@@ -21,14 +21,20 @@ def test_agent_executor_offline_fallbacks():
     assert res_ndvi["tool_call"]["name"] == "calculate_ndvi"
     assert "red_band" in res_ndvi["tool_call"]["params"]
     assert "nir_band" in res_ndvi["tool_call"]["params"]
-    assert "from engine import calculate_ndvi" in res_ndvi["code"]
+    assert "from engine.processing.indices.vegetation import calculate_ndvi" in res_ndvi["code"]
     
+    # Test NDWI search matching
+    res_ndwi = executor.execute_chat("Can you find the water using NDWI?")
+    assert "NDWI" in res_ndwi["thought"] or "water" in res_ndwi["thought"].lower()
+    assert res_ndwi["tool_call"]["name"] == "calculate_ndwi"
+    assert "from engine.processing.indices.water import calculate_ndwi" in res_ndwi["code"]
+
     # Test KMeans classification matching
     res_kmeans = executor.execute_chat("Run an unsupervised Kmeans classify with 6 clusters")
     assert "K-Means" in res_kmeans["thought"] or "kmeans" in res_kmeans["thought"].lower()
     assert res_kmeans["tool_call"]["name"] == "kmeans_classify"
     assert res_kmeans["tool_call"]["params"]["clusters"] == 5 or "clusters" in res_kmeans["tool_call"]["params"]
-    assert "kmeans_classify" in res_kmeans["code"]
+    assert "from engine.processing.classification.kmeans import kmeans_classify" in res_kmeans["code"]
 
 def test_agent_schema_formatting():
     registry = ToolRegistry()
