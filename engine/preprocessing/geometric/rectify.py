@@ -1,5 +1,17 @@
 import numpy as np
+from engine.registry import register_tool
 
+@register_tool(
+    name="polynomial_rectify",
+    label="Polynomial Rectification",
+    category="Preprocessing",
+    description="Calculate polynomial coefficients for geometric rectification",
+    params=[
+        {"name": "src_pts", "label": "Source Points", "type": "array", "required": True, "help": "Array of source points"},
+        {"name": "dst_pts", "label": "Destination Points", "type": "array", "required": True, "help": "Array of destination points"},
+        {"name": "order", "label": "Polynomial Order", "type": "int", "default": 1, "help": "Order of the polynomial transformation"}
+    ]
+)
 def calculate_polynomial_coeffs(src_pts, dst_pts, order=1):
     num_pts = src_pts.shape[0]
     if order == 1:

@@ -3,7 +3,18 @@ import numpy as np
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../build'))
+from engine.registry import register_tool
 
+@register_tool(
+    name="pca_pansharpen",
+    label="PCA Pansharpening",
+    category="Processing",
+    description="Pansharpening using Principal Component Analysis",
+    params=[
+        {"name": "ms_bands", "label": "Multi-spectral Bands", "type": "array", "required": True, "help": "Multi-spectral band array (bands, height, width)"},
+        {"name": "pan_band", "label": "Panchromatic Band", "type": "array", "required": True, "help": "Panchromatic band array (height, width)"}
+    ]
+)
 def pca_pansharpen_arrays(ms_bands, pan_band):
     """
     ms_bands: shape (bands, height, width)
