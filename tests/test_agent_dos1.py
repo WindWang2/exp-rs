@@ -1,5 +1,5 @@
 from agent.executor import AgentExecutor
-import engine.preprocessing # Ensure the tool is registered
+import engine._preprocessing # Ensure the tool is registered
 
 def test_agent_dos1():
     executor = AgentExecutor()

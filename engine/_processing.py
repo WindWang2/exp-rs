@@ -2,9 +2,9 @@ import os
 import numpy as np
 import rasterio
 from sklearn.cluster import KMeans
-from .reader import GeospatialReader
+from .core.reader import GeospatialReader
 from .registry import ToolRegistry
-from .preprocessing import calculate_dos1
+from ._preprocessing import calculate_dos1
 
 # Initialize central registry
 registry = ToolRegistry()

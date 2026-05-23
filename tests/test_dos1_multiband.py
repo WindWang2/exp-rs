@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import rasterio
 import os
-from engine.preprocessing import calculate_dos1
+from engine._preprocessing import calculate_dos1
 
 def test_calculate_dos1_multiband(tmp_path):
     input_path = str(tmp_path / "input_multiband.tif")
