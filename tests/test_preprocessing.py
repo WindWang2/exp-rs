@@ -124,7 +124,7 @@ def test_calculate_dos1_float(tmp_path):
         assert np.allclose(result_data, expected_data)
 
 def test_rectify_coeffs():
-    from engine._preprocessing import calculate_polynomial_coeffs
+    from engine.preprocessing.geometric.rectify import calculate_polynomial_coeffs
     # Simple shift: x -> x+10, y -> y+5
     src_pts = np.array([[0, 0], [1, 0], [0, 1]])
     dst_pts = np.array([[10, 5], [11, 5], [10, 6]])
