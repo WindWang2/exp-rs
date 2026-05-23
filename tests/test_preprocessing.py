@@ -136,7 +136,7 @@ def test_rectify_coeffs():
     assert np.isclose(coeffs_y[0], 5.0) # y shift
 
 def test_pca_pansharpen():
-    from engine._preprocessing import pca_pansharpen_arrays
+    from engine.processing.pansharpening.pca import pca_pansharpen_arrays
     import rasterio
     import os
     import sys
