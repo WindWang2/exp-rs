@@ -21,6 +21,7 @@ from engine.core.reader import GeospatialReader
 from engine.core.display.raster.layer import RasterLayer
 from engine.core.display.vector.layer import VectorLayer
 from gui.canvas import MapCanvas
+from gui.map_tool import MapToolPan
 from gui.layer_tree import LayerTreeModel, LayerTreeView
 from gui.toolbox import ProcessingToolbox
 from gui.agent_dock import AgentDockWidget
@@ -61,6 +62,10 @@ class MainWindow(QMainWindow):
         # 1. Initialize Central Map Canvas
         self.canvas = MapCanvas(self)
         self.setCentralWidget(self.canvas)
+        
+        # Set default map tool
+        self.pan_tool = MapToolPan(self.canvas)
+        self.canvas.set_map_tool(self.pan_tool)
         
         # 2. Setup Layer Tree Manager (QGIS C++ emulations)
         self.layer_model = LayerTreeModel(self)

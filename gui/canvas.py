@@ -34,8 +34,20 @@ class MapCanvas(QGraphicsView):
         
         # Navigation helpers
         self.zoom_factor = 1.15
-        self._last_mouse_pos = None
+        self._map_tool = None
         
+    def set_map_tool(self, tool):
+        """Sets the current map tool for interaction."""
+        if self._map_tool:
+            self._map_tool.deactivate()
+        self._map_tool = tool
+        if self._map_tool:
+            self._map_tool.activate()
+
+    def map_tool(self):
+        """Returns the current map tool."""
+        return self._map_tool
+
     def add_layer(self, layer):
         """Adds a MapLayer to the internal list and refreshes."""
         self.layers.append(layer)
@@ -93,56 +105,28 @@ class MapCanvas(QGraphicsView):
 
     # Navigation Event Overrides
     def wheelEvent(self, event):
-        if self.extent.isEmpty():
-            return
-
-        # Map pixel location to world coordinates
-        settings = self.get_settings()
-        world_pos = settings.deviceToWorld().map(QPointF(event.position()))
-        
-        # Calculate zoom factor
-        angle = event.angleDelta().y()
-        factor = 1.0 / self.zoom_factor if angle > 0 else self.zoom_factor
-        
-        # Zoom extent around the mouse cursor
-        new_width = self.extent.width() * factor
-        new_height = self.extent.height() * factor
-        
-        rel_x = (world_pos.x() - self.extent.left()) / self.extent.width()
-        rel_y = (world_pos.y() - self.extent.top()) / self.extent.height()
-        
-        new_left = world_pos.x() - rel_x * new_width
-        new_top = world_pos.y() - rel_y * new_height
-        
-        self.extent = QRectF(new_left, new_top, new_width, new_height)
-        self.refresh()
+        if self._map_tool:
+            self._map_tool.wheelEvent(event)
+        else:
+            super().wheelEvent(event)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._last_mouse_pos = event.pos()
-            self.setCursor(Qt.ClosedHandCursor)
-        super().mousePressEvent(event)
+        if self._map_tool:
+            self._map_tool.mousePressEvent(event)
+        else:
+            super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._last_mouse_pos = None
-            self.setCursor(Qt.ArrowCursor)
-        super().mouseReleaseEvent(event)
+        if self._map_tool:
+            self._map_tool.mouseReleaseEvent(event)
+        else:
+            super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self._last_mouse_pos:
-            delta = event.pos() - self._last_mouse_pos
-            self._last_mouse_pos = event.pos()
-            
-            settings = self.get_settings()
-            transform = settings.deviceToWorld()
-            
-            p1 = transform.map(QPointF(0, 0))
-            p2 = transform.map(QPointF(delta.x(), delta.y()))
-            world_delta = p2 - p1
-            
-            self.extent.translate(-world_delta.x(), -world_delta.y())
-            self.refresh()
+        if self._map_tool:
+            self._map_tool.mouseMoveEvent(event)
+        else:
+            super().mouseMoveEvent(event)
             
         # Emit coordinates for status bar
         settings = self.get_settings()
