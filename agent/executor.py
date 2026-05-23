@@ -93,7 +93,7 @@ class AgentExecutor:
             }
             res["code"] = (
                 "# Educational Script: DOS1 Atmospheric Correction\n"
-                "from engine._preprocessing import calculate_dos1\n\n"
+                "from engine.preprocessing.atmospheric.dos1 import calculate_dos1\n\n"
                 f"input_raster = '{sample_path}'\n"
                 "output_dos1 = 'data/output_dos1.tif'\n\n"
                 "calculate_dos1(input_raster, output_dos1)"

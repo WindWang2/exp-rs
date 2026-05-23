@@ -4,7 +4,6 @@ import rasterio
 from sklearn.cluster import KMeans
 from .core.reader import GeospatialReader
 from .registry import ToolRegistry
-from ._preprocessing import calculate_dos1
 
 # Initialize central registry
 registry = ToolRegistry()
@@ -154,16 +153,4 @@ registry.register(
         {"name": "clusters", "label": "Target Land cover classes", "type": "int", "default": 5, "required": True, "help": "Number of unique land cover clusters (K)"}
     ],
     fn=kmeans_classify
-)
-
-registry.register(
-    name="calculate_dos1",
-    label="DOS1 Atmospheric Correction",
-    category="Preprocessing -> Atmospheric Correction",
-    description="Performs Dark Object Subtraction (DOS1) to remove atmospheric haze from satellite imagery.",
-    params=[
-        {"name": "input_path", "label": "Input Raster File", "type": "file", "required": True, "help": "Path to the multi-spectral raster file needing atmospheric correction"},
-        {"name": "output_path", "label": "Output Corrected Raster", "type": "file", "required": True, "help": "Path where the corrected GeoTIFF will be saved"}
-    ],
-    fn=calculate_dos1
 )
