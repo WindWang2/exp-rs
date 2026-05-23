@@ -42,13 +42,20 @@ class RasterLayer(MapLayer):
         self.gray_band = 1
         self.pseudocolor_band = 1
         self.color_ramp = "viridis"
-        self.min_val = None
-        self.max_val = None
+        
+        # QGIS-aligned Contrast Stretch options
+        self.contrast_enhancement = "stretch_to_min_max"  # "stretch_to_min_max" or "none"
+        self.min_max_limits_method = "cumulative_cut"    # "cumulative_cut", "min_max", "std_dev", "user_defined"
+        self.cumulative_cut_lower = 2.0                  # default 2%
+        self.cumulative_cut_upper = 98.0                 # default 98%
+        self.std_dev_factor = 2.0                         # default 2.0
+        self.user_min = None
+        self.user_max = None
 
     def draw(self, painter, settings):
         """
         Draws the raster layer using the provided painter and settings,
-        supporting custom band configuration, colormaps, and opacity.
+        supporting custom band configuration, colormaps, opacity, and QGIS-aligned contrast stretching.
         """
         if not self.visible or painter is None:
             return
@@ -64,9 +71,34 @@ class RasterLayer(MapLayer):
             
         image_to_draw = None
 
-        def stretch(arr, min_v=None, max_v=None):
-            amin = float(min_v) if min_v is not None else float(arr.min())
-            amax = float(max_v) if max_v is not None else float(arr.max())
+        def calculate_stretch_bounds(arr):
+            valid_arr = arr[np.isfinite(arr)]
+            if valid_arr.size == 0:
+                return 0.0, 255.0
+                
+            if self.min_max_limits_method == "min_max":
+                return float(valid_arr.min()), float(valid_arr.max())
+            elif self.min_max_limits_method == "cumulative_cut":
+                low = np.percentile(valid_arr, self.cumulative_cut_lower)
+                high = np.percentile(valid_arr, self.cumulative_cut_upper)
+                return float(low), float(high)
+            elif self.min_max_limits_method == "std_dev":
+                mean = np.mean(valid_arr)
+                std = np.std(valid_arr)
+                low = mean - self.std_dev_factor * std
+                high = mean + self.std_dev_factor * std
+                return float(low), float(high)
+            elif self.min_max_limits_method == "user_defined":
+                low = self.user_min if self.user_min is not None else float(valid_arr.min())
+                high = self.user_max if self.user_max is not None else float(valid_arr.max())
+                return float(low), float(high)
+            return float(valid_arr.min()), float(valid_arr.max())
+
+        def stretch(arr):
+            if self.contrast_enhancement == "none":
+                return np.clip(arr, 0, 255).astype(np.uint8)
+                
+            amin, amax = calculate_stretch_bounds(arr)
             if amax - amin > 0:
                 stretched = ((arr.astype(float) - amin) / (amax - amin) * 255.0)
                 return np.clip(stretched, 0, 255).astype(np.uint8)
@@ -79,9 +111,9 @@ class RasterLayer(MapLayer):
                 g_band = reader.read_raster_band(self.green_band, scale_factor)
                 b_band = reader.read_raster_band(self.blue_band, scale_factor)
                 
-                r_norm = stretch(r_band, self.min_val, self.max_val)
-                g_norm = stretch(g_band, self.min_val, self.max_val)
-                b_norm = stretch(b_band, self.min_val, self.max_val)
+                r_norm = stretch(r_band)
+                g_norm = stretch(g_band)
+                b_norm = stretch(b_band)
                 
                 h, w = r_norm.shape
                 rgb = np.dstack((r_norm, g_norm, b_norm))
@@ -92,7 +124,7 @@ class RasterLayer(MapLayer):
             elif self.render_type == "grayscale":
                 # Singleband Gray
                 band = reader.read_raster_band(self.gray_band, scale_factor)
-                norm_band = stretch(band, self.min_val, self.max_val)
+                norm_band = stretch(band)
                 
                 h, w = norm_band.shape
                 gray = np.dstack((norm_band, norm_band, norm_band))
@@ -103,8 +135,10 @@ class RasterLayer(MapLayer):
             elif self.render_type == "pseudocolor":
                 # Singleband Pseudocolor using matplotlib color ramps
                 band = reader.read_raster_band(self.pseudocolor_band, scale_factor)
-                amin = float(self.min_val) if self.min_val is not None else float(band.min())
-                amax = float(self.max_val) if self.max_val is not None else float(band.max())
+                if self.contrast_enhancement == "none":
+                    amin, amax = 0.0, 255.0
+                else:
+                    amin, amax = calculate_stretch_bounds(band)
                 
                 # Normalize to [0.0, 1.0] for colormap
                 if amax - amin > 0:

@@ -20,21 +20,14 @@ def test_raster_layer_symbology_and_reprojection(app):
     # Instantiate RasterLayer
     layer = RasterLayer("test_raster", "Crops Sample", raster_path)
     
-    # Assert defaults
+    # Assert QGIS-aligned defaults
     assert layer.render_type in ["multiband", "grayscale"]
-    assert layer.opacity == 1.0
-    assert layer.min_val is None
-    assert layer.max_val is None
+    assert layer.contrast_enhancement == "stretch_to_min_max"
+    assert layer.min_max_limits_method == "cumulative_cut"
+    assert layer.cumulative_cut_lower == 2.0
+    assert layer.cumulative_cut_upper == 98.0
     
-    # Modify advanced properties
-    layer.render_type = "pseudocolor"
-    layer.pseudocolor_band = 1
-    layer.color_ramp = "viridis"
-    layer.min_val = 10.0
-    layer.max_val = 250.0
-    layer.opacity = 0.75
-    
-    # Set up mock canvas settings & painter to simulate draw() call
+    # 1. Test drawing with Cumulative Cut (2% - 98%)
     settings = MapSettings()
     settings.layers = [layer]
     settings.extent = layer.extent
@@ -43,13 +36,35 @@ def test_raster_layer_symbology_and_reprojection(app):
     img = QImage(QSize(100, 100), QImage.Format_ARGB32)
     painter = QPainter(img)
     try:
-        # Should execute successfully without throwing exceptions
+        layer.draw(painter, settings)
+    finally:
+        painter.end()
+
+    # 2. Test drawing with Std Dev Stretch (Mean +/- 2*std)
+    layer.min_max_limits_method = "std_dev"
+    layer.std_dev_factor = 2.0
+    layer.opacity = 0.8
+    
+    painter = QPainter(img)
+    try:
+        layer.draw(painter, settings)
+    finally:
+        painter.end()
+
+    # 3. Test drawing with Pseudocolor & User Defined boundaries
+    layer.render_type = "pseudocolor"
+    layer.color_ramp = "jet"
+    layer.min_max_limits_method = "user_defined"
+    layer.user_min = 20.0
+    layer.user_max = 200.0
+    
+    painter = QPainter(img)
+    try:
         layer.draw(painter, settings)
     finally:
         painter.end()
         
     # Check projection: sample_crops.tif might be EPSG:32650 (UTM).
-    # If self.crs is different from EPSG:3857, self.extent should not equal self.raw_extent.
     if layer.crs and layer.crs != "EPSG:3857":
         assert layer.extent != layer.raw_extent
     else:
@@ -83,7 +98,6 @@ def test_vector_layer_symbology_and_reprojection(app):
     img = QImage(QSize(100, 100), QImage.Format_ARGB32)
     painter = QPainter(img)
     try:
-        # Should draw successfully
         layer.draw(painter, settings)
     finally:
         painter.end()
@@ -100,7 +114,11 @@ def test_layer_properties_dialog_instantiation(app, qtbot):
     assert dialog.render_type_combo.count() == 3
     assert dialog.opacity_slider.value() == 100
     
-    # Test changing combobox
-    dialog.render_type_combo.setCurrentIndex(2) # Pseudocolor
+    # Check that Min/Max settings match
+    assert dialog.contrast_combo.currentIndex() == 1  # Stretch to MinMax is default
+    assert dialog.radio_cumulative.isChecked() is True
+    
+    # Test changing render type combobox to Pseudocolor
+    dialog.render_type_combo.setCurrentIndex(2)
     assert dialog.pseudo_widget.isHidden() is False
     assert dialog.rgb_widget.isHidden() is True

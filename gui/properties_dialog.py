@@ -1,7 +1,8 @@
 from PySide6.QtWidgets import (QDialog, QTabWidget, QWidget, QVBoxLayout, 
                                 QHBoxLayout, QFormLayout, QLabel, QLineEdit, 
-                                QComboBox, QSlider, QSpinBox, QPushButton, 
-                                QColorDialog, QGroupBox, QDialogButtonBox, QMessageBox)
+                                QComboBox, QSlider, QSpinBox, QDoubleSpinBox, 
+                                QPushButton, QColorDialog, QGroupBox, QDialogButtonBox, 
+                                QMessageBox, QRadioButton, QButtonGroup)
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QColor, QIcon
 
@@ -9,6 +10,7 @@ class LayerPropertiesDialog(QDialog):
     """
     A premium layer properties dialog for Antigravity RS.
     Allows viewing/changing layer metadata, CRS details, and custom symbology.
+    Aligned perfectly with QGIS rendering, band selections, and Min/Max settings.
     """
     def __init__(self, layer, parent=None):
         super().__init__(parent)
@@ -16,7 +18,7 @@ class LayerPropertiesDialog(QDialog):
         self.layer_type = "raster" if hasattr(layer, "provider") and hasattr(layer.provider, "reader") and layer.provider.reader.is_raster else "vector"
         
         self.setWindowTitle(f"Layer Properties - {layer.name}")
-        self.resize(500, 480)
+        self.resize(520, 560)
         
         # 1. Main Layout
         self.main_layout = QVBoxLayout(self)
@@ -60,7 +62,7 @@ class LayerPropertiesDialog(QDialog):
         
         self.main_layout.addWidget(self.tabs)
         
-        # 4. Buttons (Ok, Cancel, Apply)
+        # 4. Buttons (Ok, Cancel)
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
@@ -113,7 +115,7 @@ class LayerPropertiesDialog(QDialog):
         self.name_edit.setStyleSheet("QLineEdit { border: 1px solid #c8c8c8; border-radius: 3px; padding: 4px; color: #333333; }")
         g_layout.addRow("Layer Name:", self.name_edit)
         
-        path_label = QLabel(self.layer.provider.reader.file_path if self.layer_type == "raster" else self.layer.provider.reader.file_path)
+        path_label = QLabel(self.layer.provider.reader.file_path)
         path_label.setWordWrap(True)
         path_label.setStyleSheet("color: #555555;")
         g_layout.addRow("Source Path:", path_label)
@@ -170,7 +172,7 @@ class LayerPropertiesDialog(QDialog):
         layout.setSpacing(12)
         
         # Global Opacity Slider
-        opacity_group = QGroupBox("Layer Opacity (透明度)")
+        opacity_group = QGroupBox("Layer Opacity (不透明度)")
         opacity_group.setStyleSheet("QGroupBox { font-weight: bold; font-family: 'Segoe UI'; font-size: 12px; color: #444; }")
         op_layout = QHBoxLayout(opacity_group)
         op_layout.setContentsMargins(10, 12, 10, 10)
@@ -269,7 +271,6 @@ class LayerPropertiesDialog(QDialog):
         self.pseudo_combo.setCurrentIndex(min(self.layer.pseudocolor_band - 1, band_count - 1))
         
         self.ramp_combo = QComboBox()
-        # Premium matplotlib colormaps
         self.ramp_combo.addItems(["viridis", "jet", "magma", "inferno", "plasma", "coolwarm", "YlGn", "Blues", "terrain"])
         self.ramp_combo.setCurrentText(self.layer.color_ramp)
         self.ramp_combo.setStyleSheet("QComboBox { text-transform: lowercase; }")
@@ -278,37 +279,148 @@ class LayerPropertiesDialog(QDialog):
         p_layout.addRow("Color Ramp:", self.ramp_combo)
         
         form.addRow(self.pseudo_widget)
-        
-        # 5. Min/Max Contrast Stretch Widget
-        stretch_group = QGroupBox("Contrast Enhancement (拉伸值)")
-        stretch_group.setStyleSheet("QGroupBox { font-family: 'Segoe UI'; font-size: 11px; color: #555; }")
-        str_layout = QFormLayout(stretch_group)
-        str_layout.setContentsMargins(10, 10, 10, 10)
-        str_layout.setSpacing(6)
-        
-        self.min_edit = QLineEdit(str(self.layer.min_val) if self.layer.min_val is not None else "")
-        self.min_edit.setPlaceholderText("Automatic Min")
-        self.min_edit.setStyleSheet("QLineEdit { border: 1px solid #c8c8c8; border-radius: 3px; padding: 3px; }")
-        
-        self.max_edit = QLineEdit(str(self.layer.max_val) if self.layer.max_val is not None else "")
-        self.max_edit.setPlaceholderText("Automatic Max")
-        self.max_edit.setStyleSheet("QLineEdit { border: 1px solid #c8c8c8; border-radius: 3px; padding: 3px; }")
-        
-        str_layout.addRow("Minimum Value:", self.min_edit)
-        str_layout.addRow("Maximum Value:", self.max_edit)
-        form.addRow(str_layout)
-        
         layout.addWidget(symbology_group)
-        
-        # Connect render type changing to dynamically toggle config widgets visibility
+
+        # 5. QGIS-Aligned Contrast Stretch Config Widget
+        contrast_group = QGroupBox("Contrast Enhancement (对比度增强与拉伸)")
+        contrast_group.setStyleSheet("QGroupBox { font-weight: bold; font-family: 'Segoe UI'; font-size: 12px; color: #444; }")
+        con_layout = QVBoxLayout(contrast_group)
+        con_layout.setContentsMargins(10, 15, 10, 10)
+        con_layout.setSpacing(10)
+
+        # Contrast Algorithm Combo
+        algo_row = QHBoxLayout()
+        algo_row.addWidget(QLabel("Contrast Enhancement:"))
+        self.contrast_combo = QComboBox()
+        self.contrast_combo.addItems(["No Stretch", "Stretch to MinMax"])
+        self.contrast_combo.setCurrentIndex(0 if self.layer.contrast_enhancement == "none" else 1)
+        self.contrast_combo.setStyleSheet("QComboBox { border: 1px solid #c8c8c8; border-radius: 3px; padding: 4px; }")
+        algo_row.addWidget(self.contrast_combo)
+        con_layout.addLayout(algo_row)
+
+        # Min/Max Limit Settings Group Box
+        self.min_max_group = QGroupBox("Min / Max Value Settings (最小/最大值计算范围)")
+        self.min_max_group.setStyleSheet("QGroupBox { font-family: 'Segoe UI'; font-size: 11px; color: #555; font-weight: normal; }")
+        limits_layout = QVBoxLayout(self.min_max_group)
+        limits_layout.setSpacing(8)
+
+        # Radio Buttons
+        self.radio_cumulative = QRadioButton("Cumulative pixel count cut (累积像素百分比裁剪)")
+        self.radio_min_max = QRadioButton("Min / Max (绝对最小 / 最大值)")
+        self.radio_std_dev = QRadioButton("Mean +/- standard deviation (平均值 +/- 标准差拉伸)")
+        self.radio_user = QRadioButton("User Defined (用户自定数值限界)")
+
+        # Create Button Group
+        self.radio_group = QButtonGroup(self)
+        self.radio_group.addButton(self.radio_cumulative)
+        self.radio_group.addButton(self.radio_min_max)
+        self.radio_group.addButton(self.radio_std_dev)
+        self.radio_group.addButton(self.radio_user)
+
+        # Set initial Radio check state
+        method = self.layer.min_max_limits_method
+        if method == "cumulative_cut":
+            self.radio_cumulative.setChecked(True)
+        elif method == "min_max":
+            self.radio_min_max.setChecked(True)
+        elif method == "std_dev":
+            self.radio_std_dev.setChecked(True)
+        else:
+            self.radio_user.setChecked(True)
+
+        # Sub-widgets for settings input
+        # Cumulative cut limits inputs
+        self.cumulative_widget = QWidget()
+        cum_layout = QHBoxLayout(self.cumulative_widget)
+        cum_layout.setContentsMargins(20, 0, 0, 0)
+        cum_layout.addWidget(QLabel("Min Cut:"))
+        self.spin_low_percent = QDoubleSpinBox()
+        self.spin_low_percent.setRange(0.0, 50.0)
+        self.spin_low_percent.setSuffix(" %")
+        self.spin_low_percent.setValue(self.layer.cumulative_cut_lower)
+        self.spin_low_percent.setFixedWidth(80)
+        cum_layout.addWidget(self.spin_low_percent)
+
+        cum_layout.addWidget(QLabel("Max Cut:"))
+        self.spin_high_percent = QDoubleSpinBox()
+        self.spin_high_percent.setRange(50.0, 100.0)
+        self.spin_high_percent.setSuffix(" %")
+        self.spin_high_percent.setValue(self.layer.cumulative_cut_upper)
+        self.spin_high_percent.setFixedWidth(80)
+        cum_layout.addWidget(self.spin_high_percent)
+        cum_layout.addStretch()
+
+        # Std Dev limits input
+        self.std_dev_widget = QWidget()
+        std_layout = QHBoxLayout(self.std_dev_widget)
+        std_layout.setContentsMargins(20, 0, 0, 0)
+        std_layout.addWidget(QLabel("Std Dev Multiplier:"))
+        self.spin_std_dev = QDoubleSpinBox()
+        self.spin_std_dev.setRange(0.1, 10.0)
+        self.spin_std_dev.setSingleStep(0.1)
+        self.spin_std_dev.setValue(self.layer.std_dev_factor)
+        self.spin_std_dev.setFixedWidth(80)
+        std_layout.addWidget(self.spin_std_dev)
+        std_layout.addStretch()
+
+        # User defined limits input
+        self.user_widget = QWidget()
+        u_layout = QHBoxLayout(self.user_widget)
+        u_layout.setContentsMargins(20, 0, 0, 0)
+        u_layout.addWidget(QLabel("Min Override:"))
+        self.user_min_edit = QLineEdit(str(self.layer.user_min) if self.layer.user_min is not None else "")
+        self.user_min_edit.setPlaceholderText("Auto")
+        self.user_min_edit.setFixedWidth(80)
+        self.user_min_edit.setStyleSheet("QLineEdit { border: 1px solid #c8c8c8; border-radius: 3px; padding: 3px; }")
+        u_layout.addWidget(self.user_min_edit)
+
+        u_layout.addWidget(QLabel("Max Override:"))
+        self.user_max_edit = QLineEdit(str(self.layer.user_max) if self.layer.user_max is not None else "")
+        self.user_max_edit.setPlaceholderText("Auto")
+        self.user_max_edit.setFixedWidth(80)
+        self.user_max_edit.setStyleSheet("QLineEdit { border: 1px solid #c8c8c8; border-radius: 3px; padding: 3px; }")
+        u_layout.addWidget(self.user_max_edit)
+        u_layout.addStretch()
+
+        # Assemble Limits Panel
+        limits_layout.addWidget(self.radio_cumulative)
+        limits_layout.addWidget(self.cumulative_widget)
+        limits_layout.addWidget(self.radio_min_max)
+        limits_layout.addWidget(self.radio_std_dev)
+        limits_layout.addWidget(self.std_dev_widget)
+        limits_layout.addWidget(self.radio_user)
+        limits_layout.addWidget(self.user_widget)
+
+        con_layout.addWidget(self.min_max_group)
+        layout.addWidget(contrast_group)
+
+        # Wire Up UI dynamic enable/disable slots
+        self.contrast_combo.currentIndexChanged.connect(self._toggle_contrast_enhancement)
+        self.radio_cumulative.toggled.connect(self._toggle_limits_subwidgets)
+        self.radio_min_max.toggled.connect(self._toggle_limits_subwidgets)
+        self.radio_std_dev.toggled.connect(self._toggle_limits_subwidgets)
+        self.radio_user.toggled.connect(self._toggle_limits_subwidgets)
+
+        # Trigger initial updates
         self.render_type_combo.currentIndexChanged.connect(self._toggle_raster_widgets)
         self._toggle_raster_widgets()
+        self._toggle_contrast_enhancement()
+        self._toggle_limits_subwidgets()
         
     def _toggle_raster_widgets(self):
         index = self.render_type_combo.currentIndex()
         self.rgb_widget.setVisible(index == 0)
         self.gray_widget.setVisible(index == 1)
         self.pseudo_widget.setVisible(index == 2)
+
+    def _toggle_contrast_enhancement(self):
+        is_stretch = (self.contrast_combo.currentIndex() == 1)
+        self.min_max_group.setEnabled(is_stretch)
+
+    def _toggle_limits_subwidgets(self):
+        self.cumulative_widget.setEnabled(self.radio_cumulative.isChecked())
+        self.std_dev_widget.setEnabled(self.radio_std_dev.isChecked())
+        self.user_widget.setEnabled(self.radio_user.isChecked())
         
     def _setup_vector_style_widgets(self, layout):
         symbology_group = QGroupBox("Vector Symbology (矢量符号化)")
@@ -368,6 +480,7 @@ class LayerPropertiesDialog(QDialog):
         
         # 3. Save Symbology Configuration
         if self.layer_type == "raster":
+            # Save band render types
             idx = self.render_type_combo.currentIndex()
             if idx == 0:
                 self.layer.render_type = "multiband"
@@ -382,16 +495,29 @@ class LayerPropertiesDialog(QDialog):
                 self.layer.pseudocolor_band = self.pseudo_combo.currentIndex() + 1
                 self.layer.color_ramp = self.ramp_combo.currentText()
                 
-            # Parse min/max stretch values
-            min_str = self.min_edit.text().strip()
-            max_str = self.max_edit.text().strip()
+            # Save contrast enhancement algorithms
+            self.layer.contrast_enhancement = "none" if self.contrast_combo.currentIndex() == 0 else "stretch_to_min_max"
             
-            try:
-                self.layer.min_val = float(min_str) if min_str else None
-                self.layer.max_val = float(max_str) if max_str else None
-            except ValueError:
-                QMessageBox.warning(self, "Invalid Values", "Min/Max stretch values must be numeric.")
-                return
+            # Save limits calculation settings
+            if self.radio_cumulative.isChecked():
+                self.layer.min_max_limits_method = "cumulative_cut"
+                self.layer.cumulative_cut_lower = self.spin_low_percent.value()
+                self.layer.cumulative_cut_upper = self.spin_high_percent.value()
+            elif self.radio_min_max.isChecked():
+                self.layer.min_max_limits_method = "min_max"
+            elif self.radio_std_dev.isChecked():
+                self.layer.min_max_limits_method = "std_dev"
+                self.layer.std_dev_factor = self.spin_std_dev.value()
+            else:
+                self.layer.min_max_limits_method = "user_defined"
+                min_str = self.user_min_edit.text().strip()
+                max_str = self.user_max_edit.text().strip()
+                try:
+                    self.layer.user_min = float(min_str) if min_str else None
+                    self.layer.user_max = float(max_str) if max_str else None
+                except ValueError:
+                    QMessageBox.warning(self, "Invalid Values", "User defined Min/Max stretch values must be numeric.")
+                    return
         else:
             # Vector styling
             self.layer.renderer.set_color(self.fill_color)
