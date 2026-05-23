@@ -5,6 +5,8 @@ from engine.core.display.raster.provider import GDALDataProvider
 from engine.core.display.raster.layer import RasterLayer
 from engine.core.display.base.map_settings import MapSettings
 
+from PySide6.QtCore import QRectF, QSize
+
 def test_raster_stack_integration():
     sample_path = "data/sample_crops.tif"
     if not os.path.exists(sample_path):
@@ -20,18 +22,22 @@ def test_raster_stack_integration():
     layer = RasterLayer("raster-1", "Sample Raster", sample_path)
     assert layer.id == "raster-1"
     assert layer.provider is not None
-    assert layer.extent == extent
+    
+    expected_extent = QRectF(extent["left"], extent["top"], 
+                             extent["right"] - extent["left"], 
+                             extent["top"] - extent["bottom"])
+    assert layer.extent == expected_extent
     
     # 3. Test Draw
     settings = MapSettings()
-    settings.extent = extent
+    settings.extent = layer.extent
+    settings.output_size = QSize(800, 600)
     
     painter = MagicMock()
     # Mocking drawImage to verify it's called
     layer.draw(painter, settings)
     
     assert painter.drawImage.called
-    # First argument to drawImage(int, int, QImage) should be 0, 0
+    # First argument to drawImage(QRectF, QImage) should be target_rect
     args, kwargs = painter.drawImage.call_args
-    assert args[0] == 0
-    assert args[1] == 0
+    assert isinstance(args[0], QRectF)

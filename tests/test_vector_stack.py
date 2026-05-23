@@ -5,9 +5,20 @@ from engine.core.display.vector.layer import VectorLayer
 from engine.core.display.renderers.vector.single_symbol import SingleSymbolRenderer
 from engine.core.display.base.map_settings import MapSettings
 from PySide6.QtGui import QPainter, QImage
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QSize, QRectF
 
-def test_vector_provider():
+def test_vector_layer_initialization():
+    path = "data/test_vectors.geojson"
+    layer = VectorLayer("v1", "Test Vector", path)
+
+    assert layer.id == "v1"
+    # Expected extent from provider: left=5, bottom=5, right=20, top=20
+    # QRectF(left, top, width, height) -> QRectF(5, 20, 15, 15)
+    expected_extent = QRectF(5, 20, 15, 15)
+    assert layer.extent == expected_extent
+
+def test_vector_layer_draw():
+
     path = "data/test_vectors.geojson"
     provider = OGRDataProvider(path)
     
