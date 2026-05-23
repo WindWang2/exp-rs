@@ -1,6 +1,7 @@
 from engine.core.display.base.map_layer import MapLayer
 from engine.core.display.raster.provider import GDALDataProvider
 from PySide6.QtGui import QImage
+from PySide6.QtCore import QRectF
 import numpy as np
 
 class RasterLayer(MapLayer):
@@ -10,7 +11,11 @@ class RasterLayer(MapLayer):
     def __init__(self, layer_id: str, name: str, uri: str):
         super().__init__(layer_id, name)
         self.provider = GDALDataProvider(uri)
-        self.extent = self.provider.extent()
+        ext = self.provider.extent()
+        # Convert dict extent to QRectF. 
+        # In GIS: top > bottom. In our MapSettings convention: QRectF(left, top, width, height)
+        # where height = top - bottom (positive).
+        self.extent = QRectF(ext["left"], ext["top"], ext["right"] - ext["left"], ext["top"] - ext["bottom"])
         self.crs = self.provider.reader.metadata.get("crs")
 
     def draw(self, painter, settings):
@@ -20,11 +25,7 @@ class RasterLayer(MapLayer):
         if not self.visible or painter is None:
             return
 
-        # 1. Capture extent from settings (if available) or use layer extent
-        view_extent = settings.extent if settings.extent else self.extent
-        
-        # 2. Use the provider to read pixel data
-        # (Simplified downsampling logic similar to gui/canvas.py)
+        # Use the provider to read pixel data
         reader = self.provider.reader
         metadata = reader.metadata
         
@@ -73,15 +74,14 @@ class RasterLayer(MapLayer):
             image_to_draw = q_img.copy()
 
         if image_to_draw:
-            # 3. Draw at correct location
-            # Note: For now, we draw at (0,0) or simplified mapping.
-            # In a full implementation, we'd use settings.worldToDevice transform.
+            painter.save()
             
-            # Simple opacity support
+            world_to_device = settings.worldToDevice()
+            # Map the layer extent to device coordinates
+            target_rect = world_to_device.mapRect(self.extent)
+            
             if self.opacity < 1.0:
                 painter.setOpacity(self.opacity)
             
-            painter.drawImage(0, 0, image_to_draw)
-            
-            if self.opacity < 1.0:
-                painter.setOpacity(1.0)
+            painter.drawImage(target_rect, image_to_draw)
+            painter.restore()

@@ -18,6 +18,8 @@ def load_stylesheet(app):
 # Core engine and GUI package imports
 from engine.registry import ToolRegistry
 from engine.core.reader import GeospatialReader
+from engine.core.display.raster.layer import RasterLayer
+from engine.core.display.vector.layer import VectorLayer
 from gui.canvas import MapCanvas
 from gui.layer_tree import LayerTreeModel, LayerTreeView
 from gui.toolbox import ProcessingToolbox
@@ -151,11 +153,14 @@ class MainWindow(QMainWindow):
             # Map layer in GUI tree model
             layer_type = "raster" if reader.is_raster else "vector"
             
-            # Draw overlay on canvas
+            # Create and add layer to canvas
             if reader.is_raster:
-                extent = self.canvas.add_raster_layer(layer_id, file_path)
+                layer = RasterLayer(layer_id, basename, file_path)
             else:
-                extent = self.canvas.add_vector_layer(layer_id, file_path)
+                layer = VectorLayer(layer_id, basename, file_path)
+                
+            self.canvas.add_layer(layer)
+            extent = layer.extent
                 
             self.loaded_layers[layer_id] = {
                 "name": basename,
@@ -175,21 +180,26 @@ class MainWindow(QMainWindow):
 
     @Slot(str, bool)
     def _handle_layer_visibility_changed(self, layer_id: str, visible: bool):
-        """Synchronizes PyQt checkboxes toggling to canvas item visibility."""
-        if layer_id in self.canvas.layer_items:
-            for item in self.canvas.layer_items[layer_id]:
-                item.setVisible(visible)
+        """Synchronizes PyQt checkboxes toggling to canvas re-rendering."""
+        for layer in self.canvas.layers:
+            if layer.id == layer_id:
+                layer.visible = visible
+                self.canvas.refresh()
+                break
 
     @Slot(list)
     def _handle_layer_reorder(self, layer_ids: list):
         """Re-orders the visual drawing stacks matching custom drag re-ordering."""
-        z_value = 0
-        # Iterate in reverse: items at the bottom of the list are drawn first (background)
-        for layer_id in reversed(layer_ids):
-            if layer_id in self.canvas.layer_items:
-                for item in self.canvas.layer_items[layer_id]:
-                    item.setZValue(z_value)
-                z_value += 1
+        layer_map = {l.id: l for l in self.canvas.layers}
+        new_layers = []
+        # Draw order in MapSettings is index 0 (bottom) to N (top).
+        # layer_ids is top-to-bottom from UI.
+        for lid in reversed(layer_ids):
+            if lid in layer_map:
+                new_layers.append(layer_map[lid])
+        
+        self.canvas.layers = new_layers
+        self.canvas.refresh()
 
     @Slot(str)
     def _zoom_to_layer(self, layer_id: str):

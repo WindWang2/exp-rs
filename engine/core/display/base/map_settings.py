@@ -4,8 +4,8 @@ from PySide6.QtCore import QRectF, QSize
 class MapSettings:
     def __init__(self):
         self.layers = []
-        self.extent = QRectF() # World coordinates (GIS: Y increases UP)
-        self.output_size = QSize() # Device coordinates (Qt: Y increases DOWN)
+        self.extent = None # World coordinates (GIS: Y increases UP)
+        self.output_size = None # Device coordinates (Qt: Y increases DOWN)
         self.destination_crs = "EPSG:3857"
 
     def worldToDevice(self) -> QTransform:
@@ -14,7 +14,10 @@ class MapSettings:
         GIS coordinates: Y increases upwards.
         Device coordinates: Y increases downwards.
         """
-        if not self.extent or not self.output_size or self.extent.isEmpty() or not self.output_size.isValid():
+        if self.extent is None or self.output_size is None:
+            return QTransform()
+            
+        if self.extent.isEmpty() or not self.output_size.isValid():
             return QTransform()
             
         world_width = self.extent.width()
@@ -28,6 +31,10 @@ class MapSettings:
         
         # We want to map world top-left (extent.left, extent.top) to device (0, 0).
         # And world bottom-right (extent.right, extent.bottom) to device (device_width, device_height).
+        # In GIS, top Y is the maximum Y.
+        # In QRectF, top() is the minimum Y (if height is positive). 
+        # So we have a convention issue. 
+        # Let's assume QRectF(x, y, w, h) where y is top (max Y) and h is positive.
         
         transform = QTransform()
         # 1. Scale. Note negative s_y because GIS Y is inverted compared to Qt
