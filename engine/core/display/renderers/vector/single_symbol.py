@@ -11,6 +11,24 @@ class SingleSymbolRenderer(FeatureRenderer):
         self.pen.setWidth(stroke_width)
         self.brush = QBrush(color)
 
+    def color(self) -> QColor:
+        return self.brush.color()
+
+    def set_color(self, color: QColor):
+        self.brush = QBrush(color)
+
+    def stroke_color(self) -> QColor:
+        return self.pen.color()
+
+    def set_stroke_color(self, color: QColor):
+        self.pen.setColor(color)
+
+    def stroke_width(self) -> int:
+        return self.pen.width()
+
+    def set_stroke_width(self, width: int):
+        self.pen.setWidth(width)
+
     def render_feature(self, feature, painter, settings):
         """
         Renders a feature geometry.

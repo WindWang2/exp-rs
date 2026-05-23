@@ -50,6 +50,16 @@ class CRSTransformer:
         )
         return min(xs), min(ys), max(xs), max(ys)
 
+    def inverse_transform_bounds(self, left: float, bottom: float, right: float, top: float) -> Tuple[float, float, float, float]:
+        """Transforms a bounding box back to source CRS."""
+        if not self.inverse_transformer:
+            return left, bottom, right, top
+        xs, ys = self.inverse_transformer.transform(
+            [left, left, right, right],
+            [bottom, top, bottom, top]
+        )
+        return min(xs), min(ys), max(xs), max(ys)
+
     def transform_geometry(self, geom_shape):
         """Transforms a Shapely geometry object in a thread-safe manner."""
         if not self.transformer or geom_shape is None:

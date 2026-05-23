@@ -90,6 +90,7 @@ class LayerTreeView(QTreeView):
     """
     zoom_to_layer_requested = Signal(str)
     remove_layer_requested = Signal(str)
+    properties_requested = Signal(str) # Emits layer_id
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -158,18 +159,7 @@ class LayerTreeView(QTreeView):
         menu.addAction(remove_act)
         
         properties_act = QAction("Properties...", self)
-        properties_act.triggered.connect(lambda: self._show_properties(item))
+        properties_act.triggered.connect(lambda: self.properties_requested.emit(item.layer_id))
         menu.addAction(properties_act)
         
         menu.exec_(event.globalPos())
-
-    def _show_properties(self, item: LayerTreeItem):
-        """Pops up high-fidelity layers metadata sheet."""
-        QMessageBox.information(
-            self,
-            f"Properties - {item.text()}",
-            f"<b>Layer ID:</b> {item.layer_id}<br>"
-            f"<b>Type:</b> {item.layer_type.upper()}<br>"
-            f"<b>Source Path:</b> {item.file_path}",
-            QMessageBox.Ok
-        )

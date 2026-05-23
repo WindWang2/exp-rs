@@ -15,7 +15,7 @@ def test_vector_layer_initialization():
     # Expected extent from provider: left=5, bottom=5, right=20, top=20
     # QRectF(left, top, width, height) -> QRectF(5, 20, 15, 15)
     expected_extent = QRectF(5, 20, 15, 15)
-    assert layer.extent == expected_extent
+    assert layer.raw_extent == expected_extent
 
 def test_vector_layer_draw():
 

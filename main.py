@@ -77,6 +77,7 @@ class MainWindow(QMainWindow):
         self.layer_model.layers_reordered.connect(self._handle_layer_reorder)
         self.layer_view.zoom_to_layer_requested.connect(self._zoom_to_layer)
         self.layer_view.remove_layer_requested.connect(self._remove_layer)
+        self.layer_view.properties_requested.connect(self._show_layer_properties)
         
         # Dockable Layer Manager panel
         self.layer_dock = QDockWidget("Layers Panel", self)
@@ -220,6 +221,33 @@ class MainWindow(QMainWindow):
             self.layer_model.remove_layer_item(layer_id)
             del self.loaded_layers[layer_id]
             self.status.showMessage(f"Removed layer: {layer_id}", 3000)
+
+    @Slot(str)
+    def _show_layer_properties(self, layer_id: str):
+        """Finds active layer from canvas and shows the dynamic styling and metadata dialog."""
+        layer = None
+        for l in self.canvas.layers:
+            if l.id == layer_id:
+                layer = l
+                break
+        if not layer:
+            return
+            
+        from gui.properties_dialog import LayerPropertiesDialog
+        dialog = LayerPropertiesDialog(layer, self)
+        if dialog.exec() == LayerPropertiesDialog.Accepted:
+            # Update local layer database name
+            if layer_id in self.loaded_layers:
+                self.loaded_layers[layer_id]["name"] = layer.name
+                
+            # Update display name in tree model
+            for row in range(self.layer_model.rowCount()):
+                item = self.layer_model.item(row)
+                if hasattr(item, "layer_id") and item.layer_id == layer_id:
+                    item.setText(layer.name)
+                    break
+                    
+            self.canvas.refresh()
 
     def _zoom_to_all(self):
         """Fits viewport around consolidated bounds of all layers."""
