@@ -1,0 +1,35 @@
+<h2>Section 2: The Rendering Pipeline</h2>
+<p class="subtitle">Ensuring responsive interactions through async execution</p>
+
+<div class="mockup">
+  <div class="mockup-header">Asynchronous Execution Sequence</div>
+  <div class="mockup-body" style="background: #fff; padding: 15px;">
+    <ol style="font-size: 13px; line-height: 1.6;">
+      <li><b>User Action:</b> Panning or zooming occurs in <code>MapCanvas</code>.</li>
+      <li><b>Snapshot:</b> Canvas creates <code>MapSettings</code> (Extent, CRS, visible Layers, DPU).</li>
+      <li><b>Dispatch:</b> A <code>MapRendererJob</code> is spawned in a background thread.</li>
+      <li><b>Layer Rendering:</b>
+        <ul>
+          <li>Job iterates through visible layers.</li>
+          <li>Each layer requests data from its <code>DataProvider</code> for the current extent.</li>
+          <li><code>VectorLayer</code> uses its <code>Renderer</code> to draw features onto a per-layer <code>QImage</code>.</li>
+        </ul>
+      </li>
+      <li><b>Composition:</b> Job flattens all layer images into a single final <code>QImage</code>.</li>
+      <li><b>Feedback:</b> Canvas receives the final image and paints it to the viewport.</li>
+    </ol>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Handling Large Datasets</h3>
+  <ul>
+    <li><b>Tiling:</b> Raster providers will utilize GDAL overviews (pyramids).</li>
+    <li><b>Simplification:</b> Vector renderers will simplify geometries based on pixel-resolution at the current zoom level.</li>
+    <li><b>Cancellation:</b> If the user pans while a render is in progress, the current job is aborted and a new one starts.</li>
+  </ul>
+</div>
+
+<div class="section">
+  <p>Does this rendering pipeline and the strategy for large datasets look correct?</p>
+</div>

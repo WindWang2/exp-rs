@@ -1,0 +1,73 @@
+<h2>Unified Display Architecture</h2>
+<p class="subtitle">Comparing current simple canvas with proposed QGIS-style modular framework</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Current: Monolithic Canvas</div>
+    <div class="mockup-body">
+      <div class="section">
+        <h3>MapCanvas (QWidget)</h3>
+        <p>Directly handles:</p>
+        <ul>
+          <li>File Loading</li>
+          <li>Reprojection</li>
+          <li>Rendering (Raster/Vector)</li>
+          <li>Interaction</li>
+        </ul>
+      </div>
+      <div class="cons">
+        <h4>Cons</h4>
+        <ul>
+          <li>Not scalable</li>
+          <li>Hard to add new types</li>
+          <li>Blocking UI during render</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Proposed: Modular (QGIS Style)</div>
+    <div class="mockup-body">
+      <div class="section">
+        <h3>Mediator Pattern</h3>
+        <ul>
+          <li><b>MapCanvas:</b> Manager/Controller</li>
+          <li><b>MapLayer:</b> Data + State (Raster/Vector/...)</li>
+          <li><b>Renderer:</b> Symbology Strategy</li>
+          <li><b>Job:</b> Async worker</li>
+        </ul>
+      </div>
+      <div class="pros">
+        <h4>Pros</h4>
+        <ul>
+          <li>Highly extensible</li>
+          <li>Smooth background rendering</li>
+          <li>Rich symbology support</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Question: Focus Area</h3>
+  <p>Should we prioritize <b>extensibility</b> (making it easy to add new layer types like Mesh or WMS) or <b>rendering performance</b> (ensuring 10GB+ rasters pan smoothly) in this first refactor?</p>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="extensibility" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Priority: Extensibility</h3>
+      <p>Build the abstract base classes for Layers and Providers first.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="performance" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Priority: Performance</h3>
+      <p>Focus on the multi-threaded "Rendering Job" and caching pipeline.</p>
+    </div>
+  </div>
+</div>

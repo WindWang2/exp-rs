@@ -1,0 +1,61 @@
+<h2>Rendering Data Flow</h2>
+<p class="subtitle">How data travels from the file to the screen in the new framework</p>
+
+<div class="mockup">
+  <div class="mockup-header">Framework Data Flow Diagram</div>
+  <div class="mockup-body" style="background: #fff; padding: 20px;">
+    <div style="display: flex; align-items: center; justify-content: space-between; position: relative;">
+      <!-- Node: DataProvider -->
+      <div style="border: 2px solid #7E57C2; padding: 15px; border-radius: 8px; width: 120px; text-align: center;">
+        <b>DataProvider</b>
+        <div style="font-size: 10px; color: #666; margin-top: 5px;">(I/O: GDAL, OGR)</div>
+      </div>
+      
+      <div style="font-size: 24px;">→</div>
+      
+      <!-- Node: MapLayer -->
+      <div style="border: 2px solid #7E57C2; padding: 15px; border-radius: 8px; width: 120px; text-align: center;">
+        <b>MapLayer</b>
+        <div style="font-size: 10px; color: #666; margin-top: 5px;">(State: Opacity, Visibility)</div>
+      </div>
+      
+      <div style="font-size: 24px;">→</div>
+
+      <!-- Node: Renderer -->
+      <div style="border: 2px solid #7E57C2; padding: 15px; border-radius: 8px; width: 120px; text-align: center;">
+        <b>Renderer</b>
+        <div style="font-size: 10px; color: #666; margin-top: 5px;">(Symbology: Colors, Styles)</div>
+      </div>
+      
+      <div style="font-size: 24px;">→</div>
+
+      <!-- Node: MapCanvas -->
+      <div style="border: 2px solid #333; padding: 15px; border-radius: 8px; width: 120px; text-align: center; background: #eee;">
+        <b>MapCanvas</b>
+        <div style="font-size: 10px; color: #666; margin-top: 5px;">(Display: QGraphicsView)</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Question: First Implementation Phase</h3>
+  <p>To ensure we build a stable framework, where should we focus our efforts for the "V1" of this refactor?</p>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="skeleton" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Approach: Skeleton Framework</h3>
+      <p>Implement all abstract bases (Layer, Provider, Renderer) and basic "Single Symbol" drawing. Best for ensuring the architecture is solid before adding features.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="symbology" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Approach: Advanced Symbology</h3>
+      <p>Implement the framework but prioritize a rich vector symbology engine (e.g., categorized colors based on attributes) from day one.</p>
+    </div>
+  </div>
+</div>

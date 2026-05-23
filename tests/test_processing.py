@@ -3,7 +3,7 @@ import pytest
 import numpy as np
 import rasterio
 from rasterio.transform import from_origin
-from engine._processing import calculate_ndvi, kmeans_classify
+from engine.processing import calculate_ndvi, kmeans_classify
 
 @pytest.fixture
 def sample_spectral_raster(tmp_path):

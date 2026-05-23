@@ -1,7 +1,8 @@
 import sys
 import argparse
 from engine.registry import ToolRegistry
-import engine._processing # Imports processing so all standard tools register themselves on import
+import engine.preprocessing
+import engine.processing
 
 def main():
     parser = argparse.ArgumentParser(description="Antigravity RS — Headless CLI Companion")

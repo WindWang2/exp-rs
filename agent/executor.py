@@ -111,7 +111,7 @@ class AgentExecutor:
             }
             res["code"] = (
                 "# Educational Script: Normalized Difference Vegetation Index\n"
-                "from engine import calculate_ndvi\n\n"
+                "from engine.processing.indices.vegetation import calculate_ndvi\n\n"
                 f"input_raster = '{sample_path}'\n"
                 "output_ndvi = 'data/output_ndvi.tif'\n\n"
                 "# Execute band algebra in background thread\n"
@@ -130,7 +130,7 @@ class AgentExecutor:
             }
             res["code"] = (
                 "# Educational Script: Normalized Difference Water Index\n"
-                "from engine import calculate_ndwi\n\n"
+                "from engine.processing.indices.water import calculate_ndwi\n\n"
                 f"input_raster = '{sample_path}'\n"
                 "output_ndwi = 'data/output_ndwi.tif'\n\n"
                 "calculate_ndwi(input_raster, output_ndwi, green_band=2, nir_band=3)"
@@ -148,7 +148,7 @@ class AgentExecutor:
             }
             res["code"] = (
                 "# Educational Script: K-Means Unsupervised Classification\n"
-                "from engine import kmeans_classify\n\n"
+                "from engine.processing.classification.kmeans import kmeans_classify\n\n"
                 "kmeans_classify(\n"
                 f"    input_path='{sample_path}',\n"
                 "    output_path='data/output_classification.tif',\n"
