@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from engine._preprocessing import calculate_dos1_band
+from engine.preprocessing import calculate_dos1_band
 
 def test_calculate_dos1_band_uint16():
     # Test with uint16 data

@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import rasterio
 import os
-from engine._preprocessing import calculate_dos1_band, calculate_dos1
+from engine.preprocessing import calculate_dos1_band, calculate_dos1
 
 def test_calculate_dos1_band_basic():
     band = np.array([[10, 20], [30, 40]], dtype=np.uint8)
