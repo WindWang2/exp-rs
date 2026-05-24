@@ -2,7 +2,7 @@
 from PySide6.QtWidgets import (QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QToolButton, QSizePolicy, QStyledItemDelegate,
                                QLineEdit, QStyle)
-from PySide6.QtGui import QColor, QPainter, QPen, QStandardItemModel, QStandardItem
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtCore import Qt, Signal, QSize, QRect
 from gui.rs_icons import rs_icon
 
