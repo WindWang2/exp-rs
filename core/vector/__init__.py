@@ -1,0 +1,4 @@
+from core.vector.qgsvectorlayer import QgsVectorLayer, VectorLayer
+from core.vector.qgsvectorlayerrenderer import QgsVectorLayerRenderer, VectorLayerRenderer
+from core.vector.qgsvectordataprovider import QgsVectorDataProvider, Capabilities
+from core.vector.qgsmemoryprovider import QgsMemoryProvider

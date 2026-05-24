@@ -30,3 +30,4 @@ from core.qgsmaplayer import QgsMapLayer, MapLayer
 from core.qgsmapsettings import QgsMapSettings, MapSettings
 from core.qgsmaplayerrenderer import QgsMapLayerRenderer, MapLayerRenderer
 from core.qgsdataprovider import QgsDataProvider, DataProvider
+from core.qgsmaplayerstore import QgsMapLayerStore
