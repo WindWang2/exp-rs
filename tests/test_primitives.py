@@ -185,3 +185,18 @@ def test_wkb_types():
     assert not QgsWkbTypes.isMultiType(QgsWkbTypes.Type.Point)
     assert QgsWkbTypes.hasZ(QgsWkbTypes.Type.PointZ)
     assert not QgsWkbTypes.hasZ(QgsWkbTypes.Type.Point)
+
+
+# --- QgsUnitTypes tests ---
+
+from core.qgsunittypes import QgsUnitTypes
+
+
+def test_distance_unit_conversion():
+    # 1 degree ≈ 111319.490793 m at equator
+    result = QgsUnitTypes.fromUnitToUnitFactor(Qgis.DistanceUnit.Degrees, Qgis.DistanceUnit.Meters)
+    assert result > 100000  # approximate
+
+
+def test_area_unit_enum():
+    assert QgsUnitTypes.AreaUnit.SquareMeters == 0
