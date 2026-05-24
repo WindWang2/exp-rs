@@ -50,3 +50,17 @@ def test_rstoolbar_groups_and_trigger():
     # exclusive: clicking zin unchecks pan
     tb.button("zin").click()
     assert tb.button("zin").isChecked() and not tb.button("pan").isChecked()
+
+
+# append to tests/test_rs_widgets.py
+from gui.rs_widgets import RsStatusBar
+
+
+def test_rsstatusbar_setters():
+    sb = RsStatusBar()
+    sb.set_coord("116.4074° E, 39.9042° N")
+    sb.set_scale("1 : 50,000")
+    sb.set_crs("EPSG:4326 — WGS 84")
+    assert "116.4074" in sb.coord_label.text()
+    assert "50,000" in sb.scale_label.text()
+    assert "EPSG:4326" in sb.crs_label.text()

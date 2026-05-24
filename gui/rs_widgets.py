@@ -153,3 +153,40 @@ class RsToolBar(QWidget):
                 for other in grp:
                     self._buttons[other].setChecked(other == bid)
         self.triggered.emit(bid)
+
+
+# append to gui/rs_widgets.py
+def _seg(text="", obj="rsSeg", color=None):
+    lab = QLabel(text)
+    lab.setObjectName(obj)
+    if color:
+        lab.setStyleSheet(f"color:{color};")
+    return lab
+
+
+class RsStatusBar(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("rsStatusBar")
+        self.setFixedHeight(22)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.ready_label = _seg("● 就绪", "rsSegOk")
+        self.coord_label = _seg("—", "rsSeg")
+        self.scale_label = _seg("1 : 1", "rsSeg")
+        self.crs_label = _seg("EPSG:3857", "rsSeg")
+        self.message_label = _seg("", "rsSegMuted")
+        for w in (self.ready_label, self.coord_label, self.scale_label,
+                  self.crs_label, self.message_label):
+            lay.addWidget(w)
+        lay.addStretch(1)
+        for w in (_seg("线程 4 · 2 任务", "rsSegMuted"),
+                  _seg("渲染 18ms", "rsSegMuted"),
+                  _seg("缓存 2.4 GB", "rsSegMuted")):
+            lay.addWidget(w)
+
+    def set_coord(self, t): self.coord_label.setText(t)
+    def set_scale(self, t): self.scale_label.setText(t)
+    def set_crs(self, t): self.crs_label.setText(t)
+    def set_message(self, t): self.message_label.setText(t)
