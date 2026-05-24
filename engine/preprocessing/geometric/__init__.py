@@ -1,1 +1,0 @@
-from .rectify import calculate_polynomial_coeffs
