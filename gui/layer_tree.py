@@ -22,7 +22,14 @@ class LayerTreeItem(QStandardItem):
         self.setData(layer_id, Qt.UserRole)
         self.setData(layer_type, Qt.UserRole + 1)
         self.setData(file_path, Qt.UserRole + 2)
-        
+
+        # RsRowDelegate roles
+        from gui.rs_widgets import ROLE_SWATCH, ROLE_META, ROLE_ICON
+        palette = {"raster": "#7dd35c", "vector": "#4fb6e6"}
+        self.setData(palette.get(layer_type, "#8a92a0"), ROLE_SWATCH)
+        self.setData(layer_type, ROLE_META)
+        self.setData("raster" if layer_type == "raster" else "vector", ROLE_ICON)
+
         # Set system-fallback icons for layers
         if layer_type == "raster":
             self.setIcon(QIcon.fromTheme("image-x-generic"))
@@ -100,13 +107,13 @@ class LayerTreeView(QTreeView):
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QTreeView.InternalMove)
         
-        # Premium dark styling with custom checkmark vector graphics
+        # Premium light engineering styling with custom checkmark vector graphics
         self.setStyleSheet("""
             QTreeView {
                 background-color: #ffffff;
-                border: 1px solid #d1d1d1;
+                border: 1px solid #d4d8de;
                 border-radius: 4px;
-                color: #1a1a1a;
+                color: #2f3640;
                 font-family: 'Segoe UI', 'Inter', sans-serif;
                 font-size: 12px;
                 show-decoration-selected: 1;
@@ -116,21 +123,21 @@ class LayerTreeView(QTreeView):
                 border-radius: 2px;
             }
             QTreeView::item:hover {
-                background-color: #f1f3f5;
+                background-color: #eef1f5;
             }
             QTreeView::item:selected {
-                background-color: #e2effb;
-                color: #007ac2;
+                background-color: #e0efff;
+                color: #1f6feb;
             }
             QTreeView::indicator {
                 width: 14px;
                 height: 14px;
                 border-radius: 2px;
-                border: 1px solid #707070;
+                border: 1px solid #b3bac4;
             }
             QTreeView::indicator:checked {
-                background-color: #007ac2;
-                border: 1px solid #007ac2;
+                background-color: #1f6feb;
+                border: 1px solid #1f6feb;
                 image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwb2x5bGluZSBwb2ludHM9IjIwIDYgOSAxNyA0IDEyIi8+PC9zdmc+);
             }
             QTreeView::indicator:unchecked {
