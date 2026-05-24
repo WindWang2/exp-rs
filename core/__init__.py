@@ -29,6 +29,19 @@ from core.qgsproject import QgsProject, GISProject
 from core.qgsmaplayer import QgsMapLayer, MapLayer
 from core.qgsmapsettings import QgsMapSettings, MapSettings
 from core.qgsmaptopixel import QgsMapToPixel
+from core.qgsrendercontext import QgsRenderContext, RenderFlag
 from core.qgsmaplayerrenderer import QgsMapLayerRenderer, MapLayerRenderer
 from core.qgsdataprovider import QgsDataProvider, DataProvider
 from core.qgsmaplayerstore import QgsMapLayerStore
+
+# Phase 2 - Relations
+from core.qgsrelationmanager import QgsRelation, QgsRelationManager
+
+# Phase 2 - Symbology
+from core.symbology import (
+    QgsSymbolLayer,
+    QgsSimpleFillSymbolLayer,
+    QgsSimpleLineSymbolLayer,
+    QgsSimpleMarkerSymbolLayer,
+    QgsSymbol,
+)
