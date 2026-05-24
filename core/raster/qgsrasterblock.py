@@ -23,12 +23,13 @@ class QgsRasterBlock:
                 )
 
     @staticmethod
-    def from_numpy(array: np.ndarray, no_data_value=None) -> 'QgsRasterBlock':
+    def from_numpy(array: np.ndarray, no_data_value=None, data_type=None) -> 'QgsRasterBlock':
         """Create a QgsRasterBlock from an existing numpy array."""
         block = QgsRasterBlock()
         block._data = array
         block._height, block._width = array.shape[:2]
         block._no_data_value = no_data_value
+        block._data_type = data_type
         return block
 
     def data(self) -> np.ndarray:

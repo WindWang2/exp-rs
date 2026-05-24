@@ -131,7 +131,7 @@ class QgsRasterDataProvider(QgsRasterInterface):
             data = self._resize_array(data, height, width)
 
         no_data = self.sourceNoDataValue(band_no)
-        return QgsRasterBlock.from_numpy(data, no_data_value=no_data)
+        return QgsRasterBlock.from_numpy(data, no_data_value=no_data, data_type=self.dataType(band_no))
 
     # ------------------------------------------------------------------
     # Thread-safe cloning
@@ -188,11 +188,10 @@ class QgsRasterDataProvider(QgsRasterInterface):
 
     def _read_nodata_values(self) -> list:
         """Read per-band nodata values from the source raster."""
-        values = []
         with rasterio.open(self._uri) as src:
-            for i in range(1, src.count + 1):
-                try:
-                    values.append(src.nodata)
-                except Exception:
-                    values.append(None)
-        return values
+            nodata = src.nodata
+        return [nodata] * self._reader.metadata["count"]
+
+    def crs(self) -> str:
+        """Returns the CRS string of the source raster."""
+        return self._reader.metadata.get("crs")
