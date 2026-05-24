@@ -1,7 +1,8 @@
 # gui/rs_widgets.py
+import logging
 from PySide6.QtWidgets import (QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QToolButton, QSizePolicy, QStyledItemDelegate,
-                               QLineEdit, QStyle)
+                               QLineEdit, QStyle, QPlainTextEdit)
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtCore import Qt, Signal, QSize, QRect
 from gui.rs_icons import rs_icon
@@ -272,3 +273,53 @@ class RsSearchInput(QFrame):
 
     def text(self):
         return self.line.text()
+
+
+# append to gui/rs_widgets.py
+_LEVEL_COLOR = {"INFO": "#1a7f37", "WARN": "#bf8700", "WARNING": "#bf8700",
+                "ERROR": "#cf222e", "DEBUG": "#8a92a0", "SUCCESS": "#1a7f37"}
+
+
+class RsConsole(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("rsConsole")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.tabs = RsTabBar([("log", "日志", "file", 0),
+                              ("tasks", "任务", "cog", 0),
+                              ("python", "Python 控制台", "workflow", None),
+                              ("hist", "历史", "refresh", None)], active="log")
+        lay.addWidget(self.tabs)
+        self.view = QPlainTextEdit()
+        self.view.setObjectName("rsConsoleView")
+        self.view.setReadOnly(True)
+        lay.addWidget(self.view, 1)
+        self._count = 0
+
+    def append_log(self, time_str, level, module, msg):
+        color = _LEVEL_COLOR.get(level.upper(), "#5b6473")
+        html = (f"<span style='color:#b8bec7'>{time_str}</span> "
+                f"<span style='color:{color}'>{level}</span> "
+                f"<span style='color:#8a92a0'>{module}</span> "
+                f"<span style='color:#2f3640'>{msg}</span>")
+        self.view.appendHtml(html)
+        self._count += 1
+        self.tabs._buttons["log"].setText(f"日志  {self._count}")
+
+    def attach_logger(self, logger_name="RSStudio"):
+        """Stream real logs into the console (GUI-thread safe via QLogHandler)."""
+        from gui.log_dock import QLogHandler
+        handler = QLogHandler()
+        handler.signals.log_emitted.connect(self._on_log)
+        logging.getLogger(logger_name).addHandler(handler)
+        self._handler = handler
+
+    def _on_log(self, raw_msg, levelno, formatted, time_str):
+        level = logging.getLevelName(levelno)
+        module = ""
+        parts = formatted.split(" - ")
+        if len(parts) >= 3:
+            module = parts[2].strip("[]")
+        self.append_log(time_str, level, module, raw_msg)

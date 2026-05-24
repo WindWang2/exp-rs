@@ -88,3 +88,16 @@ def test_search_input_text():
     s = RsSearchInput("搜索 1,247 个算法…")
     s.line.setText("ndvi")
     assert s.text() == "ndvi"
+
+
+# append to tests/test_rs_widgets.py
+from gui.rs_widgets import RsConsole
+
+
+def test_rsconsole_append():
+    c = RsConsole()
+    c.append_log("10:24:12", "INFO", "gdal", "opened dataset")
+    c.append_log("10:24:13", "WARN", "crs", "reprojected")
+    txt = c.view.toPlainText()
+    assert "opened dataset" in txt and "reprojected" in txt
+    assert c.tabs.active_id == "log"
