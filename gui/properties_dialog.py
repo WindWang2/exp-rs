@@ -25,33 +25,8 @@ class LayerPropertiesDialog(QDialog):
         self.main_layout.setContentsMargins(15, 15, 15, 15)
         self.main_layout.setSpacing(12)
         
-        # 2. Tab Widget
+        # 2. Tab Widget — styled globally via QSS
         self.tabs = QTabWidget(self)
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #d1d1d1;
-                border-radius: 4px;
-                background-color: #fcfcfc;
-            }
-            QTabBar::tab {
-                background: #e1e1e1;
-                border: 1px solid #c8c8c8;
-                border-bottom-color: none;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                padding: 6px 12px;
-                margin-right: 2px;
-                color: #333333;
-                font-family: 'Segoe UI', 'Inter', sans-serif;
-                font-size: 12px;
-            }
-            QTabBar::tab:selected, QTabBar::tab:hover {
-                background: #fcfcfc;
-                border-color: #d1d1d1;
-                color: #007ac2;
-                font-weight: bold;
-            }
-        """)
         
         # 3. Create Tabs
         self.info_tab = self._create_info_tab()
@@ -62,39 +37,13 @@ class LayerPropertiesDialog(QDialog):
         
         self.main_layout.addWidget(self.tabs)
         
-        # 4. Buttons (Ok, Cancel)
+        # 4. Buttons (Ok, Cancel) — styled globally via QSS; accent the OK button
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
-        
-        # Style buttons premium
-        self.button_box.setStyleSheet("""
-            QPushButton {
-                background-color: #f1f3f5;
-                border: 1px solid #c8c8c8;
-                border-radius: 4px;
-                padding: 6px 16px;
-                font-family: 'Segoe UI', 'Inter';
-                font-size: 12px;
-                color: #333333;
-            }
-            QPushButton:hover {
-                background-color: #e2e6ea;
-                border-color: #007ac2;
-            }
-            QPushButton:pressed {
-                background-color: #dae0e5;
-            }
-            QPushButton[text="OK"] {
-                background-color: #007ac2;
-                color: white;
-                border: 1px solid #007ac2;
-            }
-            QPushButton[text="OK"]:hover {
-                background-color: #006099;
-                border-color: #006099;
-            }
-        """)
+        ok_btn = self.button_box.button(QDialogButtonBox.Ok)
+        if ok_btn:
+            ok_btn.setProperty("primary", "true")
         
         self.main_layout.addWidget(self.button_box)
         
@@ -106,29 +55,29 @@ class LayerPropertiesDialog(QDialog):
         
         # Group General
         general_group = QGroupBox("General Metadata")
-        general_group.setStyleSheet("QGroupBox { font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; color: #007ac2; }")
+        general_group.setStyleSheet("QGroupBox { font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; color: #1f6feb; }")
         g_layout = QFormLayout(general_group)
         g_layout.setContentsMargins(10, 15, 10, 10)
         g_layout.setSpacing(8)
         
         self.name_edit = QLineEdit(self.layer.name)
-        self.name_edit.setStyleSheet("QLineEdit { border: 1px solid #c8c8c8; border-radius: 3px; padding: 4px; color: #333333; }")
+        self.name_edit.setStyleSheet("QLineEdit { border: 1px solid #d4d8de; border-radius: 3px; padding: 4px; color: #2f3640; }")
         g_layout.addRow("Layer Name:", self.name_edit)
         
         path_label = QLabel(self.layer.provider.reader.file_path)
         path_label.setWordWrap(True)
-        path_label.setStyleSheet("color: #555555;")
+        path_label.setStyleSheet("color: #5b6473;")
         g_layout.addRow("Source Path:", path_label)
         
         type_label = QLabel(self.layer_type.upper())
-        type_label.setStyleSheet("font-weight: bold; color: #555555;")
+        type_label.setStyleSheet("font-weight: bold; color: #5b6473;")
         g_layout.addRow("Layer Type:", type_label)
         
         layout.addWidget(general_group)
         
         # Group CRS
         crs_group = QGroupBox("Coordinate Reference System (CRS)")
-        crs_group.setStyleSheet("QGroupBox { font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; color: #007ac2; }")
+        crs_group.setStyleSheet("QGroupBox { font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; color: #1f6feb; }")
         c_layout = QFormLayout(crs_group)
         c_layout.setContentsMargins(10, 15, 10, 10)
         c_layout.setSpacing(8)
@@ -136,18 +85,18 @@ class LayerPropertiesDialog(QDialog):
         crs_str = self.layer.crs if self.layer.crs else "None (Local/Unknown Coordinates)"
         crs_label = QLabel(crs_str)
         crs_label.setWordWrap(True)
-        crs_label.setStyleSheet("font-family: Consolas, monospace; color: #333333; font-size: 11px;")
+        crs_label.setStyleSheet("font-family: Consolas, monospace; color: #2f3640; font-size: 11px;")
         c_layout.addRow("Native Projection:", crs_label)
         
         canvas_crs_label = QLabel("EPSG:3857 (Web Mercator Standard for Display)")
-        canvas_crs_label.setStyleSheet("color: #555555;")
+        canvas_crs_label.setStyleSheet("color: #5b6473;")
         c_layout.addRow("Canvas Target CRS:", canvas_crs_label)
         
         layout.addWidget(crs_group)
         
         # Group Advanced Stats
         stats_group = QGroupBox("Spatial/Band Dimensions")
-        stats_group.setStyleSheet("QGroupBox { font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; color: #007ac2; }")
+        stats_group.setStyleSheet("QGroupBox { font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; color: #1f6feb; }")
         s_layout = QFormLayout(stats_group)
         s_layout.setContentsMargins(10, 15, 10, 10)
         s_layout.setSpacing(8)
@@ -200,7 +149,7 @@ class LayerPropertiesDialog(QDialog):
         
     def _setup_raster_style_widgets(self, layout):
         symbology_group = QGroupBox("Raster Symbology (栅格渲染模式)")
-        symbology_group.setStyleSheet("QGroupBox { font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; color: #007ac2; }")
+        symbology_group.setStyleSheet("QGroupBox { font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; color: #1f6feb; }")
         form = QFormLayout(symbology_group)
         form.setContentsMargins(10, 15, 10, 10)
         form.setSpacing(10)
@@ -208,7 +157,7 @@ class LayerPropertiesDialog(QDialog):
         # 1. Render Type Combo
         self.render_type_combo = QComboBox()
         self.render_type_combo.addItems(["Multiband Color", "Singleband Gray", "Singleband Pseudocolor"])
-        self.render_type_combo.setStyleSheet("QComboBox { border: 1px solid #c8c8c8; border-radius: 3px; padding: 4px; }")
+        self.render_type_combo.setStyleSheet("QComboBox { border: 1px solid #d4d8de; border-radius: 3px; padding: 4px; }")
         
         # Set initial value
         if self.layer.render_type == "multiband":
@@ -283,7 +232,7 @@ class LayerPropertiesDialog(QDialog):
 
         # 5. QGIS-Aligned Contrast Stretch Config Widget
         contrast_group = QGroupBox("Contrast Enhancement (对比度增强与拉伸)")
-        contrast_group.setStyleSheet("QGroupBox { font-weight: bold; font-family: 'Segoe UI'; font-size: 12px; color: #444; }")
+        contrast_group.setStyleSheet("QGroupBox { font-weight: bold; font-family: 'Segoe UI'; font-size: 12px; color: #2f3640; }")
         con_layout = QVBoxLayout(contrast_group)
         con_layout.setContentsMargins(10, 15, 10, 10)
         con_layout.setSpacing(10)
@@ -294,13 +243,13 @@ class LayerPropertiesDialog(QDialog):
         self.contrast_combo = QComboBox()
         self.contrast_combo.addItems(["No Stretch", "Stretch to MinMax"])
         self.contrast_combo.setCurrentIndex(0 if self.layer.contrast_enhancement == "none" else 1)
-        self.contrast_combo.setStyleSheet("QComboBox { border: 1px solid #c8c8c8; border-radius: 3px; padding: 4px; }")
+        self.contrast_combo.setStyleSheet("QComboBox { border: 1px solid #d4d8de; border-radius: 3px; padding: 4px; }")
         algo_row.addWidget(self.contrast_combo)
         con_layout.addLayout(algo_row)
 
         # Min/Max Limit Settings Group Box
         self.min_max_group = QGroupBox("Min / Max Value Settings (最小/最大值计算范围)")
-        self.min_max_group.setStyleSheet("QGroupBox { font-family: 'Segoe UI'; font-size: 11px; color: #555; font-weight: normal; }")
+        self.min_max_group.setStyleSheet("QGroupBox { font-family: 'Segoe UI'; font-size: 11px; color: #5b6473; font-weight: normal; }")
         limits_layout = QVBoxLayout(self.min_max_group)
         limits_layout.setSpacing(8)
 
@@ -371,14 +320,14 @@ class LayerPropertiesDialog(QDialog):
         self.user_min_edit = QLineEdit(str(self.layer.user_min) if self.layer.user_min is not None else "")
         self.user_min_edit.setPlaceholderText("Auto")
         self.user_min_edit.setFixedWidth(80)
-        self.user_min_edit.setStyleSheet("QLineEdit { border: 1px solid #c8c8c8; border-radius: 3px; padding: 3px; }")
+        self.user_min_edit.setStyleSheet("QLineEdit { border: 1px solid #d4d8de; border-radius: 3px; padding: 3px; }")
         u_layout.addWidget(self.user_min_edit)
 
         u_layout.addWidget(QLabel("Max Override:"))
         self.user_max_edit = QLineEdit(str(self.layer.user_max) if self.layer.user_max is not None else "")
         self.user_max_edit.setPlaceholderText("Auto")
         self.user_max_edit.setFixedWidth(80)
-        self.user_max_edit.setStyleSheet("QLineEdit { border: 1px solid #c8c8c8; border-radius: 3px; padding: 3px; }")
+        self.user_max_edit.setStyleSheet("QLineEdit { border: 1px solid #d4d8de; border-radius: 3px; padding: 3px; }")
         u_layout.addWidget(self.user_max_edit)
         u_layout.addStretch()
 
@@ -424,7 +373,7 @@ class LayerPropertiesDialog(QDialog):
         
     def _setup_vector_style_widgets(self, layout):
         symbology_group = QGroupBox("Vector Symbology (矢量符号化)")
-        symbology_group.setStyleSheet("QGroupBox { font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; color: #007ac2; }")
+        symbology_group.setStyleSheet("QGroupBox { font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; color: #1f6feb; }")
         form = QFormLayout(symbology_group)
         form.setContentsMargins(10, 15, 10, 10)
         form.setSpacing(10)
@@ -449,7 +398,7 @@ class LayerPropertiesDialog(QDialog):
         self.stroke_width_spin = QSpinBox()
         self.stroke_width_spin.setRange(1, 10)
         self.stroke_width_spin.setValue(renderer.stroke_width())
-        self.stroke_width_spin.setStyleSheet("QSpinBox { border: 1px solid #c8c8c8; border-radius: 3px; padding: 4px; width: 60px; }")
+        self.stroke_width_spin.setStyleSheet("QSpinBox { border: 1px solid #d4d8de; border-radius: 3px; padding: 4px; width: 60px; }")
         form.addRow("Outline Width:", self.stroke_width_spin)
         
         layout.addWidget(symbology_group)
