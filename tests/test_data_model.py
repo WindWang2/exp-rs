@@ -129,3 +129,47 @@ def test_fields_repr():
     r = repr(fs)
     assert "2" in r
     assert "fields" in r
+
+
+# --- QgsFeature tests ---
+
+from core.qgsfeature import QgsFeature
+from core.qgsgeometry import QgsGeometry
+from core.qgspointxy import QgsPointXY
+
+
+def test_feature_creation():
+    f = QgsFeature()
+    assert f.id() == 0
+
+
+def test_feature_with_fields():
+    fields = QgsFields()
+    fields.append(QgsField("id", int))
+    fields.append(QgsField("name", str))
+    f = QgsFeature(fields)
+    assert f.fields().count() == 2
+
+
+def test_feature_attributes():
+    fields = QgsFields()
+    fields.append(QgsField("id", int))
+    fields.append(QgsField("name", str))
+    f = QgsFeature(fields)
+    f.setAttribute(0, 1)
+    f.setAttribute(1, "test")
+    assert f.attribute(0) == 1
+    assert f.attribute("name") == "test"
+
+
+def test_feature_geometry():
+    f = QgsFeature()
+    g = QgsGeometry.fromPointXY(QgsPointXY(1, 2))
+    f.setGeometry(g)
+    assert not f.geometry().isNull()
+
+
+def test_feature_id():
+    f = QgsFeature()
+    f.setId(42)
+    assert f.id() == 42
