@@ -173,3 +173,41 @@ def test_feature_id():
     f = QgsFeature()
     f.setId(42)
     assert f.id() == 42
+
+
+# --- QgsFeatureRequest tests ---
+
+from core.qgsfeaturerequest import QgsFeatureRequest
+from core.qgsfeatureiterator import QgsFeatureIterator, QgsAbstractFeatureIterator
+from core.qgsrectangle import QgsRectangle
+
+
+def test_feature_request_no_filter():
+    r = QgsFeatureRequest()
+    assert r.filterType() == QgsFeatureRequest.FilterType.NoFilter
+
+
+def test_feature_request_filter_rect():
+    r = QgsFeatureRequest()
+    r.setFilterRect(QgsRectangle(0, 0, 10, 10))
+    assert r.filterType() == QgsFeatureRequest.FilterType.FilterRect
+
+
+def test_feature_request_filter_fid():
+    r = QgsFeatureRequest()
+    r.setFilterFid(42)
+    assert r.filterType() == QgsFeatureRequest.FilterType.FilterFid
+
+
+def test_feature_request_subset():
+    r = QgsFeatureRequest()
+    r.setSubsetOfAttributes(["id", "name"])
+    assert r.subsetOfAttributes() == ["id", "name"]
+
+
+def test_feature_iterator_from_list():
+    feats = [QgsFeature(id=i) for i in range(5)]
+    it = QgsFeatureIterator(feats)
+    collected = list(it)
+    assert len(collected) == 5
+    assert collected[0].id() == 0
