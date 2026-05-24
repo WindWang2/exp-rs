@@ -23,6 +23,20 @@ def test_scalebar_settings_height():
     settings.setHeight(8)
     assert settings.height() == 8
 
+def test_canvas_scale_bar():
+    """Canvas should support a scale bar decoration."""
+    from gui.qgsmapcanvas import QgsMapCanvas
+    from core.scalebar.qgsscalebarsettings import QgsScaleBarSettings
+    canvas = QgsMapCanvas()
+    settings = QgsScaleBarSettings()
+    canvas.setScaleBarSettings(settings)
+    assert canvas.scaleBarSettings() is settings
+
+def test_canvas_no_scale_bar_by_default():
+    from gui.qgsmapcanvas import QgsMapCanvas
+    canvas = QgsMapCanvas()
+    assert canvas.scaleBarSettings() is None
+
 from core.scalebar.qgsscalebarrenderer import QgsScaleBarRenderer
 
 def test_scalebar_renderer_create():

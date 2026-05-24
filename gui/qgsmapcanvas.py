@@ -34,6 +34,7 @@ class QgsMapCanvas(QGraphicsView):
         self._current_job = None
         self._render_generation = 0
         self._zoom_factor = 1.15
+        self._scale_bar_settings = None
 
         # Viewport settings
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
@@ -76,6 +77,15 @@ class QgsMapCanvas(QGraphicsView):
 
     def mapTool(self):
         return self._map_tool
+
+    # --- Scale bar ---
+    def setScaleBarSettings(self, settings):
+        """Set scale bar decoration settings (QgsScaleBarSettings or None)."""
+        self._scale_bar_settings = settings
+
+    def scaleBarSettings(self):
+        """Return current scale bar settings, or None."""
+        return self._scale_bar_settings
 
     # --- Map settings ---
     def mapSettings(self) -> QgsMapSettings:
@@ -140,9 +150,35 @@ class QgsMapCanvas(QGraphicsView):
     def _on_render_finished(self, image: QImage, generation: int):
         if generation != self._render_generation:
             return
+        # Draw scale bar on the image if configured
+        if self._scale_bar_settings and not image.isNull():
+            from PySide6.QtGui import QPainter
+            from PySide6.QtCore import QPointF
+            from core.scalebar.qgsscalebarrenderer import QgsScaleBarRenderer
+            painter = QPainter(image)
+            renderer = QgsScaleBarRenderer(self._scale_bar_settings)
+            # Position: bottom-left with 10px margin
+            x = 10
+            y = image.height() - 10
+            # Calculate scale denominator from extent and image size
+            scale_denom = self._calculate_scale_denominator(image.size())
+            renderer.render(painter, scale_denom, QPointF(x, y))
+            painter.end()
         self._map_item.setImage(image)
         self._current_job = None
         self.renderComplete.emit()
+
+    def _calculate_scale_denominator(self, image_size):
+        """Calculate the map scale denominator from extent and image size."""
+        ext = self._extent
+        if ext.isEmpty() or image_size.width() == 0:
+            return 1
+        # Scale denom = ground distance / paper distance
+        # Using 96 DPI: 1 pixel = 25.4/96 mm
+        mm_per_pixel = 25.4 / 96
+        ground_width_mm = ext.width() * 1000  # assuming extent is in meters
+        image_width_mm = image_size.width() * mm_per_pixel
+        return ground_width_mm / image_width_mm
 
     # --- CRS ---
     def _set_canvas_crs(self, new_crs: str):
