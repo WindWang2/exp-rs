@@ -95,3 +95,61 @@ class RsTabBar(QWidget):
     def _sync(self):
         for t, b in self._buttons.items():
             b.setChecked(t == self.active_id)
+
+
+# append to gui/rs_widgets.py
+_T1 = "#2f3640"
+
+
+class RsToolBar(QWidget):
+    triggered = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("rsToolBar")
+        self.setFixedHeight(36)
+        self._lay = QHBoxLayout(self)
+        self._lay.setContentsMargins(4, 0, 4, 0)
+        self._lay.setSpacing(0)
+        self._lay.addStretch(1)
+        self._buttons = {}
+        self._exclusive_groups = []
+
+    def add_group(self, items, exclusive=False):
+        group = QWidget()
+        group.setObjectName("rsToolGroup")
+        gl = QHBoxLayout(group)
+        gl.setContentsMargins(4, 0, 4, 0)
+        gl.setSpacing(1)
+        ids = []
+        for it in items:
+            b = QToolButton()
+            b.setObjectName("rsToolBtn")
+            b.setIcon(rs_icon(it["icon"], 14, _T1))
+            if it.get("label"):
+                b.setText(it["label"])
+                b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            b.setToolTip(it.get("tip", it.get("label", "")))
+            b.setCheckable(bool(it.get("checkable")))
+            b.setChecked(bool(it.get("checked")))
+            b.setCursor(Qt.ArrowCursor)
+            bid = it["id"]
+            b.clicked.connect(lambda _=False, x=bid: self._on_click(x))
+            gl.addWidget(b)
+            self._buttons[bid] = b
+            ids.append(bid)
+        if exclusive:
+            self._exclusive_groups.append(ids)
+        # insert before the trailing stretch
+        self._lay.insertWidget(self._lay.count() - 1, group)
+        return group
+
+    def button(self, bid):
+        return self._buttons[bid]
+
+    def _on_click(self, bid):
+        for grp in self._exclusive_groups:
+            if bid in grp:
+                for other in grp:
+                    self._buttons[other].setChecked(other == bid)
+        self.triggered.emit(bid)

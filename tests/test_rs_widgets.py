@@ -30,3 +30,23 @@ def test_rstabbar_active_and_signal():
     bar.set_active("symbol")
     assert bar.active_id == "symbol"
     assert seen == ["symbol"]
+
+
+# append to tests/test_rs_widgets.py
+from gui.rs_widgets import RsToolBar
+
+
+def test_rstoolbar_groups_and_trigger():
+    tb = RsToolBar()
+    tb.add_group([{"id": "open", "icon": "folder", "tip": "打开"},
+                  {"id": "save", "icon": "save", "tip": "保存"}])
+    tb.add_group([{"id": "pan", "icon": "pan", "checkable": True, "checked": True},
+                  {"id": "zin", "icon": "zoomIn", "checkable": True}],
+                 exclusive=True)
+    fired = []
+    tb.triggered.connect(fired.append)
+    tb.button("open").click()
+    assert fired == ["open"]
+    # exclusive: clicking zin unchecks pan
+    tb.button("zin").click()
+    assert tb.button("zin").isChecked() and not tb.button("pan").isChecked()
