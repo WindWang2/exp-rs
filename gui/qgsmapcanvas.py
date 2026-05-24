@@ -103,11 +103,39 @@ class QgsMapCanvas(QGraphicsView):
         self._render_generation += 1
         generation = self._render_generation
 
+        # Show fast low-res preview immediately
+        self.renderPreview()
+
+        # Start full-res render in background
         settings = self.mapSettings()
         job = QgsMapRendererJob(settings)
         job.signals.finished.connect(lambda img, gen=generation: self._on_render_finished(img, gen))
         self._current_job = job
         QThreadPool.globalInstance().start(job)
+
+    def renderPreview(self):
+        """Render a tiny preview image synchronously for instant feedback."""
+        PREVIEW_MAX = 256
+        w = self.viewport().width()
+        h = self.viewport().height()
+        if w <= 0 or h <= 0 or self._extent.isEmpty():
+            return
+        scale = PREVIEW_MAX / max(w, h)
+        pw, ph = max(1, int(w * scale)), max(1, int(h * scale))
+
+        from PySide6.QtCore import QSize as QSize2
+        preview_settings = QgsMapSettings()
+        preview_settings.layers = self._layers
+        # Pass QgsRectangle directly — QgsMapToPixel.fromSettings needs
+        # .xMinimum()/.yMaximum() which QRectF does not provide.
+        preview_settings.extent = self._extent
+        preview_settings.output_size = QSize2(pw, ph)
+        preview_settings.destination_crs = self._canvas_crs
+
+        preview_job = QgsMapRendererJob(preview_settings)
+        preview_job.run()  # Synchronous — tiny image, ~ms
+        if hasattr(preview_job, '_last_image') and preview_job._last_image and not preview_job._last_image.isNull():
+            self._map_item.setImage(preview_job._last_image)
 
     def _on_render_finished(self, image: QImage, generation: int):
         if generation != self._render_generation:

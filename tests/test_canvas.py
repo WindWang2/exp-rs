@@ -90,3 +90,75 @@ def test_canvas_refresh():
     canvas = QgsMapCanvas()
     canvas.setExtent(QgsRectangle(0, 0, 100, 100))
     canvas.refresh()
+
+
+# --- Integration tests: signals, map tools, preview ---
+
+def test_canvas_signal_extents_changed():
+    """Setting extent should emit extentsChanged."""
+    from core.qgsrectangle import QgsRectangle
+    canvas = QgsMapCanvas()
+    received = []
+    canvas.extentsChanged.connect(lambda: received.append(True))
+    canvas.setExtent(QgsRectangle(0, 0, 100, 100))
+    assert len(received) == 1
+
+
+def test_canvas_signal_layers_changed():
+    """Setting layers should emit layersChanged."""
+    canvas = QgsMapCanvas()
+    received = []
+    canvas.layersChanged.connect(lambda: received.append(True))
+    canvas.setLayers([])
+    assert len(received) == 1
+
+
+def test_canvas_map_tool_events():
+    """Map tool should receive events through canvas."""
+    from gui.qgsmaptool import QgsMapTool
+    from core.qgsrectangle import QgsRectangle
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtCore import QPointF, Qt
+    canvas = QgsMapCanvas()
+    canvas.setExtent(QgsRectangle(0, 0, 100, 100))
+    canvas.resize(500, 500)
+    events = []
+
+    class TestTool(QgsMapTool):
+        def canvasPressEvent(self, event):
+            events.append('press')
+
+    tool = TestTool(canvas)
+    canvas.setMapTool(tool)
+    event = QMouseEvent(QMouseEvent.Type.MouseButtonPress, QPointF(100, 100),
+                        QPointF(100, 100), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    canvas.mousePressEvent(event)
+    assert 'press' in events
+
+
+def test_canvas_set_map_tool():
+    """setMapTool should activate new tool and deactivate old."""
+    from gui.qgsmaptool import QgsMapTool
+    from core.qgsrectangle import QgsRectangle
+    canvas = QgsMapCanvas()
+    activations = []
+
+    class TrackTool(QgsMapTool):
+        def activate(self): activations.append('activate')
+        def deactivate(self): activations.append('deactivate')
+
+    tool1 = TrackTool(canvas)
+    tool2 = TrackTool(canvas)
+    canvas.setMapTool(tool1)
+    assert activations == ['activate']
+    canvas.setMapTool(tool2)
+    assert activations == ['activate', 'deactivate', 'activate']
+
+
+def test_canvas_render_preview():
+    """renderPreview should not crash."""
+    from core.qgsrectangle import QgsRectangle
+    canvas = QgsMapCanvas()
+    canvas.setExtent(QgsRectangle(0, 0, 100, 100))
+    canvas.resize(500, 500)
+    canvas.renderPreview()
