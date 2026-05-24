@@ -1,0 +1,202 @@
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene
+from PySide6.QtCore import Qt, QRectF, Signal, QThreadPool, QSize
+from PySide6.QtGui import QPainter, QImage
+
+from core.qgsmapsettings import QgsMapSettings
+from core.qgsrectangle import QgsRectangle
+from core.qgspointxy import QgsPointXY
+from core.qgsmaptopixel import QgsMapToPixel
+from gui.qgsmapcanvasmap import QgsMapCanvasMap
+from gui.qgsmaprendererjob import QgsMapRendererJob
+
+
+class QgsMapCanvas(QGraphicsView):
+    """QGraphicsView-based map canvas matching QGIS C++ architecture."""
+
+    coordinates_changed = Signal(float, float)
+    extentsChanged = Signal()
+    renderComplete = Signal()
+    layersChanged = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._scene = QGraphicsScene(self)
+        self.setScene(self._scene)
+
+        # Map image item
+        self._map_item = QgsMapCanvasMap(self._scene)
+
+        # State
+        self._layers = []
+        self._extent = QgsRectangle()
+        self._canvas_crs = "EPSG:3857"
+        self._map_tool = None
+        self._current_job = None
+        self._render_generation = 0
+        self._zoom_factor = 1.15
+
+        # Viewport settings
+        self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+        self.setViewportUpdateMode(QGraphicsView.MinimalViewportUpdate)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        # CRS handling
+        try:
+            from core.qgsproject import GISProject
+            self._canvas_crs = GISProject.instance().crs()
+            GISProject.instance().crsChanged.connect(self._set_canvas_crs)
+        except Exception:
+            pass
+
+    # --- Extent ---
+    def setExtent(self, extent: QgsRectangle):
+        self._extent = extent
+        self._update_scene_rect()
+        self.extentsChanged.emit()
+
+    def extent(self) -> QgsRectangle:
+        return self._extent
+
+    # --- Layers ---
+    def setLayers(self, layers: list):
+        self._layers = layers
+        self.layersChanged.emit()
+
+    def layers(self) -> list:
+        return self._layers
+
+    # --- Map tool ---
+    def setMapTool(self, tool):
+        if self._map_tool:
+            self._map_tool.deactivate()
+        self._map_tool = tool
+        if self._map_tool:
+            self._map_tool.activate()
+
+    def mapTool(self):
+        return self._map_tool
+
+    # --- Map settings ---
+    def mapSettings(self) -> QgsMapSettings:
+        settings = QgsMapSettings()
+        settings.layers = self._layers
+        settings.extent = QRectF(self._extent.xMinimum(), self._extent.yMinimum(),
+                                 self._extent.width(), self._extent.height())
+        settings.output_size = self.viewport().size()
+        settings.destination_crs = self._canvas_crs
+        return settings
+
+    def mapToPixel(self) -> QgsMapToPixel:
+        return QgsMapToPixel.fromSettings(self._extent, self.viewport().size())
+
+    # --- Refresh ---
+    def refresh(self):
+        if self._current_job:
+            self._current_job.cancel()
+            self._current_job = None
+
+        if not self._layers or self._extent.isEmpty():
+            self._map_item.clear()
+            return
+
+        self._render_generation += 1
+        generation = self._render_generation
+
+        settings = self.mapSettings()
+        job = QgsMapRendererJob(settings)
+        job.signals.finished.connect(lambda img, gen=generation: self._on_render_finished(img, gen))
+        self._current_job = job
+        QThreadPool.globalInstance().start(job)
+
+    def _on_render_finished(self, image: QImage, generation: int):
+        if generation != self._render_generation:
+            return
+        self._map_item.setImage(image)
+        self._current_job = None
+        self.renderComplete.emit()
+
+    # --- CRS ---
+    def _set_canvas_crs(self, new_crs: str):
+        old_crs = self._canvas_crs
+        if old_crs == new_crs:
+            return
+        self._canvas_crs = new_crs
+        if not self._extent.isEmpty():
+            from core.qgscoordinatetransform import QgsCoordinateTransform
+            try:
+                transformer = QgsCoordinateTransform(old_crs, new_crs)
+                xmin, ymin, xmax, ymax = transformer.transform_bounds(
+                    self._extent.left(), self._extent.bottom(),
+                    self._extent.right(), self._extent.top()
+                )
+                self.setExtent(QgsRectangle(xmin, ymin, xmax, ymax))
+            except Exception:
+                pass
+        self.refresh()
+
+    # --- Scene ---
+    def _update_scene_rect(self):
+        if not self._extent.isEmpty():
+            r = self._extent
+            self._scene.setSceneRect(QRectF(r.xMinimum(), r.yMinimum(), r.width(), r.height()))
+
+    # --- Events ---
+    def wheelEvent(self, event):
+        if self._map_tool:
+            self._map_tool.wheelEvent(event)
+        else:
+            super().wheelEvent(event)
+
+    def mousePressEvent(self, event):
+        if self._map_tool:
+            self._map_tool.mousePressEvent(event)
+        else:
+            super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._map_tool:
+            self._map_tool.mouseReleaseEvent(event)
+        else:
+            super().mouseReleaseEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._map_tool:
+            self._map_tool.mouseMoveEvent(event)
+        else:
+            super().mouseMoveEvent(event)
+        # Emit coordinates
+        settings = self.mapSettings()
+        world_pos = settings.deviceToWorld().map(QPointF(event.pos()))
+        self.coordinates_changed.emit(world_pos.x(), world_pos.y())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.refresh()
+
+    # --- Backward compatibility ---
+    def add_layer(self, layer):
+        from core.qgsproject import GISProject
+        GISProject.instance().addMapLayers([layer])
+        GISProject.instance().layerTreeRoot().addLayer(layer)
+        if self._extent.isEmpty() and layer.extent:
+            self.setExtent(QgsRectangle(layer.extent.left(), layer.extent.top() - layer.extent.height(),
+                                        layer.extent.right(), layer.extent.top()))
+
+    def remove_layer(self, layer_id: str):
+        from core.qgsproject import GISProject
+        GISProject.instance().removeMapLayers([layer_id])
+        root = GISProject.instance().layerTreeRoot()
+        for child in list(root.children()):
+            if child.nodeType() == "layer" and child.layer_id == layer_id:
+                root.removeChildNode(child)
+                break
+
+    # --- Property aliases for backward compat ---
+    @property
+    def extent_as_qrectf(self):
+        e = self._extent
+        return QRectF(e.xMinimum(), e.yMinimum(), e.width(), e.height())
+
+
+MapCanvas = QgsMapCanvas

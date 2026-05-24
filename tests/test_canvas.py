@@ -37,3 +37,56 @@ def test_canvas_map_clear():
     cmap.setImage(QImage(QSize(100, 100), QImage.Format_ARGB32))
     cmap.clear()
     assert cmap.pixmap().isNull()
+
+
+# --- QgsMapCanvas (QGraphicsView rewrite) tests ---
+
+from gui.qgsmapcanvas import QgsMapCanvas
+
+
+def test_canvas_is_qgraphics_view():
+    from PySide6.QtWidgets import QGraphicsView
+    canvas = QgsMapCanvas()
+    assert isinstance(canvas, QGraphicsView)
+
+
+def test_canvas_has_scene():
+    canvas = QgsMapCanvas()
+    assert canvas.scene() is not None
+
+
+def test_canvas_has_map_item():
+    canvas = QgsMapCanvas()
+    assert canvas._map_item is not None
+
+
+def test_canvas_set_extent():
+    from core.qgsrectangle import QgsRectangle
+    canvas = QgsMapCanvas()
+    canvas.setExtent(QgsRectangle(0, 0, 100, 100))
+    ext = canvas.extent()
+    assert ext is not None
+    assert ext.width() == 100
+
+
+def test_canvas_set_layers():
+    canvas = QgsMapCanvas()
+    canvas.setLayers([])
+    assert canvas.layers() == []
+
+
+def test_canvas_map_to_pixel():
+    from core.qgsrectangle import QgsRectangle
+    canvas = QgsMapCanvas()
+    canvas.resize(500, 500)
+    canvas.setExtent(QgsRectangle(0, 0, 100, 100))
+    mtp = canvas.mapToPixel()
+    assert mtp is not None
+
+
+def test_canvas_refresh():
+    """refresh() should not crash with no layers."""
+    from core.qgsrectangle import QgsRectangle
+    canvas = QgsMapCanvas()
+    canvas.setExtent(QgsRectangle(0, 0, 100, 100))
+    canvas.refresh()
