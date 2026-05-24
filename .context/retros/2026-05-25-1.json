@@ -1,0 +1,41 @@
+{
+  "date": "2026-05-25",
+  "window": "7d",
+  "metrics": {
+    "commits": 91,
+    "contributors": 1,
+    "prs_merged": 0,
+    "insertions": 45979,
+    "deletions": 3471,
+    "net_loc": 42508,
+    "test_loc": 4836,
+    "test_ratio": 0.272,
+    "active_days": 2,
+    "sessions": 4,
+    "deep_sessions": 3,
+    "avg_session_minutes": 109,
+    "loc_per_session_hour": 5823,
+    "feat_pct": 0.43,
+    "fix_pct": 0.05,
+    "peak_hour": 1,
+    "ai_assisted_commits": 46
+  },
+  "authors": {
+    "WindWang2": {
+      "commits": 91,
+      "insertions": 45979,
+      "deletions": 3471,
+      "test_ratio": 0.272,
+      "top_area": "core/raster/"
+    }
+  },
+  "version_range": ["v0.9.1-dev", "v0.9.2-dev"],
+  "streak_days": 2,
+  "tweetable": "Week of May 18: 1 contributor, 91 commits, 42.5k net LOC, 27% tests, 4 deep sessions, peak: 1am | Streak: 2d 🔥",
+  "test_health": {
+    "total_test_files": 29,
+    "tests_added_this_period": 29,
+    "regression_test_commits": 6,
+    "test_files_changed": 29
+  }
+}
