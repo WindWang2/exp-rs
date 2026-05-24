@@ -19,7 +19,9 @@ def test_known_icon_names_present():
 def test_rs_pixmap_is_non_null_and_sized():
     pm = rs_pixmap("folder", size=14, color="#1f6feb")
     assert not pm.isNull()
-    assert pm.width() >= 14 and pm.height() >= 14
+    # 2x DPR: logical size stays 14, physical pixels are doubled
+    assert pm.deviceIndependentSize().width() == 14
+    assert pm.width() == 28
 
 
 def test_rs_icon_returns_icon():
@@ -27,5 +29,5 @@ def test_rs_icon_returns_icon():
 
 
 def test_unknown_icon_is_blank_not_crash():
-    # unknown name returns a (blank) pixmap without raising
-    assert rs_pixmap("does-not-exist", 14, "#000") is not None
+    # unknown name returns a valid (blank/transparent) pixmap without raising
+    assert not rs_pixmap("does-not-exist", 14, "#000").isNull()

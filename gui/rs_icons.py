@@ -104,4 +104,5 @@ def rs_pixmap(name, size=14, color="#2f3640"):
 
 
 def rs_icon(name, size=14, color="#2f3640"):
+    """Return a QIcon for the named icon, recolored to `color`."""
     return QIcon(rs_pixmap(name, size, color))
