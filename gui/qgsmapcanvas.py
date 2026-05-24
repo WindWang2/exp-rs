@@ -91,8 +91,7 @@ class QgsMapCanvas(QGraphicsView):
     def mapSettings(self) -> QgsMapSettings:
         settings = QgsMapSettings()
         settings.layers = self._layers
-        settings.extent = QRectF(self._extent.xMinimum(), self._extent.yMinimum(),
-                                 self._extent.width(), self._extent.height())
+        settings.extent = self._extent  # QgsRectangle directly, not QRectF
         settings.output_size = self.viewport().size()
         settings.destination_crs = self._canvas_crs
         return settings
@@ -241,8 +240,7 @@ class QgsMapCanvas(QGraphicsView):
         GISProject.instance().addMapLayers([layer])
         GISProject.instance().layerTreeRoot().addLayer(layer)
         if self._extent.isEmpty() and layer.extent:
-            self.setExtent(QgsRectangle(layer.extent.left(), layer.extent.top() - layer.extent.height(),
-                                        layer.extent.right(), layer.extent.top()))
+            self.setExtent(layer.extent)
 
     def remove_layer(self, layer_id: str):
         from core.qgsproject import GISProject

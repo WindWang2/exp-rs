@@ -1,4 +1,3 @@
-from PySide6.QtCore import QRectF
 from core.qgsmaplayerrenderer import QgsMapLayerRenderer
 
 
@@ -40,8 +39,17 @@ class QgsVectorLayerRenderer(QgsMapLayerRenderer):
         self.opacity = layer.opacity
         self.visible = layer.visible
         self.file_path = layer.provider.reader.file_path
-        self.renderer = layer.renderer
+        self.renderer = layer.renderer.clone() if layer.renderer else None
         self._labeling = labeling  # QgsPalLayerSettings or None
+
+        # Pre-create coordinate transform on MAIN thread using cache
+        # This prevents pyproj C extension segfaults in background threads
+        self._cached_transform = None
+        dest_crs = settings.destination_crs if settings else None
+        if self.crs and dest_crs and self.crs != dest_crs:
+            from core.qgstransformcache import transform_cache
+            # Direction: src_crs -> dest_crs (for transforming layer coords to canvas coords)
+            self._cached_transform = transform_cache().get_transform(self.crs, dest_crs)
 
     def labeling(self):
         """Return the labeling settings passed to this renderer (or None)."""
@@ -66,12 +74,8 @@ class QgsVectorLayerRenderer(QgsMapLayerRenderer):
         view_extent = settings.extent if settings.extent else self.extent
         dest_crs = settings.destination_crs
 
-        # 2. Setup OTF coordinate transformers
-        if self.crs and dest_crs and self.crs != dest_crs:
-            from core.qgscoordinatetransform import QgsCoordinateTransform
-            transformer = QgsCoordinateTransform(self.crs, dest_crs)
-        else:
-            transformer = None
+        # 2. Use pre-cached OTF coordinate transformer (thread-safe)
+        transformer = self._cached_transform
 
         # 3. Inverse transform viewport bounds to layer native projection for subset query
         if transformer:
@@ -107,6 +111,8 @@ class QgsVectorLayerRenderer(QgsMapLayerRenderer):
             painter.setOpacity(old_opacity * self.opacity)
 
         # 5. Render features -- pass renderContext to the feature renderer
+        # Cache projected features for label rendering (avoids double iteration + geometry conversion)
+        rendered_features = []
         for feature in features:
             if transformer:
                 try:
@@ -119,17 +125,20 @@ class QgsVectorLayerRenderer(QgsMapLayerRenderer):
                         "shape": projected_shape
                     }
                     self.renderer.render_feature(projected_feature, painter, settings, renderContext)
+                    rendered_features.append(projected_feature)
                 except Exception as e:
                     print(f"Error drawing projected vector feature in thread: {e}")
                     self.renderer.render_feature(feature, painter, settings, renderContext)
+                    rendered_features.append(feature)
             else:
                 self.renderer.render_feature(feature, painter, settings, renderContext)
+                rendered_features.append(feature)
 
         # 6. Render labels (after all features, so labels draw on top)
         if self._labeling is not None and self._labeling.enabled:
             from core.labeling.qgsvectorlayerlabelprovider import QgsVectorLayerLabelProvider
             label_provider = QgsVectorLayerLabelProvider(self._labeling)
-            for feature in features:
+            for feature in rendered_features:
                 try:
                     adapter = _DictFeatureAdapter(feature)
                     label_provider.renderLabels(adapter, painter, renderContext)

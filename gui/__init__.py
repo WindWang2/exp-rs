@@ -3,6 +3,8 @@ from gui.qgsmapcanvasmap import QgsMapCanvasMap, MapCanvasMap
 from gui.qgsmaprendererjob import QgsMapRendererJob, MapRendererJob
 from gui.qgsmaptool import QgsMapTool, MapTool
 from gui.qgsmaptoolpan import QgsMapToolPan, MapToolPan
+from gui.qgsmaptoolzoom import QgsMapToolZoom, MapToolZoom
+from gui.qgsmaptoolidentify import QgsMapToolIdentify, MapToolIdentify
 from gui.qgsprojectcrsdialog import QgsProjectCrsDialog, ProjectCrsDialog
 from gui.qgspropertiesdialog import QgsPropertiesDialog, PropertiesDialog
 try:
@@ -22,6 +24,10 @@ __all__ = [
     'MapTool',
     'QgsMapToolPan',
     'MapToolPan',
+    'QgsMapToolZoom',
+    'MapToolZoom',
+    'QgsMapToolIdentify',
+    'MapToolIdentify',
     'QgsProjectCrsDialog',
     'ProjectCrsDialog',
     'QgsPropertiesDialog',

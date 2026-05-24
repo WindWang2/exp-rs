@@ -1,8 +1,7 @@
 import sys
 import argparse
-from engine.registry import ToolRegistry
-import engine.preprocessing
-import engine.processing
+from analysis import ToolRegistry
+import analysis
 
 def main():
     parser = argparse.ArgumentParser(description="Antigravity RS — Headless CLI Companion")

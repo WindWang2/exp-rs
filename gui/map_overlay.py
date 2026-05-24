@@ -10,6 +10,7 @@ class MapOverlayContainer(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("mapOverlayContainer")
+        self._in_resize = False  # Guard against recursive resize loops
         self.canvas = MapCanvas(self)
 
         self.info_pill = QLabel("", self)
@@ -53,9 +54,15 @@ class MapOverlayContainer(QWidget):
         self._reposition()
 
     def resizeEvent(self, event):
-        self.canvas.setGeometry(0, 0, self.width(), self.height())
-        self._reposition()
-        super().resizeEvent(event)
+        if self._in_resize:
+            return
+        self._in_resize = True
+        try:
+            self.canvas.setGeometry(0, 0, self.width(), self.height())
+            self._reposition()
+            super().resizeEvent(event)
+        finally:
+            self._in_resize = False
 
     def _reposition(self):
         w, h = self.width(), self.height()

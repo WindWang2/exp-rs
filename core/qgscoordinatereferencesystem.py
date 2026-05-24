@@ -1,12 +1,15 @@
 """QgsCoordinateReferenceSystem - QGIS-compatible CRS wrapper around pyproj."""
 from PySide6.QtCore import QObject, Signal
 from pyproj import CRS
+from core.logger import pyproj_lock
 
 
 class QgsCoordinateReferenceSystem(QObject):
     """Wraps pyproj.CRS to provide the QGIS API surface (authid, fromEpsg, isGeographic, etc.).
 
     Inherits QObject for signal support (crsChanged).
+
+    Thread-safe: Uses a lock around pyproj CRS operations.
     """
 
     crsChanged = Signal()
@@ -14,10 +17,11 @@ class QgsCoordinateReferenceSystem(QObject):
     def __init__(self, srs: str = ""):
         super().__init__()
         if srs:
-            try:
-                self._crs = CRS.from_user_input(srs)
-            except Exception:
-                self._crs = None
+            with pyproj_lock:  # Thread-safe CRS creation
+                try:
+                    self._crs = CRS.from_user_input(srs)
+                except Exception:
+                    self._crs = None
         else:
             self._crs = None
 
@@ -27,7 +31,8 @@ class QgsCoordinateReferenceSystem(QObject):
     def authid(self) -> str:
         if self._crs is None:
             return ""
-        code = self._crs.to_authority()
+        with pyproj_lock:  # Thread-safe access
+            code = self._crs.to_authority()
         if code:
             return f"{code[0]}:{code[1]}"
         return ""
@@ -35,28 +40,34 @@ class QgsCoordinateReferenceSystem(QObject):
     def description(self) -> str:
         if self._crs is None:
             return ""
-        return self._crs.name
+        with pyproj_lock:  # Thread-safe access
+            return self._crs.name
 
     def toWkt(self) -> str:
         if self._crs is None:
             return ""
-        return self._crs.to_wkt()
+        with pyproj_lock:  # Thread-safe access
+            return self._crs.to_wkt()
 
     def toProj(self) -> str:
         if self._crs is None:
             return ""
-        return self._crs.to_proj4()
+        with pyproj_lock:  # Thread-safe access
+            return self._crs.to_proj4()
 
     def isGeographic(self) -> bool:
         if self._crs is None:
             return False
-        return self._crs.is_geographic
+        with pyproj_lock:  # Thread-safe access
+            return self._crs.is_geographic
 
     def mapUnits(self):
         from core.qgis import Qgis
         if self._crs is None:
             return Qgis.DistanceUnit.UnknownUnit
-        if self._crs.is_geographic:
+        with pyproj_lock:  # Thread-safe access
+            is_geo = self._crs.is_geographic
+        if is_geo:
             return Qgis.DistanceUnit.Degrees
         return Qgis.DistanceUnit.Meters
 
@@ -66,46 +77,51 @@ class QgsCoordinateReferenceSystem(QObject):
     @staticmethod
     def fromEpsg(epsg_id: int) -> 'QgsCoordinateReferenceSystem':
         crs = QgsCoordinateReferenceSystem()
-        try:
-            crs._crs = CRS.from_epsg(epsg_id)
-        except Exception:
-            crs._crs = None
+        with pyproj_lock:  # Thread-safe CRS creation
+            try:
+                crs._crs = CRS.from_epsg(epsg_id)
+            except Exception:
+                crs._crs = None
         return crs
 
     @staticmethod
     def fromWkt(wkt: str) -> 'QgsCoordinateReferenceSystem':
         crs = QgsCoordinateReferenceSystem()
-        try:
-            crs._crs = CRS.from_wkt(wkt)
-        except Exception:
-            crs._crs = None
+        with pyproj_lock:  # Thread-safe CRS creation
+            try:
+                crs._crs = CRS.from_wkt(wkt)
+            except Exception:
+                crs._crs = None
         return crs
 
     @staticmethod
     def fromProj(proj: str) -> 'QgsCoordinateReferenceSystem':
         crs = QgsCoordinateReferenceSystem()
-        try:
-            crs._crs = CRS.from_proj4(proj)
-        except Exception:
-            crs._crs = None
+        with pyproj_lock:  # Thread-safe CRS creation
+            try:
+                crs._crs = CRS.from_proj4(proj)
+            except Exception:
+                crs._crs = None
         return crs
 
     @staticmethod
     def fromOgcWmsCrs(ogc: str) -> 'QgsCoordinateReferenceSystem':
         crs = QgsCoordinateReferenceSystem()
-        try:
-            crs._crs = CRS.from_user_input(ogc)
-        except Exception:
-            crs._crs = None
+        with pyproj_lock:  # Thread-safe CRS creation
+            try:
+                crs._crs = CRS.from_user_input(ogc)
+            except Exception:
+                crs._crs = None
         return crs
 
     @staticmethod
     def fromSrid(srid: int) -> 'QgsCoordinateReferenceSystem':
         crs = QgsCoordinateReferenceSystem()
-        try:
-            crs._crs = CRS.from_user_input(f"urn:ogc:def:crs:EPSG::{srid}")
-        except Exception:
-            crs._crs = None
+        with pyproj_lock:  # Thread-safe CRS creation
+            try:
+                crs._crs = CRS.from_user_input(f"urn:ogc:def:crs:EPSG::{srid}")
+            except Exception:
+                crs._crs = None
         return crs
 
     def __eq__(self, other):
@@ -115,7 +131,8 @@ class QgsCoordinateReferenceSystem(QObject):
             return True
         if self._crs is None or other._crs is None:
             return False
-        return self._crs == other._crs
+        with pyproj_lock:  # Thread-safe comparison
+            return self._crs == other._crs
 
     def __repr__(self):
         return f"QgsCoordinateReferenceSystem({self.authid()})"

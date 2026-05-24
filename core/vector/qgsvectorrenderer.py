@@ -26,6 +26,11 @@ class QgsFeatureRenderer(ABC):
         """
         pass
 
+    def clone(self) -> 'QgsFeatureRenderer':
+        """Return an independent copy of this renderer for thread-safe use."""
+        import copy
+        return copy.copy(self)
+
 
 class QgsRendererCategory:
     """A mapping from an attribute value to a label + symbol.
@@ -103,6 +108,10 @@ class QgsSingleSymbolRenderer(QgsFeatureRenderer):
     def setSymbol(self, symbol: QgsSymbol) -> None:
         """Replace the internal QgsSymbol."""
         self._symbol = symbol
+
+    def clone(self) -> 'QgsSingleSymbolRenderer':
+        """Return an independent copy with a cloned symbol."""
+        return QgsSingleSymbolRenderer(symbol=self._symbol.clone())
 
     def render_feature(self, feature, painter, settings, renderContext=None):
         """Render a feature using the internal symbol.
@@ -231,6 +240,17 @@ class QgsCategorizedSymbolRenderer(QgsFeatureRenderer):
     def setAttrName(self, name: str) -> None:
         """Set the attribute name used for categorization."""
         self._attr_name = name
+
+    def clone(self) -> 'QgsCategorizedSymbolRenderer':
+        """Return an independent copy with cloned categories and symbols."""
+        cloned = QgsCategorizedSymbolRenderer(self._attr_name,
+                                               self._default_symbol.clone() if self._default_symbol else None)
+        for cat in self._categories:
+            cloned.addCategory(QgsRendererCategory(
+                cat.value(), cat.label(),
+                cat.symbol().clone() if cat.symbol() else None
+            ))
+        return cloned
 
     def render_feature(self, feature, painter, settings, renderContext=None):
         """Render a feature using the matching category's symbol.

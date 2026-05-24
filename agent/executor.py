@@ -2,7 +2,13 @@ import os
 import json
 import urllib.request
 from typing import Dict, Any, Tuple
-from engine.registry import ToolRegistry
+
+# Stub for removed engine.registry.ToolRegistry
+class ToolRegistry:
+    def __init__(self): self._tools = {}
+    def get_tool(self, name): return self._tools.get(name)
+    def register_tool(self, name, tool): self._tools[name] = tool
+    def list_tools(self): return list(self._tools.keys())
 
 class AgentExecutor:
     """

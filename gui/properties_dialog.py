@@ -1,8 +1,8 @@
-from PySide6.QtWidgets import (QDialog, QTabWidget, QWidget, QVBoxLayout, 
-                                QHBoxLayout, QFormLayout, QLabel, QLineEdit, 
-                                QComboBox, QSlider, QSpinBox, QDoubleSpinBox, 
-                                QPushButton, QColorDialog, QGroupBox, QDialogButtonBox, 
-                                QMessageBox, QRadioButton, QButtonGroup)
+from PySide6.QtWidgets import (QDialog, QTabWidget, QWidget, QVBoxLayout,
+                                QHBoxLayout, QFormLayout, QLabel, QLineEdit,
+                                QComboBox, QSlider, QSpinBox, QDoubleSpinBox,
+                                QPushButton, QColorDialog, QGroupBox, QDialogButtonBox,
+                                QMessageBox, QRadioButton, QButtonGroup, QScrollArea, QSizePolicy)
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QColor, QIcon
 
@@ -16,27 +16,33 @@ class LayerPropertiesDialog(QDialog):
         super().__init__(parent)
         self.layer = layer
         self.layer_type = "raster" if hasattr(layer, "provider") and hasattr(layer.provider, "reader") and layer.provider.reader.is_raster else "vector"
-        
+
         self.setWindowTitle(f"Layer Properties - {layer.name}")
-        self.resize(520, 560)
-        
+
+        # Make dialog resizable with reasonable size limits
+        self.setMinimumSize(450, 400)
+        self.resize(520, 620)
+        self.setSizeGripEnabled(True)
+
         # 1. Main Layout
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(15, 15, 15, 15)
         self.main_layout.setSpacing(12)
-        
+
         # 2. Tab Widget — styled globally via QSS
         self.tabs = QTabWidget(self)
-        
-        # 3. Create Tabs
+        self.tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # 3. Create Tabs with scroll areas for content
         self.info_tab = self._create_info_tab()
         self.style_tab = self._create_style_tab()
-        
-        self.tabs.addTab(self.style_tab, "Symbology")
-        self.tabs.addTab(self.info_tab, "Information")
-        
+
+        # Wrap tabs in scroll areas for better handling on smaller screens
+        self._add_scroll_tab(self.style_tab, "Symbology")
+        self._add_scroll_tab(self.info_tab, "Information")
+
         self.main_layout.addWidget(self.tabs)
-        
+
         # 4. Buttons (Ok, Cancel) — styled globally via QSS; accent the OK button
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
         self.button_box.accepted.connect(self.accept)
@@ -44,14 +50,24 @@ class LayerPropertiesDialog(QDialog):
         ok_btn = self.button_box.button(QDialogButtonBox.Ok)
         if ok_btn:
             ok_btn.setProperty("primary", "true")
-        
+
         self.main_layout.addWidget(self.button_box)
+
+    def _add_scroll_tab(self, widget, title):
+        """Wrap a widget in a scroll area and add it as a tab."""
+        scroll = QScrollArea()
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        self.tabs.addTab(scroll, title)
         
     def _create_info_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
         
         # Group General
         general_group = QGroupBox("General Metadata")
@@ -117,8 +133,8 @@ class LayerPropertiesDialog(QDialog):
     def _create_style_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(12)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
         
         # Global Opacity Slider
         opacity_group = QGroupBox("Layer Opacity (不透明度)")

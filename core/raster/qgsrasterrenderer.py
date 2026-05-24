@@ -60,6 +60,34 @@ class QgsRasterRenderer(ABC):
         return np.zeros_like(arr, dtype=np.uint8)
 
 
+def _get_raster_ops():
+    """Try to import C++ raster_ops, fall back to Python implementation."""
+    try:
+        import sys, os
+        build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../build"))
+        if build_path not in sys.path:
+            sys.path.insert(0, build_path)
+        import raster_ops
+        # Check if required functions exist
+        if hasattr(raster_ops, 'warp_and_compose_rgb') and hasattr(raster_ops, 'stretch_and_compose_rgb'):
+            return raster_ops
+    except ImportError:
+        pass
+    # Fall back to Python implementation
+    from core.raster.raster_ops_fallback import (
+        stretch_and_compose_rgb, warp_and_compose_rgb,
+        stretch_gray, warp_and_stretch_gray, warp_raster_band
+    )
+    import types
+    mod = types.ModuleType('raster_ops_fallback')
+    mod.stretch_and_compose_rgb = stretch_and_compose_rgb
+    mod.warp_and_compose_rgb = warp_and_compose_rgb
+    mod.stretch_gray = stretch_gray
+    mod.warp_and_stretch_gray = warp_and_stretch_gray
+    mod.warp_raster_band = warp_raster_band
+    return mod
+
+
 class QgsMultiBandColorRenderer(QgsRasterRenderer):
     """
     Renders a multi-spectral composite combining three bands into RGB channels,
@@ -70,23 +98,18 @@ class QgsMultiBandColorRenderer(QgsRasterRenderer):
         self.red_band = layer.red_band
         self.green_band = layer.green_band
         self.blue_band = layer.blue_band
-        
+
     def render(self, reader, scale_factor, window=None, out_size=None, coeffs_x=None, coeffs_y=None) -> QImage:
         r_band = reader.read_raster_band(self.red_band, scale_factor, window=window)
         g_band = reader.read_raster_band(self.green_band, scale_factor, window=window)
         b_band = reader.read_raster_band(self.blue_band, scale_factor, window=window)
-        
-        import sys, os
-        # Path to build directory containing the compiled raster_ops module
-        build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../build"))
-        if build_path not in sys.path:
-            sys.path.insert(0, build_path)
-        import raster_ops
-        
+
+        raster_ops = _get_raster_ops()
+
         r_min, r_max = self.calculate_stretch_bounds(r_band)
         g_min, g_max = self.calculate_stretch_bounds(g_band)
         b_min, b_max = self.calculate_stretch_bounds(b_band)
-        
+
         if out_size is not None and coeffs_x is not None and coeffs_y is not None:
             out_w, out_h = out_size
             rgb_data = raster_ops.warp_and_compose_rgb(
@@ -108,9 +131,11 @@ class QgsMultiBandColorRenderer(QgsRasterRenderer):
                 g_min, g_max,
                 b_min, b_max
             )
-        
+
         h, w, _ = rgb_data.shape
-        return QImage(rgb_data.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+        img = QImage(rgb_data.data, w, h, 3 * w, QImage.Format_RGB888)
+        img.ndarray = rgb_data
+        return img.copy()
 
 
 class QgsSingleBandGrayRenderer(QgsRasterRenderer):
@@ -121,18 +146,14 @@ class QgsSingleBandGrayRenderer(QgsRasterRenderer):
     def __init__(self, layer):
         super().__init__(layer)
         self.gray_band = layer.gray_band
-        
+
     def render(self, reader, scale_factor, window=None, out_size=None, coeffs_x=None, coeffs_y=None) -> QImage:
         band = reader.read_raster_band(self.gray_band, scale_factor, window=window)
-        
-        import sys, os
-        build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../build"))
-        if build_path not in sys.path:
-            sys.path.insert(0, build_path)
-        import raster_ops
-        
+
+        raster_ops = _get_raster_ops()
+
         gray_min, gray_max = self.calculate_stretch_bounds(band)
-        
+
         if out_size is not None and coeffs_x is not None and coeffs_y is not None:
             out_w, out_h = out_size
             gray_data = raster_ops.warp_and_stretch_gray(
@@ -146,9 +167,11 @@ class QgsSingleBandGrayRenderer(QgsRasterRenderer):
                 band.astype(np.float32),
                 gray_min, gray_max
             )
-        
+
         h, w, _ = gray_data.shape
-        return QImage(gray_data.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+        img = QImage(gray_data.data, w, h, 3 * w, QImage.Format_RGB888)
+        img.ndarray = gray_data
+        return img.copy()
 
 
 class QgsSingleBandPseudoColorRenderer(QgsRasterRenderer):
@@ -163,13 +186,9 @@ class QgsSingleBandPseudoColorRenderer(QgsRasterRenderer):
         
     def render(self, reader, scale_factor, window=None, out_size=None, coeffs_x=None, coeffs_y=None) -> QImage:
         band = reader.read_raster_band(self.pseudocolor_band, scale_factor, window=window)
-        
+
         if out_size is not None and coeffs_x is not None and coeffs_y is not None:
-            import sys, os
-            build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../build"))
-            if build_path not in sys.path:
-                sys.path.insert(0, build_path)
-            import raster_ops
+            raster_ops = _get_raster_ops()
             out_w, out_h = out_size
             band = raster_ops.warp_raster_band(band.astype(np.float32), out_w, out_h, coeffs_x, coeffs_y)
             
@@ -194,7 +213,9 @@ class QgsSingleBandPseudoColorRenderer(QgsRasterRenderer):
         
         h, w = band.shape
         rgb_data = np.ascontiguousarray(rgb)
-        return QImage(rgb_data.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+        img = QImage(rgb_data.data, w, h, 3 * w, QImage.Format_RGB888)
+        img.ndarray = rgb_data
+        return img.copy()
 
 
 RasterRenderer = QgsRasterRenderer

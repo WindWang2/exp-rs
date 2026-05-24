@@ -3,7 +3,7 @@
 from core.qgsmaplayer import QgsMapLayer
 from core.raster.qgsrasterpipe import QgsRasterPipe
 from core.raster.qgsrasterdataprovider import QgsRasterDataProvider
-from PySide6.QtCore import QRectF
+from core.qgsrectangle import QgsRectangle
 
 
 class QgsRasterLayer(QgsMapLayer):
@@ -29,10 +29,15 @@ class QgsRasterLayer(QgsMapLayer):
         ext = self._provider.extent()  # QgsRectangle
         self.crs = self._provider.reader.metadata.get("crs")
 
-        # Raw extent in native projection (QRectF)
-        self.raw_extent = QRectF(
-            ext.xMinimum(), ext.yMaximum(),
-            ext.width(), ext.height(),
+        # Register CRS with transform cache on main thread (prevents segfaults)
+        if self.crs:
+            from core.qgstransformcache import transform_cache
+            transform_cache().register_layer_crs(self.crs)
+
+        # Raw extent in native projection (QgsRectangle)
+        self.raw_extent = QgsRectangle(
+            ext.xMinimum(), ext.yMinimum(),
+            ext.xMaximum(), ext.yMaximum(),
         )
 
         # --- Styling attributes ---
@@ -76,27 +81,30 @@ class QgsRasterLayer(QgsMapLayer):
     # ------------------------------------------------------------------
 
     @property
-    def extent(self) -> QRectF:
+    def extent(self) -> QgsRectangle:
         """Returns the extent reprojected into the current Project CRS."""
         from core.qgsproject import QgsProject
         return self.extentInCrs(QgsProject.instance().crs())
 
-    def extentInCrs(self, dest_crs: str) -> QRectF:
+    def extentInCrs(self, dest_crs: str) -> QgsRectangle:
         """Returns the layer extent reprojected into *dest_crs*."""
         ext = self._provider.extent()  # QgsRectangle
-        raw_ext = QRectF(
-            ext.xMinimum(), ext.yMaximum(),
-            ext.width(), ext.height(),
+        raw_ext = QgsRectangle(
+            ext.xMinimum(), ext.yMinimum(),
+            ext.xMaximum(), ext.yMaximum(),
         )
-        if self.crs and dest_crs and self.crs != dest_crs:
-            from core.qgscoordinatetransform import QgsCoordinateTransform
+        # If layer has no CRS, treat it as being in the destination CRS
+        layer_crs = self.crs if self.crs else dest_crs
+        if layer_crs and dest_crs and layer_crs != dest_crs:
+            from core.qgstransformcache import transform_cache
             try:
-                transformer = QgsCoordinateTransform(self.crs, dest_crs)
-                xmin, ymin, xmax, ymax = transformer.transform_bounds(
-                    ext.xMinimum(), ext.yMinimum(),
-                    ext.xMaximum(), ext.yMaximum()
-                )
-                return QRectF(xmin, ymax, xmax - xmin, ymax - ymin)
+                transformer = transform_cache().get_transform(self.crs, dest_crs)
+                if transformer and transformer.isValid():
+                    xmin, ymin, xmax, ymax = transformer.transform_bounds(
+                        ext.xMinimum(), ext.yMinimum(),
+                        ext.xMaximum(), ext.yMaximum()
+                    )
+                    return QgsRectangle(xmin, ymin, xmax, ymax)
             except Exception as e:
                 print(f"Error reprojecting raster extent of {self.name} to {dest_crs}: {e}")
                 return raw_ext

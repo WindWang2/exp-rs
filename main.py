@@ -115,16 +115,14 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(200, lambda: self._load_file(sample_path))
 
     def _build_menubar(self):
+        from gui.rs_widgets import RsMenuBar
         from PySide6.QtWidgets import QLabel, QWidget, QHBoxLayout
-        mb = self.menuBar()
-        # Brand corner widget (left)
-        brand = QWidget()
-        bl = QHBoxLayout(brand); bl.setContentsMargins(8, 0, 4, 0); bl.setSpacing(6)
-        logo = QLabel("RS"); logo.setObjectName("rsBrandLogo"); logo.setFixedSize(18, 18)
-        name = QLabel("RS Studio"); name.setObjectName("rsBrandName")
-        bl.addWidget(logo); bl.addWidget(name)
-        mb.setCornerWidget(brand, Qt.TopLeftCorner)
 
+        # Replace the native menu bar with our custom one
+        mb = RsMenuBar(self)
+        self.setMenuBar(mb)
+
+        # Build all menus
         for label in ["文件", "编辑", "视图", "图层", "处理", "栅格", "矢量",
                       "数据库", "AI 助手", "插件", "窗口", "帮助"]:
             menu = mb.addMenu(label)
@@ -143,15 +141,9 @@ class MainWindow(QMainWindow):
                 menu.addAction("几何校正…").triggered.connect(self._show_gcp_georef)
                 menu.addAction("属性表…").triggered.connect(self._show_attribute_table)
 
-        # Right corner widget
-        right = QWidget()
-        rl = QHBoxLayout(right); rl.setContentsMargins(0, 0, 8, 0); rl.setSpacing(8)
-        ver = QLabel("v0.9.2-dev"); ver.setStyleSheet("color:#8a92a0;font-size:11px;")
-        from gui.rs_icons import rs_icon
-        for nm in ("bell", "user"):
-            ic = QLabel(); ic.setPixmap(rs_icon(nm, 13, "#5b6473").pixmap(13, 13)); rl.addWidget(ic)
-        rl.insertWidget(0, ver)
-        mb.setCornerWidget(right, Qt.TopRightCorner)
+        # Add right-side icons
+        mb.add_version_icon("bell")
+        mb.add_version_icon("user")
 
     def _on_toolbar(self, action_id):
         handlers = {
@@ -378,7 +370,12 @@ def main():
     from gui.rs_fonts import load_fonts
     load_fonts()
     load_stylesheet(app)
-    
+
+    # Pre-warm transform cache on main thread to prevent pyproj segfaults
+    # This MUST happen before any background rendering starts
+    from core.qgstransformcache import transform_cache
+    transform_cache().warmup()
+
     # 1. Launch animated splash onboarding panel
     splash = OnboardingSplashScreen()
     splash.show()

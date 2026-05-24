@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+build/
+*.so
+.pytest_cache/
+*.log
+qgis_ref/
+data/

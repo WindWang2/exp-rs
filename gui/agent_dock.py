@@ -41,25 +41,25 @@ class MessageBubble(QFrame):
             # Clean grey bubble aligned right for user
             self.setStyleSheet("""
                 QFrame {
-                    background-color: #e1e1e1;
-                    border: 1px solid #c8c8c8;
+                    background-color: #eef1f5;
+                    border: 1px solid #e2e6ec;
                     border-radius: 8px;
                     margin-left: 50px;
                 }
             """)
-            lbl.setStyleSheet("color: #1a1a1a; font-family: 'Segoe UI', 'Inter'; font-size: 13px;")
+            lbl.setStyleSheet("color: #2f3640; font-family: 'Segoe UI', 'Inter'; font-size: 12px;")
             layout.addWidget(lbl)
         else:
-            # Crisp white bubble with ArcGIS Blue border aligned left for agent
+            # Crisp white bubble with AI-purple border aligned left for agent
             self.setStyleSheet("""
                 QFrame {
                     background-color: #ffffff;
-                    border: 1.5px solid #007ac2;
+                    border: 1.5px solid #8250df;
                     border-radius: 8px;
                     margin-right: 50px;
                 }
             """)
-            lbl.setStyleSheet("color: #1a1a1a; font-family: 'Segoe UI', 'Inter'; font-size: 13px;")
+            lbl.setStyleSheet("color: #2f3640; font-family: 'Segoe UI', 'Inter'; font-size: 12px;")
             layout.addWidget(lbl)
             
         self.setLayout(layout)
@@ -76,7 +76,7 @@ class ScriptDrawer(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         
         title = QLabel("Educational Script Equivalent:")
-        title.setStyleSheet("color: #2c3e50; font-family: 'Segoe UI', 'Inter'; font-size: 12px; font-weight: bold;")
+        title.setStyleSheet("color: #14171c; font-family: 'Segoe UI', 'Inter'; font-size: 12px; font-weight: bold;")
         layout.addWidget(title)
         
         # Code display panel
@@ -86,12 +86,12 @@ class ScriptDrawer(QWidget):
         self.code_edit.setFixedHeight(120)
         self.code_edit.setStyleSheet("""
             QTextEdit {
-                background-color: #f8f9fa;
-                border: 1px solid #d1d1d1;
+                background-color: #ffffff;
+                border: 1px solid #d4d8de;
                 border-radius: 4px;
-                color: #1a1a1a;
-                font-family: 'Courier New', monospace;
-                font-size: 12px;
+                color: #14171c;
+                font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+                font-size: 11px;
                 padding: 6px;
             }
         """)
@@ -104,28 +104,28 @@ class ScriptDrawer(QWidget):
         self.copy_btn = QPushButton("Copy Code")
         self.copy_btn.setStyleSheet("""
             QPushButton {
-                background-color: #e1e1e1;
-                color: #1a1a1a;
-                border: 1px solid #c8c8c8;
+                background-color: #e2e6ec;
+                color: #2f3640;
+                border: 1px solid #d4d8de;
                 border-radius: 4px;
                 padding: 4px 8px;
                 font-size: 11px;
             }
-            QPushButton:hover { background-color: #d1d1d1; }
+            QPushButton:hover { background-color: #cfd5dd; }
         """)
         self.copy_btn.clicked.connect(self._copy_code)
         
         self.run_btn = QPushButton("Run Script")
         self.run_btn.setStyleSheet("""
             QPushButton {
-                background-color: #007ac2;
+                background-color: #1f6feb;
                 color: #ffffff;
                 border-radius: 4px;
                 padding: 4px 8px;
                 font-size: 11px;
                 font-weight: bold;
             }
-            QPushButton:hover { background-color: #005e95; }
+            QPushButton:hover { background-color: #0d5fcc; }
         """)
         self.run_btn.clicked.connect(self._run_script)
         # Disable run button if no tool call accompanies the script
@@ -137,7 +137,7 @@ class ScriptDrawer(QWidget):
         
         layout.addLayout(btn_bar)
         self.setLayout(layout)
-        self.setStyleSheet("background-color: #f3f3f3; border: 1px solid #d1d1d1; border-radius: 4px;")
+        self.setStyleSheet("background-color: #fafbfc; border: 1px solid #d4d8de; border-radius: 4px;")
 
     def _copy_code(self):
         from PySide6.QtGui import QGuiApplication
@@ -157,7 +157,7 @@ class AgentDockWidget(QDockWidget):
     tool_execution_requested = Signal(str, dict) # Emits (tool_name, params_dict)
     
     def __init__(self, parent=None):
-        super().__init__("Antigravity RS Agent", parent)
+        super().__init__("AI AGENT CONSOLE", parent)
         self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
         self.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
         
@@ -216,15 +216,15 @@ class AgentDockWidget(QDockWidget):
         # Insert before the stretch item
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, bubble)
         # Scroll to bottom
-        QTimer = self.scroll.verticalScrollBar()
-        QTimer.setValue(QTimer.maximum())
+        bar = self.scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
 
     def add_script_drawer(self, code_text: str, tool_call: dict = None):
         drawer = ScriptDrawer(code_text, tool_call)
         drawer.run_clicked.connect(self._handle_run_clicked)
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, drawer)
-        QTimer = self.scroll.verticalScrollBar()
-        QTimer.setValue(QTimer.maximum())
+        bar = self.scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
 
     def _send_message(self):
         prompt = self.input_field.text().strip()

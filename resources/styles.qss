@@ -431,7 +431,7 @@ QToolButton#rsTab:checked {
 #rsToolBar { background: #ffffff; border-bottom: 1px solid #d4d8de; }
 #rsToolGroup { border-right: 1px solid #e4e7eb; }
 QToolButton#rsToolBtn {
-    border: 1px solid transparent; border-radius: 3px; padding: 0 6px;
+    border: 1px solid transparent; border-radius: 3px; padding: 0 8px;
     min-height: 26px; color: #2f3640; font-size: 11px;
 }
 QToolButton#rsToolBtn:hover { background: #eef1f5; color: #14171c; }
@@ -504,3 +504,18 @@ QLabel#rsBrandLogo {
     border-radius: 3px; min-width: 18px; min-height: 18px; qproperty-alignment: AlignCenter;
 }
 QLabel#rsBrandName { color: #14171c; font-weight: 600; letter-spacing: 1px; padding: 0 8px; }
+QWidget#rsMenuBarBrand, QWidget#rsMenuBarRight { background: transparent; }
+
+/* RsMenuBar custom menu bar styling */
+RsMenuBar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f4f6f9);
+    border-bottom: 1px solid #D4D8DE;
+    padding-left: 115px;
+    padding-right: 90px;
+}
+QWidget#rsMenuBarBrand {
+    background: transparent;
+}
+QWidget#rsMenuBarRight {
+    background: transparent;
+}

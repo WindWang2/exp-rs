@@ -1,7 +1,7 @@
 from core.qgsmaplayer import QgsMapLayer, MapLayer
 from providers.ogr.qgsvectordataprovider import OGRDataProvider
 from core.vector.qgsvectorrenderer import QgsSingleSymbolRenderer, SingleSymbolRenderer
-from PySide6.QtCore import QRectF
+from core.qgsrectangle import QgsRectangle
 
 class QgsVectorLayer(QgsMapLayer):
     """
@@ -16,25 +16,33 @@ class QgsVectorLayer(QgsMapLayer):
         ext = self.provider.extent()
         self.crs = self.provider.reader.metadata.get("crs")
 
+        # Register CRS with transform cache on main thread (prevents segfaults)
+        if self.crs:
+            from core.qgstransformcache import transform_cache
+            transform_cache().register_layer_crs(self.crs)
+
         # Calculate raw extent in native projection coordinates
-        self.raw_extent = QRectF(ext["left"], ext["top"], ext["right"] - ext["left"], ext["top"] - ext["bottom"])
+        self.raw_extent = QgsRectangle(ext["left"], ext["bottom"], ext["right"], ext["top"])
 
     @property
-    def extent(self) -> QRectF:
+    def extent(self) -> QgsRectangle:
         """Returns the extent of the layer reprojected into the current Project CRS."""
         from core.qgsproject import QgsProject
         return self.extentInCrs(QgsProject.instance().crs())
 
-    def extentInCrs(self, dest_crs: str) -> QRectF:
+    def extentInCrs(self, dest_crs: str) -> QgsRectangle:
         """Returns the layer extent reprojected into the target CRS."""
         ext = self.provider.extent()
-        raw_ext = QRectF(ext["left"], ext["top"], ext["right"] - ext["left"], ext["top"] - ext["bottom"])
-        if self.crs and dest_crs and self.crs != dest_crs:
-            from core.qgscoordinatetransform import QgsCoordinateTransform
+        raw_ext = QgsRectangle(ext["left"], ext["bottom"], ext["right"], ext["top"])
+        # If layer has no CRS, treat it as being in the destination CRS
+        layer_crs = self.crs if self.crs else dest_crs
+        if layer_crs and dest_crs and layer_crs != dest_crs:
+            from core.qgstransformcache import transform_cache
             try:
-                transformer = QgsCoordinateTransform(self.crs, dest_crs)
-                xmin, ymin, xmax, ymax = transformer.transform_bounds(ext["left"], ext["bottom"], ext["right"], ext["top"])
-                return QRectF(xmin, ymax, xmax - xmin, ymax - ymin)
+                transformer = transform_cache().get_transform(self.crs, dest_crs)
+                if transformer and transformer.isValid():
+                    xmin, ymin, xmax, ymax = transformer.transform_bounds(ext["left"], ext["bottom"], ext["right"], ext["top"])
+                    return QgsRectangle(xmin, ymin, xmax, ymax)
             except Exception as e:
                 print(f"Error reprojecting vector extent of {self.name} to {dest_crs}: {e}")
                 return raw_ext

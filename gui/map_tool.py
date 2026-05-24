@@ -35,7 +35,7 @@ class MapTool:
         Default wheel event implementation for zooming.
         Can be overridden by specialized zoom tools if needed.
         """
-        if self._canvas.extent.isEmpty():
+        if self._canvas.extent().isEmpty():
             return
 
         # Map pixel location to world coordinates
@@ -48,16 +48,17 @@ class MapTool:
         factor = 1.0 / zoom_factor if angle > 0 else zoom_factor
         
         # Zoom extent around the mouse cursor
-        new_width = self._canvas.extent.width() * factor
-        new_height = self._canvas.extent.height() * factor
+        ext = self._canvas.extent()
+        new_width = ext.width() * factor
+        new_height = ext.height() * factor
         
-        rel_x = (world_pos.x() - self._canvas.extent.left()) / self._canvas.extent.width()
-        rel_y = (world_pos.y() - self._canvas.extent.top()) / self._canvas.extent.height()
+        rel_x = (world_pos.x() - ext.left()) / ext.width()
+        rel_y = (world_pos.y() - ext.top()) / ext.height()
         
         new_left = world_pos.x() - rel_x * new_width
         new_top = world_pos.y() - rel_y * new_height
         
-        self._canvas.extent = QRectF(new_left, new_top, new_width, new_height)
+        self._canvas.setExtent(QRectF(new_left, new_top, new_width, new_height))
         self._canvas.refresh()
 
 
@@ -98,5 +99,7 @@ class MapToolPan(MapTool):
             p2 = transform.map(QPointF(delta.x(), delta.y()))
             world_delta = p2 - p1
             
-            self.canvas().extent.translate(-world_delta.x(), -world_delta.y())
+            ext = self.canvas().extent()
+            ext.translate(-world_delta.x(), -world_delta.y())
+            self.canvas().setExtent(ext)
             self.canvas().refresh()

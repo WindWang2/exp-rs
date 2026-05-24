@@ -25,7 +25,7 @@ class ToolParameterDialog(QDialog):
         # Tool description header
         desc = QLabel(tool_schema["description"])
         desc.setWordWrap(True)
-        desc.setStyleSheet("color: #555555; font-family: 'Segoe UI', 'Inter'; font-size: 12px; margin-bottom: 12px;")
+        desc.setStyleSheet("color: #5b6473; font-family: 'Segoe UI', 'Inter'; font-size: 12px; margin-bottom: 12px;")
         layout.addWidget(desc)
         
         form_layout = QFormLayout()
@@ -126,22 +126,22 @@ class ProcessingToolbox(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(10, 10, 10, 10)
         
-        # 1. Dynamic Autocomplete Search Bar
+         # 1. Dynamic Autocomplete Search Bar
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search tools...")
         self.search_bar.textChanged.connect(self._filter_tools)
         self.search_bar.setStyleSheet("""
             QLineEdit {
                 background-color: #ffffff;
-                border: 1px solid #d1d1d1;
+                border: 1px solid #d4d8de;
                 border-radius: 4px;
-                color: #1a1a1a;
+                color: #2f3640;
                 font-family: 'Segoe UI', 'Inter', sans-serif;
                 font-size: 12px;
                 padding: 6px 12px;
             }
             QLineEdit:focus {
-                border: 1.5px solid #007ac2;
+                border: 1.5px solid #1f6feb;
             }
         """)
         layout.addWidget(self.search_bar)
@@ -168,8 +168,8 @@ class ProcessingToolbox(QWidget):
                 background-color: #f1f3f5;
             }
             QTreeWidget::item:selected {
-                background-color: #e2effb;
-                color: #007ac2;
+                background-color: rgba(31, 111, 235, 0.10);
+                color: #1f6feb;
             }
         """)
         layout.addWidget(self.tree)
@@ -187,7 +187,7 @@ class ProcessingToolbox(QWidget):
                 cat_item = QTreeWidgetItem(self.tree, [cat])
                 cat_item.setFlags(cat_item.flags() & ~Qt.ItemIsSelectable) # Headers are folding only
                 cat_item.setFont(0, QFont("Segoe UI", 11, QFont.Bold))
-                cat_item.setForeground(0, QColor("#007ac2"))
+                cat_item.setForeground(0, QColor("#1f6feb"))
                 category_items[cat] = cat_item
                 
             tool_item = QTreeWidgetItem(category_items[cat], [tool["label"]])

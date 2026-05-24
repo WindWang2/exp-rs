@@ -4,6 +4,7 @@ from pyproj import Transformer
 from core.qgscoordinatereferencesystem import QgsCoordinateReferenceSystem
 from core.qgspointxy import QgsPointXY
 from core.qgsrectangle import QgsRectangle
+from core.logger import pyproj_lock
 
 
 class QgsCoordinateTransform:
@@ -11,11 +12,17 @@ class QgsCoordinateTransform:
     vector shapes, and canvas display coordinates.
 
     Accepts QgsCoordinateReferenceSystem objects (matching QGIS C++ API).
-    """
 
+    Thread-safe: Uses a lock around pyproj Transformer operations.
+    """
     __slots__ = ('_source_crs', '_dest_crs', '_transformer', '_inverse_transformer', '_short_circuited')
 
     def __init__(self, source_crs=None, dest_crs=None, context=None):
+        # Accept both QgsCoordinateReferenceSystem and plain strings
+        if isinstance(source_crs, str):
+            source_crs = QgsCoordinateReferenceSystem(source_crs)
+        if isinstance(dest_crs, str):
+            dest_crs = QgsCoordinateReferenceSystem(dest_crs)
         self._source_crs = source_crs
         self._dest_crs = dest_crs
         self._transformer = None
@@ -34,14 +41,16 @@ class QgsCoordinateTransform:
             self._short_circuited = True
             return
 
-        try:
-            self._transformer = Transformer.from_crs(
-                source_crs.pyproj_crs(), dest_crs.pyproj_crs(), always_xy=True)
-            self._inverse_transformer = Transformer.from_crs(
-                dest_crs.pyproj_crs(), source_crs.pyproj_crs(), always_xy=True)
-        except Exception:
-            self._transformer = None
-            self._inverse_transformer = None
+        # Use lock when creating pyproj Transformer (thread safety)
+        with pyproj_lock:
+            try:
+                self._transformer = Transformer.from_crs(
+                    source_crs.pyproj_crs(), dest_crs.pyproj_crs(), always_xy=True)
+                self._inverse_transformer = Transformer.from_crs(
+                    dest_crs.pyproj_crs(), source_crs.pyproj_crs(), always_xy=True)
+            except Exception:
+                self._transformer = None
+                self._inverse_transformer = None
 
     # --- QGIS API surface ---
 
@@ -62,7 +71,8 @@ class QgsCoordinateTransform:
             return point
         if self._transformer is None:
             return point
-        x, y = self._transformer.transform(point.x(), point.y())
+        with pyproj_lock:  # Thread-safe transform
+            x, y = self._transformer.transform(point.x(), point.y())
         return QgsPointXY(x, y)
 
     def transform_xy(self, x: float, y: float) -> Tuple[float, float]:
@@ -71,7 +81,8 @@ class QgsCoordinateTransform:
             return x, y
         if self._transformer is None:
             return x, y
-        return self._transformer.transform(x, y)
+        with pyproj_lock:  # Thread-safe transform
+            return self._transformer.transform(x, y)
 
     def transformInPlace(self, x: float, y: float) -> Tuple[float, float]:
         return self.transform_xy(x, y)
@@ -81,10 +92,11 @@ class QgsCoordinateTransform:
             return rect
         if self._transformer is None:
             return rect
-        xs, ys = self._transformer.transform(
-            [rect.xMinimum(), rect.xMinimum(), rect.xMaximum(), rect.xMaximum()],
-            [rect.yMinimum(), rect.yMaximum(), rect.yMinimum(), rect.yMaximum()]
-        )
+        with pyproj_lock:  # Thread-safe transform
+            xs, ys = self._transformer.transform(
+                [rect.xMinimum(), rect.xMinimum(), rect.xMaximum(), rect.xMaximum()],
+                [rect.yMinimum(), rect.yMaximum(), rect.yMinimum(), rect.yMaximum()]
+            )
         return QgsRectangle(min(xs), min(ys), max(xs), max(ys))
 
     def transformPolygon(self, polygon):
@@ -95,9 +107,10 @@ class QgsCoordinateTransform:
         from PySide6.QtGui import QPolygonF
         from PySide6.QtCore import QPointF
         result = QPolygonF()
-        for p in polygon:
-            x, y = self._transformer.transform(p.x(), p.y())
-            result.append(QPointF(x, y))
+        with pyproj_lock:  # Thread-safe transform
+            for p in polygon:
+                x, y = self._transformer.transform(p.x(), p.y())
+                result.append(QPointF(x, y))
         return result
 
     def transform_geometry(self, geom_shape):
@@ -106,14 +119,19 @@ class QgsCoordinateTransform:
         if self._transformer is None or geom_shape is None:
             return geom_shape
         from shapely.ops import transform as shapely_transform
-        return shapely_transform(self._transformer.transform, geom_shape)
+        # shapely_transform calls the transformer function, so we need to wrap it
+        def safe_transform(x, y):
+            with pyproj_lock:
+                return self._transformer.transform(x, y)
+        return shapely_transform(safe_transform, geom_shape)
 
     def inverseTransform(self, point: QgsPointXY) -> QgsPointXY:
         if self._short_circuited:
             return point
         if self._inverse_transformer is None:
             return point
-        x, y = self._inverse_transformer.transform(point.x(), point.y())
+        with pyproj_lock:  # Thread-safe inverse transform
+            x, y = self._inverse_transformer.transform(point.x(), point.y())
         return QgsPointXY(x, y)
 
     # --- Legacy API compatibility (used by existing code) ---
@@ -124,10 +142,11 @@ class QgsCoordinateTransform:
             return left, bottom, right, top
         if self._transformer is None:
             return left, bottom, right, top
-        xs, ys = self._transformer.transform(
-            [left, left, right, right],
-            [bottom, top, bottom, top]
-        )
+        with pyproj_lock:  # Thread-safe transform
+            xs, ys = self._transformer.transform(
+                [left, left, right, right],
+                [bottom, top, bottom, top]
+            )
         return min(xs), min(ys), max(xs), max(ys)
 
     def transform_point(self, x: float, y: float) -> Tuple[float, float]:
@@ -140,7 +159,8 @@ class QgsCoordinateTransform:
             return x, y
         if self._inverse_transformer is None:
             return x, y
-        return self._inverse_transformer.transform(x, y)
+        with pyproj_lock:  # Thread-safe inverse transform
+            return self._inverse_transformer.transform(x, y)
 
     def inverse_transform_bounds(self, left: float, bottom: float, right: float, top: float) -> Tuple[float, float, float, float]:
         """Inverse transform a bounding box."""
@@ -148,10 +168,11 @@ class QgsCoordinateTransform:
             return left, bottom, right, top
         if self._inverse_transformer is None:
             return left, bottom, right, top
-        xs, ys = self._inverse_transformer.transform(
-            [left, left, right, right],
-            [bottom, top, bottom, top]
-        )
+        with pyproj_lock:  # Thread-safe inverse transform
+            xs, ys = self._inverse_transformer.transform(
+                [left, left, right, right],
+                [bottom, top, bottom, top]
+            )
         return min(xs), min(ys), max(xs), max(ys)
 
 

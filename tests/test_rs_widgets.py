@@ -117,3 +117,24 @@ def test_property_panel_populates_from_meta():
     # empty state
     p.set_layer(None)
     assert "未选择图层" in p.dump_text()
+
+
+# append to tests/test_rs_widgets.py
+from gui.rs_widgets import RsMenuBar
+
+
+def test_rsmenubar_creates_brand_and_right_widgets():
+    mb = RsMenuBar()
+    mb.addMenu("文件")
+    mb.addMenu("编辑")
+    mb.add_version_icon("bell")
+    mb.add_version_icon("user")
+    mb.show()  # Need to show for widgets to become visible
+    assert mb._brand_widget is not None
+    assert mb._right_widget is not None
+    assert mb._brand_widget.isVisible()
+    assert mb._right_widget.isVisible()
+    # Check version label
+    assert "v0.9.2-dev" in mb._version_label.text()
+    mb.set_version("v1.0.0")
+    assert mb._version_label.text() == "v1.0.0"

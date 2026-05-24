@@ -265,6 +265,7 @@ class TestVectorLayerRendererRenderContext:
         mock_layer.visible = True
         mock_layer.provider.reader.file_path = "/tmp/test.gpkg"
         mock_renderer = MagicMock()
+        mock_renderer.clone.return_value = mock_renderer
         mock_layer.renderer = mock_renderer
 
         settings = _make_settings()
@@ -290,6 +291,7 @@ class TestVectorLayerRendererRenderContext:
         mock_layer.provider.reader.file_path = "/tmp/test.gpkg"
 
         mock_feature_renderer = MagicMock()
+        mock_feature_renderer.clone.return_value = mock_feature_renderer
         mock_layer.renderer = mock_feature_renderer
 
         settings = _make_settings()

@@ -123,7 +123,7 @@ class RsToolBar(QWidget):
         group.setObjectName("rsToolGroup")
         gl = QHBoxLayout(group)
         gl.setContentsMargins(4, 0, 4, 0)
-        gl.setSpacing(1)
+        gl.setSpacing(2)
         ids = []
         for it in items:
             b = QToolButton()
@@ -132,6 +132,11 @@ class RsToolBar(QWidget):
             if it.get("label"):
                 b.setText(it["label"])
                 b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+                # Add minimum width for buttons with text labels to prevent overlap
+                b.setMinimumWidth(60)
+            else:
+                # Icon-only buttons can be smaller
+                b.setMinimumWidth(28)
             b.setToolTip(it.get("tip", it.get("label", "")))
             b.setCheckable(bool(it.get("checkable")))
             b.setChecked(bool(it.get("checked")))
@@ -411,3 +416,85 @@ class RsPropertyPanel(QWidget):
                 for lab in w.findChildren(QLabel):
                     out.append(lab.text())
         return " | ".join(out)
+
+
+# append to gui/rs_widgets.py
+from PySide6.QtWidgets import QMenuBar, QMenu
+
+
+class RsMenuBar(QMenuBar):
+    """Custom menu bar that reliably combines brand, menus, and right widgets.
+
+    Uses eventFilter and custom paint to add brand/logo and right widgets.
+    Compatible with QMainWindow.setMenuBar().
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("rsMenuBar")
+        self.setNativeMenuBar(False)
+
+        # Create corner widgets directly
+        self._brand_widget = self._create_brand_widget()
+        self._right_widget = self._create_right_widget()
+
+        # Note: We rely on QSS/styling for placement since setCornerWidget is unreliable
+        # The brand and right widgets are added as children and positioned via stylesheet
+
+    def _create_brand_widget(self):
+        """Create the brand widget (RS logo + name)."""
+        brand = QWidget(self)
+        brand.setObjectName("rsMenuBarBrand")
+        bl = QHBoxLayout(brand); bl.setContentsMargins(8, 0, 4, 0); bl.setSpacing(6)
+        logo = QLabel("RS"); logo.setObjectName("rsBrandLogo"); logo.setFixedSize(18, 18)
+        name = QLabel("RS Studio"); name.setObjectName("rsBrandName")
+        bl.addWidget(logo); bl.addWidget(name)
+        brand.move(0, 0)
+        brand.show()
+        return brand
+
+    def _create_right_widget(self):
+        """Create the right widget (version + icons)."""
+        right = QWidget(self)
+        right.setObjectName("rsMenuBarRight")
+        rl = QHBoxLayout(right); rl.setContentsMargins(0, 0, 8, 0); rl.setSpacing(8)
+        self._version_label = QLabel("v0.9.2-dev")
+        self._version_label.setStyleSheet("color:#8a92a0;font-size:11px;")
+        rl.addWidget(self._version_label)
+        right.move(0, 0)  # Will be positioned in resizeEvent
+        right.show()
+        return right
+
+    def add_version_icon(self, icon_name, size=13, color="#5b6473"):
+        """Add an icon to the right side of the menu bar."""
+        lay = self._right_widget.layout()
+        ic = QLabel()
+        ic.setPixmap(rs_icon(icon_name, size, color).pixmap(size, size))
+        lay.addWidget(ic)
+        return ic
+
+    def set_version(self, text):
+        """Update the version label."""
+        if hasattr(self, '_version_label'):
+            self._version_label.setText(text)
+
+    def resizeEvent(self, event):
+        """Position corner widgets on resize."""
+        super().resizeEvent(event)
+        # Position brand widget at left
+        if hasattr(self, '_brand_widget'):
+            self._brand_widget.move(8, (self.height() - self._brand_widget.height()) // 2)
+            self._brand_widget.resize(self._brand_widget.sizeHint())
+        # Position right widget at right edge
+        if hasattr(self, '_right_widget'):
+            rw = self._right_widget.sizeHint().width()
+            self._right_widget.move(self.width() - rw - 8, (self.height() - self._right_widget.height()) // 2)
+            self._right_widget.resize(rw, self.height())
+
+    def showEvent(self, event):
+        """Ensure corner widgets are shown when menu bar is shown."""
+        super().showEvent(event)
+        if hasattr(self, '_brand_widget'):
+            self._brand_widget.show()
+        if hasattr(self, '_right_widget'):
+            self._right_widget.show()

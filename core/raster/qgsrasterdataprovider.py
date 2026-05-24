@@ -74,7 +74,11 @@ class QgsRasterDataProvider(QgsRasterInterface):
 
     def extent(self) -> QgsRectangle:
         b = self._reader.metadata["bounds"]
-        return QgsRectangle(b["left"], b["bottom"], b["right"], b["top"])
+        # rasterio bounds: bottom > top (rasterio convention for y-axis)
+        # QgsRectangle expects: ymin < ymax
+        ymin = min(b["bottom"], b["top"])
+        ymax = max(b["bottom"], b["top"])
+        return QgsRectangle(b["left"], ymin, b["right"], ymax)
 
     def sourceNoDataValue(self, band_no: int):
         """Return the source no-data value for *band_no* (1-based)."""
@@ -196,9 +200,11 @@ class QgsRasterDataProvider(QgsRasterInterface):
 
     def _read_nodata_values(self) -> list:
         """Read per-band nodata values from the source raster."""
-        with rasterio.open(self._uri) as src:
+        from core.logger import gdal_lock
+        with gdal_lock, rasterio.open(self._uri) as src:
+            # Use dataset-level nodata as fallback; some formats support per-band nodata
             nodata = src.nodata
-        return [nodata] * self._reader.metadata["count"]
+            return [nodata] * src.count
 
     def crs(self) -> str:
         """Returns the CRS string of the source raster."""
