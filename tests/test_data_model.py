@@ -1,6 +1,8 @@
 """Tests for QgsField and QgsFields (Tier 3 data model)."""
 from core.qgsfield import QgsField
 from core.qgsfields import QgsFields
+from core.qgsfeatureiterator import QgsFeatureIterator
+from core.qgsrectangle import QgsRectangle
 
 
 def test_field_creation():
@@ -211,3 +213,38 @@ def test_feature_iterator_from_list():
     collected = list(it)
     assert len(collected) == 5
     assert collected[0].id() == 0
+
+
+# --- QgsFeatureSource and QgsFeatureSink tests ---
+
+from core.qgsfeaturesource import QgsFeatureSource
+from core.qgsfeaturesink import QgsFeatureSink
+
+
+def test_feature_source_is_abstract():
+    # Cannot instantiate abstract class
+    import pytest
+    with pytest.raises(TypeError):
+        QgsFeatureSink()
+
+
+def test_concrete_feature_source():
+    """Test a concrete implementation of QgsFeatureSource."""
+    class MySource(QgsFeatureSource):
+        def getFeatures(self, request=None):
+            return QgsFeatureIterator([])
+        def sourceName(self):
+            return "test"
+        def fields(self):
+            return QgsFields()
+        def wkbType(self):
+            return 0
+        def featureCount(self):
+            return 0
+        def sourceExtent(self):
+            return QgsRectangle()
+        def sourceCrs(self):
+            return None
+
+    s = MySource()
+    assert s.sourceName() == "test"
