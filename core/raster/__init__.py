@@ -1,4 +1,5 @@
 from core.raster.qgsrasterlayer import QgsRasterLayer, RasterLayer
+from core.raster.qgsrasterpipe import QgsRasterPipe
 from core.raster.qgsrasterrenderer import (
     QgsRasterRenderer, RasterRenderer,
     QgsMultiBandColorRenderer, MultiBandColorRenderer,

@@ -51,6 +51,14 @@ class QgsRasterDataProvider(QgsRasterInterface):
         # Cache nodata values per band (read once, lightweight)
         self._nodata_values = self._read_nodata_values()
 
+    @property
+    def reader(self) -> 'GeospatialReader':
+        """Public accessor for the underlying GeospatialReader.
+
+        Backward-compatible with code that accesses ``provider.reader``.
+        """
+        return self._reader
+
     # ------------------------------------------------------------------
     # Metadata accessors
     # ------------------------------------------------------------------
