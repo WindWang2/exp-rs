@@ -64,3 +64,27 @@ def test_rsstatusbar_setters():
     assert "116.4074" in sb.coord_label.text()
     assert "50,000" in sb.scale_label.text()
     assert "EPSG:4326" in sb.crs_label.text()
+
+
+# append to tests/test_rs_widgets.py
+from gui.rs_widgets import RsRowDelegate, RsSearchInput, ROLE_SWATCH, ROLE_META, ROLE_ICON
+from PySide6.QtGui import QStandardItemModel, QStandardItem
+from PySide6.QtWidgets import QStyleOptionViewItem
+
+
+def test_rowdelegate_sizehint_height():
+    d = RsRowDelegate()
+    model = QStandardItemModel()
+    it = QStandardItem("NDVI_2025.tif")
+    it.setData("#7dd35c", ROLE_SWATCH)
+    it.setData("raster", ROLE_META)
+    it.setData("raster", ROLE_ICON)
+    model.appendRow(it)
+    sz = d.sizeHint(QStyleOptionViewItem(), model.index(0, 0))
+    assert sz.height() == 22
+
+
+def test_search_input_text():
+    s = RsSearchInput("搜索 1,247 个算法…")
+    s.line.setText("ndvi")
+    assert s.text() == "ndvi"

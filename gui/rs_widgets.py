@@ -1,7 +1,9 @@
 # gui/rs_widgets.py
 from PySide6.QtWidgets import (QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                               QToolButton, QSizePolicy)
-from PySide6.QtCore import Qt, Signal
+                               QToolButton, QSizePolicy, QStyledItemDelegate,
+                               QLineEdit, QStyle)
+from PySide6.QtGui import QColor, QPainter, QPen, QStandardItemModel, QStandardItem
+from PySide6.QtCore import Qt, Signal, QSize, QRect
 from gui.rs_icons import rs_icon
 
 _T2 = "#5b6473"
@@ -190,3 +192,83 @@ class RsStatusBar(QWidget):
     def set_scale(self, t): self.scale_label.setText(t)
     def set_crs(self, t): self.crs_label.setText(t)
     def set_message(self, t): self.message_label.setText(t)
+
+
+# append to gui/rs_widgets.py
+ROLE_SWATCH = Qt.UserRole + 10
+ROLE_META = Qt.UserRole + 11
+ROLE_ICON = Qt.UserRole + 12
+
+_AC = "#1f6feb"
+_AC_SOFT = QColor(31, 111, 235, 26)   # rgba(31,111,235,0.10)
+_BG3 = QColor(0xee, 0xf1, 0xf5)
+_T0 = "#14171c"
+_T3 = "#8a92a0"
+
+
+class RsRowDelegate(QStyledItemDelegate):
+    def sizeHint(self, option, index):
+        return QSize(option.rect.width(), 22)
+
+    def paint(self, painter: QPainter, option, index):
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        r = option.rect
+        selected = bool(option.state & QStyle.State_Selected)
+        hovered = bool(option.state & QStyle.State_MouseOver)
+        if selected:
+            painter.fillRect(r, _AC_SOFT)
+            painter.fillRect(QRect(r.left(), r.top(), 2, r.height()), QColor(_AC))
+        elif hovered:
+            painter.fillRect(r, _BG3)
+
+        x = r.left() + 6
+        cy = r.center().y()
+        swatch = index.data(ROLE_SWATCH)
+        if swatch:
+            painter.setPen(QPen(QColor(0, 0, 0, 26)))
+            painter.setBrush(QColor(swatch))
+            painter.drawRoundedRect(QRect(x, cy - 6, 12, 12), 2, 2)
+            x += 18
+        icon_name = index.data(ROLE_ICON)
+        if icon_name:
+            pm = rs_icon(icon_name, 13, _T2).pixmap(13, 13)
+            painter.drawPixmap(x, cy - 7, pm)
+            x += 19
+
+        meta = index.data(ROLE_META)
+        meta_w = 0
+        if meta:
+            painter.setPen(QColor(_T3))
+            fm = painter.fontMetrics()
+            meta_w = fm.horizontalAdvance(meta) + 10
+            painter.drawText(QRect(r.right() - meta_w, r.top(), meta_w - 6, r.height()),
+                             Qt.AlignRight | Qt.AlignVCenter, meta)
+
+        name = index.data(Qt.DisplayRole) or ""
+        painter.setPen(QColor(_T0 if selected else _T1))
+        name_rect = QRect(x, r.top(), r.right() - meta_w - x, r.height())
+        elided = painter.fontMetrics().elidedText(name, Qt.ElideRight, name_rect.width())
+        painter.drawText(name_rect, Qt.AlignLeft | Qt.AlignVCenter, elided)
+        painter.restore()
+
+
+class RsSearchInput(QFrame):
+    def __init__(self, placeholder="", parent=None):
+        super().__init__(parent)
+        self.setObjectName("rsSearchInput")
+        self.setFixedHeight(24)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(6, 0, 6, 0)
+        lay.setSpacing(4)
+        ic = QLabel()
+        ic.setPixmap(rs_icon("search", 12, _T3).pixmap(12, 12))
+        lay.addWidget(ic)
+        self.line = QLineEdit()
+        self.line.setObjectName("rsSearchEdit")
+        self.line.setPlaceholderText(placeholder)
+        self.line.setFrame(False)
+        lay.addWidget(self.line, 1)
+
+    def text(self):
+        return self.line.text()
