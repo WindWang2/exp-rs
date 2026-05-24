@@ -54,3 +54,44 @@ class RsPanel(QFrame):
 
     def add_body_widget(self, w):
         self._body_layout.addWidget(w)
+
+
+# append to gui/rs_widgets.py
+class RsTabBar(QWidget):
+    tab_changed = Signal(str)
+
+    def __init__(self, tabs, active=None, parent=None):
+        super().__init__(parent)
+        self.setObjectName("rsTabBar")
+        self.setFixedHeight(26)
+        self._buttons = {}
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.active_id = active or (tabs[0][0] if tabs else None)
+        for tid, label, icon, count in tabs:
+            b = QToolButton()
+            b.setObjectName("rsTab")
+            b.setText(label if count is None else f"{label}  {count}")
+            if icon:
+                b.setIcon(rs_icon(icon, 12, _T2))
+                b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            b.setCheckable(True)
+            b.setChecked(tid == self.active_id)
+            b.setCursor(Qt.ArrowCursor)
+            b.clicked.connect(lambda _=False, t=tid: self.set_active(t))
+            lay.addWidget(b)
+            self._buttons[tid] = b
+        lay.addStretch(1)
+
+    def set_active(self, tid):
+        if tid == self.active_id or tid not in self._buttons:
+            self._sync()
+            return
+        self.active_id = tid
+        self._sync()
+        self.tab_changed.emit(tid)
+
+    def _sync(self):
+        for t, b in self._buttons.items():
+            b.setChecked(t == self.active_id)

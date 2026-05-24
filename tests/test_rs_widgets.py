@@ -15,3 +15,18 @@ def test_rspanel_title_and_body():
     body = QLabel("hello")
     p.add_body_widget(body)
     assert body.parent() is not None
+
+
+# append to tests/test_rs_widgets.py
+from gui.rs_widgets import RsTabBar
+
+
+def test_rstabbar_active_and_signal():
+    bar = RsTabBar([("info", "信息", None, None),
+                    ("symbol", "符号化", None, None)], active="info")
+    seen = []
+    bar.tab_changed.connect(seen.append)
+    assert bar.active_id == "info"
+    bar.set_active("symbol")
+    assert bar.active_id == "symbol"
+    assert seen == ["symbol"]
