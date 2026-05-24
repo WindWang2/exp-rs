@@ -125,16 +125,16 @@ class TestPipeSet:
 # ---------------------------------------------------------------------------
 
 class TestPipeRenderer:
-    def test_renderer_slot_accepts_anything(self, temp_raster):
+    def test_renderer_slot_accepts_renderer(self, temp_raster):
         """Renderer doesn't extend QgsRasterInterface, so we use setRenderer."""
         pipe = QgsRasterPipe()
-        mock_renderer = object()  # Stand-in for a renderer
+        mock_renderer = type('MockRenderer', (), {'render': lambda self: None})()
         pipe.setRenderer(mock_renderer)
         assert pipe.renderer() is mock_renderer
 
     def test_renderer_type_slot(self, temp_raster):
         pipe = QgsRasterPipe()
-        mock_renderer = object()
+        mock_renderer = type('MockRenderer', (), {'render': lambda self: None})()
         pipe.setRenderer(mock_renderer)
         iface = pipe.at(QgsRasterInterface.InterfaceType.Renderer)
         assert iface is mock_renderer
@@ -158,7 +158,7 @@ class TestPipeOnOff:
 
     def test_renderer_starts_on(self):
         pipe = QgsRasterPipe()
-        pipe.setRenderer(object())
+        pipe.setRenderer(type('MockRenderer', (), {'render': lambda self: None})())
         assert pipe.on(QgsRasterInterface.InterfaceType.Renderer) is True
 
     def test_middle_stages_start_off(self):
@@ -249,12 +249,12 @@ class TestPipeClone:
 
     def test_clone_has_renderer(self):
         pipe = QgsRasterPipe()
-        mock_renderer = {"type": "test"}
+        mock_renderer = type('MockRenderer', (), {'render': lambda self: None, 'type': 'test'})()
         pipe.setRenderer(mock_renderer)
 
         cloned = pipe.clone()
-        # Renderer is shallow-copied (not a QgsRasterInterface)
-        assert cloned.renderer() is mock_renderer
+        # Renderer is deep-copied (not a QgsRasterInterface)
+        assert cloned.renderer() is not mock_renderer
 
     def test_clone_preserves_on_off_state(self, temp_raster):
         pipe = QgsRasterPipe()
@@ -287,7 +287,7 @@ class TestPipeIntegration:
         pipe.set(provider)
 
         # Simulate a renderer (not a QgsRasterInterface)
-        pipe.setRenderer({"band_count": 3})
+        pipe.setRenderer(type('MockRenderer', (), {'render': lambda self: None, 'band_count': 3})())
 
         assert pipe.provider() is provider
         assert pipe.renderer() is not None

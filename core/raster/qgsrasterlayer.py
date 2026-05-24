@@ -1,6 +1,6 @@
 """QgsRasterLayer — Raster map layer backed by a QgsRasterPipe pipeline."""
 
-from core.qgsmaplayer import QgsMapLayer, MapLayer
+from core.qgsmaplayer import QgsMapLayer
 from core.raster.qgsrasterpipe import QgsRasterPipe
 from core.raster.qgsrasterdataprovider import QgsRasterDataProvider
 from PySide6.QtCore import QRectF

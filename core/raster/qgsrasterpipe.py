@@ -7,6 +7,8 @@ Only DataProvider and Renderer are functional now; the middle 5 stages
 are optional passthrough slots (can be None, meaning "skip this stage").
 """
 
+import copy
+
 from core.raster.qgsrasterinterface import QgsRasterInterface
 from core.raster.qgsrasterblock import QgsRasterBlock
 
@@ -77,6 +79,8 @@ class QgsRasterPipe:
         Renderers do NOT extend QgsRasterInterface in our design, so they
         cannot be auto-detected by set().  Use this method instead.
         """
+        if renderer is not None and not hasattr(renderer, 'render'):
+            raise TypeError(f"Renderer must have a render() method, got {type(renderer).__name__}")
         self._interfaces[QgsRasterInterface.InterfaceType.Renderer] = renderer
         if renderer is not None:
             self._enabled[QgsRasterInterface.InterfaceType.Renderer] = True
@@ -145,7 +149,7 @@ class QgsRasterPipe:
         """Return a deep copy of the pipe.
 
         QgsRasterInterface objects are cloned via their own clone() method.
-        The Renderer is shallow-copied (it doesn't extend QgsRasterInterface).
+        The Renderer is deep-copied (it doesn't extend QgsRasterInterface).
         """
         cloned = QgsRasterPipe()
         for stage in _PIPE_STAGES:
@@ -155,7 +159,7 @@ class QgsRasterPipe:
             elif isinstance(original, QgsRasterInterface):
                 cloned._interfaces[stage] = original.clone()
             else:
-                # Renderer (not a QgsRasterInterface) — shallow copy
-                cloned._interfaces[stage] = original
+                # Renderer (not a QgsRasterInterface) — deep copy
+                cloned._interfaces[stage] = copy.deepcopy(original)
             cloned._enabled[stage] = self._enabled.get(stage, False)
         return cloned

@@ -10,9 +10,8 @@ class QgsRasterLayerRenderer(QgsMapLayerRenderer):
     Thread-safe, decoupled drawing class for Raster Layers matching QgsRasterLayerRenderer.
     Loads and styles pixel arrays dynamically in the background without locking GUI QObjects.
 
-    After the QgsRasterPipe rewrite, the renderer is obtained from the layer's pipe
-    rather than being created fresh.  Falls back to the legacy creation path if the
-    pipe has no renderer (backward compatibility with code that doesn't use the pipe).
+    The renderer is obtained from the layer's pipe.  If no renderer is available,
+    render() returns early (no drawing occurs).
     """
     def __init__(self, layer, settings):
         super().__init__(layer.id)
@@ -29,23 +28,11 @@ class QgsRasterLayerRenderer(QgsMapLayerRenderer):
         else:
             self.renderer = None
 
-        # Legacy fallback: create renderer if pipe didn't have one.
-        if self.renderer is None:
-            from core.raster.qgsrasterrenderer import (
-                QgsMultiBandColorRenderer,
-                QgsSingleBandGrayRenderer,
-                QgsSingleBandPseudoColorRenderer,
-            )
-            render_type = getattr(layer, "render_type", "grayscale")
-            if render_type == "multiband":
-                self.renderer = QgsMultiBandColorRenderer(layer)
-            elif render_type == "grayscale":
-                self.renderer = QgsSingleBandGrayRenderer(layer)
-            else:
-                self.renderer = QgsSingleBandPseudoColorRenderer(layer)
-
     def render(self, painter, settings):
         if not self.visible or painter is None:
+            return
+
+        if self.renderer is None:
             return
             
         from core.qgsreader import GeospatialReader
