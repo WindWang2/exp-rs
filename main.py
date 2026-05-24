@@ -1,9 +1,8 @@
 import sys
 import os
-from PySide6.QtWidgets import (QApplication, QMainWindow, QDockWidget, QFileDialog, 
-                               QMessageBox, QStatusBar, QToolBar, QTabWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QMainWindow, QFileDialog,
+                               QMessageBox, QWidget)
 from PySide6.QtCore import Qt, QThreadPool, QRunnable, Slot, Signal, QObject
-from PySide6.QtGui import QAction, QIcon, QKeySequence
 
 def load_stylesheet(app):
     """Loads the global Slate Light theme from resources/styles.qss."""
@@ -25,7 +24,6 @@ from gui.map_tool import MapToolPan
 from gui.layer_tree import LayerTreeModel, LayerTreeView
 from gui.toolbox import ProcessingToolbox
 from gui.agent_dock import AgentDockWidget
-from gui.log_dock import LogDockWidget
 from gui.splash import OnboardingSplashScreen
 from gui.prototype_views import (SpectralProfileDialog, ModelBuilderDialog, 
                                  GeorefDialog, ROIEditorDialog, AttributeTableDialog)
