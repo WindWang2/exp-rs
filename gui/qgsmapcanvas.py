@@ -151,20 +151,17 @@ class QgsMapCanvas(QGraphicsView):
     def mousePressEvent(self, event):
         if self._map_tool:
             self._map_tool.mousePressEvent(event)
-        else:
-            super().mousePressEvent(event)
+        super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
         if self._map_tool:
             self._map_tool.mouseReleaseEvent(event)
-        else:
-            super().mouseReleaseEvent(event)
+        super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._map_tool:
             self._map_tool.mouseMoveEvent(event)
-        else:
-            super().mouseMoveEvent(event)
+        super().mouseMoveEvent(event)
         # Emit coordinates
         settings = self.mapSettings()
         world_pos = settings.deviceToWorld().map(QPointF(event.pos()))
