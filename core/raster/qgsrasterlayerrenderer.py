@@ -28,7 +28,7 @@ class QgsRasterLayerRenderer(QgsMapLayerRenderer):
         else:
             self.renderer = None
 
-    def render(self, painter, settings):
+    def render(self, painter, settings, renderContext=None):
         if not self.visible or painter is None:
             return
 

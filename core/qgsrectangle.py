@@ -28,6 +28,19 @@ class QgsRectangle:
     def height(self) -> float:
         return self._ymax - self._ymin
 
+    # Convenience aliases matching QGIS API
+    def left(self) -> float:
+        return self._xmin
+
+    def right(self) -> float:
+        return self._xmax
+
+    def top(self) -> float:
+        return self._ymax
+
+    def bottom(self) -> float:
+        return self._ymin
+
     def area(self) -> float:
         return self.width() * self.height()
 
