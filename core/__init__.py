@@ -28,6 +28,7 @@ from core.qgsreader import GeospatialReader
 from core.qgsproject import QgsProject, GISProject
 from core.qgsmaplayer import QgsMapLayer, MapLayer
 from core.qgsmapsettings import QgsMapSettings, MapSettings
+from core.qgsmaptopixel import QgsMapToPixel
 from core.qgsmaplayerrenderer import QgsMapLayerRenderer, MapLayerRenderer
 from core.qgsdataprovider import QgsDataProvider, DataProvider
 from core.qgsmaplayerstore import QgsMapLayerStore
