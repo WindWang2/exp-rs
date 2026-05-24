@@ -101,3 +101,19 @@ def test_rsconsole_append():
     txt = c.view.toPlainText()
     assert "opened dataset" in txt and "reprojected" in txt
     assert c.tabs.active_id == "log"
+
+
+# append to tests/test_rs_widgets.py
+from gui.rs_widgets import RsPropertyPanel
+
+
+def test_property_panel_populates_from_meta():
+    p = RsPropertyPanel()
+    p.set_layer({"name": "B04_red", "type": "raster",
+                 "path": "/data/T50TMK_B04.jp2", "extent": None})
+    txt = p.dump_text()
+    assert "B04_red" in txt
+    assert "T50TMK_B04.jp2" in txt
+    # empty state
+    p.set_layer(None)
+    assert "未选择图层" in p.dump_text()

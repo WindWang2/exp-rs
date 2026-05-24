@@ -323,3 +323,91 @@ class RsConsole(QWidget):
         if len(parts) >= 3:
             module = parts[2].strip("[]")
         self.append_log(time_str, level, module, raw_msg)
+
+
+# append to gui/rs_widgets.py
+from PySide6.QtWidgets import QScrollArea
+import os as _os
+
+
+def section_header(label):
+    w = QLabel(label)
+    w.setObjectName("rsSectionHeader")
+    return w
+
+
+def prop_row(k, v, mono=True):
+    row = QWidget()
+    row.setObjectName("rsPropRow")
+    lay = QHBoxLayout(row)
+    lay.setContentsMargins(10, 3, 10, 3)
+    kl = QLabel(str(k)); kl.setObjectName("rsPropKey")
+    vl = QLabel(str(v)); vl.setObjectName("rsPropValMono" if mono else "rsPropVal")
+    vl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    lay.addWidget(kl); lay.addStretch(1); lay.addWidget(vl)
+    return row
+
+
+class RsPropertyPanel(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("rsPropertyPanel")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.tabs = RsTabBar([("info", "信息", None, None),
+                              ("symbol", "符号化", None, None),
+                              ("hist", "直方图", None, None),
+                              ("meta", "元数据", None, None)], active="info")
+        lay.addWidget(self.tabs)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setObjectName("rsPropScroll")
+        lay.addWidget(self.scroll, 1)
+        self._content = QWidget()
+        self._clayout = QVBoxLayout(self._content)
+        self._clayout.setContentsMargins(0, 4, 0, 8)
+        self._clayout.setSpacing(0)
+        self.scroll.setWidget(self._content)
+        self.set_layer(None)
+
+    def _clear(self):
+        while self._clayout.count():
+            item = self._clayout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def set_layer(self, meta, layer=None):
+        self._clear()
+        if not meta:
+            empty = QLabel("未选择图层")
+            empty.setObjectName("rsPropEmpty")
+            empty.setAlignment(Qt.AlignCenter)
+            self._clayout.addWidget(empty)
+            self._clayout.addStretch(1)
+            return
+        self._clayout.addWidget(section_header("数据源"))
+        self._clayout.addWidget(prop_row("名称", meta.get("name", "—")))
+        self._clayout.addWidget(prop_row("路径", _os.path.basename(meta.get("path", "—"))))
+        self._clayout.addWidget(prop_row("类型", meta.get("type", "—")))
+        ext = meta.get("extent")
+        if ext is not None and hasattr(ext, "xMinimum"):
+            self._clayout.addWidget(section_header("坐标系"))
+            self._clayout.addWidget(
+                prop_row("范围", f"{ext.xMinimum():.1f}, {ext.yMinimum():.1f}"))
+        if layer is not None and hasattr(layer, "opacity"):
+            self._clayout.addWidget(section_header("渲染"))
+            self._clayout.addWidget(
+                prop_row("不透明度", f"{int(getattr(layer, 'opacity', 1.0) * 100)} %"))
+        self._clayout.addStretch(1)
+
+    def dump_text(self):
+        out = []
+        for i in range(self._clayout.count()):
+            w = self._clayout.itemAt(i).widget()
+            if isinstance(w, QLabel):
+                out.append(w.text())
+            elif w is not None:
+                for lab in w.findChildren(QLabel):
+                    out.append(lab.text())
+        return " | ".join(out)
