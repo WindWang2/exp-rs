@@ -16,11 +16,12 @@ Welcome to the standalone Remote Sensing analysis platform codebase.
 
 ## Codebase Architecture
 
-*   `engine/`: Pure modular GIS engine (GeospatialReader, CRSTransformer, ToolRegistry, calculations).
-*   `gui/`: Custom premium PyQt widgets (MapCanvas, LayerTreeView/Model, ProcessingToolbox, OnboardingSplashScreen).
-*   `agent/`: Sandboxed NLP-to-JSON tool dispatchers and offline fallbacks.
-*   `src/`: Pybind11 C++ bindings stub for Orfeo Toolbox porting.
-*   `tests/`: Automated unit test suites.
+*   `core/`: Pure modular QGIS-emulated GIS core (GeospatialReader, QgsMapLayer, QgsLayerTreeNode, coordinate transform caching).
+*   `analysis/`: Geospatial analytical tools (spectral indexes, pansharpening, unsupervised classification).
+*   `gui/`: Premium PyQt/PySide6 widgets (MapCanvas, LayerTreeView/Model, ProcessingToolbox, splash screens).
+*   `agent/`: Sandboxed NLP-to-JSON tool dispatchers and offline executor.
+*   `src/`: Pybind11 C++ shared library source code (`raster_ops.cpp`).
+*   `tests/`: Automated PyTest unit and integration test suites.
 
 ## Coding Style & Standards
 

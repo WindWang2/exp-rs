@@ -99,4 +99,4 @@ We will proceed with **Approach B (Hybrid Dependency Strategy)**. This approach 
 4. **Phase 4: OTB Algorithm Ports**
    - Port OTB's C++ MeanShift and Random Forest algorithms into `src/raster_ops.cpp`.
 5. **Phase 5: Declarative Processing Toolbox**
-   - Implement centralized Tool Registry (`engine/registry.py`) and dynamic PyQt GUI panel (`gui/toolbox.py`).
+   - Implement centralized Tool Registry (`analysis/qgsprocessingregistry.py`) and dynamic PyQt GUI panel (`gui/toolbox.py`).
