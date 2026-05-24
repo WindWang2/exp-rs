@@ -12,7 +12,7 @@ from core.qgsrectangle import QgsRectangle
 from core.qgsfeatureiterator import QgsFeatureIterator
 from core.qgsfeaturerequest import QgsFeatureRequest
 from core.qgswkbtypes import QgsWkbTypes
-from core.vector.qgsvectordataprovider import QgsVectorDataProvider, Capabilities
+from core.vector.qgsvectordataprovider import QgsVectorDataProvider
 
 
 class QgsMemoryProvider(QgsVectorDataProvider):
@@ -27,7 +27,6 @@ class QgsMemoryProvider(QgsVectorDataProvider):
         self._wkb_type: int = wkb_type
         self._features: dict[int, QgsFeature] = {}
         self._next_fid: int = 1
-        self._editable: bool = True
 
     # ------------------------------------------------------------------
     # Read interface
@@ -120,14 +119,6 @@ class QgsMemoryProvider(QgsVectorDataProvider):
         self._features[feature.id()] = feature
         return True
 
-    def addFeatures(self, features: list) -> bool:
-        """Add multiple features.  Delegates to addFeature for each."""
-        success = True
-        for f in features:
-            if not self.addFeature(f):
-                success = False
-        return success
-
     def deleteFeature(self, fid) -> bool:
         """Remove a feature by FID.  Returns False if not found."""
         if fid in self._features:
@@ -151,9 +142,11 @@ class QgsMemoryProvider(QgsVectorDataProvider):
         feat = self._features.get(fid)
         if feat is None:
             return False
+        ok = True
         for idx, value in attribute_map.items():
-            feat.setAttribute(idx, value)
-        return True
+            if not feat.setAttribute(idx, value):
+                ok = False
+        return ok
 
     # ------------------------------------------------------------------
     # Editing lifecycle
@@ -161,7 +154,6 @@ class QgsMemoryProvider(QgsVectorDataProvider):
 
     def startEditing(self) -> bool:
         """Memory provider is always editable; this is a no-op returning True."""
-        self._editable = True
         return True
 
     def commitChanges(self) -> bool:
@@ -173,17 +165,11 @@ class QgsMemoryProvider(QgsVectorDataProvider):
         return True
 
     def isEditable(self) -> bool:
-        return self._editable
+        return True
 
     # ------------------------------------------------------------------
     # Concrete overrides
     # ------------------------------------------------------------------
-
-    def capabilities(self) -> int:
-        return (Capabilities.AddFeatures
-                | Capabilities.DeleteFeatures
-                | Capabilities.ChangeGeometries
-                | Capabilities.ChangeAttributeValues)
 
     def clone(self) -> 'QgsMemoryProvider':
         """Return a deep copy of this provider including all stored features."""
@@ -193,5 +179,4 @@ class QgsMemoryProvider(QgsVectorDataProvider):
             new_feat = copy.deepcopy(feat)
             new_prov._features[fid] = new_feat
         new_prov._next_fid = self._next_fid
-        new_prov._editable = self._editable
         return new_prov

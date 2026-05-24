@@ -89,7 +89,7 @@ class QgsMapLayerStore(QObject):
 
     def mapLayers(self) -> dict:
         """Return a dict of all registered layers keyed by ID."""
-        return self._layers
+        return dict(self._layers)
 
     def count(self) -> int:
         """Return the number of registered layers."""

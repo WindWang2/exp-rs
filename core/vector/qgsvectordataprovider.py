@@ -67,10 +67,6 @@ class QgsVectorDataProvider(QgsFeatureSource, QgsFeatureSink):
         pass
 
     @abstractmethod
-    def addFeatures(self, features: list) -> bool:
-        pass
-
-    @abstractmethod
     def deleteFeature(self, fid) -> bool:
         pass
 
