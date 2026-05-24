@@ -148,3 +148,40 @@ def test_rect_from_point():
     r = QgsRectangle.fromCenterAndSize(QgsPointXY(5, 5), 10, 10)
     assert r.width() == 10.0
     assert r.height() == 10.0
+
+
+# --- QgsVector tests ---
+
+from core.qgsvector import QgsVector
+
+
+def test_vector_creation():
+    v = QgsVector(3.0, 4.0)
+    assert v.x() == 3.0
+    assert v.y() == 4.0
+
+
+def test_vector_length():
+    v = QgsVector(3.0, 4.0)
+    assert v.length() == 5.0
+
+
+def test_vector_normalized():
+    v = QgsVector(3.0, 4.0)
+    n = v.normalized()
+    assert abs(n.x() - 0.6) < 1e-10
+    assert abs(n.y() - 0.8) < 1e-10
+
+
+# --- QgsWkbTypes tests ---
+
+from core.qgswkbtypes import QgsWkbTypes
+
+
+def test_wkb_types():
+    assert QgsWkbTypes.geometryType(QgsWkbTypes.Type.Point) == Qgis.GeometryType.Point
+    assert QgsWkbTypes.geometryType(QgsWkbTypes.Type.Polygon) == Qgis.GeometryType.Polygon
+    assert QgsWkbTypes.isMultiType(QgsWkbTypes.Type.MultiPoint)
+    assert not QgsWkbTypes.isMultiType(QgsWkbTypes.Type.Point)
+    assert QgsWkbTypes.hasZ(QgsWkbTypes.Type.PointZ)
+    assert not QgsWkbTypes.hasZ(QgsWkbTypes.Type.Point)
