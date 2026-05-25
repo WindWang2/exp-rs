@@ -2299,13 +2299,15 @@ else()
   endif()
 endif()
 
-# Generate cpp+header file from .proto file using "protoc" tool (to support MVT encoding of vector tiles)
-protobuf_generate_cpp(VECTOR_TILE_PROTO_SRCS VECTOR_TILE_PROTO_HDRS vectortile/vector_tile.proto)
-set(QGIS_CORE_SRCS ${QGIS_CORE_SRCS} ${VECTOR_TILE_PROTO_SRCS})
-set(QGIS_CORE_HDRS ${QGIS_CORE_HDRS} ${VECTOR_TILE_PROTO_HDRS})
-if (NOT MSVC)
-  # automatically generated file produces warnings (unused-parameter, unused-variable, misleading-indentation)
-  set_source_files_properties(${VECTOR_TILE_PROTO_SRCS} PROPERTIES COMPILE_FLAGS -w)
+# ANTIGRAVITY: disabled for P0 — vector tiles excluded (spec §5), no protobuf dep
+if(WITH_VECTORTILE)
+  # Generate cpp+header file from .proto file using "protoc" tool (to support MVT encoding of vector tiles)
+  protobuf_generate_cpp(VECTOR_TILE_PROTO_SRCS VECTOR_TILE_PROTO_HDRS vectortile/vector_tile.proto)
+  set(QGIS_CORE_SRCS ${QGIS_CORE_SRCS} ${VECTOR_TILE_PROTO_SRCS})
+  set(QGIS_CORE_HDRS ${QGIS_CORE_HDRS} ${VECTOR_TILE_PROTO_HDRS})
+  if (NOT MSVC)
+    set_source_files_properties(${VECTOR_TILE_PROTO_SRCS} PROPERTIES COMPILE_FLAGS -w)
+  endif()
 endif()
 
 # install headers
