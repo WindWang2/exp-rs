@@ -1023,28 +1023,29 @@ set(QGIS_CORE_SRCS
   vector/qgsvectorlayerundopassthroughcommand.cpp
   vector/qgsvectorlayerutils.cpp
 
-  vectortile/qgsarcgisvectortileservicedataprovider.cpp
-  vectortile/qgsmapboxglstyleconverter.cpp
-  vectortile/qgsmbtilesvectortiledataprovider.cpp
-  vectortile/qgsvectortilebasiclabeling.cpp
-  vectortile/qgsvectortilebasicrenderer.cpp
-  vectortile/qgsvectortileconnection.cpp
-  vectortile/qgsvectortiledataitems.cpp
-  vectortile/qgsvectortiledataprovider.cpp
-  vectortile/qgsvectortilelabeling.cpp
-  vectortile/qgsvectortilelayer.cpp
-  vectortile/qgsvectortilelayerrenderer.cpp
-  vectortile/qgsvectortileloader.cpp
-  vectortile/qgsvectortilematrixset.cpp
-  vectortile/qgsvectortilemvtdecoder.cpp
-  vectortile/qgsvectortilemvtencoder.cpp
-  vectortile/qgsvectortilemvtutils.cpp
-  vectortile/qgsvectortileprovidermetadata.cpp
-  vectortile/qgsvectortileutils.cpp
-  vectortile/qgsvectortilewriter.cpp
-  vectortile/qgsvtpktiles.cpp
-  vectortile/qgsvtpkvectortiledataprovider.cpp
-  vectortile/qgsxyzvectortiledataprovider.cpp
+  # ANTIGRAVITY: vectortile excluded for P0 (spec §5) — requires protobuf
+  # vectortile/qgsarcgisvectortileservicedataprovider.cpp
+  # vectortile/qgsmapboxglstyleconverter.cpp
+  # vectortile/qgsmbtilesvectortiledataprovider.cpp
+  # vectortile/qgsvectortilebasiclabeling.cpp
+  # vectortile/qgsvectortilebasicrenderer.cpp
+  # vectortile/qgsvectortileconnection.cpp
+  # vectortile/qgsvectortiledataitems.cpp
+  # vectortile/qgsvectortiledataprovider.cpp
+  # vectortile/qgsvectortilelabeling.cpp
+  # vectortile/qgsvectortilelayer.cpp
+  # vectortile/qgsvectortilelayerrenderer.cpp
+  # vectortile/qgsvectortileloader.cpp
+  # vectortile/qgsvectortilematrixset.cpp
+  # vectortile/qgsvectortilemvtdecoder.cpp
+  # vectortile/qgsvectortilemvtencoder.cpp
+  # vectortile/qgsvectortilemvtutils.cpp
+  # vectortile/qgsvectortileprovidermetadata.cpp
+  # vectortile/qgsvectortileutils.cpp
+  # vectortile/qgsvectortilewriter.cpp
+  # vectortile/qgsvtpktiles.cpp
+  # vectortile/qgsvtpkvectortiledataprovider.cpp
+  # vectortile/qgsxyzvectortiledataprovider.cpp
 
   ${CMAKE_CURRENT_BINARY_DIR}/qgsexpression_texts.cpp
 

@@ -29,6 +29,9 @@ find_package(ZLIB REQUIRED)
 find_package(LibZip REQUIRED)
 find_package(Qt6Keychain QUIET)
 find_package(Python COMPONENTS Interpreter REQUIRED)
+# QCA — include directly from known install path
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/FindQCA.cmake OPTIONAL)
+include_directories(SYSTEM /usr/include/qt6/Qca-qt6/QtCrypto)
 
 # Internal nlohmann_json: create interface target for vendored header
 if(WITH_INTERNAL_NLOHMANN_JSON)
@@ -41,6 +44,10 @@ endif()
 
 # Internal spatialindex
 option(WITH_INTERNAL_SPATIALINDEX "" ON)
+if(WITH_INTERNAL_SPATIALINDEX)
+  set(SPATIALINDEX_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/external/spatialindex/include)
+  include_directories(SYSTEM ${SPATIALINDEX_INCLUDE_DIR})
+endif()
 
 # --- qgsconfig.h: all optional features OFF for P0 ---
 set(CPACK_PACKAGE_VERSION_MAJOR 1)
@@ -58,9 +65,7 @@ set(QGIS_INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/include/qgis")
 set(QGIS_BIN_DIR "${CMAKE_INSTALL_PREFIX}/bin")
 set(QGIS_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 set(QGISPOSTFIX "")
-# HAVE_* left undefined => #cmakedefine compiles those features out
-configure_file(cmake_templates/qgsconfig.h.in ${CMAKE_BINARY_DIR}/qgsconfig.h)
-include_directories(${CMAKE_BINARY_DIR})
+set(LIBRARY_TYPE SHARED)
 
 # --- P0 options: disable optional features, use vendored deps ---
 option(ENABLE_UNITY_BUILDS "" OFF)
@@ -82,10 +87,28 @@ option(WITH_SERVER "" OFF)
 option(WITH_GUI "" ON)
 option(WITH_ANALYSIS "" OFF)
 option(WITH_BINDINGS "" OFF)
+option(WITH_AUTH "" ON)
+if(WITH_AUTH)
+  set(HAVE_AUTH TRUE)
+endif()
 option(ENABLE_TESTS "" OFF)
 option(WITH_DRACO "" OFF)
 option(WITH_INTERNAL_POLY2TRI "" ON)
 option(WITH_INTERNAL_NLOHMANN_JSON "" ON)
 option(WITH_INTERNAL_LAZPERF "" ON)
+if(WITH_INTERNAL_LAZPERF)
+  include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/external/lazperf)
+endif()
+
+# configure_file AFTER all HAVE_* variables are resolved
+configure_file(cmake_templates/qgsconfig.h.in ${CMAKE_BINARY_DIR}/qgsconfig.h)
+include_directories(${CMAKE_BINARY_DIR})
 
 add_subdirectory(src/core)
+# ANTIGRAVITY: extra include paths needed by unconditional core sources
+target_include_directories(qgis_core SYSTEM PRIVATE /usr/include/qt6/Qca-qt6/QtCrypto)
+target_include_directories(qgis_core PRIVATE
+  ${CMAKE_SOURCE_DIR}/src/core/providers/vpc
+  ${CMAKE_SOURCE_DIR}/src/core/providers/copc
+  ${CMAKE_SOURCE_DIR}/src/core/providers/ept
+)
