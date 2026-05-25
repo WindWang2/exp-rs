@@ -1023,29 +1023,28 @@ set(QGIS_CORE_SRCS
   vector/qgsvectorlayerundopassthroughcommand.cpp
   vector/qgsvectorlayerutils.cpp
 
-  # ANTIGRAVITY: vectortile excluded for P0 (spec §5) — requires protobuf
-  # vectortile/qgsarcgisvectortileservicedataprovider.cpp
-  # vectortile/qgsmapboxglstyleconverter.cpp
-  # vectortile/qgsmbtilesvectortiledataprovider.cpp
-  # vectortile/qgsvectortilebasiclabeling.cpp
-  # vectortile/qgsvectortilebasicrenderer.cpp
-  # vectortile/qgsvectortileconnection.cpp
-  # vectortile/qgsvectortiledataitems.cpp
-  # vectortile/qgsvectortiledataprovider.cpp
-  # vectortile/qgsvectortilelabeling.cpp
-  # vectortile/qgsvectortilelayer.cpp
-  # vectortile/qgsvectortilelayerrenderer.cpp
-  # vectortile/qgsvectortileloader.cpp
-  # vectortile/qgsvectortilematrixset.cpp
-  # vectortile/qgsvectortilemvtdecoder.cpp
-  # vectortile/qgsvectortilemvtencoder.cpp
-  # vectortile/qgsvectortilemvtutils.cpp
-  # vectortile/qgsvectortileprovidermetadata.cpp
-  # vectortile/qgsvectortileutils.cpp
-  # vectortile/qgsvectortilewriter.cpp
-  # vectortile/qgsvtpktiles.cpp
-  # vectortile/qgsvtpkvectortiledataprovider.cpp
-  # vectortile/qgsxyzvectortiledataprovider.cpp
+  vectortile/qgsarcgisvectortileservicedataprovider.cpp
+  vectortile/qgsmapboxglstyleconverter.cpp
+  vectortile/qgsmbtilesvectortiledataprovider.cpp
+  vectortile/qgsvectortilebasiclabeling.cpp
+  vectortile/qgsvectortilebasicrenderer.cpp
+  vectortile/qgsvectortileconnection.cpp
+  vectortile/qgsvectortiledataitems.cpp
+  vectortile/qgsvectortiledataprovider.cpp
+  vectortile/qgsvectortilelabeling.cpp
+  vectortile/qgsvectortilelayer.cpp
+  vectortile/qgsvectortilelayerrenderer.cpp
+  vectortile/qgsvectortileloader.cpp
+  vectortile/qgsvectortilematrixset.cpp
+  vectortile/qgsvectortilemvtdecoder.cpp
+  vectortile/qgsvectortilemvtencoder.cpp
+  vectortile/qgsvectortilemvtutils.cpp
+  vectortile/qgsvectortileprovidermetadata.cpp
+  vectortile/qgsvectortileutils.cpp
+  vectortile/qgsvectortilewriter.cpp
+  vectortile/qgsvtpktiles.cpp
+  vectortile/qgsvtpkvectortiledataprovider.cpp
+  vectortile/qgsxyzvectortiledataprovider.cpp
 
   ${CMAKE_CURRENT_BINARY_DIR}/qgsexpression_texts.cpp
 
@@ -2300,8 +2299,8 @@ else()
   endif()
 endif()
 
-# ANTIGRAVITY: disabled for P0 — vector tiles excluded (spec §5), no protobuf dep
 if(WITH_VECTORTILE)
+  add_definitions(-DWITH_VECTORTILE)
   # Generate cpp+header file from .proto file using "protoc" tool (to support MVT encoding of vector tiles)
   protobuf_generate_cpp(VECTOR_TILE_PROTO_SRCS VECTOR_TILE_PROTO_HDRS vectortile/vector_tile.proto)
   set(QGIS_CORE_SRCS ${QGIS_CORE_SRCS} ${VECTOR_TILE_PROTO_SRCS})

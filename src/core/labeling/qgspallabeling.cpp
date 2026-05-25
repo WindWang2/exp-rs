@@ -49,8 +49,10 @@
 #include "qgsunittypes.h"
 #include "qgsvariantutils.h"
 #include "qgsvectorlayer.h"
+#ifdef WITH_VECTORTILE
 #include "qgsvectortilebasiclabeling.h"
 #include "qgsvectortilelayer.h"
+#endif
 
 #include <QApplication>
 #include <QByteArray>
@@ -4436,6 +4438,7 @@ bool QgsPalLabeling::staticWillUseLayer( const QgsMapLayer *layer )
              || ( vl->renderer() && vl->renderer()->flags().testFlag( Qgis::FeatureRendererFlag::AffectsLabeling ) );
     }
 
+#ifdef WITH_VECTORTILE
     case Qgis::LayerType::VectorTile:
     {
       const QgsVectorTileLayer *vl = qobject_cast< const QgsVectorTileLayer * >( layer );
@@ -4447,6 +4450,7 @@ bool QgsPalLabeling::staticWillUseLayer( const QgsMapLayer *layer )
 
       return false;
     }
+#endif
 
     case Qgis::LayerType::Mesh:
     {

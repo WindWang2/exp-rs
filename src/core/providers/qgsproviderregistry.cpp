@@ -25,22 +25,24 @@
 #include "providers/ogr/qgsogrprovidermetadata.h"
 #include "providers/sensorthings/qgssensorthingsprovider.h"
 #include "qgis.h"
-#include "qgsarcgisvectortileservicedataprovider.h"
 #include "qgscesiumtilesdataprovider.h"
 #include "qgsdataitemprovider.h"
 #include "qgsdataprovider.h"
 #include "qgsesrii3sdataprovider.h"
 #include "qgslogger.h"
-#include "qgsmbtilesvectortiledataprovider.h"
 #include "qgsmessagelog.h"
 #include "qgsproject.h"
 #include "qgsprovidermetadata.h"
 #include "qgsprovidersublayerdetails.h"
 #include "qgsquantizedmeshdataprovider.h"
 #include "qgstiledsceneprovidermetadata.h"
+#ifdef WITH_VECTORTILE
+#include "qgsarcgisvectortileservicedataprovider.h"
+#include "qgsmbtilesvectortiledataprovider.h"
 #include "qgsvectortileprovidermetadata.h"
 #include "qgsvtpkvectortiledataprovider.h"
 #include "qgsxyzvectortiledataprovider.h"
+#endif
 
 #include <QString>
 
@@ -202,6 +204,7 @@ void QgsProviderRegistry::init()
     const QgsScopedRuntimeProfile profile( QObject::tr( "Create OGC SensorThings API provider" ) );
     mProviders[QgsSensorThingsProvider::providerKey()] = new QgsSensorThingsProviderMetadata();
   }
+#ifdef WITH_VECTORTILE
   {
     const QgsScopedRuntimeProfile profile( QObject::tr( "Create vector tile providers" ) );
     QgsProviderMetadata *vt = new QgsVectorTileProviderMetadata();
@@ -215,6 +218,7 @@ void QgsProviderRegistry::init()
     vt = new QgsMbTilesVectorTileDataProviderMetadata();
     mProviders[vt->key()] = vt;
   }
+#endif
 #ifdef HAVE_EPT
   {
     const QgsScopedRuntimeProfile profile( QObject::tr( "Create EPT point cloud provider" ) );
