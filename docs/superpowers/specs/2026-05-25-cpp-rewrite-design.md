@@ -266,3 +266,109 @@ Key QGIS source files for thread safety:
 - `QgsProcessingFeedback` supports progress reporting and cancellation — Agent monitors long-running tasks
 - OGC Server publishes Agent analysis results as WMS instantly — consumable by external GIS
 - Plugin System allows dynamic algorithm registration — Agent loads extensions on demand
+
+## 10. Modular & Atomic Design
+
+Core design principle: every capability is a composable, configurable atomic unit. No monolithic functions. Actions are driven by code or declarative configuration (JSON/YAML).
+
+### 10.1 Processing Algorithm = Atomic Unit
+
+Every operation is a `QgsProcessingAlgorithm` subclass with:
+
+```
+name()        → unique identifier: "antigravity:ndvi"
+displayName() → human label: "NDVI Vegetation Index"
+parameters()  → typed inputs: {input_raster: RasterLayer, red_band: Number, nir_band: Number, output_path: Destination}
+prepare()     → validate & pre-allocate
+process()     → execute (streaming blocks, cancellable)
+outputValues()→ typed outputs: {output_raster: RasterLayer, statistics: Map}
+```
+
+This is already QGIS's design. We inherit it by forking `core/processing/`.
+
+### 10.2 Algorithm Chains = JSON Config
+
+Complex workflows (e.g., "atmospheric correction → NDVI → threshold → area statistics") are not hardcoded. They are defined as declarative chains:
+
+```json
+{
+  "chain_id": "vegetation_health_assessment",
+  "steps": [
+    {
+      "algorithm": "antigravity:dos1_correction",
+      "params": {"input_raster": "$input", "output_path": "$cache/dos1.tif"}
+    },
+    {
+      "algorithm": "antigravity:ndvi",
+      "params": {"input_raster": "$cache/dos1.tif", "red_band": 1, "nir_band": 3, "output_path": "$cache/ndvi.tif"}
+    },
+    {
+      "algorithm": "antigravity:raster_threshold",
+      "params": {"input_raster": "$cache/ndvi.tif", "min": 0.3, "output_path": "$output"}
+    }
+  ],
+  "output_mapping": {
+    "result": "$output",
+    "ndvi": "$cache/ndvi.tif"
+  }
+}
+```
+
+### 10.3 Three Ways to Invoke
+
+| Method | Who | How |
+|--------|-----|-----|
+| **GUI** | User clicks toolbox | QgsProcessingDialog → algorithm → feedback |
+| **Code** | Developer / script | `QgsProcessingRunner.execute("antigravity:ndvi", params)` |
+| **Config** | JSON chain / Agent | AlgorithmRegistry resolves name → instantiate → chain executor runs steps sequentially, passing outputs as inputs |
+
+### 10.4 Algorithm Registry (C++ Singleton)
+
+```cpp
+class QgsProcessingRegistry {
+    // Register at plugin load or app startup
+    void addAlgorithm(QgsProcessingAlgorithm* algo);
+
+    // Lookup by name — used by GUI, code, config, and Agent
+    QgsProcessingAlgorithm* algorithmById(const QString& id) const;
+
+    // List all available algorithms (for toolbox, Agent tool discovery)
+    QList<QgsProcessingAlgorithm*> algorithms() const;
+};
+```
+
+All built-in algorithms (NDVI, DOS1, pansharpening, k-means...) register themselves on startup. Plugins register additional algorithms. The Agent discovers available tools by querying the registry.
+
+### 10.5 Module Boundaries
+
+Each module owns its directory and registers its algorithms independently:
+
+```
+analysis/
+├── indices/           → registers: antigravity:ndvi, antigravity:ndwi, antigravity:savi
+├── atmospheric/       → registers: antigravity:dos1, antigravity:dark_object_subtraction
+├── classification/    → registers: antigravity:kmeans, antigravity:random_forest
+├── pansharpening/     → registers: antigravity:brovey, antigravity:ihs
+└── statistics/        → registers: antigravity:zonal_stats, antigravity:raster_stats
+```
+
+No cross-dependencies between modules. Each is a self-contained plugin that could be loaded/unloaded independently.
+
+### 10.6 Configuration-driven Rendering
+
+Even rendering behavior is configurable:
+
+```json
+{
+  "rendering": {
+    "parallel_jobs": true,
+    "max_threads": 0,
+    "preview_resolution": 256,
+    "debounce_ms": 30,
+    "resampling": "bilinear",
+    "overview_preference": "auto"
+  }
+}
+```
+
+This replaces hardcoded constants in canvas.py and allows per-project tuning.
