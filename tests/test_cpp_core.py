@@ -6,10 +6,12 @@ import numpy as np
 from osgeo import gdal
 
 BUILD = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "cmake-build"))
+BUILD_PY = os.path.join(BUILD, "src", "python")
 DATA_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 @pytest.fixture(scope="session")
 def core():
+    sys.path.insert(0, BUILD_PY)
     sys.path.insert(0, BUILD)
     os.environ.setdefault("ANTIGRAVITY_DATA", BUILD)
     import _antigravity_core as c
