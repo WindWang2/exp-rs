@@ -37,6 +37,20 @@
 #include <qgsexpressioncontext.h>
 #include <qgsexpressioncontextutils.h>
 
+// P2: symbology
+#include <qgssymbol.h>
+#include <qgslinesymbol.h>
+#include <qgsfillsymbol.h>
+#include <qgsmarkersymbol.h>
+#include <qgsrenderer.h>
+#include <qgssinglesymbolrenderer.h>
+#include <QColor>
+
+// P2: render context + labeling
+#include <qgsrendercontext.h>
+#include <qgspallabeling.h>
+#include <qgsvectorlayerlabeling.h>
+
 namespace py = pybind11;
 
 // ── P0 helpers ────────────────────────────────────────────────────────────────
@@ -170,6 +184,16 @@ PYBIND11_MODULE(_antigravity_core, m) {
         .def("featureCount", [](const QgsVectorLayer &l) { return l.featureCount(); })
         .def("fields", [](const QgsVectorLayer &l) { return l.fields(); })
         .def("wkbType",      [](const QgsVectorLayer &l) { return (int)l.wkbType(); })
+        .def("renderer", [](QgsVectorLayer &l) -> QgsFeatureRenderer* {
+            return l.renderer();
+        }, py::return_value_policy::reference)
+        .def("labeling", [](const QgsVectorLayer &l) -> py::object {
+            const auto *lab = l.labeling();
+            if (!lab) return py::none();
+            const auto *simple = dynamic_cast<const QgsVectorLayerSimpleLabeling*>(lab);
+            if (!simple) return py::none();
+            return py::cast(simple->settings());
+        })
         .def("getFeatures",  [](QgsVectorLayer &l, long long limit) {
             std::vector<QgsFeature> out;
             QgsFeatureRequest req;
@@ -238,6 +262,42 @@ PYBIND11_MODULE(_antigravity_core, m) {
     py::class_<QgsExpressionContext>(m, "QgsExpressionContext")
         .def(py::init<>())
         .def("setFeature", &QgsExpressionContext::setFeature);
+
+    // ── P2: QgsRenderContext ──────────────────────────────────────────────────
+    py::class_<QgsRenderContext>(m, "QgsRenderContext")
+        .def(py::init<>())
+        .def("scaleFactor",   &QgsRenderContext::scaleFactor)
+        .def("rendererScale", &QgsRenderContext::rendererScale)
+        .def("isValid", [](const QgsRenderContext &r) {
+            return r.painter() != nullptr;
+        });
+
+    // ── P2: QgsSymbol hierarchy ───────────────────────────────────────────────
+    py::class_<QgsSymbol>(m, "QgsSymbol")
+        .def("type",    [](const QgsSymbol &s) { return (int)s.type(); })
+        .def("opacity", &QgsSymbol::opacity)
+        .def("color",   [](const QgsSymbol &s) {
+            QColor c = s.color();
+            return py::make_tuple(c.red(), c.green(), c.blue(), c.alpha());
+        });
+
+    py::class_<QgsLineSymbol,   QgsSymbol>(m, "QgsLineSymbol");
+    py::class_<QgsFillSymbol,   QgsSymbol>(m, "QgsFillSymbol");
+    py::class_<QgsMarkerSymbol, QgsSymbol>(m, "QgsMarkerSymbol");
+
+    // ── P2: QgsFeatureRenderer ────────────────────────────────────────────────
+    py::class_<QgsFeatureRenderer>(m, "QgsFeatureRenderer")
+        .def("type", &QgsFeatureRenderer::type);
+
+    py::class_<QgsSingleSymbolRenderer, QgsFeatureRenderer>(m, "QgsSingleSymbolRenderer")
+        .def("symbol", &QgsSingleSymbolRenderer::symbol,
+             py::return_value_policy::reference);
+
+    // ── P2: QgsPalLayerSettings ───────────────────────────────────────────────
+    py::class_<QgsPalLayerSettings>(m, "QgsPalLayerSettings")
+        .def(py::init<>())
+        .def_readwrite("drawLabels", &QgsPalLayerSettings::drawLabels)
+        .def_readwrite("fieldName",  &QgsPalLayerSettings::fieldName);
 
     // ── P1: QgsExpression ─────────────────────────────────────────────────────
     py::class_<QgsExpression>(m, "QgsExpression")
