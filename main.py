@@ -380,7 +380,7 @@ class MinimalQgisWindow(QMainWindow):
             layer = QgsRasterLayer(layer_id, layer_name, file_path)
 
             self.canvas.add_layer(layer)
-            self.canvas.zoom_to_extent(layer.extent())
+            self.canvas.zoom_to_extent(layer.extent)  # extent is a property
 
             if self.layer_info_label:
                 self.layer_info_label.setText(f"1 layer loaded")
