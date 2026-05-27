@@ -1,230 +1,214 @@
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QApplication
-from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QThreadPool, QTimer
-from PySide6.QtGui import QPainter, QImage, QPixmap
-import os
+"""
+C++ QgsMapCanvas wrapper - wraps the QGIS C++ map canvas for use in Python.
 
-from core.qgsmapsettings import QgsMapSettings as MapSettings
-from gui.qgsmaprendererjob import QgsMapRendererJob as MapRendererJob
+This replaces the pure-Python QGraphicsView-based MapCanvas implementation
+with the native QGIS C++ rendering engine.
+"""
 
-class MapCanvas(QGraphicsView):
+from PySide6.QtCore import QObject, Signal, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QImage, QPainter
+import _antigravity_core as core
+
+# Import coordinate reference system
+from core.qgscoordinatereferencesystem import QgsCoordinateReferenceSystem
+from core.qgsrectangle import QgsRectangle
+
+
+class _SignalEmitter(QObject):
+    """Helper class to provide signal connectivity for the wrapper."""
+    coordinates_changed = Signal(float, float)
+
+
+class MapCanvas:
     """
-    Premium Map Canvas widget inheriting QGraphicsView.
-    Uses MapSettings and MapRendererJob for modular, thread-safe rendering.
+    Wrapper around C++ QgsMapCanvas.
+
+    Provides the same interface as the old Python MapCanvas for compatibility
+    with existing code (main.py, tools, etc.).
+
+    Signal compatibility: coordinates_changed is exposed like the old Python canvas.
     """
-    coordinates_changed = Signal(float, float) # Emits (x, y) coordinates in canvas CRS
 
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.scene = QGraphicsScene(self)
-        self.setScene(self.scene)
+        """Create the C++ QgsMapCanvas instance."""
+        self._canvas = core.QgsMapCanvas()
+        self._layers_list = []  # Track layers in Python (for compatibility)
+        self.canvas_crs = "EPSG:3857"
 
-        # Setup view performance & navigation settings
-        self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Create signal emitter for coordinate updates to match old Python canvas interface
+        self._signal_emitter = _SignalEmitter()
+        self.coordinates_changed = self._signal_emitter.coordinates_changed
 
-        # Pixmap item to display the rendered map
-        self.pixmap_item = QGraphicsPixmapItem()
-        self.scene.addItem(self.pixmap_item)
+        # Connect C++ signal to our Python signal
+        # The C++ signal passes QgsPointXY, we convert to (x, y)
+        try:
+            self._canvas.xyCoordinates.connect(self._on_xy_coordinates)
+        except AttributeError:
+            pass  # Signal not connected in test mode
 
-        self._layers_list = []
-        self._current_job = None
-        self._extent_rect = QRectF()
-        self.canvas_crs = "EPSG:3857" # Web Mercator standard for display
+    def _on_xy_coordinates(self, point):
+        """Convert C++ QgsPointXY signal to Python (x, y) signal."""
+        if point:
+            self.coordinates_changed.emit(point.x(), point.y())
 
-        # Debounce timer for refresh — prevents canceling in-flight renders
-        self._refresh_timer = QTimer(self)
-        self._refresh_timer.setSingleShot(True)
-        self._refresh_timer.setInterval(50)
-        self._refresh_timer.timeout.connect(self._do_refresh)
+    @property
+    def qgs_canvas(self):
+        """Access the underlying C++ QgsMapCanvas for advanced usage."""
+        return self._canvas
 
-        # Navigation helpers
-        self.zoom_factor = 1.15
-        self._map_tool = None
-        self._in_resize_event = False  # Flag to prevent refresh loop from resizeEvent
-        
     def set_map_tool(self, tool):
-        """Sets the current map tool for interaction."""
-        if self._map_tool:
-            self._map_tool.deactivate()
-        self._map_tool = tool
-        if self._map_tool:
-            self._map_tool.activate()
+        """Set the current map tool (QgsMapToolPan, QgsMapToolZoom, etc.)."""
+        if hasattr(tool, '_qgs_tool'):
+            # It's a wrapped C++ tool
+            # C++ setMapTool signature: setMapTool(QgsMapTool* mapTool, bool clean = false)
+            self._canvas.setMapTool(tool._qgs_tool, False)
+        else:
+            # Legacy Python tool - not supported with C++ canvas
+            raise TypeError("Only C++ QgsMapTool subclasses are supported")
 
     def map_tool(self):
-        """Returns the current map tool."""
-        return self._map_tool
+        """Get the current map tool."""
+        return self._canvas.mapTool()
 
     def layers(self):
-        """Returns the list of layers (QgsMapCanvas-compatible method)."""
+        """Return the list of layers."""
         return self._layers_list
 
     def setLayers(self, layer_list):
-        """Sets the list of layers (QgsMapCanvas-compatible method)."""
+        """
+        Set the list of layers to display.
+
+        Accepts either Python QgsRasterLayer/QgsVectorLayer objects
+        or their C++ equivalents.
+        """
+        # Convert Python layers to C++ layers if needed
+        cxx_layers = []
+        for layer in layer_list:
+            if hasattr(layer, '_qgs_layer'):
+                # It's a wrapped Python layer
+                cxx_layers.append(layer._qgs_layer)
+            else:
+                # It's already a C++ layer (from _antigravity_core)
+                cxx_layers.append(layer)
+
         self._layers_list = layer_list
+        self._canvas.setLayers(cxx_layers)
 
     def setExtent(self, extent):
-        """Sets the canvas extent (QgsMapCanvas-compatible method)."""
+        """
+        Set the visible extent.
+
+        Accepts Python QgsRectangle or QRectF.
+        """
         if hasattr(extent, 'xMinimum'):
-            self._extent_rect = QRectF(extent.xMinimum(), extent.yMinimum(), extent.width(), extent.height())
+            # QgsRectangle (Python wrapper)
+            rect = core.QgsRectangle(
+                extent.xMinimum(), extent.yMinimum(),
+                extent.xMaximum(), extent.yMaximum()
+            )
+            self._canvas.setExtent(rect)
         else:
-            self._extent_rect = extent
+            # QRectF - convert to QgsRectangle
+            rect = core.QgsRectangle(
+                extent.left(), extent.top(),
+                extent.right(), extent.bottom()
+            )
+            self._canvas.setExtent(rect)
 
     def extent(self):
-        """Returns the canvas extent (QgsMapCanvas-compatible method)."""
-        return self._extent_rect
+        """Return the current visible extent as QRectF (Python compatibility)."""
+        ext = self._canvas.extent()
+        if ext:
+            return QRectF(ext.xMinimum(), ext.yMinimum(),
+                         ext.width(), ext.height())
+        return QRectF()
 
     def add_layer(self, layer):
-        """Adds a MapLayer to the internal list and refreshes."""
+        """Add a layer and refresh the canvas."""
         self._layers_list.append(layer)
-        if self._extent_rect.isEmpty() and layer.extent:
-            # First layer defines initial extent
-            # QgsRectangle (GIS coords: Y up) -> QRectF (Qt coords: Y down)
-            ext = layer.extent
-            self._extent_rect = QRectF(ext.xMinimum(), ext.yMaximum(), ext.width(), ext.height())
-        self.refresh()
+        # Refresh the layer list
+        self.setLayers(self._layers_list)
 
     def remove_layer(self, layer_id: str):
-        """Removes a layer by its ID and refreshes."""
-        self._layers_list = [l for l in self._layers_list if l.id != layer_id]
-        self.refresh()
+        """Remove a layer by ID and refresh."""
+        self._layers_list = [l for l in self._layers_list if l.id() != layer_id]
+        self.setLayers(self._layers_list)
 
     def refresh(self):
-        """Debounced refresh — coalesces rapid calls (resize events) into one render."""
-        if not self._layers_list or self._extent_rect.isEmpty():
-            if self._current_job:
-                self._current_job.cancel()
-                self._current_job = None
-            self.pixmap_item.setPixmap(QPixmap())
-            return
-        # Restart debounce timer — last call wins
-        self._refresh_timer.start()
-
-    def _do_refresh(self):
-        """Actually spawns a new MapRendererJob."""
-        # Check for recursive refresh loop
-        if self._in_resize_event:
-            from core.logger import log_debug
-            log_debug("MapCanvas: Skipping refresh during resize event")
-            return
-
-        if self._current_job:
-            # Cancel the old job but DON'T wait for it - just start a new one
-            # The old job will check _is_canceled and exit gracefully
-            self._current_job.cancel()
-            # Don't waitForFinished() as it blocks the main thread!
-            # Instead, just clear the reference and start a new job
-            self._current_job = None
-
-        settings = self.get_settings()
-
-        self._current_job = MapRendererJob(settings)
-        # QueuedConnection ensures _on_render_finished is invoked on the GUI
-        # thread, which is required because QPixmap can only be created there.
-        self._current_job.signals.finished.connect(
-            self._on_render_finished, Qt.QueuedConnection
-        )
-        QThreadPool.globalInstance().start(self._current_job)
-
-    def _on_render_finished(self, image: QImage):
-        """Updates the pixmap item with the new rendered image."""
-        # Guard: ignore signals from stale/canceled jobs.  A canceled job
-        # should never emit, but defense-in-depth for race windows.
-        if self._current_job and self._current_job._is_canceled:
-            return
-
-        # Guard: check if image is valid before using it
-        if image.isNull():
-            from core.logger import log_warning
-            log_warning("MapCanvas: Received null QImage from renderer, skipping update")
-            self._current_job = None
-            return
-
-        try:
-            # Make a detached copy — the QImage produced by the renderer may
-            # reference a numpy buffer that can be garbage-collected.
-            safe_image = image.copy()
-            if safe_image.isNull():
-                log_warning("MapCanvas: Image copy resulted in null QImage")
-                self._current_job = None
-                return
-
-            self.pixmap_item.setPixmap(QPixmap.fromImage(safe_image))
-            self.pixmap_item.setPos(0, 0)
-
-            # Only update scene rect if we're not in a resize event to prevent loops
-            if not self._in_resize_event:
-                current_rect = self.scene.sceneRect()
-                new_rect = QRectF(0, 0, safe_image.width(), safe_image.height())
-                # Only update if the size actually changed to prevent unnecessary events
-                if current_rect.size() != new_rect.size():
-                    self.scene.setSceneRect(new_rect)
-                # Don't call resetTransform() as it can trigger resize events
-        except Exception as e:
-            from core.logger import log_error
-            log_error(f"MapCanvas: Error updating display: {e}")
-        finally:
-            self._current_job = None
+        """Trigger a canvas refresh."""
+        self._canvas.refresh()
 
     def zoom_to_extent(self, rect):
-        """Fit canvas viewport around a bounding rect and re-render."""
-        if not rect.isEmpty():
-            if hasattr(rect, 'xMinimum'):
-                # QgsRectangle (GIS coords: Y up) -> QRectF (Qt coords: Y down)
-                # QRectF y position is the TOP, so we use yMaximum
-                self._extent_rect = QRectF(rect.xMinimum(), rect.yMaximum(), rect.width(), rect.height())
-            else:
-                # QRectF
-                self._extent_rect = rect
-            self.refresh()
+        """
+        Zoom to fit the given rectangle.
 
-    def resizeEvent(self, event):
-        self._in_resize_event = True
-        super().resizeEvent(event)
+        Accepts QgsRectangle or QRectF.
+        """
+        if hasattr(rect, 'xMinimum'):
+            # QgsRectangle
+            qgs_rect = core.QgsRectangle(
+                rect.xMinimum(), rect.yMinimum(),
+                rect.xMaximum(), rect.yMaximum()
+            )
+            self._canvas.setExtent(qgs_rect)
+        else:
+            # QRectF
+            qgs_rect = core.QgsRectangle(
+                rect.left(), rect.top(),
+                rect.right(), rect.bottom()
+            )
+            self._canvas.setExtent(qgs_rect)
         self.refresh()
-        self._in_resize_event = False
 
-    def get_settings(self):
-        """Constructs MapSettings based on current canvas state."""
-        from core.qgsrectangle import QgsRectangle
-        settings = MapSettings()
-        settings.layers = self._layers_list
-        # Convert QRectF to QgsRectangle for QgsMapSettings
-        # QRectF uses Qt coords (Y down), QgsRectangle uses GIS coords (Y up)
-        # We stored QgsRectangle as QRectF(xmin, ymax, width, height)
-        # So to convert back: ymin = top - height (because Qt Y increases downward)
-        ext = self._extent_rect
-        settings.extent = QgsRectangle(ext.left(), ext.top() - ext.height(), ext.right(), ext.top())
-        settings.output_size = self.viewport().size()
-        settings.destination_crs = self.canvas_crs
-        return settings
+    def zoomIn(self):
+        """Zoom in."""
+        self._canvas.zoomIn()
 
-    # Navigation Event Overrides
-    def wheelEvent(self, event):
-        if self._map_tool:
-            self._map_tool.wheelEvent(event)
-        else:
-            super().wheelEvent(event)
+    def zoomOut(self):
+        """Zoom out."""
+        self._canvas.zoomOut()
 
-    def mousePressEvent(self, event):
-        if self._map_tool:
-            self._map_tool.mousePressEvent(event)
-        else:
-            super().mousePressEvent(event)
+    def scale(self):
+        """Return the current map scale."""
+        return self._canvas.scale()
 
-    def mouseReleaseEvent(self, event):
-        if self._map_tool:
-            self._map_tool.mouseReleaseEvent(event)
-        else:
-            super().mouseReleaseEvent(event)
+    def magnificationFactor(self):
+        """Return the current magnification factor."""
+        return self._canvas.magnificationFactor()
 
-    def mouseMoveEvent(self, event):
-        if self._map_tool:
-            self._map_tool.mouseMoveEvent(event)
-        else:
-            super().mouseMoveEvent(event)
-            
-        # Emit coordinates for status bar
-        settings = self.get_settings()
-        world_pos = settings.deviceToWorld().map(QPointF(event.pos()))
-        self.coordinates_changed.emit(world_pos.x(), world_pos.y())
+    def set_destination_crs(self, crs_auth_id):
+        """Set the destination CRS (e.g., 'EPSG:3857')."""
+        crs = QgsCoordinateReferenceSystem(crs_auth_id)
+        if hasattr(crs, '_qgs_crs'):
+            self._canvas.setDestinationCrs(crs._qgs_crs)
+
+    def saveAsImage(self, path):
+        """
+        Render the current canvas to an image file.
+
+        This uses the synchronous C++ rendering (QgsMapRendererCustomPainterJob),
+        avoiding event loop issues.
+        """
+        self._canvas.saveAsImage(path)
+
+    def resize(self, width, height):
+        """Resize the canvas (for widget embedding)."""
+        # C++ QgsMapCanvas is a QWidget, so it has resize()
+        if hasattr(self._canvas, 'resize'):
+            self._canvas.resize(width, height)
+
+    def size(self):
+        """Return the canvas size."""
+        if hasattr(self._canvas, 'size'):
+            return self._canvas.size()
+        return QSize(800, 600)
+
+    def show(self):
+        """Show the canvas widget."""
+        if hasattr(self._canvas, 'show'):
+            self._canvas.show()
+
+    def setParent(self, parent):
+        """Set the parent widget."""
+        if hasattr(self._canvas, 'setParent'):
+            self._canvas.setParent(parent)

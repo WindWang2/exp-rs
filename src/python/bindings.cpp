@@ -112,6 +112,8 @@ PYBIND11_MODULE(_antigravity_core, m) {
     // ── P1: QgsRectangle ──────────────────────────────────────────────────────
     py::class_<QgsRectangle>(m, "QgsRectangle")
         .def(py::init<>())
+        .def(py::init<double, double, double, double>(),
+             py::arg("xmin"), py::arg("ymin"), py::arg("xmax"), py::arg("ymax"))
         .def("xMinimum", &QgsRectangle::xMinimum)
         .def("xMaximum", &QgsRectangle::xMaximum)
         .def("yMinimum", &QgsRectangle::yMinimum)
@@ -363,6 +365,9 @@ PYBIND11_MODULE(_antigravity_core, m) {
             c.setLayers(lst);
         })
         .def("setExtent",           [](QgsMapCanvas &c, const QgsRectangle &r) { c.setExtent(r); })
+        .def("extent",              &QgsMapCanvas::extent)
+        .def("setMapTool",          &QgsMapCanvas::setMapTool)
+        .def("mapTool",             &QgsMapCanvas::mapTool)
         .def("refresh",             &QgsMapCanvas::refresh)
         .def("scale",               &QgsMapCanvas::scale)
         .def("magnificationFactor", &QgsMapCanvas::magnificationFactor)

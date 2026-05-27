@@ -1,105 +1,104 @@
-from PySide6.QtCore import Qt, QPointF, QRectF
-from PySide6.QtGui import QCursor
-import enum
+"""
+C++ QgsMapTool wrappers - wrap QGIS C++ map tools for Python.
+
+This replaces the pure-Python map tool implementation with the native
+QGIS C++ tools (QgsMapToolPan, QgsMapToolZoom, etc.).
+"""
+
+import _antigravity_core as core
+
 
 class MapTool:
     """
-    Abstract base class for map tools (e.g., pan, zoom, selection).
-    Equivalent to QgsMapTool in QGIS.
+    Base wrapper for C++ QgsMapTool objects.
+
+    Provides a Python interface compatible with the old pure-Python
+    MapTool class, wrapping the C++ QgsMapTool implementations.
     """
-    def __init__(self, canvas):
+
+    def __init__(self, canvas, qgs_tool):
+        """
+        Initialize with a canvas and a C++ QgsMapTool instance.
+
+        Args:
+            canvas: MapCanvas wrapper instance
+            qgs_tool: C++ QgsMapTool instance (e.g., QgsMapToolPan)
+        """
         self._canvas = canvas
+        self._qgs_tool = qgs_tool
 
     def canvas(self):
+        """Return the canvas this tool is attached to."""
         return self._canvas
 
     def activate(self):
-        """Called when the tool is set as the current tool."""
-        pass
+        """Activate the tool."""
+        if self._qgs_tool:
+            self._qgs_tool.activate()
 
     def deactivate(self):
-        """Called when another tool is set as the current tool."""
-        pass
+        """Deactivate the tool."""
+        if self._qgs_tool:
+            self._qgs_tool.deactivate()
 
-    def mousePressEvent(self, event):
-        pass
-
-    def mouseReleaseEvent(self, event):
-        pass
-
-    def mouseMoveEvent(self, event):
-        pass
-
-    def wheelEvent(self, event):
-        """
-        Default wheel event implementation for zooming.
-        Can be overridden by specialized zoom tools if needed.
-        """
-        if self._canvas.extent().isEmpty():
-            return
-
-        # Map pixel location to world coordinates
-        settings = self._canvas.get_settings()
-        world_pos = settings.deviceToWorld().map(QPointF(event.position()))
-        
-        # Calculate zoom factor
-        angle = event.angleDelta().y()
-        zoom_factor = getattr(self._canvas, 'zoom_factor', 1.15)
-        factor = 1.0 / zoom_factor if angle > 0 else zoom_factor
-        
-        # Zoom extent around the mouse cursor
-        ext = self._canvas.extent()
-        new_width = ext.width() * factor
-        new_height = ext.height() * factor
-        
-        rel_x = (world_pos.x() - ext.left()) / ext.width()
-        rel_y = (world_pos.y() - ext.top()) / ext.height()
-        
-        new_left = world_pos.x() - rel_x * new_width
-        new_top = world_pos.y() - rel_y * new_height
-        
-        self._canvas.setExtent(QRectF(new_left, new_top, new_width, new_height))
-        self._canvas.refresh()
+    @property
+    def qgs_tool(self):
+        """Access the underlying C++ QgsMapTool for advanced usage."""
+        return self._qgs_tool
 
 
 class MapToolPan(MapTool):
     """
-    Tool for panning the map by dragging the mouse.
+    Wrapper for C++ QgsMapToolPan.
+
+    Provides panning functionality by dragging the mouse.
     """
+
     def __init__(self, canvas):
-        super().__init__(canvas)
-        self._dragging = False
-        self._last_mouse_pos = None
+        """
+        Create a pan tool for the given canvas.
+
+        Args:
+            canvas: MapCanvas wrapper instance
+        """
+        qgs_pan = core.QgsMapToolPan(canvas.qgs_canvas)
+        super().__init__(canvas, qgs_pan)
 
     def activate(self):
-        self.canvas().setCursor(Qt.ArrowCursor)
+        """Activate the pan tool."""
+        if self._qgs_tool:
+            self._qgs_tool.activate()
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._dragging = True
-            self._last_mouse_pos = event.pos()
-            self.canvas().setCursor(Qt.ClosedHandCursor)
+    def deactivate(self):
+        """Deactivate the pan tool."""
+        if self._qgs_tool:
+            self._qgs_tool.deactivate()
 
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._dragging = False
-            self._last_mouse_pos = None
-            self.canvas().setCursor(Qt.ArrowCursor)
 
-    def mouseMoveEvent(self, event):
-        if self._dragging and self._last_mouse_pos:
-            delta = event.pos() - self._last_mouse_pos
-            self._last_mouse_pos = event.pos()
-            
-            settings = self.canvas().get_settings()
-            transform = settings.deviceToWorld()
-            
-            # Map pixel delta to world delta
-            p1 = transform.map(QPointF(0, 0))
-            p2 = transform.map(QPointF(delta.x(), delta.y()))
-            world_delta = p2 - p1
-            
-            ext = self.canvas().extent()
-            ext.translate(-world_delta.x(), -world_delta.y())
-            self.canvas().setExtent(ext)
-            self.canvas().refresh()
+class MapToolZoom(MapTool):
+    """
+    Wrapper for C++ QgsMapToolZoom.
+
+    Provides zoom in/out functionality by dragging a rectangle.
+    """
+
+    def __init__(self, canvas, zoom_out=False):
+        """
+        Create a zoom tool for the given canvas.
+
+        Args:
+            canvas: MapCanvas wrapper instance
+            zoom_out: If True, zoom out; if False, zoom in
+        """
+        qgs_zoom = core.QgsMapToolZoom(canvas.qgs_canvas, zoom_out)
+        super().__init__(canvas, qgs_zoom)
+
+    def activate(self):
+        """Activate the zoom tool."""
+        if self._qgs_tool:
+            self._qgs_tool.activate()
+
+    def deactivate(self):
+        """Deactivate the zoom tool."""
+        if self._qgs_tool:
+            self._qgs_tool.deactivate()

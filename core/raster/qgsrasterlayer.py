@@ -62,6 +62,30 @@ class QgsRasterLayer(QgsMapLayer):
         # --- Create and attach the appropriate renderer to the pipe ---
         self._create_and_attach_renderer()
 
+        # --- C++ layer for QgsMapCanvas integration ---
+        self._qgs_layer_cached = None  # Lazy-loaded C++ QgsRasterLayer
+
+    # ------------------------------------------------------------------
+    # C++ Integration
+    # ------------------------------------------------------------------
+
+    @property
+    def _qgs_layer(self):
+        """
+        Get the C++ QgsRasterLayer for use with QgsMapCanvas.
+
+        This is lazy-created when first accessed.
+        """
+        if self._qgs_layer_cached is None:
+            import _antigravity_core as core
+            # Create C++ QgsRasterLayer using the file URI
+            # C++ signature: QgsRasterLayer(path: str, name: str = 'raster')
+            self._qgs_layer_cached = core.QgsRasterLayer(
+                self._provider._uri,  # file path
+                self.name             # layer name
+            )
+        return self._qgs_layer_cached
+
     # ------------------------------------------------------------------
     # Pipeline access
     # ------------------------------------------------------------------
