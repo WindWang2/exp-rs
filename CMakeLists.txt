@@ -52,6 +52,8 @@ if(WITH_INTERNAL_SPATIALINDEX)
 endif()
 
 # --- qgsconfig.h: all optional features OFF for P0 ---
+# ANTIGRAVITY: P3 — enable HAVE_GUI so core exposes authMethodEditWidget etc.
+set(HAVE_GUI TRUE)
 set(CPACK_PACKAGE_VERSION_MAJOR 1)
 set(CPACK_PACKAGE_VERSION_MINOR 0)
 set(CPACK_PACKAGE_VERSION_PATCH 0)
@@ -115,6 +117,15 @@ configure_file(cmake_templates/qgsconfig.h.in ${CMAKE_BINARY_DIR}/qgsconfig.h)
 include_directories(${CMAKE_BINARY_DIR})
 
 add_subdirectory(src/core)
+# ANTIGRAVITY: P3 GUI options — disable optional deps not installed on this system
+option(WITH_QWTPOLAR      "" OFF)
+option(WITH_QSCINTILLA    "" OFF)
+option(WITH_QTWEBENGINE   "" OFF)
+option(WITH_QTGAMEPAD     "" OFF)
+option(WITH_QUICK         "" OFF)
+add_subdirectory(src/ui)
+add_subdirectory(src/native)
+add_subdirectory(src/gui)
 add_subdirectory(src/python)
 enable_testing()
 add_subdirectory(tests/cpp)

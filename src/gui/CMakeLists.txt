@@ -1899,6 +1899,81 @@ endif()
 #############################################################
 # qgis_gui library
 
+# ANTIGRAVITY: remove QWT-dependent sources (QWT not installed; stub headers provided)
+list(REMOVE_ITEM QGIS_GUI_SRCS
+  symbology/qgsgraduatedhistogramwidget.cpp
+  qgshistogramwidget.cpp
+  qgscurveeditorwidget.cpp
+  qgsgradientcolorrampdialog.cpp
+  raster/qgsrasterhistogramwidget.cpp
+)
+# ANTIGRAVITY: remove QScintilla (codeeditor) sources — stub headers only
+# Also remove files that use raw Scintilla SCI_* messages or SendScintilla
+list(REMOVE_ITEM QGIS_GUI_SRCS
+  editorwidgets/qgsjsoneditwidget.cpp
+  qgsexpressionbuilderwidget.cpp
+  qgsqueryresultwidget.cpp
+  qgssqlcomposerdialog.cpp
+)
+list(REMOVE_ITEM QGIS_GUI_SRCS
+  codeeditors/qgscodeeditor.cpp
+  codeeditors/qgscodeeditorcolorscheme.cpp
+  codeeditors/qgscodeeditorcolorschemeregistry.cpp
+  codeeditors/qgscodeeditorcss.cpp
+  codeeditors/qgscodeeditordockwidget.cpp
+  codeeditors/qgscodeeditorexpression.cpp
+  codeeditors/qgscodeeditorhistorydialog.cpp
+  codeeditors/qgscodeeditorhtml.cpp
+  codeeditors/qgscodeeditorjs.cpp
+  codeeditors/qgscodeeditorjson.cpp
+  codeeditors/qgscodeeditorpython.cpp
+  codeeditors/qgscodeeditorr.cpp
+  codeeditors/qgscodeeditorshell.cpp
+  codeeditors/qgscodeeditorsql.cpp
+  codeeditors/qgscodeeditorwidget.cpp
+)
+# ANTIGRAVITY: remove non-codeeditor files that include codeeditor/Qsci headers at runtime
+list(REMOVE_ITEM QGIS_GUI_SRCS
+  qgsexpressionfinder.cpp
+  qgsexpressionlineedit.cpp
+  qgsrichtexteditor.cpp
+  qgsdbqueryhistoryprovider.cpp
+  settings/qgssettingsregistrygui.cpp
+  vector/qgsattributesformview.cpp
+  vector/qgsattributesformproperties.cpp
+  providers/sensorthings/qgssensorthingssubseteditor.cpp
+  processing/qgsprocessinghistoryprovider.cpp
+  layout/qgslayouthtmlwidget.cpp
+)
+# ANTIGRAVITY: replace settings/qgssettingsregistrygui.cpp with a stub that avoids
+# qgscodeeditor.h / Qwt headers, but provides all required static variable definitions
+list(APPEND QGIS_GUI_SRCS antigravity_settingsregistrygui.cpp)
+# ANTIGRAVITY: remove codeeditor headers from target — prevents AUTOMOC from generating
+# moc files that reference QsciScintilla/staticMetaObject etc.
+list(REMOVE_ITEM QGIS_GUI_HDRS
+  codeeditors/qgscodeeditor.h
+  codeeditors/qgscodeeditorcolorscheme.h
+  codeeditors/qgscodeeditorcolorschemeregistry.h
+  codeeditors/qgscodeeditorcss.h
+  codeeditors/qgscodeeditordockwidget.h
+  codeeditors/qgscodeeditorexpression.h
+  codeeditors/qgscodeeditorhistorydialog.h
+  codeeditors/qgscodeeditorhtml.h
+  codeeditors/qgscodeeditorjs.h
+  codeeditors/qgscodeeditorjson.h
+  codeeditors/qgscodeeditorpython.h
+  codeeditors/qgscodeeditorr.h
+  codeeditors/qgscodeeditorshell.h
+  codeeditors/qgscodeeditorsql.h
+  codeeditors/qgscodeeditorwidget.h
+)
+# ANTIGRAVITY: stub implementation for QgsCodeEditorColorSchemeRegistry
+# (qgsgui.cpp needs its constructor/destructor; real impl was in removed codeeditors/)
+list(APPEND QGIS_GUI_SRCS antigravity_codeeditor_stubs.cpp)
+# ANTIGRAVITY: auto-generated weak stubs for all missing Qgs/Qsci symbols
+# (satisfies dlopen; none are called during P3 canvas/maptool tests)
+list(APPEND QGIS_GUI_SRCS antigravity_qgsgui_stubs.c)
+
 if(NOT LIBRARY_TYPE EQUAL STATIC)
   win32_version_info("QGIS GUI Library" "qgis_gui" QGIS_GUI_SRCS)
 endif()
@@ -1919,6 +1994,8 @@ endif()
 set_target_properties(qgis_gui PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILDS})
 
 target_include_directories(qgis_gui SYSTEM PUBLIC
+  ${CMAKE_SOURCE_DIR}/src/stubs/qwt
+  ${CMAKE_SOURCE_DIR}/src/stubs
   ${QWT_INCLUDE_DIR}
   ${QSCINTILLA_INCLUDE_DIR}
 )

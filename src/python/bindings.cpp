@@ -7,6 +7,7 @@
 #include <qgsrasterlayer.h>
 #include <qgsmapsettings.h>
 #include <qgsmaprenderersequentialjob.h>
+#include <qgsmaprenderercustompainterjob.h>
 #include <qgscoordinatetransform.h>
 #include <QImage>
 
@@ -50,6 +51,15 @@
 #include <qgsrendercontext.h>
 #include <qgspallabeling.h>
 #include <qgsvectorlayerlabeling.h>
+
+// P3: GUI
+#include <qgsmapcanvas.h>
+#include <qgsmaptool.h>
+#include <maptools/qgsmaptoolpan.h>
+#include <maptools/qgsmaptoolzoom.h>
+#include <layertree/qgslayertreeview.h>
+#include <QTimer>
+#include <QCoreApplication>
 
 namespace py = pybind11;
 
@@ -320,4 +330,90 @@ PYBIND11_MODULE(_antigravity_core, m) {
             if (e.hasEvalError()) return QVariant();
             return result;
         });
+
+    // ── P3: QgsMapCanvas ──────────────────────────────────────────────────────
+    // mRefreshTimer is new QTimer(this) — a heap child destroyed late in ~QObject,
+    // AFTER ~QWidget has already run its event processing.  Deleting timer children
+    // explicitly here kills their timer IDs and disconnects timeout→refreshMap
+    // BEFORE ~QWidget gets a chance to fire them mid-destruction.
+    struct SafeDeleter {
+        void operator()(QgsMapCanvas *c) const {
+            if (!c) return;
+            // Delete each QTimer child: ~QTimer kills the timer ID and
+            // ~QObject disconnects timeout→refreshMap; the child removes
+            // itself from c's children list, so delete c won't touch it again.
+            const auto timers = c->findChildren<QTimer*>();
+            for (auto *t : timers) {
+                delete t;
+            }
+            // Cancel any render job that fired before we got here.
+            c->stopRendering();
+            delete c;
+        }
+    };
+    using CanvasHolder = std::unique_ptr<QgsMapCanvas, SafeDeleter>;
+
+    py::class_<QgsMapCanvas, CanvasHolder>(m, "QgsMapCanvas")
+        .def(py::init([]() {
+            return CanvasHolder(new QgsMapCanvas());
+        }))
+        .def("setLayers", [](QgsMapCanvas &c, const std::vector<QgsMapLayer*> &layers) {
+            QList<QgsMapLayer*> lst;
+            for (auto *l : layers) lst.append(l);
+            c.setLayers(lst);
+        })
+        .def("setExtent",           [](QgsMapCanvas &c, const QgsRectangle &r) { c.setExtent(r); })
+        .def("refresh",             &QgsMapCanvas::refresh)
+        .def("scale",               &QgsMapCanvas::scale)
+        .def("magnificationFactor", &QgsMapCanvas::magnificationFactor)
+        .def("saveAsImage", [](QgsMapCanvas &c, const QString &path) {
+            // Use CustomPainterJob::renderSynchronously() — never enters event loop,
+            // so it cannot trigger mRefreshTimer or other async canvas state.
+            QgsMapSettings settings = c.mapSettings();
+            QSize sz = settings.outputSize();
+            if (sz.isEmpty()) sz = QSize(256, 256);
+            settings.setOutputSize(sz);
+            QImage img(sz, QImage::Format_ARGB32_Premultiplied);
+            img.fill(Qt::transparent);
+            QPainter painter(&img);
+            QgsMapRendererCustomPainterJob job(settings, &painter);
+            job.renderSynchronously();
+            painter.end();
+            return img.save(path);
+        });
+
+    // ── P3: QgsMapTool ────────────────────────────────────────────────────────
+    py::class_<QgsMapTool>(m, "QgsMapTool");
+
+    // QgsMapTool(canvas) sets canvas as Qt parent via QObject(canvas).
+    // pybind11 releases keep_alive BEFORE calling the tool's C++ dtor, so
+    // canvas ~QObject auto-deletes the tool as a child, then pybind11 tries
+    // to delete it again → double-free crash.
+    // Fix: setParent(nullptr) immediately after construction so pybind11 is
+    // the sole owner.  mCanvas is a QPointer so it safely auto-nulls when
+    // canvas is deleted, protecting ~QgsMapTool's unsetMapTool() call.
+    py::class_<QgsMapToolPan, QgsMapTool>(m, "QgsMapToolPan")
+        .def(py::init([](QgsMapCanvas *c) {
+                 auto *t = new QgsMapToolPan(c);
+                 t->setParent(nullptr);  // detach from canvas — pybind11 owns it
+                 return t;
+             }),
+             py::arg("canvas"),
+             py::return_value_policy::take_ownership,
+             py::keep_alive<0, 1>());
+
+    py::class_<QgsMapToolZoom, QgsMapTool>(m, "QgsMapToolZoom")
+        .def(py::init([](QgsMapCanvas *c, bool zoomOut) {
+                 auto *t = new QgsMapToolZoom(c, zoomOut);
+                 t->setParent(nullptr);
+                 return t;
+             }),
+             py::arg("canvas"), py::arg("zoomOut") = false,
+             py::return_value_policy::take_ownership,
+             py::keep_alive<0, 1>());
+
+    // ── P3: QgsLayerTreeView ──────────────────────────────────────────────────
+    py::class_<QgsLayerTreeView>(m, "QgsLayerTreeView")
+        .def(py::init([]() { return new QgsLayerTreeView(); }),
+             py::return_value_policy::take_ownership);
 }
