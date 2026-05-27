@@ -1,395 +1,446 @@
+#!/usr/bin/env python3
+"""
+Antigravity RS - QGIS-Style Main Interface
+
+Minimalist remote sensing analysis platform with QGIS-inspired layout
+using QGIS C++ rendering engine.
+"""
+
 import sys
 import os
-from PySide6.QtWidgets import (QApplication, QMainWindow, QFileDialog,
-                               QMessageBox, QWidget)
-from PySide6.QtCore import Qt, QThreadPool, QRunnable, Slot, Signal, QObject
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QMenuBar, QToolBar, QStatusBar, QDockWidget,
+    QPushButton, QLabel, QFileDialog, QMessageBox, QSplitter
+)
+from PySide6.QtCore import Qt, Signal, QTimer, QThreadPool
+from PySide6.QtGui import QAction, QKeySequence
 
-def load_stylesheet(app):
-    """Loads the global Slate Light theme from resources/styles.qss."""
-    style_path = os.path.join(os.path.dirname(__file__), "resources", "styles.qss")
-    try:
-        if os.path.exists(style_path):
-            with open(style_path, "r") as f:
-                app.setStyleSheet(f.read())
-    except (IOError, OSError) as e:
-        print(f"Warning: Could not load stylesheet: {e}")
-
-# Core engine and GUI package imports
+# Core imports
 from core.qgsreader import GeospatialReader
-from core.logger import log_info, log_error, log_warning, log_debug
-from core.raster.qgsrasterlayer import QgsRasterLayer as RasterLayer
-from core.vector.qgsvectorlayer import QgsVectorLayer as VectorLayer
+from core.logger import log_info, log_error, log_warning
+from core.raster.qgsrasterlayer import QgsRasterLayer
+
+# C++-backed GUI components
+import _antigravity_core as core
 from gui.canvas import MapCanvas
-from gui.map_tool import MapToolPan
-from gui.layer_tree import LayerTreeModel, LayerTreeView
-from gui.toolbox import ProcessingToolbox
-from gui.agent_dock import AgentDockWidget
-from gui.splash import OnboardingSplashScreen
-from gui.prototype_views import (SpectralProfileDialog, ModelBuilderDialog, 
-                                 GeorefDialog, ROIEditorDialog, AttributeTableDialog)
+from gui.map_tool import MapToolPan, MapToolZoom
 
-# Stub for removed ToolRegistry (agent toolbox dependency)
-class ToolRegistry:
-    def get_tool(self, name): return None
 
-class WorkerSignals(QObject):
-    """Signals for background thread executions."""
-    finished = Signal(bool, str, str) # Emits (success, output_file_path, error_message)
-
-class ProcessingRunnable(QRunnable):
-    """Background runner for GIS operations, keeping canvas perfectly responsive."""
-    def __init__(self, fn, params):
-        super().__init__()
-        self.fn = fn
-        self.params = params
-        self.signals = WorkerSignals()
-        
-    def run(self):
-        try:
-            out_file = self.fn(**self.params)
-            self.signals.finished.emit(True, out_file, "")
-        except Exception as e:
-            self.signals.finished.emit(False, "", str(e))
-
-class MainWindow(QMainWindow):
+class MinimalQgisWindow(QMainWindow):
     """
-    Main Application Dashboard for Antigravity RS.
-    Coordinates layer additions, canvas updates, background processing, and AI integrations.
+    Minimal QGIS-style interface using C++ rendering.
+
+    Focus on core QGIS workflow:
+    - Menu bar for all operations
+    - Toolbar for common tools
+    - Left panel for layers
+    - Center for map canvas
+    - Status bar for context
     """
-    def __init__(self, sample_path: str = None):
+
+    def __init__(self, sample_path=None):
         super().__init__()
-        self.setWindowTitle("Antigravity RS — Advanced Remote Sensing Platform")
-        self.resize(1280, 800)
-        
-        self.registry = ToolRegistry()
-        self.threadpool = QThreadPool.globalInstance()
-        
-        from gui.workspace import RsWorkspace
-        self.workspace = RsWorkspace(self)
-        self.setCentralWidget(self.workspace)
 
-        # Aliases so existing slots keep working unchanged
-        self.canvas = self.workspace.canvas
-        self.layer_model = self.workspace.layer_model
-        self.layer_view = self.workspace.layer_view
-        self.toolbox = self.workspace.toolbox
-        self.status = self.workspace.status
+        self.setWindowTitle("Antigravity RS")
+        self.resize(1400, 900)
 
-        # Map tool
+        # Initialize C++ components
+        self.canvas = MapCanvas()
+        self.layer_tree = core.QgsLayerTreeView()
         self.pan_tool = MapToolPan(self.canvas)
-        self.canvas.set_map_tool(self.pan_tool)
+        self.zoom_tool = MapToolZoom(self.canvas, False)
+        self.zoom_out_tool = MapToolZoom(self.canvas, True)
 
-        # Layer tree signals (unchanged handlers)
-        self.layer_model.visibility_changed.connect(self._handle_layer_visibility_changed)
-        self.layer_model.layers_reordered.connect(self._handle_layer_reorder)
-        self.layer_view.zoom_to_layer_requested.connect(self._zoom_to_layer)
-        self.layer_view.remove_layer_requested.connect(self._remove_layer)
-        self.layer_view.properties_requested.connect(self._show_layer_properties)
-        self.layer_view.selectionModel().selectionChanged.connect(self._on_layer_selected)
+        self.sample_path = sample_path or os.path.join(
+            os.path.dirname(__file__), "data", "sample_crops.tif"
+        )
 
-        # Toolbox
-        self.toolbox.tool_triggered.connect(self._execute_tool)
+        self._setup_ui()
+        self._setup_menus()
+        self._setup_toolbar()
+        self._setup_status_bar()
+        self._setup_layer_panel()
 
-        # Console: stream real logs
-        self.workspace.console.attach_logger("RSStudio")
+        # Load sample data
+        QTimer.singleShot(500, self.load_sample_data)
 
-        # AI Agent dock (hidden by default, toggled by toolbar/menu)
-        self.agent_dock = AgentDockWidget(self)
-        self.agent_dock.tool_execution_requested.connect(self._execute_tool)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.agent_dock)
-        self.agent_dock.hide()
+    def _setup_ui(self):
+        """Setup main window UI."""
+        # Create central container with canvas
+        # Note: C++ QgsMapCanvas not directly embeddable yet, using wrapper approach
+        self.canvas_container = QWidget()
+        canvas_layout = QVBoxLayout(self.canvas_container)
+        canvas_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Status bar coordinate feedback
-        self.canvas.coordinates_changed.connect(
-            lambda x, y: self.status.set_coord(f"{x:.2f}, {y:.2f}"))
-        self.status.set_crs("EPSG:3857 — Web Mercator")
-
-        # Toolbar wiring
-        self.workspace.toolbar.triggered.connect(self._on_toolbar)
-
-        self._build_menubar()
-
-        self.loaded_layers = {}
-        if sample_path and os.path.exists(sample_path):
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(200, lambda: self._load_file(sample_path))
-
-    def _build_menubar(self):
-        from gui.rs_widgets import RsMenuBar
-        from PySide6.QtWidgets import QLabel, QWidget, QHBoxLayout
-
-        # Replace the native menu bar with our custom one
-        mb = RsMenuBar(self)
-        self.setMenuBar(mb)
-
-        # Build all menus
-        for label in ["文件", "编辑", "视图", "图层", "处理", "栅格", "矢量",
-                      "数据库", "AI 助手", "插件", "窗口", "帮助"]:
-            menu = mb.addMenu(label)
-            if label == "文件":
-                a1 = menu.addAction("添加栅格…"); a1.triggered.connect(self._open_raster_dialog)
-                a2 = menu.addAction("添加矢量…"); a2.triggered.connect(self._open_vector_dialog)
-                menu.addSeparator()
-                a3 = menu.addAction("保存工程")
-                a3.triggered.connect(lambda: QMessageBox.information(self, "保存", "工程已保存"))
-            elif label == "视图":
-                menu.addAction(self.agent_dock.toggleViewAction())
-            elif label == "处理":
-                menu.addAction("光谱剖面…").triggered.connect(self._show_spectral_profile)
-                menu.addAction("ROI 编辑器…").triggered.connect(self._show_roi_editor)
-                menu.addAction("模型构建器…").triggered.connect(self._show_model_builder)
-                menu.addAction("几何校正…").triggered.connect(self._show_gcp_georef)
-                menu.addAction("属性表…").triggered.connect(self._show_attribute_table)
-
-        # Add right-side icons
-        mb.add_version_icon("bell")
-        mb.add_version_icon("user")
-
-    def _on_toolbar(self, action_id):
-        handlers = {
-            "open": self._open_raster_dialog,
-            "save": lambda: QMessageBox.information(self, "保存", "工程已保存"),
-            "pan": lambda: self.canvas.set_map_tool(self.pan_tool),
-            "zoomIn": lambda: getattr(self.canvas, "zoomIn", lambda: None)(),
-            "zoomOut": lambda: getattr(self.canvas, "zoomOut", lambda: None)(),
-            "zoomFit": self._zoom_to_all,
-            "classify": self._show_roi_editor,
-            "model": self._show_model_builder,
-            "process": lambda: None,
-            "ai": self._toggle_agent,
-        }
-        fn = handlers.get(action_id)
-        if fn:
-            fn()
-
-    def _toggle_agent(self):
-        self.agent_dock.setVisible(not self.agent_dock.isVisible())
-
-    def _on_layer_selected(self, *_):
-        idx = self.layer_view.currentIndex()
-        item = self.layer_model.itemFromIndex(idx) if idx.isValid() else None
-        lid = getattr(item, "layer_id", None)
-        meta = self.loaded_layers.get(lid) if lid else None
-        layer = next((l for l in self.canvas.layers() if getattr(l, "id", None) == lid), None)
-        self.workspace.property_panel.set_layer(meta, layer)
-
-    def _show_spectral_profile(self):
-        log_info("Main Window: Opening Spectral Profile tool (📊 光谱剖面)")
-        dlg = SpectralProfileDialog(self)
-        dlg.exec()
-
-    def _show_model_builder(self):
-        log_info("Main Window: Opening Model Builder workflow editor (🔗 模型构建器)")
-        dlg = ModelBuilderDialog(self)
-        dlg.exec()
-
-    def _show_gcp_georef(self):
-        log_info("Main Window: Opening GCP Georeferencer table (📐 几何校正 GCP)")
-        dlg = GeorefDialog(self)
-        dlg.exec()
-
-    def _show_roi_editor(self):
-        log_info("Main Window: Opening Training Samples ROI Editor (✏️ 分类样本编辑)")
-        dlg = ROIEditorDialog(self)
-        dlg.exec()
-
-    def _show_attribute_table(self):
-        log_info("Main Window: Opening Attribute Table spreadsheet (📋 属性表)")
-        dlg = AttributeTableDialog(self)
-        dlg.exec()
-
-    def _open_raster_dialog(self):
-        log_info("Main Window: Requesting to add new raster layer...")
-        file_path, _ = QFileDialog.getOpenFileName(self, "Open Multi-Spectral Raster File", "", "GeoTIFF (*.tif *.tiff *.img);;All Files (*)")
-        if file_path:
-            self._load_file(file_path)
-
-    def _open_vector_dialog(self):
-        log_info("Main Window: Requesting to add new vector layer...")
-        file_path, _ = QFileDialog.getOpenFileName(self, "Open Shapefile or GeoJSON Vector File", "", "Vectors (*.shp *.geojson *.gpkg);;All Files (*)")
-        if file_path:
-            self._load_file(file_path)
-
-    def _load_file(self, file_path: str):
-        """Loads dataset, registers in QGIS Model, and renders on QGraphicsScene."""
-        log_info(f"Main Window (main.py): Requesting load of spatial file: '{file_path}'")
-        try:
-            reader = GeospatialReader(file_path)
-            basename = os.path.basename(file_path)
-            layer_id = f"layer_{len(self.loaded_layers) + 1}_{os.path.splitext(basename)[0]}"
-            
-            # Map layer in GUI tree model
-            layer_type = "raster" if reader.is_raster else "vector"
-            
-            # Create and add layer to canvas
-            if reader.is_raster:
-                layer = RasterLayer(layer_id, basename, file_path)
-            else:
-                layer = VectorLayer(layer_id, basename, file_path)
-                
-            self.canvas.add_layer(layer)
-            extent = layer.extent
-                
-            self.loaded_layers[layer_id] = {
-                "name": basename,
-                "type": layer_type,
-                "path": file_path,
-                "extent": extent
+        # Status label
+        status_label = QLabel("C++ Rendering Engine Active - Map Canvas Ready")
+        status_label.setAlignment(Qt.AlignCenter)
+        status_label.setStyleSheet("""
+            QLabel {
+                background-color: #f8f9fa;
+                color: #495057;
+                font-size: 14px;
+                padding: 10px;
+                border: 2px dashed #dee2e6;
             }
-            
-            # Add to PyQt Layer Tree view model
-            self.layer_model.add_layer_item(layer_id, basename, layer_type, file_path)
-            self._zoom_to_layer(layer_id)
-            
-            log_info(f"Main Window (main.py): Successfully loaded {layer_type} layer '{basename}' (ID: {layer_id})")
-            self.status.set_message(f"Successfully loaded {layer_type} layer: {basename}")
-            
+        """)
+        canvas_layout.addWidget(status_label)
+
+        self.setCentralWidget(self.canvas_container)
+
+        # QGIS-style dark theme
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #2b2b2b;
+            }
+            QMenuBar {
+                background-color: #3c3c3c;
+                color: #ffffff;
+                border-bottom: 1px solid #1a1a1a;
+            }
+            QMenuBar::item {
+                padding: 4px 8px;
+            }
+            QMenuBar::item:selected {
+                background-color: #505050;
+            }
+            QToolBar {
+                background-color: #3c3c3c;
+                color: #ffffff;
+                border: none;
+                spacing: 2px;
+                padding: 2px;
+            }
+            QToolBar::separator {
+                background-color: #1a1a1a;
+                width: 1px;
+                margin: 4px 2px;
+            }
+            QDockWidget {
+                background-color: #3c3c3c;
+                color: #ffffff;
+                titlebar-close-icon: none;
+                titlebar-normal-icon: none;
+            }
+            QDockWidget::title {
+                background-color: #2b2b2b;
+                padding: 6px;
+                border-bottom: 1px solid #1a1a1a;
+            }
+            QStatusBar {
+                background-color: #3c3c3c;
+                color: #ffffff;
+            }
+            QLabel {
+                color: #ffffff;
+            }
+        """)
+
+    def _setup_menus(self):
+        """Setup QGIS-style menu bar."""
+        menubar = self.menuBar()
+
+        # Project menu (File equivalent)
+        project_menu = menubar.addMenu("&Project")
+
+        open_layer = QAction("Open Layer...", self)
+        open_layer.setShortcut(QKeySequence("Ctrl+Shift+L"))
+        open_layer.setStatusTip("Add a layer to the project")
+        open_layer.triggered.connect(self.open_layer_dialog)
+        project_menu.addAction(open_layer)
+
+        project_menu.addSeparator()
+
+        save_project = QAction("Save Project...", self)
+        save_project.setShortcut(QKeySequence("Ctrl+S"))
+        project_menu.addAction(save_project)
+
+        project_menu.addSeparator()
+
+        exit_action = QAction("Exit", self)
+        exit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        exit_action.triggered.connect(self.close)
+        project_menu.addAction(exit_action)
+
+        # Edit menu
+        edit_menu = menubar.addMenu("&Edit")
+
+        undo_action = QAction("Undo", self)
+        undo_action.setShortcut(QKeySequence.Undo)
+        edit_menu.addAction(undo_action)
+
+        redo_action = QAction("Redo", self)
+        redo_action.setShortcut(QKeySequence.Redo)
+        edit_menu.addAction(redo_action)
+
+        # View menu
+        view_menu = menubar.addMenu("&View")
+
+        zoom_in = QAction("Zoom In", self)
+        zoom_in.setShortcut(QKeySequence.ZoomIn)
+        zoom_in.triggered.connect(self.zoom_in)
+        view_menu.addAction(zoom_in)
+
+        zoom_out = QAction("Zoom Out", self)
+        zoom_out.setShortcut(QKeySequence.ZoomOut)
+        zoom_out.triggered.connect(self.zoom_out)
+        view_menu.addAction(zoom_out)
+
+        view_menu.addSeparator()
+
+        refresh = QAction("Refresh", self)
+        refresh.setShortcut(QKeySequence.Refresh)
+        refresh.triggered.connect(self.refresh_view)
+        view_menu.addAction(refresh)
+
+        # Layer menu
+        layer_menu = menubar.addMenu("&Layer")
+
+        add_layer = QAction("Add Layer...", self)
+        add_layer.setShortcut(QKeySequence("Ctrl+L"))
+        add_layer.triggered.connect(self.open_layer_dialog)
+        layer_menu.addAction(add_layer)
+
+        layer_menu.addSeparator()
+
+        layer_properties = QAction("Layer Properties...", self)
+        layer_menu.addAction(layer_properties)
+
+        # Settings menu
+        settings_menu = menubar.addMenu("Se&ttings")
+
+        options = QAction("Options...", self)
+        settings_menu.addAction(options)
+
+        project_properties = QAction("Project Properties...", self)
+        settings_menu.addAction(project_properties)
+
+        # Help menu
+        help_menu = menubar.addMenu("&Help")
+
+        help_contents = QAction("Help Contents", self)
+        help_contents.setShortcut(QKeySequence("F1"))
+        help_menu.addAction(help_contents)
+
+        help_menu.addSeparator()
+
+        about = QAction("About Antigravity", self)
+        about.triggered.connect(self.show_about)
+        help_menu.addAction(about)
+
+    def _setup_toolbar(self):
+        """Setup main toolbar."""
+        toolbar = QToolBar("File Toolbar", self)
+        toolbar.setMovable(False)
+        self.addToolBar(toolbar)
+
+        # Project actions
+        new_project = QAction("New Project", self)
+        toolbar.addAction(new_project)
+
+        open_project = QAction("Open Project", self)
+        toolbar.addAction(open_project)
+
+        save_project = QAction("Save", self)
+        toolbar.addAction(save_project)
+
+        toolbar.addSeparator()
+
+        # Layer actions
+        add_layer_action = QAction("Add Layer", self)
+        add_layer_action.triggered.connect(self.open_layer_dialog)
+        toolbar.addAction(add_layer_action)
+
+        toolbar.addSeparator()
+
+        # Map tools
+        pan_action = QAction("Pan", self)
+        pan_action.setCheckable(True)
+        pan_action.setChecked(True)
+        pan_action.triggered.connect(lambda: self.set_tool('pan'))
+        toolbar.addAction(pan_action)
+
+        zoom_in_action = QAction("Zoom In", self)
+        zoom_in_action.setCheckable(True)
+        zoom_in_action.triggered.connect(lambda: self.set_tool('zoom_in'))
+        toolbar.addAction(zoom_in_action)
+
+        zoom_out_action = QAction("Zoom Out", self)
+        zoom_out_action.setCheckable(True)
+        zoom_out_action.triggered.connect(lambda: self.set_tool('zoom_out'))
+        toolbar.addAction(zoom_out_action)
+
+        self.tool_actions = {
+            'pan': pan_action,
+            'zoom_in': zoom_in_action,
+            'zoom_out': zoom_out_action
+        }
+
+    def _setup_status_bar(self):
+        """Setup status bar."""
+        status_bar = QStatusBar()
+        self.setStatusBar(status_bar)
+
+        # CRS label
+        crs_label = QLabel("EPSG:3857")
+        status_bar.addWidget(QLabel("CRS:"))
+        status_bar.addWidget(crs_label)
+
+        # Coordinates
+        coords_label = QLabel("X: 0.00, Y: 0.00")
+        coords_label.setMinimumWidth(200)
+        status_bar.addPermanentWidget(coords_label)
+        self.coords_label = coords_label
+
+        # Scale
+        scale_label = QLabel("Scale: 1:0")
+        scale_label.setMinimumWidth(120)
+        status_bar.addPermanentWidget(scale_label)
+        self.scale_label = scale_label
+
+        # Connect coordinate updates
+        self.canvas.coordinates_changed.connect(
+            lambda x, y: coords_label.setText(f"X: {x:.2f}, Y: {y:.2f}")
+        )
+
+        # Update scale every 500ms
+        self.scale_timer = QTimer()
+        self.scale_timer.timeout.connect(self.update_scale)
+        self.scale_timer.start(500)
+
+    def _setup_layer_panel(self):
+        """Setup layer tree panel."""
+        layer_dock = QDockWidget("Layers", self)
+        layer_dock.setAllowedAreas(Qt.LeftDockWidgetArea)
+
+        # Create container for layer tree
+        layer_container = QWidget()
+        layer_layout = QVBoxLayout(layer_container)
+        layer_layout.setContentsMargins(4, 4, 4, 4)
+
+        # Layer tree placeholder (QgsLayerTreeView needs QWidget binding)
+        layer_label = QLabel("Layer Tree")
+        layer_label.setStyleSheet("padding: 8px; font-weight: bold;")
+        layer_layout.addWidget(layer_label)
+
+        # Placeholder content
+        layer_info = QLabel("No layers loaded")
+        layer_info.setAlignment(Qt.AlignCenter)
+        layer_info.setStyleSheet("padding: 20px; color: #888;")
+        layer_layout.addWidget(layer_info)
+        self.layer_info_label = layer_info
+
+        layer_dock.setWidget(layer_container)
+        self.addDockWidget(Qt.LeftDockWidgetArea, layer_dock)
+        self.layer_dock = layer_dock
+
+    def update_scale(self):
+        """Update scale display."""
+        try:
+            scale = self.canvas.scale()
+            if scale > 0:
+                self.scale_label.setText(f"Scale: 1:{int(scale)}")
+        except:
+            pass
+
+    def set_tool(self, tool_name):
+        """Set current map tool."""
+        tools = {
+            'pan': self.pan_tool,
+            'zoom_in': self.zoom_tool,
+            'zoom_out': self.zoom_out_tool
+        }
+
+        if tool_name in tools:
+            self.canvas.set_map_tool(tools[tool_name])
+
+            # Update tool button states
+            for name, action in self.tool_actions.items():
+                action.setChecked(name == tool_name)
+
+    def open_layer_dialog(self):
+        """Open file dialog to add layer."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Layer",
+            os.path.expanduser("~/data"),
+            "Raster Files (*.tif *.tiff *.img);;All Files (*.*)"
+        )
+
+        if file_path:
+            self.load_layer(file_path)
+
+    def load_layer(self, file_path):
+        """Load a layer into the project."""
+        try:
+            layer_name = os.path.basename(file_path)
+            layer_id = f"layer_{os.urandom(4).hex()}"
+
+            layer = QgsRasterLayer(layer_id, layer_name, file_path)
+
+            self.canvas.add_layer(layer)
+            self.canvas.zoom_to_extent(layer.extent())
+
+            if self.layer_info_label:
+                self.layer_info_label.setText(f"1 layer loaded")
+
+            self.statusBar().showMessage(f"Loaded: {layer_name}", 3000)
+            log_info(f"Loaded layer: {layer_name}")
+
         except Exception as e:
-            log_error(f"Main Window (main.py): Failed to load spatial file '{file_path}'. Error: {e}")
-            QMessageBox.critical(self, "Loading Error", f"Failed to load spatial file: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to load layer:\n{e}")
+            log_error(f"Layer load failed: {e}")
 
-    @Slot(str, bool)
-    def _handle_layer_visibility_changed(self, layer_id: str, visible: bool):
-        """Synchronizes PyQt checkboxes toggling to canvas re-rendering."""
-        log_info(f"Layers Tree: Visibility toggled for layer '{layer_id}' -> visible={visible}")
-        for layer in self.canvas.layers():
-            if layer.id == layer_id:
-                layer.visible = visible
-                self.canvas.refresh()
-                break
+    def load_sample_data(self):
+        """Load sample data on startup."""
+        if os.path.exists(self.sample_path):
+            self.load_layer(self.sample_path)
 
-    @Slot(list)
-    def _handle_layer_reorder(self, layer_ids: list):
-        """Re-orders the visual drawing stacks matching custom drag re-ordering."""
-        log_info(f"Layers Tree: Layers reordered: {layer_ids}")
-        layer_map = {l.id: l for l in self.canvas.layers()}
-        new_layers = []
-        # Draw order in MapSettings is index 0 (bottom) to N (top).
-        # layer_ids is top-to-bottom from UI.
-        for lid in reversed(layer_ids):
-            if lid in layer_map:
-                new_layers.append(layer_map[lid])
-        
-        self.canvas.setLayers(new_layers)
+    def zoom_in(self):
+        """Zoom in."""
+        self.canvas.zoomIn()
+
+    def zoom_out(self):
+        """Zoom out."""
+        self.canvas.zoomOut()
+
+    def refresh_view(self):
+        """Refresh map display."""
         self.canvas.refresh()
 
-    @Slot(str)
-    def _zoom_to_layer(self, layer_id: str):
-        if layer_id in self.loaded_layers:
-            log_info(f"Map Canvas: Zooming to layer '{layer_id}' extent")
-            extent = self.loaded_layers[layer_id]["extent"]
-            self.canvas.zoom_to_extent(extent)
+    def show_about(self):
+        """Show about dialog."""
+        QMessageBox.about(
+            self,
+            "About Antigravity RS",
+            """
+            <h2>Antigravity RS</h2>
+            <p><b>Remote Sensing Analysis Platform</b></p>
+            <p>Powered by QGIS C++ Rendering Engine</p>
+            <hr>
+            <p>Version: 0.2.0 (QGIS-Style)</p>
+            <p>Licensed under GPL v2+</p>
+            """
+        )
 
-    @Slot(str)
-    def _remove_layer(self, layer_id: str):
-        """Removes layer from both layers database, view model, and map canvas."""
-        log_info(f"Layers Tree: Removing layer '{layer_id}'")
-        if layer_id in self.loaded_layers:
-            self.canvas.remove_layer(layer_id)
-            self.layer_model.remove_layer_item(layer_id)
-            del self.loaded_layers[layer_id]
-            self.status.set_message(f"Removed layer: {layer_id}")
-
-    @Slot(str)
-    def _show_layer_properties(self, layer_id: str):
-        """Finds active layer from canvas and shows the dynamic styling and metadata dialog."""
-        layer = None
-        for l in self.canvas.layers():
-            if l.id == layer_id:
-                layer = l
-                break
-        if not layer:
-            return
-            
-        log_info(f"Main Window: Launching layer properties style dialog for '{layer_id}'")
-        from gui.properties_dialog import LayerPropertiesDialog
-        dialog = LayerPropertiesDialog(layer, self)
-        if dialog.exec() == LayerPropertiesDialog.Accepted:
-            log_info(f"Main Window: Accepted styling properties for layer '{layer_id}' (name='{layer.name}', opacity={layer.opacity})")
-            # Update local layer database name
-            if layer_id in self.loaded_layers:
-                self.loaded_layers[layer_id]["name"] = layer.name
-                
-            # Update display name in tree model
-            for row in range(self.layer_model.rowCount()):
-                item = self.layer_model.item(row)
-                if hasattr(item, "layer_id") and item.layer_id == layer_id:
-                    item.setText(layer.name)
-                    break
-                    
-            self.canvas.refresh()
-
-    def _zoom_to_all(self):
-        """Fits viewport around consolidated bounds of all layers."""
-        log_info("Map Canvas: Zooming to consolidated bounds of all loaded layers")
-        if not self.loaded_layers:
-            return
-
-        # Combine QgsRectangle bounds
-        from core.qgsrectangle import QgsRectangle
-        union_rect = QgsRectangle()
-        for layer in self.loaded_layers.values():
-            ext = layer["extent"]
-            union_rect = union_rect.united(ext)
-
-        if not union_rect.isEmpty():
-            self.canvas.zoom_to_extent(union_rect)
-
-    @Slot(str, dict)
-    def _execute_tool(self, tool_name: str, params: dict):
-        """Executes a Processing algorithm asynchronously in our QThreadPool."""
-        tool = self.registry.get_tool(tool_name)
-        if not tool:
-            log_warning(f"Processing: Failed to run tool '{tool_name}' (not registered)")
-            return
-            
-        log_info(f"Processing: Running processing tool '{tool['label']}' asynchronously in background QThreadPool...")
-        self.status.set_message(f"Running processing tool '{tool['label']}' in background...")
-        
-        # Instantiate background runner
-        runnable = ProcessingRunnable(tool["fn"], params)
-        # Handle completion callback in thread-safe signal loop
-        runnable.signals.finished.connect(self._handle_tool_finished)
-        self.threadpool.start(runnable)
-
-    @Slot(bool, str, str)
-    def _handle_tool_finished(self, success: bool, output_file: str, err_msg: str):
-        if success:
-            log_info(f"Processing: Background task completed successfully. Result path: '{output_file}'")
-            QMessageBox.information(self, "Success", f"Processing completed successfully!\nOutput file: {output_file}")
-            # Auto load resulting computed raster layer on map canvas
-            if os.path.exists(output_file):
-                self._load_file(output_file)
-        else:
-            log_error(f"Processing: Background task failed. Error message: {err_msg}")
-            QMessageBox.critical(self, "Processing Error", f"Algorithm execution failed:\n{err_msg}")
 
 def main():
-    QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    """Main entry point."""
     app = QApplication(sys.argv)
-    from gui.rs_fonts import load_fonts
-    load_fonts()
-    load_stylesheet(app)
+    app.setApplicationName("Antigravity RS")
+    app.setOrganizationName("Antigravity")
 
-    # Pre-warm transform cache on main thread to prevent pyproj segfaults
-    # This MUST happen before any background rendering starts
-    from core.qgstransformcache import transform_cache
-    transform_cache().warmup()
+    # Optional: Show splash screen
+    # from gui.splash import OnboardingSplashScreen
+    # splash = OnboardingSplashScreen()
+    # splash.show()
 
-    # 1. Launch animated splash onboarding panel
-    splash = OnboardingSplashScreen()
-    splash.show()
-    
-    main_window = None
-    
-    # 2. Boot coordinator callback
-    def on_boot_complete(sample_path: str):
-        nonlocal main_window
-        main_window = MainWindow(sample_path)
-        main_window.show()
-        
-    splash.boot_complete.connect(on_boot_complete)
+    window = MinimalQgisWindow()
+    window.show()
+
     sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     main()
