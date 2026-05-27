@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QTr
                                QComboBox, QCheckBox)
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QColor, QIcon
-from engine.registry import ToolRegistry
+from analysis.qgsprocessingregistry import ToolRegistry
 
 class ToolParameterDialog(QDialog):
     """

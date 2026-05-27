@@ -1,4 +1,5 @@
 import os
+import threading
 import numpy as np
 import rasterio
 import fiona
@@ -6,6 +7,13 @@ from shapely.geometry import shape
 from collections import OrderedDict
 import time
 from core.logger import log_info, log_debug, log_warning, log_error, gdal_lock
+
+# Set global high-performance GDAL environment variables
+os.environ["GDAL_CACHEMAX"] = "512"  # 512 MB block cache
+os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] = "EMPTY_DIR"  # Don't scan directory on open
+os.environ["VSI_CACHE"] = "YES"  # Enable virtual file system cache
+os.environ["VSI_CACHE_SIZE"] = "67108864"  # 64 MB virtual file system cache
+os.environ["GDAL_HTTP_MERGE_CONSECUTIVE_RANGES"] = "YES"  # Highly efficient for COGs
 
 class GeospatialReader:
     """
@@ -24,9 +32,8 @@ class GeospatialReader:
         self.metadata = self._read_initial_metadata()
         log_info(f"GeospatialReader opened file: '{os.path.basename(self.file_path)}' (is_raster={self.is_raster})")
         
-        # Initialize thread-safe LRU Cache (limited to 32 downsampled bands in RAM)
-        self._tile_cache = OrderedDict()
-        self._cache_max_size = 32
+        # Thread-local storage for thread-isolated tile caches
+        self._thread_local = threading.local()
 
     def _detect_if_raster(self) -> bool:
         ext = os.path.splitext(self.file_path)[1].lower()
@@ -111,14 +118,19 @@ class GeospatialReader:
         if not self.is_raster:
             raise ValueError("File is not a raster dataset")
 
+        # Get or initialize the thread-local tile cache
+        if not hasattr(self._thread_local, "tile_cache"):
+            self._thread_local.tile_cache = OrderedDict()
+        tile_cache = self._thread_local.tile_cache
+        cache_max_size = 32
+
         # Serialize window to a cacheable key
         window_tuple = (window.col_off, window.row_off, window.width, window.height) if window else None
         cache_key = (band_index, scale_factor, window_tuple)
-        if cache_key in self._tile_cache:
-            self._tile_cache.move_to_end(cache_key)
-            return self._tile_cache[cache_key]
+        if cache_key in tile_cache:
+            tile_cache.move_to_end(cache_key)
+            return tile_cache[cache_key]
 
-        # Open independent file handle in this thread and read
         with gdal_lock, rasterio.open(self.file_path, sharing=False) as src:
             if band_index < 1 or band_index > src.count:
                 raise IndexError(f"Band index {band_index} out of range (1-{src.count})")
@@ -193,9 +205,9 @@ class GeospatialReader:
                         )
 
         # Store in LRU Cache and pop oldest if size exceeded
-        self._tile_cache[cache_key] = data
-        if len(self._tile_cache) > self._cache_max_size:
-            self._tile_cache.popitem(last=False)
+        tile_cache[cache_key] = data
+        if len(tile_cache) > cache_max_size:
+            tile_cache.popitem(last=False)
 
         return data
 
@@ -218,3 +230,9 @@ class GeospatialReader:
                     "shape": geom_shape
                 })
         return features
+
+    def close(self):
+        pass
+
+    def __del__(self):
+        pass

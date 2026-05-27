@@ -128,6 +128,8 @@ class MapCanvas:
         self._layers_list.append(layer)
         # Refresh the layer list
         self.setLayers(self._layers_list)
+        # Explicitly trigger refresh to update display
+        self.refresh()
 
     def remove_layer(self, layer_id: str):
         """Remove a layer by ID and refresh."""

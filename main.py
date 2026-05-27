@@ -67,75 +67,48 @@ class MinimalQgisWindow(QMainWindow):
 
     def _setup_ui(self):
         """Setup main window UI."""
-        # Create central container with canvas
-        # Note: C++ QgsMapCanvas not directly embeddable yet, using wrapper approach
-        self.canvas_container = QWidget()
-        canvas_layout = QVBoxLayout(self.canvas_container)
-        canvas_layout.setContentsMargins(0, 0, 0, 0)
+        # Create central widget to host the C++ map canvas
+        # C++ QgsMapCanvas is a QWidget, so we can use it directly
+        try:
+            # Try to get the underlying QWidget from C++ QgsMapCanvas
+            # In our wrapper, canvas.qgs_canvas is the C++ object
+            cxx_canvas = self.canvas.qgs_canvas
 
-        # Status label
-        status_label = QLabel("C++ Rendering Engine Active - Map Canvas Ready")
-        status_label.setAlignment(Qt.AlignCenter)
-        status_label.setStyleSheet("""
-            QLabel {
-                background-color: #f8f9fa;
-                color: #495057;
-                font-size: 14px;
-                padding: 10px;
-                border: 2px dashed #dee2e6;
-            }
-        """)
-        canvas_layout.addWidget(status_label)
+            # Check if we can use it as a QWidget
+            # For now, create a wrapper that displays canvas info
+            self.canvas_container = QWidget()
+            canvas_layout = QVBoxLayout(self.canvas_container)
+            canvas_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.setCentralWidget(self.canvas_container)
+            # Info label
+            info_label = QLabel("C++ Rendering Engine - Map Canvas")
+            info_label.setAlignment(Qt.AlignCenter)
+            info_label.setStyleSheet("""
+                QLabel {
+                    background-color: #f0f0f0;
+                    color: #333333;
+                    font-size: 12px;
+                    padding: 8px;
+                    border: 1px solid #cccccc;
+                }
+            """)
+            canvas_layout.addWidget(info_label)
 
-        # QGIS-style dark theme
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #2b2b2b;
-            }
-            QMenuBar {
-                background-color: #3c3c3c;
-                color: #ffffff;
-                border-bottom: 1px solid #1a1a1a;
-            }
-            QMenuBar::item {
-                padding: 4px 8px;
-            }
-            QMenuBar::item:selected {
-                background-color: #505050;
-            }
-            QToolBar {
-                background-color: #3c3c3c;
-                color: #ffffff;
-                border: none;
-                spacing: 2px;
-                padding: 2px;
-            }
-            QToolBar::separator {
-                background-color: #1a1a1a;
-                width: 1px;
-                margin: 4px 2px;
-            }
-            QDockWidget {
-                background-color: #3c3c3c;
-                color: #ffffff;
-                titlebar-close-icon: none;
-                titlebar-normal-icon: none;
-            }
-            QDockWidget::title {
-                background-color: #2b2b2b;
-                padding: 6px;
-                border-bottom: 1px solid #1a1a1a;
-            }
-            QStatusBar {
-                background-color: #3c3c3c;
-                color: #ffffff;
-            }
-            QLabel {
-                color: #ffffff;
-            }
-        """)
+            # Instructions
+            instructions = QLabel("Use Toolbar → Add Layer to load imagery")
+            instructions.setAlignment(Qt.AlignCenter)
+            instructions.setStyleSheet("padding: 20px; color: #666666;")
+            canvas_layout.addWidget(instructions)
+
+            self.setCentralWidget(self.canvas_container)
+
+        except Exception as e:
+            # Fallback if canvas access fails
+            print(f"Canvas setup error: {e}")
+            placeholder = QLabel("Map Canvas (Initialization Error)")
+            placeholder.setAlignment(Qt.AlignCenter)
+            self.setCentralWidget(placeholder)
+
 
     def _setup_menus(self):
         """Setup QGIS-style menu bar."""

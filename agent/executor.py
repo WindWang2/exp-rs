@@ -3,12 +3,7 @@ import json
 import urllib.request
 from typing import Dict, Any, Tuple
 
-# Stub for removed engine.registry.ToolRegistry
-class ToolRegistry:
-    def __init__(self): self._tools = {}
-    def get_tool(self, name): return self._tools.get(name)
-    def register_tool(self, name, tool): self._tools[name] = tool
-    def list_tools(self): return list(self._tools.keys())
+from analysis.qgsprocessingregistry import ToolRegistry
 
 class AgentExecutor:
     """
@@ -33,7 +28,7 @@ class AgentExecutor:
             "{\n"
             "  \"thought\": \"Calculating NDVI to assess vegetation vigor...\",\n"
             "  \"tool_call\": {\"name\": \"calculate_ndvi\", \"params\": {\"input_path\": \"data/sample_crops.tif\", \"output_path\": \"data/output_ndvi.tif\", \"red_band\": 1, \"nir_band\": 3}},\n"
-            "  \"code\": \"# NDVI Calculation\\nimport engine\\nengine.calculate_ndvi('data.tif', 'ndvi.tif', 1, 3)\"\n"
+            "  \"code\": \"# NDVI Calculation\\nfrom analysis.processing.qgsindices import calculate_ndvi\\ncalculate_ndvi('data.tif', 'ndvi.tif', 1, 3)\"\n"
             "}"
         )
 
@@ -99,7 +94,7 @@ class AgentExecutor:
             }
             res["code"] = (
                 "# Educational Script: DOS1 Atmospheric Correction\n"
-                "from engine.preprocessing.atmospheric.dos1 import calculate_dos1\n\n"
+                "from analysis.preprocessing.qgsatmospherictreatment import calculate_dos1\n\n"
                 f"input_raster = '{sample_path}'\n"
                 "output_dos1 = 'data/output_dos1.tif'\n\n"
                 "calculate_dos1(input_raster, output_dos1)"
@@ -117,7 +112,7 @@ class AgentExecutor:
             }
             res["code"] = (
                 "# Educational Script: Normalized Difference Vegetation Index\n"
-                "from engine.processing.indices.vegetation import calculate_ndvi\n\n"
+                "from analysis.processing.qgsindices import calculate_ndvi\n\n"
                 f"input_raster = '{sample_path}'\n"
                 "output_ndvi = 'data/output_ndvi.tif'\n\n"
                 "# Execute band algebra in background thread\n"
@@ -136,7 +131,7 @@ class AgentExecutor:
             }
             res["code"] = (
                 "# Educational Script: Normalized Difference Water Index\n"
-                "from engine.processing.indices.water import calculate_ndwi\n\n"
+                "from analysis.processing.qgsindices import calculate_ndwi\n\n"
                 f"input_raster = '{sample_path}'\n"
                 "output_ndwi = 'data/output_ndwi.tif'\n\n"
                 "calculate_ndwi(input_raster, output_ndwi, green_band=2, nir_band=3)"
@@ -154,7 +149,7 @@ class AgentExecutor:
             }
             res["code"] = (
                 "# Educational Script: K-Means Unsupervised Classification\n"
-                "from engine.processing.classification.kmeans import kmeans_classify\n\n"
+                "from analysis.processing.qgsclassification import kmeans_classify\n\n"
                 "kmeans_classify(\n"
                 f"    input_path='{sample_path}',\n"
                 "    output_path='data/output_classification.tif',\n"

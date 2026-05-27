@@ -1,21 +1,15 @@
 """QgsCoordinateReferenceSystem - QGIS-compatible CRS wrapper around pyproj."""
-from PySide6.QtCore import QObject, Signal
 from pyproj import CRS
 from core.logger import pyproj_lock
 
 
-class QgsCoordinateReferenceSystem(QObject):
+class QgsCoordinateReferenceSystem:
     """Wraps pyproj.CRS to provide the QGIS API surface (authid, fromEpsg, isGeographic, etc.).
-
-    Inherits QObject for signal support (crsChanged).
 
     Thread-safe: Uses a lock around pyproj CRS operations.
     """
 
-    crsChanged = Signal()
-
     def __init__(self, srs: str = ""):
-        super().__init__()
         if srs:
             with pyproj_lock:  # Thread-safe CRS creation
                 try:
