@@ -46,6 +46,12 @@ class MapCanvas:
         except AttributeError:
             pass  # Signal not connected in test mode
 
+        # Setup refresh timer for image display updates
+        from PySide6.QtCore import QTimer
+        self._refresh_timer = QTimer()
+        self._refresh_timer.timeout.connect(self._update_display_image)
+        self._refresh_timer.setInterval(1000)  # Update every second
+
     def _on_xy_coordinates(self, point):
         """Convert C++ QgsPointXY signal to Python (x, y) signal."""
         if point:
@@ -214,3 +220,43 @@ class MapCanvas:
         """Set the parent widget."""
         if hasattr(self._canvas, 'setParent'):
             self._canvas.setParent(parent)
+
+    def set_display_widget(self, label):
+        """Set QLabel widget for displaying rendered map images."""
+        self._display_label = label
+
+    def start_refresh_timer(self):
+        """Start automatic refresh for image display."""
+        if hasattr(self, '_refresh_timer'):
+            self._refresh_timer.start()
+
+    def _update_display_image(self):
+        """Update display label with rendered map image."""
+        if not self._layers_list or not hasattr(self, '_display_label'):
+            return
+
+        try:
+            import tempfile
+            import os
+            from PySide6.QtGui import QPixmap
+
+            # Render to temp file
+            temp_path = tempfile.mktemp(suffix=".png")
+            self.saveAsImage(temp_path)
+
+            # Load and display
+            if os.path.exists(temp_path):
+                pixmap = QPixmap(temp_path)
+                if not pixmap.isNull():
+                    # Scale to fit the label while keeping aspect ratio
+                    scaled = pixmap.scaled(
+                        self._display_label.size(),
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation
+                    )
+                    self._display_label.setPixmap(scaled)
+                os.unlink(temp_path)
+
+        except Exception as e:
+            from core.logger import log_debug
+            log_debug(f"Display update failed: {e}")

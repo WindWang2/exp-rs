@@ -67,47 +67,37 @@ class MinimalQgisWindow(QMainWindow):
 
     def _setup_ui(self):
         """Setup main window UI."""
-        # Create central widget to host the C++ map canvas
-        # C++ QgsMapCanvas is a QWidget, so we can use it directly
-        try:
-            # Try to get the underlying QWidget from C++ QgsMapCanvas
-            # In our wrapper, canvas.qgs_canvas is the C++ object
-            cxx_canvas = self.canvas.qgs_canvas
+        # Create central widget with image display for C++ canvas rendering
+        self.canvas_container = QWidget()
+        canvas_layout = QVBoxLayout(self.canvas_container)
+        canvas_layout.setContentsMargins(0, 0, 0, 0)
 
-            # Check if we can use it as a QWidget
-            # For now, create a wrapper that displays canvas info
-            self.canvas_container = QWidget()
-            canvas_layout = QVBoxLayout(self.canvas_container)
-            canvas_layout.setContentsMargins(0, 0, 0, 0)
+        # Image display label for rendered map
+        self.map_display = QLabel("No layer loaded")
+        self.map_display.setAlignment(Qt.AlignCenter)
+        self.map_display.setMinimumSize(800, 600)
+        self.map_display.setStyleSheet("""
+            QLabel {
+                background-color: #f5f5f5;
+                color: #333333;
+                font-size: 14px;
+                border: 1px solid #cccccc;
+            }
+        """)
+        canvas_layout.addWidget(self.map_display)
 
-            # Info label
-            info_label = QLabel("C++ Rendering Engine - Map Canvas")
-            info_label.setAlignment(Qt.AlignCenter)
-            info_label.setStyleSheet("""
-                QLabel {
-                    background-color: #f0f0f0;
-                    color: #333333;
-                    font-size: 12px;
-                    padding: 8px;
-                    border: 1px solid #cccccc;
-                }
-            """)
-            canvas_layout.addWidget(info_label)
+        # Info bar
+        info_layout = QHBoxLayout()
+        info_label = QLabel("C++ Rendering Engine | Use toolbar to add layers")
+        info_label.setStyleSheet("padding: 4px; background-color: #e9ecef; color: #495057;")
+        info_layout.addWidget(info_label)
+        canvas_layout.addLayout(info_layout)
 
-            # Instructions
-            instructions = QLabel("Use Toolbar → Add Layer to load imagery")
-            instructions.setAlignment(Qt.AlignCenter)
-            instructions.setStyleSheet("padding: 20px; color: #666666;")
-            canvas_layout.addWidget(instructions)
+        self.setCentralWidget(self.canvas_container)
 
-            self.setCentralWidget(self.canvas_container)
-
-        except Exception as e:
-            # Fallback if canvas access fails
-            print(f"Canvas setup error: {e}")
-            placeholder = QLabel("Map Canvas (Initialization Error)")
-            placeholder.setAlignment(Qt.AlignCenter)
-            self.setCentralWidget(placeholder)
+        # Connect canvas to display updates
+        self.canvas.set_display_widget(self.map_display)
+        self.canvas.start_refresh_timer()
 
 
     def _setup_menus(self):
@@ -350,18 +340,42 @@ class MinimalQgisWindow(QMainWindow):
             layer_name = os.path.basename(file_path)
             layer_id = f"layer_{os.urandom(4).hex()}"
 
+            print(f"[DEBUG] Loading layer: {layer_name}")
+            print(f"[DEBUG] File path: {file_path}")
+
             layer = QgsRasterLayer(layer_id, layer_name, file_path)
 
+            print(f"[DEBUG] Layer created: {layer}")
+            print(f"[DEBUG] Layer extent: {layer.extent}")
+
             self.canvas.add_layer(layer)
+
+            print(f"[DEBUG] Layers in canvas: {len(self.canvas.layers())}")
+            print(f"[DEBUG] Canvas extent: {self.canvas.extent()}")
+
             self.canvas.zoom_to_extent(layer.extent)  # extent is a property
 
-            if self.layer_info_label:
-                self.layer_info_label.setText(f"1 layer loaded")
+            print(f"[DEBUG] Zoomed to extent")
 
-            self.statusBar().showMessage(f"Loaded: {layer_name}", 3000)
+            if self.layer_info_label:
+                self.layer_info_label.setText(f"Layer loaded:\n{layer_name}\nExtent: {layer.extent}")
+                self.layer_info_label.setStyleSheet("""
+                    QLabel {
+                        background-color: #e8f5e8;
+                        color: #2e7d32;
+                        font-size: 11px;
+                        padding: 12px;
+                        border: 1px solid #a5d6a7;
+                    }
+                """)
+
+            self.statusBar().showMessage(f"✓ Loaded: {layer_name}", 5000)
             log_info(f"Loaded layer: {layer_name}")
 
         except Exception as e:
+            print(f"[ERROR] Layer load failed: {e}")
+            import traceback
+            traceback.print_exc()
             QMessageBox.critical(self, "Error", f"Failed to load layer:\n{e}")
             log_error(f"Layer load failed: {e}")
 
