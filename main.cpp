@@ -763,9 +763,8 @@ private:
 
     void refreshCanvasLayers()
     {
-        QgsProject *project = QgsProject::instance();
-        QList<QgsMapLayer*> layers = project->mapLayers().values();
-        // setLayers() already triggers refresh() internally in QGIS
+        QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
+        QList<QgsMapLayer*> layers = root->layerOrder();
         m_mapCanvas->setLayers(layers);
     }
 
@@ -929,8 +928,12 @@ int main(int argc, char *argv[])
             auto *layer = new QgsRasterLayer(samplePath, "sample_crops");
             if (layer->isValid()) {
                 QgsProject::instance()->addMapLayer(layer);
-                window.mapCanvas()->setLayers({layer});
+                QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
+                QgsLayerTreeGroup *group = root->findGroup("Raster Layers");
+                if (!group) group = root->addGroup("Raster Layers");
+                group->addLayer(layer);
                 window.mapCanvas()->setExtent(layer->extent());
+                window.mapCanvas()->setLayers(root->layerOrder());
                 window.mapCanvas()->refresh();
             }
         });
