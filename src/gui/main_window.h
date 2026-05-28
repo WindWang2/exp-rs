@@ -7,6 +7,7 @@
 #include <qgspointxy.h>
 #include <qgscoordinatereferencesystem.h>
 
+class QLabel;
 class QgsMapCanvas;
 class QgsLayerTreeView;
 class QgsLayerTreeModel;
