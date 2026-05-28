@@ -10,6 +10,8 @@
 class QgsMapCanvas;
 class QgsLayerTreeView;
 class QgsLayerTreeModel;
+class QgsLayerTreeGroup;
+class QgsMapLayer;
 class QgsProjectionSelectionWidget;
 class QgsProcessingToolboxTreeView;
 class QgsMapToolPan;
