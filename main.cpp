@@ -315,6 +315,42 @@ public:
         // Tabify with browser
         tabifyDockWidget(browserDock, processingDock);
 
+        // Double-click on algorithm in toolbox opens execution dialog
+        connect(m_toolboxView, &QgsProcessingToolboxTreeView::doubleClicked, this, [this](const QModelIndex &index) {
+            const QgsProcessingAlgorithm *alg = m_toolboxView->algorithmForIndex(index);
+            if (!alg)
+                return;
+
+            QgsProcessingAlgorithm *algorithm = alg->create();
+            if (!algorithm)
+                return;
+
+            // Concrete subclass implementing the pure virtual methods
+            class SimpleAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
+            {
+            public:
+                using QgsProcessingAlgorithmDialogBase::QgsProcessingAlgorithmDialogBase;
+
+                QVariantMap createProcessingParameters(Flags = Flags()) override
+                {
+                    return QVariantMap();
+                }
+
+                QgsProcessingContext *processingContext() override
+                {
+                    return &mContext;
+                }
+
+            private:
+                QgsProcessingContext mContext;
+            };
+
+            SimpleAlgorithmDialog *dlg = new SimpleAlgorithmDialog(this);
+            dlg->setAlgorithm(algorithm);
+            dlg->exec();
+            dlg->deleteLater();
+        });
+
         // Overview Panel (Right)
         QgsDockWidget *overviewDock = new QgsDockWidget("Overview", this);
         overviewDock->setObjectName("overviewDock");
