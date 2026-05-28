@@ -347,6 +347,17 @@ public:
 
             SimpleAlgorithmDialog *dlg = new SimpleAlgorithmDialog(this);
             dlg->setAlgorithm(algorithm);
+
+            // After dialog closes, refresh canvas if algorithm was successful
+            connect(dlg, &QgsProcessingAlgorithmDialogBase::algorithmFinished,
+                    this, [this](bool successful, const QVariantMap &) {
+                if (successful)
+                {
+                    refreshCanvasLayers();
+                    m_mapCanvas->refresh();
+                }
+            });
+
             dlg->exec();
             dlg->deleteLater();
         });
