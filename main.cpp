@@ -270,11 +270,6 @@ public:
         m_layerTreeView = new QgsLayerTreeView(layersContainer);
         m_layerTreeView->setHeaderHidden(false);
 
-        // Enable context menu
-        m_layerTreeView->setContextMenuPolicy(Qt::CustomContextMenu);
-        connect(m_layerTreeView, &QgsLayerTreeView::customContextMenuRequested,
-                this, &QgisDesktopWindow::showLayerTreeContextMenu);
-
         layersLayout->addWidget(m_layerTreeView);
 
         layersDock->setWidget(layersContainer);
@@ -666,86 +661,6 @@ private slots:
         }
     }
 
-    void showLayerTreeContextMenu(const QPoint &pos)
-    {
-        QModelIndex index = m_layerTreeView->indexAt(pos);
-        if (!index.isValid()) return;
-
-        // Get layer name from model data directly (avoid index2node crash)
-        QString layerName = index.data(Qt::DisplayRole).toString();
-        if (layerName.isEmpty()) return;
-
-        // Find layer by name in project
-        QgsMapLayer *targetLayer = nullptr;
-        for (QgsMapLayer *layer : QgsProject::instance()->mapLayers().values()) {
-            if (layer->name() == layerName) {
-                targetLayer = layer;
-                break;
-            }
-        }
-        if (!targetLayer) return;
-
-        QString layerId = targetLayer->id();
-        bool isRaster = (targetLayer->type() == Qgis::LayerType::Raster);
-
-        QMenu menu(this);
-
-        QAction *zoomAction = menu.addAction("Zoom to Layer");
-        connect(zoomAction, &QAction::triggered, [this, layerId]() {
-            QgsMapLayer *layer = QgsProject::instance()->mapLayer(layerId);
-            if (layer) {
-                m_mapCanvas->setExtent(layer->extent());
-                m_mapCanvas->refresh();
-            }
-        });
-
-        if (isRaster) {
-            QAction *zoomNativeAction = menu.addAction("Zoom to Native Resolution (1:1)");
-            connect(zoomNativeAction, &QAction::triggered, [this, layerId]() {
-                QgsMapLayer *layer = QgsProject::instance()->mapLayer(layerId);
-                if (layer && layer->type() == Qgis::LayerType::Raster) {
-                    QgsRasterLayer *rasterLayer = qobject_cast<QgsRasterLayer*>(layer);
-                    if (rasterLayer) {
-                        double xRes = rasterLayer->rasterUnitsPerPixelX();
-                        double yRes = rasterLayer->rasterUnitsPerPixelY();
-                        QgsRectangle ext = rasterLayer->extent();
-                        double cx = (ext.xMinimum() + ext.xMaximum()) / 2.0;
-                        double cy = (ext.yMinimum() + ext.yMaximum()) / 2.0;
-                        double w = m_mapCanvas->width() * xRes;
-                        double h = m_mapCanvas->height() * yRes;
-                        QgsRectangle nativeExt(cx - w/2, cy - h/2, cx + w/2, cy + h/2);
-                        m_mapCanvas->setExtent(nativeExt);
-                        m_mapCanvas->refresh();
-                    }
-                }
-            });
-        }
-
-        menu.addSeparator();
-
-        QAction *propertiesAction = menu.addAction("Layer Properties...");
-        connect(propertiesAction, &QAction::triggered, [this, layerId]() {
-            QgsMapLayer *layer = QgsProject::instance()->mapLayer(layerId);
-            if (layer) {
-                showLayerProperties(layer);
-            }
-        });
-
-        QAction *removeAction = menu.addAction("Remove Layer");
-        connect(removeAction, &QAction::triggered, [this, layerId]() {
-            QgsProject::instance()->removeMapLayer(layerId);
-            QList<QgsMapLayer*> remaining = QgsProject::instance()->mapLayers().values();
-            m_mapCanvas->setLayers(remaining);
-            m_mapCanvas->refresh();
-        });
-
-        menu.addSeparator();
-        menu.addAction("Add Raster Layer...", this, &QgisDesktopWindow::addRasterLayer);
-        menu.addAction("Add Vector Layer...", this, &QgisDesktopWindow::addVectorLayer);
-
-        menu.exec(m_layerTreeView->viewport()->mapToGlobal(pos));
-    }
-
 private:
     // ── Layer Loading ─────────────────────────────────────────────────────────
     void loadRasterLayer(const QString &filePath)
@@ -863,6 +778,7 @@ public:
     QgsLayerTreeModel *m_layerTreeModel = nullptr;
     QWidget *m_mapCanvasContainer = nullptr;
     QgsProjectionSelectionWidget *m_crsSelector = nullptr;
+    LayerTreeMenuProvider *m_layerTreeMenuProvider = nullptr;
 
     // Map tools
     QgsMapToolPan *m_panTool = nullptr;
@@ -981,6 +897,11 @@ int main(int argc, char *argv[])
     QgisDesktopWindow window;
     qDebug() << "Initializing layer tree...";
     window.initLayerTree();
+
+    // Set up native QGIS context menu for layer tree
+    window.m_layerTreeMenuProvider = new LayerTreeMenuProvider(window.m_layerTreeView, window.mapCanvas(), &window);
+    window.m_layerTreeView->setMenuProvider(window.m_layerTreeMenuProvider);
+
     qDebug() << "Showing window...";
     window.show();
     qDebug() << "Window shown";
