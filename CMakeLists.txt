@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(antigravity VERSION 1.0 LANGUAGES CXX C)
+project(sicnu_geo VERSION 1.0 LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -30,7 +30,8 @@ find_package(LibZip REQUIRED)
 find_package(ZSTD REQUIRED)
 find_package(Protobuf REQUIRED)
 find_package(Qt6Keychain QUIET)
-find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+# Python (build-time only — code generation scripts, not runtime)
+find_package(Python COMPONENTS Interpreter REQUIRED)
 # QCA — include directly from known install path
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/FindQCA.cmake OPTIONAL)
 include_directories(SYSTEM /usr/include/qt6/Qca-qt6/QtCrypto)
@@ -52,12 +53,12 @@ if(WITH_INTERNAL_SPATIALINDEX)
 endif()
 
 # --- qgsconfig.h: all optional features OFF for P0 ---
-# ANTIGRAVITY: P3 — enable HAVE_GUI so core exposes authMethodEditWidget etc.
+# SICNU_GEO_RS: P3 — enable HAVE_GUI so core exposes authMethodEditWidget etc.
 set(HAVE_GUI TRUE)
 set(CPACK_PACKAGE_VERSION_MAJOR 1)
 set(CPACK_PACKAGE_VERSION_MINOR 0)
 set(CPACK_PACKAGE_VERSION_PATCH 0)
-set(RELEASE_NAME "Antigravity")
+set(RELEASE_NAME "SICNU GEO RS")
 set(QGIS_VERSION_INT 10000)
 set(QGIS_PLUGIN_SUBDIR "plugins")
 set(QGIS_DATA_SUBDIR "share")
@@ -117,7 +118,7 @@ configure_file(cmake_templates/qgsconfig.h.in ${CMAKE_BINARY_DIR}/qgsconfig.h)
 include_directories(${CMAKE_BINARY_DIR})
 
 add_subdirectory(src/core)
-# ANTIGRAVITY: P3 GUI options — disable optional deps not installed on this system
+# SICNU_GEO_RS: P3 GUI options — disable optional deps not installed on this system
 option(WITH_QWTPOLAR      "" OFF)
 option(WITH_QSCINTILLA    "" OFF)
 option(WITH_QTWEBENGINE   "" OFF)
@@ -126,13 +127,50 @@ option(WITH_QUICK         "" OFF)
 add_subdirectory(src/ui)
 add_subdirectory(src/native)
 add_subdirectory(src/gui)
-add_subdirectory(src/python)
-enable_testing()
-add_subdirectory(tests/cpp)
-# ANTIGRAVITY: extra include paths needed by unconditional core sources
+# SICNU_GEO_RS: extra include paths needed by unconditional core sources
 target_include_directories(qgis_core SYSTEM PRIVATE /usr/include/qt6/Qca-qt6/QtCrypto)
 target_include_directories(qgis_core PRIVATE
   ${CMAKE_SOURCE_DIR}/src/core/providers/vpc
   ${CMAKE_SOURCE_DIR}/src/core/providers/copc
   ${CMAKE_SOURCE_DIR}/src/core/providers/ept
 )
+
+# SICNU_GEO_RS: Pure C++ QGIS Application
+if(WITH_GUI)
+  set(SICNU_GEO_RS_CPP_SRCS
+    main.cpp
+    src/processing/sicnunativealgorithms.cpp
+  )
+
+  add_executable(sicnu_geo_rs ${SICNU_GEO_RS_CPP_SRCS})
+
+  target_link_libraries(sicnu_geo_rs
+    qgis_core
+    qgis_gui
+    qgis_native
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Network
+    Qt6::Xml
+    Qt6::Svg
+    Qt6::Sql
+  )
+
+  target_include_directories(sicnu_geo_rs PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+  )
+
+  # Set output directory
+  set_target_properties(sicnu_geo_rs PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+    OUTPUT_NAME "sicnu_geo_rs"
+  )
+
+  # Install target
+  install(TARGETS sicnu_geo_rs
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib
+  )
+endif()

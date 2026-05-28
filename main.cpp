@@ -59,6 +59,7 @@
 
 // Layer properties dialogs
 #include <raster/qgsrasterlayerproperties.h>
+#include <vector/qgsvectorlayerproperties.h>
 #include <qgslayerpropertiesdialog.h>
 
 // CRS/Projection selection
@@ -79,6 +80,10 @@
 // Map renderer for performance
 #include <qgsmaprenderersequentialjob.h>
 #include <qgsmaprendererparalleljob.h>
+
+// Processing framework
+#include <processing/qgsprocessingregistry.h>
+#include "src/processing/sicnunativealgorithms.h"
 
 // Forward declare for MOC
 class LayerTreeMenuProvider;
@@ -747,16 +752,9 @@ private:
         } else if (layer->type() == Qgis::LayerType::Vector) {
             QgsVectorLayer *vectorLayer = qobject_cast<QgsVectorLayer*>(layer);
             if (vectorLayer) {
-                QMessageBox::information(this, "Vector Layer Properties",
-                    QString("Layer: %1\n"
-                            "Type: Vector\n"
-                            "CRS: %2\n"
-                            "Features: %3\n"
-                            "Geometry: %4")
-                        .arg(vectorLayer->name(),
-                             vectorLayer->crs().authid())
-                        .arg(vectorLayer->featureCount())
-                        .arg(QgsWkbTypes::displayString(vectorLayer->wkbType())));
+                QgsVectorLayerProperties dialog(m_mapCanvas, nullptr, vectorLayer, this);
+                dialog.exec();
+                m_mapCanvas->refresh();
             }
         }
     }
@@ -901,6 +899,9 @@ int main(int argc, char *argv[])
     qDebug() << "Initializing QGIS...";
     QgsApplication::initQgis();
     qDebug() << "QGIS initialized";
+
+    // Register processing algorithms
+    QgsApplication::processingRegistry()->addProvider( new SicnuNativeAlgorithms() );
 
     // Initialize QgsGui singleton (required for QGIS dialogs)
     qDebug() << "Initializing QgsGui...";
