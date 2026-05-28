@@ -405,7 +405,7 @@ protected:
 
         QString dest;
         std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
-            source->fields(), source->wkbType(), source->sourceCrs() ) );
+            source->fields(), Qgis::WkbType::Unknown, source->sourceCrs() ) );
         if ( !sink )
             throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
 
@@ -502,14 +502,22 @@ protected:
         if ( !sink )
             throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
 
-        QList<QgsGeometry> overlayGeoms;
+        QgsGeometry overlayCombined;
         QgsFeatureIterator overlayIt = overlay->getFeatures();
         QgsFeature overlayFeat;
         while ( overlayIt.nextFeature( overlayFeat ) )
         {
             if ( overlayFeat.hasGeometry() )
-                overlayGeoms.append( overlayFeat.geometry() );
+            {
+                if ( overlayCombined.isNull() )
+                    overlayCombined = overlayFeat.geometry();
+                else
+                    overlayCombined = overlayCombined.combine( overlayFeat.geometry() );
+            }
         }
+
+        if ( overlayCombined.isNull() )
+            return QVariantMap{{OUTPUT, dest}};
 
         QgsFeatureIterator it = source->getFeatures();
         QgsFeature feat;
@@ -524,15 +532,12 @@ protected:
 
             if ( feat.hasGeometry() )
             {
-                for ( const QgsGeometry &overlayGeom : overlayGeoms )
+                QgsGeometry result = feat.geometry().intersection( overlayCombined );
+                if ( !result.isEmpty() )
                 {
-                    QgsGeometry result = feat.geometry().intersection( overlayGeom );
-                    if ( !result.isEmpty() )
-                    {
-                        QgsFeature outputFeat = feat;
-                        outputFeat.setGeometry( result );
-                        sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
-                    }
+                    QgsFeature outputFeat = feat;
+                    outputFeat.setGeometry( result );
+                    sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
                 }
             }
         }
@@ -673,7 +678,7 @@ protected:
 
         QString dest;
         std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
-            source->fields(), source->wkbType(), source->sourceCrs() ) );
+            source->fields(), Qgis::WkbType::Unknown, source->sourceCrs() ) );
         if ( !sink )
             throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
 
