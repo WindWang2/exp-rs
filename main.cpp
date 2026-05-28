@@ -903,7 +903,7 @@ public:
     {
         QMenu *menu = new QMenu();
         QModelIndex index = mView->currentIndex();
-        QgsLayerTreeNode *node = mView->layerTreeModel()->index2node(index);
+        QgsLayerTreeNode *node = index.isValid() ? mView->layerTreeModel()->index2node(index) : nullptr;
 
         if (!node) {
             menu->addAction(QObject::tr("Add Raster Layer..."), mWindow, &QgisDesktopWindow::addRasterLayer);
