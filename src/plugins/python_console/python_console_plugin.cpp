@@ -3,13 +3,18 @@
 #include <QMenu>
 #include <QAction>
 #include <QIcon>
+#include <QDockWidget>
 
 #include <qgsmapcanvas.h>
 #include <layertree/qgslayertreeview.h>
-#include <QDockWidget>
 
 #include "gui/python_console_widget.h"
+
+// Include Python embedding header with QT_NO_KEYWORDS to avoid
+// conflict between Python.h 'slots' macro and Qt's 'slots' keyword
+#define QT_NO_KEYWORDS
 #include "python/qgis_python.h"
+#undef QT_NO_KEYWORDS
 
 PythonConsolePlugin::PythonConsolePlugin(QObject *parent)
     : QObject(parent)

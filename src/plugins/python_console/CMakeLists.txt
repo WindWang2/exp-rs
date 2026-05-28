@@ -15,9 +15,6 @@ target_link_libraries(python_console_plugin PRIVATE
     pybind11::embed
 )
 
-# Python embedding conflicts with Qt keywords (signals/slots)
-target_compile_definitions(python_console_plugin PRIVATE QT_NO_KEYWORDS)
-
 install(TARGETS python_console_plugin
     LIBRARY DESTINATION ${QGIS_PLUGIN_SUBDIR}
 )
