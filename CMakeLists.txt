@@ -165,59 +165,6 @@ target_include_directories(qgis_core PRIVATE
   ${CMAKE_SOURCE_DIR}/src/core/providers/ept
 )
 
-# SICNU_GEO_RS: Pure C++ QGIS Application
-if(WITH_GUI)
-  set(SICNU_GEO_RS_CPP_SRCS
-    main.cpp
-    src/processing/sicnunativealgorithms.cpp
-    src/python/qgis_python.cpp
-    src/python/bindings.cpp
-    src/python/bindings_core.cpp
-    src/python/bindings_gui.cpp
-    src/python/bindings_analysis.cpp
-    src/gui/python_console_widget.cpp
-  )
-
-  add_executable(sicnu_geo_rs ${SICNU_GEO_RS_CPP_SRCS})
-
-  target_link_libraries(sicnu_geo_rs
-    qgis_core
-    qgis_gui
-    qgis_native
-    Qt6::Core
-    Qt6::Gui
-    Qt6::Widgets
-    Qt6::Network
-    Qt6::Xml
-    Qt6::Svg
-    Qt6::Sql
-    pybind11::embed
-    CURL::libcurl
-    ${PCRE2_16}
-    ${PCRE2_8}
-  )
-
-  target_include_directories(sicnu_geo_rs PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
-  )
-
-  # QT_NO_KEYWORDS only for Python embedding files (conflicts with Python.h struct members).
-  # Other files include QGIS headers that use raw signals:/slots: keywords.
-  set_source_files_properties(
-    src/python/qgis_python.cpp
-    PROPERTIES COMPILE_DEFINITIONS "QT_NO_KEYWORDS"
-  )
-
-  # Set output directory
-  set_target_properties(sicnu_geo_rs PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-    OUTPUT_NAME "sicnu_geo_rs"
-  )
-
-  # Install target
-  install(TARGETS sicnu_geo_rs
-    RUNTIME DESTINATION bin
-    LIBRARY DESTINATION lib
-  )
-endif()
+# SICNU_GEO_RS: Plugin architecture subdirectories
+add_subdirectory(src/plugins)
+add_subdirectory(src/app)
