@@ -364,6 +364,434 @@ const QString QgsSimplifyAlgorithm::INPUT = QStringLiteral( "INPUT" );
 const QString QgsSimplifyAlgorithm::TOLERANCE = QStringLiteral( "TOLERANCE" );
 const QString QgsSimplifyAlgorithm::OUTPUT = QStringLiteral( "OUTPUT" );
 
+// ── Clip Algorithm ───────────────────────────────────────────────────────────
+
+class QgsClipAlgorithm : public QgsProcessingAlgorithm
+{
+public:
+    static const QString INPUT;
+    static const QString OVERLAY;
+    static const QString OUTPUT;
+
+    QgsClipAlgorithm() = default;
+
+    QString name() const override { return QStringLiteral( "clip" ); }
+    QString displayName() const override { return QObject::tr( "Clip" ); }
+    QString group() const override { return QObject::tr( "Vector overlay" ); }
+    QString groupId() const override { return QStringLiteral( "vectoroverlay" ); }
+    QStringList tags() const override { return { QObject::tr( "clip" ), QObject::tr( "cut" ), QObject::tr( "trim" ) }; }
+
+    QgsProcessingAlgorithm *createInstance() const override { return new QgsClipAlgorithm(); }
+
+protected:
+    void initAlgorithm( const QVariantMap & ) override
+    {
+        addParameter( new QgsProcessingParameterFeatureSource( INPUT, QObject::tr( "Input layer" ),
+            QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorAnyGeometry ) ) );
+        addParameter( new QgsProcessingParameterFeatureSource( OVERLAY, QObject::tr( "Overlay layer" ),
+            QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorAnyGeometry ) ) );
+        addParameter( new QgsProcessingParameterFeatureSink( OUTPUT, QObject::tr( "Clipped" ) ) );
+    }
+
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override
+    {
+        std::unique_ptr<QgsProcessingFeatureSource> source( parameterAsSource( parameters, INPUT, context ) );
+        if ( !source )
+            throw QgsProcessingException( invalidSourceError( parameters, INPUT ) );
+
+        std::unique_ptr<QgsProcessingFeatureSource> overlay( parameterAsSource( parameters, OVERLAY, context ) );
+        if ( !overlay )
+            throw QgsProcessingException( invalidSourceError( parameters, OVERLAY ) );
+
+        QString dest;
+        std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
+            source->fields(), source->wkbType(), source->sourceCrs() ) );
+        if ( !sink )
+            throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+
+        QgsGeometry clipGeom;
+        QgsFeatureIterator overlayIt = overlay->getFeatures();
+        QgsFeature overlayFeat;
+        while ( overlayIt.nextFeature( overlayFeat ) )
+        {
+            if ( overlayFeat.hasGeometry() )
+            {
+                if ( clipGeom.isNull() )
+                    clipGeom = overlayFeat.geometry();
+                else
+                    clipGeom = clipGeom.combine( overlayFeat.geometry() );
+            }
+        }
+
+        if ( clipGeom.isNull() )
+            return QVariantMap{{OUTPUT, dest}};
+
+        QgsFeatureIterator it = source->getFeatures();
+        QgsFeature feat;
+        long long total = source->featureCount();
+        long long current = 0;
+
+        while ( it.nextFeature( feat ) )
+        {
+            if ( feedback->isCanceled() ) break;
+            current++;
+            if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
+
+            if ( feat.hasGeometry() )
+            {
+                QgsGeometry clipped = feat.geometry().intersection( clipGeom );
+                if ( !clipped.isEmpty() )
+                {
+                    QgsFeature outputFeat = feat;
+                    outputFeat.setGeometry( clipped );
+                    sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                }
+            }
+        }
+
+        return QVariantMap{{OUTPUT, dest}};
+    }
+};
+
+const QString QgsClipAlgorithm::INPUT = QStringLiteral( "INPUT" );
+const QString QgsClipAlgorithm::OVERLAY = QStringLiteral( "OVERLAY" );
+const QString QgsClipAlgorithm::OUTPUT = QStringLiteral( "OUTPUT" );
+
+// ── Intersection Algorithm ───────────────────────────────────────────────────
+
+class QgsIntersectionAlgorithm : public QgsProcessingAlgorithm
+{
+public:
+    static const QString INPUT;
+    static const QString OVERLAY;
+    static const QString OUTPUT;
+
+    QgsIntersectionAlgorithm() = default;
+
+    QString name() const override { return QStringLiteral( "intersection" ); }
+    QString displayName() const override { return QObject::tr( "Intersection" ); }
+    QString group() const override { return QObject::tr( "Vector overlay" ); }
+    QString groupId() const override { return QStringLiteral( "vectoroverlay" ); }
+    QStringList tags() const override { return { QObject::tr( "intersection" ), QObject::tr( "overlap" ), QObject::tr( "common" ) }; }
+
+    QgsProcessingAlgorithm *createInstance() const override { return new QgsIntersectionAlgorithm(); }
+
+protected:
+    void initAlgorithm( const QVariantMap & ) override
+    {
+        addParameter( new QgsProcessingParameterFeatureSource( INPUT, QObject::tr( "Input layer" ),
+            QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorAnyGeometry ) ) );
+        addParameter( new QgsProcessingParameterFeatureSource( OVERLAY, QObject::tr( "Overlay layer" ),
+            QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorAnyGeometry ) ) );
+        addParameter( new QgsProcessingParameterFeatureSink( OUTPUT, QObject::tr( "Intersection" ) ) );
+    }
+
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override
+    {
+        std::unique_ptr<QgsProcessingFeatureSource> source( parameterAsSource( parameters, INPUT, context ) );
+        if ( !source )
+            throw QgsProcessingException( invalidSourceError( parameters, INPUT ) );
+
+        std::unique_ptr<QgsProcessingFeatureSource> overlay( parameterAsSource( parameters, OVERLAY, context ) );
+        if ( !overlay )
+            throw QgsProcessingException( invalidSourceError( parameters, OVERLAY ) );
+
+        QString dest;
+        std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
+            source->fields(), Qgis::WkbType::Unknown, source->sourceCrs() ) );
+        if ( !sink )
+            throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+
+        QList<QgsGeometry> overlayGeoms;
+        QgsFeatureIterator overlayIt = overlay->getFeatures();
+        QgsFeature overlayFeat;
+        while ( overlayIt.nextFeature( overlayFeat ) )
+        {
+            if ( overlayFeat.hasGeometry() )
+                overlayGeoms.append( overlayFeat.geometry() );
+        }
+
+        QgsFeatureIterator it = source->getFeatures();
+        QgsFeature feat;
+        long long total = source->featureCount();
+        long long current = 0;
+
+        while ( it.nextFeature( feat ) )
+        {
+            if ( feedback->isCanceled() ) break;
+            current++;
+            if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
+
+            if ( feat.hasGeometry() )
+            {
+                for ( const QgsGeometry &overlayGeom : overlayGeoms )
+                {
+                    QgsGeometry result = feat.geometry().intersection( overlayGeom );
+                    if ( !result.isEmpty() )
+                    {
+                        QgsFeature outputFeat = feat;
+                        outputFeat.setGeometry( result );
+                        sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                    }
+                }
+            }
+        }
+
+        return QVariantMap{{OUTPUT, dest}};
+    }
+};
+
+const QString QgsIntersectionAlgorithm::INPUT = QStringLiteral( "INPUT" );
+const QString QgsIntersectionAlgorithm::OVERLAY = QStringLiteral( "OVERLAY" );
+const QString QgsIntersectionAlgorithm::OUTPUT = QStringLiteral( "OUTPUT" );
+
+// ── Union Algorithm ──────────────────────────────────────────────────────────
+
+class QgsUnionAlgorithm : public QgsProcessingAlgorithm
+{
+public:
+    static const QString INPUT;
+    static const QString OVERLAY;
+    static const QString OUTPUT;
+
+    QgsUnionAlgorithm() = default;
+
+    QString name() const override { return QStringLiteral( "union" ); }
+    QString displayName() const override { return QObject::tr( "Union" ); }
+    QString group() const override { return QObject::tr( "Vector overlay" ); }
+    QString groupId() const override { return QStringLiteral( "vectoroverlay" ); }
+    QStringList tags() const override { return { QObject::tr( "union" ), QObject::tr( "merge" ), QObject::tr( "combine" ) }; }
+
+    QgsProcessingAlgorithm *createInstance() const override { return new QgsUnionAlgorithm(); }
+
+protected:
+    void initAlgorithm( const QVariantMap & ) override
+    {
+        addParameter( new QgsProcessingParameterFeatureSource( INPUT, QObject::tr( "Input layer" ),
+            QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorAnyGeometry ) ) );
+        addParameter( new QgsProcessingParameterFeatureSource( OVERLAY, QObject::tr( "Overlay layer" ),
+            QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorAnyGeometry ) ) );
+        addParameter( new QgsProcessingParameterFeatureSink( OUTPUT, QObject::tr( "Union" ) ) );
+    }
+
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override
+    {
+        std::unique_ptr<QgsProcessingFeatureSource> source( parameterAsSource( parameters, INPUT, context ) );
+        if ( !source )
+            throw QgsProcessingException( invalidSourceError( parameters, INPUT ) );
+
+        std::unique_ptr<QgsProcessingFeatureSource> overlay( parameterAsSource( parameters, OVERLAY, context ) );
+        if ( !overlay )
+            throw QgsProcessingException( invalidSourceError( parameters, OVERLAY ) );
+
+        QString dest;
+        std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
+            source->fields(), Qgis::WkbType::Unknown, source->sourceCrs() ) );
+        if ( !sink )
+            throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+
+        QgsGeometry overlayCombined;
+        QgsFeatureIterator overlayIt = overlay->getFeatures();
+        QgsFeature overlayFeat;
+        while ( overlayIt.nextFeature( overlayFeat ) )
+        {
+            if ( overlayFeat.hasGeometry() )
+            {
+                if ( overlayCombined.isNull() )
+                    overlayCombined = overlayFeat.geometry();
+                else
+                    overlayCombined = overlayCombined.combine( overlayFeat.geometry() );
+            }
+        }
+
+        QgsFeatureIterator it = source->getFeatures();
+        QgsFeature feat;
+        long long total = source->featureCount();
+        long long current = 0;
+
+        while ( it.nextFeature( feat ) )
+        {
+            if ( feedback->isCanceled() ) break;
+            current++;
+            if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
+
+            if ( feat.hasGeometry() )
+            {
+                QgsFeature outputFeat = feat;
+                if ( !overlayCombined.isNull() )
+                    outputFeat.setGeometry( feat.geometry().combine( overlayCombined ) );
+                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+            }
+        }
+
+        return QVariantMap{{OUTPUT, dest}};
+    }
+};
+
+const QString QgsUnionAlgorithm::INPUT = QStringLiteral( "INPUT" );
+const QString QgsUnionAlgorithm::OVERLAY = QStringLiteral( "OVERLAY" );
+const QString QgsUnionAlgorithm::OUTPUT = QStringLiteral( "OUTPUT" );
+
+// ── Difference Algorithm ─────────────────────────────────────────────────────
+
+class QgsDifferenceAlgorithm : public QgsProcessingAlgorithm
+{
+public:
+    static const QString INPUT;
+    static const QString OVERLAY;
+    static const QString OUTPUT;
+
+    QgsDifferenceAlgorithm() = default;
+
+    QString name() const override { return QStringLiteral( "difference" ); }
+    QString displayName() const override { return QObject::tr( "Difference" ); }
+    QString group() const override { return QObject::tr( "Vector overlay" ); }
+    QString groupId() const override { return QStringLiteral( "vectoroverlay" ); }
+    QStringList tags() const override { return { QObject::tr( "difference" ), QObject::tr( "erase" ), QObject::tr( "subtract" ) }; }
+
+    QgsProcessingAlgorithm *createInstance() const override { return new QgsDifferenceAlgorithm(); }
+
+protected:
+    void initAlgorithm( const QVariantMap & ) override
+    {
+        addParameter( new QgsProcessingParameterFeatureSource( INPUT, QObject::tr( "Input layer" ),
+            QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorAnyGeometry ) ) );
+        addParameter( new QgsProcessingParameterFeatureSource( OVERLAY, QObject::tr( "Overlay layer" ),
+            QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorAnyGeometry ) ) );
+        addParameter( new QgsProcessingParameterFeatureSink( OUTPUT, QObject::tr( "Difference" ) ) );
+    }
+
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override
+    {
+        std::unique_ptr<QgsProcessingFeatureSource> source( parameterAsSource( parameters, INPUT, context ) );
+        if ( !source )
+            throw QgsProcessingException( invalidSourceError( parameters, INPUT ) );
+
+        std::unique_ptr<QgsProcessingFeatureSource> overlay( parameterAsSource( parameters, OVERLAY, context ) );
+        if ( !overlay )
+            throw QgsProcessingException( invalidSourceError( parameters, OVERLAY ) );
+
+        QString dest;
+        std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
+            source->fields(), source->wkbType(), source->sourceCrs() ) );
+        if ( !sink )
+            throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+
+        QgsGeometry overlayCombined;
+        QgsFeatureIterator overlayIt = overlay->getFeatures();
+        QgsFeature overlayFeat;
+        while ( overlayIt.nextFeature( overlayFeat ) )
+        {
+            if ( overlayFeat.hasGeometry() )
+            {
+                if ( overlayCombined.isNull() )
+                    overlayCombined = overlayFeat.geometry();
+                else
+                    overlayCombined = overlayCombined.combine( overlayFeat.geometry() );
+            }
+        }
+
+        QgsFeatureIterator it = source->getFeatures();
+        QgsFeature feat;
+        long long total = source->featureCount();
+        long long current = 0;
+
+        while ( it.nextFeature( feat ) )
+        {
+            if ( feedback->isCanceled() ) break;
+            current++;
+            if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
+
+            if ( feat.hasGeometry() )
+            {
+                QgsFeature outputFeat = feat;
+                if ( !overlayCombined.isNull() )
+                    outputFeat.setGeometry( feat.geometry().difference( overlayCombined ) );
+                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+            }
+        }
+
+        return QVariantMap{{OUTPUT, dest}};
+    }
+};
+
+const QString QgsDifferenceAlgorithm::INPUT = QStringLiteral( "INPUT" );
+const QString QgsDifferenceAlgorithm::OVERLAY = QStringLiteral( "OVERLAY" );
+const QString QgsDifferenceAlgorithm::OUTPUT = QStringLiteral( "OUTPUT" );
+
+// ── Extract by Attribute Algorithm ───────────────────────────────────────────
+
+class QgsExtractByAttributeAlgorithm : public QgsProcessingAlgorithm
+{
+public:
+    static const QString INPUT;
+    static const QString FIELD;
+    static const QString VALUE;
+    static const QString OUTPUT;
+
+    QgsExtractByAttributeAlgorithm() = default;
+
+    QString name() const override { return QStringLiteral( "extractbyattribute" ); }
+    QString displayName() const override { return QObject::tr( "Extract by Attribute" ); }
+    QString group() const override { return QObject::tr( "Vector selection" ); }
+    QString groupId() const override { return QStringLiteral( "vectorselection" ); }
+    QStringList tags() const override { return { QObject::tr( "extract" ), QObject::tr( "filter" ), QObject::tr( "select" ), QObject::tr( "attribute" ) }; }
+
+    QgsProcessingAlgorithm *createInstance() const override { return new QgsExtractByAttributeAlgorithm(); }
+
+protected:
+    void initAlgorithm( const QVariantMap & ) override
+    {
+        addParameter( new QgsProcessingParameterFeatureSource( INPUT, QObject::tr( "Input layer" ),
+            QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorAnyGeometry ) ) );
+        addParameter( new QgsProcessingParameterField( FIELD, QObject::tr( "Field" ), QVariant(), INPUT ) );
+        addParameter( new QgsProcessingParameterString( VALUE, QObject::tr( "Value" ) ) );
+        addParameter( new QgsProcessingParameterFeatureSink( OUTPUT, QObject::tr( "Extracted" ) ) );
+    }
+
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override
+    {
+        std::unique_ptr<QgsProcessingFeatureSource> source( parameterAsSource( parameters, INPUT, context ) );
+        if ( !source )
+            throw QgsProcessingException( invalidSourceError( parameters, INPUT ) );
+
+        QString fieldName = parameterAsString( parameters, FIELD, context );
+        QString value = parameterAsString( parameters, VALUE, context );
+
+        QString dest;
+        std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
+            source->fields(), source->wkbType(), source->sourceCrs() ) );
+        if ( !sink )
+            throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+
+        int fieldIdx = source->fields().indexOf( fieldName );
+        if ( fieldIdx < 0 )
+            throw QgsProcessingException( QObject::tr( "Field '%1' not found" ).arg( fieldName ) );
+
+        QgsFeatureIterator it = source->getFeatures();
+        QgsFeature feat;
+        long long total = source->featureCount();
+        long long current = 0;
+
+        while ( it.nextFeature( feat ) )
+        {
+            if ( feedback->isCanceled() ) break;
+            current++;
+            if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
+
+            if ( feat.attribute( fieldIdx ).toString() == value )
+                sink->addFeature( feat, QgsFeatureSink::FastInsert );
+        }
+
+        return QVariantMap{{OUTPUT, dest}};
+    }
+};
+
+const QString QgsExtractByAttributeAlgorithm::INPUT = QStringLiteral( "INPUT" );
+const QString QgsExtractByAttributeAlgorithm::FIELD = QStringLiteral( "FIELD" );
+const QString QgsExtractByAttributeAlgorithm::VALUE = QStringLiteral( "VALUE" );
+const QString QgsExtractByAttributeAlgorithm::OUTPUT = QStringLiteral( "OUTPUT" );
+
 // ── Provider Implementation ──────────────────────────────────────────────────
 
 SicnuNativeAlgorithms::SicnuNativeAlgorithms( QObject *parent )
@@ -378,9 +806,19 @@ QIcon SicnuNativeAlgorithms::icon() const
 
 void SicnuNativeAlgorithms::loadAlgorithms()
 {
+    // Vector geometry
     addAlgorithm( new QgsBufferAlgorithm() );
     addAlgorithm( new QgsCentroidsAlgorithm() );
     addAlgorithm( new QgsConvexHullAlgorithm() );
     addAlgorithm( new QgsDissolveAlgorithm() );
     addAlgorithm( new QgsSimplifyAlgorithm() );
+
+    // Vector overlay
+    addAlgorithm( new QgsClipAlgorithm() );
+    addAlgorithm( new QgsIntersectionAlgorithm() );
+    addAlgorithm( new QgsUnionAlgorithm() );
+    addAlgorithm( new QgsDifferenceAlgorithm() );
+
+    // Vector selection
+    addAlgorithm( new QgsExtractByAttributeAlgorithm() );
 }
