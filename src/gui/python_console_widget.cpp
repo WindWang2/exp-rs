@@ -8,6 +8,9 @@
 #include <QPushButton>
 #include <QScrollBar>
 #include <QFont>
+#include <QGuiApplication>
+#include <QPalette>
+#include <QKeySequence>
 
 #include "src/python/qgis_python.h"
 
@@ -20,6 +23,7 @@ PythonConsoleWidget::PythonConsoleWidget(QWidget *parent)
     // Toolbar
     auto *toolbarLayout = new QHBoxLayout();
     m_runButton = new QPushButton(tr("Run"), this);
+    m_runButton->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Return));
     m_clearButton = new QPushButton(tr("Clear"), this);
     toolbarLayout->addWidget(m_runButton);
     toolbarLayout->addWidget(m_clearButton);
@@ -85,7 +89,7 @@ void PythonConsoleWidget::appendOutput(const QString &text, bool isError)
     if (isError)
         m_outputArea->setTextColor(Qt::red);
     else
-        m_outputArea->setTextColor(Qt::white);
+        m_outputArea->setTextColor(QGuiApplication::palette().color(QPalette::Text));
 
     m_outputArea->append(text);
 
