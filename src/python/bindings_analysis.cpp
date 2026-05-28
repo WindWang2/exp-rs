@@ -7,5 +7,6 @@ namespace py = pybind11;
 void init_qgis_analysis(py::module_ &m)
 {
     m.doc() = "QGIS Analysis Python bindings";
-    // Classes will be added in Task 8
+    // Analysis classes will be added as needed.
+    // Potential classes: QgsRasterCalculator, QgsZonalStatistics, etc.
 }
