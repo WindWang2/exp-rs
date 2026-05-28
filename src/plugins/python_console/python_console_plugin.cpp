@@ -6,7 +6,7 @@
 
 #include <qgsmapcanvas.h>
 #include <layertree/qgslayertreeview.h>
-#include <qgsdockwidget.h>
+#include <QDockWidget>
 
 #include "gui/python_console_widget.h"
 #include "python/qgis_python.h"
