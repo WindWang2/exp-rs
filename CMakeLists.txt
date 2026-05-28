@@ -30,6 +30,9 @@ find_package(LibZip REQUIRED)
 find_package(ZSTD REQUIRED)
 find_package(Protobuf REQUIRED)
 find_package(Qt6Keychain QUIET)
+find_package(CURL REQUIRED)
+find_library(PCRE2_16 pcre2-16 REQUIRED)
+find_library(PCRE2_8 pcre2-8 REQUIRED)
 # Python (build-time scripts + runtime embedding)
 find_package(Python REQUIRED COMPONENTS Interpreter Development)
 
@@ -137,6 +140,23 @@ option(WITH_QUICK         "" OFF)
 add_subdirectory(src/ui)
 add_subdirectory(src/native)
 add_subdirectory(src/gui)
+
+# SICNU_GEO_RS: SICNU GUI library (main window framework)
+add_library(sicnu_gui SHARED
+  src/gui/main_window.cpp
+)
+target_include_directories(sicnu_gui PUBLIC
+  ${CMAKE_SOURCE_DIR}/src
+)
+target_link_libraries(sicnu_gui PUBLIC
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_core
+)
+
 # SICNU_GEO_RS: extra include paths needed by unconditional core sources
 target_include_directories(qgis_core SYSTEM PRIVATE /usr/include/qt6/Qca-qt6/QtCrypto)
 target_include_directories(qgis_core PRIVATE
@@ -172,6 +192,9 @@ if(WITH_GUI)
     Qt6::Svg
     Qt6::Sql
     pybind11::embed
+    CURL::libcurl
+    ${PCRE2_16}
+    ${PCRE2_8}
   )
 
   target_include_directories(sicnu_geo_rs PRIVATE
