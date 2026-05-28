@@ -662,6 +662,16 @@ private slots:
     }
 
 private:
+    QgsLayerTreeGroup *findOrCreateGroup(const QString &name)
+    {
+        QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
+        QgsLayerTreeGroup *group = root->findGroup(name);
+        if (!group) {
+            group = root->addGroup(name);
+        }
+        return group;
+    }
+
     // ── Layer Loading ─────────────────────────────────────────────────────────
     void loadRasterLayer(const QString &filePath)
     {
@@ -679,6 +689,9 @@ private:
         }
 
         QgsProject::instance()->addMapLayer(layer);
+
+        QgsLayerTreeGroup *group = findOrCreateGroup("Raster Layers");
+        group->addLayer(layer);
 
         // Zoom to layer extent first, then update layers (single refresh)
         m_mapCanvas->setExtent(layer->extent());
@@ -707,6 +720,9 @@ private:
         }
 
         QgsProject::instance()->addMapLayer(layer);
+
+        QgsLayerTreeGroup *group = findOrCreateGroup("Vector Layers");
+        group->addLayer(layer);
 
         // Zoom to layer extent first, then update layers (single refresh)
         m_mapCanvas->setExtent(layer->extent());
