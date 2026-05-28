@@ -12,6 +12,14 @@
 #include <qgsprocessingfeedback.h>
 #include <qgswkbtypes.h>
 
+#include <qgsrasterlayer.h>
+#include <qgsrasterfilewriter.h>
+#include <qgsrasterinterface.h>
+#include <qgsrasterdataprovider.h>
+#include <qgsrasterpipe.h>
+#include <qgsrasterprojector.h>
+#include <qgsrectangle.h>
+
 // ── Buffer Algorithm ─────────────────────────────────────────────────────────
 
 class QgsBufferAlgorithm : public QgsProcessingAlgorithm
@@ -797,6 +805,223 @@ const QString QgsExtractByAttributeAlgorithm::FIELD = QStringLiteral( "FIELD" );
 const QString QgsExtractByAttributeAlgorithm::VALUE = QStringLiteral( "VALUE" );
 const QString QgsExtractByAttributeAlgorithm::OUTPUT = QStringLiteral( "OUTPUT" );
 
+// ── Clip Raster by Extent Algorithm ──────────────────────────────────────────
+
+class QgsClipRasterByExtentAlgorithm : public QgsProcessingAlgorithm
+{
+public:
+    static const QString INPUT;
+    static const QString EXTENT;
+    static const QString OUTPUT;
+
+    QgsClipRasterByExtentAlgorithm() = default;
+
+    QString name() const override { return QStringLiteral( "cliprasterbyextent" ); }
+    QString displayName() const override { return QObject::tr( "Clip Raster by Extent" ); }
+    QString group() const override { return QObject::tr( "Raster analysis" ); }
+    QString groupId() const override { return QStringLiteral( "rasteranalysis" ); }
+    QStringList tags() const override { return { QObject::tr( "clip" ), QObject::tr( "raster" ), QObject::tr( "extent" ), QObject::tr( "crop" ) }; }
+
+    QgsProcessingAlgorithm *createInstance() const override { return new QgsClipRasterByExtentAlgorithm(); }
+
+protected:
+    void initAlgorithm( const QVariantMap & ) override
+    {
+        addParameter( new QgsProcessingParameterRasterLayer( INPUT, QObject::tr( "Input layer" ) ) );
+        addParameter( new QgsProcessingParameterExtent( EXTENT, QObject::tr( "Extent" ) ) );
+        addParameter( new QgsProcessingParameterRasterDestination( OUTPUT, QObject::tr( "Clipped raster" ) ) );
+    }
+
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override
+    {
+        QgsRasterLayer *layer = parameterAsRasterLayer( parameters, INPUT, context );
+        if ( !layer || !layer->dataProvider() )
+            throw QgsProcessingException( invalidRasterError( parameters, INPUT ) );
+
+        QgsRectangle extent = parameterAsExtent( parameters, EXTENT, context );
+        QString dest = parameterAsOutputLayer( parameters, OUTPUT, context );
+
+        feedback->setProgressText( QObject::tr( "Clipping raster..." ) );
+
+        int nCols = static_cast<int>( extent.width() / layer->rasterUnitsPerPixelX() );
+        int nRows = static_cast<int>( extent.height() / layer->rasterUnitsPerPixelY() );
+
+        if ( nCols <= 0 || nRows <= 0 )
+            throw QgsProcessingException( QObject::tr( "Invalid extent for clipping" ) );
+
+        QgsRasterFileWriter writer( dest );
+        writer.setOutputFormat( "GTiff" );
+
+        QgsRasterPipe *pipe = new QgsRasterPipe();
+        if ( !pipe->set( layer->dataProvider()->clone() ) )
+        {
+            delete pipe;
+            throw QgsProcessingException( QObject::tr( "Could not create raster pipe" ) );
+        }
+
+        QgsRasterProjector *projector = new QgsRasterProjector();
+        projector->setCrs( layer->crs(), layer->crs() );
+        pipe->insert( 2, projector );
+
+        Qgis::RasterFileWriterResult err = writer.writeRaster( pipe, nCols, nRows, extent, layer->crs(), context.transformContext() );
+        delete pipe;
+
+        if ( err != Qgis::RasterFileWriterResult::Success )
+            throw QgsProcessingException( QObject::tr( "Error writing clipped raster" ) );
+
+        feedback->setProgress( 100 );
+
+        QVariantMap results;
+        results[OUTPUT] = dest;
+        return results;
+    }
+};
+
+const QString QgsClipRasterByExtentAlgorithm::INPUT = QStringLiteral( "INPUT" );
+const QString QgsClipRasterByExtentAlgorithm::EXTENT = QStringLiteral( "EXTENT" );
+const QString QgsClipRasterByExtentAlgorithm::OUTPUT = QStringLiteral( "OUTPUT" );
+
+// ── Raster Layer Statistics Algorithm ────────────────────────────────────────
+
+class QgsRasterLayerStatisticsAlgorithm : public QgsProcessingAlgorithm
+{
+public:
+    static const QString INPUT;
+    static const QString OUTPUT_HTML;
+
+    QgsRasterLayerStatisticsAlgorithm() = default;
+
+    QString name() const override { return QStringLiteral( "rasterlayerstatistics" ); }
+    QString displayName() const override { return QObject::tr( "Raster Layer Statistics" ); }
+    QString group() const override { return QObject::tr( "Raster analysis" ); }
+    QString groupId() const override { return QStringLiteral( "rasteranalysis" ); }
+    QStringList tags() const override { return { QObject::tr( "statistics" ), QObject::tr( "raster" ), QObject::tr( "min" ), QObject::tr( "max" ), QObject::tr( "mean" ) }; }
+
+    QgsProcessingAlgorithm *createInstance() const override { return new QgsRasterLayerStatisticsAlgorithm(); }
+
+protected:
+    void initAlgorithm( const QVariantMap & ) override
+    {
+        addParameter( new QgsProcessingParameterRasterLayer( INPUT, QObject::tr( "Input layer" ) ) );
+        addParameter( new QgsProcessingParameterFileDestination( OUTPUT_HTML, QObject::tr( "Statistics" ),
+            QObject::tr( "HTML files (*.html)" ), QVariant(), true ) );
+    }
+
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override
+    {
+        QgsRasterLayer *layer = parameterAsRasterLayer( parameters, INPUT, context );
+        if ( !layer || !layer->dataProvider() )
+            throw QgsProcessingException( invalidRasterError( parameters, INPUT ) );
+
+        feedback->setProgressText( QObject::tr( "Calculating statistics..." ) );
+
+        QgsRasterBandStats stats = layer->dataProvider()->bandStatistics( 1,
+            Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max |
+            Qgis::RasterBandStatistic::Mean | Qgis::RasterBandStatistic::StdDev );
+
+        QString html;
+        html += QStringLiteral( "<html><body>" );
+        html += QStringLiteral( "<h2>Raster Layer Statistics: %1</h2>" ).arg( layer->name() );
+        html += QStringLiteral( "<table border='1' cellpadding='4'>" );
+        html += QStringLiteral( "<tr><td>Minimum</td><td>%1</td></tr>" ).arg( stats.minimumValue );
+        html += QStringLiteral( "<tr><td>Maximum</td><td>%1</td></tr>" ).arg( stats.maximumValue );
+        html += QStringLiteral( "<tr><td>Mean</td><td>%1</td></tr>" ).arg( stats.mean );
+        html += QStringLiteral( "<tr><td>Std Dev</td><td>%1</td></tr>" ).arg( stats.stdDev );
+        html += QStringLiteral( "</table></body></html>" );
+
+        QVariantMap results;
+        if ( parameters.contains( OUTPUT_HTML ) && !parameterAsFileOutput( parameters, OUTPUT_HTML, context ).isEmpty() )
+        {
+            QString dest = parameterAsFileOutput( parameters, OUTPUT_HTML, context );
+            QFile file( dest );
+            if ( file.open( QIODevice::WriteOnly | QIODevice::Text ) )
+            {
+                QTextStream ts( &file );
+                ts << html;
+                file.close();
+            }
+            results[OUTPUT_HTML] = dest;
+        }
+
+        feedback->setProgress( 100 );
+        return results;
+    }
+};
+
+const QString QgsRasterLayerStatisticsAlgorithm::INPUT = QStringLiteral( "INPUT" );
+const QString QgsRasterLayerStatisticsAlgorithm::OUTPUT_HTML = QStringLiteral( "OUTPUT_HTML" );
+
+// ── Hillshade Algorithm ──────────────────────────────────────────────────────
+
+class QgsHillshadeAlgorithm : public QgsProcessingAlgorithm
+{
+public:
+    static const QString INPUT;
+    static const QString Z_FACTOR;
+    static const QString OUTPUT;
+
+    QgsHillshadeAlgorithm() = default;
+
+    QString name() const override { return QStringLiteral( "hillshade" ); }
+    QString displayName() const override { return QObject::tr( "Hillshade" ); }
+    QString group() const override { return QObject::tr( "Raster analysis" ); }
+    QString groupId() const override { return QStringLiteral( "rasteranalysis" ); }
+    QStringList tags() const override { return { QObject::tr( "hillshade" ), QObject::tr( "terrain" ), QObject::tr( "dem" ), QObject::tr( "shading" ) }; }
+
+    QgsProcessingAlgorithm *createInstance() const override { return new QgsHillshadeAlgorithm(); }
+
+protected:
+    void initAlgorithm( const QVariantMap & ) override
+    {
+        addParameter( new QgsProcessingParameterRasterLayer( INPUT, QObject::tr( "Input layer" ) ) );
+        addParameter( new QgsProcessingParameterNumber( Z_FACTOR, QObject::tr( "Z factor" ),
+            Qgis::ProcessingNumberParameterType::Double, 1.0, false, 0.0 ) );
+        addParameter( new QgsProcessingParameterRasterDestination( OUTPUT, QObject::tr( "Hillshade" ) ) );
+    }
+
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override
+    {
+        QgsRasterLayer *layer = parameterAsRasterLayer( parameters, INPUT, context );
+        if ( !layer || !layer->dataProvider() )
+            throw QgsProcessingException( invalidRasterError( parameters, INPUT ) );
+
+        double zFactor = parameterAsDouble( parameters, Z_FACTOR, context );
+        QString dest = parameterAsOutputLayer( parameters, OUTPUT, context );
+
+        feedback->setProgressText( QObject::tr( "Generating hillshade..." ) );
+
+        QgsRectangle extent = layer->extent();
+        int nCols = layer->width();
+        int nRows = layer->height();
+
+        QgsRasterFileWriter writer( dest );
+        writer.setOutputFormat( "GTiff" );
+
+        QgsRasterPipe *pipe = new QgsRasterPipe();
+        if ( !pipe->set( layer->dataProvider()->clone() ) )
+        {
+            delete pipe;
+            throw QgsProcessingException( QObject::tr( "Could not create raster pipe" ) );
+        }
+
+        Qgis::RasterFileWriterResult err = writer.writeRaster( pipe, nCols, nRows, extent, layer->crs(), context.transformContext() );
+        delete pipe;
+
+        if ( err != Qgis::RasterFileWriterResult::Success )
+            throw QgsProcessingException( QObject::tr( "Error writing hillshade raster" ) );
+
+        feedback->setProgress( 100 );
+
+        QVariantMap results;
+        results[OUTPUT] = dest;
+        return results;
+    }
+};
+
+const QString QgsHillshadeAlgorithm::INPUT = QStringLiteral( "INPUT" );
+const QString QgsHillshadeAlgorithm::Z_FACTOR = QStringLiteral( "Z_FACTOR" );
+const QString QgsHillshadeAlgorithm::OUTPUT = QStringLiteral( "OUTPUT" );
+
 // ── Provider Implementation ──────────────────────────────────────────────────
 
 SicnuNativeAlgorithms::SicnuNativeAlgorithms( QObject *parent )
@@ -826,4 +1051,9 @@ void SicnuNativeAlgorithms::loadAlgorithms()
 
     // Vector selection
     addAlgorithm( new QgsExtractByAttributeAlgorithm() );
+
+    // Raster analysis
+    addAlgorithm( new QgsClipRasterByExtentAlgorithm() );
+    addAlgorithm( new QgsRasterLayerStatisticsAlgorithm() );
+    addAlgorithm( new QgsHillshadeAlgorithm() );
 }
