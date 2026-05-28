@@ -19,6 +19,8 @@
 #include <qgsrasterpipe.h>
 #include <qgsrasterprojector.h>
 #include <qgsrectangle.h>
+#include <qgscoordinatetransform.h>
+#include <qgscoordinatereferencesystem.h>
 
 #include <QFile>
 #include <QTextStream>
@@ -1025,6 +1027,142 @@ const QString QgsHillshadeAlgorithm::INPUT = QStringLiteral( "INPUT" );
 const QString QgsHillshadeAlgorithm::Z_FACTOR = QStringLiteral( "Z_FACTOR" );
 const QString QgsHillshadeAlgorithm::OUTPUT = QStringLiteral( "OUTPUT" );
 
+// ── Reproject Layer Algorithm ────────────────────────────────────────────────
+
+class QgsReprojectLayerAlgorithm : public QgsProcessingAlgorithm
+{
+public:
+    static const QString INPUT;
+    static const QString TARGET_CRS;
+    static const QString OUTPUT;
+
+    QgsReprojectLayerAlgorithm() = default;
+
+    QString name() const override { return QStringLiteral( "reprojectlayer" ); }
+    QString displayName() const override { return QObject::tr( "Reproject Layer" ); }
+    QString group() const override { return QObject::tr( "Vector general" ); }
+    QString groupId() const override { return QStringLiteral( "vectorgeneral" ); }
+    QStringList tags() const override { return { QObject::tr( "reproject" ), QObject::tr( "transform" ), QObject::tr( "crs" ), QObject::tr( "projection" ) }; }
+
+    QgsProcessingAlgorithm *createInstance() const override { return new QgsReprojectLayerAlgorithm(); }
+
+protected:
+    void initAlgorithm( const QVariantMap & ) override
+    {
+        addParameter( new QgsProcessingParameterFeatureSource( INPUT, QObject::tr( "Input layer" ),
+            QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorAnyGeometry ) ) );
+        addParameter( new QgsProcessingParameterCrs( TARGET_CRS, QObject::tr( "Target CRS" ), QStringLiteral( "EPSG:4326" ) ) );
+        addParameter( new QgsProcessingParameterFeatureSink( OUTPUT, QObject::tr( "Reprojected" ) ) );
+    }
+
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override
+    {
+        std::unique_ptr<QgsProcessingFeatureSource> source( parameterAsSource( parameters, INPUT, context ) );
+        if ( !source )
+            throw QgsProcessingException( invalidSourceError( parameters, INPUT ) );
+
+        QgsCoordinateReferenceSystem targetCrs = parameterAsCrs( parameters, TARGET_CRS, context );
+        QgsCoordinateTransform transform( source->sourceCrs(), targetCrs, context.transformContext() );
+
+        QString dest;
+        std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
+            source->fields(), source->wkbType(), targetCrs ) );
+        if ( !sink )
+            throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+
+        QgsFeatureIterator it = source->getFeatures();
+        QgsFeature feat;
+        long long total = source->featureCount();
+        long long current = 0;
+
+        while ( it.nextFeature( feat ) )
+        {
+            if ( feedback->isCanceled() ) break;
+            current++;
+            if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
+
+            if ( feat.hasGeometry() )
+            {
+                QgsFeature outputFeat = feat;
+                QgsGeometry geom = feat.geometry();
+                geom.transform( transform );
+                outputFeat.setGeometry( geom );
+                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+            }
+            else
+            {
+                sink->addFeature( feat, QgsFeatureSink::FastInsert );
+            }
+        }
+
+        return QVariantMap{{OUTPUT, dest}};
+    }
+};
+
+const QString QgsReprojectLayerAlgorithm::INPUT = QStringLiteral( "INPUT" );
+const QString QgsReprojectLayerAlgorithm::TARGET_CRS = QStringLiteral( "TARGET_CRS" );
+const QString QgsReprojectLayerAlgorithm::OUTPUT = QStringLiteral( "OUTPUT" );
+
+// ── Assign Projection Algorithm ──────────────────────────────────────────────
+
+class QgsAssignProjectionAlgorithm : public QgsProcessingAlgorithm
+{
+public:
+    static const QString INPUT;
+    static const QString CRS;
+    static const QString OUTPUT;
+
+    QgsAssignProjectionAlgorithm() = default;
+
+    QString name() const override { return QStringLiteral( "assignprojection" ); }
+    QString displayName() const override { return QObject::tr( "Assign Projection" ); }
+    QString group() const override { return QObject::tr( "Vector general" ); }
+    QString groupId() const override { return QStringLiteral( "vectorgeneral" ); }
+    QStringList tags() const override { return { QObject::tr( "assign" ), QObject::tr( "projection" ), QObject::tr( "crs" ), QObject::tr( "set" ) }; }
+
+    QgsProcessingAlgorithm *createInstance() const override { return new QgsAssignProjectionAlgorithm(); }
+
+protected:
+    void initAlgorithm( const QVariantMap & ) override
+    {
+        addParameter( new QgsProcessingParameterFeatureSource( INPUT, QObject::tr( "Input layer" ),
+            QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorAnyGeometry ) ) );
+        addParameter( new QgsProcessingParameterCrs( CRS, QObject::tr( "CRS" ), QStringLiteral( "EPSG:4326" ) ) );
+        addParameter( new QgsProcessingParameterFeatureSink( OUTPUT, QObject::tr( "Assigned" ) ) );
+    }
+
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override
+    {
+        std::unique_ptr<QgsProcessingFeatureSource> source( parameterAsSource( parameters, INPUT, context ) );
+        if ( !source )
+            throw QgsProcessingException( invalidSourceError( parameters, INPUT ) );
+
+        QgsCoordinateReferenceSystem crs = parameterAsCrs( parameters, CRS, context );
+
+        QString dest;
+        std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
+            source->fields(), source->wkbType(), crs ) );
+        if ( !sink )
+            throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+
+        QgsFeatureIterator it = source->getFeatures();
+        QgsFeature feat;
+
+        while ( it.nextFeature( feat ) )
+        {
+            if ( feedback->isCanceled() ) break;
+            sink->addFeature( feat, QgsFeatureSink::FastInsert );
+        }
+
+        feedback->setProgress( 100 );
+        return QVariantMap{{OUTPUT, dest}};
+    }
+};
+
+const QString QgsAssignProjectionAlgorithm::INPUT = QStringLiteral( "INPUT" );
+const QString QgsAssignProjectionAlgorithm::CRS = QStringLiteral( "CRS" );
+const QString QgsAssignProjectionAlgorithm::OUTPUT = QStringLiteral( "OUTPUT" );
+
 // ── Provider Implementation ──────────────────────────────────────────────────
 
 SicnuNativeAlgorithms::SicnuNativeAlgorithms( QObject *parent )
@@ -1059,4 +1197,8 @@ void SicnuNativeAlgorithms::loadAlgorithms()
     addAlgorithm( new QgsClipRasterByExtentAlgorithm() );
     addAlgorithm( new QgsRasterLayerStatisticsAlgorithm() );
     addAlgorithm( new QgsHillshadeAlgorithm() );
+
+    // Coordinate/projection
+    addAlgorithm( new QgsReprojectLayerAlgorithm() );
+    addAlgorithm( new QgsAssignProjectionAlgorithm() );
 }
