@@ -2910,3 +2910,21 @@ install(TARGETS qgis_core
   RUNTIME DESTINATION ${QGIS_BIN_DIR}
   LIBRARY DESTINATION ${QGIS_LIB_DIR}
   ARCHIVE DESTINATION ${QGIS_LIB_DIR})
+
+############################################################
+# sicnu_core: Plugin manager and plugin interface library
+############################################################
+add_library(sicnu_core SHARED
+  plugin_manager.cpp
+)
+
+target_include_directories(sicnu_core PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/interfaces
+)
+
+target_link_libraries(sicnu_core PUBLIC
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+)
