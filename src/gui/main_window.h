@@ -2,6 +2,10 @@
 
 #include <QMainWindow>
 #include <QMap>
+#include <QDomDocument>
+
+#include <qgspointxy.h>
+#include <qgscoordinatereferencesystem.h>
 
 class QgsMapCanvas;
 class QgsLayerTreeView;
