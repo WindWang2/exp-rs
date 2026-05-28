@@ -58,7 +58,7 @@ protected:
 
         QString dest;
         std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
-            source->fields(), Qgis::WkbType::Polygon, source->sourceCrs() ) );
+            source->fields(), Qgis::WkbType::MultiPolygon, source->sourceCrs() ) );
         if ( !sink )
             throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
 
