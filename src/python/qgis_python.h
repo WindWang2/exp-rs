@@ -15,6 +15,8 @@ public:
 
     bool runString(const QString &command, QString &output, QString &error);
 
+    void loadBindings();
+
 private:
     QgisPython() = default;
     ~QgisPython() = default;
@@ -22,6 +24,5 @@ private:
     QgisPython &operator=(const QgisPython &) = delete;
 
     bool m_initialized = false;
+    bool m_outputRedirected = false;
 };
-
-void init_python_bindings();

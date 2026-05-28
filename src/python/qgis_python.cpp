@@ -48,12 +48,14 @@ sys.stdout = _ConsoleOutput()
 sys.stderr = _ConsoleOutput()
 )");
         m_initialized = true;
+        m_outputRedirected = true;
         qDebug() << "Python stdout/stderr redirected";
     }
     catch (py::error_already_set &e)
     {
         qWarning() << "Failed to initialize Python console output:" << e.what();
         m_initialized = true; // Still mark as initialized, console output just won't capture
+        m_outputRedirected = false;
     }
 
     return true;
@@ -83,6 +85,17 @@ bool QgisPython::runString(const QString &command, QString &output, QString &err
 
     try
     {
+        // Reset capture buffers before execution to prevent stale output
+        if (m_outputRedirected)
+        {
+            py::exec(R"(
+import sys
+from io import StringIO
+sys.stdout.buffer = StringIO()
+sys.stderr.buffer = StringIO()
+)", py::globals());
+        }
+
         py::object scope = py::globals();
         py::exec(command.toUtf8().constData(), scope);
 
@@ -103,7 +116,7 @@ bool QgisPython::runString(const QString &command, QString &output, QString &err
     }
 }
 
-void init_python_bindings()
+void QgisPython::loadBindings()
 {
     // Sub-modules are auto-registered via pybind11 PYBIND11_MODULE macros
     // This function triggers their initialization by importing them
