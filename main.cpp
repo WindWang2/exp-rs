@@ -83,6 +83,8 @@
 
 // Processing framework
 #include <processing/qgsprocessingregistry.h>
+#include <processing/qgsprocessingtoolboxtreeview.h>
+#include <processing/qgsprocessingalgorithmdialogbase.h>
 #include "src/processing/sicnunativealgorithms.h"
 
 // Forward declare for MOC
@@ -221,6 +223,12 @@ public:
         QMenu *settingsMenu = menuBar()->addMenu("&Settings");
         settingsMenu->addAction("Options...", this, &QgisDesktopWindow::options);
 
+        // Processing Menu
+        QMenu *processingMenu = menuBar()->addMenu("&Processing");
+        processingMenu->addAction("Toolbox", this, &QgisDesktopWindow::showProcessingToolbox);
+        processingMenu->addSeparator();
+        processingMenu->addAction("History", this, &QgisDesktopWindow::showProcessingHistory);
+
         // Help Menu
         QMenu *helpMenu = menuBar()->addMenu("&Help");
         helpMenu->addAction("Help Contents", this, &QgisDesktopWindow::helpContents, QKeySequence::HelpContents);
@@ -293,6 +301,19 @@ public:
         // Tabify the left dock widgets
         tabifyDockWidget(layersDock, browserDock);
         layersDock->raise();
+
+        // Processing Toolbox Panel (Left, below browser)
+        QgsDockWidget *processingDock = new QgsDockWidget("Processing Toolbox", this);
+        processingDock->setObjectName("processingDock");
+        processingDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+
+        m_toolboxView = new QgsProcessingToolboxTreeView(processingDock);
+        m_toolboxView->setRegistry(QgsApplication::processingRegistry());
+        processingDock->setWidget(m_toolboxView);
+        addDockWidget(Qt::LeftDockWidgetArea, processingDock);
+
+        // Tabify with browser
+        tabifyDockWidget(browserDock, processingDock);
 
         // Overview Panel (Right)
         QgsDockWidget *overviewDock = new QgsDockWidget("Overview", this);
@@ -568,6 +589,24 @@ private slots:
             "Settings dialog coming soon...");
     }
 
+    // ── Processing Actions ─────────────────────────────────────────────────────
+    void showProcessingToolbox()
+    {
+        // Find and raise the processing dock
+        for (QDockWidget *dock : findChildren<QDockWidget*>()) {
+            if (dock->objectName() == "processingDock") {
+                dock->show();
+                dock->raise();
+                break;
+            }
+        }
+    }
+
+    void showProcessingHistory()
+    {
+        QMessageBox::information(this, "Processing History", "Processing history coming soon...");
+    }
+
     // ── Help Actions ──────────────────────────────────────────────────────────
     void helpContents() { QMessageBox::information(this, "Help", "QGIS Help"); }
     void checkVersion() { QMessageBox::information(this, "Version", "SICNU GEO RS v1.0"); }
@@ -792,6 +831,7 @@ public:
     QWidget *m_mapCanvasContainer = nullptr;
     QgsProjectionSelectionWidget *m_crsSelector = nullptr;
     LayerTreeMenuProvider *m_layerTreeMenuProvider = nullptr;
+    QgsProcessingToolboxTreeView *m_toolboxView = nullptr;
 
     // Map tools
     QgsMapToolPan *m_panTool = nullptr;
