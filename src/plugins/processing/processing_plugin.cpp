@@ -13,7 +13,7 @@
 #include <processing/qgsprocessingalgorithmdialogbase.h>
 #include <qgsdockwidget.h>
 
-#include "src/processing/sicnunativealgorithms.h"
+#include "processing/sicnunativealgorithms.h"
 
 ProcessingPlugin::ProcessingPlugin(QObject *parent)
     : QObject(parent)

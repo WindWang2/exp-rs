@@ -1,6 +1,6 @@
 #include <QApplication>
-#include <QgsApplication.h>
-#include <QgsGui.h>
+#include <qgsapplication.h>
+#include <qgsgui.h>
 #include <QTimer>
 #include <QFileInfo>
 

@@ -8,8 +8,8 @@
 #include <layertree/qgslayertreeview.h>
 #include <qgsdockwidget.h>
 
-#include "src/gui/python_console_widget.h"
-#include "src/python/qgis_python.h"
+#include "gui/python_console_widget.h"
+#include "python/qgis_python.h"
 
 PythonConsolePlugin::PythonConsolePlugin(QObject *parent)
     : QObject(parent)
