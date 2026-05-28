@@ -178,6 +178,9 @@ if(WITH_GUI)
     ${CMAKE_SOURCE_DIR}/src
   )
 
+  # Avoid Qt 'slots'/'signals' macro conflicts with Python.h struct members
+  target_compile_definitions(sicnu_geo_rs PRIVATE QT_NO_KEYWORDS)
+
   # Set output directory
   set_target_properties(sicnu_geo_rs PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
