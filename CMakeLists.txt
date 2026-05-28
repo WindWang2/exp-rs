@@ -30,8 +30,20 @@ find_package(LibZip REQUIRED)
 find_package(ZSTD REQUIRED)
 find_package(Protobuf REQUIRED)
 find_package(Qt6Keychain QUIET)
-# Python (build-time only — code generation scripts, not runtime)
+# Python (build-time code generation scripts)
 find_package(Python COMPONENTS Interpreter REQUIRED)
+
+# Python Development (runtime embedding)
+find_package(Python REQUIRED COMPONENTS Interpreter Development)
+
+# pybind11 via FetchContent
+include(FetchContent)
+FetchContent_Declare(
+  pybind11
+  GIT_REPOSITORY https://github.com/pybind/pybind11.git
+  GIT_TAG        v2.13.6
+)
+FetchContent_MakeAvailable(pybind11)
 # QCA — include directly from known install path
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/FindQCA.cmake OPTIONAL)
 include_directories(SYSTEM /usr/include/qt6/Qca-qt6/QtCrypto)
@@ -140,6 +152,12 @@ if(WITH_GUI)
   set(SICNU_GEO_RS_CPP_SRCS
     main.cpp
     src/processing/sicnunativealgorithms.cpp
+    src/python/qgis_python.cpp
+    src/python/bindings.cpp
+    src/python/bindings_core.cpp
+    src/python/bindings_gui.cpp
+    src/python/bindings_analysis.cpp
+    src/gui/python_console_widget.cpp
   )
 
   add_executable(sicnu_geo_rs ${SICNU_GEO_RS_CPP_SRCS})
@@ -155,6 +173,8 @@ if(WITH_GUI)
     Qt6::Xml
     Qt6::Svg
     Qt6::Sql
+    pybind11::embed
+    Python::Python
   )
 
   target_include_directories(sicnu_geo_rs PRIVATE
