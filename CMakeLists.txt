@@ -30,10 +30,7 @@ find_package(LibZip REQUIRED)
 find_package(ZSTD REQUIRED)
 find_package(Protobuf REQUIRED)
 find_package(Qt6Keychain QUIET)
-# Python (build-time code generation scripts)
-find_package(Python COMPONENTS Interpreter REQUIRED)
-
-# Python Development (runtime embedding)
+# Python (build-time scripts + runtime embedding)
 find_package(Python REQUIRED COMPONENTS Interpreter Development)
 
 # pybind11 via FetchContent
@@ -44,6 +41,7 @@ FetchContent_Declare(
   GIT_TAG        v2.13.6
 )
 FetchContent_MakeAvailable(pybind11)
+
 # QCA — include directly from known install path
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/FindQCA.cmake OPTIONAL)
 include_directories(SYSTEM /usr/include/qt6/Qca-qt6/QtCrypto)
@@ -174,7 +172,6 @@ if(WITH_GUI)
     Qt6::Svg
     Qt6::Sql
     pybind11::embed
-    Python::Python
   )
 
   target_include_directories(sicnu_geo_rs PRIVATE
