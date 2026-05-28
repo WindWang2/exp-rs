@@ -178,8 +178,12 @@ if(WITH_GUI)
     ${CMAKE_SOURCE_DIR}/src
   )
 
-  # Avoid Qt 'slots'/'signals' macro conflicts with Python.h struct members
-  target_compile_definitions(sicnu_geo_rs PRIVATE QT_NO_KEYWORDS)
+  # QT_NO_KEYWORDS only for Python embedding files (conflicts with Python.h struct members).
+  # Other files include QGIS headers that use raw signals:/slots: keywords.
+  set_source_files_properties(
+    src/python/qgis_python.cpp
+    PROPERTIES COMPILE_DEFINITIONS "QT_NO_KEYWORDS"
+  )
 
   # Set output directory
   set_target_properties(sicnu_geo_rs PROPERTIES

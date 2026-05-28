@@ -87,6 +87,10 @@
 #include <processing/qgsprocessingalgorithmdialogbase.h>
 #include "src/processing/sicnunativealgorithms.h"
 
+// Python embedding
+#include "src/python/qgis_python.h"
+#include "src/gui/python_console_widget.h"
+
 // Forward declare for MOC
 class LayerTreeMenuProvider;
 class QgisDesktopWindow;
@@ -228,6 +232,10 @@ public:
         processingMenu->addAction("Toolbox", this, &QgisDesktopWindow::showProcessingToolbox);
         processingMenu->addSeparator();
         processingMenu->addAction("History", this, &QgisDesktopWindow::showProcessingHistory);
+        processingMenu->addAction("Python Console", this, [this]() {
+            if (auto *dock = findChild<QgsDockWidget *>("pythonDock"))
+                dock->setVisible(true);
+        });
 
         // Help Menu
         QMenu *helpMenu = menuBar()->addMenu("&Help");
@@ -314,6 +322,13 @@ public:
 
         // Tabify with browser
         tabifyDockWidget(browserDock, processingDock);
+
+        // Python Console (Bottom)
+        QgsDockWidget *pythonDock = new QgsDockWidget("Python Console", this);
+        pythonDock->setObjectName("pythonDock");
+        auto *pythonConsole = new PythonConsoleWidget(pythonDock);
+        pythonDock->setWidget(pythonConsole);
+        addDockWidget(Qt::BottomDockWidgetArea, pythonDock);
 
         // Double-click on algorithm in toolbox opens execution dialog
         connect(m_toolboxView, &QgsProcessingToolboxTreeView::doubleClicked, this, [this](const QModelIndex &index) {
@@ -990,6 +1005,10 @@ int main(int argc, char *argv[])
     // Register processing algorithms
     QgsApplication::processingRegistry()->addProvider( new SicnuNativeAlgorithms() );
 
+    // Initialize Python embedding
+    QgisPython::instance().initialize();
+    QgisPython::instance().loadBindings();
+
     // Initialize QgsGui singleton (required for QGIS dialogs)
     qDebug() << "Initializing QgsGui...";
     QgsGui::instance();
@@ -1027,7 +1046,12 @@ int main(int argc, char *argv[])
         });
     }
 
-    return app->exec();
+    int result = app->exec();
+
+    // Finalize Python before exit
+    QgisPython::instance().finalize();
+
+    return result;
 }
 
 #include "main.moc"
