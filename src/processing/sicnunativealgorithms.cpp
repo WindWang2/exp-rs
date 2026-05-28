@@ -20,6 +20,9 @@
 #include <qgsrasterprojector.h>
 #include <qgsrectangle.h>
 
+#include <QFile>
+#include <QTextStream>
+
 // ── Buffer Algorithm ─────────────────────────────────────────────────────────
 
 class QgsBufferAlgorithm : public QgsProcessingAlgorithm
