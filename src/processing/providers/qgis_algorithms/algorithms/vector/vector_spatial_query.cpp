@@ -89,7 +89,6 @@ QVariantMap VectorSpatialQueryAlgorithm::processAlgorithm( const QVariantMap &pa
         bool match = false;
         for ( QgsFeatureId fid : intersectIds )
         {
-            std::unique_ptr<QgsProcessingFeatureSource> dummy;
             QgsFeature interFeat;
             // Fetch the feature from the intersect source
             QgsFeatureIterator interIt = intersectSource->getFeatures( QgsFeatureRequest( fid ) );

@@ -94,19 +94,16 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
     QgsRasterFileWriter writer( dest );
     writer.setOutputFormat( QStringLiteral( "GTiff" ) );
 
-    QgsRasterPipe *pipe = new QgsRasterPipe();
+    auto pipe = std::make_unique<QgsRasterPipe>();
     if ( !pipe->set( refLayer->dataProvider()->clone() ) )
-    {
-        delete pipe;
         throw QgsProcessingException( QObject::tr( "Could not create raster pipe" ) );
-    }
 
     QgsRasterProjector *projector = new QgsRasterProjector();
     projector->setCrs( crs, crs );
     pipe->insert( 2, projector );
 
-    Qgis::RasterFileWriterResult err = writer.writeRaster( pipe, nCols, nRows, extent, crs, context.transformContext() );
-    delete pipe;
+    Qgis::RasterFileWriterResult err = writer.writeRaster( pipe.get(), nCols, nRows, extent, crs, context.transformContext() );
+    pipe.reset();
 
     if ( err != Qgis::RasterFileWriterResult::Success )
         throw QgsProcessingException( QObject::tr( "Error writing output raster" ) );
