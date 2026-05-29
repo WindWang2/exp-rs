@@ -12,7 +12,7 @@ QVariantMap GdalToolWrapper::processAlgorithm(const QVariantMap &parameters,
 {
     QString program = ToolPathManager::instance().gdalToolPath(toolName());
     if (program.isEmpty()) {
-        feedback->reportError(tr("GDAL tool '%1' not found. Ensure GDAL tools are installed.").arg(toolName()));
+        feedback->reportError(QObject::tr("GDAL tool '%1' not found. Ensure GDAL tools are installed.").arg(toolName()));
         return {};
     }
 
@@ -33,21 +33,21 @@ QVariantMap GdalToolWrapper::processAlgorithm(const QVariantMap &parameters,
 bool GdalToolWrapper::runExternalTool(const QString &program, const QStringList &args,
                                        QgsProcessingFeedback *feedback)
 {
-    feedback->pushInfo(tr("Running: %1 %2").arg(program, args.join(" ")));
+    feedback->pushInfo(QObject::tr("Running: %1 %2").arg(program, args.join(" ")));
 
     QProcess proc;
     proc.setProcessChannelMode(QProcess::MergedChannels);
     proc.start(program, args);
 
     if (!proc.waitForStarted(5000)) {
-        feedback->reportError(tr("Failed to start tool: %1").arg(proc.errorString()));
+        feedback->reportError(QObject::tr("Failed to start tool: %1").arg(proc.errorString()));
         return false;
     }
 
     while (proc.state() == QProcess::Running) {
         if (feedback->isCanceled()) {
             proc.kill();
-            feedback->reportError(tr("Tool execution canceled by user."));
+            feedback->reportError(QObject::tr("Tool execution canceled by user."));
             return false;
         }
         proc.waitForReadyRead(100);
@@ -58,7 +58,7 @@ bool GdalToolWrapper::runExternalTool(const QString &program, const QStringList 
     }
 
     if (proc.exitCode() != 0) {
-        feedback->reportError(tr("Tool failed with exit code %1: %2")
+        feedback->reportError(QObject::tr("Tool failed with exit code %1: %2")
             .arg(proc.exitCode())
             .arg(QString::fromUtf8(proc.readAllStandardError())));
         return false;
@@ -89,7 +89,7 @@ void GdalToolWrapper::addOutputVectorLayerParameter(const QString &name, const Q
 
 void GdalToolWrapper::addExtentParameter(const QString &name)
 {
-    addParameter(new QgsProcessingParameterExtent(name, tr("Extent")));
+    addParameter(new QgsProcessingParameterExtent(name, QObject::tr("Extent")));
 }
 
 void GdalToolWrapper::addCrsParameter(const QString &name, const QString &description)

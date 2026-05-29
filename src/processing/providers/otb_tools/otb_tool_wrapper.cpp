@@ -12,7 +12,7 @@ QVariantMap OtbToolWrapper::processAlgorithm(const QVariantMap &parameters,
 {
     QString program = ToolPathManager::instance().otbToolPath(applicationName());
     if (program.isEmpty()) {
-        feedback->reportError(tr("OTB application '%1' not found. Ensure OTB is installed.").arg(applicationName()));
+        feedback->reportError(QObject::tr("OTB application '%1' not found. Ensure OTB is installed.").arg(applicationName()));
         return {};
     }
 
@@ -34,21 +34,21 @@ bool OtbToolWrapper::runOtbApplication(const QStringList &args, QgsProcessingFee
 {
     QString program = ToolPathManager::instance().otbToolPath(applicationName());
 
-    feedback->pushInfo(tr("Running: %1 %2").arg(program, args.join(" ")));
+    feedback->pushInfo(QObject::tr("Running: %1 %2").arg(program, args.join(" ")));
 
     QProcess proc;
     proc.setProcessChannelMode(QProcess::MergedChannels);
     proc.start(program, args);
 
     if (!proc.waitForStarted(5000)) {
-        feedback->reportError(tr("Failed to start OTB application: %1").arg(proc.errorString()));
+        feedback->reportError(QObject::tr("Failed to start OTB application: %1").arg(proc.errorString()));
         return false;
     }
 
     while (proc.state() == QProcess::Running) {
         if (feedback->isCanceled()) {
             proc.kill();
-            feedback->reportError(tr("OTB application canceled by user."));
+            feedback->reportError(QObject::tr("OTB application canceled by user."));
             return false;
         }
         proc.waitForReadyRead(100);
@@ -59,7 +59,7 @@ bool OtbToolWrapper::runOtbApplication(const QStringList &args, QgsProcessingFee
     }
 
     if (proc.exitCode() != 0) {
-        feedback->reportError(tr("OTB application failed with exit code %1: %2")
+        feedback->reportError(QObject::tr("OTB application failed with exit code %1: %2")
             .arg(proc.exitCode())
             .arg(QString::fromUtf8(proc.readAllStandardError())));
         return false;

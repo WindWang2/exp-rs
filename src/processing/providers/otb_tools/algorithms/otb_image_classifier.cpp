@@ -8,7 +8,7 @@ void OtbImageClassifierAlgorithm::initAlgorithm(const QVariantMap &configuration
 {
     addParameter(new QgsProcessingParameterRasterLayer("INPUT", "Input raster"));
     addParameter(new QgsProcessingParameterFile("MODEL", "Trained model file",
-                                                 QgsProcessingParameterFile::File,
+                                                 Qgis::ProcessingFileParameterBehavior::File,
                                                  "Model files (*.xml *.txt)"));
     addParameter(new QgsProcessingParameterRasterDestination("OUTPUT", "Output raster (classified)"));
 }

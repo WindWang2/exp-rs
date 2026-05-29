@@ -83,9 +83,8 @@ QVariantMap VectorSpatialQueryAlgorithm::processAlgorithm( const QVariantMap &pa
         if ( !feat.hasGeometry() )
             continue;
 
-        QgsFeatureList candidates = spatialIndex.nearestNeighbor( feat.geometry(), 1 );
         // Use intersects for initial filtering
-        QgsFeatureIds intersectIds = spatialIndex.intersects( feat.geometry().boundingBox() );
+        auto intersectIds = spatialIndex.intersects( feat.geometry().boundingBox() );
 
         bool match = false;
         for ( QgsFeatureId fid : intersectIds )

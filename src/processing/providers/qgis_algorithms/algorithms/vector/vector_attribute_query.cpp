@@ -23,7 +23,7 @@ void VectorAttributeQueryAlgorithm::initAlgorithm( const QVariantMap & )
     addParameter( new QgsProcessingParameterFeatureSource( INPUT, QObject::tr( "Input layer" ),
         QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorAnyGeometry ) ) );
     addParameter( new QgsProcessingParameterString( EXPRESSION, QObject::tr( "Expression" ),
-        QString(), QVariant(), false, true ) );
+        QVariant(), false, true ) );
     addParameter( new QgsProcessingParameterFeatureSink( OUTPUT, QObject::tr( "Filtered" ) ) );
 }
 
@@ -41,16 +41,16 @@ QVariantMap VectorAttributeQueryAlgorithm::processAlgorithm( const QVariantMap &
     if ( expression.hasParserError() )
         throw QgsProcessingException( QObject::tr( "Expression error: %1" ).arg( expression.parserErrorString() ) );
 
-    expression.prepare( source->fields() );
-
     QString dest;
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
         source->fields(), source->wkbType(), source->sourceCrs() ) );
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
 
-    QgsExpressionContext exprContext = QgsExpressionContextUtils::globalScope();
-    expression.setExpressionContext( exprContext );
+    QgsExpressionContext exprContext;
+    exprContext.appendScope( QgsExpressionContextUtils::globalScope() );
+    exprContext.appendScope( QgsExpressionContextUtils::projectScope( context.project() ) );
+    expression.prepare( &exprContext );
 
     QgsFeatureIterator it = source->getFeatures();
     QgsFeature feat;
@@ -67,9 +67,8 @@ QVariantMap VectorAttributeQueryAlgorithm::processAlgorithm( const QVariantMap &
             feedback->setProgress( 100.0 * current / total );
 
         exprContext.setFeature( feat );
-        expression.setExpressionContext( exprContext );
 
-        QVariant result = expression.evaluate();
+        QVariant result = expression.evaluate( &exprContext );
         if ( !expression.hasEvalError() && result.toBool() )
             sink->addFeature( feat, QgsFeatureSink::FastInsert );
     }

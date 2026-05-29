@@ -59,7 +59,7 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
         throw QgsProcessingException( QObject::tr( "Input layers have no bands" ) );
 
     // Read all bands from all layers into memory blocks, then write merged output
-    QVector<std::unique_ptr<QgsRasterBlock>> blocks;
+    std::vector<std::unique_ptr<QgsRasterBlock>> blocks;
     int currentBand = 0;
 
     for ( QgsRasterLayer *rl : rasterLayers )
@@ -74,7 +74,7 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
             if ( !block || !block->isValid() )
                 throw QgsProcessingException( QObject::tr( "Could not read band %1 from %2" ).arg( band ).arg( rl->name() ) );
 
-            blocks.append( std::move( block ) );
+            blocks.push_back( std::move( block ) );
             currentBand++;
             feedback->setProgress( 50.0 * currentBand / totalBands );
         }

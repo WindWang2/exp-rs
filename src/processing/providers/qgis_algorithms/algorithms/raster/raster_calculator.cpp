@@ -60,7 +60,7 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
     feedback->setProgress( 10 );
 
     // Read all input bands
-    QVector<std::unique_ptr<QgsRasterBlock>> blocks;
+    std::vector<std::unique_ptr<QgsRasterBlock>> blocks;
     int totalBands = 0;
 
     for ( QgsRasterLayer *rl : rasterLayers )
@@ -75,7 +75,7 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
             if ( !block || !block->isValid() )
                 throw QgsProcessingException( QObject::tr( "Could not read band %1 from %2" ).arg( band ).arg( rl->name() ) );
 
-            blocks.append( std::move( block ) );
+            blocks.push_back( std::move( block ) );
             totalBands++;
         }
     }
