@@ -13,7 +13,10 @@
 #include <processing/qgsprocessingalgorithmdialogbase.h>
 #include <qgsdockwidget.h>
 
-#include "processing/sicnunativealgorithms.h"
+#include "processing/providers/sicnu_native/provider.h"
+#include "processing/providers/gdal_tools/provider.h"
+#include "processing/providers/otb_tools/provider.h"
+#include "processing/providers/qgis_algorithms/provider.h"
 
 ProcessingPlugin::ProcessingPlugin(QObject *parent)
     : QObject(parent)
@@ -30,8 +33,11 @@ bool ProcessingPlugin::initialize(QgsMapCanvas *canvas, QgsLayerTreeView *layerT
     m_canvas = canvas;
     m_layerTree = layerTree;
 
-    // Register processing algorithms
+    // Register processing providers
     QgsApplication::processingRegistry()->addProvider(new SicnuNativeAlgorithms());
+    QgsApplication::processingRegistry()->addProvider(new GdalToolsProvider());
+    QgsApplication::processingRegistry()->addProvider(new OtbToolsProvider());
+    QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 
     qDebug() << "ProcessingPlugin initialized";
     return true;

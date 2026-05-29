@@ -140,6 +140,7 @@ option(WITH_QUICK         "" OFF)
 add_subdirectory(src/ui)
 add_subdirectory(src/native)
 add_subdirectory(src/gui)
+add_subdirectory(src/processing)
 
 # SICNU_GEO_RS: SICNU GUI library (main window framework)
 add_library(sicnu_gui SHARED

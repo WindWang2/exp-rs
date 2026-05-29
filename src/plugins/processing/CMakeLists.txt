@@ -12,6 +12,7 @@ target_link_libraries(processing_plugin PRIVATE
     Qt6::Widgets
     qgis_core
     qgis_gui
+    sicnu_processing
 )
 
 install(TARGETS processing_plugin
