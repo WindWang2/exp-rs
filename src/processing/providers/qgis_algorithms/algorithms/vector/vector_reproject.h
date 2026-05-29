@@ -1,0 +1,27 @@
+// src/processing/providers/qgis_algorithms/algorithms/vector/vector_reproject.h
+#pragma once
+
+#include <processing/qgsprocessingalgorithm.h>
+
+class VectorReprojectAlgorithm : public QgsProcessingAlgorithm
+{
+public:
+    static const QString INPUT;
+    static const QString TARGET_CRS;
+    static const QString OUTPUT;
+
+    VectorReprojectAlgorithm() = default;
+
+    QString name() const override { return QStringLiteral( "vector_reproject" ); }
+    QString displayName() const override { return QObject::tr( "Reproject Vector" ); }
+    QString group() const override { return QObject::tr( "Vector General" ); }
+    QString groupId() const override { return QStringLiteral( "vectorgeneral" ); }
+    QStringList tags() const override { return { QObject::tr( "reproject" ), QObject::tr( "transform" ), QObject::tr( "crs" ), QObject::tr( "projection" ) }; }
+    QString provider() const override { return QStringLiteral( "qgis_algorithms" ); }
+
+    QgsProcessingAlgorithm *createInstance() const override { return new VectorReprojectAlgorithm(); }
+
+protected:
+    void initAlgorithm( const QVariantMap &configuration = QVariantMap() ) override;
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override;
+};
