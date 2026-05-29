@@ -22,8 +22,6 @@ public:
                                  QgsProcessingContext &context,
                                  QgsProcessingFeedback *feedback) override;
 
-    QString provider() const override { return "otb_tools"; }
-
 protected:
     // Helper to run an external OTB application
     bool runOtbApplication(const QStringList &args, QgsProcessingFeedback *feedback);

@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Geometry"; }
     QString applicationName() const override { return "BundleToPerfectSensor"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbBundleToPerfectSensorAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

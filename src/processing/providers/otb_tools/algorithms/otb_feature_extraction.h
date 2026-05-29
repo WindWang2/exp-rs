@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Feature"; }
     QString applicationName() const override { return "FeatureExtraction"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbFeatureExtractionAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

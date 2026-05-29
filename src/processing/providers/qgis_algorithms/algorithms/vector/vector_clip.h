@@ -17,8 +17,6 @@ public:
     QString group() const override { return QObject::tr( "Vector Overlay" ); }
     QString groupId() const override { return QStringLiteral( "vectoroverlay" ); }
     QStringList tags() const override { return { QObject::tr( "clip" ), QObject::tr( "cut" ), QObject::tr( "trim" ) }; }
-    QString provider() const override { return QStringLiteral( "qgis_algorithms" ); }
-
     QgsProcessingAlgorithm *createInstance() const override { return new VectorClipAlgorithm(); }
 
 protected:

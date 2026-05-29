@@ -30,11 +30,6 @@ QIcon QgisAlgorithmsProvider::icon() const
     return QIcon::fromTheme( QStringLiteral( "qgis" ) );
 }
 
-QgsProcessingProvider *QgisAlgorithmsProvider::clone() const
-{
-    return new QgisAlgorithmsProvider();
-}
-
 void QgisAlgorithmsProvider::loadAlgorithms()
 {
     // Raster algorithms

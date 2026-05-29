@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Utilities"; }
     QString applicationName() const override { return "ConcatenateImages"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbConcatenateImagesAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

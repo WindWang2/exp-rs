@@ -12,7 +12,6 @@ public:
     QString displayName() const override { return QObject::tr( "Calculate NDVI" ); }
     QString group() const override { return QObject::tr( "Raster" ); }
     QString groupId() const override { return QStringLiteral( "raster" ); }
-    QString provider() const override { return QStringLiteral( "qgis_algorithms" ); }
     QStringList tags() const override { return { QObject::tr( "raster" ), QObject::tr( "ndvi" ), QObject::tr( "vegetation" ) }; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new RasterNdviAlgorithm(); }

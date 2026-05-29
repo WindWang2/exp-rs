@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Utilities"; }
     QString applicationName() const override { return "Convert"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbConvertAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

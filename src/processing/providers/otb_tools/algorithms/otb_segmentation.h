@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Segmentation"; }
     QString applicationName() const override { return "Segmentation"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbSegmentationAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

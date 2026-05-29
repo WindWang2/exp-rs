@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Image Processing"; }
     QString applicationName() const override { return "BinaryMorphologicalOperation"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbBinaryMorphologicalAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

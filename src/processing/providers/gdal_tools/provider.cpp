@@ -28,11 +28,6 @@ QIcon GdalToolsProvider::icon() const
     return QIcon::fromTheme("gdal");
 }
 
-QgsProcessingProvider *GdalToolsProvider::clone() const
-{
-    return new GdalToolsProvider();
-}
-
 void GdalToolsProvider::loadAlgorithms()
 {
     // Raster Conversion

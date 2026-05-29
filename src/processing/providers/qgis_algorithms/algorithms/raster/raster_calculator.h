@@ -12,7 +12,6 @@ public:
     QString displayName() const override { return QObject::tr( "Raster Calculator" ); }
     QString group() const override { return QObject::tr( "Raster" ); }
     QString groupId() const override { return QStringLiteral( "raster" ); }
-    QString provider() const override { return QStringLiteral( "qgis_algorithms" ); }
     QStringList tags() const override { return { QObject::tr( "raster" ), QObject::tr( "calculator" ), QObject::tr( "expression" ) }; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new RasterCalculatorAlgorithm(); }

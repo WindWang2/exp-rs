@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Filtering"; }
     QString applicationName() const override { return "MeanShiftSmoothing"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbMeanShiftSmoothingAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

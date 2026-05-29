@@ -12,7 +12,6 @@ public:
     QString id() const override { return QStringLiteral( "qgis_algorithms" ); }
     QString name() const override { return QStringLiteral( "QGIS Basic Algorithms" ); }
     QIcon icon() const override;
-    QgsProcessingProvider *clone() const override;
 
 protected:
     void loadAlgorithms() override;

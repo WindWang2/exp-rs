@@ -32,11 +32,6 @@ QIcon OtbToolsProvider::icon() const
     return QIcon::fromTheme("otb");
 }
 
-QgsProcessingProvider *OtbToolsProvider::clone() const
-{
-    return new OtbToolsProvider();
-}
-
 void OtbToolsProvider::loadAlgorithms()
 {
     // Radiometry

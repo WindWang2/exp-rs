@@ -1,6 +1,6 @@
 // src/processing/providers/otb_tools/otb_tool_wrapper.cpp
 #include "otb_tool_wrapper.h"
-#include "src/processing/tools/tool_path_manager.h"
+#include "tools/tool_path_manager.h"
 
 #include <qgsprocessingcontext.h>
 #include <qgsprocessingfeedback.h>

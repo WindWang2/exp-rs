@@ -12,7 +12,6 @@ public:
     QString displayName() const override { return QObject::tr( "Resample Raster" ); }
     QString group() const override { return QObject::tr( "Raster" ); }
     QString groupId() const override { return QStringLiteral( "raster" ); }
-    QString provider() const override { return QStringLiteral( "qgis_algorithms" ); }
     QStringList tags() const override { return { QObject::tr( "raster" ), QObject::tr( "resample" ), QObject::tr( "resolution" ) }; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new RasterResampleAlgorithm(); }

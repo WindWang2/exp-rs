@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Geometry"; }
     QString applicationName() const override { return "OrthoRectification"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbOrthoRectificationAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

@@ -13,7 +13,7 @@ void OtbSegmentationAlgorithm::initAlgorithm(const QVariantMap &configuration)
     addParameter(new QgsProcessingParameterEnum("MODE", "Segmentation mode", modes, false, 0));
 
     addParameter(new QgsProcessingParameterNumber("TRESHOLD", "Segmentation threshold",
-                                                   QgsProcessingParameterNumber::Double, 0.1, false, 0.0));
+                                                   Qgis::ProcessingNumberParameterType::Double, 0.1, false, 0.0));
 
     addParameter(new QgsProcessingParameterVectorDestination("OUTPUT", "Output vector (polygons)"));
 }

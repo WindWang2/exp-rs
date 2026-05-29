@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Raster Information"; }
     QString toolName() const override { return "gdalinfo"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new GdalInfoAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

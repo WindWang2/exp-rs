@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Utilities"; }
     QString applicationName() const override { return "Rescale"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbRescaleAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

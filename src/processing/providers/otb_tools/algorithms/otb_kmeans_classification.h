@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Learning"; }
     QString applicationName() const override { return "KMeansClassification"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbKMeansClassificationAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

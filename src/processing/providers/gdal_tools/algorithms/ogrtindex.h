@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Vector Conversion"; }
     QString toolName() const override { return "ogrtindex"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OgrTindexAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

@@ -21,7 +21,7 @@ QStringList GdalMergeAlgorithm::buildArgs(const QVariantMap &parameters,
     QStringList args;
     args << "-o" << parameters.value("OUTPUT").toString();
 
-    QList<QgsMapLayer *> layers = parameterMultipleLayers(parameters, "INPUT", context);
+    QList<QgsMapLayer *> layers = parameterAsLayerList(parameters, "INPUT", context);
     for (QgsMapLayer *layer : layers) {
         if (QgsRasterLayer *raster = qobject_cast<QgsRasterLayer *>(layer)) {
             args << raster->source();

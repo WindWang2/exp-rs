@@ -22,7 +22,6 @@ public:
                                  QgsProcessingContext &context,
                                  QgsProcessingFeedback *feedback) override;
 
-    QString provider() const override { return "gdal_tools"; }
     Qgis::ProcessingAlgorithmFlags flags() const override { return Qgis::ProcessingAlgorithmFlag::SupportsBatch; }
 
 protected:

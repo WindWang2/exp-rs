@@ -12,7 +12,6 @@ public:
     QString id() const override { return "gdal_tools"; }
     QString name() const override { return "GDAL Tools"; }
     QIcon icon() const override;
-    QgsProcessingProvider *clone() const override;
 
 protected:
     void loadAlgorithms() override;

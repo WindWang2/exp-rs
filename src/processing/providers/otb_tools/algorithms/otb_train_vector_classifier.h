@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Learning"; }
     QString applicationName() const override { return "TrainVectorClassifier"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbTrainVectorClassifierAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

@@ -22,7 +22,7 @@ QStringList OgrTindexAlgorithm::buildArgs(const QVariantMap &parameters,
 
     args << parameters.value("OUTPUT").toString();
 
-    QList<QgsMapLayer *> layers = parameterMultipleLayers(parameters, "INPUT", context);
+    QList<QgsMapLayer *> layers = parameterAsLayerList(parameters, "INPUT", context);
     for (QgsMapLayer *layer : layers) {
         if (QgsVectorLayer *vector = qobject_cast<QgsVectorLayer *>(layer)) {
             args << vector->source();

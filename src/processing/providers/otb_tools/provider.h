@@ -12,7 +12,6 @@ public:
     QString id() const override { return "otb_tools"; }
     QString name() const override { return "OTB Tools"; }
     QIcon icon() const override;
-    QgsProcessingProvider *clone() const override;
 
 protected:
     void loadAlgorithms() override;

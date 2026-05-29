@@ -17,8 +17,6 @@ public:
     QString group() const override { return QObject::tr( "Vector Selection" ); }
     QString groupId() const override { return QStringLiteral( "vectorselection" ); }
     QStringList tags() const override { return { QObject::tr( "query" ), QObject::tr( "expression" ), QObject::tr( "filter" ), QObject::tr( "select" ) }; }
-    QString provider() const override { return QStringLiteral( "qgis_algorithms" ); }
-
     QgsProcessingAlgorithm *createInstance() const override { return new VectorAttributeQueryAlgorithm(); }
 
 protected:

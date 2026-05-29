@@ -17,8 +17,6 @@ public:
     QString group() const override { return QObject::tr( "Vector General" ); }
     QString groupId() const override { return QStringLiteral( "vectorgeneral" ); }
     QStringList tags() const override { return { QObject::tr( "reproject" ), QObject::tr( "transform" ), QObject::tr( "crs" ), QObject::tr( "projection" ) }; }
-    QString provider() const override { return QStringLiteral( "qgis_algorithms" ); }
-
     QgsProcessingAlgorithm *createInstance() const override { return new VectorReprojectAlgorithm(); }
 
 protected:

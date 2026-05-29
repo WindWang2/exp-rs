@@ -17,8 +17,6 @@ public:
     QString group() const override { return QObject::tr( "Vector Geometry" ); }
     QString groupId() const override { return QStringLiteral( "vectorgeometry" ); }
     QStringList tags() const override { return { QObject::tr( "dissolve" ), QObject::tr( "merge" ), QObject::tr( "combine" ) }; }
-    QString provider() const override { return QStringLiteral( "qgis_algorithms" ); }
-
     QgsProcessingAlgorithm *createInstance() const override { return new VectorDissolveAlgorithm(); }
 
 protected:

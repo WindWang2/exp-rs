@@ -22,7 +22,7 @@ QStringList GdalBuildVrtAlgorithm::buildArgs(const QVariantMap &parameters,
 
     args << parameters.value("OUTPUT").toString();
 
-    QList<QgsMapLayer *> layers = parameterMultipleLayers(parameters, "INPUT", context);
+    QList<QgsMapLayer *> layers = parameterAsLayerList(parameters, "INPUT", context);
     for (QgsMapLayer *layer : layers) {
         if (QgsRasterLayer *raster = qobject_cast<QgsRasterLayer *>(layer)) {
             args << raster->source();

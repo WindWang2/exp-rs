@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Radiometry"; }
     QString applicationName() const override { return "BandMath"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbBandMathAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

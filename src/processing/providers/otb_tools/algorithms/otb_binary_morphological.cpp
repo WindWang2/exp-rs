@@ -8,7 +8,7 @@ void OtbBinaryMorphologicalAlgorithm::initAlgorithm(const QVariantMap &configura
 {
     addParameter(new QgsProcessingParameterRasterLayer("INPUT", "Input raster (binary)"));
     addParameter(new QgsProcessingParameterNumber("RADIUS", "Structuring element radius",
-                                                   QgsProcessingParameterNumber::Integer, 3, false, 1));
+                                                   Qgis::ProcessingNumberParameterType::Integer, 3, false, 1));
 
     QStringList operators;
     operators << "dilate" << "erode" << "opening" << "closing";

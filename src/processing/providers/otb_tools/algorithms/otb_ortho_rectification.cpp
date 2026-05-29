@@ -8,7 +8,7 @@ void OtbOrthoRectificationAlgorithm::initAlgorithm(const QVariantMap &configurat
 {
     addParameter(new QgsProcessingParameterRasterLayer("INPUT", "Input raster"));
     addParameter(new QgsProcessingParameterNumber("ELEVATION", "Average elevation (meters)",
-                                                   QgsProcessingParameterNumber::Double, 0.0, false));
+                                                   Qgis::ProcessingNumberParameterType::Double, 0.0, false));
     addParameter(new QgsProcessingParameterRasterDestination("OUTPUT", "Output raster (rectified)"));
 }
 

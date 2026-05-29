@@ -1,6 +1,6 @@
 // src/processing/providers/gdal_tools/gdal_tool_wrapper.cpp
 #include "gdal_tool_wrapper.h"
-#include "src/processing/tools/tool_path_manager.h"
+#include "tools/tool_path_manager.h"
 
 #include <qgsprocessingcontext.h>
 #include <qgsprocessingfeedback.h>

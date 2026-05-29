@@ -8,7 +8,7 @@ void OtbHaralickTextureAlgorithm::initAlgorithm(const QVariantMap &configuration
 {
     addParameter(new QgsProcessingParameterRasterLayer("INPUT", "Input raster"));
     addParameter(new QgsProcessingParameterNumber("RADIUS", "Texture radius",
-                                                   QgsProcessingParameterNumber::Integer, 3, false, 1));
+                                                   Qgis::ProcessingNumberParameterType::Integer, 3, false, 1));
     addParameter(new QgsProcessingParameterRasterDestination("OUTPUT", "Output raster (textures)"));
 }
 

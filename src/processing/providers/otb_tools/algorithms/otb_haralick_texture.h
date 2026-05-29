@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Feature"; }
     QString applicationName() const override { return "HaralickTextureExtraction"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbHaralickTextureAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

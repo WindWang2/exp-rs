@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Utilities"; }
     QString applicationName() const override { return "ExtractROI"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbExtractRoiAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

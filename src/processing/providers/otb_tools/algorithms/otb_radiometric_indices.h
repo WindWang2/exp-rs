@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Feature"; }
     QString applicationName() const override { return "RadiometricIndices"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new OtbRadiometricIndicesAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

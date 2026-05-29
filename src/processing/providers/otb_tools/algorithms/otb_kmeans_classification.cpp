@@ -8,7 +8,7 @@ void OtbKMeansClassificationAlgorithm::initAlgorithm(const QVariantMap &configur
 {
     addParameter(new QgsProcessingParameterRasterLayer("INPUT", "Input raster"));
     addParameter(new QgsProcessingParameterNumber("NUM_CLASSES", "Number of classes",
-                                                   QgsProcessingParameterNumber::Integer, 5, false, 2));
+                                                   Qgis::ProcessingNumberParameterType::Integer, 5, false, 2));
     addParameter(new QgsProcessingParameterRasterDestination("OUTPUT", "Output raster (classified)"));
 }
 

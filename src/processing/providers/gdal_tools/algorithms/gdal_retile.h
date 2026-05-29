@@ -13,6 +13,8 @@ public:
     QString group() const override { return "Raster Conversion"; }
     QString toolName() const override { return "gdal_retile.py"; }
 
+    QgsProcessingAlgorithm *createInstance() const override { return new GdalRetileAlgorithm(); }
+
     void initAlgorithm(const QVariantMap &configuration = QVariantMap()) override;
 
 protected:

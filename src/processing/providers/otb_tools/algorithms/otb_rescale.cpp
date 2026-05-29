@@ -8,9 +8,9 @@ void OtbRescaleAlgorithm::initAlgorithm(const QVariantMap &configuration)
 {
     addParameter(new QgsProcessingParameterRasterLayer("INPUT", "Input raster"));
     addParameter(new QgsProcessingParameterNumber("OUTPUT_MIN", "Output minimum value",
-                                                   QgsProcessingParameterNumber::Double, 0.0, false));
+                                                   Qgis::ProcessingNumberParameterType::Double, 0.0, false));
     addParameter(new QgsProcessingParameterNumber("OUTPUT_MAX", "Output maximum value",
-                                                   QgsProcessingParameterNumber::Double, 255.0, false));
+                                                   Qgis::ProcessingNumberParameterType::Double, 255.0, false));
     addParameter(new QgsProcessingParameterRasterDestination("OUTPUT", "Output raster"));
 }
 

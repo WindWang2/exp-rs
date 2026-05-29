@@ -8,7 +8,7 @@ void GdalContourAlgorithm::initAlgorithm(const QVariantMap &configuration)
 {
     addInputRasterLayerParameter("INPUT", "Input raster layer");
     addParameter(new QgsProcessingParameterNumber("INTERVAL", "Contour interval",
-                                                   QgsProcessingParameterNumber::Double, 10.0, false, 0.0));
+                                                   Qgis::ProcessingNumberParameterType::Double, 10.0, false, 0.0));
     addOutputVectorLayerParameter("OUTPUT", "Output vector layer (contour lines)");
 }
 
