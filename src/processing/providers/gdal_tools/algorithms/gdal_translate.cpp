@@ -1,0 +1,45 @@
+// src/processing/providers/gdal_tools/algorithms/gdal_translate.cpp
+#include "gdal_translate.h"
+
+#include <processing/qgsprocessingparameters.h>
+#include <qgsrasterlayer.h>
+
+void GdalTranslateAlgorithm::initAlgorithm(const QVariantMap &configuration)
+{
+    addInputRasterLayerParameter("INPUT", "Input raster layer");
+
+    QStringList formats;
+    formats << "GTiff" << "HFA" << "ENVI" << "AAIGrid" << "PNG" << "JPEG" << "NetCDF";
+    addParameter(new QgsProcessingParameterEnum("FORMAT", "Output format", formats, false, 0));
+
+    addParameter(new QgsProcessingParameterString("EXTRA", "Additional GDAL arguments", QVariant(), false, true));
+    addOutputRasterLayerParameter("OUTPUT", "Output raster layer");
+}
+
+QStringList GdalTranslateAlgorithm::buildArgs(const QVariantMap &parameters,
+                                                QgsProcessingContext &context,
+                                                QgsProcessingFeedback *feedback)
+{
+    Q_UNUSED(context);
+    Q_UNUSED(feedback);
+
+    QStringList args;
+    args << "-of" << parameters.value("FORMAT").toString();
+
+    if (parameters.contains("EXTRA") && !parameters.value("EXTRA").toString().isEmpty()) {
+        args << parameters.value("EXTRA").toString().split(" ");
+    }
+
+    QVariant inputVar = parameters.value("INPUT");
+    QString inputPath;
+    if (inputVar.canConvert<QgsRasterLayer *>()) {
+        inputPath = inputVar.value<QgsRasterLayer *>()->source();
+    } else {
+        inputPath = inputVar.toString();
+    }
+    args << inputPath;
+
+    args << parameters.value("OUTPUT").toString();
+
+    return args;
+}
