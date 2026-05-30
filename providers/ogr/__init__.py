@@ -1,1 +1,0 @@
-from providers.ogr.qgsvectordataprovider import OGRDataProvider, VectorDataProvider

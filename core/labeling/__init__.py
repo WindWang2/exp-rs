@@ -1,2 +1,0 @@
-from core.labeling.qgspallabeling import QgsPalLayerSettings
-from core.labeling.qgsvectorlayerlabelprovider import QgsVectorLayerLabelProvider
