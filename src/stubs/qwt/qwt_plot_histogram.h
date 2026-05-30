@@ -12,7 +12,6 @@ public:
     QwtIntervalSample(double v, QPair<double,double> p) : value(v) { interval.mn = p.first; interval.mx = p.second; }
 };
 class QWT_EXPORT QwtPlotHistogram : public QwtPlotItem {
-    Q_OBJECT
 public:
     QwtPlotHistogram() {}
     explicit QwtPlotHistogram(const QString &) {}

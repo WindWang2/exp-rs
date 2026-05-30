@@ -6,7 +6,6 @@
 class QwtPlot;
 class QPrinter;
 class QWT_EXPORT QwtPlotRenderer : public QObject {
-    Q_OBJECT
 public:
     enum DiscardFlag { DiscardBackground = 0x01, DiscardCanvasBackground = 0x02 };
     Q_DECLARE_FLAGS(DiscardFlags, DiscardFlag)

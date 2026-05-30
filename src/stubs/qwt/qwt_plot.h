@@ -11,7 +11,6 @@ class QwtPlotLayout;
 
 class QWT_EXPORT QwtPlot : public QFrame
 {
-    Q_OBJECT
 public:
     explicit QwtPlot(QWidget *parent = nullptr) : QFrame(parent) {}
     explicit QwtPlot(const QwtText &, QWidget *parent = nullptr) : QFrame(parent) {}

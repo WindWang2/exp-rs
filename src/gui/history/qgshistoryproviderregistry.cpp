@@ -73,6 +73,9 @@ void QgsHistoryProviderRegistry::addDefaultProviders()
 
 bool QgsHistoryProviderRegistry::addProvider( QgsAbstractHistoryProvider *provider )
 {
+  if ( !provider )
+    return false;
+
   if ( mProviders.contains( provider->id() ) )
     return false;
 

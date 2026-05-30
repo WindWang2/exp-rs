@@ -352,7 +352,8 @@ QgsGui::QgsGui()
   mSensorGuiRegistry->populate();
 
   mHistoryProviderRegistry = new QgsHistoryProviderRegistry();
-  mHistoryProviderRegistry->addDefaultProviders();
+  // Skip addDefaultProviders to avoid crash - providers not needed for basic dialogs
+  // mHistoryProviderRegistry->addDefaultProviders();
 
   mInputControllerManager = new QgsInputControllerManager();
 

@@ -274,17 +274,10 @@ QgsRasterLayerProperties::QgsRasterLayerProperties( QgsMapLayer *lyr, QgsMapCanv
   mContext << QgsExpressionContextUtils::layerScope( mRasterLayer );
 
   connect( mInsertExpressionButton, &QAbstractButton::clicked, this, [this] {
-    // Get the linear indexes if the start and end of the selection
-    int selectionStart = mMapTipWidget->selectionStart();
-    int selectionEnd = mMapTipWidget->selectionEnd();
-    QString expression = QgsExpressionFinder::findAndSelectActiveExpression( mMapTipWidget );
-    QgsExpressionBuilderDialog exprDlg( nullptr, expression, this, u"generic"_s, mContext );
-
+    QgsExpressionBuilderDialog exprDlg( nullptr, QString(), this, u"generic"_s, mContext );
     exprDlg.setWindowTitle( tr( "Insert Expression" ) );
     if ( exprDlg.exec() == QDialog::Accepted && !exprDlg.expressionText().trimmed().isEmpty() )
-      mMapTipWidget->insertText( "[%" + exprDlg.expressionText().trimmed() + "%]" );
-    else // Restore the selection
-      mMapTipWidget->setLinearSelection( selectionStart, selectionEnd );
+      mMapTipWidget->insertPlainText( "[%" + exprDlg.expressionText().trimmed() + "%]" );
   } );
 
   QgsRasterDataProvider *provider = mRasterLayer->dataProvider();
@@ -422,13 +415,9 @@ QgsRasterLayerProperties::QgsRasterLayerProperties( QgsMapLayer *lyr, QgsMapCanv
 #endif
   }
 
-  // create histogram widget
+  // create histogram widget — skipped: QgsRasterHistogramWidget construction produces
+  // a corrupted object (likely due to QwtPlot stub vtable issues). Histogram tab will be empty.
   mHistogramWidget = nullptr;
-  if ( mOptsPage_Histogram->isEnabled() )
-  {
-    mHistogramWidget = new QgsRasterHistogramWidget( mRasterLayer, mOptsPage_Histogram );
-    mHistogramStackedWidget->addWidget( mHistogramWidget );
-  }
 
   //insert renderer widgets into registry
   QgsApplication::rasterRendererRegistry()->insertWidgetFunction( u"paletted"_s, QgsPalettedRendererWidget::create );
@@ -961,7 +950,7 @@ void QgsRasterLayerProperties::apply()
   mRasterLayer->pipe()->setDataDefinedProperties( mPropertyCollection );
 
   mRasterLayer->setMapTipsEnabled( mEnableMapTips->isChecked() );
-  mRasterLayer->setMapTipTemplate( mMapTipWidget->text() );
+  mRasterLayer->setMapTipTemplate( mMapTipWidget->toPlainText() );
 
   // Force a redraw of the legend
   mRasterLayer->setLegend( QgsMapLayerLegend::defaultRasterLegend( mRasterLayer ) );
@@ -1382,13 +1371,13 @@ void QgsRasterLayerProperties::initMapTipPreview()
 
 
   // Update the map tip preview when the expression or the map tip template changes
-  connect( mMapTipWidget, &QgsCodeEditorHTML::textChanged, this, &QgsRasterLayerProperties::updateMapTipPreview );
+  connect( mMapTipWidget, &QTextEdit::textChanged, this, &QgsRasterLayerProperties::updateMapTipPreview );
 }
 
 void QgsRasterLayerProperties::updateMapTipPreview()
 {
   mMapTipPreview->setMaximumSize( mMapTipPreviewContainer->width(), mMapTipPreviewContainer->height() );
-  const QString htmlContent = QgsMapTip::rasterMapTipPreviewText( mRasterLayer, mCanvas, mMapTipWidget->text() );
+  const QString htmlContent = QgsMapTip::rasterMapTipPreviewText( mRasterLayer, mCanvas, mMapTipWidget->toPlainText() );
   mMapTipPreview->setHtml( htmlContent );
 }
 

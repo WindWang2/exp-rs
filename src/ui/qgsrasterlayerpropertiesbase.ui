@@ -1500,7 +1500,7 @@ li.checked::marker { content: &quot;\2612&quot;; }
                    <property name="orientation">
                     <enum>Qt::Horizontal</enum>
                    </property>
-                   <widget class="QgsCodeEditorHTML" name="mMapTipWidget" native="true">
+                   <widget class="QTextEdit" name="mMapTipWidget">
                     <property name="sizePolicy">
                      <sizepolicy hsizetype="Preferred" vsizetype="MinimumExpanding">
                       <horstretch>0</horstretch>
@@ -1820,11 +1820,6 @@ You can also import an existing raster attribute table from a VAT.DBF file and a
    <extends>QWidget</extends>
    <header>qgslayertreeembeddedconfigwidget.h</header>
    <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>QgsCodeEditorHTML</class>
-   <extends>QWidget</extends>
-   <header>qgscodeeditorhtml.h</header>
   </customwidget>
   <customwidget>
    <class>QgsMapLayerRefreshSettingsWidget</class>
