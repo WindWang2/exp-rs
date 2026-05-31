@@ -1,7 +1,12 @@
 add_library(sicnu_processing SHARED
     tools/tool_path_manager.cpp
 
-    providers/sicnu_native/provider.cpp
+    gdal/gdal_dataset_wrapper.cpp
+    gdal/gdal_error_handler.cpp
+
+    algorithms/spectral_indices.cpp
+    algorithms/band_math.cpp
+    algorithms/atmospheric_correction.cpp
 
     providers/gdal_tools/provider.cpp
     providers/gdal_tools/gdal_tool_wrapper.cpp
@@ -14,6 +19,11 @@ add_library(sicnu_processing SHARED
     providers/gdal_tools/algorithms/gdal_merge.cpp
     providers/gdal_tools/algorithms/gdal_calc.cpp
     providers/gdal_tools/algorithms/gdal_retile.cpp
+    providers/gdal_tools/algorithms/gdal_proximity.cpp
+    providers/gdal_tools/algorithms/gdal_sieve.cpp
+    providers/gdal_tools/algorithms/gdal_fillnodata.cpp
+    providers/gdal_tools/algorithms/gdal_grid.cpp
+    providers/gdal_tools/algorithms/gdal_rasterize.cpp
     providers/gdal_tools/algorithms/gdalbuildvrt.cpp
     providers/gdal_tools/algorithms/gdaltindex.cpp
     providers/gdal_tools/algorithms/gdalmanage.cpp
@@ -70,6 +80,7 @@ target_link_libraries(sicnu_processing PRIVATE
     Qt6::Widgets
     qgis_core
     qgis_gui
+    GDAL::GDAL
 )
 
 install(TARGETS sicnu_processing

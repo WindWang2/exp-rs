@@ -9,6 +9,11 @@
 #include "algorithms/gdal_merge.h"
 #include "algorithms/gdal_calc.h"
 #include "algorithms/gdal_retile.h"
+#include "algorithms/gdal_proximity.h"
+#include "algorithms/gdal_sieve.h"
+#include "algorithms/gdal_fillnodata.h"
+#include "algorithms/gdal_grid.h"
+#include "algorithms/gdal_rasterize.h"
 #include "algorithms/gdalbuildvrt.h"
 #include "algorithms/gdaltindex.h"
 #include "algorithms/gdalmanage.h"
@@ -36,6 +41,8 @@ void GdalToolsProvider::loadAlgorithms()
     addAlgorithm(new GdalPolygonizeAlgorithm());
     addAlgorithm(new GdalMergeAlgorithm());
     addAlgorithm(new GdalRetileAlgorithm());
+    addAlgorithm(new GdalGridAlgorithm());
+    addAlgorithm(new GdalRasterizeAlgorithm());
     addAlgorithm(new GdalBuildVrtAlgorithm());
     addAlgorithm(new GdalTindexAlgorithm());
 
@@ -45,6 +52,9 @@ void GdalToolsProvider::loadAlgorithms()
     // Raster Analysis
     addAlgorithm(new GdalDemAlgorithm());
     addAlgorithm(new GdalCalcAlgorithm());
+    addAlgorithm(new GdalProximityAlgorithm());
+    addAlgorithm(new GdalSieveAlgorithm());
+    addAlgorithm(new GdalFillNodataAlgorithm());
     addAlgorithm(new GdalManageAlgorithm());
 
     // Raster Information
