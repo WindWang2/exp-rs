@@ -52,6 +52,12 @@ add_library(sicnu_processing SHARED
     providers/otb_tools/algorithms/otb_bundle_to_perfect_sensor.cpp
     providers/otb_tools/algorithms/otb_superimpose.cpp
     providers/otb_tools/algorithms/otb_binary_morphological.cpp
+    providers/otb_tools/algorithms/otb_band_math_x.cpp
+    providers/otb_tools/algorithms/otb_compute_images_statistics.cpp
+    providers/otb_tools/algorithms/otb_multi_resolution_pyramid.cpp
+    providers/otb_tools/algorithms/otb_gray_scale_morphological.cpp
+    providers/otb_tools/algorithms/otb_pixel_info.cpp
+    providers/otb_tools/algorithms/otb_read_image_info.cpp
 
     providers/qgis_algorithms/provider.cpp
     providers/qgis_algorithms/algorithms/raster/raster_calculator.cpp

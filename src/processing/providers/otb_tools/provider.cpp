@@ -19,6 +19,12 @@
 #include "algorithms/otb_bundle_to_perfect_sensor.h"
 #include "algorithms/otb_superimpose.h"
 #include "algorithms/otb_binary_morphological.h"
+#include "algorithms/otb_band_math_x.h"
+#include "algorithms/otb_compute_images_statistics.h"
+#include "algorithms/otb_multi_resolution_pyramid.h"
+#include "algorithms/otb_gray_scale_morphological.h"
+#include "algorithms/otb_pixel_info.h"
+#include "algorithms/otb_read_image_info.h"
 
 #include <QIcon>
 
@@ -68,4 +74,14 @@ void OtbToolsProvider::loadAlgorithms()
 
     // Image Processing
     addAlgorithm(new OtbBinaryMorphologicalAlgorithm());
+    addAlgorithm(new OtbGrayScaleMorphologicalAlgorithm());
+    addAlgorithm(new OtbMultiResolutionPyramidAlgorithm());
+
+    // Advanced Radiometry
+    addAlgorithm(new OtbBandMathXAlgorithm());
+    addAlgorithm(new OtbComputeImagesStatisticsAlgorithm());
+
+    // Info Tools
+    addAlgorithm(new OtbPixelInfoAlgorithm());
+    addAlgorithm(new OtbReadImageInfoAlgorithm());
 }
