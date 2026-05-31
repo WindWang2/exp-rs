@@ -17,6 +17,16 @@
 #include "algorithms/vector/vector_spatial_query.h"
 #include "algorithms/vector/vector_attribute_query.h"
 #include "algorithms/vector/vector_reproject.h"
+#include "algorithms/vector/vector_difference.h"
+#include "algorithms/vector/vector_symmetrical_difference.h"
+#include "algorithms/vector/vector_select_by_location.h"
+#include "algorithms/vector/vector_extract_by_location.h"
+#include "algorithms/vector/vector_field_calculator.h"
+#include "algorithms/vector/vector_nearest_neighbor.h"
+#include "algorithms/vector/vector_distance_matrix.h"
+
+// Native algorithms (merged from sicnu_native)
+#include "algorithms/native/native_algorithms.h"
 
 #include <QIcon>
 
@@ -48,4 +58,33 @@ void QgisAlgorithmsProvider::loadAlgorithms()
     addAlgorithm( new VectorSpatialQueryAlgorithm() );
     addAlgorithm( new VectorAttributeQueryAlgorithm() );
     addAlgorithm( new VectorReprojectAlgorithm() );
+    addAlgorithm( new VectorDifferenceAlgorithm() );
+    addAlgorithm( new VectorSymmetricalDifferenceAlgorithm() );
+    addAlgorithm( new VectorSelectByLocationAlgorithm() );
+    addAlgorithm( new VectorExtractByLocationAlgorithm() );
+    addAlgorithm( new VectorFieldCalculatorAlgorithm() );
+    addAlgorithm( new VectorNearestNeighborAlgorithm() );
+    addAlgorithm( new VectorDistanceMatrixAlgorithm() );
+
+    // Native algorithms (merged from sicnu_native)
+    // Vector geometry
+    addAlgorithm( new QgsBufferAlgorithm() );
+    addAlgorithm( new QgsCentroidsAlgorithm() );
+    addAlgorithm( new QgsConvexHullAlgorithm() );
+    addAlgorithm( new QgsDissolveAlgorithm() );
+    addAlgorithm( new QgsSimplifyAlgorithm() );
+    // Vector overlay
+    addAlgorithm( new QgsClipAlgorithm() );
+    addAlgorithm( new QgsIntersectionAlgorithm() );
+    addAlgorithm( new QgsUnionAlgorithm() );
+    addAlgorithm( new QgsDifferenceAlgorithm() );
+    // Vector selection
+    addAlgorithm( new QgsExtractByAttributeAlgorithm() );
+    // Raster analysis
+    addAlgorithm( new QgsClipRasterByExtentAlgorithm() );
+    addAlgorithm( new QgsRasterLayerStatisticsAlgorithm() );
+    addAlgorithm( new QgsHillshadeAlgorithm() );
+    // Projection
+    addAlgorithm( new QgsReprojectLayerAlgorithm() );
+    addAlgorithm( new QgsAssignProjectionAlgorithm() );
 }

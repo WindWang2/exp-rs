@@ -73,6 +73,13 @@ add_library(sicnu_processing SHARED
     providers/qgis_algorithms/algorithms/vector/vector_spatial_query.cpp
     providers/qgis_algorithms/algorithms/vector/vector_attribute_query.cpp
     providers/qgis_algorithms/algorithms/vector/vector_reproject.cpp
+    providers/qgis_algorithms/algorithms/vector/vector_difference.cpp
+    providers/qgis_algorithms/algorithms/vector/vector_symmetrical_difference.cpp
+    providers/qgis_algorithms/algorithms/vector/vector_select_by_location.cpp
+    providers/qgis_algorithms/algorithms/vector/vector_extract_by_location.cpp
+    providers/qgis_algorithms/algorithms/vector/vector_field_calculator.cpp
+    providers/qgis_algorithms/algorithms/vector/vector_nearest_neighbor.cpp
+    providers/qgis_algorithms/algorithms/vector/vector_distance_matrix.cpp
 )
 
 target_include_directories(sicnu_processing PRIVATE
