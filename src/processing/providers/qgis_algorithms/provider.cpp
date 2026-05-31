@@ -25,6 +25,11 @@
 #include "algorithms/vector/vector_nearest_neighbor.h"
 #include "algorithms/vector/vector_distance_matrix.h"
 
+// Remote Sensing algorithms
+#include "algorithms/remote_sensing/band_math_algorithm.h"
+#include "algorithms/remote_sensing/spectral_index_algorithm.h"
+#include "algorithms/remote_sensing/atmospheric_correction_algorithm.h"
+
 // Native algorithms (merged from sicnu_native)
 #include "algorithms/native/native_algorithms.h"
 
@@ -65,6 +70,11 @@ void QgisAlgorithmsProvider::loadAlgorithms()
     addAlgorithm( new VectorFieldCalculatorAlgorithm() );
     addAlgorithm( new VectorNearestNeighborAlgorithm() );
     addAlgorithm( new VectorDistanceMatrixAlgorithm() );
+
+    // Remote Sensing algorithms
+    addAlgorithm( new BandMathAlgorithm() );
+    addAlgorithm( new SpectralIndexAlgorithm() );
+    addAlgorithm( new AtmosphericCorrectionAlgorithm() );
 
     // Native algorithms (merged from sicnu_native)
     // Vector geometry

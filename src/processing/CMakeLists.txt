@@ -80,6 +80,10 @@ add_library(sicnu_processing SHARED
     providers/qgis_algorithms/algorithms/vector/vector_field_calculator.cpp
     providers/qgis_algorithms/algorithms/vector/vector_nearest_neighbor.cpp
     providers/qgis_algorithms/algorithms/vector/vector_distance_matrix.cpp
+
+    providers/qgis_algorithms/algorithms/remote_sensing/band_math_algorithm.cpp
+    providers/qgis_algorithms/algorithms/remote_sensing/spectral_index_algorithm.cpp
+    providers/qgis_algorithms/algorithms/remote_sensing/atmospheric_correction_algorithm.cpp
 )
 
 target_include_directories(sicnu_processing PRIVATE
