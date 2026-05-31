@@ -1,9 +1,16 @@
 add_executable(sicnu_geo_rs
     main.cpp
+    main_window.cpp
+    layer_tree_menu.cpp
+    dialogs/band_math_dialog.cpp
+    dialogs/spectral_index_dialog.cpp
+    dialogs/atmospheric_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/resources/icons.qrc
 )
 
 target_include_directories(sicnu_geo_rs PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/dialogs
 )
 
 target_link_libraries(sicnu_geo_rs PRIVATE
@@ -19,6 +26,7 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     qgis_native
     sicnu_core
     sicnu_gui
+    sicnu_processing
     CURL::libcurl
     ${PCRE2_16}
     ${PCRE2_8}
