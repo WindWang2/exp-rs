@@ -2,6 +2,8 @@
 #include "gdal_tool_wrapper.h"
 #include "tools/tool_path_manager.h"
 
+#include <qgsapplication.h>
+#include <qgsmessagelog.h>
 #include <qgsprocessingcontext.h>
 #include <qgsprocessingfeedback.h>
 #include <processing/qgsprocessingparameters.h>
@@ -33,14 +35,18 @@ QVariantMap GdalToolWrapper::processAlgorithm(const QVariantMap &parameters,
 bool GdalToolWrapper::runExternalTool(const QString &program, const QStringList &args,
                                        QgsProcessingFeedback *feedback)
 {
-    feedback->pushInfo(QObject::tr("Running: %1 %2").arg(program, args.join(" ")));
+    QString cmdLine = program + " " + args.join(" ");
+    feedback->pushInfo(QObject::tr("Running: %1").arg(cmdLine));
+    QgsMessageLog::logMessage(cmdLine, "gdal", Qgis::MessageLevel::Info);
 
     QProcess proc;
     proc.setProcessChannelMode(QProcess::MergedChannels);
     proc.start(program, args);
 
     if (!proc.waitForStarted(5000)) {
-        feedback->reportError(QObject::tr("Failed to start tool: %1").arg(proc.errorString()));
+        QString err = QObject::tr("Failed to start tool: %1").arg(proc.errorString());
+        feedback->reportError(err);
+        QgsMessageLog::logMessage(err, "gdal", Qgis::MessageLevel::Critical);
         return false;
     }
 
@@ -53,14 +59,19 @@ bool GdalToolWrapper::runExternalTool(const QString &program, const QStringList 
         proc.waitForReadyRead(100);
         QByteArray output = proc.readAllStandardOutput();
         if (!output.isEmpty()) {
-            feedback->pushInfo(QString::fromUtf8(output));
+            QString msg = QString::fromUtf8(output);
+            feedback->pushInfo(msg);
+            QgsMessageLog::logMessage(msg, "gdal", Qgis::MessageLevel::Info);
         }
     }
 
     if (proc.exitCode() != 0) {
-        feedback->reportError(QObject::tr("Tool failed with exit code %1: %2")
+        // MergedChannels merges stderr into stdout, so read from readAllStandardOutput()
+        QString err = QObject::tr("Tool failed with exit code %1: %2")
             .arg(proc.exitCode())
-            .arg(QString::fromUtf8(proc.readAllStandardError())));
+            .arg(QString::fromUtf8(proc.readAllStandardOutput()));
+        feedback->reportError(err);
+        QgsMessageLog::logMessage(err, "gdal", Qgis::MessageLevel::Warning);
         return false;
     }
 

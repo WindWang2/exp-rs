@@ -13,6 +13,9 @@
 #include <QFileInfo>
 #include <QFile>
 #include <QFontDatabase>
+#include <QSettings>
+#include <QStandardPaths>
+#include <QDateTime>
 
 // QGIS C++ includes
 #include <qgsapplication.h>
@@ -105,6 +108,35 @@ int main(int argc, char *argv[])
     QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
     qDebug() << "Processing providers registered";
 
+    // Log-to-file support
+    QSettings appSettings;
+    QFile *logFile = nullptr;
+    if (appSettings.value("logging/logToFile", false).toBool()) {
+        QString logPath = appSettings.value("logging/logFilePath").toString();
+        if (logPath.isEmpty()) {
+            logPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                      + "/sicnu_geo.log";
+        }
+        logFile = new QFile(logPath);
+        if (logFile->open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            QObject::connect(QgsApplication::messageLog(), &QgsMessageLog::messageReceivedWithFormat,
+                             logFile, [logFile](const QString &message, const QString &tag,
+                                                Qgis::MessageLevel level, Qgis::StringFormat) {
+                                 static const char *levelNames[] = {"INFO", "WARNING", "CRITICAL", "SUCCESS", ""};
+                                 const char *lvl = (static_cast<int>(level) >= 0 && static_cast<int>(level) < 5)
+                                                    ? levelNames[static_cast<int>(level)] : "INFO";
+                                 QString line = QDateTime::currentDateTime().toString(Qt::ISODate)
+                                                + " [" + QString::fromUtf8(lvl) + "] " + tag + ": " + message + "\n";
+                                 logFile->write(line.toUtf8());
+                             });
+            qDebug() << "Logging to file:" << logPath;
+        } else {
+            qWarning() << "Failed to open log file:" << logPath;
+            delete logFile;
+            logFile = nullptr;
+        }
+    }
+
     // Register fonts
     QString fontDir = AppPaths::resolveDataPath("resources/fonts");
     QFontDatabase::addApplicationFont(fontDir + "/IBMPlexSans.ttf");
@@ -154,6 +186,8 @@ int main(int argc, char *argv[])
     // Python embedding disabled
     // QgisPython::instance().finalize();
 
+    delete logFile;
+    delete app;
     return result;
 }
 
