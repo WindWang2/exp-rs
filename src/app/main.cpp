@@ -16,6 +16,8 @@
 
 // QGIS C++ includes
 #include <qgsapplication.h>
+#include <qgsmessagelog.h>
+#include <qgis.h>
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
 #include <qgslayertree.h>
@@ -38,8 +40,26 @@
 // Python embedding (disabled — Python runtime removed, pybind11 console deferred)
 // #include "python/qgis_python.h"
 
+// Qt message handler — routes qDebug/qWarning/qCritical to QgsMessageLog
+static void messageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
+{
+    Qgis::MessageLevel level;
+    switch (type) {
+        case QtDebugMsg:    level = Qgis::MessageLevel::Info; break;
+        case QtWarningMsg:  level = Qgis::MessageLevel::Warning; break;
+        case QtCriticalMsg: level = Qgis::MessageLevel::Critical; break;
+        case QtFatalMsg:    level = Qgis::MessageLevel::Critical; break;
+        case QtInfoMsg:     level = Qgis::MessageLevel::Info; break;
+    }
+    // Use context category as tag, fall back to "qt"
+    QString tag = context.category && context.category[0]
+        ? QString::fromUtf8(context.category) : QStringLiteral("qt");
+    QgsMessageLog::logMessage(msg, tag, level);
+}
+
 int main(int argc, char *argv[])
 {
+    qInstallMessageHandler(messageHandler);
     qDebug() << "Starting SICNU GEO RS...";
 
     // Create QGIS application (inherits QApplication, handles all Qt + QGIS init)
