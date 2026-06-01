@@ -115,6 +115,24 @@ target_include_directories(test_spectral_indices PRIVATE
 )
 catch_discover_tests(test_spectral_indices)
 
+# Raster NDVI algorithm tests
+add_executable(test_raster_ndvi test_raster_ndvi.cpp)
+target_link_libraries(test_raster_ndvi PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_raster_ndvi PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+catch_discover_tests(test_raster_ndvi)
+
 # GDAL error handler tests
 add_executable(test_gdal_errors test_gdal_errors.cpp)
 target_link_libraries(test_gdal_errors PRIVATE
@@ -132,6 +150,59 @@ target_include_directories(test_gdal_errors PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 catch_discover_tests(test_gdal_errors)
+
+# GDAL tool wrapper tests — verify error message capture
+add_executable(test_gdal_tool_wrapper test_gdal_tool_wrapper.cpp)
+target_link_libraries(test_gdal_tool_wrapper PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_gdal_tool_wrapper PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+catch_discover_tests(test_gdal_tool_wrapper)
+
+# GDAL null band handle tests
+add_executable(test_gdal_null_band test_gdal_null_band.cpp)
+target_link_libraries(test_gdal_null_band PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  GDAL::GDAL
+)
+target_include_directories(test_gdal_null_band PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+catch_discover_tests(test_gdal_null_band)
+
+# GDAL thread safety tests
+add_executable(test_gdal_thread_safety test_gdal_thread_safety.cpp)
+target_link_libraries(test_gdal_thread_safety PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_gdal_thread_safety PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+catch_discover_tests(test_gdal_thread_safety)
 
 # GDAL wrapper tests — verify GDAL C API wrapper
 add_executable(test_gdal_wrapper test_gdal_wrapper.cpp)
@@ -206,6 +277,38 @@ catch_discover_tests(test_algorithm_organization)
 add_executable(test_progress_dialog test_progress_dialog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/progress_dialog.cpp
 )
+target_link_libraries(test_progress_dialog PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_progress_dialog PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+catch_discover_tests(test_progress_dialog)
+
+# Spectral profile widget tests
+add_executable(test_spectral_profile_widget test_spectral_profile_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/spectral_profile_widget.cpp
+)
+target_link_libraries(test_spectral_profile_widget PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  GDAL::GDAL
+)
+target_include_directories(test_spectral_profile_widget PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+catch_discover_tests(test_spectral_profile_widget)
 
 # Panel persistence tests
 add_executable(test_panel_persistence test_panel_persistence.cpp)
@@ -256,6 +359,23 @@ target_include_directories(test_processing_framework PRIVATE
 )
 catch_discover_tests(test_processing_framework)
 
+# Processing dialog tests
+add_executable(test_processing_dialog test_processing_dialog.cpp)
+target_link_libraries(test_processing_dialog PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_processing_dialog PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+catch_discover_tests(test_processing_dialog)
+
 # Advanced algorithms tests
 add_executable(test_advanced_algorithms test_advanced_algorithms.cpp)
 target_link_libraries(test_advanced_algorithms PRIVATE
@@ -293,20 +413,12 @@ catch_discover_tests(test_data_formats)
 # Vector layer properties tests
 sicnu_add_test(test_vector_properties)
 
-target_link_libraries(test_progress_dialog PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  qgis_core
-  qgis_gui
-)
-target_include_directories(test_progress_dialog PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_BINARY_DIR}
-)
-catch_discover_tests(test_progress_dialog)
-target_link_libraries(test_algorithm_organization PRIVATE
+# Layer tree bridge tests
+sicnu_add_test(test_layer_tree_bridge)
+
+# Change detection tests
+add_executable(test_change_detection test_change_detection.cpp)
+target_link_libraries(test_change_detection PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
@@ -315,8 +427,62 @@ target_link_libraries(test_algorithm_organization PRIVATE
   qgis_gui
   sicnu_processing
 )
-target_include_directories(test_algorithm_organization PRIVATE
+target_include_directories(test_change_detection PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-catch_discover_tests(test_algorithm_organization)
+catch_discover_tests(test_change_detection)
+
+# Mosaic tests
+add_executable(test_mosaic test_mosaic.cpp)
+target_link_libraries(test_mosaic PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_mosaic PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+catch_discover_tests(test_mosaic)
+
+# Processing integration tests
+add_executable(test_processing_integration test_processing_integration.cpp)
+target_link_libraries(test_processing_integration PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_processing_integration PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+catch_discover_tests(test_processing_integration)
+
+# Log panel tests
+add_executable(test_log_panel test_log_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/log_panel.cpp
+)
+target_link_libraries(test_log_panel PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_log_panel PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+catch_discover_tests(test_log_panel)
