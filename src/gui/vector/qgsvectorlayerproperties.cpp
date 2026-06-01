@@ -81,12 +81,21 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFontDialog>
+#include <QFormLayout>
+#include <QGroupBox>
 #include <QHeaderView>
+#include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
 #include <QRegularExpressionValidator>
 #include <QString>
 #include <QUrl>
+
+#include "qgsfeatureiterator.h"
+#include "qgsfields.h"
+#include "qgsgeometry.h"
+#include "qgsspatialindex.h"
+#include "qgsvectordataprovider.h"
 
 #include "moc_qgsvectorlayerproperties.cpp"
 
@@ -441,6 +450,69 @@ QgsVectorLayerProperties::QgsVectorLayerProperties( QgsMapCanvas *canvas, QgsMes
   mOptsPage_Legend->setProperty( "helpPage", u"working_with_vector/vector_properties.html#legend-properties"_s );
   mOptsPage_Server->setProperty( "helpPage", u"working_with_vector/vector_properties.html#qgis-server-properties"_s );
 
+  // Add Statistics tab
+  QWidget *statsPage = new QWidget();
+  QVBoxLayout *statsLayout = new QVBoxLayout( statsPage );
+
+  // General info group
+  QGroupBox *generalGroup = new QGroupBox( tr( "General Information" ), statsPage );
+  QFormLayout *generalLayout = new QFormLayout( generalGroup );
+  generalLayout->addRow( tr( "Feature Count:" ), new QLabel( QString::number( mLayer->featureCount() ), generalGroup ) );
+  generalLayout->addRow( tr( "Geometry Type:" ), new QLabel( QgsWkbTypes::displayString( mLayer->wkbType() ), generalGroup ) );
+  generalLayout->addRow( tr( "CRS:" ), new QLabel( mLayer->crs().authid() + " — " + mLayer->crs().description(), generalGroup ) );
+  const bool hasSpatialIndex = mLayer->dataProvider()->capabilities() & Qgis::VectorProviderCapability::CreateSpatialIndex;
+  generalLayout->addRow( tr( "Spatial Index:" ), new QLabel( hasSpatialIndex ? tr( "Supported" ) : tr( "Not Supported" ), generalGroup ) );
+  statsLayout->addWidget( generalGroup );
+
+  // Geometry statistics group
+  QGroupBox *geomGroup = new QGroupBox( tr( "Geometry Statistics" ), statsPage );
+  QFormLayout *geomLayout = new QFormLayout( geomGroup );
+  QgsRectangle ext = mLayer->extent();
+  geomLayout->addRow( tr( "Extent:" ), new QLabel( ext.toString( 4 ), geomGroup ) );
+  if ( mLayer->geometryType() == Qgis::GeometryType::Polygon || mLayer->geometryType() == Qgis::GeometryType::Line )
+  {
+    double totalLength = 0;
+    double totalArea = 0;
+    QgsFeatureIterator it = mLayer->getFeatures();
+    QgsFeature f;
+    while ( it.nextFeature( f ) )
+    {
+      if ( f.hasGeometry() )
+      {
+        totalLength += f.geometry().length();
+        totalArea += f.geometry().area();
+      }
+    }
+    if ( mLayer->geometryType() == Qgis::GeometryType::Line )
+      geomLayout->addRow( tr( "Total Length:" ), new QLabel( QString::number( totalLength, 'f', 2 ), geomGroup ) );
+    else
+      geomLayout->addRow( tr( "Total Area:" ), new QLabel( QString::number( totalArea, 'f', 2 ), geomGroup ) );
+  }
+  statsLayout->addWidget( geomGroup );
+
+  // Attribute statistics group
+  QGroupBox *attrGroup = new QGroupBox( tr( "Attribute Statistics" ), statsPage );
+  QVBoxLayout *attrLayout = new QVBoxLayout( attrGroup );
+  const QgsFields fields = mLayer->fields();
+  for ( int i = 0; i < fields.count(); ++i )
+  {
+    const QgsField &field = fields.at( i );
+    if ( field.isNumeric() )
+    {
+      const QVariant minVal = mLayer->dataProvider()->minimumValue( i );
+      const QVariant maxVal = mLayer->dataProvider()->maximumValue( i );
+      QFormLayout *fieldLayout = new QFormLayout();
+      fieldLayout->addRow( tr( "Min:" ), new QLabel( minVal.toString(), attrGroup ) );
+      fieldLayout->addRow( tr( "Max:" ), new QLabel( maxVal.toString(), attrGroup ) );
+      QGroupBox *fieldGroup = new QGroupBox( field.name() + " (" + field.typeName() + ")", attrGroup );
+      fieldGroup->setLayout( fieldLayout );
+      attrLayout->addWidget( fieldGroup );
+    }
+  }
+  statsLayout->addWidget( attrGroup );
+  statsLayout->addStretch();
+
+  addPage( tr( "Statistics" ), tr( "Layer Statistics" ), QgsApplication::getThemeIcon( "/mActionSum.svg" ), statsPage );
 
   optionsStackedWidget_CurrentChanged( mOptStackedWidget->currentIndex() );
 
