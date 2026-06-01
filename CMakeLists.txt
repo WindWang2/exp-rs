@@ -118,6 +118,27 @@ if(WITH_COPC)
   set(HAVE_COPC TRUE)
 endif()
 option(ENABLE_TESTS "" OFF)
+option(ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+
+if(ENABLE_SANITIZERS)
+    # Compile all source files with sanitizer instrumentation
+    # Use -g1 (minimal debug info) to avoid GCC 16 ICE in dwarf2out.cc
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g1)
+    # Link sanitizer runtime into executables only (not shared libraries)
+    # to avoid ld.so conflicts with non-instrumented system libraries (Qt6, GDAL, etc.)
+    # --allow-shlib-undefined: our qgis_gui stubs have unresolved typeinfo for
+    # header-only QScintilla stubs; the symbols are never called at runtime.
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address,undefined -Wl,--allow-shlib-undefined")
+    # Also allow undefined symbols in shared libraries (same QScintilla stub reason)
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--allow-shlib-undefined")
+    # Disable LeakSanitizer: QGIS uses intentional singleton patterns (QgsExpression
+    # function registry, QgsNumericFormatRegistry, Qt/GDAL driver allocations) that
+    # live for the process lifetime and are reported as leaks. These are not bugs.
+    set(ENV{LSAN_OPTIONS} "detect_leaks=0")
+    # Also write CTestCustom.cmake so ctest sets LSAN_OPTIONS for test discovery
+    file(WRITE "${CMAKE_BINARY_DIR}/CTestCustom.cmake"
+      "set(ENV{LSAN_OPTIONS} \"detect_leaks=0\")\n")
+endif()
 option(WITH_DRACO "" OFF)
 option(WITH_INTERNAL_POLY2TRI "" ON)
 option(WITH_INTERNAL_NLOHMANN_JSON "" ON)

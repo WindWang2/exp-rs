@@ -13,7 +13,7 @@ class QSCINTILLA_EXPORT QsciLexer : public QObject
     Q_OBJECT
 public:
     explicit QsciLexer(QObject *parent = nullptr) : QObject(parent) {}
-    virtual ~QsciLexer() {}
+    virtual ~QsciLexer();
     virtual const char *language() const { return ""; }
     virtual const char *lexer() const { return ""; }
     virtual int lexerId() const { return 0; }

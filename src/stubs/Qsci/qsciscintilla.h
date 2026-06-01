@@ -12,7 +12,7 @@ class QSCINTILLA_EXPORT QsciScintilla : public QsciScintillaBase
     Q_OBJECT
 public:
     explicit QsciScintilla(QWidget *parent = nullptr) : QsciScintillaBase(parent) {}
-    virtual ~QsciScintilla() {}
+    virtual ~QsciScintilla();
 
     // Named enums (used as qualified types: QsciScintilla::WrapMode etc.)
     enum WrapMode { WrapNone = 0, WrapWord = 1, WrapCharacter = 2, WrapWhitespace = 3 };

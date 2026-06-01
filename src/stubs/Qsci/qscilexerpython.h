@@ -5,6 +5,7 @@ class QSCINTILLA_EXPORT QsciLexerPython : public QsciLexer {
     Q_OBJECT
 public:
     explicit QsciLexerPython(QObject *p = nullptr) : QsciLexer(p) {}
+    ~QsciLexerPython() override;
     const char *language() const override { return "Python"; }
     const char *lexer() const override { return "python"; }
     enum { Default = 0, Comment = 1, Number = 2, DoubleQuotedString = 3,

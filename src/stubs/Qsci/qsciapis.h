@@ -8,7 +8,7 @@ class QSCINTILLA_EXPORT QsciAPIs : public QObject
     Q_OBJECT
 public:
     explicit QsciAPIs(QsciLexer *lexer = nullptr) : QObject(lexer) {}
-    virtual ~QsciAPIs() {}
+    virtual ~QsciAPIs();
 
     void add(const QString &) {}
     void clear() {}

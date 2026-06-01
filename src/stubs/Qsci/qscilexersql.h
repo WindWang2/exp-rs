@@ -4,6 +4,7 @@ class QSCINTILLA_EXPORT QsciLexerSQL : public QsciLexer {
     Q_OBJECT
 public:
     explicit QsciLexerSQL(QObject *p = nullptr) : QsciLexer(p) {}
+    ~QsciLexerSQL() override;
     const char *language() const override { return "SQL"; }
     const char *lexer() const override { return "sql"; }
     enum { Default = 0, Comment = 1, CommentLine = 2, CommentDoc = 3,

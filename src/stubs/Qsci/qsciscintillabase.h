@@ -8,7 +8,7 @@ class QSCINTILLA_EXPORT QsciScintillaBase : public QAbstractScrollArea
     Q_OBJECT
 public:
     explicit QsciScintillaBase(QWidget *parent = nullptr) : QAbstractScrollArea(parent) {}
-    virtual ~QsciScintillaBase() {}
+    virtual ~QsciScintillaBase();
 
     // Constants used by QgsCodeEditor
     enum {
