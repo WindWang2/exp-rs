@@ -411,6 +411,142 @@ Phase 5A complete (UI foundation). Basic framework and display working. Next: in
 
 ---
 
+## Phase 6R: Code Review Fixes 🔲
+**Priority: CRITICAL — Deep review on 2026-06-01 found functional bugs and QGIS pattern deviations.**
+
+### Task 6R.1: Register Processing Providers in main.cpp 🔴 **[CRITICAL]**
+**Problem:** `ProcessingPlugin::initialize()` is never called from `main.cpp`. The processing toolbox is empty at runtime — all 70+ algorithms are invisible.
+**Fix:** In `src/app/main.cpp`, after `QgsGui::instance()`, add:
+```cpp
+QgsApplication::processingRegistry()->addProvider(new GdalToolsProvider());
+QgsApplication::processingRegistry()->addProvider(new OtbToolsProvider());
+QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
+```
+**Files:** `src/app/main.cpp`
+**Status:** Pending
+
+---
+
+### Task 6R.2: Add QgsLayerTreeMapCanvasBridge 🔴 **[CRITICAL]**
+**Problem:** Visibility toggles in layer tree do NOT propagate to canvas. Toggling a layer checkbox has no effect on rendering. Hand-rolled `refreshCanvasLayers()` misses `nodeVisibilityChanged`.
+**Fix:** Instantiate `QgsLayerTreeMapCanvasBridge` in `QgisDesktopWindow` constructor, connect to overview canvas. Remove redundant manual signal connections.
+**Files:** `src/app/main_window.h`, `src/app/main_window.cpp`
+**Status:** Pending
+
+---
+
+### Task 6R.3: Fix Duplicate Layer Addition 🔴 **[CRITICAL]**
+**Problem:** `addMapLayer(layer)` (default `addToLegend=true`) + `group->addLayer(layer)` creates double entries in layer tree.
+**Fix:** Use `addMapLayer(layer, /*addToLegend=*/false)` then `group->addLayer(layer)`.
+**Files:** `src/app/main_window.cpp:1049-1077, 1095-1097`
+**Status:** Pending
+
+---
+
+### Task 6R.4: Fix RasterNDVI Algorithm 🔴 **[CRITICAL]**
+**Problem:** `raster_ndvi.cpp` reads red+NIR blocks but never computes NDVI. Output is a copy of the red band.
+**Fix:** Implement per-pixel `(NIR - RED) / (NIR + RED)` using the block data. Reuse `SpectralIndices::ndvi()` if possible.
+**Files:** `src/processing/providers/qgis_algorithms/algorithms/raster/raster_ndvi.cpp`
+**Status:** Pending
+
+---
+
+### Task 6R.5: Fix GDAL/OTB Tool Error Messages 🔴 **[CRITICAL]**
+**Problem:** `MergedChannels` mode makes `readAllStandardError()` always return empty. Tool failures show no diagnostic info.
+**Fix:** Use `SeparateChannels` or read from `readAllStandardOutput()` in the error branch.
+**Files:** `src/processing/providers/gdal_tools/gdal_tool_wrapper.cpp`, `src/processing/providers/otb_tools/otb_tool_wrapper.cpp`
+**Status:** Pending
+
+---
+
+### Task 6R.6: Fix BandMath Parser Exception 🟡 **[IMPORTANT]**
+**Problem:** `std::stof` can throw `std::out_of_range` or `std::invalid_argument`, crashing the app.
+**Fix:** Wrap in try/catch, or use `std::from_chars` (C++17).
+**Files:** `src/processing/algorithms/band_math.cpp:212`
+**Status:** Pending
+
+---
+
+### Task 6R.7: Fix Processing Dialog Parameter Collection 🟡 **[IMPORTANT]**
+**Problem:** `SimpleAlgorithmDialog::createProcessingParameters()` returns empty `QVariantMap()`. Algorithms run with default/empty params.
+**Fix:** Collect parameter values from dialog widgets and return them.
+**Files:** `src/app/main_window.cpp:1179-1181`
+**Status:** Pending
+
+---
+
+### Task 6R.8: Fix Dangling Pointers in Widgets 🟡 **[IMPORTANT]**
+**Problem:** `SpectralProfileWidget::m_rasterLayer` and `HistogramWidget::m_rasterLayer` are raw pointers. If layer is removed from project, next paint/access = crash.
+**Fix:** Connect to `QgsProject::layerRemoved` to clear the stored pointer.
+**Files:** `src/app/widgets/spectral_profile_widget.cpp`, `src/app/widgets/histogram_widget.cpp`
+**Status:** Pending
+
+---
+
+### Task 6R.9: Restore Theme Preference on Startup 🟡 **[IMPORTANT]**
+**Problem:** `PreferencesDialog` saves theme to QSettings but neither `main.cpp` nor constructor reads it on startup.
+**Fix:** Read `preferences/theme` in `QgisDesktopWindow` constructor and apply dark palette if needed.
+**Files:** `src/app/main_window.cpp`
+**Status:** Pending
+
+---
+
+### Task 6R.10: Fix GDAL Null Band Handle Checks 🟡 **[IMPORTANT]**
+**Problem:** Three dialogs call `GDALGetRasterBand()` without null check before `GDALRasterIO`.
+**Fix:** Add null check with error message and early return.
+**Files:** `src/app/dialogs/band_math_dialog.cpp:152`, `src/app/dialogs/spectral_index_dialog.cpp:318`, `src/app/dialogs/atmospheric_dialog.cpp:230`
+**Status:** Pending
+
+---
+
+### Task 6R.11: Fix ProcessingCache Write Verification 🟡 **[IMPORTANT]**
+**Problem:** `ProcessingCache::store()` ignores `file.write()` return value. Reports success even on disk full.
+**Fix:** Check `file.write()` return and `file.error()` before returning true.
+**Files:** `src/processing/framework/processing_cache.cpp`
+**Status:** Pending
+
+---
+
+### Task 6R.12: Fix Thread Safety in GDAL Init 🟡 **[IMPORTANT]**
+**Problem:** `ensureGdalInit()` uses unsynchronized static bool. Data race under concurrent access.
+**Fix:** Use `std::call_once` / `std::once_flag`.
+**Files:** `src/processing/gdal/gdal_dataset_wrapper.cpp:9-16`
+**Status:** Pending
+
+---
+
+### Task 6R.13: Fix tests/CMakeLists.txt Duplicates 🟡 **[IMPORTANT]**
+**Problem:** `test_algorithm_organization` configured twice (lines 188-203 and 309-322). `test_progress_dialog` split across lines 206-208 and 296-308.
+**Fix:** Delete duplicate block at 309-322. Move test_progress_dialog config to be contiguous.
+**Files:** `tests/CMakeLists.txt`
+**Status:** Pending
+
+---
+
+### Task 6R.14: Remove Unnecessary Python/pybind11 Dependency 🟡 **[IMPORTANT]**
+**Problem:** CMake fetches Python Development + pybind11 but project is pure C++. Only `Interpreter` needed for build scripts.
+**Fix:** Change to `find_package(Python REQUIRED COMPONENTS Interpreter)` and remove pybind11 FetchContent.
+**Files:** `CMakeLists.txt`
+**Status:** Pending
+
+---
+
+### Task 6R.15: Add Processing Algorithm Test Coverage 🟡 **[IMPORTANT]**
+**Problem:** Zero tests for 15 vector algorithms, 6 raster algorithms, 3 RS algorithm wrappers.
+**Fix:** Create `test_vector_algorithms.cpp`, `test_raster_algorithms.cpp` with basic smoke tests.
+**Files:** `tests/`
+**Status:** Pending
+
+---
+
+### Task 6R.16: Remove Dead `sicnu_gui` Library ⚪ **[MINOR]**
+**Problem:** `sicnu_gui` library built but never used at runtime. `main.cpp` uses `QgisDesktopWindow` only.
+**Fix:** Remove from CMakeLists.txt.
+**Files:** `CMakeLists.txt`
+**Status:** Pending
+
+---
+
 ## Phase 7: Model Builder 🔲
 **Deferred — requires stable single-step algorithms first**
 - [ ] DAG execution engine for processing workflows
@@ -477,48 +613,55 @@ main.cpp
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Window/Menu/Toolbar | ✅ Working | 12 menus, 3 toolbars, all with icons |
-| Map Canvas | ✅ Working | Pan/zoom/identify tools, CRS selection |
-| Layer Tree | ✅ Working | Groups, visibility, drag-drop, context menu |
+| Map Canvas | ⚠️ Needs Bridge | Missing QgsLayerTreeMapCanvasBridge — visibility toggles don't update canvas |
+| Layer Tree | ⚠️ Duplicate Bug | addMapLayer + group->addLayer creates double entries |
 | Layer Properties | ✅ Working | Raster + vector dialogs, Statistics tab added |
-| Processing Toolbox | ✅ Working | Algorithm tree, double-click opens dialog |
-| Status Bar | ✅ Working | Coordinates, scale, CRS, render time |
-| Theme/Styling | ✅ Working | Green accent, IBM Plex, 168 SVG icons |
-| Raster Menu Actions | ✅ Working | Band Math, Vegetation Index, Atmospheric Correction dialogs connected |
+| Processing Toolbox | ❌ Empty | Providers never registered — ProcessingPlugin::initialize() never called |
+| Processing Dialogs | ❌ Broken | createProcessingParameters() returns empty map |
+| Status Bar | ⚠️ Incomplete | Render time label never populated |
+| Theme/Styling | ⚠️ Not Persisted | Theme preference not restored on startup |
+| Raster Menu Actions | ⚠️ Null Check | 3 dialogs missing GDAL null band handle check |
 | Vector Menu Actions | ✅ Working | Buffer, Dissolve, Merge, Clip wired to processing dialogs |
-| Colormap/Colorbar | ✅ Fixed | Runtime import of symbology-style.xml, 100/100 tests pass |
-| Measurement Tools | ✅ Working | MeasureTool with Distance/Area modes, geodesic calculations |
+| RS Algorithms | ❌ NDVI Broken | RasterNDVI reads data but never computes NDVI |
+| GDAL/OTB Wrappers | ❌ Silent Errors | MergedChannels makes error messages always empty |
+| BandMath Parser | ⚠️ Crash Risk | std::stof can throw unhandled exception |
+| Cache Framework | ⚠️ No Verification | ProcessingCache::store ignores write errors, no size limit |
+| GDAL Thread Safety | ⚠️ Data Race | ensureGdalInit() uses unsynchronized static bool |
+| Widget Lifecycle | ⚠️ Dangling Ptrs | SpectralProfile/Histogram hold raw layer pointers |
+| Colormap/Colorbar | ✅ Fixed | Runtime import of symbology-style.xml |
+| Measurement Tools | ✅ Working | MeasureTool with Distance/Area modes |
 | Identify Results | ✅ Working | CustomIdentifyTool + HTML results dock panel |
 | Overview Map | ✅ Working | QgsMapOverviewCanvas linked to main canvas |
 | Browser Panel | ✅ Working | QgsBrowserDockWidget with QgsBrowserGuiModel |
-| Histogram Widget | ✅ Working | QPainter-based histogram with GDAL statistics |
-| Spectral Profile | ✅ Working | SpectralProfileWidget with QPainter, GDAL pixel extraction |
-| Preferences Dialog | ❌ Missing | Options shows message box |
-| CRS Presets | ✅ Working | 36 presets, dialog, Recently Used, Settings menu + layer context menu |
-| Algorithm Organization | ✅ Working | All 46 algorithms have tags + groupId, 104 tests pass |
+| CRS Presets | ✅ Working | 36 presets, dialog, Recently Used |
+| Algorithm Organization | ✅ Working | All 46 algorithms have tags + groupId |
 | Progress Dialog | ✅ Working | ProgressDialog with cancel, elapsed time, auto-close |
 | Panel Persistence | ✅ Working | Save/restore dock layout, Reset Layout in Window menu |
 | Preferences Dialog | ✅ Working | General (theme, CRS), Tools (GDAL/OTB), About tabs |
-| Tests | ✅ 137/137 pass | Catch2 framework solid |
+| Build System | ⚠️ Issues | Duplicate CMake targets, unnecessary pybind11, dead sicnu_gui lib |
+| Test Coverage | ⚠️ Gaps | 0 tests for 24 processing algorithms (vector/raster/RS) |
+| Tests | ✅ 137/137 pass | All existing tests pass |
 
 ## Recommended Next Steps (Priority Order)
 
-1. **Task 5B.0** — Colormap & Colorbar Fix ✅ (CRITICAL — blocks all raster visualization)
-2. **Task 5B.3** — Wire up Raster Menu ✅ (Band Math, Vegetation Index, Atmospheric Correction)
-3. **Task 5B.8** — Processing Toolbox Enhancements ✅ (HIGH — complete GDAL/OTB/QGIS tools)
-4. **Task 5B.14** — Add Preset Coordinate Reference Systems ✅ (HIGH — 36 presets, dialog, Recently Used)
-5. **Task 5B.4** — Wire up Vector Menu ✅ (Buffer, Dissolve, Merge, Clip via processing dialog)
-6. **Task 5B.2** — Identify Results Panel ✅ (CustomIdentifyTool + HTML results dock)
-5. **Task 5B.1** — Measurement Tools ✅ (Distance/Area with geodesic calculations)
-6. **Task 5B.5** — Layer Properties Dialog Improvements ✅ (Spectral Information tab with per-band details)
-7. **Task 5B.6** — Overview Map ✅ (QgsMapOverviewCanvas linked to main canvas)
-8. **Task 5B.7** — Browser Panel ✅ (QgsBrowserDockWidget with QgsBrowserGuiModel)
-9. **Task 5C.1** — Histogram Widget ✅ (QPainter-based with GDAL statistics)
-10. **Task 5C.2** — Spectral Profile ✅ (QPainter line chart with GDAL pixel extraction)
-11. **Task 5B.13** — Algorithm Organization ✅ (All 46 algorithms have tags + groupId, 104 tests pass)
-12. **Task 5C.3** — Progress Dialog ✅ (ProgressDialog with cancel, elapsed time, auto-close)
-13. **Task 5C.4** — Panel Persistence ✅ (Save/restore dock layout, Reset Layout in Window menu)
-14. **Task 5C.5** — Preferences Dialog ✅ (General, Tools, About tabs with dark theme support)
-15. **Task 5B.5V** — Vector Layer Properties ✅ (Statistics tab with feature count, geometry/attribute stats)
+### Phase 6R: Code Review Fixes (2026-06-01 review)
+
+1. **Task 6R.1** — Register Processing Providers 🔴 (CRITICAL — toolbox completely empty)
+2. **Task 6R.2** — Add QgsLayerTreeMapCanvasBridge 🔴 (CRITICAL — visibility toggles broken)
+3. **Task 6R.3** — Fix Duplicate Layer Addition 🔴 (CRITICAL — double entries in tree)
+4. **Task 6R.4** — Fix RasterNDVI Algorithm 🔴 (CRITICAL — output is just red band copy)
+5. **Task 6R.5** — Fix GDAL/OTB Error Messages 🔴 (CRITICAL — tool failures show no info)
+6. **Task 6R.6** — Fix BandMath Parser Exception 🟡 (crash on overflow)
+7. **Task 6R.7** — Fix Processing Dialog Parameters 🟡 (algorithms run with empty params)
+8. **Task 6R.8** — Fix Dangling Pointers in Widgets 🟡 (crash on layer removal)
+9. **Task 6R.9** — Restore Theme on Startup 🟡 (preference lost on restart)
+10. **Task 6R.10** — Fix GDAL Null Band Checks 🟡 (3 dialogs at risk)
+11. **Task 6R.11** — Fix Cache Write Verification 🟡 (silent data loss)
+12. **Task 6R.12** — Fix Thread Safety in GDAL Init 🟡 (data race)
+13. **Task 6R.13** — Fix tests/CMakeLists.txt Duplicates 🟡 (build issues)
+14. **Task 6R.14** — Remove Unnecessary pybind11 🟡 (build bloat)
+15. **Task 6R.15** — Add Processing Algorithm Tests 🟡 (24 algorithms untested)
+16. **Task 6R.16** — Remove Dead sicnu_gui Library ⚪ (dead code)
 
 ---
-*Last updated: 2026-06-01*
+*Last updated: 2026-06-01 (Phase 6R added from deep code review)*
