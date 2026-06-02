@@ -2,11 +2,11 @@
 
 ## Goal
 
-Build a pure C++ remote sensing analysis and processing platform based on the QGIS engine, with embedded GDAL/OTB tools and customized remote sensing interactive workflows. Cross-platform (Linux/macOS/Windows).
+Build a pure C++ remote sensing analysis and processing platform based on the QGIS engine, with embedded GDAL/OTB tools and customized remote sensing interactive workflows. **Dual purpose:** (1) Undergraduate RS lab education (遥感原理实验), (2) Foundation for RS AI Agents. Cross-platform (Linux/macOS/Windows).
 
 ## Current Phase
 
-Phase 8 complete (Performance & Polish). 191/191 tests pass. Next: Phase 7 (Model Builder) or Phase 9 (3D).
+Phase 9 complete (Image Enhancement). 211/211 tests pass. Next: Phase 10 (Classification — education Lab #4).
 
 ---
 
@@ -607,7 +607,348 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 
 ---
 
-## Phase 9: 3D Visualization 🔲
+## Phase 9: Image Enhancement ✅ **[CRITICAL — Education Lab #2]**
+**Priority: CRITICAL — Every RS course starts with image enhancement.**
+**Status:** Complete. 5 algorithms + 5 spatial filters + PCA + IHS + 4 GUI dialogs + Raster > Enhancement menu. 211/211 tests pass.
+
+### Task 9.1: Contrast Stretching
+**Goal:** Linear and histogram-based contrast enhancement for raster layers.
+
+**Algorithms:**
+- Linear min-max stretch (per-band)
+- Percentage clip stretch (clip 2% tails)
+- Standard deviation stretch (e.g., ±2σ)
+- Histogram equalization
+
+**Files:**
+- Create: `src/processing/algorithms/image_enhancement.h/.cpp`
+- Create: `src/app/dialogs/contrast_stretch_dialog.h/.cpp`
+- Modify: `src/app/main_window.cpp` — wire Raster > Enhancement menu
+- Modify: `src/app/CMakeLists.txt`
+- Create: `tests/test_image_enhancement.cpp`
+
+**Steps:**
+- [x] Implement contrast stretching algorithms (TDD) — commit 42739eb
+- [x] Create ContrastStretchDialog (input layer, method, parameters) — commit a55c895
+- [x] Wire to Raster > Enhancement > Contrast Stretch menu — commit a55c895
+- [x] Build and verify — 211/211 tests pass
+
+---
+
+### Task 9.2: Spatial Filtering ✅
+**Goal:** Convolution-based spatial filtering for noise reduction and edge detection.
+
+**Algorithms:**
+- Low-pass filters: Mean (3x3, 5x5), Gaussian, Median
+- High-pass filters: Laplacian
+- Edge detection: Sobel
+
+**Files:**
+- Modify: `src/processing/algorithms/image_enhancement.h/.cpp`
+- Create: `src/app/dialogs/spatial_filter_dialog.h/.cpp`
+- Create: `tests/test_spatial_filter.cpp`
+
+**Steps:**
+- [x] Implement convolution engine with kernel support (TDD) — commit 9ab29a9
+- [x] Add preset filters (mean, Gaussian, median, Sobel, Laplacian) — commit 9ab29a9
+- [x] Create SpatialFilterDialog (layer, filter type, kernel size) — commit a55c895
+- [x] Wire to Raster > Enhancement > Spatial Filter menu — commit a55c895
+- [x] Build and verify — 211/211 tests pass
+
+---
+
+### Task 9.3: PCA (Principal Component Analysis) ✅
+**Goal:** Dimensionality reduction and image decorrelation.
+
+**Files:**
+- Modify: `src/processing/algorithms/image_enhancement.h/.cpp`
+- Create: `src/app/dialogs/pca_dialog.h/.cpp`
+- Create: `tests/test_pca.cpp`
+
+**Steps:**
+- [x] Implement PCA via covariance matrix + Jacobi eigen decomposition (TDD) — commit 12bc669
+- [x] Create PcaDialog (input layer, number of components, output) — commit a55c895
+- [x] Wire to Raster > Enhancement > PCA menu — commit a55c895
+- [x] Build and verify — 211/211 tests pass
+
+---
+
+### Task 9.4: Band Ratio and Image Transformation ✅
+**Goal:** Band ratio, IHS transform.
+
+**Files:**
+- Modify: `src/processing/algorithms/image_enhancement.h/.cpp`
+- Create: `src/app/dialogs/band_ratio_dialog.h/.cpp`
+- Create: `tests/test_band_ratio.cpp`
+
+**Steps:**
+- [x] Implement band ratio, IHS forward/inverse transform (TDD) — commit (subagent)
+- [x] Create dialog and menu wiring — commit a55c895
+- [x] Build and verify — 211/211 tests pass
+
+---
+
+## Phase 10: Classification & Training 🔴 **[CRITICAL — Education Labs #6-7]**
+**Priority: CRITICAL — Classification is the centerpiece of every RS course. Currently only CLI wrappers exist, no interactive GUI workflow.**
+
+### Task 10.1: Training Sample Management
+**Goal:** Digitize, save, load, and manage training polygons/points on the map canvas.
+
+**Files:**
+- Create: `src/app/map_tools/training_sample_tool.h/.cpp`
+- Create: `src/app/widgets/training_sample_panel.h/.cpp`
+- Create: `src/processing/algorithms/training_data.h/.cpp`
+- Create: `tests/test_training_samples.cpp`
+
+**Steps:**
+- [ ] Create TrainingSampleTool (draw polygons on canvas, assign class labels)
+- [ ] Create TrainingSamplePanel (list samples, class colors, import/export)
+- [ ] Save/load training samples as GeoJSON/Shapefile
+- [ ] Wire to Processing > Training Samples dock panel
+- [ ] Build and verify
+
+---
+
+### Task 10.2: Supervised Classification
+**Goal:** Maximum Likelihood, Minimum Distance, SVM classifiers with GUI workflow.
+
+**Algorithms:**
+- Maximum Likelihood (MLC)
+- Minimum Distance to Mean
+- Spectral Angle Mapper (SAM)
+- Support Vector Machine (SVM) — via external lib or simplified implementation
+
+**Files:**
+- Create: `src/processing/algorithms/classification.h/.cpp`
+- Create: `src/app/dialogs/classification_dialog.h/.cpp`
+- Create: `tests/test_classification.cpp`
+
+**Steps:**
+- [ ] Implement MLC, Minimum Distance, SAM classifiers (TDD)
+- [ ] Create ClassificationDialog (training samples, classifier selection, parameters)
+- [ ] Wire to Processing > Classification > Supervised Classification menu
+- [ ] Build and verify
+
+---
+
+### Task 10.3: Unsupervised Classification
+**Goal:** K-Means and ISODATA clustering with dedicated dialog.
+
+**Files:**
+- Modify: `src/processing/algorithms/classification.h/.cpp`
+- Create: `src/app/dialogs/unsupervised_dialog.h/.cpp`
+
+**Steps:**
+- [ ] Implement K-Means and ISODATA (TDD)
+- [ ] Create UnsupervisedDialog (layer, number of classes, iterations, convergence)
+- [ ] Wire to Processing > Classification > Unsupervised Classification menu
+- [ ] Build and verify
+
+---
+
+### Task 10.4: Accuracy Assessment
+**Goal:** Confusion matrix, overall accuracy, Kappa coefficient, producer's/user's accuracy.
+
+**Files:**
+- Modify: `src/processing/algorithms/classification.h/.cpp`
+- Create: `src/app/dialogs/accuracy_dialog.h/.cpp`
+- Create: `tests/test_accuracy.cpp`
+
+**Steps:**
+- [ ] Implement confusion matrix computation (TDD)
+- [ ] Create AccuracyDialog (classified raster, reference data, output matrix)
+- [ ] Display results as table with accuracy metrics
+- [ ] Build and verify
+
+---
+
+## Phase 11: Advanced RS Processing 🟡 **[HIGH — Education Labs #9-10]**
+
+### Task 11.1: Image Fusion / Pan-sharpening
+**Goal:** Brovey, PCA, IHS fusion methods for multi-resolution image merging.
+
+**Files:**
+- Create: `src/processing/algorithms/image_fusion.h/.cpp`
+- Create: `src/app/dialogs/fusion_dialog.h/.cpp`
+- Create: `tests/test_image_fusion.cpp`
+
+**Steps:**
+- [ ] Implement Brovey, PCA, IHS fusion (TDD)
+- [ ] Create FusionDialog (high-res panchromatic + low-res multispectral)
+- [ ] Wire to Raster > Fusion menu
+- [ ] Build and verify
+
+---
+
+### Task 11.2: Terrain Analysis (Native)
+**Goal:** Native C++ slope, aspect, hillshade from DEM (not CLI wrappers).
+
+**Files:**
+- Create: `src/processing/algorithms/terrain_analysis.h/.cpp`
+- Create: `src/app/dialogs/terrain_dialog.h/.cpp`
+- Create: `tests/test_terrain.cpp`
+
+**Steps:**
+- [ ] Implement slope, aspect, hillshade, roughness algorithms (TDD)
+- [ ] Create TerrainDialog (DEM input, output selection, parameters)
+- [ ] Wire to Raster > Terrain Analysis menu
+- [ ] Build and verify
+
+---
+
+### Task 11.3: Noise Filtering (SAR)
+**Goal:** Speckle filters for SAR imagery.
+
+**Files:**
+- Modify: `src/processing/algorithms/image_enhancement.h/.cpp`
+- Create: `src/app/dialogs/speckle_filter_dialog.h/.cpp`
+
+**Steps:**
+- [ ] Implement Lee, Frost, Kuan, Gamma-MAP filters (TDD)
+- [ ] Create SpeckleFilterDialog
+- [ ] Wire to Raster > Enhancement > Speckle Filter menu
+- [ ] Build and verify
+
+---
+
+### Task 11.4: Image Registration with GCPs
+**Goal:** Ground Control Point collection + polynomial/RPC georeferencing.
+
+**Files:**
+- Create: `src/app/map_tools/gcp_tool.h/.cpp`
+- Create: `src/processing/algorithms/georeference.h/.cpp`
+- Create: `src/app/dialogs/georeference_dialog.h/.cpp`
+
+**Steps:**
+- [ ] Create GcpTool (click on canvas to collect GCP pairs)
+- [ ] Implement polynomial transformation (1st, 2nd order)
+- [ ] Create GeoreferenceDialog (GCP table, RMS error display)
+- [ ] Wire to Raster > Georeferencing menu
+- [ ] Build and verify
+
+---
+
+## Phase 12: AI Agent Infrastructure 🟡 **[HIGH — RS AI Agents foundation]**
+**Goal:** Make the processing system agent-accessible via MCP (Model Context Protocol).
+
+### Task 12.1: Algorithm Semantic Metadata
+**Goal:** Enrich all algorithms with agent-readable metadata (purpose, use cases, prerequisites).
+
+**Files:**
+- Modify: `src/processing/framework/` — add AgentAlgorithmMeta structure
+- Modify: All algorithm .cpp files — add shortHelpString(), rich tags(), parameter descriptions
+
+**Steps:**
+- [ ] Define AgentAlgorithmMeta struct (purpose, useCases, prerequisites, limitations, workflowHints)
+- [ ] Add to processing framework as optional metadata on QgsProcessingAlgorithm
+- [ ] Implement shortHelpString() for all RS algorithms
+- [ ] Add semantic parameter descriptions to all initParameter() calls
+- [ ] Build and verify
+
+---
+
+### Task 12.2: JSON Schema Export for Algorithms
+**Goal:** Auto-generate JSON Schema from QgsProcessingParameter definitions.
+
+**Files:**
+- Modify: `src/processing/framework/` — add schema export
+- Create: `tests/test_algorithm_schema.cpp`
+
+**Steps:**
+- [ ] Implement toJsonSchema() on QgsProcessingAlgorithm (TDD)
+- [ ] Handle all parameter types (raster, vector, number, string, enum, boolean, band)
+- [ ] Export algorithm catalog as JSON file
+- [ ] Build and verify
+
+---
+
+### Task 12.3: MCP Server
+**Goal:** Implement MCP (Model Context Protocol) server exposing processing tools to LLM agents.
+
+**Files:**
+- Create: `src/agent/mcp_server.h/.cpp`
+- Create: `src/agent/mcp_tools.h/.cpp`
+- Create: `tests/test_mcp_server.cpp`
+
+**MCP Tools to expose:**
+- `list_algorithms` — returns all algorithms with metadata
+- `get_algorithm_schema` — returns JSON Schema for specific algorithm
+- `execute_algorithm` — runs algorithm with parameters, returns execution ID
+- `get_execution_status` — polls progress
+- `cancel_execution` — cancels running operation
+- `describe_dataset` — returns layer metadata (bands, CRS, extent, statistics)
+- `list_layers` — returns loaded layers
+
+**Steps:**
+- [ ] Implement MCP server (JSON-RPC over stdio) (TDD)
+- [ ] Implement all 7 MCP tools
+- [ ] Async execution with ProgressCallback integration
+- [ ] Structured result responses (statistics, metadata, not just file paths)
+- [ ] Build and verify
+
+---
+
+### Task 12.4: STAC/COG Data Access
+**Goal:** Browse STAC catalogs and stream Cloud-Optimized GeoTIFFs.
+
+**Files:**
+- Create: `src/agent/stac_client.h/.cpp`
+- Create: `src/app/dialogs/stac_browser_dialog.h/.cpp`
+
+**Steps:**
+- [ ] Implement STAC catalog browser (collections, items, assets)
+- [ ] Implement COG partial-file streaming via GDAL /vsicurl/
+- [ ] Create StacBrowserDialog (search, preview, add to project)
+- [ ] Wire to File > Browse STAC Catalog menu
+- [ ] Build and verify
+
+---
+
+## Phase 13: Education & Usability ⚪ **[MEDIUM — Polish for teaching]**
+
+### Task 13.1: Sample Datasets
+**Goal:** Bundle small RS datasets for lab exercises.
+
+**Steps:**
+- [ ] Add sample Landsat 8 scene (small subset, ~50MB)
+- [ ] Add sample Sentinel-2 scene (small subset)
+- [ ] Add sample DEM
+- [ ] Add sample vector (roads, land use)
+- [ ] Wire to Help > Sample Data menu
+
+---
+
+### Task 13.2: In-App Lab Guides
+**Goal:** Step-by-step tutorial system for common RS workflows.
+
+**Steps:**
+- [ ] Create tutorial framework (HTML dock widget)
+- [ ] Write tutorials: (1) Spectral Analysis, (2) Classification, (3) Change Detection
+- [ ] Wire to Help > Tutorials menu
+
+---
+
+### Task 13.3: Image Comparison Tool
+**Goal:** Swipe/flicker comparison of two raster layers.
+
+**Steps:**
+- [ ] Create ComparisonTool (split-screen or flicker mode)
+- [ ] Wire to View > Compare Layers menu
+- [ ] Build and verify
+
+---
+
+### Task 13.4: Batch Processing
+**Goal:** Run same algorithm on multiple files.
+
+**Steps:**
+- [ ] Create BatchProcessingDialog (algorithm, input files, output directory)
+- [ ] Wire to Processing > Batch Processing menu
+- [ ] Build and verify
+
+---
+
+## Phase 14: 3D Visualization 🔲 **[DEFERRED]**
 **Deferred — independent large project**
 - [ ] DEM/DTM 3D rendering
 - [ ] 3D camera controls
@@ -621,23 +962,27 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 ```
 main.cpp
 ├── src/app/
-│   ├── main_window.h/cpp       — QgisDesktopWindow (944 lines)
+│   ├── main_window.h/cpp       — QgisDesktopWindow
 │   ├── layer_tree_menu.h/cpp   — LayerTreeMenuProvider
 │   ├── app_paths.h             — Dynamic path resolution
-│   ├── dialogs/                — (NEW) Algorithm parameter dialogs
-│   └── widgets/                — (NEW) Histogram, spectral profile, progress
+│   ├── dialogs/                — Algorithm parameter dialogs
+│   ├── widgets/                — Histogram, spectral profile, progress
+│   └── map_tools/              — MeasureTool, IdentifyTool, GcpTool, TrainingSampleTool
 ├── src/core/                   — QGIS core (2049 files)
 ├── src/gui/                    — QGIS GUI (1610 files)
 ├── src/processing/
 │   ├── gdal/                   — GdalDatasetWrapper, GdalErrorHandler
-│   ├── algorithms/             — SpectralIndices, BandMath, AtmosphericCorrection, ChangeDetection, Mosaic
+│   ├── algorithms/             — SpectralIndices, BandMath, AtmosphericCorrection, ChangeDetection, Mosaic, ImageEnhancement, Classification, TerrainAnalysis, ImageFusion
+│   ├── framework/              — ProcessingCache, ProgressCallback, ErrorReporter, AgentAlgorithmMeta
 │   └── providers/              — GDAL tools, OTB tools, QGIS algorithms
-├── src/plugins/                — Plugin system (3 plugins)
+├── src/agent/                  — MCP server, STAC client, algorithm schema export
+├── src/plugins/                — Plugin system
 ├── resources/
 │   ├── styles.qss              — Green accent theme
 │   ├── icons.qrc               — 168 SVG icons
 │   └── icons/                  — SVG icon files
-└── tests/                      — 185 Catch2 tests passing
+├── packaging/                  — .desktop, .svg, AppImage script
+└── tests/                      — 191 Catch2 tests passing
 ```
 
 ## Key Decisions
@@ -684,41 +1029,46 @@ main.cpp
 | Build System | ✅ Optimized | ASAN/UBSAN support, Release -O2, LTO option, install rules |
 | Packaging | ✅ Complete | .desktop file, SVG icon, AppStream metadata, linuxdeploy AppImage script |
 | Documentation | ✅ Complete | README.md with build instructions, features, architecture |
-| Test Coverage | ✅ 191/191 | 191 tests covering algorithms, integration, framework, UI |
-| Tests | ✅ 191/191 pass | All tests pass (ASAN clean, Release clean) |
+| Test Coverage | ✅ 211/211 | 211 tests covering algorithms, enhancement, integration, framework, UI |
+| Tests | ✅ 211/211 pass | All tests pass (ASAN clean, Release clean) |
+| Image Enhancement | ✅ Complete | Contrast stretch, spatial filter, PCA, band ratio, IHS, 4 dialogs |
 
 ## Recommended Next Steps (Priority Order)
 
-### Phase 6R: Code Review Fixes (2026-06-01 review)
+### Phase 10: Classification & Training 🔴 **[CRITICAL — Education Labs #6-7]**
 
-1. **Task 6R.1** — Register Processing Providers 🔴 (CRITICAL — toolbox completely empty)
-2. **Task 6R.2** — Add QgsLayerTreeMapCanvasBridge 🔴 (CRITICAL — visibility toggles broken)
-3. **Task 6R.3** — Fix Duplicate Layer Addition 🔴 (CRITICAL — double entries in tree)
-4. **Task 6R.4** — Fix RasterNDVI Algorithm 🔴 (CRITICAL — output is just red band copy)
-5. **Task 6R.5** — Fix GDAL/OTB Error Messages 🔴 (CRITICAL — tool failures show no info)
-6. **Task 6R.6** — Fix BandMath Parser Exception 🟡 (crash on overflow)
-7. **Task 6R.7** — Fix Processing Dialog Parameters 🟡 (algorithms run with empty params)
-8. **Task 6R.8** — Fix Dangling Pointers in Widgets 🟡 (crash on layer removal)
-9. **Task 6R.9** — Restore Theme on Startup 🟡 (preference lost on restart)
-10. **Task 6R.10** — Fix GDAL Null Band Checks ✅ (3 dialogs fixed)
-11. **Task 6R.11** — Fix Cache Write Verification ✅ (write return checked)
-12. **Task 6R.12** — Fix Thread Safety in GDAL Init ✅ (std::call_once)
-13. **Task 6R.13** — Fix tests/CMakeLists.txt Duplicates ✅ (duplicates removed)
-14. **Task 6R.14** — Remove Unnecessary pybind11 ✅ (dependency removed)
-15. **Task 6R.15** — Add Processing Algorithm Tests ✅ (smoke tests added)
-16. **Task 6R.16** — Remove Dead sicnu_gui Library ✅ (library removed)
+1. **Task 10.1** — Training Sample Management (ROI digitization, sample import/export)
+2. **Task 10.2** — Supervised Classification (Maximum Likelihood, SVM, Random Forest)
+3. **Task 10.3** — Unsupervised Classification (K-Means, ISODATA)
+4. **Task 10.4** — Accuracy Assessment (confusion matrix, Kappa, overall accuracy)
 
-### Phase 8.1: Logging & Message Handling (2026-06-01)
+### Phase 10: Classification & Training 🔴 **[CRITICAL — Education Labs #6-7]**
 
-17. **Task 8.1.1** — Create LogPanel dock widget 🔴 (QgsMessageLogViewer wrapper)
-18. **Task 8.1.2** — Install Qt message handler → QgsMessageLog 🔴 (route qDebug/qWarning)
-19. **Task 8.1.3** — Add QgsMessageBar to main window 🟡 (transient notifications)
-20. **Task 8.1.4** — ErrorReporter signal → QgsMessageLog 🟡 (processing errors visible)
-21. **Task 8.1.5** — Log GDAL/OTB tool output 🟡 (subprocess stdout/stderr)
-22. **Task 8.1.6** — Replace QMessageBox with QgsMessageBar in dialogs 🟡 (non-blocking errors)
-23. **Task 8.1.7** — Log-to-file option in Preferences ⚪ (persistent logging)
-24. **Task 8.1.8** — Window menu toggle + state persistence ⚪ (log panel UX)
-25. **Task 8.1.9** — Full test suite verification ✅ (191/191 pass)
+5. **Task 10.1** — Training Sample Management (digitize, save/load, class labels)
+6. **Task 10.2** — Supervised Classification (MLC, Minimum Distance, SAM, SVM)
+7. **Task 10.3** — Unsupervised Classification (K-Means, ISODATA)
+8. **Task 10.4** — Accuracy Assessment (confusion matrix, Kappa, producer's/user's accuracy)
+
+### Phase 11: Advanced RS Processing 🟡 **[HIGH — Education Labs #9-10]**
+
+9. **Task 11.1** — Image Fusion / Pan-sharpening (Brovey, PCA, IHS)
+10. **Task 11.2** — Terrain Analysis (slope, aspect, hillshade — native C++)
+11. **Task 11.3** — Noise Filtering (Lee, Frost, Kuan, Gamma-MAP for SAR)
+12. **Task 11.4** — Image Registration with GCPs
+
+### Phase 12: AI Agent Infrastructure 🟡 **[HIGH — RS AI Agents foundation]**
+
+13. **Task 12.1** — Algorithm Semantic Metadata (AgentAlgorithmMeta, shortHelpString, rich tags)
+14. **Task 12.2** — JSON Schema Export for Algorithms
+15. **Task 12.3** — MCP Server (list_algorithms, execute_algorithm, describe_dataset, etc.)
+16. **Task 12.4** — STAC/COG Data Access (catalog browsing, COG streaming)
+
+### Phase 13: Education & Usability ⚪ **[MEDIUM]**
+
+17. **Task 13.1** — Sample Datasets (Landsat, Sentinel-2, DEM subsets)
+18. **Task 13.2** — In-App Lab Guides (HTML tutorial system)
+19. **Task 13.3** — Image Comparison Tool (swipe/flicker)
+20. **Task 13.4** — Batch Processing
 
 ---
-*Last updated: 2026-06-02 (Phase 8 performance & polish complete, 191/191 tests pass)*
+*Last updated: 2026-06-02 (Phase 8 complete, Phases 9-14 planned based on education + AI Agent research)*
