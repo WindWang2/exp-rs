@@ -2,19 +2,27 @@
 
 #include <QMainWindow>
 
+#include "qgspointxy.h"
 #include "rs_georef_mode_toggle.h"
 
 class QToolBar;
 class QLabel;
+class QAction;
 class QCloseEvent;
 class QgisInterface;
+class QgsMapCanvas;
+class RsTwinCanvasSyncController;
+class QgsGeorefToolAddPoint;
 
 /**
- * \brief Georeferencer main window shell (Task 11.4.4).
+ * \brief Georeferencer main window shell.
  *
- * Skeleton only: menus, top toolbar (mode toggle + GCP/view ops + Apply),
- * status bar (coord / CRS / RMS), placeholder central widget. Twin canvas
- * comes in Task 11.4.5; GCP table in Task 11.4.6.
+ * Twin SRC/REF canvases inside a horizontal splitter, throttle-synchronized
+ * by an RsTwinCanvasSyncController. The "Add GCP" toolbar action installs
+ * QgsGeorefToolAddPoint on the source canvas; clicking the canvas pops a
+ * QgsMapCoordsDialog for the matching destination coordinate.
+ *
+ * Tasks 11.4.4 (shell) + 11.4.5 (twin canvas, sync, add-point flow).
  */
 class QgsGeoreferencerMainWindow : public QMainWindow
 {
@@ -23,6 +31,11 @@ class QgsGeoreferencerMainWindow : public QMainWindow
   public:
     explicit QgsGeoreferencerMainWindow( QgisInterface *iface, QWidget *parent = nullptr );
 
+  public slots:
+    /// Slot connected to QgsGeorefToolAddPoint::showCoordDialog — pops up
+    /// the MapCoords dialog so the user can enter the destination coord.
+    void showCoordDialog( const QgsPointXY &sourcePixel );
+
   protected:
     void closeEvent( QCloseEvent *e ) override;
 
@@ -30,6 +43,7 @@ class QgsGeoreferencerMainWindow : public QMainWindow
     void setupMenus();
     void setupToolbars();
     void setupStatusBar();
+    void setupCentralWidget();
 
     QgisInterface *mIface = nullptr;
     RsGeorefModeToggle *mModeToggle = nullptr;
@@ -37,4 +51,12 @@ class QgsGeoreferencerMainWindow : public QMainWindow
     QLabel *mCoordLabel = nullptr;
     QLabel *mCrsLabel = nullptr;
     QLabel *mRmsLabel = nullptr;
+
+    // Task 11.4.5 — twin canvas
+    QgsMapCanvas *mSrcCanvas = nullptr;
+    QgsMapCanvas *mRefCanvas = nullptr;
+    RsTwinCanvasSyncController *mSyncCtl = nullptr;
+    QgsGeorefToolAddPoint *mAddPointTool = nullptr;
+    QAction *mAddPointAction = nullptr;
+    QAction *mSyncZoomAction = nullptr;
 };

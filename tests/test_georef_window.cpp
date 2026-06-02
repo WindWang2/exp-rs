@@ -1,4 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/reporters/catch_reporter_event_listener.hpp>
+#include <catch2/reporters/catch_reporter_registrars.hpp>
 
 #include <QApplication>
 #include <QAction>
@@ -6,7 +8,30 @@
 #include <QSignalSpy>
 
 #include "qgsgeoreferencermainwindow.h"
+#include "qgsmapcanvas.h"
 #include "rs_georef_mode_toggle.h"
+#include "rs_twincanvas_sync_controller.h"
+
+#include <cstdlib>
+
+// QGIS thread-local QgsProjContext crashes during glibc atexit cleanup when
+// the test process exercised qgis_core/qgis_gui — observed both pre- and
+// post-Task 11.4.5. Bypass the C++ destructor sequence with std::_Exit
+// once Catch has reported the final result; all assertions are recorded
+// before this point.
+namespace
+{
+  class FastExitListener : public Catch::EventListenerBase
+  {
+    public:
+      using Catch::EventListenerBase::EventListenerBase;
+      void testRunEnded( const Catch::TestRunStats &stats ) override
+      {
+        std::_Exit( stats.aborting || stats.totals.testCases.failed > 0 ? 1 : 0 );
+      }
+  };
+}
+CATCH_REGISTER_LISTENER( FastExitListener )
 
 namespace
 {
@@ -34,6 +59,15 @@ TEST_CASE( "GeorefMainWindow: constructs with mode toggle and Apply action", "[g
   REQUIRE( w.findChild<QAction *>( "rsGeorefApplyAction" ) != nullptr );
   REQUIRE( w.findChild<QAction *>( "rsGeorefSiftAction" ) != nullptr );
   REQUIRE( w.findChild<QLabel *>( "rsGeorefRmsLabel" ) != nullptr );
+}
+
+TEST_CASE( "GeorefMainWindow: has two QgsMapCanvas children with sync controller", "[georef][window]" )
+{
+  ensureApp();
+  QgsGeoreferencerMainWindow w( nullptr );
+  REQUIRE( w.findChild<QgsMapCanvas *>( "rsSrcCanvas" ) != nullptr );
+  REQUIRE( w.findChild<QgsMapCanvas *>( "rsRefCanvas" ) != nullptr );
+  REQUIRE( w.findChild<RsTwinCanvasSyncController *>() != nullptr );
 }
 
 TEST_CASE( "ModeToggle: switching emits modeChanged", "[georef][window][mode]" )
