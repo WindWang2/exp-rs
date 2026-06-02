@@ -93,6 +93,47 @@ inline QString makeSynthetic64RasterWithCrs( const QString &dir, const QString &
   return path;
 }
 
+/**
+ * Create a 64x64 raster with a synthetic RPC metadata domain.  The polynomial
+ * coefficients are an identity-ish RFM so that the center pixel (32, 32) maps
+ * to (LONG_OFF, LAT_OFF) = (116.0, 39.0).  Used by the RPC transformer tests.
+ */
+inline QString makeSyntheticRpcRaster( const QString &dir )
+{
+  GDALAllRegister();
+  const QString path = dir + QStringLiteral( "/synthetic_rpc.tif" );
+  GDALDriver *drv = GetGDALDriverManager()->GetDriverByName( "GTiff" );
+  if ( !drv )
+    return QString();
+  GDALDataset *ds = drv->Create( path.toUtf8().constData(), 64, 64, 1, GDT_Byte, nullptr );
+  if ( !ds )
+    return QString();
+
+  char **md = nullptr;
+  md = CSLSetNameValue( md, "LINE_OFF", "32" );
+  md = CSLSetNameValue( md, "SAMP_OFF", "32" );
+  md = CSLSetNameValue( md, "LAT_OFF", "39.0" );
+  md = CSLSetNameValue( md, "LONG_OFF", "116.0" );
+  md = CSLSetNameValue( md, "HEIGHT_OFF", "0" );
+  md = CSLSetNameValue( md, "LINE_SCALE", "32" );
+  md = CSLSetNameValue( md, "SAMP_SCALE", "32" );
+  md = CSLSetNameValue( md, "LAT_SCALE", "0.001" );
+  md = CSLSetNameValue( md, "LONG_SCALE", "0.001" );
+  md = CSLSetNameValue( md, "HEIGHT_SCALE", "1000" );
+  md = CSLSetNameValue( md, "LINE_NUM_COEFF",
+                        "0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0" );
+  md = CSLSetNameValue( md, "LINE_DEN_COEFF",
+                        "1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0" );
+  md = CSLSetNameValue( md, "SAMP_NUM_COEFF",
+                        "0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0" );
+  md = CSLSetNameValue( md, "SAMP_DEN_COEFF",
+                        "1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0" );
+  ds->SetMetadata( md, "RPC" );
+  CSLDestroy( md );
+  GDALClose( ds );
+  return path;
+}
+
 } // namespace warper_test
 
 // Convenience inline non-namespaced aliases so test files don't need an
@@ -108,4 +149,8 @@ inline QString makeSynthetic64Raster( const QString &dir )
 inline QString makeSynthetic64RasterWithCrs( const QString &dir, const QString &epsg = QStringLiteral( "EPSG:32650" ) )
 {
   return warper_test::makeSynthetic64RasterWithCrs( dir, epsg );
+}
+inline QString makeSyntheticRpcRaster( const QString &dir )
+{
+  return warper_test::makeSyntheticRpcRaster( dir );
 }

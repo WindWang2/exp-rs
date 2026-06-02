@@ -84,6 +84,16 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   connect( mParamsPanel, &RsGeorefParamsPanel::outputPathChanged, this,
            [this]( const QString & ) { recomputeFit(); } );
 
+  // Task 11.4.8 — mode toggle drives RPC visibility on the params panel.
+  if ( mModeToggle )
+  {
+    connect( mModeToggle, &RsGeorefModeToggle::modeChanged, this,
+             [this]( RsGeorefModeToggle::Mode m ) {
+               if ( mParamsPanel )
+                 mParamsPanel->setRpcMode( m == RsGeorefModeToggle::RpcPhysical );
+             } );
+  }
+
   mParamsPanel->setActualGcpCount( 0 );
 
   recomputeFit();

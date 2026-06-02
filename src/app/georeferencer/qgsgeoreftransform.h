@@ -119,6 +119,13 @@ class  QgsGeorefTransform : public QgsGcpTransformerInterface
     //! \brief Returns origin, scale and rotation for linear and helmert transform, fails otherwise.
     bool getOriginScaleRotation( QgsPointXY &origin, double &scaleX, double &scaleY, double &rotation ) const;
 
+    /**
+     * \brief Returns a pointer to the underlying QgsGcpTransformerInterface implementation
+     * (non-owning). Returns nullptr until \ref setMethod has been called.  Used by
+     * QgsImageWarper to detect RPC mode and inspect DEM/source-raster paths.
+     */
+    QgsGcpTransformerInterface *gcpTransformer() const { return mGeorefTransformImplementation.get(); }
+
   private:
     QgsGeorefTransform &operator=( const QgsGeorefTransform & ) = delete;
 

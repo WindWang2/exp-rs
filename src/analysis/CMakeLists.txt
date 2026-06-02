@@ -9,6 +9,7 @@ add_library(qgis_analysis STATIC
     georeferencing/qgsleastsquares.cpp
     georeferencing/qgsgcpgeometrytransformer.cpp
     georeferencing/qgsvectorwarper.cpp
+    georeferencing/qgsrpcgcptransformer.cpp
 )
 
 target_include_directories(qgis_analysis PUBLIC

@@ -50,6 +50,7 @@ class QGIS_ANALYSIS_EXPORT QgsGcpTransformerInterface
       PolynomialOrder3,        //!< Polynomial order
       ThinPlateSpline,         //!< Thin plate splines
       Projective,              //!< Projective
+      RpcPhysical = 7,         //!< RPC physical sensor model (RFM); coefficients from raster RPC metadata, GCPs refine
       InvalidTransform = 65535 //!< Invalid transform
     };
     Q_ENUM( TransformMethod )

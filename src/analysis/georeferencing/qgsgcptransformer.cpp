@@ -22,6 +22,7 @@
 #include <limits>
 
 #include "qgsleastsquares.h"
+#include "qgsrpcgcptransformer.h"
 
 #include "moc_qgsgcptransformer.cpp"
 
@@ -61,6 +62,8 @@ QString QgsGcpTransformerInterface::methodToString( QgsGcpTransformerInterface::
       return QObject::tr( "Thin Plate Spline (TPS)" );
     case QgsGcpTransformerInterface::TransformMethod::Projective:
       return QObject::tr( "Projective" );
+    case QgsGcpTransformerInterface::TransformMethod::RpcPhysical:
+      return QObject::tr( "RPC Physical (RFM)" );
     default:
       return QObject::tr( "Not set" );
   }
@@ -84,6 +87,8 @@ QgsGcpTransformerInterface *QgsGcpTransformerInterface::create( QgsGcpTransforme
       return new QgsGDALGeorefTransform( true, 0 );
     case TransformMethod::Projective:
       return new QgsProjectiveGeorefTransform;
+    case TransformMethod::RpcPhysical:
+      return new QgsRpcGcpTransformer();
     default:
       return nullptr;
   }

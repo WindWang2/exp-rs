@@ -813,6 +813,46 @@ target_include_directories(test_georef_window_warp_lock PRIVATE
 set_target_properties(test_georef_window_warp_lock PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_georef_window_warp_lock)
 
+# Task 11.4.8 — RPC physical model transformer tests
+add_executable(test_rpc_transformer test_rpc_transformer.cpp)
+target_link_libraries(test_rpc_transformer PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+)
+target_include_directories(test_rpc_transformer PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_rpc_transformer)
+
+# Task 11.4.8 — RPC mode UI test (DEM section visibility on toggle)
+add_executable(test_georef_window_rpc_mode test_georef_window_rpc_mode.cpp)
+target_link_libraries(test_georef_window_rpc_mode PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+)
+target_include_directories(test_georef_window_rpc_mode PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_georef_window_rpc_mode PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_georef_window_rpc_mode)
+
 # Band ratio and IHS transform tests
 add_executable(test_band_ratio test_band_ratio.cpp)
 target_link_libraries(test_band_ratio PRIVATE

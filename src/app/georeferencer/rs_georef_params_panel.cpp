@@ -1,5 +1,6 @@
 #include "rs_georef_params_panel.h"
 
+#include <QAbstractItemView>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
@@ -9,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListView>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QVBoxLayout>
@@ -62,9 +64,14 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
       { TM::PolynomialOrder3, tr( "Polynomial Order 3 (三次多项式)" ) },
       { TM::ThinPlateSpline, tr( "Thin Plate Spline (薄板样条)" ) },
       { TM::Projective, tr( "Projective (透视)" ) },
+      { TM::RpcPhysical, tr( "RPC Physical (RFM 物理模型)" ) },
     };
     for ( const auto &m : methods )
       mTransformCombo->addItem( m.second, QVariant::fromValue( static_cast<int>( m.first ) ) );
+
+    // Ensure the combo view is a QListView so we can hide individual rows
+    // when toggling RPC mode (see setRpcMode()).
+    mTransformCombo->setView( new QListView( mTransformCombo ) );
 
     connect( mTransformCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
              this, [this]( int ) { emit transformMethodChanged(); } );
@@ -200,6 +207,57 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     root->addWidget( sec );
   }
 
+  // ---- Section 6: DEM (RPC mode only) ----
+  {
+    mDemSection = makeSectionFrame( tr( "DEM (RPC 模式)" ), this );
+    mDemSection->setObjectName( QStringLiteral( "rsDemSection" ) );
+
+    auto *form = new QFormLayout();
+    form->setContentsMargins( 0, 0, 0, 0 );
+
+    auto *demRow = new QHBoxLayout();
+    demRow->setContentsMargins( 0, 0, 0, 0 );
+    mDemPath = new QLineEdit( mDemSection );
+    mDemPath->setObjectName( QStringLiteral( "rsDemPath" ) );
+    mDemPath->setPlaceholderText( tr( "/path/to/dem.tif (可选)" ) );
+    mDemBrowseBtn = new QPushButton( tr( "Browse…" ), mDemSection );
+    mDemBrowseBtn->setObjectName( QStringLiteral( "rsDemBrowseBtn" ) );
+    connect( mDemBrowseBtn, &QPushButton::clicked, this, [this]() {
+      const QString path = QFileDialog::getOpenFileName(
+        this,
+        tr( "选择 DEM 文件" ),
+        mDemPath->text(),
+        tr( "GeoTIFF (*.tif *.tiff);;All files (*)" ) );
+      if ( !path.isEmpty() )
+        mDemPath->setText( path );
+    } );
+    demRow->addWidget( mDemPath, 1 );
+    demRow->addWidget( mDemBrowseBtn );
+    form->addRow( tr( "DEM 路径" ), demRow );
+
+    mDemZOffset = new QDoubleSpinBox( mDemSection );
+    mDemZOffset->setObjectName( QStringLiteral( "rsDemZOffset" ) );
+    mDemZOffset->setRange( -10000.0, 10000.0 );
+    mDemZOffset->setDecimals( 2 );
+    mDemZOffset->setValue( 0.0 );
+    mDemZOffset->setSuffix( tr( " m" ) );
+    form->addRow( tr( "高程偏移" ), mDemZOffset );
+
+    mDemSection->layout()->addItem( form );
+    mDemSection->setVisible( false );
+    root->addWidget( mDemSection );
+  }
+
+  // Hide the RPC entry from the combo until the user enters RPC mode.
+  if ( auto *view = qobject_cast<QListView *>( mTransformCombo->view() ) )
+  {
+    const int rpcIdx = mTransformCombo->findData(
+      QVariant::fromValue(
+        static_cast<int>( QgsGcpTransformerInterface::TransformMethod::RpcPhysical ) ) );
+    if ( rpcIdx >= 0 )
+      view->setRowHidden( rpcIdx, true );
+  }
+
   root->addStretch( 1 );
 }
 
@@ -233,19 +291,60 @@ double RsGeorefParamsPanel::outputPixelSize() const
 
 bool RsGeorefParamsPanel::isDemSectionVisible() const
 {
-  // Task 7 stub: DEM section is added in Task 8.
-  return false;
+  // Use !isHidden() rather than isVisible(): the latter is false when the
+  // window has not yet been shown, but the DEM-section's own visibility
+  // intent is independently observable.  Tests construct the window without
+  // showing it, so we report the local (unrealized) visibility state.
+  return mDemSection && !mDemSection->isHidden();
 }
 
 QString RsGeorefParamsPanel::demPath() const
 {
-  return QString();
+  return mDemPath ? mDemPath->text().trimmed() : QString();
 }
 
-void RsGeorefParamsPanel::setRpcMode( bool /*on*/ )
+void RsGeorefParamsPanel::setRpcMode( bool on )
 {
-  // Task 7 stub. Task 8 adds the RPC transform method to the combo and the
-  // DEM section; here we only need to accept the call without effect.
+  if ( mDemSection )
+    mDemSection->setVisible( on );
+
+  if ( !mTransformCombo )
+    return;
+
+  // Hide all non-RPC rows when on; hide the RPC row when off.
+  auto *view = qobject_cast<QListView *>( mTransformCombo->view() );
+  for ( int i = 0; i < mTransformCombo->count(); ++i )
+  {
+    const auto m = static_cast<QgsGcpTransformerInterface::TransformMethod>(
+      mTransformCombo->itemData( i ).toInt() );
+    const bool isRpc = ( m == QgsGcpTransformerInterface::TransformMethod::RpcPhysical );
+    const bool shouldHide = ( on != isRpc );
+    if ( view )
+      view->setRowHidden( i, shouldHide );
+  }
+
+  if ( on )
+  {
+    const int rpcIdx = mTransformCombo->findData(
+      QVariant::fromValue(
+        static_cast<int>( QgsGcpTransformerInterface::TransformMethod::RpcPhysical ) ) );
+    if ( rpcIdx >= 0 )
+      mTransformCombo->setCurrentIndex( rpcIdx );
+  }
+  else
+  {
+    // Switch back to the first non-RPC item (Linear) when leaving RPC mode.
+    const auto current = static_cast<QgsGcpTransformerInterface::TransformMethod>(
+      mTransformCombo->currentData().toInt() );
+    if ( current == QgsGcpTransformerInterface::TransformMethod::RpcPhysical )
+    {
+      const int linIdx = mTransformCombo->findData(
+        QVariant::fromValue(
+          static_cast<int>( QgsGcpTransformerInterface::TransformMethod::Linear ) ) );
+      if ( linIdx >= 0 )
+        mTransformCombo->setCurrentIndex( linIdx );
+    }
+  }
 }
 
 void RsGeorefParamsPanel::setRmsValues( int /*total*/, int /*enabled*/,

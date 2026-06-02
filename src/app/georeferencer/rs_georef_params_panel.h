@@ -12,6 +12,7 @@
 
 class QComboBox;
 class QDoubleSpinBox;
+class QFrame;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -90,6 +91,12 @@ class RsGeorefParamsPanel : public QWidget
 
     QLineEdit *mOutputPath = nullptr;
     QPushButton *mBrowseBtn = nullptr;
+
+    // Task 11.4.8 — RPC mode DEM section
+    QFrame *mDemSection = nullptr;
+    QLineEdit *mDemPath = nullptr;
+    QPushButton *mDemBrowseBtn = nullptr;
+    QDoubleSpinBox *mDemZOffset = nullptr;
 };
 
 #endif // RS_GEOREF_PARAMS_PANEL_H
