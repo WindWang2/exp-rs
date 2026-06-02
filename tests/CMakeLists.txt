@@ -505,3 +505,20 @@ target_include_directories(test_log_panel PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_log_panel)
+
+# Image enhancement tests
+add_executable(test_image_enhancement test_image_enhancement.cpp)
+target_link_libraries(test_image_enhancement PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_image_enhancement PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_image_enhancement)

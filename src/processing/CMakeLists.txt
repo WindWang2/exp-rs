@@ -7,6 +7,13 @@ add_library(sicnu_processing SHARED
     algorithms/spectral_indices.cpp
     algorithms/band_math.cpp
     algorithms/atmospheric_correction.cpp
+    algorithms/change_detection.cpp
+    algorithms/mosaic.cpp
+    algorithms/image_enhancement.cpp
+
+    framework/processing_cache.cpp
+    framework/progress_callback.cpp
+    framework/error_reporter.cpp
 
     providers/gdal_tools/provider.cpp
     providers/gdal_tools/gdal_tool_wrapper.cpp
