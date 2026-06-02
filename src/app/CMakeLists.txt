@@ -52,3 +52,30 @@ install(TARGETS sicnu_geo_rs
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
 )
+
+# Install resources
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources/fonts
+        DESTINATION share/sicnu_geo_rs/resources)
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources/icons
+        DESTINATION share/sicnu_geo_rs/resources)
+install(FILES ${CMAKE_SOURCE_DIR}/resources/styles.qss
+        DESTINATION share/sicnu_geo_rs/resources)
+install(FILES ${CMAKE_SOURCE_DIR}/resources/icons.qrc
+        DESTINATION share/sicnu_geo_rs/resources)
+
+# Install QGIS reference data (symbology, projections)
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/qgis_ref/resources
+        DESTINATION share/sicnu_geo_rs/qgis_ref
+        PATTERN "*.db" EXCLUDE)
+
+# Install desktop file (only if packaging files exist)
+if(EXISTS ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.desktop)
+    install(FILES ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.desktop
+            DESTINATION share/applications)
+endif()
+
+# Install app icon
+if(EXISTS ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.svg)
+    install(FILES ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.svg
+            DESTINATION share/icons/hicolor/scalable/apps)
+endif()
