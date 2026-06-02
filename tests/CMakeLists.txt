@@ -667,6 +667,43 @@ target_include_directories(test_warp_crs_passthrough PRIVATE
 )
 sicnu_discover_tests(test_warp_crs_passthrough)
 
+# Georeferencer GCP list tests (Task 11.4.3) — signal emission, residual skip-disabled
+add_executable(test_gcp_list test_gcp_list.cpp)
+target_link_libraries(test_gcp_list PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+)
+target_include_directories(test_gcp_list PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_gcp_list)
+
+# Georeferencer .points v2 file tests (Task 11.4.3)
+add_executable(test_gcp_points_file test_gcp_points_file.cpp)
+target_link_libraries(test_gcp_points_file PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+)
+target_include_directories(test_gcp_points_file PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_gcp_points_file)
+
 # Band ratio and IHS transform tests
 add_executable(test_band_ratio test_band_ratio.cpp)
 target_link_libraries(test_band_ratio PRIVATE

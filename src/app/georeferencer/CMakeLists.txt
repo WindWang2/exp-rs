@@ -7,6 +7,8 @@ add_library(qgis_app_georef STATIC
     qgsimagewarper.cpp
     qgsgeoreftransform.cpp
     qgsrasterchangecoords.cpp
+    qgsgcplist.cpp
+    qgsgcplistmodel.cpp
 )
 
 target_include_directories(qgis_app_georef PUBLIC

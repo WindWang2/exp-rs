@@ -19,6 +19,9 @@
 #include "qgis_analysis_export.h"
 #include "qgscoordinatereferencesystem.h"
 
+#include <QPointF>
+#include <QString>
+
 class QgsCoordinateTransformContext;
 
 /**
@@ -112,10 +115,35 @@ class QGIS_ANALYSIS_EXPORT QgsGcpPoint
      */
     void setEnabled( bool enabled ) { mEnabled = enabled; }
 
+    /**
+     * Returns the user-defined point type label (e.g. "road", "bridge").
+     * Empty by default. Used by the SICNU `.points` v2 format and the
+     * georeferencer table view for visual grouping.
+     */
+    QString pointType() const { return mPointType; }
+
+    /**
+     * Sets the user-defined point type label.
+     * \see pointType()
+     */
+    void setPointType( const QString &type ) { mPointType = type; }
+
+    /**
+     * Returns the cached residual (dx, dy) computed against a transform.
+     * Default is (0, 0). Updated by QgsGCPList::updateResiduals().
+     */
+    QPointF residual() const { return mResidual; }
+
+    /**
+     * Sets the cached residual (dx, dy).
+     * \see residual()
+     */
+    void setResidual( QPointF r ) { mResidual = r; }
+
     // TODO c++20 - replace with = default
     bool operator==( const QgsGcpPoint &other ) const
     {
-      return mEnabled == other.mEnabled && mSourcePoint == other.mSourcePoint && mDestinationPoint == other.mDestinationPoint && mDestinationCrs == other.mDestinationCrs;
+      return mEnabled == other.mEnabled && mSourcePoint == other.mSourcePoint && mDestinationPoint == other.mDestinationPoint && mDestinationCrs == other.mDestinationCrs && mPointType == other.mPointType;
     }
 
     bool operator!=( const QgsGcpPoint &other ) const { return !( *this == other ); }
@@ -125,6 +153,8 @@ class QGIS_ANALYSIS_EXPORT QgsGcpPoint
     QgsPointXY mDestinationPoint;
     QgsCoordinateReferenceSystem mDestinationCrs;
     bool mEnabled = true;
+    QString mPointType;
+    QPointF mResidual;
 };
 
 #endif //QGSGCPPOINT_H

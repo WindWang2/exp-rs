@@ -17,7 +17,7 @@ CREATE_QGSVERSION()
 set(QT_VERSION_BASE "Qt6")
 set(QT_VERSION_BASE_LOWER "qt6")
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia Core5Compat)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia Core5Compat Test)
 find_package(GDAL REQUIRED)
 find_package(PROJ REQUIRED)
 find_package(BISON REQUIRED)
