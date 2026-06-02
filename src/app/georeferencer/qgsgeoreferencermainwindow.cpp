@@ -4,24 +4,39 @@
 #include <QCloseEvent>
 #include <QDockWidget>
 #include <QIcon>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
+#include <QMetaEnum>
 #include <QMenu>
 #include <QMenuBar>
+#include <QPointF>
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QToolBar>
+#include <QVector>
 #include <QWidget>
 
+#include <cmath>
+
+#include "qgis.h"
+#include "qgsapplication.h"
 #include "qgscoordinatereferencesystem.h"
+#include "qgscoordinatetransformcontext.h"
 #include "qgsgcplist.h"
 #include "qgsgcplistwidget.h"
 #include "qgsgcppoint.h"
 #include "qgsgeorefdatapoint.h"
 #include "qgsgeoreftooladdpoint.h"
+#include "qgsgeoreftransform.h"
 #include "qgsmapcanvas.h"
 #include "qgsmapcoordsdialog.h"
+#include "qgsmessagelog.h"
+#include "qgstaskmanager.h"
+#include "rs_georef_params_panel.h"
 #include "rs_twincanvas_sync_controller.h"
+#include "rs_warp_task.h"
 
 QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QWidget *parent )
   : QMainWindow( parent )
@@ -52,6 +67,299 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
 
   addDockWidget( Qt::BottomDockWidgetArea, mGcpDock );
   resizeDocks( { mGcpDock }, { 280 }, Qt::Vertical );
+
+  // Task 11.4.7 — right param dock
+  mParamDock = new QDockWidget( tr( "校正参数" ), this );
+  mParamDock->setObjectName( QStringLiteral( "rsParamDock" ) );
+  mParamDock->setAllowedAreas( Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea );
+  mParamsPanel = new RsGeorefParamsPanel( mParamDock );
+  mParamDock->setWidget( mParamsPanel );
+  addDockWidget( Qt::RightDockWidgetArea, mParamDock );
+  resizeDocks( { mParamDock }, { 340 }, Qt::Horizontal );
+
+  // Wire the params panel to the recompute pipeline.
+  connect( mGcps, &QgsGCPList::changed, this, &QgsGeoreferencerMainWindow::recomputeFit );
+  connect( mParamsPanel, &RsGeorefParamsPanel::transformMethodChanged,
+           this, &QgsGeoreferencerMainWindow::recomputeFit );
+  connect( mParamsPanel, &RsGeorefParamsPanel::outputPathChanged, this,
+           [this]( const QString & ) { recomputeFit(); } );
+
+  mParamsPanel->setActualGcpCount( 0 );
+
+  recomputeFit();
+}
+
+QgsGeoreferencerMainWindow::~QgsGeoreferencerMainWindow() = default;
+
+namespace
+{
+  // Lookup of the per-method minimumGcpCount without needing a fitted transformer.
+  // The instance method exists on the concrete subclasses; we construct a bare
+  // transformer just to call it.
+  int minimumGcpCountFor( QgsGcpTransformerInterface::TransformMethod m )
+  {
+    std::unique_ptr<QgsGcpTransformerInterface> t(
+      QgsGcpTransformerInterface::create( m ) );
+    return t ? t->minimumGcpCount() : 0;
+  }
+}
+
+void QgsGeoreferencerMainWindow::recomputeFit()
+{
+  if ( !mParamsPanel || !mGcps )
+    return;
+
+  const QgsGcpTransformerInterface::TransformMethod method = mParamsPanel->transformMethod();
+  const int minN = minimumGcpCountFor( method );
+  mParamsPanel->setMinimumGcpCount( minN );
+
+  // Build a fresh transform of the chosen method.
+  mTransform.reset( new QgsGeorefTransform( method ) );
+
+  // Collect enabled GCPs (source + destination) in parallel vectors.
+  QVector<QgsPointXY> src;
+  QVector<QgsPointXY> dst;
+  src.reserve( mGcps->size() );
+  dst.reserve( mGcps->size() );
+  for ( const QgsGcpPoint *p : std::as_const( *mGcps ) )
+  {
+    if ( !p || !p->isEnabled() )
+      continue;
+    src.push_back( p->sourcePoint() );
+    dst.push_back( p->destinationPoint() );
+  }
+  const int enabledCount = src.size();
+  mParamsPanel->setActualGcpCount( enabledCount );
+
+  bool fitOk = false;
+  if ( enabledCount >= minN && minN > 0 )
+  {
+    try
+    {
+      fitOk = mTransform->updateParametersFromGcps( src, dst, false );
+    }
+    catch ( ... )
+    {
+      fitOk = false;
+    }
+  }
+
+  // Residuals + scatter
+  double totalSq = 0.0, xSq = 0.0, ySq = 0.0;
+  double maxMag = 0.0;
+  int maxRow = -1;
+  QVector<QPointF> scatter;
+  scatter.reserve( enabledCount );
+
+  if ( fitOk )
+  {
+    const QgsCoordinateReferenceSystem dstCrs = mParamsPanel->destCrs();
+    mGcps->updateResiduals( mTransform.get(), dstCrs, dstCrs );
+
+    int rowId = 0;
+    int included = 0;
+    for ( const QgsGcpPoint *p : std::as_const( *mGcps ) )
+    {
+      if ( !p )
+      {
+        ++rowId;
+        continue;
+      }
+      if ( !p->isEnabled() )
+      {
+        ++rowId;
+        continue;
+      }
+      const QPointF r = p->residual();
+      scatter.push_back( r );
+      const double mag = std::hypot( r.x(), r.y() );
+      totalSq += mag * mag;
+      xSq += r.x() * r.x();
+      ySq += r.y() * r.y();
+      if ( mag > maxMag )
+      {
+        maxMag = mag;
+        maxRow = rowId;
+      }
+      ++included;
+      ++rowId;
+    }
+
+    if ( included > 0 )
+    {
+      mLastRms = std::sqrt( totalSq / included );
+      const double xRms = std::sqrt( xSq / included );
+      const double yRms = std::sqrt( ySq / included );
+      mParamsPanel->setRmsValues( mGcps->size(), enabledCount,
+                                  mLastRms, xRms, yRms, maxMag, maxRow );
+    }
+    else
+    {
+      mLastRms = 0.0;
+      mParamsPanel->setRmsValues( mGcps->size(), enabledCount, 0, 0, 0, 0, -1 );
+    }
+  }
+  else
+  {
+    mLastRms = 0.0;
+    mParamsPanel->setRmsValues( mGcps->size(), enabledCount, 0, 0, 0, 0, -1 );
+  }
+
+  mParamsPanel->setResidualScatter( scatter );
+
+  // Update status-bar RMS label.
+  if ( mRmsLabel )
+  {
+    if ( fitOk && mLastRms > 0.0 )
+      mRmsLabel->setText( tr( "RMS: %1 px" ).arg( QString::number( mLastRms, 'f', 3 ) ) );
+    else
+      mRmsLabel->setText( tr( "RMS: —" ) );
+  }
+
+  // Apply enables only when fit is valid AND output path is non-empty.
+  if ( mApplyAction )
+  {
+    const bool canApply = fitOk
+                          && enabledCount >= minN
+                          && !mParamsPanel->outputPath().isEmpty();
+    mApplyAction->setEnabled( canApply );
+  }
+}
+
+void QgsGeoreferencerMainWindow::applyTransform()
+{
+  if ( !mParamsPanel || !mGcps )
+    return;
+
+  const QgsGcpTransformerInterface::TransformMethod method = mParamsPanel->transformMethod();
+  const int minN = minimumGcpCountFor( method );
+
+  int enabled = 0;
+  for ( const QgsGcpPoint *p : std::as_const( *mGcps ) )
+    if ( p && p->isEnabled() )
+      ++enabled;
+
+  if ( enabled < minN )
+  {
+    statusBar()->showMessage( tr( "GCP 数量不足（需要 %1，实际 %2）" ).arg( minN ).arg( enabled ), 3000 );
+    return;
+  }
+  if ( mParamsPanel->outputPath().isEmpty() )
+  {
+    statusBar()->showMessage( tr( "请填写输出路径" ), 3000 );
+    return;
+  }
+  if ( mSourceRasterPath.isEmpty() )
+  {
+    statusBar()->showMessage( tr( "未指定源栅格路径" ), 3000 );
+    return;
+  }
+  if ( !mTransform )
+  {
+    statusBar()->showMessage( tr( "变换尚未完成拟合" ), 3000 );
+    return;
+  }
+
+  // Lock UI for the duration of the warp.
+  setWarpInProgressForTest( true );
+
+  auto *task = new RsWarpTask( mSourceRasterPath, mParamsPanel->outputPath(),
+                               mTransform.get(),
+                               mParamsPanel->resamplingMethod(),
+                               mParamsPanel->destCrs(),
+                               mParamsPanel->outputPixelSize() );
+
+  auto finalize = [this, task]() {
+    emitStructuredLog( task->result() );
+    setWarpInProgressForTest( false );
+    if ( task->result().status == QgsImageWarper::WarpStatus::Ok )
+    {
+      statusBar()->showMessage(
+        tr( "已输出: %1 (%2 字节, %3 ms)" )
+          .arg( mParamsPanel->outputPath() )
+          .arg( task->result().outputBytes )
+          .arg( task->result().durationMs ),
+        6000 );
+    }
+    else
+    {
+      statusBar()->showMessage(
+        tr( "校正失败: %1" ).arg( task->result().errorMessage ),
+        6000 );
+    }
+  };
+
+  connect( task, &QgsTask::taskCompleted, this, finalize );
+  connect( task, &QgsTask::taskTerminated, this, finalize );
+
+  QgsApplication::taskManager()->addTask( task );
+}
+
+void QgsGeoreferencerMainWindow::emitStructuredLog( const QgsImageWarper::WarpResult &r )
+{
+  QJsonObject o;
+  o.insert( QStringLiteral( "event" ), QStringLiteral( "warp_finished" ) );
+
+  // Stringify the enums via Q_ENUM metatype for stable log keys.
+  {
+    const QMetaEnum me = QMetaEnum::fromType<QgsGcpTransformerInterface::TransformMethod>();
+    const char *key = me.valueToKey( static_cast<int>( mParamsPanel->transformMethod() ) );
+    o.insert( QStringLiteral( "method" ), QString::fromUtf8( key ? key : "" ) );
+  }
+  {
+    const QMetaEnum me = QMetaEnum::fromType<QgsImageWarper::ResamplingMethod>();
+    const char *key = me.valueToKey( static_cast<int>( mParamsPanel->resamplingMethod() ) );
+    o.insert( QStringLiteral( "resampling" ), QString::fromUtf8( key ? key : "" ) );
+  }
+
+  o.insert( QStringLiteral( "gcp_total" ), static_cast<int>( mGcps ? mGcps->size() : 0 ) );
+
+  int enabled = 0;
+  if ( mGcps )
+  {
+    for ( const QgsGcpPoint *p : std::as_const( *mGcps ) )
+      if ( p && p->isEnabled() )
+        ++enabled;
+  }
+  o.insert( QStringLiteral( "gcp_enabled" ), enabled );
+  o.insert( QStringLiteral( "rms_px" ), mLastRms );
+  o.insert( QStringLiteral( "output" ), mParamsPanel ? mParamsPanel->outputPath() : QString() );
+  o.insert( QStringLiteral( "output_bytes" ), static_cast<double>( r.outputBytes ) );
+  o.insert( QStringLiteral( "duration_ms" ), r.durationMs );
+
+  QString status;
+  switch ( r.status )
+  {
+    case QgsImageWarper::WarpStatus::Ok:
+      status = QStringLiteral( "ok" );
+      break;
+    case QgsImageWarper::WarpStatus::Cancelled:
+      status = QStringLiteral( "cancelled" );
+      break;
+    default:
+      status = QStringLiteral( "failed" );
+      break;
+  }
+  o.insert( QStringLiteral( "status" ), status );
+
+  if ( r.status != QgsImageWarper::WarpStatus::Ok )
+  {
+    o.insert( QStringLiteral( "error_code" ), static_cast<int>( r.status ) );
+    o.insert( QStringLiteral( "error_msg" ), r.errorMessage );
+  }
+
+  QgsMessageLog::logMessage(
+    QString::fromUtf8( QJsonDocument( o ).toJson( QJsonDocument::Compact ) ),
+    QStringLiteral( "Georeferencer" ),
+    Qgis::Info );
+}
+
+void QgsGeoreferencerMainWindow::setWarpInProgressForTest( bool on )
+{
+  if ( mGcpTable )
+    mGcpTable->setEnabled( !on );
+  if ( mApplyAction )
+    mApplyAction->setEnabled( !on );
 }
 
 void QgsGeoreferencerMainWindow::setupCentralWidget()
@@ -159,12 +467,13 @@ void QgsGeoreferencerMainWindow::setupToolbars()
 
   mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Preview" ), this, []() {} );
 
-  auto *apply = mModeBar->addAction(
+  mApplyAction = mModeBar->addAction(
     QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ),
     tr( "Apply" ),
     this,
-    []() {} );
-  apply->setObjectName( QStringLiteral( "rsGeorefApplyAction" ) );
+    &QgsGeoreferencerMainWindow::applyTransform );
+  mApplyAction->setObjectName( QStringLiteral( "rsGeorefApplyAction" ) );
+  mApplyAction->setEnabled( false ); // becomes enabled once a valid fit + output is set
 }
 
 void QgsGeoreferencerMainWindow::setupStatusBar()

@@ -1,8 +1,10 @@
 #pragma once
 
 #include <QMainWindow>
+#include <memory>
 
 #include "qgspointxy.h"
+#include "qgsimagewarper.h"
 #include "rs_georef_mode_toggle.h"
 
 class QToolBar;
@@ -16,6 +18,8 @@ class RsTwinCanvasSyncController;
 class QgsGeorefToolAddPoint;
 class QgsGCPList;
 class QgsGCPListWidget;
+class QgsGeorefTransform;
+class RsGeorefParamsPanel;
 
 /**
  * \brief Georeferencer main window shell.
@@ -33,20 +37,37 @@ class QgsGeoreferencerMainWindow : public QMainWindow
 
   public:
     explicit QgsGeoreferencerMainWindow( QgisInterface *iface, QWidget *parent = nullptr );
+    ~QgsGeoreferencerMainWindow() override;
 
   public slots:
     /// Slot connected to QgsGeorefToolAddPoint::showCoordDialog — pops up
     /// the MapCoords dialog so the user can enter the destination coord.
     void showCoordDialog( const QgsPointXY &sourcePixel );
 
+    /// Test hook (Task 11.4.7) — flips the GCP table + Apply action enabled
+    /// state without launching a real warp.
+    void setWarpInProgressForTest( bool on );
+
+    /// Setter so future File→Open wiring can supply the source raster path.
+    void setSourceRasterPath( const QString &p ) { mSourceRasterPath = p; }
+
   protected:
     void closeEvent( QCloseEvent *e ) override;
+
+  private slots:
+    /// Recompute transform fit + residuals when GCP list changes.
+    void recomputeFit();
+    /// Wired to the Apply toolbar action — runs a RsWarpTask.
+    void applyTransform();
 
   private:
     void setupMenus();
     void setupToolbars();
     void setupStatusBar();
     void setupCentralWidget();
+
+    /// Emit structured JSON to QgsMessageLog tag "Georeferencer".
+    void emitStructuredLog( const QgsImageWarper::WarpResult &r );
 
     QgisInterface *mIface = nullptr;
     RsGeorefModeToggle *mModeToggle = nullptr;
@@ -67,4 +88,12 @@ class QgsGeoreferencerMainWindow : public QMainWindow
     QgsGCPList *mGcps = nullptr;
     QgsGCPListWidget *mGcpTable = nullptr;
     QDockWidget *mGcpDock = nullptr;
+
+    // Task 11.4.7 — right param dock, transform fit cache, source raster
+    RsGeorefParamsPanel *mParamsPanel = nullptr;
+    QDockWidget *mParamDock = nullptr;
+    QAction *mApplyAction = nullptr;
+    std::unique_ptr<QgsGeorefTransform> mTransform;
+    double mLastRms = 0.0;
+    QString mSourceRasterPath;
 };

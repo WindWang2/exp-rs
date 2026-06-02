@@ -20,6 +20,9 @@ add_library(qgis_app_georef STATIC
     qgsgeoreftoolmovepoint.cpp
     qgsmapcoordsdialog.cpp
     qgsgeorefvalidators.cpp
+    rs_rms_scatter_widget.cpp
+    rs_georef_params_panel.cpp
+    rs_warp_task.cpp
 )
 
 target_include_directories(qgis_app_georef PUBLIC

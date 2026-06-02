@@ -770,6 +770,49 @@ target_include_directories(test_twincanvas_sync PRIVATE
 )
 sicnu_discover_tests(test_twincanvas_sync)
 
+# RMS scatter widget tests (Task 11.4.7)
+add_executable(test_rms_scatter test_rms_scatter.cpp)
+target_link_libraries(test_rms_scatter PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+)
+target_include_directories(test_rms_scatter PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_rms_scatter)
+
+# Warp-in-progress UI lock tests (Task 11.4.7)
+add_executable(test_georef_window_warp_lock test_georef_window_warp_lock.cpp)
+target_link_libraries(test_georef_window_warp_lock PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+)
+target_include_directories(test_georef_window_warp_lock PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_georef_window_warp_lock PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_georef_window_warp_lock)
+
 # Band ratio and IHS transform tests
 add_executable(test_band_ratio test_band_ratio.cpp)
 target_link_libraries(test_band_ratio PRIVATE
