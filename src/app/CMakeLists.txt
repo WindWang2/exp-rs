@@ -8,6 +8,10 @@ add_executable(sicnu_geo_rs
     dialogs/atmospheric_dialog.cpp
     dialogs/crs_preset_dialog.cpp
     dialogs/preferences_dialog.cpp
+    dialogs/contrast_stretch_dialog.cpp
+    dialogs/spatial_filter_dialog.cpp
+    dialogs/pca_dialog.cpp
+    dialogs/band_ratio_dialog.cpp
     map_tools/measure_tool.cpp
     widgets/histogram_widget.cpp
     widgets/spectral_profile_widget.cpp

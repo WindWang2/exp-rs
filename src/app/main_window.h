@@ -109,6 +109,12 @@ public slots:
     void openSpectralIndexDialog();
     void openAtmosphericCorrectionDialog();
 
+    // Enhancement dialogs
+    void openContrastStretchDialog();
+    void openSpatialFilterDialog();
+    void openPcaDialog();
+    void openBandRatioDialog();
+
     // CRS preset dialog
     void openCrsPresetDialog();
     void setLayerCrsFromPreset();

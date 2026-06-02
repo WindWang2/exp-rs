@@ -6,6 +6,10 @@
 #include "dialogs/atmospheric_dialog.h"
 #include "dialogs/crs_preset_dialog.h"
 #include "dialogs/preferences_dialog.h"
+#include "dialogs/contrast_stretch_dialog.h"
+#include "dialogs/spatial_filter_dialog.h"
+#include "dialogs/pca_dialog.h"
+#include "dialogs/band_ratio_dialog.h"
 #include "widgets/spectral_profile_widget.h"
 #include "log_panel.h"
 
@@ -283,6 +287,12 @@ void QgisDesktopWindow::setupMenu()
     rasterMenu->addSeparator();
     rasterMenu->addAction(QIcon(":/icons/extr_ct_b_nd"), tr("Extract Band..."), this, [](){});
     rasterMenu->addAction(QIcon(":/icons/b_nd_co_bo"), tr("Band Composite..."), this, [](){});
+    rasterMenu->addSeparator();
+    auto *enhanceMenu = rasterMenu->addMenu(tr("Enhancement"));
+    enhanceMenu->addAction(tr("Contrast Stretch..."), this, &QgisDesktopWindow::openContrastStretchDialog);
+    enhanceMenu->addAction(tr("Spatial Filter..."), this, &QgisDesktopWindow::openSpatialFilterDialog);
+    enhanceMenu->addAction(tr("PCA..."), this, &QgisDesktopWindow::openPcaDialog);
+    enhanceMenu->addAction(tr("Band Ratio / IHS..."), this, &QgisDesktopWindow::openBandRatioDialog);
 
     // Vector Menu
     QMenu *vectorMenu = menuBar()->addMenu(tr("&Vector"));
@@ -1417,6 +1427,86 @@ void QgisDesktopWindow::openAtmosphericCorrectionDialog()
     }
 
     AtmosphericDialog dialog(this);
+    dialog.setRasterLayer(rasterLayer);
+    dialog.exec();
+}
+
+void QgisDesktopWindow::openContrastStretchDialog()
+{
+    QList<QgsMapLayer*> layers = selectedLayers();
+    QgsRasterLayer *rasterLayer = nullptr;
+    for (QgsMapLayer *layer : layers) {
+        if (layer->type() == Qgis::LayerType::Raster) {
+            rasterLayer = qobject_cast<QgsRasterLayer*>(layer);
+            break;
+        }
+    }
+    if (!rasterLayer) {
+        QMessageBox::information(this, tr("Contrast Stretch"),
+                                 tr("Please select a raster layer first."));
+        return;
+    }
+    ContrastStretchDialog dialog(this);
+    dialog.setRasterLayer(rasterLayer);
+    dialog.exec();
+}
+
+void QgisDesktopWindow::openSpatialFilterDialog()
+{
+    QList<QgsMapLayer*> layers = selectedLayers();
+    QgsRasterLayer *rasterLayer = nullptr;
+    for (QgsMapLayer *layer : layers) {
+        if (layer->type() == Qgis::LayerType::Raster) {
+            rasterLayer = qobject_cast<QgsRasterLayer*>(layer);
+            break;
+        }
+    }
+    if (!rasterLayer) {
+        QMessageBox::information(this, tr("Spatial Filter"),
+                                 tr("Please select a raster layer first."));
+        return;
+    }
+    SpatialFilterDialog dialog(this);
+    dialog.setRasterLayer(rasterLayer);
+    dialog.exec();
+}
+
+void QgisDesktopWindow::openPcaDialog()
+{
+    QList<QgsMapLayer*> layers = selectedLayers();
+    QgsRasterLayer *rasterLayer = nullptr;
+    for (QgsMapLayer *layer : layers) {
+        if (layer->type() == Qgis::LayerType::Raster) {
+            rasterLayer = qobject_cast<QgsRasterLayer*>(layer);
+            break;
+        }
+    }
+    if (!rasterLayer) {
+        QMessageBox::information(this, tr("PCA"),
+                                 tr("Please select a raster layer first."));
+        return;
+    }
+    PcaDialog dialog(this);
+    dialog.setRasterLayer(rasterLayer);
+    dialog.exec();
+}
+
+void QgisDesktopWindow::openBandRatioDialog()
+{
+    QList<QgsMapLayer*> layers = selectedLayers();
+    QgsRasterLayer *rasterLayer = nullptr;
+    for (QgsMapLayer *layer : layers) {
+        if (layer->type() == Qgis::LayerType::Raster) {
+            rasterLayer = qobject_cast<QgsRasterLayer*>(layer);
+            break;
+        }
+    }
+    if (!rasterLayer) {
+        QMessageBox::information(this, tr("Band Ratio / IHS"),
+                                 tr("Please select a raster layer first."));
+        return;
+    }
+    BandRatioDialog dialog(this);
     dialog.setRasterLayer(rasterLayer);
     dialog.exec();
 }
