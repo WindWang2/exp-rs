@@ -163,6 +163,7 @@ include_directories(${CMAKE_BINARY_DIR})
 
 add_subdirectory(src/core)
 add_subdirectory(src/analysis)
+add_subdirectory(src/app/georeferencer)
 # SICNU_GEO_RS: P3 GUI options — disable optional deps not installed on this system
 option(WITH_QWTPOLAR      "" OFF)
 option(WITH_QSCINTILLA    "" OFF)

@@ -589,6 +589,84 @@ target_include_directories(test_gcp_transformer PRIVATE
 )
 sicnu_discover_tests(test_gcp_transformer)
 
+# Georeferencer image warper tests (Task 11.4.2)
+add_executable(test_image_warper test_image_warper.cpp)
+target_link_libraries(test_image_warper PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+  GDAL::GDAL
+)
+target_include_directories(test_image_warper PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_image_warper)
+
+add_executable(test_image_warper_cancel test_image_warper_cancel.cpp)
+target_link_libraries(test_image_warper_cancel PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Concurrent
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+  GDAL::GDAL
+)
+target_include_directories(test_image_warper_cancel PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_image_warper_cancel)
+
+add_executable(test_image_warper_errors test_image_warper_errors.cpp)
+target_link_libraries(test_image_warper_errors PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+  GDAL::GDAL
+)
+target_include_directories(test_image_warper_errors PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_image_warper_errors)
+
+add_executable(test_warp_crs_passthrough test_warp_crs_passthrough.cpp)
+target_link_libraries(test_warp_crs_passthrough PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+  GDAL::GDAL
+)
+target_include_directories(test_warp_crs_passthrough PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_warp_crs_passthrough)
+
 # Band ratio and IHS transform tests
 add_executable(test_band_ratio test_band_ratio.cpp)
 target_link_libraries(test_band_ratio PRIVATE
