@@ -39,6 +39,7 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     qgis_core
     qgis_gui
     qgis_native
+    qgis_app_georef
     sicnu_core
     sicnu_processing
     CURL::libcurl

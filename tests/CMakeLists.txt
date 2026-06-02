@@ -704,6 +704,28 @@ target_include_directories(test_gcp_points_file PRIVATE
 )
 sicnu_discover_tests(test_gcp_points_file)
 
+# Georeferencer main window shell tests (Task 11.4.4)
+add_executable(test_georef_window test_georef_window.cpp)
+target_link_libraries(test_georef_window PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+)
+target_include_directories(test_georef_window PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_georef_window PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_georef_window)
+
 # Band ratio and IHS transform tests
 add_executable(test_band_ratio test_band_ratio.cpp)
 target_link_libraries(test_band_ratio PRIVATE

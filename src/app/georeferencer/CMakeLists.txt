@@ -9,6 +9,8 @@ add_library(qgis_app_georef STATIC
     qgsrasterchangecoords.cpp
     qgsgcplist.cpp
     qgsgcplistmodel.cpp
+    qgsgeoreferencermainwindow.cpp
+    rs_georef_mode_toggle.cpp
 )
 
 target_include_directories(qgis_app_georef PUBLIC
@@ -27,6 +29,7 @@ target_link_libraries(qgis_app_georef PUBLIC
     qgis_core
     Qt6::Core
     Qt6::Gui
+    Qt6::Widgets
     GDAL::GDAL
 )
 

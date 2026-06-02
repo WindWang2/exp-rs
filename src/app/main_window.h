@@ -30,6 +30,7 @@ class LayerTreeMenuProvider;
 class QgsBrowserDockWidget;
 class QgsBrowserGuiModel;
 class SpectralProfileWidget;
+class QgsGeoreferencerMainWindow;
 
 /**
  * \brief Custom identify tool that emits results as a signal.
@@ -123,6 +124,9 @@ public slots:
     void measureDistance();
     void measureArea();
 
+    // Georeferencer (Task 11.4.4)
+    void openGeoreferencer();
+
 private slots:
     void onProjectRead(const QDomDocument &doc);
     void onProjectWrite(QDomDocument &doc);
@@ -201,6 +205,9 @@ private:
     QLabel *m_scaleLabel = nullptr;
     QLabel *m_renderTimeLabel = nullptr;
     QLabel *m_cacheLabel = nullptr;
+
+    // Georeferencer window (lazy-constructed) — Task 11.4.4
+    QgsGeoreferencerMainWindow *m_georefWindow = nullptr;
 
     friend class LayerTreeMenuProvider;
 

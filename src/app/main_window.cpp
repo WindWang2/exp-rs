@@ -12,6 +12,7 @@
 #include "dialogs/band_ratio_dialog.h"
 #include "widgets/spectral_profile_widget.h"
 #include "log_panel.h"
+#include "georeferencer/qgsgeoreferencermainwindow.h"
 
 #include <processing/qgsprocessingparameters.h>
 
@@ -284,6 +285,8 @@ void QgisDesktopWindow::setupMenu()
     rasterMenu->addAction(QIcon(":/icons/at_os_corr"), tr("Atmospheric Correction..."), this, &QgisDesktopWindow::openAtmosphericCorrectionDialog);
     rasterMenu->addAction(QIcon(":/icons/veget_tion_index"), tr("Vegetation Index..."), this, &QgisDesktopWindow::openSpectralIndexDialog);
     rasterMenu->addAction(QIcon(":/icons/mos_ic"), tr("Mosaic..."), this, [](){});
+    rasterMenu->addSeparator();
+    rasterMenu->addAction(QIcon(":/icons/r_ster_calc"), tr("Georeferencer..."), this, &QgisDesktopWindow::openGeoreferencer);
     rasterMenu->addSeparator();
     rasterMenu->addAction(QIcon(":/icons/extr_ct_b_nd"), tr("Extract Band..."), this, [](){});
     rasterMenu->addAction(QIcon(":/icons/b_nd_co_bo"), tr("Band Composite..."), this, [](){});
@@ -674,6 +677,19 @@ void QgisDesktopWindow::measureArea()
 {
     m_mapCanvas->setMapTool( m_measureAreaTool );
     statusBar()->showMessage( tr( "Measure Area: click to add points, double-click or right-click to finish" ), 5000 );
+}
+
+void QgisDesktopWindow::openGeoreferencer()
+{
+    if ( !m_georefWindow )
+    {
+        // iface = nullptr for now; Task 11.4.7 will pass a real QgisInterface.
+        m_georefWindow = new QgsGeoreferencerMainWindow( nullptr, this );
+        m_georefWindow->setAttribute( Qt::WA_DeleteOnClose, false );
+    }
+    m_georefWindow->show();
+    m_georefWindow->raise();
+    m_georefWindow->activateWindow();
 }
 
 void QgisDesktopWindow::onIdentifyResults(const QList<QgsMapToolIdentify::IdentifyResult> &results)
