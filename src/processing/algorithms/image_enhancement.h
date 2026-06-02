@@ -6,6 +6,14 @@
 class ImageEnhancement
 {
 public:
+    struct PcaResult {
+        std::vector<std::vector<float>> output;       // output[component][pixel]
+        std::vector<float> explainedVariance;          // fraction of variance per component
+        std::vector<std::vector<float>> eigenvectors;  // eigenvectors[component][band]
+    };
+
+    static PcaResult pca(const std::vector<std::vector<float>> &input, int numComponents);
+
     static void linearStretch(const float *input, float *output, size_t count,
                               float minVal, float maxVal, float nodata = -9999.0f);
 
@@ -32,4 +40,12 @@ private:
     static void convolve(const float *input, float *output, int width, int height,
                          const float *kernel, int kernelSize);
     static void generateGaussianKernel(float *kernel, int size, float sigma);
+
+    // PCA helpers
+    static void computeCovarianceMatrix(const std::vector<std::vector<float>> &centered,
+                                         int bands, size_t n,
+                                         std::vector<std::vector<float>> &cov);
+    static void jacobiEigen(std::vector<std::vector<float>> &A, int n,
+                            std::vector<float> &eigenvalues,
+                            std::vector<std::vector<float>> &eigenvectors);
 };

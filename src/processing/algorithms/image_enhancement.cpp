@@ -265,3 +265,191 @@ void ImageEnhancement::laplacianFilter(const float *input, float *output, int wi
 
     convolve(input, output, width, height, laplacian, 3);
 }
+
+// ---- PCA ----
+
+void ImageEnhancement::computeCovarianceMatrix(const std::vector<std::vector<float>> &centered,
+                                                 int bands, size_t n,
+                                                 std::vector<std::vector<float>> &cov)
+{
+    cov.assign(bands, std::vector<float>(bands, 0.0f));
+    double divisor = (n > 1) ? static_cast<double>(n - 1) : 1.0;
+
+    for (int i = 0; i < bands; i++) {
+        for (int j = i; j < bands; j++) {
+            double sum = 0.0;
+            for (size_t k = 0; k < n; k++) {
+                sum += static_cast<double>(centered[i][k]) * centered[j][k];
+            }
+            cov[i][j] = static_cast<float>(sum / divisor);
+            cov[j][i] = cov[i][j];
+        }
+    }
+}
+
+void ImageEnhancement::jacobiEigen(std::vector<std::vector<float>> &A, int n,
+                                    std::vector<float> &eigenvalues,
+                                    std::vector<std::vector<float>> &eigenvectors)
+{
+    // Initialize eigenvectors as identity matrix
+    eigenvectors.assign(n, std::vector<float>(n, 0.0f));
+    for (int i = 0; i < n; i++)
+        eigenvectors[i][i] = 1.0f;
+
+    const int maxIter = 200;
+    const float tolerance = 1e-10f;
+
+    for (int iter = 0; iter < maxIter; iter++) {
+        // Find largest off-diagonal element
+        float maxOff = 0.0f;
+        int p = 0, q = 1;
+        for (int i = 0; i < n; i++) {
+            for (int j = i + 1; j < n; j++) {
+                if (std::abs(A[i][j]) > maxOff) {
+                    maxOff = std::abs(A[i][j]);
+                    p = i;
+                    q = j;
+                }
+            }
+        }
+
+        if (maxOff < tolerance)
+            break;
+
+        // Compute rotation angle
+        float app = A[p][p];
+        float aqq = A[q][q];
+        float apq = A[p][q];
+
+        float theta;
+        if (std::abs(app - aqq) < 1e-15f) {
+            theta = static_cast<float>(M_PI / 4.0);
+        } else {
+            theta = 0.5f * std::atan2(2.0f * apq, app - aqq);
+        }
+
+        float c = std::cos(theta);
+        float s = std::sin(theta);
+
+        // Compute new matrix elements: A' = G^T * A * G
+        // Only update rows/cols p and q (others unchanged)
+        float newApp = c * c * app + s * s * aqq - 2.0f * s * c * apq;
+        float newAqq = s * s * app + c * c * aqq + 2.0f * s * c * apq;
+        float newApq = 0.0f; // By construction
+
+        // Update off-diagonal elements in rows/cols p and q
+        for (int r = 0; r < n; r++) {
+            if (r == p || r == q) continue;
+            float arp = A[r][p];
+            float arq = A[r][q];
+            A[r][p] = c * arp - s * arq;
+            A[p][r] = A[r][p];
+            A[r][q] = s * arp + c * arq;
+            A[q][r] = A[r][q];
+        }
+
+        A[p][p] = newApp;
+        A[q][q] = newAqq;
+        A[p][q] = newApq;
+        A[q][p] = newApq;
+
+        // Update eigenvectors
+        for (int r = 0; r < n; r++) {
+            float erp = eigenvectors[r][p];
+            float erq = eigenvectors[r][q];
+            eigenvectors[r][p] = c * erp - s * erq;
+            eigenvectors[r][q] = s * erp + c * erq;
+        }
+    }
+
+    // Extract eigenvalues from diagonal
+    eigenvalues.resize(n);
+    for (int i = 0; i < n; i++)
+        eigenvalues[i] = A[i][i];
+}
+
+ImageEnhancement::PcaResult ImageEnhancement::pca(
+    const std::vector<std::vector<float>> &input, int numComponents)
+{
+    int bands = static_cast<int>(input.size());
+    if (bands == 0 || input[0].empty()) {
+        return PcaResult{};
+    }
+    size_t n = input[0].size();
+
+    // Clamp requested components
+    if (numComponents > bands)
+        numComponents = bands;
+    if (numComponents <= 0)
+        numComponents = bands;
+
+    // Step 1: Compute mean per band and center data
+    std::vector<float> means(bands, 0.0f);
+    for (int b = 0; b < bands; b++) {
+        double sum = 0.0;
+        for (size_t k = 0; k < n; k++)
+            sum += input[b][k];
+        means[b] = static_cast<float>(sum / n);
+    }
+
+    std::vector<std::vector<float>> centered(bands, std::vector<float>(n));
+    for (int b = 0; b < bands; b++) {
+        for (size_t k = 0; k < n; k++)
+            centered[b][k] = input[b][k] - means[b];
+    }
+
+    // Step 2: Compute covariance matrix
+    std::vector<std::vector<float>> cov;
+    computeCovarianceMatrix(centered, bands, n, cov);
+
+    // Step 3: Eigen decomposition
+    std::vector<float> eigenvalues;
+    std::vector<std::vector<float>> eigenvectors;
+    jacobiEigen(cov, bands, eigenvalues, eigenvectors);
+
+    // Step 4: Sort eigenvalues/eigenvectors in descending order
+    std::vector<int> indices(bands);
+    for (int i = 0; i < bands; i++) indices[i] = i;
+    std::sort(indices.begin(), indices.end(),
+              [&](int a, int b) { return eigenvalues[a] > eigenvalues[b]; });
+
+    std::vector<float> sortedEigen(bands);
+    std::vector<std::vector<float>> sortedVectors(bands, std::vector<float>(bands));
+    for (int i = 0; i < bands; i++) {
+        sortedEigen[i] = eigenvalues[indices[i]];
+        for (int b = 0; b < bands; b++)
+            sortedVectors[i][b] = eigenvectors[b][indices[i]];
+    }
+
+    // Step 5: Compute total variance and explained variance ratio
+    double totalVar = 0.0;
+    for (int i = 0; i < bands; i++)
+        totalVar += std::max(0.0, static_cast<double>(sortedEigen[i]));
+
+    PcaResult result;
+    result.explainedVariance.resize(numComponents);
+    for (int i = 0; i < numComponents; i++) {
+        result.explainedVariance[i] = (totalVar > 0.0)
+            ? static_cast<float>(std::max(0.0, static_cast<double>(sortedEigen[i])) / totalVar)
+            : 0.0f;
+    }
+
+    // Store eigenvectors for the requested components
+    result.eigenvectors.resize(numComponents, std::vector<float>(bands));
+    for (int i = 0; i < numComponents; i++) {
+        result.eigenvectors[i] = sortedVectors[i];
+    }
+
+    // Step 6: Project centered data onto top-K eigenvectors
+    result.output.resize(numComponents, std::vector<float>(n));
+    for (int comp = 0; comp < numComponents; comp++) {
+        for (size_t k = 0; k < n; k++) {
+            float val = 0.0f;
+            for (int b = 0; b < bands; b++)
+                val += sortedVectors[comp][b] * centered[b][k];
+            result.output[comp][k] = val;
+        }
+    }
+
+    return result;
+}

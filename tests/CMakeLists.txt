@@ -523,6 +523,23 @@ target_include_directories(test_image_enhancement PRIVATE
 )
 sicnu_discover_tests(test_image_enhancement)
 
+# PCA tests
+add_executable(test_pca test_pca.cpp)
+target_link_libraries(test_pca PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_pca PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_pca)
+
 # Spatial filter tests
 add_executable(test_spatial_filter test_spatial_filter.cpp)
 target_link_libraries(test_spatial_filter PRIVATE
