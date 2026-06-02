@@ -556,3 +556,52 @@ target_include_directories(test_spatial_filter PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_spatial_filter)
+
+# Georeferencer least-squares tests
+add_executable(test_least_squares test_least_squares.cpp)
+target_link_libraries(test_least_squares PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  qgis_analysis
+)
+target_include_directories(test_least_squares PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_least_squares)
+
+# Georeferencer GCP transformer tests
+add_executable(test_gcp_transformer test_gcp_transformer.cpp)
+target_link_libraries(test_gcp_transformer PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  qgis_analysis
+)
+target_include_directories(test_gcp_transformer PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_gcp_transformer)
+
+# Band ratio and IHS transform tests
+add_executable(test_band_ratio test_band_ratio.cpp)
+target_link_libraries(test_band_ratio PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_band_ratio PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_band_ratio)
