@@ -9,10 +9,13 @@ class QToolBar;
 class QLabel;
 class QAction;
 class QCloseEvent;
+class QDockWidget;
 class QgisInterface;
 class QgsMapCanvas;
 class RsTwinCanvasSyncController;
 class QgsGeorefToolAddPoint;
+class QgsGCPList;
+class QgsGCPListWidget;
 
 /**
  * \brief Georeferencer main window shell.
@@ -59,4 +62,9 @@ class QgsGeoreferencerMainWindow : public QMainWindow
     QgsGeorefToolAddPoint *mAddPointTool = nullptr;
     QAction *mAddPointAction = nullptr;
     QAction *mSyncZoomAction = nullptr;
+
+    // Task 11.4.6 — GCP list + bottom dock
+    QgsGCPList *mGcps = nullptr;
+    QgsGCPListWidget *mGcpTable = nullptr;
+    QDockWidget *mGcpDock = nullptr;
 };

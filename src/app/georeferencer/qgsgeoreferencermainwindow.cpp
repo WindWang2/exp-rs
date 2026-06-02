@@ -2,6 +2,7 @@
 
 #include <QAction>
 #include <QCloseEvent>
+#include <QDockWidget>
 #include <QIcon>
 #include <QLabel>
 #include <QMenu>
@@ -14,6 +15,7 @@
 
 #include "qgscoordinatereferencesystem.h"
 #include "qgsgcplist.h"
+#include "qgsgcplistwidget.h"
 #include "qgsgcppoint.h"
 #include "qgsgeorefdatapoint.h"
 #include "qgsgeoreftooladdpoint.h"
@@ -28,10 +30,28 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   setWindowTitle( tr( "Georeferencer · 几何校正" ) );
   resize( 1200, 800 );
 
+  // GCP list lives at the main window level — owns QgsGcpPoint instances.
+  // QgsGCPList currently has a parameterless ctor (Task 3 design); parent it
+  // explicitly so Qt cleans it up with the window.
+  mGcps = new QgsGCPList();
+  mGcps->setParent( this );
+
   setupMenus();
   setupToolbars();
   setupStatusBar();
   setupCentralWidget();
+
+  // Bottom dock: 10-column GCP table per design.html ArtboardGeoref.
+  mGcpDock = new QDockWidget( tr( "GCP 表" ), this );
+  mGcpDock->setObjectName( QStringLiteral( "rsGcpDock" ) );
+  mGcpDock->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea );
+
+  mGcpTable = new QgsGCPListWidget( mGcpDock );
+  mGcpTable->setGCPList( mGcps );
+  mGcpDock->setWidget( mGcpTable );
+
+  addDockWidget( Qt::BottomDockWidgetArea, mGcpDock );
+  resizeDocks( { mGcpDock }, { 280 }, Qt::Vertical );
 }
 
 void QgsGeoreferencerMainWindow::setupCentralWidget()
@@ -165,17 +185,34 @@ void QgsGeoreferencerMainWindow::setupStatusBar()
 
 void QgsGeoreferencerMainWindow::showCoordDialog( const QgsPointXY &sourcePixel )
 {
-  // The dialog needs a *temporary* QgsGcpPoint to preview against. The GCP
-  // list itself is wired in Task 11.4.6; for now we manage a stack-local one.
-  QgsGcpPoint tempGcp( sourcePixel, QgsPointXY(), QgsCoordinateReferenceSystem(), true );
-  QgsGeorefDataPoint tempDataPoint( mSrcCanvas, mRefCanvas, &tempGcp );
+  // The dialog holds a *preview* QgsGcpPoint while open. We keep one on the
+  // heap so it outlives the lambda capture below; the dialog (WA_DeleteOnClose)
+  // owns the lifecycle by parenting both.
+  auto *tempGcp = new QgsGcpPoint( sourcePixel, QgsPointXY(), QgsCoordinateReferenceSystem(), true );
+  auto *tempDataPoint = new QgsGeorefDataPoint( mSrcCanvas, mRefCanvas, tempGcp );
 
   QgsCoordinateReferenceSystem rasterCrs = mSrcCanvas
                                              ? mSrcCanvas->mapSettings().destinationCrs()
                                              : QgsCoordinateReferenceSystem();
 
-  auto *dlg = new QgsMapCoordsDialog( mRefCanvas, &tempDataPoint, rasterCrs, this );
+  auto *dlg = new QgsMapCoordsDialog( mRefCanvas, tempDataPoint, rasterCrs, this );
   dlg->setAttribute( Qt::WA_DeleteOnClose );
+
+  // The dialog emits pointAdded(src, dst, destCrs) on OK. Persist into the
+  // shared QgsGCPList — its changed() signal cascades to the model and the
+  // table refreshes automatically.
+  connect( dlg, &QgsMapCoordsDialog::pointAdded, this,
+           [this]( const QgsPointXY &srcCoord, const QgsPointXY &dstCoord, const QgsCoordinateReferenceSystem &destCrs ) {
+             if ( mGcps )
+               mGcps->appendPoint( QgsGcpPoint( srcCoord, dstCoord, destCrs, true ) );
+           } );
+
+  // Clean up the heap-allocated preview helpers when the dialog closes.
+  connect( dlg, &QDialog::finished, this, [tempGcp, tempDataPoint]( int ) {
+    delete tempDataPoint;
+    delete tempGcp;
+  } );
+
   dlg->show();
 }
 

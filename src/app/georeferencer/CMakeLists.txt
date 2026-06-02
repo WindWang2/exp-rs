@@ -9,10 +9,12 @@ add_library(qgis_app_georef STATIC
     qgsrasterchangecoords.cpp
     qgsgcplist.cpp
     qgsgcplistmodel.cpp
+    qgsgcplistwidget.cpp
     qgsgeoreferencermainwindow.cpp
     rs_georef_mode_toggle.cpp
     rs_twincanvas_sync_controller.cpp
     qgsgeorefdatapoint.cpp
+    qgsgeorefdelegates.cpp
     qgsgeoreftooladdpoint.cpp
     qgsgeoreftooldeletepoint.cpp
     qgsgeoreftoolmovepoint.cpp

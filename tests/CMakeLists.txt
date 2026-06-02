@@ -726,6 +726,28 @@ target_include_directories(test_georef_window PRIVATE
 set_target_properties(test_georef_window PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_georef_window)
 
+# GCP table widget tests (Task 11.4.6)
+add_executable(test_gcp_list_widget test_gcp_list_widget.cpp)
+target_link_libraries(test_gcp_list_widget PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+)
+target_include_directories(test_gcp_list_widget PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_gcp_list_widget PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_gcp_list_widget)
+
 # Twin canvas sync controller tests (Task 11.4.5)
 add_executable(test_twincanvas_sync test_twincanvas_sync.cpp)
 target_link_libraries(test_twincanvas_sync PRIVATE

@@ -17,10 +17,28 @@
 #include "qgsgcppoint.h"
 #include "qgsgeoreftransform.h"
 
+#include <QBrush>
+#include <QColor>
 #include <QLocale>
 #include <QString>
+#include <QVariant>
 
 #include <cmath>
+
+namespace
+{
+  // Warn color from design.html for residuals >= 1 unit.
+  const QColor sWarnColor( QStringLiteral( "#bf8700" ) );
+  constexpr double sWarnThreshold = 1.0;
+
+  QString formatFixed( double value, int decimals, bool showSign = false )
+  {
+    QString s = QString::number( value, 'f', decimals );
+    if ( showSign && value >= 0.0 && !s.startsWith( '+' ) )
+      s.prepend( '+' );
+    return s;
+  }
+}
 
 QgsGCPListModel::QgsGCPListModel( QObject *parent )
   : QAbstractTableModel( parent )
@@ -30,7 +48,18 @@ QgsGCPListModel::QgsGCPListModel( QObject *parent )
 void QgsGCPListModel::setGCPList( QgsGCPList *theGCPList )
 {
   beginResetModel();
+  if ( mGCPList )
+  {
+    disconnect( mGCPList, nullptr, this, nullptr );
+  }
   mGCPList = theGCPList;
+  if ( mGCPList )
+  {
+    connect( mGCPList, &QgsGCPList::changed, this, [this]() {
+      beginResetModel();
+      endResetModel();
+    } );
+  }
   endResetModel();
   updateResiduals();
 }
@@ -60,7 +89,7 @@ int QgsGCPListModel::rowCount( const QModelIndex & ) const
 
 int QgsGCPListModel::columnCount( const QModelIndex & ) const
 {
-  return static_cast<int>( Column::LastColumn );
+  return 10;
 }
 
 QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
@@ -73,63 +102,77 @@ QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
   if ( !point )
     return QVariant();
 
+  const double dX = point->residual().x();
+  const double dY = point->residual().y();
+  const double residual = std::sqrt( dX * dX + dY * dY );
+  const bool warn = point->isEnabled() && residual >= sWarnThreshold;
+  const QString dash = QStringLiteral( "—" );
+
   switch ( role )
   {
     case Qt::DisplayRole:
-    case Qt::EditRole:
-    case Qt::UserRole:
     case Qt::ToolTipRole:
+    {
       switch ( column )
       {
         case Column::Enabled:
-          break;
+          return QString();
         case Column::ID:
           return index.row();
         case Column::SourceX:
-          return ( role == Qt::DisplayRole || role == Qt::ToolTipRole )
-                 ? QVariant( formatNumber( point->sourcePoint().x() ) )
-                 : QVariant( point->sourcePoint().x() );
+          return formatFixed( point->sourcePoint().x(), 1 );
         case Column::SourceY:
-          return ( role == Qt::DisplayRole || role == Qt::ToolTipRole )
-                 ? QVariant( formatNumber( point->sourcePoint().y() ) )
-                 : QVariant( point->sourcePoint().y() );
+          // Upstream convention: Y is inverted on read/write but stored positive.
+          return formatFixed( -point->sourcePoint().y(), 1 );
         case Column::DestinationX:
         {
           const QgsPointXY td = point->transformedDestinationPoint( mTargetCrs, mTransformContext );
-          return ( role == Qt::DisplayRole || role == Qt::ToolTipRole )
-                 ? QVariant( formatNumber( td.x() ) )
-                 : QVariant( td.x() );
+          return formatFixed( td.x(), 2 );
         }
         case Column::DestinationY:
         {
           const QgsPointXY td = point->transformedDestinationPoint( mTargetCrs, mTransformContext );
-          return ( role == Qt::DisplayRole || role == Qt::ToolTipRole )
-                 ? QVariant( formatNumber( td.y() ) )
-                 : QVariant( td.y() );
+          return formatFixed( td.y(), 2 );
         }
         case Column::ResidualDx:
+          if ( !point->isEnabled() )
+            return dash;
+          return formatFixed( dX, 2, true );
         case Column::ResidualDy:
+          if ( !point->isEnabled() )
+            return dash;
+          return formatFixed( dY, 2, true );
         case Column::TotalResidual:
-        {
-          const double dX = point->residual().x();
-          const double dY = point->residual().y();
-          const double residual = std::sqrt( dX * dX + dY * dY );
-          if ( residual == 0.0 )
-            return tr( "n/a" );
-          double value = 0;
-          if ( column == Column::ResidualDx ) value = dX;
-          else if ( column == Column::ResidualDy ) value = dY;
-          else value = residual;
-          return ( role == Qt::DisplayRole || role == Qt::ToolTipRole )
-                 ? QVariant( formatNumber( value ) )
-                 : QVariant( value );
-        }
+          if ( !point->isEnabled() )
+            return dash;
+          return formatFixed( residual, 2 );
         case Column::PointType:
           return point->pointType();
         case Column::LastColumn:
           break;
       }
       break;
+    }
+
+    case Qt::EditRole:
+    {
+      switch ( column )
+      {
+        case Column::SourceX:
+          return point->sourcePoint().x();
+        case Column::SourceY:
+          return point->sourcePoint().y();
+        case Column::DestinationX:
+          return point->transformedDestinationPoint( mTargetCrs, mTransformContext ).x();
+        case Column::DestinationY:
+          return point->transformedDestinationPoint( mTargetCrs, mTransformContext ).y();
+        case Column::PointType:
+          return point->pointType();
+        default:
+          break;
+      }
+      break;
+    }
 
     case Qt::CheckStateRole:
       if ( column == Column::Enabled )
@@ -138,11 +181,21 @@ QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
 
     case Qt::TextAlignmentRole:
       if ( column == Column::Enabled )
-        return Qt::AlignHCenter;
+        return QVariant( Qt::AlignCenter );
       if ( column == Column::PointType )
-        return Qt::AlignLeft;
+        return QVariant( Qt::AlignLeft | Qt::AlignVCenter );
       if ( column != Column::LastColumn )
-        return Qt::AlignRight;
+        return QVariant( Qt::AlignRight | Qt::AlignVCenter );
+      break;
+
+    case Qt::ForegroundRole:
+      if ( warn && ( column == Column::ResidualDx || column == Column::ResidualDy || column == Column::TotalResidual ) )
+        return QBrush( sWarnColor );
+      break;
+
+    case Qt::DecorationRole:
+      if ( warn && column == Column::TotalResidual )
+        return QVariant( QStringLiteral( "⚠" ) );
       break;
 
     case static_cast<int>( Role::SourcePointRole ):
@@ -168,7 +221,7 @@ bool QgsGCPListModel::setData( const QModelIndex &index, const QVariant &value, 
       {
         const bool checked = static_cast<Qt::CheckState>( value.toInt() ) == Qt::Checked;
         point->setEnabled( checked );
-        emit dataChanged( index, index );
+        emit dataChanged( index, index, { Qt::CheckStateRole, Qt::DisplayRole } );
         updateResiduals();
         emit pointEnabled( point, index.row() );
         return true;
@@ -209,7 +262,7 @@ bool QgsGCPListModel::setData( const QModelIndex &index, const QVariant &value, 
       if ( role == Qt::EditRole || role == Qt::DisplayRole )
       {
         point->setPointType( value.toString() );
-        emit dataChanged( index, index );
+        emit dataChanged( index, index, { Qt::EditRole, Qt::DisplayRole } );
         return true;
       }
       break;
@@ -255,31 +308,19 @@ QVariant QgsGCPListModel::headerData( int section, Qt::Orientation orientation, 
   if ( orientation != Qt::Horizontal || ( role != Qt::DisplayRole && role != Qt::ToolTipRole ) )
     return QVariant();
 
-  QString unitLabel;
-  switch ( residualUnit() )
-  {
-    case Qgis::RenderUnit::MapUnits:
-      unitLabel = tr( "map units" );
-      break;
-    case Qgis::RenderUnit::Pixels:
-      unitLabel = tr( "pixels" );
-      break;
-    default:
-      break;
-  }
-
+  // Chinese headers per design.html ArtboardGeoref.
   switch ( static_cast<Column>( section ) )
   {
-    case Column::Enabled:       return tr( "Enabled" );
-    case Column::ID:            return tr( "ID" );
-    case Column::SourceX:       return tr( "Source X" );
-    case Column::SourceY:       return tr( "Source Y" );
-    case Column::DestinationX:  return tr( "Dest. X" );
-    case Column::DestinationY:  return tr( "Dest. Y" );
-    case Column::ResidualDx:    return tr( "dX (%1)" ).arg( unitLabel );
-    case Column::ResidualDy:    return tr( "dY (%1)" ).arg( unitLabel );
-    case Column::TotalResidual: return tr( "Residual (%1)" ).arg( unitLabel );
-    case Column::PointType:     return tr( "Type" );
+    case Column::Enabled:       return tr( "启用" );
+    case Column::ID:            return tr( "#" );
+    case Column::SourceX:       return tr( "X 源 (px)" );
+    case Column::SourceY:       return tr( "Y 源 (px)" );
+    case Column::DestinationX:  return tr( "X 参 (m)" );
+    case Column::DestinationY:  return tr( "Y 参 (m)" );
+    case Column::ResidualDx:    return tr( "ΔX" );
+    case Column::ResidualDy:    return tr( "ΔY" );
+    case Column::TotalResidual: return tr( "RMS (px)" );
+    case Column::PointType:     return tr( "类型" );
     case Column::LastColumn:    break;
   }
   return QVariant();
