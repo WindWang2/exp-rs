@@ -1,98 +1,82 @@
-# Antigravity RS: Streamlined Remote Sensing Analysis & Agent Platform
+# SICNU GEO RS
 
-> [!NOTE]
-> Antigravity RS is a standalone, lightweight, and high-performance remote sensing analysis platform designed for undergraduate remote sensing education and automated AI agent workflows.
+Professional remote sensing analysis platform built on the QGIS engine. Pure C++ (no Python at runtime).
 
----
+## Features
 
-## 🌟 Visual & Technical Highlights
+- **Spectral Analysis:** NDVI, EVI, SAVI, NDWI, NDBI, MNDWI indices
+- **Band Math:** Custom expression evaluation across raster bands
+- **Atmospheric Correction:** DOS1 and DOS2 methods
+- **Change Detection:** Multi-temporal image comparison
+- **Mosaic:** Raster mosaic with nodata handling
+- **Processing Toolbox:** 70+ algorithms (GDAL, OTB, QGIS native)
+- **Layer Properties:** Raster and vector layer dialogs with statistics
+- **Measurement Tools:** Geodesic distance and area measurement
+- **Identify Tool:** Click-to-query pixel/feature values
+- **CRS Presets:** 36 common coordinate reference systems
+- **Logging:** Unified logging with file output option
 
-*   **QGIS GUI Architecture Emulation**: Complete custom PySide6 Model-View classes implementing QGIS's hierarchical **`QgsLayerTreeView`** and **`QgsLayerTreeModel`** with checkbox state handling, layer ordering, and context menus.
-*   **High-Performance C++ Raster Engine**: Bilinear resampling, coordinate warping, PCA computation, and contrast-stretch RGB composition written in native C++ using **Eigen** and exposed via **Pybind11**.
-*   **In-App AI Agent Conversational Dock**: A natural-language assistant panel that translates user prompts to structured JSON API actions, executes calculations, writes educational Python scripts, and renders results dynamically.
-*   **Zero Local GIS System Overhead**: Using a modular **Hybrid Dependency Strategy**, the platform compiles monolithic QGIS and Orfeo Toolbox (OTB) algorithm concepts directly inside the package, requiring **no QGIS or OTB desktop installations** on the student's computer.
+## Prerequisites
 
----
+- CMake 3.20+
+- Qt 6.2+ (Core, Gui, Widgets, Concurrent, Network, Svg, Xml, Sql)
+- GDAL 3.4+
+- PROJ 8+
+- GEOS 3.10+
+- SQLite3, ZLIB, LibZip, ZSTD, Protobuf, CURL, PCRE2, QCA
 
-## 🛠️ Tech Stack & Dependencies
+## Build
 
-| Component | Technology | Detail |
-| :--- | :--- | :--- |
-| **Core GUI** | PySide6 (Qt for Python) | Desktop UI window layout, map canvas, docks, spectral charts |
-| **GIS Engines** | Rasterio, Fiona, PyProj | High-performance coordinate references, format readers, transforms |
-| **Native Accelerators** | C++17, Pybind11, Eigen | Bilinear warping, multiband stretch composition, matrix PCA |
-| **Build Pipeline** | CMake & GCC / MSVC | Automated compilation of C++ shared libraries (`raster_ops`) |
-| **Testing Frame** | PyTest | Verified unit testing suite (385 test cases, 100% pass) |
-
----
-
-## 📁 Repository Structure
-
-```
-exp-rs/
-├── core/               # GIS engine core models & QGIS emulations
-│   ├── layertree/      # Hierarchical layer node hierarchy
-│   ├── raster/         # Raster dataset providers & rendering engines
-│   └── vector/         # Vector dataset providers & shapefile renderers
-├── gui/                # Custom premium PyQt/PySide6 desktop widgets
-│   ├── layertree/      # Model-view implementations for layer lists
-│   ├── canvas.py       # High-performance map viewport canvas
-│   └── agent_dock.py   # In-app AI Agent side panel and chat window
-├── src/                # Native C++ Pybind11 source code (raster_ops.cpp)
-├── tests/              # Automated unit test suite
-├── CLAUDE.md           # Developer guidelines & quick commands
-└── DESIGN.md           # Product strategy and technical approach
+```bash
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+./sicnu_geo_rs
 ```
 
----
+### With Tests
 
-## 🚀 Getting Started
+```bash
+mkdir build-tests && cd build-tests
+cmake .. -DENABLE_TESTS=ON
+make -j$(nproc)
+ctest --output-on-failure
+```
 
-### Prerequisites
+### With Sanitizers (Debug)
 
-Ensure you have Python 3.10+ and standard build tools (CMake, C++ compiler) installed.
+```bash
+mkdir build-asan && cd build-asan
+cmake .. -DENABLE_TESTS=ON -DENABLE_SANITIZERS=ON -DCMAKE_BUILD_TYPE=Debug
+make -j$(nproc)
+ctest --output-on-failure
+```
 
-### Installation & Compilation
+### Install
 
-1.  **Clone the repository**:
-    ```bash
-    git clone https://github.com/your-username/exp-rs.git
-    cd exp-rs
-    ```
+```bash
+cmake --install . --prefix /usr/local
+```
 
-2.  **Install modular dependencies**:
-    ```bash
-    pip install PySide6 rasterio fiona pyproj numpy pytest eigen
-    ```
+### AppImage
 
-3.  **Compile the C++ Extension**:
-    ```bash
-    mkdir build && cd build
-    cmake ..
-    make
-    cp raster_ops.cpython*.so ..
-    cd ..
-    ```
+```bash
+./packaging/build-appimage.sh
+```
 
-### Running the App & Tests
+## Architecture
 
-*   **Launch the GUI Application**:
-    ```bash
-    python main.py
-    ```
-*   **Run Automated Test Suite**:
-    ```bash
-    PYTHONPATH=. pytest tests/
-    ```
+```
+src/
+├── app/           Application (main window, dialogs, widgets)
+├── core/          QGIS core library (vendored)
+├── gui/           QGIS GUI library (vendored)
+├── native/        Platform integration
+├── processing/    GDAL/OTB/QGIS algorithm providers
+├── plugins/       Plugin system
+└── ui/            Qt Designer forms
+```
 
----
+## License
 
-## 📚 Deep-Dive Technical Documentation
-
-For in-depth analysis of architectural ports and performance features, see:
-*   [DESIGN.md](file:///home/kevin/projects/exp-rs/DESIGN.md) - Product strategy, consideration of alternatives, and success criteria.
-*   [DOCS_QGIS_IMPLEMENTATION.md](file:///home/kevin/projects/exp-rs/DOCS_QGIS_IMPLEMENTATION.md) - QGIS multi-threaded rendering pipeline, PROJ thread-safety context management, and affine/quadratic warping formulas.
-*   [DOCS_OTB_IMPLEMENTATION.md](file:///home/kevin/projects/exp-rs/DOCS_OTB_IMPLEMENTATION.md) - Orfeo Toolbox streaming architecture, Eigen-powered PCA, and MeanShift segmentation interface designs.
-
----
-*Last Updated: 2026-05-25*
+GPL-2.0-or-later
