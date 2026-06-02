@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.sicnu.geo_rs</id>
+  <name>SICNU GEO RS</name>
+  <summary>Professional remote sensing analysis platform</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+  <description>
+    <p>
+      SICNU GEO RS is a pure C++ remote sensing analysis platform built on the QGIS engine.
+      It provides spectral index computation, atmospheric correction, band math, change detection,
+      and integration with GDAL and OTB processing tools.
+    </p>
+  </description>
+  <categories>
+    <category>Science</category>
+    <category>Geography</category>
+  </categories>
+  <url type="homepage">https://github.com/sicnu/geo-rs</url>
+  <provides>
+    <binary>sicnu_geo_rs</binary>
+  </provides>
+</component>

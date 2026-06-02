@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=SICNU GEO RS
+GenericName=Remote Sensing Analysis
+Comment=Professional remote sensing analysis platform based on QGIS
+Exec=sicnu_geo_rs %F
+Icon=sicnu_geo_rs
+Terminal=false
+Categories=Science;Geography;Education;
+MimeType=image/tiff;image/geotiff;application/x-qgis-project;
+Keywords=remote sensing;GIS;raster;vector;NDVI;
+StartupWMClass=sicnu_geo_rs
