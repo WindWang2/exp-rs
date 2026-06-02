@@ -139,6 +139,16 @@ if(ENABLE_SANITIZERS)
     file(WRITE "${CMAKE_BINARY_DIR}/CTestCustom.cmake"
       "set(ENV{LSAN_OPTIONS} \"detect_leaks=0\")\n")
 endif()
+
+# Release optimization flags
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_compile_options(-O2 -DNDEBUG)
+    option(ENABLE_LTO "Enable Link-Time Optimization for Release builds" OFF)
+    if(ENABLE_LTO)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif()
+endif()
+
 option(WITH_DRACO "" OFF)
 option(WITH_INTERNAL_POLY2TRI "" ON)
 option(WITH_INTERNAL_NLOHMANN_JSON "" ON)
@@ -190,3 +200,15 @@ target_include_directories(qgis_core PRIVATE
 # SICNU_GEO_RS: Plugin architecture subdirectories
 add_subdirectory(src/plugins)
 add_subdirectory(src/app)
+
+# SICNU_GEO_RS: Unit tests (Catch2)
+if(ENABLE_TESTS)
+    enable_testing()
+    FetchContent_Declare(
+        Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG        v3.7.1
+    )
+    FetchContent_MakeAvailable(Catch2)
+    add_subdirectory(tests)
+endif()

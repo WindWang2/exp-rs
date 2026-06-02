@@ -13,7 +13,10 @@ function(sicnu_discover_tests NAME)
       DISCOVERY_MODE PRE_TEST
       PROPERTIES ENVIRONMENT_MODIFICATION "LSAN_OPTIONS=set:detect_leaks=0")
   else()
-    catch_discover_tests(${NAME})
+    # PRE_TEST avoids race conditions in parallel builds where discovery
+    # tries to run the test executable before it is linked.
+    catch_discover_tests(${NAME}
+      DISCOVERY_MODE PRE_TEST)
   endif()
 endfunction()
 
