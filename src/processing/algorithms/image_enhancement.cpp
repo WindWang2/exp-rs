@@ -134,3 +134,134 @@ void ImageEnhancement::histogramEqualize(const float *input, float *output, size
         output[i] = cdf[bin] * 255.0f;
     }
 }
+
+// ---- Spatial filter helpers ----
+
+void ImageEnhancement::generateGaussianKernel(float *kernel, int size, float sigma)
+{
+    int half = size / 2;
+    float sum = 0.0f;
+    float twoSigmaSq = 2.0f * sigma * sigma;
+
+    for (int y = -half; y <= half; y++) {
+        for (int x = -half; x <= half; x++) {
+            float val = std::exp(-(x * x + y * y) / twoSigmaSq);
+            kernel[(y + half) * size + (x + half)] = val;
+            sum += val;
+        }
+    }
+
+    // Normalize
+    for (int i = 0; i < size * size; i++) {
+        kernel[i] /= sum;
+    }
+}
+
+void ImageEnhancement::convolve(const float *input, float *output, int width, int height,
+                                const float *kernel, int kernelSize)
+{
+    int half = kernelSize / 2;
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            float sum = 0.0f;
+
+            for (int ky = -half; ky <= half; ky++) {
+                for (int kx = -half; kx <= half; kx++) {
+                    // Clamp coordinates to image boundaries (replicate padding)
+                    int ix = std::clamp(x + kx, 0, width - 1);
+                    int iy = std::clamp(y + ky, 0, height - 1);
+
+                    float pixel = input[iy * width + ix];
+                    float kVal = kernel[(ky + half) * kernelSize + (kx + half)];
+                    sum += pixel * kVal;
+                }
+            }
+
+            output[y * width + x] = sum;
+        }
+    }
+}
+
+// ---- Public spatial filters ----
+
+void ImageEnhancement::meanFilter(const float *input, float *output, int width, int height, int kernelSize)
+{
+    int ks = kernelSize;
+    std::vector<float> kernel(ks * ks);
+    float val = 1.0f / static_cast<float>(ks * ks);
+    std::fill(kernel.begin(), kernel.end(), val);
+    convolve(input, output, width, height, kernel.data(), ks);
+}
+
+void ImageEnhancement::gaussianFilter(const float *input, float *output, int width, int height, int kernelSize, float sigma)
+{
+    int ks = kernelSize;
+    std::vector<float> kernel(ks * ks);
+    generateGaussianKernel(kernel.data(), ks, sigma);
+    convolve(input, output, width, height, kernel.data(), ks);
+}
+
+void ImageEnhancement::medianFilter(const float *input, float *output, int width, int height, int kernelSize)
+{
+    int half = kernelSize / 2;
+    std::vector<float> neighborhood;
+    neighborhood.reserve(kernelSize * kernelSize);
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            neighborhood.clear();
+
+            for (int ky = -half; ky <= half; ky++) {
+                for (int kx = -half; kx <= half; kx++) {
+                    int ix = std::clamp(x + kx, 0, width - 1);
+                    int iy = std::clamp(y + ky, 0, height - 1);
+                    neighborhood.push_back(input[iy * width + ix]);
+                }
+            }
+
+            // Find median using nth_element
+            size_t mid = neighborhood.size() / 2;
+            std::nth_element(neighborhood.begin(), neighborhood.begin() + mid, neighborhood.end());
+            output[y * width + x] = neighborhood[mid];
+        }
+    }
+}
+
+void ImageEnhancement::sobelFilter(const float *input, float *output, int width, int height)
+{
+    // Sobel X kernel
+    const float sobelX[9] = {
+        -1.0f, 0.0f, 1.0f,
+        -2.0f, 0.0f, 2.0f,
+        -1.0f, 0.0f, 1.0f
+    };
+
+    // Sobel Y kernel
+    const float sobelY[9] = {
+        -1.0f, -2.0f, -1.0f,
+         0.0f,  0.0f,  0.0f,
+         1.0f,  2.0f,  1.0f
+    };
+
+    std::vector<float> gx(width * height);
+    std::vector<float> gy(width * height);
+
+    convolve(input, gx.data(), width, height, sobelX, 3);
+    convolve(input, gy.data(), width, height, sobelY, 3);
+
+    for (int i = 0; i < width * height; i++) {
+        output[i] = std::sqrt(gx[i] * gx[i] + gy[i] * gy[i]);
+    }
+}
+
+void ImageEnhancement::laplacianFilter(const float *input, float *output, int width, int height)
+{
+    const float laplacian[9] = {
+        0.0f,  1.0f, 0.0f,
+        1.0f, -4.0f, 1.0f,
+        0.0f,  1.0f, 0.0f
+    };
+
+    convolve(input, output, width, height, laplacian, 3);
+}
