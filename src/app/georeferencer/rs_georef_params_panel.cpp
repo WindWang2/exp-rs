@@ -12,9 +12,11 @@
 #include <QLineEdit>
 #include <QListView>
 #include <QPushButton>
+#include <QSettings>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
+#include "qgsprojectionselectionwidget.h"
 #include "rs_rms_scatter_widget.h"
 
 namespace
@@ -171,14 +173,45 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     form->setContentsMargins( 0, 0, 0, 0 );
 
     mSrcCrsLabel = new QLabel( tr( "—" ), sec );
-    mDstCrsLabel = new QLabel( tr( "EPSG:32650" ), sec );
-    mProjNameLabel = new QLabel( tr( "WGS 84 / UTM zone 50N" ), sec );
     mSrcCrsLabel->setObjectName( QStringLiteral( "rsSrcCrsLabel" ) );
-    mDstCrsLabel->setObjectName( QStringLiteral( "rsDstCrsLabel" ) );
+
+    // Task 11.5.1 — real CRS picker replaces the hard-coded EPSG:32650 label.
+    mCrsWidget = new QgsProjectionSelectionWidget( sec );
+    mCrsWidget->setObjectName( QStringLiteral( "rsCrsWidget" ) );
+
+    // Restore last user choice (default to EPSG:32650 to preserve previous
+    // behaviour from Task 11.4 when no setting exists yet).
+    {
+      const QString lastAuthid = QSettings()
+                                   .value( QStringLiteral( "Georeferencer/lastDestCrs" ),
+                                           QStringLiteral( "EPSG:32650" ) )
+                                   .toString();
+      QgsCoordinateReferenceSystem saved;
+      if ( !lastAuthid.isEmpty() )
+        saved.createFromOgcWmsCrs( lastAuthid );
+      if ( saved.isValid() )
+        mCrsWidget->setCrs( saved );
+    }
+
+    connect( mCrsWidget, &QgsProjectionSelectionWidget::crsChanged, this,
+             [this]( const QgsCoordinateReferenceSystem &crs ) {
+               QSettings().setValue( QStringLiteral( "Georeferencer/lastDestCrs" ),
+                                     crs.authid() );
+               if ( mProjNameLabel )
+                 mProjNameLabel->setText( crs.description().isEmpty() ? crs.authid()
+                                                                     : crs.description() );
+               emit destCrsChanged();
+             } );
+
+    mProjNameLabel = new QLabel( sec );
     mProjNameLabel->setObjectName( QStringLiteral( "rsProjNameLabel" ) );
+    {
+      const QgsCoordinateReferenceSystem cur = mCrsWidget->crs();
+      mProjNameLabel->setText( cur.description().isEmpty() ? cur.authid() : cur.description() );
+    }
 
     form->addRow( tr( "源 CRS" ), mSrcCrsLabel );
-    form->addRow( tr( "目标 CRS" ), mDstCrsLabel );
+    form->addRow( tr( "目标 CRS" ), mCrsWidget );
     form->addRow( tr( "投影名" ), mProjNameLabel );
 
     sec->layout()->addItem( form );
@@ -280,8 +313,31 @@ QString RsGeorefParamsPanel::outputPath() const
 
 QgsCoordinateReferenceSystem RsGeorefParamsPanel::destCrs() const
 {
-  // Task 7: return a fixed test CRS until a real picker is wired (Task 8+).
+  // Task 11.5.1 — picker is the source of truth. Fall back to EPSG:32650 if
+  // the widget was never constructed (defensive — shouldn't happen).
+  if ( mCrsWidget )
+    return mCrsWidget->crs();
   return QgsCoordinateReferenceSystem( QStringLiteral( "EPSG:32650" ) );
+}
+
+void RsGeorefParamsPanel::setDestCrs( const QgsCoordinateReferenceSystem &crs )
+{
+  if ( !mCrsWidget )
+    return;
+  // QgsProjectionSelectionWidget emits crsChanged() when its current CRS
+  // actually changes; our slot persists + emits destCrsChanged(). If the
+  // incoming CRS equals the current one no signal would fire, so we fan it
+  // out unconditionally here to honour the "setter triggers signal" contract
+  // the test (and main-window recomputeFit wiring) depends on.
+  const bool sameCrs = ( mCrsWidget->crs() == crs );
+  mCrsWidget->setCrs( crs );
+  if ( sameCrs )
+  {
+    QSettings().setValue( QStringLiteral( "Georeferencer/lastDestCrs" ), crs.authid() );
+    if ( mProjNameLabel )
+      mProjNameLabel->setText( crs.description().isEmpty() ? crs.authid() : crs.description() );
+    emit destCrsChanged();
+  }
 }
 
 double RsGeorefParamsPanel::outputPixelSize() const

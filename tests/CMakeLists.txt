@@ -853,6 +853,29 @@ target_include_directories(test_georef_window_rpc_mode PRIVATE
 set_target_properties(test_georef_window_rpc_mode PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_georef_window_rpc_mode)
 
+# Task 11.5.1 — CRS picker persistence + signal tests
+add_executable(test_crs_picker_persists test_crs_picker_persists.cpp)
+target_link_libraries(test_crs_picker_persists PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  qgis_app_georef
+)
+target_include_directories(test_crs_picker_persists PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_crs_picker_persists PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_crs_picker_persists)
+
 # Band ratio and IHS transform tests
 add_executable(test_band_ratio test_band_ratio.cpp)
 target_link_libraries(test_band_ratio PRIVATE

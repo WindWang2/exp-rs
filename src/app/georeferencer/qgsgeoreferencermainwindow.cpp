@@ -83,6 +83,9 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
            this, &QgsGeoreferencerMainWindow::recomputeFit );
   connect( mParamsPanel, &RsGeorefParamsPanel::outputPathChanged, this,
            [this]( const QString & ) { recomputeFit(); } );
+  // Task 11.5.1 — user-selected destination CRS should re-run the fit.
+  connect( mParamsPanel, &RsGeorefParamsPanel::destCrsChanged,
+           this, &QgsGeoreferencerMainWindow::recomputeFit );
 
   // Task 11.4.8 — mode toggle drives RPC visibility on the params panel.
   if ( mModeToggle )

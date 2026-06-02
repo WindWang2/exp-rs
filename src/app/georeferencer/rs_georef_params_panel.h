@@ -17,6 +17,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QSpinBox;
+class QgsProjectionSelectionWidget;
 class RsRmsScatterWidget;
 
 /**
@@ -44,6 +45,7 @@ class RsGeorefParamsPanel : public QWidget
     QgsImageWarper::ResamplingMethod resamplingMethod() const;
     QString outputPath() const;
     QgsCoordinateReferenceSystem destCrs() const;
+    void setDestCrs( const QgsCoordinateReferenceSystem &crs );
     double outputPixelSize() const;
 
     // Stubs for Task 8
@@ -64,6 +66,8 @@ class RsGeorefParamsPanel : public QWidget
     void transformMethodChanged();
     void resamplingMethodChanged();
     void outputPathChanged( const QString &path );
+    /// Task 11.5.1 — emitted when the destination CRS picker changes.
+    void destCrsChanged();
 
   private slots:
     void onBrowseOutput();
@@ -86,7 +90,7 @@ class RsGeorefParamsPanel : public QWidget
     QLabel *mMaxRms = nullptr;
 
     QLabel *mSrcCrsLabel = nullptr;
-    QLabel *mDstCrsLabel = nullptr;
+    QgsProjectionSelectionWidget *mCrsWidget = nullptr;
     QLabel *mProjNameLabel = nullptr;
 
     QLineEdit *mOutputPath = nullptr;
