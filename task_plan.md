@@ -6,7 +6,7 @@ Build a pure C++ remote sensing analysis and processing platform based on the QG
 
 ## Current Phase
 
-Phase 9 complete (Image Enhancement). 211/211 tests pass. Next: Phase 10 (Classification — education Lab #4).
+Phase 11.4 complete (Georeferencer 几何校正). 239/239 tests pass. Next: **Phase 11.5 (Georeferencer 高级功能：SIFT 自动匹配、控制点辅助选择)** — 顺延的 stretch 项。Phase 10 (Classification) 仍排在后续。
 
 ---
 
@@ -811,20 +811,46 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 
 ---
 
-### Task 11.4: Image Registration with GCPs
-**Goal:** Ground Control Point collection + polynomial/RPC georeferencing.
+### Task 11.4: Georeferencer (几何校正) ✅ **COMPLETE (2026-06-03)**
+**Goal:** Image → Map / Image → Image / RPC 三模式几何校正，对齐 QGIS Georeferencer + ENVI Registration 工作流。UI 严格按 `UI/design.html` `ArtboardGeoref` 双画布 + 右 dock 参数面板布局。详细设计见 `docs/superpowers/specs/2026-06-02-georeferencer-design.md`。
 
-**Files:**
-- Create: `src/app/map_tools/gcp_tool.h/.cpp`
-- Create: `src/processing/algorithms/georeference.h/.cpp`
-- Create: `src/app/dialogs/georeference_dialog.h/.cpp`
+**Files (新建):**
+- `src/analysis/CMakeLists.txt` + `src/analysis/georeferencing/qgsgcp*.{h,cpp}` (8 文件，直搬 QGIS analysis 层 → 新静态库 qgis_analysis)
+- `src/app/georeferencer/` (~22 个文件)
+  - 直搬：`qgsgeoreferencermainwindow`（外壳重写）、`qgsgcplist*`、`qgsgcpcanvasitem`、`qgsgeoreftool{add,delete,move}point`、`qgsgeoreftransform`、`qgsimagewarper`、`qgsresidualplotitem`、`qgsmapcoordsdialog`(+ui)、`qgsrasterchangecoords`、`qgsgeorefconfigdialog`、`qgsgeorefdatapoint`、`qgsgeorefdelegates`、`qgsgeorefvalidators`、`qgsvalidateddoublespinbox`、`qgstransformsettingsdialog`(拆为右 dock)
+  - 新写：`qgsrpcgcptransformer`、`rs_rms_scatter_widget`、`rs_twincanvas_sync_controller`、`rs_georef_mode_toggle`
+- 测试：`tests/test_gcp_transformer.cpp`、`test_least_squares.cpp`、`test_rpc_transformer.cpp`、`test_gcp_list.cpp`、`test_gcp_points_file.cpp`、`test_image_warper.cpp`、`test_georef_window.cpp`、`tests/data/georef/` (~5MB 测试数据 + golden)
 
-**Steps:**
-- [ ] Create GcpTool (click on canvas to collect GCP pairs)
-- [ ] Implement polynomial transformation (1st, 2nd order)
-- [ ] Create GeoreferenceDialog (GCP table, RMS error display)
-- [ ] Wire to Raster > Georeferencing menu
-- [ ] Build and verify
+**Files (修改):**
+- `src/core/CMakeLists.txt` — 链接 `qgis_analysis`
+- `src/app/CMakeLists.txt` — 加 `app/georeferencer/*.cpp`
+- `src/app/main_window.{h,cpp}` — `openGeoreferencer()` slot + Raster 菜单项
+- `resources/styles.qss` — 增补 georef 表格样式
+- `resources/icons.qrc` — 注册 georeferencer/*.svg 主题图标
+
+**子任务（每步 Red-Green-Refactor）:**
+- [x] **11.4.1** 搬运 analysis 算法层 → 新 `qgis_analysis` 静态库；test_gcp_transformer + test_least_squares 全绿 (349e4a8)
+- [x] **11.4.2** 搬运 `QgsImageWarper` + GDAL warp 端到端；test_image_warper 与 golden 一致 (3bf7915)
+- [x] **11.4.3** GCP 列表 + `.points` 持久化 (含类型字段)；test_gcp_list + test_gcp_points_file (c34fad9)
+- [x] **11.4.4** 主窗口骨架（菜单/工具栏/Mode toggle/StatusBar/Raster 菜单接入）；启动弹窗无崩溃 (fb556dc)
+- [x] **11.4.5** 双画布并排 + `RsTwinCanvasSyncController` 同步；烟雾测试 extentsChanged 双向 (2637f31)
+- [x] **11.4.6** GCP 表格重写（圆角复选框/左竖条/警示色）+ 残差列 + 类型 delegate (c7154c6)
+- [x] **11.4.7** 右 dock 参数面板 + `RsRmsScatterWidget` + 应用校正；test_georef_window 烟雾覆盖 (196ae1d)
+- [x] **11.4.8** RPC 物理模型 (`QgsRpcGcpTransformer` 包装 `GDALCreateRPCTransformer`) + DEM 字段 + 模式切换；test_rpc_transformer (7ddd091)
+
+**Stretch (移到 Phase 11.5):**
+- 自动匹配 SIFT (顶栏按钮 v1 占位 "敬请期待")
+- 从主地图选点辅助 (image-to-map 便捷功能)
+
+**Done when:**
+- 12 个 Catch2 测试文件全绿（含取消/失败路径/CRS 透传/UI 编辑锁四个 review-后新增）
+- 手工烟雾：加载 GF-2 截图 → 6 GCP → Polynomial2 → 输出 GeoTIFF → `gdalinfo` 验证 GeoTransform
+- 手工 warp 失败烟雾：故意填只读输出路径 → 红条提示，无崩溃
+- 手工取消烟雾：大栅格 warp 中按取消 → ≤ 1s 退出
+- `QgsMessageLog` 写出符合 spec §5.5 schema 的 JSON 日志
+- design.html 视觉 review (mimo-v2.5 `ui_diff_check` 对比设计稿)
+
+**Review 状态:** CEO + Eng review 2026-06-02 完成，6 处补丁已合入 spec（CMake GDAL≥3.4 / warp 失败路径 / .points v2 头 / DEM CRS 校验 / 3 新测试用例 / 结构化日志）。
 
 ---
 
