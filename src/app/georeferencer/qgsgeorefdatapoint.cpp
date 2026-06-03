@@ -19,6 +19,7 @@
 #include "qgsgeorefdatapoint.h"
 
 #include "qgscoordinatereferencesystem.h"
+#include "qgsgcpcanvasitem.h"
 #include "qgsmapcanvas.h"
 #include "qgsmaptool.h"
 #include "qgsproject.h"
@@ -32,12 +33,57 @@ QgsGeorefDataPoint::QgsGeorefDataPoint( QgsMapCanvas *srcCanvas,
   , mDstCanvas( dstCanvas )
   , mGcpPoint( gcp )
 {
-  // QgsGCPCanvasItem will be added in Task 11.4.6.
+  // Build SRC + REF canvas item visuals if both a canvas and a gcp are wired.
+  if ( mGcpPoint )
+  {
+    if ( mSrcCanvas )
+    {
+      mGCPSourceItem = new QgsGCPCanvasItem( mSrcCanvas, mId, mGcpPoint->sourcePoint(), /*isSource=*/true );
+      mGCPSourceItem->setEnabled( mGcpPoint->isEnabled() );
+      mGCPSourceItem->setResidual( mGcpPoint->residual() );
+    }
+    if ( mDstCanvas )
+    {
+      mGCPDestinationItem = new QgsGCPCanvasItem( mDstCanvas, mId, mGcpPoint->destinationPoint(), /*isSource=*/false );
+      mGCPDestinationItem->setEnabled( mGcpPoint->isEnabled() );
+    }
+  }
 }
 
 QgsGeorefDataPoint::~QgsGeorefDataPoint()
 {
-  // Canvas marker items not yet owned (Task 11.4.6).
+  // QGraphicsItems are owned by their scene; delete is the standard cleanup.
+  delete mGCPSourceItem;
+  mGCPSourceItem = nullptr;
+  delete mGCPDestinationItem;
+  mGCPDestinationItem = nullptr;
+}
+
+void QgsGeorefDataPoint::updateMarkers()
+{
+  if ( !mGcpPoint )
+    return;
+  if ( mGCPSourceItem )
+  {
+    mGCPSourceItem->setId( mId );
+    mGCPSourceItem->setWorldPos( mGcpPoint->sourcePoint() );
+    mGCPSourceItem->setEnabled( mGcpPoint->isEnabled() );
+    mGCPSourceItem->setResidual( mGcpPoint->residual() );
+  }
+  if ( mGCPDestinationItem )
+  {
+    mGCPDestinationItem->setId( mId );
+    mGCPDestinationItem->setWorldPos( mGcpPoint->destinationPoint() );
+    mGCPDestinationItem->setEnabled( mGcpPoint->isEnabled() );
+  }
+}
+
+void QgsGeorefDataPoint::setSelected( bool on )
+{
+  if ( mGCPSourceItem )
+    mGCPSourceItem->setSelected( on );
+  if ( mGCPDestinationItem )
+    mGCPDestinationItem->setSelected( on );
 }
 
 void QgsGeorefDataPoint::setSourcePoint( const QgsPointXY &p )
@@ -78,16 +124,22 @@ void QgsGeorefDataPoint::setEnabled( bool enabled )
 void QgsGeorefDataPoint::setId( int id )
 {
   mId = id;
+  if ( mGCPSourceItem )
+    mGCPSourceItem->setId( id );
+  if ( mGCPDestinationItem )
+    mGCPDestinationItem->setId( id );
 }
 
 void QgsGeorefDataPoint::setResidual( QPointF r )
 {
   mResidual = r;
+  if ( mGCPSourceItem )
+    mGCPSourceItem->setResidual( r );
 }
 
 void QgsGeorefDataPoint::updateCoords()
 {
-  // Canvas marker visuals are added in Task 11.4.6; nothing to refresh yet.
+  updateMarkers();
 }
 
 void QgsGeorefDataPoint::setHovered( bool hovered )

@@ -11,6 +11,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QPointF>
+#include <QSet>
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QStatusBar>
@@ -26,6 +27,8 @@
 #include "qgscoordinatetransformcontext.h"
 #include "qgsgcplist.h"
 #include "qgsgcplistwidget.h"
+#include "qgsgcppoint.h"
+#include "qgsgeorefdatapoint.h"
 #include "qgsgcppoint.h"
 #include "qgsgeorefdatapoint.h"
 #include "qgsgeoreftooladdpoint.h"
@@ -79,6 +82,9 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
 
   // Wire the params panel to the recompute pipeline.
   connect( mGcps, &QgsGCPList::changed, this, &QgsGeoreferencerMainWindow::recomputeFit );
+  // Task 11.5.2 — reconcile QgsGeorefDataPoint adapters (canvas markers) with
+  // the live QgsGCPList on every mutation.
+  connect( mGcps, &QgsGCPList::changed, this, &QgsGeoreferencerMainWindow::onPointsChanged );
   connect( mParamsPanel, &RsGeorefParamsPanel::transformMethodChanged,
            this, &QgsGeoreferencerMainWindow::recomputeFit );
   connect( mParamsPanel, &RsGeorefParamsPanel::outputPathChanged, this,
@@ -102,7 +108,52 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   recomputeFit();
 }
 
-QgsGeoreferencerMainWindow::~QgsGeoreferencerMainWindow() = default;
+QgsGeoreferencerMainWindow::~QgsGeoreferencerMainWindow()
+{
+  qDeleteAll( mDataPoints );
+  mDataPoints.clear();
+}
+
+void QgsGeoreferencerMainWindow::onPointsChanged()
+{
+  if ( !mGcps )
+    return;
+
+  // Reconcile mDataPoints with the live mGcps list. We assign ids by current
+  // list position so the on-canvas numeric label tracks the table row.
+  QSet<QgsGcpPoint *> live;
+  int idCounter = 0;
+  for ( QgsGcpPoint *p : *mGcps )
+  {
+    if ( !p )
+    {
+      ++idCounter;
+      continue;
+    }
+    live.insert( p );
+    QgsGeorefDataPoint *dp = mDataPoints.value( p, nullptr );
+    if ( !dp )
+    {
+      dp = new QgsGeorefDataPoint( mSrcCanvas, mRefCanvas, p );
+      mDataPoints.insert( p, dp );
+    }
+    dp->setId( idCounter );
+    dp->updateMarkers();
+    ++idCounter;
+  }
+
+  // Drop any data points whose backing QgsGcpPoint has been removed.
+  QList<QgsGcpPoint *> dead;
+  for ( auto it = mDataPoints.cbegin(); it != mDataPoints.cend(); ++it )
+  {
+    if ( !live.contains( it.key() ) )
+      dead.append( it.key() );
+  }
+  for ( QgsGcpPoint *p : dead )
+  {
+    delete mDataPoints.take( p );
+  }
+}
 
 namespace
 {

@@ -30,7 +30,7 @@
 
 class QgsMapCanvas;
 class QgsCoordinateTransformContext;
-class QgsGCPCanvasItem; // not yet ported (Task 11.4.6); pointer is left null in 11.4.5
+class QgsGCPCanvasItem;
 
 /**
  * \brief Adapter between a QgsGcpPoint (owned by QgsGCPList) and the GUI.
@@ -79,6 +79,18 @@ class QgsGeorefDataPoint : public QObject
     void setId( int id );
 
     /**
+     * Rebuilds the SRC + REF canvas item visuals from the current
+     * QgsGcpPoint state (id, source/destination point, enabled, residual).
+     * Safe to call repeatedly; cheap when nothing has changed.
+     */
+    void updateMarkers();
+
+    QgsGCPCanvasItem *sourceItem() const { return mGCPSourceItem; }
+    QgsGCPCanvasItem *destinationItem() const { return mGCPDestinationItem; }
+
+    void setSelected( bool on );
+
+    /**
      * Tests whether \a p falls within the search radius around this point's
      * graphic on the requested \a type canvas (source or destination).
      * Returns false (and leaves \a distance unmodified) until canvas marker
@@ -117,8 +129,8 @@ class QgsGeorefDataPoint : public QObject
   private:
     QgsMapCanvas *mSrcCanvas = nullptr;
     QgsMapCanvas *mDstCanvas = nullptr;
-    QgsGCPCanvasItem *mGCPSourceItem = nullptr;      // Task 11.4.6
-    QgsGCPCanvasItem *mGCPDestinationItem = nullptr; // Task 11.4.6
+    QgsGCPCanvasItem *mGCPSourceItem = nullptr;
+    QgsGCPCanvasItem *mGCPDestinationItem = nullptr;
     bool mHovered = false;
 
     QgsGcpPoint *mGcpPoint = nullptr; // non-owning reference into QgsGCPList

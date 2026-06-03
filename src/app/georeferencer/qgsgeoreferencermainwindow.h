@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QMainWindow>
 #include <memory>
 
@@ -18,6 +19,8 @@ class RsTwinCanvasSyncController;
 class QgsGeorefToolAddPoint;
 class QgsGCPList;
 class QgsGCPListWidget;
+class QgsGcpPoint;
+class QgsGeorefDataPoint;
 class QgsGeorefTransform;
 class RsGeorefParamsPanel;
 
@@ -59,6 +62,13 @@ class QgsGeoreferencerMainWindow : public QMainWindow
     void recomputeFit();
     /// Wired to the Apply toolbar action — runs a RsWarpTask.
     void applyTransform();
+    /**
+     * Reconciles `mDataPoints` with `mGcps`: creates a QgsGeorefDataPoint
+     * for any new QgsGcpPoint, refreshes existing ones, and deletes any
+     * data point whose backing QgsGcpPoint is no longer in the list.
+     * Wired to `QgsGCPList::changed`.
+     */
+    void onPointsChanged();
 
   private:
     void setupMenus();
@@ -88,6 +98,8 @@ class QgsGeoreferencerMainWindow : public QMainWindow
     QgsGCPList *mGcps = nullptr;
     QgsGCPListWidget *mGcpTable = nullptr;
     QDockWidget *mGcpDock = nullptr;
+    /// Task 11.5.2 — owns the GUI adapter (canvas markers) for each live GCP.
+    QHash<QgsGcpPoint *, QgsGeorefDataPoint *> mDataPoints;
 
     // Task 11.4.7 — right param dock, transform fit cache, source raster
     RsGeorefParamsPanel *mParamsPanel = nullptr;
