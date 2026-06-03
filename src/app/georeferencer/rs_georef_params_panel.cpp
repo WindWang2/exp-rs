@@ -274,6 +274,10 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     mDemZOffset->setDecimals( 2 );
     mDemZOffset->setValue( 0.0 );
     mDemZOffset->setSuffix( tr( " m" ) );
+    // Task 11.5.4 — propagate spin-box edits so the main window can
+    // recompute the RPC fit (and the warp pipeline picks up RPC_HEIGHT).
+    connect( mDemZOffset, QOverload<double>::of( &QDoubleSpinBox::valueChanged ),
+             this, [this]( double ) { emit demZOffsetChanged(); } );
     form->addRow( tr( "高程偏移" ), mDemZOffset );
 
     mDemSection->layout()->addItem( form );
@@ -357,6 +361,11 @@ bool RsGeorefParamsPanel::isDemSectionVisible() const
 QString RsGeorefParamsPanel::demPath() const
 {
   return mDemPath ? mDemPath->text().trimmed() : QString();
+}
+
+double RsGeorefParamsPanel::demZOffset() const
+{
+  return mDemZOffset ? mDemZOffset->value() : 0.0;
 }
 
 void RsGeorefParamsPanel::setRpcMode( bool on )

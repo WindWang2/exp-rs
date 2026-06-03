@@ -120,8 +120,13 @@ inline QString makeSyntheticRpcRaster( const QString &dir )
   md = CSLSetNameValue( md, "LAT_SCALE", "0.001" );
   md = CSLSetNameValue( md, "LONG_SCALE", "0.001" );
   md = CSLSetNameValue( md, "HEIGHT_SCALE", "1000" );
+  // Coefficient index 3 couples line offset to normalized height (H_n).  With
+  // HEIGHT_OFF=0 and HEIGHT_SCALE=1000, an RPC_HEIGHT=0 input yields H_n=0 and
+  // preserves the identity-at-center behaviour the Task 11.4.8 tests rely on;
+  // a non-zero RPC_HEIGHT produces a small but measurable shift, which the
+  // Task 11.5.4 Z-offset test depends on.
   md = CSLSetNameValue( md, "LINE_NUM_COEFF",
-                        "0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0" );
+                        "0 1 0 0.5 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0" );
   md = CSLSetNameValue( md, "LINE_DEN_COEFF",
                         "1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0" );
   md = CSLSetNameValue( md, "SAMP_NUM_COEFF",

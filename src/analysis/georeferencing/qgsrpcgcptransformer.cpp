@@ -42,7 +42,21 @@ void QgsRpcGcpTransformer::freeTransformer()
 
 QgsGcpTransformerInterface *QgsRpcGcpTransformer::clone() const
 {
-  return new QgsRpcGcpTransformer( mSrc, mDem );
+  auto *c = new QgsRpcGcpTransformer( mSrc, mDem );
+  c->mDemPath = mDemPath;
+  c->mZOffset = mZOffset;
+  c->mUseGcpRefinement = mUseGcpRefinement;
+  return c;
+}
+
+void QgsRpcGcpTransformer::setRpcOptions( const QString &demPath, double zOffset, bool useRefine )
+{
+  mDemPath = demPath;
+  // Keep the legacy mDem in sync — downstream code (Task 11.4.8) still reads it
+  // via demPath() and the existing setDemPath() codepath.
+  mDem = demPath;
+  mZOffset = zOffset;
+  mUseGcpRefinement = useRefine;
 }
 
 bool QgsRpcGcpTransformer::updateParametersFromGcps( const QVector<QgsPointXY> & /*source*/,
@@ -74,6 +88,15 @@ bool QgsRpcGcpTransformer::updateParametersFromGcps( const QVector<QgsPointXY> &
   }
 
   char **opts = nullptr;
+  // RPC_HEIGHT is the constant-elevation fallback used when no DEM raster is
+  // available; GDAL will let RPC_DEM take precedence when both are set, but
+  // we still want the height term passed through so callers can dial it in
+  // without supplying a DEM.  Push it BEFORE the RPC_DEM entries.
+  if ( mZOffset != 0.0 )
+  {
+    const QByteArray h = QString::number( mZOffset, 'f', 4 ).toUtf8();
+    opts = CSLSetNameValue( opts, "RPC_HEIGHT", h.constData() );
+  }
   if ( !mDem.isEmpty() && QFileInfo::exists( mDem ) )
   {
     opts = CSLSetNameValue( opts, "RPC_DEM", mDem.toUtf8().constData() );

@@ -51,6 +51,26 @@ class QGIS_ANALYSIS_EXPORT QgsRpcGcpTransformer : public QgsGcpTransformerInterf
     QString sourceRasterPath() const { return mSrc; }
     QString demPath() const { return mDem; }
 
+    /**
+     * Configure DEM + Z-offset + GCP refinement flag for the next RPC fit.
+     *
+     * \a demPath is also written into the existing \c mDem member so that
+     * downstream code reading \c demPath() continues to work.  When
+     * \a zOffset is non-zero, the next call to \ref updateParametersFromGcps
+     * pushes `RPC_HEIGHT=<zOffset>` into GDAL's `papszOptions` (placed
+     * before any `RPC_DEM` so the DEM raster still wins when both are
+     * present, per the GDAL convention).
+     *
+     * \a useGcpRefinement is stored for the Task 11.5.5 linear-bias step
+     * but is not yet consumed in Task 11.5.4.
+     *
+     * \since SICNU GEO RS Phase 11.5
+     */
+    void setRpcOptions( const QString &demPath, double zOffset, bool useGcpRefinement = false );
+
+    double zOffset() const { return mZOffset; }
+    bool useGcpRefinement() const { return mUseGcpRefinement; }
+
     QgsGcpTransformerInterface *clone() const override;
     TransformMethod method() const override { return TransformMethod::RpcPhysical; }
 
@@ -71,6 +91,9 @@ class QGIS_ANALYSIS_EXPORT QgsRpcGcpTransformer : public QgsGcpTransformerInterf
 
     QString mSrc;
     QString mDem;
+    QString mDemPath;
+    double mZOffset = 0.0;
+    bool mUseGcpRefinement = false;
     void *mTransformArg = nullptr;
 };
 

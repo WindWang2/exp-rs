@@ -53,6 +53,9 @@ class RsGeorefParamsPanel : public QWidget
     QString demPath() const;
     void setRpcMode( bool on );
 
+    /// Task 11.5.4 — DEM Z-offset (metres) from the params panel spin box.
+    double demZOffset() const;
+
   public slots:
     /// Update the section-3 labels and DOF readout.
     void setRmsValues( int total, int enabled, double rmsPx,
@@ -68,6 +71,8 @@ class RsGeorefParamsPanel : public QWidget
     void outputPathChanged( const QString &path );
     /// Task 11.5.1 — emitted when the destination CRS picker changes.
     void destCrsChanged();
+    /// Task 11.5.4 — emitted when the DEM Z-offset spin box value changes.
+    void demZOffsetChanged();
 
   private slots:
     void onBrowseOutput();

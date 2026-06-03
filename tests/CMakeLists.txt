@@ -853,6 +853,24 @@ target_include_directories(test_georef_window_rpc_mode PRIVATE
 set_target_properties(test_georef_window_rpc_mode PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_georef_window_rpc_mode)
 
+# Task 11.5.4 — DEM Z-offset wired into RPC pipeline
+add_executable(test_dem_z_offset test_dem_z_offset.cpp)
+target_link_libraries(test_dem_z_offset PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+)
+target_include_directories(test_dem_z_offset PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_dem_z_offset)
+
 # Task 11.5.1 — CRS picker persistence + signal tests
 add_executable(test_crs_picker_persists test_crs_picker_persists.cpp)
 target_link_libraries(test_crs_picker_persists PRIVATE

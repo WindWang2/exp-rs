@@ -36,6 +36,7 @@
 #include "qgsgeorefdatapoint.h"
 #include "qgsgeoreftooladdpoint.h"
 #include "qgsgeoreftransform.h"
+#include "qgsrpcgcptransformer.h"
 #include "qgsmapcanvas.h"
 #include "qgsmapcoordsdialog.h"
 #include "qgsmaplayerstore.h"
@@ -96,6 +97,10 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
            [this]( const QString & ) { recomputeFit(); } );
   // Task 11.5.1 — user-selected destination CRS should re-run the fit.
   connect( mParamsPanel, &RsGeorefParamsPanel::destCrsChanged,
+           this, &QgsGeoreferencerMainWindow::recomputeFit );
+  // Task 11.5.4 — DEM Z-offset changes feed the RPC transformer's RPC_HEIGHT
+  // option; recomputeFit() picks the new value up from the panel.
+  connect( mParamsPanel, &RsGeorefParamsPanel::demZOffsetChanged,
            this, &QgsGeoreferencerMainWindow::recomputeFit );
 
   // Task 11.5.3 — REF canvas content is private to the Georeferencer when
@@ -188,6 +193,22 @@ void QgsGeoreferencerMainWindow::recomputeFit()
 
   // Build a fresh transform of the chosen method.
   mTransform.reset( new QgsGeorefTransform( method ) );
+
+  // Task 11.5.4 — push DEM/Z-offset settings down into the RPC transformer
+  // before the fit so RPC_HEIGHT and (if a DEM is set) RPC_DEM are part of
+  // GDALCreateRPCTransformerV2's papszOptions.  Task 11.5.5 will flip
+  // useGcpRefinement to true when ≥ 3 enabled GCPs exist.
+  if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical )
+  {
+    if ( auto *rpc = dynamic_cast<QgsRpcGcpTransformer *>(
+           mTransform ? mTransform->gcpTransformer() : nullptr ) )
+    {
+      rpc->setSourceRasterPath( mSourceRasterPath );
+      rpc->setRpcOptions( mParamsPanel->demPath(),
+                          mParamsPanel->demZOffset(),
+                          /*useGcpRefinement*/ false );
+    }
+  }
 
   // Collect enabled GCPs (source + destination) in parallel vectors.
   QVector<QgsPointXY> src;
