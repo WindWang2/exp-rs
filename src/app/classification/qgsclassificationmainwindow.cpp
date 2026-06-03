@@ -9,6 +9,7 @@
 #include "rs_roi_collection.h"
 #include "rs_roi_tool_base.h"
 #include "rs_roi_tool_freehand.h"
+#include "rs_roi_tool_magicwand.h"
 #include "rs_roi_tool_point.h"
 #include "rs_roi_tool_polygon.h"
 #include "rs_roi_tool_rectangle.h"
@@ -161,14 +162,21 @@ void QgsClassificationMainWindow::setupStatusBar()
 
 void QgsClassificationMainWindow::setupRoiTools()
 {
-  // Instantiate the 4 manual ROI map tools owned by this window.
+  // Instantiate the 4 manual ROI map tools owned by this window. The
+  // magic-wand tool (Task 10.7) joins the same exclusive group so only one
+  // ROI tool is active at a time.
   mToolPoint = new RsRoiToolPoint( mCanvas );
   mToolRect = new RsRoiToolRectangle( mCanvas );
   mToolPolygon = new RsRoiToolPolygon( mCanvas );
   mToolFreehand = new RsRoiToolFreehand( mCanvas );
+  mToolMagicWand = new RsRoiToolMagicWand( mCanvas );
+  // Future-proofing: once Task 10.8 wires raster loading, mSourceRasterPath
+  // will be non-empty and the magic-wand can read pixels; until then the
+  // tool's canvasReleaseEvent no-ops on an empty path.
+  mToolMagicWand->setSourceData( mSourceRasterPath );
 
   const QVector<RsRoiToolBase *> tools = {
-    mToolPoint, mToolRect, mToolPolygon, mToolFreehand
+    mToolPoint, mToolRect, mToolPolygon, mToolFreehand, mToolMagicWand
   };
   for ( RsRoiToolBase *t : tools )
   {
@@ -184,6 +192,7 @@ void QgsClassificationMainWindow::setupRoiTools()
     { QStringLiteral( "rsToolRoiRect" ), mToolRect },
     { QStringLiteral( "rsToolRoiPolygon" ), mToolPolygon },
     { QStringLiteral( "rsToolRoiFreehand" ), mToolFreehand },
+    { QStringLiteral( "rsToolRoiMagicWand" ), mToolMagicWand },
   };
 
   auto *group = new QActionGroup( this );
@@ -225,6 +234,8 @@ void QgsClassificationMainWindow::onCurrentClassChanged( int classId )
     mToolPolygon->setCurrentClassId( classId );
   if ( mToolFreehand )
     mToolFreehand->setCurrentClassId( classId );
+  if ( mToolMagicWand )
+    mToolMagicWand->setCurrentClassId( classId );
 }
 
 void QgsClassificationMainWindow::onRoiDrawn( const QgsGeometry &geom, int classId )

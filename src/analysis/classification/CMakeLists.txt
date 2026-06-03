@@ -13,7 +13,11 @@ target_include_directories(qgis_analysis PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # stack (the qgis_app_classify GUI library is also skipped — see
 # src/app/classification/CMakeLists.txt).
 if(SICNU_HAS_OPENCV)
-    target_sources(qgis_analysis PRIVATE rs_jm_separability.cpp)
+    # Phase 10A Task 10.7 — RsFloodFill is OpenCV-dependent (cv::Mat).
+    target_sources(qgis_analysis PRIVATE
+        rs_jm_separability.cpp
+        rs_flood_fill.cpp
+    )
     target_link_libraries(qgis_analysis PUBLIC ${OpenCV_LIBS})
     target_include_directories(qgis_analysis PUBLIC ${OpenCV_INCLUDE_DIRS})
     target_compile_definitions(qgis_analysis PUBLIC SICNU_HAS_OPENCV=1)

@@ -17,6 +17,7 @@ class RsRoiToolPoint;
 class RsRoiToolRectangle;
 class RsRoiToolPolygon;
 class RsRoiToolFreehand;
+class RsRoiToolMagicWand;
 
 /**
  * \brief Phase 10A — Pixel-Based Classification main window shell.
@@ -65,6 +66,9 @@ class QgsClassificationMainWindow : public QMainWindow
     RsRoiToolRectangle *mToolRect = nullptr;
     RsRoiToolPolygon *mToolPolygon = nullptr;
     RsRoiToolFreehand *mToolFreehand = nullptr;
+
+    // Task 10.7 — Magic-wand ROI map tool (L2-tolerance flood fill).
+    RsRoiToolMagicWand *mToolMagicWand = nullptr;
 
     // Source raster metadata for pixel-index rasterization. Empty path means
     // no raster is loaded yet — onRoiDrawn skips rasterization and stores an

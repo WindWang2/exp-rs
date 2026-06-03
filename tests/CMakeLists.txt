@@ -1180,4 +1180,21 @@ if(TARGET qgis_app_classify)
     ${CMAKE_BINARY_DIR}
   )
   sicnu_discover_tests(test_jm_separability)
+
+  # Phase 10A Task 10.7 — Magic-wand flood-fill algorithm tests.
+  add_executable(test_flood_fill test_flood_fill.cpp)
+  target_link_libraries(test_flood_fill PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_flood_fill PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_flood_fill)
 endif()
