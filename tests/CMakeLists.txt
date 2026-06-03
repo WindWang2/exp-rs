@@ -1197,4 +1197,78 @@ if(TARGET qgis_app_classify)
     ${CMAKE_BINARY_DIR}
   )
   sicnu_discover_tests(test_flood_fill)
+
+  # Phase 10A Task 10.8 — NormalBayes backend accuracy test.
+  add_executable(test_classifier_normalbayes test_classifier_normalbayes.cpp)
+  target_link_libraries(test_classifier_normalbayes PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_classifier_normalbayes PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_classifier_normalbayes)
+
+  # Phase 10A Task 10.8 — SVM (RBF) backend accuracy test.
+  add_executable(test_classifier_svm test_classifier_svm.cpp)
+  target_link_libraries(test_classifier_svm PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_classifier_svm PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_classifier_svm)
+
+  # Phase 10A Task 10.8 — KMeans backend cluster-centre test.
+  add_executable(test_classifier_kmeans test_classifier_kmeans.cpp)
+  target_link_libraries(test_classifier_kmeans PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_classifier_kmeans PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_classifier_kmeans)
+
+  # Phase 10A Task 10.8 — End-to-end classification task test.
+  add_executable(test_classification_e2e test_classification_e2e.cpp)
+  target_link_libraries(test_classification_e2e PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    qgis_core
+    qgis_analysis
+    qgis_app_classify
+    GDAL::GDAL
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_classification_e2e PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${CMAKE_SOURCE_DIR}/src/app/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_classification_e2e PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_classification_e2e)
 endif()

@@ -24,6 +24,9 @@ qt_add_library(qgis_app_classify STATIC
     rs_roi_tool_magicwand.cpp
     rs_spectral_curve_widget.cpp
     rs_jm_matrix_widget.cpp
+    # Phase 10A Task 10.8 — ClassifierBar + RsClassificationTask.
+    rs_classifier_setup_bar.cpp
+    rs_classification_task.cpp
 )
 
 target_include_directories(qgis_app_classify PUBLIC
