@@ -24,6 +24,8 @@ if(SICNU_HAS_OPENCV)
         rs_classifier_kmeans.cpp
         # Phase 10A review patch — stratified train/test split helper.
         rs_classification_split.cpp
+        # Phase 10A Task 10.9 — confusion matrix + Kappa + per-class P/R/F1.
+        rs_accuracy_assessment.cpp
     )
     target_link_libraries(qgis_analysis PUBLIC ${OpenCV_LIBS})
     target_include_directories(qgis_analysis PUBLIC ${OpenCV_INCLUDE_DIRS})

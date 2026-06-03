@@ -56,6 +56,33 @@ bool RsClassificationTask::run()
     return false;
   }
 
+  // 1b. Phase 10A Task 10.9 — accuracy assessment on the held-out split.
+  // KMeans is skipped because its cluster IDs are an arbitrary permutation
+  // of the ROI class IDs; confusion against testY would be misleading
+  // until Hungarian-style cluster→class alignment is added in 10A.1.
+  if ( mCfg.testX.rows > 0 && mCfg.testY.rows > 0
+       && mCfg.algoName != QStringLiteral( "KMeans" ) )
+  {
+    try
+    {
+      const cv::Mat pred = mCfg.backend->predict( mCfg.testX );
+      QVector<int> yt;
+      QVector<int> yp;
+      yt.reserve( pred.rows );
+      yp.reserve( pred.rows );
+      for ( int i = 0; i < pred.rows; ++i )
+      {
+        yt.append( mCfg.testY.at<int>( i, 0 ) );
+        yp.append( pred.at<int>( i, 0 ) );
+      }
+      mResult.accuracy = RsAccuracyAssessment::compute( yt, yp );
+    }
+    catch ( const cv::Exception & )
+    {
+      // Accuracy failure must not abort the rest of the classification.
+    }
+  }
+
   // 2. Open source raster
   GDALAllRegister();
   GDALDataset *srcDs = static_cast<GDALDataset *>(

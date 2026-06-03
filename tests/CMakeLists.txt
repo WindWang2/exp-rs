@@ -1266,6 +1266,23 @@ if(TARGET qgis_app_classify)
   )
   sicnu_discover_tests(test_stratified_split)
 
+  # Phase 10A Task 10.9 — confusion matrix + Kappa accuracy assessment.
+  add_executable(test_accuracy_assessment test_accuracy_assessment.cpp)
+  target_link_libraries(test_accuracy_assessment PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_accuracy_assessment PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_accuracy_assessment)
+
   # Phase 10A Task 10.8 — End-to-end classification task test.
   add_executable(test_classification_e2e test_classification_e2e.cpp)
   target_link_libraries(test_classification_e2e PRIVATE

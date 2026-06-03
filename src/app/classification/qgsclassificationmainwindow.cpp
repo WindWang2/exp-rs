@@ -1,5 +1,6 @@
 #include "qgsclassificationmainwindow.h"
 
+#include "rs_accuracy_dialog.h"
 #include "rs_class_def.h"
 #include "rs_class_quick_list.h"
 #include "rs_class_table_widget.h"
@@ -607,13 +608,18 @@ void QgsClassificationMainWindow::applyClassification()
     const auto &r = task->result();
     if ( r.ok )
     {
-      const QJsonObject obj{
+      QJsonObject obj{
         { QStringLiteral( "event" ), QStringLiteral( "classify_finished" ) },
         { QStringLiteral( "algo" ), algoForLog },
         { QStringLiteral( "total_pixels" ), r.totalPixels },
         { QStringLiteral( "duration_ms" ), r.durationMs },
         { QStringLiteral( "status" ), QStringLiteral( "ok" ) }
       };
+      if ( !r.accuracy.classIds.isEmpty() )
+      {
+        obj.insert( QStringLiteral( "overall_accuracy" ), r.accuracy.overallAccuracy );
+        obj.insert( QStringLiteral( "kappa" ), r.accuracy.kappa );
+      }
       QgsMessageLog::logMessage(
         QString::fromUtf8( QJsonDocument( obj ).toJson( QJsonDocument::Compact ) ),
         QStringLiteral( "Classification" ),
@@ -624,6 +630,23 @@ void QgsClassificationMainWindow::applyClassification()
             .arg( QFileInfo( outForLog ).fileName() )
             .arg( r.durationMs ),
           6000 );
+
+      // Phase 10A Task 10.9 — present accuracy dialog when the task
+      // computed metrics from the held-out split. Non-modal so the
+      // lambda returns promptly.
+      if ( !r.accuracy.classIds.isEmpty() )
+      {
+        QHash<int, QString> classNames;
+        if ( mRois )
+        {
+          const auto defs = mRois->classDefs();
+          for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
+            classNames[it.key()] = it.value().name();
+        }
+        auto *dlg = new RsAccuracyDialog( r.accuracy, classNames, this );
+        dlg->setAttribute( Qt::WA_DeleteOnClose );
+        dlg->show();
+      }
     }
     else
     {

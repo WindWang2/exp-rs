@@ -27,6 +27,8 @@ qt_add_library(qgis_app_classify STATIC
     # Phase 10A Task 10.8 — ClassifierBar + RsClassificationTask.
     rs_classifier_setup_bar.cpp
     rs_classification_task.cpp
+    # Phase 10A Task 10.9 — accuracy assessment result dialog.
+    rs_accuracy_dialog.cpp
 )
 
 target_include_directories(qgis_app_classify PUBLIC

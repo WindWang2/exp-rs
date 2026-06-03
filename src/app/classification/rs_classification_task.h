@@ -16,6 +16,7 @@
 #include "qgsfeedback.h"
 
 #include "rs_classifier_backend.h"
+#include "rs_accuracy_assessment.h"
 
 #include <QColor>
 #include <QHash>
@@ -54,11 +55,12 @@ class RsClassificationTask : public QgsTask
       QString errorMessage;
       int totalPixels = 0;
       int durationMs = 0;
-      // Phase 10A review patch — reserved for Task 10.9 accuracy assessment.
-      // run() does NOT populate these in the current patch; Task 10.9 will.
-      cv::Mat confusionMatrix;
-      double overallAccuracy = 0.0;
-      double kappa = 0.0;
+      // Phase 10A Task 10.9 — confusion matrix + Kappa + per-class P/R/F1
+      // populated when Config.testX / testY are non-empty AND the backend
+      // returns class IDs aligned with ROI class IDs (i.e. KMeans is
+      // skipped because its cluster IDs are arbitrary permutations of
+      // the true class IDs).
+      RsAccuracyAssessment::Result accuracy;
     };
 
     explicit RsClassificationTask( Config cfg );
