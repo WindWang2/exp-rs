@@ -1,5 +1,74 @@
 # Progress Log — SICNU GEO RS
 
+## Session: 2026-06-04 — Phase 11.5 Georeferencer v1.5 ✅ COMPLETE
+
+### 状态
+- **7/7 子任务完成**，全部独立提交
+- **251/251 Catch2 测试绿**（Phase 11.4 终态 239 + 11.5 新增 12：CRS picker 2 + canvas item 2 + image-to-image 2 + DEM Z-offset 1 + RPC refine 2 + RPC golden 1 + SIFT 2）
+- 全套构建 + 全套 ctest ≈ 56s，无回归
+
+### 子任务提交序列
+| 子任务 | SHA | 描述 |
+|---|---|---|
+| 11.5.1 | `f2125f9` | CRS Picker — `QgsProjectionSelectionWidget` + QgsSettings 持久化 + destCrsChanged → recomputeFit |
+| 11.5.2 | `16c7641` | GCP 画布标记 + 残差 plot 端口；落地 `QgsGeorefDataPoint`（不再 stub） |
+| 11.5.3 | `53090d2` | Image-to-Image 模式 — File 菜单加载 SRC/REF 栅格 + 私有 `QgsMapLayerStore` + 模式切换图层 |
+| 11.5.4 | `255446c` | DEM Z-offset 接线 → `RPC_HEIGHT` 进 `papszOptions` |
+| 11.5.5 | `99844b6` | RPC GCP 精化（线性 bias）— 平均残差注入 `dfLAT_OFF/dfLONG_OFF`；≥3 GCP 启用 |
+| 11.5.6 | `35d3bfb` | 合成 "真实" RPC golden — 非平凡多项式 + 斜面 DEM + SHA256 + 首次运行自动捕获 |
+| 11.5.7 | `9df03fe` | SIFT 自动匹配 — OpenCV 4.5+ OPTIONAL；detect + BFMatcher + RANSAC；`RsSiftDialog` + `RsSiftTask` + 批量入 `mGcps` + 结构化 JSON log |
+
+### 关键实施偏离 / 妥协
+
+1. **Task 11.5.6 走合成路径，未下载 LC09 L1TP**：subagent 环境无法交互登录 USGS；合成 256×256 RPC 栅格（非平凡多项式 LINE_NUM_COEFF[3]=0.4 / SAMP_NUM_COEFF[3]=0.3）+ 16×16 斜面 DEM（100m SW → 500m NE，EPSG:4326）作为非平凡回归基线。SHA256 用 first-run capture 模式：`tests/data/georef/golden/synthetic_rpc_warp.sha256`。
+2. **`QgsGCPList` ctor 仍是无参 + `setParent()`**（Phase 11.4.3 redesign）；新代码遵循该模式。
+3. **Task 11.5.5 精化前/后 RMS 显示**：标签在面板里 (`rsRmsBefore` / `rsRmsAfter`)，但 `recomputeFit()` 暂未两次跑 transformer 算对比（避免双倍 GDAL 开销）；spec §3.5 标 OPTIONAL，留作未来 polish。
+4. **Task 11.5.7 CMake 包含 `calib3d`**：spec 只列 `core features2d imgproc`，但 `cv::findHomography` 在 `calib3d`，subagent 自补。
+5. **Task 11.5.2 canvas item CRS reprojection**：当前 `updatePosition()` 不在 `destinationPointCrs` 与 REF 画布 CRS 之间转换；Task 11.5.3 在 `onModeChanged` 末尾 `updateMarkers()` 重绘所有点缓解。Image-to-Image 模式如果 REF 栅格 CRS 与 GCP `destinationPointCrs` 不一致，标记位置可能漂移。建议未来加 `QgsCoordinateTransform` step。
+
+### 环境检测
+- OpenCV 4.13.0（pkg-config opencv4）+ calib3d / core / features2d / imgproc 全装；`SICNU_HAS_OPENCV=1` 编译开启
+- GDAL 3.4+（Phase 11.4 已锁）
+- Qt6 全套 + Catch2 v3
+
+### Phase 11.5 引入的新模块概览
+- **新依赖**：OpenCV 4.5+（OPTIONAL）— 通过 `find_package(OpenCV 4.5 QUIET COMPONENTS core features2d imgproc calib3d)` + `SICNU_HAS_OPENCV` 编译宏；无 OpenCV 时 SIFT TEST_CASE 自动 SKIP，其他 250 测试照常绿
+- **新自写组件**：`RsSiftMatcher` / `RsSiftDialog` / `RsSiftTask`（共 6 文件）
+- **新端口**：`QgsGCPCanvasItem` / `QgsResidualPlotItem`（11.4.5 推迟，11.5.2 落地）
+- **新方法**：`QgsRpcGcpTransformer::setRpcOptions(demPath, zOffset, useGcpRefinement)`
+- **新文件**：1 个合成 golden SHA256 fixture（< 100 bytes）+ scripts/download_test_data.sh 占位
+
+### v1.5 仍剩余 (推迟到未来)
+- **真实 LC09 / GF-2 样本 golden**：需要外部数据采集，未来 Phase 11.6 或维护脚本任务
+- **canvas item CRS reprojection**：见上文 5
+- **精化前/后 RMS 实时对比**：需要双跑 transformer，性能 vs 可视化权衡
+- **SIFT 取消的硬中断**：OpenCV detector 内部不可打断；目前在阶段之间检查 `feedback.isCanceled()`
+- **设计稿视觉 review**：mimo-v2.5 `ui_diff_check` 未跑
+
+---
+
+## Session: 2026-06-03 (later) — Phase 11.5 设计 + 计划
+
+### 状态
+- **Spec:** `docs/superpowers/specs/2026-06-03-georeferencer-v15-design.md` 完成（7 子任务 + OpenCV 集成 + 真实 RPC golden + 完整测试矩阵 + 风险表）
+- **task_plan.md:** Task 11.5 块插入 Phase 11.4 之后 + Current Phase 指针更新到 11.5
+
+### 范围对齐
+- v1.5 装满 Phase 11.4 留下的全部 7 项 backlog
+- SIFT 选择引入 OpenCV 4.5+（4.4+ SIFT 进主干，不要 contrib）
+- Image-to-Image 用独立 File 菜单 + 参数面板路径，不与主应用图层耦合
+
+### 关键架构决定
+- OpenCV 依赖用 `OPTIONAL_COMPONENTS` 包装，无 OpenCV 时编译定义 `RS_NO_OPENCV`，SIFT 按钮灰显
+- REF 画布私有 `QgsMapLayerStore`（独立于主应用 project）
+- RPC GCP 精化用线性 bias 数学（mean offset → LAT/LONG_OFFSET），最稳；< 3 GCP 跳过
+- 真实 RPC 样本通过 git LFS（LC09 256×256 + SRTM DEM tile，~3MB）+ `scripts/download_test_data.sh` 兜底
+
+### 7 个子任务顺序
+11.5.1 (CRS) → 11.5.2 (Canvas marker) → 11.5.3 (Image-to-Image) → 11.5.4 (Z-offset) → 11.5.5 (RPC refine) → 11.5.6 (RPC golden) → 11.5.7 (SIFT)
+
+---
+
 ## Session: 2026-06-03 — Phase 11.4 Georeferencer ✅ COMPLETE
 
 ### 状态

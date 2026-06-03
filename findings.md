@@ -1,5 +1,46 @@
 # Findings & Decisions — SICNU GEO RS
 
+## Phase 11.5 Georeferencer v1.5 实施记录 (2026-06-04 完成)
+
+### 偏离原始计划的实现
+
+1. **Task 11.5.6 走合成 golden 路径**（subagent 环境无 USGS 交互登录）
+   - 原计划：LC09 L1TP 256×256 + SRTM 30m DEM via git LFS
+   - 实际：合成 256×256 非平凡 RPC 栅格（LINE_NUM_COEFF[3]=0.4，SAMP_NUM_COEFF[3]=0.3 引入 height 耦合）+ 16×16 斜面 DEM；用 first-run capture 模式生成 SHA256
+   - 优点：可重现、无外部依赖、CI 友好；缺点：仍不验证算子在真实场景的绝对精度
+   - 未来：等条件允许时按 `scripts/download_test_data.sh` README 升级到真实样本
+
+2. **OpenCV 加 `calib3d`**（spec 漏列）
+   - spec §2.1 列了 `core features2d imgproc`，但 `cv::findHomography` 是 `calib3d`
+   - subagent 自动补上；CMake 最终 `find_package(OpenCV 4.5 QUIET COMPONENTS core features2d imgproc calib3d)`
+
+3. **`SICNU_HAS_OPENCV` 编译宏（不是 `RS_NO_OPENCV`）**
+   - spec §2.1 写成 `RS_NO_OPENCV`（无 OpenCV 时定义），但 CMake 自然方向是 "found → set HAS_OPENCV"
+   - 实际：`if (OpenCV_FOUND) set(SICNU_HAS_OPENCV TRUE)`，源码 `#ifdef SICNU_HAS_OPENCV`
+   - 语义一样，正向命名更清晰
+
+4. **Task 11.5.5 精化前/后 RMS 比较**：实现了 `setRefinementRms(before, after)` API + 面板 labels，但 `recomputeFit()` 暂未两次跑 transformer 算对比（性能成本 vs 显示价值，留作 v2 polish）
+
+5. **`updateMarkers()` 模式切换后重绘**：Task 11.5.2 的 `QgsGCPCanvasItem` 没做 `destinationPointCrs → REF 画布 CRS` 重投影；Task 11.5.3 在 `onModeChanged` 末尾遍历 `mDataPoints` 调 `updateMarkers()` 强制重读源 GCP 坐标缓解，但跨 CRS 场景仍可能漂移
+
+### Phase 11.5 实施踩到的小坑
+
+- **`QgsGCPList` ctor 无参 + `setParent()`**：Phase 11.4.3 的 redesign 没加 parent 形式构造，新代码沿用该模式
+- **`QgsTask::taskCompleted` 信号 vs `result()` 访问**：SIFT 任务完成后 `result()` 在 taskCompleted 槽里访问；任务管理器在 taskCompleted/taskTerminated 信号发完后才释放任务，所以裸指针在槽里有效
+- **OpenCV detector 不可协作中断**：cv::SIFT::detectAndCompute 一旦开始 GUI 必须等它完成（典型 5-10s on 2048 边长）。退而求其次：在 detect-src / detect-ref / match / RANSAC 阶段之间检查 `mFb.isCanceled()`
+- **`cv::SIFT::create(nfeatures=0, nOctaveLayers=3, contrastThreshold)`**：OpenCV 4.4+ SIFT 进主干（不需 contrib `xfeatures2d`）
+- **Catch2 `SKIP(...)`**：在 `<catch2/catch_test_macros.hpp>`；OpenCV 缺失时第一个 TEST_CASE 自动 skip，第二个（missing files）总能跑
+
+### Phase 11.5 v1.0 已知限制
+
+- 真实 LC09 / GF-2 样本仍未入仓（合成 golden 替代）
+- 设计稿 `mimo-v2.5 ui_diff_check` 视觉 review 未跑
+- SIFT 取消语义偏弱（detector 内部不可中断）
+- canvas item 跨 CRS 重投影未实现
+- 精化前/后 RMS 实时对比待 polish
+
+---
+
 ## Phase 11.4 Georeferencer 设计决定 (2026-06-02)
 
 ### UI 形态偏离 QGIS 原版

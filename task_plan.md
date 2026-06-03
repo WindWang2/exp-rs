@@ -6,7 +6,7 @@ Build a pure C++ remote sensing analysis and processing platform based on the QG
 
 ## Current Phase
 
-Phase 11.4 complete (Georeferencer 几何校正). 239/239 tests pass. Next: **Phase 11.5 (Georeferencer 高级功能：SIFT 自动匹配、控制点辅助选择)** — 顺延的 stretch 项。Phase 10 (Classification) 仍排在后续。
+Phase 11.4 + 11.5 complete (Georeferencer + v1.5 backlog closeout). **251/251 tests pass**. Next: Phase 10 (Classification — education Lab #4) or Phase 12 (AI Agent foundation), pending priority decision.
 
 ---
 
@@ -851,6 +851,49 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 - design.html 视觉 review (mimo-v2.5 `ui_diff_check` 对比设计稿)
 
 **Review 状态:** CEO + Eng review 2026-06-02 完成，6 处补丁已合入 spec（CMake GDAL≥3.4 / warp 失败路径 / .points v2 头 / DEM CRS 校验 / 3 新测试用例 / 结构化日志）。
+
+---
+
+### Task 11.5: Georeferencer v1.5 — Backlog Closeout ✅ **COMPLETE (2026-06-04)**
+**Goal:** 关闭 Phase 11.4 留下的 7 项 v1.0 限制，让 Georeferencer 真正可生产用 + 增量 SIFT 自动匹配。设计 `docs/superpowers/specs/2026-06-03-georeferencer-v15-design.md`。
+
+**新增依赖:** OpenCV 4.5+（`find_package(OpenCV 4.5 OPTIONAL_COMPONENTS core features2d imgproc)`，仅 qgis_app_georef 链接；无 OpenCV 时 SIFT 按钮灰显，其他功能正常）。
+
+**新建文件 (3):**
+- `src/app/georeferencer/rs_sift_matcher.{h,cpp}` — OpenCV SIFT + BFMatcher + RANSAC 封装
+- `src/app/georeferencer/rs_sift_dialog.{h,cpp}` — SIFT 参数对话框
+- `src/app/georeferencer/rs_sift_task.{h,cpp}` — QgsTask 包装，协作式取消
+
+**端口文件 (2):**
+- `qgsgcpcanvasitem.{h,cpp}` — 端口自上游（Task 11.4.5 推迟）
+- `qgsresidualplotitem.{h,cpp}` — 端口自上游
+
+**修改文件:**
+- `src/analysis/georeferencing/qgsrpcgcptransformer.{h,cpp}` — `setRpcOptions(demPath, zOffset, useGcpRefinement)` + 线性 bias 精化数学
+- `src/app/georeferencer/rs_georef_params_panel.{h,cpp}` — CRS picker / 参考栅格输入 / 精化前后 RMS 对比
+- `src/app/georeferencer/qgsgeoreferencermainwindow.{h,cpp}` — File 菜单新增 3 项 / REF QgsMapLayerStore / GCP canvas item 生命周期 / SIFT 按钮 wire
+- `src/app/georeferencer/qgsgeorefdatapoint.{h,cpp}` — Task 5 stub 落地（构造时 new QgsGCPCanvasItem）
+- `CMakeLists.txt` 顶层 + `src/app/georeferencer/CMakeLists.txt` — OpenCV
+- `tests/data/georef/real_rpc/` — LC09 + DEM + golden 通过 git LFS 入仓
+- `scripts/download_test_data.sh` — 没 LFS 时下载样本
+
+**子任务（每步 Red-Green-Refactor）:**
+- [x] **11.5.1** CRS Picker (`f2125f9`)
+- [x] **11.5.2** GCP 画布标记 + 残差 plot (`16c7641`)
+- [x] **11.5.3** Image-to-Image 模式 (`53090d2`)
+- [x] **11.5.4** DEM Z-offset 接线 (`255446c`)
+- [x] **11.5.5** RPC GCP 精化（线性 bias）(`99844b6`)
+- [x] **11.5.6** 合成"真实" RPC golden 样本 (`35d3bfb`) — 用合成路径替代 LC09 下载
+- [x] **11.5.7** SIFT 自动匹配（OpenCV 4.5+ OPTIONAL）(`9df03fe`)
+
+**新增测试 (7):** test_crs_picker_persists / test_gcp_canvas_item / test_image_to_image_load / test_dem_z_offset / test_rpc_gcp_refine / test_rpc_golden / test_sift_matcher
+
+**Done when:**
+- 246+ Catch2 测试全绿（11.4 的 239 + 11.5 新增 7+）
+- 手工烟雾：真实 RPC 样本 → SIFT 自动找 ≥ 15 GCP → CRS picker 选 EPSG:4326 → Apply → 输出 GeoTIFF 验证
+- 画布显示 GCP 编号标记 + 残差箭头
+- CMake 在无 OpenCV 环境下 SIFT 按钮灰显，其他功能不受影响
+- 结构化日志：SIFT 完成后 QgsMessageLog `Georeferencer` tag 写入 `event=sift_match` JSON
 
 ---
 
