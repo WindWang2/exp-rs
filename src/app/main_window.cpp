@@ -13,6 +13,9 @@
 #include "widgets/spectral_profile_widget.h"
 #include "log_panel.h"
 #include "georeferencer/qgsgeoreferencermainwindow.h"
+#ifdef SICNU_HAS_CLASSIFY
+#include "classification/qgsclassificationmainwindow.h"
+#endif
 
 #include <processing/qgsprocessingparameters.h>
 
@@ -287,6 +290,17 @@ void QgisDesktopWindow::setupMenu()
     rasterMenu->addAction(QIcon(":/icons/mos_ic"), tr("Mosaic..."), this, [](){});
     rasterMenu->addSeparator();
     rasterMenu->addAction(QIcon(":/icons/r_ster_calc"), tr("Georeferencer..."), this, &QgisDesktopWindow::openGeoreferencer);
+    // Phase 10A Task 10.2 — Classification submenu (Pixel-based + OBIA placeholder).
+    auto *classifyMenu = rasterMenu->addMenu(tr("Classification"));
+#ifdef SICNU_HAS_CLASSIFY
+    classifyMenu->addAction(tr("Supervised Classification (Pixel-based)..."),
+                            this, &QgisDesktopWindow::openClassificationWindow);
+    auto *obiaAct = classifyMenu->addAction(tr("Object-based Classification (OBIA) — Phase 10B"));
+    obiaAct->setEnabled(false);
+#else
+    auto *disabledAct = classifyMenu->addAction(tr("Classification (OpenCV ml unavailable)"));
+    disabledAct->setEnabled(false);
+#endif
     rasterMenu->addSeparator();
     rasterMenu->addAction(QIcon(":/icons/extr_ct_b_nd"), tr("Extract Band..."), this, [](){});
     rasterMenu->addAction(QIcon(":/icons/b_nd_co_bo"), tr("Band Composite..."), this, [](){});
@@ -691,6 +705,23 @@ void QgisDesktopWindow::openGeoreferencer()
     m_georefWindow->raise();
     m_georefWindow->activateWindow();
 }
+
+#ifdef SICNU_HAS_CLASSIFY
+void QgisDesktopWindow::openClassificationWindow()
+{
+    if ( !m_classifyWindow )
+    {
+        // iface = nullptr for now; later tasks may pass a real QgisInterface.
+        m_classifyWindow = new QgsClassificationMainWindow( nullptr, this );
+        m_classifyWindow->setAttribute( Qt::WA_DeleteOnClose, false );
+    }
+    m_classifyWindow->show();
+    m_classifyWindow->raise();
+    m_classifyWindow->activateWindow();
+}
+#else
+void QgisDesktopWindow::openClassificationWindow() {}
+#endif
 
 void QgisDesktopWindow::onIdentifyResults(const QList<QgsMapToolIdentify::IdentifyResult> &results)
 {

@@ -47,6 +47,13 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     ${PCRE2_8}
 )
 
+# Phase 10A — Pixel-Based Classification. Link only when the static
+# library was actually built (OpenCV ml component available).
+if(TARGET qgis_app_classify)
+    target_link_libraries(sicnu_geo_rs PRIVATE qgis_app_classify)
+    target_compile_definitions(sicnu_geo_rs PRIVATE SICNU_HAS_CLASSIFY=1)
+endif()
+
 set_target_properties(sicnu_geo_rs PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}

@@ -1058,3 +1058,28 @@ target_include_directories(test_band_ratio PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_band_ratio)
+
+# Phase 10A Task 10.2 — Classification main window shell tests.
+# Only built when OpenCV ml component is available (qgis_app_classify exists).
+if(TARGET qgis_app_classify)
+  add_executable(test_classification_window test_classification_window.cpp)
+  target_link_libraries(test_classification_window PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Test
+    qgis_core
+    qgis_analysis
+    qgis_app_classify
+  )
+  target_include_directories(test_classification_window PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${CMAKE_SOURCE_DIR}/src/app/classification
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_classification_window PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_classification_window)
+endif()

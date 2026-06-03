@@ -31,6 +31,7 @@ class QgsBrowserDockWidget;
 class QgsBrowserGuiModel;
 class SpectralProfileWidget;
 class QgsGeoreferencerMainWindow;
+class QgsClassificationMainWindow;
 
 /**
  * \brief Custom identify tool that emits results as a signal.
@@ -127,6 +128,9 @@ public slots:
     // Georeferencer (Task 11.4.4)
     void openGeoreferencer();
 
+    // Classification (Phase 10A Task 10.2)
+    void openClassificationWindow();
+
 private slots:
     void onProjectRead(const QDomDocument &doc);
     void onProjectWrite(QDomDocument &doc);
@@ -208,6 +212,9 @@ private:
 
     // Georeferencer window (lazy-constructed) — Task 11.4.4
     QgsGeoreferencerMainWindow *m_georefWindow = nullptr;
+
+    // Classification window (lazy-constructed) — Phase 10A Task 10.2
+    QgsClassificationMainWindow *m_classifyWindow = nullptr;
 
     friend class LayerTreeMenuProvider;
 
