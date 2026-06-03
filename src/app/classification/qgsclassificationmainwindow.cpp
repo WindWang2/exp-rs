@@ -3,6 +3,7 @@
 #include "rs_class_def.h"
 #include "rs_class_quick_list.h"
 #include "rs_class_table_widget.h"
+#include "rs_jm_matrix_widget.h"
 #include "rs_pixel_rasterizer.h"
 #include "rs_roi.h"
 #include "rs_roi_collection.h"
@@ -137,7 +138,8 @@ void QgsClassificationMainWindow::setupDocks()
 
   mJmDock = new QDockWidget( tr( "JM 分离度" ), this );
   mJmDock->setObjectName( QStringLiteral( "rsClassJmDock" ) );
-  mJmDock->setWidget( new QLabel( tr( "[JM matrix — Task 10.6]" ), this ) );
+  mJmMatrix = new RsJmMatrixWidget( mJmDock );
+  mJmDock->setWidget( mJmMatrix );
   addDockWidget( Qt::RightDockWidgetArea, mJmDock );
 
   mSpectralDock = new QDockWidget( tr( "光谱曲线" ), this );

@@ -1163,4 +1163,21 @@ if(TARGET qgis_app_classify)
   )
   set_target_properties(test_spectral_curve PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(test_spectral_curve)
+
+  # Phase 10A Task 10.6 — Jeffries-Matusita separability tests.
+  add_executable(test_jm_separability test_jm_separability.cpp)
+  target_link_libraries(test_jm_separability PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_jm_separability PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_jm_separability)
 endif()
