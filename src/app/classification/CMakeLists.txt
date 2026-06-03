@@ -16,6 +16,11 @@ qt_add_library(qgis_app_classify STATIC
     qgsclassificationmainwindow.cpp
     rs_class_table_widget.cpp
     rs_class_quick_list.cpp
+    rs_roi_tool_base.cpp
+    rs_roi_tool_point.cpp
+    rs_roi_tool_rectangle.cpp
+    rs_roi_tool_polygon.cpp
+    rs_roi_tool_freehand.cpp
 )
 
 target_include_directories(qgis_app_classify PUBLIC

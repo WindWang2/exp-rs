@@ -3,20 +3,32 @@
 #include "rs_class_def.h"
 #include "rs_class_quick_list.h"
 #include "rs_class_table_widget.h"
+#include "rs_pixel_rasterizer.h"
+#include "rs_roi.h"
 #include "rs_roi_collection.h"
+#include "rs_roi_tool_base.h"
+#include "rs_roi_tool_freehand.h"
+#include "rs_roi_tool_point.h"
+#include "rs_roi_tool_polygon.h"
+#include "rs_roi_tool_rectangle.h"
+#include "qgsgeometry.h"
 #include "qgsmapcanvas.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QColor>
 #include <QDockWidget>
+#include <QHash>
 #include <QLabel>
 #include <QList>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPair>
+#include <QSet>
 #include <QSizePolicy>
 #include <QStatusBar>
 #include <QToolBar>
+#include <QVector>
 #include <QWidget>
 
 QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, QWidget *parent )
@@ -50,6 +62,7 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
   setupMenus();
   setupToolbars();
   setupDocks();
+  setupRoiTools();
   setupStatusBar();
 }
 
@@ -140,4 +153,93 @@ void QgsClassificationMainWindow::setupStatusBar()
   roiCountLabel->setObjectName( QStringLiteral( "rsClassifyRoiCountLabel" ) );
   statusBar()->addPermanentWidget( crsLabel );
   statusBar()->addPermanentWidget( roiCountLabel );
+}
+
+void QgsClassificationMainWindow::setupRoiTools()
+{
+  // Instantiate the 4 manual ROI map tools owned by this window.
+  mToolPoint = new RsRoiToolPoint( mCanvas );
+  mToolRect = new RsRoiToolRectangle( mCanvas );
+  mToolPolygon = new RsRoiToolPolygon( mCanvas );
+  mToolFreehand = new RsRoiToolFreehand( mCanvas );
+
+  const QVector<RsRoiToolBase *> tools = {
+    mToolPoint, mToolRect, mToolPolygon, mToolFreehand
+  };
+  for ( RsRoiToolBase *t : tools )
+  {
+    connect( t, &RsRoiToolBase::roiDrawn,
+             this, &QgsClassificationMainWindow::onRoiDrawn );
+  }
+
+  // Bind toolbar actions to tools. Each action is checkable and grouped so
+  // only one tool is active at a time. Toggling on installs the tool on the
+  // canvas; toggling off uninstalls it.
+  const QHash<QString, RsRoiToolBase *> actionToTool = {
+    { QStringLiteral( "rsToolRoiPoint" ), mToolPoint },
+    { QStringLiteral( "rsToolRoiRect" ), mToolRect },
+    { QStringLiteral( "rsToolRoiPolygon" ), mToolPolygon },
+    { QStringLiteral( "rsToolRoiFreehand" ), mToolFreehand },
+  };
+
+  auto *group = new QActionGroup( this );
+  group->setExclusive( true );
+
+  for ( auto it = actionToTool.constBegin(); it != actionToTool.constEnd(); ++it )
+  {
+    QAction *a = findChild<QAction *>( it.key() );
+    if ( !a )
+      continue;
+    a->setCheckable( true );
+    group->addAction( a );
+    RsRoiToolBase *t = it.value();
+    connect( a, &QAction::toggled, this, [this, t]( bool on ) {
+      if ( !mCanvas )
+        return;
+      if ( on )
+        mCanvas->setMapTool( t );
+      else
+        mCanvas->unsetMapTool( t );
+    } );
+  }
+
+  // Track the currently-selected class so the next ROI gets the right id.
+  if ( mClassTableWidget )
+  {
+    connect( mClassTableWidget, &RsClassTableWidget::currentClassChanged,
+             this, &QgsClassificationMainWindow::onCurrentClassChanged );
+  }
+}
+
+void QgsClassificationMainWindow::onCurrentClassChanged( int classId )
+{
+  if ( mToolPoint )
+    mToolPoint->setCurrentClassId( classId );
+  if ( mToolRect )
+    mToolRect->setCurrentClassId( classId );
+  if ( mToolPolygon )
+    mToolPolygon->setCurrentClassId( classId );
+  if ( mToolFreehand )
+    mToolFreehand->setCurrentClassId( classId );
+}
+
+void QgsClassificationMainWindow::onRoiDrawn( const QgsGeometry &geom, int classId )
+{
+  if ( classId <= 0 )
+  {
+    statusBar()->showMessage( tr( "请先在类别表中选一个类别" ), 3000 );
+    return;
+  }
+  // Only rasterize when a source raster has been associated. Tasks
+  // 10.5/10.7/10.8 will set mSourceWidth/Height/Gt when the user opens a
+  // raster; until then we record geometry-only ROIs.
+  QSet<quint64> pixels;
+  if ( mSourceWidth > 0 && mSourceHeight > 0 )
+  {
+    pixels = RsPixelRasterizer::rasterize( geom, mSourceGt,
+                                           mSourceWidth, mSourceHeight );
+  }
+  QVector<quint64> idx( pixels.begin(), pixels.end() );
+  if ( mRois )
+    mRois->appendRoi( RsRoi( classId, geom, idx ) );
 }

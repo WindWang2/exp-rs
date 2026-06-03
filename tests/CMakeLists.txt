@@ -1104,4 +1104,44 @@ if(TARGET qgis_app_classify)
   )
   set_target_properties(test_class_table_widget PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(test_class_table_widget)
+
+  # Phase 10A Task 10.4 — Pixel rasterizer (geometry -> pixel index set)
+  add_executable(test_pixel_rasterizer test_pixel_rasterizer.cpp)
+  target_link_libraries(test_pixel_rasterizer PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    qgis_analysis
+    GDAL::GDAL
+  )
+  target_include_directories(test_pixel_rasterizer PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_pixel_rasterizer)
+
+  # Phase 10A Task 10.4 — ROI polygon map tool (3 clicks + dblclk -> emit)
+  add_executable(test_roi_tool_polygon test_roi_tool_polygon.cpp)
+  target_link_libraries(test_roi_tool_polygon PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Test
+    qgis_core
+    qgis_gui
+    qgis_analysis
+    qgis_app_classify
+  )
+  target_include_directories(test_roi_tool_polygon PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${CMAKE_SOURCE_DIR}/src/app/classification
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_roi_tool_polygon PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_roi_tool_polygon)
 endif()

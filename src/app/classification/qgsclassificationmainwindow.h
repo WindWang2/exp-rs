@@ -1,13 +1,20 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QString>
 
 class QgisInterface;
+class QAction;
 class QDockWidget;
+class QgsGeometry;
 class QgsMapCanvas;
 class RsRoiCollection;
 class RsClassTableWidget;
 class RsClassQuickList;
+class RsRoiToolPoint;
+class RsRoiToolRectangle;
+class RsRoiToolPolygon;
+class RsRoiToolFreehand;
 
 /**
  * \brief Phase 10A — Pixel-Based Classification main window shell.
@@ -35,6 +42,7 @@ class QgsClassificationMainWindow : public QMainWindow
     void setupToolbars();
     void setupDocks();
     void setupStatusBar();
+    void setupRoiTools();
 
     QgisInterface *mIface = nullptr;
     QgsMapCanvas *mCanvas = nullptr;
@@ -47,4 +55,23 @@ class QgsClassificationMainWindow : public QMainWindow
 
     RsClassTableWidget *mClassTableWidget = nullptr;
     RsClassQuickList *mClassQuickListWidget = nullptr;
+
+    // Task 10.4 — ROI map tools (point/rectangle/polygon/freehand).
+    RsRoiToolPoint *mToolPoint = nullptr;
+    RsRoiToolRectangle *mToolRect = nullptr;
+    RsRoiToolPolygon *mToolPolygon = nullptr;
+    RsRoiToolFreehand *mToolFreehand = nullptr;
+
+    // Source raster metadata for pixel-index rasterization. Empty path means
+    // no raster is loaded yet — onRoiDrawn skips rasterization and stores an
+    // RsRoi with empty pixel indices (geometry-only, still useful for later
+    // re-rasterization once a raster is set in Task 10.5/10.7/10.8).
+    QString mSourceRasterPath;
+    int mSourceWidth = 0;
+    int mSourceHeight = 0;
+    double mSourceGt[6] = { 0, 1, 0, 0, 0, -1 };
+
+  private slots:
+    void onRoiDrawn( const QgsGeometry &geom, int classId );
+    void onCurrentClassChanged( int classId );
 };
