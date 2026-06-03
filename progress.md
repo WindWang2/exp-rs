@@ -1,5 +1,52 @@
 # Progress Log — SICNU GEO RS
 
+## Session: 2026-06-04 (晚) — Phase 10A Pixel Classification ✅ COMPLETE
+
+### 状态
+- **9/9 子任务完成 + 1 review patch**，10 个独立 commit
+- **280/280 Catch2 测试绿** (11.5 终态 251 + 10A 新增 29)
+- 全套构建 + 全套 ctest 顺利，无回归
+
+### 提交序列
+| 子任务 | SHA | 描述 |
+|---|---|---|
+| 10.1 | `960ab12` | ROI 数据模型 (RsRoi/Collection/IO) + cls_id + sidecar JSON |
+| 10.2 | `9ab1205` | 主窗口骨架 + 4 dock 占位 + Raster→Classification 菜单 + `ml` OpenCV 组件 |
+| 10.3 | `1067e19` | 类别表 widget (4列) + 类别快览 dock + 6 默认类 |
+| 10.4 | `7c159cc` | 4 个手动 ROI 工具 (point/rect/poly/freehand) + GDAL 像素栅格化 |
+| 10.5 | `b1ec6d9` | 光谱曲线 widget (QPainter 均值线+±σ 阴影) |
+| 10.6 | `cddded2` | JM 分离度算法 + 6×6 热图 widget + ε ridge |
+| 10.7 | `e17e8b8` | 魔棒 ROI 工具 (4 连通 BFS flood fill) |
+| 10.8 | `fd13451` | 3 分类器后端 + ClassifierBar + QgsTask + 256² tile-streamed predict + ColorTable |
+| review | `fd8f474` | 6 处死控件接线: 光谱/JM 重算, 预览/CV 信号, 工具栏 Spectra/Sep/Export, 分层抽样, Config testX/testY, ColorTable 背景透明 |
+| 10.9 | `7dc93db` | 精度评价 (RsAccuracyAssessment::Result: confusion + Kappa + Producer/User/F1) + 非模态对话框 + CSV 导出 |
+
+### Phase 10A.1 仍剩余
+- K-Means Hungarian assignment (label permutation 才能算混淆矩阵)
+- 5-fold 交叉验证完整实现 (当前 QMessageBox stub)
+- 真实 Sentinel-2 / Landsat 手工烟雾测试
+- 快速预览延迟基线 (< 2s 目标)
+- ROI 顶点编辑
+- 训练模型 .yml 加载入口
+- 设计稿 mimo-v2.5 ui_diff_check 视觉 review
+
+### 关键架构决定回顾
+- ROI 几何 + 像素索引 (uint64) 双存；shapefile 只持久化几何 + cls_id，索引重算
+- ε=1e-6 ridge 防 JM 协方差奇异
+- 像素 256² tile-streamed predict 控内存 (1.4GB → 几 MB)
+- ColorTable 索引 0 透明 (避免未分类像素显示黑)
+- 70/30 分层抽样，< 7 全 train
+- KMeans 跳过精度评价 (cluster ID ≠ ROI class ID，需 Hungarian)
+
+### 实施踩到的小坑
+- `RsRoiToolBase` 仅头文件 + Q_OBJECT 在子类 MOC 链接报 staticMetaObject missing — 加了 4 行 stub `.cpp`
+- `QgsVectorFileWriter::create` vendored 签名与上游略有差异 — Phase 11.4 的 lesson 又复用一次
+- `QgsRasterLayer` setLayers 所有权由 canvas 管理 — Phase 11.5 Image-to-Image 模式同模式
+- LSP 假阳性: clangd 没刷新 compile_commands.json 时报"找不到 QString"，实际 `make` 全绿
+- 子代理 sessions 中断后留下完整源文件但未 commit — git status 检查 + 重新派发"finish & commit"是稳定流程
+
+---
+
 ## Session: 2026-06-04 (later) — Phase 10A 设计 + 计划
 
 ### 状态

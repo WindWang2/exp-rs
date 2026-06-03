@@ -6,7 +6,7 @@ Build a pure C++ remote sensing analysis and processing platform based on the QG
 
 ## Current Phase
 
-Phase 11.4 + 11.5 complete (Georeferencer + v1.5 backlog closeout). **251/251 tests pass**. Next: **Phase 10A (Pixel-based Classification — education Lab #4)**。设计已确认 `docs/superpowers/specs/2026-06-04-classification-pixel-design.md`。OBIA 留 Phase 10B。
+Phase 11.4 + 11.5 + 10A complete (Georeferencer + v1.5 + Pixel Classification). **280/280 tests pass**. Next: Phase 10B (OBIA — 面向对象分类) 或 Phase 12 (AI Agent foundation)，待优先级讨论。
 
 ---
 
@@ -688,7 +688,7 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 
 ---
 
-## Phase 10A: Pixel-Based Classification 🟢 **[NEXT — Education Lab #4]**
+## Phase 10A: Pixel-Based Classification ✅ **COMPLETE (2026-06-04)**
 **Goal:** 像元级监督/非监督分类完整工作流。UI 严格按 `UI/design.html` `ArtboardClassify`。详细设计 `docs/superpowers/specs/2026-06-04-classification-pixel-design.md`。OBIA 留 Phase 10B。
 
 **新增依赖:** 无（OpenCV 4.5+ ml 模块已 Phase 11.5 引入，CMake 加 `ml` COMPONENT）。OpenCV 强依赖（不 OPTIONAL）。
@@ -704,16 +704,17 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 - `src/app/main_window.{h,cpp}` — 加 `openClassificationWindow()` slot + Raster→Classification 子菜单
 - `resources/icons.qrc` — 注册 `classify_pixel.svg` / `classify_obia.svg`
 
-**子任务（每步 Red-Green-Refactor）:**
-- [ ] **10.1** ROI 数据模型 + shapefile/JSON I/O — `RsRoi`, `RsRoiCollection`, `RsRoiIO`, `RsClassDef`；像素索引集；`cls_id` 字段名
-- [ ] **10.2** 主窗口骨架 + Raster→Classification 菜单接入 + 4 个 dock 占位
-- [ ] **10.3** 类别管理 dock + 类别快览 dock（按 design.html ClassTable + 类别快览面板）
-- [ ] **10.4** 4 个手动 ROI map tool (point/rectangle/polygon/freehand) + 当前类绑定 + 浮动 mini-toolbar
-- [ ] **10.5** 光谱曲线 widget + 底部 dock（QPainter 折线 + ±σ 半透明带）
-- [ ] **10.6** JM (Jeffries-Matusita) 分离度计算 + 6×6 热图 widget + 500ms 节流重算
-- [ ] **10.7** 魔棒 ROI 工具（容差生长 + 4 连通 flood fill）
-- [ ] **10.8** 分类器后端（NormalBayes/SVM RBF/K-Means）+ ClassifierBar + RsClassificationTask + 输出 GeoTIFF + ColorTable + 快速预览
-- [ ] **10.9** 精度评价（混淆矩阵 + Kappa + per-class P/R/F1）+ 对话框 + CSV/PDF 导出
+**子任务（每步 Red-Green-Refactor，全部完成）:**
+- [x] **10.1** ROI 数据模型 + shapefile/JSON I/O (`960ab12`)
+- [x] **10.2** 主窗口骨架 + Raster→Classification 菜单接入 (`9ab1205`)
+- [x] **10.3** 类别管理 dock + 类别快览 dock (`1067e19`)
+- [x] **10.4** 4 个手动 ROI map tool + 像素栅格化 (`7c159cc`)
+- [x] **10.5** 光谱曲线 widget + 底部 dock (`b1ec6d9`)
+- [x] **10.6** JM 分离度 + 6×6 热图 widget (`cddded2`)
+- [x] **10.7** 魔棒 ROI 工具（容差 flood fill）(`e17e8b8`)
+- [x] **10.8** 分类器后端 + ClassifierBar + Task + GeoTIFF 输出 (`fd13451`)
+- [x] **Review patch**：补 6 处死控件接线 + 分层抽样 + Config testX/testY + ColorTable 背景 (`fd8f474`)
+- [x] **10.9** 精度评价（混淆矩阵 + Kappa + per-class P/R/F1）+ 对话框 + CSV (`7dc93db`)
 
 **Stretch (留 Phase 10B / 11.6):**
 - Random Forest / Mahalanobis / 深度学习 UNet 分类器（顶栏占位灰显）
@@ -723,12 +724,20 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 - ROI 顶点编辑（增删拖拽）
 - 训练模型 .yml 加载入口
 
-**Done when:**
-- 276+ Catch2 测试全绿（11.5 终态 251 + 10A 新增 25+）
-- 手工烟雾：Sentinel-2 加载 → 6 类 30+ ROI → JM 全 ≥ 1.5 → SVM 训练 → 应用 → 混淆矩阵总精 ≥ 0.85
-- 快速预览路径 < 2s
-- 输出 GeoTIFF 在主应用打开正确显示分类色
-- 结构化日志 `event=classify_finished` JSON 落到 `QgsMessageLog` tag `Classification`
+**Done when (达成):**
+- ✅ 280/280 Catch2 测试全绿（11.5 终态 251 + 10A 新增 29）
+- ✅ 输出 GeoTIFF + ColorTable (背景色透明，避免黑色未分类像素)
+- ✅ 结构化日志 `event=classify_finished` JSON 落到 `QgsMessageLog` tag `Classification`，含 kappa + overall_accuracy
+- ⏳ 手工烟雾（无 X display 环境推迟）
+- ⏳ 快速预览路径 < 2s 测时（同上）
+
+**Phase 10A.1 Stretch (留待):**
+- K-Means 类编号 ↔ ROI 类别的 Hungarian assignment (混淆矩阵才有意义)
+- 5-fold 交叉验证完整实现（当前是 QMessageBox stub）
+- ROI 顶点编辑 (增删拖拽)
+- 训练模型 .yml 加载入口
+- 混淆矩阵 PDF 导出
+- 真实 RPC 样本 (类似 11.5.6)
 
 ---
 

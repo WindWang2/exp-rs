@@ -1,5 +1,62 @@
 # Findings & Decisions — SICNU GEO RS
 
+## Phase 10A Classification 实施记录 (2026-06-04 完成)
+
+### 偏离原始计划
+
+1. **K-Means 精度评价跳过** (review patch + Task 10.9)
+   - cluster ID 是 1..K 的任意置换，与 ROI class ID 不对应
+   - 直接算混淆矩阵会给出误导性结果 (低精度，但其实是 label 不齐)
+   - 决定: `RsClassificationTask::run` 检查 `algoName == "KMeans"` 时不算 accuracy
+   - 完整修复需要 Hungarian assignment 算法，留 Phase 10A.1
+
+2. **交叉验证 stub 化** (review patch)
+   - 5-fold CV 完整实现需要每 fold 重建 backend + label re-mapping
+   - 超过 50 行阈值，按 spec 允许 stub 为 QMessageBox "Phase 10A.1"
+   - 信号已 connect，未来填充函数体即可
+
+3. **`RsRoiToolBase` 不能仅头文件** (Task 10.4)
+   - Q_OBJECT 在仅头文件基类上，子类 MOC 找不到 `staticMetaObject`
+   - 必须有 stub `.cpp` (1 行 include 也行) 进 CMake AUTOMOC 列表
+   - Phase 11.4 没遇到因为 Georeferencer 的 base 类都有非 trivial 实现
+
+4. **ColorTable 索引 0 默认黑** (review patch Bonus)
+   - GDAL `SetColorEntry(0, ...)` 不显式设的话索引 0 = 黑
+   - 未分类像素显示黑色与 6 类配色不协调
+   - 决定: 写出前显式设 0 索引为 alpha=0 透明
+
+5. **classDefs() 返回 by value** (Task 10.1 + 10.3 累计观察)
+   - `QHash<int, RsClassDef>` 每次访问 deep copy
+   - 6 类规模没问题，但 widget 重建时多次调用累计开销
+   - 未来若类别数增加 (>50) 应改 `const QHash &` 返回
+
+### 算法选择得失
+
+- **OpenCV ML 三件套都顺利集成**：NormalBayes / SVM(RBF) / K-Means。NormalBayes API 自然，SVM 默认 C=10/γ=0.5 教学够用，K-Means 用 `cv::kmeans` 而非 `cv::ml::KMeans` (后者 API 不友好)
+- **JM 算法 ε=1e-6 ridge** 很关键，小样本类 (2 像元) 协方差秩亏不加 ridge 直接发散
+- **GDAL `GDALRasterizeGeometries` + MEM 驱动** 比手写扫描线/Bresenham 简洁，精确度匹配 GDAL 用户预期
+
+### 工程实践
+
+- **Tile-streamed predict** (256×256) 比一次性整图 predict 内存峰值降 100×
+- **`cls_id` 字段名** 避开 OGR `class` 关键字风险，确认有效
+- **像素索引 `uint64` 编码 `row * W + col`** 跨任务一致，1 万像元 ROI 占 80KB
+- **70/30 分层抽样** `std::mt19937(42)` 确定性种子，测试可重现
+- **QgsTask + QgsFeedback 模式** Phase 11.4.7 的 `RsWarpTask` 模板复用度 90%
+
+### Phase 10A v1.0 已知限制
+
+- K-Means 精度评价 (Hungarian assignment 未实现)
+- 5-fold CV (stub)
+- 设计稿视觉 review (mimo-v2.5 `ui_diff_check` 未跑)
+- 真实 Sentinel-2 / Landsat 数据手工烟雾 (无 X display)
+- 快速预览延迟基线 (< 2s 未实测)
+- ROI 顶点编辑 (整删重画)
+- 训练模型 .yml 加载入口
+- 混淆矩阵 PDF 导出 (有 CSV)
+
+---
+
 ## Phase 10A Classification 设计决定 (2026-06-04)
 
 ### Phase 10 分两个模块
