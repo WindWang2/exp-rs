@@ -3,6 +3,8 @@
 #include <QAction>
 #include <QCloseEvent>
 #include <QDockWidget>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QIcon>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -22,6 +24,7 @@
 #include <cmath>
 
 #include "qgis.h"
+#include "qgisinterface.h"
 #include "qgsapplication.h"
 #include "qgscoordinatereferencesystem.h"
 #include "qgscoordinatetransformcontext.h"
@@ -35,7 +38,9 @@
 #include "qgsgeoreftransform.h"
 #include "qgsmapcanvas.h"
 #include "qgsmapcoordsdialog.h"
+#include "qgsmaplayerstore.h"
 #include "qgsmessagelog.h"
+#include "qgsrasterlayer.h"
 #include "qgstaskmanager.h"
 #include "rs_georef_params_panel.h"
 #include "rs_twincanvas_sync_controller.h"
@@ -93,14 +98,18 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   connect( mParamsPanel, &RsGeorefParamsPanel::destCrsChanged,
            this, &QgsGeoreferencerMainWindow::recomputeFit );
 
-  // Task 11.4.8 — mode toggle drives RPC visibility on the params panel.
+  // Task 11.5.3 — REF canvas content is private to the Georeferencer when
+  // Image-to-Image mode is active; the store owns the loaded reference and
+  // source rasters and cleans them up with the window.
+  mRefStore = new QgsMapLayerStore( this );
+
+  // Task 11.4.8 + 11.5.3 — mode toggle drives RPC visibility on the params
+  // panel AND swaps REF canvas content between the main-app layers, the
+  // private reference raster, or hidden (RPC mode).
   if ( mModeToggle )
   {
-    connect( mModeToggle, &RsGeorefModeToggle::modeChanged, this,
-             [this]( RsGeorefModeToggle::Mode m ) {
-               if ( mParamsPanel )
-                 mParamsPanel->setRpcMode( m == RsGeorefModeToggle::RpcPhysical );
-             } );
+    connect( mModeToggle, &RsGeorefModeToggle::modeChanged,
+             this, &QgsGeoreferencerMainWindow::onModeChanged );
   }
 
   mParamsPanel->setActualGcpCount( 0 );
@@ -482,7 +491,12 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
 void QgsGeoreferencerMainWindow::setupMenus()
 {
   auto *fileMenu = menuBar()->addMenu( tr( "&File" ) );
-  fileMenu->addAction( tr( "Open Raster..." ), this, []() {} );
+  // Task 11.5.3 — explicit source / reference raster entries.
+  fileMenu->addAction( tr( "Open source raster..." ),
+                       this, &QgsGeoreferencerMainWindow::openSourceRaster );
+  fileMenu->addAction( tr( "Load reference raster..." ),
+                       this, QOverload<>::of( &QgsGeoreferencerMainWindow::loadReferenceRaster ) );
+  fileMenu->addSeparator();
   fileMenu->addAction( tr( "Load .points..." ), this, []() {} );
   fileMenu->addAction( tr( "Save .points..." ), this, []() {} );
   fileMenu->addSeparator();
@@ -587,6 +601,128 @@ void QgsGeoreferencerMainWindow::showCoordDialog( const QgsPointXY &sourcePixel 
   } );
 
   dlg->show();
+}
+
+void QgsGeoreferencerMainWindow::openSourceRaster()
+{
+  const QString path = QFileDialog::getOpenFileName(
+    this, tr( "Open source raster" ), QString(),
+    tr( "Raster (*.tif *.tiff *.img *.jp2);;All files (*)" ) );
+  if ( path.isEmpty() )
+    return;
+
+  setSourceRasterPath( path );
+
+  auto *layer = new QgsRasterLayer( path, QFileInfo( path ).baseName(),
+                                    QStringLiteral( "gdal" ) );
+  if ( !layer->isValid() )
+  {
+    delete layer;
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "Failed to open raster: %1" ).arg( path ), 5000 );
+    return;
+  }
+  if ( mRefStore )
+    mRefStore->addMapLayer( layer );
+  mSrcRaster = layer;
+
+  if ( mSrcCanvas )
+  {
+    mSrcCanvas->setLayers( { layer } );
+    mSrcCanvas->setExtent( layer->extent() );
+    mSrcCanvas->refresh();
+  }
+}
+
+void QgsGeoreferencerMainWindow::loadReferenceRaster()
+{
+  const QString path = QFileDialog::getOpenFileName(
+    this, tr( "Load reference raster" ), QString(),
+    tr( "Raster (*.tif *.tiff *.img *.jp2);;All files (*)" ) );
+  if ( path.isEmpty() )
+    return;
+  loadReferenceRaster( path );
+}
+
+bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
+{
+  auto *layer = new QgsRasterLayer( path, QFileInfo( path ).baseName(),
+                                    QStringLiteral( "gdal" ) );
+  if ( !layer->isValid() )
+  {
+    delete layer;
+    return false;
+  }
+  if ( mRefStore )
+    mRefStore->addMapLayer( layer );
+  mRefRaster = layer;
+
+  // If already in Image-to-Image mode, swap in immediately. Otherwise
+  // onModeChanged() will pick it up when the user switches modes.
+  if ( mRefCanvas && mModeToggle
+       && mModeToggle->currentMode() == RsGeorefModeToggle::ImageToImage )
+  {
+    mRefCanvas->setLayers( { layer } );
+    mRefCanvas->setExtent( layer->extent() );
+    mRefCanvas->refresh();
+  }
+  return true;
+}
+
+void QgsGeoreferencerMainWindow::onModeChanged( RsGeorefModeToggle::Mode m )
+{
+  if ( !mRefCanvas )
+    return;
+
+  switch ( m )
+  {
+    case RsGeorefModeToggle::ImageToMap:
+    {
+      // Restore main-app layers when the host application provides a canvas;
+      // otherwise just clear the REF canvas. The test does not exercise this
+      // branch with a non-null iface, but the behavior is harmless.
+      QList<QgsMapLayer *> mainLayers;
+      if ( mIface && mIface->mapCanvas() )
+        mainLayers = mIface->mapCanvas()->layers();
+      mRefCanvas->setLayers( mainLayers );
+      mRefCanvas->show();
+      if ( mParamsPanel )
+        mParamsPanel->setRpcMode( false );
+      break;
+    }
+    case RsGeorefModeToggle::ImageToImage:
+      if ( mRefRaster )
+      {
+        mRefCanvas->setLayers( { mRefRaster } );
+        mRefCanvas->setExtent( mRefRaster->extent() );
+      }
+      else
+      {
+        mRefCanvas->setLayers( {} );
+        if ( statusBar() )
+          statusBar()->showMessage(
+            tr( "请先 File → Load reference raster…" ), 5000 );
+      }
+      mRefCanvas->show();
+      if ( mParamsPanel )
+        mParamsPanel->setRpcMode( false );
+      break;
+    case RsGeorefModeToggle::RpcPhysical:
+      mRefCanvas->hide();
+      if ( mParamsPanel )
+        mParamsPanel->setRpcMode( true );
+      break;
+  }
+
+  mRefCanvas->refresh();
+
+  // Task 11.5.2 carryover — re-sync canvas markers after mode change so the
+  // GCP markers re-read their (possibly newly-reprojected) positions.
+  for ( auto it = mDataPoints.begin(); it != mDataPoints.end(); ++it )
+  {
+    if ( it.value() )
+      it.value()->updateMarkers();
+  }
 }
 
 void QgsGeoreferencerMainWindow::closeEvent( QCloseEvent *e )

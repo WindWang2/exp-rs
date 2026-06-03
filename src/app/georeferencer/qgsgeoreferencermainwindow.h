@@ -15,6 +15,8 @@ class QCloseEvent;
 class QDockWidget;
 class QgisInterface;
 class QgsMapCanvas;
+class QgsMapLayerStore;
+class QgsRasterLayer;
 class RsTwinCanvasSyncController;
 class QgsGeorefToolAddPoint;
 class QgsGCPList;
@@ -54,6 +56,13 @@ class QgsGeoreferencerMainWindow : public QMainWindow
     /// Setter so future File→Open wiring can supply the source raster path.
     void setSourceRasterPath( const QString &p ) { mSourceRasterPath = p; }
 
+    /// Task 11.5.3 — File menu hooks. The no-arg overloads open a QFileDialog;
+    /// the `bool loadReferenceRaster(const QString&)` overload is the testable
+    /// entry point that bypasses the dialog.
+    void openSourceRaster();
+    void loadReferenceRaster();
+    bool loadReferenceRaster( const QString &path );
+
   protected:
     void closeEvent( QCloseEvent *e ) override;
 
@@ -69,6 +78,8 @@ class QgsGeoreferencerMainWindow : public QMainWindow
      * Wired to `QgsGCPList::changed`.
      */
     void onPointsChanged();
+    /// Task 11.5.3 — repaint the REF canvas + params panel for the new mode.
+    void onModeChanged( RsGeorefModeToggle::Mode m );
 
   private:
     void setupMenus();
@@ -108,4 +119,10 @@ class QgsGeoreferencerMainWindow : public QMainWindow
     std::unique_ptr<QgsGeorefTransform> mTransform;
     double mLastRms = 0.0;
     QString mSourceRasterPath;
+
+    // Task 11.5.3 — Image-to-Image mode owns its own layer store so the REF
+    // canvas can show a raster independent of the main application project.
+    QgsMapLayerStore *mRefStore = nullptr;
+    QgsRasterLayer *mRefRaster = nullptr; // non-owning; owned by mRefStore
+    QgsRasterLayer *mSrcRaster = nullptr; // non-owning; owned by mRefStore
 };
