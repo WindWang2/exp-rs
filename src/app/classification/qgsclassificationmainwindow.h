@@ -11,6 +11,7 @@ class QgsMapCanvas;
 class RsRoiCollection;
 class RsClassTableWidget;
 class RsClassQuickList;
+class RsSpectralCurveWidget;
 class RsRoiToolPoint;
 class RsRoiToolRectangle;
 class RsRoiToolPolygon;
@@ -55,6 +56,7 @@ class QgsClassificationMainWindow : public QMainWindow
 
     RsClassTableWidget *mClassTableWidget = nullptr;
     RsClassQuickList *mClassQuickListWidget = nullptr;
+    RsSpectralCurveWidget *mSpectralCurve = nullptr;
 
     // Task 10.4 — ROI map tools (point/rectangle/polygon/freehand).
     RsRoiToolPoint *mToolPoint = nullptr;

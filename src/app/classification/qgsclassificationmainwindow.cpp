@@ -11,6 +11,7 @@
 #include "rs_roi_tool_point.h"
 #include "rs_roi_tool_polygon.h"
 #include "rs_roi_tool_rectangle.h"
+#include "rs_spectral_curve_widget.h"
 #include "qgsgeometry.h"
 #include "qgsmapcanvas.h"
 
@@ -141,7 +142,8 @@ void QgsClassificationMainWindow::setupDocks()
 
   mSpectralDock = new QDockWidget( tr( "光谱曲线" ), this );
   mSpectralDock->setObjectName( QStringLiteral( "rsClassSpectralDock" ) );
-  mSpectralDock->setWidget( new QLabel( tr( "[Spectral curve — Task 10.5]" ), this ) );
+  mSpectralCurve = new RsSpectralCurveWidget( mSpectralDock );
+  mSpectralDock->setWidget( mSpectralCurve );
   addDockWidget( Qt::BottomDockWidgetArea, mSpectralDock );
 }
 

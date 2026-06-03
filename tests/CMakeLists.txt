@@ -1144,4 +1144,23 @@ if(TARGET qgis_app_classify)
   )
   set_target_properties(test_roi_tool_polygon PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(test_roi_tool_polygon)
+
+  # Phase 10A Task 10.5 — Spectral curve widget tests.
+  add_executable(test_spectral_curve test_spectral_curve.cpp)
+  target_link_libraries(test_spectral_curve PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_analysis
+    qgis_app_classify
+  )
+  target_include_directories(test_spectral_curve PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app/classification
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_spectral_curve PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_spectral_curve)
 endif()

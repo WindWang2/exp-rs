@@ -21,6 +21,7 @@ qt_add_library(qgis_app_classify STATIC
     rs_roi_tool_rectangle.cpp
     rs_roi_tool_polygon.cpp
     rs_roi_tool_freehand.cpp
+    rs_spectral_curve_widget.cpp
 )
 
 target_include_directories(qgis_app_classify PUBLIC
