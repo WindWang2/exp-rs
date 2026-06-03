@@ -28,3 +28,6 @@ target_link_libraries(qgis_analysis PUBLIC
 
 target_compile_features(qgis_analysis PUBLIC cxx_std_17)
 set_target_properties(qgis_analysis PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# Phase 10A — Pixel-based classification ROI model + I/O
+add_subdirectory(classification)

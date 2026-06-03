@@ -1005,6 +1005,43 @@ if(SICNU_HAS_OPENCV)
 endif()
 sicnu_discover_tests(test_sift_matcher)
 
+# Phase 10A Task 10.1 — ROI collection unit tests
+add_executable(test_roi_collection test_roi_collection.cpp)
+target_link_libraries(test_roi_collection PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  qgis_analysis
+)
+target_include_directories(test_roi_collection PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_roi_collection PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_roi_collection)
+
+# Phase 10A Task 10.1 — ROI shapefile + sidecar JSON I/O tests
+add_executable(test_roi_io test_roi_io.cpp)
+target_link_libraries(test_roi_io PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+)
+target_include_directories(test_roi_io PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_roi_io PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_roi_io)
+
 # Band ratio and IHS transform tests
 add_executable(test_band_ratio test_band_ratio.cpp)
 target_link_libraries(test_band_ratio PRIVATE
