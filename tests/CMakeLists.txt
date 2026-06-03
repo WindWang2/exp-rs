@@ -959,6 +959,28 @@ target_include_directories(test_gcp_canvas_item PRIVATE
 set_target_properties(test_gcp_canvas_item PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_gcp_canvas_item)
 
+# Task 11.5.6 — RPC golden warp regression (synthetic non-trivial RPC + DEM)
+add_executable(test_rpc_golden test_rpc_golden.cpp)
+target_compile_definitions(test_rpc_golden PRIVATE
+  GEOREF_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data/georef")
+target_link_libraries(test_rpc_golden PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+  GDAL::GDAL
+)
+target_include_directories(test_rpc_golden PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_rpc_golden)
+
 # Band ratio and IHS transform tests
 add_executable(test_band_ratio test_band_ratio.cpp)
 target_link_libraries(test_band_ratio PRIVATE

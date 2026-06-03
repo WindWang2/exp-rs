@@ -6,3 +6,6 @@ build/
 *.log
 qgis_ref/
 data/
+# Allow committed golden fingerprints for Task 11.5.6 RPC regression.
+!tests/data/
+!tests/data/**
