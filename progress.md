@@ -1,5 +1,33 @@
 # Progress Log — SICNU GEO RS
 
+## Session: 2026-06-04 (later) — Phase 10A 设计 + 计划
+
+### 状态
+- **Spec:** `docs/superpowers/specs/2026-06-04-classification-pixel-design.md` 完成（9 子任务 + UI 按 design.html ArtboardClassify + 测试矩阵 + 风险表）
+- **task_plan.md:** Phase 10 老 4 任务 placeholder 重写为 Phase 10A 9 子任务 + Current Phase 指针更新到 10A
+
+### 范围对齐
+- Phase 10 拆成两个模块：10A 像元级 + 10B 面向对象 (OBIA)
+- 10A v1 算法：NormalBayes (最大似然) + SVM (RBF) + K-Means + JM 分离度（用户加的要求）
+- 10A ROI 工具：点/矩形/多边形/自由 + 魔棒（容差生长）+ 光谱曲线查看器
+- 10A 后端：OpenCV ML（复用 Phase 11.5 引入），强依赖（不 OPTIONAL）
+- 10B (OBIA) 独立 phase，分割可用 OTB 或 SLIC/CV 方法 — 后议
+
+### 关键架构决定
+- 独立 QMainWindow（对齐 Phase 11.4 Georeferencer 节奏）
+- 两层结构：`src/analysis/classification/` 算法层 + `src/app/classification/` UI 层
+- 像素索引集（uint64 vector）一次性算入 RsRoi，光谱采样直接读
+- JM 协方差用 ε=1e-6 ridge 防奇异
+- 分块 predict 256×256 tile + 流式写出（避免大栅格 OOM）
+- ROI 字段名用 `cls_id`（避开 OGR `classId` 关键字风险）
+- 类别 sidecar JSON 文件存 id/name/color
+- 主应用入口：Raster → Classification 子菜单（不放 Processing Toolbox）
+
+### 9 子任务顺序
+10.1 (ROI 数据 + I/O) → 10.2 (主窗口骨架) → 10.3 (类别 dock) → 10.4 (4 个 ROI 工具) → 10.5 (光谱曲线) → 10.6 (JM 分离度) → 10.7 (魔棒) → 10.8 (3 分类器 + 应用) → 10.9 (精度评价)
+
+---
+
 ## Session: 2026-06-04 — Phase 11.5 Georeferencer v1.5 ✅ COMPLETE
 
 ### 状态

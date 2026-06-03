@@ -1,5 +1,60 @@
 # Findings & Decisions — SICNU GEO RS
 
+## Phase 10A Classification 设计决定 (2026-06-04)
+
+### Phase 10 分两个模块
+- **10A 像元级**（本 phase）：每像元光谱特征 → 分类器 → 标签图
+- **10B 面向对象 OBIA**（后续 phase）：影像分割 → 段级特征 → 分类器 → 标签图
+- 共用 `RsClassifierBackend` 抽象（cv::ml 包装）；OBIA 多一层 `RsImageSegmenter`
+- 分割算法 10B 时再定（OTB MeanShift / OpenCV contrib SLIC / 自写 SLIC）
+
+### 算法后端：OpenCV ML（不是 OTB CLI）
+- 复用 Phase 11.5 引入的 OpenCV 4.5+
+- 主优势：同一编译单元 + 无子进程 IO + 与 SIFT 统一
+- v1 三件套：`cv::ml::NormalBayesClassifier`（最大似然代理）+ `cv::ml::SVM`（RBF 核）+ `cv::kmeans`
+- v2 stretch：`cv::ml::RTrees`（随机森林）/ Mahalanobis / 深度学习 UNet（UNet 极可能去 ONNX runtime 路线）
+- 强依赖（不 OPTIONAL）：无 OpenCV 时菜单灰显，不进窗口；OPTIONAL 灰显 UI 误导学生
+
+### v1 算法 + 样本评估清单
+- 监督：NormalBayes (Maximum Likelihood) + SVM (RBF, C=10 默认, γ 网格搜索)
+- 非监督：K-Means
+- 样本评估：JM (Jeffries-Matusita) 分离度矩阵（用户指定加）
+- 精度评价：混淆矩阵 + Kappa + per-class Producer/User Accuracy + F1
+
+### UI 形态
+- 独立 QMainWindow，对齐 Phase 11.4 Georeferencer 节奏
+- 严格按 `UI/design.html` `ArtboardClassify` 布局：左 240 (图层 + 类别快览) + 中央画布 + ClassifierBar 72 + 右 380 (类别管理 + JM 矩阵) + 底 180 (光谱曲线 dock)
+- 6 类默认配色（林地/草地/水体/建成区/耕地/裸地）
+
+### ROI 数据存储
+- 几何 + 类别 ID + **像素索引集**（uint64 vector，一次性算入）双存
+- 像素索引集大小：1 万像元 × 8 byte = 80KB / ROI，可接受
+- 编辑 ROI 几何时重算像素索引
+- Shapefile 字段名用 `cls_id`（避开 OGR 关键字风险）
+- 类别定义 sidecar JSON `<rois>.classes.json`（id/name/color）
+
+### JM 数学护栏
+- 协方差矩阵加 ε=1e-6 ridge 防奇异（小样本类）
+- 公式：B = ⅛(μ₁-μ₂)ᵀΣ̄⁻¹(μ₁-μ₂) + ½ln(detΣ̄/√(detΣ₁·detΣ₂))
+- JM = 2(1-exp(-B)) ∈ [0, 2]
+- 热图阈值：≥1.9 绿 / 1.5-1.9 黄绿 / 1.0-1.5 黄 / <1.0 红
+
+### 性能 / 内存策略
+- 分块 predict 256×256 tile + 流式写出（不持有整张 X 矩阵）
+- 大栅格内存峰值控制：1.4GB → 几 MB 工作集
+- 快速预览路径：仅 SRC 画布 viewport 内采样 + 训练 + predict，目标 < 2s
+- JM 矩阵 ROI 改动 → 500ms 节流重算
+
+### 推迟到未来
+- Random Forest / Mahalanobis / UNet（顶栏占位灰）
+- 折线 ROI / SLIC / SAM AI（顶栏占位灰）
+- K-Means 类编号 → 语义类映射
+- ROI 顶点编辑（增删拖拽）
+- 训练模型 .yml 加载入口
+- 混淆矩阵 PDF 导出（等 Phase 12 文档统一）
+
+---
+
 ## Phase 11.5 Georeferencer v1.5 实施记录 (2026-06-04 完成)
 
 ### 偏离原始计划的实现

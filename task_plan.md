@@ -6,7 +6,7 @@ Build a pure C++ remote sensing analysis and processing platform based on the QG
 
 ## Current Phase
 
-Phase 11.4 + 11.5 complete (Georeferencer + v1.5 backlog closeout). **251/251 tests pass**. Next: Phase 10 (Classification — education Lab #4) or Phase 12 (AI Agent foundation), pending priority decision.
+Phase 11.4 + 11.5 complete (Georeferencer + v1.5 backlog closeout). **251/251 tests pass**. Next: **Phase 10A (Pixel-based Classification — education Lab #4)**。设计已确认 `docs/superpowers/specs/2026-06-04-classification-pixel-design.md`。OBIA 留 Phase 10B。
 
 ---
 
@@ -688,77 +688,47 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 
 ---
 
-## Phase 10: Classification & Training 🔴 **[CRITICAL — Education Labs #6-7]**
-**Priority: CRITICAL — Classification is the centerpiece of every RS course. Currently only CLI wrappers exist, no interactive GUI workflow.**
+## Phase 10A: Pixel-Based Classification 🟢 **[NEXT — Education Lab #4]**
+**Goal:** 像元级监督/非监督分类完整工作流。UI 严格按 `UI/design.html` `ArtboardClassify`。详细设计 `docs/superpowers/specs/2026-06-04-classification-pixel-design.md`。OBIA 留 Phase 10B。
 
-### Task 10.1: Training Sample Management
-**Goal:** Digitize, save, load, and manage training polygons/points on the map canvas.
+**新增依赖:** 无（OpenCV 4.5+ ml 模块已 Phase 11.5 引入，CMake 加 `ml` COMPONENT）。OpenCV 强依赖（不 OPTIONAL）。
 
-**Files:**
-- Create: `src/app/map_tools/training_sample_tool.h/.cpp`
-- Create: `src/app/widgets/training_sample_panel.h/.cpp`
-- Create: `src/processing/algorithms/training_data.h/.cpp`
-- Create: `tests/test_training_samples.cpp`
+**新建文件 (≈ 25):**
+- `src/analysis/classification/` (10 文件)：`rs_roi` / `rs_roi_collection` / `rs_roi_io` / `rs_class_def` / `rs_classifier_backend` / `rs_classifier_{normalbayes,svm,kmeans}` / `rs_jm_separability` / `rs_accuracy_assessment`
+- `src/app/classification/` (~15 文件)：`qgsclassificationmainwindow` / 5 个 ROI map tool / `rs_class_table_widget` / `rs_class_quick_list` / `rs_jm_matrix_widget` / `rs_spectral_curve_widget` / `rs_classifier_setup_bar` / `rs_classification_task` / `rs_accuracy_dialog`
+- 15 个 test 文件
 
-**Steps:**
-- [ ] Create TrainingSampleTool (draw polygons on canvas, assign class labels)
-- [ ] Create TrainingSamplePanel (list samples, class colors, import/export)
-- [ ] Save/load training samples as GeoJSON/Shapefile
-- [ ] Wire to Processing > Training Samples dock panel
-- [ ] Build and verify
+**修改文件:**
+- 顶层 `CMakeLists.txt` — 给 `find_package(OpenCV)` 加 `ml` COMPONENT
+- `src/analysis/CMakeLists.txt` + `src/app/classification/CMakeLists.txt` (新增) — 子目录注册
+- `src/app/main_window.{h,cpp}` — 加 `openClassificationWindow()` slot + Raster→Classification 子菜单
+- `resources/icons.qrc` — 注册 `classify_pixel.svg` / `classify_obia.svg`
 
----
+**子任务（每步 Red-Green-Refactor）:**
+- [ ] **10.1** ROI 数据模型 + shapefile/JSON I/O — `RsRoi`, `RsRoiCollection`, `RsRoiIO`, `RsClassDef`；像素索引集；`cls_id` 字段名
+- [ ] **10.2** 主窗口骨架 + Raster→Classification 菜单接入 + 4 个 dock 占位
+- [ ] **10.3** 类别管理 dock + 类别快览 dock（按 design.html ClassTable + 类别快览面板）
+- [ ] **10.4** 4 个手动 ROI map tool (point/rectangle/polygon/freehand) + 当前类绑定 + 浮动 mini-toolbar
+- [ ] **10.5** 光谱曲线 widget + 底部 dock（QPainter 折线 + ±σ 半透明带）
+- [ ] **10.6** JM (Jeffries-Matusita) 分离度计算 + 6×6 热图 widget + 500ms 节流重算
+- [ ] **10.7** 魔棒 ROI 工具（容差生长 + 4 连通 flood fill）
+- [ ] **10.8** 分类器后端（NormalBayes/SVM RBF/K-Means）+ ClassifierBar + RsClassificationTask + 输出 GeoTIFF + ColorTable + 快速预览
+- [ ] **10.9** 精度评价（混淆矩阵 + Kappa + per-class P/R/F1）+ 对话框 + CSV/PDF 导出
 
-### Task 10.2: Supervised Classification
-**Goal:** Maximum Likelihood, Minimum Distance, SVM classifiers with GUI workflow.
+**Stretch (留 Phase 10B / 11.6):**
+- Random Forest / Mahalanobis / 深度学习 UNet 分类器（顶栏占位灰显）
+- 折线 ROI / SLIC 超像素 / SAM AI 提取（顶栏占位灰显）
+- OBIA：影像分割 → 段级特征 → 段级分类
+- K-Means 自动建类映射
+- ROI 顶点编辑（增删拖拽）
+- 训练模型 .yml 加载入口
 
-**Algorithms:**
-- Maximum Likelihood (MLC)
-- Minimum Distance to Mean
-- Spectral Angle Mapper (SAM)
-- Support Vector Machine (SVM) — via external lib or simplified implementation
-
-**Files:**
-- Create: `src/processing/algorithms/classification.h/.cpp`
-- Create: `src/app/dialogs/classification_dialog.h/.cpp`
-- Create: `tests/test_classification.cpp`
-
-**Steps:**
-- [ ] Implement MLC, Minimum Distance, SAM classifiers (TDD)
-- [ ] Create ClassificationDialog (training samples, classifier selection, parameters)
-- [ ] Wire to Processing > Classification > Supervised Classification menu
-- [ ] Build and verify
-
----
-
-### Task 10.3: Unsupervised Classification
-**Goal:** K-Means and ISODATA clustering with dedicated dialog.
-
-**Files:**
-- Modify: `src/processing/algorithms/classification.h/.cpp`
-- Create: `src/app/dialogs/unsupervised_dialog.h/.cpp`
-
-**Steps:**
-- [ ] Implement K-Means and ISODATA (TDD)
-- [ ] Create UnsupervisedDialog (layer, number of classes, iterations, convergence)
-- [ ] Wire to Processing > Classification > Unsupervised Classification menu
-- [ ] Build and verify
-
----
-
-### Task 10.4: Accuracy Assessment
-**Goal:** Confusion matrix, overall accuracy, Kappa coefficient, producer's/user's accuracy.
-
-**Files:**
-- Modify: `src/processing/algorithms/classification.h/.cpp`
-- Create: `src/app/dialogs/accuracy_dialog.h/.cpp`
-- Create: `tests/test_accuracy.cpp`
-
-**Steps:**
-- [ ] Implement confusion matrix computation (TDD)
-- [ ] Create AccuracyDialog (classified raster, reference data, output matrix)
-- [ ] Display results as table with accuracy metrics
-- [ ] Build and verify
+**Done when:**
+- 276+ Catch2 测试全绿（11.5 终态 251 + 10A 新增 25+）
+- 手工烟雾：Sentinel-2 加载 → 6 类 30+ ROI → JM 全 ≥ 1.5 → SVM 训练 → 应用 → 混淆矩阵总精 ≥ 0.85
+- 快速预览路径 < 2s
+- 输出 GeoTIFF 在主应用打开正确显示分类色
+- 结构化日志 `event=classify_finished` JSON 落到 `QgsMessageLog` tag `Classification`
 
 ---
 
