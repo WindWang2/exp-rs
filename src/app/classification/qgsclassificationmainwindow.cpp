@@ -1,13 +1,19 @@
 #include "qgsclassificationmainwindow.h"
 
+#include "rs_class_def.h"
+#include "rs_class_quick_list.h"
+#include "rs_class_table_widget.h"
 #include "rs_roi_collection.h"
 #include "qgsmapcanvas.h"
 
 #include <QAction>
+#include <QColor>
 #include <QDockWidget>
 #include <QLabel>
+#include <QList>
 #include <QMenu>
 #include <QMenuBar>
+#include <QPair>
 #include <QSizePolicy>
 #include <QStatusBar>
 #include <QToolBar>
@@ -21,6 +27,20 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
   resize( 1280, 800 );
 
   mRois = new RsRoiCollection( this );
+
+  // Seed default 6 classes per UI/design.html ArtboardClassify spec.
+  const QList<QPair<int, QPair<QString, QString>>> defaults = {
+    { 1, { tr( "林地" ), QStringLiteral( "#2da44e" ) } },
+    { 2, { tr( "草地" ), QStringLiteral( "#a3e635" ) } },
+    { 3, { tr( "水体" ), QStringLiteral( "#0969da" ) } },
+    { 4, { tr( "建成区" ), QStringLiteral( "#cf222e" ) } },
+    { 5, { tr( "耕地" ), QStringLiteral( "#d29922" ) } },
+    { 6, { tr( "裸地" ), QStringLiteral( "#8a92a0" ) } },
+  };
+  for ( const auto &d : defaults )
+  {
+    mRois->setClassDef( RsClassDef( d.first, d.second.first, QColor( d.second.second ) ) );
+  }
 
   mCanvas = new QgsMapCanvas( this );
   mCanvas->setObjectName( QStringLiteral( "rsClassifyCanvas" ) );
@@ -88,13 +108,17 @@ void QgsClassificationMainWindow::setupDocks()
 {
   mClassListDock = new QDockWidget( tr( "类别管理" ), this );
   mClassListDock->setObjectName( QStringLiteral( "rsClassListDock" ) );
-  mClassListDock->setWidget( new QLabel( tr( "[Class table — Task 10.3]" ), this ) );
+  mClassTableWidget = new RsClassTableWidget( mClassListDock );
+  mClassTableWidget->setRoiCollection( mRois );
+  mClassListDock->setWidget( mClassTableWidget );
   addDockWidget( Qt::RightDockWidgetArea, mClassListDock );
   mClassListDock->resize( 380, mClassListDock->height() );
 
   mClassQuickListDock = new QDockWidget( tr( "类别快览" ), this );
   mClassQuickListDock->setObjectName( QStringLiteral( "rsClassQuickListDock" ) );
-  mClassQuickListDock->setWidget( new QLabel( tr( "[Quick list — Task 10.3]" ), this ) );
+  mClassQuickListWidget = new RsClassQuickList( mClassQuickListDock );
+  mClassQuickListWidget->setRoiCollection( mRois );
+  mClassQuickListDock->setWidget( mClassQuickListWidget );
   addDockWidget( Qt::LeftDockWidgetArea, mClassQuickListDock );
 
   mJmDock = new QDockWidget( tr( "JM 分离度" ), this );

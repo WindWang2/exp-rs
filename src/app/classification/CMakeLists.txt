@@ -14,6 +14,8 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
 qt_add_library(qgis_app_classify STATIC
     qgsclassificationmainwindow.cpp
+    rs_class_table_widget.cpp
+    rs_class_quick_list.cpp
 )
 
 target_include_directories(qgis_app_classify PUBLIC

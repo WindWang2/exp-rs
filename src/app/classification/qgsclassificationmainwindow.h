@@ -6,6 +6,8 @@ class QgisInterface;
 class QDockWidget;
 class QgsMapCanvas;
 class RsRoiCollection;
+class RsClassTableWidget;
+class RsClassQuickList;
 
 /**
  * \brief Phase 10A — Pixel-Based Classification main window shell.
@@ -42,4 +44,7 @@ class QgsClassificationMainWindow : public QMainWindow
     QDockWidget *mClassQuickListDock = nullptr;
     QDockWidget *mJmDock = nullptr;
     QDockWidget *mSpectralDock = nullptr;
+
+    RsClassTableWidget *mClassTableWidget = nullptr;
+    RsClassQuickList *mClassQuickListWidget = nullptr;
 };
