@@ -107,8 +107,18 @@ bool RsClassificationTask::run()
   if ( proj && *proj )
     dstDs->SetProjection( proj );
 
-  // Attach ColorTable
+  // Attach ColorTable. Phase 10A review patch: index 0 is reserved for the
+  // "unclassified" / background pixel and rendered transparent — previously
+  // it defaulted to opaque black which masked unclassified areas.
   GDALColorTable ct( GPI_RGB );
+  {
+    GDALColorEntry bg;
+    bg.c1 = 0;
+    bg.c2 = 0;
+    bg.c3 = 0;
+    bg.c4 = 0; // alpha 0 → transparent
+    ct.SetColorEntry( 0, &bg );
+  }
   for ( auto it = mCfg.classColors.constBegin(); it != mCfg.classColors.constEnd(); ++it )
   {
     GDALColorEntry e;

@@ -38,6 +38,12 @@ class RsClassificationTask : public QgsTask
       std::unique_ptr<RsClassifierBackend> backend;   // owned
       cv::Mat trainX;                                 // CV_32F NxB
       cv::Mat trainY;                                 // CV_32S Nx1
+      // Phase 10A review patch — stratified split reserves test rows for the
+      // Task 10.9 accuracy assessment. run() currently ignores these; Task
+      // 10.9 will use them to compute confusionMatrix / overallAccuracy /
+      // kappa AFTER fit() but BEFORE the tile-streamed predict.
+      cv::Mat testX;                                  // CV_32F MxB (may be empty)
+      cv::Mat testY;                                  // CV_32S Mx1 (may be empty)
       QHash<int, QColor> classColors;                 // classId -> RGB
       QString algoName;                               // for structured log
     };
@@ -48,6 +54,11 @@ class RsClassificationTask : public QgsTask
       QString errorMessage;
       int totalPixels = 0;
       int durationMs = 0;
+      // Phase 10A review patch — reserved for Task 10.9 accuracy assessment.
+      // run() does NOT populate these in the current patch; Task 10.9 will.
+      cv::Mat confusionMatrix;
+      double overallAccuracy = 0.0;
+      double kappa = 0.0;
     };
 
     explicit RsClassificationTask( Config cfg );

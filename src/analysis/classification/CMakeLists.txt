@@ -22,6 +22,8 @@ if(SICNU_HAS_OPENCV)
         rs_classifier_normalbayes.cpp
         rs_classifier_svm.cpp
         rs_classifier_kmeans.cpp
+        # Phase 10A review patch — stratified train/test split helper.
+        rs_classification_split.cpp
     )
     target_link_libraries(qgis_analysis PUBLIC ${OpenCV_LIBS})
     target_include_directories(qgis_analysis PUBLIC ${OpenCV_INCLUDE_DIRS})

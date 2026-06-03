@@ -3,15 +3,18 @@
 #include "rs_class_def.h"
 #include "rs_class_quick_list.h"
 #include "rs_class_table_widget.h"
+#include "rs_classification_split.h"
 #include "rs_classification_task.h"
 #include "rs_classifier_kmeans.h"
 #include "rs_classifier_normalbayes.h"
 #include "rs_classifier_setup_bar.h"
 #include "rs_classifier_svm.h"
 #include "rs_jm_matrix_widget.h"
+#include "rs_jm_separability.h"
 #include "rs_pixel_rasterizer.h"
 #include "rs_roi.h"
 #include "rs_roi_collection.h"
+#include "rs_roi_io.h"
 #include "rs_roi_tool_base.h"
 #include "rs_roi_tool_freehand.h"
 #include "rs_roi_tool_magicwand.h"
@@ -30,6 +33,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QColor>
+#include <QDir>
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -40,13 +44,17 @@
 #include <QList>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QPair>
 #include <QSet>
 #include <QSizePolicy>
 #include <QStatusBar>
+#include <QTimer>
 #include <QToolBar>
 #include <QVector>
 #include <QWidget>
+
+#include <opencv2/ml.hpp>
 
 #include <gdal_priv.h>
 
@@ -87,6 +95,31 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
   setupRoiTools();
   setupClassifierBar();
   setupStatusBar();
+
+  // Phase 10A review patch — JM matrix recompute throttle. mRois::changed
+  // restarts the timer; on fire, recomputeJmMatrix runs once.
+  mJmRecomputeTimer = new QTimer( this );
+  mJmRecomputeTimer->setSingleShot( true );
+  mJmRecomputeTimer->setInterval( 500 );
+  connect( mJmRecomputeTimer, &QTimer::timeout,
+           this, &QgsClassificationMainWindow::recomputeJmMatrix );
+
+  // Phase 10A review patch — feed dead controls.
+  if ( mRois )
+  {
+    connect( mRois, &RsRoiCollection::changed,
+             this, &QgsClassificationMainWindow::recomputeSpectralCurves );
+    connect( mRois, &RsRoiCollection::changed,
+             this, [this]() {
+               if ( mJmRecomputeTimer )
+                 mJmRecomputeTimer->start();
+             } );
+  }
+  if ( mClassTableWidget && mSpectralCurve )
+  {
+    connect( mClassTableWidget, &RsClassTableWidget::currentClassChanged,
+             mSpectralCurve, &RsSpectralCurveWidget::setSelectedClass );
+  }
 }
 
 QgsClassificationMainWindow::~QgsClassificationMainWindow() = default;
@@ -131,15 +164,23 @@ void QgsClassificationMainWindow::setupToolbars()
   toolMagic->setObjectName( QStringLiteral( "rsToolRoiMagicWand" ) );
 
   roiBar->addSeparator();
-  roiBar->addAction( tr( "Spectra" ) );
-  roiBar->addAction( tr( "Separability" ) );
-  roiBar->addAction( tr( "Export ROIs" ) );
+  // Phase 10A review patch — wire the three trailing toolbar actions:
+  // Spectra/Separability toggle their dock visibility, Export saves to .shp.
+  auto *actSpectra = roiBar->addAction( tr( "Spectra" ) );
+  actSpectra->setObjectName( QStringLiteral( "rsToolSpectra" ) );
+  actSpectra->setCheckable( true );
+  auto *actSeparability = roiBar->addAction( tr( "Separability" ) );
+  actSeparability->setObjectName( QStringLiteral( "rsToolSeparability" ) );
+  actSeparability->setCheckable( true );
+  auto *actExport = roiBar->addAction( tr( "Export ROIs" ) );
+  actExport->setObjectName( QStringLiteral( "rsToolExportRois" ) );
 
   auto *spacer = new QWidget( this );
   spacer->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
   roiBar->addWidget( spacer );
 
-  roiBar->addAction( tr( "Quick preview" ) );
+  auto *preview = roiBar->addAction( tr( "Quick preview" ) );
+  preview->setObjectName( QStringLiteral( "rsClassifyPreviewAction" ) );
   auto *apply = roiBar->addAction( tr( "Apply classification..." ) );
   apply->setObjectName( QStringLiteral( "rsClassifyApplyAction" ) );
 }
@@ -275,6 +316,11 @@ void QgsClassificationMainWindow::setupClassifierBar()
 
   connect( mClassifierBar, &RsClassifierSetupBar::applyRequested,
            this, &QgsClassificationMainWindow::applyClassification );
+  // Phase 10A review patch — bar preview / cross-validate signals.
+  connect( mClassifierBar, &RsClassifierSetupBar::previewRequested,
+           this, &QgsClassificationMainWindow::applyPreview );
+  connect( mClassifierBar, &RsClassifierSetupBar::crossValidateRequested,
+           this, &QgsClassificationMainWindow::runCrossValidation );
 
   // The toolbar Apply action (from Task 10.2) routes to the same slot.
   if ( auto *apply = findChild<QAction *>(
@@ -283,6 +329,48 @@ void QgsClassificationMainWindow::setupClassifierBar()
     mApplyAction = apply;
     connect( apply, &QAction::triggered,
              this, &QgsClassificationMainWindow::applyClassification );
+  }
+  // Phase 10A review patch — toolbar Quick preview routes to applyPreview.
+  if ( auto *preview = findChild<QAction *>(
+         QStringLiteral( "rsClassifyPreviewAction" ) ) )
+  {
+    connect( preview, &QAction::triggered,
+             this, &QgsClassificationMainWindow::applyPreview );
+  }
+  // Phase 10A review patch — Spectra/Separability toggle dock visibility,
+  // Export ROIs saves to a shapefile via RsRoiIO.
+  if ( auto *actSpectra = findChild<QAction *>( QStringLiteral( "rsToolSpectra" ) ) )
+  {
+    if ( mSpectralDock )
+      actSpectra->setChecked( mSpectralDock->isVisible() );
+    connect( actSpectra, &QAction::toggled, this, [this]( bool on ) {
+      if ( mSpectralDock )
+        mSpectralDock->setVisible( on );
+    } );
+    if ( mSpectralDock )
+    {
+      connect( mSpectralDock, &QDockWidget::visibilityChanged,
+               actSpectra, &QAction::setChecked );
+    }
+  }
+  if ( auto *actSep = findChild<QAction *>( QStringLiteral( "rsToolSeparability" ) ) )
+  {
+    if ( mJmDock )
+      actSep->setChecked( mJmDock->isVisible() );
+    connect( actSep, &QAction::toggled, this, [this]( bool on ) {
+      if ( mJmDock )
+        mJmDock->setVisible( on );
+    } );
+    if ( mJmDock )
+    {
+      connect( mJmDock, &QDockWidget::visibilityChanged,
+               actSep, &QAction::setChecked );
+    }
+  }
+  if ( auto *actExport = findChild<QAction *>( QStringLiteral( "rsToolExportRois" ) ) )
+  {
+    connect( actExport, &QAction::triggered,
+             this, &QgsClassificationMainWindow::exportRois );
   }
 }
 
@@ -479,8 +567,15 @@ void QgsClassificationMainWindow::applyClassification()
   cfg.sourceRaster = mSourceRasterPath;
   cfg.outputRaster = outPath;
   cfg.bandIndices = bands;
-  cfg.trainX = X;
-  cfg.trainY = y;
+  // Phase 10A review patch — stratified 70/30 split (default ratio comes
+  // from the train-ratio spinbox). testX/testY are reserved for Task 10.9
+  // accuracy assessment.
+  const auto split = RsClassificationSplit::stratifiedSplit(
+    X, y, mClassifierBar->trainRatio() );
+  cfg.trainX = split.trainX;
+  cfg.trainY = split.trainY;
+  cfg.testX = split.testX;
+  cfg.testY = split.testY;
 
   const QHash<int, RsClassDef> classDefs = mRois ? mRois->classDefs()
                                                  : QHash<int, RsClassDef>();
@@ -562,4 +657,389 @@ void QgsClassificationMainWindow::onRoiDrawn( const QgsGeometry &geom, int class
   QVector<quint64> idx( pixels.begin(), pixels.end() );
   if ( mRois )
     mRois->appendRoi( RsRoi( classId, geom, idx ) );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 10A review patch — slot implementations.
+// ---------------------------------------------------------------------------
+
+void QgsClassificationMainWindow::applyPreview()
+{
+  if ( mSourceRasterPath.isEmpty() )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "请先 File → Open source raster..." ), 5000 );
+    return;
+  }
+  if ( !mClassifierBar )
+    return;
+
+  QVector<int> bands = mClassifierBar->selectedBands();
+  if ( bands.isEmpty() )
+  {
+    const int n = std::min( 3, mSourceBandCount );
+    for ( int i = 1; i <= n; ++i )
+      bands.push_back( i );
+  }
+  if ( bands.isEmpty() )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "无可用波段" ), 5000 );
+    return;
+  }
+
+  cv::Mat X, y;
+  if ( !buildTrainingData( bands, X, y ) || X.rows < 10 )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage(
+        tr( "训练样本不足（< 10 像元）— 请先勾画 ROI 或加载已保存样本" ), 6000 );
+    return;
+  }
+
+  // v1 simplification: classify the FULL raster but route output to a
+  // temp file, skip the file dialog, and add the result as a temporary
+  // canvas layer. Viewport-cropped windowed classification deferred.
+  const QString outPath = QDir::temp().filePath(
+    QStringLiteral( "classify_preview.tif" ) );
+
+  RsClassificationTask::Config cfg;
+  cfg.sourceRaster = mSourceRasterPath;
+  cfg.outputRaster = outPath;
+  cfg.bandIndices = bands;
+  const auto split = RsClassificationSplit::stratifiedSplit(
+    X, y, mClassifierBar->trainRatio() );
+  cfg.trainX = split.trainX;
+  cfg.trainY = split.trainY;
+  cfg.testX = split.testX;
+  cfg.testY = split.testY;
+
+  const QHash<int, RsClassDef> classDefs = mRois ? mRois->classDefs()
+                                                 : QHash<int, RsClassDef>();
+  for ( auto it = classDefs.constBegin(); it != classDefs.constEnd(); ++it )
+    cfg.classColors[it.key()] = it.value().color();
+
+  switch ( mClassifierBar->currentKind() )
+  {
+    case RsClassifierKind::NormalBayes:
+      cfg.backend.reset( new RsClassifierNormalBayes );
+      cfg.algoName = QStringLiteral( "NormalBayes" );
+      break;
+    case RsClassifierKind::SvmRbf:
+      cfg.backend.reset( new RsClassifierSvm );
+      cfg.algoName = QStringLiteral( "SVM_RBF" );
+      break;
+    case RsClassifierKind::KMeans:
+      cfg.backend.reset( new RsClassifierKMeans(
+        std::max( 2, static_cast<int>( classDefs.size() ) ) ) );
+      cfg.algoName = QStringLiteral( "KMeans" );
+      break;
+  }
+
+  auto *task = new RsClassificationTask( std::move( cfg ) );
+  const QString outForLog = outPath;
+  connect( task, &QgsTask::taskCompleted, this, [this, task, outForLog]() {
+    const auto &r = task->result();
+    if ( !r.ok )
+    {
+      if ( statusBar() )
+        statusBar()->showMessage(
+          tr( "预览失败: %1" ).arg( r.errorMessage ), 6000 );
+      return;
+    }
+    // Add the preview as a temporary layer on the canvas. Reuses
+    // mLayerStore for lifetime management.
+    auto *previewLayer = new QgsRasterLayer(
+      outForLog, QStringLiteral( "classify_preview" ),
+      QStringLiteral( "gdal" ) );
+    if ( previewLayer->isValid() )
+    {
+      if ( mLayerStore )
+        mLayerStore->addMapLayer( previewLayer );
+      if ( mCanvas )
+      {
+        QList<QgsMapLayer *> layers;
+        if ( mSourceLayer )
+          layers << previewLayer << mSourceLayer;
+        else
+          layers << previewLayer;
+        mCanvas->setLayers( layers );
+        mCanvas->refresh();
+      }
+    }
+    else
+    {
+      delete previewLayer;
+    }
+    if ( statusBar() )
+      statusBar()->showMessage(
+        tr( "预览完成 (%1 ms)" ).arg( r.durationMs ), 5000 );
+  } );
+  QgsApplication::taskManager()->addTask( task );
+  if ( statusBar() )
+    statusBar()->showMessage( tr( "预览中…" ), 3000 );
+}
+
+void QgsClassificationMainWindow::runCrossValidation()
+{
+  // v1 stub — a proper k-fold loop with OpenCV's TrainData split is more
+  // than 50 lines once we account for backend re-fit + label remapping.
+  // Defer to Phase 10A.1 to keep this review patch focused.
+  QMessageBox::information(
+    this, tr( "交叉验证" ),
+    tr( "Cross-validation coming soon — Phase 10A.1" ) );
+}
+
+void QgsClassificationMainWindow::recomputeSpectralCurves()
+{
+  if ( !mSpectralCurve )
+    return;
+  if ( mSourceRasterPath.isEmpty() || !mRois )
+  {
+    mSpectralCurve->setClassCurves( {} );
+    return;
+  }
+  if ( mSourceWidth <= 0 || mSourceHeight <= 0 )
+    return;
+
+  // Pick bands: use ClassifierBar selection if available; otherwise the
+  // first min(6, mSourceBandCount) bands.
+  QVector<int> bands = mClassifierBar ? mClassifierBar->selectedBands()
+                                      : QVector<int>{};
+  if ( bands.isEmpty() )
+  {
+    const int n = std::min( 6, mSourceBandCount );
+    for ( int i = 1; i <= n; ++i )
+      bands.push_back( i );
+  }
+  if ( bands.isEmpty() )
+    return;
+
+  // Read bands into memory once. Performance note: this re-reads the raster
+  // on every ROI change. Acceptable for v1 (typical training rasters are
+  // small / sampling is bounded by ROI pixel set); future optimisation is
+  // tile-bounded RasterIO.
+  GDALAllRegister();
+  GDALDataset *ds = static_cast<GDALDataset *>(
+    GDALOpen( mSourceRasterPath.toUtf8().constData(), GA_ReadOnly ) );
+  if ( !ds )
+    return;
+  const int W = ds->GetRasterXSize();
+  const int H = ds->GetRasterYSize();
+  const int nBands = ds->GetRasterCount();
+  for ( int b : bands )
+  {
+    if ( b < 1 || b > nBands )
+    {
+      GDALClose( ds );
+      return;
+    }
+  }
+  std::vector<std::vector<float>> bandBufs( bands.size(),
+                                            std::vector<float>( static_cast<size_t>( W ) * H ) );
+  for ( int bi = 0; bi < bands.size(); ++bi )
+  {
+    const CPLErr err = ds->GetRasterBand( bands[bi] )->RasterIO(
+      GF_Read, 0, 0, W, H, bandBufs[bi].data(),
+      W, H, GDT_Float32, 0, 0 );
+    if ( err != CE_None )
+    {
+      GDALClose( ds );
+      return;
+    }
+  }
+  GDALClose( ds );
+
+  // Bucket pixel indices by class.
+  QHash<int, QVector<quint64>> idxByClass;
+  for ( const RsRoi &roi : mRois->rois() )
+  {
+    if ( roi.classId() <= 0 )
+      continue;
+    QVector<quint64> idx = roi.pixelIndices();
+    if ( idx.isEmpty() )
+    {
+      const QSet<quint64> px = RsPixelRasterizer::rasterize(
+        roi.geometry(), mSourceGt, W, H );
+      idx = QVector<quint64>( px.begin(), px.end() );
+    }
+    auto &bucket = idxByClass[roi.classId()];
+    for ( quint64 i : idx )
+    {
+      if ( i < static_cast<quint64>( W ) * H )
+        bucket.push_back( i );
+    }
+  }
+
+  const QHash<int, RsClassDef> classDefs = mRois->classDefs();
+  QVector<RsSpectralCurveWidget::Curve> curves;
+  curves.reserve( classDefs.size() );
+  for ( auto it = classDefs.constBegin(); it != classDefs.constEnd(); ++it )
+  {
+    const QVector<quint64> &px = idxByClass.value( it.key() );
+    if ( px.isEmpty() )
+      continue;
+    RsSpectralCurveWidget::Curve curve;
+    curve.classId = it.key();
+    curve.color = it.value().color();
+    curve.name = it.value().name();
+    curve.bandMeans.resize( bands.size() );
+    curve.bandStds.resize( bands.size() );
+    for ( int bi = 0; bi < bands.size(); ++bi )
+    {
+      double sum = 0.0;
+      double sumSq = 0.0;
+      const auto &buf = bandBufs[bi];
+      for ( quint64 i : px )
+      {
+        const double v = buf[i];
+        sum += v;
+        sumSq += v * v;
+      }
+      const double n = static_cast<double>( px.size() );
+      const double mean = sum / n;
+      const double var = std::max( 0.0, sumSq / n - mean * mean );
+      curve.bandMeans[bi] = mean;
+      curve.bandStds[bi] = std::sqrt( var );
+    }
+    curves.push_back( curve );
+  }
+  mSpectralCurve->setClassCurves( curves );
+}
+
+void QgsClassificationMainWindow::recomputeJmMatrix()
+{
+  if ( !mJmMatrix || !mRois )
+    return;
+  if ( mSourceRasterPath.isEmpty() )
+    return;
+  if ( mSourceWidth <= 0 || mSourceHeight <= 0 )
+    return;
+
+  // Same band set as the spectral curve dock for consistency.
+  QVector<int> bands = mClassifierBar ? mClassifierBar->selectedBands()
+                                      : QVector<int>{};
+  if ( bands.isEmpty() )
+  {
+    const int n = std::min( 6, mSourceBandCount );
+    for ( int i = 1; i <= n; ++i )
+      bands.push_back( i );
+  }
+  if ( bands.isEmpty() )
+    return;
+
+  GDALAllRegister();
+  GDALDataset *ds = static_cast<GDALDataset *>(
+    GDALOpen( mSourceRasterPath.toUtf8().constData(), GA_ReadOnly ) );
+  if ( !ds )
+    return;
+  const int W = ds->GetRasterXSize();
+  const int H = ds->GetRasterYSize();
+  const int nBands = ds->GetRasterCount();
+  for ( int b : bands )
+  {
+    if ( b < 1 || b > nBands )
+    {
+      GDALClose( ds );
+      return;
+    }
+  }
+  std::vector<std::vector<float>> bandBufs( bands.size(),
+                                            std::vector<float>( static_cast<size_t>( W ) * H ) );
+  for ( int bi = 0; bi < bands.size(); ++bi )
+  {
+    const CPLErr err = ds->GetRasterBand( bands[bi] )->RasterIO(
+      GF_Read, 0, 0, W, H, bandBufs[bi].data(),
+      W, H, GDT_Float32, 0, 0 );
+    if ( err != CE_None )
+    {
+      GDALClose( ds );
+      return;
+    }
+  }
+  GDALClose( ds );
+
+  // Bucket pixel indices by class, then build a cv::Mat per class.
+  QHash<int, QVector<quint64>> idxByClass;
+  for ( const RsRoi &roi : mRois->rois() )
+  {
+    if ( roi.classId() <= 0 )
+      continue;
+    QVector<quint64> idx = roi.pixelIndices();
+    if ( idx.isEmpty() )
+    {
+      const QSet<quint64> px = RsPixelRasterizer::rasterize(
+        roi.geometry(), mSourceGt, W, H );
+      idx = QVector<quint64>( px.begin(), px.end() );
+    }
+    auto &bucket = idxByClass[roi.classId()];
+    for ( quint64 i : idx )
+    {
+      if ( i < static_cast<quint64>( W ) * H )
+        bucket.push_back( i );
+    }
+  }
+
+  QHash<int, cv::Mat> samplesByClass;
+  for ( auto it = idxByClass.constBegin(); it != idxByClass.constEnd(); ++it )
+  {
+    const auto &px = it.value();
+    if ( px.size() < 2 )
+      continue;
+    cv::Mat m( px.size(), bands.size(), CV_32F );
+    for ( int r = 0; r < px.size(); ++r )
+    {
+      for ( int bi = 0; bi < bands.size(); ++bi )
+        m.at<float>( r, bi ) = bandBufs[bi][px[r]];
+    }
+    samplesByClass.insert( it.key(), m );
+  }
+
+  // Sorted class id list for pairwise iteration.
+  QList<int> ids = samplesByClass.keys();
+  std::sort( ids.begin(), ids.end() );
+
+  QHash<QPair<int, int>, double> jm;
+  for ( int i = 0; i < ids.size(); ++i )
+  {
+    for ( int j = i + 1; j < ids.size(); ++j )
+    {
+      const double d = RsJmSeparability::pairJm(
+        samplesByClass.value( ids[i] ),
+        samplesByClass.value( ids[j] ) );
+      jm.insert( qMakePair( ids[i], ids[j] ), d );
+    }
+  }
+
+  QVector<RsJmMatrixWidget::ClassEntry> classes;
+  const QHash<int, RsClassDef> classDefs = mRois->classDefs();
+  QList<int> defIds = classDefs.keys();
+  std::sort( defIds.begin(), defIds.end() );
+  for ( int id : defIds )
+  {
+    const RsClassDef d = classDefs.value( id );
+    classes.push_back( { d.id(), d.name(), d.color() } );
+  }
+  mJmMatrix->setData( classes, jm );
+}
+
+void QgsClassificationMainWindow::exportRois()
+{
+  if ( !mRois || mRois->size() == 0 )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "无 ROI 可导出" ), 4000 );
+    return;
+  }
+  const QString path = QFileDialog::getSaveFileName(
+    this, tr( "Export ROIs" ), QString(),
+    tr( "ESRI Shapefile (*.shp)" ) );
+  if ( path.isEmpty() )
+    return;
+  const bool ok = RsRoiIO::save( path, *mRois );
+  if ( statusBar() )
+    statusBar()->showMessage(
+      ok ? tr( "已导出 ROI: %1" ).arg( QFileInfo( path ).fileName() )
+         : tr( "ROI 导出失败: %1" ).arg( path ),
+      5000 );
 }

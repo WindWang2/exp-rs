@@ -1249,6 +1249,23 @@ if(TARGET qgis_app_classify)
   )
   sicnu_discover_tests(test_classifier_kmeans)
 
+  # Phase 10A review patch — stratified train/test split helper test.
+  add_executable(test_stratified_split test_stratified_split.cpp)
+  target_link_libraries(test_stratified_split PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_stratified_split PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_stratified_split)
+
   # Phase 10A Task 10.8 — End-to-end classification task test.
   add_executable(test_classification_e2e test_classification_e2e.cpp)
   target_link_libraries(test_classification_e2e PRIVATE

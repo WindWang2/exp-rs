@@ -6,6 +6,8 @@
 
 #include <opencv2/core.hpp>
 
+class QTimer;
+
 class QgisInterface;
 class QAction;
 class QDockWidget;
@@ -59,6 +61,31 @@ class QgsClassificationMainWindow : public QMainWindow
     /// picker if blank). Schedules an RsClassificationTask on the global
     /// task manager.
     void applyClassification();
+
+    /// Phase 10A review patch — preview slot. v1: same flow as
+    /// applyClassification but routes output to a temp file (no picker),
+    /// skips accuracy, and adds the result layer to mCanvas. Viewport-
+    /// cropped variant deferred — full raster is classified for now.
+    void applyPreview();
+
+    /// Phase 10A review patch — 5-fold cross-validation stub. v1 shows an
+    /// info dialog ("coming soon"); proper implementation lands in Phase
+    /// 10A.1 to avoid a 50+ line accuracy/k-fold body before Task 10.9.
+    void runCrossValidation();
+
+    /// Phase 10A review patch — refresh the bottom spectral-curve dock from
+    /// the current ROIs + selected bands. Triggered on mRois::changed and
+    /// any external "please refresh" call.
+    void recomputeSpectralCurves();
+
+    /// Phase 10A review patch — recompute the JM separability matrix. Slot
+    /// is called by mJmRecomputeTimer (500ms single-shot, restarted on
+    /// each mRois::changed) to throttle expensive pairwise JM evaluation.
+    void recomputeJmMatrix();
+
+    /// Phase 10A review patch — toolbar "Export ROIs" action handler.
+    /// Pops a save dialog and calls RsRoiIO::save.
+    void exportRois();
 
   private:
     void setupMenus();
@@ -114,6 +141,11 @@ class QgsClassificationMainWindow : public QMainWindow
     // Lifetime owner for QgsRasterLayer instances handed to mCanvas.
     QgsMapLayerStore *mLayerStore = nullptr;
     QgsRasterLayer *mSourceLayer = nullptr; // non-owning
+
+    // Phase 10A review patch — 500ms single-shot throttle for JM matrix
+    // recomputation. Restarted on every mRois::changed; fires once after
+    // the user stops dragging in new ROIs.
+    QTimer *mJmRecomputeTimer = nullptr;
 
   private slots:
     void onRoiDrawn( const QgsGeometry &geom, int classId );
