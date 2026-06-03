@@ -981,6 +981,30 @@ target_include_directories(test_rpc_golden PRIVATE
 )
 sicnu_discover_tests(test_rpc_golden)
 
+# Task 11.5.7 — SIFT auto-match matcher tests
+add_executable(test_sift_matcher test_sift_matcher.cpp)
+target_link_libraries(test_sift_matcher PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+  GDAL::GDAL
+)
+target_include_directories(test_sift_matcher PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+if(SICNU_HAS_OPENCV)
+  target_compile_definitions(test_sift_matcher PRIVATE SICNU_HAS_OPENCV=1)
+  target_link_libraries(test_sift_matcher PRIVATE ${OpenCV_LIBS})
+  target_include_directories(test_sift_matcher PRIVATE ${OpenCV_INCLUDE_DIRS})
+endif()
+sicnu_discover_tests(test_sift_matcher)
+
 # Band ratio and IHS transform tests
 add_executable(test_band_ratio test_band_ratio.cpp)
 target_link_libraries(test_band_ratio PRIVATE

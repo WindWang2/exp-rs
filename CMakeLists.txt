@@ -36,6 +36,17 @@ find_library(PCRE2_8 pcre2-8 REQUIRED)
 # Python (build-time scripts + runtime embedding)
 find_package(Python REQUIRED COMPONENTS Interpreter Development)
 
+# OpenCV — OPTIONAL dependency for SIFT auto-match (Task 11.5.7).
+# Build remains green without OpenCV; SIFT is compile-time guarded via SICNU_HAS_OPENCV.
+find_package(OpenCV 4.5 QUIET COMPONENTS core features2d imgproc calib3d)
+if(OpenCV_FOUND)
+    message(STATUS "OpenCV ${OpenCV_VERSION} found — SIFT enabled")
+    set(SICNU_HAS_OPENCV TRUE)
+else()
+    message(STATUS "OpenCV not found — SIFT will be disabled (set OpenCV_DIR to enable)")
+    set(SICNU_HAS_OPENCV FALSE)
+endif()
+
 # pybind11 via FetchContent
 include(FetchContent)
 FetchContent_Declare(

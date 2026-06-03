@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QMessageBox>
 #include <QMetaEnum>
 #include <QMenu>
 #include <QMenuBar>
@@ -44,6 +45,8 @@
 #include "qgsrasterlayer.h"
 #include "qgstaskmanager.h"
 #include "rs_georef_params_panel.h"
+#include "rs_sift_dialog.h"
+#include "rs_sift_task.h"
 #include "rs_twincanvas_sync_controller.h"
 #include "rs_warp_task.h"
 
@@ -558,7 +561,61 @@ void QgsGeoreferencerMainWindow::setupToolbars()
     tr( "Auto match (SIFT)" ),
     this,
     [this]() {
-      statusBar()->showMessage( tr( "SIFT auto-match coming in Phase 11.5" ), 3000 );
+#ifndef SICNU_HAS_OPENCV
+      statusBar()->showMessage( tr( "OpenCV 不可用 — SIFT 已禁用" ), 5000 );
+      return;
+#else
+      if ( !mRefRaster )
+      {
+        statusBar()->showMessage( tr( "请先 File → Load reference raster…" ), 5000 );
+        return;
+      }
+      if ( mSourceRasterPath.isEmpty() )
+      {
+        statusBar()->showMessage( tr( "请先打开 SRC 影像" ), 5000 );
+        return;
+      }
+      RsSiftDialog dlg( this );
+      if ( dlg.exec() != QDialog::Accepted )
+        return;
+      const auto params = dlg.params();
+      auto *task = new RsSiftTask( mSourceRasterPath,
+                                   mRefRaster->source(),
+                                   mParamsPanel->destCrs(),
+                                   params );
+      connect( task, &QgsTask::taskCompleted, this, [this, task]() {
+        const auto r = task->result();
+        if ( !r.ok() )
+        {
+          statusBar()->showMessage( tr( "SIFT 失败：%1" ).arg( r.errorMessage ), 5000 );
+          return;
+        }
+        const QString msg = tr( "找到 %1 对匹配，内点 %2 个 (%3%)，是否全部采用？" )
+                              .arg( r.totalMatches )
+                              .arg( r.inliers.size() )
+                              .arg( int( r.inlierRatio * 100 ) );
+        if ( QMessageBox::question( this, tr( "SIFT 匹配结果" ), msg ) != QMessageBox::Yes )
+          return;
+        const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
+        for ( const auto &m : r.inliers )
+        {
+          QgsGcpPoint p( m.srcPx, m.dstWorld, destCrs, true );
+          mGcps->appendPoint( p );
+        }
+        QJsonObject o {
+          { QStringLiteral( "event" ),        QStringLiteral( "sift_match" ) },
+          { QStringLiteral( "matches" ),      r.totalMatches },
+          { QStringLiteral( "inliers" ),      int( r.inliers.size() ) },
+          { QStringLiteral( "inlier_ratio" ), r.inlierRatio },
+        };
+        QgsMessageLog::logMessage(
+          QString::fromUtf8( QJsonDocument( o ).toJson( QJsonDocument::Compact ) ),
+          QStringLiteral( "Georeferencer" ),
+          Qgis::MessageLevel::Info );
+      } );
+      QgsApplication::taskManager()->addTask( task );
+      statusBar()->showMessage( tr( "SIFT 匹配中…" ), 3000 );
+#endif
     } );
   sift->setObjectName( QStringLiteral( "rsGeorefSiftAction" ) );
 

@@ -25,6 +25,9 @@ add_library(qgis_app_georef STATIC
     rs_rms_scatter_widget.cpp
     rs_georef_params_panel.cpp
     rs_warp_task.cpp
+    rs_sift_matcher.cpp
+    rs_sift_dialog.cpp
+    rs_sift_task.cpp
 )
 
 target_include_directories(qgis_app_georef PUBLIC
@@ -62,3 +65,10 @@ set_target_properties(qgis_app_georef PROPERTIES
 )
 
 target_compile_features(qgis_app_georef PUBLIC cxx_std_17)
+
+# OpenCV — OPTIONAL (SIFT auto-match). Without it, SIFT degrades gracefully.
+if(SICNU_HAS_OPENCV)
+    target_compile_definitions(qgis_app_georef PUBLIC SICNU_HAS_OPENCV=1)
+    target_link_libraries(qgis_app_georef PUBLIC ${OpenCV_LIBS})
+    target_include_directories(qgis_app_georef PUBLIC ${OpenCV_INCLUDE_DIRS})
+endif()
