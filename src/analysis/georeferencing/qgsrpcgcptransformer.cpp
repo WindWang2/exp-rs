@@ -59,8 +59,8 @@ void QgsRpcGcpTransformer::setRpcOptions( const QString &demPath, double zOffset
   mUseGcpRefinement = useRefine;
 }
 
-bool QgsRpcGcpTransformer::updateParametersFromGcps( const QVector<QgsPointXY> & /*source*/,
-                                                     const QVector<QgsPointXY> & /*destination*/,
+bool QgsRpcGcpTransformer::updateParametersFromGcps( const QVector<QgsPointXY> &source,
+                                                     const QVector<QgsPointXY> &destination,
                                                      bool /*invertYAxis*/ )
 {
   freeTransformer();
@@ -101,6 +101,44 @@ bool QgsRpcGcpTransformer::updateParametersFromGcps( const QVector<QgsPointXY> &
   {
     opts = CSLSetNameValue( opts, "RPC_DEM", mDem.toUtf8().constData() );
     opts = CSLSetNameValue( opts, "RPC_DEMINTERPOLATION", "bilinear" );
+  }
+
+  // Task 11.5.5 — linear-bias GCP refinement.
+  //
+  // When enabled and at least 3 source/destination pairs are supplied, build
+  // a temporary "base" RPC transformer using the current options, sample the
+  // forward residual at each GCP, average the (destination - predicted)
+  // bias in LON/LAT, and shift `rpc.dfLONG_OFF` / `rpc.dfLAT_OFF` by that
+  // mean.  The final transformer is then created with the corrected RPC
+  // structure but the SAME papszOptions (DEM/HEIGHT do not carry CRS bias).
+  if ( mUseGcpRefinement && source.size() >= 3 && source.size() == destination.size() )
+  {
+    void *baseArg = GDALCreateRPCTransformerV2( &rpc, FALSE, 0.1, opts );
+    if ( baseArg )
+    {
+      double meanLonOff = 0.0;
+      double meanLatOff = 0.0;
+      int n = 0;
+      for ( int i = 0; i < source.size(); ++i )
+      {
+        double X = source[i].x();
+        double Y = source[i].y();
+        double Z = 0.0;
+        int success = 0;
+        if ( GDALRPCTransform( baseArg, FALSE, 1, &X, &Y, &Z, &success ) && success )
+        {
+          meanLonOff += ( destination[i].x() - X );
+          meanLatOff += ( destination[i].y() - Y );
+          ++n;
+        }
+      }
+      GDALDestroyRPCTransformer( baseArg );
+      if ( n >= 3 )
+      {
+        rpc.dfLONG_OFF += ( meanLonOff / n );
+        rpc.dfLAT_OFF += ( meanLatOff / n );
+      }
+    }
   }
 
   mTransformArg = GDALCreateRPCTransformerV2( &rpc, FALSE, 0.1, opts );

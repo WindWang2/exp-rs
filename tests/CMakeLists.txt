@@ -871,6 +871,24 @@ target_include_directories(test_dem_z_offset PRIVATE
 )
 sicnu_discover_tests(test_dem_z_offset)
 
+# Task 11.5.5 — RPC GCP linear-bias refinement
+add_executable(test_rpc_gcp_refine test_rpc_gcp_refine.cpp)
+target_link_libraries(test_rpc_gcp_refine PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+)
+target_include_directories(test_rpc_gcp_refine PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_rpc_gcp_refine)
+
 # Task 11.5.1 — CRS picker persistence + signal tests
 add_executable(test_crs_picker_persists test_crs_picker_persists.cpp)
 target_link_libraries(test_crs_picker_persists PRIVATE

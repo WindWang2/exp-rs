@@ -194,22 +194,6 @@ void QgsGeoreferencerMainWindow::recomputeFit()
   // Build a fresh transform of the chosen method.
   mTransform.reset( new QgsGeorefTransform( method ) );
 
-  // Task 11.5.4 — push DEM/Z-offset settings down into the RPC transformer
-  // before the fit so RPC_HEIGHT and (if a DEM is set) RPC_DEM are part of
-  // GDALCreateRPCTransformerV2's papszOptions.  Task 11.5.5 will flip
-  // useGcpRefinement to true when ≥ 3 enabled GCPs exist.
-  if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical )
-  {
-    if ( auto *rpc = dynamic_cast<QgsRpcGcpTransformer *>(
-           mTransform ? mTransform->gcpTransformer() : nullptr ) )
-    {
-      rpc->setSourceRasterPath( mSourceRasterPath );
-      rpc->setRpcOptions( mParamsPanel->demPath(),
-                          mParamsPanel->demZOffset(),
-                          /*useGcpRefinement*/ false );
-    }
-  }
-
   // Collect enabled GCPs (source + destination) in parallel vectors.
   QVector<QgsPointXY> src;
   QVector<QgsPointXY> dst;
@@ -224,6 +208,24 @@ void QgsGeoreferencerMainWindow::recomputeFit()
   }
   const int enabledCount = src.size();
   mParamsPanel->setActualGcpCount( enabledCount );
+
+  // Task 11.5.4/11.5.5 — push DEM/Z-offset settings down into the RPC
+  // transformer before the fit so RPC_HEIGHT and (if a DEM is set) RPC_DEM
+  // are part of GDALCreateRPCTransformerV2's papszOptions.  Linear-bias
+  // refinement is requested only when ≥ 3 enabled GCPs are available
+  // (matches QgsRpcGcpTransformer's internal guard).
+  if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical )
+  {
+    if ( auto *rpc = dynamic_cast<QgsRpcGcpTransformer *>(
+           mTransform ? mTransform->gcpTransformer() : nullptr ) )
+    {
+      rpc->setSourceRasterPath( mSourceRasterPath );
+      const bool useRefine = ( enabledCount >= 3 );
+      rpc->setRpcOptions( mParamsPanel->demPath(),
+                          mParamsPanel->demZOffset(),
+                          useRefine );
+    }
+  }
 
   bool fitOk = false;
   if ( enabledCount >= minN && minN > 0 )

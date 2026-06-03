@@ -56,6 +56,15 @@ class RsGeorefParamsPanel : public QWidget
     /// Task 11.5.4 — DEM Z-offset (metres) from the params panel spin box.
     double demZOffset() const;
 
+    /**
+     * Task 11.5.5 — display the before/after RMS comparison produced by the
+     * RPC linear-bias GCP refinement step.  Values are in destination-CRS
+     * units (typically degrees for the RPC pipeline) and rendered with 3
+     * fractional digits.  When \a after is strictly less than \a before the
+     * "after" label is coloured green; otherwise neutral gray.
+     */
+    void setRefinementRms( double before, double after );
+
   public slots:
     /// Update the section-3 labels and DOF readout.
     void setRmsValues( int total, int enabled, double rmsPx,
@@ -93,6 +102,9 @@ class RsGeorefParamsPanel : public QWidget
     QLabel *mYRms = nullptr;
     QLabel *mTotalRms = nullptr;
     QLabel *mMaxRms = nullptr;
+    // Task 11.5.5 — before/after RMS readout for RPC linear-bias refinement.
+    QLabel *mRmsBefore = nullptr;
+    QLabel *mRmsAfter = nullptr;
 
     QLabel *mSrcCrsLabel = nullptr;
     QgsProjectionSelectionWidget *mCrsWidget = nullptr;

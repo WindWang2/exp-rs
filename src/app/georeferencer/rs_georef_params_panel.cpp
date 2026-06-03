@@ -161,7 +161,16 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     grid->addRow( tr( "Total RMS" ), mTotalRms );
     grid->addRow( tr( "最大残差" ), mMaxRms );
 
+    // Task 11.5.5 — before/after RMS readout for RPC linear-bias refinement.
+    // Empty until the main window calls setRefinementRms().
+    mRmsBefore = new QLabel( QString(), sec );
+    mRmsBefore->setObjectName( QStringLiteral( "rsRmsBefore" ) );
+    mRmsAfter = new QLabel( QString(), sec );
+    mRmsAfter->setObjectName( QStringLiteral( "rsRmsAfter" ) );
+
     vbox->addItem( grid );
+    vbox->addWidget( mRmsBefore );
+    vbox->addWidget( mRmsAfter );
     sec->layout()->addItem( vbox );
     root->addWidget( sec );
   }
@@ -430,6 +439,19 @@ void RsGeorefParamsPanel::setResidualScatter( const QVector<QPointF> &dxdy )
 {
   if ( mScatter )
     mScatter->setResiduals( dxdy );
+}
+
+void RsGeorefParamsPanel::setRefinementRms( double before, double after )
+{
+  if ( mRmsBefore )
+    mRmsBefore->setText( tr( "精化前 RMS: %1 px" ).arg( before, 0, 'f', 3 ) );
+  if ( mRmsAfter )
+  {
+    mRmsAfter->setText( tr( "精化后 RMS: %1 px" ).arg( after, 0, 'f', 3 ) );
+    mRmsAfter->setStyleSheet( after < before
+                                ? QStringLiteral( "color: #208830;" )
+                                : QStringLiteral( "color: #5f6b7a;" ) );
+  }
 }
 
 void RsGeorefParamsPanel::setMinimumGcpCount( int n )
