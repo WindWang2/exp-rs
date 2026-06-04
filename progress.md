@@ -1,5 +1,28 @@
 # Progress Log — SICNU GEO RS
 
+## Session: 2026-06-04 (深夜) — Phase 10A.1 设计 + 计划
+
+### 状态
+- **Spec:** `docs/superpowers/specs/2026-06-04-classification-10a1-polish-design.md` 完成（3 子任务收尾）
+- **task_plan.md:** Phase 10A.1 块插入 Phase 10A 之后
+
+### 范围对齐
+- 收尾 3 个 Phase 10A 留下的算法缺口：K-Means Hungarian / 5-fold CV / .yml 加载
+- ROI 顶点编辑 / PDF 导出 / 真实数据烟雾 / 视觉 review / 预览基线 推迟 (需 X display 或外部数据)
+
+### 关键设计决定
+- Hungarian O(n³) Munkres 经典实现；典型 N=6 几乎瞬时；v1 限 N ≤ 256
+- K-Means K != |unique testY| 跳过 accuracy（保持现行为 + 状态栏提示）
+- 分层 k-fold 保证每 fold 至少 1 个该类样本；类样本 < k 时全 train
+- `RsClassifierBackend::isFitted()` 抽象接口（默认 false，具体后端 query OpenCV）
+- 加载的模型一次性消耗（Apply 后清空 `mLoadedBackend`）；持久化加载留 v1.1
+- K-Means 不支持 .yml 加载（`cv::kmeans` 不是 `cv::Algorithm` 子类，无 save/load）
+
+### 3 子任务顺序
+10A.1.1 (Hungarian) → 10A.1.2 (CV) → 10A.1.3 (.yml load)
+
+---
+
 ## Session: 2026-06-04 (晚) — Phase 10A Pixel Classification ✅ COMPLETE
 
 ### 状态

@@ -6,7 +6,7 @@ Build a pure C++ remote sensing analysis and processing platform based on the QG
 
 ## Current Phase
 
-Phase 11.4 + 11.5 + 10A complete (Georeferencer + v1.5 + Pixel Classification). **280/280 tests pass**. Next: Phase 10B (OBIA — 面向对象分类) 或 Phase 12 (AI Agent foundation)，待优先级讨论。
+Phase 11.4 + 11.5 + 10A complete (Georeferencer + v1.5 + Pixel Classification). **280/280 tests pass**. Next: **Phase 10A.1 (算法收尾：Hungarian / 5-fold CV / .yml 加载)**。设计已确认 `docs/superpowers/specs/2026-06-04-classification-10a1-polish-design.md`。然后 Phase 10B / 12。
 
 ---
 
@@ -731,13 +731,31 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 - ⏳ 手工烟雾（无 X display 环境推迟）
 - ⏳ 快速预览路径 < 2s 测时（同上）
 
-**Phase 10A.1 Stretch (留待):**
-- K-Means 类编号 ↔ ROI 类别的 Hungarian assignment (混淆矩阵才有意义)
-- 5-fold 交叉验证完整实现（当前是 QMessageBox stub）
-- ROI 顶点编辑 (增删拖拽)
-- 训练模型 .yml 加载入口
+---
+
+## Phase 10A.1: Classification Polish 🟢 **[NEXT — 收尾]**
+**Goal:** 填 Phase 10A 留下的 3 个算法层缺口。详细设计 `docs/superpowers/specs/2026-06-04-classification-10a1-polish-design.md`。
+
+**新增依赖:** 无（OpenCV ml 已链）。
+
+**子任务（每步 Red-Green-Refactor）:**
+- [ ] **10A.1.1** K-Means Hungarian assignment — `RsHungarianAssignment::solve` (O(n³) Munkres) + Task K-Means 分支重写 (cluster → class remap → accuracy)；4 测试
+- [ ] **10A.1.2** 5-fold Cross Validation — `RsCrossValidation::kFold` 分层切分 + 替换 stub 弹真实 mean ± std；4 测试
+- [ ] **10A.1.3** .yml 模型加载入口 — `RsClassifierBackend::isFitted()`、File→Load model 菜单、`RsClassifierLoadDialog`、Task 跳过 fit 分支；4 测试
+
+**不在范围（推迟到 10A.2 或 10B）:**
+- ROI 顶点编辑（增删拖拽）
 - 混淆矩阵 PDF 导出
-- 真实 RPC 样本 (类似 11.5.6)
+- 真实 Sentinel-2 / Landsat 手工烟雾
+- 设计稿 mimo-v2.5 `ui_diff_check`
+- 快速预览延迟基线 < 2s 实测
+
+**Done when:**
+- 290+ Catch2 测试全绿（280 + ~10）
+- K-Means 在 ROI 模式 + K==N 时输出 accuracy + Kappa
+- 工具栏「交叉验证」按钮弹真实 mean ± std
+- File → Load classifier model… → 选 .yml → Apply 跳过训练直接 predict
+- 4 个 commit (3 子任务 + planning files)
 
 ---
 
