@@ -1358,3 +1358,20 @@ if(TARGET qgis_app_classify)
   set_target_properties(test_classification_e2e PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(test_classification_e2e)
 endif()
+
+# Phase 10B.0 — OTB smoke test (3 TEST_CASE guarded by SICNU_HAS_OTB)
+if(SICNU_HAS_OTB)
+  add_executable(test_otb_smoke test_otb_smoke.cpp)
+  target_link_libraries(test_otb_smoke PRIVATE
+    OTBCommon
+    OTBImageBase
+    OTBMeanShift
+    Catch2::Catch2WithMain
+  )
+  target_include_directories(test_otb_smoke PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(test_otb_smoke PRIVATE SICNU_HAS_OTB=1)
+  sicnu_discover_tests(test_otb_smoke)
+endif()
