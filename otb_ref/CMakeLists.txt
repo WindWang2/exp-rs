@@ -533,14 +533,16 @@ endif()
 # all tests have been added that reference the group, so we put it last.
 
 #-----------------------------------------------------------------------------
-# uninstall target
-configure_file(
-    "${CMAKE_SOURCE_DIR}/CMake/cmake_uninstall.cmake.in"
-    "${CMAKE_BINARY_DIR}/cmake_uninstall.cmake"
-    IMMEDIATE @ONLY)
+# uninstall target (skip if already defined, e.g. when used as subproject)
+if(NOT TARGET uninstall)
+  configure_file(
+      "${OTB_SOURCE_DIR}/CMake/cmake_uninstall.cmake.in"
+      "${CMAKE_BINARY_DIR}/cmake_uninstall.cmake"
+      IMMEDIATE @ONLY)
 
-add_custom_target(uninstall
-  COMMAND ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/cmake_uninstall.cmake)
+  add_custom_target(uninstall
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/cmake_uninstall.cmake)
+endif()
 
 #-----------------------------------------------------------------------------
 #macro to put a fixed space between key, value  in summary

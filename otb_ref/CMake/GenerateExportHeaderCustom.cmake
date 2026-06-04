@@ -411,7 +411,7 @@ macro(_OTB_DO_GENERATE_EXPORT_HEADER TARGET_LIBRARY)
     endif()
   endif()
 
-  configure_file("${CMAKE_SOURCE_DIR}/CMake/exportheader.cmake.in"
+  configure_file("${OTB_SOURCE_DIR}/CMake/exportheader.cmake.in"
     "${EXPORT_FILE_NAME}" @ONLY)
 endmacro()
 

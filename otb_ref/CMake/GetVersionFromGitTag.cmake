@@ -89,7 +89,7 @@ function(get_package_name root_repo_dir project project_version_string)
         set(${project_version_string} "${branch_name}-$ENV{CI_COMMIT_SHORT_SHA}" PARENT_SCOPE)
       else()
         execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
-          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+          WORKING_DIRECTORY ${OTB_SOURCE_DIR}
           OUTPUT_VARIABLE ${project}_COMMIT_SHA_STRING
           OUTPUT_STRIP_TRAILING_WHITESPACE)
         set(${project_version_string} "${branch_name}-${${project}_COMMIT_SHA_STRING}" PARENT_SCOPE)

@@ -56,7 +56,7 @@ macro(gdal_try_run msg_type var source_file)
   message(STATUS "Performing Test ${var}")
   set(${var})
   try_run(RUN_${var} COMPILE_${var} ${CMAKE_CURRENT_BINARY_DIR}
-  ${CMAKE_SOURCE_DIR}/Modules/ThirdParty/GDAL/${source_file}
+  ${OTB_SOURCE_DIR}/Modules/ThirdParty/GDAL/${source_file}
   CMAKE_FLAGS "-DINCLUDE_DIRECTORIES:PATH=${GDAL_INCLUDE_DIR}" "-DLINK_LIBRARIES:STRING=${GDAL_LIBRARY}"
   COMPILE_OUTPUT_VARIABLE COMPILE_OUTPUT_${var}
   RUN_OUTPUT_VARIABLE RUN_OUTPUT_${var}
@@ -102,7 +102,7 @@ endif()
 #check OGR
 #gdal_try_run(FATAL_ERROR GDAL_HAS_OGR gdalOGRTest.cxx)
 try_compile(COMPILE_GDAL_HAS_OGR ${CMAKE_CURRENT_BINARY_DIR}
-${CMAKE_SOURCE_DIR}/Modules/ThirdParty/GDAL/gdalOGRTest.cxx
+${OTB_SOURCE_DIR}/Modules/ThirdParty/GDAL/gdalOGRTest.cxx
 CMAKE_FLAGS "-DINCLUDE_DIRECTORIES:PATH=${GDAL_INCLUDE_DIR}" "-DLINK_LIBRARIES:STRING=${GDAL_LIBRARY}"
 COMPILE_DEFINITIONS "-std=c++14" "-w"
 OUTPUT_VARIABLE COMPILE_OUTPUT_GDAL_HAS_OGR
@@ -173,7 +173,7 @@ endif()
 #FOR UNIX SYSTEMS ONLY
 if(RUN_GDAL_SYMBOLS_TEST)
   # Prepare bash script
-  configure_file(${CMAKE_SOURCE_DIR}/Modules/ThirdParty/GDAL/gdalTest.sh.in ${CMAKE_CURRENT_BINARY_DIR}/gdalTest.sh @ONLY)
+  configure_file(${OTB_SOURCE_DIR}/Modules/ThirdParty/GDAL/gdalTest.sh.in ${CMAKE_CURRENT_BINARY_DIR}/gdalTest.sh @ONLY)
   execute_process(COMMAND chmod u+x ${CMAKE_CURRENT_BINARY_DIR}/gdalTest.sh)
   execute_process(COMMAND ${CMAKE_CURRENT_BINARY_DIR}/gdalTest.sh)
   gdal_try_run(FATAL_ERROR GDAL_SYMBOLS gdalSymbolsTest.cxx ARGS ${TEMP}/gdalSymbols.txt)

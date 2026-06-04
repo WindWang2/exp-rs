@@ -18,4 +18,7 @@
 # limitations under the License.
 #
 
-find_package ( TinyXML REQUIRED )
+# When used as a subproject, TinyXML variables may be pre-set by the parent
+if(NOT TINYXML_FOUND)
+  find_package ( TinyXML REQUIRED )
+endif()

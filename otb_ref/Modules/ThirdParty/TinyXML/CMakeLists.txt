@@ -21,12 +21,16 @@
 project(OTBTinyXML)
 
 # Check if we need to define TIXML_USE_STL
-try_compile( TIXML_TEST_STL
-             ${CMAKE_CURRENT_BINARY_DIR}/CMake
-             ${CMAKE_CURRENT_SOURCE_DIR}/CMake/otbTestTinyXMLUseSTL.cxx
-             CMAKE_FLAGS "-DINCLUDE_DIRECTORIES:PATH=${TINYXML_INCLUDE_DIRS}" "-DLINK_LIBRARIES:STRING=${TINYXML_LIBRARIES}"
-             COMPILE_DEFINITIONS "-DTIXML_USE_STL"
-             OUTPUT_VARIABLE OUTPUT)
+# When used as a subproject with vendored TinyXML, skip the try_compile test
+# (it fails because try_compile can't see in-tree targets).
+if(NOT TIXML_TEST_STL)
+  try_compile( TIXML_TEST_STL
+               ${CMAKE_CURRENT_BINARY_DIR}/CMake
+               ${CMAKE_CURRENT_SOURCE_DIR}/CMake/otbTestTinyXMLUseSTL.cxx
+               CMAKE_FLAGS "-DINCLUDE_DIRECTORIES:PATH=${TINYXML_INCLUDE_DIRS}" "-DLINK_LIBRARIES:STRING=${TINYXML_LIBRARIES}"
+               COMPILE_DEFINITIONS "-DTIXML_USE_STL"
+               OUTPUT_VARIABLE OUTPUT)
+endif()
 
 if (NOT TIXML_TEST_STL)
     message(FATAL_ERROR "TIXML must be compiled with TIXML_USE_STL=ON.")

@@ -45,7 +45,7 @@ get_target_property(CLI_OUTPUT_DIR otbApplicationLauncherCommandLine RUNTIME_OUT
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/Scripts)
 
 if (WIN32)
-configure_file( ${CMAKE_SOURCE_DIR}/CMake/otbcli.ps1.in
+configure_file( ${OTB_SOURCE_DIR}/CMake/otbcli.ps1.in
                 ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/Scripts/otbcli.ps1
                 @ONLY )
 file(COPY ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/Scripts/otbcli.ps1
@@ -58,7 +58,7 @@ install(PROGRAMS ${CLI_OUTPUT_DIR}/otbcli.ps1
         COMPONENT Core)
 
 else()
-configure_file( ${CMAKE_SOURCE_DIR}/CMake/otbcli.sh.in
+configure_file( ${OTB_SOURCE_DIR}/CMake/otbcli.sh.in
                 ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/Scripts/otbcli
                 @ONLY )
 file(COPY ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/Scripts/otbcli

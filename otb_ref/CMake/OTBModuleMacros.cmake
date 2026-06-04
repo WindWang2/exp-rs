@@ -326,14 +326,7 @@ macro(otb_module_impl)
                                ${MODULE_DEPENDS_OF_COMPONENT})
 
   if (NOT ${${otb-module}-targets}_EXPORTED)
-    if (CMAKE_DEBUG)
-      message(STATUS "[CMAKE_DEBUG] Exporting target ${${otb-module}-targets} part of component ${__current_component} in file ${__current_component}Targets.cmake located at ${OTB_INSTALL_PACKAGE_DIR}")
-    endif()
-    install(EXPORT ${${otb-module}-targets}
-            FILE ${__current_component}Targets.cmake
-            DESTINATION ${OTB_INSTALL_PACKAGE_DIR}
-            COMPONENT ${__current_component})
-    # define variable in cmake CACHE to make it global
+    # Skip install(EXPORT ...) when used as subproject
     set(${${otb-module}-targets}_EXPORTED 1 CACHE INTERNAL "Bool to not declare multiple times ${${otb-module}-targets}.cmake file" FORCE)
   endif() # NOT DEFINED ${${otb-module}-targets}_EXPORTED
   otb_module_doxygen(${otb-module})   # module name
@@ -418,7 +411,6 @@ macro(otb_module_target_install _name _component)
   # do not add COMPONENT ${_component} to INCLUDE as it will be interpreted
   # as another directory to include and not a cmake keyword
   install(TARGETS ${_name}
-    EXPORT  ${${otb-module}-targets}
     RUNTIME DESTINATION ${${otb-module}_INSTALL_RUNTIME_DIR} COMPONENT ${_component}
     LIBRARY DESTINATION ${${otb-module}_INSTALL_LIBRARY_DIR} COMPONENT ${_component}
     ARCHIVE DESTINATION ${${otb-module}_INSTALL_ARCHIVE_DIR} COMPONENT ${_component}

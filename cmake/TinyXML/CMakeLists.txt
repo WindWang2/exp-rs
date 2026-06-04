@@ -2,6 +2,11 @@
 cmake_minimum_required(VERSION 3.13)
 project(tinyxml_vendored LANGUAGES CXX)
 
+# Ensure output goes to the correct directory (not /bin/)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib CACHE PATH "" FORCE)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib CACHE PATH "" FORCE)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin CACHE PATH "" FORCE)
+
 add_definitions(-DTIXML_USE_STL)
 add_library(tinyxml_vendored STATIC
     src/tinyxml.cpp

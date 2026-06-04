@@ -332,16 +332,34 @@ if(SICNU_BUILD_OTB)
     set(OTB_USE_OPENMP OFF CACHE BOOL "" FORCE)
     set(OTB_USE_SSE_FLAGS OFF CACHE BOOL "" FORCE)
 
-    # OTB add_subdirectory is currently blocked by three issues:
-    # 1. OTB uses CMAKE_SOURCE_DIR (not OTB_SOURCE_DIR) in ThirdParty init scripts,
-    #    so GDAL/TinyXML version tests point to the wrong paths when embedded
-    # 2. CMake 4.x removed FindBoost.cmake; our stub works but FindTinyXML also fails
-    # 3. OTB's GenerateExportHeaderCustom references CMAKE_SOURCE_DIR for template files
-    # Resolution: OTB needs to be patched to use OTB_SOURCE_DIR consistently, or
-    # built standalone via ExternalProject_Add. For now, OTB integration is deferred.
-    # add_subdirectory(otb_ref)
+    # OTB's GDAL init uses legacy GDAL_INCLUDE_DIR/GDAL_LIBRARY variables.
+    # Modern GDAL (4.x) CMake config doesn't set these, so provide them.
+    if(NOT GDAL_INCLUDE_DIR)
+        set(GDAL_INCLUDE_DIR "/usr/include" CACHE PATH "GDAL include dir" FORCE)
+    endif()
+    if(NOT GDAL_LIBRARY)
+        set(GDAL_LIBRARY "/usr/lib/libgdal.so" CACHE FILEPATH "GDAL library" FORCE)
+    endif()
+    # Skip GDAL config checking (try_run tests fail on Linux due to empty TEMP var)
+    set(GDAL_CONFIG_CHECKING OFF CACHE BOOL "Tests to check gdal config." FORCE)
 
-    # set(SICNU_HAS_OTB TRUE)
+    # TinyXML is not available as a system package on this system.
+    # Build a vendored copy from source and pre-set variables for OTB.
+    add_subdirectory(cmake/TinyXML)
+    set(TINYXML_FOUND TRUE CACHE BOOL "" FORCE)
+    set(TINYXML_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/cmake/TinyXML/src" CACHE PATH "" FORCE)
+    set(TINYXML_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/cmake/TinyXML/src" CACHE PATH "" FORCE)
+    set(TINYXML_LIBRARY "tinyxml_vendored" CACHE STRING "" FORCE)
+    set(TINYXML_LIBRARIES "tinyxml_vendored" CACHE STRING "" FORCE)
+    set(TINYXML_VERSION "2.6.2" CACHE STRING "" FORCE)
+    set(TIXML_TEST_STL TRUE CACHE BOOL "TinyXML STL test result" FORCE)
+
+    # OTB CMAKE_SOURCE_DIR patches applied: GDAL init, GenerateExportHeaderCustom,
+    # PreventInSourceBuilds, GetVersionFromGitTag, uninstall target all use OTB_SOURCE_DIR.
+    # TinyXML init skips find_package when pre-set.
+    add_subdirectory(otb_ref)
+
+    set(SICNU_HAS_OTB TRUE)
 endif()
 
 # configure_file AFTER all HAVE_* variables are resolved
