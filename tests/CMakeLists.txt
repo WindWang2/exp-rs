@@ -1300,6 +1300,23 @@ if(TARGET qgis_app_classify)
   )
   sicnu_discover_tests(test_hungarian_assignment)
 
+  # Phase 10A.1.2 — Stratified 5-fold cross validation.
+  add_executable(test_cross_validation test_cross_validation.cpp)
+  target_link_libraries(test_cross_validation PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_cross_validation PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_cross_validation)
+
   # Phase 10A Task 10.8 — End-to-end classification task test.
   add_executable(test_classification_e2e test_classification_e2e.cpp)
   target_link_libraries(test_classification_e2e PRIVATE

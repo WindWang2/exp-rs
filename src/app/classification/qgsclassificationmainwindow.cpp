@@ -10,6 +10,7 @@
 #include "rs_classifier_normalbayes.h"
 #include "rs_classifier_setup_bar.h"
 #include "rs_classifier_svm.h"
+#include "rs_cross_validation.h"
 #include "rs_jm_matrix_widget.h"
 #include "rs_jm_separability.h"
 #include "rs_pixel_rasterizer.h"
@@ -33,6 +34,7 @@
 
 #include <QAction>
 #include <QActionGroup>
+#include <QApplication>
 #include <QColor>
 #include <QDir>
 #include <QDockWidget>
@@ -805,12 +807,73 @@ void QgsClassificationMainWindow::applyPreview()
 
 void QgsClassificationMainWindow::runCrossValidation()
 {
-  // v1 stub — a proper k-fold loop with OpenCV's TrainData split is more
-  // than 50 lines once we account for backend re-fit + label remapping.
-  // Defer to Phase 10A.1 to keep this review patch focused.
+  // Phase 10A.1.2 — stratified 5-fold CV on the current ROIs.
+  if ( mSourceRasterPath.isEmpty() )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "请先 Open source raster…" ), 5000 );
+    return;
+  }
+  if ( !mClassifierBar )
+    return;
+
+  QVector<int> bands = mClassifierBar->selectedBands();
+  if ( bands.isEmpty() )
+  {
+    const int n = std::min( 3, mSourceBandCount );
+    for ( int i = 1; i <= n; ++i )
+      bands.push_back( i );
+  }
+  cv::Mat X, y;
+  if ( !buildTrainingData( bands, X, y ) || X.rows < 25 )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "CV 需要 ≥ 25 像元" ), 5000 );
+    return;
+  }
+
+  const auto kind = mClassifierBar->currentKind();
+  if ( kind == RsClassifierKind::KMeans )
+  {
+    QMessageBox::information(
+      this, tr( "K-Means CV" ),
+      tr( "K-Means 交叉验证不适用 (cluster ↔ class 标签不齐)。\n"
+          "请用 NormalBayes 或 SVM。" ) );
+    return;
+  }
+  auto factory = [kind]() -> std::unique_ptr<RsClassifierBackend>
+  {
+    switch ( kind )
+    {
+      case RsClassifierKind::NormalBayes:
+        return std::make_unique<RsClassifierNormalBayes>();
+      case RsClassifierKind::SvmRbf:
+        return std::make_unique<RsClassifierSvm>();
+      default:
+        return nullptr;
+    }
+  };
+
+  if ( statusBar() )
+    statusBar()->showMessage( tr( "5-fold CV 运行中…" ), 3000 );
+  QApplication::processEvents();   // let the status bar paint
+  const auto res = RsCrossValidation::kFold( X, y, factory, 5 );
+  if ( !res.ok() )
+  {
+    QMessageBox::warning( this, tr( "CV failed" ), res.errorMessage );
+    return;
+  }
+  QString perFold;
+  for ( int i = 0; i < res.foldAccuracies.size(); ++i )
+    perFold += QString( "  fold%1: %2%\n" )
+                 .arg( i + 1 )
+                 .arg( res.foldAccuracies[i] * 100, 0, 'f', 1 );
   QMessageBox::information(
-    this, tr( "交叉验证" ),
-    tr( "Cross-validation coming soon — Phase 10A.1" ) );
+    this, tr( "5-fold Cross Validation" ),
+    tr( "Mean accuracy: %1% ± %2%\n\n%3" )
+      .arg( res.meanAccuracy * 100, 0, 'f', 1 )
+      .arg( res.stdAccuracy * 100, 0, 'f', 1 )
+      .arg( perFold ) );
 }
 
 void QgsClassificationMainWindow::recomputeSpectralCurves()
