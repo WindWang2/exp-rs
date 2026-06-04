@@ -26,6 +26,8 @@ if(SICNU_HAS_OPENCV)
         rs_classification_split.cpp
         # Phase 10A Task 10.9 — confusion matrix + Kappa + per-class P/R/F1.
         rs_accuracy_assessment.cpp
+        # Phase 10A.1.1 — Munkres O(n^3) Hungarian min-cost assignment.
+        rs_hungarian_assignment.cpp
     )
     target_link_libraries(qgis_analysis PUBLIC ${OpenCV_LIBS})
     target_include_directories(qgis_analysis PUBLIC ${OpenCV_INCLUDE_DIRS})

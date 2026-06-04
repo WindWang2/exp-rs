@@ -2,9 +2,14 @@
 
 #include "rs_classification_task.h"
 
+#include "rs_hungarian_assignment.h"
+
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
+#include <QList>
+#include <QSet>
 
 #include <algorithm>
 #include <cstdint>
@@ -56,26 +61,76 @@ bool RsClassificationTask::run()
     return false;
   }
 
-  // 1b. Phase 10A Task 10.9 — accuracy assessment on the held-out split.
-  // KMeans is skipped because its cluster IDs are an arbitrary permutation
-  // of the ROI class IDs; confusion against testY would be misleading
-  // until Hungarian-style cluster→class alignment is added in 10A.1.
-  if ( mCfg.testX.rows > 0 && mCfg.testY.rows > 0
-       && mCfg.algoName != QStringLiteral( "KMeans" ) )
+  // 1b. Phase 10A Task 10.9 + 10A.1.1 — accuracy assessment on the held-out split.
+  // NormalBayes / SVM: predictions are already in class-ID space.
+  // K-Means: cluster IDs are an arbitrary permutation of the ROI class IDs;
+  // remap via Hungarian min-cost assignment on the negated overlap matrix
+  // before feeding RsAccuracyAssessment. If K != |unique testY|, skip
+  // accuracy gracefully.
+  if ( mCfg.testX.rows > 0 && mCfg.testY.rows > 0 )
   {
     try
     {
       const cv::Mat pred = mCfg.backend->predict( mCfg.testX );
       QVector<int> yt;
       QVector<int> yp;
-      yt.reserve( pred.rows );
-      yp.reserve( pred.rows );
-      for ( int i = 0; i < pred.rows; ++i )
+
+      if ( mCfg.algoName == QStringLiteral( "KMeans" ) )
       {
-        yt.append( mCfg.testY.at<int>( i, 0 ) );
-        yp.append( pred.at<int>( i, 0 ) );
+        // Hungarian-remap cluster IDs to ROI class IDs.
+        QSet<int> trueSet, clusterSet;
+        for ( int i = 0; i < mCfg.testY.rows; ++i )
+          trueSet.insert( mCfg.testY.at<int>( i, 0 ) );
+        for ( int i = 0; i < pred.rows; ++i )
+          clusterSet.insert( pred.at<int>( i, 0 ) );
+
+        if ( trueSet.size() == clusterSet.size() && !trueSet.isEmpty() )
+        {
+          QList<int> tList( trueSet.begin(), trueSet.end() );
+          QList<int> cList( clusterSet.begin(), clusterSet.end() );
+          std::sort( tList.begin(), tList.end() );
+          std::sort( cList.begin(), cList.end() );
+          const int N = tList.size();
+
+          cv::Mat cost = cv::Mat::zeros( N, N, CV_64F );
+          for ( int i = 0; i < mCfg.testY.rows; ++i )
+          {
+            const int ti = tList.indexOf( mCfg.testY.at<int>( i, 0 ) );
+            const int ci = cList.indexOf( pred.at<int>( i, 0 ) );
+            if ( ti >= 0 && ci >= 0 )
+              cost.at<double>( ti, ci ) -= 1.0;
+          }
+          const QVector<int> assign = RsHungarianAssignment::solve( cost );
+          QHash<int, int> remap;
+          for ( int i = 0; i < N && i < assign.size(); ++i )
+          {
+            if ( assign[i] >= 0 )
+              remap[cList[assign[i]]] = tList[i];
+          }
+          yt.reserve( mCfg.testY.rows );
+          yp.reserve( mCfg.testY.rows );
+          for ( int i = 0; i < mCfg.testY.rows; ++i )
+          {
+            yt.append( mCfg.testY.at<int>( i, 0 ) );
+            yp.append( remap.value( pred.at<int>( i, 0 ), -1 ) );
+          }
+        }
+        // else: K != |unique testY|; leave yt/yp empty → skip accuracy.
       }
-      mResult.accuracy = RsAccuracyAssessment::compute( yt, yp );
+      else
+      {
+        // Supervised: predictions already in class-ID space.
+        yt.reserve( pred.rows );
+        yp.reserve( pred.rows );
+        for ( int i = 0; i < pred.rows; ++i )
+        {
+          yt.append( mCfg.testY.at<int>( i, 0 ) );
+          yp.append( pred.at<int>( i, 0 ) );
+        }
+      }
+
+      if ( !yt.isEmpty() )
+        mResult.accuracy = RsAccuracyAssessment::compute( yt, yp );
     }
     catch ( const cv::Exception & )
     {
