@@ -58,6 +58,19 @@ ctest --output-on-failure
 cmake --install . --prefix /usr/local
 ```
 
+### With OTB (Vendored Segmentation & Classification)
+
+```bash
+./scripts/build_with_otb.sh build-otb
+# Or manually:
+mkdir build-otb && cd build-otb
+cmake .. -DENABLE_TESTS=ON -DSICNU_BUILD_OTB=ON -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)  # First build takes 30-45 minutes
+ctest --output-on-failure
+```
+
+Requires no additional system packages — ITK 5.4 and OTB 10 are vendored in-tree.
+
 ### AppImage
 
 ```bash
@@ -75,7 +88,20 @@ src/
 ├── processing/    GDAL/OTB/QGIS algorithm providers
 ├── plugins/       Plugin system
 └── ui/            Qt Designer forms
+otb_ref/           Orfeo Toolbox v10 (segmentation, learning)
+itk_ref/           ITK 5.4 (image processing, via git subtree)
 ```
+
+### Vendored Libraries
+
+| Directory | Source | Purpose |
+|-----------|--------|---------|
+| `src/core/`, `src/gui/` | QGIS (vendored subset) | Map engine, rendering |
+| `otb_ref/` | OTB v10 | Segmentation, classification |
+| `itk_ref/` | ITK v5.4 (git subtree) | Image processing foundation |
+| `external/pdal_wrench/` | PDAL | LiDAR processing |
+
+To upgrade ITK: `./scripts/update_itk.sh v5.4.1`
 
 ## License
 

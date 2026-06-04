@@ -1,0 +1,7 @@
+# Vendored libraries — exclude from language statistics
+itk_ref/ linguist-vendored
+otb_ref/ linguist-vendored
+
+# Prevent line-ending conversion in vendored sources (avoids massive diffs)
+itk_ref/** -text
+otb_ref/** -text
