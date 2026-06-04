@@ -293,6 +293,34 @@ if(SICNU_BUILD_OTB)
     )
         set(Module_${m} ON CACHE BOOL "" FORCE)
     endforeach()
+    # OTB requires Boost (filesystem, serialization).
+    # CMake 4.x removed FindBoost.cmake. We provide a BoostConfig.cmake stub
+    # that points to extracted Boost headers and system .so libraries.
+    # Boost headers are at ~/.local/boost (extracted from boost_1_84_0.tar.gz).
+    set(SICNU_BOOST_INCLUDE_DIR "$ENV{HOME}/.local/boost")
+    # Pre-set all Boost variables so OTB's patched Boost init skips find_package
+    set(Boost_FOUND TRUE PARENT_SCOPE)
+    set(Boost_FOUND TRUE)
+    set(Boost_INCLUDE_DIRS "${SICNU_BOOST_INCLUDE_DIR}")
+    set(Boost_LIBRARIES "/usr/lib/libboost_filesystem.so;/usr/lib/libboost_serialization.so")
+    set(Boost_LIBRARY_DIRS "/usr/lib")
+    set(Boost_INCLUDE_DIR "${SICNU_BOOST_INCLUDE_DIR}")
+    set(Boost_FILESYSTEM_LIBRARY "/usr/lib/libboost_filesystem.so")
+    set(Boost_SERIALIZATION_LIBRARY "/usr/lib/libboost_serialization.so")
+    set(Boost_FILESYSTEM_FOUND TRUE)
+    set(Boost_SERIALIZATION_FOUND TRUE)
+    set(Boost_VERSION "1.84.0")
+    set(Boost_VERSION_STRING "1.84.0")
+    set(Boost_USE_STATIC_LIBS OFF)
+    set(Boost_USE_MULTITHREADED ON)
+    # Make our BoostConfig.cmake findable via CMAKE_PREFIX_PATH
+    list(INSERT CMAKE_PREFIX_PATH 0 "${CMAKE_SOURCE_DIR}/cmake")
+    set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} CACHE STRING "" FORCE)
+    # CMake policy CMP0167: FindBoost is removed. Set to NEW to use CONFIG mode.
+    if(POLICY CMP0167)
+        cmake_policy(SET CMP0167 NEW)
+    endif()
+
     set(OTB_USE_QT OFF CACHE BOOL "" FORCE)
     set(OTB_WRAP_PYTHON OFF CACHE BOOL "" FORCE)
     set(OTB_BUILD_MODULE_AS_STANDALONE OFF CACHE BOOL "" FORCE)
@@ -304,8 +332,13 @@ if(SICNU_BUILD_OTB)
     set(OTB_USE_OPENMP OFF CACHE BOOL "" FORCE)
     set(OTB_USE_SSE_FLAGS OFF CACHE BOOL "" FORCE)
 
-    # OTB requires Boost headers (filesystem component).
-    # Uncomment when boost dev headers are installed:
+    # OTB add_subdirectory is currently blocked by three issues:
+    # 1. OTB uses CMAKE_SOURCE_DIR (not OTB_SOURCE_DIR) in ThirdParty init scripts,
+    #    so GDAL/TinyXML version tests point to the wrong paths when embedded
+    # 2. CMake 4.x removed FindBoost.cmake; our stub works but FindTinyXML also fails
+    # 3. OTB's GenerateExportHeaderCustom references CMAKE_SOURCE_DIR for template files
+    # Resolution: OTB needs to be patched to use OTB_SOURCE_DIR consistently, or
+    # built standalone via ExternalProject_Add. For now, OTB integration is deferred.
     # add_subdirectory(otb_ref)
 
     # set(SICNU_HAS_OTB TRUE)
