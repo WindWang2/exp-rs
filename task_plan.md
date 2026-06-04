@@ -6,7 +6,7 @@ Build a pure C++ remote sensing analysis and processing platform based on the QG
 
 ## Current Phase
 
-Phase 11.4 + 11.5 + 10A + 10A.1 complete. **293/293 tests pass**. Next: **Phase 10B.0 (OTB + ITK vendored infrastructure)** — Phase 10B (OBIA) 业务的基础设施 phase。设计已确认 `docs/superpowers/specs/2026-06-04-otb-infra-design.md`。
+Phase 11.4 + 11.5 + 10A + 10A.1 complete. **293/293 tests pass**. Phase 10B.0 部分完成 (ITK ✅, OTB 阻塞)。Next: **解决 OTB CMake 兼容性问题** 或 **跳到 Phase 10B 业务（先用 OTB CLI wrapper 代替 vendored 编译）**。
 
 ---
 
@@ -894,33 +894,45 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 
 ---
 
-## Phase 10B.0: OTB + ITK Vendored Infrastructure 🟢 **[NEXT — Phase 10B 业务前置]**
+## Phase 10B.0: OTB + ITK Vendored Infrastructure 🟡 **[PARTIAL — ITK ✅, OTB 阻塞]**
 **Goal:** vendor OTB v10 + ITK v5.4 进项目，让用户无需单独安装 ITK / OTB；CMake 选择性编译算法子集；为 Phase 10B (OBIA 业务) 准备 OTB MeanShift segmentation。设计 `docs/superpowers/specs/2026-06-04-otb-infra-design.md`。
 
 **仓库改动:**
-- `git mv qgis_ref/OTB otb_ref`（97MB 重组）
-- `git subtree add --prefix=itk_ref InsightSoftwareConsortium/ITK v5.4.0 --squash`（~300MB 增量）
-- 顶层 `CMakeLists.txt` 加 `option(SICNU_BUILD_OTB)` + ITK/OTB 模块 opt-in 列表
-- `.gitattributes` 标 itk_ref/ otb_ref/ vendored + -text
-- 脚本：`scripts/update_itk.sh` + `scripts/build_with_otb.sh`
-- 文档：CONTRIBUTING.md vendored 库说明
+- `git mv qgis_ref/OTB otb_ref`（97MB 重组）✅
+- `git subtree add --prefix=itk_ref ITK v5.4.0 --squash`（156MB 增量）✅
+- 顶层 `CMakeLists.txt` 加 `option(SICNU_BUILD_OTB)` + ITK/OTB 模块 opt-in 列表 ✅
+- `.gitattributes` 标 itk_ref/ otb_ref/ vendored + -text ✅
+- 脚本：`scripts/update_itk.sh` + `scripts/build_with_otb.sh` ✅
+- 文档：README.md vendored 库说明 ✅
 
-**新建文件:** `tests/test_otb_smoke.cpp`（3 TEST_CASE，SICNU_BUILD_OTB=OFF 时全 SKIP）
+**新建文件:** `tests/test_otb_smoke.cpp`（3 TEST_CASE，SICNU_BUILD_OTB=OFF 时全 SKIP）✅
 
 **子任务:**
-- [ ] **10B.0.1** OTB 重组（`git mv` + 修复 CMake 路径）
-- [ ] **10B.0.2** ITK 5.4 git subtree + 升级脚本
-- [ ] **10B.0.3** ITK 子集 CMake 配置（~12 模块 ON，首次 `make ITKCommon` 绿）
-- [ ] **10B.0.4** OTB 子集 CMake 配置（~13 模块 ON，关 Qt/Python/Wrapping，首次 `make OTBMeanShift` 绿）
-- [ ] **10B.0.5** sanity 测试 + SICNU_HAS_OTB 宏
-- [ ] **10B.0.6** CI / 文档 / .gitattributes
+- [x] **10B.0.1** OTB 重组（`mv qgis_ref/OTB otb_ref` + git add 3770 文件）— `801c3fa`
+- [x] **10B.0.2** ITK 5.4 git subtree + 升级脚本 — `8712059`, `1e24683`
+- [x] **10B.0.3** ITK 子集 CMake 配置（~80 模块 ON，`make ITKCommon` 绿）— `893d4ba`
+- [ ] **10B.0.4** OTB 子集 CMake 配置 — **被 3 个 CMake 兼容性问题阻塞**（见下方）
+- [x] **10B.0.5** sanity 测试 + SICNU_HAS_OTB 宏 — `4c42ee`（OFF 时 SKIP）
+- [x] **10B.0.6** CI / 文档 / .gitattributes — `bd7809f`
 
-**Done when:**
-- `cmake -DSICNU_BUILD_OTB=OFF ..` 行为不变
-- `cmake -DSICNU_BUILD_OTB=ON ..` 首次成功 build
-- test_otb_smoke ON=3 PASS / OFF=3 SKIP
-- 总测试 293 → 296+
-- 6 commit + 1 planning files commit
+### 10B.0.4 阻塞问题
+
+OTB `add_subdirectory(otb_ref)` 被 3 个 CMake 兼容性问题阻塞：
+
+1. **CMAKE_SOURCE_DIR vs OTB_SOURCE_DIR**: OTB 的 `ThirdParty/GDAL/otb-module-init.cmake` 和 `ThirdParty/TinyXML` 使用 `${CMAKE_SOURCE_DIR}` 引用测试文件。作为子项目时，`CMAKE_SOURCE_DIR` 指向项目根而非 OTB 根。
+2. **FindTinyXML removed**: CMake 4.x 移除了 FindTinyXML。
+3. **GenerateExportHeaderCustom**: OTB 的 export header 生成器引用 `${CMAKE_SOURCE_DIR}/CMake/exportheader.cmake.in`，该文件不存在。
+
+**解决方案候选：**
+- A) Patch OTB 使用 `OTB_SOURCE_DIR` 替代 `CMAKE_SOURCE_DIR`（~10 处）
+- B) 使用 `ExternalProject_Add` 隔离 OTB 构建（更干净但更复杂）
+- C) 使用 OTB SuperBuild（项目自带的外部依赖构建脚本）
+
+**Done when (修订):**
+- ✅ `cmake -DSICNU_BUILD_OTB=OFF ..` 行为不变
+- 🟡 `cmake -DSICNU_BUILD_OTB=ON ..` ITK 配置成功，OTB 被注释
+- ✅ test_otb_smoke OFF 时 3 SKIP
+- ✅ 7 commit（6 子任务 + 1 planning）
 
 ---
 

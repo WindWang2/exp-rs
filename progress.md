@@ -1,5 +1,50 @@
 # Progress Log — SICNU GEO RS
 
+## Session: 2026-06-05 — Phase 10B.0 OTB + ITK Vendored Infrastructure (部分完成)
+
+### 状态
+- **10B.0.1 OTB 重组** ✅ (`801c3fa`) — 3770 文件从 `qgis_ref/OTB` 移到 `otb_ref/` 并 git 追踪
+- **10B.0.2 ITK subtree** ✅ (`8712059` + `1e24683`) — ITK v5.4.0 git subtree (156MB) + `scripts/update_itk.sh`
+- **10B.0.3 ITK CMake** ✅ (`893d4ba`) — `SICNU_BUILD_OTB` option + ~80 ITK 模块 ON + `make ITKCommon` 绿
+- **10B.0.4 OTB CMake** ⚠️ 被阻塞 — 3 个 CMake 兼容性问题，`add_subdirectory(otb_ref)` 已注释
+- **10B.0.5 Sanity 测试** ✅ (`4c42ee`) — `tests/test_otb_smoke.cpp` 3 TEST_CASE，OFF 时 SKIP
+- **10B.0.6 文档/CI** ✅ (`bd7809f`) — `.gitattributes` + `build_with_otb.sh` + README 更新
+
+### 提交序列
+| 子任务 | SHA | 描述 |
+|---|---|---|
+| 10B.0.1 | `801c3fa` | OTB 重组：`mv qgis_ref/OTB otb_ref` + git add 3770 文件 |
+| 10B.0.2 | `8712059` | ITK v5.4.0 git subtree (squashed, 156MB) |
+| 10B.0.2 | `1e24683` | `scripts/update_itk.sh` 升级脚本 |
+| 10B.0.6 | `bd7809f` | `.gitattributes` + `build_with_otb.sh` + README |
+| 10B.0.3 | `893d4ba` | `SICNU_BUILD_OTB` option + ITK ~80 模块配置 + GCC16 fix |
+| 10B.0.4 | `6d86acb` | OTB CMake 配置 (blocked, 注释) + Boost stub |
+| 10B.0.5 | `4c42ee` | `test_otb_smoke.cpp` 3 TEST_CASE + 条件注册 |
+
+### OTB 阻塞的 3 个 CMake 兼容性问题
+
+1. **CMAKE_SOURCE_DIR vs OTB_SOURCE_DIR**: OTB 第三方模块 (GDAL/TinyXML init) 用 `${CMAKE_SOURCE_DIR}` 引用测试文件路径；作为子项目时指向根而非 OTB
+2. **FindTinyXML removed**: CMake 4.x 移除 FindTinyXML，OTB `ThirdParty/TinyXML` init 报错
+3. **GenerateExportHeaderCustom**: OTB export header 生成引用 `${CMAKE_SOURCE_DIR}/CMake/exportheader.cmake.in`，文件不存在
+
+### 解决方案候选
+- A) Patch OTB ~10 处 `CMAKE_SOURCE_DIR` → `OTB_SOURCE_DIR`
+- B) `ExternalProject_Add` 隔离构建
+- C) OTB SuperBuild
+
+### 额外 patch
+- **GCC 16 cstdint fix**: `itk_ref/Modules/Core/Common/include/itkFloatingPointExceptions.h` 加 `#include <cstdint>`
+- **CMake 4.x Boost stub**: `cmake/Boost/BoostConfig.cmake` 模拟 FindBoost（CMake 4.x 已移除）
+- **OTB Boost init patch**: `otb_ref/Modules/ThirdParty/Boost/otb-module-init.cmake` 跳过 find_package
+
+### 验证
+- `cmake -DSICNU_BUILD_OTB=OFF ..` ✅ 不变
+- `cmake -DSICNU_BUILD_OTB=ON ..` ✅ ITK 配置通过，OTB 注释
+- `make ITKCommon` ✅ 产出 `libITKCommon-5.4.a`
+- 293/293 测试绿（OFF 模式无回归）
+
+---
+
 ## Session: 2026-06-05 (凌晨) — Phase 10B.0 OTB Infrastructure 设计 + 计划
 
 ### 状态

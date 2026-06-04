@@ -1,5 +1,34 @@
 # Findings & Decisions — SICNU GEO RS
 
+## Phase 10B.0 OTB + ITK Vendored Infrastructure 实施记录 (2026-06-05)
+
+### 关键发现
+
+1. **OTB 不在 git 追踪**：`qgis_ref/` 在 `.gitignore` 里，OTB 4357 个源文件从未被 git 追踪。需要 `mv` + `git add` 而非 `git mv`。排除 Documentation (63MB)、Examples、Data、Docker、CI 等非编译目录后，实际追踪 3770 文件 (612K 行)。
+
+2. **ITK subtree 成功**：`git subtree add --prefix=itk_ref itk-upstream v5.4.0 --squash` 一次性引入 156MB ITK 5.4 源码。需要先 `git remote add -f itk-upstream` 拉取引用，且工作树必须完全干净（stash + `assume-unchanged` submodule）。
+
+3. **GCC 16 cstdint fix**：ITK `itkFloatingPointExceptions.h` 缺少 `#include <cstdint>` 导致 `uint32_t` 未定义。这是 ITK 5.4 在 GCC 16+ 上的已知问题。
+
+4. **CMake 4.x 移除 FindBoost**：CMake 4.0+ 删除了内置 `FindBoost.cmake`。需要 `cmake/Boost/BoostConfig.cmake` stub 手动提供 Boost 变量。
+
+5. **ITK 模块需求远超 spec 预估**：spec 列 ~12 个 ITK 模块，实际 OTB MeanShift 需要链 ~80 个 ITK 模块（包括 GPU common、FFT、Statistics、Registration 等）。这是因为 OTB 的模块依赖树很深。
+
+### OTB CMake 兼容性阻塞（3 个问题）
+
+- **根因**：OTB 的 CMake 脚本设计为顶层项目（`CMAKE_SOURCE_DIR == OTB_SOURCE_DIR`），不支持下嵌为 `add_subdirectory` 子项目
+- **影响**：OTB 第三方依赖 (GDAL/TinyXML/Boost) 的 init 脚本和 export header 生成器都引用 `${CMAKE_SOURCE_DIR}`
+- **建议**：方案 A（patch OTB ~10 处）最轻量；方案 B（ExternalProject_Add）最干净
+
+### 架构决策
+
+- **ITK/OTB 模块选择**：全 vendor + CMake opt-in 编译子集（而非只拷贝必要文件），方便未来 `git subtree pull` 升级
+- **默认 OFF**：`SICNU_BUILD_OTB=OFF` 保持开发者默认体验不变
+- **静态库**：`BUILD_SHARED_LIBS=OFF` 与项目其他库一致
+- **OTBSegmentation 暂不启用**：先让 OTBMeanShift 过，OTBSegmentation (Watershed 等) 按需加
+
+---
+
 ## Phase 10A.1 Classification Polish 实施记录 (2026-06-04 完成)
 
 ### 三个算法层缺口闭环
