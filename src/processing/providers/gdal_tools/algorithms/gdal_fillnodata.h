@@ -12,6 +12,7 @@ public:
     QString displayName() const override { return "GDAL Fill Nodata (Interpolate)"; }
     QString group() const override { return "Raster Analysis"; }
     QString groupId() const override { return "rasteranalysis"; }
+    QStringList tags() const override { return { QObject::tr( "gdal_fillnodata" ), QObject::tr( "nodata" ), QObject::tr( "interpolation" ), QObject::tr( "fill" ), QObject::tr( "gdal" ) }; }
     QString toolName() const override { return "gdal_fillnodata"; }
     QString shortHelpString() const override
     {

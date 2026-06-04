@@ -11,6 +11,8 @@ public:
     QString name() const override { return "otb_feature_extraction"; }
     QString displayName() const override { return "Feature Extraction"; }
     QString group() const override { return "Feature"; }
+    QString groupId() const override { return "feature"; }
+    QStringList tags() const override { return { QObject::tr( "feature" ), QObject::tr( "extraction" ), QObject::tr( "texture" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "FeatureExtraction"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbFeatureExtractionAlgorithm(); }

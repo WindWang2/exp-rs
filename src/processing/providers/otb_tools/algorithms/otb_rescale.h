@@ -11,6 +11,8 @@ public:
     QString name() const override { return "otb_rescale"; }
     QString displayName() const override { return "Rescale"; }
     QString group() const override { return "Utilities"; }
+    QString groupId() const override { return "utilities"; }
+    QStringList tags() const override { return { QObject::tr( "rescale" ), QObject::tr( "normalize" ), QObject::tr( "stretch" ), QObject::tr( "utilities" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "Rescale"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbRescaleAlgorithm(); }

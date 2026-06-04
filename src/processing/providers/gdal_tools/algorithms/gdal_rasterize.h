@@ -12,6 +12,7 @@ public:
     QString displayName() const override { return "GDAL Rasterize (Vector to Raster)"; }
     QString group() const override { return "Raster Conversion"; }
     QString groupId() const override { return "rasterconversion"; }
+    QStringList tags() const override { return { QObject::tr( "gdal_rasterize" ), QObject::tr( "rasterize" ), QObject::tr( "vector to raster" ), QObject::tr( "burn" ), QObject::tr( "gdal" ) }; }
     QString toolName() const override { return "gdal_rasterize"; }
     QString shortHelpString() const override
     {

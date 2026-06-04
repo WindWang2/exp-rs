@@ -11,6 +11,8 @@ public:
     QString name() const override { return "otb_lsms"; }
     QString displayName() const override { return "LSMS Segmentation"; }
     QString group() const override { return "Filtering"; }
+    QString groupId() const override { return "filtering"; }
+    QStringList tags() const override { return { QObject::tr( "lsms" ), QObject::tr( "segmentation" ), QObject::tr( "smoothing" ), QObject::tr( "filtering" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "LSMS"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbLsmsAlgorithm(); }

@@ -13,6 +13,7 @@ public:
     virtual QString applicationName() const = 0;
     virtual QString displayName() const = 0;
     virtual QString group() const { return "OTB"; }
+    virtual QString groupId() const override { return "otb"; }
     virtual QStringList buildArgs(const QVariantMap &parameters,
                                   QgsProcessingContext &context,
                                   QgsProcessingFeedback *feedback) = 0;

@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32">
+          <defs><linearGradient id="sl-grad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f8fafc"></stop><stop offset="1" stop-color="#1d4ed8" stop-opacity="0.6"></stop></linearGradient></defs>
+          <path d="M2 20 L8 10 L14 15 L20 5 L22 8" fill="none" stroke="#374151" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
+          <rect x="2" y="2" width="20" height="20" rx="1" fill="url(#sl-grad)" opacity="0.3"></rect>
+          <path d="M2 20 L8 10 L14 15 L20 5 L22 8 L22 20z" fill="#bfdbfe" opacity="0.45"></path>
+          <line x1="2" y1="20" x2="22" y2="20" stroke="#374151" stroke-width="1.5" stroke-linecap="round"></line>
+        </svg>

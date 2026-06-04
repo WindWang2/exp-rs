@@ -11,6 +11,8 @@ public:
     QString name() const override { return "gdal_contour"; }
     QString displayName() const override { return "GDAL Contour (Raster to Contours)"; }
     QString group() const override { return "Raster Conversion"; }
+    QString groupId() const override { return "rasterconversion"; }
+    QStringList tags() const override { return { QObject::tr( "gdal_contour" ), QObject::tr( "contour" ), QObject::tr( "raster to vector" ), QObject::tr( "gdal" ) }; }
     QString toolName() const override { return "gdal_contour"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new GdalContourAlgorithm(); }

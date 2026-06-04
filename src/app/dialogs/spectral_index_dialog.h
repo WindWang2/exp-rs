@@ -6,6 +6,7 @@
 class QComboBox;
 class QLineEdit;
 class QPushButton;
+class QLabel;
 class QgsRasterLayer;
 
 /**
@@ -29,6 +30,8 @@ private slots:
 
 private:
     void setupUi();
+    void populateBandCombos();
+    void updateBandVisibility();
 
     QComboBox *m_indexCombo = nullptr;
     QComboBox *m_nirCombo = nullptr;
@@ -36,6 +39,13 @@ private:
     QComboBox *m_greenCombo = nullptr;
     QComboBox *m_blueCombo = nullptr;
     QComboBox *m_swirCombo = nullptr;
+
+    QLabel *m_nirLabel = nullptr;
+    QLabel *m_redLabel = nullptr;
+    QLabel *m_greenLabel = nullptr;
+    QLabel *m_blueLabel = nullptr;
+    QLabel *m_swirLabel = nullptr;
+
     QLineEdit *m_outputEdit = nullptr;
     QPushButton *m_runButton = nullptr;
     QgsRasterLayer *m_rasterLayer = nullptr;

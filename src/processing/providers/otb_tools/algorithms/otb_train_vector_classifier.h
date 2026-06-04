@@ -11,6 +11,8 @@ public:
     QString name() const override { return "otb_train_vector_classifier"; }
     QString displayName() const override { return "Train Vector Classifier"; }
     QString group() const override { return "Learning"; }
+    QString groupId() const override { return "learning"; }
+    QStringList tags() const override { return { QObject::tr( "train" ), QObject::tr( "classifier" ), QObject::tr( "machine learning" ), QObject::tr( "supervised" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "TrainVectorClassifier"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbTrainVectorClassifierAlgorithm(); }

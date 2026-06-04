@@ -11,6 +11,8 @@ public:
     QString name() const override { return "otb_gray_scale_morphological"; }
     QString displayName() const override { return "Gray Scale Morphological Operation"; }
     QString group() const override { return "Image Processing"; }
+    QString groupId() const override { return "imageprocessing"; }
+    QStringList tags() const override { return { QObject::tr( "morphological" ), QObject::tr( "gray scale" ), QObject::tr( "erosion" ), QObject::tr( "dilation" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "GrayScaleMorphologicalOperation"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbGrayScaleMorphologicalAlgorithm(); }

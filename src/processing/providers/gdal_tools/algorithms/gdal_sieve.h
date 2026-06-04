@@ -12,6 +12,7 @@ public:
     QString displayName() const override { return "GDAL Sieve (Remove Small Polygons)"; }
     QString group() const override { return "Raster Analysis"; }
     QString groupId() const override { return "rasteranalysis"; }
+    QStringList tags() const override { return { QObject::tr( "gdal_sieve" ), QObject::tr( "sieve" ), QObject::tr( "polygon" ), QObject::tr( "filter" ), QObject::tr( "gdal" ) }; }
     QString toolName() const override { return "gdal_sieve"; }
     QString shortHelpString() const override
     {

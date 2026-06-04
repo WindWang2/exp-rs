@@ -1129,8 +1129,6 @@ endif()
 set(QGIS_CORE_HDRS
   ${CMAKE_BINARY_DIR}/qgsconfig.h
 
-  ../plugins/qgisplugin.h
-
   fromencodedcomponenthelper.h
   qgis.h
   qgis_sip.h

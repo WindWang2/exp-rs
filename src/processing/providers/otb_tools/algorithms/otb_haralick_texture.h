@@ -11,6 +11,8 @@ public:
     QString name() const override { return "otb_haralick_texture"; }
     QString displayName() const override { return "Haralick Texture Extraction"; }
     QString group() const override { return "Feature"; }
+    QString groupId() const override { return "feature"; }
+    QStringList tags() const override { return { QObject::tr( "haralick" ), QObject::tr( "texture" ), QObject::tr( "feature" ), QObject::tr( "extraction" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "HaralickTextureExtraction"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbHaralickTextureAlgorithm(); }

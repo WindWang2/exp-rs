@@ -11,6 +11,8 @@ public:
     QString name() const override { return "gdal_translate"; }
     QString displayName() const override { return "GDAL Translate (Format Conversion)"; }
     QString group() const override { return "Raster Conversion"; }
+    QString groupId() const override { return "rasterconversion"; }
+    QStringList tags() const override { return { QObject::tr( "gdal_translate" ), QObject::tr( "translate" ), QObject::tr( "format" ), QObject::tr( "conversion" ), QObject::tr( "gdal" ) }; }
     QString toolName() const override { return "gdal_translate"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new GdalTranslateAlgorithm(); }

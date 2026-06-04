@@ -4,7 +4,6 @@
 #include <QDialog>
 
 class QLineEdit;
-class QComboBox;
 class QPushButton;
 class QgsRasterLayer;
 
@@ -30,7 +29,6 @@ private:
     void setupUi();
 
     QLineEdit *m_expressionEdit = nullptr;
-    QComboBox *m_bandCombo = nullptr;
     QLineEdit *m_outputEdit = nullptr;
     QPushButton *m_runButton = nullptr;
     QgsRasterLayer *m_rasterLayer = nullptr;

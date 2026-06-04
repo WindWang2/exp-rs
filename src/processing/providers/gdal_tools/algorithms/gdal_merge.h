@@ -11,6 +11,8 @@ public:
     QString name() const override { return "gdal_merge"; }
     QString displayName() const override { return "GDAL Merge (Merge Rasters)"; }
     QString group() const override { return "Raster Conversion"; }
+    QString groupId() const override { return "rasterconversion"; }
+    QStringList tags() const override { return { QObject::tr( "gdal_merge" ), QObject::tr( "merge" ), QObject::tr( "mosaic" ), QObject::tr( "raster" ), QObject::tr( "gdal" ) }; }
     QString toolName() const override { return "gdal_merge.py"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new GdalMergeAlgorithm(); }

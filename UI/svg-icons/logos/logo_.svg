@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="80" height="80">
+          <circle cx="40" cy="40" r="20" fill="#dbeafe"></circle>
+          <circle cx="40" cy="40" r="20" fill="none" stroke="#1d4ed8" stroke-width="2"></circle>
+          <path d="M20 40 Q40 33 60 40" fill="none" stroke="#1d4ed8" stroke-width="1" opacity="0.5"></path>
+          <path d="M20 40 Q40 47 60 40" fill="none" stroke="#1d4ed8" stroke-width="1" opacity="0.5"></path>
+          <path d="M40 20 Q47 40 40 60" fill="none" stroke="#1d4ed8" stroke-width="1" opacity="0.5"></path>
+          <path d="M40 20 Q33 40 40 60" fill="none" stroke="#1d4ed8" stroke-width="1" opacity="0.5"></path>
+          <ellipse cx="40" cy="40" rx="32" ry="11" fill="none" stroke="#d97706" stroke-width="1.5" stroke-dasharray="3,2" transform="rotate(-28 40 40)"></ellipse>
+          <rect x="65" y="22" width="7" height="5" rx="1" fill="#d97706"></rect>
+          <line x1="60" y1="24.5" x2="65" y2="24.5" stroke="#d97706" stroke-width="1.5"></line>
+          <line x1="72" y1="24.5" x2="77" y2="24.5" stroke="#d97706" stroke-width="1.5"></line>
+          <circle cx="68.5" cy="24.5" r="0" fill="none"></circle>
+        </svg>

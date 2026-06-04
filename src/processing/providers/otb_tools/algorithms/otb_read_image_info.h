@@ -11,6 +11,8 @@ public:
     QString name() const override { return "otb_read_image_info"; }
     QString displayName() const override { return "Read Image Info"; }
     QString group() const override { return "Utilities"; }
+    QString groupId() const override { return "utilities"; }
+    QStringList tags() const override { return { QObject::tr( "image" ), QObject::tr( "info" ), QObject::tr( "metadata" ), QObject::tr( "utilities" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "ReadImageInfo"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbReadImageInfoAlgorithm(); }

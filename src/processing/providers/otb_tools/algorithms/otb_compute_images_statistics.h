@@ -11,6 +11,8 @@ public:
     QString name() const override { return "otb_compute_images_statistics"; }
     QString displayName() const override { return "Compute Images Statistics"; }
     QString group() const override { return "Radiometry"; }
+    QString groupId() const override { return "radiometry"; }
+    QStringList tags() const override { return { QObject::tr( "statistics" ), QObject::tr( "mean" ), QObject::tr( "variance" ), QObject::tr( "radiometry" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "ComputeImagesStatistics"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbComputeImagesStatisticsAlgorithm(); }

@@ -1,0 +1,3 @@
+<?xml version="1.0"?>
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32"><circle cx="12" cy="12" r="9" fill="#f0f4ff" stroke="#6366f1" stroke-width="1.5"></circle><ellipse cx="12" cy="12" rx="9" ry="4" fill="none" stroke="#6366f1" stroke-width="0.75" opacity="0.5"></ellipse><line x1="12" y1="3" x2="12" y2="21" stroke="#6366f1" stroke-width="0.75" opacity="0.5"></line><circle cx="17" cy="7" r="3.5" fill="#1d4ed8"></circle><text x="17" y="8.5" text-anchor="middle" font-size="4" fill="white" font-weight="700" font-family="sans-serif">CRS</text></svg>

@@ -11,6 +11,8 @@ public:
     QString name() const override { return "otb_mean_shift_smoothing"; }
     QString displayName() const override { return "Mean Shift Smoothing"; }
     QString group() const override { return "Filtering"; }
+    QString groupId() const override { return "filtering"; }
+    QStringList tags() const override { return { QObject::tr( "mean shift" ), QObject::tr( "smoothing" ), QObject::tr( "filtering" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "MeanShiftSmoothing"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbMeanShiftSmoothingAlgorithm(); }

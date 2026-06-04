@@ -12,6 +12,7 @@ public:
     QString displayName() const override { return "GDAL Grid (Point to Raster)"; }
     QString group() const override { return "Raster Conversion"; }
     QString groupId() const override { return "rasterconversion"; }
+    QStringList tags() const override { return { QObject::tr( "gdal_grid" ), QObject::tr( "grid" ), QObject::tr( "interpolation" ), QObject::tr( "point to raster" ), QObject::tr( "gdal" ) }; }
     QString toolName() const override { return "gdal_grid"; }
     QString shortHelpString() const override
     {

@@ -11,6 +11,8 @@ public:
     QString name() const override { return "gdaltindex"; }
     QString displayName() const override { return "GDAL Tile Index (Raster Tile Index)"; }
     QString group() const override { return "Raster Conversion"; }
+    QString groupId() const override { return "rasterconversion"; }
+    QStringList tags() const override { return { QObject::tr( "gdaltindex" ), QObject::tr( "tile index" ), QObject::tr( "raster" ), QObject::tr( "gdal" ) }; }
     QString toolName() const override { return "gdaltindex"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new GdalTindexAlgorithm(); }

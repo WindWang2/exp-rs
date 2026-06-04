@@ -7,6 +7,7 @@ class QComboBox;
 class QLineEdit;
 class QDoubleSpinBox;
 class QPushButton;
+class QLabel;
 class QgsRasterLayer;
 
 /**
@@ -30,12 +31,16 @@ private slots:
 
 private:
     void setupUi();
+    void populateBandCombo();
 
     QComboBox *m_methodCombo = nullptr;
     QComboBox *m_bandCombo = nullptr;
     QDoubleSpinBox *m_gainSpin = nullptr;
     QDoubleSpinBox *m_biasSpin = nullptr;
     QDoubleSpinBox *m_airmassSpin = nullptr;
+
+    QLabel *m_airmassLabel = nullptr;
+
     QLineEdit *m_outputEdit = nullptr;
     QPushButton *m_runButton = nullptr;
     QgsRasterLayer *m_rasterLayer = nullptr;

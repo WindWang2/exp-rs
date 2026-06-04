@@ -11,6 +11,8 @@ public:
     QString name() const override { return "otb_dynamic_convert"; }
     QString displayName() const override { return "Dynamic Convert"; }
     QString group() const override { return "Utilities"; }
+    QString groupId() const override { return "utilities"; }
+    QStringList tags() const override { return { QObject::tr( "dynamic" ), QObject::tr( "convert" ), QObject::tr( "rescale" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "DynamicConvert"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbDynamicConvertAlgorithm(); }

@@ -11,6 +11,8 @@ public:
     QString name() const override { return "otb_concatenate_images"; }
     QString displayName() const override { return "Concatenate Images"; }
     QString group() const override { return "Utilities"; }
+    QString groupId() const override { return "utilities"; }
+    QStringList tags() const override { return { QObject::tr( "concatenate" ), QObject::tr( "merge" ), QObject::tr( "stack" ), QObject::tr( "images" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "ConcatenateImages"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbConcatenateImagesAlgorithm(); }

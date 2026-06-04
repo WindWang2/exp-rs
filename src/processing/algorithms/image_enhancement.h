@@ -26,6 +26,13 @@ public:
     static void histogramEqualize(const float *input, float *output, size_t count,
                                   int bins = 256, float nodata = -9999.0f);
 
+    // Band ratio
+    static void bandRatio(const float *band1, const float *band2, float *output, size_t count);
+
+    // IHS transform (single pixel)
+    static void rgbToIhs(float r, float g, float b, float &i, float &h, float &s);
+    static void ihsToRgb(float i, float h, float s, float &r, float &g, float &b);
+
     // Spatial filters
     static void meanFilter(const float *input, float *output, int width, int height, int kernelSize = 3);
     static void gaussianFilter(const float *input, float *output, int width, int height, int kernelSize = 3, float sigma = 1.0f);

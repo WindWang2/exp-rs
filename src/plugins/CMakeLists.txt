@@ -1,3 +1,2 @@
 add_subdirectory(layer_tree)
 add_subdirectory(processing)
-add_subdirectory(python_console)

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <numeric>
 #include <vector>
+#include <limits>
 
 void ImageEnhancement::computeStats(const float *data, size_t count, float nodata,
                                     float &min, float &max, float &mean, float &stddev)
@@ -264,6 +265,85 @@ void ImageEnhancement::laplacianFilter(const float *input, float *output, int wi
     };
 
     convolve(input, output, width, height, laplacian, 3);
+}
+
+// ---- Band ratio ----
+
+void ImageEnhancement::bandRatio(const float *band1, const float *band2,
+                                  float *output, size_t count)
+{
+    for (size_t i = 0; i < count; i++) {
+        if (band2[i] == 0.0f) {
+            output[i] = std::numeric_limits<float>::quiet_NaN();
+        } else {
+            output[i] = band1[i] / band2[i];
+        }
+    }
+}
+
+// ---- IHS transform ----
+// Cylindrical intensity-hue-saturation model.
+// Basis: u = (2R - G - B) / sqrt(6), v = (G - B) / sqrt(2)
+// I = (R + G + B) / 3
+// H = atan2(v, u) / (2*pi), mapped to [0, 1)
+// S = sqrt(u^2 + v^2) / (3*I) = 1 - min(R,G,B)/I  (when I > 0, else 0)
+//
+// This saturation formula gives S in [0, 1] and is mathematically consistent
+// with the basis vectors, allowing exact round-trip reconstruction.
+
+void ImageEnhancement::rgbToIhs(float r, float g, float b,
+                                  float &i, float &h, float &s)
+{
+    static constexpr float inv3 = 1.0f / 3.0f;
+    static constexpr float sqrt6 = 2.449489742783178f;   // std::sqrt(6.0f)
+    static constexpr float sqrt2 = 1.4142135623730951f;   // std::sqrt(2.0f)
+    static constexpr float inv2Pi = 1.0f / (2.0f * 3.14159265358979323846f);
+    static constexpr float inv3sqrt6 = 1.0f / (3.0f * 2.449489742783178f); // 1/(3*sqrt(6))
+
+    i = (r + g + b) * inv3;
+
+    if (i == 0.0f) {
+        h = 0.0f;
+        s = 0.0f;
+        return;
+    }
+
+    float u = (2.0f * r - g - b) / sqrt6;
+    float v = (g - b) / sqrt2;
+
+    // S = sqrt(u^2 + v^2) / (3*I), which equals 1 - min(R,G,B)/I
+    float chroma = std::sqrt(u * u + v * v);
+    s = chroma * inv3 / i;
+
+    h = std::atan2(v, u) * inv2Pi;
+    if (h < 0.0f) h += 1.0f;
+}
+
+void ImageEnhancement::ihsToRgb(float i, float h, float s,
+                                  float &r, float &g, float &b)
+{
+    if (s == 0.0f || i == 0.0f) {
+        r = g = b = i;
+        return;
+    }
+
+    static constexpr float sqrt6 = 2.449489742783178f;   // std::sqrt(6.0f)
+    static constexpr float sqrt2 = 1.4142135623730951f;   // std::sqrt(2.0f)
+    static constexpr float twoPi = 2.0f * 3.14159265358979323846f;
+
+    float hRad = h * twoPi;
+    // chroma = S * 3 * I (to invert the S = chroma/(3*I) definition)
+    float chroma = s * 3.0f * i;
+    float u = chroma * std::cos(hRad);
+    float v = chroma * std::sin(hRad);
+
+    // Inverse of the forward basis transform:
+    // u = (2R - G - B) / sqrt(6)  ->  R = I + u * 2/sqrt(6) + 0
+    // v = (G - B) / sqrt(2)       ->  G = I - u/sqrt(6) + v/sqrt(2)
+    //                                 B = I - u/sqrt(6) - v/sqrt(2)
+    r = i + u * 2.0f / sqrt6;
+    g = i - u / sqrt6 + v / sqrt2;
+    b = i - u / sqrt6 - v / sqrt2;
 }
 
 // ---- PCA ----

@@ -63,6 +63,7 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
         }
 
         menu->addAction(QObject::tr("Properties..."), mWindow, &QgisDesktopWindow::layerProperties);
+        menu->addAction(QObject::tr("Set Layer CRS from Preset..."), mWindow, &QgisDesktopWindow::setLayerCrsFromPreset);
         menu->addSeparator();
         menu->addAction(defActions->actionRenameGroupOrLayer());
         menu->addAction(defActions->actionShowFeatureCount());

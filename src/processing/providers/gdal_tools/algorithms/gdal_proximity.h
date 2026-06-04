@@ -12,6 +12,7 @@ public:
     QString displayName() const override { return "GDAL Proximity (Raster Distance)"; }
     QString group() const override { return "Raster Analysis"; }
     QString groupId() const override { return "rasteranalysis"; }
+    QStringList tags() const override { return { QObject::tr( "gdal_proximity" ), QObject::tr( "proximity" ), QObject::tr( "distance" ), QObject::tr( "raster" ), QObject::tr( "gdal" ) }; }
     QString toolName() const override { return "gdal_proximity"; }
     QString shortHelpString() const override
     {

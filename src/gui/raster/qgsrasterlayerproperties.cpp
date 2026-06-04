@@ -52,6 +52,7 @@
 #include "qgsprovidersourcewidget.h"
 #include "qgsprovidersourcewidgetproviderregistry.h"
 #include "qgsrasterattributetablewidget.h"
+#include "qgsrasterbandstats.h"
 #include "qgsrastercontourrendererwidget.h"
 #include "qgsrasterdataprovider.h"
 #include "qgsrasterhistogramwidget.h"
@@ -75,6 +76,8 @@
 #include <QColorDialog>
 #include <QDesktopServices>
 #include <QFile>
+#include <QFormLayout>
+#include <QLabel>
 #include <QFileDialog>
 #include <QHeaderView>
 #include <QLinearGradient>
@@ -418,6 +421,69 @@ QgsRasterLayerProperties::QgsRasterLayerProperties( QgsMapLayer *lyr, QgsMapCanv
   // create histogram widget — skipped: QgsRasterHistogramWidget construction produces
   // a corrupted object (likely due to QwtPlot stub vtable issues). Histogram tab will be empty.
   mHistogramWidget = nullptr;
+
+  // Add Spectral Information tab
+  if ( provider )
+  {
+    QWidget *spectralPage = new QWidget();
+    QVBoxLayout *spectralLayout = new QVBoxLayout( spectralPage );
+
+    const QMetaEnum dataTypeEnum = QMetaEnum::fromType<Qgis::DataType>();
+
+    auto dataTypeString = [&dataTypeEnum]( Qgis::DataType dt ) -> QString {
+      const char *name = dataTypeEnum.valueToKey( static_cast<int>( dt ) );
+      return name ? QString( name ) : QString( "Unknown" );
+    };
+
+    int bandCount = provider->bandCount();
+    QFormLayout *formLayout = new QFormLayout();
+    formLayout->addRow( tr( "Band Count:" ), new QLabel( QString::number( bandCount ) ) );
+    formLayout->addRow( tr( "Data Type:" ), new QLabel( dataTypeString( provider->dataType( 1 ) ) ) );
+
+    const QString noDataStr = provider->sourceHasNoDataValue( 1 )
+      ? QString::number( provider->sourceNoDataValue( 1 ) )
+      : tr( "Not Set" );
+    formLayout->addRow( tr( "NoData Value:" ), new QLabel( noDataStr ) );
+
+    spectralLayout->addLayout( formLayout );
+
+    // Per-band information table
+    QGroupBox *bandGroupBox = new QGroupBox( tr( "Band Information" ) );
+    QVBoxLayout *bandLayout = new QVBoxLayout( bandGroupBox );
+
+    for ( int i = 1; i <= bandCount; i++ )
+    {
+      QString bandInfo = tr( "Band %1: %2" )
+                           .arg( i )
+                           .arg( dataTypeString( provider->dataType( i ) ) );
+
+      // Add nodata value if available
+      if ( provider->sourceHasNoDataValue( i ) )
+      {
+        bandInfo += tr( "  |  NoData: %1" ).arg( provider->sourceNoDataValue( i ) );
+      }
+
+      // Add statistics if available
+      if ( provider->hasStatistics( i, Qgis::RasterBandStatistic::All ) )
+      {
+        QgsRasterBandStats stats = provider->bandStatistics( i, Qgis::RasterBandStatistic::All );
+        bandInfo += tr( "  |  Min: %1, Max: %2, Mean: %3, StdDev: %4" )
+                      .arg( stats.minimumValue, 0, 'g', 6 )
+                      .arg( stats.maximumValue, 0, 'g', 6 )
+                      .arg( stats.mean, 0, 'g', 6 )
+                      .arg( stats.stdDev, 0, 'g', 6 );
+      }
+
+      QLabel *bandLabel = new QLabel( bandInfo );
+      bandLabel->setWordWrap( true );
+      bandLayout->addWidget( bandLabel );
+    }
+
+    spectralLayout->addWidget( bandGroupBox );
+    spectralLayout->addStretch();
+
+    addPage( tr( "Spectral Information" ), tr( "Spectral Information" ), QgsApplication::getThemeIcon( u"/propertyicons/metadata.svg"_s ), spectralPage );
+  }
 
   //insert renderer widgets into registry
   QgsApplication::rasterRendererRegistry()->insertWidgetFunction( u"paletted"_s, QgsPalettedRendererWidget::create );

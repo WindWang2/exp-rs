@@ -11,6 +11,8 @@ public:
     QString name() const override { return "otb_image_classifier"; }
     QString displayName() const override { return "Image Classifier"; }
     QString group() const override { return "Learning"; }
+    QString groupId() const override { return "learning"; }
+    QStringList tags() const override { return { QObject::tr( "classification" ), QObject::tr( "classifier" ), QObject::tr( "machine learning" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "ImageClassifier"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbImageClassifierAlgorithm(); }

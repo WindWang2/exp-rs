@@ -11,6 +11,8 @@ public:
     QString name() const override { return "gdalwarp"; }
     QString displayName() const override { return "GDAL Warp (Reproject/Clip)"; }
     QString group() const override { return "Raster Transformation"; }
+    QString groupId() const override { return "rastertransformation"; }
+    QStringList tags() const override { return { QObject::tr( "gdalwarp" ), QObject::tr( "warp" ), QObject::tr( "reproject" ), QObject::tr( "clip" ), QObject::tr( "gdal" ) }; }
     QString toolName() const override { return "gdalwarp"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new GdalWarpAlgorithm(); }

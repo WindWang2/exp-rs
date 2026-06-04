@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="80" height="80">
+          <defs>
+            <clipPath id="lc-eye">
+              <path d="M8 40 Q40 14 72 40 Q40 66 8 40z"></path>
+            </clipPath>
+          </defs>
+          <g clip-path="url(#lc-eye)">
+            <rect x="8" y="14" width="9" height="52" fill="#e03131" opacity="0.75"></rect>
+            <rect x="17" y="14" width="9" height="52" fill="#f76707" opacity="0.75"></rect>
+            <rect x="26" y="14" width="9" height="52" fill="#ffd43b" opacity="0.75"></rect>
+            <rect x="35" y="14" width="9" height="52" fill="#40c057" opacity="0.75"></rect>
+            <rect x="44" y="14" width="9" height="52" fill="#339af0" opacity="0.75"></rect>
+            <rect x="53" y="14" width="9" height="52" fill="#7950f2" opacity="0.75"></rect>
+            <rect x="62" y="14" width="10" height="52" fill="#ae3ec9" opacity="0.75"></rect>
+          </g>
+          <path d="M8 40 Q40 14 72 40 Q40 66 8 40z" fill="none" stroke="#0a1628" stroke-width="2.5"></path>
+          <circle cx="40" cy="40" r="10" fill="#0a1628"></circle>
+          <circle cx="36" cy="36" r="3.5" fill="white" opacity="0.28"></circle>
+        </svg>
