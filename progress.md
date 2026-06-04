@@ -1,5 +1,38 @@
 # Progress Log — SICNU GEO RS
 
+## Session: 2026-06-05 (凌晨) — Phase 10B.0 OTB Infrastructure 设计 + 计划
+
+### 状态
+- **Spec:** `docs/superpowers/specs/2026-06-04-otb-infra-design.md` 完成（6 子任务 + ITK 模块清单 + 风险表 + 命令细节）
+- **task_plan.md:** Phase 10B.0 块插入 Phase 11.5 之后、Phase 12 之前
+
+### 关键发现
+- **OTB 源码已在 `qgis_ref/OTB/` (97MB, v10.0.0)** — Apache 2.0，CNES 出品，含 8 模块组
+- **ITK 未在仓库** — qgis_ref/OTB/Modules/ThirdParty/ITK/ 只是 88K 的 CMake wrapper，期望外部 ITK
+- **PDAL 在 `external/pdal_wrench/`** — LiDAR 由它负责，不引 OTB-LiDAR
+- 系统未装 ITK / OTB（apt 都没找到）
+
+### 范围决策
+- ITK 来源：git subtree v5.4.0 → `itk_ref/`（~300MB 一次性增量）
+- OTB 位置：从 `qgis_ref/OTB/` git mv 到顶层 `otb_ref/`（解耦 OTB ↔ QGIS）
+- 模块策略：全 vendor，CMake `Module_<name>=ON` opt-in 编译子集
+- ITK 子集：~12 模块（Common/ImageBase/Filtering/IO/...）
+- OTB 子集：~13 模块（Common/ImageBase/MeanShift/Segmentation/Learning/...）
+- GUI / Wrapping / Python / Monteverdi 全关
+- 默认构建 `SICNU_BUILD_OTB=OFF`（开发者按需打开；CI 全开）
+- 静态库（OTB 9+ 已无插件机制）
+
+### 6 子任务顺序
+10B.0.1 (OTB 重组) → 10B.0.2 (ITK subtree) → 10B.0.3 (ITK CMake) → 10B.0.4 (OTB CMake) → 10B.0.5 (sanity 测试) → 10B.0.6 (CI / 文档)
+
+### Phase 10B 业务 (后续)
+- OTB MeanShift wrapper (`rs_segmenter_otb_meanshift.cpp`)
+- 自写 SLIC + cv::pyrMeanShiftFiltering wrapper
+- 段数据模型 + 特征 + GLCM
+- OBIA 模式 toggle + UI
+
+---
+
 ## Session: 2026-06-04 (深夜后) — Phase 10A.1 Classification Polish ✅ COMPLETE
 
 ### 状态

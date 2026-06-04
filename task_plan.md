@@ -6,7 +6,7 @@ Build a pure C++ remote sensing analysis and processing platform based on the QG
 
 ## Current Phase
 
-Phase 11.4 + 11.5 + 10A + 10A.1 complete (Georeferencer + v1.5 + Pixel Classification + Polish). **293/293 tests pass**. Next: Phase 10B (OBIA — 面向对象分类) 或 Phase 12 (AI Agent foundation)，待优先级讨论。
+Phase 11.4 + 11.5 + 10A + 10A.1 complete. **293/293 tests pass**. Next: **Phase 10B.0 (OTB + ITK vendored infrastructure)** — Phase 10B (OBIA) 业务的基础设施 phase。设计已确认 `docs/superpowers/specs/2026-06-04-otb-infra-design.md`。
 
 ---
 
