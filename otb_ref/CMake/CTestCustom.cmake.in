@@ -1,0 +1,118 @@
+#
+# Copyright (C) 2005-2024 Centre National d'Etudes Spatiales (CNES)
+#
+# This file is part of Orfeo Toolbox
+#
+#     https://www.orfeo-toolbox.org/
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+#
+# Note that the OTB/CMakeLists.txt file configures this file
+#
+#               CMake/CTestCustom.cmake.in
+#
+# to this file
+#
+#       ${OTB_BINARY_DIR}/CTestCustom.cmake
+#
+#----------------------------------------------------------------------
+#
+# For further details regarding this file,
+# see http://www.cmake.org/Wiki/CMake_Testing_With_CTest#Customizing_CTest
+#
+# and
+# http://www.kitware.com/blog/home/post/27
+#
+#----------------------------------------------------------------------
+
+set(CTEST_CUSTOM_MAXIMUM_PASSED_TEST_OUTPUT_SIZE 1000000)
+set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_WARNINGS 300)
+set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_ERRORS 50)
+
+set(CTEST_CUSTOM_COVERAGE_EXCLUDE
+ ${CTEST_CUSTOM_COVERAGE_EXCLUDE}
+
+ # Exclude try_compile sources from coverage results:
+ "/CMakeFiles/CMakeTmp/"
+
+ # Exclude files from the Examples directories
+ #".*/Examples/.*"
+
+ # Exclude files from the Testing directories
+ ".*/test/.*"
+ ".*/Testing/.*"
+
+ # Exclude files from the ThirdParty Utilities directories
+ ".*/Modules/ThirdParty/.*"
+ ".*/Utilities/.*"
+
+ # Exclude SWIG wrappers files
+ ".*/Modules/Wrappers/SWIG/src/python/otbApplicationPYTHON_wrap.*"
+ ".*/Modules/Wrappers/SWIG/src/java/otbApplicationJAVA_wrap.*"
+
+ )
+
+set(CTEST_CUSTOM_WARNING_EXCEPTION
+  ${CTEST_CUSTOM_WARNING_EXCEPTION}
+  "backward_warning"
+  "warning LNK4221"
+  "ranlib:.*file:.*has no symbols"
+  "ranlib: file: .+ has no symbols"
+  "ranlib:.*warning for library:.*the table of contents is empty.*no object file members in the library define global symbols.*"
+  "libtool:.*file:.*has no symbols"
+  "warning -.: directory name .* does not exist"
+  "ld.*warning.*duplicate dylib.*"
+  "WARNING non-zero return value in ctest"
+  ".*Microsoft.*include.*.h.*[Ww]arning.*"
+  ".*gdal_priv.h.*[Ww]arning.*"
+  ".*cpl_string.h.*[Ww]arning.*"
+  ".*ogr_feature.h.*[Ww]arning.*"
+  ".*abstract.h.*warning.*"
+
+  # Ignore clang's summary warning, assuming prior text has matched some
+  # other warning expression:
+  "[0-9,]+ warnings? generated."
+  "cl...Command.line.warning.D9025"
+  ".*include.opencv2.*warning.*"
+  ".*include.opencv2.*note.*"
+  ".*include.kml.*warning.*"
+  ".*include.ogr_feature.*warning.*"
+  ".*include.ogr_feature.*note.*"
+  ".*itksys.SharedForward.h.*warning.*"
+  ".*vcl_deprecated_header.h.*"
+  ".*otbCurlHelper.cxx:.*warning.*maxConnect.*"
+  ".*include.ITK-4.*warning.*"
+  ".*include.curl.curl.h.*warning.*"
+  ".*include.ogr_core.h.*warning.*"
+  ".*include.ogr_srs_api.h.*warning.*"
+  ".*include.ogrsf_frmts.h.*warning.*"
+  ".*include.ogr_geometry.h.*warning.*"
+  ".*include.ogr_spatialref.h.*warning.*"
+  ".*include.cpl_error.h.*warning.*"
+  ".*vnl.vnl_numeric_traits.h.*warning.*"
+  ".*vcl_config_compiler.h.*warning.*"
+  ".*boost.move.unique_ptr.hpp:.*"
+  ".*include.mpValue.h.*[Ww]arning.*\\[-Wc\\+\\+11-extensions\\]"
+  ".*itksys.SharedForward.h.*warning.*itksys_shared_forward_to_real.*"
+  ".*include.mpi_portable_platform.h.*warning.*invalid.suffix.on.literal.*"
+  # Silent latex warnings in ctest
+  ".*LaTeX Warning:.*"
+  ".*Package tabulary Warning:.*"
+  ".*Package rerunfilecheck Warning:.*"
+  # Silent warning: unknown option after ‘#pragma GCC diagnostic’ kind [-Wpragmas] from GCC 5.2
+  ".*warning: unknown option after.*pragma GCC diagnostic.*kind.*-Wpragmas.*"
+  # Silent warning: unknown warning group '-Wexpansion-to-defined', ignored [-Wunknown-pragmas] on clang 3.8
+  "warning: unknown warning group.*-Wexpansion-to-defined.*ignored.*-Wunknown-pragmas.*"
+  )

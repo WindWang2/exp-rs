@@ -1,0 +1,18 @@
+syntax: glob
+*~
+.*.swp
+*.orig
+*.pyc
+.\#*
+\#*\#
+tags
+*vim*
+*.template
+archives*
+.vscode*
+CMakeLists.txt.user
+.directory*
+build_packages*
+build
+install
+log
