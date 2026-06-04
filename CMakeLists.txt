@@ -168,6 +168,149 @@ if(WITH_INTERNAL_LAZPERF)
   include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/external/lazperf)
 endif()
 
+# ─── SICNU_BUILD_OTB: vendored ITK + OTB algorithm libraries ───────────
+option(SICNU_BUILD_OTB "Build vendored OTB + ITK algorithm libraries" OFF)
+if(SICNU_BUILD_OTB)
+    message(STATUS "SICNU_BUILD_OTB=ON — configuring vendored ITK + OTB")
+
+    # ── ITK: only algorithm core modules ──────────────────────────────────
+    set(ITK_BUILD_DEFAULT_MODULES OFF CACHE BOOL "" FORCE)
+    foreach(m
+        # Core
+        ITKCommon
+        ITKFiniteDifference
+        ITKGPUCommon
+        ITKGPUFiniteDifference
+        ITKImageAdaptors
+        ITKImageFunction
+        ITKMesh
+        ITKQuadEdgeMesh
+        ITKSpatialObjects
+        ITKTransform
+        # Filtering
+        ITKAnisotropicSmoothing
+        ITKAntiAlias
+        ITKBiasCorrection
+        ITKBinaryMathematicalMorphology
+        ITKColormap
+        ITKConvolution
+        ITKCurvatureFlow
+        ITKDeconvolution
+        ITKDenoising
+        ITKDisplacementField
+        ITKDistanceMap
+        ITKFastMarching
+        ITKFFT
+        ITKGPUAnisotropicSmoothing
+        ITKGPUImageFilterBase
+        ITKGPURegistrationCommon
+        ITKGPUTotalVariation
+        ITKGPUThresholding
+        ITKGPUSmoothing
+        ITKGPUPDEDeformableRegistration
+        ITKImageCompare
+        ITKImageCompose
+        ITKImageFeature
+        ITKImageFilterBase
+        ITKImageFusion
+        ITKImageGradient
+        ITKImageGrid
+        ITKImageIntensity
+        ITKImageLabel
+        ITKImageSources
+        ITKImageStatistics
+        ITKLabelMap
+        ITKMathematicalMorphology
+        ITKPath
+        ITKQuadEdgeMeshFiltering
+        ITKSmoothing
+        ITKSpatialFunction
+        ITKThresholding
+        # ThirdParty / Numerics
+        ITKEigen
+        ITKNarrowBand
+        ITKOptimizers
+        ITKOptimizersv4
+        ITKPolynomials
+        ITKStatistics
+        # Registration
+        ITKRegistrationCommon
+        ITKMetricsv4
+        ITKPDEDeformableRegistration
+        ITKRegistrationMethodsv4
+        # Segmentation
+        ITKClassifiers
+        ITKConnectedComponents
+        ITKDeformableMesh
+        ITKKLMRegionGrowing
+        ITKLabelVoting
+        ITKLevelSets
+        ITKLevelSetsv4
+        ITKMarkovRandomFieldsClassifiers
+        ITKRegionGrowing
+        ITKSignedDistanceFunction
+        ITKVoronoi
+        ITKWatersheds
+        # IO
+        ITKIOImageBase
+        ITKIOTIFF
+        ITKIOGDAL
+        ITKIOGEOM
+        ITKIOPNG
+        ITKIOJPEG
+        ITKIOMeta
+        ITKIORAW
+        ITKNrrdIO
+    )
+        set(Module_${m} ON CACHE BOOL "" FORCE)
+    endforeach()
+    set(ITK_WRAP_PYTHON OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(ITK_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
+    add_subdirectory(itk_ref)
+
+    # Tell OTB where to find the built ITK
+    set(ITK_DIR "${CMAKE_BINARY_DIR}/itk_ref" CACHE PATH "ITK build directory" FORCE)
+
+    # ── OTB: only algorithm modules ───────────────────────────────────────
+    set(OTB_BUILD_DEFAULT_MODULES OFF CACHE BOOL "" FORCE)
+    foreach(m
+        # Core modules needed for basic OTB functionality
+        OTBCommon
+        OTBImageBase
+        OTBImageManipulation
+        OTBObjectList
+        OTBImageIO
+        OTBStreaming
+        OTBStatistics
+        OTBLabelling
+        OTBMeanShift
+        OTBLearning
+        OTBSupervised
+        OTBFeaturesExtraction
+    )
+        set(Module_${m} ON CACHE BOOL "" FORCE)
+    endforeach()
+    set(OTB_USE_QT OFF CACHE BOOL "" FORCE)
+    set(OTB_WRAP_PYTHON OFF CACHE BOOL "" FORCE)
+    set(OTB_BUILD_MODULE_AS_STANDALONE OFF CACHE BOOL "" FORCE)
+    set(OTB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(OTB_DATA_ROOT "" CACHE PATH "OTB data root" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+
+    # Disable optional OTB ThirdParty activation options
+    set(OTB_USE_OPENMP OFF CACHE BOOL "" FORCE)
+    set(OTB_USE_SSE_FLAGS OFF CACHE BOOL "" FORCE)
+
+    # OTB requires Boost headers (filesystem component).
+    # Uncomment when boost dev headers are installed:
+    # add_subdirectory(otb_ref)
+
+    # set(SICNU_HAS_OTB TRUE)
+endif()
+
 # configure_file AFTER all HAVE_* variables are resolved
 configure_file(cmake_templates/qgsconfig.h.in ${CMAKE_BINARY_DIR}/qgsconfig.h)
 include_directories(${CMAKE_BINARY_DIR})

@@ -20,6 +20,7 @@
 
 #include "itkMacro.h" // for ITKCommon_EXPORT
 #include "itkSingletonMacro.h"
+#include <cstdint> // for uint8_t (GCC 16+ requires explicit include)
 
 namespace itk
 {
