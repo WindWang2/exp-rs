@@ -6,7 +6,7 @@ Build a pure C++ remote sensing analysis and processing platform based on the QG
 
 ## Current Phase
 
-Phase 11.4 + 11.5 + 10A complete (Georeferencer + v1.5 + Pixel Classification). **280/280 tests pass**. Next: **Phase 10A.1 (算法收尾：Hungarian / 5-fold CV / .yml 加载)**。设计已确认 `docs/superpowers/specs/2026-06-04-classification-10a1-polish-design.md`。然后 Phase 10B / 12。
+Phase 11.4 + 11.5 + 10A + 10A.1 complete (Georeferencer + v1.5 + Pixel Classification + Polish). **293/293 tests pass**. Next: Phase 10B (OBIA — 面向对象分类) 或 Phase 12 (AI Agent foundation)，待优先级讨论。
 
 ---
 
@@ -733,15 +733,15 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 
 ---
 
-## Phase 10A.1: Classification Polish 🟢 **[NEXT — 收尾]**
+## Phase 10A.1: Classification Polish ✅ **COMPLETE (2026-06-04)**
 **Goal:** 填 Phase 10A 留下的 3 个算法层缺口。详细设计 `docs/superpowers/specs/2026-06-04-classification-10a1-polish-design.md`。
 
 **新增依赖:** 无（OpenCV ml 已链）。
 
-**子任务（每步 Red-Green-Refactor）:**
-- [ ] **10A.1.1** K-Means Hungarian assignment — `RsHungarianAssignment::solve` (O(n³) Munkres) + Task K-Means 分支重写 (cluster → class remap → accuracy)；4 测试
-- [ ] **10A.1.2** 5-fold Cross Validation — `RsCrossValidation::kFold` 分层切分 + 替换 stub 弹真实 mean ± std；4 测试
-- [ ] **10A.1.3** .yml 模型加载入口 — `RsClassifierBackend::isFitted()`、File→Load model 菜单、`RsClassifierLoadDialog`、Task 跳过 fit 分支；4 测试
+**子任务（每步 Red-Green-Refactor，全部完成）:**
+- [x] **10A.1.1** K-Means Hungarian assignment (`0efdffc`) — Munkres O(n³) + Task K-Means 分支重写；5 测试
+- [x] **10A.1.2** 5-fold Cross Validation (`61419f7`) — 分层切分；4 测试
+- [x] **10A.1.3** .yml 模型加载 (`a781ded`) — isFitted virtual + LoadDialog + File 菜单 + Task 跳 fit；4 测试
 
 **不在范围（推迟到 10A.2 或 10B）:**
 - ROI 顶点编辑（增删拖拽）

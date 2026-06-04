@@ -1,5 +1,28 @@
 # Progress Log — SICNU GEO RS
 
+## Session: 2026-06-04 (深夜后) — Phase 10A.1 Classification Polish ✅ COMPLETE
+
+### 状态
+- **3/3 子任务完成**，3 个独立 commit
+- **293/293 Catch2 测试绿** (10A 终态 280 + 10A.1 新增 13)
+- 全套构建 + 全套 ctest 顺利，无回归
+
+### 提交序列
+| 子任务 | SHA | 描述 |
+|---|---|---|
+| 10A.1.1 | `0efdffc` | Hungarian Munkres O(n³) + Task K-Means 分支重写 |
+| 10A.1.2 | `61419f7` | 5-fold 分层 CV + 替换 QMessageBox stub |
+| 10A.1.3 | `a781ded` | isFitted virtual + LoadDialog + File 菜单 + 跳 fit |
+
+### 关键实施得失
+- **Hungarian 实现按 Munkres 经典模板** (~100 行 + dual potentials)，5 测试全过
+- **CV 分层抽样** 用 round-robin per class；类样本 < k 时全 train，零样本 fold 直接跳过
+- **isFitted 状态机** OpenCV 自带 `isTrained()`，包装即可；KMeans 检查 `mCenters` 是否空
+- **Apply 分支** `mLoadedBackend` 一次性消耗 + 状态栏明显提示是稳定 UX
+- **LoadDialog** 简单 QDialog 即可；用户选算法 + 浏览 .yml 路径，accept 时校验存在
+
+---
+
 ## Session: 2026-06-04 (深夜) — Phase 10A.1 设计 + 计划
 
 ### 状态

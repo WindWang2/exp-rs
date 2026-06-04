@@ -1,5 +1,28 @@
 # Findings & Decisions — SICNU GEO RS
 
+## Phase 10A.1 Classification Polish 实施记录 (2026-06-04 完成)
+
+### 三个算法层缺口闭环
+1. **K-Means Hungarian**：cluster ID → class ID 的最优置换，让混淆矩阵有意义；触发条件 `K == |unique testY|`，否则跳过保留原行为
+2. **5-fold CV**：分层切分 + per-fold fresh backend；KMeans 拒绝（cluster ↔ class 不齐）；典型 < 5s 完成
+3. **.yml 模型加载**：训练一次 save 后下次直接 load → Apply 自动跳 fit；K-Means 不支持（cv::kmeans 非 cv::Algorithm 子类）
+
+### 实施细节
+- **Munkres 经典模板** ~100 行 dual potentials + augmenting paths；5 测试 (identity / off-diag / 1×1 / 6×6 diag / empty)
+- **CV 分层** round-robin 保证每 fold 类比例近似；类样本 < k 全 train + 该类无 test 贡献
+- **mt19937 seed=42** CV 切分确定性，测试可重现
+- **isFitted virtual** OpenCV `cv::ml::StatModel::isTrained()` 自带；包装即可
+- **`mLoadedBackend` 一次性消耗**：std::move 进 Config 后清空，下次 Apply 回到训练模式（避免误用）
+- **状态栏 timeout=0** 加载后持久显示，Apply 时被 3000ms 替换
+
+### Phase 10A.1 v1 已知限制
+- K-Means K ≠ N 仍跳 accuracy（v2: 合并 cluster / 丢弃多余 cluster）
+- 加载模型不携带波段元数据（用户自负责对齐）
+- 加载模型一次性（v2: toggle "保持已加载"）
+- CV 同步阻塞主线程（v2: QgsTask 包装）
+
+---
+
 ## Phase 10A Classification 实施记录 (2026-06-04 完成)
 
 ### 偏离原始计划
