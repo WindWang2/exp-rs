@@ -4,7 +4,11 @@
 #include <QString>
 #include <QVector>
 
+#include <memory>
+
 #include <opencv2/core.hpp>
+
+#include "rs_classifier_backend.h"
 
 class QTimer;
 
@@ -87,6 +91,12 @@ class QgsClassificationMainWindow : public QMainWindow
     /// Pops a save dialog and calls RsRoiIO::save.
     void exportRois();
 
+    /// Phase 10A.1.3 — File → "Load classifier model..." action handler.
+    /// Opens RsClassifierLoadDialog; on accept, instantiates the chosen
+    /// backend, calls ->load(path), and stashes it in mLoadedBackend so the
+    /// next applyClassification() call skips training and predicts directly.
+    void loadClassifierModel();
+
   private:
     void setupMenus();
     void setupToolbars();
@@ -146,6 +156,10 @@ class QgsClassificationMainWindow : public QMainWindow
     // recomputation. Restarted on every mRois::changed; fires once after
     // the user stops dragging in new ROIs.
     QTimer *mJmRecomputeTimer = nullptr;
+
+    // Phase 10A.1.3 — backend instance loaded from disk via the File menu.
+    // Consumed (moved out) on the next applyClassification() call.
+    std::unique_ptr<RsClassifierBackend> mLoadedBackend;
 
   private slots:
     void onRoiDrawn( const QgsGeometry &geom, int classId );

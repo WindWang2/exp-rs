@@ -16,6 +16,7 @@ class QGIS_ANALYSIS_EXPORT RsClassifierKMeans : public RsClassifierBackend
     bool fit( const cv::Mat &X, const cv::Mat &y ) override; // y ignored
     cv::Mat predict( const cv::Mat &X ) const override;
     QString name() const override { return QStringLiteral( "K-Means" ); }
+    bool isFitted() const override { return !mCenters.empty(); }
 
     void setK( int k ) { mK = k; }
     int k() const { return mK; }

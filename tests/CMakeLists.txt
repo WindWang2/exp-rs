@@ -1317,6 +1317,24 @@ if(TARGET qgis_app_classify)
   )
   sicnu_discover_tests(test_cross_validation)
 
+  # Phase 10A.1.3 — Classifier isFitted state + save/load round-trip.
+  add_executable(test_classifier_load_save test_classifier_load_save.cpp)
+  target_link_libraries(test_classifier_load_save PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    Qt6::Core
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_classifier_load_save PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_classifier_load_save)
+
   # Phase 10A Task 10.8 — End-to-end classification task test.
   add_executable(test_classification_e2e test_classification_e2e.cpp)
   target_link_libraries(test_classification_e2e PRIVATE

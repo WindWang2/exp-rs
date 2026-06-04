@@ -32,4 +32,9 @@ class QGIS_ANALYSIS_EXPORT RsClassifierBackend
     /// Optional persistence (default no-op).
     virtual bool save( const QString & /*path*/ ) const { return false; }
     virtual bool load( const QString & /*path*/ ) { return false; }
+
+    /// True if backend can run predict() without fit() first.
+    /// Phase 10A.1.3 — used by RsClassificationTask to skip retraining
+    /// when a model has been loaded from disk via RsClassifierLoadDialog.
+    virtual bool isFitted() const { return false; }
 };

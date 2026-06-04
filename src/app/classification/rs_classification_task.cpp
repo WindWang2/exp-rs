@@ -42,17 +42,22 @@ bool RsClassificationTask::run()
     mResult.errorMessage = QStringLiteral( "No classifier backend supplied" );
     return false;
   }
-  if ( mCfg.trainX.empty() || mCfg.trainY.empty() )
-  {
-    mResult.errorMessage = QStringLiteral( "Empty training data" );
-    return false;
-  }
 
-  // 1. Train
-  if ( !mCfg.backend->fit( mCfg.trainX, mCfg.trainY ) )
+  // 1. Train — skipped when the backend was loaded from disk
+  //    (Phase 10A.1.3). When fit is required, empty trainX/trainY is fatal.
+  if ( !mCfg.backend->isFitted() )
   {
-    mResult.errorMessage = QStringLiteral( "Backend training failed" );
-    return false;
+    if ( mCfg.trainX.empty() || mCfg.trainY.empty() )
+    {
+      mResult.errorMessage = QStringLiteral(
+        "Backend not fitted and no training data supplied" );
+      return false;
+    }
+    if ( !mCfg.backend->fit( mCfg.trainX, mCfg.trainY ) )
+    {
+      mResult.errorMessage = QStringLiteral( "Backend training failed" );
+      return false;
+    }
   }
   mFb.setProgress( 30.0 );
   if ( mFb.isCanceled() )

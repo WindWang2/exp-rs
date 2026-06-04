@@ -29,6 +29,8 @@ qt_add_library(qgis_app_classify STATIC
     rs_classification_task.cpp
     # Phase 10A Task 10.9 — accuracy assessment result dialog.
     rs_accuracy_dialog.cpp
+    # Phase 10A.1.3 — load classifier model from disk dialog.
+    rs_classifier_load_dialog.cpp
 )
 
 target_include_directories(qgis_app_classify PUBLIC

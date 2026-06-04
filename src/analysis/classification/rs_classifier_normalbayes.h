@@ -19,6 +19,7 @@ class QGIS_ANALYSIS_EXPORT RsClassifierNormalBayes : public RsClassifierBackend
     QString name() const override { return QStringLiteral( "NormalBayes (最大似然)" ); }
     bool save( const QString &path ) const override;
     bool load( const QString &path ) override;
+    bool isFitted() const override { return mClf && mClf->isTrained(); }
 
   private:
     cv::Ptr<cv::ml::NormalBayesClassifier> mClf;

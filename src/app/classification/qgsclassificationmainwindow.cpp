@@ -7,6 +7,7 @@
 #include "rs_classification_split.h"
 #include "rs_classification_task.h"
 #include "rs_classifier_kmeans.h"
+#include "rs_classifier_load_dialog.h"
 #include "rs_classifier_normalbayes.h"
 #include "rs_classifier_setup_bar.h"
 #include "rs_classifier_svm.h"
@@ -135,6 +136,8 @@ void QgsClassificationMainWindow::setupMenus()
     static_cast<bool ( QgsClassificationMainWindow::* )()>(
       &QgsClassificationMainWindow::openSourceRaster ) );
   mOpenRasterAction->setObjectName( QStringLiteral( "rsClassifyOpenRasterAction" ) );
+  fileMenu->addAction( tr( "Load classifier model..." ), this,
+                       &QgsClassificationMainWindow::loadClassifierModel );
   fileMenu->addAction( tr( "Load ROIs..." ), this, []() {} );
   fileMenu->addAction( tr( "Save ROIs..." ), this, []() {} );
   fileMenu->addSeparator();
@@ -558,48 +561,65 @@ void QgsClassificationMainWindow::applyClassification()
     mClassifierBar->setOutputPath( outPath );
   }
 
-  cv::Mat X, y;
-  if ( !buildTrainingData( bands, X, y ) || X.rows < 10 )
-  {
-    statusBar()->showMessage(
-      tr( "训练样本不足（< 10 像元）— 请先勾画 ROI 或加载已保存样本" ), 6000 );
-    return;
-  }
-
   RsClassificationTask::Config cfg;
   cfg.sourceRaster = mSourceRasterPath;
   cfg.outputRaster = outPath;
   cfg.bandIndices = bands;
-  // Phase 10A review patch — stratified 70/30 split (default ratio comes
-  // from the train-ratio spinbox). testX/testY are reserved for Task 10.9
-  // accuracy assessment.
-  const auto split = RsClassificationSplit::stratifiedSplit(
-    X, y, mClassifierBar->trainRatio() );
-  cfg.trainX = split.trainX;
-  cfg.trainY = split.trainY;
-  cfg.testX = split.testX;
-  cfg.testY = split.testY;
 
+  // Phase 10A.1.3 — class colour table is always built from the current ROI
+  // collection so the output GTiff palette stays consistent across both the
+  // train-from-ROIs flow and the load-from-disk flow.
   const QHash<int, RsClassDef> classDefs = mRois ? mRois->classDefs()
                                                  : QHash<int, RsClassDef>();
   for ( auto it = classDefs.constBegin(); it != classDefs.constEnd(); ++it )
     cfg.classColors[it.key()] = it.value().color();
 
-  switch ( mClassifierBar->currentKind() )
+  if ( mLoadedBackend )
   {
-    case RsClassifierKind::NormalBayes:
-      cfg.backend.reset( new RsClassifierNormalBayes );
-      cfg.algoName = QStringLiteral( "NormalBayes" );
-      break;
-    case RsClassifierKind::SvmRbf:
-      cfg.backend.reset( new RsClassifierSvm );
-      cfg.algoName = QStringLiteral( "SVM_RBF" );
-      break;
-    case RsClassifierKind::KMeans:
-      cfg.backend.reset( new RsClassifierKMeans(
-        std::max( 2, static_cast<int>( classDefs.size() ) ) ) );
-      cfg.algoName = QStringLiteral( "KMeans" );
-      break;
+    // Phase 10A.1.3 — a model was loaded from disk via File → "Load
+    // classifier model...". Consume it (one-shot) and skip training.
+    // testX/testY left empty so RsClassificationTask::run() skips accuracy.
+    cfg.algoName = QStringLiteral( "Loaded (%1)" ).arg( mLoadedBackend->name() );
+    cfg.backend = std::move( mLoadedBackend );
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "使用已加载模型 (跳过训练)" ), 3000 );
+  }
+  else
+  {
+    cv::Mat X, y;
+    if ( !buildTrainingData( bands, X, y ) || X.rows < 10 )
+    {
+      statusBar()->showMessage(
+        tr( "训练样本不足（< 10 像元）— 请先勾画 ROI 或加载已保存样本" ), 6000 );
+      return;
+    }
+
+    // Phase 10A review patch — stratified 70/30 split (default ratio comes
+    // from the train-ratio spinbox). testX/testY are reserved for Task 10.9
+    // accuracy assessment.
+    const auto split = RsClassificationSplit::stratifiedSplit(
+      X, y, mClassifierBar->trainRatio() );
+    cfg.trainX = split.trainX;
+    cfg.trainY = split.trainY;
+    cfg.testX = split.testX;
+    cfg.testY = split.testY;
+
+    switch ( mClassifierBar->currentKind() )
+    {
+      case RsClassifierKind::NormalBayes:
+        cfg.backend.reset( new RsClassifierNormalBayes );
+        cfg.algoName = QStringLiteral( "NormalBayes" );
+        break;
+      case RsClassifierKind::SvmRbf:
+        cfg.backend.reset( new RsClassifierSvm );
+        cfg.algoName = QStringLiteral( "SVM_RBF" );
+        break;
+      case RsClassifierKind::KMeans:
+        cfg.backend.reset( new RsClassifierKMeans(
+          std::max( 2, static_cast<int>( classDefs.size() ) ) ) );
+        cfg.algoName = QStringLiteral( "KMeans" );
+        break;
+    }
   }
 
   const QString algoForLog = cfg.algoName;
@@ -1128,4 +1148,38 @@ void QgsClassificationMainWindow::exportRois()
       ok ? tr( "已导出 ROI: %1" ).arg( QFileInfo( path ).fileName() )
          : tr( "ROI 导出失败: %1" ).arg( path ),
       5000 );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 10A.1.3 — Load classifier model from disk.
+// ---------------------------------------------------------------------------
+
+void QgsClassificationMainWindow::loadClassifierModel()
+{
+  RsClassifierLoadDialog dlg( this );
+  if ( dlg.exec() != QDialog::Accepted )
+    return;
+
+  std::unique_ptr<RsClassifierBackend> backend;
+  switch ( dlg.selectedKind() )
+  {
+    case RsClassifierLoadDialog::BackendKind::NormalBayes:
+      backend = std::make_unique<RsClassifierNormalBayes>();
+      break;
+    case RsClassifierLoadDialog::BackendKind::SvmRbf:
+      backend = std::make_unique<RsClassifierSvm>();
+      break;
+  }
+
+  if ( !backend || !backend->load( dlg.modelPath() ) )
+  {
+    QMessageBox::warning(
+      this, tr( "Load failed" ),
+      tr( "无法加载模型：%1" ).arg( dlg.modelPath() ) );
+    return;
+  }
+  mLoadedBackend = std::move( backend );
+  if ( statusBar() )
+    statusBar()->showMessage(
+      tr( "已加载模型 — 下次 Apply 将跳过训练，直接 predict" ), 0 );
 }
