@@ -894,6 +894,36 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 
 ---
 
+## Phase 10B.0: OTB + ITK Vendored Infrastructure 🟢 **[NEXT — Phase 10B 业务前置]**
+**Goal:** vendor OTB v10 + ITK v5.4 进项目，让用户无需单独安装 ITK / OTB；CMake 选择性编译算法子集；为 Phase 10B (OBIA 业务) 准备 OTB MeanShift segmentation。设计 `docs/superpowers/specs/2026-06-04-otb-infra-design.md`。
+
+**仓库改动:**
+- `git mv qgis_ref/OTB otb_ref`（97MB 重组）
+- `git subtree add --prefix=itk_ref InsightSoftwareConsortium/ITK v5.4.0 --squash`（~300MB 增量）
+- 顶层 `CMakeLists.txt` 加 `option(SICNU_BUILD_OTB)` + ITK/OTB 模块 opt-in 列表
+- `.gitattributes` 标 itk_ref/ otb_ref/ vendored + -text
+- 脚本：`scripts/update_itk.sh` + `scripts/build_with_otb.sh`
+- 文档：CONTRIBUTING.md vendored 库说明
+
+**新建文件:** `tests/test_otb_smoke.cpp`（3 TEST_CASE，SICNU_BUILD_OTB=OFF 时全 SKIP）
+
+**子任务:**
+- [ ] **10B.0.1** OTB 重组（`git mv` + 修复 CMake 路径）
+- [ ] **10B.0.2** ITK 5.4 git subtree + 升级脚本
+- [ ] **10B.0.3** ITK 子集 CMake 配置（~12 模块 ON，首次 `make ITKCommon` 绿）
+- [ ] **10B.0.4** OTB 子集 CMake 配置（~13 模块 ON，关 Qt/Python/Wrapping，首次 `make OTBMeanShift` 绿）
+- [ ] **10B.0.5** sanity 测试 + SICNU_HAS_OTB 宏
+- [ ] **10B.0.6** CI / 文档 / .gitattributes
+
+**Done when:**
+- `cmake -DSICNU_BUILD_OTB=OFF ..` 行为不变
+- `cmake -DSICNU_BUILD_OTB=ON ..` 首次成功 build
+- test_otb_smoke ON=3 PASS / OFF=3 SKIP
+- 总测试 293 → 296+
+- 6 commit + 1 planning files commit
+
+---
+
 ## Phase 12: AI Agent Infrastructure 🟡 **[HIGH — RS AI Agents foundation]**
 **Goal:** Make the processing system agent-accessible via MCP (Model Context Protocol).
 
