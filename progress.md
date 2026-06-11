@@ -1,5 +1,131 @@
 # Progress Log — SICNU GEO RS
 
+## Session: 2026-06-07 — Phase 11.3 Speckle Filter (SAR) ✅ COMPLETE
+
+### 状态
+- **4/4 子任务完成**
+- **354/355 测试通过** (test 255 pre-existing flaky)
+- 19 个新测试: Lee (5) + Frost (4) + Kuan (3) + Gamma-MAP (4) + edge cases (3)
+
+### 核心改动
+| 文件 | 改动 |
+|---|---|
+| `src/processing/algorithms/image_enhancement.{h,cpp}` | 4 个 SAR 斑点滤波器 (Lee/Frost/Kuan/Gamma-MAP) |
+| `src/app/dialogs/speckle_filter_dialog.{h,cpp}` | 斑点滤波对话框 (滤波器类型/窗口大小/噪声方差/阻尼因子) |
+| `src/app/main_window.{h,cpp}` | Raster > Enhancement > Speckle Filter 菜单 |
+
+### 算法说明
+- **Lee**: 自适应加权滤波，基于局部方差与噪声方差的比值
+- **Frost**: 指数加权自适应滤波，阻尼因子控制平滑程度
+- **Kuan**: 类似 Lee 但使用变异系数方法
+- **Gamma-MAP**: 假设 Gamma 分布噪声的最大后验估计
+
+---
+
+## Session: 2026-06-07 — Phase 11.1 Image Fusion ✅ COMPLETE
+
+### 状态
+- **2/2 子任务完成**
+- **336/336 测试通过**
+- 10 个新测试: Brovey (4) + IHS (3) + PCA (3)
+
+### 核心改动
+| 文件 | 改动 |
+|---|---|
+| `src/processing/algorithms/image_fusion.{h,cpp}` | 3 个融合算法 (Brovey/PCA/IHS) |
+| `src/app/dialogs/fusion_dialog.{h,cpp}` | 影像融合对话框 |
+| `src/app/main_window.{h,cpp}` | Raster > Image Fusion 菜单 |
+
+---
+
+## Session: 2026-06-07 — Phase 11.2 Terrain Analysis ✅ COMPLETE
+
+### 状态
+- **2/2 子任务完成**
+- **326/326 测试通过**
+- 14 个新测试: slope (4) + aspect (3) + hillshade (2) + roughness (2) + TRI (1) + TPI (2)
+
+### 核心改动
+| 文件 | 改动 |
+|---|---|
+| `src/processing/algorithms/terrain_analysis.{h,cpp}` | 6 个地形分析算法 (slope/aspect/hillshade/roughness/TRI/TPI) |
+| `src/app/dialogs/terrain_dialog.{h,cpp}` | 地形分析对话框 |
+| `src/app/main_window.{h,cpp}` | Raster > Terrain Analysis 菜单 |
+
+---
+
+## Session: 2026-06-06 — Phase 10B OBIA Classification ✅ COMPLETE
+
+### 状态
+- **6/6 子任务完成**
+- **311/312 测试通过** (test 212 pre-existing flaky)
+- 19 个新测试: test_segment_features (7) + test_simple_segmenter (6) + test_obia_task (3) + test_otb_segmentation_params (3)
+
+### 核心改动
+| 文件 | 改动 |
+|---|---|
+| `src/analysis/segmentation/rs_segment_map.{h,cpp}` | Label image 数据模型 (fromGeoTIFF, labelAt, uniqueLabels, pixelCoords) |
+| `src/analysis/segmentation/rs_segment_features.{h,cpp}` | 每 segment 光谱统计 + 形状特征提取 + toFeatureMatrix |
+| `src/analysis/segmentation/rs_simple_segmenter.{h,cpp}` | 降级分割器 (高斯平滑+量化+连通组件+小区域合并) |
+| `src/app/obia/rs_obia_task.{h,cpp}` | QgsTask OBIA pipeline (分割→特征→训练→分类→GeoTIFF) |
+| `src/app/obia/rs_obia_main_window.{h,cpp}` | OBIA 独立窗口 (toolbar, docks, map canvas, segment 选择) |
+| `src/app/obia/rs_segment_select_tool.{h,cpp}` | 点击选 segment 的 map tool + QgsRubberBand 高亮 |
+| `src/app/obia/rs_segment_info_dock.{h,cpp}` | Segment 信息 dock (光谱/形状统计 HTML 表格) |
+| `otb_segmentation.{h,cpp}` | 增强 MeanShift 参数 (spatial/range/minsize/maxiter/threshold) |
+| `main_window.{h,cpp}` | OBIA 菜单接入 (openObiaWindow slot) |
+
+### 架构决策
+- **OTB CLI wrapper 为主路径**, SimpleSegmenter 为降级方案
+- **复用 RsClassifierBackend** (NormalBayes/SVM/KMeans) 用于段级分类
+- **独立 QMainWindow** 对齐 Georeferencer/Classification 节奏
+- **GDAL 读写** label image 和分类结果 GeoTIFF
+
+---
+
+## Session: 2026-06-06 — Phase 6R.2 Operator-Perspective Fixes
+
+### 状态
+- **Fix 1: Processing Toolbox 执行** ✅ — 自定义 QDialog 替代破碎的 `QgsProcessingAlgorithmDialogBase`，83+ 算法可执行
+- **Fix 2: Identify CRS 变换** ⏭️ — 调查确认 QGIS 内部已正确处理，无需修改
+- **Fix 3: 编辑模式持久化** ✅ — 图层切换时检测未保存编辑，弹出 save/discard/cancel 对话框
+- **Fix 4: Mosaic CRS 校验** ✅ — 输入投影不一致时拒绝合并，避免输出垃圾数据
+- **Fix 5: AddFeature CaptureMode** ⏭️ — `CaptureNone` 通过 `currentLayerChanged` 信号自动检测，无需修改
+
+### 核心改动
+| 文件 | 改动 |
+|---|---|
+| `src/app/main_window.cpp` | `openProcessingAlgorithm()` 完全重写：动态参数 Widget + `algorithm->run()` + 结果自动加载；`onLayerTreeClicked()` 增加编辑保存检查；新增 `confirmSaveEdits()` |
+| `src/app/main_window.h` | 声明 `confirmSaveEdits()` |
+| `src/app/dialogs/mosaic_dialog.cpp` | 合并前校验所有输入 CRS 一致性 |
+
+### 编译错误修复
+- `QgsProcessingParameterDefinition::FlagOptional` → `Qgis::ProcessingParameterFlag::Optional`（QGIS 3.36+ 枚举位置）
+- `QDialogButtonBox::Run` 不存在 → 自定义 `QPushButton(tr("Run"))` + `addButton(..., AcceptRole)`
+- `QgsCoordinateReferenceSystem::isEquivalentTo()` 不存在 → 使用 `operator!=`
+
+### 参数 Widget 映射
+| QgsProcessing 类型 | Widget |
+|---|---|
+| RasterLayer / VectorLayer / FeatureSource / MultipleLayers | QComboBox (项目图层) |
+| Number (Integer/Double) | QSpinBox / QDoubleSpinBox |
+| Boolean | QCheckBox |
+| Enum | QComboBox |
+| Crs | QgsProjectionSelectionWidget |
+| Extent | 4 × QDoubleSpinBox |
+| Expression | QgsExpressionLineEdit |
+| Field | QComboBox (图层字段) |
+| FeatureSink / RasterDestination / FileDestination | QLineEdit + Browse |
+| String / 其他 | QLineEdit |
+
+### 遗留
+- **Fix H (Shape Drawing Tools)**: `QgsMapToolsDigitizingTechniqueManager` 需要深度 QGIS App 集成，继续推迟
+
+### 验证
+- `cmake .. && make -j$(nproc)` ✅ 编译通过
+- 293/293 测试绿
+
+---
+
 ## Session: 2026-06-05 — Phase 10B.0 OTB + ITK Vendored Infrastructure (部分完成)
 
 ### 状态

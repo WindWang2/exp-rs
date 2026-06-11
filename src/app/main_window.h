@@ -32,6 +32,33 @@ class QgsBrowserGuiModel;
 class SpectralProfileWidget;
 class QgsGeoreferencerMainWindow;
 class QgsClassificationMainWindow;
+class QgsAdvancedDigitizingDockWidget;
+class QgsMessageBar;
+class QgsUndoWidget;
+class QgsMapToolSelect;
+class QgsMapToolAddFeature;
+class QgsMapToolMoveFeature;
+class QgsMapToolRotateFeature;
+class QgsMapToolScaleFeature;
+class QgsMapToolOffsetCurve;
+class QgsMapToolReshape;
+class QgsMapToolSplitFeatures;
+class QgsMapToolSplitParts;
+class QgsMapToolSimplify;
+class QgsMapToolReverseLine;
+class QgsMapToolAddRing;
+class QgsMapToolAddPart;
+class QgsMapToolFillRing;
+class QgsMapToolDeletePart;
+class QgsMapToolDeleteRing;
+class QgsMapToolTrimExtendFeature;
+class QgsMapToolChamferFillet;
+class QgsMapToolFeatureArray;
+class QgsVertexTool;
+class QgsFeatureAction;
+class QgsClipboard;
+class QgsAttributeTableDialog;
+class QgsVectorLayer;
 
 /**
  * \brief Custom identify tool that emits results as a signal.
@@ -110,12 +137,17 @@ public slots:
     void openBandMathDialog();
     void openSpectralIndexDialog();
     void openAtmosphericCorrectionDialog();
+    void openMosaicDialog();
+    void openChangeDetectionDialog();
 
     // Enhancement dialogs
     void openContrastStretchDialog();
     void openSpatialFilterDialog();
     void openPcaDialog();
     void openBandRatioDialog();
+    void openSpeckleFilterDialog();
+    void openTerrainDialog();
+    void openFusionDialog();
 
     // CRS preset dialog
     void openCrsPresetDialog();
@@ -125,11 +157,41 @@ public slots:
     void measureDistance();
     void measureArea();
 
+    // Vector editing tools
+    void toggleEditing();
+    void saveEdits();
+    void newVectorLayer();
+    void addFeature();
+    void moveFeature();
+    void rotateFeature();
+    void scaleFeature();
+    void offsetCurve();
+    void reshapeGeometry();
+    void splitFeatures();
+    void splitParts();
+    void simplifyFeature();
+    void reverseLine();
+    void addRing();
+    void addPart();
+    void fillRing();
+    void deletePart();
+    void deleteRing();
+    void trimExtendFeature();
+    void chamferFillet();
+    void featureArray();
+    void vertexTool();
+    void selectFeatures();
+    void openAttributeTable();
+    void deleteSelectedFeatures();
+
     // Georeferencer (Task 11.4.4)
     void openGeoreferencer();
 
     // Classification (Phase 10A Task 10.2)
     void openClassificationWindow();
+
+    // OBIA Classification (Phase 10B Task 10B.5)
+    void openObiaWindow();
 
 private slots:
     void onProjectRead(const QDomDocument &doc);
@@ -155,17 +217,23 @@ private:
     void setupConnections();
 
     QgsLayerTreeGroup *findOrCreateGroup(const QString &name);
+    QgsVectorLayer *currentVectorLayer();
+    void updateEditingUI(QgsVectorLayer *vlayer);
     void loadRasterLayer(const QString &filePath);
     void loadVectorLayer(const QString &filePath);
     void showLayerProperties(QgsMapLayer *layer);
     void refreshCanvasLayers();
     QList<QgsMapLayer*> selectedLayers();
+    QgsMapLayer *activeLayer();
     void openProcessingAlgorithm(const QString &algorithmId);
 
     // Panel state persistence
     void savePanelState();
     void restorePanelState();
     void resetPanelLayout();
+
+    bool confirmSaveEdits(QgsVectorLayer *vl);
+    bool checkUnsavedChanges();
 
     // QGIS C++ components
     QgsMapCanvas *m_mapCanvas = nullptr;
@@ -183,6 +251,37 @@ private:
     CustomIdentifyTool *m_identifyTool = nullptr;
     MeasureTool *m_measureDistanceTool = nullptr;
     MeasureTool *m_measureAreaTool = nullptr;
+
+    // Vector editing map tools
+    QgsMapToolSelect *m_selectTool = nullptr;
+    QgsMapToolAddFeature *m_addFeatureTool = nullptr;
+    QgsMapToolMoveFeature *m_moveFeatureTool = nullptr;
+    QgsMapToolRotateFeature *m_rotateFeatureTool = nullptr;
+    QgsMapToolScaleFeature *m_scaleFeatureTool = nullptr;
+    QgsMapToolOffsetCurve *m_offsetCurveTool = nullptr;
+    QgsMapToolReshape *m_reshapeTool = nullptr;
+    QgsMapToolSplitFeatures *m_splitFeaturesTool = nullptr;
+    QgsMapToolSplitParts *m_splitPartsTool = nullptr;
+    QgsMapToolSimplify *m_simplifyTool = nullptr;
+    QgsMapToolReverseLine *m_reverseLineTool = nullptr;
+    QgsMapToolAddRing *m_addRingTool = nullptr;
+    QgsMapToolAddPart *m_addPartTool = nullptr;
+    QgsMapToolFillRing *m_fillRingTool = nullptr;
+    QgsMapToolDeletePart *m_deletePartTool = nullptr;
+    QgsMapToolDeleteRing *m_deleteRingTool = nullptr;
+    QgsMapToolTrimExtendFeature *m_trimExtendTool = nullptr;
+    QgsMapToolChamferFillet *m_chamferFilletTool = nullptr;
+    QgsMapToolFeatureArray *m_featureArrayTool = nullptr;
+    QgsVertexTool *m_vertexTool = nullptr;
+
+    // Vector editing infrastructure
+    QgsAdvancedDigitizingDockWidget *m_cadDock = nullptr;
+    QgsMessageBar *m_messageBar = nullptr;
+    QgsUndoWidget *m_undoWidget = nullptr;
+    QgsClipboard *m_clipboard = nullptr;
+    QAction *m_toggleEditingAction = nullptr;
+    QAction *m_saveEditsAction = nullptr;
+    QList<QAction *> m_editingToolActions;
 
     // Dock widgets
     QgsDockWidget *m_layersDock = nullptr;
@@ -215,6 +314,9 @@ private:
 
     // Classification window (lazy-constructed) — Phase 10A Task 10.2
     QgsClassificationMainWindow *m_classifyWindow = nullptr;
+
+    // OBIA window (lazy-constructed) — Phase 10B Task 10B.5
+    QMainWindow *m_obiaWindow = nullptr;
 
     friend class LayerTreeMenuProvider;
 

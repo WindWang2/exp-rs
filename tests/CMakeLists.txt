@@ -523,6 +523,40 @@ target_include_directories(test_image_enhancement PRIVATE
 )
 sicnu_discover_tests(test_image_enhancement)
 
+# Terrain analysis tests (Phase 11.2)
+add_executable(test_terrain test_terrain.cpp)
+target_link_libraries(test_terrain PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_terrain PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_terrain)
+
+# Image fusion tests (Phase 11.1)
+add_executable(test_image_fusion test_image_fusion.cpp)
+target_link_libraries(test_image_fusion PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_image_fusion PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_image_fusion)
+
 # PCA tests
 add_executable(test_pca test_pca.cpp)
 target_link_libraries(test_pca PRIVATE
@@ -556,6 +590,23 @@ target_include_directories(test_spatial_filter PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_spatial_filter)
+
+# SAR speckle filter tests (Lee, Frost, Kuan, Gamma-MAP)
+add_executable(test_speckle_filter test_speckle_filter.cpp)
+target_link_libraries(test_speckle_filter PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_speckle_filter PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_speckle_filter)
 
 # Georeferencer least-squares tests
 add_executable(test_least_squares test_least_squares.cpp)
@@ -1358,6 +1409,88 @@ if(TARGET qgis_app_classify)
   set_target_properties(test_classification_e2e PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(test_classification_e2e)
 endif()
+
+# Phase 10B.1 — Segment data model + feature extraction tests
+add_executable(test_segment_features test_segment_features.cpp)
+target_link_libraries(test_segment_features PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+)
+target_include_directories(test_segment_features PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+if(SICNU_HAS_OPENCV)
+  target_link_libraries(test_segment_features PRIVATE ${OpenCV_LIBS})
+  target_include_directories(test_segment_features PRIVATE ${OpenCV_INCLUDE_DIRS})
+endif()
+sicnu_discover_tests(test_segment_features)
+
+# Phase 10B.4 — OBIA classification task tests (OpenCV required)
+if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
+  add_executable(test_obia_task test_obia_task.cpp)
+  target_link_libraries(test_obia_task PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    qgis_analysis
+    qgis_app_obia
+    GDAL::GDAL
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_obia_task PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${CMAKE_SOURCE_DIR}/src/analysis/segmentation
+    ${CMAKE_SOURCE_DIR}/src/app/obia
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_obia_task PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_obia_task)
+endif()
+
+# Phase 10B.3 — Simple segmenter fallback tests
+add_executable(test_simple_segmenter test_simple_segmenter.cpp)
+target_link_libraries(test_simple_segmenter PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+)
+target_include_directories(test_simple_segmenter PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_simple_segmenter)
+
+# Phase 10B.2 — OTB segmentation parameter tests
+add_executable(test_otb_segmentation_params test_otb_segmentation_params.cpp)
+target_link_libraries(test_otb_segmentation_params PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  sicnu_processing
+)
+target_include_directories(test_otb_segmentation_params PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_otb_segmentation_params)
 
 # Phase 10B.0 — OTB smoke test (3 TEST_CASE guarded by SICNU_HAS_OTB)
 if(SICNU_HAS_OTB)

@@ -1,0 +1,250 @@
+// src/app/dialogs/speckle_filter_dialog.cpp
+#include "speckle_filter_dialog.h"
+#include "processing/algorithms/image_enhancement.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
+
+#include <raster/qgsrasterlayer.h>
+
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QLineEdit>
+#include <QComboBox>
+#include <QPushButton>
+#include <QDoubleSpinBox>
+#include <QFileDialog>
+#include <QMessageBox>
+
+#include <qgsmessagelog.h>
+#include <qgis.h>
+
+#include <gdal.h>
+#include <cpl_error.h>
+#include <cpl_string.h>
+
+SpeckleFilterDialog::SpeckleFilterDialog(QWidget *parent)
+    : QDialog(parent)
+{
+    setWindowTitle(tr("Speckle Filter (SAR)"));
+    setupUi();
+}
+
+void SpeckleFilterDialog::setRasterLayer(QgsRasterLayer *layer)
+{
+    m_rasterLayer = layer;
+}
+
+void SpeckleFilterDialog::setupUi()
+{
+    auto *mainLayout = new QVBoxLayout(this);
+
+    // Filter type selection
+    auto *typeLayout = new QHBoxLayout();
+    typeLayout->addWidget(new QLabel(tr("Filter:"), this));
+    m_filterTypeCombo = new QComboBox(this);
+    m_filterTypeCombo->addItems({tr("Lee"), tr("Frost"), tr("Kuan"), tr("Gamma-MAP")});
+    typeLayout->addWidget(m_filterTypeCombo);
+    mainLayout->addLayout(typeLayout);
+
+    // Kernel size selection
+    auto *kernelLayout = new QHBoxLayout();
+    kernelLayout->addWidget(new QLabel(tr("Window Size:"), this));
+    m_kernelSizeCombo = new QComboBox(this);
+    m_kernelSizeCombo->addItems({tr("3x3"), tr("5x5"), tr("7x7")});
+    m_kernelSizeCombo->setCurrentIndex(1); // default 5x5
+    kernelLayout->addWidget(m_kernelSizeCombo);
+    mainLayout->addLayout(kernelLayout);
+
+    // Noise variance (for Lee, Kuan, Gamma-MAP)
+    auto *noiseLayout = new QHBoxLayout();
+    noiseLayout->addWidget(new QLabel(tr("Noise Variance:"), this));
+    m_noiseVarSpin = new QDoubleSpinBox(this);
+    m_noiseVarSpin->setRange(0.001, 10.0);
+    m_noiseVarSpin->setValue(1.0);
+    m_noiseVarSpin->setSingleStep(0.1);
+    m_noiseVarSpin->setDecimals(3);
+    noiseLayout->addWidget(m_noiseVarSpin);
+    mainLayout->addLayout(noiseLayout);
+
+    // Damping factor (Frost only)
+    auto *dampingLayout = new QHBoxLayout();
+    m_dampingLabel = new QLabel(tr("Damping Factor:"), this);
+    dampingLayout->addWidget(m_dampingLabel);
+    m_dampingSpin = new QDoubleSpinBox(this);
+    m_dampingSpin->setRange(0.1, 10.0);
+    m_dampingSpin->setValue(2.0);
+    m_dampingSpin->setSingleStep(0.5);
+    m_dampingSpin->setDecimals(1);
+    dampingLayout->addWidget(m_dampingSpin);
+    mainLayout->addLayout(dampingLayout);
+
+    // Initially show/hide based on filter type
+    connect(m_filterTypeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &SpeckleFilterDialog::onFilterTypeChanged);
+    onFilterTypeChanged(0);
+
+    // Output file
+    auto *outLayout = new QHBoxLayout();
+    outLayout->addWidget(new QLabel(tr("Output:"), this));
+    m_outputEdit = new QLineEdit(this);
+    outLayout->addWidget(m_outputEdit);
+    auto *browseBtn = new QPushButton(tr("Browse..."), this);
+    connect(browseBtn, &QPushButton::clicked, this, &SpeckleFilterDialog::onBrowseOutput);
+    outLayout->addWidget(browseBtn);
+    mainLayout->addLayout(outLayout);
+
+    // Buttons
+    auto *btnLayout = new QHBoxLayout();
+    btnLayout->addStretch();
+    m_runButton = new QPushButton(tr("Run"), this);
+    connect(m_runButton, &QPushButton::clicked, this, &SpeckleFilterDialog::onRun);
+    btnLayout->addWidget(m_runButton);
+    auto *cancelBtn = new QPushButton(tr("Cancel"), this);
+    connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
+    btnLayout->addWidget(cancelBtn);
+    mainLayout->addLayout(btnLayout);
+}
+
+void SpeckleFilterDialog::onFilterTypeChanged(int index)
+{
+    // Frost uses damping factor; others use noise variance
+    bool isFrost = (index == 1);
+    m_dampingLabel->setVisible(isFrost);
+    m_dampingSpin->setVisible(isFrost);
+    m_noiseVarSpin->setVisible(!isFrost);
+
+    // Update noise variance label
+    auto *noiseLabel = qobject_cast<QLabel *>(m_noiseVarSpin->parentWidget()->layout()->itemAt(0)->widget());
+    if (noiseLabel) {
+        noiseLabel->setVisible(!isFrost);
+    }
+}
+
+void SpeckleFilterDialog::onBrowseOutput()
+{
+    QString path = QFileDialog::getSaveFileName(this, tr("Output File"), QString(),
+                                                tr("GeoTIFF (*.tif)"));
+    if (!path.isEmpty())
+        m_outputEdit->setText(path);
+}
+
+void SpeckleFilterDialog::onRun()
+{
+    // Validate inputs
+    QString outputPath = m_outputEdit->text().trimmed();
+    if (outputPath.isEmpty()) {
+        QMessageBox::warning(this, tr("Speckle Filter"), tr("Please specify an output file."));
+        return;
+    }
+
+    if (!m_rasterLayer || !m_rasterLayer->isValid()) {
+        QMessageBox::warning(this, tr("Speckle Filter"), tr("No valid raster layer selected."));
+        return;
+    }
+
+    // Open source dataset
+    GdalDatasetWrapper srcDataset;
+    if (!srcDataset.open(m_rasterLayer->dataProvider()->dataSourceUri())) {
+        QgsMessageLog::logMessage(tr("Failed to open source file: %1").arg(srcDataset.lastError()),
+                                  "speckle_filter", Qgis::MessageLevel::Critical);
+        return;
+    }
+
+    int width = srcDataset.width();
+    int height = srcDataset.height();
+    int bandCount = srcDataset.bandCount();
+    size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+
+    // Determine kernel size
+    int kernelSize = 3;
+    switch (m_kernelSizeCombo->currentIndex()) {
+    case 0: kernelSize = 3; break;
+    case 1: kernelSize = 5; break;
+    case 2: kernelSize = 7; break;
+    }
+
+    int filterIndex = m_filterTypeCombo->currentIndex();
+    float noiseVar = static_cast<float>(m_noiseVarSpin->value());
+    float damping = static_cast<float>(m_dampingSpin->value());
+
+    // Read and filter each band
+    std::vector<std::vector<float>> outputBands(bandCount, std::vector<float>(pixelCount));
+
+    for (int b = 0; b < bandCount; ++b) {
+        std::vector<float> bandData(pixelCount);
+        if (!srcDataset.readBandData(b + 1, bandData.data(), width, height)) {
+            QgsMessageLog::logMessage(tr("Failed to read band %1.").arg(b + 1),
+                                      "speckle_filter", Qgis::MessageLevel::Critical);
+            return;
+        }
+
+        switch (filterIndex) {
+        case 0: // Lee
+            ImageEnhancement::leeFilter(bandData.data(), outputBands[b].data(),
+                                        width, height, kernelSize, noiseVar);
+            break;
+        case 1: // Frost
+            ImageEnhancement::frostFilter(bandData.data(), outputBands[b].data(),
+                                          width, height, kernelSize, damping);
+            break;
+        case 2: // Kuan
+            ImageEnhancement::kuanFilter(bandData.data(), outputBands[b].data(),
+                                         width, height, kernelSize, noiseVar);
+            break;
+        case 3: // Gamma-MAP
+            ImageEnhancement::gammaMapFilter(bandData.data(), outputBands[b].data(),
+                                             width, height, kernelSize, noiseVar);
+            break;
+        }
+    }
+
+    // Create output file using GDAL
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    if (!driver) {
+        QgsMessageLog::logMessage(tr("Failed to get GeoTIFF driver."),
+                                  "speckle_filter", Qgis::MessageLevel::Critical);
+        return;
+    }
+
+    char **options = nullptr;
+    options = CSLSetNameValue(options, "COMPRESS", "LZW");
+    GDALDatasetH dstDataset = GDALCreate(driver, outputPath.toUtf8().constData(),
+                                          width, height, bandCount, GDT_Float32, options);
+    CSLDestroy(options);
+
+    if (!dstDataset) {
+        QgsMessageLog::logMessage(tr("Failed to create output file."),
+                                  "speckle_filter", Qgis::MessageLevel::Critical);
+        return;
+    }
+
+    // Copy geotransform and projection from source
+    std::array<double, 6> gt = srcDataset.geoTransform();
+    GDALSetGeoTransform(dstDataset, gt.data());
+    GDALSetProjection(dstDataset, srcDataset.projection().toUtf8().constData());
+
+    // Write all output bands
+    for (int b = 0; b < bandCount; ++b) {
+        GDALRasterBandH dstBand = GDALGetRasterBand(dstDataset, b + 1);
+        if (!dstBand) {
+            QgsMessageLog::logMessage(tr("Failed to get output band %1.").arg(b + 1),
+                                      "speckle_filter", Qgis::MessageLevel::Critical);
+            GDALClose(dstDataset);
+            return;
+        }
+        CPLErr err = GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
+                                   outputBands[b].data(), width, height, GDT_Float32, 0, 0);
+        if (err != CE_None) {
+            QgsMessageLog::logMessage(tr("Failed to write output band %1.").arg(b + 1),
+                                      "speckle_filter", Qgis::MessageLevel::Critical);
+            GDALClose(dstDataset);
+            return;
+        }
+    }
+
+    GDALClose(dstDataset);
+
+    QgsMessageLog::logMessage(tr("Speckle filter completed. Output: %1").arg(outputPath),
+                              "speckle_filter", Qgis::MessageLevel::Success);
+    accept();
+}

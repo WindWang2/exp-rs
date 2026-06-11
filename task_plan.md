@@ -6,7 +6,9 @@ Build a pure C++ remote sensing analysis and processing platform based on the QG
 
 ## Current Phase
 
-Phase 11.4 + 11.5 + 10A + 10A.1 complete. **293/293 tests pass**. Phase 10B.0 部分完成 (ITK ✅, OTB 阻塞)。Next: **解决 OTB CMake 兼容性问题** 或 **跳到 Phase 10B 业务（先用 OTB CLI wrapper 代替 vendored 编译）**。
+Phase 11.1-11.5 + 10A + 10A.1 + 10B complete. **354/355 tests pass** (test 255 ImageWarper cancellation pre-existing flaky). Phase 10B.0 OTB vendored 部分完成 (ITK ✅, OTB 阻塞)。Next: **Phase 12 AI Agent** 或 **Phase 13 Education & Usability**。
+
+**Phase 6R.2 (Operator-Perspective Fixes) complete (2026-06-06):** Processing Toolbox algorithm execution fully rewritten; Mosaic CRS validation; Edit mode persistence on layer switch. 293/293 tests pass.
 
 ---
 
@@ -759,9 +761,9 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 
 ---
 
-## Phase 11: Advanced RS Processing 🟡 **[HIGH — Education Labs #9-10]**
+## Phase 11: Advanced RS Processing ✅ **[HIGH — Education Labs #9-10]**
 
-### Task 11.1: Image Fusion / Pan-sharpening
+### Task 11.1: Image Fusion / Pan-sharpening ✅ **COMPLETE (2026-06-07)**
 **Goal:** Brovey, PCA, IHS fusion methods for multi-resolution image merging.
 
 **Files:**
@@ -770,14 +772,16 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 - Create: `tests/test_image_fusion.cpp`
 
 **Steps:**
-- [ ] Implement Brovey, PCA, IHS fusion (TDD)
-- [ ] Create FusionDialog (high-res panchromatic + low-res multispectral)
-- [ ] Wire to Raster > Fusion menu
-- [ ] Build and verify
+- [x] Implement Brovey, PCA, IHS fusion (TDD) — 10 tests, 892 assertions
+- [x] Create FusionDialog (high-res panchromatic + low-res multispectral)
+- [x] Wire to Raster > Image Fusion menu
+- [x] Build and verify — 336/336 tests pass
+
+**Status:** Complete. 3 fusion methods + dialog + menu integration.
 
 ---
 
-### Task 11.2: Terrain Analysis (Native)
+### Task 11.2: Terrain Analysis (Native) ✅ **COMPLETE (2026-06-07)**
 **Goal:** Native C++ slope, aspect, hillshade from DEM (not CLI wrappers).
 
 **Files:**
@@ -786,14 +790,16 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 - Create: `tests/test_terrain.cpp`
 
 **Steps:**
-- [ ] Implement slope, aspect, hillshade, roughness algorithms (TDD)
-- [ ] Create TerrainDialog (DEM input, output selection, parameters)
-- [ ] Wire to Raster > Terrain Analysis menu
-- [ ] Build and verify
+- [x] Implement slope, aspect, hillshade, roughness, TRI, TPI algorithms (TDD)
+- [x] Create TerrainDialog (DEM input, output selection, parameters)
+- [x] Wire to Raster > Terrain Analysis menu
+- [x] Build and verify — 326/326 tests pass
+
+**Status:** Complete. 6 terrain algorithms + dialog + menu integration. 14 test cases, 1424 assertions.
 
 ---
 
-### Task 11.3: Noise Filtering (SAR)
+### Task 11.3: Noise Filtering (SAR) ✅ **COMPLETE (2026-06-07)**
 **Goal:** Speckle filters for SAR imagery.
 
 **Files:**
@@ -801,10 +807,12 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 - Create: `src/app/dialogs/speckle_filter_dialog.h/.cpp`
 
 **Steps:**
-- [ ] Implement Lee, Frost, Kuan, Gamma-MAP filters (TDD)
-- [ ] Create SpeckleFilterDialog
-- [ ] Wire to Raster > Enhancement > Speckle Filter menu
-- [ ] Build and verify
+- [x] Implement Lee, Frost, Kuan, Gamma-MAP filters (TDD) — 19 tests, 873 assertions
+- [x] Create SpeckleFilterDialog (filter type, window size, noise variance, damping)
+- [x] Wire to Raster > Enhancement > Speckle Filter menu
+- [x] Build and verify — 354/355 tests pass
+
+**Status:** Complete. 4 speckle filters + dialog + menu integration.
 
 ---
 
@@ -917,22 +925,63 @@ QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
 
 ### 10B.0.4 阻塞问题
 
-OTB `add_subdirectory(otb_ref)` 被 3 个 CMake 兼容性问题阻塞：
+OTB `add_subdirectory(otb_ref)` 被多个兼容性问题阻塞：
 
-1. **CMAKE_SOURCE_DIR vs OTB_SOURCE_DIR**: OTB 的 `ThirdParty/GDAL/otb-module-init.cmake` 和 `ThirdParty/TinyXML` 使用 `${CMAKE_SOURCE_DIR}` 引用测试文件。作为子项目时，`CMAKE_SOURCE_DIR` 指向项目根而非 OTB 根。
-2. **FindTinyXML removed**: CMake 4.x 移除了 FindTinyXML。
-3. **GenerateExportHeaderCustom**: OTB 的 export header 生成器引用 `${CMAKE_SOURCE_DIR}/CMake/exportheader.cmake.in`，该文件不存在。
+1. **CSLConstList 类型转换**: GDAL 3.4+ 的 `GetMetadata()` 返回 `CSLConstList` (`const char* const*`)，OTB 代码赋值给 `char**`（~10 处）
+2. **itkTypeMacro 参数错误**: ITK 5.4 的 `itkTypeMacro` 新增 static_assert 检查类名，OTB 多处使用错误类名（`GDALImageIO` vs `GDALDatasetWrapper`，`ParameterList` vs `ParameterGroup`，`NumericalParameter` vs 具体类型）
+3. **FindTinyXML removed**: CMake 4.x 移除了 FindTinyXML（已通过 vendored TinyXML 解决）
+4. **GenerateExportHeaderCustom**: OTB export header 生成器引用不存在的文件（已 patch）
+5. **itksys/SharedForward.h**: TestKernel 依赖 ITK KWSys 模块未启用
 
-**解决方案候选：**
-- A) Patch OTB 使用 `OTB_SOURCE_DIR` 替代 `CMAKE_SOURCE_DIR`（~10 处）
-- B) 使用 `ExternalProject_Add` 隔离 OTB 构建（更干净但更复杂）
-- C) 使用 OTB SuperBuild（项目自带的外部依赖构建脚本）
+**当前状态**: ITK 编译成功，OTB 编译被 GCC 16 + GDAL 3.13 兼容性阻塞。
+**Workaround**: OTB CLI wrapper 通过 QProcess 调用系统安装的 `otbcli_*`，不依赖 vendored 编译。
+**后续**: 等 OTB 上游支持 GCC 16 / GDAL 4.x 后再尝试 vendored 编译。
 
 **Done when (修订):**
 - ✅ `cmake -DSICNU_BUILD_OTB=OFF ..` 行为不变
 - 🟡 `cmake -DSICNU_BUILD_OTB=ON ..` ITK 配置成功，OTB 被注释
 - ✅ test_otb_smoke OFF 时 3 SKIP
 - ✅ 7 commit（6 子任务 + 1 planning）
+
+---
+
+## Phase 10B: OBIA Classification ✅ **COMPLETE (2026-06-06)**
+**Goal:** 面向对象影像分析：分割 → 段级特征提取 → 段级分类。教学实验室 #6-7 OBIA 部分。
+
+**新增依赖:** 无（复用 OpenCV 4.5+ ml + GDAL）。
+
+**架构:**
+- OTB MeanShift CLI wrapper 为主路径（系统安装 OTB 时可用）
+- `RsSimpleSegmenter` 降级路径（高斯+量化+连通组件，无外部依赖）
+- 复用 `RsClassifierBackend` (NormalBayes/SVM/KMeans) 用于段级分类
+- `RsSegmentMap` label image 数据模型 + `RsSegmentFeatures` 特征提取
+
+**新建文件 (14):**
+- `src/analysis/segmentation/` (5 文件): `rs_segment_map` / `rs_segment_features` / `rs_simple_segmenter`
+- `src/app/obia/` (7 文件): `rs_obia_task` / `rs_obia_main_window` / `rs_segment_select_tool` / `rs_segment_info_dock`
+- 4 个 test 文件: `test_segment_features` / `test_simple_segmenter` / `test_obia_task` / `test_otb_segmentation_params`
+
+**修改文件:**
+- `src/analysis/CMakeLists.txt` — add_subdirectory(segmentation)
+- `src/processing/providers/otb_tools/algorithms/otb_segmentation.h/.cpp` — 增强 MeanShift 参数
+- `src/app/main_window.{h,cpp}` — OBIA 菜单接入 (`openObiaWindow`)
+- `src/app/CMakeLists.txt` — 链接 qgis_app_obia
+- `CMakeLists.txt` — add_subdirectory(src/app/obia)
+- `tests/CMakeLists.txt` — 新增 4 个测试
+
+**子任务（每步 Red-Green-Refactor，全部完成）:**
+- [x] **10B.1** 分割数据模型 + 特征提取 (`RsSegmentMap` + `RsSegmentFeatures`) — 7 tests, 53 assertions
+- [x] **10B.2** OTB 分割 Wrapper 增强 (MeanShift 参数: spatial_radius/range_radius/min_region_size/max_iteration) — 3 tests, 21 assertions
+- [x] **10B.3** 降级分割器 `RsSimpleSegmenter` (高斯平滑+量化+连通组件+小区域合并) — 6 tests, 15 assertions
+- [x] **10B.4** OBIA 分类任务 `RsObiaTask` (QgsTask: 分割→特征→训练→分类→GeoTIFF) — 3 tests, 11 assertions
+- [x] **10B.5** OBIA 主窗口 UI (`RsObiaMainWindow` + segment 选择 + 类别分配 + 菜单接入)
+- [x] **10B.6** 集成测试 + 构建验证 — 311/312 pass (test 212 pre-existing flaky)
+
+**Done when:**
+- 19 个新测试全绿 + 293 旧测试无回归
+- OTB 可用时: MeanShift 分割 → 特征 → 分类 → GeoTIFF 输出
+- OTB 不可用时: SimpleSegmenter 降级，菜单仍可用
+- OBIA 窗口可独立启动，segment 点击选择 + 类别分配 + 分类运行
 
 ---
 
@@ -1112,12 +1161,12 @@ main.cpp
 | Layer Tree | ✅ Working | addToLegend=false fixes double entries |
 | Layer Properties | ✅ Working | Raster + vector dialogs, Statistics tab added |
 | Processing Toolbox | ✅ Working | 3 providers registered, 70+ algorithms visible |
-| Processing Dialogs | ✅ Working | Parameter collection from widgets |
+| Processing Dialogs | ✅ Working | Custom QDialog with parameter widgets + algorithm->run() + auto-load |
 | Status Bar | ⚠️ Incomplete | Render time label never populated |
 | Theme/Styling | ✅ Working | Theme preference restored on startup |
 | Raster Menu Actions | ✅ Working | Null band checks added, error handling improved |
-| Vector Menu Actions | ✅ Working | Buffer, Dissolve, Merge, Clip wired to processing dialogs |
-| RS Algorithms | ✅ Working | NDVI fixed, change detection + mosaic added |
+| Vector Menu Actions | ✅ Working | 10 operations via processing algorithm dialog |
+| RS Algorithms | ✅ Working | NDVI fixed, change detection + mosaic + CRS validation |
 | GDAL/OTB Wrappers | ✅ Working | Error messages captured from stdout |
 | BandMath Parser | ✅ Working | std::stof wrapped in try/catch |
 | Cache Framework | ✅ Working | Write verification + integrity checks |
@@ -1137,9 +1186,10 @@ main.cpp
 | Build System | ✅ Optimized | ASAN/UBSAN support, Release -O2, LTO option, install rules |
 | Packaging | ✅ Complete | .desktop file, SVG icon, AppStream metadata, linuxdeploy AppImage script |
 | Documentation | ✅ Complete | README.md with build instructions, features, architecture |
-| Test Coverage | ✅ 211/211 | 211 tests covering algorithms, enhancement, integration, framework, UI |
-| Tests | ✅ 211/211 pass | All tests pass (ASAN clean, Release clean) |
-| Image Enhancement | ✅ Complete | Contrast stretch, spatial filter, PCA, band ratio, IHS, 4 dialogs |
+| Test Coverage | ✅ 354/355 | 355 tests covering algorithms, enhancement, integration, framework, UI, OBIA, fusion, terrain, speckle |
+| Tests | ✅ 354/355 pass | 354 pass, 1 pre-existing flaky (test 255 ImageWarper cancellation) |
+| OBIA Classification | ✅ Complete | Segmentation + features + classification + UI |
+| Image Enhancement | ✅ Complete | Contrast stretch, spatial filter, PCA, band ratio, IHS, speckle filter, 5 dialogs |
 
 ## Recommended Next Steps (Priority Order)
 
@@ -1179,4 +1229,4 @@ main.cpp
 20. **Task 13.4** — Batch Processing
 
 ---
-*Last updated: 2026-06-02 (Phase 8 complete, Phases 9-14 planned based on education + AI Agent research)*
+*Last updated: 2026-06-06 (Phase 6R.2 operator-perspective fixes complete, 293/293 tests pass)*

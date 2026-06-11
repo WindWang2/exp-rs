@@ -40,6 +40,16 @@ public:
     static void sobelFilter(const float *input, float *output, int width, int height);
     static void laplacianFilter(const float *input, float *output, int width, int height);
 
+    // SAR speckle filters
+    static void leeFilter(const float *input, float *output, int width, int height,
+                          int kernelSize = 5, float noiseVariance = 1.0f);
+    static void frostFilter(const float *input, float *output, int width, int height,
+                            int kernelSize = 5, float damping = 2.0f);
+    static void kuanFilter(const float *input, float *output, int width, int height,
+                           int kernelSize = 5, float noiseVariance = 1.0f);
+    static void gammaMapFilter(const float *input, float *output, int width, int height,
+                               int kernelSize = 5, float noiseVariance = 1.0f);
+
 private:
     static void computeStats(const float *data, size_t count, float nodata,
                              float &min, float &max, float &mean, float &stddev);

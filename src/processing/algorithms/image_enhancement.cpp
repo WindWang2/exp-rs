@@ -267,6 +267,203 @@ void ImageEnhancement::laplacianFilter(const float *input, float *output, int wi
     convolve(input, output, width, height, laplacian, 3);
 }
 
+// ---- SAR Speckle Filters ----
+// All speckle filters follow the same pattern:
+// 1. For each pixel, compute local mean and variance in a window
+// 2. Estimate noise characteristics
+// 3. Adaptively weight between original pixel and local mean
+
+// Helper: compute local mean and variance for a pixel
+static void localStats(const float *input, int width, int height,
+                       int cx, int cy, int kernelSize,
+                       float &mean, float &variance)
+{
+    int half = kernelSize / 2;
+    double sum = 0.0;
+    double sumSq = 0.0;
+    int count = 0;
+
+    for (int dy = -half; dy <= half; dy++) {
+        for (int dx = -half; dx <= half; dx++) {
+            int x = std::clamp(cx + dx, 0, width - 1);
+            int y = std::clamp(cy + dy, 0, height - 1);
+            float val = input[y * width + x];
+            sum += val;
+            sumSq += val * val;
+            count++;
+        }
+    }
+
+    mean = static_cast<float>(sum / count);
+    variance = static_cast<float>(sumSq / count - mean * mean);
+    if (variance < 0.0f) variance = 0.0f; // numerical precision
+}
+
+void ImageEnhancement::leeFilter(const float *input, float *output,
+                                  int width, int height,
+                                  int kernelSize, float noiseVariance)
+{
+    // Lee filter: adaptive weighted filter
+    // output = mean + weight * (pixel - mean)
+    // weight = localVar / (localVar + noiseVariance)
+    // When local variance << noise variance: weight → 0, output → mean (strong smoothing)
+    // When local variance >> noise variance: weight → 1, output → pixel (preserve detail)
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            float mean, localVar;
+            localStats(input, width, height, x, y, kernelSize, mean, localVar);
+
+            float pixel = input[y * width + x];
+
+            if (localVar <= 0.0f) {
+                // Uniform region — use mean
+                output[y * width + x] = mean;
+            } else {
+                float weight = localVar / (localVar + noiseVariance);
+                output[y * width + x] = mean + weight * (pixel - mean);
+            }
+        }
+    }
+}
+
+void ImageEnhancement::frostFilter(const float *input, float *output,
+                                    int width, int height,
+                                    int kernelSize, float damping)
+{
+    // Frost filter: exponentially weighted adaptive filter
+    // weight = exp(-damping * distance * localVar / mean^2)
+    // Higher damping = more smoothing
+    // Uses coefficient of variation (CV = sqrt(var)/mean) to adapt
+
+    int half = kernelSize / 2;
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            float mean, localVar;
+            localStats(input, width, height, x, y, kernelSize, mean, localVar);
+
+            // Compute coefficient of variation squared
+            float cvSq = (mean > 0.0f) ? (localVar / (mean * mean)) : 0.0f;
+
+            double sumWeighted = 0.0;
+            double sumWeight = 0.0;
+
+            for (int dy = -half; dy <= half; dy++) {
+                for (int dx = -half; dx <= half; dx++) {
+                    int nx = std::clamp(x + dx, 0, width - 1);
+                    int ny = std::clamp(y + dy, 0, height - 1);
+                    float neighbor = input[ny * width + nx];
+
+                    // Distance from center pixel
+                    float dist = std::sqrt(static_cast<float>(dx * dx + dy * dy));
+
+                    // Weight: exp(-damping * distance * CV^2)
+                    float weight = std::exp(-damping * dist * cvSq);
+
+                    sumWeighted += weight * neighbor;
+                    sumWeight += weight;
+                }
+            }
+
+            output[y * width + x] = (sumWeight > 0.0)
+                ? static_cast<float>(sumWeighted / sumWeight)
+                : mean;
+        }
+    }
+}
+
+void ImageEnhancement::kuanFilter(const float *input, float *output,
+                                   int width, int height,
+                                   int kernelSize, float noiseVariance)
+{
+    // Kuan filter: similar to Lee but with different weighting
+    // Uses coefficient of variation approach
+    // Cu = noise coefficient of variation (from noiseVariance)
+    // Cl = local coefficient of variation = localVar / mean^2
+    // weight = max(0, (1 - Cu^2/Cl^2)) / (1 + Cu^2)
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            float mean, localVar;
+            localStats(input, width, height, x, y, kernelSize, mean, localVar);
+
+            float pixel = input[y * width + x];
+
+            if (localVar <= 0.0f || mean <= 0.0f) {
+                output[y * width + x] = mean;
+                continue;
+            }
+
+            // Cu^2: noise variance normalized by mean^2
+            // For multiplicative noise model: Cu^2 = noiseVariance (given as variance of speckle)
+            float cuSq = noiseVariance;
+
+            // Cl^2: local coefficient of variation squared
+            float clSq = localVar / (mean * mean);
+
+            float weight;
+            if (clSq <= cuSq) {
+                // Local variation less than noise → full smoothing
+                weight = 0.0f;
+            } else {
+                weight = (1.0f - cuSq / clSq) / (1.0f + cuSq);
+            }
+
+            output[y * width + x] = mean + weight * (pixel - mean);
+        }
+    }
+}
+
+void ImageEnhancement::gammaMapFilter(const float *input, float *output,
+                                       int width, int height,
+                                       int kernelSize, float noiseVariance)
+{
+    // Gamma-MAP filter: Maximum A Posteriori for Gamma distributed speckle
+    // Assumes multiplicative noise model: observed = true * speckle
+    // For Gamma distributed speckle with L looks:
+    //   Cu^2 = 1/L (noise variance)
+    //   Cl^2 = localVar / mean^2 (local variance)
+    //   alpha = (1 + Cu^2) / (Cl^2 - Cu^2)
+    // When Cl^2 <= Cu^2: output = mean (homogeneous region)
+    // When alpha > 0: output = ((alpha - L - 1) * mean + sqrt(mean^2 * (alpha - L - 1)^2 + 4 * alpha * L * pixel)) / (2 * alpha)
+    // Simplified: weight = max(0, 1 - Cu^2/Cl^2), output = mean + weight * (pixel - mean)
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            float mean, localVar;
+            localStats(input, width, height, x, y, kernelSize, mean, localVar);
+
+            float pixel = input[y * width + x];
+
+            if (localVar <= 0.0f || mean <= 0.0f) {
+                output[y * width + x] = mean;
+                continue;
+            }
+
+            float cuSq = noiseVariance;
+            float clSq = localVar / (mean * mean);
+
+            if (clSq <= cuSq) {
+                // Homogeneous region — smooth fully
+                output[y * width + x] = mean;
+            } else {
+                // Heterogeneous region — preserve structure
+                float alpha = (1.0f + cuSq) / (clSq - cuSq);
+                // Ensure alpha is positive
+                if (alpha < 0.0f) alpha = 0.0f;
+
+                // MAP estimate
+                float a = alpha;
+                float b = (alpha - 1.0f) * mean; // simplified from (alpha - L - 1)
+                float discriminant = b * b + 4.0f * a * pixel;
+                if (discriminant < 0.0f) discriminant = 0.0f;
+                output[y * width + x] = (b + std::sqrt(discriminant)) / (2.0f * a);
+            }
+        }
+    }
+}
+
 // ---- Band ratio ----
 
 void ImageEnhancement::bandRatio(const float *band1, const float *band2,
