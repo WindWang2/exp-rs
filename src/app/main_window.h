@@ -104,6 +104,8 @@ public:
     void initLayerTree();
 
     QgsMapCanvas *mapCanvas() const { return m_mapCanvas; }
+    QgsMapLayer *activeLayer();
+    QList<QgsMapLayer*> selectedLayers();
 
 public slots:
     void addRasterLayer();
@@ -223,8 +225,6 @@ private:
     void loadVectorLayer(const QString &filePath);
     void showLayerProperties(QgsMapLayer *layer);
     void refreshCanvasLayers();
-    QList<QgsMapLayer*> selectedLayers();
-    QgsMapLayer *activeLayer();
     void openProcessingAlgorithm(const QString &algorithmId);
 
     // Panel state persistence

@@ -1,6 +1,7 @@
 add_executable(sicnu_geo_rs
     main.cpp
     main_window.cpp
+    main_window_processing.cpp
     layer_tree_menu.cpp
     crs_presets.cpp
     log_panel.cpp
