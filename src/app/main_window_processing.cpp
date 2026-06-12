@@ -16,6 +16,7 @@
 #include "dialogs/change_detection_dialog.h"
 #include "dialogs/crs_preset_dialog.h"
 #include "dialogs/comparison_dialog.h"
+#include "dialogs/batch_processing_dialog.h"
 #include "dialogs/sicnu_algorithm_dialog.h"
 
 #include <qgsapplication.h>
@@ -384,5 +385,15 @@ void QgisDesktopWindow::setLayerCrsFromPreset()
 void QgisDesktopWindow::openComparisonDialog()
 {
     ComparisonDialog dialog(this);
+    dialog.exec();
+}
+
+// ---------------------------------------------------------------------------
+// Batch processing dialog (Processing > Batch Processing)
+// ---------------------------------------------------------------------------
+
+void QgisDesktopWindow::openBatchProcessingDialog()
+{
+    BatchProcessingDialog dialog(this);
     dialog.exec();
 }

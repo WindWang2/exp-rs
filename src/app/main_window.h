@@ -162,6 +162,9 @@ public slots:
     // Comparison tool
     void openComparisonDialog();
 
+    // Batch processing
+    void openBatchProcessingDialog();
+
     // Vector editing tools
     void toggleEditing();
     void saveEdits();

@@ -21,6 +21,7 @@ add_executable(sicnu_geo_rs
     dialogs/mosaic_dialog.cpp
     dialogs/change_detection_dialog.cpp
     dialogs/comparison_dialog.cpp
+    dialogs/batch_processing_dialog.cpp
     map_tools/measure_tool.cpp
     widgets/histogram_widget.cpp
     widgets/spectral_profile_widget.cpp

@@ -406,6 +406,8 @@ void QgisDesktopWindow::setupMenu()
     processingMenu->addAction(tr("Toolbox"), this, &QgisDesktopWindow::showProcessingToolbox);
     processingMenu->addSeparator();
     processingMenu->addAction(tr("History"), this, &QgisDesktopWindow::showProcessingHistory);
+    processingMenu->addSeparator();
+    processingMenu->addAction(tr("Batch Processing..."), this, &QgisDesktopWindow::openBatchProcessingDialog);
 
     // Raster Menu
     QMenu *rasterMenu = menuBar()->addMenu(tr("&Raster"));
