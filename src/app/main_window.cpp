@@ -42,6 +42,7 @@
 #include "widgets/spectral_profile_widget.h"
 #include "log_panel.h"
 #include "dialogs/comparison_dialog.h"
+#include "layout/qgslayoutdesignerdialog.h"
 #include "georeferencer/qgsgeoreferencermainwindow.h"
 #ifdef SICNU_HAS_CLASSIFY
 #include "classification/qgsclassificationmainwindow.h"
@@ -134,6 +135,9 @@
 // Map renderer for performance
 #include <qgsmaprenderersequentialjob.h>
 #include <qgsmaprendererparalleljob.h>
+
+// Layout
+#include <layout/qgsprintlayout.h>
 
 // Processing framework
 #include <processing/qgsprocessingregistry.h>
@@ -323,6 +327,8 @@ void QgisDesktopWindow::setupMenu()
     projectMenu->addAction(tr("Save Project As..."), this, &QgisDesktopWindow::saveProjectAs);
     projectMenu->addSeparator();
     projectMenu->addAction(QIcon(":/icons/i_ort"), tr("Import Layer..."), this, &QgisDesktopWindow::importLayer);
+    projectMenu->addSeparator();
+    projectMenu->addAction(tr("New Layout..."), this, &QgisDesktopWindow::newLayout);
     projectMenu->addSeparator();
     projectMenu->addAction(tr("Quit"), this, &QMainWindow::close, QKeySequence::Quit);
 
@@ -910,6 +916,18 @@ void QgisDesktopWindow::newProject()
     m_mapCanvas->refresh();
     updateEditingUI(nullptr);
     statusBar()->showMessage("New project created", 3000);
+}
+
+void QgisDesktopWindow::newLayout()
+{
+    // Create a new print layout
+    QgsPrintLayout *layout = new QgsPrintLayout(QgsProject::instance());
+    layout->initializeDefaults();
+
+    // Create and show the layout designer
+    auto *designer = new QgsLayoutDesignerDialog(layout, this);
+    designer->window()->setAttribute(Qt::WA_DeleteOnClose);
+    designer->window()->show();
 }
 
 void QgisDesktopWindow::openProject()

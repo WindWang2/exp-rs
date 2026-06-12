@@ -115,6 +115,7 @@ public slots:
     void saveProject();
     void saveProjectAs();
     void importLayer();
+    void newLayout();
     void undo();
     void redo();
     void cutFeatures();
