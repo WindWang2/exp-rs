@@ -2000,8 +2000,8 @@ endif()
 set_target_properties(qgis_gui PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILDS})
 
 target_include_directories(qgis_gui SYSTEM PUBLIC
-  ${CMAKE_SOURCE_DIR}/src/stubs/qwt
   ${CMAKE_SOURCE_DIR}/src/stubs
+  ${CMAKE_SOURCE_DIR}/external/qwt-6.3.0
   ${QWT_INCLUDE_DIR}
   ${QSCINTILLA_INCLUDE_DIR}
 )
