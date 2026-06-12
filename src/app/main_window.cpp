@@ -41,6 +41,7 @@
 #include "dialogs/preferences_dialog.h"
 #include "widgets/spectral_profile_widget.h"
 #include "log_panel.h"
+#include "dialogs/comparison_dialog.h"
 #include "georeferencer/qgsgeoreferencermainwindow.h"
 #ifdef SICNU_HAS_CLASSIFY
 #include "classification/qgsclassificationmainwindow.h"
@@ -383,6 +384,8 @@ void QgisDesktopWindow::setupMenu()
     viewMenu->addSeparator();
     viewMenu->addAction(QIcon(":/icons/me_sure_dist"), tr("Measure Distance"), this, &QgisDesktopWindow::measureDistance, QKeySequence("Ctrl+Shift+D"));
     viewMenu->addAction(QIcon(":/icons/me_sure_are_"), tr("Measure Area"), this, &QgisDesktopWindow::measureArea, QKeySequence("Ctrl+Shift+A"));
+    viewMenu->addSeparator();
+    viewMenu->addAction(tr("Compare Layers..."), this, &QgisDesktopWindow::openComparisonDialog, QKeySequence("Ctrl+Shift+C"));
     viewMenu->addSeparator();
     viewMenu->addAction(QIcon(":/icons/refresh_view"), tr("Refresh"), this, &QgisDesktopWindow::refreshMap, QKeySequence("F5"));
 

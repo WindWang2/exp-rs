@@ -15,6 +15,7 @@
 #include "dialogs/mosaic_dialog.h"
 #include "dialogs/change_detection_dialog.h"
 #include "dialogs/crs_preset_dialog.h"
+#include "dialogs/comparison_dialog.h"
 #include "dialogs/sicnu_algorithm_dialog.h"
 
 #include <qgsapplication.h>
@@ -374,4 +375,14 @@ void QgisDesktopWindow::setLayerCrsFromPreset()
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Comparison dialog (View > Compare Layers)
+// ---------------------------------------------------------------------------
+
+void QgisDesktopWindow::openComparisonDialog()
+{
+    ComparisonDialog dialog(this);
+    dialog.exec();
 }

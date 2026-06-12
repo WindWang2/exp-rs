@@ -329,6 +329,24 @@ target_include_directories(test_spectral_profile_widget PRIVATE
 )
 sicnu_discover_tests(test_spectral_profile_widget)
 
+# Comparison widget tests
+add_executable(test_comparison_widget test_comparison_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/comparison_widget.cpp
+)
+target_link_libraries(test_comparison_widget PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_comparison_widget PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_comparison_widget)
+
 # Panel persistence tests
 add_executable(test_panel_persistence test_panel_persistence.cpp)
 target_link_libraries(test_panel_persistence PRIVATE

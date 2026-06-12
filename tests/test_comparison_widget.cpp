@@ -1,0 +1,120 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include "app/widgets/comparison_widget.h"
+
+#include <QApplication>
+#include <QPixmap>
+
+// Helper to create a test QPixmap with a specific color
+static QPixmap createTestPixmap(int width, int height, const QColor &color)
+{
+    QPixmap pixmap(width, height);
+    pixmap.fill(color);
+    return pixmap;
+}
+
+TEST_CASE("ComparisonWidget initialization", "[comparison]") {
+    int argc = 0;
+    QApplication app(argc, nullptr);
+
+    ComparisonWidget widget;
+    REQUIRE(widget.mode() == ComparisonWidget::ComparisonMode::SplitScreen);
+    REQUIRE(widget.flickerInterval() == 500);
+}
+
+TEST_CASE("ComparisonWidget set/get mode", "[comparison]") {
+    int argc = 0;
+    QApplication app(argc, nullptr);
+
+    ComparisonWidget widget;
+
+    widget.setMode(ComparisonWidget::ComparisonMode::Flicker);
+    REQUIRE(widget.mode() == ComparisonWidget::ComparisonMode::Flicker);
+
+    widget.setMode(ComparisonWidget::ComparisonMode::SplitScreen);
+    REQUIRE(widget.mode() == ComparisonWidget::ComparisonMode::SplitScreen);
+}
+
+TEST_CASE("ComparisonWidget flicker interval", "[comparison]") {
+    int argc = 0;
+    QApplication app(argc, nullptr);
+
+    ComparisonWidget widget;
+
+    widget.setFlickerInterval(1000);
+    REQUIRE(widget.flickerInterval() == 1000);
+
+    widget.setFlickerInterval(250);
+    REQUIRE(widget.flickerInterval() == 250);
+}
+
+TEST_CASE("ComparisonWidget mode change signal", "[comparison]") {
+    int argc = 0;
+    QApplication app(argc, nullptr);
+
+    ComparisonWidget widget;
+
+    bool signalEmitted = false;
+    ComparisonWidget::ComparisonMode receivedMode = ComparisonWidget::ComparisonMode::SplitScreen;
+
+    QObject::connect(&widget, &ComparisonWidget::modeChanged,
+                     [&](ComparisonWidget::ComparisonMode mode) {
+                         signalEmitted = true;
+                         receivedMode = mode;
+                     });
+
+    widget.setMode(ComparisonWidget::ComparisonMode::Flicker);
+    REQUIRE(signalEmitted);
+    REQUIRE(receivedMode == ComparisonWidget::ComparisonMode::Flicker);
+}
+
+TEST_CASE("ComparisonWidget flicker interval signal", "[comparison]") {
+    int argc = 0;
+    QApplication app(argc, nullptr);
+
+    ComparisonWidget widget;
+
+    bool signalEmitted = false;
+    int receivedInterval = 0;
+
+    QObject::connect(&widget, &ComparisonWidget::flickerIntervalChanged,
+                     [&](int interval) {
+                         signalEmitted = true;
+                         receivedInterval = interval;
+                     });
+
+    widget.setFlickerInterval(750);
+    REQUIRE(signalEmitted);
+    REQUIRE(receivedInterval == 750);
+}
+
+TEST_CASE("ComparisonWidget set images", "[comparison]") {
+    int argc = 0;
+    QApplication app(argc, nullptr);
+
+    ComparisonWidget widget;
+
+    QPixmap left = createTestPixmap(100, 100, Qt::red);
+    QPixmap right = createTestPixmap(100, 100, Qt::blue);
+
+    widget.setLeftImage(left);
+    widget.setRightImage(right);
+
+    // No crash, images are set
+    REQUIRE(true);
+}
+
+TEST_CASE("ComparisonWidget same mode no signal", "[comparison]") {
+    int argc = 0;
+    QApplication app(argc, nullptr);
+
+    ComparisonWidget widget;
+
+    bool signalEmitted = false;
+    QObject::connect(&widget, &ComparisonWidget::modeChanged,
+                     [&]() { signalEmitted = true; });
+
+    // Already in SplitScreen mode, setting again should not emit
+    widget.setMode(ComparisonWidget::ComparisonMode::SplitScreen);
+    REQUIRE_FALSE(signalEmitted);
+}

@@ -159,6 +159,9 @@ public slots:
     void measureDistance();
     void measureArea();
 
+    // Comparison tool
+    void openComparisonDialog();
+
     // Vector editing tools
     void toggleEditing();
     void saveEdits();

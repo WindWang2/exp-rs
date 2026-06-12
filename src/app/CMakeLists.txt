@@ -20,10 +20,12 @@ add_executable(sicnu_geo_rs
     dialogs/sicnu_algorithm_dialog.cpp
     dialogs/mosaic_dialog.cpp
     dialogs/change_detection_dialog.cpp
+    dialogs/comparison_dialog.cpp
     map_tools/measure_tool.cpp
     widgets/histogram_widget.cpp
     widgets/spectral_profile_widget.cpp
     widgets/progress_dialog.cpp
+    widgets/comparison_widget.cpp
 
     # QgisApp facade
     qgis_app_facade.cpp
