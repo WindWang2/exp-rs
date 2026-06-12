@@ -12,6 +12,7 @@
 #include "rs_classifier_setup_bar.h"
 #include "rs_classifier_svm.h"
 #include "rs_cross_validation.h"
+#include "rs_cv_task.h"
 #include "rs_jm_matrix_widget.h"
 #include "rs_jm_separability.h"
 #include "rs_pixel_rasterizer.h"
@@ -874,26 +875,30 @@ void QgsClassificationMainWindow::runCrossValidation()
     }
   };
 
-  if ( statusBar() )
-    statusBar()->showMessage( tr( "5-fold CV 运行中…" ), 3000 );
-  QApplication::processEvents();   // let the status bar paint
-  const auto res = RsCrossValidation::kFold( X, y, factory, 5 );
-  if ( !res.ok() )
+  // Run cross-validation asynchronously to avoid blocking the UI
+  auto *task = new RsCvTask( X, y, factory, 5, tr( "5-fold Cross Validation" ) );
+
+  task->setCompletionCallback( [this]( const RsCrossValidation::Result &res )
   {
-    QMessageBox::warning( this, tr( "CV failed" ), res.errorMessage );
-    return;
-  }
-  QString perFold;
-  for ( int i = 0; i < res.foldAccuracies.size(); ++i )
-    perFold += QString( "  fold%1: %2%\n" )
-                 .arg( i + 1 )
-                 .arg( res.foldAccuracies[i] * 100, 0, 'f', 1 );
-  QMessageBox::information(
-    this, tr( "5-fold Cross Validation" ),
-    tr( "Mean accuracy: %1% ± %2%\n\n%3" )
-      .arg( res.meanAccuracy * 100, 0, 'f', 1 )
-      .arg( res.stdAccuracy * 100, 0, 'f', 1 )
-      .arg( perFold ) );
+    // This runs on the worker thread, so we need to invoke on the main thread
+    QMetaObject::invokeMethod( this, [this, res]()
+    {
+      QString perFold;
+      for ( int i = 0; i < res.foldAccuracies.size(); ++i )
+        perFold += QString( "  fold%1: %2%\n" )
+                     .arg( i + 1 )
+                     .arg( res.foldAccuracies[i] * 100, 0, 'f', 1 );
+      QMessageBox::information(
+        this, tr( "5-fold Cross Validation" ),
+        tr( "Mean accuracy: %1% ± %2%\n\n%3" )
+          .arg( res.meanAccuracy * 100, 0, 'f', 1 )
+          .arg( res.stdAccuracy * 100, 0, 'f', 1 )
+          .arg( perFold ) );
+    }, Qt::QueuedConnection );
+  } );
+
+  QgsApplication::taskManager()->addTask( task );
+  statusBar()->showMessage( tr( "5-fold CV 运行中…" ), 3000 );
 }
 
 void QgsClassificationMainWindow::recomputeSpectralCurves()

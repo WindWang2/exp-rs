@@ -30,6 +30,9 @@ if(SICNU_HAS_OPENCV)
         rs_hungarian_assignment.cpp
         # Phase 10A.1.2 — Stratified 5-fold cross validation.
         rs_cross_validation.cpp
+        # Async cross-validation task (QgsTask-based, non-blocking UI).
+        rs_cv_task.cpp
+        rs_cv_task.h
     )
     target_link_libraries(qgis_analysis PUBLIC ${OpenCV_LIBS})
     target_include_directories(qgis_analysis PUBLIC ${OpenCV_INCLUDE_DIRS})
