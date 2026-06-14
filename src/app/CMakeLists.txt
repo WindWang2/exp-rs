@@ -28,6 +28,7 @@ add_executable(sicnu_geo_rs
     widgets/spectral_profile_widget.cpp
     widgets/progress_dialog.cpp
     widgets/comparison_widget.cpp
+    widgets/guided_workflow_widget.cpp
 
     # QgisApp facade
     qgis_app_facade.cpp

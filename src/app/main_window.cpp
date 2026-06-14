@@ -41,6 +41,7 @@
 #include "dialogs/preferences_dialog.h"
 #include "widgets/spectral_profile_widget.h"
 #include "log_panel.h"
+#include "widgets/guided_workflow_widget.h"
 #include "dialogs/comparison_dialog.h"
 #include "layout/qgslayoutdesignerdialog.h"
 #include "georeferencer/qgsgeoreferencermainwindow.h"
@@ -490,6 +491,9 @@ void QgisDesktopWindow::setupMenu()
     QMenu *helpMenu = menuBar()->addMenu(tr("&Help"));
     helpMenu->addAction(QIcon(":/icons/hel_"), tr("Help Contents"), this, &QgisDesktopWindow::helpContents, QKeySequence::HelpContents);
     helpMenu->addSeparator();
+    helpMenu->addAction(tr("Load Sample Data"), this, &QgisDesktopWindow::loadSampleData);
+    helpMenu->addAction(tr("Guided Workflows"), this, &QgisDesktopWindow::showGuidedWorkflows);
+    helpMenu->addSeparator();
     helpMenu->addAction(tr("Check Version"), this, &QgisDesktopWindow::checkVersion);
     helpMenu->addAction(tr("About"), this, &QgisDesktopWindow::about);
 }
@@ -723,6 +727,15 @@ void QgisDesktopWindow::setupDockWidgets()
     m_logDock->setObjectName("logDock");
     addDockWidget(Qt::BottomDockWidgetArea, m_logDock);
 
+    // Guided Workflow Panel (Right, tabified with processing)
+    auto *workflowWidget = new GuidedWorkflowWidget(this);
+    m_workflowDock = new QgsDockWidget(this);
+    m_workflowDock->setObjectName("workflowDock");
+    m_workflowDock->setWindowTitle(tr("Guided Workflows"));
+    m_workflowDock->setWidget(workflowWidget);
+    addDockWidget(Qt::RightDockWidgetArea, m_workflowDock);
+    tabifyDockWidget(m_processingDock, m_workflowDock);
+
     // Window menu — add dock toggle actions
     if (m_windowMenu) {
         m_windowMenu->addSeparator();
@@ -733,6 +746,7 @@ void QgisDesktopWindow::setupDockWidgets()
         m_windowMenu->addAction(m_identifyDock->toggleViewAction());
         m_windowMenu->addAction(m_spectralDock->toggleViewAction());
         m_windowMenu->addAction(m_logDock->toggleViewAction());
+        m_windowMenu->addAction(m_workflowDock->toggleViewAction());
         m_windowMenu->addSeparator();
         QAction *resetLayoutAction = m_windowMenu->addAction(tr("Reset Layout"));
         connect(resetLayoutAction, &QAction::triggered, this, &QgisDesktopWindow::resetPanelLayout);
@@ -1431,6 +1445,54 @@ void QgisDesktopWindow::about()
         "- QGIS-compatible layer properties\n"
         "- CRS/Projection selection\n"
         "- Native QGIS rendering performance");
+}
+
+void QgisDesktopWindow::loadSampleData()
+{
+    // Find the samples_data directory relative to the application
+    QString samplesDir = AppPaths::dataDir() + "/samples_data";
+    QDir dir(samplesDir);
+    if (!dir.exists()) {
+        // Try relative to executable
+        samplesDir = QCoreApplication::applicationDirPath() + "/../samples_data";
+        dir.setPath(samplesDir);
+    }
+    if (!dir.exists()) {
+        QMessageBox::information(this, tr("Sample Data"),
+                                 tr("Sample data directory not found.\n"
+                                    "Please ensure samples_data/ exists in the application directory."));
+        return;
+    }
+
+    // Load all sample raster files
+    QStringList filters;
+    filters << "*.tif" << "*.tiff";
+    QFileInfoList files = dir.entryInfoList(filters, QDir::Files);
+
+    int loaded = 0;
+    for (const QFileInfo &file : files) {
+        loadRasterLayer(file.absoluteFilePath());
+        loaded++;
+    }
+
+    // Load shapefiles
+    filters.clear();
+    filters << "*.shp";
+    files = dir.entryInfoList(filters, QDir::Files);
+    for (const QFileInfo &file : files) {
+        loadVectorLayer(file.absoluteFilePath());
+        loaded++;
+    }
+
+    statusBar()->showMessage(tr("Loaded %1 sample datasets").arg(loaded), 5000);
+}
+
+void QgisDesktopWindow::showGuidedWorkflows()
+{
+    if (m_workflowDock) {
+        m_workflowDock->show();
+        m_workflowDock->raise();
+    }
 }
 
 // ── Coordinate and Scale Updates ───────────────────────────────────────────

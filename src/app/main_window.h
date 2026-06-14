@@ -132,6 +132,8 @@ public slots:
     void about();
     void helpContents();
     void checkVersion();
+    void loadSampleData();
+    void showGuidedWorkflows();
     void options();
     void showProcessingToolbox();
     void showProcessingHistory();
@@ -301,6 +303,7 @@ private:
     QgsDockWidget *m_identifyDock = nullptr;
     QgsDockWidget *m_spectralDock = nullptr;
     QgsDockWidget *m_logDock = nullptr;
+    QgsDockWidget *m_workflowDock = nullptr;
     QMenu *m_windowMenu = nullptr;
 
     // Identify results display
