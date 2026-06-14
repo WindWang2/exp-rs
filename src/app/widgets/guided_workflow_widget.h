@@ -74,6 +74,10 @@ private:
     Workflow createChangeDetectionWorkflow();
     Workflow createTerrainAnalysisWorkflow();
     Workflow createImageEnhancementWorkflow();
+    Workflow createAtmosphericCorrectionWorkflow();
+    Workflow createImageFusionWorkflow();
+    Workflow createPCAWorkflow();
+    Workflow createMosaicWorkflow();
 
     QgisDesktopWindow *m_mainWindow = nullptr;
 

@@ -95,7 +95,11 @@ void GuidedWorkflowWidget::loadWorkflows()
                 << createImageEnhancementWorkflow()
                 << createClassificationWorkflow()
                 << createChangeDetectionWorkflow()
-                << createTerrainAnalysisWorkflow();
+                << createTerrainAnalysisWorkflow()
+                << createAtmosphericCorrectionWorkflow()
+                << createImageFusionWorkflow()
+                << createPCAWorkflow()
+                << createMosaicWorkflow();
 
     populateWorkflowList();
 }
@@ -535,6 +539,216 @@ Workflow GuidedWorkflowWidget::createTerrainAnalysisWorkflow()
     step3.actionId = "openTerrainDialog";
     step3.completionHint = tr("Steep slopes appear bright in the slope image.");
     wf.steps << step3;
+
+    return wf;
+}
+
+Workflow GuidedWorkflowWidget::createAtmosphericCorrectionWorkflow()
+{
+    Workflow wf;
+    wf.id = "atmospheric_correction";
+    wf.title = tr("Atmospheric Correction (大气校正)");
+    wf.description = tr("Remove atmospheric effects from satellite imagery using DOS methods.");
+
+    // Step 1: Load data
+    WorkflowStep step1;
+    step1.title = tr("Load Satellite Image");
+    step1.instructions = tr("<p>Load the sample Landsat image:</p>"
+                           "<ol>"
+                           "<li>File > Add Raster Layer... → <code>landsat_sample.tif</code></li>"
+                           "</ol>"
+                           "<p>Atmospheric correction converts DN values to surface reflectance.</p>");
+    step1.actionId = "addRasterLayer";
+    step1.completionHint = tr("Image loaded with DN values.");
+    wf.steps << step1;
+
+    // Step 2: DOS1 correction
+    WorkflowStep step2;
+    step2.title = tr("DOS1 Atmospheric Correction");
+    step2.instructions = tr("<p>Apply Dark Object Subtraction (DOS1):</p>"
+                           "<ol>"
+                           "<li>Go to <b>Raster > Atmospheric Correction...</b></li>"
+                           "<li>Select method: <b>DOS1</b></li>"
+                           "<li>Set gain and bias for each band (or use defaults)</li>"
+                           "<li>Set output file (e.g., <code>dos1_corrected.tif</code>)</li>"
+                           "<li>Click <b>Run</b></li>"
+                           "</ol>"
+                           "<p>DOS1 assumes the darkest pixel in the scene has zero reflectance.</p>");
+    step2.actionId = "openAtmosphericCorrectionDialog";
+    step2.completionHint = tr("Corrected values represent surface reflectance (0-1).");
+    wf.steps << step2;
+
+    // Step 3: Compare results
+    WorkflowStep step3;
+    step3.title = tr("Compare Before/After");
+    step3.instructions = tr("<p>Compare original and corrected images:</p>"
+                           "<ol>"
+                           "<li>Go to <b>View > Compare Layers...</b></li>"
+                           "<li>Use <b>Split Screen</b> to compare</li>"
+                           "<li>Notice how atmospheric haze is reduced</li>"
+                           "</ol>"
+                           "<p>Surface reflectance is more suitable for quantitative analysis.</p>");
+    step3.actionId = "openComparisonDialog";
+    step3.completionHint = tr("Corrected image shows clearer surface features.");
+    wf.steps << step3;
+
+    return wf;
+}
+
+Workflow GuidedWorkflowWidget::createImageFusionWorkflow()
+{
+    Workflow wf;
+    wf.id = "image_fusion";
+    wf.title = tr("Image Fusion (影像融合)");
+    wf.description = tr("Combine high-resolution panchromatic with multispectral imagery.");
+
+    // Step 1: Explain the concept
+    WorkflowStep step1;
+    step1.title = tr("Understanding Fusion");
+    step1.instructions = tr("<p>Image fusion combines:</p>"
+                           "<ul>"
+                           "<li><b>Panchromatic</b>: High spatial resolution, single band</li>"
+                           "<li><b>Multispectral</b>: Lower resolution, multiple bands</li>"
+                           "</ul>"
+                           "<p>Result: High resolution multispectral image</p>"
+                           "<p>For this demo, we'll use the sample Landsat image as both inputs.</p>");
+    step1.actionId = "";
+    step1.completionHint = tr("Understanding the concept of image fusion.");
+    wf.steps << step1;
+
+    // Step 2: Load data
+    WorkflowStep step2;
+    step2.title = tr("Load Data");
+    step2.instructions = tr("<p>Load the sample image:</p>"
+                           "<ol>"
+                           "<li>File > Add Raster Layer... → <code>landsat_sample.tif</code></li>"
+                           "</ol>"
+                           "<p>In practice, you would load separate panchromatic and multispectral images.</p>");
+    step2.actionId = "addRasterLayer";
+    step2.completionHint = tr("Image loaded.");
+    wf.steps << step2;
+
+    // Step 3: Brovey fusion
+    WorkflowStep step3;
+    step3.title = tr("Brovey Fusion");
+    step3.instructions = tr("<p>Apply Brovey fusion:</p>"
+                           "<ol>"
+                           "<li>Go to <b>Raster > Image Fusion...</b></li>"
+                           "<li>Select method: <b>Brovey</b></li>"
+                           "<li>Set high-resolution and multispectral inputs</li>"
+                           "<li>Set output file</li>"
+                           "<li>Click <b>Run</b></li>"
+                           "</ol>"
+                           "<p>Brovey: R_fused = R_ms * Pan / (R_ms + G_ms + B_ms)</p>");
+    step3.actionId = "openFusionDialog";
+    step3.completionHint = tr("Fused image has higher spatial detail.");
+    wf.steps << step3;
+
+    // Step 4: IHS fusion
+    WorkflowStep step4;
+    step4.title = tr("IHS Fusion");
+    step4.instructions = tr("<p>Apply IHS fusion:</p>"
+                           "<ol>"
+                           "<li>Go to <b>Raster > Image Fusion...</b></li>"
+                           "<li>Select method: <b>IHS</b></li>"
+                           "<li>Set inputs and output</li>"
+                           "<li>Click <b>Run</b></li>"
+                           "</ol>"
+                           "<p>IHS: Convert RGB→IHS, replace I with Pan, convert back.</p>");
+    step4.actionId = "openFusionDialog";
+    step4.completionHint = tr("IHS fusion preserves spectral characteristics well.");
+    wf.steps << step4;
+
+    return wf;
+}
+
+Workflow GuidedWorkflowWidget::createPCAWorkflow()
+{
+    Workflow wf;
+    wf.id = "pca_analysis";
+    wf.title = tr("PCA Analysis (主成分分析)");
+    wf.description = tr("Dimensionality reduction using Principal Component Analysis.");
+
+    // Step 1: Load data
+    WorkflowStep step1;
+    step1.title = tr("Load Multi-band Image");
+    step1.instructions = tr("<p>Load the sample Landsat image:</p>"
+                           "<ol>"
+                           "<li>File > Add Raster Layer... → <code>landsat_sample.tif</code></li>"
+                           "</ol>"
+                           "<p>PCA reduces the number of bands while preserving most information.</p>");
+    step1.actionId = "addRasterLayer";
+    step1.completionHint = tr("7-band image loaded.");
+    wf.steps << step1;
+
+    // Step 2: Run PCA
+    WorkflowStep step2;
+    step2.title = tr("Run PCA");
+    step2.instructions = tr("<p>Perform PCA:</p>"
+                           "<ol>"
+                           "<li>Go to <b>Raster > Enhancement > PCA...</b></li>"
+                           "<li>Set number of components: <b>3</b></li>"
+                           "<li>Set output file (e.g., <code>pca_result.tif</code>)</li>"
+                           "<li>Click <b>Run</b></li>"
+                           "</ol>"
+                           "<p>PC1 contains the most variance, PC2 the second most, etc.</p>");
+    step2.actionId = "openPcaDialog";
+    step2.completionHint = tr("PCA result has 3 bands instead of 7.");
+    wf.steps << step2;
+
+    // Step 3: Analyze results
+    WorkflowStep step3;
+    step3.title = tr("Analyze PCA Results");
+    step3.instructions = tr("<p>Analyze the PCA output:</p>"
+                           "<ol>"
+                           "<li>View the PCA result image</li>"
+                           "<li>PC1: Contains ~80% of variance (brightness)</li>"
+                           "<li>PC2: Contains ~15% of variance (vegetation vs soil)</li>"
+                           "<li>PC3: Contains ~5% of variance (noise or subtle features)</li>"
+                           "</ol>"
+                           "<p>PCA is useful for data compression and noise reduction.</p>");
+    step3.actionId = "";
+    step3.completionHint = tr("PC1 shows the main patterns in the data.");
+    wf.steps << step3;
+
+    return wf;
+}
+
+Workflow GuidedWorkflowWidget::createMosaicWorkflow()
+{
+    Workflow wf;
+    wf.id = "mosaic";
+    wf.title = tr("Image Mosaic (影像镶嵌)");
+    wf.description = tr("Combine multiple images into a single mosaic.");
+
+    // Step 1: Explain concept
+    WorkflowStep step1;
+    step1.title = tr("Understanding Mosaic");
+    step1.instructions = tr("<p>Image mosaic combines multiple images:</p>"
+                           "<ul>"
+                           "<li>Adjacent scenes from same sensor</li>"
+                           "<li>Different times of same area</li>"
+                           "<li>Creates seamless coverage</li>"
+                           "</ul>"
+                           "<p>Key considerations: CRS alignment, color balancing, seamline.</p>");
+    step1.actionId = "";
+    step1.completionHint = tr("Understanding mosaic concepts.");
+    wf.steps << step1;
+
+    // Step 2: Open mosaic dialog
+    WorkflowStep step2;
+    step2.title = tr("Open Mosaic Tool");
+    step2.instructions = tr("<p>Open the mosaic dialog:</p>"
+                           "<ol>"
+                           "<li>Go to <b>Raster > Mosaic...</b></li>"
+                           "<li>Add input images</li>"
+                           "<li>Set output file</li>"
+                           "<li>Click <b>Run</b></li>"
+                           "</ol>"
+                           "<p>Note: All input images must have the same CRS.</p>");
+    step2.actionId = "openMosaicDialog";
+    step2.completionHint = tr("Mosaic created from input images.");
+    wf.steps << step2;
 
     return wf;
 }
