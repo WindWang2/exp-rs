@@ -1,4 +1,5 @@
 #include "main_window.h"
+#include "map_tools/map_tool_manager.h"
 #include "layer_tree_menu.h"
 #include "app_paths.h"
 #include "qgis_app_facade.h"
@@ -203,6 +204,8 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     qDebug() << "Window initialized";
 }
 
+QgisDesktopWindow::~QgisDesktopWindow() = default;
+
 void QgisDesktopWindow::setupUi()
 {
     QWidget *centralWidget = new QWidget(this);
@@ -235,14 +238,6 @@ void QgisDesktopWindow::setupMapCanvas()
     m_mapCanvas->enableAntiAliasing(true);
     m_mapCanvas->setSelectionColor(QColor(255, 255, 0, 100));
 
-    // Map Tools
-    m_panTool = new QgsMapToolPan(m_mapCanvas);
-    m_zoomInTool = new QgsMapToolZoom(m_mapCanvas, false);
-    m_zoomOutTool = new QgsMapToolZoom(m_mapCanvas, true);
-    m_identifyTool = new CustomIdentifyTool(m_mapCanvas);
-    m_measureDistanceTool = new MeasureTool( m_mapCanvas, MeasureTool::Distance, this );
-    m_measureAreaTool = new MeasureTool( m_mapCanvas, MeasureTool::Area, this );
-
     // Vector editing infrastructure
     m_cadDock = new QgsAdvancedDigitizingDockWidget(m_mapCanvas, this);
     addDockWidget(Qt::LeftDockWidgetArea, m_cadDock);
@@ -268,27 +263,38 @@ void QgisDesktopWindow::setupMapCanvas()
     auto *vectorLayerTools = new QgsGuiVectorLayerTools();
     QgisApp::initialize(m_mapCanvas, m_cadDock, vectorLayerTools, m_messageBar, this);
 
-    // Vector editing map tools
-    m_selectTool = new QgsMapToolSelect(m_mapCanvas);
-    m_addFeatureTool = new QgsMapToolAddFeature(m_mapCanvas, m_cadDock, QgsMapToolCapture::CaptureNone);
-    m_moveFeatureTool = new QgsMapToolMoveFeature(m_mapCanvas);
-    m_rotateFeatureTool = new QgsMapToolRotateFeature(m_mapCanvas);
-    m_scaleFeatureTool = new QgsMapToolScaleFeature(m_mapCanvas);
-    m_offsetCurveTool = new QgsMapToolOffsetCurve(m_mapCanvas);
-    m_reshapeTool = new QgsMapToolReshape(m_mapCanvas);
-    m_splitFeaturesTool = new QgsMapToolSplitFeatures(m_mapCanvas);
-    m_splitPartsTool = new QgsMapToolSplitParts(m_mapCanvas);
-    m_simplifyTool = new QgsMapToolSimplify(m_mapCanvas);
-    m_reverseLineTool = new QgsMapToolReverseLine(m_mapCanvas);
-    m_addRingTool = new QgsMapToolAddRing(m_mapCanvas);
-    m_addPartTool = new QgsMapToolAddPart(m_mapCanvas);
-    m_fillRingTool = new QgsMapToolFillRing(m_mapCanvas);
-    m_deletePartTool = new QgsMapToolDeletePart(m_mapCanvas);
-    m_deleteRingTool = new QgsMapToolDeleteRing(m_mapCanvas);
-    m_trimExtendTool = new QgsMapToolTrimExtendFeature(m_mapCanvas);
-    m_chamferFilletTool = new QgsMapToolChamferFillet(m_mapCanvas);
-    m_featureArrayTool = new QgsMapToolFeatureArray(m_mapCanvas);
-    m_vertexTool = new QgsVertexTool(m_mapCanvas, m_cadDock);
+    // Map Tools Setup (Delegated to MapToolManager)
+    m_toolManager = std::make_unique<MapToolManager>(this, m_mapCanvas, m_cadDock);
+    m_toolManager->setupTools();
+
+    // Assign tool pointers for backward compatibility and clean usage
+    m_panTool = m_toolManager->panTool();
+    m_zoomInTool = m_toolManager->zoomInTool();
+    m_zoomOutTool = m_toolManager->zoomOutTool();
+    m_identifyTool = m_toolManager->identifyTool();
+    m_measureDistanceTool = m_toolManager->measureDistanceTool();
+    m_measureAreaTool = m_toolManager->measureAreaTool();
+
+    m_selectTool = m_toolManager->selectTool();
+    m_addFeatureTool = m_toolManager->addFeatureTool();
+    m_moveFeatureTool = m_toolManager->moveFeatureTool();
+    m_rotateFeatureTool = m_toolManager->rotateFeatureTool();
+    m_scaleFeatureTool = m_toolManager->scaleFeatureTool();
+    m_offsetCurveTool = m_toolManager->offsetCurveTool();
+    m_reshapeTool = m_toolManager->reshapeTool();
+    m_splitFeaturesTool = m_toolManager->splitFeaturesTool();
+    m_splitPartsTool = m_toolManager->splitPartsTool();
+    m_simplifyTool = m_toolManager->simplifyTool();
+    m_reverseLineTool = m_toolManager->reverseLineTool();
+    m_addRingTool = m_toolManager->addRingTool();
+    m_addPartTool = m_toolManager->addPartTool();
+    m_fillRingTool = m_toolManager->fillRingTool();
+    m_deletePartTool = m_toolManager->deletePartTool();
+    m_deleteRingTool = m_toolManager->deleteRingTool();
+    m_trimExtendTool = m_toolManager->trimExtendTool();
+    m_chamferFilletTool = m_toolManager->chamferFilletTool();
+    m_featureArrayTool = m_toolManager->featureArrayTool();
+    m_vertexTool = m_toolManager->vertexTool();
 
     // Set default tool (QGIS default: pan)
     m_mapCanvas->setMapTool(m_panTool);

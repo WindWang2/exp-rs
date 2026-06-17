@@ -98,6 +98,7 @@ class QgisDesktopWindow : public QMainWindow
 
 public:
     explicit QgisDesktopWindow(QWidget *parent = nullptr);
+    ~QgisDesktopWindow() override;
 
     void setupUi();
     void setupMapCanvas();
@@ -327,6 +328,8 @@ private:
 
     // OBIA window (lazy-constructed) — Phase 10B Task 10B.5
     QMainWindow *m_obiaWindow = nullptr;
+
+    std::unique_ptr<class MapToolManager> m_toolManager;
 
     friend class LayerTreeMenuProvider;
 

@@ -1,5 +1,95 @@
 # Progress Log — SICNU GEO RS
 
+## Session: 2026-06-17 — Comprehensive Code Review & Architectural Improvements ✅ COMPLETE
+
+### 状态
+- **3/3 核心对齐任务完成**
+- **362/362 测试通过**（包括修复了不稳定的 ImageWarper 取消测试）
+
+### 核心改动
+| 文件 | 改动 |
+|---|---|
+| `src/app/map_tools/map_tool_manager.{h,cpp}` | 新建 map tools 封装类，管理 pan, zoom, measure, capture, edit 等 25+ 个工具的生命周期 |
+| `src/app/main_window.{h,cpp}` | 解耦 QgisDesktopWindow (1000+行)，利用 MapToolManager 代理地图工具初始化与引用，修复 incomplete type 导致的析构 sizeof 编译错误 |
+| `src/app/CMakeLists.txt` | 将 map_tool_manager.cpp 添加进构建 target |
+| `CMakeLists.txt` & `cmake/Boost/BoostConfig.cmake` | 移除了 pybind11 FetchContent 依赖，将 Python 限制为 Interpreter 唯一依赖，通过 target properties 动态链接 QCA、Boost、GDAL 以解决移植性及 Python 运行时冲突 |
+| `tests/test_image_warper_cancel.cpp` | 将测试影像尺寸升级为 4096x4096，并将取消信号延时缩短至 10ms，从根本上解决由于 CPU 过快而导致的 flakiness |
+
+---
+
+## Session: 2026-06-12 — QGIS Alignment: Qwt + Layout Designer ✅ COMPLETE
+
+### 状态
+- **2/2 对齐任务完成**
+- **362/362 测试通过**（首次全部通过！）
+
+### 核心改动
+| 文件 | 改动 |
+|---|---|
+| `src/gui/CMakeLists.txt` | 使用真实 Qwt 6.3.0 headers 替代 stubs |
+| `src/app/layout/qgslayoutdesignerdialog.{h,cpp}` | Layout Designer 实现 |
+| `src/app/main_window.{h,cpp}` | Project > New Layout 菜单 |
+
+### 完成的任务
+- **Qwt 渲染修复** — 使用 vendor 的真实 Qwt 6.3.0 headers，直方图/图表/颜色渐变预览现在可以正常渲染
+- **Print/Layout Designer** — 实现 QgsLayoutDesignerDialog，支持添加 Map/Legend/ScaleBar/NorthArrow/Label/Image，导出 PDF/Image
+
+### 测试结果
+- **362/362 测试全部通过**（首次 0 失败！）
+
+---
+
+## Session: 2026-06-12 — Phase 13: Education & Usability ✅ PARTIAL (Tasks 13.3 + 13.4)
+
+### 状态
+- **2/4 子任务完成**
+- **361/362 测试通过** (test 262 pre-existing flaky)
+
+### 核心改动
+| 文件 | 改动 |
+|---|---|
+| `src/app/widgets/comparison_widget.{h,cpp}` | 分屏/闪烁对比 widget |
+| `src/app/dialogs/comparison_dialog.{h,cpp}` | 影像对比对话框 |
+| `src/app/dialogs/batch_processing_dialog.{h,cpp}` | 批处理对话框 |
+| `src/app/main_window.{h,cpp}` | View > Compare Layers + Processing > Batch Processing 菜单 |
+
+### 完成的任务
+- **Task 13.3: Image Comparison Tool** — 分屏模式（垂直滑块）+ 闪烁模式（可配置速度），View > Compare Layers 菜单
+- **Task 13.4: Batch Processing** — 算法选择 + 多文件输入 + 输出目录 + 进度条，Processing > Batch Processing 菜单
+
+### 待完成
+- Task 13.1: Sample Datasets（需要实际数据文件）
+- Task 13.2: In-App Lab Guides（需要内容创作）
+
+---
+
+## Session: 2026-06-12 — Foundational Infrastructure Improvements ✅ COMPLETE
+
+### 状态
+- **3/3 基础改进完成**
+- **354/355 测试通过** (test 255 pre-existing flaky)
+
+### 核心改动
+| 文件 | 改动 |
+|---|---|
+| `src/app/main_window.cpp` | 从 2249 行拆分到 1924 行，提取 15 个处理对话框方法 |
+| `src/app/main_window_processing.cpp` | 新文件 (377 行)：所有 RS 处理对话框槽函数 |
+| `src/app/dialogs/sicnu_algorithm_dialog.{h,cpp}` | 集成 ProcessingCache，SHA256 缓存键，重复执行秒级完成 |
+| `src/analysis/classification/rs_cv_task.{h,cpp}` | 新文件：异步交叉验证 QgsTask，不再阻塞 UI |
+| `src/app/classification/qgsclassificationmainwindow.cpp` | CV 异步执行，状态栏显示进度 |
+
+### 改进详情
+1. **main_window.cpp 拆分** — 处理对话框方法提取到独立文件，改善可维护性
+2. **ProcessingCache 集成** — 算法执行前检查缓存，执行后存储结果，重复运行即时完成
+3. **异步交叉验证** — CV 在后台 QgsTask 运行，不再冻结 UI，通过 QMetaObject::invokeMethod 回调主线程
+
+### 架构决策
+- ProcessingCache 使用 SHA256(算法ID + 参数JSON) 作为缓存键，16 位 hex 截断
+- RsCvTask 使用回调模式而非信号，避免 MOC 在子目录中的处理问题
+- selectedLayers() 和 activeLayer() 提升为 public API，支持跨文件调用
+
+---
+
 ## Session: 2026-06-07 — Phase 11.3 Speckle Filter (SAR) ✅ COMPLETE
 
 ### 状态

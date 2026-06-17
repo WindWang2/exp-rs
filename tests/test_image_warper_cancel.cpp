@@ -31,13 +31,13 @@ TEST_CASE( "ImageWarper: cancellation exits within 500ms and removes output", "[
 
   // Larger raster so the warp takes more than a few ms — gives the cancel
   // signal a chance to arrive mid-flight.
-  const QString src = makeSyntheticRaster( tmp.path(), 2048, 2048 );
+  const QString src = makeSyntheticRaster( tmp.path(), 4096, 4096 );
   REQUIRE_FALSE( src.isEmpty() );
   const QString out = tmp.path() + QStringLiteral( "/out.tif" );
 
   QgsGeorefTransform transform( TM::PolynomialOrder1 );
-  QVector<QgsPointXY> s = { { 0, 0 }, { 2047, 0 }, { 0, 2047 }, { 2047, 2047 } };
-  QVector<QgsPointXY> d = { { 100, 200 }, { 2147, 200 }, { 100, 2247 }, { 2147, 2247 } };
+  QVector<QgsPointXY> s = { { 0, 0 }, { 4095, 0 }, { 0, 4095 }, { 4095, 4095 } };
+  QVector<QgsPointXY> d = { { 100, 200 }, { 4195, 200 }, { 100, 4295 }, { 4195, 4295 } };
   REQUIRE( transform.updateParametersFromGcps( s, d, false ) );
 
   QgsFeedback fb;
@@ -54,7 +54,7 @@ TEST_CASE( "ImageWarper: cancellation exits within 500ms and removes output", "[
 
   // Give the warp a head-start so we actually exercise the in-flight cancel
   // path (vs. cancelling before the warp loop has started).
-  QThread::msleep( 200 );
+  QThread::msleep( 10 );
 
   QElapsedTimer t;
   t.start();
