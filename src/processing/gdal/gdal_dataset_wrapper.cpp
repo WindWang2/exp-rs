@@ -170,7 +170,7 @@ QString GdalDatasetWrapper::lastError() const
 
 GDALDatasetH createOutputTiff(const QString &path,
                                int width, int height, int bandCount,
-                               GDALDataType dtype,
+                               int dtype,
                                const std::array<double, 6> &geoTransform,
                                const QString &projection,
                                QString *errorMessage)
@@ -187,7 +187,7 @@ GDALDatasetH createOutputTiff(const QString &path,
     opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
 
     GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(),
-                                  width, height, bandCount, dtype, opts);
+                                  width, height, bandCount, static_cast<GDALDataType>(dtype), opts);
     CSLDestroy(opts);
 
     if (!ds) {

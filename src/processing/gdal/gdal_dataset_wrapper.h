@@ -5,9 +5,8 @@
 #include <array>
 #include <cstdint>
 
-// Forward declarations to avoid exposing gdal.h in header
+// Forward declaration to avoid exposing gdal.h in header
 typedef void *GDALDatasetH;
-typedef int GDALDataType;
 
 /// Ensure GDAL drivers are registered (once per process, thread-safe).
 /// Prefer this over calling GDALAllRegister() directly.
@@ -23,7 +22,7 @@ void ensureGdalInit();
  * @param width         Raster width in pixels
  * @param height        Raster height in pixels
  * @param bandCount     Number of output bands
- * @param dtype         GDAL data type (e.g. GDT_Float32)
+ * @param dtype         GDAL data type (e.g. GDT_Float32) - cast to int to avoid including gdal.h
  * @param geoTransform  6-element affine geotransform from source
  * @param projection    WKT projection string from source
  * @param errorMessage  If non-null, receives error description on failure
@@ -31,7 +30,7 @@ void ensureGdalInit();
  */
 GDALDatasetH createOutputTiff(const QString &path,
                                int width, int height, int bandCount,
-                               GDALDataType dtype,
+                               int dtype,
                                const std::array<double, 6> &geoTransform,
                                const QString &projection,
                                QString *errorMessage = nullptr);
