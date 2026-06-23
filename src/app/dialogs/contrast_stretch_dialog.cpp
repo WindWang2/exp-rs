@@ -10,30 +10,17 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QLineEdit>
 #include <QComboBox>
-#include <QPushButton>
 #include <QDoubleSpinBox>
-#include <QFileDialog>
-#include <QMessageBox>
-
-#include <qgsmessagelog.h>
-#include <qgis.h>
 
 #include <gdal.h>
 #include <cpl_error.h>
-#include <cpl_string.h>
 
 ContrastStretchDialog::ContrastStretchDialog(QWidget *parent)
-    : QDialog(parent)
+    : RasterProcessingDialogBase(parent)
 {
-    setWindowTitle(tr("Contrast Stretch"));
+    setWindowTitle(dialogTitle());
     setupUi();
-}
-
-void ContrastStretchDialog::setRasterLayer(QgsRasterLayer *layer)
-{
-    m_rasterLayer = layer;
 }
 
 void ContrastStretchDialog::setupUi()
@@ -76,26 +63,11 @@ void ContrastStretchDialog::setupUi()
     stddevLayout->addWidget(m_stddevSpin);
     mainLayout->addLayout(stddevLayout);
 
-    // Output file
-    auto *outLayout = new QHBoxLayout();
-    outLayout->addWidget(new QLabel(tr("Output:"), this));
-    m_outputEdit = new QLineEdit(this);
-    outLayout->addWidget(m_outputEdit);
-    auto *browseBtn = new QPushButton(tr("Browse..."), this);
-    connect(browseBtn, &QPushButton::clicked, this, &ContrastStretchDialog::onBrowseOutput);
-    outLayout->addWidget(browseBtn);
-    mainLayout->addLayout(outLayout);
+    // Output file (from base class)
+    setupOutputRow(mainLayout);
 
-    // Buttons
-    auto *btnLayout = new QHBoxLayout();
-    btnLayout->addStretch();
-    m_runButton = new QPushButton(tr("Run"), this);
-    connect(m_runButton, &QPushButton::clicked, this, &ContrastStretchDialog::onRun);
-    btnLayout->addWidget(m_runButton);
-    auto *cancelBtn = new QPushButton(tr("Cancel"), this);
-    connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
-    btnLayout->addWidget(cancelBtn);
-    mainLayout->addLayout(btnLayout);
+    // Buttons (from base class)
+    setupButtonBar(mainLayout);
 
     // Initialize visibility
     onMethodChanged(0);
@@ -113,30 +85,10 @@ void ContrastStretchDialog::onMethodChanged(int index)
     m_stddevSpin->setVisible(index == 2);
 }
 
-void ContrastStretchDialog::onBrowseOutput()
-{
-    QString path = QFileDialog::getSaveFileName(this, tr("Output File"), QString(),
-                                                tr("GeoTIFF (*.tif)"));
-    if (!path.isEmpty())
-        m_outputEdit->setText(path);
-}
-
 void ContrastStretchDialog::onRun()
 {
-    // Validate inputs
-    QString outputPath = m_outputEdit->text().trimmed();
-    if (outputPath.isEmpty()) {
-        QMessageBox::warning(this, tr("Contrast Stretch"), tr("Please specify an output file."));
-        return;
-    }
-
-    if (!m_rasterLayer || !m_rasterLayer->isValid()) {
-        QMessageBox::warning(this, tr("Contrast Stretch"), tr("No valid raster layer selected."));
-        return;
-    }
-
     // Capture parameters for async execution
-    QString sourcePath = m_rasterLayer->dataProvider()->dataSourceUri();
+    QString sourcePath = m_rasterLayer->source();
     int methodIndex = m_methodCombo->currentIndex();
     double clipValue = m_clipSpin->value();
     double stddevValue = m_stddevSpin->value();
@@ -149,7 +101,7 @@ void ContrastStretchDialog::onRun()
 
     m_runButton->setEnabled(false);
 
-    m_runner->run([sourcePath, outputPath, methodIndex, clipValue, stddevValue]() -> QString {
+    m_runner->run([sourcePath, outputPath(), methodIndex, clipValue, stddevValue]() -> QString {
     try {
         // Open source dataset
         GdalDatasetWrapper srcDataset;
@@ -198,7 +150,7 @@ void ContrastStretchDialog::onRun()
 
         // Create output file using GDAL
         QString error;
-        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, width, height, bandCount,
+        GdalDatasetGuard dstGuard(createOutputTiff(outputPath(), width, height, bandCount,
                                                    GDT_Float32, srcDataset.geoTransform(),
                                                    srcDataset.projection(), &error));
         if (!dstGuard) return QString();
@@ -212,7 +164,7 @@ void ContrastStretchDialog::onRun()
                             "Failed to write output band" );
         }
 
-        return outputPath;
+        return outputPath();
     } catch (const std::runtime_error &) {
         return QString();
     }
@@ -221,15 +173,10 @@ void ContrastStretchDialog::onRun()
 
 void ContrastStretchDialog::onCompleted(const QString &outputPath)
 {
-    m_runButton->setEnabled(true);
-    QgsMessageLog::logMessage(tr("Contrast stretch completed! Output: %1").arg(outputPath),
-                              "contrast_stretch", Qgis::MessageLevel::Success);
-    accept();
+    handleCompleted(outputPath);
 }
 
 void ContrastStretchDialog::onFailed(const QString &error)
 {
-    m_runButton->setEnabled(true);
-    QgsMessageLog::logMessage(error, "contrast_stretch", Qgis::MessageLevel::Critical);
-    QMessageBox::critical(this, tr("Contrast Stretch"), tr("Operation failed. See log for details."));
+    handleFailed(error);
 }

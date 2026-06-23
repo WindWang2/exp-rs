@@ -1,33 +1,34 @@
 // src/app/dialogs/contrast_stretch_dialog.h
 #pragma once
 
-#include <QDialog>
+#include "raster_processing_dialog_base.h"
 
 class QComboBox;
-class QLineEdit;
-class QPushButton;
-class QLabel;
 class QDoubleSpinBox;
-class QgsRasterLayer;
+class QLabel;
+class AsyncGdalRunner;
 
 /**
  * Dialog for Contrast Stretch operations.
  * Supports Linear, Percentage Clip, Std Dev, and Histogram Equalization
  * using the ImageEnhancement algorithm library.
  */
-class ContrastStretchDialog : public QDialog
+class ContrastStretchDialog : public RasterProcessingDialogBase
 {
     Q_OBJECT
 
 public:
     explicit ContrastStretchDialog(QWidget *parent = nullptr);
 
-    void setRasterLayer(QgsRasterLayer *layer);
+protected:
+    QString toolName() const override { return QStringLiteral("contrast_stretch"); }
+    QString dialogTitle() const override { return tr("Contrast Stretch"); }
+    void onRun() override;
 
 private slots:
-    void onBrowseOutput();
-    void onRun();
     void onMethodChanged(int index);
+    void onCompleted(const QString &outputPath);
+    void onFailed(const QString &error);
 
 private:
     void setupUi();
@@ -37,7 +38,5 @@ private:
     QDoubleSpinBox *m_stddevSpin = nullptr;
     QLabel *m_clipLabel = nullptr;
     QLabel *m_stddevLabel = nullptr;
-    QLineEdit *m_outputEdit = nullptr;
-    QPushButton *m_runButton = nullptr;
-    QgsRasterLayer *m_rasterLayer = nullptr;
+    AsyncGdalRunner *m_runner = nullptr;
 };
