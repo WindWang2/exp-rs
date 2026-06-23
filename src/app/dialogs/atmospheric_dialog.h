@@ -1,32 +1,30 @@
 // src/app/dialogs/atmospheric_dialog.h
 #pragma once
 
-#include <QDialog>
+#include "raster_processing_dialog_base.h"
 
 class QComboBox;
-class QLineEdit;
 class QDoubleSpinBox;
-class QPushButton;
 class QLabel;
-class QgsRasterLayer;
 
 /**
  * Dialog for Atmospheric Correction operations.
  * Supports DN-to-Radiance conversion, DOS1, and DOS2 methods
  * using the AtmosphericCorrection algorithm library.
  */
-class AtmosphericDialog : public QDialog
+class AtmosphericDialog : public RasterProcessingDialogBase
 {
     Q_OBJECT
 
 public:
     explicit AtmosphericDialog(QWidget *parent = nullptr);
 
-    void setRasterLayer(QgsRasterLayer *layer);
+protected:
+    QString toolName() const override { return QStringLiteral("atmospheric_correction"); }
+    QString dialogTitle() const override { return tr("Atmospheric Correction"); }
+    void onRun() override;
 
 private slots:
-    void onBrowseOutput();
-    void onRun();
     void onMethodChanged(int index);
 
 private:
@@ -40,8 +38,4 @@ private:
     QDoubleSpinBox *m_airmassSpin = nullptr;
 
     QLabel *m_airmassLabel = nullptr;
-
-    QLineEdit *m_outputEdit = nullptr;
-    QPushButton *m_runButton = nullptr;
-    QgsRasterLayer *m_rasterLayer = nullptr;
 };
