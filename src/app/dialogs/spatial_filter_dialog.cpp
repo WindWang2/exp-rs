@@ -10,31 +10,19 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QLineEdit>
 #include <QComboBox>
-#include <QPushButton>
-#include <QFileDialog>
-#include <QMessageBox>
 
 #include <qgsmessagelog.h>
 #include <qgis.h>
 
 #include <gdal.h>
 #include <cpl_error.h>
-#include <cpl_string.h>
-
-#include "qgsogrutils.h"
 
 SpatialFilterDialog::SpatialFilterDialog(QWidget *parent)
-    : QDialog(parent)
+    : RasterProcessingDialogBase(parent)
 {
-    setWindowTitle(tr("Spatial Filter"));
+    setWindowTitle(dialogTitle());
     setupUi();
-}
-
-void SpatialFilterDialog::setRasterLayer(QgsRasterLayer *layer)
-{
-    m_rasterLayer = layer;
 }
 
 void SpatialFilterDialog::setupUi()
@@ -58,52 +46,17 @@ void SpatialFilterDialog::setupUi()
     kernelLayout->addWidget(m_kernelSizeCombo);
     mainLayout->addLayout(kernelLayout);
 
-    // Output file
-    auto *outLayout = new QHBoxLayout();
-    outLayout->addWidget(new QLabel(tr("Output:"), this));
-    m_outputEdit = new QLineEdit(this);
-    outLayout->addWidget(m_outputEdit);
-    auto *browseBtn = new QPushButton(tr("Browse..."), this);
-    connect(browseBtn, &QPushButton::clicked, this, &SpatialFilterDialog::onBrowseOutput);
-    outLayout->addWidget(browseBtn);
-    mainLayout->addLayout(outLayout);
+    // Output file (from base class)
+    setupOutputRow(mainLayout);
 
-    // Buttons
-    auto *btnLayout = new QHBoxLayout();
-    btnLayout->addStretch();
-    m_runButton = new QPushButton(tr("Run"), this);
-    connect(m_runButton, &QPushButton::clicked, this, &SpatialFilterDialog::onRun);
-    btnLayout->addWidget(m_runButton);
-    auto *cancelBtn = new QPushButton(tr("Cancel"), this);
-    connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
-    btnLayout->addWidget(cancelBtn);
-    mainLayout->addLayout(btnLayout);
-}
-
-void SpatialFilterDialog::onBrowseOutput()
-{
-    QString path = QFileDialog::getSaveFileName(this, tr("Output File"), QString(),
-                                                tr("GeoTIFF (*.tif)"));
-    if (!path.isEmpty())
-        m_outputEdit->setText(path);
+    // Buttons (from base class)
+    setupButtonBar(mainLayout);
 }
 
 void SpatialFilterDialog::onRun()
 {
-    // Validate inputs
-    QString outputPath = m_outputEdit->text().trimmed();
-    if (outputPath.isEmpty()) {
-        QMessageBox::warning(this, tr("Spatial Filter"), tr("Please specify an output file."));
-        return;
-    }
-
-    if (!m_rasterLayer || !m_rasterLayer->isValid()) {
-        QMessageBox::warning(this, tr("Spatial Filter"), tr("No valid raster layer selected."));
-        return;
-    }
-
     // Capture parameters for async execution
-    QString sourcePath = m_rasterLayer->dataProvider()->dataSourceUri();
+    QString sourcePath = m_rasterLayer->source();
     int kernelSize = (m_kernelSizeCombo->currentIndex() == 1) ? 5 : 3;
     int filterIndex = m_filterTypeCombo->currentIndex();
 
@@ -115,7 +68,7 @@ void SpatialFilterDialog::onRun()
 
     m_runButton->setEnabled(false);
 
-    m_runner->run([sourcePath, outputPath, kernelSize, filterIndex]() -> QString {
+    m_runner->run([sourcePath, outputPath(), kernelSize, filterIndex]() -> QString {
     try {
         // Open source dataset
         GdalDatasetWrapper srcDataset;
@@ -159,21 +112,21 @@ void SpatialFilterDialog::onRun()
 
         // Create output
         QString error;
-        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, width, height, bandCount,
+        GdalDatasetGuard dstGuard(createOutputTiff(outputPath(), width, height, bandCount,
                                                    GDT_Float32, srcDataset.geoTransform(),
                                                    srcDataset.projection(), &error));
         if (!dstGuard) return QString();
 
         // Write all output bands
         for (int b = 0; b < bandCount; ++b) {
-            GDALRasterBandH dstBand = GDALGetRasterBand(dstDataset.get(), b + 1);
+            GDALRasterBandH dstBand = GDALGetRasterBand(dstGuard.get(), b + 1);
             if (!dstBand) return QString();
             GDAL_SAFE_CALL( GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
                             outputBands[b].data(), width, height, GDT_Float32, 0, 0),
                             "Failed to write output band" );
         }
 
-        return outputPath;
+        return outputPath();
     } catch (const std::runtime_error &) {
         return QString();
     }
@@ -182,15 +135,10 @@ void SpatialFilterDialog::onRun()
 
 void SpatialFilterDialog::onCompleted(const QString &outputPath)
 {
-    m_runButton->setEnabled(true);
-    QgsMessageLog::logMessage(tr("Spatial filter completed! Output: %1").arg(outputPath),
-                              "spatial_filter", Qgis::MessageLevel::Success);
-    accept();
+    handleCompleted(outputPath);
 }
 
 void SpatialFilterDialog::onFailed(const QString &error)
 {
-    m_runButton->setEnabled(true);
-    QgsMessageLog::logMessage(error, "spatial_filter", Qgis::MessageLevel::Critical);
-    QMessageBox::critical(this, tr("Spatial Filter"), tr("Operation failed. See log for details."));
+    handleFailed(error);
 }
