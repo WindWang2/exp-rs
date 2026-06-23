@@ -10,30 +10,20 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QLineEdit>
 #include <QComboBox>
-#include <QPushButton>
 #include <QDoubleSpinBox>
-#include <QFileDialog>
-#include <QMessageBox>
 
 #include <qgsmessagelog.h>
 #include <qgis.h>
 
 #include <gdal.h>
 #include <cpl_error.h>
-#include <cpl_string.h>
 
 SpeckleFilterDialog::SpeckleFilterDialog(QWidget *parent)
-    : QDialog(parent)
+    : RasterProcessingDialogBase(parent)
 {
-    setWindowTitle(tr("Speckle Filter (SAR)"));
+    setWindowTitle(dialogTitle());
     setupUi();
-}
-
-void SpeckleFilterDialog::setRasterLayer(QgsRasterLayer *layer)
-{
-    m_rasterLayer = layer;
 }
 
 void SpeckleFilterDialog::setupUi()
@@ -85,26 +75,11 @@ void SpeckleFilterDialog::setupUi()
             this, &SpeckleFilterDialog::onFilterTypeChanged);
     onFilterTypeChanged(0);
 
-    // Output file
-    auto *outLayout = new QHBoxLayout();
-    outLayout->addWidget(new QLabel(tr("Output:"), this));
-    m_outputEdit = new QLineEdit(this);
-    outLayout->addWidget(m_outputEdit);
-    auto *browseBtn = new QPushButton(tr("Browse..."), this);
-    connect(browseBtn, &QPushButton::clicked, this, &SpeckleFilterDialog::onBrowseOutput);
-    outLayout->addWidget(browseBtn);
-    mainLayout->addLayout(outLayout);
+    // Output file (from base class)
+    setupOutputRow(mainLayout);
 
-    // Buttons
-    auto *btnLayout = new QHBoxLayout();
-    btnLayout->addStretch();
-    m_runButton = new QPushButton(tr("Run"), this);
-    connect(m_runButton, &QPushButton::clicked, this, &SpeckleFilterDialog::onRun);
-    btnLayout->addWidget(m_runButton);
-    auto *cancelBtn = new QPushButton(tr("Cancel"), this);
-    connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
-    btnLayout->addWidget(cancelBtn);
-    mainLayout->addLayout(btnLayout);
+    // Buttons (from base class)
+    setupButtonBar(mainLayout);
 }
 
 void SpeckleFilterDialog::onFilterTypeChanged(int index)
@@ -122,30 +97,10 @@ void SpeckleFilterDialog::onFilterTypeChanged(int index)
     }
 }
 
-void SpeckleFilterDialog::onBrowseOutput()
-{
-    QString path = QFileDialog::getSaveFileName(this, tr("Output File"), QString(),
-                                                tr("GeoTIFF (*.tif)"));
-    if (!path.isEmpty())
-        m_outputEdit->setText(path);
-}
-
 void SpeckleFilterDialog::onRun()
 {
-    // Validate inputs
-    QString outputPath = m_outputEdit->text().trimmed();
-    if (outputPath.isEmpty()) {
-        QMessageBox::warning(this, tr("Speckle Filter"), tr("Please specify an output file."));
-        return;
-    }
-
-    if (!m_rasterLayer || !m_rasterLayer->isValid()) {
-        QMessageBox::warning(this, tr("Speckle Filter"), tr("No valid raster layer selected."));
-        return;
-    }
-
     // Capture parameters for async execution
-    QString sourcePath = m_rasterLayer->dataProvider()->dataSourceUri();
+    QString sourcePath = m_rasterLayer->source();
     int kernelSize = 3;
     switch (m_kernelSizeCombo->currentIndex()) {
     case 0: kernelSize = 3; break;
@@ -164,7 +119,7 @@ void SpeckleFilterDialog::onRun()
 
     m_runButton->setEnabled(false);
 
-    m_runner->run([sourcePath, outputPath, kernelSize, filterIndex,
+    m_runner->run([sourcePath, outputPath(), kernelSize, filterIndex,
                    noiseVar, damping]() -> QString {
     try {
         // Open source dataset
@@ -205,7 +160,7 @@ void SpeckleFilterDialog::onRun()
 
         // Create output
         QString error;
-        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, width, height, bandCount,
+        GdalDatasetGuard dstGuard(createOutputTiff(outputPath(), width, height, bandCount,
                                                    GDT_Float32, srcDataset.geoTransform(),
                                                    srcDataset.projection(), &error));
         if (!dstGuard) return QString();
@@ -219,7 +174,7 @@ void SpeckleFilterDialog::onRun()
                             "Failed to write output band" );
         }
 
-        return outputPath;
+        return outputPath();
     } catch (const std::runtime_error &) {
         return QString();
     }
@@ -228,15 +183,10 @@ void SpeckleFilterDialog::onRun()
 
 void SpeckleFilterDialog::onCompleted(const QString &outputPath)
 {
-    m_runButton->setEnabled(true);
-    QgsMessageLog::logMessage(tr("Speckle filter completed! Output: %1").arg(outputPath),
-                              "speckle_filter", Qgis::MessageLevel::Success);
-    accept();
+    handleCompleted(outputPath);
 }
 
 void SpeckleFilterDialog::onFailed(const QString &error)
 {
-    m_runButton->setEnabled(true);
-    QgsMessageLog::logMessage(error, "speckle_filter", Qgis::MessageLevel::Critical);
-    QMessageBox::critical(this, tr("Speckle Filter"), tr("Operation failed. See log for details."));
+    handleFailed(error);
 }

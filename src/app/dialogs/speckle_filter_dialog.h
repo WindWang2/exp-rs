@@ -1,34 +1,30 @@
 // src/app/dialogs/speckle_filter_dialog.h
 #pragma once
 
-#include <QDialog>
-#include <QLineEdit>
+#include "raster_processing_dialog_base.h"
 
 class QComboBox;
-class QLabel;
-class QPushButton;
 class QDoubleSpinBox;
-class QgsRasterLayer;
+class QLabel;
 
 /**
  * Dialog for SAR Speckle Filtering operations.
  * Supports Lee, Frost, Kuan, and Gamma-MAP filters
  * for reducing speckle noise in synthetic aperture radar imagery.
  */
-class SpeckleFilterDialog : public QDialog
+class SpeckleFilterDialog : public RasterProcessingDialogBase
 {
     Q_OBJECT
 
 public:
     explicit SpeckleFilterDialog(QWidget *parent = nullptr);
 
-    void setRasterLayer(QgsRasterLayer *layer);
-
-    QString outputPath() const { return m_outputEdit ? m_outputEdit->text().trimmed() : QString(); }
+protected:
+    QString toolName() const override { return QStringLiteral("speckle_filter"); }
+    QString dialogTitle() const override { return tr("Speckle Filter"); }
+    void onRun() override;
 
 private slots:
-    void onBrowseOutput();
-    void onRun();
     void onFilterTypeChanged(int index);
 
 private:
@@ -39,7 +35,4 @@ private:
     QDoubleSpinBox *m_noiseVarSpin = nullptr;
     QDoubleSpinBox *m_dampingSpin = nullptr;
     QLabel *m_dampingLabel = nullptr;
-    QLineEdit *m_outputEdit = nullptr;
-    QPushButton *m_runButton = nullptr;
-    QgsRasterLayer *m_rasterLayer = nullptr;
 };
