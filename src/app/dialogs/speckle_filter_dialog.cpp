@@ -1,7 +1,9 @@
 // src/app/dialogs/speckle_filter_dialog.cpp
 #include "speckle_filter_dialog.h"
+#include "async_gdal_runner.h"
 #include "processing/algorithms/image_enhancement.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_safe_call.h"
 
 #include <raster/qgsrasterlayer.h>
 
@@ -142,109 +144,99 @@ void SpeckleFilterDialog::onRun()
         return;
     }
 
-    // Open source dataset
-    GdalDatasetWrapper srcDataset;
-    if (!srcDataset.open(m_rasterLayer->dataProvider()->dataSourceUri())) {
-        QgsMessageLog::logMessage(tr("Failed to open source file: %1").arg(srcDataset.lastError()),
-                                  "speckle_filter", Qgis::MessageLevel::Critical);
-        return;
-    }
-
-    int width = srcDataset.width();
-    int height = srcDataset.height();
-    int bandCount = srcDataset.bandCount();
-    size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
-
-    // Determine kernel size
+    // Capture parameters for async execution
+    QString sourcePath = m_rasterLayer->dataProvider()->dataSourceUri();
     int kernelSize = 3;
     switch (m_kernelSizeCombo->currentIndex()) {
     case 0: kernelSize = 3; break;
     case 1: kernelSize = 5; break;
     case 2: kernelSize = 7; break;
     }
-
     int filterIndex = m_filterTypeCombo->currentIndex();
     float noiseVar = static_cast<float>(m_noiseVarSpin->value());
     float damping = static_cast<float>(m_dampingSpin->value());
 
-    // Read and filter each band
-    std::vector<std::vector<float>> outputBands(bandCount, std::vector<float>(pixelCount));
+    if (!m_runner) {
+        m_runner = new AsyncGdalRunner(this, this);
+        connect(m_runner, &AsyncGdalRunner::completed, this, &SpeckleFilterDialog::onCompleted);
+        connect(m_runner, &AsyncGdalRunner::failed, this, &SpeckleFilterDialog::onFailed);
+    }
 
-    for (int b = 0; b < bandCount; ++b) {
-        std::vector<float> bandData(pixelCount);
-        if (!srcDataset.readBandData(b + 1, bandData.data(), width, height)) {
-            QgsMessageLog::logMessage(tr("Failed to read band %1.").arg(b + 1),
-                                      "speckle_filter", Qgis::MessageLevel::Critical);
-            return;
-        }
+    m_runButton->setEnabled(false);
 
-        switch (filterIndex) {
-        case 0: // Lee
-            ImageEnhancement::leeFilter(bandData.data(), outputBands[b].data(),
-                                        width, height, kernelSize, noiseVar);
-            break;
-        case 1: // Frost
-            ImageEnhancement::frostFilter(bandData.data(), outputBands[b].data(),
-                                          width, height, kernelSize, damping);
-            break;
-        case 2: // Kuan
-            ImageEnhancement::kuanFilter(bandData.data(), outputBands[b].data(),
-                                         width, height, kernelSize, noiseVar);
-            break;
-        case 3: // Gamma-MAP
-            ImageEnhancement::gammaMapFilter(bandData.data(), outputBands[b].data(),
+    m_runner->run([sourcePath, outputPath, kernelSize, filterIndex,
+                   noiseVar, damping]() -> QString {
+    try {
+        // Open source dataset
+        GdalDatasetWrapper srcDataset;
+        if (!srcDataset.open(sourcePath)) return QString();
+
+        int width = srcDataset.width();
+        int height = srcDataset.height();
+        int bandCount = srcDataset.bandCount();
+        size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+
+        // Read and filter each band
+        std::vector<std::vector<float>> outputBands(bandCount, std::vector<float>(pixelCount));
+
+        for (int b = 0; b < bandCount; ++b) {
+            std::vector<float> bandData(pixelCount);
+            if (!srcDataset.readBandData(b + 1, bandData.data(), width, height)) return QString();
+
+            switch (filterIndex) {
+            case 0: // Lee
+                ImageEnhancement::leeFilter(bandData.data(), outputBands[b].data(),
+                                            width, height, kernelSize, noiseVar);
+                break;
+            case 1: // Frost
+                ImageEnhancement::frostFilter(bandData.data(), outputBands[b].data(),
+                                              width, height, kernelSize, damping);
+                break;
+            case 2: // Kuan
+                ImageEnhancement::kuanFilter(bandData.data(), outputBands[b].data(),
                                              width, height, kernelSize, noiseVar);
-            break;
+                break;
+            case 3: // Gamma-MAP
+                ImageEnhancement::gammaMapFilter(bandData.data(), outputBands[b].data(),
+                                                 width, height, kernelSize, noiseVar);
+                break;
+            }
         }
-    }
 
-    // Create output file using GDAL
-    GDALDriverH driver = GDALGetDriverByName("GTiff");
-    if (!driver) {
-        QgsMessageLog::logMessage(tr("Failed to get GeoTIFF driver."),
-                                  "speckle_filter", Qgis::MessageLevel::Critical);
-        return;
-    }
+        // Create output
+        QString error;
+        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, width, height, bandCount,
+                                                   GDT_Float32, srcDataset.geoTransform(),
+                                                   srcDataset.projection(), &error));
+        if (!dstGuard) return QString();
 
-    char **options = nullptr;
-    options = CSLSetNameValue(options, "COMPRESS", "LZW");
-    GDALDatasetH dstDataset = GDALCreate(driver, outputPath.toUtf8().constData(),
-                                          width, height, bandCount, GDT_Float32, options);
-    CSLDestroy(options);
-
-    if (!dstDataset) {
-        QgsMessageLog::logMessage(tr("Failed to create output file."),
-                                  "speckle_filter", Qgis::MessageLevel::Critical);
-        return;
-    }
-
-    // Copy geotransform and projection from source
-    std::array<double, 6> gt = srcDataset.geoTransform();
-    GDALSetGeoTransform(dstDataset, gt.data());
-    GDALSetProjection(dstDataset, srcDataset.projection().toUtf8().constData());
-
-    // Write all output bands
-    for (int b = 0; b < bandCount; ++b) {
-        GDALRasterBandH dstBand = GDALGetRasterBand(dstDataset, b + 1);
-        if (!dstBand) {
-            QgsMessageLog::logMessage(tr("Failed to get output band %1.").arg(b + 1),
-                                      "speckle_filter", Qgis::MessageLevel::Critical);
-            GDALClose(dstDataset);
-            return;
+        // Write all output bands
+        for (int b = 0; b < bandCount; ++b) {
+            GDALRasterBandH dstBand = GDALGetRasterBand(dstGuard.get(), b + 1);
+            if (!dstBand) return QString();
+            GDAL_SAFE_CALL( GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
+                            outputBands[b].data(), width, height, GDT_Float32, 0, 0),
+                            "Failed to write output band" );
         }
-        CPLErr err = GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
-                                   outputBands[b].data(), width, height, GDT_Float32, 0, 0);
-        if (err != CE_None) {
-            QgsMessageLog::logMessage(tr("Failed to write output band %1.").arg(b + 1),
-                                      "speckle_filter", Qgis::MessageLevel::Critical);
-            GDALClose(dstDataset);
-            return;
-        }
+
+        return outputPath;
+    } catch (const std::runtime_error &) {
+        return QString();
     }
+    });
+}
 
-    GDALClose(dstDataset);
-
-    QgsMessageLog::logMessage(tr("Speckle filter completed. Output: %1").arg(outputPath),
+void SpeckleFilterDialog::onCompleted(const QString &outputPath)
+{
+    m_runButton->setEnabled(true);
+    QgsMessageLog::logMessage(tr("Speckle filter completed! Output: %1").arg(outputPath),
                               "speckle_filter", Qgis::MessageLevel::Success);
     accept();
+}
+
+void SpeckleFilterDialog::onFailed(const QString &error)
+{
+    m_runButton->setEnabled(true);
+    QgsMessageLog::logMessage(error, "speckle_filter", Qgis::MessageLevel::Critical);
+    QMessageBox::critical(this, tr("Speckle Filter"), tr("Operation failed. See log for details."));
 }

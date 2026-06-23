@@ -127,30 +127,12 @@ void PcaDialog::onRun()
     // Run PCA
     ImageEnhancement::PcaResult pcaResult = ImageEnhancement::pca(allBands, numComponents);
 
-    // Create output file using GDAL
-    GDALDriverH driver = GDALGetDriverByName("GTiff");
-    if (!driver) {
-        QgsMessageLog::logMessage(tr("Failed to get GeoTIFF driver."),
-                                  "pca", Qgis::MessageLevel::Critical);
-        return;
-    }
-
-    char **options = nullptr;
-    options = CSLSetNameValue(options, "COMPRESS", "LZW");
-    GDALDatasetH dstDataset = GDALCreate(driver, outputPath.toUtf8().constData(),
-                                          width, height, numComponents, GDT_Float32, options);
-    CSLDestroy(options);
-
-    if (!dstDataset) {
-        QgsMessageLog::logMessage(tr("Failed to create output file."),
-                                  "pca", Qgis::MessageLevel::Critical);
-        return;
-    }
-
-    // Copy geotransform and projection from source
-    std::array<double, 6> gt = srcDataset.geoTransform();
-    GDALSetGeoTransform(dstDataset, gt.data());
-    GDALSetProjection(dstDataset, srcDataset.projection().toUtf8().constData());
+    // Create output
+        QString error;
+        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, width, height, bandCount,
+                                                   GDT_Float32, srcDataset.geoTransform(),
+                                                   srcDataset.projection(), &error));
+        if (!dstGuard) return QString();
 
     // Write each component as a band
     for (int c = 0; c < numComponents; ++c) {

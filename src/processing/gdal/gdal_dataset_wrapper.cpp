@@ -3,11 +3,12 @@
 
 #include <gdal.h>
 #include <cpl_error.h>
+#include <cpl_string.h>
 #include <QFile>
 #include <mutex>
 
 // Ensure GDAL drivers are registered (once per process, thread-safe)
-static void ensureGdalInit()
+void ensureGdalInit()
 {
     static std::once_flag flag;
     std::call_once(flag, []() { GDALAllRegister(); });
@@ -163,4 +164,43 @@ double GdalDatasetWrapper::bandNoDataValue(int bandNum, bool *hasNodata) const
 QString GdalDatasetWrapper::lastError() const
 {
     return m_lastError;
+}
+
+// --- Free function: createOutputTiff ---
+
+GDALDatasetH createOutputTiff(const QString &path,
+                               int width, int height, int bandCount,
+                               GDALDataType dtype,
+                               const std::array<double, 6> &geoTransform,
+                               const QString &projection,
+                               QString *errorMessage)
+{
+    ensureGdalInit();
+
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    if (!driver) {
+        if (errorMessage) *errorMessage = QStringLiteral("GeoTIFF driver not available");
+        return nullptr;
+    }
+
+    char **opts = nullptr;
+    opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
+
+    GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(),
+                                  width, height, bandCount, dtype, opts);
+    CSLDestroy(opts);
+
+    if (!ds) {
+        const char *msg = CPLGetLastErrorMsg();
+        if (errorMessage) {
+            *errorMessage = msg ? QString::fromUtf8(msg)
+                                : QStringLiteral("Failed to create output file: %1").arg(path);
+        }
+        return nullptr;
+    }
+
+    GDALSetGeoTransform(ds, const_cast<double *>(geoTransform.data()));
+    GDALSetProjection(ds, projection.toUtf8().constData());
+
+    return ds;
 }

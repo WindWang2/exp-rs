@@ -1,7 +1,9 @@
 // src/app/dialogs/spatial_filter_dialog.cpp
 #include "spatial_filter_dialog.h"
+#include "async_gdal_runner.h"
 #include "processing/algorithms/image_enhancement.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_safe_call.h"
 
 #include <raster/qgsrasterlayer.h>
 
@@ -20,6 +22,8 @@
 #include <gdal.h>
 #include <cpl_error.h>
 #include <cpl_string.h>
+
+#include "qgsogrutils.h"
 
 SpatialFilterDialog::SpatialFilterDialog(QWidget *parent)
     : QDialog(parent)
@@ -98,105 +102,95 @@ void SpatialFilterDialog::onRun()
         return;
     }
 
-    // Open source dataset
-    GdalDatasetWrapper srcDataset;
-    if (!srcDataset.open(m_rasterLayer->dataProvider()->dataSourceUri())) {
-        QgsMessageLog::logMessage(tr("Failed to open source file: %1").arg(srcDataset.lastError()),
-                                  "spatial_filter", Qgis::MessageLevel::Critical);
-        return;
-    }
-
-    int width = srcDataset.width();
-    int height = srcDataset.height();
-    int bandCount = srcDataset.bandCount();
-    size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
-
-    // Determine kernel size
+    // Capture parameters for async execution
+    QString sourcePath = m_rasterLayer->dataProvider()->dataSourceUri();
     int kernelSize = (m_kernelSizeCombo->currentIndex() == 1) ? 5 : 3;
     int filterIndex = m_filterTypeCombo->currentIndex();
 
-    // Read and filter each band
-    std::vector<std::vector<float>> outputBands(bandCount, std::vector<float>(pixelCount));
+    if (!m_runner) {
+        m_runner = new AsyncGdalRunner(this, this);
+        connect(m_runner, &AsyncGdalRunner::completed, this, &SpatialFilterDialog::onCompleted);
+        connect(m_runner, &AsyncGdalRunner::failed, this, &SpatialFilterDialog::onFailed);
+    }
 
-    for (int b = 0; b < bandCount; ++b) {
-        std::vector<float> bandData(pixelCount);
-        if (!srcDataset.readBandData(b + 1, bandData.data(), width, height)) {
-            QgsMessageLog::logMessage(tr("Failed to read band %1.").arg(b + 1),
-                                      "spatial_filter", Qgis::MessageLevel::Critical);
-            return;
-        }
+    m_runButton->setEnabled(false);
 
-        switch (filterIndex) {
-        case 0: // Mean
-            ImageEnhancement::meanFilter(bandData.data(), outputBands[b].data(),
-                                         width, height, kernelSize);
-            break;
-        case 1: // Gaussian
-            ImageEnhancement::gaussianFilter(bandData.data(), outputBands[b].data(),
+    m_runner->run([sourcePath, outputPath, kernelSize, filterIndex]() -> QString {
+    try {
+        // Open source dataset
+        GdalDatasetWrapper srcDataset;
+        if (!srcDataset.open(sourcePath)) return QString();
+
+        int width = srcDataset.width();
+        int height = srcDataset.height();
+        int bandCount = srcDataset.bandCount();
+        size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+
+        // Read and filter each band
+        std::vector<std::vector<float>> outputBands(bandCount, std::vector<float>(pixelCount));
+
+        for (int b = 0; b < bandCount; ++b) {
+            std::vector<float> bandData(pixelCount);
+            if (!srcDataset.readBandData(b + 1, bandData.data(), width, height)) return QString();
+
+            switch (filterIndex) {
+            case 0: // Mean
+                ImageEnhancement::meanFilter(bandData.data(), outputBands[b].data(),
                                              width, height, kernelSize);
-            break;
-        case 2: // Median
-            ImageEnhancement::medianFilter(bandData.data(), outputBands[b].data(),
-                                           width, height, kernelSize);
-            break;
-        case 3: // Sobel
-            ImageEnhancement::sobelFilter(bandData.data(), outputBands[b].data(),
-                                          width, height);
-            break;
-        case 4: // Laplacian
-            ImageEnhancement::laplacianFilter(bandData.data(), outputBands[b].data(),
+                break;
+            case 1: // Gaussian
+                ImageEnhancement::gaussianFilter(bandData.data(), outputBands[b].data(),
+                                                 width, height, kernelSize);
+                break;
+            case 2: // Median
+                ImageEnhancement::medianFilter(bandData.data(), outputBands[b].data(),
+                                               width, height, kernelSize);
+                break;
+            case 3: // Sobel
+                ImageEnhancement::sobelFilter(bandData.data(), outputBands[b].data(),
                                               width, height);
-            break;
+                break;
+            case 4: // Laplacian
+                ImageEnhancement::laplacianFilter(bandData.data(), outputBands[b].data(),
+                                                  width, height);
+                break;
+            }
         }
-    }
 
-    // Create output file using GDAL
-    GDALDriverH driver = GDALGetDriverByName("GTiff");
-    if (!driver) {
-        QgsMessageLog::logMessage(tr("Failed to get GeoTIFF driver."),
-                                  "spatial_filter", Qgis::MessageLevel::Critical);
-        return;
-    }
+        // Create output
+        QString error;
+        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, width, height, bandCount,
+                                                   GDT_Float32, srcDataset.geoTransform(),
+                                                   srcDataset.projection(), &error));
+        if (!dstGuard) return QString();
 
-    char **options = nullptr;
-    options = CSLSetNameValue(options, "COMPRESS", "LZW");
-    GDALDatasetH dstDataset = GDALCreate(driver, outputPath.toUtf8().constData(),
-                                          width, height, bandCount, GDT_Float32, options);
-    CSLDestroy(options);
-
-    if (!dstDataset) {
-        QgsMessageLog::logMessage(tr("Failed to create output file."),
-                                  "spatial_filter", Qgis::MessageLevel::Critical);
-        return;
-    }
-
-    // Copy geotransform and projection from source
-    std::array<double, 6> gt = srcDataset.geoTransform();
-    GDALSetGeoTransform(dstDataset, gt.data());
-    GDALSetProjection(dstDataset, srcDataset.projection().toUtf8().constData());
-
-    // Write all output bands
-    for (int b = 0; b < bandCount; ++b) {
-        GDALRasterBandH dstBand = GDALGetRasterBand(dstDataset, b + 1);
-        if (!dstBand) {
-            QgsMessageLog::logMessage(tr("Failed to get output band %1.").arg(b + 1),
-                                      "spatial_filter", Qgis::MessageLevel::Critical);
-            GDALClose(dstDataset);
-            return;
+        // Write all output bands
+        for (int b = 0; b < bandCount; ++b) {
+            GDALRasterBandH dstBand = GDALGetRasterBand(dstDataset.get(), b + 1);
+            if (!dstBand) return QString();
+            GDAL_SAFE_CALL( GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
+                            outputBands[b].data(), width, height, GDT_Float32, 0, 0),
+                            "Failed to write output band" );
         }
-        CPLErr err = GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
-                                   outputBands[b].data(), width, height, GDT_Float32, 0, 0);
-        if (err != CE_None) {
-            QgsMessageLog::logMessage(tr("Failed to write output band %1.").arg(b + 1),
-                                      "spatial_filter", Qgis::MessageLevel::Critical);
-            GDALClose(dstDataset);
-            return;
-        }
+
+        return outputPath;
+    } catch (const std::runtime_error &) {
+        return QString();
     }
+    });
+}
 
-    GDALClose(dstDataset);
-
-    QgsMessageLog::logMessage(tr("Spatial filter completed successfully! Output: %1").arg(outputPath),
+void SpatialFilterDialog::onCompleted(const QString &outputPath)
+{
+    m_runButton->setEnabled(true);
+    QgsMessageLog::logMessage(tr("Spatial filter completed! Output: %1").arg(outputPath),
                               "spatial_filter", Qgis::MessageLevel::Success);
     accept();
+}
+
+void SpatialFilterDialog::onFailed(const QString &error)
+{
+    m_runButton->setEnabled(true);
+    QgsMessageLog::logMessage(error, "spatial_filter", Qgis::MessageLevel::Critical);
+    QMessageBox::critical(this, tr("Spatial Filter"), tr("Operation failed. See log for details."));
 }

@@ -1,7 +1,6 @@
 // src/app/dialogs/spectral_index_dialog.cpp
 #include "spectral_index_dialog.h"
-#include "processing/algorithms/spectral_indices.h"
-#include "processing/gdal/gdal_dataset_wrapper.h"
+#include "async_algorithm_runner.h"
 
 #include <raster/qgsrasterlayer.h>
 
@@ -13,13 +12,28 @@
 #include <QPushButton>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QDir>
+#include <QDateTime>
 
+#include <qgsapplication.h>
+#include <qgsproject.h>
 #include <qgsmessagelog.h>
 #include <qgis.h>
+
+#include <processing/qgsprocessingregistry.h>
+#include <processing/qgsprocessingalgorithm.h>
+#include <processing/qgsprocessingcontext.h>
+#include <processing/qgsprocessingfeedback.h>
 
 #include <gdal.h>
 #include <cpl_error.h>
 #include <cpl_string.h>
+
+#include "processing/gdal/gdal_safe_call.h"
+
+#include "qgsogrutils.h"
+
+#include <vector>
 
 SpectralIndexDialog::SpectralIndexDialog(QWidget *parent)
     : QDialog(parent)
@@ -178,175 +192,177 @@ void SpectralIndexDialog::onBrowseOutput()
         m_outputEdit->setText(path);
 }
 
+/**
+ * Extract a single band from a multi-band raster into a temporary single-band
+ * GeoTIFF file and return a QgsRasterLayer wrapping it.  The caller takes
+ * ownership of the returned layer.  Returns nullptr on failure.
+ *
+ * This bridges the dialog UI (which lets the user pick band numbers from a
+ * multi-band layer) with the SpectralIndexAlgorithm API (which expects
+ * separate single-band QgsRasterLayer objects).
+ */
+static QgsRasterLayer *extractBandAsLayer( QgsRasterLayer *srcLayer, int bandNum,
+                                           const QString &tag, QStringList &tempFiles )
+{
+    if ( !srcLayer || !srcLayer->isValid() || bandNum <= 0 )
+        return nullptr;
+
+    gdal::dataset_unique_ptr srcDS( GDALOpen(
+        srcLayer->dataProvider()->dataSourceUri().toUtf8().constData(), GA_ReadOnly ) );
+    if ( !srcDS )
+        return nullptr;
+
+    int width  = GDALGetRasterXSize( srcDS.get() );
+    int height = GDALGetRasterYSize( srcDS.get() );
+
+    QString tempPath = QDir::tempPath()
+        + QStringLiteral( "/sicnu_%1_band%2_%3.tif" )
+              .arg( tag )
+              .arg( bandNum )
+              .arg( QDateTime::currentMSecsSinceEpoch() );
+
+    // Create output file
+    double gt[6];
+    GDALGetGeoTransform( srcDS.get(), gt );
+    std::array<double, 6> geoTransform;
+    std::copy(std::begin(gt), std::end(gt), geoTransform.begin());
+    const char *proj = GDALGetProjectionRef( srcDS.get() );
+    QString projection = proj ? QString::fromUtf8(proj) : QString();
+
+    QString error;
+    GdalDatasetGuard dstDS(createOutputTiff(tempPath, width, height, 1,
+                                           GDT_Float32, geoTransform, projection, &error));
+    if ( !dstDS ) { return nullptr; }
+
+    // Copy pixel data for the requested band
+    std::vector<float> buf( static_cast<size_t>( width ) * height );
+    try {
+        GDALRasterBandH srcBand = GDALGetRasterBand( srcDS.get(), bandNum );
+        if ( !srcBand ) {
+            QFile::remove( tempPath );
+            return nullptr;
+        }
+        GDAL_SAFE_CALL( GDALRasterIO( srcBand, GF_Read, 0, 0, width, height,
+                        buf.data(), width, height, GDT_Float32, 0, 0 ),
+                        "Failed to read source band data" );
+        GDALRasterBandH dstBand = GDALGetRasterBand( dstDS.get(), 1 );
+        if ( !dstBand ) {
+            QFile::remove( tempPath );
+            return nullptr;
+        }
+        GDAL_SAFE_CALL( GDALRasterIO( dstBand, GF_Write, 0, 0, width, height,
+                        buf.data(), width, height, GDT_Float32, 0, 0 ),
+                        "Failed to write band data to temp file" );
+    } catch ( const std::runtime_error & ) {
+        QFile::remove( tempPath );
+        return nullptr;
+    }
+
+    tempFiles.append( tempPath );
+
+    return new QgsRasterLayer( tempPath,
+                               QStringLiteral( "%1_band%2" ).arg( tag ).arg( bandNum ) );
+}
+
 void SpectralIndexDialog::onRun()
 {
     // Validate inputs
     QString outputPath = m_outputEdit->text().trimmed();
-    if (outputPath.isEmpty()) {
-        QMessageBox::warning(this, tr("Spectral Index"), tr("Please specify an output file."));
+    if ( outputPath.isEmpty() ) {
+        QMessageBox::warning( this, tr( "Spectral Index" ), tr( "Please specify an output file." ) );
         return;
     }
 
-    if (!m_rasterLayer || !m_rasterLayer->isValid()) {
-        QMessageBox::warning(this, tr("Spectral Index"), tr("No valid raster layer selected."));
+    if ( !m_rasterLayer || !m_rasterLayer->isValid() ) {
+        QMessageBox::warning( this, tr( "Spectral Index" ), tr( "No valid raster layer selected." ) );
         return;
     }
 
-    // Open source dataset
-    GdalDatasetWrapper srcDataset;
-    if (!srcDataset.open(m_rasterLayer->dataProvider()->dataSourceUri())) {
-        QgsMessageLog::logMessage(tr("Failed to open source file: %1").arg(srcDataset.lastError()),
-                                  "spectral_index", Qgis::MessageLevel::Critical);
+    // Look up the processing algorithm from the registry
+    const QgsProcessingAlgorithm *alg = QgsApplication::processingRegistry()->algorithmById(
+        QStringLiteral( "qgis_algorithms:rs_spectral_index" ) );
+    if ( !alg ) {
+        QMessageBox::critical( this, tr( "Spectral Index" ),
+                               tr( "Processing algorithm not found: rs_spectral_index" ) );
         return;
     }
 
-    int width = srcDataset.width();
-    int height = srcDataset.height();
-    size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+    std::unique_ptr<QgsProcessingAlgorithm> algorithm( alg->create() );
 
-    // Read required bands
+    // Extract each visible band selection into a temporary single-band layer.
+    // The algorithm expects separate QgsRasterLayer objects, each containing
+    // exactly the band to be used.  Temporary files are cleaned up at the end.
+    QStringList tempFiles;
+    auto cleanupGuard = qScopeGuard([&tempFiles]() {
+        for (const QString &f : tempFiles)
+            QFile::remove(f);
+    });
+
     int index = m_indexCombo->currentIndex();
+    std::unique_ptr<QgsRasterLayer> nirLayer, redLayer, greenLayer, blueLayer, swirLayer;
 
-    // Helper lambda to read a band
-    auto readBand = [&](int bandNum) -> std::vector<float> {
-        std::vector<float> buffer(pixelCount);
-        if (!srcDataset.readBandData(bandNum, buffer.data(), width, height)) {
-            return {};
-        }
-        return buffer;
-    };
+    if ( m_nirCombo->isVisible() )
+        nirLayer.reset( extractBandAsLayer( m_rasterLayer,
+                        m_nirCombo->currentData().toInt(), QStringLiteral( "nir" ), tempFiles ) );
+    if ( m_redCombo->isVisible() )
+        redLayer.reset( extractBandAsLayer( m_rasterLayer,
+                        m_redCombo->currentData().toInt(), QStringLiteral( "red" ), tempFiles ) );
+    if ( m_greenCombo->isVisible() )
+        greenLayer.reset( extractBandAsLayer( m_rasterLayer,
+                          m_greenCombo->currentData().toInt(), QStringLiteral( "green" ), tempFiles ) );
+    if ( m_blueCombo->isVisible() )
+        blueLayer.reset( extractBandAsLayer( m_rasterLayer,
+                         m_blueCombo->currentData().toInt(), QStringLiteral( "blue" ), tempFiles ) );
+    if ( m_swirCombo->isVisible() )
+        swirLayer.reset( extractBandAsLayer( m_rasterLayer,
+                         m_swirCombo->currentData().toInt(), QStringLiteral( "swir" ), tempFiles ) );
 
-    // Read bands based on selected index
-    std::vector<float> nir, red, green, blue, swir, output(pixelCount);
-    bool success = false;
+    // Build parameters from dialog inputs
+    QVariantMap params;
+    params.insert( QStringLiteral( "INDEX" ), index );
+    if ( nirLayer )
+        params.insert( QStringLiteral( "NIR_BAND" ), QVariant::fromValue( nirLayer.get() ) );
+    if ( redLayer )
+        params.insert( QStringLiteral( "RED_BAND" ), QVariant::fromValue( redLayer.get() ) );
+    if ( greenLayer )
+        params.insert( QStringLiteral( "GREEN_BAND" ), QVariant::fromValue( greenLayer.get() ) );
+    if ( blueLayer )
+        params.insert( QStringLiteral( "BLUE_BAND" ), QVariant::fromValue( blueLayer.get() ) );
+    if ( swirLayer )
+        params.insert( QStringLiteral( "SWIR_BAND" ), QVariant::fromValue( swirLayer.get() ) );
+    params.insert( QStringLiteral( "OUTPUT" ), outputPath );
 
-    switch (index) {
-    case 0: // NDVI
-    {
-        nir = readBand(m_nirCombo->currentData().toInt());
-        red = readBand(m_redCombo->currentData().toInt());
-        if (nir.empty() || red.empty()) {
-            QgsMessageLog::logMessage(tr("Failed to read band data."),
-                                      "spectral_index", Qgis::MessageLevel::Critical);
-            return;
-        }
-        success = SpectralIndices::ndvi(nir.data(), red.data(), output.data(), pixelCount);
-        break;
-    }
-    case 1: // EVI
-    {
-        nir = readBand(m_nirCombo->currentData().toInt());
-        red = readBand(m_redCombo->currentData().toInt());
-        blue = readBand(m_blueCombo->currentData().toInt());
-        if (nir.empty() || red.empty() || blue.empty()) {
-            QgsMessageLog::logMessage(tr("Failed to read band data."),
-                                      "spectral_index", Qgis::MessageLevel::Critical);
-            return;
-        }
-        success = SpectralIndices::evi(nir.data(), red.data(), blue.data(), output.data(), pixelCount);
-        break;
-    }
-    case 2: // SAVI
-    {
-        nir = readBand(m_nirCombo->currentData().toInt());
-        red = readBand(m_redCombo->currentData().toInt());
-        if (nir.empty() || red.empty()) {
-            QgsMessageLog::logMessage(tr("Failed to read band data."),
-                                      "spectral_index", Qgis::MessageLevel::Critical);
-            return;
-        }
-        success = SpectralIndices::savi(nir.data(), red.data(), output.data(), pixelCount);
-        break;
-    }
-    case 3: // NDWI
-    {
-        green = readBand(m_greenCombo->currentData().toInt());
-        nir = readBand(m_nirCombo->currentData().toInt());
-        if (green.empty() || nir.empty()) {
-            QgsMessageLog::logMessage(tr("Failed to read band data."),
-                                      "spectral_index", Qgis::MessageLevel::Critical);
-            return;
-        }
-        success = SpectralIndices::ndwi(green.data(), nir.data(), output.data(), pixelCount);
-        break;
-    }
-    case 4: // NDBI
-    {
-        swir = readBand(m_swirCombo->currentData().toInt());
-        nir = readBand(m_nirCombo->currentData().toInt());
-        if (swir.empty() || nir.empty()) {
-            QgsMessageLog::logMessage(tr("Failed to read band data."),
-                                      "spectral_index", Qgis::MessageLevel::Critical);
-            return;
-        }
-        success = SpectralIndices::ndbi(swir.data(), nir.data(), output.data(), pixelCount);
-        break;
-    }
-    case 5: // MNDWI
-    {
-        green = readBand(m_greenCombo->currentData().toInt());
-        swir = readBand(m_swirCombo->currentData().toInt());
-        if (green.empty() || swir.empty()) {
-            QgsMessageLog::logMessage(tr("Failed to read band data."),
-                                      "spectral_index", Qgis::MessageLevel::Critical);
-            return;
-        }
-        success = SpectralIndices::mndwi(green.data(), swir.data(), output.data(), pixelCount);
-        break;
-    }
+    // Execute algorithm asynchronously
+    QgsProcessingContext context;
+    context.setProject( QgsProject::instance() );
+
+    if ( !m_runner ) {
+        m_runner = new AsyncAlgorithmRunner( this, this );
+        connect( m_runner, &AsyncAlgorithmRunner::completed,
+                 this, &SpectralIndexDialog::onAlgorithmCompleted );
+        connect( m_runner, &AsyncAlgorithmRunner::failed,
+                 this, &SpectralIndexDialog::onAlgorithmFailed );
     }
 
-    if (!success) {
-        QgsMessageLog::logMessage(tr("Failed to calculate spectral index."),
-                                  "spectral_index", Qgis::MessageLevel::Critical);
-        return;
-    }
+    m_runButton->setEnabled( false );
+    m_runner->run( alg, params, context );
+}
 
-    // Create output file using GDAL
-    GDALDriverH driver = GDALGetDriverByName("GTiff");
-    if (!driver) {
-        QgsMessageLog::logMessage(tr("Failed to get GeoTIFF driver."),
-                                  "spectral_index", Qgis::MessageLevel::Critical);
-        return;
-    }
-
-    char **options = nullptr;
-    options = CSLSetNameValue(options, "COMPRESS", "LZW");
-    GDALDatasetH dstDataset = GDALCreate(driver, outputPath.toUtf8().constData(),
-                                          width, height, 1, GDT_Float32, options);
-    CSLDestroy(options);
-
-    if (!dstDataset) {
-        QgsMessageLog::logMessage(tr("Failed to create output file."),
-                                  "spectral_index", Qgis::MessageLevel::Critical);
-        return;
-    }
-
-    // Copy geotransform and projection from source
-    std::array<double, 6> gt = srcDataset.geoTransform();
-    GDALSetGeoTransform(dstDataset, gt.data());
-    GDALSetProjection(dstDataset, srcDataset.projection().toUtf8().constData());
-
-    // Write output band
-    GDALRasterBandH dstBand = GDALGetRasterBand(dstDataset, 1);
-    if (!dstBand) {
-        QgsMessageLog::logMessage(tr("Failed to get output band."),
-                                  "spectral_index", Qgis::MessageLevel::Critical);
-        GDALClose(dstDataset);
-        return;
-    }
-    CPLErr err = GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
-                               output.data(), width, height, GDT_Float32, 0, 0);
-
-    GDALClose(dstDataset);
-
-    if (err != CE_None) {
-        QgsMessageLog::logMessage(tr("Failed to write output file."),
-                                  "spectral_index", Qgis::MessageLevel::Critical);
-        return;
-    }
-
-    QgsMessageLog::logMessage(tr("Spectral index calculation completed successfully! Output: %1").arg(outputPath),
-                              "spectral_index", Qgis::MessageLevel::Success);
+void SpectralIndexDialog::onAlgorithmCompleted( const QVariantMap &results )
+{
+    Q_UNUSED( results );
+    QString outputPath = m_outputEdit->text().trimmed();
+    QgsMessageLog::logMessage(
+        tr( "Spectral index calculation completed successfully! Output: %1" ).arg( outputPath ),
+        "spectral_index", Qgis::MessageLevel::Success );
+    m_runButton->setEnabled( true );
     accept();
+}
+
+void SpectralIndexDialog::onAlgorithmFailed( const QString &errorMessage )
+{
+    QgsMessageLog::logMessage( errorMessage, "spectral_index", Qgis::MessageLevel::Critical );
+    QMessageBox::critical( this, tr( "Spectral Index" ),
+                           tr( "Algorithm failed. See log for details." ) );
+    m_runButton->setEnabled( true );
 }

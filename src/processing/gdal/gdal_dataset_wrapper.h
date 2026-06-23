@@ -5,6 +5,37 @@
 #include <array>
 #include <cstdint>
 
+// Forward declarations to avoid exposing gdal.h in header
+typedef void *GDALDatasetH;
+typedef int GDALDataType;
+
+/// Ensure GDAL drivers are registered (once per process, thread-safe).
+/// Prefer this over calling GDALAllRegister() directly.
+void ensureGdalInit();
+
+/**
+ * Create a standard GeoTIFF output file with LZW compression.
+ *
+ * Copies the geotransform and projection from a source dataset.
+ * The caller is responsible for closing the returned dataset handle.
+ *
+ * @param path          Output file path
+ * @param width         Raster width in pixels
+ * @param height        Raster height in pixels
+ * @param bandCount     Number of output bands
+ * @param dtype         GDAL data type (e.g. GDT_Float32)
+ * @param geoTransform  6-element affine geotransform from source
+ * @param projection    WKT projection string from source
+ * @param errorMessage  If non-null, receives error description on failure
+ * @return GDALDatasetH on success, nullptr on failure
+ */
+GDALDatasetH createOutputTiff(const QString &path,
+                               int width, int height, int bandCount,
+                               GDALDataType dtype,
+                               const std::array<double, 6> &geoTransform,
+                               const QString &projection,
+                               QString *errorMessage = nullptr);
+
 /**
  * RAII wrapper around GDAL C API for raster dataset access.
  *

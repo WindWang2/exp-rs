@@ -1,32 +1,33 @@
 // src/app/dialogs/band_ratio_dialog.h
 #pragma once
 
-#include <QDialog>
+#include "raster_processing_dialog_base.h"
 
 class QComboBox;
-class QLineEdit;
-class QPushButton;
 class QLabel;
-class QgsRasterLayer;
+class AsyncGdalRunner;
 
 /**
  * Dialog for Band Ratio and IHS Transform operations.
  * Supports Band Ratio (band1/band2) and IHS Transform (R,G,B -> I,H,S)
  * using the ImageEnhancement algorithm library.
  */
-class BandRatioDialog : public QDialog
+class BandRatioDialog : public RasterProcessingDialogBase
 {
     Q_OBJECT
 
 public:
     explicit BandRatioDialog(QWidget *parent = nullptr);
 
-    void setRasterLayer(QgsRasterLayer *layer);
+protected:
+    QString toolName() const override { return QStringLiteral("band_ratio"); }
+    QString dialogTitle() const override { return tr("Band Ratio / IHS"); }
+    void onRun() override;
 
 private slots:
-    void onBrowseOutput();
-    void onRun();
     void onModeChanged(int index);
+    void onCompleted(const QString &outputPath);
+    void onFailed(const QString &error);
 
 private:
     void setupUi();
@@ -48,7 +49,5 @@ private:
     QLabel *m_blueLabel = nullptr;
     QComboBox *m_blueCombo = nullptr;
 
-    QLineEdit *m_outputEdit = nullptr;
-    QPushButton *m_runButton = nullptr;
-    QgsRasterLayer *m_rasterLayer = nullptr;
+    AsyncGdalRunner *m_runner = nullptr;
 };

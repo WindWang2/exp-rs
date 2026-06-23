@@ -1,7 +1,9 @@
 // src/app/dialogs/contrast_stretch_dialog.cpp
 #include "contrast_stretch_dialog.h"
+#include "async_gdal_runner.h"
 #include "processing/algorithms/image_enhancement.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_safe_call.h"
 
 #include <raster/qgsrasterlayer.h>
 
@@ -133,108 +135,101 @@ void ContrastStretchDialog::onRun()
         return;
     }
 
-    // Open source dataset
-    GdalDatasetWrapper srcDataset;
-    if (!srcDataset.open(m_rasterLayer->dataProvider()->dataSourceUri())) {
-        QgsMessageLog::logMessage(tr("Failed to open source file: %1").arg(srcDataset.lastError()),
-                                  "contrast_stretch", Qgis::MessageLevel::Critical);
-        return;
-    }
-
-    int width = srcDataset.width();
-    int height = srcDataset.height();
-    int bandCount = srcDataset.bandCount();
-    size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
-
-    // Read all bands
-    std::vector<std::vector<float>> allBands(bandCount, std::vector<float>(pixelCount));
-    for (int b = 0; b < bandCount; ++b) {
-        if (!srcDataset.readBandData(b + 1, allBands[b].data(), width, height)) {
-            QgsMessageLog::logMessage(tr("Failed to read band %1.").arg(b + 1),
-                                      "contrast_stretch", Qgis::MessageLevel::Critical);
-            return;
-        }
-    }
-
-    // Apply stretch to each band
+    // Capture parameters for async execution
+    QString sourcePath = m_rasterLayer->dataProvider()->dataSourceUri();
     int methodIndex = m_methodCombo->currentIndex();
-    std::vector<std::vector<float>> outputBands(bandCount, std::vector<float>(pixelCount));
+    double clipValue = m_clipSpin->value();
+    double stddevValue = m_stddevSpin->value();
 
-    for (int b = 0; b < bandCount; ++b) {
-        switch (methodIndex) {
-        case 0: // Linear
-        {
-            // Compute per-band min/max for full-range stretch
-            float minVal = *std::min_element(allBands[b].begin(), allBands[b].end());
-            float maxVal = *std::max_element(allBands[b].begin(), allBands[b].end());
-            ImageEnhancement::linearStretch(allBands[b].data(), outputBands[b].data(),
-                                            pixelCount, minVal, maxVal);
-            break;
-        }
-        case 1: // Percentage Clip
-            ImageEnhancement::percentClipStretch(allBands[b].data(), outputBands[b].data(),
-                                                 pixelCount,
-                                                 static_cast<float>(m_clipSpin->value()));
-            break;
-        case 2: // Std Dev
-            ImageEnhancement::stddevStretch(allBands[b].data(), outputBands[b].data(),
-                                            pixelCount,
-                                            static_cast<float>(m_stddevSpin->value()));
-            break;
-        case 3: // Histogram Equalization
-            ImageEnhancement::histogramEqualize(allBands[b].data(), outputBands[b].data(),
-                                                pixelCount);
-            break;
-        }
+    if (!m_runner) {
+        m_runner = new AsyncGdalRunner(this, this);
+        connect(m_runner, &AsyncGdalRunner::completed, this, &ContrastStretchDialog::onCompleted);
+        connect(m_runner, &AsyncGdalRunner::failed, this, &ContrastStretchDialog::onFailed);
     }
 
-    // Create output file using GDAL
-    GDALDriverH driver = GDALGetDriverByName("GTiff");
-    if (!driver) {
-        QgsMessageLog::logMessage(tr("Failed to get GeoTIFF driver."),
-                                  "contrast_stretch", Qgis::MessageLevel::Critical);
-        return;
-    }
+    m_runButton->setEnabled(false);
 
-    char **options = nullptr;
-    options = CSLSetNameValue(options, "COMPRESS", "LZW");
-    GDALDatasetH dstDataset = GDALCreate(driver, outputPath.toUtf8().constData(),
-                                          width, height, bandCount, GDT_Float32, options);
-    CSLDestroy(options);
+    m_runner->run([sourcePath, outputPath, methodIndex, clipValue, stddevValue]() -> QString {
+    try {
+        // Open source dataset
+        GdalDatasetWrapper srcDataset;
+        if (!srcDataset.open(sourcePath)) return QString();
 
-    if (!dstDataset) {
-        QgsMessageLog::logMessage(tr("Failed to create output file."),
-                                  "contrast_stretch", Qgis::MessageLevel::Critical);
-        return;
-    }
+        int width = srcDataset.width();
+        int height = srcDataset.height();
+        int bandCount = srcDataset.bandCount();
+        size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
 
-    // Copy geotransform and projection from source
-    std::array<double, 6> gt = srcDataset.geoTransform();
-    GDALSetGeoTransform(dstDataset, gt.data());
-    GDALSetProjection(dstDataset, srcDataset.projection().toUtf8().constData());
-
-    // Write all output bands
-    for (int b = 0; b < bandCount; ++b) {
-        GDALRasterBandH dstBand = GDALGetRasterBand(dstDataset, b + 1);
-        if (!dstBand) {
-            QgsMessageLog::logMessage(tr("Failed to get output band %1.").arg(b + 1),
-                                      "contrast_stretch", Qgis::MessageLevel::Critical);
-            GDALClose(dstDataset);
-            return;
+        // Read all bands
+        std::vector<std::vector<float>> allBands(bandCount, std::vector<float>(pixelCount));
+        for (int b = 0; b < bandCount; ++b) {
+            if (!srcDataset.readBandData(b + 1, allBands[b].data(), width, height)) return QString();
         }
-        CPLErr err = GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
-                                   outputBands[b].data(), width, height, GDT_Float32, 0, 0);
-        if (err != CE_None) {
-            QgsMessageLog::logMessage(tr("Failed to write output band %1.").arg(b + 1),
-                                      "contrast_stretch", Qgis::MessageLevel::Critical);
-            GDALClose(dstDataset);
-            return;
+
+        // Apply stretch to each band
+        std::vector<std::vector<float>> outputBands(bandCount, std::vector<float>(pixelCount));
+
+        for (int b = 0; b < bandCount; ++b) {
+            switch (methodIndex) {
+            case 0: // Linear
+            {
+                float minVal = *std::min_element(allBands[b].begin(), allBands[b].end());
+                float maxVal = *std::max_element(allBands[b].begin(), allBands[b].end());
+                ImageEnhancement::linearStretch(allBands[b].data(), outputBands[b].data(),
+                                                pixelCount, minVal, maxVal);
+                break;
+            }
+            case 1: // Percentage Clip
+                ImageEnhancement::percentClipStretch(allBands[b].data(), outputBands[b].data(),
+                                                     pixelCount,
+                                                     static_cast<float>(clipValue));
+                break;
+            case 2: // Std Dev
+                ImageEnhancement::stddevStretch(allBands[b].data(), outputBands[b].data(),
+                                                pixelCount,
+                                                static_cast<float>(stddevValue));
+                break;
+            case 3: // Histogram Equalization
+                ImageEnhancement::histogramEqualize(allBands[b].data(), outputBands[b].data(),
+                                                    pixelCount);
+                break;
+            }
         }
+
+        // Create output file using GDAL
+        QString error;
+        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, width, height, bandCount,
+                                                   GDT_Float32, srcDataset.geoTransform(),
+                                                   srcDataset.projection(), &error));
+        if (!dstGuard) return QString();
+
+        // Write all output bands
+        for (int b = 0; b < bandCount; ++b) {
+            GDALRasterBandH dstBand = GDALGetRasterBand(dstGuard.get(), b + 1);
+            if (!dstBand) return QString();
+            GDAL_SAFE_CALL( GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
+                            outputBands[b].data(), width, height, GDT_Float32, 0, 0),
+                            "Failed to write output band" );
+        }
+
+        return outputPath;
+    } catch (const std::runtime_error &) {
+        return QString();
     }
+    });
+}
 
-    GDALClose(dstDataset);
-
-    QgsMessageLog::logMessage(tr("Contrast stretch completed successfully! Output: %1").arg(outputPath),
+void ContrastStretchDialog::onCompleted(const QString &outputPath)
+{
+    m_runButton->setEnabled(true);
+    QgsMessageLog::logMessage(tr("Contrast stretch completed! Output: %1").arg(outputPath),
                               "contrast_stretch", Qgis::MessageLevel::Success);
     accept();
+}
+
+void ContrastStretchDialog::onFailed(const QString &error)
+{
+    m_runButton->setEnabled(true);
+    QgsMessageLog::logMessage(error, "contrast_stretch", Qgis::MessageLevel::Critical);
+    QMessageBox::critical(this, tr("Contrast Stretch"), tr("Operation failed. See log for details."));
 }

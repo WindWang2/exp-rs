@@ -1,37 +1,25 @@
 // src/app/dialogs/band_ratio_dialog.cpp
 #include "band_ratio_dialog.h"
+#include "async_gdal_runner.h"
 #include "processing/algorithms/image_enhancement.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_safe_call.h"
 
 #include <raster/qgsrasterlayer.h>
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QLineEdit>
 #include <QComboBox>
-#include <QPushButton>
-#include <QFileDialog>
-#include <QMessageBox>
-
-#include <qgsmessagelog.h>
-#include <qgis.h>
 
 #include <gdal.h>
 #include <cpl_error.h>
-#include <cpl_string.h>
 
 BandRatioDialog::BandRatioDialog(QWidget *parent)
-    : QDialog(parent)
+    : RasterProcessingDialogBase(parent)
 {
-    setWindowTitle(tr("Band Ratio / IHS"));
+    setWindowTitle(dialogTitle());
     setupUi();
-}
-
-void BandRatioDialog::setRasterLayer(QgsRasterLayer *layer)
-{
-    m_rasterLayer = layer;
-    populateBandCombos();
 }
 
 void BandRatioDialog::setupUi()
@@ -76,26 +64,11 @@ void BandRatioDialog::setupUi()
     ihsLayout->addWidget(m_blueCombo);
     mainLayout->addLayout(ihsLayout);
 
-    // Output file
-    auto *outLayout = new QHBoxLayout();
-    outLayout->addWidget(new QLabel(tr("Output:"), this));
-    m_outputEdit = new QLineEdit(this);
-    outLayout->addWidget(m_outputEdit);
-    auto *browseBtn = new QPushButton(tr("Browse..."), this);
-    connect(browseBtn, &QPushButton::clicked, this, &BandRatioDialog::onBrowseOutput);
-    outLayout->addWidget(browseBtn);
-    mainLayout->addLayout(outLayout);
+    // Output file (from base class)
+    setupOutputRow(mainLayout);
 
-    // Buttons
-    auto *btnLayout = new QHBoxLayout();
-    btnLayout->addStretch();
-    m_runButton = new QPushButton(tr("Run"), this);
-    connect(m_runButton, &QPushButton::clicked, this, &BandRatioDialog::onRun);
-    btnLayout->addWidget(m_runButton);
-    auto *cancelBtn = new QPushButton(tr("Cancel"), this);
-    connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
-    btnLayout->addWidget(cancelBtn);
-    mainLayout->addLayout(btnLayout);
+    // Buttons (from base class)
+    setupButtonBar(mainLayout);
 
     // Initialize visibility
     onModeChanged(0);
@@ -155,136 +128,94 @@ void BandRatioDialog::onModeChanged(int index)
     m_blueCombo->setVisible(!isRatio);
 }
 
-void BandRatioDialog::onBrowseOutput()
-{
-    QString path = QFileDialog::getSaveFileName(this, tr("Output File"), QString(),
-                                                tr("GeoTIFF (*.tif)"));
-    if (!path.isEmpty())
-        m_outputEdit->setText(path);
-}
-
 void BandRatioDialog::onRun()
 {
-    // Validate inputs
-    QString outputPath = m_outputEdit->text().trimmed();
-    if (outputPath.isEmpty()) {
-        QMessageBox::warning(this, tr("Band Ratio / IHS"), tr("Please specify an output file."));
-        return;
-    }
-
-    if (!m_rasterLayer || !m_rasterLayer->isValid()) {
-        QMessageBox::warning(this, tr("Band Ratio / IHS"), tr("No valid raster layer selected."));
-        return;
-    }
-
-    // Open source dataset
-    GdalDatasetWrapper srcDataset;
-    if (!srcDataset.open(m_rasterLayer->dataProvider()->dataSourceUri())) {
-        QgsMessageLog::logMessage(tr("Failed to open source file: %1").arg(srcDataset.lastError()),
-                                  "band_ratio", Qgis::MessageLevel::Critical);
-        return;
-    }
-
-    int width = srcDataset.width();
-    int height = srcDataset.height();
-    size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
-
+    // Capture parameters for async execution
+    QString sourcePath = m_rasterLayer->source();
     int modeIndex = m_modeCombo->currentIndex();
-    int outBandCount = (modeIndex == 0) ? 1 : 3; // ratio=1 band, IHS=3 bands
+    int band1Num = m_band1Combo->currentData().toInt();
+    int band2Num = m_band2Combo->currentData().toInt();
+    int redNum = m_redCombo->currentData().toInt();
+    int greenNum = m_greenCombo->currentData().toInt();
+    int blueNum = m_blueCombo->currentData().toInt();
 
-    // Read required bands
-    auto readBand = [&](int bandNum) -> std::vector<float> {
-        std::vector<float> buffer(pixelCount);
-        if (!srcDataset.readBandData(bandNum, buffer.data(), width, height)) {
-            return {};
-        }
-        return buffer;
-    };
-
-    std::vector<std::vector<float>> outputBands(outBandCount, std::vector<float>(pixelCount));
-
-    if (modeIndex == 0) {
-        // Band Ratio
-        std::vector<float> band1 = readBand(m_band1Combo->currentData().toInt());
-        std::vector<float> band2 = readBand(m_band2Combo->currentData().toInt());
-
-        if (band1.empty() || band2.empty()) {
-            QgsMessageLog::logMessage(tr("Failed to read band data."),
-                                      "band_ratio", Qgis::MessageLevel::Critical);
-            return;
-        }
-
-        ImageEnhancement::bandRatio(band1.data(), band2.data(),
-                                    outputBands[0].data(), pixelCount);
-    } else {
-        // IHS Transform
-        std::vector<float> r = readBand(m_redCombo->currentData().toInt());
-        std::vector<float> g = readBand(m_greenCombo->currentData().toInt());
-        std::vector<float> b = readBand(m_blueCombo->currentData().toInt());
-
-        if (r.empty() || g.empty() || b.empty()) {
-            QgsMessageLog::logMessage(tr("Failed to read band data."),
-                                      "band_ratio", Qgis::MessageLevel::Critical);
-            return;
-        }
-
-        // Transform each pixel from RGB to IHS
-        for (size_t i = 0; i < pixelCount; ++i) {
-            float ii, h, s;
-            ImageEnhancement::rgbToIhs(r[i], g[i], b[i], ii, h, s);
-            outputBands[0][i] = ii;
-            outputBands[1][i] = h;
-            outputBands[2][i] = s;
-        }
+    if (!m_runner) {
+        m_runner = new AsyncGdalRunner(this, this);
+        connect(m_runner, &AsyncGdalRunner::completed, this, &BandRatioDialog::onCompleted);
+        connect(m_runner, &AsyncGdalRunner::failed, this, &BandRatioDialog::onFailed);
     }
 
-    // Create output file using GDAL
-    GDALDriverH driver = GDALGetDriverByName("GTiff");
-    if (!driver) {
-        QgsMessageLog::logMessage(tr("Failed to get GeoTIFF driver."),
-                                  "band_ratio", Qgis::MessageLevel::Critical);
-        return;
-    }
+    m_runButton->setEnabled(false);
 
-    char **options = nullptr;
-    options = CSLSetNameValue(options, "COMPRESS", "LZW");
-    GDALDatasetH dstDataset = GDALCreate(driver, outputPath.toUtf8().constData(),
-                                          width, height, outBandCount, GDT_Float32, options);
-    CSLDestroy(options);
+    m_runner->run([sourcePath, outputPath(), modeIndex, band1Num, band2Num,
+                   redNum, greenNum, blueNum]() -> QString {
+    try {
+        // Open source dataset
+        GdalDatasetWrapper srcDataset;
+        if (!srcDataset.open(sourcePath)) return QString();
 
-    if (!dstDataset) {
-        QgsMessageLog::logMessage(tr("Failed to create output file."),
-                                  "band_ratio", Qgis::MessageLevel::Critical);
-        return;
-    }
+        int width = srcDataset.width();
+        int height = srcDataset.height();
+        size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
 
-    // Copy geotransform and projection from source
-    std::array<double, 6> gt = srcDataset.geoTransform();
-    GDALSetGeoTransform(dstDataset, gt.data());
-    GDALSetProjection(dstDataset, srcDataset.projection().toUtf8().constData());
+        int outBandCount = (modeIndex == 0) ? 1 : 3;
 
-    // Write all output bands
-    for (int b = 0; b < outBandCount; ++b) {
-        GDALRasterBandH dstBand = GDALGetRasterBand(dstDataset, b + 1);
-        if (!dstBand) {
-            QgsMessageLog::logMessage(tr("Failed to get output band %1.").arg(b + 1),
-                                      "band_ratio", Qgis::MessageLevel::Critical);
-            GDALClose(dstDataset);
-            return;
+        auto readBand = [&](int bandNum) -> std::vector<float> {
+            std::vector<float> buffer(pixelCount);
+            if (!srcDataset.readBandData(bandNum, buffer.data(), width, height))
+                return {};
+            return buffer;
+        };
+
+        std::vector<std::vector<float>> outputBands(outBandCount, std::vector<float>(pixelCount));
+
+        if (modeIndex == 0) {
+            std::vector<float> b1 = readBand(band1Num);
+            std::vector<float> b2 = readBand(band2Num);
+            if (b1.empty() || b2.empty()) return QString();
+            ImageEnhancement::bandRatio(b1.data(), b2.data(), outputBands[0].data(), pixelCount);
+        } else {
+            std::vector<float> r = readBand(redNum);
+            std::vector<float> g = readBand(greenNum);
+            std::vector<float> b = readBand(blueNum);
+            if (r.empty() || g.empty() || b.empty()) return QString();
+            for (size_t i = 0; i < pixelCount; ++i) {
+                float ii, h, s;
+                ImageEnhancement::rgbToIhs(r[i], g[i], b[i], ii, h, s);
+                outputBands[0][i] = ii;
+                outputBands[1][i] = h;
+                outputBands[2][i] = s;
+            }
         }
-        CPLErr err = GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
-                                   outputBands[b].data(), width, height, GDT_Float32, 0, 0);
-        if (err != CE_None) {
-            QgsMessageLog::logMessage(tr("Failed to write output band %1.").arg(b + 1),
-                                      "band_ratio", Qgis::MessageLevel::Critical);
-            GDALClose(dstDataset);
-            return;
+
+        // Create output
+        QString error;
+        GdalDatasetGuard dst(createOutputTiff(outputPath(), width, height, outBandCount,
+                                              GDT_Float32, srcDataset.geoTransform(),
+                                              srcDataset.projection(), &error));
+        if (!dst) return QString();
+
+        for (int b = 0; b < outBandCount; ++b) {
+            GDALRasterBandH band = GDALGetRasterBand(dst.get(), b + 1);
+            if (!band) return QString();
+            GDAL_SAFE_CALL( GDALRasterIO(band, GF_Write, 0, 0, width, height,
+                            outputBands[b].data(), width, height, GDT_Float32, 0, 0),
+                            "Failed to write output band" );
         }
+
+        return outputPath();
+    } catch (const std::runtime_error &) {
+        return QString();
     }
+    });
+}
 
-    GDALClose(dstDataset);
+void BandRatioDialog::onCompleted(const QString &outputPath)
+{
+    handleCompleted(outputPath);
+}
 
-    QgsMessageLog::logMessage(tr("Band ratio / IHS completed successfully! Output: %1").arg(outputPath),
-                              "band_ratio", Qgis::MessageLevel::Success);
-    accept();
+void BandRatioDialog::onFailed(const QString &error)
+{
+    handleFailed(error);
 }
