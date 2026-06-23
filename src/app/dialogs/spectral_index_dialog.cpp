@@ -7,11 +7,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QLineEdit>
 #include <QComboBox>
-#include <QPushButton>
-#include <QFileDialog>
-#include <QMessageBox>
 #include <QDir>
 #include <QDateTime>
 
@@ -27,25 +23,16 @@
 
 #include <gdal.h>
 #include <cpl_error.h>
-#include <cpl_string.h>
 
 #include "processing/gdal/gdal_safe_call.h"
-
-#include "qgsogrutils.h"
 
 #include <vector>
 
 SpectralIndexDialog::SpectralIndexDialog(QWidget *parent)
-    : QDialog(parent)
+    : RasterProcessingDialogBase(parent)
 {
-    setWindowTitle(tr("Spectral Index"));
+    setWindowTitle(dialogTitle());
     setupUi();
-}
-
-void SpectralIndexDialog::setRasterLayer(QgsRasterLayer *layer)
-{
-    m_rasterLayer = layer;
-    populateBandCombos();
 }
 
 void SpectralIndexDialog::setupUi()
@@ -90,26 +77,11 @@ void SpectralIndexDialog::setupUi()
     bandLayout2->addWidget(m_swirCombo);
     mainLayout->addLayout(bandLayout2);
 
-    // Output file
-    auto *outLayout = new QHBoxLayout();
-    outLayout->addWidget(new QLabel(tr("Output:")));
-    m_outputEdit = new QLineEdit(this);
-    outLayout->addWidget(m_outputEdit);
-    auto *browseBtn = new QPushButton(tr("Browse..."), this);
-    connect(browseBtn, &QPushButton::clicked, this, &SpectralIndexDialog::onBrowseOutput);
-    outLayout->addWidget(browseBtn);
-    mainLayout->addLayout(outLayout);
+    // Output file (from base class)
+    setupOutputRow(mainLayout);
 
-    // Buttons
-    auto *btnLayout = new QHBoxLayout();
-    btnLayout->addStretch();
-    m_runButton = new QPushButton(tr("Run"), this);
-    connect(m_runButton, &QPushButton::clicked, this, &SpectralIndexDialog::onRun);
-    btnLayout->addWidget(m_runButton);
-    auto *cancelBtn = new QPushButton(tr("Cancel"), this);
-    connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
-    btnLayout->addWidget(cancelBtn);
-    mainLayout->addLayout(btnLayout);
+    // Buttons (from base class)
+    setupButtonBar(mainLayout);
 
     // Initialize band visibility
     updateBandVisibility();
@@ -182,14 +154,6 @@ void SpectralIndexDialog::updateBandVisibility()
 void SpectralIndexDialog::onIndexChanged(int index)
 {
     updateBandVisibility();
-}
-
-void SpectralIndexDialog::onBrowseOutput()
-{
-    QString path = QFileDialog::getSaveFileName(this, tr("Output File"), QString(),
-                                                tr("GeoTIFF (*.tif)"));
-    if (!path.isEmpty())
-        m_outputEdit->setText(path);
 }
 
 /**
@@ -266,18 +230,6 @@ static QgsRasterLayer *extractBandAsLayer( QgsRasterLayer *srcLayer, int bandNum
 
 void SpectralIndexDialog::onRun()
 {
-    // Validate inputs
-    QString outputPath = m_outputEdit->text().trimmed();
-    if ( outputPath.isEmpty() ) {
-        QMessageBox::warning( this, tr( "Spectral Index" ), tr( "Please specify an output file." ) );
-        return;
-    }
-
-    if ( !m_rasterLayer || !m_rasterLayer->isValid() ) {
-        QMessageBox::warning( this, tr( "Spectral Index" ), tr( "No valid raster layer selected." ) );
-        return;
-    }
-
     // Look up the processing algorithm from the registry
     const QgsProcessingAlgorithm *alg = QgsApplication::processingRegistry()->algorithmById(
         QStringLiteral( "qgis_algorithms:rs_spectral_index" ) );
@@ -330,7 +282,7 @@ void SpectralIndexDialog::onRun()
         params.insert( QStringLiteral( "BLUE_BAND" ), QVariant::fromValue( blueLayer.get() ) );
     if ( swirLayer )
         params.insert( QStringLiteral( "SWIR_BAND" ), QVariant::fromValue( swirLayer.get() ) );
-    params.insert( QStringLiteral( "OUTPUT" ), outputPath );
+    params.insert( QStringLiteral( "OUTPUT" ), outputPath() );
 
     // Execute algorithm asynchronously
     QgsProcessingContext context;
@@ -351,18 +303,10 @@ void SpectralIndexDialog::onRun()
 void SpectralIndexDialog::onAlgorithmCompleted( const QVariantMap &results )
 {
     Q_UNUSED( results );
-    QString outputPath = m_outputEdit->text().trimmed();
-    QgsMessageLog::logMessage(
-        tr( "Spectral index calculation completed successfully! Output: %1" ).arg( outputPath ),
-        "spectral_index", Qgis::MessageLevel::Success );
-    m_runButton->setEnabled( true );
-    accept();
+    handleCompleted( outputPath() );
 }
 
 void SpectralIndexDialog::onAlgorithmFailed( const QString &errorMessage )
 {
-    QgsMessageLog::logMessage( errorMessage, "spectral_index", Qgis::MessageLevel::Critical );
-    QMessageBox::critical( this, tr( "Spectral Index" ),
-                           tr( "Algorithm failed. See log for details." ) );
-    m_runButton->setEnabled( true );
+    handleFailed( errorMessage );
 }
