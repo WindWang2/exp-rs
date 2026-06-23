@@ -2,38 +2,26 @@
 #include "pca_dialog.h"
 #include "processing/algorithms/image_enhancement.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_safe_call.h"
 
 #include <raster/qgsrasterlayer.h>
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QLineEdit>
-#include <QPushButton>
 #include <QSpinBox>
-#include <QFileDialog>
-#include <QMessageBox>
 
 #include <qgsmessagelog.h>
 #include <qgis.h>
 
 #include <gdal.h>
 #include <cpl_error.h>
-#include <cpl_string.h>
 
 PcaDialog::PcaDialog(QWidget *parent)
-    : QDialog(parent)
+    : RasterProcessingDialogBase(parent)
 {
-    setWindowTitle(tr("PCA"));
+    setWindowTitle(dialogTitle());
     setupUi();
-}
-
-void PcaDialog::setRasterLayer(QgsRasterLayer *layer)
-{
-    m_rasterLayer = layer;
-    if (layer && layer->isValid()) {
-        m_componentsSpin->setMaximum(layer->bandCount());
-    }
 }
 
 void PcaDialog::setupUi()
@@ -49,50 +37,15 @@ void PcaDialog::setupUi()
     compLayout->addWidget(m_componentsSpin);
     mainLayout->addLayout(compLayout);
 
-    // Output file
-    auto *outLayout = new QHBoxLayout();
-    outLayout->addWidget(new QLabel(tr("Output:"), this));
-    m_outputEdit = new QLineEdit(this);
-    outLayout->addWidget(m_outputEdit);
-    auto *browseBtn = new QPushButton(tr("Browse..."), this);
-    connect(browseBtn, &QPushButton::clicked, this, &PcaDialog::onBrowseOutput);
-    outLayout->addWidget(browseBtn);
-    mainLayout->addLayout(outLayout);
+    // Output file (from base class)
+    setupOutputRow(mainLayout);
 
-    // Buttons
-    auto *btnLayout = new QHBoxLayout();
-    btnLayout->addStretch();
-    m_runButton = new QPushButton(tr("Run"), this);
-    connect(m_runButton, &QPushButton::clicked, this, &PcaDialog::onRun);
-    btnLayout->addWidget(m_runButton);
-    auto *cancelBtn = new QPushButton(tr("Cancel"), this);
-    connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
-    btnLayout->addWidget(cancelBtn);
-    mainLayout->addLayout(btnLayout);
-}
-
-void PcaDialog::onBrowseOutput()
-{
-    QString path = QFileDialog::getSaveFileName(this, tr("Output File"), QString(),
-                                                tr("GeoTIFF (*.tif)"));
-    if (!path.isEmpty())
-        m_outputEdit->setText(path);
+    // Buttons (from base class)
+    setupButtonBar(mainLayout);
 }
 
 void PcaDialog::onRun()
 {
-    // Validate inputs
-    QString outputPath = m_outputEdit->text().trimmed();
-    if (outputPath.isEmpty()) {
-        QMessageBox::warning(this, tr("PCA"), tr("Please specify an output file."));
-        return;
-    }
-
-    if (!m_rasterLayer || !m_rasterLayer->isValid()) {
-        QMessageBox::warning(this, tr("PCA"), tr("No valid raster layer selected."));
-        return;
-    }
-
     // Open source dataset
     GdalDatasetWrapper srcDataset;
     if (!srcDataset.open(m_rasterLayer->source())) {
@@ -128,19 +81,22 @@ void PcaDialog::onRun()
     ImageEnhancement::PcaResult pcaResult = ImageEnhancement::pca(allBands, numComponents);
 
     // Create output
-        QString error;
-        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, width, height, bandCount,
-                                                   GDT_Float32, srcDataset.geoTransform(),
-                                                   srcDataset.projection(), &error));
-        if (!dstGuard) return QString();
+    QString error;
+    GdalDatasetGuard dstGuard(createOutputTiff(outputPath(), width, height, numComponents,
+                                               GDT_Float32, srcDataset.geoTransform(),
+                                               srcDataset.projection(), &error));
+    if (!dstGuard) {
+        QgsMessageLog::logMessage(tr("Failed to create output file: %1").arg(error),
+                                  "pca", Qgis::MessageLevel::Critical);
+        return;
+    }
 
     // Write each component as a band
     for (int c = 0; c < numComponents; ++c) {
-        GDALRasterBandH dstBand = GDALGetRasterBand(dstDataset, c + 1);
+        GDALRasterBandH dstBand = GDALGetRasterBand(dstGuard.get(), c + 1);
         if (!dstBand) {
             QgsMessageLog::logMessage(tr("Failed to get output band %1.").arg(c + 1),
                                       "pca", Qgis::MessageLevel::Critical);
-            GDALClose(dstDataset);
             return;
         }
         CPLErr err = GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
@@ -148,12 +104,9 @@ void PcaDialog::onRun()
         if (err != CE_None) {
             QgsMessageLog::logMessage(tr("Failed to write output band %1.").arg(c + 1),
                                       "pca", Qgis::MessageLevel::Critical);
-            GDALClose(dstDataset);
             return;
         }
     }
-
-    GDALClose(dstDataset);
 
     // Log variance explained
     QString varianceMsg;
@@ -162,8 +115,5 @@ void PcaDialog::onRun()
                            .arg(pcaResult.explainedVariance[c] * 100.0f, 0, 'f', 1);
     }
 
-    QgsMessageLog::logMessage(tr("PCA completed successfully! Variance explained: %1. Output: %2")
-                                  .arg(varianceMsg, outputPath),
-                              "pca", Qgis::MessageLevel::Success);
-    accept();
+    handleCompleted(outputPath());
 }
