@@ -95,7 +95,7 @@ void PcaDialog::onRun()
 
     // Open source dataset
     GdalDatasetWrapper srcDataset;
-    if (!srcDataset.open(m_rasterLayer->dataProvider()->dataSourceUri())) {
+    if (!srcDataset.open(m_rasterLayer->source())) {
         QgsMessageLog::logMessage(tr("Failed to open source file: %1").arg(srcDataset.lastError()),
                                   "pca", Qgis::MessageLevel::Critical);
         return;
