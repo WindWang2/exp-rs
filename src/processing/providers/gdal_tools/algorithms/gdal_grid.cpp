@@ -86,14 +86,7 @@ QStringList GdalGridAlgorithm::buildArgs(const QVariantMap &parameters,
         }
     }
 
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsVectorLayer *>()) {
-        inputPath = inputVar.value<QgsVectorLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << inputPath;
+    args << vectorLayerSource(parameters.value("INPUT"));
 
     args << parameters.value("OUTPUT").toString();
 

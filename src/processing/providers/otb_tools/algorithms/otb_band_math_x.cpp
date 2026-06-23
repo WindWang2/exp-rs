@@ -31,16 +31,10 @@ QStringList OtbBandMathXAlgorithm::buildArgs(const QVariantMap &parameters,
     if (inputVar.canConvert<QVariantList>()) {
         const QVariantList inputList = inputVar.toList();
         for (const QVariant &v : inputList) {
-            if (v.canConvert<QgsRasterLayer *>()) {
-                inputPaths << v.value<QgsRasterLayer *>()->source();
-            } else {
-                inputPaths << v.toString();
-            }
+            inputPaths << rasterLayerSource(v);
         }
-    } else if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPaths << inputVar.value<QgsRasterLayer *>()->source();
     } else {
-        inputPaths << inputVar.toString();
+        inputPaths << rasterLayerSource(inputVar);
     }
 
     for (const QString &path : inputPaths) {

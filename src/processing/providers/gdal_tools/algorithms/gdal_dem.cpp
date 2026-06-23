@@ -30,14 +30,7 @@ QStringList GdalDemAlgorithm::buildArgs(const QVariantMap &parameters,
     QString mode = modes.value(modeIndex, "hillshade");
     args << mode;
 
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << inputPath;
+    args << rasterLayerSource(parameters.value("INPUT"));
     args << parameters.value("OUTPUT").toString();
 
     return args;

@@ -2,10 +2,13 @@
 #include "gdal_tool_wrapper.h"
 #include "tools/tool_path_manager.h"
 
+#include "core/sicnu_logging.h"
 #include <qgsapplication.h>
 #include <qgsmessagelog.h>
 #include <qgsprocessingcontext.h>
 #include <qgsprocessingfeedback.h>
+#include <qgsrasterlayer.h>
+#include <qgsvectordatalayer.h>
 #include <processing/qgsprocessingparameters.h>
 
 QVariantMap GdalToolWrapper::processAlgorithm(const QVariantMap &parameters,
@@ -14,17 +17,22 @@ QVariantMap GdalToolWrapper::processAlgorithm(const QVariantMap &parameters,
 {
     QString program = ToolPathManager::instance().gdalToolPath(toolName());
     if (program.isEmpty()) {
-        feedback->reportError(QObject::tr("GDAL tool '%1' not found. Ensure GDAL tools are installed.").arg(toolName()));
+        SICNU_LOG_ERROR( SicnuLogTags::GDAL, QString( "GDAL tool '%1' not found — ensure GDAL tools are installed" ).arg( toolName() ) );
+        if (feedback)
+            feedback->reportError(QObject::tr("GDAL tool '%1' not found. Ensure GDAL tools are installed.").arg(toolName()));
         return {};
     }
 
     QStringList args = buildArgs(parameters, context, feedback);
     if (args.isEmpty()) return {};
 
+    SICNU_LOG_INFO( SicnuLogTags::GDAL, QString( "Executing GDAL tool: %1" ).arg( toolName() ) );
     if (!runExternalTool(program, args, feedback)) {
+        SICNU_LOG_ERROR( SicnuLogTags::GDAL, QString( "GDAL tool '%1' failed" ).arg( toolName() ) );
         return {};
     }
 
+    SICNU_LOG_SUCCESS( SicnuLogTags::GDAL, QString( "GDAL tool '%1' completed successfully" ).arg( toolName() ) );
     QVariantMap results;
     if (parameters.contains("OUTPUT")) {
         results["OUTPUT"] = parameters.value("OUTPUT");
@@ -36,8 +44,8 @@ bool GdalToolWrapper::runExternalTool(const QString &program, const QStringList 
                                        QgsProcessingFeedback *feedback)
 {
     QString cmdLine = program + " " + args.join(" ");
-    feedback->pushInfo(QObject::tr("Running: %1").arg(cmdLine));
-    QgsMessageLog::logMessage(cmdLine, "gdal", Qgis::MessageLevel::Info);
+    if (feedback) feedback->pushInfo(QObject::tr("Running: %1").arg(cmdLine));
+    SICNU_LOG_INFO( SicnuLogTags::GDAL, cmdLine );
 
     QProcess proc;
     proc.setProcessChannelMode(QProcess::MergedChannels);
@@ -45,13 +53,13 @@ bool GdalToolWrapper::runExternalTool(const QString &program, const QStringList 
 
     if (!proc.waitForStarted(5000)) {
         QString err = QObject::tr("Failed to start tool: %1").arg(proc.errorString());
-        feedback->reportError(err);
-        QgsMessageLog::logMessage(err, "gdal", Qgis::MessageLevel::Critical);
+        if (feedback) feedback->reportError(err);
+        SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
         return false;
     }
 
     while (proc.state() == QProcess::Running) {
-        if (feedback->isCanceled()) {
+        if (feedback && feedback->isCanceled()) {
             proc.kill();
             feedback->reportError(QObject::tr("Tool execution canceled by user."));
             return false;
@@ -60,22 +68,39 @@ bool GdalToolWrapper::runExternalTool(const QString &program, const QStringList 
         QByteArray output = proc.readAllStandardOutput();
         if (!output.isEmpty()) {
             QString msg = QString::fromUtf8(output);
-            feedback->pushInfo(msg);
-            QgsMessageLog::logMessage(msg, "gdal", Qgis::MessageLevel::Info);
+            if (feedback) feedback->pushInfo(msg);
+            SICNU_LOG_INFO( SicnuLogTags::GDAL, msg );
         }
     }
 
     if (proc.exitCode() != 0) {
-        // MergedChannels merges stderr into stdout, so read from readAllStandardOutput()
         QString err = QObject::tr("Tool failed with exit code %1: %2")
             .arg(proc.exitCode())
             .arg(QString::fromUtf8(proc.readAllStandardOutput()));
-        feedback->reportError(err);
-        QgsMessageLog::logMessage(err, "gdal", Qgis::MessageLevel::Warning);
+        if (feedback) feedback->reportError(err);
+        SICNU_LOG_WARN( SicnuLogTags::GDAL, err );
         return false;
     }
 
     return true;
+}
+
+QString GdalToolWrapper::rasterLayerSource(const QVariant &var)
+{
+    if (var.canConvert<QgsRasterLayer *>()) {
+        QgsRasterLayer *layer = var.value<QgsRasterLayer *>();
+        return layer ? layer->source() : QString();
+    }
+    return var.toString();
+}
+
+QString GdalToolWrapper::vectorLayerSource(const QVariant &var)
+{
+    if (var.canConvert<QgsVectorLayer *>()) {
+        QgsVectorLayer *layer = var.value<QgsVectorLayer *>();
+        return layer ? layer->source() : QString();
+    }
+    return var.toString();
 }
 
 void GdalToolWrapper::addInputRasterLayerParameter(const QString &name, const QString &description)

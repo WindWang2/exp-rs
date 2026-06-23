@@ -20,15 +20,7 @@ QStringList OtbKMeansClassificationAlgorithm::buildArgs(const QVariantMap &param
     Q_UNUSED(feedback);
 
     QStringList args;
-
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << "-in" << inputPath;
+    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
     args << "-nc" << QString::number(parameters.value("NUM_CLASSES").toInt());
     args << "-out" << parameters.value("OUTPUT").toString();
 

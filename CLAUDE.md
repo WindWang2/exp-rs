@@ -19,7 +19,7 @@ Pure C++ Remote Sensing analysis platform built on the QGIS engine.
 
 ## Language
 
-100% C++ (C++17). No Python at runtime. Python is only used at build time for code generation scripts (`scripts/`).
+100% C++ (C++20). No Python at runtime. Python is only used at build time for code generation scripts (`scripts/`).
 
 ## Coding Style & Standards
 

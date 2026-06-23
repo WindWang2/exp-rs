@@ -21,15 +21,7 @@ QStringList OtbTrainVectorClassifierAlgorithm::buildArgs(const QVariantMap &para
     Q_UNUSED(feedback);
 
     QStringList args;
-
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsVectorLayer *>()) {
-        inputPath = inputVar.value<QgsVectorLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << "-in" << inputPath;
+    args << "-in" << vectorLayerSource(parameters.value("INPUT"));
     args << "-features" << parameters.value("FEATURES").toString();
     args << "-label" << parameters.value("LABEL_FIELD").toString();
     args << "-out" << parameters.value("OUTPUT").toString();

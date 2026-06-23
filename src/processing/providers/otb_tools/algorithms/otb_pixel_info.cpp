@@ -25,15 +25,7 @@ QStringList OtbPixelInfoAlgorithm::buildArgs(const QVariantMap &parameters,
     Q_UNUSED(feedback);
 
     QStringList args;
-
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << "-in" << inputPath;
+    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
     args << "-coord" << QString::number(parameters.value("X").toInt())
          << QString::number(parameters.value("Y").toInt());
 

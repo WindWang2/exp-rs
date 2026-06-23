@@ -19,24 +19,8 @@ QStringList OtbSuperimposeAlgorithm::buildArgs(const QVariantMap &parameters,
     Q_UNUSED(feedback);
 
     QStringList args;
-
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << "-in" << inputPath;
-
-    QVariant refVar = parameters.value("REFERENCE");
-    QString refPath;
-    if (refVar.canConvert<QgsRasterLayer *>()) {
-        refPath = refVar.value<QgsRasterLayer *>()->source();
-    } else {
-        refPath = refVar.toString();
-    }
-    args << "-ref" << refPath;
+    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
+    args << "-ref" << rasterLayerSource(parameters.value("REFERENCE"));
     args << "-out" << parameters.value("OUTPUT").toString();
 
     return args;

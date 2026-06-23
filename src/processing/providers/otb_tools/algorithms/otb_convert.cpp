@@ -23,15 +23,7 @@ QStringList OtbConvertAlgorithm::buildArgs(const QVariantMap &parameters,
     Q_UNUSED(feedback);
 
     QStringList args;
-
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << "-in" << inputPath;
+    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
 
     QStringList types = {"uint8", "uint16", "int16", "float", "double"};
     QString selectedType = types.value(parameters.value("OUTPUT_TYPE").toInt(), "uint8");

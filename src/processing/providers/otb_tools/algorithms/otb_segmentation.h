@@ -12,7 +12,7 @@ public:
     QString displayName() const override { return "Image Segmentation"; }
     QString group() const override { return "Segmentation"; }
     QString groupId() const override { return "segmentation"; }
-    QStringList tags() const override { return { QObject::tr( "segmentation" ), QObject::tr( "classification" ), QObject::tr( "image" ), QObject::tr( "otb" ) }; }
+    QStringList tags() const override { return { QObject::tr( "segmentation" ), QObject::tr( "classification" ), QObject::tr( "image" ), QObject::tr( "otb" ), QObject::tr( "meanshift" ), QObject::tr( "obia" ) }; }
     QString applicationName() const override { return "Segmentation"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbSegmentationAlgorithm(); }

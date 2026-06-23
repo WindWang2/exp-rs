@@ -67,14 +67,7 @@ QStringList OgrInfoAlgorithm::buildArgs(const QVariantMap &parameters,
     }
 
     // Input file
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsVectorLayer *>()) {
-        inputPath = inputVar.value<QgsVectorLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << inputPath;
+    args << vectorLayerSource(parameters.value("INPUT"));
 
     // Layer name (optional)
     if (parameters.contains("LAYER_NAME") && !parameters.value("LAYER_NAME").toString().isEmpty()) {

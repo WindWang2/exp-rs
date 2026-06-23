@@ -28,14 +28,7 @@ QStringList GdalManageAlgorithm::buildArgs(const QVariantMap &parameters,
     QString action = actions.value(actionIndex, "info");
     args << action;
 
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << inputPath;
+    args << rasterLayerSource(parameters.value("INPUT"));
 
     return args;
 }

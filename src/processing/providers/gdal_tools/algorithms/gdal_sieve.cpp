@@ -30,14 +30,7 @@ QStringList GdalSieveAlgorithm::buildArgs(const QVariantMap &parameters,
     int threshold = parameters.value("THRESHOLD", 2).toInt();
     args << "-st" << QString::number(threshold);
 
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << inputPath;
+    args << rasterLayerSource(parameters.value("INPUT"));
 
     args << parameters.value("OUTPUT").toString();
 

@@ -22,15 +22,7 @@ QStringList OtbRescaleAlgorithm::buildArgs(const QVariantMap &parameters,
     Q_UNUSED(feedback);
 
     QStringList args;
-
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << "-in" << inputPath;
+    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
     args << "-out.min" << QString::number(parameters.value("OUTPUT_MIN").toDouble());
     args << "-out.max" << QString::number(parameters.value("OUTPUT_MAX").toDouble());
     args << "-out" << parameters.value("OUTPUT").toString();

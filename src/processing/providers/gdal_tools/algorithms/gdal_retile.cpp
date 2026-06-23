@@ -28,15 +28,7 @@ QStringList GdalRetileAlgorithm::buildArgs(const QVariantMap &parameters,
     }
 
     args << "-targetDir" << parameters.value("OUTPUT_DIR").toString();
-
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << inputPath;
+    args << rasterLayerSource(parameters.value("INPUT"));
 
     return args;
 }

@@ -2,10 +2,13 @@
 #include "otb_tool_wrapper.h"
 #include "tools/tool_path_manager.h"
 
+#include "core/sicnu_logging.h"
 #include <qgsapplication.h>
 #include <qgsmessagelog.h>
 #include <qgsprocessingcontext.h>
 #include <qgsprocessingfeedback.h>
+#include <qgsrasterlayer.h>
+#include <qgsvectordatalayer.h>
 #include <processing/qgsprocessingparameters.h>
 
 QVariantMap OtbToolWrapper::processAlgorithm(const QVariantMap &parameters,
@@ -14,17 +17,26 @@ QVariantMap OtbToolWrapper::processAlgorithm(const QVariantMap &parameters,
 {
     QString program = ToolPathManager::instance().otbToolPath(applicationName());
     if (program.isEmpty()) {
-        feedback->reportError(QObject::tr("OTB application '%1' not found. Ensure OTB is installed.").arg(applicationName()));
+        SICNU_LOG_ERROR( SicnuLogTags::OTB, QString( "OTB application '%1' not found — set SICNU_OTB_PATH or configure in Preferences" ).arg( applicationName() ) );
+        if (feedback)
+            feedback->reportError(QObject::tr(
+                "OTB application '%1' not found.\n"
+                "Expected at: tools/otb/otbcli_%1\n"
+                "Set SICNU_OTB_PATH environment variable or configure OTB path in Preferences.")
+                .arg(applicationName()));
         return {};
     }
 
     QStringList args = buildArgs(parameters, context, feedback);
     if (args.isEmpty()) return {};
 
-    if (!runOtbApplication(args, feedback)) {
+    SICNU_LOG_INFO( SicnuLogTags::OTB, QString( "Executing OTB application: %1" ).arg( applicationName() ) );
+    if (!runOtbApplication(program, args, feedback)) {
+        SICNU_LOG_ERROR( SicnuLogTags::OTB, QString( "OTB application '%1' failed" ).arg( applicationName() ) );
         return {};
     }
 
+    SICNU_LOG_SUCCESS( SicnuLogTags::OTB, QString( "OTB application '%1' completed successfully" ).arg( applicationName() ) );
     QVariantMap results;
     if (parameters.contains("OUTPUT")) {
         results["OUTPUT"] = parameters.value("OUTPUT");
@@ -32,13 +44,11 @@ QVariantMap OtbToolWrapper::processAlgorithm(const QVariantMap &parameters,
     return results;
 }
 
-bool OtbToolWrapper::runOtbApplication(const QStringList &args, QgsProcessingFeedback *feedback)
+bool OtbToolWrapper::runOtbApplication(const QString &program, const QStringList &args, QgsProcessingFeedback *feedback)
 {
-    QString program = ToolPathManager::instance().otbToolPath(applicationName());
-
     QString cmdLine = program + " " + args.join(" ");
-    feedback->pushInfo(QObject::tr("Running: %1").arg(cmdLine));
-    QgsMessageLog::logMessage(cmdLine, "otb", Qgis::MessageLevel::Info);
+    if (feedback) feedback->pushInfo(QObject::tr("Running: %1").arg(cmdLine));
+    SICNU_LOG_INFO( SicnuLogTags::OTB, cmdLine );
 
     QProcess proc;
     proc.setProcessChannelMode(QProcess::MergedChannels);
@@ -46,13 +56,13 @@ bool OtbToolWrapper::runOtbApplication(const QStringList &args, QgsProcessingFee
 
     if (!proc.waitForStarted(5000)) {
         QString err = QObject::tr("Failed to start OTB application: %1").arg(proc.errorString());
-        feedback->reportError(err);
-        QgsMessageLog::logMessage(err, "otb", Qgis::MessageLevel::Critical);
+        if (feedback) feedback->reportError(err);
+        SICNU_LOG_ERROR( SicnuLogTags::OTB, err );
         return false;
     }
 
     while (proc.state() == QProcess::Running) {
-        if (feedback->isCanceled()) {
+        if (feedback && feedback->isCanceled()) {
             proc.kill();
             feedback->reportError(QObject::tr("OTB application canceled by user."));
             return false;
@@ -61,20 +71,37 @@ bool OtbToolWrapper::runOtbApplication(const QStringList &args, QgsProcessingFee
         QByteArray output = proc.readAllStandardOutput();
         if (!output.isEmpty()) {
             QString msg = QString::fromUtf8(output);
-            feedback->pushInfo(msg);
-            QgsMessageLog::logMessage(msg, "otb", Qgis::MessageLevel::Info);
+            if (feedback) feedback->pushInfo(msg);
+            SICNU_LOG_INFO( SicnuLogTags::OTB, msg );
         }
     }
 
     if (proc.exitCode() != 0) {
-        // MergedChannels merges stderr into stdout, so read from readAllStandardOutput()
         QString err = QObject::tr("OTB application failed with exit code %1: %2")
             .arg(proc.exitCode())
             .arg(QString::fromUtf8(proc.readAllStandardOutput()));
-        feedback->reportError(err);
-        QgsMessageLog::logMessage(err, "otb", Qgis::MessageLevel::Warning);
+        if (feedback) feedback->reportError(err);
+        SICNU_LOG_WARN( SicnuLogTags::OTB, err );
         return false;
     }
 
     return true;
+}
+
+QString OtbToolWrapper::rasterLayerSource(const QVariant &var)
+{
+    if (var.canConvert<QgsRasterLayer *>()) {
+        QgsRasterLayer *layer = var.value<QgsRasterLayer *>();
+        return layer ? layer->source() : QString();
+    }
+    return var.toString();
+}
+
+QString OtbToolWrapper::vectorLayerSource(const QVariant &var)
+{
+    if (var.canConvert<QgsVectorLayer *>()) {
+        QgsVectorLayer *layer = var.value<QgsVectorLayer *>();
+        return layer ? layer->source() : QString();
+    }
+    return var.toString();
 }

@@ -53,14 +53,7 @@ QStringList GdalRasterizeAlgorithm::buildArgs(const QVariantMap &parameters,
 
     // Template raster
     if (parameters.contains("RASTER_TEMPLATE") && !parameters.value("RASTER_TEMPLATE").toString().isEmpty()) {
-        QVariant templateVar = parameters.value("RASTER_TEMPLATE");
-        QString templatePath;
-        if (templateVar.canConvert<QgsRasterLayer *>()) {
-            templatePath = templateVar.value<QgsRasterLayer *>()->source();
-        } else {
-            templatePath = templateVar.toString();
-        }
-        args << "-at" << "-ts" << templatePath;
+        args << "-at" << "-ts" << rasterLayerSource(parameters.value("RASTER_TEMPLATE"));
     } else {
         // Use extent and size
         if (parameters.contains("EXTENT") && !parameters.value("EXTENT").toString().isEmpty()) {
@@ -79,14 +72,7 @@ QStringList GdalRasterizeAlgorithm::buildArgs(const QVariantMap &parameters,
         }
     }
 
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsVectorLayer *>()) {
-        inputPath = inputVar.value<QgsVectorLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << inputPath;
+    args << vectorLayerSource(parameters.value("INPUT"));
 
     args << parameters.value("OUTPUT").toString();
 

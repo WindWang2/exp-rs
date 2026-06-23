@@ -30,6 +30,10 @@ protected:
     bool runExternalTool(const QString &program, const QStringList &args,
                          QgsProcessingFeedback *feedback);
 
+    // Null-safe layer source extraction helpers
+    static QString rasterLayerSource(const QVariant &var);
+    static QString vectorLayerSource(const QVariant &var);
+
     // Common parameter helpers
     void addInputRasterLayerParameter(const QString &name = "INPUT",
                                       const QString &description = "Input raster layer");

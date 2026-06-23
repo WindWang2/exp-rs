@@ -25,5 +25,9 @@ public:
 
 protected:
     // Helper to run an external OTB application
-    bool runOtbApplication(const QStringList &args, QgsProcessingFeedback *feedback);
+    bool runOtbApplication(const QString &program, const QStringList &args, QgsProcessingFeedback *feedback);
+
+    // Null-safe layer source extraction helpers
+    static QString rasterLayerSource(const QVariant &var);
+    static QString vectorLayerSource(const QVariant &var);
 };

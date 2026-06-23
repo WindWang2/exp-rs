@@ -45,14 +45,7 @@ QStringList GdalFillNodataAlgorithm::buildArgs(const QVariantMap &parameters,
         }
     }
 
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << inputPath;
+    args << rasterLayerSource(parameters.value("INPUT"));
 
     args << parameters.value("OUTPUT").toString();
 

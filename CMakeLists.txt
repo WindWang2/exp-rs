@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(sicnu_geo VERSION 1.0 LANGUAGES CXX C)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -11,29 +11,59 @@ include(CreateQgsVersion)
 include(GenerateExportHeader)
 
 set(COMPLETE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
-set(ENABLE_LOCAL_BUILD_SHORTCUTS ON)
+option(ENABLE_LOCAL_BUILD_SHORTCUTS "Skip git version detection for faster local builds" ON)
 CREATE_QGSVERSION()
 
 set(QT_VERSION_BASE "Qt6")
 set(QT_VERSION_BASE_LOWER "qt6")
 
+# =============================================================================
+# Vendored GDAL/PROJ/GEOS (ExternalProject-based, no system install needed)
+# Default to OFF for now (requires first-time build of vendored deps)
+# Set -DSICNU_VENDOR_GDAL=ON to build and use vendored GDAL/PROJ/GEOS
+# =============================================================================
+option(SICNU_VENDOR_GDAL "Build and use vendored GDAL/PROJ/GEOS from vendor/" OFF)
+if(SICNU_VENDOR_GDAL)
+    include(vendor_deps)
+    sicnu_use_vendored_deps()
+    message(STATUS "SICNU_VENDOR_GDAL=ON — building GDAL/PROJ/GEOS from vendor/")
+endif()
+
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia Core5Compat Test)
-find_package(GDAL REQUIRED)
-find_package(PROJ REQUIRED)
+
+# When vendoring, directly include the config files to bypass Find module cache
+if(SICNU_VENDOR_GDAL)
+    include("${SICNU_VENDOR_PREFIX}/lib/cmake/gdal/GDALConfig.cmake")
+    include("${SICNU_VENDOR_PREFIX}/lib/cmake/proj/proj-config.cmake")
+    include("${SICNU_VENDOR_PREFIX}/lib/cmake/GEOS/geos-config.cmake")
+    set(GDAL_FOUND TRUE)
+    set(PROJ_FOUND TRUE)
+    set(GEOS_FOUND TRUE)
+    message(STATUS "Found vendored GDAL ${GDAL_VERSION}")
+    message(STATUS "Found vendored PROJ")
+    message(STATUS "Found vendored GEOS")
+else()
+    find_package(GDAL REQUIRED)
+    find_package(PROJ REQUIRED)
+    find_package(GEOS REQUIRED)
+endif()
 find_package(BISON REQUIRED)
 find_package(FLEX REQUIRED)
-find_package(GEOS REQUIRED)
 find_package(EXPAT REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(LibZip REQUIRED)
-find_package(ZSTD REQUIRED)
+# ZSTD is only required for point cloud support (WITH_EPT)
+if(WITH_EPT)
+    find_package(ZSTD REQUIRED)
+endif()
 find_package(Protobuf REQUIRED)
 find_package(Qt6Keychain QUIET)
-find_package(CURL REQUIRED)
+# PCRE2 and CURL are transitive dependencies (glib, Qt6, GDAL)
 find_library(PCRE2_16 pcre2-16 REQUIRED)
 find_library(PCRE2_8 pcre2-8 REQUIRED)
-# Python (build-time scripts + runtime embedding)
+find_package(CURL REQUIRED)
+# Python (build-time scripts + embedded interpreter)
 find_package(Python REQUIRED COMPONENTS Interpreter Development)
 
 # OpenCV — OPTIONAL dependency for SIFT auto-match (Task 11.5.7).
@@ -47,20 +77,19 @@ else()
     set(SICNU_HAS_OPENCV FALSE)
 endif()
 
-# pybind11 via FetchContent
+# Include FetchContent for dependency management (e.g. Catch2)
 include(FetchContent)
-FetchContent_Declare(
-  pybind11
-  GIT_REPOSITORY https://github.com/pybind/pybind11.git
-  GIT_TAG        v2.13.6
-)
-FetchContent_MakeAvailable(pybind11)
 
-# QCA — include directly from known install path
+# QCA — include directly from known install path or FindQCA result
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/FindQCA.cmake OPTIONAL)
-include_directories(SYSTEM /usr/include/qt6/Qca-qt6/QtCrypto)
+if(QCA_FOUND)
+  include_directories(SYSTEM ${QCA_INCLUDE_DIR} ${QCA_INCLUDE_DIR}/QtCrypto)
+elseif(UNIX)
+  include_directories(SYSTEM /usr/include/qt6/Qca-qt6/QtCrypto)
+endif()
 
 # Internal nlohmann_json: create interface target for vendored header
+option(WITH_INTERNAL_NLOHMANN_JSON "" ON)
 if(WITH_INTERNAL_NLOHMANN_JSON)
   include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/external/nlohmann)
   add_library(nlohmann_json INTERFACE)
@@ -101,7 +130,7 @@ option(ENABLE_UNITY_BUILDS "" OFF)
 option(WITH_INTERNAL_MESHOPTIMIZER "" ON)
 option(WITH_VECTORTILE "" ON)
 option(WITH_SFCGAL "" OFF)
-option(USE_PRECOMPILED_HEADERS "" OFF)
+option(USE_PRECOMPILED_HEADERS "" ON)
 option(WITH_PDAL "" OFF)
 option(WITH_COPC "" ON)
 option(WITH_EPT "" ON)
@@ -128,20 +157,26 @@ endif()
 if(WITH_COPC)
   set(HAVE_COPC TRUE)
 endif()
-option(ENABLE_TESTS "" OFF)
+option(ENABLE_TESTS "" ON)
 option(ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
 if(ENABLE_SANITIZERS)
     # Compile all source files with sanitizer instrumentation
-    # Use -g1 (minimal debug info) to avoid GCC 16 ICE in dwarf2out.cc
-    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g1)
-    # Link sanitizer runtime into executables only (not shared libraries)
-    # to avoid ld.so conflicts with non-instrumented system libraries (Qt6, GDAL, etc.)
-    # --allow-shlib-undefined: our qgis_gui stubs have unresolved typeinfo for
-    # header-only QScintilla stubs; the symbols are never called at runtime.
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address,undefined -Wl,--allow-shlib-undefined")
-    # Also allow undefined symbols in shared libraries (same QScintilla stub reason)
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--allow-shlib-undefined")
+    if(MSVC)
+        # MSVC: only AddressSanitizer is supported
+        add_compile_options(/fsanitize=address)
+    else()
+        # GCC/Clang: AddressSanitizer + UndefinedBehaviorSanitizer
+        # Use -g1 (minimal debug info) to avoid GCC 16 ICE in dwarf2out.cc
+        add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g1)
+        # Link sanitizer runtime into executables only (not shared libraries)
+        # to avoid ld.so conflicts with non-instrumented system libraries (Qt6, GDAL, etc.)
+        # --allow-shlib-undefined: our qgis_gui stubs have unresolved typeinfo for
+        # header-only QScintilla stubs; the symbols are never called at runtime.
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address,undefined -Wl,--allow-shlib-undefined")
+        # Also allow undefined symbols in shared libraries (same QScintilla stub reason)
+        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--allow-shlib-undefined")
+    endif()
     # Disable LeakSanitizer: QGIS uses intentional singleton patterns (QgsExpression
     # function registry, QgsNumericFormatRegistry, Qt/GDAL driver allocations) that
     # live for the process lifetime and are reported as leaks. These are not bugs.
@@ -154,7 +189,7 @@ endif()
 # Release optimization flags
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     add_compile_options(-O2 -DNDEBUG)
-    option(ENABLE_LTO "Enable Link-Time Optimization for Release builds" OFF)
+    option(ENABLE_LTO "Enable Link-Time Optimization for Release builds" ON)
     if(ENABLE_LTO)
         set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
     endif()
@@ -162,7 +197,6 @@ endif()
 
 option(WITH_DRACO "" OFF)
 option(WITH_INTERNAL_POLY2TRI "" ON)
-option(WITH_INTERNAL_NLOHMANN_JSON "" ON)
 option(WITH_INTERNAL_LAZPERF "" ON)
 if(WITH_INTERNAL_LAZPERF)
   include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/external/lazperf)
@@ -172,6 +206,11 @@ endif()
 option(SICNU_BUILD_OTB "Build vendored OTB + ITK algorithm libraries" OFF)
 if(SICNU_BUILD_OTB)
     message(STATUS "SICNU_BUILD_OTB=ON — configuring vendored ITK + OTB")
+    # Force -fPIC for all OTB/ITK libraries (needed for shared module applications)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE)
+
+    # ── ITK: only algorithm core modules ──────────────────────────────────
+    set(ITK_BUILD_DEFAULT_MODULES OFF CACHE BOOL "" FORCE)
 
     # ── ITK: only algorithm core modules ──────────────────────────────────
     set(ITK_BUILD_DEFAULT_MODULES OFF CACHE BOOL "" FORCE)
@@ -274,10 +313,9 @@ if(SICNU_BUILD_OTB)
     # Tell OTB where to find the built ITK
     set(ITK_DIR "${CMAKE_BINARY_DIR}/itk_ref" CACHE PATH "ITK build directory" FORCE)
 
-    # ── OTB: only algorithm modules ───────────────────────────────────────
+    # ── OTB: only core modules (Applications/Wrappers disabled — use CLI wrappers) ──
     set(OTB_BUILD_DEFAULT_MODULES OFF CACHE BOOL "" FORCE)
     foreach(m
-        # Core modules needed for basic OTB functionality
         OTBCommon
         OTBImageBase
         OTBImageManipulation
@@ -286,36 +324,66 @@ if(SICNU_BUILD_OTB)
         OTBStreaming
         OTBStatistics
         OTBLabelling
-        OTBMeanShift
-        OTBLearning
-        OTBSupervised
-        OTBFeaturesExtraction
     )
         set(Module_${m} ON CACHE BOOL "" FORCE)
     endforeach()
+    # Disable all Application/Wrapper modules (use CLI wrappers instead)
+    set(Module_OTBApplicationEngine OFF CACHE BOOL "" FORCE)
+    set(Module_OTBAppCore OFF CACHE BOOL "" FORCE)
+    set(Module_OTBCommandLine OFF CACHE BOOL "" FORCE)
+    # Disable all Application submodules and TestKernel
+    file(GLOB OTB_APP_MODULES "${CMAKE_SOURCE_DIR}/otb_ref/Modules/*/Applications/otb-module.cmake")
+    foreach(app_module ${OTB_APP_MODULES})
+        get_filename_component(app_dir ${app_module} DIRECTORY)
+        get_filename_component(app_name ${app_dir} NAME)
+        set(Module_${app_name} OFF CACHE BOOL "" FORCE)
+    endforeach()
+    set(Module_OTBTestKernel OFF CACHE BOOL "" FORCE)
+
+    # Tell OTB where to find GDAL
+    find_path(GDAL_INCLUDE_DIR gdal.h HINTS /usr/include/gdal)
+    find_library(GDAL_LIBRARY NAMES gdal)
+    set(GDAL_INCLUDE_DIRS "${GDAL_INCLUDE_DIR}" CACHE PATH "" FORCE)
+    set(GDAL_LIBRARIES "${GDAL_LIBRARY}" CACHE PATH "" FORCE)
+    set(GDAL_FOUND TRUE CACHE BOOL "" FORCE)
+
     # OTB requires Boost (filesystem, serialization).
-    # CMake 4.x removed FindBoost.cmake. We provide a BoostConfig.cmake stub
-    # that points to extracted Boost headers and system .so libraries.
-    # Boost headers are at ~/.local/boost (extracted from boost_1_84_0.tar.gz).
-    set(SICNU_BOOST_INCLUDE_DIR "$ENV{HOME}/.local/boost")
+    # Use vendored Boost headers + system Boost libraries
+    set(SICNU_BOOST_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/boost_ref" CACHE PATH "Vendored Boost include directory")
+
+    # Find system Boost libraries
+    find_library(Boost_FILESYSTEM_LIBRARY NAMES boost_filesystem)
+    find_library(Boost_SERIALIZATION_LIBRARY NAMES boost_serialization)
+
+    if(Boost_FILESYSTEM_LIBRARY AND Boost_SERIALIZATION_LIBRARY)
+        message(STATUS "Found system Boost libraries: ${Boost_FILESYSTEM_LIBRARY}")
+        # Create imported targets
+        add_library(Boost::filesystem STATIC IMPORTED)
+        set_target_properties(Boost::filesystem PROPERTIES
+            IMPORTED_LOCATION "${Boost_FILESYSTEM_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${SICNU_BOOST_INCLUDE_DIR}"
+        )
+        add_library(Boost::serialization STATIC IMPORTED)
+        set_target_properties(Boost::serialization PROPERTIES
+            IMPORTED_LOCATION "${Boost_SERIALIZATION_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${SICNU_BOOST_INCLUDE_DIR}"
+        )
+    else()
+        message(FATAL_ERROR "Boost libraries not found. Please install libboost-filesystem-dev and libboost-serialization-dev")
+    endif()
+
     # Pre-set all Boost variables so OTB's patched Boost init skips find_package
-    set(Boost_FOUND TRUE PARENT_SCOPE)
     set(Boost_FOUND TRUE)
     set(Boost_INCLUDE_DIRS "${SICNU_BOOST_INCLUDE_DIR}")
-    set(Boost_LIBRARIES "/usr/lib/libboost_filesystem.so;/usr/lib/libboost_serialization.so")
-    set(Boost_LIBRARY_DIRS "/usr/lib")
+    set(Boost_LIBRARIES "Boost::filesystem;Boost::serialization")
     set(Boost_INCLUDE_DIR "${SICNU_BOOST_INCLUDE_DIR}")
-    set(Boost_FILESYSTEM_LIBRARY "/usr/lib/libboost_filesystem.so")
-    set(Boost_SERIALIZATION_LIBRARY "/usr/lib/libboost_serialization.so")
     set(Boost_FILESYSTEM_FOUND TRUE)
     set(Boost_SERIALIZATION_FOUND TRUE)
     set(Boost_VERSION "1.84.0")
     set(Boost_VERSION_STRING "1.84.0")
-    set(Boost_USE_STATIC_LIBS OFF)
+    set(Boost_USE_STATIC_LIBS ON)
     set(Boost_USE_MULTITHREADED ON)
-    # Make our BoostConfig.cmake findable via CMAKE_PREFIX_PATH
-    list(INSERT CMAKE_PREFIX_PATH 0 "${CMAKE_SOURCE_DIR}/cmake")
-    set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} CACHE STRING "" FORCE)
+    
     # CMake policy CMP0167: FindBoost is removed. Set to NEW to use CONFIG mode.
     if(POLICY CMP0167)
         cmake_policy(SET CMP0167 NEW)
@@ -335,10 +403,23 @@ if(SICNU_BUILD_OTB)
     # OTB's GDAL init uses legacy GDAL_INCLUDE_DIR/GDAL_LIBRARY variables.
     # Modern GDAL (4.x) CMake config doesn't set these, so provide them.
     if(NOT GDAL_INCLUDE_DIR)
-        set(GDAL_INCLUDE_DIR "/usr/include" CACHE PATH "GDAL include dir" FORCE)
+        if(TARGET GDAL::GDAL)
+            get_target_property(GDAL_INCLUDE_DIR GDAL::GDAL INTERFACE_INCLUDE_DIRECTORIES)
+        endif()
+        if(NOT GDAL_INCLUDE_DIR)
+            find_path(GDAL_INCLUDE_DIR gdal.h PATHS /usr/include /usr/local/include)
+        endif()
     endif()
     if(NOT GDAL_LIBRARY)
-        set(GDAL_LIBRARY "/usr/lib/libgdal.so" CACHE FILEPATH "GDAL library" FORCE)
+        if(TARGET GDAL::GDAL)
+            get_target_property(GDAL_LIBRARY GDAL::GDAL IMPORTED_LOCATION)
+            if(NOT GDAL_LIBRARY)
+                get_target_property(GDAL_LIBRARY GDAL::GDAL IMPORTED_LOCATION_RELEASE)
+            endif()
+        endif()
+        if(NOT GDAL_LIBRARY)
+            find_library(GDAL_LIBRARY NAMES gdal PATHS /usr/lib /usr/local/lib)
+        endif()
     endif()
     # Skip GDAL config checking (try_run tests fail on Linux due to empty TEMP var)
     set(GDAL_CONFIG_CHECKING OFF CACHE BOOL "Tests to check gdal config." FORCE)
@@ -370,6 +451,7 @@ add_subdirectory(src/core)
 add_subdirectory(src/analysis)
 add_subdirectory(src/app/georeferencer)
 add_subdirectory(src/app/classification)
+add_subdirectory(src/app/obia)
 # SICNU_GEO_RS: P3 GUI options — disable optional deps not installed on this system
 option(WITH_QWTPOLAR      "" OFF)
 option(WITH_QSCINTILLA    "" OFF)
@@ -398,7 +480,11 @@ target_link_libraries(sicnu_gui PUBLIC
 )
 
 # SICNU_GEO_RS: extra include paths needed by unconditional core sources
-target_include_directories(qgis_core SYSTEM PRIVATE /usr/include/qt6/Qca-qt6/QtCrypto)
+if(QCA_FOUND)
+  target_include_directories(qgis_core SYSTEM PRIVATE ${QCA_INCLUDE_DIR} ${QCA_INCLUDE_DIR}/QtCrypto)
+elseif(UNIX)
+  target_include_directories(qgis_core SYSTEM PRIVATE /usr/include/qt6/Qca-qt6/QtCrypto)
+endif()
 target_include_directories(qgis_core PRIVATE
   ${CMAKE_SOURCE_DIR}/src/core/providers/vpc
   ${CMAKE_SOURCE_DIR}/src/core/providers/copc

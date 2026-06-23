@@ -25,15 +25,7 @@ QStringList OtbBinaryMorphologicalAlgorithm::buildArgs(const QVariantMap &parame
     Q_UNUSED(feedback);
 
     QStringList args;
-
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << "-in" << inputPath;
+    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
     args << "-struct" << QString::number(parameters.value("RADIUS").toInt());
 
     QStringList operators = {"dilate", "erode", "opening", "closing"};

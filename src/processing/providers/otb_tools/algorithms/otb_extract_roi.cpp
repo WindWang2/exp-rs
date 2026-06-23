@@ -19,15 +19,7 @@ QStringList OtbExtractRoiAlgorithm::buildArgs(const QVariantMap &parameters,
     Q_UNUSED(feedback);
 
     QStringList args;
-
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << "-in" << inputPath;
+    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
 
     if (parameters.contains("EXTENT") && !parameters.value("EXTENT").toString().isEmpty()) {
         QStringList extent = parameters.value("EXTENT").toString().split(",");

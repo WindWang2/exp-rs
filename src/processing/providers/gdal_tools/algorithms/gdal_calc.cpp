@@ -21,14 +21,7 @@ QStringList GdalCalcAlgorithm::buildArgs(const QVariantMap &parameters,
 
     QStringList args;
 
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << "-A" << inputPath;
+    args << "-A" << rasterLayerSource(parameters.value("INPUT"));
 
     QString expression = parameters.value("EXPRESSION").toString();
     args << "--calc=" + expression;

@@ -18,12 +18,36 @@ Professional remote sensing analysis platform built on the QGIS engine. Pure C++
 
 ## Prerequisites
 
-- CMake 3.20+
-- Qt 6.2+ (Core, Gui, Widgets, Concurrent, Network, Svg, Xml, Sql)
-- GDAL 3.4+
-- PROJ 8+
-- GEOS 3.10+
-- SQLite3, ZLIB, LibZip, ZSTD, Protobuf, CURL, PCRE2, QCA
+**一键安装所有依赖:**
+
+```bash
+sudo ./scripts/install_deps.sh
+```
+
+支持 Arch Linux, Ubuntu/Debian, Fedora, macOS (Homebrew)。
+
+**已 Vendor 的依赖（无需安装）:**
+- QGIS core/gui 源码 (32MB)
+- ITK 5.4 (156MB)
+- OTB 10 (97MB)
+- nlohmann_json, spatialindex, poly2tri, lazperf, TinyXML
+- Catch2 (测试框架，自动下载)
+
+**需要系统安装的依赖:**
+
+| 依赖 | 说明 |
+|------|------|
+| CMake 3.20+ | 构建系统 |
+| Qt 6.2+ | GUI 框架 (Core, Gui, Widgets, Svg, Tools, Multimedia) |
+| GDAL 3.4+ | 地理空间 I/O |
+| PROJ 8+ | 坐标转换 |
+| GEOS 3.10+ | 几何运算 |
+| OpenCV 4.5+ | SIFT 匹配 + 分类 (可选) |
+| SQLite3, ZLIB, LibZip, ZSTD | 标准系统库 |
+| Protobuf, CURL, EXPAT, PCRE2 | 标准系统库 |
+| QCA | Qt 加密架构 |
+| BISON, FLEX | 构建工具 |
+| Python 3 | 构建脚本 (运行时不需要) |
 
 ## Build
 

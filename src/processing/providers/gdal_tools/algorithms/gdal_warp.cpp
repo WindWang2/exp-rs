@@ -37,14 +37,7 @@ QStringList GdalWarpAlgorithm::buildArgs(const QVariantMap &parameters,
         args << parameters.value("EXTRA").toString().split(" ");
     }
 
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << inputPath;
+    args << rasterLayerSource(parameters.value("INPUT"));
     args << parameters.value("OUTPUT").toString();
 
     return args;

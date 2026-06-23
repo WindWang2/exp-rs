@@ -27,15 +27,7 @@ QStringList OtbMultiResolutionPyramidAlgorithm::buildArgs(const QVariantMap &par
     Q_UNUSED(feedback);
 
     QStringList args;
-
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << "-in" << inputPath;
+    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
 
     args << "-levels" << QString::number(parameters.value("LEVELS").toInt());
 

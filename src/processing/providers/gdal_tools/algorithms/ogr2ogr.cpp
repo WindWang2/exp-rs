@@ -145,14 +145,7 @@ QStringList Ogr2OgrAlgorithm::buildArgs(const QVariantMap &parameters,
     args << parameters.value("OUTPUT").toString();
 
     // Input file
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsVectorLayer *>()) {
-        inputPath = inputVar.value<QgsVectorLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << inputPath;
+    args << vectorLayerSource(parameters.value("INPUT"));
 
     // Source layer name
     if (parameters.contains("SRC_LAYER") && !parameters.value("SRC_LAYER").toString().isEmpty()) {

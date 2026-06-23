@@ -19,24 +19,8 @@ QStringList OtbBundleToPerfectSensorAlgorithm::buildArgs(const QVariantMap &para
     Q_UNUSED(feedback);
 
     QStringList args;
-
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << "-in" << inputPath;
-
-    QVariant panVar = parameters.value("PANCHROMATIC");
-    QString panPath;
-    if (panVar.canConvert<QgsRasterLayer *>()) {
-        panPath = panVar.value<QgsRasterLayer *>()->source();
-    } else {
-        panPath = panVar.toString();
-    }
-    args << "-pan" << panPath;
+    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
+    args << "-pan" << rasterLayerSource(parameters.value("PANCHROMATIC"));
     args << "-out" << parameters.value("OUTPUT").toString();
 
     return args;

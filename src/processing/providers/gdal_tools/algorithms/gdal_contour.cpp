@@ -25,14 +25,7 @@ QStringList GdalContourAlgorithm::buildArgs(const QVariantMap &parameters,
     double interval = parameters.value("INTERVAL", 10.0).toDouble();
     args << "-i" << QString::number(interval);
 
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << inputPath;
+    args << rasterLayerSource(parameters.value("INPUT"));
     args << parameters.value("OUTPUT").toString();
 
     return args;

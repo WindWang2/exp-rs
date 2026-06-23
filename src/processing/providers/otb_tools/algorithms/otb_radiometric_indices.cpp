@@ -19,15 +19,7 @@ QStringList OtbRadiometricIndicesAlgorithm::buildArgs(const QVariantMap &paramet
     Q_UNUSED(feedback);
 
     QStringList args;
-
-    QVariant inputVar = parameters.value("INPUT");
-    QString inputPath;
-    if (inputVar.canConvert<QgsRasterLayer *>()) {
-        inputPath = inputVar.value<QgsRasterLayer *>()->source();
-    } else {
-        inputPath = inputVar.toString();
-    }
-    args << "-in" << inputPath;
+    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
     args << "-list" << parameters.value("LIST").toString();
     args << "-out" << parameters.value("OUTPUT").toString();
 
