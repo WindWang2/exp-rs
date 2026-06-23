@@ -172,7 +172,7 @@ static QgsRasterLayer *extractBandAsLayer( QgsRasterLayer *srcLayer, int bandNum
         return nullptr;
 
     gdal::dataset_unique_ptr srcDS( GDALOpen(
-        srcLayer->dataProvider()->dataSourceUri().toUtf8().constData(), GA_ReadOnly ) );
+        srcLayer->source().toUtf8().constData(), GA_ReadOnly ) );
     if ( !srcDS )
         return nullptr;
 

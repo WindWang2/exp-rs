@@ -211,8 +211,8 @@ void ChangeDetectionDialog::runDetection()
     }
 
     // Capture parameters for async execution
-    QString beforeSourcePath = beforeLayer->dataProvider()->dataSourceUri();
-    QString afterSourcePath = afterLayer->dataProvider()->dataSourceUri();
+    QString beforeSourcePath = beforeLayer->source();
+    QString afterSourcePath = afterLayer->source();
     int beforeBand = m_beforeBandCombo->currentData().toInt();
     int afterBand = m_afterBandCombo->currentData().toInt();
     int methodIndex = m_methodCombo->currentIndex();
