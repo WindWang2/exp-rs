@@ -10,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QSpinBox>
+#include <QMessageBox>
 
 #include <qgsmessagelog.h>
 #include <qgis.h>
@@ -116,4 +117,14 @@ void PcaDialog::onRun()
     }
 
     handleCompleted(outputPath());
+}
+
+void PcaDialog::onCompleted(const QString &outputPath)
+{
+    handleCompleted(outputPath);
+}
+
+void PcaDialog::onFailed(const QString &errorMessage)
+{
+    handleFailed(errorMessage);
 }

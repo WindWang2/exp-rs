@@ -68,7 +68,7 @@ void SpatialFilterDialog::onRun()
 
     m_runButton->setEnabled(false);
 
-    m_runner->run([sourcePath, outputPath(), kernelSize, filterIndex]() -> QString {
+    m_runner->run([this, sourcePath, outputPath = outputPath(), kernelSize, filterIndex]() -> QString {
     try {
         // Open source dataset
         GdalDatasetWrapper srcDataset;
@@ -112,7 +112,7 @@ void SpatialFilterDialog::onRun()
 
         // Create output
         QString error;
-        GdalDatasetGuard dstGuard(createOutputTiff(outputPath(), width, height, bandCount,
+        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, width, height, bandCount,
                                                    GDT_Float32, srcDataset.geoTransform(),
                                                    srcDataset.projection(), &error));
         if (!dstGuard) return QString();
@@ -126,7 +126,7 @@ void SpatialFilterDialog::onRun()
                             "Failed to write output band" );
         }
 
-        return outputPath();
+        return outputPath;
     } catch (const std::runtime_error &) {
         return QString();
     }

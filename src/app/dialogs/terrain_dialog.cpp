@@ -292,3 +292,11 @@ void TerrainDialog::onAnalysisFinished()
         QMessageBox::warning( this, tr( "Error" ), tr( "Terrain analysis failed." ) );
     }
 }
+
+void TerrainDialog::onBrowseOutput()
+{
+    QString path = QFileDialog::getSaveFileName( this, tr( "Output File" ), QString(),
+                                                 tr( "GeoTIFF (*.tif)" ) );
+    if ( !path.isEmpty() )
+        mOutputEdit->setText( path );
+}

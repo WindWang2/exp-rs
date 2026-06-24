@@ -188,3 +188,13 @@ void AtmosphericDialog::onRun()
 
     handleCompleted(outputPath());
 }
+
+void AtmosphericDialog::onCompleted(const QString &outputPath)
+{
+    handleCompleted(outputPath);
+}
+
+void AtmosphericDialog::onFailed(const QString &errorMessage)
+{
+    handleFailed(errorMessage);
+}

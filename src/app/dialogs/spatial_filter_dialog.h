@@ -4,6 +4,7 @@
 #include "raster_processing_dialog_base.h"
 
 class QComboBox;
+class AsyncGdalRunner;
 
 /**
  * Dialog for Spatial Filtering operations.
@@ -22,9 +23,14 @@ protected:
     QString dialogTitle() const override { return tr("Spatial Filter"); }
     void onRun() override;
 
+private slots:
+    void onCompleted(const QString &outputPath);
+    void onFailed(const QString &errorMessage);
+
 private:
     void setupUi();
 
     QComboBox *m_filterTypeCombo = nullptr;
     QComboBox *m_kernelSizeCombo = nullptr;
+    AsyncGdalRunner *m_runner = nullptr;
 };

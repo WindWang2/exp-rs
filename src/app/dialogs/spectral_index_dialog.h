@@ -5,6 +5,7 @@
 
 class QComboBox;
 class QLabel;
+class AsyncAlgorithmRunner;
 
 /**
  * Dialog for Spectral Index calculations.
@@ -25,6 +26,8 @@ protected:
 
 private slots:
     void onIndexChanged(int index);
+    void onAlgorithmCompleted(const QVariantMap &results);
+    void onAlgorithmFailed(const QString &errorMessage);
 
 private:
     void setupUi();
@@ -43,4 +46,5 @@ private:
     QLabel *m_greenLabel = nullptr;
     QLabel *m_blueLabel = nullptr;
     QLabel *m_swirLabel = nullptr;
+    AsyncAlgorithmRunner *m_runner = nullptr;
 };

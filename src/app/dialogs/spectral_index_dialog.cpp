@@ -1,6 +1,7 @@
 // src/app/dialogs/spectral_index_dialog.cpp
 #include "spectral_index_dialog.h"
 #include "async_algorithm_runner.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <raster/qgsrasterlayer.h>
 
@@ -10,10 +11,12 @@
 #include <QComboBox>
 #include <QDir>
 #include <QDateTime>
+#include <QMessageBox>
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
 #include <qgsmessagelog.h>
+#include <qgsogrutils.h>
 #include <qgis.h>
 
 #include <processing/qgsprocessingregistry.h>

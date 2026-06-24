@@ -22,6 +22,10 @@ protected:
     QString dialogTitle() const override { return tr("Principal Component Analysis"); }
     void onRun() override;
 
+private slots:
+    void onCompleted(const QString &outputPath);
+    void onFailed(const QString &errorMessage);
+
 private:
     void setupUi();
 

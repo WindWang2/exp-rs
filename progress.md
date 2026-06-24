@@ -1,5 +1,65 @@
 # Progress Log — SICNU GEO RS
 
+## Session: 2026-06-24 — Build Fixes & Missing Headers ✅ COMPLETE
+
+### 状态
+- **主程序 sicnu_geo_rs 编译成功**
+- **所有核心单元测试通过**
+- **image_enhancement_panel.cpp 已重写以匹配 .h**
+
+### 核心改动
+| 文件 | 改动 |
+|---|---|
+| `src/app/dialogs/raster_processing_dialog_base.h` | 添加 `#include <QVBoxLayout>` |
+| `src/app/dialogs/stac_browser_dialog.{h,cpp}` | 新建 STAC 浏览器对话框（Phase 12 AI Agent） |
+| `src/app/dialogs/extract_band_dialog.{h,cpp}` | 新建头文件，补全 lambda 实现 |
+| `src/app/dialogs/terrain_dialog.{h,cpp}` | 新建头文件，添加 outputPath() 和 onBrowseOutput() |
+| `src/app/dialogs/fusion_dialog.{h,cpp}` | 新建头文件，添加缺失成员和方法 |
+| `src/app/dialogs/change_detection_dialog.{h,cpp}` | 新建头文件，修复 lambda 捕获，添加 outputPath() |
+| `src/app/dialogs/spectral_index_dialog.h` | 添加 onCompleted/onFailed/m_runner 声明 |
+| `src/app/dialogs/spatial_filter_dialog.{h,cpp}` | 添加 slots 和 m_runner 声明，修复 lambda |
+| `src/app/dialogs/speckle_filter_dialog.{h,cpp}` | 添加 slots 和 m_runner 声明，修复 lambda |
+| `src/app/dialogs/pca_dialog.{h,cpp}` | 添加 slots 声明和实现 |
+| `src/app/dialogs/atmospheric_dialog.{h,cpp}` | 添加 slots 声明和实现 |
+| `src/app/dialogs/band_math_dialog.cpp` | 添加 `#include <QMessageBox>` |
+| `src/app/dialogs/contrast_stretch_dialog.cpp` | 修复 lambda 捕获 outputPath |
+| `src/app/dialogs/band_ratio_dialog.cpp` | 修复 lambda 捕获 outputPath |
+| `src/app/dialogs/mosaic_dialog.{h,cpp}` | 添加 slots 声明，修复 includes，添加 createOutputTiff |
+| `src/app/dialogs/async_runner_base.{h,cpp}` | 添加 QApplication include，新建 MOC stub |
+| `src/app/dialogs/image_enhancement_panel.cpp` | 完全重写以匹配 .h 声明 |
+| `src/app/CMakeLists.txt` | 添加缺失的源文件和 include 路径 |
+| `src/app/main_window_processing.cpp` | 恢复 ImageEnhancementPanel 功能 |
+
+### 已修复的问题
+- ✅ 6 个缺失的头文件
+- ✅ 5 个 lambda 捕获问题
+- ✅ 8 个缺失的方法实现
+- ✅ image_enhancement_panel.cpp/.h 不匹配
+
+### 仍存在的问题
+- ⚠️ `test_colormap` 测试崩溃（pre-existing 问题）
+
+---
+
+## Session: 2026-06-18 — Phase 12: AI Agent Infrastructure 🟡 IN PROGRESS
+
+### 状态
+- **4/4 AI Agent 基础架构任务开发中**
+- **357/357 单元测试通过**（Offscreen 运行成功）
+
+### 核心改动
+| 文件 | 改动 |
+|---|---|
+| `src/core/processing/qgsprocessingalgorithm.{h,cpp}` | 新增 `toJsonSchema()` 及 `metadata()` 虚方法，用于导出算法参数的 JSON Schema 和 Agent 语义元数据 |
+| `src/processing/providers/qgis_algorithms/algorithms/remote_sensing/` | 为 `BandMath`, `SpectralIndex`, `AtmosphericCorrection` 算法添加 shortHelpString() 详细描述，重写 metadata() 返回用途/用例/限制/工作流建议 |
+| `src/agent/mcp_server.{h,cpp}` | 实现基于 Model Context Protocol (stdio/JSON-RPC 2.0) 的 Agent 服务端，提供 list_algorithms, get_algorithm_schema, execute_algorithm, list_layers, describe_dataset 等 7 个工具 |
+| `src/agent/stac_client.h` | 基于 QNetworkAccessManager 实现 STAC 目录搜索与 COG 数据集资源解析 |
+| `src/app/dialogs/stac_browser_dialog.{h,cpp}` | 实现云端 STAC 数据集浏览器对话框，支持按时空范围搜索，并通过 GDAL `/vsicurl/` 虚拟文件系统流式加载 Cloud-Optimized GeoTIFF (COG) 到画布 |
+| `src/app/main.cpp` | 引入 `--mcp` 命令行模式启动无 GUI event loop 的 MCP 进程 |
+| `tests/test_algorithm_schema.cpp` & `tests/test_mcp_server.cpp` | 添加算法 JSON 模式、Agent 语义元数据以及 MCP 处理函数的集成单元测试 |
+
+---
+
 ## Session: 2026-06-17 — Comprehensive Code Review & Architectural Improvements ✅ COMPLETE
 
 ### 状态

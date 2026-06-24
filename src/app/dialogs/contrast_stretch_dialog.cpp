@@ -101,7 +101,7 @@ void ContrastStretchDialog::onRun()
 
     m_runButton->setEnabled(false);
 
-    m_runner->run([sourcePath, outputPath(), methodIndex, clipValue, stddevValue]() -> QString {
+    m_runner->run([this, sourcePath, outputPath = outputPath(), methodIndex, clipValue, stddevValue]() -> QString {
     try {
         // Open source dataset
         GdalDatasetWrapper srcDataset;
@@ -150,7 +150,7 @@ void ContrastStretchDialog::onRun()
 
         // Create output file using GDAL
         QString error;
-        GdalDatasetGuard dstGuard(createOutputTiff(outputPath(), width, height, bandCount,
+        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, width, height, bandCount,
                                                    GDT_Float32, srcDataset.geoTransform(),
                                                    srcDataset.projection(), &error));
         if (!dstGuard) return QString();
@@ -164,7 +164,7 @@ void ContrastStretchDialog::onRun()
                             "Failed to write output band" );
         }
 
-        return outputPath();
+        return outputPath;
     } catch (const std::runtime_error &) {
         return QString();
     }

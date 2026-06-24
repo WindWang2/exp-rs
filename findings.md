@@ -1,5 +1,34 @@
 # Findings & Decisions — SICNU GEO RS
 
+## Phase 6R.2: Operator-Perspective Fixes (2026-06-06)
+
+### 关键发现
+
+1. **Processing Toolbox 完全无法执行算法**：`openProcessingAlgorithm()` 使用 `QgsProcessingAlgorithmDialogBase` 子类，但：
+   - `createProcessingParameters()` 返回空 QVariantMap（从不读取控件值）
+   - `runAlgorithm()` 是空方法体（QGIS 源码 line 744-745）
+   - `setMainWidget(qobject_cast<QgsPanelWidget*>(paramPanel))` 永远传 nullptr
+   - 影响：全部 83+ 处理算法（GDAL/OTB/QGIS）都无法执行
+   - **修复**：完全绕开 `QgsProcessingAlgorithmDialogBase`，用普通 `QDialog` + 动态参数控件 + `algorithm->run()` 重新实现
+
+2. **Mosaic 无 CRS 校验**：输入不同投影的栅格会静默产生错误结果
+   - **修复**：合并前用 `QgsCoordinateReferenceSystem::operator==` 检查所有输入 CRS 一致性
+
+3. **编辑模式切换残留**：从编辑中的矢量图层切换到其他图层，编辑状态静默保留
+   - **修复**：`onLayerTreeClicked()` 中检查当前图层编辑状态，弹保存/丢弃/取消对话框
+
+4. **Identify CRS 问题不存在**：`QgsMapToolIdentify::identify()` 内部已正确处理 CRS 转换，无需修改
+
+5. **AddFeature CaptureMode 无问题**：`CaptureNone` 模式通过 `currentLayerChanged` 信号自动从图层几何类型推断模式
+
+### 实施决定
+
+- **绕开 QgsProcessingAlgorithmDialogBase**：该基类与 QGIS App 有深层耦合（`QgisApp::instance()`），我们的纯 C++ 应用无法使用。改用独立的 `QDialog` + `QFormLayout` + `algorithm->run()` 直接调用。
+- **参数控件映射**：RasterLayer/VectorLayer/FeatureSource → QComboBox（从项目图层填充），Number → QSpinBox/QDoubleSpinBox，Enum → QComboBox，Boolean → QCheckBox，Crs/Extent/Field → QLineEdit，Destination → QLineEdit + Browse
+- **结果自动加载**：根据输出文件扩展名（tif/shp/gpkg/geojson）自动判断栅格/矢量并加载到画布
+
+---
+
 ## Phase 10B.0 OTB + ITK Vendored Infrastructure 实施记录 (2026-06-05)
 
 ### 关键发现

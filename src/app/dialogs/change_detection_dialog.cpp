@@ -226,7 +226,7 @@ void ChangeDetectionDialog::runDetection()
 
     m_runButton->setEnabled(false);
 
-    m_runner->run([beforeSourcePath, afterSourcePath, beforeBand, afterBand,
+    m_runner->run([this, beforeSourcePath, afterSourcePath, beforeBand, afterBand,
                    methodIndex, threshold, outPath]() -> QString {
     try {
         // Open source datasets
@@ -283,13 +283,13 @@ void ChangeDetectionDialog::runDetection()
 
         // Create output
         QString error;
-        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, width, height, bandCount,
-                                                   GDT_Float32, srcDataset.geoTransform(),
-                                                   srcDataset.projection(), &error));
+        GdalDatasetGuard dstGuard(createOutputTiff(outPath, width, height, 1,
+                                                   GDT_Float32, beforeDs.geoTransform(),
+                                                   beforeDs.projection(), &error));
         if (!dstGuard) return QString();
 
         // Write output band
-        GDALRasterBandH dstBand = GDALGetRasterBand(dstDataset.get(), 1);
+        GDALRasterBandH dstBand = GDALGetRasterBand(dstGuard.get(), 1);
         if (!dstBand) return QString();
 
         GDAL_SAFE_CALL( GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
@@ -301,6 +301,11 @@ void ChangeDetectionDialog::runDetection()
         return QString();
     }
     });
+}
+
+QString ChangeDetectionDialog::outputPath() const
+{
+    return m_outputEdit ? m_outputEdit->text().trimmed() : QString();
 }
 
 void ChangeDetectionDialog::onCompleted(const QString &outputPath)

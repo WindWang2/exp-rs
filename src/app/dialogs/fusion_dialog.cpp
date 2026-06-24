@@ -2,6 +2,7 @@
 #include "fusion_dialog.h"
 
 #include "processing/algorithms/image_fusion.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_safe_call.h"
 #include "processing/tools/tool_path_manager.h"
 
@@ -418,4 +419,43 @@ void FusionDialog::onRun()
 void FusionDialog::onMethodChanged(int index) { Q_UNUSED(index); }
 void FusionDialog::onCompleted(const QString &outputPath) { Q_UNUSED(outputPath); accept(); }
 void FusionDialog::onFailed(const QString &errorMessage) { QMessageBox::warning(this, tr("Error"), errorMessage); }
+
+void FusionDialog::onBrowsePan()
+{
+    QString path = QFileDialog::getOpenFileName(this, tr("Select Panchromatic Image"), QString(),
+                                                tr("GeoTIFF (*.tif *.tiff);;All Files (*)"));
+    if (!path.isEmpty()) {
+        // Find or add layer
+        for (int i = 0; i < mPanCombo->count(); ++i) {
+            auto *rl = mPanCombo->itemData(i).value<QgsRasterLayer*>();
+            if (rl && rl->source() == path) {
+                mPanCombo->setCurrentIndex(i);
+                return;
+            }
+        }
+    }
+}
+
+void FusionDialog::onBrowseMs()
+{
+    QString path = QFileDialog::getOpenFileName(this, tr("Select Multispectral Image"), QString(),
+                                                tr("GeoTIFF (*.tif *.tiff);;All Files (*)"));
+    if (!path.isEmpty()) {
+        for (int i = 0; i < mMsCombo->count(); ++i) {
+            auto *rl = mMsCombo->itemData(i).value<QgsRasterLayer*>();
+            if (rl && rl->source() == path) {
+                mMsCombo->setCurrentIndex(i);
+                return;
+            }
+        }
+    }
+}
+
+void FusionDialog::onBrowseOutput()
+{
+    QString path = QFileDialog::getSaveFileName(this, tr("Output File"), QString(),
+                                                tr("GeoTIFF (*.tif)"));
+    if (!path.isEmpty())
+        mOutputEdit->setText(path);
+}
 

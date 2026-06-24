@@ -10,6 +10,8 @@
 #include <QLabel>
 #include <QGroupBox>
 #include <QListWidget>
+#include <QFileDialog>
+#include <QMessageBox>
 
 #include <qgsmessagelog.h>
 #include <qgis.h>
@@ -224,6 +226,11 @@ void MosaicDialog::onRun()
 
         // --- Write output GeoTIFF ---
         GDALAllRegister();
+
+        QString error;
+        GdalDatasetGuard dstGuard(createOutputTiff(outPath, outWidth, outHeight, 1,
+                                                    GDT_Float32, outGT, inputs[0].projection, &error));
+        if (!dstGuard) return QString();
 
         GDALRasterBandH band = GDALGetRasterBand(dstGuard.get(), 1);
         if (!band) return QString();

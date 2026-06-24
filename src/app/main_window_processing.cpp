@@ -2,6 +2,7 @@
 // Extracted from main_window.cpp for maintainability
 #include "main_window.h"
 
+#include "dialogs/image_enhancement_panel.h"
 #include "dialogs/band_math_dialog.h"
 #include "dialogs/spectral_index_dialog.h"
 #include "dialogs/atmospheric_dialog.h"
@@ -54,6 +55,20 @@ void QgisDesktopWindow::openProcessingAlgorithm(const QString &algorithmId)
     dlg->buildParameterWidgets();
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     dlg->show();
+}
+
+// ---------------------------------------------------------------------------
+// Image Enhancement Panel
+// ---------------------------------------------------------------------------
+
+void QgisDesktopWindow::openImageEnhancementPanel()
+{
+    ImageEnhancementPanel dialog(this);
+    QgsRasterLayer *rasterLayer = qobject_cast<QgsRasterLayer*>(activeLayer());
+    if (rasterLayer) {
+        dialog.setRasterLayer(rasterLayer);
+    }
+    dialog.exec();
 }
 
 // ---------------------------------------------------------------------------
@@ -273,7 +288,10 @@ void QgisDesktopWindow::openTerrainDialog()
 {
     TerrainDialog dialog(this);
     if (dialog.exec() == QDialog::Accepted) {
-        // Output is loaded automatically by the dialog
+        QString outPath = dialog.outputPath();
+        if (!outPath.isEmpty()) {
+            loadRasterLayer(outPath);
+        }
     }
 }
 

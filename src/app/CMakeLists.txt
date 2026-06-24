@@ -22,6 +22,12 @@ add_executable(sicnu_geo_rs
     dialogs/change_detection_dialog.cpp
     dialogs/comparison_dialog.cpp
     dialogs/batch_processing_dialog.cpp
+    dialogs/stac_browser_dialog.cpp
+    dialogs/raster_processing_dialog_base.cpp
+    dialogs/async_runner_base.cpp
+    dialogs/async_gdal_runner.cpp
+    dialogs/async_algorithm_runner.cpp
+    dialogs/extract_band_dialog.cpp
     layout/qgslayoutdesignerdialog.cpp
     map_tools/measure_tool.cpp
     widgets/histogram_widget.cpp
@@ -32,6 +38,21 @@ add_executable(sicnu_geo_rs
 
     # QgisApp facade
     qgis_app_facade.cpp
+
+    # Layer and map tool managers
+    layer_manager.cpp
+    map_tools/map_tool_manager.cpp
+
+    # Python console and API
+    ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_console.cpp
+    ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_api.cpp
+    ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
+
+    # MCP server
+    ${CMAKE_SOURCE_DIR}/src/agent/mcp_server.cpp
+
+    # Image enhancement panel
+    dialogs/image_enhancement_panel.cpp
 
     # Vector editing map tools
     qgsmaptooladdfeature.cpp
@@ -119,7 +140,10 @@ target_include_directories(sicnu_geo_rs PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/maptools
     ${CMAKE_CURRENT_SOURCE_DIR}/vertextool
     ${CMAKE_CURRENT_SOURCE_DIR}/selecttools
+    ${CMAKE_SOURCE_DIR}/src/python
+    ${CMAKE_SOURCE_DIR}/src/agent
     ${GDAL_INCLUDE_DIR}
+    ${Python_INCLUDE_DIRS}
 )
 
 target_link_libraries(sicnu_geo_rs PRIVATE
@@ -139,6 +163,7 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     CURL::libcurl
     ${PCRE2_16}
     ${PCRE2_8}
+    Python::Python
 )
 
 # Phase 10A — Pixel-Based Classification. Link only when the static

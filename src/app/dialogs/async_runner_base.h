@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QString>
 #include <QWidget>
+#include <QApplication>
 
 /**
  * Base class for async runners providing common cursor management and running state.

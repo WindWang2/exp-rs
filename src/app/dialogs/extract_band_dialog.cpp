@@ -1,6 +1,7 @@
 // extract_band_dialog.cpp — Extract single band from multi-band raster
 #include "extract_band_dialog.h"
 #include "async_gdal_runner.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <qgsrasterlayer.h>
 #include <qgsproject.h>
@@ -186,8 +187,51 @@ void ExtractBandDialog::onRun()
         if (!srcBand) return QString();
 
         // Create output
+        double gt[6];
+        GDALGetGeoTransform(srcGuard.get(), gt);
+        std::array<double, 6> geoTransform;
+        std::copy(std::begin(gt), std::end(gt), geoTransform.begin());
+        const char *proj = GDALGetProjectionRef(srcGuard.get());
+        QString projection = proj ? QString::fromUtf8(proj) : QString();
+
         QString error;
-        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, width, height, bandCount,
-                                                   GDT_Float32, srcDataset.geoTransform(),
-                                                   srcDataset.projection(), &error));
+        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, w, h, 1,
+                                                   GDT_Float32, geoTransform,
+                                                   projection, &error));
         if (!dstGuard) return QString();
+
+        // Read and write pixel data
+        std::vector<float> buf(static_cast<size_t>(w) * h);
+        GDAL_SAFE_CALL( GDALRasterIO(srcBand, GF_Read, 0, 0, w, h, buf.data(), w, h, GDT_Float32, 0, 0),
+                        "Failed to read band data" );
+
+        GDALRasterBandH dstBand = GDALGetRasterBand(dstGuard.get(), 1);
+        if (!dstBand) return QString();
+        GDAL_SAFE_CALL( GDALRasterIO(dstBand, GF_Write, 0, 0, w, h, buf.data(), w, h, GDT_Float32, 0, 0),
+                        "Failed to write band data" );
+
+        return outputPath;
+    } catch (const std::runtime_error &) {
+        return QString();
+    }
+    });
+}
+
+void ExtractBandDialog::onLayerChanged()
+{
+    populateBandCombo();
+}
+
+void ExtractBandDialog::onCompleted(const QString &outputPath)
+{
+    m_runButton->setEnabled(true);
+    QgsMessageLog::logMessage(tr("Band extraction completed! Output: %1").arg(outputPath),
+                              "extract_band", Qgis::MessageLevel::Success);
+    accept();
+}
+
+void ExtractBandDialog::onFailed(const QString &errorMessage)
+{
+    m_runButton->setEnabled(true);
+    QMessageBox::warning(this, tr("Error"), tr("Band extraction failed: %1").arg(errorMessage));
+}

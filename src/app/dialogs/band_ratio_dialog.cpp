@@ -147,7 +147,7 @@ void BandRatioDialog::onRun()
 
     m_runButton->setEnabled(false);
 
-    m_runner->run([sourcePath, outputPath(), modeIndex, band1Num, band2Num,
+    m_runner->run([this, sourcePath, outputPath = outputPath(), modeIndex, band1Num, band2Num,
                    redNum, greenNum, blueNum]() -> QString {
     try {
         // Open source dataset
@@ -190,7 +190,7 @@ void BandRatioDialog::onRun()
 
         // Create output
         QString error;
-        GdalDatasetGuard dst(createOutputTiff(outputPath(), width, height, outBandCount,
+        GdalDatasetGuard dst(createOutputTiff(outputPath, width, height, outBandCount,
                                               GDT_Float32, srcDataset.geoTransform(),
                                               srcDataset.projection(), &error));
         if (!dst) return QString();
@@ -203,7 +203,7 @@ void BandRatioDialog::onRun()
                             "Failed to write output band" );
         }
 
-        return outputPath();
+        return outputPath;
     } catch (const std::runtime_error &) {
         return QString();
     }

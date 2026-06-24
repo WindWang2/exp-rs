@@ -5,6 +5,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QString>
+#include <QVBoxLayout>
 
 class QgsRasterLayer;
 

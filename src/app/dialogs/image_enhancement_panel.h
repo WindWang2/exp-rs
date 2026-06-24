@@ -32,6 +32,8 @@ protected:
 
 private slots:
     void onMethodChanged(int index);
+    void onCompleted(const QString &outputPath);
+    void onFailed(const QString &errorMessage);
 
 private:
     void setupUi();
@@ -75,6 +77,7 @@ private:
 
     // Status
     QLabel *m_statusLabel = nullptr;
+    QPushButton *m_runButton = nullptr;
 
     AsyncGdalRunner *m_runner = nullptr;
 };
