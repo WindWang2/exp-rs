@@ -9,6 +9,7 @@ add_library(sicnu_processing SHARED
     algorithms/band_math.cpp
     algorithms/atmospheric_correction.cpp
     algorithms/change_detection.cpp
+    algorithms/math_utils.cpp
     algorithms/mosaic.cpp
     algorithms/image_enhancement.cpp
     algorithms/chunked_processor.cpp

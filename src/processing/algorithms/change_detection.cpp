@@ -1,5 +1,6 @@
 // src/processing/algorithms/change_detection.cpp — Change detection algorithms
 #include "change_detection.h"
+#include "math_utils.h"
 #include "core/sicnu_logging.h"
 #include "framework/input_validator.h"
 
@@ -34,15 +35,7 @@ bool normalizedDifference(const float *before, const float *after, float *out, s
     }
     if (count == 0) return false;
 
-    for (size_t i = 0; i < count; ++i) {
-        float sum = after[i] + before[i];
-        if (sum == 0.0f)
-            out[i] = std::numeric_limits<float>::quiet_NaN();
-        else
-            out[i] = (after[i] - before[i]) / sum;
-    }
-
-    return true;
+    return MathUtils::normalizedDifference(after, before, out, count);
 }
 
 bool changeMask(const float *diff, uint8_t *mask, size_t count, float threshold)
@@ -74,56 +67,14 @@ ChangeStats statistics(const float *diff, size_t count)
     }
     if (count == 0) return stats;
 
-    stats.count = count;
+    // Use shared MathUtils::computeStats
+    MathUtils::Stats mathStats = MathUtils::computeStats(diff, count);
 
-    // Find first non-NaN value for initialization
-    bool foundValid = false;
-    size_t firstValid = 0;
-    for (size_t i = 0; i < count; ++i) {
-        if (!std::isnan(diff[i])) {
-            firstValid = i;
-            foundValid = true;
-            break;
-        }
-    }
-
-    if (!foundValid) {
-        // All values are NaN
-        stats.min = 0.0f;
-        stats.max = 0.0f;
-        stats.mean = 0.0f;
-        stats.stddev = 0.0f;
-        return stats;
-    }
-
-    stats.min = diff[firstValid];
-    stats.max = diff[firstValid];
-
-    double sum = 0.0;
-    size_t validCount = 0;
-    for (size_t i = 0; i < count; ++i) {
-        if (std::isnan(diff[i])) continue;
-        sum += diff[i];
-        stats.min = std::min(stats.min, diff[i]);
-        stats.max = std::max(stats.max, diff[i]);
-        validCount++;
-    }
-
-    if (validCount == 0) {
-        stats.mean = 0.0f;
-        stats.stddev = 0.0f;
-        return stats;
-    }
-
-    stats.mean = static_cast<float>(sum / validCount);
-
-    double sqSum = 0.0;
-    for (size_t i = 0; i < count; ++i) {
-        if (std::isnan(diff[i])) continue;
-        double d = diff[i] - stats.mean;
-        sqSum += d * d;
-    }
-    stats.stddev = static_cast<float>(std::sqrt(sqSum / validCount));
+    stats.count = mathStats.count;
+    stats.min = mathStats.min;
+    stats.max = mathStats.max;
+    stats.mean = mathStats.mean;
+    stats.stddev = mathStats.stddev;
 
     return stats;
 }
