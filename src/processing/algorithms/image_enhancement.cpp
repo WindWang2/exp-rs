@@ -547,12 +547,10 @@ void ImageEnhancement::leeFilter(const float *input, float *output,
 
     const int half = kernelSize / 2;
 
-    // Process in chunks for better cache locality
-    const int chunkHeight = 256;
-    for (int yStart = 0; yStart < height; yStart += chunkHeight) {
-        int yEnd = std::min(yStart + chunkHeight, height);
-
-        for (int y = yStart; y < yEnd; y++) {
+    // Use ChunkedProcessor for parallel processing
+    ChunkedProcessor processor(width, height, half);
+    processor.process([&](const ChunkedProcessor::Chunk &chunk) -> bool {
+        for (int y = chunk.startRow; y < chunk.endRow; y++) {
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
@@ -573,7 +571,8 @@ void ImageEnhancement::leeFilter(const float *input, float *output,
                 }
             }
         }
-    }
+        return true;
+    });
 }
 
 void ImageEnhancement::frostFilter(const float *input, float *output,
@@ -612,12 +611,10 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
         }
     }
 
-    // Process in chunks for better cache locality
-    const int chunkHeight = 256;
-    for (int yStart = 0; yStart < height; yStart += chunkHeight) {
-        int yEnd = std::min(yStart + chunkHeight, height);
-
-        for (int y = yStart; y < yEnd; y++) {
+    // Use ChunkedProcessor for parallel processing
+    ChunkedProcessor processor(width, height, half);
+    processor.process([&](const ChunkedProcessor::Chunk &chunk) -> bool {
+        for (int y = chunk.startRow; y < chunk.endRow; y++) {
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
@@ -661,7 +658,8 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
                 : mean;
             }
         }
-    }
+        return true;
+    });
 }
 
 void ImageEnhancement::kuanFilter(const float *input, float *output,
@@ -690,12 +688,12 @@ void ImageEnhancement::kuanFilter(const float *input, float *output,
     // Build integral image for O(1) local statistics
     IntegralImage integral(input, width, height);
 
-    // Process in chunks for better cache locality
-    const int chunkHeight = 256;
-    for (int yStart = 0; yStart < height; yStart += chunkHeight) {
-        int yEnd = std::min(yStart + chunkHeight, height);
+    const int half = kernelSize / 2;
 
-        for (int y = yStart; y < yEnd; y++) {
+    // Use ChunkedProcessor for parallel processing
+    ChunkedProcessor processor(width, height, half);
+    processor.process([&](const ChunkedProcessor::Chunk &chunk) -> bool {
+        for (int y = chunk.startRow; y < chunk.endRow; y++) {
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
@@ -731,7 +729,8 @@ void ImageEnhancement::kuanFilter(const float *input, float *output,
             output[y * width + x] = mean + weight * (pixel - mean);
             }
         }
-    }
+        return true;
+    });
 }
 
 void ImageEnhancement::gammaMapFilter(const float *input, float *output,
@@ -760,12 +759,12 @@ void ImageEnhancement::gammaMapFilter(const float *input, float *output,
     // Build integral image for O(1) local statistics
     IntegralImage integral(input, width, height);
 
-    // Process in chunks for better cache locality
-    const int chunkHeight = 256;
-    for (int yStart = 0; yStart < height; yStart += chunkHeight) {
-        int yEnd = std::min(yStart + chunkHeight, height);
+    const int half = kernelSize / 2;
 
-        for (int y = yStart; y < yEnd; y++) {
+    // Use ChunkedProcessor for parallel processing
+    ChunkedProcessor processor(width, height, half);
+    processor.process([&](const ChunkedProcessor::Chunk &chunk) -> bool {
+        for (int y = chunk.startRow; y < chunk.endRow; y++) {
             for (int x = 0; x < width; x++) {
                 float pixel = input[y * width + x];
 
@@ -804,7 +803,8 @@ void ImageEnhancement::gammaMapFilter(const float *input, float *output,
                 }
             }
         }
-    }
+        return true;
+    });
 }
 
 // ---- Band ratio ----
