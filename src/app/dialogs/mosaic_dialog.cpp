@@ -9,11 +9,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QGroupBox>
-#include <QFileDialog>
-#include <QMessageBox>
 #include <QListWidget>
-#include <QPushButton>
-#include <QMessageBox>
 
 #include <qgsmessagelog.h>
 #include <qgis.h>
@@ -27,9 +23,9 @@
 #include <vector>
 
 MosaicDialog::MosaicDialog(QWidget *parent)
-    : QDialog(parent)
+    : RasterProcessingDialogBase(parent)
 {
-    setWindowTitle(tr("Mosaic"));
+    setWindowTitle(dialogTitle());
     setMinimumWidth(500);
     setupUi();
 }
@@ -59,26 +55,11 @@ void MosaicDialog::setupUi()
 
     mainLayout->addWidget(inputGroup);
 
-    // --- Output file ---
-    auto *outLayout = new QHBoxLayout();
-    outLayout->addWidget(new QLabel(tr("Output:")));
-    m_outputEdit = new QLineEdit(this);
-    outLayout->addWidget(m_outputEdit);
-    auto *browseBtn = new QPushButton(tr("Browse..."), this);
-    connect(browseBtn, &QPushButton::clicked, this, &MosaicDialog::browseOutput);
-    outLayout->addWidget(browseBtn);
-    mainLayout->addLayout(outLayout);
+    // --- Output file (from base class) ---
+    setupOutputRow(mainLayout);
 
-    // --- Buttons ---
-    auto *btnLayout = new QHBoxLayout();
-    btnLayout->addStretch();
-    m_runButton = new QPushButton(tr("Run"), this);
-    connect(m_runButton, &QPushButton::clicked, this, &MosaicDialog::runMosaic);
-    btnLayout->addWidget(m_runButton);
-    auto *cancelBtn = new QPushButton(tr("Cancel"), this);
-    connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
-    btnLayout->addWidget(cancelBtn);
-    mainLayout->addLayout(btnLayout);
+    // --- Buttons (from base class) ---
+    setupButtonBar(mainLayout);
 }
 
 void MosaicDialog::addInputFile()
@@ -99,15 +80,7 @@ void MosaicDialog::removeInputFile()
     }
 }
 
-void MosaicDialog::browseOutput()
-{
-    QString path = QFileDialog::getSaveFileName(this, tr("Output File"), QString(),
-                                                tr("GeoTIFF (*.tif)"));
-    if (!path.isEmpty())
-        m_outputEdit->setText(path);
-}
-
-void MosaicDialog::runMosaic()
+void MosaicDialog::onRun()
 {
     // --- Validate ---
     if (m_inputList->count() < 2) {
@@ -115,7 +88,7 @@ void MosaicDialog::runMosaic()
         return;
     }
 
-    QString outPath = m_outputEdit->text().trimmed();
+    QString outPath = outputPath();
     if (outPath.isEmpty()) {
         QMessageBox::warning(this, tr("Mosaic"), tr("Please specify an output file."));
         return;
@@ -271,15 +244,10 @@ void MosaicDialog::runMosaic()
 
 void MosaicDialog::onCompleted(const QString &outputPath)
 {
-    m_runButton->setEnabled(true);
-    QgsMessageLog::logMessage(tr("Mosaic completed! Output: %1").arg(outputPath),
-                              "mosaic", Qgis::MessageLevel::Success);
-    accept();
+    handleCompleted(outputPath);
 }
 
 void MosaicDialog::onFailed(const QString &error)
 {
-    m_runButton->setEnabled(true);
-    QgsMessageLog::logMessage(error, "mosaic", Qgis::MessageLevel::Critical);
-    QMessageBox::critical(this, tr("Mosaic"), tr("Operation failed. See log for details."));
+    handleFailed(error);
 }

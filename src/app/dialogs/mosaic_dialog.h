@@ -1,10 +1,9 @@
 // src/app/dialogs/mosaic_dialog.h
 #pragma once
 
-#include <QDialog>
+#include "raster_processing_dialog_base.h"
 
 class QListWidget;
-class QLineEdit;
 class QPushButton;
 class AsyncGdalRunner;
 
@@ -12,26 +11,25 @@ class AsyncGdalRunner;
  * Dialog for mosaicking (stitching) multiple raster files into a single output.
  * Validates CRS consistency, computes the union extent, and merges overlapping regions.
  */
-class MosaicDialog : public QDialog
+class MosaicDialog : public RasterProcessingDialogBase
 {
     Q_OBJECT
 
 public:
     explicit MosaicDialog(QWidget *parent = nullptr);
 
+protected:
+    QString toolName() const override { return QStringLiteral("mosaic"); }
+    QString dialogTitle() const override { return tr("Mosaic"); }
+    void onRun() override;
+
 private slots:
     void addInputFile();
     void removeInputFile();
-    void browseOutput();
-    void runMosaic();
-    void onCompleted(const QString &outputPath);
-    void onFailed(const QString &error);
 
 private:
     void setupUi();
 
     QListWidget *m_inputList = nullptr;
-    QLineEdit *m_outputEdit = nullptr;
-    QPushButton *m_runButton = nullptr;
     AsyncGdalRunner *m_runner = nullptr;
 };
