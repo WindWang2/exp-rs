@@ -1,5 +1,6 @@
 // fusion_dialog.cpp — Phase 11.1
 #include "fusion_dialog.h"
+#include "dialog_utils.h"
 
 #include "processing/algorithms/image_fusion.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -159,15 +160,8 @@ FusionDialog::FusionDialog( QWidget *parent )
     connect( buttons, &QDialogButtonBox::rejected, this, &QDialog::reject );
 
     // Populate layers
-    const auto layers = QgsProject::instance()->mapLayers().values();
-    for ( auto *layer : layers )
-    {
-        if ( auto *rl = qobject_cast<QgsRasterLayer *>( layer ) )
-        {
-            mPanCombo->addItem( rl->name(), QVariant::fromValue( rl ) );
-            mMsCombo->addItem( rl->name(), QVariant::fromValue( rl ) );
-        }
-    }
+    populateRasterLayerCombo( mPanCombo );
+    populateRasterLayerCombo( mMsCombo );
 
     // Populate RGB band combos and per-band weights when multispectral layer changes
     connect( mMsCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ), this, [this]( int idx ) {

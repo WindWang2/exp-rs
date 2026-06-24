@@ -20,6 +20,7 @@ add_executable(sicnu_geo_rs
     dialogs/sicnu_algorithm_dialog.cpp
     dialogs/mosaic_dialog.cpp
     dialogs/change_detection_dialog.cpp
+    dialogs/dialog_utils.cpp
     dialogs/comparison_dialog.cpp
     dialogs/batch_processing_dialog.cpp
     dialogs/stac_browser_dialog.cpp

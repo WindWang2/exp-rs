@@ -1,5 +1,6 @@
 // terrain_dialog.cpp — Phase 11.2
 #include "terrain_dialog.h"
+#include "dialog_utils.h"
 
 #include "processing/algorithms/terrain_analysis.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -118,14 +119,7 @@ TerrainDialog::TerrainDialog( QWidget *parent )
     connect( buttons, &QDialogButtonBox::rejected, this, &QDialog::reject );
 
     // Populate layers
-    const auto layers = QgsProject::instance()->mapLayers().values();
-    for ( auto *layer : layers )
-    {
-        if ( auto *rl = qobject_cast<QgsRasterLayer *>( layer ) )
-        {
-            mLayerCombo->addItem( rl->name(), QVariant::fromValue( rl ) );
-        }
-    }
+    populateRasterLayerCombo( mLayerCombo );
 
     // Auto-detect cell size from first layer
     connect( mLayerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ), this,
@@ -240,29 +234,12 @@ void TerrainDialog::runAnalysis()
 
         if ( !ok ) return false;
 
-        // Write output
-        double gt[6] = { 0, 1, 0, 0, 0, 1 };
-        GDALGetGeoTransform( ds.get(), gt );
-        std::array<double, 6> geoTransform;
-        std::copy(std::begin(gt), std::end(gt), geoTransform.begin());
-        const char *proj = GDALGetProjectionRef( ds.get() );
-        QString projection = proj ? QString::fromUtf8(proj) : QString();
-
+        // Write output using shared utility
+        GeoInfo geo = extractGeoInfo( ds.get() );
+        std::vector<std::vector<float>> bands = { out };
         QString error;
-        GdalDatasetGuard outDs(createOutputTiff(outputPath, w, h, 1,
-                                               GDT_Float32, geoTransform, projection, &error));
-        if ( !outDs ) return false;
-
-        GDALRasterBandH outBand = GDALGetRasterBand( outDs.get(), 1 );
-        if ( !outBand ) return false;
-        GDALSetRasterNoDataValue( outBand, nodata );
-
-        for ( int r = 0; r < h; ++r )
-        {
-            GDAL_SAFE_CALL( GDALRasterIO( outBand, GF_Write, 0, r, w, 1,
-                            out.data() + r * w, w, 1, GDT_Float32, 0, 0 ),
-                            "Failed to write output raster" );
-        }
+        if ( !writeGdalOutput( outputPath, w, h, bands, geo.geoTransform, geo.projection, &error ) )
+            return false;
 
         return true;
     } catch ( const std::runtime_error & ) {

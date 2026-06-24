@@ -397,26 +397,13 @@ void ImageEnhancementPanel::onRun()
             }
         }
 
-        // Write output
-        double gt[6];
-        GDALGetGeoTransform(srcDs, gt);
-        std::array<double, 6> geoTransform;
-        std::copy(std::begin(gt), std::end(gt), geoTransform.begin());
-        const char *proj = GDALGetProjectionRef(srcDs);
-        QString projection = proj ? QString::fromUtf8(proj) : QString();
+        // Write output using shared utility
+        GeoInfo geo = extractGeoInfo(srcDs);
+        GDALClose(srcDs);
 
         QString error;
-        GdalDatasetGuard dstGuard(createOutputTiff(outPath, w, h, bands,
-                                                   GDT_Float32, geoTransform, projection, &error));
-        GDALClose(srcDs);
-        if (!dstGuard) return QString();
-
-        for (int b = 0; b < bands; ++b) {
-            GDALRasterBandH dstBand = GDALGetRasterBand(dstGuard.get(), b + 1);
-            if (!dstBand) return QString();
-            if (GDALRasterIO(dstBand, GF_Write, 0, 0, w, h, outputBands[b].data(), w, h, GDT_Float32, 0, 0) != CE_None)
-                return QString();
-        }
+        if (!writeGdalOutput(outPath, w, h, outputBands, geo.geoTransform, geo.projection, &error))
+            return QString();
 
         return outPath;
     } catch (const std::runtime_error &) {

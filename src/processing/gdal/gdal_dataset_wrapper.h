@@ -4,6 +4,7 @@
 #include <QString>
 #include <array>
 #include <cstdint>
+#include <vector>
 
 // Forward declaration to avoid exposing gdal.h in header
 typedef void *GDALDatasetH;
@@ -34,6 +35,41 @@ GDALDatasetH createOutputTiff(const QString &path,
                                const std::array<double, 6> &geoTransform,
                                const QString &projection,
                                QString *errorMessage = nullptr);
+
+/**
+ * Geotransform and projection info extracted from a GDAL dataset.
+ */
+struct GeoInfo {
+    std::array<double, 6> geoTransform = {0, 1, 0, 0, 0, 1};
+    QString projection;
+};
+
+/**
+ * Extract geotransform and projection from a raw GDAL dataset handle.
+ * Useful when working with GDALDatasetH directly instead of GdalDatasetWrapper.
+ */
+GeoInfo extractGeoInfo(GDALDatasetH ds);
+
+/**
+ * Write multi-band float data to a new GeoTIFF file.
+ *
+ * Creates a GeoTIFF with LZW compression and writes all bands in one call.
+ * Replaces the common pattern: createOutputTiff + per-band GDALRasterIO loop.
+ *
+ * @param outputPath    Output file path
+ * @param width         Raster width in pixels
+ * @param height        Raster height in pixels
+ * @param bands         Vector of band data (each band = width*height floats)
+ * @param geoTransform  6-element affine geotransform
+ * @param projection    WKT projection string
+ * @param errorMessage  If non-null, receives error description on failure
+ * @return true on success
+ */
+bool writeGdalOutput(const QString &outputPath, int width, int height,
+                     const std::vector<std::vector<float>> &bands,
+                     const std::array<double, 6> &geoTransform,
+                     const QString &projection,
+                     QString *errorMessage = nullptr);
 
 /**
  * RAII wrapper around GDAL C API for raster dataset access.

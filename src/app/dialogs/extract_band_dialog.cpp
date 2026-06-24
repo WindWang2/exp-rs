@@ -1,5 +1,6 @@
 // extract_band_dialog.cpp — Extract single band from multi-band raster
 #include "extract_band_dialog.h"
+#include "dialog_utils.h"
 #include "async_gdal_runner.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
@@ -99,13 +100,12 @@ void ExtractBandDialog::setupUi()
     connect(m_layerCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &ExtractBandDialog::onLayerChanged);
 
-    // Populate layers
-    const auto layers = QgsProject::instance()->mapLayers().values();
-    for (auto *layer : layers) {
-        if (auto *rl = qobject_cast<QgsRasterLayer *>(layer)) {
-            if (rl->bandCount() > 1) {
-                m_layerCombo->addItem(rl->name(), QVariant::fromValue(rl));
-            }
+    // Populate layers (only multi-band)
+    populateRasterLayerCombo(m_layerCombo);
+    for (int i = m_layerCombo->count() - 1; i >= 0; --i) {
+        auto *rl = m_layerCombo->itemData(i).value<QgsRasterLayer *>();
+        if (!rl || rl->bandCount() <= 1) {
+            m_layerCombo->removeItem(i);
         }
     }
 
@@ -186,29 +186,17 @@ void ExtractBandDialog::onRun()
         GDALRasterBandH srcBand = GDALGetRasterBand(srcGuard.get(), bandIndex);
         if (!srcBand) return QString();
 
-        // Create output
-        double gt[6];
-        GDALGetGeoTransform(srcGuard.get(), gt);
-        std::array<double, 6> geoTransform;
-        std::copy(std::begin(gt), std::end(gt), geoTransform.begin());
-        const char *proj = GDALGetProjectionRef(srcGuard.get());
-        QString projection = proj ? QString::fromUtf8(proj) : QString();
-
-        QString error;
-        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, w, h, 1,
-                                                   GDT_Float32, geoTransform,
-                                                   projection, &error));
-        if (!dstGuard) return QString();
-
-        // Read and write pixel data
+        // Read band data
         std::vector<float> buf(static_cast<size_t>(w) * h);
         GDAL_SAFE_CALL( GDALRasterIO(srcBand, GF_Read, 0, 0, w, h, buf.data(), w, h, GDT_Float32, 0, 0),
                         "Failed to read band data" );
 
-        GDALRasterBandH dstBand = GDALGetRasterBand(dstGuard.get(), 1);
-        if (!dstBand) return QString();
-        GDAL_SAFE_CALL( GDALRasterIO(dstBand, GF_Write, 0, 0, w, h, buf.data(), w, h, GDT_Float32, 0, 0),
-                        "Failed to write band data" );
+        // Write output using shared utility
+        GeoInfo geo = extractGeoInfo(srcGuard.get());
+        std::vector<std::vector<float>> bands = { buf };
+        QString error;
+        if (!writeGdalOutput(outputPath, w, h, bands, geo.geoTransform, geo.projection, &error))
+            return QString();
 
         return outputPath;
     } catch (const std::runtime_error &) {

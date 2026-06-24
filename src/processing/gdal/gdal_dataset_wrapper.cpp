@@ -204,3 +204,61 @@ GDALDatasetH createOutputTiff(const QString &path,
 
     return ds;
 }
+
+// --- Free function: extractGeoInfo ---
+
+GeoInfo extractGeoInfo(GDALDatasetH ds)
+{
+    GeoInfo info;
+    if (!ds) return info;
+
+    GDALGetGeoTransform(ds, info.geoTransform.data());
+    const char *proj = GDALGetProjectionRef(ds);
+    info.projection = proj ? QString::fromUtf8(proj) : QString();
+
+    return info;
+}
+
+// --- Free function: writeGdalOutput ---
+
+bool writeGdalOutput(const QString &outputPath, int width, int height,
+                     const std::vector<std::vector<float>> &bands,
+                     const std::array<double, 6> &geoTransform,
+                     const QString &projection,
+                     QString *errorMessage)
+{
+    if (bands.empty()) {
+        if (errorMessage) *errorMessage = QStringLiteral("No band data to write");
+        return false;
+    }
+
+    int bandCount = static_cast<int>(bands.size());
+
+    GDALDatasetH ds = createOutputTiff(outputPath, width, height, bandCount,
+                                        GDT_Float32, geoTransform, projection, errorMessage);
+    if (!ds) return false;
+
+    for (int b = 0; b < bandCount; ++b) {
+        GDALRasterBandH dstBand = GDALGetRasterBand(ds, b + 1);
+        if (!dstBand) {
+            if (errorMessage) *errorMessage = QStringLiteral("Failed to get output band %1").arg(b + 1);
+            GDALClose(ds);
+            return false;
+        }
+        CPLErr err = GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
+                                   const_cast<float *>(bands[b].data()),
+                                   width, height, GDT_Float32, 0, 0);
+        if (err != CE_None) {
+            const char *msg = CPLGetLastErrorMsg();
+            if (errorMessage) {
+                *errorMessage = msg ? QString::fromUtf8(msg)
+                                    : QStringLiteral("Failed to write band %1").arg(b + 1);
+            }
+            GDALClose(ds);
+            return false;
+        }
+    }
+
+    GDALClose(ds);
+    return true;
+}
