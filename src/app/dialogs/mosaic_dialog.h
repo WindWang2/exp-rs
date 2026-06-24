@@ -26,8 +26,6 @@ protected:
 private slots:
     void addInputFile();
     void removeInputFile();
-    void onCompleted(const QString &outputPath);
-    void onFailed(const QString &errorMessage);
 
 private:
     void setupUi();

@@ -91,6 +91,20 @@ protected:
      */
     void handleFailed(const QString &error);
 
+public slots:
+    /**
+     * Slot for async runner completed signal.
+     * Can be connected directly to AsyncGdalRunner::completed or AsyncAlgorithmRunner::completed.
+     */
+    void onCompleted(const QString &outputPath);
+
+    /**
+     * Slot for async runner failed signal.
+     * Can be connected directly to AsyncGdalRunner::failed or AsyncAlgorithmRunner::failed.
+     */
+    void onFailed(const QString &errorMessage);
+
+protected:
     // --- Members ---
     QgsRasterLayer *m_rasterLayer = nullptr;
     QLineEdit *m_outputEdit = nullptr;

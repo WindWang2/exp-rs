@@ -119,12 +119,4 @@ void PcaDialog::onRun()
     handleCompleted(outputPath());
 }
 
-void PcaDialog::onCompleted(const QString &outputPath)
-{
-    handleCompleted(outputPath);
-}
 
-void PcaDialog::onFailed(const QString &errorMessage)
-{
-    handleFailed(errorMessage);
-}

@@ -249,12 +249,4 @@ void MosaicDialog::onRun()
     });
 }
 
-void MosaicDialog::onCompleted(const QString &outputPath)
-{
-    handleCompleted(outputPath);
-}
 
-void MosaicDialog::onFailed(const QString &error)
-{
-    handleFailed(error);
-}

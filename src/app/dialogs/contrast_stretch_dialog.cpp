@@ -171,12 +171,4 @@ void ContrastStretchDialog::onRun()
     });
 }
 
-void ContrastStretchDialog::onCompleted(const QString &outputPath)
-{
-    handleCompleted(outputPath);
-}
 
-void ContrastStretchDialog::onFailed(const QString &error)
-{
-    handleFailed(error);
-}

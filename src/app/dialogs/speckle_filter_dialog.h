@@ -27,8 +27,6 @@ protected:
 
 private slots:
     void onFilterTypeChanged(int index);
-    void onCompleted(const QString &outputPath);
-    void onFailed(const QString &errorMessage);
 
 private:
     void setupUi();

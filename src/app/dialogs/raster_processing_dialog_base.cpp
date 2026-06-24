@@ -93,3 +93,13 @@ void RasterProcessingDialogBase::handleFailed(const QString &error)
     QgsMessageLog::logMessage(error, toolName(), Qgis::MessageLevel::Critical);
     QMessageBox::critical(this, dialogTitle(), tr("Operation failed. See log for details."));
 }
+
+void RasterProcessingDialogBase::onCompleted(const QString &outputPath)
+{
+    handleCompleted(outputPath);
+}
+
+void RasterProcessingDialogBase::onFailed(const QString &errorMessage)
+{
+    handleFailed(errorMessage);
+}

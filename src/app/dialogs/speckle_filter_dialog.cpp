@@ -181,12 +181,4 @@ void SpeckleFilterDialog::onRun()
     });
 }
 
-void SpeckleFilterDialog::onCompleted(const QString &outputPath)
-{
-    handleCompleted(outputPath);
-}
 
-void SpeckleFilterDialog::onFailed(const QString &error)
-{
-    handleFailed(error);
-}

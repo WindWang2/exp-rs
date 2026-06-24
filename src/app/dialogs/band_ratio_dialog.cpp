@@ -210,12 +210,4 @@ void BandRatioDialog::onRun()
     });
 }
 
-void BandRatioDialog::onCompleted(const QString &outputPath)
-{
-    handleCompleted(outputPath);
-}
 
-void BandRatioDialog::onFailed(const QString &error)
-{
-    handleFailed(error);
-}

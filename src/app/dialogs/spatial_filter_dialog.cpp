@@ -133,12 +133,4 @@ void SpatialFilterDialog::onRun()
     });
 }
 
-void SpatialFilterDialog::onCompleted(const QString &outputPath)
-{
-    handleCompleted(outputPath);
-}
 
-void SpatialFilterDialog::onFailed(const QString &error)
-{
-    handleFailed(error);
-}

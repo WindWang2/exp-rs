@@ -23,8 +23,6 @@ protected:
     void onRun() override;
 
 private slots:
-    void onCompleted(const QString &outputPath);
-    void onFailed(const QString &errorMessage);
 
 private:
     void setupUi();

@@ -26,8 +26,6 @@ protected:
 
 private slots:
     void onModeChanged(int index);
-    void onCompleted(const QString &outputPath);
-    void onFailed(const QString &error);
 
 private:
     void setupUi();
