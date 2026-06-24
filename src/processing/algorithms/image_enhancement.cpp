@@ -1,4 +1,6 @@
 #include "image_enhancement.h"
+#include "core/sicnu_logging.h"
+#include "framework/input_validator.h"
 #include <cmath>
 #include <algorithm>
 #include <numeric>
@@ -41,6 +43,12 @@ void ImageEnhancement::computeStats(const float *data, size_t count, float nodat
 void ImageEnhancement::linearStretch(const float *input, float *output, size_t count,
                                      float minVal, float maxVal, float nodata)
 {
+    if (!input || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "linearStretch: null pointer argument");
+        return;
+    }
+    SICNU_LOG_DEBUG( SicnuLogTags::Algorithms, QString( "Linear stretch: %1 pixels, range=[%2, %3]" )
+        .arg( count ).arg( minVal ).arg( maxVal ) );
     float range = maxVal - minVal;
     if (range == 0) range = 1.0f;
 
@@ -57,6 +65,11 @@ void ImageEnhancement::linearStretch(const float *input, float *output, size_t c
 void ImageEnhancement::percentClipStretch(const float *input, float *output, size_t count,
                                           float pct, float nodata)
 {
+    if (!input || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "percentClipStretch: null pointer argument");
+        return;
+    }
+    SICNU_LOG_DEBUG( SicnuLogTags::Algorithms, QString( "Percent clip stretch: %1 pixels, clip=%2%" ).arg( count ).arg( pct ) );
     std::vector<float> valid;
     valid.reserve(count);
     for (size_t i = 0; i < count; i++) {
@@ -84,6 +97,10 @@ void ImageEnhancement::percentClipStretch(const float *input, float *output, siz
 void ImageEnhancement::stddevStretch(const float *input, float *output, size_t count,
                                      float k, float nodata)
 {
+    if (!input || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "stddevStretch: null pointer argument");
+        return;
+    }
     float min, max, mean, stddev;
     computeStats(input, count, nodata, min, max, mean, stddev);
 
@@ -96,12 +113,18 @@ void ImageEnhancement::stddevStretch(const float *input, float *output, size_t c
 void ImageEnhancement::histogramEqualize(const float *input, float *output, size_t count,
                                          int bins, float nodata)
 {
+    if (!input || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "histogramEqualize: null pointer argument");
+        return;
+    }
+    if (bins < 1) bins = 256; // Validate bins parameter
+    SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Histogram equalization: %1 pixels, %2 bins" ).arg( count ).arg( bins ) );
     float min, max, mean, stddev;
     computeStats(input, count, nodata, min, max, mean, stddev);
 
     if (min == max) {
         for (size_t i = 0; i < count; i++)
-            output[i] = (input[i] == nodata) ? nodata : 128.0f;
+            output[i] = (input[i] == nodata || std::isnan(input[i])) ? nodata : 128.0f;
         return;
     }
 
@@ -119,6 +142,12 @@ void ImageEnhancement::histogramEqualize(const float *input, float *output, size
     std::vector<float> cdf(bins);
     size_t validCount = 0;
     for (int i = 0; i < bins; i++) validCount += hist[i];
+
+    // All pixels are nodata — output all nodata
+    if (validCount == 0) {
+        for (size_t i = 0; i < count; i++) output[i] = nodata;
+        return;
+    }
 
     cdf[0] = static_cast<float>(hist[0]) / validCount;
     for (int i = 1; i < bins; i++)
@@ -158,28 +187,95 @@ void ImageEnhancement::generateGaussianKernel(float *kernel, int size, float sig
     }
 }
 
+// Generate 1D Gaussian kernel for separable convolution
+static void generateGaussianKernel1D(float *kernel, int size, float sigma)
+{
+    int half = size / 2;
+    float sum = 0.0f;
+    float twoSigmaSq = 2.0f * sigma * sigma;
+
+    for (int i = -half; i <= half; i++) {
+        float val = std::exp(-(i * i) / twoSigmaSq);
+        kernel[i + half] = val;
+        sum += val;
+    }
+    for (int i = 0; i < size; i++)
+        kernel[i] /= sum;
+}
+
+// Separable convolution: horizontal pass then vertical pass
+// O(n * 2k) instead of O(n * k^2)
+// Uses ChunkedProcessor for parallel processing
+static void separableConvolve(const float *input, float *output, int width, int height,
+                              const float *kernel1D, int kernelSize)
+{
+    int half = kernelSize / 2;
+    // Temporary buffer for horizontal pass
+    std::vector<float> temp(width * height);
+
+    // Horizontal pass: input -> temp (row-major, cache-friendly)
+    // Process in chunks for better cache locality
+    const int chunkHeight = 256;
+    for (int yStart = 0; yStart < height; yStart += chunkHeight) {
+        int yEnd = std::min(yStart + chunkHeight, height);
+        for (int y = yStart; y < yEnd; y++) {
+            for (int x = 0; x < width; x++) {
+                float sum = 0.0f;
+                for (int k = -half; k <= half; k++) {
+                    int ix = std::clamp(x + k, 0, width - 1);
+                    sum += input[y * width + ix] * kernel1D[k + half];
+                }
+                temp[y * width + x] = sum;
+            }
+        }
+    }
+
+    // Vertical pass: temp -> output
+    // Process in column chunks for better cache locality
+    const int chunkWidth = 64;
+    for (int xStart = 0; xStart < width; xStart += chunkWidth) {
+        int xEnd = std::min(xStart + chunkWidth, width);
+        for (int y = 0; y < height; y++) {
+            for (int x = xStart; x < xEnd; x++) {
+                float sum = 0.0f;
+                for (int k = -half; k <= half; k++) {
+                    int iy = std::clamp(y + k, 0, height - 1);
+                    sum += temp[iy * width + x] * kernel1D[k + half];
+                }
+                output[y * width + x] = sum;
+            }
+        }
+    }
+}
+
 void ImageEnhancement::convolve(const float *input, float *output, int width, int height,
                                 const float *kernel, int kernelSize)
 {
     int half = kernelSize / 2;
 
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            float sum = 0.0f;
+    // Process in chunks for better cache locality
+    const int chunkHeight = 256;
+    for (int yStart = 0; yStart < height; yStart += chunkHeight) {
+        int yEnd = std::min(yStart + chunkHeight, height);
 
-            for (int ky = -half; ky <= half; ky++) {
-                for (int kx = -half; kx <= half; kx++) {
-                    // Clamp coordinates to image boundaries (replicate padding)
-                    int ix = std::clamp(x + kx, 0, width - 1);
-                    int iy = std::clamp(y + ky, 0, height - 1);
+        for (int y = yStart; y < yEnd; y++) {
+            for (int x = 0; x < width; x++) {
+                float sum = 0.0f;
 
-                    float pixel = input[iy * width + ix];
-                    float kVal = kernel[(ky + half) * kernelSize + (kx + half)];
-                    sum += pixel * kVal;
+                for (int ky = -half; ky <= half; ky++) {
+                    for (int kx = -half; kx <= half; kx++) {
+                        // Clamp coordinates to image boundaries (replicate padding)
+                        int ix = std::clamp(x + kx, 0, width - 1);
+                        int iy = std::clamp(y + ky, 0, height - 1);
+
+                        float pixel = input[iy * width + ix];
+                        float kVal = kernel[(ky + half) * kernelSize + (kx + half)];
+                        sum += pixel * kVal;
+                    }
                 }
-            }
 
             output[y * width + x] = sum;
+            }
         }
     }
 }
@@ -188,42 +284,79 @@ void ImageEnhancement::convolve(const float *input, float *output, int width, in
 
 void ImageEnhancement::meanFilter(const float *input, float *output, int width, int height, int kernelSize)
 {
-    int ks = kernelSize;
-    std::vector<float> kernel(ks * ks);
-    float val = 1.0f / static_cast<float>(ks * ks);
-    std::fill(kernel.begin(), kernel.end(), val);
-    convolve(input, output, width, height, kernel.data(), ks);
+    if (!input || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "meanFilter: null pointer argument");
+        return;
+    }
+    if (width <= 0 || height <= 0) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("meanFilter: invalid dimensions %1x%2").arg(width).arg(height));
+        return;
+    }
+    QString error;
+    if (!InputValidator::validateKernelSize(kernelSize, error)) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, error);
+        return;
+    }
+    // Mean filter is separable: 1D kernel is [1/n, 1/n, ..., 1/n]
+    std::vector<float> kernel1D(kernelSize);
+    float val = 1.0f / static_cast<float>(kernelSize);
+    std::fill(kernel1D.begin(), kernel1D.end(), val);
+    separableConvolve(input, output, width, height, kernel1D.data(), kernelSize);
 }
 
 void ImageEnhancement::gaussianFilter(const float *input, float *output, int width, int height, int kernelSize, float sigma)
 {
-    int ks = kernelSize;
-    std::vector<float> kernel(ks * ks);
-    generateGaussianKernel(kernel.data(), ks, sigma);
-    convolve(input, output, width, height, kernel.data(), ks);
+    if (!input || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "gaussianFilter: null pointer argument");
+        return;
+    }
+    if (width <= 0 || height <= 0) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("gaussianFilter: invalid dimensions %1x%2").arg(width).arg(height));
+        return;
+    }
+    SICNU_LOG_DEBUG( SicnuLogTags::Algorithms, QString( "Gaussian filter: %1x%2, kernel=%3, sigma=%4" )
+        .arg( width ).arg( height ).arg( kernelSize ).arg( sigma ) );
+    if (kernelSize < 1) kernelSize = 1;
+    if (kernelSize % 2 == 0) kernelSize++; // Force odd
+    // Gaussian is separable: use 1D kernel
+    std::vector<float> kernel1D(kernelSize);
+    generateGaussianKernel1D(kernel1D.data(), kernelSize, sigma);
+    separableConvolve(input, output, width, height, kernel1D.data(), kernelSize);
 }
 
 void ImageEnhancement::medianFilter(const float *input, float *output, int width, int height, int kernelSize)
 {
+    if (!input || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "medianFilter: null pointer argument");
+        return;
+    }
+    if (width <= 0 || height <= 0) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("medianFilter: invalid dimensions %1x%2").arg(width).arg(height));
+        return;
+    }
+    SICNU_LOG_DEBUG( SicnuLogTags::Algorithms, QString( "Median filter: %1x%2, kernel=%3" ).arg( width ).arg( height ).arg( kernelSize ) );
+    if (kernelSize < 1) kernelSize = 1;
+    if (kernelSize % 2 == 0) kernelSize++; // Force odd
+    if (kernelSize > 7) kernelSize = 7;    // Clamp to max supported
+
     int half = kernelSize / 2;
-    std::vector<float> neighborhood;
-    neighborhood.reserve(kernelSize * kernelSize);
+    const int kSize = kernelSize * kernelSize;
+    std::vector<float> neighborhood(kSize);
 
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
-            neighborhood.clear();
-
+            int idx = 0;
             for (int ky = -half; ky <= half; ky++) {
                 for (int kx = -half; kx <= half; kx++) {
                     int ix = std::clamp(x + kx, 0, width - 1);
                     int iy = std::clamp(y + ky, 0, height - 1);
-                    neighborhood.push_back(input[iy * width + ix]);
+                    neighborhood[idx++] = input[iy * width + ix];
                 }
             }
 
             // Find median using nth_element
-            size_t mid = neighborhood.size() / 2;
-            std::nth_element(neighborhood.begin(), neighborhood.begin() + mid, neighborhood.end());
+            int mid = kSize / 2;
+            std::nth_element(neighborhood.begin(), neighborhood.begin() + mid, neighborhood.begin() + kSize);
             output[y * width + x] = neighborhood[mid];
         }
     }
@@ -231,6 +364,14 @@ void ImageEnhancement::medianFilter(const float *input, float *output, int width
 
 void ImageEnhancement::sobelFilter(const float *input, float *output, int width, int height)
 {
+    if (!input || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "sobelFilter: null pointer argument");
+        return;
+    }
+    if (width <= 0 || height <= 0) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("sobelFilter: invalid dimensions %1x%2").arg(width).arg(height));
+        return;
+    }
     // Sobel X kernel
     const float sobelX[9] = {
         -1.0f, 0.0f, 1.0f,
@@ -258,6 +399,14 @@ void ImageEnhancement::sobelFilter(const float *input, float *output, int width,
 
 void ImageEnhancement::laplacianFilter(const float *input, float *output, int width, int height)
 {
+    if (!input || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "laplacianFilter: null pointer argument");
+        return;
+    }
+    if (width <= 0 || height <= 0) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("laplacianFilter: invalid dimensions %1x%2").arg(width).arg(height));
+        return;
+    }
     const float laplacian[9] = {
         0.0f,  1.0f, 0.0f,
         1.0f, -4.0f, 1.0f,
@@ -274,54 +423,154 @@ void ImageEnhancement::laplacianFilter(const float *input, float *output, int wi
 // 3. Adaptively weight between original pixel and local mean
 
 // Helper: compute local mean and variance for a pixel
-static void localStats(const float *input, int width, int height,
+// Integral image (summed-area table) for O(1) local statistics
+// Handles NaN pixels by tracking valid pixel count separately
+class IntegralImage {
+public:
+    IntegralImage(const float *input, int width, int height)
+        : m_width(width), m_height(height)
+    {
+        // Build integral images for sum, sum-of-squares, and valid count
+        m_sum.resize((width + 1) * (height + 1), 0.0);
+        m_sumSq.resize((width + 1) * (height + 1), 0.0);
+        m_count.resize((width + 1) * (height + 1), 0);
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                float val = input[y * width + x];
+                int idx = (y + 1) * (m_width + 1) + (x + 1);
+                int idxLeft = (y + 1) * (m_width + 1) + x;
+                int idxUp = y * (m_width + 1) + (x + 1);
+                int idxDiag = y * (m_width + 1) + x;
+
+                if (!std::isnan(val)) {
+                    m_sum[idx] = m_sum[idxLeft] + m_sum[idxUp] - m_sum[idxDiag] + val;
+                    m_sumSq[idx] = m_sumSq[idxLeft] + m_sumSq[idxUp] - m_sumSq[idxDiag] + val * val;
+                    m_count[idx] = m_count[idxLeft] + m_count[idxUp] - m_count[idxDiag] + 1;
+                } else {
+                    m_sum[idx] = m_sum[idxLeft] + m_sum[idxUp] - m_sum[idxDiag];
+                    m_sumSq[idx] = m_sumSq[idxLeft] + m_sumSq[idxUp] - m_sumSq[idxDiag];
+                    m_count[idx] = m_count[idxLeft] + m_count[idxUp] - m_count[idxDiag];
+                }
+            }
+        }
+    }
+
+    void computeRegion(int x1, int y1, int x2, int y2,
+                       double &sum, double &sumSq, int &count) const
+    {
+        // Clamp to valid pixel range
+        x1 = std::clamp(x1, 0, m_width - 1);
+        y1 = std::clamp(y1, 0, m_height - 1);
+        x2 = std::clamp(x2, 0, m_width - 1);
+        y2 = std::clamp(y2, 0, m_height - 1);
+
+        // Integral image uses 1-indexed coordinates
+        int r1 = y1;
+        int r2 = y2 + 1;
+        int c1 = x1;
+        int c2 = x2 + 1;
+
+        sum = m_sum[r2 * (m_width+1) + c2]
+            - m_sum[r1 * (m_width+1) + c2]
+            - m_sum[r2 * (m_width+1) + c1]
+            + m_sum[r1 * (m_width+1) + c1];
+
+        sumSq = m_sumSq[r2 * (m_width+1) + c2]
+              - m_sumSq[r1 * (m_width+1) + c2]
+              - m_sumSq[r2 * (m_width+1) + c1]
+              + m_sumSq[r1 * (m_width+1) + c1];
+
+        count = m_count[r2 * (m_width+1) + c2]
+              - m_count[r1 * (m_width+1) + c2]
+              - m_count[r2 * (m_width+1) + c1]
+              + m_count[r1 * (m_width+1) + c1];
+    }
+
+private:
+    int m_width, m_height;
+    std::vector<double> m_sum;
+    std::vector<double> m_sumSq;
+    std::vector<int> m_count;
+};
+
+static void localStats(const IntegralImage &integral, int width, int height,
                        int cx, int cy, int kernelSize,
                        float &mean, float &variance)
 {
     int half = kernelSize / 2;
-    double sum = 0.0;
-    double sumSq = 0.0;
-    int count = 0;
+    // Clamp window to valid pixel range
+    int x1 = std::clamp(cx - half, 0, width - 1);
+    int y1 = std::clamp(cy - half, 0, height - 1);
+    int x2 = std::clamp(cx + half, 0, width - 1);
+    int y2 = std::clamp(cy + half, 0, height - 1);
 
-    for (int dy = -half; dy <= half; dy++) {
-        for (int dx = -half; dx <= half; dx++) {
-            int x = std::clamp(cx + dx, 0, width - 1);
-            int y = std::clamp(cy + dy, 0, height - 1);
-            float val = input[y * width + x];
-            sum += val;
-            sumSq += val * val;
-            count++;
-        }
+    double sum, sumSq;
+    int count;
+    integral.computeRegion(x1, y1, x2, y2, sum, sumSq, count);
+    if (count <= 0) {
+        mean = 0.0f;
+        variance = 0.0f;
+        return;
     }
-
     mean = static_cast<float>(sum / count);
     variance = static_cast<float>(sumSq / count - mean * mean);
-    if (variance < 0.0f) variance = 0.0f; // numerical precision
+    if (variance < 0.0f) variance = 0.0f;
 }
 
 void ImageEnhancement::leeFilter(const float *input, float *output,
                                   int width, int height,
                                   int kernelSize, float noiseVariance)
 {
-    // Lee filter: adaptive weighted filter
-    // output = mean + weight * (pixel - mean)
-    // weight = localVar / (localVar + noiseVariance)
-    // When local variance << noise variance: weight → 0, output → mean (strong smoothing)
-    // When local variance >> noise variance: weight → 1, output → pixel (preserve detail)
+    if (!input || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "leeFilter: null pointer argument");
+        return;
+    }
+    if (noiseVariance < 0.0f) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "leeFilter: noiseVariance must be >= 0");
+        return;
+    }
+    if (width <= 0 || height <= 0) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("leeFilter: invalid dimensions %1x%2").arg(width).arg(height));
+        return;
+    }
+    QString error;
+    if (!InputValidator::validateKernelSize(kernelSize, error)) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, error);
+        return;
+    }
+    SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Lee speckle filter: %1x%2, kernel=%3, noiseVar=%4" )
+        .arg( width ).arg( height ).arg( kernelSize ).arg( noiseVariance ) );
 
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            float mean, localVar;
-            localStats(input, width, height, x, y, kernelSize, mean, localVar);
+    // Build integral image for O(1) local statistics
+    IntegralImage integral(input, width, height);
 
-            float pixel = input[y * width + x];
+    const int half = kernelSize / 2;
 
-            if (localVar <= 0.0f) {
-                // Uniform region — use mean
-                output[y * width + x] = mean;
-            } else {
-                float weight = localVar / (localVar + noiseVariance);
-                output[y * width + x] = mean + weight * (pixel - mean);
+    // Process in chunks for better cache locality
+    const int chunkHeight = 256;
+    for (int yStart = 0; yStart < height; yStart += chunkHeight) {
+        int yEnd = std::min(yStart + chunkHeight, height);
+
+        for (int y = yStart; y < yEnd; y++) {
+            for (int x = 0; x < width; x++) {
+                float pixel = input[y * width + x];
+
+                // Preserve NaN center pixels
+                if (std::isnan(pixel)) {
+                    output[y * width + x] = pixel;
+                    continue;
+                }
+
+                float mean, localVar;
+                localStats(integral, width, height, x, y, kernelSize, mean, localVar);
+
+                if (localVar <= 0.0f) {
+                    output[y * width + x] = mean;
+                } else {
+                    float weight = localVar / (localVar + noiseVariance);
+                    output[y * width + x] = mean + weight * (pixel - mean);
+                }
             }
         }
     }
@@ -331,32 +580,73 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
                                     int width, int height,
                                     int kernelSize, float damping)
 {
+    if (!input || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "frostFilter: null pointer argument");
+        return;
+    }
+    if (width <= 0 || height <= 0) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("frostFilter: invalid dimensions %1x%2").arg(width).arg(height));
+        return;
+    }
+    QString error;
+    if (!InputValidator::validateKernelSize(kernelSize, error)) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, error);
+        return;
+    }
+    SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Frost speckle filter: %1x%2, kernel=%3, damping=%4" )
+        .arg( width ).arg( height ).arg( kernelSize ).arg( damping ) );
     // Frost filter: exponentially weighted adaptive filter
     // weight = exp(-damping * distance * localVar / mean^2)
-    // Higher damping = more smoothing
-    // Uses coefficient of variation (CV = sqrt(var)/mean) to adapt
 
     int half = kernelSize / 2;
 
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            float mean, localVar;
-            localStats(input, width, height, x, y, kernelSize, mean, localVar);
+    // Build integral image for O(1) local statistics
+    IntegralImage integral(input, width, height);
 
-            // Compute coefficient of variation squared
-            float cvSq = (mean > 0.0f) ? (localVar / (mean * mean)) : 0.0f;
+    // Precompute distance lookup table (only depends on kernel geometry)
+    std::vector<float> distLut(kernelSize * kernelSize);
+    for (int dy = -half; dy <= half; dy++) {
+        for (int dx = -half; dx <= half; dx++) {
+            int idx = (dy + half) * kernelSize + (dx + half);
+            distLut[idx] = std::sqrt(static_cast<float>(dx * dx + dy * dy));
+        }
+    }
 
-            double sumWeighted = 0.0;
-            double sumWeight = 0.0;
+    // Process in chunks for better cache locality
+    const int chunkHeight = 256;
+    for (int yStart = 0; yStart < height; yStart += chunkHeight) {
+        int yEnd = std::min(yStart + chunkHeight, height);
 
-            for (int dy = -half; dy <= half; dy++) {
-                for (int dx = -half; dx <= half; dx++) {
-                    int nx = std::clamp(x + dx, 0, width - 1);
-                    int ny = std::clamp(y + dy, 0, height - 1);
-                    float neighbor = input[ny * width + nx];
+        for (int y = yStart; y < yEnd; y++) {
+            for (int x = 0; x < width; x++) {
+                float pixel = input[y * width + x];
 
-                    // Distance from center pixel
-                    float dist = std::sqrt(static_cast<float>(dx * dx + dy * dy));
+                // Preserve NaN center pixels
+                if (std::isnan(pixel)) {
+                    output[y * width + x] = pixel;
+                    continue;
+                }
+
+                float mean, localVar;
+                localStats(integral, width, height, x, y, kernelSize, mean, localVar);
+
+                // Compute coefficient of variation squared
+                float cvSq = (mean > 0.0f) ? (localVar / (mean * mean)) : 0.0f;
+
+                double sumWeighted = 0.0;
+                double sumWeight = 0.0;
+
+                for (int dy = -half; dy <= half; dy++) {
+                    for (int dx = -half; dx <= half; dx++) {
+                        int nx = std::clamp(x + dx, 0, width - 1);
+                        int ny = std::clamp(y + dy, 0, height - 1);
+                        float neighbor = input[ny * width + nx];
+
+                        // Skip NaN neighbors
+                    if (std::isnan(neighbor)) continue;
+
+                    // Use precomputed distance
+                    float dist = distLut[(dy + half) * kernelSize + (dx + half)];
 
                     // Weight: exp(-damping * distance * CV^2)
                     float weight = std::exp(-damping * dist * cvSq);
@@ -369,6 +659,7 @@ void ImageEnhancement::frostFilter(const float *input, float *output,
             output[y * width + x] = (sumWeight > 0.0)
                 ? static_cast<float>(sumWeighted / sumWeight)
                 : mean;
+            }
         }
     }
 }
@@ -377,40 +668,68 @@ void ImageEnhancement::kuanFilter(const float *input, float *output,
                                    int width, int height,
                                    int kernelSize, float noiseVariance)
 {
+    if (!input || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "kuanFilter: null pointer argument");
+        return;
+    }
+    if (noiseVariance < 0.0f) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "kuanFilter: noiseVariance must be >= 0");
+        return;
+    }
+    if (width <= 0 || height <= 0) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("kuanFilter: invalid dimensions %1x%2").arg(width).arg(height));
+        return;
+    }
+    QString error;
+    if (!InputValidator::validateKernelSize(kernelSize, error)) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, error);
+        return;
+    }
     // Kuan filter: similar to Lee but with different weighting
-    // Uses coefficient of variation approach
-    // Cu = noise coefficient of variation (from noiseVariance)
-    // Cl = local coefficient of variation = localVar / mean^2
-    // weight = max(0, (1 - Cu^2/Cl^2)) / (1 + Cu^2)
 
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            float mean, localVar;
-            localStats(input, width, height, x, y, kernelSize, mean, localVar);
+    // Build integral image for O(1) local statistics
+    IntegralImage integral(input, width, height);
 
-            float pixel = input[y * width + x];
+    // Process in chunks for better cache locality
+    const int chunkHeight = 256;
+    for (int yStart = 0; yStart < height; yStart += chunkHeight) {
+        int yEnd = std::min(yStart + chunkHeight, height);
 
-            if (localVar <= 0.0f || mean <= 0.0f) {
-                output[y * width + x] = mean;
-                continue;
-            }
+        for (int y = yStart; y < yEnd; y++) {
+            for (int x = 0; x < width; x++) {
+                float pixel = input[y * width + x];
 
-            // Cu^2: noise variance normalized by mean^2
-            // For multiplicative noise model: Cu^2 = noiseVariance (given as variance of speckle)
-            float cuSq = noiseVariance;
+                // Preserve NaN center pixels
+                if (std::isnan(pixel)) {
+                    output[y * width + x] = pixel;
+                    continue;
+                }
 
-            // Cl^2: local coefficient of variation squared
-            float clSq = localVar / (mean * mean);
+                float mean, localVar;
+                localStats(integral, width, height, x, y, kernelSize, mean, localVar);
 
-            float weight;
-            if (clSq <= cuSq) {
-                // Local variation less than noise → full smoothing
-                weight = 0.0f;
-            } else {
+                if (localVar <= 0.0f || mean <= 0.0f) {
+                    output[y * width + x] = mean;
+                    continue;
+                }
+
+                // Cu^2: noise variance normalized by mean^2
+                // For multiplicative noise model: Cu^2 = noiseVariance (given as variance of speckle)
+                float cuSq = noiseVariance;
+
+                // Cl^2: local coefficient of variation squared
+                float clSq = localVar / (mean * mean);
+
+                float weight;
+                if (clSq <= cuSq) {
+                    // Local variation less than noise → full smoothing
+                    weight = 0.0f;
+                } else {
                 weight = (1.0f - cuSq / clSq) / (1.0f + cuSq);
             }
 
             output[y * width + x] = mean + weight * (pixel - mean);
+            }
         }
     }
 }
@@ -419,39 +738,62 @@ void ImageEnhancement::gammaMapFilter(const float *input, float *output,
                                        int width, int height,
                                        int kernelSize, float noiseVariance)
 {
+    if (!input || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "gammaMapFilter: null pointer argument");
+        return;
+    }
+    if (noiseVariance < 0.0f) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "gammaMapFilter: noiseVariance must be >= 0");
+        return;
+    }
+    if (width <= 0 || height <= 0) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("gammaMapFilter: invalid dimensions %1x%2").arg(width).arg(height));
+        return;
+    }
+    QString error;
+    if (!InputValidator::validateKernelSize(kernelSize, error)) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, error);
+        return;
+    }
     // Gamma-MAP filter: Maximum A Posteriori for Gamma distributed speckle
-    // Assumes multiplicative noise model: observed = true * speckle
-    // For Gamma distributed speckle with L looks:
-    //   Cu^2 = 1/L (noise variance)
-    //   Cl^2 = localVar / mean^2 (local variance)
-    //   alpha = (1 + Cu^2) / (Cl^2 - Cu^2)
-    // When Cl^2 <= Cu^2: output = mean (homogeneous region)
-    // When alpha > 0: output = ((alpha - L - 1) * mean + sqrt(mean^2 * (alpha - L - 1)^2 + 4 * alpha * L * pixel)) / (2 * alpha)
-    // Simplified: weight = max(0, 1 - Cu^2/Cl^2), output = mean + weight * (pixel - mean)
 
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            float mean, localVar;
-            localStats(input, width, height, x, y, kernelSize, mean, localVar);
+    // Build integral image for O(1) local statistics
+    IntegralImage integral(input, width, height);
 
-            float pixel = input[y * width + x];
+    // Process in chunks for better cache locality
+    const int chunkHeight = 256;
+    for (int yStart = 0; yStart < height; yStart += chunkHeight) {
+        int yEnd = std::min(yStart + chunkHeight, height);
 
-            if (localVar <= 0.0f || mean <= 0.0f) {
-                output[y * width + x] = mean;
-                continue;
-            }
+        for (int y = yStart; y < yEnd; y++) {
+            for (int x = 0; x < width; x++) {
+                float pixel = input[y * width + x];
 
-            float cuSq = noiseVariance;
-            float clSq = localVar / (mean * mean);
+                // Preserve NaN center pixels
+                if (std::isnan(pixel)) {
+                    output[y * width + x] = pixel;
+                    continue;
+                }
 
-            if (clSq <= cuSq) {
-                // Homogeneous region — smooth fully
-                output[y * width + x] = mean;
-            } else {
-                // Heterogeneous region — preserve structure
-                float alpha = (1.0f + cuSq) / (clSq - cuSq);
-                // Ensure alpha is positive
-                if (alpha < 0.0f) alpha = 0.0f;
+                float mean, localVar;
+                localStats(integral, width, height, x, y, kernelSize, mean, localVar);
+
+                if (localVar <= 0.0f || mean <= 0.0f) {
+                    output[y * width + x] = mean;
+                    continue;
+                }
+
+                float cuSq = noiseVariance;
+                float clSq = localVar / (mean * mean);
+
+                if (clSq <= cuSq) {
+                    // Homogeneous region — smooth fully
+                    output[y * width + x] = mean;
+                } else {
+                    // Heterogeneous region — preserve structure
+                    float alpha = (1.0f + cuSq) / (clSq - cuSq);
+                    // Ensure alpha is positive
+                    if (alpha < 0.0f) alpha = 0.0f;
 
                 // MAP estimate
                 float a = alpha;
@@ -459,6 +801,7 @@ void ImageEnhancement::gammaMapFilter(const float *input, float *output,
                 float discriminant = b * b + 4.0f * a * pixel;
                 if (discriminant < 0.0f) discriminant = 0.0f;
                 output[y * width + x] = (b + std::sqrt(discriminant)) / (2.0f * a);
+                }
             }
         }
     }
@@ -469,6 +812,14 @@ void ImageEnhancement::gammaMapFilter(const float *input, float *output,
 void ImageEnhancement::bandRatio(const float *band1, const float *band2,
                                   float *output, size_t count)
 {
+    if (!band1 || !band2 || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "bandRatio: null pointer argument");
+        return;
+    }
+    if (count == 0) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "bandRatio: zero pixel count");
+        return;
+    }
     for (size_t i = 0; i < count; i++) {
         if (band2[i] == 0.0f) {
             output[i] = std::numeric_limits<float>::quiet_NaN();
@@ -650,8 +1001,12 @@ ImageEnhancement::PcaResult ImageEnhancement::pca(
 {
     int bands = static_cast<int>(input.size());
     if (bands == 0 || input[0].empty()) {
+        SICNU_LOG_ERROR( SicnuLogTags::Algorithms, "PCA: empty input data" );
         return PcaResult{};
     }
+
+    SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "PCA decomposition: %1 bands, %2 components" )
+        .arg( bands ).arg( numComponents ) );
     size_t n = input[0].size();
 
     // Clamp requested components
