@@ -8,15 +8,10 @@
 #include <qgsproject.h>
 
 #include <QComboBox>
-#include <QDialogButtonBox>
-#include <QFileDialog>
-#include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
-#include <QLineEdit>
 #include <QMessageBox>
-#include <QPushButton>
 #include <QVBoxLayout>
 
 #include <qgsmessagelog.h>
@@ -29,33 +24,18 @@
 #include "processing/gdal/gdal_safe_call.h"
 
 ExtractBandDialog::ExtractBandDialog(QWidget *parent)
-    : QDialog(parent)
+    : RasterProcessingDialogBase(parent)
 {
     setWindowTitle(tr("Extract Band"));
     setupUi();
 }
 
-void ExtractBandDialog::setRasterLayer(QgsRasterLayer *layer)
-{
-    if (!layer) return;
-
-    // Find and select the layer in the combo box
-    for (int i = 0; i < m_layerCombo->count(); ++i) {
-        if (m_layerCombo->itemData(i).value<QgsRasterLayer *>() == layer) {
-            m_layerCombo->setCurrentIndex(i);
-            break;
-        }
-    }
-}
-
-QString ExtractBandDialog::outputPath() const
-{
-    return m_outputEdit ? m_outputEdit->text().trimmed() : QString();
-}
-
 void ExtractBandDialog::setupUi()
 {
-    auto *mainLayout = new QVBoxLayout(this);
+    auto *mainLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (!mainLayout) {
+        mainLayout = new QVBoxLayout(this);
+    }
 
     // Input section
     auto *inputGroup = new QGroupBox(tr("Input"));
@@ -71,32 +51,13 @@ void ExtractBandDialog::setupUi()
 
     mainLayout->addWidget(inputGroup);
 
-    // Output section
-    auto *outputGroup = new QGroupBox(tr("Output"));
-    auto *outputLayout = new QFormLayout(outputGroup);
+    // Output section (using base class)
+    setupOutputRow(mainLayout);
 
-    auto *outputRow = new QWidget;
-    auto *outputRowLayout = new QHBoxLayout(outputRow);
-    outputRowLayout->setContentsMargins(0, 0, 0, 0);
-    m_outputEdit = new QLineEdit;
-    m_outputEdit->setPlaceholderText(tr("Output raster path"));
-    auto *browseBtn = new QPushButton(tr("Browse..."));
-    outputRowLayout->addWidget(m_outputEdit);
-    outputRowLayout->addWidget(browseBtn);
-    outputLayout->addRow(tr("Output File:"), outputRow);
-
-    mainLayout->addWidget(outputGroup);
-
-    // Buttons
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    m_runButton = buttons->button(QDialogButtonBox::Ok);
-    m_runButton->setText(tr("Extract"));
-    mainLayout->addWidget(buttons);
+    // Buttons (using base class)
+    setupButtonBar(mainLayout);
 
     // Connections
-    connect(browseBtn, &QPushButton::clicked, this, &ExtractBandDialog::onBrowseOutput);
-    connect(buttons, &QDialogButtonBox::accepted, this, &ExtractBandDialog::onRun);
-    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(m_layerCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &ExtractBandDialog::onLayerChanged);
 
@@ -131,15 +92,6 @@ void ExtractBandDialog::populateBandCombo()
     }
 }
 
-void ExtractBandDialog::onBrowseOutput()
-{
-    QString path = QFileDialog::getSaveFileName(this, tr("Save Extracted Band"), QString(),
-                                                 tr("GeoTIFF (*.tif *.tiff)"));
-    if (!path.isEmpty()) {
-        m_outputEdit->setText(path);
-    }
-}
-
 void ExtractBandDialog::onRun()
 {
     auto *rl = m_layerCombo->currentData().value<QgsRasterLayer *>();
@@ -154,13 +106,13 @@ void ExtractBandDialog::onRun()
         return;
     }
 
-    QString outputPath = m_outputEdit->text().trimmed();
-    if (outputPath.isEmpty()) {
+    QString outPath = outputPath();
+    if (outPath.isEmpty()) {
         // Auto-generate output path
         QString inputPath = rl->source();
-        outputPath = QFileInfo(inputPath).path() + "/" + QFileInfo(inputPath).baseName()
+        outPath = QFileInfo(inputPath).path() + "/" + QFileInfo(inputPath).baseName()
                      + tr("_band%1.tif").arg(bandIndex);
-        m_outputEdit->setText(outputPath);
+        m_outputEdit->setText(outPath);
     }
 
     // Capture parameters for async execution
@@ -168,13 +120,13 @@ void ExtractBandDialog::onRun()
 
     if (!m_runner) {
         m_runner = new AsyncGdalRunner(this, this);
-        connect(m_runner, &AsyncGdalRunner::completed, this, &ExtractBandDialog::onCompleted);
-        connect(m_runner, &AsyncGdalRunner::failed, this, &ExtractBandDialog::onFailed);
+        connect(m_runner, &AsyncGdalRunner::completed, this, &ExtractBandDialog::handleCompleted);
+        connect(m_runner, &AsyncGdalRunner::failed, this, &ExtractBandDialog::handleFailed);
     }
 
     m_runButton->setEnabled(false);
 
-    m_runner->run([sourcePath, bandIndex, outputPath]() -> QString {
+    m_runner->run([sourcePath, bandIndex, outPath]() -> QString {
     try {
         // Open source raster
         GdalDatasetGuard srcGuard( GDALOpen(sourcePath.toUtf8().constData(), GA_ReadOnly) );
@@ -195,10 +147,10 @@ void ExtractBandDialog::onRun()
         GeoInfo geo = extractGeoInfo(srcGuard.get());
         std::vector<std::vector<float>> bands = { buf };
         QString error;
-        if (!writeGdalOutput(outputPath, w, h, bands, geo.geoTransform, geo.projection, &error))
+        if (!writeGdalOutput(outPath, w, h, bands, geo.geoTransform, geo.projection, &error))
             return QString();
 
-        return outputPath;
+        return outPath;
     } catch (const std::runtime_error &) {
         return QString();
     }
@@ -208,18 +160,4 @@ void ExtractBandDialog::onRun()
 void ExtractBandDialog::onLayerChanged()
 {
     populateBandCombo();
-}
-
-void ExtractBandDialog::onCompleted(const QString &outputPath)
-{
-    m_runButton->setEnabled(true);
-    QgsMessageLog::logMessage(tr("Band extraction completed! Output: %1").arg(outputPath),
-                              "extract_band", Qgis::MessageLevel::Success);
-    accept();
-}
-
-void ExtractBandDialog::onFailed(const QString &errorMessage)
-{
-    m_runButton->setEnabled(true);
-    QMessageBox::warning(this, tr("Error"), tr("Band extraction failed: %1").arg(errorMessage));
 }

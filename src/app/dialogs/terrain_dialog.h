@@ -1,40 +1,36 @@
 // terrain_dialog.h — Phase 11.2 Terrain Analysis Dialog
 #pragma once
 
-#include <QDialog>
+#include "raster_processing_dialog_base.h"
 #include <QFutureWatcher>
 
 class QComboBox;
 class QDoubleSpinBox;
-class QLineEdit;
 class QLabel;
-class QPushButton;
-class QgsRasterLayer;
 
-class TerrainDialog : public QDialog
+class TerrainDialog : public RasterProcessingDialogBase
 {
     Q_OBJECT
 
 public:
     explicit TerrainDialog(QWidget *parent = nullptr);
 
-    void setRasterLayer(QgsRasterLayer *layer);
-    QString outputPath() const { return mOutputPath; }
+protected:
+    QString toolName() const override { return QStringLiteral("terrain"); }
+    QString dialogTitle() const override { return tr("Terrain Analysis"); }
+    void onRun() override;
 
 private slots:
-    void runAnalysis();
     void onAnalysisFinished();
-    void onBrowseOutput();
 
 private:
+    void setupUi();
+
     QComboBox *mLayerCombo = nullptr;
     QComboBox *mAnalysisCombo = nullptr;
     QDoubleSpinBox *mCellSizeSpin = nullptr;
     QDoubleSpinBox *mSunAzimuthSpin = nullptr;
     QDoubleSpinBox *mSunElevationSpin = nullptr;
-    QLineEdit *mOutputEdit = nullptr;
     QLabel *mStatusLabel = nullptr;
-    QPushButton *mRunButton = nullptr;
     QFutureWatcher<bool> *mWatcher = nullptr;
-    QString mOutputPath;
 };

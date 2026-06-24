@@ -1,5 +1,6 @@
 // src/app/dialogs/change_detection_dialog.cpp
 #include "change_detection_dialog.h"
+#include "dialog_utils.h"
 #include "async_gdal_runner.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_safe_call.h"
@@ -8,15 +9,11 @@
 #include <raster/qgsrasterlayer.h>
 
 #include <QVBoxLayout>
-#include <QHBoxLayout>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
-#include <QLineEdit>
 #include <QComboBox>
 #include <QDoubleSpinBox>
-#include <QPushButton>
-#include <QFileDialog>
 #include <QMessageBox>
 
 #include <qgsproject.h>
@@ -33,7 +30,7 @@
 #include <cstdint>
 
 ChangeDetectionDialog::ChangeDetectionDialog(QWidget *parent)
-    : QDialog(parent)
+    : RasterProcessingDialogBase(parent)
 {
     setWindowTitle(tr("Change Detection"));
     setMinimumWidth(450);
@@ -42,7 +39,10 @@ ChangeDetectionDialog::ChangeDetectionDialog(QWidget *parent)
 
 void ChangeDetectionDialog::setupUi()
 {
-    auto *mainLayout = new QVBoxLayout(this);
+    auto *mainLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (!mainLayout) {
+        mainLayout = new QVBoxLayout(this);
+    }
 
     // --- Input group ---
     auto *inputGroup = new QGroupBox(tr("Input Images"), this);
@@ -82,26 +82,15 @@ void ChangeDetectionDialog::setupUi()
 
     mainLayout->addWidget(methodGroup);
 
-    // --- Output group ---
-    auto *outLayout = new QHBoxLayout();
-    outLayout->addWidget(new QLabel(tr("Output:")));
-    m_outputEdit = new QLineEdit(this);
-    outLayout->addWidget(m_outputEdit);
-    auto *browseBtn = new QPushButton(tr("Browse..."), this);
-    connect(browseBtn, &QPushButton::clicked, this, &ChangeDetectionDialog::browseOutput);
-    outLayout->addWidget(browseBtn);
-    mainLayout->addLayout(outLayout);
+    // --- Output section (using base class) ---
+    setupOutputRow(mainLayout);
 
-    // --- Buttons ---
-    auto *btnLayout = new QHBoxLayout();
-    btnLayout->addStretch();
-    m_runButton = new QPushButton(tr("Run"), this);
-    connect(m_runButton, &QPushButton::clicked, this, &ChangeDetectionDialog::runDetection);
-    btnLayout->addWidget(m_runButton);
-    auto *cancelBtn = new QPushButton(tr("Cancel"), this);
-    connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
-    btnLayout->addWidget(cancelBtn);
-    mainLayout->addLayout(btnLayout);
+    // --- Status ---
+    m_statusLabel = new QLabel(tr("Ready"), this);
+    mainLayout->addWidget(m_statusLabel);
+
+    // --- Buttons (using base class) ---
+    setupButtonBar(mainLayout);
 
     // --- Connections ---
     connect(m_beforeLayerCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -162,14 +151,6 @@ void ChangeDetectionDialog::updateBandSelectors()
     }
 }
 
-void ChangeDetectionDialog::browseOutput()
-{
-    QString path = QFileDialog::getSaveFileName(this, tr("Output File"), QString(),
-                                                tr("GeoTIFF (*.tif)"));
-    if (!path.isEmpty())
-        m_outputEdit->setText(path);
-}
-
 void ChangeDetectionDialog::onMethodChanged(int index)
 {
     bool isChangeMask = (index == 2);
@@ -177,7 +158,7 @@ void ChangeDetectionDialog::onMethodChanged(int index)
     m_thresholdLabel->setVisible(isChangeMask);
 }
 
-void ChangeDetectionDialog::runDetection()
+void ChangeDetectionDialog::onRun()
 {
     // Validate layer selection
     if (m_beforeLayerCombo->count() == 0 || m_afterLayerCombo->count() == 0) {
@@ -203,7 +184,7 @@ void ChangeDetectionDialog::runDetection()
     }
 
     // Validate output path
-    QString outPath = m_outputEdit->text().trimmed();
+    QString outPath = outputPath();
     if (outPath.isEmpty()) {
         QMessageBox::warning(this, tr("Change Detection"),
                              tr("Please specify an output file."));
@@ -220,11 +201,12 @@ void ChangeDetectionDialog::runDetection()
 
     if (!m_runner) {
         m_runner = new AsyncGdalRunner(this, this);
-        connect(m_runner, &AsyncGdalRunner::completed, this, &ChangeDetectionDialog::onCompleted);
-        connect(m_runner, &AsyncGdalRunner::failed, this, &ChangeDetectionDialog::onFailed);
+        connect(m_runner, &AsyncGdalRunner::completed, this, &ChangeDetectionDialog::handleCompleted);
+        connect(m_runner, &AsyncGdalRunner::failed, this, &ChangeDetectionDialog::handleFailed);
     }
 
     m_runButton->setEnabled(false);
+    m_statusLabel->setText(tr("Processing..."));
 
     m_runner->run([this, beforeSourcePath, afterSourcePath, beforeBand, afterBand,
                    methodIndex, threshold, outPath]() -> QString {
@@ -301,24 +283,4 @@ void ChangeDetectionDialog::runDetection()
         return QString();
     }
     });
-}
-
-QString ChangeDetectionDialog::outputPath() const
-{
-    return m_outputEdit ? m_outputEdit->text().trimmed() : QString();
-}
-
-void ChangeDetectionDialog::onCompleted(const QString &outputPath)
-{
-    m_runButton->setEnabled(true);
-    QgsMessageLog::logMessage(tr("Change detection completed! Output: %1").arg(outputPath),
-                              "change_detection", Qgis::MessageLevel::Success);
-    accept();
-}
-
-void ChangeDetectionDialog::onFailed(const QString &error)
-{
-    m_runButton->setEnabled(true);
-    QgsMessageLog::logMessage(error, "change_detection", Qgis::MessageLevel::Critical);
-    QMessageBox::critical(this, tr("Change Detection"), tr("Operation failed. See log for details."));
 }

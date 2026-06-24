@@ -1,17 +1,14 @@
 // change_detection_dialog.h — Change Detection Dialog
 #pragma once
 
-#include <QDialog>
+#include "raster_processing_dialog_base.h"
 
 class QComboBox;
 class QDoubleSpinBox;
-class QLineEdit;
 class QLabel;
-class QPushButton;
-class QgsRasterLayer;
 class AsyncGdalRunner;
 
-class ChangeDetectionDialog : public QDialog
+class ChangeDetectionDialog : public RasterProcessingDialogBase
 {
     Q_OBJECT
 
@@ -19,13 +16,13 @@ public:
     explicit ChangeDetectionDialog(QWidget *parent = nullptr);
 
     void populateLayers();
-    QString outputPath() const;
+
+protected:
+    QString toolName() const override { return QStringLiteral("change_detection"); }
+    QString dialogTitle() const override { return tr("Change Detection"); }
+    void onRun() override;
 
 private slots:
-    void runDetection();
-    void onCompleted(const QString &outputPath);
-    void onFailed(const QString &errorMessage);
-    void browseOutput();
     void updateBandSelectors();
     void onMethodChanged(int index);
 
@@ -39,8 +36,6 @@ private:
     QComboBox *m_afterBandCombo = nullptr;
     QDoubleSpinBox *m_thresholdSpin = nullptr;
     QLabel *m_thresholdLabel = nullptr;
-    QLineEdit *m_outputEdit = nullptr;
     QLabel *m_statusLabel = nullptr;
-    QPushButton *m_runButton = nullptr;
     AsyncGdalRunner *m_runner = nullptr;
 };

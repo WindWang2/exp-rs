@@ -33,12 +33,15 @@
 #include "qgsogrutils.h"
 
 FusionDialog::FusionDialog( QWidget *parent )
-    : QDialog( parent )
+    : RasterProcessingDialogBase( parent )
 {
     setWindowTitle( tr( "Image Fusion / Pan-sharpening" ) );
     setMinimumWidth( 500 );
 
-    auto *mainLayout = new QVBoxLayout( this );
+    auto *mainLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (!mainLayout) {
+        mainLayout = new QVBoxLayout(this);
+    }
 
     // Input section
     auto *inputGroup = new QGroupBox( tr( "Input" ) );
@@ -127,37 +130,15 @@ FusionDialog::FusionDialog( QWidget *parent )
 
     mainLayout->addWidget( inputGroup );
 
-    // Output section
-    auto *outputGroup = new QGroupBox( tr( "Output" ) );
-    auto *outputLayout = new QFormLayout( outputGroup );
+    // Output section (using base class)
+    setupOutputRow(mainLayout);
 
-    auto *outputRow = new QWidget;
-    auto *outputRowLayout = new QHBoxLayout( outputRow );
-    outputRowLayout->setContentsMargins( 0, 0, 0, 0 );
-    mOutputEdit = new QLineEdit;
-    mOutputEdit->setPlaceholderText( tr( "Output raster path" ) );
-    auto *browseBtn = new QPushButton( tr( "Browse..." ) );
-    outputRowLayout->addWidget( mOutputEdit );
-    outputRowLayout->addWidget( browseBtn );
-    outputLayout->addRow( tr( "Output File:" ), outputRow );
+    // Status
+    mStatusLabel = new QLabel(tr("Ready"));
+    mainLayout->addWidget(mStatusLabel);
 
-    mainLayout->addWidget( outputGroup );
-
-    // Buttons
-    auto *buttons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel );
-    buttons->button( QDialogButtonBox::Ok )->setText( tr( "Fuse" ) );
-    mainLayout->addWidget( buttons );
-
-    // Connections
-    connect( browseBtn, &QPushButton::clicked, this, [this]() {
-        QString path = QFileDialog::getSaveFileName( this, tr( "Save Output" ), QString(),
-                                                     tr( "GeoTIFF (*.tif)" ) );
-        if ( !path.isEmpty() )
-            mOutputEdit->setText( path );
-    } );
-
-    connect( buttons, &QDialogButtonBox::accepted, this, &FusionDialog::onRun );
-    connect( buttons, &QDialogButtonBox::rejected, this, &QDialog::reject );
+    // Buttons (using base class)
+    setupButtonBar(mainLayout);
 
     // Populate layers
     populateRasterLayerCombo( mPanCombo );
@@ -208,11 +189,6 @@ FusionDialog::FusionDialog( QWidget *parent )
         emit mMsCombo->currentIndexChanged( 0 );
 }
 
-QString FusionDialog::outputPath() const
-{
-    return mOutputEdit->text().trimmed();
-}
-
 void FusionDialog::onRun()
 {
     auto *panLayer = mPanCombo->currentData().value<QgsRasterLayer *>();
@@ -224,12 +200,12 @@ void FusionDialog::onRun()
         return;
     }
 
-    QString outputPath = mOutputEdit->text().trimmed();
-    if ( outputPath.isEmpty() )
+    QString outPath = outputPath();
+    if ( outPath.isEmpty() )
     {
-        outputPath = QFileInfo( msLayer->source() ).path() + "/"
+        outPath = QFileInfo( msLayer->source() ).path() + "/"
                      + QFileInfo( msLayer->source() ).baseName() + "_fused.tif";
-        mOutputEdit->setText( outputPath );
+        m_outputEdit->setText( outPath );
     }
 
     // Open panchromatic
@@ -301,13 +277,13 @@ void FusionDialog::onRun()
         if ( method == "otb_btps" )
         {
             program = ToolPathManager::instance().otbToolPath( "BundleToPerfectSensor" );
-            args << "-in" << msPath << "-inp" << panPath << "-out" << outputPath;
+            args << "-in" << msPath << "-inp" << panPath << "-out" << outPath;
         }
         else
         {
             program = ToolPathManager::instance().gdalToolPath( "gdalwarp" );
             args << "-r" << "bilinear" << "-of" << "GTiff" << "-co" << "COMPRESS=LZW"
-                 << panPath << msPath << outputPath;
+                 << panPath << msPath << outPath;
         }
 
         QProcess proc;
@@ -387,7 +363,7 @@ void FusionDialog::onRun()
         QString projection = proj ? QString::fromUtf8(proj) : QString();
 
         QString error;
-        GdalDatasetGuard outDs(createOutputTiff(outputPath, w, h, result.size(),
+        GdalDatasetGuard outDs(createOutputTiff(outPath, w, h, result.size(),
                                                GDT_Float32, geoTransform, projection, &error));
         if ( !outDs ) { QMessageBox::warning( this, tr( "Error" ), tr( "Cannot create output." ) ); return; }
 
@@ -405,14 +381,10 @@ void FusionDialog::onRun()
         }
     }
 
-    QMessageBox::information( this, tr( "Image Fusion" ),
-                              tr( "Fusion complete!\nOutput: %1" ).arg( outputPath ) );
-    accept();
+    handleCompleted(outPath);
 }
 
 void FusionDialog::onMethodChanged(int index) { Q_UNUSED(index); }
-void FusionDialog::onCompleted(const QString &outputPath) { Q_UNUSED(outputPath); accept(); }
-void FusionDialog::onFailed(const QString &errorMessage) { QMessageBox::warning(this, tr("Error"), errorMessage); }
 
 void FusionDialog::onBrowsePan()
 {
@@ -445,11 +417,4 @@ void FusionDialog::onBrowseMs()
     }
 }
 
-void FusionDialog::onBrowseOutput()
-{
-    QString path = QFileDialog::getSaveFileName(this, tr("Output File"), QString(),
-                                                tr("GeoTIFF (*.tif)"));
-    if (!path.isEmpty())
-        mOutputEdit->setText(path);
-}
 

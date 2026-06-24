@@ -10,17 +10,11 @@
 #include <qgsproject.h>
 
 #include <QComboBox>
-#include <QDialogButtonBox>
 #include <QDoubleSpinBox>
-#include <QFileDialog>
-#include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
-#include <QLineEdit>
 #include <QMessageBox>
-#include <QPushButton>
-#include <QSpinBox>
 #include <QVBoxLayout>
 #include <QApplication>
 
@@ -34,12 +28,19 @@
 #include "qgsogrutils.h"
 
 TerrainDialog::TerrainDialog( QWidget *parent )
-    : QDialog( parent )
+    : RasterProcessingDialogBase( parent )
 {
     setWindowTitle( tr( "Terrain Analysis" ) );
     setMinimumWidth( 450 );
+    setupUi();
+}
 
-    auto *mainLayout = new QVBoxLayout( this );
+void TerrainDialog::setupUi()
+{
+    auto *mainLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (!mainLayout) {
+        mainLayout = new QVBoxLayout(this);
+    }
 
     // Input section
     auto *inputGroup = new QGroupBox( tr( "Input" ) );
@@ -85,38 +86,15 @@ TerrainDialog::TerrainDialog( QWidget *parent )
 
     mainLayout->addWidget( paramGroup );
 
-    // Output section
-    auto *outputGroup = new QGroupBox( tr( "Output" ) );
-    auto *outputLayout = new QFormLayout( outputGroup );
+    // Output section (using base class)
+    setupOutputRow(mainLayout);
 
-    auto *outputRow = new QWidget;
-    auto *outputRowLayout = new QHBoxLayout( outputRow );
-    outputRowLayout->setContentsMargins( 0, 0, 0, 0 );
-    mOutputEdit = new QLineEdit;
-    mOutputEdit->setPlaceholderText( tr( "Output raster path" ) );
-    auto *browseBtn = new QPushButton( tr( "Browse..." ) );
-    outputRowLayout->addWidget( mOutputEdit );
-    outputRowLayout->addWidget( browseBtn );
-    outputLayout->addRow( tr( "Output File:" ), outputRow );
+    // Status
+    mStatusLabel = new QLabel(tr("Ready"));
+    mainLayout->addWidget(mStatusLabel);
 
-    mainLayout->addWidget( outputGroup );
-
-    // Buttons
-    auto *buttons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel );
-    mRunButton = buttons->button( QDialogButtonBox::Ok );
-    mRunButton->setText( tr( "Run" ) );
-    mainLayout->addWidget( buttons );
-
-    // Connections
-    connect( browseBtn, &QPushButton::clicked, this, [this]() {
-        QString path = QFileDialog::getSaveFileName( this, tr( "Save Output" ), QString(),
-                                                     tr( "GeoTIFF (*.tif)" ) );
-        if ( !path.isEmpty() )
-            mOutputEdit->setText( path );
-    } );
-
-    connect( buttons, &QDialogButtonBox::accepted, this, &TerrainDialog::runAnalysis );
-    connect( buttons, &QDialogButtonBox::rejected, this, &QDialog::reject );
+    // Buttons (using base class)
+    setupButtonBar(mainLayout);
 
     // Populate layers
     populateRasterLayerCombo( mLayerCombo );
@@ -141,21 +119,7 @@ TerrainDialog::TerrainDialog( QWidget *parent )
         mLayerCombo->setCurrentIndex( 0 );
 }
 
-void TerrainDialog::setRasterLayer( QgsRasterLayer *layer )
-{
-    if ( !layer )
-        return;
-    for ( int i = 0; i < mLayerCombo->count(); ++i )
-    {
-        if ( mLayerCombo->itemData( i ).value<QgsRasterLayer *>() == layer )
-        {
-            mLayerCombo->setCurrentIndex( i );
-            return;
-        }
-    }
-}
-
-void TerrainDialog::runAnalysis()
+void TerrainDialog::onRun()
 {
     auto *rl = mLayerCombo->currentData().value<QgsRasterLayer *>();
     if ( !rl )
@@ -164,21 +128,20 @@ void TerrainDialog::runAnalysis()
         return;
     }
 
-    QString outputPath = mOutputEdit->text().trimmed();
-    if ( outputPath.isEmpty() )
+    QString outPath = outputPath();
+    if ( outPath.isEmpty() )
     {
         // Auto-generate output path
         QString inputPath = rl->source();
         QString analysisType = mAnalysisCombo->currentData().toString();
-        outputPath = QFileInfo( inputPath ).path() + "/" + QFileInfo( inputPath ).baseName()
+        outPath = QFileInfo( inputPath ).path() + "/" + QFileInfo( inputPath ).baseName()
                      + "_" + analysisType + ".tif";
-        mOutputEdit->setText( outputPath );
+        m_outputEdit->setText( outPath );
     }
 
-    mOutputPath = outputPath;
-
     // Disable run button during analysis
-    if ( mRunButton ) mRunButton->setEnabled( false );
+    m_runButton->setEnabled( false );
+    mStatusLabel->setText(tr("Processing..."));
     QApplication::setOverrideCursor( Qt::WaitCursor );
 
     // Run analysis asynchronously using QtConcurrent
@@ -194,7 +157,7 @@ void TerrainDialog::runAnalysis()
     float sunAzimuth = static_cast<float>( mSunAzimuthSpin->value() );
     float sunElevation = static_cast<float>( mSunElevationSpin->value() );
 
-    QFuture<bool> future = QtConcurrent::run( [sourcePath, outputPath, analysisType, cellSize,
+    QFuture<bool> future = QtConcurrent::run( [sourcePath, outPath, analysisType, cellSize,
                                                 sunAzimuth, sunElevation]() -> bool {
     try {
         // Open source raster
@@ -238,7 +201,7 @@ void TerrainDialog::runAnalysis()
         GeoInfo geo = extractGeoInfo( ds.get() );
         std::vector<std::vector<float>> bands = { out };
         QString error;
-        if ( !writeGdalOutput( outputPath, w, h, bands, geo.geoTransform, geo.projection, &error ) )
+        if ( !writeGdalOutput( outPath, w, h, bands, geo.geoTransform, geo.projection, &error ) )
             return false;
 
         return true;
@@ -253,27 +216,19 @@ void TerrainDialog::runAnalysis()
 void TerrainDialog::onAnalysisFinished()
 {
     QApplication::restoreOverrideCursor();
-    if ( mRunButton ) mRunButton->setEnabled( true );
+    m_runButton->setEnabled( true );
 
     if ( !mWatcher ) return;
 
     bool ok = mWatcher->result();
     if ( ok )
     {
-        QMessageBox::information( this, tr( "Terrain Analysis" ),
-                                  tr( "Analysis complete!\nOutput: %1" ).arg( mOutputPath ) );
-        accept();
+        mStatusLabel->setText(tr("Completed!"));
+        handleCompleted(outputPath());
     }
     else
     {
-        QMessageBox::warning( this, tr( "Error" ), tr( "Terrain analysis failed." ) );
+        mStatusLabel->setText(tr("Failed!"));
+        handleFailed(tr("Terrain analysis failed."));
     }
-}
-
-void TerrainDialog::onBrowseOutput()
-{
-    QString path = QFileDialog::getSaveFileName( this, tr( "Output File" ), QString(),
-                                                 tr( "GeoTIFF (*.tif)" ) );
-    if ( !path.isEmpty() )
-        mOutputEdit->setText( path );
 }

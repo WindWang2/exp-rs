@@ -1,35 +1,31 @@
 // fusion_dialog.h — Phase 11.1 Image Fusion / Pan-sharpening Dialog
 #pragma once
 
-#include <QDialog>
+#include "raster_processing_dialog_base.h"
 #include <QVector>
 
 class QComboBox;
 class QDoubleSpinBox;
 class QFormLayout;
-class QLineEdit;
 class QLabel;
 class QWidget;
-class QgsRasterLayer;
 
-class FusionDialog : public QDialog
+class FusionDialog : public RasterProcessingDialogBase
 {
     Q_OBJECT
 
 public:
     explicit FusionDialog(QWidget *parent = nullptr);
 
-    void setRasterLayer(QgsRasterLayer *layer);
-    QString outputPath() const;
+protected:
+    QString toolName() const override { return QStringLiteral("fusion"); }
+    QString dialogTitle() const override { return tr("Image Fusion"); }
+    void onRun() override;
 
 private slots:
-    void onRun();
     void onMethodChanged(int index);
-    void onCompleted(const QString &outputPath);
-    void onFailed(const QString &errorMessage);
     void onBrowsePan();
     void onBrowseMs();
-    void onBrowseOutput();
 
 private:
     void setupUi();
@@ -48,6 +44,5 @@ private:
     QVector<QDoubleSpinBox*> mBandWeightSpins;
     QWidget *mBandWeightsWidget = nullptr;
     QFormLayout *mBandWeightsLayout = nullptr;
-    QLineEdit *mOutputEdit = nullptr;
     QLabel *mStatusLabel = nullptr;
 };
