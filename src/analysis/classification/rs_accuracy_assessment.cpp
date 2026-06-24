@@ -1,6 +1,7 @@
 // rs_accuracy_assessment.cpp — Phase 10A Task 10.9.
 
 #include "rs_accuracy_assessment.h"
+#include "sicnu_logging.h"
 
 #include <QSet>
 
@@ -11,7 +12,13 @@ RsAccuracyAssessment::compute( const QVector<int> &yt, const QVector<int> &yp )
 {
   Result r;
   if ( yt.size() != yp.size() || yt.isEmpty() )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification, QString( "Accuracy assessment: mismatched or empty vectors (yt=%1, yp=%2)" )
+        .arg( yt.size() ).arg( yp.size() ) );
     return r;
+  }
+
+  SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Computing accuracy assessment: %1 samples" ).arg( yt.size() ) );
 
   // Collect the union of observed class IDs and sort them for a stable
   // matrix row/column ordering.
@@ -79,5 +86,7 @@ RsAccuracyAssessment::compute( const QVector<int> &yt, const QVector<int> &yp )
     r.f1[id] = ( p + u ) > 0 ? 2.0 * p * u / ( p + u ) : 0.0;
   }
 
+  SICNU_LOG_SUCCESS( SicnuLogTags::Classification, QString( "Accuracy: overall=%1, kappa=%2, classes=%3" )
+      .arg( r.overallAccuracy, 0, 'f', 4 ).arg( r.kappa, 0, 'f', 4 ).arg( r.classIds.size() ) );
   return r;
 }

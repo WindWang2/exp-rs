@@ -2,6 +2,7 @@
 
 #include "rs_accuracy_dialog.h"
 
+#include "core/sicnu_logging.h"
 #include <QColor>
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -29,6 +30,10 @@ RsAccuracyDialog::RsAccuracyDialog( const RsAccuracyAssessment::Result &result,
   , mResult( result )
   , mNames( classNames )
 {
+  SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Accuracy assessment: OA=%1%, Kappa=%2, classes=%3" )
+    .arg( mResult.overallAccuracy * 100.0, 0, 'f', 1 )
+    .arg( mResult.kappa, 0, 'f', 3 )
+    .arg( mResult.classIds.size() ) );
   setWindowTitle( tr( "Accuracy Assessment" ) );
   resize( 720, 560 );
 
@@ -159,4 +164,5 @@ void RsAccuracyDialog::exportCsv()
         << mResult.f1.value( id ) << "\n";
   }
   f.close();
+  SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Accuracy report exported: %1" ).arg( path ) );
 }

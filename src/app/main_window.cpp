@@ -1,4 +1,5 @@
 #include "main_window.h"
+#include "layer_manager.h"
 #include "map_tools/map_tool_manager.h"
 #include "layer_tree_menu.h"
 #include "app_paths.h"
@@ -44,6 +45,9 @@
 #include "log_panel.h"
 #include "widgets/guided_workflow_widget.h"
 #include "dialogs/comparison_dialog.h"
+#include "dialogs/stac_browser_dialog.h"
+#include "dialogs/extract_band_dialog.h"
+#include "dialogs/image_enhancement_panel.h"
 #include "layout/qgslayoutdesignerdialog.h"
 #include "georeferencer/qgsgeoreferencermainwindow.h"
 #ifdef SICNU_HAS_CLASSIFY
@@ -75,7 +79,6 @@
 #include <QTabWidget>
 #include <QFormLayout>
 #include <QSettings>
-#include <QPalette>
 #include <QGroupBox>
 #include <QSlider>
 #include <QComboBox>
@@ -125,6 +128,11 @@
 
 // QgsGui singleton
 #include <qgsgui.h>
+#include <history/qgshistoryproviderregistry.h>
+#include <history/qgshistoryprovider.h>
+#include <history/qgshistoryentrymodel.h>
+#include <history/qgshistorywidget.h>
+#include <processing/qgsprocessingfavoritealgorithmmanager.h>
 
 // Raster renderer and filters
 #include <raster/qgsbrightnesscontrastfilter.h>
@@ -140,6 +148,7 @@
 
 // Layout
 #include <layout/qgsprintlayout.h>
+#include <layout/qgslayoutmanager.h>
 
 // Processing framework
 #include <processing/qgsprocessingregistry.h>
@@ -148,9 +157,14 @@
 #include <processing/qgsprocessingfeedback.h>
 #include <processing/qgsprocessingparameters.h>
 
-// Python embedding (disabled — Python runtime removed)
-// #include "python/qgis_python.h"
-// #include "gui/python_console_widget.h"
+// Plugin system
+#include <core/plugin_manager.h>
+#include <core/interfaces/sicnu_plugin_interface.h>
+
+// Python embedding
+#include "python/qgis_python.h"
+#include "python/sicnu_python_console.h"
+#include "python/sicnu_python_api.h"
 
 QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -160,6 +174,13 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
 
     qDebug() << "Setting up UI...";
     setupUi();
+    qDebug() << "Setting up map canvas...";
+    setupMapCanvas();
+
+    // Create LayerManager (must come after map canvas + layer tree view exist)
+    m_layerManager = std::make_unique<LayerManager>( m_mapCanvas, m_layerTreeView,
+                                                     m_overviewCanvas, this );
+
     qDebug() << "Setting up menu...";
     setupMenu();
     qDebug() << "Setting up toolbars...";
@@ -170,31 +191,42 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     setupStatusBar();
     qDebug() << "Setting up connections...";
     setupConnections();
-    qDebug() << "Setting up map canvas...";
-    setupMapCanvas();
     qDebug() << "Restoring panel state...";
     restorePanelState();
+
+    // Load plugins
+    qDebug() << "Loading plugins...";
+    m_pluginManager = std::make_unique<PluginManager>(m_mapCanvas, m_layerTreeView);
+    m_pluginManager->loadPlugins(QCoreApplication::applicationDirPath() + "/../plugins");
+    for (const QString &pluginName : m_pluginManager->loadedPlugins()) {
+        SicnuPluginInterface *plugin = m_pluginManager->plugin(pluginName);
+        if (!plugin) continue;
+
+        // Add plugin widgets as dock widgets
+        if (QWidget *widget = plugin->createWidget(this)) {
+            auto *dock = new QgsDockWidget(plugin->name(), this);
+            dock->setObjectName("plugin_" + plugin->name().toLower().replace(" ", "_"));
+            dock->setWidget(widget);
+            addDockWidget(Qt::RightDockWidgetArea, dock);
+        }
+        // Add plugin menu actions
+        for (QAction *action : plugin->menuActions()) {
+            menuBar()->addAction(action);
+        }
+        // Add plugin toolbar actions
+        for (QAction *action : plugin->toolbarActions()) {
+            statusBar()->showMessage(tr("Plugin '%1' loaded").arg(plugin->name()), 3000);
+        }
+    }
+
+    // Initialize Python API with map canvas
+    SicnuPythonApi::instance().initialize(m_mapCanvas);
 
     // Restore theme preference
     QSettings settings;
     QString theme = settings.value("preferences/theme", "light").toString();
     if (theme == "dark") {
-        // Apply dark palette
-        QPalette darkPalette;
-        darkPalette.setColor(QPalette::Window, QColor(53, 53, 53));
-        darkPalette.setColor(QPalette::WindowText, Qt::white);
-        darkPalette.setColor(QPalette::Base, QColor(25, 25, 25));
-        darkPalette.setColor(QPalette::AlternateBase, QColor(53, 53, 53));
-        darkPalette.setColor(QPalette::ToolTipBase, Qt::white);
-        darkPalette.setColor(QPalette::ToolTipText, Qt::white);
-        darkPalette.setColor(QPalette::Text, Qt::white);
-        darkPalette.setColor(QPalette::Button, QColor(53, 53, 53));
-        darkPalette.setColor(QPalette::ButtonText, Qt::white);
-        darkPalette.setColor(QPalette::BrightText, Qt::red);
-        darkPalette.setColor(QPalette::Link, QColor(42, 130, 218));
-        darkPalette.setColor(QPalette::Highlight, QColor(42, 130, 218));
-        darkPalette.setColor(QPalette::HighlightedText, Qt::black);
-        qApp->setPalette(darkPalette);
+        applyDarkPalette();
         qDebug() << "Dark theme applied";
     }
 
@@ -244,6 +276,7 @@ void QgisDesktopWindow::setupMapCanvas()
     m_cadDock->hide();
     m_messageBar = new QgsMessageBar(this);
     m_clipboard = new QgsClipboard();
+    m_clipboard->setParent( this );
 
     // Place message bar above the map canvas
     QVBoxLayout *canvasLayout = qobject_cast<QVBoxLayout*>(m_mapCanvasContainer->parentWidget() ? m_mapCanvasContainer->parentWidget()->layout() : nullptr);
@@ -298,11 +331,6 @@ void QgisDesktopWindow::setupMapCanvas()
 
     // Set default tool (QGIS default: pan)
     m_mapCanvas->setMapTool(m_panTool);
-
-    // Overview canvas (created here because it needs m_mapCanvas)
-    m_overviewCanvas = new QgsMapOverviewCanvas(m_overviewDock, m_mapCanvas);
-    m_overviewCanvas->enableAntiAliasing(true);
-    m_overviewDock->setWidget(m_overviewCanvas);
 }
 
 void QgisDesktopWindow::setupMenu()
@@ -334,6 +362,7 @@ void QgisDesktopWindow::setupMenu()
     projectMenu->addAction(tr("Save Project As..."), this, &QgisDesktopWindow::saveProjectAs);
     projectMenu->addSeparator();
     projectMenu->addAction(QIcon(":/icons/i_ort"), tr("Import Layer..."), this, &QgisDesktopWindow::importLayer);
+    projectMenu->addAction(tr("Browse STAC Catalog..."), this, &QgisDesktopWindow::browseStacCatalog);
     projectMenu->addSeparator();
     projectMenu->addAction(tr("New Layout..."), this, &QgisDesktopWindow::newLayout);
     projectMenu->addSeparator();
@@ -342,6 +371,8 @@ void QgisDesktopWindow::setupMenu()
     // Edit Menu
     QMenu *editMenu = menuBar()->addMenu(tr("&Edit"));
     m_toggleEditingAction = editMenu->addAction(QIcon(":/icons/mActionToggleEditing"), tr("Toggle Editing"), this, &QgisDesktopWindow::toggleEditing);
+    m_toggleEditingAction->setCheckable(true);
+    m_toggleEditingAction->setShortcut(QKeySequence("Ctrl+E"));
     m_saveEditsAction = editMenu->addAction(QIcon(":/icons/mActionSaveEdits"), tr("Save Edits"), this, &QgisDesktopWindow::saveEdits);
     m_saveEditsAction->setEnabled(false);
     editMenu->addSeparator();
@@ -424,7 +455,7 @@ void QgisDesktopWindow::setupMenu()
 
     // Raster Menu
     QMenu *rasterMenu = menuBar()->addMenu(tr("&Raster"));
-    rasterMenu->addAction(QIcon(":/icons/r_ster_calc"), tr("Raster Calculator..."), this, [this](){ openProcessingAlgorithm("raster_calculator"); });
+    rasterMenu->addAction(QIcon(":/icons/r_ster_calc"), tr("Image Enhancement..."), this, &QgisDesktopWindow::openImageEnhancementPanel);
     rasterMenu->addAction(QIcon(":/icons/b_nd_m_th"), tr("Band Math..."), this, &QgisDesktopWindow::openBandMathDialog);
     rasterMenu->addAction(QIcon(":/icons/at_os_corr"), tr("Atmospheric Correction..."), this, &QgisDesktopWindow::openAtmosphericCorrectionDialog);
     rasterMenu->addAction(QIcon(":/icons/veget_tion_index"), tr("Vegetation Index..."), this, &QgisDesktopWindow::openSpectralIndexDialog);
@@ -449,8 +480,15 @@ void QgisDesktopWindow::setupMenu()
     disabledAct->setEnabled(false);
 #endif
     rasterMenu->addSeparator();
-    rasterMenu->addAction(QIcon(":/icons/extr_ct_b_nd"), tr("Extract Band..."), this, [this](){ openProcessingAlgorithm("raster_merge_bands"); });
-    rasterMenu->addAction(QIcon(":/icons/b_nd_co_bo"), tr("Band Composite..."), this, [this](){ openProcessingAlgorithm("raster_merge_bands"); });
+    rasterMenu->addAction(QIcon(":/icons/extr_ct_b_nd"), tr("Extract Band..."), this, [this]() {
+        ExtractBandDialog dlg(this);
+        if (m_mapCanvas && m_mapCanvas->currentLayer()) {
+            if (auto *rl = qobject_cast<QgsRasterLayer *>(m_mapCanvas->currentLayer()))
+                dlg.setRasterLayer(rl);
+        }
+        dlg.exec();
+    });
+    rasterMenu->addAction(QIcon(":/icons/b_nd_co_bo"), tr("Band Composite..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:raster_merge_bands"); });
     rasterMenu->addSeparator();
     auto *enhanceMenu = rasterMenu->addMenu(tr("Enhancement"));
     enhanceMenu->addAction(tr("Contrast Stretch..."), this, &QgisDesktopWindow::openContrastStretchDialog);
@@ -467,22 +505,21 @@ void QgisDesktopWindow::setupMenu()
 
     // Vector Menu
     QMenu *vectorMenu = menuBar()->addMenu(tr("&Vector"));
-    vectorMenu->addAction(QIcon(":/icons/buffer"), tr("Buffer..."), this, [this](){ openProcessingAlgorithm("vector_buffer"); });
-    vectorMenu->addAction(QIcon(":/icons/dissolve"), tr("Dissolve..."), this, [this](){ openProcessingAlgorithm("vector_dissolve"); });
-    vectorMenu->addAction(QIcon(":/icons/merge"), tr("Merge..."), this, [this](){ openProcessingAlgorithm("vector_merge"); });
-    vectorMenu->addAction(QIcon(":/icons/cli_"), tr("Clip..."), this, [this](){ openProcessingAlgorithm("vector_clip"); });
+    vectorMenu->addAction(QIcon(":/icons/buffer"), tr("Buffer..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_buffer"); });
+    vectorMenu->addAction(QIcon(":/icons/dissolve"), tr("Dissolve..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_dissolve"); });
+    vectorMenu->addAction(QIcon(":/icons/merge"), tr("Merge..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_merge"); });
+    vectorMenu->addAction(QIcon(":/icons/cli_"), tr("Clip..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_clip"); });
     vectorMenu->addSeparator();
-    vectorMenu->addAction(tr("Difference..."), this, [this](){ openProcessingAlgorithm("vector_difference"); });
-    vectorMenu->addAction(tr("Symmetrical Difference..."), this, [this](){ openProcessingAlgorithm("vector_symmetrical_difference"); });
-    vectorMenu->addAction(tr("Intersection..."), this, [this](){ openProcessingAlgorithm("native_intersection"); });
-    vectorMenu->addAction(tr("Union..."), this, [this](){ openProcessingAlgorithm("native_union"); });
+    vectorMenu->addAction(tr("Difference..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:native_difference"); });
+    vectorMenu->addAction(tr("Intersection..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:native_intersection"); });
+    vectorMenu->addAction(tr("Union..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:native_union"); });
     vectorMenu->addSeparator();
-    vectorMenu->addAction(tr("Select by Location..."), this, [this](){ openProcessingAlgorithm("vector_select_by_location"); });
-    vectorMenu->addAction(tr("Extract by Location..."), this, [this](){ openProcessingAlgorithm("vector_extract_by_location"); });
-    vectorMenu->addAction(tr("Reproject..."), this, [this](){ openProcessingAlgorithm("vector_reproject"); });
-    vectorMenu->addAction(tr("Field Calculator..."), this, [this](){ openProcessingAlgorithm("vector_field_calculator"); });
-    vectorMenu->addAction(tr("Nearest Neighbor..."), this, [this](){ openProcessingAlgorithm("vector_nearest_neighbor"); });
-    vectorMenu->addAction(tr("Distance Matrix..."), this, [this](){ openProcessingAlgorithm("vector_distance_matrix"); });
+    vectorMenu->addAction(tr("Select by Location..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_select_by_location"); });
+    vectorMenu->addAction(tr("Extract by Location..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_extract_by_location"); });
+    vectorMenu->addAction(tr("Reproject..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_reproject"); });
+    vectorMenu->addAction(tr("Field Calculator..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_field_calculator"); });
+    vectorMenu->addAction(tr("Nearest Neighbor..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_nearest_neighbor"); });
+    vectorMenu->addAction(tr("Distance Matrix..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_distance_matrix"); });
 
     // Settings Menu
     QMenu *settingsMenu = menuBar()->addMenu(tr("&Settings"));
@@ -550,7 +587,7 @@ void QgisDesktopWindow::setupToolbars()
     rsToolBar->setToolButtonStyle(Qt::ToolButtonIconOnly);
 
     rsToolBar->addAction(QIcon(":/icons/veget_tion_index"), tr("Vegetation Index"), this, &QgisDesktopWindow::openSpectralIndexDialog)->setToolTip(tr("Vegetation Index (NDVI, EVI, etc.)"));
-    rsToolBar->addAction(QIcon(":/icons/b_nd_co_bo"), tr("Band Composition"), this, [this](){ openProcessingAlgorithm("raster_merge_bands"); })->setToolTip(tr("Band Composition"));
+    rsToolBar->addAction(QIcon(":/icons/b_nd_co_bo"), tr("Band Composition"), this, [this](){ openProcessingAlgorithm("qgis_algorithms:raster_merge_bands"); })->setToolTip(tr("Band Composition"));
     rsToolBar->addAction(QIcon(":/icons/at_os_corr"), tr("Atmospheric Correction"), this, &QgisDesktopWindow::openAtmosphericCorrectionDialog)->setToolTip(tr("Atmospheric Correction (DOS1/DOS2)"));
     rsToolBar->addAction(QIcon(":/icons/mos_ic"), tr("Mosaic"), this, &QgisDesktopWindow::openMosaicDialog)->setToolTip(tr("Mosaic / Stitching"));
     rsToolBar->addSeparator();
@@ -561,12 +598,10 @@ void QgisDesktopWindow::setupToolbars()
     digitizeToolBar->setIconSize(QSize(24, 24));
     digitizeToolBar->setToolButtonStyle(Qt::ToolButtonIconOnly);
 
-    m_toggleEditingAction = digitizeToolBar->addAction(QIcon(":/icons/mActionToggleEditing"), tr("Toggle Editing"), this, &QgisDesktopWindow::toggleEditing);
     m_toggleEditingAction->setToolTip(tr("Toggle Editing (Ctrl+E)"));
-    m_toggleEditingAction->setCheckable(true);
-    m_saveEditsAction = digitizeToolBar->addAction(QIcon(":/icons/mActionSaveEdits"), tr("Save Edits"), this, &QgisDesktopWindow::saveEdits);
+    digitizeToolBar->addAction(m_toggleEditingAction);
     m_saveEditsAction->setToolTip(tr("Save Edits"));
-    m_saveEditsAction->setEnabled(false);
+    digitizeToolBar->addAction(m_saveEditsAction);
     digitizeToolBar->addSeparator();
     auto *actSelect = digitizeToolBar->addAction(QIcon(":/icons/mActionSelectRectangle"), tr("Select"), this, &QgisDesktopWindow::selectFeatures);
     actSelect->setToolTip(tr("Select Features"));
@@ -603,7 +638,7 @@ void QgisDesktopWindow::setupToolbars()
                              actAddRing, actFillRing, actDelPart };
     for (QAction *a : m_editingToolActions)
         a->setEnabled(false);
-    rsToolBar->addAction(QIcon(":/icons/r_ster_calc"), tr("Raster Calculator"), this, [this](){ openProcessingAlgorithm("raster_calculator"); })->setToolTip(tr("Raster Calculator"));
+    rsToolBar->addAction(QIcon(":/icons/r_ster_calc"), tr("Raster Calculator"), this, [this](){ openProcessingAlgorithm("qgis_algorithms:raster_calculator"); })->setToolTip(tr("Raster Calculator"));
     rsToolBar->addAction(QIcon(":/icons/su_ervised"), tr("Supervised Classification"), this, &QgisDesktopWindow::openClassificationWindow)->setToolTip(tr("Supervised Classification"));
     rsToolBar->addAction(QIcon(":/icons/b_nd_m_th"), tr("Band Math"), this, &QgisDesktopWindow::openBandMathDialog)->setToolTip(tr("Band Math Expression"));
 }
@@ -642,10 +677,10 @@ void QgisDesktopWindow::setupDockWidgets()
         QString suffix = QFileInfo(fileName).suffix().toLower();
         if (suffix == "tif" || suffix == "tiff" || suffix == "img" ||
             suffix == "jp2" || suffix == "png" || suffix == "jpg" || suffix == "asc")
-            loadRasterLayer(fileName);
+            m_layerManager->loadRasterLayer(fileName);
         else if (suffix == "shp" || suffix == "gpkg" || suffix == "geojson" ||
                  suffix == "kml" || suffix == "gml")
-            loadVectorLayer(fileName);
+            m_layerManager->loadVectorLayer(fileName);
         else
             statusBar()->showMessage(tr("Unsupported file type: %1").arg(suffix), 3000);
     });
@@ -670,8 +705,13 @@ void QgisDesktopWindow::setupDockWidgets()
     searchEdit->setPlaceholderText(tr("Search algorithms..."));
     toolboxLayout->addWidget(searchEdit);
 
-    m_toolboxView = new QgsProcessingToolboxTreeView(toolboxContainer);
-    m_toolboxView->setRegistry(QgsApplication::processingRegistry());
+    m_toolboxView = new QgsProcessingToolboxTreeView( toolboxContainer,
+        QgsApplication::processingRegistry(),
+        QgsGui::processingRecentAlgorithmLog(),
+        QgsGui::processingFavoriteAlgorithmManager() );
+    m_toolboxView->setRegistry( QgsApplication::processingRegistry(),
+        QgsGui::processingRecentAlgorithmLog(),
+        QgsGui::processingFavoriteAlgorithmManager() );
     toolboxLayout->addWidget(m_toolboxView);
 
     m_processingDock->setWidget(toolboxContainer);
@@ -681,12 +721,12 @@ void QgisDesktopWindow::setupDockWidgets()
     connect(searchEdit, &QgsFilterLineEdit::textChanged,
             m_toolboxView, &QgsProcessingToolboxTreeView::setFilterString);
 
-    // Python Console (disabled — Python runtime removed)
-    // QgsDockWidget *pythonDock = new QgsDockWidget("Python Console", this);
-    // pythonDock->setObjectName("pythonDock");
-    // auto *pythonConsole = new PythonConsoleWidget(pythonDock);
-    // pythonDock->setWidget(pythonConsole);
-    // addDockWidget(Qt::BottomDockWidgetArea, pythonDock);
+    // Python Console (lazy-loaded on first use)
+    m_pythonDock = new QgsDockWidget(tr("Python Console"), this);
+    m_pythonDock->setObjectName("pythonDock");
+    m_pythonDock->setWidget(new QWidget(m_pythonDock)); // Placeholder
+    addDockWidget(Qt::BottomDockWidgetArea, m_pythonDock);
+    m_pythonDock->hide(); // Hidden until first use
 
     // Double-click on algorithm in toolbox opens execution dialog
     connect(m_toolboxView, &QgsProcessingToolboxTreeView::doubleClicked, this, [this](const QModelIndex &index) {
@@ -697,11 +737,55 @@ void QgisDesktopWindow::setupDockWidgets()
         openProcessingAlgorithm(alg->id());
     });
 
+    // Right-click context menu for favorites
+    m_toolboxView->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_toolboxView, &QgsProcessingToolboxTreeView::customContextMenuRequested, this,
+        [this](const QPoint &pos) {
+            QModelIndex index = m_toolboxView->indexAt(pos);
+            const QgsProcessingAlgorithm *alg = m_toolboxView->algorithmForIndex(index);
+            if (!alg)
+                return;
+
+            QMenu menu(this);
+            QString algId = alg->id();
+
+            // Check if already in favorites
+            bool isFav = QgsGui::processingFavoriteAlgorithmManager()->isFavorite(algId);
+            if (isFav) {
+                QAction *removeFav = menu.addAction(tr("Remove from Favorites"));
+                connect(removeFav, &QAction::triggered, this, [this, algId]() {
+                    QgsGui::processingFavoriteAlgorithmManager()->remove(algId);
+                    m_toolboxView->setRegistry(QgsApplication::processingRegistry(),
+                        QgsGui::processingRecentAlgorithmLog(),
+                        QgsGui::processingFavoriteAlgorithmManager());
+                });
+            } else {
+                QAction *addFav = menu.addAction(tr("Add to Favorites"));
+                connect(addFav, &QAction::triggered, this, [this, algId]() {
+                    QgsGui::processingFavoriteAlgorithmManager()->add(algId);
+                    m_toolboxView->setRegistry(QgsApplication::processingRegistry(),
+                        QgsGui::processingRecentAlgorithmLog(),
+                        QgsGui::processingFavoriteAlgorithmManager());
+                });
+            }
+
+            // Open algorithm action
+            QAction *openAlg = menu.addAction(tr("Open Algorithm"));
+            connect(openAlg, &QAction::triggered, this, [this, algId]() {
+                openProcessingAlgorithm(algId);
+            });
+
+            menu.exec(m_toolboxView->viewport()->mapToGlobal(pos));
+        });
+
+
     // Overview Panel (Right, tabified with Processing Toolbox)
-    // Widget is set later in setupMapCanvas() once m_mapCanvas exists
     m_overviewDock = new QgsDockWidget("Overview", this);
     m_overviewDock->setObjectName("overviewDock");
     m_overviewDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_overviewCanvas = new QgsMapOverviewCanvas(m_overviewDock, m_mapCanvas);
+    m_overviewCanvas->enableAntiAliasing(true);
+    m_overviewDock->setWidget(m_overviewCanvas);
     addDockWidget(Qt::RightDockWidgetArea, m_overviewDock);
     tabifyDockWidget(m_processingDock, m_overviewDock);
     m_processingDock->raise();
@@ -754,6 +838,22 @@ void QgisDesktopWindow::setupDockWidgets()
         m_windowMenu->addAction(m_logDock->toggleViewAction());
         m_windowMenu->addAction(m_workflowDock->toggleViewAction());
         m_windowMenu->addSeparator();
+
+        // Python Console (lazy-loaded)
+        QAction *pythonAction = m_windowMenu->addAction(tr("Python Console"));
+        pythonAction->setCheckable(true);
+        connect(pythonAction, &QAction::triggered, this, [this]() {
+            if (!m_pythonConsole) {
+                statusBar()->showMessage(tr("Initializing Python..."));
+                m_pythonConsole = std::make_unique<SicnuPythonConsole>(m_pythonDock);
+                m_pythonDock->setWidget(m_pythonConsole.get());
+                statusBar()->showMessage(tr("Python ready"), 3000);
+            }
+            m_pythonDock->show();
+            m_pythonDock->raise();
+        });
+
+        m_windowMenu->addSeparator();
         QAction *resetLayoutAction = m_windowMenu->addAction(tr("Reset Layout"));
         connect(resetLayoutAction, &QAction::triggered, this, &QgisDesktopWindow::resetPanelLayout);
     }
@@ -766,9 +866,9 @@ void QgisDesktopWindow::setupStatusBar()
     bar->setFixedHeight(22);
 
     // Ready status (left side)
-    QLabel *readyLabel = new QLabel("Ready", bar);
-    readyLabel->setObjectName("rsSegOk");
-    bar->addWidget(readyLabel);
+    m_readyLabel = new QLabel("Ready", bar);
+    m_readyLabel->setObjectName("rsReadyLabel");
+    bar->addWidget(m_readyLabel);
 
     // Coordinates display
     m_coordinatesLabel = new QLabel("0.000000, 0.000000", bar);
@@ -807,6 +907,24 @@ void QgisDesktopWindow::setupConnections()
             this, &QgisDesktopWindow::updateExtents);
     connect(m_mapCanvas, &QgsMapCanvas::renderComplete,
             this, &QgisDesktopWindow::onRenderComplete);
+    m_renderTimer.start();
+
+    // Task manager — update ready status when tasks start/end
+    connect(QgsApplication::taskManager(), &QgsTaskManager::statusChanged,
+            this, [this](long taskId, int status) {
+        Q_UNUSED(taskId);
+        Q_UNUSED(status);
+        if (m_readyLabel) {
+            int activeCount = QgsApplication::taskManager()->countActiveTasks();
+            if (activeCount > 0) {
+                m_readyLabel->setText(tr("Processing (%1 tasks)...").arg(activeCount));
+                m_readyLabel->setStyleSheet("color: #e67e22; font-weight: bold;");
+            } else {
+                m_readyLabel->setText(tr("Ready"));
+                m_readyLabel->setStyleSheet("");
+            }
+        }
+    });
 
     // Identify tool results
     connect(m_identifyTool, &CustomIdentifyTool::identifyCompleted,
@@ -821,48 +939,19 @@ void QgisDesktopWindow::setupConnections()
 
 void QgisDesktopWindow::initLayerTree()
 {
-    QgsProject *project = QgsProject::instance();
-    QgsLayerTree *root = project->layerTreeRoot();
+    // Delegate layer tree model + bridge setup to LayerManager
+    m_layerManager->initLayerTree();
+    m_layerTreeModel = m_layerManager->layerTreeModel();
 
-    // Create layer tree model with QGIS-compatible flags
-    m_layerTreeModel = new QgsLayerTreeModel(root, this);
-
-    // Display flags (matching QGIS defaults)
-    m_layerTreeModel->setFlag(QgsLayerTreeModel::ShowLegend);
-    m_layerTreeModel->setFlag(QgsLayerTreeModel::ShowLegendAsTree);
-    m_layerTreeModel->setFlag(QgsLayerTreeModel::UseEmbeddedWidgets);
-    m_layerTreeModel->setFlag(QgsLayerTreeModel::UseTextFormatting);
-
-    // Behavioral flags (matching QGIS defaults)
-    m_layerTreeModel->setFlag(QgsLayerTreeModel::AllowNodeReorder);
-    m_layerTreeModel->setFlag(QgsLayerTreeModel::AllowNodeRename);
-    m_layerTreeModel->setFlag(QgsLayerTreeModel::AllowNodeChangeVisibility);
-    m_layerTreeModel->setFlag(QgsLayerTreeModel::AllowLegendChangeState);
-    m_layerTreeModel->setFlag(QgsLayerTreeModel::ActionHierarchical);
-
-    m_layerTreeView->setLayerTreeModel(m_layerTreeModel);
-    m_layerTreeView->setModel(m_layerTreeModel);
-
-    // Expand all nodes by default (QGIS behavior)
-    m_layerTreeView->expandAll();
-
-    // Connect layer tree signals
+    // Connect layer tree signals (UI events remain in the window)
     connect(m_layerTreeView, &QgsLayerTreeView::clicked,
             this, &QgisDesktopWindow::onLayerTreeClicked);
     connect(m_layerTreeView, &QgsLayerTreeView::doubleClicked,
             this, &QgisDesktopWindow::onLayerTreeDoubleClicked);
 
     // Connect project signals for CRS updates
-    connect(project, &QgsProject::crsChanged,
+    connect(QgsProject::instance(), &QgsProject::crsChanged,
             this, &QgisDesktopWindow::updateCrsDisplay);
-
-    // Bridge: automatic layer tree → canvas synchronization
-    m_layerTreeBridge = new QgsLayerTreeMapCanvasBridge(root, m_mapCanvas, this);
-    connect(m_layerTreeBridge, &QgsLayerTreeMapCanvasBridge::canvasLayersChanged,
-            this, [this]() {
-                if (m_overviewCanvas)
-                    m_overviewCanvas->setLayers(m_mapCanvas->layers());
-            });
 
     // Set up native QGIS context menu for layer tree
     m_layerTreeMenuProvider = new LayerTreeMenuProvider(m_layerTreeView, m_mapCanvas, this);
@@ -893,7 +982,6 @@ bool QgisDesktopWindow::checkUnsavedChanges()
                     if (v && v->isEditable() && v->isModified())
                     {
                         v->commitChanges();
-                        v->startEditing();
                     }
                 }
             }
@@ -940,13 +1028,14 @@ void QgisDesktopWindow::newProject()
 
 void QgisDesktopWindow::newLayout()
 {
-    // Create a new print layout
-    QgsPrintLayout *layout = new QgsPrintLayout(QgsProject::instance());
+    // Create a new print layout and register with project layout manager
+    QgsPrintLayout *layout = new QgsPrintLayout( QgsProject::instance() );
     layout->initializeDefaults();
+    QgsProject::instance()->layoutManager()->addLayout( layout );
 
     // Create and show the layout designer
-    auto *designer = new QgsLayoutDesignerDialog(layout, this);
-    designer->window()->setAttribute(Qt::WA_DeleteOnClose);
+    auto *designer = new QgsLayoutDesignerDialog( layout, this );
+    designer->window()->setAttribute( Qt::WA_DeleteOnClose );
     designer->window()->show();
 }
 
@@ -990,7 +1079,30 @@ void QgisDesktopWindow::saveProjectAs()
     }
 }
 
-void QgisDesktopWindow::importLayer() { addRasterLayer(); }
+void QgisDesktopWindow::importLayer()
+{
+    // Support both raster and vector files
+    QString filter = tr( "All supported files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.asc *.shp *.gpkg *.geojson *.kml *.gml);;"
+                         "Raster files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.asc);;"
+                         "Vector files (*.shp *.gpkg *.geojson *.kml *.gml);;"
+                         "All files (*)" );
+    QString path = QFileDialog::getOpenFileName( this, tr( "Import Layer" ), QString(), filter );
+    if ( path.isEmpty() )
+        return;
+
+    QString ext = QFileInfo( path ).suffix().toLower();
+    QStringList rasterExts = { "tif", "tiff", "img", "jp2", "png", "jpg", "asc" };
+    if ( rasterExts.contains( ext ) )
+        loadRasterLayer( path );
+    else
+        loadVectorLayer( path );
+}
+
+void QgisDesktopWindow::browseStacCatalog()
+{
+    StacBrowserDialog dlg(m_mapCanvas, this);
+    dlg.exec();
+}
 
 // ── Edit Actions ──────────────────────────────────────────────────────────
 void QgisDesktopWindow::undo()
@@ -1316,7 +1428,7 @@ void QgisDesktopWindow::addRasterLayer()
         "Raster Files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.jpeg);;All Files (*.*)"
     );
     if (!filePath.isEmpty()) {
-        loadRasterLayer(filePath);
+        m_layerManager->loadRasterLayer(filePath);
     }
 }
 
@@ -1328,35 +1440,25 @@ void QgisDesktopWindow::addVectorLayer()
         "Vector Files (*.shp *.gpkg *.geojson *.kml *.gml);;All Files (*.*)"
     );
     if (!filePath.isEmpty()) {
-        loadVectorLayer(filePath);
+        m_layerManager->loadVectorLayer(filePath);
     }
 }
 
 void QgisDesktopWindow::layerProperties()
 {
-    QList<QgsMapLayer*> selected = selectedLayers();
+    QList<QgsMapLayer*> selected = m_layerManager->selectedLayers();
     if (selected.isEmpty()) {
         QMessageBox::information(this, "Layer Properties", "No layer selected");
         return;
     }
 
     QgsMapLayer *layer = selected.first();
-    showLayerProperties(layer);
+    m_layerManager->showLayerProperties(layer);
 }
 
 void QgisDesktopWindow::removeLayer()
 {
-    QList<QgsMapLayer*> selected = selectedLayers();
-    if (selected.isEmpty()) {
-        statusBar()->showMessage("No layer selected", 2000);
-        return;
-    }
-
-    for (QgsMapLayer *layer : selected) {
-        QgsProject::instance()->removeMapLayer(layer->id());
-    }
-    refreshCanvasLayers();
-    statusBar()->showMessage("Layer removed", 2000);
+    m_layerManager->removeSelectedLayers();
 }
 
 void QgisDesktopWindow::setProjectCrs()
@@ -1381,6 +1483,25 @@ void QgisDesktopWindow::setProjectCrs()
 }
 
 // ── Settings Actions ──────────────────────────────────────────────────────
+void QgisDesktopWindow::applyDarkPalette()
+{
+    QPalette darkPalette;
+    darkPalette.setColor(QPalette::Window, QColor(53, 53, 53));
+    darkPalette.setColor(QPalette::WindowText, Qt::white);
+    darkPalette.setColor(QPalette::Base, QColor(25, 25, 25));
+    darkPalette.setColor(QPalette::AlternateBase, QColor(53, 53, 53));
+    darkPalette.setColor(QPalette::ToolTipBase, Qt::white);
+    darkPalette.setColor(QPalette::ToolTipText, Qt::white);
+    darkPalette.setColor(QPalette::Text, Qt::white);
+    darkPalette.setColor(QPalette::Button, QColor(53, 53, 53));
+    darkPalette.setColor(QPalette::ButtonText, Qt::white);
+    darkPalette.setColor(QPalette::BrightText, Qt::red);
+    darkPalette.setColor(QPalette::Link, QColor(42, 130, 218));
+    darkPalette.setColor(QPalette::Highlight, QColor(42, 130, 218));
+    darkPalette.setColor(QPalette::HighlightedText, Qt::black);
+    qApp->setPalette(darkPalette);
+}
+
 void QgisDesktopWindow::options()
 {
     PreferencesDialog dialog(this);
@@ -1390,23 +1511,8 @@ void QgisDesktopWindow::options()
         QString theme = dialog.theme();
         if (theme == "dark")
         {
-            // Apply dark theme
             qApp->setStyle(QStyleFactory::create("Fusion"));
-            QPalette darkPalette;
-            darkPalette.setColor(QPalette::Window, QColor(53, 53, 53));
-            darkPalette.setColor(QPalette::WindowText, Qt::white);
-            darkPalette.setColor(QPalette::Base, QColor(25, 25, 25));
-            darkPalette.setColor(QPalette::AlternateBase, QColor(53, 53, 53));
-            darkPalette.setColor(QPalette::ToolTipBase, Qt::white);
-            darkPalette.setColor(QPalette::ToolTipText, Qt::white);
-            darkPalette.setColor(QPalette::Text, Qt::white);
-            darkPalette.setColor(QPalette::Button, QColor(53, 53, 53));
-            darkPalette.setColor(QPalette::ButtonText, Qt::white);
-            darkPalette.setColor(QPalette::BrightText, Qt::red);
-            darkPalette.setColor(QPalette::Link, QColor(42, 130, 218));
-            darkPalette.setColor(QPalette::Highlight, QColor(42, 130, 218));
-            darkPalette.setColor(QPalette::HighlightedText, Qt::black);
-            qApp->setPalette(darkPalette);
+            applyDarkPalette();
         }
         else
         {
@@ -1433,19 +1539,45 @@ void QgisDesktopWindow::showProcessingToolbox()
 
 void QgisDesktopWindow::showProcessingHistory()
 {
-    statusBar()->showMessage(tr("Processing History not yet implemented"), 3000);
+    // Create a dialog to show processing history
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Processing History"));
+    dialog.setMinimumSize(600, 400);
+
+    auto *layout = new QVBoxLayout(&dialog);
+
+    // Get history entries from the registry
+    QgsHistoryProviderRegistry *historyReg = QgsGui::historyProviderRegistry();
+    if (!historyReg) {
+        auto *label = new QLabel(tr("History registry not available."), &dialog);
+        layout->addWidget(label);
+        dialog.exec();
+        return;
+    }
+
+    // Create a history widget
+    QgsHistoryWidget *historyWidget = new QgsHistoryWidget(
+        QString(), Qgis::HistoryProviderBackend::LocalProfile, historyReg, QgsHistoryWidgetContext(), &dialog);
+    layout->addWidget(historyWidget);
+
+    // Add close button
+    auto *closeButton = new QPushButton(tr("Close"), &dialog);
+    connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::accept);
+    layout->addWidget(closeButton);
+
+    dialog.exec();
 }
 
 // ── Help Actions ──────────────────────────────────────────────────────────
 void QgisDesktopWindow::helpContents() { QMessageBox::information(this, "Help", "QGIS Help"); }
-void QgisDesktopWindow::checkVersion() { QMessageBox::information(this, "Version", "SICNU GEO RS v1.0"); }
+void QgisDesktopWindow::checkVersion() { QMessageBox::information(this, "Version", "SICNU GEO RS v0.9.2-dev"); }
 void QgisDesktopWindow::about()
 {
     QMessageBox::about(this, "About",
         "SICNU GEO RS\n\n"
         "Professional Remote Sensing Analysis Platform\n"
         "Built with QGIS C++ Libraries\n\n"
-        "Version 1.0\n\n"
+        "Version v0.9.2-dev\n\n"
         "Features:\n"
         "- Raster and vector layer support\n"
         "- QGIS-compatible layer properties\n"
@@ -1539,12 +1671,13 @@ void QgisDesktopWindow::updateCrsDisplay()
 void QgisDesktopWindow::onRenderComplete(QPainter *painter)
 {
     Q_UNUSED(painter);
-    // Use elapsed time since last refresh as approximate render time
+    // Display render time
     if (m_renderTimeLabel)
     {
-        // QGIS logs render time internally — just update cache info here
-        m_renderTimeLabel->setText(QString());
+        qint64 elapsed = m_renderTimer.elapsed();
+        m_renderTimeLabel->setText(tr("Render: %1 ms").arg(elapsed));
     }
+    m_renderTimer.start(); // Restart for next render
 
     // Update cache label with approximate memory usage from loaded raster layers
     if (m_cacheLabel)
@@ -1644,134 +1777,38 @@ void QgisDesktopWindow::onLayerTreeDoubleClicked(const QModelIndex &index)
 
 QgsLayerTreeGroup *QgisDesktopWindow::findOrCreateGroup(const QString &name)
 {
-    QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
-    QgsLayerTreeGroup *group = root->findGroup(name);
-    if (!group) {
-        group = root->addGroup(name);
-    }
-    return group;
+    return m_layerManager->findOrCreateGroup(name);
 }
 
-// ── Layer Loading ─────────────────────────────────────────────────────────
+// ── Layer Loading (delegated to LayerManager) ─────────────────────────────
 void QgisDesktopWindow::loadRasterLayer(const QString &filePath)
 {
-    QFileInfo fi(filePath);
-    QString name = fi.fileName();
-
-    QgsRasterLayer *layer = new QgsRasterLayer(filePath, name, "gdal");
-
-    if (!layer->isValid()) {
-        QMessageBox::warning(this, "Load Layer",
-            QString("Failed to load raster layer:\n%1\n\nError: %2")
-                .arg(filePath, layer->error().message()));
-        delete layer;
-        return;
-    }
-
-    QgsProject::instance()->addMapLayer(layer, /*addToLegend=*/false);
-
-    QgsLayerTreeGroup *group = findOrCreateGroup("Raster Layers");
-    group->addLayer(layer);
-
-    // Only zoom to new layer if canvas has no other visible layers
-    if (m_mapCanvas->layers().isEmpty())
-        m_mapCanvas->setExtent(layer->extent());
-    refreshCanvasLayers();
-
-    statusBar()->showMessage(QString("Loaded: %1 (%2x%3, %4 bands)")
-        .arg(name)
-        .arg(layer->width())
-        .arg(layer->height())
-        .arg(layer->bandCount()), 3000);
+    m_layerManager->loadRasterLayer(filePath);
 }
 
 void QgisDesktopWindow::loadVectorLayer(const QString &filePath)
 {
-    QFileInfo fi(filePath);
-    QString name = fi.fileName();
-
-    QgsVectorLayer *layer = new QgsVectorLayer(filePath, name, "ogr");
-
-    if (!layer->isValid()) {
-        QMessageBox::warning(this, "Load Layer",
-            QString("Failed to load vector layer:\n%1\n\nError: %2")
-                .arg(filePath, layer->error().message()));
-        delete layer;
-        return;
-    }
-
-    QgsProject::instance()->addMapLayer(layer, /*addToLegend=*/false);
-
-    QgsLayerTreeGroup *group = findOrCreateGroup("Vector Layers");
-    group->addLayer(layer);
-
-    // Only zoom to new layer if canvas has no other visible layers
-    if (m_mapCanvas->layers().isEmpty())
-        m_mapCanvas->setExtent(layer->extent());
-    refreshCanvasLayers();
-
-    statusBar()->showMessage(QString("Loaded: %1 (%2 features)")
-        .arg(name)
-        .arg(layer->featureCount()), 3000);
+    m_layerManager->loadVectorLayer(filePath);
 }
 
 void QgisDesktopWindow::showLayerProperties(QgsMapLayer *layer)
 {
-    if (!layer) return;
-
-    if (layer->type() == Qgis::LayerType::Raster) {
-        QgsRasterLayer *rasterLayer = qobject_cast<QgsRasterLayer*>(layer);
-        if (rasterLayer) {
-            QgsRasterLayerProperties dialog(rasterLayer, m_mapCanvas, this);
-            dialog.exec();
-            m_mapCanvas->refresh();
-        }
-    } else if (layer->type() == Qgis::LayerType::Vector) {
-        QgsVectorLayer *vectorLayer = qobject_cast<QgsVectorLayer*>(layer);
-        if (vectorLayer) {
-            QgsVectorLayerProperties dialog(m_mapCanvas, nullptr, vectorLayer, this);
-            dialog.exec();
-            m_mapCanvas->refresh();
-        }
-    }
+    m_layerManager->showLayerProperties(layer);
 }
 
 void QgisDesktopWindow::refreshCanvasLayers()
 {
-    QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
-    QList<QgsMapLayer*> layers = root->layerOrder();
-    m_mapCanvas->setLayers(layers);
-
-    // Keep overview canvas in sync with the main canvas layers
-    if (m_overviewCanvas)
-    {
-        m_overviewCanvas->setLayers(layers);
-    }
+    m_layerManager->refreshCanvasLayers();
 }
 
 QgsMapLayer *QgisDesktopWindow::activeLayer()
 {
-    // Priority: canvas current layer → tree selection
-    if (m_mapCanvas && m_mapCanvas->currentLayer())
-        return m_mapCanvas->currentLayer();
-    QList<QgsMapLayer*> layers = selectedLayers();
-    return layers.isEmpty() ? nullptr : layers.first();
+    return m_layerManager->activeLayer();
 }
 
 QList<QgsMapLayer*> QgisDesktopWindow::selectedLayers()
 {
-    QList<QgsMapLayer*> result;
-    QModelIndexList selected = m_layerTreeView->selectionModel()->selectedIndexes();
-    for (const QModelIndex &idx : selected) {
-        QgsLayerTreeNode *node = m_layerTreeView->index2node(idx);
-        if (node && node->nodeType() == QgsLayerTreeNode::NodeLayer) {
-            QgsLayerTreeLayer *layerNode = static_cast<QgsLayerTreeLayer*>(node);
-            if (layerNode->layer()) {
-                result.append(layerNode->layer());
-            }
-        }
-    }
-    return result;
+    return m_layerManager->selectedLayers();
 }
 
 // ── Vector Editing Actions ─────────────────────────────────────────────────
@@ -1789,11 +1826,11 @@ void QgisDesktopWindow::newVectorLayer()
     if (layer->isValid())
     {
         QgsProject::instance()->addMapLayer(layer, /*addToLegend=*/false);
-        QgsLayerTreeGroup *group = findOrCreateGroup("Vector Layers");
+        QgsLayerTreeGroup *group = m_layerManager->findOrCreateGroup("Vector Layers");
         group->addLayer(layer);
         if (m_mapCanvas->layers().isEmpty())
             m_mapCanvas->setExtent(layer->extent());
-        refreshCanvasLayers();
+        m_layerManager->refreshCanvasLayers();
         statusBar()->showMessage(tr("Created new layer: %1").arg(fileName), 5000);
     }
     else

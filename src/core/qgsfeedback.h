@@ -20,6 +20,7 @@
 #include "qgis_sip.h"
 
 #include <QObject>
+#include <atomic>
 
 /**
  * \ingroup core
@@ -153,9 +154,9 @@ class CORE_EXPORT QgsFeedback : public QObject
 
   private:
     //! Whether the operation has been canceled already. False by default.
-    bool mCanceled = false;
+    std::atomic<bool> mCanceled{false};
 
-    double mProgress = 0.0;
+    std::atomic<double> mProgress{0.0};
     unsigned long long mProcessedCount = 0;
 };
 

@@ -1,9 +1,9 @@
-#ifndef ERROR_REPORTER_H
-#define ERROR_REPORTER_H
+#pragma once
 
 #include <QString>
 #include <QList>
 #include <QDateTime>
+#include <QMutex>
 #include <functional>
 
 namespace sicnu {
@@ -36,10 +36,9 @@ public:
     void setErrorCallback(ErrorCallback callback);
 
 private:
+    mutable QMutex m_mutex;
     QList<ProcessingError> m_errors;
     ErrorCallback m_callback;
 };
 
 } // namespace sicnu
-
-#endif // ERROR_REPORTER_H

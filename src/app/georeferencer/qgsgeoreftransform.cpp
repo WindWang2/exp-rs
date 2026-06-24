@@ -46,7 +46,7 @@ void QgsGeorefTransform::setMethod( TransformMethod parametrisation )
 {
   if ( parametrisation != mTransformParametrisation )
   {
-    mGeorefTransformImplementation.reset( QgsGcpTransformerInterface::create( parametrisation ) );
+    mGeorefTransformImplementation = QgsGcpTransformerInterface::create( parametrisation );
     mParametersInitialized = false;
     mTransformParametrisation = parametrisation;
   }
@@ -72,11 +72,11 @@ bool QgsGeorefTransform::parametersInitialized() const
   return mParametersInitialized;
 }
 
-QgsGcpTransformerInterface *QgsGeorefTransform::clone() const
+std::unique_ptr<QgsGcpTransformerInterface> QgsGeorefTransform::clone() const
 {
   auto res = std::make_unique<QgsGeorefTransform>( *this );
   res->updateParametersFromGcps( mSourceCoordinates, mDestinationCoordinates, mInvertYAxis );
-  return res.release();
+  return res;
 }
 
 bool QgsGeorefTransform::updateParametersFromGcps( const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates, bool invertYAxis )

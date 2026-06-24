@@ -1,6 +1,7 @@
 // src/processing/providers/qgis_algorithms/algorithms/raster/raster_resample.cpp
 #include "raster_resample.h"
 
+#include <memory>
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <processing/qgsprocessingcontext.h>
@@ -47,10 +48,9 @@ QVariantMap RasterResampleAlgorithm::processAlgorithm( const QVariantMap &parame
     QgsRasterFileWriter writer( dest );
     writer.setOutputFormat( QStringLiteral( "GTiff" ) );
 
-    QgsRasterPipe *pipe = new QgsRasterPipe();
+    auto pipe = std::make_unique<QgsRasterPipe>();
     if ( !pipe->set( provider->clone() ) )
     {
-        delete pipe;
         throw QgsProcessingException( QObject::tr( "Could not create raster pipe" ) );
     }
 
@@ -58,8 +58,7 @@ QVariantMap RasterResampleAlgorithm::processAlgorithm( const QVariantMap &parame
     projector->setCrs( layer->crs(), layer->crs() );
     pipe->insert( 2, projector );
 
-    Qgis::RasterFileWriterResult err = writer.writeRaster( pipe, newCols, newRows, extent, layer->crs(), context.transformContext() );
-    delete pipe;
+    Qgis::RasterFileWriterResult err = writer.writeRaster( pipe.get(), newCols, newRows, extent, layer->crs(), context.transformContext() );
 
     if ( err != Qgis::RasterFileWriterResult::Success )
         throw QgsProcessingException( QObject::tr( "Error writing resampled raster" ) );

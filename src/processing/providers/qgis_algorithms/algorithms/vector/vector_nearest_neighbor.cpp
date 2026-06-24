@@ -108,7 +108,6 @@ QVariantMap VectorNearestNeighborAlgorithm::processAlgorithm( const QVariantMap 
         }
         else
         {
-            searchRect = refIndex.geometry( refFeat.id() ).boundingBox();
             // Use a very large search area
             searchRect = QgsRectangle( -1e15, -1e15, 1e15, 1e15 );
         }

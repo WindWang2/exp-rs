@@ -8,7 +8,7 @@
 #include <qgsprocessingcontext.h>
 #include <qgsprocessingfeedback.h>
 #include <qgsrasterlayer.h>
-#include <qgsvectordatalayer.h>
+#include <qgsvectorlayer.h>
 #include <processing/qgsprocessingparameters.h>
 
 QVariantMap OtbToolWrapper::processAlgorithm(const QVariantMap &parameters,

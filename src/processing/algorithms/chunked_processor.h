@@ -5,7 +5,7 @@
 #include <functional>
 #include <vector>
 
-class QFeedback;
+class QgsFeedback;
 
 /**
  * Chunked parallel processor for large raster operations.
@@ -48,7 +48,7 @@ public:
      * @return true if all chunks succeeded
      */
     using ChunkCallback = std::function<bool(const Chunk &chunk)>;
-    bool process(const ChunkCallback &callback, QFeedback *feedback = nullptr);
+    bool process(const ChunkCallback &callback, QgsFeedback *feedback = nullptr);
 
 private:
     int m_width;

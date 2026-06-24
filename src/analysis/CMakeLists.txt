@@ -31,3 +31,6 @@ set_target_properties(qgis_analysis PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Phase 10A — Pixel-based classification ROI model + I/O
 add_subdirectory(classification)
+
+# Phase 10B — OBIA segmentation data model + feature extraction
+add_subdirectory(segmentation)

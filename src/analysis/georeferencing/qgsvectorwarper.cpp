@@ -157,8 +157,10 @@ bool QgsVectorWarperTask::run()
     mErrorMessage = warper.error();
     mResult = Result::Error;
   }
-
-  mResult = mFeedback->isCanceled() ? Result::Canceled : Result::Success;
+  else
+  {
+    mResult = mFeedback->isCanceled() ? Result::Canceled : Result::Success;
+  }
   mFeedback.reset();
   return mResult == Result::Success;
 }

@@ -8,6 +8,9 @@ void SimpleProgressCallback::onStart(const QString &taskName, int totalSteps)
     m_totalSteps = totalSteps;
     m_currentStep = 0;
     m_started = true;
+    m_completed = false;
+    m_success = false;
+    m_cancelled = false;
 }
 
 void SimpleProgressCallback::onProgress(int currentStep, const QString &message)

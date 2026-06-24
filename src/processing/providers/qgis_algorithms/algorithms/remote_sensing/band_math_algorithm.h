@@ -27,8 +27,11 @@ public:
 
     QgsProcessingAlgorithm *createInstance() const override { return new BandMathAlgorithm(); }
 
-protected:
+    QString shortHelpString() const override;
+    QVariantMap metadata() const override;
     void initAlgorithm( const QVariantMap &configuration = QVariantMap() ) override;
+
+protected:
     QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context,
                                   QgsProcessingFeedback *feedback ) override;
 };

@@ -12,6 +12,8 @@
 #include "qgsfield.h"
 #include "qgscoordinatereferencesystem.h"
 #include "qgscoordinatetransformcontext.h"
+#include "qgscoordinatetransform.h"
+#include "qgsproject.h"
 #include "qgis.h"
 
 #include <QFile>
@@ -50,8 +52,10 @@ namespace
     root[QStringLiteral( "classes" )] = arr;
 
     QFile f( sidecarPath( shp ) );
-    if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+    if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+      qWarning() << "RsRoiIO: sidecar write failed for" << sidecarPath( shp );
       return false;
+    }
     f.write( QJsonDocument( root ).toJson() );
     return true;
   }
@@ -61,12 +65,16 @@ namespace
     QFile f( sidecarPath( shp ) );
     if ( !f.exists() )
       return true; // missing sidecar is OK; classes stay empty
-    if ( !f.open( QIODevice::ReadOnly ) )
+    if ( !f.open( QIODevice::ReadOnly ) ) {
+      qWarning() << "RsRoiIO: sidecar read failed for" << sidecarPath( shp );
       return false;
+    }
     QJsonParseError err;
     const QJsonDocument doc = QJsonDocument::fromJson( f.readAll(), &err );
-    if ( err.error != QJsonParseError::NoError || !doc.isObject() )
+    if ( err.error != QJsonParseError::NoError || !doc.isObject() ) {
+      qWarning() << "RsRoiIO: sidecar parse error:" << err.errorString();
       return false;
+    }
     const QJsonArray arr = doc.object().value( QStringLiteral( "classes" ) ).toArray();
     for ( const QJsonValue &v : arr )
     {
@@ -81,7 +89,7 @@ namespace
   }
 } // namespace
 
-bool RsRoiIO::save( const QString &shp, const RsRoiCollection &col )
+bool RsRoiIO::save( const QString &shp, const RsRoiCollection &col, const QgsCoordinateReferenceSystem &crs )
 {
   // Field schema — `cls_id` chosen to avoid OGR reserved keyword risk (spec §4.7).
   QgsFields fields;
@@ -92,10 +100,10 @@ bool RsRoiIO::save( const QString &shp, const RsRoiCollection &col )
   opts.driverName = QStringLiteral( "ESRI Shapefile" );
   opts.fileEncoding = QStringLiteral( "UTF-8" );
 
-  const QgsCoordinateReferenceSystem crs( QStringLiteral( "EPSG:4326" ) );
+  const QgsCoordinateReferenceSystem destCrs( QStringLiteral( "EPSG:4326" ) );
 
   QgsVectorFileWriter *writer = QgsVectorFileWriter::create(
-    shp, fields, Qgis::WkbType::Polygon, crs,
+    shp, fields, Qgis::WkbType::Polygon, destCrs,
     QgsCoordinateTransformContext(), opts );
 
   if ( !writer )
@@ -106,11 +114,24 @@ bool RsRoiIO::save( const QString &shp, const RsRoiCollection &col )
     return false;
   }
 
+  QgsCoordinateTransform trans;
+  bool doTransform = false;
+  if ( crs.isValid() && crs != destCrs )
+  {
+    trans = QgsCoordinateTransform( crs, destCrs, QgsProject::instance() );
+    doTransform = true;
+  }
+
   for ( int i = 0; i < col.size(); ++i )
   {
     const RsRoi &roi = col.at( i );
     QgsFeature feat( fields );
-    feat.setGeometry( roi.geometry() );
+    QgsGeometry geom = roi.geometry();
+    if ( doTransform )
+    {
+      geom.transform( trans );
+    }
+    feat.setGeometry( geom );
     feat.setAttribute( QStringLiteral( "cls_id" ), roi.classId() );
     feat.setAttribute( QStringLiteral( "px_count" ),
                        static_cast<qint64>( roi.pixelIndices().size() ) );
@@ -125,7 +146,7 @@ bool RsRoiIO::save( const QString &shp, const RsRoiCollection &col )
   return writeSidecar( shp, col );
 }
 
-bool RsRoiIO::load( const QString &shp, RsRoiCollection &col )
+bool RsRoiIO::load( const QString &shp, RsRoiCollection &col, const QgsCoordinateReferenceSystem &crs )
 {
   if ( !QFile::exists( shp ) )
     return false;
@@ -138,13 +159,27 @@ bool RsRoiIO::load( const QString &shp, RsRoiCollection &col )
   if ( !readSidecar( shp, col ) )
     return false;
 
+  const QgsCoordinateReferenceSystem srcCrs( QStringLiteral( "EPSG:4326" ) );
+  QgsCoordinateTransform trans;
+  bool doTransform = false;
+  if ( crs.isValid() && crs != srcCrs )
+  {
+    trans = QgsCoordinateTransform( srcCrs, crs, QgsProject::instance() );
+    doTransform = true;
+  }
+
   QgsFeature feat;
   QgsFeatureIterator it = layer.getFeatures();
   while ( it.nextFeature( feat ) )
   {
     const int clsId = feat.attribute( QStringLiteral( "cls_id" ) ).toInt();
+    QgsGeometry geom = feat.geometry();
+    if ( doTransform )
+    {
+      geom.transform( trans );
+    }
     // Pixel indices are NOT persisted — caller must recompute against current raster.
-    col.appendRoi( RsRoi( clsId, feat.geometry(), QVector<quint64>() ) );
+    col.appendRoi( RsRoi( clsId, geom, QVector<quint64>() ) );
   }
   return true;
 }

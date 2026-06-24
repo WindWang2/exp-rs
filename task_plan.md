@@ -996,11 +996,11 @@ OTB `add_subdirectory(otb_ref)` 被多个兼容性问题阻塞：
 - Modify: All algorithm .cpp files — add shortHelpString(), rich tags(), parameter descriptions
 
 **Steps:**
-- [ ] Define AgentAlgorithmMeta struct (purpose, useCases, prerequisites, limitations, workflowHints)
-- [ ] Add to processing framework as optional metadata on QgsProcessingAlgorithm
-- [ ] Implement shortHelpString() for all RS algorithms
-- [ ] Add semantic parameter descriptions to all initParameter() calls
-- [ ] Build and verify
+- [x] Define AgentAlgorithmMeta struct (purpose, useCases, prerequisites, limitations, workflowHints)
+- [x] Add to processing framework as optional metadata on QgsProcessingAlgorithm
+- [x] Implement shortHelpString() for all RS algorithms
+- [x] Add semantic parameter descriptions to all initParameter() calls
+- [x] Build and verify
 
 ---
 
@@ -1012,10 +1012,10 @@ OTB `add_subdirectory(otb_ref)` 被多个兼容性问题阻塞：
 - Create: `tests/test_algorithm_schema.cpp`
 
 **Steps:**
-- [ ] Implement toJsonSchema() on QgsProcessingAlgorithm (TDD)
-- [ ] Handle all parameter types (raster, vector, number, string, enum, boolean, band)
-- [ ] Export algorithm catalog as JSON file
-- [ ] Build and verify
+- [x] Implement toJsonSchema() on QgsProcessingAlgorithm (TDD)
+- [x] Handle all parameter types (raster, vector, number, string, enum, boolean, band)
+- [x] Export algorithm catalog as JSON file
+- [x] Build and verify
 
 ---
 
@@ -1037,11 +1037,11 @@ OTB `add_subdirectory(otb_ref)` 被多个兼容性问题阻塞：
 - `list_layers` — returns loaded layers
 
 **Steps:**
-- [ ] Implement MCP server (JSON-RPC over stdio) (TDD)
-- [ ] Implement all 7 MCP tools
-- [ ] Async execution with ProgressCallback integration
-- [ ] Structured result responses (statistics, metadata, not just file paths)
-- [ ] Build and verify
+- [x] Implement MCP server (JSON-RPC over stdio) (TDD)
+- [x] Implement all 7 MCP tools
+- [x] Async execution with ProgressCallback integration
+- [x] Structured result responses (statistics, metadata, not just file paths)
+- [x] Build and verify
 
 ---
 
@@ -1053,11 +1053,11 @@ OTB `add_subdirectory(otb_ref)` 被多个兼容性问题阻塞：
 - Create: `src/app/dialogs/stac_browser_dialog.h/.cpp`
 
 **Steps:**
-- [ ] Implement STAC catalog browser (collections, items, assets)
-- [ ] Implement COG partial-file streaming via GDAL /vsicurl/
-- [ ] Create StacBrowserDialog (search, preview, add to project)
-- [ ] Wire to File > Browse STAC Catalog menu
-- [ ] Build and verify
+- [x] Implement STAC catalog browser (collections, items, assets)
+- [x] Implement COG partial-file streaming via GDAL /vsicurl/
+- [x] Create StacBrowserDialog (search, preview, add to project)
+- [x] Wire to File > Browse STAC Catalog menu
+- [x] Build and verify
 
 ---
 
@@ -1085,23 +1085,28 @@ OTB `add_subdirectory(otb_ref)` 被多个兼容性问题阻塞：
 
 ---
 
-### Task 13.3: Image Comparison Tool
+### Task 13.3: Image Comparison Tool ✅ **COMPLETE (2026-06-12)**
 **Goal:** Swipe/flicker comparison of two raster layers.
 
 **Steps:**
-- [ ] Create ComparisonTool (split-screen or flicker mode)
-- [ ] Wire to View > Compare Layers menu
-- [ ] Build and verify
+- [x] Create ComparisonWidget (split-screen + flicker mode) — 7 tests, 12 assertions
+- [x] Create ComparisonDialog with layer selection
+- [x] Wire to View > Compare Layers menu (Ctrl+Shift+C)
+- [x] Build and verify — 361/362 tests pass
+
+**Status:** Complete. Split-screen with vertical slider + flicker mode with configurable interval.
 
 ---
 
-### Task 13.4: Batch Processing
+### Task 13.4: Batch Processing ✅ **COMPLETE (2026-06-12)**
 **Goal:** Run same algorithm on multiple files.
 
 **Steps:**
-- [ ] Create BatchProcessingDialog (algorithm, input files, output directory)
-- [ ] Wire to Processing > Batch Processing menu
-- [ ] Build and verify
+- [x] Create BatchProcessingDialog (algorithm selector, input files, output directory)
+- [x] Wire to Processing > Batch Processing menu
+- [x] Build and verify — 361/362 tests pass
+
+**Status:** Complete. Algorithm selection from all registered providers, multiple file input, progress tracking.
 
 ---
 

@@ -9,6 +9,9 @@
 
 class QgsRasterLayer;
 
+// Opaque GDAL handle
+typedef void *GDALDatasetH;
+
 /**
  * \brief Spectral profile (pixel value across all bands) widget.
  *
@@ -25,6 +28,7 @@ class SpectralProfileWidget : public QWidget
 
 public:
     explicit SpectralProfileWidget( QWidget *parent = nullptr );
+    ~SpectralProfileWidget() override;
 
     /**
      * Extract the pixel values across all bands at the given map
@@ -50,9 +54,14 @@ private:
     void drawChart( QPainter &painter, const QRect &chartRect );
     void drawAxes( QPainter &painter, const QRect &chartRect );
     void drawLine( QPainter &painter, const QRect &chartRect );
+    void closeDataset();
 
     QgsPointXY m_point;
     QgsRasterLayer *m_rasterLayer = nullptr;
+
+    // Cached GDAL dataset handle — avoids reopening on every click
+    GDALDatasetH m_cachedDataset = nullptr;
+    QString m_cachedSource;
 
     // Per-band data
     QVector<double> m_values;          // pixel value per band

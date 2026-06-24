@@ -54,6 +54,9 @@ class QgsGCPListWidget : public QTableView
     /// Emitted when the user requests deletion of the given rows.
     void deleteRowsRequested( const QList<int> &rows );
 
+  protected:
+    void keyPressEvent( QKeyEvent *event ) override;
+
   private slots:
     void onModelDataChanged( const QModelIndex &topLeft, const QModelIndex &bottomRight, const QList<int> &roles );
 

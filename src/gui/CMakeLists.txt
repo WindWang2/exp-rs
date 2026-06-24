@@ -1979,6 +1979,12 @@ list(APPEND QGIS_GUI_SRCS antigravity_codeeditor_stubs.cpp)
 # ANTIGRAVITY: auto-generated weak stubs for all missing Qgs/Qsci symbols
 # (satisfies dlopen; none are called during P3 canvas/maptool tests)
 list(APPEND QGIS_GUI_SRCS antigravity_qgsgui_stubs.c)
+# LTO causes type-mismatch errors between stubs and MOC-generated implementations.
+# Disable LTO for this one file to avoid conflicts.
+if(ENABLE_LTO)
+  set_source_files_properties(antigravity_qgsgui_stubs.c PROPERTIES
+    COMPILE_OPTIONS "-fno-lto")
+endif()
 
 if(NOT LIBRARY_TYPE EQUAL STATIC)
   win32_version_info("QGIS GUI Library" "qgis_gui" QGIS_GUI_SRCS)
@@ -2153,7 +2159,7 @@ endif()
 
 # We use private headers from core that need this
 target_compile_definitions(qgis_gui PRIVATE "CMAKE_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\"")
-target_compile_definitions(qgis_gui PRIVATE "-DQT_NO_FOREACH")
+target_compile_definitions(qgis_gui PRIVATE "QT_NO_FOREACH")
 
 add_definitions(-DQWT_DLL)
 

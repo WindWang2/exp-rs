@@ -636,15 +636,17 @@ void QgsVectorLayerProperties::syncToLayer()
   mSimplifyDrawingSpinBox->setClearValue( 1.0 );
 
   QgsVectorLayerSelectionProperties *selectionProperties = qobject_cast<QgsVectorLayerSelectionProperties *>( mLayer->selectionProperties() );
-  if ( selectionProperties->selectionColor().isValid() )
+  if ( selectionProperties )
   {
-    mSelectionColorButton->setColor( selectionProperties->selectionColor() );
-  }
-  if ( QgsSymbol *symbol = selectionProperties->selectionSymbol() )
-  {
-    mSelectionSymbolButton->setSymbol( symbol->clone() );
-  }
-  switch ( selectionProperties->selectionRenderingMode() )
+    if ( selectionProperties->selectionColor().isValid() )
+    {
+      mSelectionColorButton->setColor( selectionProperties->selectionColor() );
+    }
+    if ( QgsSymbol *symbol = selectionProperties->selectionSymbol() )
+    {
+      mSelectionSymbolButton->setSymbol( symbol->clone() );
+    }
+    switch ( selectionProperties->selectionRenderingMode() )
   {
     case Qgis::SelectionRenderingMode::Default:
       mRadioDefaultSelectionColor->setChecked( true );
@@ -674,6 +676,7 @@ void QgsVectorLayerProperties::syncToLayer()
       }
       break;
   }
+  } // selectionProperties guard
 
   QString remark = u" (%1)"_s.arg( tr( "Not supported" ) );
   const QgsVectorDataProvider *provider = mLayer->dataProvider();
@@ -868,24 +871,27 @@ void QgsVectorLayerProperties::apply()
   }
 
   QgsVectorLayerSelectionProperties *selectionProperties = qobject_cast<QgsVectorLayerSelectionProperties *>( mLayer->selectionProperties() );
-  if ( mSelectionColorButton->color() != mSelectionColorButton->defaultColor() )
-    selectionProperties->setSelectionColor( mSelectionColorButton->color() );
-  else
-    selectionProperties->setSelectionColor( QColor() );
-  if ( QgsSymbol *symbol = mSelectionSymbolButton->symbol() )
-    selectionProperties->setSelectionSymbol( symbol->clone() );
+  if ( selectionProperties )
+  {
+    if ( mSelectionColorButton->color() != mSelectionColorButton->defaultColor() )
+      selectionProperties->setSelectionColor( mSelectionColorButton->color() );
+    else
+      selectionProperties->setSelectionColor( QColor() );
+    if ( QgsSymbol *symbol = mSelectionSymbolButton->symbol() )
+      selectionProperties->setSelectionSymbol( symbol->clone() );
 
-  if ( mRadioOverrideSelectionSymbol->isChecked() )
-  {
-    selectionProperties->setSelectionRenderingMode( Qgis::SelectionRenderingMode::CustomSymbol );
-  }
-  else if ( mRadioOverrideSelectionColor->isChecked() )
-  {
-    selectionProperties->setSelectionRenderingMode( Qgis::SelectionRenderingMode::CustomColor );
-  }
-  else
-  {
-    selectionProperties->setSelectionRenderingMode( Qgis::SelectionRenderingMode::Default );
+    if ( mRadioOverrideSelectionSymbol->isChecked() )
+    {
+      selectionProperties->setSelectionRenderingMode( Qgis::SelectionRenderingMode::CustomSymbol );
+    }
+    else if ( mRadioOverrideSelectionColor->isChecked() )
+    {
+      selectionProperties->setSelectionRenderingMode( Qgis::SelectionRenderingMode::CustomColor );
+    }
+    else
+    {
+      selectionProperties->setSelectionRenderingMode( Qgis::SelectionRenderingMode::Default );
+    }
   }
 
   mRefreshSettingsWidget->saveToLayer();

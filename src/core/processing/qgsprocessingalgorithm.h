@@ -230,6 +230,17 @@ class QgsPointCloudLayer;
     virtual Qgis::ProcessingAlgorithmFlags flags() const SIP_HOLDGIL;
 
     /**
+     * Returns a dictionary of metadata for the algorithm.
+     * This can be used to store agent-readable metadata or other custom key-value pairs.
+     */
+    virtual QVariantMap metadata() const { return QVariantMap(); }
+
+    /**
+     * Returns a JSON schema representation of the algorithm parameters.
+     */
+    virtual QVariantMap toJsonSchema() const;
+
+    /**
      * Returns TRUE if the algorithm can execute. Algorithm subclasses can return FALSE
      * here to indicate that they are not able to execute, e.g. as a result of unmet
      * external dependencies. If specified, the \a errorMessage argument will be filled

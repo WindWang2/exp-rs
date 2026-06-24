@@ -11,6 +11,7 @@
 #include <QApplication>
 #include <QTimer>
 #include <QFileInfo>
+#include <QPointer>
 #include <QFile>
 #include <QFontDatabase>
 #include <QSettings>
@@ -26,6 +27,8 @@
 #include <qgslayertree.h>
 #include <qgslayertreegroup.h>
 #include <qgsstyle.h>
+#include <qgsvectorlayer.h>
+#include <qgsvectordataprovider.h>
 #include <processing/qgsprocessingregistry.h>
 
 // QgsGui singleton
@@ -34,11 +37,13 @@
 // App includes
 #include "app/app_paths.h"
 #include "app/main_window.h"
+#include "agent/mcp_server.h"
 
 // Processing providers
 #include "processing/providers/gdal_tools/provider.h"
 #include "processing/providers/otb_tools/provider.h"
 #include "processing/providers/qgis_algorithms/provider.h"
+#include "processing/providers/generic_cli/provider.h"
 
 // Python embedding (disabled — Python runtime removed, pybind11 console deferred)
 // #include "python/qgis_python.h"
@@ -65,9 +70,17 @@ int main(int argc, char *argv[])
     qInstallMessageHandler(messageHandler);
     qDebug() << "Starting SICNU GEO RS...";
 
+    bool mcpMode = false;
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--mcp") == 0) {
+            mcpMode = true;
+            break;
+        }
+    }
+
     // Create QGIS application (inherits QApplication, handles all Qt + QGIS init)
     // Heap-allocated to avoid destructor crash during DSO cleanup
-    QgsApplication *app = new QgsApplication(argc, argv, true);
+    QgsApplication *app = new QgsApplication(argc, argv, !mcpMode);
     app->setApplicationName("SICNU GEO RS");
     app->setApplicationVersion("1.0");
     app->setOrganizationName("SICNU");
@@ -91,22 +104,26 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Register processing algorithms (sicnu_native merged into qgis_algorithms)
+    // Register processing providers
+    QgsApplication::processingRegistry()->addProvider(new GdalToolsProvider());
+    QgsApplication::processingRegistry()->addProvider(new OtbToolsProvider());
+    QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
+    QgsApplication::processingRegistry()->addProvider(new GenericCliProvider());
+    qDebug() << "Processing providers registered";
 
-    // Python embedding disabled — Python runtime removed
-    // QgisPython::instance().initialize();
-    // QgisPython::instance().loadBindings();
+    if (mcpMode) {
+        std::cerr << "Initializing MCP Mode..." << std::endl;
+        McpServer server;
+        server.start(app);
+        int result = app->exec();
+        delete app;
+        return result;
+    }
 
     // Initialize QgsGui singleton (required for QGIS dialogs)
     qDebug() << "Initializing QgsGui...";
     QgsGui::instance();
     qDebug() << "QgsGui initialized";
-
-    // Register processing providers
-    QgsApplication::processingRegistry()->addProvider(new GdalToolsProvider());
-    QgsApplication::processingRegistry()->addProvider(new OtbToolsProvider());
-    QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
-    qDebug() << "Processing providers registered";
 
     // Log-to-file support
     QSettings appSettings;
@@ -166,7 +183,9 @@ int main(int argc, char *argv[])
     // Auto-load sample data if available
     QString samplePath = AppPaths::resolveDataPath("data/sample_crops.tif");
     if (QFileInfo::exists(samplePath)) {
-        QTimer::singleShot(500, [&window, samplePath]() {
+        QPointer<QgisDesktopWindow> safeWindow(&window);
+        QTimer::singleShot(500, [safeWindow, samplePath]() {
+            if (!safeWindow) return;
             auto *layer = new QgsRasterLayer(samplePath, "sample_crops");
             if (layer->isValid()) {
                 QgsProject::instance()->addMapLayer(layer);
@@ -174,9 +193,11 @@ int main(int argc, char *argv[])
                 QgsLayerTreeGroup *group = root->findGroup("Raster Layers");
                 if (!group) group = root->addGroup("Raster Layers");
                 group->addLayer(layer);
-                window.mapCanvas()->setExtent(layer->extent());
-                window.mapCanvas()->setLayers(root->layerOrder());
-                window.mapCanvas()->refresh();
+                safeWindow->mapCanvas()->setExtent(layer->extent());
+                safeWindow->mapCanvas()->setLayers(root->layerOrder());
+                safeWindow->mapCanvas()->refresh();
+            } else {
+                delete layer;
             }
         });
     }

@@ -71,7 +71,7 @@ class QGIS_ANALYSIS_EXPORT QgsRpcGcpTransformer : public QgsGcpTransformerInterf
     double zOffset() const { return mZOffset; }
     bool useGcpRefinement() const { return mUseGcpRefinement; }
 
-    QgsGcpTransformerInterface *clone() const override;
+    std::unique_ptr<QgsGcpTransformerInterface> clone() const override;
     TransformMethod method() const override { return TransformMethod::RpcPhysical; }
 
     bool updateParametersFromGcps( const QVector<QgsPointXY> &source,

@@ -1,5 +1,6 @@
 // rs_segment_map.cpp — Phase 10B Task 10B.1
 #include "rs_segment_map.h"
+#include "sicnu_logging.h"
 
 #include <gdal.h>
 #include <cpl_error.h>
@@ -15,9 +16,14 @@ RsSegmentMap::RsSegmentMap( QVector<quint32> labels, int width, int height )
 
 RsSegmentMap RsSegmentMap::fromGeoTIFF( const QString &path )
 {
+    SICNU_LOG_INFO( SicnuLogTags::Segmentation, QString( "Loading segment map from: %1" ).arg( path ) );
+
     GDALDatasetH ds = GDALOpen( path.toUtf8().constData(), GA_ReadOnly );
     if ( !ds )
+    {
+        SICNU_LOG_ERROR( SicnuLogTags::Segmentation, QString( "Failed to open segment raster: %1" ).arg( path ) );
         return {};
+    }
 
     int w = GDALGetRasterXSize( ds );
     int h = GDALGetRasterYSize( ds );
@@ -30,17 +36,21 @@ RsSegmentMap RsSegmentMap::fromGeoTIFF( const QString &path )
     }
 
     // ISSUE 4 fix: Read as Float32 and convert, handling all numeric raster types
-    QVector<float> floatBuf( w * h );
+    QVector<float> floatBuf( static_cast<size_t>(w) * static_cast<size_t>(h) );
     CPLErr err = GDALRasterIO( band, GF_Read, 0, 0, w, h,
                                floatBuf.data(), w, h, GDT_Float32, 0, 0 );
     GDALClose( ds );
 
     if ( err != CE_None )
+    {
+        SICNU_LOG_ERROR( SicnuLogTags::Segmentation, "GDALRasterIO failed for segment map" );
         return {};
+    }
 
     // Convert float to uint32, clamping negative values to 0
-    QVector<quint32> labels( w * h );
-    for ( int i = 0; i < w * h; ++i )
+    const size_t nPx = static_cast<size_t>(w) * static_cast<size_t>(h);
+    QVector<quint32> labels( nPx );
+    for ( size_t i = 0; i < nPx; ++i )
     {
         float v = floatBuf[i];
         if ( std::isnan( v ) || v < 0 )
@@ -49,6 +59,7 @@ RsSegmentMap RsSegmentMap::fromGeoTIFF( const QString &path )
             labels[i] = static_cast<quint32>( v + 0.5f ); // round to nearest
     }
 
+    SICNU_LOG_SUCCESS( SicnuLogTags::Segmentation, QString( "Loaded segment map: %1x%2" ).arg( w ).arg( h ) );
     return RsSegmentMap( std::move( labels ), w, h );
 }
 

@@ -1,5 +1,6 @@
 #include "rs_sift_matcher.h"
 
+#include "core/sicnu_logging.h"
 #include <QFileInfo>
 
 #include "qgsfeedback.h"
@@ -15,6 +16,8 @@
 #include <opencv2/calib3d.hpp>
 #endif
 
+#include "processing/gdal/gdal_dataset_wrapper.h"
+
 #include <gdal_priv.h>
 
 RsSiftMatcher::RsSiftMatcher( QgsFeedback *fb )
@@ -29,7 +32,7 @@ namespace
 //! Returns scale factor (dstSize / srcSize) and writes the 6-tuple geotransform.
 cv::Mat readGdalGray( const QString &path, int maxSide, double &scaleOut, double gt[6] )
 {
-  GDALAllRegister();
+  ensureGdalInit();
   GDALDataset *ds = static_cast<GDALDataset *>(
     GDALOpen( path.toUtf8().constData(), GA_ReadOnly ) );
   if ( !ds )
@@ -71,6 +74,8 @@ RsSiftMatcher::Result RsSiftMatcher::run( const QString &srcRaster,
                                           const Params &params )
 {
   Result r;
+  SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QString( "SIFT matching started: src=%1 ref=%2" )
+    .arg( QFileInfo( srcRaster ).fileName(), QFileInfo( refRaster ).fileName() ) );
 
   // Fast-fail: missing files. This works without OpenCV so the error path is testable.
   if ( !QFileInfo::exists( srcRaster ) )
@@ -174,6 +179,8 @@ RsSiftMatcher::Result RsSiftMatcher::run( const QString &srcRaster,
   r.inlierRatio = matches.empty()
                     ? 0.0
                     : double( inlierCount ) / double( matches.size() );
+  SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QString( "SIFT matching completed: %1 matches, %2 inliers (%3%)" )
+    .arg( r.totalMatches ).arg( inlierCount ).arg( static_cast<int>( r.inlierRatio * 100 ) ) );
   return r;
 #endif
 }

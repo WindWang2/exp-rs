@@ -1,58 +1,110 @@
 // rs_classifier_kmeans.cpp — Phase 10A Task 10.8.
 
 #include "rs_classifier_kmeans.h"
+#include "sicnu_logging.h"
+
+#include <QDebug>
 
 #include <algorithm>
 #include <limits>
 
 RsClassifierKMeans::RsClassifierKMeans( int k )
-  : mK( k > 0 ? k : 1 )
+  : m_k( k > 0 ? k : 1 )
 {
 }
 
+// K-Means convergence and initialisation parameters.
+// maxIter=100 — sufficient for convergence on typical RS pixel datasets.
+// eps=1.0 — cluster-centre shift tolerance (in pixel-value space with
+//           reflectance scaled to [0,1] or [0,10000], 1.0 is tight enough).
+// attempts=3 — run the algorithm 3 times with different seeds and keep the
+//              best compactness result, balancing quality vs. runtime.
+static constexpr int kKMeansMaxIter   = 100;
+static constexpr double kKMeansEps    = 1.0;
+static constexpr int kKMeansAttempts  = 3;
+
 bool RsClassifierKMeans::fit( const cv::Mat &X, const cv::Mat & /*y*/ )
 {
-  if ( X.empty() || X.rows < mK )
+  if ( X.empty() || X.rows < m_k )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification, QString( "KMeans::fit — insufficient samples: %1 rows, k=%2" )
+        .arg( X.rows ).arg( m_k ) );
     return false;
-  cv::Mat data = X;
-  if ( data.type() != CV_32F )
-    data.convertTo( data, CV_32F );
+  }
 
-  cv::Mat labels;
-  const cv::TermCriteria term( cv::TermCriteria::MAX_ITER + cv::TermCriteria::EPS,
-                               100, 1.0 );
-  cv::kmeans( data, mK, labels, term, 3, cv::KMEANS_PP_CENTERS, mCenters );
-  return !mCenters.empty();
+  SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "KMeans training: %1 samples, %2 features, k=%3" )
+      .arg( X.rows ).arg( X.cols ).arg( m_k ) );
+  try
+  {
+    cv::Mat data = X;
+    if ( data.type() != CV_32F )
+      data.convertTo( data, CV_32F );
+
+    cv::Mat labels;
+    const cv::TermCriteria term( cv::TermCriteria::MAX_ITER + cv::TermCriteria::EPS,
+                                 kKMeansMaxIter, kKMeansEps );
+    cv::kmeans( data, m_k, labels, term, kKMeansAttempts, cv::KMEANS_PP_CENTERS, m_centers );
+    SICNU_LOG_SUCCESS( SicnuLogTags::Classification, "KMeans training complete" );
+    return !m_centers.empty();
+  }
+  catch ( const cv::Exception &e )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification, QString( "KMeans::fit — OpenCV error: %1" ).arg( e.what() ) );
+    m_centers = cv::Mat();
+    return false;
+  }
+  catch ( const std::exception &e )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification, QString( "KMeans::fit — error: %1" ).arg( e.what() ) );
+    m_centers = cv::Mat();
+    return false;
+  }
 }
 
 cv::Mat RsClassifierKMeans::predict( const cv::Mat &X ) const
 {
   cv::Mat out( X.rows, 1, CV_32S );
-  if ( mCenters.empty() )
+  if ( m_centers.empty() || X.empty() )
   {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification, "KMeans::predict — model not trained or empty input" );
     out.setTo( 0 );
     return out;
   }
 
-  cv::Mat data = X;
-  if ( data.type() != CV_32F )
-    data.convertTo( data, CV_32F );
+  SICNU_LOG_DEBUG( SicnuLogTags::Classification, QString( "KMeans predicting %1 samples" ).arg( X.rows ) );
 
-  for ( int i = 0; i < data.rows; ++i )
+  try
   {
-    const cv::Mat sample = data.row( i );
-    double best = std::numeric_limits<double>::max();
-    int bestK = 0;
-    for ( int k = 0; k < mCenters.rows; ++k )
+    cv::Mat data = X;
+    if ( data.type() != CV_32F )
+      data.convertTo( data, CV_32F );
+
+    for ( int i = 0; i < data.rows; ++i )
     {
-      const double d = cv::norm( sample, mCenters.row( k ) );
-      if ( d < best )
+      const cv::Mat sample = data.row( i );
+      double best = std::numeric_limits<double>::max();
+      int bestK = 0;
+      for ( int k = 0; k < m_centers.rows; ++k )
       {
-        best = d;
-        bestK = k;
+        const double d = cv::norm( sample, m_centers.row( k ) );
+        if ( d < best )
+        {
+          best = d;
+          bestK = k;
+        }
       }
+      out.at<int>( i, 0 ) = bestK + 1; // 1-based class ID
     }
-    out.at<int>( i, 0 ) = bestK + 1; // 1-based class ID
+  }
+  catch ( const cv::Exception &e )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification, QString( "KMeans::predict — OpenCV error: %1" ).arg( e.what() ) );
+    out = cv::Mat();
+  }
+  catch ( const std::exception &e )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification, QString( "KMeans::predict — error: %1" ).arg( e.what() ) );
+    out = cv::Mat();
   }
   return out;
 }

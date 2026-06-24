@@ -1,4 +1,5 @@
 #include "image_enhancement.h"
+#include "chunked_processor.h"
 #include "core/sicnu_logging.h"
 #include "framework/input_validator.h"
 #include <cmath>

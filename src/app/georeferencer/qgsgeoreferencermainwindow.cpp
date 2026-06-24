@@ -24,6 +24,7 @@
 
 #include <cmath>
 
+#include "core/sicnu_logging.h"
 #include "qgis.h"
 #include "qgisinterface.h"
 #include "qgsapplication.h"
@@ -31,8 +32,6 @@
 #include "qgscoordinatetransformcontext.h"
 #include "qgsgcplist.h"
 #include "qgsgcplistwidget.h"
-#include "qgsgcppoint.h"
-#include "qgsgeorefdatapoint.h"
 #include "qgsgcppoint.h"
 #include "qgsgeorefdatapoint.h"
 #include "qgsgeoreftooladdpoint.h"
@@ -54,6 +53,7 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   : QMainWindow( parent )
   , mIface( iface )
 {
+  SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QStringLiteral( "Georeferencer window opened" ) );
   setWindowTitle( tr( "Georeferencer · 几何校正" ) );
   resize( 1200, 800 );
 
@@ -76,6 +76,8 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   mGcpTable = new QgsGCPListWidget( mGcpDock );
   mGcpTable->setGCPList( mGcps );
   mGcpDock->setWidget( mGcpTable );
+  connect( mGcpTable, &QgsGCPListWidget::deleteRowsRequested,
+           this, &QgsGeoreferencerMainWindow::deleteGcpRows );
 
   addDockWidget( Qt::BottomDockWidgetArea, mGcpDock );
   resizeDocks( { mGcpDock }, { 280 }, Qt::Vertical );
@@ -359,6 +361,12 @@ void QgsGeoreferencerMainWindow::applyTransform()
     return;
   }
 
+  SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QString( "Apply warp: %1 -> %2, %3 GCPs, method %4" )
+    .arg( QFileInfo( mSourceRasterPath ).fileName() )
+    .arg( QFileInfo( mParamsPanel->outputPath() ).fileName() )
+    .arg( enabled )
+    .arg( static_cast<int>( method ) ) );
+
   // Lock UI for the duration of the warp.
   setWarpInProgressForTest( true );
 
@@ -373,6 +381,10 @@ void QgsGeoreferencerMainWindow::applyTransform()
     setWarpInProgressForTest( false );
     if ( task->result().status == QgsImageWarper::WarpStatus::Ok )
     {
+      SICNU_LOG_SUCCESS( SicnuLogTags::Georeferencing, QString( "Warp completed: %1 (%2 bytes, %3 ms)" )
+        .arg( mParamsPanel->outputPath() )
+        .arg( task->result().outputBytes )
+        .arg( task->result().durationMs ) );
       statusBar()->showMessage(
         tr( "已输出: %1 (%2 字节, %3 ms)" )
           .arg( mParamsPanel->outputPath() )
@@ -382,6 +394,7 @@ void QgsGeoreferencerMainWindow::applyTransform()
     }
     else
     {
+      SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, QString( "Warp failed: %1" ).arg( task->result().errorMessage ) );
       statusBar()->showMessage(
         tr( "校正失败: %1" ).arg( task->result().errorMessage ),
         6000 );
@@ -523,8 +536,8 @@ void QgsGeoreferencerMainWindow::setupMenus()
   fileMenu->addAction( tr( "Load reference raster..." ),
                        this, QOverload<>::of( &QgsGeoreferencerMainWindow::loadReferenceRaster ) );
   fileMenu->addSeparator();
-  fileMenu->addAction( tr( "Load .points..." ), this, []() {} );
-  fileMenu->addAction( tr( "Save .points..." ), this, []() {} );
+  fileMenu->addAction( tr( "Load .points..." ), this, &QgsGeoreferencerMainWindow::loadPoints );
+  fileMenu->addAction( tr( "Save .points..." ), this, &QgsGeoreferencerMainWindow::savePoints );
   fileMenu->addSeparator();
   fileMenu->addAction( tr( "Close" ), this, &QWidget::close );
 
@@ -547,9 +560,9 @@ void QgsGeoreferencerMainWindow::setupToolbars()
   // GCP ops — Add GCP gets wired to the map tool in setupCentralWidget().
   mAddPointAction = mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Add GCP" ) );
   mAddPointAction->setObjectName( QStringLiteral( "rsGeorefAddPointAction" ) );
-  mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Delete GCP" ), this, []() {} );
-  mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Load .gcp" ), this, []() {} );
-  mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Export .gcp" ), this, []() {} );
+  mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Delete GCP" ), this, &QgsGeoreferencerMainWindow::deleteSelectedGcp );
+  mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Load .gcp" ), this, &QgsGeoreferencerMainWindow::loadPoints );
+  mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Export .gcp" ), this, &QgsGeoreferencerMainWindow::savePoints );
 
   mModeBar->addSeparator();
   mSyncZoomAction = mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Sync zoom" ) );
@@ -664,6 +677,7 @@ void QgsGeoreferencerMainWindow::showCoordDialog( const QgsPointXY &sourcePixel 
 
   auto *dlg = new QgsMapCoordsDialog( mRefCanvas, tempDataPoint, rasterCrs, this );
   dlg->setAttribute( Qt::WA_DeleteOnClose );
+  tempDataPoint->setParent( dlg );
 
   // The dialog emits pointAdded(src, dst, destCrs) on OK. Persist into the
   // shared QgsGCPList — its changed() signal cascades to the model and the
@@ -671,12 +685,16 @@ void QgsGeoreferencerMainWindow::showCoordDialog( const QgsPointXY &sourcePixel 
   connect( dlg, &QgsMapCoordsDialog::pointAdded, this,
            [this]( const QgsPointXY &srcCoord, const QgsPointXY &dstCoord, const QgsCoordinateReferenceSystem &destCrs ) {
              if ( mGcps )
+             {
                mGcps->appendPoint( QgsGcpPoint( srcCoord, dstCoord, destCrs, true ) );
+               SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QString( "GCP added at src(%1, %2) -> dst(%3, %4)" )
+                 .arg( srcCoord.x(), 0, 'f', 1 ).arg( srcCoord.y(), 0, 'f', 1 )
+                 .arg( dstCoord.x(), 0, 'f', 1 ).arg( dstCoord.y(), 0, 'f', 1 ) );
+             }
            } );
 
-  // Clean up the heap-allocated preview helpers when the dialog closes.
-  connect( dlg, &QDialog::finished, this, [tempGcp, tempDataPoint]( int ) {
-    delete tempDataPoint;
+  // Clean up the heap-allocated preview helpers when the dialog is destroyed.
+  connect( dlg, &QObject::destroyed, this, [tempGcp]() {
     delete tempGcp;
   } );
 
@@ -697,6 +715,7 @@ void QgsGeoreferencerMainWindow::openSourceRaster()
                                     QStringLiteral( "gdal" ) );
   if ( !layer->isValid() )
   {
+    SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, QString( "Failed to open source raster: %1" ).arg( path ) );
     delete layer;
     if ( statusBar() )
       statusBar()->showMessage( tr( "Failed to open raster: %1" ).arg( path ), 5000 );
@@ -705,6 +724,7 @@ void QgsGeoreferencerMainWindow::openSourceRaster()
   if ( mRefStore )
     mRefStore->addMapLayer( layer );
   mSrcRaster = layer;
+  SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QString( "Source raster loaded: %1" ).arg( QFileInfo( path ).fileName() ) );
 
   if ( mSrcCanvas )
   {
@@ -730,9 +750,11 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
                                     QStringLiteral( "gdal" ) );
   if ( !layer->isValid() )
   {
+    SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, QString( "Failed to open reference raster: %1" ).arg( path ) );
     delete layer;
     return false;
   }
+  SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QString( "Reference raster loaded: %1" ).arg( QFileInfo( path ).fileName() ) );
   if ( mRefStore )
     mRefStore->addMapLayer( layer );
   mRefRaster = layer;
@@ -810,3 +832,81 @@ void QgsGeoreferencerMainWindow::closeEvent( QCloseEvent *e )
   // TODO Task 11.4.7: persist QgsSettings, ask about unsaved GCPs.
   e->accept();
 }
+
+void QgsGeoreferencerMainWindow::loadPoints()
+{
+  const QString path = QFileDialog::getOpenFileName(
+    this, tr( "Load GCP points" ), QString(),
+    tr( "GCP Points (*.points *.gcp);;All files (*)" ) );
+  if ( path.isEmpty() )
+    return;
+
+  const QgsCoordinateReferenceSystem destCrs = mParamsPanel ? mParamsPanel->destCrs() : QgsCoordinateReferenceSystem();
+  if ( !mGcps->loadGcps( path, destCrs ) )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, QString( "Failed to load GCP points: %1" ).arg( path ) );
+    QMessageBox::warning( this, tr( "Load GCPs" ), tr( "Failed to load GCP points from %1" ).arg( path ) );
+  }
+  else
+  {
+    SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QString( "Loaded GCP points from %1" ).arg( path ) );
+  }
+}
+
+void QgsGeoreferencerMainWindow::savePoints()
+{
+  const QString path = QFileDialog::getSaveFileName(
+    this, tr( "Save GCP points" ), QString(),
+    tr( "GCP Points (*.points *.gcp);;All files (*)" ) );
+  if ( path.isEmpty() )
+    return;
+
+  QString finalPath = path;
+  if ( QFileInfo( finalPath ).suffix().isEmpty() )
+  {
+    finalPath += QStringLiteral( ".points" );
+  }
+
+  if ( !mGcps->saveGcps( finalPath ) )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, QString( "Failed to save GCP points: %1" ).arg( finalPath ) );
+    QMessageBox::warning( this, tr( "Save GCPs" ), tr( "Failed to save GCP points to %1" ).arg( finalPath ) );
+  }
+  else
+  {
+    SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QString( "Saved GCP points to %1" ).arg( finalPath ) );
+  }
+}
+
+void QgsGeoreferencerMainWindow::deleteSelectedGcp()
+{
+  if ( !mGcpTable )
+    return;
+  QModelIndexList selected = mGcpTable->selectionModel()->selectedRows();
+  if ( selected.isEmpty() )
+  {
+    statusBar()->showMessage( tr( "请先在表格中选择要删除的 GCP" ), 3000 );
+    return;
+  }
+  QList<int> rows;
+  rows.reserve( selected.size() );
+  for ( const QModelIndex &idx : selected )
+  {
+    rows.append( idx.row() );
+  }
+  deleteGcpRows( rows );
+}
+
+void QgsGeoreferencerMainWindow::deleteGcpRows( const QList<int> &rows )
+{
+  if ( !mGcps || rows.isEmpty() )
+    return;
+  QList<int> sortedRows = rows;
+  std::sort( sortedRows.begin(), sortedRows.end(), std::greater<int>() );
+  for ( int row : sortedRows )
+  {
+    if ( row >= 0 && row < mGcps->size() )
+      mGcps->removePointAt( row );
+  }
+}
+

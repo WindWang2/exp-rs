@@ -1,6 +1,8 @@
 #ifndef RS_WARP_TASK_H
 #define RS_WARP_TASK_H
 
+#include <memory>
+
 #include <QString>
 
 #include "qgscoordinatereferencesystem.h"
@@ -23,10 +25,11 @@ class RsWarpTask : public QgsTask
   public:
     RsWarpTask( const QString &in,
                 const QString &out,
-                QgsGeorefTransform *transform,
+                const QgsGeorefTransform *transform,
                 QgsImageWarper::ResamplingMethod r,
                 const QgsCoordinateReferenceSystem &destCrs,
                 double pixelSize );
+    ~RsWarpTask() override;
 
     bool run() override;
     void cancel() override;
@@ -36,7 +39,7 @@ class RsWarpTask : public QgsTask
   private:
     QString mIn;
     QString mOut;
-    QgsGeorefTransform *mTransform = nullptr;
+    std::unique_ptr<QgsGeorefTransform> mTransform;
     QgsImageWarper::ResamplingMethod mResamp;
     QgsCoordinateReferenceSystem mDestCrs;
     double mPixelSize = 0.0;

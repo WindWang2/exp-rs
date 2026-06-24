@@ -1,0 +1,67 @@
+// native_convex_hull.h
+#pragma once
+
+#include <processing/qgsprocessingalgorithm.h>
+#include <processing/qgsprocessingparameters.h>
+#include <processing/qgsprocessingoutputs.h>
+#include <qgsfeature.h>
+#include <qgsfeatureiterator.h>
+#include <qgsgeometry.h>
+#include <qgsfields.h>
+#include <qgsprocessingcontext.h>
+#include <qgsprocessingfeedback.h>
+#include <qgswkbtypes.h>
+
+class QgsConvexHullAlgorithm : public QgsProcessingAlgorithm
+{
+public:
+    QgsConvexHullAlgorithm() = default;
+    QString name() const override { return QStringLiteral( "convexhull" ); }
+    QString displayName() const override { return QObject::tr( "Convex Hull" ); }
+    QString group() const override { return QObject::tr( "Vector geometry" ); }
+    QString groupId() const override { return QStringLiteral( "vectorgeometry" ); }
+    QStringList tags() const override { return { QObject::tr( "convex" ), QObject::tr( "hull" ), QObject::tr( "envelope" ) }; }
+    QgsProcessingAlgorithm *createInstance() const override { return new QgsConvexHullAlgorithm(); }
+
+protected:
+    void initAlgorithm( const QVariantMap & ) override
+    {
+        addParameter( new QgsProcessingParameterFeatureSource( QStringLiteral( "INPUT" ), QObject::tr( "Input layer" ),
+            QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorAnyGeometry ) ) );
+        addParameter( new QgsProcessingParameterFeatureSink( QStringLiteral( "OUTPUT" ), QObject::tr( "Convex Hull" ) ) );
+    }
+
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override
+    {
+        std::unique_ptr<QgsProcessingFeatureSource> source( parameterAsSource( parameters, QStringLiteral( "INPUT" ), context ) );
+        if ( !source )
+            throw QgsProcessingException( invalidSourceError( parameters, QStringLiteral( "INPUT" ) ) );
+
+        QString dest;
+        std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, QStringLiteral( "OUTPUT" ), context, dest,
+            source->fields(), source->wkbType(), source->sourceCrs() ) );
+        if ( !sink )
+            throw QgsProcessingException( invalidSinkError( parameters, QStringLiteral( "OUTPUT" ) ) );
+
+        QgsFeatureIterator it = source->getFeatures();
+        QgsFeature feat;
+        long long total = source->featureCount();
+        long long current = 0;
+
+        while ( it.nextFeature( feat ) )
+        {
+            if ( feedback->isCanceled() ) break;
+            current++;
+            if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
+
+            if ( feat.hasGeometry() )
+            {
+                QgsFeature outputFeat = feat;
+                outputFeat.setGeometry( feat.geometry().convexHull() );
+                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+            }
+        }
+
+        return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
+    }
+};

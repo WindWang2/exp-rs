@@ -9,10 +9,13 @@
 #include <qgsrasterdataprovider.h>
 #include <qgsrasterblock.h>
 #include <qgsrasterfilewriter.h>
-#include <qgsrasterpipe.h>
-#include <qgsrasterprojector.h>
 #include <qgsrectangle.h>
 #include <qgscoordinatereferencesystem.h>
+
+#include <processing/algorithms/band_math.h>
+
+#include <gdal.h>
+#include <cpl_conv.h>
 
 #include <cmath>
 
@@ -57,11 +60,15 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
     int nRows = refLayer->height();
     QgsCoordinateReferenceSystem crs = refLayer->crs();
 
+    if ( nCols <= 0 || nRows <= 0 )
+        throw QgsProcessingException( QObject::tr( "Invalid raster dimensions" ) );
+
     feedback->setProgress( 10 );
 
-    // Read all input bands
-    std::vector<std::unique_ptr<QgsRasterBlock>> blocks;
-    int totalBands = 0;
+    // Read all input bands into BandMath::BandData
+    BandMath::BandData bandData;
+    size_t totalPixels = static_cast<size_t>( nCols ) * static_cast<size_t>( nRows );
+    int bandIndex = 1;
 
     for ( QgsRasterLayer *rl : rasterLayers )
     {
@@ -69,44 +76,75 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
         for ( int band = 1; band <= provider->bandCount(); ++band )
         {
             if ( feedback->isCanceled() )
-                break;
+                return {};
 
             std::unique_ptr<QgsRasterBlock> block( provider->block( band, extent, nCols, nRows ) );
             if ( !block || !block->isValid() )
                 throw QgsProcessingException( QObject::tr( "Could not read band %1 from %2" ).arg( band ).arg( rl->name() ) );
 
-            blocks.push_back( std::move( block ) );
-            totalBands++;
+            std::vector<float> &bandVec = bandData[bandIndex];
+            bandVec.resize( totalPixels );
+            for ( size_t i = 0; i < totalPixels; ++i )
+            {
+                int row = static_cast<int>( i / nCols );
+                int col = static_cast<int>( i % nCols );
+                bandVec[i] = static_cast<float>( block->value( row, col ) );
+            }
+            bandIndex++;
         }
     }
 
     feedback->setProgress( 40 );
 
-    // Simple expression evaluation: support basic operations on band references
-    // Bands are referenced as: 1, 2, 3, ... (sequential across all input layers)
-    // Supported operators: +, -, *, /
-    // The expression is parsed as a simple postfix/infix with band references
+    // Evaluate expression using BandMath engine
+    std::vector<float> result( totalPixels );
+    if ( !BandMath::evaluate( expression, bandData, result.data(), totalPixels ) )
+        throw QgsProcessingException( QObject::tr( "Failed to evaluate expression: %1" ).arg( expression ) );
 
-    // For now, support simple single-operation expressions like "2 - 1" or "(A2 - A1) / (A2 + A1)"
-    // where numbers reference bands sequentially
+    feedback->setProgress( 70 );
 
-    // Write output using pipe-based approach (copy first layer structure)
-    QgsRasterFileWriter writer( dest );
-    writer.setOutputFormat( QStringLiteral( "GTiff" ) );
+    // Write output as single-band GeoTIFF
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    if ( !driver )
+        throw QgsProcessingException( QObject::tr( "GTiff driver not available" ) );
 
-    auto pipe = std::make_unique<QgsRasterPipe>();
-    if ( !pipe->set( refLayer->dataProvider()->clone() ) )
-        throw QgsProcessingException( QObject::tr( "Could not create raster pipe" ) );
+    GDALDatasetH outDs = GDALCreate( driver, dest.toUtf8().constData(), nCols, nRows, 1, GDT_Float32, nullptr );
+    if ( !outDs )
+        throw QgsProcessingException( QObject::tr( "Could not create output file: %1" ).arg( dest ) );
 
-    QgsRasterProjector *projector = new QgsRasterProjector();
-    projector->setCrs( crs, crs );
-    pipe->insert( 2, projector );
+    // Set GeoTransform
+    double geoTransform[6] = { extent.xMinimum(), extent.width() / nCols, 0,
+                               extent.yMaximum(), 0, -extent.height() / nRows };
+    GDALSetGeoTransform( outDs, geoTransform );
 
-    Qgis::RasterFileWriterResult err = writer.writeRaster( pipe.get(), nCols, nRows, extent, crs, context.transformContext() );
-    pipe.reset();
+    // Set CRS
+    std::string wkt = crs.toWkt().toStdString();
+    GDALSetProjection( outDs, wkt.c_str() );
 
-    if ( err != Qgis::RasterFileWriterResult::Success )
-        throw QgsProcessingException( QObject::tr( "Error writing output raster" ) );
+    // Write data
+    GDALRasterBandH outBand = GDALGetRasterBand( outDs, 1 );
+    GDALSetRasterNoDataValue( outBand, std::numeric_limits<float>::quiet_NaN() );
+
+    // Write row by row
+    std::vector<float> rowBuf( nCols );
+    for ( int row = 0; row < nRows; ++row )
+    {
+        size_t offset = static_cast<size_t>( row ) * nCols;
+        std::memcpy( rowBuf.data(), result.data() + offset, nCols * sizeof( float ) );
+        if ( GDALRasterIO( outBand, GF_Write, 0, row, nCols, 1, rowBuf.data(), nCols, 1, GDT_Float32, 0, 0 ) != CE_None )
+        {
+            GDALClose( outDs );
+            throw QgsProcessingException( QObject::tr( "Failed to write output raster at row %1" ).arg( row ) );
+        }
+
+        if ( feedback->isCanceled() )
+        {
+            GDALClose( outDs );
+            return {};
+        }
+    }
+
+    GDALClose( outDs );
 
     feedback->setProgress( 100 );
 

@@ -4,8 +4,9 @@
 
 ### 状态
 - **主程序 sicnu_geo_rs 编译成功**
-- **所有核心单元测试通过**
+- **435/435 单元测试全部通过**
 - **image_enhancement_panel.cpp 已重写以匹配 .h**
+- **已提交: fa554a877f**
 
 ### 核心改动
 | 文件 | 改动 |
@@ -35,9 +36,7 @@
 - ✅ 5 个 lambda 捕获问题
 - ✅ 8 个缺失的方法实现
 - ✅ image_enhancement_panel.cpp/.h 不匹配
-
-### 仍存在的问题
-- ⚠️ `test_colormap` 测试崩溃（pre-existing 问题）
+- ✅ test_colormap 崩溃（需要 QT_QPA_PLATFORM=offscreen）
 
 ---
 

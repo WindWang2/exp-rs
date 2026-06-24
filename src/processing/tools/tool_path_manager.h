@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QString>
+#include <QMutex>
 
 class ToolPathManager
 {
@@ -26,6 +27,7 @@ private:
     QString findInEnv(const QString &envVar, const QString &toolName) const;
     QString findInSystemPath(const QString &toolName) const;
 
+    mutable QMutex m_mutex;
     QString m_customGdalPath;
     QString m_customOtbPath;
 };

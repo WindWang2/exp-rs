@@ -1,5 +1,6 @@
 // rs_simple_segmenter.cpp — Phase 10B Task 10B.3
 #include "rs_simple_segmenter.h"
+#include "sicnu_logging.h"
 
 #include <cmath>
 #include <algorithm>
@@ -16,9 +17,16 @@ RsSegmentMap RsSimpleSegmenter::segment( const float *data, int width, int heigh
                                           float nodata, const Params &params )
 {
     if ( !data || width <= 0 || height <= 0 )
+    {
+        SICNU_LOG_ERROR( SicnuLogTags::Segmentation, QString( "Invalid input: data=%1, width=%2, height=%3" )
+            .arg( data ? "valid" : "null" ).arg( width ).arg( height ) );
         return {};
+    }
 
-    const int n = width * height;
+    SICNU_LOG_INFO( SicnuLogTags::Segmentation, QString( "Starting segmentation: %1x%2, kernel=%3, bins=%4, minRegion=%5" )
+        .arg( width ).arg( height ).arg( params.smoothKernel ).arg( params.quantizeBins ).arg( params.minRegionSize ) );
+
+    const size_t n = static_cast<size_t>(width) * static_cast<size_t>(height);
 
     // 1. Copy data for in-place smoothing
     QVector<float> smoothed( data, data + n );
@@ -31,7 +39,7 @@ RsSegmentMap RsSimpleSegmenter::segment( const float *data, int width, int heigh
 
     // Find nodata bin value
     int nodataBin = -1;
-    for ( int i = 0; i < n; ++i )
+    for ( size_t i = 0; i < n; ++i )
     {
         if ( data[i] == nodata || std::isnan( data[i] ) )
         {
@@ -46,7 +54,10 @@ RsSegmentMap RsSimpleSegmenter::segment( const float *data, int width, int heigh
     // 5. Merge small regions
     mergeSmallRegions( labels, width, height, params.minRegionSize );
 
-    return RsSegmentMap( std::move( labels ), width, height );
+    RsSegmentMap result( std::move( labels ), width, height );
+    SICNU_LOG_SUCCESS( SicnuLogTags::Segmentation, QString( "Segmentation complete: %1 segments found" )
+        .arg( result.segmentCount() ) );
+    return result;
 }
 
 RsSegmentMap RsSimpleSegmenter::segmentMultiBand( const float *const *bandData,
@@ -54,13 +65,19 @@ RsSegmentMap RsSimpleSegmenter::segmentMultiBand( const float *const *bandData,
                                                    float nodata, const Params &params )
 {
     if ( !bandData || nBands <= 0 || width <= 0 || height <= 0 )
+    {
+        SICNU_LOG_ERROR( SicnuLogTags::Segmentation, QString( "segmentMultiBand: invalid input (nBands=%1)" ).arg( nBands ) );
         return {};
+    }
 
-    const int n = width * height;
+    SICNU_LOG_INFO( SicnuLogTags::Segmentation, QString( "Starting multi-band segmentation: %1 bands, %2x%3" )
+        .arg( nBands ).arg( width ).arg( height ) );
+
+    const size_t n = static_cast<size_t>(width) * static_cast<size_t>(height);
 
     // Compute mean across bands
     QVector<float> meanBand( n, 0.0f );
-    for ( int i = 0; i < n; ++i )
+    for ( size_t i = 0; i < n; ++i )
     {
         bool isNodata = false;
         float sum = 0;
@@ -143,12 +160,12 @@ void RsSimpleSegmenter::gaussianSmooth( QVector<float> &data, int w, int h, int 
     }
 }
 
-QVector<int> RsSimpleSegmenter::quantize( const float *data, int n, int bins, float nodata )
+QVector<int> RsSimpleSegmenter::quantize( const float *data, size_t n, int bins, float nodata )
 {
     // Find min/max excluding nodata
     float vmin = std::numeric_limits<float>::max();
     float vmax = std::numeric_limits<float>::lowest();
-    for ( int i = 0; i < n; ++i )
+    for ( size_t i = 0; i < n; ++i )
     {
         if ( data[i] == nodata || std::isnan( data[i] ) )
             continue;
@@ -160,14 +177,14 @@ QVector<int> RsSimpleSegmenter::quantize( const float *data, int n, int bins, fl
     {
         // All same value
         QVector<int> result( n, 0 );
-        for ( int i = 0; i < n; ++i )
+        for ( size_t i = 0; i < n; ++i )
             result[i] = ( data[i] == nodata || std::isnan( data[i] ) ) ? 0 : 1;
         return result;
     }
 
     QVector<int> result( n );
     const float scale = ( bins - 1 ) / ( vmax - vmin );
-    for ( int i = 0; i < n; ++i )
+    for ( size_t i = 0; i < n; ++i )
     {
         if ( data[i] == nodata || std::isnan( data[i] ) )
             result[i] = 0; // nodata bin
@@ -180,7 +197,7 @@ QVector<int> RsSimpleSegmenter::quantize( const float *data, int n, int bins, fl
 QVector<quint32> RsSimpleSegmenter::connectedComponents( const QVector<int> &quantized,
                                                           int w, int h, int nodataBin )
 {
-    const int n = w * h;
+    const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h);
     QVector<quint32> labels( n, 0 );
     quint32 nextLabel = 1;
 
@@ -260,6 +277,9 @@ void RsSimpleSegmenter::mergeSmallRegions( QVector<quint32> &labels, int w, int 
     if ( smallRegions.empty() )
         return;
 
+    SICNU_LOG_DEBUG( SicnuLogTags::Segmentation, QString( "Merging %1 small regions (minSize=%2)" )
+        .arg( smallRegions.size() ).arg( minSize ) );
+
     // HIGH #7 fix: Build adjacency in one image scan, then apply merges in one pass.
     // O(W*H + K*B) where B = boundary pixels per small region.
     const int dr4[] = { -1, 1, 0, 0 };
@@ -268,7 +288,7 @@ void RsSimpleSegmenter::mergeSmallRegions( QVector<quint32> &labels, int w, int 
     // Pass 1: For each small region pixel, count its non-small neighbors
     // regionId -> { neighborId -> boundaryCount }
     std::unordered_map<quint32, std::unordered_map<quint32, int>> adjacency;
-    for ( int i = 0; i < w * h; ++i )
+    for ( size_t i = 0; i < static_cast<size_t>(w) * static_cast<size_t>(h); ++i )
     {
         quint32 segId = labels[i];
         if ( segId == 0 || smallRegions.find( segId ) == smallRegions.end() )
@@ -306,7 +326,7 @@ void RsSimpleSegmenter::mergeSmallRegions( QVector<quint32> &labels, int w, int 
     }
 
     // Apply all merges in a single pass over the full image
-    for ( int i = 0; i < w * h; ++i )
+    for ( size_t i = 0; i < static_cast<size_t>(w) * static_cast<size_t>(h); ++i )
     {
         auto it = mergeMap.find( labels[i] );
         if ( it != mergeMap.end() )

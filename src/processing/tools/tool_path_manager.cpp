@@ -5,7 +5,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QProcessEnvironment>
-#include <QProcess>
+#include <QStandardPaths>
 
 ToolPathManager &ToolPathManager::instance()
 {
@@ -17,9 +17,13 @@ ToolPathManager::ToolPathManager() = default;
 
 QString ToolPathManager::gdalToolPath(const QString &toolName) const
 {
+    QMutexLocker locker(&m_mutex);
+    QString customPath = m_customGdalPath;
+    locker.unlock();
+
     // 1. Custom path
-    if (!m_customGdalPath.isEmpty()) {
-        QString p = QDir(m_customGdalPath).filePath(toolName);
+    if (!customPath.isEmpty()) {
+        QString p = QDir(customPath).filePath(toolName);
         if (QFileInfo::exists(p)) return p;
     }
 
@@ -42,38 +46,51 @@ bool ToolPathManager::isGdalAvailable() const
 
 QString ToolPathManager::otbToolPath(const QString &appName) const
 {
+    QMutexLocker locker(&m_mutex);
+    QString customPath = m_customOtbPath;
+    locker.unlock();
+
     QString cliName = "otbcli_" + appName;
 
     // 1. Custom path
-    if (!m_customOtbPath.isEmpty()) {
-        QString p = QDir(m_customOtbPath).filePath(cliName);
+    if (!customPath.isEmpty()) {
+        QString p = QDir(customPath).filePath(cliName);
         if (QFileInfo::exists(p)) return p;
     }
 
-    // 2. App directory
+    // 2. App directory (bundled OTB — primary path for packaged builds)
     QString appPath = findInAppDir("tools/otb", cliName);
     if (!appPath.isEmpty()) return appPath;
 
-    // 3. Environment variable
+    // 3. App directory relative to binary (for development builds)
+    QString appDir = QCoreApplication::applicationDirPath();
+    QString devPath = QDir(appDir).filePath("../tools/otb/" + cliName);
+    if (QFileInfo::exists(devPath)) return QDir::cleanPath(devPath);
+
+    // 4. Environment variable
     QString envPath = findInEnv("SICNU_OTB_PATH", cliName);
     if (!envPath.isEmpty()) return envPath;
 
-    // 4. System PATH
+    // 5. System PATH (fallback)
     return findInSystemPath(cliName);
 }
 
 bool ToolPathManager::isOtbAvailable() const
 {
-    return !otbToolPath("BandMath").isEmpty();
+    // OTB is bundled — always available in packaged builds
+    // Check for any OTB CLI tool as indicator
+    return !otbToolPath("BandMath").isEmpty() || !otbToolPath("ExtractROI").isEmpty();
 }
 
 void ToolPathManager::setGdalPath(const QString &path)
 {
+    QMutexLocker locker(&m_mutex);
     m_customGdalPath = path;
 }
 
 void ToolPathManager::setOtbPath(const QString &path)
 {
+    QMutexLocker locker(&m_mutex);
     m_customOtbPath = path;
 }
 
@@ -94,9 +111,7 @@ QString ToolPathManager::findInEnv(const QString &envVar, const QString &toolNam
 
 QString ToolPathManager::findInSystemPath(const QString &toolName) const
 {
-    QProcess proc;
-    proc.start("which", QStringList() << toolName);
-    proc.waitForFinished(3000);
-    QString result = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+    // Cross-platform executable lookup (works on Linux, macOS, Windows)
+    QString result = QStandardPaths::findExecutable(toolName);
     return result.isEmpty() ? QString() : result;
 }

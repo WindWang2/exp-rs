@@ -5,6 +5,7 @@
 #include <QHBoxLayout>
 #include <QCloseEvent>
 #include <QSettings>
+#include <QElapsedTimer>
 
 // QGIS includes
 #include <qgsmapcanvas.h>
@@ -19,11 +20,11 @@
 #include <qgspointxy.h>
 #include <qgsdockwidget.h>
 #include <qgsmapoverviewcanvas.h>
-#include <qgslayertreemapcanvasbridge.h>
 
 #include "map_tools/measure_tool.h"
 
 class QDomDocument;
+class LayerManager;
 class QPainter;
 class QTextBrowser;
 class LayerTreeMenuProvider;
@@ -34,7 +35,6 @@ class QgsGeoreferencerMainWindow;
 class QgsClassificationMainWindow;
 class QgsAdvancedDigitizingDockWidget;
 class QgsMessageBar;
-class QgsUndoWidget;
 class QgsMapToolSelect;
 class QgsMapToolAddFeature;
 class QgsMapToolMoveFeature;
@@ -116,6 +116,7 @@ public slots:
     void saveProject();
     void saveProjectAs();
     void importLayer();
+    void browseStacCatalog();
     void newLayout();
     void undo();
     void redo();
@@ -140,6 +141,7 @@ public slots:
     void showProcessingHistory();
 
     // Raster processing dialogs
+    void openImageEnhancementPanel();
     void openBandMathDialog();
     void openSpectralIndexDialog();
     void openAtmosphericCorrectionDialog();
@@ -244,6 +246,7 @@ private:
 
     bool confirmSaveEdits(QgsVectorLayer *vl);
     bool checkUnsavedChanges();
+    void applyDarkPalette();
 
     // QGIS C++ components
     QgsMapCanvas *m_mapCanvas = nullptr;
@@ -287,7 +290,6 @@ private:
     // Vector editing infrastructure
     QgsAdvancedDigitizingDockWidget *m_cadDock = nullptr;
     QgsMessageBar *m_messageBar = nullptr;
-    QgsUndoWidget *m_undoWidget = nullptr;
     QgsClipboard *m_clipboard = nullptr;
     QAction *m_toggleEditingAction = nullptr;
     QAction *m_saveEditsAction = nullptr;
@@ -300,7 +302,6 @@ private:
     QgsDockWidget *m_processingDock = nullptr;
     QgsDockWidget *m_overviewDock = nullptr;
     QgsMapOverviewCanvas *m_overviewCanvas = nullptr;
-    QgsLayerTreeMapCanvasBridge *m_layerTreeBridge = nullptr;
     QgsDockWidget *m_identifyDock = nullptr;
     QgsDockWidget *m_spectralDock = nullptr;
     QgsDockWidget *m_logDock = nullptr;
@@ -314,11 +315,13 @@ private:
     SpectralProfileWidget *m_spectralProfile = nullptr;
 
     // Status bar widgets
+    QLabel *m_readyLabel = nullptr;
     QLabel *m_crsLabel = nullptr;
     QLabel *m_coordinatesLabel = nullptr;
     QLabel *m_scaleLabel = nullptr;
     QLabel *m_renderTimeLabel = nullptr;
     QLabel *m_cacheLabel = nullptr;
+    QElapsedTimer m_renderTimer;
 
     // Georeferencer window (lazy-constructed) — Task 11.4.4
     QgsGeoreferencerMainWindow *m_georefWindow = nullptr;
@@ -330,6 +333,12 @@ private:
     QMainWindow *m_obiaWindow = nullptr;
 
     std::unique_ptr<class MapToolManager> m_toolManager;
+    std::unique_ptr<LayerManager> m_layerManager;
+    std::unique_ptr<class PluginManager> m_pluginManager;
+
+    // Lazy-loaded modules
+    std::unique_ptr<class SicnuPythonConsole> m_pythonConsole;
+    class QgsDockWidget *m_pythonDock = nullptr;
 
     friend class LayerTreeMenuProvider;
 

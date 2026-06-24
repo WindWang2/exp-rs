@@ -54,9 +54,9 @@ static std::vector<float> readBandData( QgsRasterDataProvider *provider, int ban
     if ( !block || !block->isValid() )
         return {};
 
-    int totalPixels = nCols * nRows;
+    size_t totalPixels = static_cast<size_t>( nCols ) * static_cast<size_t>( nRows );
     std::vector<float> data( totalPixels );
-    for ( int i = 0; i < totalPixels; ++i )
+    for ( size_t i = 0; i < totalPixels; ++i )
     {
         int row = i / nCols;
         int col = i % nCols;
@@ -127,7 +127,7 @@ QVariantMap SpectralIndexAlgorithm::processAlgorithm( const QVariantMap &paramet
     if ( nCols <= 0 || nRows <= 0 )
         throw QgsProcessingException( QObject::tr( "Invalid raster dimensions" ) );
 
-    int totalPixels = nCols * nRows;
+    size_t totalPixels = static_cast<size_t>( nCols ) * static_cast<size_t>( nRows );
     feedback->setProgressText( QObject::tr( "Reading input bands..." ) );
 
     // Read band data as needed
@@ -230,4 +230,20 @@ QVariantMap SpectralIndexAlgorithm::processAlgorithm( const QVariantMap &paramet
     feedback->setProgress( 100 );
 
     return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
+}
+
+QString SpectralIndexAlgorithm::shortHelpString() const
+{
+    return QObject::tr( "Computes standard remote sensing vegetation, water, and build-up indices (NDVI, EVI, SAVI, NDWI, NDBI, MNDWI) using red, near-infrared, blue, green, and shortwave infrared bands." );
+}
+
+QVariantMap SpectralIndexAlgorithm::metadata() const
+{
+    return QVariantMap{
+        { QStringLiteral( "purpose" ), QObject::tr( "Standard spectral index computation." ) },
+        { QStringLiteral( "useCases" ), QStringList{ QObject::tr( "Vegetation health monitoring (NDVI, EVI, SAVI)" ), QObject::tr( "Water body mapping (NDWI, MNDWI)" ), QObject::tr( "Built-up area detection (NDBI)" ) } },
+        { QStringLiteral( "prerequisites" ), QStringList{ QObject::tr( "Input raster must contain the bands required for the selected index." ) } },
+        { QStringLiteral( "limitations" ), QStringList{ QObject::tr( "Requires correctly mapping red, NIR, blue, green, or SWIR bands depending on the selected index." ) } },
+        { QStringLiteral( "workflowHints" ), QStringList{ QObject::tr( "Can be used to generate input features for supervised image classifiers (SVM, Random Forest)." ) } }
+    };
 }

@@ -14,6 +14,7 @@
  ***************************************************************************/
 
 #include "qgsgcptransformer.h"
+#include "sicnu_logging.h"
 
 #include <cassert>
 #include <cmath>
@@ -69,43 +70,53 @@ QString QgsGcpTransformerInterface::methodToString( QgsGcpTransformerInterface::
   }
 }
 
-QgsGcpTransformerInterface *QgsGcpTransformerInterface::create( QgsGcpTransformerInterface::TransformMethod method )
+std::unique_ptr<QgsGcpTransformerInterface> QgsGcpTransformerInterface::create( QgsGcpTransformerInterface::TransformMethod method )
 {
   switch ( method )
   {
     case TransformMethod::Linear:
-      return new QgsLinearGeorefTransform;
+      return std::make_unique<QgsLinearGeorefTransform>();
     case TransformMethod::Helmert:
-      return new QgsHelmertGeorefTransform;
+      return std::make_unique<QgsHelmertGeorefTransform>();
     case TransformMethod::PolynomialOrder1:
-      return new QgsGDALGeorefTransform( false, 1 );
+      return std::make_unique<QgsGDALGeorefTransform>( false, 1 );
     case TransformMethod::PolynomialOrder2:
-      return new QgsGDALGeorefTransform( false, 2 );
+      return std::make_unique<QgsGDALGeorefTransform>( false, 2 );
     case TransformMethod::PolynomialOrder3:
-      return new QgsGDALGeorefTransform( false, 3 );
+      return std::make_unique<QgsGDALGeorefTransform>( false, 3 );
     case TransformMethod::ThinPlateSpline:
-      return new QgsGDALGeorefTransform( true, 0 );
+      return std::make_unique<QgsGDALGeorefTransform>( true, 0 );
     case TransformMethod::Projective:
-      return new QgsProjectiveGeorefTransform;
+      return std::make_unique<QgsProjectiveGeorefTransform>();
     case TransformMethod::RpcPhysical:
-      return new QgsRpcGcpTransformer();
+      return std::make_unique<QgsRpcGcpTransformer>();
     default:
       return nullptr;
   }
 }
 
-QgsGcpTransformerInterface *QgsGcpTransformerInterface::createFromParameters(
+std::unique_ptr<QgsGcpTransformerInterface> QgsGcpTransformerInterface::createFromParameters(
   QgsGcpTransformerInterface::TransformMethod method, const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates
 )
 {
-  std::unique_ptr<QgsGcpTransformerInterface> transformer( create( method ) );
+  SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QString( "Creating transformer: method=%1, GCPs=%2" )
+      .arg( methodToString( method ) ).arg( sourceCoordinates.size() ) );
+
+  std::unique_ptr<QgsGcpTransformerInterface> transformer = create( method );
   if ( !transformer )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, "Failed to create transformer for method" );
     return nullptr;
+  }
 
   if ( !transformer->updateParametersFromGcps( sourceCoordinates, destinationCoordinates ) )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, "Failed to update transformer parameters from GCPs" );
     return nullptr;
+  }
 
-  return transformer.release();
+  SICNU_LOG_SUCCESS( SicnuLogTags::Georeferencing, "Transformer created successfully" );
+  return transformer;
 }
 
 
@@ -121,11 +132,11 @@ bool QgsLinearGeorefTransform::getOriginScale( QgsPointXY &origin, double &scale
   return true;
 }
 
-QgsGcpTransformerInterface *QgsLinearGeorefTransform::clone() const
+std::unique_ptr<QgsGcpTransformerInterface> QgsLinearGeorefTransform::clone() const
 {
   auto res = std::make_unique<QgsLinearGeorefTransform>();
   res->mParameters = mParameters;
-  return res.release();
+  return res;
 }
 
 bool QgsLinearGeorefTransform::updateParametersFromGcps( const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates, bool invertYAxis )
@@ -237,11 +248,11 @@ bool QgsHelmertGeorefTransform::getOriginScaleRotation( QgsPointXY &origin, doub
   return true;
 }
 
-QgsGcpTransformerInterface *QgsHelmertGeorefTransform::clone() const
+std::unique_ptr<QgsGcpTransformerInterface> QgsHelmertGeorefTransform::clone() const
 {
   auto res = std::make_unique<QgsHelmertGeorefTransform>();
   res->mHelmertParameters = mHelmertParameters;
-  return res.release();
+  return res;
 }
 
 int QgsHelmertGeorefTransform::helmertTransform( void *pTransformerArg, int bDstToSrc, int nPointCount, double *x, double *y, double *z, int *panSuccess )
@@ -331,11 +342,11 @@ QgsGDALGeorefTransform::~QgsGDALGeorefTransform()
   destroyGdalArgs();
 }
 
-QgsGcpTransformerInterface *QgsGDALGeorefTransform::clone() const
+std::unique_ptr<QgsGcpTransformerInterface> QgsGDALGeorefTransform::clone() const
 {
   auto res = std::make_unique<QgsGDALGeorefTransform>( mIsTPSTransform, mPolynomialOrder );
   res->updateParametersFromGcps( mSourceCoords, mDestCoordinates, mInvertYAxis );
-  return res.release();
+  return res;
 }
 
 bool QgsGDALGeorefTransform::updateParametersFromGcps( const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates, bool invertYAxis )
@@ -343,6 +354,9 @@ bool QgsGDALGeorefTransform::updateParametersFromGcps( const QVector<QgsPointXY>
   mSourceCoords = sourceCoordinates;
   mDestCoordinates = destinationCoordinates;
   mInvertYAxis = invertYAxis;
+
+  SICNU_LOG_DEBUG( SicnuLogTags::Georeferencing, QString( "GDALGeorefTransform: updating with %1 GCPs (TPS=%2, order=%3)" )
+      .arg( sourceCoordinates.size() ).arg( mIsTPSTransform ).arg( mPolynomialOrder ) );
 
   assert( sourceCoordinates.size() == destinationCoordinates.size() );
   if ( sourceCoordinates.size() != destinationCoordinates.size() )
@@ -438,11 +452,11 @@ QgsProjectiveGeorefTransform::QgsProjectiveGeorefTransform()
   : mParameters()
 {}
 
-QgsGcpTransformerInterface *QgsProjectiveGeorefTransform::clone() const
+std::unique_ptr<QgsGcpTransformerInterface> QgsProjectiveGeorefTransform::clone() const
 {
   auto res = std::make_unique<QgsProjectiveGeorefTransform>();
   res->mParameters = mParameters;
-  return res.release();
+  return res;
 }
 
 bool QgsProjectiveGeorefTransform::updateParametersFromGcps( const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates, bool invertYAxis )

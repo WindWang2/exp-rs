@@ -16,13 +16,13 @@ class QGIS_ANALYSIS_EXPORT RsClassifierKMeans : public RsClassifierBackend
     bool fit( const cv::Mat &X, const cv::Mat &y ) override; // y ignored
     cv::Mat predict( const cv::Mat &X ) const override;
     QString name() const override { return QStringLiteral( "K-Means" ); }
-    bool isFitted() const override { return !mCenters.empty(); }
+    bool isFitted() const override { return !m_centers.empty(); }
 
-    void setK( int k ) { mK = k; }
-    int k() const { return mK; }
-    cv::Mat centers() const { return mCenters; }
+    void setK( int k ) { m_k = k; }
+    int k() const { return m_k; }
+    cv::Mat centers() const { return m_centers; }
 
   private:
-    int mK;
-    cv::Mat mCenters; // K x bands, CV_32F
+    int m_k;
+    cv::Mat m_centers; // K x bands, CV_32F
 };

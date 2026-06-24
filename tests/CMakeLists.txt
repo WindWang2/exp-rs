@@ -152,6 +152,42 @@ target_include_directories(test_raster_ndvi PRIVATE
 )
 sicnu_discover_tests(test_raster_ndvi)
 
+# Algorithm JSON schema and metadata tests
+add_executable(test_algorithm_schema test_algorithm_schema.cpp)
+target_link_libraries(test_algorithm_schema PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_algorithm_schema PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_algorithm_schema)
+
+# MCP server tests
+add_executable(test_mcp_server test_mcp_server.cpp ../src/agent/mcp_server.cpp)
+target_link_libraries(test_mcp_server PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_mcp_server PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_mcp_server)
+
 # GDAL error handler tests
 add_executable(test_gdal_errors test_gdal_errors.cpp)
 target_link_libraries(test_gdal_errors PRIVATE
@@ -1510,13 +1546,11 @@ target_include_directories(test_otb_segmentation_params PRIVATE
 )
 sicnu_discover_tests(test_otb_segmentation_params)
 
-# Phase 10B.0 — OTB smoke test (3 TEST_CASE guarded by SICNU_HAS_OTB)
+# Phase 10B.0 — OTB smoke test (guarded by SICNU_HAS_OTB)
 if(SICNU_HAS_OTB)
   add_executable(test_otb_smoke test_otb_smoke.cpp)
   target_link_libraries(test_otb_smoke PRIVATE
     OTBCommon
-    OTBImageBase
-    OTBMeanShift
     Catch2::Catch2WithMain
   )
   target_include_directories(test_otb_smoke PRIVATE
@@ -1526,3 +1560,177 @@ if(SICNU_HAS_OTB)
   target_compile_definitions(test_otb_smoke PRIVATE SICNU_HAS_OTB=1)
   sicnu_discover_tests(test_otb_smoke)
 endif()
+
+# Comprehensive hooks test suite — 100% branch coverage for all hooks
+add_executable(test_hooks_comprehensive test_hooks_comprehensive.cpp)
+target_link_libraries(test_hooks_comprehensive PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+)
+target_include_directories(test_hooks_comprehensive PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_hooks_comprehensive PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_hooks_comprehensive)
+
+# GCP Geometry Transformer tests
+add_executable(test_gcp_geometry_transformer test_gcp_geometry_transformer.cpp)
+target_link_libraries(test_gcp_geometry_transformer PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_analysis
+)
+target_include_directories(test_gcp_geometry_transformer PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_gcp_geometry_transformer)
+
+# Vector Warper tests
+add_executable(test_vector_warper test_vector_warper.cpp)
+target_link_libraries(test_vector_warper PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_analysis
+)
+target_include_directories(test_vector_warper PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_vector_warper PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_vector_warper)
+
+# Histogram Widget tests — tests the data structures, not the widget itself
+# (widget is part of main app executable, not a separate library)
+add_executable(test_histogram_widget test_histogram_widget.cpp)
+target_link_libraries(test_histogram_widget PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+)
+target_include_directories(test_histogram_widget PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_histogram_widget)
+
+# Guided Workflow Widget tests
+add_executable(test_guided_workflow_widget test_guided_workflow_widget.cpp)
+target_link_libraries(test_guided_workflow_widget PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+)
+target_include_directories(test_guided_workflow_widget PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_guided_workflow_widget)
+
+# STAC Client tests
+add_executable(test_stac_client test_stac_client.cpp)
+target_link_libraries(test_stac_client PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Network
+)
+target_include_directories(test_stac_client PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+# StacClient is header-only with Q_OBJECT — needs AUTOMOC
+set_target_properties(test_stac_client PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_stac_client)
+
+# GDAL Safe Call tests
+add_executable(test_gdal_safe_call test_gdal_safe_call.cpp)
+target_link_libraries(test_gdal_safe_call PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  GDAL::GDAL
+)
+target_include_directories(test_gdal_safe_call PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_gdal_safe_call)
+
+# Input Validator tests
+add_executable(test_input_validator test_input_validator.cpp)
+target_link_libraries(test_input_validator PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  sicnu_processing
+)
+target_include_directories(test_input_validator PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_input_validator)
+
+# Async Algorithm Runner tests
+add_executable(test_async_algorithm_runner test_async_algorithm_runner.cpp)
+target_link_libraries(test_async_algorithm_runner PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+)
+target_include_directories(test_async_algorithm_runner PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_async_algorithm_runner)
+
+# Processing Dialogs tests
+add_executable(test_processing_dialogs test_processing_dialogs.cpp)
+target_link_libraries(test_processing_dialogs PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+)
+target_include_directories(test_processing_dialogs PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_processing_dialogs)
+
+# Dialog Edge Cases tests
+add_executable(test_dialog_edge_cases test_dialog_edge_cases.cpp)
+target_link_libraries(test_dialog_edge_cases PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+)
+target_include_directories(test_dialog_edge_cases PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_dialog_edge_cases)

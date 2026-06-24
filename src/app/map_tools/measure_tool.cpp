@@ -1,4 +1,5 @@
 #include "measure_tool.h"
+#include "core/sicnu_logging.h"
 
 #include <qgsmapcanvas.h>
 #include <qgsmapmouseevent.h>
@@ -17,6 +18,9 @@ MeasureTool::MeasureTool( QgsMapCanvas *canvas, MeasureMode mode, QObject *paren
 {
     Q_UNUSED( parent );
 
+    SICNU_LOG_INFO( SicnuLogTags::MapTools, QString( "Measure tool created: mode=%1" )
+        .arg( mode == Distance ? "Distance" : "Area" ) );
+
     mRubberBand = new QgsRubberBand( canvas,
         mMode == Area ? Qgis::GeometryType::Polygon : Qgis::GeometryType::Line );
     mRubberBand->setColor( QColor( 255, 0, 0, 180 ) );
@@ -32,6 +36,8 @@ MeasureTool::MeasureTool( QgsMapCanvas *canvas, MeasureMode mode, QObject *paren
 MeasureTool::~MeasureTool()
 {
     reset();
+    delete mRubberBand;
+    mRubberBand = nullptr;
 }
 
 void MeasureTool::canvasPressEvent( QgsMapMouseEvent *e )
@@ -112,6 +118,9 @@ void MeasureTool::finishMeasurement()
         reset();
         return;
     }
+
+    SICNU_LOG_INFO( SicnuLogTags::MapTools, QString( "Finishing measurement: %1 points, mode=%2" )
+        .arg( mPoints.size() ).arg( mMode == Distance ? "Distance" : "Area" ) );
 
     double value = 0;
     QString unit;

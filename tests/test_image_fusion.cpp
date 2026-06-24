@@ -1,0 +1,170 @@
+// test_image_fusion.cpp — Phase 11.1: Image fusion tests.
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+
+#include "processing/algorithms/image_fusion.h"
+
+#include <cmath>
+#include <vector>
+
+using Catch::Approx;
+
+static const float NODATA = -9999.0f;
+
+// ===========================================================================
+// Brovey
+// ===========================================================================
+
+TEST_CASE( "Brovey: uniform bands produce uniform output", "[fusion]" )
+{
+    const int W = 8, H = 8, N = W * H;
+    std::vector<float> r( N, 100.0f ), g( N, 100.0f ), b( N, 100.0f );
+    std::vector<float> pan( N, 200.0f );
+
+    QVector<const float *> msBands = { r.data(), g.data(), b.data() };
+    auto result = ImageFusion::brovey( msBands, 3, pan.data(), W, H, NODATA );
+
+    REQUIRE( result.size() == 3 );
+    for ( int i = 0; i < N; ++i )
+    {
+        // Each band = (100/300) * 200 = 66.67
+        REQUIRE( result[0][i] == Approx( 200.0f / 3.0f ).margin( 0.1f ) );
+        REQUIRE( result[1][i] == Approx( 200.0f / 3.0f ).margin( 0.1f ) );
+        REQUIRE( result[2][i] == Approx( 200.0f / 3.0f ).margin( 0.1f ) );
+    }
+}
+
+TEST_CASE( "Brovey: preserves spectral ratio", "[fusion]" )
+{
+    const int W = 4, H = 4, N = W * H;
+    // R=200, G=100, B=50 → ratio 4:2:1
+    std::vector<float> r( N, 200.0f ), g( N, 100.0f ), b( N, 50.0f );
+    std::vector<float> pan( N, 350.0f );
+
+    QVector<const float *> msBands = { r.data(), g.data(), b.data() };
+    auto result = ImageFusion::brovey( msBands, 3, pan.data(), W, H, NODATA );
+
+    // sum = 350, ratio: R=200/350, G=100/350, B=50/350
+    // fused R = (200/350)*350 = 200, G = (100/350)*350 = 100, B = (50/350)*350 = 50
+    for ( int i = 0; i < N; ++i )
+    {
+        REQUIRE( result[0][i] == Approx( 200.0f ).margin( 0.1f ) );
+        REQUIRE( result[1][i] == Approx( 100.0f ).margin( 0.1f ) );
+        REQUIRE( result[2][i] == Approx( 50.0f ).margin( 0.1f ) );
+    }
+}
+
+TEST_CASE( "Brovey: nodata preserved", "[fusion]" )
+{
+    const int W = 4, H = 4, N = W * H;
+    std::vector<float> r( N, 100.0f ), g( N, 100.0f ), b( N, 100.0f );
+    std::vector<float> pan( N, 200.0f );
+    r[0] = NODATA;
+    pan[1] = NODATA;
+
+    QVector<const float *> msBands = { r.data(), g.data(), b.data() };
+    auto result = ImageFusion::brovey( msBands, 3, pan.data(), W, H, NODATA );
+
+    REQUIRE( result[0][0] == NODATA );
+    REQUIRE( result[0][1] == NODATA );
+    // Other pixels should be valid
+    REQUIRE( result[0][2] != NODATA );
+}
+
+TEST_CASE( "Brovey: null input returns empty", "[fusion]" )
+{
+    auto result = ImageFusion::brovey( {}, 0, nullptr, 0, 0, NODATA );
+    REQUIRE( result.isEmpty() );
+}
+
+// ===========================================================================
+// IHS Fusion
+// ===========================================================================
+
+TEST_CASE( "IHS: uniform RGB produces uniform output", "[fusion]" )
+{
+    const int W = 8, H = 8, N = W * H;
+    std::vector<float> r( N, 100.0f ), g( N, 100.0f ), b( N, 100.0f );
+    std::vector<float> pan( N, 100.0f ); // same as intensity
+
+    auto result = ImageFusion::ihsFusion( r.data(), g.data(), b.data(),
+                                           pan.data(), W, H, NODATA );
+
+    REQUIRE( result.size() == 3 );
+    for ( int i = 0; i < N; ++i )
+    {
+        // With matched pan ≈ intensity, output should be close to input
+        REQUIRE( result[0][i] == Approx( 100.0f ).margin( 5.0f ) );
+        REQUIRE( result[1][i] == Approx( 100.0f ).margin( 5.0f ) );
+        REQUIRE( result[2][i] == Approx( 100.0f ).margin( 5.0f ) );
+    }
+}
+
+TEST_CASE( "IHS: higher pan produces valid output", "[fusion]" )
+{
+    const int W = 8, H = 8, N = W * H;
+    std::vector<float> r( N, 100.0f ), g( N, 100.0f ), b( N, 100.0f );
+    std::vector<float> pan( N, 200.0f ); // brighter pan
+
+    auto result = ImageFusion::ihsFusion( r.data(), g.data(), b.data(),
+                                           pan.data(), W, H, NODATA );
+
+    // Output should be valid (non-negative, non-nodata)
+    for ( int i = 0; i < N; ++i )
+    {
+        REQUIRE( result[0][i] >= 0.0f );
+        REQUIRE( result[1][i] >= 0.0f );
+        REQUIRE( result[2][i] >= 0.0f );
+        REQUIRE( result[0][i] != NODATA );
+    }
+}
+
+TEST_CASE( "IHS: null input returns empty", "[fusion]" )
+{
+    auto result = ImageFusion::ihsFusion( nullptr, nullptr, nullptr,
+                                           nullptr, 0, 0, NODATA );
+    REQUIRE( result.isEmpty() );
+}
+
+// ===========================================================================
+// PCA Fusion
+// ===========================================================================
+
+TEST_CASE( "PCA Fusion: produces correct number of bands", "[fusion]" )
+{
+    const int W = 8, H = 8, N = W * H;
+    std::vector<float> r( N, 100.0f ), g( N, 100.0f ), b( N, 100.0f );
+    std::vector<float> pan( N, 150.0f );
+
+    QVector<const float *> msBands = { r.data(), g.data(), b.data() };
+    auto result = ImageFusion::pcaFusion( msBands, 3, pan.data(), W, H, NODATA );
+
+    REQUIRE( result.size() == 3 );
+    REQUIRE( result[0].size() == N );
+    REQUIRE( result[1].size() == N );
+    REQUIRE( result[2].size() == N );
+}
+
+TEST_CASE( "PCA Fusion: null input returns empty", "[fusion]" )
+{
+    auto result = ImageFusion::pcaFusion( {}, 0, nullptr, 0, 0, NODATA );
+    REQUIRE( result.isEmpty() );
+}
+
+TEST_CASE( "PCA Fusion: uniform input produces uniform output", "[fusion]" )
+{
+    const int W = 8, H = 8, N = W * H;
+    std::vector<float> r( N, 100.0f ), g( N, 100.0f ), b( N, 100.0f );
+    std::vector<float> pan( N, 100.0f );
+
+    QVector<const float *> msBands = { r.data(), g.data(), b.data() };
+    auto result = ImageFusion::pcaFusion( msBands, 3, pan.data(), W, H, NODATA );
+
+    // With uniform input and pan ≈ intensity, output should be close to input
+    for ( int i = 0; i < N; ++i )
+    {
+        REQUIRE( result[0][i] == Approx( 100.0f ).margin( 10.0f ) );
+        REQUIRE( result[1][i] == Approx( 100.0f ).margin( 10.0f ) );
+        REQUIRE( result[2][i] == Approx( 100.0f ).margin( 10.0f ) );
+    }
+}

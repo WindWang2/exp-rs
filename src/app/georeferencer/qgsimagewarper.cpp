@@ -15,6 +15,9 @@
 
 #include "qgsimagewarper.h"
 
+#include "core/sicnu_logging.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
+
 #include <cmath>
 #include <cpl_conv.h>
 #include <cpl_string.h>
@@ -48,7 +51,7 @@ bool QgsImageWarper::openSrcDSAndGetWarpOpt(
 ) const
 {
   // Open input file
-  GDALAllRegister();
+  ensureGdalInit();
   hSrcDS.reset( GDALOpen( input.toUtf8().constData(), GA_ReadOnly ) );
   if ( !hSrcDS )
     return false;
@@ -97,6 +100,14 @@ bool QgsImageWarper::createDestinationDataset(
       continue;
     papszOptions = CSLSetNameValue( papszOptions, tokens.at( 0 ).toUtf8().constData(), tokens.at( 1 ).toUtf8().constData() );
   }
+
+  // Verify source has at least one band
+  if ( GDALGetRasterCount( hSrcDS ) == 0 )
+  {
+    CSLDestroy( papszOptions );
+    return false;
+  }
+
   hDstDS.reset( GDALCreate( driver, outputName.toUtf8().constData(), resX, resY, GDALGetRasterCount( hSrcDS ), GDALGetRasterDataType( GDALGetRasterBand( hSrcDS, 1 ) ), papszOptions ) );
   CSLDestroy( papszOptions );
   if ( !hDstDS )
@@ -228,6 +239,10 @@ QgsImageWarper::Result QgsImageWarper::warpFile(
   // Create a transformer which transforms from source to destination pixels (and vice versa)
   psWarpOptions->pfnTransformer = GeoToPixelTransform;
   psWarpOptions->pTransformerArg = addGeoToPixelTransform( georefTransform.GDALTransformer(), georefTransform.GDALTransformerArgs(), adfGeoTransform );
+  if ( !psWarpOptions->pTransformerArg )
+  {
+    return QgsImageWarper::Result::TransformError;
+  }
 
   // Initialize and execute the warp operation.
   GDALWarpOperation oOperation;
@@ -264,6 +279,8 @@ QgsImageWarper::WarpResult QgsImageWarper::warpFile(
   timer.start();
   WarpResult result;
 
+  SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QString( "Warp started: %1 -> %2" ).arg( input, output ) );
+
   if ( !georefTransform )
   {
     result.status = WarpStatus::SingularTransform;
@@ -279,7 +296,7 @@ QgsImageWarper::WarpResult QgsImageWarper::warpFile(
 
   // Pre-flight: verify input is readable.
   CPLErrorReset();
-  GDALAllRegister();
+  ensureGdalInit();
   GDALDatasetH probe = GDALOpen( input.toUtf8().constData(), GA_ReadOnly );
   if ( !probe )
   {
@@ -378,6 +395,8 @@ QgsImageWarper::WarpResult QgsImageWarper::warpFile(
   {
     QFileInfo fi( output );
     result.outputBytes = fi.size();
+    SICNU_LOG_SUCCESS( SicnuLogTags::Georeferencing, QString( "Warp completed: %1 (%2 bytes, %3 ms)" )
+      .arg( output ).arg( result.outputBytes ).arg( result.durationMs ) );
   }
   result.durationMs = static_cast<int>( timer.elapsed() );
   return result;

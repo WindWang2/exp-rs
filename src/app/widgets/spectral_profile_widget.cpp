@@ -1,5 +1,6 @@
 // src/app/widgets/spectral_profile_widget.cpp
 #include "spectral_profile_widget.h"
+#include "core/sicnu_logging.h"
 
 #include <raster/qgsrasterlayer.h>
 #include <raster/qgsrasterdataprovider.h>
@@ -18,7 +19,7 @@
 #include <cmath>
 #include <limits>
 
-// ── Constructor ──────────────────────────────────────────────────────────────
+// ── Constructor / Destructor ─────────────────────────────────────────────────
 
 SpectralProfileWidget::SpectralProfileWidget( QWidget *parent )
     : QWidget( parent )
@@ -26,14 +27,29 @@ SpectralProfileWidget::SpectralProfileWidget( QWidget *parent )
     setMinimumSize( 320, 220 );
     setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Expanding );
 
-    // Connect to layer removal to clear dangling pointer
+    // Connect to layer removal to clear dangling pointer and close dataset
     connect( QgsProject::instance(), &QgsProject::layerRemoved,
              this, [this]( const QString &layerId ) {
                  if ( m_rasterLayer && m_rasterLayer->id() == layerId ) {
                      m_rasterLayer = nullptr;
+                     closeDataset();
                      clear();
                  }
              } );
+}
+
+SpectralProfileWidget::~SpectralProfileWidget()
+{
+    closeDataset();
+}
+
+void SpectralProfileWidget::closeDataset()
+{
+    if ( m_cachedDataset ) {
+        GDALClose( m_cachedDataset );
+        m_cachedDataset = nullptr;
+        m_cachedSource.clear();
+    }
 }
 
 // ── Public methods ───────────────────────────────────────────────────────────
@@ -69,26 +85,32 @@ void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLa
     if ( !layer )
         return;
 
+    SICNU_LOG_INFO( SicnuLogTags::Widgets, QString( "Extracting spectral profile: layer=%1, point=(%2, %3)" )
+        .arg( layer->name() ).arg( point.x(), 0, 'f', 4 ).arg( point.y(), 0, 'f', 4 ) );
+
     m_layerName = layer->name();
 
-    // Open the raster source with GDAL
+    // Use cached dataset if the source hasn't changed
     const QString source = layer->source();
-    GDALDatasetH dataset = GDALOpen( source.toUtf8().constData(), GA_ReadOnly );
+    if ( !m_cachedDataset || m_cachedSource != source ) {
+        closeDataset();
+        m_cachedDataset = GDALOpen( source.toUtf8().constData(), GA_ReadOnly );
+        m_cachedSource = source;
+    }
+
+    GDALDatasetH dataset = m_cachedDataset;
     if ( !dataset )
         return;
 
     const int bandCount = GDALGetRasterCount( dataset );
     if ( bandCount < 1 )
-    {
-        GDALClose( dataset );
         return;
-    }
 
     // Convert map coordinate (layer CRS) to pixel coordinate
     double adfGeoTransform[6];
-    GDALGetGeoTransform( dataset, adfGeoTransform );
+    if ( GDALGetGeoTransform( dataset, adfGeoTransform ) != CE_None )
+        return;
 
-    // Inverse geo-transform to get pixel/line from map coordinates
     double x = point.x();
     double y = point.y();
     double col = ( x - adfGeoTransform[0] ) / adfGeoTransform[1];
@@ -98,10 +120,7 @@ void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLa
     const int nXSize = GDALGetRasterXSize( dataset );
     const int nYSize = GDALGetRasterYSize( dataset );
     if ( col < 0 || col >= nXSize || row < 0 || row >= nYSize )
-    {
-        GDALClose( dataset );
         return;
-    }
 
     const int pixelX = static_cast<int>( col );
     const int pixelY = static_cast<int>( row );
@@ -113,7 +132,6 @@ void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLa
     {
         GDALRasterBandH band = GDALGetRasterBand( dataset, i + 1 );
 
-        // Read a single pixel
         double pixelValue = 0.0;
         CPLErr err = GDALRasterIO( band, GF_Read,
                                    pixelX, pixelY, 1, 1,
@@ -123,51 +141,33 @@ void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLa
         if ( err == CE_None )
         {
             m_values[i] = pixelValue;
+            if ( pixelValue < m_minValue ) m_minValue = pixelValue;
+            if ( pixelValue > m_maxValue ) m_maxValue = pixelValue;
         }
         else
         {
             m_values[i] = std::numeric_limits<double>::quiet_NaN();
         }
 
-        // Track range (skip NaN)
-        if ( err == CE_None )
-        {
-            if ( pixelValue < m_minValue )
-                m_minValue = pixelValue;
-            if ( pixelValue > m_maxValue )
-                m_maxValue = pixelValue;
-        }
-
-        // Band label: use description if available, otherwise "Band N"
         const char *desc = GDALGetDescription( band );
         if ( desc && desc[0] != '\0' )
-        {
             m_bandLabels[i] = QString::fromUtf8( desc );
-        }
         else
-        {
             m_bandLabels[i] = QObject::tr( "Band %1" ).arg( i + 1 );
-        }
     }
 
-    // If all pixels are NaN, mark no data
     bool anyValid = false;
     for ( int i = 0; i < bandCount; ++i )
     {
-        if ( !std::isnan( m_values[i] ) )
-        {
-            anyValid = true;
-            break;
-        }
+        if ( !std::isnan( m_values[i] ) ) { anyValid = true; break; }
     }
 
     m_hasData = anyValid;
-
-    // Ensure range is not degenerate
     if ( m_minValue >= m_maxValue )
         m_maxValue = m_minValue + 1.0;
 
-    GDALClose( dataset );
+    SICNU_LOG_DEBUG( SicnuLogTags::Widgets, QString( "Spectral profile extracted: %1 bands, hasData=%2" )
+        .arg( bandCount ).arg( anyValid ) );
 }
 
 // ── Painting ─────────────────────────────────────────────────────────────────

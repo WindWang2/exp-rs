@@ -24,6 +24,9 @@ public:
     GdalErrorHandler();
     ~GdalErrorHandler();
 
+    GdalErrorHandler(const GdalErrorHandler&) = delete;
+    GdalErrorHandler& operator=(const GdalErrorHandler&) = delete;
+
     /// Install this handler as the GDAL error callback.
     void install();
 
@@ -53,5 +56,5 @@ private:
     int m_errorNumber = 0;
     bool m_hasError = false;
 
-    static GdalErrorHandler *s_activeHandler;
+    static thread_local GdalErrorHandler *s_activeHandler;
 };

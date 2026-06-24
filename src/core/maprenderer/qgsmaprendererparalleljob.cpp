@@ -16,6 +16,7 @@
 #include "qgsmaprendererparalleljob.h"
 
 #include <memory>
+#include <QDir>
 
 #include "qgsfeedback.h"
 #include "qgslabelingengine.h"
@@ -279,21 +280,21 @@ void QgsMapRendererParallelJob::renderingFinished()
   {
     if ( job.img )
     {
-      job.img->save( QString( "/tmp/first_pass_%1.png" ).arg( i ) );
+      job.img->save( QDir::tempPath() + QString( "/first_pass_%1.png" ).arg( i ) );
     }
     if ( job.maskPass.image )
     {
-      job.maskPass.image->save( QString( "/tmp/first_pass_%1_mask.png" ).arg( i ) );
+      job.maskPass.image->save( QDir::tempPath() + QString( "/first_pass_%1_mask.png" ).arg( i ) );
     }
     i++;
   }
   if ( mLabelJob.img )
   {
-    mLabelJob.img->save( QString( "/tmp/labels.png" ) );
+    mLabelJob.img->save( QDir::tempPath() + "/labels.png" );
   }
   if ( mLabelJob.maskImage )
   {
-    mLabelJob.maskImage->save( QString( "/tmp/labels_mask.png" ) );
+    mLabelJob.maskImage->save( QDir::tempPath() + "/labels_mask.png" );
   }
 #endif
   if ( !mSecondPassLayerJobs.empty() )

@@ -1,9 +1,9 @@
-#ifndef PROCESSING_CACHE_H
-#define PROCESSING_CACHE_H
+#pragma once
 
 #include <QString>
 #include <QByteArray>
 #include <QDir>
+#include <QMutex>
 
 namespace sicnu {
 
@@ -24,11 +24,11 @@ public:
 
 private:
     QString cachePath(const QString &key) const;
+    qint64 currentCacheSizeBytes() const;
 
     QString m_cacheDir;
     qint64 m_maxSizeBytes;
+    mutable QMutex m_mutex;
 };
 
 } // namespace sicnu
-
-#endif // PROCESSING_CACHE_H

@@ -1,7 +1,7 @@
-#ifndef PROGRESS_CALLBACK_H
-#define PROGRESS_CALLBACK_H
+#pragma once
 
 #include <QString>
+#include <atomic>
 
 namespace sicnu {
 
@@ -37,15 +37,13 @@ public:
 
 private:
     QString m_taskName;
-    int m_totalSteps = 0;
-    int m_currentStep = 0;
-    bool m_started = false;
-    bool m_completed = false;
-    bool m_success = false;
-    bool m_cancelled = false;
+    std::atomic<int> m_totalSteps{0};
+    std::atomic<int> m_currentStep{0};
+    std::atomic<bool> m_started{false};
+    std::atomic<bool> m_completed{false};
+    std::atomic<bool> m_success{false};
+    std::atomic<bool> m_cancelled{false};
     QString m_lastMessage;
 };
 
 } // namespace sicnu
-
-#endif // PROGRESS_CALLBACK_H

@@ -1,5 +1,6 @@
 // qgslayoutdesignerdialog.cpp — Minimal layout designer implementation
 #include "qgslayoutdesignerdialog.h"
+#include "core/sicnu_logging.h"
 
 #include <qgslayout.h>
 #include <qgslayoutview.h>
@@ -25,8 +26,12 @@ QgsLayoutDesignerDialog::QgsLayoutDesignerDialog(QgsMasterLayoutInterface *layou
     : QgsLayoutDesignerInterface(parent)
     , mMasterLayout(layout)
 {
+    SICNU_LOG_INFO(SicnuLogTags::Layout, "Layout Designer opened");
+
     // Create a separate QMainWindow for the UI
-    mWindow = new QMainWindow(parent);
+    // Parent it to the caller's widget parent if available
+    QWidget *widgetParent = parent ? qobject_cast<QWidget *>(parent) : nullptr;
+    mWindow = new QMainWindow(widgetParent);
 
     // QgsMasterLayoutInterface is also a QgsLayout (via QgsPrintLayout)
     mLayout = dynamic_cast<QgsLayout *>(layout);
@@ -41,7 +46,9 @@ QgsLayoutDesignerDialog::QgsLayoutDesignerDialog(QgsMasterLayoutInterface *layou
 
 QgsLayoutDesignerDialog::~QgsLayoutDesignerDialog()
 {
-    delete mWindow;
+    // If mWindow has no Qt parent, we must delete it manually
+    if (mWindow && !mWindow->parent())
+        delete mWindow;
 }
 
 QgsLayout *QgsLayoutDesignerDialog::layout()

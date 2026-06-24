@@ -32,6 +32,7 @@ add_library(qgis_app_georef STATIC
 
 target_include_directories(qgis_app_georef PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/core
     ${CMAKE_SOURCE_DIR}/src/core/geometry
     ${CMAKE_SOURCE_DIR}/src/core/proj
@@ -50,6 +51,7 @@ target_link_libraries(qgis_app_georef PUBLIC
     qgis_analysis
     qgis_core
     qgis_gui
+    sicnu_processing
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets

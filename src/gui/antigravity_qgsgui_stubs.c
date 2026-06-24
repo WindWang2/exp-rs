@@ -225,8 +225,7 @@ void _ZN27QgsAttributesFormProperties13updatedFieldsEv(void) __attribute__((weak
 void _ZN27QgsAttributesFormProperties13updatedFieldsEv(void) {}
 
 // QgsCodeEditor::QgsCodeEditor(QWidget*, QString const&, bool, bool, QFlags<QgsCodeEditor::Flag>, QgsCodeEditor::Mode)
-void _ZN13QgsCodeEditorC1EP7QWidgetRK7QStringbb6QFlagsINS_4FlagEENS_4ModeE(void) __attribute__((weak, visibility("default")));
-void _ZN13QgsCodeEditorC1EP7QWidgetRK7QStringbb6QFlagsINS_4FlagEENS_4ModeE(void) {}
+// — proper C++ constructor provided in antigravity_codeeditor_stubs.cpp
 
 // QgsCodeEditor::getMonospaceFont()
 void _ZN13QgsCodeEditor16getMonospaceFontEv(void) __attribute__((weak, visibility("default")));
@@ -253,24 +252,21 @@ void _ZN13QgsCodeEditor18setLinearSelectionEii(void) __attribute__((weak, visibi
 void _ZN13QgsCodeEditor18setLinearSelectionEii(void) {}
 
 // QgsCodeEditorExpression::QgsCodeEditorExpression(QWidget*)
-void _ZN23QgsCodeEditorExpressionC1EP7QWidget(void) __attribute__((weak, visibility("default")));
-void _ZN23QgsCodeEditorExpressionC1EP7QWidget(void) {}
+// — proper C++ constructor provided in antigravity_codeeditor_stubs.cpp
 
 // QgsCodeEditorExpression::staticMetaObject
 void _ZN23QgsCodeEditorExpression16staticMetaObjectE(void) __attribute__((weak, visibility("default")));
 void _ZN23QgsCodeEditorExpression16staticMetaObjectE(void) {}
 
 // QgsCodeEditorHTML::QgsCodeEditorHTML(QWidget*)
-void _ZN17QgsCodeEditorHTMLC1EP7QWidget(void) __attribute__((weak, visibility("default")));
-void _ZN17QgsCodeEditorHTMLC1EP7QWidget(void) {}
+// — proper C++ constructor provided in antigravity_codeeditor_stubs.cpp
 
 // QgsCodeEditorPython::QgsCodeEditorPython(QWidget*, QList<QString> const&, QgsCodeEditor::Mode, QFlags<QgsCodeEditor::Flag>)
 void _ZN19QgsCodeEditorPythonC1EP7QWidgetRK5QListI7QStringEN13QgsCodeEditor4ModeE6QFlagsINS7_4FlagEE(void) __attribute__((weak, visibility("default")));
 void _ZN19QgsCodeEditorPythonC1EP7QWidgetRK5QListI7QStringEN13QgsCodeEditor4ModeE6QFlagsINS7_4FlagEE(void) {}
 
 // QgsCodeEditorSQL::QgsCodeEditorSQL(QWidget*)
-void _ZN16QgsCodeEditorSQLC1EP7QWidget(void) __attribute__((weak, visibility("default")));
-void _ZN16QgsCodeEditorSQLC1EP7QWidget(void) {}
+// — proper C++ constructor provided in antigravity_codeeditor_stubs.cpp
 
 // QgsCodeEditorSQL::setFields(QgsFields const&)
 void _ZN16QgsCodeEditorSQL9setFieldsERK9QgsFields(void) __attribute__((weak, visibility("default")));
@@ -1347,4 +1343,3 @@ void _ZN13QsciScintilla16staticMetaObjectE(void) {}
 // QsciScintilla::textChanged()
 void _ZN13QsciScintilla11textChangedEv(void) __attribute__((weak, visibility("default")));
 void _ZN13QsciScintilla11textChangedEv(void) {}
-

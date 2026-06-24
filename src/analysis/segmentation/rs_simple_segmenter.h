@@ -38,7 +38,7 @@ class QGIS_ANALYSIS_EXPORT RsSimpleSegmenter
     static void gaussianSmooth( QVector<float> &data, int w, int h, int kernelSize );
 
     /// Quantize float data to integer bins.
-    static QVector<int> quantize( const float *data, int n, int bins, float nodata );
+    static QVector<int> quantize( const float *data, size_t n, int bins, float nodata );
 
     /// 8-connected component labeling on quantized integer grid.
     /// Returns label map (1-based; 0 = background/nodata).

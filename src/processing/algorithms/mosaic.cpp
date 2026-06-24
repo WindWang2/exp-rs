@@ -1,5 +1,7 @@
 // src/processing/algorithms/mosaic.cpp — Mosaic/merge algorithm
 #include "mosaic.h"
+#include "core/sicnu_logging.h"
+#include "framework/input_validator.h"
 
 #include <cmath>
 #include <cstring>
@@ -10,16 +12,27 @@ namespace Mosaic
 
 static bool isValid(float value, float nodata)
 {
+    if (std::isnan(value))
+        return false;
     if (std::isnan(nodata))
-        return !std::isnan(value);
+        return true;
     return value != nodata;
 }
 
 bool merge(const MosaicSource *sources, size_t sourceCount,
            float *out, size_t outWidth, size_t outHeight)
 {
-    if (!sources || sourceCount == 0 || !out || outWidth == 0 || outHeight == 0)
+    if (!sources || !out) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "Mosaic::merge: null pointer argument");
         return false;
+    }
+    if (sourceCount == 0 || outWidth == 0 || outHeight == 0) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "Mosaic::merge: invalid dimensions or source count");
+        return false;
+    }
+
+    SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Mosaic merge: %1 sources, output=%2x%3" )
+        .arg( sourceCount ).arg( outWidth ).arg( outHeight ) );
 
     // Initialize output to NaN (no data)
     for (size_t i = 0; i < outWidth * outHeight; ++i)

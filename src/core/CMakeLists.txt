@@ -2789,9 +2789,10 @@ if(NOT WITH_INTERNAL_SPATIALINDEX)
   target_link_libraries(qgis_core ${SPATIALINDEX_LIBRARY})
 endif()
 
-target_link_libraries(qgis_core
-  Qt6Keychain::Qt6Keychain
-)
+if(TARGET Qt6Keychain::Qt6Keychain)
+  target_link_libraries(qgis_core Qt6Keychain::Qt6Keychain)
+  target_compile_definitions(qgis_core PRIVATE "HAVE_QT6KEYCHAIN")
+endif()
 
 if (WITH_QTPRINTER)
   target_link_libraries(qgis_core ${QT_VERSION_BASE}::PrintSupport)

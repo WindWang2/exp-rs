@@ -400,7 +400,8 @@ void QgsProcessingToolboxModel::addProvider( QgsProcessingProvider *provider )
 
 bool QgsProcessingToolboxModel::isTopLevelProvider( const QString &providerId )
 {
-  return providerId == "qgis"_L1 || providerId == "native"_L1 || providerId == "3d"_L1 || providerId == "pdal"_L1;
+  return providerId == "qgis"_L1 || providerId == "native"_L1 || providerId == "3d"_L1 || providerId == "pdal"_L1
+      || providerId == "qgis_algorithms"_L1 || providerId == "gdal_tools"_L1 || providerId == "otb_tools"_L1;
 }
 
 QString QgsProcessingToolboxModel::toolTipForAlgorithm( const QgsProcessingAlgorithm *algorithm )

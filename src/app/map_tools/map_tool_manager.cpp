@@ -1,4 +1,5 @@
 #include "map_tool_manager.h"
+#include "core/sicnu_logging.h"
 
 #include <qgsmapcanvas.h>
 #include <qgsmaptoolpan.h>
@@ -39,10 +40,22 @@ MapToolManager::MapToolManager(QgisDesktopWindow *mainWindow, QgsMapCanvas *canv
 {
 }
 
-MapToolManager::~MapToolManager() = default;
+MapToolManager::~MapToolManager()
+{
+    // Clean up all map tools that weren't taken by the canvas
+    for (QgsMapTool *tool : m_allTools) {
+        // Only delete if not currently set on canvas
+        if (m_canvas && m_canvas->mapTool() != tool) {
+            delete tool;
+        }
+    }
+    m_allTools.clear();
+}
 
 void MapToolManager::setupTools()
 {
+    SICNU_LOG_INFO( SicnuLogTags::MapTools, "Initializing map tools" );
+
     m_panTool = new QgsMapToolPan(m_canvas);
     m_zoomInTool = new QgsMapToolZoom(m_canvas, false);
     m_zoomOutTool = new QgsMapToolZoom(m_canvas, true);
@@ -64,6 +77,16 @@ void MapToolManager::setupTools()
     m_reverseLineTool = new QgsMapToolReverseLine(m_canvas);
     m_addRingTool = new QgsMapToolAddRing(m_canvas);
     m_addPartTool = new QgsMapToolAddPart(m_canvas);
+
+    // Store all tools for cleanup
+    m_allTools = {
+        m_panTool, m_zoomInTool, m_zoomOutTool, m_identifyTool,
+        m_measureDistanceTool, m_measureAreaTool,
+        m_selectTool, m_addFeatureTool, m_moveFeatureTool,
+        m_rotateFeatureTool, m_scaleFeatureTool, m_offsetCurveTool,
+        m_reshapeTool, m_splitFeaturesTool, m_splitPartsTool,
+        m_simplifyTool, m_reverseLineTool, m_addRingTool, m_addPartTool
+    };
     m_fillRingTool = new QgsMapToolFillRing(m_canvas);
     m_deletePartTool = new QgsMapToolDeletePart(m_canvas);
     m_deleteRingTool = new QgsMapToolDeleteRing(m_canvas);
@@ -71,4 +94,7 @@ void MapToolManager::setupTools()
     m_chamferFilletTool = new QgsMapToolChamferFillet(m_canvas);
     m_featureArrayTool = new QgsMapToolFeatureArray(m_canvas);
     m_vertexTool = new QgsVertexTool(m_canvas, m_cadDock);
+
+    SICNU_LOG_SUCCESS( SicnuLogTags::MapTools, QString( "Map tools initialized: pan, zoom, identify, measure, %1 editing tools" )
+        .arg( 19 ) ); // number of vector editing tools created
 }

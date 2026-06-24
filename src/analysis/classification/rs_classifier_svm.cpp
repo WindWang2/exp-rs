@@ -1,55 +1,29 @@
 // rs_classifier_svm.cpp — Phase 10A Task 10.8.
 
 #include "rs_classifier_svm.h"
+#include "sicnu_logging.h"
+
+// SVM hyperparameters (tuned for typical remote-sensing land-cover tasks).
+// C=10 — moderately high regularisation penalty to reduce misclassification
+//        on small training sets common in RS workflows.
+// gamma=0.5 — RBF kernel bandwidth; balances locality vs. generalisation.
+// maxIter=200 / eps=1e-4 — tight convergence criteria so the solver
+//        terminates well before the iteration cap on most datasets.
+static constexpr double kSvmC        = 10.0;
+static constexpr double kSvmGamma    = 0.5;
+static constexpr int    kSvmMaxIter  = 200;
+static constexpr double kSvmEps      = 1e-4;
 
 RsClassifierSvm::RsClassifierSvm()
-  : mClf( cv::ml::SVM::create() )
 {
-  mClf->setType( cv::ml::SVM::C_SVC );
-  mClf->setKernel( cv::ml::SVM::RBF );
-  mClf->setC( 10.0 );
-  mClf->setGamma( 0.5 );
-  mClf->setTermCriteria( cv::TermCriteria(
-    cv::TermCriteria::MAX_ITER + cv::TermCriteria::EPS, 200, 1e-4 ) );
-}
+  m_clf = cv::ml::SVM::create();
+  m_clf->setType( cv::ml::SVM::C_SVC );
+  m_clf->setKernel( cv::ml::SVM::RBF );
+  m_clf->setC( kSvmC );
+  m_clf->setGamma( kSvmGamma );
+  m_clf->setTermCriteria( cv::TermCriteria(
+    cv::TermCriteria::MAX_ITER + cv::TermCriteria::EPS, kSvmMaxIter, kSvmEps ) );
 
-bool RsClassifierSvm::fit( const cv::Mat &X, const cv::Mat &y )
-{
-  if ( X.empty() || y.empty() || X.rows != y.rows )
-    return false;
-  return mClf->train( X, cv::ml::ROW_SAMPLE, y );
-}
-
-cv::Mat RsClassifierSvm::predict( const cv::Mat &X ) const
-{
-  cv::Mat out;
-  mClf->predict( X, out );
-  out.convertTo( out, CV_32S );
-  return out;
-}
-
-bool RsClassifierSvm::save( const QString &path ) const
-{
-  try
-  {
-    mClf->save( path.toStdString() );
-    return true;
-  }
-  catch ( ... )
-  {
-    return false;
-  }
-}
-
-bool RsClassifierSvm::load( const QString &path )
-{
-  try
-  {
-    mClf = cv::Algorithm::load<cv::ml::SVM>( path.toStdString() );
-    return mClf != nullptr;
-  }
-  catch ( ... )
-  {
-    return false;
-  }
+  SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "SVM classifier initialized: C=%1, gamma=%2" )
+      .arg( kSvmC ).arg( kSvmGamma ) );
 }

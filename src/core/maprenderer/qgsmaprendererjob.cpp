@@ -16,6 +16,7 @@
 #include "qgsmaprendererjob.h"
 
 #include <memory>
+#include <QDir>
 
 #include "qgselevationmap.h"
 #include "qgsexception.h"
@@ -1379,7 +1380,7 @@ QImage QgsMapRendererJob::composeImage( const QgsMapSettings &settings, const st
 
 
 #if DEBUG_RENDERING
-    img.save( QString( "/tmp/final_%1.png" ).arg( i ) );
+    img.save( QDir::tempPath() + QString( "/final_%1.png" ).arg( i ) );
     i++;
 #endif
 
@@ -1435,7 +1436,7 @@ QImage QgsMapRendererJob::composeImage( const QgsMapSettings &settings, const st
 
   painter.end();
 #if DEBUG_RENDERING
-  image.save( "/tmp/final.png" );
+  image.save( QDir::tempPath() + "/final.png" );
 #endif
   return image;
 }

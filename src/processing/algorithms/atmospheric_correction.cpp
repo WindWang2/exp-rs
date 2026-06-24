@@ -1,7 +1,9 @@
 // src/processing/algorithms/atmospheric_correction.cpp — DOS atmospheric correction
 #include "atmospheric_correction.h"
+#include "core/sicnu_logging.h"
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace AtmosphericCorrection
@@ -9,11 +11,17 @@ namespace AtmosphericCorrection
 
 static float findMin(const float *data, size_t count)
 {
-    float minVal = data[0];
-    for (size_t i = 1; i < count; i++) {
-        if (data[i] < minVal) minVal = data[i];
+    float minVal = std::numeric_limits<float>::max();
+    bool found = false;
+    for (size_t i = 0; i < count; i++) {
+        if (!std::isnan(data[i])) {
+            if (data[i] < minVal) {
+                minVal = data[i];
+                found = true;
+            }
+        }
     }
-    return minVal;
+    return found ? minVal : 0.0f;
 }
 
 static bool convertAndFindMin(const float *dn, std::vector<float> &radiance,
@@ -28,6 +36,7 @@ static bool convertAndFindMin(const float *dn, std::vector<float> &radiance,
 bool dnToRadiance(const float *dn, float *radiance, size_t count, float gain, float bias)
 {
     if (!dn || !radiance || count == 0) return false;
+    if (std::isnan(gain) || std::isnan(bias)) return false;
     for (size_t i = 0; i < count; i++) {
         radiance[i] = gain * dn[i] + bias;
     }
@@ -37,6 +46,9 @@ bool dnToRadiance(const float *dn, float *radiance, size_t count, float gain, fl
 bool dos1(const float *dn, float *surface, size_t count, float gain, float bias)
 {
     if (!dn || !surface || count == 0) return false;
+
+    SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "DOS1 atmospheric correction: %1 pixels, gain=%2, bias=%3" )
+        .arg( count ).arg( gain ).arg( bias ) );
 
     std::vector<float> radiance(count);
     float minRadiance;
@@ -52,7 +64,10 @@ bool dos1(const float *dn, float *surface, size_t count, float gain, float bias)
 bool dos2(const float *dn, float *surface, size_t count, float gain, float bias, float transmittance)
 {
     if (!dn || !surface || count == 0) return false;
-    if (transmittance <= 0.0f || transmittance > 1.0f) return false;
+
+    SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "DOS2 atmospheric correction: %1 pixels, transmittance=%2" )
+        .arg( count ).arg( transmittance ) );
+    if (std::isnan(transmittance) || transmittance <= 0.0f || transmittance > 1.0f) return false;
 
     std::vector<float> radiance(count);
     float pathRadiance;
@@ -67,7 +82,11 @@ bool dos2(const float *dn, float *surface, size_t count, float gain, float bias,
 
 float estimateTransmittance(float airmass)
 {
-    if (airmass <= 0.0f) return 0.0f;
+    if (std::isnan(airmass) || airmass <= 0.0f) return 0.0f;
+    // Aerosol optical depth at ~550 nm for a clear atmosphere.
+    // tau=0.1 is the standard DOS1 assumption (Chavez, 1996,
+    // "Image-based atmospheric corrections — revisited and improved",
+    // Photogrammetric Engineering & Remote Sensing 62(9):1025-1036).
     constexpr float tau = 0.1f;
     return std::exp(-tau * airmass);
 }

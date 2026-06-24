@@ -1,5 +1,6 @@
 // src/app/widgets/histogram_widget.cpp
 #include "histogram_widget.h"
+#include "core/sicnu_logging.h"
 
 #include <raster/qgsrasterlayer.h>
 #include <raster/qgsrasterdataprovider.h>
@@ -18,7 +19,7 @@
 #include <cmath>
 #include <limits>
 
-// ── Constructor ──────────────────────────────────────────────────────────────
+// ── Constructor / Destructor ─────────────────────────────────────────────────
 
 HistogramWidget::HistogramWidget( QWidget *parent )
     : QWidget( parent )
@@ -26,14 +27,29 @@ HistogramWidget::HistogramWidget( QWidget *parent )
     setMinimumSize( 320, 220 );
     setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Expanding );
 
-    // Connect to layer removal to clear dangling pointer
+    // Connect to layer removal to clear dangling pointer and close dataset
     connect( QgsProject::instance(), &QgsProject::layerRemoved,
              this, [this]( const QString &layerId ) {
                  if ( m_rasterLayer && m_rasterLayer->id() == layerId ) {
                      m_rasterLayer = nullptr;
+                     closeDataset();
                      update();
                  }
              } );
+}
+
+HistogramWidget::~HistogramWidget()
+{
+    closeDataset();
+}
+
+void HistogramWidget::closeDataset()
+{
+    if ( m_cachedDataset ) {
+        GDALClose( m_cachedDataset );
+        m_cachedDataset = nullptr;
+        m_cachedSource.clear();
+    }
 }
 
 // ── Public setters ───────────────────────────────────────────────────────────
@@ -75,18 +91,24 @@ void HistogramWidget::computeHistogram()
     if ( !m_rasterLayer )
         return;
 
-    // Open the raster source with GDAL
+    SICNU_LOG_INFO( SicnuLogTags::Widgets, QString( "Computing histogram: layer=%1, band=%2" )
+        .arg( m_rasterLayer->name() ).arg( m_band ) );
+
+    // Use cached dataset if the source hasn't changed
     const QString source = m_rasterLayer->source();
-    GDALDatasetH dataset = GDALOpen( source.toUtf8().constData(), GA_ReadOnly );
+    if ( !m_cachedDataset || m_cachedSource != source ) {
+        closeDataset();
+        m_cachedDataset = GDALOpen( source.toUtf8().constData(), GA_ReadOnly );
+        m_cachedSource = source;
+    }
+
+    GDALDatasetH dataset = m_cachedDataset;
     if ( !dataset )
         return;
 
     int bandCount = GDALGetRasterCount( dataset );
     if ( m_band < 1 || m_band > bandCount )
-    {
-        GDALClose( dataset );
         return;
-    }
 
     GDALRasterBandH band = GDALGetRasterBand( dataset, m_band );
 
@@ -104,21 +126,16 @@ void HistogramWidget::computeHistogram()
     }
 
     // ---- Histogram ----------------------------------------------------------
-    // Use 256 bins by default.  GDALGetDefaultHistogram may return a
-    // different bin count; fall back to GDALGetHistogram with 256 bins.
     int nBuckets = 256;
     double dfHistMin = 0, dfHistMax = 0;
     int *panHistogram = nullptr;
 
-    // Try the default histogram first (fast, may be cached in .aux.xml)
     CPLErr histErr = GDALGetDefaultHistogram( band, &dfHistMin, &dfHistMax,
                                               &nBuckets, &panHistogram, TRUE,
                                               nullptr, nullptr );
 
-    // If default histogram unavailable, compute one ourselves
     if ( histErr != CE_None || !panHistogram )
     {
-        // Use statistics range if available
         if ( m_stats.valid )
         {
             dfHistMin = m_stats.min;
@@ -126,26 +143,13 @@ void HistogramWidget::computeHistogram()
         }
         else
         {
-            // Approximate range from data type
             GDALDataType eType = GDALGetRasterDataType( band );
             switch ( eType )
             {
-                case GDT_Byte:
-                    dfHistMin = 0;
-                    dfHistMax = 255;
-                    break;
-                case GDT_UInt16:
-                    dfHistMin = 0;
-                    dfHistMax = 65535;
-                    break;
-                case GDT_Int16:
-                    dfHistMin = -32768;
-                    dfHistMax = 32767;
-                    break;
-                default:
-                    dfHistMin = 0;
-                    dfHistMax = 255;
-                    break;
+                case GDT_Byte:   dfHistMin = 0;     dfHistMax = 255;    break;
+                case GDT_UInt16: dfHistMin = 0;     dfHistMax = 65535;  break;
+                case GDT_Int16:  dfHistMin = -32768; dfHistMax = 32767; break;
+                default:         dfHistMin = 0;     dfHistMax = 255;    break;
             }
         }
 
@@ -170,12 +174,12 @@ void HistogramWidget::computeHistogram()
             if ( m_histogram[i] > m_maxFrequency )
                 m_maxFrequency = m_histogram[i];
         }
+        SICNU_LOG_SUCCESS( SicnuLogTags::Widgets, QString( "Histogram computed: %1 bins, range=[%2, %3]" )
+            .arg( nBuckets ).arg( dfHistMin ).arg( dfHistMax ) );
     }
 
     if ( panHistogram )
         CPLFree( panHistogram );
-
-    GDALClose( dataset );
 }
 
 // ── Painting ─────────────────────────────────────────────────────────────────

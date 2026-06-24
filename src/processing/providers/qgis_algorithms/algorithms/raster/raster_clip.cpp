@@ -1,6 +1,7 @@
 // src/processing/providers/qgis_algorithms/algorithms/raster/raster_clip.cpp
 #include "raster_clip.h"
 
+#include <memory>
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <processing/qgsprocessingcontext.h>
@@ -45,10 +46,9 @@ QVariantMap RasterClipAlgorithm::processAlgorithm( const QVariantMap &parameters
     QgsRasterFileWriter writer( dest );
     writer.setOutputFormat( QStringLiteral( "GTiff" ) );
 
-    QgsRasterPipe *pipe = new QgsRasterPipe();
+    auto pipe = std::make_unique<QgsRasterPipe>();
     if ( !pipe->set( provider->clone() ) )
     {
-        delete pipe;
         throw QgsProcessingException( QObject::tr( "Could not create raster pipe" ) );
     }
 
@@ -56,8 +56,7 @@ QVariantMap RasterClipAlgorithm::processAlgorithm( const QVariantMap &parameters
     projector->setCrs( layer->crs(), layer->crs() );
     pipe->insert( 2, projector );
 
-    Qgis::RasterFileWriterResult err = writer.writeRaster( pipe, nCols, nRows, extent, layer->crs(), context.transformContext() );
-    delete pipe;
+    Qgis::RasterFileWriterResult err = writer.writeRaster( pipe.get(), nCols, nRows, extent, layer->crs(), context.transformContext() );
 
     if ( err != Qgis::RasterFileWriterResult::Success )
         throw QgsProcessingException( QObject::tr( "Error writing clipped raster" ) );

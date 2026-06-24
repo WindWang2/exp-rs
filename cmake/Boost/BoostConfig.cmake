@@ -4,10 +4,18 @@
 #
 # This file is found via CMAKE_PREFIX_PATH set in the parent CMakeLists.txt.
 
+# Try to find libraries dynamically if they are not already set
+if(NOT Boost_FILESYSTEM_LIBRARY)
+    find_library(Boost_FILESYSTEM_LIBRARY NAMES boost_filesystem boost_filesystem-mt REQUIRED)
+endif()
+if(NOT Boost_SERIALIZATION_LIBRARY)
+    find_library(Boost_SERIALIZATION_LIBRARY NAMES boost_serialization boost_serialization-mt REQUIRED)
+endif()
+get_filename_component(Boost_LIBRARY_DIRS "${Boost_FILESYSTEM_LIBRARY}" DIRECTORY)
+
 set(Boost_FOUND TRUE)
 set(Boost_INCLUDE_DIRS "${SICNU_BOOST_INCLUDE_DIR}")
-set(Boost_LIBRARIES "/usr/lib/libboost_filesystem.so;/usr/lib/libboost_serialization.so")
-set(Boost_LIBRARY_DIRS "/usr/lib")
+set(Boost_LIBRARIES "${Boost_FILESYSTEM_LIBRARY};${Boost_SERIALIZATION_LIBRARY}")
 set(Boost_VERSION "1.84.0")
 set(Boost_VERSION_MAJOR 1)
 set(Boost_VERSION_MINOR 84)
@@ -15,8 +23,6 @@ set(Boost_VERSION_PATCH 0)
 set(Boost_FILESYSTEM_FOUND TRUE)
 set(Boost_SERIALIZATION_FOUND TRUE)
 set(Boost_INCLUDE_DIR "${SICNU_BOOST_INCLUDE_DIR}")
-set(Boost_FILESYSTEM_LIBRARY "/usr/lib/libboost_filesystem.so")
-set(Boost_SERIALIZATION_LIBRARY "/usr/lib/libboost_serialization.so")
 set(Boost_USE_STATIC_LIBS OFF)
 set(Boost_USE_MULTITHREADED ON)
 
@@ -30,13 +36,13 @@ endif()
 if(NOT TARGET Boost::filesystem)
     add_library(Boost::filesystem SHARED IMPORTED)
     set_target_properties(Boost::filesystem PROPERTIES
-        IMPORTED_LOCATION "/usr/lib/libboost_filesystem.so"
+        IMPORTED_LOCATION "${Boost_FILESYSTEM_LIBRARY}"
         INTERFACE_INCLUDE_DIRECTORIES "${SICNU_BOOST_INCLUDE_DIR}")
 endif()
 
 if(NOT TARGET Boost::serialization)
     add_library(Boost::serialization SHARED IMPORTED)
     set_target_properties(Boost::serialization PROPERTIES
-        IMPORTED_LOCATION "/usr/lib/libboost_serialization.so"
+        IMPORTED_LOCATION "${Boost_SERIALIZATION_LIBRARY}"
         INTERFACE_INCLUDE_DIRECTORIES "${SICNU_BOOST_INCLUDE_DIR}")
 endif()

@@ -62,7 +62,7 @@ QVariantMap BandMathAlgorithm::processAlgorithm( const QVariantMap &parameters,
 
     // Read all bands from all layers into BandData map (b1, b2, ...)
     BandMath::BandData bandData;
-    int totalPixels = nCols * nRows;
+    size_t totalPixels = static_cast<size_t>( nCols ) * static_cast<size_t>( nRows );
     int bandIndex = 1;
 
     for ( QgsRasterLayer *rl : rasterLayers )
@@ -79,7 +79,7 @@ QVariantMap BandMathAlgorithm::processAlgorithm( const QVariantMap &parameters,
 
             std::vector<float> &bandVec = bandData[bandIndex];
             bandVec.resize( totalPixels );
-            for ( int i = 0; i < totalPixels; ++i )
+            for ( size_t i = 0; i < totalPixels; ++i )
             {
                 int row = i / nCols;
                 int col = i % nCols;
@@ -127,4 +127,20 @@ QVariantMap BandMathAlgorithm::processAlgorithm( const QVariantMap &parameters,
     feedback->setProgress( 100 );
 
     return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
+}
+
+QString BandMathAlgorithm::shortHelpString() const
+{
+    return QObject::tr( "Evaluates arbitrary mathematical expressions on multi-band raster data. Bands are referenced sequentially as b1, b2, ..., bN across all selected input layers." );
+}
+
+QVariantMap BandMathAlgorithm::metadata() const
+{
+    return QVariantMap{
+        { QStringLiteral( "purpose" ), QObject::tr( "Performs band algebra and custom spectral index calculations using mathematical expressions." ) },
+        { QStringLiteral( "useCases" ), QStringList{ QObject::tr( "Custom index creation (e.g., customized NDVI)" ), QObject::tr( "Band ratioing" ), QObject::tr( "Thresholding and masking" ) } },
+        { QStringLiteral( "prerequisites" ), QStringList{ QObject::tr( "Input layers must be rasters." ), QObject::tr( "Expression must use valid variables (b1, b2, etc.)." ) } },
+        { QStringLiteral( "limitations" ), QStringList{ QObject::tr( "All input bands must have matching spatial extents and resolutions, or they will be resampled to the first layer's geometry." ) } },
+        { QStringLiteral( "workflowHints" ), QStringList{ QObject::tr( "Usually the first step in creating custom classification features or masks." ) } }
+    };
 }

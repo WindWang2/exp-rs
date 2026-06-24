@@ -2,6 +2,7 @@
 
 #include "rs_classification_task.h"
 
+#include "core/sicnu_logging.h"
 #include "rs_hungarian_assignment.h"
 
 #include <QElapsedTimer>
@@ -14,6 +15,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <gdal_priv.h>
 
@@ -34,8 +37,17 @@ void RsClassificationTask::cancel()
 
 bool RsClassificationTask::run()
 {
+  // Progress milestones: training finishes at 30%, tile prediction spans
+  // 30%-95%, and final bookkeeping fills to 100%.
+  constexpr double kProgressAfterTrain   = 30.0;
+  constexpr double kProgressPredictSpan  = 65.0;
+  constexpr double kProgressComplete     = 100.0;
+
   QElapsedTimer timer;
   timer.start();
+
+  SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Classification task started: algo=%1, bands=%2, output=%3" )
+    .arg( mCfg.algoName ).arg( mCfg.bandIndices.size() ).arg( QFileInfo( mCfg.outputRaster ).fileName() ) );
 
   if ( !mCfg.backend )
   {
@@ -59,19 +71,63 @@ bool RsClassificationTask::run()
       return false;
     }
   }
-  mFb.setProgress( 30.0 );
+  mFb.setProgress( kProgressAfterTrain );
   if ( mFb.isCanceled() )
   {
     mResult.errorMessage = QStringLiteral( "Cancelled" );
     return false;
   }
 
+  // Hungarian remapping table for K-Means to align cluster IDs (1..K) with true class IDs.
+  QHash<int, int> kmeansRemap;
+  if ( mCfg.algoName == QStringLiteral( "KMeans" ) && !mCfg.trainX.empty() && !mCfg.trainY.empty() )
+  {
+    try
+    {
+      const cv::Mat trainPred = mCfg.backend->predict( mCfg.trainX );
+      QSet<int> trueSet, clusterSet;
+      for ( int i = 0; i < mCfg.trainY.rows; ++i )
+        trueSet.insert( mCfg.trainY.at<int>( i, 0 ) );
+      for ( int i = 0; i < trainPred.rows; ++i )
+        clusterSet.insert( trainPred.at<int>( i, 0 ) );
+
+      if ( !trueSet.isEmpty() )
+      {
+        QList<int> tList( trueSet.begin(), trueSet.end() );
+        QList<int> cList( clusterSet.begin(), clusterSet.end() );
+        std::sort( tList.begin(), tList.end() );
+        std::sort( cList.begin(), cList.end() );
+        const int N = tList.size();
+        const int M = cList.size();
+        const int sz = std::max( N, M );
+
+        cv::Mat cost = cv::Mat::zeros( sz, sz, CV_64F );
+        for ( int i = 0; i < mCfg.trainY.rows; ++i )
+        {
+          const int ti = tList.indexOf( mCfg.trainY.at<int>( i, 0 ) );
+          const int ci = cList.indexOf( trainPred.at<int>( i, 0 ) );
+          if ( ti >= 0 && ci >= 0 )
+            cost.at<double>( ti, ci ) -= 1.0;
+        }
+
+        const QVector<int> assign = RsHungarianAssignment::solve( cost );
+        for ( int i = 0; i < N && i < assign.size(); ++i )
+        {
+          const int clusterIdx = assign[i];
+          if ( clusterIdx >= 0 && clusterIdx < M )
+            kmeansRemap[cList[clusterIdx]] = tList[i];
+        }
+      }
+    }
+    catch ( ... )
+    {
+      qWarning() << "KMeans Hungarian remap failed, using un-remapped cluster IDs";
+    }
+  }
+
   // 1b. Phase 10A Task 10.9 + 10A.1.1 — accuracy assessment on the held-out split.
   // NormalBayes / SVM: predictions are already in class-ID space.
-  // K-Means: cluster IDs are an arbitrary permutation of the ROI class IDs;
-  // remap via Hungarian min-cost assignment on the negated overlap matrix
-  // before feeding RsAccuracyAssessment. If K != |unique testY|, skip
-  // accuracy gracefully.
+  // K-Means: cluster IDs are remapped to true class IDs.
   if ( mCfg.testX.rows > 0 && mCfg.testY.rows > 0 )
   {
     try
@@ -82,45 +138,13 @@ bool RsClassificationTask::run()
 
       if ( mCfg.algoName == QStringLiteral( "KMeans" ) )
       {
-        // Hungarian-remap cluster IDs to ROI class IDs.
-        QSet<int> trueSet, clusterSet;
+        yt.reserve( mCfg.testY.rows );
+        yp.reserve( mCfg.testY.rows );
         for ( int i = 0; i < mCfg.testY.rows; ++i )
-          trueSet.insert( mCfg.testY.at<int>( i, 0 ) );
-        for ( int i = 0; i < pred.rows; ++i )
-          clusterSet.insert( pred.at<int>( i, 0 ) );
-
-        if ( trueSet.size() == clusterSet.size() && !trueSet.isEmpty() )
         {
-          QList<int> tList( trueSet.begin(), trueSet.end() );
-          QList<int> cList( clusterSet.begin(), clusterSet.end() );
-          std::sort( tList.begin(), tList.end() );
-          std::sort( cList.begin(), cList.end() );
-          const int N = tList.size();
-
-          cv::Mat cost = cv::Mat::zeros( N, N, CV_64F );
-          for ( int i = 0; i < mCfg.testY.rows; ++i )
-          {
-            const int ti = tList.indexOf( mCfg.testY.at<int>( i, 0 ) );
-            const int ci = cList.indexOf( pred.at<int>( i, 0 ) );
-            if ( ti >= 0 && ci >= 0 )
-              cost.at<double>( ti, ci ) -= 1.0;
-          }
-          const QVector<int> assign = RsHungarianAssignment::solve( cost );
-          QHash<int, int> remap;
-          for ( int i = 0; i < N && i < assign.size(); ++i )
-          {
-            if ( assign[i] >= 0 )
-              remap[cList[assign[i]]] = tList[i];
-          }
-          yt.reserve( mCfg.testY.rows );
-          yp.reserve( mCfg.testY.rows );
-          for ( int i = 0; i < mCfg.testY.rows; ++i )
-          {
-            yt.append( mCfg.testY.at<int>( i, 0 ) );
-            yp.append( remap.value( pred.at<int>( i, 0 ), -1 ) );
-          }
+          yt.append( mCfg.testY.at<int>( i, 0 ) );
+          yp.append( kmeansRemap.value( pred.at<int>( i, 0 ), pred.at<int>( i, 0 ) ) );
         }
-        // else: K != |unique testY|; leave yt/yp empty → skip accuracy.
       }
       else
       {
@@ -137,14 +161,14 @@ bool RsClassificationTask::run()
       if ( !yt.isEmpty() )
         mResult.accuracy = RsAccuracyAssessment::compute( yt, yp );
     }
-    catch ( const cv::Exception & )
+    catch ( const cv::Exception &e )
     {
-      // Accuracy failure must not abort the rest of the classification.
+      qWarning() << "Accuracy assessment failed:" << e.what();
     }
   }
 
   // 2. Open source raster
-  GDALAllRegister();
+  ensureGdalInit();
   GDALDataset *srcDs = static_cast<GDALDataset *>(
     GDALOpen( mCfg.sourceRaster.toUtf8().constData(), GA_ReadOnly ) );
   if ( !srcDs )
@@ -219,19 +243,19 @@ bool RsClassificationTask::run()
   dstDs->GetRasterBand( 1 )->SetColorInterpretation( GCI_PaletteIndex );
 
   // 4. Tile-streamed predict
-  constexpr int TILE = 256;
+  constexpr int kTileSize = 256;
   const int B = mCfg.bandIndices.size();
   const int totalTiles =
-    ( ( W + TILE - 1 ) / TILE ) * ( ( H + TILE - 1 ) / TILE );
+    ( ( W + kTileSize - 1 ) / kTileSize ) * ( ( H + kTileSize - 1 ) / kTileSize );
   int doneTiles = 0;
 
-  std::vector<float> tileBuf( static_cast<size_t>( TILE ) * TILE );
-  std::vector<uint8_t> outBuf( static_cast<size_t>( TILE ) * TILE );
+  std::vector<float> tileBuf( static_cast<size_t>( kTileSize ) * kTileSize );
+  std::vector<uint8_t> outBuf( static_cast<size_t>( kTileSize ) * kTileSize );
 
-  for ( int ty = 0; ty < H; ty += TILE )
+  for ( int ty = 0; ty < H; ty += kTileSize )
   {
-    const int th = std::min( TILE, H - ty );
-    for ( int tx = 0; tx < W; tx += TILE )
+    const int th = std::min( kTileSize, H - ty );
+    for ( int tx = 0; tx < W; tx += kTileSize )
     {
       if ( mFb.isCanceled() )
       {
@@ -241,7 +265,7 @@ bool RsClassificationTask::run()
         mResult.errorMessage = QStringLiteral( "Cancelled" );
         return false;
       }
-      const int tw = std::min( TILE, W - tx );
+      const int tw = std::min( kTileSize, W - tx );
       const int npx = th * tw;
 
       cv::Mat X( npx, B, CV_32F );
@@ -264,10 +288,47 @@ bool RsClassificationTask::run()
           X.at<float>( p, bi ) = tileBuf[p];
       }
 
-      const cv::Mat pred = mCfg.backend->predict( X );
+      cv::Mat pred;
+      try
+      {
+        pred = mCfg.backend->predict( X );
+      }
+      catch ( const cv::Exception &ex )
+      {
+        GDALClose( srcDs );
+        GDALClose( dstDs );
+        QFile::remove( mCfg.outputRaster );
+        mResult.errorMessage = QStringLiteral( "Classifier prediction threw OpenCV exception: %1" )
+                                 .arg( QString::fromStdString( ex.what() ) );
+        return false;
+      }
+      catch ( ... )
+      {
+        GDALClose( srcDs );
+        GDALClose( dstDs );
+        QFile::remove( mCfg.outputRaster );
+        mResult.errorMessage = QStringLiteral( "Classifier prediction threw unknown exception" );
+        return false;
+      }
+
+      // Verify prediction output size matches tile pixel count
+      if ( pred.rows < npx )
+      {
+        GDALClose( srcDs );
+        GDALClose( dstDs );
+        QFile::remove( mCfg.outputRaster );
+        mResult.errorMessage = QStringLiteral( "Classifier returned fewer predictions (%1) than expected (%2)" )
+                                   .arg( pred.rows ).arg( npx );
+        return false;
+      }
+
       for ( int p = 0; p < npx; ++p )
       {
-        const int v = pred.at<int>( p, 0 );
+        int v = pred.at<int>( p, 0 );
+        if ( mCfg.algoName == QStringLiteral( "KMeans" ) )
+        {
+          v = kmeansRemap.value( v, v );
+        }
         outBuf[p] = static_cast<uint8_t>( std::clamp( v, 0, 255 ) );
       }
       dstDs->GetRasterBand( 1 )->RasterIO(
@@ -275,7 +336,7 @@ bool RsClassificationTask::run()
         tw, th, GDT_Byte, 0, 0 );
 
       ++doneTiles;
-      mFb.setProgress( 30.0 + 65.0 * doneTiles / totalTiles );
+      mFb.setProgress( kProgressAfterTrain + kProgressPredictSpan * doneTiles / totalTiles );
     }
   }
 
@@ -285,6 +346,8 @@ bool RsClassificationTask::run()
   mResult.totalPixels = W * H;
   mResult.durationMs = static_cast<int>( timer.elapsed() );
   mResult.ok = true;
-  mFb.setProgress( 100.0 );
+  mFb.setProgress( kProgressComplete );
+  SICNU_LOG_SUCCESS( SicnuLogTags::Classification, QString( "Classification completed: %1 pixels, %2 ms" )
+    .arg( mResult.totalPixels ).arg( mResult.durationMs ) );
   return true;
 }

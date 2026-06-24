@@ -5,22 +5,14 @@
 // courses. Assumes a multivariate Gaussian PDF per class.
 #pragma once
 
-#include "rs_classifier_backend.h"
+#include "rs_classifier_cv_backend.h"
 
 #include <opencv2/ml.hpp>
 
-class QGIS_ANALYSIS_EXPORT RsClassifierNormalBayes : public RsClassifierBackend
+class QGIS_ANALYSIS_EXPORT RsClassifierNormalBayes : public RsClassifierCvBackend<cv::ml::NormalBayesClassifier>
 {
   public:
     RsClassifierNormalBayes();
 
-    bool fit( const cv::Mat &X, const cv::Mat &y ) override;
-    cv::Mat predict( const cv::Mat &X ) const override;
     QString name() const override { return QStringLiteral( "NormalBayes (最大似然)" ); }
-    bool save( const QString &path ) const override;
-    bool load( const QString &path ) override;
-    bool isFitted() const override { return mClf && mClf->isTrained(); }
-
-  private:
-    cv::Ptr<cv::ml::NormalBayesClassifier> mClf;
 };

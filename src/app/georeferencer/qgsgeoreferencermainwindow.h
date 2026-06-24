@@ -80,6 +80,11 @@ class QgsGeoreferencerMainWindow : public QMainWindow
     void onPointsChanged();
     /// Task 11.5.3 — repaint the REF canvas + params panel for the new mode.
     void onModeChanged( RsGeorefModeToggle::Mode m );
+    void loadPoints();
+    void savePoints();
+    void deleteSelectedGcp();
+    void deleteGcpRows( const QList<int> &rows );
+
 
   private:
     void setupMenus();

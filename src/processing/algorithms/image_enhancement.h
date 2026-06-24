@@ -50,12 +50,13 @@ public:
     static void gammaMapFilter(const float *input, float *output, int width, int height,
                                int kernelSize = 5, float noiseVariance = 1.0f);
 
+    /** Generic convolution with user-defined kernel */
+    static void convolve(const float *input, float *output, int width, int height,
+                         const float *kernel, int kernelSize);
+
 private:
     static void computeStats(const float *data, size_t count, float nodata,
                              float &min, float &max, float &mean, float &stddev);
-
-    static void convolve(const float *input, float *output, int width, int height,
-                         const float *kernel, int kernelSize);
     static void generateGaussianKernel(float *kernel, int size, float sigma);
 
     // PCA helpers

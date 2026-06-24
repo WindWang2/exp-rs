@@ -32,10 +32,7 @@ bool ProcessingPlugin::initialize(QgsMapCanvas *canvas, QgsLayerTreeView *layerT
     m_canvas = canvas;
     m_layerTree = layerTree;
 
-    // Register processing providers (sicnu_native merged into qgis_algorithms)
-    QgsApplication::processingRegistry()->addProvider(new GdalToolsProvider());
-    QgsApplication::processingRegistry()->addProvider(new OtbToolsProvider());
-    QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
+    // Providers are registered in main.cpp — no duplicate registration needed
 
     qDebug() << "ProcessingPlugin initialized";
     return true;
@@ -48,39 +45,9 @@ void ProcessingPlugin::unload()
 
 QWidget *ProcessingPlugin::createWidget(QWidget *parent)
 {
-    QDockWidget *dock = new QDockWidget("Processing Toolbox", parent);
-    dock->setObjectName("processingDock");
-    dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
-
-    m_toolboxView = new QgsProcessingToolboxTreeView(dock);
-    m_toolboxView->setRegistry(QgsApplication::processingRegistry());
-    dock->setWidget(m_toolboxView);
-
-    // Connect double-click to open algorithm dialog
-    connect(m_toolboxView, &QgsProcessingToolboxTreeView::doubleClicked, this, [this](const QModelIndex &index) {
-        const QgsProcessingAlgorithm *alg = m_toolboxView->algorithmForIndex(index);
-        if (!alg) return;
-
-        QgsProcessingAlgorithm *algorithm = alg->create();
-        if (!algorithm) return;
-
-        class SimpleAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
-        {
-        public:
-            using QgsProcessingAlgorithmDialogBase::QgsProcessingAlgorithmDialogBase;
-            QVariantMap createProcessingParameters(Flags = Flags()) override { return QVariantMap(); }
-            QgsProcessingContext *processingContext() override { return &mContext; }
-        private:
-            QgsProcessingContext mContext;
-        };
-
-        SimpleAlgorithmDialog *dlg = new SimpleAlgorithmDialog(m_toolboxView);
-        dlg->setAlgorithm(algorithm);
-        dlg->exec();
-        dlg->deleteLater();
-    });
-
-    return dock;
+    // Toolbox is created in main_window.cpp — this plugin provides a no-op widget
+    Q_UNUSED(parent);
+    return nullptr;
 }
 
 QList<QAction*> ProcessingPlugin::menuActions()

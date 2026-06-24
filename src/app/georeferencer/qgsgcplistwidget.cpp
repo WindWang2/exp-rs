@@ -20,6 +20,7 @@
 #include <QAbstractItemModel>
 #include <QFont>
 #include <QHeaderView>
+#include <QKeyEvent>
 
 QgsGCPListWidget::QgsGCPListWidget( QWidget *parent )
   : QTableView( parent )
@@ -86,3 +87,24 @@ void QgsGCPListWidget::onModelDataChanged( const QModelIndex &topLeft, const QMo
     emit pointTypeChanged( row, point->pointType() );
   }
 }
+
+void QgsGCPListWidget::keyPressEvent( QKeyEvent *event )
+{
+  if ( event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace )
+  {
+    QModelIndexList selected = selectionModel()->selectedRows();
+    if ( !selected.isEmpty() )
+    {
+      QList<int> rows;
+      rows.reserve( selected.size() );
+      for ( const QModelIndex &idx : selected )
+      {
+        rows.append( idx.row() );
+      }
+      emit deleteRowsRequested( rows );
+      return;
+    }
+  }
+  QTableView::keyPressEvent( event );
+}
+

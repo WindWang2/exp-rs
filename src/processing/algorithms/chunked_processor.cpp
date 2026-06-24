@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <QtConcurrent>
 #include <QVector>
-#include <QFeedback>
+#include <qgsfeedback.h>
 
 ChunkedProcessor::ChunkedProcessor(int width, int height, int overlap, int chunkHeight)
     : m_width(width)
@@ -33,7 +33,7 @@ void ChunkedProcessor::buildChunks(int chunkHeight)
     }
 }
 
-bool ChunkedProcessor::process(const ChunkCallback &callback, QFeedback *feedback)
+bool ChunkedProcessor::process(const ChunkCallback &callback, QgsFeedback *feedback)
 {
     if (m_chunks.empty())
         return true;

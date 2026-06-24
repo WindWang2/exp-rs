@@ -2,6 +2,7 @@ add_library(sicnu_processing SHARED
     tools/tool_path_manager.cpp
 
     gdal/gdal_dataset_wrapper.cpp
+    gdal/gdal_async_reader.cpp
     gdal/gdal_error_handler.cpp
 
     algorithms/spectral_indices.cpp
@@ -10,10 +11,15 @@ add_library(sicnu_processing SHARED
     algorithms/change_detection.cpp
     algorithms/mosaic.cpp
     algorithms/image_enhancement.cpp
+    algorithms/chunked_processor.cpp
+    algorithms/terrain_analysis.cpp
+    algorithms/image_fusion.cpp
+    algorithms/vector_optimizer.cpp
 
     framework/processing_cache.cpp
     framework/progress_callback.cpp
     framework/error_reporter.cpp
+    framework/input_validator.cpp
 
     providers/gdal_tools/provider.cpp
     providers/gdal_tools/gdal_tool_wrapper.cpp
@@ -66,6 +72,9 @@ add_library(sicnu_processing SHARED
     providers/otb_tools/algorithms/otb_pixel_info.cpp
     providers/otb_tools/algorithms/otb_read_image_info.cpp
 
+    providers/generic_cli/provider.cpp
+    providers/generic_cli/generic_cli_algorithm.cpp
+
     providers/qgis_algorithms/provider.cpp
     providers/qgis_algorithms/algorithms/raster/raster_calculator.cpp
     providers/qgis_algorithms/algorithms/raster/raster_resample.cpp
@@ -91,6 +100,20 @@ add_library(sicnu_processing SHARED
     providers/qgis_algorithms/algorithms/remote_sensing/band_math_algorithm.cpp
     providers/qgis_algorithms/algorithms/remote_sensing/spectral_index_algorithm.cpp
     providers/qgis_algorithms/algorithms/remote_sensing/atmospheric_correction_algorithm.cpp
+
+    providers/qgis_algorithms/algorithms/native/native_centroids.cpp
+    providers/qgis_algorithms/algorithms/native/native_convex_hull.cpp
+    providers/qgis_algorithms/algorithms/native/native_simplify.cpp
+    providers/qgis_algorithms/algorithms/native/native_clip.cpp
+    providers/qgis_algorithms/algorithms/native/native_intersection.cpp
+    providers/qgis_algorithms/algorithms/native/native_union.cpp
+    providers/qgis_algorithms/algorithms/native/native_difference.cpp
+    providers/qgis_algorithms/algorithms/native/native_extract_by_attribute.cpp
+    providers/qgis_algorithms/algorithms/native/native_clip_raster.cpp
+    providers/qgis_algorithms/algorithms/native/native_raster_statistics.cpp
+    providers/qgis_algorithms/algorithms/native/native_hillshade.cpp
+    providers/qgis_algorithms/algorithms/native/native_reproject_layer.cpp
+    providers/qgis_algorithms/algorithms/native/native_assign_projection.cpp
 )
 
 target_include_directories(sicnu_processing PRIVATE
@@ -101,9 +124,7 @@ target_include_directories(sicnu_processing PRIVATE
 target_link_libraries(sicnu_processing PRIVATE
     Qt6::Core
     Qt6::Gui
-    Qt6::Widgets
     qgis_core
-    qgis_gui
     GDAL::GDAL
 )
 

@@ -105,6 +105,113 @@ Qgis::ProcessingAlgorithmFlags QgsProcessingAlgorithm::flags() const
   return Qgis::ProcessingAlgorithmFlag::SupportsBatch | Qgis::ProcessingAlgorithmFlag::CanCancel;
 }
 
+QVariantMap QgsProcessingAlgorithm::toJsonSchema() const
+{
+  QVariantMap schema;
+  schema[QStringLiteral("$schema")] = QStringLiteral("http://json-schema.org/draft-07/schema#");
+  schema[QStringLiteral("title")] = id();
+  
+  QString desc = displayName();
+  QString help = shortHelpString();
+  if (!help.isEmpty())
+  {
+    desc += QStringLiteral(" - ") + help;
+  }
+  schema[QStringLiteral("description")] = desc;
+  schema[QStringLiteral("type")] = QStringLiteral("object");
+
+  QVariantMap properties;
+  QStringList required;
+
+  const QgsProcessingParameterDefinitions params = parameterDefinitions();
+  for (const QgsProcessingParameterDefinition *param : params)
+  {
+    if (!param)
+      continue;
+
+    QVariantMap prop;
+    prop[QStringLiteral("title")] = param->description();
+    
+    QString jsonType = QStringLiteral("string"); // default fallback
+    QString paramType = param->type();
+
+    if (paramType == QStringLiteral("boolean"))
+    {
+      jsonType = QStringLiteral("boolean");
+    }
+    else if (paramType == QStringLiteral("number"))
+    {
+      const QgsProcessingParameterNumber *numParam = dynamic_cast<const QgsProcessingParameterNumber *>(param);
+      if (numParam && numParam->dataType() == Qgis::ProcessingNumberParameterType::Integer)
+      {
+        jsonType = QStringLiteral("integer");
+      }
+      else
+      {
+        jsonType = QStringLiteral("number");
+      }
+      if (numParam)
+      {
+        prop[QStringLiteral("minimum")] = numParam->minimum();
+        prop[QStringLiteral("maximum")] = numParam->maximum();
+      }
+    }
+    else if (paramType == QStringLiteral("enum"))
+    {
+      const QgsProcessingParameterEnum *enumParam = dynamic_cast<const QgsProcessingParameterEnum *>(param);
+      if (enumParam)
+      {
+        if (enumParam->allowMultiple())
+        {
+          jsonType = QStringLiteral("array");
+          QVariantMap items;
+          items[QStringLiteral("type")] = QStringLiteral("string");
+          items[QStringLiteral("enum")] = enumParam->options();
+          prop[QStringLiteral("items")] = items;
+        }
+        else
+        {
+          jsonType = QStringLiteral("string");
+          prop[QStringLiteral("enum")] = enumParam->options();
+        }
+      }
+    }
+    else if (paramType == QStringLiteral("raster") || 
+             paramType == QStringLiteral("vector") ||
+             paramType == QStringLiteral("band") ||
+             paramType == QStringLiteral("field") ||
+             paramType == QStringLiteral("extent") ||
+             paramType == QStringLiteral("crs"))
+    {
+      jsonType = QStringLiteral("string");
+    }
+
+    prop[QStringLiteral("type")] = jsonType;
+    prop[QStringLiteral("description")] = param->type(); // expose QGIS parameter type
+
+    if (param->defaultValue().isValid())
+    {
+      prop[QStringLiteral("default")] = param->defaultValue();
+    }
+
+    bool isOptional = param->flags() & Qgis::ProcessingParameterFlag::Optional;
+    if (!isOptional && !param->isDestination())
+    {
+      required.append(param->name());
+    }
+
+    properties[param->name()] = prop;
+  }
+
+  schema[QStringLiteral("properties")] = properties;
+  if (!required.isEmpty())
+  {
+    schema[QStringLiteral("required")] = required;
+  }
+
+  return schema;
+}
+
 bool QgsProcessingAlgorithm::canExecute( QString * ) const
 {
   return true;

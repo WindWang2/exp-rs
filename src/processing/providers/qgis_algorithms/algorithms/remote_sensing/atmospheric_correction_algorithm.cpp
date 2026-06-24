@@ -61,7 +61,7 @@ QVariantMap AtmosphericCorrectionAlgorithm::processAlgorithm( const QVariantMap 
     if ( nCols <= 0 || nRows <= 0 )
         throw QgsProcessingException( QObject::tr( "Invalid raster dimensions" ) );
 
-    int totalPixels = nCols * nRows;
+    size_t totalPixels = static_cast<size_t>( nCols ) * static_cast<size_t>( nRows );
 
     // Read input DN band
     feedback->setProgressText( QObject::tr( "Reading input raster..." ) );
@@ -70,7 +70,7 @@ QVariantMap AtmosphericCorrectionAlgorithm::processAlgorithm( const QVariantMap 
         throw QgsProcessingException( QObject::tr( "Could not read input raster band" ) );
 
     std::vector<float> dnData( totalPixels );
-    for ( int i = 0; i < totalPixels; ++i )
+    for ( size_t i = 0; i < totalPixels; ++i )
     {
         int row = i / nCols;
         int col = i % nCols;
@@ -132,4 +132,20 @@ QVariantMap AtmosphericCorrectionAlgorithm::processAlgorithm( const QVariantMap 
     feedback->setProgress( 100 );
 
     return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
+}
+
+QString AtmosphericCorrectionAlgorithm::shortHelpString() const
+{
+    return QObject::tr( "Performs DOS (Dark Object Subtraction) atmospheric correction on a raster layer using DOS1 or DOS2 methods to convert digital numbers to surface reflectance." );
+}
+
+QVariantMap AtmosphericCorrectionAlgorithm::metadata() const
+{
+    return QVariantMap{
+        { QStringLiteral( "purpose" ), QObject::tr( "Applies simple atmospheric correction to satellite imagery." ) },
+        { QStringLiteral( "useCases" ), QStringList{ QObject::tr( "Converting raw DN values to surface reflectance" ), QObject::tr( "Pre-processing multi-temporal imagery for change detection" ) } },
+        { QStringLiteral( "prerequisites" ), QStringList{ QObject::tr( "Input raster with raw DN values." ) } },
+        { QStringLiteral( "limitations" ), QStringList{ QObject::tr( "Assumes the presence of a dark object in the scene." ), QObject::tr( "DOS2 requires sun elevation and acquisition details." ) } },
+        { QStringLiteral( "workflowHints" ), QStringList{ QObject::tr( "Should be run before computing spectral indices or performing classification to ensure physical consistency of reflectance values." ) } }
+    };
 }

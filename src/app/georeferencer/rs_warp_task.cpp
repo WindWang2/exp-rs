@@ -1,12 +1,13 @@
 #include "rs_warp_task.h"
 
+#include "core/sicnu_logging.h"
 #include <QFileInfo>
 
 #include "qgsgeoreftransform.h"
 
 RsWarpTask::RsWarpTask( const QString &in,
                         const QString &out,
-                        QgsGeorefTransform *transform,
+                        const QgsGeorefTransform *transform,
                         QgsImageWarper::ResamplingMethod r,
                         const QgsCoordinateReferenceSystem &destCrs,
                         double pixelSize )
@@ -14,26 +15,42 @@ RsWarpTask::RsWarpTask( const QString &in,
              QgsTask::CanCancel )
   , mIn( in )
   , mOut( out )
-  , mTransform( transform )
   , mResamp( r )
   , mDestCrs( destCrs )
   , mPixelSize( pixelSize )
 {
+  if ( transform )
+  {
+    mTransform.reset( dynamic_cast<QgsGeorefTransform *>( transform->clone().release() ) );
+  }
   connect( &mFb, &QgsFeedback::progressChanged,
            this, [this]( double p ) { setProgress( p ); } );
 }
 
+RsWarpTask::~RsWarpTask() = default;
+
 bool RsWarpTask::run()
 {
+  SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QString( "Warp task started: %1" ).arg( mIn ) );
   QgsImageWarper warper( &mFb );
   mResult = warper.warpFile(
-    mIn, mOut, mTransform, mResamp,
+    mIn, mOut, mTransform.get(), mResamp,
     /*useZeroAsTrans=*/false,
     /*zeroIsTransparent=*/false,
     mDestCrs,
     QSize(),
     mPixelSize, mPixelSize );
-  return mResult.status == QgsImageWarper::WarpStatus::Ok;
+  const bool ok = mResult.status == QgsImageWarper::WarpStatus::Ok;
+  if ( ok )
+  {
+    SICNU_LOG_SUCCESS( SicnuLogTags::Georeferencing, QString( "Warp task completed: %1 (%2 ms)" )
+      .arg( mOut ).arg( mResult.durationMs ) );
+  }
+  else
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, QString( "Warp task failed: %1" ).arg( mResult.errorMessage ) );
+  }
+  return ok;
 }
 
 void RsWarpTask::cancel()

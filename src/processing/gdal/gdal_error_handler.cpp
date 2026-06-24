@@ -1,7 +1,7 @@
 // src/processing/gdal/gdal_error_handler.cpp — GDAL error handler implementation
 #include "gdal_error_handler.h"
 
-GdalErrorHandler *GdalErrorHandler::s_activeHandler = nullptr;
+thread_local GdalErrorHandler *GdalErrorHandler::s_activeHandler = nullptr;
 
 GdalErrorHandler::GdalErrorHandler() = default;
 

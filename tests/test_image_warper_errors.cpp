@@ -28,10 +28,10 @@ TEST_CASE( "ImageWarper: unwritable output path returns GdalError", "[georef][wa
   const QString src = makeSynthetic64Raster( tmp.path() );
   REQUIRE_FALSE( src.isEmpty() );
 
-  // /dev/null/... is unwritable on Linux — GDALCreate() will fail with an
+  // Use a path in a non-existent directory — GDALCreate() will fail with an
   // OS error.  We don't care which exact status we get; only that it is one
   // of the two "real" failure modes and that an error message is set.
-  const QString out = QStringLiteral( "/dev/null/nope/out.tif" );
+  const QString out = QDir::tempPath() + QStringLiteral( "/sicnu_nonexistent_dir/nope/out.tif" );
 
   QgsGeorefTransform transform( TM::PolynomialOrder1 );
   QVector<QgsPointXY> s = { { 0, 0 }, { 63, 0 }, { 0, 63 } };

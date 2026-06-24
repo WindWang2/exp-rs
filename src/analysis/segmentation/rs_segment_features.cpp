@@ -1,5 +1,6 @@
 // rs_segment_features.cpp — Phase 10B Task 10B.1
 #include "rs_segment_features.h"
+#include "sicnu_logging.h"
 
 #include <gdal.h>
 #include <cpl_error.h>
@@ -15,17 +16,26 @@ RsSegmentFeatures::extract( const QString &rasterPath,
 {
     QMap<quint32, SegmentStat> result;
     if ( segMap.isEmpty() || bandIndices.isEmpty() )
+    {
+        SICNU_LOG_ERROR( SicnuLogTags::Segmentation, "Feature extraction: empty segment map or band indices" );
         return result;
+    }
+
+    SICNU_LOG_INFO( SicnuLogTags::Segmentation, QString( "Extracting features: %1 bands, %2 segments" )
+        .arg( bandIndices.size() ).arg( segMap.segmentCount() ) );
 
     // Open raster
     GDALDatasetH ds = GDALOpen( rasterPath.toUtf8().constData(), GA_ReadOnly );
     if ( !ds )
+    {
+        SICNU_LOG_ERROR( SicnuLogTags::Segmentation, QString( "Failed to open raster for feature extraction: %1" ).arg( rasterPath ) );
         return result;
+    }
 
     const int w = segMap.width();
     const int h = segMap.height();
     const int nBands = bandIndices.size();
-    const int nPixels = w * h;
+    const size_t nPixels = static_cast<size_t>(w) * static_cast<size_t>(h);
 
     // Read all requested bands into contiguous buffers
     QVector<QVector<float>> bandData( nBands );
@@ -173,6 +183,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         result[segId] = stat;
     }
 
+    SICNU_LOG_SUCCESS( SicnuLogTags::Segmentation, QString( "Feature extraction complete: %1 segment stats computed" ).arg( result.size() ) );
     return result;
 }
 

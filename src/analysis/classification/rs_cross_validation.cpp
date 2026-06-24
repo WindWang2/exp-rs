@@ -1,5 +1,6 @@
 // rs_cross_validation.cpp — Phase 10A.1.2 implementation.
 #include "rs_cross_validation.h"
+#include "sicnu_logging.h"
 
 #include <QHash>
 
@@ -15,19 +16,25 @@ RsCrossValidation::kFold( const cv::Mat &X, const cv::Mat &y,
   Result r;
   if ( X.empty() || y.empty() || X.rows != y.rows )
   {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification, "Cross-validation: empty or mismatched X/y" );
     r.errorMessage = QStringLiteral( "Empty or mismatched X/y" );
     return r;
   }
   if ( k < 2 )
   {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification, QString( "Cross-validation: k must be >= 2 (got %1)" ).arg( k ) );
     r.errorMessage = QStringLiteral( "k must be >= 2" );
     return r;
   }
   if ( !factory )
   {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification, "Cross-validation: no backend factory provided" );
     r.errorMessage = QStringLiteral( "No backend factory" );
     return r;
   }
+
+  SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Starting %1-fold cross-validation: %2 samples, %3 features" )
+      .arg( k ).arg( X.rows ).arg( X.cols ) );
 
   // Group sample indices by class label.
   QHash<int, QVector<int>> byClass;
@@ -130,6 +137,7 @@ RsCrossValidation::kFold( const cv::Mat &X, const cv::Mat &y,
 
   if ( accs.isEmpty() )
   {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification, QString( "Cross-validation: all %1 folds failed" ).arg( k ) );
     r.errorMessage = QStringLiteral( "All folds failed" );
     return r;
   }
@@ -145,5 +153,7 @@ RsCrossValidation::kFold( const cv::Mat &X, const cv::Mat &y,
     sq += ( a - r.meanAccuracy ) * ( a - r.meanAccuracy );
   r.stdAccuracy = std::sqrt( sq / accs.size() );
 
+  SICNU_LOG_SUCCESS( SicnuLogTags::Classification, QString( "Cross-validation complete: mean=%1, std=%2, folds=%3" )
+      .arg( r.meanAccuracy, 0, 'f', 4 ).arg( r.stdAccuracy, 0, 'f', 4 ).arg( accs.size() ) );
   return r;
 }

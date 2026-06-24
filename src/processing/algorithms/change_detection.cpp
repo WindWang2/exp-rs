@@ -1,5 +1,7 @@
 // src/processing/algorithms/change_detection.cpp — Change detection algorithms
 #include "change_detection.h"
+#include "core/sicnu_logging.h"
+#include "framework/input_validator.h"
 
 #include <cmath>
 #include <algorithm>
@@ -10,8 +12,13 @@ namespace ChangeDetection
 
 bool difference(const float *before, const float *after, float *out, size_t count)
 {
-    if (!before || !after || !out || count == 0)
+    if (!before || !after || !out) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "difference: null pointer argument");
         return false;
+    }
+    if (count == 0) return false;
+
+    SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Change detection (difference): %1 pixels" ).arg( count ) );
 
     for (size_t i = 0; i < count; ++i)
         out[i] = std::abs(after[i] - before[i]);
@@ -21,8 +28,11 @@ bool difference(const float *before, const float *after, float *out, size_t coun
 
 bool normalizedDifference(const float *before, const float *after, float *out, size_t count)
 {
-    if (!before || !after || !out || count == 0)
+    if (!before || !after || !out) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "normalizedDifference: null pointer argument");
         return false;
+    }
+    if (count == 0) return false;
 
     for (size_t i = 0; i < count; ++i) {
         float sum = after[i] + before[i];
@@ -37,11 +47,20 @@ bool normalizedDifference(const float *before, const float *after, float *out, s
 
 bool changeMask(const float *diff, uint8_t *mask, size_t count, float threshold)
 {
-    if (!diff || !mask || count == 0)
+    if (!diff || !mask) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "changeMask: null pointer argument");
         return false;
+    }
+    if (count == 0) return false;
 
-    for (size_t i = 0; i < count; ++i)
-        mask[i] = (diff[i] >= threshold) ? 1 : 0;
+    SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Change mask: %1 pixels, threshold=%2" ).arg( count ).arg( threshold ) );
+
+    for (size_t i = 0; i < count; ++i) {
+        if (std::isnan(diff[i]))
+            mask[i] = 255; // No data
+        else
+            mask[i] = (diff[i] >= threshold) ? 1 : 0;
+    }
 
     return true;
 }
@@ -49,27 +68,62 @@ bool changeMask(const float *diff, uint8_t *mask, size_t count, float threshold)
 ChangeStats statistics(const float *diff, size_t count)
 {
     ChangeStats stats;
-    if (!diff || count == 0)
+    if (!diff) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "statistics: null pointer argument");
         return stats;
+    }
+    if (count == 0) return stats;
 
     stats.count = count;
-    stats.min = diff[0];
-    stats.max = diff[0];
+
+    // Find first non-NaN value for initialization
+    bool foundValid = false;
+    size_t firstValid = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (!std::isnan(diff[i])) {
+            firstValid = i;
+            foundValid = true;
+            break;
+        }
+    }
+
+    if (!foundValid) {
+        // All values are NaN
+        stats.min = 0.0f;
+        stats.max = 0.0f;
+        stats.mean = 0.0f;
+        stats.stddev = 0.0f;
+        return stats;
+    }
+
+    stats.min = diff[firstValid];
+    stats.max = diff[firstValid];
 
     double sum = 0.0;
+    size_t validCount = 0;
     for (size_t i = 0; i < count; ++i) {
+        if (std::isnan(diff[i])) continue;
         sum += diff[i];
         stats.min = std::min(stats.min, diff[i]);
         stats.max = std::max(stats.max, diff[i]);
+        validCount++;
     }
-    stats.mean = static_cast<float>(sum / count);
+
+    if (validCount == 0) {
+        stats.mean = 0.0f;
+        stats.stddev = 0.0f;
+        return stats;
+    }
+
+    stats.mean = static_cast<float>(sum / validCount);
 
     double sqSum = 0.0;
     for (size_t i = 0; i < count; ++i) {
+        if (std::isnan(diff[i])) continue;
         double d = diff[i] - stats.mean;
         sqSum += d * d;
     }
-    stats.stddev = static_cast<float>(std::sqrt(sqSum / count));
+    stats.stddev = static_cast<float>(std::sqrt(sqSum / validCount));
 
     return stats;
 }

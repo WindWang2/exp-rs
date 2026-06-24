@@ -13,6 +13,7 @@
  ***************************************************************************/
 
 #include "qgsrpcgcptransformer.h"
+#include "sicnu_logging.h"
 
 #include <cpl_conv.h>
 #include <cpl_string.h>
@@ -40,9 +41,9 @@ void QgsRpcGcpTransformer::freeTransformer()
   }
 }
 
-QgsGcpTransformerInterface *QgsRpcGcpTransformer::clone() const
+std::unique_ptr<QgsGcpTransformerInterface> QgsRpcGcpTransformer::clone() const
 {
-  auto *c = new QgsRpcGcpTransformer( mSrc, mDem );
+  auto c = std::make_unique<QgsRpcGcpTransformer>( mSrc, mDem );
   c->mDemPath = mDemPath;
   c->mZOffset = mZOffset;
   c->mUseGcpRefinement = mUseGcpRefinement;
@@ -66,16 +67,26 @@ bool QgsRpcGcpTransformer::updateParametersFromGcps( const QVector<QgsPointXY> &
   freeTransformer();
 
   if ( mSrc.isEmpty() )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, "RPC transformer: source raster path is empty" );
     return false;
+  }
+
+  SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QString( "Initializing RPC transformer: src=%1, GCPs=%2, refine=%3" )
+      .arg( mSrc ).arg( source.size() ).arg( mUseGcpRefinement ) );
 
   GDALAllRegister();
   GDALDataset *ds = static_cast<GDALDataset *>( GDALOpen( mSrc.toUtf8().constData(), GA_ReadOnly ) );
   if ( !ds )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, QString( "Failed to open source raster for RPC: %1" ).arg( mSrc ) );
     return false;
+  }
 
   CSLConstList md = ds->GetMetadata( "RPC" );
   if ( !md )
   {
+    SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, "No RPC metadata found in source raster" );
     GDALClose( ds );
     return false;
   }
@@ -83,6 +94,7 @@ bool QgsRpcGcpTransformer::updateParametersFromGcps( const QVector<QgsPointXY> &
   GDALRPCInfoV2 rpc;
   if ( !GDALExtractRPCInfoV2( md, &rpc ) )
   {
+    SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, "Failed to extract RPC info from metadata" );
     GDALClose( ds );
     return false;
   }
@@ -145,6 +157,11 @@ bool QgsRpcGcpTransformer::updateParametersFromGcps( const QVector<QgsPointXY> &
 
   CSLDestroy( opts );
   GDALClose( ds );
+
+  if ( mTransformArg )
+    SICNU_LOG_SUCCESS( SicnuLogTags::Georeferencing, "RPC transformer initialized successfully" );
+  else
+    SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, "Failed to create RPC transformer" );
 
   return mTransformArg != nullptr;
 }

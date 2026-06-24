@@ -55,4 +55,4 @@ namespace AtmosphericCorrection
      * @return transmittance in (0, 1]
      */
     float estimateTransmittance(float airmass);
-}
+} // namespace AtmosphericCorrection

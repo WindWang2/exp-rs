@@ -6,6 +6,7 @@
 #include <QString>
 
 class QgsRasterLayer;
+typedef void *GDALDatasetH;
 
 /**
  * \brief Raster band histogram widget.
@@ -21,6 +22,7 @@ class HistogramWidget : public QWidget
 
 public:
     explicit HistogramWidget( QWidget *parent = nullptr );
+    ~HistogramWidget() override;
 
     /**
      * Set the raster layer to analyse.
@@ -58,9 +60,14 @@ private:
     void drawAxes( QPainter &painter, const QRect &chartRect );
     void drawBars( QPainter &painter, const QRect &chartRect );
     void drawStats( QPainter &painter, const QRect &statsRect );
+    void closeDataset();
 
     QgsRasterLayer *m_rasterLayer = nullptr;
     int m_band = 1;
+
+    // Cached GDAL dataset handle
+    GDALDatasetH m_cachedDataset = nullptr;
+    QString m_cachedSource;
 
     // Histogram bins: index -> count
     QVector<double> m_histogram;

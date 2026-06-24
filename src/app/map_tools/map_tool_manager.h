@@ -103,4 +103,7 @@ private:
     QgsMapToolChamferFillet *m_chamferFilletTool = nullptr;
     QgsMapToolFeatureArray *m_featureArrayTool = nullptr;
     QgsVertexTool *m_vertexTool = nullptr;
+
+    // Store all tools for cleanup
+    QList<QgsMapTool*> m_allTools;
 };

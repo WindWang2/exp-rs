@@ -52,30 +52,56 @@ void RsRoiToolMagicWand::canvasReleaseEvent( QgsMapMouseEvent *e )
     return;
   }
 
-  // Read full image into a CV_32FC(B) cv::Mat (band-interleaved per-pixel).
-  cv::Mat img( H, W, CV_32FC( B ) );
-  std::vector<float> band( static_cast<size_t>( W ) * static_cast<size_t>( H ) );
+  // Restrict magic wand search space to a local window to prevent massive
+  // memory usage and UI freeze.  halfWindow=256 yields a 513x513 search
+  // window (~263k pixels), which keeps the peak memory for a multi-band
+  // flood-fill under ~10 MB even with 8+ bands.
+  constexpr int kMagicWandHalfWindow = 256;
+  const int halfWindow = kMagicWandHalfWindow;
+  const int colStart = std::max( 0, sc - halfWindow );
+  const int rowStart = std::max( 0, sr - halfWindow );
+  const int colEnd = std::min( W - 1, sc + halfWindow );
+  const int rowEnd = std::min( H - 1, sr + halfWindow );
+  const int winW = colEnd - colStart + 1;
+  const int winH = rowEnd - rowStart + 1;
+
+  cv::Mat img( winH, winW, CV_32FC( B ) );
+  std::vector<float> band( static_cast<size_t>( winW ) * static_cast<size_t>( winH ) );
   for ( int b = 0; b < B; ++b )
   {
     if ( ds->GetRasterBand( b + 1 )->RasterIO(
-           GF_Read, 0, 0, W, H, band.data(), W, H, GDT_Float32, 0, 0 )
+           GF_Read, colStart, rowStart, winW, winH, band.data(), winW, winH, GDT_Float32, 0, 0 )
          != CE_None )
     {
+      qWarning() << "RsRoiToolMagicWand: failed to read band" << (b + 1);
       GDALClose( ds );
       return;
     }
-    for ( int r = 0; r < H; ++r )
+    for ( int r = 0; r < winH; ++r )
     {
       float *rowPtr = reinterpret_cast<float *>( img.ptr( r ) );
-      for ( int c = 0; c < W; ++c )
-        rowPtr[c * B + b] = band[static_cast<size_t>( r ) * W + c];
+      for ( int c = 0; c < winW; ++c )
+        rowPtr[c * B + b] = band[static_cast<size_t>( r ) * winW + c];
     }
   }
   GDALClose( ds );
 
-  const QSet<quint64> pixels = RsFloodFill::run( img, sr, sc, mTolerance );
-  if ( pixels.isEmpty() )
+  const int localSr = sr - rowStart;
+  const int localSc = sc - colStart;
+  const QSet<quint64> localPixels = RsFloodFill::run( img, localSr, localSc, mTolerance );
+  if ( localPixels.isEmpty() )
     return;
+
+  QSet<quint64> pixels;
+  pixels.reserve( localPixels.size() );
+  for ( quint64 i : localPixels )
+  {
+    const int lr = static_cast<int>( i / quint64( winW ) );
+    const int lc = static_cast<int>( i % quint64( winW ) );
+    const int r = lr + rowStart;
+    const int c = lc + colStart;
+    pixels.insert( static_cast<quint64>( r ) * static_cast<quint64>( W ) + static_cast<quint64>( c ) );
+  }
 
   // Bbox of selected pixels (v1 approximation).
   quint64 rMin = std::numeric_limits<quint64>::max();

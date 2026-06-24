@@ -168,5 +168,29 @@
     <file alias="zon_l_st_ts">icons/Zon_l_St_ts.svg</file>
     <file alias="zoo_in">icons/Zoo_In.svg</file>
     <file alias="zoo_out">icons/Zoo_Out.svg</file>
+    <file alias="mActionAddPart">icons/mActionAddPart.svg</file>
+    <file alias="mActionAddRing">icons/mActionAddRing.svg</file>
+    <file alias="mActionCaptureLine">icons/mActionCaptureLine.svg</file>
+    <file alias="mActionCapturePoint">icons/mActionCapturePoint.svg</file>
+    <file alias="mActionCapturePolygon">icons/mActionCapturePolygon.svg</file>
+    <file alias="mActionChamferFillet">icons/mActionChamferFillet.svg</file>
+    <file alias="mActionDeletePart">icons/mActionDeletePart.svg</file>
+    <file alias="mActionDeleteRing">icons/mActionDeleteRing.svg</file>
+    <file alias="mActionDeleteSelectedFeatures">icons/mActionDeleteSelectedFeatures.svg</file>
+    <file alias="mActionFeatureArray">icons/mActionFeatureArray.svg</file>
+    <file alias="mActionFillRing">icons/mActionFillRing.svg</file>
+    <file alias="mActionMoveFeature">icons/mActionMoveFeature.svg</file>
+    <file alias="mActionOffsetCurve">icons/mActionOffsetCurve.svg</file>
+    <file alias="mActionReshape">icons/mActionReshape.svg</file>
+    <file alias="mActionReverseLine">icons/mActionReverseLine.svg</file>
+    <file alias="mActionRotateFeature">icons/mActionRotateFeature.svg</file>
+    <file alias="mActionSaveEdits">icons/mActionSaveEdits.svg</file>
+    <file alias="mActionScaleFeature">icons/mActionScaleFeature.svg</file>
+    <file alias="mActionSelectRectangle">icons/mActionSelectRectangle.svg</file>
+    <file alias="mActionSimplify">icons/mActionSimplify.svg</file>
+    <file alias="mActionSplitFeatures">icons/mActionSplitFeatures.svg</file>
+    <file alias="mActionToggleEditing">icons/mActionToggleEditing.svg</file>
+    <file alias="mActionTrimExtendFeature">icons/mActionTrimExtendFeature.svg</file>
+    <file alias="mActionVertexTool">icons/mActionVertexTool.svg</file>
   </qresource>
 </RCC>
