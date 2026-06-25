@@ -1,5 +1,6 @@
 #include "qgsclassificationmainwindow.h"
 
+#include "processing/algorithms/math_utils.h"
 #include "core/sicnu_logging.h"
 #include "rs_accuracy_dialog.h"
 #include "rs_class_def.h"
@@ -1057,12 +1058,15 @@ void QgsClassificationMainWindow::recomputeSpectralCurves()
 
     for ( int bi = 0; bi < bands.size(); ++bi )
     {
-      double sum = bandSums[classId][bi];
-      double sumSq = bandSumSq[classId][bi];
-      double mean = sum / n;
-      double var = std::max( 0.0, sumSq / n - mean * mean );
-      curve.bandMeans[bi] = mean;
-      curve.bandStds[bi] = std::sqrt( var );
+      MathUtils::AccumulatorStats accStats;
+      accStats.count = n;
+      accStats.sum = bandSums[classId][bi];
+      accStats.sumSq = bandSumSq[classId][bi];
+      accStats.min = 0;
+      accStats.max = 0;
+      MathUtils::Stats s = MathUtils::computeStatsFromAccumulators(accStats);
+      curve.bandMeans[bi] = s.mean;
+      curve.bandStds[bi] = s.stddev;
     }
     curves.push_back( curve );
   }

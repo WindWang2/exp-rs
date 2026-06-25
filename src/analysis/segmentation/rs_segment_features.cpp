@@ -1,5 +1,6 @@
 // rs_segment_features.cpp — Phase 10B Task 10B.1
 #include "rs_segment_features.h"
+#include "../../processing/algorithms/math_utils.h"
 #include "sicnu_logging.h"
 
 #include <gdal.h>
@@ -174,10 +175,15 @@ RsSegmentFeatures::extract( const QString &rasterPath,
 
         for ( int b = 0; b < nBands; ++b )
         {
-            stat.mean[b] = acc.sum[b] / acc.count;
-            const double variance = acc.sumSq[b] / acc.count
-                                    - stat.mean[b] * stat.mean[b];
-            stat.stddev[b] = std::sqrt( std::max( 0.0, variance ) );
+            MathUtils::AccumulatorStats accStats;
+            accStats.count = acc.count;
+            accStats.sum = acc.sum[b];
+            accStats.sumSq = acc.sumSq[b];
+            accStats.min = static_cast<float>(acc.minVal[b]);
+            accStats.max = static_cast<float>(acc.maxVal[b]);
+            MathUtils::Stats s = MathUtils::computeStatsFromAccumulators(accStats);
+            stat.mean[b] = s.mean;
+            stat.stddev[b] = s.stddev;
         }
 
         result[segId] = stat;

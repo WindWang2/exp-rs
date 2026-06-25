@@ -1,5 +1,6 @@
 // rs_simple_segmenter.cpp — Phase 10B Task 10B.3
 #include "rs_simple_segmenter.h"
+#include "../../processing/algorithms/math_utils.h"
 #include "sicnu_logging.h"
 
 #include <cmath>
@@ -162,16 +163,10 @@ void RsSimpleSegmenter::gaussianSmooth( QVector<float> &data, int w, int h, int 
 
 QVector<int> RsSimpleSegmenter::quantize( const float *data, size_t n, int bins, float nodata )
 {
-    // Find min/max excluding nodata
-    float vmin = std::numeric_limits<float>::max();
-    float vmax = std::numeric_limits<float>::lowest();
-    for ( size_t i = 0; i < n; ++i )
-    {
-        if ( data[i] == nodata || std::isnan( data[i] ) )
-            continue;
-        vmin = std::min( vmin, data[i] );
-        vmax = std::max( vmax, data[i] );
-    }
+    // Find min/max excluding nodata using shared utility
+    MathUtils::Stats stats = MathUtils::computeStatsWithNodata(data, n, nodata);
+    float vmin = stats.min;
+    float vmax = stats.max;
 
     if ( vmin >= vmax )
     {
