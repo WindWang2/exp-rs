@@ -207,6 +207,10 @@ public slots:
     // OBIA Classification (Phase 10B Task 10B.5)
     void openObiaWindow();
 
+    // Layer loading (public for template helper in main_window_processing.cpp)
+    void loadRasterLayer(const QString &filePath);
+    void loadVectorLayer(const QString &filePath);
+
 private slots:
     void onProjectRead(const QDomDocument &doc);
     void onProjectWrite(QDomDocument &doc);
@@ -233,8 +237,6 @@ private:
     QgsLayerTreeGroup *findOrCreateGroup(const QString &name);
     QgsVectorLayer *currentVectorLayer();
     void updateEditingUI(QgsVectorLayer *vlayer);
-    void loadRasterLayer(const QString &filePath);
-    void loadVectorLayer(const QString &filePath);
     void showLayerProperties(QgsMapLayer *layer);
     void refreshCanvasLayers();
     void openProcessingAlgorithm(const QString &algorithmId);

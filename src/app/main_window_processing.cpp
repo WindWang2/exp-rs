@@ -33,6 +33,50 @@
 #include <QStatusBar>
 
 // ---------------------------------------------------------------------------
+// Helper: find active/selected raster layer with fallback
+// ---------------------------------------------------------------------------
+
+static QgsRasterLayer *findActiveRaster(QgisDesktopWindow *win)
+{
+    // Try active layer first
+    QgsRasterLayer *rl = qobject_cast<QgsRasterLayer*>(win->activeLayer());
+    if (rl) return rl;
+
+    // Try selected layers
+    for (QgsMapLayer *layer : win->selectedLayers()) {
+        if (layer->type() == Qgis::LayerType::Raster)
+            return qobject_cast<QgsRasterLayer*>(layer);
+    }
+
+    // Fallback: first raster layer in project
+    for (QgsMapLayer *layer : QgsProject::instance()->mapLayers().values()) {
+        if (layer->type() == Qgis::LayerType::Raster)
+            return qobject_cast<QgsRasterLayer*>(layer);
+    }
+
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: open a raster processing dialog and load result
+// ---------------------------------------------------------------------------
+
+template<typename DialogType>
+static void openRasterDialog(QgisDesktopWindow *win, const QString &title,
+                             QgsRasterLayer *rasterLayer = nullptr)
+{
+    DialogType dialog(win);
+    if (rasterLayer) {
+        dialog.setRasterLayer(rasterLayer);
+    }
+    if (dialog.exec() == QDialog::Accepted) {
+        QString outPath = dialog.outputPath();
+        if (!outPath.isEmpty() && QFile::exists(outPath))
+            win->loadRasterLayer(outPath);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Processing algorithm dialog (from Processing Toolbox)
 // ---------------------------------------------------------------------------
 
@@ -77,28 +121,13 @@ void QgisDesktopWindow::openImageEnhancementPanel()
 
 void QgisDesktopWindow::openBandMathDialog()
 {
-    QgsRasterLayer *rasterLayer = qobject_cast<QgsRasterLayer*>(activeLayer());
-    if (!rasterLayer) {
-        for (QgsMapLayer *layer : QgsProject::instance()->mapLayers().values()) {
-            if (layer->type() == Qgis::LayerType::Raster) {
-                rasterLayer = qobject_cast<QgsRasterLayer*>(layer);
-                break;
-            }
-        }
-    }
+    QgsRasterLayer *rasterLayer = findActiveRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("Band Math"),
                                  tr("Please select a raster layer first."));
         return;
     }
-
-    BandMathDialog dialog(this);
-    dialog.setRasterLayer(rasterLayer);
-    if (dialog.exec() == QDialog::Accepted) {
-        QString outPath = dialog.outputPath();
-        if (!outPath.isEmpty() && QFile::exists(outPath))
-            loadRasterLayer(outPath);
-    }
+    openRasterDialog<BandMathDialog>(this, tr("Band Math"), rasterLayer);
 }
 
 // ---------------------------------------------------------------------------
@@ -107,28 +136,13 @@ void QgisDesktopWindow::openBandMathDialog()
 
 void QgisDesktopWindow::openSpectralIndexDialog()
 {
-    QgsRasterLayer *rasterLayer = qobject_cast<QgsRasterLayer*>(activeLayer());
-    if (!rasterLayer) {
-        for (QgsMapLayer *layer : QgsProject::instance()->mapLayers().values()) {
-            if (layer->type() == Qgis::LayerType::Raster) {
-                rasterLayer = qobject_cast<QgsRasterLayer*>(layer);
-                break;
-            }
-        }
-    }
+    QgsRasterLayer *rasterLayer = findActiveRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("Spectral Index"),
                                  tr("Please select a raster layer first."));
         return;
     }
-
-    SpectralIndexDialog dialog(this);
-    dialog.setRasterLayer(rasterLayer);
-    if (dialog.exec() == QDialog::Accepted) {
-        QString outPath = dialog.outputPath();
-        if (!outPath.isEmpty() && QFile::exists(outPath))
-            loadRasterLayer(outPath);
-    }
+    openRasterDialog<SpectralIndexDialog>(this, tr("Spectral Index"), rasterLayer);
 }
 
 // ---------------------------------------------------------------------------
@@ -137,42 +151,13 @@ void QgisDesktopWindow::openSpectralIndexDialog()
 
 void QgisDesktopWindow::openAtmosphericCorrectionDialog()
 {
-    QgsRasterLayer *rasterLayer = qobject_cast<QgsRasterLayer*>(activeLayer());
-    if (!rasterLayer) {
-        for (QgsMapLayer *layer : QgsProject::instance()->mapLayers().values()) {
-            if (layer->type() == Qgis::LayerType::Raster) {
-                rasterLayer = qobject_cast<QgsRasterLayer*>(layer);
-                break;
-            }
-        }
-    }
+    QgsRasterLayer *rasterLayer = findActiveRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("Atmospheric Correction"),
                                  tr("Please select a raster layer first."));
         return;
     }
-
-    AtmosphericDialog dialog(this);
-    dialog.setRasterLayer(rasterLayer);
-    if (dialog.exec() == QDialog::Accepted) {
-        QString outPath = dialog.outputPath();
-        if (!outPath.isEmpty() && QFile::exists(outPath))
-            loadRasterLayer(outPath);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Helper: find selected raster layer
-// ---------------------------------------------------------------------------
-
-static QgsRasterLayer *findSelectedRaster(QgisDesktopWindow *win)
-{
-    QList<QgsMapLayer*> layers = win->selectedLayers();
-    for (QgsMapLayer *layer : layers) {
-        if (layer->type() == Qgis::LayerType::Raster)
-            return qobject_cast<QgsRasterLayer*>(layer);
-    }
-    return nullptr;
+    openRasterDialog<AtmosphericDialog>(this, tr("Atmospheric Correction"), rasterLayer);
 }
 
 // ---------------------------------------------------------------------------
@@ -181,19 +166,13 @@ static QgsRasterLayer *findSelectedRaster(QgisDesktopWindow *win)
 
 void QgisDesktopWindow::openContrastStretchDialog()
 {
-    QgsRasterLayer *rasterLayer = findSelectedRaster(this);
+    QgsRasterLayer *rasterLayer = findActiveRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("Contrast Stretch"),
                                  tr("Please select a raster layer first."));
         return;
     }
-    ContrastStretchDialog dialog(this);
-    dialog.setRasterLayer(rasterLayer);
-    if (dialog.exec() == QDialog::Accepted) {
-        QString outPath = dialog.outputPath();
-        if (!outPath.isEmpty() && QFile::exists(outPath))
-            loadRasterLayer(outPath);
-    }
+    openRasterDialog<ContrastStretchDialog>(this, tr("Contrast Stretch"), rasterLayer);
 }
 
 // ---------------------------------------------------------------------------
@@ -202,19 +181,13 @@ void QgisDesktopWindow::openContrastStretchDialog()
 
 void QgisDesktopWindow::openSpatialFilterDialog()
 {
-    QgsRasterLayer *rasterLayer = findSelectedRaster(this);
+    QgsRasterLayer *rasterLayer = findActiveRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("Spatial Filter"),
                                  tr("Please select a raster layer first."));
         return;
     }
-    SpatialFilterDialog dialog(this);
-    dialog.setRasterLayer(rasterLayer);
-    if (dialog.exec() == QDialog::Accepted) {
-        QString outPath = dialog.outputPath();
-        if (!outPath.isEmpty() && QFile::exists(outPath))
-            loadRasterLayer(outPath);
-    }
+    openRasterDialog<SpatialFilterDialog>(this, tr("Spatial Filter"), rasterLayer);
 }
 
 // ---------------------------------------------------------------------------
@@ -223,19 +196,13 @@ void QgisDesktopWindow::openSpatialFilterDialog()
 
 void QgisDesktopWindow::openSpeckleFilterDialog()
 {
-    QgsRasterLayer *rasterLayer = findSelectedRaster(this);
+    QgsRasterLayer *rasterLayer = findActiveRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("Speckle Filter"),
                                  tr("Please select a raster layer first."));
         return;
     }
-    SpeckleFilterDialog dialog(this);
-    dialog.setRasterLayer(rasterLayer);
-    if (dialog.exec() == QDialog::Accepted) {
-        QString outPath = dialog.outputPath();
-        if (!outPath.isEmpty() && QFile::exists(outPath))
-            loadRasterLayer(outPath);
-    }
+    openRasterDialog<SpeckleFilterDialog>(this, tr("Speckle Filter"), rasterLayer);
 }
 
 // ---------------------------------------------------------------------------
@@ -244,19 +211,13 @@ void QgisDesktopWindow::openSpeckleFilterDialog()
 
 void QgisDesktopWindow::openPcaDialog()
 {
-    QgsRasterLayer *rasterLayer = findSelectedRaster(this);
+    QgsRasterLayer *rasterLayer = findActiveRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("PCA"),
                                  tr("Please select a raster layer first."));
         return;
     }
-    PcaDialog dialog(this);
-    dialog.setRasterLayer(rasterLayer);
-    if (dialog.exec() == QDialog::Accepted) {
-        QString outPath = dialog.outputPath();
-        if (!outPath.isEmpty() && QFile::exists(outPath))
-            loadRasterLayer(outPath);
-    }
+    openRasterDialog<PcaDialog>(this, tr("PCA"), rasterLayer);
 }
 
 // ---------------------------------------------------------------------------
@@ -265,19 +226,13 @@ void QgisDesktopWindow::openPcaDialog()
 
 void QgisDesktopWindow::openBandRatioDialog()
 {
-    QgsRasterLayer *rasterLayer = findSelectedRaster(this);
+    QgsRasterLayer *rasterLayer = findActiveRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("Band Ratio / IHS"),
                                  tr("Please select a raster layer first."));
         return;
     }
-    BandRatioDialog dialog(this);
-    dialog.setRasterLayer(rasterLayer);
-    if (dialog.exec() == QDialog::Accepted) {
-        QString outPath = dialog.outputPath();
-        if (!outPath.isEmpty() && QFile::exists(outPath))
-            loadRasterLayer(outPath);
-    }
+    openRasterDialog<BandRatioDialog>(this, tr("Band Ratio / IHS"), rasterLayer);
 }
 
 // ---------------------------------------------------------------------------
@@ -286,13 +241,7 @@ void QgisDesktopWindow::openBandRatioDialog()
 
 void QgisDesktopWindow::openTerrainDialog()
 {
-    TerrainDialog dialog(this);
-    if (dialog.exec() == QDialog::Accepted) {
-        QString outPath = dialog.outputPath();
-        if (!outPath.isEmpty()) {
-            loadRasterLayer(outPath);
-        }
-    }
+    openRasterDialog<TerrainDialog>(this, tr("Terrain Analysis"));
 }
 
 // ---------------------------------------------------------------------------
@@ -301,12 +250,7 @@ void QgisDesktopWindow::openTerrainDialog()
 
 void QgisDesktopWindow::openFusionDialog()
 {
-    FusionDialog dialog(this);
-    if (dialog.exec() == QDialog::Accepted) {
-        QString outPath = dialog.outputPath();
-        if (!outPath.isEmpty() && QFile::exists(outPath))
-            loadRasterLayer(outPath);
-    }
+    openRasterDialog<FusionDialog>(this, tr("Image Fusion"));
 }
 
 // ---------------------------------------------------------------------------
@@ -315,12 +259,7 @@ void QgisDesktopWindow::openFusionDialog()
 
 void QgisDesktopWindow::openMosaicDialog()
 {
-    MosaicDialog dialog(this);
-    if (dialog.exec() == QDialog::Accepted) {
-        QString outPath = dialog.outputPath();
-        if (!outPath.isEmpty() && QFile::exists(outPath))
-            loadRasterLayer(outPath);
-    }
+    openRasterDialog<MosaicDialog>(this, tr("Mosaic"));
 }
 
 // ---------------------------------------------------------------------------
