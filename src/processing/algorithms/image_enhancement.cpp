@@ -9,39 +9,6 @@
 #include <vector>
 #include <limits>
 
-void ImageEnhancement::computeStats(const float *data, size_t count, float nodata,
-                                    float &min, float &max, float &mean, float &stddev)
-{
-    min = 1e30f;
-    max = -1e30f;
-    double sum = 0;
-    size_t validCount = 0;
-
-    for (size_t i = 0; i < count; i++) {
-        if (data[i] == nodata || std::isnan(data[i])) continue;
-        min = std::min(min, data[i]);
-        max = std::max(max, data[i]);
-        sum += data[i];
-        validCount++;
-    }
-
-    if (validCount == 0) {
-        mean = 0;
-        stddev = 0;
-        return;
-    }
-
-    mean = static_cast<float>(sum / validCount);
-
-    double sqSum = 0;
-    for (size_t i = 0; i < count; i++) {
-        if (data[i] == nodata || std::isnan(data[i])) continue;
-        double diff = data[i] - mean;
-        sqSum += diff * diff;
-    }
-    stddev = static_cast<float>(std::sqrt(sqSum / validCount));
-}
-
 void ImageEnhancement::linearStretch(const float *input, float *output, size_t count,
                                      float minVal, float maxVal, float nodata)
 {
@@ -103,11 +70,10 @@ void ImageEnhancement::stddevStretch(const float *input, float *output, size_t c
         SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "stddevStretch: null pointer argument");
         return;
     }
-    float min, max, mean, stddev;
-    computeStats(input, count, nodata, min, max, mean, stddev);
+    MathUtils::Stats stats = MathUtils::computeStatsWithNodata(input, count, nodata);
 
-    float lo = mean - k * stddev;
-    float hi = mean + k * stddev;
+    float lo = stats.mean - k * stats.stddev;
+    float hi = stats.mean + k * stats.stddev;
 
     linearStretch(input, output, count, lo, hi, nodata);
 }
@@ -121,8 +87,9 @@ void ImageEnhancement::histogramEqualize(const float *input, float *output, size
     }
     if (bins < 1) bins = 256; // Validate bins parameter
     SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Histogram equalization: %1 pixels, %2 bins" ).arg( count ).arg( bins ) );
-    float min, max, mean, stddev;
-    computeStats(input, count, nodata, min, max, mean, stddev);
+    MathUtils::Stats stats = MathUtils::computeStatsWithNodata(input, count, nodata);
+    float min = stats.min;
+    float max = stats.max;
 
     if (min == max) {
         for (size_t i = 0; i < count; i++)

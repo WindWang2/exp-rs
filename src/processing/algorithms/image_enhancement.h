@@ -55,8 +55,6 @@ public:
                          const float *kernel, int kernelSize);
 
 private:
-    static void computeStats(const float *data, size_t count, float nodata,
-                             float &min, float &max, float &mean, float &stddev);
     static void generateGaussianKernel(float *kernel, int size, float sigma);
 
     // PCA helpers
