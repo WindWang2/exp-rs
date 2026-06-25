@@ -13,6 +13,9 @@ Pure C++ Remote Sensing analysis platform built on the QGIS engine.
 *   `main.cpp`: Pure C++ Qt6 desktop application (QgisDesktopWindow).
 *   `src/core/`: QGIS core library — layers, rendering, CRS, geometry, providers, expressions.
 *   `src/gui/`: QGIS GUI library — map canvas, map tools, layer tree, dialogs.
+*   `src/analysis/`: Analysis libraries — classification, georeferencing, segmentation.
+*   `src/agent/`: AI Agent infrastructure — MCP server, STAC client.
+*   `src/processing/`: Processing framework — algorithms, GDAL wrappers, providers.
 *   `src/native/`: Platform-native integration (Linux/macOS/Windows).
 *   `src/ui/`: Qt Designer .ui form files.
 *   `external/`: Vendored C++ dependencies (nlohmann_json, spatialindex, poly2tri, lazperf).

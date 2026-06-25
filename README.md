@@ -9,6 +9,12 @@ Professional remote sensing analysis platform built on the QGIS engine. Pure C++
 - **Atmospheric Correction:** DOS1 and DOS2 methods
 - **Change Detection:** Multi-temporal image comparison
 - **Mosaic:** Raster mosaic with nodata handling
+- **Image Enhancement:** Contrast stretch, spatial filtering, speckle filtering (SAR)
+- **Image Fusion:** Brovey, IHS, PCA pan-sharpening
+- **Terrain Analysis:** Slope, aspect, hillshade, roughness, TRI, TPI
+- **Classification:** NormalBayes, SVM, K-Means with cross-validation
+- **OBIA:** Object-based image analysis with OTB MeanShift segmentation
+- **Georeferencer:** GCP-based georeferencing with RPC support and SIFT matching
 - **Processing Toolbox:** 70+ algorithms (GDAL, OTB, QGIS native)
 - **Layer Properties:** Raster and vector layer dialogs with statistics
 - **Measurement Tools:** Geodesic distance and area measurement
@@ -64,8 +70,10 @@ make -j$(nproc)
 mkdir build-tests && cd build-tests
 cmake .. -DENABLE_TESTS=ON
 make -j$(nproc)
-ctest --output-on-failure
+QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 ```
+
+**443 tests** covering core algorithms, GDAL utilities, dialog UI, and processing framework.
 
 ### With Sanitizers (Debug)
 
@@ -106,15 +114,23 @@ Requires no additional system packages — ITK 5.4 and OTB 10 are vendored in-tr
 ```
 src/
 ├── app/           Application (main window, dialogs, widgets)
+├── analysis/      Analysis libraries (classification, georeferencing, segmentation)
+├── agent/         AI Agent infrastructure (MCP server, STAC client)
 ├── core/          QGIS core library (vendored)
 ├── gui/           QGIS GUI library (vendored)
 ├── native/        Platform integration
-├── processing/    GDAL/OTB/QGIS algorithm providers
+├── processing/    GDAL/OTB/QGIS algorithm providers + shared utilities
 ├── plugins/       Plugin system
 └── ui/            Qt Designer forms
 otb_ref/           Orfeo Toolbox v10 (segmentation, learning)
 itk_ref/           ITK 5.4 (image processing, via git subtree)
 ```
+
+### Shared Utilities
+
+- **MathUtils** (`src/processing/algorithms/math_utils.h`): Safe division, statistics computation, normalized difference
+- **GDAL I/O** (`src/processing/gdal/gdal_dataset_wrapper.h`): Dataset wrapper, GeoInfo extraction, batch output writing
+- **Dialog Base** (`src/app/dialogs/raster_processing_dialog_base.h`): Common UI for raster processing dialogs
 
 ### Vendored Libraries
 
