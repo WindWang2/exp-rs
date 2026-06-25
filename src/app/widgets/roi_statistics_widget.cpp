@@ -1,5 +1,6 @@
 // roi_statistics_widget.cpp — ROI Statistics Analysis Widget
 #include "roi_statistics_widget.h"
+#include "processing/algorithms/math_utils.h"
 #include "core/sicnu_logging.h"
 
 #include <qgsrasterlayer.h>
@@ -138,28 +139,13 @@ void RoiStatisticsWidget::computeStatistics()
         GDALRasterIO(band, GF_Read, xOff, yOff, xSize, ySize, buf.data(), xSize, ySize, GDT_Float32, 0, 0);
         GDALClose(ds);
 
-        // Compute statistics
-        double sum = 0.0, sumSq = 0.0;
-        int count = 0;
-        double minVal = std::numeric_limits<double>::max();
-        double maxVal = std::numeric_limits<double>::lowest();
-
-        for (size_t i = 0; i < buf.size(); ++i) {
-            if (std::isnan(buf[i])) continue;
-            sum += buf[i];
-            sumSq += buf[i] * buf[i];
-            minVal = std::min(minVal, static_cast<double>(buf[i]));
-            maxVal = std::max(maxVal, static_cast<double>(buf[i]));
-            count++;
-        }
-
-        m_stats[b].pixelCount = count;
-        if (count > 0) {
-            m_stats[b].mean = sum / count;
-            m_stats[b].stddev = std::sqrt(sumSq / count - m_stats[b].mean * m_stats[b].mean);
-            m_stats[b].min = minVal;
-            m_stats[b].max = maxVal;
-        }
+        // Compute statistics using shared utility
+        MathUtils::Stats s = MathUtils::computeStats(buf.data(), buf.size());
+        m_stats[b].pixelCount = static_cast<int>(s.validCount);
+        m_stats[b].mean = s.mean;
+        m_stats[b].stddev = s.stddev;
+        m_stats[b].min = s.min;
+        m_stats[b].max = s.max;
     }
 
     m_summaryLabel->setText(tr("Statistics computed for %1 bands, %2 pixels")

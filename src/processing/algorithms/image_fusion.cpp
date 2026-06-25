@@ -1,5 +1,6 @@
 // image_fusion.cpp — Phase 11.1
 #include "image_fusion.h"
+#include "math_utils.h"
 #include "core/sicnu_logging.h"
 
 #include <cmath>
@@ -17,42 +18,21 @@ void ImageFusion::histogramMatch( float *data, int n,
     if ( n <= 0 || refN <= 0 )
         return;
 
-    // Compute stats for source
-    double sumS = 0, sumSqS = 0;
-    int cntS = 0;
-    for ( int i = 0; i < n; ++i )
-    {
-        if ( data[i] == nodata || std::isnan( data[i] ) )
-            continue;
-        sumS += data[i];
-        sumSqS += static_cast<double>( data[i] ) * data[i];
-        cntS++;
-    }
+    // Compute stats for source and reference using shared utility
+    MathUtils::Stats statsS = MathUtils::computeStatsWithNodata(data, n, nodata);
+    MathUtils::Stats statsR = MathUtils::computeStatsWithNodata(ref, refN, nodata);
 
-    // Compute stats for reference
-    double sumR = 0, sumSqR = 0;
-    int cntR = 0;
-    for ( int i = 0; i < refN; ++i )
-    {
-        if ( ref[i] == nodata || std::isnan( ref[i] ) )
-            continue;
-        sumR += ref[i];
-        sumSqR += static_cast<double>( ref[i] ) * ref[i];
-        cntR++;
-    }
-
-    if ( cntS == 0 || cntR == 0 )
+    if ( statsS.validCount == 0 || statsR.validCount == 0 )
         return;
 
-    double meanS = sumS / cntS;
-    double meanR = sumR / cntR;
-    double varS = sumSqS / cntS - meanS * meanS;
-    double varR = sumSqR / cntR - meanR * meanR;
-    double stdS = std::sqrt( std::max( 0.0, varS ) );
-    double stdR = std::sqrt( std::max( 0.0, varR ) );
+    double meanS = statsS.mean;
+    double meanR = statsR.mean;
+    double stdS = statsS.stddev;
+    double stdR = statsR.stddev;
 
     // Linear transform: matched = (data - meanS) * (stdR / stdS) + meanR
-    double scale = ( stdS > 1e-10 ) ? stdR / stdS : 1.0;
+    double scale = MathUtils::safeDivDouble(stdR, stdS);
+    if ( scale == 0.0 ) scale = 1.0;
     for ( int i = 0; i < n; ++i )
     {
         if ( data[i] == nodata || std::isnan( data[i] ) )
