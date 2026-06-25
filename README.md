@@ -128,9 +128,9 @@ itk_ref/           ITK 5.4 (image processing, via git subtree)
 
 ### Shared Utilities
 
-- **MathUtils** (`src/processing/algorithms/math_utils.h`): Safe division, statistics computation, normalized difference
-- **GDAL I/O** (`src/processing/gdal/gdal_dataset_wrapper.h`): Dataset wrapper, GeoInfo extraction, batch output writing
-- **Dialog Base** (`src/app/dialogs/raster_processing_dialog_base.h`): Common UI for raster processing dialogs
+- **MathUtils** (`src/processing/algorithms/math_utils.h`): Safe division, statistics computation, normalized difference — see [docs/math-utils.md](docs/math-utils.md)
+- **GDAL I/O** (`src/processing/gdal/gdal_dataset_wrapper.h`): Dataset wrapper, GeoInfo extraction, batch output writing — see [docs/gdal-utils.md](docs/gdal-utils.md)
+- **Dialog Base** (`src/app/dialogs/raster_processing_dialog_base.h`): Common UI for raster processing dialogs — see [docs/dialog-base-class.md](docs/dialog-base-class.md)
 
 ### Vendored Libraries
 
