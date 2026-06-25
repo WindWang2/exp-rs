@@ -1,5 +1,6 @@
 // src/processing/algorithms/band_math.cpp — Band math expression engine
 #include "band_math.h"
+#include "math_utils.h"
 #include "core/sicnu_logging.h"
 #include "framework/input_validator.h"
 
@@ -72,7 +73,7 @@ struct BinaryOpNode : Node
             case '+': return l + r;
             case '-': return l - r;
             case '*': return l * r;
-            case '/': return (r == 0.0f) ? NaN : (l / r);
+            case '/': return MathUtils::safeDiv(l, r);
             default: return NaN;
         }
     }

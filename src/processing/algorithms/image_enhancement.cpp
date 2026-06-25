@@ -1,4 +1,5 @@
 #include "image_enhancement.h"
+#include "math_utils.h"
 #include "chunked_processor.h"
 #include "core/sicnu_logging.h"
 #include "framework/input_validator.h"
@@ -822,11 +823,7 @@ void ImageEnhancement::bandRatio(const float *band1, const float *band2,
         return;
     }
     for (size_t i = 0; i < count; i++) {
-        if (band2[i] == 0.0f) {
-            output[i] = std::numeric_limits<float>::quiet_NaN();
-        } else {
-            output[i] = band1[i] / band2[i];
-        }
+        output[i] = MathUtils::safeDiv(band1[i], band2[i]);
     }
 }
 

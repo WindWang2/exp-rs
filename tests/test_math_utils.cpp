@@ -154,3 +154,108 @@ TEST_CASE("MathUtils::normalizedDifference", "[math_utils]")
         REQUIRE_FALSE(MathUtils::normalizedDifference(a, a, out, 0));
     }
 }
+
+TEST_CASE("MathUtils::safeDivDouble", "[math_utils]")
+{
+    SECTION("normal division")
+    {
+        double result = MathUtils::safeDivDouble(10.0, 2.0);
+        REQUIRE(result == Catch::Approx(5.0));
+    }
+
+    SECTION("division by zero returns 0.0")
+    {
+        double result = MathUtils::safeDivDouble(10.0, 0.0);
+        REQUIRE(result == Catch::Approx(0.0));
+    }
+
+    SECTION("negative division")
+    {
+        double result = MathUtils::safeDivDouble(-10.0, 2.0);
+        REQUIRE(result == Catch::Approx(-5.0));
+    }
+}
+
+TEST_CASE("MathUtils::computeStatsWithNodata", "[math_utils]")
+{
+    SECTION("nodata values are skipped")
+    {
+        float data[] = {1.0f, -9999.0f, 3.0f, -9999.0f, 5.0f};
+        MathUtils::Stats stats = MathUtils::computeStatsWithNodata(data, 5, -9999.0f);
+        REQUIRE(stats.count == 5);
+        REQUIRE(stats.validCount == 3);
+        REQUIRE(stats.min == Catch::Approx(1.0f));
+        REQUIRE(stats.max == Catch::Approx(5.0f));
+        REQUIRE(stats.mean == Catch::Approx(3.0f));
+    }
+
+    SECTION("NaN and nodata both skipped")
+    {
+        float data[] = {1.0f, NaN, 3.0f, -9999.0f, 5.0f};
+        MathUtils::Stats stats = MathUtils::computeStatsWithNodata(data, 5, -9999.0f);
+        REQUIRE(stats.count == 5);
+        REQUIRE(stats.validCount == 3);
+        REQUIRE(stats.min == Catch::Approx(1.0f));
+        REQUIRE(stats.max == Catch::Approx(5.0f));
+    }
+
+    SECTION("all nodata returns zero stats")
+    {
+        float data[] = {-9999.0f, -9999.0f, -9999.0f};
+        MathUtils::Stats stats = MathUtils::computeStatsWithNodata(data, 3, -9999.0f);
+        REQUIRE(stats.count == 3);
+        REQUIRE(stats.validCount == 0);
+        REQUIRE(stats.min == 0.0f);
+        REQUIRE(stats.max == 0.0f);
+    }
+}
+
+TEST_CASE("MathUtils::computeStatsFromAccumulators", "[math_utils]")
+{
+    SECTION("basic accumulator stats")
+    {
+        // Simulate: values = {2, 4, 4, 4, 5, 5, 7, 9}
+        // count=8, sum=40, sumSq=232, min=2, max=9
+        MathUtils::AccumulatorStats acc;
+        acc.count = 8;
+        acc.sum = 40.0;
+        acc.sumSq = 232.0;
+        acc.min = 2.0f;
+        acc.max = 9.0f;
+
+        MathUtils::Stats stats = MathUtils::computeStatsFromAccumulators(acc);
+        REQUIRE(stats.count == 8);
+        REQUIRE(stats.validCount == 8);
+        REQUIRE(stats.min == Catch::Approx(2.0f));
+        REQUIRE(stats.max == Catch::Approx(9.0f));
+        REQUIRE(stats.mean == Catch::Approx(5.0f));
+        // Population variance = 232/8 - 25 = 29 - 25 = 4
+        REQUIRE(stats.stddev == Catch::Approx(2.0f));
+    }
+
+    SECTION("empty accumulator")
+    {
+        MathUtils::AccumulatorStats acc;
+        acc.count = 0;
+
+        MathUtils::Stats stats = MathUtils::computeStatsFromAccumulators(acc);
+        REQUIRE(stats.count == 0);
+        REQUIRE(stats.mean == Catch::Approx(0.0f));
+        REQUIRE(stats.stddev == Catch::Approx(0.0f));
+    }
+
+    SECTION("single value")
+    {
+        MathUtils::AccumulatorStats acc;
+        acc.count = 1;
+        acc.sum = 42.0;
+        acc.sumSq = 1764.0;
+        acc.min = 42.0f;
+        acc.max = 42.0f;
+
+        MathUtils::Stats stats = MathUtils::computeStatsFromAccumulators(acc);
+        REQUIRE(stats.count == 1);
+        REQUIRE(stats.mean == Catch::Approx(42.0f));
+        REQUIRE(stats.stddev == Catch::Approx(0.0f));
+    }
+}
