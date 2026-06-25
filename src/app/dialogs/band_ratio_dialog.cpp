@@ -147,7 +147,7 @@ void BandRatioDialog::onRun()
 
     m_runButton->setEnabled(false);
 
-    m_runner->run([this, sourcePath, outputPath = outputPath(), modeIndex, band1Num, band2Num,
+    m_runner->run([sourcePath, outputPath = outputPath(), modeIndex, band1Num, band2Num,
                    redNum, greenNum, blueNum]() -> QString {
     try {
         // Open source dataset

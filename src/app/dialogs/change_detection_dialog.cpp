@@ -208,7 +208,7 @@ void ChangeDetectionDialog::onRun()
     m_runButton->setEnabled(false);
     m_statusLabel->setText(tr("Processing..."));
 
-    m_runner->run([this, beforeSourcePath, afterSourcePath, beforeBand, afterBand,
+    m_runner->run([beforeSourcePath, afterSourcePath, beforeBand, afterBand,
                    methodIndex, threshold, outPath]() -> QString {
     try {
         // Open source datasets
