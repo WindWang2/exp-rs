@@ -1,12 +1,66 @@
 # Progress Log — SICNU GEO RS
 
-## Session: 2026-06-24 — Build Fixes & Missing Headers ✅ COMPLETE
+## Session: 2026-06-24 — Code Reuse Refactoring ✅ COMPLETE
 
 ### 状态
 - **主程序 sicnu_geo_rs 编译成功**
-- **435/435 单元测试全部通过**
-- **image_enhancement_panel.cpp 已重写以匹配 .h**
-- **已提交: fa554a877f**
+- **443/443 单元测试全部通过**
+- **10 个重构提交已完成**
+- **净减少 ~200 行重复代码**
+
+### 核心改动
+
+#### Phase 1: GDAL I/O 工具函数
+| 文件 | 改动 |
+|---|---|
+| `src/processing/gdal/gdal_dataset_wrapper.{h,cpp}` | 添加 `extractGeoInfo()`, `writeGdalOutput()` |
+| `src/app/dialogs/dialog_utils.{h,cpp}` | 新建 `populateRasterLayerCombo()` |
+| `src/app/dialogs/fusion_dialog.cpp` | 使用 `populateRasterLayerCombo()` |
+| `src/app/dialogs/terrain_dialog.cpp` | 使用 `extractGeoInfo()` + `writeGdalOutput()` |
+| `src/app/dialogs/extract_band_dialog.cpp` | 使用 `extractGeoInfo()` + `writeGdalOutput()` |
+| `src/app/dialogs/image_enhancement_panel.cpp` | 使用 `extractGeoInfo()` + `writeGdalOutput()` |
+
+#### Phase 2: 迁移独立对话框到基类
+| 文件 | 改动 |
+|---|---|
+| `src/app/dialogs/fusion_dialog.{h,cpp}` | 继承 RasterProcessingDialogBase |
+| `src/app/dialogs/extract_band_dialog.{h,cpp}` | 继承 RasterProcessingDialogBase |
+| `src/app/dialogs/terrain_dialog.{h,cpp}` | 继承 RasterProcessingDialogBase |
+| `src/app/dialogs/change_detection_dialog.{h,cpp}` | 继承 RasterProcessingDialogBase |
+
+#### Phase 3: MathUtils 算法去重
+| 文件 | 改动 |
+|---|---|
+| `src/processing/algorithms/math_utils.{h,cpp}` | 新建：`safeDiv`, `safeDivDouble`, `computeStats`, `computeStatsWithNodata`, `computeStatsFromAccumulators`, `normalizedDifference` |
+| `src/processing/algorithms/spectral_indices.cpp` | 使用 `MathUtils::safeDiv`, `MathUtils::normalizedDifference` |
+| `src/processing/algorithms/change_detection.cpp` | 使用 `MathUtils::computeStats`, `MathUtils::normalizedDifference` |
+| `src/processing/algorithms/band_math.cpp` | 使用 `MathUtils::safeDiv` |
+| `src/processing/algorithms/image_enhancement.cpp` | 删除私有 `computeStats`，使用 `MathUtils::computeStatsWithNodata` |
+| `src/processing/algorithms/image_fusion.cpp` | 使用 `MathUtils::computeStatsWithNodata`, `MathUtils::safeDivDouble` |
+| `src/processing/algorithms/terrain_analysis.cpp` | 使用 `MathUtils::safeDivDouble` |
+| `src/app/widgets/roi_statistics_widget.cpp` | 使用 `MathUtils::computeStats` |
+| `src/analysis/segmentation/rs_segment_features.cpp` | 使用 `MathUtils::computeStatsFromAccumulators` |
+| `src/analysis/segmentation/rs_simple_segmenter.cpp` | 使用 `MathUtils::computeStatsWithNodata` |
+| `src/app/classification/qgsclassificationmainwindow.cpp` | 使用 `MathUtils::computeStatsFromAccumulators` |
+| `src/analysis/classification/rs_accuracy_assessment.cpp` | 使用 `MathUtils::safeDivDouble` |
+
+#### Phase 4: 基类默认 slots
+| 文件 | 改动 |
+|---|---|
+| `src/app/dialogs/raster_processing_dialog_base.{h,cpp}` | 添加 `onCompleted`/`onFailed` public slots |
+| 7 个子类对话框 | 移除重复的 `onCompleted`/`onFailed` 实现 |
+
+#### Phase 5: 统一对话框模式
+| 文件 | 改动 |
+|---|---|
+| `src/app/main_window_processing.cpp` | 添加 `findActiveRaster()`, `openRasterDialog<T>()` 模板 |
+| `src/app/main_window.h` | 将 `loadRasterLayer`/`loadVectorLayer` 提升为 public |
+
+#### Phase 6: TDD 测试
+| 文件 | 改动 |
+|---|---|
+| `tests/test_math_utils.{cpp}` | 新建：90 个断言覆盖所有 MathUtils 函数 |
+| `tests/test_gdal_utils.{cpp}` | 新建：41 个断言覆盖 `extractGeoInfo`, `writeGdalOutput` |
 
 ### 核心改动
 | 文件 | 改动 |

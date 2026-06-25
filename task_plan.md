@@ -6,9 +6,9 @@ Build a pure C++ remote sensing analysis and processing platform based on the QG
 
 ## Current Phase
 
-Phase 11.1-11.5 + 10A + 10A.1 + 10B complete. **354/355 tests pass** (test 255 ImageWarper cancellation pre-existing flaky). Phase 10B.0 OTB vendored 部分完成 (ITK ✅, OTB 阻塞)。Next: **Phase 12 AI Agent** 或 **Phase 13 Education & Usability**。
+Phase 11.1-11.5 + 10A + 10A.1 + 10B + Code Reuse Refactoring complete. **443/443 tests pass**. Phase 10B.0 OTB vendored 部分完成 (ITK ✅, OTB 阻塞)。Next: **Phase 12 AI Agent** 或 **Phase 13 Education & Usability**。
 
-**Phase 6R.2 (Operator-Perspective Fixes) complete (2026-06-06):** Processing Toolbox algorithm execution fully rewritten; Mosaic CRS validation; Edit mode persistence on layer switch. 293/293 tests pass.
+**Code Reuse Refactoring complete (2026-06-24):** MathUtils namespace, GDAL I/O utilities, dialog base class migration, unified dialog patterns. 10 commits, net -200 lines of duplicate code. 443/443 tests pass.
 
 ---
 

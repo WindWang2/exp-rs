@@ -1,5 +1,41 @@
 # Findings & Decisions — SICNU GEO RS
 
+## Code Reuse Refactoring (2026-06-24)
+
+### 关键发现
+
+1. **大量重复的 GDAL I/O 模式**：14 个对话框文件重复相同的写入循环（createOutputTiff + per-band GDALRasterIO）
+   - **修复**：创建 `writeGdalOutput()` 统一封装
+
+2. **5 个独立对话框重复基类功能**：FusionDialog、ExtractBandDialog、TerrainDialog、ChangeDetectionDialog 手动创建输出浏览、按钮栏、完成处理
+   - **修复**：迁移到 `RasterProcessingDialogBase` 基类
+
+3. **算法文件中的安全除法重复**：band_math.cpp、image_enhancement.cpp 手动实现 `safeDiv`
+   - **修复**：创建 `MathUtils::safeDiv()` 统一使用
+
+4. **统计计算重复**：image_enhancement.cpp、change_detection.cpp、roi_statistics_widget.cpp 各自实现 min/max/mean/stddev
+   - **修复**：创建 `MathUtils::computeStats()` 系列函数
+
+5. **对话框打开模式重复**：main_window_processing.cpp 中 10+ 个函数重复相同的"查找图层 + 打开对话框 + 加载结果"模式
+   - **修复**：创建 `findActiveRaster()` + `openRasterDialog<T>()` 模板
+
+### 实施决定
+
+- **MathUtils 命名空间**：集中所有数学工具函数（safeDiv、computeStats、normalizedDifference），支持 NaN 和 nodata 跳过
+- **AccumulatorStats**：支持流式/分段统计，用于 rs_segment_features 和 qgsclassificationmainwindow
+- **safeDivDouble**：双精度版本，返回 0.0 而非 NaN（适用于精度评价等场景）
+- **populateRasterLayerCombo()**：统一的图层组合框填充函数
+- **findActiveRaster()**：统一的活动栅格图层查找（activeLayer → selectedLayers → 项目中第一个）
+- **openRasterDialog<T>()**：模板化的对话框打开模式，减少 10+ 处重复代码
+
+### 测试覆盖
+
+- `test_math_utils.cpp`：77 个断言覆盖所有 MathUtils 函数
+- `test_gdal_utils.cpp`：41 个断言覆盖 extractGeoInfo、writeGdalOutput
+- 所有 443 测试通过
+
+---
+
 ## Phase 6R.2: Operator-Perspective Fixes (2026-06-06)
 
 ### 关键发现
