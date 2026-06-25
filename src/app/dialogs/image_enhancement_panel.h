@@ -32,6 +32,8 @@ protected:
 
 private slots:
     void onMethodChanged(int index);
+    void onCompleted(const QString &outputPath);
+    void onFailed(const QString &errorMessage);
 
 private:
     void setupUi();

@@ -62,7 +62,7 @@ Stats computeStats(const float *data, size_t count)
     stats.validCount = validCount;
     stats.mean = (validCount > 0) ? static_cast<float>(sum / validCount) : 0.0f;
 
-    // Second pass: compute sample stddev
+    // Second pass: compute population stddev
     if (validCount > 1) {
         double sumSq = 0.0;
         for (size_t i = 0; i < count; ++i) {
@@ -70,7 +70,7 @@ Stats computeStats(const float *data, size_t count)
             double diff = data[i] - stats.mean;
             sumSq += diff * diff;
         }
-        stats.stddev = static_cast<float>(std::sqrt(sumSq / (validCount - 1)));
+        stats.stddev = static_cast<float>(std::sqrt(sumSq / validCount));
     } else {
         stats.stddev = 0.0f;
     }
@@ -121,7 +121,7 @@ Stats computeStatsWithNodata(const float *data, size_t count, float nodata)
     stats.validCount = validCount;
     stats.mean = (validCount > 0) ? static_cast<float>(sum / validCount) : 0.0f;
 
-    // Second pass: compute sample stddev
+    // Second pass: compute population stddev
     if (validCount > 1) {
         double sumSq = 0.0;
         for (size_t i = 0; i < count; ++i) {
@@ -129,7 +129,7 @@ Stats computeStatsWithNodata(const float *data, size_t count, float nodata)
             double diff = data[i] - stats.mean;
             sumSq += diff * diff;
         }
-        stats.stddev = static_cast<float>(std::sqrt(sumSq / (validCount - 1)));
+        stats.stddev = static_cast<float>(std::sqrt(sumSq / validCount));
     } else {
         stats.stddev = 0.0f;
     }

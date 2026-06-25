@@ -17,7 +17,7 @@ struct Stats {
     float min = 0.0f;
     float max = 0.0f;
     float mean = 0.0f;
-    float stddev = 0.0f;  // Sample stddev (N-1 denominator)
+    float stddev = 0.0f;  // Population stddev (N denominator)
 };
 
 /**
@@ -39,6 +39,9 @@ float safeDiv(float numerator, float denominator);
 
 /**
  * Safe division for doubles: returns 0.0 when denominator is zero.
+ * Note: Unlike safeDiv (which returns NaN for float), this returns 0.0
+ * because callers in accuracy assessment and terrain analysis expect 0.0
+ * as the fallback value for guarded divisions.
  */
 double safeDivDouble(double numerator, double denominator);
 

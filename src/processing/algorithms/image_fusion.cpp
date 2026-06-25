@@ -31,8 +31,8 @@ void ImageFusion::histogramMatch( float *data, int n,
     double stdR = statsR.stddev;
 
     // Linear transform: matched = (data - meanS) * (stdR / stdS) + meanR
-    double scale = MathUtils::safeDivDouble(stdR, stdS);
-    if ( scale == 0.0 ) scale = 1.0;
+    // Guard against near-zero stddev (near-constant data with float jitter)
+    double scale = ( stdS > 1e-10 ) ? ( stdR / stdS ) : 1.0;
     for ( int i = 0; i < n; ++i )
     {
         if ( data[i] == nodata || std::isnan( data[i] ) )

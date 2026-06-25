@@ -71,7 +71,8 @@ TEST_CASE("MathUtils::computeStats", "[math_utils]")
         REQUIRE(stats.min == Catch::Approx(1.0f));
         REQUIRE(stats.max == Catch::Approx(5.0f));
         REQUIRE(stats.mean == Catch::Approx(3.0f));
-        REQUIRE(stats.stddev == Catch::Approx(1.5811f).margin(0.001f));
+        // Population stddev (N denominator): sqrt(2.0) ≈ 1.4142
+        REQUIRE(stats.stddev == Catch::Approx(1.4142f).margin(0.001f));
     }
 
     SECTION("NaN values are skipped")
@@ -106,7 +107,8 @@ TEST_CASE("MathUtils::computeStats", "[math_utils]")
         REQUIRE(stats.min == Catch::Approx(-3.0f));
         REQUIRE(stats.max == Catch::Approx(3.0f));
         REQUIRE(stats.mean == Catch::Approx(0.0f));
-        REQUIRE(stats.stddev == Catch::Approx(2.582f).margin(0.001f));
+        // Population stddev (N denominator): sqrt(5.0) ≈ 2.2361
+        REQUIRE(stats.stddev == Catch::Approx(2.2361f).margin(0.001f));
     }
 }
 

@@ -33,7 +33,7 @@
 #include <QStatusBar>
 
 // ---------------------------------------------------------------------------
-// Helper: find active/selected raster layer with fallback
+// Helper: find active/selected raster layer (no project-wide fallback)
 // ---------------------------------------------------------------------------
 
 static QgsRasterLayer *findActiveRaster(QgisDesktopWindow *win)
@@ -47,6 +47,17 @@ static QgsRasterLayer *findActiveRaster(QgisDesktopWindow *win)
         if (layer->type() == Qgis::LayerType::Raster)
             return qobject_cast<QgsRasterLayer*>(layer);
     }
+
+    return nullptr;
+}
+
+// Helper: find raster layer with project-wide fallback (for legacy dialogs)
+// ---------------------------------------------------------------------------
+
+static QgsRasterLayer *findAnyRaster(QgisDesktopWindow *win)
+{
+    QgsRasterLayer *rl = findActiveRaster(win);
+    if (rl) return rl;
 
     // Fallback: first raster layer in project
     for (QgsMapLayer *layer : QgsProject::instance()->mapLayers().values()) {
@@ -121,7 +132,7 @@ void QgisDesktopWindow::openImageEnhancementPanel()
 
 void QgisDesktopWindow::openBandMathDialog()
 {
-    QgsRasterLayer *rasterLayer = findActiveRaster(this);
+    QgsRasterLayer *rasterLayer = findAnyRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("Band Math"),
                                  tr("Please select a raster layer first."));
@@ -136,7 +147,7 @@ void QgisDesktopWindow::openBandMathDialog()
 
 void QgisDesktopWindow::openSpectralIndexDialog()
 {
-    QgsRasterLayer *rasterLayer = findActiveRaster(this);
+    QgsRasterLayer *rasterLayer = findAnyRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("Spectral Index"),
                                  tr("Please select a raster layer first."));
@@ -151,7 +162,7 @@ void QgisDesktopWindow::openSpectralIndexDialog()
 
 void QgisDesktopWindow::openAtmosphericCorrectionDialog()
 {
-    QgsRasterLayer *rasterLayer = findActiveRaster(this);
+    QgsRasterLayer *rasterLayer = findAnyRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("Atmospheric Correction"),
                                  tr("Please select a raster layer first."));

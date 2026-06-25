@@ -412,4 +412,18 @@ void ImageEnhancementPanel::onRun()
     });
 }
 
+void ImageEnhancementPanel::onCompleted(const QString &outputPath)
+{
+    m_runButton->setEnabled(true);
+    m_statusLabel->setText(tr("Completed!"));
+    handleCompleted(outputPath);
+}
+
+void ImageEnhancementPanel::onFailed(const QString &errorMessage)
+{
+    m_runButton->setEnabled(true);
+    m_statusLabel->setText(tr("Failed!"));
+    handleFailed(errorMessage);
+}
+
 
