@@ -1,5 +1,6 @@
 // terrain_analysis.cpp — Phase 11.2
 #include "terrain_analysis.h"
+#include "math_utils.h"
 #include "core/sicnu_logging.h"
 #include "framework/input_validator.h"
 
@@ -385,7 +386,7 @@ bool TerrainAnalysis::tri( const float *dem, float *out, int width, int height,
                     count++;
                 }
             }
-            out[idx] = count > 0 ? sumDiff / count : 0;
+            out[idx] = static_cast<float>(MathUtils::safeDivDouble(sumDiff, count));
         }
     }
     return true;
@@ -436,7 +437,7 @@ bool TerrainAnalysis::tpi( const float *dem, float *out, int width, int height,
                     count++;
                 }
             }
-            const float mean = count > 0 ? sum / count : z;
+            const float mean = count > 0 ? static_cast<float>(MathUtils::safeDivDouble(sum, count)) : z;
             out[idx] = z - mean;
         }
     }
