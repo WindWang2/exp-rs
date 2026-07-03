@@ -44,4 +44,26 @@ public:
   {
     return resolveDataPath( "data" );
   }
+
+  /**
+   * Returns the bundled lab sample datasets directory (rasters, vectors).
+   * Checks project-root samples_data/, data/samples_data/, and install paths.
+   */
+  static QString samplesDataDir()
+  {
+    const QStringList candidates = {
+      resolveDataPath( "samples_data" ),
+      resolveDataPath( "data/samples_data" ),
+      QDir( QCoreApplication::applicationDirPath() ).absoluteFilePath( "../samples_data" ),
+      QDir( QCoreApplication::applicationDirPath() ).absoluteFilePath( "samples_data" ),
+    };
+
+    for ( const QString &candidate : candidates )
+    {
+      if ( QDir( candidate ).exists() )
+        return QDir( candidate ).absolutePath();
+    }
+
+    return {};
+  }
 };

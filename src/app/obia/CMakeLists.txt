@@ -26,6 +26,7 @@ target_include_directories(qgis_app_obia PUBLIC
     ${CMAKE_SOURCE_DIR}/src/analysis
     ${CMAKE_SOURCE_DIR}/src/analysis/classification
     ${CMAKE_SOURCE_DIR}/src/analysis/segmentation
+    ${CMAKE_SOURCE_DIR}/src/processing
     ${CMAKE_BINARY_DIR}
 )
 
@@ -33,6 +34,7 @@ target_link_libraries(qgis_app_obia PUBLIC
     qgis_analysis
     qgis_core
     qgis_gui
+    sicnu_processing
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets

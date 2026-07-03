@@ -115,6 +115,35 @@ TEST_CASE( "ObiaTask: SimpleSegmenter pipeline with synthetic raster", "[obia][c
     }
 }
 
+TEST_CASE( "ObiaTask: OTB unavailable falls back to SimpleSegmenter", "[obia][classification]" )
+{
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+
+    QString inputPath = createTestRaster( tempDir.path(), 16, 16, 2 );
+    REQUIRE( !inputPath.isEmpty() );
+
+    RsObiaTask::Config cfg;
+    cfg.sourceRaster = inputPath;
+    cfg.outputRaster = tempDir.path() + "/obia_output.tif";
+    cfg.bandIndices = { 1, 2 };
+    cfg.useOtb = true;
+    cfg.smoothKernel = 3;
+    cfg.quantizeBins = 4;
+    cfg.minRegionSize = 10;
+    cfg.backend = std::make_unique<RsClassifierNormalBayes>();
+    cfg.algoName = "NormalBayes";
+
+    RsObiaTask task( std::move( cfg ) );
+    const bool ok = task.run();
+
+    // Training fails without labels, but segmentation should succeed via fallback.
+    REQUIRE( !ok );
+    REQUIRE( task.result().errorMessage.contains( "No labeled segments" ) );
+    REQUIRE( !task.segmentMap().isEmpty() );
+    REQUIRE( task.segmentMap().segmentCount() > 0 );
+}
+
 TEST_CASE( "ObiaTask: empty segmentLabels fails gracefully", "[obia][classification]" )
 {
     QTemporaryDir tempDir;

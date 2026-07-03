@@ -2,6 +2,8 @@
 #include "rs_obia_task.h"
 
 #include "rs_simple_segmenter.h"
+#include "sicnu_logging.h"
+#include "tools/tool_path_manager.h"
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -10,10 +12,12 @@
 #include <cpl_string.h>
 #include <ogr_srs_api.h>
 
+#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QTemporaryDir>
 
 #include <algorithm>
 
@@ -199,14 +203,107 @@ bool RsObiaTask::run()
 
 bool RsObiaTask::runOtbSegmentation( QString &errorMsg )
 {
-    // Check if OTB CLI is available
-    // We construct the command manually since we don't have direct access
-    // to ToolPathManager from the analysis layer.
-    // The caller should set useOtb=false if OTB is not available.
+    const QString program = ToolPathManager::instance().otbToolPath( QStringLiteral( "Segmentation" ) );
+    if ( program.isEmpty() )
+    {
+        errorMsg = tr( "OTB Segmentation CLI not found — set SICNU_OTB_PATH or install OTB" );
+        return false;
+    }
 
-    // For now, fall through to SimpleSegmenter
-    errorMsg = tr( "OTB segmentation not directly available in task; using fallback" );
-    return false;
+    QTemporaryDir tempDir;
+    if ( !tempDir.isValid() )
+    {
+        errorMsg = tr( "Cannot create temporary directory for OTB output" );
+        return false;
+    }
+
+    const QString vectorOut = tempDir.path() + QStringLiteral( "/segments.shp" );
+    const QString labelOut = tempDir.path() + QStringLiteral( "/labels.tif" );
+
+    QStringList args;
+    args << QStringLiteral( "-in" ) << mCfg.sourceRaster;
+    args << QStringLiteral( "-mode" ) << QStringLiteral( "meanshift" );
+    args << QStringLiteral( "-mode.meanshift.spatialr" ) << QString::number( mCfg.spatialRadius );
+    args << QStringLiteral( "-mode.meanshift.ranger" ) << QString::number( mCfg.rangeRadius, 'f', 2 );
+    args << QStringLiteral( "-mode.meanshift.minsize" ) << QString::number( mCfg.minRegionSize );
+    args << QStringLiteral( "-mode.meanshift.maxiter" ) << QString::number( mCfg.maxIteration );
+    args << QStringLiteral( "-out" ) << vectorOut << labelOut << QStringLiteral( "uint32" );
+
+    const QString cmdLine = program + QLatin1Char( ' ' ) + args.join( QLatin1Char( ' ' ) );
+    SICNU_LOG_INFO( SicnuLogTags::OBIA, QStringLiteral( "Running OTB Segmentation: %1" ).arg( cmdLine ) );
+
+    QProcess proc;
+    proc.setProcessChannelMode( QProcess::MergedChannels );
+    proc.start( program, args );
+
+    if ( !proc.waitForStarted( 5000 ) )
+    {
+        errorMsg = tr( "Failed to start OTB Segmentation: %1" ).arg( proc.errorString() );
+        SICNU_LOG_ERROR( SicnuLogTags::OBIA, errorMsg );
+        return false;
+    }
+
+    while ( proc.state() == QProcess::Running )
+    {
+        if ( isCanceled() )
+        {
+            proc.kill();
+            proc.waitForFinished( 3000 );
+            errorMsg = tr( "OTB segmentation canceled" );
+            return false;
+        }
+        proc.waitForReadyRead( 100 );
+        const QByteArray output = proc.readAllStandardOutput();
+        if ( !output.isEmpty() )
+            SICNU_LOG_INFO( SicnuLogTags::OBIA, QString::fromUtf8( output ) );
+    }
+
+    proc.waitForFinished( -1 );
+
+    if ( proc.exitCode() != 0 )
+    {
+        errorMsg = tr( "OTB Segmentation failed (exit %1): %2" )
+                       .arg( proc.exitCode() )
+                       .arg( QString::fromUtf8( proc.readAllStandardOutput() ) );
+        SICNU_LOG_ERROR( SicnuLogTags::OBIA, errorMsg );
+        return false;
+    }
+
+    if ( !QFile::exists( labelOut ) )
+    {
+        errorMsg = tr( "OTB did not produce label image: %1" ).arg( labelOut );
+        SICNU_LOG_ERROR( SicnuLogTags::OBIA, errorMsg );
+        return false;
+    }
+
+    mSegMap = RsSegmentMap::fromGeoTIFF( labelOut );
+    if ( mSegMap.isEmpty() )
+    {
+        errorMsg = tr( "Failed to load OTB label image" );
+        return false;
+    }
+
+    GDALDatasetH srcDs = GDALOpen( mCfg.sourceRaster.toUtf8().constData(), GA_ReadOnly );
+    if ( srcDs )
+    {
+        const int srcW = GDALGetRasterXSize( srcDs );
+        const int srcH = GDALGetRasterYSize( srcDs );
+        GDALClose( srcDs );
+
+        if ( mSegMap.width() != srcW || mSegMap.height() != srcH )
+        {
+            errorMsg = tr( "Label image size mismatch: %1x%2 vs source %3x%4" )
+                           .arg( mSegMap.width() )
+                           .arg( mSegMap.height() )
+                           .arg( srcW )
+                           .arg( srcH );
+            return false;
+        }
+    }
+
+    SICNU_LOG_SUCCESS( SicnuLogTags::OBIA,
+                       QStringLiteral( "OTB segmentation complete: %1 segments" ).arg( mSegMap.segmentCount() ) );
+    return true;
 }
 
 // ---------------------------------------------------------------------------

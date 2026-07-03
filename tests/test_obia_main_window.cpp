@@ -1,0 +1,75 @@
+// test_obia_main_window.cpp — Phase 10B Task 10B.5 UI smoke tests
+#include <catch2/catch_test_macros.hpp>
+
+#ifdef SICNU_HAS_OPENCV
+
+#include "app/obia/rs_obia_main_window.h"
+
+#include <QApplication>
+#include <QComboBox>
+#include <QDockWidget>
+#include <QSpinBox>
+#include <QToolBar>
+
+namespace
+{
+
+int fake_argc = 1;
+char fake_argv0[] = "test_obia_main_window";
+char *fake_argv[] = { fake_argv0, nullptr };
+
+QApplication *ensureApp()
+{
+    if ( !QApplication::instance() )
+        return new QApplication( fake_argc, fake_argv );
+    return static_cast<QApplication *>( QApplication::instance() );
+}
+
+} // namespace
+
+TEST_CASE( "ObiaMainWindow: construction and window chrome", "[obia][ui]" )
+{
+    ensureApp();
+
+    RsObiaMainWindow window;
+    REQUIRE( window.windowTitle().contains( "OBIA" ) );
+    REQUIRE( window.centralWidget() != nullptr );
+    REQUIRE( window.statusBar() != nullptr );
+}
+
+TEST_CASE( "ObiaMainWindow: toolbar segmentation and classifier widgets", "[obia][ui]" )
+{
+    ensureApp();
+
+    RsObiaMainWindow window;
+    window.show();
+    QApplication::processEvents();
+
+    auto *toolbar = window.findChild<QToolBar *>( "obiaToolbar" );
+    REQUIRE( toolbar != nullptr );
+
+    auto *kernelSpin = window.findChild<QSpinBox *>( "kernelSpin" );
+    auto *binsSpin = window.findChild<QSpinBox *>( "binsSpin" );
+    auto *classifierCombo = window.findChild<QComboBox *>( "classifierCombo" );
+
+    REQUIRE( kernelSpin != nullptr );
+    REQUIRE( binsSpin != nullptr );
+    REQUIRE( classifierCombo != nullptr );
+    REQUIRE( kernelSpin->value() == 5 );
+    REQUIRE( binsSpin->value() == 32 );
+    REQUIRE( classifierCombo->count() == 3 );
+}
+
+TEST_CASE( "ObiaMainWindow: dock panels exist", "[obia][ui]" )
+{
+    ensureApp();
+
+    RsObiaMainWindow window;
+    window.show();
+    QApplication::processEvents();
+
+    REQUIRE( window.findChild<QDockWidget *>( "obiaClassDock" ) != nullptr );
+    REQUIRE( window.findChild<QDockWidget *>( "obiaSegmentDock" ) != nullptr );
+}
+
+#endif // SICNU_HAS_OPENCV

@@ -99,7 +99,8 @@ void GuidedWorkflowWidget::loadWorkflows()
                 << createAtmosphericCorrectionWorkflow()
                 << createImageFusionWorkflow()
                 << createPCAWorkflow()
-                << createMosaicWorkflow();
+                << createMosaicWorkflow()
+                << createObiaWorkflow();
 
     populateWorkflowList();
 }
@@ -749,6 +750,53 @@ Workflow GuidedWorkflowWidget::createMosaicWorkflow()
     step2.actionId = "openMosaicDialog";
     step2.completionHint = tr("Mosaic created from input images.");
     wf.steps << step2;
+
+    return wf;
+}
+
+Workflow GuidedWorkflowWidget::createObiaWorkflow()
+{
+    Workflow wf;
+    wf.id = "obia_classification";
+    wf.title = tr( "Object-Based Classification (OBIA)" );
+    wf.description = tr( "Segment the image into objects, label segments, and classify by spectral shape features." );
+
+    WorkflowStep step1;
+    step1.title = tr( "Load Sample Data" );
+    step1.instructions = tr( "<p>Load bundled lab datasets from <code>samples_data/</code>:</p>"
+                              "<ol>"
+                              "<li>Go to <b>Help &gt; Load Sample Data</b></li>"
+                              "<li>Confirm <code>landsat_sample.tif</code> appears on the map</li>"
+                              "</ol>" );
+    step1.actionId = "loadSampleData";
+    step1.completionHint = tr( "Sample raster layers are visible in the layer tree." );
+    wf.steps << step1;
+
+    WorkflowStep step2;
+    step2.title = tr( "Open OBIA Window" );
+    step2.instructions = tr( "<p>Launch the object-based classification workspace:</p>"
+                              "<ol>"
+                              "<li>Go to <b>Raster &gt; Classification &gt; Object-based Classification (OBIA)...</b></li>"
+                              "<li>Click <b>Load Raster</b> and select <code>landsat_sample.tif</code></li>"
+                              "</ol>" );
+    step2.actionId = "openObiaWindow";
+    step2.completionHint = tr( "OBIA window is open with the raster loaded." );
+    wf.steps << step2;
+
+    WorkflowStep step3;
+    step3.title = tr( "Segment and Classify" );
+    step3.instructions = tr( "<p>Run the OBIA pipeline:</p>"
+                              "<ol>"
+                              "<li>Adjust segmentation parameters (kernel / bins) if needed</li>"
+                              "<li>Click <b>Segment</b> to create image objects</li>"
+                              "<li>Click segments on the map and assign classes</li>"
+                              "<li>Choose a classifier and click <b>Classify</b></li>"
+                              "<li>Click <b>Export</b> to save the result GeoTIFF</li>"
+                              "</ol>"
+                              "<p>When OTB is installed, MeanShift segmentation is used automatically; otherwise a built-in segmenter is used.</p>" );
+    step3.actionId = "";
+    step3.completionHint = tr( "Classification map exported with segment-level class colors." );
+    wf.steps << step3;
 
     return wf;
 }

@@ -45,6 +45,13 @@ TEST_CASE("AppPaths::dataDir returns data directory", "[paths]") {
   REQUIRE(QFileInfo(path).isAbsolute());
 }
 
+TEST_CASE("AppPaths::samplesDataDir resolves bundled lab datasets", "[paths][samples]") {
+  QString path = AppPaths::samplesDataDir();
+  REQUIRE_FALSE(path.isEmpty());
+  REQUIRE(QDir(path).exists());
+  REQUIRE(QFileInfo::exists(path + "/landsat_sample.tif"));
+}
+
 TEST_CASE("main.cpp does not use hardcoded paths", "[paths]") {
   // This test documents the requirement: main.cpp must NOT contain
   // hardcoded paths like "/home/kevin/projects/exp-rs".

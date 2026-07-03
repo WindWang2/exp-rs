@@ -132,18 +132,13 @@ void QgisDesktopWindow::about()
 
 void QgisDesktopWindow::loadSampleData()
 {
-    // Find the samples_data directory relative to the application
-    QString samplesDir = AppPaths::dataDir() + "/samples_data";
-    QDir dir(samplesDir);
-    if (!dir.exists()) {
-        // Try relative to executable
-        samplesDir = QCoreApplication::applicationDirPath() + "/../samples_data";
-        dir.setPath(samplesDir);
-    }
-    if (!dir.exists()) {
-        QMessageBox::information(this, tr("Sample Data"),
-                                 tr("Sample data directory not found.\n"
-                                    "Please ensure samples_data/ exists in the application directory."));
+    const QString samplesDir = AppPaths::samplesDataDir();
+    QDir dir( samplesDir );
+    if ( !dir.exists() )
+    {
+        QMessageBox::information( this, tr( "Sample Data" ),
+                                  tr( "Sample data directory not found.\n"
+                                      "Expected samples_data/ at the project root or under data/." ) );
         return;
     }
 

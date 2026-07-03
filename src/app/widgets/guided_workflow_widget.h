@@ -78,6 +78,7 @@ private:
     Workflow createImageFusionWorkflow();
     Workflow createPCAWorkflow();
     Workflow createMosaicWorkflow();
+    Workflow createObiaWorkflow();
 
     QgisDesktopWindow *m_mainWindow = nullptr;
 
