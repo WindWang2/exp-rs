@@ -50,13 +50,16 @@ TEST_CASE( "ObiaMainWindow: toolbar segmentation and classifier widgets", "[obia
 
     auto *kernelSpin = window.findChild<QSpinBox *>( "kernelSpin" );
     auto *binsSpin = window.findChild<QSpinBox *>( "binsSpin" );
+    auto *minRegionSpin = window.findChild<QSpinBox *>( "minRegionSpin" );
     auto *classifierCombo = window.findChild<QComboBox *>( "classifierCombo" );
 
     REQUIRE( kernelSpin != nullptr );
     REQUIRE( binsSpin != nullptr );
+    REQUIRE( minRegionSpin != nullptr );
     REQUIRE( classifierCombo != nullptr );
     REQUIRE( kernelSpin->value() == 5 );
     REQUIRE( binsSpin->value() == 32 );
+    REQUIRE( minRegionSpin->value() == 100 );
     REQUIRE( classifierCombo->count() == 3 );
 }
 

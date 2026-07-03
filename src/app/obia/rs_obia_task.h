@@ -88,7 +88,5 @@ class RsObiaTask : public QgsTask
     Result mResult;
     RsSegmentMap mSegMap;
 
-    bool runOtbSegmentation( QString &errorMsg );
-    bool runSimpleSegmentation( QString &errorMsg );
     bool writeOutput( const QMap<quint32, int> &segmentClasses, QString &errorMsg );
 };

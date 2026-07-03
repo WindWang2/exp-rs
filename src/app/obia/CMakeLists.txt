@@ -10,6 +10,7 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
 qt_add_library(qgis_app_obia STATIC
+    rs_obia_segmentation.cpp
     rs_obia_task.cpp
     rs_segment_select_tool.cpp
     rs_segment_info_dock.cpp

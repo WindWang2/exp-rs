@@ -1,9 +1,7 @@
 // rs_obia_task.cpp — Phase 10B Task 10B.4
 #include "rs_obia_task.h"
 
-#include "rs_simple_segmenter.h"
-#include "sicnu_logging.h"
-#include "tools/tool_path_manager.h"
+#include "rs_obia_segmentation.h"
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -12,12 +10,9 @@
 #include <cpl_string.h>
 #include <ogr_srs_api.h>
 
-#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
-#include <QProcess>
 #include <QRegularExpression>
-#include <QTemporaryDir>
 
 #include <algorithm>
 
@@ -67,19 +62,28 @@ bool RsObiaTask::run()
     }
     else
     {
-        QString segError;
-        bool segOk = false;
-        if ( mCfg.useOtb )
-            segOk = runOtbSegmentation( segError );
-        if ( !segOk )
-            segOk = runSimpleSegmentation( segError );
+        RsObiaSegmentationConfig segCfg;
+        segCfg.rasterPath = mCfg.sourceRaster;
+        segCfg.bandIndices = mCfg.bandIndices;
+        segCfg.preferOtb = mCfg.useOtb;
+        segCfg.spatialRadius = mCfg.spatialRadius;
+        segCfg.rangeRadius = mCfg.rangeRadius;
+        segCfg.minRegionSize = mCfg.minRegionSize;
+        segCfg.maxIteration = mCfg.maxIteration;
+        segCfg.smoothKernel = mCfg.smoothKernel;
+        segCfg.quantizeBins = mCfg.quantizeBins;
 
-        if ( !segOk )
+        const RsObiaSegmentationResult segResult = RsObiaSegmentation::run(
+            segCfg, [this]() { return isCanceled(); } );
+
+        if ( !segResult.ok )
         {
             mResult.ok = false;
-            mResult.errorMessage = tr( "Segmentation failed: %1" ).arg( segError );
+            mResult.errorMessage = tr( "Segmentation failed: %1" ).arg( segResult.errorMessage );
             return false;
         }
+
+        mSegMap = segResult.segMap;
     }
 
     if ( isCanceled() )
@@ -194,191 +198,6 @@ bool RsObiaTask::run()
     mResult.ok = true;
     mResult.durationMs = static_cast<int>( timer.elapsed() );
     setProgress( 100 );
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// Segmentation: OTB MeanShift
-// ---------------------------------------------------------------------------
-
-bool RsObiaTask::runOtbSegmentation( QString &errorMsg )
-{
-    const QString program = ToolPathManager::instance().otbToolPath( QStringLiteral( "Segmentation" ) );
-    if ( program.isEmpty() )
-    {
-        errorMsg = tr( "OTB Segmentation CLI not found — set SICNU_OTB_PATH or install OTB" );
-        return false;
-    }
-
-    QTemporaryDir tempDir;
-    if ( !tempDir.isValid() )
-    {
-        errorMsg = tr( "Cannot create temporary directory for OTB output" );
-        return false;
-    }
-
-    const QString vectorOut = tempDir.path() + QStringLiteral( "/segments.shp" );
-    const QString labelOut = tempDir.path() + QStringLiteral( "/labels.tif" );
-
-    QStringList args;
-    args << QStringLiteral( "-in" ) << mCfg.sourceRaster;
-    args << QStringLiteral( "-mode" ) << QStringLiteral( "meanshift" );
-    args << QStringLiteral( "-mode.meanshift.spatialr" ) << QString::number( mCfg.spatialRadius );
-    args << QStringLiteral( "-mode.meanshift.ranger" ) << QString::number( mCfg.rangeRadius, 'f', 2 );
-    args << QStringLiteral( "-mode.meanshift.minsize" ) << QString::number( mCfg.minRegionSize );
-    args << QStringLiteral( "-mode.meanshift.maxiter" ) << QString::number( mCfg.maxIteration );
-    args << QStringLiteral( "-out" ) << vectorOut << labelOut << QStringLiteral( "uint32" );
-
-    const QString cmdLine = program + QLatin1Char( ' ' ) + args.join( QLatin1Char( ' ' ) );
-    SICNU_LOG_INFO( SicnuLogTags::OBIA, QStringLiteral( "Running OTB Segmentation: %1" ).arg( cmdLine ) );
-
-    QProcess proc;
-    proc.setProcessChannelMode( QProcess::MergedChannels );
-    proc.start( program, args );
-
-    if ( !proc.waitForStarted( 5000 ) )
-    {
-        errorMsg = tr( "Failed to start OTB Segmentation: %1" ).arg( proc.errorString() );
-        SICNU_LOG_ERROR( SicnuLogTags::OBIA, errorMsg );
-        return false;
-    }
-
-    while ( proc.state() == QProcess::Running )
-    {
-        if ( isCanceled() )
-        {
-            proc.kill();
-            proc.waitForFinished( 3000 );
-            errorMsg = tr( "OTB segmentation canceled" );
-            return false;
-        }
-        proc.waitForReadyRead( 100 );
-        const QByteArray output = proc.readAllStandardOutput();
-        if ( !output.isEmpty() )
-            SICNU_LOG_INFO( SicnuLogTags::OBIA, QString::fromUtf8( output ) );
-    }
-
-    proc.waitForFinished( -1 );
-
-    if ( proc.exitCode() != 0 )
-    {
-        errorMsg = tr( "OTB Segmentation failed (exit %1): %2" )
-                       .arg( proc.exitCode() )
-                       .arg( QString::fromUtf8( proc.readAllStandardOutput() ) );
-        SICNU_LOG_ERROR( SicnuLogTags::OBIA, errorMsg );
-        return false;
-    }
-
-    if ( !QFile::exists( labelOut ) )
-    {
-        errorMsg = tr( "OTB did not produce label image: %1" ).arg( labelOut );
-        SICNU_LOG_ERROR( SicnuLogTags::OBIA, errorMsg );
-        return false;
-    }
-
-    mSegMap = RsSegmentMap::fromGeoTIFF( labelOut );
-    if ( mSegMap.isEmpty() )
-    {
-        errorMsg = tr( "Failed to load OTB label image" );
-        return false;
-    }
-
-    GDALDatasetH srcDs = GDALOpen( mCfg.sourceRaster.toUtf8().constData(), GA_ReadOnly );
-    if ( srcDs )
-    {
-        const int srcW = GDALGetRasterXSize( srcDs );
-        const int srcH = GDALGetRasterYSize( srcDs );
-        GDALClose( srcDs );
-
-        if ( mSegMap.width() != srcW || mSegMap.height() != srcH )
-        {
-            errorMsg = tr( "Label image size mismatch: %1x%2 vs source %3x%4" )
-                           .arg( mSegMap.width() )
-                           .arg( mSegMap.height() )
-                           .arg( srcW )
-                           .arg( srcH );
-            return false;
-        }
-    }
-
-    SICNU_LOG_SUCCESS( SicnuLogTags::OBIA,
-                       QStringLiteral( "OTB segmentation complete: %1 segments" ).arg( mSegMap.segmentCount() ) );
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// Segmentation: SimpleSegmenter fallback
-// ---------------------------------------------------------------------------
-
-bool RsObiaTask::runSimpleSegmentation( QString &errorMsg )
-{
-    GDALDatasetH ds = GDALOpen( mCfg.sourceRaster.toUtf8().constData(), GA_ReadOnly );
-    if ( !ds )
-    {
-        errorMsg = tr( "Cannot open raster: %1" ).arg( mCfg.sourceRaster );
-        return false;
-    }
-
-    const int w = GDALGetRasterXSize( ds );
-    const int h = GDALGetRasterYSize( ds );
-    const int nBands = mCfg.bandIndices.size();
-
-    if ( nBands == 0 )
-    {
-        GDALClose( ds );
-        errorMsg = tr( "No bands selected" );
-        return false;
-    }
-
-    // Read band data
-    QVector<QVector<float>> bandData( nBands );
-    for ( int b = 0; b < nBands; ++b )
-    {
-        bandData[b].resize( w * h );
-        GDALRasterBandH band = GDALGetRasterBand( ds, mCfg.bandIndices[b] );
-        if ( !band )
-        {
-            GDALClose( ds );
-            errorMsg = tr( "Cannot read band %1" ).arg( mCfg.bandIndices[b] );
-            return false;
-        }
-        if ( GDALRasterIO( band, GF_Read, 0, 0, w, h,
-                           bandData[b].data(), w, h, GDT_Float32, 0, 0 ) != CE_None )
-        {
-            GDALClose( ds );
-            errorMsg = tr( "RasterIO failed for band %1" ).arg( mCfg.bandIndices[b] );
-            return false;
-        }
-    }
-
-    // Get nodata value
-    GDALRasterBandH firstBand = GDALGetRasterBand( ds, mCfg.bandIndices[0] );
-    int hasNodata = 0;
-    float nodata = static_cast<float>( GDALGetRasterNoDataValue( firstBand, &hasNodata ) );
-    GDALClose( ds );
-
-    if ( !hasNodata )
-        nodata = -9999.0f;
-
-    // Build band pointer array
-    QVector<const float *> bandPtrs( nBands );
-    for ( int b = 0; b < nBands; ++b )
-        bandPtrs[b] = bandData[b].data();
-
-    // Segment
-    RsSimpleSegmenter::Params params;
-    params.smoothKernel = mCfg.smoothKernel;
-    params.quantizeBins = mCfg.quantizeBins;
-    params.minRegionSize = mCfg.minRegionSize;
-
-    mSegMap = RsSimpleSegmenter::segmentMultiBand( bandPtrs.constData(), nBands, w, h, nodata, params );
-
-    if ( mSegMap.isEmpty() )
-    {
-        errorMsg = tr( "Segmentation produced empty result" );
-        return false;
-    }
-
     return true;
 }
 

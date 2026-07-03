@@ -3,7 +3,7 @@
 #include "sicnu_logging.h"
 
 #include "rs_obia_task.h"
-#include "rs_simple_segmenter.h"
+#include "rs_obia_segmentation.h"
 #include "rs_classifier_normalbayes.h"
 #include "rs_classifier_svm.h"
 #include "rs_classifier_kmeans.h"
@@ -22,6 +22,7 @@
 
 #include <QAction>
 #include <QComboBox>
+#include <QGuiApplication>
 #include <QFileDialog>
 #include <QSpinBox>
 #include <QFileInfo>
@@ -103,9 +104,16 @@ void RsObiaMainWindow::setupToolbar()
     auto *binsSpin = new QSpinBox;
     binsSpin->setRange( 2, 128 );
     binsSpin->setValue( 32 );
-    binsSpin->setToolTip( tr( "Quantization bins" ) );
+    binsSpin->setToolTip( tr( "Quantization bins (built-in segmenter fallback)" ) );
     binsSpin->setObjectName( "binsSpin" );
     mToolbar->addWidget( binsSpin );
+
+    auto *minRegionSpin = new QSpinBox;
+    minRegionSpin->setRange( 10, 10000 );
+    minRegionSpin->setValue( 100 );
+    minRegionSpin->setToolTip( tr( "Minimum region size (OTB MeanShift / built-in merge)" ) );
+    minRegionSpin->setObjectName( "minRegionSpin" );
+    mToolbar->addWidget( minRegionSpin );
 
     mToolbar->addAction( tr( "Segment" ), this, &RsObiaMainWindow::runSegmentation );
 
@@ -247,112 +255,58 @@ void RsObiaMainWindow::runSegmentation()
 
     SICNU_LOG_INFO( SicnuLogTags::OBIA, QString( "Starting segmentation: %1" ).arg( mRasterPath ) );
 
-    // Build band indices (use all bands)
     QVector<int> bandIndices;
     for ( int b = 1; b <= mBandCount; ++b )
         bandIndices.append( b );
 
-    // Get params from toolbar
     auto *kernelSpin = findChild<QSpinBox *>( "kernelSpin" );
     auto *binsSpin = findChild<QSpinBox *>( "binsSpin" );
+    auto *minRegionSpin = findChild<QSpinBox *>( "minRegionSpin" );
 
-    RsSimpleSegmenter::Params params;
-    params.smoothKernel = kernelSpin ? kernelSpin->value() : 5;
-    params.quantizeBins = binsSpin ? binsSpin->value() : 32;
-    params.minRegionSize = 50;
+    RsObiaSegmentationConfig segCfg;
+    segCfg.rasterPath = mRasterPath;
+    segCfg.bandIndices = bandIndices;
+    segCfg.preferOtb = true;
+    segCfg.smoothKernel = kernelSpin ? kernelSpin->value() : 5;
+    segCfg.quantizeBins = binsSpin ? binsSpin->value() : 32;
+    segCfg.minRegionSize = minRegionSpin ? minRegionSpin->value() : 100;
 
-    // Read band data via GDAL
-    GDALDatasetH ds = GDALOpen( mRasterPath.toUtf8().constData(), GA_ReadOnly );
-    if ( !ds )
-    {
-        QMessageBox::warning( this, tr( "Error" ), tr( "Cannot open raster for segmentation" ) );
-        return;
-    }
-
-    const int w = GDALGetRasterXSize( ds );
-    const int h = GDALGetRasterYSize( ds );
-
-    QVector<QVector<float>> bandData( mBandCount );
-    bool readOk = true;
-    for ( int b = 0; b < mBandCount; ++b )
-    {
-        bandData[b].resize( w * h );
-        GDALRasterBandH band = GDALGetRasterBand( ds, b + 1 );
-        if ( !band )
-        {
-            readOk = false;
-            break;
-        }
-        if ( GDALRasterIO( band, GF_Read, 0, 0, w, h, bandData[b].data(), w, h, GDT_Float32, 0, 0 ) != CE_None )
-        {
-            readOk = false;
-            break;
-        }
-    }
-
-    GDALRasterBandH firstBand = GDALGetRasterBand( ds, 1 );
-    int hasNodata = 0;
-    float nodata = firstBand ? static_cast<float>( GDALGetRasterNoDataValue( firstBand, &hasNodata ) ) : -9999.0f;
-    GDALClose( ds );
-
-    if ( !readOk )
-    {
-        QMessageBox::warning( this, tr( "Error" ), tr( "Failed to read raster band data" ) );
-        return;
-    }
-
-    if ( !hasNodata )
-        nodata = -9999.0f;
-
-    // Build band pointers (must stay alive during async execution)
-    auto sharedBandData = std::make_shared<QVector<QVector<float>>>( std::move(bandData) );
-    QVector<const float *> bandPtrs( mBandCount );
-    for ( int b = 0; b < mBandCount; ++b )
-        bandPtrs[b] = (*sharedBandData)[b].data();
-
-    // Segment asynchronously using QtConcurrent
     QGuiApplication::setOverrideCursor( Qt::WaitCursor );
+    statusBar()->showMessage( RsObiaSegmentation::isOtbAvailable()
+                                  ? tr( "Segmenting with OTB MeanShift..." )
+                                  : tr( "Segmenting with built-in segmenter..." ) );
 
-    // Capture values for lambda
-    int capturedBandCount = mBandCount;
-    QVector<int> capturedBandIndices = bandIndices;
+    auto *watcher = new QFutureWatcher<RsObiaSegmentationResult>( this );
+    connect( watcher, &QFutureWatcher<RsObiaSegmentationResult>::finished, this,
+             [this, watcher, bandIndices]() {
+                 QGuiApplication::restoreOverrideCursor();
+                 const RsObiaSegmentationResult result = watcher->result();
+                 watcher->deleteLater();
 
-    QFutureWatcher<RsSegmentMap> *watcher = new QFutureWatcher<RsSegmentMap>( this );
-    connect( watcher, &QFutureWatcher<RsSegmentMap>::finished, this, [this, watcher, sharedBandData, bandPtrs, capturedBandCount, capturedBandIndices]() {
-        QGuiApplication::restoreOverrideCursor();
-        mSegMap = watcher->result();
-        watcher->deleteLater();
+                 if ( !result.ok )
+                 {
+                     QMessageBox::warning( this, tr( "Error" ), result.errorMessage );
+                     updateStatusLabel();
+                     return;
+                 }
 
-        if ( mSegMap.isEmpty() )
-        {
-            QMessageBox::warning( this, tr( "Error" ), tr( "Segmentation produced no segments" ) );
-            return;
-        }
+                 applySegmentationResult( result.segMap, result.usedOtb, bandIndices );
+             } );
 
-        // Update segment map and features
-        mSegStats = RsSegmentFeatures::extract( mRasterPath, mSegMap, capturedBandIndices );
-        mSegmentLabels.clear();
+    watcher->setFuture( QtConcurrent::run( [segCfg]() {
+        static bool s_gdalInit = ( GDALAllRegister(), true );
+        Q_UNUSED( s_gdalInit );
+        return RsObiaSegmentation::run( segCfg );
+    } ) );
+}
 
-        QMessageBox::information( this, tr( "Segmentation" ),
-                                  tr( "Segmentation complete: %1 segments" ).arg( mSegMap.uniqueLabels().size() ) );
-    });
-
-    // Capture for async execution
-    auto segFuture = QtConcurrent::run( [bandPtrs, capturedBandCount, w, h, nodata, params]() -> RsSegmentMap {
-        return RsSimpleSegmenter::segmentMultiBand( bandPtrs.constData(), capturedBandCount, w, h, nodata, params );
-    } );
-    watcher->setFuture( segFuture );
-
-    if ( mSegMap.isEmpty() )
-    {
-        QMessageBox::warning( this, tr( "Error" ), tr( "Segmentation produced no segments" ) );
-        return;
-    }
-
-    // Extract features
+void RsObiaMainWindow::applySegmentationResult(
+    const RsSegmentMap &segMap, bool usedOtb, const QVector<int> &bandIndices )
+{
+    mSegMap = segMap;
     mSegStats = RsSegmentFeatures::extract( mRasterPath, mSegMap, bandIndices );
+    mSegmentLabels.clear();
 
-    // Set up select tool
     if ( !mSelectTool )
     {
         mSelectTool = new RsSegmentSelectTool( mCanvas );
@@ -364,25 +318,26 @@ void RsObiaMainWindow::runSegmentation()
     mSelectTool->setSegmentMap( mSegMap );
 
     double gt[6] = { 0, 1, 0, 0, 0, 1 };
-    if ( mRasterLayer )
+    GDALDatasetH rds = GDALOpen( mRasterPath.toUtf8().constData(), GA_ReadOnly );
+    if ( rds )
     {
-        auto *rds = GDALOpen( mRasterPath.toUtf8().constData(), GA_ReadOnly );
-        if ( rds )
-        {
-            GDALGetGeoTransform( rds, gt );
-            GDALClose( rds );
-        }
+        GDALGetGeoTransform( rds, gt );
+        GDALClose( rds );
     }
     mSelectTool->setGeoTransform( gt );
-
     mCanvas->setMapTool( mSelectTool );
 
-    // Update UI
-    mSegmentLabels.clear();
     updateSegmentTable();
     updateStatusLabel();
 
-    statusBar()->showMessage( tr( "Segmentation complete: %1 segments" ).arg( mSegMap.segmentCount() ), 5000 );
+    const QString method = usedOtb ? tr( "OTB MeanShift" ) : tr( "built-in segmenter" );
+    statusBar()->showMessage(
+        tr( "Segmentation complete (%1): %2 segments" ).arg( method ).arg( mSegMap.segmentCount() ), 5000 );
+
+    QMessageBox::information( this, tr( "Segmentation" ),
+                              tr( "Segmentation complete using %1: %2 segments" )
+                                  .arg( method )
+                                  .arg( mSegMap.segmentCount() ) );
 }
 
 void RsObiaMainWindow::runClassification()
