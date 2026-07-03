@@ -6,8 +6,14 @@
 #include <QPushButton>
 #include <QString>
 #include <QVBoxLayout>
+#include <QVariantMap>
+#include <functional>
 
 class QgsRasterLayer;
+class AsyncGdalRunner;
+class AsyncAlgorithmRunner;
+class QgsProcessingAlgorithm;
+class QgsProcessingContext;
 
 /**
  * Base class for raster processing dialogs providing common UI elements and callbacks.
@@ -33,12 +39,41 @@ public:
     /**
      * Set the raster layer to process.
      */
-    void setRasterLayer(QgsRasterLayer *layer);
+    virtual void setRasterLayer(QgsRasterLayer *layer);
 
     /**
      * Get the output file path.
      */
     QString outputPath() const;
+
+    /**
+     * True while a GDAL task is running (Run button disabled).
+     */
+    bool isRunning() const { return m_running; }
+
+    /**
+     * Disable Run and mark dialog as busy. Called automatically by runGdalTask().
+     */
+    void startRun();
+
+    /**
+     * Re-enable Run after completion or failure.
+     */
+    void finishRun();
+
+    /**
+     * Run a GDAL I/O task on a background thread.
+     * Connects to onCompleted/onFailed automatically on first use.
+     */
+    void runGdalTask(const std::function<QString()> &task);
+
+    /**
+     * Run a QGIS Processing algorithm on a background thread.
+     * Connects to onCompleted/onFailed automatically on first use.
+     */
+    void runAlgorithmTask(const QgsProcessingAlgorithm *algorithm,
+                          const QVariantMap &parameters,
+                          QgsProcessingContext &context);
 
 protected:
     // --- Virtual hooks for subclasses ---
@@ -63,6 +98,11 @@ protected:
      * Execute the processing. Called when Run is clicked and inputs are valid.
      */
     virtual void onRun() = 0;
+
+    /**
+     * Hook for subclasses to release resources held only for the duration of a run.
+     */
+    virtual void cleanupRunResources() {}
 
     // --- UI helpers ---
 
@@ -109,4 +149,7 @@ protected:
     QgsRasterLayer *m_rasterLayer = nullptr;
     QLineEdit *m_outputEdit = nullptr;
     QPushButton *m_runButton = nullptr;
+    AsyncGdalRunner *m_runner = nullptr;
+    AsyncAlgorithmRunner *m_algorithmRunner = nullptr;
+    bool m_running = false;
 };

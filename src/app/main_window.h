@@ -339,8 +339,10 @@ private:
     std::unique_ptr<class PluginManager> m_pluginManager;
 
     // Lazy-loaded modules
+#ifdef SICNU_EMBED_PYTHON
     std::unique_ptr<class SicnuPythonConsole> m_pythonConsole;
     class QgsDockWidget *m_pythonDock = nullptr;
+#endif
 
     friend class LayerTreeMenuProvider;
 

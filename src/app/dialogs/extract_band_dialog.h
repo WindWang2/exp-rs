@@ -5,7 +5,6 @@
 
 class QComboBox;
 class QLabel;
-class AsyncGdalRunner;
 
 class ExtractBandDialog : public RasterProcessingDialogBase
 {
@@ -29,5 +28,5 @@ private:
     QComboBox *m_layerCombo = nullptr;
     QComboBox *m_bandCombo = nullptr;
     QLabel *m_infoLabel = nullptr;
-    AsyncGdalRunner *m_runner = nullptr;
+
 };

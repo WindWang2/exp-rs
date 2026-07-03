@@ -7,6 +7,7 @@
 #include <QMutex>
 #include <QMap>
 #include <QPointer>
+#include <atomic>
 #include <memory>
 #include <QCoreApplication>
 
@@ -19,10 +20,13 @@ class StdinReader : public QThread
     Q_OBJECT
 public:
     StdinReader(QObject *parent = nullptr) : QThread(parent) {}
+    void requestStop();
 signals:
     void lineRead(const QString &line);
 protected:
     void run() override;
+private:
+    std::atomic<bool> m_stopRequested{false};
 };
 
 struct AlgorithmExecution {

@@ -102,15 +102,7 @@ void MosaicDialog::onRun()
         inputPaths.append(m_inputList->item(i)->text());
     }
 
-    if (!m_runner) {
-        m_runner = new AsyncGdalRunner(this, this);
-        connect(m_runner, &AsyncGdalRunner::completed, this, &MosaicDialog::onCompleted);
-        connect(m_runner, &AsyncGdalRunner::failed, this, &MosaicDialog::onFailed);
-    }
-
-    m_runButton->setEnabled(false);
-
-    m_runner->run([inputPaths, outPath]() -> QString {
+    runGdalTask([inputPaths, outPath]() -> QString {
     try {
         const int inputCount = inputPaths.size();
         struct InputInfo {

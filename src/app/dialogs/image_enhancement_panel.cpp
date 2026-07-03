@@ -272,16 +272,7 @@ void ImageEnhancementPanel::onRun()
 
     int method = m_methodCombo->currentIndex();
 
-    // Disable run button
-    m_runButton->setEnabled(false);
     m_statusLabel->setText(tr("Processing..."));
-
-    // Create runner if needed
-    if (!m_runner) {
-        m_runner = new AsyncGdalRunner(this, this);
-        connect(m_runner, &AsyncGdalRunner::completed, this, &ImageEnhancementPanel::onCompleted);
-        connect(m_runner, &AsyncGdalRunner::failed, this, &ImageEnhancementPanel::onFailed);
-    }
 
     // Capture parameters
     int stretchType = m_stretchTypeCombo->currentIndex();
@@ -299,7 +290,7 @@ void ImageEnhancementPanel::onRun()
     double noiseVar = m_noiseVarSpin->value();
     double damping = m_dampingSpin->value();
 
-    m_runner->run([sourcePath, outPath, method, stretchType, clipPercent, stddevMult,
+    runGdalTask([sourcePath, outPath, method, stretchType, clipPercent, stddevMult,
                     filterType, kernelSize, sigma, customKernelStr, ratioType, band1, band2,
                     speckleType, speckleKernel, noiseVar, damping]() -> QString {
     try {

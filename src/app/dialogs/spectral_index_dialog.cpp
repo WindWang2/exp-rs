@@ -1,6 +1,5 @@
 // src/app/dialogs/spectral_index_dialog.cpp
 #include "spectral_index_dialog.h"
-#include "async_algorithm_runner.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <raster/qgsrasterlayer.h>
@@ -242,74 +241,64 @@ void SpectralIndexDialog::onRun()
         return;
     }
 
-    std::unique_ptr<QgsProcessingAlgorithm> algorithm( alg->create() );
+    cleanupRunResources();
+    m_tempFiles.clear();
+    m_tempLayers.clear();
 
     // Extract each visible band selection into a temporary single-band layer.
     // The algorithm expects separate QgsRasterLayer objects, each containing
-    // exactly the band to be used.  Temporary files are cleaned up at the end.
-    QStringList tempFiles;
-    auto cleanupGuard = qScopeGuard([&tempFiles]() {
-        for (const QString &f : tempFiles)
-            QFile::remove(f);
-    });
-
+    // exactly the band to be used.  Temporary files are cleaned up after run.
     int index = m_indexCombo->currentIndex();
     std::unique_ptr<QgsRasterLayer> nirLayer, redLayer, greenLayer, blueLayer, swirLayer;
 
     if ( m_nirCombo->isVisible() )
         nirLayer.reset( extractBandAsLayer( m_rasterLayer,
-                        m_nirCombo->currentData().toInt(), QStringLiteral( "nir" ), tempFiles ) );
+                        m_nirCombo->currentData().toInt(), QStringLiteral( "nir" ), m_tempFiles ) );
     if ( m_redCombo->isVisible() )
         redLayer.reset( extractBandAsLayer( m_rasterLayer,
-                        m_redCombo->currentData().toInt(), QStringLiteral( "red" ), tempFiles ) );
+                        m_redCombo->currentData().toInt(), QStringLiteral( "red" ), m_tempFiles ) );
     if ( m_greenCombo->isVisible() )
         greenLayer.reset( extractBandAsLayer( m_rasterLayer,
-                          m_greenCombo->currentData().toInt(), QStringLiteral( "green" ), tempFiles ) );
+                          m_greenCombo->currentData().toInt(), QStringLiteral( "green" ), m_tempFiles ) );
     if ( m_blueCombo->isVisible() )
         blueLayer.reset( extractBandAsLayer( m_rasterLayer,
-                         m_blueCombo->currentData().toInt(), QStringLiteral( "blue" ), tempFiles ) );
+                         m_blueCombo->currentData().toInt(), QStringLiteral( "blue" ), m_tempFiles ) );
     if ( m_swirCombo->isVisible() )
         swirLayer.reset( extractBandAsLayer( m_rasterLayer,
-                         m_swirCombo->currentData().toInt(), QStringLiteral( "swir" ), tempFiles ) );
+                         m_swirCombo->currentData().toInt(), QStringLiteral( "swir" ), m_tempFiles ) );
+
+    auto keepLayer = [this](std::unique_ptr<QgsRasterLayer> &layer) -> QgsRasterLayer * {
+        if (!layer)
+            return nullptr;
+        m_tempLayers.push_back(std::move(layer));
+        return m_tempLayers.back().get();
+    };
 
     // Build parameters from dialog inputs
     QVariantMap params;
     params.insert( QStringLiteral( "INDEX" ), index );
-    if ( nirLayer )
-        params.insert( QStringLiteral( "NIR_BAND" ), QVariant::fromValue( nirLayer.get() ) );
-    if ( redLayer )
-        params.insert( QStringLiteral( "RED_BAND" ), QVariant::fromValue( redLayer.get() ) );
-    if ( greenLayer )
-        params.insert( QStringLiteral( "GREEN_BAND" ), QVariant::fromValue( greenLayer.get() ) );
-    if ( blueLayer )
-        params.insert( QStringLiteral( "BLUE_BAND" ), QVariant::fromValue( blueLayer.get() ) );
-    if ( swirLayer )
-        params.insert( QStringLiteral( "SWIR_BAND" ), QVariant::fromValue( swirLayer.get() ) );
+    if ( QgsRasterLayer *nir = keepLayer(nirLayer) )
+        params.insert( QStringLiteral( "NIR_BAND" ), QVariant::fromValue( nir ) );
+    if ( QgsRasterLayer *red = keepLayer(redLayer) )
+        params.insert( QStringLiteral( "RED_BAND" ), QVariant::fromValue( red ) );
+    if ( QgsRasterLayer *green = keepLayer(greenLayer) )
+        params.insert( QStringLiteral( "GREEN_BAND" ), QVariant::fromValue( green ) );
+    if ( QgsRasterLayer *blue = keepLayer(blueLayer) )
+        params.insert( QStringLiteral( "BLUE_BAND" ), QVariant::fromValue( blue ) );
+    if ( QgsRasterLayer *swir = keepLayer(swirLayer) )
+        params.insert( QStringLiteral( "SWIR_BAND" ), QVariant::fromValue( swir ) );
     params.insert( QStringLiteral( "OUTPUT" ), outputPath() );
 
-    // Execute algorithm asynchronously
     QgsProcessingContext context;
     context.setProject( QgsProject::instance() );
 
-    if ( !m_runner ) {
-        m_runner = new AsyncAlgorithmRunner( this, this );
-        connect( m_runner, &AsyncAlgorithmRunner::completed,
-                 this, &SpectralIndexDialog::onAlgorithmCompleted );
-        connect( m_runner, &AsyncAlgorithmRunner::failed,
-                 this, &SpectralIndexDialog::onAlgorithmFailed );
-    }
-
-    m_runButton->setEnabled( false );
-    m_runner->run( alg, params, context );
+    runAlgorithmTask(alg, params, context);
 }
 
-void SpectralIndexDialog::onAlgorithmCompleted( const QVariantMap &results )
+void SpectralIndexDialog::cleanupRunResources()
 {
-    Q_UNUSED( results );
-    handleCompleted( outputPath() );
-}
-
-void SpectralIndexDialog::onAlgorithmFailed( const QString &errorMessage )
-{
-    handleFailed( errorMessage );
+    m_tempLayers.clear();
+    for (const QString &path : std::as_const(m_tempFiles))
+        QFile::remove(path);
+    m_tempFiles.clear();
 }

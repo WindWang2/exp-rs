@@ -6,7 +6,6 @@
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
-class AsyncGdalRunner;
 
 /**
  * Dialog for Contrast Stretch operations.
@@ -36,5 +35,4 @@ private:
     QDoubleSpinBox *m_stddevSpin = nullptr;
     QLabel *m_clipLabel = nullptr;
     QLabel *m_stddevLabel = nullptr;
-    AsyncGdalRunner *m_runner = nullptr;
 };

@@ -5,7 +5,6 @@
 
 class QListWidget;
 class QPushButton;
-class AsyncGdalRunner;
 
 /**
  * Dialog for mosaicking (stitching) multiple raster files into a single output.
@@ -31,5 +30,4 @@ private:
     void setupUi();
 
     QListWidget *m_inputList = nullptr;
-    AsyncGdalRunner *m_runner = nullptr;
 };

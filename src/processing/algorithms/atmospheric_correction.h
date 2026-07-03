@@ -1,6 +1,7 @@
 // src/processing/algorithms/atmospheric_correction.h
 #pragma once
 
+#include <QString>
 #include <cstddef>
 
 /**
@@ -55,4 +56,12 @@ namespace AtmosphericCorrection
      * @return transmittance in (0, 1]
      */
     float estimateTransmittance(float airmass);
+
+    /**
+     * Apply atmospheric correction to one band of a GeoTIFF and write output.
+     * @param method 0=DN to Radiance, 1=DOS1, 2=DOS2
+     */
+    bool processFile(const QString &sourcePath, const QString &outputPath,
+                     int bandNum, int method, float gain, float bias,
+                     float airmass = 1.0f, QString *errorMessage = nullptr);
 } // namespace AtmosphericCorrection

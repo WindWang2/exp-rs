@@ -2,6 +2,7 @@
 #include "image_fusion.h"
 #include "math_utils.h"
 #include "core/sicnu_logging.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <cmath>
 #include <algorithm>
@@ -457,4 +458,121 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
     }
 
     return result;
+}
+
+bool ImageFusion::processNativeFusion( const QString &panPath, const QString &msPath,
+                                       const QString &outputPath,
+                                       const NativeFusionParams &params,
+                                       QString *errorMessage )
+{
+    GdalDatasetWrapper panDataset;
+    if ( !panDataset.open( panPath ) )
+    {
+        if ( errorMessage )
+            *errorMessage = panDataset.lastError();
+        return false;
+    }
+
+    GdalDatasetWrapper msDataset;
+    if ( !msDataset.open( msPath ) )
+    {
+        if ( errorMessage )
+            *errorMessage = msDataset.lastError();
+        return false;
+    }
+
+    const int w = panDataset.width();
+    const int h = panDataset.height();
+    const int msBands = msDataset.bandCount();
+    if ( msBands < 1 )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "Multispectral raster has no bands" );
+        return false;
+    }
+
+    const size_t pixelCount = static_cast<size_t>( w ) * static_cast<size_t>( h );
+    std::vector<float> panData( pixelCount );
+    if ( !panDataset.readBandData( 1, panData.data(), w, h ) )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "Failed to read panchromatic band" );
+        return false;
+    }
+
+    const int nMsBands = std::min( msBands, 4 );
+    QVector<std::vector<float>> msData( nMsBands );
+    QVector<const float *> msPtrs( nMsBands );
+    for ( int b = 0; b < nMsBands; ++b )
+    {
+        msData[b].resize( pixelCount );
+        if ( !msDataset.readBandData( b + 1, msData[b].data(), w, h ) )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral( "Failed to read multispectral band %1" ).arg( b + 1 );
+            return false;
+        }
+        msPtrs[b] = msData[b].data();
+    }
+
+    const float nodata = -9999.0f;
+    QVector<QVector<float>> result;
+
+    if ( params.method == QStringLiteral( "linear" ) )
+    {
+        result = linearWeighted( msPtrs, nMsBands, panData.data(), w, h, nodata,
+                                 params.msWeights, params.panWeight );
+    }
+    else if ( params.method == QStringLiteral( "brovey" ) )
+    {
+        result = brovey( msPtrs, nMsBands, panData.data(), w, h, nodata );
+    }
+    else if ( params.method == QStringLiteral( "ihs" ) )
+    {
+        if ( params.redIdx < 0 || params.greenIdx < 0 || params.blueIdx < 0 ||
+             params.redIdx >= nMsBands || params.greenIdx >= nMsBands || params.blueIdx >= nMsBands )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral( "Invalid RGB band selection for IHS fusion" );
+            return false;
+        }
+        result = ihsFusion( msPtrs[params.redIdx], msPtrs[params.greenIdx], msPtrs[params.blueIdx],
+                            panData.data(), w, h, nodata );
+    }
+    else if ( params.method == QStringLiteral( "pca" ) )
+    {
+        result = pcaFusion( msPtrs, nMsBands, panData.data(), w, h, nodata );
+    }
+    else
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "Unsupported native fusion method" );
+        return false;
+    }
+
+    if ( result.isEmpty() )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "Fusion produced no output" );
+        return false;
+    }
+
+    std::vector<std::vector<float>> outBands;
+    outBands.reserve( result.size() );
+    for ( int b = 0; b < result.size(); ++b )
+    {
+        const QVector<float> &band = result[b];
+        outBands.emplace_back( band.constBegin(), band.constEnd() );
+    }
+
+    QString writeError;
+    if ( !writeGdalOutput( outputPath, w, h, outBands,
+                           panDataset.geoTransform(), panDataset.projection(), &writeError ) )
+    {
+        if ( errorMessage )
+            *errorMessage = writeError;
+        return false;
+    }
+
+    return true;
 }

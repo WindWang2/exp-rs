@@ -1,5 +1,6 @@
 // src/processing/algorithms/atmospheric_correction.cpp — DOS atmospheric correction
 #include "atmospheric_correction.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 #include "core/sicnu_logging.h"
 
 #include <cmath>
@@ -89,6 +90,66 @@ float estimateTransmittance(float airmass)
     // Photogrammetric Engineering & Remote Sensing 62(9):1025-1036).
     constexpr float tau = 0.1f;
     return std::exp(-tau * airmass);
+}
+
+bool processFile(const QString &sourcePath, const QString &outputPath,
+                 int bandNum, int method, float gain, float bias,
+                 float airmass, QString *errorMessage)
+{
+    GdalDatasetWrapper srcDataset;
+    if (!srcDataset.open(sourcePath)) {
+        if (errorMessage)
+            *errorMessage = srcDataset.lastError();
+        return false;
+    }
+
+    const int width = srcDataset.width();
+    const int height = srcDataset.height();
+    const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+
+    std::vector<float> dn(pixelCount);
+    if (!srcDataset.readBandData(bandNum, dn.data(), width, height)) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Failed to read band %1").arg(bandNum);
+        return false;
+    }
+
+    std::vector<float> output(pixelCount);
+    bool success = false;
+    switch (method) {
+    case 0:
+        success = dnToRadiance(dn.data(), output.data(), pixelCount, gain, bias);
+        break;
+    case 1:
+        success = dos1(dn.data(), output.data(), pixelCount, gain, bias);
+        break;
+    case 2: {
+        const float transmittance = estimateTransmittance(airmass);
+        success = dos2(dn.data(), output.data(), pixelCount, gain, bias, transmittance);
+        break;
+    }
+    default:
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Unknown atmospheric correction method");
+        return false;
+    }
+
+    if (!success) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Atmospheric correction failed");
+        return false;
+    }
+
+    std::vector<std::vector<float>> outBands = {std::move(output)};
+    QString writeError;
+    if (!writeGdalOutput(outputPath, width, height, outBands,
+                         srcDataset.geoTransform(), srcDataset.projection(), &writeError)) {
+        if (errorMessage)
+            *errorMessage = writeError;
+        return false;
+    }
+
+    return true;
 }
 
 } // namespace AtmosphericCorrection

@@ -5,7 +5,6 @@
 
 class QComboBox;
 class QLabel;
-class AsyncGdalRunner;
 
 /**
  * Dialog for Band Ratio and IHS Transform operations.
@@ -47,5 +46,5 @@ private:
     QLabel *m_blueLabel = nullptr;
     QComboBox *m_blueCombo = nullptr;
 
-    AsyncGdalRunner *m_runner = nullptr;
+
 };

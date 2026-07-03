@@ -236,3 +236,47 @@ TEST_CASE("BandMath respects operator precedence (* over -)", "[bandmath]")
     BandMath::evaluate("b1 * 2 - b2", bands, out.data(), 4);
     REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.5f * 2.0f - 0.1f, 0.001f)); // 0.9
 }
+
+// --- File-level processing (dialog async pipeline) ---
+
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include <QTemporaryDir>
+#include <QFile>
+#include <gdal.h>
+
+TEST_CASE("BandMath processFile writes evaluated raster", "[bandmath][gdal]")
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    const QString sourcePath = dir.filePath(QStringLiteral("source.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("output.tif"));
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+
+    GDALDatasetH srcDs = createOutputTiff(sourcePath, 2, 2, 2, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+
+    std::vector<float> band1 = {0.5f, 0.8f, 0.0f, 0.3f};
+    std::vector<float> band2 = {0.1f, 0.2f, 0.0f, 0.3f};
+    GDALRasterBandH b1 = GDALGetRasterBand(srcDs, 1);
+    GDALRasterBandH b2 = GDALGetRasterBand(srcDs, 2);
+    REQUIRE(GDALRasterIO(b1, GF_Write, 0, 0, 2, 2, band1.data(), 2, 2, GDT_Float32, 0, 0) == CE_None);
+    REQUIRE(GDALRasterIO(b2, GF_Write, 0, 0, 2, 2, band2.data(), 2, 2, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(srcDs);
+
+    QString error;
+    const bool ok = BandMath::processFile(sourcePath, outputPath, QStringLiteral("(b1 - b2) / (b1 + b2)"), &error);
+    REQUIRE(ok);
+    REQUIRE(QFile::exists(outputPath));
+    REQUIRE(error.isEmpty());
+
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(outputPath));
+    REQUIRE(outDs.bandCount() == 1);
+
+    std::vector<float> out(4);
+    REQUIRE(outDs.readBandData(1, out.data(), 2, 2));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.666666f, 0.01f));
+}

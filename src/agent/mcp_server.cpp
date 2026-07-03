@@ -48,10 +48,15 @@ QString mcpDataTypeToString( Qgis::DataType type ) {
 #include <qgsfields.h>
 
 // StdinReader implementation
+void StdinReader::requestStop()
+{
+    m_stopRequested = true;
+}
+
 void StdinReader::run()
 {
     std::string stdLine;
-    while (std::getline(std::cin, stdLine))
+    while (!m_stopRequested && std::getline(std::cin, stdLine))
     {
         QString line = QString::fromStdString(stdLine).trimmed();
         if (!line.isEmpty())
@@ -151,8 +156,8 @@ McpServer::~McpServer()
 {
     if (mReader)
     {
-        mReader->terminate();
-        mReader->wait();
+        mReader->requestStop();
+        mReader->wait(3000);
     }
 }
 

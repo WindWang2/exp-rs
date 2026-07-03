@@ -48,3 +48,40 @@ TEST_CASE("PCA variance sums to 1", "[pca]") {
     for (auto v : result.explainedVariance) totalVariance += v;
     REQUIRE(totalVariance == Approx(1.0f).margin(0.01f));
 }
+
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include <QTemporaryDir>
+#include <QFile>
+#include <gdal.h>
+
+TEST_CASE("ImageEnhancement processPcaFile writes component bands", "[pca][gdal]")
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    const QString sourcePath = dir.filePath(QStringLiteral("source.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("output.tif"));
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+
+    GDALDatasetH srcDs = createOutputTiff(sourcePath, 2, 2, 3, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+
+    for (int b = 1; b <= 3; ++b) {
+        std::vector<float> band(4, static_cast<float>(b));
+        GDALRasterBandH bandH = GDALGetRasterBand(srcDs, b);
+        REQUIRE(GDALRasterIO(bandH, GF_Write, 0, 0, 2, 2, band.data(), 2, 2, GDT_Float32, 0, 0) == CE_None);
+    }
+    GDALClose(srcDs);
+
+    QString error;
+    const bool ok = ImageEnhancement::processPcaFile(sourcePath, outputPath, 2, &error);
+    REQUIRE(ok);
+    REQUIRE(QFile::exists(outputPath));
+    REQUIRE(error.isEmpty());
+
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(outputPath));
+    REQUIRE(outDs.bandCount() == 2);
+}

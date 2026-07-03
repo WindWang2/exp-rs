@@ -1,5 +1,10 @@
 // raster_processing_dialog_base.cpp — Base class for raster processing dialogs
 #include "raster_processing_dialog_base.h"
+#include "async_gdal_runner.h"
+#include "async_algorithm_runner.h"
+
+#include <processing/qgsprocessingalgorithm.h>
+#include <processing/qgsprocessingcontext.h>
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -79,9 +84,61 @@ void RasterProcessingDialogBase::browseOutput()
         m_outputEdit->setText(path);
 }
 
+void RasterProcessingDialogBase::startRun()
+{
+    m_running = true;
+    if (m_runButton)
+        m_runButton->setEnabled(false);
+}
+
+void RasterProcessingDialogBase::finishRun()
+{
+    m_running = false;
+    if (m_runButton)
+        m_runButton->setEnabled(true);
+}
+
+void RasterProcessingDialogBase::runGdalTask(const std::function<QString()> &task)
+{
+    if (isRunning())
+        return;
+
+    if (!m_runner) {
+        m_runner = new AsyncGdalRunner(this, this);
+        connect(m_runner, &AsyncGdalRunner::completed, this, &RasterProcessingDialogBase::onCompleted);
+        connect(m_runner, &AsyncGdalRunner::failed, this, &RasterProcessingDialogBase::onFailed);
+    }
+
+    startRun();
+    m_runner->run(task);
+}
+
+void RasterProcessingDialogBase::runAlgorithmTask(const QgsProcessingAlgorithm *algorithm,
+                                                const QVariantMap &parameters,
+                                                QgsProcessingContext &context)
+{
+    if (isRunning())
+        return;
+
+    if (!m_algorithmRunner) {
+        m_algorithmRunner = new AsyncAlgorithmRunner(this, this);
+        connect(m_algorithmRunner, &AsyncAlgorithmRunner::completed, this,
+                [this](const QVariantMap &results) {
+                    Q_UNUSED(results);
+                    onCompleted(outputPath());
+                });
+        connect(m_algorithmRunner, &AsyncAlgorithmRunner::failed, this,
+                &RasterProcessingDialogBase::onFailed);
+    }
+
+    startRun();
+    m_algorithmRunner->run(algorithm, parameters, context);
+}
+
 void RasterProcessingDialogBase::handleCompleted(const QString &outputPath)
 {
-    m_runButton->setEnabled(true);
+    cleanupRunResources();
+    finishRun();
     QgsMessageLog::logMessage(tr("%1 completed! Output: %2").arg(toolName(), outputPath),
                               toolName(), Qgis::MessageLevel::Success);
     accept();
@@ -89,7 +146,8 @@ void RasterProcessingDialogBase::handleCompleted(const QString &outputPath)
 
 void RasterProcessingDialogBase::handleFailed(const QString &error)
 {
-    m_runButton->setEnabled(true);
+    cleanupRunResources();
+    finishRun();
     QgsMessageLog::logMessage(error, toolName(), Qgis::MessageLevel::Critical);
     QMessageBox::critical(this, dialogTitle(), tr("Operation failed. See log for details."));
 }

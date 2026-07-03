@@ -199,3 +199,35 @@ TEST_CASE("DOS1 multi-band correction preserves band independence", "[atm][dos1]
     // Band 2 DN=80 → radiance=0.8, surface=0.8-0.6=0.2
     REQUIRE_THAT(out2[0], Catch::Matchers::WithinAbs(0.2f, 0.001f));
 }
+
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include <QTemporaryDir>
+#include <QFile>
+#include <gdal.h>
+
+TEST_CASE("AtmosphericCorrection processFile applies DOS1", "[atm][gdal]")
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    const QString sourcePath = dir.filePath(QStringLiteral("source.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("output.tif"));
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+
+    GDALDatasetH srcDs = createOutputTiff(sourcePath, 2, 2, 1, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+
+    std::vector<float> band = {50.0f, 100.0f, 200.0f, 80.0f};
+    GDALRasterBandH b1 = GDALGetRasterBand(srcDs, 1);
+    REQUIRE(GDALRasterIO(b1, GF_Write, 0, 0, 2, 2, band.data(), 2, 2, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(srcDs);
+
+    QString error;
+    const bool ok = AtmosphericCorrection::processFile(sourcePath, outputPath, 1, 1,
+                                                       0.01f, 0.0f, 1.0f, &error);
+    REQUIRE(ok);
+    REQUIRE(QFile::exists(outputPath));
+    REQUIRE(error.isEmpty());
+}

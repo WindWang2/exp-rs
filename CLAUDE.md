@@ -19,6 +19,18 @@ Pure C++ Remote Sensing analysis platform built on the QGIS engine.
 *   `src/native/`: Platform-native integration (Linux/macOS/Windows).
 *   `src/ui/`: Qt Designer .ui form files.
 *   `external/`: Vendored C++ dependencies (nlohmann_json, spatialindex, poly2tri, lazperf).
+*   `src/app/`: Application shell — see [P0–P5 refactor spec](docs/superpowers/specs/2026-07-03-refactor-sprint-design.md) for module map:
+    *   `main_window.cpp` — constructor, `setupUi`, `setupMapCanvas`
+    *   `main_window_menus.cpp` — menu / toolbar / status bar
+    *   `main_window_docks.cpp` — dock panels
+    *   `main_window_connections.cpp` — signals, canvas state, layer tree events
+    *   `main_window_view.cpp` — zoom, pan, measure, Georeferencer
+    *   `main_window_vector.cpp` — vector editing
+    *   `main_window_project.cpp` — project I/O, STAC browser
+    *   `main_window_layers.cpp` — layers, identify results
+    *   `main_window_misc.cpp` — preferences, help, panel layout
+    *   `main_window_processing.cpp` — RS processing dialog slots
+    *   `dialogs/raster_processing_dialog_base.{h,cpp}` — shared async dialog lifecycle
 
 ## Language
 

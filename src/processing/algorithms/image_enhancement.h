@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QString>
 #include <vector>
 #include <cstddef>
 
@@ -13,6 +14,12 @@ public:
     };
 
     static PcaResult pca(const std::vector<std::vector<float>> &input, int numComponents);
+
+    /**
+     * Run PCA on a multi-band GeoTIFF and write component bands to output.
+     */
+    static bool processPcaFile(const QString &sourcePath, const QString &outputPath,
+                               int numComponents, QString *errorMessage = nullptr);
 
     static void linearStretch(const float *input, float *output, size_t count,
                               float minVal, float maxVal, float nodata = -9999.0f);

@@ -199,16 +199,9 @@ void ChangeDetectionDialog::onRun()
     int methodIndex = m_methodCombo->currentIndex();
     double threshold = m_thresholdSpin->value();
 
-    if (!m_runner) {
-        m_runner = new AsyncGdalRunner(this, this);
-        connect(m_runner, &AsyncGdalRunner::completed, this, &ChangeDetectionDialog::handleCompleted);
-        connect(m_runner, &AsyncGdalRunner::failed, this, &ChangeDetectionDialog::handleFailed);
-    }
-
-    m_runButton->setEnabled(false);
     m_statusLabel->setText(tr("Processing..."));
 
-    m_runner->run([beforeSourcePath, afterSourcePath, beforeBand, afterBand,
+    runGdalTask([beforeSourcePath, afterSourcePath, beforeBand, afterBand,
                    methodIndex, threshold, outPath]() -> QString {
     try {
         // Open source datasets

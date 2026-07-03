@@ -1,6 +1,14 @@
 add_executable(sicnu_geo_rs
     main.cpp
     main_window.cpp
+    main_window_menus.cpp
+    main_window_docks.cpp
+    main_window_connections.cpp
+    main_window_vector.cpp
+    main_window_project.cpp
+    main_window_layers.cpp
+    main_window_view.cpp
+    main_window_misc.cpp
     main_window_processing.cpp
     layer_tree_menu.cpp
     crs_presets.cpp
@@ -44,13 +52,9 @@ add_executable(sicnu_geo_rs
     layer_manager.cpp
     map_tools/map_tool_manager.cpp
 
-    # Python console and API
-    ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_console.cpp
-    ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_api.cpp
-    ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
-
-    # MCP server
+    # MCP server + STAC client
     ${CMAKE_SOURCE_DIR}/src/agent/mcp_server.cpp
+    ${CMAKE_SOURCE_DIR}/src/agent/stac_client.cpp
 
     # Image enhancement panel
     dialogs/image_enhancement_panel.cpp
@@ -141,10 +145,8 @@ target_include_directories(sicnu_geo_rs PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/maptools
     ${CMAKE_CURRENT_SOURCE_DIR}/vertextool
     ${CMAKE_CURRENT_SOURCE_DIR}/selecttools
-    ${CMAKE_SOURCE_DIR}/src/python
     ${CMAKE_SOURCE_DIR}/src/agent
     ${GDAL_INCLUDE_DIR}
-    ${Python_INCLUDE_DIRS}
 )
 
 target_link_libraries(sicnu_geo_rs PRIVATE
@@ -164,8 +166,18 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     CURL::libcurl
     ${PCRE2_16}
     ${PCRE2_8}
-    Python::Python
 )
+
+if(SICNU_EMBED_PYTHON)
+    target_sources(sicnu_geo_rs PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_console.cpp
+        ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_api.cpp
+        ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
+    )
+    target_include_directories(sicnu_geo_rs PRIVATE ${CMAKE_SOURCE_DIR}/src/python)
+    target_link_libraries(sicnu_geo_rs PRIVATE Python::Python)
+    target_compile_definitions(sicnu_geo_rs PRIVATE SICNU_EMBED_PYTHON=1)
+endif()
 
 # Phase 10A — Pixel-Based Classification. Link only when the static
 # library was actually built (OpenCV ml component available).

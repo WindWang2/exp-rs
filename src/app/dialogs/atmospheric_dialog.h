@@ -18,6 +18,7 @@ class AtmosphericDialog : public RasterProcessingDialogBase
 
 public:
     explicit AtmosphericDialog(QWidget *parent = nullptr);
+    void setRasterLayer(QgsRasterLayer *layer) override;
 
 protected:
     QString toolName() const override { return QStringLiteral("atmospheric_correction"); }

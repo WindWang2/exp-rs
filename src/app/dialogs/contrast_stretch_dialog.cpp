@@ -93,15 +93,7 @@ void ContrastStretchDialog::onRun()
     double clipValue = m_clipSpin->value();
     double stddevValue = m_stddevSpin->value();
 
-    if (!m_runner) {
-        m_runner = new AsyncGdalRunner(this, this);
-        connect(m_runner, &AsyncGdalRunner::completed, this, &ContrastStretchDialog::onCompleted);
-        connect(m_runner, &AsyncGdalRunner::failed, this, &ContrastStretchDialog::onFailed);
-    }
-
-    m_runButton->setEnabled(false);
-
-    m_runner->run([this, sourcePath, outputPath = outputPath(), methodIndex, clipValue, stddevValue]() -> QString {
+    runGdalTask([sourcePath, outputPath = outputPath(), methodIndex, clipValue, stddevValue]() -> QString {
     try {
         // Open source dataset
         GdalDatasetWrapper srcDataset;
@@ -148,21 +140,10 @@ void ContrastStretchDialog::onRun()
             }
         }
 
-        // Create output file using GDAL
         QString error;
-        GdalDatasetGuard dstGuard(createOutputTiff(outputPath, width, height, bandCount,
-                                                   GDT_Float32, srcDataset.geoTransform(),
-                                                   srcDataset.projection(), &error));
-        if (!dstGuard) return QString();
-
-        // Write all output bands
-        for (int b = 0; b < bandCount; ++b) {
-            GDALRasterBandH dstBand = GDALGetRasterBand(dstGuard.get(), b + 1);
-            if (!dstBand) return QString();
-            GDAL_SAFE_CALL( GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
-                            outputBands[b].data(), width, height, GDT_Float32, 0, 0),
-                            "Failed to write output band" );
-        }
+        if (!writeGdalOutput(outputPath, width, height, outputBands,
+                             srcDataset.geoTransform(), srcDataset.projection(), &error))
+            return QString();
 
         return outputPath;
     } catch (const std::runtime_error &) {

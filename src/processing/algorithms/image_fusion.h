@@ -10,6 +10,7 @@
 // All functions operate on float arrays with nodata support.
 #pragma once
 
+#include <QString>
 #include <QVector>
 
 class ImageFusion
@@ -54,6 +55,24 @@ class ImageFusion
     static QVector<QVector<float>> ihsFusion(
         const float *msR, const float *msG, const float *msB,
         const float *panBand, int width, int height, float nodata );
+
+    struct NativeFusionParams {
+        QString method;
+        float panWeight = 0.5f;
+        QVector<float> msWeights;
+        int redIdx = 0;
+        int greenIdx = 1;
+        int blueIdx = 2;
+    };
+
+    /**
+     * Read pan/MS rasters, run a native fusion algorithm, write GeoTIFF output.
+     * Supported methods: linear, brovey, ihs, pca.
+     */
+    static bool processNativeFusion(const QString &panPath, const QString &msPath,
+                                    const QString &outputPath,
+                                    const NativeFusionParams &params,
+                                    QString *errorMessage = nullptr);
 
   private:
     /// Histogram-match src to ref (match mean and stddev).

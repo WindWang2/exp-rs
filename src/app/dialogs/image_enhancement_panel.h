@@ -9,7 +9,6 @@ class QLabel;
 class QLineEdit;
 class QSpinBox;
 class QStackedWidget;
-class AsyncGdalRunner;
 
 /**
  * Unified Image Enhancement Panel combining multiple processing operations:
@@ -79,5 +78,5 @@ private:
     QLabel *m_statusLabel = nullptr;
     QPushButton *m_runButton = nullptr;
 
-    AsyncGdalRunner *m_runner = nullptr;
+
 };

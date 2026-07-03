@@ -657,6 +657,7 @@ target_link_libraries(test_pca PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
+  GDAL::GDAL
 )
 target_include_directories(test_pca PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -1683,7 +1684,10 @@ target_include_directories(test_guided_workflow_widget PRIVATE
 sicnu_discover_tests(test_guided_workflow_widget)
 
 # STAC Client tests
-add_executable(test_stac_client test_stac_client.cpp)
+add_executable(test_stac_client
+  test_stac_client.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/stac_client.cpp
+)
 target_link_libraries(test_stac_client PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
@@ -1770,3 +1774,27 @@ target_include_directories(test_dialog_edge_cases PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_dialog_edge_cases)
+
+# Raster processing dialog base — run lifecycle + async task helper
+add_executable(test_raster_processing_dialog_base
+  test_raster_processing_dialog_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_gdal_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_algorithm_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_runner_base.cpp
+)
+set_target_properties(test_raster_processing_dialog_base PROPERTIES AUTOMOC ON)
+target_link_libraries(test_raster_processing_dialog_base PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Concurrent
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_raster_processing_dialog_base PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_raster_processing_dialog_base)

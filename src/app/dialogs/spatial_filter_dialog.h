@@ -4,7 +4,6 @@
 #include "raster_processing_dialog_base.h"
 
 class QComboBox;
-class AsyncGdalRunner;
 
 /**
  * Dialog for Spatial Filtering operations.
@@ -30,5 +29,4 @@ private:
 
     QComboBox *m_filterTypeCombo = nullptr;
     QComboBox *m_kernelSizeCombo = nullptr;
-    AsyncGdalRunner *m_runner = nullptr;
 };

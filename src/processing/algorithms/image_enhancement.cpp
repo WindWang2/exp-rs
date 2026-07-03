@@ -1,6 +1,7 @@
 #include "image_enhancement.h"
 #include "math_utils.h"
 #include "chunked_processor.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 #include "core/sicnu_logging.h"
 #include "framework/input_validator.h"
 #include <cmath>
@@ -1049,4 +1050,47 @@ ImageEnhancement::PcaResult ImageEnhancement::pca(
     }
 
     return result;
+}
+
+bool ImageEnhancement::processPcaFile(const QString &sourcePath, const QString &outputPath,
+                                      int numComponents, QString *errorMessage)
+{
+    GdalDatasetWrapper srcDataset;
+    if (!srcDataset.open(sourcePath)) {
+        if (errorMessage)
+            *errorMessage = srcDataset.lastError();
+        return false;
+    }
+
+    const int width = srcDataset.width();
+    const int height = srcDataset.height();
+    const int bandCount = srcDataset.bandCount();
+    const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+
+    if (numComponents > bandCount) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Number of components exceeds band count");
+        return false;
+    }
+
+    std::vector<std::vector<float>> allBands(bandCount, std::vector<float>(pixelCount));
+    for (int b = 0; b < bandCount; ++b) {
+        if (!srcDataset.readBandData(b + 1, allBands[b].data(), width, height)) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Failed to read band %1").arg(b + 1);
+            return false;
+        }
+    }
+
+    const PcaResult pcaResult = pca(allBands, numComponents);
+
+    QString writeError;
+    if (!writeGdalOutput(outputPath, width, height, pcaResult.output,
+                         srcDataset.geoTransform(), srcDataset.projection(), &writeError)) {
+        if (errorMessage)
+            *errorMessage = writeError;
+        return false;
+    }
+
+    return true;
 }

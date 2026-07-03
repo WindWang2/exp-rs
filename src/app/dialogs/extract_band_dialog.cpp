@@ -118,15 +118,7 @@ void ExtractBandDialog::onRun()
     // Capture parameters for async execution
     QString sourcePath = rl->source();
 
-    if (!m_runner) {
-        m_runner = new AsyncGdalRunner(this, this);
-        connect(m_runner, &AsyncGdalRunner::completed, this, &ExtractBandDialog::handleCompleted);
-        connect(m_runner, &AsyncGdalRunner::failed, this, &ExtractBandDialog::handleFailed);
-    }
-
-    m_runButton->setEnabled(false);
-
-    m_runner->run([sourcePath, bandIndex, outPath]() -> QString {
+    runGdalTask([sourcePath, bandIndex, outPath]() -> QString {
     try {
         // Open source raster
         GdalDatasetGuard srcGuard( GDALOpen(sourcePath.toUtf8().constData(), GA_ReadOnly) );

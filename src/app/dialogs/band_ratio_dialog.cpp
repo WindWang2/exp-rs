@@ -139,15 +139,7 @@ void BandRatioDialog::onRun()
     int greenNum = m_greenCombo->currentData().toInt();
     int blueNum = m_blueCombo->currentData().toInt();
 
-    if (!m_runner) {
-        m_runner = new AsyncGdalRunner(this, this);
-        connect(m_runner, &AsyncGdalRunner::completed, this, &BandRatioDialog::onCompleted);
-        connect(m_runner, &AsyncGdalRunner::failed, this, &BandRatioDialog::onFailed);
-    }
-
-    m_runButton->setEnabled(false);
-
-    m_runner->run([sourcePath, outputPath = outputPath(), modeIndex, band1Num, band2Num,
+    runGdalTask([sourcePath, outputPath = outputPath(), modeIndex, band1Num, band2Num,
                    redNum, greenNum, blueNum]() -> QString {
     try {
         // Open source dataset

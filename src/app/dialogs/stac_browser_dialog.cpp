@@ -1,5 +1,6 @@
 // stac_browser_dialog.cpp — STAC Catalog Browser Dialog
 #include "stac_browser_dialog.h"
+#include "agent/stac_client.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -9,7 +10,6 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QJsonValue>
-#include <QUrlQuery>
 
 #include <qgsmapcanvas.h>
 #include <qgsrasterlayer.h>
@@ -18,13 +18,13 @@
 StacBrowserDialog::StacBrowserDialog(QgsMapCanvas *canvas, QWidget *parent)
     : QDialog(parent)
     , m_canvas(canvas)
-    , m_networkManager(new QNetworkAccessManager(this))
+    , m_stacClient(new StacClient(this))
 {
     setupUi();
     setWindowTitle(tr("STAC Catalog Browser"));
     resize(800, 600);
 
-    connect(m_networkManager, &QNetworkAccessManager::finished,
+    connect(m_stacClient, &StacClient::searchCompleted,
             this, &StacBrowserDialog::onSearchCompleted);
 }
 
@@ -32,7 +32,6 @@ void StacBrowserDialog::setupUi()
 {
     auto *mainLayout = new QVBoxLayout(this);
 
-    // Search parameters
     auto *formLayout = new QFormLayout();
     m_endpointEdit = new QLineEdit(QStringLiteral("https://earth-search.aws.element84.com/v1"));
     m_collectionEdit = new QLineEdit(QStringLiteral("sentinel-2-l2a"));
@@ -46,12 +45,10 @@ void StacBrowserDialog::setupUi()
     formLayout->addRow(tr("BBox:"), m_bboxEdit);
     mainLayout->addLayout(formLayout);
 
-    // Search button
     m_searchButton = new QPushButton(tr("Search"));
     connect(m_searchButton, &QPushButton::clicked, this, &StacBrowserDialog::searchCatalog);
     mainLayout->addWidget(m_searchButton);
 
-    // Results table
     m_resultsTable = new QTableWidget;
     m_resultsTable->setColumnCount(4);
     m_resultsTable->setHorizontalHeaderLabels({tr("ID"), tr("Collection"), tr("Datetime"), tr("Assets")});
@@ -60,7 +57,6 @@ void StacBrowserDialog::setupUi()
     m_resultsTable->setSelectionMode(QAbstractItemView::SingleSelection);
     mainLayout->addWidget(m_resultsTable);
 
-    // Load button
     m_loadButton = new QPushButton(tr("Load Selected Asset"));
     m_loadButton->setEnabled(false);
     connect(m_loadButton, &QPushButton::clicked, this, &StacBrowserDialog::loadSelectedAsset);
@@ -69,119 +65,97 @@ void StacBrowserDialog::setupUi()
 
 void StacBrowserDialog::searchCatalog()
 {
-    QString endpoint = m_endpointEdit->text().trimmed();
+    const QString endpoint = m_endpointEdit->text().trimmed();
     if (endpoint.isEmpty()) {
         QMessageBox::warning(this, tr("Error"), tr("STAC endpoint is required."));
         return;
     }
 
-    QString url = endpoint + "/search";
-    QUrlQuery query;
-    if (!m_collectionEdit->text().trimmed().isEmpty())
-        query.addQueryItem(QStringLiteral("collections"), m_collectionEdit->text().trimmed());
-    if (!m_datetimeEdit->text().trimmed().isEmpty())
-        query.addQueryItem(QStringLiteral("datetime"), m_datetimeEdit->text().trimmed());
-    if (!m_bboxEdit->text().trimmed().isEmpty())
-        query.addQueryItem(QStringLiteral("bbox"), m_bboxEdit->text().trimmed());
-
-    QUrl requestUrl(url);
-    requestUrl.setQuery(query);
-
-    QNetworkRequest request(requestUrl);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QStringList bbox;
+    const QString bboxText = m_bboxEdit->text().trimmed();
+    if (!bboxText.isEmpty())
+        bbox = bboxText.split(QLatin1Char(','));
 
     m_searchButton->setEnabled(false);
     m_searchButton->setText(tr("Searching..."));
-    m_networkManager->get(request);
+    m_stacClient->search(endpoint, m_collectionEdit->text().trimmed(),
+                         m_datetimeEdit->text().trimmed(), bbox);
 }
 
-void StacBrowserDialog::onSearchCompleted(QNetworkReply *reply)
+void StacBrowserDialog::onSearchCompleted(const QVariantList &features, const QString &error)
 {
     m_searchButton->setEnabled(true);
     m_searchButton->setText(tr("Search"));
 
-    reply->deleteLater();
-    if (reply->error() != QNetworkReply::NoError) {
-        QMessageBox::warning(this, tr("Search Failed"), reply->errorString());
+    if (!error.isEmpty()) {
+        QMessageBox::warning(this, tr("Search Failed"), error);
         return;
     }
 
-    QJsonParseError error;
-    QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &error);
-    if (error.error != QJsonParseError::NoError) {
-        QMessageBox::warning(this, tr("Parse Error"), error.errorString());
-        return;
-    }
-
-    QJsonObject root = doc.object();
-    QJsonArray features = root.value(QStringLiteral("features")).toArray();
     populateResults(features);
 }
 
-void StacBrowserDialog::populateResults(const QJsonArray &features)
+void StacBrowserDialog::populateResults(const QVariantList &features)
 {
     m_resultsTable->setRowCount(features.size());
-    for (int i = 0; i < features.size(); ++i) {
-        QJsonObject feature = features[i].toObject();
-        m_resultsTable->setItem(i, 0, new QTableWidgetItem(feature.value(QStringLiteral("id")).toString()));
-        m_resultsTable->setItem(i, 1, new QTableWidgetItem(feature.value(QStringLiteral("collection")).toString()));
+    m_featureData.clear();
 
-        QJsonObject properties = feature.value(QStringLiteral("properties")).toObject();
-        m_resultsTable->setItem(i, 2, new QTableWidgetItem(properties.value(QStringLiteral("datetime")).toString()));
+    for (int row = 0; row < features.size(); ++row) {
+        const QVariantMap feature = features[row].toMap();
+        m_featureData.append(feature);
 
-        QJsonObject assets = feature.value(QStringLiteral("assets")).toObject();
-        m_resultsTable->setItem(i, 3, new QTableWidgetItem(QString::number(assets.size()) + tr(" assets")));
+        const QString id = feature.value(QStringLiteral("id")).toString();
+        const QVariantMap props = feature.value(QStringLiteral("properties")).toMap();
+        const QString datetime = props.value(QStringLiteral("datetime")).toString();
+        const QVariantMap assets = feature.value(QStringLiteral("assets")).toMap();
 
-        // Store assets data in the ID column for later retrieval
-        m_resultsTable->item(i, 0)->setData(Qt::UserRole, assets);
+        m_resultsTable->setItem(row, 0, new QTableWidgetItem(id));
+        m_resultsTable->setItem(row, 1, new QTableWidgetItem(m_collectionEdit->text()));
+        m_resultsTable->setItem(row, 2, new QTableWidgetItem(datetime));
+        m_resultsTable->setItem(row, 3, new QTableWidgetItem(QString::number(assets.size())));
     }
 
-    m_loadButton->setEnabled(features.size() > 0);
+    m_loadButton->setEnabled(!features.isEmpty());
 }
 
 void StacBrowserDialog::loadSelectedAsset()
 {
-    QList<QTableWidgetItem*> selected = m_resultsTable->selectedItems();
-    if (selected.isEmpty()) {
-        QMessageBox::information(this, tr("No Selection"), tr("Please select a dataset to load."));
+    const int row = m_resultsTable->currentRow();
+    if (row < 0 || row >= m_featureData.size()) {
+        QMessageBox::warning(this, tr("Error"), tr("Select a STAC item first."));
         return;
     }
 
-    int row = selected.first()->row();
-    QJsonObject assets = m_resultsTable->item(row, 0)->data(Qt::UserRole).toJsonObject();
+    const QVariantMap feature = m_featureData[row];
+    const QVariantMap assets = feature.value(QStringLiteral("assets")).toMap();
 
-    // Try to find a COG asset (typically "visual" or first available)
-    QString assetUrl;
-    if (assets.contains(QStringLiteral("visual"))) {
-        assetUrl = assets.value(QStringLiteral("visual")).toObject().value(QStringLiteral("href")).toString();
-    } else if (assets.contains(QStringLiteral("overview"))) {
-        assetUrl = assets.value(QStringLiteral("overview")).toObject().value(QStringLiteral("href")).toString();
-    } else {
-        // Use first available asset
-        for (auto it = assets.begin(); it != assets.end(); ++it) {
-            QJsonObject asset = it.value().toObject();
-            QString href = asset.value(QStringLiteral("href")).toString();
-            if (href.endsWith(QStringLiteral(".tif"), Qt::CaseInsensitive)) {
-                assetUrl = href;
-                break;
-            }
+    QString cogUrl;
+    for (auto it = assets.constBegin(); it != assets.constEnd(); ++it) {
+        const QVariantMap asset = it.value().toMap();
+        const QString href = asset.value(QStringLiteral("href")).toString();
+        if (href.endsWith(QStringLiteral(".tif"), Qt::CaseInsensitive) ||
+            asset.value(QStringLiteral("type")).toString().contains(QStringLiteral("image/tiff"))) {
+            cogUrl = href;
+            break;
         }
     }
 
-    if (assetUrl.isEmpty()) {
-        QMessageBox::warning(this, tr("No Asset"), tr("No suitable raster asset found in selected dataset."));
+    if (cogUrl.isEmpty()) {
+        QMessageBox::warning(this, tr("Error"), tr("No COG asset found in selected item."));
         return;
     }
 
-    // Load as COG via GDAL vsicurl
-    QString layerName = m_resultsTable->item(row, 0)->text();
-    QgsRasterLayer *layer = new QgsRasterLayer(assetUrl, layerName, QStringLiteral("gdal"));
-    if (layer->isValid()) {
-        QgsProject::instance()->addMapLayer(layer);
-        m_canvas->refresh();
-        accept();
-    } else {
-        QMessageBox::warning(this, tr("Load Failed"), tr("Failed to load raster from: %1").arg(assetUrl));
+    const QString vsicurl = QStringLiteral("/vsicurl/") + cogUrl;
+    auto *layer = new QgsRasterLayer(vsicurl, feature.value(QStringLiteral("id")).toString());
+    if (!layer->isValid()) {
         delete layer;
+        QMessageBox::warning(this, tr("Error"), tr("Failed to load COG from STAC asset."));
+        return;
     }
+
+    QgsProject::instance()->addMapLayer(layer);
+    if (m_canvas)
+        m_canvas->setExtent(layer->extent());
+
+    accept();
 }

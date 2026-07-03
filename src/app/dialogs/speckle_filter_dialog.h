@@ -6,7 +6,7 @@
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
-class AsyncGdalRunner;
+
 
 /**
  * Dialog for SAR Speckle Filtering operations.
@@ -36,5 +36,5 @@ private:
     QDoubleSpinBox *m_noiseVarSpin = nullptr;
     QDoubleSpinBox *m_dampingSpin = nullptr;
     QLabel *m_dampingLabel = nullptr;
-    AsyncGdalRunner *m_runner = nullptr;
+
 };

@@ -60,15 +60,7 @@ void SpatialFilterDialog::onRun()
     int kernelSize = (m_kernelSizeCombo->currentIndex() == 1) ? 5 : 3;
     int filterIndex = m_filterTypeCombo->currentIndex();
 
-    if (!m_runner) {
-        m_runner = new AsyncGdalRunner(this, this);
-        connect(m_runner, &AsyncGdalRunner::completed, this, &SpatialFilterDialog::onCompleted);
-        connect(m_runner, &AsyncGdalRunner::failed, this, &SpatialFilterDialog::onFailed);
-    }
-
-    m_runButton->setEnabled(false);
-
-    m_runner->run([this, sourcePath, outputPath = outputPath(), kernelSize, filterIndex]() -> QString {
+    runGdalTask([sourcePath, outputPath = outputPath(), kernelSize, filterIndex]() -> QString {
     try {
         // Open source dataset
         GdalDatasetWrapper srcDataset;

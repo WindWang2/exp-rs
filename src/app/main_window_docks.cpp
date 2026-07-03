@@ -1,0 +1,250 @@
+// main_window_docks.cpp — Dock widget setup
+// Extracted from main_window.cpp for maintainability
+#include "main_window.h"
+
+#include "layer_manager.h"
+#include "log_panel.h"
+#include "widgets/spectral_profile_widget.h"
+#include "widgets/guided_workflow_widget.h"
+
+#include <QVBoxLayout>
+#include <QMenu>
+#include <QTextBrowser>
+#include <QAction>
+#include <QFileInfo>
+#include <QStatusBar>
+
+#include <qgsapplication.h>
+#include <processing/qgsprocessingalgorithm.h>
+#include <processing/qgsprocessingfavoritealgorithmmanager.h>
+#include <qgsbrowserdockwidget.h>
+#include <qgsbrowserguimodel.h>
+#include <qgsdockwidget.h>
+#include <qgsfilterlineedit.h>
+#include <qgsmapoverviewcanvas.h>
+#include <qgsprocessingtoolboxtreeview.h>
+#include <qgsgui.h>
+
+#ifdef SICNU_EMBED_PYTHON
+#include "python/sicnu_python_console.h"
+#endif
+
+void QgisDesktopWindow::setupDockWidgets()
+{
+    // Layers Panel (Left)
+    m_layersDock = new QgsDockWidget("Layers", this);
+    m_layersDock->setObjectName("layersDock");
+    m_layersDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+
+    QWidget *layersContainer = new QWidget(m_layersDock);
+    QVBoxLayout *layersLayout = new QVBoxLayout(layersContainer);
+    layersLayout->setContentsMargins(0, 0, 0, 0);
+
+    // Create QGIS C++ layer tree view
+    m_layerTreeView = new QgsLayerTreeView(layersContainer);
+    m_layerTreeView->setHeaderHidden(false);
+
+    layersLayout->addWidget(m_layerTreeView);
+
+    m_layersDock->setWidget(layersContainer);
+    addDockWidget(Qt::LeftDockWidgetArea, m_layersDock);
+
+    // Browser Panel (Left, below layers)
+    m_browserModel = new QgsBrowserGuiModel( this );
+    m_browserDock = new QgsBrowserDockWidget( "Browser", m_browserModel, this );
+    m_browserDock->setObjectName( "browserDock" );
+    m_browserDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+    addDockWidget( Qt::LeftDockWidgetArea, m_browserDock );
+
+    // Browser double-click / drag → add layer to project
+    connect(m_browserDock, &QgsBrowserDockWidget::openFile, this, [this](const QString &fileName, const QString &fileTypeHint) {
+        Q_UNUSED(fileTypeHint);
+        if (fileName.isEmpty()) return;
+        QString suffix = QFileInfo(fileName).suffix().toLower();
+        if (suffix == "tif" || suffix == "tiff" || suffix == "img" ||
+            suffix == "jp2" || suffix == "png" || suffix == "jpg" || suffix == "asc")
+            m_layerManager->loadRasterLayer(fileName);
+        else if (suffix == "shp" || suffix == "gpkg" || suffix == "geojson" ||
+                 suffix == "kml" || suffix == "gml")
+            m_layerManager->loadVectorLayer(fileName);
+        else
+            statusBar()->showMessage(tr("Unsupported file type: %1").arg(suffix), 3000);
+    });
+
+    // Tabify the left dock widgets
+    tabifyDockWidget(m_layersDock, m_browserDock);
+    m_layersDock->raise();
+
+    // Processing Toolbox Panel (Right, with Overview)
+    m_processingDock = new QgsDockWidget("Processing Toolbox", this);
+    m_processingDock->setObjectName("processingDock");
+    m_processingDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+
+    // Container with search box + tree view
+    auto *toolboxContainer = new QWidget(m_processingDock);
+    auto *toolboxLayout = new QVBoxLayout(toolboxContainer);
+    toolboxLayout->setContentsMargins(0, 0, 0, 0);
+    toolboxLayout->setSpacing(2);
+
+    auto *searchEdit = new QgsFilterLineEdit(toolboxContainer);
+    searchEdit->setShowSearchIcon(true);
+    searchEdit->setPlaceholderText(tr("Search algorithms..."));
+    toolboxLayout->addWidget(searchEdit);
+
+    m_toolboxView = new QgsProcessingToolboxTreeView( toolboxContainer,
+        QgsApplication::processingRegistry(),
+        QgsGui::processingRecentAlgorithmLog(),
+        QgsGui::processingFavoriteAlgorithmManager() );
+    m_toolboxView->setRegistry( QgsApplication::processingRegistry(),
+        QgsGui::processingRecentAlgorithmLog(),
+        QgsGui::processingFavoriteAlgorithmManager() );
+    toolboxLayout->addWidget(m_toolboxView);
+
+    m_processingDock->setWidget(toolboxContainer);
+    addDockWidget(Qt::RightDockWidgetArea, m_processingDock);
+
+    // Connect search filter
+    connect(searchEdit, &QgsFilterLineEdit::textChanged,
+            m_toolboxView, &QgsProcessingToolboxTreeView::setFilterString);
+
+#ifdef SICNU_EMBED_PYTHON
+    // Python Console (lazy-loaded on first use)
+    m_pythonDock = new QgsDockWidget(tr("Python Console"), this);
+    m_pythonDock->setObjectName("pythonDock");
+    m_pythonDock->setWidget(new QWidget(m_pythonDock)); // Placeholder
+    addDockWidget(Qt::BottomDockWidgetArea, m_pythonDock);
+    m_pythonDock->hide(); // Hidden until first use
+#endif
+
+    // Double-click on algorithm in toolbox opens execution dialog
+    connect(m_toolboxView, &QgsProcessingToolboxTreeView::doubleClicked, this, [this](const QModelIndex &index) {
+        const QgsProcessingAlgorithm *alg = m_toolboxView->algorithmForIndex(index);
+        if (!alg)
+            return;
+
+        openProcessingAlgorithm(alg->id());
+    });
+
+    // Right-click context menu for favorites
+    m_toolboxView->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_toolboxView, &QgsProcessingToolboxTreeView::customContextMenuRequested, this,
+        [this](const QPoint &pos) {
+            QModelIndex index = m_toolboxView->indexAt(pos);
+            const QgsProcessingAlgorithm *alg = m_toolboxView->algorithmForIndex(index);
+            if (!alg)
+                return;
+
+            QMenu menu(this);
+            QString algId = alg->id();
+
+            // Check if already in favorites
+            bool isFav = QgsGui::processingFavoriteAlgorithmManager()->isFavorite(algId);
+            if (isFav) {
+                QAction *removeFav = menu.addAction(tr("Remove from Favorites"));
+                connect(removeFav, &QAction::triggered, this, [this, algId]() {
+                    QgsGui::processingFavoriteAlgorithmManager()->remove(algId);
+                    m_toolboxView->setRegistry(QgsApplication::processingRegistry(),
+                        QgsGui::processingRecentAlgorithmLog(),
+                        QgsGui::processingFavoriteAlgorithmManager());
+                });
+            } else {
+                QAction *addFav = menu.addAction(tr("Add to Favorites"));
+                connect(addFav, &QAction::triggered, this, [this, algId]() {
+                    QgsGui::processingFavoriteAlgorithmManager()->add(algId);
+                    m_toolboxView->setRegistry(QgsApplication::processingRegistry(),
+                        QgsGui::processingRecentAlgorithmLog(),
+                        QgsGui::processingFavoriteAlgorithmManager());
+                });
+            }
+
+            // Open algorithm action
+            QAction *openAlg = menu.addAction(tr("Open Algorithm"));
+            connect(openAlg, &QAction::triggered, this, [this, algId]() {
+                openProcessingAlgorithm(algId);
+            });
+
+            menu.exec(m_toolboxView->viewport()->mapToGlobal(pos));
+        });
+
+
+    // Overview Panel (Right, tabified with Processing Toolbox)
+    m_overviewDock = new QgsDockWidget("Overview", this);
+    m_overviewDock->setObjectName("overviewDock");
+    m_overviewDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_overviewCanvas = new QgsMapOverviewCanvas(m_overviewDock, m_mapCanvas);
+    m_overviewCanvas->enableAntiAliasing(true);
+    m_overviewDock->setWidget(m_overviewCanvas);
+    addDockWidget(Qt::RightDockWidgetArea, m_overviewDock);
+    tabifyDockWidget(m_processingDock, m_overviewDock);
+    m_processingDock->raise();
+
+    // Identify Results Panel (Right, tabified with Processing/Overview)
+    m_identifyDock = new QgsDockWidget(tr("Identify Results"), this);
+    m_identifyDock->setObjectName("identifyDock");
+    m_identifyDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+
+    m_identifyResults = new QTextBrowser(m_identifyDock);
+    m_identifyResults->setOpenExternalLinks(false);
+    m_identifyResults->setPlaceholderText(tr("Click on the map with the Identify tool to see feature details here."));
+    m_identifyDock->setWidget(m_identifyResults);
+    addDockWidget(Qt::RightDockWidgetArea, m_identifyDock);
+    tabifyDockWidget(m_overviewDock, m_identifyDock);
+
+    // Spectral Profile Panel (Right, tabified with Identify Results)
+    m_spectralDock = new QgsDockWidget(tr("Spectral Profile"), this);
+    m_spectralDock->setObjectName("spectralDock");
+    m_spectralDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+
+    m_spectralProfile = new SpectralProfileWidget(m_spectralDock);
+    m_spectralDock->setWidget(m_spectralProfile);
+    addDockWidget(Qt::RightDockWidgetArea, m_spectralDock);
+    tabifyDockWidget(m_identifyDock, m_spectralDock);
+
+    // Log Panel (Bottom, tabified)
+    m_logDock = new LogPanel(this);
+    m_logDock->setObjectName("logDock");
+    addDockWidget(Qt::BottomDockWidgetArea, m_logDock);
+
+    // Guided Workflow Panel (Right, tabified with processing)
+    auto *workflowWidget = new GuidedWorkflowWidget(this);
+    m_workflowDock = new QgsDockWidget(this);
+    m_workflowDock->setObjectName("workflowDock");
+    m_workflowDock->setWindowTitle(tr("Guided Workflows"));
+    m_workflowDock->setWidget(workflowWidget);
+    addDockWidget(Qt::RightDockWidgetArea, m_workflowDock);
+    tabifyDockWidget(m_processingDock, m_workflowDock);
+
+    // Window menu — add dock toggle actions
+    if (m_windowMenu) {
+        m_windowMenu->addSeparator();
+        m_windowMenu->addAction(m_layersDock->toggleViewAction());
+        m_windowMenu->addAction(m_browserDock->toggleViewAction());
+        m_windowMenu->addAction(m_processingDock->toggleViewAction());
+        m_windowMenu->addAction(m_overviewDock->toggleViewAction());
+        m_windowMenu->addAction(m_identifyDock->toggleViewAction());
+        m_windowMenu->addAction(m_spectralDock->toggleViewAction());
+        m_windowMenu->addAction(m_logDock->toggleViewAction());
+        m_windowMenu->addAction(m_workflowDock->toggleViewAction());
+        m_windowMenu->addSeparator();
+
+#ifdef SICNU_EMBED_PYTHON
+        // Python Console (lazy-loaded)
+        QAction *pythonAction = m_windowMenu->addAction(tr("Python Console"));
+        pythonAction->setCheckable(true);
+        connect(pythonAction, &QAction::triggered, this, [this]() {
+            if (!m_pythonConsole) {
+                statusBar()->showMessage(tr("Initializing Python..."));
+                m_pythonConsole = std::make_unique<SicnuPythonConsole>(m_pythonDock);
+                m_pythonDock->setWidget(m_pythonConsole.get());
+                statusBar()->showMessage(tr("Python ready"), 3000);
+            }
+            m_pythonDock->show();
+            m_pythonDock->raise();
+        });
+
+        m_windowMenu->addSeparator();
+#endif
+        QAction *resetLayoutAction = m_windowMenu->addAction(tr("Reset Layout"));
+        connect(resetLayoutAction, &QAction::triggered, this, &QgisDesktopWindow::resetPanelLayout);
+    }
+}

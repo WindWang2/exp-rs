@@ -208,180 +208,68 @@ void FusionDialog::onRun()
         m_outputEdit->setText( outPath );
     }
 
-    // Open panchromatic
-    gdal::dataset_unique_ptr panDs( GDALOpen( panLayer->source().toUtf8().constData(), GA_ReadOnly ) );
-    if ( !panDs )
+    const QString method = mMethodCombo->currentData().toString();
+    const QString panPath = panLayer->source();
+    const QString msPath = msLayer->source();
+
+    if ( method == QStringLiteral( "ihs" ) )
     {
-        QMessageBox::warning( this, tr( "Error" ), tr( "Cannot open panchromatic raster." ) );
-        return;
-    }
-
-    // Open multispectral
-    gdal::dataset_unique_ptr msDs( GDALOpen( msLayer->source().toUtf8().constData(), GA_ReadOnly ) );
-    if ( !msDs )
-    {
-        QMessageBox::warning( this, tr( "Error" ), tr( "Cannot open multispectral raster." ) );
-        return;
-    }
-
-    const int w = GDALGetRasterXSize( panDs.get() );
-    const int h = GDALGetRasterYSize( panDs.get() );
-    const int msBands = GDALGetRasterCount( msDs.get() );
-
-    if ( msBands < 1 )
-    {
-        QMessageBox::warning( this, tr( "Error" ), tr( "Multispectral raster has no bands." ) );
-        return;
-    }
-
-    // Read panchromatic band
-    GDALRasterBandH panBand = GDALGetRasterBand( panDs.get(), 1 );
-    if ( !panBand ) {
-        QMessageBox::warning( this, tr( "Error" ), tr( "Panchromatic raster has no bands." ) );
-        return;
-    }
-    int hasNodata = 0;
-    float nodata = static_cast<float>( GDALGetRasterNoDataValue( panBand, &hasNodata ) );
-    if ( !hasNodata )
-        nodata = -9999.0f;
-
-    std::vector<float> panData( w * h );
-    GDAL_SAFE_CALL( GDALRasterIO( panBand, GF_Read, 0, 0, w, h, panData.data(), w, h, GDT_Float32, 0, 0 ),
-                    "Failed to read panchromatic data" );
-
-    // Read multispectral bands
-    int nMsBands = std::min( msBands, 4 ); // limit to 4 bands
-    QVector<std::vector<float>> msData( nMsBands );
-    QVector<const float *> msPtrs( nMsBands );
-
-    // Read at pan resolution (GDAL handles resampling)
-    for ( int b = 0; b < nMsBands; ++b )
-    {
-        msData[b].resize( w * h );
-        GDALRasterBandH band = GDALGetRasterBand( msDs.get(), b + 1 );
-        GDAL_SAFE_CALL( GDALRasterIO( band, GF_Read, 0, 0, w, h, msData[b].data(), w, h, GDT_Float32, 0, 0 ),
-                        (std::string("Failed to read multispectral band ") + std::to_string(b + 1)).c_str() );
-        msPtrs[b] = msData[b].data();
-    }
-
-    // Run fusion
-    QString method = mMethodCombo->currentData().toString();
-    QString panPath = panLayer->source();
-    QString msPath = msLayer->source();
-
-    if ( method == "otb_btps" || method == "gdal_pansharp" )
-    {
-        // OTB or GDAL fusion — run via CLI wrapper
-        QString program;
-        QStringList args;
-        if ( method == "otb_btps" )
-        {
-            program = ToolPathManager::instance().otbToolPath( "BundleToPerfectSensor" );
-            args << "-in" << msPath << "-inp" << panPath << "-out" << outPath;
-        }
-        else
-        {
-            program = ToolPathManager::instance().gdalToolPath( "gdalwarp" );
-            args << "-r" << "bilinear" << "-of" << "GTiff" << "-co" << "COMPRESS=LZW"
-                 << panPath << msPath << outPath;
-        }
-
-        QProcess proc;
-        proc.setProcessChannelMode( QProcess::MergedChannels );
-        proc.start( program, args );
-        if ( !proc.waitForStarted( 5000 ) )
-        {
-            QMessageBox::warning( this, tr( "Error" ), tr( "Failed to start fusion tool." ) );
-            return;
-        }
-        proc.waitForFinished( -1 );
-        if ( proc.exitCode() != 0 )
+        const int nMsBands = std::min( msLayer->bandCount(), 4 );
+        const int rIdx = mRedCombo->currentIndex();
+        const int gIdx = mGreenCombo->currentIndex();
+        const int bIdx = mBlueCombo->currentIndex();
+        if ( rIdx < 0 || gIdx < 0 || bIdx < 0 ||
+             rIdx >= nMsBands || gIdx >= nMsBands || bIdx >= nMsBands )
         {
             QMessageBox::warning( this, tr( "Error" ),
-                                  tr( "Fusion failed: %1" ).arg( QString::fromUtf8( proc.readAllStandardOutput() ) ) );
+                tr( "IHS fusion requires selecting R, G, B bands from the multispectral image." ) );
             return;
         }
     }
-    else
-    {
-        // Native fusion (Linear, Brovey, IHS, PCA)
-        QVector<QVector<float>> result;
-        float panWeight = mWeightSpin ? static_cast<float>(mWeightSpin->value()) : 0.5f;
 
-        if ( method == "linear" )
+    ImageFusion::NativeFusionParams nativeParams;
+    nativeParams.method = method;
+    nativeParams.panWeight = mWeightSpin ? static_cast<float>( mWeightSpin->value() ) : 0.5f;
+    for ( auto *spin : mBandWeightSpins )
+        nativeParams.msWeights.append( spin ? static_cast<float>( spin->value() ) : 0.5f );
+    nativeParams.redIdx = mRedCombo->currentIndex();
+    nativeParams.greenIdx = mGreenCombo->currentIndex();
+    nativeParams.blueIdx = mBlueCombo->currentIndex();
+
+    runGdalTask( [method, panPath, msPath, outPath, nativeParams]() -> QString {
+        if ( method == QStringLiteral( "otb_btps" ) || method == QStringLiteral( "gdal_pansharp" ) )
         {
-            // Collect per-band weights
-            QVector<float> msWeights;
-            for ( auto *spin : mBandWeightSpins )
-                msWeights.append( spin ? static_cast<float>(spin->value()) : 0.5f );
-            result = ImageFusion::linearWeighted( msPtrs, nMsBands, panData.data(), w, h, nodata, msWeights, panWeight );
-        }
-        else if ( method == "brovey" )
-        {
-            result = ImageFusion::brovey( msPtrs, nMsBands, panData.data(), w, h, nodata );
-        }
-        else if ( method == "ihs" )
-        {
-            // IHS requires selecting R, G, B bands
-            int rIdx = mRedCombo->currentIndex();
-            int gIdx = mGreenCombo->currentIndex();
-            int bIdx = mBlueCombo->currentIndex();
-            if ( rIdx < 0 || gIdx < 0 || bIdx < 0 ||
-                 rIdx >= nMsBands || gIdx >= nMsBands || bIdx >= nMsBands )
+            QString program;
+            QStringList args;
+            if ( method == QStringLiteral( "otb_btps" ) )
             {
-                QMessageBox::warning( this, tr( "Error" ),
-                    tr( "IHS fusion requires selecting R, G, B bands from the multispectral image." ) );
-                return;
+                program = ToolPathManager::instance().otbToolPath( QStringLiteral( "BundleToPerfectSensor" ) );
+                args << QStringLiteral( "-in" ) << msPath
+                     << QStringLiteral( "-inp" ) << panPath
+                     << QStringLiteral( "-out" ) << outPath;
             }
-            auto ihsResult = ImageFusion::ihsFusion( msPtrs[rIdx], msPtrs[gIdx], msPtrs[bIdx],
-                                                       panData.data(), w, h, nodata );
-            result = ihsResult;
-            nMsBands = 3;
-        }
-        else if ( method == "pca" )
-        {
-            result = ImageFusion::pcaFusion( msPtrs, nMsBands, panData.data(), w, h, nodata );
-        }
-        else
-        {
-            QMessageBox::warning( this, tr( "Error" ), tr( "IHS fusion requires at least 3 bands." ) );
-            return;
-        }
+            else
+            {
+                program = ToolPathManager::instance().gdalToolPath( QStringLiteral( "gdalwarp" ) );
+                args << QStringLiteral( "-r" ) << QStringLiteral( "bilinear" )
+                     << QStringLiteral( "-of" ) << QStringLiteral( "GTiff" )
+                     << QStringLiteral( "-co" ) << QStringLiteral( "COMPRESS=LZW" )
+                     << panPath << msPath << outPath;
+            }
 
-        if ( result.isEmpty() )
-        {
-            QMessageBox::warning( this, tr( "Error" ), tr( "Fusion failed." ) );
-            return;
+            QProcess proc;
+            proc.setProcessChannelMode( QProcess::MergedChannels );
+            proc.start( program, args );
+            if ( !proc.waitForStarted( 5000 ) || proc.waitForFinished( -1 ) != 0 || proc.exitCode() != 0 )
+                return QString();
+            return outPath;
         }
-
-        // Write native fusion result
-        double gt[6];
-        if ( GDALGetGeoTransform( panDs.get(), gt ) == CE_None ) {}
-        std::array<double, 6> geoTransform;
-        std::copy(std::begin(gt), std::end(gt), geoTransform.begin());
-        const char *proj = GDALGetProjectionRef( panDs.get() );
-        QString projection = proj ? QString::fromUtf8(proj) : QString();
 
         QString error;
-        GdalDatasetGuard outDs(createOutputTiff(outPath, w, h, result.size(),
-                                               GDT_Float32, geoTransform, projection, &error));
-        if ( !outDs ) { QMessageBox::warning( this, tr( "Error" ), tr( "Cannot create output." ) ); return; }
-
-        for ( int b = 0; b < result.size(); ++b )
-        {
-            GDALRasterBandH outBand = GDALGetRasterBand( outDs.get(), b + 1 );
-            if ( !outBand ) return;
-            GDALSetRasterNoDataValue( outBand, nodata );
-            for ( int r = 0; r < h; ++r )
-            {
-                if ( GDALRasterIO( outBand, GF_Write, 0, r, w, 1,
-                     result[b].data() + r * w, w, 1, GDT_Float32, 0, 0 ) != CE_None )
-                    return;
-            }
-        }
-    }
-
-    handleCompleted(outPath);
+        if ( !ImageFusion::processNativeFusion( panPath, msPath, outPath, nativeParams, &error ) )
+            return QString();
+        return outPath;
+    } );
 }
 
 void FusionDialog::onMethodChanged(int index) { Q_UNUSED(index); }

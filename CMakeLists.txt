@@ -63,8 +63,14 @@ find_package(Qt6Keychain QUIET)
 find_library(PCRE2_16 pcre2-16 REQUIRED)
 find_library(PCRE2_8 pcre2-8 REQUIRED)
 find_package(CURL REQUIRED)
-# Python (build-time scripts + embedded interpreter)
-find_package(Python REQUIRED COMPONENTS Interpreter Development)
+# Python: always required for build-time scripts; Development only when embedding
+find_package(Python REQUIRED COMPONENTS Interpreter)
+if(SICNU_EMBED_PYTHON)
+    find_package(Python REQUIRED COMPONENTS Interpreter Development)
+    message(STATUS "SICNU_EMBED_PYTHON=ON — linking embedded Python console")
+else()
+    message(STATUS "SICNU_EMBED_PYTHON=OFF — Python console disabled")
+endif()
 
 # OpenCV — OPTIONAL dependency for SIFT auto-match (Task 11.5.7).
 # Build remains green without OpenCV; SIFT is compile-time guarded via SICNU_HAS_OPENCV.
@@ -158,6 +164,7 @@ if(WITH_COPC)
   set(HAVE_COPC TRUE)
 endif()
 option(ENABLE_TESTS "" ON)
+option(SICNU_EMBED_PYTHON "Embed optional Python console in desktop app" OFF)
 option(ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
 if(ENABLE_SANITIZERS)

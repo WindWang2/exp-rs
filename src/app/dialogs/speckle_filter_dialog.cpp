@@ -111,15 +111,7 @@ void SpeckleFilterDialog::onRun()
     float noiseVar = static_cast<float>(m_noiseVarSpin->value());
     float damping = static_cast<float>(m_dampingSpin->value());
 
-    if (!m_runner) {
-        m_runner = new AsyncGdalRunner(this, this);
-        connect(m_runner, &AsyncGdalRunner::completed, this, &SpeckleFilterDialog::onCompleted);
-        connect(m_runner, &AsyncGdalRunner::failed, this, &SpeckleFilterDialog::onFailed);
-    }
-
-    m_runButton->setEnabled(false);
-
-    m_runner->run([this, sourcePath, outputPath = outputPath(), kernelSize, filterIndex,
+    runGdalTask([sourcePath, outputPath = outputPath(), kernelSize, filterIndex,
                    noiseVar, damping]() -> QString {
     try {
         // Open source dataset

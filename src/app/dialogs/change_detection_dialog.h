@@ -6,7 +6,7 @@
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
-class AsyncGdalRunner;
+
 
 class ChangeDetectionDialog : public RasterProcessingDialogBase
 {
@@ -37,5 +37,5 @@ private:
     QDoubleSpinBox *m_thresholdSpin = nullptr;
     QLabel *m_thresholdLabel = nullptr;
     QLabel *m_statusLabel = nullptr;
-    AsyncGdalRunner *m_runner = nullptr;
+
 };

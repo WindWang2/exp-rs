@@ -3,6 +3,7 @@
 #include "math_utils.h"
 #include "core/sicnu_logging.h"
 #include "framework/input_validator.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <cmath>
 #include <limits>
@@ -279,6 +280,51 @@ bool evaluate(const QString &expression, const BandData &bands, float *out, size
     for (size_t i = 0; i < count; i++) {
         out[i] = ast->eval(bands, i);
     }
+    return true;
+}
+
+bool processFile(const QString &sourcePath, const QString &outputPath,
+                 const QString &expression, QString *errorMessage)
+{
+    GdalDatasetWrapper srcDataset;
+    if (!srcDataset.open(sourcePath)) {
+        if (errorMessage)
+            *errorMessage = srcDataset.lastError();
+        return false;
+    }
+
+    const int width = srcDataset.width();
+    const int height = srcDataset.height();
+    const int bandCount = srcDataset.bandCount();
+    const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+
+    BandData bands;
+    for (int i = 1; i <= bandCount; ++i) {
+        std::vector<float> buffer(pixelCount);
+        if (!srcDataset.readBandData(i, buffer.data(), width, height)) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Failed to read band %1").arg(i);
+            return false;
+        }
+        bands[i] = std::move(buffer);
+    }
+
+    std::vector<float> output(pixelCount);
+    if (!evaluate(expression, bands, output.data(), pixelCount)) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Failed to evaluate expression");
+        return false;
+    }
+
+    std::vector<std::vector<float>> outBands = {std::move(output)};
+    QString writeError;
+    if (!writeGdalOutput(outputPath, width, height, outBands,
+                         srcDataset.geoTransform(), srcDataset.projection(), &writeError)) {
+        if (errorMessage)
+            *errorMessage = writeError;
+        return false;
+    }
+
     return true;
 }
 

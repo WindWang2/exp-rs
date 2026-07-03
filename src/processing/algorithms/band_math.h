@@ -35,4 +35,11 @@ namespace BandMath
      * Division by zero produces NaN. Missing band references return false.
      */
     bool evaluate(const QString &expression, const BandData &bands, float *out, size_t count);
+
+    /**
+     * Read a multi-band GeoTIFF, evaluate an expression, and write a single-band output.
+     * @return true on success; optional errorMessage receives failure reason.
+     */
+    bool processFile(const QString &sourcePath, const QString &outputPath,
+                     const QString &expression, QString *errorMessage = nullptr);
 }

@@ -3,9 +3,12 @@
 
 #include "raster_processing_dialog_base.h"
 
+#include <memory>
+#include <vector>
+
 class QComboBox;
 class QLabel;
-class AsyncAlgorithmRunner;
+class QgsRasterLayer;
 
 /**
  * Dialog for Spectral Index calculations.
@@ -23,11 +26,10 @@ protected:
     QString toolName() const override { return QStringLiteral("spectral_index"); }
     QString dialogTitle() const override { return tr("Spectral Index"); }
     void onRun() override;
+    void cleanupRunResources() override;
 
 private slots:
     void onIndexChanged(int index);
-    void onAlgorithmCompleted(const QVariantMap &results);
-    void onAlgorithmFailed(const QString &errorMessage);
 
 private:
     void setupUi();
@@ -46,5 +48,7 @@ private:
     QLabel *m_greenLabel = nullptr;
     QLabel *m_blueLabel = nullptr;
     QLabel *m_swirLabel = nullptr;
-    AsyncAlgorithmRunner *m_runner = nullptr;
+
+    QStringList m_tempFiles;
+    std::vector<std::unique_ptr<QgsRasterLayer>> m_tempLayers;
 };

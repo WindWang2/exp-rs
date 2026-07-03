@@ -1,6 +1,6 @@
 # SICNU GEO RS
 
-Professional remote sensing analysis platform built on the QGIS engine. Pure C++ (no Python at runtime).
+Professional remote sensing analysis platform built on the QGIS engine. Pure C++ desktop app. Optional embedded Python console (`-DSICNU_EMBED_PYTHON=ON`).
 
 ## Features
 
@@ -53,7 +53,7 @@ sudo ./scripts/install_deps.sh
 | Protobuf, CURL, EXPAT, PCRE2 | 标准系统库 |
 | QCA | Qt 加密架构 |
 | BISON, FLEX | 构建工具 |
-| Python 3 | 构建脚本 (运行时不需要) |
+| Python 3 | 构建脚本；仅 `-DSICNU_EMBED_PYTHON=ON` 时链接运行时 |
 
 ## Build
 
@@ -73,7 +73,7 @@ make -j$(nproc)
 QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 ```
 
-**443 tests** covering core algorithms, GDAL utilities, dialog UI, and processing framework.
+**449 tests** covering core algorithms, GDAL utilities, dialog UI, and processing framework.
 
 ### With Sanitizers (Debug)
 

@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <QVariantMap>
 #include <QVariantList>
+#include "agent/stac_client.h"
 
 TEST_CASE("STAC URL construction", "[agent][stac]")
 {
@@ -46,6 +47,21 @@ TEST_CASE("STAC URL construction", "[agent][stac]")
         url.setQuery(query);
 
         REQUIRE(url.toString().contains("collections=sentinel-2"));
+    }
+
+    SECTION("StacClient::buildSearchUrl")
+    {
+        const QUrl url = StacClient::buildSearchUrl(
+            QStringLiteral("https://example.com/stac"),
+            QStringLiteral("sentinel-2"),
+            QStringLiteral("2023-01-01/2023-12-31"),
+            QStringList{QStringLiteral("-180"), QStringLiteral("-90"),
+                        QStringLiteral("180"), QStringLiteral("90")});
+
+        REQUIRE(url.toString().contains(QStringLiteral("/search")));
+        REQUIRE(url.toString().contains(QStringLiteral("collections=sentinel-2")));
+        REQUIRE(url.toString().contains(QStringLiteral("datetime=")));
+        REQUIRE(url.toString().contains(QStringLiteral("bbox=")));
     }
 }
 
