@@ -1547,6 +1547,32 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
   )
   set_target_properties(test_obia_task PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(test_obia_task)
+
+  # Phase 10B.6 — OBIA end-to-end integration tests
+  add_executable(test_obia_integration test_obia_integration.cpp)
+  target_link_libraries(test_obia_integration PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    qgis_analysis
+    qgis_app_obia
+    GDAL::GDAL
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_obia_integration PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${CMAKE_SOURCE_DIR}/src/analysis/segmentation
+    ${CMAKE_SOURCE_DIR}/src/app/obia
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_obia_integration PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_obia_integration)
 endif()
 
 # Phase 10B.3 — Simple segmenter fallback tests

@@ -14,6 +14,19 @@ using Catch::Approx;
 #include <processing/qgsprocessingcontext.h>
 #include <processing/qgsprocessingfeedback.h>
 
+namespace
+{
+class TestableOtbSegmentation : public OtbSegmentationAlgorithm
+{
+  public:
+    QStringList testBuildArgs( const QVariantMap &parameters )
+    {
+        QgsProcessingContext context;
+        return buildArgs( parameters, context, nullptr );
+    }
+};
+} // namespace
+
 TEST_CASE( "OTB Segmentation: algorithm metadata", "[otb][segmentation]" )
 {
     OtbSegmentationAlgorithm algo;
@@ -69,4 +82,39 @@ TEST_CASE( "OTB Segmentation: default values", "[otb][segmentation]" )
     REQUIRE( defaults["MIN_REGION_SIZE"].toInt() == 100 );
     REQUIRE( defaults["MAX_ITERATION"].toInt() == 100 );
     REQUIRE( defaults["THRESHOLD"].toDouble() == Catch::Approx(0.1) );
+}
+
+TEST_CASE( "OTB Segmentation: buildArgs MeanShift with label raster", "[otb][segmentation]" )
+{
+    TestableOtbSegmentation algo;
+
+    QVariantMap params;
+    params["INPUT"] = "/data/input.tif";
+    params["MODE"] = 0;
+    params["SPATIAL_RADIUS"] = 7;
+    params["RANGE_RADIUS"] = 20.0;
+    params["MIN_REGION_SIZE"] = 50;
+    params["MAX_ITERATION"] = 200;
+    params["OUTPUT"] = "/tmp/segments.shp";
+    params["OUTPUT_RASTER"] = "/tmp/labels.tif";
+
+    const QStringList args = algo.testBuildArgs( params );
+
+    REQUIRE( args.indexOf( "-in" ) >= 0 );
+    REQUIRE( args[args.indexOf( "-in" ) + 1] == "/data/input.tif" );
+    REQUIRE( args.indexOf( "-mode" ) >= 0 );
+    REQUIRE( args[args.indexOf( "-mode" ) + 1] == "meanshift" );
+    REQUIRE( args.indexOf( "-mode.meanshift.spatialr" ) >= 0 );
+    REQUIRE( args[args.indexOf( "-mode.meanshift.spatialr" ) + 1] == "7" );
+    REQUIRE( args.indexOf( "-mode.meanshift.ranger" ) >= 0 );
+    REQUIRE( args[args.indexOf( "-mode.meanshift.ranger" ) + 1] == "20.00" );
+    REQUIRE( args.indexOf( "-mode.meanshift.minsize" ) >= 0 );
+    REQUIRE( args[args.indexOf( "-mode.meanshift.minsize" ) + 1] == "50" );
+    REQUIRE( args.indexOf( "-mode.meanshift.maxiter" ) >= 0 );
+    REQUIRE( args[args.indexOf( "-mode.meanshift.maxiter" ) + 1] == "200" );
+    REQUIRE( args.indexOf( "-out" ) >= 0 );
+    REQUIRE( args[args.indexOf( "-out" ) + 1] == "/tmp/segments.shp" );
+    REQUIRE( args[args.indexOf( "-out" ) + 2] == "/tmp/labels.tif" );
+    REQUIRE( args[args.indexOf( "-out" ) + 3] == "uint32" );
+    REQUIRE( !args.contains( "-mode.meanshift.threshold" ) );
 }

@@ -73,7 +73,7 @@ make -j$(nproc)
 QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 ```
 
-**449 tests** covering core algorithms, GDAL utilities, dialog UI, and processing framework.
+**452 tests** covering core algorithms, GDAL utilities, dialog UI, OBIA pipeline, and processing framework.
 
 ### With Sanitizers (Debug)
 
