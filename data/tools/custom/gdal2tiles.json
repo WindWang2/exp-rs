@@ -1,0 +1,13 @@
+{
+  "id": "gdal2tiles",
+  "name": "GDAL2Tiles (Web Map Tiles)",
+  "group": "Raster Conversion",
+  "group_id": "rasterconversion",
+  "command": "gdal2tiles.py",
+  "tags": ["gdal", "tiles", "web", "custom"],
+  "parameters": [
+    {"name": "INPUT", "type": "raster", "description": "Input raster"},
+    {"name": "OUTPUT", "type": "string", "description": "Output directory"}
+  ],
+  "args": ["{INPUT}", "{OUTPUT}"]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "otb_disparity_to_dem",
+  "name": "OTB Disparity to DEM",
+  "group": "Stereo",
+  "group_id": "stereo",
+  "command": "otbcli_DisparityMapToElevationMap",
+  "tags": ["otb", "stereo", "dem", "elevation", "custom"],
+  "parameters": [
+    {"name": "DISPARITY", "type": "raster", "description": "Input disparity map"},
+    {"name": "OUTPUT", "type": "output_raster", "description": "Elevation map output"},
+    {"name": "ELEVATION", "type": "number", "description": "Mean elevation (meters)", "default": 0.0}
+  ],
+  "args": ["-io.in", "{DISPARITY}", "-io.out", "{OUTPUT}", "-elev.default", "{ELEVATION}"]
+}
