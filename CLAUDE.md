@@ -15,7 +15,7 @@ Pure C++ Remote Sensing analysis platform built on the QGIS engine.
 *   `src/gui/`: QGIS GUI library — map canvas, map tools, layer tree, dialogs.
 *   `src/analysis/`: Analysis libraries — classification, georeferencing, segmentation.
 *   `src/agent/`: AI Agent infrastructure — MCP server, STAC client.
-*   `src/processing/`: Processing framework — algorithms, GDAL wrappers, providers.
+*   `src/processing/`: Processing framework — algorithms, GDAL wrappers, providers. Toolbox coverage manifest: `data/processing/toolbox_manifest.json`; Generic CLI tools: `data/tools/custom/*.json`.
 *   `src/native/`: Platform-native integration (Linux/macOS/Windows).
 *   `src/ui/`: Qt Designer .ui form files.
 *   `external/`: Vendored C++ dependencies (nlohmann_json, spatialindex, poly2tri, lazperf).

@@ -73,7 +73,17 @@ make -j$(nproc)
 QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 ```
 
-**460 tests** covering core algorithms, GDAL utilities, dialog UI, OBIA pipeline, and processing framework.
+**483 tests** covering core algorithms, GDAL utilities, dialog UI, OBIA pipeline, and processing framework.
+
+### Toolbox coverage gate
+
+Processing Toolbox Phase 1 registers algorithms against a manifest-driven CI gate:
+
+```bash
+QT_QPA_PLATFORM=offscreen ctest -R test_toolbox_coverage --output-on-failure
+```
+
+Manifest: `data/processing/toolbox_manifest.json`. Generic CLI long-tail tools ship from `data/tools/custom/`.
 
 ### With Sanitizers (Debug)
 
