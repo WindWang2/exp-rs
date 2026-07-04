@@ -14,6 +14,11 @@ public:
     QString groupId() const override { return "radiometry"; }
     QStringList tags() const override { return { QObject::tr( "statistics" ), QObject::tr( "mean" ), QObject::tr( "variance" ), QObject::tr( "radiometry" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "ComputeImagesStatistics"; }
+    QString shortHelpString() const override
+    {
+        return QObject::tr( "Computes per-band mean, standard deviation, and other statistics for one or more raster images. "
+                            "Output is an XML statistics file used by OTB classifiers." );
+    }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbComputeImagesStatisticsAlgorithm(); }
 

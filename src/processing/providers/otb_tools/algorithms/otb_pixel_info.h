@@ -14,6 +14,10 @@ public:
     QString groupId() const override { return "utilities"; }
     QStringList tags() const override { return { QObject::tr( "pixel" ), QObject::tr( "info" ), QObject::tr( "value" ), QObject::tr( "utilities" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "PixelInfo"; }
+    QString shortHelpString() const override
+    {
+        return QObject::tr( "Returns the spectral values of a raster pixel at the given image coordinates." );
+    }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbPixelInfoAlgorithm(); }
 

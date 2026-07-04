@@ -1720,6 +1720,24 @@ target_include_directories(test_otb_new_algorithms_params PRIVATE
 )
 sicnu_discover_tests(test_otb_new_algorithms_params)
 
+# Processing Toolbox Phase 1 Task 5 — OTB info upgrades + stereo rectification
+add_executable(test_otb_info_upgrades test_otb_info_upgrades.cpp)
+target_link_libraries(test_otb_info_upgrades PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  sicnu_processing
+)
+target_include_directories(test_otb_info_upgrades PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_otb_info_upgrades)
+
 # Phase 10B.0 — OTB smoke test (guarded by SICNU_HAS_OTB)
 if(SICNU_HAS_OTB)
   add_executable(test_otb_smoke test_otb_smoke.cpp)

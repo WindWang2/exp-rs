@@ -14,6 +14,10 @@ public:
     QString groupId() const override { return "utilities"; }
     QStringList tags() const override { return { QObject::tr( "image" ), QObject::tr( "info" ), QObject::tr( "metadata" ), QObject::tr( "utilities" ), QObject::tr( "otb" ) }; }
     QString applicationName() const override { return "ReadImageInfo"; }
+    QString shortHelpString() const override
+    {
+        return QObject::tr( "Reads and displays metadata for a raster image: size, bands, pixel type, projection, and spacing." );
+    }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbReadImageInfoAlgorithm(); }
 

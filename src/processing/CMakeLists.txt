@@ -82,6 +82,7 @@ add_library(sicnu_processing SHARED
     providers/otb_tools/algorithms/otb_local_statistic_extraction.cpp
     providers/otb_tools/algorithms/otb_multivariate_alteration_detector.cpp
     providers/otb_tools/algorithms/otb_svm_classification.cpp
+    providers/otb_tools/algorithms/otb_stereo_rectification.cpp
 
     providers/generic_cli/provider.cpp
     providers/generic_cli/generic_cli_algorithm.cpp

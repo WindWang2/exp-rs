@@ -29,6 +29,7 @@
 #include "algorithms/otb_local_statistic_extraction.h"
 #include "algorithms/otb_multivariate_alteration_detector.h"
 #include "algorithms/otb_svm_classification.h"
+#include "algorithms/otb_stereo_rectification.h"
 
 #include <QIcon>
 
@@ -78,6 +79,7 @@ void OtbToolsProvider::loadAlgorithms()
     addAlgorithm(new OtbOrthoRectificationAlgorithm());
     addAlgorithm(new OtbBundleToPerfectSensorAlgorithm());
     addAlgorithm(new OtbSuperimposeAlgorithm());
+    addAlgorithm(new OtbStereoRectificationAlgorithm());
     addAlgorithm(new OtbMultivariateAlterationDetectorAlgorithm());
 
     // Image Processing
