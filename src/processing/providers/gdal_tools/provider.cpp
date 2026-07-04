@@ -19,6 +19,10 @@
 #include "algorithms/gdalmanage.h"
 #include "algorithms/gdaladdo.h"
 #include "algorithms/gdaltransform.h"
+#include "algorithms/gdal_edit.h"
+#include "algorithms/pct2rgb.h"
+#include "algorithms/rgb2pct.h"
+#include "algorithms/gdal2xyz.h"
 #include "algorithms/ogr2ogr.h"
 #include "algorithms/ogrinfo.h"
 #include "algorithms/ogrtindex.h"
@@ -48,6 +52,9 @@ void GdalToolsProvider::loadAlgorithms()
     addAlgorithm(new GdalBuildVrtAlgorithm());
     addAlgorithm(new GdalTindexAlgorithm());
     addAlgorithm(new GdalAddoAlgorithm());
+    addAlgorithm(new Pct2RgbAlgorithm());
+    addAlgorithm(new Rgb2PctAlgorithm());
+    addAlgorithm(new Gdal2XyzAlgorithm());
 
     // Raster Transformation
     addAlgorithm(new GdalWarpAlgorithm());
@@ -63,6 +70,7 @@ void GdalToolsProvider::loadAlgorithms()
 
     // Raster Information
     addAlgorithm(new GdalInfoAlgorithm());
+    addAlgorithm(new GdalEditAlgorithm());
 
     // Vector Conversion
     addAlgorithm(new Ogr2OgrAlgorithm());

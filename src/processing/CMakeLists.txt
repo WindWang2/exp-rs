@@ -43,6 +43,10 @@ add_library(sicnu_processing SHARED
     providers/gdal_tools/algorithms/gdalmanage.cpp
     providers/gdal_tools/algorithms/gdaladdo.cpp
     providers/gdal_tools/algorithms/gdaltransform.cpp
+    providers/gdal_tools/algorithms/gdal_edit.cpp
+    providers/gdal_tools/algorithms/pct2rgb.cpp
+    providers/gdal_tools/algorithms/rgb2pct.cpp
+    providers/gdal_tools/algorithms/gdal2xyz.cpp
     providers/gdal_tools/algorithms/ogr2ogr.cpp
     providers/gdal_tools/algorithms/ogrinfo.cpp
     providers/gdal_tools/algorithms/ogrtindex.cpp
