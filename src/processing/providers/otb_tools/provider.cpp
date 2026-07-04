@@ -25,6 +25,10 @@
 #include "algorithms/otb_gray_scale_morphological.h"
 #include "algorithms/otb_pixel_info.h"
 #include "algorithms/otb_read_image_info.h"
+#include "algorithms/otb_gray_level_cooccurrence_matrix.h"
+#include "algorithms/otb_local_statistic_extraction.h"
+#include "algorithms/otb_multivariate_alteration_detector.h"
+#include "algorithms/otb_svm_classification.h"
 
 #include <QIcon>
 
@@ -61,16 +65,20 @@ void OtbToolsProvider::loadAlgorithms()
     addAlgorithm(new OtbTrainVectorClassifierAlgorithm());
     addAlgorithm(new OtbImageClassifierAlgorithm());
     addAlgorithm(new OtbKMeansClassificationAlgorithm());
+    addAlgorithm(new OtbSvmClassificationAlgorithm());
 
     // Feature
     addAlgorithm(new OtbFeatureExtractionAlgorithm());
     addAlgorithm(new OtbHaralickTextureAlgorithm());
+    addAlgorithm(new OtbGrayLevelCooccurrenceMatrixAlgorithm());
+    addAlgorithm(new OtbLocalStatisticExtractionAlgorithm());
     addAlgorithm(new OtbRadiometricIndicesAlgorithm());
 
     // Geometry
     addAlgorithm(new OtbOrthoRectificationAlgorithm());
     addAlgorithm(new OtbBundleToPerfectSensorAlgorithm());
     addAlgorithm(new OtbSuperimposeAlgorithm());
+    addAlgorithm(new OtbMultivariateAlterationDetectorAlgorithm());
 
     // Image Processing
     addAlgorithm(new OtbBinaryMorphologicalAlgorithm());

@@ -78,6 +78,10 @@ add_library(sicnu_processing SHARED
     providers/otb_tools/algorithms/otb_gray_scale_morphological.cpp
     providers/otb_tools/algorithms/otb_pixel_info.cpp
     providers/otb_tools/algorithms/otb_read_image_info.cpp
+    providers/otb_tools/algorithms/otb_gray_level_cooccurrence_matrix.cpp
+    providers/otb_tools/algorithms/otb_local_statistic_extraction.cpp
+    providers/otb_tools/algorithms/otb_multivariate_alteration_detector.cpp
+    providers/otb_tools/algorithms/otb_svm_classification.cpp
 
     providers/generic_cli/provider.cpp
     providers/generic_cli/generic_cli_algorithm.cpp
