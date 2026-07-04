@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "categories": {
+    "gdal_raster_basic": {
+      "target_pct": 80,
+      "required": [
+        "gdal_tools:gdal_translate",
+        "gdal_tools:gdalwarp",
+        "gdal_tools:gdal_info",
+        "gdal_tools:gdal_merge",
+        "gdal_tools:gdalbuildvrt",
+        "gdal_tools:gdal_retile",
+        "gdal_tools:gdaladdo",
+        "gdal_tools:gdaltransform",
+        "gdal_tools:gdal2xyz"
+      ]
+    },
+    "gdal_raster_analysis": {
+      "target_pct": 80,
+      "required": [
+        "gdal_tools:gdal_dem",
+        "gdal_tools:gdal_calc",
+        "gdal_tools:gdal_contour",
+        "gdal_tools:gdal_proximity",
+        "gdal_tools:gdal_sieve",
+        "gdal_tools:gdal_fillnodata",
+        "gdal_tools:gdal_grid",
+        "gdal_tools:gdal_rasterize",
+        "gdal_tools:gdal_polygonize",
+        "gdal_tools:gdalmanage"
+      ]
+    },
+    "gdal_vector": {
+      "target_pct": 80,
+      "required": [
+        "gdal_tools:ogr2ogr",
+        "gdal_tools:ogrinfo",
+        "gdal_tools:ogrtindex"
+      ]
+    },
+    "otb_rs": {
+      "target_pct": 80,
+      "required": [
+        "otb_tools:otb_band_math",
+        "otb_tools:otb_segmentation",
+        "otb_tools:otb_feature_extraction",
+        "otb_tools:otb_haralick_texture",
+        "otb_tools:otb_radiometric_indices",
+        "otb_tools:otb_image_classifier",
+        "otb_tools:otb_kmeans_classification",
+        "otb_tools:otb_gray_level_cooccurrence_matrix",
+        "otb_tools:otb_local_statistic_extraction",
+        "otb_tools:otb_multivariate_alteration_detector"
+      ]
+    },
+    "otb_preprocess": {
+      "target_pct": 80,
+      "required": [
+        "otb_tools:otb_ortho_rectification",
+        "otb_tools:otb_bundle_to_perfect_sensor",
+        "otb_tools:otb_superimpose",
+        "otb_tools:otb_mean_shift_smoothing",
+        "otb_tools:otb_compute_images_statistics",
+        "otb_tools:otb_read_image_info",
+        "otb_tools:otb_pixel_info",
+        "otb_tools:otb_rescale",
+        "otb_tools:otb_convert",
+        "otb_tools:otb_stereo_rectification"
+      ]
+    }
+  },
+  "handcrafted_required": [
+    "gdal_tools:gdaladdo",
+    "gdal_tools:gdaltransform",
+    "gdal_tools:gdal_edit",
+    "gdal_tools:pct2rgb",
+    "gdal_tools:rgb2pct",
+    "gdal_tools:gdal2xyz",
+    "otb_tools:otb_compute_images_statistics",
+    "otb_tools:otb_read_image_info",
+    "otb_tools:otb_pixel_info",
+    "otb_tools:otb_gray_level_cooccurrence_matrix",
+    "otb_tools:otb_local_statistic_extraction",
+    "otb_tools:otb_svm_classification",
+    "otb_tools:otb_multivariate_alteration_detector",
+    "otb_tools:otb_stereo_rectification",
+    "qgis_algorithms:rs_band_math",
+    "qgis_algorithms:rs_spectral_index",
+    "qgis_algorithms:rs_atmospheric_correction",
+    "qgis_algorithms:raster_statistics"
+  ]
+}

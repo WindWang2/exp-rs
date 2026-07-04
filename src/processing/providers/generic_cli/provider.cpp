@@ -2,6 +2,7 @@
 #include "provider.h"
 #include "generic_cli_algorithm.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
@@ -10,6 +11,8 @@
 #include <QStandardPaths>
 #include <QIcon>
 #include <QMessageBox>
+
+#include "app/app_paths.h"
 
 GenericCliProvider::GenericCliProvider(const QString &configDir)
     : m_configDir(configDir)
@@ -34,11 +37,13 @@ void GenericCliProvider::loadAlgorithms()
 {
     loadToolsFromDirectory(m_configDir);
 
-    // Also load from app directory
-    QString appDir = QCoreApplication::applicationDirPath() + "/../tools/custom";
-    if (QDir(appDir).exists()) {
-        loadToolsFromDirectory(appDir);
-    }
+    const QString shipped = AppPaths::resolveDataPath( "data/tools/custom" );
+    if ( QDir( shipped ).exists() )
+        loadToolsFromDirectory( shipped );
+
+    const QString appCustom = QCoreApplication::applicationDirPath() + "/../tools/custom";
+    if ( QDir( appCustom ).exists() )
+        loadToolsFromDirectory( appCustom );
 }
 
 void GenericCliProvider::loadToolsFromDirectory(const QString &dir)
