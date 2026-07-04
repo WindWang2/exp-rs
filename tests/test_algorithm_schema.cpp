@@ -6,6 +6,7 @@
 #include "processing/providers/qgis_algorithms/algorithms/remote_sensing/band_math_algorithm.h"
 #include "processing/providers/qgis_algorithms/algorithms/remote_sensing/spectral_index_algorithm.h"
 #include "processing/providers/qgis_algorithms/algorithms/remote_sensing/atmospheric_correction_algorithm.h"
+#include "processing/providers/qgis_algorithms/algorithms/raster/raster_statistics.h"
 
 TEST_CASE("Algorithm toJsonSchema and metadata tests", "[agent][schema]") {
     SECTION("BandMathAlgorithm schema and metadata") {
@@ -78,5 +79,21 @@ TEST_CASE("Algorithm toJsonSchema and metadata tests", "[agent][schema]") {
 
         QVariantMap meta = alg.metadata();
         CHECK(meta.value("purpose").toString().contains("atmospheric"));
+    }
+
+    SECTION("RasterStatisticsAlgorithm schema and metadata") {
+        RasterStatisticsAlgorithm alg;
+        alg.initAlgorithm();
+
+        QVariantMap schema = alg.toJsonSchema();
+        REQUIRE_FALSE(schema.isEmpty());
+        CHECK(schema.value("title").toString() == "raster_statistics");
+
+        QVariantMap properties = schema.value("properties").toMap();
+        REQUIRE(properties.contains("INPUT"));
+
+        QVariantMap meta = alg.metadata();
+        CHECK(meta.contains("purpose"));
+        CHECK_FALSE(alg.shortHelpString().isEmpty());
     }
 }

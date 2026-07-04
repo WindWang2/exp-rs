@@ -77,3 +77,24 @@ QVariantMap RasterStatisticsAlgorithm::processAlgorithm( const QVariantMap &para
 
     return results;
 }
+
+QString RasterStatisticsAlgorithm::shortHelpString() const
+{
+    return QObject::tr( "Computes per-band minimum, maximum, mean, and standard deviation for a raster layer. "
+                        "Results can be written to a text file or returned as processing output." );
+}
+
+QVariantMap RasterStatisticsAlgorithm::metadata() const
+{
+    return QVariantMap{
+        { QStringLiteral( "purpose" ), QObject::tr( "Summarizes raster band value distributions for quality checks and preprocessing." ) },
+        { QStringLiteral( "useCases" ), QStringList{
+              QObject::tr( "Inspect band ranges before classification or enhancement" ),
+              QObject::tr( "Document dataset statistics for lab reports" ),
+              QObject::tr( "Validate imported imagery" )
+          } },
+        { QStringLiteral( "prerequisites" ), QStringList{ QObject::tr( "Input must be a readable raster layer." ) } },
+        { QStringLiteral( "limitations" ), QStringList{ QObject::tr( "Statistics depend on the raster provider's cached or computed band stats." ) } },
+        { QStringLiteral( "workflowHints" ), QStringList{ QObject::tr( "Run before contrast stretch or classification to choose sensible thresholds." ) } }
+    };
+}
