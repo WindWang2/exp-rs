@@ -260,6 +260,23 @@ target_include_directories(test_gdal_tool_wrapper PRIVATE
 )
 sicnu_discover_tests(test_gdal_tool_wrapper)
 
+# GDAL addo wrapper parameter tests
+add_executable(test_gdaladdo_params test_gdaladdo_params.cpp)
+target_link_libraries(test_gdaladdo_params PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_gdaladdo_params PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_gdaladdo_params)
+
 # GDAL null band handle tests
 add_executable(test_gdal_null_band test_gdal_null_band.cpp)
 target_link_libraries(test_gdal_null_band PRIVATE

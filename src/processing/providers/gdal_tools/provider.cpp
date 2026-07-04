@@ -17,6 +17,8 @@
 #include "algorithms/gdalbuildvrt.h"
 #include "algorithms/gdaltindex.h"
 #include "algorithms/gdalmanage.h"
+#include "algorithms/gdaladdo.h"
+#include "algorithms/gdaltransform.h"
 #include "algorithms/ogr2ogr.h"
 #include "algorithms/ogrinfo.h"
 #include "algorithms/ogrtindex.h"
@@ -45,9 +47,11 @@ void GdalToolsProvider::loadAlgorithms()
     addAlgorithm(new GdalRasterizeAlgorithm());
     addAlgorithm(new GdalBuildVrtAlgorithm());
     addAlgorithm(new GdalTindexAlgorithm());
+    addAlgorithm(new GdalAddoAlgorithm());
 
     // Raster Transformation
     addAlgorithm(new GdalWarpAlgorithm());
+    addAlgorithm(new GdalTransformAlgorithm());
 
     // Raster Analysis
     addAlgorithm(new GdalDemAlgorithm());
