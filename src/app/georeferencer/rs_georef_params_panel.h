@@ -71,6 +71,12 @@ class RsGeorefParamsPanel : public QWidget
      */
     void setRefinementRms( double before, double after );
 
+    /**
+     * Clear refinement RMS labels to the empty placeholder (—).
+     * Used for non-RPC methods and when fewer than 3 enabled GCPs are available.
+     */
+    void clearRefinementRms();
+
   public slots:
     /// Update the section-3 labels and DOF readout.
     void setRmsValues( int total, int enabled, double rmsPx,

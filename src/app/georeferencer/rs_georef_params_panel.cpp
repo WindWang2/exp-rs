@@ -484,6 +484,17 @@ void RsGeorefParamsPanel::setRefinementRms( double before, double after )
   }
 }
 
+void RsGeorefParamsPanel::clearRefinementRms()
+{
+  if ( mRmsBefore )
+    mRmsBefore->setText( tr( "精化前 RMS: —" ) );
+  if ( mRmsAfter )
+  {
+    mRmsAfter->setText( tr( "精化后 RMS: —" ) );
+    mRmsAfter->setStyleSheet( QString() );
+  }
+}
+
 void RsGeorefParamsPanel::setMinimumGcpCount( int n )
 {
   mMinPtsLabel->setText( QString::number( n ) );

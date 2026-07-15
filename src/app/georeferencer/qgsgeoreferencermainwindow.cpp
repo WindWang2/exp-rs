@@ -211,6 +211,24 @@ namespace
       QgsGcpTransformerInterface::create( m ) );
     return t ? t->minimumGcpCount() : 0;
   }
+
+  // RMS over enabled GCP residual magnitudes (same units as the table / setRmsValues).
+  double computeEnabledRms( QgsGCPList *gcps )
+  {
+    if ( !gcps )
+      return 0.0;
+    double totalSq = 0.0;
+    int n = 0;
+    for ( const QgsGcpPoint *p : std::as_const( *gcps ) )
+    {
+      if ( !p || !p->isEnabled() )
+        continue;
+      const QPointF r = p->residual();
+      totalSq += r.x() * r.x() + r.y() * r.y();
+      ++n;
+    }
+    return n > 0 ? std::sqrt( totalSq / n ) : 0.0;
+  }
 }
 
 void QgsGeoreferencerMainWindow::recomputeFit()
@@ -221,9 +239,6 @@ void QgsGeoreferencerMainWindow::recomputeFit()
   const QgsGcpTransformerInterface::TransformMethod method = mParamsPanel->transformMethod();
   const int minN = minimumGcpCountFor( method );
   mParamsPanel->setMinimumGcpCount( minN );
-
-  // Build a fresh transform of the chosen method.
-  mTransform.reset( new QgsGeorefTransform( method ) );
 
   // Collect enabled GCPs (source + destination) in parallel vectors.
   QVector<QgsPointXY> src;
@@ -240,27 +255,53 @@ void QgsGeoreferencerMainWindow::recomputeFit()
   const int enabledCount = src.size();
   mParamsPanel->setActualGcpCount( enabledCount );
 
-  // Task 11.5.4/11.5.5 — push DEM/Z-offset settings down into the RPC
-  // transformer before the fit so RPC_HEIGHT and (if a DEM is set) RPC_DEM
-  // are part of GDALCreateRPCTransformerV2's papszOptions.  Linear-bias
-  // refinement is requested only when ≥ 3 enabled GCPs are available
-  // (matches QgsRpcGcpTransformer's internal guard).
-  if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical )
+  bool fitOk = false;
+
+  // Task 6 / §5 — RPC with ≥ 3 enabled GCPs: dual-run unrefined then refined
+  // so the params panel can show before/after RMS. Working mTransform keeps
+  // the refined model for Apply and residual display.
+  if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical
+       && enabledCount >= 3 )
   {
+    double rmsBefore = -1.0;
+    double rmsAfter = -1.0;
+    const QgsCoordinateReferenceSystem dstCrs = mParamsPanel->destCrs();
+
+    // BEFORE — unrefined RPC
+    {
+      auto beforeXf = std::make_unique<QgsGeorefTransform>( method );
+      if ( auto *rpc = dynamic_cast<QgsRpcGcpTransformer *>(
+             beforeXf ? beforeXf->gcpTransformer() : nullptr ) )
+      {
+        rpc->setSourceRasterPath( mSourceRasterPath );
+        rpc->setRpcOptions( mParamsPanel->demPath(),
+                            mParamsPanel->demZOffset(),
+                            /*useRefine=*/false );
+      }
+      try
+      {
+        if ( beforeXf && beforeXf->updateParametersFromGcps( src, dst, false ) )
+        {
+          mGcps->updateResiduals( beforeXf.get(), dstCrs, dstCrs );
+          rmsBefore = computeEnabledRms( mGcps );
+        }
+      }
+      catch ( ... )
+      {
+        // leave rmsBefore < 0
+      }
+    }
+
+    // AFTER — refined working transform (Apply uses this)
+    mTransform.reset( new QgsGeorefTransform( method ) );
     if ( auto *rpc = dynamic_cast<QgsRpcGcpTransformer *>(
            mTransform ? mTransform->gcpTransformer() : nullptr ) )
     {
       rpc->setSourceRasterPath( mSourceRasterPath );
-      const bool useRefine = ( enabledCount >= 3 );
       rpc->setRpcOptions( mParamsPanel->demPath(),
                           mParamsPanel->demZOffset(),
-                          useRefine );
+                          /*useRefine=*/true );
     }
-  }
-
-  bool fitOk = false;
-  if ( enabledCount >= minN && minN > 0 )
-  {
     try
     {
       fitOk = mTransform->updateParametersFromGcps( src, dst, false );
@@ -269,9 +310,64 @@ void QgsGeoreferencerMainWindow::recomputeFit()
     {
       fitOk = false;
     }
+    if ( fitOk )
+    {
+      mGcps->updateResiduals( mTransform.get(), dstCrs, dstCrs );
+      rmsAfter = computeEnabledRms( mGcps );
+    }
+
+    if ( rmsBefore >= 0.0 && rmsAfter >= 0.0 )
+      mParamsPanel->setRefinementRms( rmsBefore, rmsAfter );
+    else
+      mParamsPanel->clearRefinementRms();
+  }
+  else
+  {
+    // Non-RPC, or RPC with fewer than 3 enabled GCPs: single fit path.
+    mParamsPanel->clearRefinementRms();
+    mTransform.reset( new QgsGeorefTransform( method ) );
+
+    // Task 11.5.4/11.5.5 — push DEM/Z-offset into the RPC transformer.
+    // Linear-bias refinement is off here (enabledCount < 3 for RPC).
+    if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical )
+    {
+      if ( auto *rpc = dynamic_cast<QgsRpcGcpTransformer *>(
+             mTransform ? mTransform->gcpTransformer() : nullptr ) )
+      {
+        rpc->setSourceRasterPath( mSourceRasterPath );
+        rpc->setRpcOptions( mParamsPanel->demPath(),
+                            mParamsPanel->demZOffset(),
+                            /*useRefine=*/false );
+      }
+    }
+
+    if ( enabledCount >= minN && minN > 0 )
+    {
+      try
+      {
+        fitOk = mTransform->updateParametersFromGcps( src, dst, false );
+      }
+      catch ( ... )
+      {
+        fitOk = false;
+      }
+    }
+    // RPC minN is 0 (coefficients from metadata); still allow a fit with 0–2 GCPs.
+    else if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical
+              && mTransform )
+    {
+      try
+      {
+        fitOk = mTransform->updateParametersFromGcps( src, dst, false );
+      }
+      catch ( ... )
+      {
+        fitOk = false;
+      }
+    }
   }
 
-  // Residuals + scatter
+  // Residuals + scatter (from final mTransform; dual path already wrote refined residuals)
   double totalSq = 0.0, xSq = 0.0, ySq = 0.0;
   double maxMag = 0.0;
   int maxRow = -1;
@@ -280,6 +376,8 @@ void QgsGeoreferencerMainWindow::recomputeFit()
 
   if ( fitOk )
   {
+    // For the dual RPC path residuals are already from the refined model;
+    // re-run for the single-fit path (and harmless for dual).
     const QgsCoordinateReferenceSystem dstCrs = mParamsPanel->destCrs();
     mGcps->updateResiduals( mTransform.get(), dstCrs, dstCrs );
 
