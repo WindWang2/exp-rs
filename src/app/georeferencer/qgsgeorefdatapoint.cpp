@@ -68,6 +68,7 @@ void QgsGeorefDataPoint::updateMarkers()
   if ( mGCPSourceItem )
   {
     mGCPSourceItem->setId( mId );
+    // SRC is pixel space — never reproject.
     mGCPSourceItem->setWorldPos( mGcpPoint->sourcePoint() );
     mGCPSourceItem->setEnabled( mGcpPoint->isEnabled() );
     mGCPSourceItem->setResidual( mGcpPoint->residual() );
@@ -75,7 +76,16 @@ void QgsGeorefDataPoint::updateMarkers()
   if ( mGCPDestinationItem )
   {
     mGCPDestinationItem->setId( mId );
-    mGCPDestinationItem->setWorldPos( mGcpPoint->destinationPoint() );
+    // REF may be in a different CRS than the GCP destination CRS.
+    // Reproject into the destination canvas CRS so markers don't drift.
+    QgsPointXY dest = mGcpPoint->destinationPoint();
+    if ( mDstCanvas && mDstCanvas->mapSettings().destinationCrs().isValid() )
+    {
+      dest = mGcpPoint->transformedDestinationPoint(
+               mDstCanvas->mapSettings().destinationCrs(),
+               QgsProject::instance()->transformContext() );
+    }
+    mGCPDestinationItem->setWorldPos( dest );
     mGCPDestinationItem->setEnabled( mGcpPoint->isEnabled() );
   }
 }

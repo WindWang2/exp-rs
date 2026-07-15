@@ -1212,6 +1212,29 @@ target_include_directories(test_gcp_canvas_item PRIVATE
 set_target_properties(test_gcp_canvas_item PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_gcp_canvas_item)
 
+# Task 4 (v16) — REF GCP marker CRS reprojection onto canvas destination CRS
+add_executable(test_gcp_canvas_crs test_gcp_canvas_crs.cpp)
+target_link_libraries(test_gcp_canvas_crs PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  qgis_app_georef
+)
+target_include_directories(test_gcp_canvas_crs PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_gcp_canvas_crs PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_gcp_canvas_crs)
+
 # Task 11.5.6 — RPC golden warp regression (synthetic non-trivial RPC + DEM)
 add_executable(test_rpc_golden test_rpc_golden.cpp)
 target_compile_definitions(test_rpc_golden PRIVATE
