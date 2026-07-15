@@ -15,6 +15,7 @@
 #include <QMenuBar>
 #include <QPointF>
 #include <QSet>
+#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QStatusBar>
@@ -63,6 +64,13 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   mGcps = new QgsGCPList();
   mGcps->setParent( this );
 
+  // Task 11.6.2 — GCP list mutations mark the session dirty (except during
+  // load/save which suppress via mSuppressDirtyFromList).
+  connect( mGcps, &QgsGCPList::changed, this, [this]() {
+    if ( !mSuppressDirtyFromList )
+      mSession.markDirty();
+  } );
+
   setupMenus();
   setupToolbars();
   setupStatusBar();
@@ -99,7 +107,11 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   connect( mParamsPanel, &RsGeorefParamsPanel::transformMethodChanged,
            this, &QgsGeoreferencerMainWindow::recomputeFit );
   connect( mParamsPanel, &RsGeorefParamsPanel::outputPathChanged, this,
-           [this]( const QString & ) { recomputeFit(); } );
+           [this]( const QString & ) {
+             recomputeFit();
+             // Task 11.6.2 — persist path keys when output path is set (browse/type).
+             mSession.saveWorkflow( captureWorkflowSnapshot() );
+           } );
   // Task 11.5.1 — user-selected destination CRS should re-run the fit.
   connect( mParamsPanel, &RsGeorefParamsPanel::destCrsChanged,
            this, &QgsGeoreferencerMainWindow::recomputeFit );
@@ -125,6 +137,11 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   mParamsPanel->setActualGcpCount( 0 );
 
   recomputeFit();
+
+  // Task 11.6.2 — restore window geometry/docks + workflow panel settings.
+  // Paths only (no auto-load of .points or rasters).
+  mSession.restoreWindow( this );
+  applyWorkflowSnapshot( mSession.restoreWorkflow() );
 }
 
 QgsGeoreferencerMainWindow::~QgsGeoreferencerMainWindow()
@@ -468,10 +485,75 @@ void QgsGeoreferencerMainWindow::emitStructuredLog( const QgsImageWarper::WarpRe
 
 void QgsGeoreferencerMainWindow::setWarpInProgressForTest( bool on )
 {
+  mWarpInProgress = on;
   if ( mGcpTable )
     mGcpTable->setEnabled( !on );
   if ( mApplyAction )
     mApplyAction->setEnabled( !on );
+}
+
+bool QgsGeoreferencerMainWindow::isDirtyForTest() const
+{
+  return mSession.isDirty();
+}
+
+void QgsGeoreferencerMainWindow::markDirtyForTest()
+{
+  mSession.markDirty();
+}
+
+RsGeorefSessionState::WorkflowSnapshot QgsGeoreferencerMainWindow::captureWorkflowSnapshot() const
+{
+  RsGeorefSessionState::WorkflowSnapshot s;
+  if ( mModeToggle )
+    s.mode = static_cast<int>( mModeToggle->currentMode() );
+  if ( mParamsPanel )
+  {
+    s.transformMethod = static_cast<int>( mParamsPanel->transformMethod() );
+    s.resamplingMethod = static_cast<int>( mParamsPanel->resamplingMethod() );
+    s.lastOutputPath = mParamsPanel->outputPath();
+    s.lastDemPath = mParamsPanel->demPath();
+  }
+  s.lastSourcePath = mSourceRasterPath;
+  s.lastRefPath = mRefRasterPath;
+  s.lastPointsPath = mSession.lastPointsPath();
+  s.syncZoom = mSyncZoomAction ? mSyncZoomAction->isChecked() : true;
+  return s;
+}
+
+void QgsGeoreferencerMainWindow::applyWorkflowSnapshot( const RsGeorefSessionState::WorkflowSnapshot &s )
+{
+  // Mode first so setRpcMode() configures the transform combo visibility before
+  // we restore the stored method index.
+  if ( mModeToggle )
+  {
+    const auto mode = static_cast<RsGeorefModeToggle::Mode>( s.mode );
+    if ( mode >= RsGeorefModeToggle::ImageToMap && mode <= RsGeorefModeToggle::RpcPhysical )
+      mModeToggle->setMode( mode );
+  }
+  if ( mParamsPanel )
+  {
+    // Block panel signals so setOutputPath does not emit outputPathChanged and
+    // overwrite QSettings with a half-applied snapshot mid-restore.
+    const QSignalBlocker panelBlocker( mParamsPanel );
+    mParamsPanel->setTransformMethod(
+      static_cast<QgsGcpTransformerInterface::TransformMethod>( s.transformMethod ) );
+    mParamsPanel->setResamplingMethod(
+      static_cast<QgsImageWarper::ResamplingMethod>( s.resamplingMethod ) );
+    if ( !s.lastOutputPath.isEmpty() )
+      mParamsPanel->setOutputPath( s.lastOutputPath );
+    if ( !s.lastDemPath.isEmpty() )
+      mParamsPanel->setDemPath( s.lastDemPath );
+  }
+  if ( !s.lastSourcePath.isEmpty() )
+    mSourceRasterPath = s.lastSourcePath;
+  if ( !s.lastRefPath.isEmpty() )
+    mRefRasterPath = s.lastRefPath;
+  if ( mSyncZoomAction )
+    mSyncZoomAction->setChecked( s.syncZoom );
+  // lastPointsPath is hydrated by restoreWorkflow() into mSession; do not
+  // auto-load the .points file (spec: paths only).
+  recomputeFit();
 }
 
 void QgsGeoreferencerMainWindow::setupCentralWidget()
@@ -732,6 +814,9 @@ void QgsGeoreferencerMainWindow::openSourceRaster()
     mSrcCanvas->setExtent( layer->extent() );
     mSrcCanvas->refresh();
   }
+
+  // Task 11.6.2 — persist last source path immediately on success.
+  mSession.saveWorkflow( captureWorkflowSnapshot() );
 }
 
 void QgsGeoreferencerMainWindow::loadReferenceRaster()
@@ -758,6 +843,7 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
   if ( mRefStore )
     mRefStore->addMapLayer( layer );
   mRefRaster = layer;
+  mRefRasterPath = path;
 
   // If already in Image-to-Image mode, swap in immediately. Otherwise
   // onModeChanged() will pick it up when the user switches modes.
@@ -768,6 +854,9 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
     mRefCanvas->setExtent( layer->extent() );
     mRefCanvas->refresh();
   }
+
+  // Task 11.6.2 — persist last reference path immediately on success.
+  mSession.saveWorkflow( captureWorkflowSnapshot() );
   return true;
 }
 
@@ -829,26 +918,87 @@ void QgsGeoreferencerMainWindow::onModeChanged( RsGeorefModeToggle::Mode m )
 
 void QgsGeoreferencerMainWindow::closeEvent( QCloseEvent *e )
 {
-  // TODO Task 11.4.7: persist QgsSettings, ask about unsaved GCPs.
+  if ( mWarpInProgress )
+  {
+    const auto ans = QMessageBox::question(
+      this, tr( "几何校正" ),
+      tr( "校正任务仍在运行，仍要关闭？" ),
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+    if ( ans != QMessageBox::Yes )
+    {
+      e->ignore();
+      return;
+    }
+  }
+
+  if ( mSession.isDirty() )
+  {
+    const auto ans = QMessageBox::question(
+      this, tr( "未保存的控制点" ),
+      tr( "GCP 列表有未保存的更改。是否保存？" ),
+      QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+      QMessageBox::Save );
+    if ( ans == QMessageBox::Cancel )
+    {
+      e->ignore();
+      return;
+    }
+    if ( ans == QMessageBox::Save )
+    {
+      // Prefer last path; else file dialog via existing savePoints() pattern.
+      QString path = mSession.lastPointsPath();
+      if ( path.isEmpty() )
+      {
+        path = QFileDialog::getSaveFileName(
+          this, tr( "Save GCP points" ), QString(),
+          tr( "GCP Points (*.points *.gcp);;All files (*)" ) );
+        if ( path.isEmpty() )
+        {
+          e->ignore();
+          return;
+        }
+        if ( QFileInfo( path ).suffix().isEmpty() )
+          path += QStringLiteral( ".points" );
+      }
+      if ( !mGcps || !mGcps->saveGcps( path ) )
+      {
+        QMessageBox::warning( this, tr( "Save GCPs" ),
+                              tr( "保存失败，窗口未关闭。" ) );
+        e->ignore();
+        return;
+      }
+      mSession.setLastPointsPath( path );
+      mSession.clearDirty();
+    }
+  }
+
+  mSession.saveWorkflow( captureWorkflowSnapshot() );
+  mSession.saveWindow( this );
   e->accept();
 }
 
 void QgsGeoreferencerMainWindow::loadPoints()
 {
   const QString path = QFileDialog::getOpenFileName(
-    this, tr( "Load GCP points" ), QString(),
+    this, tr( "Load GCP points" ),
+    mSession.lastPointsPath(),
     tr( "GCP Points (*.points *.gcp);;All files (*)" ) );
   if ( path.isEmpty() )
     return;
 
   const QgsCoordinateReferenceSystem destCrs = mParamsPanel ? mParamsPanel->destCrs() : QgsCoordinateReferenceSystem();
-  if ( !mGcps->loadGcps( path, destCrs ) )
+  mSuppressDirtyFromList = true;
+  const bool ok = mGcps->loadGcps( path, destCrs );
+  mSuppressDirtyFromList = false;
+  if ( !ok )
   {
     SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, QString( "Failed to load GCP points: %1" ).arg( path ) );
     QMessageBox::warning( this, tr( "Load GCPs" ), tr( "Failed to load GCP points from %1" ).arg( path ) );
   }
   else
   {
+    mSession.setLastPointsPath( path );
+    mSession.clearDirty();
     SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QString( "Loaded GCP points from %1" ).arg( path ) );
   }
 }
@@ -856,7 +1006,8 @@ void QgsGeoreferencerMainWindow::loadPoints()
 void QgsGeoreferencerMainWindow::savePoints()
 {
   const QString path = QFileDialog::getSaveFileName(
-    this, tr( "Save GCP points" ), QString(),
+    this, tr( "Save GCP points" ),
+    mSession.lastPointsPath(),
     tr( "GCP Points (*.points *.gcp);;All files (*)" ) );
   if ( path.isEmpty() )
     return;
@@ -874,6 +1025,8 @@ void QgsGeoreferencerMainWindow::savePoints()
   }
   else
   {
+    mSession.setLastPointsPath( finalPath );
+    mSession.clearDirty();
     SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QString( "Saved GCP points to %1" ).arg( finalPath ) );
   }
 }

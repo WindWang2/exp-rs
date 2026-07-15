@@ -48,6 +48,12 @@ class RsGeorefParamsPanel : public QWidget
     void setDestCrs( const QgsCoordinateReferenceSystem &crs );
     double outputPixelSize() const;
 
+    /// Task 11.6.2 — workflow restore helpers.
+    void setTransformMethod( QgsGcpTransformerInterface::TransformMethod m );
+    void setResamplingMethod( QgsImageWarper::ResamplingMethod m );
+    void setOutputPath( const QString &path );
+    void setDemPath( const QString &path );
+
     // Stubs for Task 8
     bool isDemSectionVisible() const;
     QString demPath() const;

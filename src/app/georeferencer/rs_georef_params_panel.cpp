@@ -271,7 +271,7 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
         mDemPath->text(),
         tr( "GeoTIFF (*.tif *.tiff);;All files (*)" ) );
       if ( !path.isEmpty() )
-        mDemPath->setText( path );
+        setDemPath( path );
     } );
     demRow->addWidget( mDemPath, 1 );
     demRow->addWidget( mDemBrowseBtn );
@@ -322,6 +322,36 @@ QgsImageWarper::ResamplingMethod RsGeorefParamsPanel::resamplingMethod() const
 QString RsGeorefParamsPanel::outputPath() const
 {
   return mOutputPath->text().trimmed();
+}
+
+void RsGeorefParamsPanel::setTransformMethod( QgsGcpTransformerInterface::TransformMethod m )
+{
+  if ( !mTransformCombo )
+    return;
+  const int idx = mTransformCombo->findData( QVariant::fromValue( static_cast<int>( m ) ) );
+  if ( idx >= 0 )
+    mTransformCombo->setCurrentIndex( idx );
+}
+
+void RsGeorefParamsPanel::setResamplingMethod( QgsImageWarper::ResamplingMethod m )
+{
+  if ( !mResamplingCombo )
+    return;
+  const int idx = mResamplingCombo->findData( QVariant::fromValue( static_cast<int>( m ) ) );
+  if ( idx >= 0 )
+    mResamplingCombo->setCurrentIndex( idx );
+}
+
+void RsGeorefParamsPanel::setOutputPath( const QString &path )
+{
+  if ( mOutputPath )
+    mOutputPath->setText( path );
+}
+
+void RsGeorefParamsPanel::setDemPath( const QString &path )
+{
+  if ( mDemPath )
+    mDemPath->setText( path );
 }
 
 QgsCoordinateReferenceSystem RsGeorefParamsPanel::destCrs() const
@@ -482,5 +512,5 @@ void RsGeorefParamsPanel::onBrowseOutput()
     tr( "GeoTIFF (*.tif *.tiff);;All files (*)" ) );
   if ( path.isEmpty() )
     return;
-  mOutputPath->setText( path );
+  setOutputPath( path );
 }

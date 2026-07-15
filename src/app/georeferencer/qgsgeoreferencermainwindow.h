@@ -7,6 +7,7 @@
 #include "qgspointxy.h"
 #include "qgsimagewarper.h"
 #include "rs_georef_mode_toggle.h"
+#include "rs_georef_session_state.h"
 
 class QToolBar;
 class QLabel;
@@ -43,6 +44,11 @@ class QgsGeoreferencerMainWindow : public QMainWindow
   public:
     explicit QgsGeoreferencerMainWindow( QgisInterface *iface, QWidget *parent = nullptr );
     ~QgsGeoreferencerMainWindow() override;
+
+    /// Test hook: expose dirty state without UI.
+    bool isDirtyForTest() const;
+    void markDirtyForTest();
+    RsGeorefSessionState *sessionStateForTest() { return &mSession; }
 
   public slots:
     /// Slot connected to QgsGeorefToolAddPoint::showCoordDialog — pops up
@@ -95,6 +101,9 @@ class QgsGeoreferencerMainWindow : public QMainWindow
     /// Emit structured JSON to QgsMessageLog tag "Georeferencer".
     void emitStructuredLog( const QgsImageWarper::WarpResult &r );
 
+    void applyWorkflowSnapshot( const RsGeorefSessionState::WorkflowSnapshot &s );
+    RsGeorefSessionState::WorkflowSnapshot captureWorkflowSnapshot() const;
+
     QgisInterface *mIface = nullptr;
     RsGeorefModeToggle *mModeToggle = nullptr;
     QToolBar *mModeBar = nullptr;
@@ -124,10 +133,17 @@ class QgsGeoreferencerMainWindow : public QMainWindow
     std::unique_ptr<QgsGeorefTransform> mTransform;
     double mLastRms = 0.0;
     QString mSourceRasterPath;
+    /// Last successfully chosen reference raster path (settings only; not auto-loaded).
+    QString mRefRasterPath;
 
     // Task 11.5.3 — Image-to-Image mode owns its own layer store so the REF
     // canvas can show a raster independent of the main application project.
     QgsMapLayerStore *mRefStore = nullptr;
     QgsRasterLayer *mRefRaster = nullptr; // non-owning; owned by mRefStore
     QgsRasterLayer *mSrcRaster = nullptr; // non-owning; owned by mRefStore
+
+    // Task 11.6.2 — dirty flag / settings session
+    RsGeorefSessionState mSession;
+    bool mSuppressDirtyFromList = false;
+    bool mWarpInProgress = false;
 };
