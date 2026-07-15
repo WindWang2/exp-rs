@@ -18,6 +18,8 @@
  ***************************************************************************/
 #include "qgsgeorefdatapoint.h"
 
+#include <cmath>
+
 #include "qgscoordinatereferencesystem.h"
 #include "qgsgcpcanvasitem.h"
 #include "qgsmapcanvas.h"
@@ -149,10 +151,33 @@ void QgsGeorefDataPoint::setHovered( bool hovered )
 
 bool QgsGeorefDataPoint::contains( const QgsPointXY &p, QgsGcpPoint::PointType type, double &distance )
 {
-  Q_UNUSED( p )
-  Q_UNUSED( type )
-  Q_UNUSED( distance )
-  // Canvas marker hit-test is added in Task 11.4.6.
+  QgsGCPCanvasItem *item = nullptr;
+  switch ( type )
+  {
+    case QgsGcpPoint::PointType::Source:
+      item = mGCPSourceItem;
+      break;
+    case QgsGcpPoint::PointType::Destination:
+      item = mGCPDestinationItem;
+      break;
+  }
+  if ( !item || !item->canvas() )
+    return false;
+
+  const double searchRadiusMM = QgsMapTool::searchRadiusMM();
+  const double pixelsPerMM = item->canvas()->logicalDpiX() / 25.4;
+  const double searchRadiusPx = searchRadiusMM * pixelsPerMM;
+
+  const QPointF pPos = item->toCanvasCoordinates( p );
+  const QPointF itemPos = item->pos();
+  const double dx = pPos.x() - itemPos.x();
+  const double dy = pPos.y() - itemPos.y();
+  const double d = std::hypot( dx, dy );
+  if ( d <= searchRadiusPx )
+  {
+    distance = d;
+    return true;
+  }
   return false;
 }
 

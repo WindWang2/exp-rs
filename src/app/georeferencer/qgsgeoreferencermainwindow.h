@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include <memory>
 
+#include "qgsgcppoint.h"
 #include "qgspointxy.h"
 #include "qgsimagewarper.h"
 #include "rs_georef_mode_toggle.h"
@@ -20,9 +21,10 @@ class QgsMapLayerStore;
 class QgsRasterLayer;
 class RsTwinCanvasSyncController;
 class QgsGeorefToolAddPoint;
+class QgsGeorefToolMovePoint;
+class QgsGeorefToolDeletePoint;
 class QgsGCPList;
 class QgsGCPListWidget;
-class QgsGcpPoint;
 class QgsGeorefDataPoint;
 class QgsGeorefTransform;
 class RsGeorefParamsPanel;
@@ -91,6 +93,13 @@ class QgsGeoreferencerMainWindow : public QMainWindow
     void deleteSelectedGcp();
     void deleteGcpRows( const QList<int> &rows );
 
+    // Task 11.6.3 — Move / Delete map-tool slots
+    void selectPoint( const QgsPointXY &p );
+    void movePoint( const QgsPointXY &p );
+    void releasePoint( const QgsPointXY &p );
+    void cancelPoint( const QgsPointXY &p );
+    void hoverPoint( const QgsPointXY &p );
+    void deletePointAt( const QgsPointXY &p );
 
   private:
     void setupMenus();
@@ -103,6 +112,9 @@ class QgsGeoreferencerMainWindow : public QMainWindow
 
     void applyWorkflowSnapshot( const RsGeorefSessionState::WorkflowSnapshot &s );
     RsGeorefSessionState::WorkflowSnapshot captureWorkflowSnapshot() const;
+
+    /// Nearest GCP whose marker contains \a p on the given canvas side.
+    QgsGeorefDataPoint *findDataPoint( const QgsPointXY &p, QgsGcpPoint::PointType type );
 
     QgisInterface *mIface = nullptr;
     RsGeorefModeToggle *mModeToggle = nullptr;
@@ -118,6 +130,17 @@ class QgsGeoreferencerMainWindow : public QMainWindow
     QgsGeorefToolAddPoint *mAddPointTool = nullptr;
     QAction *mAddPointAction = nullptr;
     QAction *mSyncZoomAction = nullptr;
+
+    // Task 11.6.3 — Move / Delete map tools (SRC + REF)
+    QgsGeorefToolMovePoint *mToolMoveSrc = nullptr;
+    QgsGeorefToolMovePoint *mToolMoveDst = nullptr;
+    QgsGeorefToolDeletePoint *mToolDeleteSrc = nullptr;
+    QgsGeorefToolDeletePoint *mToolDeleteDst = nullptr;
+    QAction *mMovePointAction = nullptr;
+    QAction *mDeletePointAction = nullptr;
+    QgsGeorefDataPoint *mMovingPoint = nullptr;
+    QgsGeorefDataPoint *mHoveredPoint = nullptr;
+    QgsPointXY mMoveOrigin;
 
     // Task 11.4.6 — GCP list + bottom dock
     QgsGCPList *mGcps = nullptr;

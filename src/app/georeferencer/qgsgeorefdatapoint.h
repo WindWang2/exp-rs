@@ -91,10 +91,9 @@ class QgsGeorefDataPoint : public QObject
     void setSelected( bool on );
 
     /**
-     * Tests whether \a p falls within the search radius around this point's
-     * graphic on the requested \a type canvas (source or destination).
-     * Returns false (and leaves \a distance unmodified) until canvas marker
-     * items are wired in Task 11.4.6.
+     * Tests whether \a p falls within the map-tool search radius around this
+     * point's graphic on the requested \a type canvas (source or destination).
+     * On hit, writes the pixel distance into \a distance and returns true.
      */
     bool contains( const QgsPointXY &p, QgsGcpPoint::PointType type, double &distance );
 

@@ -1,6 +1,7 @@
 #include "qgsgeoreferencermainwindow.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QCloseEvent>
 #include <QDockWidget>
 #include <QFileDialog>
@@ -36,11 +37,14 @@
 #include "qgsgcppoint.h"
 #include "qgsgeorefdatapoint.h"
 #include "qgsgeoreftooladdpoint.h"
+#include "qgsgeoreftooldeletepoint.h"
+#include "qgsgeoreftoolmovepoint.h"
 #include "qgsgeoreftransform.h"
 #include "qgsrpcgcptransformer.h"
 #include "qgsmapcanvas.h"
 #include "qgsmapcoordsdialog.h"
 #include "qgsmaplayerstore.h"
+#include "qgsmaptool.h"
 #include "qgsmessagelog.h"
 #include "qgsrasterlayer.h"
 #include "qgstaskmanager.h"
@@ -187,7 +191,12 @@ void QgsGeoreferencerMainWindow::onPointsChanged()
   }
   for ( QgsGcpPoint *p : dead )
   {
-    delete mDataPoints.take( p );
+    QgsGeorefDataPoint *dp = mDataPoints.take( p );
+    if ( mMovingPoint == dp )
+      mMovingPoint = nullptr;
+    if ( mHoveredPoint == dp )
+      mHoveredPoint = nullptr;
+    delete dp;
   }
 }
 
@@ -580,20 +589,93 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
   // Add-point map tool — clicking the SRC canvas pops the MapCoords dialog.
   mAddPointTool = new QgsGeorefToolAddPoint( mSrcCanvas );
   mAddPointTool->setParent( this );
+  mAddPointTool->setAction( mAddPointAction );
   connect( mAddPointTool, &QgsGeorefToolAddPoint::showCoordDialog,
            this, &QgsGeoreferencerMainWindow::showCoordDialog );
 
-  // Wire the toolbar's Add GCP action — toggle installs/uninstalls the tool.
+  // Task 11.6.3 — Move tools (SRC pixel + REF destination). Two-click begin/end.
+  mToolMoveSrc = new QgsGeorefToolMovePoint( mSrcCanvas );
+  mToolMoveSrc->setParent( this );
+  mToolMoveSrc->setAction( mMovePointAction );
+  mToolMoveDst = new QgsGeorefToolMovePoint( mRefCanvas );
+  mToolMoveDst->setParent( this );
+  mToolMoveDst->setAction( mMovePointAction );
+
+  connect( mToolMoveSrc, &QgsGeorefToolMovePoint::pointBeginMove, this, &QgsGeoreferencerMainWindow::selectPoint );
+  connect( mToolMoveSrc, &QgsGeorefToolMovePoint::pointMoving, this, &QgsGeoreferencerMainWindow::movePoint );
+  connect( mToolMoveSrc, &QgsGeorefToolMovePoint::pointEndMove, this, &QgsGeoreferencerMainWindow::releasePoint );
+  connect( mToolMoveSrc, &QgsGeorefToolMovePoint::pointCancelMove, this, &QgsGeoreferencerMainWindow::cancelPoint );
+  connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointBeginMove, this, &QgsGeoreferencerMainWindow::selectPoint );
+  connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointMoving, this, &QgsGeoreferencerMainWindow::movePoint );
+  connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointEndMove, this, &QgsGeoreferencerMainWindow::releasePoint );
+  connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointCancelMove, this, &QgsGeoreferencerMainWindow::cancelPoint );
+
+  const auto clearMoveHover = [this]() {
+    mMovingPoint = nullptr;
+    if ( mHoveredPoint )
+    {
+      mHoveredPoint->setHovered( false );
+      mHoveredPoint = nullptr;
+    }
+  };
+  connect( mToolMoveSrc, &QgsMapTool::deactivated, this, clearMoveHover );
+  connect( mToolMoveDst, &QgsMapTool::deactivated, this, clearMoveHover );
+
+  // Task 11.6.3 — Delete tools on both canvases (shared hit-test slots).
+  mToolDeleteSrc = new QgsGeorefToolDeletePoint( mSrcCanvas );
+  mToolDeleteSrc->setParent( this );
+  mToolDeleteSrc->setAction( mDeletePointAction );
+  mToolDeleteDst = new QgsGeorefToolDeletePoint( mRefCanvas );
+  mToolDeleteDst->setParent( this );
+  mToolDeleteDst->setAction( mDeletePointAction );
+
+  connect( mToolDeleteSrc, &QgsGeorefToolDeletePoint::deletePoint, this, &QgsGeoreferencerMainWindow::deletePointAt );
+  connect( mToolDeleteSrc, &QgsGeorefToolDeletePoint::hoverPoint, this, &QgsGeoreferencerMainWindow::hoverPoint );
+  connect( mToolDeleteDst, &QgsGeorefToolDeletePoint::deletePoint, this, &QgsGeoreferencerMainWindow::deletePointAt );
+  connect( mToolDeleteDst, &QgsGeorefToolDeletePoint::hoverPoint, this, &QgsGeoreferencerMainWindow::hoverPoint );
+
+  const auto clearDeleteHover = [this]() {
+    if ( mHoveredPoint )
+    {
+      mHoveredPoint->setHovered( false );
+      mHoveredPoint = nullptr;
+    }
+  };
+  connect( mToolDeleteSrc, &QgsMapTool::deactivated, this, clearDeleteHover );
+  connect( mToolDeleteDst, &QgsMapTool::deactivated, this, clearDeleteHover );
+
+  // Wire exclusive toolbar actions to install map tools on the twin canvases.
   if ( mAddPointAction )
   {
-    mAddPointAction->setCheckable( true );
     connect( mAddPointAction, &QAction::toggled, this, [this]( bool on ) {
-      if ( !mSrcCanvas )
+      if ( !on || !mSrcCanvas )
         return;
-      if ( on )
-        mSrcCanvas->setMapTool( mAddPointTool );
-      else if ( mSrcCanvas->mapTool() == mAddPointTool )
-        mSrcCanvas->unsetMapTool( mAddPointTool );
+      mSrcCanvas->setMapTool( mAddPointTool );
+      if ( mRefCanvas && mRefCanvas->mapTool()
+           && ( mRefCanvas->mapTool() == mToolMoveDst || mRefCanvas->mapTool() == mToolDeleteDst ) )
+        mRefCanvas->unsetMapTool( mRefCanvas->mapTool() );
+    } );
+  }
+  if ( mMovePointAction )
+  {
+    connect( mMovePointAction, &QAction::toggled, this, [this]( bool on ) {
+      if ( !on )
+        return;
+      if ( mSrcCanvas )
+        mSrcCanvas->setMapTool( mToolMoveSrc );
+      if ( mRefCanvas )
+        mRefCanvas->setMapTool( mToolMoveDst );
+    } );
+  }
+  if ( mDeletePointAction )
+  {
+    connect( mDeletePointAction, &QAction::toggled, this, [this]( bool on ) {
+      if ( !on )
+        return;
+      if ( mSrcCanvas )
+        mSrcCanvas->setMapTool( mToolDeleteSrc );
+      if ( mRefCanvas )
+        mRefCanvas->setMapTool( mToolDeleteDst );
     } );
   }
 
@@ -639,10 +721,26 @@ void QgsGeoreferencerMainWindow::setupToolbars()
   mModeBar->addWidget( mModeToggle );
   mModeBar->addSeparator();
 
-  // GCP ops — Add GCP gets wired to the map tool in setupCentralWidget().
+  // GCP ops — Add / Move / Delete are mutually exclusive map tools (wired in setupCentralWidget).
   mAddPointAction = mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Add GCP" ) );
   mAddPointAction->setObjectName( QStringLiteral( "rsGeorefAddPointAction" ) );
-  mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Delete GCP" ), this, &QgsGeoreferencerMainWindow::deleteSelectedGcp );
+  mAddPointAction->setCheckable( true );
+
+  mMovePointAction = mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Move GCP" ) );
+  mMovePointAction->setObjectName( QStringLiteral( "rsGeorefMovePointAction" ) );
+  mMovePointAction->setCheckable( true );
+
+  mDeletePointAction = mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Delete GCP" ) );
+  mDeletePointAction->setObjectName( QStringLiteral( "rsGeorefDeletePointAction" ) );
+  mDeletePointAction->setCheckable( true );
+  // Table-row delete remains available via Del key on the GCP table.
+
+  auto *mapToolGroup = new QActionGroup( this );
+  mapToolGroup->setExclusive( true );
+  mapToolGroup->addAction( mAddPointAction );
+  mapToolGroup->addAction( mMovePointAction );
+  mapToolGroup->addAction( mDeletePointAction );
+
   mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Load .gcp" ), this, &QgsGeoreferencerMainWindow::loadPoints );
   mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Export .gcp" ), this, &QgsGeoreferencerMainWindow::savePoints );
 
@@ -1060,6 +1158,186 @@ void QgsGeoreferencerMainWindow::deleteGcpRows( const QList<int> &rows )
   {
     if ( row >= 0 && row < mGcps->size() )
       mGcps->removePointAt( row );
+  }
+}
+
+QgsGeorefDataPoint *QgsGeoreferencerMainWindow::findDataPoint( const QgsPointXY &p, QgsGcpPoint::PointType type )
+{
+  QgsGeorefDataPoint *nearest = nullptr;
+  double bestDistance = -1.0;
+  for ( auto it = mDataPoints.cbegin(); it != mDataPoints.cend(); ++it )
+  {
+    QgsGeorefDataPoint *dp = it.value();
+    if ( !dp )
+      continue;
+    double distance = 0.0;
+    if ( dp->contains( p, type, distance ) )
+    {
+      if ( bestDistance < 0.0 || distance < bestDistance )
+      {
+        bestDistance = distance;
+        nearest = dp;
+      }
+    }
+  }
+  return nearest;
+}
+
+void QgsGeoreferencerMainWindow::selectPoint( const QgsPointXY &p )
+{
+  const bool isSrc = ( sender() == mToolMoveSrc );
+  const QgsGcpPoint::PointType type = isSrc
+                                        ? QgsGcpPoint::PointType::Source
+                                        : QgsGcpPoint::PointType::Destination;
+  QgsGeorefToolMovePoint *tool = isSrc ? mToolMoveSrc : mToolMoveDst;
+
+  mMovingPoint = findDataPoint( p, type );
+  if ( !mMovingPoint || !tool )
+    return;
+
+  if ( mHoveredPoint )
+  {
+    mHoveredPoint->setHovered( false );
+    mHoveredPoint = nullptr;
+  }
+
+  mMoveOrigin = ( type == QgsGcpPoint::PointType::Source )
+                  ? mMovingPoint->sourcePoint()
+                  : mMovingPoint->destinationPoint();
+  // Two-click move tool requires a non-empty start so subsequent clicks end the move.
+  tool->setStartPoint( mMoveOrigin );
+}
+
+void QgsGeoreferencerMainWindow::movePoint( const QgsPointXY &p )
+{
+  const bool isSrc = ( sender() == mToolMoveSrc );
+  const QgsGcpPoint::PointType type = isSrc
+                                        ? QgsGcpPoint::PointType::Source
+                                        : QgsGcpPoint::PointType::Destination;
+
+  if ( mMovingPoint )
+  {
+    // Temporary coordinate update only — residual recompute waits for releasePoint.
+    mMovingPoint->moveTo( p, type );
+    return;
+  }
+
+  // Not yet dragging: hover highlight under cursor.
+  QgsGeorefDataPoint *point = findDataPoint( p, type );
+  if ( point )
+    point->setHovered( true );
+  if ( mHoveredPoint && point != mHoveredPoint )
+    mHoveredPoint->setHovered( false );
+  mHoveredPoint = point;
+}
+
+void QgsGeoreferencerMainWindow::releasePoint( const QgsPointXY &p )
+{
+  Q_UNUSED( p )
+  const bool isSrc = ( sender() == mToolMoveSrc );
+  const QgsGcpPoint::PointType type = isSrc
+                                        ? QgsGcpPoint::PointType::Source
+                                        : QgsGcpPoint::PointType::Destination;
+  QgsGeorefToolMovePoint *tool = isSrc ? mToolMoveSrc : mToolMoveDst;
+
+  if ( tool )
+    tool->setStartPoint( QgsPointXY() );
+
+  if ( mMovingPoint )
+  {
+    // In-place mutation of QgsGcpPoint does not emit QgsGCPList::changed.
+    mSession.markDirty();
+    recomputeFit();
+    for ( auto it = mDataPoints.begin(); it != mDataPoints.end(); ++it )
+    {
+      if ( it.value() )
+        it.value()->updateMarkers();
+    }
+    // Refresh the GCP table (model only resets on list structural changes).
+    if ( mGcpTable )
+      mGcpTable->setGCPList( mGcps );
+  }
+
+  mMovingPoint = nullptr;
+
+  QgsGeorefDataPoint *point = findDataPoint( p, type );
+  if ( point )
+    point->setHovered( true );
+  if ( mHoveredPoint && point != mHoveredPoint )
+    mHoveredPoint->setHovered( false );
+  mHoveredPoint = point;
+}
+
+void QgsGeoreferencerMainWindow::cancelPoint( const QgsPointXY &p )
+{
+  const bool isSrc = ( sender() == mToolMoveSrc );
+  const QgsGcpPoint::PointType type = isSrc
+                                        ? QgsGcpPoint::PointType::Source
+                                        : QgsGcpPoint::PointType::Destination;
+  QgsGeorefToolMovePoint *tool = isSrc ? mToolMoveSrc : mToolMoveDst;
+
+  if ( mMovingPoint )
+  {
+    // Restore pre-move origin (prefer tool startPoint; fall back to mMoveOrigin).
+    const QgsPointXY origin = ( tool && !tool->startPoint().isEmpty() )
+                                ? tool->startPoint()
+                                : mMoveOrigin;
+    if ( type == QgsGcpPoint::PointType::Source )
+      mMovingPoint->setSourcePoint( origin );
+    else
+      mMovingPoint->setDestinationPoint( origin );
+  }
+
+  if ( tool )
+    tool->setStartPoint( QgsPointXY() );
+  mMovingPoint = nullptr;
+
+  QgsGeorefDataPoint *point = findDataPoint( p, type );
+  if ( point )
+    point->setHovered( true );
+  if ( mHoveredPoint && point != mHoveredPoint )
+    mHoveredPoint->setHovered( false );
+  mHoveredPoint = point;
+}
+
+void QgsGeoreferencerMainWindow::hoverPoint( const QgsPointXY &p )
+{
+  const QgsGcpPoint::PointType type = ( sender() == mToolDeleteSrc )
+                                        ? QgsGcpPoint::PointType::Source
+                                        : QgsGcpPoint::PointType::Destination;
+  QgsGeorefDataPoint *point = findDataPoint( p, type );
+  if ( point )
+    point->setHovered( true );
+  if ( mHoveredPoint && point != mHoveredPoint )
+    mHoveredPoint->setHovered( false );
+  mHoveredPoint = point;
+}
+
+void QgsGeoreferencerMainWindow::deletePointAt( const QgsPointXY &p )
+{
+  const QgsGcpPoint::PointType type = ( sender() == mToolDeleteSrc )
+                                        ? QgsGcpPoint::PointType::Source
+                                        : QgsGcpPoint::PointType::Destination;
+  QgsGeorefDataPoint *dp = findDataPoint( p, type );
+  if ( !dp || !mGcps )
+    return;
+
+  if ( mHoveredPoint == dp )
+  {
+    mHoveredPoint->setHovered( false );
+    mHoveredPoint = nullptr;
+  }
+  if ( mMovingPoint == dp )
+    mMovingPoint = nullptr;
+
+  QgsGcpPoint *gcp = dp->gcpPoint();
+  for ( int i = 0; i < mGcps->size(); ++i )
+  {
+    if ( mGcps->at( i ) == gcp )
+    {
+      mGcps->removePointAt( i );
+      break;
+    }
   }
 }
 
