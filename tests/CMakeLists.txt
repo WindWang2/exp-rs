@@ -936,6 +936,28 @@ target_include_directories(test_georef_window PRIVATE
 set_target_properties(test_georef_window PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_georef_window)
 
+# Task 5 (v1.6) — mode-aware MapCoords pick canvas
+add_executable(test_pick_canvas_mode test_pick_canvas_mode.cpp)
+target_link_libraries(test_pick_canvas_mode PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+)
+target_include_directories(test_pick_canvas_mode PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_pick_canvas_mode PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_pick_canvas_mode)
+
 # GCP table widget tests (Task 11.4.6)
 add_executable(test_gcp_list_widget test_gcp_list_widget.cpp)
 target_link_libraries(test_gcp_list_widget PRIVATE

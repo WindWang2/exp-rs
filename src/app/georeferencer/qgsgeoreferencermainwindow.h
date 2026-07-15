@@ -52,6 +52,10 @@ class QgsGeoreferencerMainWindow : public QMainWindow
     void markDirtyForTest();
     RsGeorefSessionState *sessionStateForTest() { return &mSession; }
 
+    /// Returns canvas used for MapCoords "从地图取点". Null-safe.
+    QgsMapCanvas *pickCanvasForMode( RsGeorefModeToggle::Mode m ) const;
+    QgsMapCanvas *pickCanvas() const;
+
   public slots:
     /// Slot connected to QgsGeorefToolAddPoint::showCoordDialog — pops up
     /// the MapCoords dialog so the user can enter the destination coord.

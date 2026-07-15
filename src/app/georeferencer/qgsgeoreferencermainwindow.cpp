@@ -843,6 +843,22 @@ void QgsGeoreferencerMainWindow::setupStatusBar()
   statusBar()->addPermanentWidget( mRmsLabel );
 }
 
+QgsMapCanvas *QgsGeoreferencerMainWindow::pickCanvasForMode( RsGeorefModeToggle::Mode m ) const
+{
+  if ( m == RsGeorefModeToggle::ImageToImage )
+    return mRefCanvas;
+  if ( mIface && mIface->mapCanvas() )
+    return mIface->mapCanvas();
+  return mRefCanvas; // fallback when main app canvas is unavailable
+}
+
+QgsMapCanvas *QgsGeoreferencerMainWindow::pickCanvas() const
+{
+  const auto mode = mModeToggle ? mModeToggle->currentMode()
+                                : RsGeorefModeToggle::ImageToMap;
+  return pickCanvasForMode( mode );
+}
+
 void QgsGeoreferencerMainWindow::showCoordDialog( const QgsPointXY &sourcePixel )
 {
   // The dialog holds a *preview* QgsGcpPoint while open. We keep one on the
@@ -855,7 +871,19 @@ void QgsGeoreferencerMainWindow::showCoordDialog( const QgsPointXY &sourcePixel 
                                              ? mSrcCanvas->mapSettings().destinationCrs()
                                              : QgsCoordinateReferenceSystem();
 
-  auto *dlg = new QgsMapCoordsDialog( mRefCanvas, tempDataPoint, rasterCrs, this );
+  // Image→Map / RPC pick on the main app canvas; Image→Image on REF.
+  // Fall back to REF when no main canvas is available.
+  QgsMapCanvas *canvas = pickCanvas();
+  const auto mode = mModeToggle ? mModeToggle->currentMode()
+                                : RsGeorefModeToggle::ImageToMap;
+  if ( statusBar()
+       && mode != RsGeorefModeToggle::ImageToImage
+       && !( mIface && mIface->mapCanvas() ) )
+  {
+    statusBar()->showMessage( tr( "主地图不可用，改用参考画布取点" ), 4000 );
+  }
+
+  auto *dlg = new QgsMapCoordsDialog( canvas, tempDataPoint, rasterCrs, this );
   dlg->setAttribute( Qt::WA_DeleteOnClose );
   tempDataPoint->setParent( dlg );
 
