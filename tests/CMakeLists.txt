@@ -1122,6 +1122,26 @@ target_include_directories(test_crs_picker_persists PRIVATE
 set_target_properties(test_crs_picker_persists PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_crs_picker_persists)
 
+# Task 11.6.1 — Georef session state (dirty + settings)
+# Compiles session_state.cpp directly (Qt-only unit) so the test does not
+# require a full qgis_app_georef link chain. Source is still in the library.
+add_executable(test_georef_session_state
+  test_georef_session_state.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer/rs_georef_session_state.cpp
+)
+target_link_libraries(test_georef_session_state PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+)
+target_include_directories(test_georef_session_state PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_georef_session_state)
+
 # Task 11.5.3 — Image-to-Image mode load test
 add_executable(test_image_to_image_load test_image_to_image_load.cpp)
 target_link_libraries(test_image_to_image_load PRIVATE

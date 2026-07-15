@@ -28,6 +28,7 @@ add_library(qgis_app_georef STATIC
     rs_sift_matcher.cpp
     rs_sift_dialog.cpp
     rs_sift_task.cpp
+    rs_georef_session_state.cpp
 )
 
 target_include_directories(qgis_app_georef PUBLIC
