@@ -27,3 +27,6 @@ otb_ref/sonar-project.properties
 !tests/data/
 !tests/data/**
 vendor/_deps/
+
+# Superpowers / agent worktrees
+.worktrees/
