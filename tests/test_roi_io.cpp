@@ -4,6 +4,11 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include "qgscoordinatereferencesystem.h"
+#include "qgspointxy.h"
+#include "qgsvectorlayer.h"
+
+#include <cmath>
 #include "rs_roi_io.h"
 #include "rs_roi_collection.h"
 #include "rs_class_def.h"
@@ -55,4 +60,42 @@ TEST_CASE( "RoiIO: load returns false on invalid path", "[classify][roi][io]" )
   RsRoiCollection col;
   REQUIRE_FALSE( RsRoiIO::load( QStringLiteral( "/does/not/exist.shp" ), col ) );
   REQUIRE( col.size() == 0 );
+}
+
+TEST_CASE( "RoiIO: projected CRS round-trip preserves coordinates", "[classify][roi][io]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString path = tmp.path() + QStringLiteral( "/rois_utm.shp" );
+
+  const QgsCoordinateReferenceSystem utm50( QStringLiteral( "EPSG:32650" ) );
+  REQUIRE( utm50.isValid() );
+
+  RsRoiCollection orig;
+  orig.setClassDef( RsClassDef( 1, QStringLiteral( "Urban" ), QColor( "#ff0000" ) ) );
+  // Small square in UTM zone 50N meters (EPSG:32650).
+  orig.appendRoi( RsRoi( 1,
+                         QgsGeometry::fromWkt( QStringLiteral(
+                           "POLYGON((500000 4000000,500010 4000000,500010 4000010,500000 4000010,500000 4000000))" ) ),
+                         QVector<quint64>() ) );
+
+  REQUIRE( RsRoiIO::save( path, orig, utm50 ) );
+  REQUIRE( QFile::exists( path ) );
+
+  // Shapefile layer must carry the source CRS, not a forced 4326.
+  {
+    QgsVectorLayer written( path, QStringLiteral( "check" ), QStringLiteral( "ogr" ) );
+    REQUIRE( written.isValid() );
+    REQUIRE( written.crs().isValid() );
+    REQUIRE( written.crs().authid() == QStringLiteral( "EPSG:32650" ) );
+  }
+
+  RsRoiCollection loaded;
+  REQUIRE( RsRoiIO::load( path, loaded, utm50 ) );
+  REQUIRE( loaded.size() == 1 );
+  REQUIRE_FALSE( loaded.at( 0 ).geometry().isNull() );
+
+  const QgsPointXY c = loaded.at( 0 ).geometry().centroid().asPoint();
+  REQUIRE( std::abs( c.x() - 500005.0 ) < 1e-3 );
+  REQUIRE( std::abs( c.y() - 4000005.0 ) < 1e-3 );
 }

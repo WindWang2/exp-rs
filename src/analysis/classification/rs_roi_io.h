@@ -14,6 +14,10 @@ class QGIS_ANALYSIS_EXPORT RsRoiIO
      * named "<basename>.classes.json" is written alongside containing the class
      * definitions (id/name/color).
      *
+     * When \a crs is valid it is written as the shapefile CRS (geometries are
+     * assumed to already be in that CRS). When invalid, falls back to EPSG:4326
+     * and emits a qWarning.
+     *
      * NOTE: pixel indices are NOT persisted — they are raster-coordinate
      * dependent and must be recomputed by the caller against the active raster.
      */
@@ -23,6 +27,10 @@ class QGIS_ANALYSIS_EXPORT RsRoiIO
      * Loads ROIs from \a shapefilePath into \a col. The sidecar JSON file (if
      * present) is also read to restore class definitions. Loaded ROIs have
      * empty pixelIndices() — the caller must recompute them.
+     *
+     * Features are read in the layer's native CRS. When \a targetCrs is valid
+     * and differs from the layer CRS, geometries are transformed into
+     * \a targetCrs before append (failed transforms skip the feature).
      */
-    static bool load( const QString &shapefilePath, RsRoiCollection &col, const QgsCoordinateReferenceSystem &crs = QgsCoordinateReferenceSystem() );
+    static bool load( const QString &shapefilePath, RsRoiCollection &col, const QgsCoordinateReferenceSystem &targetCrs = QgsCoordinateReferenceSystem() );
 };

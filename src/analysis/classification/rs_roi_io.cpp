@@ -15,7 +15,9 @@
 #include "qgscoordinatetransform.h"
 #include "qgsproject.h"
 #include "qgis.h"
+#include "qgsexception.h"
 
+#include <QDebug>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -62,9 +64,11 @@ namespace
 
   bool readSidecar( const QString &shp, RsRoiCollection &col )
   {
-    QFile f( sidecarPath( shp ) );
-    if ( !f.exists() )
-      return true; // missing sidecar is OK; classes stay empty
+    const QString path = sidecarPath( shp );
+    if ( !QFile::exists( path ) )
+      return true; // optional
+
+    QFile f( path );
     if ( !f.open( QIODevice::ReadOnly ) ) {
       qWarning() << "RsRoiIO: sidecar read failed for" << sidecarPath( shp );
       return false;
@@ -79,11 +83,10 @@ namespace
     for ( const QJsonValue &v : arr )
     {
       const QJsonObject o = v.toObject();
-      col.setClassDef( RsClassDef(
-        o.value( QStringLiteral( "id" ) ).toInt(),
-        o.value( QStringLiteral( "name" ) ).toString(),
-        QColor( o.value( QStringLiteral( "color" ) ).toString() )
-      ) );
+      const int id = o.value( QStringLiteral( "id" ) ).toInt();
+      const QString name = o.value( QStringLiteral( "name" ) ).toString();
+      const QColor color( o.value( QStringLiteral( "color" ) ).toString() );
+      col.setClassDef( RsClassDef( id, name, color ) );
     }
     return true;
   }
@@ -100,7 +103,13 @@ bool RsRoiIO::save( const QString &shp, const RsRoiCollection &col, const QgsCoo
   opts.driverName = QStringLiteral( "ESRI Shapefile" );
   opts.fileEncoding = QStringLiteral( "UTF-8" );
 
-  const QgsCoordinateReferenceSystem destCrs( QStringLiteral( "EPSG:4326" ) );
+  // Prefer the caller's CRS (typically the source raster CRS). Invalid → 4326.
+  QgsCoordinateReferenceSystem destCrs = crs;
+  if ( !destCrs.isValid() )
+  {
+    destCrs = QgsCoordinateReferenceSystem( QStringLiteral( "EPSG:4326" ) );
+    qWarning() << "RsRoiIO::save: invalid CRS, falling back to EPSG:4326 for" << shp;
+  }
 
   QgsVectorFileWriter *writer = QgsVectorFileWriter::create(
     shp, fields, Qgis::WkbType::Polygon, destCrs,
@@ -114,24 +123,12 @@ bool RsRoiIO::save( const QString &shp, const RsRoiCollection &col, const QgsCoo
     return false;
   }
 
-  QgsCoordinateTransform trans;
-  bool doTransform = false;
-  if ( crs.isValid() && crs != destCrs )
-  {
-    trans = QgsCoordinateTransform( crs, destCrs, QgsProject::instance() );
-    doTransform = true;
-  }
-
+  // Geometries are assumed to already be in destCrs — no reprojection on save.
   for ( int i = 0; i < col.size(); ++i )
   {
     const RsRoi &roi = col.at( i );
     QgsFeature feat( fields );
-    QgsGeometry geom = roi.geometry();
-    if ( doTransform )
-    {
-      geom.transform( trans );
-    }
-    feat.setGeometry( geom );
+    feat.setGeometry( roi.geometry() );
     feat.setAttribute( QStringLiteral( "cls_id" ), roi.classId() );
     feat.setAttribute( QStringLiteral( "px_count" ),
                        static_cast<qint64>( roi.pixelIndices().size() ) );
@@ -146,7 +143,7 @@ bool RsRoiIO::save( const QString &shp, const RsRoiCollection &col, const QgsCoo
   return writeSidecar( shp, col );
 }
 
-bool RsRoiIO::load( const QString &shp, RsRoiCollection &col, const QgsCoordinateReferenceSystem &crs )
+bool RsRoiIO::load( const QString &shp, RsRoiCollection &col, const QgsCoordinateReferenceSystem &targetCrs )
 {
   if ( !QFile::exists( shp ) )
     return false;
@@ -159,12 +156,13 @@ bool RsRoiIO::load( const QString &shp, RsRoiCollection &col, const QgsCoordinat
   if ( !readSidecar( shp, col ) )
     return false;
 
-  const QgsCoordinateReferenceSystem srcCrs( QStringLiteral( "EPSG:4326" ) );
-  QgsCoordinateTransform trans;
+  const QgsCoordinateReferenceSystem layerCrs = layer.crs();
+  QgsCoordinateTransform xform;
   bool doTransform = false;
-  if ( crs.isValid() && crs != srcCrs )
+  if ( targetCrs.isValid() && layerCrs.isValid() && targetCrs != layerCrs )
   {
-    trans = QgsCoordinateTransform( srcCrs, crs, QgsProject::instance() );
+    xform = QgsCoordinateTransform( layerCrs, targetCrs,
+                                    QgsProject::instance()->transformContext() );
     doTransform = true;
   }
 
@@ -176,7 +174,16 @@ bool RsRoiIO::load( const QString &shp, RsRoiCollection &col, const QgsCoordinat
     QgsGeometry geom = feat.geometry();
     if ( doTransform )
     {
-      geom.transform( trans );
+      try
+      {
+        geom.transform( xform );
+      }
+      catch ( QgsCsException &e )
+      {
+        qWarning() << "RsRoiIO::load: transform failed for feature"
+                   << feat.id() << ":" << e.what();
+        continue;
+      }
     }
     // Pixel indices are NOT persisted — caller must recompute against current raster.
     col.appendRoi( RsRoi( clsId, geom, QVector<quint64>() ) );
