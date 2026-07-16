@@ -18,6 +18,7 @@
 #include "rs_classifier_backend.h"
 #include "rs_accuracy_assessment.h"
 #include "rs_feature_scaler.h"
+#include "rs_pixel_window.h"
 
 #include <QColor>
 #include <QHash>
@@ -50,6 +51,11 @@ class RsClassificationTask : public QgsTask
       QHash<int, QColor> classColors;                 // classId -> RGB
       QString algoName;                               // for structured log
       RsFeatureScaler scaler;
+      // Viewport crop for preview: when true and window.valid, output is
+      // sized to the half-open window and only those tiles are predicted.
+      // Apply leaves this false (full raster).
+      bool cropToWindow = false;
+      RsPixelWindow window;
       // Default GTiff creation options (tiled + DEFLATE). Empty list → Create(nullptr).
       QStringList creationOptions{
         QStringLiteral( "TILED=YES" ),

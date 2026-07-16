@@ -66,10 +66,9 @@ class QgsClassificationMainWindow : public QMainWindow
     /// task manager.
     void applyClassification();
 
-    /// Phase 10A review patch — preview slot. v1: same flow as
-    /// applyClassification but routes output to a temp file (no picker),
-    /// skips accuracy, and adds the result layer to m_canvas. Viewport-
-    /// cropped variant deferred — full raster is classified for now.
+    /// Phase 10A review patch — preview slot. Routes output to a temp file
+    /// (no picker), skips accuracy dialog, crops to the canvas viewport via
+    /// RsPixelWindow, and adds the result layer to m_canvas.
     void applyPreview();
 
     /// Phase 10A review patch — 5-fold cross-validation stub. v1 shows an

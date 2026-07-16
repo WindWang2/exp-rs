@@ -185,6 +185,35 @@ bool RsClassificationTask::run()
   srcDs->GetGeoTransform( gt );
   const char *proj = srcDs->GetProjectionRef();
 
+  // Optional viewport crop (preview). Full apply leaves cropToWindow=false.
+  const bool useCrop = mCfg.cropToWindow && mCfg.window.valid;
+  int x0 = 0;
+  int y0 = 0;
+  int x1 = W;
+  int y1 = H;
+  if ( useCrop )
+  {
+    x0 = std::clamp( mCfg.window.x0, 0, W );
+    y0 = std::clamp( mCfg.window.y0, 0, H );
+    x1 = std::clamp( mCfg.window.x1, 0, W );
+    y1 = std::clamp( mCfg.window.y1, 0, H );
+    if ( x1 <= x0 || y1 <= y0 )
+    {
+      GDALClose( srcDs );
+      mResult.errorMessage = QStringLiteral( "Crop window is empty after clamp" );
+      return false;
+    }
+  }
+  const int Wout = x1 - x0;
+  const int Hout = y1 - y0;
+  double outGt[6] = { gt[0], gt[1], gt[2], gt[3], gt[4], gt[5] };
+  if ( useCrop )
+  {
+    // Origin at source pixel (x0, y0).
+    outGt[0] = gt[0] + x0 * gt[1] + y0 * gt[2];
+    outGt[3] = gt[3] + x0 * gt[4] + y0 * gt[5];
+  }
+
   // Sanity-check requested bands
   const int nBands = srcDs->GetRasterCount();
   for ( int b : mCfg.bandIndices )
@@ -211,14 +240,14 @@ bool RsClassificationTask::run()
   for ( const QString &o : mCfg.creationOptions )
     papsz = CSLAddString( papsz, o.toUtf8().constData() );
   GDALDataset *dstDs = drv->Create(
-    mCfg.outputRaster.toUtf8().constData(), W, H, 1, GDT_Byte, papsz );
+    mCfg.outputRaster.toUtf8().constData(), Wout, Hout, 1, GDT_Byte, papsz );
   if ( !dstDs && papsz )
   {
     CSLDestroy( papsz );
     papsz = nullptr;
     qWarning() << "Create with options failed; retrying without options";
     dstDs = drv->Create(
-      mCfg.outputRaster.toUtf8().constData(), W, H, 1, GDT_Byte, nullptr );
+      mCfg.outputRaster.toUtf8().constData(), Wout, Hout, 1, GDT_Byte, nullptr );
   }
   else
   {
@@ -231,7 +260,7 @@ bool RsClassificationTask::run()
                              .arg( mCfg.outputRaster );
     return false;
   }
-  dstDs->SetGeoTransform( gt );
+  dstDs->SetGeoTransform( outGt );
   if ( proj && *proj )
     dstDs->SetProjection( proj );
 
@@ -259,20 +288,20 @@ bool RsClassificationTask::run()
   dstDs->GetRasterBand( 1 )->SetColorTable( &ct );
   dstDs->GetRasterBand( 1 )->SetColorInterpretation( GCI_PaletteIndex );
 
-  // 4. Tile-streamed predict
+  // 4. Tile-streamed predict — loop only the (possibly cropped) window.
   constexpr int kTileSize = 256;
   const int B = mCfg.bandIndices.size();
   const int totalTiles =
-    ( ( W + kTileSize - 1 ) / kTileSize ) * ( ( H + kTileSize - 1 ) / kTileSize );
+    ( ( Wout + kTileSize - 1 ) / kTileSize ) * ( ( Hout + kTileSize - 1 ) / kTileSize );
   int doneTiles = 0;
 
   std::vector<float> tileBuf( static_cast<size_t>( kTileSize ) * kTileSize );
   std::vector<uint8_t> outBuf( static_cast<size_t>( kTileSize ) * kTileSize );
 
-  for ( int ty = 0; ty < H; ty += kTileSize )
+  for ( int ty = y0; ty < y1; ty += kTileSize )
   {
-    const int th = std::min( kTileSize, H - ty );
-    for ( int tx = 0; tx < W; tx += kTileSize )
+    const int th = std::min( kTileSize, y1 - ty );
+    for ( int tx = x0; tx < x1; tx += kTileSize )
     {
       if ( mFb.isCanceled() )
       {
@@ -282,7 +311,7 @@ bool RsClassificationTask::run()
         mResult.errorMessage = QStringLiteral( "Cancelled" );
         return false;
       }
-      const int tw = std::min( kTileSize, W - tx );
+      const int tw = std::min( kTileSize, x1 - tx );
       const int npx = th * tw;
 
       cv::Mat X( npx, B, CV_32F );
@@ -362,8 +391,11 @@ bool RsClassificationTask::run()
         }
         outBuf[p] = static_cast<uint8_t>( std::clamp( v, 0, 255 ) );
       }
+      // Source tile at absolute (tx,ty); dest at window-relative offset.
+      const int ox = tx - x0;
+      const int oy = ty - y0;
       dstDs->GetRasterBand( 1 )->RasterIO(
-        GF_Write, tx, ty, tw, th, outBuf.data(),
+        GF_Write, ox, oy, tw, th, outBuf.data(),
         tw, th, GDT_Byte, 0, 0 );
 
       ++doneTiles;
@@ -374,7 +406,7 @@ bool RsClassificationTask::run()
   GDALClose( srcDs );
   GDALClose( dstDs );
 
-  mResult.totalPixels = W * H;
+  mResult.totalPixels = Wout * Hout;
   mResult.durationMs = static_cast<int>( timer.elapsed() );
   mResult.ok = true;
   mFb.setProgress( kProgressComplete );
