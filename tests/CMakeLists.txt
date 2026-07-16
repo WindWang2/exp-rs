@@ -1564,6 +1564,20 @@ if(TARGET qgis_app_classify)
   )
   sicnu_discover_tests(test_stratified_split)
 
+  # Classification v1.1 Task 1 — feature scaler (z-score + JSON).
+  add_executable(test_feature_scaler test_feature_scaler.cpp)
+  target_link_libraries(test_feature_scaler PRIVATE
+    Catch2::Catch2WithMain
+    qgis_analysis
+    Qt6::Core
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_feature_scaler PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_feature_scaler)
+
   # Phase 10A Task 10.9 — confusion matrix + Kappa accuracy assessment.
   add_executable(test_accuracy_assessment test_accuracy_assessment.cpp)
   target_link_libraries(test_accuracy_assessment PRIVATE

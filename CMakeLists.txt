@@ -72,9 +72,22 @@ else()
     message(STATUS "SICNU_EMBED_PYTHON=OFF — Python console disabled")
 endif()
 
-# OpenCV — OPTIONAL dependency for SIFT auto-match (Task 11.5.7).
-# Build remains green without OpenCV; SIFT is compile-time guarded via SICNU_HAS_OPENCV.
-find_package(OpenCV 4.5 QUIET COMPONENTS core features2d imgproc calib3d ml)
+# OpenCV — OPTIONAL (SIFT georeferencing + supervised classification).
+# Supports OpenCV 4.x (opencv4 cmake dir) and 5.x (opencv5 cmake dir).
+if(NOT OpenCV_DIR OR OpenCV_DIR STREQUAL "OpenCV_DIR-NOTFOUND")
+    if(EXISTS "/usr/lib/cmake/opencv5/OpenCVConfig.cmake")
+        set(OpenCV_DIR "/usr/lib/cmake/opencv5" CACHE PATH "OpenCV config directory" FORCE)
+    elseif(EXISTS "/usr/lib/cmake/opencv4/OpenCVConfig.cmake")
+        set(OpenCV_DIR "/usr/lib/cmake/opencv4" CACHE PATH "OpenCV config directory" FORCE)
+    endif()
+endif()
+
+# OpenCV 5 renamed cmake components: features2d→features, calib3d→calib.
+# Version pin 4.5 is incompatible with OpenCV 5's package version check.
+find_package(OpenCV QUIET COMPONENTS core imgproc ml features calib)
+if(NOT OpenCV_FOUND)
+    find_package(OpenCV QUIET COMPONENTS core features2d imgproc calib3d ml)
+endif()
 if(OpenCV_FOUND)
     message(STATUS "OpenCV ${OpenCV_VERSION} found — SIFT enabled")
     set(SICNU_HAS_OPENCV TRUE)
