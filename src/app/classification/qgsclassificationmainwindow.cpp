@@ -1288,6 +1288,8 @@ void QgsClassificationMainWindow::loadRois()
   }
 
   mSuppressDirtyFromRois = true;
+  // Replace existing ROIs — load appends; clear first under suppress.
+  m_rois->clear();
   const bool ok = RsRoiIO::load( path, *m_rois, crs );
   if ( ok )
   {
@@ -1388,6 +1390,8 @@ void QgsClassificationMainWindow::applySnapshot( const RsClassifySessionState::S
     m_toolMagicWand->setTolerance( s.wandTolerance );
   m_lastModelPath = s.lastModelPath;
   // Paths only — do not auto-open raster / ROI / model files.
+  if ( !s.lastSourcePath.isEmpty() )
+    m_sourceRasterPath = s.lastSourcePath;
   // lastRoisPath is hydrated by restoreSnapshot() into mSession.
 }
 
@@ -1427,7 +1431,8 @@ void QgsClassificationMainWindow::closeEvent( QCloseEvent *e )
         crs = m_sourceLayer->crs();
 
       mSuppressDirtyFromRois = true;
-      const bool ok = ( m_rois && m_rois->size() > 0 )
+      // Empty collection is a valid save (empty shp + sidecar); only fail if no list.
+      const bool ok = m_rois
                         ? RsRoiIO::save( path, *m_rois, crs )
                         : false;
       mSuppressDirtyFromRois = false;
