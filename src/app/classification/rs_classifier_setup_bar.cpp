@@ -137,6 +137,23 @@ double RsClassifierSetupBar::trainRatio() const
   return mTrainRatioSpin ? mTrainRatioSpin->value() : 0.7;
 }
 
+void RsClassifierSetupBar::setTrainRatio( double ratio )
+{
+  if ( mTrainRatioSpin )
+    mTrainRatioSpin->setValue( ratio );
+}
+
+void RsClassifierSetupBar::setCurrentKind( RsClassifierKind kind )
+{
+  mKind = kind;
+  if ( mBtnNormalBayes )
+    mBtnNormalBayes->setChecked( kind == RsClassifierKind::NormalBayes );
+  if ( mBtnSvm )
+    mBtnSvm->setChecked( kind == RsClassifierKind::SvmRbf );
+  if ( mBtnKMeans )
+    mBtnKMeans->setChecked( kind == RsClassifierKind::KMeans );
+}
+
 QString RsClassifierSetupBar::outputPath() const
 {
   return mOutputEdit ? mOutputEdit->text().trimmed() : QString();

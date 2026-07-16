@@ -9,8 +9,10 @@
 #include <opencv2/core.hpp>
 
 #include "rs_classifier_backend.h"
+#include "rs_classify_session_state.h"
 
 class QTimer;
+class QCloseEvent;
 
 class QgisInterface;
 class QAction;
@@ -99,7 +101,12 @@ class QgsClassificationMainWindow : public QMainWindow
     /// next applyClassification() call skips training and predicts directly.
     void loadClassifierModel();
 
+  protected:
+    void closeEvent( QCloseEvent *e ) override;
+
   private:
+    void applySnapshot( const RsClassifySessionState::Snapshot &s );
+    RsClassifySessionState::Snapshot captureSnapshot() const;
     void setupMenus();
     void setupToolbars();
     void setupDocks();
@@ -158,6 +165,11 @@ class QgsClassificationMainWindow : public QMainWindow
     // recomputation. Restarted on every m_rois::changed; fires once after
     // the user stops dragging in new ROIs.
     QTimer *m_jmRecomputeTimer = nullptr;
+
+    // Classification v1.1 Task 7 — dirty flag / settings session
+    RsClassifySessionState mSession;
+    bool mSuppressDirtyFromRois = false;
+    QString m_lastModelPath;
 
     // Phase 10A.1.3 — backend instance loaded from disk via the File menu.
     // Consumed (moved out) on the next applyClassification() call.

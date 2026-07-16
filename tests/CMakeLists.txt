@@ -1595,6 +1595,26 @@ if(TARGET qgis_app_classify)
   )
   sicnu_discover_tests(test_pixel_window)
 
+  # Classification v1.1 Task 7 — session dirty + Classification/* QSettings.
+  # Compiles session_state.cpp directly (Qt-only unit) so the test does not
+  # require a full qgis_app_classify link chain. Source is still in the library.
+  add_executable(test_classify_session_state
+    test_classify_session_state.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/classification/rs_classify_session_state.cpp
+  )
+  target_link_libraries(test_classify_session_state PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+  )
+  target_include_directories(test_classify_session_state PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app/classification
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_classify_session_state)
+
   # Phase 10A Task 10.9 — confusion matrix + Kappa accuracy assessment.
   add_executable(test_accuracy_assessment test_accuracy_assessment.cpp)
   target_link_libraries(test_accuracy_assessment PRIVATE
