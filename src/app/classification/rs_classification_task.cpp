@@ -99,9 +99,9 @@ bool RsClassificationTask::run()
         std::sort( cList.begin(), cList.end() );
         const int N = tList.size();
         const int M = cList.size();
-        const int sz = std::max( N, M );
 
-        cv::Mat cost = cv::Mat::zeros( sz, sz, CV_64F );
+        // Rectangular N×M cost; RsHungarianAssignment pads to square safely.
+        cv::Mat cost = cv::Mat::zeros( N, M, CV_64F );
         for ( int i = 0; i < mCfg.trainY.rows; ++i )
         {
           const int ti = tList.indexOf( mCfg.trainY.at<int>( i, 0 ) );

@@ -56,3 +56,29 @@ TEST_CASE( "Hungarian: empty matrix returns empty vector", "[classify][hungarian
   auto a = RsHungarianAssignment::solve( cost );
   REQUIRE( a.isEmpty() );
 }
+
+TEST_CASE( "Hungarian: 2x3 rectangular maps rows to real columns", "[classify][hungarian]" )
+{
+  // 2 true classes, 3 clusters; best: class0->c0, class1->c1
+  cv::Mat cost = ( cv::Mat_<double>( 2, 3 ) <<
+                   0, 5, 5,
+                   5, 0, 5 );
+  auto a = RsHungarianAssignment::solve( cost );
+  REQUIRE( a.size() == 2 );
+  REQUIRE( a[0] == 0 );
+  REQUIRE( a[1] == 1 );
+}
+
+TEST_CASE( "Hungarian: 3x2 rectangular", "[classify][hungarian]" )
+{
+  cv::Mat cost = ( cv::Mat_<double>( 3, 2 ) <<
+                   0, 9,
+                   9, 0,
+                   5, 5 );
+  auto a = RsHungarianAssignment::solve( cost );
+  REQUIRE( a.size() == 3 );
+  // first two rows should take the two columns
+  REQUIRE( ( a[0] == 0 || a[0] == 1 ) );
+  REQUIRE( ( a[1] == 0 || a[1] == 1 ) );
+  REQUIRE( a[0] != a[1] );
+}

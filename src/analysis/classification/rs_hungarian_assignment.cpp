@@ -3,7 +3,9 @@
 // Classic Munkres O(n^3) implementation on a square cost matrix using
 // dual potentials u[i]/v[j] and augmenting paths. 1-based internal
 // indexing converted at the boundary for clarity vs. the textbook
-// presentation.
+// presentation. Rectangular inputs are padded to square with a large
+// finite pad cost, then assignments outside the original column range
+// are reported as -1.
 
 #include "rs_hungarian_assignment.h"
 
@@ -13,11 +15,18 @@
 
 namespace
 {
-  QVector<int> solveImpl( const std::vector<std::vector<double>> &in )
+  QVector<int> solveImplFromSquare( const cv::Mat &square )
   {
-    const int n = static_cast<int>( in.size() );
-    if ( n == 0 )
+    const int n = square.rows;
+    if ( n == 0 || square.cols != n )
       return {};
+
+    cv::Mat tmp;
+    square.convertTo( tmp, CV_64F );
+    std::vector<std::vector<double>> in( n, std::vector<double>( n ) );
+    for ( int i = 0; i < n; ++i )
+      for ( int j = 0; j < n; ++j )
+        in[i][j] = tmp.at<double>( i, j );
 
     // u[i], v[j] are dual potentials; p[j] is the row assigned to column j
     // (0 = unassigned). way[j] is part of the augmenting-path reconstruction.
@@ -90,14 +99,23 @@ namespace
 
 QVector<int> RsHungarianAssignment::solve( const cv::Mat &cost )
 {
-  if ( cost.empty() || cost.rows != cost.cols )
+  if ( cost.empty() )
     return {};
   const int n = cost.rows;
+  const int m = cost.cols;
+  const int sz = std::max( n, m );
+  constexpr double kPad = 1e9;
+  cv::Mat square( sz, sz, CV_64F, cv::Scalar( kPad ) );
   cv::Mat tmp;
   cost.convertTo( tmp, CV_64F );
-  std::vector<std::vector<double>> m( n, std::vector<double>( n ) );
+  tmp.copyTo( square( cv::Rect( 0, 0, m, n ) ) );
+  QVector<int> full = solveImplFromSquare( square );
+  QVector<int> out( n, -1 );
   for ( int i = 0; i < n; ++i )
-    for ( int j = 0; j < n; ++j )
-      m[i][j] = tmp.at<double>( i, j );
-  return solveImpl( m );
+  {
+    const int col = full[i];
+    if ( col >= 0 && col < m )
+      out[i] = col;
+  }
+  return out;
 }
