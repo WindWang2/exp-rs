@@ -116,5 +116,16 @@ TEST_CASE(
   GDALColorTable *ct = outDs->GetRasterBand( 1 )->GetColorTable();
   REQUIRE( ct != nullptr );
 
+  // Default creation options: tiled DEFLATE GeoTIFF
+  const char *compression = outDs->GetMetadataItem( "COMPRESSION", "IMAGE_STRUCTURE" );
+  REQUIRE( compression != nullptr );
+  REQUIRE( QString::fromUtf8( compression ) == QLatin1String( "DEFLATE" ) );
+  int blockX = 0, blockY = 0;
+  outDs->GetRasterBand( 1 )->GetBlockSize( &blockX, &blockY );
+  REQUIRE( blockX > 0 );
+  REQUIRE( blockY > 0 );
+  // TILED=YES → block height is a tile (not a full strip of height 1 / scanline)
+  REQUIRE( blockY > 1 );
+
   GDALClose( outDs );
 }

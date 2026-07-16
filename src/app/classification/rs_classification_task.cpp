@@ -5,6 +5,7 @@
 #include "core/sicnu_logging.h"
 #include "rs_hungarian_assignment.h"
 
+#include <QDebug>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
@@ -18,6 +19,7 @@
 
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <cpl_string.h>
 #include <gdal_priv.h>
 
 RsClassificationTask::RsClassificationTask( Config cfg )
@@ -205,8 +207,23 @@ bool RsClassificationTask::run()
     mResult.errorMessage = QStringLiteral( "GTiff driver unavailable" );
     return false;
   }
+  char **papsz = nullptr;
+  for ( const QString &o : mCfg.creationOptions )
+    papsz = CSLAddString( papsz, o.toUtf8().constData() );
   GDALDataset *dstDs = drv->Create(
-    mCfg.outputRaster.toUtf8().constData(), W, H, 1, GDT_Byte, nullptr );
+    mCfg.outputRaster.toUtf8().constData(), W, H, 1, GDT_Byte, papsz );
+  if ( !dstDs && papsz )
+  {
+    CSLDestroy( papsz );
+    papsz = nullptr;
+    qWarning() << "Create with options failed; retrying without options";
+    dstDs = drv->Create(
+      mCfg.outputRaster.toUtf8().constData(), W, H, 1, GDT_Byte, nullptr );
+  }
+  else
+  {
+    CSLDestroy( papsz );
+  }
   if ( !dstDs )
   {
     GDALClose( srcDs );

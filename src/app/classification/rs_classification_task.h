@@ -22,6 +22,7 @@
 #include <QColor>
 #include <QHash>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 #include <memory>
@@ -48,8 +49,13 @@ class RsClassificationTask : public QgsTask
       cv::Mat testY;                                  // CV_32S Mx1 (may be empty)
       QHash<int, QColor> classColors;                 // classId -> RGB
       QString algoName;                               // for structured log
-      // If fitted, Task transforms tile X before predict. Caller scales train/test.
       RsFeatureScaler scaler;
+      // Default GTiff creation options (tiled + DEFLATE). Empty list → Create(nullptr).
+      QStringList creationOptions{
+        QStringLiteral( "TILED=YES" ),
+        QStringLiteral( "COMPRESS=DEFLATE" ),
+        QStringLiteral( "PREDICTOR=2" )
+      };
     };
 
     struct Result
