@@ -28,6 +28,7 @@
 #include "rs_roi_tool_polygon.h"
 #include "rs_roi_tool_rectangle.h"
 #include "rs_spectral_curve_widget.h"
+#include "rs_feature_scaler.h"
 #include "qgsapplication.h"
 #include "qgsgeometry.h"
 #include "qgscoordinatereferencesystem.h"
@@ -622,10 +623,18 @@ void QgsClassificationMainWindow::applyClassification()
     // accuracy assessment.
     const auto split = RsClassificationSplit::stratifiedSplit(
       X, y, m_classifierBar->trainRatio() );
-    cfg.trainX = split.trainX;
+    RsFeatureScaler scaler;
+    if ( !scaler.fit( split.trainX ) )
+    {
+      statusBar()->showMessage( tr( "特征标准化失败" ), 5000 );
+      return;
+    }
+    cfg.trainX = scaler.transform( split.trainX );
     cfg.trainY = split.trainY;
-    cfg.testX = split.testX;
+    if ( !split.testX.empty() )
+      cfg.testX = scaler.transform( split.testX );
     cfg.testY = split.testY;
+    cfg.scaler = scaler;
 
     switch ( m_classifierBar->currentKind() )
     {
@@ -785,10 +794,19 @@ void QgsClassificationMainWindow::applyPreview()
   cfg.bandIndices = bands;
   const auto split = RsClassificationSplit::stratifiedSplit(
     X, y, m_classifierBar->trainRatio() );
-  cfg.trainX = split.trainX;
+  RsFeatureScaler scaler;
+  if ( !scaler.fit( split.trainX ) )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "特征标准化失败" ), 5000 );
+    return;
+  }
+  cfg.trainX = scaler.transform( split.trainX );
   cfg.trainY = split.trainY;
-  cfg.testX = split.testX;
+  if ( !split.testX.empty() )
+    cfg.testX = scaler.transform( split.testX );
   cfg.testY = split.testY;
+  cfg.scaler = scaler;
 
   const QHash<int, RsClassDef> classDefs = m_rois ? m_rois->classDefs()
                                                  : QHash<int, RsClassDef>();
