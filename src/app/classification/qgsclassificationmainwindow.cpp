@@ -1287,39 +1287,40 @@ void QgsClassificationMainWindow::loadRois()
     crs = m_sourceLayer->crs();
   }
 
-  mSuppressDirtyFromRois = true;
-  // Replace existing ROIs — load appends; clear first under suppress.
-  m_rois->clear();
-  const bool ok = RsRoiIO::load( path, *m_rois, crs );
-  if ( ok )
-  {
-    SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "ROIs loaded from %1" ).arg( path ) );
-    // Recompute pixel indices for each ROI if the source raster is valid
-    if ( m_sourceWidth > 0 && m_sourceHeight > 0 )
-    {
-      QVector<RsRoi> loadedRois = m_rois->rois();
-      m_rois->clear();
-      for ( RsRoi &roi : loadedRois )
-      {
-        QSet<quint64> pixels = RsPixelRasterizer::rasterize(
-          roi.geometry(), m_sourceGt, m_sourceWidth, m_sourceHeight );
-        roi.setPixelIndices( QVector<quint64>( pixels.begin(), pixels.end() ) );
-        m_rois->appendRoi( roi );
-      }
-    }
-
-    mSession.setLastRoisPath( path );
-    mSession.clearDirty();
-    if ( statusBar() )
-      statusBar()->showMessage( tr( "成功加载 %1 个 ROI" ).arg( m_rois->size() ), 5000 );
-  }
-  else
+  // Load into a temp collection first so a failed read never wipes live ROIs.
+  RsRoiCollection loaded;
+  const bool ok = RsRoiIO::load( path, loaded, crs );
+  if ( !ok )
   {
     QMessageBox::critical(
       this, tr( "Error" ),
       tr( "Failed to load ROIs from %1" ).arg( path ) );
+    return;
   }
+
+  mSuppressDirtyFromRois = true;
+  m_rois->clear();
+  for ( RsRoi roi : loaded.rois() )
+  {
+    if ( m_sourceWidth > 0 && m_sourceHeight > 0 )
+    {
+      QSet<quint64> pixels = RsPixelRasterizer::rasterize(
+        roi.geometry(), m_sourceGt, m_sourceWidth, m_sourceHeight );
+      roi.setPixelIndices( QVector<quint64>( pixels.begin(), pixels.end() ) );
+    }
+    m_rois->appendRoi( roi );
+  }
+  // Restore class defs from sidecar (loaded into temp collection).
+  const auto defs = loaded.classDefs();
+  for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
+    m_rois->setClassDef( it.value() );
   mSuppressDirtyFromRois = false;
+
+  SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "ROIs loaded from %1" ).arg( path ) );
+  mSession.setLastRoisPath( path );
+  mSession.clearDirty();
+  if ( statusBar() )
+    statusBar()->showMessage( tr( "成功加载 %1 个 ROI" ).arg( m_rois->size() ), 5000 );
 }
 
 // ---------------------------------------------------------------------------
