@@ -13,6 +13,7 @@
 #include "rs_classifier_normalbayes.h"
 #include "rs_classifier_setup_bar.h"
 #include "rs_classifier_svm.h"
+#include "rs_classify_session_state.h"
 #include "rs_cross_validation.h"
 #include "rs_cv_task.h"
 #include "rs_jm_matrix_widget.h"
@@ -42,6 +43,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QCloseEvent>
 #include <QColor>
 #include <QDir>
 #include <QDockWidget>
@@ -151,15 +153,142 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
                if ( m_jmRecomputeTimer )
                  m_jmRecomputeTimer->start();
              } );
+    // Classification v1.1 — mark session dirty on ROI / class changes.
+    // Suppressed during load/save so those paths can clearDirty cleanly.
+    connect( m_rois, &RsRoiCollection::changed, this, [this]() {
+      if ( !mSuppressDirty )
+        mSession.markDirty();
+    } );
   }
   if ( m_classTableWidget && m_spectralCurve )
   {
     connect( m_classTableWidget, &RsClassTableWidget::currentClassChanged,
              m_spectralCurve, &RsSpectralCurveWidget::setSelectedClass );
   }
+
+  // Restore window geometry + last workflow prefs (kind, ratio, paths).
+  mSession.restoreWindow( this );
+  applyWorkflowSnapshot( mSession.restoreWorkflow() );
+  mSession.clearDirty();
 }
 
 QgsClassificationMainWindow::~QgsClassificationMainWindow() = default;
+
+RsClassifySessionState::WorkflowSnapshot
+QgsClassificationMainWindow::captureWorkflowSnapshot() const
+{
+  RsClassifySessionState::WorkflowSnapshot s;
+  s.lastSourcePath = m_sourceRasterPath;
+  s.lastOutputPath = m_classifierBar ? m_classifierBar->outputPath() : QString();
+  s.lastRoisPath = mSession.lastRoisPath();
+  s.lastModelPath = mLastModelPath;
+  s.classifierKind = m_classifierBar
+                       ? static_cast<int>( m_classifierBar->currentKind() )
+                       : 0;
+  s.trainRatio = m_classifierBar ? m_classifierBar->trainRatio() : 0.7;
+  s.wandTolerance = m_toolMagicWand ? m_toolMagicWand->tolerance() : 20.0;
+  return s;
+}
+
+void QgsClassificationMainWindow::applyWorkflowSnapshot(
+  const RsClassifySessionState::WorkflowSnapshot &s )
+{
+  if ( m_classifierBar )
+  {
+    m_classifierBar->setCurrentKind(
+      static_cast<RsClassifierKind>( s.classifierKind ) );
+    m_classifierBar->setTrainRatio( s.trainRatio );
+    if ( !s.lastOutputPath.isEmpty() )
+      m_classifierBar->setOutputPath( s.lastOutputPath );
+  }
+  if ( m_toolMagicWand )
+    m_toolMagicWand->setTolerance( s.wandTolerance );
+  if ( !s.lastRoisPath.isEmpty() )
+    mSession.setLastRoisPath( s.lastRoisPath );
+  mLastModelPath = s.lastModelPath;
+  // lastSourcePath is remembered for the next open dialog start; auto-open
+  // of the previous raster is intentionally not done (YAGNI / avoid surprise).
+}
+
+bool QgsClassificationMainWindow::saveRoisToPath( QString path )
+{
+  if ( !m_rois || m_rois->size() == 0 )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "无 ROI 可导出" ), 4000 );
+    return false;
+  }
+  if ( path.isEmpty() )
+    path = mSession.lastRoisPath();
+  if ( path.isEmpty() )
+  {
+    path = QFileDialog::getSaveFileName(
+      this, tr( "Export ROIs" ), QString(),
+      tr( "ESRI Shapefile (*.shp)" ) );
+  }
+  if ( path.isEmpty() )
+    return false;
+  if ( !path.endsWith( QLatin1String( ".shp" ), Qt::CaseInsensitive ) )
+    path += QStringLiteral( ".shp" );
+
+  QgsCoordinateReferenceSystem crs;
+  if ( m_sourceLayer )
+    crs = m_sourceLayer->crs();
+
+  mSuppressDirty = true;
+  const bool ok = RsRoiIO::save( path, *m_rois, crs );
+  mSuppressDirty = false;
+  if ( ok )
+  {
+    mSession.setLastRoisPath( path );
+    mSession.clearDirty();
+    SICNU_LOG_INFO( SicnuLogTags::Classification,
+                    QString( "ROIs exported: %1 (%2 ROIs)" )
+                      .arg( QFileInfo( path ).fileName() )
+                      .arg( m_rois->size() ) );
+    if ( statusBar() )
+      statusBar()->showMessage(
+        tr( "已导出 ROI: %1" ).arg( QFileInfo( path ).fileName() ), 5000 );
+  }
+  else
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                     QString( "ROI export failed: %1" ).arg( path ) );
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "ROI 导出失败: %1" ).arg( path ), 5000 );
+  }
+  return ok;
+}
+
+void QgsClassificationMainWindow::closeEvent( QCloseEvent *e )
+{
+  if ( mSession.isDirty() )
+  {
+    const auto ans = QMessageBox::question(
+      this, tr( "未保存的 ROI" ),
+      tr( "ROI / 类别有未保存的更改。是否保存？" ),
+      QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+      QMessageBox::Save );
+    if ( ans == QMessageBox::Cancel )
+    {
+      e->ignore();
+      return;
+    }
+    if ( ans == QMessageBox::Save )
+    {
+      if ( !saveRoisToPath( mSession.lastRoisPath() ) )
+      {
+        // User cancelled dialog or write failed — keep window open.
+        e->ignore();
+        return;
+      }
+    }
+  }
+
+  mSession.saveWorkflow( captureWorkflowSnapshot() );
+  mSession.saveWindow( this );
+  e->accept();
+}
 
 void QgsClassificationMainWindow::setupMenus()
 {
@@ -692,6 +821,7 @@ void QgsClassificationMainWindow::applyClassification()
           modelPath += QStringLiteral( ".yml" );
         }
         cfg.modelSavePath = modelPath;
+        mLastModelPath = modelPath;
       }
     }
   }
@@ -1278,34 +1408,13 @@ void QgsClassificationMainWindow::recomputeJmMatrix()
 
 void QgsClassificationMainWindow::exportRois()
 {
-  if ( !m_rois || m_rois->size() == 0 )
-  {
-    if ( statusBar() )
-      statusBar()->showMessage( tr( "无 ROI 可导出" ), 4000 );
-    return;
-  }
+  // Always prompt for path from the menu (last path is for dirty-close Save).
   const QString path = QFileDialog::getSaveFileName(
-    this, tr( "Export ROIs" ), QString(),
+    this, tr( "Export ROIs" ), mSession.lastRoisPath(),
     tr( "ESRI Shapefile (*.shp)" ) );
   if ( path.isEmpty() )
     return;
-
-  QgsCoordinateReferenceSystem crs;
-  if ( m_sourceLayer )
-  {
-    crs = m_sourceLayer->crs();
-  }
-
-  const bool ok = RsRoiIO::save( path, *m_rois, crs );
-  if ( ok )
-    SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "ROIs exported: %1 (%2 ROIs)" ).arg( QFileInfo( path ).fileName() ).arg( m_rois->size() ) );
-  else
-    SICNU_LOG_ERROR( SicnuLogTags::Classification, QString( "ROI export failed: %1" ).arg( path ) );
-  if ( statusBar() )
-    statusBar()->showMessage(
-      ok ? tr( "已导出 ROI: %1" ).arg( QFileInfo( path ).fileName() )
-         : tr( "ROI 导出失败: %1" ).arg( path ),
-      5000 );
+  saveRoisToPath( path );
 }
 
 void QgsClassificationMainWindow::loadRois()
@@ -1316,7 +1425,7 @@ void QgsClassificationMainWindow::loadRois()
   }
 
   const QString path = QFileDialog::getOpenFileName(
-    this, tr( "Load ROIs" ), QString(),
+    this, tr( "Load ROIs" ), mSession.lastRoisPath(),
     tr( "ESRI Shapefile (*.shp)" ) );
   if ( path.isEmpty() )
     return;
@@ -1327,25 +1436,32 @@ void QgsClassificationMainWindow::loadRois()
     crs = m_sourceLayer->crs();
   }
 
-  const bool ok = RsRoiIO::load( path, *m_rois, crs );
-  if ( ok )
-    SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "ROIs loaded from %1" ).arg( path ) );
+  // Stage into a temporary collection so a failed load never wipes the UI.
+  RsRoiCollection staging;
+  const bool ok = RsRoiIO::load( path, staging, crs );
   if ( ok )
   {
-    // Recompute pixel indices for each ROI if the source raster is valid
-    if ( m_sourceWidth > 0 && m_sourceHeight > 0 )
+    mSuppressDirty = true;
+    m_rois->clear();
+    const auto defs = staging.classDefs();
+    for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
+      m_rois->setClassDef( it.value() );
+    for ( int i = 0; i < staging.size(); ++i )
     {
-      QVector<RsRoi> loadedRois = m_rois->rois();
-      m_rois->clear();
-      for ( RsRoi &roi : loadedRois )
+      RsRoi roi = staging.at( i );
+      if ( m_sourceWidth > 0 && m_sourceHeight > 0 )
       {
         QSet<quint64> pixels = RsPixelRasterizer::rasterize(
           roi.geometry(), m_sourceGt, m_sourceWidth, m_sourceHeight );
         roi.setPixelIndices( QVector<quint64>( pixels.begin(), pixels.end() ) );
-        m_rois->appendRoi( roi );
       }
+      m_rois->appendRoi( roi );
     }
-    
+    mSuppressDirty = false;
+    mSession.setLastRoisPath( path );
+    mSession.clearDirty();
+    SICNU_LOG_INFO( SicnuLogTags::Classification,
+                    QString( "ROIs loaded from %1" ).arg( path ) );
     if ( statusBar() )
       statusBar()->showMessage( tr( "成功加载 %1 个 ROI" ).arg( m_rois->size() ), 5000 );
   }

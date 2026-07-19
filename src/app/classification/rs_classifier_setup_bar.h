@@ -33,8 +33,10 @@ class RsClassifierSetupBar : public QWidget
     explicit RsClassifierSetupBar( QWidget *parent = nullptr );
 
     RsClassifierKind currentKind() const { return mKind; }
+    void setCurrentKind( RsClassifierKind kind );
     QVector<int> selectedBands() const;
     double trainRatio() const;
+    void setTrainRatio( double ratio );
     QString outputPath() const;
 
     void setSourceBands( int count );

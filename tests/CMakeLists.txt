@@ -1594,6 +1594,22 @@ if(TARGET qgis_app_classify)
   )
   sicnu_discover_tests(test_pixel_window)
 
+  # Classification v1.1 — dirty flag + workflow QSettings session.
+  add_executable(test_classify_session_state
+    test_classify_session_state.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/classification/rs_classify_session_state.cpp
+  )
+  target_link_libraries(test_classify_session_state PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+  )
+  target_include_directories(test_classify_session_state PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/app/classification
+  )
+  sicnu_discover_tests(test_classify_session_state)
+
   # Phase 10A Task 10.9 — confusion matrix + Kappa accuracy assessment.
   add_executable(test_accuracy_assessment test_accuracy_assessment.cpp)
   target_link_libraries(test_accuracy_assessment PRIVATE

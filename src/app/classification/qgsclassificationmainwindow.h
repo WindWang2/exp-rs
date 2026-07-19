@@ -9,8 +9,10 @@
 #include <opencv2/core.hpp>
 
 #include "rs_classifier_backend.h"
+#include "rs_classify_session_state.h"
 #include "rs_feature_scaler.h"
 
+class QCloseEvent;
 class QTimer;
 
 class QgisInterface;
@@ -100,6 +102,9 @@ class QgsClassificationMainWindow : public QMainWindow
     /// next applyClassification() call skips training and predicts directly.
     void loadClassifierModel();
 
+  protected:
+    void closeEvent( QCloseEvent *e ) override;
+
   private:
     void setupMenus();
     void setupToolbars();
@@ -113,6 +118,12 @@ class QgsClassificationMainWindow : public QMainWindow
     bool buildTrainingData( const QVector<int> &bands,
                             cv::Mat &X,
                             cv::Mat &y ) const;
+
+    RsClassifySessionState::WorkflowSnapshot captureWorkflowSnapshot() const;
+    void applyWorkflowSnapshot( const RsClassifySessionState::WorkflowSnapshot &s );
+    /// Save ROIs to \a path (or last path / file dialog when empty). Returns
+    /// true on success. Used by exportRois and dirty close Save.
+    bool saveRoisToPath( QString path );
 
     QgisInterface *m_iface = nullptr;
     QgsMapCanvas *m_canvas = nullptr;
@@ -166,6 +177,11 @@ class QgsClassificationMainWindow : public QMainWindow
     // Optional feature scaler loaded from <model>.scale.json sidecar.
     // Consumed with m_loadedBackend on the next applyClassification().
     RsFeatureScaler m_loadedScaler;
+
+    // Classification v1.1 — dirty close + QSettings workflow continuity.
+    RsClassifySessionState mSession;
+    bool mSuppressDirty = false;
+    QString mLastModelPath;
 
   private slots:
     void onRoiDrawn( const QgsGeometry &geom, int classId );

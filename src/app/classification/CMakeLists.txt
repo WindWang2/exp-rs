@@ -31,6 +31,8 @@ qt_add_library(qgis_app_classify STATIC
     rs_accuracy_dialog.cpp
     # Phase 10A.1.3 — load classifier model from disk dialog.
     rs_classifier_load_dialog.cpp
+    # Classification v1.1 — dirty close + workflow QSettings.
+    rs_classify_session_state.cpp
 )
 
 target_include_directories(qgis_app_classify PUBLIC
