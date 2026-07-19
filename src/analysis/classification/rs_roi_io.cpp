@@ -15,6 +15,7 @@
 #include "qgscoordinatetransform.h"
 #include "qgsproject.h"
 #include "qgis.h"
+#include "qgsexception.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -22,6 +23,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QVariant>
+#include <QtGlobal>
 
 namespace
 {
@@ -100,7 +102,15 @@ bool RsRoiIO::save( const QString &shp, const RsRoiCollection &col, const QgsCoo
   opts.driverName = QStringLiteral( "ESRI Shapefile" );
   opts.fileEncoding = QStringLiteral( "UTF-8" );
 
-  const QgsCoordinateReferenceSystem destCrs( QStringLiteral( "EPSG:4326" ) );
+  // Write in the caller's CRS when valid (typically the source raster CRS).
+  // Fallback to EPSG:4326 only when no CRS is supplied — geometries are still
+  // written as-is (no synthetic transform to lon/lat).
+  QgsCoordinateReferenceSystem destCrs = crs;
+  if ( !destCrs.isValid() )
+  {
+    destCrs = QgsCoordinateReferenceSystem( QStringLiteral( "EPSG:4326" ) );
+    qWarning() << "RsRoiIO::save: no CRS supplied; writing shapefile as EPSG:4326";
+  }
 
   QgsVectorFileWriter *writer = QgsVectorFileWriter::create(
     shp, fields, Qgis::WkbType::Polygon, destCrs,
@@ -114,24 +124,12 @@ bool RsRoiIO::save( const QString &shp, const RsRoiCollection &col, const QgsCoo
     return false;
   }
 
-  QgsCoordinateTransform trans;
-  bool doTransform = false;
-  if ( crs.isValid() && crs != destCrs )
-  {
-    trans = QgsCoordinateTransform( crs, destCrs, QgsProject::instance() );
-    doTransform = true;
-  }
-
+  // Geometries are already in destCrs (caller contract); no transform on write.
   for ( int i = 0; i < col.size(); ++i )
   {
     const RsRoi &roi = col.at( i );
     QgsFeature feat( fields );
-    QgsGeometry geom = roi.geometry();
-    if ( doTransform )
-    {
-      geom.transform( trans );
-    }
-    feat.setGeometry( geom );
+    feat.setGeometry( roi.geometry() );
     feat.setAttribute( QStringLiteral( "cls_id" ), roi.classId() );
     feat.setAttribute( QStringLiteral( "px_count" ),
                        static_cast<qint64>( roi.pixelIndices().size() ) );
@@ -146,7 +144,7 @@ bool RsRoiIO::save( const QString &shp, const RsRoiCollection &col, const QgsCoo
   return writeSidecar( shp, col );
 }
 
-bool RsRoiIO::load( const QString &shp, RsRoiCollection &col, const QgsCoordinateReferenceSystem &crs )
+bool RsRoiIO::load( const QString &shp, RsRoiCollection &col, const QgsCoordinateReferenceSystem &targetCrs )
 {
   if ( !QFile::exists( shp ) )
     return false;
@@ -159,12 +157,14 @@ bool RsRoiIO::load( const QString &shp, RsRoiCollection &col, const QgsCoordinat
   if ( !readSidecar( shp, col ) )
     return false;
 
-  const QgsCoordinateReferenceSystem srcCrs( QStringLiteral( "EPSG:4326" ) );
+  // Transform from the layer's native CRS into the caller's target CRS
+  // (typically the source raster CRS). Skip when target is invalid or equal.
+  const QgsCoordinateReferenceSystem layerCrs = layer.crs();
   QgsCoordinateTransform trans;
   bool doTransform = false;
-  if ( crs.isValid() && crs != srcCrs )
+  if ( targetCrs.isValid() && layerCrs.isValid() && targetCrs != layerCrs )
   {
-    trans = QgsCoordinateTransform( srcCrs, crs, QgsProject::instance() );
+    trans = QgsCoordinateTransform( layerCrs, targetCrs, QgsProject::instance() );
     doTransform = true;
   }
 
@@ -176,7 +176,16 @@ bool RsRoiIO::load( const QString &shp, RsRoiCollection &col, const QgsCoordinat
     QgsGeometry geom = feat.geometry();
     if ( doTransform )
     {
-      geom.transform( trans );
+      try
+      {
+        geom.transform( trans );
+      }
+      catch ( QgsCsException &e )
+      {
+        qWarning() << "RsRoiIO::load: CRS transform failed for feature"
+                    << feat.id() << ":" << e.what();
+        continue;
+      }
     }
     // Pixel indices are NOT persisted — caller must recompute against current raster.
     col.appendRoi( RsRoi( clsId, geom, QVector<quint64>() ) );

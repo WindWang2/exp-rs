@@ -1,4 +1,5 @@
 // tests/test_roi_io.cpp — Phase 10A Task 10.1: RsRoiIO shapefile + sidecar JSON round-trip
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <QCoreApplication>
 #include <QFile>
@@ -7,7 +8,11 @@
 #include "rs_roi_io.h"
 #include "rs_roi_collection.h"
 #include "rs_class_def.h"
+#include "qgscoordinatereferencesystem.h"
 #include "qgsgeometry.h"
+#include "qgspointxy.h"
+
+using Catch::Approx;
 
 TEST_CASE( "RoiIO: write+read shapefile preserves class id and sidecar JSON", "[classify][roi][io]" )
 {
@@ -55,4 +60,38 @@ TEST_CASE( "RoiIO: load returns false on invalid path", "[classify][roi][io]" )
   RsRoiCollection col;
   REQUIRE_FALSE( RsRoiIO::load( QStringLiteral( "/does/not/exist.shp" ), col ) );
   REQUIRE( col.size() == 0 );
+}
+
+TEST_CASE( "RoiIO: UTM source CRS round-trip preserves meters", "[classify][roi][io]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString path = tmp.path() + QStringLiteral( "/rois_utm.shp" );
+
+  // UTM zone 50N (WGS 84) — typical Chinese RS lab scene CRS.
+  const QgsCoordinateReferenceSystem utm(
+    QStringLiteral( "EPSG:32650" ) );
+  REQUIRE( utm.isValid() );
+
+  // Square around a realistic UTM easting/northing (meters).
+  const QString wkt = QStringLiteral(
+    "POLYGON((500000 3500000,500100 3500000,500100 3500100,500000 3500100,500000 3500000))" );
+
+  RsRoiCollection orig;
+  orig.setClassDef( RsClassDef( 1, QStringLiteral( "Forest" ), QColor( "#2da44e" ) ) );
+  orig.appendRoi( RsRoi( 1, QgsGeometry::fromWkt( wkt ), QVector<quint64>{ 1, 2 } ) );
+
+  REQUIRE( RsRoiIO::save( path, orig, utm ) );
+  REQUIRE( QFile::exists( path ) );
+
+  RsRoiCollection loaded;
+  REQUIRE( RsRoiIO::load( path, loaded, utm ) );
+  REQUIRE( loaded.size() == 1 );
+  REQUIRE( loaded.at( 0 ).classId() == 1 );
+
+  const QgsRectangle bb = loaded.at( 0 ).geometry().boundingBox();
+  REQUIRE( bb.xMinimum() == Approx( 500000.0 ).margin( 1e-3 ) );
+  REQUIRE( bb.yMinimum() == Approx( 3500000.0 ).margin( 1e-3 ) );
+  REQUIRE( bb.xMaximum() == Approx( 500100.0 ).margin( 1e-3 ) );
+  REQUIRE( bb.yMaximum() == Approx( 3500100.0 ).margin( 1e-3 ) );
 }
