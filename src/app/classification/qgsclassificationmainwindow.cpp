@@ -656,6 +656,27 @@ void QgsClassificationMainWindow::applyClassification()
         cfg.algoName = QStringLiteral( "KMeans" );
         break;
     }
+
+    // Optional model save (training path only). Cancel leaves modelSavePath
+    // empty so the task skips persistence. Sidecar .scale.json is written
+    // next to the YAML by RsClassificationTask::run after fit.
+    // KMeans has no OpenCV Algorithm serialisation — skip the dialog.
+    if ( m_classifierBar->currentKind() != RsClassifierKind::KMeans )
+    {
+      QString modelPath = QFileDialog::getSaveFileName(
+        this, tr( "Save classifier model (optional)" ), QString(),
+        tr( "OpenCV YAML (*.yml *.yaml);;All files (*)" ) );
+      if ( !modelPath.isEmpty() )
+      {
+        if ( !modelPath.endsWith( QLatin1String( ".yml" ), Qt::CaseInsensitive )
+             && !modelPath.endsWith( QLatin1String( ".yaml" ), Qt::CaseInsensitive )
+             && !modelPath.endsWith( QLatin1String( ".xml" ), Qt::CaseInsensitive ) )
+        {
+          modelPath += QStringLiteral( ".yml" );
+        }
+        cfg.modelSavePath = modelPath;
+      }
+    }
   }
 
   const QString algoForLog = cfg.algoName;

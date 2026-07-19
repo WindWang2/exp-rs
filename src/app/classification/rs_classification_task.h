@@ -50,6 +50,9 @@ class RsClassificationTask : public QgsTask
       QString algoName;                               // for structured log
       // If fitted, Task transforms tile X before predict. Caller scales train/test.
       RsFeatureScaler scaler;
+      // Optional: after successful fit, persist model YAML + .scale.json sidecar.
+      // Empty = do not save.
+      QString modelSavePath;
     };
 
     struct Result

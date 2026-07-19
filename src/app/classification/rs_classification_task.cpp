@@ -71,6 +71,44 @@ bool RsClassificationTask::run()
       return false;
     }
   }
+
+  // Optional model persistence — write OpenCV YAML + feature-scaler sidecar
+  // next to it so loadClassifierModel() can restore both.
+  if ( !mCfg.modelSavePath.isEmpty() )
+  {
+    if ( !mCfg.backend->save( mCfg.modelSavePath ) )
+    {
+      SICNU_LOG_WARN( SicnuLogTags::Classification,
+                      QString( "Failed to save classifier model: %1" )
+                        .arg( mCfg.modelSavePath ) );
+    }
+    else
+    {
+      SICNU_LOG_INFO( SicnuLogTags::Classification,
+                      QString( "Classifier model saved: %1" )
+                        .arg( mCfg.modelSavePath ) );
+      if ( mCfg.scaler.isFitted() )
+      {
+        const QFileInfo mi( mCfg.modelSavePath );
+        const QString scalePath = mi.absolutePath() + QLatin1Char( '/' )
+                                  + mi.completeBaseName()
+                                  + QStringLiteral( ".scale.json" );
+        if ( !mCfg.scaler.saveJson( scalePath ) )
+        {
+          SICNU_LOG_WARN( SicnuLogTags::Classification,
+                          QString( "Failed to save scale.json sidecar: %1" )
+                            .arg( scalePath ) );
+        }
+        else
+        {
+          SICNU_LOG_INFO( SicnuLogTags::Classification,
+                          QString( "Feature scaler sidecar saved: %1" )
+                            .arg( scalePath ) );
+        }
+      }
+    }
+  }
+
   mFb.setProgress( kProgressAfterTrain );
   if ( mFb.isCanceled() )
   {
