@@ -1610,6 +1610,20 @@ if(TARGET qgis_app_classify)
   )
   sicnu_discover_tests(test_classify_session_state)
 
+  # Classification workflow — soft gates + step completion.
+  add_executable(test_classify_workflow_controller test_classify_workflow_controller.cpp)
+  target_link_libraries(test_classify_workflow_controller PRIVATE
+    Catch2::Catch2WithMain
+    qgis_app_classify
+    Qt6::Core
+  )
+  target_include_directories(test_classify_workflow_controller PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/app/classification
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_classify_workflow_controller PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_classify_workflow_controller)
+
   # Phase 10A Task 10.9 — confusion matrix + Kappa accuracy assessment.
   add_executable(test_accuracy_assessment test_accuracy_assessment.cpp)
   target_link_libraries(test_accuracy_assessment PRIVATE

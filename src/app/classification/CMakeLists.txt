@@ -33,6 +33,8 @@ qt_add_library(qgis_app_classify STATIC
     rs_classifier_load_dialog.cpp
     # Classification v1.1 — dirty close + workflow QSettings.
     rs_classify_session_state.cpp
+    # Classification workflow — step state / soft gates / mode.
+    rs_classify_workflow_controller.cpp
 )
 
 target_include_directories(qgis_app_classify PUBLIC
