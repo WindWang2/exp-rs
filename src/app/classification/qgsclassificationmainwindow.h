@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QMap>
 #include <QString>
 #include <QVector>
 
@@ -13,9 +14,13 @@
 #include "rs_classify_workflow_controller.h"
 #include "rs_feature_scaler.h"
 
+class QCheckBox;
 class QCloseEvent;
 class QLabel;
+class QLineEdit;
 class QPushButton;
+class QSpinBox;
+class QTableWidget;
 class QTimer;
 
 class QgisInterface;
@@ -134,6 +139,10 @@ class QgsClassificationMainWindow : public QMainWindow
     bool buildTrainingData( const QVector<int> &bands,
                             cv::Mat &X,
                             cv::Mat &y ) const;
+    /// Start RsPostProcessTask from Step 6 panel settings.
+    void runPostProcess();
+    /// Collect recode old→new pairs from the Step 6 table (may be empty).
+    QMap<int, int> collectRecodeMap() const;
 
     RsClassifySessionState::WorkflowSnapshot captureWorkflowSnapshot() const;
     void applyWorkflowSnapshot( const RsClassifySessionState::WorkflowSnapshot &s );
@@ -159,6 +168,23 @@ class QgsClassificationMainWindow : public QMainWindow
     QPushButton *m_stepPreviewBtn = nullptr;
     QPushButton *m_stepApplyBtn = nullptr;
     bool m_trainSampleRole = true;
+
+    // Step 6 — post-process panel.
+    QLineEdit *m_ppInputEdit = nullptr;
+    QLineEdit *m_ppOutputEdit = nullptr;
+    QLineEdit *m_ppVectorEdit = nullptr;
+    QCheckBox *m_ppSieveCb = nullptr;
+    QCheckBox *m_ppMajorityCb = nullptr;
+    QCheckBox *m_ppClumpCb = nullptr;
+    QCheckBox *m_ppRecodeCb = nullptr;
+    QCheckBox *m_ppPolygonizeCb = nullptr;
+    QSpinBox *m_ppSieveSpin = nullptr;
+    QSpinBox *m_ppMajoritySpin = nullptr;
+    QTableWidget *m_ppRecodeTable = nullptr;
+    QPushButton *m_ppRunBtn = nullptr;
+    QPushButton *m_ppSkipBtn = nullptr;
+    /// Last successful full-Apply classified raster path (Step 6 input default).
+    QString m_lastClassifyPath;
 
     QDockWidget *m_classListDock = nullptr;
     QDockWidget *m_classQuickListDock = nullptr;

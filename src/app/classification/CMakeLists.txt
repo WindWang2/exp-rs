@@ -38,6 +38,8 @@ qt_add_library(qgis_app_classify STATIC
     # Classification workflow — stepper bar + step host skeleton.
     rs_classify_stepper_bar.cpp
     rs_classify_step_host.cpp
+    # Classification workflow — post-process task (Step 6).
+    rs_post_process_task.cpp
 )
 
 target_include_directories(qgis_app_classify PUBLIC

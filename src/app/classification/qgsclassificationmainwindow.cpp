@@ -9,6 +9,7 @@
 #include "rs_classification_split.h"
 #include "rs_classification_task.h"
 #include "rs_classifier_kmeans.h"
+#include "rs_post_process_task.h"
 #include "rs_classifier_load_dialog.h"
 #include "rs_classifier_normalbayes.h"
 #include "rs_classifier_setup_bar.h"
@@ -47,6 +48,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QCloseEvent>
 #include <QColor>
 #include <QDir>
@@ -54,11 +56,16 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFormLayout>
+#include <QGridLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHash>
+#include <QHeaderView>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QLineEdit>
 #include <QList>
 #include <QMenu>
 #include <QMenuBar>
@@ -67,7 +74,9 @@
 #include <QPushButton>
 #include <QSet>
 #include <QSizePolicy>
+#include <QSpinBox>
 #include <QStatusBar>
+#include <QTableWidget>
 #include <QTimer>
 #include <QToolBar>
 #include <QVBoxLayout>
@@ -861,7 +870,160 @@ void QgsClassificationMainWindow::populateStepPanels()
     lay->addStretch( 1 );
   }
 
-  // Steps 5–7 remain skeleton placeholders for later tasks.
+  // --- Step 6: PostProcess -------------------------------------------------
+  if ( QWidget *body = m_stepHost->body( RsClassifyStep::PostProcess ) )
+  {
+    auto *lay = qobject_cast<QVBoxLayout *>( body->layout() );
+    if ( !lay )
+    {
+      lay = new QVBoxLayout( body );
+      lay->setContentsMargins( 0, 4, 0, 4 );
+      lay->setSpacing( 8 );
+    }
+
+    auto *pathForm = new QFormLayout;
+    pathForm->setContentsMargins( 0, 0, 0, 0 );
+    pathForm->setSpacing( 6 );
+
+    auto *inRow = new QHBoxLayout;
+    m_ppInputEdit = new QLineEdit( body );
+    m_ppInputEdit->setObjectName( QStringLiteral( "classifyStep6Input" ) );
+    m_ppInputEdit->setPlaceholderText( tr( "分类结果栅格（默认上次 Apply 输出）" ) );
+    if ( !m_lastClassifyPath.isEmpty() )
+      m_ppInputEdit->setText( m_lastClassifyPath );
+    auto *btnInBrowse = new QPushButton( tr( "浏览…" ), body );
+    btnInBrowse->setObjectName( QStringLiteral( "classifyStep6InputBrowse" ) );
+    connect( btnInBrowse, &QPushButton::clicked, this, [this]() {
+      const QString p = QFileDialog::getOpenFileName(
+        this, tr( "选择分类栅格" ), m_ppInputEdit ? m_ppInputEdit->text() : QString(),
+        tr( "GeoTIFF (*.tif *.tiff);;All files (*)" ) );
+      if ( !p.isEmpty() && m_ppInputEdit )
+        m_ppInputEdit->setText( p );
+    } );
+    inRow->addWidget( m_ppInputEdit, 1 );
+    inRow->addWidget( btnInBrowse );
+    pathForm->addRow( tr( "输入" ), inRow );
+
+    auto *outRow = new QHBoxLayout;
+    m_ppOutputEdit = new QLineEdit( body );
+    m_ppOutputEdit->setObjectName( QStringLiteral( "classifyStep6Output" ) );
+    m_ppOutputEdit->setPlaceholderText( tr( "后处理输出 GeoTIFF" ) );
+    auto *btnOutBrowse = new QPushButton( tr( "浏览…" ), body );
+    btnOutBrowse->setObjectName( QStringLiteral( "classifyStep6OutputBrowse" ) );
+    connect( btnOutBrowse, &QPushButton::clicked, this, [this]() {
+      const QString p = QFileDialog::getSaveFileName(
+        this, tr( "后处理输出栅格" ), m_ppOutputEdit ? m_ppOutputEdit->text() : QString(),
+        tr( "GeoTIFF (*.tif)" ) );
+      if ( !p.isEmpty() && m_ppOutputEdit )
+        m_ppOutputEdit->setText( p );
+    } );
+    outRow->addWidget( m_ppOutputEdit, 1 );
+    outRow->addWidget( btnOutBrowse );
+    pathForm->addRow( tr( "输出栅格" ), outRow );
+
+    auto *vecRow = new QHBoxLayout;
+    m_ppVectorEdit = new QLineEdit( body );
+    m_ppVectorEdit->setObjectName( QStringLiteral( "classifyStep6Vector" ) );
+    m_ppVectorEdit->setPlaceholderText( tr( "矢量化输出（可选，.gpkg / .shp）" ) );
+    auto *btnVecBrowse = new QPushButton( tr( "浏览…" ), body );
+    btnVecBrowse->setObjectName( QStringLiteral( "classifyStep6VectorBrowse" ) );
+    connect( btnVecBrowse, &QPushButton::clicked, this, [this]() {
+      const QString p = QFileDialog::getSaveFileName(
+        this, tr( "矢量化输出" ), m_ppVectorEdit ? m_ppVectorEdit->text() : QString(),
+        tr( "GeoPackage (*.gpkg);;ESRI Shapefile (*.shp)" ) );
+      if ( !p.isEmpty() && m_ppVectorEdit )
+        m_ppVectorEdit->setText( p );
+    } );
+    vecRow->addWidget( m_ppVectorEdit, 1 );
+    vecRow->addWidget( btnVecBrowse );
+    pathForm->addRow( tr( "输出矢量" ), vecRow );
+    lay->addLayout( pathForm );
+
+    auto *opsBox = new QGroupBox( tr( "算子" ), body );
+    auto *opsGrid = new QGridLayout( opsBox );
+    opsGrid->setContentsMargins( 8, 8, 8, 8 );
+    opsGrid->setHorizontalSpacing( 8 );
+    opsGrid->setVerticalSpacing( 6 );
+
+    m_ppSieveCb = new QCheckBox( tr( "Sieve" ), opsBox );
+    m_ppSieveCb->setObjectName( QStringLiteral( "classifyStep6Sieve" ) );
+    m_ppSieveCb->setChecked( true );
+    m_ppSieveSpin = new QSpinBox( opsBox );
+    m_ppSieveSpin->setObjectName( QStringLiteral( "classifyStep6SieveThreshold" ) );
+    m_ppSieveSpin->setRange( 1, 1000000 );
+    m_ppSieveSpin->setValue( 10 );
+    m_ppSieveSpin->setPrefix( tr( "阈值 " ) );
+    opsGrid->addWidget( m_ppSieveCb, 0, 0 );
+    opsGrid->addWidget( m_ppSieveSpin, 0, 1 );
+
+    m_ppMajorityCb = new QCheckBox( tr( "多数滤波" ), opsBox );
+    m_ppMajorityCb->setObjectName( QStringLiteral( "classifyStep6Majority" ) );
+    m_ppMajorityCb->setChecked( true );
+    m_ppMajoritySpin = new QSpinBox( opsBox );
+    m_ppMajoritySpin->setObjectName( QStringLiteral( "classifyStep6MajorityKernel" ) );
+    m_ppMajoritySpin->setRange( 3, 7 );
+    m_ppMajoritySpin->setSingleStep( 2 );
+    m_ppMajoritySpin->setValue( 3 );
+    m_ppMajoritySpin->setPrefix( tr( "核 " ) );
+    opsGrid->addWidget( m_ppMajorityCb, 1, 0 );
+    opsGrid->addWidget( m_ppMajoritySpin, 1, 1 );
+
+    m_ppClumpCb = new QCheckBox( tr( "Clump" ), opsBox );
+    m_ppClumpCb->setObjectName( QStringLiteral( "classifyStep6Clump" ) );
+    m_ppClumpCb->setChecked( false );
+    opsGrid->addWidget( m_ppClumpCb, 2, 0, 1, 2 );
+
+    m_ppRecodeCb = new QCheckBox( tr( "重编码" ), opsBox );
+    m_ppRecodeCb->setObjectName( QStringLiteral( "classifyStep6Recode" ) );
+    m_ppRecodeCb->setChecked( false );
+    opsGrid->addWidget( m_ppRecodeCb, 3, 0, 1, 2 );
+
+    m_ppPolygonizeCb = new QCheckBox( tr( "矢量化 (Polygonize)" ), opsBox );
+    m_ppPolygonizeCb->setObjectName( QStringLiteral( "classifyStep6Polygonize" ) );
+    m_ppPolygonizeCb->setChecked( false );
+    opsGrid->addWidget( m_ppPolygonizeCb, 4, 0, 1, 2 );
+
+    lay->addWidget( opsBox );
+
+    m_ppRecodeTable = new QTableWidget( 3, 2, body );
+    m_ppRecodeTable->setObjectName( QStringLiteral( "classifyStep6RecodeTable" ) );
+    m_ppRecodeTable->setHorizontalHeaderLabels( { tr( "旧类" ), tr( "新类" ) } );
+    m_ppRecodeTable->horizontalHeader()->setStretchLastSection( true );
+    m_ppRecodeTable->verticalHeader()->setVisible( false );
+    m_ppRecodeTable->setMaximumHeight( 120 );
+    m_ppRecodeTable->setEnabled( false );
+    lay->addWidget( m_ppRecodeTable );
+    connect( m_ppRecodeCb, &QCheckBox::toggled, m_ppRecodeTable, &QWidget::setEnabled );
+
+    auto *btnRow = new QHBoxLayout;
+    m_ppRunBtn = new QPushButton( tr( "运行后处理" ), body );
+    m_ppRunBtn->setObjectName( QStringLiteral( "classifyStep6Run" ) );
+    connect( m_ppRunBtn, &QPushButton::clicked, this,
+             &QgsClassificationMainWindow::runPostProcess );
+    m_ppSkipBtn = new QPushButton( tr( "跳过后处理" ), body );
+    m_ppSkipBtn->setObjectName( QStringLiteral( "classifyStep6Skip" ) );
+    connect( m_ppSkipBtn, &QPushButton::clicked, this, [this]() {
+      if ( m_workflow )
+        m_workflow->setPostProcessSkipped( true );
+      if ( statusBar() )
+        statusBar()->showMessage( tr( "已跳过后处理" ), 3000 );
+      refreshWorkflowUi();
+    } );
+    btnRow->addWidget( m_ppRunBtn );
+    btnRow->addWidget( m_ppSkipBtn );
+    lay->addLayout( btnRow );
+
+    auto *hint = new QLabel(
+      tr( "顺序：Sieve → 多数滤波 → Clump → 重编码 → 保存栅格 → 矢量化。"
+          "可跳过本步直接进入输出。" ),
+      body );
+    hint->setWordWrap( true );
+    hint->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    lay->addWidget( hint );
+    lay->addStretch( 1 );
+  }
+
+  // Steps 5 and 7 remain skeleton placeholders for later tasks.
 }
 
 void QgsClassificationMainWindow::ensureDefaultClasses()
@@ -1404,6 +1566,19 @@ void QgsClassificationMainWindow::applyClassification()
     if ( r.ok )
     {
       // Full Apply path only — preview never sets this flag.
+      m_lastClassifyPath = outForLog;
+      if ( m_ppInputEdit && m_ppInputEdit->text().trimmed().isEmpty() )
+        m_ppInputEdit->setText( outForLog );
+      else if ( m_ppInputEdit && m_ppInputEdit->text() != outForLog )
+        m_ppInputEdit->setText( outForLog );
+      if ( m_ppOutputEdit && m_ppOutputEdit->text().trimmed().isEmpty() )
+      {
+        const QFileInfo fi( outForLog );
+        m_ppOutputEdit->setText(
+          fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName()
+          + QStringLiteral( "_post.tif" ) );
+      }
+
       if ( m_workflow )
       {
         m_workflow->setHasFullClassifyResult( true );
@@ -1657,6 +1832,174 @@ void QgsClassificationMainWindow::applyPreview()
   QgsApplication::taskManager()->addTask( task );
   if ( statusBar() )
     statusBar()->showMessage( tr( "预览中…" ), 3000 );
+}
+
+QMap<int, int> QgsClassificationMainWindow::collectRecodeMap() const
+{
+  QMap<int, int> map;
+  if ( !m_ppRecodeTable )
+    return map;
+  for ( int row = 0; row < m_ppRecodeTable->rowCount(); ++row )
+  {
+    QTableWidgetItem *oldItem = m_ppRecodeTable->item( row, 0 );
+    QTableWidgetItem *newItem = m_ppRecodeTable->item( row, 1 );
+    if ( !oldItem || !newItem )
+      continue;
+    bool okOld = false;
+    bool okNew = false;
+    const int oldId = oldItem->text().trimmed().toInt( &okOld );
+    const int newId = newItem->text().trimmed().toInt( &okNew );
+    if ( okOld && okNew )
+      map.insert( oldId, newId );
+  }
+  return map;
+}
+
+void QgsClassificationMainWindow::runPostProcess()
+{
+  if ( !m_workflow || !m_workflow->canRunPostProcess() )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "请先完成全图分类 Apply" ), 5000 );
+    return;
+  }
+
+  RsPostProcessConfig cfg;
+  cfg.inputPath = m_ppInputEdit ? m_ppInputEdit->text().trimmed() : QString();
+  if ( cfg.inputPath.isEmpty() )
+    cfg.inputPath = m_lastClassifyPath;
+  if ( cfg.inputPath.isEmpty() )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "请指定分类栅格输入路径" ), 5000 );
+    return;
+  }
+
+  cfg.outputRasterPath = m_ppOutputEdit ? m_ppOutputEdit->text().trimmed() : QString();
+  if ( cfg.outputRasterPath.isEmpty() )
+  {
+    cfg.outputRasterPath = QFileDialog::getSaveFileName(
+      this, tr( "后处理输出栅格" ), QString(), tr( "GeoTIFF (*.tif)" ) );
+    if ( cfg.outputRasterPath.isEmpty() )
+      return;
+    if ( m_ppOutputEdit )
+      m_ppOutputEdit->setText( cfg.outputRasterPath );
+  }
+
+  cfg.runSieve = m_ppSieveCb && m_ppSieveCb->isChecked();
+  cfg.sieveThreshold = m_ppSieveSpin ? m_ppSieveSpin->value() : 10;
+  cfg.connectedness = 8;
+  cfg.runMajority = m_ppMajorityCb && m_ppMajorityCb->isChecked();
+  int kernel = m_ppMajoritySpin ? m_ppMajoritySpin->value() : 3;
+  if ( kernel % 2 == 0 )
+    ++kernel;
+  cfg.majorityKernel = kernel;
+  cfg.runClump = m_ppClumpCb && m_ppClumpCb->isChecked();
+  cfg.runRecode = m_ppRecodeCb && m_ppRecodeCb->isChecked();
+  cfg.recodeMap = cfg.runRecode ? collectRecodeMap() : QMap<int, int>();
+  cfg.runPolygonize = m_ppPolygonizeCb && m_ppPolygonizeCb->isChecked();
+  cfg.outputVectorPath = m_ppVectorEdit ? m_ppVectorEdit->text().trimmed() : QString();
+
+  if ( cfg.runRecode && cfg.recodeMap.isEmpty() )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "重编码已勾选，请在表格中填写旧类→新类" ), 5000 );
+    return;
+  }
+  if ( cfg.runPolygonize && cfg.outputVectorPath.isEmpty() )
+  {
+    const QFileInfo fi( cfg.outputRasterPath );
+    cfg.outputVectorPath = fi.absolutePath() + QLatin1Char( '/' )
+                           + fi.completeBaseName() + QStringLiteral( ".gpkg" );
+    if ( m_ppVectorEdit )
+      m_ppVectorEdit->setText( cfg.outputVectorPath );
+  }
+  if ( !cfg.runSieve && !cfg.runMajority && !cfg.runClump
+       && !cfg.runRecode && !cfg.runPolygonize )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "请至少选择一个后处理算子，或点「跳过后处理」" ), 5000 );
+    return;
+  }
+
+  if ( m_ppRunBtn )
+    m_ppRunBtn->setEnabled( false );
+
+  const QString outRaster = cfg.outputRasterPath;
+  const QString outVector = cfg.outputVectorPath;
+  const bool doPoly = cfg.runPolygonize;
+  auto *task = new RsPostProcessTask( std::move( cfg ) );
+
+  connect( task, &QgsTask::taskCompleted, this, [this, task, outRaster, outVector, doPoly]() {
+    if ( m_ppRunBtn )
+      m_ppRunBtn->setEnabled( true );
+    const auto &r = task->result();
+    if ( !r.ok )
+    {
+      if ( statusBar() )
+        statusBar()->showMessage( tr( "后处理失败: %1" ).arg( r.errorMessage ), 6000 );
+      return;
+    }
+
+    if ( m_workflow )
+      m_workflow->setHasPostProcessResult( true );
+
+    // Load result raster onto the classification canvas when possible.
+    auto *resultLayer = new QgsRasterLayer(
+      outRaster, QFileInfo( outRaster ).baseName() + QStringLiteral( " (post)" ),
+      QStringLiteral( "gdal" ) );
+    if ( resultLayer->isValid() )
+    {
+      if ( m_layerStore )
+        m_layerStore->addMapLayer( resultLayer );
+      if ( m_canvas )
+      {
+        QList<QgsMapLayer *> layers;
+        layers << resultLayer;
+        if ( m_sourceLayer )
+          layers << m_sourceLayer;
+        m_canvas->setLayers( layers );
+        m_canvas->refresh();
+      }
+    }
+    else
+    {
+      delete resultLayer;
+    }
+
+    if ( statusBar() )
+    {
+      QString msg = tr( "后处理完成: %1 (%2 ms)" )
+                      .arg( QFileInfo( outRaster ).fileName() )
+                      .arg( r.durationMs );
+      if ( doPoly && !outVector.isEmpty() )
+        msg += tr( "；矢量 %1" ).arg( QFileInfo( outVector ).fileName() );
+      statusBar()->showMessage( msg, 6000 );
+    }
+    refreshWorkflowUi();
+  } );
+
+  connect( task, &QgsTask::taskTerminated, this, [this, task]() {
+    if ( m_ppRunBtn )
+      m_ppRunBtn->setEnabled( true );
+    const auto &r = task->result();
+    if ( !r.errorMessage.isEmpty()
+         && r.errorMessage != QStringLiteral( "Cancelled" ) )
+    {
+      SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                       QStringLiteral( "Post-process failed: %1" ).arg( r.errorMessage ) );
+      if ( statusBar() )
+        statusBar()->showMessage( tr( "后处理失败: %1" ).arg( r.errorMessage ), 6000 );
+    }
+    else if ( statusBar() )
+    {
+      statusBar()->showMessage( tr( "后处理已取消" ), 3000 );
+    }
+  } );
+
+  QgsApplication::taskManager()->addTask( task );
+  if ( statusBar() )
+    statusBar()->showMessage( tr( "后处理中…" ), 3000 );
 }
 
 void QgsClassificationMainWindow::runCrossValidation()
