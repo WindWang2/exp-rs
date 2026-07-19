@@ -18,6 +18,7 @@
 #include "rs_jm_matrix_widget.h"
 #include "rs_jm_separability.h"
 #include "rs_pixel_rasterizer.h"
+#include "rs_pixel_window.h"
 #include "rs_roi.h"
 #include "rs_roi_collection.h"
 #include "rs_roi_io.h"
@@ -838,9 +839,21 @@ void QgsClassificationMainWindow::applyPreview()
     return;
   }
 
-  // v1 simplification: classify the FULL raster but route output to a
-  // temp file, skip the file dialog, and add the result as a temporary
-  // canvas layer. Viewport-cropped windowed classification deferred.
+  // Viewport-cropped preview: only classify the current canvas extent.
+  // Reject when the viewport does not intersect the source raster.
+  if ( !m_canvas )
+    return;
+  const RsPixelWindow win = rsMapExtentToPixelWindow(
+    m_canvas->extent(), m_sourceGt, m_sourceWidth, m_sourceHeight );
+  if ( !win.valid )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "视口不在影像范围内" ), 5000 );
+    return;
+  }
+
+  // Route output to a temp file, skip the file dialog, and add the result
+  // as a temporary canvas layer. Accuracy dialog is intentionally not shown.
   const QString outPath = QDir::temp().filePath(
     QStringLiteral( "classify_preview.tif" ) );
 
@@ -848,6 +861,8 @@ void QgsClassificationMainWindow::applyPreview()
   cfg.sourceRaster = m_sourceRasterPath;
   cfg.outputRaster = outPath;
   cfg.bandIndices = bands;
+  cfg.cropToWindow = true;
+  cfg.window = win;
   const auto split = RsClassificationSplit::stratifiedSplit(
     X, y, m_classifierBar->trainRatio() );
   if ( !fitScalerOntoConfig( split, cfg ) )

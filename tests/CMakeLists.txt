@@ -1578,6 +1578,22 @@ if(TARGET qgis_app_classify)
   )
   sicnu_discover_tests(test_feature_scaler)
 
+  # Classification v1.1 — viewport map extent → pixel window.
+  add_executable(test_pixel_window test_pixel_window.cpp)
+  target_link_libraries(test_pixel_window PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    GDAL::GDAL
+  )
+  target_include_directories(test_pixel_window PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_pixel_window)
+
   # Phase 10A Task 10.9 — confusion matrix + Kappa accuracy assessment.
   add_executable(test_accuracy_assessment test_accuracy_assessment.cpp)
   target_link_libraries(test_accuracy_assessment PRIVATE

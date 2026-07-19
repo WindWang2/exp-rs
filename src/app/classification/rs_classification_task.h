@@ -18,6 +18,7 @@
 #include "rs_classifier_backend.h"
 #include "rs_accuracy_assessment.h"
 #include "rs_feature_scaler.h"
+#include "rs_pixel_window.h"
 
 #include <QColor>
 #include <QHash>
@@ -63,6 +64,11 @@ class RsClassificationTask : public QgsTask
         QStringLiteral( "COMPRESS=DEFLATE" ),
         QStringLiteral( "PREDICTOR=2" )
       };
+      // When true and window.valid, output size/GT match the pixel window
+      // and only that sub-rectangle is classified (preview path). Apply
+      // leaves this false for full-raster output.
+      bool cropToWindow = false;
+      RsPixelWindow window;
     };
 
     struct Result
