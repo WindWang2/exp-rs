@@ -14,6 +14,9 @@
 #include "rs_classifier_setup_bar.h"
 #include "rs_classifier_svm.h"
 #include "rs_classify_session_state.h"
+#include "rs_classify_step_host.h"
+#include "rs_classify_stepper_bar.h"
+#include "rs_classify_workflow_controller.h"
 #include "rs_cross_validation.h"
 #include "rs_cv_task.h"
 #include "rs_jm_matrix_widget.h"
@@ -59,6 +62,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPair>
+#include <QPushButton>
 #include <QSet>
 #include <QSizePolicy>
 #include <QStatusBar>
@@ -133,6 +137,7 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
   setupDocks();
   setupRoiTools();
   setupClassifierBar();
+  setupWorkflowUi();
   setupStatusBar();
 
   // Phase 10A review patch — JM matrix recompute throttle. m_rois::changed
@@ -159,6 +164,11 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
       if ( !mSuppressDirty )
         mSession.markDirty();
     } );
+    // Workflow shell — keep soft-gate stats in sync with ROI / class edits.
+    connect( m_rois, &RsRoiCollection::changed,
+             this, &QgsClassificationMainWindow::syncWorkflowFromRois );
+    connect( m_rois, &RsRoiCollection::classDefChanged,
+             this, [this]( int ) { syncWorkflowFromRois(); } );
   }
   if ( m_classTableWidget && m_spectralCurve )
   {
@@ -170,6 +180,10 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
   mSession.restoreWindow( this );
   applyWorkflowSnapshot( mSession.restoreWorkflow() );
   mSession.clearDirty();
+
+  // Seed controller from default classes / empty ROIs after UI is up.
+  syncWorkflowFromRois();
+  refreshWorkflowUi();
 }
 
 QgsClassificationMainWindow::~QgsClassificationMainWindow() = default;
@@ -544,6 +558,192 @@ void QgsClassificationMainWindow::setupClassifierBar()
   }
 }
 
+void QgsClassificationMainWindow::setupWorkflowUi()
+{
+  m_workflow = new RsClassifyWorkflowController( this );
+
+  m_stepper = new RsClassifyStepperBar( this );
+  addToolBarBreak();
+  auto *wfBar = addToolBar( tr( "工作流" ) );
+  wfBar->setObjectName( QStringLiteral( "rsClassifyWorkflowBar" ) );
+  wfBar->setMovable( false );
+  wfBar->addWidget( m_stepper );
+
+  m_stepHost = new RsClassifyStepHost( this );
+  m_workflowDock = new QDockWidget( tr( "工作流步骤" ), this );
+  m_workflowDock->setObjectName( QStringLiteral( "ClassifyWorkflowDock" ) );
+  m_workflowDock->setWidget( m_stepHost );
+  addDockWidget( Qt::RightDockWidgetArea, m_workflowDock );
+  // Prefer the step host as the primary right-side panel.
+  if ( m_classListDock )
+    tabifyDockWidget( m_classListDock, m_workflowDock );
+  m_workflowDock->raise();
+
+  connect( m_stepper, &RsClassifyStepperBar::stepClicked, this,
+           [this]( RsClassifyStep s ) {
+             if ( m_workflow )
+               m_workflow->setCurrentStep( s );
+           } );
+
+  connect( m_workflow, &RsClassifyWorkflowController::currentStepChanged, this,
+           [this]( RsClassifyStep s ) {
+             if ( m_stepper )
+               m_stepper->setCurrentStep( s );
+             if ( m_stepHost )
+               m_stepHost->setCurrentStep( s );
+             refreshWorkflowUi();
+           } );
+
+  connect( m_stepper, &RsClassifyStepperBar::modeToggled,
+           m_workflow, &RsClassifyWorkflowController::setMode );
+
+  connect( m_workflow, &RsClassifyWorkflowController::modeChanged, this,
+           [this]( RsClassifyUiMode m ) {
+             if ( m_stepper )
+               m_stepper->setMode( m );
+             refreshWorkflowUi();
+           } );
+
+  connect( m_workflow, &RsClassifyWorkflowController::completionChanged,
+           this, &QgsClassificationMainWindow::refreshWorkflowUi );
+
+  connect( m_stepHost, &RsClassifyStepHost::prevClicked, this, [this]() {
+    if ( !m_workflow )
+      return;
+    const int cur = static_cast<int>( m_workflow->currentStep() );
+    if ( cur > 0 )
+      m_workflow->setCurrentStep( static_cast<RsClassifyStep>( cur - 1 ) );
+  } );
+  connect( m_stepHost, &RsClassifyStepHost::nextClicked, this, [this]() {
+    if ( !m_workflow )
+      return;
+    const int cur = static_cast<int>( m_workflow->currentStep() );
+    const int last = static_cast<int>( RsClassifyStep::Count ) - 1;
+    if ( cur < last )
+      m_workflow->setCurrentStep( static_cast<RsClassifyStep>( cur + 1 ) );
+  } );
+}
+
+void QgsClassificationMainWindow::syncWorkflowFromRois()
+{
+  if ( !m_workflow || !m_rois )
+    return;
+
+  m_workflow->setClassCount( m_rois->classDefs().size() );
+
+  QSet<int> classesWithPixels;
+  int trainPixels = 0;
+  for ( const RsRoi &roi : m_rois->rois() )
+  {
+    const int n = roi.pixelIndices().size();
+    if ( n <= 0 )
+      continue;
+    trainPixels += n;
+    if ( roi.classId() > 0 )
+      classesWithPixels.insert( roi.classId() );
+  }
+  m_workflow->setTrainingClassCountWithPixels( classesWithPixels.size() );
+  m_workflow->setTrainingPixelCount( trainPixels );
+}
+
+void QgsClassificationMainWindow::refreshWorkflowUi()
+{
+  if ( !m_workflow )
+    return;
+
+  // Stepper completion ticks.
+  if ( m_stepper )
+  {
+    for ( int i = 0; i < static_cast<int>( RsClassifyStep::Count ); ++i )
+    {
+      const auto step = static_cast<RsClassifyStep>( i );
+      m_stepper->setStepComplete( step, m_workflow->isStepComplete( step ) );
+    }
+    m_stepper->setCurrentStep( m_workflow->currentStep() );
+    m_stepper->setMode( m_workflow->mode() );
+  }
+
+  if ( m_stepHost )
+    m_stepHost->setCurrentStep( m_workflow->currentStep() );
+
+  // Gate labels for each panel from missingRequirements.
+  if ( m_stepHost )
+  {
+    for ( int i = 0; i < static_cast<int>( RsClassifyStep::Count ); ++i )
+    {
+      const auto step = static_cast<RsClassifyStep>( i );
+      if ( QLabel *gate = m_stepHost->gateLabel( step ) )
+      {
+        const QStringList miss = m_workflow->missingRequirements( step );
+        if ( miss.isEmpty() )
+        {
+          if ( m_workflow->isStepComplete( step ) )
+            gate->setText( tr( "已完成" ) );
+          else
+            gate->setText( tr( "可进行主操作" ) );
+          gate->setStyleSheet( QStringLiteral( "color: #1a7f37;" ) );
+        }
+        else
+        {
+          gate->setText( tr( "还需：%1" ).arg( miss.join( QStringLiteral( "；" ) ) ) );
+          gate->setStyleSheet( QStringLiteral( "color: #9a6700;" ) );
+        }
+      }
+    }
+  }
+
+  // Soft-gate Apply / Preview from canTrainOrClassify.
+  const bool canTrain = m_workflow->canTrainOrClassify();
+  if ( m_applyAction )
+    m_applyAction->setEnabled( canTrain );
+  if ( auto *preview = findChild<QAction *>( QStringLiteral( "rsClassifyPreviewAction" ) ) )
+    preview->setEnabled( canTrain );
+  if ( m_classifierBar )
+  {
+    if ( auto *btnApply = m_classifierBar->findChild<QPushButton *>(
+           QStringLiteral( "rsClassifierBtnApply" ) ) )
+      btnApply->setEnabled( canTrain );
+    if ( auto *btnPreview = m_classifierBar->findChild<QPushButton *>(
+           QStringLiteral( "rsClassifierBtnPreview" ) ) )
+      btnPreview->setEnabled( canTrain );
+  }
+
+  // Wizard: soft-hide JM / spectral unless Evaluate step; expert: show all.
+  const bool expert = m_workflow->mode() == RsClassifyUiMode::Expert;
+  const bool onEval = m_workflow->currentStep() == RsClassifyStep::Evaluate;
+  if ( expert )
+  {
+    if ( m_jmDock )
+      m_jmDock->show();
+    if ( m_spectralDock )
+      m_spectralDock->show();
+    if ( m_classListDock )
+      m_classListDock->show();
+    if ( m_classQuickListDock )
+      m_classQuickListDock->show();
+  }
+  else
+  {
+    if ( m_jmDock )
+      m_jmDock->setVisible( onEval );
+    if ( m_spectralDock )
+      m_spectralDock->setVisible( onEval );
+  }
+
+  // Status bar soft-gate hint for the current step (non-sticky).
+  if ( statusBar() )
+  {
+    const QStringList miss =
+      m_workflow->missingRequirements( m_workflow->currentStep() );
+    if ( !miss.isEmpty() )
+    {
+      statusBar()->showMessage(
+        tr( "软门禁：还需 %1" ).arg( miss.join( QStringLiteral( "；" ) ) ),
+        4000 );
+    }
+  }
+}
+
 bool QgsClassificationMainWindow::openSourceRaster()
 {
   const QString path = QFileDialog::getOpenFileName(
@@ -598,6 +798,8 @@ bool QgsClassificationMainWindow::openSourceRaster( const QString &path )
     m_toolMagicWand->setSourceData( m_sourceRasterPath );
   if ( m_classifierBar )
     m_classifierBar->setSourceBands( m_sourceBandCount );
+  if ( m_workflow )
+    m_workflow->setHasSourceRaster( true );
 
   SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Source raster loaded: %1 (%2x%3, %4 bands)" )
     .arg( QFileInfo( path ).fileName() ).arg( m_sourceWidth ).arg( m_sourceHeight ).arg( m_sourceBandCount ) );
@@ -836,6 +1038,14 @@ void QgsClassificationMainWindow::applyClassification()
     const auto &r = task->result();
     if ( r.ok )
     {
+      // Full Apply path only — preview never sets this flag.
+      if ( m_workflow )
+      {
+        m_workflow->setHasFullClassifyResult( true );
+        if ( !r.accuracy.classIds.isEmpty() )
+          m_workflow->setHasAccuracyMetrics( true );
+      }
+
       QJsonObject obj{
         { QStringLiteral( "event" ), QStringLiteral( "classify_finished" ) },
         { QStringLiteral( "algo" ), algoForLog },

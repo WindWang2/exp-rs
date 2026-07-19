@@ -35,6 +35,9 @@ qt_add_library(qgis_app_classify STATIC
     rs_classify_session_state.cpp
     # Classification workflow — step state / soft gates / mode.
     rs_classify_workflow_controller.cpp
+    # Classification workflow — stepper bar + step host skeleton.
+    rs_classify_stepper_bar.cpp
+    rs_classify_step_host.cpp
 )
 
 target_include_directories(qgis_app_classify PUBLIC

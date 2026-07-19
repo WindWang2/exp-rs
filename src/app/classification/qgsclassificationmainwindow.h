@@ -10,6 +10,7 @@
 
 #include "rs_classifier_backend.h"
 #include "rs_classify_session_state.h"
+#include "rs_classify_workflow_controller.h"
 #include "rs_feature_scaler.h"
 
 class QCloseEvent;
@@ -33,6 +34,8 @@ class RsRoiToolPolygon;
 class RsRoiToolFreehand;
 class RsRoiToolMagicWand;
 class RsClassifierSetupBar;
+class RsClassifyStepperBar;
+class RsClassifyStepHost;
 
 /**
  * \brief Phase 10A — Pixel-Based Classification main window shell.
@@ -112,6 +115,11 @@ class QgsClassificationMainWindow : public QMainWindow
     void setupStatusBar();
     void setupRoiTools();
     void setupClassifierBar();
+    void setupWorkflowUi();
+    /// Sync stepper completion, gate labels, Apply enable, wizard dock layout.
+    void refreshWorkflowUi();
+    /// Push ROI / class stats into the workflow controller.
+    void syncWorkflowFromRois();
     /// Build a CV_32F NxB sample matrix and CV_32S Nx1 label matrix from the
     /// current ROIs + open source raster. Returns true if there are >= 10
     /// total samples, populates `X`, `y` and `bandsOut` accordingly.
@@ -128,6 +136,11 @@ class QgsClassificationMainWindow : public QMainWindow
     QgisInterface *m_iface = nullptr;
     QgsMapCanvas *m_canvas = nullptr;
     RsRoiCollection *m_rois = nullptr;
+
+    RsClassifyWorkflowController *m_workflow = nullptr;
+    RsClassifyStepperBar *m_stepper = nullptr;
+    RsClassifyStepHost *m_stepHost = nullptr;
+    QDockWidget *m_workflowDock = nullptr;
 
     QDockWidget *m_classListDock = nullptr;
     QDockWidget *m_classQuickListDock = nullptr;
