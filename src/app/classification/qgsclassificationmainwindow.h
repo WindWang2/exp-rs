@@ -40,6 +40,7 @@ class RsRoiToolRectangle;
 class RsRoiToolPolygon;
 class RsRoiToolFreehand;
 class RsRoiToolMagicWand;
+class RsAccuracyPanel;
 class RsClassifierSetupBar;
 class RsClassifyStepperBar;
 class RsClassifyStepHost;
@@ -168,6 +169,10 @@ class QgsClassificationMainWindow : public QMainWindow
     QPushButton *m_stepPreviewBtn = nullptr;
     QPushButton *m_stepApplyBtn = nullptr;
     bool m_trainSampleRole = true;
+
+    // Step 5 — accuracy panel (embedded).
+    RsAccuracyPanel *m_accuracyPanel = nullptr;
+    QPushButton *m_stepAccuracyPopupBtn = nullptr;
 
     // Step 6 — post-process panel.
     QLineEdit *m_ppInputEdit = nullptr;

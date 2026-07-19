@@ -27,8 +27,9 @@ qt_add_library(qgis_app_classify STATIC
     # Phase 10A Task 10.8 — ClassifierBar + RsClassificationTask.
     rs_classifier_setup_bar.cpp
     rs_classification_task.cpp
-    # Phase 10A Task 10.9 — accuracy assessment result dialog.
+    # Phase 10A Task 10.9 — accuracy assessment result dialog + embed panel.
     rs_accuracy_dialog.cpp
+    rs_accuracy_panel.cpp
     # Phase 10A.1.3 — load classifier model from disk dialog.
     rs_classifier_load_dialog.cpp
     # Classification v1.1 — dirty close + workflow QSettings.

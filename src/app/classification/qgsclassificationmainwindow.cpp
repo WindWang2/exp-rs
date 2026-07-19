@@ -3,6 +3,7 @@
 #include "processing/algorithms/math_utils.h"
 #include "core/sicnu_logging.h"
 #include "rs_accuracy_dialog.h"
+#include "rs_accuracy_panel.h"
 #include "rs_class_def.h"
 #include "rs_class_quick_list.h"
 #include "rs_class_table_widget.h"
@@ -870,6 +871,42 @@ void QgsClassificationMainWindow::populateStepPanels()
     lay->addStretch( 1 );
   }
 
+  // --- Step 5: Accuracy ----------------------------------------------------
+  if ( QWidget *body = m_stepHost->body( RsClassifyStep::Accuracy ) )
+  {
+    auto *lay = qobject_cast<QVBoxLayout *>( body->layout() );
+    if ( !lay )
+    {
+      lay = new QVBoxLayout( body );
+      lay->setContentsMargins( 0, 4, 0, 4 );
+      lay->setSpacing( 8 );
+    }
+
+    m_accuracyPanel = new RsAccuracyPanel( body );
+    m_accuracyPanel->setObjectName( QStringLiteral( "classifyStep5AccuracyPanel" ) );
+    lay->addWidget( m_accuracyPanel, 1 );
+
+    m_stepAccuracyPopupBtn = new QPushButton( tr( "弹出完整窗口" ), body );
+    m_stepAccuracyPopupBtn->setObjectName( QStringLiteral( "classifyStep5Popup" ) );
+    m_stepAccuracyPopupBtn->setEnabled( false );
+    connect( m_stepAccuracyPopupBtn, &QPushButton::clicked, this, [this]() {
+      if ( !m_accuracyPanel || !m_accuracyPanel->hasResult() )
+        return;
+      auto *dlg = new RsAccuracyDialog(
+        m_accuracyPanel->result(), m_accuracyPanel->classNames(), this );
+      dlg->setAttribute( Qt::WA_DeleteOnClose );
+      dlg->show();
+    } );
+    lay->addWidget( m_stepAccuracyPopupBtn );
+
+    auto *hint = new QLabel(
+      tr( "精度来自全图 Apply 的 holdout/验证划分；可导出 CSV 或弹出大图查看。" ),
+      body );
+    hint->setWordWrap( true );
+    hint->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    lay->addWidget( hint );
+  }
+
   // --- Step 6: PostProcess -------------------------------------------------
   if ( QWidget *body = m_stepHost->body( RsClassifyStep::PostProcess ) )
   {
@@ -1023,7 +1060,7 @@ void QgsClassificationMainWindow::populateStepPanels()
     lay->addStretch( 1 );
   }
 
-  // Steps 5 and 7 remain skeleton placeholders for later tasks.
+  // Step 7 remains a skeleton placeholder for a later task.
 }
 
 void QgsClassificationMainWindow::ensureDefaultClasses()
@@ -1186,6 +1223,10 @@ void QgsClassificationMainWindow::refreshWorkflowUi()
   {
     m_stepSampleStatsLabel->setText( tr( "无样本集合" ) );
   }
+
+  // Step 5: popup enabled only when panel has metrics.
+  if ( m_stepAccuracyPopupBtn )
+    m_stepAccuracyPopupBtn->setEnabled( m_accuracyPanel && m_accuracyPanel->hasResult() );
 
   // Soft-gate Apply / Preview from canTrainOrClassify.
   const bool canTrain = m_workflow->canTrainOrClassify();
@@ -1580,11 +1621,7 @@ void QgsClassificationMainWindow::applyClassification()
       }
 
       if ( m_workflow )
-      {
         m_workflow->setHasFullClassifyResult( true );
-        if ( !r.accuracy.classIds.isEmpty() )
-          m_workflow->setHasAccuracyMetrics( true );
-      }
 
       QJsonObject obj{
         { QStringLiteral( "event" ), QStringLiteral( "classify_finished" ) },
@@ -1609,9 +1646,8 @@ void QgsClassificationMainWindow::applyClassification()
             .arg( r.durationMs ),
           6000 );
 
-      // Phase 10A Task 10.9 — present accuracy dialog when the task
-      // computed metrics from the held-out split. Non-modal so the
-      // lambda returns promptly.
+      // Embed accuracy metrics in Step 5 panel (preferred); optional popup
+      // remains available via the panel button.
       if ( !r.accuracy.classIds.isEmpty() )
       {
         QHash<int, QString> classNames;
@@ -1621,10 +1657,17 @@ void QgsClassificationMainWindow::applyClassification()
           for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
             classNames[it.key()] = it.value().name();
         }
-        auto *dlg = new RsAccuracyDialog( r.accuracy, classNames, this );
-        dlg->setAttribute( Qt::WA_DeleteOnClose );
-        dlg->show();
+        if ( m_accuracyPanel )
+          m_accuracyPanel->setResult( r.accuracy, classNames );
+        if ( m_stepAccuracyPopupBtn )
+          m_stepAccuracyPopupBtn->setEnabled( true );
+        if ( m_workflow )
+          m_workflow->setHasAccuracyMetrics( true );
+        // Advance soft focus to accuracy step so the embedded panel is visible.
+        if ( m_workflow )
+          m_workflow->setCurrentStep( RsClassifyStep::Accuracy );
       }
+      refreshWorkflowUi();
     }
     else
     {
