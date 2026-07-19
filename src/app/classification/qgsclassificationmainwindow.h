@@ -139,6 +139,8 @@ class QgsClassificationMainWindow : public QMainWindow
     void ensureDefaultClasses();
     /// Train vs validation sample-digitizing role (UI highlight; ROIs stay shared).
     void setActiveSampleRole( bool trainRole );
+    /// Guard Apply/Preview/CV against concurrent re-entry while a QgsTask runs.
+    void setClassifyBusy( bool busy );
     /// Build a CV_32F NxB sample matrix and CV_32S Nx1 label matrix from the
     /// current ROIs + open source raster. Returns true if there are >= 10
     /// total samples, populates `X`, `y` and `bandsOut` accordingly.
@@ -176,10 +178,14 @@ class QgsClassificationMainWindow : public QMainWindow
     QLabel *m_stepSampleStatsLabel = nullptr;
     QPushButton *m_stepTrainRoleBtn = nullptr;
     QPushButton *m_stepValidRoleBtn = nullptr;
+    QAction *m_trainRoleAction = nullptr;
+    QAction *m_validRoleAction = nullptr;
     QPushButton *m_stepCvBtn = nullptr;
     QPushButton *m_stepPreviewBtn = nullptr;
     QPushButton *m_stepApplyBtn = nullptr;
     bool m_trainSampleRole = true;
+    /// True while Apply / Preview / CV / post-process task is outstanding.
+    bool m_classifyBusy = false;
 
     // Step 5 — accuracy panel (embedded).
     RsAccuracyPanel *m_accuracyPanel = nullptr;

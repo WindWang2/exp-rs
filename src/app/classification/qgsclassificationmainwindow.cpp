@@ -370,6 +370,26 @@ void QgsClassificationMainWindow::setupToolbars()
   toolMagic->setObjectName( QStringLiteral( "rsToolRoiMagicWand" ) );
 
   roiBar->addSeparator();
+  // Train / Valid sample role — mutually exclusive toolbar highlight (W7).
+  m_trainRoleAction = roiBar->addAction( tr( "训练样本" ) );
+  m_trainRoleAction->setObjectName( QStringLiteral( "rsToolTrainRole" ) );
+  m_trainRoleAction->setCheckable( true );
+  m_trainRoleAction->setChecked( true );
+  m_validRoleAction = roiBar->addAction( tr( "验证样本" ) );
+  m_validRoleAction->setObjectName( QStringLiteral( "rsToolValidRole" ) );
+  m_validRoleAction->setCheckable( true );
+  auto *sampleRoleGroup = new QActionGroup( this );
+  sampleRoleGroup->setExclusive( true );
+  sampleRoleGroup->addAction( m_trainRoleAction );
+  sampleRoleGroup->addAction( m_validRoleAction );
+  connect( m_trainRoleAction, &QAction::triggered, this, [this]() {
+    setActiveSampleRole( true );
+  } );
+  connect( m_validRoleAction, &QAction::triggered, this, [this]() {
+    setActiveSampleRole( false );
+  } );
+
+  roiBar->addSeparator();
   // Phase 10A review patch — wire the three trailing toolbar actions:
   // Spectra/Separability toggle their dock visibility, Export saves to .shp.
   auto *actSpectra = roiBar->addAction( tr( "Spectra" ) );
@@ -1181,6 +1201,10 @@ void QgsClassificationMainWindow::setActiveSampleRole( bool trainRole )
     m_stepTrainRoleBtn->setChecked( trainRole );
   if ( m_stepValidRoleBtn )
     m_stepValidRoleBtn->setChecked( !trainRole );
+  if ( m_trainRoleAction )
+    m_trainRoleAction->setChecked( trainRole );
+  if ( m_validRoleAction )
+    m_validRoleAction->setChecked( !trainRole );
   if ( statusBar() )
   {
     statusBar()->showMessage(
@@ -1188,6 +1212,14 @@ void QgsClassificationMainWindow::setActiveSampleRole( bool trainRole )
                 : tr( "当前角色：验证样本（UI 标记；ROI 仍共享集合）" ),
       4000 );
   }
+  refreshWorkflowUi();
+}
+
+void QgsClassificationMainWindow::setClassifyBusy( bool busy )
+{
+  if ( m_classifyBusy == busy )
+    return;
+  m_classifyBusy = busy;
   refreshWorkflowUi();
 }
 
@@ -1300,13 +1332,15 @@ void QgsClassificationMainWindow::refreshWorkflowUi()
   if ( m_stepAccuracyPopupBtn )
     m_stepAccuracyPopupBtn->setEnabled( m_accuracyPanel && m_accuracyPanel->hasResult() );
 
-  // Soft-gate Apply / Preview from canTrainOrClassify.
-  const bool canTrain = m_workflow->canTrainOrClassify();
-  const QString trainTip = canTrain
-                             ? QString()
-                             : tr( "还需：%1" ).arg(
-                                 m_workflow->missingRequirements( RsClassifyStep::TrainClassify )
-                                   .join( QStringLiteral( "；" ) ) );
+  // Soft-gate Apply / Preview from canTrainOrClassify; also block while busy.
+  const bool canTrain = m_workflow->canTrainOrClassify() && !m_classifyBusy;
+  QString trainTip;
+  if ( m_classifyBusy )
+    trainTip = tr( "分类任务运行中…" );
+  else if ( !m_workflow->canTrainOrClassify() )
+    trainTip = tr( "还需：%1" ).arg(
+      m_workflow->missingRequirements( RsClassifyStep::TrainClassify )
+        .join( QStringLiteral( "；" ) ) );
   if ( m_applyAction )
   {
     m_applyAction->setEnabled( canTrain );
@@ -1331,6 +1365,12 @@ void QgsClassificationMainWindow::refreshWorkflowUi()
       btnPreview->setEnabled( canTrain );
       btnPreview->setToolTip( trainTip );
     }
+    if ( auto *btnCv = m_classifierBar->findChild<QPushButton *>(
+           QStringLiteral( "rsClassifierBtnCv" ) ) )
+    {
+      btnCv->setEnabled( canTrain );
+      btnCv->setToolTip( trainTip );
+    }
   }
   if ( m_stepApplyBtn )
   {
@@ -1347,6 +1387,8 @@ void QgsClassificationMainWindow::refreshWorkflowUi()
     m_stepCvBtn->setEnabled( canTrain );
     m_stepCvBtn->setToolTip( trainTip );
   }
+  if ( m_ppRunBtn )
+    m_ppRunBtn->setEnabled( m_workflow->canRunPostProcess() && !m_classifyBusy );
 
   // Wizard: soft-hide JM / spectral unless Evaluate step; expert: show all.
   const bool expert = m_workflow->mode() == RsClassifyUiMode::Expert;
@@ -1548,6 +1590,8 @@ bool QgsClassificationMainWindow::buildTrainingData( const QVector<int> &bands,
 
 void QgsClassificationMainWindow::applyClassification()
 {
+  if ( m_classifyBusy )
+    return;
   if ( m_sourceRasterPath.isEmpty() )
   {
     statusBar()->showMessage( tr( "请先 File → Open source raster..." ), 5000 );
@@ -1673,8 +1717,10 @@ void QgsClassificationMainWindow::applyClassification()
   SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Classification started: algo=%1, bands=%2, output=%3" )
     .arg( cfg.algoName ).arg( cfg.bandIndices.size() ).arg( QFileInfo( outPath ).fileName() ) );
   auto *task = new RsClassificationTask( std::move( cfg ) );
+  setClassifyBusy( true );
 
   connect( task, &QgsTask::taskCompleted, this, [this, task, algoForLog, outForLog]() {
+    setClassifyBusy( false );
     const auto &r = task->result();
     if ( r.ok )
     {
@@ -1753,6 +1799,7 @@ void QgsClassificationMainWindow::applyClassification()
   // run() returns false on both cancel and hard failure — QgsTask emits
   // taskTerminated (not taskCompleted). Surface errorMessage when present.
   connect( task, &QgsTask::taskTerminated, this, [this, task]() {
+    setClassifyBusy( false );
     const auto &r = task->result();
     if ( !r.errorMessage.isEmpty()
          && r.errorMessage != QStringLiteral( "Cancelled" ) )
@@ -1803,6 +1850,8 @@ void QgsClassificationMainWindow::onRoiDrawn( const QgsGeometry &geom, int class
 
 void QgsClassificationMainWindow::applyPreview()
 {
+  if ( m_classifyBusy )
+    return;
   if ( m_sourceRasterPath.isEmpty() )
   {
     if ( statusBar() )
@@ -1892,7 +1941,9 @@ void QgsClassificationMainWindow::applyPreview()
 
   auto *task = new RsClassificationTask( std::move( cfg ) );
   const QString outForLog = outPath;
+  setClassifyBusy( true );
   connect( task, &QgsTask::taskCompleted, this, [this, task, outForLog]() {
+    setClassifyBusy( false );
     const auto &r = task->result();
     if ( !r.ok )
     {
@@ -1901,8 +1952,7 @@ void QgsClassificationMainWindow::applyPreview()
           tr( "预览失败: %1" ).arg( r.errorMessage ), 6000 );
       return;
     }
-    // Add the preview as a temporary layer on the canvas. Reuses
-    // m_layerStore for lifetime management.
+    // Preview must never mark full classify complete (hasFullClassifyResult).
     auto *previewLayer = new QgsRasterLayer(
       outForLog, QStringLiteral( "classify_preview" ),
       QStringLiteral( "gdal" ) );
@@ -1931,6 +1981,7 @@ void QgsClassificationMainWindow::applyPreview()
   } );
 
   connect( task, &QgsTask::taskTerminated, this, [this, task]() {
+    setClassifyBusy( false );
     const auto &r = task->result();
     if ( !r.errorMessage.isEmpty()
          && r.errorMessage != QStringLiteral( "Cancelled" ) )
@@ -1973,6 +2024,8 @@ QMap<int, int> QgsClassificationMainWindow::collectRecodeMap() const
 
 void QgsClassificationMainWindow::runPostProcess()
 {
+  if ( m_classifyBusy )
+    return;
   if ( !m_workflow || !m_workflow->canRunPostProcess() )
   {
     if ( statusBar() )
@@ -2038,17 +2091,14 @@ void QgsClassificationMainWindow::runPostProcess()
     return;
   }
 
-  if ( m_ppRunBtn )
-    m_ppRunBtn->setEnabled( false );
-
   const QString outRaster = cfg.outputRasterPath;
   const QString outVector = cfg.outputVectorPath;
   const bool doPoly = cfg.runPolygonize;
   auto *task = new RsPostProcessTask( std::move( cfg ) );
+  setClassifyBusy( true );
 
   connect( task, &QgsTask::taskCompleted, this, [this, task, outRaster, outVector, doPoly]() {
-    if ( m_ppRunBtn )
-      m_ppRunBtn->setEnabled( true );
+    setClassifyBusy( false );
     const auto &r = task->result();
     if ( !r.ok )
     {
@@ -2100,8 +2150,7 @@ void QgsClassificationMainWindow::runPostProcess()
   } );
 
   connect( task, &QgsTask::taskTerminated, this, [this, task]() {
-    if ( m_ppRunBtn )
-      m_ppRunBtn->setEnabled( true );
+    setClassifyBusy( false );
     const auto &r = task->result();
     if ( !r.errorMessage.isEmpty()
          && r.errorMessage != QStringLiteral( "Cancelled" ) )
@@ -2125,6 +2174,8 @@ void QgsClassificationMainWindow::runPostProcess()
 void QgsClassificationMainWindow::runCrossValidation()
 {
   // Phase 10A.1.2 — stratified 5-fold CV on the current ROIs.
+  if ( m_classifyBusy )
+    return;
   if ( m_sourceRasterPath.isEmpty() )
   {
     if ( statusBar() )
@@ -2173,12 +2224,14 @@ void QgsClassificationMainWindow::runCrossValidation()
 
   // Run cross-validation asynchronously to avoid blocking the UI
   auto *task = new RsCvTask( X, y, factory, 5, tr( "5-fold Cross Validation" ) );
+  setClassifyBusy( true );
 
   task->setCompletionCallback( [this]( const RsCrossValidation::Result &res )
   {
     // This runs on the worker thread, so we need to invoke on the main thread
     QMetaObject::invokeMethod( this, [this, res]()
     {
+      setClassifyBusy( false );
       QString perFold;
       for ( int i = 0; i < res.foldAccuracies.size(); ++i )
         perFold += QString( "  fold%1: %2%\n" )
@@ -2191,6 +2244,10 @@ void QgsClassificationMainWindow::runCrossValidation()
           .arg( res.stdAccuracy * 100, 0, 'f', 1 )
           .arg( perFold ) );
     }, Qt::QueuedConnection );
+  } );
+
+  connect( task, &QgsTask::taskTerminated, this, [this]() {
+    setClassifyBusy( false );
   } );
 
   QgsApplication::taskManager()->addTask( task );

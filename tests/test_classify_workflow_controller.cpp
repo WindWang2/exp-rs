@@ -47,6 +47,34 @@ TEST_CASE( "Workflow: missingRequirements lists source for train", "[classify][w
   w.setTrainingPixelCount( 100 );
   const auto miss = w.missingRequirements( RsClassifyStep::TrainClassify );
   REQUIRE_FALSE( miss.isEmpty() );
+  // Chinese soft-gate messages must be non-empty for every reported item.
+  for ( const QString &m : miss )
+    REQUIRE_FALSE( m.trimmed().isEmpty() );
   w.setHasSourceRaster( true );
   REQUIRE( w.canTrainOrClassify() );
+  REQUIRE( w.missingRequirements( RsClassifyStep::TrainClassify ).isEmpty() );
+}
+
+TEST_CASE( "Workflow: Chinese missingRequirements non-empty for all gated steps",
+           "[classify][workflow]" )
+{
+  RsClassifyWorkflowController w;
+  // Leave all inputs at defaults so each gated step has a non-empty list.
+  const RsClassifyStep steps[] = {
+    RsClassifyStep::ClassSystem,
+    RsClassifyStep::Samples,
+    RsClassifyStep::Evaluate,
+    RsClassifyStep::TrainClassify,
+    RsClassifyStep::Accuracy,
+    RsClassifyStep::PostProcess,
+    RsClassifyStep::Export,
+  };
+  for ( RsClassifyStep s : steps )
+  {
+    const auto miss = w.missingRequirements( s );
+    // ClassSystem needs >=2 classes → message; Samples needs source+class, etc.
+    REQUIRE_FALSE( miss.isEmpty() );
+    for ( const QString &m : miss )
+      REQUIRE_FALSE( m.trimmed().isEmpty() );
+  }
 }
