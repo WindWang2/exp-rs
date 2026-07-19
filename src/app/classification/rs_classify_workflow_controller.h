@@ -34,6 +34,7 @@ public:
   void setTrainingClassCountWithPixels( int n );
   void setTrainingPixelCount( int n );
   void setEvaluateReviewed( bool v );
+  bool evaluateReviewed() const { return mEvalReviewed; }
   void setHasFullClassifyResult( bool v ); // Apply path only, not preview
   void setHasAccuracyMetrics( bool v );
   void setPostProcessSkipped( bool v );

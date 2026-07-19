@@ -29,8 +29,8 @@ class RsAccuracyPanel : public QWidget
     RsAccuracyAssessment::Result result() const { return mResult; }
     QHash<int, QString> classNames() const { return mNames; }
 
-  private slots:
-    void exportCsv();
+    /// Interactive CSV export (file dialog). Returns true if a file was written.
+    bool exportCsv();
 
   private:
     QString classLabel( int id ) const;

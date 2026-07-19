@@ -1594,6 +1594,21 @@ if(TARGET qgis_app_classify)
   )
   sicnu_discover_tests(test_pixel_window)
 
+  # Classification workflow — .rscproj JSON project persistence.
+  add_executable(test_classification_project test_classification_project.cpp)
+  target_link_libraries(test_classification_project PRIVATE
+    Catch2::Catch2WithMain
+    qgis_analysis
+    Qt6::Core
+  )
+  target_include_directories(test_classification_project PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_classification_project)
+
   # Classification v1.1 — dirty flag + workflow QSettings session.
   add_executable(test_classify_session_state
     test_classify_session_state.cpp

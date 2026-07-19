@@ -7,11 +7,13 @@
 #include "rs_class_def.h"
 #include "rs_class_quick_list.h"
 #include "rs_class_table_widget.h"
+#include "rs_classification_project.h"
 #include "rs_classification_split.h"
 #include "rs_classification_task.h"
 #include "rs_classifier_kmeans.h"
 #include "rs_post_process_task.h"
 #include "rs_classifier_load_dialog.h"
+#include "qgisinterface.h"
 #include "rs_classifier_normalbayes.h"
 #include "rs_classifier_setup_bar.h"
 #include "rs_classifier_svm.h"
@@ -331,6 +333,13 @@ void QgsClassificationMainWindow::setupMenus()
                        &QgsClassificationMainWindow::loadRois );
   fileMenu->addAction( tr( "Save ROIs..." ), this,
                        &QgsClassificationMainWindow::exportRois );
+  fileMenu->addSeparator();
+  fileMenu->addAction( tr( "Save classification project..." ), this, [this]() {
+    saveClassificationProject();
+  } );
+  fileMenu->addAction( tr( "Load classification project..." ), this, [this]() {
+    loadProjectFromFile();
+  } );
   fileMenu->addSeparator();
   fileMenu->addAction( tr( "Close" ), this, &QWidget::close );
 
@@ -1060,7 +1069,70 @@ void QgsClassificationMainWindow::populateStepPanels()
     lay->addStretch( 1 );
   }
 
-  // Step 7 remains a skeleton placeholder for a later task.
+  // --- Step 7: Export ------------------------------------------------------
+  if ( QWidget *body = m_stepHost->body( RsClassifyStep::Export ) )
+  {
+    auto *lay = qobject_cast<QVBoxLayout *>( body->layout() );
+    if ( !lay )
+    {
+      lay = new QVBoxLayout( body );
+      lay->setContentsMargins( 0, 4, 0, 4 );
+      lay->setSpacing( 8 );
+    }
+
+    auto *listBox = new QGroupBox( tr( "导出所选产物" ), body );
+    listBox->setObjectName( QStringLiteral( "classifyStep7ExportBox" ) );
+    auto *listLay = new QVBoxLayout( listBox );
+
+    m_exportClassifiedCb = new QCheckBox( tr( "分类 GeoTIFF" ), listBox );
+    m_exportClassifiedCb->setObjectName( QStringLiteral( "classifyStep7Classified" ) );
+    m_exportClassifiedCb->setChecked( true );
+    listLay->addWidget( m_exportClassifiedCb );
+
+    m_exportPostRasterCb = new QCheckBox( tr( "后处理栅格" ), listBox );
+    m_exportPostRasterCb->setObjectName( QStringLiteral( "classifyStep7PostRaster" ) );
+    listLay->addWidget( m_exportPostRasterCb );
+
+    m_exportPostVectorCb = new QCheckBox( tr( "后处理矢量" ), listBox );
+    m_exportPostVectorCb->setObjectName( QStringLiteral( "classifyStep7PostVector" ) );
+    listLay->addWidget( m_exportPostVectorCb );
+
+    m_exportRoiCb = new QCheckBox( tr( "ROI" ), listBox );
+    m_exportRoiCb->setObjectName( QStringLiteral( "classifyStep7Roi" ) );
+    listLay->addWidget( m_exportRoiCb );
+
+    m_exportAccuracyCsvCb = new QCheckBox( tr( "精度 CSV" ), listBox );
+    m_exportAccuracyCsvCb->setObjectName( QStringLiteral( "classifyStep7AccuracyCsv" ) );
+    listLay->addWidget( m_exportAccuracyCsvCb );
+
+    m_exportProjectCb = new QCheckBox( tr( "分类项目 .rscproj" ), listBox );
+    m_exportProjectCb->setObjectName( QStringLiteral( "classifyStep7Project" ) );
+    m_exportProjectCb->setChecked( true );
+    listLay->addWidget( m_exportProjectCb );
+
+    lay->addWidget( listBox );
+
+    m_exportSelectedBtn = new QPushButton( tr( "导出所选" ), body );
+    m_exportSelectedBtn->setObjectName( QStringLiteral( "classifyStep7ExportSelected" ) );
+    connect( m_exportSelectedBtn, &QPushButton::clicked, this,
+             &QgsClassificationMainWindow::exportSelectedStep7 );
+    lay->addWidget( m_exportSelectedBtn );
+
+    m_exportLoadToMainBtn = new QPushButton( tr( "加载分类结果到主窗口" ), body );
+    m_exportLoadToMainBtn->setObjectName( QStringLiteral( "classifyStep7LoadToMain" ) );
+    connect( m_exportLoadToMainBtn, &QPushButton::clicked, this,
+             &QgsClassificationMainWindow::loadClassificationResultToMain );
+    lay->addWidget( m_exportLoadToMainBtn );
+
+    auto *hint = new QLabel(
+      tr( "勾选产物后点「导出所选」；可将分类/后处理栅格加载到主窗口图层树。"
+          "任一成功导出或加载即完成本步。" ),
+      body );
+    hint->setWordWrap( true );
+    hint->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    lay->addWidget( hint );
+    lay->addStretch( 1 );
+  }
 }
 
 void QgsClassificationMainWindow::ensureDefaultClasses()
@@ -1661,6 +1733,7 @@ void QgsClassificationMainWindow::applyClassification()
           m_accuracyPanel->setResult( r.accuracy, classNames );
         if ( m_stepAccuracyPopupBtn )
           m_stepAccuracyPopupBtn->setEnabled( true );
+        m_accuracySource = QStringLiteral( "holdout" );
         if ( m_workflow )
           m_workflow->setHasAccuracyMetrics( true );
         // Advance soft focus to accuracy step so the embedded panel is visible.
@@ -1986,6 +2059,10 @@ void QgsClassificationMainWindow::runPostProcess()
 
     if ( m_workflow )
       m_workflow->setHasPostProcessResult( true );
+
+    m_lastPostRasterPath = outRaster;
+    if ( doPoly && !outVector.isEmpty() )
+      m_lastPostVectorPath = outVector;
 
     // Load result raster onto the classification canvas when possible.
     auto *resultLayer = new QgsRasterLayer(
@@ -2506,4 +2583,337 @@ void QgsClassificationMainWindow::loadClassifierModel()
       statusBar()->showMessage(
         tr( "已加载模型 — 下次 Apply 将跳过训练，直接 predict" ), 0 );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Step 7 — export checklist + project persistence.
+// ---------------------------------------------------------------------------
+
+bool QgsClassificationMainWindow::copyPathWithDialog( const QString &srcPath,
+                                                     const QString &title )
+{
+  if ( srcPath.isEmpty() || !QFileInfo::exists( srcPath ) )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "源文件不存在: %1" ).arg( srcPath ), 5000 );
+    return false;
+  }
+
+  const QFileInfo fi( srcPath );
+  const QString dest = QFileDialog::getSaveFileName(
+    this, title, fi.fileName(),
+    tr( "All files (*)" ) );
+  if ( dest.isEmpty() )
+    return false;
+
+  if ( QFileInfo::exists( dest ) )
+    QFile::remove( dest );
+
+  if ( !QFile::copy( srcPath, dest ) )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "复制失败: %1" ).arg( dest ), 5000 );
+    return false;
+  }
+  if ( statusBar() )
+    statusBar()->showMessage(
+      tr( "已导出: %1" ).arg( QFileInfo( dest ).fileName() ), 4000 );
+  return true;
+}
+
+void QgsClassificationMainWindow::exportSelectedStep7()
+{
+  bool anySuccess = false;
+  int attempted = 0;
+
+  if ( m_exportClassifiedCb && m_exportClassifiedCb->isChecked() )
+  {
+    ++attempted;
+    const QString src = !m_lastClassifyPath.isEmpty()
+                          ? m_lastClassifyPath
+                          : ( m_ppInputEdit ? m_ppInputEdit->text().trimmed()
+                                            : QString() );
+    if ( copyPathWithDialog( src, tr( "导出分类 GeoTIFF" ) ) )
+      anySuccess = true;
+  }
+
+  if ( m_exportPostRasterCb && m_exportPostRasterCb->isChecked() )
+  {
+    ++attempted;
+    const QString src = !m_lastPostRasterPath.isEmpty()
+                          ? m_lastPostRasterPath
+                          : ( m_ppOutputEdit ? m_ppOutputEdit->text().trimmed()
+                                             : QString() );
+    if ( copyPathWithDialog( src, tr( "导出后处理栅格" ) ) )
+      anySuccess = true;
+  }
+
+  if ( m_exportPostVectorCb && m_exportPostVectorCb->isChecked() )
+  {
+    ++attempted;
+    const QString src = !m_lastPostVectorPath.isEmpty()
+                          ? m_lastPostVectorPath
+                          : ( m_ppVectorEdit ? m_ppVectorEdit->text().trimmed()
+                                             : QString() );
+    if ( copyPathWithDialog( src, tr( "导出后处理矢量" ) ) )
+      anySuccess = true;
+  }
+
+  if ( m_exportRoiCb && m_exportRoiCb->isChecked() )
+  {
+    ++attempted;
+    const QString path = QFileDialog::getSaveFileName(
+      this, tr( "Export ROIs" ), mSession.lastRoisPath(),
+      tr( "ESRI Shapefile (*.shp)" ) );
+    if ( !path.isEmpty() && saveRoisToPath( path ) )
+      anySuccess = true;
+  }
+
+  if ( m_exportAccuracyCsvCb && m_exportAccuracyCsvCb->isChecked() )
+  {
+    ++attempted;
+    if ( m_accuracyPanel && m_accuracyPanel->hasResult()
+         && m_accuracyPanel->exportCsv() )
+      anySuccess = true;
+    else if ( statusBar() )
+      statusBar()->showMessage( tr( "无精度结果可导出" ), 4000 );
+  }
+
+  if ( m_exportProjectCb && m_exportProjectCb->isChecked() )
+  {
+    ++attempted;
+    if ( saveClassificationProject() )
+      anySuccess = true;
+  }
+
+  if ( attempted == 0 )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "请至少勾选一项导出内容" ), 4000 );
+    return;
+  }
+
+  if ( anySuccess )
+  {
+    if ( m_workflow )
+      m_workflow->setHasExportedOrLoadedToMain( true );
+    refreshWorkflowUi();
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "导出所选完成" ), 4000 );
+  }
+}
+
+void QgsClassificationMainWindow::loadClassificationResultToMain()
+{
+  QString path = !m_lastPostRasterPath.isEmpty()
+                   ? m_lastPostRasterPath
+                   : m_lastClassifyPath;
+  if ( path.isEmpty() && m_ppOutputEdit )
+    path = m_ppOutputEdit->text().trimmed();
+  if ( path.isEmpty() && m_ppInputEdit )
+    path = m_ppInputEdit->text().trimmed();
+
+  if ( path.isEmpty() || !QFileInfo::exists( path ) )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "无可用的分类/后处理栅格路径" ), 5000 );
+    return;
+  }
+
+  if ( !m_iface )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage(
+        tr( "主窗口接口不可用，无法加载图层（请从主程序打开分类窗口）" ), 6000 );
+    return;
+  }
+
+  const QString baseName = QFileInfo( path ).completeBaseName();
+  QgsRasterLayer *layer = m_iface->addRasterLayer( path, baseName );
+  if ( !layer || !layer->isValid() )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "加载到主窗口失败: %1" ).arg( path ), 5000 );
+    return;
+  }
+
+  if ( m_workflow )
+    m_workflow->setHasExportedOrLoadedToMain( true );
+  refreshWorkflowUi();
+  if ( statusBar() )
+    statusBar()->showMessage(
+      tr( "已加载到主窗口: %1" ).arg( baseName ), 5000 );
+}
+
+bool QgsClassificationMainWindow::saveClassificationProject( QString path )
+{
+  if ( path.isEmpty() )
+  {
+    path = QFileDialog::getSaveFileName(
+      this, tr( "保存分类项目" ), m_projectPath,
+      tr( "Classification project (*.rscproj);;All files (*)" ) );
+  }
+  if ( path.isEmpty() )
+    return false;
+  if ( !path.endsWith( QLatin1String( ".rscproj" ), Qt::CaseInsensitive ) )
+    path += QStringLiteral( ".rscproj" );
+
+  RsClassificationProjectData data;
+  data.version = 1;
+  if ( m_workflow )
+  {
+    data.workflowStep = static_cast<int>( m_workflow->currentStep() );
+    data.workflowMode =
+      ( m_workflow->mode() == RsClassifyUiMode::Expert )
+        ? QStringLiteral( "expert" )
+        : QStringLiteral( "wizard" );
+    data.evaluateReviewed = m_workflow->evaluateReviewed();
+  }
+  data.sourceRasterPath = m_sourceRasterPath;
+  data.roisPath = mSession.lastRoisPath();
+  data.classifiedRasterPath = m_lastClassifyPath;
+  data.postProcessRasterPath = m_lastPostRasterPath;
+  if ( data.postProcessRasterPath.isEmpty() && m_ppOutputEdit )
+    data.postProcessRasterPath = m_ppOutputEdit->text().trimmed();
+  data.postProcessVectorPath = m_lastPostVectorPath;
+  if ( data.postProcessVectorPath.isEmpty() && m_ppVectorEdit )
+    data.postProcessVectorPath = m_ppVectorEdit->text().trimmed();
+  data.accuracySource = m_accuracySource;
+  if ( m_accuracyPanel && m_accuracyPanel->hasResult() )
+  {
+    data.overallAccuracy = m_accuracyPanel->result().overallAccuracy;
+    data.kappa = m_accuracyPanel->result().kappa;
+  }
+
+  if ( !RsClassificationProject::save( path, data ) )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "保存项目失败: %1" ).arg( path ), 5000 );
+    return false;
+  }
+
+  m_projectPath = path;
+  SICNU_LOG_INFO( SicnuLogTags::Classification,
+                  QString( "Classification project saved: %1" ).arg( path ) );
+  if ( statusBar() )
+    statusBar()->showMessage(
+      tr( "已保存项目: %1" ).arg( QFileInfo( path ).fileName() ), 5000 );
+  return true;
+}
+
+bool QgsClassificationMainWindow::loadProjectFromFile( QString path )
+{
+  if ( path.isEmpty() )
+  {
+    path = QFileDialog::getOpenFileName(
+      this, tr( "加载分类项目" ), m_projectPath,
+      tr( "Classification project (*.rscproj);;All files (*)" ) );
+  }
+  if ( path.isEmpty() )
+    return false;
+
+  RsClassificationProjectData data;
+  if ( !RsClassificationProject::load( path, data ) )
+  {
+    QMessageBox::critical( this, tr( "Error" ),
+                           tr( "无法加载项目: %1" ).arg( path ) );
+    return false;
+  }
+
+  m_projectPath = path;
+
+  // Paths first so UI panels reflect them.
+  if ( !data.classifiedRasterPath.isEmpty() )
+  {
+    m_lastClassifyPath = data.classifiedRasterPath;
+    if ( m_ppInputEdit )
+      m_ppInputEdit->setText( data.classifiedRasterPath );
+  }
+  if ( !data.postProcessRasterPath.isEmpty() )
+  {
+    m_lastPostRasterPath = data.postProcessRasterPath;
+    if ( m_ppOutputEdit )
+      m_ppOutputEdit->setText( data.postProcessRasterPath );
+  }
+  if ( !data.postProcessVectorPath.isEmpty() )
+  {
+    m_lastPostVectorPath = data.postProcessVectorPath;
+    if ( m_ppVectorEdit )
+      m_ppVectorEdit->setText( data.postProcessVectorPath );
+  }
+  m_accuracySource = data.accuracySource;
+
+  // Optionally restore source raster and ROIs when paths are present.
+  if ( !data.sourceRasterPath.isEmpty()
+       && QFileInfo::exists( data.sourceRasterPath )
+       && data.sourceRasterPath != m_sourceRasterPath )
+  {
+    openSourceRaster( data.sourceRasterPath );
+  }
+  if ( !data.roisPath.isEmpty() && QFileInfo::exists( data.roisPath ) && m_rois )
+  {
+    QgsCoordinateReferenceSystem crs;
+    if ( m_sourceLayer )
+      crs = m_sourceLayer->crs();
+    RsRoiCollection staging;
+    if ( RsRoiIO::load( data.roisPath, staging, crs ) )
+    {
+      mSuppressDirty = true;
+      m_rois->clear();
+      const auto defs = staging.classDefs();
+      for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
+        m_rois->setClassDef( it.value() );
+      for ( int i = 0; i < staging.size(); ++i )
+      {
+        RsRoi roi = staging.at( i );
+        if ( m_sourceWidth > 0 && m_sourceHeight > 0 )
+        {
+          QSet<quint64> pixels = RsPixelRasterizer::rasterize(
+            roi.geometry(), m_sourceGt, m_sourceWidth, m_sourceHeight );
+          roi.setPixelIndices( QVector<quint64>( pixels.begin(), pixels.end() ) );
+        }
+        m_rois->appendRoi( roi );
+      }
+      mSuppressDirty = false;
+      mSession.setLastRoisPath( data.roisPath );
+      mSession.clearDirty();
+    }
+  }
+
+  if ( m_workflow )
+  {
+    m_workflow->setEvaluateReviewed( data.evaluateReviewed );
+    if ( !data.classifiedRasterPath.isEmpty()
+         && QFileInfo::exists( data.classifiedRasterPath ) )
+      m_workflow->setHasFullClassifyResult( true );
+    if ( !data.postProcessRasterPath.isEmpty()
+         && QFileInfo::exists( data.postProcessRasterPath ) )
+      m_workflow->setHasPostProcessResult( true );
+
+    const RsClassifyUiMode mode =
+      ( data.workflowMode == QLatin1String( "expert" ) )
+        ? RsClassifyUiMode::Expert
+        : RsClassifyUiMode::Wizard;
+    m_workflow->setMode( mode );
+
+    int step = data.workflowStep;
+    if ( step < 0 )
+      step = 0;
+    if ( step >= static_cast<int>( RsClassifyStep::Count ) )
+      step = static_cast<int>( RsClassifyStep::Count ) - 1;
+    m_workflow->setCurrentStep( static_cast<RsClassifyStep>( step ) );
+  }
+
+  syncWorkflowFromRois();
+  refreshWorkflowUi();
+
+  SICNU_LOG_INFO( SicnuLogTags::Classification,
+                  QString( "Classification project loaded: %1 (step=%2 mode=%3)" )
+                    .arg( path )
+                    .arg( data.workflowStep )
+                    .arg( data.workflowMode ) );
+  if ( statusBar() )
+    statusBar()->showMessage(
+      tr( "已加载项目: %1" ).arg( QFileInfo( path ).fileName() ), 5000 );
+  return true;
 }

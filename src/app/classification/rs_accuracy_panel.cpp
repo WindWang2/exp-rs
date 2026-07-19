@@ -227,23 +227,23 @@ void RsAccuracyPanel::rebuildTables()
     mExportBtn->setEnabled( true );
 }
 
-void RsAccuracyPanel::exportCsv()
+bool RsAccuracyPanel::exportCsv()
 {
   if ( !mHasResult )
-    return;
+    return false;
 
   const QString path = QFileDialog::getSaveFileName(
     this, tr( "导出精度报告 (CSV)" ), QString(),
     tr( "CSV files (*.csv)" ) );
   if ( path.isEmpty() )
-    return;
+    return false;
 
   QFile f( path );
   if ( !f.open( QIODevice::WriteOnly | QIODevice::Text ) )
   {
     QMessageBox::warning( this, tr( "导出失败" ),
                           tr( "无法写入文件: %1" ).arg( path ) );
-    return;
+    return false;
   }
   QTextStream out( &f );
 
@@ -281,4 +281,5 @@ void RsAccuracyPanel::exportCsv()
   f.close();
   SICNU_LOG_INFO( SicnuLogTags::Classification,
                   QString( "Accuracy report exported: %1" ).arg( path ) );
+  return true;
 }

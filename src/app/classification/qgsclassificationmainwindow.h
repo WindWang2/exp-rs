@@ -113,6 +113,11 @@ class QgsClassificationMainWindow : public QMainWindow
     /// next applyClassification() call skips training and predicts directly.
     void loadClassifierModel();
 
+    /// Save classification project (.rscproj) — prompts if \a path empty.
+    bool saveClassificationProject( QString path = QString() );
+    /// Load classification project and restore workflow step/mode/paths.
+    bool loadProjectFromFile( QString path = QString() );
+
   protected:
     void closeEvent( QCloseEvent *e ) override;
 
@@ -124,7 +129,7 @@ class QgsClassificationMainWindow : public QMainWindow
     void setupRoiTools();
     void setupClassifierBar();
     void setupWorkflowUi();
-    /// Fill step-host bodies for steps 1–4 with actions linked to existing slots.
+    /// Fill step-host bodies for steps 1–7 with actions linked to existing slots.
     void populateStepPanels();
     /// Sync stepper completion, gate labels, Apply enable, wizard dock layout.
     void refreshWorkflowUi();
@@ -144,6 +149,12 @@ class QgsClassificationMainWindow : public QMainWindow
     void runPostProcess();
     /// Collect recode old→new pairs from the Step 6 table (may be empty).
     QMap<int, int> collectRecodeMap() const;
+    /// Step 7: export checked artefacts (GeoTIFF copy, ROI, CSV, .rscproj).
+    void exportSelectedStep7();
+    /// Step 7: add last classify/post raster to the main app via m_iface.
+    void loadClassificationResultToMain();
+    /// Copy an existing file to a user-chosen destination. Returns true on success.
+    bool copyPathWithDialog( const QString &srcPath, const QString &title );
 
     RsClassifySessionState::WorkflowSnapshot captureWorkflowSnapshot() const;
     void applyWorkflowSnapshot( const RsClassifySessionState::WorkflowSnapshot &s );
@@ -190,6 +201,24 @@ class QgsClassificationMainWindow : public QMainWindow
     QPushButton *m_ppSkipBtn = nullptr;
     /// Last successful full-Apply classified raster path (Step 6 input default).
     QString m_lastClassifyPath;
+    /// Last successful post-process raster / vector paths.
+    QString m_lastPostRasterPath;
+    QString m_lastPostVectorPath;
+
+    // Step 7 — export checklist.
+    QCheckBox *m_exportClassifiedCb = nullptr;
+    QCheckBox *m_exportPostRasterCb = nullptr;
+    QCheckBox *m_exportPostVectorCb = nullptr;
+    QCheckBox *m_exportRoiCb = nullptr;
+    QCheckBox *m_exportAccuracyCsvCb = nullptr;
+    QCheckBox *m_exportProjectCb = nullptr;
+    QPushButton *m_exportSelectedBtn = nullptr;
+    QPushButton *m_exportLoadToMainBtn = nullptr;
+
+    /// Accuracy source label for project persistence ("holdout" | "valid_layer").
+    QString m_accuracySource;
+    /// Last saved/loaded .rscproj path.
+    QString m_projectPath;
 
     QDockWidget *m_classListDock = nullptr;
     QDockWidget *m_classQuickListDock = nullptr;
