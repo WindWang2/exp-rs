@@ -13,8 +13,8 @@ class QStackedWidget;
 /**
  * \brief Host for the seven classification step panels.
  *
- * Each panel is a placeholder skeleton (title, completion tip, gate label,
- * prev/next). Real controls are filled in a later task.
+ * Each panel is a skeleton (title, completion tip, gate label, empty body,
+ * prev/next). Main window fills body widgets with real step controls.
  */
 class RsClassifyStepHost : public QWidget
 {
@@ -25,6 +25,9 @@ class RsClassifyStepHost : public QWidget
 
     void setCurrentStep( RsClassifyStep s );
     QWidget *panel( RsClassifyStep s ) const;
+
+    /// Content area for step-specific controls (objectName classifyStepBody).
+    QWidget *body( RsClassifyStep s ) const;
 
     /// Soft-gate status label for the given step (objectName classifyStepGate).
     QLabel *gateLabel( RsClassifyStep s ) const;

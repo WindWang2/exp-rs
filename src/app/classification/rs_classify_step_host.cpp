@@ -82,14 +82,13 @@ QWidget *RsClassifyStepHost::buildPanel( RsClassifyStep s )
   gate->setStyleSheet( QStringLiteral( "color: #9a6700;" ) );
   layout->addWidget( gate );
 
-  // Placeholder body for Task 6 real controls.
-  auto *placeholder = new QLabel(
-    tr( "（步骤内容将在后续任务接入）" ), panel );
-  placeholder->setObjectName( QStringLiteral( "classifyStepPlaceholder" ) );
-  placeholder->setStyleSheet( QStringLiteral( "color: #8c959f;" ) );
-  layout->addWidget( placeholder );
-
-  layout->addStretch( 1 );
+  // Empty body for mainwindow to parent step-specific controls into.
+  auto *body = new QWidget( panel );
+  body->setObjectName( QStringLiteral( "classifyStepBody" ) );
+  auto *bodyLayout = new QVBoxLayout( body );
+  bodyLayout->setContentsMargins( 0, 4, 0, 4 );
+  bodyLayout->setSpacing( 8 );
+  layout->addWidget( body, /*stretch=*/1 );
 
   auto *nav = new QHBoxLayout;
   auto *prev = new QPushButton( tr( "上一步" ), panel );
@@ -124,6 +123,14 @@ QWidget *RsClassifyStepHost::panel( RsClassifyStep s ) const
   if ( idx < 0 || idx >= mPanels.size() )
     return nullptr;
   return mPanels[idx];
+}
+
+QWidget *RsClassifyStepHost::body( RsClassifyStep s ) const
+{
+  QWidget *p = panel( s );
+  if ( !p )
+    return nullptr;
+  return p->findChild<QWidget *>( QStringLiteral( "classifyStepBody" ) );
 }
 
 QLabel *RsClassifyStepHost::gateLabel( RsClassifyStep s ) const

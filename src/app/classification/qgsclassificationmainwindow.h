@@ -14,6 +14,8 @@
 #include "rs_feature_scaler.h"
 
 class QCloseEvent;
+class QLabel;
+class QPushButton;
 class QTimer;
 
 class QgisInterface;
@@ -116,10 +118,16 @@ class QgsClassificationMainWindow : public QMainWindow
     void setupRoiTools();
     void setupClassifierBar();
     void setupWorkflowUi();
+    /// Fill step-host bodies for steps 1–4 with actions linked to existing slots.
+    void populateStepPanels();
     /// Sync stepper completion, gate labels, Apply enable, wizard dock layout.
     void refreshWorkflowUi();
     /// Push ROI / class stats into the workflow controller.
     void syncWorkflowFromRois();
+    /// Ensure the default 6 land-cover classes exist when the scheme is empty.
+    void ensureDefaultClasses();
+    /// Train vs validation sample-digitizing role (UI highlight; ROIs stay shared).
+    void setActiveSampleRole( bool trainRole );
     /// Build a CV_32F NxB sample matrix and CV_32S Nx1 label matrix from the
     /// current ROIs + open source raster. Returns true if there are >= 10
     /// total samples, populates `X`, `y` and `bandsOut` accordingly.
@@ -141,6 +149,16 @@ class QgsClassificationMainWindow : public QMainWindow
     RsClassifyStepperBar *m_stepper = nullptr;
     RsClassifyStepHost *m_stepHost = nullptr;
     QDockWidget *m_workflowDock = nullptr;
+
+    // Step panel widgets (owned by m_stepHost panel bodies).
+    QLabel *m_stepClassCountLabel = nullptr;
+    QLabel *m_stepSampleStatsLabel = nullptr;
+    QPushButton *m_stepTrainRoleBtn = nullptr;
+    QPushButton *m_stepValidRoleBtn = nullptr;
+    QPushButton *m_stepCvBtn = nullptr;
+    QPushButton *m_stepPreviewBtn = nullptr;
+    QPushButton *m_stepApplyBtn = nullptr;
+    bool m_trainSampleRole = true;
 
     QDockWidget *m_classListDock = nullptr;
     QDockWidget *m_classQuickListDock = nullptr;

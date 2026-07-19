@@ -46,6 +46,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QButtonGroup>
 #include <QCloseEvent>
 #include <QColor>
 #include <QDir>
@@ -53,6 +54,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QHBoxLayout>
 #include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -68,6 +70,7 @@
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolBar>
+#include <QVBoxLayout>
 #include <QVector>
 #include <QWidget>
 
@@ -622,6 +625,299 @@ void QgsClassificationMainWindow::setupWorkflowUi()
     if ( cur < last )
       m_workflow->setCurrentStep( static_cast<RsClassifyStep>( cur + 1 ) );
   } );
+
+  populateStepPanels();
+}
+
+void QgsClassificationMainWindow::populateStepPanels()
+{
+  if ( !m_stepHost )
+    return;
+
+  // --- Step 1: ClassSystem -------------------------------------------------
+  if ( QWidget *body = m_stepHost->body( RsClassifyStep::ClassSystem ) )
+  {
+    auto *lay = qobject_cast<QVBoxLayout *>( body->layout() );
+    if ( !lay )
+    {
+      lay = new QVBoxLayout( body );
+      lay->setContentsMargins( 0, 4, 0, 4 );
+      lay->setSpacing( 8 );
+    }
+
+    auto *btnOpen = new QPushButton( tr( "打开源影像…" ), body );
+    btnOpen->setObjectName( QStringLiteral( "classifyStep1OpenRaster" ) );
+    connect( btnOpen, &QPushButton::clicked, this,
+             static_cast<bool ( QgsClassificationMainWindow::* )()>(
+               &QgsClassificationMainWindow::openSourceRaster ) );
+    lay->addWidget( btnOpen );
+
+    m_stepClassCountLabel = new QLabel( body );
+    m_stepClassCountLabel->setObjectName( QStringLiteral( "classifyStep1ClassCount" ) );
+    m_stepClassCountLabel->setWordWrap( true );
+    lay->addWidget( m_stepClassCountLabel );
+
+    auto *btnDefaults = new QPushButton( tr( "添加默认 6 类" ), body );
+    btnDefaults->setObjectName( QStringLiteral( "classifyStep1DefaultClasses" ) );
+    connect( btnDefaults, &QPushButton::clicked, this,
+             &QgsClassificationMainWindow::ensureDefaultClasses );
+    lay->addWidget( btnDefaults );
+
+    auto *btnClasses = new QPushButton( tr( "打开类别管理" ), body );
+    btnClasses->setObjectName( QStringLiteral( "classifyStep1OpenClassTable" ) );
+    connect( btnClasses, &QPushButton::clicked, this, [this]() {
+      if ( !m_classListDock )
+        return;
+      m_classListDock->show();
+      m_classListDock->raise();
+      m_classListDock->activateWindow();
+    } );
+    lay->addWidget( btnClasses );
+
+    auto *help = new QLabel(
+      tr( "在类别管理中编辑名称与颜色；至少 2 个类别后可进入下一步。" ), body );
+    help->setWordWrap( true );
+    help->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    lay->addWidget( help );
+    lay->addStretch( 1 );
+  }
+
+  // --- Step 2: Samples -----------------------------------------------------
+  if ( QWidget *body = m_stepHost->body( RsClassifyStep::Samples ) )
+  {
+    auto *lay = qobject_cast<QVBoxLayout *>( body->layout() );
+    if ( !lay )
+    {
+      lay = new QVBoxLayout( body );
+      lay->setContentsMargins( 0, 4, 0, 4 );
+      lay->setSpacing( 8 );
+    }
+
+    auto *roleRow = new QHBoxLayout;
+    m_stepTrainRoleBtn = new QPushButton( tr( "训练样本" ), body );
+    m_stepTrainRoleBtn->setObjectName( QStringLiteral( "classifyStep2TrainRole" ) );
+    m_stepTrainRoleBtn->setCheckable( true );
+    m_stepValidRoleBtn = new QPushButton( tr( "验证样本" ), body );
+    m_stepValidRoleBtn->setObjectName( QStringLiteral( "classifyStep2ValidRole" ) );
+    m_stepValidRoleBtn->setCheckable( true );
+    auto *roleGroup = new QButtonGroup( body );
+    roleGroup->setExclusive( true );
+    roleGroup->addButton( m_stepTrainRoleBtn );
+    roleGroup->addButton( m_stepValidRoleBtn );
+    m_stepTrainRoleBtn->setChecked( true );
+    connect( m_stepTrainRoleBtn, &QPushButton::clicked, this, [this]() {
+      setActiveSampleRole( true );
+    } );
+    connect( m_stepValidRoleBtn, &QPushButton::clicked, this, [this]() {
+      setActiveSampleRole( false );
+    } );
+    roleRow->addWidget( m_stepTrainRoleBtn );
+    roleRow->addWidget( m_stepValidRoleBtn );
+    lay->addLayout( roleRow );
+
+    m_stepSampleStatsLabel = new QLabel( body );
+    m_stepSampleStatsLabel->setObjectName( QStringLiteral( "classifyStep2Stats" ) );
+    m_stepSampleStatsLabel->setWordWrap( true );
+    lay->addWidget( m_stepSampleStatsLabel );
+
+    auto *roiRow = new QHBoxLayout;
+    auto *btnExport = new QPushButton( tr( "导出 ROI…" ), body );
+    btnExport->setObjectName( QStringLiteral( "classifyStep2ExportRois" ) );
+    connect( btnExport, &QPushButton::clicked, this,
+             &QgsClassificationMainWindow::exportRois );
+    auto *btnLoad = new QPushButton( tr( "加载 ROI…" ), body );
+    btnLoad->setObjectName( QStringLiteral( "classifyStep2LoadRois" ) );
+    connect( btnLoad, &QPushButton::clicked, this,
+             &QgsClassificationMainWindow::loadRois );
+    roiRow->addWidget( btnExport );
+    roiRow->addWidget( btnLoad );
+    lay->addLayout( roiRow );
+
+    auto *note = new QLabel(
+      tr( "数字化工具（点/矩形/多边形/自由绘/魔棒）在上方工具栏；"
+          "先在类别快览中选中类别再勾绘。" ),
+      body );
+    note->setWordWrap( true );
+    note->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    lay->addWidget( note );
+    lay->addStretch( 1 );
+  }
+
+  // --- Step 3: Evaluate ----------------------------------------------------
+  if ( QWidget *body = m_stepHost->body( RsClassifyStep::Evaluate ) )
+  {
+    auto *lay = qobject_cast<QVBoxLayout *>( body->layout() );
+    if ( !lay )
+    {
+      lay = new QVBoxLayout( body );
+      lay->setContentsMargins( 0, 4, 0, 4 );
+      lay->setSpacing( 8 );
+    }
+
+    auto *btnSpectral = new QPushButton( tr( "重算光谱曲线" ), body );
+    btnSpectral->setObjectName( QStringLiteral( "classifyStep3RecomputeSpectral" ) );
+    connect( btnSpectral, &QPushButton::clicked, this, [this]() {
+      recomputeSpectralCurves();
+      if ( m_spectralDock )
+      {
+        m_spectralDock->show();
+        m_spectralDock->raise();
+      }
+    } );
+    lay->addWidget( btnSpectral );
+
+    auto *btnJm = new QPushButton( tr( "重算 JM 分离度" ), body );
+    btnJm->setObjectName( QStringLiteral( "classifyStep3RecomputeJm" ) );
+    connect( btnJm, &QPushButton::clicked, this, [this]() {
+      recomputeJmMatrix();
+      if ( m_jmDock )
+      {
+        m_jmDock->show();
+        m_jmDock->raise();
+      }
+    } );
+    lay->addWidget( btnJm );
+
+    auto *btnRaiseSpectral = new QPushButton( tr( "打开光谱曲线面板" ), body );
+    btnRaiseSpectral->setObjectName( QStringLiteral( "classifyStep3RaiseSpectral" ) );
+    connect( btnRaiseSpectral, &QPushButton::clicked, this, [this]() {
+      if ( m_spectralDock )
+      {
+        m_spectralDock->show();
+        m_spectralDock->raise();
+      }
+    } );
+    lay->addWidget( btnRaiseSpectral );
+
+    auto *btnRaiseJm = new QPushButton( tr( "打开 JM 面板" ), body );
+    btnRaiseJm->setObjectName( QStringLiteral( "classifyStep3RaiseJm" ) );
+    connect( btnRaiseJm, &QPushButton::clicked, this, [this]() {
+      if ( m_jmDock )
+      {
+        m_jmDock->show();
+        m_jmDock->raise();
+      }
+    } );
+    lay->addWidget( btnRaiseJm );
+
+    auto *btnReviewed = new QPushButton( tr( "标记已审阅" ), body );
+    btnReviewed->setObjectName( QStringLiteral( "classifyStep3MarkReviewed" ) );
+    connect( btnReviewed, &QPushButton::clicked, this, [this]() {
+      if ( m_workflow )
+        m_workflow->setEvaluateReviewed( true );
+      refreshWorkflowUi();
+    } );
+    lay->addWidget( btnReviewed );
+
+    auto *hint = new QLabel(
+      tr( "检查 JM 与光谱可分性后点「标记已审阅」以完成本步。" ), body );
+    hint->setWordWrap( true );
+    hint->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    lay->addWidget( hint );
+    lay->addStretch( 1 );
+  }
+
+  // --- Step 4: TrainClassify -----------------------------------------------
+  if ( QWidget *body = m_stepHost->body( RsClassifyStep::TrainClassify ) )
+  {
+    auto *lay = qobject_cast<QVBoxLayout *>( body->layout() );
+    if ( !lay )
+    {
+      lay = new QVBoxLayout( body );
+      lay->setContentsMargins( 0, 4, 0, 4 );
+      lay->setSpacing( 8 );
+    }
+
+    auto *note = new QLabel(
+      tr( "分类器类型、波段与训练比例在底部 Classifier 工具栏设置。" ), body );
+    note->setWordWrap( true );
+    note->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    lay->addWidget( note );
+
+    m_stepCvBtn = new QPushButton( tr( "交叉验证 (CV)" ), body );
+    m_stepCvBtn->setObjectName( QStringLiteral( "classifyStep4Cv" ) );
+    connect( m_stepCvBtn, &QPushButton::clicked, this,
+             &QgsClassificationMainWindow::runCrossValidation );
+    lay->addWidget( m_stepCvBtn );
+
+    m_stepPreviewBtn = new QPushButton( tr( "快速预览" ), body );
+    m_stepPreviewBtn->setObjectName( QStringLiteral( "classifyStep4Preview" ) );
+    connect( m_stepPreviewBtn, &QPushButton::clicked, this,
+             &QgsClassificationMainWindow::applyPreview );
+    lay->addWidget( m_stepPreviewBtn );
+
+    m_stepApplyBtn = new QPushButton( tr( "应用分类…" ), body );
+    m_stepApplyBtn->setObjectName( QStringLiteral( "classifyStep4Apply" ) );
+    connect( m_stepApplyBtn, &QPushButton::clicked, this,
+             &QgsClassificationMainWindow::applyClassification );
+    lay->addWidget( m_stepApplyBtn );
+
+    auto *tip = new QLabel(
+      tr( "预览仅当前视口，不计入本步完成；全图 Apply 完成后进入精度评定。" ),
+      body );
+    tip->setWordWrap( true );
+    tip->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    lay->addWidget( tip );
+    lay->addStretch( 1 );
+  }
+
+  // Steps 5–7 remain skeleton placeholders for later tasks.
+}
+
+void QgsClassificationMainWindow::ensureDefaultClasses()
+{
+  if ( !m_rois )
+    return;
+  if ( !m_rois->classDefs().isEmpty() )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "类别方案已存在，未覆盖" ), 3000 );
+    if ( m_classListDock )
+    {
+      m_classListDock->show();
+      m_classListDock->raise();
+    }
+    return;
+  }
+
+  const QList<QPair<int, QPair<QString, QString>>> defaults = {
+    { 1, { tr( "林地" ), QStringLiteral( "#2da44e" ) } },
+    { 2, { tr( "草地" ), QStringLiteral( "#a3e635" ) } },
+    { 3, { tr( "水体" ), QStringLiteral( "#0969da" ) } },
+    { 4, { tr( "建成区" ), QStringLiteral( "#cf222e" ) } },
+    { 5, { tr( "耕地" ), QStringLiteral( "#d29922" ) } },
+    { 6, { tr( "裸地" ), QStringLiteral( "#8a92a0" ) } },
+  };
+  for ( const auto &d : defaults )
+  {
+    m_rois->setClassDef( RsClassDef( d.first, d.second.first, QColor( d.second.second ) ) );
+  }
+  if ( statusBar() )
+    statusBar()->showMessage( tr( "已添加默认 6 类" ), 3000 );
+  if ( m_classListDock )
+  {
+    m_classListDock->show();
+    m_classListDock->raise();
+  }
+  syncWorkflowFromRois();
+  refreshWorkflowUi();
+}
+
+void QgsClassificationMainWindow::setActiveSampleRole( bool trainRole )
+{
+  m_trainSampleRole = trainRole;
+  if ( m_stepTrainRoleBtn )
+    m_stepTrainRoleBtn->setChecked( trainRole );
+  if ( m_stepValidRoleBtn )
+    m_stepValidRoleBtn->setChecked( !trainRole );
+  if ( statusBar() )
+  {
+    statusBar()->showMessage(
+      trainRole ? tr( "当前角色：训练样本（数字化工具写入训练集）" )
+                : tr( "当前角色：验证样本（UI 标记；ROI 仍共享集合）" ),
+      4000 );
+  }
+  refreshWorkflowUi();
 }
 
 void QgsClassificationMainWindow::syncWorkflowFromRois()
@@ -692,20 +988,89 @@ void QgsClassificationMainWindow::refreshWorkflowUi()
     }
   }
 
+  // Step 1: class count label.
+  if ( m_stepClassCountLabel )
+  {
+    const int n = m_rois ? m_rois->classDefs().size() : 0;
+    const QString src = m_sourceRasterPath.isEmpty()
+                          ? tr( "未打开源影像" )
+                          : tr( "源影像：%1" ).arg( QFileInfo( m_sourceRasterPath ).fileName() );
+    m_stepClassCountLabel->setText(
+      tr( "%1\n类别数：%2" ).arg( src ).arg( n ) );
+  }
+
+  // Step 2: ROI / pixel stats.
+  if ( m_stepSampleStatsLabel && m_rois )
+  {
+    int roiCount = m_rois->size();
+    int pixelCount = 0;
+    QSet<int> classesWithPixels;
+    for ( const RsRoi &roi : m_rois->rois() )
+    {
+      const int n = roi.pixelIndices().size();
+      pixelCount += n;
+      if ( n > 0 && roi.classId() > 0 )
+        classesWithPixels.insert( roi.classId() );
+    }
+    const QString role = m_trainSampleRole ? tr( "训练" ) : tr( "验证" );
+    m_stepSampleStatsLabel->setText(
+      tr( "当前角色：%1\nROI 数：%2 · 像元：%3 · 有像元类别：%4" )
+        .arg( role )
+        .arg( roiCount )
+        .arg( pixelCount )
+        .arg( classesWithPixels.size() ) );
+  }
+  else if ( m_stepSampleStatsLabel )
+  {
+    m_stepSampleStatsLabel->setText( tr( "无样本集合" ) );
+  }
+
   // Soft-gate Apply / Preview from canTrainOrClassify.
   const bool canTrain = m_workflow->canTrainOrClassify();
+  const QString trainTip = canTrain
+                             ? QString()
+                             : tr( "还需：%1" ).arg(
+                                 m_workflow->missingRequirements( RsClassifyStep::TrainClassify )
+                                   .join( QStringLiteral( "；" ) ) );
   if ( m_applyAction )
+  {
     m_applyAction->setEnabled( canTrain );
+    m_applyAction->setToolTip( trainTip );
+  }
   if ( auto *preview = findChild<QAction *>( QStringLiteral( "rsClassifyPreviewAction" ) ) )
+  {
     preview->setEnabled( canTrain );
+    preview->setToolTip( trainTip );
+  }
   if ( m_classifierBar )
   {
     if ( auto *btnApply = m_classifierBar->findChild<QPushButton *>(
            QStringLiteral( "rsClassifierBtnApply" ) ) )
+    {
       btnApply->setEnabled( canTrain );
+      btnApply->setToolTip( trainTip );
+    }
     if ( auto *btnPreview = m_classifierBar->findChild<QPushButton *>(
            QStringLiteral( "rsClassifierBtnPreview" ) ) )
+    {
       btnPreview->setEnabled( canTrain );
+      btnPreview->setToolTip( trainTip );
+    }
+  }
+  if ( m_stepApplyBtn )
+  {
+    m_stepApplyBtn->setEnabled( canTrain );
+    m_stepApplyBtn->setToolTip( trainTip );
+  }
+  if ( m_stepPreviewBtn )
+  {
+    m_stepPreviewBtn->setEnabled( canTrain );
+    m_stepPreviewBtn->setToolTip( trainTip );
+  }
+  if ( m_stepCvBtn )
+  {
+    m_stepCvBtn->setEnabled( canTrain );
+    m_stepCvBtn->setToolTip( trainTip );
   }
 
   // Wizard: soft-hide JM / spectral unless Evaluate step; expert: show all.
