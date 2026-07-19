@@ -22,6 +22,7 @@
 #include <QColor>
 #include <QHash>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 #include <memory>
@@ -54,6 +55,14 @@ class RsClassificationTask : public QgsTask
       // Empty = do not save. Non-empty: hard-fails the task if model or
       // sidecar write fails (orphan model file is removed on sidecar failure).
       QString modelSavePath;
+      // GDAL GTiff creation options. Defaults favour tiled DEFLATE suitable
+      // for large lab scenes. On Create failure with non-empty options the
+      // task retries once with no options.
+      QStringList creationOptions{
+        QStringLiteral( "TILED=YES" ),
+        QStringLiteral( "COMPRESS=DEFLATE" ),
+        QStringLiteral( "PREDICTOR=2" )
+      };
     };
 
     struct Result
