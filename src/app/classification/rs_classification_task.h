@@ -51,7 +51,8 @@ class RsClassificationTask : public QgsTask
       // If fitted, Task transforms tile X before predict. Caller scales train/test.
       RsFeatureScaler scaler;
       // Optional: after successful fit, persist model YAML + .scale.json sidecar.
-      // Empty = do not save.
+      // Empty = do not save. Non-empty: hard-fails the task if model or
+      // sidecar write fails (orphan model file is removed on sidecar failure).
       QString modelSavePath;
     };
 

@@ -74,38 +74,40 @@ bool RsClassificationTask::run()
 
   // Optional model persistence — write OpenCV YAML + feature-scaler sidecar
   // next to it so loadClassifierModel() can restore both.
+  // Hard-fail when modelSavePath is set and either half of the pair fails;
+  // if the model wrote successfully but the sidecar did not, remove the
+  // orphan model so callers never load a scaled-trained model without its
+  // matching scale.json.
   if ( !mCfg.modelSavePath.isEmpty() )
   {
     if ( !mCfg.backend->save( mCfg.modelSavePath ) )
     {
-      SICNU_LOG_WARN( SicnuLogTags::Classification,
-                      QString( "Failed to save classifier model: %1" )
-                        .arg( mCfg.modelSavePath ) );
+      mResult.errorMessage = QStringLiteral( "Failed to save classifier model: %1" )
+                               .arg( mCfg.modelSavePath );
+      SICNU_LOG_ERROR( SicnuLogTags::Classification, mResult.errorMessage );
+      return false;
     }
-    else
+    SICNU_LOG_INFO( SicnuLogTags::Classification,
+                    QString( "Classifier model saved: %1" )
+                      .arg( mCfg.modelSavePath ) );
+    if ( mCfg.scaler.isFitted() )
     {
-      SICNU_LOG_INFO( SicnuLogTags::Classification,
-                      QString( "Classifier model saved: %1" )
-                        .arg( mCfg.modelSavePath ) );
-      if ( mCfg.scaler.isFitted() )
+      const QFileInfo mi( mCfg.modelSavePath );
+      const QString scalePath = mi.absolutePath() + QLatin1Char( '/' )
+                                + mi.completeBaseName()
+                                + QStringLiteral( ".scale.json" );
+      if ( !mCfg.scaler.saveJson( scalePath ) )
       {
-        const QFileInfo mi( mCfg.modelSavePath );
-        const QString scalePath = mi.absolutePath() + QLatin1Char( '/' )
-                                  + mi.completeBaseName()
-                                  + QStringLiteral( ".scale.json" );
-        if ( !mCfg.scaler.saveJson( scalePath ) )
-        {
-          SICNU_LOG_WARN( SicnuLogTags::Classification,
-                          QString( "Failed to save scale.json sidecar: %1" )
-                            .arg( scalePath ) );
-        }
-        else
-        {
-          SICNU_LOG_INFO( SicnuLogTags::Classification,
-                          QString( "Feature scaler sidecar saved: %1" )
-                            .arg( scalePath ) );
-        }
+        QFile::remove( mCfg.modelSavePath );
+        mResult.errorMessage =
+          QStringLiteral( "Failed to save scale.json sidecar: %1 (model file removed)" )
+            .arg( scalePath );
+        SICNU_LOG_ERROR( SicnuLogTags::Classification, mResult.errorMessage );
+        return false;
       }
+      SICNU_LOG_INFO( SicnuLogTags::Classification,
+                      QString( "Feature scaler sidecar saved: %1" )
+                        .arg( scalePath ) );
     }
   }
 

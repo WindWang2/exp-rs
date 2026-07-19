@@ -71,6 +71,29 @@
 #include <gdal_priv.h>
 
 #include <memory>
+#include <utility>
+
+namespace
+{
+
+/// Fit a feature scaler on the train split and write scaled matrices +
+/// the fitted scaler onto \a cfg. Returns false if fit fails.
+bool fitScalerOntoConfig( const RsTrainTestSplit &split,
+                          RsClassificationTask::Config &cfg )
+{
+  RsFeatureScaler scaler;
+  if ( !scaler.fit( split.trainX ) )
+    return false;
+  cfg.trainX = scaler.transform( split.trainX );
+  cfg.trainY = split.trainY;
+  if ( !split.testX.empty() )
+    cfg.testX = scaler.transform( split.testX );
+  cfg.testY = split.testY;
+  cfg.scaler = std::move( scaler );
+  return true;
+}
+
+} // namespace
 
 QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, QWidget *parent )
   : QMainWindow( parent )
@@ -627,18 +650,11 @@ void QgsClassificationMainWindow::applyClassification()
     // accuracy assessment.
     const auto split = RsClassificationSplit::stratifiedSplit(
       X, y, m_classifierBar->trainRatio() );
-    RsFeatureScaler scaler;
-    if ( !scaler.fit( split.trainX ) )
+    if ( !fitScalerOntoConfig( split, cfg ) )
     {
       statusBar()->showMessage( tr( "特征标准化失败" ), 5000 );
       return;
     }
-    cfg.trainX = scaler.transform( split.trainX );
-    cfg.trainY = split.trainY;
-    if ( !split.testX.empty() )
-      cfg.testX = scaler.transform( split.testX );
-    cfg.testY = split.testY;
-    cfg.scaler = scaler;
 
     switch ( m_classifierBar->currentKind() )
     {
@@ -737,10 +753,25 @@ void QgsClassificationMainWindow::applyClassification()
     }
   } );
 
-  connect( task, &QgsTask::taskTerminated, this, [this]() {
-    SICNU_LOG_WARN( SicnuLogTags::Classification, QStringLiteral( "Classification cancelled" ) );
-    if ( statusBar() )
-      statusBar()->showMessage( tr( "分类已取消" ), 3000 );
+  // run() returns false on both cancel and hard failure — QgsTask emits
+  // taskTerminated (not taskCompleted). Surface errorMessage when present.
+  connect( task, &QgsTask::taskTerminated, this, [this, task]() {
+    const auto &r = task->result();
+    if ( !r.errorMessage.isEmpty()
+         && r.errorMessage != QStringLiteral( "Cancelled" ) )
+    {
+      SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                       QString( "Classification failed: %1" ).arg( r.errorMessage ) );
+      if ( statusBar() )
+        statusBar()->showMessage(
+          tr( "分类失败: %1" ).arg( r.errorMessage ), 6000 );
+    }
+    else
+    {
+      SICNU_LOG_WARN( SicnuLogTags::Classification, QStringLiteral( "Classification cancelled" ) );
+      if ( statusBar() )
+        statusBar()->showMessage( tr( "分类已取消" ), 3000 );
+    }
   } );
 
   QgsApplication::taskManager()->addTask( task );
@@ -819,19 +850,12 @@ void QgsClassificationMainWindow::applyPreview()
   cfg.bandIndices = bands;
   const auto split = RsClassificationSplit::stratifiedSplit(
     X, y, m_classifierBar->trainRatio() );
-  RsFeatureScaler scaler;
-  if ( !scaler.fit( split.trainX ) )
+  if ( !fitScalerOntoConfig( split, cfg ) )
   {
     if ( statusBar() )
       statusBar()->showMessage( tr( "特征标准化失败" ), 5000 );
     return;
   }
-  cfg.trainX = scaler.transform( split.trainX );
-  cfg.trainY = split.trainY;
-  if ( !split.testX.empty() )
-    cfg.testX = scaler.transform( split.testX );
-  cfg.testY = split.testY;
-  cfg.scaler = scaler;
 
   const QHash<int, RsClassDef> classDefs = m_rois ? m_rois->classDefs()
                                                  : QHash<int, RsClassDef>();
@@ -895,9 +919,19 @@ void QgsClassificationMainWindow::applyPreview()
         tr( "预览完成 (%1 ms)" ).arg( r.durationMs ), 5000 );
   } );
 
-  connect( task, &QgsTask::taskTerminated, this, [this]() {
-    if ( statusBar() )
+  connect( task, &QgsTask::taskTerminated, this, [this, task]() {
+    const auto &r = task->result();
+    if ( !r.errorMessage.isEmpty()
+         && r.errorMessage != QStringLiteral( "Cancelled" ) )
+    {
+      if ( statusBar() )
+        statusBar()->showMessage(
+          tr( "预览失败: %1" ).arg( r.errorMessage ), 6000 );
+    }
+    else if ( statusBar() )
+    {
       statusBar()->showMessage( tr( "预览已取消" ), 3000 );
+    }
   } );
 
   QgsApplication::taskManager()->addTask( task );
@@ -1343,6 +1377,7 @@ void QgsClassificationMainWindow::loadClassifierModel()
   const QFileInfo mi( dlg.modelPath() );
   const QString scalePath = mi.absolutePath() + QLatin1Char( '/' )
                             + mi.completeBaseName() + QStringLiteral( ".scale.json" );
+  bool scaleMissing = false;
   if ( QFile::exists( scalePath ) )
   {
     if ( !m_loadedScaler.loadJson( scalePath ) )
@@ -1361,9 +1396,22 @@ void QgsClassificationMainWindow::loadClassifierModel()
                       QString( "Loaded feature scaler sidecar: %1" ).arg( scalePath ) );
     }
   }
+  else
+  {
+    scaleMissing = true;
+    SICNU_LOG_INFO( SicnuLogTags::Classification,
+                    QString( "No scale.json sidecar at %1 — predicting without feature scaling (compat with old models)" )
+                      .arg( scalePath ) );
+  }
 
   SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Classifier model loaded: %1" ).arg( dlg.modelPath() ) );
   if ( statusBar() )
-    statusBar()->showMessage(
-      tr( "已加载模型 — 下次 Apply 将跳过训练，直接 predict" ), 0 );
+  {
+    if ( scaleMissing )
+      statusBar()->showMessage(
+        tr( "已加载模型（无 scale.json，将不缩放特征，兼容旧模型）— 下次 Apply 将跳过训练" ), 0 );
+    else
+      statusBar()->showMessage(
+        tr( "已加载模型 — 下次 Apply 将跳过训练，直接 predict" ), 0 );
+  }
 }
