@@ -28,6 +28,7 @@
 #include "rs_roi_tool_polygon.h"
 #include "rs_roi_tool_rectangle.h"
 #include "rs_spectral_curve_widget.h"
+#include "rs_feature_scaler.h"
 #include "qgsapplication.h"
 #include "qgsgeometry.h"
 #include "qgscoordinatereferencesystem.h"
@@ -43,6 +44,7 @@
 #include <QColor>
 #include <QDir>
 #include <QDockWidget>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHash>
@@ -604,6 +606,9 @@ void QgsClassificationMainWindow::applyClassification()
     // testX/testY left empty so RsClassificationTask::run() skips accuracy.
     cfg.algoName = QStringLiteral( "Loaded (%1)" ).arg( m_loadedBackend->name() );
     cfg.backend = std::move( m_loadedBackend );
+    // Apply sidecar scaler so tile features match training feature space.
+    cfg.scaler = m_loadedScaler;
+    m_loadedScaler = RsFeatureScaler();
     if ( statusBar() )
       statusBar()->showMessage( tr( "使用已加载模型 (跳过训练)" ), 3000 );
   }
@@ -622,10 +627,18 @@ void QgsClassificationMainWindow::applyClassification()
     // accuracy assessment.
     const auto split = RsClassificationSplit::stratifiedSplit(
       X, y, m_classifierBar->trainRatio() );
-    cfg.trainX = split.trainX;
+    RsFeatureScaler scaler;
+    if ( !scaler.fit( split.trainX ) )
+    {
+      statusBar()->showMessage( tr( "特征标准化失败" ), 5000 );
+      return;
+    }
+    cfg.trainX = scaler.transform( split.trainX );
     cfg.trainY = split.trainY;
-    cfg.testX = split.testX;
+    if ( !split.testX.empty() )
+      cfg.testX = scaler.transform( split.testX );
     cfg.testY = split.testY;
+    cfg.scaler = scaler;
 
     switch ( m_classifierBar->currentKind() )
     {
@@ -785,10 +798,19 @@ void QgsClassificationMainWindow::applyPreview()
   cfg.bandIndices = bands;
   const auto split = RsClassificationSplit::stratifiedSplit(
     X, y, m_classifierBar->trainRatio() );
-  cfg.trainX = split.trainX;
+  RsFeatureScaler scaler;
+  if ( !scaler.fit( split.trainX ) )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "特征标准化失败" ), 5000 );
+    return;
+  }
+  cfg.trainX = scaler.transform( split.trainX );
   cfg.trainY = split.trainY;
-  cfg.testX = split.testX;
+  if ( !split.testX.empty() )
+    cfg.testX = scaler.transform( split.testX );
   cfg.testY = split.testY;
+  cfg.scaler = scaler;
 
   const QHash<int, RsClassDef> classDefs = m_rois ? m_rois->classDefs()
                                                  : QHash<int, RsClassDef>();
@@ -1294,6 +1316,31 @@ void QgsClassificationMainWindow::loadClassifierModel()
     return;
   }
   m_loadedBackend = std::move( backend );
+
+  // Optional sidecar: <model-stem>.scale.json next to the YAML/XML model.
+  m_loadedScaler = RsFeatureScaler();
+  const QFileInfo mi( dlg.modelPath() );
+  const QString scalePath = mi.absolutePath() + QLatin1Char( '/' )
+                            + mi.completeBaseName() + QStringLiteral( ".scale.json" );
+  if ( QFile::exists( scalePath ) )
+  {
+    if ( !m_loadedScaler.loadJson( scalePath ) )
+    {
+      m_loadedScaler = RsFeatureScaler();
+      SICNU_LOG_WARN( SicnuLogTags::Classification,
+                      QString( "scale.json present but failed to load: %1 — predicting without scaling" )
+                        .arg( scalePath ) );
+      if ( statusBar() )
+        statusBar()->showMessage(
+          tr( "警告：scale.json 损坏，将不缩放特征" ), 6000 );
+    }
+    else
+    {
+      SICNU_LOG_INFO( SicnuLogTags::Classification,
+                      QString( "Loaded feature scaler sidecar: %1" ).arg( scalePath ) );
+    }
+  }
+
   SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Classifier model loaded: %1" ).arg( dlg.modelPath() ) );
   if ( statusBar() )
     statusBar()->showMessage(

@@ -9,6 +9,7 @@
 #include <opencv2/core.hpp>
 
 #include "rs_classifier_backend.h"
+#include "rs_feature_scaler.h"
 
 class QTimer;
 
@@ -163,6 +164,9 @@ class QgsClassificationMainWindow : public QMainWindow
     // Phase 10A.1.3 — backend instance loaded from disk via the File menu.
     // Consumed (moved out) on the next applyClassification() call.
     std::unique_ptr<RsClassifierBackend> m_loadedBackend;
+    // Optional feature scaler loaded from <model>.scale.json sidecar.
+    // Consumed with m_loadedBackend on the next applyClassification().
+    RsFeatureScaler m_loadedScaler;
 
   private slots:
     void onRoiDrawn( const QgsGeometry &geom, int classId );

@@ -17,6 +17,7 @@
 
 #include "rs_classifier_backend.h"
 #include "rs_accuracy_assessment.h"
+#include "rs_feature_scaler.h"
 
 #include <QColor>
 #include <QHash>
@@ -47,6 +48,8 @@ class RsClassificationTask : public QgsTask
       cv::Mat testY;                                  // CV_32S Mx1 (may be empty)
       QHash<int, QColor> classColors;                 // classId -> RGB
       QString algoName;                               // for structured log
+      // If fitted, Task transforms tile X before predict. Caller scales train/test.
+      RsFeatureScaler scaler;
     };
 
     struct Result

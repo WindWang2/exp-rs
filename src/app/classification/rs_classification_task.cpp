@@ -288,6 +288,20 @@ bool RsClassificationTask::run()
           X.at<float>( p, bi ) = tileBuf[p];
       }
 
+      if ( mCfg.scaler.isFitted() )
+      {
+        X = mCfg.scaler.transform( X );
+        if ( X.empty() )
+        {
+          GDALClose( srcDs );
+          GDALClose( dstDs );
+          QFile::remove( mCfg.outputRaster );
+          mResult.errorMessage = QStringLiteral(
+            "Feature scaling failed at tile (%1,%2)" ).arg( tx ).arg( ty );
+          return false;
+        }
+      }
+
       cv::Mat pred;
       try
       {
