@@ -1641,6 +1641,26 @@ if(TARGET qgis_app_classify)
   )
   sicnu_discover_tests(test_accuracy_assessment)
 
+  # Classification workflow — post-process pure operators (sieve/majority/clump/recode).
+  add_executable(test_post_process test_post_process.cpp)
+  target_link_libraries(test_post_process PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    Qt6::Core
+    Qt6::Gui
+    GDAL::GDAL
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_post_process PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_post_process)
+
   # Phase 10A.1.1 — Hungarian min-cost assignment (Munkres O(n^3)).
   add_executable(test_hungarian_assignment test_hungarian_assignment.cpp)
   target_link_libraries(test_hungarian_assignment PRIVATE
