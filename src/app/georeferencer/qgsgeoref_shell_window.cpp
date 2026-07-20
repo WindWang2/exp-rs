@@ -43,6 +43,7 @@
 #include "qgsmessagelog.h"
 #include "qgsrasterlayer.h"
 #include "qgstaskmanager.h"
+#include "rs_georef_task_list.h"
 #include "rs_warp_task.h"
 
 namespace
@@ -103,7 +104,24 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   connect( mGcpTable, &QgsGCPListWidget::deleteRowsRequested,
            this, &QgsGeorefShellWindow::deleteGcpRows );
   addDockWidget( Qt::BottomDockWidgetArea, mGcpDock );
-  resizeDocks( { mGcpDock }, { 280 }, Qt::Vertical );
+
+  // Task list dock — Apply/Run enqueues warp jobs here.
+  mTaskDock = new QDockWidget( tr( "校正任务" ), this );
+  mTaskDock->setObjectName( gcpDockObjectName + QStringLiteral( "_tasks" ) );
+  mTaskDock->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea );
+  mTaskList = new RsGeorefTaskList( mTaskDock );
+  mTaskList->setObjectName( QStringLiteral( "rsGeorefTaskList" ) );
+  mTaskDock->setWidget( mTaskList );
+  addDockWidget( Qt::BottomDockWidgetArea, mTaskDock );
+  tabifyDockWidget( mGcpDock, mTaskDock );
+  mGcpDock->raise();
+  resizeDocks( { mGcpDock, mTaskDock }, { 220, 180 }, Qt::Vertical );
+
+  connect( mTaskList, &RsGeorefTaskList::openOutputRequested, this,
+           [this]( const QString &path ) {
+             if ( statusBar() )
+               statusBar()->showMessage( tr( "输出: %1" ).arg( path ), 5000 );
+           } );
 
   mParamDock = new QDockWidget( tr( "校正参数" ), this );
   mParamDock->setObjectName( paramDockObjectName );
@@ -211,8 +229,9 @@ void QgsGeorefShellWindow::addApplyAction( QToolBar *bar, const QString &objectN
 
   mApplyAction = bar->addAction(
     QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ),
-    tr( "Apply" ), this, &QgsGeorefShellWindow::applyTransform );
+    tr( "运行" ), this, &QgsGeorefShellWindow::applyTransform );
   mApplyAction->setObjectName( objectName );
+  mApplyAction->setToolTip( tr( "将当前配置加入任务列表并执行几何校正" ) );
   mApplyAction->setEnabled( false );
 }
 
@@ -519,7 +538,7 @@ void QgsGeorefShellWindow::recomputeFit()
 
 void QgsGeorefShellWindow::applyTransform()
 {
-  if ( !mParamsPanel || !mGcps )
+  if ( !mParamsPanel || !mGcps || !mTaskList )
     return;
 
   const auto method = mParamsPanel->transformMethod();
@@ -549,29 +568,78 @@ void QgsGeorefShellWindow::applyTransform()
     return;
   }
 
-  setWarpInProgressForTest( true );
-  auto *task = new RsWarpTask( mSourceRasterPath, mParamsPanel->outputPath(),
-                               mTransform.get(), mParamsPanel->resamplingMethod(),
-                               mParamsPanel->destCrs(), mParamsPanel->outputPixelSize() );
-  auto finalize = [this, task]() {
+  // Snapshot parameters at enqueue time so later panel edits don't affect this job.
+  const QString sourcePath = mSourceRasterPath;
+  const QString outputPath = mParamsPanel->outputPath();
+  const double rmsAtStart = mLastRms;
+  const auto resampling = mParamsPanel->resamplingMethod();
+  const auto destCrs = mParamsPanel->destCrs();
+  const double pixelSize = mParamsPanel->outputPixelSize();
+
+  QString methodLabel;
+  {
+    const QMetaEnum me = QMetaEnum::fromType<QgsGcpTransformerInterface::TransformMethod>();
+    const char *key = me.valueToKey( static_cast<int>( method ) );
+    methodLabel = QString::fromUtf8( key ? key : "?" );
+  }
+
+  const RsGeorefTaskList::Kind kind =
+    ( shellId() == QLatin1String( "i2m" ) )
+      ? RsGeorefTaskList::Kind::WarpI2M
+      : RsGeorefTaskList::Kind::WarpI2I;
+
+  const QString title = tr( "%1 → %2" )
+                          .arg( QFileInfo( sourcePath ).fileName() )
+                          .arg( QFileInfo( outputPath ).fileName() );
+
+  const int taskId = mTaskList->beginTask( kind, title, methodLabel,
+                                           sourcePath, outputPath,
+                                           enabled, rmsAtStart );
+
+  // Raise task dock so the user sees the new row.
+  if ( mTaskDock )
+  {
+    mTaskDock->show();
+    mTaskDock->raise();
+  }
+
+  auto *task = new RsWarpTask( sourcePath, outputPath,
+                               mTransform.get(), resampling,
+                               destCrs, pixelSize );
+
+  auto finalize = [this, task, taskId, outputPath]() {
     emitStructuredLog( task->result() );
-    setWarpInProgressForTest( false );
-    if ( task->result().status == QgsImageWarper::WarpStatus::Ok )
+    const auto &r = task->result();
+    if ( r.status == QgsImageWarper::WarpStatus::Ok )
     {
+      if ( mTaskList )
+        mTaskList->finishSuccess( taskId, r.durationMs, r.outputBytes );
       statusBar()->showMessage(
-        tr( "已输出: %1 (%2 字节, %3 ms)" )
-          .arg( mParamsPanel->outputPath() )
-          .arg( task->result().outputBytes )
-          .arg( task->result().durationMs ), 6000 );
+        tr( "任务 #%1 完成: %2 (%3 字节, %4 ms)" )
+          .arg( taskId )
+          .arg( QFileInfo( outputPath ).fileName() )
+          .arg( r.outputBytes )
+          .arg( r.durationMs ), 6000 );
+    }
+    else if ( r.status == QgsImageWarper::WarpStatus::Cancelled )
+    {
+      if ( mTaskList )
+        mTaskList->finishCancelled( taskId, r.durationMs );
+      statusBar()->showMessage( tr( "任务 #%1 已取消" ).arg( taskId ), 4000 );
     }
     else
     {
-      statusBar()->showMessage( tr( "校正失败: %1" ).arg( task->result().errorMessage ), 6000 );
+      if ( mTaskList )
+        mTaskList->finishFailed( taskId, r.errorMessage, r.durationMs );
+      statusBar()->showMessage(
+        tr( "任务 #%1 失败: %2" ).arg( taskId ).arg( r.errorMessage ), 6000 );
     }
   };
   connect( task, &QgsTask::taskCompleted, this, finalize );
   connect( task, &QgsTask::taskTerminated, this, finalize );
   QgsApplication::taskManager()->addTask( task );
+
+  statusBar()->showMessage( tr( "已加入任务列表 #%1 并开始运行…" ).arg( taskId ), 3000 );
 }
 
 void QgsGeorefShellWindow::emitStructuredLog( const QgsImageWarper::WarpResult &r )
@@ -717,7 +785,8 @@ void QgsGeorefShellWindow::openSourceRaster()
 
 void QgsGeorefShellWindow::closeEvent( QCloseEvent *e )
 {
-  if ( mWarpInProgress )
+  const bool busy = mWarpInProgress || ( mTaskList && mTaskList->hasRunning() );
+  if ( busy )
   {
     const auto ans = QMessageBox::question(
       this, tr( "几何校正" ), tr( "校正任务仍在运行，仍要关闭？" ),

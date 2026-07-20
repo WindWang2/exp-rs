@@ -6,6 +6,7 @@
 #include "qgsgeoref_image_to_map_window.h"
 #include "qgsmapcanvas.h"
 #include "rs_georef_params_panel.h"
+#include "rs_georef_task_list.h"
 
 #include <QApplication>
 #include <QSplitter>
@@ -52,6 +53,10 @@ TEST_CASE( "I2I window has horizontal twin canvases", "[georef][dual]" )
   auto *panel = w.findChild<RsGeorefParamsPanel *>();
   REQUIRE( panel != nullptr );
   REQUIRE( panel->profile() == RsGeorefParamsPanel::Profile::ImageToImage );
+
+  auto *tasks = w.findChild<RsGeorefTaskList *>( QStringLiteral( "rsGeorefTaskList" ) );
+  REQUIRE( tasks != nullptr );
+  REQUIRE( tasks->entryCount() == 0 );
 }
 
 TEST_CASE( "I2M window has SRC and Map canvases", "[georef][dual]" )

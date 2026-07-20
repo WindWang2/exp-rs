@@ -974,6 +974,28 @@ target_include_directories(test_georef_dual_window PRIVATE
 set_target_properties(test_georef_dual_window PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_georef_dual_window)
 
+# Georef task list (Apply → enqueue UI)
+add_executable(test_georef_task_list test_georef_task_list.cpp)
+target_link_libraries(test_georef_task_list PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+)
+target_include_directories(test_georef_task_list PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_georef_task_list PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_georef_task_list)
+
 # Task 5 (v1.6) — mode-aware MapCoords pick canvas
 add_executable(test_pick_canvas_mode test_pick_canvas_mode.cpp)
 target_link_libraries(test_pick_canvas_mode PRIVATE

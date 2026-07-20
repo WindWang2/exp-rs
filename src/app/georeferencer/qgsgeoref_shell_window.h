@@ -9,6 +9,7 @@
 #include "qgsimagewarper.h"
 #include "rs_georef_params_panel.h"
 #include "rs_georef_session_state.h"
+#include "rs_georef_task_list.h"
 
 class QAction;
 class QCloseEvent;
@@ -46,10 +47,12 @@ class QgsGeorefShellWindow : public QMainWindow
 
     QgsMapCanvas *srcCanvas() const { return mSrcCanvas; }
     QgsMapCanvas *dstCanvas() const { return mDstCanvas; }
+    RsGeorefTaskList *taskListForTest() { return mTaskList; }
 
   public slots:
     void showCoordDialog( const QgsPointXY &sourcePixel );
     void openSourceRaster();
+    /// Validate params, enqueue a warp job into the task list, and run it.
     void applyTransform();
     void loadPoints();
     void savePoints();
@@ -134,6 +137,8 @@ class QgsGeorefShellWindow : public QMainWindow
 
     RsGeorefParamsPanel *mParamsPanel = nullptr;
     QDockWidget *mParamDock = nullptr;
+    RsGeorefTaskList *mTaskList = nullptr;
+    QDockWidget *mTaskDock = nullptr;
     std::unique_ptr<QgsGeorefTransform> mTransform;
     double mLastRms = 0.0;
     QString mSourceRasterPath;
