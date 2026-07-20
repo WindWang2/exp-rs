@@ -23,11 +23,16 @@ RsGeorefTaskList::RsGeorefTaskList( QWidget *parent )
   auto *top = new QHBoxLayout;
   mSummary = new QLabel( tr( "任务: 0" ), this );
   mSummary->setObjectName( QStringLiteral( "rsGeorefTaskSummary" ) );
+  mSummary->setToolTip( tr( "任务统计：总数 / 运行中 / 完成 / 失败。" ) );
   mCancelBtn = new QPushButton( tr( "取消选中" ), this );
   mCancelBtn->setObjectName( QStringLiteral( "rsGeorefTaskCancelBtn" ) );
   mCancelBtn->setEnabled( false );
+  mCancelBtn->setToolTip( tr( "取消当前选中且仍在运行的校正任务。" ) );
+  mCancelBtn->setStatusTip( mCancelBtn->toolTip() );
   mClearBtn = new QPushButton( tr( "清空已完成" ), this );
   mClearBtn->setObjectName( QStringLiteral( "rsGeorefTaskClearBtn" ) );
+  mClearBtn->setToolTip( tr( "从列表移除已完成/失败/取消的任务，不影响运行中任务。" ) );
+  mClearBtn->setStatusTip( mClearBtn->toolTip() );
   top->addWidget( mSummary, 1 );
   top->addWidget( mCancelBtn );
   top->addWidget( mClearBtn );

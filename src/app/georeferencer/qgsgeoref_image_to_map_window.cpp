@@ -50,10 +50,13 @@ void QgsGeorefImageToMapWindow::setupCentralWidget()
   mSrcCanvas = new QgsMapCanvas( this );
   mSrcCanvas->setObjectName( QStringLiteral( "rsGeorefI2MSrcCanvas" ) );
   mSrcCanvas->setCanvasColor( Qt::white );
+  mSrcCanvas->setToolTip( tr( "源影像画布 (SRC)：加载待校正影像，在此点击添加 GCP 源位置。" ) );
 
   mDstCanvas = new QgsMapCanvas( this );
   mDstCanvas->setObjectName( QStringLiteral( "rsGeorefI2MMapCanvas" ) );
   mDstCanvas->setCanvasColor( QColor( 245, 245, 245 ) );
+  mDstCanvas->setToolTip( tr(
+    "地图预览 (Map)：镜像主工程中可见图层，在此指定 GCP 目标坐标（地理坐标）。" ) );
 
   splitter->addWidget( mSrcCanvas );
   splitter->addWidget( mDstCanvas );
@@ -65,13 +68,17 @@ void QgsGeorefImageToMapWindow::setupCentralWidget()
 void QgsGeorefImageToMapWindow::setupMenus()
 {
   QMenu *fileMenu = createFileMenu();
-  fileMenu->addAction( tr( "Refresh map layers" ),
+  auto *refresh = fileMenu->addAction( tr( "Refresh map layers" ),
                        this, &QgsGeorefImageToMapWindow::refreshMapLayersFromProject );
+  refresh->setToolTip( tr( "重新同步主工程可见图层到下方 Map 画布。" ) );
+  refresh->setStatusTip( refresh->toolTip() );
   fileMenu->addSeparator();
-  fileMenu->addAction( tr( "Load .points..." ), this, &QgsGeorefShellWindow::loadPoints );
-  fileMenu->addAction( tr( "Save .points..." ), this, &QgsGeorefShellWindow::savePoints );
+  auto *loadPts = fileMenu->addAction( tr( "Load .points..." ), this, &QgsGeorefShellWindow::loadPoints );
+  loadPts->setToolTip( tr( "导入已保存的控制点文件。" ) );
+  auto *savePts = fileMenu->addAction( tr( "Save .points..." ), this, &QgsGeorefShellWindow::savePoints );
+  savePts->setToolTip( tr( "导出当前控制点。" ) );
   fileMenu->addSeparator();
-  fileMenu->addAction( tr( "Close" ), this, &QWidget::close );
+  fileMenu->addAction( tr( "Close" ), this, &QWidget::close )->setToolTip( tr( "关闭本窗口（不影响 Image 2 Image）。" ) );
   addStandardMenuBar();
 }
 
@@ -80,13 +87,33 @@ void QgsGeorefImageToMapWindow::setupToolbars()
   mToolBar = addToolBar( tr( "Tools" ) );
   mToolBar->setObjectName( QStringLiteral( "rsGeorefI2MToolBar" ) );
   mToolBar->setMovable( false );
+  mToolBar->setToolTip( tr( "Image 2 Map 工具：对主地图取点、RPC 方法与运行。" ) );
 
   addGcpEditActions( mToolBar, QStringLiteral( "rsGeorefI2M" ) );
   mToolBar->addSeparator();
-  mToolBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Refresh map" ),
+  auto *refresh = mToolBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Refresh map" ),
                        this, &QgsGeorefImageToMapWindow::refreshMapLayersFromProject );
+  refresh->setToolTip( tr(
+    "刷新地图：将主窗口工程中当前可见图层同步到 Map 预览画布。"
+    "主图增删图层或改可见性后点此更新。" ) );
+  refresh->setStatusTip( refresh->toolTip() );
+  refresh->setWhatsThis( refresh->toolTip() );
 
   addApplyAction( mToolBar, QStringLiteral( "rsGeorefI2MApplyAction" ) );
+}
+
+QString QgsGeorefImageToMapWindow::windowHelpText() const
+{
+  return tr(
+    "<b>Image Registration · Image 2 Map</b><br>"
+    "源影像对主工程地图：上方 SRC，下方 Map（主图可见图层镜像）。<br><br>"
+    "<b>典型流程</b><br>"
+    "1. 主窗口加载已有地理参考底图/矢量<br>"
+    "2. 本窗口 File → Open source raster<br>"
+    "3. Add GCP：SRC 点地物 → Map 上对应位置<br>"
+    "4. 变换方法可选 <b>RPC Physical</b>（需源含 RPC；可配 DEM）<br>"
+    "5. 设置输出路径 → 运行 → 任务列表查看/加载结果<br><br>"
+    "无 SIFT、无「打开参考影像」。悬停工具与参数可看说明。" );
 }
 
 void QgsGeorefImageToMapWindow::refreshMapLayersFromProject()

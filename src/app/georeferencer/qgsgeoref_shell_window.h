@@ -84,6 +84,8 @@ class QgsGeorefShellWindow : public QMainWindow
 
     /// Log shell tag for structured warp events ("i2i" / "i2m").
     virtual QString shellId() const { return QStringLiteral( "georef" ); }
+    /// Multi-line help text for Help → 关于本窗口.
+    virtual QString windowHelpText() const;
     /// Extra snapshot fields (e.g. ref path, sync zoom).
     virtual void captureShellSpecific( RsGeorefSessionState::WorkflowSnapshot & ) const {}
     virtual void applyShellSpecific( const RsGeorefSessionState::WorkflowSnapshot & ) {}

@@ -20,8 +20,30 @@
 #include <QStatusBar>
 #include <QToolBar>
 #include <QVector>
+#include <QWhatsThis>
 #include <QWidget>
 #include <cmath>
+
+namespace
+{
+  void tipAction( QAction *a, const QString &text )
+  {
+    if ( !a )
+      return;
+    a->setToolTip( text );
+    a->setStatusTip( text );
+    a->setWhatsThis( text );
+  }
+
+  void tipWidget( QWidget *w, const QString &text )
+  {
+    if ( !w )
+      return;
+    w->setToolTip( text );
+    w->setStatusTip( text );
+    w->setWhatsThis( text );
+  }
+}
 
 #include "qgis.h"
 #include "qgsapplication.h"
@@ -99,8 +121,12 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   mGcpDock = new QDockWidget( tr( "GCP 表" ), this );
   mGcpDock->setObjectName( gcpDockObjectName );
   mGcpDock->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea );
+  tipWidget( mGcpDock, tr(
+    "地面控制点列表：启用/禁用点、查看残差。点数与分布决定拟合质量。" ) );
   mGcpTable = new QgsGCPListWidget( mGcpDock );
   mGcpTable->setGCPList( mGcps );
+  tipWidget( mGcpTable, tr(
+    "表格中每一行是一个 GCP。可在画布上加点/移动/删除，或在此勾选启用状态。" ) );
   mGcpDock->setWidget( mGcpTable );
   connect( mGcpTable, &QgsGCPListWidget::deleteRowsRequested,
            this, &QgsGeorefShellWindow::deleteGcpRows );
@@ -110,6 +136,8 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   mTaskDock = new QDockWidget( tr( "校正任务" ), this );
   mTaskDock->setObjectName( gcpDockObjectName + QStringLiteral( "_tasks" ) );
   mTaskDock->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea );
+  tipWidget( mTaskDock, tr(
+    "运行历史：点「运行」后任务出现在此，可查看进度、取消或加载结果。" ) );
   mTaskList = new RsGeorefTaskList( mTaskDock );
   mTaskList->setObjectName( QStringLiteral( "rsGeorefTaskList" ) );
   mTaskDock->setWidget( mTaskList );
@@ -131,6 +159,8 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   mParamDock = new QDockWidget( tr( "校正参数" ), this );
   mParamDock->setObjectName( paramDockObjectName );
   mParamDock->setAllowedAreas( Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea );
+  tipWidget( mParamDock, tr(
+    "变换方法、重采样、目标 CRS 与输出路径。悬停各控件可查看详细说明。" ) );
   mParamsPanel = new RsGeorefParamsPanel( mParamDock );
   mParamsPanel->setProfile( profile );
   if ( profile == RsGeorefParamsPanel::Profile::ImageToImage )
@@ -169,20 +199,26 @@ void QgsGeorefShellWindow::setupStatusBar( const QString &coordObj, const QStrin
 {
   mCoordLabel = new QLabel( tr( "—" ), this );
   mCoordLabel->setObjectName( coordObj );
+  tipWidget( mCoordLabel, tr( "提示与坐标信息。" ) );
   mCrsLabel = new QLabel( tr( "CRS: —" ), this );
   mCrsLabel->setObjectName( crsObj );
+  tipWidget( mCrsLabel, tr( "当前相关坐标系摘要。" ) );
   mRmsLabel = new QLabel( tr( "RMS: —" ), this );
   mRmsLabel->setObjectName( rmsObj );
+  tipWidget( mRmsLabel, tr( "当前拟合总 RMS。点数不足或未拟合时显示 —。" ) );
   statusBar()->addWidget( mCoordLabel, 1 );
   statusBar()->addPermanentWidget( mCrsLabel );
   statusBar()->addPermanentWidget( mRmsLabel );
+  statusBar()->showMessage( tr( "准备就绪 — 打开源影像并选取 GCP，设置输出后点「运行」" ), 8000 );
 }
 
 QMenu *QgsGeorefShellWindow::createFileMenu()
 {
   auto *fileMenu = menuBar()->addMenu( tr( "&File" ) );
-  fileMenu->addAction( tr( "Open source raster..." ),
-                       this, &QgsGeorefShellWindow::openSourceRaster );
+  auto *openSrc = fileMenu->addAction( tr( "Open source raster..." ),
+                                       this, &QgsGeorefShellWindow::openSourceRaster );
+  tipAction( openSrc, tr(
+    "打开待校正源影像（SRC）。影像显示在源画布上，路径用于写出 warp。" ) );
   return fileMenu;
 }
 
@@ -191,7 +227,27 @@ void QgsGeorefShellWindow::addStandardMenuBar()
   menuBar()->addMenu( tr( "&Edit" ) );
   menuBar()->addMenu( tr( "&View" ) );
   menuBar()->addMenu( tr( "&Settings" ) );
-  menuBar()->addMenu( tr( "&Help" ) );
+  auto *helpMenu = menuBar()->addMenu( tr( "&Help" ) );
+  auto *about = helpMenu->addAction( tr( "关于本窗口…" ), this, [this]() {
+    QMessageBox::information( this, tr( "几何校正帮助" ), windowHelpText() );
+  } );
+  tipAction( about, tr( "显示本窗口工作流程与各面板说明。" ) );
+  auto *whats = helpMenu->addAction( tr( "这是什么？(Shift+F1)" ), this, [this]() {
+    QWhatsThis::enterWhatsThisMode();
+  } );
+  tipAction( whats, tr( "进入「这是什么」模式，再点击控件查看说明。" ) );
+}
+
+QString QgsGeorefShellWindow::windowHelpText() const
+{
+  return tr(
+    "<b>影像配准 / 几何校正</b><br><br>"
+    "1. 打开源影像（File）<br>"
+    "2. 在 SRC 与目标画布上采集 GCP<br>"
+    "3. 在右侧设置变换方法、目标 CRS、输出路径<br>"
+    "4. 查看残差；点数与方法满足后点工具栏「运行」<br>"
+    "5. 在「校正任务」中查看进度；完成后双击可加载结果<br><br>"
+    "提示：将鼠标悬停在工具按钮或参数控件上可查看详细说明。" );
 }
 
 void QgsGeorefShellWindow::addGcpEditActions( QToolBar *bar, const QString &objectNamePrefix )
@@ -200,18 +256,26 @@ void QgsGeorefShellWindow::addGcpEditActions( QToolBar *bar, const QString &obje
     return;
 
   const QIcon ic( QStringLiteral( ":/icons/r_ster_calc" ) );
+  tipWidget( bar, tr( "配准工具栏：加点 / 移动 / 删除 GCP，导入导出控制点，运行校正。" ) );
 
   mAddPointAction = bar->addAction( ic, tr( "Add GCP" ) );
   mAddPointAction->setObjectName( objectNamePrefix + QStringLiteral( "AddPointAction" ) );
   mAddPointAction->setCheckable( true );
+  tipAction( mAddPointAction, tr(
+    "添加控制点：在源画布（SRC）点击一点，再在目标画布上指定对应位置"
+    "（或通过坐标对话框输入）。均匀分布、覆盖边缘效果更好。" ) );
 
   mMovePointAction = bar->addAction( ic, tr( "Move GCP" ) );
   mMovePointAction->setObjectName( objectNamePrefix + QStringLiteral( "MovePointAction" ) );
   mMovePointAction->setCheckable( true );
+  tipAction( mMovePointAction, tr(
+    "移动控制点：在源或目标画布上拖动已有 GCP 标记，微调位置后残差会自动重算。" ) );
 
   mDeletePointAction = bar->addAction( ic, tr( "Delete GCP" ) );
   mDeletePointAction->setObjectName( objectNamePrefix + QStringLiteral( "DeletePointAction" ) );
   mDeletePointAction->setCheckable( true );
+  tipAction( mDeletePointAction, tr(
+    "删除控制点：在画布上点击 GCP 标记删除；也可在 GCP 表中选中行删除。" ) );
 
   auto *group = new QActionGroup( this );
   group->setExclusive( true );
@@ -219,8 +283,10 @@ void QgsGeorefShellWindow::addGcpEditActions( QToolBar *bar, const QString &obje
   group->addAction( mMovePointAction );
   group->addAction( mDeletePointAction );
 
-  bar->addAction( ic, tr( "Load .gcp" ), this, &QgsGeorefShellWindow::loadPoints );
-  bar->addAction( ic, tr( "Export .gcp" ), this, &QgsGeorefShellWindow::savePoints );
+  auto *loadGcp = bar->addAction( ic, tr( "Load .gcp" ), this, &QgsGeorefShellWindow::loadPoints );
+  tipAction( loadGcp, tr( "从 .points / .gcp 文件加载控制点列表。" ) );
+  auto *saveGcp = bar->addAction( ic, tr( "Export .gcp" ), this, &QgsGeorefShellWindow::savePoints );
+  tipAction( saveGcp, tr( "将当前控制点导出为 .points 文件，便于下次继续。" ) );
 }
 
 void QgsGeorefShellWindow::addApplyAction( QToolBar *bar, const QString &objectName )
@@ -236,7 +302,9 @@ void QgsGeorefShellWindow::addApplyAction( QToolBar *bar, const QString &objectN
     QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ),
     tr( "运行" ), this, &QgsGeorefShellWindow::applyTransform );
   mApplyAction->setObjectName( objectName );
-  mApplyAction->setToolTip( tr( "将当前配置加入任务列表并执行几何校正" ) );
+  tipAction( mApplyAction, tr(
+    "运行几何校正：校验 GCP / 输出路径后，将任务加入「校正任务」列表并后台执行 warp。\n"
+    "可多次运行形成多条任务；运行中可在任务列表取消。" ) );
   mApplyAction->setEnabled( false );
 }
 

@@ -53,10 +53,12 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
   mSrcCanvas = new QgsMapCanvas( this );
   mSrcCanvas->setObjectName( QStringLiteral( "rsSrcCanvas" ) );
   mSrcCanvas->setCanvasColor( Qt::white );
+  mSrcCanvas->setToolTip( tr( "源影像画布 (SRC)：加载待校正影像，在此点击添加 GCP 源位置。" ) );
 
   mDstCanvas = new QgsMapCanvas( this );
   mDstCanvas->setObjectName( QStringLiteral( "rsRefCanvas" ) );
   mDstCanvas->setCanvasColor( Qt::white );
+  mDstCanvas->setToolTip( tr( "参考影像画布 (REF)：加载已配准参考影像，在此指定 GCP 目标位置。" ) );
 
   split->addWidget( mSrcCanvas );
   split->addWidget( mDstCanvas );
@@ -79,13 +81,17 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
 void QgsGeoreferencerMainWindow::setupMenus()
 {
   QMenu *fileMenu = createFileMenu();
-  fileMenu->addAction( tr( "Load reference raster..." ),
+  auto *loadRef = fileMenu->addAction( tr( "Load reference raster..." ),
                        this, QOverload<>::of( &QgsGeoreferencerMainWindow::loadReferenceRaster ) );
+  loadRef->setToolTip( tr( "打开参考影像到右侧 REF 画布，作为 GCP 目标与对齐基准。" ) );
+  loadRef->setStatusTip( loadRef->toolTip() );
   fileMenu->addSeparator();
-  fileMenu->addAction( tr( "Load .points..." ), this, &QgsGeorefShellWindow::loadPoints );
-  fileMenu->addAction( tr( "Save .points..." ), this, &QgsGeorefShellWindow::savePoints );
+  auto *loadPts = fileMenu->addAction( tr( "Load .points..." ), this, &QgsGeorefShellWindow::loadPoints );
+  loadPts->setToolTip( tr( "导入已保存的控制点文件。" ) );
+  auto *savePts = fileMenu->addAction( tr( "Save .points..." ), this, &QgsGeorefShellWindow::savePoints );
+  savePts->setToolTip( tr( "导出当前控制点，关闭窗口前若有未保存更改也会提示。" ) );
   fileMenu->addSeparator();
-  fileMenu->addAction( tr( "Close" ), this, &QWidget::close );
+  fileMenu->addAction( tr( "Close" ), this, &QWidget::close )->setToolTip( tr( "关闭本窗口（不影响 Image 2 Map）。" ) );
   addStandardMenuBar();
 }
 
@@ -94,6 +100,7 @@ void QgsGeoreferencerMainWindow::setupToolbars()
   mToolBar = addToolBar( tr( "Tools" ) );
   mToolBar->setObjectName( QStringLiteral( "rsGeorefToolBar" ) );
   mToolBar->setMovable( false );
+  mToolBar->setToolTip( tr( "Image 2 Image 工具：双影像配准、SIFT 自动匹配与运行。" ) );
 
   addGcpEditActions( mToolBar, QStringLiteral( "rsGeoref" ) );
   mToolBar->addSeparator();
@@ -101,14 +108,38 @@ void QgsGeoreferencerMainWindow::setupToolbars()
   mSyncZoomAction = mToolBar->addAction(
     QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Sync zoom" ) );
   mSyncZoomAction->setObjectName( QStringLiteral( "rsGeorefSyncZoomAction" ) );
+  mSyncZoomAction->setToolTip( tr(
+    "同步缩放：开启后 SRC 与 REF 画布联动缩放/平移，便于对照同名地物取点。" ) );
+  mSyncZoomAction->setStatusTip( mSyncZoomAction->toolTip() );
+  mSyncZoomAction->setWhatsThis( mSyncZoomAction->toolTip() );
 
   auto *sift = mToolBar->addAction(
     QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ),
     tr( "Auto match (SIFT)" ),
     this, &QgsGeoreferencerMainWindow::runSiftMatch );
   sift->setObjectName( QStringLiteral( "rsGeorefSiftAction" ) );
+  sift->setToolTip( tr(
+    "SIFT 自动匹配：需已打开 SRC 与参考影像。提取特征并筛选内点后，可批量添加 GCP。\n"
+    "需要 OpenCV；仅 Image 2 Image 提供。" ) );
+  sift->setStatusTip( sift->toolTip() );
+  sift->setWhatsThis( sift->toolTip() );
 
   addApplyAction( mToolBar, QStringLiteral( "rsGeorefApplyAction" ) );
+}
+
+QString QgsGeoreferencerMainWindow::windowHelpText() const
+{
+  return tr(
+    "<b>Image Registration · Image 2 Image</b><br>"
+    "双影像配准：左侧源影像，右侧参考影像。<br><br>"
+    "<b>典型流程</b><br>"
+    "1. File → Open source raster<br>"
+    "2. File → Load reference raster<br>"
+    "3. 用 Add GCP 在两侧同名地物上取点（≥ 方法要求点数）<br>"
+    "4. 可选：SIFT 自动匹配、Sync zoom 联动浏览<br>"
+    "5. 右侧设置变换方法与输出路径 → 运行<br><br>"
+    "不含 RPC（RPC 请用 Image 2 Map）。悬停工具按钮可看详细说明；"
+    "Help → 这是什么？ 可点击任意控件查看。" );
 }
 
 void QgsGeoreferencerMainWindow::runSiftMatch()

@@ -21,7 +21,16 @@
 
 namespace
 {
-  QFrame *makeSectionFrame( const QString &title, QWidget *parent )
+  void setHelp( QWidget *w, const QString &tip )
+  {
+    if ( !w )
+      return;
+    w->setToolTip( tip );
+    w->setWhatsThis( tip );
+    w->setStatusTip( tip );
+  }
+
+  QFrame *makeSectionFrame( const QString &title, QWidget *parent, const QString &sectionTip = {} )
   {
     auto *frame = new QFrame( parent );
     frame->setObjectName( QStringLiteral( "rsParamSection" ) );
@@ -34,6 +43,13 @@ namespace
     QFont f = header->font();
     f.setBold( true );
     header->setFont( f );
+    if ( !sectionTip.isEmpty() )
+    {
+      header->setToolTip( sectionTip );
+      header->setWhatsThis( sectionTip );
+      frame->setToolTip( sectionTip );
+      frame->setWhatsThis( sectionTip );
+    }
     lay->addWidget( header );
     return frame;
   }
@@ -44,6 +60,9 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
 {
   setObjectName( QStringLiteral( "rsGeorefParamsPanel" ) );
   setMinimumWidth( 320 );
+  setHelp( this, tr(
+    "校正参数面板：选择变换方法、重采样与输出路径，并查看 GCP 拟合残差。"
+    "设置完成后点工具栏「运行」加入任务列表。" ) );
 
   auto *root = new QVBoxLayout( this );
   root->setContentsMargins( 6, 6, 6, 6 );
@@ -51,7 +70,9 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
 
   // ---- Section 1: 坐标变换 ----
   {
-    QFrame *sec = makeSectionFrame( tr( "坐标变换" ), this );
+    QFrame *sec = makeSectionFrame(
+      tr( "坐标变换" ), this,
+      tr( "根据 GCP 拟合源像素到目标坐标的几何模型。点数不足时「运行」会禁用。" ) );
     auto *form = new QFormLayout();
     form->setContentsMargins( 0, 0, 0, 0 );
 
@@ -78,6 +99,13 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     connect( mTransformCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
              this, [this]( int ) { emit transformMethodChanged(); } );
 
+    setHelp( mTransformCombo, tr(
+      "变换方法：\n"
+      "• Linear / Helmert：全局相似/线性，点数少时可用\n"
+      "• 多项式 1–3：常见影像配准，阶数越高越灵活但易过拟合\n"
+      "• TPS：局部变形强，适合复杂畸变\n"
+      "• Projective：透视/扫描图\n"
+      "• RPC Physical：仅 Image→Map，依赖源影像 RPC 元数据与可选 DEM" ) );
     form->addRow( tr( "方法" ), mTransformCombo );
 
     mMinPtsLabel = new QLabel( tr( "—" ), sec );
@@ -86,6 +114,9 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     mMinPtsLabel->setObjectName( QStringLiteral( "rsMinPtsLabel" ) );
     mActualPtsLabel->setObjectName( QStringLiteral( "rsActualPtsLabel" ) );
     mDofLabel->setObjectName( QStringLiteral( "rsDofLabel" ) );
+    setHelp( mMinPtsLabel, tr( "当前方法要求的最少启用 GCP 数。" ) );
+    setHelp( mActualPtsLabel, tr( "当前已启用、参与拟合的 GCP 数量。" ) );
+    setHelp( mDofLabel, tr( "自由度 = 实际点数 − 最少点数。>0 时可用残差评估精度。" ) );
 
     form->addRow( tr( "最少点数" ), mMinPtsLabel );
     form->addRow( tr( "实际可用点数" ), mActualPtsLabel );
@@ -97,7 +128,9 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
 
   // ---- Section 2: 重采样 ----
   {
-    QFrame *sec = makeSectionFrame( tr( "重采样" ), this );
+    QFrame *sec = makeSectionFrame(
+      tr( "重采样" ), this,
+      tr( "写出校正结果栅格时的像元插值方式与输出分辨率。" ) );
     auto *form = new QFormLayout();
     form->setContentsMargins( 0, 0, 0, 0 );
 
@@ -111,6 +144,11 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     mResamplingCombo->addItem( tr( "Lanczos" ), QVariant::fromValue( static_cast<int>( RM::Lanczos ) ) );
     connect( mResamplingCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
              this, [this]( int ) { emit resamplingMethodChanged(); } );
+    setHelp( mResamplingCombo, tr(
+      "重采样算法：\n"
+      "• Nearest：保持类别/整数值，分类图适用\n"
+      "• Bilinear：连续影像常用\n"
+      "• Cubic / Lanczos：更平滑，计算稍慢" ) );
     form->addRow( tr( "算法" ), mResamplingCombo );
 
     mPixelSize = new QDoubleSpinBox( sec );
@@ -119,18 +157,21 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     mPixelSize->setDecimals( 6 );
     mPixelSize->setValue( 0.0 );
     mPixelSize->setSpecialValueText( tr( "auto" ) );
+    setHelp( mPixelSize, tr( "输出像元大小（目标 CRS 单位）。auto 表示由引擎根据输入自动估计。" ) );
     form->addRow( tr( "输出像元大小" ), mPixelSize );
 
     mOutputExtent = new QLineEdit( sec );
     mOutputExtent->setObjectName( QStringLiteral( "rsOutputExtent" ) );
     mOutputExtent->setReadOnly( true );
     mOutputExtent->setText( tr( "auto · ref" ) );
+    setHelp( mOutputExtent, tr( "输出地理范围（只读）。当前为自动/参考范围策略。" ) );
     form->addRow( tr( "输出范围" ), mOutputExtent );
 
     mBackground = new QSpinBox( sec );
     mBackground->setObjectName( QStringLiteral( "rsBackground" ) );
     mBackground->setRange( 0, 65535 );
     mBackground->setValue( 0 );
+    setHelp( mBackground, tr( "无数据覆盖区域填充的背景像元值。" ) );
     form->addRow( tr( "背景值" ), mBackground );
 
     sec->layout()->addItem( form );
@@ -139,11 +180,14 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
 
   // ---- Section 3: RMS 误差分布 ----
   {
-    QFrame *sec = makeSectionFrame( tr( "RMS 误差分布" ), this );
+    QFrame *sec = makeSectionFrame(
+      tr( "RMS 误差分布" ), this,
+      tr( "显示当前拟合残差。目标：总 RMS 与最大残差尽量小且点分布均匀。" ) );
     auto *vbox = new QVBoxLayout();
     vbox->setContentsMargins( 0, 0, 0, 0 );
 
     mScatter = new RsRmsScatterWidget( sec );
+    setHelp( mScatter, tr( "残差散点图：横纵为 X/Y 残差。离群点可禁用或重新取点。" ) );
     vbox->addWidget( mScatter, 0, Qt::AlignHCenter );
 
     auto *grid = new QFormLayout();
@@ -156,6 +200,8 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     mYRms->setObjectName( QStringLiteral( "rsYRmsLabel" ) );
     mTotalRms->setObjectName( QStringLiteral( "rsTotalRmsLabel" ) );
     mMaxRms->setObjectName( QStringLiteral( "rsMaxRmsLabel" ) );
+    setHelp( mTotalRms, tr( "启用 GCP 残差均方根（像素或目标单位，视拟合路径而定）。" ) );
+    setHelp( mMaxRms, tr( "残差最大的点，优先检查该 GCP 是否取错。" ) );
     grid->addRow( tr( "X RMS" ), mXRms );
     grid->addRow( tr( "Y RMS" ), mYRms );
     grid->addRow( tr( "Total RMS" ), mTotalRms );
@@ -167,6 +213,8 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     mRmsBefore->setObjectName( QStringLiteral( "rsRmsBefore" ) );
     mRmsAfter = new QLabel( QString(), sec );
     mRmsAfter->setObjectName( QStringLiteral( "rsRmsAfter" ) );
+    setHelp( mRmsBefore, tr( "RPC 精化前 RMS（有 ≥3 个 GCP 时显示）。" ) );
+    setHelp( mRmsAfter, tr( "RPC 线性偏差精化后 RMS；绿字表示精化改善。" ) );
 
     vbox->addItem( grid );
     vbox->addWidget( mRmsBefore );
@@ -177,16 +225,20 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
 
   // ---- Section 4: 坐标系 ----
   {
-    QFrame *sec = makeSectionFrame( tr( "坐标系" ), this );
+    QFrame *sec = makeSectionFrame(
+      tr( "坐标系" ), this,
+      tr( "目标坐标系用于拟合与写出 GeoTIFF。I2M 下 Map 画布会跟随目标 CRS。" ) );
     auto *form = new QFormLayout();
     form->setContentsMargins( 0, 0, 0, 0 );
 
     mSrcCrsLabel = new QLabel( tr( "—" ), sec );
     mSrcCrsLabel->setObjectName( QStringLiteral( "rsSrcCrsLabel" ) );
+    setHelp( mSrcCrsLabel, tr( "源影像坐标系（若已定义）。" ) );
 
     // Task 11.5.1 — real CRS picker replaces the hard-coded EPSG:32650 label.
     mCrsWidget = new QgsProjectionSelectionWidget( sec );
     mCrsWidget->setObjectName( QStringLiteral( "rsCrsWidget" ) );
+    setHelp( mCrsWidget, tr( "选择校正结果的目标 CRS（如 UTM / 国家 2000）。" ) );
 
     // Restore last user choice (default to EPSG:32650 to preserve previous
     // behaviour from Task 11.4 when no setting exists yet).
@@ -229,7 +281,9 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
 
   // ---- Section 5: 输出 ----
   {
-    QFrame *sec = makeSectionFrame( tr( "输出" ), this );
+    QFrame *sec = makeSectionFrame(
+      tr( "输出" ), this,
+      tr( "校正结果 GeoTIFF 路径。必须填写后才能「运行」。" ) );
     auto *row = new QHBoxLayout();
     row->setContentsMargins( 0, 0, 0, 0 );
 
@@ -238,10 +292,12 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     mOutputPath->setPlaceholderText( tr( "/path/to/output.tif" ) );
     connect( mOutputPath, &QLineEdit::textChanged,
              this, [this]( const QString &s ) { emit outputPathChanged( s ); } );
+    setHelp( mOutputPath, tr( "输出文件完整路径（建议 .tif）。任务列表会记录此路径。" ) );
 
     mBrowseBtn = new QPushButton( tr( "Browse…" ), sec );
     mBrowseBtn->setObjectName( QStringLiteral( "rsBrowseOutputBtn" ) );
     connect( mBrowseBtn, &QPushButton::clicked, this, &RsGeorefParamsPanel::onBrowseOutput );
+    setHelp( mBrowseBtn, tr( "浏览选择输出文件位置。" ) );
 
     row->addWidget( mOutputPath, 1 );
     row->addWidget( mBrowseBtn );
@@ -251,7 +307,9 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
 
   // ---- Section 6: DEM (RPC mode only) ----
   {
-    mDemSection = makeSectionFrame( tr( "DEM (RPC 模式)" ), this );
+    mDemSection = makeSectionFrame(
+      tr( "DEM (RPC 模式)" ), this,
+      tr( "仅 RPC Physical 方法显示。可选 DEM 与高程偏移改善正射/投影精度。" ) );
     mDemSection->setObjectName( QStringLiteral( "rsDemSection" ) );
 
     auto *form = new QFormLayout();
@@ -262,6 +320,7 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     mDemPath = new QLineEdit( mDemSection );
     mDemPath->setObjectName( QStringLiteral( "rsDemPath" ) );
     mDemPath->setPlaceholderText( tr( "/path/to/dem.tif (可选)" ) );
+    setHelp( mDemPath, tr( "数字高程模型路径（可选）。用于 RPC 高度相关投影。" ) );
     mDemBrowseBtn = new QPushButton( tr( "Browse…" ), mDemSection );
     mDemBrowseBtn->setObjectName( QStringLiteral( "rsDemBrowseBtn" ) );
     connect( mDemBrowseBtn, &QPushButton::clicked, this, [this]() {
@@ -273,6 +332,7 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
       if ( !path.isEmpty() )
         setDemPath( path );
     } );
+    setHelp( mDemBrowseBtn, tr( "选择 DEM 栅格文件。" ) );
     demRow->addWidget( mDemPath, 1 );
     demRow->addWidget( mDemBrowseBtn );
     form->addRow( tr( "DEM 路径" ), demRow );
@@ -287,6 +347,7 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     // recompute the RPC fit (and the warp pipeline picks up RPC_HEIGHT).
     connect( mDemZOffset, QOverload<double>::of( &QDoubleSpinBox::valueChanged ),
              this, [this]( double ) { emit demZOffsetChanged(); } );
+    setHelp( mDemZOffset, tr( "相对 DEM 的高程偏移（米），传入 RPC_HEIGHT 选项。" ) );
     form->addRow( tr( "高程偏移" ), mDemZOffset );
 
     mDemSection->layout()->addItem( form );

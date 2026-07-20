@@ -156,12 +156,21 @@ void QgisDesktopWindow::setupMenu()
     rasterMenu->addSeparator();
     QMenu *regMenu = rasterMenu->addMenu(tr("Image Registration"));
     regMenu->setObjectName(QStringLiteral("mImageRegistrationMenu"));
-    regMenu->addAction(QIcon(QStringLiteral(":/icons/r_ster_calc")),
+    regMenu->setToolTipsVisible(true);
+    regMenu->setToolTip(tr("影像配准 / 几何校正：双影像或影像对地图。"));
+    auto *i2iAct = regMenu->addAction(QIcon(QStringLiteral(":/icons/r_ster_calc")),
                        tr("Image 2 Image"),
                        this, &QgisDesktopWindow::openGeorefImageToImage);
-    regMenu->addAction(QIcon(QStringLiteral(":/icons/r_ster_calc")),
+    i2iAct->setToolTip(tr(
+        "Image 2 Image：水平双画布 SRC|REF，同名点配准，支持 SIFT 自动匹配。"
+        "不含 RPC。"));
+    i2iAct->setStatusTip(i2iAct->toolTip());
+    auto *i2mAct = regMenu->addAction(QIcon(QStringLiteral(":/icons/r_ster_calc")),
                        tr("Image 2 Map"),
                        this, &QgisDesktopWindow::openGeorefImageToMap);
+    i2mAct->setToolTip(tr(
+        "Image 2 Map：源影像 + 主工程地图预览取点，变换方法含 RPC Physical。"));
+    i2mAct->setStatusTip(i2mAct->toolTip());
     rasterMenu->addAction(tr("Change Detection..."), this, &QgisDesktopWindow::openChangeDetectionDialog);
     // Phase 10A Task 10.2 — Classification submenu (Pixel-based + OBIA placeholder).
     auto *classifyMenu = rasterMenu->addMenu(tr("Classification"));

@@ -20,6 +20,7 @@ class QgsGeorefImageToMapWindow : public QgsGeorefShellWindow
 
   protected:
     QString shellId() const override { return QStringLiteral( "i2m" ); }
+    QString windowHelpText() const override;
     void onTransformMethodChangedExtra() override;
     void captureShellSpecific( RsGeorefSessionState::WorkflowSnapshot &s ) const override;
 
