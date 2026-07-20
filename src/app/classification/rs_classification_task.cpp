@@ -342,20 +342,25 @@ bool RsClassificationTask::run()
     dstDs->GetRasterBand( 1 )->SetColorTable( &ct );
     dstDs->GetRasterBand( 1 )->SetColorInterpretation( GCI_PaletteIndex );
   }
-  dstDs->GetRasterBand( 1 )->SetNoDataValue( 0 );
+  const int unclassified = mCfg.ignoreOptions.unclassifiedValue;
+  if ( mCfg.ignoreOptions.writeOutputNodata )
+    dstDs->GetRasterBand( 1 )->SetNoDataValue( unclassified );
 
-  // Per-band NoData from the source: any feature NoData → class 0.
+  // Per-band source NoData (optional) + user ignore values → unclassified.
   const int B = mCfg.bandIndices.size();
   std::vector<bool> bandHasNodata( static_cast<size_t>( B ), false );
   std::vector<float> bandNodata( static_cast<size_t>( B ), 0.0f );
-  for ( int bi = 0; bi < B; ++bi )
+  if ( mCfg.ignoreOptions.useSourceNodata )
   {
-    int success = 0;
-    const double nd = srcDs->GetRasterBand( mCfg.bandIndices[bi] )->GetNoDataValue( &success );
-    if ( success )
+    for ( int bi = 0; bi < B; ++bi )
     {
-      bandHasNodata[static_cast<size_t>( bi )] = true;
-      bandNodata[static_cast<size_t>( bi )] = static_cast<float>( nd );
+      int success = 0;
+      const double nd = srcDs->GetRasterBand( mCfg.bandIndices[bi] )->GetNoDataValue( &success );
+      if ( success )
+      {
+        bandHasNodata[static_cast<size_t>( bi )] = true;
+        bandNodata[static_cast<size_t>( bi )] = static_cast<float>( nd );
+      }
     }
   }
 
@@ -406,15 +411,20 @@ bool RsClassificationTask::run()
             QStringLiteral( "RasterIO read failed at tile (%1,%2)" ).arg( tx ).arg( ty );
           return false;
         }
-        const bool hasNd = bandHasNodata[static_cast<size_t>( bi )];
-        const float nd = bandNodata[static_cast<size_t>( bi )];
         for ( int p = 0; p < npx; ++p )
         {
           const float v = tileBuf[static_cast<size_t>( p )];
           X.at<float>( p, bi ) = v;
-          if ( std::isnan( v ) || ( hasNd && v == nd ) )
-            pixelNodata[static_cast<size_t>( p )] = 1;
         }
+      }
+      // Mark ignore / edge pixels after all bands are filled.
+      std::vector<float> feat( static_cast<size_t>( B ) );
+      for ( int p = 0; p < npx; ++p )
+      {
+        for ( int bi = 0; bi < B; ++bi )
+          feat[static_cast<size_t>( bi )] = X.at<float>( p, bi );
+        if ( mCfg.ignoreOptions.isIgnorePixel( feat.data(), B, bandHasNodata, bandNodata ) )
+          pixelNodata[static_cast<size_t>( p )] = 1;
       }
 
       if ( mCfg.scaler.isFitted() )
@@ -469,7 +479,7 @@ bool RsClassificationTask::run()
       {
         if ( pixelNodata[static_cast<size_t>( p )] )
         {
-          outBuf[static_cast<size_t>( p )] = 0;
+          outBuf[static_cast<size_t>( p )] = static_cast<int32_t>( unclassified );
           continue;
         }
         int v = pred.at<int>( p, 0 );
@@ -478,7 +488,7 @@ bool RsClassificationTask::run()
           v = kmeansRemap.value( v, v );
         }
         if ( v < 0 )
-          v = 0;
+          v = unclassified;
         outBuf[static_cast<size_t>( p )] = static_cast<int32_t>( v );
       }
       // Destination offsets are relative to the crop window origin.

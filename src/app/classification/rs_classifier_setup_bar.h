@@ -14,6 +14,8 @@
 #include <QWidget>
 
 class QButtonGroup;
+class QCheckBox;
+class QComboBox;
 class QDoubleSpinBox;
 class QLineEdit;
 class QPushButton;
@@ -38,6 +40,15 @@ class RsClassifierSetupBar : public QWidget
     double trainRatio() const;
     void setTrainRatio( double ratio );
     QString outputPath() const;
+
+    /// Edge / NoData options for classify + training sample filter.
+    bool useSourceNodata() const;
+    void setUseSourceNodata( bool on );
+    QString ignoreValuesText() const;
+    void setIgnoreValuesText( const QString &text );
+    /// 0 = AnyBand, 1 = AllBands
+    int ignoreMatchMode() const;
+    void setIgnoreMatchMode( int mode );
 
     void setSourceBands( int count );
     int sourceBands() const { return mSourceBands; }
@@ -65,6 +76,9 @@ class RsClassifierSetupBar : public QWidget
     QLineEdit *mBandsEdit = nullptr;
     QDoubleSpinBox *mTrainRatioSpin = nullptr;
     QLineEdit *mOutputEdit = nullptr;
+    QCheckBox *mUseSrcNodataCheck = nullptr;
+    QLineEdit *mIgnoreValuesEdit = nullptr;
+    QComboBox *mIgnoreModeCombo = nullptr;
     QPushButton *mBtnApply = nullptr;
     QPushButton *mBtnPreview = nullptr;
     QPushButton *mBtnCv = nullptr;

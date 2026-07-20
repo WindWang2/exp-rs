@@ -6,6 +6,7 @@ target_sources(qgis_analysis PRIVATE
     rs_pixel_rasterizer.cpp
     # Classification v1.1 — viewport → pixel window (no OpenCV).
     rs_pixel_window.cpp
+    rs_pixel_ignore_options.cpp
 )
 target_include_directories(qgis_analysis PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

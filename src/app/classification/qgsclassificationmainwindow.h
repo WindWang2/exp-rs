@@ -13,6 +13,7 @@
 #include "rs_classify_session_state.h"
 #include "rs_classify_workflow_controller.h"
 #include "rs_feature_scaler.h"
+#include "rs_pixel_ignore_options.h"
 
 class QCheckBox;
 class QCloseEvent;
@@ -147,6 +148,8 @@ class QgsClassificationMainWindow : public QMainWindow
     bool buildTrainingData( const QVector<int> &bands,
                             cv::Mat &X,
                             cv::Mat &y ) const;
+    /// Read NoData / ignore-value options from the classifier setup bar.
+    RsPixelIgnoreOptions currentIgnoreOptions() const;
     /// Start RsPostProcessTask from Step 6 panel settings.
     void runPostProcess();
     /// Collect recode old→new pairs from the Step 6 table (may be empty).

@@ -1654,6 +1654,19 @@ if(TARGET qgis_app_classify)
   )
   sicnu_discover_tests(test_pixel_window)
 
+  # Classification edge handling — NoData + user ignore values.
+  add_executable(test_pixel_ignore_options test_pixel_ignore_options.cpp)
+  target_link_libraries(test_pixel_ignore_options PRIVATE
+    Catch2::Catch2WithMain
+    qgis_analysis
+    Qt6::Core
+  )
+  target_include_directories(test_pixel_ignore_options PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_pixel_ignore_options)
+
   # Classification workflow — .rscproj JSON project persistence.
   add_executable(test_classification_project test_classification_project.cpp)
   target_link_libraries(test_classification_project PRIVATE

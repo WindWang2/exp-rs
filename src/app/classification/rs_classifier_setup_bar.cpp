@@ -2,6 +2,8 @@
 
 #include "rs_classifier_setup_bar.h"
 
+#include <QCheckBox>
+#include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -9,6 +11,7 @@
 #include <QPushButton>
 #include <QStringList>
 #include <QToolButton>
+#include <QVBoxLayout>
 
 RsClassifierSetupBar::RsClassifierSetupBar( QWidget *parent )
   : QWidget( parent )
@@ -18,8 +21,11 @@ RsClassifierSetupBar::RsClassifierSetupBar( QWidget *parent )
 
 void RsClassifierSetupBar::buildLayout()
 {
-  auto *row = new QHBoxLayout( this );
-  row->setContentsMargins( 8, 4, 8, 4 );
+  auto *root = new QVBoxLayout( this );
+  root->setContentsMargins( 8, 4, 8, 4 );
+  root->setSpacing( 4 );
+
+  auto *row = new QHBoxLayout();
   row->setSpacing( 8 );
 
   // --- Algorithm buttons ----------------------------------------------------
@@ -113,6 +119,77 @@ void RsClassifierSetupBar::buildLayout()
            this, &RsClassifierSetupBar::previewRequested );
   connect( mBtnCv, &QPushButton::clicked,
            this, &RsClassifierSetupBar::crossValidateRequested );
+
+  root->addLayout( row );
+
+  // --- NoData / ignore values (edge handling) -----------------------------
+  auto *row2 = new QHBoxLayout();
+  row2->setSpacing( 8 );
+  mUseSrcNodataCheck = new QCheckBox( tr( "使用源 NoData" ), this );
+  mUseSrcNodataCheck->setObjectName( QStringLiteral( "rsClassifierUseSrcNodata" ) );
+  mUseSrcNodataCheck->setChecked( true );
+  mUseSrcNodataCheck->setToolTip( tr(
+    "启用后，各输入波段的 GDAL NoData 像元不参与分类，输出为未分类 (0)。"
+    "适合影像边缘或无效区。" ) );
+  row2->addWidget( mUseSrcNodataCheck );
+
+  row2->addWidget( new QLabel( tr( "忽略值:" ), this ) );
+  mIgnoreValuesEdit = new QLineEdit( this );
+  mIgnoreValuesEdit->setObjectName( QStringLiteral( "rsClassifierIgnoreValues" ) );
+  mIgnoreValuesEdit->setPlaceholderText( tr( "如 0 或 0,-9999（逗号分隔）" ) );
+  mIgnoreValuesEdit->setMaximumWidth( 160 );
+  mIgnoreValuesEdit->setToolTip( tr(
+    "额外忽略的像元值（任意波段等于该值则视为背景/边缘）。"
+    "常见：填充 0、背景 -9999。可与源 NoData 同时生效。" ) );
+  row2->addWidget( mIgnoreValuesEdit );
+
+  row2->addWidget( new QLabel( tr( "匹配:" ), this ) );
+  mIgnoreModeCombo = new QComboBox( this );
+  mIgnoreModeCombo->setObjectName( QStringLiteral( "rsClassifierIgnoreMode" ) );
+  mIgnoreModeCombo->addItem( tr( "任一波段" ), 0 );
+  mIgnoreModeCombo->addItem( tr( "全部波段" ), 1 );
+  mIgnoreModeCombo->setToolTip( tr(
+    "任一波段：只要有一个波段为 NoData/忽略值 → 整像素忽略（默认，适合边缘）。\n"
+    "全部波段：仅当所有波段均为忽略值时才忽略。" ) );
+  row2->addWidget( mIgnoreModeCombo );
+  row2->addStretch( 1 );
+  root->addLayout( row2 );
+}
+
+bool RsClassifierSetupBar::useSourceNodata() const
+{
+  return mUseSrcNodataCheck ? mUseSrcNodataCheck->isChecked() : true;
+}
+
+void RsClassifierSetupBar::setUseSourceNodata( bool on )
+{
+  if ( mUseSrcNodataCheck )
+    mUseSrcNodataCheck->setChecked( on );
+}
+
+QString RsClassifierSetupBar::ignoreValuesText() const
+{
+  return mIgnoreValuesEdit ? mIgnoreValuesEdit->text().trimmed() : QString();
+}
+
+void RsClassifierSetupBar::setIgnoreValuesText( const QString &text )
+{
+  if ( mIgnoreValuesEdit )
+    mIgnoreValuesEdit->setText( text );
+}
+
+int RsClassifierSetupBar::ignoreMatchMode() const
+{
+  return mIgnoreModeCombo ? mIgnoreModeCombo->currentData().toInt() : 0;
+}
+
+void RsClassifierSetupBar::setIgnoreMatchMode( int mode )
+{
+  if ( !mIgnoreModeCombo )
+    return;
+  const int idx = mIgnoreModeCombo->findData( mode );
+  if ( idx >= 0 )
+    mIgnoreModeCombo->setCurrentIndex( idx );
 }
 
 QVector<int> RsClassifierSetupBar::selectedBands() const

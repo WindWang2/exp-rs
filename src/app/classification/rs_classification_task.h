@@ -10,7 +10,7 @@
 //   5. tile-stream predict (256x256) writing class IDs
 //      - GDT_Byte when max class id ≤ 255
 //      - GDT_UInt16 / GDT_Int16 when class ids exceed 255 (no silent clamp)
-//   6. source-band NoData → output class 0 (unclassified)
+//   6. NoData / user ignore values → output unclassified (default class 0)
 //
 // Cancellation: a QgsFeedback is connected to setProgress + cancel(). If
 // cancelled mid-tile the partially-written output file is removed.
@@ -22,6 +22,7 @@
 #include "rs_classifier_backend.h"
 #include "rs_accuracy_assessment.h"
 #include "rs_feature_scaler.h"
+#include "rs_pixel_ignore_options.h"
 #include "rs_pixel_window.h"
 
 #include <QColor>
@@ -73,6 +74,9 @@ class RsClassificationTask : public QgsTask
       // leaves this false for full-raster output.
       bool cropToWindow = false;
       RsPixelWindow window;
+
+      /// Edge / background handling: source NoData + optional ignore values.
+      RsPixelIgnoreOptions ignoreOptions;
     };
 
     struct Result

@@ -1594,8 +1594,70 @@ bool QgsClassificationMainWindow::buildTrainingData( const QVector<int> &bands,
     }
   }
 
+  // Drop ROI samples that fall on NoData / user ignore values (edge/background).
+  const RsPixelIgnoreOptions ignore = currentIgnoreOptions();
+  const int B = bands.size();
+  std::vector<bool> bandHasNodata( static_cast<size_t>( B ), false );
+  std::vector<float> bandNodata( static_cast<size_t>( B ), 0.f );
+  if ( ignore.useSourceNodata )
+  {
+    for ( int bi = 0; bi < B; ++bi )
+    {
+      int success = 0;
+      const double nd = ds->GetRasterBand( bands[bi] )->GetNoDataValue( &success );
+      if ( success )
+      {
+        bandHasNodata[static_cast<size_t>( bi )] = true;
+        bandNodata[static_cast<size_t>( bi )] = static_cast<float>( nd );
+      }
+    }
+  }
+
+  std::vector<float> feat( static_cast<size_t>( B ) );
+  QVector<int> keepRows;
+  keepRows.reserve( samples.size() );
+  for ( int s = 0; s < samples.size(); ++s )
+  {
+    for ( int bi = 0; bi < B; ++bi )
+      feat[static_cast<size_t>( bi )] = X.at<float>( s, bi );
+    if ( !ignore.isIgnorePixel( feat.data(), B, bandHasNodata, bandNodata ) )
+      keepRows.push_back( s );
+  }
+
+  if ( keepRows.size() < 10 )
+  {
+    GDALClose( ds );
+    return false;
+  }
+
+  if ( keepRows.size() != samples.size() )
+  {
+    cv::Mat X2( keepRows.size(), B, CV_32F );
+    cv::Mat y2( keepRows.size(), 1, CV_32S );
+    for ( int i = 0; i < keepRows.size(); ++i )
+    {
+      X.row( keepRows[i] ).copyTo( X2.row( i ) );
+      y2.at<int>( i, 0 ) = y.at<int>( keepRows[i], 0 );
+    }
+    X = X2;
+    y = y2;
+  }
+
   GDALClose( ds );
   return true;
+}
+
+RsPixelIgnoreOptions QgsClassificationMainWindow::currentIgnoreOptions() const
+{
+  RsPixelIgnoreOptions opt;
+  if ( !m_classifierBar )
+    return opt;
+  opt.useSourceNodata = m_classifierBar->useSourceNodata();
+  opt.setIgnoreValuesFromText( m_classifierBar->ignoreValuesText() );
+  opt.mode = ( m_classifierBar->ignoreMatchMode() == 1 )
+               ? RsPixelIgnoreOptions::Mode::AllBands
+               : RsPixelIgnoreOptions::Mode::AnyBand;
+  return opt;
 }
 
 void QgsClassificationMainWindow::applyClassification()
@@ -1639,6 +1701,7 @@ void QgsClassificationMainWindow::applyClassification()
   cfg.sourceRaster = m_sourceRasterPath;
   cfg.outputRaster = outPath;
   cfg.bandIndices = bands;
+  cfg.ignoreOptions = currentIgnoreOptions();
 
   // Phase 10A.1.3 — class colour table is always built from the current ROI
   // collection so the output GTiff palette stays consistent across both the
@@ -1922,6 +1985,7 @@ void QgsClassificationMainWindow::applyPreview()
   cfg.sourceRaster = m_sourceRasterPath;
   cfg.outputRaster = outPath;
   cfg.bandIndices = bands;
+  cfg.ignoreOptions = currentIgnoreOptions();
   cfg.cropToWindow = true;
   cfg.window = win;
   const auto split = RsClassificationSplit::stratifiedSplit(
