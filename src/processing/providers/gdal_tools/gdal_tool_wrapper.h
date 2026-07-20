@@ -36,6 +36,13 @@ public:
 
     Qgis::ProcessingAlgorithmFlags flags() const override { return Qgis::ProcessingAlgorithmFlag::SupportsBatch; }
 
+    /**
+     * Build a shell-style command line for the current parameters (dialog preview).
+     * Does not run the tool. Destination paths are resolved like processAlgorithm.
+     */
+    QString commandLinePreview( const QVariantMap &parameters,
+                                QgsProcessingContext &context );
+
 protected:
     // Helper to run an external tool
     bool runExternalTool(const QString &program, const QStringList &args,

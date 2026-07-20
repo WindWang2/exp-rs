@@ -9,6 +9,7 @@
 #include <QProcessEnvironment>
 #include <QFileInfo>
 #include <QDir>
+#include <QRegularExpression>
 #include <QStandardPaths>
 
 #include <qgsapplication.h>
@@ -239,6 +240,48 @@ QStringList GenericCliAlgorithm::buildArgs( const QVariantMap &parameters,
     }
 
     return args;
+}
+
+QString GenericCliAlgorithm::commandLinePreview( const QVariantMap &parameters,
+                                                 QgsProcessingContext &context ) const
+{
+    const QString rawCommand = m_config.value( QStringLiteral( "command" ) ).toString();
+    QString command = resolveCommand( rawCommand );
+    if ( command.isEmpty() )
+        command = rawCommand.isEmpty() ? QStringLiteral( "<command>" ) : rawCommand;
+
+    QVariantMap resolvedParameters = parameters;
+    const QJsonArray paramDefs = m_config.value( QStringLiteral( "parameters" ) ).toArray();
+    for ( const QJsonValue &paramVal : paramDefs )
+    {
+        const QJsonObject param = paramVal.toObject();
+        const QString name = param.value( QStringLiteral( "name" ) ).toString();
+        const QString type = param.value( QStringLiteral( "type" ) ).toString();
+        if ( !type.startsWith( QStringLiteral( "output_" ) ) || !resolvedParameters.contains( name ) )
+            continue;
+        resolvedParameters.insert(
+          name, resolveParameterValue( name, resolvedParameters.value( name ), context ) );
+    }
+
+    QgsProcessingFeedback feedback;
+    const QStringList args = buildArgs( resolvedParameters, context, &feedback );
+
+    auto shellQuote = []( const QString &arg ) -> QString {
+        if ( arg.isEmpty() )
+            return QStringLiteral( "''" );
+        static const QRegularExpression needQuote( QStringLiteral( R"([^\w@%+=:,./-])" ) );
+        if ( !arg.contains( needQuote ) )
+            return arg;
+        QString out = arg;
+        out.replace( QLatin1Char( '\'' ), QStringLiteral( "'\\''" ) );
+        return QLatin1Char( '\'' ) + out + QLatin1Char( '\'' );
+    };
+
+    QStringList parts;
+    parts << shellQuote( command );
+    for ( const QString &a : args )
+        parts << shellQuote( a );
+    return parts.join( QLatin1Char( ' ' ) );
 }
 
 QVariantMap GenericCliAlgorithm::processAlgorithm(const QVariantMap &parameters,

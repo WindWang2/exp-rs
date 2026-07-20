@@ -11,6 +11,8 @@
 #include <QVariantMap>
 
 class QCheckBox;
+class QPlainTextEdit;
+class QGroupBox;
 class QgsProcessingFeedback;
 class QgsProcessingParametersWidget;
 
@@ -35,6 +37,7 @@ class SicnuAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
 
   protected slots:
     void algExecuted( bool successful, const QVariantMap &results ) override;
+    void updateCommandPreview();
 
   protected:
     void finished( bool successful, const QVariantMap &result,
@@ -49,4 +52,6 @@ class SicnuAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
     long long mHistoryLogId = -1;
     QCheckBox *mLoadResultsCheck = nullptr;
     QgsProcessingFeedback *mFeedback = nullptr;
+    QGroupBox *mCommandGroup = nullptr;
+    QPlainTextEdit *mCommandPreview = nullptr;
 };

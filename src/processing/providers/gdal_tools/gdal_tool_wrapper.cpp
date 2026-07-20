@@ -13,9 +13,31 @@
 #include <processing/qgsprocessingparameters.h>
 
 #include <QFileInfo>
+#include <QRegularExpression>
 
 namespace
 {
+QString shellQuote( const QString &arg )
+{
+    if ( arg.isEmpty() )
+        return QStringLiteral( "''" );
+    static const QRegularExpression needQuote( QStringLiteral( R"([^\w@%+=:,./-])" ) );
+    if ( !arg.contains( needQuote ) )
+        return arg;
+    QString out = arg;
+    out.replace( QLatin1Char( '\'' ), QStringLiteral( "'\\''" ) );
+    return QLatin1Char( '\'' ) + out + QLatin1Char( '\'' );
+}
+
+QString joinCommandLine( const QString &program, const QStringList &args )
+{
+    QStringList parts;
+    parts << shellQuote( program );
+    for ( const QString &a : args )
+        parts << shellQuote( a );
+    return parts.join( QLatin1Char( ' ' ) );
+}
+
 QVariantMap resolveDestinationParameters( const QgsProcessingAlgorithm *algorithm,
                                           const QVariantMap &parameters,
                                           QgsProcessingContext &context )
@@ -103,10 +125,36 @@ QVariantMap GdalToolWrapper::processAlgorithm(const QVariantMap &parameters,
     return results;
 }
 
+QString GdalToolWrapper::commandLinePreview( const QVariantMap &parameters,
+                                             QgsProcessingContext &context )
+{
+    const QVariantMap resolved = resolveDestinationParameters( this, parameters, context );
+    QString program = ToolPathManager::instance().gdalToolPath( toolName() );
+    if ( program.isEmpty() )
+        program = toolName();
+
+    try
+    {
+        QgsProcessingFeedback feedback;
+        const QStringList args = buildArgs( resolved, context, &feedback );
+        if ( args.isEmpty() )
+            return QObject::tr( "# 无法根据当前参数生成命令（请检查必填项）" );
+        return joinCommandLine( program, args );
+    }
+    catch ( const QgsProcessingException &e )
+    {
+        return QObject::tr( "# 命令预览失败: %1" ).arg( e.what() );
+    }
+    catch ( ... )
+    {
+        return QObject::tr( "# 命令预览失败（参数不完整或无效）" );
+    }
+}
+
 bool GdalToolWrapper::runExternalTool(const QString &program, const QStringList &args,
                                        QgsProcessingFeedback *feedback)
 {
-    QString cmdLine = program + " " + args.join(" ");
+    QString cmdLine = joinCommandLine( program, args );
     if (feedback) feedback->pushInfo(QObject::tr("Running: %1").arg(cmdLine));
     SICNU_LOG_INFO( SicnuLogTags::GDAL, cmdLine );
 

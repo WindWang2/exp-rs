@@ -24,13 +24,20 @@
 #include <QCheckBox>
 #include <QFormLayout>
 #include <QMessageBox>
+#include <QPlainTextEdit>
 #include <QScrollArea>
 #include <QSizePolicy>
 #include <QGroupBox>
 #include <QLabel>
 #include <QDateTime>
 #include <QFileInfo>
+#include <QFont>
 #include <QSettings>
+#include <QVBoxLayout>
+
+#include "providers/gdal_tools/gdal_tool_wrapper.h"
+#include "providers/otb_tools/otb_tool_wrapper.h"
+#include "providers/generic_cli/generic_cli_algorithm.h"
 
 namespace
 {
@@ -422,6 +429,11 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
     }
 
     mWrappers.append( wrapper );
+
+    connect( wrapper, &QgsAbstractProcessingParameterWidgetWrapper::widgetValueHasChanged,
+             this, [this]( QgsAbstractProcessingParameterWidgetWrapper * ) {
+               updateCommandPreview();
+             } );
   }
 
   if ( advancedGroup->isVisible() )
@@ -435,6 +447,35 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
     tr( "When enabled, output rasters and vectors are added to the layer list after the tool finishes." ) );
   formLayout->addRow( mLoadResultsCheck );
 
+  // GDAL / OTB / Generic CLI: live command-line preview from current parameters.
+  mCommandGroup = new QGroupBox( tr( "调用命令 (Command)" ) );
+  mCommandGroup->setObjectName( QStringLiteral( "rsAlgCommandPreviewGroup" ) );
+  mCommandGroup->setToolTip( tr(
+    "根据上方参数实时生成的外部命令行。可复制到终端手动执行（路径与临时输出可能与实际运行略有差异）。" ) );
+  auto *cmdLayout = new QVBoxLayout( mCommandGroup );
+  cmdLayout->setContentsMargins( 6, 6, 6, 6 );
+  mCommandPreview = new QPlainTextEdit( mCommandGroup );
+  mCommandPreview->setObjectName( QStringLiteral( "rsAlgCommandPreview" ) );
+  mCommandPreview->setReadOnly( true );
+  mCommandPreview->setLineWrapMode( QPlainTextEdit::WidgetWidth );
+  mCommandPreview->setMaximumBlockCount( 50 );
+  mCommandPreview->setMinimumHeight( 72 );
+  mCommandPreview->setMaximumHeight( 140 );
+  QFont mono = mCommandPreview->font();
+  mono.setFamily( QStringLiteral( "monospace" ) );
+  mono.setStyleHint( QFont::Monospace );
+  mCommandPreview->setFont( mono );
+  mCommandPreview->setPlaceholderText( tr( "（根据参数生成调用命令…）" ) );
+  mCommandPreview->setToolTip( mCommandGroup->toolTip() );
+  cmdLayout->addWidget( mCommandPreview );
+  formLayout->addRow( mCommandGroup );
+
+  const bool isCli =
+    dynamic_cast<const GdalToolWrapper *>( algorithm() )
+    || dynamic_cast<const OtbToolWrapper *>( algorithm() )
+    || dynamic_cast<const GenericCliAlgorithm *>( algorithm() );
+  mCommandGroup->setVisible( isCli );
+
   scrollArea->setWidget( container );
 
   auto *panelWidget = new QgsPanelWidget();
@@ -443,6 +484,41 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
   panelLayout->addWidget( scrollArea );
 
   setMainWidget( panelWidget );
+
+  if ( isCli )
+    updateCommandPreview();
+}
+
+void SicnuAlgorithmDialog::updateCommandPreview()
+{
+  if ( !mCommandPreview || !mCommandGroup || !mCommandGroup->isVisible() || !algorithm() )
+    return;
+
+  const QVariantMap params = createProcessingParameters();
+  QString cmd;
+
+  if ( auto *gdal = dynamic_cast<GdalToolWrapper *>(
+         const_cast<QgsProcessingAlgorithm *>( algorithm() ) ) )
+  {
+    cmd = gdal->commandLinePreview( params, mContext );
+  }
+  else if ( auto *otb = dynamic_cast<OtbToolWrapper *>(
+              const_cast<QgsProcessingAlgorithm *>( algorithm() ) ) )
+  {
+    cmd = otb->commandLinePreview( params, mContext );
+  }
+  else if ( auto *cli = dynamic_cast<const GenericCliAlgorithm *>( algorithm() ) )
+  {
+    cmd = cli->commandLinePreview( params, mContext );
+  }
+  else
+  {
+    cmd = tr( "# 此算法为内置实现，无外部 CLI 命令" );
+  }
+
+  // Avoid resetting cursor if unchanged
+  if ( mCommandPreview->toPlainText() != cmd )
+    mCommandPreview->setPlainText( cmd );
 }
 
 // ---------------------------------------------------------------------------

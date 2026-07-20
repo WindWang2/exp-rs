@@ -34,6 +34,10 @@ public:
                                  QgsProcessingContext &context,
                                  QgsProcessingFeedback *feedback) override;
 
+    /// Shell-style CLI preview for dialog (does not execute).
+    QString commandLinePreview( const QVariantMap &parameters,
+                                QgsProcessingContext &context );
+
 protected:
     // Helper to run an external OTB application
     bool runOtbApplication(const QString &program, const QStringList &args, QgsProcessingFeedback *feedback);

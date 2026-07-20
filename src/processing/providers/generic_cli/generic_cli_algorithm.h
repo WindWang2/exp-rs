@@ -39,6 +39,10 @@ public:
     QString shortHelpString() const override;
     QgsProcessingAlgorithm *createInstance() const override;
 
+    /// Shell-style CLI preview for dialog (does not execute).
+    QString commandLinePreview( const QVariantMap &parameters,
+                                QgsProcessingContext &context ) const;
+
 protected:
     void initAlgorithm(const QVariantMap &configuration) override;
     QVariantMap processAlgorithm(const QVariantMap &parameters,
