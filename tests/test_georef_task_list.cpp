@@ -63,11 +63,15 @@ TEST_CASE( "georef task list: begin and finish success", "[georef][tasklist]" )
   REQUIRE( table != nullptr );
   REQUIRE( table->rowCount() == 1 );
 
+  list.setProgress( id, 42.5 );
+  REQUIRE( list.entryById( id ).progress == 42.5 );
+
   list.finishSuccess( id, 1500, 4096 );
   REQUIRE_FALSE( list.hasRunning() );
   REQUIRE( list.entryAt( 0 ).status == RsGeorefTaskList::Status::Success );
   REQUIRE( list.entryAt( 0 ).durationMs == 1500 );
   REQUIRE( list.entryAt( 0 ).outputBytes == 4096 );
+  REQUIRE( list.entryAt( 0 ).progress == 100.0 );
 }
 
 TEST_CASE( "georef task list: fail and clear finished keeps running", "[georef][tasklist]" )

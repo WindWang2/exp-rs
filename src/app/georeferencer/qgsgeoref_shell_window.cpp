@@ -41,6 +41,7 @@
 #include "qgsmaplayerstore.h"
 #include "qgsmaptool.h"
 #include "qgsmessagelog.h"
+#include "qgsproject.h"
 #include "qgsrasterlayer.h"
 #include "qgstaskmanager.h"
 #include "rs_georef_task_list.h"
@@ -122,6 +123,10 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
              if ( statusBar() )
                statusBar()->showMessage( tr( "输出: %1" ).arg( path ), 5000 );
            } );
+  connect( mTaskList, &RsGeorefTaskList::loadOutputRequested, this,
+           &QgsGeorefShellWindow::loadWarpOutputToProject );
+  connect( mTaskList, &RsGeorefTaskList::cancelTaskRequested, this,
+           &QgsGeorefShellWindow::cancelWarpTask );
 
   mParamDock = new QDockWidget( tr( "校正参数" ), this );
   mParamDock->setObjectName( paramDockObjectName );
@@ -606,8 +611,16 @@ void QgsGeorefShellWindow::applyTransform()
   auto *task = new RsWarpTask( sourcePath, outputPath,
                                mTransform.get(), resampling,
                                destCrs, pixelSize );
+  mActiveWarpTasks.insert( taskId, task );
+
+  connect( task, &QgsTask::progressChanged, this,
+           [this, taskId]( double p ) {
+             if ( mTaskList )
+               mTaskList->setProgress( taskId, p );
+           } );
 
   auto finalize = [this, task, taskId, outputPath]() {
+    mActiveWarpTasks.remove( taskId );
     emitStructuredLog( task->result() );
     const auto &r = task->result();
     if ( r.status == QgsImageWarper::WarpStatus::Ok )
@@ -615,7 +628,7 @@ void QgsGeorefShellWindow::applyTransform()
       if ( mTaskList )
         mTaskList->finishSuccess( taskId, r.durationMs, r.outputBytes );
       statusBar()->showMessage(
-        tr( "任务 #%1 完成: %2 (%3 字节, %4 ms)" )
+        tr( "任务 #%1 完成: %2 (%3 字节, %4 ms) — 双击可加载到主工程" )
           .arg( taskId )
           .arg( QFileInfo( outputPath ).fileName() )
           .arg( r.outputBytes )
@@ -640,6 +653,39 @@ void QgsGeorefShellWindow::applyTransform()
   QgsApplication::taskManager()->addTask( task );
 
   statusBar()->showMessage( tr( "已加入任务列表 #%1 并开始运行…" ).arg( taskId ), 3000 );
+}
+
+void QgsGeorefShellWindow::cancelWarpTask( int taskId )
+{
+  const auto it = mActiveWarpTasks.constFind( taskId );
+  if ( it == mActiveWarpTasks.constEnd() || !it.value() )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "任务 #%1 已不在运行" ).arg( taskId ), 3000 );
+    return;
+  }
+  it.value()->cancel();
+  if ( statusBar() )
+    statusBar()->showMessage( tr( "正在取消任务 #%1…" ).arg( taskId ), 3000 );
+}
+
+void QgsGeorefShellWindow::loadWarpOutputToProject( const QString &path )
+{
+  if ( path.isEmpty() )
+    return;
+
+  auto *layer = new QgsRasterLayer( path, QFileInfo( path ).baseName(),
+                                    QStringLiteral( "gdal" ) );
+  if ( !layer->isValid() )
+  {
+    delete layer;
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "无法加载结果: %1" ).arg( path ), 5000 );
+    return;
+  }
+  QgsProject::instance()->addMapLayer( layer );
+  if ( statusBar() )
+    statusBar()->showMessage( tr( "已加载到主工程: %1" ).arg( layer->name() ), 5000 );
 }
 
 void QgsGeorefShellWindow::emitStructuredLog( const QgsImageWarper::WarpResult &r )

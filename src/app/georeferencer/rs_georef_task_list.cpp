@@ -2,10 +2,12 @@
 
 #include <QAbstractItemView>
 #include <QColor>
+#include <QItemSelectionModel>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMenu>
 #include <QPushButton>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -21,19 +23,24 @@ RsGeorefTaskList::RsGeorefTaskList( QWidget *parent )
   auto *top = new QHBoxLayout;
   mSummary = new QLabel( tr( "任务: 0" ), this );
   mSummary->setObjectName( QStringLiteral( "rsGeorefTaskSummary" ) );
+  mCancelBtn = new QPushButton( tr( "取消选中" ), this );
+  mCancelBtn->setObjectName( QStringLiteral( "rsGeorefTaskCancelBtn" ) );
+  mCancelBtn->setEnabled( false );
   mClearBtn = new QPushButton( tr( "清空已完成" ), this );
   mClearBtn->setObjectName( QStringLiteral( "rsGeorefTaskClearBtn" ) );
   top->addWidget( mSummary, 1 );
+  top->addWidget( mCancelBtn );
   top->addWidget( mClearBtn );
   root->addLayout( top );
 
-  mTable = new QTableWidget( 0, 8, this );
+  mTable = new QTableWidget( 0, 9, this );
   mTable->setObjectName( QStringLiteral( "rsGeorefTaskTable" ) );
   mTable->setHorizontalHeaderLabels( {
     tr( "#" ),
     tr( "类型" ),
     tr( "方法" ),
     tr( "状态" ),
+    tr( "进度" ),
     tr( "GCP" ),
     tr( "RMS" ),
     tr( "耗时" ),
@@ -46,20 +53,36 @@ RsGeorefTaskList::RsGeorefTaskList( QWidget *parent )
   mTable->setEditTriggers( QAbstractItemView::NoEditTriggers );
   mTable->setAlternatingRowColors( true );
   mTable->setSortingEnabled( false );
+  mTable->setContextMenuPolicy( Qt::CustomContextMenu );
   mTable->setColumnWidth( 0, 36 );
   mTable->setColumnWidth( 1, 72 );
   mTable->setColumnWidth( 3, 64 );
-  mTable->setColumnWidth( 4, 44 );
-  mTable->setColumnWidth( 5, 64 );
+  mTable->setColumnWidth( 4, 52 );
+  mTable->setColumnWidth( 5, 44 );
   mTable->setColumnWidth( 6, 64 );
+  mTable->setColumnWidth( 7, 64 );
   mTable->horizontalHeader()->setSectionResizeMode( 2, QHeaderView::Stretch );
-  mTable->horizontalHeader()->setSectionResizeMode( 7, QHeaderView::Stretch );
-  mTable->setToolTip( tr( "双击成功任务可请求打开输出路径" ) );
+  mTable->horizontalHeader()->setSectionResizeMode( 8, QHeaderView::Stretch );
+  mTable->setToolTip( tr( "双击成功任务：加载结果到主工程；右键可取消运行中任务" ) );
   root->addWidget( mTable, 1 );
 
   connect( mClearBtn, &QPushButton::clicked, this, &RsGeorefTaskList::onClearClicked );
+  connect( mCancelBtn, &QPushButton::clicked, this, &RsGeorefTaskList::onCancelClicked );
   connect( mTable, &QTableWidget::cellDoubleClicked,
            this, &RsGeorefTaskList::onDoubleClick );
+  connect( mTable, &QTableWidget::customContextMenuRequested,
+           this, &RsGeorefTaskList::onContextMenu );
+  connect( mTable, &QTableWidget::itemSelectionChanged, this, [this]() {
+    const auto rows = mTable->selectionModel()->selectedRows();
+    bool canCancel = false;
+    if ( !rows.isEmpty() )
+    {
+      const int row = rows.first().row();
+      if ( row >= 0 && row < mEntries.size() )
+        canCancel = ( mEntries.at( row ).status == Status::Running );
+    }
+    mCancelBtn->setEnabled( canCancel );
+  } );
 
   updateSummary();
 }
@@ -80,10 +103,23 @@ int RsGeorefTaskList::beginTask( Kind kind, const QString &title,
   e.outputPath = outputPath;
   e.gcpCount = gcpCount;
   e.rmsPx = rmsPx;
+  e.progress = 0.0;
   e.startedAt = QDateTime::currentDateTime();
   mEntries.prepend( e );
   rebuildTable();
   return e.id;
+}
+
+void RsGeorefTaskList::setProgress( int id, double percent )
+{
+  for ( Entry &e : mEntries )
+  {
+    if ( e.id != id || e.status != Status::Running )
+      continue;
+    e.progress = qBound( 0.0, percent, 100.0 );
+    refreshRow( id );
+    return;
+  }
 }
 
 void RsGeorefTaskList::finishSuccess( int id, int durationMs, qint64 outputBytes,
@@ -94,6 +130,7 @@ void RsGeorefTaskList::finishSuccess( int id, int durationMs, qint64 outputBytes
     if ( e.id != id )
       continue;
     e.status = Status::Success;
+    e.progress = 100.0;
     e.durationMs = durationMs;
     e.outputBytes = outputBytes;
     e.detail = detail;
@@ -135,7 +172,6 @@ void RsGeorefTaskList::finishCancelled( int id, int durationMs )
 void RsGeorefTaskList::clearFinished()
 {
   QVector<Entry> keep;
-  keep.reserve( mEntries.size() );
   for ( const Entry &e : mEntries )
   {
     if ( e.status == Status::Running )
@@ -169,9 +205,32 @@ RsGeorefTaskList::Entry RsGeorefTaskList::entryAt( int row ) const
   return mEntries.at( row );
 }
 
+RsGeorefTaskList::Entry RsGeorefTaskList::entryById( int id ) const
+{
+  for ( const Entry &e : mEntries )
+  {
+    if ( e.id == id )
+      return e;
+  }
+  return {};
+}
+
 void RsGeorefTaskList::onClearClicked()
 {
   clearFinished();
+}
+
+void RsGeorefTaskList::onCancelClicked()
+{
+  const auto rows = mTable->selectionModel()->selectedRows();
+  if ( rows.isEmpty() )
+    return;
+  const int row = rows.first().row();
+  if ( row < 0 || row >= mEntries.size() )
+    return;
+  const Entry &e = mEntries.at( row );
+  if ( e.status == Status::Running )
+    emit cancelTaskRequested( e.id );
 }
 
 void RsGeorefTaskList::onDoubleClick( int row, int /*column*/ )
@@ -179,8 +238,54 @@ void RsGeorefTaskList::onDoubleClick( int row, int /*column*/ )
   if ( row < 0 || row >= mEntries.size() )
     return;
   const Entry &e = mEntries.at( row );
-  if ( e.status == Status::Success && !e.outputPath.isEmpty() )
-    emit openOutputRequested( e.outputPath );
+  if ( e.status != Status::Success || e.outputPath.isEmpty() )
+    return;
+  emit loadOutputRequested( e.outputPath );
+  emit openOutputRequested( e.outputPath );
+}
+
+void RsGeorefTaskList::onContextMenu( const QPoint &pos )
+{
+  const QModelIndex idx = mTable->indexAt( pos );
+  if ( !idx.isValid() )
+    return;
+  mTable->selectRow( idx.row() );
+  const Entry e = entryAt( idx.row() );
+
+  QMenu menu( this );
+  QAction *cancelAct = menu.addAction( tr( "取消任务" ) );
+  cancelAct->setEnabled( e.status == Status::Running );
+  QAction *loadAct = menu.addAction( tr( "加载结果到主工程" ) );
+  loadAct->setEnabled( e.status == Status::Success && !e.outputPath.isEmpty() );
+  QAction *chosen = menu.exec( mTable->viewport()->mapToGlobal( pos ) );
+  if ( chosen == cancelAct )
+    emit cancelTaskRequested( e.id );
+  else if ( chosen == loadAct )
+    emit loadOutputRequested( e.outputPath );
+}
+
+int RsGeorefTaskList::rowForId( int id ) const
+{
+  for ( int i = 0; i < mEntries.size(); ++i )
+  {
+    if ( mEntries.at( i ).id == id )
+      return i;
+  }
+  return -1;
+}
+
+void RsGeorefTaskList::refreshRow( int id )
+{
+  const int row = rowForId( id );
+  if ( row < 0 || !mTable || row >= mTable->rowCount() )
+    return;
+  const Entry &e = mEntries.at( row );
+  if ( auto *item = mTable->item( row, 4 ) )
+  {
+    if ( e.status == Status::Running )
+      item->setText( QString::number( int( e.progress ) ) + QLatin1Char( '%' ) );
+  }
+  updateSummary();
 }
 
 QString RsGeorefTaskList::kindLabel( Kind k )
@@ -256,18 +361,27 @@ void RsGeorefTaskList::rebuildTable()
       st->setToolTip( e.detail );
     mTable->setItem( row, 3, st );
 
+    QString progText = QStringLiteral( "—" );
+    if ( e.status == Status::Running )
+      progText = QString::number( int( e.progress ) ) + QLatin1Char( '%' );
+    else if ( e.status == Status::Success )
+      progText = QStringLiteral( "100%" );
+    auto *progItem = new QTableWidgetItem( progText );
+    progItem->setTextAlignment( Qt::AlignCenter );
+    mTable->setItem( row, 4, progItem );
+
     auto *gcpItem = new QTableWidgetItem( e.gcpCount > 0
                                             ? QString::number( e.gcpCount )
                                             : QStringLiteral( "—" ) );
     gcpItem->setTextAlignment( Qt::AlignCenter );
-    mTable->setItem( row, 4, gcpItem );
+    mTable->setItem( row, 5, gcpItem );
 
     QString rmsText = QStringLiteral( "—" );
     if ( e.rmsPx >= 0.0 )
       rmsText = QString::number( e.rmsPx, 'f', 3 );
     auto *rmsItem = new QTableWidgetItem( rmsText );
     rmsItem->setTextAlignment( Qt::AlignRight | Qt::AlignVCenter );
-    mTable->setItem( row, 5, rmsItem );
+    mTable->setItem( row, 6, rmsItem );
 
     QString durText = QStringLiteral( "—" );
     if ( e.status != Status::Running && e.durationMs > 0 )
@@ -283,7 +397,7 @@ void RsGeorefTaskList::rebuildTable()
     }
     auto *durItem = new QTableWidgetItem( durText );
     durItem->setTextAlignment( Qt::AlignRight | Qt::AlignVCenter );
-    mTable->setItem( row, 6, durItem );
+    mTable->setItem( row, 7, durItem );
 
     const QString outName = e.outputPath.isEmpty()
                               ? QStringLiteral( "—" )
@@ -296,9 +410,10 @@ void RsGeorefTaskList::rebuildTable()
         tip += tr( "\n%1 字节" ).arg( e.outputBytes );
       outItem->setToolTip( tip );
     }
-    mTable->setItem( row, 7, outItem );
+    mTable->setItem( row, 8, outItem );
   }
   updateSummary();
+  mCancelBtn->setEnabled( false );
 }
 
 void RsGeorefTaskList::updateSummary()

@@ -13,8 +13,8 @@ class QTableWidget;
 /**
  * \brief Task list for Image Registration warp runs.
  *
- * Each Apply/Run enqueues a row (Running → Success / Failed / Cancelled)
- * with method, RMS, duration, and output path.
+ * Each Run enqueues a row (Running → Success / Failed / Cancelled)
+ * with method, progress, RMS, duration, and output path.
  */
 class RsGeorefTaskList : public QWidget
 {
@@ -39,22 +39,22 @@ class RsGeorefTaskList : public QWidget
       int id = 0;
       Kind kind = Kind::WarpI2I;
       Status status = Status::Running;
-      QString title;       ///< e.g. transform method name
-      QString detail;      ///< error or note
+      QString title;
+      QString detail;
       QString sourcePath;
       QString outputPath;
       QString methodLabel;
-      double rmsPx = -1.0; ///< <0 = n/a
+      double rmsPx = -1.0;
       int gcpCount = 0;
       int durationMs = 0;
       qint64 outputBytes = 0;
+      double progress = 0.0; ///< 0–100 while running
       QDateTime startedAt;
       QDateTime finishedAt;
     };
 
     explicit RsGeorefTaskList( QWidget *parent = nullptr );
 
-    /// Start a new running entry; returns id for later finish*.
     int beginTask( Kind kind,
                    const QString &title,
                    const QString &methodLabel,
@@ -63,6 +63,7 @@ class RsGeorefTaskList : public QWidget
                    int gcpCount,
                    double rmsPx );
 
+    void setProgress( int id, double percent );
     void finishSuccess( int id, int durationMs, qint64 outputBytes = 0,
                         const QString &detail = QString() );
     void finishFailed( int id, const QString &error, int durationMs = 0 );
@@ -75,17 +76,24 @@ class RsGeorefTaskList : public QWidget
     int runningCount() const;
     bool hasRunning() const { return runningCount() > 0; }
     Entry entryAt( int row ) const;
+    Entry entryById( int id ) const;
 
   signals:
     void openOutputRequested( const QString &path );
+    void loadOutputRequested( const QString &path );
+    void cancelTaskRequested( int taskId );
 
   private slots:
     void onDoubleClick( int row, int column );
     void onClearClicked();
+    void onCancelClicked();
+    void onContextMenu( const QPoint &pos );
 
   private:
     void rebuildTable();
     void updateSummary();
+    void refreshRow( int id );
+    int rowForId( int id ) const;
     static QString kindLabel( Kind k );
     static QString statusLabel( Status s );
     static QColor statusColor( Status s );
@@ -93,6 +101,7 @@ class RsGeorefTaskList : public QWidget
     QTableWidget *mTable = nullptr;
     QLabel *mSummary = nullptr;
     QPushButton *mClearBtn = nullptr;
+    QPushButton *mCancelBtn = nullptr;
     QVector<Entry> mEntries;
     int mNextId = 1;
 };

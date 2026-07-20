@@ -2,6 +2,7 @@
 
 #include <QHash>
 #include <QMainWindow>
+#include <QPointer>
 #include <memory>
 
 #include "qgsgcppoint.h"
@@ -28,6 +29,7 @@ class QgsGCPList;
 class QgsGCPListWidget;
 class QgsGeorefDataPoint;
 class QgsGeorefTransform;
+class RsWarpTask;
 
 /**
  * Shared Image Registration shell: GCP list, fit/warp, map tools, docks,
@@ -105,6 +107,8 @@ class QgsGeorefShellWindow : public QMainWindow
     void applyWorkflowSnapshot( const RsGeorefSessionState::WorkflowSnapshot &s );
     RsGeorefSessionState::WorkflowSnapshot captureWorkflowSnapshot() const;
     QgsGeorefDataPoint *findDataPoint( const QgsPointXY &p, QgsGcpPoint::PointType type );
+    void cancelWarpTask( int taskId );
+    void loadWarpOutputToProject( const QString &path );
 
     QgisInterface *mIface = nullptr;
 
@@ -146,4 +150,6 @@ class QgsGeorefShellWindow : public QMainWindow
     RsGeorefSessionState mSession;
     bool mSuppressDirtyFromList = false;
     bool mWarpInProgress = false;
+    /// task-list id → live QgsTask (for cancel / progress).
+    QHash<int, QPointer<RsWarpTask>> mActiveWarpTasks;
 };
