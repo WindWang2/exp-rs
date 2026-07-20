@@ -52,7 +52,7 @@ namespace
   }
 }
 
-TEST_CASE( "I2I shell: DEM hidden and mode toggle not primary UX",
+TEST_CASE( "I2I shell: DEM hidden and no mode toggle widget",
            "[georef][window][rpc]" )
 {
   ensureApp();
@@ -62,10 +62,7 @@ TEST_CASE( "I2I shell: DEM hidden and mode toggle not primary UX",
   REQUIRE( panel != nullptr );
   REQUIRE( panel->profile() == RsGeorefParamsPanel::Profile::ImageToImage );
   REQUIRE_FALSE( panel->isDemSectionVisible() );
-
-  auto *toggle = w.findChild<QWidget *>( QStringLiteral( "rsGeorefModeToggle" ) );
-  if ( toggle )
-    REQUIRE( toggle->isHidden() );
+  REQUIRE( w.findChild<RsGeorefModeToggle *>() == nullptr );
 }
 
 TEST_CASE( "params panel I2M can show dem for RPC", "[georef][panel]" )

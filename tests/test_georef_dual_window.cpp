@@ -47,9 +47,7 @@ TEST_CASE( "I2I window has horizontal twin canvases", "[georef][dual]" )
   REQUIRE( splitter != nullptr );
   REQUIRE( splitter->orientation() == Qt::Horizontal );
 
-  auto *toggle = w.findChild<QWidget *>( QStringLiteral( "rsGeorefModeToggle" ) );
-  if ( toggle )
-    REQUIRE( toggle->isHidden() );
+  REQUIRE( w.findChild<QWidget *>( QStringLiteral( "rsGeorefModeToggle" ) ) == nullptr );
 
   auto *panel = w.findChild<RsGeorefParamsPanel *>();
   REQUIRE( panel != nullptr );

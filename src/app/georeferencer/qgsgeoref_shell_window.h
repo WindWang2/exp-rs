@@ -14,6 +14,7 @@ class QAction;
 class QCloseEvent;
 class QDockWidget;
 class QLabel;
+class QMenu;
 class QToolBar;
 class QgisInterface;
 class QgsMapCanvas;
@@ -67,6 +68,14 @@ class QgsGeorefShellWindow : public QMainWindow
     void setupStatusBar( const QString &coordObj, const QString &crsObj, const QString &rmsObj );
     void createMapTools();
     void wireMapToolActions();
+
+    /// File menu skeleton: Open source, optional extras, .points, Close.
+    QMenu *createFileMenu();
+    void addStandardMenuBar();
+
+    /// Shared GCP toolbar block (Add/Move/Delete exclusive + load/export .gcp).
+    void addGcpEditActions( QToolBar *bar, const QString &objectNamePrefix );
+    void addApplyAction( QToolBar *bar, const QString &objectName );
 
     /// Log shell tag for structured warp events ("i2i" / "i2m").
     virtual QString shellId() const { return QStringLiteral( "georef" ); }

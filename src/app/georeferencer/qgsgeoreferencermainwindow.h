@@ -17,8 +17,10 @@ class QgsGeoreferencerMainWindow : public QgsGeorefShellWindow
   public:
     explicit QgsGeoreferencerMainWindow( QgisInterface *iface, QWidget *parent = nullptr );
 
-    QgsMapCanvas *pickCanvasForMode( RsGeorefModeToggle::Mode m ) const;
-    QgsMapCanvas *pickCanvas() const;
+    /// Destination canvas for MapCoords pick (always REF on I2I).
+    QgsMapCanvas *pickCanvas() const { return mDstCanvas; }
+    /// Compatibility with older tests: mode argument is ignored (I2I is fixed).
+    QgsMapCanvas *pickCanvasForMode( RsGeorefModeToggle::Mode ) const { return mDstCanvas; }
 
   public slots:
     void loadReferenceRaster();
@@ -30,15 +32,14 @@ class QgsGeoreferencerMainWindow : public QgsGeorefShellWindow
     void applyShellSpecific( const RsGeorefSessionState::WorkflowSnapshot &s ) override;
 
   private slots:
-    void onModeChanged( RsGeorefModeToggle::Mode m );
+    void runSiftMatch();
 
   private:
     void setupMenus();
     void setupToolbars();
     void setupCentralWidget();
 
-    RsGeorefModeToggle *mModeToggle = nullptr;
-    QToolBar *mModeBar = nullptr;
+    QToolBar *mToolBar = nullptr;
     QAction *mSyncZoomAction = nullptr;
     RsTwinCanvasSyncController *mSyncCtl = nullptr;
     QString mRefRasterPath;

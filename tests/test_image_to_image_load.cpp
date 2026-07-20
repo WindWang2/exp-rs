@@ -1,8 +1,6 @@
 // Task 11.5.3 — Image-to-Image mode load + canvas swap.
 //
-// Validates that the Georeferencer main window can load an independent
-// reference raster through `loadReferenceRaster()` and that switching to
-// Image-to-Image mode wires the reference raster into the REF map canvas.
+// Validates that the I2I shell loads an independent reference raster into REF.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -13,7 +11,6 @@
 
 #include "qgsgeoreferencermainwindow.h"
 #include "qgsmapcanvas.h"
-#include "rs_georef_mode_toggle.h"
 
 namespace
 {
@@ -53,10 +50,6 @@ TEST_CASE( "Image-to-Image: loadReferenceRaster wires REF canvas with one layer"
 
   QgsGeoreferencerMainWindow w( nullptr );
   REQUIRE( w.loadReferenceRaster( refPath ) );
-
-  auto *toggle = w.findChild<RsGeorefModeToggle *>();
-  REQUIRE( toggle );
-  toggle->setMode( RsGeorefModeToggle::ImageToImage );
 
   auto *refCanvas = w.findChild<QgsMapCanvas *>( "rsRefCanvas" );
   REQUIRE( refCanvas );

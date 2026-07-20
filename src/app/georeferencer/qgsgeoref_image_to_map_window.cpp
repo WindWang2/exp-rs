@@ -1,11 +1,7 @@
 #include "qgsgeoref_image_to_map_window.h"
 
-#include <QAction>
-#include <QActionGroup>
 #include <QIcon>
 #include <QMenu>
-#include <QMenuBar>
-#include <QSizePolicy>
 #include <QSplitter>
 #include <QToolBar>
 #include <QWidget>
@@ -68,9 +64,7 @@ void QgsGeorefImageToMapWindow::setupCentralWidget()
 
 void QgsGeorefImageToMapWindow::setupMenus()
 {
-  auto *fileMenu = menuBar()->addMenu( tr( "&File" ) );
-  fileMenu->addAction( tr( "Open source raster..." ),
-                       this, &QgsGeorefShellWindow::openSourceRaster );
+  QMenu *fileMenu = createFileMenu();
   fileMenu->addAction( tr( "Refresh map layers" ),
                        this, &QgsGeorefImageToMapWindow::refreshMapLayersFromProject );
   fileMenu->addSeparator();
@@ -78,11 +72,7 @@ void QgsGeorefImageToMapWindow::setupMenus()
   fileMenu->addAction( tr( "Save .points..." ), this, &QgsGeorefShellWindow::savePoints );
   fileMenu->addSeparator();
   fileMenu->addAction( tr( "Close" ), this, &QWidget::close );
-
-  menuBar()->addMenu( tr( "&Edit" ) );
-  menuBar()->addMenu( tr( "&View" ) );
-  menuBar()->addMenu( tr( "&Settings" ) );
-  menuBar()->addMenu( tr( "&Help" ) );
+  addStandardMenuBar();
 }
 
 void QgsGeorefImageToMapWindow::setupToolbars()
@@ -91,41 +81,12 @@ void QgsGeorefImageToMapWindow::setupToolbars()
   mToolBar->setObjectName( QStringLiteral( "rsGeorefI2MToolBar" ) );
   mToolBar->setMovable( false );
 
-  mAddPointAction = mToolBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Add GCP" ) );
-  mAddPointAction->setObjectName( QStringLiteral( "rsGeorefI2MAddPointAction" ) );
-  mAddPointAction->setCheckable( true );
-
-  mMovePointAction = mToolBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Move GCP" ) );
-  mMovePointAction->setObjectName( QStringLiteral( "rsGeorefI2MMovePointAction" ) );
-  mMovePointAction->setCheckable( true );
-
-  mDeletePointAction = mToolBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Delete GCP" ) );
-  mDeletePointAction->setObjectName( QStringLiteral( "rsGeorefI2MDeletePointAction" ) );
-  mDeletePointAction->setCheckable( true );
-
-  auto *mapToolGroup = new QActionGroup( this );
-  mapToolGroup->setExclusive( true );
-  mapToolGroup->addAction( mAddPointAction );
-  mapToolGroup->addAction( mMovePointAction );
-  mapToolGroup->addAction( mDeletePointAction );
-
-  mToolBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Load .gcp" ),
-                       this, &QgsGeorefShellWindow::loadPoints );
-  mToolBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Export .gcp" ),
-                       this, &QgsGeorefShellWindow::savePoints );
+  addGcpEditActions( mToolBar, QStringLiteral( "rsGeorefI2M" ) );
   mToolBar->addSeparator();
   mToolBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Refresh map" ),
                        this, &QgsGeorefImageToMapWindow::refreshMapLayersFromProject );
 
-  auto *spacer = new QWidget( this );
-  spacer->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
-  mToolBar->addWidget( spacer );
-
-  mApplyAction = mToolBar->addAction(
-    QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ),
-    tr( "Apply" ), this, &QgsGeorefShellWindow::applyTransform );
-  mApplyAction->setObjectName( QStringLiteral( "rsGeorefI2MApplyAction" ) );
-  mApplyAction->setEnabled( false );
+  addApplyAction( mToolBar, QStringLiteral( "rsGeorefI2MApplyAction" ) );
 }
 
 void QgsGeorefImageToMapWindow::refreshMapLayersFromProject()
@@ -170,6 +131,6 @@ void QgsGeorefImageToMapWindow::onTransformMethodChangedExtra()
 
 void QgsGeorefImageToMapWindow::captureShellSpecific( RsGeorefSessionState::WorkflowSnapshot &s ) const
 {
-  s.mode = 0; // ImageToMap legacy index
+  s.mode = 0;
   s.syncZoom = false;
 }

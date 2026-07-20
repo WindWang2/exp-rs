@@ -1,19 +1,26 @@
 #include "qgsgeoref_shell_window.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QCloseEvent>
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QIcon>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QMetaEnum>
 #include <QSet>
 #include <QSignalBlocker>
+#include <QSizePolicy>
 #include <QStatusBar>
+#include <QToolBar>
 #include <QVector>
+#include <QWidget>
 #include <cmath>
 
 #include "qgis.h"
@@ -146,6 +153,67 @@ void QgsGeorefShellWindow::setupStatusBar( const QString &coordObj, const QStrin
   statusBar()->addWidget( mCoordLabel, 1 );
   statusBar()->addPermanentWidget( mCrsLabel );
   statusBar()->addPermanentWidget( mRmsLabel );
+}
+
+QMenu *QgsGeorefShellWindow::createFileMenu()
+{
+  auto *fileMenu = menuBar()->addMenu( tr( "&File" ) );
+  fileMenu->addAction( tr( "Open source raster..." ),
+                       this, &QgsGeorefShellWindow::openSourceRaster );
+  return fileMenu;
+}
+
+void QgsGeorefShellWindow::addStandardMenuBar()
+{
+  menuBar()->addMenu( tr( "&Edit" ) );
+  menuBar()->addMenu( tr( "&View" ) );
+  menuBar()->addMenu( tr( "&Settings" ) );
+  menuBar()->addMenu( tr( "&Help" ) );
+}
+
+void QgsGeorefShellWindow::addGcpEditActions( QToolBar *bar, const QString &objectNamePrefix )
+{
+  if ( !bar )
+    return;
+
+  const QIcon ic( QStringLiteral( ":/icons/r_ster_calc" ) );
+
+  mAddPointAction = bar->addAction( ic, tr( "Add GCP" ) );
+  mAddPointAction->setObjectName( objectNamePrefix + QStringLiteral( "AddPointAction" ) );
+  mAddPointAction->setCheckable( true );
+
+  mMovePointAction = bar->addAction( ic, tr( "Move GCP" ) );
+  mMovePointAction->setObjectName( objectNamePrefix + QStringLiteral( "MovePointAction" ) );
+  mMovePointAction->setCheckable( true );
+
+  mDeletePointAction = bar->addAction( ic, tr( "Delete GCP" ) );
+  mDeletePointAction->setObjectName( objectNamePrefix + QStringLiteral( "DeletePointAction" ) );
+  mDeletePointAction->setCheckable( true );
+
+  auto *group = new QActionGroup( this );
+  group->setExclusive( true );
+  group->addAction( mAddPointAction );
+  group->addAction( mMovePointAction );
+  group->addAction( mDeletePointAction );
+
+  bar->addAction( ic, tr( "Load .gcp" ), this, &QgsGeorefShellWindow::loadPoints );
+  bar->addAction( ic, tr( "Export .gcp" ), this, &QgsGeorefShellWindow::savePoints );
+}
+
+void QgsGeorefShellWindow::addApplyAction( QToolBar *bar, const QString &objectName )
+{
+  if ( !bar )
+    return;
+
+  auto *spacer = new QWidget( this );
+  spacer->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
+  bar->addWidget( spacer );
+
+  mApplyAction = bar->addAction(
+    QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ),
+    tr( "Apply" ), this, &QgsGeorefShellWindow::applyTransform );
+  mApplyAction->setObjectName( objectName );
+  mApplyAction->setEnabled( false );
 }
 
 void QgsGeorefShellWindow::createMapTools()

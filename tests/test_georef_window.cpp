@@ -51,11 +51,12 @@ namespace
   }
 }
 
-TEST_CASE( "GeorefMainWindow: constructs with mode toggle and Apply action", "[georef][window]" )
+TEST_CASE( "GeorefMainWindow: constructs with Apply + SIFT actions (I2I, no mode toggle UX)", "[georef][window]" )
 {
   ensureApp();
   QgsGeoreferencerMainWindow w( nullptr );
-  REQUIRE( w.findChild<RsGeorefModeToggle *>() != nullptr );
+  // Dual-window redesign: mode toggle is not part of the I2I shell UI.
+  REQUIRE( w.findChild<RsGeorefModeToggle *>() == nullptr );
   REQUIRE( w.findChild<QAction *>( "rsGeorefApplyAction" ) != nullptr );
   REQUIRE( w.findChild<QAction *>( "rsGeorefSiftAction" ) != nullptr );
   REQUIRE( w.findChild<QLabel *>( "rsGeorefRmsLabel" ) != nullptr );

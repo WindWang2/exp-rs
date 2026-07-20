@@ -58,6 +58,6 @@ TEST_CASE( "pickCanvas: ImageToImage uses REF; ImageToMap falls back without ifa
   // RpcPhysical without iface → same REF fallback
   REQUIRE( w.pickCanvasForMode( RsGeorefModeToggle::RpcPhysical ) == ref );
 
-  // pickCanvas() follows the current mode toggle (default ImageToMap)
+  // I2I always picks on REF canvas
   REQUIRE( w.pickCanvas() == ref );
 }

@@ -1,16 +1,13 @@
 #include "qgsgeoreferencermainwindow.h"
 
 #include <QAction>
-#include <QActionGroup>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QIcon>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMenu>
-#include <QMenuBar>
 #include <QMessageBox>
-#include <QSizePolicy>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QToolBar>
@@ -18,14 +15,11 @@
 
 #include "core/sicnu_logging.h"
 #include "qgis.h"
-#include "qgisinterface.h"
 #include "qgsapplication.h"
 #include "qgscoordinatereferencesystem.h"
 #include "qgsgcplist.h"
 #include "qgsgcppoint.h"
-#include "qgsgeorefdatapoint.h"
 #include "qgsmapcanvas.h"
-#include "qgsmaplayerstore.h"
 #include "qgsmessagelog.h"
 #include "qgsrasterlayer.h"
 #include "qgstaskmanager.h"
@@ -49,21 +43,6 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   finishCommonSetup( RsGeorefParamsPanel::Profile::ImageToImage,
                      QStringLiteral( "rsGcpDock" ),
                      QStringLiteral( "rsParamDock" ) );
-
-  if ( mModeToggle )
-  {
-    mModeToggle->setObjectName( QStringLiteral( "rsGeorefModeToggle" ) );
-    mModeToggle->setMode( RsGeorefModeToggle::ImageToImage );
-    mModeToggle->hide();
-    connect( mModeToggle, &RsGeorefModeToggle::modeChanged,
-             this, &QgsGeoreferencerMainWindow::onModeChanged );
-  }
-  onModeChanged( RsGeorefModeToggle::ImageToImage );
-  if ( mModeToggle )
-  {
-    mModeToggle->setMode( RsGeorefModeToggle::ImageToImage );
-    mModeToggle->hide();
-  }
 }
 
 void QgsGeoreferencerMainWindow::setupCentralWidget()
@@ -99,9 +78,7 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
 
 void QgsGeoreferencerMainWindow::setupMenus()
 {
-  auto *fileMenu = menuBar()->addMenu( tr( "&File" ) );
-  fileMenu->addAction( tr( "Open source raster..." ),
-                       this, &QgsGeorefShellWindow::openSourceRaster );
+  QMenu *fileMenu = createFileMenu();
   fileMenu->addAction( tr( "Load reference raster..." ),
                        this, QOverload<>::of( &QgsGeoreferencerMainWindow::loadReferenceRaster ) );
   fileMenu->addSeparator();
@@ -109,140 +86,85 @@ void QgsGeoreferencerMainWindow::setupMenus()
   fileMenu->addAction( tr( "Save .points..." ), this, &QgsGeorefShellWindow::savePoints );
   fileMenu->addSeparator();
   fileMenu->addAction( tr( "Close" ), this, &QWidget::close );
-
-  menuBar()->addMenu( tr( "&Edit" ) );
-  menuBar()->addMenu( tr( "&View" ) );
-  menuBar()->addMenu( tr( "&Settings" ) );
-  menuBar()->addMenu( tr( "&Help" ) );
+  addStandardMenuBar();
 }
 
 void QgsGeoreferencerMainWindow::setupToolbars()
 {
-  mModeBar = addToolBar( tr( "Mode" ) );
-  mModeBar->setObjectName( QStringLiteral( "rsGeorefToolBar" ) );
-  mModeBar->setMovable( false );
+  mToolBar = addToolBar( tr( "Tools" ) );
+  mToolBar->setObjectName( QStringLiteral( "rsGeorefToolBar" ) );
+  mToolBar->setMovable( false );
 
-  mModeToggle = new RsGeorefModeToggle( this );
-  mModeToggle->setObjectName( QStringLiteral( "rsGeorefModeToggle" ) );
-  mModeBar->addWidget( mModeToggle );
-  mModeToggle->hide();
-  mModeBar->addSeparator();
+  addGcpEditActions( mToolBar, QStringLiteral( "rsGeoref" ) );
+  mToolBar->addSeparator();
 
-  mAddPointAction = mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Add GCP" ) );
-  mAddPointAction->setObjectName( QStringLiteral( "rsGeorefAddPointAction" ) );
-  mAddPointAction->setCheckable( true );
-
-  mMovePointAction = mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Move GCP" ) );
-  mMovePointAction->setObjectName( QStringLiteral( "rsGeorefMovePointAction" ) );
-  mMovePointAction->setCheckable( true );
-
-  mDeletePointAction = mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Delete GCP" ) );
-  mDeletePointAction->setObjectName( QStringLiteral( "rsGeorefDeletePointAction" ) );
-  mDeletePointAction->setCheckable( true );
-
-  auto *mapToolGroup = new QActionGroup( this );
-  mapToolGroup->setExclusive( true );
-  mapToolGroup->addAction( mAddPointAction );
-  mapToolGroup->addAction( mMovePointAction );
-  mapToolGroup->addAction( mDeletePointAction );
-
-  mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Load .gcp" ),
-                       this, &QgsGeorefShellWindow::loadPoints );
-  mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Export .gcp" ),
-                       this, &QgsGeorefShellWindow::savePoints );
-
-  mModeBar->addSeparator();
-  mSyncZoomAction = mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Sync zoom" ) );
+  mSyncZoomAction = mToolBar->addAction(
+    QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Sync zoom" ) );
   mSyncZoomAction->setObjectName( QStringLiteral( "rsGeorefSyncZoomAction" ) );
-  mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Zoom to all" ), this, []() {} );
 
-  auto *sift = mModeBar->addAction(
+  auto *sift = mToolBar->addAction(
     QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ),
     tr( "Auto match (SIFT)" ),
-    this,
-    [this]() {
-#ifndef SICNU_HAS_OPENCV
-      statusBar()->showMessage( tr( "OpenCV 不可用 — SIFT 已禁用" ), 5000 );
-      return;
-#else
-      if ( !mRefRaster )
-      {
-        statusBar()->showMessage( tr( "请先 File → Load reference raster…" ), 5000 );
-        return;
-      }
-      if ( mSourceRasterPath.isEmpty() )
-      {
-        statusBar()->showMessage( tr( "请先打开 SRC 影像" ), 5000 );
-        return;
-      }
-      RsSiftDialog dlg( this );
-      if ( dlg.exec() != QDialog::Accepted )
-        return;
-      const auto params = dlg.params();
-      auto *task = new RsSiftTask( mSourceRasterPath,
-                                   mRefRaster->source(),
-                                   mParamsPanel->destCrs(),
-                                   params );
-      connect( task, &QgsTask::taskCompleted, this, [this, task]() {
-        const auto r = task->result();
-        if ( !r.ok() )
-        {
-          statusBar()->showMessage( tr( "SIFT 失败：%1" ).arg( r.errorMessage ), 5000 );
-          return;
-        }
-        const QString msg = tr( "找到 %1 对匹配，内点 %2 个 (%3%)，是否全部采用？" )
-                              .arg( r.totalMatches )
-                              .arg( r.inliers.size() )
-                              .arg( int( r.inlierRatio * 100 ) );
-        if ( QMessageBox::question( this, tr( "SIFT 匹配结果" ), msg ) != QMessageBox::Yes )
-          return;
-        const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
-        for ( const auto &m : r.inliers )
-          mGcps->appendPoint( QgsGcpPoint( m.srcPx, m.dstWorld, destCrs, true ) );
-        QJsonObject o {
-          { QStringLiteral( "event" ),        QStringLiteral( "sift_match" ) },
-          { QStringLiteral( "matches" ),      r.totalMatches },
-          { QStringLiteral( "inliers" ),      int( r.inliers.size() ) },
-          { QStringLiteral( "inlier_ratio" ), r.inlierRatio },
-        };
-        QgsMessageLog::logMessage(
-          QString::fromUtf8( QJsonDocument( o ).toJson( QJsonDocument::Compact ) ),
-          QStringLiteral( "Georeferencer" ),
-          Qgis::MessageLevel::Info );
-      } );
-      QgsApplication::taskManager()->addTask( task );
-      statusBar()->showMessage( tr( "SIFT 匹配中…" ), 3000 );
-#endif
-    } );
+    this, &QgsGeoreferencerMainWindow::runSiftMatch );
   sift->setObjectName( QStringLiteral( "rsGeorefSiftAction" ) );
 
-  auto *spacer = new QWidget( this );
-  spacer->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
-  mModeBar->addWidget( spacer );
-
-  mModeBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Preview" ), this, []() {} );
-
-  mApplyAction = mModeBar->addAction(
-    QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ),
-    tr( "Apply" ),
-    this,
-    &QgsGeorefShellWindow::applyTransform );
-  mApplyAction->setObjectName( QStringLiteral( "rsGeorefApplyAction" ) );
-  mApplyAction->setEnabled( false );
+  addApplyAction( mToolBar, QStringLiteral( "rsGeorefApplyAction" ) );
 }
 
-QgsMapCanvas *QgsGeoreferencerMainWindow::pickCanvasForMode( RsGeorefModeToggle::Mode m ) const
+void QgsGeoreferencerMainWindow::runSiftMatch()
 {
-  if ( m == RsGeorefModeToggle::ImageToImage )
-    return mDstCanvas;
-  if ( mIface && mIface->mapCanvas() )
-    return mIface->mapCanvas();
-  return mDstCanvas;
-}
+#ifndef SICNU_HAS_OPENCV
+  statusBar()->showMessage( tr( "OpenCV 不可用 — SIFT 已禁用" ), 5000 );
+  return;
+#else
+  if ( !mRefRaster )
+  {
+    statusBar()->showMessage( tr( "请先 File → Load reference raster…" ), 5000 );
+    return;
+  }
+  if ( mSourceRasterPath.isEmpty() )
+  {
+    statusBar()->showMessage( tr( "请先打开 SRC 影像" ), 5000 );
+    return;
+  }
+  RsSiftDialog dlg( this );
+  if ( dlg.exec() != QDialog::Accepted )
+    return;
 
-QgsMapCanvas *QgsGeoreferencerMainWindow::pickCanvas() const
-{
-  return mDstCanvas; // I2I always picks on REF
+  auto *task = new RsSiftTask( mSourceRasterPath,
+                               mRefRaster->source(),
+                               mParamsPanel->destCrs(),
+                               dlg.params() );
+  connect( task, &QgsTask::taskCompleted, this, [this, task]() {
+    const auto r = task->result();
+    if ( !r.ok() )
+    {
+      statusBar()->showMessage( tr( "SIFT 失败：%1" ).arg( r.errorMessage ), 5000 );
+      return;
+    }
+    const QString msg = tr( "找到 %1 对匹配，内点 %2 个 (%3%)，是否全部采用？" )
+                          .arg( r.totalMatches )
+                          .arg( r.inliers.size() )
+                          .arg( int( r.inlierRatio * 100 ) );
+    if ( QMessageBox::question( this, tr( "SIFT 匹配结果" ), msg ) != QMessageBox::Yes )
+      return;
+    const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
+    for ( const auto &m : r.inliers )
+      mGcps->appendPoint( QgsGcpPoint( m.srcPx, m.dstWorld, destCrs, true ) );
+    QJsonObject o {
+      { QStringLiteral( "event" ),        QStringLiteral( "sift_match" ) },
+      { QStringLiteral( "matches" ),      r.totalMatches },
+      { QStringLiteral( "inliers" ),      int( r.inliers.size() ) },
+      { QStringLiteral( "inlier_ratio" ), r.inlierRatio },
+    };
+    QgsMessageLog::logMessage(
+      QString::fromUtf8( QJsonDocument( o ).toJson( QJsonDocument::Compact ) ),
+      QStringLiteral( "Georeferencer" ),
+      Qgis::MessageLevel::Info );
+  } );
+  QgsApplication::taskManager()->addTask( task );
+  statusBar()->showMessage( tr( "SIFT 匹配中…" ), 3000 );
+#endif
 }
 
 void QgsGeoreferencerMainWindow::loadReferenceRaster()
@@ -280,30 +202,6 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
   return true;
 }
 
-void QgsGeoreferencerMainWindow::onModeChanged( RsGeorefModeToggle::Mode m )
-{
-  if ( !mDstCanvas )
-    return;
-
-  // I2I shell is pinned to twin-raster layout; still honor REF raster paint.
-  Q_UNUSED( m )
-  if ( mRefRaster )
-  {
-    mDstCanvas->setLayers( { mRefRaster } );
-    mDstCanvas->setExtent( mRefRaster->extent() );
-  }
-  mDstCanvas->show();
-  if ( mParamsPanel )
-    mParamsPanel->setRpcMode( false );
-  mDstCanvas->refresh();
-
-  for ( auto it = mDataPoints.begin(); it != mDataPoints.end(); ++it )
-  {
-    if ( it.value() )
-      it.value()->updateMarkers();
-  }
-}
-
 void QgsGeoreferencerMainWindow::captureShellSpecific( RsGeorefSessionState::WorkflowSnapshot &s ) const
 {
   s.mode = static_cast<int>( RsGeorefModeToggle::ImageToImage );
@@ -317,9 +215,4 @@ void QgsGeoreferencerMainWindow::applyShellSpecific( const RsGeorefSessionState:
     mRefRasterPath = s.lastRefPath;
   if ( mSyncZoomAction )
     mSyncZoomAction->setChecked( s.syncZoom );
-  if ( mModeToggle )
-  {
-    mModeToggle->setMode( RsGeorefModeToggle::ImageToImage );
-    mModeToggle->hide();
-  }
 }

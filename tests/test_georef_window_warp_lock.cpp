@@ -63,8 +63,6 @@ TEST_CASE( "Warp lock: while warp pending GCP table is disabled and Apply disabl
 
   w.setWarpInProgressForTest( false );
   REQUIRE( table->isEnabled() );
-  // After unlock, Apply returns to its pre-lock enabled state (true).
-  REQUIRE( applyAction->isEnabled() == true );
-  // Avoid unused-variable diagnostic when initial-state capture isn't asserted.
-  (void) applyStartedEnabled;
+  // After unlock, Apply follows recomputeFit (empty session → still disabled).
+  REQUIRE( applyAction->isEnabled() == applyStartedEnabled );
 }

@@ -88,7 +88,7 @@ TEST_CASE( "setWarpInProgressForTest: true disables GCP table and Apply action",
   REQUIRE_FALSE( applyAction->isEnabled() );
 }
 
-TEST_CASE( "setWarpInProgressForTest: false re-enables GCP table and Apply action",
+TEST_CASE( "setWarpInProgressForTest: false re-enables GCP table (Apply via recomputeFit)",
            "[hooks][testhook][warplock]" )
 {
   ensureApp();
@@ -105,10 +105,10 @@ TEST_CASE( "setWarpInProgressForTest: false re-enables GCP table and Apply actio
   REQUIRE_FALSE( table->isEnabled() );
   REQUIRE_FALSE( applyAction->isEnabled() );
 
-  // Then re-enable
+  // Unlock table; Apply only if fit+output allow (empty session → still disabled).
   w.setWarpInProgressForTest( false );
   REQUIRE( table->isEnabled() );
-  REQUIRE( applyAction->isEnabled() );
+  REQUIRE_FALSE( applyAction->isEnabled() );
 }
 
 TEST_CASE( "setWarpInProgressForTest: multiple toggles maintain correct state",
@@ -130,7 +130,8 @@ TEST_CASE( "setWarpInProgressForTest: multiple toggles maintain correct state",
 
   w.setWarpInProgressForTest( false );
   REQUIRE( table->isEnabled() );
-  REQUIRE( applyAction->isEnabled() );
+  // Apply stays disabled until fit + output path allow it (no fake re-enable).
+  REQUIRE_FALSE( applyAction->isEnabled() );
 
   w.setWarpInProgressForTest( true );
   REQUIRE_FALSE( table->isEnabled() );
@@ -138,7 +139,7 @@ TEST_CASE( "setWarpInProgressForTest: multiple toggles maintain correct state",
 
   w.setWarpInProgressForTest( false );
   REQUIRE( table->isEnabled() );
-  REQUIRE( applyAction->isEnabled() );
+  REQUIRE_FALSE( applyAction->isEnabled() );
 }
 
 TEST_CASE( "setWarpInProgressForTest: handles null pointers gracefully",
@@ -468,33 +469,24 @@ TEST_CASE( "QgsGCPListWidget: deleteRowsRequested signal emission",
 // Integration Tests: Hook interactions
 // ============================================================================
 
-TEST_CASE( "Hook integration: mode toggle affects params panel RPC visibility",
+TEST_CASE( "Hook integration: I2M profile method drives DEM visibility",
            "[hooks][integration][mode]" )
 {
   ensureApp();
-  QgsGeoreferencerMainWindow w( nullptr );
+  // Dual-window redesign: RPC is a transform method on the I2M shell / panel profile.
+  RsGeorefParamsPanel panel;
+  panel.setProfile( RsGeorefParamsPanel::Profile::ImageToMap );
+  REQUIRE_FALSE( panel.isDemSectionVisible() );
 
-  auto *panel = w.findChild<RsGeorefParamsPanel *>();
-  auto *toggle = w.findChild<RsGeorefModeToggle *>();
-  REQUIRE( panel != nullptr );
-  REQUIRE( toggle != nullptr );
-
-  // Default: ImageToMap, DEM hidden
-  REQUIRE_FALSE( panel->isDemSectionVisible() );
-
-  // Switch to RPC mode
-  toggle->setMode( RsGeorefModeToggle::RpcPhysical );
-  REQUIRE( panel->isDemSectionVisible() );
-  REQUIRE( panel->transformMethod() ==
+  panel.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::RpcPhysical );
+  panel.setRpcMode( true );
+  REQUIRE( panel.isDemSectionVisible() );
+  REQUIRE( panel.transformMethod() ==
            QgsGcpTransformerInterface::TransformMethod::RpcPhysical );
 
-  // Switch back to ImageToMap
-  toggle->setMode( RsGeorefModeToggle::ImageToMap );
-  REQUIRE_FALSE( panel->isDemSectionVisible() );
-
-  // Switch to ImageToImage
-  toggle->setMode( RsGeorefModeToggle::ImageToImage );
-  REQUIRE_FALSE( panel->isDemSectionVisible() );
+  panel.setProfile( RsGeorefParamsPanel::Profile::ImageToImage );
+  panel.setRpcMode( false );
+  REQUIRE_FALSE( panel.isDemSectionVisible() );
 }
 
 TEST_CASE( "Hook integration: warp lock during apply operation",
@@ -519,10 +511,10 @@ TEST_CASE( "Hook integration: warp lock during apply operation",
   // During warp, user cannot interact with GCP table
   // This prevents data corruption during warp operation
 
-  // Simulate warp end
+  // Simulate warp end — table unlocked; Apply only if recomputeFit allows.
   w.setWarpInProgressForTest( false );
   REQUIRE( table->isEnabled() );
-  REQUIRE( applyAction->isEnabled() );
+  REQUIRE_FALSE( applyAction->isEnabled() );
 }
 
 TEST_CASE( "Hook integration: GCP list changes trigger recompute",
@@ -637,15 +629,10 @@ TEST_CASE( "Coverage: setWarpInProgressForTest all branches",
   REQUIRE_FALSE( table->isEnabled() );
   REQUIRE_FALSE( applyAction->isEnabled() );
 
-  // Branch 2: on=false, table and apply exist
+  // Branch 2: on=false unlocks table; Apply re-evaluated via recomputeFit
   w.setWarpInProgressForTest( false );
   REQUIRE( table->isEnabled() );
-  REQUIRE( applyAction->isEnabled() );
-
-  // All branches covered:
-  // - if (mGcpTable) mGcpTable->setEnabled(!on);
-  // - if (mApplyAction) mApplyAction->setEnabled(!on);
-  // - Both true and false paths for on parameter
+  REQUIRE_FALSE( applyAction->isEnabled() );
 }
 
 TEST_CASE( "Coverage: RsGeorefModeToggle all mode values",
