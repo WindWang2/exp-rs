@@ -16,6 +16,16 @@ AsyncAlgorithmRunner::AsyncAlgorithmRunner(QWidget *parentWidget, QObject *paren
 {
 }
 
+AsyncAlgorithmRunner::~AsyncAlgorithmRunner()
+{
+    // Cancel outstanding task so it does not call into a destroyed runner/dialog.
+    if (m_task && isRunning()) {
+        disconnect(m_task, nullptr, this, nullptr);
+        m_task->cancel();
+        m_task = nullptr;
+    }
+}
+
 void AsyncAlgorithmRunner::run(const QgsProcessingAlgorithm *algorithm,
                                 const QVariantMap &parameters,
                                 QgsProcessingContext &context)

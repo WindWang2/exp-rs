@@ -55,7 +55,7 @@ public:
   /** Standard macro */
   itkNewMacro(Self);
 
-  itkTypeMacro(Self, otb::Application);
+  itkTypeMacro(DomainTransform, otb::Application);
 
 private:
   DomainTransform()

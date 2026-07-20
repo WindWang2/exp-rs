@@ -5,6 +5,12 @@
 #include <qgsprocessingregistry.h>
 #include <qgsprocessingalgorithm.h>
 
+#include <qgsmessagelog.h>
+#include <qgsprocessingcontext.h>
+#include <qgsprocessingfeedback.h>
+
+#include <QApplication>
+#include <QEventLoop>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -16,6 +22,7 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QFileInfo>
+#include <QStringList>
 
 BatchProcessingDialog::BatchProcessingDialog(QWidget *parent)
     : QDialog(parent)
@@ -172,45 +179,70 @@ void BatchProcessingDialog::onRun()
 
     int successCount = 0;
     int failCount = 0;
+    QStringList errorMessages;
 
     for (int i = 0; i < m_inputFiles.size(); ++i) {
         const QString &inputFile = m_inputFiles[i];
         m_statusLabel->setText(tr("Processing %1...").arg(QFileInfo(inputFile).fileName()));
-        QApplication::processEvents();
+        // Keep UI responsive without re-entering user-input handlers (nested dialogs/clicks).
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
         // Build output path
         QString baseName = QFileInfo(inputFile).completeBaseName();
         QString outputPath = m_outputDir + QStringLiteral("/") + baseName + QStringLiteral("_processed.tif");
 
-        // Build parameters
-        QVariantMap params;
-        // Try common parameter names
-        if (alg->parameterDefinition(QStringLiteral("INPUT"))) {
-            params[QStringLiteral("INPUT")] = inputFile;
-        } else if (alg->parameterDefinition(QStringLiteral("INPUT_LAYER"))) {
-            params[QStringLiteral("INPUT_LAYER")] = inputFile;
-        }
+        try {
+            // Build parameters
+            QVariantMap params;
+            // Try common parameter names
+            if (alg->parameterDefinition(QStringLiteral("INPUT"))) {
+                params[QStringLiteral("INPUT")] = inputFile;
+            } else if (alg->parameterDefinition(QStringLiteral("INPUT_LAYER"))) {
+                params[QStringLiteral("INPUT_LAYER")] = inputFile;
+            }
 
-        if (alg->parameterDefinition(QStringLiteral("OUTPUT"))) {
-            params[QStringLiteral("OUTPUT")] = outputPath;
-        } else if (alg->parameterDefinition(QStringLiteral("OUTPUT_LAYER"))) {
-            params[QStringLiteral("OUTPUT_LAYER")] = outputPath;
-        }
+            if (alg->parameterDefinition(QStringLiteral("OUTPUT"))) {
+                params[QStringLiteral("OUTPUT")] = outputPath;
+            } else if (alg->parameterDefinition(QStringLiteral("OUTPUT_LAYER"))) {
+                params[QStringLiteral("OUTPUT_LAYER")] = outputPath;
+            }
 
-        // Run algorithm
-        QgsProcessingContext context;
-        QString errorMsg;
-        if (alg->checkParameterValues(params, context, &errorMsg)) {
-            // Create a simple feedback
-            QgsProcessingFeedback feedback;
-            QVariantMap results = alg->run(params, context, &feedback);
-            if (!results.isEmpty()) {
-                successCount++;
+            // Run algorithm
+            QgsProcessingContext context;
+            QString errorMsg;
+            if (alg->checkParameterValues(params, context, &errorMsg)) {
+                QgsProcessingFeedback feedback;
+                QVariantMap results = alg->run(params, context, &feedback);
+                if (!results.isEmpty()) {
+                    successCount++;
+                } else {
+                    failCount++;
+                    const QString detail = feedback.textLog().isEmpty()
+                        ? tr("Algorithm returned no results")
+                        : feedback.textLog();
+                    const QString entry = tr("%1: %2").arg(QFileInfo(inputFile).fileName(), detail);
+                    errorMessages.append(entry);
+                    QgsMessageLog::logMessage(entry, QStringLiteral("batch"), Qgis::MessageLevel::Warning);
+                }
             } else {
                 failCount++;
+                const QString entry = tr("%1: %2")
+                    .arg(QFileInfo(inputFile).fileName(),
+                         errorMsg.isEmpty() ? tr("Invalid parameters") : errorMsg);
+                errorMessages.append(entry);
+                QgsMessageLog::logMessage(entry, QStringLiteral("batch"), Qgis::MessageLevel::Warning);
             }
-        } else {
+        } catch (const std::exception &e) {
             failCount++;
+            const QString entry = tr("%1: %2")
+                .arg(QFileInfo(inputFile).fileName(), QString::fromUtf8(e.what()));
+            errorMessages.append(entry);
+            QgsMessageLog::logMessage(entry, QStringLiteral("batch"), Qgis::MessageLevel::Critical);
+        } catch (...) {
+            failCount++;
+            const QString entry = tr("%1: unknown error").arg(QFileInfo(inputFile).fileName());
+            errorMessages.append(entry);
+            QgsMessageLog::logMessage(entry, QStringLiteral("batch"), Qgis::MessageLevel::Critical);
         }
 
         m_progressBar->setValue(i + 1);
@@ -221,9 +253,15 @@ void BatchProcessingDialog::onRun()
     m_runButton->setEnabled(true);
 
     if (failCount > 0) {
-        QMessageBox::warning(this, tr("Batch Processing"),
-                             tr("Batch complete with errors:\n%1 succeeded, %2 failed")
-                                 .arg(successCount).arg(failCount));
+        QString details = tr("Batch complete with errors:\n%1 succeeded, %2 failed")
+                              .arg(successCount).arg(failCount);
+        if (!errorMessages.isEmpty()) {
+            const int maxShow = 8;
+            details += QLatin1Char('\n') + errorMessages.mid(0, maxShow).join(QLatin1Char('\n'));
+            if (errorMessages.size() > maxShow)
+                details += tr("\n… and %1 more (see log)").arg(errorMessages.size() - maxShow);
+        }
+        QMessageBox::warning(this, tr("Batch Processing"), details);
     } else {
         QMessageBox::information(this, tr("Batch Processing"),
                                  tr("Batch complete:\n%1 files processed successfully")

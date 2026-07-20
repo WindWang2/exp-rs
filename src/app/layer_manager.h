@@ -45,6 +45,17 @@ class LayerManager : public QObject
     void loadRasterLayer( const QString &filePath );
     void loadVectorLayer( const QString &filePath );
 
+    /**
+     * Resolve a user-picked path to the path GDAL should open.
+     * ENVI: GDAL requires the binary data file, not the .hdr header —
+     * if \a filePath is a .hdr, returns the sibling data file when found.
+     * Otherwise returns \a filePath unchanged.
+     */
+    static QString resolveRasterOpenPath( const QString &filePath );
+
+    /** True if the path looks like a raster (extension or ENVI pair). */
+    static bool isLikelyRasterPath( const QString &filePath );
+
     // ── Layer operations ──────────────────────────────────────────────
     void showLayerProperties( QgsMapLayer *layer );
     void removeSelectedLayers();

@@ -5,6 +5,7 @@
 #include <QVariantMap>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QString>
 #include <QUrl>
 
 class StacClient : public QObject
@@ -18,6 +19,20 @@ public:
 
     static QUrl buildSearchUrl(const QString &endpoint, const QString &collection,
                                const QString &datetime, const QStringList &bbox);
+
+    /**
+     * \brief Validate a STAC endpoint or asset URL for SSRF safety.
+     *
+     * Prefers https. Blocks private / loopback / link-local hosts unless
+     * SICNU_STAC_ALLOW_PRIVATE=1. Returns empty string when OK, else an error.
+     */
+    static QString validateUrlPolicy(const QUrl &url, bool requireHttpsPreferred = true);
+
+    /**
+     * \brief Validate an asset href before prefixing /vsicurl/.
+     * Allows only http/https schemes (https preferred).
+     */
+    static QString validateAssetHref(const QString &href);
 
     void search(const QString &endpoint, const QString &collection,
                 const QString &datetime, const QStringList &bbox);

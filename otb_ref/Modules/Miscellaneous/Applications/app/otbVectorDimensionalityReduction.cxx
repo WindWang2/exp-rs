@@ -48,7 +48,7 @@ public:
 
   /** Standard macro */
   itkNewMacro(Self);
-  itkTypeMacro(Self, Application)
+  itkTypeMacro(VectorDimensionalityReduction, Application)
 
       /** Filters typedef */
       typedef float ValueType;

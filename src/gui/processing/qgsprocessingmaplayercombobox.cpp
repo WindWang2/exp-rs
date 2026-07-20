@@ -58,7 +58,9 @@ QgsProcessingMapLayerComboBox::QgsProcessingMapLayerComboBox( const QgsProcessin
   layout->setSpacing( 6 );
 
   mCombo = new QgsMapLayerComboBox();
-  layout->addWidget( mCombo );
+  mCombo->setMinimumWidth( 320 );
+  mCombo->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+  layout->addWidget( mCombo, 1 );
   layout->setAlignment( mCombo, Qt::AlignTop );
 
   int iconSize = QgsGuiUtils::scaleIconSize( 24 );

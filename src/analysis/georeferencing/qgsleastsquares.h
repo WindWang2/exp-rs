@@ -46,12 +46,14 @@ class QGIS_ANALYSIS_EXPORT QgsLeastSquares
 
     /**
      * Transforms the point at \a origin in-place, using a linear transformation calculated from the list of source and destination Ground Control Points (GCPs).
+     * \a pixelXSize / \a pixelYSize are signed scales (mirroring is preserved; do not fabs).
      * \throws SingularException when source coordinates are collinear / degenerate.
      */
     static void linear( const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates, QgsPointXY &origin, double &pixelXSize, double &pixelYSize );
 
     /**
      * Transforms the point at \a origin in-place, using a helmert transformation calculated from the list of source and destination Ground Control Points (GCPs).
+     * \throws SingularException when the 4×4 normal matrix is singular or the solution is non-finite.
      * \throws QgsNotSupportedException on QGIS built without GSL.
      */
     static void helmert( const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates, QgsPointXY &origin, double &pixelSize, double &rotation );
@@ -64,6 +66,7 @@ class QGIS_ANALYSIS_EXPORT QgsLeastSquares
 
     /**
      * Calculates projective parameters from the list of source and destination Ground Control Points (GCPs).
+     * \throws SingularException when coordinate normalization degenerates (zero mean distance).
      * \throws QgsNotSupportedException on QGIS built without GSL.
      */
     static void projective( const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates, double H[9] );

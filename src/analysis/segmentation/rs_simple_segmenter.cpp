@@ -9,6 +9,7 @@
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -210,16 +211,25 @@ QVector<quint32> RsSimpleSegmenter::connectedComponents( const QVector<int> &qua
             if ( labels[idx] != 0 )
                 continue;
 
-            // BFS flood fill
+            // BFS flood fill. Cap segment size at 1e6 to avoid OOM on huge
+            // homogeneous regions; residual connected pixels get a NEW label
+            // rather than being left as 0 (outer scan may have already passed
+            // them, so relying on the outer loop alone would drop pixels).
             const int targetBin = quantized[idx];
             std::queue<int> q;
             q.push( idx );
             labels[idx] = nextLabel;
             size_t segmentSize = 1;
-            const size_t maxSegmentSize = 1000000; // Safeguard to prevent OOM on large homogeneous regions
+            const size_t maxSegmentSize = 1000000;
 
-            while ( !q.empty() && segmentSize < maxSegmentSize )
+            while ( !q.empty() )
             {
+                if ( segmentSize >= maxSegmentSize )
+                {
+                    ++nextLabel;
+                    segmentSize = 0;
+                }
+
                 int cur = q.front();
                 q.pop();
                 int cr = cur / w;
@@ -239,8 +249,6 @@ QVector<quint32> RsSimpleSegmenter::connectedComponents( const QVector<int> &qua
                     labels[nidx] = nextLabel;
                     q.push( nidx );
                     segmentSize++;
-                    if ( segmentSize >= maxSegmentSize )
-                        break;
                 }
             }
             nextLabel++;
@@ -302,7 +310,8 @@ void RsSimpleSegmenter::mergeSmallRegions( QVector<quint32> &labels, int w, int 
         }
     }
 
-    // Build merge map from adjacency
+    // Build merge map from adjacency (small → preferred neighbor).
+    // Neighbor may itself be small, so chains must be resolved (multi-hop).
     std::unordered_map<quint32, quint32> mergeMap;
     for ( auto &[segId, neighbors] : adjacency )
     {
@@ -320,11 +329,49 @@ void RsSimpleSegmenter::mergeSmallRegions( QVector<quint32> &labels, int w, int 
             mergeMap[segId] = bestNeighbor;
     }
 
-    // Apply all merges in a single pass over the full image
+    // Union-find style multi-hop resolution with path compression.
+    // Follow mergeMap[A]→B→C… until a root that is not in mergeMap (or cycle).
+    auto resolve = [&mergeMap]( quint32 id ) -> quint32 {
+        auto it = mergeMap.find( id );
+        if ( it == mergeMap.end() )
+            return id;
+
+        std::vector<quint32> path;
+        quint32 cur = id;
+        const size_t guard = mergeMap.size() + 1;
+        while ( path.size() < guard )
+        {
+            auto j = mergeMap.find( cur );
+            if ( j == mergeMap.end() )
+                break;
+            path.push_back( cur );
+            cur = j->second;
+            // Cycle: stop at current and break the cycle by pointing to self's next.
+            bool cycle = false;
+            for ( quint32 p : path )
+            {
+                if ( p == cur )
+                {
+                    cycle = true;
+                    break;
+                }
+            }
+            if ( cycle )
+                break;
+        }
+        for ( quint32 p : path )
+            mergeMap[p] = cur;
+        return cur;
+    };
+
+    // Apply fully-resolved merges in a single pass over the full image
     for ( size_t i = 0; i < static_cast<size_t>(w) * static_cast<size_t>(h); ++i )
     {
-        auto it = mergeMap.find( labels[i] );
-        if ( it != mergeMap.end() )
-            labels[i] = it->second;
+        const quint32 lab = labels[i];
+        if ( lab == 0 )
+            continue;
+        const quint32 root = resolve( lab );
+        if ( root != lab )
+            labels[i] = root;
     }
 }

@@ -24,6 +24,9 @@ class QGIS_ANALYSIS_EXPORT RsRoiCollection : public QObject
     void clear();
 
     void setClassDef( const RsClassDef &d );
+    /// Replace the full class scheme in one shot (single changed emission).
+    void setClassDefs( const QHash<int, RsClassDef> &defs );
+    void clearClassDefs();
     RsClassDef classDef( int id ) const { return mClasses.value( id ); }
     QHash<int, RsClassDef> classDefs() const { return mClasses; }
 

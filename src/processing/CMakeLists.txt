@@ -1,5 +1,6 @@
 add_library(sicnu_processing SHARED
     tools/tool_path_manager.cpp
+    tools/cli_tool_discovery.cpp
 
     gdal/gdal_dataset_wrapper.cpp
     gdal/gdal_async_reader.cpp
@@ -16,6 +17,7 @@ add_library(sicnu_processing SHARED
     algorithms/terrain_analysis.cpp
     algorithms/image_fusion.cpp
     algorithms/vector_optimizer.cpp
+    algorithms/satellite_products.cpp
 
     framework/processing_cache.cpp
     framework/progress_callback.cpp

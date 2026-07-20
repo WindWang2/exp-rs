@@ -30,8 +30,11 @@ int main(int argc, char *argv[]) {
     // Import symbology-style.xml if default style has no color ramps
     QgsStyle *style = QgsStyle::defaultStyle();
     if (style->colorRampNames().isEmpty()) {
-        QString xmlPath = AppPaths::resolveDataPath("qgis_ref/resources/symbology-style.xml");
-        if (QFileInfo::exists(xmlPath)) {
+        const QString resDir = AppPaths::qgisRefResourcesDir();
+        const QString xmlPath = resDir.isEmpty()
+            ? QString()
+            : QDir( resDir ).filePath( QStringLiteral( "symbology-style.xml" ) );
+        if ( !xmlPath.isEmpty() && QFileInfo::exists( xmlPath ) ) {
             style->importXml(xmlPath);
         }
     }

@@ -44,11 +44,11 @@ TEST_CASE( "Accuracy: known confusion → expected Kappa", "[classify][acc]" )
   // Kappa for this confusion matrix is around 0.74; allow a generous margin.
   REQUIRE( r.kappa == Approx( 0.75 ).margin( 0.05 ) );
 
-  // Producer/User accuracy sanity: class 2 producer = 2/2 = 1.0 because all
-  // true class-2 samples were predicted as class 2; class 1 producer = 1/1
-  // because only one sample was predicted as class 1 and it was true class 1.
-  REQUIRE( r.producerAcc.value( 1 ) == Approx( 1.0 ).margin( 1e-6 ) );
-  REQUIRE( r.userAcc.value( 1 ) == Approx( 0.5 ).margin( 1e-6 ) );
+  // Producer/User accuracy (rows=true, cols=pred):
+  // class 1: true count 2, one predicted as 1 → producer = 1/2 = 0.5
+  //           predicted-as-1 count 1, all correct → user = 1/1 = 1.0
+  REQUIRE( r.producerAcc.value( 1 ) == Approx( 0.5 ).margin( 1e-6 ) );
+  REQUIRE( r.userAcc.value( 1 ) == Approx( 1.0 ).margin( 1e-6 ) );
 }
 
 TEST_CASE( "Accuracy: single-class degenerate case", "[classify][acc]" )

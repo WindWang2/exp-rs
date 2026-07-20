@@ -60,7 +60,7 @@ public:
 
   /** Run-time type information (and related methods). */
   itkNewMacro(Self);
-  itkTypeMacro(SVMMachineLearningModel, MachineLearningModel);
+  itkTypeMacro(LibSVMMachineLearningModel, MachineLearningModel);
 
   /** Train the machine learning model */
   void Train() override;

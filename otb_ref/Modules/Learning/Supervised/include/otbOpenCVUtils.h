@@ -21,15 +21,25 @@
 #ifndef otbOpenCVUtils_h
 #define otbOpenCVUtils_h
 
+// OpenCV 5 removed C API headers (core_c.h). OTB uses C++ cv::Mat / cv::ml only.
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-align"
-#include <opencv2/core/core.hpp>
-#include <opencv2/core/core_c.h>
+#include <opencv2/core.hpp>
 #pragma GCC diagnostic pop
 #else
-#include <opencv2/core/core.hpp>
-#include <opencv2/core/core_c.h>
+#include <opencv2/core.hpp>
+#endif
+
+// Legacy C-API TermCriteria type bits (removed with core_c.h).
+#ifndef CV_TERMCRIT_ITER
+# define CV_TERMCRIT_ITER cv::TermCriteria::COUNT
+#endif
+#ifndef CV_TERMCRIT_EPS
+# define CV_TERMCRIT_EPS cv::TermCriteria::EPS
+#endif
+#ifndef CV_TERMCRIT_NUMBER
+# define CV_TERMCRIT_NUMBER CV_TERMCRIT_ITER
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)

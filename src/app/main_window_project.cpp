@@ -1,7 +1,10 @@
 // main_window_project.cpp — Project I/O and data import
 #include "main_window.h"
 
+#include "app_paths.h"
+#include "layer_manager.h"
 #include "dialogs/stac_browser_dialog.h"
+#include "operators/framework/rs_operation_logger.h"
 
 #include <QFileDialog>
 #include <QFileInfo>
@@ -83,25 +86,51 @@ void QgisDesktopWindow::saveProjectAs()
 
 void QgisDesktopWindow::importLayer()
 {
-    // Support both raster and vector files
-    QString filter = tr( "All supported files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.asc *.shp *.gpkg *.geojson *.kml *.gml);;"
-                         "Raster files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.asc);;"
+    // Raster includes ENVI (.dat / .hdr; extensionless binaries via All files)
+    QString filter = tr( "All supported files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.jpeg *.asc *.dat *.hdr *.bil *.bsq *.bip *.shp *.gpkg *.geojson *.kml *.gml);;"
+                         "Raster files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.jpeg *.asc *.dat *.hdr *.bil *.bsq *.bip);;"
+                         "ENVI raster (*.dat *.hdr *.img *.bil *.bsq *.bip);;"
                          "Vector files (*.shp *.gpkg *.geojson *.kml *.gml);;"
                          "All files (*)" );
-    QString path = QFileDialog::getOpenFileName( this, tr( "Import Layer" ), QString(), filter );
+    QString path = QFileDialog::getOpenFileName( this, tr( "Import Layer" ),
+                                                 AppPaths::dataDir(), filter );
     if ( path.isEmpty() )
         return;
 
-    QString ext = QFileInfo( path ).suffix().toLower();
-    QStringList rasterExts = { "tif", "tiff", "img", "jp2", "png", "jpg", "asc" };
-    if ( rasterExts.contains( ext ) )
-        loadRasterLayer( path );
+    if ( LayerManager::isLikelyRasterPath( path ) )
+        m_layerManager->loadRasterLayer( path );
     else
-        loadVectorLayer( path );
+        m_layerManager->loadVectorLayer( path );
 }
 
 void QgisDesktopWindow::browseStacCatalog()
 {
     StacBrowserDialog dlg(m_mapCanvas, this);
     dlg.exec();
+}
+
+void QgisDesktopWindow::exportLabReport()
+{
+    auto& logger = sicnu::operators::RSOperationLogger::instance();
+    if (logger.recordCount() == 0) {
+        QMessageBox::information(this, tr("Export Lab Report"),
+                                 tr("No operations have been recorded yet."));
+        return;
+    }
+
+    QString filePath = QFileDialog::getSaveFileName(
+        this, tr("Export Lab Report"), QString(),
+        tr("JSON files (*.json);;CSV files (*.csv);;All files (*.*)"));
+    if (filePath.isEmpty())
+        return;
+
+    std::string errorMessage;
+    if (!logger.exportToFile(filePath.toStdString(), &errorMessage)) {
+        QMessageBox::warning(this, tr("Export Lab Report"),
+                             tr("Failed to export report:\n%1")
+                                 .arg(QString::fromStdString(errorMessage)));
+        return;
+    }
+
+    statusBar()->showMessage(tr("Lab report exported: %1").arg(filePath), 3000);
 }

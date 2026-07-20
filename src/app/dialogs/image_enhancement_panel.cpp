@@ -302,6 +302,15 @@ void ImageEnhancementPanel::onRun()
         int h = GDALGetRasterYSize(srcDs);
         int bands = GDALGetRasterCount(srcDs);
 
+        // Guard full-scene float buffers (input + output) against OOM.
+        constexpr qint64 kMaxBytes = 2LL * 1024 * 1024 * 1024; // 2 GiB soft cap
+        const qint64 estBytes = static_cast<qint64>( w ) * h * bands * static_cast<qint64>( sizeof( float ) ) * 2;
+        if ( estBytes > kMaxBytes || estBytes < 0 )
+        {
+            GDALClose( srcDs );
+            return QString();
+        }
+
         // Read all bands
         std::vector<std::vector<float>> inputBands(bands);
         for (int b = 0; b < bands; ++b) {

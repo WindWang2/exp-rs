@@ -193,7 +193,7 @@ public:
   typedef itk::SmartPointer<const Self> ConstPointer;
 
   itkNewMacro(Self);
-  itkTypeMacro(NumericalParameter, Parameter);
+  itkTypeMacro(FloatParameter, NumericalParameter);
 
   ParameterType GetType() const override
   {
@@ -215,7 +215,7 @@ public:
   typedef itk::SmartPointer<const Self> ConstPointer;
 
   itkNewMacro(Self);
-  itkTypeMacro(NumericalParameter, Parameter);
+  itkTypeMacro(DoubleParameter, NumericalParameter);
 
   ParameterType GetType() const override
   {
@@ -237,7 +237,7 @@ public:
   typedef itk::SmartPointer<const Self> ConstPointer;
 
   itkNewMacro(Self);
-  itkTypeMacro(NumericalParameter, Parameter);
+  itkTypeMacro(IntParameter, NumericalParameter);
 
   ParameterType GetType() const override
   {
@@ -250,7 +250,7 @@ class OTBApplicationEngine_EXPORT RAMParameter : public NumericalParameter<unsig
 public:
   /** Standard class typedef */
   typedef RAMParameter                  Self;
-  typedef Parameter                     Superclass;
+  typedef NumericalParameter<unsigned int> Superclass;
   typedef itk::SmartPointer<Self>       Pointer;
   typedef itk::SmartPointer<const Self> ConstPointer;
 
@@ -258,7 +258,7 @@ public:
   itkNewMacro(Self);
 
   /** RTTI support */
-  itkTypeMacro(RAMParameter, Parameter);
+  itkTypeMacro(RAMParameter, NumericalParameter);
 
   ParameterType GetType() const override
   {
@@ -285,7 +285,7 @@ public:
   typedef itk::SmartPointer<const Self> ConstPointer;
 
   itkNewMacro(Self);
-  itkTypeMacro(RadiusParameter, Parameter);
+  itkTypeMacro(RadiusParameter, IntParameter);
 
   bool HasValue() const override
   {

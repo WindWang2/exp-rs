@@ -34,7 +34,7 @@ QStringList GdalWarpAlgorithm::buildArgs(const QVariantMap &parameters,
     }
 
     if (parameters.contains("EXTRA") && !parameters.value("EXTRA").toString().isEmpty()) {
-        args << parameters.value("EXTRA").toString().split(" ");
+        args << QProcess::splitCommand(parameters.value("EXTRA").toString());
     }
 
     args << rasterLayerSource(parameters.value("INPUT"));

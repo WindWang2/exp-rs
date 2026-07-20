@@ -28,12 +28,22 @@ public:
     explicit AsyncGdalRunner(QWidget *parentWidget, QObject *parent = nullptr);
     ~AsyncGdalRunner() override;
 
-    using GdalTask = std::function<QString()>; // returns output path or empty on error
+    /**
+     * Task functor executed on a background thread.
+     *
+     * Return contract:
+     *   - non-empty path  → success (completed signal)
+     *   - empty string    → generic failure
+     *   - string starting with errorMarker() → failure with message after the marker
+     */
+    using GdalTask = std::function<QString()>;
+
+    /** Prefix for structured error returns from background tasks. */
+    static QString errorMarker() { return QStringLiteral("\x01SICNU_ERR\x01"); }
 
     /**
-     * Run a GDAL task asynchronously.
+     * Run a GDAL/operator task asynchronously.
      * The task function is executed on a background thread.
-     * It should return the output path on success, or an empty string on failure.
      */
     void run(const GdalTask &task);
 

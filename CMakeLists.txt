@@ -369,7 +369,7 @@ if(SICNU_BUILD_OTB)
 
     # OTB requires Boost (filesystem, serialization).
     # Use vendored Boost headers + system Boost libraries
-    set(SICNU_BOOST_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/boost_ref" CACHE PATH "Vendored Boost include directory")
+    set(SICNU_BOOST_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/refs/boost" CACHE PATH "Vendored Boost include directory")
 
     # Find system Boost libraries
     find_library(Boost_FILESYSTEM_LIBRARY NAMES boost_filesystem)
@@ -513,6 +513,11 @@ target_include_directories(qgis_core PRIVATE
 
 # SICNU_GEO_RS: Plugin architecture subdirectories
 add_subdirectory(src/plugins)
+add_subdirectory(src/operators)
+# Headless CLI pipeline executor (depends on sicnu_operators)
+if(TARGET sicnu_operators)
+  add_subdirectory(src/cli)
+endif()
 add_subdirectory(src/app)
 
 # SICNU_GEO_RS: Unit tests (Catch2)

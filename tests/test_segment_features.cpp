@@ -70,6 +70,15 @@ TEST_CASE( "SegmentMap: construction and basic queries", "[segmentation]" )
         auto coords99 = segMap.pixelCoords( 99 );
         REQUIRE( coords99.size() == 0 ); // nonexistent
     }
+
+    SECTION( "pixelCount uses size cache without requiring coords" )
+    {
+        REQUIRE( segMap.pixelCount( 1 ) == 4 );
+        REQUIRE( segMap.pixelCount( 2 ) == 4 );
+        REQUIRE( segMap.pixelCount( 3 ) == 4 );
+        REQUIRE( segMap.pixelCount( 0 ) == 0 );
+        REQUIRE( segMap.pixelCount( 99 ) == 0 );
+    }
 }
 
 TEST_CASE( "SegmentMap: empty map", "[segmentation]" )

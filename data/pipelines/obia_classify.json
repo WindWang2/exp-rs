@@ -1,0 +1,19 @@
+{
+  "name": "obia_classify_lab",
+  "description": "Object-based classification with grid superpixels + ROI + SVM",
+  "steps": [
+    {
+      "operator": "rs:obia_classify",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "training": "data/samples/training_samples.shp",
+        "output": "/tmp/sicnu_obia_class.tif",
+        "method": "svm",
+        "classField": "class_id",
+        "segmentMethod": "grid",
+        "cellSize": 16,
+        "minLabelPixels": 2
+      }
+    }
+  ]
+}

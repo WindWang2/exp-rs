@@ -6,14 +6,14 @@
 3. 学会使用波段运算进行自定义分析
 
 ## 实验数据
-- `samples_data/landsat_sample.tif` (7波段Landsat-like影像)
+- `data/samples/landsat_sample.tif` (7波段Landsat-like影像)
 
 ## 实验步骤
 
 ### 2.1 加载影像
 1. 启动 SICNU GEO RS
 2. 菜单: File > Add Raster Layer...
-3. 选择 `samples_data/landsat_sample.tif`
+3. 选择 `data/samples/landsat_sample.tif`
 
 ### 2.2 查看光谱曲线
 1. 菜单: View > Identify

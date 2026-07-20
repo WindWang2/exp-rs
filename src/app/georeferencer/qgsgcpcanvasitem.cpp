@@ -61,9 +61,9 @@ void QgsGCPCanvasItem::paint( QPainter *p )
   p->setRenderHint( QPainter::Antialiasing );
   p->setOpacity( mEnabled ? 1.0 : 0.4 );
 
-  // Filled circle: badge color, or yellow when selected
-  QPen outline( Qt::black );
-  outline.setWidthF( mSelected ? 2.0 : 1.0 );
+  // Filled circle: badge color, or yellow when selected. Hover uses thicker cyan outline.
+  QPen outline( mHovered ? QColor( QStringLiteral( "#39d0d8" ) ) : Qt::black );
+  outline.setWidthF( mHovered ? 2.5 : ( mSelected ? 2.0 : 1.0 ) );
   p->setPen( outline );
   p->setBrush( mSelected ? mSelectedBrush : mBadgeBrush );
   p->drawEllipse( QPointF( 0, 0 ), kRadius, kRadius );
@@ -156,6 +156,14 @@ void QgsGCPCanvasItem::setSelected( bool s )
   if ( mSelected == s )
     return;
   mSelected = s;
+  update();
+}
+
+void QgsGCPCanvasItem::setHovered( bool h )
+{
+  if ( mHovered == h )
+    return;
+  mHovered = h;
   update();
 }
 

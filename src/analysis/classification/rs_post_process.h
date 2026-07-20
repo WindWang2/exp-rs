@@ -3,6 +3,11 @@
 // Sieve / majority filter / clump / recode on integer class-label rasters
 // (cv::Mat CV_32S preferred, CV_8U accepted). File helpers use GDAL for
 // load/save and polygonize. No GUI dependencies.
+//
+// NOTE: loadLabelRaster currently loads the full raster into a contiguous
+// cv::Mat. Majority/sieve/clump therefore operate on the entire image in
+// memory. For multi-GB label rasters prefer windowed I/O in a future pass;
+// majorityFilter supports optional cancel checks so long runs can abort.
 #pragma once
 
 #include "qgis_analysis_export.h"
@@ -12,6 +17,8 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+
+#include <functional>
 
 #include <opencv2/core.hpp>
 
@@ -29,9 +36,13 @@ class QGIS_ANALYSIS_EXPORT RsPostProcess
     /**
      * Sliding-window mode filter. \a kernelOdd must be odd and ≥ 3 (3/5/7).
      * Output type is CV_32S.
+     * Optional \a isCanceled is polled every few rows; returns false with
+     * err="Cancelled" when it reports true. Full-image in-memory path
+     * (see file note above).
      */
     static bool majorityFilter( const cv::Mat &src, cv::Mat &dst, int kernelOdd,
-                                QString *err = nullptr );
+                                QString *err = nullptr,
+                                const std::function<bool()> &isCanceled = nullptr );
 
     /**
      * Multi-label connected-component labeling (equal class values, 4 or 8

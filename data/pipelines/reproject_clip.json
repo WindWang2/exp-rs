@@ -1,0 +1,24 @@
+{
+  "name": "reproject_clip_lab",
+  "description": "Teaching pipeline: reproject to EPSG:3857 then clip by extent",
+  "steps": [
+    {
+      "operator": "gdal:reproject",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "output": "/tmp/sicnu_webmerc.tif",
+        "dstCrs": "EPSG:3857",
+        "resampling": "bilinear"
+      }
+    },
+    {
+      "operator": "gdal:clip",
+      "params": {
+        "input": "/tmp/sicnu_webmerc.tif",
+        "output": "/tmp/sicnu_webmerc_clip.tif",
+        "extent": "1.25e7,3.0e6,1.28e7,3.3e6",
+        "resampling": "nearest"
+      }
+    }
+  ]
+}

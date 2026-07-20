@@ -1,6 +1,6 @@
 /*
  * RS Studio — QSS Theme v2
- * Based on UI/design.html design tokens
+ * Based on docs/design/ui/design.html design tokens
  *
  * === Design Token Reference ===
  * Neutrals:  bg-0=#ffffff  bg-1=#f6f7f9  bg-3=#eef1f5  bg-4=#e2e6ec  bg-5=#cfd5dd  bg-6=#b3bac4

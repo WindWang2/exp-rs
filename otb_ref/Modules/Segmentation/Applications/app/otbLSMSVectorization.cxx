@@ -63,7 +63,7 @@ public:
 
   itkNewMacro(Self);
 
-  itkTypeMacro(Vectorization, otb::Application);
+  itkTypeMacro(LSMSVectorization, otb::Application);
 
 private:
   void DoInit() override

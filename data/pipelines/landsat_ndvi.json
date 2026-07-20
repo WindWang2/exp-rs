@@ -1,0 +1,25 @@
+{
+  "name": "Landsat import → NDVI",
+  "version": "1.0",
+  "description": "Stack Landsat OLI bands then compute NDVI (B5 NIR, B4 Red).",
+  "steps": [
+    {
+      "operator": "rs:landsat_import",
+      "params": {
+        "input": "${LANDSAT_MTL_OR_SCENE_DIR}",
+        "output": "${WORK}/landsat_stack.tif",
+        "bands": ["B2", "B3", "B4", "B5"]
+      }
+    },
+    {
+      "operator": "rs:spectral_index",
+      "params": {
+        "input": "${WORK}/landsat_stack.tif",
+        "output": "${WORK}/ndvi.tif",
+        "index": "NDVI",
+        "nir": 4,
+        "red": 3
+      }
+    }
+  ]
+}

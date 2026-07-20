@@ -27,8 +27,15 @@ cp -r "$PROJECT_DIR/resources/icons" "$APPDIR/usr/share/sicnu_geo_rs/resources/"
 cp "$PROJECT_DIR/resources/styles.qss" "$APPDIR/usr/share/sicnu_geo_rs/resources/"
 
 mkdir -p "$APPDIR/usr/share/sicnu_geo_rs/qgis_ref/resources"
-cp "$PROJECT_DIR/qgis_ref/resources/symbology-style.xml" \
-   "$APPDIR/usr/share/sicnu_geo_rs/qgis_ref/resources/" 2>/dev/null || true
+for _sym in \
+  "$PROJECT_DIR/refs/qgis/resources/symbology-style.xml" \
+  "$PROJECT_DIR/qgis_ref/resources/symbology-style.xml"
+do
+  if [ -f "$_sym" ]; then
+    cp "$_sym" "$APPDIR/usr/share/sicnu_geo_rs/qgis_ref/resources/"
+    break
+  fi
+done
 
 # Bundle OTB binaries (required — OTB is part of the application)
 OTB_SOURCE="${OTB_INSTALL_DIR:-/opt/otb}"

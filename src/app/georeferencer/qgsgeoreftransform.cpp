@@ -16,16 +16,39 @@
 
 #include "qgsgeoreftransform.h"
 
+#include "qgsrpcgcptransformer.h"
+
 #include <cassert>
 #include <cmath>
 #include <gdal.h>
 #include <gdal_alg.h>
 #include <limits>
 
+namespace {
+
+//! Copy RPC source/DEM/options that setMethod() alone cannot recreate.
+void copyRpcStateIfPresent( const QgsGcpTransformerInterface *srcImpl,
+                            QgsGcpTransformerInterface *dstImpl )
+{
+  const auto *srcRpc = dynamic_cast<const QgsRpcGcpTransformer *>( srcImpl );
+  auto *dstRpc = dynamic_cast<QgsRpcGcpTransformer *>( dstImpl );
+  if ( !srcRpc || !dstRpc )
+    return;
+
+  dstRpc->setSourceRasterPath( srcRpc->sourceRasterPath() );
+  dstRpc->setRpcOptions( srcRpc->demPath(), srcRpc->zOffset(), srcRpc->useGcpRefinement() );
+}
+
+} // namespace
+
 QgsGeorefTransform::QgsGeorefTransform( const QgsGeorefTransform &other )
 {
   setMethod( other.mTransformParametrisation );
   mRasterChangeCoords = other.mRasterChangeCoords;
+  // RpcPhysical needs source raster path + DEM/Z-offset/refine options that
+  // setMethod() alone cannot recreate (fresh empty QgsRpcGcpTransformer).
+  copyRpcStateIfPresent( other.mGeorefTransformImplementation.get(),
+                         mGeorefTransformImplementation.get() );
 }
 
 QgsGeorefTransform::QgsGeorefTransform( TransformMethod parametrisation )
@@ -75,6 +98,12 @@ bool QgsGeorefTransform::parametersInitialized() const
 std::unique_ptr<QgsGcpTransformerInterface> QgsGeorefTransform::clone() const
 {
   auto res = std::make_unique<QgsGeorefTransform>( *this );
+  // Copy ctor already restored RPC path/options; re-assert from *this in case
+  // the implementation was replaced between construction and clone().
+  copyRpcStateIfPresent( mGeorefTransformImplementation.get(),
+                         res->mGeorefTransformImplementation.get() );
+  // Re-fit so GDAL/RPC transformer args are live on the clone (required for
+  // RpcPhysical validity which depends on source raster path + DEM options).
   res->updateParametersFromGcps( mSourceCoordinates, mDestinationCoordinates, mInvertYAxis );
   return res;
 }

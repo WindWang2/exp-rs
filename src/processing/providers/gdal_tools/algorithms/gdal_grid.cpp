@@ -91,7 +91,7 @@ QStringList GdalGridAlgorithm::buildArgs(const QVariantMap &parameters,
     args << parameters.value("OUTPUT").toString();
 
     if (parameters.contains("EXTRA") && !parameters.value("EXTRA").toString().isEmpty()) {
-        args << parameters.value("EXTRA").toString().split(" ");
+        args << QProcess::splitCommand(parameters.value("EXTRA").toString());
     }
 
     return args;

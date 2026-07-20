@@ -1,9 +1,9 @@
 // sicnu_algorithm_dialog.cpp — Phase: Processing Toolbox overhaul
 #include "sicnu_algorithm_dialog.h"
+#include "main_window.h"
 
 #include <gui/processing/qgsprocessingguiregistry.h>
 #include <gui/processing/qgsprocessingwidgetwrapper.h>
-#include <gui/processing/qgsprocessingguiutils.h>
 #include <gui/qgsgui.h>
 
 #include <qgsprocessingalgrunnertask.h>
@@ -11,123 +11,327 @@
 #include <qgsprocessingcontext.h>
 #include <qgsprocessingalgorithm.h>
 #include <qgsprocessingparameters.h>
-#include <qgsprocessingutils.h>
 #include <qgsprocessingprovider.h>
 #include <qgsproject.h>
 #include <qgsmapcanvas.h>
+#include <qgslayertree.h>
 #include <qgslayertreegroup.h>
+#include <qgsrasterlayer.h>
+#include <qgsvectorlayer.h>
 #include <gui/history/qgshistoryproviderregistry.h>
 #include <gui/processing/qgsprocessingrecentalgorithmlog.h>
 
+#include <QCheckBox>
 #include <QFormLayout>
 #include <QMessageBox>
 #include <QScrollArea>
+#include <QSizePolicy>
 #include <QGroupBox>
 #include <QLabel>
 #include <QDateTime>
-#include <QCryptographicHash>
-#include <QJsonDocument>
+#include <QFileInfo>
+#include <QSettings>
 
-// ---------------------------------------------------------------------------
-// C++ port of Postprocessing.py::handleAlgorithmResults()
-//
-// Uses the QGIS framework's layersToLoadOnCompletion() mechanism,
-// QgsProcessingGuiUtils::addResultLayers() for proper layer tree placement,
-// and respects layer sort keys and output group names.
-// ---------------------------------------------------------------------------
-
-static bool handleAlgorithmResults(
-    const QgsProcessingAlgorithm *algorithm,
-    QgsProcessingContext &context,
-    QgsProcessingFeedback *feedback,
-    const QVariantMap & )
+namespace
 {
-    if ( !feedback )
-        return true;
 
-    feedback->setProgressText( QObject::tr( "Loading resulting layers" ) );
+QString outputPathFromVariant( const QVariant &value )
+{
+  if ( value.userType() == qMetaTypeId<QgsProcessingOutputLayerDefinition>() )
+    return value.value<QgsProcessingOutputLayerDefinition>().sink.staticValue().toString();
 
-    QVector<QgsProcessingGuiUtils::ResultLayerDetails> addedLayers;
-    const auto layersToLoad = context.layersToLoadOnCompletion();
-    const int totalCount = layersToLoad.size();
-    int i = 0;
+  return value.toString();
+}
 
-    for ( auto it = layersToLoad.constBegin(); it != layersToLoad.constEnd(); ++it )
+QString normalizedLayerSource( const QString &source )
+{
+  if ( source.isEmpty() )
+    return source;
+
+  const QFileInfo fi( source );
+  if ( fi.exists() )
+    return fi.canonicalFilePath();
+
+  return source;
+}
+
+bool projectHasLayerWithSource( const QString &source )
+{
+  const QString normalized = normalizedLayerSource( source );
+  const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
+  for ( QgsMapLayer *layer : layers )
+  {
+    if ( !layer )
+      continue;
+    if ( layer->source() == source
+         || normalizedLayerSource( layer->source() ) == normalized )
+      return true;
+  }
+  return false;
+}
+
+/**
+ * If a temporary destination was re-resolved after the algorithm wrote the file,
+ * the reported path can point at an empty sibling dir under processing_XXXXXX.
+ * Search for the same basename under that processing root.
+ */
+QString findSiblingTempOutput( const QString &reportedPath )
+{
+  if ( reportedPath.isEmpty() )
+    return {};
+
+  const QFileInfo fi( reportedPath );
+  const QString baseName = fi.fileName();
+  if ( baseName.isEmpty() )
+    return {};
+
+  // Expect .../processing_XXXXXX/<uuid>/OUTPUT.tif
+  const QDir runDir = fi.dir();
+  QDir rootDir = runDir;
+  if ( !rootDir.cdUp() )
+    return {};
+
+  if ( !rootDir.dirName().startsWith( QStringLiteral( "processing_" ) ) )
+    return {};
+
+  const QFileInfoList subdirs = rootDir.entryInfoList( QDir::Dirs | QDir::NoDotAndDotDot );
+  QString bestPath;
+  qint64 bestSize = -1;
+  for ( const QFileInfo &sub : subdirs )
+  {
+    const QString candidate = sub.absoluteFilePath() + QLatin1Char( '/' ) + baseName;
+    const QFileInfo cfi( candidate );
+    if ( !cfi.exists() || !cfi.isFile() )
+      continue;
+    if ( cfi.size() > bestSize )
     {
-        if ( feedback->isCanceled() )
-            return false;
+      bestSize = cfi.size();
+      bestPath = cfi.canonicalFilePath();
+    }
+  }
+  return bestPath;
+}
 
-        if ( totalCount > 2 )
-            feedback->setProgress( 100 * i / static_cast<double>( totalCount ) );
+QString resolvedResultPath(
+  const QgsProcessingParameterDefinition *param,
+  const QVariant &value,
+  QgsProcessingContext &context )
+{
+  const QString direct = outputPathFromVariant( value );
+  if ( !direct.isEmpty() && QFileInfo::exists( direct ) )
+    return direct;
 
-        const QString destId = it.key();
-        const QgsProcessingContext::LayerDetails &details = it.value();
+  // Recover when TEMPORARY_OUTPUT was resolved more than once (new UUID dir).
+  if ( !direct.isEmpty() )
+  {
+    const QString sibling = findSiblingTempOutput( direct );
+    if ( !sibling.isEmpty() )
+      return sibling;
+  }
 
-        std::unique_ptr<QgsMapLayer> layer(
-            QgsProcessingUtils::mapLayerFromString( destId, context, false, details.layerTypeHint ) );
-        if ( layer )
-        {
-            details.setOutputLayerName( layer.get() );
+  if ( param )
+  {
+    // testOnly=true: do not register layers; still may generate a NEW temp path
+    // if value is still the TEMPORARY_OUTPUT token — only accept if the file exists.
+    const QString resolved = QgsProcessingParameters::parameterAsOutputLayer(
+                               param, value, context, true );
+    if ( !resolved.isEmpty() && QFileInfo::exists( resolved ) )
+      return resolved;
 
-            // Transfer ownership from temporary store
-            QgsMapLayer *ownedLayer = context.temporaryLayerStore()->takeMapLayer( layer.get() );
-            if ( ownedLayer )
-            {
-                QgsProcessingGuiUtils::ResultLayerDetails resultDetails( ownedLayer );
-                resultDetails.targetLayerTreeGroup =
-                    QgsProcessingGuiUtils::layerTreeResultsGroup( details, context );
-                resultDetails.sortKey = details.layerSortKey;
-                resultDetails.destinationProject = details.project;
-                addedLayers.append( resultDetails );
-            }
-        }
-        ++i;
+    if ( !resolved.isEmpty() )
+    {
+      const QString sibling = findSiblingTempOutput( resolved );
+      if ( !sibling.isEmpty() )
+        return sibling;
+    }
+  }
+
+  return direct;
+}
+
+QgisDesktopWindow *findMainWindow( QWidget *start )
+{
+  for ( QWidget *w = start; w; w = w->parentWidget() )
+  {
+    if ( auto *mainWin = qobject_cast<QgisDesktopWindow *>( w ) )
+      return mainWin;
+  }
+  return nullptr;
+}
+
+bool isLoadableDestinationType( const QString &type )
+{
+  return type == QgsProcessingParameterRasterDestination::typeName()
+         || type == QgsProcessingParameterVectorDestination::typeName()
+         || type == QgsProcessingParameterFeatureSink::typeName();
+}
+
+bool addRasterToProject( const QString &path, QgsProcessingFeedback *feedback )
+{
+  const QFileInfo fi( path );
+  auto *layer = new QgsRasterLayer( path, fi.fileName(), QStringLiteral( "gdal" ) );
+  if ( !layer->isValid() )
+  {
+    if ( feedback )
+    {
+      feedback->reportError(
+        QObject::tr( "Failed to load result raster: %1" )
+          .arg( layer->error().message() ) );
+    }
+    delete layer;
+    return false;
+  }
+
+  QgsProject *project = QgsProject::instance();
+  project->addMapLayer( layer, false );
+  QgsLayerTreeGroup *group = project->layerTreeRoot()->findGroup( QStringLiteral( "Raster Layers" ) );
+  if ( !group )
+    group = project->layerTreeRoot()->insertGroup( 0, QStringLiteral( "Raster Layers" ) );
+  group->addLayer( layer );
+  return true;
+}
+
+bool addVectorToProject( const QString &path, QgsProcessingFeedback *feedback )
+{
+  const QFileInfo fi( path );
+  auto *layer = new QgsVectorLayer( path, fi.fileName(), QStringLiteral( "ogr" ) );
+  if ( !layer->isValid() )
+  {
+    if ( feedback )
+    {
+      feedback->reportError(
+        QObject::tr( "Failed to load result vector: %1" )
+          .arg( layer->error().message() ) );
+    }
+    delete layer;
+    return false;
+  }
+
+  QgsProject *project = QgsProject::instance();
+  project->addMapLayer( layer, false );
+  QgsLayerTreeGroup *group = project->layerTreeRoot()->findGroup( QStringLiteral( "Vector Layers" ) );
+  if ( !group )
+    group = project->layerTreeRoot()->insertGroup( 0, QStringLiteral( "Vector Layers" ) );
+  group->addLayer( layer );
+  return true;
+}
+
+int loadFileResultLayers(
+  const QgsProcessingAlgorithm *algorithm,
+  const QVariantMap &result,
+  QgsProcessingContext &context,
+  QgsProcessingFeedback *feedback,
+  QWidget *parentWidget )
+{
+  if ( !algorithm )
+    return 0;
+
+  QgisDesktopWindow *mainWin = findMainWindow( parentWidget );
+  int loadedCount = 0;
+
+  for ( const QgsProcessingParameterDefinition *param : algorithm->parameterDefinitions() )
+  {
+    if ( !param || !result.contains( param->name() ) )
+      continue;
+
+    if ( !param->isDestination() )
+      continue;
+
+    const QString type = param->type();
+    if ( !isLoadableDestinationType( type ) )
+    {
+      if ( feedback )
+      {
+        feedback->pushWarning(
+          QObject::tr( "Skipping auto-load for unsupported output type '%1' (%2)." )
+            .arg( type, param->name() ) );
+      }
+      continue;
     }
 
-    QgsProcessingGuiUtils::addResultLayers( addedLayers, context );
-    feedback->setProgress( 100 );
-    return true;
+    const QString path = resolvedResultPath( param, result.value( param->name() ), context );
+    if ( path.isEmpty() )
+      continue;
+
+    if ( !QFileInfo::exists( path ) )
+    {
+      if ( feedback )
+      {
+        feedback->reportError(
+          QObject::tr( "Output file not found: %1" ).arg( path ) );
+      }
+      continue;
+    }
+
+    if ( projectHasLayerWithSource( path ) )
+      continue;
+
+    bool loaded = false;
+    if ( type == QgsProcessingParameterRasterDestination::typeName() )
+    {
+      if ( mainWin )
+      {
+        mainWin->loadRasterLayer( path );
+        loaded = projectHasLayerWithSource( path );
+        if ( !loaded )
+          loaded = addRasterToProject( path, feedback );
+      }
+      else
+      {
+        loaded = addRasterToProject( path, feedback );
+      }
+    }
+    else // vector / feature sink
+    {
+      if ( mainWin )
+      {
+        mainWin->loadVectorLayer( path );
+        loaded = projectHasLayerWithSource( path );
+        if ( !loaded )
+          loaded = addVectorToProject( path, feedback );
+      }
+      else
+      {
+        loaded = addVectorToProject( path, feedback );
+      }
+    }
+
+    if ( !loaded )
+      continue;
+
+    if ( feedback )
+      feedback->pushInfo( QObject::tr( "Loaded result layer: %1" ).arg( path ) );
+    ++loadedCount;
+  }
+
+  return loadedCount;
 }
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Construction
 // ---------------------------------------------------------------------------
 
-// Static cache shared across all algorithm dialogs
-sicnu::ProcessingCache SicnuAlgorithmDialog::s_cache;
-
 SicnuAlgorithmDialog::SicnuAlgorithmDialog( QWidget *parent )
-    : QgsProcessingAlgorithmDialogBase( parent )
+  : QgsProcessingAlgorithmDialogBase( parent )
 {
+  if ( QgsProject *project = QgsProject::instance() )
+  {
+    mContext.setProject( project );
+    mContext.setTransformContext( project->transformContext() );
+  }
 }
 
 SicnuAlgorithmDialog::~SicnuAlgorithmDialog()
 {
-    // Wrappers may have been parented to widgets in the form layout.
-    // Only delete those that are still orphan (no parent).
-    for ( auto *wrapper : mWrappers )
-    {
-        if ( wrapper && !wrapper->parent() )
-            delete wrapper;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Cache key generation — SHA256 of algorithm ID + serialized parameters
-// ---------------------------------------------------------------------------
-
-QString SicnuAlgorithmDialog::computeCacheKey( const QVariantMap &params )
-{
-    if ( !algorithm() )
-        return QString();
-
-    QByteArray data;
-    data.append( algorithm()->id().toUtf8() );
-    data.append( '\0' );
-    data.append( QJsonDocument::fromVariant( params ).toJson( QJsonDocument::Compact ) );
-
-    QByteArray hash = QCryptographicHash::hash( data, QCryptographicHash::Sha256 );
-    return QString::fromLatin1( hash.toHex().left( 16 ) ); // 16 hex chars = 64 bits
+  // Wrappers may have been parented to widgets in the form layout.
+  // Only delete those that are still orphan (no parent).
+  for ( auto *wrapper : mWrappers )
+  {
+    if ( wrapper && !wrapper->parent() )
+      delete wrapper;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -136,97 +340,109 @@ QString SicnuAlgorithmDialog::computeCacheKey( const QVariantMap &params )
 
 void SicnuAlgorithmDialog::buildParameterWidgets()
 {
-    if ( !algorithm() )
-        return;
+  if ( !algorithm() )
+    return;
 
-    // Set up widget context (links to project, canvas, etc.)
-    QgsProcessingParameterWidgetContext widgetContext;
-    widgetContext.setProject( QgsProject::instance() );
+  QgsProcessingParameterWidgetContext widgetContext;
+  widgetContext.registerProcessingContextGenerator( this );
 
-    // Set map canvas so layer combo boxes can resolve CRS/extent
-    QWidget *w = parentWidget();
-    while ( w )
+  if ( QgsProject *project = QgsProject::instance() )
+  {
+    widgetContext.setProject( project );
+    mContext.setProject( project );
+    mContext.setTransformContext( project->transformContext() );
+  }
+
+  QWidget *w = parentWidget();
+  while ( w )
+  {
+    if ( QgsMapCanvas *canvas = w->findChild<QgsMapCanvas *>() )
     {
-      if ( QgsMapCanvas *canvas = w->findChild<QgsMapCanvas *>() )
-      {
-        widgetContext.setMapCanvas( canvas );
-        break;
-      }
-      w = w->parentWidget();
+      widgetContext.setMapCanvas( canvas );
+      widgetContext.setActiveLayer( canvas->currentLayer() );
+      break;
+    }
+    w = w->parentWidget();
+  }
+
+  auto *scrollArea = new QScrollArea();
+  scrollArea->setWidgetResizable( true );
+  scrollArea->setFrameShape( QFrame::NoFrame );
+
+  auto *container = new QWidget();
+  auto *formLayout = new QFormLayout( container );
+  formLayout->setLabelAlignment( Qt::AlignRight );
+  formLayout->setFieldGrowthPolicy( QFormLayout::ExpandingFieldsGrow );
+  formLayout->setContentsMargins( 4, 4, 4, 4 );
+
+  auto *advancedGroup = new QGroupBox( tr( "Advanced Parameters" ) );
+  auto *advancedLayout = new QFormLayout( advancedGroup );
+  advancedLayout->setLabelAlignment( Qt::AlignRight );
+  advancedLayout->setFieldGrowthPolicy( QFormLayout::ExpandingFieldsGrow );
+  advancedGroup->hide();
+
+  const auto paramDefs = algorithm()->parameterDefinitions();
+  for ( const QgsProcessingParameterDefinition *param : paramDefs )
+  {
+    if ( !param )
+      continue;
+
+    // Include destinations so OUTPUT paths are collected and loadable.
+    QgsAbstractProcessingParameterWidgetWrapper *wrapper =
+      QgsGui::processingGuiRegistry()->createParameterWidgetWrapper(
+        param, Qgis::ProcessingMode::Standard );
+
+    if ( !wrapper )
+      continue;
+
+    wrapper->setWidgetContext( widgetContext );
+    wrapper->registerProcessingContextGenerator( this );
+    wrapper->registerProcessingParametersGenerator( this );
+    QWidget *widget = wrapper->createWrappedWidget( mContext );
+    if ( !widget )
+    {
+      delete wrapper;
+      continue;
     }
 
-    // Create a scroll area with a form layout for parameters
-    auto *scrollArea = new QScrollArea();
-    scrollArea->setWidgetResizable( true );
-    scrollArea->setFrameShape( QFrame::NoFrame );
+    QLabel *label = new QLabel( param->description() + QStringLiteral( ":" ) );
+    label->setToolTip( param->toolTip() );
 
-    auto *container = new QWidget();
-    auto *formLayout = new QFormLayout( container );
-    formLayout->setLabelAlignment( Qt::AlignRight );
-    formLayout->setContentsMargins( 4, 4, 4, 4 );
+    widget->setMinimumWidth( 320 );
+    widget->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
 
-    // Advanced parameters group
-    auto *advancedGroup = new QGroupBox( tr( "Advanced Parameters" ) );
-    auto *advancedLayout = new QFormLayout( advancedGroup );
-    advancedLayout->setLabelAlignment( Qt::AlignRight );
-    advancedGroup->hide();
-
-    const auto paramDefs = algorithm()->parameterDefinitions();
-    for ( const QgsProcessingParameterDefinition *param : paramDefs )
+    if ( param->flags() & Qgis::ProcessingParameterFlag::Advanced )
     {
-        if ( !param )
-            continue;
-
-        // Skip destination parameters — they're handled by the base dialog
-        if ( param->isDestination() )
-            continue;
-
-        QgsAbstractProcessingParameterWidgetWrapper *wrapper =
-            QgsGui::processingGuiRegistry()->createParameterWidgetWrapper(
-                param, Qgis::ProcessingMode::Standard );
-
-        if ( !wrapper )
-            continue;
-
-        wrapper->setWidgetContext( widgetContext );
-        QWidget *widget = wrapper->createWrappedWidget( mContext );
-        if ( !widget )
-        {
-            delete wrapper;
-            continue;
-        }
-
-        // Create label
-        QLabel *label = new QLabel( param->description() + QStringLiteral( ":" ) );
-        label->setToolTip( param->toolTip() );
-
-        // Add to form or advanced group
-        if ( param->flags() & Qgis::ProcessingParameterFlag::Advanced )
-        {
-            advancedLayout->addRow( label, widget );
-            advancedGroup->show();
-        }
-        else
-        {
-            formLayout->addRow( label, widget );
-        }
-
-        mWrappers.append( wrapper );
+      advancedLayout->addRow( label, widget );
+      advancedGroup->show();
+    }
+    else
+    {
+      formLayout->addRow( label, widget );
     }
 
-    // Add advanced group at the bottom
-    if ( advancedGroup->isVisible() )
-        formLayout->addWidget( advancedGroup );
+    mWrappers.append( wrapper );
+  }
 
-    scrollArea->setWidget( container );
+  if ( advancedGroup->isVisible() )
+    formLayout->addWidget( advancedGroup );
 
-    // Create a simple panel widget to hold the scroll area
-    auto *panelWidget = new QgsPanelWidget();
-    auto *panelLayout = new QVBoxLayout( panelWidget );
-    panelLayout->setContentsMargins( 0, 0, 0, 0 );
-    panelLayout->addWidget( scrollArea );
+  QSettings settings;
+  mLoadResultsCheck = new QCheckBox( tr( "Load result layers into map" ) );
+  mLoadResultsCheck->setChecked(
+    settings.value( QStringLiteral( "processing/loadResultsToLayers" ), true ).toBool() );
+  mLoadResultsCheck->setToolTip(
+    tr( "When enabled, output rasters and vectors are added to the layer list after the tool finishes." ) );
+  formLayout->addRow( mLoadResultsCheck );
 
-    setMainWidget( panelWidget );
+  scrollArea->setWidget( container );
+
+  auto *panelWidget = new QgsPanelWidget();
+  auto *panelLayout = new QVBoxLayout( panelWidget );
+  panelLayout->setContentsMargins( 0, 0, 0, 0 );
+  panelLayout->addWidget( scrollArea );
+
+  setMainWidget( panelWidget );
 }
 
 // ---------------------------------------------------------------------------
@@ -235,18 +451,29 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
 
 QVariantMap SicnuAlgorithmDialog::createProcessingParameters( Flags )
 {
-    QVariantMap params;
+  QVariantMap params;
+  const bool loadResults = mLoadResultsCheck && mLoadResultsCheck->isChecked();
+  QgsProject *destProject = loadResults ? QgsProject::instance() : nullptr;
 
-    for ( const QgsAbstractProcessingParameterWidgetWrapper *wrapper : mWrappers )
+  for ( const QgsAbstractProcessingParameterWidgetWrapper *wrapper : mWrappers )
+  {
+    if ( !wrapper || !wrapper->parameterDefinition() )
+      continue;
+
+    const QString paramName = wrapper->parameterDefinition()->name();
+    QVariant value = wrapper->parameterValue();
+
+    if ( value.userType() == qMetaTypeId<QgsProcessingOutputLayerDefinition>() )
     {
-        if ( !wrapper || !wrapper->parameterDefinition() )
-            continue;
-
-        const QString paramName = wrapper->parameterDefinition()->name();
-        params[paramName] = wrapper->parameterValue();
+      QgsProcessingOutputLayerDefinition def = value.value<QgsProcessingOutputLayerDefinition>();
+      def.destinationProject = loadResults ? destProject : nullptr;
+      value = QVariant::fromValue( def );
     }
 
-    return params;
+    params[paramName] = value;
+  }
+
+  return params;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,176 +482,153 @@ QVariantMap SicnuAlgorithmDialog::createProcessingParameters( Flags )
 
 QgsProcessingContext *SicnuAlgorithmDialog::processingContext()
 {
-    return &mContext;
+  return &mContext;
 }
 
 // ---------------------------------------------------------------------------
 // runAlgorithm — async execution via QgsProcessingAlgRunnerTask
-// Aligned with QGIS Python AlgorithmDialog.runAlgorithm()
 // ---------------------------------------------------------------------------
 
 void SicnuAlgorithmDialog::runAlgorithm()
 {
-    if ( !algorithm() )
-        return;
+  if ( !algorithm() )
+    return;
 
-    // 1. Collect parameters from widgets
-    QVariantMap params = createProcessingParameters();
+  if ( mLoadResultsCheck )
+  {
+    QSettings settings;
+    settings.setValue( QStringLiteral( "processing/loadResultsToLayers" ),
+                       mLoadResultsCheck->isChecked() );
+  }
 
-    // 2. Preprocess (resolve layer references, etc.)
-    params = algorithm()->preprocessParameters( params );
+  QVariantMap params = createProcessingParameters();
+  params = algorithm()->preprocessParameters( params );
 
-    // 3. Validate
-    QString errorMsg;
-    if ( !algorithm()->checkParameterValues( params, mContext, &errorMsg ) )
-    {
-        QMessageBox::warning( this, tr( "Invalid Parameters" ), errorMsg );
-        return;
-    }
+  QString errorMsg;
+  if ( !algorithm()->checkParameterValues( params, mContext, &errorMsg ) )
+  {
+    QMessageBox::warning( this, tr( "Invalid Parameters" ), errorMsg );
+    return;
+  }
 
-    // 3.5. Check processing cache for repeated execution
-    QString cacheKey = computeCacheKey( params );
-    if ( !cacheKey.isEmpty() && s_cache.contains( cacheKey ) )
-    {
-        QByteArray cachedData = s_cache.retrieve( cacheKey );
-        QVariantMap cachedResult = QJsonDocument::fromJson( cachedData ).toVariant().toMap();
-        if ( !cachedResult.isEmpty() )
-        {
-            QgsProcessingFeedback *fb = createFeedback();
-            fb->pushInfo( tr( "Result loaded from cache (key: %1)" ).arg( cacheKey ) );
-            finished( true, cachedResult, mContext, fb );
-            return;
-        }
-    }
+  mFeedback = createFeedback();
+  QgsProcessingFeedback *feedback = mFeedback;
 
-    // 4. Create feedback connected to dialog's progress/log UI
-    QgsProcessingFeedback *feedback = createFeedback();
+  applyContextOverrides( &mContext );
+  // File-based CLI tools load via loadFileResultLayers; clear framework queue
+  // so we do not double-load when destinationProject is also set.
+  mContext.setLayersToLoadOnCompletion( {} );
 
-    // 5. Apply context overrides (from dialog settings)
-    applyContextOverrides( &mContext );
+  blockControlsWhileRunning();
+  setExecutedAnyResult( true );
+  cancelButton()->setEnabled(
+    algorithm()->flags() & Qgis::ProcessingAlgorithmFlag::CanCancel );
+  showLog();
 
-    // 6. Block UI, switch to log tab, enable cancel
-    blockControlsWhileRunning();
-    setExecutedAnyResult( true );
-    cancelButton()->setEnabled(
-        algorithm()->flags() & Qgis::ProcessingAlgorithmFlag::CanCancel );
-    showLog();
+  feedback->pushVersionInfo( algorithm()->provider() );
+  if ( algorithm()->provider() )
+  {
+    const QString warn = algorithm()->provider()->warningMessage();
+    if ( !warn.isEmpty() )
+      feedback->reportError( warn );
+  }
 
-    // 7. Push version info and provider warnings
-    feedback->pushVersionInfo( algorithm()->provider() );
-    if ( algorithm()->provider() )
-    {
-        const QString warn = algorithm()->provider()->warningMessage();
-        if ( !warn.isEmpty() )
-            feedback->reportError( warn );
-    }
+  mStartTime = QDateTime::currentMSecsSinceEpoch();
+  feedback->pushInfo( tr( "Algorithm started at: %1" )
+                        .arg( QDateTime::currentDateTime().toString( Qt::ISODate ) ) );
+  feedback->setProgressText( tr( "<b>Algorithm '%1' starting&hellip;</b>" )
+                               .arg( algorithm()->displayName() ) );
 
-    // 8. Log algorithm start time and input parameters
-    mStartTime = QDateTime::currentMSecsSinceEpoch();
-    feedback->pushInfo( tr( "Algorithm started at: %1" )
-        .arg( QDateTime::currentDateTime().toString( Qt::ISODate ) ) );
-    feedback->setProgressText( tr( "<b>Algorithm '%1' starting&hellip;</b>" )
-        .arg( algorithm()->displayName() ) );
+  feedback->pushInfo( tr( "Input parameters:" ) );
+  QStringList paramParts;
+  const auto paramDefs = algorithm()->parameterDefinitions();
+  for ( const QgsProcessingParameterDefinition *param : paramDefs )
+  {
+    if ( !param || !params.contains( param->name() ) )
+      continue;
+    bool ok = false;
+    const QString valStr = param->valueAsString( params.value( param->name() ), mContext, ok );
+    paramParts.append( QStringLiteral( "'%1' : %2" )
+                         .arg( param->name(), ok ? valStr : params.value( param->name() ).toString() ) );
+  }
+  feedback->pushCommandInfo( QStringLiteral( "{ %1 }" ).arg( paramParts.join( QStringLiteral( ", " ) ) ) );
+  feedback->pushInfo( QString() );
 
-    feedback->pushInfo( tr( "Input parameters:" ) );
-    QStringList paramParts;
-    const auto paramDefs = algorithm()->parameterDefinitions();
-    for ( const QgsProcessingParameterDefinition *param : paramDefs )
-    {
-        if ( !param || !params.contains( param->name() ) )
-            continue;
-        bool ok = false;
-        const QString valStr = param->valueAsString( params.value( param->name() ), mContext, ok );
-        paramParts.append( QStringLiteral( "'%1' : %2" )
-            .arg( param->name(), ok ? valStr : params.value( param->name() ).toString() ) );
-    }
-    feedback->pushCommandInfo( QStringLiteral( "{ %1 }" ).arg( paramParts.join( QStringLiteral( ", " ) ) ) );
-    feedback->pushInfo( QString() );
+  QVariantMap historyDetails;
+  historyDetails[QStringLiteral( "algorithm_id" )] = algorithm()->id();
+  historyDetails[QStringLiteral( "parameters" )] = algorithm()->asMap( params, mContext );
+  const QString pythonCmd = algorithm()->asPythonCommand( params, mContext );
+  if ( !pythonCmd.isEmpty() )
+    historyDetails[QStringLiteral( "python_command" )] = pythonCmd;
 
-    // 9. Record to processing history
-    QVariantMap historyDetails;
-    historyDetails[QStringLiteral( "algorithm_id" )] = algorithm()->id();
-    historyDetails[QStringLiteral( "parameters" )] = algorithm()->asMap( params, mContext );
-    const QString pythonCmd = algorithm()->asPythonCommand( params, mContext );
-    if ( !pythonCmd.isEmpty() )
-        historyDetails[QStringLiteral( "python_command" )] = pythonCmd;
+  bool historyOk = false;
+  mHistoryLogId = QgsGui::historyProviderRegistry()->addEntry(
+    QStringLiteral( "processing" ), historyDetails, historyOk );
+  mHistoryDetails = historyDetails;
 
-    bool historyOk = false;
-    mHistoryLogId = QgsGui::historyProviderRegistry()->addEntry(
-        QStringLiteral( "processing" ), historyDetails, historyOk );
-    mHistoryDetails = historyDetails;
+  QgsGui::processingRecentAlgorithmLog()->push( algorithm()->id() );
 
-    // 10. Record in recent algorithms
-    QgsGui::processingRecentAlgorithmLog()->push( algorithm()->id() );
+  QgsProcessingAlgRunnerTask *task = new QgsProcessingAlgRunnerTask(
+    algorithm(), params, mContext, feedback );
 
-    // 11. Create and launch the async task
-    QgsProcessingAlgRunnerTask *task = new QgsProcessingAlgRunnerTask(
-        algorithm(), params, mContext, feedback );
+  setCurrentTask( task );
+}
 
-    setCurrentTask( task ); // connects executed → algExecuted, adds to task manager
+// ---------------------------------------------------------------------------
+// algExecuted — async task completed; invoke post-processing (layer load, etc.)
+// ---------------------------------------------------------------------------
+
+void SicnuAlgorithmDialog::algExecuted( bool successful, const QVariantMap &results )
+{
+  if ( mFeedback )
+    finished( successful, results, mContext, mFeedback );
+
+  if ( successful && algorithm() && mLoadResultsCheck && mLoadResultsCheck->isChecked() )
+  {
+    loadFileResultLayers( algorithm(), results, mContext, mFeedback, parentWidget() );
+  }
+
+  QgsProcessingAlgorithmDialogBase::algExecuted( successful, results );
+
+  resetGui();
+  mFeedback = nullptr;
 }
 
 // ---------------------------------------------------------------------------
 // finished — called after algorithm completes
-// Aligned with QGIS Python AlgorithmDialog.finish() + Postprocessing.py
 // ---------------------------------------------------------------------------
 
 void SicnuAlgorithmDialog::finished( bool successful, const QVariantMap &result,
-                                      QgsProcessingContext &context, QgsProcessingFeedback *feedback )
+                                     QgsProcessingContext &context, QgsProcessingFeedback *feedback )
 {
-    QgsProcessingAlgorithmDialogBase::finished( successful, result, context, feedback );
+  QgsProcessingAlgorithmDialogBase::finished( successful, result, context, feedback );
 
-    if ( successful )
+  if ( successful )
+  {
+    if ( feedback && mStartTime > 0 )
     {
-        // Report elapsed time
-        if ( feedback && mStartTime > 0 )
-        {
-            const double elapsed = ( QDateTime::currentMSecsSinceEpoch() - mStartTime ) / 1000.0;
-            feedback->pushInfo( tr( "Execution completed in %1 seconds" ).arg( elapsed, 0, 'f', 2 ) );
-        }
-
-        // Use QGIS framework mechanism to load result layers
-        if ( algorithm() )
-            handleAlgorithmResults( algorithm(), context, feedback, result );
-
-        // Push formatted results summary
-        if ( feedback )
-            feedback->pushFormattedResults( algorithm(), context, result );
-
-        // Store result in processing cache for repeated execution
-        if ( algorithm() && !result.isEmpty() )
-        {
-            QVariantMap params = createProcessingParameters();
-            params = algorithm()->preprocessParameters( params );
-            QString cacheKey = computeCacheKey( params );
-            if ( !cacheKey.isEmpty() )
-            {
-                QByteArray data = QJsonDocument::fromVariant( result ).toJson( QJsonDocument::Compact );
-                s_cache.store( cacheKey, data );
-                if ( feedback )
-                    feedback->pushInfo( tr( "Result cached (key: %1)" ).arg( cacheKey ) );
-            }
-        }
-    }
-    else
-    {
-        if ( feedback )
-        {
-            if ( mStartTime > 0 )
-            {
-                const double elapsed = ( QDateTime::currentMSecsSinceEpoch() - mStartTime ) / 1000.0;
-                feedback->reportError( tr( "Execution failed after %1 seconds" ).arg( elapsed, 0, 'f', 2 ) );
-            }
-            feedback->reportError( tr( "Algorithm failed." ) );
-        }
+      const double elapsed = ( QDateTime::currentMSecsSinceEpoch() - mStartTime ) / 1000.0;
+      feedback->pushInfo( tr( "Execution completed in %1 seconds" ).arg( elapsed, 0, 'f', 2 ) );
     }
 
-    // Update processing history with results and log
-    if ( mHistoryLogId >= 0 )
+    if ( feedback )
+      feedback->pushFormattedResults( algorithm(), context, result );
+  }
+  else if ( feedback )
+  {
+    if ( mStartTime > 0 )
     {
-        mHistoryDetails[QStringLiteral( "results" )] = result;
-        if ( feedback )
-            mHistoryDetails[QStringLiteral( "log" )] = feedback->htmlLog();
-        QgsGui::historyProviderRegistry()->updateEntry( mHistoryLogId, mHistoryDetails );
+      const double elapsed = ( QDateTime::currentMSecsSinceEpoch() - mStartTime ) / 1000.0;
+      feedback->reportError( tr( "Execution failed after %1 seconds" ).arg( elapsed, 0, 'f', 2 ) );
     }
+    feedback->reportError( tr( "Algorithm failed." ) );
+  }
+
+  if ( mHistoryLogId >= 0 )
+  {
+    mHistoryDetails[QStringLiteral( "results" )] = result;
+    if ( feedback )
+      mHistoryDetails[QStringLiteral( "log" )] = feedback->htmlLog();
+    QgsGui::historyProviderRegistry()->updateEntry( mHistoryLogId, mHistoryDetails );
+  }
 }

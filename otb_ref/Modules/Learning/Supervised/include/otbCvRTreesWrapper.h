@@ -96,6 +96,8 @@ public:
 
 #ifdef OTB_OPENCV_4
   virtual void getVotes(cv::InputArray samples, cv::OutputArray results, int flags) const override;
+  // Pure virtual in OpenCV 5; defaulted (non-pure) in OpenCV 4.
+  virtual double getOOBError() const override;
 #endif
 
   virtual cv::Mat getVarImportance() const override;

@@ -37,7 +37,7 @@ public slots:
 
 private:
     void setupUi();
-    bool shouldShowMessage(const QString &tag, Qgis::MessageLevel level) const;
+    bool shouldShowMessage(const QString &message, const QString &tag, Qgis::MessageLevel level) const;
 
     QTextEdit *mTextEdit = nullptr;
     QComboBox *m_levelFilter = nullptr;

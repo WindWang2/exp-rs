@@ -108,10 +108,22 @@ cmake --install . --prefix /usr/local
 mkdir build-otb && cd build-otb
 cmake .. -DENABLE_TESTS=ON -DSICNU_BUILD_OTB=ON -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)  # First build takes 30-45 minutes
-ctest --output-on-failure
+./scripts/bundle_otb_tools.sh "$(pwd)" "$(pwd)/.."   # stage tools/otb
 ```
 
-Requires no additional system packages — ITK 5.4 and OTB 10 are vendored in-tree.
+ITK is built as static PIC libraries; OTB is built **shared** so composite CLI apps
+(`TrainImagesClassifier`, etc.) share a single ApplicationEngine.
+
+Point a normal (non-OTB) product build or CLI/tests at the bundle:
+
+```bash
+export SICNU_OTB_PATH="$PWD/build-otb/tools/otb"
+# optional if not using tools/otb/otbenv.profile:
+export LD_LIBRARY_PATH="$PWD/build-otb/lib:${LD_LIBRARY_PATH}"
+source build-otb/tools/otb/otbenv.profile   # sets OTB_APPLICATION_PATH, PATH, LD_LIBRARY_PATH
+```
+
+LibSVM / MuParserX are auto-vendored when missing from the system.
 
 ### AppImage
 
@@ -122,19 +134,25 @@ Requires no additional system packages — ITK 5.4 and OTB 10 are vendored in-tr
 ## Architecture
 
 ```
-src/
-├── app/           Application (main window, dialogs, widgets)
-├── analysis/      Analysis libraries (classification, georeferencing, segmentation)
-├── agent/         AI Agent infrastructure (MCP server, STAC client)
-├── core/          QGIS core library (vendored)
-├── gui/           QGIS GUI library (vendored)
-├── native/        Platform integration
-├── processing/    GDAL/OTB/QGIS algorithm providers + shared utilities
-├── plugins/       Plugin system
-└── ui/            Qt Designer forms
-otb_ref/           Orfeo Toolbox v10 (segmentation, learning)
-itk_ref/           ITK 5.4 (image processing, via git subtree)
+src/               Application + QGIS core/gui + processing
+├── app/           Main window, dialogs, widgets
+├── analysis/      Classification, georeferencing, segmentation
+├── agent/         MCP server, STAC client
+├── core/, gui/    QGIS libraries (vendored subset)
+├── processing/    GDAL/OTB/QGIS providers + utilities
+└── …
+data/
+├── processing/    Toolbox manifest (tracked)
+├── tools/custom/  Generic CLI tool JSON (tracked)
+└── samples/       Lab sample datasets
+docs/              Design, architecture, labs, agent notes
+refs/              Optional local refs: qgis/, boost/ (gitignored)
+otb_ref/           Orfeo Toolbox v10 (CMake-coupled, stays at root)
+itk_ref/           ITK 5.4 via git subtree (stays at root)
+external/          Header-only / small vendored C++ deps
 ```
+
+Full map: [docs/repo-layout.md](docs/repo-layout.md).
 
 ### Shared Utilities
 

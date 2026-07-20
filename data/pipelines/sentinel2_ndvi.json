@@ -1,0 +1,26 @@
+{
+  "name": "Sentinel-2 import → NDVI",
+  "version": "1.0",
+  "description": "Stack Sentinel-2 10 m bands (B2,B3,B4,B8) then compute NDVI.",
+  "steps": [
+    {
+      "operator": "rs:sentinel2_import",
+      "params": {
+        "input": "${S2_SAFE_DIR}",
+        "output": "${WORK}/s2_stack.tif",
+        "resolution": "10m",
+        "bands": ["B2", "B3", "B4", "B8"]
+      }
+    },
+    {
+      "operator": "rs:spectral_index",
+      "params": {
+        "input": "${WORK}/s2_stack.tif",
+        "output": "${WORK}/ndvi.tif",
+        "index": "NDVI",
+        "nir": 4,
+        "red": 3
+      }
+    }
+  ]
+}

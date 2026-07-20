@@ -61,6 +61,7 @@ class RsGeorefParamsPanel : public QWidget
 
     /// Task 11.5.4 — DEM Z-offset (metres) from the params panel spin box.
     double demZOffset() const;
+    void setDemZOffset( double z );
 
     /**
      * Task 11.5.5 — display the before/after RMS comparison produced by the

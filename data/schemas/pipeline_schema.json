@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sicnu-geo-rs/schemas/pipeline_schema.json",
+  "title": "SICNU GEO RS Pipeline",
+  "description": "JSON definition of a headless processing pipeline.",
+  "type": "object",
+  "required": ["steps"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Human-readable pipeline name."
+    },
+    "version": {
+      "type": "string",
+      "description": "Pipeline format version.",
+      "default": "1.0"
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["operator"],
+        "properties": {
+          "operator": {
+            "type": "string",
+            "description": "Registered RSOperator identifier, e.g. rs:spectral_index."
+          },
+          "params": {
+            "type": "object",
+            "description": "Operator-specific parameters. Refer to operator schema."
+          },
+          "id": {
+            "type": "string",
+            "description": "Optional step identifier for referencing outputs."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -51,7 +51,7 @@ public:
   typedef itk::ChangeLabelImageFilter<LabelImageType, LabelImageType> ChangeLabelImageFilterType;
 
   itkNewMacro(Self);
-  itkTypeMacro(Merging, otb::Application);
+  itkTypeMacro(SmallRegionsMerging, otb::Application);
 
 private:
   ChangeLabelImageFilterType::Pointer m_ChangeLabelFilter;

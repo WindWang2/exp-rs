@@ -38,9 +38,10 @@ class QGIS_ANALYSIS_EXPORT RsSegmentMap
     int segmentCount() const;
 
     /// Pixel coordinates belonging to a segment.
+    /// Builds coords only for the requested segment (lazy), not a full map cache.
     QVector<QPoint> pixelCoords( quint32 segmentId ) const;
 
-    /// Number of pixels in a segment (O(1) with cache, no copy).
+    /// Number of pixels in a segment. Uses a size-only cache (no QPoint storage).
     int pixelCount( quint32 segmentId ) const;
 
     /// Raw label buffer (read-only).
@@ -53,7 +54,12 @@ class QGIS_ANALYSIS_EXPORT RsSegmentMap
     int mWidth = 0;
     int mHeight = 0;
 
-    // ISSUE 13 fix: lazy-built cache for pixelCoords()
+    /// Size-only cache: segmentId → pixel count (cheap, built once).
+    mutable QMap<quint32, int> mSizeCache;
+    mutable bool mSizeCacheBuilt = false;
+    /// Per-segment coords, filled lazily only when pixelCoords() is called.
     mutable QMap<quint32, QVector<QPoint>> mCoordsCache;
-    void buildCoordsCache() const;
+
+    void ensureSizeCache() const;
+    QVector<QPoint> buildCoordsForSegment( quint32 segmentId ) const;
 };

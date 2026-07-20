@@ -1,0 +1,33 @@
+{
+  "name": "obia_export_lab",
+  "description": "Segment image, export object stats CSV, polygonize labels to shapefile",
+  "steps": [
+    {
+      "operator": "rs:obia_segment",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "output": "/tmp/sicnu_seg_labels.tif",
+        "smoothKernel": 5,
+        "quantizeBins": 32,
+        "minRegionSize": 50
+      }
+    },
+    {
+      "operator": "rs:segment_stats",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "labels": "/tmp/sicnu_seg_labels.tif",
+        "output": "/tmp/sicnu_seg_stats.csv"
+      }
+    },
+    {
+      "operator": "gdal:polygonize",
+      "params": {
+        "input": "/tmp/sicnu_seg_labels.tif",
+        "output": "/tmp/sicnu_seg_polygons.shp",
+        "field": "SEG_ID",
+        "connected8": true
+      }
+    }
+  ]
+}

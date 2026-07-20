@@ -13,6 +13,7 @@
 #include <QSet>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -263,6 +264,22 @@ bool RsClassificationTask::run()
     }
   }
 
+  // Max class id drives output datatype: Byte only when all ids fit in 0..255.
+  // Never silently clamp large class IDs into uint8.
+  int maxClassId = 0;
+  for ( auto it = mCfg.classColors.constBegin(); it != mCfg.classColors.constEnd(); ++it )
+    maxClassId = std::max( maxClassId, it.key() );
+  for ( int i = 0; i < mCfg.trainY.rows; ++i )
+    maxClassId = std::max( maxClassId, mCfg.trainY.at<int>( i, 0 ) );
+  for ( int i = 0; i < mCfg.testY.rows; ++i )
+    maxClassId = std::max( maxClassId, mCfg.testY.at<int>( i, 0 ) );
+
+  GDALDataType outType = GDT_Byte;
+  if ( maxClassId > 65535 )
+    outType = GDT_Int32;
+  else if ( maxClassId > 255 )
+    outType = GDT_UInt16;
+
   // 3. Create destination GTiff (tiled+DEFLATE by default; fall back on fail)
   GDALDriver *drv = GetGDALDriverManager()->GetDriverByName( "GTiff" );
   if ( !drv )
@@ -275,14 +292,14 @@ bool RsClassificationTask::run()
   for ( const QString &o : mCfg.creationOptions )
     papsz = CSLAddString( papsz, o.toUtf8().constData() );
   GDALDataset *dstDs = drv->Create(
-    mCfg.outputRaster.toUtf8().constData(), outW, outH, 1, GDT_Byte, papsz );
+    mCfg.outputRaster.toUtf8().constData(), outW, outH, 1, outType, papsz );
   if ( !dstDs && papsz )
   {
     CSLDestroy( papsz );
     papsz = nullptr;
     qWarning() << "RsClassificationTask: Create with options failed; retrying without options";
     dstDs = drv->Create(
-      mCfg.outputRaster.toUtf8().constData(), outW, outH, 1, GDT_Byte, nullptr );
+      mCfg.outputRaster.toUtf8().constData(), outW, outH, 1, outType, nullptr );
   }
   else
   {
@@ -300,41 +317,60 @@ bool RsClassificationTask::run()
   if ( proj && *proj )
     dstDs->SetProjection( proj );
 
-  // Attach ColorTable. Phase 10A review patch: index 0 is reserved for the
-  // "unclassified" / background pixel and rendered transparent — previously
-  // it defaulted to opaque black which masked unclassified areas.
-  GDALColorTable ct( GPI_RGB );
+  // ColorTable is palette-index based and only meaningful for Byte output.
+  // Index 0 is reserved for unclassified / NoData (transparent).
+  if ( outType == GDT_Byte )
   {
-    GDALColorEntry bg;
-    bg.c1 = 0;
-    bg.c2 = 0;
-    bg.c3 = 0;
-    bg.c4 = 0; // alpha 0 → transparent
-    ct.SetColorEntry( 0, &bg );
+    GDALColorTable ct( GPI_RGB );
+    {
+      GDALColorEntry bg;
+      bg.c1 = 0;
+      bg.c2 = 0;
+      bg.c3 = 0;
+      bg.c4 = 0; // alpha 0 → transparent
+      ct.SetColorEntry( 0, &bg );
+    }
+    for ( auto it = mCfg.classColors.constBegin(); it != mCfg.classColors.constEnd(); ++it )
+    {
+      GDALColorEntry e;
+      e.c1 = static_cast<short>( it.value().red() );
+      e.c2 = static_cast<short>( it.value().green() );
+      e.c3 = static_cast<short>( it.value().blue() );
+      e.c4 = 255;
+      ct.SetColorEntry( it.key(), &e );
+    }
+    dstDs->GetRasterBand( 1 )->SetColorTable( &ct );
+    dstDs->GetRasterBand( 1 )->SetColorInterpretation( GCI_PaletteIndex );
   }
-  for ( auto it = mCfg.classColors.constBegin(); it != mCfg.classColors.constEnd(); ++it )
+  dstDs->GetRasterBand( 1 )->SetNoDataValue( 0 );
+
+  // Per-band NoData from the source: any feature NoData → class 0.
+  const int B = mCfg.bandIndices.size();
+  std::vector<bool> bandHasNodata( static_cast<size_t>( B ), false );
+  std::vector<float> bandNodata( static_cast<size_t>( B ), 0.0f );
+  for ( int bi = 0; bi < B; ++bi )
   {
-    GDALColorEntry e;
-    e.c1 = static_cast<short>( it.value().red() );
-    e.c2 = static_cast<short>( it.value().green() );
-    e.c3 = static_cast<short>( it.value().blue() );
-    e.c4 = 255;
-    ct.SetColorEntry( it.key(), &e );
+    int success = 0;
+    const double nd = srcDs->GetRasterBand( mCfg.bandIndices[bi] )->GetNoDataValue( &success );
+    if ( success )
+    {
+      bandHasNodata[static_cast<size_t>( bi )] = true;
+      bandNodata[static_cast<size_t>( bi )] = static_cast<float>( nd );
+    }
   }
-  dstDs->GetRasterBand( 1 )->SetColorTable( &ct );
-  dstDs->GetRasterBand( 1 )->SetColorInterpretation( GCI_PaletteIndex );
 
   // 4. Tile-streamed predict over [x0,x1)×[y0,y1) in source pixel space;
   // write relative to the destination origin (0,0).
   constexpr int kTileSize = 256;
-  const int B = mCfg.bandIndices.size();
   const int totalTiles = std::max( 1,
     ( ( outW + kTileSize - 1 ) / kTileSize )
     * ( ( outH + kTileSize - 1 ) / kTileSize ) );
   int doneTiles = 0;
 
   std::vector<float> tileBuf( static_cast<size_t>( kTileSize ) * kTileSize );
-  std::vector<uint8_t> outBuf( static_cast<size_t>( kTileSize ) * kTileSize );
+  // Int32 write buffer; GDAL converts to the band datatype on RasterIO.
+  std::vector<int32_t> outBuf( static_cast<size_t>( kTileSize ) * kTileSize );
+  std::vector<uint8_t> pixelNodata( static_cast<size_t>( kTileSize ) * kTileSize );
 
   for ( int ty = y0; ty < y1; ty += kTileSize )
   {
@@ -352,6 +388,8 @@ bool RsClassificationTask::run()
       const int tw = std::min( kTileSize, x1 - tx );
       const int npx = th * tw;
 
+      std::fill( pixelNodata.begin(), pixelNodata.begin() + npx, 0 );
+
       cv::Mat X( npx, B, CV_32F );
       for ( int bi = 0; bi < B; ++bi )
       {
@@ -368,8 +406,15 @@ bool RsClassificationTask::run()
             QStringLiteral( "RasterIO read failed at tile (%1,%2)" ).arg( tx ).arg( ty );
           return false;
         }
+        const bool hasNd = bandHasNodata[static_cast<size_t>( bi )];
+        const float nd = bandNodata[static_cast<size_t>( bi )];
         for ( int p = 0; p < npx; ++p )
-          X.at<float>( p, bi ) = tileBuf[p];
+        {
+          const float v = tileBuf[static_cast<size_t>( p )];
+          X.at<float>( p, bi ) = v;
+          if ( std::isnan( v ) || ( hasNd && v == nd ) )
+            pixelNodata[static_cast<size_t>( p )] = 1;
+        }
       }
 
       if ( mCfg.scaler.isFitted() )
@@ -422,19 +467,27 @@ bool RsClassificationTask::run()
 
       for ( int p = 0; p < npx; ++p )
       {
+        if ( pixelNodata[static_cast<size_t>( p )] )
+        {
+          outBuf[static_cast<size_t>( p )] = 0;
+          continue;
+        }
         int v = pred.at<int>( p, 0 );
         if ( mCfg.algoName == QStringLiteral( "KMeans" ) )
         {
           v = kmeansRemap.value( v, v );
         }
-        outBuf[p] = static_cast<uint8_t>( std::clamp( v, 0, 255 ) );
+        if ( v < 0 )
+          v = 0;
+        outBuf[static_cast<size_t>( p )] = static_cast<int32_t>( v );
       }
       // Destination offsets are relative to the crop window origin.
+      // GDAL converts Int32 buffer to the band datatype (Byte / UInt16 / Int32).
       const int dstX = tx - x0;
       const int dstY = ty - y0;
       dstDs->GetRasterBand( 1 )->RasterIO(
         GF_Write, dstX, dstY, tw, th, outBuf.data(),
-        tw, th, GDT_Byte, 0, 0 );
+        tw, th, GDT_Int32, 0, 0 );
 
       ++doneTiles;
       mFb.setProgress( kProgressAfterTrain + kProgressPredictSpan * doneTiles / totalTiles );

@@ -3,6 +3,7 @@
 
 #include "app_paths.h"
 #include "dialogs/preferences_dialog.h"
+#include "processing/tools/tool_path_manager.h"
 
 #include <QApplication>
 #include <QCloseEvent>
@@ -52,6 +53,9 @@ void QgisDesktopWindow::options()
     PreferencesDialog dialog(this);
     if (dialog.exec() == QDialog::Accepted)
     {
+        ToolPathManager::instance().setGdalPath( dialog.gdalPath() );
+        ToolPathManager::instance().setOtbPath( dialog.otbPath() );
+
         // Apply theme if changed
         QString theme = dialog.theme();
         if (theme == "dark")
@@ -65,7 +69,11 @@ void QgisDesktopWindow::options()
             qApp->setPalette(QApplication::style()->standardPalette());
         }
 
-        statusBar()->showMessage(tr("Preferences saved"), 3000);
+        // Log-to-file takes effect after restart (sink is opened in main.cpp at startup).
+        if ( dialog.logToFile() )
+            statusBar()->showMessage( tr( "Preferences saved (log-to-file applies on next launch)" ), 4000 );
+        else
+            statusBar()->showMessage( tr( "Preferences saved" ), 3000 );
     }
 }
 
@@ -138,7 +146,7 @@ void QgisDesktopWindow::loadSampleData()
     {
         QMessageBox::information( this, tr( "Sample Data" ),
                                   tr( "Sample data directory not found.\n"
-                                      "Expected samples_data/ at the project root or under data/." ) );
+                                      "Expected data/samples/ at the project root." ) );
         return;
     }
 

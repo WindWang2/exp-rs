@@ -112,9 +112,8 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
            this, &QgsGeoreferencerMainWindow::recomputeFit );
   connect( mParamsPanel, &RsGeorefParamsPanel::outputPathChanged, this,
            [this]( const QString & ) {
+             // Enable/disable Apply only — workflow paths persist on close / open.
              recomputeFit();
-             // Task 11.6.2 — persist path keys when output path is set (browse/type).
-             mSession.saveWorkflow( captureWorkflowSnapshot() );
            } );
   // Task 11.5.1 — user-selected destination CRS should re-run the fit.
   connect( mParamsPanel, &RsGeorefParamsPanel::destCrsChanged,
@@ -240,20 +239,19 @@ void QgsGeoreferencerMainWindow::recomputeFit()
   const int minN = minimumGcpCountFor( method );
   mParamsPanel->setMinimumGcpCount( minN );
 
-  // Collect enabled GCPs (source + destination) in parallel vectors.
+  // Collect enabled GCPs with destinations transformed into the target CRS —
+  // same vectors residuals use (createGCPVectors). Fitting on raw
+  // destinationPoint() while residuals re-projected destinations caused a
+  // CRS mismatch. invertYAxis=true matches residual / QGIS raster CS policy.
+  const QgsCoordinateReferenceSystem dstCrs = mParamsPanel->destCrs();
+  const QgsCoordinateTransformContext transformContext;
   QVector<QgsPointXY> src;
   QVector<QgsPointXY> dst;
-  src.reserve( mGcps->size() );
-  dst.reserve( mGcps->size() );
-  for ( const QgsGcpPoint *p : std::as_const( *mGcps ) )
-  {
-    if ( !p || !p->isEnabled() )
-      continue;
-    src.push_back( p->sourcePoint() );
-    dst.push_back( p->destinationPoint() );
-  }
+  mGcps->createGCPVectors( src, dst, dstCrs, transformContext );
   const int enabledCount = src.size();
   mParamsPanel->setActualGcpCount( enabledCount );
+
+  constexpr bool kInvertYAxis = true;
 
   bool fitOk = false;
 
@@ -265,7 +263,6 @@ void QgsGeoreferencerMainWindow::recomputeFit()
   {
     double rmsBefore = -1.0;
     double rmsAfter = -1.0;
-    const QgsCoordinateReferenceSystem dstCrs = mParamsPanel->destCrs();
 
     // BEFORE — unrefined RPC
     {
@@ -280,9 +277,9 @@ void QgsGeoreferencerMainWindow::recomputeFit()
       }
       try
       {
-        if ( beforeXf && beforeXf->updateParametersFromGcps( src, dst, false ) )
+        if ( beforeXf && beforeXf->updateParametersFromGcps( src, dst, kInvertYAxis ) )
         {
-          mGcps->updateResiduals( beforeXf.get(), dstCrs, dstCrs );
+          mGcps->updateResiduals( beforeXf.get(), dstCrs, transformContext );
           rmsBefore = computeEnabledRms( mGcps );
         }
       }
@@ -304,7 +301,7 @@ void QgsGeoreferencerMainWindow::recomputeFit()
     }
     try
     {
-      fitOk = mTransform->updateParametersFromGcps( src, dst, false );
+      fitOk = mTransform->updateParametersFromGcps( src, dst, kInvertYAxis );
     }
     catch ( ... )
     {
@@ -312,7 +309,7 @@ void QgsGeoreferencerMainWindow::recomputeFit()
     }
     if ( fitOk )
     {
-      mGcps->updateResiduals( mTransform.get(), dstCrs, dstCrs );
+      mGcps->updateResiduals( mTransform.get(), dstCrs, transformContext );
       rmsAfter = computeEnabledRms( mGcps );
     }
 
@@ -345,7 +342,7 @@ void QgsGeoreferencerMainWindow::recomputeFit()
     {
       try
       {
-        fitOk = mTransform->updateParametersFromGcps( src, dst, false );
+        fitOk = mTransform->updateParametersFromGcps( src, dst, kInvertYAxis );
       }
       catch ( ... )
       {
@@ -358,7 +355,7 @@ void QgsGeoreferencerMainWindow::recomputeFit()
     {
       try
       {
-        fitOk = mTransform->updateParametersFromGcps( src, dst, false );
+        fitOk = mTransform->updateParametersFromGcps( src, dst, kInvertYAxis );
       }
       catch ( ... )
       {
@@ -376,10 +373,8 @@ void QgsGeoreferencerMainWindow::recomputeFit()
 
   if ( fitOk )
   {
-    // For the dual RPC path residuals are already from the refined model;
-    // re-run for the single-fit path (and harmless for dual).
-    const QgsCoordinateReferenceSystem dstCrs = mParamsPanel->destCrs();
-    mGcps->updateResiduals( mTransform.get(), dstCrs, dstCrs );
+    // Residuals only compute distances; do not re-fit/mutate mTransform.
+    mGcps->updateResiduals( mTransform.get(), dstCrs, transformContext );
 
     int rowId = 0;
     int included = 0;
@@ -426,6 +421,13 @@ void QgsGeoreferencerMainWindow::recomputeFit()
   }
   else
   {
+    // Drop stale residuals (e.g. dual-RPC before succeeded, after failed).
+    mGcps->clearResiduals();
+    for ( auto it = mDataPoints.begin(); it != mDataPoints.end(); ++it )
+    {
+      if ( it.value() )
+        it.value()->updateMarkers();
+    }
     mLastRms = 0.0;
     mParamsPanel->setRmsValues( mGcps->size(), enabledCount, 0, 0, 0, 0, -1 );
   }
@@ -620,6 +622,8 @@ RsGeorefSessionState::WorkflowSnapshot QgsGeoreferencerMainWindow::captureWorkfl
     s.resamplingMethod = static_cast<int>( mParamsPanel->resamplingMethod() );
     s.lastOutputPath = mParamsPanel->outputPath();
     s.lastDemPath = mParamsPanel->demPath();
+    s.lastDestCrsAuthId = mParamsPanel->destCrs().authid();
+    s.demZOffset = mParamsPanel->demZOffset();
   }
   s.lastSourcePath = mSourceRasterPath;
   s.lastRefPath = mRefRasterPath;
@@ -651,6 +655,13 @@ void QgsGeoreferencerMainWindow::applyWorkflowSnapshot( const RsGeorefSessionSta
       mParamsPanel->setOutputPath( s.lastOutputPath );
     if ( !s.lastDemPath.isEmpty() )
       mParamsPanel->setDemPath( s.lastDemPath );
+    if ( !s.lastDestCrsAuthId.isEmpty() )
+    {
+      const QgsCoordinateReferenceSystem crs( s.lastDestCrsAuthId );
+      if ( crs.isValid() )
+        mParamsPanel->setDestCrs( crs );
+    }
+    mParamsPanel->setDemZOffset( s.demZOffset );
   }
   if ( !s.lastSourcePath.isEmpty() )
     mSourceRasterPath = s.lastSourcePath;
@@ -1191,6 +1202,10 @@ void QgsGeoreferencerMainWindow::closeEvent( QCloseEvent *e )
         e->ignore();
         return;
       }
+      SICNU_LOG_INFO( SicnuLogTags::Georeferencing,
+                      QString( "Saved GCP points on close to %1" ).arg( path ) );
+      if ( statusBar() )
+        statusBar()->showMessage( tr( "已保存控制点: %1" ).arg( path ), 4000 );
       mSession.setLastPointsPath( path );
       mSession.clearDirty();
     }
@@ -1359,7 +1374,6 @@ void QgsGeoreferencerMainWindow::movePoint( const QgsPointXY &p )
 
 void QgsGeoreferencerMainWindow::releasePoint( const QgsPointXY &p )
 {
-  Q_UNUSED( p )
   const bool isSrc = ( sender() == mToolMoveSrc );
   const QgsGcpPoint::PointType type = isSrc
                                         ? QgsGcpPoint::PointType::Source
@@ -1371,20 +1385,15 @@ void QgsGeoreferencerMainWindow::releasePoint( const QgsPointXY &p )
 
   if ( mMovingPoint )
   {
-    // In-place mutation of QgsGcpPoint does not emit QgsGCPList::changed.
-    mSession.markDirty();
-    recomputeFit();
-    for ( auto it = mDataPoints.begin(); it != mDataPoints.end(); ++it )
-    {
-      if ( it.value() )
-        it.value()->updateMarkers();
-    }
-    // Refresh the GCP table (model only resets on list structural changes).
-    if ( mGcpTable )
-      mGcpTable->setGCPList( mGcps );
+    // In-place QgsGcpPoint mutation — notify list so dirty/fit/table refresh.
+    mMovingPoint = nullptr;
+    if ( mGcps )
+      mGcps->notifyPointsMutated();
   }
-
-  mMovingPoint = nullptr;
+  else
+  {
+    mMovingPoint = nullptr;
+  }
 
   QgsGeorefDataPoint *point = findDataPoint( p, type );
   if ( point )

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B3D5C"/>
+      <stop offset="55%" stop-color="#126E82"/>
+      <stop offset="100%" stop-color="#1FA2A0"/>
+    </linearGradient>
+    <linearGradient id="land" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3DDC97"/>
+      <stop offset="100%" stop-color="#2BB673"/>
+    </linearGradient>
+    <linearGradient id="water" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4FC3F7"/>
+      <stop offset="100%" stop-color="#0288D1"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  <!-- Rounded app tile -->
+  <rect x="16" y="16" width="224" height="224" rx="48" fill="url(#bg)" filter="url(#soft)"/>
+  <!-- Globe / planet -->
+  <circle cx="128" cy="128" r="70" fill="#0A2740" opacity="0.35"/>
+  <circle cx="128" cy="128" r="62" fill="none" stroke="#E8F7FF" stroke-width="3.5" opacity="0.9"/>
+  <!-- Land mass suggestion -->
+  <path d="M86 120 C96 92, 120 84, 140 96 C158 106, 168 100, 176 112 C184 124, 176 148, 160 158 C142 170, 118 168, 100 152 C88 140, 80 132, 86 120 Z"
+        fill="url(#land)" opacity="0.95"/>
+  <!-- Water wedge -->
+  <path d="M148 88 C170 98, 184 118, 186 140 C188 162, 176 180, 156 188 C168 168, 170 140, 158 116 C152 104, 148 96, 148 88 Z"
+        fill="url(#water)" opacity="0.85"/>
+  <!-- Orbit ring (satellite path) -->
+  <ellipse cx="128" cy="128" rx="92" ry="34" fill="none" stroke="#F4B942" stroke-width="3"
+           stroke-dasharray="8 7" transform="rotate(-28 128 128)" opacity="0.95"/>
+  <!-- Satellite body -->
+  <g transform="translate(196 78) rotate(18)">
+    <rect x="-10" y="-7" width="20" height="14" rx="2.5" fill="#F4B942"/>
+    <rect x="-22" y="-4" width="10" height="8" rx="1" fill="#FFD97A"/>
+    <rect x="12" y="-4" width="10" height="8" rx="1" fill="#FFD97A"/>
+    <circle cx="0" cy="0" r="2.2" fill="#0B3D5C"/>
+  </g>
+  <!-- Grid ticks (RS / analysis cue) -->
+  <g stroke="#E8F7FF" stroke-width="1.6" opacity="0.45">
+    <path d="M70 128 H186"/>
+    <path d="M128 70 V186"/>
+  </g>
+</svg>

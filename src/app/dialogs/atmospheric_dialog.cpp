@@ -1,7 +1,6 @@
 // src/app/dialogs/atmospheric_dialog.cpp — Atmospheric correction dialog
 #include "atmospheric_dialog.h"
 #include "dialog_utils.h"
-#include "processing/algorithms/atmospheric_correction.h"
 
 #include <raster/qgsrasterlayer.h>
 
@@ -12,10 +11,6 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QMessageBox>
-
-#include <qgsproject.h>
-#include <qgsmessagelog.h>
-#include <qgis.h>
 
 AtmosphericDialog::AtmosphericDialog(QWidget *parent)
     : RasterProcessingDialogBase(parent)
@@ -40,9 +35,9 @@ void AtmosphericDialog::setupUi()
     auto *formLayout = new QFormLayout(methodGroup);
 
     m_methodCombo = new QComboBox(this);
-    m_methodCombo->addItem(tr("DN to Radiance"));
-    m_methodCombo->addItem(tr("DOS1 (Dark Object Subtraction)"));
-    m_methodCombo->addItem(tr("DOS2 (with Transmittance)"));
+    m_methodCombo->addItem(tr("DN to Radiance"), QStringLiteral("dn_to_radiance"));
+    m_methodCombo->addItem(tr("DOS1 (Dark Object Subtraction)"), QStringLiteral("dos1"));
+    m_methodCombo->addItem(tr("DOS2 (with Transmittance)"), QStringLiteral("dos2"));
     connect(m_methodCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &AtmosphericDialog::onMethodChanged);
     formLayout->addRow(tr("Method:"), m_methodCombo);
@@ -102,18 +97,16 @@ void AtmosphericDialog::onMethodChanged(int index)
 void AtmosphericDialog::onRun()
 {
     const int bandNum = m_bandCombo->currentData().toInt();
-    const float gain = static_cast<float>(m_gainSpin->value());
-    const float bias = static_cast<float>(m_biasSpin->value());
-    const int method = m_methodCombo->currentIndex();
-    const float airmass = static_cast<float>(m_airmassSpin->value());
-    const QString sourcePath = m_rasterLayer->source();
-    const QString outPath = outputPath();
+    const QString method = m_methodCombo->currentData().toString();
 
-    runGdalTask([sourcePath, outPath, bandNum, method, gain, bias, airmass]() -> QString {
-        QString error;
-        if (!AtmosphericCorrection::processFile(sourcePath, outPath, bandNum, method,
-                                                gain, bias, airmass, &error))
-            return QString();
-        return outPath;
-    });
+    Json::Value params(Json::objectValue);
+    params["input"] = m_rasterLayer->source().toStdString();
+    params["output"] = outputPath().toStdString();
+    params["band"] = bandNum;
+    params["method"] = method.toStdString();
+    params["gain"] = m_gainSpin->value();
+    params["bias"] = m_biasSpin->value();
+    params["airmass"] = m_airmassSpin->value();
+
+    runOperatorTask(QStringLiteral("rs:atmospheric_correction"), params);
 }

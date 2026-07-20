@@ -15,6 +15,7 @@ public:
 
     // OTB tools
     QString otbToolPath(const QString &appName) const;
+    QString otbBundleDir() const;
     bool isOtbAvailable() const;
 
     // Set custom paths (for user configuration)

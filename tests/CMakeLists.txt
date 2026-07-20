@@ -218,6 +218,22 @@ target_link_libraries(test_mcp_server PRIVATE
   sicnu_processing
   GDAL::GDAL
 )
+if(TARGET sicnu_operators)
+  target_link_libraries(test_mcp_server PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_mcp_server PRIVATE jsoncpp)
+elseif(PkgConfig_FOUND)
+  pkg_check_modules(JSONCPP QUIET jsoncpp)
+  if(JSONCPP_FOUND)
+    target_include_directories(test_mcp_server PRIVATE ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(test_mcp_server PRIVATE ${JSONCPP_LIBRARIES})
+  else()
+    target_link_libraries(test_mcp_server PRIVATE jsoncpp)
+  endif()
+else()
+  target_link_libraries(test_mcp_server PRIVATE jsoncpp)
+endif()
 target_include_directories(test_mcp_server PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
@@ -1866,6 +1882,85 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
     ${CMAKE_BINARY_DIR}
   )
   sicnu_discover_tests(test_obia_segmentation)
+endif()
+
+# ---------------------------------------------------------------------------
+# Orphan tests: pipeline runner + RS/OpenCV operators (link only when deps exist)
+# ---------------------------------------------------------------------------
+if(TARGET sicnu_operators)
+  # Pipeline runner (CLI) — needs runner sources + operators + jsoncpp
+  add_executable(test_pipeline_runner
+    test_pipeline_runner.cpp
+    ${CMAKE_SOURCE_DIR}/src/cli/rs_pipeline_runner.cpp
+  )
+  target_link_libraries(test_pipeline_runner PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_operators
+    sicnu_processing
+    GDAL::GDAL
+  )
+  target_include_directories(test_pipeline_runner PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  if(TARGET jsoncpp)
+    target_link_libraries(test_pipeline_runner PRIVATE jsoncpp)
+  elseif(JSONCPP_LIBRARIES)
+    target_include_directories(test_pipeline_runner PRIVATE ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(test_pipeline_runner PRIVATE ${JSONCPP_LIBRARIES})
+  else()
+    target_link_libraries(test_pipeline_runner PRIVATE jsoncpp)
+  endif()
+  sicnu_discover_tests(test_pipeline_runner)
+
+  # RSOperator framework unit tests (no OpenCV required)
+  add_executable(test_rs_operator test_rs_operator.cpp)
+  target_link_libraries(test_rs_operator PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_operators
+  )
+  target_include_directories(test_rs_operator PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  if(TARGET jsoncpp)
+    target_link_libraries(test_rs_operator PRIVATE jsoncpp)
+  elseif(JSONCPP_LIBRARIES)
+    target_include_directories(test_rs_operator PRIVATE ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(test_rs_operator PRIVATE ${JSONCPP_LIBRARIES})
+  else()
+    target_link_libraries(test_rs_operator PRIVATE jsoncpp)
+  endif()
+  sicnu_discover_tests(test_rs_operator)
+
+  # OpenCV-backed operators (only when OpenCV operators were compiled in)
+  if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
+    add_executable(test_opencv_operators test_opencv_operators.cpp)
+    target_link_libraries(test_opencv_operators PRIVATE
+      Catch2::Catch2WithMain
+      Qt6::Core
+      sicnu_operators
+      sicnu_processing
+      GDAL::GDAL
+      ${OpenCV_LIBS}
+    )
+    target_include_directories(test_opencv_operators PRIVATE
+      ${CMAKE_SOURCE_DIR}/src
+      ${CMAKE_BINARY_DIR}
+      ${OpenCV_INCLUDE_DIRS}
+    )
+    if(TARGET jsoncpp)
+      target_link_libraries(test_opencv_operators PRIVATE jsoncpp)
+    elseif(JSONCPP_LIBRARIES)
+      target_include_directories(test_opencv_operators PRIVATE ${JSONCPP_INCLUDE_DIRS})
+      target_link_libraries(test_opencv_operators PRIVATE ${JSONCPP_LIBRARIES})
+    else()
+      target_link_libraries(test_opencv_operators PRIVATE jsoncpp)
+    endif()
+    sicnu_discover_tests(test_opencv_operators)
+  endif()
 endif()
 
 # Phase 10B.3 — Simple segmenter fallback tests

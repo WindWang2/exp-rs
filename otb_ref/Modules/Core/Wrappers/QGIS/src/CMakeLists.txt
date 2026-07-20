@@ -56,13 +56,24 @@ foreach(app_name ${app_names})
   file(APPEND "${QGIS_APP_LIST_FILE}" "${app_name}\n")
 endforeach()
 
-# call otbQgisDescriptor with the app list, the location to create the files 
-add_custom_command(OUTPUT "${QGIS_APP_DESCRIPTOR_PATH}/algs.txt"
-  COMMAND ${generate_descriptor_cmd}
-  "${QGIS_APP_LIST_FILE}" "${app_location}" "./${OTB_INSTALL_DATA_DIR}/description/"
-  WORKING_DIRECTORY ${OTB_BINARY_DIR}
-  COMMENT "Generate gqis descriptor files"
-  VERBATIM)
+# call otbQgisDescriptor with the app list, the location to create the files.
+# SICNU/OTB_USE_QT=OFF: otbQgisDescriptor often aborts when loading app plugins
+# outside a full OTB install env; descriptors are only for QGIS Processing and
+# are not required for otbcli_* launchers used by SICNU RSOperators.
+if(OTB_USE_QT)
+  add_custom_command(OUTPUT "${QGIS_APP_DESCRIPTOR_PATH}/algs.txt"
+    COMMAND ${generate_descriptor_cmd}
+    "${QGIS_APP_LIST_FILE}" "${app_location}" "./${OTB_INSTALL_DATA_DIR}/description/"
+    WORKING_DIRECTORY ${OTB_BINARY_DIR}
+    COMMENT "Generate QGIS descriptor files"
+    VERBATIM)
+else()
+  add_custom_command(OUTPUT "${QGIS_APP_DESCRIPTOR_PATH}/algs.txt"
+    COMMAND "${CMAKE_COMMAND}" "-E" "make_directory" "${QGIS_APP_DESCRIPTOR_PATH}"
+    COMMAND "${CMAKE_COMMAND}" "-E" "touch" "${QGIS_APP_DESCRIPTOR_PATH}/algs.txt"
+    COMMENT "Skipping QGIS descriptor generation (OTB_USE_QT=OFF)"
+    VERBATIM)
+endif()
 
 add_custom_target(generate_descriptors DEPENDS "${QGIS_APP_DESCRIPTOR_PATH}/algs.txt")
 add_dependencies(${otb-module}-all generate_descriptors)

@@ -3,17 +3,13 @@
 
 #include "raster_processing_dialog_base.h"
 
-#include <memory>
-#include <vector>
-
 class QComboBox;
 class QLabel;
 class QgsRasterLayer;
 
 /**
  * Dialog for Spectral Index calculations.
- * Supports NDVI, EVI, SAVI, NDWI, NDBI, MNDWI indices
- * using the SpectralIndices algorithm library.
+ * Supports NDVI, EVI, SAVI, NDWI, NDBI, MNDWI via the rs:spectral_index operator.
  */
 class SpectralIndexDialog : public RasterProcessingDialogBase
 {
@@ -22,11 +18,12 @@ class SpectralIndexDialog : public RasterProcessingDialogBase
 public:
     explicit SpectralIndexDialog(QWidget *parent = nullptr);
 
+    void setRasterLayer(QgsRasterLayer *layer) override;
+
 protected:
     QString toolName() const override { return QStringLiteral("spectral_index"); }
     QString dialogTitle() const override { return tr("Spectral Index"); }
     void onRun() override;
-    void cleanupRunResources() override;
 
 private slots:
     void onIndexChanged(int index);
@@ -48,7 +45,4 @@ private:
     QLabel *m_greenLabel = nullptr;
     QLabel *m_blueLabel = nullptr;
     QLabel *m_swirLabel = nullptr;
-
-    QStringList m_tempFiles;
-    std::vector<std::unique_ptr<QgsRasterLayer>> m_tempLayers;
 };

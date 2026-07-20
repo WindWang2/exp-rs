@@ -10,6 +10,7 @@
 #include <processing/providers/otb_tools/provider.h>
 #include <processing/providers/qgis_algorithms/provider.h>
 #include <processing/providers/generic_cli/provider.h>
+#include <processing/tools/cli_tool_discovery.h>
 
 #include "app/app_paths.h"
 
@@ -58,6 +59,34 @@ TEST_CASE( "Toolbox manifest category coverage", "[processing][coverage]" )
         const int pct = required.isEmpty() ? 100 : ( found * 100 / required.size() );
         INFO( catName.toStdString() << " coverage: " << found << "/" << required.size() );
         CHECK( pct >= targetPct );
+    }
+}
+
+TEST_CASE( "Discovered GDAL and OTB CLI tools registered", "[processing][coverage][discovery]" )
+{
+    ensureProvidersRegistered();
+    auto *registry = QgsApplication::processingRegistry();
+
+    const QStringList otbApps = CliToolDiscovery::discoverOtbApplicationNames();
+    INFO( "Discovered OTB apps: " << otbApps.size() );
+    CHECK( otbApps.size() >= 1 );
+
+    for ( const QString &appName : otbApps )
+    {
+        const QString algoId = QStringLiteral( "otb_tools:" ) + CliToolDiscovery::otbAlgorithmId( appName );
+        INFO( "Missing discovered OTB: " << algoId.toStdString() );
+        CHECK( registry->algorithmById( algoId ) != nullptr );
+    }
+
+    const QStringList gdalTools = CliToolDiscovery::discoverGdalToolNames();
+    INFO( "Discovered GDAL tools: " << gdalTools.size() );
+    CHECK( gdalTools.size() >= 1 );
+
+    for ( const QString &toolName : gdalTools )
+    {
+        const QString algoId = QStringLiteral( "gdal_tools:" ) + CliToolDiscovery::gdalAlgorithmId( toolName );
+        INFO( "Missing discovered GDAL: " << algoId.toStdString() );
+        CHECK( registry->algorithmById( algoId ) != nullptr );
     }
 }
 

@@ -50,7 +50,7 @@ std::vector<std::map<std::string, std::string> > CosmoImageMetadataInterface::sa
   std::vector<std::map<std::string, std::string> > metadataBands;
   GDALDataset * dataset = static_cast<GDALDataset*>(GDALOpen(file.c_str(), GA_ReadOnly));
   // Metadata for dataset
-  char** papszMetadata = dataset->GetMetadata(nullptr);
+  CSLConstList papszMetadata = dataset->GetMetadata(nullptr);
   for (int cpt = 0; papszMetadata[cpt] != nullptr; ++cpt)
     {
     std::string key, value;

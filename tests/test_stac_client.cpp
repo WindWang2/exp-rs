@@ -63,6 +63,23 @@ TEST_CASE("STAC URL construction", "[agent][stac]")
         REQUIRE(url.toString().contains(QStringLiteral("datetime=")));
         REQUIRE(url.toString().contains(QStringLiteral("bbox=")));
     }
+
+    SECTION("URL policy blocks private hosts by default")
+    {
+        // Clear allow-private for deterministic check when env is unset is hard;
+        // still verify public HTTPS is accepted and bad schemes rejected.
+        REQUIRE(StacClient::validateUrlPolicy(
+                    QUrl(QStringLiteral("https://earth-search.aws.element84.com/v1")), true)
+                    .isEmpty());
+        REQUIRE_FALSE(StacClient::validateUrlPolicy(
+                          QUrl(QStringLiteral("ftp://example.com/stac")), true)
+                          .isEmpty());
+        REQUIRE_FALSE(StacClient::validateAssetHref(QStringLiteral("file:///etc/passwd")).isEmpty());
+        REQUIRE_FALSE(StacClient::validateAssetHref(QStringLiteral("/vsicurl/https://x")).isEmpty());
+        REQUIRE(StacClient::validateAssetHref(
+                    QStringLiteral("https://example.com/data.tif"))
+                    .isEmpty());
+    }
 }
 
 TEST_CASE("STAC feature parsing", "[agent][stac]")

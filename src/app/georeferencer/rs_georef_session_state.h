@@ -22,6 +22,10 @@ class RsGeorefSessionState
       QString lastOutputPath;
       QString lastDemPath;
       QString lastPointsPath;
+      /// Destination CRS auth id (e.g. "EPSG:32650"); empty if unset.
+      QString lastDestCrsAuthId;
+      /// DEM height offset (metres) for RPC; default 0.
+      double demZOffset = 0.0;
       bool syncZoom = true;
     };
 

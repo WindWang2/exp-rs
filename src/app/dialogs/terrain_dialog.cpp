@@ -2,10 +2,6 @@
 #include "terrain_dialog.h"
 #include "dialog_utils.h"
 
-#include "processing/algorithms/terrain_analysis.h"
-#include "processing/gdal/gdal_dataset_wrapper.h"
-#include "processing/gdal/gdal_safe_call.h"
-
 #include <qgsrasterlayer.h>
 #include <qgsproject.h>
 
@@ -16,16 +12,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QVBoxLayout>
-#include <QApplication>
-
-#include <gdal.h>
-#include <gdal_priv.h>
-#include <QtConcurrent>
-#include <cpl_error.h>
-#include <cpl_conv.h>
-#include <cpl_string.h>
-
-#include "qgsogrutils.h"
+#include <QFileInfo>
 
 TerrainDialog::TerrainDialog( QWidget *parent )
     : RasterProcessingDialogBase( parent )
@@ -131,104 +118,32 @@ void TerrainDialog::onRun()
     QString outPath = outputPath();
     if ( outPath.isEmpty() )
     {
-        // Auto-generate output path
-        QString inputPath = rl->source();
-        QString analysisType = mAnalysisCombo->currentData().toString();
+        const QString inputPath = rl->source();
+        const QString analysisType = mAnalysisCombo->currentData().toString();
         outPath = QFileInfo( inputPath ).path() + "/" + QFileInfo( inputPath ).baseName()
                      + "_" + analysisType + ".tif";
         m_outputEdit->setText( outPath );
     }
 
-    // Disable run button during analysis
-    m_runButton->setEnabled( false );
-    mStatusLabel->setText(tr("Processing..."));
-    QApplication::setOverrideCursor( Qt::WaitCursor );
+    if ( mStatusLabel )
+        mStatusLabel->setText( tr( "Processing..." ) );
 
-    // Run analysis asynchronously using QtConcurrent
-    if ( !mWatcher ) {
-        mWatcher = new QFutureWatcher<bool>( this );
-        connect( mWatcher, &QFutureWatcher<bool>::finished, this, &TerrainDialog::onAnalysisFinished );
-    }
+    Json::Value params( Json::objectValue );
+    params["input"] = rl->source().toStdString();
+    params["output"] = outPath.toStdString();
+    params["product"] = mAnalysisCombo->currentData().toString().toStdString();
+    params["cellSize"] = mCellSizeSpin->value();
+    params["sunAzimuth"] = mSunAzimuthSpin->value();
+    params["sunElevation"] = mSunElevationSpin->value();
+    params["nodata"] = -9999.0;
 
-    // Capture parameters for the async task
-    QString sourcePath = rl->source();
-    QString analysisType = mAnalysisCombo->currentData().toString();
-    float cellSize = static_cast<float>( mCellSizeSpin->value() );
-    float sunAzimuth = static_cast<float>( mSunAzimuthSpin->value() );
-    float sunElevation = static_cast<float>( mSunElevationSpin->value() );
-
-    QFuture<bool> future = QtConcurrent::run( [sourcePath, outPath, analysisType, cellSize,
-                                                sunAzimuth, sunElevation]() -> bool {
-    try {
-        // Open source raster
-        gdal::dataset_unique_ptr ds( GDALOpen( sourcePath.toUtf8().constData(), GA_ReadOnly ) );
-        if ( !ds ) return false;
-
-        const int w = GDALGetRasterXSize( ds.get() );
-        const int h = GDALGetRasterYSize( ds.get() );
-
-        GDALRasterBandH band = GDALGetRasterBand( ds.get(), 1 );
-        if ( !band ) return false;
-
-        int hasNodata = 0;
-        float nodata = static_cast<float>( GDALGetRasterNoDataValue( band, &hasNodata ) );
-        if ( !hasNodata ) nodata = -9999.0f;
-
-        // Read DEM data
-        std::vector<float> dem( w * h );
-        GDAL_SAFE_CALL( GDALRasterIO( band, GF_Read, 0, 0, w, h, dem.data(), w, h, GDT_Float32, 0, 0 ),
-                        "Failed to read DEM data" );
-
-        // Run analysis
-        std::vector<float> out( w * h );
-        bool ok = false;
-        if ( analysisType == "slope" )
-            ok = TerrainAnalysis::slope( dem.data(), out.data(), w, h, cellSize, nodata );
-        else if ( analysisType == "aspect" )
-            ok = TerrainAnalysis::aspect( dem.data(), out.data(), w, h, cellSize, nodata );
-        else if ( analysisType == "hillshade" )
-            ok = TerrainAnalysis::hillshade( dem.data(), out.data(), w, h, cellSize, nodata, sunAzimuth, sunElevation );
-        else if ( analysisType == "roughness" )
-            ok = TerrainAnalysis::roughness( dem.data(), out.data(), w, h, nodata );
-        else if ( analysisType == "tri" )
-            ok = TerrainAnalysis::tri( dem.data(), out.data(), w, h, nodata );
-        else if ( analysisType == "tpi" )
-            ok = TerrainAnalysis::tpi( dem.data(), out.data(), w, h, nodata );
-
-        if ( !ok ) return false;
-
-        // Write output using shared utility
-        GeoInfo geo = extractGeoInfo( ds.get() );
-        std::vector<std::vector<float>> bands = { out };
-        QString error;
-        if ( !writeGdalOutput( outPath, w, h, bands, geo.geoTransform, geo.projection, &error ) )
-            return false;
-
-        return true;
-    } catch ( const std::runtime_error & ) {
-        return false;
-    }
-    } );
-
-    mWatcher->setFuture( future );
+    runOperatorTask( QStringLiteral( "rs:terrain_analysis" ), params );
 }
 
 void TerrainDialog::onAnalysisFinished()
 {
-    QApplication::restoreOverrideCursor();
-    m_runButton->setEnabled( true );
-
-    if ( !mWatcher ) return;
-
-    bool ok = mWatcher->result();
-    if ( ok )
-    {
-        mStatusLabel->setText(tr("Completed!"));
-        handleCompleted(outputPath());
-    }
-    else
-    {
-        mStatusLabel->setText(tr("Failed!"));
-        handleFailed(tr("Terrain analysis failed."));
-    }
+    // Legacy slot kept for binary compatibility of any external connections;
+    // terrain now uses runOperatorTask / base-class completion handlers.
+    if ( mStatusLabel )
+        mStatusLabel->setText( tr( "Ready" ) );
 }

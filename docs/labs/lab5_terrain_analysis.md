@@ -6,7 +6,7 @@
 3. 学会利用地形因子进行地貌分析
 
 ## 实验数据
-- `samples_data/dem_sample.tif` (数字高程模型)
+- `data/samples/dem_sample.tif` (数字高程模型)
 
 ## 实验步骤
 

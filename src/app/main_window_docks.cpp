@@ -6,6 +6,7 @@
 #include "log_panel.h"
 #include "widgets/spectral_profile_widget.h"
 #include "widgets/guided_workflow_widget.h"
+#include "widgets/histogram_stretch_widget.h"
 
 #include <QVBoxLayout>
 #include <QMenu>
@@ -27,6 +28,7 @@
 
 #ifdef SICNU_EMBED_PYTHON
 #include "python/sicnu_python_console.h"
+#include "widgets/python_script_editor.h"
 #endif
 
 void QgisDesktopWindow::setupDockWidgets()
@@ -60,15 +62,18 @@ void QgisDesktopWindow::setupDockWidgets()
     connect(m_browserDock, &QgsBrowserDockWidget::openFile, this, [this](const QString &fileName, const QString &fileTypeHint) {
         Q_UNUSED(fileTypeHint);
         if (fileName.isEmpty()) return;
-        QString suffix = QFileInfo(fileName).suffix().toLower();
-        if (suffix == "tif" || suffix == "tiff" || suffix == "img" ||
-            suffix == "jp2" || suffix == "png" || suffix == "jpg" || suffix == "asc")
-            m_layerManager->loadRasterLayer(fileName);
-        else if (suffix == "shp" || suffix == "gpkg" || suffix == "geojson" ||
-                 suffix == "kml" || suffix == "gml")
-            m_layerManager->loadVectorLayer(fileName);
+        if ( LayerManager::isLikelyRasterPath( fileName ) )
+            m_layerManager->loadRasterLayer( fileName );
         else
-            statusBar()->showMessage(tr("Unsupported file type: %1").arg(suffix), 3000);
+        {
+            const QString suffix = QFileInfo( fileName ).suffix().toLower();
+            if ( suffix == QLatin1String( "shp" ) || suffix == QLatin1String( "gpkg" )
+                 || suffix == QLatin1String( "geojson" ) || suffix == QLatin1String( "kml" )
+                 || suffix == QLatin1String( "gml" ) )
+                m_layerManager->loadVectorLayer( fileName );
+            else
+                statusBar()->showMessage( tr( "Unsupported file type: %1" ).arg( suffix.isEmpty() ? fileName : suffix ), 3000 );
+        }
     });
 
     // Tabify the left dock widgets
@@ -114,6 +119,14 @@ void QgisDesktopWindow::setupDockWidgets()
     m_pythonDock->setWidget(new QWidget(m_pythonDock)); // Placeholder
     addDockWidget(Qt::BottomDockWidgetArea, m_pythonDock);
     m_pythonDock->hide(); // Hidden until first use
+
+    // Python Script Editor Dock (lazy-loaded on first use)
+    m_pythonScriptEditorDock = new QgsDockWidget(tr("Python Script Editor"), this);
+    m_pythonScriptEditorDock->setObjectName("pythonScriptEditorDock");
+    m_pythonScriptEditorDock->setWidget(new QWidget(m_pythonScriptEditorDock)); // Placeholder
+    addDockWidget(Qt::BottomDockWidgetArea, m_pythonScriptEditorDock);
+    tabifyDockWidget(m_pythonDock, m_pythonScriptEditorDock);
+    m_pythonScriptEditorDock->hide(); // Hidden until first use
 #endif
 
     // Double-click on algorithm in toolbox opens execution dialog
@@ -200,6 +213,16 @@ void QgisDesktopWindow::setupDockWidgets()
     addDockWidget(Qt::RightDockWidgetArea, m_spectralDock);
     tabifyDockWidget(m_identifyDock, m_spectralDock);
 
+    // Histogram Stretch Panel (Right, tabified with Spectral Profile)
+    m_histogramStretchDock = new QgsDockWidget(tr("Histogram Stretch"), this);
+    m_histogramStretchDock->setObjectName("histogramStretchDock");
+    m_histogramStretchDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+
+    m_histogramStretch = new HistogramStretchWidget(m_histogramStretchDock);
+    m_histogramStretchDock->setWidget(m_histogramStretch);
+    addDockWidget(Qt::RightDockWidgetArea, m_histogramStretchDock);
+    tabifyDockWidget(m_spectralDock, m_histogramStretchDock);
+
     // Log Panel (Bottom, tabified)
     m_logDock = new LogPanel(this);
     m_logDock->setObjectName("logDock");
@@ -223,6 +246,7 @@ void QgisDesktopWindow::setupDockWidgets()
         m_windowMenu->addAction(m_overviewDock->toggleViewAction());
         m_windowMenu->addAction(m_identifyDock->toggleViewAction());
         m_windowMenu->addAction(m_spectralDock->toggleViewAction());
+        m_windowMenu->addAction(m_histogramStretchDock->toggleViewAction());
         m_windowMenu->addAction(m_logDock->toggleViewAction());
         m_windowMenu->addAction(m_workflowDock->toggleViewAction());
         m_windowMenu->addSeparator();
@@ -240,6 +264,24 @@ void QgisDesktopWindow::setupDockWidgets()
             }
             m_pythonDock->show();
             m_pythonDock->raise();
+        });
+
+        // Python Script Editor (lazy-loaded)
+        QAction *scriptEditorAction = m_windowMenu->addAction(tr("Python Script Editor"));
+        scriptEditorAction->setCheckable(true);
+        connect(scriptEditorAction, &QAction::triggered, this, [this]() {
+            if (!m_pythonScriptEditor) {
+                statusBar()->showMessage(tr("Initializing Python script editor..."));
+                m_pythonScriptEditor = std::make_unique<Sicnu::PythonScriptEditor>(m_pythonScriptEditorDock);
+                connect(m_pythonScriptEditor.get(), &Sicnu::PythonScriptEditor::statusMessage,
+                        this, [this](const QString &message) {
+                            statusBar()->showMessage(message, 3000);
+                        });
+                m_pythonScriptEditorDock->setWidget(m_pythonScriptEditor.get());
+                statusBar()->showMessage(tr("Python script editor ready"), 3000);
+            }
+            m_pythonScriptEditorDock->show();
+            m_pythonScriptEditorDock->raise();
         });
 
         m_windowMenu->addSeparator();

@@ -1,5 +1,6 @@
 // rs_cross_validation.cpp — Phase 10A.1.2 implementation.
 #include "rs_cross_validation.h"
+#include "rs_feature_scaler.h"
 #include "sicnu_logging.h"
 
 #include <QHash>
@@ -11,7 +12,9 @@
 RsCrossValidation::Result
 RsCrossValidation::kFold( const cv::Mat &X, const cv::Mat &y,
                           std::function<std::unique_ptr<RsClassifierBackend>()> factory,
-                          int k )
+                          int k,
+                          bool scaleFeatures,
+                          std::function<bool()> isCanceled )
 {
   Result r;
   if ( X.empty() || y.empty() || X.rows != y.rows )
@@ -33,8 +36,8 @@ RsCrossValidation::kFold( const cv::Mat &X, const cv::Mat &y,
     return r;
   }
 
-  SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Starting %1-fold cross-validation: %2 samples, %3 features" )
-      .arg( k ).arg( X.rows ).arg( X.cols ) );
+  SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Starting %1-fold cross-validation: %2 samples, %3 features, scale=%4" )
+      .arg( k ).arg( X.rows ).arg( X.cols ).arg( scaleFeatures ? "on" : "off" ) );
 
   // Group sample indices by class label.
   QHash<int, QVector<int>> byClass;
@@ -76,6 +79,14 @@ RsCrossValidation::kFold( const cv::Mat &X, const cv::Mat &y,
 
   for ( int fi = 0; fi < k; ++fi )
   {
+    if ( isCanceled && isCanceled() )
+    {
+      SICNU_LOG_INFO( SicnuLogTags::Classification,
+                      QString( "Cross-validation cancelled before fold %1" ).arg( fi + 1 ) );
+      r.errorMessage = QStringLiteral( "Cancelled" );
+      return r;
+    }
+
     QVector<int> trainIdx, testIdx;
     testIdx = foldTest[fi];
     for ( int fj = 0; fj < k; ++fj )
@@ -105,6 +116,18 @@ RsCrossValidation::kFold( const cv::Mat &X, const cv::Mat &y,
     {
       X.row( testIdx[i] ).copyTo( testX.row( i ) );
       testY.at<int>( i, 0 ) = y.at<int>( testIdx[i], 0 );
+    }
+
+    // Mirror Apply: fit scaler on fold train only, transform train + test.
+    if ( scaleFeatures )
+    {
+      RsFeatureScaler scaler;
+      if ( !scaler.fit( trainX ) )
+        continue;
+      trainX = scaler.transform( trainX );
+      testX = scaler.transform( testX );
+      if ( trainX.empty() || testX.empty() )
+        continue;
     }
 
     auto backend = factory();

@@ -407,6 +407,12 @@ double RsGeorefParamsPanel::demZOffset() const
   return mDemZOffset ? mDemZOffset->value() : 0.0;
 }
 
+void RsGeorefParamsPanel::setDemZOffset( double z )
+{
+  if ( mDemZOffset )
+    mDemZOffset->setValue( z );
+}
+
 void RsGeorefParamsPanel::setRpcMode( bool on )
 {
   if ( mDemSection )

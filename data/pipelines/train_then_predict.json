@@ -1,0 +1,27 @@
+{
+  "name": "train_then_predict",
+  "description": "Train SVM, save model, re-apply with modelIn (predict-only)",
+  "steps": [
+    {
+      "operator": "rs:supervised_classification",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "training": "data/samples/training_samples.shp",
+        "output": "/tmp/sicnu_train_map.tif",
+        "method": "svm",
+        "classField": "class_id",
+        "modelOut": "/tmp/sicnu_landcover_svm.xml",
+        "maxSamplesPerClass": 2000
+      }
+    },
+    {
+      "operator": "rs:supervised_classification",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "output": "/tmp/sicnu_predict_only.tif",
+        "method": "svm",
+        "modelIn": "/tmp/sicnu_landcover_svm.xml"
+      }
+    }
+  ]
+}

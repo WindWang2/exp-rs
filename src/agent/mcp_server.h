@@ -77,7 +77,7 @@ private:
     void sendNotification(const QString &method, const QVariantMap &params);
 
 protected:
-    // MCP Methods
+    // MCP Methods — QgsProcessing algorithms (legacy Agent surface)
     QVariantMap handleListAlgorithms();
     QVariantMap handleGetAlgorithmSchema(const QString &algorithmId);
     QVariantMap handleExecuteAlgorithm(const QString &algorithmId, const QVariantMap &parameters);
@@ -86,9 +86,22 @@ protected:
     QVariantMap handleListLayers();
     QVariantMap handleDescribeDataset(const QString &layerId);
 
+    // MCP Methods — RSOperator kernel (preferred Agent surface)
+    QVariantMap handleListOperators();
+    QVariantMap handleGetOperatorSchema(const QString &operatorId);
+    QVariantMap handleExecuteOperator(const QString &operatorId, const QVariantMap &parameters);
+
 private:
+    /// Allow-list: rs:, gdal:, gdal_tools:, otb:; custom_tools: only with SICNU_MCP_TRUST_CUSTOM_TOOLS=1
+    static bool isAlgorithmIdAllowed(const QString &algorithmId, QString *reason = nullptr);
+    /// Same allow-list for operator ids (rs:, gdal:, otb:, opencv: prefix family).
+    static bool isOperatorIdAllowed(const QString &operatorId, QString *reason = nullptr);
+    /// When SICNU_MCP_WORKSPACE is set, reject absolute string params outside that root.
+    static bool validateWorkspacePaths(const QVariantMap &parameters, QString *reason = nullptr);
+
     StdinReader *mReader = nullptr;
     QMap<QString, std::shared_ptr<AlgorithmExecution>> mExecutions;
+    QMap<QString, std::shared_ptr<std::atomic<bool>>> mOperatorCancelFlags;
     QMutex mMutex;
     int mExecutionCounter = 0;
     QCoreApplication *mApp = nullptr;

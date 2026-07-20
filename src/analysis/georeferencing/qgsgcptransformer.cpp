@@ -141,6 +141,8 @@ std::unique_ptr<QgsGcpTransformerInterface> QgsLinearGeorefTransform::clone() co
 
 bool QgsLinearGeorefTransform::updateParametersFromGcps( const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates, bool invertYAxis )
 {
+  if ( sourceCoordinates.size() != destinationCoordinates.size() )
+    return false;
   if ( destinationCoordinates.size() < minimumGcpCount() )
     return false;
 
@@ -212,6 +214,8 @@ int QgsLinearGeorefTransform::linearTransform( void *pTransformerArg, int bDstTo
 //
 bool QgsHelmertGeorefTransform::updateParametersFromGcps( const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates, bool invertYAxis )
 {
+  if ( sourceCoordinates.size() != destinationCoordinates.size() )
+    return false;
   if ( destinationCoordinates.size() < minimumGcpCount() )
     return false;
 

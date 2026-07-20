@@ -78,8 +78,8 @@ bool QgisDesktopWindow::checkUnsavedChanges()
         }
     }
 
-    // Check for unsaved project
-    if (QgsProject::instance()->isDirty() && !QgsProject::instance()->fileName().isEmpty())
+    // Check for unsaved project (prompt even when no path yet — unsaved new projects)
+    if (QgsProject::instance()->isDirty())
     {
         int res = QMessageBox::question(this, tr("Save Project"),
             tr("The project has been modified. Save changes?"),
@@ -87,7 +87,19 @@ bool QgisDesktopWindow::checkUnsavedChanges()
         if (res == QMessageBox::Cancel)
             return false;
         if (res == QMessageBox::Save)
-            QgsProject::instance()->write();
+        {
+            // Empty path → Save As; if user cancels Save As, abort the close/action.
+            if (QgsProject::instance()->fileName().isEmpty())
+            {
+                saveProjectAs();
+                if (QgsProject::instance()->fileName().isEmpty())
+                    return false;
+            }
+            else
+            {
+                QgsProject::instance()->write();
+            }
+        }
     }
 
     return true;

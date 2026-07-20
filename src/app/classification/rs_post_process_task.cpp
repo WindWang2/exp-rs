@@ -181,7 +181,9 @@ bool RsPostProcessTask::run()
   if ( mCfg.runMajority )
   {
     cv::Mat out;
-    if ( !RsPostProcess::majorityFilter( labels, out, mCfg.majorityKernel, &err ) )
+    if ( !RsPostProcess::majorityFilter(
+           labels, out, mCfg.majorityKernel, &err,
+           [this]() { return mFb.isCanceled(); } ) )
     {
       mResult.errorMessage = err.isEmpty()
                                ? QStringLiteral( "Majority filter failed" )

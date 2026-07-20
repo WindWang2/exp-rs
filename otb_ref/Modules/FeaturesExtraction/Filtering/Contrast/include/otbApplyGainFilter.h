@@ -60,7 +60,7 @@ public:
   /** Method for creation through the object factory. */
   itkNewMacro(Self);
   /** Run-time type information (and related methods). */
-  itkTypeMacro(ComputeHistoFilter, ImageToImageFilter);
+  itkTypeMacro(ApplyGainFilter, ImageToImageFilter);
 
   /** Get/Set macro to get/set the nodata value */
   itkSetMacro(NoData, InputPixelType);

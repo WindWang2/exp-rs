@@ -1,5 +1,7 @@
 // src/processing/providers/gdal_tools/provider.cpp
 #include "provider.h"
+#include "processing/providers/generic_cli/generic_cli_algorithm.h"
+#include "processing/tools/cli_tool_discovery.h"
 #include "algorithms/gdal_translate.h"
 #include "algorithms/gdal_warp.h"
 #include "algorithms/gdal_info.h"
@@ -78,4 +80,11 @@ void GdalToolsProvider::loadAlgorithms()
 
     // Vector Information
     addAlgorithm(new OgrInfoAlgorithm());
+
+    // Auto-discovered GDAL/OGR CLI tools not covered by handcrafted wrappers
+    for ( const QString &toolName : CliToolDiscovery::discoverGdalToolNames() )
+    {
+        addAlgorithm( new GenericCliAlgorithm(
+            CliToolDiscovery::makeGdalDiscoveredConfig( toolName ), id() ) );
+    }
 }

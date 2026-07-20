@@ -1,6 +1,5 @@
 // src/app/dialogs/pca_dialog.cpp
 #include "pca_dialog.h"
-#include "processing/algorithms/image_enhancement.h"
 
 #include <raster/qgsrasterlayer.h>
 
@@ -9,9 +8,6 @@
 #include <QLabel>
 #include <QSpinBox>
 #include <QMessageBox>
-
-#include <qgsmessagelog.h>
-#include <qgis.h>
 
 PcaDialog::PcaDialog(QWidget *parent)
     : RasterProcessingDialogBase(parent)
@@ -51,13 +47,10 @@ void PcaDialog::onRun()
         return;
     }
 
-    const QString sourcePath = m_rasterLayer->source();
-    const QString outPath = outputPath();
+    Json::Value params(Json::objectValue);
+    params["input"] = m_rasterLayer->source().toStdString();
+    params["output"] = outputPath().toStdString();
+    params["numComponents"] = numComponents;
 
-    runGdalTask([sourcePath, outPath, numComponents]() -> QString {
-        QString error;
-        if (!ImageEnhancement::processPcaFile(sourcePath, outPath, numComponents, &error))
-            return QString();
-        return outPath;
-    });
+    runOperatorTask(QStringLiteral("rs:pca"), params);
 }

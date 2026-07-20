@@ -15,12 +15,12 @@ RsClassifierKMeans::RsClassifierKMeans( int k )
 
 // K-Means convergence and initialisation parameters.
 // maxIter=100 — sufficient for convergence on typical RS pixel datasets.
-// eps=1.0 — cluster-centre shift tolerance (in pixel-value space with
-//           reflectance scaled to [0,1] or [0,10000], 1.0 is tight enough).
+// eps=1e-4 — centre-shift tolerance for z-score / unit-variance features
+//            (Apply path standardises bands before fit). Still fine on raw DN.
 // attempts=3 — run the algorithm 3 times with different seeds and keep the
 //              best compactness result, balancing quality vs. runtime.
 static constexpr int kKMeansMaxIter   = 100;
-static constexpr double kKMeansEps    = 1.0;
+static constexpr double kKMeansEps    = 1e-4;
 static constexpr int kKMeansAttempts  = 3;
 
 bool RsClassifierKMeans::fit( const cv::Mat &X, const cv::Mat & /*y*/ )

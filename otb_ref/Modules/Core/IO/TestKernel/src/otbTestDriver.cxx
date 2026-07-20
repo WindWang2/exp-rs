@@ -19,30 +19,27 @@
  */
 
 
-// define some itksys* things to make ShareForward.h happy
-#define itksys_SHARED_FORWARD_DIR_BUILD ""
-#define itksys_SHARED_FORWARD_PATH_BUILD ""
-#define itksys_SHARED_FORWARD_PATH_INSTALL ""
-#define itksys_SHARED_FORWARD_EXE_BUILD ""
-#define itksys_SHARED_FORWARD_EXE_INSTALL ""
+// ITK/KWSys removed SharedForward.h (post-KWSys cleanup). Only the libpath
+// env name + path separator macros were used by this driver — define them
+// here so the file builds against modern ITK without a KWSys shim.
+#if defined(_WIN32)
+# define KWSYS_SHARED_FORWARD_LDPATH "PATH"
+# define KWSYS_SHARED_FORWARD_PATH_SEP ";"
+#elif defined(__APPLE__)
+# define KWSYS_SHARED_FORWARD_LDPATH "DYLD_LIBRARY_PATH"
+# define KWSYS_SHARED_FORWARD_PATH_SEP ":"
+#else
+# define KWSYS_SHARED_FORWARD_LDPATH "LD_LIBRARY_PATH"
+# define KWSYS_SHARED_FORWARD_PATH_SEP ":"
+#endif
 
+#include <cstring>
 #include <map>
 #include <string>
 #include <iostream>
 #include <fstream>
 #include "itksys/SystemTools.hxx"
 #include "itkMacro.h"
-
-// include SharedForward to avoid duplicating the code which find the library path variable
-// name and the path separator
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
-#include "itksys/SharedForward.h"
-#pragma GCC diagnostic pop
-#else
-#include "itksys/SharedForward.h"
-#endif
 
 #include "itksys/Process.h"
 

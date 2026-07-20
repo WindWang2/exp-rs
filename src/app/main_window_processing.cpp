@@ -19,6 +19,7 @@
 #include "dialogs/comparison_dialog.h"
 #include "dialogs/batch_processing_dialog.h"
 #include "dialogs/sicnu_algorithm_dialog.h"
+#include "map_tools/swipe_map_tool.h"
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
@@ -354,6 +355,51 @@ void QgisDesktopWindow::openComparisonDialog()
 {
     ComparisonDialog dialog(this);
     dialog.exec();
+}
+
+// ---------------------------------------------------------------------------
+// Swipe comparison tool (View > Swipe Layers)
+// ---------------------------------------------------------------------------
+
+void QgisDesktopWindow::toggleSwipeTool()
+{
+    if (!m_mapCanvas)
+        return;
+
+    if (m_mapCanvas->mapTool() == m_swipeTool) {
+        // Deactivate: restore pan tool
+        m_mapCanvas->setMapTool(m_panTool);
+        statusBar()->showMessage(tr("Swipe tool deactivated"), 2000);
+        return;
+    }
+
+    // Lazily create the swipe tool
+    if (!m_swipeTool) {
+        m_swipeTool = new SwipeMapTool(m_mapCanvas);
+    }
+
+    // Use current layer as base and first other visible raster as compare
+    QgsMapLayer *baseLayer = m_mapCanvas->currentLayer();
+    QgsMapLayer *compareLayer = nullptr;
+
+    const auto layers = m_mapCanvas->layers();
+    for (QgsMapLayer *layer : layers) {
+        if (layer && layer != baseLayer && layer->type() == Qgis::LayerType::Raster) {
+            compareLayer = layer;
+            break;
+        }
+    }
+
+    if (!baseLayer || !compareLayer) {
+        statusBar()->showMessage(tr("Swipe requires at least two raster layers"), 3000);
+        return;
+    }
+
+    m_swipeTool->setBaseLayer(baseLayer);
+    m_swipeTool->setCompareLayer(compareLayer);
+    m_mapCanvas->setMapTool(m_swipeTool);
+    statusBar()->showMessage(tr("Swipe tool active — move mouse to compare '%1' vs '%2'")
+                                 .arg(baseLayer->name(), compareLayer->name()), 3000);
 }
 
 // ---------------------------------------------------------------------------

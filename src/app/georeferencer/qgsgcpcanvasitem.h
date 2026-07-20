@@ -76,6 +76,9 @@ class QgsGCPCanvasItem final : public QgsMapCanvasItem
     bool isSelectedMarker() const { return mSelected; }
     void setSelected( bool s );
 
+    bool isHovered() const { return mHovered; }
+    void setHovered( bool h );
+
     QPointF residual() const { return mResidual; }
     void setResidual( QPointF r );
 
@@ -88,6 +91,7 @@ class QgsGCPCanvasItem final : public QgsMapCanvasItem
     bool mIsSource = true;
     bool mEnabled = true;
     bool mSelected = false;
+    bool mHovered = false;
     QPointF mResidual;
 
     QBrush mBadgeBrush;     // blue for SRC, green for REF

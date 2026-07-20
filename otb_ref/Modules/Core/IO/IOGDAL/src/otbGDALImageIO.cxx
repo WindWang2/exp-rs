@@ -278,7 +278,7 @@ void GDALImageIO::Read(void* buffer)
 bool GDALImageIO::GetSubDatasetInfo(std::vector<std::string>& names, std::vector<std::string>& desc)
 {
   // Note: we assume that the subdatasets are in order : SUBDATASET_ID_NAME, SUBDATASET_ID_DESC, SUBDATASET_ID+1_NAME, SUBDATASET_ID+1_DESC
-  char** papszMetadata;
+  CSLConstList papszMetadata;
   papszMetadata = m_Dataset->GetDataSet()->GetMetadata("SUBDATASETS");
 
   // Have we find some dataSet ?
@@ -436,7 +436,7 @@ void GDALImageIO::InternalReadImageInformation()
   {
     // this happen in the case of a hdf file with SUBDATASETS
     // Note: we assume that the datasets are in order
-    char** papszMetadata;
+    CSLConstList papszMetadata;
     papszMetadata = m_Dataset->GetDataSet()->GetMetadata("SUBDATASETS");
     // TODO: we might want to keep the list of names somewhere, at least the number of datasets
     std::vector<std::string> names;
@@ -662,11 +662,11 @@ void GDALImageIO::InternalReadImageInformation()
   }
 
   // get list of other files part of the same dataset
-  char** datasetFileList = dataset->GetFileList();
+  CSLConstList datasetFileList = dataset->GetFileList();
   m_AttachedFileNames.clear();
   if (datasetFileList != nullptr)
   {
-    char** currentFile = datasetFileList;
+    const char* const* currentFile = datasetFileList;
     while (*currentFile != nullptr)
     {
       if (m_FileName.compare(*currentFile) != 0)
@@ -676,7 +676,7 @@ void GDALImageIO::InternalReadImageInformation()
       }
       currentFile++;
     }
-    CSLDestroy(datasetFileList);
+    CSLDestroy(const_cast<char**>(datasetFileList));
   }
 
   /*----------------------------------------------------------------------*/
@@ -741,7 +741,7 @@ void GDALImageIO::InternalReadImageInformation()
 
   if (m_NumberOfDimensions == 3)
     m_Spacing[2] = 1;
-  char** papszMetadata = dataset->GetMetadata(nullptr);
+  CSLConstList papszMetadata = dataset->GetMetadata(nullptr);
 
   /* -------------------------------------------------------------------- */
   /*      Report general info.                                            */

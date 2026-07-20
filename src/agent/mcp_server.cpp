@@ -1,9 +1,15 @@
 #include "mcp_server.h"
 #include "core/sicnu_logging.h"
 
+#include "operators/framework/rs_operator_registry.h"
+#include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_error.h"
+#include "operators/framework/rs_operator.h"
+
 #include <iostream>
 #include <QJsonDocument>
 #include <qgis.h>
+#include <json/json.h>
 
 namespace {
 QString mcpDataTypeToString( Qgis::DataType type ) {
@@ -32,6 +38,10 @@ QString mcpDataTypeToString( Qgis::DataType type ) {
 #include <QJsonArray>
 #include <QDebug>
 
+#include <QDir>
+#include <QFileInfo>
+#include <QProcessEnvironment>
+
 #include <qgsapplication.h>
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
@@ -46,6 +56,116 @@ QString mcpDataTypeToString( Qgis::DataType type ) {
 #include <qgscoordinatereferencesystem.h>
 #include <qgsrectangle.h>
 #include <qgsfields.h>
+
+namespace {
+
+bool envFlagEnabled(const char *name)
+{
+    const QByteArray v = qgetenv(name);
+    if (v.isEmpty())
+        return false;
+    const QString s = QString::fromUtf8(v).trimmed().toLower();
+    return s == QLatin1String("1") || s == QLatin1String("true") || s == QLatin1String("yes")
+           || s == QLatin1String("on");
+}
+
+bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
+{
+    if (isCustomTools)
+        *isCustomTools = false;
+
+    static const QStringList kAllowed = {
+        QStringLiteral("rs:"),
+        QStringLiteral("gdal:"),
+        QStringLiteral("gdal_tools:"),
+        QStringLiteral("otb:"),
+        QStringLiteral("opencv:"), // operator surface uses opencv: filters
+    };
+    for (const QString &prefix : kAllowed) {
+        if (id.startsWith(prefix))
+            return true;
+    }
+    if (id.startsWith(QStringLiteral("custom_tools:"))) {
+        if (isCustomTools)
+            *isCustomTools = true;
+        return false;
+    }
+    return false;
+}
+
+/// Resolve a path for workspace checks. Relative paths are allowed without check.
+/// Absolute paths must canonicalize under workspace root.
+bool absolutePathOutsideWorkspace(const QString &pathValue, const QString &workspaceRoot, QString *detail)
+{
+    if (pathValue.isEmpty())
+        return false;
+
+    // Only enforce on absolute paths / home-expanded paths
+    QString path = pathValue;
+    if (path.startsWith(QLatin1Char('~'))) {
+        path = QDir::homePath() + path.mid(1);
+    }
+    const QFileInfo fi(path);
+    if (!fi.isAbsolute())
+        return false;
+
+    QString workspaceCanon = QDir(workspaceRoot).canonicalPath();
+    if (workspaceCanon.isEmpty())
+        workspaceCanon = QFileInfo(workspaceRoot).absoluteFilePath();
+    if (workspaceCanon.isEmpty())
+        return false;
+
+    QString resolved;
+    if (fi.exists()) {
+        resolved = fi.canonicalFilePath();
+    } else {
+        // Non-existent output path: resolve parent dir + filename
+        QDir parent = fi.dir();
+        QString parentCanon = parent.canonicalPath();
+        if (parentCanon.isEmpty())
+            parentCanon = parent.absolutePath();
+        resolved = QDir(parentCanon).filePath(fi.fileName());
+    }
+
+    const QString normResolved = QDir::cleanPath(resolved);
+    const QString normWorkspace = QDir::cleanPath(workspaceCanon);
+
+    if (normResolved == normWorkspace)
+        return false;
+    if (normResolved.startsWith(normWorkspace + QLatin1Char('/')))
+        return false;
+
+    if (detail) {
+        *detail = QStringLiteral("Path outside SICNU_MCP_WORKSPACE: %1").arg(pathValue);
+    }
+    return true;
+}
+
+bool collectOutsideWorkspace(const QVariant &value, const QString &workspaceRoot, QString *detail)
+{
+    if (value.userType() == QMetaType::QString) {
+        return absolutePathOutsideWorkspace(value.toString(), workspaceRoot, detail);
+    }
+    if (value.userType() == QMetaType::QVariantList) {
+        const QVariantList list = value.toList();
+        for (const QVariant &item : list) {
+            if (collectOutsideWorkspace(item, workspaceRoot, detail))
+                return true;
+        }
+        return false;
+    }
+    if (value.userType() == QMetaType::QVariantMap) {
+        const QVariantMap map = value.toMap();
+        for (auto it = map.constBegin(); it != map.constEnd(); ++it) {
+            if (collectOutsideWorkspace(it.value(), workspaceRoot, detail))
+                return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+} // namespace
 
 // StdinReader implementation
 void StdinReader::requestStop()
@@ -80,6 +200,181 @@ AlgorithmWorker::~AlgorithmWorker()
 {
     wait();
 }
+
+namespace {
+
+QVariant jsonValueToVariant(const Json::Value &value);
+Json::Value variantToJsonValue(const QVariant &value);
+
+QVariantMap jsonObjectToVariantMap(const Json::Value &obj)
+{
+    QVariantMap map;
+    if (!obj.isObject())
+        return map;
+    for (const auto &name : obj.getMemberNames()) {
+        map.insert(QString::fromStdString(name), jsonValueToVariant(obj[name]));
+    }
+    return map;
+}
+
+QVariant jsonValueToVariant(const Json::Value &value)
+{
+    if (value.isNull())
+        return QVariant();
+    if (value.isBool())
+        return value.asBool();
+    if (value.isInt() || value.isUInt())
+        return value.asInt();
+    if (value.isInt64() || value.isUInt64())
+        return static_cast<qlonglong>(value.asInt64());
+    if (value.isDouble())
+        return value.asDouble();
+    if (value.isString())
+        return QString::fromStdString(value.asString());
+    if (value.isArray()) {
+        QVariantList list;
+        for (Json::ArrayIndex i = 0; i < value.size(); ++i)
+            list.append(jsonValueToVariant(value[i]));
+        return list;
+    }
+    if (value.isObject())
+        return jsonObjectToVariantMap(value);
+    return QVariant();
+}
+
+Json::Value variantToJsonValue(const QVariant &value)
+{
+    if (!value.isValid() || value.isNull())
+        return Json::Value(Json::nullValue);
+
+    switch (value.userType()) {
+    case QMetaType::Bool:
+        return Json::Value(value.toBool());
+    case QMetaType::Int:
+    case QMetaType::UInt:
+    case QMetaType::LongLong:
+    case QMetaType::ULongLong:
+        return Json::Value(static_cast<Json::Int64>(value.toLongLong()));
+    case QMetaType::Double:
+    case QMetaType::Float:
+        return Json::Value(value.toDouble());
+    case QMetaType::QString:
+        return Json::Value(value.toString().toStdString());
+    case QMetaType::QVariantList: {
+        Json::Value arr(Json::arrayValue);
+        const QVariantList list = value.toList();
+        for (const QVariant &item : list)
+            arr.append(variantToJsonValue(item));
+        return arr;
+    }
+    case QMetaType::QStringList: {
+        Json::Value arr(Json::arrayValue);
+        const QStringList list = value.toStringList();
+        for (const QString &item : list)
+            arr.append(item.toStdString());
+        return arr;
+    }
+    case QMetaType::QVariantMap: {
+        Json::Value obj(Json::objectValue);
+        const QVariantMap map = value.toMap();
+        for (auto it = map.constBegin(); it != map.constEnd(); ++it)
+            obj[it.key().toStdString()] = variantToJsonValue(it.value());
+        return obj;
+    }
+    default:
+        // Fallback: stringify unknown types
+        return Json::Value(value.toString().toStdString());
+    }
+}
+
+/**
+ * Background worker that runs an RSOperator without blocking the MCP I/O thread.
+ */
+class OperatorWorker : public QThread
+{
+public:
+    OperatorWorker(const QString &execId,
+                   const QString &operatorId,
+                   const QVariantMap &parameters,
+                   std::shared_ptr<AlgorithmExecution> execState,
+                   std::shared_ptr<std::atomic<bool>> cancelFlag,
+                   QObject *parent = nullptr)
+        : QThread(parent)
+        , mExecId(execId)
+        , mOperatorId(operatorId)
+        , mParameters(parameters)
+        , mState(std::move(execState))
+        , mCancelFlag(std::move(cancelFlag))
+    {
+    }
+
+    ~OperatorWorker() override { wait(); }
+
+protected:
+    void run() override
+    {
+        try {
+            auto op = sicnu::operators::RSOperatorRegistry::instance().create(
+                mOperatorId.toStdString());
+            if (!op) {
+                QMutexLocker locker(&mState->mutex);
+                mState->error = QStringLiteral("Operator not found: ") + mOperatorId;
+                mState->completed = true;
+                return;
+            }
+
+            sicnu::operators::RSOperatorContext context;
+            auto state = mState;
+            context.setCancelFlag(mCancelFlag.get());
+            context.setProgressCallback([state](double progress, const std::string &message) {
+                QMutexLocker locker(&state->mutex);
+                state->progress = progress;
+                state->progressText = QString::fromStdString(message);
+            });
+
+            const Json::Value params = variantToJsonValue(mParameters);
+            const Json::Value result = op->execute(params, context);
+
+            QMutexLocker locker(&mState->mutex);
+            if (mState->canceled || (mCancelFlag && mCancelFlag->load())) {
+                mState->canceled = true;
+                mState->completed = true;
+                return;
+            }
+            mState->result = jsonObjectToVariantMap(result.isObject() ? result : Json::Value(Json::objectValue));
+            if (!result.isObject()) {
+                mState->result[QStringLiteral("value")] = jsonValueToVariant(result);
+            }
+            mState->progress = 1.0;
+            mState->completed = true;
+        } catch (const sicnu::operators::RSOperatorError &e) {
+            QMutexLocker locker(&mState->mutex);
+            if (e.code() == sicnu::operators::ErrorCode::Cancelled) {
+                mState->canceled = true;
+            } else {
+                mState->error = QString::fromStdString(e.message());
+            }
+            mState->completed = true;
+        } catch (const std::exception &e) {
+            QMutexLocker locker(&mState->mutex);
+            mState->error = QString::fromUtf8(e.what());
+            mState->completed = true;
+        } catch (...) {
+            QMutexLocker locker(&mState->mutex);
+            mState->error = QStringLiteral("Unknown operator error");
+            mState->completed = true;
+        }
+    }
+
+private:
+    QString mExecId;
+    QString mOperatorId;
+    QVariantMap mParameters;
+    std::shared_ptr<AlgorithmExecution> mState;
+    std::shared_ptr<std::atomic<bool>> mCancelFlag;
+};
+
+} // namespace
 
 class McpFeedback : public QgsProcessingFeedback
 {
@@ -280,6 +575,55 @@ void McpServer::handleRequest(const QVariantMap &request)
         };
         tools.append(cancelTool);
 
+        // list_operators tool (RSOperator kernel)
+        QVariantMap listOpsTool;
+        listOpsTool[QStringLiteral("name")] = QStringLiteral("list_operators");
+        listOpsTool[QStringLiteral("description")] = QStringLiteral(
+            "List all registered RSOperator algorithms (Agent-ready kernel: rs:/opencv:/gdal:/otb:).");
+        listOpsTool[QStringLiteral("inputSchema")] = QVariantMap{
+            {QStringLiteral("type"), QStringLiteral("object")},
+            {QStringLiteral("properties"), QVariantMap()}
+        };
+        tools.append(listOpsTool);
+
+        // get_operator_schema tool
+        QVariantMap opSchemaTool;
+        opSchemaTool[QStringLiteral("name")] = QStringLiteral("get_operator_schema");
+        opSchemaTool[QStringLiteral("description")] = QStringLiteral(
+            "Get JSON Schema and metadata for an RSOperator (e.g. 'rs:spectral_index').");
+        opSchemaTool[QStringLiteral("inputSchema")] = QVariantMap{
+            {QStringLiteral("type"), QStringLiteral("object")},
+            {QStringLiteral("properties"), QVariantMap{
+                {QStringLiteral("operator_id"), QVariantMap{
+                    {QStringLiteral("type"), QStringLiteral("string")},
+                    {QStringLiteral("description"), QStringLiteral("Operator id, e.g. 'gdal:reproject'")}
+                }}
+            }},
+            {QStringLiteral("required"), QStringList{QStringLiteral("operator_id")}}
+        };
+        tools.append(opSchemaTool);
+
+        // execute_operator tool
+        QVariantMap execOpTool;
+        execOpTool[QStringLiteral("name")] = QStringLiteral("execute_operator");
+        execOpTool[QStringLiteral("description")] = QStringLiteral(
+            "Asynchronously run an RSOperator with JSON parameters. Returns execution_id.");
+        execOpTool[QStringLiteral("inputSchema")] = QVariantMap{
+            {QStringLiteral("type"), QStringLiteral("object")},
+            {QStringLiteral("properties"), QVariantMap{
+                {QStringLiteral("operator_id"), QVariantMap{
+                    {QStringLiteral("type"), QStringLiteral("string")},
+                    {QStringLiteral("description"), QStringLiteral("Operator id to execute")}
+                }},
+                {QStringLiteral("parameters"), QVariantMap{
+                    {QStringLiteral("type"), QStringLiteral("object")},
+                    {QStringLiteral("description"), QStringLiteral("JSON parameter object")}
+                }}
+            }},
+            {QStringLiteral("required"), QStringList{QStringLiteral("operator_id"), QStringLiteral("parameters")}}
+        };
+        tools.append(execOpTool);
+
         // list_layers tool
         QVariantMap listLayersTool;
         listLayersTool[QStringLiteral("name")] = QStringLiteral("list_layers");
@@ -333,6 +677,19 @@ void McpServer::handleRequest(const QVariantMap &request)
             else if (toolName == QStringLiteral("execute_algorithm"))
             {
                 resultData = handleExecuteAlgorithm(arguments.value(QStringLiteral("algorithm_id")).toString(), arguments.value(QStringLiteral("parameters")).toMap());
+            }
+            else if (toolName == QStringLiteral("list_operators"))
+            {
+                resultData = handleListOperators();
+            }
+            else if (toolName == QStringLiteral("get_operator_schema"))
+            {
+                resultData = handleGetOperatorSchema(arguments.value(QStringLiteral("operator_id")).toString());
+            }
+            else if (toolName == QStringLiteral("execute_operator"))
+            {
+                resultData = handleExecuteOperator(arguments.value(QStringLiteral("operator_id")).toString(),
+                                                   arguments.value(QStringLiteral("parameters")).toMap());
             }
             else if (toolName == QStringLiteral("get_execution_status"))
             {
@@ -445,6 +802,160 @@ QVariantMap McpServer::handleListAlgorithms()
     return result;
 }
 
+QVariantMap McpServer::handleListOperators()
+{
+    QVariantMap result;
+    QVariantList opList;
+
+    auto &registry = sicnu::operators::RSOperatorRegistry::instance();
+    const auto names = registry.operatorNames();
+    for (const std::string &name : names) {
+        auto op = registry.create(name);
+        if (!op)
+            continue;
+
+        QVariantMap opMap;
+        opMap[QStringLiteral("id")] = QString::fromStdString(op->name());
+        opMap[QStringLiteral("displayName")] = QString::fromStdString(op->displayName());
+        opMap[QStringLiteral("group")] = QString::fromStdString(op->group());
+        opMap[QStringLiteral("description")] = QString::fromStdString(op->description());
+
+        const Json::Value meta = op->metadata();
+        if (meta.isObject() && !meta.empty()) {
+            opMap[QStringLiteral("metadata")] = jsonObjectToVariantMap(meta);
+        }
+
+        opList.append(opMap);
+    }
+
+    result[QStringLiteral("operators")] = opList;
+    result[QStringLiteral("count")] = static_cast<int>(opList.size());
+    return result;
+}
+
+QVariantMap McpServer::handleGetOperatorSchema(const QString &operatorId)
+{
+    auto op = sicnu::operators::RSOperatorRegistry::instance().create(operatorId.toStdString());
+    if (!op) {
+        QVariantMap err;
+        err[QStringLiteral("error")] = QStringLiteral("Operator not found: ") + operatorId;
+        return err;
+    }
+
+    QVariantMap result = jsonObjectToVariantMap(op->schema());
+    result[QStringLiteral("operator_id")] = operatorId;
+    result[QStringLiteral("metadata")] = jsonObjectToVariantMap(op->metadata());
+    return result;
+}
+
+bool McpServer::isAlgorithmIdAllowed(const QString &algorithmId, QString *reason)
+{
+    bool isCustom = false;
+    if (idHasAllowedPrefix(algorithmId, &isCustom))
+        return true;
+
+    if (isCustom || algorithmId.startsWith(QStringLiteral("custom_tools:"))) {
+        if (envFlagEnabled("SICNU_MCP_TRUST_CUSTOM_TOOLS"))
+            return true;
+        if (reason) {
+            *reason = QStringLiteral(
+                "Algorithm id '%1' is blocked by default (custom_tools). "
+                "Set SICNU_MCP_TRUST_CUSTOM_TOOLS=1 to allow.").arg(algorithmId);
+        }
+        return false;
+    }
+
+    if (reason) {
+        *reason = QStringLiteral(
+            "Algorithm id '%1' is not in the MCP allow-list "
+            "(rs:, gdal:, gdal_tools:, otb:).").arg(algorithmId);
+    }
+    return false;
+}
+
+bool McpServer::isOperatorIdAllowed(const QString &operatorId, QString *reason)
+{
+    bool isCustom = false;
+    if (idHasAllowedPrefix(operatorId, &isCustom))
+        return true;
+
+    if (isCustom || operatorId.startsWith(QStringLiteral("custom_tools:"))) {
+        if (envFlagEnabled("SICNU_MCP_TRUST_CUSTOM_TOOLS"))
+            return true;
+        if (reason) {
+            *reason = QStringLiteral(
+                "Operator id '%1' is blocked by default (custom_tools). "
+                "Set SICNU_MCP_TRUST_CUSTOM_TOOLS=1 to allow.").arg(operatorId);
+        }
+        return false;
+    }
+
+    // Operators also use opencv: which is already in allowed prefixes.
+    if (reason) {
+        *reason = QStringLiteral(
+            "Operator id '%1' is not in the MCP allow-list "
+            "(rs:, gdal:, gdal_tools:, otb:, opencv:).").arg(operatorId);
+    }
+    return false;
+}
+
+bool McpServer::validateWorkspacePaths(const QVariantMap &parameters, QString *reason)
+{
+    const QString workspace = QProcessEnvironment::systemEnvironment().value(
+        QStringLiteral("SICNU_MCP_WORKSPACE"));
+    if (workspace.isEmpty())
+        return true;
+
+    QString detail;
+    if (collectOutsideWorkspace(parameters, workspace, &detail)) {
+        if (reason)
+            *reason = detail;
+        return false;
+    }
+    return true;
+}
+
+QVariantMap McpServer::handleExecuteOperator(const QString &operatorId, const QVariantMap &parameters)
+{
+    SICNU_LOG_INFO(SicnuLogTags::MCP, QString("Executing operator: %1").arg(operatorId));
+
+    QString denyReason;
+    if (!isOperatorIdAllowed(operatorId, &denyReason)) {
+        SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
+        throw std::runtime_error(denyReason.toStdString());
+    }
+    if (!validateWorkspacePaths(parameters, &denyReason)) {
+        SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
+        throw std::runtime_error(denyReason.toStdString());
+    }
+
+    if (!sicnu::operators::RSOperatorRegistry::instance().hasOperator(operatorId.toStdString())) {
+        SICNU_LOG_ERROR(SicnuLogTags::MCP, QString("Operator not found: %1").arg(operatorId));
+        throw std::runtime_error("Operator not found: " + operatorId.toStdString());
+    }
+
+    mMutex.lock();
+    mExecutionCounter++;
+    QString execId = QStringLiteral("op_exec_%1").arg(mExecutionCounter);
+    auto state = std::make_shared<AlgorithmExecution>();
+    state->id = execId;
+    state->algorithmId = operatorId;
+    mExecutions[execId] = state;
+    auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
+    mOperatorCancelFlags[execId] = cancelFlag;
+    mMutex.unlock();
+
+    OperatorWorker *worker = new OperatorWorker(execId, operatorId, parameters, state, cancelFlag, this);
+    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+    worker->start();
+
+    QVariantMap result;
+    result[QStringLiteral("execution_id")] = execId;
+    result[QStringLiteral("status")] = QStringLiteral("running");
+    result[QStringLiteral("operator_id")] = operatorId;
+    return result;
+}
+
 QVariantMap McpServer::handleGetAlgorithmSchema(const QString &algorithmId)
 {
     std::unique_ptr<QgsProcessingAlgorithm> alg(QgsApplication::processingRegistry()->createAlgorithmById(algorithmId));
@@ -461,6 +972,16 @@ QVariantMap McpServer::handleGetAlgorithmSchema(const QString &algorithmId)
 QVariantMap McpServer::handleExecuteAlgorithm(const QString &algorithmId, const QVariantMap &parameters)
 {
     SICNU_LOG_INFO(SicnuLogTags::MCP, QString("Executing algorithm: %1").arg(algorithmId));
+
+    QString denyReason;
+    if (!isAlgorithmIdAllowed(algorithmId, &denyReason)) {
+        SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
+        throw std::runtime_error(denyReason.toStdString());
+    }
+    if (!validateWorkspacePaths(parameters, &denyReason)) {
+        SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
+        throw std::runtime_error(denyReason.toStdString());
+    }
 
     QgsProcessingAlgorithm *alg = QgsApplication::processingRegistry()->createAlgorithmById(algorithmId);
     if (!alg)
@@ -539,6 +1060,9 @@ QVariantMap McpServer::handleCancelExecution(const QString &executionId)
     {
         QMutexLocker stateLocker(&state->mutex);
         state->canceled = true;
+    }
+    if (mOperatorCancelFlags.contains(executionId)) {
+        mOperatorCancelFlags[executionId]->store(true);
     }
 
     QVariantMap result;

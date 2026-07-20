@@ -1,5 +1,7 @@
 <RCC>
   <qresource prefix="/icons">
+    <file alias="app_icon">icons/app_icon.svg</file>
+    <file alias="rs_studio_logo">icons/app_icon.svg</file>
     <file alias="3d_buildings">icons/3D_Buildings.svg</file>
     <file alias="3d_rot_te">icons/3D_Rot_te.svg</file>
     <file alias="3d_view">icons/3D_View.svg</file>

@@ -184,6 +184,11 @@ void CvRTreesWrapper::getVotes(cv::InputArray samples, cv::OutputArray results, 
 {
   m_Impl->getVotes(samples, results, flags);
 }
+
+double CvRTreesWrapper::getOOBError() const
+{
+  return m_Impl->getOOBError();
+}
 #endif
 
 cv::String CvRTreesWrapper::getDefaultName() const

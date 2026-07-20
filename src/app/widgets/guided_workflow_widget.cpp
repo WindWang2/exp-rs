@@ -251,7 +251,7 @@ Workflow GuidedWorkflowWidget::createSpectralAnalysisWorkflow()
     step1.instructions = tr("<p>First, load the sample multi-band Landsat image:</p>"
                            "<ol>"
                            "<li>Go to <b>File > Add Raster Layer...</b></li>"
-                           "<li>Navigate to the <code>samples_data/</code> directory</li>"
+                           "<li>Navigate to the <code>data/samples/</code> directory</li>"
                            "<li>Select <code>landsat_sample.tif</code></li>"
                            "<li>Click <b>Open</b></li>"
                            "</ol>"
@@ -345,7 +345,7 @@ Workflow GuidedWorkflowWidget::createImageEnhancementWorkflow()
     // Step 1: Load data
     WorkflowStep step1;
     step1.title = tr("Load Sample Data");
-    step1.instructions = tr("<p>Load the sample Landsat image: <code>samples_data/landsat_sample.tif</code></p>");
+    step1.instructions = tr("<p>Load the sample Landsat image: <code>data/samples/landsat_sample.tif</code></p>");
     step1.actionId = "addRasterLayer";
     step1.completionHint = tr("Image loaded in map canvas.");
     wf.steps << step1;
@@ -763,7 +763,7 @@ Workflow GuidedWorkflowWidget::createObiaWorkflow()
 
     WorkflowStep step1;
     step1.title = tr( "Load Sample Data" );
-    step1.instructions = tr( "<p>Load bundled lab datasets from <code>samples_data/</code>:</p>"
+    step1.instructions = tr( "<p>Load bundled lab datasets from <code>data/samples/</code>:</p>"
                               "<ol>"
                               "<li>Go to <b>Help &gt; Load Sample Data</b></li>"
                               "<li>Confirm <code>landsat_sample.tif</code> appears on the map</li>"

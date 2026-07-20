@@ -14,20 +14,20 @@ RsCvTask::RsCvTask( const cv::Mat &X, const cv::Mat &y,
 
 bool RsCvTask::run()
 {
-    // Run cross-validation with progress reporting
-    // RsCrossValidation::kFold doesn't support progress callbacks,
-    // so we report progress at key points
-
-    setProgress( 10 );
+    setProgress( 5 );
 
     if ( isCanceled() )
         return false;
 
-    mResult = RsCrossValidation::kFold( mX, mY, mFactory, mK );
+    // Per-fold feature scaling (default) + cancel checks between folds.
+    mResult = RsCrossValidation::kFold(
+      mX, mY, mFactory, mK,
+      /*scaleFeatures=*/true,
+      [this]() { return isCanceled(); } );
 
-    setProgress( 90 );
+    setProgress( 95 );
 
-    if ( isCanceled() )
+    if ( isCanceled() || mResult.errorMessage == QStringLiteral( "Cancelled" ) )
         return false;
 
     setProgress( 100 );

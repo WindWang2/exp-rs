@@ -32,7 +32,7 @@ if(OpenCV_DIR)
       PATHS "${OPENCV_SEARCH_PATH}"
       #no additional paths are added to the search if OpenCV_DIR
       NO_DEFAULT_PATH
-      PATH_SUFFIXES "include" "include/opencv4"
+      PATH_SUFFIXES "include" "include/opencv4" "include/opencv5"
       DOC "The directory where opencv/cv.h is installed")
   endif()
 endif()
@@ -42,7 +42,7 @@ if(NOT opencv_INCLUDE_DIR)
     opencv_INCLUDE_DIR
     opencv2/opencv.hpp
     PATHS "${OpenCV_DIR}"
-    PATH_SUFFIXES "include" "include/opencv4"
+    PATH_SUFFIXES "include" "include/opencv4" "include/opencv5"
     DOC "The directory where opencv/cv.h is installed")
 endif()
 
@@ -104,8 +104,8 @@ endif()
 
 if(NOT OPENCV_SEARCH_PATH)
   get_filename_component(OPENCV_SEARCH_PATH "${opencv_INCLUDE_DIR}" PATH)
-  # include dir is include/opencv4 in v4 UNIX
-  if(UNIX AND OpenCV_VERSION_MAJOR EQUAL 4)
+  # include dir is include/opencv{4,5} on UNIX installs
+  if(UNIX AND (OpenCV_VERSION_MAJOR EQUAL 4 OR OpenCV_VERSION_MAJOR EQUAL 5))
     get_filename_component(OPENCV_SEARCH_PATH "${OPENCV_SEARCH_PATH}" PATH)
   endif()
 endif()
@@ -114,17 +114,15 @@ endif()
 find_library(
   OPENCV_core_LIBRARY
   NAMES ${opencv_core_NAMES}
-  PATHS ${OPENCV_SEARCH_PATH}
+  PATHS ${OPENCV_SEARCH_PATH} /usr/lib /usr/local/lib
   PATH_SUFFIXES "lib" "lib64" "lib/${CMAKE_LIBRARY_ARCHITECTURE}"
-  NO_DEFAULT_PATH
   DOC "Path to opencv_core library")
 
 find_library(
   OPENCV_ml_LIBRARY
   NAMES ${opencv_ml_NAMES}
-  PATHS ${OPENCV_SEARCH_PATH}
+  PATHS ${OPENCV_SEARCH_PATH} /usr/lib /usr/local/lib
   PATH_SUFFIXES "lib" "lib64" "lib/${CMAKE_LIBRARY_ARCHITECTURE}"
-  NO_DEFAULT_PATH
   DOC "Path to opencv_ml library")
 
 set(OpenCV_FOUND FALSE)

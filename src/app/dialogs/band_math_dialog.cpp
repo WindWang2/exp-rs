@@ -1,6 +1,5 @@
 // src/app/dialogs/band_math_dialog.cpp
 #include "band_math_dialog.h"
-#include "processing/algorithms/band_math.h"
 
 #include <raster/qgsrasterlayer.h>
 
@@ -44,13 +43,10 @@ void BandMathDialog::onRun()
         return;
     }
 
-    const QString sourcePath = m_rasterLayer->source();
-    const QString outPath = outputPath();
+    Json::Value params(Json::objectValue);
+    params["input"] = m_rasterLayer->source().toStdString();
+    params["output"] = outputPath().toStdString();
+    params["expression"] = expression.toStdString();
 
-    runGdalTask([sourcePath, outPath, expression]() -> QString {
-        QString error;
-        if (!BandMath::processFile(sourcePath, outPath, expression, &error))
-            return QString();
-        return outPath;
-    });
+    runOperatorTask(QStringLiteral("rs:band_math"), params);
 }

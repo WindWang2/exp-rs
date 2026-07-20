@@ -8,7 +8,11 @@
 #include "qgspointxy.h"
 #include "qgsrectangle.h"
 
+#include <QVector>
+
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <vector>
 
 #include <gdal_alg.h>
@@ -44,8 +48,8 @@ void RsRoiToolMagicWand::canvasReleaseEvent( QgsMapMouseEvent *e )
     GDALClose( ds );
     return;
   }
-  const int sc = int( inv[0] + inv[1] * map.x() + inv[2] * map.y() );
-  const int sr = int( inv[3] + inv[4] * map.x() + inv[5] * map.y() );
+  const int sc = static_cast<int>( std::floor( inv[0] + inv[1] * map.x() + inv[2] * map.y() ) );
+  const int sr = static_cast<int>( std::floor( inv[3] + inv[4] * map.x() + inv[5] * map.y() ) );
   if ( sr < 0 || sr >= H || sc < 0 || sc >= W || B <= 0 )
   {
     GDALClose( ds );
@@ -103,7 +107,8 @@ void RsRoiToolMagicWand::canvasReleaseEvent( QgsMapMouseEvent *e )
     pixels.insert( static_cast<quint64>( r ) * static_cast<quint64>( W ) + static_cast<quint64>( c ) );
   }
 
-  // Bbox of selected pixels (v1 approximation).
+  // Bbox of selected pixels — display geometry only. Training uses exact
+  // pixel indices via roiDrawnPixels (do NOT re-rasterize the bbox).
   quint64 rMin = std::numeric_limits<quint64>::max();
   quint64 cMin = std::numeric_limits<quint64>::max();
   quint64 rMax = 0;
@@ -124,5 +129,9 @@ void RsRoiToolMagicWand::canvasReleaseEvent( QgsMapMouseEvent *e )
   const double y1 = gt[3] + gt[4] * double( cMax + 1 ) + gt[5] * double( rMax + 1 );
   QgsRectangle bbox( std::min( x0, x1 ), std::min( y0, y1 ),
                      std::max( x0, x1 ), std::max( y0, y1 ) );
-  emit roiDrawn( QgsGeometry::fromRect( bbox ), mClassId );
+  const QgsGeometry geom = QgsGeometry::fromRect( bbox );
+  const QVector<quint64> idx( pixels.begin(), pixels.end() );
+  emit roiDrawnPixels( geom, mClassId, idx );
+  // Keep base signal for any generic listeners; onRoiDrawnPixels is preferred.
+  emit roiDrawn( geom, mClassId );
 }

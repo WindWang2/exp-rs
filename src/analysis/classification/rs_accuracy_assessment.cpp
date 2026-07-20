@@ -69,6 +69,9 @@ RsAccuracyAssessment::compute( const QVector<int> &yt, const QVector<int> &yp )
     r.kappa = MathUtils::safeDivDouble(r.overallAccuracy - pe, 1.0 - pe);
 
   // Per-class Producer / User / F1.
+  // Matrix layout: rows = true class, cols = predicted class.
+  // Producer (recall)  = TP / rowSum  (of all true i, how many found)
+  // User (precision)   = TP / colSum  (of all predicted i, how many correct)
   for ( int i = 0; i < n; ++i )
   {
     int rowSum = 0;
@@ -80,11 +83,11 @@ RsAccuracyAssessment::compute( const QVector<int> &yt, const QVector<int> &yp )
       colSum += r.confusion.at<int>( k, i );
     }
     const int id = r.classIds[i];
-    r.producerAcc[id] = MathUtils::safeDivDouble(d, colSum);
-    r.userAcc[id]     = MathUtils::safeDivDouble(d, rowSum);
+    r.producerAcc[id] = MathUtils::safeDivDouble( d, rowSum );
+    r.userAcc[id]     = MathUtils::safeDivDouble( d, colSum );
     const double p = r.producerAcc[id];
     const double u = r.userAcc[id];
-    r.f1[id] = MathUtils::safeDivDouble(2.0 * p * u, p + u);
+    r.f1[id] = MathUtils::safeDivDouble( 2.0 * p * u, p + u );
   }
 
   SICNU_LOG_SUCCESS( SicnuLogTags::Classification, QString( "Accuracy: overall=%1, kappa=%2, classes=%3" )

@@ -5,6 +5,8 @@
 #include <gdal_priv.h>
 #include <cpl_conv.h>
 
+#include <string>
+
 class GdalDriverChecker
 {
 public:
@@ -66,4 +68,44 @@ TEST_CASE("Remote sensing format support", "[gdal][rs]") {
         bool hasHdf = checker.hasDriver("HDF4") || checker.hasDriver("HDF5");
         CHECK(hasHdf);
     }
+}
+
+TEST_CASE("ENVI raster open via data file", "[gdal][envi]") {
+    GdalDriverChecker checker;
+    REQUIRE(checker.hasDriver("ENVI"));
+
+    // Prefer project data samples when present (gitignored large rasters)
+    const char *candidates[] = {
+        "data/dem.dat",
+        "data/CCD1.dat",
+        "data/GF_1",
+    };
+
+    bool openedAny = false;
+    for (const char *path : candidates) {
+        GDALDatasetH ds = GDALOpen(path, GA_ReadOnly);
+        if (!ds)
+            continue;
+        openedAny = true;
+        CHECK(GDALGetRasterXSize(ds) > 0);
+        CHECK(GDALGetRasterYSize(ds) > 0);
+        CHECK(GDALGetRasterCount(ds) >= 1);
+        const char *driverName = GDALGetDriverShortName(GDALGetDatasetDriver(ds));
+        CHECK(std::string(driverName ? driverName : "") == "ENVI");
+        GDALClose(ds);
+    }
+
+    // Skip soft if sample ENVI files not checked out locally
+    if (!openedAny) {
+        WARN("No local ENVI samples under data/; driver presence already checked");
+    }
+}
+
+TEST_CASE("ENVI header alone is not openable", "[gdal][envi]") {
+    GdalDriverChecker checker;
+    REQUIRE(checker.hasDriver("ENVI"));
+
+    GDALDatasetH ds = GDALOpen("data/dem.hdr", GA_ReadOnly);
+    // GDAL refuses .hdr; open path must be the binary data file
+    CHECK(ds == nullptr);
 }

@@ -26,7 +26,7 @@ TEST_CASE( "Generic CLI shipped tools load", "[processing][generic_cli]" )
     const QStringList expectedIds = {
         "custom_tools:gdal2tiles",
         "custom_tools:otb_bilateral_filter",
-        "custom_tools:otb_median_filter",
+        "custom_tools:otb_mean_filter",
         "custom_tools:otb_block_matching",
         "custom_tools:otb_disparity_to_dem",
     };

@@ -58,8 +58,25 @@ class APP_EXPORT QgisApp : public QObject
       QgsVectorLayerTools *vectorLayerTools,
       QgsMessageBar *messageBar,
       QMainWindow *mainWindow = nullptr,
+      QgsClipboard *clipboard = nullptr,
       QObject *parent = nullptr
     );
+
+    /**
+     * Temporarily rebind the singleton to another canvas/CAD/tools context
+     * (e.g. the classification window). Call restoreContext() to undo.
+     * Nested rebind is not supported — only one saved context is kept.
+     */
+    void rebind(
+      QgsMapCanvas *canvas,
+      QgsAdvancedDigitizingDockWidget *cadDock,
+      QgsVectorLayerTools *vectorLayerTools,
+      QgsMessageBar *messageBar,
+      QMainWindow *mainWindow = nullptr
+    );
+
+    //! Restore the context saved by the last rebind(). No-op if none saved.
+    void restoreContext();
 
     // ── Accessors ──────────────────────────────────────────────────────────
 
@@ -130,4 +147,13 @@ class APP_EXPORT QgisApp : public QObject
     QgsMessageBar *mMessageBar = nullptr;
     QgsVertexEditor *mVertexEditor = nullptr;
     QgsClipboard *mClipboard = nullptr;
+    mutable QgsStatusBar *mStatusBar = nullptr;
+
+    // Snapshot for rebind()/restoreContext()
+    bool mHasSavedContext = false;
+    QgsMapCanvas *mSavedCanvas = nullptr;
+    QMainWindow *mSavedMainWindow = nullptr;
+    QgsAdvancedDigitizingDockWidget *mSavedCadDock = nullptr;
+    QgsVectorLayerTools *mSavedVectorLayerTools = nullptr;
+    QgsMessageBar *mSavedMessageBar = nullptr;
 };

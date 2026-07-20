@@ -8,6 +8,7 @@
 #include <QToolBar>
 #include <QStatusBar>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QMenu>
 #include <QLabel>
 #include <QAction>
@@ -17,14 +18,21 @@
 
 void QgisDesktopWindow::setupMenu()
 {
-    // Brand logo (left corner)
+    // Brand logo (left corner) — app icon + short product name
     QWidget *brandWidget = new QWidget(this);
     brandWidget->setObjectName("rsMenuBarBrand");
     QHBoxLayout *brandLayout = new QHBoxLayout(brandWidget);
     brandLayout->setContentsMargins(8, 0, 0, 0);
-    brandLayout->setSpacing(4);
-    QLabel *logo = new QLabel("RS");
+    brandLayout->setSpacing(6);
+    QLabel *logo = new QLabel;
     logo->setObjectName("rsBrandLogo");
+    {
+        const QIcon ic(QStringLiteral(":/icons/app_icon"));
+        if (!ic.isNull())
+            logo->setPixmap(ic.pixmap(22, 22));
+        else
+            logo->setText(QStringLiteral("RS"));
+    }
     QLabel *name = new QLabel("RS Studio");
     name->setObjectName("rsBrandName");
     brandLayout->addWidget(logo);
@@ -47,6 +55,8 @@ void QgisDesktopWindow::setupMenu()
     projectMenu->addAction(tr("Browse STAC Catalog..."), this, &QgisDesktopWindow::browseStacCatalog);
     projectMenu->addSeparator();
     projectMenu->addAction(tr("New Layout..."), this, &QgisDesktopWindow::newLayout);
+    projectMenu->addSeparator();
+    projectMenu->addAction(tr("Export Lab Report..."), this, &QgisDesktopWindow::exportLabReport);
     projectMenu->addSeparator();
     projectMenu->addAction(tr("Quit"), this, &QMainWindow::close, QKeySequence::Quit);
 
@@ -112,6 +122,7 @@ void QgisDesktopWindow::setupMenu()
     viewMenu->addAction(QIcon(":/icons/me_sure_are_"), tr("Measure Area"), this, &QgisDesktopWindow::measureArea, QKeySequence("Ctrl+Shift+A"));
     viewMenu->addSeparator();
     viewMenu->addAction(tr("Compare Layers..."), this, &QgisDesktopWindow::openComparisonDialog, QKeySequence("Ctrl+Shift+C"));
+    viewMenu->addAction(tr("Swipe Layers"), this, &QgisDesktopWindow::toggleSwipeTool, QKeySequence("Ctrl+Shift+S"));
     viewMenu->addSeparator();
     viewMenu->addAction(QIcon(":/icons/refresh_view"), tr("Refresh"), this, &QgisDesktopWindow::refreshMap, QKeySequence("F5"));
 

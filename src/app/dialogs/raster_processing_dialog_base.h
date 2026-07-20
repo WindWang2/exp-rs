@@ -9,6 +9,8 @@
 #include <QVariantMap>
 #include <functional>
 
+#include <json/json.h>
+
 class QgsRasterLayer;
 class AsyncGdalRunner;
 class AsyncAlgorithmRunner;
@@ -35,6 +37,11 @@ class RasterProcessingDialogBase : public QDialog
 
 public:
     explicit RasterProcessingDialogBase(QWidget *parent = nullptr);
+
+    /**
+     * Ignore reject/close while a background task is running.
+     */
+    void reject() override;
 
     /**
      * Set the raster layer to process.
@@ -74,6 +81,15 @@ public:
     void runAlgorithmTask(const QgsProcessingAlgorithm *algorithm,
                           const QVariantMap &parameters,
                           QgsProcessingContext &context);
+
+    /**
+     * Run an RSOperator (sicnu::operators kernel) on a background thread.
+     *
+     * Prefer this over direct algorithm calls so GUI, CLI, and MCP share one
+     * execution path. Parameters must match the operator schema(); the result
+     * must contain an "output" string path.
+     */
+    void runOperatorTask(const QString &operatorId, const Json::Value &params);
 
 protected:
     // --- Virtual hooks for subclasses ---

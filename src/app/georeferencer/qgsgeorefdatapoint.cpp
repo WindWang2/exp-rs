@@ -46,7 +46,16 @@ QgsGeorefDataPoint::QgsGeorefDataPoint( QgsMapCanvas *srcCanvas,
     }
     if ( mDstCanvas )
     {
-      mGCPDestinationItem = new QgsGCPCanvasItem( mDstCanvas, mId, mGcpPoint->destinationPoint(), /*isSource=*/false );
+      // Destination may need CRS reprojection into the REF canvas CRS — do that
+      // immediately so the first paint is not in raw lon/lat.
+      QgsPointXY dest = mGcpPoint->destinationPoint();
+      if ( mDstCanvas->mapSettings().destinationCrs().isValid() )
+      {
+        dest = mGcpPoint->transformedDestinationPoint(
+                 mDstCanvas->mapSettings().destinationCrs(),
+                 QgsProject::instance()->transformContext() );
+      }
+      mGCPDestinationItem = new QgsGCPCanvasItem( mDstCanvas, mId, dest, /*isSource=*/false );
       mGCPDestinationItem->setEnabled( mGcpPoint->isEnabled() );
     }
   }
@@ -131,6 +140,10 @@ void QgsGeorefDataPoint::setEnabled( bool enabled )
 {
   if ( mGcpPoint )
     mGcpPoint->setEnabled( enabled );
+  if ( mGCPSourceItem )
+    mGCPSourceItem->setEnabled( enabled );
+  if ( mGCPDestinationItem )
+    mGCPDestinationItem->setEnabled( enabled );
 }
 
 void QgsGeorefDataPoint::setId( int id )
@@ -156,7 +169,13 @@ void QgsGeorefDataPoint::updateCoords()
 
 void QgsGeorefDataPoint::setHovered( bool hovered )
 {
+  if ( mHovered == hovered )
+    return;
   mHovered = hovered;
+  if ( mGCPSourceItem )
+    mGCPSourceItem->setHovered( hovered );
+  if ( mGCPDestinationItem )
+    mGCPDestinationItem->setHovered( hovered );
 }
 
 bool QgsGeorefDataPoint::contains( const QgsPointXY &p, QgsGcpPoint::PointType type, double &distance )
@@ -205,12 +224,11 @@ void QgsGeorefDataPoint::moveTo( QgsPointXY p, QgsGcpPoint::PointType type )
     case QgsGcpPoint::PointType::Destination:
     {
       mGcpPoint->setDestinationPoint( p );
-      if ( mSrcCanvas && mSrcCanvas->mapSettings().destinationCrs().isValid() )
-        mGcpPoint->setDestinationPointCrs( mSrcCanvas->mapSettings().destinationCrs() );
-      else if ( mDstCanvas && mDstCanvas->mapSettings().destinationCrs().isValid() )
+      // Destination is edited on the REF canvas — always take CRS from dst canvas.
+      // Never prefer SRC (pixel-space) even if it happens to carry a valid CRS.
+      if ( mDstCanvas && mDstCanvas->mapSettings().destinationCrs().isValid() )
         mGcpPoint->setDestinationPointCrs( mDstCanvas->mapSettings().destinationCrs() );
-
-      if ( !mGcpPoint->destinationPointCrs().isValid() )
+      else if ( !mGcpPoint->destinationPointCrs().isValid() )
         mGcpPoint->setDestinationPointCrs( QgsProject::instance()->crs() );
       break;
     }

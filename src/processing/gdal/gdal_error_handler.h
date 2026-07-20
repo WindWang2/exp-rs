@@ -55,6 +55,7 @@ private:
     CPLErr m_severity = CE_None;
     int m_errorNumber = 0;
     bool m_hasError = false;
+    CPLErrorHandler m_previousHandler = nullptr;
 
     static thread_local GdalErrorHandler *s_activeHandler;
 };

@@ -54,7 +54,9 @@ class RsObiaMainWindow : public QMainWindow
     void setupMapCanvas();
     void updateSegmentTable();
     void updateStatusLabel();
-    void applySegmentationResult( const RsSegmentMap &segMap, bool usedOtb, const QVector<int> &bandIndices );
+    void applySegmentationResult( const RsSegmentMap &segMap,
+                                  bool usedOtb,
+                                  QMap<quint32, RsSegmentFeatures::SegmentStat> stats );
 
     // Map canvas
     QgsMapCanvas *mCanvas = nullptr;

@@ -1,0 +1,292 @@
+// sicnu_python_api.cpp — Python API bindings for SICNU GEO RS platform
+#include "sicnu_python_api.h"
+
+#include <qgsapplication.h>
+#include <qgsproject.h>
+#include <qgsmapcanvas.h>
+#include <qgsrasterlayer.h>
+#include <qgsvectorlayer.h>
+#include <qgsrasterdataprovider.h>
+#include <qgsvectordataprovider.h>
+#include <qgscoordinatereferencesystem.h>
+#include <qgsrectangle.h>
+#include <qgsgeometry.h>
+#include <qgsfeature.h>
+#include <processing/qgsprocessingregistry.h>
+#include <processing/qgsprocessingalgorithm.h>
+#include <processing/qgsprocessingcontext.h>
+#include <processing/qgsprocessingfeedback.h>
+
+#include <QFileInfo>
+#include <QCoreApplication>
+
+SicnuPythonApi &SicnuPythonApi::instance()
+{
+    static SicnuPythonApi s_instance;
+    return s_instance;
+}
+
+SicnuPythonApi::SicnuPythonApi(QObject *parent)
+    : QObject(parent)
+{
+}
+
+void SicnuPythonApi::initialize(QgsMapCanvas *canvas)
+{
+    m_canvas = canvas;
+}
+
+// ---- Project ----
+
+QString SicnuPythonApi::projectPath() const
+{
+    return QgsProject::instance()->fileName();
+}
+
+bool SicnuPythonApi::saveProject()
+{
+    return QgsProject::instance()->write();
+}
+
+bool SicnuPythonApi::openProject(const QString &path)
+{
+    return QgsProject::instance()->read(path);
+}
+
+// ---- Layers ----
+
+QStringList SicnuPythonApi::layerNames() const
+{
+    QStringList names;
+    const auto layers = QgsProject::instance()->mapLayers();
+    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
+        names.append(it.value()->name());
+    }
+    return names;
+}
+
+int SicnuPythonApi::layerCount() const
+{
+    return QgsProject::instance()->mapLayers().size();
+}
+
+QString SicnuPythonApi::addRasterLayer(const QString &path, const QString &name)
+{
+    QString layerName = name.isEmpty() ? QFileInfo(path).baseName() : name;
+    auto *layer = new QgsRasterLayer(path, layerName);
+    if (!layer->isValid()) {
+        delete layer;
+        return QString();
+    }
+    QgsProject::instance()->addMapLayer(layer);
+    if (m_canvas) m_canvas->refresh();
+    return layer->name();
+}
+
+QString SicnuPythonApi::addVectorLayer(const QString &path, const QString &name)
+{
+    QString layerName = name.isEmpty() ? QFileInfo(path).baseName() : name;
+    auto *layer = new QgsVectorLayer(path, layerName, "ogr");
+    if (!layer->isValid()) {
+        delete layer;
+        return QString();
+    }
+    QgsProject::instance()->addMapLayer(layer);
+    if (m_canvas) m_canvas->refresh();
+    return layer->name();
+}
+
+bool SicnuPythonApi::removeLayer(const QString &layerName)
+{
+    const auto layers = QgsProject::instance()->mapLayers();
+    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
+        if (it.value()->name() == layerName) {
+            QgsProject::instance()->removeMapLayer(it.key());
+            if (m_canvas) m_canvas->refresh();
+            return true;
+        }
+    }
+    return false;
+}
+
+// ---- Raster Operations ----
+
+QVariantMap SicnuPythonApi::rasterInfo(const QString &layerName) const
+{
+    QVariantMap info;
+    const auto layers = QgsProject::instance()->mapLayers();
+    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
+        auto *rl = qobject_cast<QgsRasterLayer *>(it.value());
+        if (rl && rl->name() == layerName) {
+            info["name"] = rl->name();
+            info["path"] = rl->source();
+            info["width"] = rl->width();
+            info["height"] = rl->height();
+            info["bandCount"] = rl->bandCount();
+            info["crs"] = rl->crs().authid();
+            info["extent"] = QString("%1,%2,%3,%4")
+                .arg(rl->extent().xMinimum())
+                .arg(rl->extent().yMinimum())
+                .arg(rl->extent().xMaximum())
+                .arg(rl->extent().yMaximum());
+            return info;
+        }
+    }
+    return info;
+}
+
+QList<double> SicnuPythonApi::pixelValue(const QString &layerName, double x, double y) const
+{
+    QList<double> values;
+    const auto layers = QgsProject::instance()->mapLayers();
+    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
+        auto *rl = qobject_cast<QgsRasterLayer *>(it.value());
+        if (rl && rl->name() == layerName && rl->dataProvider()) {
+            QgsPointXY point(x, y);
+            for (int band = 1; band <= rl->bandCount(); ++band) {
+                bool ok;
+                double val = rl->dataProvider()->sample(point, band, &ok);
+                values.append(ok ? val : std::numeric_limits<double>::quiet_NaN());
+            }
+            return values;
+        }
+    }
+    return values;
+}
+
+QVariantMap SicnuPythonApi::bandStatistics(const QString &layerName, int band) const
+{
+    QVariantMap stats;
+    const auto layers = QgsProject::instance()->mapLayers();
+    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
+        auto *rl = qobject_cast<QgsRasterLayer *>(it.value());
+        if (rl && rl->name() == layerName && rl->dataProvider()) {
+            QgsRasterBandStats bandStats = rl->dataProvider()->bandStatistics(band);
+            stats["min"] = bandStats.minimumValue;
+            stats["max"] = bandStats.maximumValue;
+            stats["mean"] = bandStats.mean;
+            stats["stdDev"] = bandStats.stdDev;
+            stats["range"] = bandStats.range;
+            return stats;
+        }
+    }
+    return stats;
+}
+
+// ---- Vector Operations ----
+
+QVariantMap SicnuPythonApi::vectorInfo(const QString &layerName) const
+{
+    QVariantMap info;
+    const auto layers = QgsProject::instance()->mapLayers();
+    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
+        auto *vl = qobject_cast<QgsVectorLayer *>(it.value());
+        if (vl && vl->name() == layerName) {
+            info["name"] = vl->name();
+            info["path"] = vl->source();
+            info["featureCount"] = vl->featureCount();
+            info["geometryType"] = static_cast<int>(vl->geometryType());
+            info["crs"] = vl->crs().authid();
+            info["fields"] = vl->fields().names();
+            return info;
+        }
+    }
+    return info;
+}
+
+int SicnuPythonApi::featureCount(const QString &layerName) const
+{
+    const auto layers = QgsProject::instance()->mapLayers();
+    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
+        auto *vl = qobject_cast<QgsVectorLayer *>(it.value());
+        if (vl && vl->name() == layerName) {
+            return vl->featureCount();
+        }
+    }
+    return 0;
+}
+
+// ---- Processing ----
+
+bool SicnuPythonApi::runAlgorithm(const QString &algorithmId, const QVariantMap &parameters)
+{
+    const QgsProcessingAlgorithm *alg = QgsApplication::processingRegistry()->algorithmById(algorithmId);
+    if (!alg) return false;
+
+    std::unique_ptr<QgsProcessingAlgorithm> algo(alg->create());
+    QgsProcessingContext context;
+    context.setProject(QgsProject::instance());
+    QgsProcessingFeedback feedback;
+
+    bool ok = false;
+    algo->run(parameters, context, &feedback, &ok);
+    return ok;
+}
+
+// ---- Map Canvas ----
+
+QVariantMap SicnuPythonApi::canvasExtent() const
+{
+    QVariantMap extent;
+    if (m_canvas) {
+        QgsRectangle ext = m_canvas->extent();
+        extent["xmin"] = ext.xMinimum();
+        extent["ymin"] = ext.yMinimum();
+        extent["xmax"] = ext.xMaximum();
+        extent["ymax"] = ext.yMaximum();
+    }
+    return extent;
+}
+
+void SicnuPythonApi::setCanvasExtent(double xmin, double ymin, double xmax, double ymax)
+{
+    if (m_canvas) {
+        m_canvas->setExtent(QgsRectangle(xmin, ymin, xmax, ymax));
+        m_canvas->refresh();
+    }
+}
+
+void SicnuPythonApi::refreshCanvas()
+{
+    if (m_canvas) m_canvas->refresh();
+}
+
+double SicnuPythonApi::canvasScale() const
+{
+    return m_canvas ? m_canvas->scale() : 0.0;
+}
+
+void SicnuPythonApi::setCanvasScale(double scale)
+{
+    if (m_canvas) {
+        m_canvas->zoomScale(scale);
+    }
+}
+
+// ---- CRS ----
+
+QString SicnuPythonApi::projectCrs() const
+{
+    return QgsProject::instance()->crs().authid();
+}
+
+bool SicnuPythonApi::setProjectCrs(const QString &crsString)
+{
+    QgsCoordinateReferenceSystem crs(crsString);
+    if (!crs.isValid()) return false;
+    QgsProject::instance()->setCrs(crs);
+    if (m_canvas) m_canvas->refresh();
+    return true;
+}
+
+// ---- Application ----
+
+QString SicnuPythonApi::applicationPath() const
+{
+    return QCoreApplication::applicationDirPath();
+}
+
+QString SicnuPythonApi::version() const
+{
+    return QStringLiteral("SICNU GEO RS v0.9.2-dev");
+}

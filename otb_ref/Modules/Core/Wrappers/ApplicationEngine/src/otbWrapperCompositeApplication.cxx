@@ -58,6 +58,14 @@ bool CompositeApplication::AddApplication(std::string appType, std::string key, 
   InternalApplication container;
   container.App  = ApplicationRegistry::CreateApplication(appType);
   container.Desc = desc;
+  if (container.App.IsNull())
+  {
+    // Missing otbapp_<Type>.so on OTB_APPLICATION_PATH — do not dereference.
+    otbAppLogFATAL("Failed to load internal application '" << appType
+                    << "' (key=" << key << "). Ensure otbapp_" << appType
+                    << ".so is installed under OTB_APPLICATION_PATH.");
+    return false;
+  }
   // Setup logger
   container.App->SetLogger(this->GetLogger());
   container.App->AddObserver(AddProcessToWatchEvent(), m_AddProcessCommand.GetPointer());

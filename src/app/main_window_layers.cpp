@@ -177,13 +177,14 @@ void QgisDesktopWindow::onIdentifyResults(const QList<QgsMapToolIdentify::Identi
 void QgisDesktopWindow::addRasterLayer()
 {
     QString filePath = QFileDialog::getOpenFileName(
-        this, "Open Raster Layer",
+        this, tr( "Open Raster Layer" ),
         AppPaths::dataDir(),
-        "Raster Files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.jpeg);;All Files (*.*)"
+        tr( "Raster files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.jpeg *.asc *.dat *.hdr *.bil *.bsq *.bip);;"
+            "ENVI raster (*.dat *.hdr *.img *.bil *.bsq *.bip);;"
+            "All files (*)" )
     );
-    if (!filePath.isEmpty()) {
-        m_layerManager->loadRasterLayer(filePath);
-    }
+    if ( !filePath.isEmpty() )
+        m_layerManager->loadRasterLayer( filePath );
 }
 
 void QgisDesktopWindow::addVectorLayer()

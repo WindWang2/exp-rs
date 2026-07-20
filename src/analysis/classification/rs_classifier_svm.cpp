@@ -7,11 +7,11 @@
 // C=10 — moderately high regularisation penalty to reduce misclassification
 //        on small training sets common in RS workflows.
 // gamma=0.5 — RBF kernel bandwidth; balances locality vs. generalisation.
-// maxIter=200 / eps=1e-4 — tight convergence criteria so the solver
-//        terminates well before the iteration cap on most datasets.
+// maxIter=1000 / eps=1e-4 — allow large multi-class RS problems to converge
+//        after standardisation; still EPS-driven for small sets.
 static constexpr double kSvmC        = 10.0;
 static constexpr double kSvmGamma    = 0.5;
-static constexpr int    kSvmMaxIter  = 200;
+static constexpr int    kSvmMaxIter  = 1000;
 static constexpr double kSvmEps      = 1e-4;
 
 RsClassifierSvm::RsClassifierSvm()

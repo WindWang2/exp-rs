@@ -68,7 +68,7 @@ public:
   typedef otb::TileImageFilter<LabelImageType> TileImageFilterType;
 
   itkNewMacro(Self);
-  itkTypeMacro(Merging, otb::Application);
+  itkTypeMacro(LSMSSmallRegionsMerging, otb::Application);
 
 private:
   ChangeLabelImageFilterType::Pointer m_ChangeLabelFilter;

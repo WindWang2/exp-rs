@@ -59,6 +59,9 @@ class QgsFeatureAction;
 class QgsClipboard;
 class QgsAttributeTableDialog;
 class QgsVectorLayer;
+class SwipeMapTool;
+
+namespace Sicnu { class PythonScriptEditor; }
 
 /**
  * \brief Custom identify tool that emits results as a signal.
@@ -118,6 +121,7 @@ public slots:
     void importLayer();
     void browseStacCatalog();
     void newLayout();
+    void exportLabReport();
     void undo();
     void redo();
     void cutFeatures();
@@ -167,6 +171,7 @@ public slots:
 
     // Comparison tool
     void openComparisonDialog();
+    void toggleSwipeTool();
 
     // Batch processing
     void openBatchProcessingDialog();
@@ -266,6 +271,7 @@ private:
     CustomIdentifyTool *m_identifyTool = nullptr;
     MeasureTool *m_measureDistanceTool = nullptr;
     MeasureTool *m_measureAreaTool = nullptr;
+    SwipeMapTool *m_swipeTool = nullptr;
 
     // Vector editing map tools
     QgsMapToolSelect *m_selectTool = nullptr;
@@ -306,6 +312,7 @@ private:
     QgsMapOverviewCanvas *m_overviewCanvas = nullptr;
     QgsDockWidget *m_identifyDock = nullptr;
     QgsDockWidget *m_spectralDock = nullptr;
+    QgsDockWidget *m_histogramStretchDock = nullptr;
     QgsDockWidget *m_logDock = nullptr;
     QgsDockWidget *m_workflowDock = nullptr;
     QMenu *m_windowMenu = nullptr;
@@ -315,6 +322,9 @@ private:
 
     // Spectral profile display
     SpectralProfileWidget *m_spectralProfile = nullptr;
+
+    // Histogram stretch display
+    class HistogramStretchWidget *m_histogramStretch = nullptr;
 
     // Status bar widgets
     QLabel *m_readyLabel = nullptr;
@@ -342,6 +352,8 @@ private:
 #ifdef SICNU_EMBED_PYTHON
     std::unique_ptr<class SicnuPythonConsole> m_pythonConsole;
     class QgsDockWidget *m_pythonDock = nullptr;
+    std::unique_ptr<Sicnu::PythonScriptEditor> m_pythonScriptEditor;
+    class QgsDockWidget *m_pythonScriptEditorDock = nullptr;
 #endif
 
     friend class LayerTreeMenuProvider;

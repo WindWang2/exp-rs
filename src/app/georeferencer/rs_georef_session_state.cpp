@@ -53,6 +53,8 @@ void RsGeorefSessionState::saveWorkflow( const WorkflowSnapshot &snap )
   s.setValue( QStringLiteral( "%1lastOutputPath" ).arg( QLatin1String( kPrefix ) ), snap.lastOutputPath );
   s.setValue( QStringLiteral( "%1lastDemPath" ).arg( QLatin1String( kPrefix ) ), snap.lastDemPath );
   s.setValue( QStringLiteral( "%1lastPointsPath" ).arg( QLatin1String( kPrefix ) ), snap.lastPointsPath );
+  s.setValue( QStringLiteral( "%1lastDestCrs" ).arg( QLatin1String( kPrefix ) ), snap.lastDestCrsAuthId );
+  s.setValue( QStringLiteral( "%1demZOffset" ).arg( QLatin1String( kPrefix ) ), snap.demZOffset );
   s.setValue( QStringLiteral( "%1syncZoom" ).arg( QLatin1String( kPrefix ) ), snap.syncZoom );
   mLastPointsPath = snap.lastPointsPath;
 }
@@ -69,6 +71,8 @@ RsGeorefSessionState::WorkflowSnapshot RsGeorefSessionState::restoreWorkflow()
   o.lastOutputPath = s.value( QStringLiteral( "%1lastOutputPath" ).arg( QLatin1String( kPrefix ) ) ).toString();
   o.lastDemPath = s.value( QStringLiteral( "%1lastDemPath" ).arg( QLatin1String( kPrefix ) ) ).toString();
   o.lastPointsPath = s.value( QStringLiteral( "%1lastPointsPath" ).arg( QLatin1String( kPrefix ) ) ).toString();
+  o.lastDestCrsAuthId = s.value( QStringLiteral( "%1lastDestCrs" ).arg( QLatin1String( kPrefix ) ) ).toString();
+  o.demZOffset = s.value( QStringLiteral( "%1demZOffset" ).arg( QLatin1String( kPrefix ) ), 0.0 ).toDouble();
   o.syncZoom = s.value( QStringLiteral( "%1syncZoom" ).arg( QLatin1String( kPrefix ) ), true ).toBool();
   // Keep member in sync so lastPointsPath() works after restart without an extra setter.
   mLastPointsPath = o.lastPointsPath;

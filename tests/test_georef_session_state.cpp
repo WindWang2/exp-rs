@@ -45,6 +45,8 @@ TEST_CASE( "SessionState: workflow snapshot round-trip", "[georef][session]" )
   in.lastOutputPath = QStringLiteral( "/tmp/out.tif" );
   in.lastDemPath = QStringLiteral( "/tmp/dem.tif" );
   in.lastPointsPath = QStringLiteral( "/tmp/a.points" );
+  in.lastDestCrsAuthId = QStringLiteral( "EPSG:32650" );
+  in.demZOffset = 12.5;
   in.syncZoom = false;
 
   RsGeorefSessionState s;
@@ -60,6 +62,8 @@ TEST_CASE( "SessionState: workflow snapshot round-trip", "[georef][session]" )
   REQUIRE( out.lastOutputPath == QStringLiteral( "/tmp/out.tif" ) );
   REQUIRE( out.lastDemPath == QStringLiteral( "/tmp/dem.tif" ) );
   REQUIRE( out.lastPointsPath == QStringLiteral( "/tmp/a.points" ) );
+  REQUIRE( out.lastDestCrsAuthId == QStringLiteral( "EPSG:32650" ) );
+  REQUIRE( out.demZOffset == 12.5 );
   REQUIRE( out.syncZoom == false );
   REQUIRE( s.lastPointsPath() == QStringLiteral( "/tmp/a.points" ) );
 }

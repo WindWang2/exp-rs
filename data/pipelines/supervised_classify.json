@@ -1,0 +1,17 @@
+{
+  "name": "supervised_classify_lab",
+  "description": "Train SVM from ROI polygons and classify Landsat sample",
+  "steps": [
+    {
+      "operator": "rs:supervised_classification",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "training": "data/samples/training_samples.shp",
+        "output": "/tmp/sicnu_landcover.tif",
+        "method": "svm",
+        "classField": "class_id",
+        "maxSamplesPerClass": 2000
+      }
+    }
+  ]
+}

@@ -47,15 +47,40 @@ public:
 
   /**
    * Returns the bundled lab sample datasets directory (rasters, vectors).
-   * Checks project-root samples_data/, data/samples_data/, and install paths.
+   * Prefers data/samples/; keeps legacy samples_data/ candidates for one release.
    */
   static QString samplesDataDir()
   {
     const QStringList candidates = {
+      resolveDataPath( "data/samples" ),
       resolveDataPath( "samples_data" ),
       resolveDataPath( "data/samples_data" ),
+      QDir( QCoreApplication::applicationDirPath() ).absoluteFilePath( "../data/samples" ),
+      QDir( QCoreApplication::applicationDirPath() ).absoluteFilePath( "data/samples" ),
       QDir( QCoreApplication::applicationDirPath() ).absoluteFilePath( "../samples_data" ),
       QDir( QCoreApplication::applicationDirPath() ).absoluteFilePath( "samples_data" ),
+    };
+
+    for ( const QString &candidate : candidates )
+    {
+      if ( QDir( candidate ).exists() )
+        return QDir( candidate ).absolutePath();
+    }
+
+    return {};
+  }
+
+  /**
+   * QGIS reference resources (symbology, etc.).
+   * Source tree: refs/qgis/; install layout may still use qgis_ref/.
+   */
+  static QString qgisRefResourcesDir()
+  {
+    const QStringList candidates = {
+      resolveDataPath( "refs/qgis/resources" ),
+      resolveDataPath( "qgis_ref/resources" ),
+      QDir( QCoreApplication::applicationDirPath() ).absoluteFilePath( "../share/sicnu_geo_rs/qgis_ref/resources" ),
+      QDir( QCoreApplication::applicationDirPath() ).absoluteFilePath( "share/sicnu_geo_rs/qgis_ref/resources" ),
     };
 
     for ( const QString &candidate : candidates )

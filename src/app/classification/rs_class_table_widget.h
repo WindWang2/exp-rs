@@ -29,6 +29,8 @@ class RsClassTableWidget : public QWidget
     quint64 pixelCountForRow( int row ) const;
 
     void setCurrentRow( int row );
+    /// Select the row whose class id matches; no-op if not found.
+    void setCurrentClassId( int classId );
     int currentClassId() const;
 
   signals:
@@ -41,4 +43,5 @@ class RsClassTableWidget : public QWidget
   private:
     QTableWidget *mTable = nullptr;
     RsRoiCollection *mRois = nullptr;
+    int mStickyClassId = 0; ///< Survives rebuild when the table temporarily clears selection.
 };

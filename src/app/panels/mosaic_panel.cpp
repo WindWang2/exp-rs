@@ -187,6 +187,9 @@ void MosaicPanel::runMosaic()
             inputs[i].projection = ds.projection();
 
             size_t pixelCount = static_cast<size_t>(inputs[i].width) * static_cast<size_t>(inputs[i].height);
+            constexpr size_t kMaxPixels = 500000000ULL; // ~2 GiB float soft cap per input
+            if ( pixelCount == 0 || pixelCount > kMaxPixels )
+                return QString();
             inputs[i].data.resize(pixelCount);
 
             if (!ds.readBandData(1, inputs[i].data.data(), inputs[i].width, inputs[i].height)) return QString();

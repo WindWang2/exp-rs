@@ -65,6 +65,13 @@ class QgsGCPList : public QObject, public QList<QgsGcpPoint *>
     void clearPoints();
 
     /**
+     * Emit \ref changed() without structural mutation.
+     * Use after in-place edits to QgsGcpPoint fields (e.g. move tool)
+     * so listeners recompute fit / refresh markers / mark dirty.
+     */
+    void notifyPointsMutated();
+
+    /**
      * Creates parallel vectors of enabled source/destination points,
      * with destinations transformed to \a targetCrs if valid.
      */
@@ -91,6 +98,9 @@ class QgsGCPList : public QObject, public QList<QgsGcpPoint *>
     void updateResiduals( QgsGeorefTransform *georefTransform,
                           const QgsCoordinateReferenceSystem &sourceCrs,
                           const QgsCoordinateReferenceSystem &targetCrs );
+
+    /// Zero residual on every owned point (enabled and disabled).
+    void clearResiduals();
 
     /**
      * Writes the GCP list to \a filePath in SICNU .points v2 format.

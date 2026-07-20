@@ -7,8 +7,7 @@ class QComboBox;
 
 /**
  * Dialog for Spatial Filtering operations.
- * Supports Mean, Gaussian, Median, Sobel, and Laplacian filters
- * using the ImageEnhancement algorithm library.
+ * All filters (Mean/Gaussian/Median/Sobel/Laplacian) use OpenCV RSOperators.
  */
 class SpatialFilterDialog : public RasterProcessingDialogBase
 {

@@ -4,6 +4,10 @@
 #include "app_paths.h"
 #include "qgis_app_facade.h"
 
+#ifdef SICNU_EMBED_PYTHON
+#include "widgets/python_script_editor.h"
+#endif
+
 // Vector editing map tools
 #include "qgsmaptooladdfeature.h"
 #include "qgsmaptooladdpart.h"
@@ -50,6 +54,7 @@
 #include <qgsapplication.h>
 #include <qgis.h>
 #include <qgsmapcanvas.h>
+#include <qgsmaptool.h>
 #include <qgsmaptoolpan.h>
 #include <qgsmaptoolzoom.h>
 #include <qgsmaptoolidentify.h>
@@ -77,16 +82,16 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     qDebug() << "Setting up map canvas...";
     setupMapCanvas();
 
-    // Create LayerManager (must come after map canvas + layer tree view exist)
-    m_layerManager = std::make_unique<LayerManager>( m_mapCanvas, m_layerTreeView,
-                                                     m_overviewCanvas, this );
-
     qDebug() << "Setting up menu...";
     setupMenu();
     qDebug() << "Setting up toolbars...";
     setupToolbars();
     qDebug() << "Setting up dock widgets...";
     setupDockWidgets();
+
+    // Create LayerManager (must come after map canvas + layer tree view exist)
+    m_layerManager = std::make_unique<LayerManager>( m_mapCanvas, m_layerTreeView,
+                                                     m_overviewCanvas, this );
     qDebug() << "Setting up status bar...";
     setupStatusBar();
     qDebug() << "Setting up connections...";
@@ -138,7 +143,41 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     qDebug() << "Window initialized";
 }
 
-QgisDesktopWindow::~QgisDesktopWindow() = default;
+QgisDesktopWindow::~QgisDesktopWindow()
+{
+    // Tear down child windows that rebind QgisApp / own canvases first.
+    // Use QWidget* so we don't need full type definitions here.
+    auto disposeChildWindow = []( QWidget *w ) {
+        if (!w)
+            return;
+        w->hide();
+        w->setParent(nullptr);
+        w->deleteLater();
+    };
+    disposeChildWindow(static_cast<QWidget *>(static_cast<void *>(m_classifyWindow)));
+    m_classifyWindow = nullptr;
+    disposeChildWindow(m_obiaWindow);
+    m_obiaWindow = nullptr;
+    disposeChildWindow(static_cast<QWidget *>(static_cast<void *>(m_georefWindow)));
+    m_georefWindow = nullptr;
+
+    // Stop map jobs and release the active map tool before unique_ptr members
+    // and QObject children (canvas) are destroyed — prevents double-delete of
+    // QgsMapTool objects parented to the canvas (exit SIGSEGV).
+    if (m_mapCanvas) {
+        m_mapCanvas->stopRendering();
+        if (QgsMapTool *tool = m_mapCanvas->mapTool())
+            m_mapCanvas->unsetMapTool(tool);
+        m_mapCanvas->setLayers({});
+    }
+
+    // Destroy tool owners while the canvas QObject still exists so tools can
+    // safely reparent/unset. unique_ptr destruction order is reverse of
+    // declaration; force explicit reset here for clarity.
+    m_toolManager.reset();
+    m_layerManager.reset();
+    m_pluginManager.reset();
+}
 
 void QgisDesktopWindow::setupUi()
 {
@@ -194,9 +233,9 @@ void QgisDesktopWindow::setupMapCanvas()
         }
     }
 
-    // Initialize QgisApp facade for ported tools
+    // Initialize QgisApp facade for ported tools (wire clipboard so cut/copy/paste work)
     auto *vectorLayerTools = new QgsGuiVectorLayerTools();
-    QgisApp::initialize(m_mapCanvas, m_cadDock, vectorLayerTools, m_messageBar, this);
+    QgisApp::initialize( m_mapCanvas, m_cadDock, vectorLayerTools, m_messageBar, this, m_clipboard );
 
     // Map Tools Setup (Delegated to MapToolManager)
     m_toolManager = std::make_unique<MapToolManager>(this, m_mapCanvas, m_cadDock);

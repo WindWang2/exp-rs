@@ -1,15 +1,14 @@
 {
   "id": "otb_bilateral_filter",
-  "name": "OTB Bilateral Filter",
+  "name": "OTB Smoothing (Gaussian)",
   "group": "Image Filtering",
   "group_id": "filtering",
-  "command": "otbcli_BilateralImageFilter",
-  "tags": ["otb", "filter", "bilateral", "smoothing", "custom"],
+  "command": "otbcli_Smoothing",
+  "tags": ["otb", "filter", "smoothing", "gaussian", "custom"],
   "parameters": [
     {"name": "INPUT", "type": "raster", "description": "Input raster"},
     {"name": "OUTPUT", "type": "output_raster", "description": "Filtered output raster"},
-    {"name": "RANGE", "type": "number", "description": "Range standard deviation", "default": 15.0},
-    {"name": "SPATIAL", "type": "number", "description": "Spatial standard deviation", "default": 3.0}
+    {"name": "SPATIAL", "type": "number", "description": "Gaussian spatial standard deviation (pixels)", "default": 3.0}
   ],
-  "args": ["-in", "{INPUT}", "-out", "{OUTPUT}", "-filter.range", "{RANGE}", "-filter.spatial", "{SPATIAL}"]
+  "args": ["-in", "{INPUT}", "-out", "{OUTPUT}", "-type", "gaussian", "-type.gaussian.stdev", "{SPATIAL}"]
 }

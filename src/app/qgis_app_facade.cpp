@@ -4,13 +4,16 @@
 #include <qgsadvanceddigitizingdockwidget.h>
 #include <qgsvectorlayertools.h>
 #include <qgsmessagebar.h>
+#include <qgsstatusbar.h>
 #include <qgsattributeeditorcontext.h>
 #include <qgsvectorlayer.h>
 #include <qgsproject.h>
 #include <qgscoordinatereferencesystem.h>
+#include "qgsclipboard.h"
 #include <QAction>
 #include <QToolBar>
 #include <QMainWindow>
+#include <QStatusBar>
 
 // ── Singleton ──────────────────────────────────────────────────────────────
 
@@ -43,6 +46,7 @@ void QgisApp::initialize(
   QgsVectorLayerTools *vectorLayerTools,
   QgsMessageBar *messageBar,
   QMainWindow *mainWindow,
+  QgsClipboard *clipboard,
   QObject *parent )
 {
   QgisApp *app = instance();
@@ -55,6 +59,57 @@ void QgisApp::initialize(
   app->mVectorLayerTools = vectorLayerTools;
   app->mMessageBar = messageBar;
   app->mMainWindow = mainWindow;
+  if ( clipboard )
+    app->mClipboard = clipboard;
+
+  // Own a real QgsStatusBar so vertex tool / map tools can show messages.
+  if ( mainWindow && !app->mStatusBar )
+  {
+    app->mStatusBar = new QgsStatusBar( mainWindow );
+    if ( QStatusBar *sb = mainWindow->statusBar() )
+    {
+      sb->addPermanentWidget( app->mStatusBar, 1 );
+      app->mStatusBar->setParentStatusBar( sb );
+    }
+  }
+
+  // Base context is the "home" binding — clear any pending restore snapshot.
+  app->mHasSavedContext = false;
+}
+
+void QgisApp::rebind(
+  QgsMapCanvas *canvas,
+  QgsAdvancedDigitizingDockWidget *cadDock,
+  QgsVectorLayerTools *vectorLayerTools,
+  QgsMessageBar *messageBar,
+  QMainWindow *mainWindow )
+{
+  if ( !mHasSavedContext )
+  {
+    mSavedCanvas = mCanvas;
+    mSavedCadDock = mCadDock;
+    mSavedVectorLayerTools = mVectorLayerTools;
+    mSavedMessageBar = mMessageBar;
+    mSavedMainWindow = mMainWindow;
+    mHasSavedContext = true;
+  }
+  mCanvas = canvas;
+  mCadDock = cadDock;
+  mVectorLayerTools = vectorLayerTools;
+  mMessageBar = messageBar;
+  mMainWindow = mainWindow;
+}
+
+void QgisApp::restoreContext()
+{
+  if ( !mHasSavedContext )
+    return;
+  mCanvas = mSavedCanvas;
+  mCadDock = mSavedCadDock;
+  mVectorLayerTools = mSavedVectorLayerTools;
+  mMessageBar = mSavedMessageBar;
+  mMainWindow = mSavedMainWindow;
+  mHasSavedContext = false;
 }
 
 // ── Accessors ───────────────────────────────────────────────────────────────
@@ -68,9 +123,49 @@ QMainWindow *QgisApp::mainWindow() const { return mMainWindow; }
 
 QgsVertexEditor *QgisApp::vertexEditor() const { return mVertexEditor; }
 
-void QgisApp::addUserInputWidget( QWidget *widget ) { Q_UNUSED( widget ) }
+void QgisApp::addUserInputWidget( QWidget *widget )
+{
+  if ( !widget )
+    return;
 
-class QgsStatusBar *QgisApp::statusBarIface() const { return nullptr; }
+  if ( mCanvas )
+  {
+    widget->setParent( mCanvas );
+    const QSize hint = widget->sizeHint().isValid() ? widget->sizeHint() : widget->size();
+    const int x = 10;
+    const int y = qMax( 0, mCanvas->height() - hint.height() - 10 );
+    widget->move( x, y );
+    widget->show();
+    widget->raise();
+    return;
+  }
+
+  if ( mMainWindow )
+  {
+    widget->setParent( mMainWindow );
+    widget->setWindowFlags( Qt::Tool | Qt::FramelessWindowHint );
+    widget->show();
+  }
+}
+
+QgsStatusBar *QgisApp::statusBarIface() const
+{
+  if ( !mStatusBar )
+  {
+    // Lazy create if initialize ran without a main window (or was never called).
+    QWidget *parent = mMainWindow ? static_cast<QWidget *>( mMainWindow ) : nullptr;
+    mStatusBar = new QgsStatusBar( parent );
+    if ( mMainWindow )
+    {
+      if ( QStatusBar *sb = mMainWindow->statusBar() )
+      {
+        sb->addPermanentWidget( mStatusBar, 1 );
+        mStatusBar->setParentStatusBar( sb );
+      }
+    }
+  }
+  return mStatusBar;
+}
 
 QString QgisApp::styleSheet() const { return QString(); }
 
@@ -98,9 +193,33 @@ void QgisApp::deleteSelected( QgsVectorLayer *layer, QWidget *parent )
   layer->deleteFeatures( layer->selectedFeatureIds() );
 }
 
-void QgisApp::cutSelectionToClipboard( QgsVectorLayer *layer ) { Q_UNUSED( layer ) }
-void QgisApp::copySelectionToClipboard( QgsVectorLayer *layer ) { Q_UNUSED( layer ) }
-void QgisApp::pasteFromClipboard( QgsVectorLayer *layer ) { Q_UNUSED( layer ) }
+void QgisApp::cutSelectionToClipboard( QgsVectorLayer *layer )
+{
+  if ( !layer || !mClipboard )
+    return;
+  mClipboard->replaceWithCopyOf( layer );
+  if ( layer->isEditable() )
+    layer->deleteSelectedFeatures();
+}
+
+void QgisApp::copySelectionToClipboard( QgsVectorLayer *layer )
+{
+  if ( !layer || !mClipboard )
+    return;
+  mClipboard->replaceWithCopyOf( layer );
+}
+
+void QgisApp::pasteFromClipboard( QgsVectorLayer *layer )
+{
+  if ( !layer || !mClipboard || !layer->isEditable() )
+    return;
+  QgsFeatureList features = mClipboard->transformedCopyOf( layer->crs(), layer->fields() );
+  if ( features.isEmpty() )
+    return;
+  layer->addFeatures( features );
+  if ( mCanvas )
+    mCanvas->refresh();
+}
 
 bool QgisApp::toggleEditing( QgsVectorLayer *layer, bool allowCancel )
 {

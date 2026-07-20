@@ -1,5 +1,7 @@
 // src/processing/providers/otb_tools/provider.cpp
 #include "provider.h"
+#include "processing/providers/generic_cli/generic_cli_algorithm.h"
+#include "processing/tools/cli_tool_discovery.h"
 #include "algorithms/otb_band_math.h"
 #include "algorithms/otb_segmentation.h"
 #include "algorithms/otb_extract_roi.h"
@@ -94,4 +96,11 @@ void OtbToolsProvider::loadAlgorithms()
     // Info Tools
     addAlgorithm(new OtbPixelInfoAlgorithm());
     addAlgorithm(new OtbReadImageInfoAlgorithm());
+
+    // Auto-discovered OTB applications not covered by handcrafted wrappers
+    for ( const QString &appName : CliToolDiscovery::discoverOtbApplicationNames() )
+    {
+        addAlgorithm( new GenericCliAlgorithm(
+            CliToolDiscovery::makeOtbDiscoveredConfig( appName ), id() ) );
+    }
 }

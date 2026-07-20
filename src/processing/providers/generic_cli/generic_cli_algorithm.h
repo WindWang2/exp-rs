@@ -46,5 +46,7 @@ protected:
 private:
     QJsonObject m_config;
     QString m_providerId;
-    QStringList buildArgs(const QVariantMap &parameters, QgsProcessingFeedback *feedback) const;
+    QString resolveCommand( const QString &command ) const;
+    QString resolveParameterValue( const QString &paramName, const QVariant &value, QgsProcessingContext &context ) const;
+    QStringList buildArgs( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) const;
 };

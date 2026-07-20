@@ -7,6 +7,11 @@
 #include <random>
 #include <vector>
 
+// NOTE: Stratification is by class label at the *pixel* level. Adjacent pixels
+// from the same ROI polygon can land in both train and test, so reported OA/Kappa
+// is optimistic under spatial autocorrelation. Prefer ROI-level splits for
+// scientific accuracy reporting when that API is available.
+
 RsTrainTestSplit RsClassificationSplit::stratifiedSplit( const cv::Mat &X,
                                                          const cv::Mat &y,
                                                          double ratio )

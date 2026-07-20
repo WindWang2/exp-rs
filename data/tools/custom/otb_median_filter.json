@@ -1,14 +1,14 @@
 {
-  "id": "otb_median_filter",
-  "name": "OTB Median Filter",
+  "id": "otb_mean_filter",
+  "name": "OTB Mean Filter",
   "group": "Image Filtering",
   "group_id": "filtering",
-  "command": "otbcli_MeanImageFilter",
-  "tags": ["otb", "filter", "median", "smoothing", "custom"],
+  "command": "otbcli_Smoothing",
+  "tags": ["otb", "filter", "mean", "smoothing", "custom"],
   "parameters": [
     {"name": "INPUT", "type": "raster", "description": "Input raster"},
     {"name": "OUTPUT", "type": "output_raster", "description": "Filtered output raster"},
     {"name": "RADIUS", "type": "number", "description": "Filter radius (pixels)", "default": 2}
   ],
-  "args": ["-in", "{INPUT}", "-out", "{OUTPUT}", "-filter.radius", "{RADIUS}"]
+  "args": ["-in", "{INPUT}", "-out", "{OUTPUT}", "-type", "mean", "-type.mean.radius", "{RADIUS}"]
 }

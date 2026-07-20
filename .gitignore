@@ -1,17 +1,54 @@
+# Python
 __pycache__/
 *.pyc
+.pytest_cache/
+
+# Build trees (all out-of-source variants)
 build/
 build-*/
-*.so
-.pytest_cache/
-*.log
-qgis_ref/
-data/
-.context/
+cmake-build/
+cmake-build*/
 Testing/
-CTestCustom.cmake
-*.png
-# OTB non-essential dirs (excluded from git tracking)
+# CMake may emit this under a build tree; do not ignore a root copy if tracked intentionally
+**/CTestCustom.cmake
+
+# Shared objects / logs / runtime DB
+*.so
+*.a
+*.log
+symbology-style.db
+*.aux.xml
+compile_commands.json
+
+# Screenshots / local images at root (assets live under images/ or docs/)
+/*.png
+
+# Local large rasters under data/; re-include tracked configs + samples
+data/*
+!data/processing/
+!data/processing/**
+!data/tools/
+!data/tools/**
+!data/schemas/
+!data/schemas/**
+!data/pipelines/
+!data/pipelines/**
+!data/samples/
+!data/samples/**
+!data/sample_crops.tif
+!data/test_vectors.geojson
+
+# Test golden data always tracked
+!tests/data/
+!tests/data/**
+
+# Reference trees (local / optional)
+qgis_ref/
+refs/
+boost_ref/
+.context/
+
+# OTB non-essential dirs (if tree present at root)
 otb_ref/CI/
 otb_ref/Docker/
 otb_ref/Documentation/
@@ -23,10 +60,11 @@ otb_ref/.gitlab/
 otb_ref/.gitlab-ci.yml
 otb_ref/.gitmodules
 otb_ref/sonar-project.properties
-# Allow committed golden fingerprints for Task 11.5.6 RPC regression.
-!tests/data/
-!tests/data/**
-vendor/_deps/
 
-# Superpowers / agent worktrees
+# Local optional dependency trees (GDAL/PROJ/GEOS/Boost unpacks — not source of truth)
+vendor/
+
+# Superpowers / agent worktrees / local planning sessions
 .worktrees/
+.superpowers/
+.planning/

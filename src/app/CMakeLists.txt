@@ -40,6 +40,7 @@ add_executable(sicnu_geo_rs
     layout/qgslayoutdesignerdialog.cpp
     map_tools/measure_tool.cpp
     widgets/histogram_widget.cpp
+    widgets/histogram_stretch_widget.cpp
     widgets/spectral_profile_widget.cpp
     widgets/progress_dialog.cpp
     widgets/comparison_widget.cpp
@@ -51,6 +52,7 @@ add_executable(sicnu_geo_rs
     # Layer and map tool managers
     layer_manager.cpp
     map_tools/map_tool_manager.cpp
+    map_tools/swipe_map_tool.cpp
 
     # MCP server + STAC client
     ${CMAKE_SOURCE_DIR}/src/agent/mcp_server.cpp
@@ -163,6 +165,8 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     qgis_app_georef
     sicnu_core
     sicnu_processing
+    sicnu_operators
+    jsoncpp
     CURL::libcurl
     ${PCRE2_16}
     ${PCRE2_8}
@@ -215,9 +219,16 @@ install(FILES ${CMAKE_SOURCE_DIR}/resources/icons.qrc
         DESTINATION share/sicnu_geo_rs/resources)
 
 # Install QGIS reference data (symbology, projections)
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/qgis_ref/resources
-        DESTINATION share/sicnu_geo_rs/qgis_ref
-        PATTERN "*.db" EXCLUDE)
+# Source lives under refs/qgis/; install path stays qgis_ref for runtime compatibility.
+if(EXISTS ${CMAKE_SOURCE_DIR}/refs/qgis/resources)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/refs/qgis/resources
+            DESTINATION share/sicnu_geo_rs/qgis_ref
+            PATTERN "*.db" EXCLUDE)
+elseif(EXISTS ${CMAKE_SOURCE_DIR}/qgis_ref/resources)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/qgis_ref/resources
+            DESTINATION share/sicnu_geo_rs/qgis_ref
+            PATTERN "*.db" EXCLUDE)
+endif()
 
 # Install desktop file (only if packaging files exist)
 if(EXISTS ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.desktop)

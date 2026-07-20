@@ -206,7 +206,9 @@ QgsImageWarper::Result QgsImageWarper::warpFile(
     if ( destResY > 0.0 )
       destResY = -destResY;
 
-    if ( adfGeoTransform[0] <= 0.0 || adfGeoTransform[5] >= 0.0 )
+    // Only reject true orientation failure (pixel height not north-up).
+    // Origin X may legitimately be ≤ 0 (e.g. western hemisphere / local CRS).
+    if ( adfGeoTransform[5] >= 0.0 )
     {
       QgsDebugError( u"Image is not north up after GDALSuggestedWarpOutput, bailing out."_s );
       return QgsImageWarper::Result::InvalidParameters;

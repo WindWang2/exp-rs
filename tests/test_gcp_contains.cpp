@@ -73,3 +73,32 @@ TEST_CASE( "GCP contains: hit inside search radius on SRC", "[georef][contains]"
 
   REQUIRE_FALSE( dp.contains( QgsPointXY( 0, 0 ), QgsGcpPoint::PointType::Source, dist ) );
 }
+
+TEST_CASE( "GCP contains: hit inside search radius on DEST", "[georef][contains]" )
+{
+  ensureApp();
+  QgsMapCanvas src;
+  src.resize( 400, 400 );
+  src.mapSettings().setOutputSize( QSize( 400, 400 ) );
+  src.setExtent( QgsRectangle( 0, 0, 100, 100 ) );
+
+  QgsMapCanvas dst;
+  dst.resize( 400, 400 );
+  dst.mapSettings().setOutputSize( QSize( 400, 400 ) );
+  dst.setExtent( QgsRectangle( 0, 0, 100, 100 ) );
+
+  QgsGcpPoint gcp( QgsPointXY( 50, 50 ), QgsPointXY( 40, 40 ),
+                   QgsCoordinateReferenceSystem( QStringLiteral( "EPSG:4326" ) ), true );
+  QgsGeorefDataPoint dp( &src, &dst, &gcp );
+  dp.setId( 2 );
+  dp.updateMarkers();
+
+  REQUIRE( dp.destinationItem() );
+
+  double dist = -1;
+  REQUIRE( dp.contains( QgsPointXY( 40, 40 ), QgsGcpPoint::PointType::Destination, dist ) );
+  REQUIRE( dist >= 0.0 );
+  REQUIRE( dist < 1.0 );
+
+  REQUIRE_FALSE( dp.contains( QgsPointXY( 0, 0 ), QgsGcpPoint::PointType::Destination, dist ) );
+}

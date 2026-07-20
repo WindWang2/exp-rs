@@ -1,0 +1,16 @@
+{
+  "name": "obia_segment_lab",
+  "description": "Simple OBIA segmentation on Landsat sample",
+  "steps": [
+    {
+      "operator": "rs:obia_segment",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "output": "/tmp/sicnu_segments.tif",
+        "smoothKernel": 5,
+        "quantizeBins": 32,
+        "minRegionSize": 50
+      }
+    }
+  ]
+}

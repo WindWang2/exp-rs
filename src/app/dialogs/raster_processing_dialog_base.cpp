@@ -3,6 +3,11 @@
 #include "async_gdal_runner.h"
 #include "async_algorithm_runner.h"
 
+#include "operators/framework/rs_operator_registry.h"
+#include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_error.h"
+#include "operators/framework/rs_operator.h"
+
 #include <processing/qgsprocessingalgorithm.h>
 #include <processing/qgsprocessingcontext.h>
 
@@ -19,6 +24,14 @@
 RasterProcessingDialogBase::RasterProcessingDialogBase(QWidget *parent)
     : QDialog(parent)
 {
+}
+
+void RasterProcessingDialogBase::reject()
+{
+    // Guard close/Cancel while a GDAL or algorithm task is in flight.
+    if (isRunning())
+        return;
+    QDialog::reject();
 }
 
 void RasterProcessingDialogBase::setRasterLayer(QgsRasterLayer *layer)
@@ -89,6 +102,8 @@ void RasterProcessingDialogBase::startRun()
     m_running = true;
     if (m_runButton)
         m_runButton->setEnabled(false);
+    // Prevent Esc / window-close from destroying the dialog mid-run.
+    setCursor(Qt::WaitCursor);
 }
 
 void RasterProcessingDialogBase::finishRun()
@@ -96,6 +111,7 @@ void RasterProcessingDialogBase::finishRun()
     m_running = false;
     if (m_runButton)
         m_runButton->setEnabled(true);
+    unsetCursor();
 }
 
 void RasterProcessingDialogBase::runGdalTask(const std::function<QString()> &task)
@@ -135,6 +151,43 @@ void RasterProcessingDialogBase::runAlgorithmTask(const QgsProcessingAlgorithm *
     m_algorithmRunner->run(algorithm, parameters, context);
 }
 
+void RasterProcessingDialogBase::runOperatorTask(const QString &operatorId,
+                                                 const Json::Value &params)
+{
+    if (isRunning())
+        return;
+
+    // Capture by value: params and operatorId must outlive the UI thread call.
+    const std::string opId = operatorId.toStdString();
+    const Json::Value paramsCopy = params;
+    const QString errMarker = AsyncGdalRunner::errorMarker();
+
+    runGdalTask([opId, paramsCopy, errMarker]() -> QString {
+        try {
+            auto op = sicnu::operators::RSOperatorRegistry::instance().create(opId);
+            if (!op) {
+                return errMarker + QStringLiteral("Operator not registered: %1")
+                                       .arg(QString::fromStdString(opId));
+            }
+
+            sicnu::operators::RSOperatorContext context;
+            const Json::Value result = op->execute(paramsCopy, context);
+
+            if (result.isMember("output") && result["output"].isString()) {
+                return QString::fromStdString(result["output"].asString());
+            }
+            return errMarker + QStringLiteral("Operator '%1' did not return an output path")
+                                   .arg(QString::fromStdString(opId));
+        } catch (const sicnu::operators::RSOperatorError &e) {
+            return errMarker + QString::fromStdString(e.message());
+        } catch (const std::exception &e) {
+            return errMarker + QString::fromUtf8(e.what());
+        } catch (...) {
+            return errMarker + QStringLiteral("Unknown operator error");
+        }
+    });
+}
+
 void RasterProcessingDialogBase::handleCompleted(const QString &outputPath)
 {
     cleanupRunResources();
@@ -149,7 +202,9 @@ void RasterProcessingDialogBase::handleFailed(const QString &error)
     cleanupRunResources();
     finishRun();
     QgsMessageLog::logMessage(error, toolName(), Qgis::MessageLevel::Critical);
-    QMessageBox::critical(this, dialogTitle(), tr("Operation failed. See log for details."));
+    QMessageBox::critical(this, dialogTitle(),
+                          error.isEmpty() ? tr("Operation failed. See log for details.")
+                                          : error);
 }
 
 void RasterProcessingDialogBase::onCompleted(const QString &outputPath)

@@ -44,6 +44,46 @@ bool ToolPathManager::isGdalAvailable() const
     return !gdalToolPath("gdal_translate").isEmpty();
 }
 
+namespace
+{
+QString findOtbCliInDirectory( const QString &dir, const QString &cliName )
+{
+    if ( dir.isEmpty() )
+        return QString();
+
+    const QStringList candidates = {
+        QDir( dir ).filePath( cliName ),
+        QDir( dir ).filePath( QStringLiteral( "bin/" ) + cliName ),
+    };
+
+    for ( const QString &candidate : candidates )
+    {
+        if ( QFileInfo::exists( candidate ) )
+            return candidate;
+    }
+
+    return QString();
+}
+} // namespace
+
+QString ToolPathManager::otbBundleDir() const
+{
+    QString appDir = QCoreApplication::applicationDirPath();
+    for ( const QString &candidate : {
+              // Dev build: binary in ${CMAKE_BINARY_DIR}/, bundle in ${CMAKE_BINARY_DIR}/tools/otb
+              QDir( appDir ).filePath( QStringLiteral( "tools/otb" ) ),
+              // Installed layout: binary in prefix/bin/, bundle in prefix/tools/otb
+              QDir( appDir ).filePath( QStringLiteral( "../tools/otb" ) ),
+              QDir( appDir ).filePath( QStringLiteral( "../../tools/otb" ) ),
+          } )
+    {
+        const QString binDir = QDir( candidate ).filePath( QStringLiteral( "bin" ) );
+        if ( QFileInfo::exists( QDir( binDir ).filePath( QStringLiteral( "otbcli" ) ) ) )
+            return QDir::cleanPath( candidate );
+    }
+    return QString();
+}
+
 QString ToolPathManager::otbToolPath(const QString &appName) const
 {
     QMutexLocker locker(&m_mutex);
@@ -52,26 +92,50 @@ QString ToolPathManager::otbToolPath(const QString &appName) const
 
     QString cliName = "otbcli_" + appName;
 
-    // 1. Custom path
-    if (!customPath.isEmpty()) {
-        QString p = QDir(customPath).filePath(cliName);
-        if (QFileInfo::exists(p)) return p;
+    // 1. Custom path (directory root or bin/)
+    if ( const QString customTool = findOtbCliInDirectory( customPath, cliName ); !customTool.isEmpty() )
+        return customTool;
+
+    // 2. Vendored bundle staged by sicnu_otb_bundle (build/tools/otb)
+    if ( const QString bundleDir = otbBundleDir(); !bundleDir.isEmpty() )
+    {
+        if ( const QString bundled = findOtbCliInDirectory( bundleDir, cliName ); !bundled.isEmpty() )
+            return bundled;
     }
 
-    // 2. App directory (bundled OTB — primary path for packaged builds)
-    QString appPath = findInAppDir("tools/otb", cliName);
-    if (!appPath.isEmpty()) return appPath;
+    // 3. App directory (bundled OTB — primary path for packaged builds)
+    if ( const QString appPath = findInAppDir( "tools/otb", cliName ); !appPath.isEmpty() )
+        return appPath;
+    if ( const QString appBinPath = findInAppDir( "tools/otb/bin", cliName ); !appBinPath.isEmpty() )
+        return appBinPath;
 
-    // 3. App directory relative to binary (for development builds)
+    // 5. App directory relative to binary (for development builds)
     QString appDir = QCoreApplication::applicationDirPath();
-    QString devPath = QDir(appDir).filePath("../tools/otb/" + cliName);
-    if (QFileInfo::exists(devPath)) return QDir::cleanPath(devPath);
+    for ( const QString &devDir : {
+              QDir( appDir ).filePath( QStringLiteral( "tools/otb" ) ),
+              QDir( appDir ).filePath( QStringLiteral( "tools/otb/bin" ) ),
+              QDir( appDir ).filePath( QStringLiteral( "../tools/otb" ) ),
+              QDir( appDir ).filePath( QStringLiteral( "../tools/otb/bin" ) ),
+              QDir( appDir ).filePath( QStringLiteral( "../../tools/otb/bin" ) ),
+          } )
+    {
+        if ( const QString devPath = findOtbCliInDirectory( devDir, cliName ); !devPath.isEmpty() )
+            return QDir::cleanPath( devPath );
+    }
 
-    // 4. Environment variable
-    QString envPath = findInEnv("SICNU_OTB_PATH", cliName);
-    if (!envPath.isEmpty()) return envPath;
+    // 6. Environment variable
+    if ( const QString envPath = findInEnv( "SICNU_OTB_PATH", cliName ); !envPath.isEmpty() )
+        return envPath;
+    const QString envDir = QProcessEnvironment::systemEnvironment().value( QStringLiteral( "SICNU_OTB_PATH" ) );
+    if ( const QString envBinPath = findOtbCliInDirectory( envDir, cliName ); !envBinPath.isEmpty() )
+        return envBinPath;
 
-    // 5. System PATH (fallback)
+    // 7. Build-tree bin/ (otbcli_* emitted next to otbApplicationLauncherCommandLine)
+    const QString buildBin = QDir( QCoreApplication::applicationDirPath() ).filePath( QStringLiteral( "../bin" ) );
+    if ( const QString devTool = findOtbCliInDirectory( buildBin, cliName ); !devTool.isEmpty() )
+        return QDir::cleanPath( devTool );
+
+    // 8. System PATH (fallback)
     return findInSystemPath(cliName);
 }
 

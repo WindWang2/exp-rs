@@ -3,6 +3,7 @@
 
 #include "layer_manager.h"
 #include "layer_tree_menu.h"
+#include "widgets/histogram_stretch_widget.h"
 
 #include <QStatusBar>
 
@@ -205,6 +206,11 @@ void QgisDesktopWindow::onLayerTreeClicked(const QModelIndex &index)
         QgsMapLayer *layer = layerNode->layer();
         m_mapCanvas->setCurrentLayer(layer);
         updateEditingUI(qobject_cast<QgsVectorLayer *>(layer));
+
+        if (m_histogramStretch) {
+            if (auto *rl = qobject_cast<QgsRasterLayer *>(layer))
+                m_histogramStretch->setRasterLayer(rl);
+        }
     } else {
         m_mapCanvas->setCurrentLayer(nullptr);
         updateEditingUI(nullptr);

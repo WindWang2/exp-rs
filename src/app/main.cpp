@@ -10,13 +10,16 @@
 
 #include <QApplication>
 #include <QTimer>
+#include <QDir>
 #include <QFileInfo>
 #include <QPointer>
 #include <QFile>
 #include <QFontDatabase>
+#include <QIcon>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QDateTime>
+#include <memory>
 
 // QGIS C++ includes
 #include <qgsapplication.h>
@@ -44,6 +47,7 @@
 #include "processing/providers/otb_tools/provider.h"
 #include "processing/providers/qgis_algorithms/provider.h"
 #include "processing/providers/generic_cli/provider.h"
+#include "processing/tools/tool_path_manager.h"
 
 // Python embedding (disabled — Python runtime removed, pybind11 console deferred)
 // #include "python/qgis_python.h"
@@ -82,8 +86,15 @@ int main(int argc, char *argv[])
     // Heap-allocated to avoid destructor crash during DSO cleanup
     QgsApplication *app = new QgsApplication(argc, argv, !mcpMode);
     app->setApplicationName("SICNU GEO RS");
+    app->setApplicationDisplayName(QStringLiteral("RS Studio"));
     app->setApplicationVersion("1.0");
     app->setOrganizationName("SICNU");
+    // Application / window icon (resources/icons/app_icon.svg via icons.qrc)
+    {
+        const QIcon appIcon(QStringLiteral(":/icons/app_icon"));
+        if (!appIcon.isNull())
+            app->setWindowIcon(appIcon);
+    }
 
     // Set prefix path and initialize providers (GDAL, PROJ, etc.)
     qDebug() << "Setting prefix path...";
@@ -95,13 +106,27 @@ int main(int argc, char *argv[])
     // Import predefined color ramps (Viridis, Magma, Spectral, etc.)
     QgsStyle *style = QgsStyle::defaultStyle();
     if (style->colorRampNames().isEmpty()) {
-        QString xmlPath = AppPaths::resolveDataPath("qgis_ref/resources/symbology-style.xml");
-        if (QFileInfo::exists(xmlPath)) {
+        const QString resDir = AppPaths::qgisRefResourcesDir();
+        const QString xmlPath = resDir.isEmpty()
+            ? QString()
+            : QDir( resDir ).filePath( QStringLiteral( "symbology-style.xml" ) );
+        if ( !xmlPath.isEmpty() && QFileInfo::exists( xmlPath ) ) {
             style->importXml(xmlPath);
             qDebug() << "Imported color ramps from:" << xmlPath;
         } else {
-            qWarning() << "symbology-style.xml not found at:" << xmlPath;
+            qWarning() << "symbology-style.xml not found (tried refs/qgis and qgis_ref resources)";
         }
+    }
+
+    // Load custom GDAL/OTB tool paths from preferences
+    {
+        QSettings toolSettings;
+        const QString gdalPath = toolSettings.value( QStringLiteral( "tools/gdalPath" ) ).toString();
+        const QString otbPath = toolSettings.value( QStringLiteral( "tools/otbPath" ) ).toString();
+        if ( !gdalPath.isEmpty() )
+            ToolPathManager::instance().setGdalPath( gdalPath );
+        if ( !otbPath.isEmpty() )
+            ToolPathManager::instance().setOtbPath( otbPath );
     }
 
     // Register processing providers
@@ -170,20 +195,21 @@ int main(int argc, char *argv[])
         qWarning() << "Could not load theme:" << qssPath;
     }
 
-    // Create and initialize layer tree
+    // Heap-allocated: must be destroyed before QgsApplication teardown
     qDebug() << "Creating window...";
-    QgisDesktopWindow window;
+    auto window = std::make_unique<QgisDesktopWindow>();
+    window->setWindowIcon(app->windowIcon());
     qDebug() << "Initializing layer tree...";
-    window.initLayerTree();
+    window->initLayerTree();
 
     qDebug() << "Showing window...";
-    window.show();
+    window->show();
     qDebug() << "Window shown";
 
     // Auto-load sample data if available
     QString samplePath = AppPaths::resolveDataPath("data/sample_crops.tif");
     if (QFileInfo::exists(samplePath)) {
-        QPointer<QgisDesktopWindow> safeWindow(&window);
+        QPointer<QgisDesktopWindow> safeWindow(window.get());
         QTimer::singleShot(500, [safeWindow, samplePath]() {
             if (!safeWindow) return;
             auto *layer = new QgsRasterLayer(samplePath, "sample_crops");
@@ -202,11 +228,12 @@ int main(int argc, char *argv[])
         });
     }
 
-    int result = app->exec();
+    const int result = app->exec();
 
     // Python embedding disabled
     // QgisPython::instance().finalize();
 
+    window.reset();
     delete logFile;
     delete app;
     return result;

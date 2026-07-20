@@ -2,6 +2,7 @@
 #include "core/sicnu_logging.h"
 
 #include <qgsmapcanvas.h>
+#include <qgsmaptool.h>
 #include <qgsmaptoolpan.h>
 #include <qgsmaptoolzoom.h>
 #include <qgsmaptoolidentify.h>
@@ -42,14 +43,59 @@ MapToolManager::MapToolManager(QgisDesktopWindow *mainWindow, QgsMapCanvas *canv
 
 MapToolManager::~MapToolManager()
 {
-    // Clean up all map tools that weren't taken by the canvas
+    // QgsMapTool is QObject-parented to the canvas. We must unset the active
+    // tool and reparent before delete, otherwise canvas::~QObject will
+    // double-delete remaining tools during QWidget teardown (SIGSEGV).
+    if (m_canvas) {
+        if (QgsMapTool *active = m_canvas->mapTool())
+            m_canvas->unsetMapTool(active);
+    }
+
+    // Include tools created after the initial m_allTools list was frozen.
+    const QList<QgsMapTool *> extras = {
+        m_fillRingTool, m_deletePartTool, m_deleteRingTool,
+        m_trimExtendTool, m_chamferFilletTool, m_featureArrayTool,
+        m_vertexTool
+    };
+    for (QgsMapTool *t : extras) {
+        if (t && !m_allTools.contains(t))
+            m_allTools.append(t);
+    }
+
     for (QgsMapTool *tool : m_allTools) {
-        // Only delete if not currently set on canvas
-        if (m_canvas && m_canvas->mapTool() != tool) {
-            delete tool;
-        }
+        if (!tool)
+            continue;
+        tool->setParent(nullptr);
+        delete tool;
     }
     m_allTools.clear();
+
+    m_panTool = nullptr;
+    m_zoomInTool = nullptr;
+    m_zoomOutTool = nullptr;
+    m_identifyTool = nullptr;
+    m_measureDistanceTool = nullptr;
+    m_measureAreaTool = nullptr;
+    m_selectTool = nullptr;
+    m_addFeatureTool = nullptr;
+    m_moveFeatureTool = nullptr;
+    m_rotateFeatureTool = nullptr;
+    m_scaleFeatureTool = nullptr;
+    m_offsetCurveTool = nullptr;
+    m_reshapeTool = nullptr;
+    m_splitFeaturesTool = nullptr;
+    m_splitPartsTool = nullptr;
+    m_simplifyTool = nullptr;
+    m_reverseLineTool = nullptr;
+    m_addRingTool = nullptr;
+    m_addPartTool = nullptr;
+    m_fillRingTool = nullptr;
+    m_deletePartTool = nullptr;
+    m_deleteRingTool = nullptr;
+    m_trimExtendTool = nullptr;
+    m_chamferFilletTool = nullptr;
+    m_featureArrayTool = nullptr;
+    m_vertexTool = nullptr;
 }
 
 void MapToolManager::setupTools()

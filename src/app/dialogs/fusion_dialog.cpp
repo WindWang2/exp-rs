@@ -2,9 +2,6 @@
 #include "fusion_dialog.h"
 #include "dialog_utils.h"
 
-#include "processing/algorithms/image_fusion.h"
-#include "processing/gdal/gdal_dataset_wrapper.h"
-#include "processing/gdal/gdal_safe_call.h"
 #include "processing/tools/tool_path_manager.h"
 
 #include <qgsrasterlayer.h>
@@ -12,25 +9,16 @@
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
-#include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QVBoxLayout>
-
-#include <gdal.h>
-#include <gdal_priv.h>
-#include <cpl_error.h>
-#include <cpl_string.h>
 #include <QProcess>
-
-#include "qgsogrutils.h"
 
 FusionDialog::FusionDialog( QWidget *parent )
     : RasterProcessingDialogBase( parent )
@@ -227,49 +215,65 @@ void FusionDialog::onRun()
         }
     }
 
-    ImageFusion::NativeFusionParams nativeParams;
-    nativeParams.method = method;
-    nativeParams.panWeight = mWeightSpin ? static_cast<float>( mWeightSpin->value() ) : 0.5f;
-    for ( auto *spin : mBandWeightSpins )
-        nativeParams.msWeights.append( spin ? static_cast<float>( spin->value() ) : 0.5f );
-    nativeParams.redIdx = mRedCombo->currentIndex();
-    nativeParams.greenIdx = mGreenCombo->currentIndex();
-    nativeParams.blueIdx = mBlueCombo->currentIndex();
-
-    runGdalTask( [method, panPath, msPath, outPath, nativeParams]() -> QString {
-        if ( method == QStringLiteral( "otb_btps" ) || method == QStringLiteral( "gdal_pansharp" ) )
-        {
+    // External CLI methods stay on the process path (not in rs:image_fusion).
+    if ( method == QStringLiteral( "otb_btps" ) || method == QStringLiteral( "gdal_pansharp" ) )
+    {
+        runGdalTask( [method, panPath, msPath, outPath]() -> QString {
             QString program;
             QStringList args;
             if ( method == QStringLiteral( "otb_btps" ) )
             {
                 program = ToolPathManager::instance().otbToolPath( QStringLiteral( "BundleToPerfectSensor" ) );
+                if ( program.isEmpty() )
+                    return QString();
                 args << QStringLiteral( "-in" ) << msPath
                      << QStringLiteral( "-inp" ) << panPath
                      << QStringLiteral( "-out" ) << outPath;
             }
             else
             {
-                program = ToolPathManager::instance().gdalToolPath( QStringLiteral( "gdalwarp" ) );
-                args << QStringLiteral( "-r" ) << QStringLiteral( "bilinear" )
+                // gdal_pansharpen.py pan_dataset spectral_dataset out_dataset
+                program = ToolPathManager::instance().gdalToolPath( QStringLiteral( "gdal_pansharpen.py" ) );
+                if ( program.isEmpty() )
+                    return QString();
+                args << panPath << msPath << outPath
+                     << QStringLiteral( "-r" ) << QStringLiteral( "bilinear" )
                      << QStringLiteral( "-of" ) << QStringLiteral( "GTiff" )
-                     << QStringLiteral( "-co" ) << QStringLiteral( "COMPRESS=LZW" )
-                     << panPath << msPath << outPath;
+                     << QStringLiteral( "-co" ) << QStringLiteral( "COMPRESS=LZW" );
             }
 
             QProcess proc;
             proc.setProcessChannelMode( QProcess::MergedChannels );
             proc.start( program, args );
-            if ( !proc.waitForStarted( 5000 ) || proc.waitForFinished( -1 ) != 0 || proc.exitCode() != 0 )
+            // waitForFinished returns bool (true = finished); do not compare to 0.
+            if ( !proc.waitForStarted( 5000 )
+                 || !proc.waitForFinished( -1 )
+                 || proc.exitCode() != 0
+                 || proc.exitStatus() != QProcess::NormalExit )
                 return QString();
             return outPath;
-        }
+        } );
+        return;
+    }
 
-        QString error;
-        if ( !ImageFusion::processNativeFusion( panPath, msPath, outPath, nativeParams, &error ) )
-            return QString();
-        return outPath;
-    } );
+    // Native methods share the RSOperator kernel with CLI/MCP.
+    Json::Value params( Json::objectValue );
+    params["pan"] = panPath.toStdString();
+    params["ms"] = msPath.toStdString();
+    params["output"] = outPath.toStdString();
+    params["method"] = method.toStdString();
+    params["panWeight"] = mWeightSpin ? mWeightSpin->value() : 0.5;
+    params["redIdx"] = mRedCombo ? mRedCombo->currentIndex() : 0;
+    params["greenIdx"] = mGreenCombo ? mGreenCombo->currentIndex() : 1;
+    params["blueIdx"] = mBlueCombo ? mBlueCombo->currentIndex() : 2;
+    if ( !mBandWeightSpins.isEmpty() )
+    {
+        params["msWeights"] = Json::Value( Json::arrayValue );
+        for ( auto *spin : mBandWeightSpins )
+            params["msWeights"].append( spin ? spin->value() : 0.5 );
+    }
+
+    runOperatorTask( QStringLiteral( "rs:image_fusion" ), params );
 }
 
 void FusionDialog::onMethodChanged(int index) { Q_UNUSED(index); }

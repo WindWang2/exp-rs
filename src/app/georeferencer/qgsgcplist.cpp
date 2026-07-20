@@ -58,6 +58,20 @@ void QgsGCPList::clearPoints()
   emit changed();
 }
 
+void QgsGCPList::notifyPointsMutated()
+{
+  emit changed();
+}
+
+void QgsGCPList::clearResiduals()
+{
+  for ( QgsGcpPoint *p : *this )
+  {
+    if ( p )
+      p->setResidual( QPointF() );
+  }
+}
+
 void QgsGCPList::createGCPVectors( QVector<QgsPointXY> &sourcePoints,
                                    QVector<QgsPointXY> &destinationPoints,
                                    const QgsCoordinateReferenceSystem &targetCrs,
@@ -102,14 +116,26 @@ void QgsGCPList::updateResiduals( QgsGeorefTransform *georefTransform,
                                   const QgsCoordinateTransformContext &context,
                                   Qgis::RenderUnit residualUnit )
 {
-  bool bTransformUpdated = false;
+  bool transformReady = false;
   QVector<QgsPointXY> sourceCoordinates;
   QVector<QgsPointXY> destinationCoordinates;
   createGCPVectors( sourceCoordinates, destinationCoordinates, targetCrs, context );
 
   if ( georefTransform )
   {
-    bTransformUpdated = georefTransform->updateParametersFromGcps( sourceCoordinates, destinationCoordinates, true );
+    // Prefer the already-fitted transform (recomputeFit owns the fit).
+    // Only fit here when the transform has not been initialized yet
+    // (e.g. model/test callers that only invoke updateResiduals).
+    if ( georefTransform->parametersInitialized() )
+    {
+      transformReady = true;
+    }
+    else
+    {
+      // invertYAxis=true matches the raster CS convention used by recomputeFit.
+      transformReady = georefTransform->updateParametersFromGcps(
+        sourceCoordinates, destinationCoordinates, /*invertYAxis=*/true );
+    }
   }
 
   for ( int i = 0; i < size(); ++i )
@@ -128,7 +154,7 @@ void QgsGCPList::updateResiduals( QgsGeorefTransform *georefTransform,
 
     double dX = 0;
     double dY = 0;
-    if ( georefTransform && bTransformUpdated && georefTransform->parametersInitialized() )
+    if ( georefTransform && transformReady && georefTransform->parametersInitialized() )
     {
       QgsPointXY dst;
       const QgsPointXY pixel = georefTransform->toSourcePixel( p->sourcePoint() );

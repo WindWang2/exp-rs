@@ -13,13 +13,14 @@ GdalErrorHandler::~GdalErrorHandler()
 void GdalErrorHandler::install()
 {
     s_activeHandler = this;
-    CPLSetErrorHandler(errorHandler);
+    m_previousHandler = CPLSetErrorHandler(errorHandler);
 }
 
 void GdalErrorHandler::uninstall()
 {
     if (s_activeHandler == this) {
-        CPLSetErrorHandler(nullptr);
+        CPLSetErrorHandler(m_previousHandler);
+        m_previousHandler = nullptr;
         s_activeHandler = nullptr;
     }
 }

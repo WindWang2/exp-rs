@@ -10,7 +10,9 @@ Pure C++ Remote Sensing analysis platform built on the QGIS engine.
 
 ## Codebase Architecture
 
-*   `main.cpp`: Pure C++ Qt6 desktop application (QgisDesktopWindow).
+See [docs/repo-layout.md](docs/repo-layout.md) for the full directory map.
+
+*   `src/app/main.cpp`: Pure C++ Qt6 desktop application (QgisDesktopWindow).
 *   `src/core/`: QGIS core library — layers, rendering, CRS, geometry, providers, expressions.
 *   `src/gui/`: QGIS GUI library — map canvas, map tools, layer tree, dialogs.
 *   `src/analysis/`: Analysis libraries — classification, georeferencing, segmentation.
@@ -19,6 +21,10 @@ Pure C++ Remote Sensing analysis platform built on the QGIS engine.
 *   `src/native/`: Platform-native integration (Linux/macOS/Windows).
 *   `src/ui/`: Qt Designer .ui form files.
 *   `external/`: Vendored C++ dependencies (nlohmann_json, spatialindex, poly2tri, lazperf).
+*   `data/samples/`: Lab / tutorial sample datasets.
+*   `docs/`: Design, architecture, labs, agent notes, superpowers specs/plans.
+*   `refs/qgis/`, `refs/boost/`: Optional local reference trees (gitignored).
+*   `itk_ref/`, `otb_ref/`: ITK / OTB source at repo root (CMake-coupled).
 *   `src/app/`: Application shell — see [P0–P5 refactor spec](docs/superpowers/specs/2026-07-03-refactor-sprint-design.md) for module map:
     *   `main_window.cpp` — constructor, `setupUi`, `setupMapCanvas`
     *   `main_window_menus.cpp` — menu / toolbar / status bar

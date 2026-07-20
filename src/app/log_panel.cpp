@@ -102,7 +102,7 @@ void LogPanel::setupUi()
     });
 }
 
-bool LogPanel::shouldShowMessage(const QString &tag, Qgis::MessageLevel level) const
+bool LogPanel::shouldShowMessage(const QString &message, const QString &tag, Qgis::MessageLevel level) const
 {
     // Level filter
     int levelFilter = m_levelFilter->currentData().toInt();
@@ -114,9 +114,11 @@ bool LogPanel::shouldShowMessage(const QString &tag, Qgis::MessageLevel level) c
     if (!tagFilter.isEmpty() && tagFilter != tr("All") && !tag.contains(tagFilter, Qt::CaseInsensitive))
         return false;
 
-    // Search filter
+    // Search filter — match message body as well as tag
     QString searchText = m_searchEdit->text();
-    if (!searchText.isEmpty() && !tag.contains(searchText, Qt::CaseInsensitive))
+    if (!searchText.isEmpty()
+        && !tag.contains(searchText, Qt::CaseInsensitive)
+        && !message.contains(searchText, Qt::CaseInsensitive))
         return false;
 
     return true;
@@ -151,7 +153,7 @@ void LogPanel::logMessage(const QString &message, const QString &tag, Qgis::Mess
         m_tagFilter->addItem(tag, tag);
     }
 
-    if (!shouldShowMessage(tag, level))
+    if (!shouldShowMessage(message, tag, level))
         return;
 
     QString prefix;

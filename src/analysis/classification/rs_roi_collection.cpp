@@ -56,3 +56,19 @@ void RsRoiCollection::setClassDef( const RsClassDef &d )
   emit classDefChanged( d.id() );
   emit changed();
 }
+
+void RsRoiCollection::setClassDefs( const QHash<int, RsClassDef> &defs )
+{
+  mClasses = defs;
+  emit classDefChanged( -1 );
+  emit changed();
+}
+
+void RsRoiCollection::clearClassDefs()
+{
+  if ( mClasses.isEmpty() )
+    return;
+  mClasses.clear();
+  emit classDefChanged( -1 );
+  emit changed();
+}

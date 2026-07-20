@@ -17,6 +17,7 @@
 #include "qgsleastsquares.h"
 
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 #include "qgsexception.h"
@@ -68,8 +69,10 @@ void QgsLeastSquares::linear( const QVector<QgsPointXY> &sourceCoordinates, cons
   origin.setX( aX );
   origin.setY( aY );
 
-  pixelXSize = std::fabs( bX );
-  pixelYSize = std::fabs( bY );
+  // Preserve signed scales so mirrored / flipped source axes remain correct.
+  // Callers that need a positive pixel size should take fabs themselves.
+  pixelXSize = bX;
+  pixelYSize = bY;
 }
 
 
@@ -128,16 +131,36 @@ void QgsLeastSquares::helmert( const QVector<QgsPointXY> &sourceCoordinates, con
   gsl_vector *x = gsl_vector_alloc( 4 );
   gsl_permutation *p = gsl_permutation_alloc( 4 );
   int s;
-  gsl_linalg_LU_decomp( &M.matrix, p, &s );
-  gsl_linalg_LU_solve( &M.matrix, p, &b.vector, x );
+  const int decompStatus = gsl_linalg_LU_decomp( &M.matrix, p, &s );
+  if ( decompStatus != 0 )
+  {
+    gsl_permutation_free( p );
+    gsl_vector_free( x );
+    throw QgsLeastSquares::SingularException();
+  }
+  const int solveStatus = gsl_linalg_LU_solve( &M.matrix, p, &b.vector, x );
   gsl_permutation_free( p );
+  if ( solveStatus != 0 )
+  {
+    gsl_vector_free( x );
+    throw QgsLeastSquares::SingularException();
+  }
 
-  origin.setX( gsl_vector_get( x, 2 ) );
-  origin.setY( gsl_vector_get( x, 3 ) );
-  pixelSize = std::sqrt( std::pow( gsl_vector_get( x, 0 ), 2 ) + std::pow( gsl_vector_get( x, 1 ), 2 ) );
-  rotation = std::atan2( gsl_vector_get( x, 1 ), gsl_vector_get( x, 0 ) );
-
+  const double a = gsl_vector_get( x, 0 );
+  const double bParam = gsl_vector_get( x, 1 );
+  const double x0 = gsl_vector_get( x, 2 );
+  const double y0 = gsl_vector_get( x, 3 );
   gsl_vector_free( x );
+
+  if ( !std::isfinite( a ) || !std::isfinite( bParam ) || !std::isfinite( x0 ) || !std::isfinite( y0 ) )
+  {
+    throw QgsLeastSquares::SingularException();
+  }
+
+  origin.setX( x0 );
+  origin.setY( y0 );
+  pixelSize = std::sqrt( std::pow( a, 2 ) + std::pow( bParam, 2 ) );
+  rotation = std::atan2( bParam, a );
 #endif
 }
 
@@ -222,6 +245,13 @@ void normalizeCoordinates( const QVector<QgsPointXY> &coords, QVector<QgsPointXY
     meanDist += std::sqrt( X * X + Y * Y );
   }
   meanDist *= 1.0 / coords.size();
+
+  // All points coincide (or are numerically identical) → projective scale
+  // would divide by zero / produce Inf/NaN coefficients.
+  if ( meanDist < std::numeric_limits<double>::epsilon() )
+  {
+    throw QgsLeastSquares::SingularException();
+  }
 
   const double OOD = meanDist * M_SQRT1_2;
   const double D = 1.0 / OOD;

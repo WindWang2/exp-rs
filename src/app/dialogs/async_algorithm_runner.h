@@ -24,6 +24,7 @@ class AsyncAlgorithmRunner : public AsyncRunnerBase
 
 public:
     explicit AsyncAlgorithmRunner(QWidget *parentWidget, QObject *parent = nullptr);
+    ~AsyncAlgorithmRunner() override;
 
     /**
      * Run an algorithm asynchronously.

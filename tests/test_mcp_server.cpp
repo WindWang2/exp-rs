@@ -23,6 +23,13 @@ public:
     QVariantMap testGetAlgorithmSchema(const QString &id) { return handleGetAlgorithmSchema(id); }
     QVariantMap testListLayers() { return handleListLayers(); }
     QVariantMap testDescribeDataset(const QString &id) { return handleDescribeDataset(id); }
+    QVariantMap testListOperators() { return handleListOperators(); }
+    QVariantMap testGetOperatorSchema(const QString &id) { return handleGetOperatorSchema(id); }
+    QVariantMap testExecuteOperator(const QString &id, const QVariantMap &params)
+    {
+        return handleExecuteOperator(id, params);
+    }
+    QVariantMap testGetExecutionStatus(const QString &id) { return handleGetExecutionStatus(id); }
 };
 
 TEST_CASE("MCP Server tests", "[agent][mcp]") {
@@ -83,5 +90,42 @@ TEST_CASE("MCP Server tests", "[agent][mcp]") {
 
         // Clean up
         QgsProject::instance()->removeMapLayer(layer);
+    }
+
+    SECTION("list_operators lists RSOperator kernel") {
+        QVariantMap res = server.testListOperators();
+        QVariantList ops = res.value("operators").toList();
+        REQUIRE(res.value("count").toInt() == ops.size());
+        REQUIRE(ops.size() >= 15);
+
+        bool foundSpectral = false;
+        bool foundReproject = false;
+        for (const QVariant &op : ops) {
+            QVariantMap opMap = op.toMap();
+            const QString id = opMap.value("id").toString();
+            if (id == "rs:spectral_index") {
+                foundSpectral = true;
+                CHECK(opMap.value("group").toString() == "spectral");
+            }
+            if (id == "gdal:reproject") {
+                foundReproject = true;
+            }
+        }
+        CHECK(foundSpectral);
+        CHECK(foundReproject);
+    }
+
+    SECTION("get_operator_schema returns schema for spectral index") {
+        QVariantMap schema = server.testGetOperatorSchema("rs:spectral_index");
+        REQUIRE_FALSE(schema.contains("error"));
+        CHECK(schema.value("operator_id").toString() == "rs:spectral_index");
+        QVariantMap properties = schema.value("properties").toMap();
+        REQUIRE(properties.contains("input"));
+        REQUIRE(properties.contains("index"));
+    }
+
+    SECTION("get_operator_schema returns error for unknown operator") {
+        QVariantMap schema = server.testGetOperatorSchema("no:such_operator");
+        REQUIRE(schema.contains("error"));
     }
 }

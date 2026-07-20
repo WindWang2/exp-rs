@@ -1505,10 +1505,6 @@ bool QgsClassificationMainWindow::buildTrainingData( const QVector<int> &bands,
   if ( m_sourceWidth <= 0 || m_sourceHeight <= 0 )
     return false;
 
-  // Open the raster and pre-read each selected band into memory. For tiny
-  // training sets (typical ROI coverage is < 0.1% of the raster) this is
-  // cheaper than per-pixel RasterIO calls. Future optimisation: bounding-box
-  // tile reads.
   ensureGdalInit();
   GDALDataset *ds = static_cast<GDALDataset *>(
     GDALOpen( m_sourceRasterPath.toUtf8().constData(), GA_ReadOnly ) );
@@ -1526,9 +1522,8 @@ bool QgsClassificationMainWindow::buildTrainingData( const QVector<int> &bands,
     }
   }
 
-  // Collect (classId, pixelIdx) pairs first, recomputing rasterisation if the ROI
-  // was loaded geometry-only.
-  QVector<QPair<int, quint64>> samples;
+  // Collect samples with pixel-index dedup (last class wins on overlapping ROIs).
+  QHash<quint64, int> pixelClass;
   for ( const RsRoi &roi : m_rois->rois() )
   {
     if ( roi.classId() <= 0 )
@@ -1542,46 +1537,58 @@ bool QgsClassificationMainWindow::buildTrainingData( const QVector<int> &bands,
     }
     for ( quint64 i : idx )
     {
-      if ( i < static_cast<quint64>( W ) * H )
-        samples.push_back( qMakePair( roi.classId(), i ) );
+      if ( i < static_cast<quint64>( W ) * static_cast<quint64>( H ) )
+        pixelClass.insert( i, roi.classId() );
     }
   }
 
-  if ( samples.size() < 10 )
+  if ( pixelClass.size() < 10 )
   {
     GDALClose( ds );
     return false;
   }
 
-  // Read only the required training sample pixels from the GDAL bands.
-  // Utilizing GDAL's block cache makes this highly performant without storing entire bands in memory.
+  // Flatten to (classId, pixelIdx) and group sample columns by row so each
+  // unique row is read once per band (scanline) instead of 1×1 RasterIO.
+  QVector<QPair<int, quint64>> samples;
+  samples.reserve( pixelClass.size() );
+  for ( auto it = pixelClass.constBegin(); it != pixelClass.constEnd(); ++it )
+    samples.push_back( qMakePair( it.value(), it.key() ) );
+
+  // row -> list of (sampleIndex, col)
+  QHash<int, QVector<QPair<int, int>>> byRow;
+  byRow.reserve( samples.size() );
+  for ( int s = 0; s < samples.size(); ++s )
+  {
+    const quint64 idx = samples[s].second;
+    const int r = static_cast<int>( idx / static_cast<quint64>( W ) );
+    const int c = static_cast<int>( idx % static_cast<quint64>( W ) );
+    byRow[r].append( qMakePair( s, c ) );
+  }
+
   X.create( samples.size(), bands.size(), CV_32F );
   y.create( samples.size(), 1, CV_32S );
+  for ( int s = 0; s < samples.size(); ++s )
+    y.at<int>( s, 0 ) = samples[s].first;
 
+  std::vector<float> rowBuf( static_cast<size_t>( W ) );
   for ( int bi = 0; bi < bands.size(); ++bi )
   {
     GDALRasterBand *band = ds->GetRasterBand( bands[bi] );
-    for ( int s = 0; s < samples.size(); ++s )
+    for ( auto it = byRow.constBegin(); it != byRow.constEnd(); ++it )
     {
-      const quint64 idx = samples[s].second;
-      const int r = static_cast<int>( idx / W );
-      const int c = static_cast<int>( idx % W );
-      float val = 0.0f;
+      const int r = it.key();
       const CPLErr err = band->RasterIO(
-        GF_Read, c, r, 1, 1, &val,
-        1, 1, GDT_Float32, 0, 0 );
+        GF_Read, 0, r, W, 1, rowBuf.data(),
+        W, 1, GDT_Float32, 0, 0 );
       if ( err != CE_None )
       {
         GDALClose( ds );
         return false;
       }
-      X.at<float>( s, bi ) = val;
+      for ( const QPair<int, int> &sc : it.value() )
+        X.at<float>( sc.first, bi ) = rowBuf[static_cast<size_t>( sc.second )];
     }
-  }
-
-  for ( int s = 0; s < samples.size(); ++s )
-  {
-    y.at<int>( s, 0 ) = samples[s].first;
   }
 
   GDALClose( ds );
@@ -1683,10 +1690,16 @@ void QgsClassificationMainWindow::applyClassification()
         cfg.algoName = QStringLiteral( "SVM_RBF" );
         break;
       case RsClassifierKind::KMeans:
+      {
+        // k from unique labels that actually have training samples, not empty classDefs.
+        QSet<int> uniqueLabels;
+        for ( int i = 0; i < y.rows; ++i )
+          uniqueLabels.insert( y.at<int>( i, 0 ) );
         cfg.backend.reset( new RsClassifierKMeans(
-          std::max( 2, static_cast<int>( classDefs.size() ) ) ) );
+          std::max( 2, static_cast<int>( uniqueLabels.size() ) ) ) );
         cfg.algoName = QStringLiteral( "KMeans" );
         break;
+      }
     }
 
     // Optional model save (training path only). Cancel leaves modelSavePath
@@ -1933,10 +1946,16 @@ void QgsClassificationMainWindow::applyPreview()
       cfg.algoName = QStringLiteral( "SVM_RBF" );
       break;
     case RsClassifierKind::KMeans:
+    {
+      // k from unique labels that actually have training samples, not empty classDefs.
+      QSet<int> uniqueLabels;
+      for ( int i = 0; i < y.rows; ++i )
+        uniqueLabels.insert( y.at<int>( i, 0 ) );
       cfg.backend.reset( new RsClassifierKMeans(
-        std::max( 2, static_cast<int>( classDefs.size() ) ) ) );
+        std::max( 2, static_cast<int>( uniqueLabels.size() ) ) ) );
       cfg.algoName = QStringLiteral( "KMeans" );
       break;
+    }
   }
 
   auto *task = new RsClassificationTask( std::move( cfg ) );

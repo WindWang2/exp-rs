@@ -70,7 +70,7 @@ public:
   itkNewMacro(Self);
 
   /** Run-time type information (and related methods). */
-  itkTypeMacro(UnaryFunctorNeighborhoodImageFilter, ImageToImageFilter);
+  itkTypeMacro(SFSTexturesImageFilter, ImageToImageFilter);
 
   /** Some convenient typedefs. */
   typedef typename InputImageType::ConstPointer         InputImagePointerType;

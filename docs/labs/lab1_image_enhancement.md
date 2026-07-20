@@ -6,14 +6,14 @@
 3. 学会使用直方图分析影像特征
 
 ## 实验数据
-- `samples_data/landsat_sample.tif` (7波段Landsat-like影像)
+- `data/samples/landsat_sample.tif` (7波段Landsat-like影像)
 
 ## 实验步骤
 
 ### 1.1 加载影像
 1. 启动 SICNU GEO RS
 2. 菜单: File > Add Raster Layer...
-3. 选择 `samples_data/landsat_sample.tif`
+3. 选择 `data/samples/landsat_sample.tif`
 4. 在图层面板中查看影像信息
 
 ### 1.2 查看直方图

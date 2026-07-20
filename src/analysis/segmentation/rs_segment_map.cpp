@@ -72,57 +72,77 @@ quint32 RsSegmentMap::labelAt( int row, int col ) const
 
 QSet<quint32> RsSegmentMap::uniqueLabels() const
 {
+    ensureSizeCache();
     QSet<quint32> result;
-    for ( quint32 v : mLabels )
-    {
-        if ( v != 0 )
-            result.insert( v );
-    }
+    for ( auto it = mSizeCache.constBegin(); it != mSizeCache.constEnd(); ++it )
+        result.insert( it.key() );
     return result;
 }
 
 int RsSegmentMap::segmentCount() const
 {
-    return uniqueLabels().size();
+    ensureSizeCache();
+    return mSizeCache.size();
+}
+
+void RsSegmentMap::ensureSizeCache() const
+{
+    if ( mSizeCacheBuilt )
+        return;
+
+    mSizeCache.clear();
+    for ( quint32 label : mLabels )
+    {
+        if ( label != 0 )
+            ++mSizeCache[label];
+    }
+    mSizeCacheBuilt = true;
+}
+
+QVector<QPoint> RsSegmentMap::buildCoordsForSegment( quint32 segmentId ) const
+{
+    QVector<QPoint> coords;
+    if ( segmentId == 0 || mLabels.isEmpty() )
+        return coords;
+
+    // Pre-size when size cache is available to avoid realloc churn.
+    ensureSizeCache();
+    const auto sizeIt = mSizeCache.constFind( segmentId );
+    if ( sizeIt == mSizeCache.constEnd() )
+        return coords;
+    coords.reserve( sizeIt.value() );
+
+    for ( int r = 0; r < mHeight; ++r )
+    {
+        const int rowBase = r * mWidth;
+        for ( int c = 0; c < mWidth; ++c )
+        {
+            if ( mLabels[rowBase + c] == segmentId )
+                coords.append( QPoint( c, r ) );
+        }
+    }
+    return coords;
 }
 
 QVector<QPoint> RsSegmentMap::pixelCoords( quint32 segmentId ) const
 {
-    // ISSUE 13 fix: use cached index if available
-    if ( !mCoordsCache.isEmpty() )
-    {
-        auto it = mCoordsCache.constFind( segmentId );
-        if ( it != mCoordsCache.constEnd() )
-            return it.value();
+    if ( segmentId == 0 )
         return {};
-    }
 
-    // Fallback: linear scan (first call builds cache)
-    buildCoordsCache();
     auto it = mCoordsCache.constFind( segmentId );
     if ( it != mCoordsCache.constEnd() )
         return it.value();
-    return {};
+
+    QVector<QPoint> coords = buildCoordsForSegment( segmentId );
+    mCoordsCache.insert( segmentId, coords );
+    return coords;
 }
 
 int RsSegmentMap::pixelCount( quint32 segmentId ) const
 {
-    if ( mCoordsCache.isEmpty() )
-        buildCoordsCache();
-    auto it = mCoordsCache.constFind( segmentId );
-    return it != mCoordsCache.constEnd() ? it.value().size() : 0;
-}
+    if ( segmentId == 0 )
+        return 0;
 
-void RsSegmentMap::buildCoordsCache() const
-{
-    mCoordsCache.clear();
-    for ( int r = 0; r < mHeight; ++r )
-    {
-        for ( int c = 0; c < mWidth; ++c )
-        {
-            quint32 label = mLabels[r * mWidth + c];
-            if ( label != 0 )
-                mCoordsCache[label].append( QPoint( c, r ) );
-        }
-    }
+    ensureSizeCache();
+    return mSizeCache.value( segmentId, 0 );
 }

@@ -27,7 +27,7 @@ QStringList GdalTranslateAlgorithm::buildArgs(const QVariantMap &parameters,
     args << "-of" << parameters.value("FORMAT").toString();
 
     if (parameters.contains("EXTRA") && !parameters.value("EXTRA").toString().isEmpty()) {
-        args << parameters.value("EXTRA").toString().split(" ");
+        args << QProcess::splitCommand(parameters.value("EXTRA").toString());
     }
 
     args << rasterLayerSource(parameters.value("INPUT"));

@@ -7,8 +7,8 @@
 4. 掌握分类精度评价方法
 
 ## 实验数据
-- `samples_data/landsat_sample.tif` (7波段Landsat-like影像)
-- `samples_data/training_samples.shp` (训练样本ROI)
+- `data/samples/landsat_sample.tif` (7波段Landsat-like影像)
+- `data/samples/training_samples.shp` (训练样本ROI)
 
 ## 实验步骤
 

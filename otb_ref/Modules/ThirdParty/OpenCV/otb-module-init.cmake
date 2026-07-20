@@ -25,7 +25,8 @@ if("${OpenCV_VERSION}" VERSION_LESS "3.0.0")
   message(ERROR " The OpenCV version detected (${OpenCV_VERSION}) is older than the minimum supported version (3.0.0) ")
 endif()
 
-if(OpenCV_VERSION_MAJOR EQUAL 4)
+# OpenCV 4+ C++ ml API (also OpenCV 5); used to gate getVotes / API shims.
+if(OpenCV_VERSION_MAJOR GREATER_EQUAL 4)
 set(OTB_OPENCV_4 1)
 else()
 set(OTB_OPENCV_4 0)

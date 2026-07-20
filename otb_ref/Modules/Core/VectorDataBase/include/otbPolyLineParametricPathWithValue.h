@@ -60,7 +60,7 @@ public:
   itkNewMacro(Self);
 
   /** Creation through object factory macro */
-  itkTypeMacro(PolyLineParametricPath, MySuperclass);
+  itkTypeMacro(PolyLineParametricPathWithValue, itk::PolyLineParametricPath);
 
   /** Template parameters typedefs */
   typedef TValue ValueType;

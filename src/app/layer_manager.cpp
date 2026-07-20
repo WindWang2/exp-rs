@@ -18,6 +18,8 @@
 #include <raster/qgsrasterlayerproperties.h>
 #include <vector/qgsvectorlayerproperties.h>
 
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QFileDialog>
 #include <QMainWindow>
@@ -25,6 +27,99 @@
 #include <QStatusBar>
 
 #include "app_paths.h"
+
+// ---------------------------------------------------------------------------
+// ENVI / path helpers
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/**
+ * GDAL's ENVI driver opens the binary data file, not the .hdr.
+ * If the user selected a header, locate the paired data file.
+ * Common layouts: name.dat+name.hdr, name+name.hdr, name.img+name.hdr.
+ */
+QString resolveEnviDataPath( const QString &path )
+{
+    const QFileInfo fi( path );
+    const QString suffix = fi.suffix().toLower();
+    if ( suffix != QLatin1String( "hdr" ) )
+        return path;
+
+    const QString dir = fi.absolutePath();
+    const QString base = fi.completeBaseName(); // strip .hdr / .HDR
+
+    // Prefer same-stem with no extension (GF_1 + GF_1.HDR), then common data suffixes
+    const QStringList candidates = {
+        QDir( dir ).filePath( base ),
+        QDir( dir ).filePath( base + QStringLiteral( ".dat" ) ),
+        QDir( dir ).filePath( base + QStringLiteral( ".img" ) ),
+        QDir( dir ).filePath( base + QStringLiteral( ".bil" ) ),
+        QDir( dir ).filePath( base + QStringLiteral( ".bsq" ) ),
+        QDir( dir ).filePath( base + QStringLiteral( ".bip" ) ),
+        QDir( dir ).filePath( base + QStringLiteral( ".raw" ) ),
+    };
+
+    for ( const QString &candidate : candidates )
+    {
+        const QFileInfo cfi( candidate );
+        if ( cfi.exists() && cfi.isFile() )
+            return cfi.absoluteFilePath();
+    }
+
+    // No sibling data file found — return original so GDAL can report a clear error
+    return path;
+}
+
+bool hasEnviHeaderSibling( const QString &path )
+{
+    const QFileInfo fi( path );
+    if ( !fi.exists() || !fi.isFile() )
+        return false;
+    const QString stem = fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName();
+    // For extensionless files, completeBaseName() == fileName()
+    const QString bare = fi.absoluteFilePath();
+    return QFile::exists( bare + QStringLiteral( ".hdr" ) )
+           || QFile::exists( bare + QStringLiteral( ".HDR" ) )
+           || QFile::exists( stem + QStringLiteral( ".hdr" ) )
+           || QFile::exists( stem + QStringLiteral( ".HDR" ) );
+}
+
+} // namespace
+
+QString LayerManager::resolveRasterOpenPath( const QString &filePath )
+{
+    return resolveEnviDataPath( filePath );
+}
+
+bool LayerManager::isLikelyRasterPath( const QString &filePath )
+{
+    const QFileInfo fi( filePath );
+    const QString ext = fi.suffix().toLower();
+
+    static const QStringList kRasterExts = {
+        QStringLiteral( "tif" ),  QStringLiteral( "tiff" ), QStringLiteral( "img" ),
+        QStringLiteral( "jp2" ),  QStringLiteral( "png" ),  QStringLiteral( "jpg" ),
+        QStringLiteral( "jpeg" ), QStringLiteral( "asc" ),  QStringLiteral( "dat" ),
+        QStringLiteral( "hdr" ),  QStringLiteral( "bil" ),  QStringLiteral( "bsq" ),
+        QStringLiteral( "bip" ),  QStringLiteral( "nc" ),   QStringLiteral( "hdf" ),
+        QStringLiteral( "h5" ),   QStringLiteral( "vrt" ),  QStringLiteral( "kea" ),
+    };
+
+    if ( kRasterExts.contains( ext ) )
+        return true;
+
+    // Extensionless ENVI binary (e.g. GF_1 next to GF_1.HDR)
+    if ( ext.isEmpty() && hasEnviHeaderSibling( filePath ) )
+        return true;
+
+    // Any file with a sibling .hdr is treated as ENVI raster data
+    if ( !ext.isEmpty() && hasEnviHeaderSibling( filePath ) )
+        return true;
+
+    return false;
+}
 
 // ---------------------------------------------------------------------------
 // Construction / destruction
@@ -90,16 +185,31 @@ void LayerManager::initLayerTree()
 
 void LayerManager::loadRasterLayer( const QString &filePath )
 {
-    QFileInfo fi( filePath );
-    QString name = fi.fileName();
+    if ( !m_mapCanvas )
+        return;
 
-    QgsRasterLayer *layer = new QgsRasterLayer( filePath, name, "gdal" );
+    const QString openPath = resolveRasterOpenPath( filePath );
+    QFileInfo fi( openPath );
+    // Prefer stem name for ENVI (dem.dat → dem, GF_1 → GF_1)
+    QString name = fi.completeBaseName();
+    if ( name.isEmpty() )
+        name = fi.fileName();
+
+    QgsRasterLayer *layer = new QgsRasterLayer( openPath, name, QStringLiteral( "gdal" ) );
 
     if ( !layer->isValid() )
     {
+        QString hint;
+        if ( QFileInfo( filePath ).suffix().toLower() == QLatin1String( "hdr" )
+             && openPath == filePath )
+        {
+            hint = QObject::tr(
+                "\n\nENVI header selected but no data file was found next to it "
+                "(expected e.g. same name without .hdr, or .dat / .img)." );
+        }
         QMessageBox::warning( m_parentWidget, QObject::tr( "Load Layer" ),
-                              QObject::tr( "Failed to load raster layer:\n%1\n\nError: %2" )
-                                  .arg( filePath, layer->error().message() ) );
+                              QObject::tr( "Failed to load raster layer:\n%1\n\nError: %2%3" )
+                                  .arg( openPath, layer->error().message(), hint ) );
         delete layer;
         return;
     }
@@ -125,6 +235,9 @@ void LayerManager::loadRasterLayer( const QString &filePath )
 
 void LayerManager::loadVectorLayer( const QString &filePath )
 {
+    if ( !m_mapCanvas )
+        return;
+
     QFileInfo fi( filePath );
     QString name = fi.fileName();
 
@@ -209,8 +322,19 @@ void LayerManager::removeSelectedLayers()
 
 void LayerManager::refreshCanvasLayers()
 {
+    if ( !m_mapCanvas )
+        return;
+
+    // Prefer the layer-tree bridge (respects visibility / checked state and order).
+    if ( m_layerTreeBridge )
+    {
+        m_layerTreeBridge->setCanvasLayers();
+        return;
+    }
+
+    // Fallback: only checked/visible layers from the layer tree.
     QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
-    QList<QgsMapLayer *> layers = root->layerOrder();
+    QList<QgsMapLayer *> layers = root->checkedLayers();
     m_mapCanvas->setLayers( layers );
 
     // Keep overview canvas in sync with the main canvas layers

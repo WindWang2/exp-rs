@@ -41,7 +41,7 @@ public:
   typedef itk::SmartPointer<const Self> ConstPointer;
 
   /** Run-time type information (and related methods). */
-  itkTypeMacro(ContingencyTableCalculator, itk::Object);
+  itkTypeMacro(ContingencyTable, itk::Object);
 
   /** Method for creation through the object factory. */
   itkNewMacro(Self);

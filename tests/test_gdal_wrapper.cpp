@@ -5,6 +5,7 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QString>
+#include <QStringList>
 #include <QFileInfo>
 #include <vector>
 #include <cmath>
@@ -25,7 +26,17 @@ static QString testPhrPath()
 static QString testLandsatPath()
 {
     QString base = QFileInfo(__FILE__).absolutePath();
-    return QFileInfo(base + "/../qgis_ref/tests/testdata/landsat.tif").absoluteFilePath();
+    // Prefer reorganized refs/qgis/; keep legacy qgis_ref/ for local trees
+    const QStringList candidates = {
+        base + "/../refs/qgis/tests/testdata/landsat.tif",
+        base + "/../qgis_ref/tests/testdata/landsat.tif",
+    };
+    for ( const QString &c : candidates )
+    {
+        if ( QFileInfo::exists( c ) )
+            return QFileInfo( c ).absoluteFilePath();
+    }
+    return QFileInfo( candidates.first() ).absoluteFilePath();
 }
 
 // --- Dataset open/close ---

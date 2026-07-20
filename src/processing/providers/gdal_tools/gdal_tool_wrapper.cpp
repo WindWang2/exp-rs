@@ -4,6 +4,7 @@
 
 #include "core/sicnu_logging.h"
 #include <qgsapplication.h>
+#include <qgsexception.h>
 #include <qgsmessagelog.h>
 #include <qgsprocessingcontext.h>
 #include <qgsprocessingfeedback.h>
@@ -11,31 +12,93 @@
 #include <qgsvectorlayer.h>
 #include <processing/qgsprocessingparameters.h>
 
+#include <QFileInfo>
+
+namespace
+{
+QVariantMap resolveDestinationParameters( const QgsProcessingAlgorithm *algorithm,
+                                          const QVariantMap &parameters,
+                                          QgsProcessingContext &context )
+{
+    if ( !algorithm )
+        return parameters;
+
+    QVariantMap resolved = parameters;
+    for ( const QgsProcessingParameterDefinition *param : algorithm->parameterDefinitions() )
+    {
+        if ( !param || !resolved.contains( param->name() ) )
+            continue;
+
+        const QString type = param->type();
+        if ( type != QgsProcessingParameterRasterDestination::typeName()
+             && type != QgsProcessingParameterVectorDestination::typeName()
+             && type != QgsProcessingParameterFeatureSink::typeName() )
+            continue;
+
+        resolved.insert(
+            param->name(),
+            QgsProcessingParameters::parameterAsOutputLayer( param, resolved.value( param->name() ), context, true ) );
+    }
+    return resolved;
+}
+} // namespace
+
 QVariantMap GdalToolWrapper::processAlgorithm(const QVariantMap &parameters,
                                               QgsProcessingContext &context,
                                               QgsProcessingFeedback *feedback)
 {
+    const QVariantMap resolvedParameters = resolveDestinationParameters( this, parameters, context );
+
     QString program = ToolPathManager::instance().gdalToolPath(toolName());
     if (program.isEmpty()) {
-        SICNU_LOG_ERROR( SicnuLogTags::GDAL, QString( "GDAL tool '%1' not found — ensure GDAL tools are installed" ).arg( toolName() ) );
+        const QString err = QObject::tr("GDAL tool '%1' not found. Ensure GDAL tools are installed.").arg(toolName());
+        SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
         if (feedback)
-            feedback->reportError(QObject::tr("GDAL tool '%1' not found. Ensure GDAL tools are installed.").arg(toolName()));
-        return {};
+            feedback->reportError(err);
+        throw QgsProcessingException(err);
     }
 
-    QStringList args = buildArgs(parameters, context, feedback);
-    if (args.isEmpty()) return {};
+    QStringList args = buildArgs(resolvedParameters, context, feedback);
+    if (args.isEmpty()) {
+        const QString err = QObject::tr("Failed to build arguments for GDAL tool '%1'.").arg(toolName());
+        SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
+        if (feedback)
+            feedback->reportError(err);
+        throw QgsProcessingException(err);
+    }
 
     SICNU_LOG_INFO( SicnuLogTags::GDAL, QString( "Executing GDAL tool: %1" ).arg( toolName() ) );
     if (!runExternalTool(program, args, feedback)) {
-        SICNU_LOG_ERROR( SicnuLogTags::GDAL, QString( "GDAL tool '%1' failed" ).arg( toolName() ) );
-        return {};
+        const QString err = QObject::tr("GDAL tool '%1' failed").arg(toolName());
+        SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
+        throw QgsProcessingException(err);
     }
 
     SICNU_LOG_SUCCESS( SicnuLogTags::GDAL, QString( "GDAL tool '%1' completed successfully" ).arg( toolName() ) );
     QVariantMap results;
-    if (parameters.contains("OUTPUT")) {
-        results["OUTPUT"] = parameters.value("OUTPUT");
+    for ( const QgsProcessingParameterDefinition *param : parameterDefinitions() )
+    {
+        if ( !param || !resolvedParameters.contains( param->name() ) )
+            continue;
+
+        const QString type = param->type();
+        if ( type == QgsProcessingParameterRasterDestination::typeName()
+             || type == QgsProcessingParameterVectorDestination::typeName()
+             || type == QgsProcessingParameterFeatureSink::typeName() )
+        {
+            const QString outPath = resolvedParameters.value( param->name() ).toString();
+            if ( !outPath.isEmpty() && !QFileInfo::exists( outPath ) )
+            {
+                const QString err = QObject::tr(
+                                      "Tool reported success but output file is missing: %1" )
+                                      .arg( outPath );
+                if ( feedback )
+                    feedback->reportError( err );
+                SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
+                throw QgsProcessingException(err);
+            }
+            results.insert( param->name(), outPath );
+        }
     }
     return results;
 }

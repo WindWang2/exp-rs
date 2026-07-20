@@ -62,8 +62,9 @@ void QgisDesktopWindow::openClassificationWindow()
 #else
 void QgisDesktopWindow::openClassificationWindow() {
     QMessageBox::information(this, tr("Classification"),
-        tr("Supervised classification requires OpenCV ml module.\n"
-           "Build with SICNU_HAS_CLASSIFY=ON to enable this feature."));
+        tr("Supervised classification requires OpenCV with the ml module.\n"
+           "Install opencv (including opencv-ml) and rebuild:\n"
+           "  cd build && cmake .. && make -j$(nproc)"));
 }
 #endif
 

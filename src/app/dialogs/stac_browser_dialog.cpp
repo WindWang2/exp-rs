@@ -145,6 +145,13 @@ void StacBrowserDialog::loadSelectedAsset()
         return;
     }
 
+    const QString hrefError = StacClient::validateAssetHref(cogUrl);
+    if (!hrefError.isEmpty()) {
+        QMessageBox::warning(this, tr("Error"),
+                             tr("Rejected STAC asset href: %1").arg(hrefError));
+        return;
+    }
+
     const QString vsicurl = QStringLiteral("/vsicurl/") + cogUrl;
     auto *layer = new QgsRasterLayer(vsicurl, feature.value(QStringLiteral("id")).toString());
     if (!layer->isValid()) {

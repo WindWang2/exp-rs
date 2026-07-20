@@ -227,10 +227,39 @@ bool RsObiaTask::writeOutput( const QMap<quint32, int> &segmentClasses, QString 
         return false;
     }
 
+    // Choose output type: UInt16 when any class id exceeds 255, else Byte
+    int maxClassId = 0;
+    for ( auto it = segmentClasses.constBegin(); it != segmentClasses.constEnd(); ++it )
+    {
+        if ( it.value() < 0 )
+        {
+            errorMsg = tr( "Negative class ID %1 is not supported" ).arg( it.value() );
+            GDALClose( srcDs );
+            return false;
+        }
+        if ( it.value() > maxClassId )
+            maxClassId = it.value();
+    }
+    for ( auto it = mCfg.classColors.constBegin(); it != mCfg.classColors.constEnd(); ++it )
+    {
+        if ( it.key() > maxClassId )
+            maxClassId = it.key();
+    }
+
+    if ( maxClassId > 65535 )
+    {
+        errorMsg = tr( "Class ID %1 exceeds UInt16 range (0-65535)" ).arg( maxClassId );
+        GDALClose( srcDs );
+        return false;
+    }
+
+    const bool useUInt16 = maxClassId > 255;
+    const GDALDataType outType = useUInt16 ? GDT_UInt16 : GDT_Byte;
+
     char **papszOptions = nullptr;
     papszOptions = CSLSetNameValue( papszOptions, "COMPRESS", "LZW" );
     GDALDatasetH dstDs = GDALCreate( driver, mCfg.outputRaster.toUtf8().constData(),
-                                      w, h, 1, GDT_Byte, papszOptions );
+                                      w, h, 1, outType, papszOptions );
     CSLDestroy( papszOptions );
 
     if ( !dstDs )
@@ -250,71 +279,103 @@ bool RsObiaTask::writeOutput( const QMap<quint32, int> &segmentClasses, QString 
 
     GDALClose( srcDs );
 
-    // Set up color table
-    GDALColorTableH ct = GDALCreateColorTable( GPI_RGB );
-
-    // Index 0 = nodata (transparent)
-    GDALColorEntry nodataColor = { 0, 0, 0, 0 };
-    GDALSetColorEntry( ct, 0, &nodataColor );
-
-    // Class colors
-    for ( auto it = mCfg.classColors.constBegin(); it != mCfg.classColors.constEnd(); ++it )
-    {
-        GDALColorEntry ce;
-        ce.c1 = static_cast<short>( it.value().red() );
-        ce.c2 = static_cast<short>( it.value().green() );
-        ce.c3 = static_cast<short>( it.value().blue() );
-        ce.c4 = 255;
-        GDALSetColorEntry( ct, it.key(), &ce );
-    }
-
     GDALRasterBandH outBand = GDALGetRasterBand( dstDs, 1 );
-    GDALSetRasterColorTable( outBand, ct );
-    GDALSetRasterColorInterpretation( outBand, GCI_PaletteIndex );
-    GDALDestroyColorTable( ct );
 
-    // HIGH #6 fix: validate class IDs fit in byte range
-    for ( auto it = segmentClasses.constBegin(); it != segmentClasses.constEnd(); ++it )
+    // Palette color tables are primarily for Byte; attach only when ids fit 0-255
+    if ( !useUInt16 )
     {
-        if ( it.value() < 0 || it.value() > 255 )
+        GDALColorTableH ct = GDALCreateColorTable( GPI_RGB );
+
+        GDALColorEntry nodataColor = { 0, 0, 0, 0 };
+        GDALSetColorEntry( ct, 0, &nodataColor );
+
+        for ( auto it = mCfg.classColors.constBegin(); it != mCfg.classColors.constEnd(); ++it )
         {
-            errorMsg = tr( "Class ID %1 exceeds byte range (0-255)" ).arg( it.value() );
-            GDALClose( dstDs );
-            return false;
+            GDALColorEntry ce;
+            ce.c1 = static_cast<short>( it.value().red() );
+            ce.c2 = static_cast<short>( it.value().green() );
+            ce.c3 = static_cast<short>( it.value().blue() );
+            ce.c4 = 255;
+            GDALSetColorEntry( ct, it.key(), &ce );
         }
+
+        GDALSetRasterColorTable( outBand, ct );
+        GDALSetRasterColorInterpretation( outBand, GCI_PaletteIndex );
+        GDALDestroyColorTable( ct );
     }
 
     // Write pixel data: for each pixel, look up segment → class
-    QVector<quint8> rowBuf( w );
     const auto &labels = mSegMap.labels();
     int totalPixels = 0;
 
-    for ( int r = 0; r < h; ++r )
+    if ( useUInt16 )
     {
-        for ( int c = 0; c < w; ++c )
+        QVector<quint16> rowBuf( w );
+        for ( int r = 0; r < h; ++r )
         {
-            quint32 segId = labels[r * w + c];
-            if ( segId == 0 )
-                rowBuf[c] = 0; // nodata
-            else
+            for ( int c = 0; c < w; ++c )
             {
-                auto it = segmentClasses.find( segId );
-                if ( it != segmentClasses.end() )
+                quint32 segId = labels[r * w + c];
+                if ( segId == 0 )
                 {
-                    rowBuf[c] = static_cast<quint8>( it.value() );
-                    totalPixels++;
+                    rowBuf[c] = 0;
                 }
                 else
-                    rowBuf[c] = 0; // unclassified
+                {
+                    auto it = segmentClasses.find( segId );
+                    if ( it != segmentClasses.end() )
+                    {
+                        rowBuf[c] = static_cast<quint16>( it.value() );
+                        totalPixels++;
+                    }
+                    else
+                    {
+                        rowBuf[c] = 0;
+                    }
+                }
+            }
+            if ( GDALRasterIO( outBand, GF_Write, 0, r, w, 1,
+                               rowBuf.data(), w, 1, GDT_UInt16, 0, 0 ) != CE_None )
+            {
+                errorMsg = tr( "RasterIO write failed at row %1" ).arg( r );
+                GDALClose( dstDs );
+                return false;
             }
         }
-        // HIGH #3 fix: check write result
-        if ( GDALRasterIO( outBand, GF_Write, 0, r, w, 1,
-                           rowBuf.data(), w, 1, GDT_Byte, 0, 0 ) != CE_None )
+    }
+    else
+    {
+        QVector<quint8> rowBuf( w );
+        for ( int r = 0; r < h; ++r )
         {
-            errorMsg = tr( "RasterIO write failed at row %1" ).arg( r );
-            GDALClose( dstDs );
-            return false;
+            for ( int c = 0; c < w; ++c )
+            {
+                quint32 segId = labels[r * w + c];
+                if ( segId == 0 )
+                {
+                    rowBuf[c] = 0;
+                }
+                else
+                {
+                    auto it = segmentClasses.find( segId );
+                    if ( it != segmentClasses.end() )
+                    {
+                        rowBuf[c] = static_cast<quint8>( it.value() );
+                        totalPixels++;
+                    }
+                    else
+                    {
+                        rowBuf[c] = 0;
+                    }
+                }
+            }
+            if ( GDALRasterIO( outBand, GF_Write, 0, r, w, 1,
+                               rowBuf.data(), w, 1, GDT_Byte, 0, 0 ) != CE_None )
+            {
+                errorMsg = tr( "RasterIO write failed at row %1" ).arg( r );
+                GDALClose( dstDs );
+                return false;
+            }
         }
     }
 

@@ -52,14 +52,23 @@ void RsClassTableWidget::setRoiCollection( RsRoiCollection *col )
 
 void RsClassTableWidget::rebuild()
 {
+  // Preserve selection: rebuild used to clear the table and drop currentClassId
+  // to 0, which made every subsequent ROI sample look "invalid" (classId<=0).
+  const int keepId = currentClassId() > 0 ? currentClassId() : mStickyClassId;
+
+  mTable->blockSignals( true );
   mTable->setRowCount( 0 );
   if ( !mRois )
+  {
+    mTable->blockSignals( false );
     return;
+  }
 
   const QHash<int, RsClassDef> defs = mRois->classDefs();
   QList<int> ids = defs.keys();
   std::sort( ids.begin(), ids.end() );
 
+  int restoreRow = -1;
   for ( int id : ids )
   {
     const RsClassDef d = defs.value( id );
@@ -83,6 +92,29 @@ void RsClassTableWidget::rebuild()
     auto *pxCell = new QTableWidgetItem( QString::number( pxN ) );
     pxCell->setTextAlignment( Qt::AlignRight | Qt::AlignVCenter );
     mTable->setItem( row, 3, pxCell );
+
+    if ( keepId > 0 && id == keepId )
+      restoreRow = row;
+  }
+
+  if ( restoreRow < 0 && mTable->rowCount() > 0 )
+    restoreRow = 0;
+
+  if ( restoreRow >= 0 )
+    mTable->selectRow( restoreRow );
+
+  mTable->blockSignals( false );
+
+  // Emit only if sticky id changed (first fill / external set).
+  const int now = currentClassId();
+  if ( now > 0 && now != mStickyClassId )
+  {
+    mStickyClassId = now;
+    emit currentClassChanged( now );
+  }
+  else if ( now > 0 )
+  {
+    mStickyClassId = now;
   }
 }
 
@@ -105,19 +137,40 @@ quint64 RsClassTableWidget::pixelCountForRow( int row ) const
 
 void RsClassTableWidget::setCurrentRow( int row )
 {
+  if ( row < 0 || row >= mTable->rowCount() )
+    return;
   mTable->selectRow( row );
+}
+
+void RsClassTableWidget::setCurrentClassId( int classId )
+{
+  if ( classId <= 0 || !mTable )
+    return;
+  for ( int r = 0; r < mTable->rowCount(); ++r )
+  {
+    auto *it = mTable->item( r, 0 );
+    if ( it && it->data( Qt::UserRole ).toInt() == classId )
+    {
+      mTable->selectRow( r );
+      mStickyClassId = classId;
+      return;
+    }
+  }
 }
 
 int RsClassTableWidget::currentClassId() const
 {
   const auto rows = mTable->selectionModel()->selectedRows();
   if ( rows.isEmpty() )
-    return 0;
+    return mStickyClassId;
   auto *it = mTable->item( rows.first().row(), 0 );
-  return it ? it->data( Qt::UserRole ).toInt() : 0;
+  return it ? it->data( Qt::UserRole ).toInt() : mStickyClassId;
 }
 
 void RsClassTableWidget::onSelectionChanged()
 {
-  emit currentClassChanged( currentClassId() );
+  const int id = currentClassId();
+  if ( id > 0 )
+    mStickyClassId = id;
+  emit currentClassChanged( id );
 }

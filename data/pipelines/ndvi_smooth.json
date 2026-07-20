@@ -1,0 +1,25 @@
+{
+  "name": "ndvi_smooth_lab",
+  "description": "Teaching pipeline: compute NDVI then smooth with Gaussian blur",
+  "steps": [
+    {
+      "operator": "rs:spectral_index",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "output": "/tmp/sicnu_ndvi.tif",
+        "index": "NDVI",
+        "nir": 4,
+        "red": 3
+      }
+    },
+    {
+      "operator": "opencv:gaussian_blur",
+      "params": {
+        "input": "/tmp/sicnu_ndvi.tif",
+        "output": "/tmp/sicnu_ndvi_smooth.tif",
+        "ksize": 5,
+        "sigmaX": 1.0
+      }
+    }
+  ]
+}

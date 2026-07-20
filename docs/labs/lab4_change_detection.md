@@ -6,8 +6,8 @@
 3. 学会分析变化检测结果
 
 ## 实验数据
-- `samples_data/change_before.tif` (变化前影像)
-- `samples_data/change_after.tif` (变化后影像)
+- `data/samples/change_before.tif` (变化前影像)
+- `data/samples/change_after.tif` (变化后影像)
 
 ## 实验步骤
 

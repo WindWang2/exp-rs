@@ -8,8 +8,8 @@
 //   classIds        — sorted unique class IDs observed in either vector
 //   overallAccuracy — sum(diag) / total
 //   kappa           — Cohen's Kappa, with po==1.0 guard returning 1.0
-//   producerAcc     — per-class TP / column-sum (omission-error complement)
-//   userAcc         — per-class TP / row-sum    (commission-error complement)
+//   producerAcc     — per-class TP / row-sum    (recall; omission complement)
+//   userAcc         — per-class TP / column-sum (precision; commission complement)
 //   f1              — harmonic mean of producer and user accuracy
 //
 // Empty / size-mismatched input yields an empty Result with all metrics

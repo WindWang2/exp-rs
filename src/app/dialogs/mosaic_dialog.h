@@ -20,6 +20,7 @@ public:
 protected:
     QString toolName() const override { return QStringLiteral("mosaic"); }
     QString dialogTitle() const override { return tr("Mosaic"); }
+    bool validateInputs() override;
     void onRun() override;
 
 private slots:

@@ -231,7 +231,8 @@ bool RsPostProcess::sieve( const cv::Mat &src, cv::Mat &dst, int threshold,
 }
 
 bool RsPostProcess::majorityFilter( const cv::Mat &src, cv::Mat &dst, int kernelOdd,
-                                    QString *err )
+                                    QString *err,
+                                    const std::function<bool()> &isCanceled )
 {
   cv::Mat labels;
   if ( !toLabels32S( src, labels, err ) )
@@ -242,9 +243,15 @@ bool RsPostProcess::majorityFilter( const cv::Mat &src, cv::Mat &dst, int kernel
     return false;
   }
 
+  // Full-image path: O(H*W*k^2). Poll cancel every 16 rows so UI tasks can abort.
   cv::Mat out( labels.rows, labels.cols, CV_32S );
   for ( int r = 0; r < labels.rows; ++r )
   {
+    if ( isCanceled && ( r % 16 ) == 0 && isCanceled() )
+    {
+      setErr( err, QStringLiteral( "Cancelled" ) );
+      return false;
+    }
     int *outRow = out.ptr<int>( r );
     for ( int c = 0; c < labels.cols; ++c )
       outRow[c] = modeOfWindow( labels, r, c, kernelOdd );

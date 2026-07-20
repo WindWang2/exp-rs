@@ -35,6 +35,8 @@
 #include <QStatusBar>
 #include <QVBoxLayout>
 
+#include <atomic>
+#include <memory>
 #include <gdal.h>
 
 // ---------------------------------------------------------------------------
@@ -271,40 +273,86 @@ void RsObiaMainWindow::runSegmentation()
     segCfg.quantizeBins = binsSpin ? binsSpin->value() : 32;
     segCfg.minRegionSize = minRegionSpin ? minRegionSpin->value() : 100;
 
-    QGuiApplication::setOverrideCursor( Qt::WaitCursor );
-    statusBar()->showMessage( RsObiaSegmentation::isOtbAvailable()
-                                  ? tr( "Segmenting with OTB MeanShift..." )
-                                  : tr( "Segmenting with built-in segmenter..." ) );
+    const QString rasterPath = mRasterPath;
 
-    auto *watcher = new QFutureWatcher<RsObiaSegmentationResult>( this );
-    connect( watcher, &QFutureWatcher<RsObiaSegmentationResult>::finished, this,
-             [this, watcher, bandIndices]() {
+    // Cancel token shared with the worker
+    auto canceled = std::make_shared<std::atomic<bool>>( false );
+
+    auto *progress = new QProgressDialog(
+        RsObiaSegmentation::isOtbAvailable()
+            ? tr( "Segmenting with OTB MeanShift..." )
+            : tr( "Segmenting with built-in segmenter..." ),
+        tr( "Cancel" ), 0, 0, this );
+    progress->setWindowModality( Qt::WindowModal );
+    progress->setMinimumDuration( 0 );
+    progress->setValue( 0 );
+    progress->show();
+    connect( progress, &QProgressDialog::canceled, this, [canceled]() {
+        canceled->store( true );
+    } );
+
+    QGuiApplication::setOverrideCursor( Qt::WaitCursor );
+    statusBar()->showMessage( progress->labelText() );
+
+    // Bundle segmentation + feature extraction so both stay off the GUI thread.
+    struct SegWorkResult
+    {
+        RsObiaSegmentationResult seg;
+        QMap<quint32, RsSegmentFeatures::SegmentStat> stats;
+    };
+
+    auto *watcher = new QFutureWatcher<SegWorkResult>( this );
+    connect( watcher, &QFutureWatcher<SegWorkResult>::finished, this,
+             [this, watcher, progress]() {
                  QGuiApplication::restoreOverrideCursor();
-                 const RsObiaSegmentationResult result = watcher->result();
+                 progress->reset();
+                 progress->deleteLater();
+
+                 const SegWorkResult work = watcher->result();
                  watcher->deleteLater();
 
-                 if ( !result.ok )
+                 if ( !work.seg.ok )
                  {
-                     QMessageBox::warning( this, tr( "Error" ), result.errorMessage );
+                     if ( work.seg.errorMessage.contains( QStringLiteral( "cancel" ), Qt::CaseInsensitive ) )
+                         statusBar()->showMessage( tr( "Segmentation canceled" ), 3000 );
+                     else
+                         QMessageBox::warning( this, tr( "Error" ), work.seg.errorMessage );
                      updateStatusLabel();
                      return;
                  }
 
-                 applySegmentationResult( result.segMap, result.usedOtb, bandIndices );
+                 applySegmentationResult( work.seg.segMap, work.seg.usedOtb, work.stats );
              } );
 
-    watcher->setFuture( QtConcurrent::run( [segCfg]() {
+    watcher->setFuture( QtConcurrent::run( [segCfg, bandIndices, rasterPath, canceled]() {
         static bool s_gdalInit = ( GDALAllRegister(), true );
         Q_UNUSED( s_gdalInit );
-        return RsObiaSegmentation::run( segCfg );
+
+        SegWorkResult work;
+        work.seg = RsObiaSegmentation::run( segCfg, [canceled]() {
+            return canceled->load();
+        } );
+
+        if ( work.seg.ok && !canceled->load() )
+        {
+            work.stats = RsSegmentFeatures::extract( rasterPath, work.seg.segMap, bandIndices );
+        }
+        else if ( work.seg.ok && canceled->load() )
+        {
+            work.seg.ok = false;
+            work.seg.errorMessage = QObject::tr( "Segmentation canceled" );
+        }
+        return work;
     } ) );
 }
 
 void RsObiaMainWindow::applySegmentationResult(
-    const RsSegmentMap &segMap, bool usedOtb, const QVector<int> &bandIndices )
+    const RsSegmentMap &segMap,
+    bool usedOtb,
+    QMap<quint32, RsSegmentFeatures::SegmentStat> stats )
 {
     mSegMap = segMap;
-    mSegStats = RsSegmentFeatures::extract( mRasterPath, mSegMap, bandIndices );
+    mSegStats = std::move( stats );
     mSegmentLabels.clear();
 
     if ( !mSelectTool )
@@ -389,10 +437,18 @@ void RsObiaMainWindow::runClassification()
     for ( const auto &cd : mClassDefs )
         classColors[cd.id] = cd.color;
 
+    // Prompt for classified output path (no hard-coded default write)
+    const QString defaultOut = QFileInfo( mRasterPath ).path() + QStringLiteral( "/obia_classified.tif" );
+    const QString outputPath = QFileDialog::getSaveFileName(
+        this, tr( "Save Classified Raster" ), defaultOut,
+        tr( "GeoTIFF (*.tif *.tiff);;All files (*)" ) );
+    if ( outputPath.isEmpty() )
+        return;
+
     // Build config — pass existing segment map and features to avoid re-segmentation
     RsObiaTask::Config cfg;
     cfg.sourceRaster = mRasterPath;
-    cfg.outputRaster = QFileInfo( mRasterPath ).path() + "/obia_classified.tif";
+    cfg.outputRaster = outputPath;
     cfg.bandIndices = bandIndices;
     cfg.existingSegMap = mSegMap;       // reuse pre-computed segments
     cfg.existingStats = mSegStats;     // reuse pre-computed features
@@ -400,9 +456,6 @@ void RsObiaMainWindow::runClassification()
     cfg.segmentLabels = mSegmentLabels;
     cfg.classColors = classColors;
     cfg.algoName = algoName;
-
-    // Capture output path before std::move(cfg)
-    const QString outputPath = cfg.outputRaster;
 
     // Run asynchronously via QgsTaskManager
     QGuiApplication::setOverrideCursor( Qt::WaitCursor );
@@ -438,9 +491,17 @@ void RsObiaMainWindow::runClassification()
 
 void RsObiaMainWindow::exportResult()
 {
+    if ( mRasterPath.isEmpty() )
+    {
+        QMessageBox::information( this, tr( "Export" ),
+                                  tr( "No classification has been run yet. Use Classify and choose a save path." ) );
+        return;
+    }
+
+    const QString defaultOut = QFileInfo( mRasterPath ).path() + QStringLiteral( "/obia_classified.tif" );
     QMessageBox::information( this, tr( "Export" ),
-                              tr( "Classification output is saved automatically to:\n%1" )
-                                  .arg( QFileInfo( mRasterPath ).path() + "/obia_classified.tif" ) );
+                              tr( "Use Classify to write the result. Suggested path:\n%1" )
+                                  .arg( defaultOut ) );
 }
 
 void RsObiaMainWindow::onSegmentSelected( quint32 segmentId )
@@ -452,9 +513,10 @@ void RsObiaMainWindow::onSegmentSelected( quint32 segmentId )
         mInfoDock->showSegmentInfo( segmentId, it.value(), classId );
     }
 
+    // Use pixelCount (size cache) — do not call pixelCoords().size() which forces coord build.
     statusBar()->showMessage( tr( "Selected segment %1 (pixels: %2)" )
                                   .arg( segmentId )
-                                  .arg( mSegMap.pixelCoords( segmentId ).size() ) );
+                                  .arg( mSegMap.pixelCount( segmentId ) ) );
 }
 
 void RsObiaMainWindow::onSelectionCleared()

@@ -6,11 +6,12 @@
 
 #include <gui/processing/qgsprocessingalgorithmdialogbase.h>
 #include <gui/processing/qgsprocessingwidgetwrapper.h>
-#include "processing/framework/processing_cache.h"
 
 #include <QVector>
 #include <QVariantMap>
 
+class QCheckBox;
+class QgsProcessingFeedback;
 class QgsProcessingParametersWidget;
 
 class SicnuAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
@@ -32,19 +33,20 @@ class SicnuAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
     // Called by the main window to set up the parameter UI
     void buildParameterWidgets();
 
+  protected slots:
+    void algExecuted( bool successful, const QVariantMap &results ) override;
+
   protected:
     void finished( bool successful, const QVariantMap &result,
                    QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override;
 
   private:
-    QString computeCacheKey(const QVariantMap &params);
-
     QgsProcessingContext mContext;
     QgsProcessingParametersWidget *mParamWidget = nullptr;
     QVector<QgsAbstractProcessingParameterWidgetWrapper *> mWrappers;
     qint64 mStartTime = 0;
     QVariantMap mHistoryDetails;
     long long mHistoryLogId = -1;
-
-    static sicnu::ProcessingCache s_cache;
+    QCheckBox *mLoadResultsCheck = nullptr;
+    QgsProcessingFeedback *mFeedback = nullptr;
 };
