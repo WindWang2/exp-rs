@@ -262,8 +262,10 @@ void QgsGeorefShellWindow::addGcpEditActions( QToolBar *bar, const QString &obje
   mAddPointAction->setObjectName( objectNamePrefix + QStringLiteral( "AddPointAction" ) );
   mAddPointAction->setCheckable( true );
   tipAction( mAddPointAction, tr(
-    "添加控制点：在源画布（SRC）点击一点，再在目标画布上指定对应位置"
-    "（或通过坐标对话框输入）。均匀分布、覆盖边缘效果更好。" ) );
+    "添加控制点（双画布点选）：\n"
+    "1. 在左侧/上方源影像 (SRC) 点击源点\n"
+    "2. 在右侧/下方参考影像或地图上点击同名目标点\n"
+    "右键取消当前未完成的源点。均匀分布、覆盖边缘效果更好。" ) );
 
   mMovePointAction = bar->addAction( ic, tr( "Move GCP" ) );
   mMovePointAction->setObjectName( objectNamePrefix + QStringLiteral( "MovePointAction" ) );
@@ -313,11 +315,32 @@ void QgsGeorefShellWindow::createMapTools()
   if ( !mSrcCanvas || !mDstCanvas )
     return;
 
+  // Dual-canvas GCP pick: SRC → source, REF/Map → destination (no form).
   mAddPointTool = new QgsGeorefToolAddPoint( mSrcCanvas );
   mAddPointTool->setParent( this );
   mAddPointTool->setAction( mAddPointAction );
-  connect( mAddPointTool, &QgsGeorefToolAddPoint::showCoordDialog,
-           this, &QgsGeorefShellWindow::showCoordDialog );
+  connect( mAddPointTool, &QgsGeorefToolAddPoint::pointPicked,
+           this, &QgsGeorefShellWindow::onSourcePointPicked );
+  connect( mAddPointTool, &QgsGeorefToolAddPoint::canceled, this, [this]() {
+    if ( !mHasPendingSource )
+      return;
+    clearPendingGcpPick();
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "已取消未完成的源点" ), 3000 );
+  } );
+
+  mAddPointToolDst = new QgsGeorefToolAddPoint( mDstCanvas );
+  mAddPointToolDst->setParent( this );
+  mAddPointToolDst->setAction( mAddPointAction );
+  connect( mAddPointToolDst, &QgsGeorefToolAddPoint::pointPicked,
+           this, &QgsGeorefShellWindow::onDestPointPicked );
+  connect( mAddPointToolDst, &QgsGeorefToolAddPoint::canceled, this, [this]() {
+    if ( !mHasPendingSource )
+      return;
+    clearPendingGcpPick();
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "已取消未完成的源点" ), 3000 );
+  } );
 
   mToolMoveSrc = new QgsGeorefToolMovePoint( mSrcCanvas );
   mToolMoveSrc->setParent( this );
@@ -374,12 +397,19 @@ void QgsGeorefShellWindow::wireMapToolActions()
   if ( mAddPointAction )
   {
     connect( mAddPointAction, &QAction::toggled, this, [this]( bool on ) {
-      if ( !on || !mSrcCanvas )
+      if ( !on )
+      {
+        clearPendingGcpPick();
         return;
-      mSrcCanvas->setMapTool( mAddPointTool );
-      if ( mDstCanvas && mDstCanvas->mapTool()
-           && ( mDstCanvas->mapTool() == mToolMoveDst || mDstCanvas->mapTool() == mToolDeleteDst ) )
-        mDstCanvas->unsetMapTool( mDstCanvas->mapTool() );
+      }
+      // Both canvases active for dual pick: SRC source, REF/Map destination.
+      if ( mSrcCanvas && mAddPointTool )
+        mSrcCanvas->setMapTool( mAddPointTool );
+      if ( mDstCanvas && mAddPointToolDst )
+        mDstCanvas->setMapTool( mAddPointToolDst );
+      if ( statusBar() )
+        statusBar()->showMessage(
+          tr( "添加 GCP：先在源画布点击源点，再在目标画布点击同名位置（右键取消）" ), 8000 );
     } );
   }
   if ( mMovePointAction )
@@ -387,6 +417,7 @@ void QgsGeorefShellWindow::wireMapToolActions()
     connect( mMovePointAction, &QAction::toggled, this, [this]( bool on ) {
       if ( !on )
         return;
+      clearPendingGcpPick();
       if ( mSrcCanvas )
         mSrcCanvas->setMapTool( mToolMoveSrc );
       if ( mDstCanvas )
@@ -398,6 +429,7 @@ void QgsGeorefShellWindow::wireMapToolActions()
     connect( mDeletePointAction, &QAction::toggled, this, [this]( bool on ) {
       if ( !on )
         return;
+      clearPendingGcpPick();
       if ( mSrcCanvas )
         mSrcCanvas->setMapTool( mToolDeleteSrc );
       if ( mDstCanvas )
@@ -800,6 +832,11 @@ void QgsGeorefShellWindow::setWarpInProgressForTest( bool on )
 bool QgsGeorefShellWindow::isDirtyForTest() const { return mSession.isDirty(); }
 void QgsGeorefShellWindow::markDirtyForTest() { mSession.markDirty(); }
 
+int QgsGeorefShellWindow::gcpCountForTest() const
+{
+  return mGcps ? mGcps->size() : 0;
+}
+
 RsGeorefSessionState::WorkflowSnapshot QgsGeorefShellWindow::captureWorkflowSnapshot() const
 {
   RsGeorefSessionState::WorkflowSnapshot s;
@@ -845,8 +882,70 @@ void QgsGeorefShellWindow::applyWorkflowSnapshot( const RsGeorefSessionState::Wo
   recomputeFit();
 }
 
+void QgsGeorefShellWindow::clearPendingGcpPick()
+{
+  mHasPendingSource = false;
+  mPendingSource = QgsPointXY();
+  delete mPendingDataPoint;
+  mPendingDataPoint = nullptr;
+  delete mPendingGcp;
+  mPendingGcp = nullptr;
+}
+
+void QgsGeorefShellWindow::beginPendingSourcePick( const QgsPointXY &sourceMap )
+{
+  clearPendingGcpPick();
+  mPendingSource = sourceMap;
+  mHasPendingSource = true;
+  mPendingGcp = new QgsGcpPoint( sourceMap, QgsPointXY(), QgsCoordinateReferenceSystem(), true );
+  mPendingDataPoint = new QgsGeorefDataPoint( mSrcCanvas, mDstCanvas, mPendingGcp );
+  mPendingDataPoint->setParent( this );
+  if ( statusBar() )
+    statusBar()->showMessage(
+      tr( "已选源点 (%1, %2) — 请在目标画布上点击同名位置（右键取消）" )
+        .arg( sourceMap.x(), 0, 'f', 2 )
+        .arg( sourceMap.y(), 0, 'f', 2 ),
+      0 );
+}
+
+void QgsGeorefShellWindow::commitGcpPair( const QgsPointXY &sourceMap, const QgsPointXY &destMap )
+{
+  QgsCoordinateReferenceSystem destCrs;
+  if ( mDstCanvas )
+    destCrs = mDstCanvas->mapSettings().destinationCrs();
+  if ( !destCrs.isValid() && mParamsPanel )
+    destCrs = mParamsPanel->destCrs();
+
+  clearPendingGcpPick();
+  if ( !mGcps )
+    return;
+  mGcps->appendPoint( QgsGcpPoint( sourceMap, destMap, destCrs, true ) );
+  if ( statusBar() )
+    statusBar()->showMessage(
+      tr( "已添加 GCP（共 %1 个）。可继续：源画布 → 目标画布" ).arg( mGcps->size() ), 5000 );
+}
+
+void QgsGeorefShellWindow::onSourcePointPicked( const QgsPointXY &sourceMap )
+{
+  // Re-clicking SRC while pending updates the source position.
+  beginPendingSourcePick( sourceMap );
+}
+
+void QgsGeorefShellWindow::onDestPointPicked( const QgsPointXY &destMap )
+{
+  if ( !mHasPendingSource )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "请先在源影像画布上点击源点" ), 4000 );
+    return;
+  }
+  commitGcpPair( mPendingSource, destMap );
+}
+
 void QgsGeorefShellWindow::showCoordDialog( const QgsPointXY &sourcePixel )
 {
+  // Advanced / compatibility path: typed destination coordinates.
+  // Primary UX is dual-canvas pick (onSourcePointPicked / onDestPointPicked).
   auto *tempGcp = new QgsGcpPoint( sourcePixel, QgsPointXY(), QgsCoordinateReferenceSystem(), true );
   auto *tempDataPoint = new QgsGeorefDataPoint( mSrcCanvas, mDstCanvas, tempGcp );
 

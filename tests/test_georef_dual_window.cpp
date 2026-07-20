@@ -5,9 +5,11 @@
 #include "qgsgeoreferencermainwindow.h"
 #include "qgsgeoref_image_to_map_window.h"
 #include "qgsmapcanvas.h"
+#include "qgspointxy.h"
 #include "rs_georef_params_panel.h"
 #include "rs_georef_task_list.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QSplitter>
 
@@ -69,4 +71,37 @@ TEST_CASE( "I2M window has SRC and Map canvases", "[georef][dual]" )
   auto *splitter = w.findChild<QSplitter *>( QStringLiteral( "rsGeorefI2MSplitter" ) );
   REQUIRE( splitter != nullptr );
   REQUIRE( splitter->orientation() == Qt::Vertical );
+}
+
+TEST_CASE( "I2I dual-canvas GCP pick arms both tools and appends pair", "[georef][dual][gcp]" )
+{
+  QgsGeoreferencerMainWindow w( nullptr, nullptr );
+  auto *add = w.findChild<QAction *>( QStringLiteral( "rsGeorefAddPointAction" ) );
+  REQUIRE( add != nullptr );
+  add->setChecked( true );
+  REQUIRE( w.srcCanvas() != nullptr );
+  REQUIRE( w.dstCanvas() != nullptr );
+  REQUIRE( w.srcCanvas()->mapTool() != nullptr );
+  REQUIRE( w.dstCanvas()->mapTool() != nullptr );
+  REQUIRE( w.srcCanvas()->mapTool() != w.dstCanvas()->mapTool() );
+
+  REQUIRE( w.gcpCountForTest() == 0 );
+  REQUIRE_FALSE( w.hasPendingSourceForTest() );
+
+  // Dest first → no GCP (must pick SRC first).
+  w.pickDestForTest( QgsPointXY( 100, 200 ) );
+  REQUIRE( w.gcpCountForTest() == 0 );
+
+  w.pickSourceForTest( QgsPointXY( 10, 20 ) );
+  REQUIRE( w.hasPendingSourceForTest() );
+  REQUIRE( w.gcpCountForTest() == 0 );
+
+  w.pickDestForTest( QgsPointXY( 100, 200 ) );
+  REQUIRE_FALSE( w.hasPendingSourceForTest() );
+  REQUIRE( w.gcpCountForTest() == 1 );
+
+  // Second pair
+  w.pickSourceForTest( QgsPointXY( 30, 40 ) );
+  w.pickDestForTest( QgsPointXY( 130, 240 ) );
+  REQUIRE( w.gcpCountForTest() == 2 );
 }

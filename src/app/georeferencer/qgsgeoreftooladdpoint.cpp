@@ -29,5 +29,7 @@ QgsGeorefToolAddPoint::QgsGeorefToolAddPoint( QgsMapCanvas *canvas )
 void QgsGeorefToolAddPoint::canvasPressEvent( QgsMapMouseEvent *e )
 {
   if ( Qt::LeftButton == e->button() )
-    emit showCoordDialog( toMapCoordinates( e->pos() ) );
+    emit pointPicked( toMapCoordinates( e->pos() ) );
+  else if ( Qt::RightButton == e->button() )
+    emit canceled();
 }

@@ -28,9 +28,10 @@ class QgsMapCanvas;
 class QgsMapMouseEvent;
 
 /**
- * \brief Source-canvas map tool: clicking the canvas emits a source
- * coordinate, which the main window uses to open the MapCoords dialog
- * for entering the matching destination coordinate.
+ * \brief Click-to-pick map tool for GCP placement on a single canvas.
+ *
+ * Left click emits \ref pointPicked with canvas map coordinates.
+ * Right click emits \ref canceled (e.g. abandon a pending source point).
  */
 class QgsGeorefToolAddPoint : public QgsMapTool
 {
@@ -44,9 +45,10 @@ class QgsGeorefToolAddPoint : public QgsMapTool
     void canvasPressEvent( QgsMapMouseEvent *e ) override;
 
   signals:
-    /// Emitted on a left-button click on the canvas. Coordinate is in
-    /// source-canvas map coords (pixels for a non-referenced raster).
-    void showCoordDialog( const QgsPointXY &sourceCoordinates );
+    /// Left-button click; coordinate is in this tool's canvas map CRS.
+    void pointPicked( const QgsPointXY &mapCoordinates );
+    /// Right-button click — cancel pending dual-canvas pick.
+    void canceled();
 };
 
 #endif // QGSGEOREFTOOLADDPOINT_H

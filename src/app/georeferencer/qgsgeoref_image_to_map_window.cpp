@@ -50,13 +50,16 @@ void QgsGeorefImageToMapWindow::setupCentralWidget()
   mSrcCanvas = new QgsMapCanvas( this );
   mSrcCanvas->setObjectName( QStringLiteral( "rsGeorefI2MSrcCanvas" ) );
   mSrcCanvas->setCanvasColor( Qt::white );
-  mSrcCanvas->setToolTip( tr( "源影像画布 (SRC)：加载待校正影像，在此点击添加 GCP 源位置。" ) );
+  mSrcCanvas->setToolTip( tr(
+    "源影像画布 (SRC)：加载待校正影像。\n"
+    "Add GCP 时先在此点击源点，再在下方 Map 点击同名位置。" ) );
 
   mDstCanvas = new QgsMapCanvas( this );
   mDstCanvas->setObjectName( QStringLiteral( "rsGeorefI2MMapCanvas" ) );
   mDstCanvas->setCanvasColor( QColor( 245, 245, 245 ) );
   mDstCanvas->setToolTip( tr(
-    "地图预览 (Map)：镜像主工程中可见图层，在此指定 GCP 目标坐标（地理坐标）。" ) );
+    "地图预览 (Map)：镜像主工程中可见图层。\n"
+    "Add GCP 时在此点击与源点对应的地图位置（地理坐标），完成一对控制点。" ) );
 
   splitter->addWidget( mSrcCanvas );
   splitter->addWidget( mDstCanvas );
@@ -110,7 +113,7 @@ QString QgsGeorefImageToMapWindow::windowHelpText() const
     "<b>典型流程</b><br>"
     "1. 主窗口加载已有地理参考底图/矢量<br>"
     "2. 本窗口 File → Open source raster<br>"
-    "3. Add GCP：SRC 点地物 → Map 上对应位置<br>"
+    "3. Add GCP：先在 SRC 点源点，再在 Map 点目标位置（双画布点选，不弹坐标表单）<br>"
     "4. 变换方法可选 <b>RPC Physical</b>（需源含 RPC；可配 DEM）<br>"
     "5. 设置输出路径 → 运行 → 任务列表查看/加载结果<br><br>"
     "无 SIFT、无「打开参考影像」。悬停工具与参数可看说明。" );

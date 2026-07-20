@@ -53,12 +53,16 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
   mSrcCanvas = new QgsMapCanvas( this );
   mSrcCanvas->setObjectName( QStringLiteral( "rsSrcCanvas" ) );
   mSrcCanvas->setCanvasColor( Qt::white );
-  mSrcCanvas->setToolTip( tr( "源影像画布 (SRC)：加载待校正影像，在此点击添加 GCP 源位置。" ) );
+  mSrcCanvas->setToolTip( tr(
+    "源影像画布 (SRC)：加载待校正影像。\n"
+    "Add GCP 时先在此点击源点，再在右侧 REF 点击同名点（不弹坐标表单）。" ) );
 
   mDstCanvas = new QgsMapCanvas( this );
   mDstCanvas->setObjectName( QStringLiteral( "rsRefCanvas" ) );
   mDstCanvas->setCanvasColor( Qt::white );
-  mDstCanvas->setToolTip( tr( "参考影像画布 (REF)：加载已配准参考影像，在此指定 GCP 目标位置。" ) );
+  mDstCanvas->setToolTip( tr(
+    "参考影像画布 (REF)：加载已配准参考影像。\n"
+    "Add GCP 时在此点击与源点对应的同名位置，完成一对控制点。" ) );
 
   split->addWidget( mSrcCanvas );
   split->addWidget( mDstCanvas );
@@ -135,7 +139,8 @@ QString QgsGeoreferencerMainWindow::windowHelpText() const
     "<b>典型流程</b><br>"
     "1. File → Open source raster<br>"
     "2. File → Load reference raster<br>"
-    "3. 用 Add GCP 在两侧同名地物上取点（≥ 方法要求点数）<br>"
+    "3. 点选 Add GCP：先在 SRC 点击源点，再在 REF 点击同名目标点"
+    "（不弹出坐标填写框；右键取消未完成源点）<br>"
     "4. 可选：SIFT 自动匹配、Sync zoom 联动浏览<br>"
     "5. 右侧设置变换方法与输出路径 → 运行<br><br>"
     "不含 RPC（RPC 请用 Image 2 Map）。悬停工具按钮可看详细说明；"

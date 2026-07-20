@@ -51,7 +51,14 @@ class QgsGeorefShellWindow : public QMainWindow
     QgsMapCanvas *dstCanvas() const { return mDstCanvas; }
     RsGeorefTaskList *taskListForTest() { return mTaskList; }
 
+    /// Test hooks for dual-canvas GCP pick (no MapCoords dialog).
+    void pickSourceForTest( const QgsPointXY &p ) { onSourcePointPicked( p ); }
+    void pickDestForTest( const QgsPointXY &p ) { onDestPointPicked( p ); }
+    bool hasPendingSourceForTest() const { return mHasPendingSource; }
+    int gcpCountForTest() const;
+
   public slots:
+    /// I2M optional: open coordinate dialog for typed destination (advanced).
     void showCoordDialog( const QgsPointXY &sourcePixel );
     void openSourceRaster();
     /// Validate params, enqueue a warp job into the task list, and run it.
@@ -103,6 +110,10 @@ class QgsGeorefShellWindow : public QMainWindow
     void hoverPoint( const QgsPointXY &p );
     void deletePointAt( const QgsPointXY &p );
     void onTransformMethodChanged();
+    /// Dual-canvas GCP: left-click SRC / REF (or Map).
+    void onSourcePointPicked( const QgsPointXY &sourceMap );
+    void onDestPointPicked( const QgsPointXY &destMap );
+    void clearPendingGcpPick();
 
   protected:
     void emitStructuredLog( const QgsImageWarper::WarpResult &r );
@@ -111,6 +122,8 @@ class QgsGeorefShellWindow : public QMainWindow
     QgsGeorefDataPoint *findDataPoint( const QgsPointXY &p, QgsGcpPoint::PointType type );
     void cancelWarpTask( int taskId );
     void loadWarpOutputToProject( const QString &path );
+    void beginPendingSourcePick( const QgsPointXY &sourceMap );
+    void commitGcpPair( const QgsPointXY &sourceMap, const QgsPointXY &destMap );
 
     QgisInterface *mIface = nullptr;
 
@@ -123,7 +136,8 @@ class QgsGeorefShellWindow : public QMainWindow
     QgsMapLayerStore *mLayerStore = nullptr;
     QgsRasterLayer *mSrcRaster = nullptr;
 
-    QgsGeorefToolAddPoint *mAddPointTool = nullptr;
+    QgsGeorefToolAddPoint *mAddPointTool = nullptr;     ///< SRC canvas
+    QgsGeorefToolAddPoint *mAddPointToolDst = nullptr;  ///< REF / Map canvas
     QgsGeorefToolMovePoint *mToolMoveSrc = nullptr;
     QgsGeorefToolMovePoint *mToolMoveDst = nullptr;
     QgsGeorefToolDeletePoint *mToolDeleteSrc = nullptr;
@@ -135,6 +149,12 @@ class QgsGeorefShellWindow : public QMainWindow
     QgsGeorefDataPoint *mMovingPoint = nullptr;
     QgsGeorefDataPoint *mHoveredPoint = nullptr;
     QgsPointXY mMoveOrigin;
+
+    /// Dual-canvas pick: SRC click stored until REF/Map click completes the pair.
+    bool mHasPendingSource = false;
+    QgsPointXY mPendingSource;
+    QgsGcpPoint *mPendingGcp = nullptr;              // owned while pending
+    QgsGeorefDataPoint *mPendingDataPoint = nullptr; // owned; parented to this
 
     QgsGCPList *mGcps = nullptr;
     QgsGCPListWidget *mGcpTable = nullptr;
