@@ -11,6 +11,7 @@ add_library(qgis_app_georef STATIC
     qgsgcplistmodel.cpp
     qgsgcplistwidget.cpp
     qgsgeoreferencermainwindow.cpp
+    qgsgeoref_image_to_map_window.cpp
     rs_georef_mode_toggle.cpp
     rs_twincanvas_sync_controller.cpp
     qgsgeorefdatapoint.cpp

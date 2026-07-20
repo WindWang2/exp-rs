@@ -39,6 +39,12 @@ class RsGeorefParamsPanel : public QWidget
 {
     Q_OBJECT
   public:
+    enum class Profile
+    {
+      ImageToImage, ///< Twin-raster shell: no RPC method / DEM
+      ImageToMap,   ///< SRC + map shell: RPC available as a transform method
+    };
+
     explicit RsGeorefParamsPanel( QWidget *parent = nullptr );
 
     QgsGcpTransformerInterface::TransformMethod transformMethod() const;
@@ -54,9 +60,13 @@ class RsGeorefParamsPanel : public QWidget
     void setOutputPath( const QString &path );
     void setDemPath( const QString &path );
 
-    // Stubs for Task 8
+    /// I2I vs I2M shell profile: filters RPC method visibility in the combo.
+    void setProfile( Profile p );
+    Profile profile() const { return mProfile; }
+
     bool isDemSectionVisible() const;
     QString demPath() const;
+    /// Show/hide DEM section only (does not exclusive-filter the method combo).
     void setRpcMode( bool on );
 
     /// Task 11.5.4 — DEM Z-offset (metres) from the params panel spin box.
@@ -131,6 +141,9 @@ class RsGeorefParamsPanel : public QWidget
     QLineEdit *mDemPath = nullptr;
     QPushButton *mDemBrowseBtn = nullptr;
     QDoubleSpinBox *mDemZOffset = nullptr;
+
+    Profile mProfile = Profile::ImageToImage;
+    void applyProfileToMethodCombo();
 };
 
 #endif // RS_GEOREF_PARAMS_PANEL_H

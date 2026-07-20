@@ -58,8 +58,8 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   : QMainWindow( parent )
   , mIface( iface )
 {
-  SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QStringLiteral( "Georeferencer window opened" ) );
-  setWindowTitle( tr( "Georeferencer · 几何校正" ) );
+  SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QStringLiteral( "Image 2 Image georef window opened" ) );
+  setWindowTitle( tr( "Image Registration · Image 2 Image" ) );
   resize( 1200, 800 );
 
   // GCP list lives at the main window level — owns QgsGcpPoint instances.
@@ -99,6 +99,8 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   mParamDock->setObjectName( QStringLiteral( "rsParamDock" ) );
   mParamDock->setAllowedAreas( Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea );
   mParamsPanel = new RsGeorefParamsPanel( mParamDock );
+  mParamsPanel->setProfile( RsGeorefParamsPanel::Profile::ImageToImage );
+  mParamsPanel->setRpcMode( false );
   mParamDock->setWidget( mParamsPanel );
   addDockWidget( Qt::RightDockWidgetArea, mParamDock );
   resizeDocks( { mParamDock }, { 340 }, Qt::Horizontal );
@@ -128,16 +130,21 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   // source rasters and cleans them up with the window.
   mRefStore = new QgsMapLayerStore( this );
 
-  // Task 11.4.8 + 11.5.3 — mode toggle drives RPC visibility on the params
-  // panel AND swaps REF canvas content between the main-app layers, the
-  // private reference raster, or hidden (RPC mode).
+  // Dual-window redesign: this shell is fixed Image-to-Image. Mode toggle is
+  // hidden (kept for session restore / tests that find the objectName).
   if ( mModeToggle )
   {
+    mModeToggle->setObjectName( QStringLiteral( "rsGeorefModeToggle" ) );
+    mModeToggle->setMode( RsGeorefModeToggle::ImageToImage );
+    mModeToggle->hide();
     connect( mModeToggle, &RsGeorefModeToggle::modeChanged,
              this, &QgsGeoreferencerMainWindow::onModeChanged );
   }
 
   mParamsPanel->setActualGcpCount( 0 );
+
+  // Force REF store path (Image-to-Image) once at end of setup.
+  onModeChanged( RsGeorefModeToggle::ImageToImage );
 
   recomputeFit();
 
@@ -145,6 +152,15 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   // Paths only (no auto-load of .points or rasters).
   mSession.restoreWindow( this );
   applyWorkflowSnapshot( mSession.restoreWorkflow() );
+  // Re-pin I2I after snapshot (snapshot may restore a legacy mode index).
+  if ( mModeToggle )
+  {
+    mModeToggle->setMode( RsGeorefModeToggle::ImageToImage );
+    mModeToggle->hide();
+  }
+  mParamsPanel->setProfile( RsGeorefParamsPanel::Profile::ImageToImage );
+  mParamsPanel->setRpcMode( false );
+  onModeChanged( RsGeorefModeToggle::ImageToImage );
 }
 
 QgsGeoreferencerMainWindow::~QgsGeoreferencerMainWindow()
@@ -827,7 +843,9 @@ void QgsGeoreferencerMainWindow::setupToolbars()
   mModeBar->setMovable( false );
 
   mModeToggle = new RsGeorefModeToggle( this );
+  mModeToggle->setObjectName( QStringLiteral( "rsGeorefModeToggle" ) );
   mModeBar->addWidget( mModeToggle );
+  mModeToggle->hide(); // I2I shell: no entry mode toggle (dual-window redesign)
   mModeBar->addSeparator();
 
   // GCP ops — Add / Move / Delete are mutually exclusive map tools (wired in setupCentralWidget).

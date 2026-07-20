@@ -158,8 +158,10 @@ QgisDesktopWindow::~QgisDesktopWindow()
     m_classifyWindow = nullptr;
     disposeChildWindow(m_obiaWindow);
     m_obiaWindow = nullptr;
-    disposeChildWindow(static_cast<QWidget *>(static_cast<void *>(m_georefWindow)));
-    m_georefWindow = nullptr;
+    disposeChildWindow(static_cast<QWidget *>(static_cast<void *>(m_georefI2I)));
+    m_georefI2I = nullptr;
+    disposeChildWindow(static_cast<QWidget *>(static_cast<void *>(m_georefI2M)));
+    m_georefI2M = nullptr;
 
     // Stop map jobs and release the active map tool before unique_ptr members
     // and QObject children (canvas) are destroyed — prevents double-delete of

@@ -7,6 +7,7 @@
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
 #include <georeferencer/qgsgeoreferencermainwindow.h>
+#include <georeferencer/qgsgeoref_image_to_map_window.h>
 
 #ifdef SICNU_HAS_CLASSIFY
 #include "classification/qgsclassificationmainwindow.h"
@@ -35,15 +36,33 @@ void QgisDesktopWindow::measureArea()
 
 void QgisDesktopWindow::openGeoreferencer()
 {
-    if ( !m_georefWindow )
+    openGeorefImageToImage();
+}
+
+void QgisDesktopWindow::openGeorefImageToImage()
+{
+    if ( !m_georefI2I )
     {
-        // iface = nullptr for now; Task 11.4.7 will pass a real QgisInterface.
-        m_georefWindow = new QgsGeoreferencerMainWindow( nullptr, this );
-        m_georefWindow->setAttribute( Qt::WA_DeleteOnClose, false );
+        m_georefI2I = new QgsGeoreferencerMainWindow( nullptr, this );
+        m_georefI2I->setAttribute( Qt::WA_DeleteOnClose, false );
+        m_georefI2I->setWindowTitle( tr( "Image Registration · Image 2 Image" ) );
     }
-    m_georefWindow->show();
-    m_georefWindow->raise();
-    m_georefWindow->activateWindow();
+    m_georefI2I->show();
+    m_georefI2I->raise();
+    m_georefI2I->activateWindow();
+}
+
+void QgisDesktopWindow::openGeorefImageToMap()
+{
+    if ( !m_georefI2M )
+    {
+        m_georefI2M = new QgsGeorefImageToMapWindow( nullptr, this );
+        m_georefI2M->setAttribute( Qt::WA_DeleteOnClose, false );
+        m_georefI2M->setWindowTitle( tr( "Image Registration · Image 2 Map" ) );
+    }
+    m_georefI2M->show();
+    m_georefI2M->raise();
+    m_georefI2M->activateWindow();
 }
 
 #ifdef SICNU_HAS_CLASSIFY

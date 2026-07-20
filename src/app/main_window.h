@@ -32,6 +32,7 @@ class QgsBrowserDockWidget;
 class QgsBrowserGuiModel;
 class SpectralProfileWidget;
 class QgsGeoreferencerMainWindow;
+class QgsGeorefImageToMapWindow;
 class QgsClassificationMainWindow;
 class QgsAdvancedDigitizingDockWidget;
 class QgsMessageBar;
@@ -203,8 +204,10 @@ public slots:
     void openAttributeTable();
     void deleteSelectedFeatures();
 
-    // Georeferencer (Task 11.4.4)
-    void openGeoreferencer();
+    // Image Registration — dual shells (I2I / I2M)
+    void openGeoreferencer(); ///< Compatibility alias → openGeorefImageToImage()
+    void openGeorefImageToImage();
+    void openGeorefImageToMap();
 
     // Classification (Phase 10A Task 10.2)
     void openClassificationWindow();
@@ -335,8 +338,9 @@ private:
     QLabel *m_cacheLabel = nullptr;
     QElapsedTimer m_renderTimer;
 
-    // Georeferencer window (lazy-constructed) — Task 11.4.4
-    QgsGeoreferencerMainWindow *m_georefWindow = nullptr;
+    // Image Registration windows (lazy-constructed singletons)
+    QgsGeoreferencerMainWindow *m_georefI2I = nullptr;
+    QgsGeorefImageToMapWindow *m_georefI2M = nullptr;
 
     // Classification window (lazy-constructed) — Phase 10A Task 10.2
     QgsClassificationMainWindow *m_classifyWindow = nullptr;

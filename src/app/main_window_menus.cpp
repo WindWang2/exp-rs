@@ -154,7 +154,14 @@ void QgisDesktopWindow::setupMenu()
     rasterMenu->addAction(QIcon(":/icons/veget_tion_index"), tr("Vegetation Index..."), this, &QgisDesktopWindow::openSpectralIndexDialog);
     rasterMenu->addAction(QIcon(":/icons/mos_ic"), tr("Mosaic..."), this, &QgisDesktopWindow::openMosaicDialog);
     rasterMenu->addSeparator();
-    rasterMenu->addAction(QIcon(":/icons/r_ster_calc"), tr("Georeferencer..."), this, &QgisDesktopWindow::openGeoreferencer);
+    QMenu *regMenu = rasterMenu->addMenu(tr("Image Registration"));
+    regMenu->setObjectName(QStringLiteral("mImageRegistrationMenu"));
+    regMenu->addAction(QIcon(QStringLiteral(":/icons/r_ster_calc")),
+                       tr("Image 2 Image"),
+                       this, &QgisDesktopWindow::openGeorefImageToImage);
+    regMenu->addAction(QIcon(QStringLiteral(":/icons/r_ster_calc")),
+                       tr("Image 2 Map"),
+                       this, &QgisDesktopWindow::openGeorefImageToMap);
     rasterMenu->addAction(tr("Change Detection..."), this, &QgisDesktopWindow::openChangeDetectionDialog);
     // Phase 10A Task 10.2 — Classification submenu (Pixel-based + OBIA placeholder).
     auto *classifyMenu = rasterMenu->addMenu(tr("Classification"));

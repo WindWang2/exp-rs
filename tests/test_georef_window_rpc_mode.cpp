@@ -1,21 +1,21 @@
-// SICNU GEO RS — Task 11.4.8 UI test: RPC-mode toggle on the params panel.
+// SICNU GEO RS — RPC DEM visibility: method-driven on I2M profile (dual-window redesign).
 //
 // Verifies that:
-//   - The georeferencer window exposes a RsGeorefModeToggle and a
-//     RsGeorefParamsPanel as findable children.
-//   - On initial construction (ImageToMap mode) the DEM section is hidden.
-//   - Switching to RpcPhysical via the toggle reveals the DEM section and
-//     selects TransformMethod::RpcPhysical in the params panel combo.
-//   - Switching back to ImageToMap re-hides the DEM section.
+//   - Image 2 Image shell pins I2I profile: DEM hidden, mode toggle hidden.
+//   - Params panel ImageToMap profile can show DEM when RPC method is selected.
+//   - I2M window exposes SRC + Map canvases and vertical splitter.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
 #include <QApplication>
+#include <QSplitter>
 
 #include "qgsgcptransformer.h"
 #include "qgsgeoreferencermainwindow.h"
+#include "qgsgeoref_image_to_map_window.h"
+#include "qgsmapcanvas.h"
 #include "rs_georef_mode_toggle.h"
 #include "rs_georef_params_panel.h"
 
@@ -52,25 +52,49 @@ namespace
   }
 }
 
-TEST_CASE( "RPC mode: DEM section visible only when RPC selected",
+TEST_CASE( "I2I shell: DEM hidden and mode toggle not primary UX",
            "[georef][window][rpc]" )
 {
   ensureApp();
   QgsGeoreferencerMainWindow w( nullptr );
 
   auto *panel = w.findChild<RsGeorefParamsPanel *>();
-  auto *toggle = w.findChild<RsGeorefModeToggle *>();
   REQUIRE( panel != nullptr );
-  REQUIRE( toggle != nullptr );
-
-  // Default mode is ImageToMap → DEM section hidden.
+  REQUIRE( panel->profile() == RsGeorefParamsPanel::Profile::ImageToImage );
   REQUIRE_FALSE( panel->isDemSectionVisible() );
 
-  toggle->setMode( RsGeorefModeToggle::RpcPhysical );
-  REQUIRE( panel->isDemSectionVisible() );
-  REQUIRE( panel->transformMethod() ==
-           QgsGcpTransformerInterface::TransformMethod::RpcPhysical );
+  auto *toggle = w.findChild<QWidget *>( QStringLiteral( "rsGeorefModeToggle" ) );
+  if ( toggle )
+    REQUIRE( toggle->isHidden() );
+}
 
-  toggle->setMode( RsGeorefModeToggle::ImageToMap );
-  REQUIRE_FALSE( panel->isDemSectionVisible() );
+TEST_CASE( "params panel I2M can show dem for RPC", "[georef][panel]" )
+{
+  ensureApp();
+  RsGeorefParamsPanel p;
+  p.setProfile( RsGeorefParamsPanel::Profile::ImageToMap );
+  p.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::RpcPhysical );
+  p.setRpcMode( true );
+  REQUIRE( p.isDemSectionVisible() );
+
+  p.setProfile( RsGeorefParamsPanel::Profile::ImageToImage );
+  p.setRpcMode( false );
+  REQUIRE_FALSE( p.isDemSectionVisible() );
+}
+
+TEST_CASE( "I2M window has SRC and Map canvases", "[georef][dual]" )
+{
+  ensureApp();
+  QgsGeorefImageToMapWindow w( nullptr, nullptr );
+  auto *src = w.findChild<QgsMapCanvas *>( QStringLiteral( "rsGeorefI2MSrcCanvas" ) );
+  auto *map = w.findChild<QgsMapCanvas *>( QStringLiteral( "rsGeorefI2MMapCanvas" ) );
+  REQUIRE( src != nullptr );
+  REQUIRE( map != nullptr );
+  auto *splitter = w.findChild<QSplitter *>( QStringLiteral( "rsGeorefI2MSplitter" ) );
+  REQUIRE( splitter != nullptr );
+  REQUIRE( splitter->orientation() == Qt::Vertical );
+
+  auto *panel = w.findChild<RsGeorefParamsPanel *>();
+  REQUIRE( panel != nullptr );
+  REQUIRE( panel->profile() == RsGeorefParamsPanel::Profile::ImageToMap );
 }

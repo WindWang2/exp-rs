@@ -294,15 +294,8 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     root->addWidget( mDemSection );
   }
 
-  // Hide the RPC entry from the combo until the user enters RPC mode.
-  if ( auto *view = qobject_cast<QListView *>( mTransformCombo->view() ) )
-  {
-    const int rpcIdx = mTransformCombo->findData(
-      QVariant::fromValue(
-        static_cast<int>( QgsGcpTransformerInterface::TransformMethod::RpcPhysical ) ) );
-    if ( rpcIdx >= 0 )
-      view->setRowHidden( rpcIdx, true );
-  }
+  // Default profile is ImageToImage — hide RPC until I2M setProfile().
+  applyProfileToMethodCombo();
 
   root->addStretch( 1 );
 }
@@ -413,48 +406,60 @@ void RsGeorefParamsPanel::setDemZOffset( double z )
     mDemZOffset->setValue( z );
 }
 
-void RsGeorefParamsPanel::setRpcMode( bool on )
+void RsGeorefParamsPanel::setProfile( Profile p )
 {
-  if ( mDemSection )
-    mDemSection->setVisible( on );
+  mProfile = p;
+  applyProfileToMethodCombo();
+  if ( mProfile == Profile::ImageToImage )
+  {
+    setRpcMode( false );
+  }
+  else
+  {
+    setRpcMode( transformMethod() ==
+                QgsGcpTransformerInterface::TransformMethod::RpcPhysical );
+  }
+}
 
+void RsGeorefParamsPanel::applyProfileToMethodCombo()
+{
   if ( !mTransformCombo )
     return;
 
-  // Hide all non-RPC rows when on; hide the RPC row when off.
   auto *view = qobject_cast<QListView *>( mTransformCombo->view() );
+  const int rpcIdx = mTransformCombo->findData(
+    QVariant::fromValue(
+      static_cast<int>( QgsGcpTransformerInterface::TransformMethod::RpcPhysical ) ) );
+
+  // I2I: hide RPC row. I2M: show every method (including RPC).
   for ( int i = 0; i < mTransformCombo->count(); ++i )
   {
     const auto m = static_cast<QgsGcpTransformerInterface::TransformMethod>(
       mTransformCombo->itemData( i ).toInt() );
     const bool isRpc = ( m == QgsGcpTransformerInterface::TransformMethod::RpcPhysical );
-    const bool shouldHide = ( on != isRpc );
+    const bool hide = ( mProfile == Profile::ImageToImage && isRpc );
     if ( view )
-      view->setRowHidden( i, shouldHide );
+      view->setRowHidden( i, hide );
   }
 
-  if ( on )
+  if ( mProfile == Profile::ImageToImage
+       && transformMethod() == QgsGcpTransformerInterface::TransformMethod::RpcPhysical )
   {
-    const int rpcIdx = mTransformCombo->findData(
+    const int linIdx = mTransformCombo->findData(
       QVariant::fromValue(
-        static_cast<int>( QgsGcpTransformerInterface::TransformMethod::RpcPhysical ) ) );
-    if ( rpcIdx >= 0 )
-      mTransformCombo->setCurrentIndex( rpcIdx );
+        static_cast<int>( QgsGcpTransformerInterface::TransformMethod::Linear ) ) );
+    if ( linIdx >= 0 )
+      mTransformCombo->setCurrentIndex( linIdx );
   }
-  else
-  {
-    // Switch back to the first non-RPC item (Linear) when leaving RPC mode.
-    const auto current = static_cast<QgsGcpTransformerInterface::TransformMethod>(
-      mTransformCombo->currentData().toInt() );
-    if ( current == QgsGcpTransformerInterface::TransformMethod::RpcPhysical )
-    {
-      const int linIdx = mTransformCombo->findData(
-        QVariant::fromValue(
-          static_cast<int>( QgsGcpTransformerInterface::TransformMethod::Linear ) ) );
-      if ( linIdx >= 0 )
-        mTransformCombo->setCurrentIndex( linIdx );
-    }
-  }
+
+  Q_UNUSED( rpcIdx )
+}
+
+void RsGeorefParamsPanel::setRpcMode( bool on )
+{
+  // DEM section only — method combo is controlled by setProfile().
+  if ( mDemSection )
+    mDemSection->setVisible( on );
 }
 
 void RsGeorefParamsPanel::setRmsValues( int /*total*/, int /*enabled*/,

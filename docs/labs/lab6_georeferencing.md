@@ -12,17 +12,30 @@
 
 ### 6.1 打开几何校正工具
 1. 启动 SICNU GEO RS
-2. 菜单: Raster > Georeferencer
-3. 打开几何校正窗口
+2. 菜单: **Raster → Image Registration → Image 2 Map**（影像对主地图）  
+   或 **Raster → Image Registration → Image 2 Image**（双影像配准）
+3. 两个窗口可同时打开，各自为单例（再次点击菜单会激活已有窗口）
+
+**Image 2 Image (I2I)**  
+- 水平双画布：SRC（源） + REF（参考影像）  
+- File → Open source raster / Load reference raster  
+- 支持 SIFT 自动匹配；**不含** RPC 物理模型  
+
+**Image 2 Map (I2M)**  
+- 垂直双画布：SRC（上） + Map 预览（下，同步主工程可见图层）  
+- File → Open source raster（无“打开参考影像”）  
+- 变换方法可选 **RPC Physical**；无 SIFT  
 
 ### 6.2 加载待校正影像
-1. 在几何校正窗口中，菜单: File > Open Raster...
+1. 在几何校正窗口中，菜单: File → Open source raster...
 2. 选择待校正的影像文件
-3. 影像显示在左侧画布
+3. I2I：源影像显示在左侧；I2M：源影像显示在上方画布  
+4. I2I：再通过 File → Load reference raster 加载参考影像到右侧  
+5. I2M：下方 Map 画布自动镜像主窗口工程中的可见图层（可 File → Refresh map layers）
 
 ### 6.3 选取地面控制点(GCP)
-1. 在左侧画布上点击明显地物点 (如道路交叉口、建筑物角点)
-2. 在右侧画布上对应位置点击相同地物
+1. 在 SRC 画布上点击明显地物点 (如道路交叉口、建筑物角点)
+2. I2I：在 REF 画布对应位置取点；I2M：在 Map 画布（主工程图层）上取点
 3. 重复上述步骤，选取至少6个GCP
 4. 在GCP表格中查看控制点坐标
 
