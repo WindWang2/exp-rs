@@ -10,6 +10,7 @@ add_library(qgis_app_georef STATIC
     qgsgcplist.cpp
     qgsgcplistmodel.cpp
     qgsgcplistwidget.cpp
+    qgsgeoref_shell_window.cpp
     qgsgeoreferencermainwindow.cpp
     qgsgeoref_image_to_map_window.cpp
     rs_georef_mode_toggle.cpp

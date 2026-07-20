@@ -2,138 +2,37 @@
 
 #include <QAction>
 #include <QActionGroup>
-#include <QCloseEvent>
-#include <QDockWidget>
-#include <QFileDialog>
-#include <QFileInfo>
 #include <QIcon>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QLabel>
-#include <QMessageBox>
-#include <QMetaEnum>
 #include <QMenu>
 #include <QMenuBar>
-#include <QPointF>
-#include <QSet>
-#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
-#include <QStatusBar>
 #include <QToolBar>
-#include <QVector>
 #include <QWidget>
 
-#include <cmath>
-
 #include "core/sicnu_logging.h"
-#include "qgis.h"
-#include "qgisinterface.h"
-#include "qgsapplication.h"
-#include "qgscoordinatereferencesystem.h"
-#include "qgscoordinatetransformcontext.h"
-#include "qgsgcplist.h"
-#include "qgsgcplistwidget.h"
-#include "qgsgcppoint.h"
-#include "qgsgeorefdatapoint.h"
-#include "qgsgeoreftooladdpoint.h"
-#include "qgsgeoreftooldeletepoint.h"
-#include "qgsgeoreftoolmovepoint.h"
-#include "qgsgeoreftransform.h"
-#include "qgsrpcgcptransformer.h"
-#include "qgsmapcanvas.h"
-#include "qgsmapcoordsdialog.h"
-#include "qgsmaplayerstore.h"
-#include "qgsmaptool.h"
-#include "qgsmessagelog.h"
-#include "qgsproject.h"
+#include "qgsgcptransformer.h"
 #include "qgslayertree.h"
-#include "qgsrasterlayer.h"
-#include "qgstaskmanager.h"
-#include "rs_georef_params_panel.h"
-#include "rs_warp_task.h"
-
-namespace
-{
-  int minimumGcpCountFor( QgsGcpTransformerInterface::TransformMethod m )
-  {
-    std::unique_ptr<QgsGcpTransformerInterface> t(
-      QgsGcpTransformerInterface::create( m ) );
-    return t ? t->minimumGcpCount() : 0;
-  }
-
-  double computeEnabledRms( QgsGCPList *gcps )
-  {
-    if ( !gcps )
-      return 0.0;
-    double totalSq = 0.0;
-    int n = 0;
-    for ( const QgsGcpPoint *p : std::as_const( *gcps ) )
-    {
-      if ( !p || !p->isEnabled() )
-        continue;
-      const QPointF r = p->residual();
-      totalSq += r.x() * r.x() + r.y() * r.y();
-      ++n;
-    }
-    return n > 0 ? std::sqrt( totalSq / n ) : 0.0;
-  }
-}
+#include "qgsmapcanvas.h"
+#include "qgsproject.h"
 
 QgsGeorefImageToMapWindow::QgsGeorefImageToMapWindow( QgisInterface *iface, QWidget *parent )
-  : QMainWindow( parent )
-  , mIface( iface )
+  : QgsGeorefShellWindow( iface, parent )
 {
   SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QStringLiteral( "Image 2 Map georef window opened" ) );
   setWindowTitle( tr( "Image Registration · Image 2 Map" ) );
   resize( 1100, 900 );
 
-  mGcps = new QgsGCPList();
-  mGcps->setParent( this );
-  connect( mGcps, &QgsGCPList::changed, this, [this]() {
-    if ( !mSuppressDirtyFromList )
-      mSession.markDirty();
-  } );
-
   setupMenus();
   setupToolbars();
-  setupStatusBar();
+  setupStatusBar( QStringLiteral( "rsGeorefI2MCoordLabel" ),
+                  QStringLiteral( "rsGeorefI2MCrsLabel" ),
+                  QStringLiteral( "rsGeorefI2MRmsLabel" ) );
   setupCentralWidget();
+  finishCommonSetup( RsGeorefParamsPanel::Profile::ImageToMap,
+                     QStringLiteral( "rsGcpDockI2M" ),
+                     QStringLiteral( "rsParamDockI2M" ) );
 
-  mGcpDock = new QDockWidget( tr( "GCP 表" ), this );
-  mGcpDock->setObjectName( QStringLiteral( "rsGcpDockI2M" ) );
-  mGcpDock->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea );
-  mGcpTable = new QgsGCPListWidget( mGcpDock );
-  mGcpTable->setGCPList( mGcps );
-  mGcpDock->setWidget( mGcpTable );
-  connect( mGcpTable, &QgsGCPListWidget::deleteRowsRequested,
-           this, &QgsGeorefImageToMapWindow::deleteGcpRows );
-  addDockWidget( Qt::BottomDockWidgetArea, mGcpDock );
-  resizeDocks( { mGcpDock }, { 260 }, Qt::Vertical );
-
-  mParamDock = new QDockWidget( tr( "校正参数" ), this );
-  mParamDock->setObjectName( QStringLiteral( "rsParamDockI2M" ) );
-  mParamDock->setAllowedAreas( Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea );
-  mParamsPanel = new RsGeorefParamsPanel( mParamDock );
-  mParamsPanel->setProfile( RsGeorefParamsPanel::Profile::ImageToMap );
-  mParamDock->setWidget( mParamsPanel );
-  addDockWidget( Qt::RightDockWidgetArea, mParamDock );
-  resizeDocks( { mParamDock }, { 340 }, Qt::Horizontal );
-
-  connect( mGcps, &QgsGCPList::changed, this, &QgsGeorefImageToMapWindow::recomputeFit );
-  connect( mGcps, &QgsGCPList::changed, this, &QgsGeorefImageToMapWindow::onPointsChanged );
-  connect( mParamsPanel, &RsGeorefParamsPanel::transformMethodChanged,
-           this, &QgsGeorefImageToMapWindow::onTransformMethodChanged );
-  connect( mParamsPanel, &RsGeorefParamsPanel::outputPathChanged, this,
-           [this]( const QString & ) { recomputeFit(); } );
-  connect( mParamsPanel, &RsGeorefParamsPanel::destCrsChanged,
-           this, &QgsGeorefImageToMapWindow::recomputeFit );
-  connect( mParamsPanel, &RsGeorefParamsPanel::demZOffsetChanged,
-           this, &QgsGeorefImageToMapWindow::recomputeFit );
-
-  mSrcStore = new QgsMapLayerStore( this );
-
-  // Mirror main project layers into the Map canvas.
   connect( QgsProject::instance(), &QgsProject::layersAdded, this,
            [this]( const QList<QgsMapLayer *> & ) { refreshMapLayersFromProject(); } );
   connect( QgsProject::instance(),
@@ -144,397 +43,7 @@ QgsGeorefImageToMapWindow::QgsGeorefImageToMapWindow( QgisInterface *iface, QWid
     connect( root, &QgsLayerTreeNode::visibilityChanged, this,
              [this]( QgsLayerTreeNode * ) { refreshMapLayersFromProject(); } );
   }
-
-  mParamsPanel->setActualGcpCount( 0 );
-  onTransformMethodChanged();
   refreshMapLayersFromProject();
-  recomputeFit();
-
-  mSession.restoreWindow( this );
-  applyWorkflowSnapshot( mSession.restoreWorkflow() );
-  mParamsPanel->setProfile( RsGeorefParamsPanel::Profile::ImageToMap );
-  onTransformMethodChanged();
-}
-
-QgsGeorefImageToMapWindow::~QgsGeorefImageToMapWindow()
-{
-  qDeleteAll( mDataPoints );
-  mDataPoints.clear();
-}
-
-void QgsGeorefImageToMapWindow::onTransformMethodChanged()
-{
-  if ( !mParamsPanel )
-    return;
-  const bool rpc = mParamsPanel->transformMethod() ==
-                   QgsGcpTransformerInterface::TransformMethod::RpcPhysical;
-  mParamsPanel->setRpcMode( rpc );
-  recomputeFit();
-}
-
-void QgsGeorefImageToMapWindow::refreshMapLayersFromProject()
-{
-  if ( !mMapCanvas )
-    return;
-
-  QList<QgsMapLayer *> layers;
-  if ( QgsLayerTree *root = QgsProject::instance()->layerTreeRoot() )
-  {
-    const QList<QgsMapLayer *> ordered = root->checkedLayers();
-    for ( QgsMapLayer *l : ordered )
-    {
-      if ( l && l->isValid() )
-        layers << l;
-    }
-  }
-  else
-  {
-    const auto projectLayers = QgsProject::instance()->mapLayers().values();
-    for ( QgsMapLayer *l : projectLayers )
-    {
-      if ( l && l->isValid() )
-        layers << l;
-    }
-  }
-
-  mMapCanvas->setLayers( layers );
-  if ( mParamsPanel && mParamsPanel->destCrs().isValid() )
-    mMapCanvas->setDestinationCrs( mParamsPanel->destCrs() );
-  else if ( QgsProject::instance()->crs().isValid() )
-    mMapCanvas->setDestinationCrs( QgsProject::instance()->crs() );
-  mMapCanvas->refresh();
-}
-
-void QgsGeorefImageToMapWindow::onPointsChanged()
-{
-  if ( !mGcps )
-    return;
-
-  QSet<QgsGcpPoint *> live;
-  int idCounter = 0;
-  for ( QgsGcpPoint *p : *mGcps )
-  {
-    if ( !p )
-    {
-      ++idCounter;
-      continue;
-    }
-    live.insert( p );
-    QgsGeorefDataPoint *dp = mDataPoints.value( p, nullptr );
-    if ( !dp )
-    {
-      dp = new QgsGeorefDataPoint( mSrcCanvas, mMapCanvas, p );
-      mDataPoints.insert( p, dp );
-    }
-    dp->setId( idCounter );
-    dp->updateMarkers();
-    ++idCounter;
-  }
-
-  QList<QgsGcpPoint *> dead;
-  for ( auto it = mDataPoints.cbegin(); it != mDataPoints.cend(); ++it )
-  {
-    if ( !live.contains( it.key() ) )
-      dead.append( it.key() );
-  }
-  for ( QgsGcpPoint *p : dead )
-  {
-    QgsGeorefDataPoint *dp = mDataPoints.take( p );
-    if ( mMovingPoint == dp )
-      mMovingPoint = nullptr;
-    if ( mHoveredPoint == dp )
-      mHoveredPoint = nullptr;
-    delete dp;
-  }
-}
-
-void QgsGeorefImageToMapWindow::recomputeFit()
-{
-  if ( !mParamsPanel || !mGcps )
-    return;
-
-  const QgsGcpTransformerInterface::TransformMethod method = mParamsPanel->transformMethod();
-  const int minN = minimumGcpCountFor( method );
-  mParamsPanel->setMinimumGcpCount( minN );
-
-  const QgsCoordinateReferenceSystem dstCrs = mParamsPanel->destCrs();
-  const QgsCoordinateTransformContext transformContext;
-  QVector<QgsPointXY> src;
-  QVector<QgsPointXY> dst;
-  mGcps->createGCPVectors( src, dst, dstCrs, transformContext );
-  const int enabledCount = src.size();
-  mParamsPanel->setActualGcpCount( enabledCount );
-
-  constexpr bool kInvertYAxis = true;
-  bool fitOk = false;
-
-  if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical
-       && enabledCount >= 3 )
-  {
-    double rmsBefore = -1.0;
-    double rmsAfter = -1.0;
-    {
-      auto beforeXf = std::make_unique<QgsGeorefTransform>( method );
-      if ( auto *rpc = dynamic_cast<QgsRpcGcpTransformer *>(
-             beforeXf ? beforeXf->gcpTransformer() : nullptr ) )
-      {
-        rpc->setSourceRasterPath( mSourceRasterPath );
-        rpc->setRpcOptions( mParamsPanel->demPath(), mParamsPanel->demZOffset(), false );
-      }
-      try
-      {
-        if ( beforeXf && beforeXf->updateParametersFromGcps( src, dst, kInvertYAxis ) )
-        {
-          mGcps->updateResiduals( beforeXf.get(), dstCrs, transformContext );
-          rmsBefore = computeEnabledRms( mGcps );
-        }
-      }
-      catch ( ... ) {}
-    }
-    mTransform.reset( new QgsGeorefTransform( method ) );
-    if ( auto *rpc = dynamic_cast<QgsRpcGcpTransformer *>(
-           mTransform ? mTransform->gcpTransformer() : nullptr ) )
-    {
-      rpc->setSourceRasterPath( mSourceRasterPath );
-      rpc->setRpcOptions( mParamsPanel->demPath(), mParamsPanel->demZOffset(), true );
-    }
-    try
-    {
-      fitOk = mTransform->updateParametersFromGcps( src, dst, kInvertYAxis );
-    }
-    catch ( ... )
-    {
-      fitOk = false;
-    }
-    if ( fitOk )
-    {
-      mGcps->updateResiduals( mTransform.get(), dstCrs, transformContext );
-      rmsAfter = computeEnabledRms( mGcps );
-    }
-    if ( rmsBefore >= 0.0 && rmsAfter >= 0.0 )
-      mParamsPanel->setRefinementRms( rmsBefore, rmsAfter );
-    else
-      mParamsPanel->clearRefinementRms();
-  }
-  else
-  {
-    mParamsPanel->clearRefinementRms();
-    mTransform.reset( new QgsGeorefTransform( method ) );
-    if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical )
-    {
-      if ( auto *rpc = dynamic_cast<QgsRpcGcpTransformer *>(
-             mTransform ? mTransform->gcpTransformer() : nullptr ) )
-      {
-        rpc->setSourceRasterPath( mSourceRasterPath );
-        rpc->setRpcOptions( mParamsPanel->demPath(), mParamsPanel->demZOffset(), false );
-      }
-    }
-    if ( enabledCount >= minN && minN > 0 )
-    {
-      try { fitOk = mTransform->updateParametersFromGcps( src, dst, kInvertYAxis ); }
-      catch ( ... ) { fitOk = false; }
-    }
-    else if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical && mTransform )
-    {
-      try { fitOk = mTransform->updateParametersFromGcps( src, dst, kInvertYAxis ); }
-      catch ( ... ) { fitOk = false; }
-    }
-  }
-
-  double totalSq = 0.0, xSq = 0.0, ySq = 0.0, maxMag = 0.0;
-  int maxRow = -1;
-  QVector<QPointF> scatter;
-  scatter.reserve( enabledCount );
-
-  if ( fitOk )
-  {
-    mGcps->updateResiduals( mTransform.get(), dstCrs, transformContext );
-    int rowId = 0;
-    int included = 0;
-    for ( const QgsGcpPoint *p : std::as_const( *mGcps ) )
-    {
-      if ( !p ) { ++rowId; continue; }
-      if ( !p->isEnabled() ) { ++rowId; continue; }
-      const QPointF r = p->residual();
-      scatter.push_back( r );
-      const double mag = std::hypot( r.x(), r.y() );
-      totalSq += mag * mag;
-      xSq += r.x() * r.x();
-      ySq += r.y() * r.y();
-      if ( mag > maxMag ) { maxMag = mag; maxRow = rowId; }
-      ++included;
-      ++rowId;
-    }
-    if ( included > 0 )
-    {
-      mLastRms = std::sqrt( totalSq / included );
-      mParamsPanel->setRmsValues( mGcps->size(), enabledCount, mLastRms,
-                                  std::sqrt( xSq / included ), std::sqrt( ySq / included ),
-                                  maxMag, maxRow );
-    }
-    else
-    {
-      mLastRms = 0.0;
-      mParamsPanel->setRmsValues( mGcps->size(), enabledCount, 0, 0, 0, 0, -1 );
-    }
-  }
-  else
-  {
-    mGcps->clearResiduals();
-    for ( auto it = mDataPoints.begin(); it != mDataPoints.end(); ++it )
-      if ( it.value() ) it.value()->updateMarkers();
-    mLastRms = 0.0;
-    mParamsPanel->setRmsValues( mGcps->size(), enabledCount, 0, 0, 0, 0, -1 );
-  }
-
-  mParamsPanel->setResidualScatter( scatter );
-  if ( mRmsLabel )
-  {
-    if ( fitOk && mLastRms > 0.0 )
-      mRmsLabel->setText( tr( "RMS: %1 px" ).arg( QString::number( mLastRms, 'f', 3 ) ) );
-    else
-      mRmsLabel->setText( tr( "RMS: —" ) );
-  }
-  if ( mApplyAction )
-  {
-    mApplyAction->setEnabled( fitOk && enabledCount >= minN
-                              && !mParamsPanel->outputPath().isEmpty() );
-  }
-}
-
-void QgsGeorefImageToMapWindow::applyTransform()
-{
-  if ( !mParamsPanel || !mGcps )
-    return;
-
-  const auto method = mParamsPanel->transformMethod();
-  const int minN = minimumGcpCountFor( method );
-  int enabled = 0;
-  for ( const QgsGcpPoint *p : std::as_const( *mGcps ) )
-    if ( p && p->isEnabled() ) ++enabled;
-
-  if ( enabled < minN )
-  {
-    statusBar()->showMessage( tr( "GCP 数量不足（需要 %1，实际 %2）" ).arg( minN ).arg( enabled ), 3000 );
-    return;
-  }
-  if ( mParamsPanel->outputPath().isEmpty() )
-  {
-    statusBar()->showMessage( tr( "请填写输出路径" ), 3000 );
-    return;
-  }
-  if ( mSourceRasterPath.isEmpty() )
-  {
-    statusBar()->showMessage( tr( "未指定源栅格路径" ), 3000 );
-    return;
-  }
-  if ( !mTransform )
-  {
-    statusBar()->showMessage( tr( "变换尚未完成拟合" ), 3000 );
-    return;
-  }
-
-  setWarpInProgressForTest( true );
-  auto *task = new RsWarpTask( mSourceRasterPath, mParamsPanel->outputPath(),
-                               mTransform.get(), mParamsPanel->resamplingMethod(),
-                               mParamsPanel->destCrs(), mParamsPanel->outputPixelSize() );
-  auto finalize = [this, task]() {
-    emitStructuredLog( task->result() );
-    setWarpInProgressForTest( false );
-    if ( task->result().status == QgsImageWarper::WarpStatus::Ok )
-    {
-      statusBar()->showMessage(
-        tr( "已输出: %1 (%2 字节, %3 ms)" )
-          .arg( mParamsPanel->outputPath() )
-          .arg( task->result().outputBytes )
-          .arg( task->result().durationMs ), 6000 );
-    }
-    else
-    {
-      statusBar()->showMessage( tr( "校正失败: %1" ).arg( task->result().errorMessage ), 6000 );
-    }
-  };
-  connect( task, &QgsTask::taskCompleted, this, finalize );
-  connect( task, &QgsTask::taskTerminated, this, finalize );
-  QgsApplication::taskManager()->addTask( task );
-}
-
-void QgsGeorefImageToMapWindow::emitStructuredLog( const QgsImageWarper::WarpResult &r )
-{
-  QJsonObject o;
-  o.insert( QStringLiteral( "event" ), QStringLiteral( "warp_finished" ) );
-  o.insert( QStringLiteral( "shell" ), QStringLiteral( "i2m" ) );
-  {
-    const QMetaEnum me = QMetaEnum::fromType<QgsGcpTransformerInterface::TransformMethod>();
-    const char *key = me.valueToKey( static_cast<int>( mParamsPanel->transformMethod() ) );
-    o.insert( QStringLiteral( "method" ), QString::fromUtf8( key ? key : "" ) );
-  }
-  o.insert( QStringLiteral( "output" ), mParamsPanel ? mParamsPanel->outputPath() : QString() );
-  o.insert( QStringLiteral( "output_bytes" ), static_cast<double>( r.outputBytes ) );
-  o.insert( QStringLiteral( "duration_ms" ), r.durationMs );
-  o.insert( QStringLiteral( "status" ),
-            r.status == QgsImageWarper::WarpStatus::Ok ? QStringLiteral( "ok" )
-                                                       : QStringLiteral( "failed" ) );
-  if ( r.status != QgsImageWarper::WarpStatus::Ok )
-    o.insert( QStringLiteral( "error_msg" ), r.errorMessage );
-  QgsMessageLog::logMessage(
-    QString::fromUtf8( QJsonDocument( o ).toJson( QJsonDocument::Compact ) ),
-    QStringLiteral( "Georeferencer" ), Qgis::Info );
-}
-
-void QgsGeorefImageToMapWindow::setWarpInProgressForTest( bool on )
-{
-  mWarpInProgress = on;
-  if ( mGcpTable ) mGcpTable->setEnabled( !on );
-  if ( mApplyAction ) mApplyAction->setEnabled( !on );
-}
-
-bool QgsGeorefImageToMapWindow::isDirtyForTest() const { return mSession.isDirty(); }
-void QgsGeorefImageToMapWindow::markDirtyForTest() { mSession.markDirty(); }
-
-RsGeorefSessionState::WorkflowSnapshot QgsGeorefImageToMapWindow::captureWorkflowSnapshot() const
-{
-  RsGeorefSessionState::WorkflowSnapshot s;
-  s.mode = 0; // ImageToMap legacy index
-  if ( mParamsPanel )
-  {
-    s.transformMethod = static_cast<int>( mParamsPanel->transformMethod() );
-    s.resamplingMethod = static_cast<int>( mParamsPanel->resamplingMethod() );
-    s.lastOutputPath = mParamsPanel->outputPath();
-    s.lastDemPath = mParamsPanel->demPath();
-    s.lastDestCrsAuthId = mParamsPanel->destCrs().authid();
-    s.demZOffset = mParamsPanel->demZOffset();
-  }
-  s.lastSourcePath = mSourceRasterPath;
-  s.lastPointsPath = mSession.lastPointsPath();
-  s.syncZoom = false;
-  return s;
-}
-
-void QgsGeorefImageToMapWindow::applyWorkflowSnapshot( const RsGeorefSessionState::WorkflowSnapshot &s )
-{
-  if ( mParamsPanel )
-  {
-    const QSignalBlocker panelBlocker( mParamsPanel );
-    mParamsPanel->setTransformMethod(
-      static_cast<QgsGcpTransformerInterface::TransformMethod>( s.transformMethod ) );
-    mParamsPanel->setResamplingMethod(
-      static_cast<QgsImageWarper::ResamplingMethod>( s.resamplingMethod ) );
-    if ( !s.lastOutputPath.isEmpty() )
-      mParamsPanel->setOutputPath( s.lastOutputPath );
-    if ( !s.lastDemPath.isEmpty() )
-      mParamsPanel->setDemPath( s.lastDemPath );
-    if ( !s.lastDestCrsAuthId.isEmpty() )
-    {
-      const QgsCoordinateReferenceSystem crs( s.lastDestCrsAuthId );
-      if ( crs.isValid() )
-        mParamsPanel->setDestCrs( crs );
-    }
-    mParamsPanel->setDemZOffset( s.demZOffset );
-  }
-  if ( !s.lastSourcePath.isEmpty() )
-    mSourceRasterPath = s.lastSourcePath;
-  recomputeFit();
 }
 
 void QgsGeorefImageToMapWindow::setupCentralWidget()
@@ -546,101 +55,27 @@ void QgsGeorefImageToMapWindow::setupCentralWidget()
   mSrcCanvas->setObjectName( QStringLiteral( "rsGeorefI2MSrcCanvas" ) );
   mSrcCanvas->setCanvasColor( Qt::white );
 
-  mMapCanvas = new QgsMapCanvas( this );
-  mMapCanvas->setObjectName( QStringLiteral( "rsGeorefI2MMapCanvas" ) );
-  mMapCanvas->setCanvasColor( QColor( 245, 245, 245 ) );
+  mDstCanvas = new QgsMapCanvas( this );
+  mDstCanvas->setObjectName( QStringLiteral( "rsGeorefI2MMapCanvas" ) );
+  mDstCanvas->setCanvasColor( QColor( 245, 245, 245 ) );
 
   splitter->addWidget( mSrcCanvas );
-  splitter->addWidget( mMapCanvas );
+  splitter->addWidget( mDstCanvas );
   splitter->setStretchFactor( 0, 1 );
   splitter->setStretchFactor( 1, 1 );
   setCentralWidget( splitter );
-
-  mAddPointTool = new QgsGeorefToolAddPoint( mSrcCanvas );
-  mAddPointTool->setParent( this );
-  mAddPointTool->setAction( mAddPointAction );
-  connect( mAddPointTool, &QgsGeorefToolAddPoint::showCoordDialog,
-           this, &QgsGeorefImageToMapWindow::showCoordDialog );
-
-  mToolMoveSrc = new QgsGeorefToolMovePoint( mSrcCanvas );
-  mToolMoveSrc->setParent( this );
-  mToolMoveSrc->setAction( mMovePointAction );
-  mToolMoveDst = new QgsGeorefToolMovePoint( mMapCanvas );
-  mToolMoveDst->setParent( this );
-  mToolMoveDst->setAction( mMovePointAction );
-
-  connect( mToolMoveSrc, &QgsGeorefToolMovePoint::pointBeginMove, this, &QgsGeorefImageToMapWindow::selectPoint );
-  connect( mToolMoveSrc, &QgsGeorefToolMovePoint::pointMoving, this, &QgsGeorefImageToMapWindow::movePoint );
-  connect( mToolMoveSrc, &QgsGeorefToolMovePoint::pointEndMove, this, &QgsGeorefImageToMapWindow::releasePoint );
-  connect( mToolMoveSrc, &QgsGeorefToolMovePoint::pointCancelMove, this, &QgsGeorefImageToMapWindow::cancelPoint );
-  connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointBeginMove, this, &QgsGeorefImageToMapWindow::selectPoint );
-  connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointMoving, this, &QgsGeorefImageToMapWindow::movePoint );
-  connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointEndMove, this, &QgsGeorefImageToMapWindow::releasePoint );
-  connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointCancelMove, this, &QgsGeorefImageToMapWindow::cancelPoint );
-
-  const auto clearMoveHover = [this]() {
-    mMovingPoint = nullptr;
-    if ( mHoveredPoint ) { mHoveredPoint->setHovered( false ); mHoveredPoint = nullptr; }
-  };
-  connect( mToolMoveSrc, &QgsMapTool::deactivated, this, clearMoveHover );
-  connect( mToolMoveDst, &QgsMapTool::deactivated, this, clearMoveHover );
-
-  mToolDeleteSrc = new QgsGeorefToolDeletePoint( mSrcCanvas );
-  mToolDeleteSrc->setParent( this );
-  mToolDeleteSrc->setAction( mDeletePointAction );
-  mToolDeleteDst = new QgsGeorefToolDeletePoint( mMapCanvas );
-  mToolDeleteDst->setParent( this );
-  mToolDeleteDst->setAction( mDeletePointAction );
-
-  connect( mToolDeleteSrc, &QgsGeorefToolDeletePoint::deletePoint, this, &QgsGeorefImageToMapWindow::deletePointAt );
-  connect( mToolDeleteSrc, &QgsGeorefToolDeletePoint::hoverPoint, this, &QgsGeorefImageToMapWindow::hoverPoint );
-  connect( mToolDeleteDst, &QgsGeorefToolDeletePoint::deletePoint, this, &QgsGeorefImageToMapWindow::deletePointAt );
-  connect( mToolDeleteDst, &QgsGeorefToolDeletePoint::hoverPoint, this, &QgsGeorefImageToMapWindow::hoverPoint );
-
-  const auto clearDeleteHover = [this]() {
-    if ( mHoveredPoint ) { mHoveredPoint->setHovered( false ); mHoveredPoint = nullptr; }
-  };
-  connect( mToolDeleteSrc, &QgsMapTool::deactivated, this, clearDeleteHover );
-  connect( mToolDeleteDst, &QgsMapTool::deactivated, this, clearDeleteHover );
-
-  if ( mAddPointAction )
-  {
-    connect( mAddPointAction, &QAction::toggled, this, [this]( bool on ) {
-      if ( !on || !mSrcCanvas ) return;
-      mSrcCanvas->setMapTool( mAddPointTool );
-      if ( mMapCanvas && mMapCanvas->mapTool()
-           && ( mMapCanvas->mapTool() == mToolMoveDst || mMapCanvas->mapTool() == mToolDeleteDst ) )
-        mMapCanvas->unsetMapTool( mMapCanvas->mapTool() );
-    } );
-  }
-  if ( mMovePointAction )
-  {
-    connect( mMovePointAction, &QAction::toggled, this, [this]( bool on ) {
-      if ( !on ) return;
-      if ( mSrcCanvas ) mSrcCanvas->setMapTool( mToolMoveSrc );
-      if ( mMapCanvas ) mMapCanvas->setMapTool( mToolMoveDst );
-    } );
-  }
-  if ( mDeletePointAction )
-  {
-    connect( mDeletePointAction, &QAction::toggled, this, [this]( bool on ) {
-      if ( !on ) return;
-      if ( mSrcCanvas ) mSrcCanvas->setMapTool( mToolDeleteSrc );
-      if ( mMapCanvas ) mMapCanvas->setMapTool( mToolDeleteDst );
-    } );
-  }
 }
 
 void QgsGeorefImageToMapWindow::setupMenus()
 {
   auto *fileMenu = menuBar()->addMenu( tr( "&File" ) );
   fileMenu->addAction( tr( "Open source raster..." ),
-                       this, &QgsGeorefImageToMapWindow::openSourceRaster );
+                       this, &QgsGeorefShellWindow::openSourceRaster );
   fileMenu->addAction( tr( "Refresh map layers" ),
                        this, &QgsGeorefImageToMapWindow::refreshMapLayersFromProject );
   fileMenu->addSeparator();
-  fileMenu->addAction( tr( "Load .points..." ), this, &QgsGeorefImageToMapWindow::loadPoints );
-  fileMenu->addAction( tr( "Save .points..." ), this, &QgsGeorefImageToMapWindow::savePoints );
+  fileMenu->addAction( tr( "Load .points..." ), this, &QgsGeorefShellWindow::loadPoints );
+  fileMenu->addAction( tr( "Save .points..." ), this, &QgsGeorefShellWindow::savePoints );
   fileMenu->addSeparator();
   fileMenu->addAction( tr( "Close" ), this, &QWidget::close );
 
@@ -675,14 +110,12 @@ void QgsGeorefImageToMapWindow::setupToolbars()
   mapToolGroup->addAction( mDeletePointAction );
 
   mToolBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Load .gcp" ),
-                       this, &QgsGeorefImageToMapWindow::loadPoints );
+                       this, &QgsGeorefShellWindow::loadPoints );
   mToolBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Export .gcp" ),
-                       this, &QgsGeorefImageToMapWindow::savePoints );
+                       this, &QgsGeorefShellWindow::savePoints );
   mToolBar->addSeparator();
   mToolBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Refresh map" ),
                        this, &QgsGeorefImageToMapWindow::refreshMapLayersFromProject );
-
-  // No SIFT on I2M (spec).
 
   auto *spacer = new QWidget( this );
   spacer->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
@@ -690,271 +123,53 @@ void QgsGeorefImageToMapWindow::setupToolbars()
 
   mApplyAction = mToolBar->addAction(
     QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ),
-    tr( "Apply" ), this, &QgsGeorefImageToMapWindow::applyTransform );
+    tr( "Apply" ), this, &QgsGeorefShellWindow::applyTransform );
   mApplyAction->setObjectName( QStringLiteral( "rsGeorefI2MApplyAction" ) );
   mApplyAction->setEnabled( false );
 }
 
-void QgsGeorefImageToMapWindow::setupStatusBar()
+void QgsGeorefImageToMapWindow::refreshMapLayersFromProject()
 {
-  mCoordLabel = new QLabel( tr( "—" ), this );
-  mCoordLabel->setObjectName( QStringLiteral( "rsGeorefI2MCoordLabel" ) );
-  mCrsLabel = new QLabel( tr( "CRS: —" ), this );
-  mCrsLabel->setObjectName( QStringLiteral( "rsGeorefI2MCrsLabel" ) );
-  mRmsLabel = new QLabel( tr( "RMS: —" ), this );
-  mRmsLabel->setObjectName( QStringLiteral( "rsGeorefI2MRmsLabel" ) );
-  statusBar()->addWidget( mCoordLabel, 1 );
-  statusBar()->addPermanentWidget( mCrsLabel );
-  statusBar()->addPermanentWidget( mRmsLabel );
-}
-
-void QgsGeorefImageToMapWindow::showCoordDialog( const QgsPointXY &sourcePixel )
-{
-  auto *tempGcp = new QgsGcpPoint( sourcePixel, QgsPointXY(), QgsCoordinateReferenceSystem(), true );
-  auto *tempDataPoint = new QgsGeorefDataPoint( mSrcCanvas, mMapCanvas, tempGcp );
-
-  QgsCoordinateReferenceSystem rasterCrs = mSrcCanvas
-                                             ? mSrcCanvas->mapSettings().destinationCrs()
-                                             : QgsCoordinateReferenceSystem();
-
-  // Destination pick uses the Map canvas (project layers).
-  QgsMapCanvas *pick = mMapCanvas;
-  auto *dlg = new QgsMapCoordsDialog( pick, tempDataPoint, rasterCrs, this );
-  dlg->setAttribute( Qt::WA_DeleteOnClose );
-  tempDataPoint->setParent( dlg );
-
-  connect( dlg, &QgsMapCoordsDialog::pointAdded, this,
-           [this]( const QgsPointXY &srcCoord, const QgsPointXY &dstCoord,
-                   const QgsCoordinateReferenceSystem &destCrs ) {
-             if ( mGcps )
-               mGcps->appendPoint( QgsGcpPoint( srcCoord, dstCoord, destCrs, true ) );
-           } );
-  connect( dlg, &QObject::destroyed, this, [tempGcp]() { delete tempGcp; } );
-  dlg->show();
-}
-
-void QgsGeorefImageToMapWindow::openSourceRaster()
-{
-  const QString path = QFileDialog::getOpenFileName(
-    this, tr( "Open source raster" ), QString(),
-    tr( "Raster (*.tif *.tiff *.img *.jp2);;All files (*)" ) );
-  if ( path.isEmpty() )
+  if ( !mDstCanvas )
     return;
 
-  setSourceRasterPath( path );
-  auto *layer = new QgsRasterLayer( path, QFileInfo( path ).baseName(), QStringLiteral( "gdal" ) );
-  if ( !layer->isValid() )
+  QList<QgsMapLayer *> layers;
+  if ( QgsLayerTree *root = QgsProject::instance()->layerTreeRoot() )
   {
-    delete layer;
-    if ( statusBar() )
-      statusBar()->showMessage( tr( "Failed to open raster: %1" ).arg( path ), 5000 );
+    for ( QgsMapLayer *l : root->checkedLayers() )
+    {
+      if ( l && l->isValid() )
+        layers << l;
+    }
+  }
+  else
+  {
+    for ( QgsMapLayer *l : QgsProject::instance()->mapLayers().values() )
+    {
+      if ( l && l->isValid() )
+        layers << l;
+    }
+  }
+
+  mDstCanvas->setLayers( layers );
+  if ( mParamsPanel && mParamsPanel->destCrs().isValid() )
+    mDstCanvas->setDestinationCrs( mParamsPanel->destCrs() );
+  else if ( QgsProject::instance()->crs().isValid() )
+    mDstCanvas->setDestinationCrs( QgsProject::instance()->crs() );
+  mDstCanvas->refresh();
+}
+
+void QgsGeorefImageToMapWindow::onTransformMethodChangedExtra()
+{
+  if ( !mParamsPanel )
     return;
-  }
-  if ( mSrcStore )
-    mSrcStore->addMapLayer( layer );
-  mSrcRaster = layer;
-  if ( mSrcCanvas )
-  {
-    mSrcCanvas->setLayers( { layer } );
-    mSrcCanvas->setExtent( layer->extent() );
-    mSrcCanvas->refresh();
-  }
-  mSession.saveWorkflow( captureWorkflowSnapshot() );
+  mParamsPanel->setRpcMode(
+    mParamsPanel->transformMethod() ==
+    QgsGcpTransformerInterface::TransformMethod::RpcPhysical );
 }
 
-void QgsGeorefImageToMapWindow::closeEvent( QCloseEvent *e )
+void QgsGeorefImageToMapWindow::captureShellSpecific( RsGeorefSessionState::WorkflowSnapshot &s ) const
 {
-  if ( mWarpInProgress )
-  {
-    const auto ans = QMessageBox::question(
-      this, tr( "几何校正" ), tr( "校正任务仍在运行，仍要关闭？" ),
-      QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
-    if ( ans != QMessageBox::Yes ) { e->ignore(); return; }
-  }
-  if ( mSession.isDirty() )
-  {
-    const auto ans = QMessageBox::question(
-      this, tr( "未保存的控制点" ),
-      tr( "GCP 列表有未保存的更改。是否保存？" ),
-      QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save );
-    if ( ans == QMessageBox::Cancel ) { e->ignore(); return; }
-    if ( ans == QMessageBox::Save )
-    {
-      QString path = mSession.lastPointsPath();
-      if ( path.isEmpty() )
-      {
-        path = QFileDialog::getSaveFileName(
-          this, tr( "Save GCP points" ), QString(),
-          tr( "GCP Points (*.points *.gcp);;All files (*)" ) );
-        if ( path.isEmpty() ) { e->ignore(); return; }
-        if ( QFileInfo( path ).suffix().isEmpty() )
-          path += QStringLiteral( ".points" );
-      }
-      if ( !mGcps || !mGcps->saveGcps( path ) )
-      {
-        QMessageBox::warning( this, tr( "Save GCPs" ), tr( "保存失败，窗口未关闭。" ) );
-        e->ignore();
-        return;
-      }
-      mSession.setLastPointsPath( path );
-      mSession.clearDirty();
-    }
-  }
-  mSession.saveWorkflow( captureWorkflowSnapshot() );
-  mSession.saveWindow( this );
-  e->accept();
-}
-
-void QgsGeorefImageToMapWindow::loadPoints()
-{
-  const QString path = QFileDialog::getOpenFileName(
-    this, tr( "Load GCP points" ), mSession.lastPointsPath(),
-    tr( "GCP Points (*.points *.gcp);;All files (*)" ) );
-  if ( path.isEmpty() ) return;
-  const QgsCoordinateReferenceSystem destCrs =
-    mParamsPanel ? mParamsPanel->destCrs() : QgsCoordinateReferenceSystem();
-  mSuppressDirtyFromList = true;
-  const bool ok = mGcps->loadGcps( path, destCrs );
-  mSuppressDirtyFromList = false;
-  if ( !ok )
-    QMessageBox::warning( this, tr( "Load GCPs" ), tr( "Failed to load GCP points from %1" ).arg( path ) );
-  else
-  {
-    mSession.setLastPointsPath( path );
-    mSession.clearDirty();
-  }
-}
-
-void QgsGeorefImageToMapWindow::savePoints()
-{
-  const QString path = QFileDialog::getSaveFileName(
-    this, tr( "Save GCP points" ), mSession.lastPointsPath(),
-    tr( "GCP Points (*.points *.gcp);;All files (*)" ) );
-  if ( path.isEmpty() ) return;
-  QString finalPath = path;
-  if ( QFileInfo( finalPath ).suffix().isEmpty() )
-    finalPath += QStringLiteral( ".points" );
-  if ( !mGcps->saveGcps( finalPath ) )
-    QMessageBox::warning( this, tr( "Save GCPs" ), tr( "Failed to save GCP points to %1" ).arg( finalPath ) );
-  else
-  {
-    mSession.setLastPointsPath( finalPath );
-    mSession.clearDirty();
-  }
-}
-
-void QgsGeorefImageToMapWindow::deleteGcpRows( const QList<int> &rows )
-{
-  if ( !mGcps || rows.isEmpty() ) return;
-  QList<int> sortedRows = rows;
-  std::sort( sortedRows.begin(), sortedRows.end(), std::greater<int>() );
-  for ( int row : sortedRows )
-    if ( row >= 0 && row < mGcps->size() )
-      mGcps->removePointAt( row );
-}
-
-QgsGeorefDataPoint *QgsGeorefImageToMapWindow::findDataPoint( const QgsPointXY &p, QgsGcpPoint::PointType type )
-{
-  QgsGeorefDataPoint *nearest = nullptr;
-  double bestDistance = -1.0;
-  for ( auto it = mDataPoints.cbegin(); it != mDataPoints.cend(); ++it )
-  {
-    QgsGeorefDataPoint *dp = it.value();
-    if ( !dp ) continue;
-    double distance = 0.0;
-    if ( dp->contains( p, type, distance ) )
-    {
-      if ( bestDistance < 0.0 || distance < bestDistance )
-      {
-        bestDistance = distance;
-        nearest = dp;
-      }
-    }
-  }
-  return nearest;
-}
-
-void QgsGeorefImageToMapWindow::selectPoint( const QgsPointXY &p )
-{
-  const bool isSrc = ( sender() == mToolMoveSrc );
-  const auto type = isSrc ? QgsGcpPoint::PointType::Source : QgsGcpPoint::PointType::Destination;
-  QgsGeorefToolMovePoint *tool = isSrc ? mToolMoveSrc : mToolMoveDst;
-  mMovingPoint = findDataPoint( p, type );
-  if ( !mMovingPoint || !tool ) return;
-  if ( mHoveredPoint ) { mHoveredPoint->setHovered( false ); mHoveredPoint = nullptr; }
-  mMoveOrigin = ( type == QgsGcpPoint::PointType::Source )
-                  ? mMovingPoint->sourcePoint() : mMovingPoint->destinationPoint();
-  tool->setStartPoint( mMoveOrigin );
-}
-
-void QgsGeorefImageToMapWindow::movePoint( const QgsPointXY &p )
-{
-  const bool isSrc = ( sender() == mToolMoveSrc );
-  const auto type = isSrc ? QgsGcpPoint::PointType::Source : QgsGcpPoint::PointType::Destination;
-  if ( mMovingPoint ) { mMovingPoint->moveTo( p, type ); return; }
-  QgsGeorefDataPoint *point = findDataPoint( p, type );
-  if ( point ) point->setHovered( true );
-  if ( mHoveredPoint && point != mHoveredPoint ) mHoveredPoint->setHovered( false );
-  mHoveredPoint = point;
-}
-
-void QgsGeorefImageToMapWindow::releasePoint( const QgsPointXY &p )
-{
-  const bool isSrc = ( sender() == mToolMoveSrc );
-  const auto type = isSrc ? QgsGcpPoint::PointType::Source : QgsGcpPoint::PointType::Destination;
-  QgsGeorefToolMovePoint *tool = isSrc ? mToolMoveSrc : mToolMoveDst;
-  if ( tool ) tool->setStartPoint( QgsPointXY() );
-  if ( mMovingPoint )
-  {
-    mMovingPoint = nullptr;
-    if ( mGcps ) mGcps->notifyPointsMutated();
-  }
-  QgsGeorefDataPoint *point = findDataPoint( p, type );
-  if ( point ) point->setHovered( true );
-  if ( mHoveredPoint && point != mHoveredPoint ) mHoveredPoint->setHovered( false );
-  mHoveredPoint = point;
-}
-
-void QgsGeorefImageToMapWindow::cancelPoint( const QgsPointXY &p )
-{
-  const bool isSrc = ( sender() == mToolMoveSrc );
-  const auto type = isSrc ? QgsGcpPoint::PointType::Source : QgsGcpPoint::PointType::Destination;
-  QgsGeorefToolMovePoint *tool = isSrc ? mToolMoveSrc : mToolMoveDst;
-  if ( mMovingPoint )
-  {
-    const QgsPointXY origin = ( tool && !tool->startPoint().isEmpty() ) ? tool->startPoint() : mMoveOrigin;
-    if ( type == QgsGcpPoint::PointType::Source ) mMovingPoint->setSourcePoint( origin );
-    else mMovingPoint->setDestinationPoint( origin );
-  }
-  if ( tool ) tool->setStartPoint( QgsPointXY() );
-  mMovingPoint = nullptr;
-  QgsGeorefDataPoint *point = findDataPoint( p, type );
-  if ( point ) point->setHovered( true );
-  if ( mHoveredPoint && point != mHoveredPoint ) mHoveredPoint->setHovered( false );
-  mHoveredPoint = point;
-}
-
-void QgsGeorefImageToMapWindow::hoverPoint( const QgsPointXY &p )
-{
-  const auto type = ( sender() == mToolDeleteSrc )
-                      ? QgsGcpPoint::PointType::Source : QgsGcpPoint::PointType::Destination;
-  QgsGeorefDataPoint *point = findDataPoint( p, type );
-  if ( point ) point->setHovered( true );
-  if ( mHoveredPoint && point != mHoveredPoint ) mHoveredPoint->setHovered( false );
-  mHoveredPoint = point;
-}
-
-void QgsGeorefImageToMapWindow::deletePointAt( const QgsPointXY &p )
-{
-  const auto type = ( sender() == mToolDeleteSrc )
-                      ? QgsGcpPoint::PointType::Source : QgsGcpPoint::PointType::Destination;
-  QgsGeorefDataPoint *dp = findDataPoint( p, type );
-  if ( !dp || !mGcps ) return;
-  if ( mHoveredPoint == dp ) { mHoveredPoint->setHovered( false ); mHoveredPoint = nullptr; }
-  if ( mMovingPoint == dp ) mMovingPoint = nullptr;
-  QgsGcpPoint *gcp = dp->gcpPoint();
-  for ( int i = 0; i < mGcps->size(); ++i )
-  {
-    if ( mGcps->at( i ) == gcp ) { mGcps->removePointAt( i ); break; }
-  }
+  s.mode = 0; // ImageToMap legacy index
+  s.syncZoom = false;
 }
