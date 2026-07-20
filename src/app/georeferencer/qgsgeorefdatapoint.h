@@ -85,6 +85,9 @@ class QgsGeorefDataPoint : public QObject
      */
     void updateMarkers();
 
+    /// Destination position in the dest canvas CRS (for markers / zoom).
+    QgsPointXY destinationDisplayPoint() const;
+
     QgsGCPCanvasItem *sourceItem() const { return mGCPSourceItem; }
     QgsGCPCanvasItem *destinationItem() const { return mGCPDestinationItem; }
 

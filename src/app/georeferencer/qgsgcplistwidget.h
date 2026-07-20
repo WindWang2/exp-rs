@@ -17,6 +17,8 @@
 
 class QgsGCPList;
 class QgsGCPListModel;
+class QContextMenuEvent;
+class QMouseEvent;
 
 /**
  * \brief 10-column GCP table styled per design.html ArtboardGeoref.
@@ -24,15 +26,8 @@ class QgsGCPListModel;
  * Columns: 启用 / # / X 源 (px) / Y 源 (px) / X 参 (m) / Y 参 (m) / ΔX / ΔY /
  *          RMS (px) / 类型.
  *
- * Row height defaults to 26 px; column widths default to
- * {40, 40, 120, 120, 140, 140, 80, 80, 90, 120}.
- *
- * Column 9 uses an editable RsGcpTypeDelegate combobox; column 0 is a
- * Qt::CheckStateRole enable toggle handled by the model.
- *
- * The widget bubbles model-level edits up as `pointEnabled`,
- * `pointTypeChanged` and `deleteRowsRequested` signals so the main window
- * (Task 11.4.6) can persist and the parameter dock (Task 11.4.7) can refresh.
+ * Supports Delete key, right-click context menu (delete / enable / edit /
+ * zoom), and double-click to locate on both canvases.
  */
 class QgsGCPListWidget : public QTableView
 {
@@ -44,6 +39,11 @@ class QgsGCPListWidget : public QTableView
     /// Attach a non-owning GCP list. Recreates the model bindings.
     void setGCPList( QgsGCPList *list );
 
+    QgsGCPListModel *gcpModel() const { return mModel; }
+
+    /// Currently selected row indices (sorted ascending).
+    QList<int> selectedRows() const;
+
   signals:
     /// Emitted when the user toggles a row's enable checkbox.
     void pointEnabled( int row, bool enabled );
@@ -54,11 +54,22 @@ class QgsGCPListWidget : public QTableView
     /// Emitted when the user requests deletion of the given rows.
     void deleteRowsRequested( const QList<int> &rows );
 
+    /// Zoom / locate requests (row is list index).
+    void zoomToSourceRequested( int row );
+    void zoomToDestRequested( int row );
+    void zoomToBothRequested( int row );
+
+    /// Row selection changed (for canvas marker highlight). -1 if none.
+    void currentGcpRowChanged( int row );
+
   protected:
     void keyPressEvent( QKeyEvent *event ) override;
+    void contextMenuEvent( QContextMenuEvent *event ) override;
+    void mouseDoubleClickEvent( QMouseEvent *event ) override;
 
   private slots:
     void onModelDataChanged( const QModelIndex &topLeft, const QModelIndex &bottomRight, const QList<int> &roles );
+    void onSelectionChanged();
 
   private:
     QgsGCPListModel *mModel = nullptr;

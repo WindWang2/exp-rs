@@ -49,6 +49,9 @@ QgsGCPCanvasItem::QgsGCPCanvasItem( QgsMapCanvas *mapCanvas,
 {
   mResidualPen.setColor( QColor( 255, 0, 0 ) );
   mResidualPen.setWidthF( 2.0 );
+  // Sit above map layers / other overlays so GCP badges stay visible.
+  setZValue( 2000 );
+  setVisible( true );
 
   updatePosition();
 }

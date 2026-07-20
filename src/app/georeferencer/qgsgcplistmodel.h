@@ -65,6 +65,9 @@ class QgsGCPListModel : public QAbstractTableModel
 
     void updateResiduals();
 
+    /// Refresh all cells without full model reset (after residual recompute).
+    void refreshAll();
+
     static QString formatNumber( double number );
 
   signals:

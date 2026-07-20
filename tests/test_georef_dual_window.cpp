@@ -104,4 +104,16 @@ TEST_CASE( "I2I dual-canvas GCP pick arms both tools and appends pair", "[georef
   w.pickSourceForTest( QgsPointXY( 30, 40 ) );
   w.pickDestForTest( QgsPointXY( 130, 240 ) );
   REQUIRE( w.gcpCountForTest() == 2 );
+
+  // Canvas badge items should exist on both SRC and REF scenes.
+  auto *src = w.srcCanvas();
+  auto *ref = w.dstCanvas();
+  REQUIRE( src != nullptr );
+  REQUIRE( ref != nullptr );
+  REQUIRE( src->scene() != nullptr );
+  REQUIRE( ref->scene() != nullptr );
+  // At least 2 graphics items per canvas (one badge per GCP); scenes may
+  // also hold other items, so only require non-empty item lists.
+  REQUIRE( src->scene()->items().size() >= 2 );
+  REQUIRE( ref->scene()->items().size() >= 2 );
 }

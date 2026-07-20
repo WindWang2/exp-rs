@@ -222,8 +222,9 @@ bool QgsGCPListModel::setData( const QModelIndex &index, const QVariant &value, 
         const bool checked = static_cast<Qt::CheckState>( value.toInt() ) == Qt::Checked;
         point->setEnabled( checked );
         emit dataChanged( index, index, { Qt::CheckStateRole, Qt::DisplayRole } );
-        updateResiduals();
         emit pointEnabled( point, index.row() );
+        // Notify shell so canvas markers recompute fit / refresh.
+        mGCPList->notifyPointsMutated();
         return true;
       }
       break;
@@ -238,7 +239,7 @@ bool QgsGCPListModel::setData( const QModelIndex &index, const QVariant &value, 
         sourcePoint.setY( value.toDouble() );
       point->setSourcePoint( sourcePoint );
       emit dataChanged( index, index );
-      updateResiduals();
+      mGCPList->notifyPointsMutated();
       return true;
     }
 
@@ -254,7 +255,7 @@ bool QgsGCPListModel::setData( const QModelIndex &index, const QVariant &value, 
       if ( mTargetCrs.isValid() )
         point->setDestinationPointCrs( mTargetCrs );
       emit dataChanged( index, index );
-      updateResiduals();
+      mGCPList->notifyPointsMutated();
       return true;
     }
 
@@ -263,6 +264,7 @@ bool QgsGCPListModel::setData( const QModelIndex &index, const QVariant &value, 
       {
         point->setPointType( value.toString() );
         emit dataChanged( index, index, { Qt::EditRole, Qt::DisplayRole } );
+        mGCPList->notifyPointsMutated();
         return true;
       }
       break;
@@ -331,6 +333,14 @@ Qgis::RenderUnit QgsGCPListModel::residualUnit() const
   if ( mGeorefTransform && mGeorefTransform->providesAccurateInverseTransformation() )
     return Qgis::RenderUnit::MapUnits;
   return Qgis::RenderUnit::Pixels;
+}
+
+void QgsGCPListModel::refreshAll()
+{
+  if ( rowCount() <= 0 )
+    return;
+  emit dataChanged( index( 0, 0 ),
+                    index( rowCount() - 1, columnCount() - 1 ) );
 }
 
 void QgsGCPListModel::updateResiduals()

@@ -35,7 +35,7 @@ QgsGeorefDataPoint::QgsGeorefDataPoint( QgsMapCanvas *srcCanvas,
   , mDstCanvas( dstCanvas )
   , mGcpPoint( gcp )
 {
-  // Build SRC + REF canvas item visuals if both a canvas and a gcp are wired.
+  // Build SRC + REF canvas item visuals if a canvas and a gcp are wired.
   if ( mGcpPoint )
   {
     if ( mSrcCanvas )
@@ -46,16 +46,8 @@ QgsGeorefDataPoint::QgsGeorefDataPoint( QgsMapCanvas *srcCanvas,
     }
     if ( mDstCanvas )
     {
-      // Destination may need CRS reprojection into the REF canvas CRS — do that
-      // immediately so the first paint is not in raw lon/lat.
-      QgsPointXY dest = mGcpPoint->destinationPoint();
-      if ( mDstCanvas->mapSettings().destinationCrs().isValid() )
-      {
-        dest = mGcpPoint->transformedDestinationPoint(
-                 mDstCanvas->mapSettings().destinationCrs(),
-                 QgsProject::instance()->transformContext() );
-      }
-      mGCPDestinationItem = new QgsGCPCanvasItem( mDstCanvas, mId, dest, /*isSource=*/false );
+      mGCPDestinationItem = new QgsGCPCanvasItem(
+        mDstCanvas, mId, destinationDisplayPoint(), /*isSource=*/false );
       mGCPDestinationItem->setEnabled( mGcpPoint->isEnabled() );
     }
   }
@@ -70,33 +62,50 @@ QgsGeorefDataPoint::~QgsGeorefDataPoint()
   mGCPDestinationItem = nullptr;
 }
 
+QgsPointXY QgsGeorefDataPoint::destinationDisplayPoint() const
+{
+  if ( !mGcpPoint )
+    return QgsPointXY();
+  // Prefer the stored destination as picked on the dest canvas. Only reproject
+  // when both CRSes are valid and differ (I2M map CRS vs stored dest CRS).
+  const QgsCoordinateReferenceSystem destCrs = mGcpPoint->destinationPointCrs();
+  const QgsCoordinateReferenceSystem canvasCrs = mDstCanvas
+                                                   ? mDstCanvas->mapSettings().destinationCrs()
+                                                   : QgsCoordinateReferenceSystem();
+  if ( canvasCrs.isValid() && destCrs.isValid() && canvasCrs != destCrs )
+  {
+    return mGcpPoint->transformedDestinationPoint(
+      canvasCrs, QgsProject::instance()->transformContext() );
+  }
+  return mGcpPoint->destinationPoint();
+}
+
 void QgsGeorefDataPoint::updateMarkers()
 {
   if ( !mGcpPoint )
     return;
+  mResidual = mGcpPoint->residual();
   if ( mGCPSourceItem )
   {
     mGCPSourceItem->setId( mId );
-    // SRC is pixel space — never reproject.
+    // SRC is pixel/map space of the source canvas — never reproject.
     mGCPSourceItem->setWorldPos( mGcpPoint->sourcePoint() );
     mGCPSourceItem->setEnabled( mGcpPoint->isEnabled() );
-    mGCPSourceItem->setResidual( mGcpPoint->residual() );
+    mGCPSourceItem->setResidual( mResidual );
+    mGCPSourceItem->setVisible( true );
   }
   if ( mGCPDestinationItem )
   {
     mGCPDestinationItem->setId( mId );
-    // REF may be in a different CRS than the GCP destination CRS.
-    // Reproject into the destination canvas CRS so markers don't drift.
-    QgsPointXY dest = mGcpPoint->destinationPoint();
-    if ( mDstCanvas && mDstCanvas->mapSettings().destinationCrs().isValid() )
-    {
-      dest = mGcpPoint->transformedDestinationPoint(
-               mDstCanvas->mapSettings().destinationCrs(),
-               QgsProject::instance()->transformContext() );
-    }
-    mGCPDestinationItem->setWorldPos( dest );
+    mGCPDestinationItem->setWorldPos( destinationDisplayPoint() );
     mGCPDestinationItem->setEnabled( mGcpPoint->isEnabled() );
+    mGCPDestinationItem->setVisible( true );
   }
+  // Force a repaint of the canvases so badges appear immediately after pick.
+  if ( mSrcCanvas )
+    mSrcCanvas->update();
+  if ( mDstCanvas )
+    mDstCanvas->update();
 }
 
 void QgsGeorefDataPoint::setSelected( bool on )

@@ -114,6 +114,10 @@ class QgsGeorefShellWindow : public QMainWindow
     void onSourcePointPicked( const QgsPointXY &sourceMap );
     void onDestPointPicked( const QgsPointXY &destMap );
     void clearPendingGcpPick();
+    void zoomToGcpSource( int row );
+    void zoomToGcpDest( int row );
+    void zoomToGcpBoth( int row );
+    void onGcpTableRowChanged( int row );
 
   protected:
     void emitStructuredLog( const QgsImageWarper::WarpResult &r );
@@ -124,6 +128,9 @@ class QgsGeorefShellWindow : public QMainWindow
     void loadWarpOutputToProject( const QString &path );
     void beginPendingSourcePick( const QgsPointXY &sourceMap );
     void commitGcpPair( const QgsPointXY &sourceMap, const QgsPointXY &destMap );
+    void panCanvasToPoint( QgsMapCanvas *canvas, const QgsPointXY &mapPoint );
+    void setSelectedGcpRow( int row );
+    void syncAllMarkers();
 
     QgisInterface *mIface = nullptr;
 

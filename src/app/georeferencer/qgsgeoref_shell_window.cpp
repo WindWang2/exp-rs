@@ -50,6 +50,7 @@ namespace
 #include "qgscoordinatereferencesystem.h"
 #include "qgscoordinatetransformcontext.h"
 #include "qgsgcplist.h"
+#include "qgsgcplistmodel.h"
 #include "qgsgcplistwidget.h"
 #include "qgsgcppoint.h"
 #include "qgsgeorefdatapoint.h"
@@ -65,6 +66,7 @@ namespace
 #include "qgsmessagelog.h"
 #include "qgsproject.h"
 #include "qgsrasterlayer.h"
+#include "qgsrectangle.h"
 #include "qgstaskmanager.h"
 #include "rs_georef_task_list.h"
 #include "rs_warp_task.h"
@@ -126,10 +128,20 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   mGcpTable = new QgsGCPListWidget( mGcpDock );
   mGcpTable->setGCPList( mGcps );
   tipWidget( mGcpTable, tr(
-    "表格中每一行是一个 GCP。可在画布上加点/移动/删除，或在此勾选启用状态。" ) );
+    "控制点列表：源/目标坐标与残差。\n"
+    "右键：定位、启用/禁用、编辑坐标、删除。\n"
+    "Delete 删除选中行；双击 # 或残差列 → 两侧定位。" ) );
   mGcpDock->setWidget( mGcpTable );
   connect( mGcpTable, &QgsGCPListWidget::deleteRowsRequested,
            this, &QgsGeorefShellWindow::deleteGcpRows );
+  connect( mGcpTable, &QgsGCPListWidget::zoomToSourceRequested,
+           this, &QgsGeorefShellWindow::zoomToGcpSource );
+  connect( mGcpTable, &QgsGCPListWidget::zoomToDestRequested,
+           this, &QgsGeorefShellWindow::zoomToGcpDest );
+  connect( mGcpTable, &QgsGCPListWidget::zoomToBothRequested,
+           this, &QgsGeorefShellWindow::zoomToGcpBoth );
+  connect( mGcpTable, &QgsGCPListWidget::currentGcpRowChanged,
+           this, &QgsGeorefShellWindow::onGcpTableRowChanged );
   addDockWidget( Qt::BottomDockWidgetArea, mGcpDock );
 
   // Task list dock — Apply/Run enqueues warp jobs here.
@@ -450,7 +462,7 @@ void QgsGeorefShellWindow::onPointsChanged()
     return;
 
   QSet<QgsGcpPoint *> live;
-  int idCounter = 0;
+  int idCounter = 1; // 1-based labels on canvas badges
   for ( QgsGcpPoint *p : *mGcps )
   {
     if ( !p )
@@ -463,6 +475,7 @@ void QgsGeorefShellWindow::onPointsChanged()
     if ( !dp )
     {
       dp = new QgsGeorefDataPoint( mSrcCanvas, mDstCanvas, p );
+      dp->setParent( this );
       mDataPoints.insert( p, dp );
     }
     dp->setId( idCounter );
@@ -485,6 +498,104 @@ void QgsGeorefShellWindow::onPointsChanged()
       mHoveredPoint = nullptr;
     delete dp;
   }
+
+  if ( mSrcCanvas )
+    mSrcCanvas->refresh();
+  if ( mDstCanvas )
+    mDstCanvas->refresh();
+}
+
+void QgsGeorefShellWindow::syncAllMarkers()
+{
+  for ( auto it = mDataPoints.begin(); it != mDataPoints.end(); ++it )
+  {
+    if ( it.value() )
+      it.value()->updateMarkers();
+  }
+  if ( mSrcCanvas )
+    mSrcCanvas->update();
+  if ( mDstCanvas )
+    mDstCanvas->update();
+}
+
+void QgsGeorefShellWindow::panCanvasToPoint( QgsMapCanvas *canvas, const QgsPointXY &mapPoint )
+{
+  if ( !canvas )
+    return;
+  QgsRectangle extent = canvas->extent();
+  if ( extent.isEmpty() || !extent.isFinite() )
+  {
+    constexpr double half = 50.0;
+    extent = QgsRectangle( mapPoint.x() - half, mapPoint.y() - half,
+                           mapPoint.x() + half, mapPoint.y() + half );
+  }
+  else
+  {
+    const double w = extent.width();
+    const double h = extent.height();
+    extent = QgsRectangle( mapPoint.x() - w / 2.0, mapPoint.y() - h / 2.0,
+                           mapPoint.x() + w / 2.0, mapPoint.y() + h / 2.0 );
+  }
+  canvas->setExtent( extent );
+  canvas->refresh();
+}
+
+void QgsGeorefShellWindow::setSelectedGcpRow( int row )
+{
+  if ( !mGcps )
+    return;
+  for ( int r = 0; r < mGcps->size(); ++r )
+  {
+    QgsGcpPoint *p = mGcps->at( r );
+    QgsGeorefDataPoint *dp = p ? mDataPoints.value( p, nullptr ) : nullptr;
+    if ( dp )
+      dp->setSelected( r == row );
+  }
+  if ( mSrcCanvas )
+    mSrcCanvas->update();
+  if ( mDstCanvas )
+    mDstCanvas->update();
+}
+
+void QgsGeorefShellWindow::zoomToGcpSource( int row )
+{
+  if ( !mGcps || row < 0 || row >= mGcps->size() )
+    return;
+  QgsGcpPoint *p = mGcps->at( row );
+  if ( !p )
+    return;
+  setSelectedGcpRow( row );
+  panCanvasToPoint( mSrcCanvas, p->sourcePoint() );
+  if ( statusBar() )
+    statusBar()->showMessage( tr( "已定位到源点 #%1" ).arg( row + 1 ), 3000 );
+}
+
+void QgsGeorefShellWindow::zoomToGcpDest( int row )
+{
+  if ( !mGcps || row < 0 || row >= mGcps->size() )
+    return;
+  QgsGcpPoint *p = mGcps->at( row );
+  if ( !p )
+    return;
+  setSelectedGcpRow( row );
+  QgsGeorefDataPoint *dp = mDataPoints.value( p, nullptr );
+  const QgsPointXY dest = dp ? dp->destinationDisplayPoint() : p->destinationPoint();
+  panCanvasToPoint( mDstCanvas, dest );
+  if ( statusBar() )
+    statusBar()->showMessage( tr( "已定位到目标点 #%1" ).arg( row + 1 ), 3000 );
+}
+
+void QgsGeorefShellWindow::zoomToGcpBoth( int row )
+{
+  zoomToGcpSource( row );
+  zoomToGcpDest( row );
+  if ( statusBar() )
+    statusBar()->showMessage( tr( "已两侧定位 GCP #%1" ).arg( row + 1 ), 3000 );
+}
+
+void QgsGeorefShellWindow::onGcpTableRowChanged( int row )
+{
+  setSelectedGcpRow( row );
 }
 
 void QgsGeorefShellWindow::recomputeFit()
@@ -619,11 +730,14 @@ void QgsGeorefShellWindow::recomputeFit()
   else
   {
     mGcps->clearResiduals();
-    for ( auto it = mDataPoints.begin(); it != mDataPoints.end(); ++it )
-      if ( it.value() ) it.value()->updateMarkers();
     mLastRms = 0.0;
     mParamsPanel->setRmsValues( mGcps->size(), enabledCount, 0, 0, 0, 0, -1 );
   }
+
+  // Always push residual / position to canvas badges after fit.
+  syncAllMarkers();
+  if ( mGcpTable && mGcpTable->gcpModel() )
+    mGcpTable->gcpModel()->refreshAll();
 
   mParamsPanel->setResidualScatter( scatter );
   if ( mRmsLabel )
