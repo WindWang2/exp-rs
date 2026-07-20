@@ -15,10 +15,12 @@ qt_add_library(qgis_app_obia STATIC
     rs_segment_select_tool.cpp
     rs_segment_info_dock.cpp
     rs_obia_main_window.cpp
+    ../dialogs/dialog_help_catalog.cpp
 )
 
 target_include_directories(qgis_app_obia PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/src/app
     ${CMAKE_SOURCE_DIR}/src/core
     ${CMAKE_SOURCE_DIR}/src/core/geometry
     ${CMAKE_SOURCE_DIR}/src/core/proj

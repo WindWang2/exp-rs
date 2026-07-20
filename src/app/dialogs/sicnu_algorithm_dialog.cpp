@@ -1,5 +1,6 @@
 // sicnu_algorithm_dialog.cpp — Phase: Processing Toolbox overhaul
 #include "sicnu_algorithm_dialog.h"
+#include "dialog_help_catalog.h"
 #include "main_window.h"
 
 #include <gui/processing/qgsprocessingguiregistry.h>
@@ -487,6 +488,24 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
 
   if ( isCli )
     updateCommandPreview();
+
+  SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "processing_algorithm" ) );
+  // Append algorithm-specific short help into window WhatsThis
+  if ( algorithm() )
+  {
+    const QString algHelp = algorithm()->shortHelpString().isEmpty()
+                              ? algorithm()->shortDescription()
+                              : algorithm()->shortHelpString();
+    if ( !algHelp.isEmpty() )
+    {
+      setWhatsThis( SicnuDialogHelp::htmlForTool(
+                      QStringLiteral( "processing_algorithm" ), algorithm()->displayName() )
+                    + QStringLiteral( "<hr/>" ) + algHelp );
+      setToolTip( algorithm()->shortDescription().isEmpty()
+                    ? algorithm()->displayName()
+                    : algorithm()->shortDescription() );
+    }
+  }
 }
 
 void SicnuAlgorithmDialog::updateCommandPreview()

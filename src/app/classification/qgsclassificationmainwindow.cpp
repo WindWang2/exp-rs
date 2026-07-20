@@ -1,4 +1,5 @@
 #include "qgsclassificationmainwindow.h"
+#include "dialogs/dialog_help_catalog.h"
 
 #include "processing/algorithms/math_utils.h"
 #include "core/sicnu_logging.h"
@@ -123,6 +124,8 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
 {
   SICNU_LOG_INFO( SicnuLogTags::Classification, QStringLiteral( "Classification window opened" ) );
   setWindowTitle( tr( "Classification · 监督分类" ) );
+  setWhatsThis( SicnuDialogHelp::htmlForTool( QStringLiteral( "classification" ), windowTitle() ) );
+  setToolTip( SicnuDialogHelp::shortForTool( QStringLiteral( "classification" ), windowTitle() ) );
   resize( 1280, 800 );
 
   m_rois = new RsRoiCollection( this );

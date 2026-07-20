@@ -20,7 +20,8 @@ void PcaDialog::setupUi()
 {
     auto *mainLayout = new QVBoxLayout(this);
 
-    auto *compLayout = new QHBoxLayout();
+    setupHelpBanner(mainLayout);
+auto *compLayout = new QHBoxLayout();
     compLayout->addWidget(new QLabel(tr("Components:"), this));
     m_componentsSpin = new QSpinBox(this);
     m_componentsSpin->setRange(1, 10);

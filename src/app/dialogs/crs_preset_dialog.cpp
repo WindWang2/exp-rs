@@ -1,5 +1,6 @@
 // src/app/dialogs/crs_preset_dialog.cpp
 #include "crs_preset_dialog.h"
+#include "dialog_help_catalog.h"
 #include "crs_presets.h"
 
 #include <qgscoordinatereferencesystem.h>
@@ -18,7 +19,9 @@ CrsPresetDialog::CrsPresetDialog( QWidget *parent )
     : QDialog( parent )
 {
     setWindowTitle( tr( "Select CRS Preset" ) );
-    resize( 650, 480 );
+    
+    SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "crs_preset" ) );
+resize( 650, 480 );
     setupUi();
     populateTree();
 }
@@ -106,6 +109,16 @@ void CrsPresetDialog::setupUi()
         accept();
     } );
     connect( m_cancelButton, &QPushButton::clicked, this, &QDialog::reject );
+
+    auto *helpRow = new QHBoxLayout();
+    helpRow->addStretch();
+    auto *helpBtn = new QPushButton( tr( "帮助" ), this );
+    SicnuDialogHelp::tip( helpBtn, tr( "查看本对话框说明。" ) );
+    connect( helpBtn, &QPushButton::clicked, this, [this]() {
+        SicnuDialogHelp::showToolHelp( this, QStringLiteral( "crs_preset" ), windowTitle() );
+    } );
+    helpRow->addWidget( helpBtn );
+    mainLayout->addLayout( helpRow );
 }
 
 void CrsPresetDialog::populateTree()

@@ -30,7 +30,8 @@ void SpeckleFilterDialog::setupUi()
 {
     auto *mainLayout = new QVBoxLayout(this);
 
-    // Filter type selection
+    setupHelpBanner(mainLayout);
+// Filter type selection
     auto *typeLayout = new QHBoxLayout();
     typeLayout->addWidget(new QLabel(tr("Filter:"), this));
     m_filterTypeCombo = new QComboBox(this);

@@ -1,4 +1,5 @@
 #include "preferences_dialog.h"
+#include "dialog_help_catalog.h"
 
 #include <QTabWidget>
 #include <QComboBox>
@@ -18,6 +19,8 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(tr("Preferences"));
+    
+    SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "preferences" ) );
     setMinimumSize(500, 400);
 
     auto *mainLayout = new QVBoxLayout(this);
@@ -29,11 +32,22 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     setupToolsTab();
     setupAboutTab();
 
-    auto *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply, this);
+    auto *buttonBox = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply | QDialogButtonBox::Help, this );
     connect(buttonBox, &QDialogButtonBox::accepted, this, &PreferencesDialog::onAccept);
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(buttonBox->button(QDialogButtonBox::Apply), &QPushButton::clicked, this, &PreferencesDialog::saveSettings);
+    connect( buttonBox, &QDialogButtonBox::helpRequested, this, [this]() {
+        SicnuDialogHelp::showToolHelp( this, QStringLiteral( "preferences" ), windowTitle() );
+    } );
     mainLayout->addWidget(buttonBox);
+
+    // Tips on key fields (after tabs built)
+    SicnuDialogHelp::tip( m_tabWidget, tr( "常规 / 工具路径 / 关于 分页设置。" ) );
+    if ( m_themeCombo )
+        SicnuDialogHelp::tip( m_themeCombo, tr( "界面主题：浅色或深色。" ) );
+    if ( m_crsCombo )
+        SicnuDialogHelp::tip( m_crsCombo, tr( "新建工程时的默认坐标系。" ) );
 
     loadSettings();
 }

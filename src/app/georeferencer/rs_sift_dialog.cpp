@@ -1,4 +1,5 @@
 #include "rs_sift_dialog.h"
+#include "dialogs/dialog_help_catalog.h"
 
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
@@ -12,6 +13,7 @@ RsSiftDialog::RsSiftDialog( QWidget *parent )
 {
   setWindowTitle( tr( "SIFT 自动匹配参数" ) );
   setObjectName( QStringLiteral( "rsSiftDialog" ) );
+  SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "sift_match" ) );
 
   const RsSiftMatcher::Params defaults;
 
@@ -51,11 +53,19 @@ RsSiftDialog::RsSiftDialog( QWidget *parent )
   form->addRow( tr( "最小内点比 (minInlierRatio)" ),        mMinInlier );
   form->addRow( tr( "RANSAC 容差 (ransacThreshold)" ),      mRansacThresh );
   form->addRow( tr( "最大边长 (maxImageSide)" ),            mMaxImageSide );
+  SicnuDialogHelp::tip( mContrast, tr( "特征点对比度阈值，越大则匹配点越少、越稳定。" ) );
+  SicnuDialogHelp::tip( mMaxMatches, tr( "保留的最大匹配对数上限。" ) );
+  SicnuDialogHelp::tip( mMinInlier, tr( "RANSAC 后内点比例下限，过低则结果不可靠。" ) );
+  SicnuDialogHelp::tip( mRansacThresh, tr( "RANSAC 像素容差，控制几何一致性。" ) );
+  SicnuDialogHelp::tip( mMaxImageSide, tr( "匹配前将影像缩放到此最大边长以加速。" ) );
 
   auto *buttons = new QDialogButtonBox(
-    QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this );
+    QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Help, this );
   connect( buttons, &QDialogButtonBox::accepted, this, &QDialog::accept );
   connect( buttons, &QDialogButtonBox::rejected, this, &QDialog::reject );
+  connect( buttons, &QDialogButtonBox::helpRequested, this, [this]() {
+    SicnuDialogHelp::showToolHelp( this, QStringLiteral( "sift_match" ), windowTitle() );
+  } );
 
   auto *root = new QVBoxLayout( this );
   root->addLayout( form );

@@ -43,7 +43,9 @@ void ImageEnhancementPanel::setupUi()
     auto *mainLayout = qobject_cast<QVBoxLayout*>(layout());
     if (!mainLayout) {
         mainLayout = new QVBoxLayout(this);
-    }
+    
+    setupHelpBanner(mainLayout);
+}
 
     // Method selection
     auto *methodLayout = new QHBoxLayout();

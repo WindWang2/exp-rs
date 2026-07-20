@@ -12,7 +12,8 @@ void BandMathDialog::setupUi()
 {
     auto *mainLayout = new QVBoxLayout(this);
 
-    // Expression input
+    setupHelpBanner(mainLayout);
+// Expression input
     auto *exprLayout = new QHBoxLayout();
     exprLayout->addWidget(new QLabel(tr("Expression:"), this));
     m_expressionEdit = new QLineEdit(this);

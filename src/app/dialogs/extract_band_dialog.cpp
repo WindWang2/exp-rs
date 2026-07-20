@@ -35,7 +35,9 @@ void ExtractBandDialog::setupUi()
     auto *mainLayout = qobject_cast<QVBoxLayout*>(layout());
     if (!mainLayout) {
         mainLayout = new QVBoxLayout(this);
-    }
+    
+    setupHelpBanner(mainLayout);
+}
 
     // Input section
     auto *inputGroup = new QGroupBox(tr("Input"));

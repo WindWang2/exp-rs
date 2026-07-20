@@ -30,7 +30,8 @@ void AtmosphericDialog::setupUi()
 {
     auto *mainLayout = new QVBoxLayout(this);
 
-    // --- Method group ---
+    setupHelpBanner(mainLayout);
+// --- Method group ---
     auto *methodGroup = new QGroupBox(tr("Correction Method"), this);
     auto *formLayout = new QFormLayout(methodGroup);
 

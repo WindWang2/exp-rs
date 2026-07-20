@@ -2,6 +2,7 @@
 #include "raster_processing_dialog_base.h"
 #include "async_gdal_runner.h"
 #include "async_algorithm_runner.h"
+#include "dialog_help_catalog.h"
 
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/framework/rs_operator_context.h"
@@ -16,6 +17,7 @@
 #include <QLabel>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QFrame>
 
 #include <raster/qgsrasterlayer.h>
 #include <qgsmessagelog.h>
@@ -60,13 +62,49 @@ bool RasterProcessingDialogBase::validateInputs()
     return true;
 }
 
+void RasterProcessingDialogBase::setupHelpBanner( QVBoxLayout *layout )
+{
+    if ( !layout )
+        return;
+
+    SicnuDialogHelp::applyDialogChrome( this, toolName() );
+
+    auto *frame = new QFrame( this );
+    frame->setObjectName( QStringLiteral( "rsDialogHelpBanner" ) );
+    frame->setFrameShape( QFrame::StyledPanel );
+    auto *hl = new QHBoxLayout( frame );
+    hl->setContentsMargins( 8, 6, 8, 6 );
+    auto *lbl = new QLabel( SicnuDialogHelp::shortForTool( toolName(), dialogTitle() ), frame );
+    lbl->setWordWrap( true );
+    lbl->setObjectName( QStringLiteral( "rsDialogHelpSummary" ) );
+    SicnuDialogHelp::tip( lbl, tr( "本对话框功能简介。点击「帮助」查看完整说明。" ) );
+    hl->addWidget( lbl, 1 );
+    auto *more = new QPushButton( tr( "帮助…" ), frame );
+    more->setObjectName( QStringLiteral( "rsDialogHelpBtn" ) );
+    SicnuDialogHelp::tip( more, tr( "打开本功能的说明文档。" ) );
+    connect( more, &QPushButton::clicked, this, [this]() {
+        SicnuDialogHelp::showHelpBox( this, dialogTitle(), dialogHelpHtml() );
+    } );
+    hl->addWidget( more );
+    layout->insertWidget( 0, frame );
+}
+
+QString RasterProcessingDialogBase::dialogHelpHtml() const
+{
+    return SicnuDialogHelp::htmlForTool( toolName(), dialogTitle() );
+}
+
 void RasterProcessingDialogBase::setupOutputRow(QVBoxLayout *layout)
 {
     auto *outLayout = new QHBoxLayout();
-    outLayout->addWidget(new QLabel(tr("Output:"), this));
+    auto *outLabel = new QLabel(tr("Output:"), this);
+    SicnuDialogHelp::tip( outLabel, tr( "输出 GeoTIFF 路径。运行前必须填写。" ) );
+    outLayout->addWidget(outLabel);
     m_outputEdit = new QLineEdit(this);
+    SicnuDialogHelp::tip( m_outputEdit, tr( "结果保存路径。建议使用 .tif 扩展名。" ) );
     outLayout->addWidget(m_outputEdit);
     auto *browseBtn = new QPushButton(tr("Browse..."), this);
+    SicnuDialogHelp::tip( browseBtn, tr( "浏览选择输出文件位置。" ) );
     connect(browseBtn, &QPushButton::clicked, this, &RasterProcessingDialogBase::browseOutput);
     outLayout->addWidget(browseBtn);
     layout->addLayout(outLayout);
@@ -75,8 +113,16 @@ void RasterProcessingDialogBase::setupOutputRow(QVBoxLayout *layout)
 void RasterProcessingDialogBase::setupButtonBar(QVBoxLayout *layout)
 {
     auto *btnLayout = new QHBoxLayout();
+    auto *helpBtn = new QPushButton( tr( "帮助" ), this );
+    helpBtn->setObjectName( QStringLiteral( "rsDialogHelpButton" ) );
+    SicnuDialogHelp::tip( helpBtn, tr( "查看本功能的说明文档与使用提示。" ) );
+    connect( helpBtn, &QPushButton::clicked, this, [this]() {
+        SicnuDialogHelp::showHelpBox( this, dialogTitle(), dialogHelpHtml() );
+    } );
+    btnLayout->addWidget( helpBtn );
     btnLayout->addStretch();
     m_runButton = new QPushButton(tr("Run"), this);
+    SicnuDialogHelp::tip( m_runButton, tr( "校验输入后开始处理。运行中请勿关闭对话框。" ) );
     connect(m_runButton, &QPushButton::clicked, this, [this]() {
         if (validateInputs()) {
             onRun();
@@ -84,6 +130,7 @@ void RasterProcessingDialogBase::setupButtonBar(QVBoxLayout *layout)
     });
     btnLayout->addWidget(m_runButton);
     auto *cancelBtn = new QPushButton(tr("Cancel"), this);
+    SicnuDialogHelp::tip( cancelBtn, tr( "关闭对话框（任务运行中将忽略关闭）。" ) );
     connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
     btnLayout->addWidget(cancelBtn);
     layout->addLayout(btnLayout);

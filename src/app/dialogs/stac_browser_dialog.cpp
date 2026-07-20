@@ -1,7 +1,9 @@
 // stac_browser_dialog.cpp — STAC Catalog Browser Dialog
 #include "stac_browser_dialog.h"
+#include "dialog_help_catalog.h"
 #include "agent/stac_client.h"
 
+#include <QPushButton>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -22,7 +24,9 @@ StacBrowserDialog::StacBrowserDialog(QgsMapCanvas *canvas, QWidget *parent)
 {
     setupUi();
     setWindowTitle(tr("STAC Catalog Browser"));
-    resize(800, 600);
+    
+    SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "stac_browser" ) );
+resize(800, 600);
 
     connect(m_stacClient, &StacClient::searchCompleted,
             this, &StacBrowserDialog::onSearchCompleted);
@@ -61,6 +65,16 @@ void StacBrowserDialog::setupUi()
     m_loadButton->setEnabled(false);
     connect(m_loadButton, &QPushButton::clicked, this, &StacBrowserDialog::loadSelectedAsset);
     mainLayout->addWidget(m_loadButton);
+
+    auto *helpRow = new QHBoxLayout();
+    helpRow->addStretch();
+    auto *helpBtn = new QPushButton( tr( "帮助" ), this );
+    SicnuDialogHelp::tip( helpBtn, tr( "查看本对话框说明。" ) );
+    connect( helpBtn, &QPushButton::clicked, this, [this]() {
+        SicnuDialogHelp::showToolHelp( this, QStringLiteral( "stac_browser" ), windowTitle() );
+    } );
+    helpRow->addWidget( helpBtn );
+    mainLayout->addLayout( helpRow );
 }
 
 void StacBrowserDialog::searchCatalog()

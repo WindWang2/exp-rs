@@ -32,11 +32,13 @@ add_library(qgis_app_georef STATIC
     rs_sift_task.cpp
     rs_georef_session_state.cpp
     rs_georef_task_list.cpp
+    ../dialogs/dialog_help_catalog.cpp
 )
 
 target_include_directories(qgis_app_georef PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app
     ${CMAKE_SOURCE_DIR}/src/core
     ${CMAKE_SOURCE_DIR}/src/core/geometry
     ${CMAKE_SOURCE_DIR}/src/core/proj

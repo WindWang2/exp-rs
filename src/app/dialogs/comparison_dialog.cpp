@@ -1,5 +1,6 @@
 // src/app/dialogs/comparison_dialog.cpp
 #include "comparison_dialog.h"
+#include "dialog_help_catalog.h"
 #include "widgets/comparison_widget.h"
 
 #include <qgsrasterlayer.h>
@@ -16,7 +17,9 @@ ComparisonDialog::ComparisonDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(tr("Compare Layers"));
-    resize(800, 600);
+    
+    SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "comparison" ) );
+resize(800, 600);
     setupUi();
 }
 
@@ -61,6 +64,16 @@ void ComparisonDialog::setupUi()
     if (m_rightLayerCombo->count() > 1) {
         m_rightLayerCombo->setCurrentIndex(1);
     }
+
+    auto *helpRow = new QHBoxLayout();
+    helpRow->addStretch();
+    auto *helpBtn = new QPushButton( tr( "帮助" ), this );
+    SicnuDialogHelp::tip( helpBtn, tr( "查看本对话框说明。" ) );
+    connect( helpBtn, &QPushButton::clicked, this, [this]() {
+        SicnuDialogHelp::showToolHelp( this, QStringLiteral( "comparison" ), windowTitle() );
+    } );
+    helpRow->addWidget( helpBtn );
+    mainLayout->addLayout( helpRow );
 }
 
 void ComparisonDialog::setLeftLayer(QgsRasterLayer *layer)

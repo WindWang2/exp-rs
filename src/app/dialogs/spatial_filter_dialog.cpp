@@ -19,7 +19,8 @@ void SpatialFilterDialog::setupUi()
 {
     auto *mainLayout = new QVBoxLayout(this);
 
-    auto *typeLayout = new QHBoxLayout();
+    setupHelpBanner(mainLayout);
+auto *typeLayout = new QHBoxLayout();
     typeLayout->addWidget(new QLabel(tr("Filter:"), this));
     m_filterTypeCombo = new QComboBox(this);
     m_filterTypeCombo->addItem(tr("Mean"), QStringLiteral("opencv:mean_blur"));

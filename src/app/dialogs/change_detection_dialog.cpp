@@ -27,7 +27,9 @@ void ChangeDetectionDialog::setupUi()
     auto *mainLayout = qobject_cast<QVBoxLayout*>(layout());
     if (!mainLayout) {
         mainLayout = new QVBoxLayout(this);
-    }
+    
+    setupHelpBanner(mainLayout);
+}
 
     // --- Input group ---
     auto *inputGroup = new QGroupBox(tr("Input Images"), this);

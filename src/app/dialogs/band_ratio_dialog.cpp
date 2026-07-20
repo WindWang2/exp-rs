@@ -26,7 +26,8 @@ void BandRatioDialog::setupUi()
 {
     auto *mainLayout = new QVBoxLayout(this);
 
-    // Mode selection
+    setupHelpBanner(mainLayout);
+// Mode selection
     auto *modeLayout = new QHBoxLayout();
     modeLayout->addWidget(new QLabel(tr("Mode:"), this));
     m_modeCombo = new QComboBox(this);

@@ -1,5 +1,6 @@
 // rs_obia_main_window.cpp — Phase 10B Task 10B.5
 #include "rs_obia_main_window.h"
+#include "dialogs/dialog_help_catalog.h"
 #include "sicnu_logging.h"
 
 #include "rs_obia_task.h"
@@ -63,6 +64,8 @@ RsObiaMainWindow::RsObiaMainWindow( QWidget *parent )
     , mClassDefs( defaultClassDefs() )
 {
     setWindowTitle( tr( "OBIA — Object-Based Classification" ) );
+  setWhatsThis( SicnuDialogHelp::htmlForTool( QStringLiteral( "obia" ), windowTitle() ) );
+  setToolTip( SicnuDialogHelp::shortForTool( QStringLiteral( "obia" ), windowTitle() ) );
     resize( 1200, 800 );
 
     setupUi();

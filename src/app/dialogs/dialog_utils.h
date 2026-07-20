@@ -1,6 +1,8 @@
 // dialog_utils.h — Shared utilities for dialog UI
 #pragma once
 
+#include "dialog_help_catalog.h"
+
 class QComboBox;
 
 /**

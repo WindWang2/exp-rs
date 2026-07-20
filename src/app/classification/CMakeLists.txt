@@ -38,6 +38,7 @@ qt_add_library(qgis_app_classify STATIC
     rs_classify_workflow_controller.cpp
     # Classification workflow — stepper bar + step host skeleton.
     rs_classify_stepper_bar.cpp
+    ../dialogs/dialog_help_catalog.cpp
     rs_classify_step_host.cpp
     # Classification workflow — post-process task (Step 6).
     rs_post_process_task.cpp
@@ -46,6 +47,7 @@ qt_add_library(qgis_app_classify STATIC
 target_include_directories(qgis_app_classify PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app
     ${CMAKE_SOURCE_DIR}/src/core
     ${CMAKE_SOURCE_DIR}/src/core/geometry
     ${CMAKE_SOURCE_DIR}/src/core/proj

@@ -21,7 +21,8 @@ void MosaicDialog::setupUi()
 {
     auto *mainLayout = new QVBoxLayout(this);
 
-    // --- Input files group ---
+    setupHelpBanner(mainLayout);
+// --- Input files group ---
     auto *inputGroup = new QGroupBox(tr("Input Rasters"), this);
     auto *inputLayout = new QVBoxLayout(inputGroup);
 

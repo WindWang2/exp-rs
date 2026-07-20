@@ -128,14 +128,26 @@ protected:
     void setupOutputRow(QVBoxLayout *layout);
 
     /**
-     * Create the button bar (Run + Cancel).
+     * Create the button bar (Help + Run + Cancel).
      */
     void setupButtonBar(QVBoxLayout *layout);
+
+    /**
+     * Insert a collapsible help banner (short description) at the top of \a layout.
+     * Call after setWindowTitle / once main layout exists.
+     */
+    void setupHelpBanner( QVBoxLayout *layout );
 
     /**
      * Default browse output implementation (GeoTIFF filter).
      */
     void browseOutput();
+
+    /**
+     * HTML help body for the Help button (override for custom text).
+     * Default looks up SicnuDialogHelp by toolName().
+     */
+    virtual QString dialogHelpHtml() const;
 
     /**
      * Default completion handler (enable button, log success, accept).

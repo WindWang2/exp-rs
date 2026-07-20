@@ -25,7 +25,8 @@ void SpectralIndexDialog::setupUi()
 {
     auto *mainLayout = new QVBoxLayout(this);
 
-    // Index selection — userData holds the operator enum string
+    setupHelpBanner(mainLayout);
+// Index selection — userData holds the operator enum string
     auto *idxLayout = new QHBoxLayout();
     idxLayout->addWidget(new QLabel(tr("Index:")));
     m_indexCombo = new QComboBox(this);

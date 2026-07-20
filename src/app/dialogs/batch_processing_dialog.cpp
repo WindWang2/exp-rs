@@ -1,5 +1,6 @@
 // src/app/dialogs/batch_processing_dialog.cpp
 #include "batch_processing_dialog.h"
+#include "dialog_help_catalog.h"
 
 #include <qgsapplication.h>
 #include <qgsprocessingregistry.h>
@@ -28,6 +29,8 @@ BatchProcessingDialog::BatchProcessingDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(tr("Batch Processing"));
+    
+    SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "batch_processing" ) );
     resize(600, 500);
     setupUi();
 }
@@ -100,6 +103,16 @@ void BatchProcessingDialog::setupUi()
     connect(closeBtn, &QPushButton::clicked, this, &QDialog::accept);
     btnLayout->addWidget(closeBtn);
     mainLayout->addLayout(btnLayout);
+
+    auto *helpRow = new QHBoxLayout();
+    helpRow->addStretch();
+    auto *helpBtn = new QPushButton( tr( "帮助" ), this );
+    SicnuDialogHelp::tip( helpBtn, tr( "查看本对话框说明。" ) );
+    connect( helpBtn, &QPushButton::clicked, this, [this]() {
+        SicnuDialogHelp::showToolHelp( this, QStringLiteral( "batch_processing" ), windowTitle() );
+    } );
+    helpRow->addWidget( helpBtn );
+    mainLayout->addLayout( helpRow );
 }
 
 void BatchProcessingDialog::setAlgorithmId(const QString &algorithmId)

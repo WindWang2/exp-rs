@@ -27,7 +27,8 @@ void ContrastStretchDialog::setupUi()
 {
     auto *mainLayout = new QVBoxLayout(this);
 
-    // Method selection
+    setupHelpBanner(mainLayout);
+// Method selection
     auto *methodLayout = new QHBoxLayout();
     methodLayout->addWidget(new QLabel(tr("Method:"), this));
     m_methodCombo = new QComboBox(this);
