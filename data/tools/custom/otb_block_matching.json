@@ -4,12 +4,49 @@
   "group": "Stereo",
   "group_id": "stereo",
   "command": "otbcli_BlockMatching",
-  "tags": ["otb", "stereo", "disparity", "block matching", "custom"],
-  "parameters": [
-    {"name": "LEFT", "type": "raster", "description": "Left epipolar image"},
-    {"name": "RIGHT", "type": "raster", "description": "Right epipolar image"},
-    {"name": "OUTPUT", "type": "output_raster", "description": "Disparity map output"},
-    {"name": "WINDOW", "type": "number", "description": "Correlation window radius", "default": 4}
+  "tags": [
+    "otb",
+    "stereo",
+    "disparity",
+    "block matching",
+    "custom"
   ],
-  "args": ["-io.inleft", "{LEFT}", "-io.inright", "{RIGHT}", "-io.out", "{OUTPUT}", "-bm.metric", "ssd", "-bm.radius", "{WINDOW}"]
+  "parameters": [
+    {
+      "name": "LEFT",
+      "type": "raster",
+      "description": "Left epipolar image"
+    },
+    {
+      "name": "RIGHT",
+      "type": "raster",
+      "description": "Right epipolar image"
+    },
+    {
+      "name": "OUTPUT",
+      "type": "output_raster",
+      "description": "Disparity map output"
+    },
+    {
+      "name": "WINDOW",
+      "type": "number",
+      "description": "Correlation window radius",
+      "default": 4
+    }
+  ],
+  "args": [
+    "-io.inleft",
+    "{LEFT}",
+    "-io.inright",
+    "{RIGHT}",
+    "-io.out",
+    "{OUTPUT}",
+    "-bm.metric",
+    "ssd",
+    "-bm.radius",
+    "{WINDOW}"
+  ],
+  "short_description": "OTB 块匹配",
+  "description": "OTB 块匹配",
+  "help": "<p><b>OTB Block Matching (Stereo)</b></p><p>立体像对块匹配，生成视差相关结果。</p><p>CLI: <code>otbcli_BlockMatching</code></p>"
 }

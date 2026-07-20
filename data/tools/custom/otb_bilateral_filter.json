@@ -4,11 +4,42 @@
   "group": "Image Filtering",
   "group_id": "filtering",
   "command": "otbcli_Smoothing",
-  "tags": ["otb", "filter", "smoothing", "gaussian", "custom"],
-  "parameters": [
-    {"name": "INPUT", "type": "raster", "description": "Input raster"},
-    {"name": "OUTPUT", "type": "output_raster", "description": "Filtered output raster"},
-    {"name": "SPATIAL", "type": "number", "description": "Gaussian spatial standard deviation (pixels)", "default": 3.0}
+  "tags": [
+    "otb",
+    "filter",
+    "smoothing",
+    "gaussian",
+    "custom"
   ],
-  "args": ["-in", "{INPUT}", "-out", "{OUTPUT}", "-type", "gaussian", "-type.gaussian.stdev", "{SPATIAL}"]
+  "parameters": [
+    {
+      "name": "INPUT",
+      "type": "raster",
+      "description": "Input raster"
+    },
+    {
+      "name": "OUTPUT",
+      "type": "output_raster",
+      "description": "Filtered output raster"
+    },
+    {
+      "name": "SPATIAL",
+      "type": "number",
+      "description": "Gaussian spatial standard deviation (pixels)",
+      "default": 3.0
+    }
+  ],
+  "args": [
+    "-in",
+    "{INPUT}",
+    "-out",
+    "{OUTPUT}",
+    "-type",
+    "gaussian",
+    "-type.gaussian.stdev",
+    "{SPATIAL}"
+  ],
+  "short_description": "OTB 双边滤波",
+  "description": "OTB 双边滤波",
+  "help": "<p><b>OTB Smoothing (Gaussian)</b></p><p>边缘保持的平滑滤波，适合在保边界同时降噪。</p><p>CLI: <code>otbcli_Smoothing</code></p>"
 }

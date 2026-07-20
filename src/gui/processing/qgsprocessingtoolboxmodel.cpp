@@ -26,6 +26,7 @@
 
 #include <QMimeData>
 #include <QPalette>
+#include <QRegularExpression>
 #include <QString>
 
 #include "moc_qgsprocessingtoolboxmodel.cpp"
@@ -406,9 +407,27 @@ bool QgsProcessingToolboxModel::isTopLevelProvider( const QString &providerId )
 
 QString QgsProcessingToolboxModel::toolTipForAlgorithm( const QgsProcessingAlgorithm *algorithm )
 {
-  return u"<p><b>%1</b></p>%2<p>%3</p>%4"_s.arg(
+  // Prefer shortDescription; fall back to a truncated plain shortHelpString so
+  // toolbox hover always shows useful tool intro text when help is available.
+  QString summary = algorithm->shortDescription();
+  if ( summary.isEmpty() )
+  {
+    summary = algorithm->shortHelpString();
+    // Strip simple HTML tags for a compact hover tip.
+    summary.replace( QRegularExpression( QStringLiteral( "<[^>]+>" ) ), QString() );
+    summary = summary.simplified();
+    if ( summary.size() > 280 )
+      summary = summary.left( 277 ) + QChar( 0x2026 );
+  }
+
+  QString groupLine;
+  if ( !algorithm->group().isEmpty() )
+    groupLine = u"<p><i>%1</i></p>"_s.arg( algorithm->group() );
+
+  return u"<p><b>%1</b></p>%2%3<p>%4</p>%5"_s.arg(
     algorithm->displayName(),
-    !algorithm->shortDescription().isEmpty() ? u"<p>%1</p>"_s.arg( algorithm->shortDescription() ) : QString(),
+    groupLine,
+    !summary.isEmpty() ? u"<p>%1</p>"_s.arg( summary ) : QString(),
     QObject::tr( "Algorithm ID: ‘%1’" ).arg( u"<i>%1</i>"_s.arg( algorithm->id() ) ),
     ( algorithm->flags() & Qgis::ProcessingAlgorithmFlag::KnownIssues ) ? u"<b style=\"color:red\">%1</b>"_s.arg( QObject::tr( "Warning: Algorithm has known issues" ) ) : QString()
   );

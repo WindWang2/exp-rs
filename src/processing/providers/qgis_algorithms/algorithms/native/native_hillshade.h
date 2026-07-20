@@ -2,6 +2,7 @@
 #pragma once
 
 #include <processing/qgsprocessingalgorithm.h>
+#include "algorithm_help_catalog.h"
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsrasterlayer.h>
@@ -27,6 +28,15 @@ public:
     QString group() const override { return QObject::tr( "Raster analysis" ); }
     QString groupId() const override { return QStringLiteral( "rasteranalysis" ); }
     QStringList tags() const override { return { QObject::tr( "hillshade" ), QObject::tr( "terrain" ), QObject::tr( "dem" ), QObject::tr( "shading" ) }; }
+    QString shortDescription() const override
+    {
+        return SicnuAlgorithmHelp::shortDescription( name(), displayName() );
+    }
+    QString shortHelpString() const override
+    {
+        return SicnuAlgorithmHelp::shortHelpString( name(), displayName(), QString(), tags() );
+    }
+
     QgsProcessingAlgorithm *createInstance() const override { return new QgsHillshadeAlgorithm(); }
 
 protected:

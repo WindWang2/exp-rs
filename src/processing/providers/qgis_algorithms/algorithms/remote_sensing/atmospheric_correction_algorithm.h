@@ -2,6 +2,7 @@
 #pragma once
 
 #include <processing/qgsprocessingalgorithm.h>
+#include "algorithm_help_catalog.h"
 
 /**
  * Processing algorithm wrapper for AtmosphericCorrection::* functions.
@@ -23,6 +24,11 @@ public:
         return { QObject::tr( "atmospheric" ), QObject::tr( "correction" ), QObject::tr( "dos" ),
                  QObject::tr( "radiance" ), QObject::tr( "reflectance" ), QObject::tr( "remote sensing" ) };
     }
+    QString shortDescription() const override
+    {
+        return SicnuAlgorithmHelp::shortDescription( name(), displayName() );
+    }
+
 
     QgsProcessingAlgorithm *createInstance() const override { return new AtmosphericCorrectionAlgorithm(); }
 

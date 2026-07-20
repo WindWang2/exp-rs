@@ -13,8 +13,21 @@
 #include <QLabel>
 #include <QAction>
 #include <QKeySequence>
+#include <QList>
+#include <QPair>
 
 #include <qgsrasterlayer.h>
+
+
+namespace {
+void tip(QAction *a, const QString &t)
+{
+    if (!a) return;
+    a->setToolTip(t);
+    a->setStatusTip(t);
+    a->setWhatsThis(t);
+}
+} // namespace
 
 void QgisDesktopWindow::setupMenu()
 {
@@ -350,6 +363,72 @@ void QgisDesktopWindow::setupToolbars()
     rsToolBar->addAction(QIcon(":/icons/r_ster_calc"), tr("Raster Calculator"), this, [this](){ openProcessingAlgorithm("qgis_algorithms:raster_calculator"); })->setToolTip(tr("Raster Calculator"));
     rsToolBar->addAction(QIcon(":/icons/su_ervised"), tr("Supervised Classification"), this, &QgisDesktopWindow::openClassificationWindow)->setToolTip(tr("Supervised Classification"));
     rsToolBar->addAction(QIcon(":/icons/b_nd_m_th"), tr("Band Math"), this, &QgisDesktopWindow::openBandMathDialog)->setToolTip(tr("Band Math Expression"));
+
+    // Detailed tooltips for common actions
+    auto setTipByText = [this](const QString &label, const QString &tipText) {
+        for (QAction *a : findChildren<QAction *>()) {
+            if (!a) continue;
+            if (a->text().remove(QLatin1Char('&')) == label) {
+                a->setToolTip(tipText);
+                a->setStatusTip(tipText);
+                a->setWhatsThis(tipText);
+            }
+        }
+    };
+    const QList<QPair<QString, QString>> tips = {
+        { tr("New Project"), tr("创建空白工程，清除当前图层与视图状态。") },
+        { tr("Open Project..."), tr("打开已保存的工程文件。") },
+        { tr("Save Project"), tr("保存当前工程到已有路径。") },
+        { tr("Save Project As..."), tr("将工程另存为新文件。") },
+        { tr("Import Layer..."), tr("导入栅格或矢量图层到工程。") },
+        { tr("Browse STAC Catalog..."), tr("浏览 STAC 目录检索遥感数据。") },
+        { tr("Quit"), tr("退出应用程序。") },
+        { tr("Zoom In"), tr("放大地图视图。") },
+        { tr("Zoom Out"), tr("缩小地图视图。") },
+        { tr("Pan Map"), tr("平移地图。") },
+        { tr("Full Extent"), tr("缩放到所有图层范围。") },
+        { tr("Identify Features"), tr("点击地图查询要素/像元属性。") },
+        { tr("Measure Distance"), tr("量测距离。") },
+        { tr("Measure Area"), tr("量测面积。") },
+        { tr("Toggle Editing"), tr("开启/关闭当前矢量图层编辑。") },
+        { tr("Save Edits"), tr("保存矢量编辑。") },
+        { tr("Select Features"), tr("矩形选择要素。") },
+        { tr("Delete Selected"), tr("删除选中要素。") },
+        { tr("Open Attribute Table..."), tr("打开属性表。") },
+        { tr("Add Feature"), tr("数字化添加新要素。") },
+        { tr("Vertex Tool"), tr("编辑节点。") },
+        { tr("Processing Toolbox"), tr("打开处理工具箱，运行 GDAL/OTB/内置算法。") },
+        { tr("Image Enhancement..."), tr("影像增强与显示拉伸。") },
+        { tr("Band Math..."), tr("波段运算表达式计算。") },
+        { tr("Atmospheric Correction..."), tr("大气校正对话框。") },
+        { tr("Vegetation Index..."), tr("植被/光谱指数计算。") },
+        { tr("Mosaic..."), tr("多景影像镶嵌。") },
+        { tr("Change Detection..."), tr("变化检测分析。") },
+        { tr("Supervised Classification (Pixel-based)..."), tr("打开监督分类窗口（像元级）。") },
+        { tr("Object-based Classification (OBIA)..."), tr("面向对象分类 (OBIA)。") },
+        { tr("Image 2 Image"), tr("双影像配准：SRC|REF，支持 SIFT。") },
+        { tr("Image 2 Map"), tr("影像对主地图配准，支持 RPC。") },
+        { tr("Help Contents"), tr("打开帮助文档。") },
+    };
+    for (const auto &p : tips)
+        setTipByText(p.first, p.second);
+
+    // Any remaining actions without tip: use cleaned label
+    for (QAction *a : findChildren<QAction *>()) {
+        if (!a || a->isSeparator()) continue;
+        if (!a->toolTip().isEmpty() && a->toolTip() != a->text()) continue;
+        const QString t = a->text().remove(QLatin1Char('&')).trimmed();
+        if (t.isEmpty()) continue;
+        if (a->toolTip().isEmpty() || a->toolTip() == a->text() || a->toolTip() == t)
+        {
+            // keep existing detailed tips; only fill empty
+        }
+        if (a->toolTip().isEmpty()) {
+            a->setToolTip(t);
+            a->setStatusTip(t);
+        }
+    }
+
 }
 void QgisDesktopWindow::setupStatusBar()
 {

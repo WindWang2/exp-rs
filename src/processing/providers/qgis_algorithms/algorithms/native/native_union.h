@@ -2,6 +2,7 @@
 #pragma once
 
 #include <processing/qgsprocessingalgorithm.h>
+#include "algorithm_help_catalog.h"
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsfeature.h>
@@ -21,6 +22,15 @@ public:
     QString group() const override { return QObject::tr( "Vector overlay" ); }
     QString groupId() const override { return QStringLiteral( "vectoroverlay" ); }
     QStringList tags() const override { return { QObject::tr( "union" ), QObject::tr( "merge" ), QObject::tr( "combine" ) }; }
+    QString shortDescription() const override
+    {
+        return SicnuAlgorithmHelp::shortDescription( name(), displayName() );
+    }
+    QString shortHelpString() const override
+    {
+        return SicnuAlgorithmHelp::shortHelpString( name(), displayName(), QString(), tags() );
+    }
+
     QgsProcessingAlgorithm *createInstance() const override { return new QgsUnionAlgorithm(); }
 
 protected:

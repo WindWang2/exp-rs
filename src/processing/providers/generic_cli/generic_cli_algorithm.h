@@ -35,6 +35,8 @@ public:
     QString group() const override;
     QString groupId() const override;
     QStringList tags() const override;
+    QString shortDescription() const override;
+    QString shortHelpString() const override;
     QgsProcessingAlgorithm *createInstance() const override;
 
 protected:

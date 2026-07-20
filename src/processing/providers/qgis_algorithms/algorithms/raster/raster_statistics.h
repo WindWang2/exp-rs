@@ -2,6 +2,7 @@
 #pragma once
 
 #include <processing/qgsprocessingalgorithm.h>
+#include "algorithm_help_catalog.h"
 
 class RasterStatisticsAlgorithm : public QgsProcessingAlgorithm
 {
@@ -16,6 +17,11 @@ public:
     QString shortHelpString() const override;
     QVariantMap metadata() const override;
     void initAlgorithm( const QVariantMap &configuration = QVariantMap() ) override;
+    QString shortDescription() const override
+    {
+        return SicnuAlgorithmHelp::shortDescription( name(), displayName() );
+    }
+
 
     QgsProcessingAlgorithm *createInstance() const override { return new RasterStatisticsAlgorithm(); }
 

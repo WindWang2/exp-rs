@@ -4,6 +4,8 @@
 #include <processing/qgsprocessingalgorithm.h>
 #include <QProcess>
 
+#include "algorithm_help_catalog.h"
+
 class OtbToolWrapper : public QgsProcessingAlgorithm
 {
 public:
@@ -17,6 +19,15 @@ public:
     virtual QStringList buildArgs(const QVariantMap &parameters,
                                   QgsProcessingContext &context,
                                   QgsProcessingFeedback *feedback) = 0;
+
+    QString shortDescription() const override
+    {
+        return SicnuAlgorithmHelp::shortDescription( name(), displayName() );
+    }
+    QString shortHelpString() const override
+    {
+        return SicnuAlgorithmHelp::shortHelpString( name(), displayName(), applicationName(), tags() );
+    }
 
     // Common implementation
     QVariantMap processAlgorithm(const QVariantMap &parameters,

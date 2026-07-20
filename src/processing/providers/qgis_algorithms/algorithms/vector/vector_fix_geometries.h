@@ -2,6 +2,7 @@
 #pragma once
 
 #include <processing/qgsprocessingalgorithm.h>
+#include "algorithm_help_catalog.h"
 
 class VectorFixGeometriesAlgorithm : public QgsProcessingAlgorithm
 {
@@ -12,6 +13,15 @@ public:
     QString group() const override { return QObject::tr("Vector geometry"); }
     QString groupId() const override { return QStringLiteral("vectorgeometry"); }
     QStringList tags() const override { return { QObject::tr("fix"), QObject::tr("repair"), QObject::tr("valid") }; }
+    QString shortDescription() const override
+    {
+        return SicnuAlgorithmHelp::shortDescription( name(), displayName() );
+    }
+    QString shortHelpString() const override
+    {
+        return SicnuAlgorithmHelp::shortHelpString( name(), displayName(), QString(), tags() );
+    }
+
     QgsProcessingAlgorithm *createInstance() const override { return new VectorFixGeometriesAlgorithm(); }
 
 protected:

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <processing/qgsprocessingalgorithm.h>
+#include "algorithm_help_catalog.h"
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsfeature.h>
@@ -21,6 +22,15 @@ public:
     QString group() const override { return QObject::tr( "Vector selection" ); }
     QString groupId() const override { return QStringLiteral( "vectorselection" ); }
     QStringList tags() const override { return { QObject::tr( "extract" ), QObject::tr( "filter" ), QObject::tr( "select" ), QObject::tr( "attribute" ) }; }
+    QString shortDescription() const override
+    {
+        return SicnuAlgorithmHelp::shortDescription( name(), displayName() );
+    }
+    QString shortHelpString() const override
+    {
+        return SicnuAlgorithmHelp::shortHelpString( name(), displayName(), QString(), tags() );
+    }
+
     QgsProcessingAlgorithm *createInstance() const override { return new QgsExtractByAttributeAlgorithm(); }
 
 protected:

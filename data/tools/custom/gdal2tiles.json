@@ -4,10 +4,29 @@
   "group": "Raster Conversion",
   "group_id": "rasterconversion",
   "command": "gdal2tiles.py",
-  "tags": ["gdal", "tiles", "web", "custom"],
-  "parameters": [
-    {"name": "INPUT", "type": "raster", "description": "Input raster"},
-    {"name": "OUTPUT", "type": "string", "description": "Output directory for web map tiles (created if missing)"}
+  "tags": [
+    "gdal",
+    "tiles",
+    "web",
+    "custom"
   ],
-  "args": ["{INPUT}", "{OUTPUT}"]
+  "parameters": [
+    {
+      "name": "INPUT",
+      "type": "raster",
+      "description": "Input raster"
+    },
+    {
+      "name": "OUTPUT",
+      "type": "string",
+      "description": "Output directory for web map tiles (created if missing)"
+    }
+  ],
+  "args": [
+    "{INPUT}",
+    "{OUTPUT}"
+  ],
+  "short_description": "GDAL 瓦片",
+  "description": "GDAL 瓦片",
+  "help": "<p><b>GDAL2Tiles (Web Map Tiles)</b></p><p>将栅格切成 Web 地图瓦片（gdal2tiles）。</p><p>CLI: <code>gdal2tiles.py</code></p>"
 }

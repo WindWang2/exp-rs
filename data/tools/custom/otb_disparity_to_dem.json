@@ -4,11 +4,40 @@
   "group": "Stereo",
   "group_id": "stereo",
   "command": "otbcli_DisparityMapToElevationMap",
-  "tags": ["otb", "stereo", "dem", "elevation", "custom"],
-  "parameters": [
-    {"name": "DISPARITY", "type": "raster", "description": "Input disparity map"},
-    {"name": "OUTPUT", "type": "output_raster", "description": "Elevation map output"},
-    {"name": "ELEVATION", "type": "number", "description": "Mean elevation (meters)", "default": 0.0}
+  "tags": [
+    "otb",
+    "stereo",
+    "dem",
+    "elevation",
+    "custom"
   ],
-  "args": ["-io.in", "{DISPARITY}", "-io.out", "{OUTPUT}", "-elev.default", "{ELEVATION}"]
+  "parameters": [
+    {
+      "name": "DISPARITY",
+      "type": "raster",
+      "description": "Input disparity map"
+    },
+    {
+      "name": "OUTPUT",
+      "type": "output_raster",
+      "description": "Elevation map output"
+    },
+    {
+      "name": "ELEVATION",
+      "type": "number",
+      "description": "Mean elevation (meters)",
+      "default": 0.0
+    }
+  ],
+  "args": [
+    "-io.in",
+    "{DISPARITY}",
+    "-io.out",
+    "{OUTPUT}",
+    "-elev.default",
+    "{ELEVATION}"
+  ],
+  "short_description": "视差转 DEM",
+  "description": "视差转 DEM",
+  "help": "<p><b>OTB Disparity to DEM</b></p><p>将视差图转换为数字高程模型。</p><p>CLI: <code>otbcli_DisparityMapToElevationMap</code></p>"
 }

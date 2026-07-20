@@ -2,6 +2,7 @@
 #pragma once
 
 #include <processing/qgsprocessingalgorithm.h>
+#include "algorithm_help_catalog.h"
 
 class VectorReprojectAlgorithm : public QgsProcessingAlgorithm
 {
@@ -17,6 +18,15 @@ public:
     QString group() const override { return QObject::tr( "Vector General" ); }
     QString groupId() const override { return QStringLiteral( "vectorgeneral" ); }
     QStringList tags() const override { return { QObject::tr( "reproject" ), QObject::tr( "transform" ), QObject::tr( "crs" ), QObject::tr( "projection" ) }; }
+    QString shortDescription() const override
+    {
+        return SicnuAlgorithmHelp::shortDescription( name(), displayName() );
+    }
+    QString shortHelpString() const override
+    {
+        return SicnuAlgorithmHelp::shortHelpString( name(), displayName(), QString(), tags() );
+    }
+
     QgsProcessingAlgorithm *createInstance() const override { return new VectorReprojectAlgorithm(); }
 
 protected:

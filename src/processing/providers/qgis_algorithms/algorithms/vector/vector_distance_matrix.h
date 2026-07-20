@@ -2,6 +2,7 @@
 #pragma once
 
 #include <processing/qgsprocessingalgorithm.h>
+#include "algorithm_help_catalog.h"
 
 class VectorDistanceMatrixAlgorithm : public QgsProcessingAlgorithm
 {
@@ -21,6 +22,15 @@ public:
     QString group() const override { return QObject::tr( "Vector Analysis" ); }
     QString groupId() const override { return QStringLiteral( "vectoranalysis" ); }
     QStringList tags() const override { return { QObject::tr( "distance" ), QObject::tr( "matrix" ), QObject::tr( "proximity" ), QObject::tr( "pairwise" ) }; }
+    QString shortDescription() const override
+    {
+        return SicnuAlgorithmHelp::shortDescription( name(), displayName() );
+    }
+    QString shortHelpString() const override
+    {
+        return SicnuAlgorithmHelp::shortHelpString( name(), displayName(), QString(), tags() );
+    }
+
     QgsProcessingAlgorithm *createInstance() const override { return new VectorDistanceMatrixAlgorithm(); }
 
 protected:

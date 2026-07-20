@@ -2,6 +2,7 @@
 #pragma once
 
 #include <processing/qgsprocessingalgorithm.h>
+#include "algorithm_help_catalog.h"
 
 /**
  * Processing algorithm wrapper for SpectralIndices::* functions.
@@ -24,6 +25,11 @@ public:
                  QObject::tr( "evi" ), QObject::tr( "savi" ), QObject::tr( "ndwi" ),
                  QObject::tr( "ndbi" ), QObject::tr( "mndwi" ), QObject::tr( "remote sensing" ) };
     }
+    QString shortDescription() const override
+    {
+        return SicnuAlgorithmHelp::shortDescription( name(), displayName() );
+    }
+
 
     QgsProcessingAlgorithm *createInstance() const override { return new SpectralIndexAlgorithm(); }
 

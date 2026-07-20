@@ -2,6 +2,7 @@
 #pragma once
 
 #include <processing/qgsprocessingalgorithm.h>
+#include "algorithm_help_catalog.h"
 
 class VectorBufferAlgorithm : public QgsProcessingAlgorithm
 {
@@ -19,6 +20,15 @@ public:
     QString group() const override { return QObject::tr( "Vector Geometry" ); }
     QString groupId() const override { return QStringLiteral( "vectorgeometry" ); }
     QStringList tags() const override { return { QObject::tr( "buffer" ), QObject::tr( "distance" ), QObject::tr( "polygon" ) }; }
+    QString shortDescription() const override
+    {
+        return SicnuAlgorithmHelp::shortDescription( name(), displayName() );
+    }
+    QString shortHelpString() const override
+    {
+        return SicnuAlgorithmHelp::shortHelpString( name(), displayName(), QString(), tags() );
+    }
+
     QgsProcessingAlgorithm *createInstance() const override { return new VectorBufferAlgorithm(); }
 
 protected:

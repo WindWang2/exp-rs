@@ -4,11 +4,42 @@
   "group": "Image Filtering",
   "group_id": "filtering",
   "command": "otbcli_Smoothing",
-  "tags": ["otb", "filter", "mean", "smoothing", "custom"],
-  "parameters": [
-    {"name": "INPUT", "type": "raster", "description": "Input raster"},
-    {"name": "OUTPUT", "type": "output_raster", "description": "Filtered output raster"},
-    {"name": "RADIUS", "type": "number", "description": "Filter radius (pixels)", "default": 2}
+  "tags": [
+    "otb",
+    "filter",
+    "mean",
+    "smoothing",
+    "custom"
   ],
-  "args": ["-in", "{INPUT}", "-out", "{OUTPUT}", "-type", "mean", "-type.mean.radius", "{RADIUS}"]
+  "parameters": [
+    {
+      "name": "INPUT",
+      "type": "raster",
+      "description": "Input raster"
+    },
+    {
+      "name": "OUTPUT",
+      "type": "output_raster",
+      "description": "Filtered output raster"
+    },
+    {
+      "name": "RADIUS",
+      "type": "number",
+      "description": "Filter radius (pixels)",
+      "default": 2
+    }
+  ],
+  "args": [
+    "-in",
+    "{INPUT}",
+    "-out",
+    "{OUTPUT}",
+    "-type",
+    "mean",
+    "-type.mean.radius",
+    "{RADIUS}"
+  ],
+  "short_description": "OTB 均值滤波",
+  "description": "OTB 均值滤波",
+  "help": "<p><b>OTB Mean Filter</b></p><p>对输入栅格做均值平滑，半径以像素计。常用于降噪。</p><p>CLI: <code>otbcli_Smoothing</code></p>"
 }

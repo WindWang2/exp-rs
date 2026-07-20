@@ -1,5 +1,6 @@
 // generic_cli_algorithm.cpp — Generic CLI tool wrapper for user-defined tools
 #include "generic_cli_algorithm.h"
+#include "algorithm_help_catalog.h"
 #include "tools/tool_path_manager.h"
 
 #include <QJsonArray>
@@ -66,6 +67,48 @@ QStringList GenericCliAlgorithm::tags() const
     for (const QJsonValue &tag : tagArray)
         tags.append(tag.toString());
     return tags;
+}
+
+QString GenericCliAlgorithm::shortDescription() const
+{
+    const QString fromJson = m_config.value( QStringLiteral( "short_description" ) ).toString();
+    if ( !fromJson.isEmpty() )
+        return fromJson;
+    const QString desc = m_config.value( QStringLiteral( "description" ) ).toString();
+    if ( !desc.isEmpty() )
+        return desc;
+    return SicnuAlgorithmHelp::shortDescription( name(), displayName() );
+}
+
+QString GenericCliAlgorithm::shortHelpString() const
+{
+    const QString help = m_config.value( QStringLiteral( "help" ) ).toString();
+    if ( !help.isEmpty() )
+        return help;
+    const QString desc = m_config.value( QStringLiteral( "description" ) ).toString();
+    QString body = desc;
+    if ( body.isEmpty() )
+        return SicnuAlgorithmHelp::shortHelpString( name(), displayName(),
+                                                    m_config.value( QStringLiteral( "command" ) ).toString(),
+                                                    tags() );
+    // Append parameter descriptions from JSON
+    QStringList paramLines;
+    const QJsonArray params = m_config.value( QStringLiteral( "parameters" ) ).toArray();
+    for ( const QJsonValue &v : params )
+    {
+        const QJsonObject p = v.toObject();
+        const QString n = p.value( QStringLiteral( "name" ) ).toString();
+        const QString d = p.value( QStringLiteral( "description" ) ).toString();
+        if ( !n.isEmpty() )
+            paramLines << QStringLiteral( "• <b>%1</b>: %2" ).arg( n, d.isEmpty() ? QObject::tr( "（无描述）" ) : d );
+    }
+    QString html = QObject::tr( "<p><b>%1</b></p><p>%2</p>" ).arg( displayName(), body );
+    if ( !paramLines.isEmpty() )
+        html += QObject::tr( "<p><b>参数</b></p><p>%1</p>" ).arg( paramLines.join( QStringLiteral( "<br/>" ) ) );
+    const QString cmd = m_config.value( QStringLiteral( "command" ) ).toString();
+    if ( !cmd.isEmpty() )
+        html += QObject::tr( "<p>CLI: <code>%1</code></p>" ).arg( cmd );
+    return html;
 }
 
 QgsProcessingAlgorithm *GenericCliAlgorithm::createInstance() const

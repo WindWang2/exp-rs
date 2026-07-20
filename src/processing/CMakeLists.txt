@@ -1,4 +1,5 @@
 add_library(sicnu_processing SHARED
+    algorithm_help_catalog.cpp
     tools/tool_path_manager.cpp
     tools/cli_tool_discovery.cpp
 

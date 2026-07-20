@@ -2,6 +2,7 @@
 #pragma once
 
 #include <processing/qgsprocessingalgorithm.h>
+#include "algorithm_help_catalog.h"
 
 class VectorNearestNeighborAlgorithm : public QgsProcessingAlgorithm
 {
@@ -19,6 +20,15 @@ public:
     QString group() const override { return QObject::tr( "Vector Analysis" ); }
     QString groupId() const override { return QStringLiteral( "vectoranalysis" ); }
     QStringList tags() const override { return { QObject::tr( "nearest" ), QObject::tr( "neighbor" ), QObject::tr( "distance" ), QObject::tr( "proximity" ), QObject::tr( "closest" ) }; }
+    QString shortDescription() const override
+    {
+        return SicnuAlgorithmHelp::shortDescription( name(), displayName() );
+    }
+    QString shortHelpString() const override
+    {
+        return SicnuAlgorithmHelp::shortHelpString( name(), displayName(), QString(), tags() );
+    }
+
     QgsProcessingAlgorithm *createInstance() const override { return new VectorNearestNeighborAlgorithm(); }
 
 protected:
