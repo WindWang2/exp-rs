@@ -1,8 +1,10 @@
 #include "qgsgeoref_image_to_map_window.h"
 
 #include <QIcon>
+#include <QLabel>
 #include <QMenu>
 #include <QSplitter>
+#include <QStringList>
 #include <QToolBar>
 #include <QWidget>
 
@@ -10,6 +12,7 @@
 #include "qgsgcptransformer.h"
 #include "qgslayertree.h"
 #include "qgsmapcanvas.h"
+#include "qgsmaplayer.h"
 #include "qgsproject.h"
 
 QgsGeorefImageToMapWindow::QgsGeorefImageToMapWindow( QgisInterface *iface, QWidget *parent )
@@ -51,18 +54,31 @@ void QgsGeorefImageToMapWindow::setupCentralWidget()
   mSrcCanvas->setObjectName( QStringLiteral( "rsGeorefI2MSrcCanvas" ) );
   mSrcCanvas->setCanvasColor( Qt::white );
   mSrcCanvas->setToolTip( tr(
-    "源影像画布 (SRC)：加载待校正影像。\n"
+    "源影像画布 (SRC / Warp)：加载待校正影像。\n"
     "Add GCP 时先在此点击源点，再在下方 Map 点击同名位置。" ) );
 
   mDstCanvas = new QgsMapCanvas( this );
   mDstCanvas->setObjectName( QStringLiteral( "rsGeorefI2MMapCanvas" ) );
   mDstCanvas->setCanvasColor( QColor( 245, 245, 245 ) );
   mDstCanvas->setToolTip( tr(
-    "地图预览 (Map)：镜像主工程中可见图层。\n"
+    "地图预览 (Map / Base)：镜像主工程中可见图层。\n"
     "Add GCP 时在此点击与源点对应的地图位置（地理坐标），完成一对控制点。" ) );
 
-  splitter->addWidget( mSrcCanvas );
-  splitter->addWidget( mDstCanvas );
+  QWidget *srcPanel = makeCanvasPanel(
+    mSrcCanvas, &mSrcLayerLabel,
+    tr( "源 (Warp)" ),
+    QStringLiteral( "rsGeorefI2MSrcPanel" ),
+    QStringLiteral( "rsGeorefI2MSrcLayerLabel" ) );
+  QWidget *mapPanel = makeCanvasPanel(
+    mDstCanvas, &mDstLayerLabel,
+    tr( "基准 (Base)" ),
+    QStringLiteral( "rsGeorefI2MMapPanel" ),
+    QStringLiteral( "rsGeorefI2MMapLayerLabel" ) );
+  updateSourceLayerCaption();
+  updateDestLayerCaption( QString() );
+
+  splitter->addWidget( srcPanel );
+  splitter->addWidget( mapPanel );
   splitter->setStretchFactor( 0, 1 );
   splitter->setStretchFactor( 1, 1 );
   setCentralWidget( splitter );
@@ -148,6 +164,35 @@ void QgsGeorefImageToMapWindow::refreshMapLayersFromProject()
   else if ( QgsProject::instance()->crs().isValid() )
     mDstCanvas->setDestinationCrs( QgsProject::instance()->crs() );
   mDstCanvas->refresh();
+
+  // Caption: list visible project layer names as the Map / Base stack.
+  if ( layers.isEmpty() )
+  {
+    updateDestLayerCaption( QString() );
+  }
+  else
+  {
+    QStringList names;
+    QStringList tipLines;
+    names.reserve( layers.size() );
+    for ( QgsMapLayer *l : layers )
+    {
+      if ( !l )
+        continue;
+      names << l->name();
+      tipLines << QStringLiteral( "%1\n  %2" ).arg( l->name(), l->source() );
+    }
+    QString display = names.join( QStringLiteral( ", " ) );
+    constexpr int kMaxCaption = 80;
+    if ( display.size() > kMaxCaption )
+      display = display.left( kMaxCaption - 1 ) + QChar( 0x2026 ); // …
+    updateDestLayerCaption(
+      display,
+      tr( "地图基准 (Base) — 主工程可见图层 (%1):\n%2" )
+        .arg( names.size() )
+        .arg( tipLines.join( QLatin1Char( '\n' ) ) ) );
+  }
+  updateSourceLayerCaption();
 }
 
 void QgsGeorefImageToMapWindow::onTransformMethodChangedExtra()

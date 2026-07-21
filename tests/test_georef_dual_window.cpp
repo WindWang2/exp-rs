@@ -12,6 +12,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QLabel>
 #include <QSplitter>
 
 #include <cstdlib>
@@ -60,6 +61,14 @@ TEST_CASE( "I2I window has horizontal twin canvases", "[georef][dual]" )
   auto *tasks = w.findChild<RsGeorefTaskList *>( QStringLiteral( "rsGeorefTaskList" ) );
   REQUIRE( tasks != nullptr );
   REQUIRE( tasks->entryCount() == 0 );
+
+  // Warp / Base captions above each canvas
+  auto *srcLabel = w.findChild<QLabel *>( QStringLiteral( "rsSrcLayerLabel" ) );
+  auto *refLabel = w.findChild<QLabel *>( QStringLiteral( "rsRefLayerLabel" ) );
+  REQUIRE( srcLabel != nullptr );
+  REQUIRE( refLabel != nullptr );
+  REQUIRE( srcLabel->text().contains( QStringLiteral( "Warp" ) ) );
+  REQUIRE( refLabel->text().contains( QStringLiteral( "Base" ) ) );
 }
 
 TEST_CASE( "I2M window has SRC and Map canvases", "[georef][dual]" )
@@ -72,6 +81,13 @@ TEST_CASE( "I2M window has SRC and Map canvases", "[georef][dual]" )
   auto *splitter = w.findChild<QSplitter *>( QStringLiteral( "rsGeorefI2MSplitter" ) );
   REQUIRE( splitter != nullptr );
   REQUIRE( splitter->orientation() == Qt::Vertical );
+
+  auto *srcLabel = w.findChild<QLabel *>( QStringLiteral( "rsGeorefI2MSrcLayerLabel" ) );
+  auto *mapLabel = w.findChild<QLabel *>( QStringLiteral( "rsGeorefI2MMapLayerLabel" ) );
+  REQUIRE( srcLabel != nullptr );
+  REQUIRE( mapLabel != nullptr );
+  REQUIRE( srcLabel->text().contains( QStringLiteral( "Warp" ) ) );
+  REQUIRE( mapLabel->text().contains( QStringLiteral( "Base" ) ) );
 }
 
 TEST_CASE( "I2I dual-canvas GCP pick arms both tools and appends pair", "[georef][dual][gcp]" )

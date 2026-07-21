@@ -54,18 +54,32 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
   mSrcCanvas->setObjectName( QStringLiteral( "rsSrcCanvas" ) );
   mSrcCanvas->setCanvasColor( Qt::white );
   mSrcCanvas->setToolTip( tr(
-    "源影像画布 (SRC)：加载待校正影像。\n"
+    "源影像画布 (SRC / Warp)：加载待校正影像。\n"
     "Add GCP 时先在此点击源点，再在右侧 REF 点击同名点（不弹坐标表单）。" ) );
 
   mDstCanvas = new QgsMapCanvas( this );
   mDstCanvas->setObjectName( QStringLiteral( "rsRefCanvas" ) );
   mDstCanvas->setCanvasColor( Qt::white );
   mDstCanvas->setToolTip( tr(
-    "参考影像画布 (REF)：加载已配准参考影像。\n"
+    "参考影像画布 (REF / Base)：加载已配准参考影像。\n"
     "Add GCP 时在此点击与源点对应的同名位置，完成一对控制点。" ) );
 
-  split->addWidget( mSrcCanvas );
-  split->addWidget( mDstCanvas );
+  QWidget *srcPanel = makeCanvasPanel(
+    mSrcCanvas, &mSrcLayerLabel,
+    tr( "源 (Warp)" ),
+    QStringLiteral( "rsSrcCanvasPanel" ),
+    QStringLiteral( "rsSrcLayerLabel" ) );
+  QWidget *refPanel = makeCanvasPanel(
+    mDstCanvas, &mDstLayerLabel,
+    tr( "基准 (Base)" ),
+    QStringLiteral( "rsRefCanvasPanel" ),
+    QStringLiteral( "rsRefLayerLabel" ) );
+  // Role-specific empty captions (makeCanvasPanel used role as prefix once).
+  updateSourceLayerCaption();
+  updateDestLayerCaption( QString() );
+
+  split->addWidget( srcPanel );
+  split->addWidget( refPanel );
   split->setStretchFactor( 0, 1 );
   split->setStretchFactor( 1, 1 );
   setCentralWidget( split );
@@ -243,6 +257,10 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
     mDstCanvas->refresh();
   }
 
+  updateDestLayerCaption(
+    layer->name(),
+    tr( "参考影像（基准 / Base）\n图层: %1\n路径: %2" )
+      .arg( layer->name(), path ) );
   mSession.saveWorkflow( captureWorkflowSnapshot() );
   return true;
 }
@@ -257,7 +275,14 @@ void QgsGeoreferencerMainWindow::captureShellSpecific( RsGeorefSessionState::Wor
 void QgsGeoreferencerMainWindow::applyShellSpecific( const RsGeorefSessionState::WorkflowSnapshot &s )
 {
   if ( !s.lastRefPath.isEmpty() )
+  {
     mRefRasterPath = s.lastRefPath;
+    // Caption only — full layer reload is user-driven if store was empty.
+    updateDestLayerCaption(
+      QFileInfo( s.lastRefPath ).fileName(),
+      tr( "参考影像（基准 / Base）\n路径: %1" ).arg( s.lastRefPath ) );
+  }
   if ( mSyncZoomAction )
     mSyncZoomAction->setChecked( s.syncZoom );
+  updateSourceLayerCaption();
 }

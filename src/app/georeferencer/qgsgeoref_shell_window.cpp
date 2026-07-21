@@ -6,6 +6,8 @@
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFont>
+#include <QFrame>
 #include <QIcon>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -19,6 +21,7 @@
 #include <QSizePolicy>
 #include <QStatusBar>
 #include <QToolBar>
+#include <QVBoxLayout>
 #include <QVector>
 #include <QWhatsThis>
 #include <QWidget>
@@ -222,6 +225,97 @@ void QgsGeorefShellWindow::setupStatusBar( const QString &coordObj, const QStrin
   statusBar()->addPermanentWidget( mCrsLabel );
   statusBar()->addPermanentWidget( mRmsLabel );
   statusBar()->showMessage( tr( "准备就绪 — 打开源影像并选取 GCP，设置输出后点「运行」" ), 8000 );
+}
+
+QWidget *QgsGeorefShellWindow::makeCanvasPanel( QgsMapCanvas *canvas,
+                                                QLabel **labelOut,
+                                                const QString &roleTitle,
+                                                const QString &panelObjectName,
+                                                const QString &labelObjectName )
+{
+  auto *panel = new QWidget( this );
+  panel->setObjectName( panelObjectName );
+  auto *layout = new QVBoxLayout( panel );
+  layout->setContentsMargins( 0, 0, 0, 0 );
+  layout->setSpacing( 0 );
+
+  auto *caption = new QLabel( roleTitle + QStringLiteral( ": —" ), panel );
+  caption->setObjectName( labelObjectName );
+  caption->setMargin( 4 );
+  caption->setWordWrap( false );
+  caption->setTextInteractionFlags( Qt::TextSelectableByMouse );
+  QFont f = caption->font();
+  f.setBold( true );
+  f.setPointSize( std::max( 9, f.pointSize() ) );
+  caption->setFont( f );
+  caption->setStyleSheet(
+    QStringLiteral(
+      "QLabel {"
+      "  background-color: #f0f3f6;"
+      "  color: #24292f;"
+      "  border-bottom: 1px solid #d0d7de;"
+      "  padding: 4px 8px;"
+      "}" ) );
+  tipWidget( caption, tr(
+    "当前画布对应的图层/文件名。悬停可查看完整路径。" ) );
+
+  layout->addWidget( caption );
+  layout->addWidget( canvas, 1 );
+
+  if ( labelOut )
+    *labelOut = caption;
+  return panel;
+}
+
+void QgsGeorefShellWindow::updateSourceLayerCaption()
+{
+  if ( !mSrcLayerLabel )
+    return;
+
+  QString name;
+  QString path = mSourceRasterPath;
+  if ( mSrcRaster && mSrcRaster->isValid() )
+  {
+    name = mSrcRaster->name();
+    if ( path.isEmpty() )
+      path = mSrcRaster->source();
+  }
+  else if ( !path.isEmpty() )
+  {
+    name = QFileInfo( path ).fileName();
+  }
+
+  if ( name.isEmpty() )
+  {
+    mSrcLayerLabel->setText( tr( "源 (Warp): —" ) );
+    mSrcLayerLabel->setToolTip( tr( "尚未打开源影像（待纠正 / Warp）。File → Open source raster…" ) );
+    return;
+  }
+
+  mSrcLayerLabel->setText( tr( "源 (Warp): %1" ).arg( name ) );
+  mSrcLayerLabel->setToolTip(
+    tr( "源影像（待纠正 / Warp）\n图层: %1\n路径: %2" )
+      .arg( name, path.isEmpty() ? tr( "—" ) : path ) );
+}
+
+void QgsGeorefShellWindow::updateDestLayerCaption( const QString &displayName,
+                                                   const QString &fullPathOrTip )
+{
+  if ( !mDstLayerLabel )
+    return;
+
+  if ( displayName.isEmpty() )
+  {
+    mDstLayerLabel->setText( tr( "基准 (Base): —" ) );
+    mDstLayerLabel->setToolTip( tr( "尚未指定基准（参考影像或地图图层）。" ) );
+    return;
+  }
+
+  mDstLayerLabel->setText( tr( "基准 (Base): %1" ).arg( displayName ) );
+  if ( !fullPathOrTip.isEmpty() )
+    mDstLayerLabel->setToolTip( fullPathOrTip );
+  else
+    mDstLayerLabel->setToolTip( tr( "基准图层 / 参考: %1" ).arg( displayName ) );
 }
 
 QMenu *QgsGeorefShellWindow::createFileMenu()
@@ -1001,6 +1095,7 @@ void QgsGeorefShellWindow::applyWorkflowSnapshot( const RsGeorefSessionState::Wo
   if ( !s.lastSourcePath.isEmpty() )
     mSourceRasterPath = s.lastSourcePath;
   applyShellSpecific( s );
+  updateSourceLayerCaption();
   recomputeFit();
 }
 
@@ -1147,6 +1242,7 @@ void QgsGeorefShellWindow::openSourceRaster()
     mSrcCanvas->setExtent( layer->extent() );
     mSrcCanvas->refresh();
   }
+  updateSourceLayerCaption();
   mSession.saveWorkflow( captureWorkflowSnapshot() );
 }
 

@@ -89,6 +89,21 @@ class QgsGeorefShellWindow : public QMainWindow
     void addGcpEditActions( QToolBar *bar, const QString &objectNamePrefix );
     void addApplyAction( QToolBar *bar, const QString &objectName );
 
+    /**
+     * Wrap \a canvas with a caption bar (role + layer/file name).
+     * Sets *\a labelOut to the caption QLabel (owned by returned panel).
+     */
+    QWidget *makeCanvasPanel( QgsMapCanvas *canvas,
+                              QLabel **labelOut,
+                              const QString &roleTitle,
+                              const QString &panelObjectName,
+                              const QString &labelObjectName );
+    /// Update SRC / Warp caption from mSourceRasterPath + mSrcRaster.
+    void updateSourceLayerCaption();
+    /// Update REF / Map / Base caption (subclass or shell after load).
+    void updateDestLayerCaption( const QString &displayName,
+                                 const QString &fullPathOrTip = QString() );
+
     /// Log shell tag for structured warp events ("i2i" / "i2m").
     virtual QString shellId() const { return QStringLiteral( "georef" ); }
     /// Multi-line help text for Help → 关于本窗口.
@@ -139,6 +154,10 @@ class QgsGeorefShellWindow : public QMainWindow
     QLabel *mCoordLabel = nullptr;
     QLabel *mCrsLabel = nullptr;
     QLabel *mRmsLabel = nullptr;
+    /// Caption above SRC canvas: "源 (Warp): file.tif"
+    QLabel *mSrcLayerLabel = nullptr;
+    /// Caption above REF/Map canvas: "参考 (Base): …" / "地图 (Base): …"
+    QLabel *mDstLayerLabel = nullptr;
 
     QgsMapCanvas *mSrcCanvas = nullptr;
     QgsMapCanvas *mDstCanvas = nullptr; ///< REF (I2I) or Map (I2M)
