@@ -84,6 +84,9 @@ class  QgsGeorefTransform : public QgsGcpTransformerInterface
     //! \returns whether the parameters of this transform have been initialized by \ref updateParametersFromGCPs
     bool parametersInitialized() const;
 
+    /// Last invertYAxis flag passed to updateParametersFromGcps (for residual re-fit).
+    bool invertYAxis() const { return mInvertYAxis; }
+
     std::unique_ptr<QgsGcpTransformerInterface> clone() const override;
     bool updateParametersFromGcps( const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates, bool invertYAxis = false ) override;
     int minimumGcpCount() const override;

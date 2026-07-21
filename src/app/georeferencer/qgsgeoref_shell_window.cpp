@@ -752,15 +752,13 @@ void QgsGeorefShellWindow::recomputeFit()
   // Residual in source *pixel* space so canvas residual arrows scale correctly.
   const Qgis::RenderUnit residualUnit = Qgis::RenderUnit::Pixels;
 
-  bool fitOk = false;
-  bool sourceIsMap = false;
+  // ALWAYS true: QgsGeorefTransform::transformRasterToWorld / WorldToRaster
+  // bookend-flip external pixel Y (±). Linear/Helmert use invertYAxis so that
+  // after those flips, external pixel Y matches GDAL col/line from toSourcePixel.
+  // invertY=false + bookend flip caused systematic ΔY ≈ image height (~8000 px).
+  constexpr bool kInvertYAxis = true;
 
-  // invertYAxis: true for pure pixel sources (canvas Y may need GDAL row flip).
-  // false when loadRaster maps map→col/line (Y already top-origin line index);
-  // applying invertY again would destroy I2I residuals on georeferenced pairs.
-  auto invertYFor = []( QgsGeorefTransform *xf ) -> bool {
-    return !( xf && xf->hasExistingGeoreference() );
-  };
+  bool fitOk = false;
 
   if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical && enabledCount >= 3 )
   {
@@ -777,7 +775,7 @@ void QgsGeorefShellWindow::recomputeFit()
       }
       try
       {
-        if ( beforeXf && beforeXf->updateParametersFromGcps( src, dst, invertYFor( beforeXf.get() ) ) )
+        if ( beforeXf && beforeXf->updateParametersFromGcps( src, dst, kInvertYAxis ) )
         {
           mGcps->updateResiduals( beforeXf.get(), dstCrs, transformContext, residualUnit );
           rmsBefore = computeEnabledRms( mGcps );
@@ -795,7 +793,7 @@ void QgsGeorefShellWindow::recomputeFit()
     }
     try
     {
-      fitOk = mTransform->updateParametersFromGcps( src, dst, invertYFor( mTransform.get() ) );
+      fitOk = mTransform->updateParametersFromGcps( src, dst, kInvertYAxis );
     }
     catch ( ... )
     {
@@ -825,20 +823,19 @@ void QgsGeorefShellWindow::recomputeFit()
         rpc->setRpcOptions( mParamsPanel->demPath(), mParamsPanel->demZOffset(), false );
       }
     }
-    const bool invertY = invertYFor( mTransform.get() );
     if ( enabledCount >= minN && minN > 0 )
     {
-      try { fitOk = mTransform->updateParametersFromGcps( src, dst, invertY ); }
+      try { fitOk = mTransform->updateParametersFromGcps( src, dst, kInvertYAxis ); }
       catch ( ... ) { fitOk = false; }
     }
     else if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical && mTransform )
     {
-      try { fitOk = mTransform->updateParametersFromGcps( src, dst, invertY ); }
+      try { fitOk = mTransform->updateParametersFromGcps( src, dst, kInvertYAxis ); }
       catch ( ... ) { fitOk = false; }
     }
   }
 
-  sourceIsMap = mTransform && mTransform->hasExistingGeoreference();
+  const bool sourceIsMap = mTransform && mTransform->hasExistingGeoreference();
 
   // Keep GCP table in sync: REF coords = image/map coords of Base; residual unit labels.
   if ( mGcpTable && mGcpTable->gcpModel() )
@@ -1213,17 +1210,33 @@ void QgsGeorefShellWindow::commitGcpPair( const QgsPointXY &sourceMap, const Qgs
     return;
   }
 
+  // I2I map-map sanity: same-name features in one projected CRS should be close.
+  // Huge separation usually means Sync zoom or mismatched CRS on the two canvases.
+  QString warn;
+  const double srcMag = std::hypot( src.x(), src.y() );
+  const double dstMag = std::hypot( dst.x(), dst.y() );
+  if ( srcMag > 1000.0 && dstMag > 1000.0 )
+  {
+    const double sep = std::hypot( src.x() - dst.x(), src.y() - dst.y() );
+    if ( sep > 50000.0 )
+    {
+      warn = tr( " ⚠ 源/参相距约 %1 km，请关闭 Sync zoom 并确认两侧 CRS 一致后重采。" )
+               .arg( sep / 1000.0, 0, 'f', 1 );
+    }
+  }
+
   mGcps->appendPoint( QgsGcpPoint( src, dst, destCrs, true ) );
   rearmAddPointTools();
   if ( statusBar() )
     statusBar()->showMessage(
-      tr( "已添加 GCP #%1：源 (%2, %3) → 目标 (%4, %5)" )
+      tr( "已添加 GCP #%1：源 (%2, %3) → 目标 (%4, %5)%6" )
         .arg( mGcps->size() )
         .arg( src.x(), 0, 'f', 2 )
         .arg( src.y(), 0, 'f', 2 )
         .arg( dst.x(), 0, 'f', 2 )
-        .arg( dst.y(), 0, 'f', 2 ),
-      5000 );
+        .arg( dst.y(), 0, 'f', 2 )
+        .arg( warn ),
+      warn.isEmpty() ? 5000 : 10000 );
 }
 
 void QgsGeorefShellWindow::onSourcePointPicked( const QgsPointXY &sourceMap )

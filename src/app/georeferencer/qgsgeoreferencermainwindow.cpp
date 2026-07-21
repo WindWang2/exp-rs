@@ -85,8 +85,8 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
   setCentralWidget( split );
 
   mSyncCtl = new RsTwinCanvasSyncController( mSrcCanvas, mDstCanvas, this );
-  // Default OFF: SRC is often pixel/local while REF is map CRS — linking extents
-  // makes source picks land at wrong coords (e.g. all zeros / off-image).
+  // Default OFF: linking extents across different CRS/geotransforms corrupts
+  // dual-canvas map picks (e.g. REF X becoming large negative).
   if ( mSyncCtl )
     mSyncCtl->setEnabled( false );
   if ( mSyncZoomAction )
@@ -94,11 +94,14 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
     mSyncZoomAction->setCheckable( true );
     mSyncZoomAction->setChecked( false );
     mSyncZoomAction->setToolTip( tr(
-      "同步缩放：仅在 SRC 与 REF 坐标单位/范围相近时建议开启。\n"
-      "源为像素、参考为地图坐标时请保持关闭，否则取点会错位。" ) );
+      "同步缩放（默认关闭）：仅当 SRC 与 REF 为同一 CRS 且范围相近时使用。\n"
+      "已配准影像对请保持关闭，否则取点坐标会错乱、残差异常。" ) );
     connect( mSyncZoomAction, &QAction::toggled, this, [this]( bool on ) {
       if ( mSyncCtl )
         mSyncCtl->setEnabled( on );
+      if ( on && statusBar() )
+        statusBar()->showMessage(
+          tr( "已开启 Sync zoom — 请确认两侧 CRS 一致，否则 GCP 坐标可能错误" ), 6000 );
     } );
   }
 }

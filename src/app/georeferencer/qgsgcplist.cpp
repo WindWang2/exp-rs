@@ -89,7 +89,12 @@ void QgsGCPList::createGCPVectors( QVector<QgsPointXY> &sourcePoints,
       continue;
 
     sourcePoints.push_back( pt->sourcePoint() );
-    if ( targetCrs.isValid() )
+    // Only reproject when both CRSes are valid and differ. Transforming from an
+    // invalid/unknown destination CRS into target CRS can produce nonsense
+    // coordinates (e.g. large negative X) and wreck the Linear fit.
+    if ( targetCrs.isValid()
+         && pt->destinationPointCrs().isValid()
+         && targetCrs != pt->destinationPointCrs() )
     {
       destinationPoints.push_back( pt->transformedDestinationPoint( targetCrs, context ) );
     }
@@ -132,7 +137,8 @@ void QgsGCPList::updateResiduals( QgsGeorefTransform *georefTransform,
     }
     else
     {
-      // invertYAxis=true matches the raster CS convention used by recomputeFit.
+      // invertYAxis=true pairs with ±Y bookends in transformWorldToRaster so
+      // external pixel Y matches toSourcePixel() (GDAL col/line, Y down).
       transformReady = georefTransform->updateParametersFromGcps(
         sourceCoordinates, destinationCoordinates, /*invertYAxis=*/true );
     }
@@ -148,30 +154,39 @@ void QgsGCPList::updateResiduals( QgsGeorefTransform *georefTransform,
     if ( !p->isEnabled() )
       continue;
 
-    const QgsPointXY transformedDestinationPoint = targetCrs.isValid()
-        ? p->transformedDestinationPoint( targetCrs, context )
-        : p->destinationPoint();
+    // Prefer destination as stored (REF/Map pick). Only reproject when both
+    // CRSes are valid and differ — avoids corrupting Base image coords.
+    QgsPointXY worldPt = p->destinationPoint();
+    if ( targetCrs.isValid() && p->destinationPointCrs().isValid()
+         && targetCrs != p->destinationPointCrs() )
+    {
+      worldPt = p->transformedDestinationPoint( targetCrs, context );
+    }
 
     double dX = 0;
     double dY = 0;
     if ( georefTransform && transformReady && georefTransform->parametersInitialized() )
     {
-      QgsPointXY dst;
-      const QgsPointXY pixel = georefTransform->toSourcePixel( p->sourcePoint() );
+      QgsPointXY predictedPixel;
+      // Source may be map (georef) or pixel; toSourcePixel is identity if no geotransform.
+      const QgsPointXY observedPixel = georefTransform->toSourcePixel( p->sourcePoint() );
       if ( residualUnit == Qgis::RenderUnit::Pixels )
       {
-        if ( georefTransform->transformWorldToRaster( transformedDestinationPoint, dst ) )
+        // transformWorldToRaster returns external pixel space (same as toSourcePixel
+        // when invertYAxis=true with the ±Y bookends in QgsGeorefTransform).
+        if ( georefTransform->transformWorldToRaster( worldPt, predictedPixel ) )
         {
-          dX = ( dst.x() - pixel.x() );
-          dY = -( dst.y() - pixel.y() );
+          dX = predictedPixel.x() - observedPixel.x();
+          dY = predictedPixel.y() - observedPixel.y();
         }
       }
       else if ( residualUnit == Qgis::RenderUnit::MapUnits )
       {
-        if ( georefTransform->transformRasterToWorld( pixel, dst ) )
+        QgsPointXY predictedWorld;
+        if ( georefTransform->transformRasterToWorld( observedPixel, predictedWorld ) )
         {
-          dX = ( dst.x() - transformedDestinationPoint.x() );
-          dY = ( dst.y() - transformedDestinationPoint.y() );
+          dX = predictedWorld.x() - worldPt.x();
+          dY = predictedWorld.y() - worldPt.y();
         }
       }
     }
