@@ -98,6 +98,57 @@ void registerClassifySupervised( WorkflowRegistry &reg )
   reg.registerDefinition( std::move( d ) );
 }
 
+/// Image-to-map georeferencing workspace (6 steps ↔ dual-window I2M flow).
+/// Soft gates use session artifacts only (source_raster / gcp_count / output).
+/// Warp stays Interactive — UI still runs RsWarpTask / QgsImageWarper.
+void registerGeorefImageToMap( WorkflowRegistry &reg )
+{
+  WorkflowDefinition d;
+  d.id = "lab.georef.image_to_map";
+  d.title = "几何校正（影像到地图）";
+  d.host = HostKind::Workspace;
+  d.workspaceKind = "georef";
+
+  StepDef openImage;
+  openImage.id = "open_image";
+  openImage.title = "打开影像";
+  openImage.kind = StepKind::Interactive;
+
+  StepDef gcp;
+  gcp.id = "gcp";
+  gcp.title = "控制点";
+  gcp.kind = StepKind::Interactive;
+  gcp.gates.push_back( {"hasArtifact:source_raster", "请先打开源影像"} );
+
+  StepDef transform;
+  transform.id = "transform";
+  transform.title = "变换模型";
+  transform.kind = StepKind::Interactive;
+  transform.gates.push_back( {"hasArtifact:gcp_count", "请先采集控制点"} );
+
+  StepDef residual;
+  residual.id = "residual";
+  residual.title = "残差检查";
+  residual.kind = StepKind::Review;
+  residual.gates.push_back( {"hasArtifact:gcp_count", "请先采集控制点"} );
+
+  StepDef warp;
+  warp.id = "warp";
+  warp.title = "重采样写出";
+  // No clean catalog operator for dual-window warp; UI owns RsWarpTask.
+  warp.kind = StepKind::Interactive;
+  warp.gates.push_back( {"hasArtifact:gcp_count", "请先采集控制点"} );
+
+  StepDef loadResult;
+  loadResult.id = "load_result";
+  loadResult.title = "加载结果";
+  loadResult.kind = StepKind::Review;
+  loadResult.gates.push_back( {"hasArtifact:output", "请先完成重采样写出"} );
+
+  d.steps = {openImage, gcp, transform, residual, warp, loadResult};
+  reg.registerDefinition( std::move( d ) );
+}
+
 void registerBuiltinWorkflows( WorkflowRegistry &reg )
 {
   // Primary input keys match each operator's schema() required fields.
@@ -119,6 +170,7 @@ void registerBuiltinWorkflows( WorkflowRegistry &reg )
                       "rs:atmospheric_correction", "input", "请选择输入栅格" );
 
   registerClassifySupervised( reg );
+  registerGeorefImageToMap( reg );
 }
 
 } // namespace sicnu::workflow

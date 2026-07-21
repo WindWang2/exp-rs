@@ -229,7 +229,8 @@ TEST_CASE( "Builtin workflows registered", "[workflow]" )
   REQUIRE( reg.has( "tool.rs.pca" ) );
   REQUIRE( reg.has( "tool.rs.atmospheric_correction" ) );
   REQUIRE( reg.has( "lab.classify.supervised" ) );
-  REQUIRE( reg.ids().size() == 9 );
+  REQUIRE( reg.has( "lab.georef.image_to_map" ) );
+  REQUIRE( reg.ids().size() == 10 );
 
   const auto *d = reg.find( "tool.rs.spectral_index" );
   REQUIRE( d );
@@ -292,6 +293,65 @@ TEST_CASE( "Builtin lab.classify.supervised has 7 steps in order", "[workflow]" 
   REQUIRE( rt.state( sid ).currentStepId == "classes" );
   REQUIRE( rt.gotoStep( sid, "train" ) );
   REQUIRE( rt.state( sid ).currentStepId == "train" );
+}
+
+TEST_CASE( "Builtin lab.georef.image_to_map has 6 steps in order", "[workflow]" )
+{
+  WorkflowRegistry reg;
+  registerBuiltinWorkflows( reg );
+  const auto *d = reg.find( "lab.georef.image_to_map" );
+  REQUIRE( d );
+  REQUIRE( d->host == HostKind::Workspace );
+  REQUIRE( d->workspaceKind == "georef" );
+  REQUIRE( d->title == "几何校正（影像到地图）" );
+  REQUIRE( d->steps.size() == 6 );
+
+  const std::vector<std::string> expectedIds = {
+    "open_image", "gcp", "transform", "residual", "warp", "load_result"
+  };
+  const std::vector<std::string> expectedTitles = {
+    "打开影像", "控制点", "变换模型", "残差检查", "重采样写出", "加载结果"
+  };
+  const std::vector<StepKind> expectedKinds = {
+    StepKind::Interactive,
+    StepKind::Interactive,
+    StepKind::Interactive,
+    StepKind::Review,
+    StepKind::Interactive,
+    StepKind::Review,
+  };
+
+  for ( size_t i = 0; i < expectedIds.size(); ++i )
+  {
+    REQUIRE( d->steps[i].id == expectedIds[i] );
+    REQUIRE( d->steps[i].title == expectedTitles[i] );
+    REQUIRE( d->steps[i].kind == expectedKinds[i] );
+  }
+
+  // Soft gates on pure session artifacts.
+  REQUIRE_FALSE( d->steps[1].gates.empty() );
+  REQUIRE( d->steps[1].gates[0].require == "hasArtifact:source_raster" );
+  REQUIRE_FALSE( d->steps[2].gates.empty() );
+  REQUIRE( d->steps[2].gates[0].require == "hasArtifact:gcp_count" );
+  REQUIRE_FALSE( d->steps[4].gates.empty() );
+  REQUIRE( d->steps[4].gates[0].require == "hasArtifact:gcp_count" );
+  REQUIRE_FALSE( d->steps[5].gates.empty() );
+  REQUIRE( d->steps[5].gates[0].require == "hasArtifact:output" );
+
+  WorkflowRuntime rt( reg );
+  const auto sid = rt.open( "lab.georef.image_to_map" );
+  REQUIRE_FALSE( sid.empty() );
+  REQUIRE( rt.state( sid ).currentStepId == "open_image" );
+
+  // Soft gate: warp blocked without gcp_count; passes after mock artifact.
+  REQUIRE( rt.gotoStep( sid, "warp" ) );
+  auto can = rt.canRun( sid, "warp" );
+  REQUIRE_FALSE( can.ok );
+  rt.setArtifact( sid, "gcp_count", "4" );
+  can = rt.canRun( sid, "warp" );
+  REQUIRE( can.ok );
+  REQUIRE( rt.gotoStep( sid, "residual" ) );
+  REQUIRE( rt.state( sid ).currentStepId == "residual" );
 }
 
 TEST_CASE( "Runtime open returns empty for missing definition", "[workflow]" )

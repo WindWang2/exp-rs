@@ -124,6 +124,8 @@ QgsGeorefShellWindow::QgsGeorefShellWindow( QgisInterface *iface, QWidget *paren
 
 QgsGeorefShellWindow::~QgsGeorefShellWindow()
 {
+  if ( mWorkflowBridge )
+    mWorkflowBridge->close();
   qDeleteAll( mDataPoints );
   mDataPoints.clear();
 }
@@ -803,6 +805,18 @@ void QgsGeorefShellWindow::onPointsChanged()
   if ( !mGcps )
     return;
 
+  if ( mWorkflowBridge && mWorkflowBridge->isOpen() )
+  {
+    mWorkflowBridge->setGcpCountArtifact( static_cast<int>( mGcps->size() ) );
+    if ( !mGcps->isEmpty() )
+    {
+      mWorkflowBridge->markStepComplete( "gcp" );
+      // Advance from gcp → transform once control points exist.
+      if ( mWorkflowBridge->runtime().state( mWorkflowBridge->sessionId() ).currentStepId == "gcp" )
+        mWorkflowBridge->gotoStep( "transform" );
+    }
+  }
+
   if ( mSaveGcpAction )
     mSaveGcpAction->setEnabled( hasSourceReady() && !mGcps->isEmpty() );
 
@@ -1230,6 +1244,12 @@ void QgsGeorefShellWindow::applyTransform()
     {
       if ( mTaskList )
         mTaskList->finishSuccess( taskId, r.durationMs, r.outputBytes );
+      if ( mWorkflowBridge && mWorkflowBridge->isOpen() )
+      {
+        mWorkflowBridge->setOutputArtifact( outputPath.toStdString() );
+        mWorkflowBridge->markStepComplete( "warp" );
+        mWorkflowBridge->gotoStep( "load_result" );
+      }
       statusBar()->showMessage(
         tr( "任务 #%1 完成: %2 (%3 字节, %4 ms) — 双击可加载到主工程" )
           .arg( taskId )
@@ -1287,6 +1307,11 @@ void QgsGeorefShellWindow::loadWarpOutputToProject( const QString &path )
     return;
   }
   QgsProject::instance()->addMapLayer( layer );
+  if ( mWorkflowBridge && mWorkflowBridge->isOpen() )
+  {
+    mWorkflowBridge->setOutputArtifact( path.toStdString() );
+    mWorkflowBridge->markStepComplete( "load_result" );
+  }
   if ( statusBar() )
     statusBar()->showMessage( tr( "已加载到主工程: %1" ).arg( layer->name() ), 5000 );
 }
@@ -1583,6 +1608,12 @@ bool QgsGeorefShellWindow::loadSourceRaster( const QString &path, const QString 
   updateToolAvailability();
   recomputeFit();
   mSession.saveWorkflow( captureWorkflowSnapshot() );
+  if ( mWorkflowBridge && mWorkflowBridge->isOpen() )
+  {
+    mWorkflowBridge->setSourceRasterArtifact( path.toStdString() );
+    mWorkflowBridge->markStepComplete( "open_image" );
+    mWorkflowBridge->gotoStep( "gcp" );
+  }
   if ( statusBar() )
     statusBar()->showMessage( tr( "已加载源影像 (Warp): %1" ).arg( layer->name() ), 4000 );
   return true;

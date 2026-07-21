@@ -11,6 +11,7 @@
 #include "rs_georef_params_panel.h"
 #include "rs_georef_session_state.h"
 #include "rs_georef_task_list.h"
+#include "rs_georef_workflow_bridge.h"
 
 class QAction;
 class QActionGroup;
@@ -53,6 +54,8 @@ class QgsGeorefShellWindow : public QMainWindow
     QgsMapCanvas *srcCanvas() const { return mSrcCanvas; }
     QgsMapCanvas *dstCanvas() const { return mDstCanvas; }
     RsGeorefTaskList *taskListForTest() { return mTaskList; }
+    /// Runtime session for lab.georef.image_to_map (I2M only; null on I2I).
+    RsGeorefWorkflowBridge *workflowBridgeForTest() { return mWorkflowBridge.get(); }
 
     /// Test hooks for dual-canvas GCP pick (no MapCoords dialog).
     void pickSourceForTest( const QgsPointXY &p ) { onSourcePointPicked( p ); }
@@ -260,4 +263,7 @@ class QgsGeorefShellWindow : public QMainWindow
     bool mWarpInProgress = false;
     /// task-list id → live QgsTask (for cancel / progress).
     QHash<int, QPointer<RsWarpTask>> mActiveWarpTasks;
+
+    /// lab.georef.image_to_map session (opened by I2M shell only).
+    std::unique_ptr<RsGeorefWorkflowBridge> mWorkflowBridge;
 };

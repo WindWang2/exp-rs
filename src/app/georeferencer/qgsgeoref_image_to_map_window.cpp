@@ -10,11 +10,13 @@
 
 #include "core/sicnu_logging.h"
 #include "dialogs/dialog_help_catalog.h"
+#include "qgsgcplist.h"
 #include "qgsgcptransformer.h"
 #include "qgslayertree.h"
 #include "qgsmapcanvas.h"
 #include "qgsmaplayer.h"
 #include "qgsproject.h"
+#include "rs_georef_workflow_bridge.h"
 
 QgsGeorefImageToMapWindow::QgsGeorefImageToMapWindow( QgisInterface *iface, QWidget *parent )
   : QgsGeorefShellWindow( iface, parent )
@@ -34,6 +36,30 @@ QgsGeorefImageToMapWindow::QgsGeorefImageToMapWindow( QgisInterface *iface, QWid
   finishCommonSetup( RsGeorefParamsPanel::Profile::ImageToMap,
                      QStringLiteral( "rsGcpDockI2M" ),
                      QStringLiteral( "rsParamDockI2M" ) );
+
+  // Runtime session for lab.georef.image_to_map — step/artifact mirror only.
+  mWorkflowBridge = std::make_unique<RsGeorefWorkflowBridge>();
+  if ( !mWorkflowBridge->open() )
+  {
+    SICNU_LOG_WARN( SicnuLogTags::Georeferencing,
+                    QStringLiteral( "Failed to open workflow session lab.georef.image_to_map" ) );
+  }
+  else
+  {
+    // Mirror state restored during finishCommonSetup (source path / GCPs).
+    if ( !mSourceRasterPath.isEmpty() )
+    {
+      mWorkflowBridge->setSourceRasterArtifact( mSourceRasterPath.toStdString() );
+      mWorkflowBridge->markStepComplete( "open_image" );
+      mWorkflowBridge->gotoStep( "gcp" );
+    }
+    if ( mGcps && !mGcps->isEmpty() )
+    {
+      mWorkflowBridge->setGcpCountArtifact( static_cast<int>( mGcps->size() ) );
+      mWorkflowBridge->markStepComplete( "gcp" );
+      mWorkflowBridge->gotoStep( "transform" );
+    }
+  }
 
   connect( QgsProject::instance(), &QgsProject::layersAdded, this,
            [this]( const QList<QgsMapLayer *> & ) { refreshMapLayersFromProject(); } );
