@@ -220,15 +220,16 @@ void QgisDesktopWindow::setupDockWidgets()
     addDockWidget(Qt::RightDockWidgetArea, m_spectralDock);
     tabifyDockWidget(m_identifyDock, m_spectralDock);
 
-    // Histogram Stretch Panel (Right, tabified with Spectral Profile)
-    m_histogramStretchDock = new QgsDockWidget(tr("Histogram Stretch"), this);
-    m_histogramStretchDock->setObjectName("histogramStretchDock");
-    m_histogramStretchDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    // Display stretch panel (renderer only — no export; like layer symbology stretch)
+    m_histogramStretchDock = new QgsDockWidget( tr( "显示拉伸" ), this );
+    m_histogramStretchDock->setObjectName( "histogramStretchDock" );
+    m_histogramStretchDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
 
-    m_histogramStretch = new HistogramStretchWidget(m_histogramStretchDock);
-    m_histogramStretchDock->setWidget(m_histogramStretch);
-    addDockWidget(Qt::RightDockWidgetArea, m_histogramStretchDock);
-    tabifyDockWidget(m_spectralDock, m_histogramStretchDock);
+    m_histogramStretch = new HistogramStretchWidget( m_histogramStretchDock );
+    m_histogramStretchDock->setWidget( m_histogramStretch );
+    addDockWidget( Qt::RightDockWidgetArea, m_histogramStretchDock );
+    tabifyDockWidget( m_spectralDock, m_histogramStretchDock );
+    m_histogramStretchDock->hide();
 
     // Log Panel (Bottom, tabified)
     m_logDock = new LogPanel(this);

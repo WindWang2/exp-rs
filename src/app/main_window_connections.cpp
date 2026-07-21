@@ -207,9 +207,15 @@ void QgisDesktopWindow::onLayerTreeClicked(const QModelIndex &index)
         m_mapCanvas->setCurrentLayer(layer);
         updateEditingUI(qobject_cast<QgsVectorLayer *>(layer));
 
-        if (m_histogramStretch) {
-            if (auto *rl = qobject_cast<QgsRasterLayer *>(layer))
-                m_histogramStretch->setRasterLayer(rl);
+        if ( m_histogramStretch )
+        {
+            if ( auto *rl = qobject_cast<QgsRasterLayer *>( layer ) )
+            {
+                m_histogramStretch->setRasterLayer( rl );
+                if ( m_histogramStretchDock && m_histogramStretchDock->isVisible() )
+                    m_histogramStretchDock->setWindowTitle(
+                      tr( "显示拉伸 — %1" ).arg( rl->name() ) );
+            }
         }
     } else {
         m_mapCanvas->setCurrentLayer(nullptr);

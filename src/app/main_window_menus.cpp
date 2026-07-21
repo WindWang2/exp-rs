@@ -604,22 +604,14 @@ void QgisDesktopWindow::setupToolbars()
                                      this, &QgisDesktopWindow::measureArea ),
          tr( "测面 (Ctrl+Shift+A)" ) );
     mapToolsToolBar->addSeparator();
-    // Quick image display / stretch (common lab path)
-    tip( mapToolsToolBar->addAction( ic( "enh_nce" ), tr( "对比度拉伸" ),
-                                     this, &QgisDesktopWindow::openContrastStretchDialog ),
-         tr( "快速对比度拉伸（百分比裁剪 / 标准差等）" ) );
-    tip( mapToolsToolBar->addAction( ic( "histogr_eq" ), tr( "图像增强" ),
-                                     this, &QgisDesktopWindow::openImageEnhancementPanel ),
-         tr( "图像增强面板（直方图均衡等）" ) );
-    tip( mapToolsToolBar->addAction( ic( "dis_l_y" ), tr( "直方图拉伸" ),
-                                     this, [this]() {
-                                       if ( m_histogramStretchDock )
-                                       {
-                                         m_histogramStretchDock->show();
-                                         m_histogramStretchDock->raise();
-                                       }
-                                     } ),
-         tr( "打开直方图拉伸面板，交互调整显示对比度" ) );
+    // Display-only stretch (layer renderer / symbology) — NOT export processing
+    tip( mapToolsToolBar->addAction( ic( "enh_nce" ), tr( "显示拉伸" ),
+                                     this, &QgisDesktopWindow::openDisplayStretchPanel ),
+         tr( "显示对比度拉伸（线性 / 百分比裁剪 / 标准差）。\n"
+             "只改图层渲染，不导出新文件，对应图层属性中的显示增强。" ) );
+    tip( mapToolsToolBar->addAction( ic( "dis_l_y" ), tr( "图层属性" ),
+                                     this, &QgisDesktopWindow::layerProperties ),
+         tr( "打开当前图层属性（符号化 / 透明度 / 显示等完整设置）" ) );
 
     // CRS picker lives on the status bar (compact product shell); create here for wiring.
     m_crsSelector = new QgsProjectionSelectionWidget( this );

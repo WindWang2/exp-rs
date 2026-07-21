@@ -49,10 +49,10 @@ void HistogramStretchWidget::setupUi()
 
     // Algorithm selector
     m_algorithmCombo = new QComboBox( this );
-    m_algorithmCombo->addItem( tr( "Linear Min-Max" ), static_cast<int>( StretchAlgorithm::LinearMinMax ) );
-    m_algorithmCombo->addItem( tr( "Percent Clip" ), static_cast<int>( StretchAlgorithm::PercentClip ) );
-    m_algorithmCombo->addItem( tr( "Std Dev" ), static_cast<int>( StretchAlgorithm::StdDev ) );
-    m_algorithmCombo->addItem( tr( "No Enhancement" ), static_cast<int>( StretchAlgorithm::NoEnhancement ) );
+    m_algorithmCombo->addItem( tr( "线性 Min-Max" ), static_cast<int>( StretchAlgorithm::LinearMinMax ) );
+    m_algorithmCombo->addItem( tr( "百分比裁剪" ), static_cast<int>( StretchAlgorithm::PercentClip ) );
+    m_algorithmCombo->addItem( tr( "标准差" ), static_cast<int>( StretchAlgorithm::StdDev ) );
+    m_algorithmCombo->addItem( tr( "无增强" ), static_cast<int>( StretchAlgorithm::NoEnhancement ) );
     connect( m_algorithmCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
              this, &HistogramStretchWidget::onAlgorithmChanged );
     formLayout->addRow( tr( "Algorithm:" ), m_algorithmCombo );
@@ -92,9 +92,11 @@ void HistogramStretchWidget::setupUi()
 
     // Buttons
     auto *buttonLayout = new QHBoxLayout();
-    m_applyButton = new QPushButton( tr( "Apply" ), this );
+    m_applyButton = new QPushButton( tr( "应用到显示" ), this );
+    m_applyButton->setToolTip( tr( "仅更新图层渲染器，不写出新文件" ) );
     connect( m_applyButton, &QPushButton::clicked, this, &HistogramStretchWidget::applyStretch );
-    m_resetButton = new QPushButton( tr( "Reset" ), this );
+    m_resetButton = new QPushButton( tr( "重置显示" ), this );
+    m_resetButton->setToolTip( tr( "恢复默认 min/max 显示范围" ) );
     connect( m_resetButton, &QPushButton::clicked, this, &HistogramStretchWidget::resetStretch );
     buttonLayout->addWidget( m_applyButton );
     buttonLayout->addWidget( m_resetButton );

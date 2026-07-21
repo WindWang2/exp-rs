@@ -25,9 +25,14 @@
 #include "dialogs/batch_processing_dialog.h"
 #include "dialogs/sicnu_algorithm_dialog.h"
 #include "map_tools/swipe_map_tool.h"
+#include "widgets/histogram_stretch_widget.h"
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
+#include <qgsrasterlayer.h>
+#include <qgsdockwidget.h>
+#include <QMessageBox>
+#include <QStatusBar>
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
 #include <qgsmapcanvas.h>
@@ -193,7 +198,7 @@ void QgisDesktopWindow::openAtmosphericCorrectionDialog()
 }
 
 // ---------------------------------------------------------------------------
-// Contrast Stretch dialog
+// Contrast Stretch dialog (processing — writes a new GeoTIFF)
 // ---------------------------------------------------------------------------
 
 void QgisDesktopWindow::openContrastStretchDialog()
@@ -205,6 +210,39 @@ void QgisDesktopWindow::openContrastStretchDialog()
         return;
     }
     openRasterDialog<ContrastStretchDialog>(this, tr("Contrast Stretch"), rasterLayer);
+}
+
+// ---------------------------------------------------------------------------
+// Display stretch panel (renderer only — same idea as layer properties symbology)
+// ---------------------------------------------------------------------------
+
+void QgisDesktopWindow::openDisplayStretchPanel()
+{
+    QgsRasterLayer *rasterLayer = findActiveRaster( this );
+    if ( !rasterLayer )
+        rasterLayer = findAnyRaster( this );
+    if ( !rasterLayer )
+    {
+        QMessageBox::information( this, tr( "显示拉伸" ),
+                                  tr( "请先选择或加载一个栅格图层。\n"
+                                      "此功能仅调整地图显示对比度，不导出新文件。" ) );
+        return;
+    }
+
+    if ( !m_histogramStretchDock || !m_histogramStretch )
+    {
+        QMessageBox::warning( this, tr( "显示拉伸" ),
+                              tr( "显示拉伸面板尚未初始化。" ) );
+        return;
+    }
+
+    m_histogramStretch->setRasterLayer( rasterLayer );
+    m_histogramStretchDock->setWindowTitle(
+      tr( "显示拉伸 — %1" ).arg( rasterLayer->name() ) );
+    m_histogramStretchDock->show();
+    m_histogramStretchDock->raise();
+    statusBar()->showMessage(
+      tr( "显示拉伸：修改图层渲染器，仅影响显示，不写出新栅格。" ), 5000 );
 }
 
 // ---------------------------------------------------------------------------

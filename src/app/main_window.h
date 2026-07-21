@@ -157,8 +157,10 @@ public slots:
     void openMosaicDialog();
     void openChangeDetectionDialog();
 
-    // Enhancement dialogs
+    // Enhancement dialogs (processing — write new raster)
     void openContrastStretchDialog();
+    /** Display-only stretch (layer renderer / symbology), no export. */
+    void openDisplayStretchPanel();
     void openSpatialFilterDialog();
     void openPcaDialog();
     void openBandRatioDialog();
