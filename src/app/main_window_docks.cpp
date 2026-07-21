@@ -335,20 +335,29 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
             m_taskPanelDock->hide();
     } );
 
-    // Six-tab ribbon above the map canvas — primary navigation for RS workflow.
+    // Compact product ribbon under the menu bar (top chrome), not over the canvas.
     m_ribbonController = new RibbonController( this, this );
     m_ribbonBar = m_ribbonController->createRibbonBar();
     connect( m_ribbonController, &RibbonController::openWorkflowTool,
              this, &QgisDesktopWindow::openWorkflowTool );
 
-    if ( QWidget *central = centralWidget() )
-    {
-        if ( auto *lay = qobject_cast<QVBoxLayout *>( central->layout() ) )
-        {
-            // Place ribbon at the top of the central column (above message bar / canvas).
-            lay->insertWidget( 0, m_ribbonBar );
-        }
-    }
+    auto *ribbonHost = new QToolBar( tr( "功能区" ), this );
+    ribbonHost->setObjectName( QStringLiteral( "rsRibbonHost" ) );
+    ribbonHost->setMovable( false );
+    ribbonHost->setFloatable( false );
+    ribbonHost->setAllowedAreas( Qt::TopToolBarArea );
+    ribbonHost->setContextMenuPolicy( Qt::PreventContextMenu );
+    ribbonHost->setIconSize( QSize( 16, 16 ) );
+    ribbonHost->setToolButtonStyle( Qt::ToolButtonIconOnly );
+    ribbonHost->setMinimumHeight( 80 );
+    ribbonHost->setMaximumHeight( 84 );
+    ribbonHost->addWidget( m_ribbonBar );
+
+    // Insert as the first top toolbar so it sits directly under the menu bar.
+    if ( QToolBar *mapBar = findChild<QToolBar *>( QStringLiteral( "mapToolsToolBar" ) ) )
+        insertToolBar( mapBar, ribbonHost );
+    else
+        addToolBar( Qt::TopToolBarArea, ribbonHost );
 }
 
 void QgisDesktopWindow::applyProductShellLayout()
@@ -361,7 +370,16 @@ void QgisDesktopWindow::applyProductShellLayout()
         tb->hide();
     if ( QToolBar *tb = findChild<QToolBar *>( QStringLiteral( "fileToolBar" ) ) )
         tb->hide();
-    // Keep mapToolsToolBar + digitizeToolBar — not covered by the ribbon tabs.
+    // Map navigation lives on Ribbon「视图」; rehome CRS picker to status bar.
+    if ( QToolBar *tb = findChild<QToolBar *>( QStringLiteral( "mapToolsToolBar" ) ) )
+        tb->hide();
+    if ( m_crsSelector && statusBar() && m_crsSelector->parent() != statusBar() )
+    {
+        m_crsSelector->setParent( statusBar() );
+        m_crsSelector->setMaximumWidth( 240 );
+        m_crsSelector->show();
+        statusBar()->addPermanentWidget( m_crsSelector );
+    }
 
     auto hideDock = []( QDockWidget *dock ) {
         if ( dock )

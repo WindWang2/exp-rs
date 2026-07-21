@@ -900,13 +900,70 @@ QLabel#rsReadyLabel {
 }
 
 /* ============ Ribbon ============ */
+/* Compact product ribbon (top chrome under menu) */
+#rsRibbonHost {
+  background: #ffffff;
+  border: none;
+  border-bottom: 1px solid #e4e7eb;
+  spacing: 0;
+  padding: 0;
+}
+#rsRibbonHost::separator {
+  width: 0;
+  background: transparent;
+}
 #rsRibbonBar {
   background: #ffffff;
+  border: none;
+  min-height: 80px;
+  max-height: 80px;
+}
+#rsRibbonTabRow {
+  background: #f6f7f9;
   border-bottom: 1px solid #e4e7eb;
 }
-#rsRibbonTabBar::tab:selected {
+QPushButton#rsRibbonTabButton {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #5b6473;
+  font-size: 12px;
+  padding: 2px 12px;
+  margin: 0 1px;
+}
+QPushButton#rsRibbonTabButton:hover {
+  color: #2f3640;
+  background: rgba(58, 127, 26, 0.06);
+}
+QPushButton#rsRibbonTabButton:checked {
   color: #3a7f1a;
   font-weight: 600;
+  border-bottom: 2px solid #3a7f1a;
+  background: #ffffff;
+}
+#rsRibbonPage {
+  background: #ffffff;
+}
+#rsRibbonStack {
+  background: #ffffff;
+}
+#rsRibbonSep {
+  background: #e4e7eb;
+  border: none;
+  margin: 4px 6px;
+}
+#rsRibbonBar QToolButton {
+  color: #2f3640;
+  font-size: 10px;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 3px;
+}
+#rsRibbonBar QToolButton:hover {
+  background: rgba(58, 127, 26, 0.10);
+}
+#rsRibbonBar QToolButton:pressed {
+  background: rgba(58, 127, 26, 0.18);
 }
 #rsRibbonGroupTitle {
   color: #8a92a0;

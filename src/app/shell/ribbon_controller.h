@@ -1,5 +1,5 @@
 /***************************************************************************
- * ribbon_controller.h  —  six-tab RS workflow ribbon above the map canvas
+ * ribbon_controller.h  —  compact top-chrome RS workflow ribbon
  ***************************************************************************/
 #pragma once
 
@@ -9,13 +9,15 @@
 class QWidget;
 class QToolButton;
 class QHBoxLayout;
+class QStackedWidget;
+class QButtonGroup;
 class QgisDesktopWindow;
 
 /**
- * Builds the main-shell ribbon (工程 / 数据 / 预处理 / 分析 / 分类/解译 / 制图).
+ * Builds a compact product ribbon (menu-bar height band, not canvas overlay):
+ * 工程 / 数据 / 预处理 / 分析 / 分类·解译 / 制图 / 视图
  *
- * Project/data/workspace buttons call QgisDesktopWindow slots directly.
- * Atomic RS tools emit openWorkflowTool(definitionId) for the session controller.
+ * Atomic RS tools emit openWorkflowTool(definitionId).
  */
 class RibbonController : public QObject
 {
@@ -23,18 +25,22 @@ class RibbonController : public QObject
   public:
     explicit RibbonController( QgisDesktopWindow *window, QObject *parent = nullptr );
 
-    /** Build ribbon QWidget (objectName rsRibbonBar) to place above the canvas. */
+    /**
+     * Build ribbon widget (objectName rsRibbonBar).
+     * Place under the menu bar via a non-movable QToolBar host — not in central canvas.
+     */
     QWidget *createRibbonBar();
 
   signals:
     void openWorkflowTool( const QString &definitionId );
 
   private:
-    QWidget *makeTabPage();
+    QWidget *makeToolStrip();
     QToolButton *addToolButton( QHBoxLayout *layout,
                                 const QString &text,
                                 const char *iconAlias,
                                 const QString &tooltip = QString() );
+    void addGroupSeparator( QHBoxLayout *layout );
 
     QgisDesktopWindow *m_window = nullptr;
 };
