@@ -105,6 +105,10 @@ class QgsGeorefShellWindow : public QMainWindow
      */
     void addCanvasNavigationActions( QToolBar *bar, const QString &objectNamePrefix );
     void addApplyAction( QToolBar *bar, const QString &objectName );
+    /// View menu: pan/zoom/fit + previous/next extent.
+    void addViewMenu();
+    /// Right-click on a canvas for navigation shortcuts.
+    void installCanvasContextMenu( QgsMapCanvas *canvas, bool isSource );
 
     /// Exclusive map-tool action group (pan/zoom/GCP).
     QActionGroup *mapToolActionGroup();
@@ -169,6 +173,12 @@ class QgsGeorefShellWindow : public QMainWindow
     void zoomSourceOut();
     void zoomDestIn();
     void zoomDestOut();
+    void zoomPreviousSource();
+    void zoomNextSource();
+    void zoomPreviousDest();
+    void zoomNextDest();
+    void zoomPreviousBoth();
+    void zoomNextBoth();
 
   protected:
     void emitStructuredLog( const QgsImageWarper::WarpResult &r );
@@ -227,6 +237,8 @@ class QgsGeorefShellWindow : public QMainWindow
     QAction *mFitSrcAction = nullptr;
     QAction *mFitDstAction = nullptr;
     QAction *mFitBothAction = nullptr;
+    QAction *mZoomPrevAction = nullptr;
+    QAction *mZoomNextAction = nullptr;
     QAction *mAddPointAction = nullptr;
     QAction *mMovePointAction = nullptr;
     QAction *mDeletePointAction = nullptr;

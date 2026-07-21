@@ -148,16 +148,17 @@ void QgsGeoreferencerMainWindow::setupToolbars()
   mToolBar->addSeparator();
 
   mSyncZoomAction = mToolBar->addAction(
-    QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Sync zoom" ) );
+    QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "同步缩放" ) );
   mSyncZoomAction->setObjectName( QStringLiteral( "rsGeorefSyncZoomAction" ) );
   mSyncZoomAction->setToolTip( tr(
-    "同步缩放：开启后 SRC 与 REF 画布联动缩放/平移，便于对照同名地物取点。" ) );
+    "同步缩放（默认关）：两侧 CRS 一致且范围相近时才建议开启。\n"
+    "不同 CRS 时联动会弄乱取点坐标。" ) );
   mSyncZoomAction->setStatusTip( mSyncZoomAction->toolTip() );
   mSyncZoomAction->setWhatsThis( mSyncZoomAction->toolTip() );
 
   mSiftAction = mToolBar->addAction(
     QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ),
-    tr( "Auto match (SIFT)" ),
+    tr( "SIFT 自动匹配" ),
     this, &QgsGeoreferencerMainWindow::runSiftMatch );
   mSiftAction->setObjectName( QStringLiteral( "rsGeorefSiftAction" ) );
   mSiftAction->setToolTip( tr(

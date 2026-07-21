@@ -134,6 +134,7 @@ public slots:
     void selectAll();
     void zoomIn();
     void zoomOut();
+    void zoomFullExtent();
     void panMap();
     void identifyFeatures();
     void refreshMap();
@@ -235,7 +236,6 @@ private slots:
     void updateExtents();
     void updateCrsDisplay();
     void setProjectCrs();
-    void zoomFullExtent();
     void zoomToLayer();
 
 private:

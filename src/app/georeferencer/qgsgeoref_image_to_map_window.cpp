@@ -141,10 +141,10 @@ void QgsGeorefImageToMapWindow::setupToolbars()
   mToolBar->addSeparator();
   addGcpEditActions( mToolBar, QStringLiteral( "rsGeorefI2M" ) );
   mToolBar->addSeparator();
-  auto *refresh = mToolBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Refresh map" ),
+  auto *refresh = mToolBar->addAction( QIcon( QStringLiteral( ":/icons/refresh_view" ) ), tr( "刷新地图" ),
                        this, &QgsGeorefImageToMapWindow::refreshMapLayersFromProject );
   refresh->setToolTip( tr(
-    "刷新地图：将主窗口工程中当前可见图层同步到 Map 预览画布。"
+    "刷新地图：将主工程当前可见图层同步到 Map 预览。"
     "主图增删图层或改可见性后点此更新。" ) );
   refresh->setStatusTip( refresh->toolTip() );
   refresh->setWhatsThis( refresh->toolTip() );
