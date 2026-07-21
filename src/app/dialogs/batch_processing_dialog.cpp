@@ -1,6 +1,7 @@
 // src/app/dialogs/batch_processing_dialog.cpp
 #include "batch_processing_dialog.h"
 #include "dialog_help_catalog.h"
+#include "dialog_utils.h"
 
 #include <qgsapplication.h>
 #include <qgsprocessingregistry.h>
@@ -14,6 +15,8 @@
 #include <QEventLoop>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QFormLayout>
+#include <QFrame>
 #include <QLabel>
 #include <QComboBox>
 #include <QListWidget>
@@ -25,102 +28,108 @@
 #include <QFileInfo>
 #include <QStringList>
 
-BatchProcessingDialog::BatchProcessingDialog(QWidget *parent)
-    : QDialog(parent)
+BatchProcessingDialog::BatchProcessingDialog( QWidget *parent )
+  : QDialog( parent )
 {
-    setWindowTitle(tr("Batch Processing"));
-    
-    SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "batch_processing" ) );
-    resize(600, 500);
-    setupUi();
+  setWindowTitle( tr( "批量处理" ) );
+  SicnuUi::polishDialog( this, 560 );
+  SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "batch_processing" ) );
+  resize( 620, 520 );
+  setupUi();
 }
 
 void BatchProcessingDialog::setupUi()
 {
-    auto *mainLayout = new QVBoxLayout(this);
+  auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
 
-    // Algorithm selection
-    auto *algLayout = new QHBoxLayout();
-    algLayout->addWidget(new QLabel(tr("Algorithm:"), this));
-    m_algorithmCombo = new QComboBox(this);
-    m_algorithmCombo->setMinimumWidth(300);
-    SicnuDialogHelp::tip( m_algorithmCombo, tr(
-      "选择要批量运行的处理算法。建议先在工具箱对单文件验证参数。" ) );
-    connect(m_algorithmCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &BatchProcessingDialog::onAlgorithmChanged);
-    algLayout->addWidget(m_algorithmCombo);
-    mainLayout->addLayout(algLayout);
+  // Help strip
+  auto *banner = SicnuUi::makeSection(
+    this, tr( "流程" ),
+    tr( "选算法 → 添加文件 → 设输出目录 → 运行批量。" ) );
+  qobject_cast<QVBoxLayout *>( banner->layout() )->addWidget(  SicnuUi::makeHintLabel(
+    banner, SicnuDialogHelp::shortForTool(
+              QStringLiteral( "batch_processing" ), tr( "批量处理" ) ) ) );
+  mainLayout->addWidget( banner );
 
-    // Populate algorithm combo
-    const auto algorithms = QgsApplication::processingRegistry()->algorithms();
-    for (const QgsProcessingAlgorithm *alg : algorithms) {
-        m_algorithmCombo->addItem(
-            QStringLiteral("%1 (%2)").arg(alg->displayName(), alg->provider()->name()),
-            alg->id());
-    }
+  QFrame *algSec = SicnuUi::makeSection( this, tr( "算法" ) );
+  auto *algForm = new QFormLayout();
+  algForm->setContentsMargins( 0, 0, 0, 0 );
+  m_algorithmCombo = new QComboBox( algSec );
+  m_algorithmCombo->setMinimumWidth( 300 );
+  SicnuDialogHelp::tip( m_algorithmCombo, tr(
+    "选择要批量运行的算法。建议先在工具箱对单文件验证。" ) );
+  connect( m_algorithmCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+           this, &BatchProcessingDialog::onAlgorithmChanged );
+  algForm->addRow( tr( "处理算法" ), m_algorithmCombo );
+  qobject_cast<QVBoxLayout *>( algSec->layout() )->addLayout( algForm );
+  mainLayout->addWidget( algSec );
 
-    // Input files
-    mainLayout->addWidget(new QLabel(tr("Input Files:"), this));
+  const auto algorithms = QgsApplication::processingRegistry()->algorithms();
+  for ( const QgsProcessingAlgorithm *alg : algorithms )
+  {
+    m_algorithmCombo->addItem(
+      QStringLiteral( "%1 (%2)" ).arg( alg->displayName(), alg->provider()->name() ),
+      alg->id() );
+  }
 
-    auto *fileButtonLayout = new QHBoxLayout();
-    auto *addFilesBtn = new QPushButton(tr("Add Files..."), this);
-    SicnuDialogHelp::tip( addFilesBtn, tr( "添加待批量处理的输入文件。" ) );
-    connect(addFilesBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onAddFiles);
-    fileButtonLayout->addWidget(addFilesBtn);
+  QFrame *fileSec = SicnuUi::makeSection( this, tr( "输入文件" ) );
+  m_fileList = new QListWidget( fileSec );
+  m_fileList->setSelectionMode( QListWidget::ExtendedSelection );
+  m_fileList->setMinimumHeight( 140 );
+  SicnuDialogHelp::tip( m_fileList, tr( "待处理文件列表。" ) );
+  qobject_cast<QVBoxLayout *>( fileSec->layout() )->addWidget(  m_fileList );
+  auto *fileButtonLayout = new QHBoxLayout();
+  auto *addFilesBtn = new QPushButton( tr( "添加文件…" ), fileSec );
+  SicnuUi::markSecondary( addFilesBtn );
+  connect( addFilesBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onAddFiles );
+  fileButtonLayout->addWidget( addFilesBtn );
+  auto *removeBtn = new QPushButton( tr( "移除选中" ), fileSec );
+  SicnuUi::markSecondary( removeBtn );
+  connect( removeBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onRemoveSelected );
+  fileButtonLayout->addWidget( removeBtn );
+  fileButtonLayout->addStretch();
+  qobject_cast<QVBoxLayout *>( fileSec->layout() )->addLayout( fileButtonLayout );
+  mainLayout->addWidget( fileSec );
 
-    auto *removeBtn = new QPushButton(tr("Remove Selected"), this);
-    SicnuDialogHelp::tip( removeBtn, tr( "从列表移除选中文件。" ) );
-    connect(removeBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onRemoveSelected);
-    fileButtonLayout->addWidget(removeBtn);
-    fileButtonLayout->addStretch();
-    mainLayout->addLayout(fileButtonLayout);
+  QFrame *outSec = SicnuUi::makeSection( this, tr( "输出" ) );
+  auto *outForm = new QFormLayout();
+  outForm->setContentsMargins( 0, 0, 0, 0 );
+  m_outputDirEdit = new QLineEdit( outSec );
+  SicnuDialogHelp::tip( m_outputDirEdit, tr( "所有结果写入此目录。" ) );
+  auto *browseBtn = new QPushButton( tr( "浏览…" ), outSec );
+  SicnuUi::markSecondary( browseBtn );
+  connect( browseBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onBrowseOutputDir );
+  auto *outRow = new QHBoxLayout();
+  outRow->addWidget( m_outputDirEdit, 1 );
+  outRow->addWidget( browseBtn );
+  outForm->addRow( tr( "输出目录" ), outRow );
+  qobject_cast<QVBoxLayout *>( outSec->layout() )->addLayout( outForm );
+  mainLayout->addWidget( outSec );
 
-    m_fileList = new QListWidget(this);
-    m_fileList->setSelectionMode(QListWidget::ExtendedSelection);
-    SicnuDialogHelp::tip( m_fileList, tr( "待处理文件列表。可多选后移除。" ) );
-    mainLayout->addWidget(m_fileList);
+  m_progressBar = new QProgressBar( this );
+  m_progressBar->setVisible( false );
+  mainLayout->addWidget( m_progressBar );
+  m_statusLabel = SicnuUi::makeHintLabel( this, tr( "就绪" ) );
+  mainLayout->addWidget( m_statusLabel );
 
-    // Output directory
-    auto *outLayout = new QHBoxLayout();
-    outLayout->addWidget(new QLabel(tr("Output Directory:"), this));
-    m_outputDirEdit = new QLineEdit(this);
-    SicnuDialogHelp::tip( m_outputDirEdit, tr( "所有结果写入此目录，文件名由输入派生。" ) );
-    outLayout->addWidget(m_outputDirEdit);
-    auto *browseBtn = new QPushButton(tr("Browse..."), this);
-    SicnuDialogHelp::tip( browseBtn, tr( "选择输出目录。" ) );
-    connect(browseBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onBrowseOutputDir);
-    outLayout->addWidget(browseBtn);
-    mainLayout->addLayout(outLayout);
-
-    // Progress
-    m_progressBar = new QProgressBar(this);
-    m_progressBar->setVisible(false);
-    mainLayout->addWidget(m_progressBar);
-
-    m_statusLabel = new QLabel(this);
-    mainLayout->addWidget(m_statusLabel);
-
-    // Buttons
-    auto *btnLayout = new QHBoxLayout();
-    btnLayout->addStretch();
-    m_runButton = new QPushButton(tr("Run Batch"), this);
-    SicnuDialogHelp::tip( m_runButton, tr( "按列表顺序运行算法。运行中请勿关闭对话框。" ) );
-    connect(m_runButton, &QPushButton::clicked, this, &BatchProcessingDialog::onRun);
-    btnLayout->addWidget(m_runButton);
-    auto *closeBtn = new QPushButton(tr("Close"), this);
-    connect(closeBtn, &QPushButton::clicked, this, &QDialog::accept);
-    btnLayout->addWidget(closeBtn);
-    mainLayout->addLayout(btnLayout);
-
-    auto *helpRow = new QHBoxLayout();
-    helpRow->addStretch();
-    auto *helpBtn = new QPushButton( tr( "帮助" ), this );
-    SicnuDialogHelp::tip( helpBtn, tr( "查看本对话框说明。" ) );
-    connect( helpBtn, &QPushButton::clicked, this, [this]() {
-        SicnuDialogHelp::showToolHelp( this, QStringLiteral( "batch_processing" ), windowTitle() );
-    } );
-    helpRow->addWidget( helpBtn );
-    mainLayout->addLayout( helpRow );
+  auto *btnLayout = SicnuUi::makeActionRow( this );
+  auto *helpBtn = new QPushButton( tr( "帮助" ), this );
+  SicnuUi::markSecondary( helpBtn );
+  connect( helpBtn, &QPushButton::clicked, this, [this]() {
+    SicnuDialogHelp::showToolHelp( this, QStringLiteral( "batch_processing" ), windowTitle() );
+  } );
+  btnLayout->addWidget( helpBtn );
+  btnLayout->addStretch();
+  auto *closeBtn = new QPushButton( tr( "关闭" ), this );
+  SicnuUi::markSecondary( closeBtn );
+  connect( closeBtn, &QPushButton::clicked, this, &QDialog::accept );
+  btnLayout->addWidget( closeBtn );
+  m_runButton = new QPushButton( tr( "运行批量" ), this );
+  SicnuUi::markPrimary( m_runButton );
+  SicnuDialogHelp::tip( m_runButton, tr( "按列表顺序运行。运行中请勿关闭。" ) );
+  connect( m_runButton, &QPushButton::clicked, this, &BatchProcessingDialog::onRun );
+  btnLayout->addWidget( m_runButton );
+  mainLayout->addLayout( btnLayout );
 }
 
 void BatchProcessingDialog::setAlgorithmId(const QString &algorithmId)

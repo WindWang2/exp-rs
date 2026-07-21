@@ -143,11 +143,11 @@ void RasterProcessingDialogBase::setupOutputRow( QVBoxLayout *layout )
   auto *pathLabel = new QLabel( tr( "文件路径" ), sec );
   SicnuDialogHelp::tip( pathLabel, tr( "输出 GeoTIFF 路径。运行前必须填写。" ) );
   form->addRow( pathLabel, row );
-  sec->layout()->addItem( form );
+  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
 
   auto *hint = SicnuUi::makeHintLabel(
     sec, tr( "提示：处理完成后可从日志或工程图层中加载结果。" ) );
-  sec->layout()->addWidget( hint );
+  qobject_cast<QVBoxLayout *>( sec->layout() )->addWidget(  hint );
 
   layout->addWidget( sec );
 }

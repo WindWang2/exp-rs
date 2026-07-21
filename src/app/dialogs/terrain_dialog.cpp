@@ -9,149 +9,137 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
-#include <QGroupBox>
+#include <QFrame>
 #include <QLabel>
 #include <QMessageBox>
 #include <QVBoxLayout>
 #include <QFileInfo>
 
 TerrainDialog::TerrainDialog( QWidget *parent )
-    : RasterProcessingDialogBase( parent )
+  : RasterProcessingDialogBase( parent )
 {
-    setWindowTitle( tr( "Terrain Analysis" ) );
-    setMinimumWidth( 450 );
-    setupUi();
+  setWindowTitle( tr( "地形分析" ) );
+  setMinimumWidth( 480 );
+  setupUi();
 }
 
 void TerrainDialog::setupUi()
 {
-    auto *mainLayout = qobject_cast<QVBoxLayout*>(layout());
-    if (!mainLayout) {
-        mainLayout = new QVBoxLayout(this);
-    
-    setupHelpBanner(mainLayout);
-}
+  auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
+  setupHelpBanner( mainLayout );
 
-    // Input section
-    auto *inputGroup = new QGroupBox( tr( "Input" ) );
-    auto *inputLayout = new QFormLayout( inputGroup );
+  QFrame *inputSec = SicnuUi::makeSection(
+    this, tr( "输入" ),
+    tr( "选择 DEM 与分析产品。米制投影下坡度/阴影更可靠。" ) );
+  auto *inputForm = new QFormLayout();
+  inputForm->setContentsMargins( 0, 0, 0, 0 );
+  inputForm->setHorizontalSpacing( 12 );
+  inputForm->setVerticalSpacing( 8 );
 
-    mLayerCombo = new QComboBox;
-    SicnuDialogHelp::tip( mLayerCombo, tr( "DEM 高程栅格图层。米制投影下坡度/阴影更可靠。" ) );
-    inputLayout->addRow( tr( "DEM Layer:" ), mLayerCombo );
+  mLayerCombo = new QComboBox( inputSec );
+  SicnuDialogHelp::tip( mLayerCombo, tr( "DEM 高程栅格。" ) );
+  inputForm->addRow( tr( "DEM 图层" ), mLayerCombo );
 
-    mAnalysisCombo = new QComboBox;
-    mAnalysisCombo->addItem( tr( "Slope (degrees)" ), "slope" );
-    mAnalysisCombo->addItem( tr( "Aspect (degrees)" ), "aspect" );
-    mAnalysisCombo->addItem( tr( "Hillshade" ), "hillshade" );
-    mAnalysisCombo->addItem( tr( "Roughness (max-min)" ), "roughness" );
-    mAnalysisCombo->addItem( tr( "TRI (Terrain Ruggedness)" ), "tri" );
-    mAnalysisCombo->addItem( tr( "TPI (Topographic Position)" ), "tpi" );
-    SicnuDialogHelp::tip( mAnalysisCombo, tr(
-      "• Slope/Aspect：坡度(°)/坡向(°)\n"
-      "• Hillshade：山体阴影（用下方太阳参数）\n"
-      "• Roughness/TRI/TPI：粗糙度与地形位置" ) );
-    inputLayout->addRow( tr( "Analysis:" ), mAnalysisCombo );
+  mAnalysisCombo = new QComboBox( inputSec );
+  mAnalysisCombo->addItem( tr( "坡度 (度)" ), "slope" );
+  mAnalysisCombo->addItem( tr( "坡向 (度)" ), "aspect" );
+  mAnalysisCombo->addItem( tr( "山体阴影" ), "hillshade" );
+  mAnalysisCombo->addItem( tr( "粗糙度 Roughness" ), "roughness" );
+  mAnalysisCombo->addItem( tr( "TRI 地形起伏" ), "tri" );
+  mAnalysisCombo->addItem( tr( "TPI 地形位置" ), "tpi" );
+  SicnuDialogHelp::tip( mAnalysisCombo, tr(
+    "坡度/坡向；Hillshade 需太阳方位/高度；Roughness/TRI/TPI。" ) );
+  inputForm->addRow( tr( "分析类型" ), mAnalysisCombo );
+  qobject_cast<QVBoxLayout *>( inputSec->layout() )->addLayout( inputForm );
+  mainLayout->addWidget( inputSec );
 
-    mainLayout->addWidget( inputGroup );
+  QFrame *paramSec = SicnuUi::makeSection(
+    this, tr( "参数" ),
+    tr( "像元大小常自动估算；太阳参数仅用于山体阴影。" ) );
+  auto *paramForm = new QFormLayout();
+  paramForm->setContentsMargins( 0, 0, 0, 0 );
+  paramForm->setHorizontalSpacing( 12 );
+  paramForm->setVerticalSpacing( 8 );
 
-    // Parameters section
-    auto *paramGroup = new QGroupBox( tr( "Parameters" ) );
-    auto *paramLayout = new QFormLayout( paramGroup );
+  mCellSizeSpin = new QDoubleSpinBox( paramSec );
+  mCellSizeSpin->setRange( 0.001, 10000.0 );
+  mCellSizeSpin->setValue( 1.0 );
+  SicnuDialogHelp::tip( mCellSizeSpin, tr( "像元大小（地图单位）。" ) );
+  paramForm->addRow( tr( "像元大小" ), mCellSizeSpin );
 
-    mCellSizeSpin = new QDoubleSpinBox;
-    mCellSizeSpin->setRange( 0.001, 10000.0 );
-    mCellSizeSpin->setValue( 1.0 );
-    SicnuDialogHelp::tip( mCellSizeSpin, tr( "像元大小（地图单位）。选图层后常自动估算。" ) );
-    paramLayout->addRow( tr( "Cell Size:" ), mCellSizeSpin );
+  mSunAzimuthSpin = new QDoubleSpinBox( paramSec );
+  mSunAzimuthSpin->setRange( 0, 360 );
+  mSunAzimuthSpin->setValue( 315.0 );
+  mSunAzimuthSpin->setSuffix( QStringLiteral( "°" ) );
+  SicnuDialogHelp::tip( mSunAzimuthSpin, tr( "太阳方位：自北顺时针 0–360°。" ) );
+  paramForm->addRow( tr( "太阳方位" ), mSunAzimuthSpin );
 
-    mSunAzimuthSpin = new QDoubleSpinBox;
-    mSunAzimuthSpin->setRange( 0, 360 );
-    mSunAzimuthSpin->setValue( 315.0 );
-    mSunAzimuthSpin->setSuffix( "°" );
-    SicnuDialogHelp::tip( mSunAzimuthSpin, tr( "太阳方位角：自北顺时针 0–360°。仅 Hillshade。" ) );
-    paramLayout->addRow( tr( "Sun Azimuth:" ), mSunAzimuthSpin );
+  mSunElevationSpin = new QDoubleSpinBox( paramSec );
+  mSunElevationSpin->setRange( 0, 90 );
+  mSunElevationSpin->setValue( 45.0 );
+  mSunElevationSpin->setSuffix( QStringLiteral( "°" ) );
+  SicnuDialogHelp::tip( mSunElevationSpin, tr( "太阳高度：0–90°。" ) );
+  paramForm->addRow( tr( "太阳高度" ), mSunElevationSpin );
+  qobject_cast<QVBoxLayout *>( paramSec->layout() )->addLayout( paramForm );
+  mainLayout->addWidget( paramSec );
 
-    mSunElevationSpin = new QDoubleSpinBox;
-    mSunElevationSpin->setRange( 0, 90 );
-    mSunElevationSpin->setValue( 45.0 );
-    mSunElevationSpin->setSuffix( "°" );
-    SicnuDialogHelp::tip( mSunElevationSpin, tr( "太阳高度角：地平线以上 0–90°。仅 Hillshade。" ) );
-    paramLayout->addRow( tr( "Sun Elevation:" ), mSunElevationSpin );
+  setupOutputRow( mainLayout );
+  mStatusLabel = SicnuUi::makeHintLabel( this, tr( "就绪" ) );
+  mainLayout->addWidget( mStatusLabel );
+  setupButtonBar( mainLayout );
+  mainLayout->addStretch( 1 );
 
-    mainLayout->addWidget( paramGroup );
-
-    // Output section (using base class)
-    setupOutputRow(mainLayout);
-
-    // Status
-    mStatusLabel = new QLabel(tr("Ready"));
-    mainLayout->addWidget(mStatusLabel);
-
-    // Buttons (using base class)
-    setupButtonBar(mainLayout);
-
-    // Populate layers
-    populateRasterLayerCombo( mLayerCombo );
-
-    // Auto-detect cell size from first layer
-    connect( mLayerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ), this,
-             [this]( int idx ) {
-                 if ( auto *rl = mLayerCombo->itemData( idx ).value<QgsRasterLayer *>() )
-                 {
-                     // Try to get pixel size from raster extent
-                     auto extent = rl->extent();
-                     if ( extent.width() > 0 && extent.height() > 0 && rl->width() > 0 )
-                     {
-                         double cs = extent.width() / rl->width();
-                         mCellSizeSpin->setValue( cs );
-                     }
-                 }
-             } );
-
-    // Trigger initial cell size detection
-    if ( mLayerCombo->count() > 0 )
-        mLayerCombo->setCurrentIndex( 0 );
+  populateRasterLayerCombo( mLayerCombo );
+  connect( mLayerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ), this,
+           [this]( int idx ) {
+             if ( auto *rl = mLayerCombo->itemData( idx ).value<QgsRasterLayer *>() )
+             {
+               auto extent = rl->extent();
+               if ( extent.width() > 0 && extent.height() > 0 && rl->width() > 0 )
+                 mCellSizeSpin->setValue( extent.width() / rl->width() );
+             }
+           } );
+  if ( mLayerCombo->count() > 0 )
+    mLayerCombo->setCurrentIndex( 0 );
 }
 
 void TerrainDialog::onRun()
 {
-    auto *rl = mLayerCombo->currentData().value<QgsRasterLayer *>();
-    if ( !rl )
-    {
-        QMessageBox::warning( this, tr( "Error" ), tr( "Select a DEM layer." ) );
-        return;
-    }
+  auto *rl = mLayerCombo->currentData().value<QgsRasterLayer *>();
+  if ( !rl )
+  {
+    QMessageBox::warning( this, dialogTitle(), tr( "请选择 DEM 图层。" ) );
+    return;
+  }
 
-    QString outPath = outputPath();
-    if ( outPath.isEmpty() )
-    {
-        const QString inputPath = rl->source();
-        const QString analysisType = mAnalysisCombo->currentData().toString();
-        outPath = QFileInfo( inputPath ).path() + "/" + QFileInfo( inputPath ).baseName()
-                     + "_" + analysisType + ".tif";
-        m_outputEdit->setText( outPath );
-    }
+  QString outPath = outputPath();
+  if ( outPath.isEmpty() )
+  {
+    const QString inputPath = rl->source();
+    const QString analysisType = mAnalysisCombo->currentData().toString();
+    outPath = QFileInfo( inputPath ).path() + QLatin1Char( '/' )
+              + QFileInfo( inputPath ).baseName()
+              + QLatin1Char( '_' ) + analysisType + QStringLiteral( ".tif" );
+    m_outputEdit->setText( outPath );
+  }
 
-    if ( mStatusLabel )
-        mStatusLabel->setText( tr( "Processing..." ) );
+  if ( mStatusLabel )
+    mStatusLabel->setText( tr( "处理中…" ) );
 
-    Json::Value params( Json::objectValue );
-    params["input"] = rl->source().toStdString();
-    params["output"] = outPath.toStdString();
-    params["product"] = mAnalysisCombo->currentData().toString().toStdString();
-    params["cellSize"] = mCellSizeSpin->value();
-    params["sunAzimuth"] = mSunAzimuthSpin->value();
-    params["sunElevation"] = mSunElevationSpin->value();
-    params["nodata"] = -9999.0;
-
-    runOperatorTask( QStringLiteral( "rs:terrain_analysis" ), params );
+  setRasterLayer( rl );
+  Json::Value params( Json::objectValue );
+  params["input"] = rl->source().toStdString();
+  params["output"] = outPath.toStdString();
+  params["product"] = mAnalysisCombo->currentData().toString().toStdString();
+  params["cellSize"] = mCellSizeSpin->value();
+  params["sunAzimuth"] = mSunAzimuthSpin->value();
+  params["sunElevation"] = mSunElevationSpin->value();
+  params["nodata"] = -9999.0;
+  runOperatorTask( QStringLiteral( "rs:terrain_analysis" ), params );
 }
 
 void TerrainDialog::onAnalysisFinished()
 {
-    // Legacy slot kept for binary compatibility of any external connections;
-    // terrain now uses runOperatorTask / base-class completion handlers.
-    if ( mStatusLabel )
-        mStatusLabel->setText( tr( "Ready" ) );
+  if ( mStatusLabel )
+    mStatusLabel->setText( tr( "就绪" ) );
 }

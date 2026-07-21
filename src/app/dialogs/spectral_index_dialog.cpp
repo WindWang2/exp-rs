@@ -8,6 +8,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
+#include <QFrame>
 #include <QLabel>
 #include <QComboBox>
 
@@ -80,8 +81,8 @@ void SpectralIndexDialog::setupUi()
   SicnuDialogHelp::tip( m_swirCombo, tr( "短波红外。用于 NDBI/MNDWI。" ) );
   form->addRow( m_swirLabel, m_swirCombo );
 
-  sec->layout()->addItem( form );
-  sec->layout()->addWidget( SicnuUi::makeHintLabel(
+  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
+  qobject_cast<QVBoxLayout *>( sec->layout() )->addWidget(  SicnuUi::makeHintLabel(
     sec, tr( "默认按 Landsat/Sentinel 常见顺序预填，请按实际数据核对波段。" ) ) );
   mainLayout->addWidget( sec );
 

@@ -7,7 +7,7 @@
 
 #include <QVBoxLayout>
 #include <QFormLayout>
-#include <QGroupBox>
+#include <QFrame>
 #include <QLabel>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -15,179 +15,169 @@
 
 #include <qgsproject.h>
 
-ChangeDetectionDialog::ChangeDetectionDialog(QWidget *parent)
-    : RasterProcessingDialogBase(parent)
+ChangeDetectionDialog::ChangeDetectionDialog( QWidget *parent )
+  : RasterProcessingDialogBase( parent )
 {
-    setWindowTitle(tr("Change Detection"));
-    setMinimumWidth(450);
-    setupUi();
+  setWindowTitle( tr( "变化检测" ) );
+  setMinimumWidth( 480 );
+  setupUi();
 }
 
 void ChangeDetectionDialog::setupUi()
 {
-    auto *mainLayout = qobject_cast<QVBoxLayout*>(layout());
-    if (!mainLayout) {
-        mainLayout = new QVBoxLayout(this);
-    
-    setupHelpBanner(mainLayout);
-}
+  auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
+  setupHelpBanner( mainLayout );
 
-    // --- Input group ---
-    auto *inputGroup = new QGroupBox(tr("Input Images"), this);
-    auto *formLayout = new QFormLayout(inputGroup);
+  QFrame *inputSec = SicnuUi::makeSection(
+    this, tr( "双时相输入" ),
+    tr( "前后时相须几何对齐。可先做影像配准。" ) );
+  auto *form = new QFormLayout();
+  form->setContentsMargins( 0, 0, 0, 0 );
+  form->setHorizontalSpacing( 12 );
+  form->setVerticalSpacing( 8 );
 
-    m_beforeLayerCombo = new QComboBox(this);
-    m_afterLayerCombo = new QComboBox(this);
-    m_beforeBandCombo = new QComboBox(this);
-    m_afterBandCombo = new QComboBox(this);
-    SicnuDialogHelp::tip( m_beforeLayerCombo, tr( "变化前（较早时相）影像图层。须与后期几何对齐。" ) );
-    SicnuDialogHelp::tip( m_afterLayerCombo, tr( "变化后（较晚时相）影像图层。" ) );
-    SicnuDialogHelp::tip( m_beforeBandCombo, tr( "前期参与计算的波段。" ) );
-    SicnuDialogHelp::tip( m_afterBandCombo, tr( "后期参与计算的波段（宜与前期对应）。" ) );
+  m_beforeLayerCombo = new QComboBox( inputSec );
+  m_afterLayerCombo = new QComboBox( inputSec );
+  m_beforeBandCombo = new QComboBox( inputSec );
+  m_afterBandCombo = new QComboBox( inputSec );
+  SicnuDialogHelp::tip( m_beforeLayerCombo, tr( "变化前（较早）影像。" ) );
+  SicnuDialogHelp::tip( m_afterLayerCombo, tr( "变化后（较晚）影像。" ) );
+  SicnuDialogHelp::tip( m_beforeBandCombo, tr( "前期波段。" ) );
+  SicnuDialogHelp::tip( m_afterBandCombo, tr( "后期波段。" ) );
+  form->addRow( tr( "前期影像" ), m_beforeLayerCombo );
+  form->addRow( tr( "前期波段" ), m_beforeBandCombo );
+  form->addRow( tr( "后期影像" ), m_afterLayerCombo );
+  form->addRow( tr( "后期波段" ), m_afterBandCombo );
+  qobject_cast<QVBoxLayout *>( inputSec->layout() )->addLayout( form );
+  mainLayout->addWidget( inputSec );
 
-    formLayout->addRow(tr("Before Image:"), m_beforeLayerCombo);
-    formLayout->addRow(tr("Before Band:"), m_beforeBandCombo);
-    formLayout->addRow(tr("After Image:"), m_afterLayerCombo);
-    formLayout->addRow(tr("After Band:"), m_afterBandCombo);
+  QFrame *methodSec = SicnuUi::makeSection(
+    this, tr( "检测方法" ),
+    tr( "差值 / 归一化差值 / 变化掩膜。" ) );
+  auto *methodForm = new QFormLayout();
+  methodForm->setContentsMargins( 0, 0, 0, 0 );
+  methodForm->setHorizontalSpacing( 12 );
 
-    mainLayout->addWidget(inputGroup);
+  m_methodCombo = new QComboBox( methodSec );
+  m_methodCombo->addItem( tr( "差值 Difference" ), QStringLiteral( "difference" ) );
+  m_methodCombo->addItem( tr( "归一化差值" ), QStringLiteral( "normalized_difference" ) );
+  m_methodCombo->addItem( tr( "变化掩膜" ), QStringLiteral( "change_mask" ) );
+  SicnuDialogHelp::tip( m_methodCombo, tr(
+    "• 差值：后−前\n• 归一化差值：(后−前)/(后+前)\n• 掩膜：|差值|≥阈值" ) );
+  methodForm->addRow( tr( "方法" ), m_methodCombo );
 
-    // --- Method group ---
-    auto *methodGroup = new QGroupBox(tr("Detection Method"), this);
-    auto *methodLayout = new QFormLayout(methodGroup);
+  m_thresholdLabel = new QLabel( tr( "阈值" ), methodSec );
+  m_thresholdSpin = new QDoubleSpinBox( methodSec );
+  m_thresholdSpin->setRange( 0.0, 10000.0 );
+  m_thresholdSpin->setDecimals( 2 );
+  m_thresholdSpin->setValue( 10.0 );
+  m_thresholdSpin->setVisible( false );
+  m_thresholdLabel->setVisible( false );
+  SicnuDialogHelp::tip( m_thresholdSpin, tr( "变化掩膜阈值。" ) );
+  methodForm->addRow( m_thresholdLabel, m_thresholdSpin );
+  qobject_cast<QVBoxLayout *>( methodSec->layout() )->addLayout( methodForm );
+  mainLayout->addWidget( methodSec );
 
-    m_methodCombo = new QComboBox(this);
-    m_methodCombo->addItem(tr("Difference"), QStringLiteral("difference"));
-    m_methodCombo->addItem(tr("Normalized Difference"), QStringLiteral("normalized_difference"));
-    m_methodCombo->addItem(tr("Change Mask"), QStringLiteral("change_mask"));
-    SicnuDialogHelp::tip( m_methodCombo, tr(
-      "• Difference：后−前\n"
-      "• Normalized Difference：(后−前)/(后+前)\n"
-      "• Change Mask：|差值|≥阈值 的二值掩膜" ) );
+  setupOutputRow( mainLayout );
+  m_statusLabel = SicnuUi::makeHintLabel( this, tr( "就绪" ) );
+  mainLayout->addWidget( m_statusLabel );
+  setupButtonBar( mainLayout );
+  mainLayout->addStretch( 1 );
 
-    m_thresholdLabel = new QLabel(tr("Threshold:"), this);
-    m_thresholdSpin = new QDoubleSpinBox(this);
-    m_thresholdSpin->setRange(0.0, 10000.0);
-    m_thresholdSpin->setDecimals(2);
-    m_thresholdSpin->setValue(10.0);
-    m_thresholdSpin->setVisible(false);
-    m_thresholdLabel->setVisible(false);
-    SicnuDialogHelp::tip( m_thresholdSpin, tr( "Change Mask 阈值，与影像 DN/指数量纲一致。" ) );
+  connect( m_beforeLayerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+           this, &ChangeDetectionDialog::updateBandSelectors );
+  connect( m_afterLayerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+           this, &ChangeDetectionDialog::updateBandSelectors );
+  connect( m_methodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+           this, &ChangeDetectionDialog::onMethodChanged );
 
-    methodLayout->addRow(tr("Method:"), m_methodCombo);
-    methodLayout->addRow(m_thresholdLabel, m_thresholdSpin);
-
-    mainLayout->addWidget(methodGroup);
-
-    setupOutputRow(mainLayout);
-
-    m_statusLabel = new QLabel(tr("Ready"), this);
-    mainLayout->addWidget(m_statusLabel);
-
-    setupButtonBar(mainLayout);
-
-    connect(m_beforeLayerCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &ChangeDetectionDialog::updateBandSelectors);
-    connect(m_afterLayerCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &ChangeDetectionDialog::updateBandSelectors);
-    connect(m_methodCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &ChangeDetectionDialog::onMethodChanged);
+  populateLayers();
 }
 
 void ChangeDetectionDialog::populateLayers()
 {
-    m_beforeLayerCombo->clear();
-    m_afterLayerCombo->clear();
-
-    const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
-    for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
-        QgsRasterLayer *rasterLayer = qobject_cast<QgsRasterLayer *>(it.value());
-        if (rasterLayer && rasterLayer->isValid()) {
-            m_beforeLayerCombo->addItem(rasterLayer->name(), rasterLayer->id());
-            m_afterLayerCombo->addItem(rasterLayer->name(), rasterLayer->id());
-        }
+  m_beforeLayerCombo->clear();
+  m_afterLayerCombo->clear();
+  const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
+  for ( auto it = layers.constBegin(); it != layers.constEnd(); ++it )
+  {
+    QgsRasterLayer *rasterLayer = qobject_cast<QgsRasterLayer *>( it.value() );
+    if ( rasterLayer && rasterLayer->isValid() )
+    {
+      m_beforeLayerCombo->addItem( rasterLayer->name(), rasterLayer->id() );
+      m_afterLayerCombo->addItem( rasterLayer->name(), rasterLayer->id() );
     }
-
-    updateBandSelectors();
+  }
+  updateBandSelectors();
 }
 
 void ChangeDetectionDialog::updateBandSelectors()
 {
-    if (m_beforeLayerCombo->count() > 0) {
-        QString beforeId = m_beforeLayerCombo->currentData().toString();
-        QgsRasterLayer *beforeLayer = QgsProject::instance()->mapLayer<QgsRasterLayer *>(beforeId);
-        m_beforeBandCombo->clear();
-        if (beforeLayer && beforeLayer->isValid()) {
-            for (int i = 1; i <= beforeLayer->bandCount(); ++i) {
-                m_beforeBandCombo->addItem(tr("Band %1").arg(i), i);
-            }
-        }
-    } else {
-        m_beforeBandCombo->clear();
-    }
-
-    if (m_afterLayerCombo->count() > 0) {
-        QString afterId = m_afterLayerCombo->currentData().toString();
-        QgsRasterLayer *afterLayer = QgsProject::instance()->mapLayer<QgsRasterLayer *>(afterId);
-        m_afterBandCombo->clear();
-        if (afterLayer && afterLayer->isValid()) {
-            for (int i = 1; i <= afterLayer->bandCount(); ++i) {
-                m_afterBandCombo->addItem(tr("Band %1").arg(i), i);
-            }
-        }
-    } else {
-        m_afterBandCombo->clear();
-    }
+  auto fillBands = []( QComboBox *layerCombo, QComboBox *bandCombo ) {
+    bandCombo->clear();
+    const QString id = layerCombo->currentData().toString();
+    auto *rl = qobject_cast<QgsRasterLayer *>( QgsProject::instance()->mapLayer( id ) );
+    if ( !rl )
+      return;
+    for ( int i = 1; i <= rl->bandCount(); ++i )
+      bandCombo->addItem( tr( "波段 %1" ).arg( i ), i );
+  };
+  fillBands( m_beforeLayerCombo, m_beforeBandCombo );
+  fillBands( m_afterLayerCombo, m_afterBandCombo );
 }
 
-void ChangeDetectionDialog::onMethodChanged(int index)
+void ChangeDetectionDialog::onMethodChanged( int index )
 {
-    const bool isChangeMask = (index == 2);
-    m_thresholdSpin->setVisible(isChangeMask);
-    m_thresholdLabel->setVisible(isChangeMask);
+  const bool showTh = ( index == 2 );
+  m_thresholdSpin->setVisible( showTh );
+  m_thresholdLabel->setVisible( showTh );
 }
 
 bool ChangeDetectionDialog::validateInputs()
 {
-    if (outputPath().isEmpty()) {
-        QMessageBox::warning(this, dialogTitle(), tr("Please specify an output file."));
-        return false;
-    }
-    if (m_beforeLayerCombo->count() == 0 || m_afterLayerCombo->count() == 0) {
-        QMessageBox::warning(this, dialogTitle(),
-                             tr("Please ensure both before and after images are available."));
-        return false;
-    }
-    return true;
+  if ( outputPath().isEmpty() )
+  {
+    QMessageBox::warning( this, dialogTitle(), tr( "请指定输出文件。" ) );
+    return false;
+  }
+  if ( m_beforeLayerCombo->currentData().toString().isEmpty()
+       || m_afterLayerCombo->currentData().toString().isEmpty() )
+  {
+    QMessageBox::warning( this, dialogTitle(), tr( "请选择前期与后期影像。" ) );
+    return false;
+  }
+  return true;
 }
 
 void ChangeDetectionDialog::onRun()
 {
-    const QString beforeId = m_beforeLayerCombo->currentData().toString();
-    const QString afterId = m_afterLayerCombo->currentData().toString();
-    QgsRasterLayer *beforeLayer = QgsProject::instance()->mapLayer<QgsRasterLayer *>(beforeId);
-    QgsRasterLayer *afterLayer = QgsProject::instance()->mapLayer<QgsRasterLayer *>(afterId);
+  if ( !validateInputs() )
+    return;
 
-    if (!beforeLayer || !beforeLayer->isValid()) {
-        QMessageBox::warning(this, dialogTitle(), tr("Invalid before image layer."));
-        return;
-    }
-    if (!afterLayer || !afterLayer->isValid()) {
-        QMessageBox::warning(this, dialogTitle(), tr("Invalid after image layer."));
-        return;
-    }
+  auto *before = qobject_cast<QgsRasterLayer *>(
+    QgsProject::instance()->mapLayer( m_beforeLayerCombo->currentData().toString() ) );
+  auto *after = qobject_cast<QgsRasterLayer *>(
+    QgsProject::instance()->mapLayer( m_afterLayerCombo->currentData().toString() ) );
+  if ( !before || !before->isValid() )
+  {
+    QMessageBox::warning( this, dialogTitle(), tr( "前期影像无效。" ) );
+    return;
+  }
+  if ( !after || !after->isValid() )
+  {
+    QMessageBox::warning( this, dialogTitle(), tr( "后期影像无效。" ) );
+    return;
+  }
 
-    if (m_statusLabel)
-        m_statusLabel->setText(tr("Processing..."));
-
-    Json::Value params(Json::objectValue);
-    params["before"] = beforeLayer->source().toStdString();
-    params["after"] = afterLayer->source().toStdString();
-    params["output"] = outputPath().toStdString();
-    params["method"] = m_methodCombo->currentData().toString().toStdString();
-    params["threshold"] = m_thresholdSpin->value();
-    params["beforeBand"] = m_beforeBandCombo->currentData().toInt();
-    params["afterBand"] = m_afterBandCombo->currentData().toInt();
-
-    runOperatorTask(QStringLiteral("rs:change_detection"), params);
+  setRasterLayer( before );
+  Json::Value params( Json::objectValue );
+  params["before"] = before->source().toStdString();
+  params["after"] = after->source().toStdString();
+  params["beforeBand"] = m_beforeBandCombo->currentData().toInt();
+  params["afterBand"] = m_afterBandCombo->currentData().toInt();
+  params["method"] = m_methodCombo->currentData().toString().toStdString();
+  params["threshold"] = m_thresholdSpin->value();
+  params["output"] = outputPath().toStdString();
+  m_statusLabel->setText( tr( "运行中…" ) );
+  runOperatorTask( QStringLiteral( "rs:change_detection" ), params );
 }

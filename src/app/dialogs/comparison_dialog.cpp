@@ -1,6 +1,7 @@
 // src/app/dialogs/comparison_dialog.cpp
 #include "comparison_dialog.h"
 #include "dialog_help_catalog.h"
+#include "dialog_utils.h"
 #include "widgets/comparison_widget.h"
 
 #include <qgsrasterlayer.h>
@@ -8,75 +9,73 @@
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QFrame>
 #include <QLabel>
 #include <QComboBox>
 #include <QPushButton>
 #include <QMessageBox>
 
-ComparisonDialog::ComparisonDialog(QWidget *parent)
-    : QDialog(parent)
+ComparisonDialog::ComparisonDialog( QWidget *parent )
+  : QDialog( parent )
 {
-    setWindowTitle(tr("Compare Layers"));
-    
-    SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "comparison" ) );
-resize(800, 600);
-    setupUi();
+  setWindowTitle( tr( "图层对比" ) );
+  SicnuUi::polishDialog( this, 800 );
+  SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "comparison" ) );
+  resize( 860, 640 );
+  setupUi();
 }
 
 void ComparisonDialog::setupUi()
 {
-    auto *mainLayout = new QVBoxLayout(this);
+  auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
+  mainLayout->addWidget( SicnuUi::makeHintLabel(
+    this, tr( "选择左右图层后点「加载」，并排目视对比配准、变化或分类结果。" ) ) );
 
-    // Layer selection bar
-    auto *layerLayout = new QHBoxLayout();
+  QFrame *bar = SicnuUi::makeSection( this, tr( "图层" ) );
+  auto *layerLayout = new QHBoxLayout();
+  layerLayout->setContentsMargins( 0, 0, 0, 0 );
+  layerLayout->addWidget( new QLabel( tr( "左侧" ), bar ) );
+  m_leftLayerCombo = new QComboBox( bar );
+  m_leftLayerCombo->setMinimumWidth( 200 );
+  SicnuDialogHelp::tip( m_leftLayerCombo, tr( "左侧对比栅格。" ) );
+  layerLayout->addWidget( m_leftLayerCombo, 1 );
+  layerLayout->addWidget( new QLabel( tr( "右侧" ), bar ) );
+  m_rightLayerCombo = new QComboBox( bar );
+  m_rightLayerCombo->setMinimumWidth( 200 );
+  SicnuDialogHelp::tip( m_rightLayerCombo, tr( "右侧对比栅格。" ) );
+  layerLayout->addWidget( m_rightLayerCombo, 1 );
+  m_loadButton = new QPushButton( tr( "加载" ), bar );
+  SicnuUi::markPrimary( m_loadButton );
+  SicnuDialogHelp::tip( m_loadButton, tr( "加载到对比视图。" ) );
+  connect( m_loadButton, &QPushButton::clicked, this, &ComparisonDialog::onLoadLayers );
+  layerLayout->addWidget( m_loadButton );
+  qobject_cast<QVBoxLayout *>( bar->layout() )->addLayout( layerLayout );
+  mainLayout->addWidget( bar );
 
-    layerLayout->addWidget(new QLabel(tr("Left Layer:"), this));
-    m_leftLayerCombo = new QComboBox(this);
-    m_leftLayerCombo->setMinimumWidth(200);
-    SicnuDialogHelp::tip( m_leftLayerCombo, tr( "左侧对比栅格图层。" ) );
-    layerLayout->addWidget(m_leftLayerCombo);
+  m_comparisonWidget = new ComparisonWidget( this );
+  mainLayout->addWidget( m_comparisonWidget, 1 );
 
-    layerLayout->addWidget(new QLabel(tr("Right Layer:"), this));
-    m_rightLayerCombo = new QComboBox(this);
-    m_rightLayerCombo->setMinimumWidth(200);
-    SicnuDialogHelp::tip( m_rightLayerCombo, tr( "右侧对比栅格图层。" ) );
-    layerLayout->addWidget(m_rightLayerCombo);
-
-    m_loadButton = new QPushButton(tr("Load"), this);
-    SicnuDialogHelp::tip( m_loadButton, tr( "加载两侧图层到对比视图。" ) );
-    connect(m_loadButton, &QPushButton::clicked, this, &ComparisonDialog::onLoadLayers);
-    layerLayout->addWidget(m_loadButton);
-
-    mainLayout->addLayout(layerLayout);
-
-    // Comparison widget
-    m_comparisonWidget = new ComparisonWidget(this);
-    mainLayout->addWidget(m_comparisonWidget);
-
-    // Populate layer combos with raster layers from project
-    const auto layers = QgsProject::instance()->mapLayers().values();
-    for (QgsMapLayer *layer : layers) {
-        if (layer->type() == Qgis::LayerType::Raster) {
-            QString name = layer->name();
-            m_leftLayerCombo->addItem(name, layer->id());
-            m_rightLayerCombo->addItem(name, layer->id());
-        }
+  const auto layers = QgsProject::instance()->mapLayers().values();
+  for ( QgsMapLayer *layer : layers )
+  {
+    if ( layer->type() == Qgis::LayerType::Raster )
+    {
+      m_leftLayerCombo->addItem( layer->name(), layer->id() );
+      m_rightLayerCombo->addItem( layer->name(), layer->id() );
     }
+  }
+  if ( m_rightLayerCombo->count() > 1 )
+    m_rightLayerCombo->setCurrentIndex( 1 );
 
-    // Select different layers by default if available
-    if (m_rightLayerCombo->count() > 1) {
-        m_rightLayerCombo->setCurrentIndex(1);
-    }
-
-    auto *helpRow = new QHBoxLayout();
-    helpRow->addStretch();
-    auto *helpBtn = new QPushButton( tr( "帮助" ), this );
-    SicnuDialogHelp::tip( helpBtn, tr( "查看本对话框说明。" ) );
-    connect( helpBtn, &QPushButton::clicked, this, [this]() {
-        SicnuDialogHelp::showToolHelp( this, QStringLiteral( "comparison" ), windowTitle() );
-    } );
-    helpRow->addWidget( helpBtn );
-    mainLayout->addLayout( helpRow );
+  auto *helpRow = SicnuUi::makeActionRow( this );
+  helpRow->addStretch();
+  auto *helpBtn = new QPushButton( tr( "帮助" ), this );
+  SicnuUi::markSecondary( helpBtn );
+  connect( helpBtn, &QPushButton::clicked, this, [this]() {
+    SicnuDialogHelp::showToolHelp( this, QStringLiteral( "comparison" ), windowTitle() );
+  } );
+  helpRow->addWidget( helpBtn );
+  mainLayout->addLayout( helpRow );
 }
 
 void ComparisonDialog::setLeftLayer(QgsRasterLayer *layer)

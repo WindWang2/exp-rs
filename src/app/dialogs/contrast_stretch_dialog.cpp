@@ -12,6 +12,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
+#include <QFrame>
 #include <QLabel>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -72,7 +73,7 @@ void ContrastStretchDialog::setupUi()
   SicnuDialogHelp::tip( m_stddevSpin, tr( "拉伸到 mean±K·σ。常用 2。" ) );
   form->addRow( m_stddevLabel, m_stddevSpin );
 
-  sec->layout()->addItem( form );
+  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
   mainLayout->addWidget( sec );
 
   setupOutputRow( mainLayout );

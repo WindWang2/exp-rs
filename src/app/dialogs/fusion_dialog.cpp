@@ -13,7 +13,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
-#include <QGroupBox>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
@@ -22,171 +22,147 @@
 #include <QProcess>
 
 FusionDialog::FusionDialog( QWidget *parent )
-    : RasterProcessingDialogBase( parent )
+  : RasterProcessingDialogBase( parent )
 {
-    setWindowTitle( tr( "Image Fusion / Pan-sharpening" ) );
-    setMinimumWidth( 500 );
+  setWindowTitle( tr( "影像融合 / 全色锐化" ) );
+  setMinimumWidth( 520 );
 
-    auto *mainLayout = qobject_cast<QVBoxLayout*>(layout());
-    if (!mainLayout) {
-        mainLayout = new QVBoxLayout(this);
-    
-    setupHelpBanner(mainLayout);
-}
+  auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
+  setupHelpBanner( mainLayout );
 
-    // Input section
-    auto *inputGroup = new QGroupBox( tr( "Input" ) );
-    auto *inputLayout = new QFormLayout( inputGroup );
+  QFrame *sec = SicnuUi::makeSection(
+    this, tr( "输入与方法" ),
+    tr( "全色 + 多光谱须大致同范围并已配准。按方法显示权重或 RGB 波段。" ) );
+  auto *inputLayout = new QFormLayout();
+  inputLayout->setContentsMargins( 0, 0, 0, 0 );
+  inputLayout->setHorizontalSpacing( 12 );
+  inputLayout->setVerticalSpacing( 8 );
 
-    mPanCombo = new QComboBox;
-    SicnuDialogHelp::tip( mPanCombo, tr( "全色高分辨率单波段。须与多光谱大致同范围并已配准。" ) );
-    inputLayout->addRow( tr( "Panchromatic (high-res):" ), mPanCombo );
+  mPanCombo = new QComboBox( sec );
+  SicnuDialogHelp::tip( mPanCombo, tr( "全色高分辨率单波段。" ) );
+  inputLayout->addRow( tr( "全色 (高分)" ), mPanCombo );
 
-    mMsCombo = new QComboBox;
-    SicnuDialogHelp::tip( mMsCombo, tr( "多光谱低分辨率影像。融合后空间分辨率接近全色。" ) );
-    inputLayout->addRow( tr( "Multispectral (low-res):" ), mMsCombo );
+  mMsCombo = new QComboBox( sec );
+  SicnuDialogHelp::tip( mMsCombo, tr( "多光谱低分辨率影像。" ) );
+  inputLayout->addRow( tr( "多光谱 (低分)" ), mMsCombo );
 
-    mMethodCombo = new QComboBox;
-    mMethodCombo->addItem( tr( "Linear Weighted Fusion" ), "linear" );
-    mMethodCombo->addItem( tr( "Brovey Transform" ), "brovey" );
-    mMethodCombo->addItem( tr( "IHS Fusion (requires RGB)" ), "ihs" );
-    mMethodCombo->addItem( tr( "PCA Fusion" ), "pca" );
-    mMethodCombo->addItem( tr( "OTB BundleToPerfectSensor" ), "otb_btps" );
-    mMethodCombo->addItem( tr( "GDAL Pansharpen" ), "gdal_pansharp" );
-    SicnuDialogHelp::tip( mMethodCombo, tr(
-      "融合方法：Linear（可调权重）/ Brovey / IHS（需 RGB 波段）/ PCA；"
-      "或调用 OTB/GDAL 外部 pansharpen。" ) );
-    inputLayout->addRow( tr( "Method:" ), mMethodCombo );
+  mMethodCombo = new QComboBox( sec );
+  mMethodCombo->addItem( tr( "线性加权" ), "linear" );
+  mMethodCombo->addItem( tr( "Brovey 变换" ), "brovey" );
+  mMethodCombo->addItem( tr( "IHS 融合 (需 RGB)" ), "ihs" );
+  mMethodCombo->addItem( tr( "PCA 融合" ), "pca" );
+  mMethodCombo->addItem( tr( "OTB BundleToPerfectSensor" ), "otb_btps" );
+  mMethodCombo->addItem( tr( "GDAL Pansharpen" ), "gdal_pansharp" );
+  SicnuDialogHelp::tip( mMethodCombo, tr(
+    "Linear / Brovey / IHS / PCA；或 OTB/GDAL 外部 pansharpen。" ) );
+  inputLayout->addRow( tr( "方法" ), mMethodCombo );
 
-    // Pan weight for linear fusion
-    mWeightLabel = new QLabel( tr( "Pan Weight:" ) );
-    mWeightSpin = new QDoubleSpinBox();
-    mWeightSpin->setRange( 0.0, 1.0 );
-    mWeightSpin->setValue( 0.5 );
-    mWeightSpin->setSingleStep( 0.1 );
-    mWeightSpin->setDecimals( 2 );
-    SicnuDialogHelp::tip( mWeightSpin, tr( "线性融合中全色占比 0–1。越大空间细节越强，光谱可能更偏。" ) );
-    inputLayout->addRow( mWeightLabel, mWeightSpin );
+  mWeightLabel = new QLabel( tr( "全色权重" ), sec );
+  mWeightSpin = new QDoubleSpinBox( sec );
+  mWeightSpin->setRange( 0.0, 1.0 );
+  mWeightSpin->setValue( 0.5 );
+  mWeightSpin->setSingleStep( 0.1 );
+  mWeightSpin->setDecimals( 2 );
+  SicnuDialogHelp::tip( mWeightSpin, tr( "线性融合中全色占比 0–1。" ) );
+  inputLayout->addRow( mWeightLabel, mWeightSpin );
 
-    // Per-band weights container (populated when layer is selected)
-    mBandWeightsWidget = new QWidget;
-    mBandWeightsLayout = new QFormLayout( mBandWeightsWidget );
-    mBandWeightsLayout->setContentsMargins( 0, 0, 0, 0 );
-    inputLayout->addRow( tr( "Band Weights:" ), mBandWeightsWidget );
+  mBandWeightsWidget = new QWidget( sec );
+  mBandWeightsLayout = new QFormLayout( mBandWeightsWidget );
+  mBandWeightsLayout->setContentsMargins( 0, 0, 0, 0 );
+  inputLayout->addRow( tr( "分波段权重" ), mBandWeightsWidget );
 
-    // Hide weight controls by default, show only for linear fusion
-    mWeightLabel->setVisible( false );
-    mWeightSpin->setVisible( false );
-    mBandWeightsWidget->setVisible( false );
+  mWeightLabel->setVisible( false );
+  mWeightSpin->setVisible( false );
+  mBandWeightsWidget->setVisible( false );
 
-    connect( mMethodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ), this,
-             [this]( int idx ) {
-                 QString method = mMethodCombo->itemData( idx ).toString();
-                 bool isLinear = ( method == "linear" );
-                 mWeightLabel->setVisible( isLinear );
-                 mWeightSpin->setVisible( isLinear );
-                 mBandWeightsWidget->setVisible( isLinear );
-                 bool isIhs = ( method == "ihs" );
-                 mRedLabel->setVisible( isIhs );
-                 mRedCombo->setVisible( isIhs );
-                 mGreenLabel->setVisible( isIhs );
-                 mGreenCombo->setVisible( isIhs );
-                 mBlueLabel->setVisible( isIhs );
-                 mBlueCombo->setVisible( isIhs );
-             } );
+  mRedCombo = new QComboBox( sec );
+  mGreenCombo = new QComboBox( sec );
+  mBlueCombo = new QComboBox( sec );
+  SicnuDialogHelp::tip( mRedCombo, tr( "IHS：红波段。" ) );
+  SicnuDialogHelp::tip( mGreenCombo, tr( "IHS：绿波段。" ) );
+  SicnuDialogHelp::tip( mBlueCombo, tr( "IHS：蓝波段。" ) );
+  mRedLabel = new QLabel( tr( "红波段" ), sec );
+  mGreenLabel = new QLabel( tr( "绿波段" ), sec );
+  mBlueLabel = new QLabel( tr( "蓝波段" ), sec );
+  inputLayout->addRow( mRedLabel, mRedCombo );
+  inputLayout->addRow( mGreenLabel, mGreenCombo );
+  inputLayout->addRow( mBlueLabel, mBlueCombo );
+  mRedLabel->setVisible( false );
+  mRedCombo->setVisible( false );
+  mGreenLabel->setVisible( false );
+  mGreenCombo->setVisible( false );
+  mBlueLabel->setVisible( false );
+  mBlueCombo->setVisible( false );
 
-    // RGB band selection for IHS fusion
-    mRedCombo = new QComboBox;
-    mGreenCombo = new QComboBox;
-    mBlueCombo = new QComboBox;
-    SicnuDialogHelp::tip( mRedCombo, tr( "IHS 融合：多光谱红波段。" ) );
-    SicnuDialogHelp::tip( mGreenCombo, tr( "IHS 融合：多光谱绿波段。" ) );
-    SicnuDialogHelp::tip( mBlueCombo, tr( "IHS 融合：多光谱蓝波段。" ) );
-    mRedLabel = new QLabel( tr( "Red Band:" ) );
-    mGreenLabel = new QLabel( tr( "Green Band:" ) );
-    mBlueLabel = new QLabel( tr( "Blue Band:" ) );
-    inputLayout->addRow( mRedLabel, mRedCombo );
-    inputLayout->addRow( mGreenLabel, mGreenCombo );
-    inputLayout->addRow( mBlueLabel, mBlueCombo );
+  auto updateMethodUi = [this]( int idx ) {
+    QString method = mMethodCombo->itemData( idx ).toString();
+    bool isLinear = ( method == QLatin1String( "linear" ) );
+    mWeightLabel->setVisible( isLinear );
+    mWeightSpin->setVisible( isLinear );
+    mBandWeightsWidget->setVisible( isLinear );
+    bool isIhs = ( method == QLatin1String( "ihs" ) );
+    mRedLabel->setVisible( isIhs );
+    mRedCombo->setVisible( isIhs );
+    mGreenLabel->setVisible( isIhs );
+    mGreenCombo->setVisible( isIhs );
+    mBlueLabel->setVisible( isIhs );
+    mBlueCombo->setVisible( isIhs );
+  };
+  connect( mMethodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+           this, updateMethodUi );
 
-    // Hide RGB combos by default, show only for IHS
-    mRedLabel->setVisible( false );
-    mRedCombo->setVisible( false );
-    mGreenLabel->setVisible( false );
-    mGreenCombo->setVisible( false );
-    mBlueLabel->setVisible( false );
-    mBlueCombo->setVisible( false );
+  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( inputLayout );
+  mainLayout->addWidget( sec );
+  setupOutputRow( mainLayout );
+  mStatusLabel = SicnuUi::makeHintLabel( this, tr( "就绪" ) );
+  mainLayout->addWidget( mStatusLabel );
+  setupButtonBar( mainLayout );
+  mainLayout->addStretch( 1 );
 
-    connect( mMethodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ), this,
-             [this]( int idx ) {
-                 bool isIhs = ( mMethodCombo->itemData( idx ).toString() == "ihs" );
-                 mRedLabel->setVisible( isIhs );
-                 mRedCombo->setVisible( isIhs );
-                 mGreenLabel->setVisible( isIhs );
-                 mGreenCombo->setVisible( isIhs );
-                 mBlueLabel->setVisible( isIhs );
-                 mBlueCombo->setVisible( isIhs );
-             } );
+  populateRasterLayerCombo( mPanCombo );
+  populateRasterLayerCombo( mMsCombo );
 
-    mainLayout->addWidget( inputGroup );
-
-    // Output section (using base class)
-    setupOutputRow(mainLayout);
-
-    // Status
-    mStatusLabel = new QLabel(tr("Ready"));
-    mainLayout->addWidget(mStatusLabel);
-
-    // Buttons (using base class)
-    setupButtonBar(mainLayout);
-
-    // Populate layers
-    populateRasterLayerCombo( mPanCombo );
-    populateRasterLayerCombo( mMsCombo );
-
-    // Populate RGB band combos and per-band weights when multispectral layer changes
-    connect( mMsCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ), this, [this]( int idx ) {
-        mRedCombo->clear();
-        mGreenCombo->clear();
-        mBlueCombo->clear();
-        mBandWeightSpins.clear();
-
-        // Clear old band weight widgets
-        while ( mBandWeightsLayout->count() > 0 ) {
-            QLayoutItem *item = mBandWeightsLayout->takeAt( 0 );
-            delete item->widget();
-            delete item;
-        }
-
-        auto *rl = mMsCombo->itemData( idx ).value<QgsRasterLayer *>();
-        if ( rl ) {
-            int nBands = rl->bandCount();
-            for ( int i = 1; i <= nBands; ++i ) {
-                QString name = rl->bandName( i );
-                if ( name.isEmpty() ) name = tr( "Band %1" ).arg( i );
-                mRedCombo->addItem( name, i );
-                mGreenCombo->addItem( name, i );
-                mBlueCombo->addItem( name, i );
-
-                // Add per-band weight spin
-                auto *spin = new QDoubleSpinBox();
-                spin->setRange( 0.0, 1.0 );
-                spin->setValue( 0.5f );
-                spin->setSingleStep( 0.1 );
-                spin->setDecimals( 2 );
-                mBandWeightsLayout->addRow( name + ":", spin );
-                mBandWeightSpins.append( spin );
-            }
-            // Default R=1, G=2, B=3
-            if ( mRedCombo->count() > 0 ) mRedCombo->setCurrentIndex( 0 );
-            if ( mGreenCombo->count() > 1 ) mGreenCombo->setCurrentIndex( 1 );
-            if ( mBlueCombo->count() > 2 ) mBlueCombo->setCurrentIndex( 2 );
-        }
-    } );
-
-    // Trigger initial population
-    if ( mMsCombo->count() > 0 )
-        emit mMsCombo->currentIndexChanged( 0 );
+  connect( mMsCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ), this, [this]( int idx ) {
+    mRedCombo->clear();
+    mGreenCombo->clear();
+    mBlueCombo->clear();
+    mBandWeightSpins.clear();
+    while ( mBandWeightsLayout->count() > 0 )
+    {
+      QLayoutItem *item = mBandWeightsLayout->takeAt( 0 );
+      delete item->widget();
+      delete item;
+    }
+    auto *rl = mMsCombo->itemData( idx ).value<QgsRasterLayer *>();
+    if ( rl )
+    {
+      int nBands = rl->bandCount();
+      for ( int i = 1; i <= nBands; ++i )
+      {
+        QString name = rl->bandName( i );
+        if ( name.isEmpty() )
+          name = tr( "波段 %1" ).arg( i );
+        mRedCombo->addItem( name, i );
+        mGreenCombo->addItem( name, i );
+        mBlueCombo->addItem( name, i );
+        auto *spin = new QDoubleSpinBox();
+        spin->setRange( 0.0, 1.0 );
+        spin->setValue( 0.5 );
+        spin->setSingleStep( 0.1 );
+        spin->setDecimals( 2 );
+        mBandWeightsLayout->addRow( name + QLatin1Char( ':' ), spin );
+        mBandWeightSpins.append( spin );
+      }
+      if ( mRedCombo->count() > 0 )
+        mRedCombo->setCurrentIndex( 0 );
+      if ( mGreenCombo->count() > 1 )
+        mGreenCombo->setCurrentIndex( 1 );
+      if ( mBlueCombo->count() > 2 )
+        mBlueCombo->setCurrentIndex( 2 );
+    }
+  } );
+  if ( mMsCombo->count() > 0 )
+    emit mMsCombo->currentIndexChanged( 0 );
 }
 
 void FusionDialog::onRun()

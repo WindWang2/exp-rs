@@ -35,6 +35,7 @@ private:
     QComboBox *m_kernelSizeCombo = nullptr;
     QDoubleSpinBox *m_noiseVarSpin = nullptr;
     QDoubleSpinBox *m_dampingSpin = nullptr;
+    QLabel *m_noiseVarLabel = nullptr;
     QLabel *m_dampingLabel = nullptr;
 
 };

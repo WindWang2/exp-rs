@@ -38,7 +38,7 @@ void PcaDialog::setupUi()
       "输出主成分个数，必须 ≤ 输入波段数。"
       "前几个 PC 通常含大部分方差，用于去相关与降维。" ) );
     form->addRow( tr( "主成分数" ), m_componentsSpin );
-    sec->layout()->addItem( form );
+    qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
     mainLayout->addWidget( sec );
 
     setupOutputRow( mainLayout );

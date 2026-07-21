@@ -1,10 +1,13 @@
 #include "rs_sift_dialog.h"
 #include "dialogs/dialog_help_catalog.h"
+#include "dialogs/dialog_utils.h"
 
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QFrame>
 #include <QLabel>
+#include <QPushButton>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
@@ -13,6 +16,7 @@ RsSiftDialog::RsSiftDialog( QWidget *parent )
 {
   setWindowTitle( tr( "SIFT 自动匹配参数" ) );
   setObjectName( QStringLiteral( "rsSiftDialog" ) );
+  SicnuUi::polishDialog( this, 420 );
   SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "sift_match" ) );
 
   const RsSiftMatcher::Params defaults;
@@ -47,28 +51,41 @@ RsSiftDialog::RsSiftDialog( QWidget *parent )
   mMaxImageSide->setSuffix( QStringLiteral( " px" ) );
   mMaxImageSide->setValue( defaults.maxImageSide );
 
-  auto *form = new QFormLayout;
-  form->addRow( tr( "对比度阈值 (contrastThreshold)" ),     mContrast );
-  form->addRow( tr( "最多匹配数 (maxMatches)" ),            mMaxMatches );
-  form->addRow( tr( "最小内点比 (minInlierRatio)" ),        mMinInlier );
-  form->addRow( tr( "RANSAC 容差 (ransacThreshold)" ),      mRansacThresh );
-  form->addRow( tr( "最大边长 (maxImageSide)" ),            mMaxImageSide );
-  SicnuDialogHelp::tip( mContrast, tr( "特征点对比度阈值，越大则匹配点越少、越稳定。" ) );
-  SicnuDialogHelp::tip( mMaxMatches, tr( "保留的最大匹配对数上限。" ) );
-  SicnuDialogHelp::tip( mMinInlier, tr( "RANSAC 后内点比例下限，过低则结果不可靠。" ) );
-  SicnuDialogHelp::tip( mRansacThresh, tr( "RANSAC 像素容差，控制几何一致性。" ) );
-  SicnuDialogHelp::tip( mMaxImageSide, tr( "匹配前将影像缩放到此最大边长以加速。" ) );
+  SicnuDialogHelp::tip( mContrast, tr( "特征对比度阈值，越大点越少越稳。" ) );
+  SicnuDialogHelp::tip( mMaxMatches, tr( "最大匹配对数。" ) );
+  SicnuDialogHelp::tip( mMinInlier, tr( "RANSAC 内点比例下限。" ) );
+  SicnuDialogHelp::tip( mRansacThresh, tr( "RANSAC 像素容差。" ) );
+  SicnuDialogHelp::tip( mMaxImageSide, tr( "匹配前最大边长（加速）。" ) );
+
+  auto *root = SicnuUi::makeDialogRootLayout( this );
+  root->addWidget( SicnuUi::makeHintLabel(
+    this, SicnuDialogHelp::shortForTool( QStringLiteral( "sift_match" ),
+                                         tr( "SIFT 自动匹配" ) ) ) );
+
+  QFrame *sec = SicnuUi::makeSection( this, tr( "匹配参数" ) );
+  auto *form = new QFormLayout();
+  form->setContentsMargins( 0, 0, 0, 0 );
+  form->setHorizontalSpacing( 12 );
+  form->setVerticalSpacing( 8 );
+  form->addRow( tr( "对比度阈值" ), mContrast );
+  form->addRow( tr( "最多匹配数" ), mMaxMatches );
+  form->addRow( tr( "最小内点比" ), mMinInlier );
+  form->addRow( tr( "RANSAC 容差" ), mRansacThresh );
+  form->addRow( tr( "最大边长" ), mMaxImageSide );
+  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
+  root->addWidget( sec );
 
   auto *buttons = new QDialogButtonBox(
     QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Help, this );
+  buttons->button( QDialogButtonBox::Ok )->setText( tr( "确定" ) );
+  buttons->button( QDialogButtonBox::Cancel )->setText( tr( "取消" ) );
+  buttons->button( QDialogButtonBox::Help )->setText( tr( "帮助" ) );
+  SicnuUi::markPrimary( buttons->button( QDialogButtonBox::Ok ) );
   connect( buttons, &QDialogButtonBox::accepted, this, &QDialog::accept );
   connect( buttons, &QDialogButtonBox::rejected, this, &QDialog::reject );
   connect( buttons, &QDialogButtonBox::helpRequested, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, QStringLiteral( "sift_match" ), windowTitle() );
   } );
-
-  auto *root = new QVBoxLayout( this );
-  root->addLayout( form );
   root->addWidget( buttons );
 }
 

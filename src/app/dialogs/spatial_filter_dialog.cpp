@@ -50,7 +50,7 @@ void SpatialFilterDialog::setupUi()
   SicnuDialogHelp::tip( m_kernelSizeCombo, tr( "卷积核大小。越大平滑/边缘响应范围越大。" ) );
   form->addRow( tr( "核大小" ), m_kernelSizeCombo );
 
-  sec->layout()->addItem( form );
+  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
   mainLayout->addWidget( sec );
 
   setupOutputRow( mainLayout );

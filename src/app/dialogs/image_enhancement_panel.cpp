@@ -1,6 +1,7 @@
 // image_enhancement_panel.cpp — Unified Image Enhancement Panel
 #include "image_enhancement_panel.h"
 #include "dialog_help_catalog.h"
+#include "dialog_utils.h"
 #include "async_gdal_runner.h"
 #include "processing/algorithms/image_enhancement.h"
 #include "processing/algorithms/image_fusion.h"
@@ -14,6 +15,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
+#include <QFrame>
 #include <QGroupBox>
 #include <QComboBox>
 #include <QSpinBox>
@@ -31,78 +33,62 @@
 #include <cpl_string.h>
 #include <cmath>
 
-ImageEnhancementPanel::ImageEnhancementPanel(QWidget *parent)
-    : RasterProcessingDialogBase(parent)
+ImageEnhancementPanel::ImageEnhancementPanel( QWidget *parent )
+  : RasterProcessingDialogBase( parent )
 {
-    setWindowTitle(tr("Image Enhancement"));
-    resize(500, 600);
-    setupUi();
+  setWindowTitle( tr( "影像增强" ) );
+  resize( 520, 640 );
+  setupUi();
 }
 
 void ImageEnhancementPanel::setupUi()
 {
-    auto *mainLayout = qobject_cast<QVBoxLayout*>(layout());
-    if (!mainLayout) {
-        mainLayout = new QVBoxLayout(this);
-    
-    setupHelpBanner(mainLayout);
-}
+  auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
+  setupHelpBanner( mainLayout );
 
-    // Method selection
-    auto *methodLayout = new QHBoxLayout();
-    methodLayout->addWidget(new QLabel(tr("Method:")));
-    m_methodCombo = new QComboBox();
-    m_methodCombo->addItem(tr("Contrast Stretch"), 0);
-    m_methodCombo->addItem(tr("Spatial Filter"), 1);
-    m_methodCombo->addItem(tr("Band Ratio / IHS"), 2);
-    m_methodCombo->addItem(tr("Speckle Filter (SAR)"), 3);
-    SicnuDialogHelp::tip( m_methodCombo, tr(
-      "增强类型：对比度拉伸 / 空间滤波 / 波段比值·IHS / SAR 斑点滤波。"
-      "下方参数页随类型切换。" ) );
-    methodLayout->addWidget(m_methodCombo);
-    mainLayout->addLayout(methodLayout);
+  QFrame *methodSec = SicnuUi::makeSection(
+    this, tr( "增强类型" ),
+    tr( "选择一类增强；下方参数页随类型切换。" ) );
+  auto *methodForm = new QFormLayout();
+  methodForm->setContentsMargins( 0, 0, 0, 0 );
+  m_methodCombo = new QComboBox( methodSec );
+  m_methodCombo->addItem( tr( "对比度拉伸" ), 0 );
+  m_methodCombo->addItem( tr( "空间滤波" ), 1 );
+  m_methodCombo->addItem( tr( "波段比值 / IHS" ), 2 );
+  m_methodCombo->addItem( tr( "斑点滤波 (SAR)" ), 3 );
+  SicnuDialogHelp::tip( m_methodCombo, tr(
+    "对比度拉伸 / 空间滤波 / 波段比值·IHS / SAR 斑点滤波。" ) );
+  methodForm->addRow( tr( "类型" ), m_methodCombo );
+  qobject_cast<QVBoxLayout *>( methodSec->layout() )->addLayout( methodForm );
+  mainLayout->addWidget( methodSec );
 
-    // Parameters stack
-    m_stackedWidget = new QStackedWidget();
+  m_stackedWidget = new QStackedWidget( this );
 
-    // Stretch options
-    auto *stretchGroup = new QGroupBox(tr("Contrast Stretch Parameters"));
-    setupStretchOptions(new QVBoxLayout(stretchGroup));
-    m_stackedWidget->addWidget(stretchGroup);
+  auto *stretchGroup = SicnuUi::makeGroup( this, tr( "对比度拉伸参数" ) );
+  setupStretchOptions( new QVBoxLayout( stretchGroup ) );
+  m_stackedWidget->addWidget( stretchGroup );
 
-    // Filter options
-    auto *filterGroup = new QGroupBox(tr("Spatial Filter Parameters"));
-    setupFilterOptions(new QVBoxLayout(filterGroup));
-    m_stackedWidget->addWidget(filterGroup);
+  auto *filterGroup = SicnuUi::makeGroup( this, tr( "空间滤波参数" ) );
+  setupFilterOptions( new QVBoxLayout( filterGroup ) );
+  m_stackedWidget->addWidget( filterGroup );
 
-    // Band ratio options
-    auto *ratioGroup = new QGroupBox(tr("Band Ratio / IHS Parameters"));
-    setupBandRatioOptions(new QVBoxLayout(ratioGroup));
-    m_stackedWidget->addWidget(ratioGroup);
+  auto *ratioGroup = SicnuUi::makeGroup( this, tr( "波段比值 / IHS 参数" ) );
+  setupBandRatioOptions( new QVBoxLayout( ratioGroup ) );
+  m_stackedWidget->addWidget( ratioGroup );
 
-    // Speckle options
-    auto *speckleGroup = new QGroupBox(tr("Speckle Filter Parameters"));
-    setupSpeckleOptions(new QVBoxLayout(speckleGroup));
-    m_stackedWidget->addWidget(speckleGroup);
+  auto *speckleGroup = SicnuUi::makeGroup( this, tr( "斑点滤波参数" ) );
+  setupSpeckleOptions( new QVBoxLayout( speckleGroup ) );
+  m_stackedWidget->addWidget( speckleGroup );
 
-    mainLayout->addWidget(m_stackedWidget);
+  mainLayout->addWidget( m_stackedWidget, 1 );
+  setupOutputRow( mainLayout );
+  m_statusLabel = SicnuUi::makeHintLabel( this, tr( "就绪" ) );
+  mainLayout->addWidget( m_statusLabel );
+  setupButtonBar( mainLayout );
 
-    // Output file (from base class)
-    setupOutputRow(mainLayout);
-
-    // Status
-    m_statusLabel = new QLabel(tr("Ready"));
-    mainLayout->addWidget(m_statusLabel);
-
-    // Buttons (from base class)
-    setupButtonBar(mainLayout);
-
-    // Connections
-    connect(m_methodCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &ImageEnhancementPanel::onMethodChanged);
-
-    // Initial state
-    onMethodChanged(0);
+  connect( m_methodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+           this, &ImageEnhancementPanel::onMethodChanged );
+  onMethodChanged( 0 );
 }
 
 void ImageEnhancementPanel::setupStretchOptions(QVBoxLayout *layout)

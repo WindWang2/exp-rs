@@ -8,6 +8,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
+#include <QFrame>
 #include <QLabel>
 #include <QMessageBox>
 #include <QLineEdit>
@@ -33,8 +34,8 @@ void BandMathDialog::setupUi()
     "示例：(b1-b2)/(b1+b2)；b1*0.0001\n"
     "支持 + − * / 与括号。" ) );
   form->addRow( tr( "公式" ), m_expressionEdit );
-  sec->layout()->addItem( form );
-  sec->layout()->addWidget( SicnuUi::makeHintLabel(
+  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
+  qobject_cast<QVBoxLayout *>( sec->layout() )->addWidget(  SicnuUi::makeHintLabel(
     sec, tr( "常用：NDVI ≈ (b_nir − b_red) / (b_nir + b_red)；注意除零。" ) ) );
   mainLayout->addWidget( sec );
 
