@@ -14,6 +14,7 @@
 #include <QWidget>
 
 #include "core/sicnu_logging.h"
+#include "dialogs/dialog_help_catalog.h"
 #include "qgis.h"
 #include "qgsapplication.h"
 #include "qgscoordinatereferencesystem.h"
@@ -33,6 +34,8 @@ QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QW
   SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QStringLiteral( "Image 2 Image georef window opened" ) );
   setWindowTitle( tr( "Image Registration · Image 2 Image" ) );
   resize( 1200, 800 );
+  setWhatsThis( SicnuDialogHelp::htmlForTool( QStringLiteral( "georef_i2i" ), windowTitle() ) );
+  setToolTip( SicnuDialogHelp::shortForTool( QStringLiteral( "georef_i2i" ), windowTitle() ) );
 
   setupMenus();
   setupToolbars();

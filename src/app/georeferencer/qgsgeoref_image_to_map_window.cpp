@@ -9,6 +9,7 @@
 #include <QWidget>
 
 #include "core/sicnu_logging.h"
+#include "dialogs/dialog_help_catalog.h"
 #include "qgsgcptransformer.h"
 #include "qgslayertree.h"
 #include "qgsmapcanvas.h"
@@ -21,6 +22,8 @@ QgsGeorefImageToMapWindow::QgsGeorefImageToMapWindow( QgisInterface *iface, QWid
   SICNU_LOG_INFO( SicnuLogTags::Georeferencing, QStringLiteral( "Image 2 Map georef window opened" ) );
   setWindowTitle( tr( "Image Registration · Image 2 Map" ) );
   resize( 1100, 900 );
+  setWhatsThis( SicnuDialogHelp::htmlForTool( QStringLiteral( "georef_i2m" ), windowTitle() ) );
+  setToolTip( SicnuDialogHelp::shortForTool( QStringLiteral( "georef_i2m" ), windowTitle() ) );
 
   setupMenus();
   setupToolbars();

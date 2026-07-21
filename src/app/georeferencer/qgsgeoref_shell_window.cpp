@@ -50,6 +50,7 @@ namespace
   }
 }
 
+#include "dialogs/dialog_help_catalog.h"
 #include "qgis.h"
 #include "qgsapplication.h"
 #include "qgscoordinatereferencesystem.h"
@@ -129,14 +130,16 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   mGcpDock = new QDockWidget( tr( "GCP 表" ), this );
   mGcpDock->setObjectName( gcpDockObjectName );
   mGcpDock->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea );
-  tipWidget( mGcpDock, tr(
-    "地面控制点列表：启用/禁用点、查看残差。点数与分布决定拟合质量。" ) );
+  tipWidget( mGcpDock, SicnuDialogHelp::shortForTool(
+               QStringLiteral( "georef_gcp_table" ), tr( "GCP 控制点表" ) ) );
   mGcpTable = new QgsGCPListWidget( mGcpDock );
   mGcpTable->setGCPList( mGcps );
-  tipWidget( mGcpTable, tr(
-    "控制点列表：源/目标坐标与残差。\n"
-    "右键：定位、启用/禁用、编辑坐标、删除。\n"
-    "Delete 删除选中行；双击 # 或残差列 → 两侧定位。" ) );
+  tipWidget( mGcpTable, SicnuDialogHelp::shortForTool(
+               QStringLiteral( "georef_gcp_table" ), tr( "GCP 控制点表" ) )
+             + QLatin1Char( '\n' )
+             + tr( "右键：定位 / 启用禁用 / 编辑 / 删除。Delete 删行。" ) );
+  mGcpTable->setWhatsThis( SicnuDialogHelp::htmlForTool(
+    QStringLiteral( "georef_gcp_table" ), tr( "GCP 控制点表" ) ) );
   mGcpDock->setWidget( mGcpTable );
   connect( mGcpTable, &QgsGCPListWidget::deleteRowsRequested,
            this, &QgsGeorefShellWindow::deleteGcpRows );
@@ -154,10 +157,12 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   mTaskDock = new QDockWidget( tr( "校正任务" ), this );
   mTaskDock->setObjectName( gcpDockObjectName + QStringLiteral( "_tasks" ) );
   mTaskDock->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea );
-  tipWidget( mTaskDock, tr(
-    "运行历史：点「运行」后任务出现在此，可查看进度、取消或加载结果。" ) );
+  tipWidget( mTaskDock, SicnuDialogHelp::shortForTool(
+               QStringLiteral( "georef_tasks" ), tr( "校正任务列表" ) ) );
   mTaskList = new RsGeorefTaskList( mTaskDock );
   mTaskList->setObjectName( QStringLiteral( "rsGeorefTaskList" ) );
+  mTaskList->setWhatsThis( SicnuDialogHelp::htmlForTool(
+    QStringLiteral( "georef_tasks" ), tr( "校正任务列表" ) ) );
   mTaskDock->setWidget( mTaskList );
   addDockWidget( Qt::BottomDockWidgetArea, mTaskDock );
   tabifyDockWidget( mGcpDock, mTaskDock );
@@ -177,8 +182,8 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   mParamDock = new QDockWidget( tr( "校正参数" ), this );
   mParamDock->setObjectName( paramDockObjectName );
   mParamDock->setAllowedAreas( Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea );
-  tipWidget( mParamDock, tr(
-    "变换方法、重采样、目标 CRS 与输出路径。悬停各控件可查看详细说明。" ) );
+  tipWidget( mParamDock, SicnuDialogHelp::shortForTool(
+               QStringLiteral( "georef_params" ), tr( "校正参数面板" ) ) );
   mParamsPanel = new RsGeorefParamsPanel( mParamDock );
   mParamsPanel->setProfile( profile );
   if ( profile == RsGeorefParamsPanel::Profile::ImageToImage )

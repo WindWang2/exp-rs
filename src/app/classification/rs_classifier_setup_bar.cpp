@@ -2,6 +2,8 @@
 
 #include "rs_classifier_setup_bar.h"
 
+#include "dialogs/dialog_help_catalog.h"
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -25,6 +27,9 @@ void RsClassifierSetupBar::buildLayout()
   root->setContentsMargins( 8, 4, 8, 4 );
   root->setSpacing( 4 );
 
+  SicnuDialogHelp::tip( this, SicnuDialogHelp::shortForTool(
+                          QStringLiteral( "classify_setup" ), tr( "分类设置栏" ) ) );
+
   auto *row = new QHBoxLayout();
   row->setSpacing( 8 );
 
@@ -43,6 +48,15 @@ void RsClassifierSetupBar::buildLayout()
   mBtnMahaDisabled = makeAlgoBtn( tr( "Mahalanobis" ), false );
   mBtnUnetDisabled = makeAlgoBtn( tr( "UNet" ), false );
   mBtnNormalBayes->setChecked( true );
+  SicnuDialogHelp::tip( mBtnNormalBayes, tr(
+    "正态贝叶斯：假设各类光谱呈多维正态，适合样本较充分、类间可分的场景。" ) );
+  SicnuDialogHelp::tip( mBtnSvm, tr(
+    "SVM (RBF)：支持向量机 + 径向基核，适合中等样本、非线性边界。" ) );
+  SicnuDialogHelp::tip( mBtnKMeans, tr(
+    "K-Means：无监督聚类，类别数取自有样本的类；标签可能与 ROI 类号需对应。" ) );
+  SicnuDialogHelp::tip( mBtnRfDisabled, tr( "随机森林：计划中，当前构建未启用。" ) );
+  SicnuDialogHelp::tip( mBtnMahaDisabled, tr( "马氏距离分类：计划中。" ) );
+  SicnuDialogHelp::tip( mBtnUnetDisabled, tr( "UNet 深度学习：计划中。" ) );
 
   // Use an explicit single-toggle group so the three enabled buttons are
   // mutually exclusive. Disabled placeholders are not added to the group.
@@ -79,6 +93,9 @@ void RsClassifierSetupBar::buildLayout()
   mBandsEdit->setPlaceholderText( tr( "e.g. 1,2,3" ) );
   mBandsEdit->setMaximumWidth( 120 );
   mBandsEdit->setObjectName( QStringLiteral( "rsClassifierBands" ) );
+  SicnuDialogHelp::tip( mBandsEdit, tr(
+    "参与分类的波段序号（从 1 开始），逗号分隔。\n"
+    "例：1,2,3 或 2,3,4,5。留空时默认取前若干波段。" ) );
   row->addWidget( mBandsEdit );
 
   // --- Train ratio ----------------------------------------------------------
@@ -90,6 +107,9 @@ void RsClassifierSetupBar::buildLayout()
   mTrainRatioSpin->setValue( 0.7 );
   mTrainRatioSpin->setDecimals( 2 );
   mTrainRatioSpin->setObjectName( QStringLiteral( "rsClassifierTrainRatio" ) );
+  SicnuDialogHelp::tip( mTrainRatioSpin, tr(
+    "分层抽样中用于训练的比例（0.1–0.95）。\n"
+    "其余样本用于测试精度（混淆矩阵）。默认 0.7。" ) );
   row->addWidget( mTrainRatioSpin );
 
   // --- Output path ----------------------------------------------------------
@@ -98,20 +118,37 @@ void RsClassifierSetupBar::buildLayout()
   mOutputEdit = new QLineEdit( this );
   mOutputEdit->setPlaceholderText( tr( "/path/to/classified.tif (留空则提示)" ) );
   mOutputEdit->setObjectName( QStringLiteral( "rsClassifierOutput" ) );
+  SicnuDialogHelp::tip( mOutputEdit, tr(
+    "分类结果 GeoTIFF 路径。留空时运行会弹出保存对话框。" ) );
   row->addWidget( mOutputEdit, /*stretch*/ 1 );
 
   // --- Action buttons -------------------------------------------------------
   mBtnCv = new QPushButton( tr( "⚖ 交叉验证" ), this );
   mBtnCv->setObjectName( QStringLiteral( "rsClassifierBtnCv" ) );
+  SicnuDialogHelp::tip( mBtnCv, tr(
+    "分层 K 折交叉验证，估计模型稳定性（不写整景分类图）。" ) );
   mBtnPreview = new QPushButton( tr( "▶ 快速预览" ), this );
   mBtnPreview->setObjectName( QStringLiteral( "rsClassifierBtnPreview" ) );
+  SicnuDialogHelp::tip( mBtnPreview, tr(
+    "仅对当前地图视口范围分类并临时加载，便于快速试参数。" ) );
   mBtnApply = new QPushButton( tr( "▶ 训练并分类" ), this );
   mBtnApply->setObjectName( QStringLiteral( "rsClassifierBtnApply" ) );
   mBtnApply->setDefault( true );
+  SicnuDialogHelp::tip( mBtnApply, tr(
+    "用 ROI 样本训练并整景分类，写出输出栅格；完成后可做精度评价。" ) );
+
+  auto *helpBtn = new QPushButton( tr( "帮助" ), this );
+  helpBtn->setObjectName( QStringLiteral( "rsClassifierHelpBtn" ) );
+  SicnuDialogHelp::tip( helpBtn, tr( "打开分类设置栏完整说明。" ) );
+  connect( helpBtn, &QPushButton::clicked, this, [this]() {
+    SicnuDialogHelp::showToolHelp( this, QStringLiteral( "classify_setup" ),
+                                   tr( "分类设置" ) );
+  } );
 
   row->addWidget( mBtnCv );
   row->addWidget( mBtnPreview );
   row->addWidget( mBtnApply );
+  row->addWidget( helpBtn );
 
   connect( mBtnApply, &QPushButton::clicked,
            this, &RsClassifierSetupBar::applyRequested );
