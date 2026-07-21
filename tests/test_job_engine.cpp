@@ -133,6 +133,7 @@ struct EngineGuard
     ensureTestOperatorsRegistered();
     auto &eng = JobEngine::instance();
     eng.setListener( nullptr );
+    eng.clearExecutors();
     eng.setMaxWorkers( 2 );
   }
 
@@ -141,6 +142,7 @@ struct EngineGuard
     auto &eng = JobEngine::instance();
     eng.waitUntilIdleForTests( 15000 );
     eng.setListener( nullptr );
+    eng.clearExecutors();
   }
 
   JobEngine &engine() { return JobEngine::instance(); }
@@ -280,4 +282,106 @@ TEST_CASE( "setMaxWorkers clamps to 2..4", "[job]" )
   REQUIRE( eng.maxWorkers() == 4 );
   eng.setMaxWorkers( 3 );
   REQUIRE( eng.maxWorkers() == 3 );
+}
+
+TEST_CASE( "registerExecutor prefix runs without RSOperator", "[job]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+
+  eng.registerExecutor( "mock:", []( const JobRequest &req, RSOperatorContext &ctx ) {
+    ctx.logInfo( "mock-exec" );
+    Json::Value r( Json::objectValue );
+    r["echo"] = req.params.get( "x", 0 ).asInt();
+    r["output"] = "/tmp/mock.out";
+    return r;
+  } );
+
+  JobRequest req;
+  req.algorithmId = "mock:thing";
+  req.params["x"] = 42;
+  req.title = "mock";
+  req.source = "test";
+
+  const auto id = eng.submit( req );
+  eng.waitUntilIdleForTests();
+
+  auto snap = eng.snapshot( id );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Succeeded );
+  REQUIRE( snap->result["echo"].asInt() == 42 );
+  REQUIRE( snap->result["output"].asString() == "/tmp/mock.out" );
+}
+
+TEST_CASE( "submit callable one-shot executor", "[job]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+
+  std::atomic<bool> cancelCalled{false};
+
+  JobRequest req;
+  req.algorithmId = "callable:gdal";
+  req.title = "lambda";
+  req.source = "test";
+
+  const auto id = eng.submit(
+    std::move( req ),
+    []( const JobRequest &, RSOperatorContext &ctx ) {
+      ctx.reportProgress( 0.5, "halfway" );
+      Json::Value r( Json::objectValue );
+      r["output"] = "/tmp/callable.tif";
+      return r;
+    },
+    [&cancelCalled]() { cancelCalled.store( true ); } );
+
+  eng.waitUntilIdleForTests();
+
+  auto snap = eng.snapshot( id );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Succeeded );
+  REQUIRE( snap->result["output"].asString() == "/tmp/callable.tif" );
+  REQUIRE_FALSE( cancelCalled.load() );
+}
+
+TEST_CASE( "callable cancel hook fires while running", "[job]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.setMaxWorkers( 2 );
+
+  std::atomic<bool> cancelHookFired{false};
+  std::atomic<bool> started{false};
+
+  JobRequest req;
+  req.algorithmId = "callable:long";
+  req.title = "long";
+  req.source = "test";
+
+  const auto id = eng.submit(
+    std::move( req ),
+    [&started]( const JobRequest &, RSOperatorContext &ctx ) {
+      started.store( true );
+      for ( int i = 0; i < 500; ++i )
+      {
+        ctx.throwIfCancelled();
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+      }
+      Json::Value r( Json::objectValue );
+      r["ok"] = true;
+      return r;
+    },
+    [&cancelHookFired]() { cancelHookFired.store( true ); } );
+
+  for ( int i = 0; i < 200 && !started.load(); ++i )
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+  REQUIRE( started.load() );
+
+  REQUIRE( eng.cancel( id ) );
+  eng.waitUntilIdleForTests();
+
+  REQUIRE( cancelHookFired.load() );
+  auto snap = eng.snapshot( id );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Cancelled );
 }

@@ -2,7 +2,6 @@
 #include "job_engine.h"
 
 #include "operators/framework/rs_operator.h"
-#include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
 
@@ -62,7 +61,48 @@ int JobEngine::maxWorkers() const
   return m_maxWorkers;
 }
 
+void JobEngine::registerExecutor( const std::string &prefix, JobExecutor executor )
+{
+  if ( prefix.empty() || !executor )
+    return;
+  std::lock_guard<std::mutex> lock( m_mutex );
+  // Replace existing same prefix; otherwise append (longer prefixes preferred at lookup).
+  for ( auto &pair : m_prefixExecutors )
+  {
+    if ( pair.first == prefix )
+    {
+      pair.second = std::move( executor );
+      return;
+    }
+  }
+  m_prefixExecutors.emplace_back( prefix, std::move( executor ) );
+  // Longest prefix first for stable matching.
+  std::sort( m_prefixExecutors.begin(), m_prefixExecutors.end(),
+             []( const auto &a, const auto &b ) { return a.first.size() > b.first.size(); } );
+}
+
+void JobEngine::clearExecutors()
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_prefixExecutors.clear();
+}
+
+JobEngine::JobExecutor JobEngine::findPrefixExecutorLocked( const std::string &algorithmId ) const
+{
+  for ( const auto &pair : m_prefixExecutors )
+  {
+    if ( algorithmId.rfind( pair.first, 0 ) == 0 ) // starts_with
+      return pair.second;
+  }
+  return {};
+}
+
 std::string JobEngine::submit( JobRequest req )
+{
+  return submit( std::move( req ), JobExecutor{}, CancelHook{} );
+}
+
+std::string JobEngine::submit( JobRequest req, JobExecutor executor, CancelHook onCancel )
 {
   std::string id;
   JobRecord copy;
@@ -83,6 +123,13 @@ std::string JobEngine::submit( JobRequest req )
     rec.createdAtMs = nowUnixMs();
 
     m_jobs.emplace( id, rec );
+    if ( executor )
+    {
+      JobBody body;
+      body.executor = std::move( executor );
+      body.onCancel = std::move( onCancel );
+      m_jobBodies.emplace( id, std::move( body ) );
+    }
     m_queue.push_back( id );
     ensureWorkersLocked();
     copy = m_jobs.at( id );
@@ -96,6 +143,7 @@ bool JobEngine::cancel( const std::string &jobId )
 {
   JobRecord copy;
   bool changed = false;
+  CancelHook cancelHook;
   {
     std::lock_guard<std::mutex> lock( m_mutex );
     auto it = m_jobs.find( jobId );
@@ -118,6 +166,7 @@ bool JobEngine::cancel( const std::string &jobId )
         rec.finishedAtMs = nowUnixMs();
         rec.statusMessage = "Cancelled";
         appendLog( rec, JobLogLevel::Info, "Cancelled while queued" );
+        m_jobBodies.erase( jobId );
         copy = rec;
         changed = true;
         break;
@@ -127,7 +176,21 @@ bool JobEngine::cancel( const std::string &jobId )
         auto fit = m_cancelFlags.find( jobId );
         if ( fit != m_cancelFlags.end() && fit->second )
           fit->second->store( true );
+        auto bit = m_jobBodies.find( jobId );
+        if ( bit != m_jobBodies.end() && bit->second.onCancel )
+          cancelHook = bit->second.onCancel;
         // Terminal state set when operator observes cancel / exits
+        if ( cancelHook )
+        {
+          try
+          {
+            cancelHook();
+          }
+          catch ( ... )
+          {
+            // cancel hooks must not throw into engine
+          }
+        }
         return true;
       }
     }
@@ -205,6 +268,8 @@ void JobEngine::shutdownForTests()
     m_queue.clear();
     m_jobs.clear();
     m_cancelFlags.clear();
+    m_jobBodies.clear();
+    m_prefixExecutors.clear();
     m_running = 0;
     m_exclusiveRunning = false;
     m_listener = nullptr;
@@ -340,6 +405,7 @@ void JobEngine::finishJobLocked( JobRecord &rec, bool wasExclusive )
   if ( wasExclusive )
     m_exclusiveRunning = false;
   m_cancelFlags.erase( rec.id );
+  m_jobBodies.erase( rec.id );
 }
 
 void JobEngine::runOperatorJob( const std::string &jobId )
@@ -347,6 +413,7 @@ void JobEngine::runOperatorJob( const std::string &jobId )
   JobRequest request;
   std::shared_ptr<std::atomic<bool>> cancelFlag;
   bool wasExclusive = false;
+  JobExecutor executor;
 
   JobRecord startedCopy;
   {
@@ -362,27 +429,38 @@ void JobEngine::runOperatorJob( const std::string &jobId )
     m_cancelFlags[jobId] = cancelFlag;
     appendLog( rec, JobLogLevel::Info, "Started" );
     startedCopy = rec;
+
+    auto bit = m_jobBodies.find( jobId );
+    if ( bit != m_jobBodies.end() && bit->second.executor )
+      executor = bit->second.executor;
+    else
+      executor = findPrefixExecutorLocked( request.algorithmId );
   }
   notify( startedCopy );
 
-  auto op = sicnu::operators::RSOperatorRegistry::instance().create( request.algorithmId );
-  if ( !op )
+  // Resolve body: per-job / prefix executor, else RSOperator.
+  std::unique_ptr<sicnu::operators::RSOperator> op;
+  if ( !executor )
   {
-    JobRecord copy;
+    op = sicnu::operators::RSOperatorRegistry::instance().create( request.algorithmId );
+    if ( !op )
     {
-      std::lock_guard<std::mutex> lock( m_mutex );
-      auto it = m_jobs.find( jobId );
-      if ( it == m_jobs.end() )
-        return;
-      JobRecord &rec = it->second;
-      rec.state = JobState::Failed;
-      rec.error = "Unknown algorithm: " + request.algorithmId;
-      appendLog( rec, JobLogLevel::Error, rec.error );
-      finishJobLocked( rec, wasExclusive );
-      copy = rec;
+      JobRecord copy;
+      {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        auto it = m_jobs.find( jobId );
+        if ( it == m_jobs.end() )
+          return;
+        JobRecord &rec = it->second;
+        rec.state = JobState::Failed;
+        rec.error = "Unknown algorithm: " + request.algorithmId;
+        appendLog( rec, JobLogLevel::Error, rec.error );
+        finishJobLocked( rec, wasExclusive );
+        copy = rec;
+      }
+      notify( copy );
+      return;
     }
-    notify( copy );
-    return;
   }
 
   sicnu::operators::RSOperatorContext ctx;
@@ -416,10 +494,7 @@ void JobEngine::runOperatorJob( const std::string &jobId )
     notify( copy );
   } );
 
-  try
-  {
-    Json::Value result = op->run( request.params, ctx );
-
+  auto finishSuccess = [&]( Json::Value result ) {
     JobRecord copy;
     {
       std::lock_guard<std::mutex> lock( m_mutex );
@@ -445,9 +520,9 @@ void JobEngine::runOperatorJob( const std::string &jobId )
       copy = rec;
     }
     notify( copy );
-  }
-  catch ( const sicnu::operators::RSOperatorError &e )
-  {
+  };
+
+  auto finishError = [&]( const sicnu::operators::RSOperatorError &e ) {
     JobRecord copy;
     {
       std::lock_guard<std::mutex> lock( m_mutex );
@@ -475,9 +550,9 @@ void JobEngine::runOperatorJob( const std::string &jobId )
       copy = rec;
     }
     notify( copy );
-  }
-  catch ( const std::exception &e )
-  {
+  };
+
+  auto finishStdException = [&]( const std::exception &e ) {
     JobRecord copy;
     {
       std::lock_guard<std::mutex> lock( m_mutex );
@@ -493,6 +568,24 @@ void JobEngine::runOperatorJob( const std::string &jobId )
       copy = rec;
     }
     notify( copy );
+  };
+
+  try
+  {
+    Json::Value result;
+    if ( executor )
+      result = executor( request, ctx );
+    else
+      result = op->run( request.params, ctx );
+    finishSuccess( std::move( result ) );
+  }
+  catch ( const sicnu::operators::RSOperatorError &e )
+  {
+    finishError( e );
+  }
+  catch ( const std::exception &e )
+  {
+    finishStdException( e );
   }
 }
 
