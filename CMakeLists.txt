@@ -515,6 +515,7 @@ target_include_directories(qgis_core PRIVATE
 add_subdirectory(src/plugins)
 add_subdirectory(src/operators)
 add_subdirectory(src/workflow)
+add_subdirectory(src/jobs)
 # Headless CLI pipeline executor (depends on sicnu_operators)
 if(TARGET sicnu_operators)
   add_subdirectory(src/cli)
