@@ -5,6 +5,7 @@
 #include "layer_manager.h"
 #include "log_panel.h"
 #include "shell/job_engine_qt_bridge.h"
+#include "shell/processing_job_adapter.h"
 #include "shell/ribbon_controller.h"
 #include "shell/rs_job_panel.h"
 #include "shell/task_panel_host.h"
@@ -244,6 +245,7 @@ void QgisDesktopWindow::setupDockWidgets()
     tabifyDockWidget( m_logDock, m_jobPanel );
     m_jobPanel->raise();
     JobEngineQtBridge::instance(); // ensure listener is installed
+    ProcessingJobAdapter::registerProcessingJobExecutor();
 
     // Guided Workflow Panel (Right, tabified with processing)
     auto *workflowWidget = new GuidedWorkflowWidget(this);

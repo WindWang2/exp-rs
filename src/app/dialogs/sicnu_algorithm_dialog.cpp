@@ -2,15 +2,22 @@
 #include "sicnu_algorithm_dialog.h"
 #include "dialog_help_catalog.h"
 #include "main_window.h"
+#include "shell/job_engine_qt_bridge.h"
+#include "shell/processing_job_adapter.h"
+
+#include "jobs/job_engine.h"
+#include "jobs/job_types.h"
+#include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_error.h"
 
 #include <gui/processing/qgsprocessingguiregistry.h>
 #include <gui/processing/qgsprocessingwidgetwrapper.h>
 #include <gui/qgsgui.h>
 
-#include <qgsprocessingalgrunnertask.h>
 #include <qgsprocessingfeedback.h>
 #include <qgsprocessingcontext.h>
 #include <qgsprocessingalgorithm.h>
+#include <qgsexception.h>
 #include <qgsprocessingparameters.h>
 #include <qgsprocessingprovider.h>
 #include <qgsproject.h>
@@ -318,6 +325,13 @@ int loadFileResultLayers(
 } // namespace
 
 // ---------------------------------------------------------------------------
+// Run-state (unique_ptr needs complete QgsProcessingAlgorithm in this TU)
+// ---------------------------------------------------------------------------
+
+SicnuProcessingRunState::SicnuProcessingRunState() = default;
+SicnuProcessingRunState::~SicnuProcessingRunState() = default;
+
+// ---------------------------------------------------------------------------
 // Construction
 // ---------------------------------------------------------------------------
 
@@ -592,12 +606,24 @@ QgsProcessingContext *SicnuAlgorithmDialog::processingContext()
 }
 
 // ---------------------------------------------------------------------------
-// runAlgorithm — async execution via QgsProcessingAlgRunnerTask
+// runAlgorithm — JobEngine-backed async execution
+// prepare() on GUI thread; runPrepared() on worker; postProcess() on GUI.
 // ---------------------------------------------------------------------------
+
+bool SicnuAlgorithmDialog::isFinalized()
+{
+  // Keep the dialog alive while a JobEngine job is outstanding (no QgsTask).
+  if ( !mPendingJobId.isEmpty() )
+    return false;
+  return QgsProcessingAlgorithmDialogBase::isFinalized();
+}
 
 void SicnuAlgorithmDialog::runAlgorithm()
 {
   if ( !algorithm() )
+    return;
+
+  if ( !mPendingJobId.isEmpty() )
     return;
 
   if ( mLoadResultsCheck )
@@ -674,10 +700,144 @@ void SicnuAlgorithmDialog::runAlgorithm()
 
   QgsGui::processingRecentAlgorithmLog()->push( algorithm()->id() );
 
-  QgsProcessingAlgRunnerTask *task = new QgsProcessingAlgRunnerTask(
-    algorithm(), params, mContext, feedback );
+  // prepare on GUI thread (context affinity), then JobEngine runs runPrepared.
+  auto state = std::make_shared<SicnuProcessingRunState>();
+  state->parameters = params;
+  state->algorithm.reset( algorithm()->create() );
+  if ( !state->algorithm )
+  {
+    feedback->reportError( tr( "Failed to create algorithm instance." ) );
+    resetGui();
+    mFeedback = nullptr;
+    return;
+  }
 
-  setCurrentTask( task );
+  try
+  {
+    if ( !state->algorithm->prepare( params, mContext, feedback ) )
+    {
+      feedback->reportError( tr( "Algorithm prepare() failed." ) );
+      resetGui();
+      mFeedback = nullptr;
+      mRunState.reset();
+      return;
+    }
+  }
+  catch ( const QgsProcessingException &e )
+  {
+    feedback->reportError( e.what() );
+    resetGui();
+    mFeedback = nullptr;
+    mRunState.reset();
+    return;
+  }
+
+  mRunState = state;
+
+  if ( !mJobBridgeConnected )
+  {
+    auto *bridge = JobEngineQtBridge::instance();
+    connect( bridge, &JobEngineQtBridge::jobFinished, this,
+             &SicnuAlgorithmDialog::onProcessingJobFinished );
+    mJobBridgeConnected = true;
+  }
+
+  sicnu::jobs::JobRequest req;
+  req.algorithmId = ProcessingJobAdapter::processingAlgorithmId( algorithm()->id() );
+  req.title = algorithm()->displayName().toStdString();
+  req.source = "toolbox";
+
+  QgsProcessingContext *contextPtr = &mContext;
+  QgsProcessingFeedback *feedbackPtr = feedback;
+
+  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+    std::move( req ),
+    [state, contextPtr, feedbackPtr]( const sicnu::jobs::JobRequest &,
+                                      sicnu::operators::RSOperatorContext &ctx ) {
+      ctx.logInfo( "Running QgsProcessingAlgorithm (runPrepared)" );
+      if ( feedbackPtr && feedbackPtr->isCanceled() )
+      {
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
+      }
+      ctx.throwIfCancelled();
+
+      // Marks that postProcess() is required on the GUI thread even on failure
+      // (runPrepared sets mHasExecuted before processAlgorithm).
+      state->workerStarted = true;
+
+      try
+      {
+        state->results = state->algorithm->runPrepared(
+          state->parameters, *contextPtr, feedbackPtr );
+      }
+      catch ( const QgsProcessingException &e )
+      {
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::QgisProcessingError, e.what().toStdString() );
+      }
+
+      if ( ( feedbackPtr && feedbackPtr->isCanceled() ) || ctx.isCancelled() )
+      {
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
+      }
+
+      return ProcessingJobAdapter::resultsToJson( state->results );
+    },
+    [feedbackPtr]() {
+      if ( feedbackPtr )
+        feedbackPtr->cancel();
+    } );
+
+  mPendingJobId = QString::fromStdString( jobId );
+  feedback->pushInfo( tr( "Submitted as job %1" ).arg( mPendingJobId ) );
+}
+
+void SicnuAlgorithmDialog::onProcessingJobFinished( const QString &jobId )
+{
+  if ( mPendingJobId.isEmpty() || jobId != mPendingJobId )
+    return;
+
+  mPendingJobId.clear();
+
+  const auto snapOpt = sicnu::jobs::JobEngine::instance().snapshot( jobId.toStdString() );
+  bool successful = snapOpt
+                    && snapOpt->state == sicnu::jobs::JobState::Succeeded;
+
+  // postProcess must run on the context's thread (GUI), and only if the
+  // worker entered runPrepared (mHasExecuted). Queued-cancel skips this.
+  QVariantMap results;
+  if ( mRunState && mRunState->algorithm && mRunState->workerStarted )
+  {
+    try
+    {
+      const QVariantMap pp = mRunState->algorithm->postProcess(
+        mContext, mFeedback, successful );
+      results = !pp.isEmpty() ? pp : mRunState->results;
+    }
+    catch ( const QgsProcessingException &e )
+    {
+      if ( mFeedback )
+        mFeedback->reportError( e.what() );
+      successful = false;
+      results = mRunState->results;
+    }
+  }
+  else if ( mRunState )
+  {
+    results = mRunState->results;
+  }
+
+  if ( !successful && mFeedback && snapOpt && !snapOpt->error.empty() )
+  {
+    // Surface JobEngine error if feedback log is thin
+    if ( mFeedback->textLog().isEmpty() )
+      mFeedback->reportError( QString::fromStdString( snapOpt->error ) );
+  }
+
+  algExecuted( successful, results );
+  mRunState.reset();
 }
 
 // ---------------------------------------------------------------------------
