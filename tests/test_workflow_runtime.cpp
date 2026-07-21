@@ -228,7 +228,8 @@ TEST_CASE( "Builtin workflows registered", "[workflow]" )
   REQUIRE( reg.has( "tool.rs.terrain_analysis" ) );
   REQUIRE( reg.has( "tool.rs.pca" ) );
   REQUIRE( reg.has( "tool.rs.atmospheric_correction" ) );
-  REQUIRE( reg.ids().size() == 8 );
+  REQUIRE( reg.has( "lab.classify.supervised" ) );
+  REQUIRE( reg.ids().size() == 9 );
 
   const auto *d = reg.find( "tool.rs.spectral_index" );
   REQUIRE( d );
@@ -238,6 +239,59 @@ TEST_CASE( "Builtin workflows registered", "[workflow]" )
   REQUIRE( d->steps[0].id == "run" );
   REQUIRE_FALSE( d->steps[0].gates.empty() );
   REQUIRE( d->steps[0].gates[0].require == "paramNonEmpty:run.input" );
+}
+
+TEST_CASE( "Builtin lab.classify.supervised has 7 steps in order", "[workflow]" )
+{
+  WorkflowRegistry reg;
+  registerBuiltinWorkflows( reg );
+  const auto *d = reg.find( "lab.classify.supervised" );
+  REQUIRE( d );
+  REQUIRE( d->host == HostKind::Workspace );
+  REQUIRE( d->workspaceKind == "classify" );
+  REQUIRE( d->title == "监督分类" );
+  REQUIRE( d->steps.size() == 7 );
+
+  const std::vector<std::string> expectedIds = {
+    "classes", "samples", "evaluate", "train", "accuracy", "post", "export"
+  };
+  const std::vector<std::string> expectedTitles = {
+    "分类体系", "样本", "样本评价", "训练-分类", "精度评定", "后处理", "输出"
+  };
+  const std::vector<StepKind> expectedKinds = {
+    StepKind::Interactive,
+    StepKind::Interactive,
+    StepKind::Review,
+    StepKind::Operator,
+    StepKind::Review,
+    StepKind::Interactive,
+    StepKind::Review,
+  };
+
+  for ( size_t i = 0; i < expectedIds.size(); ++i )
+  {
+    REQUIRE( d->steps[i].id == expectedIds[i] );
+    REQUIRE( d->steps[i].title == expectedTitles[i] );
+    REQUIRE( d->steps[i].kind == expectedKinds[i] );
+  }
+
+  REQUIRE( d->steps[3].operatorId == "rs:supervised_classification" );
+  REQUIRE( d->steps[3].artifactOnSuccess == "classified_output" );
+
+  // Soft gates expressible via pure session artifacts.
+  REQUIRE_FALSE( d->steps[1].gates.empty() );
+  REQUIRE( d->steps[1].gates[0].require == "hasArtifact:source_raster" );
+  REQUIRE_FALSE( d->steps[3].gates.empty() );
+  REQUIRE( d->steps[3].gates[0].require == "hasArtifact:source_raster" );
+  REQUIRE_FALSE( d->steps[4].gates.empty() );
+  REQUIRE( d->steps[4].gates[0].require == "hasArtifact:classified_output" );
+
+  WorkflowRuntime rt( reg );
+  const auto sid = rt.open( "lab.classify.supervised" );
+  REQUIRE_FALSE( sid.empty() );
+  REQUIRE( rt.state( sid ).currentStepId == "classes" );
+  REQUIRE( rt.gotoStep( sid, "train" ) );
+  REQUIRE( rt.state( sid ).currentStepId == "train" );
 }
 
 TEST_CASE( "Runtime open returns empty for missing definition", "[workflow]" )

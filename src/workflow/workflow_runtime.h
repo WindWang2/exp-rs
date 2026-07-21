@@ -36,6 +36,10 @@ class WorkflowRuntime
     Json::Value runStep( const std::string &sessionId, const std::string &stepId );
 
     void markStepComplete( const std::string &sessionId, const std::string &stepId );
+
+    /// Record a pure session artifact (path/value) for soft GateDef hasArtifact:*.
+    void setArtifact( const std::string &sessionId, const std::string &name, const std::string &value );
+
     void close( const std::string &sessionId );
 
   private:

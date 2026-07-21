@@ -1699,14 +1699,20 @@ if(TARGET qgis_app_classify)
   sicnu_discover_tests(test_classify_session_state)
 
   # Classification workflow — soft gates + step completion.
-  add_executable(test_classify_workflow_controller test_classify_workflow_controller.cpp)
+  add_executable(test_classify_workflow_controller test_classify_workflow_controller.cpp
+    # SicnuUi chrome symbols pulled transitively via qgis_app_classify moc unit.
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  )
   target_link_libraries(test_classify_workflow_controller PRIVATE
     Catch2::Catch2WithMain
     qgis_app_classify
     Qt6::Core
+    Qt6::Widgets
   )
   target_include_directories(test_classify_workflow_controller PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/classification
+    ${CMAKE_SOURCE_DIR}/src/app
+    ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
   )
   set_target_properties(test_classify_workflow_controller PROPERTIES AUTOMOC ON)

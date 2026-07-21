@@ -21,6 +21,7 @@
 #include "rs_classify_session_state.h"
 #include "rs_classify_step_host.h"
 #include "rs_classify_stepper_bar.h"
+#include "rs_classify_workflow_bridge.h"
 #include "rs_classify_workflow_controller.h"
 #include "rs_cross_validation.h"
 #include "rs_cv_task.h"
@@ -204,7 +205,11 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
   refreshWorkflowUi();
 }
 
-QgsClassificationMainWindow::~QgsClassificationMainWindow() = default;
+QgsClassificationMainWindow::~QgsClassificationMainWindow()
+{
+  if ( m_workflowBridge )
+    m_workflowBridge->close();
+}
 
 RsClassifySessionState::WorkflowSnapshot
 QgsClassificationMainWindow::captureWorkflowSnapshot() const
@@ -607,6 +612,15 @@ void QgsClassificationMainWindow::setupWorkflowUi()
 {
   m_workflow = new RsClassifyWorkflowController( this );
 
+  // Runtime session for lab.classify.supervised — mirrors step/complete only.
+  // Soft classify-specific gates remain on m_workflow (controller authority).
+  m_workflowBridge = std::make_unique<RsClassifyWorkflowBridge>();
+  if ( !m_workflowBridge->open() )
+  {
+    SICNU_LOG_WARN( SicnuLogTags::Classification,
+                    QStringLiteral( "Failed to open workflow session lab.classify.supervised" ) );
+  }
+
   m_stepper = new RsClassifyStepperBar( this );
   addToolBarBreak();
   auto *wfBar = addToolBar( tr( "工作流" ) );
@@ -632,6 +646,8 @@ void QgsClassificationMainWindow::setupWorkflowUi()
 
   connect( m_workflow, &RsClassifyWorkflowController::currentStepChanged, this,
            [this]( RsClassifyStep s ) {
+             if ( m_workflowBridge )
+               m_workflowBridge->gotoStep( s );
              if ( m_stepper )
                m_stepper->setCurrentStep( s );
              if ( m_stepHost )
@@ -649,8 +665,11 @@ void QgsClassificationMainWindow::setupWorkflowUi()
              refreshWorkflowUi();
            } );
 
-  connect( m_workflow, &RsClassifyWorkflowController::completionChanged,
-           this, &QgsClassificationMainWindow::refreshWorkflowUi );
+  connect( m_workflow, &RsClassifyWorkflowController::completionChanged, this, [this]() {
+    if ( m_workflowBridge && m_workflow )
+      m_workflowBridge->syncCompletionsFromController( *m_workflow );
+    refreshWorkflowUi();
+  } );
 
   connect( m_stepHost, &RsClassifyStepHost::prevClicked, this, [this]() {
     if ( !m_workflow )
@@ -1485,6 +1504,8 @@ bool QgsClassificationMainWindow::openSourceRaster( const QString &path )
     m_classifierBar->setSourceBands( m_sourceBandCount );
   if ( m_workflow )
     m_workflow->setHasSourceRaster( true );
+  if ( m_workflowBridge )
+    m_workflowBridge->setSourceRasterArtifact( path.toStdString() );
 
   SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Source raster loaded: %1 (%2x%3, %4 bands)" )
     .arg( QFileInfo( path ).fileName() ).arg( m_sourceWidth ).arg( m_sourceHeight ).arg( m_sourceBandCount ) );
@@ -1819,6 +1840,8 @@ void QgsClassificationMainWindow::applyClassification()
 
       if ( m_workflow )
         m_workflow->setHasFullClassifyResult( true );
+      if ( m_workflowBridge )
+        m_workflowBridge->setClassifiedOutputArtifact( outForLog.toStdString() );
 
       QJsonObject obj{
         { QStringLiteral( "event" ), QStringLiteral( "classify_finished" ) },
@@ -3028,7 +3051,12 @@ bool QgsClassificationMainWindow::loadProjectFromFile( QString path )
     m_workflow->setEvaluateReviewed( data.evaluateReviewed );
     if ( !data.classifiedRasterPath.isEmpty()
          && QFileInfo::exists( data.classifiedRasterPath ) )
+    {
       m_workflow->setHasFullClassifyResult( true );
+      if ( m_workflowBridge )
+        m_workflowBridge->setClassifiedOutputArtifact(
+          data.classifiedRasterPath.toStdString() );
+    }
     if ( !data.postProcessRasterPath.isEmpty()
          && QFileInfo::exists( data.postProcessRasterPath ) )
       m_workflow->setHasPostProcessResult( true );
@@ -3046,6 +3074,8 @@ bool QgsClassificationMainWindow::loadProjectFromFile( QString path )
       step = static_cast<int>( RsClassifyStep::Count ) - 1;
     m_workflow->setCurrentStep( static_cast<RsClassifyStep>( step ) );
   }
+  if ( m_workflowBridge && !m_sourceRasterPath.isEmpty() )
+    m_workflowBridge->setSourceRasterArtifact( m_sourceRasterPath.toStdString() );
 
   syncWorkflowFromRois();
   refreshWorkflowUi();

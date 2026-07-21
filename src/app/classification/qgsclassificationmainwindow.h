@@ -11,6 +11,7 @@
 
 #include "rs_classifier_backend.h"
 #include "rs_classify_session_state.h"
+#include "rs_classify_workflow_bridge.h"
 #include "rs_classify_workflow_controller.h"
 #include "rs_feature_scaler.h"
 #include "rs_pixel_ignore_options.h"
@@ -172,6 +173,9 @@ class QgsClassificationMainWindow : public QMainWindow
     RsRoiCollection *m_rois = nullptr;
 
     RsClassifyWorkflowController *m_workflow = nullptr;
+    /// Runtime session for lab.classify.supervised (step/complete mirror).
+    /// Controller remains classify-specific gate authority this phase.
+    std::unique_ptr<RsClassifyWorkflowBridge> m_workflowBridge;
     RsClassifyStepperBar *m_stepper = nullptr;
     RsClassifyStepHost *m_stepHost = nullptr;
     QDockWidget *m_workflowDock = nullptr;

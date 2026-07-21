@@ -36,6 +36,8 @@ qt_add_library(qgis_app_classify STATIC
     rs_classify_session_state.cpp
     # Classification workflow — step state / soft gates / mode.
     rs_classify_workflow_controller.cpp
+    # Runtime session bridge (lab.classify.supervised).
+    rs_classify_workflow_bridge.cpp
     # Classification workflow — stepper bar + step host skeleton.
     rs_classify_stepper_bar.cpp
     ../dialogs/dialog_help_catalog.cpp
@@ -63,6 +65,7 @@ target_link_libraries(qgis_app_classify PUBLIC
     qgis_core
     qgis_gui
     sicnu_processing
+    sicnu_workflow
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets

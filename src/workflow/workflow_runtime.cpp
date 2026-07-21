@@ -162,6 +162,14 @@ void WorkflowRuntime::markStepComplete( const std::string &sessionId, const std:
   s->markStepComplete( stepId );
 }
 
+void WorkflowRuntime::setArtifact( const std::string &sessionId, const std::string &name, const std::string &value )
+{
+  WorkflowSession *s = sessionMut( sessionId );
+  if ( !s )
+    return;
+  s->setArtifact( name, value );
+}
+
 void WorkflowRuntime::close( const std::string &sessionId )
 {
   m_sessions.erase( sessionId );

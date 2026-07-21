@@ -5,7 +5,8 @@ namespace sicnu::workflow {
 
 class WorkflowRegistry;
 
-/// Register catalog of built-in single-step TaskPanel tools.
+/// Register catalog of built-in TaskPanel tools and Workspace labs
+/// (including lab.classify.supervised).
 void registerBuiltinWorkflows( WorkflowRegistry &reg );
 
 } // namespace sicnu::workflow
