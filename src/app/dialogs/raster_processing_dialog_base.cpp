@@ -4,11 +4,10 @@
 #include "async_algorithm_runner.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
+#include "shell/job_engine_qt_bridge.h"
 
-#include "operators/framework/rs_operator_registry.h"
-#include "operators/framework/rs_operator_context.h"
-#include "operators/framework/rs_operator_error.h"
-#include "operators/framework/rs_operator.h"
+#include "jobs/job_engine.h"
+#include "jobs/job_types.h"
 
 #include <processing/qgsprocessingalgorithm.h>
 #include <processing/qgsprocessingcontext.h>
@@ -267,42 +266,63 @@ void RasterProcessingDialogBase::runOperatorTask( const QString &operatorId,
   if ( isRunning() )
     return;
 
-  // Capture by value: params and operatorId must outlive the UI thread call.
-  const std::string opId = operatorId.toStdString();
-  const Json::Value paramsCopy = params;
-  const QString errMarker = AsyncGdalRunner::errorMarker();
+  if ( !m_jobBridgeConnected )
+  {
+    auto *bridge = JobEngineQtBridge::instance();
+    connect( bridge, &JobEngineQtBridge::jobFinished, this,
+             &RasterProcessingDialogBase::onOperatorJobFinished );
+    m_jobBridgeConnected = true;
+  }
 
-  runGdalTask( [opId, paramsCopy, errMarker]() -> QString {
-    try
-    {
-      auto op = sicnu::operators::RSOperatorRegistry::instance().create( opId );
-      if ( !op )
-      {
-        return errMarker + QStringLiteral( "Operator not registered: %1" )
-                             .arg( QString::fromStdString( opId ) );
-      }
+  startRun();
 
-      sicnu::operators::RSOperatorContext context;
-      const Json::Value result = op->execute( paramsCopy, context );
+  sicnu::jobs::JobRequest req;
+  req.algorithmId = operatorId.toStdString();
+  req.params = params;
+  req.title = dialogTitle().toStdString();
+  req.source = "dialog";
 
-      if ( result.isMember( "output" ) && result["output"].isString() )
-        return QString::fromStdString( result["output"].asString() );
-      return errMarker + QStringLiteral( "Operator '%1' did not return an output path" )
-                           .arg( QString::fromStdString( opId ) );
-    }
-    catch ( const sicnu::operators::RSOperatorError &e )
+  const std::string jobId = sicnu::jobs::JobEngine::instance().submit( std::move( req ) );
+  m_pendingJobId = QString::fromStdString( jobId );
+}
+
+void RasterProcessingDialogBase::onOperatorJobFinished( const QString &jobId )
+{
+  if ( m_pendingJobId.isEmpty() || jobId != m_pendingJobId )
+    return;
+
+  m_pendingJobId.clear();
+
+  const auto snapOpt = sicnu::jobs::JobEngine::instance().snapshot( jobId.toStdString() );
+  if ( !snapOpt )
+  {
+    onFailed( tr( "任务记录丢失" ) );
+    return;
+  }
+
+  const auto &rec = *snapOpt;
+  using sicnu::jobs::JobState;
+  if ( rec.state != JobState::Succeeded )
+  {
+    QString error = QString::fromStdString( rec.error );
+    if ( error.isEmpty() )
     {
-      return errMarker + QString::fromStdString( e.message() );
+      if ( rec.state == JobState::Cancelled )
+        error = tr( "已取消" );
+      else
+        error = tr( "运行失败" );
     }
-    catch ( const std::exception &e )
-    {
-      return errMarker + QString::fromUtf8( e.what() );
-    }
-    catch ( ... )
-    {
-      return errMarker + QStringLiteral( "Unknown operator error" );
-    }
-  } );
+    onFailed( error );
+    return;
+  }
+
+  if ( rec.result.isMember( "output" ) && rec.result["output"].isString() )
+  {
+    onCompleted( QString::fromStdString( rec.result["output"].asString() ) );
+    return;
+  }
+
+  onFailed( tr( "Operator did not return an output path" ) );
 }
 
 void RasterProcessingDialogBase::handleCompleted( const QString &outputPath )

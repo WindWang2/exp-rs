@@ -172,6 +172,13 @@ public slots:
      */
     void onFailed(const QString &errorMessage);
 
+private:
+    /**
+     * Handle JobEngineQtBridge::jobFinished for the operator path.
+     * Filters on m_pendingJobId and routes to onCompleted/onFailed.
+     */
+    void onOperatorJobFinished( const QString &jobId );
+
 protected:
     // --- Members ---
     QgsRasterLayer *m_rasterLayer = nullptr;
@@ -180,4 +187,6 @@ protected:
     AsyncGdalRunner *m_runner = nullptr;
     AsyncAlgorithmRunner *m_algorithmRunner = nullptr;
     bool m_running = false;
+    QString m_pendingJobId;
+    bool m_jobBridgeConnected = false;
 };
