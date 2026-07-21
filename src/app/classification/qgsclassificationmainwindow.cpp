@@ -49,6 +49,12 @@
 #include "qgsrasterlayer.h"
 #include "qgstaskmanager.h"
 
+#include "shell/job_engine_qt_bridge.h"
+#include "jobs/job_engine.h"
+#include "jobs/job_types.h"
+#include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_error.h"
+
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
@@ -1819,108 +1825,140 @@ void QgsClassificationMainWindow::applyClassification()
   auto *task = new RsClassificationTask( std::move( cfg ) );
   setClassifyBusy( true );
 
-  connect( task, &QgsTask::taskCompleted, this, [this, task, algoForLog, outForLog]() {
-    setClassifyBusy( false );
-    const auto &r = task->result();
-    if ( r.ok )
-    {
-      // Full Apply path only — preview never sets this flag.
-      m_lastClassifyPath = outForLog;
-      if ( m_ppInputEdit && m_ppInputEdit->text().trimmed().isEmpty() )
-        m_ppInputEdit->setText( outForLog );
-      else if ( m_ppInputEdit && m_ppInputEdit->text() != outForLog )
-        m_ppInputEdit->setText( outForLog );
-      if ( m_ppOutputEdit && m_ppOutputEdit->text().trimmed().isEmpty() )
+  sicnu::jobs::JobRequest req;
+  req.algorithmId = "module:classify:apply";
+  req.title = QStringLiteral( "Classification: %1" ).arg( algoForLog ).toStdString();
+  req.source = "module";
+  req.exclusive = true;
+  req.params["output"] = outForLog.toStdString();
+
+  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+    std::move( req ),
+    [task]( const sicnu::jobs::JobRequest &request,
+            sicnu::operators::RSOperatorContext &ctx ) {
+      ctx.logInfo( "Running supervised classification apply" );
+      ctx.reportProgress( 0.0, "Classifying" );
+      const bool ok = task->run();
+      if ( ctx.isCancelled() || ( !ok && task->result().errorMessage
+                                    == QStringLiteral( "Cancelled" ) ) )
       {
-        const QFileInfo fi( outForLog );
-        m_ppOutputEdit->setText(
-          fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName()
-          + QStringLiteral( "_post.tif" ) );
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
       }
-
-      if ( m_workflow )
-        m_workflow->setHasFullClassifyResult( true );
-      if ( m_workflowBridge )
-        m_workflowBridge->setClassifiedOutputArtifact( outForLog.toStdString() );
-
-      QJsonObject obj{
-        { QStringLiteral( "event" ), QStringLiteral( "classify_finished" ) },
-        { QStringLiteral( "algo" ), algoForLog },
-        { QStringLiteral( "total_pixels" ), r.totalPixels },
-        { QStringLiteral( "duration_ms" ), r.durationMs },
-        { QStringLiteral( "status" ), QStringLiteral( "ok" ) }
-      };
-      if ( !r.accuracy.classIds.isEmpty() )
+      if ( !ok )
       {
-        obj.insert( QStringLiteral( "overall_accuracy" ), r.accuracy.overallAccuracy );
-        obj.insert( QStringLiteral( "kappa" ), r.accuracy.kappa );
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::ComputationError,
+          task->result().errorMessage.toStdString() );
       }
-      QgsMessageLog::logMessage(
-        QString::fromUtf8( QJsonDocument( obj ).toJson( QJsonDocument::Compact ) ),
-        QStringLiteral( "Classification" ),
-        Qgis::MessageLevel::Info );
-      if ( statusBar() )
-        statusBar()->showMessage(
-          tr( "分类完成: %1 (%2 ms)" )
-            .arg( QFileInfo( outForLog ).fileName() )
-            .arg( r.durationMs ),
-          6000 );
+      Json::Value result( Json::objectValue );
+      result["output"] = request.params.get( "output", "" ).asString();
+      result["totalPixels"] = task->result().totalPixels;
+      result["durationMs"] = task->result().durationMs;
+      return result;
+    },
+    [task]() { task->cancel(); } );
 
-      // Embed accuracy metrics in Step 5 panel (preferred); optional popup
-      // remains available via the panel button.
-      if ( !r.accuracy.classIds.isEmpty() )
-      {
-        QHash<int, QString> classNames;
-        if ( m_rois )
-        {
-          const auto defs = m_rois->classDefs();
-          for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
-            classNames[it.key()] = it.value().name();
-        }
-        if ( m_accuracyPanel )
-          m_accuracyPanel->setResult( r.accuracy, classNames );
-        if ( m_stepAccuracyPopupBtn )
-          m_stepAccuracyPopupBtn->setEnabled( true );
-        m_accuracySource = QStringLiteral( "holdout" );
-        if ( m_workflow )
-          m_workflow->setHasAccuracyMetrics( true );
-        // Advance soft focus to accuracy step so the embedded panel is visible.
-        if ( m_workflow )
-          m_workflow->setCurrentStep( RsClassifyStep::Accuracy );
-      }
-      refreshWorkflowUi();
-    }
-    else
-    {
-      if ( statusBar() )
-        statusBar()->showMessage(
-          tr( "分类失败: %1" ).arg( r.errorMessage ), 6000 );
-    }
-  } );
+  const QString jobIdQ = QString::fromStdString( jobId );
+  auto *bridge = JobEngineQtBridge::instance();
+  auto *conn = new QMetaObject::Connection;
+  *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
+                   [this, task, jobIdQ, algoForLog, outForLog, conn]( const QString &id ) {
+                     if ( id != jobIdQ )
+                       return;
+                     disconnect( *conn );
+                     delete conn;
+                     setClassifyBusy( false );
 
-  // run() returns false on both cancel and hard failure — QgsTask emits
-  // taskTerminated (not taskCompleted). Surface errorMessage when present.
-  connect( task, &QgsTask::taskTerminated, this, [this, task]() {
-    setClassifyBusy( false );
-    const auto &r = task->result();
-    if ( !r.errorMessage.isEmpty()
-         && r.errorMessage != QStringLiteral( "Cancelled" ) )
-    {
-      SICNU_LOG_ERROR( SicnuLogTags::Classification,
-                       QString( "Classification failed: %1" ).arg( r.errorMessage ) );
-      if ( statusBar() )
-        statusBar()->showMessage(
-          tr( "分类失败: %1" ).arg( r.errorMessage ), 6000 );
-    }
-    else
-    {
-      SICNU_LOG_WARN( SicnuLogTags::Classification, QStringLiteral( "Classification cancelled" ) );
-      if ( statusBar() )
-        statusBar()->showMessage( tr( "分类已取消" ), 3000 );
-    }
-  } );
+                     const auto snapOpt =
+                       sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
+                     const auto &r = task->result();
 
-  QgsApplication::taskManager()->addTask( task );
+                     if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Succeeded && r.ok )
+                     {
+                       m_lastClassifyPath = outForLog;
+                       if ( m_ppInputEdit && m_ppInputEdit->text().trimmed().isEmpty() )
+                         m_ppInputEdit->setText( outForLog );
+                       else if ( m_ppInputEdit && m_ppInputEdit->text() != outForLog )
+                         m_ppInputEdit->setText( outForLog );
+                       if ( m_ppOutputEdit && m_ppOutputEdit->text().trimmed().isEmpty() )
+                       {
+                         const QFileInfo fi( outForLog );
+                         m_ppOutputEdit->setText(
+                           fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName()
+                           + QStringLiteral( "_post.tif" ) );
+                       }
+
+                       if ( m_workflow )
+                         m_workflow->setHasFullClassifyResult( true );
+                       if ( m_workflowBridge )
+                         m_workflowBridge->setClassifiedOutputArtifact( outForLog.toStdString() );
+
+                       QJsonObject obj{
+                         { QStringLiteral( "event" ), QStringLiteral( "classify_finished" ) },
+                         { QStringLiteral( "algo" ), algoForLog },
+                         { QStringLiteral( "total_pixels" ), r.totalPixels },
+                         { QStringLiteral( "duration_ms" ), r.durationMs },
+                         { QStringLiteral( "status" ), QStringLiteral( "ok" ) }
+                       };
+                       if ( !r.accuracy.classIds.isEmpty() )
+                       {
+                         obj.insert( QStringLiteral( "overall_accuracy" ), r.accuracy.overallAccuracy );
+                         obj.insert( QStringLiteral( "kappa" ), r.accuracy.kappa );
+                       }
+                       QgsMessageLog::logMessage(
+                         QString::fromUtf8( QJsonDocument( obj ).toJson( QJsonDocument::Compact ) ),
+                         QStringLiteral( "Classification" ),
+                         Qgis::MessageLevel::Info );
+                       if ( statusBar() )
+                         statusBar()->showMessage(
+                           tr( "分类完成: %1 (%2 ms)" )
+                             .arg( QFileInfo( outForLog ).fileName() )
+                             .arg( r.durationMs ),
+                           6000 );
+
+                       if ( !r.accuracy.classIds.isEmpty() )
+                       {
+                         QHash<int, QString> classNames;
+                         if ( m_rois )
+                         {
+                           const auto defs = m_rois->classDefs();
+                           for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
+                             classNames[it.key()] = it.value().name();
+                         }
+                         if ( m_accuracyPanel )
+                           m_accuracyPanel->setResult( r.accuracy, classNames );
+                         if ( m_stepAccuracyPopupBtn )
+                           m_stepAccuracyPopupBtn->setEnabled( true );
+                         m_accuracySource = QStringLiteral( "holdout" );
+                         if ( m_workflow )
+                           m_workflow->setHasAccuracyMetrics( true );
+                         if ( m_workflow )
+                           m_workflow->setCurrentStep( RsClassifyStep::Accuracy );
+                       }
+                       refreshWorkflowUi();
+                     }
+                     else if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
+                     {
+                       SICNU_LOG_WARN( SicnuLogTags::Classification,
+                                       QStringLiteral( "Classification cancelled" ) );
+                       if ( statusBar() )
+                         statusBar()->showMessage( tr( "分类已取消" ), 3000 );
+                     }
+                     else
+                     {
+                       const QString err = !r.errorMessage.isEmpty()
+                                            ? r.errorMessage
+                                            : ( snapOpt ? QString::fromStdString( snapOpt->error )
+                                                        : tr( "运行失败" ) );
+                       SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                                        QString( "Classification failed: %1" ).arg( err ) );
+                       if ( statusBar() )
+                         statusBar()->showMessage( tr( "分类失败: %1" ).arg( err ), 6000 );
+                     }
+                     task->deleteLater();
+                   } );
+
   if ( statusBar() )
     statusBar()->showMessage( tr( "分类中…" ), 3000 );
 }
@@ -2051,61 +2089,99 @@ void QgsClassificationMainWindow::applyPreview()
   auto *task = new RsClassificationTask( std::move( cfg ) );
   const QString outForLog = outPath;
   setClassifyBusy( true );
-  connect( task, &QgsTask::taskCompleted, this, [this, task, outForLog]() {
-    setClassifyBusy( false );
-    const auto &r = task->result();
-    if ( !r.ok )
-    {
-      if ( statusBar() )
-        statusBar()->showMessage(
-          tr( "预览失败: %1" ).arg( r.errorMessage ), 6000 );
-      return;
-    }
-    // Preview must never mark full classify complete (hasFullClassifyResult).
-    auto *previewLayer = new QgsRasterLayer(
-      outForLog, QStringLiteral( "classify_preview" ),
-      QStringLiteral( "gdal" ) );
-    if ( previewLayer->isValid() )
-    {
-      if ( m_layerStore )
-        m_layerStore->addMapLayer( previewLayer );
-      if ( m_canvas )
+
+  sicnu::jobs::JobRequest req;
+  req.algorithmId = "module:classify:preview";
+  req.title = QStringLiteral( "Classification preview" ).toStdString();
+  req.source = "module";
+  req.exclusive = false;
+  req.params["output"] = outForLog.toStdString();
+
+  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+    std::move( req ),
+    [task]( const sicnu::jobs::JobRequest &request,
+            sicnu::operators::RSOperatorContext &ctx ) {
+      ctx.logInfo( "Running classification preview" );
+      const bool ok = task->run();
+      if ( ctx.isCancelled() || ( !ok && task->result().errorMessage
+                                    == QStringLiteral( "Cancelled" ) ) )
       {
-        QList<QgsMapLayer *> layers;
-        if ( m_sourceLayer )
-          layers << previewLayer << m_sourceLayer;
-        else
-          layers << previewLayer;
-        m_canvas->setLayers( layers );
-        m_canvas->refresh();
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
       }
-    }
-    else
-    {
-      delete previewLayer;
-    }
-    if ( statusBar() )
-      statusBar()->showMessage(
-        tr( "预览完成 (%1 ms)" ).arg( r.durationMs ), 5000 );
-  } );
+      if ( !ok )
+      {
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::ComputationError,
+          task->result().errorMessage.toStdString() );
+      }
+      Json::Value result( Json::objectValue );
+      result["output"] = request.params.get( "output", "" ).asString();
+      result["durationMs"] = task->result().durationMs;
+      return result;
+    },
+    [task]() { task->cancel(); } );
 
-  connect( task, &QgsTask::taskTerminated, this, [this, task]() {
-    setClassifyBusy( false );
-    const auto &r = task->result();
-    if ( !r.errorMessage.isEmpty()
-         && r.errorMessage != QStringLiteral( "Cancelled" ) )
-    {
-      if ( statusBar() )
-        statusBar()->showMessage(
-          tr( "预览失败: %1" ).arg( r.errorMessage ), 6000 );
-    }
-    else if ( statusBar() )
-    {
-      statusBar()->showMessage( tr( "预览已取消" ), 3000 );
-    }
-  } );
+  const QString jobIdQ = QString::fromStdString( jobId );
+  auto *bridge = JobEngineQtBridge::instance();
+  auto *conn = new QMetaObject::Connection;
+  *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
+                   [this, task, jobIdQ, outForLog, conn]( const QString &id ) {
+                     if ( id != jobIdQ )
+                       return;
+                     disconnect( *conn );
+                     delete conn;
+                     setClassifyBusy( false );
 
-  QgsApplication::taskManager()->addTask( task );
+                     const auto snapOpt =
+                       sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
+                     const auto &r = task->result();
+
+                     if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Succeeded && r.ok )
+                     {
+                       auto *previewLayer = new QgsRasterLayer(
+                         outForLog, QStringLiteral( "classify_preview" ),
+                         QStringLiteral( "gdal" ) );
+                       if ( previewLayer->isValid() )
+                       {
+                         if ( m_layerStore )
+                           m_layerStore->addMapLayer( previewLayer );
+                         if ( m_canvas )
+                         {
+                           QList<QgsMapLayer *> layers;
+                           if ( m_sourceLayer )
+                             layers << previewLayer << m_sourceLayer;
+                           else
+                             layers << previewLayer;
+                           m_canvas->setLayers( layers );
+                           m_canvas->refresh();
+                         }
+                       }
+                       else
+                       {
+                         delete previewLayer;
+                       }
+                       if ( statusBar() )
+                         statusBar()->showMessage(
+                           tr( "预览完成 (%1 ms)" ).arg( r.durationMs ), 5000 );
+                     }
+                     else if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
+                     {
+                       if ( statusBar() )
+                         statusBar()->showMessage( tr( "预览已取消" ), 3000 );
+                     }
+                     else
+                     {
+                       const QString err = !r.errorMessage.isEmpty()
+                                            ? r.errorMessage
+                                            : ( snapOpt ? QString::fromStdString( snapOpt->error )
+                                                        : tr( "运行失败" ) );
+                       if ( statusBar() )
+                         statusBar()->showMessage( tr( "预览失败: %1" ).arg( err ), 6000 );
+                     }
+                     task->deleteLater();
+                   } );
+
   if ( statusBar() )
     statusBar()->showMessage( tr( "预览中…" ), 3000 );
 }

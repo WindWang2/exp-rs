@@ -38,6 +38,7 @@ target_link_libraries(qgis_app_obia PUBLIC
     qgis_core
     qgis_gui
     sicnu_processing
+    sicnu_jobs
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets

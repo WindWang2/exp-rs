@@ -78,8 +78,7 @@ class QgsClassificationMainWindow : public QMainWindow
 
     /// Apply the configured classifier to the open source raster, writing
     /// the result to the path requested in the ClassifierBar (or a file
-    /// picker if blank). Schedules an RsClassificationTask on the global
-    /// task manager.
+    /// picker if blank). Submits module:classify:apply via JobEngine.
     void applyClassification();
 
     /// Preview slot: trains like applyClassification but classifies only the

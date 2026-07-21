@@ -273,8 +273,10 @@ class QgsGeorefShellWindow : public QMainWindow
     RsGeorefSessionState mSession;
     bool mSuppressDirtyFromList = false;
     bool mWarpInProgress = false;
-    /// task-list id → live QgsTask (for cancel / progress).
+    /// task-list id → live QgsTask body (run under JobEngine; for cancel / result).
     QHash<int, QPointer<RsWarpTask>> mActiveWarpTasks;
+    /// task-list id → JobEngine job id.
+    QHash<int, QString> mActiveWarpJobIds;
 
     /// lab.georef.image_to_map session (opened by I2M shell only).
     std::unique_ptr<RsGeorefWorkflowBridge> mWorkflowBridge;
