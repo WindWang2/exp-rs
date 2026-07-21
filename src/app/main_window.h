@@ -259,6 +259,8 @@ private:
     void savePanelState();
     void restorePanelState();
     void resetPanelLayout();
+    /** Hide chrome that duplicates the Ribbon + Task panel product shell. */
+    void applyProductShellLayout();
 
     bool confirmSaveEdits(QgsVectorLayer *vl);
     bool checkUnsavedChanges();

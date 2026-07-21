@@ -17,6 +17,7 @@
 #include <QAction>
 #include <QFileInfo>
 #include <QStatusBar>
+#include <QToolBar>
 
 #include <qgsapplication.h>
 #include <processing/qgsprocessingalgorithm.h>
@@ -301,16 +302,17 @@ void QgisDesktopWindow::setupDockWidgets()
 
 void QgisDesktopWindow::setupRibbonAndTaskPanel()
 {
-    // Right-side task panel for atomic workflow tools
+    // Right-side task panel for atomic workflow tools (primary RS tool surface).
+    // Do not tabify with Processing Toolbox — that stack made two UIs fight for the
+    // same dock area. Processing stays available from 窗口 menu for experts.
     m_taskPanel = new TaskPanelHost( this );
     m_taskPanelDock = new QgsDockWidget( tr( "任务" ), this );
     m_taskPanelDock->setObjectName( QStringLiteral( "rsTaskPanelDock" ) );
     m_taskPanelDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
     m_taskPanelDock->setWidget( m_taskPanel );
     addDockWidget( Qt::RightDockWidgetArea, m_taskPanelDock );
-    if ( m_processingDock )
-        tabifyDockWidget( m_processingDock, m_taskPanelDock );
-    m_taskPanelDock->raise();
+    // Start hidden; openWorkflowTool() shows it when a tool is chosen.
+    m_taskPanelDock->hide();
 
     if ( m_windowMenu )
         m_windowMenu->addAction( m_taskPanelDock->toggleViewAction() );
@@ -333,7 +335,7 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
             m_taskPanelDock->hide();
     } );
 
-    // Six-tab ribbon above the map canvas
+    // Six-tab ribbon above the map canvas — primary navigation for RS workflow.
     m_ribbonController = new RibbonController( this, this );
     m_ribbonBar = m_ribbonController->createRibbonBar();
     connect( m_ribbonController, &RibbonController::openWorkflowTool,
@@ -347,6 +349,48 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
             lay->insertWidget( 0, m_ribbonBar );
         }
     }
+}
+
+void QgisDesktopWindow::applyProductShellLayout()
+{
+    // Product shell: Ribbon (top) + map tools + layers are primary.
+    // Hide chrome that duplicates the same entry points (classic RS toolbar,
+    // file toolbar, processing toolbox stack, guided-workflow dock).
+
+    if ( QToolBar *tb = findChild<QToolBar *>( QStringLiteral( "rsToolBar" ) ) )
+        tb->hide();
+    if ( QToolBar *tb = findChild<QToolBar *>( QStringLiteral( "fileToolBar" ) ) )
+        tb->hide();
+    // Keep mapToolsToolBar + digitizeToolBar — not covered by the ribbon tabs.
+
+    auto hideDock = []( QDockWidget *dock ) {
+        if ( dock )
+            dock->hide();
+    };
+    hideDock( m_processingDock );
+    hideDock( m_workflowDock );
+    hideDock( m_overviewDock );
+    hideDock( m_identifyDock );
+    hideDock( m_spectralDock );
+    hideDock( m_histogramStretchDock );
+    // Log stays available but collapsed by default to reduce vertical noise.
+    hideDock( m_logDock );
+
+    // Layers stay on the left; browser tabified under it can stay hidden until needed.
+    if ( m_browserDock )
+        m_browserDock->hide();
+    if ( m_layersDock )
+    {
+        m_layersDock->show();
+        m_layersDock->raise();
+    }
+
+    // Task panel only when a tool is open — do not leave an empty right dock open.
+    if ( m_taskPanelDock && !m_taskPanelDock->isVisible() )
+        m_taskPanelDock->hide();
+
+    if ( m_ribbonBar )
+        m_ribbonBar->show();
 }
 
 void QgisDesktopWindow::refreshWorkflowLayerChoices()

@@ -180,39 +180,48 @@ void QgisDesktopWindow::showGuidedWorkflows()
         m_workflowDock->raise();
     }
 }
-void QgisDesktopWindow::savePanelState()
-{
-    QSettings settings;
-    settings.setValue( "mainwindow/state", saveState() );
-    settings.setValue( "mainwindow/geometry", saveGeometry() );
-}
-
 void QgisDesktopWindow::restorePanelState()
 {
     QSettings settings;
-    QByteArray state = settings.value( "mainwindow/state" ).toByteArray();
-    if ( !state.isEmpty() )
+    // v2: product shell (Ribbon + Task panel). Old state restored classic toolbars
+    // and a crowded right dock stack that fought the new chrome.
+    constexpr int kShellLayoutVersion = 2;
+    const int savedVersion = settings.value( QStringLiteral( "mainwindow/shellLayoutVersion" ), 0 ).toInt();
+
+    if ( savedVersion >= kShellLayoutVersion )
     {
-        restoreState( state );
+        const QByteArray state = settings.value( QStringLiteral( "mainwindow/state" ) ).toByteArray();
+        if ( !state.isEmpty() )
+            restoreState( state );
     }
-    QByteArray geometry = settings.value( "mainwindow/geometry" ).toByteArray();
+    else
+    {
+        // Drop pre-shell layout so applyProductShellLayout becomes the baseline.
+        settings.remove( QStringLiteral( "mainwindow/state" ) );
+        settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), kShellLayoutVersion );
+    }
+
+    const QByteArray geometry = settings.value( QStringLiteral( "mainwindow/geometry" ) ).toByteArray();
     if ( !geometry.isEmpty() )
-    {
         restoreGeometry( geometry );
-    }
 }
 
 void QgisDesktopWindow::resetPanelLayout()
 {
     QSettings settings;
-    settings.remove( "mainwindow/state" );
-    settings.remove( "mainwindow/geometry" );
+    settings.remove( QStringLiteral( "mainwindow/state" ) );
+    settings.remove( QStringLiteral( "mainwindow/geometry" ) );
+    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 2 );
 
-    // Reset to default layout
+    // Dock areas back to defaults, then apply product shell visibility.
     if ( m_layersDock )
         addDockWidget( Qt::LeftDockWidgetArea, m_layersDock );
     if ( m_browserDock )
         addDockWidget( Qt::LeftDockWidgetArea, m_browserDock );
+    if ( m_layersDock && m_browserDock )
+        tabifyDockWidget( m_layersDock, m_browserDock );
+    if ( m_taskPanelDock )
+        addDockWidget( Qt::RightDockWidgetArea, m_taskPanelDock );
     if ( m_processingDock )
         addDockWidget( Qt::RightDockWidgetArea, m_processingDock );
     if ( m_overviewDock )
@@ -221,8 +230,23 @@ void QgisDesktopWindow::resetPanelLayout()
         addDockWidget( Qt::RightDockWidgetArea, m_identifyDock );
     if ( m_spectralDock )
         addDockWidget( Qt::RightDockWidgetArea, m_spectralDock );
+    if ( m_histogramStretchDock )
+        addDockWidget( Qt::RightDockWidgetArea, m_histogramStretchDock );
+    if ( m_workflowDock )
+        addDockWidget( Qt::RightDockWidgetArea, m_workflowDock );
+    if ( m_logDock )
+        addDockWidget( Qt::BottomDockWidgetArea, m_logDock );
 
-    statusBar()->showMessage( tr( "Layout reset to defaults" ), 3000 );
+    applyProductShellLayout();
+    statusBar()->showMessage( tr( "布局已重置为 Ribbon + 任务面板模式" ), 3000 );
+}
+
+void QgisDesktopWindow::savePanelState()
+{
+    QSettings settings;
+    settings.setValue( QStringLiteral( "mainwindow/state" ), saveState() );
+    settings.setValue( QStringLiteral( "mainwindow/geometry" ), saveGeometry() );
+    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 2 );
 }
 
 void QgisDesktopWindow::closeEvent( QCloseEvent *event )

@@ -104,6 +104,8 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     setupConnections();
     qDebug() << "Restoring panel state...";
     restorePanelState();
+    // Must run AFTER restoreState so old QSettings do not resurrect duplicate chrome.
+    applyProductShellLayout();
 
     // Load plugins
     qDebug() << "Loading plugins...";
