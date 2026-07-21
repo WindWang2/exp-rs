@@ -3,7 +3,7 @@
 // Verifies that:
 //   - Image 2 Image shell pins I2I profile: DEM hidden, mode toggle hidden.
 //   - Params panel ImageToMap profile can show DEM when RPC method is selected.
-//   - I2M window exposes SRC + Map canvases and vertical splitter.
+//   - I2M window is QGIS-style: source canvas only (map coords dialog / main map).
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
@@ -79,17 +79,17 @@ TEST_CASE( "params panel I2M can show dem for RPC", "[georef][panel]" )
   REQUIRE_FALSE( p.isDemSectionVisible() );
 }
 
-TEST_CASE( "I2M window has SRC and Map canvases", "[georef][dual]" )
+TEST_CASE( "I2M window is QGIS-style source-only with map-coords GCP", "[georef][dual]" )
 {
   ensureApp();
   QgsGeorefImageToMapWindow w( nullptr, nullptr );
   auto *src = w.findChild<QgsMapCanvas *>( QStringLiteral( "rsGeorefI2MSrcCanvas" ) );
-  auto *map = w.findChild<QgsMapCanvas *>( QStringLiteral( "rsGeorefI2MMapCanvas" ) );
   REQUIRE( src != nullptr );
-  REQUIRE( map != nullptr );
-  auto *splitter = w.findChild<QSplitter *>( QStringLiteral( "rsGeorefI2MSplitter" ) );
-  REQUIRE( splitter != nullptr );
-  REQUIRE( splitter->orientation() == Qt::Vertical );
+  // No embedded base/map panel (destination is main map or typed coords).
+  auto *map = w.findChild<QgsMapCanvas *>( QStringLiteral( "rsGeorefI2MMapCanvas" ) );
+  REQUIRE( map == nullptr );
+  REQUIRE( w.dstCanvas() == nullptr );
+  REQUIRE( w.usesMapCoordsDialogForGcp() );
 
   auto *panel = w.findChild<RsGeorefParamsPanel *>();
   REQUIRE( panel != nullptr );

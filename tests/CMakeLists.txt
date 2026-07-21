@@ -1124,7 +1124,12 @@ target_include_directories(test_rpc_transformer PRIVATE
 sicnu_discover_tests(test_rpc_transformer)
 
 # Task 11.4.8 — RPC mode UI test (DEM section visibility on toggle)
-add_executable(test_georef_window_rpc_mode test_georef_window_rpc_mode.cpp)
+add_executable(test_georef_window_rpc_mode
+  test_georef_window_rpc_mode.cpp
+  # Georef lib references JobEngineQtBridge / SicnuUi helpers from the app.
+  ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+)
 target_link_libraries(test_georef_window_rpc_mode PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
@@ -1134,6 +1139,7 @@ target_link_libraries(test_georef_window_rpc_mode PRIVATE
   qgis_core
   qgis_analysis
   qgis_app_georef
+  sicnu_jobs
 )
 target_include_directories(test_georef_window_rpc_mode PRIVATE
   ${CMAKE_SOURCE_DIR}/src

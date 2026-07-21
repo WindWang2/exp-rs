@@ -56,6 +56,12 @@ class QgsGeorefShellWindow : public QMainWindow
     RsGeorefTaskList *taskListForTest() { return mTaskList; }
     /// Runtime session for lab.georef.image_to_map (I2M only; null on I2I).
     RsGeorefWorkflowBridge *workflowBridgeForTest() { return mWorkflowBridge.get(); }
+    /**
+     * QGIS-style Image→Map GCP: click source image, then enter map X/Y or pick
+     * from the main application canvas (no embedded base-image panel).
+     * I2I keeps dual-canvas pick (default false).
+     */
+    virtual bool usesMapCoordsDialogForGcp() const { return false; }
 
     /// Test hooks for dual-canvas GCP pick (no MapCoords dialog).
     void pickSourceForTest( const QgsPointXY &p ) { onSourcePointPicked( p ); }
@@ -199,6 +205,8 @@ class QgsGeorefShellWindow : public QMainWindow
                                   const QgsPointXY &canvasMapPt ) const;
     /// Push source/dest raster paths into GCP table for col/row display.
     void updateGcpTableRasterPaths();
+    /// Main app map canvas for I2M "from map" pick (may be null in tests).
+    QgsMapCanvas *mainApplicationMapCanvas() const;
 
     QgisInterface *mIface = nullptr;
 

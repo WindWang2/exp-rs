@@ -146,21 +146,30 @@ void QgsMapCoordsDialog::setToolEmitPoint( bool isEnable )
 {
   if ( isEnable )
   {
-    if ( mMinimizeWindowCheckBox->isChecked() )
+    if ( mMinimizeWindowCheckBox->isChecked() && parentWidget() )
     {
       parentWidget()->showMinimized();
     }
 
-    Q_ASSERT( parentWidget()->parentWidget() );
-    parentWidget()->parentWidget()->activateWindow();
-    parentWidget()->parentWidget()->raise();
+    // Raise the main application window that owns the map canvas.
+    if ( mQgisCanvas )
+    {
+      if ( QWidget *w = mQgisCanvas->window() )
+      {
+        w->showNormal();
+        w->activateWindow();
+        w->raise();
+      }
+    }
 
-    mPrevMapTool = mQgisCanvas->mapTool();
-    mQgisCanvas->setMapTool( mToolEmitPoint );
+    mPrevMapTool = mQgisCanvas ? mQgisCanvas->mapTool() : nullptr;
+    if ( mQgisCanvas )
+      mQgisCanvas->setMapTool( mToolEmitPoint );
   }
   else
   {
-    mQgisCanvas->setMapTool( mPrevMapTool );
+    if ( mQgisCanvas && mPrevMapTool )
+      mQgisCanvas->setMapTool( mPrevMapTool );
   }
 }
 

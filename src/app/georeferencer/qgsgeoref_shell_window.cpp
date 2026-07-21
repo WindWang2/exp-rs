@@ -77,6 +77,7 @@ namespace
 #include "qgsmapcanvas.h"
 #include "qgsmapcoordsdialog.h"
 #include "qgsmaplayerstore.h"
+#include "qgisinterface.h"
 #include "qgsmaptool.h"
 #include "qgsmessagelog.h"
 #include "qgsproject.h"
@@ -585,14 +586,12 @@ void QgsGeorefShellWindow::addApplyAction( QToolBar *bar, const QString &objectN
 
 void QgsGeorefShellWindow::createMapTools()
 {
-  if ( !mSrcCanvas || !mDstCanvas )
+  if ( !mSrcCanvas )
     return;
 
-  // Dual-canvas GCP pick: SRC → source, REF/Map → destination (no form).
-  // IMPORTANT: do NOT setAction() on these tools. Two tools sharing one QAction
-  // causes deactivate() on one canvas to uncheck the action and clear pending
-  // source (source coords became 0,0). Toolbar actions are wired only in
-  // wireMapToolActions().
+  // Dual-canvas GCP (I2I): SRC → source, REF → destination.
+  // Map-coords dialog mode (I2M): only SRC tools; destination via table or main map.
+  // IMPORTANT: do NOT setAction() on dual-canvas add tools (shared QAction race).
   mAddPointTool = new QgsGeorefToolAddPoint( mSrcCanvas );
   mAddPointTool->setParent( this );
   connect( mAddPointTool, &QgsGeorefToolAddPoint::pointPicked,
@@ -605,31 +604,37 @@ void QgsGeorefShellWindow::createMapTools()
       statusBar()->showMessage( tr( "已取消未完成的源点" ), 3000 );
   } );
 
-  mAddPointToolDst = new QgsGeorefToolAddPoint( mDstCanvas );
-  mAddPointToolDst->setParent( this );
-  connect( mAddPointToolDst, &QgsGeorefToolAddPoint::pointPicked,
-           this, &QgsGeorefShellWindow::onDestPointPicked );
-  connect( mAddPointToolDst, &QgsGeorefToolAddPoint::canceled, this, [this]() {
-    if ( !mHasPendingSource )
-      return;
-    clearPendingGcpPick();
-    if ( statusBar() )
-      statusBar()->showMessage( tr( "已取消未完成的源点" ), 3000 );
-  } );
+  if ( mDstCanvas && !usesMapCoordsDialogForGcp() )
+  {
+    mAddPointToolDst = new QgsGeorefToolAddPoint( mDstCanvas );
+    mAddPointToolDst->setParent( this );
+    connect( mAddPointToolDst, &QgsGeorefToolAddPoint::pointPicked,
+             this, &QgsGeorefShellWindow::onDestPointPicked );
+    connect( mAddPointToolDst, &QgsGeorefToolAddPoint::canceled, this, [this]() {
+      if ( !mHasPendingSource )
+        return;
+      clearPendingGcpPick();
+      if ( statusBar() )
+        statusBar()->showMessage( tr( "已取消未完成的源点" ), 3000 );
+    } );
+  }
 
   mToolMoveSrc = new QgsGeorefToolMovePoint( mSrcCanvas );
   mToolMoveSrc->setParent( this );
-  mToolMoveDst = new QgsGeorefToolMovePoint( mDstCanvas );
-  mToolMoveDst->setParent( this );
-
   connect( mToolMoveSrc, &QgsGeorefToolMovePoint::pointBeginMove, this, &QgsGeorefShellWindow::selectPoint );
   connect( mToolMoveSrc, &QgsGeorefToolMovePoint::pointMoving, this, &QgsGeorefShellWindow::movePoint );
   connect( mToolMoveSrc, &QgsGeorefToolMovePoint::pointEndMove, this, &QgsGeorefShellWindow::releasePoint );
   connect( mToolMoveSrc, &QgsGeorefToolMovePoint::pointCancelMove, this, &QgsGeorefShellWindow::cancelPoint );
-  connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointBeginMove, this, &QgsGeorefShellWindow::selectPoint );
-  connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointMoving, this, &QgsGeorefShellWindow::movePoint );
-  connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointEndMove, this, &QgsGeorefShellWindow::releasePoint );
-  connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointCancelMove, this, &QgsGeorefShellWindow::cancelPoint );
+
+  if ( mDstCanvas )
+  {
+    mToolMoveDst = new QgsGeorefToolMovePoint( mDstCanvas );
+    mToolMoveDst->setParent( this );
+    connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointBeginMove, this, &QgsGeorefShellWindow::selectPoint );
+    connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointMoving, this, &QgsGeorefShellWindow::movePoint );
+    connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointEndMove, this, &QgsGeorefShellWindow::releasePoint );
+    connect( mToolMoveDst, &QgsGeorefToolMovePoint::pointCancelMove, this, &QgsGeorefShellWindow::cancelPoint );
+  }
 
   const auto clearMoveHover = [this]() {
     mMovingPoint = nullptr;
@@ -640,17 +645,21 @@ void QgsGeorefShellWindow::createMapTools()
     }
   };
   connect( mToolMoveSrc, &QgsMapTool::deactivated, this, clearMoveHover );
-  connect( mToolMoveDst, &QgsMapTool::deactivated, this, clearMoveHover );
+  if ( mToolMoveDst )
+    connect( mToolMoveDst, &QgsMapTool::deactivated, this, clearMoveHover );
 
   mToolDeleteSrc = new QgsGeorefToolDeletePoint( mSrcCanvas );
   mToolDeleteSrc->setParent( this );
-  mToolDeleteDst = new QgsGeorefToolDeletePoint( mDstCanvas );
-  mToolDeleteDst->setParent( this );
-
   connect( mToolDeleteSrc, &QgsGeorefToolDeletePoint::deletePoint, this, &QgsGeorefShellWindow::deletePointAt );
   connect( mToolDeleteSrc, &QgsGeorefToolDeletePoint::hoverPoint, this, &QgsGeorefShellWindow::hoverPoint );
-  connect( mToolDeleteDst, &QgsGeorefToolDeletePoint::deletePoint, this, &QgsGeorefShellWindow::deletePointAt );
-  connect( mToolDeleteDst, &QgsGeorefToolDeletePoint::hoverPoint, this, &QgsGeorefShellWindow::hoverPoint );
+
+  if ( mDstCanvas )
+  {
+    mToolDeleteDst = new QgsGeorefToolDeletePoint( mDstCanvas );
+    mToolDeleteDst->setParent( this );
+    connect( mToolDeleteDst, &QgsGeorefToolDeletePoint::deletePoint, this, &QgsGeorefShellWindow::deletePointAt );
+    connect( mToolDeleteDst, &QgsGeorefToolDeletePoint::hoverPoint, this, &QgsGeorefShellWindow::hoverPoint );
+  }
 
   const auto clearDeleteHover = [this]() {
     if ( mHoveredPoint )
@@ -660,22 +669,26 @@ void QgsGeorefShellWindow::createMapTools()
     }
   };
   connect( mToolDeleteSrc, &QgsMapTool::deactivated, this, clearDeleteHover );
-  connect( mToolDeleteDst, &QgsMapTool::deactivated, this, clearDeleteHover );
+  if ( mToolDeleteDst )
+    connect( mToolDeleteDst, &QgsMapTool::deactivated, this, clearDeleteHover );
 
-  // Navigation tools (both canvases)
+  // Navigation tools (SRC always; dest only when dual-canvas)
   mPanSrc = new QgsMapToolPan( mSrcCanvas );
   mPanSrc->setParent( this );
-  mPanDst = new QgsMapToolPan( mDstCanvas );
-  mPanDst->setParent( this );
-
   mZoomInSrc = new QgsMapToolZoom( mSrcCanvas, false /* zoom in */ );
   mZoomInSrc->setParent( this );
   mZoomOutSrc = new QgsMapToolZoom( mSrcCanvas, true /* zoom out */ );
   mZoomOutSrc->setParent( this );
-  mZoomInDst = new QgsMapToolZoom( mDstCanvas, false );
-  mZoomInDst->setParent( this );
-  mZoomOutDst = new QgsMapToolZoom( mDstCanvas, true );
-  mZoomOutDst->setParent( this );
+
+  if ( mDstCanvas )
+  {
+    mPanDst = new QgsMapToolPan( mDstCanvas );
+    mPanDst->setParent( this );
+    mZoomInDst = new QgsMapToolZoom( mDstCanvas, false );
+    mZoomInDst->setParent( this );
+    mZoomOutDst = new QgsMapToolZoom( mDstCanvas, true );
+    mZoomOutDst->setParent( this );
+  }
 }
 
 void QgsGeorefShellWindow::rearmAddPointTools()
@@ -736,8 +749,14 @@ void QgsGeorefShellWindow::wireMapToolActions()
       }
       rearmAddPointTools();
       if ( statusBar() )
-        statusBar()->showMessage(
-          tr( "添加 GCP：先在左侧/上方源画布点击源点，再在参考/地图上点击同名位置（右键取消）" ), 8000 );
+      {
+        if ( usesMapCoordsDialogForGcp() )
+          statusBar()->showMessage(
+            tr( "添加 GCP：在源影像上点击像点，然后在对话框中填写地图坐标或从主窗口地图取点" ), 8000 );
+        else
+          statusBar()->showMessage(
+            tr( "添加 GCP：先在源画布点击源点，再在参考影像上点击同名位置（右键取消）" ), 8000 );
+      }
     } );
   }
   if ( mMovePointAction )
@@ -1162,7 +1181,24 @@ void QgsGeorefShellWindow::zoomToGcpDest( int row )
   setSelectedGcpRow( row );
   QgsGeorefDataPoint *dp = mDataPoints.value( p, nullptr );
   const QgsPointXY dest = dp ? dp->destinationDisplayPoint() : p->destinationPoint();
-  panCanvasToPoint( mDstCanvas, dest );
+  if ( mDstCanvas )
+  {
+    panCanvasToPoint( mDstCanvas, dest );
+  }
+  else if ( usesMapCoordsDialogForGcp() )
+  {
+    // I2M: locate destination on the main application map.
+    QgsMapCanvas *mainMap = mainApplicationMapCanvas();
+    if ( mainMap )
+    {
+      panCanvasToPoint( mainMap, dest );
+      if ( QWidget *w = mainMap->window() )
+      {
+        w->raise();
+        w->activateWindow();
+      }
+    }
+  }
   if ( statusBar() )
     statusBar()->showMessage( tr( "已定位到目标点 #%1" ).arg( row + 1 ), 3000 );
 }
@@ -1792,6 +1828,13 @@ void QgsGeorefShellWindow::onSourcePointPicked( const QgsPointXY &sourceMap )
 {
   // Normalize into the source layer CRS so stored map coords match the image.
   const QgsPointXY layerMap = mapPickToLayerCrs( mSrcCanvas, mSrcRaster, sourceMap );
+  if ( usesMapCoordsDialogForGcp() )
+  {
+    // QGIS-style I2M: dialog for typed map X/Y or pick from main window map.
+    showCoordDialog( layerMap );
+    rearmAddPointTools();
+    return;
+  }
   beginPendingSourcePick( layerMap );
 }
 
@@ -1810,29 +1853,74 @@ void QgsGeorefShellWindow::onDestPointPicked( const QgsPointXY &destMap )
   commitGcpPair( src, layerMap );
 }
 
+QgsMapCanvas *QgsGeorefShellWindow::mainApplicationMapCanvas() const
+{
+  if ( mIface )
+  {
+    if ( QgsMapCanvas *c = mIface->mapCanvas() )
+      return c;
+  }
+  // Walk parents for the main window canvas (iface is often null in this app).
+  for ( QWidget *w = parentWidget(); w; w = w->parentWidget() )
+  {
+    const auto canvases = w->findChildren<QgsMapCanvas *>();
+    for ( QgsMapCanvas *c : canvases )
+    {
+      if ( c && c != mSrcCanvas && c != mDstCanvas )
+        return c;
+    }
+  }
+  return nullptr;
+}
+
 void QgsGeorefShellWindow::showCoordDialog( const QgsPointXY &sourcePixel )
 {
-  // Advanced / compatibility path: typed destination coordinates.
-  // Primary UX is dual-canvas pick (onSourcePointPicked / onDestPointPicked).
+  // QGIS-style destination entry: type X/Y or pick from the main map canvas.
+  QgsMapCanvas *mainMap = mainApplicationMapCanvas();
+
+  if ( !mainMap )
+  {
+    // Fallback: seed a row so the user can fill dest X/Y in the GCP table.
+    if ( statusBar() )
+      statusBar()->showMessage(
+        tr( "无法连接主地图画布：请在 GCP 表中直接填写目标 X/Y，或先打开主窗口。" ), 6000 );
+    if ( mGcps )
+    {
+      QgsCoordinateReferenceSystem destCrs;
+      if ( mParamsPanel )
+        destCrs = mParamsPanel->destCrs();
+      mGcps->appendPoint( QgsGcpPoint( sourcePixel, QgsPointXY(), destCrs, true ) );
+    }
+    return;
+  }
+
   auto *tempGcp = new QgsGcpPoint( sourcePixel, QgsPointXY(), QgsCoordinateReferenceSystem(), true );
-  auto *tempDataPoint = new QgsGeorefDataPoint( mSrcCanvas, mDstCanvas, tempGcp );
+  auto *tempDataPoint = new QgsGeorefDataPoint( mSrcCanvas, nullptr, tempGcp );
 
-  QgsCoordinateReferenceSystem rasterCrs = mSrcCanvas
-                                             ? mSrcCanvas->mapSettings().destinationCrs()
-                                             : QgsCoordinateReferenceSystem();
+  QgsCoordinateReferenceSystem rasterCrs = mParamsPanel
+                                             ? mParamsPanel->destCrs()
+                                             : mainMap->mapSettings().destinationCrs();
+  if ( !rasterCrs.isValid() )
+    rasterCrs = mainMap->mapSettings().destinationCrs();
 
-  auto *dlg = new QgsMapCoordsDialog( mDstCanvas, tempDataPoint, rasterCrs, this );
+  auto *dlg = new QgsMapCoordsDialog( mainMap, tempDataPoint, rasterCrs, this );
   dlg->setAttribute( Qt::WA_DeleteOnClose );
   tempDataPoint->setParent( dlg );
+  dlg->updateSourceCoordinates( sourcePixel );
 
   connect( dlg, &QgsMapCoordsDialog::pointAdded, this,
            [this]( const QgsPointXY &srcCoord, const QgsPointXY &dstCoord,
                    const QgsCoordinateReferenceSystem &destCrs ) {
              if ( mGcps )
                mGcps->appendPoint( QgsGcpPoint( srcCoord, dstCoord, destCrs, true ) );
+             if ( statusBar() )
+               statusBar()->showMessage( tr( "已添加 GCP（源像点 + 地图坐标）" ), 4000 );
+             rearmAddPointTools();
            } );
   connect( dlg, &QObject::destroyed, this, [tempGcp]() { delete tempGcp; } );
   dlg->show();
+  dlg->raise();
+  dlg->activateWindow();
 }
 
 void QgsGeorefShellWindow::openSourceRaster()
