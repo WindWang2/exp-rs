@@ -57,249 +57,429 @@ void QgisDesktopWindow::setupMenu()
     versionLabel->setObjectName("rsBrandVersion");
     menuBar()->setCornerWidget(versionLabel, Qt::TopRightCorner);
 
-    // Project Menu
-    QMenu *projectMenu = menuBar()->addMenu(tr("&Project"));
-    projectMenu->addAction(QIcon(":/icons/new_project"), tr("New Project"), this, &QgisDesktopWindow::newProject, QKeySequence::New);
-    projectMenu->addAction(QIcon(":/icons/o_en"), tr("Open Project..."), this, &QgisDesktopWindow::openProject, QKeySequence::Open);
-    projectMenu->addAction(QIcon(":/icons/s_ve"), tr("Save Project"), this, &QgisDesktopWindow::saveProject, QKeySequence::Save);
-    projectMenu->addAction(tr("Save Project As..."), this, &QgisDesktopWindow::saveProjectAs);
-    projectMenu->addSeparator();
-    projectMenu->addAction(QIcon(":/icons/i_ort"), tr("Import Layer..."), this, &QgisDesktopWindow::importLayer);
-    projectMenu->addAction(tr("Browse STAC Catalog..."), this, &QgisDesktopWindow::browseStacCatalog);
-    projectMenu->addSeparator();
-    projectMenu->addAction(tr("New Layout..."), this, &QgisDesktopWindow::newLayout);
-    projectMenu->addSeparator();
-    projectMenu->addAction(tr("Export Lab Report..."), this, &QgisDesktopWindow::exportLabReport);
-    projectMenu->addSeparator();
-    projectMenu->addAction(tr("Quit"), this, &QMainWindow::close, QKeySequence::Quit);
+    // Helper: enable tooltips on every top-level / submenu we create.
+    auto makeMenu = []( QMenu *m ) -> QMenu * {
+        if ( m )
+            m->setToolTipsVisible( true );
+        return m;
+    };
 
-    // Edit Menu
-    QMenu *editMenu = menuBar()->addMenu(tr("&Edit"));
-    m_toggleEditingAction = editMenu->addAction(QIcon(":/icons/mActionToggleEditing"), tr("Toggle Editing"), this, &QgisDesktopWindow::toggleEditing);
-    m_toggleEditingAction->setCheckable(true);
-    m_toggleEditingAction->setShortcut(QKeySequence("Ctrl+E"));
-    m_saveEditsAction = editMenu->addAction(QIcon(":/icons/mActionSaveEdits"), tr("Save Edits"), this, &QgisDesktopWindow::saveEdits);
-    m_saveEditsAction->setEnabled(false);
-    editMenu->addSeparator();
-    editMenu->addAction(tr("Undo"), this, &QgisDesktopWindow::undo, QKeySequence::Undo);
-    editMenu->addAction(tr("Redo"), this, &QgisDesktopWindow::redo, QKeySequence::Redo);
-    editMenu->addSeparator();
-    editMenu->addAction(tr("Cut Features"), this, &QgisDesktopWindow::cutFeatures, QKeySequence::Cut);
-    editMenu->addAction(tr("Copy Features"), this, &QgisDesktopWindow::copyFeatures, QKeySequence::Copy);
-    editMenu->addAction(tr("Paste Features"), this, &QgisDesktopWindow::pasteFeatures, QKeySequence::Paste);
-    editMenu->addSeparator();
-    editMenu->addAction(tr("Select All"), this, &QgisDesktopWindow::selectAll, QKeySequence("Ctrl+A"));
-    editMenu->addAction(QIcon(":/icons/mActionSelectRectangle"), tr("Select Features"), this, &QgisDesktopWindow::selectFeatures);
-    editMenu->addSeparator();
-    editMenu->addAction(QIcon(":/icons/mActionDeleteSelectedFeatures"), tr("Delete Selected"), this, &QgisDesktopWindow::deleteSelectedFeatures, QKeySequence::Delete);
-    editMenu->addSeparator();
-    editMenu->addAction(tr("Open Attribute Table..."), this, &QgisDesktopWindow::openAttributeTable);
+    // ------------------------------------------------------------------
+    // 工程 Project — file I/O, data import, layout, quit
+    // ------------------------------------------------------------------
+    QMenu *projectMenu = makeMenu( menuBar()->addMenu( tr( "工程(&P)" ) ) );
+    tip( projectMenu->addAction( QIcon( ":/icons/new_project" ), tr( "新建工程" ),
+                                 this, &QgisDesktopWindow::newProject, QKeySequence::New ),
+         tr( "创建空白工程，清除当前图层与视图状态。" ) );
+    tip( projectMenu->addAction( QIcon( ":/icons/o_en" ), tr( "打开工程..." ),
+                                 this, &QgisDesktopWindow::openProject, QKeySequence::Open ),
+         tr( "打开已保存的工程文件。" ) );
+    tip( projectMenu->addAction( QIcon( ":/icons/s_ve" ), tr( "保存工程" ),
+                                 this, &QgisDesktopWindow::saveProject, QKeySequence::Save ),
+         tr( "保存当前工程到已有路径。" ) );
+    tip( projectMenu->addAction( tr( "工程另存为..." ), this, &QgisDesktopWindow::saveProjectAs ),
+         tr( "将工程另存为新文件。" ) );
+    projectMenu->addSeparator();
+    tip( projectMenu->addAction( QIcon( ":/icons/i_ort" ), tr( "导入图层..." ),
+                                 this, &QgisDesktopWindow::importLayer ),
+         tr( "导入栅格或矢量图层到工程。" ) );
+    tip( projectMenu->addAction( tr( "浏览 STAC 目录..." ),
+                                 this, &QgisDesktopWindow::browseStacCatalog ),
+         tr( "浏览 STAC 目录检索遥感数据。" ) );
+    projectMenu->addSeparator();
+    tip( projectMenu->addAction( tr( "新建布局..." ), this, &QgisDesktopWindow::newLayout ),
+         tr( "创建打印布局 / 出图。" ) );
+    tip( projectMenu->addAction( tr( "导出实验报告..." ),
+                                 this, &QgisDesktopWindow::exportLabReport ),
+         tr( "导出课程/实验报告。" ) );
+    projectMenu->addSeparator();
+    tip( projectMenu->addAction( tr( "退出" ), this, &QMainWindow::close, QKeySequence::Quit ),
+         tr( "退出应用程序。" ) );
 
-    // Digitize Menu
-    QMenu *digitizeMenu = menuBar()->addMenu(tr("&Digitize"));
-    digitizeMenu->addAction(QIcon(":/icons/mActionCapturePoint"), tr("Add Feature"), this, &QgisDesktopWindow::addFeature, QKeySequence("Ctrl+."));
-    digitizeMenu->addAction(QIcon(":/icons/mActionVertexTool"), tr("Vertex Tool"), this, &QgisDesktopWindow::vertexTool, QKeySequence("Ctrl+V"));
-    digitizeMenu->addSeparator();
-    digitizeMenu->addAction(QIcon(":/icons/mActionMoveFeature"), tr("Move Feature"), this, &QgisDesktopWindow::moveFeature);
-    digitizeMenu->addAction(QIcon(":/icons/mActionRotateFeature"), tr("Rotate Feature"), this, &QgisDesktopWindow::rotateFeature);
-    digitizeMenu->addAction(QIcon(":/icons/mActionScaleFeature"), tr("Scale Feature"), this, &QgisDesktopWindow::scaleFeature);
-    digitizeMenu->addAction(QIcon(":/icons/mActionOffsetCurve"), tr("Offset Curve"), this, &QgisDesktopWindow::offsetCurve);
-    digitizeMenu->addAction(QIcon(":/icons/mActionReverseLine"), tr("Reverse Line"), this, &QgisDesktopWindow::reverseLine);
-    digitizeMenu->addSeparator();
-    digitizeMenu->addAction(QIcon(":/icons/mActionReshape"), tr("Reshape Geometry"), this, &QgisDesktopWindow::reshapeGeometry);
-    digitizeMenu->addAction(QIcon(":/icons/mActionSplitFeatures"), tr("Split Features"), this, &QgisDesktopWindow::splitFeatures);
-    digitizeMenu->addAction(tr("Split Parts"), this, &QgisDesktopWindow::splitParts);
-    digitizeMenu->addAction(QIcon(":/icons/mActionSimplify"), tr("Simplify"), this, &QgisDesktopWindow::simplifyFeature);
-    digitizeMenu->addSeparator();
-    digitizeMenu->addAction(QIcon(":/icons/mActionAddRing"), tr("Add Ring"), this, &QgisDesktopWindow::addRing);
-    digitizeMenu->addAction(QIcon(":/icons/mActionAddPart"), tr("Add Part"), this, &QgisDesktopWindow::addPart);
-    digitizeMenu->addAction(QIcon(":/icons/mActionFillRing"), tr("Fill Ring"), this, &QgisDesktopWindow::fillRing);
-    digitizeMenu->addAction(QIcon(":/icons/mActionDeletePart"), tr("Delete Part"), this, &QgisDesktopWindow::deletePart);
-    digitizeMenu->addAction(QIcon(":/icons/mActionDeleteRing"), tr("Delete Ring"), this, &QgisDesktopWindow::deleteRing);
-    digitizeMenu->addSeparator();
-    digitizeMenu->addAction(QIcon(":/icons/mActionTrimExtendFeature"), tr("Trim/Extend Feature"), this, &QgisDesktopWindow::trimExtendFeature);
-    digitizeMenu->addAction(QIcon(":/icons/mActionChamferFillet"), tr("Chamfer/Fillet"), this, &QgisDesktopWindow::chamferFillet);
-    digitizeMenu->addAction(QIcon(":/icons/mActionFeatureArray"), tr("Feature Array"), this, &QgisDesktopWindow::featureArray);
+    // ------------------------------------------------------------------
+    // 编辑 Edit — feature edit + 数字化 as submenu (no longer top-level)
+    // ------------------------------------------------------------------
+    QMenu *editMenu = makeMenu( menuBar()->addMenu( tr( "编辑(&E)" ) ) );
+    m_toggleEditingAction = editMenu->addAction(
+      QIcon( ":/icons/mActionToggleEditing" ), tr( "切换编辑" ),
+      this, &QgisDesktopWindow::toggleEditing );
+    m_toggleEditingAction->setCheckable( true );
+    m_toggleEditingAction->setShortcut( QKeySequence( "Ctrl+E" ) );
+    tip( m_toggleEditingAction, tr( "开启/关闭当前矢量图层编辑。" ) );
+    m_saveEditsAction = editMenu->addAction(
+      QIcon( ":/icons/mActionSaveEdits" ), tr( "保存编辑" ),
+      this, &QgisDesktopWindow::saveEdits );
+    m_saveEditsAction->setEnabled( false );
+    tip( m_saveEditsAction, tr( "保存矢量编辑。" ) );
+    editMenu->addSeparator();
+    tip( editMenu->addAction( tr( "撤销" ), this, &QgisDesktopWindow::undo, QKeySequence::Undo ),
+         tr( "撤销上一步编辑。" ) );
+    tip( editMenu->addAction( tr( "重做" ), this, &QgisDesktopWindow::redo, QKeySequence::Redo ),
+         tr( "重做已撤销的编辑。" ) );
+    editMenu->addSeparator();
+    tip( editMenu->addAction( tr( "剪切要素" ), this, &QgisDesktopWindow::cutFeatures, QKeySequence::Cut ),
+         tr( "剪切选中要素。" ) );
+    tip( editMenu->addAction( tr( "复制要素" ), this, &QgisDesktopWindow::copyFeatures, QKeySequence::Copy ),
+         tr( "复制选中要素。" ) );
+    tip( editMenu->addAction( tr( "粘贴要素" ), this, &QgisDesktopWindow::pasteFeatures, QKeySequence::Paste ),
+         tr( "粘贴要素。" ) );
+    editMenu->addSeparator();
+    tip( editMenu->addAction( tr( "全选" ), this, &QgisDesktopWindow::selectAll, QKeySequence( "Ctrl+A" ) ),
+         tr( "选择当前图层全部要素。" ) );
+    tip( editMenu->addAction( QIcon( ":/icons/mActionSelectRectangle" ), tr( "选择要素" ),
+                             this, &QgisDesktopWindow::selectFeatures ),
+         tr( "矩形选择要素。" ) );
+    tip( editMenu->addAction( QIcon( ":/icons/mActionDeleteSelectedFeatures" ), tr( "删除选中" ),
+                             this, &QgisDesktopWindow::deleteSelectedFeatures, QKeySequence::Delete ),
+         tr( "删除选中要素。" ) );
+    editMenu->addSeparator();
+    tip( editMenu->addAction( tr( "打开属性表..." ), this, &QgisDesktopWindow::openAttributeTable ),
+         tr( "打开属性表。" ) );
 
-    // View Menu
-    QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
-    viewMenu->addAction(QIcon(":/icons/zoo_in"), tr("Zoom In"), this, &QgisDesktopWindow::zoomIn, QKeySequence::ZoomIn);
-    viewMenu->addAction(QIcon(":/icons/zoo_out"), tr("Zoom Out"), this, &QgisDesktopWindow::zoomOut, QKeySequence::ZoomOut);
-    viewMenu->addAction(QIcon(":/icons/full_extent"), tr("Zoom Full"), this, &QgisDesktopWindow::zoomFullExtent, QKeySequence("Ctrl+Shift+F"));
-    viewMenu->addAction(tr("Zoom to Layer"), this, &QgisDesktopWindow::zoomToLayer, QKeySequence("Ctrl+L"));
-    viewMenu->addSeparator();
-    viewMenu->addAction(QIcon(":/icons/p_n"), tr("Pan"), this, &QgisDesktopWindow::panMap, QKeySequence("Space"));
-    viewMenu->addAction(QIcon(":/icons/identify"), tr("Identify"), this, &QgisDesktopWindow::identifyFeatures, QKeySequence("Ctrl+Shift+I"));
-    viewMenu->addSeparator();
-    viewMenu->addAction(QIcon(":/icons/me_sure_dist"), tr("Measure Distance"), this, &QgisDesktopWindow::measureDistance, QKeySequence("Ctrl+Shift+D"));
-    viewMenu->addAction(QIcon(":/icons/me_sure_are_"), tr("Measure Area"), this, &QgisDesktopWindow::measureArea, QKeySequence("Ctrl+Shift+A"));
-    viewMenu->addSeparator();
-    viewMenu->addAction(tr("Compare Layers..."), this, &QgisDesktopWindow::openComparisonDialog, QKeySequence("Ctrl+Shift+C"));
-    viewMenu->addAction(tr("Swipe Layers"), this, &QgisDesktopWindow::toggleSwipeTool, QKeySequence("Ctrl+Shift+S"));
-    viewMenu->addSeparator();
-    viewMenu->addAction(QIcon(":/icons/refresh_view"), tr("Refresh"), this, &QgisDesktopWindow::refreshMap, QKeySequence("F5"));
+    // Digitize tools nested under Edit (grouped)
+    QMenu *digitizeMenu = makeMenu( editMenu->addMenu( tr( "数字化" ) ) );
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionCapturePoint" ), tr( "添加要素" ),
+                                  this, &QgisDesktopWindow::addFeature, QKeySequence( "Ctrl+." ) ),
+         tr( "数字化添加新要素。" ) );
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionVertexTool" ), tr( "节点工具" ),
+                                  this, &QgisDesktopWindow::vertexTool, QKeySequence( "Ctrl+V" ) ),
+         tr( "编辑节点。" ) );
+    digitizeMenu->addSeparator();
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionMoveFeature" ), tr( "移动要素" ),
+                                  this, &QgisDesktopWindow::moveFeature ),
+         tr( "移动选中要素。" ) );
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionRotateFeature" ), tr( "旋转要素" ),
+                                  this, &QgisDesktopWindow::rotateFeature ),
+         tr( "旋转选中要素。" ) );
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionScaleFeature" ), tr( "缩放要素" ),
+                                  this, &QgisDesktopWindow::scaleFeature ),
+         tr( "缩放选中要素。" ) );
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionOffsetCurve" ), tr( "偏移线" ),
+                                  this, &QgisDesktopWindow::offsetCurve ),
+         tr( "线要素偏移。" ) );
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionReverseLine" ), tr( "反转线方向" ),
+                                  this, &QgisDesktopWindow::reverseLine ),
+         tr( "反转线要素方向。" ) );
+    digitizeMenu->addSeparator();
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionReshape" ), tr( "重塑几何" ),
+                                  this, &QgisDesktopWindow::reshapeGeometry ),
+         tr( "重塑要素几何。" ) );
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionSplitFeatures" ), tr( "分割要素" ),
+                                  this, &QgisDesktopWindow::splitFeatures ),
+         tr( "分割要素。" ) );
+    tip( digitizeMenu->addAction( tr( "分割部件" ), this, &QgisDesktopWindow::splitParts ),
+         tr( "分割多部件几何。" ) );
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionSimplify" ), tr( "简化" ),
+                                  this, &QgisDesktopWindow::simplifyFeature ),
+         tr( "简化几何。" ) );
+    digitizeMenu->addSeparator();
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionAddRing" ), tr( "添加环" ),
+                                  this, &QgisDesktopWindow::addRing ),
+         tr( "添加内环。" ) );
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionAddPart" ), tr( "添加部件" ),
+                                  this, &QgisDesktopWindow::addPart ),
+         tr( "添加多部件。" ) );
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionFillRing" ), tr( "填充环" ),
+                                  this, &QgisDesktopWindow::fillRing ),
+         tr( "填充环生成新要素。" ) );
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionDeletePart" ), tr( "删除部件" ),
+                                  this, &QgisDesktopWindow::deletePart ),
+         tr( "删除部件。" ) );
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionDeleteRing" ), tr( "删除环" ),
+                                  this, &QgisDesktopWindow::deleteRing ),
+         tr( "删除内环。" ) );
+    digitizeMenu->addSeparator();
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionTrimExtendFeature" ), tr( "修剪/延伸" ),
+                                  this, &QgisDesktopWindow::trimExtendFeature ),
+         tr( "修剪或延伸要素。" ) );
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionChamferFillet" ), tr( "倒角/圆角" ),
+                                  this, &QgisDesktopWindow::chamferFillet ),
+         tr( "倒角或圆角。" ) );
+    tip( digitizeMenu->addAction( QIcon( ":/icons/mActionFeatureArray" ), tr( "要素阵列" ),
+                                  this, &QgisDesktopWindow::featureArray ),
+         tr( "按阵列复制要素。" ) );
 
-    // Layer Menu
-    QMenu *layerMenu = menuBar()->addMenu(tr("&Layer"));
-    layerMenu->addAction(QIcon(":/icons/r_ster"), tr("Add Raster Layer..."), this, &QgisDesktopWindow::addRasterLayer);
-    layerMenu->addAction(QIcon(":/icons/vector"), tr("Add Vector Layer..."), this, &QgisDesktopWindow::addVectorLayer);
+    // ------------------------------------------------------------------
+    // 视图 View — navigation, measure, compare
+    // ------------------------------------------------------------------
+    QMenu *viewMenu = makeMenu( menuBar()->addMenu( tr( "视图(&V)" ) ) );
+    tip( viewMenu->addAction( QIcon( ":/icons/zoo_in" ), tr( "放大" ),
+                              this, &QgisDesktopWindow::zoomIn, QKeySequence::ZoomIn ),
+         tr( "放大地图视图。" ) );
+    tip( viewMenu->addAction( QIcon( ":/icons/zoo_out" ), tr( "缩小" ),
+                              this, &QgisDesktopWindow::zoomOut, QKeySequence::ZoomOut ),
+         tr( "缩小地图视图。" ) );
+    tip( viewMenu->addAction( QIcon( ":/icons/full_extent" ), tr( "全图" ),
+                              this, &QgisDesktopWindow::zoomFullExtent, QKeySequence( "Ctrl+Shift+F" ) ),
+         tr( "缩放到所有图层范围。" ) );
+    tip( viewMenu->addAction( tr( "缩放到图层" ), this, &QgisDesktopWindow::zoomToLayer,
+                              QKeySequence( "Ctrl+L" ) ),
+         tr( "缩放到当前图层范围。" ) );
+    viewMenu->addSeparator();
+    tip( viewMenu->addAction( QIcon( ":/icons/p_n" ), tr( "平移" ),
+                              this, &QgisDesktopWindow::panMap, QKeySequence( "Space" ) ),
+         tr( "平移地图。" ) );
+    tip( viewMenu->addAction( QIcon( ":/icons/identify" ), tr( "识别" ),
+                              this, &QgisDesktopWindow::identifyFeatures, QKeySequence( "Ctrl+Shift+I" ) ),
+         tr( "点击地图查询要素/像元属性。" ) );
+    viewMenu->addSeparator();
+    tip( viewMenu->addAction( QIcon( ":/icons/me_sure_dist" ), tr( "测距" ),
+                              this, &QgisDesktopWindow::measureDistance, QKeySequence( "Ctrl+Shift+D" ) ),
+         tr( "量测距离。" ) );
+    tip( viewMenu->addAction( QIcon( ":/icons/me_sure_are_" ), tr( "测面" ),
+                              this, &QgisDesktopWindow::measureArea, QKeySequence( "Ctrl+Shift+A" ) ),
+         tr( "量测面积。" ) );
+    viewMenu->addSeparator();
+    tip( viewMenu->addAction( tr( "图层对比..." ), this, &QgisDesktopWindow::openComparisonDialog,
+                              QKeySequence( "Ctrl+Shift+C" ) ),
+         tr( "左右并排对比两个图层。" ) );
+    tip( viewMenu->addAction( tr( "卷帘对比" ), this, &QgisDesktopWindow::toggleSwipeTool,
+                              QKeySequence( "Ctrl+Shift+S" ) ),
+         tr( "在地图上拖动分割线对比上下图层。" ) );
+    viewMenu->addSeparator();
+    tip( viewMenu->addAction( QIcon( ":/icons/refresh_view" ), tr( "刷新" ),
+                              this, &QgisDesktopWindow::refreshMap, QKeySequence( "F5" ) ),
+         tr( "刷新地图渲染。" ) );
+
+    // ------------------------------------------------------------------
+    // 图层 Layer — add/manage layers only
+    // ------------------------------------------------------------------
+    QMenu *layerMenu = makeMenu( menuBar()->addMenu( tr( "图层(&L)" ) ) );
+    tip( layerMenu->addAction( QIcon( ":/icons/r_ster" ), tr( "添加栅格图层..." ),
+                               this, &QgisDesktopWindow::addRasterLayer ),
+         tr( "从文件添加栅格图层。" ) );
+    tip( layerMenu->addAction( QIcon( ":/icons/vector" ), tr( "添加矢量图层..." ),
+                               this, &QgisDesktopWindow::addVectorLayer ),
+         tr( "从文件添加矢量图层。" ) );
     layerMenu->addSeparator();
-    layerMenu->addAction(tr("New Shapefile Layer..."), this, &QgisDesktopWindow::newVectorLayer);
+    tip( layerMenu->addAction( tr( "新建 Shapefile 图层..." ),
+                               this, &QgisDesktopWindow::newVectorLayer ),
+         tr( "创建新的 Shapefile 矢量图层。" ) );
     layerMenu->addSeparator();
-    layerMenu->addAction(tr("Layer Properties..."), this, &QgisDesktopWindow::layerProperties, QKeySequence("Ctrl+I"));
-    layerMenu->addAction(tr("Remove Layer"), this, &QgisDesktopWindow::removeLayer, QKeySequence("Ctrl+Shift+Delete"));
+    tip( layerMenu->addAction( tr( "图层属性..." ), this, &QgisDesktopWindow::layerProperties,
+                               QKeySequence( "Ctrl+I" ) ),
+         tr( "打开当前图层属性。" ) );
+    tip( layerMenu->addAction( tr( "移除图层" ), this, &QgisDesktopWindow::removeLayer,
+                               QKeySequence( "Ctrl+Shift+Delete" ) ),
+         tr( "从工程中移除当前图层。" ) );
     layerMenu->addSeparator();
-    layerMenu->addAction(tr("Set Project CRS..."), this, &QgisDesktopWindow::setProjectCrs);
+    tip( layerMenu->addAction( tr( "设置工程 CRS..." ), this, &QgisDesktopWindow::setProjectCrs ),
+         tr( "设置工程坐标系。" ) );
 
-    // Processing Menu
-    QMenu *processingMenu = menuBar()->addMenu(tr("&Processing"));
-    processingMenu->setToolTipsVisible(true);
-    tip(processingMenu->addAction(tr("Toolbox"), this, &QgisDesktopWindow::showProcessingToolbox),
-        tr("打开处理工具箱：浏览 GDAL/OTB/内置算法，每个参数有说明与（CLI）命令预览。"));
-    processingMenu->addSeparator();
-    tip(processingMenu->addAction(tr("History"), this, &QgisDesktopWindow::showProcessingHistory),
-        tr("查看已运行处理算法的历史记录。"));
-    processingMenu->addSeparator();
-    tip(processingMenu->addAction(tr("Batch Processing..."), this, &QgisDesktopWindow::openBatchProcessingDialog),
-        tr("同一算法批量处理多个输入文件。"));
+    // ------------------------------------------------------------------
+    // 栅格 Raster — 预处理 + 增强 + 波段（数据准备）
+    // ------------------------------------------------------------------
+    QMenu *rasterMenu = makeMenu( menuBar()->addMenu( tr( "栅格(&R)" ) ) );
 
-    // Raster Menu
-    QMenu *rasterMenu = menuBar()->addMenu(tr("&Raster"));
-    rasterMenu->setToolTipsVisible(true);
-    tip(rasterMenu->addAction(QIcon(":/icons/r_ster_calc"), tr("Image Enhancement..."), this, &QgisDesktopWindow::openImageEnhancementPanel),
-        tr("影像增强综合：对比度拉伸、空间滤波、波段比值/IHS、SAR 斑点滤波。"));
-    tip(rasterMenu->addAction(QIcon(":/icons/b_nd_m_th"), tr("Band Math..."), this, &QgisDesktopWindow::openBandMathDialog),
-        tr("波段运算：表达式如 (b1-b2)/(b1+b2)。"));
-    tip(rasterMenu->addAction(QIcon(":/icons/at_os_corr"), tr("Atmospheric Correction..."), this, &QgisDesktopWindow::openAtmosphericCorrectionDialog),
-        tr("大气校正：DN→辐射、DOS1/DOS2。"));
-    tip(rasterMenu->addAction(QIcon(":/icons/veget_tion_index"), tr("Vegetation Index..."), this, &QgisDesktopWindow::openSpectralIndexDialog),
-        tr("光谱指数：NDVI/EVI/SAVI/NDWI/NDBI/MNDWI。"));
-    tip(rasterMenu->addAction(QIcon(":/icons/mos_ic"), tr("Mosaic..."), this, &QgisDesktopWindow::openMosaicDialog),
-        tr("多景栅格镶嵌为连续影像。"));
-    rasterMenu->addSeparator();
-    QMenu *regMenu = rasterMenu->addMenu(tr("Image Registration"));
-    regMenu->setObjectName(QStringLiteral("mImageRegistrationMenu"));
-    regMenu->setToolTipsVisible(true);
-    regMenu->setToolTip(tr("影像配准 / 几何校正：双影像或影像对地图。"));
-    auto *i2iAct = regMenu->addAction(QIcon(QStringLiteral(":/icons/r_ster_calc")),
-                       tr("Image 2 Image"),
-                       this, &QgisDesktopWindow::openGeorefImageToImage);
-    tip(i2iAct, tr(
-        "Image 2 Image：水平双画布 SRC|REF，同名点配准，支持 SIFT 自动匹配。"
-        "右侧校正参数有详细说明。不含 RPC。"));
-    auto *i2mAct = regMenu->addAction(QIcon(QStringLiteral(":/icons/r_ster_calc")),
-                       tr("Image 2 Map"),
-                       this, &QgisDesktopWindow::openGeorefImageToMap);
-    tip(i2mAct, tr(
-        "Image 2 Map：源影像 + 主工程地图预览取点，变换方法含 RPC Physical。"));
-    tip(rasterMenu->addAction(tr("Change Detection..."), this, &QgisDesktopWindow::openChangeDetectionDialog),
-        tr("双时相变化检测：差值/归一化差值/变化掩膜。"));
-    // Phase 10A Task 10.2 — Classification submenu (Pixel-based + OBIA placeholder).
-    auto *classifyMenu = rasterMenu->addMenu(tr("Classification"));
-    classifyMenu->setToolTipsVisible(true);
-#ifdef SICNU_HAS_CLASSIFY
-    tip(classifyMenu->addAction(tr("Supervised Classification (Pixel-based)..."),
-                            this, &QgisDesktopWindow::openClassificationWindow),
-        tr("像元级监督分类：ROI 采样、算法与波段设置、精度评价。"));
-#ifdef SICNU_HAS_OBIA
-    tip(classifyMenu->addAction(tr("Object-based Classification (OBIA)..."),
-                            this, &QgisDesktopWindow::openObiaWindow),
-        tr("面向对象分类：分割参数 + 对象级分类器。"));
-#else
-    auto *obiaAct = classifyMenu->addAction(tr("Object-based Classification (OBIA) — Phase 10B"));
-    obiaAct->setEnabled(false);
-#endif
-#else
-    auto *disabledAct = classifyMenu->addAction(tr("Classification (OpenCV ml unavailable)"));
-    disabledAct->setEnabled(false);
-#endif
-    rasterMenu->addSeparator();
-    tip(rasterMenu->addAction(QIcon(":/icons/extr_ct_b_nd"), tr("Extract Band..."), this, [this]() {
-        ExtractBandDialog dlg(this);
-        if (m_mapCanvas && m_mapCanvas->currentLayer()) {
-            if (auto *rl = qobject_cast<QgsRasterLayer *>(m_mapCanvas->currentLayer()))
-                dlg.setRasterLayer(rl);
-        }
-        dlg.exec();
-    }), tr("从多波段栅格提取单一波段保存。"));
-    tip(rasterMenu->addAction(QIcon(":/icons/b_nd_co_bo"), tr("Band Composite..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:raster_merge_bands"); }),
-        tr("多波段合成/合并（处理算法）。"));
-    rasterMenu->addSeparator();
-    auto *enhanceMenu = rasterMenu->addMenu(tr("Enhancement"));
-    enhanceMenu->setToolTipsVisible(true);
-    tip(enhanceMenu->addAction(tr("Contrast Stretch..."), this, &QgisDesktopWindow::openContrastStretchDialog),
-        tr("对比度拉伸：线性/百分比裁剪/标准差/直方图均衡。"));
-    tip(enhanceMenu->addAction(tr("Spatial Filter..."), this, &QgisDesktopWindow::openSpatialFilterDialog),
-        tr("空间滤波：均值/高斯/中值/Sobel/Laplacian。"));
-    tip(enhanceMenu->addAction(tr("PCA..."), this, &QgisDesktopWindow::openPcaDialog),
-        tr("主成分分析：降维与去相关。"));
-    tip(enhanceMenu->addAction(tr("Band Ratio / IHS..."), this, &QgisDesktopWindow::openBandRatioDialog),
-        tr("波段比值或 IHS 变换。"));
+    // 预处理
+    QMenu *preprocessMenu = makeMenu( rasterMenu->addMenu( tr( "预处理" ) ) );
+    tip( preprocessMenu->addAction( QIcon( ":/icons/at_os_corr" ), tr( "大气校正..." ),
+                                    this, &QgisDesktopWindow::openAtmosphericCorrectionDialog ),
+         tr( "大气校正：DN→辐射、DOS1/DOS2。" ) );
+    tip( preprocessMenu->addAction( QIcon( ":/icons/mos_ic" ), tr( "镶嵌..." ),
+                                    this, &QgisDesktopWindow::openMosaicDialog ),
+         tr( "多景栅格镶嵌为连续影像。" ) );
+    tip( preprocessMenu->addAction( QIcon( ":/icons/extr_ct_b_nd" ), tr( "提取波段..." ), this, [this]() {
+          ExtractBandDialog dlg( this );
+          if ( m_mapCanvas && m_mapCanvas->currentLayer() )
+          {
+            if ( auto *rl = qobject_cast<QgsRasterLayer *>( m_mapCanvas->currentLayer() ) )
+              dlg.setRasterLayer( rl );
+          }
+          dlg.exec();
+        } ),
+         tr( "从多波段栅格提取单一波段保存。" ) );
+    tip( preprocessMenu->addAction( QIcon( ":/icons/b_nd_co_bo" ), tr( "波段合成..." ), this, [this]() {
+          openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:raster_merge_bands" ) );
+        } ),
+         tr( "多波段合成/合并。" ) );
+
+    // 影像增强
+    QMenu *enhanceMenu = makeMenu( rasterMenu->addMenu( tr( "影像增强" ) ) );
+    tip( enhanceMenu->addAction( QIcon( ":/icons/r_ster_calc" ), tr( "增强综合面板..." ),
+                                 this, &QgisDesktopWindow::openImageEnhancementPanel ),
+         tr( "综合面板：对比度拉伸、空间滤波、波段比值/IHS、SAR 斑点滤波。" ) );
     enhanceMenu->addSeparator();
-    tip(enhanceMenu->addAction(tr("Speckle Filter (SAR)..."), this, &QgisDesktopWindow::openSpeckleFilterDialog),
-        tr("SAR 斑点滤波：Lee/Frost/Kuan/Gamma-MAP。"));
+    tip( enhanceMenu->addAction( tr( "对比度拉伸..." ),
+                                 this, &QgisDesktopWindow::openContrastStretchDialog ),
+         tr( "线性 / 百分比裁剪 / 标准差 / 直方图均衡。" ) );
+    tip( enhanceMenu->addAction( tr( "空间滤波..." ),
+                                 this, &QgisDesktopWindow::openSpatialFilterDialog ),
+         tr( "均值 / 高斯 / 中值 / Sobel / Laplacian。" ) );
+    tip( enhanceMenu->addAction( tr( "斑点滤波 (SAR)..." ),
+                                 this, &QgisDesktopWindow::openSpeckleFilterDialog ),
+         tr( "SAR 斑点滤波：Lee / Frost / Kuan / Gamma-MAP。" ) );
 
-    auto *terrainMenu = rasterMenu->addMenu(tr("Terrain Analysis"));
-    terrainMenu->setToolTipsVisible(true);
-    tip(terrainMenu->addAction(tr("Slope / Aspect / Hillshade..."), this, &QgisDesktopWindow::openTerrainDialog),
-        tr("DEM 地形：坡度/坡向/山体阴影/粗糙度等。"));
+    // 波段运算与变换
+    QMenu *bandMenu = makeMenu( rasterMenu->addMenu( tr( "波段与变换" ) ) );
+    tip( bandMenu->addAction( QIcon( ":/icons/b_nd_m_th" ), tr( "波段运算..." ),
+                              this, &QgisDesktopWindow::openBandMathDialog ),
+         tr( "表达式运算，如 (b1-b2)/(b1+b2)。" ) );
+    tip( bandMenu->addAction( tr( "波段比值 / IHS..." ),
+                              this, &QgisDesktopWindow::openBandRatioDialog ),
+         tr( "波段比值或 IHS 变换。" ) );
+    tip( bandMenu->addAction( tr( "主成分分析 (PCA)..." ),
+                              this, &QgisDesktopWindow::openPcaDialog ),
+         tr( "主成分分析：降维与去相关。" ) );
 
-    tip(rasterMenu->addAction(tr("Image Fusion..."), this, &QgisDesktopWindow::openFusionDialog),
-        tr("全色锐化/影像融合：Linear/Brovey/IHS/PCA 或 OTB/GDAL。"));
+    // ------------------------------------------------------------------
+    // 分析 Analysis — 配准、指数、变化、分类、地形、融合（专题）
+    // ------------------------------------------------------------------
+    QMenu *analysisMenu = makeMenu( menuBar()->addMenu( tr( "分析(&A)" ) ) );
 
-    // Vector Menu
-    QMenu *vectorMenu = menuBar()->addMenu(tr("&Vector"));
-    vectorMenu->setToolTipsVisible(true);
-    tip(vectorMenu->addAction(QIcon(":/icons/buffer"), tr("Buffer..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_buffer"); }),
-        tr("矢量缓冲区分析。"));
-    tip(vectorMenu->addAction(QIcon(":/icons/dissolve"), tr("Dissolve..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_dissolve"); }),
-        tr("按属性融合要素。"));
-    tip(vectorMenu->addAction(QIcon(":/icons/merge"), tr("Merge..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_merge"); }),
-        tr("合并多个矢量图层。"));
-    tip(vectorMenu->addAction(QIcon(":/icons/cli_"), tr("Clip..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_clip"); }),
-        tr("按边界裁剪矢量。"));
-    vectorMenu->addSeparator();
-    tip(vectorMenu->addAction(tr("Difference..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:native_difference"); }),
-        tr("矢量擦除/差集。"));
-    tip(vectorMenu->addAction(tr("Intersection..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:native_intersection"); }),
-        tr("矢量相交。"));
-    tip(vectorMenu->addAction(tr("Union..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:native_union"); }),
-        tr("矢量联合。"));
-    vectorMenu->addSeparator();
-    tip(vectorMenu->addAction(tr("Select by Location..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_select_by_location"); }),
-        tr("按空间关系选择要素。"));
-    tip(vectorMenu->addAction(tr("Extract by Location..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_extract_by_location"); }),
-        tr("按空间关系提取要素到新图层。"));
-    tip(vectorMenu->addAction(tr("Reproject..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_reproject"); }),
-        tr("矢量重投影。"));
-    tip(vectorMenu->addAction(tr("Field Calculator..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_field_calculator"); }),
-        tr("字段计算器。"));
-    tip(vectorMenu->addAction(tr("Nearest Neighbor..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_nearest_neighbor"); }),
-        tr("最近邻分析。"));
-    tip(vectorMenu->addAction(tr("Distance Matrix..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_distance_matrix"); }),
-        tr("距离矩阵。"));
+    QMenu *regMenu = makeMenu( analysisMenu->addMenu( tr( "影像配准" ) ) );
+    regMenu->setObjectName( QStringLiteral( "mImageRegistrationMenu" ) );
+    tip( regMenu->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ),
+                             tr( "影像对影像 (I2I)..." ),
+                             this, &QgisDesktopWindow::openGeorefImageToImage ),
+         tr( "双画布 SRC|REF 同名点配准，支持 SIFT。不含 RPC。" ) );
+    tip( regMenu->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ),
+                             tr( "影像对地图 (I2M)..." ),
+                             this, &QgisDesktopWindow::openGeorefImageToMap ),
+         tr( "源影像 + 主工程地图取点；支持 RPC Physical。" ) );
 
-    // Settings Menu
-    QMenu *settingsMenu = menuBar()->addMenu(tr("&Settings"));
-    settingsMenu->setToolTipsVisible(true);
-    tip(settingsMenu->addAction(QIcon(":/icons/settings"), tr("Options..."), this, &QgisDesktopWindow::options),
-        tr("首选项：主题、默认 CRS、日志、GDAL/OTB 路径。"));
+    tip( analysisMenu->addAction( QIcon( ":/icons/veget_tion_index" ), tr( "光谱指数..." ),
+                                  this, &QgisDesktopWindow::openSpectralIndexDialog ),
+         tr( "NDVI / EVI / SAVI / NDWI / NDBI / MNDWI。" ) );
+    tip( analysisMenu->addAction( tr( "变化检测..." ),
+                                  this, &QgisDesktopWindow::openChangeDetectionDialog ),
+         tr( "双时相：差值 / 归一化差值 / 变化掩膜。" ) );
+    tip( analysisMenu->addAction( tr( "影像融合..." ),
+                                  this, &QgisDesktopWindow::openFusionDialog ),
+         tr( "全色锐化：Linear / Brovey / IHS / PCA 或 OTB/GDAL。" ) );
+    tip( analysisMenu->addAction( tr( "地形分析..." ),
+                                  this, &QgisDesktopWindow::openTerrainDialog ),
+         tr( "DEM：坡度 / 坡向 / 山体阴影 / 粗糙度等。" ) );
+
+    analysisMenu->addSeparator();
+    QMenu *classifyMenu = makeMenu( analysisMenu->addMenu( tr( "分类" ) ) );
+#ifdef SICNU_HAS_CLASSIFY
+    tip( classifyMenu->addAction( tr( "监督分类（像元级）..." ),
+                                  this, &QgisDesktopWindow::openClassificationWindow ),
+         tr( "像元级监督分类：ROI、算法、精度评价。" ) );
+#ifdef SICNU_HAS_OBIA
+    tip( classifyMenu->addAction( tr( "面向对象分类 (OBIA)..." ),
+                                  this, &QgisDesktopWindow::openObiaWindow ),
+         tr( "分割 + 对象级分类。" ) );
+#else
+    auto *obiaAct = classifyMenu->addAction( tr( "面向对象分类 (OBIA) — 未启用" ) );
+    obiaAct->setEnabled( false );
+#endif
+#else
+    auto *disabledAct = classifyMenu->addAction( tr( "分类（OpenCV ml 不可用）" ) );
+    disabledAct->setEnabled( false );
+#endif
+
+    // ------------------------------------------------------------------
+    // 矢量 Vector — 按功能分组
+    // ------------------------------------------------------------------
+    QMenu *vectorMenu = makeMenu( menuBar()->addMenu( tr( "矢量(&T)" ) ) );
+
+    QMenu *vecGeo = makeMenu( vectorMenu->addMenu( tr( "几何处理" ) ) );
+    tip( vecGeo->addAction( QIcon( ":/icons/buffer" ), tr( "缓冲区..." ), this, [this]() {
+          openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:vector_buffer" ) );
+        } ),
+         tr( "矢量缓冲区分析。" ) );
+    tip( vecGeo->addAction( QIcon( ":/icons/dissolve" ), tr( "融合..." ), this, [this]() {
+          openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:vector_dissolve" ) );
+        } ),
+         tr( "按属性融合要素。" ) );
+    tip( vecGeo->addAction( QIcon( ":/icons/merge" ), tr( "合并..." ), this, [this]() {
+          openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:vector_merge" ) );
+        } ),
+         tr( "合并多个矢量图层。" ) );
+    tip( vecGeo->addAction( QIcon( ":/icons/cli_" ), tr( "裁剪..." ), this, [this]() {
+          openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:vector_clip" ) );
+        } ),
+         tr( "按边界裁剪矢量。" ) );
+
+    QMenu *vecOverlay = makeMenu( vectorMenu->addMenu( tr( "叠加分析" ) ) );
+    tip( vecOverlay->addAction( tr( "擦除..." ), this, [this]() {
+          openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:native_difference" ) );
+        } ),
+         tr( "矢量擦除 / 差集。" ) );
+    tip( vecOverlay->addAction( tr( "相交..." ), this, [this]() {
+          openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:native_intersection" ) );
+        } ),
+         tr( "矢量相交。" ) );
+    tip( vecOverlay->addAction( tr( "联合..." ), this, [this]() {
+          openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:native_union" ) );
+        } ),
+         tr( "矢量联合。" ) );
+
+    QMenu *vecSelect = makeMenu( vectorMenu->addMenu( tr( "空间选择" ) ) );
+    tip( vecSelect->addAction( tr( "按位置选择..." ), this, [this]() {
+          openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:vector_select_by_location" ) );
+        } ),
+         tr( "按空间关系选择要素。" ) );
+    tip( vecSelect->addAction( tr( "按位置提取..." ), this, [this]() {
+          openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:vector_extract_by_location" ) );
+        } ),
+         tr( "按空间关系提取要素到新图层。" ) );
+
+    QMenu *vecAttr = makeMenu( vectorMenu->addMenu( tr( "属性与投影" ) ) );
+    tip( vecAttr->addAction( tr( "重投影..." ), this, [this]() {
+          openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:vector_reproject" ) );
+        } ),
+         tr( "矢量重投影。" ) );
+    tip( vecAttr->addAction( tr( "字段计算器..." ), this, [this]() {
+          openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:vector_field_calculator" ) );
+        } ),
+         tr( "字段计算器。" ) );
+    tip( vecAttr->addAction( tr( "最近邻..." ), this, [this]() {
+          openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:vector_nearest_neighbor" ) );
+        } ),
+         tr( "最近邻分析。" ) );
+    tip( vecAttr->addAction( tr( "距离矩阵..." ), this, [this]() {
+          openProcessingAlgorithm( QStringLiteral( "qgis_algorithms:vector_distance_matrix" ) );
+        } ),
+         tr( "距离矩阵。" ) );
+
+    // ------------------------------------------------------------------
+    // 处理 Processing — toolbox / history / batch only
+    // ------------------------------------------------------------------
+    QMenu *processingMenu = makeMenu( menuBar()->addMenu( tr( "处理(&O)" ) ) );
+    tip( processingMenu->addAction( tr( "工具箱" ), this, &QgisDesktopWindow::showProcessingToolbox ),
+         tr( "打开处理工具箱：GDAL / OTB / 内置算法。" ) );
+    tip( processingMenu->addAction( tr( "历史记录" ), this, &QgisDesktopWindow::showProcessingHistory ),
+         tr( "查看已运行处理算法的历史。" ) );
+    processingMenu->addSeparator();
+    tip( processingMenu->addAction( tr( "批量处理..." ),
+                                    this, &QgisDesktopWindow::openBatchProcessingDialog ),
+         tr( "同一算法批量处理多个输入文件。" ) );
+
+    // ------------------------------------------------------------------
+    // 设置 Settings
+    // ------------------------------------------------------------------
+    QMenu *settingsMenu = makeMenu( menuBar()->addMenu( tr( "设置(&S)" ) ) );
+    tip( settingsMenu->addAction( QIcon( ":/icons/settings" ), tr( "选项..." ),
+                                  this, &QgisDesktopWindow::options ),
+         tr( "主题、默认 CRS、日志、GDAL/OTB 路径。" ) );
     settingsMenu->addSeparator();
-    tip(settingsMenu->addAction(QIcon(":/icons/define_crs"), tr("CRS Presets..."), this, &QgisDesktopWindow::openCrsPresetDialog),
-        tr("浏览并选择常用坐标系预设。"));
+    tip( settingsMenu->addAction( QIcon( ":/icons/define_crs" ), tr( "CRS 预设..." ),
+                                  this, &QgisDesktopWindow::openCrsPresetDialog ),
+         tr( "浏览并选择常用坐标系预设。" ) );
 
     // Window Menu (dock toggle actions added in setupDockWidgets)
-    m_windowMenu = menuBar()->addMenu(tr("&Window"));
+    m_windowMenu = makeMenu( menuBar()->addMenu( tr( "窗口(&W)" ) ) );
 
-    // Help Menu
-    QMenu *helpMenu = menuBar()->addMenu(tr("&Help"));
-    helpMenu->addAction(QIcon(":/icons/hel_"), tr("Help Contents"), this, &QgisDesktopWindow::helpContents, QKeySequence::HelpContents);
+    // ------------------------------------------------------------------
+    // 帮助 Help
+    // ------------------------------------------------------------------
+    QMenu *helpMenu = makeMenu( menuBar()->addMenu( tr( "帮助(&H)" ) ) );
+    tip( helpMenu->addAction( QIcon( ":/icons/hel_" ), tr( "帮助内容" ),
+                              this, &QgisDesktopWindow::helpContents, QKeySequence::HelpContents ),
+         tr( "打开帮助文档。" ) );
     helpMenu->addSeparator();
-    helpMenu->addAction(tr("Load Sample Data"), this, &QgisDesktopWindow::loadSampleData);
-    helpMenu->addAction(tr("Guided Workflows"), this, &QgisDesktopWindow::showGuidedWorkflows);
+    tip( helpMenu->addAction( tr( "加载示例数据" ), this, &QgisDesktopWindow::loadSampleData ),
+         tr( "加载内置示例数据集。" ) );
+    tip( helpMenu->addAction( tr( "引导工作流" ), this, &QgisDesktopWindow::showGuidedWorkflows ),
+         tr( "分步引导式实验流程。" ) );
     helpMenu->addSeparator();
-    helpMenu->addAction(tr("Check Version"), this, &QgisDesktopWindow::checkVersion);
-    helpMenu->addAction(tr("About"), this, &QgisDesktopWindow::about);
+    tip( helpMenu->addAction( tr( "检查版本" ), this, &QgisDesktopWindow::checkVersion ),
+         tr( "显示当前版本信息。" ) );
+    tip( helpMenu->addAction( tr( "关于" ), this, &QgisDesktopWindow::about ),
+         tr( "关于本软件。" ) );
 }
 
 void QgisDesktopWindow::setupToolbars()
@@ -341,133 +521,120 @@ void QgisDesktopWindow::setupToolbars()
     mapToolsToolBar->addSeparator();
     mapToolsToolBar->addWidget(m_crsSelector);
 
-    // Remote Sensing Toolbar
-    QToolBar *rsToolBar = addToolBar("Remote Sensing");
-    rsToolBar->setObjectName("rsToolBar");
-    rsToolBar->setIconSize(QSize(24, 24));
-    rsToolBar->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    // Remote Sensing Toolbar — 分析快捷入口（与「分析」菜单对应）
+    QToolBar *rsToolBar = addToolBar( tr( "遥感分析" ) );
+    rsToolBar->setObjectName( "rsToolBar" );
+    rsToolBar->setIconSize( QSize( 24, 24 ) );
+    rsToolBar->setToolButtonStyle( Qt::ToolButtonIconOnly );
 
-    rsToolBar->addAction(QIcon(":/icons/veget_tion_index"), tr("Vegetation Index"), this, &QgisDesktopWindow::openSpectralIndexDialog)->setToolTip(tr("Vegetation Index (NDVI, EVI, etc.)"));
-    rsToolBar->addAction(QIcon(":/icons/b_nd_co_bo"), tr("Band Composition"), this, [this](){ openProcessingAlgorithm("qgis_algorithms:raster_merge_bands"); })->setToolTip(tr("Band Composition"));
-    rsToolBar->addAction(QIcon(":/icons/at_os_corr"), tr("Atmospheric Correction"), this, &QgisDesktopWindow::openAtmosphericCorrectionDialog)->setToolTip(tr("Atmospheric Correction (DOS1/DOS2)"));
-    rsToolBar->addAction(QIcon(":/icons/mos_ic"), tr("Mosaic"), this, &QgisDesktopWindow::openMosaicDialog)->setToolTip(tr("Mosaic / Stitching"));
+    tip( rsToolBar->addAction( QIcon( ":/icons/veget_tion_index" ), tr( "光谱指数" ),
+                               this, &QgisDesktopWindow::openSpectralIndexDialog ),
+         tr( "光谱指数：NDVI / EVI 等。" ) );
+    tip( rsToolBar->addAction( QIcon( ":/icons/at_os_corr" ), tr( "大气校正" ),
+                               this, &QgisDesktopWindow::openAtmosphericCorrectionDialog ),
+         tr( "大气校正：DOS1 / DOS2。" ) );
+    tip( rsToolBar->addAction( QIcon( ":/icons/mos_ic" ), tr( "镶嵌" ),
+                               this, &QgisDesktopWindow::openMosaicDialog ),
+         tr( "多景镶嵌。" ) );
+    tip( rsToolBar->addAction( QIcon( ":/icons/b_nd_m_th" ), tr( "波段运算" ),
+                               this, &QgisDesktopWindow::openBandMathDialog ),
+         tr( "波段运算表达式。" ) );
     rsToolBar->addSeparator();
+    tip( rsToolBar->addAction( QIcon( ":/icons/r_ster_calc" ), tr( "配准 I2I" ),
+                               this, &QgisDesktopWindow::openGeorefImageToImage ),
+         tr( "影像对影像配准。" ) );
+    tip( rsToolBar->addAction( QIcon( ":/icons/su_ervised" ), tr( "监督分类" ),
+                               this, &QgisDesktopWindow::openClassificationWindow ),
+         tr( "像元级监督分类。" ) );
 
     // Digitizing Toolbar
-    QToolBar *digitizeToolBar = addToolBar("Digitizing");
-    digitizeToolBar->setObjectName("digitizeToolBar");
-    digitizeToolBar->setIconSize(QSize(24, 24));
-    digitizeToolBar->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    QToolBar *digitizeToolBar = addToolBar( tr( "数字化" ) );
+    digitizeToolBar->setObjectName( "digitizeToolBar" );
+    digitizeToolBar->setIconSize( QSize( 24, 24 ) );
+    digitizeToolBar->setToolButtonStyle( Qt::ToolButtonIconOnly );
 
-    m_toggleEditingAction->setToolTip(tr("Toggle Editing (Ctrl+E)"));
-    digitizeToolBar->addAction(m_toggleEditingAction);
-    m_saveEditsAction->setToolTip(tr("Save Edits"));
-    digitizeToolBar->addAction(m_saveEditsAction);
+    m_toggleEditingAction->setToolTip( tr( "切换编辑 (Ctrl+E)" ) );
+    digitizeToolBar->addAction( m_toggleEditingAction );
+    m_saveEditsAction->setToolTip( tr( "保存编辑" ) );
+    digitizeToolBar->addAction( m_saveEditsAction );
     digitizeToolBar->addSeparator();
-    auto *actSelect = digitizeToolBar->addAction(QIcon(":/icons/mActionSelectRectangle"), tr("Select"), this, &QgisDesktopWindow::selectFeatures);
-    actSelect->setToolTip(tr("Select Features"));
-    auto *actAddFeature = digitizeToolBar->addAction(QIcon(":/icons/mActionCapturePoint"), tr("Add Feature"), this, &QgisDesktopWindow::addFeature);
-    actAddFeature->setToolTip(tr("Add Feature"));
-    auto *actVertex = digitizeToolBar->addAction(QIcon(":/icons/mActionVertexTool"), tr("Vertex"), this, &QgisDesktopWindow::vertexTool);
-    actVertex->setToolTip(tr("Vertex Tool"));
+    auto *actSelect = digitizeToolBar->addAction(
+      QIcon( ":/icons/mActionSelectRectangle" ), tr( "选择" ),
+      this, &QgisDesktopWindow::selectFeatures );
+    actSelect->setToolTip( tr( "选择要素" ) );
+    auto *actAddFeature = digitizeToolBar->addAction(
+      QIcon( ":/icons/mActionCapturePoint" ), tr( "添加要素" ),
+      this, &QgisDesktopWindow::addFeature );
+    actAddFeature->setToolTip( tr( "添加要素" ) );
+    auto *actVertex = digitizeToolBar->addAction(
+      QIcon( ":/icons/mActionVertexTool" ), tr( "节点" ),
+      this, &QgisDesktopWindow::vertexTool );
+    actVertex->setToolTip( tr( "节点工具" ) );
     digitizeToolBar->addSeparator();
-    auto *actMove = digitizeToolBar->addAction(QIcon(":/icons/mActionMoveFeature"), tr("Move"), this, &QgisDesktopWindow::moveFeature);
-    actMove->setToolTip(tr("Move Feature"));
-    auto *actRotate = digitizeToolBar->addAction(QIcon(":/icons/mActionRotateFeature"), tr("Rotate"), this, &QgisDesktopWindow::rotateFeature);
-    actRotate->setToolTip(tr("Rotate Feature"));
-    auto *actReshape = digitizeToolBar->addAction(QIcon(":/icons/mActionReshape"), tr("Reshape"), this, &QgisDesktopWindow::reshapeGeometry);
-    actReshape->setToolTip(tr("Reshape Geometry"));
-    auto *actSplit = digitizeToolBar->addAction(QIcon(":/icons/mActionSplitFeatures"), tr("Split"), this, &QgisDesktopWindow::splitFeatures);
-    actSplit->setToolTip(tr("Split Features"));
+    auto *actMove = digitizeToolBar->addAction(
+      QIcon( ":/icons/mActionMoveFeature" ), tr( "移动" ),
+      this, &QgisDesktopWindow::moveFeature );
+    actMove->setToolTip( tr( "移动要素" ) );
+    auto *actRotate = digitizeToolBar->addAction(
+      QIcon( ":/icons/mActionRotateFeature" ), tr( "旋转" ),
+      this, &QgisDesktopWindow::rotateFeature );
+    actRotate->setToolTip( tr( "旋转要素" ) );
+    auto *actReshape = digitizeToolBar->addAction(
+      QIcon( ":/icons/mActionReshape" ), tr( "重塑" ),
+      this, &QgisDesktopWindow::reshapeGeometry );
+    actReshape->setToolTip( tr( "重塑几何" ) );
+    auto *actSplit = digitizeToolBar->addAction(
+      QIcon( ":/icons/mActionSplitFeatures" ), tr( "分割" ),
+      this, &QgisDesktopWindow::splitFeatures );
+    actSplit->setToolTip( tr( "分割要素" ) );
     digitizeToolBar->addSeparator();
-    auto *actOffset = digitizeToolBar->addAction(QIcon(":/icons/mActionOffsetCurve"), tr("Offset"), this, &QgisDesktopWindow::offsetCurve);
-    actOffset->setToolTip(tr("Offset Curve"));
-    auto *actSimplify = digitizeToolBar->addAction(QIcon(":/icons/mActionSimplify"), tr("Simplify"), this, &QgisDesktopWindow::simplifyFeature);
-    actSimplify->setToolTip(tr("Simplify"));
-    auto *actReverse = digitizeToolBar->addAction(QIcon(":/icons/mActionReverseLine"), tr("Reverse"), this, &QgisDesktopWindow::reverseLine);
-    actReverse->setToolTip(tr("Reverse Line"));
-    auto *actAddRing = digitizeToolBar->addAction(QIcon(":/icons/mActionAddRing"), tr("Add Ring"), this, &QgisDesktopWindow::addRing);
-    actAddRing->setToolTip(tr("Add Ring"));
-    auto *actFillRing = digitizeToolBar->addAction(QIcon(":/icons/mActionFillRing"), tr("Fill Ring"), this, &QgisDesktopWindow::fillRing);
-    actFillRing->setToolTip(tr("Fill Ring"));
-    auto *actDelPart = digitizeToolBar->addAction(QIcon(":/icons/mActionDeletePart"), tr("Delete Part"), this, &QgisDesktopWindow::deletePart);
-    actDelPart->setToolTip(tr("Delete Part"));
+    auto *actOffset = digitizeToolBar->addAction(
+      QIcon( ":/icons/mActionOffsetCurve" ), tr( "偏移" ),
+      this, &QgisDesktopWindow::offsetCurve );
+    actOffset->setToolTip( tr( "偏移线" ) );
+    auto *actSimplify = digitizeToolBar->addAction(
+      QIcon( ":/icons/mActionSimplify" ), tr( "简化" ),
+      this, &QgisDesktopWindow::simplifyFeature );
+    actSimplify->setToolTip( tr( "简化" ) );
+    auto *actReverse = digitizeToolBar->addAction(
+      QIcon( ":/icons/mActionReverseLine" ), tr( "反转" ),
+      this, &QgisDesktopWindow::reverseLine );
+    actReverse->setToolTip( tr( "反转线方向" ) );
+    auto *actAddRing = digitizeToolBar->addAction(
+      QIcon( ":/icons/mActionAddRing" ), tr( "添加环" ),
+      this, &QgisDesktopWindow::addRing );
+    actAddRing->setToolTip( tr( "添加环" ) );
+    auto *actFillRing = digitizeToolBar->addAction(
+      QIcon( ":/icons/mActionFillRing" ), tr( "填充环" ),
+      this, &QgisDesktopWindow::fillRing );
+    actFillRing->setToolTip( tr( "填充环" ) );
+    auto *actDelPart = digitizeToolBar->addAction(
+      QIcon( ":/icons/mActionDeletePart" ), tr( "删除部件" ),
+      this, &QgisDesktopWindow::deletePart );
+    actDelPart->setToolTip( tr( "删除部件" ) );
 
     // Editing tool actions — enabled only when a vector layer is in editing mode
     m_editingToolActions = { actSelect, actAddFeature, actVertex, actMove, actRotate,
                              actReshape, actSplit, actOffset, actSimplify, actReverse,
                              actAddRing, actFillRing, actDelPart };
-    for (QAction *a : m_editingToolActions)
-        a->setEnabled(false);
-    rsToolBar->addAction(QIcon(":/icons/r_ster_calc"), tr("Raster Calculator"), this, [this](){ openProcessingAlgorithm("qgis_algorithms:raster_calculator"); })->setToolTip(tr("Raster Calculator"));
-    rsToolBar->addAction(QIcon(":/icons/su_ervised"), tr("Supervised Classification"), this, &QgisDesktopWindow::openClassificationWindow)->setToolTip(tr("Supervised Classification"));
-    rsToolBar->addAction(QIcon(":/icons/b_nd_m_th"), tr("Band Math"), this, &QgisDesktopWindow::openBandMathDialog)->setToolTip(tr("Band Math Expression"));
+    for ( QAction *a : m_editingToolActions )
+      a->setEnabled( false );
 
-    // Detailed tooltips for common actions
-    auto setTipByText = [this](const QString &label, const QString &tipText) {
-        for (QAction *a : findChildren<QAction *>()) {
-            if (!a) continue;
-            if (a->text().remove(QLatin1Char('&')) == label) {
-                a->setToolTip(tipText);
-                a->setStatusTip(tipText);
-                a->setWhatsThis(tipText);
-            }
-        }
-    };
-    const QList<QPair<QString, QString>> tips = {
-        { tr("New Project"), tr("创建空白工程，清除当前图层与视图状态。") },
-        { tr("Open Project..."), tr("打开已保存的工程文件。") },
-        { tr("Save Project"), tr("保存当前工程到已有路径。") },
-        { tr("Save Project As..."), tr("将工程另存为新文件。") },
-        { tr("Import Layer..."), tr("导入栅格或矢量图层到工程。") },
-        { tr("Browse STAC Catalog..."), tr("浏览 STAC 目录检索遥感数据。") },
-        { tr("Quit"), tr("退出应用程序。") },
-        { tr("Zoom In"), tr("放大地图视图。") },
-        { tr("Zoom Out"), tr("缩小地图视图。") },
-        { tr("Pan Map"), tr("平移地图。") },
-        { tr("Full Extent"), tr("缩放到所有图层范围。") },
-        { tr("Identify Features"), tr("点击地图查询要素/像元属性。") },
-        { tr("Measure Distance"), tr("量测距离。") },
-        { tr("Measure Area"), tr("量测面积。") },
-        { tr("Toggle Editing"), tr("开启/关闭当前矢量图层编辑。") },
-        { tr("Save Edits"), tr("保存矢量编辑。") },
-        { tr("Select Features"), tr("矩形选择要素。") },
-        { tr("Delete Selected"), tr("删除选中要素。") },
-        { tr("Open Attribute Table..."), tr("打开属性表。") },
-        { tr("Add Feature"), tr("数字化添加新要素。") },
-        { tr("Vertex Tool"), tr("编辑节点。") },
-        { tr("Processing Toolbox"), tr("打开处理工具箱，运行 GDAL/OTB/内置算法。") },
-        { tr("Image Enhancement..."), tr("影像增强与显示拉伸。") },
-        { tr("Band Math..."), tr("波段运算表达式计算。") },
-        { tr("Atmospheric Correction..."), tr("大气校正对话框。") },
-        { tr("Vegetation Index..."), tr("植被/光谱指数计算。") },
-        { tr("Mosaic..."), tr("多景影像镶嵌。") },
-        { tr("Change Detection..."), tr("变化检测分析。") },
-        { tr("Supervised Classification (Pixel-based)..."), tr("打开监督分类窗口（像元级）。") },
-        { tr("Object-based Classification (OBIA)..."), tr("面向对象分类 (OBIA)。") },
-        { tr("Image 2 Image"), tr("双影像配准：SRC|REF，支持 SIFT。") },
-        { tr("Image 2 Map"), tr("影像对主地图配准，支持 RPC。") },
-        { tr("Help Contents"), tr("打开帮助文档。") },
-    };
-    for (const auto &p : tips)
-        setTipByText(p.first, p.second);
-
-    // Any remaining actions without tip: use cleaned label
-    for (QAction *a : findChildren<QAction *>()) {
-        if (!a || a->isSeparator()) continue;
-        if (!a->toolTip().isEmpty() && a->toolTip() != a->text()) continue;
-        const QString t = a->text().remove(QLatin1Char('&')).trimmed();
-        if (t.isEmpty()) continue;
-        if (a->toolTip().isEmpty() || a->toolTip() == a->text() || a->toolTip() == t)
+    // Fill empty tooltips with cleaned action text
+    for ( QAction *a : findChildren<QAction *>() )
+    {
+      if ( !a || a->isSeparator() )
+        continue;
+      if ( a->toolTip().isEmpty() )
+      {
+        const QString t = a->text().remove( QLatin1Char( '&' ) ).trimmed();
+        if ( !t.isEmpty() )
         {
-            // keep existing detailed tips; only fill empty
+          a->setToolTip( t );
+          a->setStatusTip( t );
         }
-        if (a->toolTip().isEmpty()) {
-            a->setToolTip(t);
-            a->setStatusTip(t);
-        }
+      }
     }
-
 }
 void QgisDesktopWindow::setupStatusBar()
 {
