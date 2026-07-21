@@ -307,9 +307,24 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     QMenu *rasterMenu = makeMenu( menuBar()->addMenu( tr( "栅格(&R)" ) ) );
 
-    // 预处理
+    // 预处理（几何/辐射准备：配准、大气、镶嵌、波段）
     QMenu *preprocessMenu = makeMenu( rasterMenu->addMenu( tr( "预处理" ) ) );
-    setMenuIcon( preprocessMenu, ic( "at_os_corr" ) );
+    setMenuIcon( preprocessMenu, ic( "geocorrection" ) );
+
+    // 影像配准 — 预处理第一步常用
+    QMenu *regMenu = makeMenu( preprocessMenu->addMenu( tr( "影像配准" ) ) );
+    regMenu->setObjectName( QStringLiteral( "mImageRegistrationMenu" ) );
+    setMenuIcon( regMenu, ic( "geocorrection" ) );
+    tip( regMenu->addAction( ic( "coregistr_tion" ),
+                             tr( "影像对影像 (I2I)..." ),
+                             this, &QgisDesktopWindow::openGeorefImageToImage ),
+         tr( "双画布 SRC|REF 同名点配准，支持 SIFT。不含 RPC。" ) );
+    tip( regMenu->addAction( ic( "geocorrection" ),
+                             tr( "影像对地图 (I2M)..." ),
+                             this, &QgisDesktopWindow::openGeorefImageToMap ),
+         tr( "源影像 + 主工程地图取点；支持 RPC Physical。" ) );
+    preprocessMenu->addSeparator();
+
     tip( preprocessMenu->addAction( ic( "at_os_corr" ), tr( "大气校正..." ),
                                     this, &QgisDesktopWindow::openAtmosphericCorrectionDialog ),
          tr( "大气校正：DN→辐射、DOS1/DOS2。" ) );
@@ -365,18 +380,6 @@ void QgisDesktopWindow::setupMenu()
     // 分析 Analysis — 配准、指数、变化、分类、地形、融合（专题）
     // ------------------------------------------------------------------
     QMenu *analysisMenu = makeMenu( menuBar()->addMenu( tr( "分析(&A)" ) ) );
-
-    QMenu *regMenu = makeMenu( analysisMenu->addMenu( tr( "影像配准" ) ) );
-    regMenu->setObjectName( QStringLiteral( "mImageRegistrationMenu" ) );
-    setMenuIcon( regMenu, ic( "geocorrection" ) );
-    tip( regMenu->addAction( ic( "coregistr_tion" ),
-                             tr( "影像对影像 (I2I)..." ),
-                             this, &QgisDesktopWindow::openGeorefImageToImage ),
-         tr( "双画布 SRC|REF 同名点配准，支持 SIFT。不含 RPC。" ) );
-    tip( regMenu->addAction( ic( "geocorrection" ),
-                             tr( "影像对地图 (I2M)..." ),
-                             this, &QgisDesktopWindow::openGeorefImageToMap ),
-         tr( "源影像 + 主工程地图取点；支持 RPC Physical。" ) );
 
     tip( analysisMenu->addAction( ic( "veget_tion_index" ), tr( "光谱指数..." ),
                                   this, &QgisDesktopWindow::openSpectralIndexDialog ),
