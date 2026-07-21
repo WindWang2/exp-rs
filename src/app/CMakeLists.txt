@@ -14,6 +14,8 @@ add_executable(sicnu_geo_rs
     shell/task_panel_host.cpp
     shell/workflow_session_controller.cpp
     shell/ribbon_controller.cpp
+    shell/job_engine_qt_bridge.cpp
+    shell/rs_job_panel.cpp
     layer_tree_menu.cpp
     crs_presets.cpp
     log_panel.cpp
@@ -172,6 +174,7 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     sicnu_processing
     sicnu_operators
     sicnu_workflow
+    sicnu_jobs
     jsoncpp
     CURL::libcurl
     ${PCRE2_16}

@@ -64,6 +64,7 @@ class SwipeMapTool;
 class TaskPanelHost;
 class WorkflowSessionController;
 class RibbonController;
+class RsJobPanel;
 
 namespace Sicnu { class PythonScriptEditor; }
 
@@ -327,6 +328,7 @@ private:
     QgsDockWidget *m_spectralDock = nullptr;
     QgsDockWidget *m_histogramStretchDock = nullptr;
     QgsDockWidget *m_logDock = nullptr;
+    RsJobPanel *m_jobPanel = nullptr;
     QgsDockWidget *m_workflowDock = nullptr;
     QgsDockWidget *m_taskPanelDock = nullptr;
     TaskPanelHost *m_taskPanel = nullptr;

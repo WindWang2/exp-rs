@@ -4,7 +4,9 @@
 
 #include "layer_manager.h"
 #include "log_panel.h"
+#include "shell/job_engine_qt_bridge.h"
 #include "shell/ribbon_controller.h"
+#include "shell/rs_job_panel.h"
 #include "shell/task_panel_host.h"
 #include "shell/workflow_session_controller.h"
 #include "widgets/spectral_profile_widget.h"
@@ -236,6 +238,13 @@ void QgisDesktopWindow::setupDockWidgets()
     m_logDock->setObjectName("logDock");
     addDockWidget(Qt::BottomDockWidgetArea, m_logDock);
 
+    // Unified JobEngine panel (Bottom, tabified with Log)
+    m_jobPanel = new RsJobPanel( this );
+    addDockWidget( Qt::BottomDockWidgetArea, m_jobPanel );
+    tabifyDockWidget( m_logDock, m_jobPanel );
+    m_jobPanel->raise();
+    JobEngineQtBridge::instance(); // ensure listener is installed
+
     // Guided Workflow Panel (Right, tabified with processing)
     auto *workflowWidget = new GuidedWorkflowWidget(this);
     m_workflowDock = new QgsDockWidget(this);
@@ -256,6 +265,8 @@ void QgisDesktopWindow::setupDockWidgets()
         m_windowMenu->addAction(m_spectralDock->toggleViewAction());
         m_windowMenu->addAction(m_histogramStretchDock->toggleViewAction());
         m_windowMenu->addAction(m_logDock->toggleViewAction());
+        if ( m_jobPanel )
+          m_windowMenu->addAction( m_jobPanel->toggleViewAction() );
         m_windowMenu->addAction(m_workflowDock->toggleViewAction());
         // Task panel dock is created after setupDockWidgets (setupRibbonAndTaskPanel);
         // its toggle action is added there once the dock exists.
@@ -392,6 +403,12 @@ void QgisDesktopWindow::applyProductShellLayout()
     hideDock( m_histogramStretchDock );
     // Log stays available but collapsed by default to reduce vertical noise.
     hideDock( m_logDock );
+    // Job panel is primary observability surface — show by default.
+    if ( m_jobPanel )
+    {
+      m_jobPanel->show();
+      m_jobPanel->raise();
+    }
 
     // Layers stay on the left; browser tabified under it can stay hidden until needed.
     if ( m_browserDock )
