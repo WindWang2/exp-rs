@@ -2306,10 +2306,14 @@ target_include_directories(test_raster_processing_dialog_base PRIVATE
 )
 sicnu_discover_tests(test_raster_processing_dialog_base)
 
-# Workflow engine runtime smoke test (Qt-free)
+# Workflow engine runtime smoke test (Qt-free headers; may link Qt6::Core via sicnu_operators)
 if(TARGET sicnu_workflow)
   add_executable(test_workflow_runtime test_workflow_runtime.cpp)
   target_link_libraries(test_workflow_runtime PRIVATE Catch2::Catch2WithMain sicnu_workflow)
+  # Mock operator registration in tests needs QCoreApplication + RSOperator headers.
+  if(TARGET sicnu_operators)
+    target_link_libraries(test_workflow_runtime PRIVATE sicnu_operators Qt6::Core)
+  endif()
   target_include_directories(test_workflow_runtime PRIVATE ${CMAKE_SOURCE_DIR}/src)
   sicnu_discover_tests(test_workflow_runtime)
 endif()

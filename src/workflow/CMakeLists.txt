@@ -23,6 +23,11 @@ else()
   target_link_libraries(sicnu_workflow PUBLIC jsoncpp)
 endif()
 
+# Runner executes RSOperators; operators pull Qt6::Core (OK — no Widgets in headers).
+if(TARGET sicnu_operators)
+  target_link_libraries(sicnu_workflow PUBLIC sicnu_operators)
+endif()
+
 set_target_properties(sicnu_workflow PROPERTIES
   CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
