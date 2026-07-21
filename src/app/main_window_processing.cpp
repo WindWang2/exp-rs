@@ -133,6 +133,11 @@ void QgisDesktopWindow::openImageEnhancementPanel()
 
 void QgisDesktopWindow::openBandMathDialog()
 {
+    if ( m_sessionController )
+    {
+        openWorkflowTool( QStringLiteral( "tool.rs.band_math" ) );
+        return;
+    }
     QgsRasterLayer *rasterLayer = findAnyRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("Band Math"),
@@ -148,6 +153,11 @@ void QgisDesktopWindow::openBandMathDialog()
 
 void QgisDesktopWindow::openSpectralIndexDialog()
 {
+    if ( m_sessionController )
+    {
+        openWorkflowTool( QStringLiteral( "tool.rs.spectral_index" ) );
+        return;
+    }
     QgsRasterLayer *rasterLayer = findAnyRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("Spectral Index"),
@@ -163,6 +173,11 @@ void QgisDesktopWindow::openSpectralIndexDialog()
 
 void QgisDesktopWindow::openAtmosphericCorrectionDialog()
 {
+    if ( m_sessionController )
+    {
+        openWorkflowTool( QStringLiteral( "tool.rs.atmospheric_correction" ) );
+        return;
+    }
     QgsRasterLayer *rasterLayer = findAnyRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("Atmospheric Correction"),
@@ -223,6 +238,11 @@ void QgisDesktopWindow::openSpeckleFilterDialog()
 
 void QgisDesktopWindow::openPcaDialog()
 {
+    if ( m_sessionController )
+    {
+        openWorkflowTool( QStringLiteral( "tool.rs.pca" ) );
+        return;
+    }
     QgsRasterLayer *rasterLayer = findActiveRaster(this);
     if (!rasterLayer) {
         QMessageBox::information(this, tr("PCA"),
@@ -253,6 +273,11 @@ void QgisDesktopWindow::openBandRatioDialog()
 
 void QgisDesktopWindow::openTerrainDialog()
 {
+    if ( m_sessionController )
+    {
+        openWorkflowTool( QStringLiteral( "tool.rs.terrain_analysis" ) );
+        return;
+    }
     openRasterDialog<TerrainDialog>(this, tr("Terrain Analysis"));
 }
 
@@ -262,6 +287,11 @@ void QgisDesktopWindow::openTerrainDialog()
 
 void QgisDesktopWindow::openFusionDialog()
 {
+    if ( m_sessionController )
+    {
+        openWorkflowTool( QStringLiteral( "tool.rs.image_fusion" ) );
+        return;
+    }
     openRasterDialog<FusionDialog>(this, tr("Image Fusion"));
 }
 
@@ -271,6 +301,11 @@ void QgisDesktopWindow::openFusionDialog()
 
 void QgisDesktopWindow::openMosaicDialog()
 {
+    if ( m_sessionController )
+    {
+        openWorkflowTool( QStringLiteral( "tool.rs.mosaic" ) );
+        return;
+    }
     openRasterDialog<MosaicDialog>(this, tr("Mosaic"));
 }
 
@@ -280,6 +315,11 @@ void QgisDesktopWindow::openMosaicDialog()
 
 void QgisDesktopWindow::openChangeDetectionDialog()
 {
+    if ( m_sessionController )
+    {
+        openWorkflowTool( QStringLiteral( "tool.rs.change_detection" ) );
+        return;
+    }
     ChangeDetectionDialog dialog(this);
     dialog.populateLayers();
     if (dialog.exec() == QDialog::Accepted) {
