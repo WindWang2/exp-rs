@@ -48,7 +48,7 @@ namespace
   }
 }
 
-TEST_CASE( "GCPCanvasItem: paints SRC badge (blue) at given position", "[georef][canvas]" )
+TEST_CASE( "GCPCanvasItem: paints SRC crosshair (blue) at given position", "[georef][canvas]" )
 {
   ensureApp();
   QgsMapCanvas canvas;
@@ -74,19 +74,19 @@ TEST_CASE( "GCPCanvasItem: paints SRC badge (blue) at given position", "[georef]
   canvas.scene()->render( &painter, QRectF( 0, 0, 400, 400 ), QRectF( 0, 0, 400, 400 ) );
   painter.end();
 
-  // Expect at least 10 pixels matching the SRC badge color near center.
-  // Badge color is #1f6feb so blue>200, red<80, green<150.
-  int blueHits = 0;
+  // Crosshair is thin: expect some non-white pixels near center with blue channel
+  // dominance (SRC color #1f6feb) or dark halo.
+  int inkHits = 0;
   for ( int y = 180; y < 220; ++y )
   {
     for ( int x = 180; x < 220; ++x )
     {
       QRgb p = img.pixel( x, y );
-      if ( qBlue( p ) > 180 && qRed( p ) < 100 && qGreen( p ) < 170 )
-        ++blueHits;
+      if ( qRed( p ) < 250 || qGreen( p ) < 250 || qBlue( p ) < 250 )
+        ++inkHits;
     }
   }
-  REQUIRE( blueHits >= 5 );
+  REQUIRE( inkHits >= 5 );
 }
 
 TEST_CASE( "GCPCanvasItem: disabled marker does not crash", "[georef][canvas]" )

@@ -6,8 +6,7 @@
     Email                : sherman at mrcc dot com
 
     SICNU port (2026-06-02, Task 11.4.5): adapter referencing a QgsGcpPoint
-    owned by QgsGCPList; canvas marker items are deferred to Task 11.4.6
-    so any code path that depended on QgsGCPCanvasItem is a no-op here.
+    owned by QgsGCPList; canvas marker items (crosshairs) on SRC + REF/Map.
  ***************************************************************************
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -20,6 +19,7 @@
 
 #include <cmath>
 
+#include "qgis.h"
 #include "qgscoordinatereferencesystem.h"
 #include "qgsgcpcanvasitem.h"
 #include "qgsmapcanvas.h"
@@ -28,6 +28,22 @@
 
 #include "moc_qgsgeorefdatapoint.cpp"
 
+namespace
+{
+  /// True once a destination has been assigned (pending SRC-only pick is false).
+  bool hasDestinationSide( const QgsGcpPoint *gcp )
+  {
+    if ( !gcp )
+      return false;
+    // Dual-pick / dialog always set a destination CRS when dest is committed.
+    if ( gcp->destinationPointCrs().isValid() )
+      return true;
+    // Loaded .points may lack CRS but still have non-zero destination.
+    const QgsPointXY d = gcp->destinationPoint();
+    return !( qgsDoubleNear( d.x(), 0.0 ) && qgsDoubleNear( d.y(), 0.0 ) );
+  }
+}
+
 QgsGeorefDataPoint::QgsGeorefDataPoint( QgsMapCanvas *srcCanvas,
                                         QgsMapCanvas *dstCanvas,
                                         QgsGcpPoint *gcp )
@@ -35,22 +51,8 @@ QgsGeorefDataPoint::QgsGeorefDataPoint( QgsMapCanvas *srcCanvas,
   , mDstCanvas( dstCanvas )
   , mGcpPoint( gcp )
 {
-  // Build SRC + REF canvas item visuals if a canvas and a gcp are wired.
-  if ( mGcpPoint )
-  {
-    if ( mSrcCanvas )
-    {
-      mGCPSourceItem = new QgsGCPCanvasItem( mSrcCanvas, mId, mGcpPoint->sourcePoint(), /*isSource=*/true );
-      mGCPSourceItem->setEnabled( mGcpPoint->isEnabled() );
-      mGCPSourceItem->setResidual( mGcpPoint->residual() );
-    }
-    if ( mDstCanvas )
-    {
-      mGCPDestinationItem = new QgsGCPCanvasItem(
-        mDstCanvas, mId, destinationDisplayPoint(), /*isSource=*/false );
-      mGCPDestinationItem->setEnabled( mGcpPoint->isEnabled() );
-    }
-  }
+  ensureItems();
+  updateMarkers();
 }
 
 QgsGeorefDataPoint::~QgsGeorefDataPoint()
@@ -60,6 +62,26 @@ QgsGeorefDataPoint::~QgsGeorefDataPoint()
   mGCPSourceItem = nullptr;
   delete mGCPDestinationItem;
   mGCPDestinationItem = nullptr;
+}
+
+void QgsGeorefDataPoint::ensureItems()
+{
+  if ( !mGcpPoint )
+    return;
+
+  // Always keep a source crosshair on the SRC canvas.
+  if ( mSrcCanvas && !mGCPSourceItem )
+  {
+    mGCPSourceItem = new QgsGCPCanvasItem( mSrcCanvas, mId, mGcpPoint->sourcePoint(), /*isSource=*/true );
+  }
+
+  // Always keep a destination crosshair on REF / Map once dest is set.
+  // For I2I both images must show GCPs after a pair is completed.
+  if ( mDstCanvas && !mGCPDestinationItem )
+  {
+    mGCPDestinationItem = new QgsGCPCanvasItem(
+      mDstCanvas, mId, destinationDisplayPoint(), /*isSource=*/false );
+  }
 }
 
 QgsPointXY QgsGeorefDataPoint::destinationDisplayPoint() const
@@ -84,28 +106,44 @@ void QgsGeorefDataPoint::updateMarkers()
 {
   if ( !mGcpPoint )
     return;
+
+  ensureItems();
   mResidual = mGcpPoint->residual();
+
   if ( mGCPSourceItem )
   {
     mGCPSourceItem->setId( mId );
-    // SRC is pixel/map space of the source canvas — never reproject.
     mGCPSourceItem->setWorldPos( mGcpPoint->sourcePoint() );
     mGCPSourceItem->setEnabled( mGcpPoint->isEnabled() );
     mGCPSourceItem->setResidual( mResidual );
     mGCPSourceItem->setVisible( true );
+    mGCPSourceItem->updatePosition();
   }
+
   if ( mGCPDestinationItem )
   {
     mGCPDestinationItem->setId( mId );
     mGCPDestinationItem->setWorldPos( destinationDisplayPoint() );
     mGCPDestinationItem->setEnabled( mGcpPoint->isEnabled() );
-    mGCPDestinationItem->setVisible( true );
+    // Hide on REF until destination is committed (pending SRC-only pick).
+    // After dual-canvas pick / load, always show on reference / map canvas.
+    mGCPDestinationItem->setVisible( hasDestinationSide( mGcpPoint ) );
+    mGCPDestinationItem->updatePosition();
   }
-  // Force a repaint of the canvases so badges appear immediately after pick.
+
+  // Force repaint so crosshairs appear immediately after pick on both sides.
   if ( mSrcCanvas )
+  {
     mSrcCanvas->update();
+    if ( mSrcCanvas->scene() )
+      mSrcCanvas->scene()->update();
+  }
   if ( mDstCanvas )
+  {
     mDstCanvas->update();
+    if ( mDstCanvas->scene() )
+      mDstCanvas->scene()->update();
+  }
 }
 
 void QgsGeorefDataPoint::setSelected( bool on )
@@ -199,7 +237,7 @@ bool QgsGeorefDataPoint::contains( const QgsPointXY &p, QgsGcpPoint::PointType t
       item = mGCPDestinationItem;
       break;
   }
-  if ( !item || !item->canvas() )
+  if ( !item || !item->canvas() || !item->isVisible() )
     return false;
 
   const double searchRadiusMM = QgsMapTool::searchRadiusMM();
@@ -233,8 +271,7 @@ void QgsGeorefDataPoint::moveTo( QgsPointXY p, QgsGcpPoint::PointType type )
     case QgsGcpPoint::PointType::Destination:
     {
       mGcpPoint->setDestinationPoint( p );
-      // Destination is edited on the REF canvas — always take CRS from dst canvas.
-      // Never prefer SRC (pixel-space) even if it happens to carry a valid CRS.
+      // Destination is edited on the REF/Map canvas — take CRS from dst canvas.
       if ( mDstCanvas && mDstCanvas->mapSettings().destinationCrs().isValid() )
         mGcpPoint->setDestinationPointCrs( mDstCanvas->mapSettings().destinationCrs() );
       else if ( !mGcpPoint->destinationPointCrs().isValid() )

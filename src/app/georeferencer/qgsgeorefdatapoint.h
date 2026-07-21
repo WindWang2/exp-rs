@@ -79,9 +79,9 @@ class QgsGeorefDataPoint : public QObject
     void setId( int id );
 
     /**
-     * Rebuilds the SRC + REF canvas item visuals from the current
+     * Rebuilds the SRC + REF/Map crosshair visuals from the current
      * QgsGcpPoint state (id, source/destination point, enabled, residual).
-     * Safe to call repeatedly; cheap when nothing has changed.
+     * Ensures items exist on both canvases (I2I must show GCPs on SRC and REF).
      */
     void updateMarkers();
 
@@ -129,6 +129,8 @@ class QgsGeorefDataPoint : public QObject
     void updateCoords();
 
   private:
+    void ensureItems();
+
     QgsMapCanvas *mSrcCanvas = nullptr;
     QgsMapCanvas *mDstCanvas = nullptr;
     QgsGCPCanvasItem *mGCPSourceItem = nullptr;

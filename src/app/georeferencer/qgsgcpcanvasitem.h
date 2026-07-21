@@ -9,6 +9,7 @@
     holds only its own visual state (id, world position, isSource,
     enabled, selected, residual). Lifecycle is driven by
     QgsGeorefDataPoint, which owns the SRC + REF canvas items.
+    2026-07: crosshair (十字丝) visual.
  ***************************************************************************
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -32,19 +33,10 @@
 class QgsMapCanvas;
 
 /**
- * \brief Per-GCP overlay item rendered on either the SRC or REF map canvas.
+ * \brief Per-GCP overlay item rendered on either the SRC or REF/Map canvas.
  *
- * Does not depend on QgsGeorefDataPoint: it is constructed with the
- * (id, world position, isSource) tuple and exposes setters for state
- * changes. The owner (QgsGeorefDataPoint) is responsible for keeping
- * the visual state in sync with the underlying QgsGcpPoint.
- *
- * Visual design (per design.html ArtboardGeoref):
- *   - SRC badge color: #1f6feb (blue)
- *   - REF badge color: #2da44e (green)
- *   - Selected: yellow border (#bf8700) + thicker outline
- *   - Disabled: 40% opacity
- *   - Residual arrow (SRC only) drawn from marker origin.
+ * Drawn as a \b crosshair (十字丝) with optional numeric id. SRC is blue,
+ * REF/Map is green; selected / hover change color. Residual arrow on SRC only.
  */
 class QgsGCPCanvasItem final : public QgsMapCanvasItem
 {
@@ -94,8 +86,8 @@ class QgsGCPCanvasItem final : public QgsMapCanvasItem
     bool mHovered = false;
     QPointF mResidual;
 
-    QBrush mBadgeBrush;     // blue for SRC, green for REF
-    QBrush mSelectedBrush;  // yellow when selected
+    QBrush mBadgeBrush;     // retained for color tokens / future use
+    QBrush mSelectedBrush;
     QPen mResidualPen;
 
     void drawResidualArrow( QPainter *p );
