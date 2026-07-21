@@ -6,6 +6,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/framework/rs_schema.h"
+#include "workflow/builtin_definitions.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_gate.h"
 #include "workflow/workflow_registry.h"
@@ -213,6 +214,30 @@ TEST_CASE( "Gate empty list passes", "[workflow][gate]" )
   auto r = evaluateGates( s, {} );
   REQUIRE( r.ok );
   REQUIRE( r.hints.empty() );
+}
+
+TEST_CASE( "Builtin workflows registered", "[workflow]" )
+{
+  WorkflowRegistry reg;
+  registerBuiltinWorkflows( reg );
+  REQUIRE( reg.has( "tool.rs.spectral_index" ) );
+  REQUIRE( reg.has( "tool.rs.band_math" ) );
+  REQUIRE( reg.has( "tool.rs.change_detection" ) );
+  REQUIRE( reg.has( "tool.rs.image_fusion" ) );
+  REQUIRE( reg.has( "tool.rs.mosaic" ) );
+  REQUIRE( reg.has( "tool.rs.terrain_analysis" ) );
+  REQUIRE( reg.has( "tool.rs.pca" ) );
+  REQUIRE( reg.has( "tool.rs.atmospheric_correction" ) );
+  REQUIRE( reg.ids().size() == 8 );
+
+  const auto *d = reg.find( "tool.rs.spectral_index" );
+  REQUIRE( d );
+  REQUIRE( d->host == HostKind::TaskPanel );
+  REQUIRE( d->steps.size() == 1 );
+  REQUIRE( d->steps[0].operatorId == "rs:spectral_index" );
+  REQUIRE( d->steps[0].id == "run" );
+  REQUIRE_FALSE( d->steps[0].gates.empty() );
+  REQUIRE( d->steps[0].gates[0].require == "paramNonEmpty:run.input" );
 }
 
 TEST_CASE( "Runtime open returns empty for missing definition", "[workflow]" )
