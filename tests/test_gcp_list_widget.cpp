@@ -8,15 +8,13 @@
 
 #include "qgsgcplistwidget.h"
 #include "qgsgcplist.h"
+#include "qgsgcplistmodel.h"
 #include "qgsgcppoint.h"
 #include "qgscoordinatereferencesystem.h"
 #include "qgspointxy.h"
 
 #include <cstdlib>
 
-// Mirrors the FastExitListener used by test_georef_window — QGIS thread-local
-// QgsProjContext crashes during glibc atexit cleanup once qgis_core/qgis_gui
-// has been touched. _Exit after Catch reports keeps the test suite green.
 namespace
 {
   class FastExitListener : public Catch::EventListenerBase
@@ -48,17 +46,18 @@ namespace
   }
 }
 
-TEST_CASE( "GCP table: shows 10 columns", "[georef][table]" )
+TEST_CASE( "GCP table: shows map + pixel columns for both images", "[georef][table]" )
 {
   ensureApp();
   QgsGCPListWidget w;
   QgsGCPList list;
   w.setGCPList( &list );
   REQUIRE( w.model() != nullptr );
-  REQUIRE( w.model()->columnCount() == 10 );
+  REQUIRE( w.model()->columnCount() == static_cast<int>( QgsGCPListModel::Column::LastColumn ) );
+  REQUIRE( w.model()->columnCount() == 14 );
 }
 
-TEST_CASE( "GCP table: displays pointType in column 9", "[georef][table]" )
+TEST_CASE( "GCP table: displays pointType in last type column", "[georef][table]" )
 {
   ensureApp();
   QgsGCPListWidget w;
@@ -69,11 +68,12 @@ TEST_CASE( "GCP table: displays pointType in column 9", "[georef][table]" )
   list.appendPoint( p );
   w.setGCPList( &list );
   REQUIRE( w.model()->rowCount() == 1 );
-  const QString shown = w.model()->data( w.model()->index( 0, 9 ), Qt::DisplayRole ).toString();
+  const int typeCol = static_cast<int>( QgsGCPListModel::Column::PointType );
+  const QString shown = w.model()->data( w.model()->index( 0, typeCol ), Qt::DisplayRole ).toString();
   REQUIRE( shown == QStringLiteral( "river" ) );
 }
 
-TEST_CASE( "GCP table: residual >= 1px gets warn foreground at col 8", "[georef][table]" )
+TEST_CASE( "GCP table: residual warn foreground on total residual column", "[georef][table]" )
 {
   ensureApp();
   QgsGCPListWidget w;
@@ -82,11 +82,11 @@ TEST_CASE( "GCP table: residual >= 1px gets warn foreground at col 8", "[georef]
   QgsGcpPoint p( QgsPointXY( 1, 2 ), QgsPointXY( 100, 200 ), crs, true );
   list.appendPoint( p );
   w.setGCPList( &list );
-  // Mutate residual after wiring: setGCPList/updateResiduals would otherwise
-  // overwrite the residual to (0,0) since no QgsGeorefTransform is attached.
-  list.at( 0 )->setResidual( QPointF( 1.5, 1.5 ) );
+  // Pixel residual warn threshold is 2.0
+  list.at( 0 )->setResidual( QPointF( 3.0, 3.0 ) );
 
-  const QVariant fg = w.model()->data( w.model()->index( 0, 8 ), Qt::ForegroundRole );
+  const int rmsCol = static_cast<int>( QgsGCPListModel::Column::TotalResidual );
+  const QVariant fg = w.model()->data( w.model()->index( 0, rmsCol ), Qt::ForegroundRole );
   REQUIRE( fg.isValid() );
   REQUIRE( fg.canConvert<QBrush>() );
   const QBrush brush = fg.value<QBrush>();
