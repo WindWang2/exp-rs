@@ -23,15 +23,22 @@
 #include "qgsmapcanvas.h"
 #include "qgsmessagelog.h"
 #include "qgsrasterlayer.h"
+#include "qgsproject.h"
 #include "rs_sift_dialog.h"
 #include "rs_sift_task.h"
+#include "rs_template_match_dialog.h"
+#include "rs_template_matcher.h"
 #include "rs_twincanvas_sync_controller.h"
+#include "qgsgcplist.h"
+#include "qgsgcppoint.h"
 
 #include "shell/job_engine_qt_bridge.h"
 #include "jobs/job_engine.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
+
+#include "qgsfeedback.h"
 
 QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QWidget *parent )
   : QgsGeorefShellWindow( iface, parent )
@@ -172,6 +179,17 @@ void QgsGeoreferencerMainWindow::setupToolbars()
   mSiftAction->setStatusTip( mSiftAction->toolTip() );
   mSiftAction->setWhatsThis( mSiftAction->toolTip() );
 
+  mTemplateMatchAction = mToolBar->addAction(
+    QIcon( QStringLiteral( ":/icons/select" ) ),
+    tr( "模板匹配" ),
+    this, &QgsGeoreferencerMainWindow::runTemplateMatch );
+  mTemplateMatchAction->setObjectName( QStringLiteral( "rsGeorefTemplateMatchAction" ) );
+  mTemplateMatchAction->setToolTip( tr(
+    "模板匹配（NCC）：利用源影像初始地理坐标预测参考影像搜索区，再做相关匹配。\n"
+    "适合已有近似坐标的遥感影像；可网格采样或用现有粗 GCP 作种子。需要 OpenCV。" ) );
+  mTemplateMatchAction->setStatusTip( mTemplateMatchAction->toolTip() );
+  mTemplateMatchAction->setWhatsThis( mTemplateMatchAction->toolTip() );
+
   addApplyAction( mToolBar, QStringLiteral( "rsGeorefApplyAction" ) );
 }
 
@@ -186,7 +204,7 @@ QString QgsGeoreferencerMainWindow::windowHelpText() const
     "3. 两侧都打开后，Add / Move / Delete GCP 才可用<br>"
     "4. 导航：平移 / 放大 / 缩小；适合源 / 适合参考 / 适合两侧<br>"
     "5. 点选 Add GCP：先 SRC 再 REF（右键取消未完成源点）<br>"
-    "6. 可选：SIFT、Sync zoom → 设置输出 → 运行<br><br>"
+    "6. 可选：模板匹配（需 SRC 初始坐标）/ SIFT、Sync zoom → 设置输出 → 运行<br><br>"
     "不含 RPC（RPC 请用 Image 2 Map）。" );
 }
 
@@ -301,6 +319,145 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
                    } );
 
   statusBar()->showMessage( tr( "SIFT 匹配中…" ), 3000 );
+#endif
+}
+
+void QgsGeoreferencerMainWindow::runTemplateMatch()
+{
+#ifndef SICNU_HAS_OPENCV
+  statusBar()->showMessage( tr( "OpenCV 不可用 — 模板匹配已禁用" ), 5000 );
+  return;
+#else
+  if ( !mRefRaster )
+  {
+    statusBar()->showMessage( tr( "请先 File → Load reference raster…" ), 5000 );
+    return;
+  }
+  if ( mSourceRasterPath.isEmpty() )
+  {
+    statusBar()->showMessage( tr( "请先打开 SRC 影像" ), 5000 );
+    return;
+  }
+
+  RsTemplateMatchDialog dlg( this );
+  if ( dlg.exec() != QDialog::Accepted )
+    return;
+
+  RsTemplateMatcher::Params params = dlg.params();
+  QVector<QgsPointXY> seeds;
+  if ( params.seedMode == RsTemplateMatcher::SeedMode::ExistingSeeds )
+  {
+    if ( !mGcps || mGcps->isEmpty() )
+    {
+      statusBar()->showMessage( tr( "种子模式需要至少一个已有 GCP" ), 5000 );
+      return;
+    }
+    QVector<QgsPointXY> dstDummy;
+    mGcps->createGCPVectors( seeds, dstDummy, mParamsPanel->destCrs(),
+                             QgsProject::instance()->transformContext() );
+    if ( seeds.isEmpty() )
+    {
+      statusBar()->showMessage( tr( "没有可用的种子点" ), 5000 );
+      return;
+    }
+  }
+
+  // Heap-allocate so JobEngine worker can own the result until UI completion.
+  auto *resultHolder = new RsTemplateMatcher::Result;
+  auto *fb = new QgsFeedback;
+  auto paramsCopy = params;
+  auto seedsCopy = seeds;
+  const QString srcPath = mSourceRasterPath;
+  const QString refPath = mRefRaster->source();
+  const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
+
+  sicnu::jobs::JobRequest req;
+  req.algorithmId = "module:georef:template_match";
+  req.title = tr( "模板匹配" ).toStdString();
+  req.source = "module";
+  req.exclusive = true;
+
+  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+    std::move( req ),
+    [resultHolder, fb, paramsCopy, seedsCopy, srcPath, refPath, destCrs](
+      const sicnu::jobs::JobRequest &,
+      sicnu::operators::RSOperatorContext &ctx ) {
+      ctx.logInfo( "Running geo-initialized template matching (NCC)" );
+      ctx.reportProgress( 0.0, "Template match" );
+      RsTemplateMatcher matcher( fb );
+      *resultHolder = matcher.run( srcPath, refPath, destCrs, paramsCopy, seedsCopy );
+      if ( ctx.isCancelled() || resultHolder->errorMessage == QStringLiteral( "cancelled" ) )
+      {
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
+      }
+      if ( !resultHolder->ok() )
+      {
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::ComputationError,
+          resultHolder->errorMessage.toStdString() );
+      }
+      Json::Value result( Json::objectValue );
+      result["accepted"] = resultHolder->accepted;
+      result["attempted"] = resultHolder->attempted;
+      return result;
+    },
+    [fb]() { fb->cancel(); } );
+
+  const QString jobIdQ = QString::fromStdString( jobId );
+  auto *bridge = JobEngineQtBridge::instance();
+  auto *conn = new QMetaObject::Connection;
+  *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
+                   [this, resultHolder, fb, destCrs, jobIdQ, conn]( const QString &id ) {
+                     if ( id != jobIdQ )
+                       return;
+                     disconnect( *conn );
+                     delete conn;
+
+                     const auto snapOpt =
+                       sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
+                     const auto r = *resultHolder;
+                     delete resultHolder;
+                     delete fb;
+
+                     if ( !snapOpt || snapOpt->state != sicnu::jobs::JobState::Succeeded || !r.ok() )
+                     {
+                       if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
+                         statusBar()->showMessage( tr( "模板匹配已取消" ), 3000 );
+                       else
+                         statusBar()->showMessage(
+                           tr( "模板匹配失败：%1" )
+                             .arg( r.errorMessage.isEmpty()
+                                     ? ( snapOpt ? QString::fromStdString( snapOpt->error )
+                                                 : tr( "未知错误" ) )
+                                     : r.errorMessage ),
+                           6000 );
+                       return;
+                     }
+
+                     const QString msg = tr( "尝试 %1 点，接受 %2 对匹配，是否写入 GCP 列表？" )
+                                           .arg( r.attempted )
+                                           .arg( r.accepted );
+                     if ( QMessageBox::question( this, tr( "模板匹配结果" ), msg ) != QMessageBox::Yes )
+                       return;
+
+                     for ( const auto &m : r.matches )
+                       mGcps->appendPoint( QgsGcpPoint( m.srcPx, m.dstWorld, destCrs, true ) );
+
+                     QJsonObject o {
+                       { QStringLiteral( "event" ),     QStringLiteral( "template_match" ) },
+                       { QStringLiteral( "attempted" ), r.attempted },
+                       { QStringLiteral( "accepted" ),  r.accepted },
+                     };
+                     QgsMessageLog::logMessage(
+                       QString::fromUtf8( QJsonDocument( o ).toJson( QJsonDocument::Compact ) ),
+                       QStringLiteral( "Georeferencer" ),
+                       Qgis::MessageLevel::Info );
+                     statusBar()->showMessage(
+                       tr( "已添加 %1 个模板匹配 GCP" ).arg( r.accepted ), 5000 );
+                   } );
+
+  statusBar()->showMessage( tr( "模板匹配中…" ), 3000 );
 #endif
 }
 

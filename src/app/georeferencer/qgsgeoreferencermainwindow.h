@@ -37,6 +37,7 @@ class QgsGeoreferencerMainWindow : public QgsGeorefShellWindow
 
   private slots:
     void runSiftMatch();
+    void runTemplateMatch();
 
   private:
     void setupMenus();
@@ -46,6 +47,7 @@ class QgsGeoreferencerMainWindow : public QgsGeorefShellWindow
     QToolBar *mToolBar = nullptr;
     QAction *mSyncZoomAction = nullptr;
     QAction *mSiftAction = nullptr;
+    QAction *mTemplateMatchAction = nullptr;
     QAction *mOpenRefFileAction = nullptr;
     QAction *mOpenRefLayerAction = nullptr;
     RsTwinCanvasSyncController *mSyncCtl = nullptr;

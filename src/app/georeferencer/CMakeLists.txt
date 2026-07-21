@@ -30,6 +30,8 @@ add_library(qgis_app_georef STATIC
     rs_sift_matcher.cpp
     rs_sift_dialog.cpp
     rs_sift_task.cpp
+    rs_template_matcher.cpp
+    rs_template_match_dialog.cpp
     rs_georef_session_state.cpp
     rs_georef_task_list.cpp
     rs_georef_workflow_bridge.cpp
@@ -77,7 +79,7 @@ set_target_properties(qgis_app_georef PROPERTIES
 
 target_compile_features(qgis_app_georef PUBLIC cxx_std_17)
 
-# OpenCV — OPTIONAL (SIFT auto-match). Without it, SIFT degrades gracefully.
+# OpenCV — OPTIONAL (SIFT + template match). Without it, both degrade gracefully.
 if(SICNU_HAS_OPENCV)
     target_compile_definitions(qgis_app_georef PUBLIC SICNU_HAS_OPENCV=1)
     target_link_libraries(qgis_app_georef PUBLIC ${OpenCV_LIBS})
