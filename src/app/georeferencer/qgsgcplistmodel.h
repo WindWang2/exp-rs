@@ -56,6 +56,15 @@ class QgsGCPListModel : public QAbstractTableModel
 
     void setTargetCrs( const QgsCoordinateReferenceSystem &targetCrs, const QgsCoordinateTransformContext &context );
 
+    /**
+     * Column header units:
+     * \a sourceIsMap — source picks are layer/map coords (georeferenced source)
+     * \a residualIsMap — residuals reported in map units (else pixels)
+     * \a destCrsAuth — e.g. "EPSG:32650" for dest column tooltip/header
+     */
+    void setCoordinateDisplayMode( bool sourceIsMap, bool residualIsMap,
+                                   const QString &destCrsAuth = QString() );
+
     int rowCount( const QModelIndex &parent = QModelIndex() ) const override;
     int columnCount( const QModelIndex &parent = QModelIndex() ) const override;
     QVariant data( const QModelIndex &index, int role = Qt::DisplayRole ) const override;
@@ -70,6 +79,9 @@ class QgsGCPListModel : public QAbstractTableModel
 
     static QString formatNumber( double number );
 
+    bool sourceIsMapCoords() const { return mSourceIsMap; }
+    bool residualIsMapUnits() const { return mResidualIsMap; }
+
   signals:
     void pointEnabled( QgsGcpPoint *pnt, int i );
 
@@ -81,6 +93,10 @@ class QgsGCPListModel : public QAbstractTableModel
 
     QgsGCPList *mGCPList = nullptr;
     QgsGeorefTransform *mGeorefTransform = nullptr;
+
+    bool mSourceIsMap = false;
+    bool mResidualIsMap = false;
+    QString mDestCrsAuth;
 };
 
 #endif

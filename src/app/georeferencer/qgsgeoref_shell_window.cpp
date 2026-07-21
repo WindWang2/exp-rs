@@ -721,16 +721,46 @@ void QgsGeorefShellWindow::recomputeFit()
   const int minN = minimumGcpCountFor( method );
   mParamsPanel->setMinimumGcpCount( minN );
 
-  const QgsCoordinateReferenceSystem dstCrs = mParamsPanel->destCrs();
-  const QgsCoordinateTransformContext transformContext;
+  // Prefer dest canvas CRS for residual display (REF/Map image coords).
+  QgsCoordinateReferenceSystem dstCrs = mParamsPanel->destCrs();
+  if ( mDstCanvas && mDstCanvas->mapSettings().destinationCrs().isValid() )
+  {
+    if ( !dstCrs.isValid() )
+      dstCrs = mDstCanvas->mapSettings().destinationCrs();
+  }
+  const QgsCoordinateTransformContext transformContext =
+    QgsProject::instance() ? QgsProject::instance()->transformContext()
+                           : QgsCoordinateTransformContext();
+
   QVector<QgsPointXY> src;
   QVector<QgsPointXY> dst;
   mGcps->createGCPVectors( src, dst, dstCrs, transformContext );
   const int enabledCount = src.size();
   mParamsPanel->setActualGcpCount( enabledCount );
 
-  constexpr bool kInvertYAxis = true;
+  // Dual-canvas pick stores canvas map coordinates. If the source raster is
+  // already georeferenced, loadRaster() makes updateParametersFromGcps convert
+  // map→pixel before fit (classic georeferencer). Without loadRaster, map coords
+  // were treated as pixels + invertY → multi-km bogus residuals.
+  auto configureTransform = [this]( QgsGeorefTransform *xf ) {
+    if ( !xf )
+      return;
+    if ( !mSourceRasterPath.isEmpty() )
+      xf->loadRaster( mSourceRasterPath );
+  };
+
+  // Residual in source *pixel* space so canvas residual arrows scale correctly.
+  const Qgis::RenderUnit residualUnit = Qgis::RenderUnit::Pixels;
+
   bool fitOk = false;
+  bool sourceIsMap = false;
+
+  // invertYAxis: true for pure pixel sources (canvas Y may need GDAL row flip).
+  // false when loadRaster maps map→col/line (Y already top-origin line index);
+  // applying invertY again would destroy I2I residuals on georeferenced pairs.
+  auto invertYFor = []( QgsGeorefTransform *xf ) -> bool {
+    return !( xf && xf->hasExistingGeoreference() );
+  };
 
   if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical && enabledCount >= 3 )
   {
@@ -738,6 +768,7 @@ void QgsGeorefShellWindow::recomputeFit()
     double rmsAfter = -1.0;
     {
       auto beforeXf = std::make_unique<QgsGeorefTransform>( method );
+      configureTransform( beforeXf.get() );
       if ( auto *rpc = dynamic_cast<QgsRpcGcpTransformer *>(
              beforeXf ? beforeXf->gcpTransformer() : nullptr ) )
       {
@@ -746,15 +777,16 @@ void QgsGeorefShellWindow::recomputeFit()
       }
       try
       {
-        if ( beforeXf && beforeXf->updateParametersFromGcps( src, dst, kInvertYAxis ) )
+        if ( beforeXf && beforeXf->updateParametersFromGcps( src, dst, invertYFor( beforeXf.get() ) ) )
         {
-          mGcps->updateResiduals( beforeXf.get(), dstCrs, transformContext );
+          mGcps->updateResiduals( beforeXf.get(), dstCrs, transformContext, residualUnit );
           rmsBefore = computeEnabledRms( mGcps );
         }
       }
       catch ( ... ) {}
     }
     mTransform.reset( new QgsGeorefTransform( method ) );
+    configureTransform( mTransform.get() );
     if ( auto *rpc = dynamic_cast<QgsRpcGcpTransformer *>(
            mTransform ? mTransform->gcpTransformer() : nullptr ) )
     {
@@ -763,7 +795,7 @@ void QgsGeorefShellWindow::recomputeFit()
     }
     try
     {
-      fitOk = mTransform->updateParametersFromGcps( src, dst, kInvertYAxis );
+      fitOk = mTransform->updateParametersFromGcps( src, dst, invertYFor( mTransform.get() ) );
     }
     catch ( ... )
     {
@@ -771,7 +803,7 @@ void QgsGeorefShellWindow::recomputeFit()
     }
     if ( fitOk )
     {
-      mGcps->updateResiduals( mTransform.get(), dstCrs, transformContext );
+      mGcps->updateResiduals( mTransform.get(), dstCrs, transformContext, residualUnit );
       rmsAfter = computeEnabledRms( mGcps );
     }
     if ( rmsBefore >= 0.0 && rmsAfter >= 0.0 )
@@ -783,6 +815,7 @@ void QgsGeorefShellWindow::recomputeFit()
   {
     mParamsPanel->clearRefinementRms();
     mTransform.reset( new QgsGeorefTransform( method ) );
+    configureTransform( mTransform.get() );
     if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical )
     {
       if ( auto *rpc = dynamic_cast<QgsRpcGcpTransformer *>(
@@ -792,16 +825,29 @@ void QgsGeorefShellWindow::recomputeFit()
         rpc->setRpcOptions( mParamsPanel->demPath(), mParamsPanel->demZOffset(), false );
       }
     }
+    const bool invertY = invertYFor( mTransform.get() );
     if ( enabledCount >= minN && minN > 0 )
     {
-      try { fitOk = mTransform->updateParametersFromGcps( src, dst, kInvertYAxis ); }
+      try { fitOk = mTransform->updateParametersFromGcps( src, dst, invertY ); }
       catch ( ... ) { fitOk = false; }
     }
     else if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical && mTransform )
     {
-      try { fitOk = mTransform->updateParametersFromGcps( src, dst, kInvertYAxis ); }
+      try { fitOk = mTransform->updateParametersFromGcps( src, dst, invertY ); }
       catch ( ... ) { fitOk = false; }
     }
+  }
+
+  sourceIsMap = mTransform && mTransform->hasExistingGeoreference();
+
+  // Keep GCP table in sync: REF coords = image/map coords of Base; residual unit labels.
+  if ( mGcpTable && mGcpTable->gcpModel() )
+  {
+    mGcpTable->gcpModel()->setGeorefTransform( mTransform.get() );
+    mGcpTable->gcpModel()->setCoordinateDisplayMode(
+      sourceIsMap, /*residualIsMap=*/false,
+      dstCrs.isValid() ? dstCrs.authid() : QString() );
+    mGcpTable->gcpModel()->setTargetCrs( dstCrs, transformContext );
   }
 
   double totalSq = 0.0, xSq = 0.0, ySq = 0.0, maxMag = 0.0;
@@ -811,7 +857,7 @@ void QgsGeorefShellWindow::recomputeFit()
 
   if ( fitOk )
   {
-    mGcps->updateResiduals( mTransform.get(), dstCrs, transformContext );
+    mGcps->updateResiduals( mTransform.get(), dstCrs, transformContext, residualUnit );
     int rowId = 0;
     int included = 0;
     for ( const QgsGcpPoint *p : std::as_const( *mGcps ) )
@@ -865,7 +911,8 @@ void QgsGeorefShellWindow::recomputeFit()
   {
     mApplyAction->setEnabled( fitOk && enabledCount >= minN
                               && !mParamsPanel->outputPath().isEmpty()
-                              && !mWarpInProgress );
+                              && !mWarpInProgress
+                              && hasSourceReady() && hasDestReady() );
   }
 }
 
@@ -1287,6 +1334,7 @@ bool QgsGeorefShellWindow::loadSourceRaster( const QString &path, const QString 
   }
   updateSourceLayerCaption();
   updateToolAvailability();
+  recomputeFit();
   mSession.saveWorkflow( captureWorkflowSnapshot() );
   if ( statusBar() )
     statusBar()->showMessage( tr( "已加载源影像 (Warp): %1" ).arg( layer->name() ), 4000 );

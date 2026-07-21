@@ -288,12 +288,16 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
     mDstCanvas->setExtent( layer->extent() );
     mDstCanvas->refresh();
   }
+  // Align target CRS with reference image when panel CRS is still unset.
+  if ( mParamsPanel && layer->crs().isValid() && !mParamsPanel->destCrs().isValid() )
+    mParamsPanel->setDestCrs( layer->crs() );
 
   updateDestLayerCaption(
     layer->name(),
     tr( "参考影像（基准 / Base）\n图层: %1\n路径: %2" )
       .arg( layer->name(), path ) );
   updateToolAvailability();
+  recomputeFit();
   mSession.saveWorkflow( captureWorkflowSnapshot() );
   if ( statusBar() )
     statusBar()->showMessage( tr( "已加载参考影像 (Base): %1" ).arg( layer->name() ), 4000 );

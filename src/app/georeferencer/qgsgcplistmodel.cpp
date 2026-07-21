@@ -80,6 +80,17 @@ void QgsGCPListModel::setTargetCrs( const QgsCoordinateReferenceSystem &targetCr
     emit dataChanged( index( 0, static_cast<int>( Column::DestinationX ) ),
                       index( rowCount() - 1, static_cast<int>( Column::DestinationY ) ) );
   }
+  emit headerDataChanged( Qt::Horizontal, 0, columnCount() - 1 );
+}
+
+void QgsGCPListModel::setCoordinateDisplayMode( bool sourceIsMap, bool residualIsMap,
+                                                  const QString &destCrsAuth )
+{
+  mSourceIsMap = sourceIsMap;
+  mResidualIsMap = residualIsMap;
+  mDestCrsAuth = destCrsAuth;
+  emit headerDataChanged( Qt::Horizontal, 0, columnCount() - 1 );
+  refreshAll();
 }
 
 int QgsGCPListModel::rowCount( const QModelIndex & ) const
@@ -127,13 +138,27 @@ QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
           return formatFixed( point->sourcePoint().y(), 2 );
         case Column::DestinationX:
         {
-          const QgsPointXY td = point->transformedDestinationPoint( mTargetCrs, mTransformContext );
-          return formatFixed( td.x(), 2 );
+          // Prefer raw destination as picked on REF/Map (image/map coords of base).
+          // Only reproject when target CRS is valid and differs from stored CRS.
+          if ( mTargetCrs.isValid()
+               && point->destinationPointCrs().isValid()
+               && mTargetCrs != point->destinationPointCrs() )
+          {
+            const QgsPointXY td = point->transformedDestinationPoint( mTargetCrs, mTransformContext );
+            return formatFixed( td.x(), 2 );
+          }
+          return formatFixed( point->destinationPoint().x(), 2 );
         }
         case Column::DestinationY:
         {
-          const QgsPointXY td = point->transformedDestinationPoint( mTargetCrs, mTransformContext );
-          return formatFixed( td.y(), 2 );
+          if ( mTargetCrs.isValid()
+               && point->destinationPointCrs().isValid()
+               && mTargetCrs != point->destinationPointCrs() )
+          {
+            const QgsPointXY td = point->transformedDestinationPoint( mTargetCrs, mTransformContext );
+            return formatFixed( td.y(), 2 );
+          }
+          return formatFixed( point->destinationPoint().y(), 2 );
         }
         case Column::ResidualDx:
           if ( !point->isEnabled() )
@@ -311,18 +336,45 @@ QVariant QgsGCPListModel::headerData( int section, Qt::Orientation orientation, 
   if ( orientation != Qt::Horizontal || ( role != Qt::DisplayRole && role != Qt::ToolTipRole ) )
     return QVariant();
 
-  // Chinese headers per design.html ArtboardGeoref.
+  // Chinese headers — units depend on whether dual-pick stores map or pixel coords.
+  const QString srcU = mSourceIsMap ? tr( "map" ) : tr( "px" );
+  const QString resU = mResidualIsMap ? tr( "m" ) : tr( "px" );
+  const QString dstU = mDestCrsAuth.isEmpty() ? tr( "map" ) : mDestCrsAuth;
+
+  if ( role == Qt::ToolTipRole )
+  {
+    switch ( static_cast<Column>( section ) )
+    {
+      case Column::SourceX:
+      case Column::SourceY:
+        return mSourceIsMap
+                 ? tr( "源影像画布上的地图/图层坐标（双画布点选）" )
+                 : tr( "源影像像元坐标" );
+      case Column::DestinationX:
+      case Column::DestinationY:
+        return tr( "参考/地图画布上的坐标（Base 影像坐标系）\n%1" ).arg( dstU );
+      case Column::ResidualDx:
+      case Column::ResidualDy:
+      case Column::TotalResidual:
+        return mResidualIsMap
+                 ? tr( "残差（地图单位）" )
+                 : tr( "残差（源影像像元）" );
+      default:
+        break;
+    }
+  }
+
   switch ( static_cast<Column>( section ) )
   {
     case Column::Enabled:       return tr( "启用" );
     case Column::ID:            return tr( "#" );
-    case Column::SourceX:       return tr( "X 源 (px)" );
-    case Column::SourceY:       return tr( "Y 源 (px)" );
-    case Column::DestinationX:  return tr( "X 参 (m)" );
-    case Column::DestinationY:  return tr( "Y 参 (m)" );
-    case Column::ResidualDx:    return tr( "ΔX" );
-    case Column::ResidualDy:    return tr( "ΔY" );
-    case Column::TotalResidual: return tr( "RMS (px)" );
+    case Column::SourceX:       return tr( "X 源 (%1)" ).arg( srcU );
+    case Column::SourceY:       return tr( "Y 源 (%1)" ).arg( srcU );
+    case Column::DestinationX:  return tr( "X 参 (%1)" ).arg( mDestCrsAuth.isEmpty() ? tr( "map" ) : QStringLiteral( "map" ) );
+    case Column::DestinationY:  return tr( "Y 参 (%1)" ).arg( mDestCrsAuth.isEmpty() ? tr( "map" ) : QStringLiteral( "map" ) );
+    case Column::ResidualDx:    return tr( "ΔX (%1)" ).arg( resU );
+    case Column::ResidualDy:    return tr( "ΔY (%1)" ).arg( resU );
+    case Column::TotalResidual: return tr( "RMS (%1)" ).arg( resU );
     case Column::PointType:     return tr( "类型" );
     case Column::LastColumn:    break;
   }
@@ -331,8 +383,9 @@ QVariant QgsGCPListModel::headerData( int section, Qt::Orientation orientation, 
 
 Qgis::RenderUnit QgsGCPListModel::residualUnit() const
 {
-  if ( mGeorefTransform && mGeorefTransform->providesAccurateInverseTransformation() )
+  if ( mResidualIsMap )
     return Qgis::RenderUnit::MapUnits;
+  // Default: residual in source-pixel space (matches canvas residual arrows).
   return Qgis::RenderUnit::Pixels;
 }
 
