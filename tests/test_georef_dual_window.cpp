@@ -90,11 +90,35 @@ TEST_CASE( "I2M window has SRC and Map canvases", "[georef][dual]" )
   REQUIRE( mapLabel->text().contains( QStringLiteral( "Base" ) ) );
 }
 
+TEST_CASE( "I2I GCP tools disabled until both source and reference open", "[georef][dual][tools]" )
+{
+  QgsGeoreferencerMainWindow w( nullptr, nullptr );
+  auto *add = w.findChild<QAction *>( QStringLiteral( "rsGeorefAddPointAction" ) );
+  auto *move = w.findChild<QAction *>( QStringLiteral( "rsGeorefMovePointAction" ) );
+  auto *del = w.findChild<QAction *>( QStringLiteral( "rsGeorefDeletePointAction" ) );
+  REQUIRE( add != nullptr );
+  REQUIRE( move != nullptr );
+  REQUIRE( del != nullptr );
+  REQUIRE_FALSE( add->isEnabled() );
+  REQUIRE_FALSE( move->isEnabled() );
+  REQUIRE_FALSE( del->isEnabled() );
+}
+
+TEST_CASE( "I2M GCP tools disabled until source open", "[georef][dual][tools]" )
+{
+  QgsGeorefImageToMapWindow w( nullptr, nullptr );
+  auto *add = w.findChild<QAction *>( QStringLiteral( "rsGeorefI2MAddPointAction" ) );
+  REQUIRE( add != nullptr );
+  REQUIRE_FALSE( add->isEnabled() );
+}
+
 TEST_CASE( "I2I dual-canvas GCP pick arms both tools and appends pair", "[georef][dual][gcp]" )
 {
   QgsGeoreferencerMainWindow w( nullptr, nullptr );
   auto *add = w.findChild<QAction *>( QStringLiteral( "rsGeorefAddPointAction" ) );
   REQUIRE( add != nullptr );
+  // Bypass layer gate for unit test of pick/commit path.
+  add->setEnabled( true );
   add->setChecked( true );
   REQUIRE( w.srcCanvas() != nullptr );
   REQUIRE( w.dstCanvas() != nullptr );

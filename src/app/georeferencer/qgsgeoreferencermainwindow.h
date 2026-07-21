@@ -25,12 +25,15 @@ class QgsGeoreferencerMainWindow : public QgsGeorefShellWindow
   public slots:
     void loadReferenceRaster();
     bool loadReferenceRaster( const QString &path );
+    void loadReferenceFromProjectLayer();
 
   protected:
     QString shellId() const override { return QStringLiteral( "i2i" ); }
     QString windowHelpText() const override;
     void captureShellSpecific( RsGeorefSessionState::WorkflowSnapshot &s ) const override;
     void applyShellSpecific( const RsGeorefSessionState::WorkflowSnapshot &s ) override;
+    bool hasDestReady() const override;
+    void updateToolAvailability() override;
 
   private slots:
     void runSiftMatch();
@@ -42,6 +45,9 @@ class QgsGeoreferencerMainWindow : public QgsGeorefShellWindow
 
     QToolBar *mToolBar = nullptr;
     QAction *mSyncZoomAction = nullptr;
+    QAction *mSiftAction = nullptr;
+    QAction *mOpenRefFileAction = nullptr;
+    QAction *mOpenRefLayerAction = nullptr;
     RsTwinCanvasSyncController *mSyncCtl = nullptr;
     QString mRefRasterPath;
     QgsRasterLayer *mRefRaster = nullptr; // non-owning; in mLayerStore

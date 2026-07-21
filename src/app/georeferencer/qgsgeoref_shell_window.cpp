@@ -9,6 +9,7 @@
 #include <QFont>
 #include <QFrame>
 #include <QIcon>
+#include <QInputDialog>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
@@ -16,6 +17,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMetaEnum>
+#include <QStringList>
 #include <QSet>
 #include <QSignalBlocker>
 #include <QSizePolicy>
@@ -208,6 +210,7 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   if ( profile == RsGeorefParamsPanel::Profile::ImageToImage )
     mParamsPanel->setRpcMode( false );
   onTransformMethodChanged();
+  updateToolAvailability();
 }
 
 void QgsGeorefShellWindow::setupStatusBar( const QString &coordObj, const QString &crsObj, const QString &rmsObj )
@@ -321,10 +324,16 @@ void QgsGeorefShellWindow::updateDestLayerCaption( const QString &displayName,
 QMenu *QgsGeorefShellWindow::createFileMenu()
 {
   auto *fileMenu = menuBar()->addMenu( tr( "&File" ) );
-  auto *openSrc = fileMenu->addAction( tr( "Open source raster..." ),
-                                       this, &QgsGeorefShellWindow::openSourceRaster );
-  tipAction( openSrc, tr(
-    "打开待校正源影像（SRC）。影像显示在源画布上，路径用于写出 warp。" ) );
+  mOpenSourceFileAction = fileMenu->addAction(
+    tr( "Open source raster from file..." ),
+    this, &QgsGeorefShellWindow::openSourceRaster );
+  tipAction( mOpenSourceFileAction, tr(
+    "从文件打开待校正源影像（SRC / Warp）。显示在源画布，路径用于写出 warp。" ) );
+  mOpenSourceLayerAction = fileMenu->addAction(
+    tr( "Open source from project layer..." ),
+    this, &QgsGeorefShellWindow::openSourceFromProjectLayer );
+  tipAction( mOpenSourceLayerAction, tr(
+    "从主工程图层列表选择栅格作为源影像（Warp），无需再选文件。" ) );
   return fileMenu;
 }
 
@@ -391,10 +400,10 @@ void QgsGeorefShellWindow::addGcpEditActions( QToolBar *bar, const QString &obje
   group->addAction( mMovePointAction );
   group->addAction( mDeletePointAction );
 
-  auto *loadGcp = bar->addAction( ic, tr( "Load .gcp" ), this, &QgsGeorefShellWindow::loadPoints );
-  tipAction( loadGcp, tr( "从 .points / .gcp 文件加载控制点列表。" ) );
-  auto *saveGcp = bar->addAction( ic, tr( "Export .gcp" ), this, &QgsGeorefShellWindow::savePoints );
-  tipAction( saveGcp, tr( "将当前控制点导出为 .points 文件，便于下次继续。" ) );
+  mLoadGcpAction = bar->addAction( ic, tr( "Load .gcp" ), this, &QgsGeorefShellWindow::loadPoints );
+  tipAction( mLoadGcpAction, tr( "从 .points / .gcp 文件加载控制点列表。" ) );
+  mSaveGcpAction = bar->addAction( ic, tr( "Export .gcp" ), this, &QgsGeorefShellWindow::savePoints );
+  tipAction( mSaveGcpAction, tr( "将当前控制点导出为 .points 文件，便于下次继续。" ) );
 }
 
 void QgsGeorefShellWindow::addApplyAction( QToolBar *bar, const QString &objectName )
@@ -562,6 +571,9 @@ void QgsGeorefShellWindow::onPointsChanged()
 {
   if ( !mGcps )
     return;
+
+  if ( mSaveGcpAction )
+    mSaveGcpAction->setEnabled( hasSourceReady() && !mGcps->isEmpty() );
 
   QSet<QgsGcpPoint *> live;
   int idCounter = 1; // 1-based labels on canvas badges
@@ -1219,18 +1231,49 @@ void QgsGeorefShellWindow::openSourceRaster()
     tr( "Raster (*.tif *.tiff *.img *.jp2);;All files (*)" ) );
   if ( path.isEmpty() )
     return;
+  loadSourceRaster( path );
+}
 
-  setSourceRasterPath( path );
-  auto *layer = new QgsRasterLayer( path, QFileInfo( path ).baseName(), QStringLiteral( "gdal" ) );
+void QgsGeorefShellWindow::openSourceFromProjectLayer()
+{
+  QgsRasterLayer *picked = pickProjectRasterLayer(
+    tr( "从主工程选择源影像 (Warp)" ) );
+  if ( !picked )
+    return;
+  loadSourceRaster( picked->source(), picked->name() );
+}
+
+bool QgsGeorefShellWindow::loadSourceRaster( const QString &path, const QString &displayName )
+{
+  if ( path.isEmpty() )
+    return false;
+
+  const QString name = displayName.isEmpty()
+                         ? QFileInfo( path ).completeBaseName()
+                         : displayName;
+  auto *layer = new QgsRasterLayer( path, name, QStringLiteral( "gdal" ) );
+  if ( !layer->isValid() )
+  {
+    // Retry with default provider key empty for non-file sources (e.g. memory).
+    delete layer;
+    layer = new QgsRasterLayer( path, name );
+  }
   if ( !layer->isValid() )
   {
     delete layer;
     if ( statusBar() )
-      statusBar()->showMessage( tr( "Failed to open raster: %1" ).arg( path ), 5000 );
-    return;
+      statusBar()->showMessage( tr( "无法打开源影像: %1" ).arg( path ), 5000 );
+    return false;
   }
+
+  setSourceRasterPath( path );
   if ( mLayerStore )
     mLayerStore->addMapLayer( layer );
+  else
+  {
+    // Should not happen after finishCommonSetup; avoid leak.
+    layer->setParent( this );
+  }
   mSrcRaster = layer;
   if ( mSrcCanvas )
   {
@@ -1243,7 +1286,111 @@ void QgsGeorefShellWindow::openSourceRaster()
     mSrcCanvas->refresh();
   }
   updateSourceLayerCaption();
+  updateToolAvailability();
   mSession.saveWorkflow( captureWorkflowSnapshot() );
+  if ( statusBar() )
+    statusBar()->showMessage( tr( "已加载源影像 (Warp): %1" ).arg( layer->name() ), 4000 );
+  return true;
+}
+
+bool QgsGeorefShellWindow::hasSourceReady() const
+{
+  return mSrcRaster && mSrcRaster->isValid();
+}
+
+bool QgsGeorefShellWindow::hasDestReady() const
+{
+  // I2M: map canvas is always usable (even empty); I2I overrides for REF.
+  return true;
+}
+
+void QgsGeorefShellWindow::updateToolAvailability()
+{
+  const bool srcOk = hasSourceReady();
+  const bool destOk = hasDestReady();
+  const bool gcpOk = srcOk && destOk;
+
+  if ( mAddPointAction )
+  {
+    mAddPointAction->setEnabled( gcpOk );
+    if ( !gcpOk && mAddPointAction->isChecked() )
+      mAddPointAction->setChecked( false );
+  }
+  if ( mMovePointAction )
+  {
+    mMovePointAction->setEnabled( gcpOk );
+    if ( !gcpOk && mMovePointAction->isChecked() )
+      mMovePointAction->setChecked( false );
+  }
+  if ( mDeletePointAction )
+  {
+    mDeletePointAction->setEnabled( gcpOk );
+    if ( !gcpOk && mDeletePointAction->isChecked() )
+      mDeletePointAction->setChecked( false );
+  }
+  if ( mLoadGcpAction )
+    mLoadGcpAction->setEnabled( srcOk );
+  if ( mSaveGcpAction )
+    mSaveGcpAction->setEnabled( srcOk && mGcps && !mGcps->isEmpty() );
+  if ( mGcpTable )
+    mGcpTable->setEnabled( gcpOk || ( mGcps && !mGcps->isEmpty() ) );
+
+  if ( !gcpOk )
+    clearPendingGcpPick();
+
+  // Apply remains gated by recomputeFit (GCP count + output path + tools).
+  recomputeFit();
+  if ( mApplyAction && !gcpOk )
+    mApplyAction->setEnabled( false );
+}
+
+// Keep Export .gcp enabled state in sync when GCP list changes.
+// (Hooked via existing onPointsChanged → recomputeFit; also refresh save.)
+
+QgsRasterLayer *QgsGeorefShellWindow::pickProjectRasterLayer( const QString &dialogTitle )
+{
+  QList<QgsRasterLayer *> rasters;
+  const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
+  for ( auto it = layers.constBegin(); it != layers.constEnd(); ++it )
+  {
+    if ( auto *rl = qobject_cast<QgsRasterLayer *>( it.value() ) )
+    {
+      if ( rl->isValid() )
+        rasters.append( rl );
+    }
+  }
+
+  if ( rasters.isEmpty() )
+  {
+    QMessageBox::information(
+      this, dialogTitle,
+      tr( "主工程中没有可用的栅格图层。\n请先在主窗口加载影像，或改用「从文件打开」。" ) );
+    return nullptr;
+  }
+
+  QStringList labels;
+  labels.reserve( rasters.size() );
+  for ( QgsRasterLayer *rl : rasters )
+  {
+    const QString src = rl->source();
+    const QString shortSrc = src.size() > 60
+                               ? ( QStringLiteral( "…" ) + src.right( 59 ) )
+                               : src;
+    labels << QStringLiteral( "%1  [%2]" ).arg( rl->name(), shortSrc );
+  }
+
+  bool ok = false;
+  const QString chosen = QInputDialog::getItem(
+    this, dialogTitle,
+    tr( "选择栅格图层:" ),
+    labels, 0, false, &ok );
+  if ( !ok || chosen.isEmpty() )
+    return nullptr;
+
+  const int idx = labels.indexOf( chosen );
+  if ( idx < 0 || idx >= rasters.size() )
+    return nullptr;
+  return rasters.at( idx );
 }
 
 void QgsGeorefShellWindow::closeEvent( QCloseEvent *e )

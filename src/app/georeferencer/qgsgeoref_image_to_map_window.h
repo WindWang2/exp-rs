@@ -23,6 +23,8 @@ class QgsGeorefImageToMapWindow : public QgsGeorefShellWindow
     QString windowHelpText() const override;
     void onTransformMethodChangedExtra() override;
     void captureShellSpecific( RsGeorefSessionState::WorkflowSnapshot &s ) const override;
+    bool hasDestReady() const override;
+    void updateToolAvailability() override;
 
   private:
     void setupMenus();

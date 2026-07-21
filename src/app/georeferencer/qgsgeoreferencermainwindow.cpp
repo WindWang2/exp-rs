@@ -106,10 +106,19 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
 void QgsGeoreferencerMainWindow::setupMenus()
 {
   QMenu *fileMenu = createFileMenu();
-  auto *loadRef = fileMenu->addAction( tr( "Load reference raster..." ),
-                       this, QOverload<>::of( &QgsGeoreferencerMainWindow::loadReferenceRaster ) );
-  loadRef->setToolTip( tr( "打开参考影像到右侧 REF 画布，作为 GCP 目标与对齐基准。" ) );
-  loadRef->setStatusTip( loadRef->toolTip() );
+  fileMenu->addSeparator();
+  mOpenRefFileAction = fileMenu->addAction(
+    tr( "Load reference raster from file..." ),
+    this, QOverload<>::of( &QgsGeoreferencerMainWindow::loadReferenceRaster ) );
+  mOpenRefFileAction->setToolTip( tr(
+    "从文件打开参考影像到右侧 REF（Base），作为 GCP 目标与对齐基准。" ) );
+  mOpenRefFileAction->setStatusTip( mOpenRefFileAction->toolTip() );
+  mOpenRefLayerAction = fileMenu->addAction(
+    tr( "Load reference from project layer..." ),
+    this, &QgsGeoreferencerMainWindow::loadReferenceFromProjectLayer );
+  mOpenRefLayerAction->setToolTip( tr(
+    "从主工程图层列表选择栅格作为参考影像（Base）。" ) );
+  mOpenRefLayerAction->setStatusTip( mOpenRefLayerAction->toolTip() );
   fileMenu->addSeparator();
   auto *loadPts = fileMenu->addAction( tr( "Load .points..." ), this, &QgsGeorefShellWindow::loadPoints );
   loadPts->setToolTip( tr( "导入已保存的控制点文件。" ) );
@@ -138,16 +147,16 @@ void QgsGeoreferencerMainWindow::setupToolbars()
   mSyncZoomAction->setStatusTip( mSyncZoomAction->toolTip() );
   mSyncZoomAction->setWhatsThis( mSyncZoomAction->toolTip() );
 
-  auto *sift = mToolBar->addAction(
+  mSiftAction = mToolBar->addAction(
     QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ),
     tr( "Auto match (SIFT)" ),
     this, &QgsGeoreferencerMainWindow::runSiftMatch );
-  sift->setObjectName( QStringLiteral( "rsGeorefSiftAction" ) );
-  sift->setToolTip( tr(
+  mSiftAction->setObjectName( QStringLiteral( "rsGeorefSiftAction" ) );
+  mSiftAction->setToolTip( tr(
     "SIFT 自动匹配：需已打开 SRC 与参考影像。提取特征并筛选内点后，可批量添加 GCP。\n"
     "需要 OpenCV；仅 Image 2 Image 提供。" ) );
-  sift->setStatusTip( sift->toolTip() );
-  sift->setWhatsThis( sift->toolTip() );
+  mSiftAction->setStatusTip( mSiftAction->toolTip() );
+  mSiftAction->setWhatsThis( mSiftAction->toolTip() );
 
   addApplyAction( mToolBar, QStringLiteral( "rsGeorefApplyAction" ) );
 }
@@ -156,16 +165,14 @@ QString QgsGeoreferencerMainWindow::windowHelpText() const
 {
   return tr(
     "<b>Image Registration · Image 2 Image</b><br>"
-    "双影像配准：左侧源影像，右侧参考影像。<br><br>"
+    "双影像配准：左侧源影像 (Warp)，右侧参考影像 (Base)。<br><br>"
     "<b>典型流程</b><br>"
-    "1. File → Open source raster<br>"
-    "2. File → Load reference raster<br>"
-    "3. 点选 Add GCP：先在 SRC 点击源点，再在 REF 点击同名目标点"
-    "（不弹出坐标填写框；右键取消未完成源点）<br>"
-    "4. 可选：SIFT 自动匹配、Sync zoom 联动浏览<br>"
-    "5. 右侧设置变换方法与输出路径 → 运行<br><br>"
-    "不含 RPC（RPC 请用 Image 2 Map）。悬停工具按钮可看详细说明；"
-    "Help → 这是什么？ 可点击任意控件查看。" );
+    "1. 打开源影像：从文件 或 从主工程图层<br>"
+    "2. 打开参考影像：从文件 或 从主工程图层<br>"
+    "3. 两侧都打开后，Add / Move / Delete GCP 才可用<br>"
+    "4. 点选 Add GCP：先 SRC 再 REF（右键取消未完成源点）<br>"
+    "5. 可选：SIFT、Sync zoom → 设置输出 → 运行<br><br>"
+    "不含 RPC（RPC 请用 Image 2 Map）。" );
 }
 
 void QgsGeoreferencerMainWindow::runSiftMatch()
@@ -234,13 +241,38 @@ void QgsGeoreferencerMainWindow::loadReferenceRaster()
   loadReferenceRaster( path );
 }
 
+void QgsGeoreferencerMainWindow::loadReferenceFromProjectLayer()
+{
+  QgsRasterLayer *picked = pickProjectRasterLayer(
+    tr( "从主工程选择参考影像 (Base)" ) );
+  if ( !picked )
+    return;
+  loadReferenceRaster( picked->source() );
+  // Prefer project layer display name on caption if path load used basename.
+  if ( mRefRaster && mRefRaster->isValid() && !picked->name().isEmpty() )
+  {
+    // Layer was created with file basename; caption already set — refresh name tip.
+    updateDestLayerCaption(
+      picked->name(),
+      tr( "参考影像（基准 / Base）— 来自主工程图层\n图层: %1\n路径: %2" )
+        .arg( picked->name(), picked->source() ) );
+  }
+}
+
 bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
 {
-  auto *layer = new QgsRasterLayer( path, QFileInfo( path ).baseName(), QStringLiteral( "gdal" ) );
+  auto *layer = new QgsRasterLayer( path, QFileInfo( path ).completeBaseName(), QStringLiteral( "gdal" ) );
+  if ( !layer->isValid() )
+  {
+    delete layer;
+    layer = new QgsRasterLayer( path, QFileInfo( path ).completeBaseName() );
+  }
   if ( !layer->isValid() )
   {
     SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, QString( "Failed to open reference raster: %1" ).arg( path ) );
     delete layer;
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "无法打开参考影像: %1" ).arg( path ), 5000 );
     return false;
   }
   if ( mLayerStore )
@@ -261,8 +293,25 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
     layer->name(),
     tr( "参考影像（基准 / Base）\n图层: %1\n路径: %2" )
       .arg( layer->name(), path ) );
+  updateToolAvailability();
   mSession.saveWorkflow( captureWorkflowSnapshot() );
+  if ( statusBar() )
+    statusBar()->showMessage( tr( "已加载参考影像 (Base): %1" ).arg( layer->name() ), 4000 );
   return true;
+}
+
+bool QgsGeoreferencerMainWindow::hasDestReady() const
+{
+  return mRefRaster && mRefRaster->isValid();
+}
+
+void QgsGeoreferencerMainWindow::updateToolAvailability()
+{
+  QgsGeorefShellWindow::updateToolAvailability();
+  if ( mSiftAction )
+    mSiftAction->setEnabled( hasSourceReady() && hasDestReady() );
+  if ( mSyncZoomAction )
+    mSyncZoomAction->setEnabled( hasSourceReady() && hasDestReady() );
 }
 
 void QgsGeoreferencerMainWindow::captureShellSpecific( RsGeorefSessionState::WorkflowSnapshot &s ) const

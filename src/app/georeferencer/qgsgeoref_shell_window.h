@@ -60,7 +60,12 @@ class QgsGeorefShellWindow : public QMainWindow
   public slots:
     /// I2M optional: open coordinate dialog for typed destination (advanced).
     void showCoordDialog( const QgsPointXY &sourcePixel );
+    /// Open source (Warp) from file dialog.
     void openSourceRaster();
+    /// Open source (Warp) by picking a raster layer from the main project.
+    void openSourceFromProjectLayer();
+    /// Load source raster from path (file or provider URI). Returns false on failure.
+    bool loadSourceRaster( const QString &path, const QString &displayName = QString() );
     /// Validate params, enqueue a warp job into the task list, and run it.
     void applyTransform();
     void loadPoints();
@@ -113,6 +118,14 @@ class QgsGeorefShellWindow : public QMainWindow
     virtual void applyShellSpecific( const RsGeorefSessionState::WorkflowSnapshot & ) {}
     /// Called when transform method combo changes (I2M toggles DEM).
     virtual void onTransformMethodChangedExtra() {}
+    /// Source (Warp) raster is loaded and valid.
+    virtual bool hasSourceReady() const;
+    /// Dest side ready: REF raster (I2I) or map canvas (I2M, default true).
+    virtual bool hasDestReady() const;
+    /// Enable/disable GCP tools according to open layers. Call after load.
+    virtual void updateToolAvailability();
+    /// Pick a raster layer from QgsProject (nullptr if cancelled / none).
+    QgsRasterLayer *pickProjectRasterLayer( const QString &dialogTitle );
 
   protected slots:
     void recomputeFit();
@@ -173,7 +186,11 @@ class QgsGeorefShellWindow : public QMainWindow
     QAction *mAddPointAction = nullptr;
     QAction *mMovePointAction = nullptr;
     QAction *mDeletePointAction = nullptr;
+    QAction *mLoadGcpAction = nullptr;
+    QAction *mSaveGcpAction = nullptr;
     QAction *mApplyAction = nullptr;
+    QAction *mOpenSourceFileAction = nullptr;
+    QAction *mOpenSourceLayerAction = nullptr;
     QgsGeorefDataPoint *mMovingPoint = nullptr;
     QgsGeorefDataPoint *mHoveredPoint = nullptr;
     QgsPointXY mMoveOrigin;

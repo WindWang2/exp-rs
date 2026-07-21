@@ -125,14 +125,27 @@ QString QgsGeorefImageToMapWindow::windowHelpText() const
 {
   return tr(
     "<b>Image Registration · Image 2 Map</b><br>"
-    "源影像对主工程地图：上方 SRC，下方 Map（主图可见图层镜像）。<br><br>"
+    "源影像 (Warp) 对主工程地图 (Base)：上方 SRC，下方 Map。<br><br>"
     "<b>典型流程</b><br>"
-    "1. 主窗口加载已有地理参考底图/矢量<br>"
-    "2. 本窗口 File → Open source raster<br>"
-    "3. Add GCP：先在 SRC 点源点，再在 Map 点目标位置（双画布点选，不弹坐标表单）<br>"
-    "4. 变换方法可选 <b>RPC Physical</b>（需源含 RPC；可配 DEM）<br>"
-    "5. 设置输出路径 → 运行 → 任务列表查看/加载结果<br><br>"
-    "无 SIFT、无「打开参考影像」。悬停工具与参数可看说明。" );
+    "1. 主窗口加载地理参考底图/矢量<br>"
+    "2. 本窗口打开源影像：从文件 或 从主工程图层<br>"
+    "3. 源影像打开后，Add / Move / Delete GCP 才可用<br>"
+    "4. Map 侧为工程可见图层（可 Refresh map）<br>"
+    "5. Add GCP：先 SRC 再 Map → 可选 RPC → 运行<br><br>"
+    "无 SIFT。悬停工具与参数可看说明。" );
+}
+
+bool QgsGeorefImageToMapWindow::hasDestReady() const
+{
+  // Map canvas is usable once project has at least one visible layer,
+  // or always allow dest pick on empty map (coords still valid).
+  // Require source only for GCP tools; dest side is the project map.
+  return true;
+}
+
+void QgsGeorefImageToMapWindow::updateToolAvailability()
+{
+  QgsGeorefShellWindow::updateToolAvailability();
 }
 
 void QgsGeorefImageToMapWindow::refreshMapLayersFromProject()
@@ -193,6 +206,7 @@ void QgsGeorefImageToMapWindow::refreshMapLayersFromProject()
         .arg( tipLines.join( QLatin1Char( '\n' ) ) ) );
   }
   updateSourceLayerCaption();
+  updateToolAvailability();
 }
 
 void QgsGeorefImageToMapWindow::onTransformMethodChangedExtra()
