@@ -898,3 +898,55 @@ QLabel#rsReadyLabel {
     color: #3a7f1a;
     font-weight: 600;
 }
+
+/* ============ Ribbon ============ */
+#rsRibbonBar {
+  background: #ffffff;
+  border-bottom: 1px solid #e4e7eb;
+}
+#rsRibbonTabBar::tab:selected {
+  color: #3a7f1a;
+  font-weight: 600;
+}
+#rsRibbonGroupTitle {
+  color: #8a92a0;
+  font-size: 10px;
+}
+
+/* ============ Task panel ============ */
+#rsTaskPanel {
+  background: #ffffff;
+  border-left: 1px solid #e4e7eb;
+}
+#rsTaskPanelTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #14171c;
+}
+#rsTaskPanelSectionLabel {
+  color: #5b6473;
+  font-size: 11px;
+  margin-top: 8px;
+}
+QPushButton#rsTaskPanelRun[primary="true"] {
+  background-color: #3a7f1a;
+  color: #ffffff;
+  border: none;
+}
+QPushButton#rsTaskPanelRun[primary="true"]:hover {
+  background-color: #2d6313;
+}
+QPushButton#rsTaskPanelRun:disabled,
+QPushButton#rsTaskPanelRun[primary="true"]:disabled {
+  background-color: #cfd5dd;
+  border: none;
+  color: #8a92a0;
+}
+#rsTaskPanelHint {
+  color: #8a92a0;
+  font-size: 11px;
+}
+#rsTaskPanelHint[error="true"] {
+  color: #cf222e;
+}
+
