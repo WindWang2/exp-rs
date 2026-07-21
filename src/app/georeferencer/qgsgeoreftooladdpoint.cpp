@@ -24,12 +24,25 @@
 
 QgsGeorefToolAddPoint::QgsGeorefToolAddPoint( QgsMapCanvas *canvas )
   : QgsMapTool( canvas )
-{}
+{
+  setCursor( Qt::CrossCursor );
+}
 
 void QgsGeorefToolAddPoint::canvasPressEvent( QgsMapMouseEvent *e )
 {
+  if ( !e )
+    return;
   if ( Qt::LeftButton == e->button() )
-    emit pointPicked( toMapCoordinates( e->pos() ) );
+  {
+    // Prefer the precomputed map point from the event (handles HiDPI / canvas
+    // transform consistently). Fall back to tool helper if needed.
+    QgsPointXY mapPt = e->mapPoint();
+    if ( mapPt.isEmpty() )
+      mapPt = toMapCoordinates( e->pos() );
+    emit pointPicked( mapPt );
+  }
   else if ( Qt::RightButton == e->button() )
+  {
     emit canceled();
+  }
 }

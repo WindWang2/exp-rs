@@ -71,10 +71,17 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
   setCentralWidget( split );
 
   mSyncCtl = new RsTwinCanvasSyncController( mSrcCanvas, mDstCanvas, this );
+  // Default OFF: SRC is often pixel/local while REF is map CRS — linking extents
+  // makes source picks land at wrong coords (e.g. all zeros / off-image).
+  if ( mSyncCtl )
+    mSyncCtl->setEnabled( false );
   if ( mSyncZoomAction )
   {
     mSyncZoomAction->setCheckable( true );
-    mSyncZoomAction->setChecked( true );
+    mSyncZoomAction->setChecked( false );
+    mSyncZoomAction->setToolTip( tr(
+      "同步缩放：仅在 SRC 与 REF 坐标单位/范围相近时建议开启。\n"
+      "源为像素、参考为地图坐标时请保持关闭，否则取点会错位。" ) );
     connect( mSyncZoomAction, &QAction::toggled, this, [this]( bool on ) {
       if ( mSyncCtl )
         mSyncCtl->setEnabled( on );
@@ -229,6 +236,8 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
 
   if ( mDstCanvas )
   {
+    if ( layer->crs().isValid() )
+      mDstCanvas->setDestinationCrs( layer->crs() );
     mDstCanvas->setLayers( { layer } );
     mDstCanvas->setExtent( layer->extent() );
     mDstCanvas->refresh();

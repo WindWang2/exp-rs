@@ -120,10 +120,11 @@ QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
         case Column::ID:
           return index.row();
         case Column::SourceX:
-          return formatFixed( point->sourcePoint().x(), 1 );
+          return formatFixed( point->sourcePoint().x(), 2 );
         case Column::SourceY:
-          // Upstream convention: Y is inverted on read/write but stored positive.
-          return formatFixed( -point->sourcePoint().y(), 1 );
+          // Store and display the same canvas/map coordinates used for markers.
+          // (Do not negate Y — dual-canvas pick stores real map Y, not GDAL row.)
+          return formatFixed( point->sourcePoint().y(), 2 );
         case Column::DestinationX:
         {
           const QgsPointXY td = point->transformedDestinationPoint( mTargetCrs, mTransformContext );

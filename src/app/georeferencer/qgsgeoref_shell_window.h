@@ -131,6 +131,8 @@ class QgsGeorefShellWindow : public QMainWindow
     void panCanvasToPoint( QgsMapCanvas *canvas, const QgsPointXY &mapPoint );
     void setSelectedGcpRow( int row );
     void syncAllMarkers();
+    /// Keep Add-GCP tools armed on both canvases (no shared QAction on tools).
+    void rearmAddPointTools();
 
     QgisInterface *mIface = nullptr;
 

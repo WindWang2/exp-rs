@@ -4,6 +4,7 @@
 
 #include "qgsgeoreferencermainwindow.h"
 #include "qgsgeoref_image_to_map_window.h"
+#include "qgsgcplistwidget.h"
 #include "qgsmapcanvas.h"
 #include "qgspointxy.h"
 #include "rs_georef_params_panel.h"
@@ -99,6 +100,21 @@ TEST_CASE( "I2I dual-canvas GCP pick arms both tools and appends pair", "[georef
   w.pickDestForTest( QgsPointXY( 100, 200 ) );
   REQUIRE_FALSE( w.hasPendingSourceForTest() );
   REQUIRE( w.gcpCountForTest() == 1 );
+
+  // Source must not collapse to (0,0) — regression for empty SRC column.
+  {
+    auto *table = w.findChild<QgsGCPListWidget *>( QStringLiteral( "rsGcpTable" ) );
+    REQUIRE( table != nullptr );
+    REQUIRE( table->model() != nullptr );
+    const double sx = table->model()->data( table->model()->index( 0, 2 ), Qt::EditRole ).toDouble();
+    const double sy = table->model()->data( table->model()->index( 0, 3 ), Qt::EditRole ).toDouble();
+    const double dx = table->model()->data( table->model()->index( 0, 4 ), Qt::EditRole ).toDouble();
+    const double dy = table->model()->data( table->model()->index( 0, 5 ), Qt::EditRole ).toDouble();
+    REQUIRE( sx == 10.0 );
+    REQUIRE( sy == 20.0 );
+    REQUIRE( dx == 100.0 );
+    REQUIRE( dy == 200.0 );
+  }
 
   // Second pair
   w.pickSourceForTest( QgsPointXY( 30, 40 ) );
