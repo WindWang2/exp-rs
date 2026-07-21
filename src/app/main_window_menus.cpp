@@ -573,8 +573,8 @@ void QgisDesktopWindow::setupToolbars()
                                  this, &QgisDesktopWindow::addVectorLayer ),
          tr( "添加矢量图层" ) );
 
-    // Map Tools Toolbar
-    QToolBar *mapToolsToolBar = addToolBar( tr( "地图工具" ) );
+    // Navigation + display toolbar (always visible under Ribbon)
+    QToolBar *mapToolsToolBar = addToolBar( tr( "导航与显示" ) );
     mapToolsToolBar->setObjectName( "mapToolsToolBar" );
     polishBar( mapToolsToolBar );
 
@@ -590,25 +590,42 @@ void QgisDesktopWindow::setupToolbars()
     tip( mapToolsToolBar->addAction( ic( "full_extent" ), tr( "全图" ),
                                      this, &QgisDesktopWindow::zoomFullExtent ),
          tr( "全图 (Ctrl+Shift+F)" ) );
+    tip( mapToolsToolBar->addAction( ic( "refresh_view" ), tr( "刷新" ),
+                                     this, &QgisDesktopWindow::refreshMap ),
+         tr( "刷新地图" ) );
     mapToolsToolBar->addSeparator();
     tip( mapToolsToolBar->addAction( ic( "identify" ), tr( "识别" ),
                                      this, &QgisDesktopWindow::identifyFeatures ),
          tr( "识别 (Ctrl+Shift+I)" ) );
-    mapToolsToolBar->addSeparator();
     tip( mapToolsToolBar->addAction( ic( "me_sure_dist" ), tr( "测距" ),
                                      this, &QgisDesktopWindow::measureDistance ),
          tr( "测距 (Ctrl+Shift+D)" ) );
     tip( mapToolsToolBar->addAction( ic( "me_sure_are_" ), tr( "测面" ),
                                      this, &QgisDesktopWindow::measureArea ),
          tr( "测面 (Ctrl+Shift+A)" ) );
-
-    // CRS Selector in toolbar
-    m_crsSelector = new QgsProjectionSelectionWidget(mapToolsToolBar);
-    m_crsSelector->setOptionVisible(QgsProjectionSelectionWidget::ProjectCrs, true);
-    connect(m_crsSelector, &QgsProjectionSelectionWidget::crsChanged,
-            this, &QgisDesktopWindow::onCrsChanged);
     mapToolsToolBar->addSeparator();
-    mapToolsToolBar->addWidget(m_crsSelector);
+    // Quick image display / stretch (common lab path)
+    tip( mapToolsToolBar->addAction( ic( "enh_nce" ), tr( "对比度拉伸" ),
+                                     this, &QgisDesktopWindow::openContrastStretchDialog ),
+         tr( "快速对比度拉伸（百分比裁剪 / 标准差等）" ) );
+    tip( mapToolsToolBar->addAction( ic( "histogr_eq" ), tr( "图像增强" ),
+                                     this, &QgisDesktopWindow::openImageEnhancementPanel ),
+         tr( "图像增强面板（直方图均衡等）" ) );
+    tip( mapToolsToolBar->addAction( ic( "dis_l_y" ), tr( "直方图拉伸" ),
+                                     this, [this]() {
+                                       if ( m_histogramStretchDock )
+                                       {
+                                         m_histogramStretchDock->show();
+                                         m_histogramStretchDock->raise();
+                                       }
+                                     } ),
+         tr( "打开直方图拉伸面板，交互调整显示对比度" ) );
+
+    // CRS picker lives on the status bar (compact product shell); create here for wiring.
+    m_crsSelector = new QgsProjectionSelectionWidget( this );
+    m_crsSelector->setOptionVisible( QgsProjectionSelectionWidget::ProjectCrs, true );
+    connect( m_crsSelector, &QgsProjectionSelectionWidget::crsChanged,
+             this, &QgisDesktopWindow::onCrsChanged );
 
     // Remote Sensing Toolbar — 分析快捷入口（与「分析」菜单对应）
     QToolBar *rsToolBar = addToolBar( tr( "遥感分析" ) );
@@ -727,7 +744,7 @@ void QgisDesktopWindow::setupStatusBar()
 {
     QStatusBar *bar = statusBar();
     bar->setObjectName("rsStatusBar");
-    bar->setFixedHeight(22);
+    bar->setFixedHeight(26);
 
     // Ready status (left side)
     m_readyLabel = new QLabel("Ready", bar);
@@ -744,10 +761,17 @@ void QgisDesktopWindow::setupStatusBar()
     m_scaleLabel->setObjectName("rsScaleLabel");
     bar->addPermanentWidget(m_scaleLabel);
 
-    // CRS display
+    // CRS picker (interactive) — keep label for readouts if needed
+    if ( m_crsSelector )
+    {
+        m_crsSelector->setParent( bar );
+        m_crsSelector->setMaximumWidth( 220 );
+        m_crsSelector->setMaximumHeight( 22 );
+        bar->addPermanentWidget( m_crsSelector );
+    }
     m_crsLabel = new QLabel("EPSG:3857", bar);
     m_crsLabel->setObjectName("rsCrsLabel");
-    bar->addPermanentWidget(m_crsLabel);
+    m_crsLabel->hide(); // selector supersedes plain label
 
     // Render time display
     m_renderTimeLabel = new QLabel("", bar);

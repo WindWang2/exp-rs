@@ -370,15 +370,13 @@ void QgisDesktopWindow::applyProductShellLayout()
         tb->hide();
     if ( QToolBar *tb = findChild<QToolBar *>( QStringLiteral( "fileToolBar" ) ) )
         tb->hide();
-    // Map navigation lives on Ribbon「视图」; rehome CRS picker to status bar.
+    // Keep compact 导航与显示 toolbar (pan/zoom + contrast stretch shortcuts).
     if ( QToolBar *tb = findChild<QToolBar *>( QStringLiteral( "mapToolsToolBar" ) ) )
-        tb->hide();
-    if ( m_crsSelector && statusBar() && m_crsSelector->parent() != statusBar() )
     {
-        m_crsSelector->setParent( statusBar() );
-        m_crsSelector->setMaximumWidth( 240 );
-        m_crsSelector->show();
-        statusBar()->addPermanentWidget( m_crsSelector );
+        tb->show();
+        // Sit directly under the ribbon host.
+        if ( QToolBar *ribbonHost = findChild<QToolBar *>( QStringLiteral( "rsRibbonHost" ) ) )
+            insertToolBarBreak( ribbonHost );
     }
 
     auto hideDock = []( QDockWidget *dock ) {
