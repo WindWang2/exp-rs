@@ -1,5 +1,6 @@
 // src/app/dialogs/spectral_index_dialog.cpp
 #include "spectral_index_dialog.h"
+#include "dialog_help_catalog.h"
 
 #include <raster/qgsrasterlayer.h>
 
@@ -36,6 +37,11 @@ void SpectralIndexDialog::setupUi()
     m_indexCombo->addItem(tr("NDWI"), QStringLiteral("NDWI"));
     m_indexCombo->addItem(tr("NDBI"), QStringLiteral("NDBI"));
     m_indexCombo->addItem(tr("MNDWI"), QStringLiteral("MNDWI"));
+    SicnuDialogHelp::tip( m_indexCombo, tr(
+      "光谱指数类型：\n"
+      "• NDVI：植被 (NIR,Red)\n• EVI：增强植被 (NIR,Red,Blue)\n"
+      "• SAVI：土壤调节植被 (NIR,Red)\n• NDWI：水体 (Green,NIR)\n"
+      "• NDBI：建成区 (SWIR,NIR)\n• MNDWI：改进水体 (Green,SWIR)" ) );
     connect(m_indexCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &SpectralIndexDialog::onIndexChanged);
     idxLayout->addWidget(m_indexCombo);
@@ -46,10 +52,12 @@ void SpectralIndexDialog::setupUi()
     m_nirLabel = new QLabel(tr("NIR:"), this);
     bandLayout->addWidget(m_nirLabel);
     m_nirCombo = new QComboBox(this);
+    SicnuDialogHelp::tip( m_nirCombo, tr( "近红外波段号（从 1 起）。Landsat8 常为 5，Sentinel-2 常为 8/8A。" ) );
     bandLayout->addWidget(m_nirCombo);
     m_redLabel = new QLabel(tr("Red:"), this);
     bandLayout->addWidget(m_redLabel);
     m_redCombo = new QComboBox(this);
+    SicnuDialogHelp::tip( m_redCombo, tr( "红光波段。用于 NDVI/EVI/SAVI。" ) );
     bandLayout->addWidget(m_redCombo);
     mainLayout->addLayout(bandLayout);
 
@@ -58,14 +66,17 @@ void SpectralIndexDialog::setupUi()
     m_greenLabel = new QLabel(tr("Green:"), this);
     bandLayout2->addWidget(m_greenLabel);
     m_greenCombo = new QComboBox(this);
+    SicnuDialogHelp::tip( m_greenCombo, tr( "绿光波段。用于 NDWI/MNDWI。" ) );
     bandLayout2->addWidget(m_greenCombo);
     m_blueLabel = new QLabel(tr("Blue:"), this);
     bandLayout2->addWidget(m_blueLabel);
     m_blueCombo = new QComboBox(this);
+    SicnuDialogHelp::tip( m_blueCombo, tr( "蓝光波段。仅 EVI 需要。" ) );
     bandLayout2->addWidget(m_blueCombo);
     m_swirLabel = new QLabel(tr("SWIR:"), this);
     bandLayout2->addWidget(m_swirLabel);
     m_swirCombo = new QComboBox(this);
+    SicnuDialogHelp::tip( m_swirCombo, tr( "短波红外。用于 NDBI/MNDWI。" ) );
     bandLayout2->addWidget(m_swirCombo);
     mainLayout->addLayout(bandLayout2);
 

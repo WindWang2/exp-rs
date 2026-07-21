@@ -33,14 +33,17 @@ void ComparisonDialog::setupUi()
     layerLayout->addWidget(new QLabel(tr("Left Layer:"), this));
     m_leftLayerCombo = new QComboBox(this);
     m_leftLayerCombo->setMinimumWidth(200);
+    SicnuDialogHelp::tip( m_leftLayerCombo, tr( "左侧对比栅格图层。" ) );
     layerLayout->addWidget(m_leftLayerCombo);
 
     layerLayout->addWidget(new QLabel(tr("Right Layer:"), this));
     m_rightLayerCombo = new QComboBox(this);
     m_rightLayerCombo->setMinimumWidth(200);
+    SicnuDialogHelp::tip( m_rightLayerCombo, tr( "右侧对比栅格图层。" ) );
     layerLayout->addWidget(m_rightLayerCombo);
 
     m_loadButton = new QPushButton(tr("Load"), this);
+    SicnuDialogHelp::tip( m_loadButton, tr( "加载两侧图层到对比视图。" ) );
     connect(m_loadButton, &QPushButton::clicked, this, &ComparisonDialog::onLoadLayers);
     layerLayout->addWidget(m_loadButton);
 

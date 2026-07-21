@@ -1,5 +1,6 @@
 // src/app/dialogs/band_math_dialog.cpp
 #include "band_math_dialog.h"
+#include "dialog_help_catalog.h"
 
 #include <raster/qgsrasterlayer.h>
 
@@ -18,6 +19,10 @@ void BandMathDialog::setupUi()
     exprLayout->addWidget(new QLabel(tr("Expression:"), this));
     m_expressionEdit = new QLineEdit(this);
     m_expressionEdit->setPlaceholderText(tr("e.g., (b1 - b2) / (b1 + b2)"));
+    SicnuDialogHelp::tip( m_expressionEdit, tr(
+      "波段运算表达式。波段写作 b1,b2…（从 1 起）。\n"
+      "示例：(b1-b2)/(b1+b2)；b1*0.0001\n"
+      "支持 + − * / 与括号。" ) );
     exprLayout->addWidget(m_expressionEdit);
     mainLayout->addLayout(exprLayout);
 

@@ -1,5 +1,6 @@
 // image_enhancement_panel.cpp — Unified Image Enhancement Panel
 #include "image_enhancement_panel.h"
+#include "dialog_help_catalog.h"
 #include "async_gdal_runner.h"
 #include "processing/algorithms/image_enhancement.h"
 #include "processing/algorithms/image_fusion.h"
@@ -55,6 +56,9 @@ void ImageEnhancementPanel::setupUi()
     m_methodCombo->addItem(tr("Spatial Filter"), 1);
     m_methodCombo->addItem(tr("Band Ratio / IHS"), 2);
     m_methodCombo->addItem(tr("Speckle Filter (SAR)"), 3);
+    SicnuDialogHelp::tip( m_methodCombo, tr(
+      "增强类型：对比度拉伸 / 空间滤波 / 波段比值·IHS / SAR 斑点滤波。"
+      "下方参数页随类型切换。" ) );
     methodLayout->addWidget(m_methodCombo);
     mainLayout->addLayout(methodLayout);
 
@@ -110,18 +114,22 @@ void ImageEnhancementPanel::setupStretchOptions(QVBoxLayout *layout)
     m_stretchTypeCombo->addItem(tr("Percentage Clip"), 1);
     m_stretchTypeCombo->addItem(tr("Standard Deviation"), 2);
     m_stretchTypeCombo->addItem(tr("Histogram Equalization"), 3);
+    SicnuDialogHelp::tip( m_stretchTypeCombo, tr(
+      "线性 / 百分比裁剪 / 标准差 / 直方图均衡。" ) );
     formLayout->addRow(tr("Type:"), m_stretchTypeCombo);
 
     m_clipPercentSpin = new QDoubleSpinBox();
     m_clipPercentSpin->setRange(0.1, 10.0);
     m_clipPercentSpin->setValue(2.0);
     m_clipPercentSpin->setSuffix("%");
+    SicnuDialogHelp::tip( m_clipPercentSpin, tr( "两端裁剪百分比。常用 1–2%。" ) );
     m_clipLabel = new QLabel(tr("Clip %:"));
     formLayout->addRow(m_clipLabel, m_clipPercentSpin);
 
     m_stddevMultSpin = new QDoubleSpinBox();
     m_stddevMultSpin->setRange(0.5, 5.0);
     m_stddevMultSpin->setValue(2.0);
+    SicnuDialogHelp::tip( m_stddevMultSpin, tr( "标准差倍数 K。常用 2。" ) );
     m_stddevLabel = new QLabel(tr("StdDev ×:"));
     formLayout->addRow(m_stddevLabel, m_stddevMultSpin);
 
@@ -150,6 +158,7 @@ void ImageEnhancementPanel::setupFilterOptions(QVBoxLayout *layout)
     m_filterTypeCombo->addItem(tr("Median"), 2);
     m_filterTypeCombo->addItem(tr("Sobel (Edge)"), 3);
     m_filterTypeCombo->addItem(tr("Laplacian (Edge)"), 4);
+    SicnuDialogHelp::tip( m_filterTypeCombo, tr( "平滑（均值/高斯/中值）或边缘（Sobel/Laplacian）。" ) );
     formLayout->addRow(tr("Filter:"), m_filterTypeCombo);
 
     m_kernelSizeCombo = new QComboBox();
@@ -157,17 +166,20 @@ void ImageEnhancementPanel::setupFilterOptions(QVBoxLayout *layout)
     m_kernelSizeCombo->addItem("5×5", 5);
     m_kernelSizeCombo->addItem("7×7", 7);
     m_kernelSizeCombo->addItem("9×9", 9);
+    SicnuDialogHelp::tip( m_kernelSizeCombo, tr( "卷积核大小。" ) );
     formLayout->addRow(tr("Kernel Size:"), m_kernelSizeCombo);
 
     m_sigmaSpin = new QDoubleSpinBox();
     m_sigmaSpin->setRange(0.1, 10.0);
     m_sigmaSpin->setValue(1.0);
     m_sigmaSpin->setPrefix("σ = ");
+    SicnuDialogHelp::tip( m_sigmaSpin, tr( "高斯滤波标准差 σ。" ) );
     m_sigmaLabel = new QLabel(tr("Sigma:"));
     formLayout->addRow(m_sigmaLabel, m_sigmaSpin);
 
     m_customKernelEdit = new QLineEdit();
     m_customKernelEdit->setPlaceholderText(tr("e.g., 0 -1 0 -1 5 -1 0 -1 0 (3x3 row-major)"));
+    SicnuDialogHelp::tip( m_customKernelEdit, tr( "自定义核：按行主序空格分隔系数。" ) );
     m_customKernelLabel = new QLabel(tr("Custom Kernel:"));
     formLayout->addRow(m_customKernelLabel, m_customKernelEdit);
 
@@ -194,10 +206,13 @@ void ImageEnhancementPanel::setupBandRatioOptions(QVBoxLayout *layout)
     m_ratioTypeCombo = new QComboBox();
     m_ratioTypeCombo->addItem(tr("Band Ratio"), 0);
     m_ratioTypeCombo->addItem(tr("IHS Transform"), 1);
+    SicnuDialogHelp::tip( m_ratioTypeCombo, tr( "波段比值或 IHS 变换。" ) );
     formLayout->addRow(tr("Type:"), m_ratioTypeCombo);
 
     m_band1Combo = new QComboBox();
     m_band2Combo = new QComboBox();
+    SicnuDialogHelp::tip( m_band1Combo, tr( "比值分子或 IHS 相关波段 1。" ) );
+    SicnuDialogHelp::tip( m_band2Combo, tr( "比值分母或 IHS 相关波段 2。" ) );
     m_band1Label = new QLabel(tr("Band 1:"));
     m_band2Label = new QLabel(tr("Band 2:"));
     formLayout->addRow(m_band1Label, m_band1Combo);
@@ -220,24 +235,28 @@ void ImageEnhancementPanel::setupSpeckleOptions(QVBoxLayout *layout)
     m_speckleTypeCombo->addItem(tr("Frost"), 1);
     m_speckleTypeCombo->addItem(tr("Kuan"), 2);
     m_speckleTypeCombo->addItem(tr("Gamma MAP"), 3);
+    SicnuDialogHelp::tip( m_speckleTypeCombo, tr( "SAR 斑点滤波：Lee/Frost/Kuan/Gamma-MAP。" ) );
     formLayout->addRow(tr("Filter:"), m_speckleTypeCombo);
 
     m_speckleKernelCombo = new QComboBox();
     m_speckleKernelCombo->addItem("3×3", 3);
     m_speckleKernelCombo->addItem("5×5", 5);
     m_speckleKernelCombo->addItem("7×7", 7);
+    SicnuDialogHelp::tip( m_speckleKernelCombo, tr( "滤波窗口大小。" ) );
     formLayout->addRow(tr("Kernel Size:"), m_speckleKernelCombo);
 
     m_noiseVarSpin = new QDoubleSpinBox();
     m_noiseVarSpin->setRange(0.001, 1.0);
     m_noiseVarSpin->setValue(0.1);
     m_noiseVarSpin->setDecimals(4);
+    SicnuDialogHelp::tip( m_noiseVarSpin, tr( "噪声方差（非 Frost）。" ) );
     m_noiseVarLabel = new QLabel(tr("Noise Variance:"));
     formLayout->addRow(m_noiseVarLabel, m_noiseVarSpin);
 
     m_dampingSpin = new QDoubleSpinBox();
     m_dampingSpin->setRange(0.1, 10.0);
     m_dampingSpin->setValue(1.0);
+    SicnuDialogHelp::tip( m_dampingSpin, tr( "Frost 阻尼因子。" ) );
     m_dampingLabel = new QLabel(tr("Damping (Frost):"));
     formLayout->addRow(m_dampingLabel, m_dampingSpin);
 

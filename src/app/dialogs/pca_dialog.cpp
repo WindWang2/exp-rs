@@ -1,5 +1,6 @@
 // src/app/dialogs/pca_dialog.cpp
 #include "pca_dialog.h"
+#include "dialog_help_catalog.h"
 
 #include <raster/qgsrasterlayer.h>
 
@@ -26,6 +27,9 @@ auto *compLayout = new QHBoxLayout();
     m_componentsSpin = new QSpinBox(this);
     m_componentsSpin->setRange(1, 10);
     m_componentsSpin->setValue(3);
+    SicnuDialogHelp::tip( m_componentsSpin, tr(
+      "输出主成分个数，必须 ≤ 输入波段数。"
+      "前几个 PC 通常含大部分方差，用于去相关与降维。" ) );
     compLayout->addWidget(m_componentsSpin);
     mainLayout->addLayout(compLayout);
 

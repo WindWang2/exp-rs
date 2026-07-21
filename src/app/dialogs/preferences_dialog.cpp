@@ -60,6 +60,7 @@ void PreferencesDialog::setupGeneralTab()
     m_themeCombo = new QComboBox(tab);
     m_themeCombo->addItem(tr("Light"), "light");
     m_themeCombo->addItem(tr("Dark"), "dark");
+    SicnuDialogHelp::tip( m_themeCombo, tr( "界面主题：浅色或深色。" ) );
     layout->addRow(tr("Theme:"), m_themeCombo);
 
     m_crsCombo = new QComboBox(tab);
@@ -69,6 +70,7 @@ void PreferencesDialog::setupGeneralTab()
     m_crsCombo->addItem("EPSG:32650 - UTM Zone 50N", "EPSG:32650");
     m_crsCombo->addItem("EPSG:32651 - UTM Zone 51N", "EPSG:32651");
     m_crsCombo->setEditable(true);
+    SicnuDialogHelp::tip( m_crsCombo, tr( "新建工程时的默认坐标系。" ) );
     layout->addRow(tr("Default CRS:"), m_crsCombo);
 
     // Logging section
@@ -76,11 +78,13 @@ void PreferencesDialog::setupGeneralTab()
     layout->addRow(logLabel);
 
     m_logToFileCheck = new QCheckBox(tr("Enable log to file"), tab);
+    SicnuDialogHelp::tip( m_logToFileCheck, tr( "是否将日志写入文件。" ) );
     layout->addRow(m_logToFileCheck);
 
     auto *logPathLayout = new QHBoxLayout();
     m_logFilePathEdit = new QLineEdit(tab);
     m_logFilePathEdit->setPlaceholderText(tr("Log file path"));
+    SicnuDialogHelp::tip( m_logFilePathEdit, tr( "日志文件完整路径。" ) );
     logPathLayout->addWidget(m_logFilePathEdit);
     auto *logBrowseBtn = new QPushButton(tr("Browse..."), tab);
     connect(logBrowseBtn, &QPushButton::clicked, this, &PreferencesDialog::onBrowseLogPath);
@@ -101,6 +105,7 @@ void PreferencesDialog::setupToolsTab()
     auto *gdalLayout = new QHBoxLayout();
     m_gdalPathEdit = new QLineEdit(tab);
     m_gdalPathEdit->setPlaceholderText(tr("Path to GDAL tools directory"));
+    SicnuDialogHelp::tip( m_gdalPathEdit, tr( "GDAL 工具目录（gdal_translate 等所在路径）。" ) );
     gdalLayout->addWidget(m_gdalPathEdit);
     auto *gdalBrowseBtn = new QPushButton(tr("Browse..."), tab);
     connect(gdalBrowseBtn, &QPushButton::clicked, this, &PreferencesDialog::onBrowseGdalPath);
@@ -110,6 +115,7 @@ void PreferencesDialog::setupToolsTab()
     auto *otbLayout = new QHBoxLayout();
     m_otbPathEdit = new QLineEdit(tab);
     m_otbPathEdit->setPlaceholderText(tr("Path to OTB tools directory"));
+    SicnuDialogHelp::tip( m_otbPathEdit, tr( "OTB 工具目录，供 OTB 包装算法调用。" ) );
     otbLayout->addWidget(m_otbPathEdit);
     auto *otbBrowseBtn = new QPushButton(tr("Browse..."), tab);
     connect(otbBrowseBtn, &QPushButton::clicked, this, &PreferencesDialog::onBrowseOtbPath);

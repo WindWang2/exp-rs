@@ -1,5 +1,6 @@
 // src/app/dialogs/contrast_stretch_dialog.cpp
 #include "contrast_stretch_dialog.h"
+#include "dialog_help_catalog.h"
 #include "async_gdal_runner.h"
 #include "processing/algorithms/image_enhancement.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -34,6 +35,12 @@ void ContrastStretchDialog::setupUi()
     m_methodCombo = new QComboBox(this);
     m_methodCombo->addItems({tr("Linear"), tr("Percentage Clip"),
                              tr("Std Dev"), tr("Histogram Equalization")});
+    SicnuDialogHelp::tip( m_methodCombo, tr(
+      "拉伸方法：\n"
+      "• Linear：最小–最大线性\n"
+      "• Percentage Clip：两端裁剪后再拉伸（抑制极端值）\n"
+      "• Std Dev：均值±K×标准差\n"
+      "• Histogram Equalization：直方图均衡" ) );
     connect(m_methodCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &ContrastStretchDialog::onMethodChanged);
     methodLayout->addWidget(m_methodCombo);
@@ -49,6 +56,7 @@ void ContrastStretchDialog::setupUi()
     m_clipSpin->setSingleStep(0.5);
     m_clipSpin->setDecimals(1);
     m_clipSpin->setSuffix("%");
+    SicnuDialogHelp::tip( m_clipSpin, tr( "百分比裁剪：两端各舍弃该比例的像元后再拉伸。常用 1–2%。" ) );
     clipLayout->addWidget(m_clipSpin);
     mainLayout->addLayout(clipLayout);
 
@@ -61,6 +69,7 @@ void ContrastStretchDialog::setupUi()
     m_stddevSpin->setValue(2.0);
     m_stddevSpin->setSingleStep(0.5);
     m_stddevSpin->setDecimals(1);
+    SicnuDialogHelp::tip( m_stddevSpin, tr( "标准差倍数 K：拉伸到 mean±K·σ。常用 2。" ) );
     stddevLayout->addWidget(m_stddevSpin);
     mainLayout->addLayout(stddevLayout);
 

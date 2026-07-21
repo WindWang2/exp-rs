@@ -42,6 +42,10 @@ void StacBrowserDialog::setupUi()
     m_datetimeEdit = new QLineEdit;
     m_bboxEdit = new QLineEdit;
     m_bboxEdit->setPlaceholderText(tr("min_lon,min_lat,max_lon,max_lat"));
+    SicnuDialogHelp::tip( m_endpointEdit, tr( "STAC API 根 URL，例如 Element84 Earth Search。" ) );
+    SicnuDialogHelp::tip( m_collectionEdit, tr( "集合 ID，如 sentinel-2-l2a。" ) );
+    SicnuDialogHelp::tip( m_datetimeEdit, tr( "时间过滤（ISO 时刻或区间，视目录支持）。" ) );
+    SicnuDialogHelp::tip( m_bboxEdit, tr( "空间范围：min_lon,min_lat,max_lon,max_lat。" ) );
 
     formLayout->addRow(tr("STAC Endpoint:"), m_endpointEdit);
     formLayout->addRow(tr("Collection:"), m_collectionEdit);
@@ -50,6 +54,7 @@ void StacBrowserDialog::setupUi()
     mainLayout->addLayout(formLayout);
 
     m_searchButton = new QPushButton(tr("Search"));
+    SicnuDialogHelp::tip( m_searchButton, tr( "按条件检索 STAC 要素。" ) );
     connect(m_searchButton, &QPushButton::clicked, this, &StacBrowserDialog::searchCatalog);
     mainLayout->addWidget(m_searchButton);
 
@@ -59,10 +64,12 @@ void StacBrowserDialog::setupUi()
     m_resultsTable->horizontalHeader()->setStretchLastSection(true);
     m_resultsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_resultsTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    SicnuDialogHelp::tip( m_resultsTable, tr( "检索结果。选中一行后可加载资产。" ) );
     mainLayout->addWidget(m_resultsTable);
 
     m_loadButton = new QPushButton(tr("Load Selected Asset"));
     m_loadButton->setEnabled(false);
+    SicnuDialogHelp::tip( m_loadButton, tr( "将选中项资产加载到当前工程（需网络）。" ) );
     connect(m_loadButton, &QPushButton::clicked, this, &StacBrowserDialog::loadSelectedAsset);
     mainLayout->addWidget(m_loadButton);
 

@@ -1,5 +1,6 @@
 // fusion_dialog.cpp — Phase 11.1
 #include "fusion_dialog.h"
+#include "dialog_help_catalog.h"
 #include "dialog_utils.h"
 
 #include "processing/tools/tool_path_manager.h"
@@ -38,9 +39,11 @@ FusionDialog::FusionDialog( QWidget *parent )
     auto *inputLayout = new QFormLayout( inputGroup );
 
     mPanCombo = new QComboBox;
+    SicnuDialogHelp::tip( mPanCombo, tr( "全色高分辨率单波段。须与多光谱大致同范围并已配准。" ) );
     inputLayout->addRow( tr( "Panchromatic (high-res):" ), mPanCombo );
 
     mMsCombo = new QComboBox;
+    SicnuDialogHelp::tip( mMsCombo, tr( "多光谱低分辨率影像。融合后空间分辨率接近全色。" ) );
     inputLayout->addRow( tr( "Multispectral (low-res):" ), mMsCombo );
 
     mMethodCombo = new QComboBox;
@@ -50,6 +53,9 @@ FusionDialog::FusionDialog( QWidget *parent )
     mMethodCombo->addItem( tr( "PCA Fusion" ), "pca" );
     mMethodCombo->addItem( tr( "OTB BundleToPerfectSensor" ), "otb_btps" );
     mMethodCombo->addItem( tr( "GDAL Pansharpen" ), "gdal_pansharp" );
+    SicnuDialogHelp::tip( mMethodCombo, tr(
+      "融合方法：Linear（可调权重）/ Brovey / IHS（需 RGB 波段）/ PCA；"
+      "或调用 OTB/GDAL 外部 pansharpen。" ) );
     inputLayout->addRow( tr( "Method:" ), mMethodCombo );
 
     // Pan weight for linear fusion
@@ -59,6 +65,7 @@ FusionDialog::FusionDialog( QWidget *parent )
     mWeightSpin->setValue( 0.5 );
     mWeightSpin->setSingleStep( 0.1 );
     mWeightSpin->setDecimals( 2 );
+    SicnuDialogHelp::tip( mWeightSpin, tr( "线性融合中全色占比 0–1。越大空间细节越强，光谱可能更偏。" ) );
     inputLayout->addRow( mWeightLabel, mWeightSpin );
 
     // Per-band weights container (populated when layer is selected)
@@ -92,6 +99,9 @@ FusionDialog::FusionDialog( QWidget *parent )
     mRedCombo = new QComboBox;
     mGreenCombo = new QComboBox;
     mBlueCombo = new QComboBox;
+    SicnuDialogHelp::tip( mRedCombo, tr( "IHS 融合：多光谱红波段。" ) );
+    SicnuDialogHelp::tip( mGreenCombo, tr( "IHS 融合：多光谱绿波段。" ) );
+    SicnuDialogHelp::tip( mBlueCombo, tr( "IHS 融合：多光谱蓝波段。" ) );
     mRedLabel = new QLabel( tr( "Red Band:" ) );
     mGreenLabel = new QLabel( tr( "Green Band:" ) );
     mBlueLabel = new QLabel( tr( "Blue Band:" ) );

@@ -1,5 +1,6 @@
 // src/app/dialogs/spatial_filter_dialog.cpp
 #include "spatial_filter_dialog.h"
+#include "dialog_help_catalog.h"
 
 #include <raster/qgsrasterlayer.h>
 
@@ -28,6 +29,10 @@ auto *typeLayout = new QHBoxLayout();
     m_filterTypeCombo->addItem(tr("Median"), QStringLiteral("opencv:median_blur"));
     m_filterTypeCombo->addItem(tr("Sobel"), QStringLiteral("opencv:sobel"));
     m_filterTypeCombo->addItem(tr("Laplacian"), QStringLiteral("opencv:laplacian"));
+    SicnuDialogHelp::tip( m_filterTypeCombo, tr(
+      "• Mean/Gaussian/Median：平滑\n"
+      "• Sobel/Laplacian：边缘增强\n"
+      "中值滤波对椒盐噪声更稳。" ) );
     typeLayout->addWidget(m_filterTypeCombo);
     mainLayout->addLayout(typeLayout);
 
@@ -36,6 +41,7 @@ auto *typeLayout = new QHBoxLayout();
     m_kernelSizeCombo = new QComboBox(this);
     m_kernelSizeCombo->addItem(tr("3x3"), 3);
     m_kernelSizeCombo->addItem(tr("5x5"), 5);
+    SicnuDialogHelp::tip( m_kernelSizeCombo, tr( "卷积核大小。越大平滑/边缘响应范围越大。" ) );
     kernelLayout->addWidget(m_kernelSizeCombo);
     mainLayout->addLayout(kernelLayout);
 

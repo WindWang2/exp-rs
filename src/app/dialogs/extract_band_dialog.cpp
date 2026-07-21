@@ -1,5 +1,6 @@
 // extract_band_dialog.cpp — Extract single band from multi-band raster
 #include "extract_band_dialog.h"
+#include "dialog_help_catalog.h"
 #include "dialog_utils.h"
 #include "async_gdal_runner.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -44,11 +45,11 @@ void ExtractBandDialog::setupUi()
     auto *inputLayout = new QFormLayout(inputGroup);
 
     m_layerCombo = new QComboBox;
-    m_layerCombo->setToolTip(tr("Select a multi-band raster layer"));
+    SicnuDialogHelp::tip( m_layerCombo, tr( "工程中的多波段栅格图层（波段数>1）。" ) );
     inputLayout->addRow(tr("Raster Layer:"), m_layerCombo);
 
     m_bandCombo = new QComboBox;
-    m_bandCombo->setToolTip(tr("Select the band to extract"));
+    SicnuDialogHelp::tip( m_bandCombo, tr( "要单独导出的波段号/名称。" ) );
     inputLayout->addRow(tr("Band:"), m_bandCombo);
 
     mainLayout->addWidget(inputGroup);

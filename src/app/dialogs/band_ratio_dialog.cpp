@@ -1,5 +1,6 @@
 // src/app/dialogs/band_ratio_dialog.cpp
 #include "band_ratio_dialog.h"
+#include "dialog_help_catalog.h"
 #include "async_gdal_runner.h"
 #include "processing/algorithms/image_enhancement.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -32,6 +33,9 @@ void BandRatioDialog::setupUi()
     modeLayout->addWidget(new QLabel(tr("Mode:"), this));
     m_modeCombo = new QComboBox(this);
     m_modeCombo->addItems({tr("Band Ratio"), tr("IHS Transform")});
+    SicnuDialogHelp::tip( m_modeCombo, tr(
+      "• Band Ratio：分子波段÷分母波段，突出光谱差异\n"
+      "• IHS：RGB→强度/色调/饱和度空间" ) );
     connect(m_modeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &BandRatioDialog::onModeChanged);
     modeLayout->addWidget(m_modeCombo);
@@ -42,10 +46,12 @@ void BandRatioDialog::setupUi()
     m_band1Label = new QLabel(tr("Numerator:"), this);
     ratioLayout->addWidget(m_band1Label);
     m_band1Combo = new QComboBox(this);
+    SicnuDialogHelp::tip( m_band1Combo, tr( "比值分子波段。" ) );
     ratioLayout->addWidget(m_band1Combo);
     m_band2Label = new QLabel(tr("Denominator:"), this);
     ratioLayout->addWidget(m_band2Label);
     m_band2Combo = new QComboBox(this);
+    SicnuDialogHelp::tip( m_band2Combo, tr( "比值分母波段（勿为 0 或全零）。" ) );
     ratioLayout->addWidget(m_band2Combo);
     mainLayout->addLayout(ratioLayout);
 
@@ -54,14 +60,17 @@ void BandRatioDialog::setupUi()
     m_redLabel = new QLabel(tr("R:"), this);
     ihsLayout->addWidget(m_redLabel);
     m_redCombo = new QComboBox(this);
+    SicnuDialogHelp::tip( m_redCombo, tr( "IHS 输入红色波段。" ) );
     ihsLayout->addWidget(m_redCombo);
     m_greenLabel = new QLabel(tr("G:"), this);
     ihsLayout->addWidget(m_greenLabel);
     m_greenCombo = new QComboBox(this);
+    SicnuDialogHelp::tip( m_greenCombo, tr( "IHS 输入绿色波段。" ) );
     ihsLayout->addWidget(m_greenCombo);
     m_blueLabel = new QLabel(tr("B:"), this);
     ihsLayout->addWidget(m_blueLabel);
     m_blueCombo = new QComboBox(this);
+    SicnuDialogHelp::tip( m_blueCombo, tr( "IHS 输入蓝色波段。" ) );
     ihsLayout->addWidget(m_blueCombo);
     mainLayout->addLayout(ihsLayout);
 

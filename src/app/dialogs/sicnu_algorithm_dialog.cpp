@@ -414,7 +414,15 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
     }
 
     QLabel *label = new QLabel( param->description() + QStringLiteral( ":" ) );
-    label->setToolTip( param->toolTip() );
+    const QString paramTip = param->toolTip().isEmpty()
+                               ? param->description()
+                               : param->toolTip();
+    label->setToolTip( paramTip );
+    label->setWhatsThis( paramTip );
+    label->setStatusTip( paramTip );
+    widget->setToolTip( paramTip );
+    widget->setWhatsThis( paramTip );
+    widget->setStatusTip( paramTip );
 
     widget->setMinimumWidth( 320 );
     widget->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );

@@ -3,6 +3,7 @@
 #include "rs_accuracy_panel.h"
 
 #include "core/sicnu_logging.h"
+#include "dialogs/dialog_help_catalog.h"
 
 #include <QColor>
 #include <QFile>
@@ -33,12 +34,17 @@ RsAccuracyPanel::RsAccuracyPanel( QWidget *parent )
   layout->setContentsMargins( 0, 0, 0, 0 );
   layout->setSpacing( 6 );
 
+  SicnuDialogHelp::tip( this, SicnuDialogHelp::shortForTool(
+                         QStringLiteral( "accuracy" ), tr( "精度评价" ) ) );
+
   mEmptyHint = new QLabel(
     tr( "完成全图分类（含验证/holdout 精度）后在此显示 OA、Kappa 与混淆矩阵。" ),
     this );
   mEmptyHint->setObjectName( QStringLiteral( "rsAccuracyEmptyHint" ) );
   mEmptyHint->setWordWrap( true );
   mEmptyHint->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+  SicnuDialogHelp::tip( mEmptyHint, tr(
+    "总体精度 OA、Kappa、混淆矩阵（行=真实，列=预测）、制图/用户精度与 F1。" ) );
   layout->addWidget( mEmptyHint );
 
   mHeaderLabel = new QLabel( this );
@@ -59,6 +65,8 @@ RsAccuracyPanel::RsAccuracyPanel( QWidget *parent )
   mConfusion->horizontalHeader()->setSectionResizeMode( QHeaderView::Stretch );
   mConfusion->verticalHeader()->setSectionResizeMode( QHeaderView::Stretch );
   mConfusion->setMinimumHeight( 120 );
+  SicnuDialogHelp::tip( mConfusion, tr(
+    "混淆矩阵：行=真实类别，列=预测类别。对角线上为正确分类样本数。" ) );
   layout->addWidget( mConfusion, 2 );
 
   auto *pmTitle = new QLabel( tr( "分类别指标" ), this );
@@ -73,11 +81,14 @@ RsAccuracyPanel::RsAccuracyPanel( QWidget *parent )
   mPerClass->horizontalHeader()->setSectionResizeMode( QHeaderView::Stretch );
   mPerClass->verticalHeader()->setVisible( false );
   mPerClass->setMinimumHeight( 80 );
+  SicnuDialogHelp::tip( mPerClass, tr(
+    "制图精度≈召回率；用户精度≈精确率；F1 为二者调和平均。" ) );
   layout->addWidget( mPerClass, 1 );
 
   mExportBtn = new QPushButton( tr( "导出 CSV…" ), this );
   mExportBtn->setObjectName( QStringLiteral( "rsAccuracyExportCsv" ) );
   mExportBtn->setEnabled( false );
+  SicnuDialogHelp::tip( mExportBtn, tr( "将精度表导出为 CSV 报告。" ) );
   connect( mExportBtn, &QPushButton::clicked, this, &RsAccuracyPanel::exportCsv );
   layout->addWidget( mExportBtn );
 }

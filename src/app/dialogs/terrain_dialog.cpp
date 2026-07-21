@@ -1,5 +1,6 @@
 // terrain_dialog.cpp — Phase 11.2
 #include "terrain_dialog.h"
+#include "dialog_help_catalog.h"
 #include "dialog_utils.h"
 
 #include <qgsrasterlayer.h>
@@ -36,6 +37,7 @@ void TerrainDialog::setupUi()
     auto *inputLayout = new QFormLayout( inputGroup );
 
     mLayerCombo = new QComboBox;
+    SicnuDialogHelp::tip( mLayerCombo, tr( "DEM 高程栅格图层。米制投影下坡度/阴影更可靠。" ) );
     inputLayout->addRow( tr( "DEM Layer:" ), mLayerCombo );
 
     mAnalysisCombo = new QComboBox;
@@ -45,6 +47,10 @@ void TerrainDialog::setupUi()
     mAnalysisCombo->addItem( tr( "Roughness (max-min)" ), "roughness" );
     mAnalysisCombo->addItem( tr( "TRI (Terrain Ruggedness)" ), "tri" );
     mAnalysisCombo->addItem( tr( "TPI (Topographic Position)" ), "tpi" );
+    SicnuDialogHelp::tip( mAnalysisCombo, tr(
+      "• Slope/Aspect：坡度(°)/坡向(°)\n"
+      "• Hillshade：山体阴影（用下方太阳参数）\n"
+      "• Roughness/TRI/TPI：粗糙度与地形位置" ) );
     inputLayout->addRow( tr( "Analysis:" ), mAnalysisCombo );
 
     mainLayout->addWidget( inputGroup );
@@ -56,21 +62,21 @@ void TerrainDialog::setupUi()
     mCellSizeSpin = new QDoubleSpinBox;
     mCellSizeSpin->setRange( 0.001, 10000.0 );
     mCellSizeSpin->setValue( 1.0 );
-    mCellSizeSpin->setToolTip( tr( "Cell size in map units (auto-detected from raster)" ) );
+    SicnuDialogHelp::tip( mCellSizeSpin, tr( "像元大小（地图单位）。选图层后常自动估算。" ) );
     paramLayout->addRow( tr( "Cell Size:" ), mCellSizeSpin );
 
     mSunAzimuthSpin = new QDoubleSpinBox;
     mSunAzimuthSpin->setRange( 0, 360 );
     mSunAzimuthSpin->setValue( 315.0 );
     mSunAzimuthSpin->setSuffix( "°" );
-    mSunAzimuthSpin->setToolTip( tr( "Sun direction clockwise from north" ) );
+    SicnuDialogHelp::tip( mSunAzimuthSpin, tr( "太阳方位角：自北顺时针 0–360°。仅 Hillshade。" ) );
     paramLayout->addRow( tr( "Sun Azimuth:" ), mSunAzimuthSpin );
 
     mSunElevationSpin = new QDoubleSpinBox;
     mSunElevationSpin->setRange( 0, 90 );
     mSunElevationSpin->setValue( 45.0 );
     mSunElevationSpin->setSuffix( "°" );
-    mSunElevationSpin->setToolTip( tr( "Sun altitude above horizon" ) );
+    SicnuDialogHelp::tip( mSunElevationSpin, tr( "太阳高度角：地平线以上 0–90°。仅 Hillshade。" ) );
     paramLayout->addRow( tr( "Sun Elevation:" ), mSunElevationSpin );
 
     mainLayout->addWidget( paramGroup );

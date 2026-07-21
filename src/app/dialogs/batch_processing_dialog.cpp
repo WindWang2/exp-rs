@@ -44,6 +44,8 @@ void BatchProcessingDialog::setupUi()
     algLayout->addWidget(new QLabel(tr("Algorithm:"), this));
     m_algorithmCombo = new QComboBox(this);
     m_algorithmCombo->setMinimumWidth(300);
+    SicnuDialogHelp::tip( m_algorithmCombo, tr(
+      "选择要批量运行的处理算法。建议先在工具箱对单文件验证参数。" ) );
     connect(m_algorithmCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &BatchProcessingDialog::onAlgorithmChanged);
     algLayout->addWidget(m_algorithmCombo);
@@ -62,10 +64,12 @@ void BatchProcessingDialog::setupUi()
 
     auto *fileButtonLayout = new QHBoxLayout();
     auto *addFilesBtn = new QPushButton(tr("Add Files..."), this);
+    SicnuDialogHelp::tip( addFilesBtn, tr( "添加待批量处理的输入文件。" ) );
     connect(addFilesBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onAddFiles);
     fileButtonLayout->addWidget(addFilesBtn);
 
     auto *removeBtn = new QPushButton(tr("Remove Selected"), this);
+    SicnuDialogHelp::tip( removeBtn, tr( "从列表移除选中文件。" ) );
     connect(removeBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onRemoveSelected);
     fileButtonLayout->addWidget(removeBtn);
     fileButtonLayout->addStretch();
@@ -73,14 +77,17 @@ void BatchProcessingDialog::setupUi()
 
     m_fileList = new QListWidget(this);
     m_fileList->setSelectionMode(QListWidget::ExtendedSelection);
+    SicnuDialogHelp::tip( m_fileList, tr( "待处理文件列表。可多选后移除。" ) );
     mainLayout->addWidget(m_fileList);
 
     // Output directory
     auto *outLayout = new QHBoxLayout();
     outLayout->addWidget(new QLabel(tr("Output Directory:"), this));
     m_outputDirEdit = new QLineEdit(this);
+    SicnuDialogHelp::tip( m_outputDirEdit, tr( "所有结果写入此目录，文件名由输入派生。" ) );
     outLayout->addWidget(m_outputDirEdit);
     auto *browseBtn = new QPushButton(tr("Browse..."), this);
+    SicnuDialogHelp::tip( browseBtn, tr( "选择输出目录。" ) );
     connect(browseBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onBrowseOutputDir);
     outLayout->addWidget(browseBtn);
     mainLayout->addLayout(outLayout);
@@ -97,6 +104,7 @@ void BatchProcessingDialog::setupUi()
     auto *btnLayout = new QHBoxLayout();
     btnLayout->addStretch();
     m_runButton = new QPushButton(tr("Run Batch"), this);
+    SicnuDialogHelp::tip( m_runButton, tr( "按列表顺序运行算法。运行中请勿关闭对话框。" ) );
     connect(m_runButton, &QPushButton::clicked, this, &BatchProcessingDialog::onRun);
     btnLayout->addWidget(m_runButton);
     auto *closeBtn = new QPushButton(tr("Close"), this);

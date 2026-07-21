@@ -153,19 +153,29 @@ void QgisDesktopWindow::setupMenu()
 
     // Processing Menu
     QMenu *processingMenu = menuBar()->addMenu(tr("&Processing"));
-    processingMenu->addAction(tr("Toolbox"), this, &QgisDesktopWindow::showProcessingToolbox);
+    processingMenu->setToolTipsVisible(true);
+    tip(processingMenu->addAction(tr("Toolbox"), this, &QgisDesktopWindow::showProcessingToolbox),
+        tr("打开处理工具箱：浏览 GDAL/OTB/内置算法，每个参数有说明与（CLI）命令预览。"));
     processingMenu->addSeparator();
-    processingMenu->addAction(tr("History"), this, &QgisDesktopWindow::showProcessingHistory);
+    tip(processingMenu->addAction(tr("History"), this, &QgisDesktopWindow::showProcessingHistory),
+        tr("查看已运行处理算法的历史记录。"));
     processingMenu->addSeparator();
-    processingMenu->addAction(tr("Batch Processing..."), this, &QgisDesktopWindow::openBatchProcessingDialog);
+    tip(processingMenu->addAction(tr("Batch Processing..."), this, &QgisDesktopWindow::openBatchProcessingDialog),
+        tr("同一算法批量处理多个输入文件。"));
 
     // Raster Menu
     QMenu *rasterMenu = menuBar()->addMenu(tr("&Raster"));
-    rasterMenu->addAction(QIcon(":/icons/r_ster_calc"), tr("Image Enhancement..."), this, &QgisDesktopWindow::openImageEnhancementPanel);
-    rasterMenu->addAction(QIcon(":/icons/b_nd_m_th"), tr("Band Math..."), this, &QgisDesktopWindow::openBandMathDialog);
-    rasterMenu->addAction(QIcon(":/icons/at_os_corr"), tr("Atmospheric Correction..."), this, &QgisDesktopWindow::openAtmosphericCorrectionDialog);
-    rasterMenu->addAction(QIcon(":/icons/veget_tion_index"), tr("Vegetation Index..."), this, &QgisDesktopWindow::openSpectralIndexDialog);
-    rasterMenu->addAction(QIcon(":/icons/mos_ic"), tr("Mosaic..."), this, &QgisDesktopWindow::openMosaicDialog);
+    rasterMenu->setToolTipsVisible(true);
+    tip(rasterMenu->addAction(QIcon(":/icons/r_ster_calc"), tr("Image Enhancement..."), this, &QgisDesktopWindow::openImageEnhancementPanel),
+        tr("影像增强综合：对比度拉伸、空间滤波、波段比值/IHS、SAR 斑点滤波。"));
+    tip(rasterMenu->addAction(QIcon(":/icons/b_nd_m_th"), tr("Band Math..."), this, &QgisDesktopWindow::openBandMathDialog),
+        tr("波段运算：表达式如 (b1-b2)/(b1+b2)。"));
+    tip(rasterMenu->addAction(QIcon(":/icons/at_os_corr"), tr("Atmospheric Correction..."), this, &QgisDesktopWindow::openAtmosphericCorrectionDialog),
+        tr("大气校正：DN→辐射、DOS1/DOS2。"));
+    tip(rasterMenu->addAction(QIcon(":/icons/veget_tion_index"), tr("Vegetation Index..."), this, &QgisDesktopWindow::openSpectralIndexDialog),
+        tr("光谱指数：NDVI/EVI/SAVI/NDWI/NDBI/MNDWI。"));
+    tip(rasterMenu->addAction(QIcon(":/icons/mos_ic"), tr("Mosaic..."), this, &QgisDesktopWindow::openMosaicDialog),
+        tr("多景栅格镶嵌为连续影像。"));
     rasterMenu->addSeparator();
     QMenu *regMenu = rasterMenu->addMenu(tr("Image Registration"));
     regMenu->setObjectName(QStringLiteral("mImageRegistrationMenu"));
@@ -174,25 +184,27 @@ void QgisDesktopWindow::setupMenu()
     auto *i2iAct = regMenu->addAction(QIcon(QStringLiteral(":/icons/r_ster_calc")),
                        tr("Image 2 Image"),
                        this, &QgisDesktopWindow::openGeorefImageToImage);
-    i2iAct->setToolTip(tr(
+    tip(i2iAct, tr(
         "Image 2 Image：水平双画布 SRC|REF，同名点配准，支持 SIFT 自动匹配。"
-        "不含 RPC。"));
-    i2iAct->setStatusTip(i2iAct->toolTip());
+        "右侧校正参数有详细说明。不含 RPC。"));
     auto *i2mAct = regMenu->addAction(QIcon(QStringLiteral(":/icons/r_ster_calc")),
                        tr("Image 2 Map"),
                        this, &QgisDesktopWindow::openGeorefImageToMap);
-    i2mAct->setToolTip(tr(
+    tip(i2mAct, tr(
         "Image 2 Map：源影像 + 主工程地图预览取点，变换方法含 RPC Physical。"));
-    i2mAct->setStatusTip(i2mAct->toolTip());
-    rasterMenu->addAction(tr("Change Detection..."), this, &QgisDesktopWindow::openChangeDetectionDialog);
+    tip(rasterMenu->addAction(tr("Change Detection..."), this, &QgisDesktopWindow::openChangeDetectionDialog),
+        tr("双时相变化检测：差值/归一化差值/变化掩膜。"));
     // Phase 10A Task 10.2 — Classification submenu (Pixel-based + OBIA placeholder).
     auto *classifyMenu = rasterMenu->addMenu(tr("Classification"));
+    classifyMenu->setToolTipsVisible(true);
 #ifdef SICNU_HAS_CLASSIFY
-    classifyMenu->addAction(tr("Supervised Classification (Pixel-based)..."),
-                            this, &QgisDesktopWindow::openClassificationWindow);
+    tip(classifyMenu->addAction(tr("Supervised Classification (Pixel-based)..."),
+                            this, &QgisDesktopWindow::openClassificationWindow),
+        tr("像元级监督分类：ROI 采样、算法与波段设置、精度评价。"));
 #ifdef SICNU_HAS_OBIA
-    classifyMenu->addAction(tr("Object-based Classification (OBIA)..."),
-                            this, &QgisDesktopWindow::openObiaWindow);
+    tip(classifyMenu->addAction(tr("Object-based Classification (OBIA)..."),
+                            this, &QgisDesktopWindow::openObiaWindow),
+        tr("面向对象分类：分割参数 + 对象级分类器。"));
 #else
     auto *obiaAct = classifyMenu->addAction(tr("Object-based Classification (OBIA) — Phase 10B"));
     obiaAct->setEnabled(false);
@@ -202,52 +214,79 @@ void QgisDesktopWindow::setupMenu()
     disabledAct->setEnabled(false);
 #endif
     rasterMenu->addSeparator();
-    rasterMenu->addAction(QIcon(":/icons/extr_ct_b_nd"), tr("Extract Band..."), this, [this]() {
+    tip(rasterMenu->addAction(QIcon(":/icons/extr_ct_b_nd"), tr("Extract Band..."), this, [this]() {
         ExtractBandDialog dlg(this);
         if (m_mapCanvas && m_mapCanvas->currentLayer()) {
             if (auto *rl = qobject_cast<QgsRasterLayer *>(m_mapCanvas->currentLayer()))
                 dlg.setRasterLayer(rl);
         }
         dlg.exec();
-    });
-    rasterMenu->addAction(QIcon(":/icons/b_nd_co_bo"), tr("Band Composite..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:raster_merge_bands"); });
+    }), tr("从多波段栅格提取单一波段保存。"));
+    tip(rasterMenu->addAction(QIcon(":/icons/b_nd_co_bo"), tr("Band Composite..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:raster_merge_bands"); }),
+        tr("多波段合成/合并（处理算法）。"));
     rasterMenu->addSeparator();
     auto *enhanceMenu = rasterMenu->addMenu(tr("Enhancement"));
-    enhanceMenu->addAction(tr("Contrast Stretch..."), this, &QgisDesktopWindow::openContrastStretchDialog);
-    enhanceMenu->addAction(tr("Spatial Filter..."), this, &QgisDesktopWindow::openSpatialFilterDialog);
-    enhanceMenu->addAction(tr("PCA..."), this, &QgisDesktopWindow::openPcaDialog);
-    enhanceMenu->addAction(tr("Band Ratio / IHS..."), this, &QgisDesktopWindow::openBandRatioDialog);
+    enhanceMenu->setToolTipsVisible(true);
+    tip(enhanceMenu->addAction(tr("Contrast Stretch..."), this, &QgisDesktopWindow::openContrastStretchDialog),
+        tr("对比度拉伸：线性/百分比裁剪/标准差/直方图均衡。"));
+    tip(enhanceMenu->addAction(tr("Spatial Filter..."), this, &QgisDesktopWindow::openSpatialFilterDialog),
+        tr("空间滤波：均值/高斯/中值/Sobel/Laplacian。"));
+    tip(enhanceMenu->addAction(tr("PCA..."), this, &QgisDesktopWindow::openPcaDialog),
+        tr("主成分分析：降维与去相关。"));
+    tip(enhanceMenu->addAction(tr("Band Ratio / IHS..."), this, &QgisDesktopWindow::openBandRatioDialog),
+        tr("波段比值或 IHS 变换。"));
     enhanceMenu->addSeparator();
-    enhanceMenu->addAction(tr("Speckle Filter (SAR)..."), this, &QgisDesktopWindow::openSpeckleFilterDialog);
+    tip(enhanceMenu->addAction(tr("Speckle Filter (SAR)..."), this, &QgisDesktopWindow::openSpeckleFilterDialog),
+        tr("SAR 斑点滤波：Lee/Frost/Kuan/Gamma-MAP。"));
 
     auto *terrainMenu = rasterMenu->addMenu(tr("Terrain Analysis"));
-    terrainMenu->addAction(tr("Slope / Aspect / Hillshade..."), this, &QgisDesktopWindow::openTerrainDialog);
+    terrainMenu->setToolTipsVisible(true);
+    tip(terrainMenu->addAction(tr("Slope / Aspect / Hillshade..."), this, &QgisDesktopWindow::openTerrainDialog),
+        tr("DEM 地形：坡度/坡向/山体阴影/粗糙度等。"));
 
-    rasterMenu->addAction(tr("Image Fusion..."), this, &QgisDesktopWindow::openFusionDialog);
+    tip(rasterMenu->addAction(tr("Image Fusion..."), this, &QgisDesktopWindow::openFusionDialog),
+        tr("全色锐化/影像融合：Linear/Brovey/IHS/PCA 或 OTB/GDAL。"));
 
     // Vector Menu
     QMenu *vectorMenu = menuBar()->addMenu(tr("&Vector"));
-    vectorMenu->addAction(QIcon(":/icons/buffer"), tr("Buffer..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_buffer"); });
-    vectorMenu->addAction(QIcon(":/icons/dissolve"), tr("Dissolve..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_dissolve"); });
-    vectorMenu->addAction(QIcon(":/icons/merge"), tr("Merge..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_merge"); });
-    vectorMenu->addAction(QIcon(":/icons/cli_"), tr("Clip..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_clip"); });
+    vectorMenu->setToolTipsVisible(true);
+    tip(vectorMenu->addAction(QIcon(":/icons/buffer"), tr("Buffer..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_buffer"); }),
+        tr("矢量缓冲区分析。"));
+    tip(vectorMenu->addAction(QIcon(":/icons/dissolve"), tr("Dissolve..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_dissolve"); }),
+        tr("按属性融合要素。"));
+    tip(vectorMenu->addAction(QIcon(":/icons/merge"), tr("Merge..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_merge"); }),
+        tr("合并多个矢量图层。"));
+    tip(vectorMenu->addAction(QIcon(":/icons/cli_"), tr("Clip..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_clip"); }),
+        tr("按边界裁剪矢量。"));
     vectorMenu->addSeparator();
-    vectorMenu->addAction(tr("Difference..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:native_difference"); });
-    vectorMenu->addAction(tr("Intersection..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:native_intersection"); });
-    vectorMenu->addAction(tr("Union..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:native_union"); });
+    tip(vectorMenu->addAction(tr("Difference..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:native_difference"); }),
+        tr("矢量擦除/差集。"));
+    tip(vectorMenu->addAction(tr("Intersection..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:native_intersection"); }),
+        tr("矢量相交。"));
+    tip(vectorMenu->addAction(tr("Union..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:native_union"); }),
+        tr("矢量联合。"));
     vectorMenu->addSeparator();
-    vectorMenu->addAction(tr("Select by Location..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_select_by_location"); });
-    vectorMenu->addAction(tr("Extract by Location..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_extract_by_location"); });
-    vectorMenu->addAction(tr("Reproject..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_reproject"); });
-    vectorMenu->addAction(tr("Field Calculator..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_field_calculator"); });
-    vectorMenu->addAction(tr("Nearest Neighbor..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_nearest_neighbor"); });
-    vectorMenu->addAction(tr("Distance Matrix..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_distance_matrix"); });
+    tip(vectorMenu->addAction(tr("Select by Location..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_select_by_location"); }),
+        tr("按空间关系选择要素。"));
+    tip(vectorMenu->addAction(tr("Extract by Location..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_extract_by_location"); }),
+        tr("按空间关系提取要素到新图层。"));
+    tip(vectorMenu->addAction(tr("Reproject..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_reproject"); }),
+        tr("矢量重投影。"));
+    tip(vectorMenu->addAction(tr("Field Calculator..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_field_calculator"); }),
+        tr("字段计算器。"));
+    tip(vectorMenu->addAction(tr("Nearest Neighbor..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_nearest_neighbor"); }),
+        tr("最近邻分析。"));
+    tip(vectorMenu->addAction(tr("Distance Matrix..."), this, [this](){ openProcessingAlgorithm("qgis_algorithms:vector_distance_matrix"); }),
+        tr("距离矩阵。"));
 
     // Settings Menu
     QMenu *settingsMenu = menuBar()->addMenu(tr("&Settings"));
-    settingsMenu->addAction(QIcon(":/icons/settings"), tr("Options..."), this, &QgisDesktopWindow::options);
+    settingsMenu->setToolTipsVisible(true);
+    tip(settingsMenu->addAction(QIcon(":/icons/settings"), tr("Options..."), this, &QgisDesktopWindow::options),
+        tr("首选项：主题、默认 CRS、日志、GDAL/OTB 路径。"));
     settingsMenu->addSeparator();
-    settingsMenu->addAction(QIcon(":/icons/define_crs"), tr("CRS Presets..."), this, &QgisDesktopWindow::openCrsPresetDialog);
+    tip(settingsMenu->addAction(QIcon(":/icons/define_crs"), tr("CRS Presets..."), this, &QgisDesktopWindow::openCrsPresetDialog),
+        tr("浏览并选择常用坐标系预设。"));
 
     // Window Menu (dock toggle actions added in setupDockWidgets)
     m_windowMenu = menuBar()->addMenu(tr("&Window"));

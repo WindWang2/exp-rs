@@ -1,4 +1,5 @@
 #include "main_window.h"
+#include "dialogs/dialog_help_catalog.h"
 #include "layer_manager.h"
 #include "map_tools/map_tool_manager.h"
 #include "app_paths.h"
@@ -75,6 +76,9 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     setWindowTitle("RS Studio — Remote Sensing Analysis");
+    setToolTip( SicnuDialogHelp::shortForTool( QStringLiteral( "main_window" ), windowTitle() ) );
+    setWhatsThis( SicnuDialogHelp::htmlForTool( QStringLiteral( "main_window" ), windowTitle() ) );
+    setStatusTip( toolTip() );
     resize(1600, 1000);
 
     qDebug() << "Setting up UI...";

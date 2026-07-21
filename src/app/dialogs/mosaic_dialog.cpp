@@ -1,5 +1,6 @@
 // src/app/dialogs/mosaic_dialog.cpp
 #include "mosaic_dialog.h"
+#include "dialog_help_catalog.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -27,14 +28,18 @@ void MosaicDialog::setupUi()
     auto *inputLayout = new QVBoxLayout(inputGroup);
 
     m_inputList = new QListWidget(this);
+    SicnuDialogHelp::tip( m_inputList, tr(
+      "参与镶嵌的栅格列表。至少 2 个文件；投影宜一致。" ) );
     inputLayout->addWidget(m_inputList);
 
     auto *inputBtnLayout = new QHBoxLayout();
     auto *addBtn = new QPushButton(tr("Add..."), this);
+    SicnuDialogHelp::tip( addBtn, tr( "添加一个或多个栅格文件。" ) );
     connect(addBtn, &QPushButton::clicked, this, &MosaicDialog::addInputFile);
     inputBtnLayout->addWidget(addBtn);
 
     auto *removeBtn = new QPushButton(tr("Remove"), this);
+    SicnuDialogHelp::tip( removeBtn, tr( "从列表移除选中文件。" ) );
     connect(removeBtn, &QPushButton::clicked, this, &MosaicDialog::removeInputFile);
     inputBtnLayout->addWidget(removeBtn);
 

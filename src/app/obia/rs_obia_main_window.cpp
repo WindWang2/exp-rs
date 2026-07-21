@@ -93,7 +93,8 @@ void RsObiaMainWindow::setupToolbar()
     mToolbar = addToolBar( tr( "OBIA" ) );
     mToolbar->setObjectName( "obiaToolbar" );
 
-    mToolbar->addAction( tr( "Load Raster" ), this, &RsObiaMainWindow::loadRaster );
+    auto *loadAct = mToolbar->addAction( tr( "Load Raster" ), this, &RsObiaMainWindow::loadRaster );
+    SicnuDialogHelp::tip( loadAct, tr( "加载待分割/分类的栅格影像。" ) );
 
     mToolbar->addSeparator();
 
@@ -102,25 +103,29 @@ void RsObiaMainWindow::setupToolbar()
     auto *kernelSpin = new QSpinBox;
     kernelSpin->setRange( 3, 21 );
     kernelSpin->setValue( 5 );
-    kernelSpin->setToolTip( tr( "Smoothing kernel size" ) );
+    SicnuDialogHelp::tip( kernelSpin, tr(
+      "平滑核大小 3–21。越大对象边界越粗、碎斑越少。" ) );
     kernelSpin->setObjectName( "kernelSpin" );
     mToolbar->addWidget( kernelSpin );
 
     auto *binsSpin = new QSpinBox;
     binsSpin->setRange( 2, 128 );
     binsSpin->setValue( 32 );
-    binsSpin->setToolTip( tr( "Quantization bins (built-in segmenter fallback)" ) );
+    SicnuDialogHelp::tip( binsSpin, tr(
+      "量化级数（内置分割回退）。级数多则细节多、对象更碎。" ) );
     binsSpin->setObjectName( "binsSpin" );
     mToolbar->addWidget( binsSpin );
 
     auto *minRegionSpin = new QSpinBox;
     minRegionSpin->setRange( 10, 10000 );
     minRegionSpin->setValue( 100 );
-    minRegionSpin->setToolTip( tr( "Minimum region size (OTB MeanShift / built-in merge)" ) );
+    SicnuDialogHelp::tip( minRegionSpin, tr(
+      "最小对象像元数。小于此值的区域会被合并，抑制碎斑。" ) );
     minRegionSpin->setObjectName( "minRegionSpin" );
     mToolbar->addWidget( minRegionSpin );
 
-    mToolbar->addAction( tr( "Segment" ), this, &RsObiaMainWindow::runSegmentation );
+    auto *segAct = mToolbar->addAction( tr( "Segment" ), this, &RsObiaMainWindow::runSegmentation );
+    SicnuDialogHelp::tip( segAct, tr( "运行影像分割，生成对象。" ) );
 
     mToolbar->addSeparator();
 
@@ -128,13 +133,17 @@ void RsObiaMainWindow::setupToolbar()
     mToolbar->addWidget( new QLabel( tr( " Classifier:" ) ) );
     auto *classifierCombo = new QComboBox;
     classifierCombo->addItems( { "NormalBayes", "SVM", "KMeans" } );
+    SicnuDialogHelp::tip( classifierCombo, tr(
+      "对象级分类器：NormalBayes / SVM / KMeans。" ) );
     classifierCombo->setObjectName( "classifierCombo" );
     mToolbar->addWidget( classifierCombo );
 
-    mToolbar->addAction( tr( "Classify" ), this, &RsObiaMainWindow::runClassification );
+    auto *clsAct = mToolbar->addAction( tr( "Classify" ), this, &RsObiaMainWindow::runClassification );
+    SicnuDialogHelp::tip( clsAct, tr( "对分割对象进行分类。" ) );
 
     mToolbar->addSeparator();
-    mToolbar->addAction( tr( "Export" ), this, &RsObiaMainWindow::exportResult );
+    auto *expAct = mToolbar->addAction( tr( "Export" ), this, &RsObiaMainWindow::exportResult );
+    SicnuDialogHelp::tip( expAct, tr( "导出分类/分割结果。" ) );
 }
 
 void RsObiaMainWindow::setupDocks()
@@ -142,9 +151,11 @@ void RsObiaMainWindow::setupDocks()
     // Left dock: class assignment
     mClassDock = new QDockWidget( tr( "Classes" ), this );
     mClassDock->setObjectName( "obiaClassDock" );
+    SicnuDialogHelp::tip( mClassDock, tr( "类别表：ID、名称、显示颜色。用于对象分类图例与标注。" ) );
     mClassTable = new QTableWidget;
     mClassTable->setColumnCount( 3 );
     mClassTable->setHorizontalHeaderLabels( { tr( "ID" ), tr( "Name" ), tr( "Color" ) } );
+    SicnuDialogHelp::tip( mClassTable, tr( "类别定义。ID 对应分类栅格像元值。" ) );
     mClassTable->horizontalHeader()->setStretchLastSection( true );
     mClassTable->setSelectionBehavior( QAbstractItemView::SelectRows );
     mClassTable->setSelectionMode( QAbstractItemView::SingleSelection );

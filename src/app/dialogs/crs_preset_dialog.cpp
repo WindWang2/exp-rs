@@ -40,6 +40,7 @@ void CrsPresetDialog::setupUi()
     searchLayout->addWidget( new QLabel( tr( "Search:" ) ) );
     m_searchEdit = new QLineEdit( this );
     m_searchEdit->setPlaceholderText( tr( "Filter by name or EPSG code..." ) );
+    SicnuDialogHelp::tip( m_searchEdit, tr( "按名称或 EPSG 代码过滤预设列表。" ) );
     searchLayout->addWidget( m_searchEdit );
     mainLayout->addLayout( searchLayout );
 
@@ -53,6 +54,7 @@ void CrsPresetDialog::setupUi()
     m_treeWidget->setRootIsDecorated( true );
     m_treeWidget->setAlternatingRowColors( true );
     m_treeWidget->setSelectionMode( QAbstractItemView::SingleSelection );
+    SicnuDialogHelp::tip( m_treeWidget, tr( "常用坐标系分组列表。选中后右侧显示详情，双击可确认。" ) );
 
     // Right panel: details group box
     auto *detailsWidget = new QWidget( splitter );

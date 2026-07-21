@@ -1,5 +1,6 @@
 // src/app/dialogs/change_detection_dialog.cpp
 #include "change_detection_dialog.h"
+#include "dialog_help_catalog.h"
 #include "dialog_utils.h"
 
 #include <raster/qgsrasterlayer.h>
@@ -39,6 +40,10 @@ void ChangeDetectionDialog::setupUi()
     m_afterLayerCombo = new QComboBox(this);
     m_beforeBandCombo = new QComboBox(this);
     m_afterBandCombo = new QComboBox(this);
+    SicnuDialogHelp::tip( m_beforeLayerCombo, tr( "变化前（较早时相）影像图层。须与后期几何对齐。" ) );
+    SicnuDialogHelp::tip( m_afterLayerCombo, tr( "变化后（较晚时相）影像图层。" ) );
+    SicnuDialogHelp::tip( m_beforeBandCombo, tr( "前期参与计算的波段。" ) );
+    SicnuDialogHelp::tip( m_afterBandCombo, tr( "后期参与计算的波段（宜与前期对应）。" ) );
 
     formLayout->addRow(tr("Before Image:"), m_beforeLayerCombo);
     formLayout->addRow(tr("Before Band:"), m_beforeBandCombo);
@@ -55,6 +60,10 @@ void ChangeDetectionDialog::setupUi()
     m_methodCombo->addItem(tr("Difference"), QStringLiteral("difference"));
     m_methodCombo->addItem(tr("Normalized Difference"), QStringLiteral("normalized_difference"));
     m_methodCombo->addItem(tr("Change Mask"), QStringLiteral("change_mask"));
+    SicnuDialogHelp::tip( m_methodCombo, tr(
+      "• Difference：后−前\n"
+      "• Normalized Difference：(后−前)/(后+前)\n"
+      "• Change Mask：|差值|≥阈值 的二值掩膜" ) );
 
     m_thresholdLabel = new QLabel(tr("Threshold:"), this);
     m_thresholdSpin = new QDoubleSpinBox(this);
@@ -63,6 +72,7 @@ void ChangeDetectionDialog::setupUi()
     m_thresholdSpin->setValue(10.0);
     m_thresholdSpin->setVisible(false);
     m_thresholdLabel->setVisible(false);
+    SicnuDialogHelp::tip( m_thresholdSpin, tr( "Change Mask 阈值，与影像 DN/指数量纲一致。" ) );
 
     methodLayout->addRow(tr("Method:"), m_methodCombo);
     methodLayout->addRow(m_thresholdLabel, m_thresholdSpin);

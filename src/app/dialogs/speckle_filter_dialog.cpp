@@ -1,5 +1,6 @@
 // src/app/dialogs/speckle_filter_dialog.cpp
 #include "speckle_filter_dialog.h"
+#include "dialog_help_catalog.h"
 #include "async_gdal_runner.h"
 #include "processing/algorithms/image_enhancement.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -36,6 +37,9 @@ void SpeckleFilterDialog::setupUi()
     typeLayout->addWidget(new QLabel(tr("Filter:"), this));
     m_filterTypeCombo = new QComboBox(this);
     m_filterTypeCombo->addItems({tr("Lee"), tr("Frost"), tr("Kuan"), tr("Gamma-MAP")});
+    SicnuDialogHelp::tip( m_filterTypeCombo, tr(
+      "SAR 斑点滤波器：Lee / Frost / Kuan / Gamma-MAP。"
+      "窗口越大越平滑；Frost 用阻尼因子，其余用噪声方差。" ) );
     typeLayout->addWidget(m_filterTypeCombo);
     mainLayout->addLayout(typeLayout);
 
@@ -45,6 +49,7 @@ void SpeckleFilterDialog::setupUi()
     m_kernelSizeCombo = new QComboBox(this);
     m_kernelSizeCombo->addItems({tr("3x3"), tr("5x5"), tr("7x7")});
     m_kernelSizeCombo->setCurrentIndex(1); // default 5x5
+    SicnuDialogHelp::tip( m_kernelSizeCombo, tr( "滤波窗口。3×3 保细节，7×7 更平滑。" ) );
     kernelLayout->addWidget(m_kernelSizeCombo);
     mainLayout->addLayout(kernelLayout);
 
@@ -56,6 +61,7 @@ void SpeckleFilterDialog::setupUi()
     m_noiseVarSpin->setValue(1.0);
     m_noiseVarSpin->setSingleStep(0.1);
     m_noiseVarSpin->setDecimals(3);
+    SicnuDialogHelp::tip( m_noiseVarSpin, tr( "噪声方差估计（Lee/Kuan/Gamma-MAP）。依传感器与标定调整。" ) );
     noiseLayout->addWidget(m_noiseVarSpin);
     mainLayout->addLayout(noiseLayout);
 
@@ -68,6 +74,7 @@ void SpeckleFilterDialog::setupUi()
     m_dampingSpin->setValue(2.0);
     m_dampingSpin->setSingleStep(0.5);
     m_dampingSpin->setDecimals(1);
+    SicnuDialogHelp::tip( m_dampingSpin, tr( "Frost 阻尼因子：越大平滑越强。" ) );
     dampingLayout->addWidget(m_dampingSpin);
     mainLayout->addLayout(dampingLayout);
 
