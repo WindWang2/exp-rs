@@ -14,7 +14,7 @@ class TaskPanelHost;
 
 /**
  * Owns process-local workflow registry/runtime and drives TaskPanelHost.
- * Run executes on a worker thread; UI updates return via QueuedConnection.
+ * Run submits to JobEngine; UI updates arrive via JobEngineQtBridge signals.
  */
 class WorkflowSessionController : public QObject
 {
@@ -40,8 +40,15 @@ class WorkflowSessionController : public QObject
     void requestLoadRaster( const QString &path );
     void statusMessage( const QString &msg );
 
+  private slots:
+    void onJobFinished( const QString &jobId );
+
   private:
     void ensureRunConnected();
+    void ensureJobBridgeConnected();
+    void applyJobResultToSession( const std::string &sessionId,
+                                  const std::string &stepId,
+                                  const Json::Value &result );
 
     // Member order: registry must outlive runtime (runtime holds a reference).
     sicnu::workflow::WorkflowRegistry m_registry;
@@ -49,10 +56,14 @@ class WorkflowSessionController : public QObject
 
     QString m_activeSession;
     QString m_activeStepId;
+    QString m_activeTitle;
+    QString m_pendingJobId;
+    bool m_pendingLoadToMap = false;
     TaskPanelHost *m_panel = nullptr;
     QStringList m_layerIds;
     QStringList m_layerNames;
     bool m_builtinsRegistered = false;
     bool m_runConnected = false;
+    bool m_jobBridgeConnected = false;
     bool m_runInFlight = false;
 };

@@ -3,30 +3,60 @@
  ***************************************************************************/
 #include "workflow_session_controller.h"
 
+#include "job_engine_qt_bridge.h"
 #include "task_panel_host.h"
 
+#include "jobs/job_engine.h"
+#include "jobs/job_types.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "workflow/builtin_definitions.h"
 
-#include <QMetaObject>
-#include <QPointer>
-
 #include <exception>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
+using sicnu::jobs::JobEngine;
+using sicnu::jobs::JobRequest;
+using sicnu::jobs::JobState;
 using sicnu::operators::RSOperatorRegistry;
 using sicnu::workflow::CanRunResult;
 using sicnu::workflow::StepDef;
 using sicnu::workflow::StepKind;
+
+namespace {
+
+std::string jsonValueToArtifactString( const Json::Value &v )
+{
+  if ( v.isString() )
+    return v.asString();
+  if ( v.isNull() )
+    return {};
+  Json::StreamWriterBuilder builder;
+  builder["indentation"] = "";
+  return Json::writeString( builder, v );
+}
+
+const StepDef *findStep( const sicnu::workflow::WorkflowDefinition *def, const std::string &stepId )
+{
+  if ( !def )
+    return nullptr;
+  for ( const auto &s : def->steps )
+  {
+    if ( s.id == stepId )
+      return &s;
+  }
+  return nullptr;
+}
+
+} // namespace
 
 WorkflowSessionController::WorkflowSessionController( QObject *parent )
   : QObject( parent )
   , m_registry()
   , m_runtime( m_registry )
 {
+  ensureJobBridgeConnected();
 }
 
 void WorkflowSessionController::registerBuiltins()
@@ -85,15 +115,7 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
     return {};
   }
 
-  const StepDef *step = nullptr;
-  for ( const auto &s : def->steps )
-  {
-    if ( s.id == stepId )
-    {
-      step = &s;
-      break;
-    }
-  }
+  const StepDef *step = findStep( def, stepId );
   if ( !step )
     step = &def->steps.front();
 
@@ -126,6 +148,8 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
   if ( title.isEmpty() )
     title = definitionId;
 
+  m_activeTitle = title;
+
   m_panel->showTool( title, helpSummary, schema );
   m_panel->setRasterLayerChoices( m_layerIds, m_layerNames );
   ensureRunConnected();
@@ -149,6 +173,16 @@ void WorkflowSessionController::ensureRunConnected()
   connect( m_panel, &TaskPanelHost::runClicked,
            this, &WorkflowSessionController::onRunClicked );
   m_runConnected = true;
+}
+
+void WorkflowSessionController::ensureJobBridgeConnected()
+{
+  if ( m_jobBridgeConnected )
+    return;
+  auto *bridge = JobEngineQtBridge::instance();
+  connect( bridge, &JobEngineQtBridge::jobFinished,
+           this, &WorkflowSessionController::onJobFinished );
+  m_jobBridgeConnected = true;
 }
 
 void WorkflowSessionController::onRunClicked()
@@ -183,74 +217,136 @@ void WorkflowSessionController::onRunClicked()
     return;
   }
 
+  // Resolve operator id from the session definition step.
+  std::string definitionId;
+  try
+  {
+    definitionId = m_runtime.state( sessionId ).definitionId;
+  }
+  catch ( const std::exception &e )
+  {
+    m_panel->setFailed( QString::fromUtf8( e.what() ) );
+    return;
+  }
+
+  const StepDef *step = findStep( m_registry.find( definitionId ), stepId );
+  if ( !step || step->kind != StepKind::Operator || step->operatorId.empty() )
+  {
+    m_panel->setFailed( tr( "当前步骤不是可运行算子" ) );
+    return;
+  }
+
+  ensureJobBridgeConnected();
+
+  JobRequest req;
+  req.algorithmId = step->operatorId;
+  req.params = params;
+  req.title = m_activeTitle.isEmpty()
+                ? ( step->title.empty() ? step->operatorId : step->title )
+                : m_activeTitle.toStdString();
+  req.source = "task_panel";
+
+  const std::string jobId = JobEngine::instance().submit( std::move( req ) );
+
   m_runInFlight = true;
+  m_pendingJobId = QString::fromStdString( jobId );
+  m_pendingLoadToMap = m_panel->loadResultToMap();
   m_panel->setRunning( true );
   emit statusMessage( tr( "正在运行…" ) );
+}
 
-  const bool loadToMap = m_panel->loadResultToMap();
-  // Capture panel via QPointer so completion is safe if panel is destroyed.
-  QPointer<TaskPanelHost> panel = m_panel;
-  QPointer<WorkflowSessionController> self = this;
+void WorkflowSessionController::onJobFinished( const QString &jobId )
+{
+  if ( m_pendingJobId.isEmpty() || jobId != m_pendingJobId )
+    return;
 
-  std::thread( [self, panel, sessionId, stepId, loadToMap]() {
-    Json::Value result;
-    QString error;
-    bool ok = false;
-    try
+  m_pendingJobId.clear();
+  m_runInFlight = false;
+
+  if ( m_panel )
+    m_panel->setRunning( false );
+
+  const auto snapOpt = JobEngine::instance().snapshot( jobId.toStdString() );
+  if ( !snapOpt )
+  {
+    if ( m_panel )
+      m_panel->setFailed( tr( "任务记录丢失" ) );
+    emit statusMessage( tr( "任务记录丢失" ) );
+    return;
+  }
+
+  const auto &rec = *snapOpt;
+  if ( rec.state != JobState::Succeeded )
+  {
+    QString error = QString::fromStdString( rec.error );
+    if ( error.isEmpty() )
     {
-      if ( self )
-      {
-        result = self->m_runtime.runStep( sessionId, stepId );
-        ok = true;
-      }
+      if ( rec.state == JobState::Cancelled )
+        error = tr( "已取消" );
       else
-      {
-        error = QStringLiteral( "Session controller destroyed" );
-      }
+        error = tr( "运行失败" );
     }
-    catch ( const std::exception &e )
-    {
-      error = QString::fromUtf8( e.what() );
-    }
-    catch ( ... )
-    {
-      error = QStringLiteral( "Unknown error" );
-    }
+    if ( m_panel )
+      m_panel->setFailed( error );
+    emit statusMessage( error );
+    return;
+  }
 
-    if ( !self )
-      return;
+  const std::string sessionId = m_activeSession.toStdString();
+  const std::string stepId = m_activeStepId.toStdString();
+  if ( !sessionId.empty() && !stepId.empty() )
+    applyJobResultToSession( sessionId, stepId, rec.result );
 
-    // Marshal completion back to the GUI thread.
-    QMetaObject::invokeMethod( self, [self, panel, result, error, ok, loadToMap]() {
-      if ( !self )
-        return;
+  QString outputPath;
+  if ( rec.result.isMember( "output" ) && rec.result["output"].isString() )
+    outputPath = QString::fromStdString( rec.result["output"].asString() );
 
-      self->m_runInFlight = false;
+  if ( m_pendingLoadToMap && !outputPath.isEmpty() )
+    emit requestLoadRaster( outputPath );
 
-      if ( panel )
-        panel->setRunning( false );
+  const QString msg = outputPath.isEmpty()
+                        ? tr( "运行成功" )
+                        : tr( "运行成功：%1" ).arg( outputPath );
+  if ( m_panel )
+    m_panel->setSuccess( msg );
+  emit statusMessage( msg );
+}
 
-      if ( !ok )
-      {
-        if ( panel )
-          panel->setFailed( error );
-        emit self->statusMessage( error );
-        return;
-      }
+void WorkflowSessionController::applyJobResultToSession( const std::string &sessionId,
+                                                         const std::string &stepId,
+                                                         const Json::Value &result )
+{
+  std::string definitionId;
+  try
+  {
+    definitionId = m_runtime.state( sessionId ).definitionId;
+  }
+  catch ( const std::exception & )
+  {
+    return;
+  }
 
-      QString outputPath;
-      if ( result.isMember( "output" ) && result["output"].isString() )
-        outputPath = QString::fromStdString( result["output"].asString() );
+  const StepDef *step = findStep( m_registry.find( definitionId ), stepId );
 
-      if ( loadToMap && !outputPath.isEmpty() )
-        emit self->requestLoadRaster( outputPath );
+  // Mirror WorkflowRuntime::runStep artifact side-effects.
+  if ( result.isMember( "output" ) && result["output"].isString() )
+  {
+    const std::string name =
+      ( !step || step->artifactOnSuccess.empty() ) ? "output" : step->artifactOnSuccess;
+    m_runtime.setArtifact( sessionId, name, result["output"].asString() );
+  }
+  else if ( result.isMember( "result" ) )
+  {
+    const std::string name =
+      ( !step || step->artifactOnSuccess.empty() || step->artifactOnSuccess == "output" )
+        ? "result"
+        : step->artifactOnSuccess;
+    m_runtime.setArtifact( sessionId, name, jsonValueToArtifactString( result["result"] ) );
+  }
+  else if ( step && !step->artifactOnSuccess.empty() )
+  {
+    m_runtime.setArtifact( sessionId, step->artifactOnSuccess, jsonValueToArtifactString( result ) );
+  }
 
-      const QString msg = outputPath.isEmpty()
-                            ? QObject::tr( "运行成功" )
-                            : QObject::tr( "运行成功：%1" ).arg( outputPath );
-      if ( panel )
-        panel->setSuccess( msg );
-      emit self->statusMessage( msg );
-    }, Qt::QueuedConnection );
-  } ).detach();
+  m_runtime.markStepComplete( sessionId, stepId );
 }
