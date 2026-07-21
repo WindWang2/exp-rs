@@ -2305,3 +2305,11 @@ target_include_directories(test_raster_processing_dialog_base PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_raster_processing_dialog_base)
+
+# Workflow engine runtime smoke test (Qt-free)
+if(TARGET sicnu_workflow)
+  add_executable(test_workflow_runtime test_workflow_runtime.cpp)
+  target_link_libraries(test_workflow_runtime PRIVATE Catch2::Catch2WithMain sicnu_workflow)
+  target_include_directories(test_workflow_runtime PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  sicnu_discover_tests(test_workflow_runtime)
+endif()

@@ -514,6 +514,7 @@ target_include_directories(qgis_core PRIVATE
 # SICNU_GEO_RS: Plugin architecture subdirectories
 add_subdirectory(src/plugins)
 add_subdirectory(src/operators)
+add_subdirectory(src/workflow)
 # Headless CLI pipeline executor (depends on sicnu_operators)
 if(TARGET sicnu_operators)
   add_subdirectory(src/cli)
