@@ -101,38 +101,77 @@ void MyDialog::setupUi()
 |--------|-------------|
 | `handleCompleted(outputPath)` | Log success, re-enable run button, accept dialog |
 | `handleFailed(error)` | Log error, re-enable run button, show error message |
-| `onCompleted(outputPath)` | Slot for async runner completed signal |
-| `onFailed(errorMessage)` | Slot for async runner failed signal |
+| `onCompleted(outputPath)` | Slot for JobEngine job success |
+| `onFailed(errorMessage)` | Slot for JobEngine job failure |
 
-## Async Processing Pattern
+## Async Processing: JobEngine (required path)
 
-For long-running operations, use `AsyncGdalRunner`:
+All long-running dialog work goes through **JobEngine** so tasks appear in the
+**RsJobPanel** dock (cancel, logs, progress). Do **not** start ad-hoc
+`std::thread` / `QtConcurrent` / `AsyncGdalRunner` from new dialog code.
+
+### RSOperator path (preferred for modular tools)
 
 ```cpp
 void MyDialog::onRun()
 {
     if (!validateInputs()) return;
 
-    if (!m_runner) {
-        m_runner = new AsyncGdalRunner(this, this);
-        connect(m_runner, &AsyncGdalRunner::completed,
-                this, &MyDialog::onCompleted);
-        connect(m_runner, &AsyncGdalRunner::failed,
-                this, &MyDialog::onFailed);
-    }
+    Json::Value params;
+    params["input"] = m_rasterLayer->source().toStdString();
+    params["output"] = outputPath().toStdString();
+    // ... operator-specific fields
 
-    m_runButton->setEnabled(false);
+    runOperatorTask(QStringLiteral("rs:my_operator"), params);
+}
+```
+
+`runOperatorTask` submits `JobRequest` with `algorithmId` = operator id.
+On success the job result must include an `"output"` string path; the base class
+calls `onCompleted(path)`.
+
+### GDAL lambda path
+
+```cpp
+void MyDialog::onRun()
+{
+    if (!validateInputs()) return;
 
     QString sourcePath = m_rasterLayer->source();
     QString outPath = outputPath();
 
-    m_runner->run([sourcePath, outPath]() -> QString {
-        // Processing logic here (runs in background thread)
-        // Return outputPath on success, empty QString on failure
+    runGdalTask([sourcePath, outPath]() -> QString {
+        // Background JobEngine worker (callable:gdal_task)
+        // Return non-empty path on success
+        // Return "\x01SICNU_ERR\x01" + message for structured failure
+        // Return empty for generic failure
         return outPath;
     });
 }
 ```
+
+### Processing algorithm path
+
+- **Toolbox double-click** opens `SicnuAlgorithmDialog`; **Run** prepares the
+  algorithm on the GUI thread and submits `runPrepared` to JobEngine with
+  algorithm id `processing:<qgisAlgorithmId>`.
+- Dialog helpers may call `runAlgorithmTask(algorithm, params, context)` which
+  also submits via JobEngine (worker-local context).
+
+Prefix executor registration (app startup):
+
+```cpp
+ProcessingJobAdapter::registerProcessingJobExecutor(); // "processing:"
+```
+
+### Deprecated legacy runners
+
+| Type | Status |
+|------|--------|
+| `AsyncGdalRunner` | Deprecated stub; use `runGdalTask` |
+| `AsyncAlgorithmRunner` | Deprecated stub; use `SicnuAlgorithmDialog` / `runAlgorithmTask` |
+
+These types remain compiled for transitional tests only.
 
 ## Dialog Utility: populateRasterLayerCombo
 
@@ -160,3 +199,4 @@ Each item stores `QgsRasterLayer*` as QVariant data. Use `currentData().value<Qg
 | TerrainDialog | `terrain_dialog.{h,cpp}` | Slope, aspect, hillshade |
 | ExtractBandDialog | `extract_band_dialog.{h,cpp}` | Extract single band |
 | ChangeDetectionDialog | `change_detection_dialog.{h,cpp}` | Multi-temporal comparison |
+| SicnuAlgorithmDialog | `sicnu_algorithm_dialog.{h,cpp}` | Processing toolbox algorithms via JobEngine |

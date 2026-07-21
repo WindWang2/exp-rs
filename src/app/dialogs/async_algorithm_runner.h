@@ -1,4 +1,5 @@
-// async_algorithm_runner.h — Helper for async algorithm execution in dialogs
+// async_algorithm_runner.h — DEPRECATED: use JobEngine / SicnuAlgorithmDialog
+// or RasterProcessingDialogBase::runAlgorithmTask instead.
 #pragma once
 
 #include "async_runner_base.h"
@@ -10,13 +11,10 @@ class QgsProcessingFeedback;
 class QgsProcessingAlgRunnerTask;
 
 /**
- * Helper class for running processing algorithms asynchronously in dialogs.
+ * \deprecated Prefer SicnuAlgorithmDialog (toolbox) or
+ * RasterProcessingDialogBase::runAlgorithmTask() / JobEngine processing: executor.
  *
- * Usage:
- *   AsyncAlgorithmRunner *runner = new AsyncAlgorithmRunner(this);
- *   connect(runner, &AsyncAlgorithmRunner::completed, this, &MyDialog::onAlgorithmCompleted);
- *   connect(runner, &AsyncAlgorithmRunner::failed, this, &MyDialog::onAlgorithmFailed);
- *   runner->run(algorithm, params, context);
+ * Kept as a thin legacy type for tests / transitional includes.
  */
 class AsyncAlgorithmRunner : public AsyncRunnerBase
 {
@@ -26,24 +24,15 @@ public:
     explicit AsyncAlgorithmRunner(QWidget *parentWidget, QObject *parent = nullptr);
     ~AsyncAlgorithmRunner() override;
 
-    /**
-     * Run an algorithm asynchronously.
-     * The algorithm is cloned internally, so the caller retains ownership of the original.
-     */
+    /** \deprecated Prefer JobEngine-backed paths. */
     void run(const QgsProcessingAlgorithm *algorithm,
              const QVariantMap &parameters,
              QgsProcessingContext &context);
 
-    /**
-     * Cancel the running task.
-     */
     void cancel();
 
 signals:
-    /** Emitted when the algorithm completes successfully. */
     void completed(const QVariantMap &results);
-
-    /** Emitted with progress updates (0-100). */
     void progressChanged(double progress);
 
 private:

@@ -1,9 +1,9 @@
 // raster_processing_dialog_base.cpp — Base class for raster processing dialogs
 #include "raster_processing_dialog_base.h"
-#include "async_algorithm_runner.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
 #include "shell/job_engine_qt_bridge.h"
+#include "shell/processing_job_adapter.h"
 
 #include "jobs/job_engine.h"
 #include "jobs/job_types.h"
@@ -12,6 +12,11 @@
 
 #include <processing/qgsprocessingalgorithm.h>
 #include <processing/qgsprocessingcontext.h>
+#include <qgsexception.h>
+#include <processing/qgsprocessingfeedback.h>
+#include <qgsproject.h>
+
+#include <memory>
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -283,23 +288,107 @@ void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm 
                                                    const QVariantMap &parameters,
                                                    QgsProcessingContext &context )
 {
-  if ( isRunning() )
+  if ( isRunning() || !algorithm )
     return;
 
-  if ( !m_algorithmRunner )
+  if ( !m_jobBridgeConnected )
   {
-    m_algorithmRunner = new AsyncAlgorithmRunner( this, this );
-    connect( m_algorithmRunner, &AsyncAlgorithmRunner::completed, this,
-             [this]( const QVariantMap &results ) {
-               Q_UNUSED( results );
-               onCompleted( outputPath() );
-             } );
-    connect( m_algorithmRunner, &AsyncAlgorithmRunner::failed, this,
-             &RasterProcessingDialogBase::onFailed );
+    auto *bridge = JobEngineQtBridge::instance();
+    connect( bridge, &JobEngineQtBridge::jobFinished, this,
+             &RasterProcessingDialogBase::onOperatorJobFinished );
+    m_jobBridgeConnected = true;
   }
 
   startRun();
-  m_algorithmRunner->run( algorithm, parameters, context );
+
+  // Worker-local context (copy thread-safe settings) so prepare / runPrepared /
+  // postProcess all run on the JobEngine worker — same pattern as the
+  // processing: prefix executor.
+  const QString algId = algorithm->id();
+  const QString displayName = algorithm->displayName();
+  std::shared_ptr<QgsProcessingAlgorithm> algClone( algorithm->create() );
+  if ( !algClone )
+  {
+    finishRun();
+    onFailed( tr( "Failed to create algorithm instance" ) );
+    return;
+  }
+
+  // Snapshot project pointers for the worker (read-only use).
+  QgsProject *project = context.project();
+
+  sicnu::jobs::JobRequest req;
+  req.algorithmId = ProcessingJobAdapter::processingAlgorithmId( algId );
+  req.title = displayName.toStdString();
+  req.source = "dialog";
+  req.clientTag = toolName().toStdString();
+
+  const QString fallbackOutput = outputPath();
+  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+    std::move( req ),
+    [algClone, parameters, project, fallbackOutput](
+      const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
+      ctx.logInfo( "Running dialog processing algorithm" );
+      QgsProcessingContext localCtx;
+      if ( project )
+      {
+        localCtx.setProject( project );
+        localCtx.setTransformContext( project->transformContext() );
+      }
+
+      QgsProcessingFeedback feedback;
+      try
+      {
+        if ( !algClone->prepare( parameters, localCtx, &feedback ) )
+        {
+          const QString err = feedback.textLog();
+          throw sicnu::operators::RSOperatorError(
+            sicnu::operators::ErrorCode::QgisProcessingError,
+            err.isEmpty() ? "prepare() failed" : err.toStdString() );
+        }
+        const QVariantMap runRes =
+          algClone->runPrepared( parameters, localCtx, &feedback );
+        if ( feedback.isCanceled() || ctx.isCancelled() )
+        {
+          algClone->postProcess( localCtx, &feedback, false );
+          throw sicnu::operators::RSOperatorError(
+            sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
+        }
+        QVariantMap results = algClone->postProcess( localCtx, &feedback, true );
+        if ( results.isEmpty() )
+          results = runRes;
+
+        Json::Value out = ProcessingJobAdapter::resultsToJson( results );
+        if ( !out.isMember( "output" ) && !fallbackOutput.isEmpty() )
+          out["output"] = fallbackOutput.toStdString();
+        if ( !out.isMember( "output" ) )
+        {
+          for ( auto it = results.constBegin(); it != results.constEnd(); ++it )
+          {
+            if ( it.value().userType() == QMetaType::QString
+                 && !it.value().toString().isEmpty() )
+            {
+              out["output"] = it.value().toString().toStdString();
+              break;
+            }
+          }
+        }
+        if ( !out.isMember( "output" ) )
+        {
+          throw sicnu::operators::RSOperatorError(
+            sicnu::operators::ErrorCode::ComputationError,
+            "Algorithm did not produce an output path" );
+        }
+        return out;
+      }
+      catch ( const QgsProcessingException &e )
+      {
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::QgisProcessingError, e.what().toStdString() );
+      }
+    } );
+
+  m_pendingJobId = QString::fromStdString( jobId );
 }
 
 void RasterProcessingDialogBase::runOperatorTask( const QString &operatorId,

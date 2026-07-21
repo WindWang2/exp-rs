@@ -12,7 +12,6 @@
 #include <json/json.h>
 
 class QgsRasterLayer;
-class AsyncAlgorithmRunner;
 class QgsProcessingAlgorithm;
 class QgsProcessingContext;
 
@@ -78,8 +77,9 @@ public:
     void runGdalTask(const std::function<QString()> &task);
 
     /**
-     * Run a QGIS Processing algorithm on a background thread.
-     * Connects to onCompleted/onFailed automatically on first use.
+     * Run a QGIS Processing algorithm via JobEngine (processing: prefix id).
+     * Completes via onCompleted/onFailed through JobEngineQtBridge.
+     * Prefer SicnuAlgorithmDialog for full toolbox parameter UIs.
      */
     void runAlgorithmTask(const QgsProcessingAlgorithm *algorithm,
                           const QVariantMap &parameters,
@@ -185,7 +185,6 @@ protected:
     QgsRasterLayer *m_rasterLayer = nullptr;
     QLineEdit *m_outputEdit = nullptr;
     QPushButton *m_runButton = nullptr;
-    AsyncAlgorithmRunner *m_algorithmRunner = nullptr;
     bool m_running = false;
     QString m_pendingJobId;
     bool m_jobBridgeConnected = false;

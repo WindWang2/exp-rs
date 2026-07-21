@@ -1,4 +1,5 @@
-// async_gdal_runner.h — Reusable async GDAL I/O runner for dialogs
+// async_gdal_runner.h — DEPRECATED: use RasterProcessingDialogBase::runGdalTask
+// (JobEngine callable:gdal_task) instead.
 #pragma once
 
 #include "async_runner_base.h"
@@ -7,18 +8,10 @@
 #include <functional>
 
 /**
- * Helper class for running GDAL operations asynchronously in dialogs.
+ * \deprecated Prefer RasterProcessingDialogBase::runGdalTask() which submits
+ * to JobEngine so the job appears in RsJobPanel.
  *
- * Usage:
- *   auto *runner = new AsyncGdalRunner(this);
- *   connect(runner, &AsyncGdalRunner::completed, this, [this](const QString &outputPath) {
- *       loadRasterLayer(outputPath);
- *       accept();
- *   });
- *   connect(runner, &AsyncGdalRunner::failed, this, [this](const QString &error) {
- *       QMessageBox::warning(this, tr("Error"), error);
- *   });
- *   runner->run(task);
+ * Kept as a thin legacy type for tests / transitional includes.
  */
 class AsyncGdalRunner : public AsyncRunnerBase
 {
@@ -28,27 +21,14 @@ public:
     explicit AsyncGdalRunner(QWidget *parentWidget, QObject *parent = nullptr);
     ~AsyncGdalRunner() override;
 
-    /**
-     * Task functor executed on a background thread.
-     *
-     * Return contract:
-     *   - non-empty path  → success (completed signal)
-     *   - empty string    → generic failure
-     *   - string starting with errorMarker() → failure with message after the marker
-     */
     using GdalTask = std::function<QString()>;
 
-    /** Prefix for structured error returns from background tasks. */
     static QString errorMarker() { return QStringLiteral("\x01SICNU_ERR\x01"); }
 
-    /**
-     * Run a GDAL/operator task asynchronously.
-     * The task function is executed on a background thread.
-     */
+    /** \deprecated Routes through QtConcurrent only — prefer runGdalTask/JobEngine. */
     void run(const GdalTask &task);
 
 signals:
-    /** Emitted when the task completes successfully. Output path is provided. */
     void completed(const QString &outputPath);
 
 private:
