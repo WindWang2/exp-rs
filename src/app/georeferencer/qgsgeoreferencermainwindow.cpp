@@ -23,10 +23,15 @@
 #include "qgsmapcanvas.h"
 #include "qgsmessagelog.h"
 #include "qgsrasterlayer.h"
-#include "qgstaskmanager.h"
 #include "rs_sift_dialog.h"
 #include "rs_sift_task.h"
 #include "rs_twincanvas_sync_controller.h"
+
+#include "shell/job_engine_qt_bridge.h"
+#include "jobs/job_engine.h"
+#include "jobs/job_types.h"
+#include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_error.h"
 
 QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QWidget *parent )
   : QgsGeorefShellWindow( iface, parent )
@@ -209,34 +214,92 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
                                mRefRaster->source(),
                                mParamsPanel->destCrs(),
                                dlg.params() );
-  connect( task, &QgsTask::taskCompleted, this, [this, task]() {
-    const auto r = task->result();
-    if ( !r.ok() )
-    {
-      statusBar()->showMessage( tr( "SIFT 失败：%1" ).arg( r.errorMessage ), 5000 );
-      return;
-    }
-    const QString msg = tr( "找到 %1 对匹配，内点 %2 个 (%3%)，是否全部采用？" )
-                          .arg( r.totalMatches )
-                          .arg( r.inliers.size() )
-                          .arg( int( r.inlierRatio * 100 ) );
-    if ( QMessageBox::question( this, tr( "SIFT 匹配结果" ), msg ) != QMessageBox::Yes )
-      return;
-    const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
-    for ( const auto &m : r.inliers )
-      mGcps->appendPoint( QgsGcpPoint( m.srcPx, m.dstWorld, destCrs, true ) );
-    QJsonObject o {
-      { QStringLiteral( "event" ),        QStringLiteral( "sift_match" ) },
-      { QStringLiteral( "matches" ),      r.totalMatches },
-      { QStringLiteral( "inliers" ),      int( r.inliers.size() ) },
-      { QStringLiteral( "inlier_ratio" ), r.inlierRatio },
-    };
-    QgsMessageLog::logMessage(
-      QString::fromUtf8( QJsonDocument( o ).toJson( QJsonDocument::Compact ) ),
-      QStringLiteral( "Georeferencer" ),
-      Qgis::MessageLevel::Info );
-  } );
-  QgsApplication::taskManager()->addTask( task );
+
+  sicnu::jobs::JobRequest req;
+  req.algorithmId = "module:georef:sift";
+  req.title = tr( "SIFT 匹配" ).toStdString();
+  req.source = "module";
+  req.exclusive = true;
+
+  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+    std::move( req ),
+    [task]( const sicnu::jobs::JobRequest &,
+            sicnu::operators::RSOperatorContext &ctx ) {
+      ctx.logInfo( "Running SIFT matching" );
+      ctx.reportProgress( 0.0, "SIFT" );
+      const bool ok = task->run();
+      if ( ctx.isCancelled() || !ok )
+      {
+        if ( ctx.isCancelled() || task->result().errorMessage.contains( QStringLiteral( "cancel" ), Qt::CaseInsensitive ) )
+        {
+          throw sicnu::operators::RSOperatorError(
+            sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
+        }
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::ComputationError,
+          task->result().errorMessage.isEmpty()
+            ? "SIFT failed"
+            : task->result().errorMessage.toStdString() );
+      }
+      Json::Value result( Json::objectValue );
+      result["totalMatches"] = task->result().totalMatches;
+      result["inliers"] = static_cast<int>( task->result().inliers.size() );
+      result["inlierRatio"] = task->result().inlierRatio;
+      return result;
+    },
+    [task]() { task->cancel(); } );
+
+  const QString jobIdQ = QString::fromStdString( jobId );
+  auto *bridge = JobEngineQtBridge::instance();
+  auto *conn = new QMetaObject::Connection;
+  *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
+                   [this, task, jobIdQ, conn]( const QString &id ) {
+                     if ( id != jobIdQ )
+                       return;
+                     disconnect( *conn );
+                     delete conn;
+
+                     const auto snapOpt =
+                       sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
+                     const auto r = task->result();
+                     delete task;
+
+                     if ( !snapOpt || snapOpt->state != sicnu::jobs::JobState::Succeeded || !r.ok() )
+                     {
+                       if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
+                         statusBar()->showMessage( tr( "SIFT 已取消" ), 3000 );
+                       else
+                         statusBar()->showMessage(
+                           tr( "SIFT 失败：%1" )
+                             .arg( r.errorMessage.isEmpty()
+                                     ? ( snapOpt ? QString::fromStdString( snapOpt->error )
+                                                 : tr( "未知错误" ) )
+                                     : r.errorMessage ),
+                           5000 );
+                       return;
+                     }
+
+                     const QString msg = tr( "找到 %1 对匹配，内点 %2 个 (%3%)，是否全部采用？" )
+                                           .arg( r.totalMatches )
+                                           .arg( r.inliers.size() )
+                                           .arg( int( r.inlierRatio * 100 ) );
+                     if ( QMessageBox::question( this, tr( "SIFT 匹配结果" ), msg ) != QMessageBox::Yes )
+                       return;
+                     const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
+                     for ( const auto &m : r.inliers )
+                       mGcps->appendPoint( QgsGcpPoint( m.srcPx, m.dstWorld, destCrs, true ) );
+                     QJsonObject o {
+                       { QStringLiteral( "event" ),        QStringLiteral( "sift_match" ) },
+                       { QStringLiteral( "matches" ),      r.totalMatches },
+                       { QStringLiteral( "inliers" ),      int( r.inliers.size() ) },
+                       { QStringLiteral( "inlier_ratio" ), r.inlierRatio },
+                     };
+                     QgsMessageLog::logMessage(
+                       QString::fromUtf8( QJsonDocument( o ).toJson( QJsonDocument::Compact ) ),
+                       QStringLiteral( "Georeferencer" ),
+                       Qgis::MessageLevel::Info );
+                   } );
+
   statusBar()->showMessage( tr( "SIFT 匹配中…" ), 3000 );
 #endif
 }

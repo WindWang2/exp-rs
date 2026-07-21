@@ -2,7 +2,6 @@
 #include "speckle_filter_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
-#include "async_gdal_runner.h"
 #include "processing/algorithms/image_enhancement.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_safe_call.h"

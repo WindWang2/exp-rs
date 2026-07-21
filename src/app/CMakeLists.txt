@@ -41,9 +41,6 @@ add_executable(sicnu_geo_rs
     dialogs/batch_processing_dialog.cpp
     dialogs/stac_browser_dialog.cpp
     dialogs/raster_processing_dialog_base.cpp
-    dialogs/async_runner_base.cpp
-    dialogs/async_gdal_runner.cpp
-    dialogs/async_algorithm_runner.cpp
     dialogs/extract_band_dialog.cpp
     layout/qgslayoutdesignerdialog.cpp
     map_tools/measure_tool.cpp

@@ -2282,76 +2282,114 @@ void QgsClassificationMainWindow::runPostProcess()
   auto *task = new RsPostProcessTask( std::move( cfg ) );
   setClassifyBusy( true );
 
-  connect( task, &QgsTask::taskCompleted, this, [this, task, outRaster, outVector, doPoly]() {
-    setClassifyBusy( false );
-    const auto &r = task->result();
-    if ( !r.ok )
-    {
-      if ( statusBar() )
-        statusBar()->showMessage( tr( "后处理失败: %1" ).arg( r.errorMessage ), 6000 );
-      return;
-    }
+  sicnu::jobs::JobRequest req;
+  req.algorithmId = "module:classify:postprocess";
+  req.title = tr( "分类后处理" ).toStdString();
+  req.source = "module";
+  req.exclusive = true;
+  req.params["output"] = outRaster.toStdString();
 
-    if ( m_workflow )
-      m_workflow->setHasPostProcessResult( true );
-
-    m_lastPostRasterPath = outRaster;
-    if ( doPoly && !outVector.isEmpty() )
-      m_lastPostVectorPath = outVector;
-
-    // Load result raster onto the classification canvas when possible.
-    auto *resultLayer = new QgsRasterLayer(
-      outRaster, QFileInfo( outRaster ).baseName() + QStringLiteral( " (post)" ),
-      QStringLiteral( "gdal" ) );
-    if ( resultLayer->isValid() )
-    {
-      if ( m_layerStore )
-        m_layerStore->addMapLayer( resultLayer );
-      if ( m_canvas )
+  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+    std::move( req ),
+    [task]( const sicnu::jobs::JobRequest &,
+            sicnu::operators::RSOperatorContext &ctx ) {
+      ctx.logInfo( "Running classification post-process" );
+      ctx.reportProgress( 0.0, "Post-process" );
+      const bool ok = task->run();
+      if ( ctx.isCancelled()
+           || ( !ok && task->result().errorMessage == QStringLiteral( "Cancelled" ) ) )
       {
-        QList<QgsMapLayer *> layers;
-        layers << resultLayer;
-        if ( m_sourceLayer )
-          layers << m_sourceLayer;
-        m_canvas->setLayers( layers );
-        m_canvas->refresh();
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
       }
-    }
-    else
-    {
-      delete resultLayer;
-    }
+      if ( !ok )
+      {
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::ComputationError,
+          task->result().errorMessage.toStdString() );
+      }
+      Json::Value result( Json::objectValue );
+      result["durationMs"] = task->result().durationMs;
+      return result;
+    },
+    [task]() { task->cancel(); } );
 
-    if ( statusBar() )
-    {
-      QString msg = tr( "后处理完成: %1 (%2 ms)" )
-                      .arg( QFileInfo( outRaster ).fileName() )
-                      .arg( r.durationMs );
-      if ( doPoly && !outVector.isEmpty() )
-        msg += tr( "；矢量 %1" ).arg( QFileInfo( outVector ).fileName() );
-      statusBar()->showMessage( msg, 6000 );
-    }
-    refreshWorkflowUi();
-  } );
+  const QString jobIdQ = QString::fromStdString( jobId );
+  auto *bridge = JobEngineQtBridge::instance();
+  auto *conn = new QMetaObject::Connection;
+  *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
+                   [this, task, jobIdQ, outRaster, outVector, doPoly, conn]( const QString &id ) {
+                     if ( id != jobIdQ )
+                       return;
+                     disconnect( *conn );
+                     delete conn;
+                     setClassifyBusy( false );
 
-  connect( task, &QgsTask::taskTerminated, this, [this, task]() {
-    setClassifyBusy( false );
-    const auto &r = task->result();
-    if ( !r.errorMessage.isEmpty()
-         && r.errorMessage != QStringLiteral( "Cancelled" ) )
-    {
-      SICNU_LOG_ERROR( SicnuLogTags::Classification,
-                       QStringLiteral( "Post-process failed: %1" ).arg( r.errorMessage ) );
-      if ( statusBar() )
-        statusBar()->showMessage( tr( "后处理失败: %1" ).arg( r.errorMessage ), 6000 );
-    }
-    else if ( statusBar() )
-    {
-      statusBar()->showMessage( tr( "后处理已取消" ), 3000 );
-    }
-  } );
+                     const auto snapOpt =
+                       sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
+                     const auto &r = task->result();
 
-  QgsApplication::taskManager()->addTask( task );
+                     if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Succeeded && r.ok )
+                     {
+                       if ( m_workflow )
+                         m_workflow->setHasPostProcessResult( true );
+
+                       m_lastPostRasterPath = outRaster;
+                       if ( doPoly && !outVector.isEmpty() )
+                         m_lastPostVectorPath = outVector;
+
+                       auto *resultLayer = new QgsRasterLayer(
+                         outRaster, QFileInfo( outRaster ).baseName() + QStringLiteral( " (post)" ),
+                         QStringLiteral( "gdal" ) );
+                       if ( resultLayer->isValid() )
+                       {
+                         if ( m_layerStore )
+                           m_layerStore->addMapLayer( resultLayer );
+                         if ( m_canvas )
+                         {
+                           QList<QgsMapLayer *> layers;
+                           layers << resultLayer;
+                           if ( m_sourceLayer )
+                             layers << m_sourceLayer;
+                           m_canvas->setLayers( layers );
+                           m_canvas->refresh();
+                         }
+                       }
+                       else
+                       {
+                         delete resultLayer;
+                       }
+
+                       if ( statusBar() )
+                       {
+                         QString msg = tr( "后处理完成: %1 (%2 ms)" )
+                                         .arg( QFileInfo( outRaster ).fileName() )
+                                         .arg( r.durationMs );
+                         if ( doPoly && !outVector.isEmpty() )
+                           msg += tr( "；矢量 %1" ).arg( QFileInfo( outVector ).fileName() );
+                         statusBar()->showMessage( msg, 6000 );
+                       }
+                       refreshWorkflowUi();
+                     }
+                     else if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
+                     {
+                       if ( statusBar() )
+                         statusBar()->showMessage( tr( "后处理已取消" ), 3000 );
+                     }
+                     else
+                     {
+                       const QString err = !r.errorMessage.isEmpty()
+                                            ? r.errorMessage
+                                            : ( snapOpt ? QString::fromStdString( snapOpt->error )
+                                                        : tr( "未知错误" ) );
+                       SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                                        QStringLiteral( "Post-process failed: %1" ).arg( err ) );
+                       if ( statusBar() )
+                         statusBar()->showMessage( tr( "后处理失败: %1" ).arg( err ), 6000 );
+                     }
+                     delete task;
+                   } );
+
   if ( statusBar() )
     statusBar()->showMessage( tr( "后处理中…" ), 3000 );
 }
@@ -2407,36 +2445,93 @@ void QgsClassificationMainWindow::runCrossValidation()
     }
   };
 
-  // Run cross-validation asynchronously to avoid blocking the UI
+  // Run cross-validation via JobEngine (appears in unified task panel)
   auto *task = new RsCvTask( X, y, factory, 5, tr( "5-fold Cross Validation" ) );
   setClassifyBusy( true );
 
-  task->setCompletionCallback( [this]( const RsCrossValidation::Result &res )
-  {
-    // This runs on the worker thread, so we need to invoke on the main thread
-    QMetaObject::invokeMethod( this, [this, res]()
-    {
-      setClassifyBusy( false );
-      QString perFold;
-      for ( int i = 0; i < res.foldAccuracies.size(); ++i )
-        perFold += QString( "  fold%1: %2%\n" )
-                     .arg( i + 1 )
-                     .arg( res.foldAccuracies[i] * 100, 0, 'f', 1 );
-      QMessageBox::information(
-        this, tr( "5-fold Cross Validation" ),
-        tr( "Mean accuracy: %1% ± %2%\n\n%3" )
-          .arg( res.meanAccuracy * 100, 0, 'f', 1 )
-          .arg( res.stdAccuracy * 100, 0, 'f', 1 )
-          .arg( perFold ) );
-    }, Qt::QueuedConnection );
-  } );
+  sicnu::jobs::JobRequest req;
+  req.algorithmId = "module:classify:cv";
+  req.title = tr( "5-fold 交叉验证" ).toStdString();
+  req.source = "module";
+  req.exclusive = false;
 
-  connect( task, &QgsTask::taskTerminated, this, [this]() {
-    setClassifyBusy( false );
-  } );
+  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+    std::move( req ),
+    [task]( const sicnu::jobs::JobRequest &,
+            sicnu::operators::RSOperatorContext &ctx ) {
+      ctx.logInfo( "Running 5-fold cross validation" );
+      ctx.reportProgress( 0.0, "CV" );
+      // Do not use task completion callback (worker thread UI); result via task->result()
+      const bool ok = task->run();
+      if ( ctx.isCancelled() || !ok )
+      {
+        if ( task->result().errorMessage == QStringLiteral( "Cancelled" ) || ctx.isCancelled() )
+        {
+          throw sicnu::operators::RSOperatorError(
+            sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
+        }
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::ComputationError,
+          task->result().errorMessage.isEmpty()
+            ? "Cross validation failed"
+            : task->result().errorMessage.toStdString() );
+      }
+      Json::Value result( Json::objectValue );
+      result["meanAccuracy"] = task->result().meanAccuracy;
+      result["stdAccuracy"] = task->result().stdAccuracy;
+      return result;
+    },
+    [task]() { task->cancel(); } );
 
-  QgsApplication::taskManager()->addTask( task );
-  statusBar()->showMessage( tr( "5-fold CV 运行中…" ), 3000 );
+  const QString jobIdQ = QString::fromStdString( jobId );
+  auto *bridge = JobEngineQtBridge::instance();
+  auto *conn = new QMetaObject::Connection;
+  *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
+                   [this, task, jobIdQ, conn]( const QString &id ) {
+                     if ( id != jobIdQ )
+                       return;
+                     disconnect( *conn );
+                     delete conn;
+                     setClassifyBusy( false );
+
+                     const auto snapOpt =
+                       sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
+                     const auto res = task->result();
+                     delete task;
+
+                     if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Succeeded && res.ok() )
+                     {
+                       QString perFold;
+                       for ( int i = 0; i < res.foldAccuracies.size(); ++i )
+                         perFold += QString( "  fold%1: %2%\n" )
+                                      .arg( i + 1 )
+                                      .arg( res.foldAccuracies[i] * 100, 0, 'f', 1 );
+                       QMessageBox::information(
+                         this, tr( "5-fold Cross Validation" ),
+                         tr( "Mean accuracy: %1% ± %2%\n\n%3" )
+                           .arg( res.meanAccuracy * 100, 0, 'f', 1 )
+                           .arg( res.stdAccuracy * 100, 0, 'f', 1 )
+                           .arg( perFold ) );
+                       if ( statusBar() )
+                         statusBar()->showMessage( tr( "交叉验证完成" ), 3000 );
+                     }
+                     else if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
+                     {
+                       if ( statusBar() )
+                         statusBar()->showMessage( tr( "交叉验证已取消" ), 3000 );
+                     }
+                     else if ( statusBar() )
+                     {
+                       statusBar()->showMessage(
+                         tr( "交叉验证失败: %1" )
+                           .arg( snapOpt ? QString::fromStdString( snapOpt->error )
+                                         : tr( "未知错误" ) ),
+                         5000 );
+                     }
+                   } );
+
+  if ( statusBar() )
+    statusBar()->showMessage( tr( "5-fold CV 运行中…" ), 3000 );
 }
 
 void QgsClassificationMainWindow::recomputeSpectralCurves()

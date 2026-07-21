@@ -2246,20 +2246,6 @@ target_include_directories(test_input_validator PRIVATE
 )
 sicnu_discover_tests(test_input_validator)
 
-# Async Algorithm Runner tests
-add_executable(test_async_algorithm_runner test_async_algorithm_runner.cpp)
-target_link_libraries(test_async_algorithm_runner PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-)
-target_include_directories(test_async_algorithm_runner PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_BINARY_DIR}
-)
-sicnu_discover_tests(test_async_algorithm_runner)
-
 # Processing Dialogs tests
 add_executable(test_processing_dialogs test_processing_dialogs.cpp)
 target_link_libraries(test_processing_dialogs PRIVATE
@@ -2288,13 +2274,13 @@ target_include_directories(test_dialog_edge_cases PRIVATE
 )
 sicnu_discover_tests(test_dialog_edge_cases)
 
-# Raster processing dialog base — run lifecycle + async task helper
+# Raster processing dialog base — run lifecycle (JobEngine-backed)
 add_executable(test_raster_processing_dialog_base
   test_raster_processing_dialog_base.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_gdal_runner.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_algorithm_runner.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_runner_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
 )
 set_target_properties(test_raster_processing_dialog_base PROPERTIES AUTOMOC ON)
 target_link_libraries(test_raster_processing_dialog_base PRIVATE
@@ -2302,6 +2288,9 @@ target_link_libraries(test_raster_processing_dialog_base PRIVATE
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  sicnu_jobs
+  sicnu_operators
+
   Qt6::Concurrent
   qgis_core
   qgis_gui
