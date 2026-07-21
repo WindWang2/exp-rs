@@ -13,6 +13,7 @@
 #include "rs_georef_task_list.h"
 
 class QAction;
+class QActionGroup;
 class QCloseEvent;
 class QDockWidget;
 class QLabel;
@@ -21,6 +22,8 @@ class QToolBar;
 class QgisInterface;
 class QgsMapCanvas;
 class QgsMapLayerStore;
+class QgsMapToolPan;
+class QgsMapToolZoom;
 class QgsRasterLayer;
 class QgsGeorefToolAddPoint;
 class QgsGeorefToolMovePoint;
@@ -92,7 +95,16 @@ class QgsGeorefShellWindow : public QMainWindow
 
     /// Shared GCP toolbar block (Add/Move/Delete exclusive + load/export .gcp).
     void addGcpEditActions( QToolBar *bar, const QString &objectNamePrefix );
+    /**
+     * Pan / Zoom In / Zoom Out (exclusive with GCP tools) plus
+     * Fit Source / Fit Dest / Fit Both (one-shot extent).
+     * Call after canvases exist; tools created in createMapTools().
+     */
+    void addCanvasNavigationActions( QToolBar *bar, const QString &objectNamePrefix );
     void addApplyAction( QToolBar *bar, const QString &objectName );
+
+    /// Exclusive map-tool action group (pan/zoom/GCP).
+    QActionGroup *mapToolActionGroup();
 
     /**
      * Wrap \a canvas with a caption bar (role + layer/file name).
@@ -146,6 +158,14 @@ class QgsGeorefShellWindow : public QMainWindow
     void zoomToGcpDest( int row );
     void zoomToGcpBoth( int row );
     void onGcpTableRowChanged( int row );
+    /// Canvas navigation (toolbar).
+    void fitSourceExtent();
+    void fitDestExtent();
+    void fitBothExtents();
+    void zoomSourceIn();
+    void zoomSourceOut();
+    void zoomDestIn();
+    void zoomDestOut();
 
   protected:
     void emitStructuredLog( const QgsImageWarper::WarpResult &r );
@@ -191,6 +211,19 @@ class QgsGeorefShellWindow : public QMainWindow
     QgsGeorefToolMovePoint *mToolMoveDst = nullptr;
     QgsGeorefToolDeletePoint *mToolDeleteSrc = nullptr;
     QgsGeorefToolDeletePoint *mToolDeleteDst = nullptr;
+    QgsMapToolPan *mPanSrc = nullptr;
+    QgsMapToolPan *mPanDst = nullptr;
+    QgsMapToolZoom *mZoomInSrc = nullptr;
+    QgsMapToolZoom *mZoomOutSrc = nullptr;
+    QgsMapToolZoom *mZoomInDst = nullptr;
+    QgsMapToolZoom *mZoomOutDst = nullptr;
+    QActionGroup *mMapToolActionGroup = nullptr;
+    QAction *mPanAction = nullptr;
+    QAction *mZoomInAction = nullptr;
+    QAction *mZoomOutAction = nullptr;
+    QAction *mFitSrcAction = nullptr;
+    QAction *mFitDstAction = nullptr;
+    QAction *mFitBothAction = nullptr;
     QAction *mAddPointAction = nullptr;
     QAction *mMovePointAction = nullptr;
     QAction *mDeletePointAction = nullptr;

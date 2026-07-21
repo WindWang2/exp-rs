@@ -140,8 +140,10 @@ void QgsGeoreferencerMainWindow::setupToolbars()
   mToolBar = addToolBar( tr( "Tools" ) );
   mToolBar->setObjectName( QStringLiteral( "rsGeorefToolBar" ) );
   mToolBar->setMovable( false );
-  mToolBar->setToolTip( tr( "Image 2 Image 工具：双影像配准、SIFT 自动匹配与运行。" ) );
+  mToolBar->setToolTip( tr( "Image 2 Image 工具：导航、双影像配准、SIFT 与运行。" ) );
 
+  addCanvasNavigationActions( mToolBar, QStringLiteral( "rsGeoref" ) );
+  mToolBar->addSeparator();
   addGcpEditActions( mToolBar, QStringLiteral( "rsGeoref" ) );
   mToolBar->addSeparator();
 
@@ -176,8 +178,9 @@ QString QgsGeoreferencerMainWindow::windowHelpText() const
     "1. 打开源影像：从文件 或 从主工程图层<br>"
     "2. 打开参考影像：从文件 或 从主工程图层<br>"
     "3. 两侧都打开后，Add / Move / Delete GCP 才可用<br>"
-    "4. 点选 Add GCP：先 SRC 再 REF（右键取消未完成源点）<br>"
-    "5. 可选：SIFT、Sync zoom → 设置输出 → 运行<br><br>"
+    "4. 导航：平移 / 放大 / 缩小；适合源 / 适合参考 / 适合两侧<br>"
+    "5. 点选 Add GCP：先 SRC 再 REF（右键取消未完成源点）<br>"
+    "6. 可选：SIFT、Sync zoom → 设置输出 → 运行<br><br>"
     "不含 RPC（RPC 请用 Image 2 Map）。" );
 }
 

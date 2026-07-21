@@ -109,8 +109,10 @@ void QgsGeorefImageToMapWindow::setupToolbars()
   mToolBar = addToolBar( tr( "Tools" ) );
   mToolBar->setObjectName( QStringLiteral( "rsGeorefI2MToolBar" ) );
   mToolBar->setMovable( false );
-  mToolBar->setToolTip( tr( "Image 2 Map 工具：对主地图取点、RPC 方法与运行。" ) );
+  mToolBar->setToolTip( tr( "Image 2 Map 工具：导航、对主地图取点、RPC 与运行。" ) );
 
+  addCanvasNavigationActions( mToolBar, QStringLiteral( "rsGeorefI2M" ) );
+  mToolBar->addSeparator();
   addGcpEditActions( mToolBar, QStringLiteral( "rsGeorefI2M" ) );
   mToolBar->addSeparator();
   auto *refresh = mToolBar->addAction( QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Refresh map" ),
@@ -133,8 +135,9 @@ QString QgsGeorefImageToMapWindow::windowHelpText() const
     "1. 主窗口加载地理参考底图/矢量<br>"
     "2. 本窗口打开源影像：从文件 或 从主工程图层<br>"
     "3. 源影像打开后，Add / Move / Delete GCP 才可用<br>"
-    "4. Map 侧为工程可见图层（可 Refresh map）<br>"
-    "5. Add GCP：先 SRC 再 Map → 可选 RPC → 运行<br><br>"
+    "4. 导航：平移 / 放大 / 缩小；适合源 / 适合地图 / 适合两侧<br>"
+    "5. Map 侧为工程可见图层（可 Refresh map）<br>"
+    "6. Add GCP：先 SRC 再 Map → 可选 RPC → 运行<br><br>"
     "无 SIFT。悬停工具与参数可看说明。" );
 }
 
