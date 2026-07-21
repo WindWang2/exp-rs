@@ -1,6 +1,5 @@
 // raster_processing_dialog_base.cpp — Base class for raster processing dialogs
 #include "raster_processing_dialog_base.h"
-#include "async_gdal_runner.h"
 #include "async_algorithm_runner.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
@@ -8,6 +7,8 @@
 
 #include "jobs/job_engine.h"
 #include "jobs/job_types.h"
+#include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_error.h"
 
 #include <processing/qgsprocessingalgorithm.h>
 #include <processing/qgsprocessingcontext.h>
@@ -24,6 +25,14 @@
 #include <raster/qgsrasterlayer.h>
 #include <qgsmessagelog.h>
 #include <qgis.h>
+
+namespace {
+// Same contract as AsyncGdalRunner::errorMarker() for structured failure returns.
+QString gdalErrorMarker()
+{
+  return QStringLiteral( "\x01SICNU_ERR\x01" );
+}
+} // namespace
 
 RasterProcessingDialogBase::RasterProcessingDialogBase( QWidget *parent )
   : QDialog( parent )
@@ -226,15 +235,48 @@ void RasterProcessingDialogBase::runGdalTask( const std::function<QString()> &ta
   if ( isRunning() )
     return;
 
-  if ( !m_runner )
+  // Prefer JobEngine so dialog GDAL work appears in RsJobPanel (same as runOperatorTask).
+  if ( !m_jobBridgeConnected )
   {
-    m_runner = new AsyncGdalRunner( this, this );
-    connect( m_runner, &AsyncGdalRunner::completed, this, &RasterProcessingDialogBase::onCompleted );
-    connect( m_runner, &AsyncGdalRunner::failed, this, &RasterProcessingDialogBase::onFailed );
+    auto *bridge = JobEngineQtBridge::instance();
+    connect( bridge, &JobEngineQtBridge::jobFinished, this,
+             &RasterProcessingDialogBase::onOperatorJobFinished );
+    m_jobBridgeConnected = true;
   }
 
   startRun();
-  m_runner->run( task );
+
+  sicnu::jobs::JobRequest req;
+  req.algorithmId = "callable:gdal_task";
+  req.title = dialogTitle().toStdString();
+  req.source = "dialog";
+  req.clientTag = toolName().toStdString();
+
+  const QString errMarker = gdalErrorMarker();
+  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+    std::move( req ),
+    [task, errMarker]( const sicnu::jobs::JobRequest &,
+                       sicnu::operators::RSOperatorContext &ctx ) {
+      ctx.logInfo( "Running dialog GDAL task" );
+      const QString result = task();
+      if ( result.isEmpty() )
+      {
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::ComputationError,
+          "Operation failed. Check log for details." );
+      }
+      if ( result.startsWith( errMarker ) )
+      {
+        throw sicnu::operators::RSOperatorError(
+          sicnu::operators::ErrorCode::ComputationError,
+          result.mid( errMarker.size() ).toStdString() );
+      }
+      Json::Value out( Json::objectValue );
+      out["output"] = result.toStdString();
+      return out;
+    } );
+
+  m_pendingJobId = QString::fromStdString( jobId );
 }
 
 void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm *algorithm,

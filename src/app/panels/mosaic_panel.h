@@ -8,7 +8,6 @@ class QLineEdit;
 class QPushButton;
 class QLabel;
 class QProgressBar;
-class AsyncGdalRunner;
 
 /**
  * Panel for mosaicking (stitching) multiple raster files into a single output.
@@ -63,5 +62,6 @@ private:
     QPushButton *m_runButton = nullptr;
     QLabel *m_statusLabel = nullptr;
     QProgressBar *m_progressBar = nullptr;
-    AsyncGdalRunner *m_runner = nullptr;
+    QString m_pendingJobId;
+    bool m_jobBridgeConnected = false;
 };

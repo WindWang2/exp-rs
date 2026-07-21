@@ -12,7 +12,6 @@
 #include <json/json.h>
 
 class QgsRasterLayer;
-class AsyncGdalRunner;
 class AsyncAlgorithmRunner;
 class QgsProcessingAlgorithm;
 class QgsProcessingContext;
@@ -69,8 +68,12 @@ public:
     void finishRun();
 
     /**
-     * Run a GDAL I/O task on a background thread.
-     * Connects to onCompleted/onFailed automatically on first use.
+     * Run a GDAL I/O lambda via JobEngine (callable:gdal_task).
+     * Task return contract (legacy AsyncGdalRunner):
+     *   - non-empty path → success
+     *   - empty → generic failure
+     *   - "\x01SICNU_ERR\x01" + message → structured failure
+     * Completes via onCompleted/onFailed through JobEngineQtBridge.
      */
     void runGdalTask(const std::function<QString()> &task);
 
@@ -161,14 +164,12 @@ protected:
 
 public slots:
     /**
-     * Slot for async runner completed signal.
-     * Can be connected directly to AsyncGdalRunner::completed or AsyncAlgorithmRunner::completed.
+     * Slot for async runner completed signal (JobEngine operator/callable path).
      */
     void onCompleted(const QString &outputPath);
 
     /**
      * Slot for async runner failed signal.
-     * Can be connected directly to AsyncGdalRunner::failed or AsyncAlgorithmRunner::failed.
      */
     void onFailed(const QString &errorMessage);
 
@@ -184,7 +185,6 @@ protected:
     QgsRasterLayer *m_rasterLayer = nullptr;
     QLineEdit *m_outputEdit = nullptr;
     QPushButton *m_runButton = nullptr;
-    AsyncGdalRunner *m_runner = nullptr;
     AsyncAlgorithmRunner *m_algorithmRunner = nullptr;
     bool m_running = false;
     QString m_pendingJobId;
