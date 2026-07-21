@@ -2,7 +2,6 @@
     qgsgcplistmodel.h - SICNU port of QGIS GCP list table model
      --------------------------------------
     Date                 : 2026-06-02 (SICNU port)
-    Originally           : 27-Feb-2009, (c) 2009 Manuel Massing
  ***************************************************************************
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -17,8 +16,10 @@
 #include "qgis.h"
 #include "qgscoordinatereferencesystem.h"
 #include "qgscoordinatetransformcontext.h"
+#include "qgsrasterchangecoords.h"
 
 #include <QAbstractTableModel>
+#include <QString>
 
 class QgsGcpPoint;
 class QgsGeorefTransform;
@@ -31,12 +32,16 @@ class QgsGCPListModel : public QAbstractTableModel
   public:
     enum class Column : int
     {
-      Enabled,
+      Enabled = 0,
       ID,
-      SourceX,
-      SourceY,
-      DestinationX,
-      DestinationY,
+      SourceMapX,
+      SourceMapY,
+      SourceCol,   ///< source image column (pixel)
+      SourceRow,   ///< source image row (pixel)
+      DestMapX,
+      DestMapY,
+      DestCol,     ///< reference/map image column
+      DestRow,     ///< reference/map image row
       ResidualDx,
       ResidualDy,
       TotalResidual,
@@ -57,13 +62,14 @@ class QgsGCPListModel : public QAbstractTableModel
     void setTargetCrs( const QgsCoordinateReferenceSystem &targetCrs, const QgsCoordinateTransformContext &context );
 
     /**
-     * Column header units:
-     * \a sourceIsMap — source picks are layer/map coords (georeferenced source)
-     * \a residualIsMap — residuals reported in map units (else pixels)
-     * \a destCrsAuth — e.g. "EPSG:32650" for dest column tooltip/header
+     * \a sourceIsMap — source picks are layer/map coords
+     * \a residualIsMap — residuals in map units (else source pixels)
      */
     void setCoordinateDisplayMode( bool sourceIsMap, bool residualIsMap,
                                    const QString &destCrsAuth = QString() );
+
+    /// Enable col/row display via GDAL geotransform of source and dest rasters.
+    void setRasterPaths( const QString &sourcePath, const QString &destPath );
 
     int rowCount( const QModelIndex &parent = QModelIndex() ) const override;
     int columnCount( const QModelIndex &parent = QModelIndex() ) const override;
@@ -73,8 +79,6 @@ class QgsGCPListModel : public QAbstractTableModel
     QVariant headerData( int section, Qt::Orientation orientation, int role = Qt::DisplayRole ) const override;
 
     void updateResiduals();
-
-    /// Refresh all cells without full model reset (after residual recompute).
     void refreshAll();
 
     static QString formatNumber( double number );
@@ -87,6 +91,8 @@ class QgsGCPListModel : public QAbstractTableModel
 
   private:
     Qgis::RenderUnit residualUnit() const;
+    QgsPointXY toSourcePixel( const QgsPointXY &mapOrPixel ) const;
+    QgsPointXY toDestPixel( const QgsPointXY &mapOrPixel ) const;
 
     QgsCoordinateReferenceSystem mTargetCrs;
     QgsCoordinateTransformContext mTransformContext;
@@ -97,6 +103,11 @@ class QgsGCPListModel : public QAbstractTableModel
     bool mSourceIsMap = false;
     bool mResidualIsMap = false;
     QString mDestCrsAuth;
+
+    QgsRasterChangeCoords mSrcCoords;
+    QgsRasterChangeCoords mDstCoords;
+    bool mHasSrcRaster = false;
+    bool mHasDstRaster = false;
 };
 
 #endif

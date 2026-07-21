@@ -54,12 +54,13 @@ QgsGCPListWidget::QgsGCPListWidget( QWidget *parent )
   setFont( mono );
   horizontalHeader()->setFont( QFont( QStringLiteral( "IBM Plex Sans" ), 9, QFont::DemiBold ) );
 
-  // Column widths from design.html: 40,40,120,120,140,140,80,80,90,120
-  const int widths[10] = { 40, 40, 120, 120, 140, 140, 80, 80, 90, 120 };
-  for ( int c = 0; c < 10; ++c )
+  // 启用 # X源 Y源 列源 行源 X参 Y参 列参 行参 ΔX ΔY RMS 类型
+  const int widths[] = { 36, 32, 90, 90, 70, 70, 90, 90, 70, 70, 72, 72, 72, 80 };
+  for ( int c = 0; c < static_cast<int>( sizeof( widths ) / sizeof( widths[0] ) ); ++c )
     setColumnWidth( c, widths[c] );
 
-  setItemDelegateForColumn( 9, new RsGcpTypeDelegate( this ) );
+  // PointType is last data column (index 13)
+  setItemDelegateForColumn( 13, new RsGcpTypeDelegate( this ) );
 
   connect( mModel, &QAbstractItemModel::dataChanged,
            this, &QgsGCPListWidget::onModelDataChanged );
@@ -113,7 +114,7 @@ void QgsGCPListWidget::onModelDataChanged( const QModelIndex &topLeft, const QMo
   {
     emit pointEnabled( row, point->isEnabled() );
   }
-  else if ( col == 9 && ( roles.isEmpty() || roles.contains( Qt::EditRole ) || roles.contains( Qt::DisplayRole ) ) )
+  else if ( col == 13 && ( roles.isEmpty() || roles.contains( Qt::EditRole ) || roles.contains( Qt::DisplayRole ) ) )
   {
     emit pointTypeChanged( row, point->pointType() );
   }
@@ -144,9 +145,9 @@ void QgsGCPListWidget::mouseDoubleClickEvent( QMouseEvent *event )
   const QModelIndex idx = indexAt( event->pos() );
   if ( idx.isValid() )
   {
-    // Editable columns open the editor; ID / residual → locate both canvases.
+    // ID / residual cols → locate both canvases.
     const int col = idx.column();
-    if ( col == 1 || col == 6 || col == 7 || col == 8 )
+    if ( col == 1 || col == 10 || col == 11 || col == 12 )
     {
       emit zoomToBothRequested( idx.row() );
       return;
@@ -207,13 +208,13 @@ void QgsGCPListWidget::contextMenuEvent( QContextMenuEvent *event )
   }
   else if ( chosen == editSrc )
   {
-    const QModelIndex editIdx = mModel->index( row, 2 );
+    const QModelIndex editIdx = mModel->index( row, 2 ); // SourceMapX
     setCurrentIndex( editIdx );
     edit( editIdx );
   }
   else if ( chosen == editDst )
   {
-    const QModelIndex editIdx = mModel->index( row, 4 );
+    const QModelIndex editIdx = mModel->index( row, 6 ); // DestMapX
     setCurrentIndex( editIdx );
     edit( editIdx );
   }

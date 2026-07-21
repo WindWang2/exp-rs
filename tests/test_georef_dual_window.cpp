@@ -146,10 +146,11 @@ TEST_CASE( "I2I dual-canvas GCP pick arms both tools and appends pair", "[georef
     auto *table = w.findChild<QgsGCPListWidget *>( QStringLiteral( "rsGcpTable" ) );
     REQUIRE( table != nullptr );
     REQUIRE( table->model() != nullptr );
+    // Columns: Enabled, ID, SrcMapX, SrcMapY, SrcCol, SrcRow, DstMapX, DstMapY, ...
     const double sx = table->model()->data( table->model()->index( 0, 2 ), Qt::EditRole ).toDouble();
     const double sy = table->model()->data( table->model()->index( 0, 3 ), Qt::EditRole ).toDouble();
-    const double dx = table->model()->data( table->model()->index( 0, 4 ), Qt::EditRole ).toDouble();
-    const double dy = table->model()->data( table->model()->index( 0, 5 ), Qt::EditRole ).toDouble();
+    const double dx = table->model()->data( table->model()->index( 0, 6 ), Qt::EditRole ).toDouble();
+    const double dy = table->model()->data( table->model()->index( 0, 7 ), Qt::EditRole ).toDouble();
     REQUIRE( sx == 10.0 );
     REQUIRE( sy == 20.0 );
     REQUIRE( dx == 100.0 );

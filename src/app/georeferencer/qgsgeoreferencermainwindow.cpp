@@ -282,23 +282,29 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
     mLayerStore->addMapLayer( layer );
   mRefRaster = layer;
   mRefRasterPath = path;
+  mDstRaster = layer;
+  mDestRasterPath = path;
 
   if ( mDstCanvas )
   {
+    // Always use the REF layer CRS as the canvas CRS so map picks are in
+    // the image's native coordinates (not project CRS).
     if ( layer->crs().isValid() )
       mDstCanvas->setDestinationCrs( layer->crs() );
     mDstCanvas->setLayers( { layer } );
     mDstCanvas->setExtent( layer->extent() );
     mDstCanvas->refresh();
   }
-  // Align target CRS with reference image when panel CRS is still unset.
-  if ( mParamsPanel && layer->crs().isValid() && !mParamsPanel->destCrs().isValid() )
+  // Align target CRS with reference image.
+  if ( mParamsPanel && layer->crs().isValid() )
     mParamsPanel->setDestCrs( layer->crs() );
 
   updateDestLayerCaption(
     layer->name(),
-    tr( "参考影像（基准 / Base）\n图层: %1\n路径: %2" )
-      .arg( layer->name(), path ) );
+    tr( "参考影像（基准 / Base）\n图层: %1\n路径: %2\nCRS: %3" )
+      .arg( layer->name(), path,
+            layer->crs().isValid() ? layer->crs().authid() : tr( "—" ) ) );
+  updateGcpTableRasterPaths();
   updateToolAvailability();
   recomputeFit();
   mSession.saveWorkflow( captureWorkflowSnapshot() );

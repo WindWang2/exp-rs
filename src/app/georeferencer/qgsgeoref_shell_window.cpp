@@ -64,6 +64,7 @@ namespace
 #include "qgsgeoreftoolmovepoint.h"
 #include "qgsgeoreftransform.h"
 #include "qgsrpcgcptransformer.h"
+#include "qgscoordinatetransform.h"
 #include "qgsmapcanvas.h"
 #include "qgsmapcoordsdialog.h"
 #include "qgsmaplayerstore.h"
@@ -513,6 +514,38 @@ void QgsGeorefShellWindow::rearmAddPointTools()
     mSrcCanvas->setMapTool( mAddPointTool );
   if ( mDstCanvas && mAddPointToolDst )
     mDstCanvas->setMapTool( mAddPointToolDst );
+}
+
+QgsPointXY QgsGeorefShellWindow::mapPickToLayerCrs( QgsMapCanvas *canvas, QgsRasterLayer *layer,
+                                                     const QgsPointXY &canvasMapPt ) const
+{
+  if ( !canvas || !layer || !layer->isValid() )
+    return canvasMapPt;
+
+  const QgsCoordinateReferenceSystem canvasCrs = canvas->mapSettings().destinationCrs();
+  const QgsCoordinateReferenceSystem layerCrs = layer->crs();
+  if ( !canvasCrs.isValid() || !layerCrs.isValid() || canvasCrs == layerCrs )
+    return canvasMapPt;
+
+  try
+  {
+    const QgsCoordinateTransform ct(
+      canvasCrs, layerCrs,
+      QgsProject::instance() ? QgsProject::instance()->transformContext()
+                             : QgsCoordinateTransformContext() );
+    return ct.transform( canvasMapPt );
+  }
+  catch ( ... )
+  {
+    return canvasMapPt;
+  }
+}
+
+void QgsGeorefShellWindow::updateGcpTableRasterPaths()
+{
+  if ( !mGcpTable || !mGcpTable->gcpModel() )
+    return;
+  mGcpTable->gcpModel()->setRasterPaths( mSourceRasterPath, mDestRasterPath );
 }
 
 void QgsGeorefShellWindow::wireMapToolActions()
@@ -1241,8 +1274,9 @@ void QgsGeorefShellWindow::commitGcpPair( const QgsPointXY &sourceMap, const Qgs
 
 void QgsGeorefShellWindow::onSourcePointPicked( const QgsPointXY &sourceMap )
 {
-  // Re-clicking SRC while pending updates the source position.
-  beginPendingSourcePick( sourceMap );
+  // Normalize into the source layer CRS so stored map coords match the image.
+  const QgsPointXY layerMap = mapPickToLayerCrs( mSrcCanvas, mSrcRaster, sourceMap );
+  beginPendingSourcePick( layerMap );
 }
 
 void QgsGeorefShellWindow::onDestPointPicked( const QgsPointXY &destMap )
@@ -1254,9 +1288,10 @@ void QgsGeorefShellWindow::onDestPointPicked( const QgsPointXY &destMap )
     rearmAddPointTools();
     return;
   }
-  // Copy pending source now — commit clears pending state.
+  // Normalize REF/Map pick into the destination raster CRS when available.
+  const QgsPointXY layerMap = mapPickToLayerCrs( mDstCanvas, mDstRaster, destMap );
   const QgsPointXY src = mPendingSource;
-  commitGcpPair( src, destMap );
+  commitGcpPair( src, layerMap );
 }
 
 void QgsGeorefShellWindow::showCoordDialog( const QgsPointXY &sourcePixel )
@@ -1346,6 +1381,7 @@ bool QgsGeorefShellWindow::loadSourceRaster( const QString &path, const QString 
     mSrcCanvas->refresh();
   }
   updateSourceLayerCaption();
+  updateGcpTableRasterPaths();
   updateToolAvailability();
   recomputeFit();
   mSession.saveWorkflow( captureWorkflowSnapshot() );

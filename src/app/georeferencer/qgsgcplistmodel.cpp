@@ -27,7 +27,6 @@
 
 namespace
 {
-  // Warn color from design.html for residuals >= 1 unit.
   const QColor sWarnColor( QStringLiteral( "#bf8700" ) );
   constexpr double sWarnThreshold = 1.0;
 
@@ -49,9 +48,7 @@ void QgsGCPListModel::setGCPList( QgsGCPList *theGCPList )
 {
   beginResetModel();
   if ( mGCPList )
-  {
     disconnect( mGCPList, nullptr, this, nullptr );
-  }
   mGCPList = theGCPList;
   if ( mGCPList )
   {
@@ -77,8 +74,8 @@ void QgsGCPListModel::setTargetCrs( const QgsCoordinateReferenceSystem &targetCr
   updateResiduals();
   if ( rowCount() > 0 )
   {
-    emit dataChanged( index( 0, static_cast<int>( Column::DestinationX ) ),
-                      index( rowCount() - 1, static_cast<int>( Column::DestinationY ) ) );
+    emit dataChanged( index( 0, static_cast<int>( Column::DestMapX ) ),
+                      index( rowCount() - 1, static_cast<int>( Column::DestMapY ) ) );
   }
   emit headerDataChanged( Qt::Horizontal, 0, columnCount() - 1 );
 }
@@ -93,6 +90,40 @@ void QgsGCPListModel::setCoordinateDisplayMode( bool sourceIsMap, bool residualI
   refreshAll();
 }
 
+void QgsGCPListModel::setRasterPaths( const QString &sourcePath, const QString &destPath )
+{
+  mHasSrcRaster = false;
+  mHasDstRaster = false;
+  if ( !sourcePath.isEmpty() )
+  {
+    mSrcCoords.loadRaster( sourcePath );
+    mHasSrcRaster = mSrcCoords.hasExistingGeoreference();
+  }
+  if ( !destPath.isEmpty() )
+  {
+    mDstCoords.loadRaster( destPath );
+    mHasDstRaster = mDstCoords.hasExistingGeoreference();
+  }
+  refreshAll();
+  emit headerDataChanged( Qt::Horizontal, 0, columnCount() - 1 );
+}
+
+QgsPointXY QgsGCPListModel::toSourcePixel( const QgsPointXY &mapOrPixel ) const
+{
+  if ( mGeorefTransform && mGeorefTransform->hasExistingGeoreference() )
+    return mGeorefTransform->toSourcePixel( mapOrPixel );
+  if ( mHasSrcRaster )
+    return mSrcCoords.toColumnLine( mapOrPixel );
+  return mapOrPixel;
+}
+
+QgsPointXY QgsGCPListModel::toDestPixel( const QgsPointXY &mapOrPixel ) const
+{
+  if ( mHasDstRaster )
+    return mDstCoords.toColumnLine( mapOrPixel );
+  return QgsPointXY(); // unknown
+}
+
 int QgsGCPListModel::rowCount( const QModelIndex & ) const
 {
   return mGCPList ? mGCPList->size() : 0;
@@ -100,12 +131,13 @@ int QgsGCPListModel::rowCount( const QModelIndex & ) const
 
 int QgsGCPListModel::columnCount( const QModelIndex & ) const
 {
-  return 10;
+  return static_cast<int>( Column::LastColumn );
 }
 
 QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
 {
-  if ( !mGCPList || index.row() < 0 || index.row() >= mGCPList->size() || index.column() < 0 || index.column() >= columnCount() )
+  if ( !mGCPList || index.row() < 0 || index.row() >= mGCPList->size()
+       || index.column() < 0 || index.column() >= columnCount() )
     return QVariant();
 
   const Column column = static_cast<Column>( index.column() );
@@ -116,8 +148,14 @@ QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
   const double dX = point->residual().x();
   const double dY = point->residual().y();
   const double residual = std::sqrt( dX * dX + dY * dY );
-  const bool warn = point->isEnabled() && residual >= sWarnThreshold;
+  // Pixel residual: warn above 2 px; map residual: warn above 30 m
+  const double warnThr = mResidualIsMap ? 30.0 : 2.0;
+  const bool warn = point->isEnabled() && residual >= warnThr;
   const QString dash = QStringLiteral( "—" );
+
+  const QgsPointXY destMap = point->destinationPoint();
+  const QgsPointXY srcPx = toSourcePixel( point->sourcePoint() );
+  const QgsPointXY dstPx = toDestPixel( destMap );
 
   switch ( role )
   {
@@ -129,37 +167,27 @@ QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
         case Column::Enabled:
           return QString();
         case Column::ID:
-          return index.row();
-        case Column::SourceX:
+          return index.row() + 1;
+        case Column::SourceMapX:
           return formatFixed( point->sourcePoint().x(), 2 );
-        case Column::SourceY:
-          // Store and display the same canvas/map coordinates used for markers.
-          // (Do not negate Y — dual-canvas pick stores real map Y, not GDAL row.)
+        case Column::SourceMapY:
           return formatFixed( point->sourcePoint().y(), 2 );
-        case Column::DestinationX:
-        {
-          // Prefer raw destination as picked on REF/Map (image/map coords of base).
-          // Only reproject when target CRS is valid and differs from stored CRS.
-          if ( mTargetCrs.isValid()
-               && point->destinationPointCrs().isValid()
-               && mTargetCrs != point->destinationPointCrs() )
-          {
-            const QgsPointXY td = point->transformedDestinationPoint( mTargetCrs, mTransformContext );
-            return formatFixed( td.x(), 2 );
-          }
-          return formatFixed( point->destinationPoint().x(), 2 );
-        }
-        case Column::DestinationY:
-        {
-          if ( mTargetCrs.isValid()
-               && point->destinationPointCrs().isValid()
-               && mTargetCrs != point->destinationPointCrs() )
-          {
-            const QgsPointXY td = point->transformedDestinationPoint( mTargetCrs, mTransformContext );
-            return formatFixed( td.y(), 2 );
-          }
-          return formatFixed( point->destinationPoint().y(), 2 );
-        }
+        case Column::SourceCol:
+          return ( mHasSrcRaster || ( mGeorefTransform && mGeorefTransform->hasExistingGeoreference() ) )
+                   ? formatFixed( srcPx.x(), 1 )
+                   : dash;
+        case Column::SourceRow:
+          return ( mHasSrcRaster || ( mGeorefTransform && mGeorefTransform->hasExistingGeoreference() ) )
+                   ? formatFixed( srcPx.y(), 1 )
+                   : dash;
+        case Column::DestMapX:
+          return formatFixed( destMap.x(), 2 );
+        case Column::DestMapY:
+          return formatFixed( destMap.y(), 2 );
+        case Column::DestCol:
+          return mHasDstRaster ? formatFixed( dstPx.x(), 1 ) : dash;
+        case Column::DestRow:
+          return mHasDstRaster ? formatFixed( dstPx.y(), 1 ) : dash;
         case Column::ResidualDx:
           if ( !point->isEnabled() )
             return dash;
@@ -184,14 +212,14 @@ QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
     {
       switch ( column )
       {
-        case Column::SourceX:
+        case Column::SourceMapX:
           return point->sourcePoint().x();
-        case Column::SourceY:
+        case Column::SourceMapY:
           return point->sourcePoint().y();
-        case Column::DestinationX:
-          return point->transformedDestinationPoint( mTargetCrs, mTransformContext ).x();
-        case Column::DestinationY:
-          return point->transformedDestinationPoint( mTargetCrs, mTransformContext ).y();
+        case Column::DestMapX:
+          return destMap.x();
+        case Column::DestMapY:
+          return destMap.y();
         case Column::PointType:
           return point->pointType();
         default:
@@ -210,12 +238,11 @@ QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
         return QVariant( Qt::AlignCenter );
       if ( column == Column::PointType )
         return QVariant( Qt::AlignLeft | Qt::AlignVCenter );
-      if ( column != Column::LastColumn )
-        return QVariant( Qt::AlignRight | Qt::AlignVCenter );
-      break;
+      return QVariant( Qt::AlignRight | Qt::AlignVCenter );
 
     case Qt::ForegroundRole:
-      if ( warn && ( column == Column::ResidualDx || column == Column::ResidualDy || column == Column::TotalResidual ) )
+      if ( warn && ( column == Column::ResidualDx || column == Column::ResidualDy
+                     || column == Column::TotalResidual ) )
         return QBrush( sWarnColor );
       break;
 
@@ -232,7 +259,8 @@ QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
 
 bool QgsGCPListModel::setData( const QModelIndex &index, const QVariant &value, int role )
 {
-  if ( !mGCPList || index.row() < 0 || index.row() >= mGCPList->size() || index.column() < 0 || index.column() >= columnCount() )
+  if ( !mGCPList || index.row() < 0 || index.row() >= mGCPList->size()
+       || index.column() < 0 || index.column() >= columnCount() )
     return false;
 
   QgsGcpPoint *point = mGCPList->at( index.row() );
@@ -249,17 +277,16 @@ bool QgsGCPListModel::setData( const QModelIndex &index, const QVariant &value, 
         point->setEnabled( checked );
         emit dataChanged( index, index, { Qt::CheckStateRole, Qt::DisplayRole } );
         emit pointEnabled( point, index.row() );
-        // Notify shell so canvas markers recompute fit / refresh.
         mGCPList->notifyPointsMutated();
         return true;
       }
       break;
 
-    case Column::SourceX:
-    case Column::SourceY:
+    case Column::SourceMapX:
+    case Column::SourceMapY:
     {
       QgsPointXY sourcePoint = point->sourcePoint();
-      if ( column == Column::SourceX )
+      if ( column == Column::SourceMapX )
         sourcePoint.setX( value.toDouble() );
       else
         sourcePoint.setY( value.toDouble() );
@@ -269,17 +296,15 @@ bool QgsGCPListModel::setData( const QModelIndex &index, const QVariant &value, 
       return true;
     }
 
-    case Column::DestinationX:
-    case Column::DestinationY:
+    case Column::DestMapX:
+    case Column::DestMapY:
     {
-      QgsPointXY destinationPoint = point->transformedDestinationPoint( mTargetCrs, mTransformContext );
-      if ( column == Column::DestinationX )
+      QgsPointXY destinationPoint = point->destinationPoint();
+      if ( column == Column::DestMapX )
         destinationPoint.setX( value.toDouble() );
       else
         destinationPoint.setY( value.toDouble() );
       point->setDestinationPoint( destinationPoint );
-      if ( mTargetCrs.isValid() )
-        point->setDestinationPointCrs( mTargetCrs );
       emit dataChanged( index, index );
       mGCPList->notifyPointsMutated();
       return true;
@@ -295,11 +320,7 @@ bool QgsGCPListModel::setData( const QModelIndex &index, const QVariant &value, 
       }
       break;
 
-    case Column::ID:
-    case Column::ResidualDx:
-    case Column::ResidualDy:
-    case Column::TotalResidual:
-    case Column::LastColumn:
+    default:
       return false;
   }
   return false;
@@ -307,7 +328,8 @@ bool QgsGCPListModel::setData( const QModelIndex &index, const QVariant &value, 
 
 Qt::ItemFlags QgsGCPListModel::flags( const QModelIndex &index ) const
 {
-  if ( !mGCPList || index.row() < 0 || index.row() >= mGCPList->size() || index.column() < 0 || index.column() >= columnCount() )
+  if ( !mGCPList || index.row() < 0 || index.row() >= mGCPList->size()
+       || index.column() < 0 || index.column() >= columnCount() )
     return QAbstractTableModel::flags( index );
 
   const Column column = static_cast<Column>( index.column() );
@@ -315,20 +337,15 @@ Qt::ItemFlags QgsGCPListModel::flags( const QModelIndex &index ) const
   {
     case Column::Enabled:
       return Qt::ItemIsEnabled | Qt::ItemIsUserCheckable | Qt::ItemIsSelectable;
-    case Column::SourceX:
-    case Column::SourceY:
-    case Column::DestinationX:
-    case Column::DestinationY:
+    case Column::SourceMapX:
+    case Column::SourceMapY:
+    case Column::DestMapX:
+    case Column::DestMapY:
     case Column::PointType:
       return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable;
-    case Column::ID:
-    case Column::ResidualDx:
-    case Column::ResidualDy:
-    case Column::TotalResidual:
-    case Column::LastColumn:
+    default:
       return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
   }
-  return QAbstractTableModel::flags( index );
 }
 
 QVariant QgsGCPListModel::headerData( int section, Qt::Orientation orientation, int role ) const
@@ -336,29 +353,28 @@ QVariant QgsGCPListModel::headerData( int section, Qt::Orientation orientation, 
   if ( orientation != Qt::Horizontal || ( role != Qt::DisplayRole && role != Qt::ToolTipRole ) )
     return QVariant();
 
-  // Chinese headers — units depend on whether dual-pick stores map or pixel coords.
-  const QString srcU = mSourceIsMap ? tr( "map" ) : tr( "px" );
   const QString resU = mResidualIsMap ? tr( "m" ) : tr( "px" );
-  const QString dstU = mDestCrsAuth.isEmpty() ? tr( "map" ) : mDestCrsAuth;
 
   if ( role == Qt::ToolTipRole )
   {
     switch ( static_cast<Column>( section ) )
     {
-      case Column::SourceX:
-      case Column::SourceY:
-        return mSourceIsMap
-                 ? tr( "源影像画布上的地图/图层坐标（双画布点选）" )
-                 : tr( "源影像像元坐标" );
-      case Column::DestinationX:
-      case Column::DestinationY:
-        return tr( "参考/地图画布上的坐标（Base 影像坐标系）\n%1" ).arg( dstU );
+      case Column::SourceMapX:
+      case Column::SourceMapY:
+        return tr( "源影像图层坐标系下的地图坐标" );
+      case Column::SourceCol:
+      case Column::SourceRow:
+        return tr( "源影像像元行列号（列=col，行=row，自左上角）" );
+      case Column::DestMapX:
+      case Column::DestMapY:
+        return tr( "参考影像/地图图层坐标系下的坐标（Base）" );
+      case Column::DestCol:
+      case Column::DestRow:
+        return tr( "参考影像像元行列号（列=col，行=row）" );
       case Column::ResidualDx:
       case Column::ResidualDy:
       case Column::TotalResidual:
-        return mResidualIsMap
-                 ? tr( "残差（地图单位）" )
-                 : tr( "残差（源影像像元）" );
+        return mResidualIsMap ? tr( "残差（地图单位）" ) : tr( "残差（源影像像元）" );
       default:
         break;
     }
@@ -368,13 +384,17 @@ QVariant QgsGCPListModel::headerData( int section, Qt::Orientation orientation, 
   {
     case Column::Enabled:       return tr( "启用" );
     case Column::ID:            return tr( "#" );
-    case Column::SourceX:       return tr( "X 源 (%1)" ).arg( srcU );
-    case Column::SourceY:       return tr( "Y 源 (%1)" ).arg( srcU );
-    case Column::DestinationX:  return tr( "X 参 (%1)" ).arg( mDestCrsAuth.isEmpty() ? tr( "map" ) : QStringLiteral( "map" ) );
-    case Column::DestinationY:  return tr( "Y 参 (%1)" ).arg( mDestCrsAuth.isEmpty() ? tr( "map" ) : QStringLiteral( "map" ) );
-    case Column::ResidualDx:    return tr( "ΔX (%1)" ).arg( resU );
-    case Column::ResidualDy:    return tr( "ΔY (%1)" ).arg( resU );
-    case Column::TotalResidual: return tr( "RMS (%1)" ).arg( resU );
+    case Column::SourceMapX:    return tr( "X源(map)" );
+    case Column::SourceMapY:    return tr( "Y源(map)" );
+    case Column::SourceCol:     return tr( "列源" );
+    case Column::SourceRow:     return tr( "行源" );
+    case Column::DestMapX:      return tr( "X参(map)" );
+    case Column::DestMapY:      return tr( "Y参(map)" );
+    case Column::DestCol:       return tr( "列参" );
+    case Column::DestRow:       return tr( "行参" );
+    case Column::ResidualDx:    return tr( "ΔX(%1)" ).arg( resU );
+    case Column::ResidualDy:    return tr( "ΔY(%1)" ).arg( resU );
+    case Column::TotalResidual: return tr( "RMS(%1)" ).arg( resU );
     case Column::PointType:     return tr( "类型" );
     case Column::LastColumn:    break;
   }
@@ -385,7 +405,6 @@ Qgis::RenderUnit QgsGCPListModel::residualUnit() const
 {
   if ( mResidualIsMap )
     return Qgis::RenderUnit::MapUnits;
-  // Default: residual in source-pixel space (matches canvas residual arrows).
   return Qgis::RenderUnit::Pixels;
 }
 

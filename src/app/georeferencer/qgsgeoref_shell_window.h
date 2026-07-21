@@ -161,6 +161,11 @@ class QgsGeorefShellWindow : public QMainWindow
     void syncAllMarkers();
     /// Keep Add-GCP tools armed on both canvases (no shared QAction on tools).
     void rearmAddPointTools();
+    /// Convert canvas map pick into the raster layer's CRS (avoids CRS mix-ups).
+    QgsPointXY mapPickToLayerCrs( QgsMapCanvas *canvas, QgsRasterLayer *layer,
+                                  const QgsPointXY &canvasMapPt ) const;
+    /// Push source/dest raster paths into GCP table for col/row display.
+    void updateGcpTableRasterPaths();
 
     QgisInterface *mIface = nullptr;
 
@@ -176,6 +181,9 @@ class QgsGeorefShellWindow : public QMainWindow
     QgsMapCanvas *mDstCanvas = nullptr; ///< REF (I2I) or Map (I2M)
     QgsMapLayerStore *mLayerStore = nullptr;
     QgsRasterLayer *mSrcRaster = nullptr;
+    /// REF raster for I2I (null for I2M map mode). Used for pixel/CRS helpers.
+    QgsRasterLayer *mDstRaster = nullptr;
+    QString mDestRasterPath;
 
     QgsGeorefToolAddPoint *mAddPointTool = nullptr;     ///< SRC canvas
     QgsGeorefToolAddPoint *mAddPointToolDst = nullptr;  ///< REF / Map canvas
