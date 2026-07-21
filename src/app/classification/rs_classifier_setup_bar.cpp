@@ -3,6 +3,7 @@
 #include "rs_classifier_setup_bar.h"
 
 #include "dialogs/dialog_help_catalog.h"
+#include "dialogs/dialog_utils.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -18,17 +19,22 @@
 RsClassifierSetupBar::RsClassifierSetupBar( QWidget *parent )
   : QWidget( parent )
 {
+  setObjectName( QStringLiteral( "rsClassifierSetupBar" ) );
   buildLayout();
 }
 
 void RsClassifierSetupBar::buildLayout()
 {
   auto *root = new QVBoxLayout( this );
-  root->setContentsMargins( 8, 4, 8, 4 );
-  root->setSpacing( 4 );
+  root->setContentsMargins( 10, 8, 10, 8 );
+  root->setSpacing( 6 );
 
   SicnuDialogHelp::tip( this, SicnuDialogHelp::shortForTool(
                           QStringLiteral( "classify_setup" ), tr( "分类设置栏" ) ) );
+
+  auto *flowHint = SicnuUi::makeHintLabel(
+    this, tr( "流程：选算法 → 设波段/训练比例 → 采集 ROI → 预览或训练分类 → 精度评价" ) );
+  root->addWidget( flowHint );
 
   auto *row = new QHBoxLayout();
   row->setSpacing( 8 );
@@ -131,14 +137,15 @@ void RsClassifierSetupBar::buildLayout()
   mBtnPreview->setObjectName( QStringLiteral( "rsClassifierBtnPreview" ) );
   SicnuDialogHelp::tip( mBtnPreview, tr(
     "仅对当前地图视口范围分类并临时加载，便于快速试参数。" ) );
-  mBtnApply = new QPushButton( tr( "▶ 训练并分类" ), this );
+  mBtnApply = new QPushButton( tr( "训练并分类" ), this );
   mBtnApply->setObjectName( QStringLiteral( "rsClassifierBtnApply" ) );
-  mBtnApply->setDefault( true );
+  SicnuUi::markPrimary( mBtnApply );
   SicnuDialogHelp::tip( mBtnApply, tr(
     "用 ROI 样本训练并整景分类，写出输出栅格；完成后可做精度评价。" ) );
 
   auto *helpBtn = new QPushButton( tr( "帮助" ), this );
   helpBtn->setObjectName( QStringLiteral( "rsClassifierHelpBtn" ) );
+  SicnuUi::markSecondary( helpBtn );
   SicnuDialogHelp::tip( helpBtn, tr( "打开分类设置栏完整说明。" ) );
   connect( helpBtn, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, QStringLiteral( "classify_setup" ),

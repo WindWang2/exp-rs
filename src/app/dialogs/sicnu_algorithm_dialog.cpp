@@ -379,11 +379,14 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
 
   auto *container = new QWidget();
   auto *formLayout = new QFormLayout( container );
-  formLayout->setLabelAlignment( Qt::AlignRight );
+  formLayout->setLabelAlignment( Qt::AlignRight | Qt::AlignVCenter );
   formLayout->setFieldGrowthPolicy( QFormLayout::ExpandingFieldsGrow );
-  formLayout->setContentsMargins( 4, 4, 4, 4 );
+  formLayout->setContentsMargins( 12, 10, 12, 10 );
+  formLayout->setHorizontalSpacing( 12 );
+  formLayout->setVerticalSpacing( 10 );
 
-  auto *advancedGroup = new QGroupBox( tr( "Advanced Parameters" ) );
+  auto *advancedGroup = new QGroupBox( tr( "高级参数" ) );
+  advancedGroup->setObjectName( QStringLiteral( "rsDialogGroup" ) );
   auto *advancedLayout = new QFormLayout( advancedGroup );
   advancedLayout->setLabelAlignment( Qt::AlignRight );
   advancedLayout->setFieldGrowthPolicy( QFormLayout::ExpandingFieldsGrow );
