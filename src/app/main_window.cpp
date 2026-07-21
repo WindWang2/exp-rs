@@ -96,6 +96,8 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     // Create LayerManager (must come after map canvas + layer tree view exist)
     m_layerManager = std::make_unique<LayerManager>( m_mapCanvas, m_layerTreeView,
                                                      m_overviewCanvas, this );
+    qDebug() << "Setting up ribbon and task panel...";
+    setupRibbonAndTaskPanel();
     qDebug() << "Setting up status bar...";
     setupStatusBar();
     qDebug() << "Setting up connections...";

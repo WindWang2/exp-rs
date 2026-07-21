@@ -61,6 +61,9 @@ class QgsClipboard;
 class QgsAttributeTableDialog;
 class QgsVectorLayer;
 class SwipeMapTool;
+class TaskPanelHost;
+class WorkflowSessionController;
+class RibbonController;
 
 namespace Sicnu { class PythonScriptEditor; }
 
@@ -239,8 +242,11 @@ private:
     void setupMenu();
     void setupToolbars();
     void setupDockWidgets();
+    void setupRibbonAndTaskPanel();
     void setupStatusBar();
     void setupConnections();
+    void openWorkflowTool( const QString &definitionId );
+    void refreshWorkflowLayerChoices();
 
     QgsLayerTreeGroup *findOrCreateGroup(const QString &name);
     QgsVectorLayer *currentVectorLayer();
@@ -318,6 +324,11 @@ private:
     QgsDockWidget *m_histogramStretchDock = nullptr;
     QgsDockWidget *m_logDock = nullptr;
     QgsDockWidget *m_workflowDock = nullptr;
+    QgsDockWidget *m_taskPanelDock = nullptr;
+    TaskPanelHost *m_taskPanel = nullptr;
+    WorkflowSessionController *m_sessionController = nullptr;
+    RibbonController *m_ribbonController = nullptr;
+    QWidget *m_ribbonBar = nullptr;
     QMenu *m_windowMenu = nullptr;
 
     // Identify results display

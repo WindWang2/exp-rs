@@ -13,6 +13,7 @@ add_executable(sicnu_geo_rs
     shell/schema_form_builder.cpp
     shell/task_panel_host.cpp
     shell/workflow_session_controller.cpp
+    shell/ribbon_controller.cpp
     layer_tree_menu.cpp
     crs_presets.cpp
     log_panel.cpp

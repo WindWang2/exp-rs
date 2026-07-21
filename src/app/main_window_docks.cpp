@@ -4,6 +4,9 @@
 
 #include "layer_manager.h"
 #include "log_panel.h"
+#include "shell/ribbon_controller.h"
+#include "shell/task_panel_host.h"
+#include "shell/workflow_session_controller.h"
 #include "widgets/spectral_profile_widget.h"
 #include "widgets/guided_workflow_widget.h"
 #include "widgets/histogram_stretch_widget.h"
@@ -23,7 +26,10 @@
 #include <qgsdockwidget.h>
 #include <qgsfilterlineedit.h>
 #include <qgsmapoverviewcanvas.h>
+#include <qgsmaplayer.h>
+#include <qgsproject.h>
 #include <qgsprocessingtoolboxtreeview.h>
+#include <qgsrasterlayer.h>
 #include <qgsgui.h>
 
 #ifdef SICNU_EMBED_PYTHON
@@ -249,6 +255,8 @@ void QgisDesktopWindow::setupDockWidgets()
         m_windowMenu->addAction(m_histogramStretchDock->toggleViewAction());
         m_windowMenu->addAction(m_logDock->toggleViewAction());
         m_windowMenu->addAction(m_workflowDock->toggleViewAction());
+        // Task panel dock is created after setupDockWidgets (setupRibbonAndTaskPanel);
+        // its toggle action is added there once the dock exists.
         m_windowMenu->addSeparator();
 
 #ifdef SICNU_EMBED_PYTHON
@@ -289,4 +297,84 @@ void QgisDesktopWindow::setupDockWidgets()
         QAction *resetLayoutAction = m_windowMenu->addAction(tr("Reset Layout"));
         connect(resetLayoutAction, &QAction::triggered, this, &QgisDesktopWindow::resetPanelLayout);
     }
+}
+
+void QgisDesktopWindow::setupRibbonAndTaskPanel()
+{
+    // Right-side task panel for atomic workflow tools
+    m_taskPanel = new TaskPanelHost( this );
+    m_taskPanelDock = new QgsDockWidget( tr( "任务" ), this );
+    m_taskPanelDock->setObjectName( QStringLiteral( "rsTaskPanelDock" ) );
+    m_taskPanelDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+    m_taskPanelDock->setWidget( m_taskPanel );
+    addDockWidget( Qt::RightDockWidgetArea, m_taskPanelDock );
+    if ( m_processingDock )
+        tabifyDockWidget( m_processingDock, m_taskPanelDock );
+    m_taskPanelDock->raise();
+
+    if ( m_windowMenu )
+        m_windowMenu->addAction( m_taskPanelDock->toggleViewAction() );
+
+    // Session controller bridges TaskPanelHost ↔ WorkflowRuntime
+    m_sessionController = new WorkflowSessionController( this );
+    m_sessionController->registerBuiltins();
+    m_sessionController->bindPanel( m_taskPanel );
+
+    connect( m_sessionController, &WorkflowSessionController::requestLoadRaster,
+             this, [this]( const QString &path ) {
+                 loadRasterLayer( path );
+             } );
+    connect( m_sessionController, &WorkflowSessionController::statusMessage,
+             this, [this]( const QString &msg ) {
+                 statusBar()->showMessage( msg, 5000 );
+             } );
+    connect( m_taskPanel, &TaskPanelHost::closeClicked, this, [this]() {
+        if ( m_taskPanelDock )
+            m_taskPanelDock->hide();
+    } );
+
+    // Six-tab ribbon above the map canvas
+    m_ribbonController = new RibbonController( this, this );
+    m_ribbonBar = m_ribbonController->createRibbonBar();
+    connect( m_ribbonController, &RibbonController::openWorkflowTool,
+             this, &QgisDesktopWindow::openWorkflowTool );
+
+    if ( QWidget *central = centralWidget() )
+    {
+        if ( auto *lay = qobject_cast<QVBoxLayout *>( central->layout() ) )
+        {
+            // Place ribbon at the top of the central column (above message bar / canvas).
+            lay->insertWidget( 0, m_ribbonBar );
+        }
+    }
+}
+
+void QgisDesktopWindow::refreshWorkflowLayerChoices()
+{
+    if ( !m_sessionController )
+        return;
+
+    QStringList ids;
+    QStringList names;
+    const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
+    for ( auto it = layers.constBegin(); it != layers.constEnd(); ++it )
+    {
+        QgsMapLayer *layer = it.value();
+        if ( !layer || !qobject_cast<QgsRasterLayer *>( layer ) )
+            continue;
+        ids.append( it.key() );
+        names.append( layer->name() );
+    }
+    m_sessionController->setLayerChoices( ids, names );
+}
+
+void QgisDesktopWindow::openWorkflowTool( const QString &definitionId )
+{
+    if ( !m_sessionController || !m_taskPanelDock )
+        return;
+
+    refreshWorkflowLayerChoices();
+    m_sessionController->openTool( definitionId );
+    m_taskPanelDock->show();
+    m_taskPanelDock->raise();
 }
