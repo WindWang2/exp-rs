@@ -218,6 +218,13 @@ QWidget *RibbonController::createRibbonBar()
     {
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openClassificationWindow );
     }
+    // OBIA keeps its dedicated workspace window (RsObiaMainWindow); ribbon
+    // mirrors the 栅格 menu entry. lab.obia is a catalog stub only for now.
+    if ( QToolButton *btn = addToolButton( hl, tr( "OBIA" ), "seg_ent_tion",
+                                           tr( "面向对象分类：分割 + 对象级分类" ) ) )
+    {
+      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openObiaWindow );
+    }
 
     tabs->addTab( page, tr( "分类/解译" ) );
   }

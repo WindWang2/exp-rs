@@ -149,6 +149,54 @@ void registerGeorefImageToMap( WorkflowRegistry &reg )
   reg.registerDefinition( std::move( d ) );
 }
 
+/// OBIA workspace stub (mirrors RsObiaMainWindow toolbar: load → segment →
+/// label → classify → export). UI still owns RsObiaMainWindow / RsObiaTask;
+/// Runtime binding can land later without changing the definition id.
+void registerObia( WorkflowRegistry &reg )
+{
+  WorkflowDefinition d;
+  d.id = "lab.obia";
+  d.title = "面向对象分类 (OBIA)";
+  d.host = HostKind::Workspace;
+  d.workspaceKind = "obia";
+
+  StepDef openImage;
+  openImage.id = "open_image";
+  openImage.title = "打开影像";
+  openImage.kind = StepKind::Interactive;
+
+  StepDef segment;
+  segment.id = "segment";
+  segment.title = "分割";
+  segment.kind = StepKind::Operator;
+  segment.operatorId = "rs:obia_segment";
+  segment.artifactOnSuccess = "segment_map";
+  segment.gates.push_back( {"hasArtifact:source_raster", "请先打开源影像"} );
+
+  StepDef label;
+  label.id = "label";
+  label.title = "对象标注";
+  label.kind = StepKind::Interactive;
+  label.gates.push_back( {"hasArtifact:segment_map", "请先完成分割"} );
+
+  StepDef classify;
+  classify.id = "classify";
+  classify.title = "对象分类";
+  classify.kind = StepKind::Operator;
+  classify.operatorId = "rs:obia_classify";
+  classify.artifactOnSuccess = "classified_output";
+  classify.gates.push_back( {"hasArtifact:segment_map", "请先完成分割"} );
+
+  StepDef exportStep;
+  exportStep.id = "export";
+  exportStep.title = "导出";
+  exportStep.kind = StepKind::Review;
+  exportStep.gates.push_back( {"hasArtifact:classified_output", "请先完成对象分类"} );
+
+  d.steps = {openImage, segment, label, classify, exportStep};
+  reg.registerDefinition( std::move( d ) );
+}
+
 void registerBuiltinWorkflows( WorkflowRegistry &reg )
 {
   // Primary input keys match each operator's schema() required fields.
@@ -171,6 +219,7 @@ void registerBuiltinWorkflows( WorkflowRegistry &reg )
 
   registerClassifySupervised( reg );
   registerGeorefImageToMap( reg );
+  registerObia( reg );
 }
 
 } // namespace sicnu::workflow

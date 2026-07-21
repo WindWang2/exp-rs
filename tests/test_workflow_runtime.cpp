@@ -220,6 +220,7 @@ TEST_CASE( "Builtin workflows registered", "[workflow]" )
 {
   WorkflowRegistry reg;
   registerBuiltinWorkflows( reg );
+  // Atomic TaskPanel tools
   REQUIRE( reg.has( "tool.rs.spectral_index" ) );
   REQUIRE( reg.has( "tool.rs.band_math" ) );
   REQUIRE( reg.has( "tool.rs.change_detection" ) );
@@ -228,9 +229,11 @@ TEST_CASE( "Builtin workflows registered", "[workflow]" )
   REQUIRE( reg.has( "tool.rs.terrain_analysis" ) );
   REQUIRE( reg.has( "tool.rs.pca" ) );
   REQUIRE( reg.has( "tool.rs.atmospheric_correction" ) );
+  // Workspace labs
   REQUIRE( reg.has( "lab.classify.supervised" ) );
   REQUIRE( reg.has( "lab.georef.image_to_map" ) );
-  REQUIRE( reg.ids().size() == 10 );
+  REQUIRE( reg.has( "lab.obia" ) );
+  REQUIRE( reg.ids().size() == 11 );
 
   const auto *d = reg.find( "tool.rs.spectral_index" );
   REQUIRE( d );
@@ -352,6 +355,63 @@ TEST_CASE( "Builtin lab.georef.image_to_map has 6 steps in order", "[workflow]" 
   REQUIRE( can.ok );
   REQUIRE( rt.gotoStep( sid, "residual" ) );
   REQUIRE( rt.state( sid ).currentStepId == "residual" );
+}
+
+TEST_CASE( "Builtin lab.obia has 5 steps in order", "[workflow]" )
+{
+  WorkflowRegistry reg;
+  registerBuiltinWorkflows( reg );
+  const auto *d = reg.find( "lab.obia" );
+  REQUIRE( d );
+  REQUIRE( d->host == HostKind::Workspace );
+  REQUIRE( d->workspaceKind == "obia" );
+  REQUIRE( d->title == "面向对象分类 (OBIA)" );
+  REQUIRE( d->steps.size() == 5 );
+
+  const std::vector<std::string> expectedIds = {
+    "open_image", "segment", "label", "classify", "export"
+  };
+  const std::vector<std::string> expectedTitles = {
+    "打开影像", "分割", "对象标注", "对象分类", "导出"
+  };
+  const std::vector<StepKind> expectedKinds = {
+    StepKind::Interactive,
+    StepKind::Operator,
+    StepKind::Interactive,
+    StepKind::Operator,
+    StepKind::Review,
+  };
+
+  for ( size_t i = 0; i < expectedIds.size(); ++i )
+  {
+    REQUIRE( d->steps[i].id == expectedIds[i] );
+    REQUIRE( d->steps[i].title == expectedTitles[i] );
+    REQUIRE( d->steps[i].kind == expectedKinds[i] );
+  }
+
+  REQUIRE( d->steps[1].operatorId == "rs:obia_segment" );
+  REQUIRE( d->steps[1].artifactOnSuccess == "segment_map" );
+  REQUIRE( d->steps[3].operatorId == "rs:obia_classify" );
+  REQUIRE( d->steps[3].artifactOnSuccess == "classified_output" );
+
+  REQUIRE_FALSE( d->steps[1].gates.empty() );
+  REQUIRE( d->steps[1].gates[0].require == "hasArtifact:source_raster" );
+  REQUIRE_FALSE( d->steps[2].gates.empty() );
+  REQUIRE( d->steps[2].gates[0].require == "hasArtifact:segment_map" );
+  REQUIRE_FALSE( d->steps[4].gates.empty() );
+  REQUIRE( d->steps[4].gates[0].require == "hasArtifact:classified_output" );
+
+  WorkflowRuntime rt( reg );
+  const auto sid = rt.open( "lab.obia" );
+  REQUIRE_FALSE( sid.empty() );
+  REQUIRE( rt.state( sid ).currentStepId == "open_image" );
+
+  REQUIRE( rt.gotoStep( sid, "segment" ) );
+  auto can = rt.canRun( sid, "segment" );
+  REQUIRE_FALSE( can.ok );
+  rt.setArtifact( sid, "source_raster", "/tmp/demo.tif" );
+  can = rt.canRun( sid, "segment" );
+  REQUIRE( can.ok );
 }
 
 TEST_CASE( "Runtime open returns empty for missing definition", "[workflow]" )

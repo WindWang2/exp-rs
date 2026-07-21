@@ -1,5 +1,10 @@
 // main_window_processing.cpp — RS processing dialog slots
 // Extracted from main_window.cpp for maintainability
+//
+// Migration note (W1–W5): high-frequency RS tools prefer WorkflowRuntime via
+// openWorkflowTool(definitionId) when m_sessionController is available.
+// Legacy QDialog paths remain as fallback (no session controller / headless
+// callers) and for tools not yet registered as atomic definitions.
 #include "main_window.h"
 
 #include "dialogs/image_enhancement_panel.h"
