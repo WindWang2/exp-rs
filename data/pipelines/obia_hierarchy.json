@@ -1,0 +1,25 @@
+{
+  "name": "obia_hierarchy_lab",
+  "description": "Hierarchical OBIA V1: MeanShift fine + Watershed coarse + parent-link (+ optional classify)",
+  "steps": [
+    {
+      "operator": "rs:obia_hierarchy",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "outputFine": "/tmp/sicnu_obia_fine_labels.tif",
+        "outputCoarse": "/tmp/sicnu_obia_coarse_labels.tif",
+        "outputParents": "/tmp/sicnu_obia_parents.csv",
+        "outputClass": "/tmp/sicnu_obia_hierarchy_class.tif",
+        "training": "data/samples/training_samples.shp",
+        "method": "svm",
+        "classField": "class_id",
+        "classifyLevel": 0,
+        "spatialRadius": 5,
+        "rangeRadius": 15.0,
+        "minRegionSize": 100,
+        "watershedThreshold": 0.01,
+        "minLabelPixels": 2
+      }
+    }
+  ]
+}

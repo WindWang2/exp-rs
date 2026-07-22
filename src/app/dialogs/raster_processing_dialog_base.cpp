@@ -2,10 +2,9 @@
 #include "raster_processing_dialog_base.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
-#include "shell/job_engine_qt_bridge.h"
 #include "shell/processing_job_adapter.h"
+#include "shell/rs_job_runner.h"
 
-#include "jobs/job_engine.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -240,15 +239,6 @@ void RasterProcessingDialogBase::runGdalTask( const std::function<QString()> &ta
   if ( isRunning() )
     return;
 
-  // Prefer JobEngine so dialog GDAL work appears in RsJobPanel (same as runOperatorTask).
-  if ( !m_jobBridgeConnected )
-  {
-    auto *bridge = JobEngineQtBridge::instance();
-    connect( bridge, &JobEngineQtBridge::jobFinished, this,
-             &RasterProcessingDialogBase::onOperatorJobFinished );
-    m_jobBridgeConnected = true;
-  }
-
   startRun();
 
   sicnu::jobs::JobRequest req;
@@ -258,7 +248,7 @@ void RasterProcessingDialogBase::runGdalTask( const std::function<QString()> &ta
   req.clientTag = toolName().toStdString();
 
   const QString errMarker = gdalErrorMarker();
-  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+  m_pendingJobId = RsJobRunner::run(
     std::move( req ),
     [task, errMarker]( const sicnu::jobs::JobRequest &,
                        sicnu::operators::RSOperatorContext &ctx ) {
@@ -279,9 +269,25 @@ void RasterProcessingDialogBase::runGdalTask( const std::function<QString()> &ta
       Json::Value out( Json::objectValue );
       out["output"] = result.toStdString();
       return out;
-    } );
-
-  m_pendingJobId = QString::fromStdString( jobId );
+    },
+    [this]( const RsJobFinish &fin ) {
+      m_pendingJobId.clear();
+      if ( fin.succeeded()
+           && fin.result.isMember( "output" )
+           && fin.result["output"].isString() )
+      {
+        onCompleted( QString::fromStdString( fin.result["output"].asString() ) );
+        return;
+      }
+      if ( fin.cancelled() )
+        onFailed( tr( "已取消" ) );
+      else if ( !fin.error.isEmpty() )
+        onFailed( fin.error );
+      else
+        onFailed( tr( "运行失败" ) );
+    },
+    {},
+    this );
 }
 
 void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm *algorithm,
@@ -290,14 +296,6 @@ void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm 
 {
   if ( isRunning() || !algorithm )
     return;
-
-  if ( !m_jobBridgeConnected )
-  {
-    auto *bridge = JobEngineQtBridge::instance();
-    connect( bridge, &JobEngineQtBridge::jobFinished, this,
-             &RasterProcessingDialogBase::onOperatorJobFinished );
-    m_jobBridgeConnected = true;
-  }
 
   startRun();
 
@@ -314,7 +312,6 @@ void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm 
     return;
   }
 
-  // Snapshot project pointers for the worker (read-only use).
   QgsProject *project = context.project();
 
   sicnu::jobs::JobRequest req;
@@ -324,7 +321,7 @@ void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm 
   req.clientTag = toolName().toStdString();
 
   const QString fallbackOutput = outputPath();
-  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+  m_pendingJobId = RsJobRunner::run(
     std::move( req ),
     [algClone, parameters, project, fallbackOutput](
       const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
@@ -386,9 +383,25 @@ void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm 
         throw sicnu::operators::RSOperatorError(
           sicnu::operators::ErrorCode::QgisProcessingError, e.what().toStdString() );
       }
-    } );
-
-  m_pendingJobId = QString::fromStdString( jobId );
+    },
+    [this]( const RsJobFinish &fin ) {
+      m_pendingJobId.clear();
+      if ( fin.succeeded()
+           && fin.result.isMember( "output" )
+           && fin.result["output"].isString() )
+      {
+        onCompleted( QString::fromStdString( fin.result["output"].asString() ) );
+        return;
+      }
+      if ( fin.cancelled() )
+        onFailed( tr( "已取消" ) );
+      else if ( !fin.error.isEmpty() )
+        onFailed( fin.error );
+      else
+        onFailed( tr( "Operator did not return an output path" ) );
+    },
+    {},
+    this );
 }
 
 void RasterProcessingDialogBase::runOperatorTask( const QString &operatorId,
@@ -396,14 +409,6 @@ void RasterProcessingDialogBase::runOperatorTask( const QString &operatorId,
 {
   if ( isRunning() )
     return;
-
-  if ( !m_jobBridgeConnected )
-  {
-    auto *bridge = JobEngineQtBridge::instance();
-    connect( bridge, &JobEngineQtBridge::jobFinished, this,
-             &RasterProcessingDialogBase::onOperatorJobFinished );
-    m_jobBridgeConnected = true;
-  }
 
   startRun();
 
@@ -413,47 +418,25 @@ void RasterProcessingDialogBase::runOperatorTask( const QString &operatorId,
   req.title = dialogTitle().toStdString();
   req.source = "dialog";
 
-  const std::string jobId = sicnu::jobs::JobEngine::instance().submit( std::move( req ) );
-  m_pendingJobId = QString::fromStdString( jobId );
-}
-
-void RasterProcessingDialogBase::onOperatorJobFinished( const QString &jobId )
-{
-  if ( m_pendingJobId.isEmpty() || jobId != m_pendingJobId )
-    return;
-
-  m_pendingJobId.clear();
-
-  const auto snapOpt = sicnu::jobs::JobEngine::instance().snapshot( jobId.toStdString() );
-  if ( !snapOpt )
-  {
-    onFailed( tr( "任务记录丢失" ) );
-    return;
-  }
-
-  const auto &rec = *snapOpt;
-  using sicnu::jobs::JobState;
-  if ( rec.state != JobState::Succeeded )
-  {
-    QString error = QString::fromStdString( rec.error );
-    if ( error.isEmpty() )
-    {
-      if ( rec.state == JobState::Cancelled )
-        error = tr( "已取消" );
+  m_pendingJobId = RsJobRunner::runOperator(
+    std::move( req ),
+    [this]( const RsJobFinish &fin ) {
+      m_pendingJobId.clear();
+      if ( fin.succeeded()
+           && fin.result.isMember( "output" )
+           && fin.result["output"].isString() )
+      {
+        onCompleted( QString::fromStdString( fin.result["output"].asString() ) );
+        return;
+      }
+      if ( fin.cancelled() )
+        onFailed( tr( "已取消" ) );
+      else if ( !fin.error.isEmpty() )
+        onFailed( fin.error );
       else
-        error = tr( "运行失败" );
-    }
-    onFailed( error );
-    return;
-  }
-
-  if ( rec.result.isMember( "output" ) && rec.result["output"].isString() )
-  {
-    onCompleted( QString::fromStdString( rec.result["output"].asString() ) );
-    return;
-  }
-
-  onFailed( tr( "Operator did not return an output path" ) );
+        onFailed( tr( "Operator did not return an output path" ) );
+    },
+    this );
 }
 
 void RasterProcessingDialogBase::handleCompleted( const QString &outputPath )

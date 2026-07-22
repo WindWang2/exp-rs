@@ -15,6 +15,8 @@ add_executable(sicnu_geo_rs
     shell/workflow_session_controller.cpp
     shell/ribbon_controller.cpp
     shell/job_engine_qt_bridge.cpp
+    shell/rs_job_runner.cpp
+    shell/rs_session_map_workspace.cpp
     shell/processing_job_adapter.cpp
     shell/rs_job_panel.cpp
     layer_tree_menu.cpp

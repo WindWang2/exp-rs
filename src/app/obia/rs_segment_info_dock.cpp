@@ -1,4 +1,4 @@
-// rs_segment_info_dock.cpp — Phase 10B Task 10B.5
+// rs_segment_info_dock.cpp — Segment info dock.
 #include "rs_segment_info_dock.h"
 
 RsSegmentInfoDock::RsSegmentInfoDock( QWidget *parent )
@@ -10,9 +10,9 @@ RsSegmentInfoDock::RsSegmentInfoDock( QWidget *parent )
     setWidget( mInfoText );
 }
 
-void RsSegmentInfoDock::showSegmentInfo( quint32 segmentId,
-                                          const RsSegmentFeatures::SegmentStat &stat,
-                                          int classId )
+QString RsSegmentInfoDock::formatBaseHtml( quint32 segmentId,
+                                           const RsSegmentFeatures::SegmentStat &stat,
+                                           int classId )
 {
     QString html;
     html += QStringLiteral( "<b>%1 %2</b><br>" ).arg( tr( "Segment" ) ).arg( segmentId );
@@ -37,7 +37,33 @@ void RsSegmentInfoDock::showSegmentInfo( quint32 segmentId,
                     .arg( stat.max[b], 0, 'f', 2 );
     }
     html += QStringLiteral( "</table>" );
+    return html;
+}
 
+void RsSegmentInfoDock::showSegmentInfo( quint32 segmentId,
+                                          const RsSegmentFeatures::SegmentStat &stat,
+                                          int classId )
+{
+    mInfoText->setHtml( formatBaseHtml( segmentId, stat, classId ) );
+}
+
+void RsSegmentInfoDock::showSegmentInfo( quint32 segmentId,
+                                          const RsSegmentFeatures::SegmentStat &stat,
+                                          int classId,
+                                          int level,
+                                          quint32 parentId,
+                                          int childCount,
+                                          double areaRatioToParent )
+{
+    QString html = formatBaseHtml( segmentId, stat, classId );
+    html += QStringLiteral( "<br><b>%1</b><br>" ).arg( tr( "Hierarchy (ids are level-local):" ) );
+    html += QStringLiteral( "%1: %2<br>" ).arg( tr( "Level" ) ).arg( level );
+    if ( parentId == 0 )
+        html += QStringLiteral( "%1: %2<br>" ).arg( tr( "Parent" ) ).arg( tr( "none (orphan / coarsest)" ) );
+    else
+        html += QStringLiteral( "%1: %2<br>" ).arg( tr( "Parent id" ) ).arg( parentId );
+    html += QStringLiteral( "%1: %2<br>" ).arg( tr( "Child count" ) ).arg( childCount );
+    html += QStringLiteral( "%1: %2<br>" ).arg( tr( "Area ratio to parent" ) ).arg( areaRatioToParent, 0, 'f', 4 );
     mInfoText->setHtml( html );
 }
 

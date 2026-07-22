@@ -68,6 +68,7 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         rs/rs_supervised_classification_operator.cpp
         rs/rs_obia_segment_operator.cpp
         rs/rs_obia_classify_operator.cpp
+        rs/rs_obia_hierarchy_operator.cpp
         rs/rs_segment_stats_operator.cpp
         rs/rs_segmentation_utils.cpp
     )
@@ -102,6 +103,15 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
         ${OpenCV_LIBS}
     )
     target_compile_definitions(sicnu_operators PUBLIC SICNU_HAS_OPENCV=1)
+endif()
+
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND TARGET qgis_analysis)
+    target_link_libraries(sicnu_operators PUBLIC qgis_analysis)
+    target_include_directories(sicnu_operators PUBLIC
+        ${CMAKE_SOURCE_DIR}/src/analysis
+        ${CMAKE_SOURCE_DIR}/src/analysis/segmentation
+        ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    )
 endif()
 
 # jsoncpp headers may be in a system path that requires -I flags from pkg-config

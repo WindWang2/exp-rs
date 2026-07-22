@@ -12,6 +12,7 @@
 #include "rs_classification_split.h"
 #include "rs_classification_task.h"
 #include "rs_classifier_kmeans.h"
+#include "rs_post_process_dialog.h"
 #include "rs_post_process_task.h"
 #include "rs_classifier_load_dialog.h"
 #include "qgisinterface.h"
@@ -33,24 +34,38 @@
 #include "rs_roi_collection.h"
 #include "rs_roi_io.h"
 #include "rs_roi_tool_base.h"
-#include "rs_roi_tool_freehand.h"
 #include "rs_roi_tool_magicwand.h"
-#include "rs_roi_tool_point.h"
-#include "rs_roi_tool_polygon.h"
-#include "rs_roi_tool_rectangle.h"
 #include "rs_spectral_curve_widget.h"
 #include "rs_feature_scaler.h"
+#include "qgsadvanceddigitizingdockwidget.h"
 #include "qgsapplication.h"
-#include "qgsgeometry.h"
+#include "qgscategorizedsymbolrenderer.h"
 #include "qgscoordinatereferencesystem.h"
+#include "qgsfeature.h"
+#include "qgsfeatureid.h"
+#include "qgsfeatureiterator.h"
+#include "qgsfeaturerequest.h"
+#include "qgsfield.h"
+#include "qgsfields.h"
+#include "qgsfillsymbol.h"
+#include "qgsgeometry.h"
 #include "qgsmapcanvas.h"
-#include "qgsmaplayerstore.h"
+#include "qgsmaplayer.h"
+#include "qgsmapmouseevent.h"
+#include "qgsmaptooldigitizefeature.h"
+#include "qgsmaptoolpan.h"
+#include "qgsmemoryproviderutils.h"
 #include "qgsmessagelog.h"
+#include "qgslayertreemodel.h"
+#include "qgslayertreeview.h"
 #include "qgsrasterlayer.h"
+#include "qgssymbol.h"
 #include "qgstaskmanager.h"
+#include "qgsvectorlayer.h"
+#include "qgis.h"
 
-#include "shell/job_engine_qt_bridge.h"
-#include "jobs/job_engine.h"
+#include "shell/rs_job_runner.h"
+#include "shell/rs_session_map_workspace.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -106,6 +121,70 @@
 namespace
 {
 
+/// Click-select features on the sample vector layer (QGIS-like selection).
+class SampleSelectTool : public QgsMapTool
+{
+  public:
+    SampleSelectTool( QgsMapCanvas *canvas, QgsVectorLayer **layerRef )
+      : QgsMapTool( canvas )
+      , mLayerRef( layerRef )
+    {
+      setCursor( Qt::ArrowCursor );
+      mToolName = QStringLiteral( "Select samples" );
+    }
+
+    void canvasReleaseEvent( QgsMapMouseEvent *e ) override
+    {
+      if ( !e || !mLayerRef || !*mLayerRef )
+        return;
+      QgsVectorLayer *vl = *mLayerRef;
+      const QgsPointXY map = toMapCoordinates( e->pos() );
+      // ~5 px search radius in map units
+      const double mapUnitsPerPixel = canvas() && canvas()->mapUnitsPerPixel() > 0
+                                        ? canvas()->mapUnitsPerPixel()
+                                        : 1.0;
+      const double tol = 5.0 * mapUnitsPerPixel;
+      QgsRectangle search( map.x() - tol, map.y() - tol, map.x() + tol, map.y() + tol );
+      QgsFeatureRequest req;
+      req.setFilterRect( search );
+      req.setFlags( Qgis::FeatureRequestFlag::ExactIntersect );
+      QgsFeatureIterator it = vl->getFeatures( req );
+      QgsFeature f;
+      QgsFeatureIds ids;
+      while ( it.nextFeature( f ) )
+        ids.insert( f.id() );
+
+      if ( e->modifiers() & Qt::ShiftModifier )
+      {
+        QgsFeatureIds cur = vl->selectedFeatureIds();
+        for ( QgsFeatureId id : ids )
+          cur.insert( id );
+        vl->selectByIds( cur );
+      }
+      else if ( e->modifiers() & Qt::ControlModifier )
+      {
+        QgsFeatureIds cur = vl->selectedFeatureIds();
+        for ( QgsFeatureId id : ids )
+        {
+          if ( cur.contains( id ) )
+            cur.remove( id );
+          else
+            cur.insert( id );
+        }
+        vl->selectByIds( cur );
+      }
+      else
+      {
+        vl->selectByIds( ids );
+      }
+      if ( canvas() )
+        canvas()->refresh();
+    }
+
+  private:
+    QgsVectorLayer **mLayerRef = nullptr;
+};
+
 /// Fit a feature scaler on the train split and write scaled matrices +
 /// the fitted scaler onto \a cfg. Returns false if fit fails.
 bool fitScalerOntoConfig( const RsTrainTestSplit &split,
@@ -136,7 +215,6 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
   resize( 1280, 800 );
 
   m_rois = new RsRoiCollection( this );
-  m_layerStore = new QgsMapLayerStore( this );
 
   // Seed default 6 classes per UI/design.html ArtboardClassify spec.
   const QList<QPair<int, QPair<QString, QString>>> defaults = {
@@ -157,10 +235,13 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
   m_canvas->setCanvasColor( Qt::white );
   setCentralWidget( m_canvas );
 
+  m_sessionMap = new RsSessionMapWorkspace( m_canvas, this );
+
+  setupLayerManager();
   setupMenus();
   setupToolbars();
   setupDocks();
-  setupRoiTools();
+  setupSampleVectorEditing();
   setupClassifierBar();
   setupWorkflowUi();
   setupStatusBar();
@@ -194,6 +275,13 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
              this, &QgsClassificationMainWindow::syncWorkflowFromRois );
     connect( m_rois, &RsRoiCollection::classDefChanged,
              this, [this]( int ) { syncWorkflowFromRois(); } );
+    connect( m_rois, &RsRoiCollection::changed,
+             this, &QgsClassificationMainWindow::updateRoiStatusLabels );
+    connect( m_rois, &RsRoiCollection::classDefChanged,
+             this, [this]( int ) {
+               applySampleLayerRenderer();
+               syncWorkflowFromRois();
+             } );
   }
   if ( m_classTableWidget && m_spectralCurve )
   {
@@ -209,12 +297,31 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
   // Seed controller from default classes / empty ROIs after UI is up.
   syncWorkflowFromRois();
   refreshWorkflowUi();
+
+  // Default tool: add polygon (editing already on for sample layer).
+  if ( m_addPolygonAction )
+    m_addPolygonAction->setChecked( true );
+  updateRoiStatusLabels();
 }
 
 QgsClassificationMainWindow::~QgsClassificationMainWindow()
 {
   if ( m_workflowBridge )
     m_workflowBridge->close();
+
+  // Tear down map interaction while canvas, CAD dock, and session layers are
+  // still alive. Sibling docks (e.g. CAD) may be destroyed before the canvas;
+  // ~QgsMapCanvas would then deactivate tools with a dangling CAD pointer.
+  // Session store (on m_sessionMap) may also outlive or die before the canvas
+  // depending on child order — drop canvas layer refs first.
+  // Note: setMapTool(nullptr) is a no-op in QgsMapCanvas; use unsetMapTool.
+  if ( m_canvas )
+  {
+    if ( QgsMapTool *tool = m_canvas->mapTool() )
+      m_canvas->unsetMapTool( tool );
+    m_canvas->setLayers( QList<QgsMapLayer *>() );
+    m_canvas->setCurrentLayer( nullptr );
+  }
 }
 
 RsClassifySessionState::WorkflowSnapshot
@@ -358,33 +465,82 @@ void QgsClassificationMainWindow::setupMenus()
   fileMenu->addAction( tr( "Close" ), this, &QWidget::close );
 
   menuBar()->addMenu( tr( "Edit" ) );
-  menuBar()->addMenu( tr( "View" ) );
-  menuBar()->addMenu( tr( "Processing" ) );
+
+  auto *viewMenu = menuBar()->addMenu( tr( "View" ) );
+  // Layer dock toggle filled after setupLayerManager / setupDocks — connect later if needed.
+
+  auto *procMenu = menuBar()->addMenu( tr( "处理(&P)" ) );
+  procMenu->setObjectName( QStringLiteral( "rsClassifyProcessingMenu" ) );
+
+  auto *ppMenu = procMenu->addMenu( tr( "分类后处理" ) );
+  ppMenu->setObjectName( QStringLiteral( "rsClassifyPostProcessMenu" ) );
+  ppMenu->setToolTip( tr( "每个算法独立对话框；默认加载结果到本窗口图层管理" ) );
+
+  auto addPp = [this, ppMenu]( RsPostProcessDialog::Algorithm a ) {
+    auto *act = ppMenu->addAction( RsPostProcessDialog::algorithmTitle( a ), this, [this, a]() {
+      openPostProcessDialog( static_cast<int>( a ) );
+    } );
+    act->setObjectName( QStringLiteral( "rsClassifyPp_%1" ).arg( static_cast<int>( a ) ) );
+  };
+  addPp( RsPostProcessDialog::Algorithm::Sieve );
+  addPp( RsPostProcessDialog::Algorithm::Majority );
+  addPp( RsPostProcessDialog::Algorithm::Clump );
+  addPp( RsPostProcessDialog::Algorithm::Recode );
+  addPp( RsPostProcessDialog::Algorithm::Polygonize );
+
+  procMenu->addSeparator();
+  procMenu->addAction( tr( "快速预览" ), this, &QgsClassificationMainWindow::applyPreview );
+  procMenu->addAction( tr( "训练并分类…" ), this, &QgsClassificationMainWindow::applyClassification );
+  procMenu->addAction( tr( "交叉验证" ), this, &QgsClassificationMainWindow::runCrossValidation );
+
   menuBar()->addMenu( tr( "Help" ) );
 }
 
 void QgsClassificationMainWindow::setupToolbars()
 {
-  auto *roiBar = addToolBar( tr( "ROI" ) );
+  // QGIS-style sample editing toolbar (same model as main-window vector edit).
+  auto *roiBar = addToolBar( tr( "样本编辑" ) );
   roiBar->setObjectName( QStringLiteral( "rsClassifyRoiBar" ) );
   roiBar->setMovable( false );
+  roiBar->setToolTip( tr(
+    "与主窗口矢量编辑一致：切换编辑 → 添加多边形 → 双击结束；"
+    "选择后可删除；样本显示在矢量图层上。" ) );
 
-  roiBar->addAction( tr( "Select" ) );
+  auto *toolPan = roiBar->addAction( tr( "漫游" ) );
+  toolPan->setObjectName( QStringLiteral( "rsToolSamplePan" ) );
+  toolPan->setCheckable( true );
+  toolPan->setToolTip( tr( "漫游 / 拖动画布" ) );
+
+  auto *toolSelect = roiBar->addAction( tr( "选择要素" ) );
+  toolSelect->setObjectName( QStringLiteral( "rsToolSampleSelect" ) );
+  toolSelect->setCheckable( true );
+  toolSelect->setToolTip( tr( "点击选择样本要素（Shift 加选，Ctrl 切换）" ) );
+
   roiBar->addSeparator();
 
-  auto *toolPoint = roiBar->addAction( tr( "Point" ) );
-  toolPoint->setObjectName( QStringLiteral( "rsToolRoiPoint" ) );
-  auto *toolRect = roiBar->addAction( tr( "Rectangle" ) );
-  toolRect->setObjectName( QStringLiteral( "rsToolRoiRect" ) );
-  auto *toolPoly = roiBar->addAction( tr( "Polygon" ) );
-  toolPoly->setObjectName( QStringLiteral( "rsToolRoiPolygon" ) );
-  auto *toolFree = roiBar->addAction( tr( "Freehand" ) );
-  toolFree->setObjectName( QStringLiteral( "rsToolRoiFreehand" ) );
-  auto *toolMagic = roiBar->addAction( tr( "Magic wand" ) );
+  m_toggleEditAction = roiBar->addAction( tr( "切换编辑" ) );
+  m_toggleEditAction->setObjectName( QStringLiteral( "rsToolSampleToggleEdit" ) );
+  m_toggleEditAction->setCheckable( true );
+  m_toggleEditAction->setChecked( true );
+  m_toggleEditAction->setToolTip( tr( "开启/关闭样本矢量层编辑（与 QGIS 一致）" ) );
+
+  m_addPolygonAction = roiBar->addAction( tr( "添加多边形" ) );
+  m_addPolygonAction->setObjectName( QStringLiteral( "rsToolSampleAddPolygon" ) );
+  m_addPolygonAction->setCheckable( true );
+  m_addPolygonAction->setToolTip( tr(
+    "数字化多边形样本：左键加点，右键/双击结束。"
+    "属性 cls_id 自动取当前类别。" ) );
+
+  m_deleteSelectedAction = roiBar->addAction( tr( "删除选中" ) );
+  m_deleteSelectedAction->setObjectName( QStringLiteral( "rsToolSampleDelete" ) );
+  m_deleteSelectedAction->setToolTip( tr( "删除选中的样本要素" ) );
+
+  auto *toolMagic = roiBar->addAction( tr( "魔棒" ) );
   toolMagic->setObjectName( QStringLiteral( "rsToolRoiMagicWand" ) );
+  toolMagic->setCheckable( true );
+  toolMagic->setToolTip( tr( "可选：容差生长后写入样本矢量层（非标准 QGIS 编辑）" ) );
 
   roiBar->addSeparator();
-  // Train / Valid sample role — mutually exclusive toolbar highlight (W7).
   m_trainRoleAction = roiBar->addAction( tr( "训练样本" ) );
   m_trainRoleAction->setObjectName( QStringLiteral( "rsToolTrainRole" ) );
   m_trainRoleAction->setCheckable( true );
@@ -404,8 +560,6 @@ void QgsClassificationMainWindow::setupToolbars()
   } );
 
   roiBar->addSeparator();
-  // Phase 10A review patch — wire the three trailing toolbar actions:
-  // Spectra/Separability toggle their dock visibility, Export saves to .shp.
   auto *actSpectra = roiBar->addAction( tr( "Spectra" ) );
   actSpectra->setObjectName( QStringLiteral( "rsToolSpectra" ) );
   actSpectra->setCheckable( true );
@@ -425,8 +579,55 @@ void QgsClassificationMainWindow::setupToolbars()
   apply->setObjectName( QStringLiteral( "rsClassifyApplyAction" ) );
 }
 
+void QgsClassificationMainWindow::setupLayerManager()
+{
+  // Dock + view only; store/tree/model/bridge live on m_sessionMap.
+  m_layerTreeDock = new QDockWidget( tr( "图层" ), this );
+  m_layerTreeDock->setObjectName( QStringLiteral( "rsClassifyLayerTreeDock" ) );
+  m_layerTreeView = new QgsLayerTreeView( m_layerTreeDock );
+  m_layerTreeView->setObjectName( QStringLiteral( "rsClassifyLayerTreeView" ) );
+  if ( m_sessionMap && m_sessionMap->layerTreeModel() )
+  {
+    m_layerTreeView->setModel( m_sessionMap->layerTreeModel() );
+    m_layerTreeView->setLayerTreeModel( m_sessionMap->layerTreeModel() );
+  }
+  m_layerTreeDock->setWidget( m_layerTreeView );
+  addDockWidget( Qt::LeftDockWidgetArea, m_layerTreeDock );
+}
+
+void QgsClassificationMainWindow::addSessionLayer( QgsMapLayer *layer, bool insertOnTop )
+{
+  if ( !m_sessionMap )
+    return;
+  m_sessionMap->addLayer( layer, insertOnTop );
+  if ( m_layerTreeView )
+    m_layerTreeView->expandAll();
+}
+
+void QgsClassificationMainWindow::removeSessionLayer( QgsMapLayer *layer )
+{
+  if ( !m_sessionMap )
+    return;
+  m_sessionMap->removeLayer( layer );
+}
+
 void QgsClassificationMainWindow::setupDocks()
 {
+  // View menu: layer dock toggle
+  if ( QMenu *viewMenu = menuBar()->findChild<QMenu *>( QString(), Qt::FindDirectChildrenOnly ) )
+  {
+    // Prefer the View menu we just created by title scan
+  }
+  for ( QAction *a : menuBar()->actions() )
+  {
+    if ( a->menu() && a->text().contains( tr( "View" ) ) )
+    {
+      if ( m_layerTreeDock )
+        a->menu()->addAction( m_layerTreeDock->toggleViewAction() );
+      break;
+    }
+  }
+
   m_classListDock = new QDockWidget( tr( "类别管理" ), this );
   m_classListDock->setObjectName( QStringLiteral( "rsClassListDock" ) );
   m_classTableWidget = new RsClassTableWidget( m_classListDock );
@@ -465,82 +666,422 @@ void QgsClassificationMainWindow::setupStatusBar()
   statusBar()->addPermanentWidget( roiCountLabel );
 }
 
-void QgsClassificationMainWindow::setupRoiTools()
+void QgsClassificationMainWindow::setupSampleVectorEditing()
 {
-  // Instantiate the 4 manual ROI map tools owned by this window. The
-  // magic-wand tool (Task 10.7) joins the same exclusive group so only one
-  // ROI tool is active at a time.
-  m_toolPoint = new RsRoiToolPoint( m_canvas );
-  m_toolRect = new RsRoiToolRectangle( m_canvas );
-  m_toolPolygon = new RsRoiToolPolygon( m_canvas );
-  m_toolFreehand = new RsRoiToolFreehand( m_canvas );
+  ensureSampleLayer();
+
+  // CAD dock is required by QgsMapToolDigitizeFeature (Q_ASSERT).
+  m_cadDock = new QgsAdvancedDigitizingDockWidget( m_canvas, this );
+  m_cadDock->setObjectName( QStringLiteral( "rsClassifyCadDock" ) );
+  addDockWidget( Qt::LeftDockWidgetArea, m_cadDock );
+  m_cadDock->hide();
+
+  m_toolPan = new QgsMapToolPan( m_canvas );
+  m_toolSelect = new SampleSelectTool( m_canvas, &m_sampleLayer );
+  m_toolAddPolygon = new QgsMapToolDigitizeFeature(
+    m_canvas, m_cadDock, QgsMapToolCapture::CapturePolygon );
+  m_toolAddPolygon->setLayer( m_sampleLayer );
+  connect( m_toolAddPolygon, &QgsMapToolDigitizeFeature::digitizingCompleted,
+           this, &QgsClassificationMainWindow::onSampleDigitized );
+
   m_toolMagicWand = new RsRoiToolMagicWand( m_canvas );
-  // Future-proofing: once Task 10.8 wires raster loading, m_sourceRasterPath
-  // will be non-empty and the magic-wand can read pixels; until then the
-  // tool's canvasReleaseEvent no-ops on an empty path.
   m_toolMagicWand->setSourceData( m_sourceRasterPath );
-
-  const QVector<RsRoiToolBase *> tools = {
-    m_toolPoint, m_toolRect, m_toolPolygon, m_toolFreehand, m_toolMagicWand
-  };
-  for ( RsRoiToolBase *t : tools )
-  {
-    connect( t, &RsRoiToolBase::roiDrawn,
-             this, &QgsClassificationMainWindow::onRoiDrawn );
-  }
-
-  // Bind toolbar actions to tools. Each action is checkable and grouped so
-  // only one tool is active at a time. Toggling on installs the tool on the
-  // canvas; toggling off uninstalls it.
-  const QHash<QString, RsRoiToolBase *> actionToTool = {
-    { QStringLiteral( "rsToolRoiPoint" ), m_toolPoint },
-    { QStringLiteral( "rsToolRoiRect" ), m_toolRect },
-    { QStringLiteral( "rsToolRoiPolygon" ), m_toolPolygon },
-    { QStringLiteral( "rsToolRoiFreehand" ), m_toolFreehand },
-    { QStringLiteral( "rsToolRoiMagicWand" ), m_toolMagicWand },
-  };
+  connect( m_toolMagicWand, &RsRoiToolBase::roiDrawn,
+           this, &QgsClassificationMainWindow::onMagicWandRoi );
 
   auto *group = new QActionGroup( this );
   group->setExclusive( true );
 
-  for ( auto it = actionToTool.constBegin(); it != actionToTool.constEnd(); ++it )
-  {
-    QAction *a = findChild<QAction *>( it.key() );
-    if ( !a )
-      continue;
+  auto bindTool = [this, group]( const QString &objName, QgsMapTool *tool ) {
+    QAction *a = findChild<QAction *>( objName );
+    if ( !a || !tool )
+      return;
     a->setCheckable( true );
     group->addAction( a );
-    RsRoiToolBase *t = it.value();
-    connect( a, &QAction::toggled, this, [this, t]( bool on ) {
+    connect( a, &QAction::toggled, this, [this, tool]( bool on ) {
       if ( !m_canvas )
         return;
       if ( on )
-        m_canvas->setMapTool( t );
-      else
-        m_canvas->unsetMapTool( t );
+        m_canvas->setMapTool( tool );
+      else if ( m_canvas->mapTool() == tool )
+        m_canvas->unsetMapTool( tool );
     } );
+  };
+  bindTool( QStringLiteral( "rsToolSamplePan" ), m_toolPan );
+  bindTool( QStringLiteral( "rsToolSampleSelect" ), m_toolSelect );
+  bindTool( QStringLiteral( "rsToolSampleAddPolygon" ), m_toolAddPolygon );
+  bindTool( QStringLiteral( "rsToolRoiMagicWand" ), m_toolMagicWand );
+
+  if ( m_toggleEditAction )
+  {
+    connect( m_toggleEditAction, &QAction::toggled,
+             this, &QgsClassificationMainWindow::onToggleEditing );
+  }
+  if ( m_deleteSelectedAction )
+  {
+    connect( m_deleteSelectedAction, &QAction::triggered,
+             this, &QgsClassificationMainWindow::deleteSelectedSamples );
   }
 
-  // Track the currently-selected class so the next ROI gets the right id.
   if ( m_classTableWidget )
   {
     connect( m_classTableWidget, &RsClassTableWidget::currentClassChanged,
              this, &QgsClassificationMainWindow::onCurrentClassChanged );
   }
+  if ( m_classQuickListWidget )
+  {
+    connect( m_classQuickListWidget, &RsClassQuickList::currentClassChanged,
+             this, &QgsClassificationMainWindow::onCurrentClassChanged );
+  }
+
+  ensureSampleLayerEditing( true );
+  if ( m_sessionMap )
+    m_sessionMap->setCurrentLayer( m_sampleLayer );
+}
+
+void QgsClassificationMainWindow::ensureSampleLayer()
+{
+  if ( m_sampleLayer )
+    return;
+
+  QgsFields fields;
+  fields.append( QgsField( QStringLiteral( "cls_id" ), QMetaType::Type::Int ) );
+  fields.append( QgsField( QStringLiteral( "cls_name" ), QMetaType::Type::QString ) );
+  fields.append( QgsField( QStringLiteral( "px_count" ), QMetaType::Type::LongLong ) );
+
+  QgsCoordinateReferenceSystem crs;
+  if ( m_sourceLayer && m_sourceLayer->crs().isValid() )
+    crs = m_sourceLayer->crs();
+  else
+    crs = QgsCoordinateReferenceSystem::fromEpsgId( 4326 );
+
+  m_sampleLayer = QgsMemoryProviderUtils::createMemoryLayer(
+    tr( "训练样本" ), fields, Qgis::WkbType::Polygon, crs );
+  m_sampleLayer->setObjectName( QStringLiteral( "rsClassifySampleLayer" ) );
+  applySampleLayerRenderer();
+  addSessionLayer( m_sampleLayer, true );
+
+  connect( m_sampleLayer, &QgsVectorLayer::featureAdded,
+           this, [this]( QgsFeatureId ) { onSampleLayerEdited(); } );
+  connect( m_sampleLayer, &QgsVectorLayer::featureDeleted,
+           this, [this]( QgsFeatureId ) { onSampleLayerEdited(); } );
+  connect( m_sampleLayer, &QgsVectorLayer::geometryChanged,
+           this, [this]( QgsFeatureId, const QgsGeometry & ) { onSampleLayerEdited(); } );
+  connect( m_sampleLayer, &QgsVectorLayer::committedFeaturesAdded,
+           this, [this]( const QString &, const QgsFeatureList & ) { onSampleLayerEdited(); } );
+  connect( m_sampleLayer, &QgsVectorLayer::committedFeaturesRemoved,
+           this, [this]( const QString &, const QgsFeatureIds & ) { onSampleLayerEdited(); } );
+  connect( m_sampleLayer, &QgsVectorLayer::editingStopped,
+           this, &QgsClassificationMainWindow::onSampleLayerEdited );
+}
+
+void QgsClassificationMainWindow::applySampleLayerRenderer()
+{
+  if ( !m_sampleLayer || !m_rois )
+    return;
+
+  QgsCategoryList cats;
+  const QHash<int, RsClassDef> defs = m_rois->classDefs();
+  QList<int> ids = defs.keys();
+  std::sort( ids.begin(), ids.end() );
+  for ( int id : ids )
+  {
+    const RsClassDef d = defs.value( id );
+    std::unique_ptr<QgsSymbol> sym(
+      QgsSymbol::defaultSymbol( Qgis::GeometryType::Polygon ) );
+    if ( !sym )
+      continue;
+    QColor c = d.color();
+    c.setAlpha( 110 );
+    sym->setColor( c );
+    if ( auto *fill = dynamic_cast<QgsFillSymbol *>( sym.get() ) )
+    {
+      fill->setColor( c );
+    }
+    cats.append( QgsRendererCategory( id, sym.release(), d.name() ) );
+  }
+  auto *renderer = new QgsCategorizedSymbolRenderer( QStringLiteral( "cls_id" ), cats );
+  m_sampleLayer->setRenderer( renderer );
+  m_sampleLayer->triggerRepaint();
+  if ( m_canvas )
+    m_canvas->refresh();
+}
+
+
+
+void QgsClassificationMainWindow::ensureSampleLayerEditing( bool on )
+{
+  ensureSampleLayer();
+  if ( !m_sampleLayer )
+    return;
+  if ( on )
+  {
+    if ( !m_sampleLayer->isEditable() )
+      m_sampleLayer->startEditing();
+  }
+  else if ( m_sampleLayer->isEditable() )
+  {
+    m_sampleLayer->commitChanges();
+  }
+  if ( m_toggleEditAction )
+    m_toggleEditAction->setChecked( m_sampleLayer->isEditable() );
+}
+
+void QgsClassificationMainWindow::onToggleEditing( bool on )
+{
+  ensureSampleLayerEditing( on );
+  if ( statusBar() )
+  {
+    statusBar()->showMessage(
+      on ? tr( "样本层编辑已开启" ) : tr( "样本层编辑已关闭（已提交）" ), 2500 );
+  }
+}
+
+void QgsClassificationMainWindow::deleteSelectedSamples()
+{
+  ensureSampleLayer();
+  if ( !m_sampleLayer )
+    return;
+  if ( !m_sampleLayer->isEditable() )
+    ensureSampleLayerEditing( true );
+  if ( m_sampleLayer->selectedFeatureIds().isEmpty() )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "未选中样本要素" ), 2500 );
+    return;
+  }
+  m_sampleLayer->beginEditCommand( tr( "删除样本" ) );
+  m_sampleLayer->deleteSelectedFeatures();
+  m_sampleLayer->endEditCommand();
+  m_sampleLayer->triggerRepaint();
+  onSampleLayerEdited();
+  if ( m_canvas )
+    m_canvas->refresh();
+}
+
+void QgsClassificationMainWindow::rebuildRoisFromSampleLayer()
+{
+  if ( !m_rois || !m_sampleLayer || mSuppressSampleSync )
+    return;
+
+  mSuppressSampleSync = true;
+  // Keep class defs; replace geometries.
+  const QHash<int, RsClassDef> defs = m_rois->classDefs();
+  m_rois->clear();
+  for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
+    m_rois->setClassDef( it.value() );
+
+  QgsFeatureRequest req;
+  req.setFlags( Qgis::FeatureRequestFlag::NoGeometry );
+  // Need geometry for rasterize
+  req = QgsFeatureRequest();
+
+  QgsFeatureIterator it = m_sampleLayer->getFeatures( req );
+  QgsFeature f;
+  while ( it.nextFeature( f ) )
+  {
+    if ( !f.hasGeometry() || f.geometry().isEmpty() )
+      continue;
+    const int classId = f.attribute( QStringLiteral( "cls_id" ) ).toInt();
+    if ( classId <= 0 )
+      continue;
+    QSet<quint64> pixels;
+    if ( m_sourceWidth > 0 && m_sourceHeight > 0 )
+    {
+      pixels = RsPixelRasterizer::rasterize(
+        f.geometry(), m_sourceGt, m_sourceWidth, m_sourceHeight );
+    }
+    QVector<quint64> idx( pixels.begin(), pixels.end() );
+    m_rois->appendRoi( RsRoi( classId, f.geometry(), idx ) );
+  }
+  mSuppressSampleSync = false;
+  updateRoiStatusLabels();
+}
+
+void QgsClassificationMainWindow::syncSampleLayerFromRois()
+{
+  ensureSampleLayer();
+  if ( !m_sampleLayer || !m_rois )
+    return;
+
+  mSuppressSampleSync = true;
+  const bool wasEditable = m_sampleLayer->isEditable();
+  if ( !wasEditable )
+    m_sampleLayer->startEditing();
+
+  // Clear all features
+  QgsFeatureIds all;
+  QgsFeatureIterator it = m_sampleLayer->getFeatures( QgsFeatureRequest().setNoAttributes() );
+  QgsFeature f;
+  while ( it.nextFeature( f ) )
+    all.insert( f.id() );
+  if ( !all.isEmpty() )
+    m_sampleLayer->deleteFeatures( all );
+
+  for ( const RsRoi &roi : m_rois->rois() )
+  {
+    if ( roi.geometry().isEmpty() )
+      continue;
+    QgsFeature nf( m_sampleLayer->fields() );
+    nf.setGeometry( roi.geometry() );
+    nf.setAttribute( QStringLiteral( "cls_id" ), roi.classId() );
+    QString name;
+    if ( m_rois->classDefs().contains( roi.classId() ) )
+      name = m_rois->classDef( roi.classId() ).name();
+    nf.setAttribute( QStringLiteral( "cls_name" ), name );
+    nf.setAttribute( QStringLiteral( "px_count" ),
+                     static_cast<qint64>( roi.pixelIndices().size() ) );
+    m_sampleLayer->addFeature( nf );
+  }
+
+  if ( !wasEditable )
+    m_sampleLayer->commitChanges();
+  else
+    m_sampleLayer->triggerRepaint();
+
+  applySampleLayerRenderer();
+  mSuppressSampleSync = false;
+  if ( m_canvas )
+    m_canvas->refresh();
+  updateRoiStatusLabels();
+}
+
+void QgsClassificationMainWindow::onSampleLayerEdited()
+{
+  if ( mSuppressSampleSync )
+    return;
+  rebuildRoisFromSampleLayer();
+}
+
+void QgsClassificationMainWindow::onSampleDigitized( const QgsFeature &feature )
+{
+  ensureSampleLayer();
+  if ( !m_sampleLayer )
+    return;
+
+  const int classId = resolveActiveClassId();
+  if ( classId <= 0 )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "请先在类别表中选一个类别" ), 3000 );
+    return;
+  }
+  if ( !feature.hasGeometry() || feature.geometry().isEmpty() )
+    return;
+
+  if ( !m_sampleLayer->isEditable() )
+    ensureSampleLayerEditing( true );
+
+  QgsFeature feat( m_sampleLayer->fields() );
+  feat.setGeometry( feature.geometry() );
+  QString name;
+  if ( m_rois && m_rois->classDefs().contains( classId ) )
+    name = m_rois->classDef( classId ).name();
+  feat.setAttribute( QStringLiteral( "cls_id" ), classId );
+  feat.setAttribute( QStringLiteral( "cls_name" ), name );
+
+  QSet<quint64> pixels;
+  if ( m_sourceWidth > 0 && m_sourceHeight > 0 )
+  {
+    pixels = RsPixelRasterizer::rasterize(
+      feature.geometry(), m_sourceGt, m_sourceWidth, m_sourceHeight );
+  }
+  feat.setAttribute( QStringLiteral( "px_count" ),
+                     static_cast<qint64>( pixels.size() ) );
+
+  m_sampleLayer->beginEditCommand( tr( "添加训练样本" ) );
+  const bool ok = m_sampleLayer->addFeature( feat );
+  m_sampleLayer->endEditCommand();
+  if ( !ok )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "添加样本失败" ), 3000 );
+    return;
+  }
+  m_sampleLayer->triggerRepaint();
+  if ( m_canvas )
+    m_canvas->refresh();
+  // featureAdded signal rebuilds collection
+  if ( statusBar() )
+  {
+    statusBar()->showMessage(
+      tr( "已添加样本 → %1（%2 像元）" ).arg( name ).arg( pixels.size() ), 3000 );
+  }
+}
+
+void QgsClassificationMainWindow::onMagicWandRoi( const QgsGeometry &geom, int classId )
+{
+  // Reuse digitize path: inject geometry as a completed feature.
+  QgsFeature f;
+  f.setGeometry( geom );
+  if ( classId > 0 && m_toolMagicWand )
+    m_toolMagicWand->setCurrentClassId( classId );
+  // Temporarily force class if tool had 0
+  if ( classId <= 0 )
+    classId = resolveActiveClassId();
+  if ( classId > 0 && m_classTableWidget && m_classTableWidget->currentClassId() != classId )
+    m_classTableWidget->setCurrentClassId( classId );
+  onSampleDigitized( f );
 }
 
 void QgsClassificationMainWindow::onCurrentClassChanged( int classId )
 {
-  if ( m_toolPoint )
-    m_toolPoint->setCurrentClassId( classId );
-  if ( m_toolRect )
-    m_toolRect->setCurrentClassId( classId );
-  if ( m_toolPolygon )
-    m_toolPolygon->setCurrentClassId( classId );
-  if ( m_toolFreehand )
-    m_toolFreehand->setCurrentClassId( classId );
+  if ( classId <= 0 )
+    return;
   if ( m_toolMagicWand )
     m_toolMagicWand->setCurrentClassId( classId );
+  if ( m_classTableWidget && m_classTableWidget->currentClassId() != classId )
+    m_classTableWidget->setCurrentClassId( classId );
+  if ( m_classQuickListWidget && m_classQuickListWidget->currentClassId() != classId )
+    m_classQuickListWidget->setCurrentClassId( classId );
+  if ( m_spectralCurve )
+    m_spectralCurve->setSelectedClass( classId );
+}
+
+int QgsClassificationMainWindow::resolveActiveClassId( int preferred ) const
+{
+  if ( preferred > 0 )
+    return preferred;
+  if ( m_classTableWidget )
+  {
+    const int id = m_classTableWidget->currentClassId();
+    if ( id > 0 )
+      return id;
+  }
+  if ( m_classQuickListWidget )
+  {
+    const int id = m_classQuickListWidget->currentClassId();
+    if ( id > 0 )
+      return id;
+  }
+  return 0;
+}
+
+void QgsClassificationMainWindow::updateRoiStatusLabels()
+{
+  auto *roiCountLabel = findChild<QLabel *>( QStringLiteral( "rsClassifyRoiCountLabel" ) );
+  if ( !roiCountLabel )
+    return;
+  int roiN = 0;
+  quint64 pxN = 0;
+  if ( m_rois )
+  {
+    roiN = m_rois->size();
+    for ( const RsRoi &r : m_rois->rois() )
+      pxN += static_cast<quint64>( r.pixelIndices().size() );
+  }
+  roiCountLabel->setText( tr( "总样本: %1, 像元: %2" ).arg( roiN ).arg( pxN ) );
+
+  auto *crsLabel = findChild<QLabel *>( QStringLiteral( "rsClassifyCrsLabel" ) );
+  if ( crsLabel )
+  {
+    QString crsText = tr( "CRS: —" );
+    if ( m_sampleLayer && m_sampleLayer->crs().isValid() )
+      crsText = tr( "CRS: %1" ).arg( m_sampleLayer->crs().authid() );
+    else if ( m_sourceLayer && m_sourceLayer->crs().isValid() )
+      crsText = tr( "CRS: %1" ).arg( m_sourceLayer->crs().authid() );
+    crsLabel->setText( crsText );
+  }
 }
 
 void QgsClassificationMainWindow::setupClassifierBar()
@@ -964,7 +1505,7 @@ void QgsClassificationMainWindow::populateStepPanels()
     lay->addWidget( hint );
   }
 
-  // --- Step 6: PostProcess -------------------------------------------------
+  // --- Step 6: PostProcess (dialog-driven; panel is a thin entry) ---------
   if ( QWidget *body = m_stepHost->body( RsClassifyStep::PostProcess ) )
   {
     auto *lay = qobject_cast<QVBoxLayout *>( body->layout() );
@@ -975,145 +1516,38 @@ void QgsClassificationMainWindow::populateStepPanels()
       lay->setSpacing( 8 );
     }
 
-    auto *pathForm = new QFormLayout;
-    pathForm->setContentsMargins( 0, 0, 0, 0 );
-    pathForm->setSpacing( 6 );
+    auto *hint = new QLabel(
+      tr( "后处理为「一算法一对话框」。请用下方按钮或菜单「处理 → 分类后处理」。\n"
+          "默认会将结果加载到本窗口左侧图层管理。也可跳过本步进入输出。" ),
+      body );
+    hint->setWordWrap( true );
+    hint->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    lay->addWidget( hint );
 
-    auto *inRow = new QHBoxLayout;
-    m_ppInputEdit = new QLineEdit( body );
-    m_ppInputEdit->setObjectName( QStringLiteral( "classifyStep6Input" ) );
-    m_ppInputEdit->setPlaceholderText( tr( "分类结果栅格（默认上次 Apply 输出）" ) );
-    if ( !m_lastClassifyPath.isEmpty() )
-      m_ppInputEdit->setText( m_lastClassifyPath );
-    auto *btnInBrowse = new QPushButton( tr( "浏览…" ), body );
-    btnInBrowse->setObjectName( QStringLiteral( "classifyStep6InputBrowse" ) );
-    connect( btnInBrowse, &QPushButton::clicked, this, [this]() {
-      const QString p = QFileDialog::getOpenFileName(
-        this, tr( "选择分类栅格" ), m_ppInputEdit ? m_ppInputEdit->text() : QString(),
-        tr( "GeoTIFF (*.tif *.tiff);;All files (*)" ) );
-      if ( !p.isEmpty() && m_ppInputEdit )
-        m_ppInputEdit->setText( p );
-    } );
-    inRow->addWidget( m_ppInputEdit, 1 );
-    inRow->addWidget( btnInBrowse );
-    pathForm->addRow( tr( "输入" ), inRow );
+    auto addAlgoBtn = [this, body, lay]( RsPostProcessDialog::Algorithm a ) {
+      auto *btn = new QPushButton( RsPostProcessDialog::algorithmTitle( a ), body );
+      btn->setObjectName( QStringLiteral( "classifyStep6Algo_%1" ).arg( static_cast<int>( a ) ) );
+      connect( btn, &QPushButton::clicked, this, [this, a]() {
+        openPostProcessDialog( static_cast<int>( a ) );
+      } );
+      lay->addWidget( btn );
+    };
+    addAlgoBtn( RsPostProcessDialog::Algorithm::Sieve );
+    addAlgoBtn( RsPostProcessDialog::Algorithm::Majority );
+    addAlgoBtn( RsPostProcessDialog::Algorithm::Clump );
+    addAlgoBtn( RsPostProcessDialog::Algorithm::Recode );
+    addAlgoBtn( RsPostProcessDialog::Algorithm::Polygonize );
 
-    auto *outRow = new QHBoxLayout;
-    m_ppOutputEdit = new QLineEdit( body );
-    m_ppOutputEdit->setObjectName( QStringLiteral( "classifyStep6Output" ) );
-    m_ppOutputEdit->setPlaceholderText( tr( "后处理输出 GeoTIFF" ) );
-    auto *btnOutBrowse = new QPushButton( tr( "浏览…" ), body );
-    btnOutBrowse->setObjectName( QStringLiteral( "classifyStep6OutputBrowse" ) );
-    connect( btnOutBrowse, &QPushButton::clicked, this, [this]() {
-      const QString p = QFileDialog::getSaveFileName(
-        this, tr( "后处理输出栅格" ), m_ppOutputEdit ? m_ppOutputEdit->text() : QString(),
-        tr( "GeoTIFF (*.tif)" ) );
-      if ( !p.isEmpty() && m_ppOutputEdit )
-        m_ppOutputEdit->setText( p );
-    } );
-    outRow->addWidget( m_ppOutputEdit, 1 );
-    outRow->addWidget( btnOutBrowse );
-    pathForm->addRow( tr( "输出栅格" ), outRow );
-
-    auto *vecRow = new QHBoxLayout;
-    m_ppVectorEdit = new QLineEdit( body );
-    m_ppVectorEdit->setObjectName( QStringLiteral( "classifyStep6Vector" ) );
-    m_ppVectorEdit->setPlaceholderText( tr( "矢量化输出（可选，.gpkg / .shp）" ) );
-    auto *btnVecBrowse = new QPushButton( tr( "浏览…" ), body );
-    btnVecBrowse->setObjectName( QStringLiteral( "classifyStep6VectorBrowse" ) );
-    connect( btnVecBrowse, &QPushButton::clicked, this, [this]() {
-      const QString p = QFileDialog::getSaveFileName(
-        this, tr( "矢量化输出" ), m_ppVectorEdit ? m_ppVectorEdit->text() : QString(),
-        tr( "GeoPackage (*.gpkg);;ESRI Shapefile (*.shp)" ) );
-      if ( !p.isEmpty() && m_ppVectorEdit )
-        m_ppVectorEdit->setText( p );
-    } );
-    vecRow->addWidget( m_ppVectorEdit, 1 );
-    vecRow->addWidget( btnVecBrowse );
-    pathForm->addRow( tr( "输出矢量" ), vecRow );
-    lay->addLayout( pathForm );
-
-    auto *opsBox = new QGroupBox( tr( "算子" ), body );
-    auto *opsGrid = new QGridLayout( opsBox );
-    opsGrid->setContentsMargins( 8, 8, 8, 8 );
-    opsGrid->setHorizontalSpacing( 8 );
-    opsGrid->setVerticalSpacing( 6 );
-
-    m_ppSieveCb = new QCheckBox( tr( "Sieve" ), opsBox );
-    m_ppSieveCb->setObjectName( QStringLiteral( "classifyStep6Sieve" ) );
-    m_ppSieveCb->setChecked( true );
-    m_ppSieveSpin = new QSpinBox( opsBox );
-    m_ppSieveSpin->setObjectName( QStringLiteral( "classifyStep6SieveThreshold" ) );
-    m_ppSieveSpin->setRange( 1, 1000000 );
-    m_ppSieveSpin->setValue( 10 );
-    m_ppSieveSpin->setPrefix( tr( "阈值 " ) );
-    opsGrid->addWidget( m_ppSieveCb, 0, 0 );
-    opsGrid->addWidget( m_ppSieveSpin, 0, 1 );
-
-    m_ppMajorityCb = new QCheckBox( tr( "多数滤波" ), opsBox );
-    m_ppMajorityCb->setObjectName( QStringLiteral( "classifyStep6Majority" ) );
-    m_ppMajorityCb->setChecked( true );
-    m_ppMajoritySpin = new QSpinBox( opsBox );
-    m_ppMajoritySpin->setObjectName( QStringLiteral( "classifyStep6MajorityKernel" ) );
-    m_ppMajoritySpin->setRange( 3, 7 );
-    m_ppMajoritySpin->setSingleStep( 2 );
-    m_ppMajoritySpin->setValue( 3 );
-    m_ppMajoritySpin->setPrefix( tr( "核 " ) );
-    opsGrid->addWidget( m_ppMajorityCb, 1, 0 );
-    opsGrid->addWidget( m_ppMajoritySpin, 1, 1 );
-
-    m_ppClumpCb = new QCheckBox( tr( "Clump" ), opsBox );
-    m_ppClumpCb->setObjectName( QStringLiteral( "classifyStep6Clump" ) );
-    m_ppClumpCb->setChecked( false );
-    opsGrid->addWidget( m_ppClumpCb, 2, 0, 1, 2 );
-
-    m_ppRecodeCb = new QCheckBox( tr( "重编码" ), opsBox );
-    m_ppRecodeCb->setObjectName( QStringLiteral( "classifyStep6Recode" ) );
-    m_ppRecodeCb->setChecked( false );
-    opsGrid->addWidget( m_ppRecodeCb, 3, 0, 1, 2 );
-
-    m_ppPolygonizeCb = new QCheckBox( tr( "矢量化 (Polygonize)" ), opsBox );
-    m_ppPolygonizeCb->setObjectName( QStringLiteral( "classifyStep6Polygonize" ) );
-    m_ppPolygonizeCb->setChecked( false );
-    opsGrid->addWidget( m_ppPolygonizeCb, 4, 0, 1, 2 );
-
-    lay->addWidget( opsBox );
-
-    m_ppRecodeTable = new QTableWidget( 3, 2, body );
-    m_ppRecodeTable->setObjectName( QStringLiteral( "classifyStep6RecodeTable" ) );
-    m_ppRecodeTable->setHorizontalHeaderLabels( { tr( "旧类" ), tr( "新类" ) } );
-    m_ppRecodeTable->horizontalHeader()->setStretchLastSection( true );
-    m_ppRecodeTable->verticalHeader()->setVisible( false );
-    m_ppRecodeTable->setMaximumHeight( 120 );
-    m_ppRecodeTable->setEnabled( false );
-    lay->addWidget( m_ppRecodeTable );
-    connect( m_ppRecodeCb, &QCheckBox::toggled, m_ppRecodeTable, &QWidget::setEnabled );
-
-    auto *btnRow = new QHBoxLayout;
-    m_ppRunBtn = new QPushButton( tr( "运行后处理" ), body );
-    m_ppRunBtn->setObjectName( QStringLiteral( "classifyStep6Run" ) );
-    connect( m_ppRunBtn, &QPushButton::clicked, this,
-             &QgsClassificationMainWindow::runPostProcess );
-    m_ppSkipBtn = new QPushButton( tr( "跳过后处理" ), body );
-    m_ppSkipBtn->setObjectName( QStringLiteral( "classifyStep6Skip" ) );
-    connect( m_ppSkipBtn, &QPushButton::clicked, this, [this]() {
+    auto *btnSkip = new QPushButton( tr( "跳过后处理" ), body );
+    btnSkip->setObjectName( QStringLiteral( "classifyStep6Skip" ) );
+    connect( btnSkip, &QPushButton::clicked, this, [this]() {
       if ( m_workflow )
         m_workflow->setPostProcessSkipped( true );
       if ( statusBar() )
         statusBar()->showMessage( tr( "已跳过后处理" ), 3000 );
       refreshWorkflowUi();
     } );
-    btnRow->addWidget( m_ppRunBtn );
-    btnRow->addWidget( m_ppSkipBtn );
-    lay->addLayout( btnRow );
-
-    auto *hint = new QLabel(
-      tr( "顺序：Sieve → 多数滤波 → Clump → 重编码 → 保存栅格 → 矢量化。"
-          "可跳过本步直接进入输出。" ),
-      body );
-    hint->setWordWrap( true );
-    hint->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
-    lay->addWidget( hint );
+    lay->addWidget( btnSkip );
     lay->addStretch( 1 );
   }
 
@@ -1415,9 +1849,6 @@ void QgsClassificationMainWindow::refreshWorkflowUi()
     m_stepCvBtn->setEnabled( canTrain );
     m_stepCvBtn->setToolTip( trainTip );
   }
-  if ( m_ppRunBtn )
-    m_ppRunBtn->setEnabled( m_workflow->canRunPostProcess() && !m_classifyBusy );
-
   // Wizard: soft-hide JM / spectral unless Evaluate step; expert: show all.
   const bool expert = m_workflow->mode() == RsClassifyUiMode::Expert;
   const bool onEval = m_workflow->currentStep() == RsClassifyStep::Evaluate;
@@ -1489,14 +1920,32 @@ bool QgsClassificationMainWindow::openSourceRaster( const QString &path )
                                     QStringLiteral( "gdal" ) );
   if ( layer->isValid() )
   {
-    if ( m_layerStore )
-      m_layerStore->addMapLayer( layer );
-    m_sourceLayer = layer;
-    if ( m_canvas )
+    if ( m_sourceLayer )
     {
-      m_canvas->setLayers( { layer } );
-      m_canvas->setExtent( layer->extent() );
-      m_canvas->refresh();
+      // R2 take transfers ownership out of the store — delete on replace.
+      removeSessionLayer( m_sourceLayer );
+      delete m_sourceLayer;
+      m_sourceLayer = nullptr;
+    }
+    m_sourceLayer = layer;
+    // Source under samples: insert at bottom of stack (not top)
+    addSessionLayer( layer, /*insertOnTop=*/false );
+    ensureSampleLayer();
+    if ( m_sampleLayer && layer->crs().isValid() )
+      m_sampleLayer->setCrs( layer->crs() );
+    applySampleLayerRenderer();
+    // Ensure sample sits above source
+    if ( m_sampleLayer )
+    {
+      removeSessionLayer( m_sampleLayer );
+      addSessionLayer( m_sampleLayer, true );
+    }
+    rebuildRoisFromSampleLayer();
+    if ( m_sessionMap )
+    {
+      m_sessionMap->zoomToLayer( layer );
+      if ( m_sampleLayer )
+        m_sessionMap->setCurrentLayer( m_sampleLayer );
     }
   }
   else
@@ -1832,7 +2281,7 @@ void QgsClassificationMainWindow::applyClassification()
   req.exclusive = true;
   req.params["output"] = outForLog.toStdString();
 
-  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+  RsJobRunner::run(
     std::move( req ),
     [task]( const sicnu::jobs::JobRequest &request,
             sicnu::operators::RSOperatorContext &ctx ) {
@@ -1857,132 +2306,104 @@ void QgsClassificationMainWindow::applyClassification()
       result["durationMs"] = task->result().durationMs;
       return result;
     },
-    [task]() { task->cancel(); } );
+    [this, task, algoForLog, outForLog]( const RsJobFinish &fin ) {
+      setClassifyBusy( false );
+      const auto &r = task->result();
 
-  const QString jobIdQ = QString::fromStdString( jobId );
-  auto *bridge = JobEngineQtBridge::instance();
-  auto *conn = new QMetaObject::Connection;
-  *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
-                   [this, task, jobIdQ, algoForLog, outForLog, conn]( const QString &id ) {
-                     if ( id != jobIdQ )
-                       return;
-                     disconnect( *conn );
-                     delete conn;
-                     setClassifyBusy( false );
+      if ( fin.succeeded() && r.ok )
+      {
+        m_lastClassifyPath = outForLog;
 
-                     const auto snapOpt =
-                       sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
-                     const auto &r = task->result();
+        if ( m_workflow )
+          m_workflow->setHasFullClassifyResult( true );
 
-                     if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Succeeded && r.ok )
-                     {
-                       m_lastClassifyPath = outForLog;
-                       if ( m_ppInputEdit && m_ppInputEdit->text().trimmed().isEmpty() )
-                         m_ppInputEdit->setText( outForLog );
-                       else if ( m_ppInputEdit && m_ppInputEdit->text() != outForLog )
-                         m_ppInputEdit->setText( outForLog );
-                       if ( m_ppOutputEdit && m_ppOutputEdit->text().trimmed().isEmpty() )
-                       {
-                         const QFileInfo fi( outForLog );
-                         m_ppOutputEdit->setText(
-                           fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName()
-                           + QStringLiteral( "_post.tif" ) );
-                       }
+        auto *classLayer = new QgsRasterLayer(
+          outForLog,
+          QFileInfo( outForLog ).baseName() + tr( " (分类)" ),
+          QStringLiteral( "gdal" ) );
+        if ( classLayer->isValid() )
+        {
+          m_previewLayer = classLayer;
+          addSessionLayer( classLayer, true );
+        }
+        else
+        {
+          delete classLayer;
+        }
+        if ( m_workflowBridge )
+          m_workflowBridge->setClassifiedOutputArtifact( outForLog.toStdString() );
 
-                       if ( m_workflow )
-                         m_workflow->setHasFullClassifyResult( true );
-                       if ( m_workflowBridge )
-                         m_workflowBridge->setClassifiedOutputArtifact( outForLog.toStdString() );
+        QJsonObject obj{
+          { QStringLiteral( "event" ), QStringLiteral( "classify_finished" ) },
+          { QStringLiteral( "algo" ), algoForLog },
+          { QStringLiteral( "total_pixels" ), r.totalPixels },
+          { QStringLiteral( "duration_ms" ), r.durationMs },
+          { QStringLiteral( "status" ), QStringLiteral( "ok" ) }
+        };
+        if ( !r.accuracy.classIds.isEmpty() )
+        {
+          obj.insert( QStringLiteral( "overall_accuracy" ), r.accuracy.overallAccuracy );
+          obj.insert( QStringLiteral( "kappa" ), r.accuracy.kappa );
+        }
+        QgsMessageLog::logMessage(
+          QString::fromUtf8( QJsonDocument( obj ).toJson( QJsonDocument::Compact ) ),
+          QStringLiteral( "Classification" ),
+          Qgis::MessageLevel::Info );
+        if ( statusBar() )
+          statusBar()->showMessage(
+            tr( "分类完成: %1 (%2 ms)" )
+              .arg( QFileInfo( outForLog ).fileName() )
+              .arg( r.durationMs ),
+            6000 );
 
-                       QJsonObject obj{
-                         { QStringLiteral( "event" ), QStringLiteral( "classify_finished" ) },
-                         { QStringLiteral( "algo" ), algoForLog },
-                         { QStringLiteral( "total_pixels" ), r.totalPixels },
-                         { QStringLiteral( "duration_ms" ), r.durationMs },
-                         { QStringLiteral( "status" ), QStringLiteral( "ok" ) }
-                       };
-                       if ( !r.accuracy.classIds.isEmpty() )
-                       {
-                         obj.insert( QStringLiteral( "overall_accuracy" ), r.accuracy.overallAccuracy );
-                         obj.insert( QStringLiteral( "kappa" ), r.accuracy.kappa );
-                       }
-                       QgsMessageLog::logMessage(
-                         QString::fromUtf8( QJsonDocument( obj ).toJson( QJsonDocument::Compact ) ),
-                         QStringLiteral( "Classification" ),
-                         Qgis::MessageLevel::Info );
-                       if ( statusBar() )
-                         statusBar()->showMessage(
-                           tr( "分类完成: %1 (%2 ms)" )
-                             .arg( QFileInfo( outForLog ).fileName() )
-                             .arg( r.durationMs ),
-                           6000 );
-
-                       if ( !r.accuracy.classIds.isEmpty() )
-                       {
-                         QHash<int, QString> classNames;
-                         if ( m_rois )
-                         {
-                           const auto defs = m_rois->classDefs();
-                           for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
-                             classNames[it.key()] = it.value().name();
-                         }
-                         if ( m_accuracyPanel )
-                           m_accuracyPanel->setResult( r.accuracy, classNames );
-                         if ( m_stepAccuracyPopupBtn )
-                           m_stepAccuracyPopupBtn->setEnabled( true );
-                         m_accuracySource = QStringLiteral( "holdout" );
-                         if ( m_workflow )
-                           m_workflow->setHasAccuracyMetrics( true );
-                         if ( m_workflow )
-                           m_workflow->setCurrentStep( RsClassifyStep::Accuracy );
-                       }
-                       refreshWorkflowUi();
-                     }
-                     else if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
-                     {
-                       SICNU_LOG_WARN( SicnuLogTags::Classification,
-                                       QStringLiteral( "Classification cancelled" ) );
-                       if ( statusBar() )
-                         statusBar()->showMessage( tr( "分类已取消" ), 3000 );
-                     }
-                     else
-                     {
-                       const QString err = !r.errorMessage.isEmpty()
-                                            ? r.errorMessage
-                                            : ( snapOpt ? QString::fromStdString( snapOpt->error )
-                                                        : tr( "运行失败" ) );
-                       SICNU_LOG_ERROR( SicnuLogTags::Classification,
-                                        QString( "Classification failed: %1" ).arg( err ) );
-                       if ( statusBar() )
-                         statusBar()->showMessage( tr( "分类失败: %1" ).arg( err ), 6000 );
-                     }
-                     task->deleteLater();
-                   } );
+        if ( !r.accuracy.classIds.isEmpty() )
+        {
+          QHash<int, QString> classNames;
+          if ( m_rois )
+          {
+            const auto defs = m_rois->classDefs();
+            for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
+              classNames[it.key()] = it.value().name();
+          }
+          if ( m_accuracyPanel )
+            m_accuracyPanel->setResult( r.accuracy, classNames );
+          if ( m_stepAccuracyPopupBtn )
+            m_stepAccuracyPopupBtn->setEnabled( true );
+          m_accuracySource = QStringLiteral( "holdout" );
+          if ( m_workflow )
+            m_workflow->setHasAccuracyMetrics( true );
+          if ( m_workflow )
+            m_workflow->setCurrentStep( RsClassifyStep::Accuracy );
+        }
+        refreshWorkflowUi();
+      }
+      else if ( fin.cancelled() )
+      {
+        SICNU_LOG_WARN( SicnuLogTags::Classification,
+                        QStringLiteral( "Classification cancelled" ) );
+        if ( statusBar() )
+          statusBar()->showMessage( tr( "分类已取消" ), 3000 );
+      }
+      else
+      {
+        const QString err = !r.errorMessage.isEmpty()
+                              ? r.errorMessage
+                              : ( !fin.error.isEmpty() ? fin.error : tr( "运行失败" ) );
+        SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                         QString( "Classification failed: %1" ).arg( err ) );
+        if ( statusBar() )
+          statusBar()->showMessage( tr( "分类失败: %1" ).arg( err ), 6000 );
+      }
+      task->deleteLater();
+    },
+    [task]() { task->cancel(); },
+    this );
 
   if ( statusBar() )
     statusBar()->showMessage( tr( "分类中…" ), 3000 );
 }
 
-void QgsClassificationMainWindow::onRoiDrawn( const QgsGeometry &geom, int classId )
-{
-  if ( classId <= 0 )
-  {
-    statusBar()->showMessage( tr( "请先在类别表中选一个类别" ), 3000 );
-    return;
-  }
-  // Only rasterize when a source raster has been associated. Tasks
-  // 10.5/10.7/10.8 will set m_sourceWidth/Height/Gt when the user opens a
-  // raster; until then we record geometry-only ROIs.
-  QSet<quint64> pixels;
-  if ( m_sourceWidth > 0 && m_sourceHeight > 0 )
-  {
-    pixels = RsPixelRasterizer::rasterize( geom, m_sourceGt,
-                                           m_sourceWidth, m_sourceHeight );
-  }
-  QVector<quint64> idx( pixels.begin(), pixels.end() );
-  if ( m_rois )
-    m_rois->appendRoi( RsRoi( classId, geom, idx ) );
-}
+
 
 // ---------------------------------------------------------------------------
 // Phase 10A review patch — slot implementations.
@@ -2097,7 +2518,7 @@ void QgsClassificationMainWindow::applyPreview()
   req.exclusive = false;
   req.params["output"] = outForLog.toStdString();
 
-  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+  RsJobRunner::run(
     std::move( req ),
     [task]( const sicnu::jobs::JobRequest &request,
             sicnu::operators::RSOperatorContext &ctx ) {
@@ -2120,176 +2541,146 @@ void QgsClassificationMainWindow::applyPreview()
       result["durationMs"] = task->result().durationMs;
       return result;
     },
-    [task]() { task->cancel(); } );
+    [this, task, outForLog]( const RsJobFinish &fin ) {
+      setClassifyBusy( false );
+      const auto &r = task->result();
 
-  const QString jobIdQ = QString::fromStdString( jobId );
-  auto *bridge = JobEngineQtBridge::instance();
-  auto *conn = new QMetaObject::Connection;
-  *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
-                   [this, task, jobIdQ, outForLog, conn]( const QString &id ) {
-                     if ( id != jobIdQ )
-                       return;
-                     disconnect( *conn );
-                     delete conn;
-                     setClassifyBusy( false );
-
-                     const auto snapOpt =
-                       sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
-                     const auto &r = task->result();
-
-                     if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Succeeded && r.ok )
-                     {
-                       auto *previewLayer = new QgsRasterLayer(
-                         outForLog, QStringLiteral( "classify_preview" ),
-                         QStringLiteral( "gdal" ) );
-                       if ( previewLayer->isValid() )
-                       {
-                         if ( m_layerStore )
-                           m_layerStore->addMapLayer( previewLayer );
-                         if ( m_canvas )
-                         {
-                           QList<QgsMapLayer *> layers;
-                           if ( m_sourceLayer )
-                             layers << previewLayer << m_sourceLayer;
-                           else
-                             layers << previewLayer;
-                           m_canvas->setLayers( layers );
-                           m_canvas->refresh();
-                         }
-                       }
-                       else
-                       {
-                         delete previewLayer;
-                       }
-                       if ( statusBar() )
-                         statusBar()->showMessage(
-                           tr( "预览完成 (%1 ms)" ).arg( r.durationMs ), 5000 );
-                     }
-                     else if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
-                     {
-                       if ( statusBar() )
-                         statusBar()->showMessage( tr( "预览已取消" ), 3000 );
-                     }
-                     else
-                     {
-                       const QString err = !r.errorMessage.isEmpty()
-                                            ? r.errorMessage
-                                            : ( snapOpt ? QString::fromStdString( snapOpt->error )
-                                                        : tr( "运行失败" ) );
-                       if ( statusBar() )
-                         statusBar()->showMessage( tr( "预览失败: %1" ).arg( err ), 6000 );
-                     }
-                     task->deleteLater();
-                   } );
+      if ( fin.succeeded() && r.ok )
+      {
+        auto *previewLayer = new QgsRasterLayer(
+          outForLog, QStringLiteral( "classify_preview" ),
+          QStringLiteral( "gdal" ) );
+        if ( previewLayer->isValid() )
+        {
+          if ( m_previewLayer )
+          {
+            // R2 take transfers ownership out of the store — delete on replace.
+            removeSessionLayer( m_previewLayer );
+            delete m_previewLayer;
+            m_previewLayer = nullptr;
+          }
+          m_previewLayer = previewLayer;
+          addSessionLayer( previewLayer, true );
+        }
+        else
+        {
+          delete previewLayer;
+        }
+        if ( statusBar() )
+          statusBar()->showMessage(
+            tr( "预览完成 (%1 ms)" ).arg( r.durationMs ), 5000 );
+      }
+      else if ( fin.cancelled() )
+      {
+        if ( statusBar() )
+          statusBar()->showMessage( tr( "预览已取消" ), 3000 );
+      }
+      else
+      {
+        const QString err = !r.errorMessage.isEmpty()
+                              ? r.errorMessage
+                              : ( !fin.error.isEmpty() ? fin.error : tr( "运行失败" ) );
+        if ( statusBar() )
+          statusBar()->showMessage( tr( "预览失败: %1" ).arg( err ), 6000 );
+      }
+      task->deleteLater();
+    },
+    [task]() { task->cancel(); },
+    this );
 
   if ( statusBar() )
     statusBar()->showMessage( tr( "预览中…" ), 3000 );
 }
 
-QMap<int, int> QgsClassificationMainWindow::collectRecodeMap() const
+void QgsClassificationMainWindow::openPostProcessDialog( int algorithm )
 {
-  QMap<int, int> map;
-  if ( !m_ppRecodeTable )
-    return map;
-  for ( int row = 0; row < m_ppRecodeTable->rowCount(); ++row )
+  if ( m_classifyBusy )
   {
-    QTableWidgetItem *oldItem = m_ppRecodeTable->item( row, 0 );
-    QTableWidgetItem *newItem = m_ppRecodeTable->item( row, 1 );
-    if ( !oldItem || !newItem )
-      continue;
-    bool okOld = false;
-    bool okNew = false;
-    const int oldId = oldItem->text().trimmed().toInt( &okOld );
-    const int newId = newItem->text().trimmed().toInt( &okNew );
-    if ( okOld && okNew )
-      map.insert( oldId, newId );
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "当前有任务进行中，请稍候" ), 3000 );
+    return;
   }
-  return map;
+
+  const auto algo = static_cast<RsPostProcessDialog::Algorithm>( algorithm );
+  RsPostProcessDialog dlg( algo, this );
+
+  // Prefer last classify result as input; else last post-process raster.
+  QString defIn = m_lastClassifyPath;
+  if ( defIn.isEmpty() )
+    defIn = m_lastPostRasterPath;
+  dlg.setDefaultInputPath( defIn );
+  if ( !defIn.isEmpty() )
+  {
+    const QFileInfo fi( defIn );
+    QString suffix;
+    switch ( algo )
+    {
+      case RsPostProcessDialog::Algorithm::Sieve:
+        suffix = QStringLiteral( "_sieve.tif" );
+        break;
+      case RsPostProcessDialog::Algorithm::Majority:
+        suffix = QStringLiteral( "_majority.tif" );
+        break;
+      case RsPostProcessDialog::Algorithm::Clump:
+        suffix = QStringLiteral( "_clump.tif" );
+        break;
+      case RsPostProcessDialog::Algorithm::Recode:
+        suffix = QStringLiteral( "_recode.tif" );
+        break;
+      case RsPostProcessDialog::Algorithm::Polygonize:
+        suffix = QStringLiteral( "_poly.gpkg" );
+        break;
+    }
+    dlg.setDefaultOutputPath(
+      fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName() + suffix );
+  }
+
+  if ( dlg.exec() != QDialog::Accepted )
+    return;
+
+  RsPostProcessConfig cfg;
+  QString err;
+  if ( !dlg.buildConfig( cfg, &err ) )
+  {
+    QMessageBox::warning( this, RsPostProcessDialog::algorithmTitle( algo ), err );
+    return;
+  }
+  runPostProcess( cfg, dlg.loadToLayerTree(),
+                  RsPostProcessDialog::algorithmTitle( algo ),
+                  RsPostProcessDialog::algorithmId( algo ) );
 }
 
-void QgsClassificationMainWindow::runPostProcess()
+void QgsClassificationMainWindow::runPostProcess( const RsPostProcessConfig &cfgIn,
+                                                  bool loadToLayers,
+                                                  const QString &jobTitle,
+                                                  const QString &algorithmId )
 {
   if ( m_classifyBusy )
     return;
-  if ( !m_workflow || !m_workflow->canRunPostProcess() )
-  {
-    if ( statusBar() )
-      statusBar()->showMessage( tr( "请先完成全图分类 Apply" ), 5000 );
-    return;
-  }
 
-  RsPostProcessConfig cfg;
-  cfg.inputPath = m_ppInputEdit ? m_ppInputEdit->text().trimmed() : QString();
-  if ( cfg.inputPath.isEmpty() )
-    cfg.inputPath = m_lastClassifyPath;
-  if ( cfg.inputPath.isEmpty() )
-  {
-    if ( statusBar() )
-      statusBar()->showMessage( tr( "请指定分类栅格输入路径" ), 5000 );
-    return;
-  }
-
-  cfg.outputRasterPath = m_ppOutputEdit ? m_ppOutputEdit->text().trimmed() : QString();
-  if ( cfg.outputRasterPath.isEmpty() )
-  {
-    cfg.outputRasterPath = QFileDialog::getSaveFileName(
-      this, tr( "后处理输出栅格" ), QString(), tr( "GeoTIFF (*.tif)" ) );
-    if ( cfg.outputRasterPath.isEmpty() )
-      return;
-    if ( m_ppOutputEdit )
-      m_ppOutputEdit->setText( cfg.outputRasterPath );
-  }
-
-  cfg.runSieve = m_ppSieveCb && m_ppSieveCb->isChecked();
-  cfg.sieveThreshold = m_ppSieveSpin ? m_ppSieveSpin->value() : 10;
-  cfg.connectedness = 8;
-  cfg.runMajority = m_ppMajorityCb && m_ppMajorityCb->isChecked();
-  int kernel = m_ppMajoritySpin ? m_ppMajoritySpin->value() : 3;
-  if ( kernel % 2 == 0 )
-    ++kernel;
-  cfg.majorityKernel = kernel;
-  cfg.runClump = m_ppClumpCb && m_ppClumpCb->isChecked();
-  cfg.runRecode = m_ppRecodeCb && m_ppRecodeCb->isChecked();
-  cfg.recodeMap = cfg.runRecode ? collectRecodeMap() : QMap<int, int>();
-  cfg.runPolygonize = m_ppPolygonizeCb && m_ppPolygonizeCb->isChecked();
-  cfg.outputVectorPath = m_ppVectorEdit ? m_ppVectorEdit->text().trimmed() : QString();
-
-  if ( cfg.runRecode && cfg.recodeMap.isEmpty() )
-  {
-    if ( statusBar() )
-      statusBar()->showMessage( tr( "重编码已勾选，请在表格中填写旧类→新类" ), 5000 );
-    return;
-  }
-  if ( cfg.runPolygonize && cfg.outputVectorPath.isEmpty() )
-  {
-    const QFileInfo fi( cfg.outputRasterPath );
-    cfg.outputVectorPath = fi.absolutePath() + QLatin1Char( '/' )
-                           + fi.completeBaseName() + QStringLiteral( ".gpkg" );
-    if ( m_ppVectorEdit )
-      m_ppVectorEdit->setText( cfg.outputVectorPath );
-  }
-  if ( !cfg.runSieve && !cfg.runMajority && !cfg.runClump
-       && !cfg.runRecode && !cfg.runPolygonize )
-  {
-    if ( statusBar() )
-      statusBar()->showMessage( tr( "请至少选择一个后处理算子，或点「跳过后处理」" ), 5000 );
-    return;
-  }
-
+  RsPostProcessConfig cfg = cfgIn;
   const QString outRaster = cfg.outputRasterPath;
   const QString outVector = cfg.outputVectorPath;
   const bool doPoly = cfg.runPolygonize;
+  const bool rasterOut = !doPoly || !outRaster.isEmpty();
   auto *task = new RsPostProcessTask( std::move( cfg ) );
   setClassifyBusy( true );
 
   sicnu::jobs::JobRequest req;
-  req.algorithmId = "module:classify:postprocess";
-  req.title = tr( "分类后处理" ).toStdString();
+  req.algorithmId = algorithmId.isEmpty()
+                      ? "module:classify:postprocess"
+                      : algorithmId.toStdString();
+  req.title = ( jobTitle.isEmpty() ? tr( "分类后处理" ) : jobTitle ).toStdString();
   req.source = "module";
   req.exclusive = true;
-  req.params["output"] = outRaster.toStdString();
+  req.params["input"] = cfgIn.inputPath.toStdString();
+  if ( !outRaster.isEmpty() )
+    req.params["output"] = outRaster.toStdString();
+  if ( !outVector.isEmpty() )
+    req.params["outputVector"] = outVector.toStdString();
+  req.params["loadOutputsToMain"] = loadToLayers;
 
-  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+  RsJobRunner::run(
     std::move( req ),
     [task]( const sicnu::jobs::JobRequest &,
             sicnu::operators::RSOperatorContext &ctx ) {
@@ -2310,85 +2701,89 @@ void QgsClassificationMainWindow::runPostProcess()
       }
       Json::Value result( Json::objectValue );
       result["durationMs"] = task->result().durationMs;
+      if ( !task->config().outputRasterPath.isEmpty() )
+        result["output"] = task->config().outputRasterPath.toStdString();
+      if ( !task->config().outputVectorPath.isEmpty() )
+        result["outputVector"] = task->config().outputVectorPath.toStdString();
       return result;
     },
-    [task]() { task->cancel(); } );
+    [this, task, outRaster, outVector, doPoly, loadToLayers]( const RsJobFinish &fin ) {
+      setClassifyBusy( false );
+      const auto &r = task->result();
 
-  const QString jobIdQ = QString::fromStdString( jobId );
-  auto *bridge = JobEngineQtBridge::instance();
-  auto *conn = new QMetaObject::Connection;
-  *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
-                   [this, task, jobIdQ, outRaster, outVector, doPoly, conn]( const QString &id ) {
-                     if ( id != jobIdQ )
-                       return;
-                     disconnect( *conn );
-                     delete conn;
-                     setClassifyBusy( false );
+      if ( fin.succeeded() && r.ok )
+      {
+        if ( m_workflow )
+          m_workflow->setHasPostProcessResult( true );
 
-                     const auto snapOpt =
-                       sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
-                     const auto &r = task->result();
+        if ( !outRaster.isEmpty() )
+          m_lastPostRasterPath = outRaster;
+        if ( doPoly && !outVector.isEmpty() )
+          m_lastPostVectorPath = outVector;
 
-                     if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Succeeded && r.ok )
-                     {
-                       if ( m_workflow )
-                         m_workflow->setHasPostProcessResult( true );
+        if ( loadToLayers )
+        {
+          if ( !doPoly && !outRaster.isEmpty() && QFileInfo::exists( outRaster ) )
+          {
+            auto *resultLayer = new QgsRasterLayer(
+              outRaster,
+              QFileInfo( outRaster ).baseName() + tr( " (后处理)" ),
+              QStringLiteral( "gdal" ) );
+            if ( resultLayer->isValid() )
+            {
+              m_previewLayer = resultLayer;
+              addSessionLayer( resultLayer, true );
+            }
+            else
+            {
+              delete resultLayer;
+            }
+          }
+          if ( doPoly && !outVector.isEmpty() && QFileInfo::exists( outVector ) )
+          {
+            auto *vlayer = new QgsVectorLayer(
+              outVector,
+              QFileInfo( outVector ).baseName() + tr( " (矢量)" ),
+              QStringLiteral( "ogr" ) );
+            if ( vlayer->isValid() )
+              addSessionLayer( vlayer, true );
+            else
+              delete vlayer;
+          }
+        }
 
-                       m_lastPostRasterPath = outRaster;
-                       if ( doPoly && !outVector.isEmpty() )
-                         m_lastPostVectorPath = outVector;
-
-                       auto *resultLayer = new QgsRasterLayer(
-                         outRaster, QFileInfo( outRaster ).baseName() + QStringLiteral( " (post)" ),
-                         QStringLiteral( "gdal" ) );
-                       if ( resultLayer->isValid() )
-                       {
-                         if ( m_layerStore )
-                           m_layerStore->addMapLayer( resultLayer );
-                         if ( m_canvas )
-                         {
-                           QList<QgsMapLayer *> layers;
-                           layers << resultLayer;
-                           if ( m_sourceLayer )
-                             layers << m_sourceLayer;
-                           m_canvas->setLayers( layers );
-                           m_canvas->refresh();
-                         }
-                       }
-                       else
-                       {
-                         delete resultLayer;
-                       }
-
-                       if ( statusBar() )
-                       {
-                         QString msg = tr( "后处理完成: %1 (%2 ms)" )
-                                         .arg( QFileInfo( outRaster ).fileName() )
-                                         .arg( r.durationMs );
-                         if ( doPoly && !outVector.isEmpty() )
-                           msg += tr( "；矢量 %1" ).arg( QFileInfo( outVector ).fileName() );
-                         statusBar()->showMessage( msg, 6000 );
-                       }
-                       refreshWorkflowUi();
-                     }
-                     else if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
-                     {
-                       if ( statusBar() )
-                         statusBar()->showMessage( tr( "后处理已取消" ), 3000 );
-                     }
-                     else
-                     {
-                       const QString err = !r.errorMessage.isEmpty()
-                                            ? r.errorMessage
-                                            : ( snapOpt ? QString::fromStdString( snapOpt->error )
-                                                        : tr( "未知错误" ) );
-                       SICNU_LOG_ERROR( SicnuLogTags::Classification,
-                                        QStringLiteral( "Post-process failed: %1" ).arg( err ) );
-                       if ( statusBar() )
-                         statusBar()->showMessage( tr( "后处理失败: %1" ).arg( err ), 6000 );
-                     }
-                     delete task;
-                   } );
+        if ( statusBar() )
+        {
+          QString msg = tr( "后处理完成 (%1 ms)" ).arg( r.durationMs );
+          if ( !outRaster.isEmpty() )
+            msg += QStringLiteral( ": " ) + QFileInfo( outRaster ).fileName();
+          if ( doPoly && !outVector.isEmpty() )
+            msg += tr( "；矢量 %1" ).arg( QFileInfo( outVector ).fileName() );
+          if ( loadToLayers )
+            msg += tr( "（已加载到图层）" );
+          statusBar()->showMessage( msg, 6000 );
+        }
+        refreshWorkflowUi();
+      }
+      else if ( fin.cancelled() )
+      {
+        if ( statusBar() )
+          statusBar()->showMessage( tr( "后处理已取消" ), 3000 );
+      }
+      else
+      {
+        const QString err = !r.errorMessage.isEmpty()
+                              ? r.errorMessage
+                              : ( !fin.error.isEmpty() ? fin.error : tr( "未知错误" ) );
+        SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                         QStringLiteral( "Post-process failed: %1" ).arg( err ) );
+        if ( statusBar() )
+          statusBar()->showMessage( tr( "后处理失败: %1" ).arg( err ), 6000 );
+      }
+      delete task;
+    },
+    [task]() { task->cancel(); },
+    this );
 
   if ( statusBar() )
     statusBar()->showMessage( tr( "后处理中…" ), 3000 );
@@ -2455,13 +2850,12 @@ void QgsClassificationMainWindow::runCrossValidation()
   req.source = "module";
   req.exclusive = false;
 
-  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+  RsJobRunner::run(
     std::move( req ),
     [task]( const sicnu::jobs::JobRequest &,
             sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running 5-fold cross validation" );
       ctx.reportProgress( 0.0, "CV" );
-      // Do not use task completion callback (worker thread UI); result via task->result()
       const bool ok = task->run();
       if ( ctx.isCancelled() || !ok )
       {
@@ -2481,54 +2875,42 @@ void QgsClassificationMainWindow::runCrossValidation()
       result["stdAccuracy"] = task->result().stdAccuracy;
       return result;
     },
-    [task]() { task->cancel(); } );
+    [this, task]( const RsJobFinish &fin ) {
+      setClassifyBusy( false );
+      const auto res = task->result();
+      delete task;
 
-  const QString jobIdQ = QString::fromStdString( jobId );
-  auto *bridge = JobEngineQtBridge::instance();
-  auto *conn = new QMetaObject::Connection;
-  *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
-                   [this, task, jobIdQ, conn]( const QString &id ) {
-                     if ( id != jobIdQ )
-                       return;
-                     disconnect( *conn );
-                     delete conn;
-                     setClassifyBusy( false );
-
-                     const auto snapOpt =
-                       sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
-                     const auto res = task->result();
-                     delete task;
-
-                     if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Succeeded && res.ok() )
-                     {
-                       QString perFold;
-                       for ( int i = 0; i < res.foldAccuracies.size(); ++i )
-                         perFold += QString( "  fold%1: %2%\n" )
-                                      .arg( i + 1 )
-                                      .arg( res.foldAccuracies[i] * 100, 0, 'f', 1 );
-                       QMessageBox::information(
-                         this, tr( "5-fold Cross Validation" ),
-                         tr( "Mean accuracy: %1% ± %2%\n\n%3" )
-                           .arg( res.meanAccuracy * 100, 0, 'f', 1 )
-                           .arg( res.stdAccuracy * 100, 0, 'f', 1 )
-                           .arg( perFold ) );
-                       if ( statusBar() )
-                         statusBar()->showMessage( tr( "交叉验证完成" ), 3000 );
-                     }
-                     else if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
-                     {
-                       if ( statusBar() )
-                         statusBar()->showMessage( tr( "交叉验证已取消" ), 3000 );
-                     }
-                     else if ( statusBar() )
-                     {
-                       statusBar()->showMessage(
-                         tr( "交叉验证失败: %1" )
-                           .arg( snapOpt ? QString::fromStdString( snapOpt->error )
-                                         : tr( "未知错误" ) ),
-                         5000 );
-                     }
-                   } );
+      if ( fin.succeeded() && res.ok() )
+      {
+        QString perFold;
+        for ( int i = 0; i < res.foldAccuracies.size(); ++i )
+          perFold += QString( "  fold%1: %2%\n" )
+                       .arg( i + 1 )
+                       .arg( res.foldAccuracies[i] * 100, 0, 'f', 1 );
+        QMessageBox::information(
+          this, tr( "5-fold Cross Validation" ),
+          tr( "Mean accuracy: %1% ± %2%\n\n%3" )
+            .arg( res.meanAccuracy * 100, 0, 'f', 1 )
+            .arg( res.stdAccuracy * 100, 0, 'f', 1 )
+            .arg( perFold ) );
+        if ( statusBar() )
+          statusBar()->showMessage( tr( "交叉验证完成" ), 3000 );
+      }
+      else if ( fin.cancelled() )
+      {
+        if ( statusBar() )
+          statusBar()->showMessage( tr( "交叉验证已取消" ), 3000 );
+      }
+      else if ( statusBar() )
+      {
+        statusBar()->showMessage(
+          tr( "交叉验证失败: %1" )
+            .arg( !fin.error.isEmpty() ? fin.error : tr( "未知错误" ) ),
+          5000 );
+      }
+    },
+    [task]() { task->cancel(); },
+    this );
 
   if ( statusBar() )
     statusBar()->showMessage( tr( "5-fold CV 运行中…" ), 3000 );
@@ -2833,12 +3215,14 @@ void QgsClassificationMainWindow::loadRois()
       m_rois->appendRoi( roi );
     }
     mSuppressDirty = false;
+    syncSampleLayerFromRois();
+    applySampleLayerRenderer();
     mSession.setLastRoisPath( path );
     mSession.clearDirty();
     SICNU_LOG_INFO( SicnuLogTags::Classification,
                     QString( "ROIs loaded from %1" ).arg( path ) );
     if ( statusBar() )
-      statusBar()->showMessage( tr( "成功加载 %1 个 ROI" ).arg( m_rois->size() ), 5000 );
+      statusBar()->showMessage( tr( "成功加载 %1 个样本" ).arg( m_rois->size() ), 5000 );
   }
   else
   {
@@ -2966,10 +3350,7 @@ void QgsClassificationMainWindow::exportSelectedStep7()
   if ( m_exportClassifiedCb && m_exportClassifiedCb->isChecked() )
   {
     ++attempted;
-    const QString src = !m_lastClassifyPath.isEmpty()
-                          ? m_lastClassifyPath
-                          : ( m_ppInputEdit ? m_ppInputEdit->text().trimmed()
-                                            : QString() );
+    const QString src = m_lastClassifyPath;
     if ( copyPathWithDialog( src, tr( "导出分类 GeoTIFF" ) ) )
       anySuccess = true;
   }
@@ -2977,10 +3358,7 @@ void QgsClassificationMainWindow::exportSelectedStep7()
   if ( m_exportPostRasterCb && m_exportPostRasterCb->isChecked() )
   {
     ++attempted;
-    const QString src = !m_lastPostRasterPath.isEmpty()
-                          ? m_lastPostRasterPath
-                          : ( m_ppOutputEdit ? m_ppOutputEdit->text().trimmed()
-                                             : QString() );
+    const QString src = m_lastPostRasterPath;
     if ( copyPathWithDialog( src, tr( "导出后处理栅格" ) ) )
       anySuccess = true;
   }
@@ -2988,10 +3366,7 @@ void QgsClassificationMainWindow::exportSelectedStep7()
   if ( m_exportPostVectorCb && m_exportPostVectorCb->isChecked() )
   {
     ++attempted;
-    const QString src = !m_lastPostVectorPath.isEmpty()
-                          ? m_lastPostVectorPath
-                          : ( m_ppVectorEdit ? m_ppVectorEdit->text().trimmed()
-                                             : QString() );
+    const QString src = m_lastPostVectorPath;
     if ( copyPathWithDialog( src, tr( "导出后处理矢量" ) ) )
       anySuccess = true;
   }
@@ -3045,10 +3420,6 @@ void QgsClassificationMainWindow::loadClassificationResultToMain()
   QString path = !m_lastPostRasterPath.isEmpty()
                    ? m_lastPostRasterPath
                    : m_lastClassifyPath;
-  if ( path.isEmpty() && m_ppOutputEdit )
-    path = m_ppOutputEdit->text().trimmed();
-  if ( path.isEmpty() && m_ppInputEdit )
-    path = m_ppInputEdit->text().trimmed();
 
   if ( path.isEmpty() || !QFileInfo::exists( path ) )
   {
@@ -3110,11 +3481,7 @@ bool QgsClassificationMainWindow::saveClassificationProject( QString path )
   data.roisPath = mSession.lastRoisPath();
   data.classifiedRasterPath = m_lastClassifyPath;
   data.postProcessRasterPath = m_lastPostRasterPath;
-  if ( data.postProcessRasterPath.isEmpty() && m_ppOutputEdit )
-    data.postProcessRasterPath = m_ppOutputEdit->text().trimmed();
   data.postProcessVectorPath = m_lastPostVectorPath;
-  if ( data.postProcessVectorPath.isEmpty() && m_ppVectorEdit )
-    data.postProcessVectorPath = m_ppVectorEdit->text().trimmed();
   data.accuracySource = m_accuracySource;
   if ( m_accuracyPanel && m_accuracyPanel->hasResult() )
   {
@@ -3161,23 +3528,11 @@ bool QgsClassificationMainWindow::loadProjectFromFile( QString path )
 
   // Paths first so UI panels reflect them.
   if ( !data.classifiedRasterPath.isEmpty() )
-  {
     m_lastClassifyPath = data.classifiedRasterPath;
-    if ( m_ppInputEdit )
-      m_ppInputEdit->setText( data.classifiedRasterPath );
-  }
   if ( !data.postProcessRasterPath.isEmpty() )
-  {
     m_lastPostRasterPath = data.postProcessRasterPath;
-    if ( m_ppOutputEdit )
-      m_ppOutputEdit->setText( data.postProcessRasterPath );
-  }
   if ( !data.postProcessVectorPath.isEmpty() )
-  {
     m_lastPostVectorPath = data.postProcessVectorPath;
-    if ( m_ppVectorEdit )
-      m_ppVectorEdit->setText( data.postProcessVectorPath );
-  }
   m_accuracySource = data.accuracySource;
 
   // Optionally restore source raster and ROIs when paths are present.
@@ -3212,6 +3567,8 @@ bool QgsClassificationMainWindow::loadProjectFromFile( QString path )
         m_rois->appendRoi( roi );
       }
       mSuppressDirty = false;
+      syncSampleLayerFromRois();
+      applySampleLayerRenderer();
       mSession.setLastRoisPath( data.roisPath );
       mSession.clearDirty();
     }

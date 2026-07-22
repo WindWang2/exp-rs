@@ -1,15 +1,9 @@
-// rs_obia_main_window.h — Phase 10B Task 10B.5: OBIA classification main window.
-//
-// Standalone QMainWindow for object-based image analysis:
-//   - Left dock: layer list + segment class assignment
-//   - Center: map canvas showing segmentation result
-//   - Right dock: classifier setup + run controls
-//   - Bottom dock: segment info
-//   - Toolbar: load raster, segment, classify, export
+// rs_obia_main_window.h — OBIA window (flat + hierarchical V1).
 #pragma once
 
 #include <QMainWindow>
 
+#include "rs_object_hierarchy.h"
 #include "rs_segment_map.h"
 #include "rs_segment_features.h"
 #include "rs_segment_info_dock.h"
@@ -40,8 +34,12 @@ class RsObiaMainWindow : public QMainWindow
   private slots:
     void loadRaster();
     void runSegmentation();
+    void runHierarchicalSegmentation();
     void runClassification();
     void exportResult();
+    void importRoiLabels();
+    void onActiveLevelChanged( int level );
+    void onClassifyLevelChanged( int level );
 
     void onSegmentSelected( quint32 segmentId );
     void onSelectionCleared();
@@ -57,6 +55,12 @@ class RsObiaMainWindow : public QMainWindow
     void applySegmentationResult( const RsSegmentMap &segMap,
                                   bool usedOtb,
                                   QMap<quint32, RsSegmentFeatures::SegmentStat> stats );
+    void applyHierarchyResult( RsObjectHierarchy hierarchy,
+                               int activeLevel,
+                               QMap<quint32, RsSegmentFeatures::SegmentStat> stats );
+    void setActiveLevelMap( int level );
+    QVector<int> allBandIndices() const;
+    int currentClassifyLevel() const;
 
     // Map canvas
     QgsMapCanvas *mCanvas = nullptr;
@@ -67,13 +71,17 @@ class RsObiaMainWindow : public QMainWindow
     QgsLayerTreeModel *mLayerTreeModel = nullptr;
     QgsLayerTreeView *mLayerView = nullptr;
 
-    // Segment data
+    // Segment data (active level surface)
     RsSegmentMap mSegMap;
     QMap<quint32, RsSegmentFeatures::SegmentStat> mSegStats;
-    QMap<quint32, int> mSegmentLabels; // segmentId → classId
+    QMap<quint32, int> mSegmentLabels; // segmentId → classId (classify level)
+    RsObjectHierarchy mHierarchy;
+    int mActiveLevel = 0;
+    int mClassifyLevel = 0; // default finest
+    bool mHasHierarchy = false;
+    QString mLastClassRasterPath;
 
 public:
-    // Class definitions (reuse Phase 10A pattern)
     struct ClassDef
     {
         int id;
@@ -85,20 +93,16 @@ private:
     QVector<ClassDef> mClassDefs;
     int mCurrentClassId = 1;
 
-    // Map tool
     RsSegmentSelectTool *mSelectTool = nullptr;
 
-    // Docks
     RsSegmentInfoDock *mInfoDock = nullptr;
     QDockWidget *mClassDock = nullptr;
     QTableWidget *mClassTable = nullptr;
     QDockWidget *mSegmentDock = nullptr;
     QTableWidget *mSegmentTable = nullptr;
 
-    // Toolbar
     QToolBar *mToolbar = nullptr;
 
-    // State
     QString mRasterPath;
     int mBandCount = 0;
     int mSelectedClassRow = 0;

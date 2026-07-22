@@ -28,6 +28,7 @@ Schema: see `data/schemas/pipeline_schema.json`.
 | `obia_segment.json` | Simple OBIA object segmentation |
 | `obia_classify.json` | Full OBIA classify (objects + ROI train + SVM) |
 | `obia_export.json` | Segment → stats CSV → polygon shapefile |
+| `obia_hierarchy.json` | Hierarchical OBIA V1 (OTB MeanShift+Watershed+link+optional classify) |
 
 Edit `input` / `output` paths to match your local data. Sample GeoTIFFs live under `data/samples/`.
 
@@ -37,5 +38,6 @@ Edit `input` / `output` paths to match your local data. Sample GeoTIFFs live und
 - `rs:supervised_classification` — train from polygons (`classField`) **or** predict-only with `modelIn`
 - `rs:obia_segment` — teaching object segmentation (smooth → quantize → CC)
 - `rs:obia_classify` — segment + mean features + ROI majority label + classify objects
+- `rs:obia_hierarchy` — hierarchical OBIA V1 via analysis library (requires OTB; optional training→class raster)
 - `rs:segment_stats` — per-object mean/area table (CSV)
 - `gdal:polygonize` — label/class raster → polygons

@@ -8,6 +8,13 @@
 #include "rs_classifier_normalbayes.h"
 #include "rs_classifier_svm.h"
 #include "rs_classifier_kmeans.h"
+#include "rs_object_hierarchy.h"
+#include "rs_otb_segmenter.h"
+#include "rs_parent_link.h"
+#include "rs_hierarchy_features.h"
+#include "rs_object_classify.h"
+#include "rs_class_raster.h"
+#include "rs_segmenter_port.h"
 
 #include "shell/job_engine_qt_bridge.h"
 #include "jobs/job_engine.h"
@@ -30,6 +37,7 @@
 #include <QGuiApplication>
 #include <QFileDialog>
 #include <QSpinBox>
+#include <QDoubleSpinBox>
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QLabel>
@@ -41,8 +49,12 @@
 #include <QVBoxLayout>
 
 #include <atomic>
+#include <cmath>
 #include <memory>
+#include <map>
+#include <vector>
 #include <gdal.h>
+#include <ogr_api.h>
 
 // ---------------------------------------------------------------------------
 // Default class definitions (same as Phase 10A)
@@ -129,7 +141,21 @@ void RsObiaMainWindow::setupToolbar()
     mToolbar->addWidget( minRegionSpin );
 
     auto *segAct = mToolbar->addAction( tr( "Segment" ), this, &RsObiaMainWindow::runSegmentation );
-    SicnuDialogHelp::tip( segAct, tr( "运行影像分割，生成对象。" ) );
+    SicnuDialogHelp::tip( segAct, tr( "运行单层影像分割，生成对象。" ) );
+
+    auto *hierAct = mToolbar->addAction( tr( "Hierarchy" ), this, &RsObiaMainWindow::runHierarchicalSegmentation );
+    SicnuDialogHelp::tip( hierAct, tr(
+      "两层层次分割：细层 MeanShift + 粗层 Watershed + 父链接（需 OTB）。" ) );
+
+    mToolbar->addWidget( new QLabel( tr( " View L:" ) ) );
+    auto *levelSpin = new QSpinBox;
+    levelSpin->setRange( 0, 1 );
+    levelSpin->setValue( 0 );
+    levelSpin->setObjectName( "levelSpin" );
+    SicnuDialogHelp::tip( levelSpin, tr( "活动显示层级（0=最细）。对象 id 按层独立编号。" ) );
+    mToolbar->addWidget( levelSpin );
+    connect( levelSpin, QOverload<int>::of( &QSpinBox::valueChanged ),
+             this, &RsObiaMainWindow::onActiveLevelChanged );
 
     mToolbar->addSeparator();
 
@@ -142,12 +168,27 @@ void RsObiaMainWindow::setupToolbar()
     classifierCombo->setObjectName( "classifierCombo" );
     mToolbar->addWidget( classifierCombo );
 
+    mToolbar->addWidget( new QLabel( tr( " Cls L:" ) ) );
+    auto *classifyLevelSpin = new QSpinBox;
+    classifyLevelSpin->setRange( 0, 1 );
+    classifyLevelSpin->setValue( 0 );
+    classifyLevelSpin->setObjectName( "classifyLevelSpin" );
+    SicnuDialogHelp::tip( classifyLevelSpin, tr(
+      "分类层级，默认 0（最细）。训练标签绑定该层对象。" ) );
+    mToolbar->addWidget( classifyLevelSpin );
+    connect( classifyLevelSpin, QOverload<int>::of( &QSpinBox::valueChanged ),
+             this, &RsObiaMainWindow::onClassifyLevelChanged );
+
     auto *clsAct = mToolbar->addAction( tr( "Classify" ), this, &RsObiaMainWindow::runClassification );
-    SicnuDialogHelp::tip( clsAct, tr( "对分割对象进行分类。" ) );
+    SicnuDialogHelp::tip( clsAct, tr( "对所选层级的对象进行分类。" ) );
+
+    auto *roiAct = mToolbar->addAction( tr( "Import ROI" ), this, &RsObiaMainWindow::importRoiLabels );
+    SicnuDialogHelp::tip( roiAct, tr(
+      "从训练多边形按多数票标注对象；与点击标注冲突时后写覆盖并提示。" ) );
 
     mToolbar->addSeparator();
     auto *expAct = mToolbar->addAction( tr( "Export" ), this, &RsObiaMainWindow::exportResult );
-    SicnuDialogHelp::tip( expAct, tr( "导出分类/分割结果。" ) );
+    SicnuDialogHelp::tip( expAct, tr( "导出分类栅格（及可选矢量化）。" ) );
 }
 
 void RsObiaMainWindow::setupDocks()
@@ -254,10 +295,19 @@ void RsObiaMainWindow::loadRaster()
     mCanvas->setExtent( layer->extent() );
     mCanvas->refresh();
 
-    // Reset segmentation
+    // Reset segmentation / hierarchy
     mSegMap = RsSegmentMap();
     mSegStats.clear();
     mSegmentLabels.clear();
+    mHierarchy.clear();
+    mHasHierarchy = false;
+    mActiveLevel = 0;
+    mClassifyLevel = 0;
+    mLastClassRasterPath.clear();
+    if ( auto *ls = findChild<QSpinBox *>( "levelSpin" ) )
+        ls->setValue( 0 );
+    if ( auto *cs = findChild<QSpinBox *>( "classifyLevelSpin" ) )
+        cs->setValue( 0 );
     updateSegmentTable();
     updateStatusLabel();
 
@@ -444,6 +494,9 @@ void RsObiaMainWindow::applySegmentationResult(
     updateSegmentTable();
     updateStatusLabel();
 
+    mHasHierarchy = false;
+    mHierarchy.clear();
+
     const QString method = usedOtb ? tr( "OTB MeanShift" ) : tr( "built-in segmenter" );
     statusBar()->showMessage(
         tr( "Segmentation complete (%1): %2 segments" ).arg( method ).arg( mSegMap.segmentCount() ), 5000 );
@@ -454,33 +507,294 @@ void RsObiaMainWindow::applySegmentationResult(
                                   .arg( mSegMap.segmentCount() ) );
 }
 
+QVector<int> RsObiaMainWindow::allBandIndices() const
+{
+    QVector<int> bandIndices;
+    for ( int b = 1; b <= mBandCount; ++b )
+        bandIndices.append( b );
+    return bandIndices;
+}
+
+int RsObiaMainWindow::currentClassifyLevel() const
+{
+    if ( auto *cs = findChild<QSpinBox *>( "classifyLevelSpin" ) )
+        return cs->value();
+    return mClassifyLevel;
+}
+
+void RsObiaMainWindow::setActiveLevelMap( int level )
+{
+    if ( !mHasHierarchy || level < 0 || level >= mHierarchy.levelCount() )
+        return;
+
+    mActiveLevel = level;
+    mSegMap = mHierarchy.level( level );
+    mSegStats = RsSegmentFeatures::extract( mRasterPath, mSegMap, allBandIndices() );
+
+    // Labels are stored for classify level; when viewing another level, table class col may be empty.
+    if ( mSelectTool )
+        mSelectTool->setSegmentMap( mSegMap );
+
+    updateSegmentTable();
+    updateStatusLabel();
+}
+
+void RsObiaMainWindow::applyHierarchyResult( RsObjectHierarchy hierarchy,
+                                             int activeLevel,
+                                             QMap<quint32, RsSegmentFeatures::SegmentStat> stats )
+{
+    mHierarchy = std::move( hierarchy );
+    mHasHierarchy = true;
+    mActiveLevel = activeLevel;
+    mClassifyLevel = 0;
+    mSegMap = mHierarchy.level( activeLevel );
+    mSegStats = std::move( stats );
+    mSegmentLabels.clear();
+
+    if ( auto *ls = findChild<QSpinBox *>( "levelSpin" ) )
+    {
+        ls->setMaximum( std::max( 0, mHierarchy.levelCount() - 1 ) );
+        ls->setValue( activeLevel );
+    }
+    if ( auto *cs = findChild<QSpinBox *>( "classifyLevelSpin" ) )
+    {
+        cs->setMaximum( std::max( 0, mHierarchy.levelCount() - 1 ) );
+        cs->setValue( 0 );
+    }
+
+    if ( !mSelectTool )
+    {
+        mSelectTool = new RsSegmentSelectTool( mCanvas );
+        connect( mSelectTool, &RsSegmentSelectTool::segmentSelected,
+                 this, &RsObiaMainWindow::onSegmentSelected );
+        connect( mSelectTool, &RsSegmentSelectTool::selectionCleared,
+                 this, &RsObiaMainWindow::onSelectionCleared );
+    }
+    mSelectTool->setSegmentMap( mSegMap );
+
+    double gt[6] = { 0, 1, 0, 0, 0, 1 };
+    GDALDatasetH rds = GDALOpen( mRasterPath.toUtf8().constData(), GA_ReadOnly );
+    if ( rds )
+    {
+        GDALGetGeoTransform( rds, gt );
+        GDALClose( rds );
+    }
+    mSelectTool->setGeoTransform( gt );
+    mCanvas->setMapTool( mSelectTool );
+
+    updateSegmentTable();
+    updateStatusLabel();
+
+    statusBar()->showMessage(
+        tr( "Hierarchy ready: %1 levels | viewing L%2 (%3 objects)" )
+            .arg( mHierarchy.levelCount() )
+            .arg( mActiveLevel )
+            .arg( mSegMap.segmentCount() ),
+        5000 );
+
+    QMessageBox::information(
+        this, tr( "Hierarchical Segmentation" ),
+        tr( "Two-level hierarchy built.\nLevel 0 (fine): %1 objects\nLevel 1 (coarse): %2 objects\n"
+            "Select an object to inspect parent / childCount / areaRatio.\n"
+            "Segment ids are local per level." )
+            .arg( mHierarchy.level( 0 ).segmentCount() )
+            .arg( mHierarchy.levelCount() > 1 ? mHierarchy.level( 1 ).segmentCount() : 0 ) );
+}
+
+void RsObiaMainWindow::runHierarchicalSegmentation()
+{
+    if ( mRasterPath.isEmpty() )
+    {
+        QMessageBox::information( this, tr( "OBIA" ), tr( "Load a raster first." ) );
+        return;
+    }
+
+    if ( !RsOtbSegmenter::isAvailable() )
+    {
+        QMessageBox::warning(
+            this, tr( "OTB required" ),
+            tr( "Hierarchical OBIA requires OTB Segmentation CLI.\n"
+                "Set SICNU_OTB_PATH or install OTB.\n"
+                "No silent teaching fallback for the hierarchy path." ) );
+        return;
+    }
+
+    const QString rasterPath = mRasterPath;
+    auto canceled = std::make_shared<std::atomic<bool>>( false );
+
+    auto *progress = new QProgressDialog(
+        tr( "Building 2-level hierarchy (MeanShift + Watershed)..." ),
+        tr( "Cancel" ), 0, 0, this );
+    progress->setWindowModality( Qt::WindowModal );
+    progress->setMinimumDuration( 0 );
+    progress->show();
+    QGuiApplication::setOverrideCursor( Qt::WaitCursor );
+    statusBar()->showMessage( progress->labelText() );
+
+    struct HierWork
+    {
+        bool ok = false;
+        QString error;
+        RsObjectHierarchy hierarchy;
+        QMap<quint32, RsSegmentFeatures::SegmentStat> stats;
+    };
+    auto work = std::make_shared<HierWork>();
+    const QVector<int> bandIndices = allBandIndices();
+
+    // Reuse toolbar spins for fine MeanShift; Watershed threshold default.
+    auto *kernelSpin = findChild<QSpinBox *>( "kernelSpin" );
+    auto *binsSpin = findChild<QSpinBox *>( "binsSpin" );
+    auto *minRegionSpin = findChild<QSpinBox *>( "minRegionSpin" );
+    const int spatialRadius = kernelSpin ? kernelSpin->value() : 5;
+    // binsSpin (quantize levels in simple segmenter) maps to range radius scale for MeanShift.
+    const double rangeRadius = binsSpin ? static_cast<double>( binsSpin->value() ) * 0.5 : 15.0;
+    const int minRegionSize = minRegionSpin ? minRegionSpin->value() : 100;
+    const double watershedThreshold = 0.01;
+
+    sicnu::jobs::JobRequest req;
+    req.algorithmId = "module:obia:hierarchy";
+    req.title = tr( "OBIA hierarchical segment" ).toStdString();
+    req.source = "module";
+    req.exclusive = true;
+    req.params["input"] = rasterPath.toStdString();
+
+    const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+        std::move( req ),
+        [rasterPath, bandIndices, canceled, work, spatialRadius, rangeRadius, minRegionSize,
+         watershedThreshold](
+            const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
+            ctx.logInfo( "OBIA hierarchical segmentation" );
+            static bool s_gdalInit = ( GDALAllRegister(), true );
+            Q_UNUSED( s_gdalInit );
+
+            // Toolbar: kernelSpin→spatialr, binsSpin→range scale, minRegionSpin→minsize.
+            RsLevelSpec fine;
+            fine.filter = RsLevelSpec::Filter::MeanShift;
+            fine.name = QStringLiteral( "fine" );
+            fine.spatialRadius = spatialRadius;
+            fine.rangeRadius = rangeRadius;
+            fine.minRegionSize = minRegionSize;
+            fine.maxIterations = 100;
+            fine.threshold = 0.1;
+
+            RsLevelSpec coarse;
+            coarse.filter = RsLevelSpec::Filter::Watershed;
+            coarse.name = QStringLiteral( "coarse" );
+            coarse.watershedThreshold = watershedThreshold;
+
+            RsOtbSegmenter segmenter;
+            RsPixelMajorityParentLink linker;
+            QString err;
+            ctx.reportProgress( 0.1, "buildLevels" );
+            const bool ok = work->hierarchy.buildLevels(
+                rasterPath, { fine, coarse }, segmenter, linker, &err,
+                [canceled, &ctx]() { return canceled->load() || ctx.isCancelled(); } );
+
+            if ( !ok )
+            {
+                work->error = err;
+                throw sicnu::operators::RSOperatorError(
+                    sicnu::operators::ErrorCode::ComputationError,
+                    err.toStdString() );
+            }
+
+            ctx.reportProgress( 0.8, "Extracting fine-level features" );
+            work->stats = RsSegmentFeatures::extract(
+                rasterPath, work->hierarchy.level( 0 ), bandIndices );
+            work->ok = true;
+
+            Json::Value result( Json::objectValue );
+            result["levels"] = work->hierarchy.levelCount();
+            result["fineSegments"] = work->hierarchy.level( 0 ).segmentCount();
+            if ( work->hierarchy.levelCount() > 1 )
+                result["coarseSegments"] = work->hierarchy.level( 1 ).segmentCount();
+            return result;
+        },
+        [canceled]() { canceled->store( true ); } );
+
+    const QString jobIdQ = QString::fromStdString( jobId );
+    connect( progress, &QProgressDialog::canceled, this, [jobIdQ, canceled]() {
+        canceled->store( true );
+        sicnu::jobs::JobEngine::instance().cancel( jobIdQ.toStdString() );
+    } );
+
+    auto *bridge = JobEngineQtBridge::instance();
+    auto *conn = new QMetaObject::Connection;
+    *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
+                     [this, work, progress, jobIdQ, conn]( const QString &id ) {
+                         if ( id != jobIdQ )
+                             return;
+                         disconnect( *conn );
+                         delete conn;
+                         QGuiApplication::restoreOverrideCursor();
+                         progress->reset();
+                         progress->deleteLater();
+
+                         const auto snapOpt =
+                             sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
+                         if ( !snapOpt || snapOpt->state != sicnu::jobs::JobState::Succeeded
+                              || !work->ok )
+                         {
+                             if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
+                                 statusBar()->showMessage( tr( "Hierarchy build canceled" ), 3000 );
+                             else
+                             {
+                                 const QString err = !work->error.isEmpty()
+                                                       ? work->error
+                                                       : ( snapOpt ? QString::fromStdString( snapOpt->error )
+                                                                   : tr( "Hierarchy build failed" ) );
+                                 QMessageBox::warning( this, tr( "Error" ), err );
+                             }
+                             updateStatusLabel();
+                             return;
+                         }
+
+                         applyHierarchyResult( std::move( work->hierarchy ), 0, std::move( work->stats ) );
+                     } );
+}
+
+void RsObiaMainWindow::onActiveLevelChanged( int level )
+{
+    if ( !mHasHierarchy )
+        return;
+    if ( level == mActiveLevel )
+        return;
+    setActiveLevelMap( level );
+    statusBar()->showMessage( tr( "Viewing level %1 (%2 objects, ids are level-local)" )
+                                  .arg( level )
+                                  .arg( mSegMap.segmentCount() ),
+                              4000 );
+}
+
+void RsObiaMainWindow::onClassifyLevelChanged( int level )
+{
+    mClassifyLevel = level;
+    // Training labels are per classify-level object ids — clear on level switch to avoid id confusion.
+    mSegmentLabels.clear();
+    updateSegmentTable();
+    statusBar()->showMessage(
+        tr( "Classify level set to %1 — labels cleared (ids are level-local)" ).arg( level ), 4000 );
+}
+
 void RsObiaMainWindow::runClassification()
 {
-    if ( mSegMap.isEmpty() || mSegStats.isEmpty() )
+    if ( mSegMap.isEmpty() )
     {
         SICNU_LOG_WARN( SicnuLogTags::OBIA, "Classification requested without segmentation" );
-        QMessageBox::information( this, tr( "OBIA" ), tr( "Run segmentation first." ) );
+        QMessageBox::information( this, tr( "OBIA" ), tr( "Run segmentation or hierarchy first." ) );
         return;
     }
 
-    // Need at least 2 labeled segments
     if ( mSegmentLabels.size() < 2 )
     {
-        SICNU_LOG_WARN( SicnuLogTags::OBIA, QString( "Classification: only %1 segments labeled (need >= 2)" )
-            .arg( mSegmentLabels.size() ) );
         QMessageBox::information( this, tr( "OBIA" ),
-                                  tr( "Label at least 2 segments (click segment → assign class)." ) );
+                                  tr( "Label at least 2 segments (click assign and/or Import ROI)." ) );
         return;
     }
 
-    // Get classifier from toolbar
     auto *combo = findChild<QComboBox *>( "classifierCombo" );
     QString algoName = combo ? combo->currentText() : "NormalBayes";
 
-    SICNU_LOG_INFO( SicnuLogTags::OBIA, QString( "Starting OBIA classification: %1 labeled segments, algorithm=%2" )
-        .arg( mSegmentLabels.size() ).arg( algoName ) );
-
-    // Count unique user-labeled classes for KMeans K
     QSet<int> uniqueClasses;
     for ( auto it = mSegmentLabels.constBegin(); it != mSegmentLabels.constEnd(); ++it )
         uniqueClasses.insert( it.value() );
@@ -493,17 +807,11 @@ void RsObiaMainWindow::runClassification()
     else
         backend = std::make_unique<RsClassifierNormalBayes>();
 
-    // Build band indices
-    QVector<int> bandIndices;
-    for ( int b = 1; b <= mBandCount; ++b )
-        bandIndices.append( b );
-
-    // Build class colors
+    const QVector<int> bandIndices = allBandIndices();
     QHash<int, QColor> classColors;
     for ( const auto &cd : mClassDefs )
         classColors[cd.id] = cd.color;
 
-    // Prompt for classified output path (no hard-coded default write)
     const QString defaultOut = QFileInfo( mRasterPath ).path() + QStringLiteral( "/obia_classified.tif" );
     const QString outputPath = QFileDialog::getSaveFileName(
         this, tr( "Save Classified Raster" ), defaultOut,
@@ -511,21 +819,186 @@ void RsObiaMainWindow::runClassification()
     if ( outputPath.isEmpty() )
         return;
 
-    // Build config — pass existing segment map and features to avoid re-segmentation
+    // Hierarchical path: F2a + classify + paint on JobEngine (cancelable, non-blocking UI)
+    if ( mHasHierarchy && mHierarchy.levelCount() > 0 )
+    {
+        const int clsLevel = currentClassifyLevel();
+        if ( clsLevel < 0 || clsLevel >= mHierarchy.levelCount() )
+        {
+            QMessageBox::warning( this, tr( "Error" ), tr( "Invalid classify level." ) );
+            return;
+        }
+
+        auto canceled = std::make_shared<std::atomic<bool>>( false );
+        auto *progress = new QProgressDialog(
+            tr( "Classifying hierarchy level %1..." ).arg( clsLevel ),
+            tr( "Cancel" ), 0, 0, this );
+        progress->setWindowModality( Qt::WindowModal );
+        progress->setMinimumDuration( 0 );
+        progress->show();
+        QGuiApplication::setOverrideCursor( Qt::WaitCursor );
+        statusBar()->showMessage( progress->labelText() );
+
+        struct HierClsWork
+        {
+            bool ok = false;
+            QString error;
+        };
+        auto work = std::make_shared<HierClsWork>();
+
+        // Capture hierarchy snapshot + labels for worker thread
+        const RsObjectHierarchy hierarchy = mHierarchy;
+        const QMap<quint32, int> trainLabels = mSegmentLabels;
+        const QString rasterPath = mRasterPath;
+        // Move backend into shared_ptr for worker ownership
+        auto backendShared = std::shared_ptr<RsClassifierBackend>( std::move( backend ) );
+        const QHash<int, QColor> colors = classColors;
+        const QVector<int> bands = bandIndices;
+
+        sicnu::jobs::JobRequest req;
+        req.algorithmId = "module:obia:hierarchy_classify";
+        req.title = QStringLiteral( "OBIA hierarchy classify L%1" ).arg( clsLevel ).toStdString();
+        req.source = "module";
+        req.exclusive = true;
+        req.params["output"] = outputPath.toStdString();
+
+        const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
+            std::move( req ),
+            [hierarchy, trainLabels, rasterPath, outputPath, clsLevel, bands, colors,
+             backendShared, canceled, work](
+                const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
+                ctx.logInfo( "OBIA hierarchy classify" );
+                static bool s_gdalInit = ( GDALAllRegister(), true );
+                Q_UNUSED( s_gdalInit );
+
+                auto isCanceled = [canceled, &ctx]() {
+                    return canceled->load() || ctx.isCancelled();
+                };
+
+                ctx.reportProgress( 0.1, "F2a features" );
+                if ( isCanceled() )
+                    throw sicnu::operators::RSOperatorError(
+                        sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
+
+                auto feat = RsHierarchyFeatures::buildFeatureMatrix(
+                    hierarchy, rasterPath, clsLevel, bands );
+                if ( !feat.ok )
+                {
+                    work->error = feat.errorMessage;
+                    throw sicnu::operators::RSOperatorError(
+                        sicnu::operators::ErrorCode::ComputationError,
+                        feat.errorMessage.toStdString() );
+                }
+
+                if ( isCanceled() )
+                    throw sicnu::operators::RSOperatorError(
+                        sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
+
+                ctx.reportProgress( 0.5, "Train/predict" );
+                auto cls = RsObjectClassify::classify(
+                    feat.X, feat.meta.segmentIds, trainLabels, *backendShared );
+                if ( !cls.ok )
+                {
+                    work->error = cls.errorMessage;
+                    throw sicnu::operators::RSOperatorError(
+                        sicnu::operators::ErrorCode::ComputationError,
+                        cls.errorMessage.toStdString() );
+                }
+
+                if ( isCanceled() )
+                    throw sicnu::operators::RSOperatorError(
+                        sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
+
+                ctx.reportProgress( 0.85, "Paint class raster" );
+                auto paint = RsClassRaster::paint(
+                    hierarchy.level( clsLevel ), cls.segmentClasses, rasterPath, outputPath, colors );
+                if ( !paint.ok )
+                {
+                    work->error = paint.errorMessage;
+                    throw sicnu::operators::RSOperatorError(
+                        sicnu::operators::ErrorCode::GdalError,
+                        paint.errorMessage.toStdString() );
+                }
+
+                work->ok = true;
+                Json::Value result( Json::objectValue );
+                result["output"] = outputPath.toStdString();
+                result["classifyLevel"] = clsLevel;
+                return result;
+            },
+            [canceled]() { canceled->store( true ); } );
+
+        const QString jobIdQ = QString::fromStdString( jobId );
+        connect( progress, &QProgressDialog::canceled, this, [jobIdQ, canceled]() {
+            canceled->store( true );
+            sicnu::jobs::JobEngine::instance().cancel( jobIdQ.toStdString() );
+        } );
+
+        auto *bridge = JobEngineQtBridge::instance();
+        auto *conn = new QMetaObject::Connection;
+        *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
+                         [this, work, progress, outputPath, clsLevel, jobIdQ, conn]( const QString &id ) {
+                             if ( id != jobIdQ )
+                                 return;
+                             disconnect( *conn );
+                             delete conn;
+                             QGuiApplication::restoreOverrideCursor();
+                             progress->reset();
+                             progress->deleteLater();
+
+                             const auto snapOpt =
+                                 sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
+                             if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Succeeded
+                                  && work->ok )
+                             {
+                                 mLastClassRasterPath = outputPath;
+                                 QMessageBox::information(
+                                     this, tr( "OBIA Classification" ),
+                                     tr( "Classification complete on level %1!\nOutput: %2" )
+                                         .arg( clsLevel )
+                                         .arg( outputPath ) );
+
+                                 auto *resultLayer = new QgsRasterLayer(
+                                     outputPath, QFileInfo( outputPath ).baseName() );
+                                 if ( resultLayer->isValid() )
+                                 {
+                                     QgsProject::instance()->addMapLayer( resultLayer );
+                                     mCanvas->refresh();
+                                 }
+                                 else
+                                 {
+                                     delete resultLayer;
+                                 }
+                             }
+                             else if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
+                             {
+                                 statusBar()->showMessage( tr( "Hierarchy classify canceled" ), 3000 );
+                             }
+                             else
+                             {
+                                 const QString err = !work->error.isEmpty()
+                                                       ? work->error
+                                                       : ( snapOpt ? QString::fromStdString( snapOpt->error )
+                                                                   : tr( "Classification failed" ) );
+                                 QMessageBox::warning( this, tr( "Error" ), err );
+                             }
+                         } );
+        return;
+    }
+
+    // Flat path (existing RsObiaTask)
     RsObiaTask::Config cfg;
     cfg.sourceRaster = mRasterPath;
     cfg.outputRaster = outputPath;
     cfg.bandIndices = bandIndices;
-    cfg.existingSegMap = mSegMap;       // reuse pre-computed segments
-    cfg.existingStats = mSegStats;     // reuse pre-computed features
+    cfg.existingSegMap = mSegMap;
+    cfg.existingStats = mSegStats;
     cfg.backend = std::move( backend );
     cfg.segmentLabels = mSegmentLabels;
     cfg.classColors = classColors;
     cfg.algoName = algoName;
 
-    // Run asynchronously via JobEngine (exclusive)
     QGuiApplication::setOverrideCursor( Qt::WaitCursor );
-
     auto *task = new RsObiaTask( std::move( cfg ) );
 
     sicnu::jobs::JobRequest req;
@@ -536,29 +1009,29 @@ void RsObiaMainWindow::runClassification()
     req.params["output"] = outputPath.toStdString();
 
     const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
-      std::move( req ),
-      [task]( const sicnu::jobs::JobRequest &request,
-              sicnu::operators::RSOperatorContext &ctx ) {
-          ctx.logInfo( "OBIA classify" );
-          ctx.reportProgress( 0.0, "Classifying objects" );
-          const bool ok = task->run();
-          if ( ctx.isCancelled() )
-          {
-              throw sicnu::operators::RSOperatorError(
-                sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
-          }
-          if ( !ok )
-          {
-              throw sicnu::operators::RSOperatorError(
-                sicnu::operators::ErrorCode::ComputationError,
-                task->result().errorMessage.toStdString() );
-          }
-          Json::Value result( Json::objectValue );
-          result["output"] = request.params.get( "output", "" ).asString();
-          result["durationMs"] = task->result().durationMs;
-          return result;
-      },
-      [task]() { task->cancel(); } );
+        std::move( req ),
+        [task]( const sicnu::jobs::JobRequest &request,
+                sicnu::operators::RSOperatorContext &ctx ) {
+            ctx.logInfo( "OBIA classify" );
+            ctx.reportProgress( 0.0, "Classifying objects" );
+            const bool ok = task->run();
+            if ( ctx.isCancelled() )
+            {
+                throw sicnu::operators::RSOperatorError(
+                    sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
+            }
+            if ( !ok )
+            {
+                throw sicnu::operators::RSOperatorError(
+                    sicnu::operators::ErrorCode::ComputationError,
+                    task->result().errorMessage.toStdString() );
+            }
+            Json::Value result( Json::objectValue );
+            result["output"] = request.params.get( "output", "" ).asString();
+            result["durationMs"] = task->result().durationMs;
+            return result;
+        },
+        [task]() { task->cancel(); } );
 
     const QString jobIdQ = QString::fromStdString( jobId );
     auto *bridge = JobEngineQtBridge::instance();
@@ -572,16 +1045,17 @@ void RsObiaMainWindow::runClassification()
                          QGuiApplication::restoreOverrideCursor();
 
                          const auto snapOpt =
-                           sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
+                             sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
                          if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Succeeded
                               && task->result().ok )
                          {
+                             mLastClassRasterPath = outputPath;
                              QMessageBox::information(
-                               this, tr( "OBIA Classification" ),
-                               tr( "Classification complete!\nOutput: %1" ).arg( outputPath ) );
+                                 this, tr( "OBIA Classification" ),
+                                 tr( "Classification complete!\nOutput: %1" ).arg( outputPath ) );
 
                              auto *resultLayer = new QgsRasterLayer(
-                               outputPath, QFileInfo( outputPath ).baseName() );
+                                 outputPath, QFileInfo( outputPath ).baseName() );
                              if ( resultLayer->isValid() )
                              {
                                  QgsProject::instance()->addMapLayer( resultLayer );
@@ -599,28 +1073,228 @@ void RsObiaMainWindow::runClassification()
                          else
                          {
                              const QString err = !task->result().errorMessage.isEmpty()
-                                                  ? task->result().errorMessage
-                                                  : ( snapOpt ? QString::fromStdString( snapOpt->error )
-                                                              : tr( "Classification failed" ) );
+                                                   ? task->result().errorMessage
+                                                   : ( snapOpt ? QString::fromStdString( snapOpt->error )
+                                                               : tr( "Classification failed" ) );
                              QMessageBox::warning( this, tr( "Error" ), err );
                          }
                          task->deleteLater();
                      } );
 }
 
-void RsObiaMainWindow::exportResult()
+void RsObiaMainWindow::importRoiLabels()
 {
-    if ( mRasterPath.isEmpty() )
+    if ( mSegMap.isEmpty() )
     {
-        QMessageBox::information( this, tr( "Export" ),
-                                  tr( "No classification has been run yet. Use Classify and choose a save path." ) );
+        QMessageBox::information( this, tr( "Import ROI" ), tr( "Run segmentation or hierarchy first." ) );
         return;
     }
 
-    const QString defaultOut = QFileInfo( mRasterPath ).path() + QStringLiteral( "/obia_classified.tif" );
-    QMessageBox::information( this, tr( "Export" ),
-                              tr( "Use Classify to write the result. Suggested path:\n%1" )
-                                  .arg( defaultOut ) );
+    // Labels apply to classify level geometry
+    const int clsLevel = mHasHierarchy ? currentClassifyLevel() : 0;
+    const RsSegmentMap &labelMap =
+        mHasHierarchy ? mHierarchy.level( clsLevel ) : mSegMap;
+
+    if ( labelMap.isEmpty() )
+    {
+        QMessageBox::warning( this, tr( "Import ROI" ), tr( "Empty segment map at classify level." ) );
+        return;
+    }
+
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr( "Open training polygons" ), QString(),
+        tr( "Vector (*.shp *.gpkg *.geojson);;All files (*)" ) );
+    if ( path.isEmpty() )
+        return;
+
+    GDALAllRegister();
+    GDALDatasetH vecDs = GDALOpenEx( path.toUtf8().constData(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr );
+    if ( !vecDs )
+    {
+        QMessageBox::warning( this, tr( "Import ROI" ), tr( "Cannot open vector: %1" ).arg( path ) );
+        return;
+    }
+
+    OGRLayerH layer = GDALDatasetGetLayer( vecDs, 0 );
+    if ( !layer )
+    {
+        GDALClose( vecDs );
+        QMessageBox::warning( this, tr( "Import ROI" ), tr( "No layers in vector file." ) );
+        return;
+    }
+
+    OGRFeatureDefnH defn = OGR_L_GetLayerDefn( layer );
+    int fieldIdx = OGR_FD_GetFieldIndex( defn, "class_id" );
+    if ( fieldIdx < 0 )
+        fieldIdx = OGR_FD_GetFieldIndex( defn, "class" );
+    if ( fieldIdx < 0 )
+        fieldIdx = OGR_FD_GetFieldIndex( defn, "id" );
+    if ( fieldIdx < 0 )
+    {
+        GDALClose( vecDs );
+        QMessageBox::warning( this, tr( "Import ROI" ),
+                              tr( "No class_id/class/id field found." ) );
+        return;
+    }
+
+    double gt[6] = { 0, 1, 0, 0, 0, 1 };
+    GDALDatasetH rds = GDALOpen( mRasterPath.toUtf8().constData(), GA_ReadOnly );
+    if ( rds )
+    {
+        GDALGetGeoTransform( rds, gt );
+        GDALClose( rds );
+    }
+
+    const int w = labelMap.width();
+    const int h = labelMap.height();
+    const auto &labels = labelMap.labels();
+
+    // votes[segId][classId]
+    QHash<quint32, QHash<int, int>> votes;
+
+    OGR_L_ResetReading( layer );
+    OGRFeatureH feat = nullptr;
+    while ( ( feat = OGR_L_GetNextFeature( layer ) ) != nullptr )
+    {
+        const int classId = OGR_F_GetFieldAsInteger( feat, fieldIdx );
+        OGRGeometryH geom = OGR_F_GetGeometryRef( feat );
+        if ( classId <= 0 || !geom )
+        {
+            OGR_F_Destroy( feat );
+            continue;
+        }
+
+        if ( std::abs( gt[1] ) < 1e-12 || std::abs( gt[5] ) < 1e-12 )
+        {
+            OGR_F_Destroy( feat );
+            continue;
+        }
+
+        // Envelope → pixel range; normalize for north-up or south-up geotransforms.
+        OGREnvelope env;
+        OGR_G_GetEnvelope( geom, &env );
+        int cA = static_cast<int>( std::floor( ( env.MinX - gt[0] ) / gt[1] ) );
+        int cB = static_cast<int>( std::ceil( ( env.MaxX - gt[0] ) / gt[1] ) );
+        int rA = static_cast<int>( std::floor( ( env.MinY - gt[3] ) / gt[5] ) );
+        int rB = static_cast<int>( std::ceil( ( env.MaxY - gt[3] ) / gt[5] ) );
+        const int c0 = std::max( 0, std::min( cA, cB ) );
+        const int c1 = std::min( w - 1, std::max( cA, cB ) );
+        const int r0 = std::max( 0, std::min( rA, rB ) );
+        const int r1 = std::min( h - 1, std::max( rA, rB ) );
+        if ( c0 > c1 || r0 > r1 )
+        {
+            OGR_F_Destroy( feat );
+            continue;
+        }
+
+        OGRGeometryH pt = OGR_G_CreateGeometry( wkbPoint );
+        for ( int r = r0; r <= r1; ++r )
+        {
+            for ( int c = c0; c <= c1; ++c )
+            {
+                const double x = gt[0] + ( c + 0.5 ) * gt[1] + ( r + 0.5 ) * gt[2];
+                const double y = gt[3] + ( c + 0.5 ) * gt[4] + ( r + 0.5 ) * gt[5];
+                OGR_G_SetPoint_2D( pt, 0, x, y );
+                if ( !OGR_G_Contains( geom, pt ) && !OGR_G_Intersects( geom, pt ) )
+                    continue;
+                const quint32 sid = labels[r * w + c];
+                if ( sid != 0 )
+                    ++votes[sid][classId];
+            }
+        }
+        OGR_G_DestroyGeometry( pt );
+        OGR_F_Destroy( feat );
+    }
+    GDALClose( vecDs );
+
+    // When viewing a different level than classify level, switch view for assign feedback
+    if ( mHasHierarchy && mActiveLevel != clsLevel )
+        setActiveLevelMap( clsLevel );
+
+    // Match operator default minLabelPixels (3) for dual-write parity.
+    constexpr int minLabelPixels = 3;
+
+    int overwritten = 0;
+    int newlyLabeled = 0;
+    int skippedSparse = 0;
+    for ( auto it = votes.constBegin(); it != votes.constEnd(); ++it )
+    {
+        int bestClass = 0;
+        int bestCount = 0;
+        int total = 0;
+        for ( auto cit = it.value().constBegin(); cit != it.value().constEnd(); ++cit )
+        {
+            total += cit.value();
+            // Majority; ties → smaller classId (deterministic, mirrors parent-link P1).
+            if ( cit.value() > bestCount
+                 || ( cit.value() == bestCount && ( bestClass == 0 || cit.key() < bestClass ) ) )
+            {
+                bestCount = cit.value();
+                bestClass = cit.key();
+            }
+        }
+        if ( bestClass <= 0 || total < minLabelPixels )
+        {
+            if ( total > 0 && total < minLabelPixels )
+                ++skippedSparse;
+            continue;
+        }
+
+        if ( mSegmentLabels.contains( it.key() ) && mSegmentLabels.value( it.key() ) != bestClass )
+            ++overwritten;
+        else if ( !mSegmentLabels.contains( it.key() ) )
+            ++newlyLabeled;
+
+        // Last write wins
+        mSegmentLabels[it.key()] = bestClass;
+    }
+
+    updateSegmentTable();
+    updateStatusLabel();
+    statusBar()->showMessage(
+        tr( "ROI majority: +%1 new, %2 overwritten (last write wins), %3 skipped (< %4 px) on L%5" )
+            .arg( newlyLabeled )
+            .arg( overwritten )
+            .arg( skippedSparse )
+            .arg( minLabelPixels )
+            .arg( clsLevel ),
+        6000 );
+}
+
+void RsObiaMainWindow::exportResult()
+{
+    if ( !mLastClassRasterPath.isEmpty() && QFileInfo::exists( mLastClassRasterPath ) )
+    {
+        const QString vecOut = QFileDialog::getSaveFileName(
+            this, tr( "Export class polygons (optional)" ),
+            QFileInfo( mLastClassRasterPath ).path() + QStringLiteral( "/obia_classes.shp" ),
+            tr( "Shapefile (*.shp);;All files (*)" ) );
+        if ( !vecOut.isEmpty() )
+        {
+            auto r = RsClassRaster::polygonize( mLastClassRasterPath, vecOut );
+            if ( r.ok )
+            {
+                QMessageBox::information(
+                    this, tr( "Export" ),
+                    tr( "Class raster: %1\nPolygons: %2" )
+                        .arg( mLastClassRasterPath )
+                        .arg( vecOut ) );
+                return;
+            }
+            QMessageBox::warning( this, tr( "Export" ),
+                                  tr( "Class raster at:\n%1\nPolygonize failed: %2" )
+                                      .arg( mLastClassRasterPath )
+                                      .arg( r.errorMessage ) );
+            return;
+        }
+        QMessageBox::information( this, tr( "Export" ),
+                                  tr( "Class raster already written:\n%1" ).arg( mLastClassRasterPath ) );
+        return;
+    }
+
+    QMessageBox::information(
+        this, tr( "Export" ),
+        tr( "Run Classify first to write a class raster, then Export can polygonize it." ) );
 }
 
 void RsObiaMainWindow::onSegmentSelected( quint32 segmentId )
@@ -628,12 +1302,25 @@ void RsObiaMainWindow::onSegmentSelected( quint32 segmentId )
     auto it = mSegStats.find( segmentId );
     if ( it != mSegStats.end() )
     {
-        int classId = mSegmentLabels.value( segmentId, 0 );
-        mInfoDock->showSegmentInfo( segmentId, it.value(), classId );
+        const int classId = ( mActiveLevel == currentClassifyLevel() )
+                              ? mSegmentLabels.value( segmentId, 0 )
+                              : 0;
+        if ( mHasHierarchy )
+        {
+            const quint32 parentId = mHierarchy.parentOf( mActiveLevel, segmentId );
+            const int childCount = mHierarchy.childCount( mActiveLevel, segmentId );
+            const double areaRatio = mHierarchy.areaRatioToParent( mActiveLevel, segmentId );
+            mInfoDock->showSegmentInfo( segmentId, it.value(), classId,
+                                        mActiveLevel, parentId, childCount, areaRatio );
+        }
+        else
+        {
+            mInfoDock->showSegmentInfo( segmentId, it.value(), classId );
+        }
     }
 
-    // Use pixelCount (size cache) — do not call pixelCoords().size() which forces coord build.
-    statusBar()->showMessage( tr( "Selected segment %1 (pixels: %2)" )
+    statusBar()->showMessage( tr( "Selected L%1 segment %2 (pixels: %3)" )
+                                  .arg( mActiveLevel )
                                   .arg( segmentId )
                                   .arg( mSegMap.pixelCount( segmentId ) ) );
 }
@@ -646,18 +1333,47 @@ void RsObiaMainWindow::onSelectionCleared()
 
 void RsObiaMainWindow::onAssignClass()
 {
+    // Click-assign operates on classify level objects
+    if ( mHasHierarchy && mActiveLevel != currentClassifyLevel() )
+    {
+        QMessageBox::information(
+            this, tr( "OBIA" ),
+            tr( "Switch View L to the classify level (%1) before assigning labels, "
+                "or change Cls L to the active view level." )
+                .arg( currentClassifyLevel() ) );
+        return;
+    }
+
     if ( mSelectTool && mSelectTool->selectedSegmentId() != 0 )
     {
         quint32 segId = mSelectTool->selectedSegmentId();
-        mSegmentLabels[segId] = mCurrentClassId;
+        const bool overwritten = mSegmentLabels.contains( segId )
+                                 && mSegmentLabels.value( segId ) != mCurrentClassId;
+        mSegmentLabels[segId] = mCurrentClassId; // last write wins
         updateSegmentTable();
 
-        // Update info dock
         auto it = mSegStats.find( segId );
         if ( it != mSegStats.end() )
-            mInfoDock->showSegmentInfo( segId, it.value(), mCurrentClassId );
+        {
+            if ( mHasHierarchy )
+            {
+                mInfoDock->showSegmentInfo(
+                    segId, it.value(), mCurrentClassId, mActiveLevel,
+                    mHierarchy.parentOf( mActiveLevel, segId ),
+                    mHierarchy.childCount( mActiveLevel, segId ),
+                    mHierarchy.areaRatioToParent( mActiveLevel, segId ) );
+            }
+            else
+            {
+                mInfoDock->showSegmentInfo( segId, it.value(), mCurrentClassId );
+            }
+        }
 
-        statusBar()->showMessage( tr( "Segment %1 → Class %2" ).arg( segId ).arg( mCurrentClassId ), 3000 );
+        statusBar()->showMessage(
+            overwritten
+                ? tr( "Segment %1 → Class %2 (overwrote previous label)" ).arg( segId ).arg( mCurrentClassId )
+                : tr( "Segment %1 → Class %2" ).arg( segId ).arg( mCurrentClassId ),
+            3000 );
     }
     else
     {
@@ -681,8 +1397,17 @@ void RsObiaMainWindow::updateSegmentTable()
         mSegmentTable->setItem( i, 0, new QTableWidgetItem( QString::number( segId ) ) );
         mSegmentTable->setItem( i, 1, new QTableWidgetItem( QString::number( mSegMap.pixelCount( segId ) ) ) );
 
-        int classId = mSegmentLabels.value( segId, 0 );
-        QString classText = classId > 0 ? QString::number( classId ) : tr( "-" );
+        // Labels are level-local and bind to classify level only — never show
+        // classify-level class against a different view level's segment ids.
+        const bool labelsApplyToView =
+            !mHasHierarchy || ( mActiveLevel == currentClassifyLevel() );
+        QString classText = tr( "-" );
+        if ( labelsApplyToView )
+        {
+            const int classId = mSegmentLabels.value( segId, 0 );
+            if ( classId > 0 )
+                classText = QString::number( classId );
+        }
         mSegmentTable->setItem( i, 2, new QTableWidgetItem( classText ) );
     }
 }
@@ -694,6 +1419,14 @@ void RsObiaMainWindow::updateStatusLabel()
 
     if ( mSegMap.isEmpty() )
         statusBar()->showMessage( tr( "Ready — Load a raster to begin" ) );
+    else if ( mHasHierarchy )
+        statusBar()->showMessage(
+            tr( "Hierarchy L%1/%2 | %3 objects | %4 labeled | classify L%5" )
+                .arg( mActiveLevel )
+                .arg( mHierarchy.levelCount() - 1 )
+                .arg( mSegMap.segmentCount() )
+                .arg( mSegmentLabels.size() )
+                .arg( currentClassifyLevel() ) );
     else
         statusBar()->showMessage( tr( "%1 segments | %2 labeled" )
                                       .arg( mSegMap.segmentCount() )

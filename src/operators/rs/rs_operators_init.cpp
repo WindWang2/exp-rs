@@ -20,6 +20,7 @@
 #include "rs_supervised_classification_operator.h"
 #include "rs_obia_segment_operator.h"
 #include "rs_obia_classify_operator.h"
+#include "rs_obia_hierarchy_operator.h"
 #include "rs_segment_stats_operator.h"
 #endif
 
@@ -43,6 +44,7 @@ REGISTER_RS_OPERATOR(RsKmeansOperator, "rs:kmeans_classification")
 REGISTER_RS_OPERATOR(RsSupervisedClassificationOperator, "rs:supervised_classification")
 REGISTER_RS_OPERATOR(RsObiaSegmentOperator, "rs:obia_segment")
 REGISTER_RS_OPERATOR(RsObiaClassifyOperator, "rs:obia_classify")
+REGISTER_RS_OPERATOR(RsObiaHierarchyOperator, "rs:obia_hierarchy")
 REGISTER_RS_OPERATOR(RsSegmentStatsOperator, "rs:segment_stats")
 #endif
 

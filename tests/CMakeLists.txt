@@ -1426,7 +1426,17 @@ sicnu_discover_tests(test_band_ratio)
 # Phase 10A Task 10.2 — Classification main window shell tests.
 # Only built when OpenCV ml component is available (qgis_app_classify exists).
 if(TARGET qgis_app_classify)
-  add_executable(test_classification_window test_classification_window.cpp)
+  # Shell QObject TUs live on sicnu_geo_rs only (not qgis_app_classify) to avoid
+  # MOC ODR. Full-window classify tests must compile the same shell sources here.
+  # Follow-up: extract a shared OBJECT/static lib (e.g. sicnu_app_shell) once more
+  # tests need this list — do not add these .cpp files to qgis_app_classify.
+  add_executable(test_classification_window
+    test_classification_window.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/rs_session_map_workspace.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  )
   target_link_libraries(test_classification_window PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -1434,13 +1444,16 @@ if(TARGET qgis_app_classify)
     Qt6::Widgets
     Qt6::Test
     qgis_core
+    qgis_gui
     qgis_analysis
     qgis_app_classify
+    sicnu_jobs
   )
   target_include_directories(test_classification_window PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/analysis
     ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${CMAKE_SOURCE_DIR}/src/app
     ${CMAKE_SOURCE_DIR}/src/app/classification
     ${CMAKE_BINARY_DIR}
   )
@@ -1857,6 +1870,29 @@ if(SICNU_HAS_OPENCV)
 endif()
 sicnu_discover_tests(test_segment_features)
 
+# Hierarchical OBIA V1 — parent-link, hierarchy, F2a, writeback (#16–#21)
+add_executable(test_object_hierarchy test_object_hierarchy.cpp)
+target_link_libraries(test_object_hierarchy PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+)
+target_include_directories(test_object_hierarchy PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/segmentation
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_BINARY_DIR}
+)
+if(SICNU_HAS_OPENCV)
+  target_link_libraries(test_object_hierarchy PRIVATE ${OpenCV_LIBS})
+  target_include_directories(test_object_hierarchy PRIVATE ${OpenCV_INCLUDE_DIRS})
+endif()
+sicnu_discover_tests(test_object_hierarchy)
+
 # Phase 10B.4 — OBIA classification task tests (OpenCV required)
 if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
   add_executable(test_obia_task test_obia_task.cpp)
@@ -1911,7 +1947,10 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
   sicnu_discover_tests(test_obia_integration)
 
   # Phase 10B.5 — OBIA main window UI smoke tests
-  add_executable(test_obia_main_window test_obia_main_window.cpp)
+  add_executable(test_obia_main_window
+    test_obia_main_window.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
+  )
   target_link_libraries(test_obia_main_window PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -1921,11 +1960,13 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
     qgis_gui
     qgis_analysis
     qgis_app_obia
+    sicnu_jobs
     GDAL::GDAL
     ${OpenCV_LIBS}
   )
   target_include_directories(test_obia_main_window PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app
     ${CMAKE_SOURCE_DIR}/src/app/obia
     ${OpenCV_INCLUDE_DIRS}
     ${CMAKE_BINARY_DIR}

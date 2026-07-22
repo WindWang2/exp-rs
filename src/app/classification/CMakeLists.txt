@@ -42,8 +42,15 @@ qt_add_library(qgis_app_classify STATIC
     rs_classify_stepper_bar.cpp
     ../dialogs/dialog_help_catalog.cpp
     rs_classify_step_host.cpp
-    # Classification workflow — post-process task (Step 6).
+    # Classification workflow — post-process task + dialog.
     rs_post_process_task.cpp
+    rs_post_process_dialog.cpp
+)
+
+# Layer tree for session layer manager
+target_include_directories(qgis_app_classify PUBLIC
+    ${CMAKE_SOURCE_DIR}/src/core/layertree
+    ${CMAKE_SOURCE_DIR}/src/gui/layertree
 )
 
 target_include_directories(qgis_app_classify PUBLIC
@@ -53,6 +60,8 @@ target_include_directories(qgis_app_classify PUBLIC
     ${CMAKE_SOURCE_DIR}/src/core
     ${CMAKE_SOURCE_DIR}/src/core/geometry
     ${CMAKE_SOURCE_DIR}/src/core/proj
+    ${CMAKE_SOURCE_DIR}/src/core/providers/memory
+    ${CMAKE_SOURCE_DIR}/src/core/symbology
     ${CMAKE_SOURCE_DIR}/src/gui
     ${CMAKE_SOURCE_DIR}/src/gui/maptools
     ${CMAKE_SOURCE_DIR}/src/analysis

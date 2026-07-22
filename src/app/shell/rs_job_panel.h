@@ -1,24 +1,33 @@
 /***************************************************************************
- * rs_job_panel.h  —  bottom dock listing JobEngine jobs + selected log
+ * rs_job_panel.h  —  统一任务中心：列表 + 详情/日志 + 右键操作
  ***************************************************************************/
 #pragma once
 
 #include <qgsdockwidget.h>
 
+#include <json/json.h>
+
+#include <QHash>
 #include <QString>
+#include <QStringList>
 
 class QTreeWidget;
 class QTreeWidgetItem;
 class QPlainTextEdit;
 class QPushButton;
 class QComboBox;
-class QSplitter;
+class QTabWidget;
+class QMenu;
+class QPoint;
+class QLabel;
 
 /**
- * Dock widget for unified JobEngine observability.
+ * 统一 JobEngine 任务中心。
  *
- * Left: job list (title, state, progress). Right: selected job log.
- * Actions: Cancel selected, Clear finished. Optional state filter.
+ * - 列表：标题 / 状态 / 进度 /「加载到主图」勾选
+ * - 右键菜单：无任务时也可刷新/说明；有任务时显示详情、停止、加载输出等
+ * - 详情页：方法 id、参数、输入输出、结果 JSON
+ * - 成功后若勾选「加载到主图」则自动把输出路径加入主程序
  */
 class RsJobPanel : public QgsDockWidget
 {
@@ -35,21 +44,42 @@ class RsJobPanel : public QgsDockWidget
     void onCancelClicked();
     void onClearFinishedClicked();
     void onFilterChanged();
+    void onContextMenuRequested( const QPoint &pos );
+    void onItemChanged( QTreeWidgetItem *item, int column );
 
   private:
     void setupUi();
     void refreshAll();
     void upsertJobRow( const QString &jobId );
     void fillLogForJob( const QString &jobId );
+    void fillDetailsForJob( const QString &jobId );
+    void updateActionEnabled();
     QString selectedJobId() const;
     bool passesFilter( const QString &stateText ) const;
-    static QString stateToString( int state ); // JobState as int for storage
+    static QString stateToString( int state );
     static QString formatProgress( double progress );
+    static QString prettyJson( const std::string &jsonText );
+    static QString prettyJsonValue( const Json::Value &v );
+
+    bool loadToMainPreference( const QString &jobId ) const;
+    void setLoadToMainPreference( const QString &jobId, bool on );
+    QStringList collectOutputPaths( const QString &jobId ) const;
+    int loadPathsToMain( const QStringList &paths );
+    void tryAutoLoadOutputs( const QString &jobId );
+    void showAboutDialog();
+    void copyText( const QString &text );
 
     QTreeWidget *m_jobTree = nullptr;
+    QTabWidget *m_detailTabs = nullptr;
+    QPlainTextEdit *m_detailView = nullptr;
     QPlainTextEdit *m_logView = nullptr;
     QPushButton *m_cancelBtn = nullptr;
+    QPushButton *m_loadBtn = nullptr;
     QPushButton *m_clearFinishedBtn = nullptr;
     QComboBox *m_filterCombo = nullptr;
+    QLabel *m_hintLabel = nullptr;
     QString m_selectedId;
+    /// Per-job "load outputs to main map" preference (UI + optional request flag).
+    QHash<QString, bool> m_loadToMain;
+    bool m_blockItemChanged = false;
 };

@@ -67,18 +67,18 @@ public:
     void finishRun();
 
     /**
-     * Run a GDAL I/O lambda via JobEngine (callable:gdal_task).
+     * Run a GDAL I/O lambda via RsJobRunner / JobEngine (callable:gdal_task).
      * Task return contract (legacy AsyncGdalRunner):
      *   - non-empty path → success
      *   - empty → generic failure
      *   - "\x01SICNU_ERR\x01" + message → structured failure
-     * Completes via onCompleted/onFailed through JobEngineQtBridge.
+     * Completes via onCompleted/onFailed on the GUI thread.
      */
     void runGdalTask(const std::function<QString()> &task);
 
     /**
-     * Run a QGIS Processing algorithm via JobEngine (processing: prefix id).
-     * Completes via onCompleted/onFailed through JobEngineQtBridge.
+     * Run a QGIS Processing algorithm via RsJobRunner (processing: prefix id).
+     * Completes via onCompleted/onFailed on the GUI thread.
      * Prefer SicnuAlgorithmDialog for full toolbox parameter UIs.
      */
     void runAlgorithmTask(const QgsProcessingAlgorithm *algorithm,
@@ -86,7 +86,7 @@ public:
                           QgsProcessingContext &context);
 
     /**
-     * Run an RSOperator (sicnu::operators kernel) on a background thread.
+     * Run an RSOperator via RsJobRunner (registry / prefix path).
      *
      * Prefer this over direct algorithm calls so GUI, CLI, and MCP share one
      * execution path. Parameters must match the operator schema(); the result
@@ -173,13 +173,6 @@ public slots:
      */
     void onFailed(const QString &errorMessage);
 
-private:
-    /**
-     * Handle JobEngineQtBridge::jobFinished for the operator path.
-     * Filters on m_pendingJobId and routes to onCompleted/onFailed.
-     */
-    void onOperatorJobFinished( const QString &jobId );
-
 protected:
     // --- Members ---
     QgsRasterLayer *m_rasterLayer = nullptr;
@@ -187,5 +180,4 @@ protected:
     QPushButton *m_runButton = nullptr;
     bool m_running = false;
     QString m_pendingJobId;
-    bool m_jobBridgeConnected = false;
 };

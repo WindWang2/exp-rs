@@ -67,4 +67,5 @@ vendor/
 # Superpowers / agent worktrees / local planning sessions
 .worktrees/
 .superpowers/
+.gstack/
 .planning/
