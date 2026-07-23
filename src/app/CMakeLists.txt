@@ -52,6 +52,8 @@ add_executable(sicnu_geo_rs
     widgets/progress_dialog.cpp
     widgets/comparison_widget.cpp
     widgets/guided_workflow_widget.cpp
+    panels/mosaic_panel.cpp
+    panels/task_center_dock.cpp
 
     # QgisApp facade
     qgis_app_facade.cpp
@@ -175,6 +177,7 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     sicnu_operators
     sicnu_workflow
     sicnu_jobs
+    sicnu_task_center
     jsoncpp
     CURL::libcurl
     ${PCRE2_16}

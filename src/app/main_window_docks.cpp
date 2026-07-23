@@ -13,6 +13,7 @@
 #include "widgets/spectral_profile_widget.h"
 #include "widgets/guided_workflow_widget.h"
 #include "widgets/histogram_stretch_widget.h"
+#include "panels/task_center_dock.h"
 
 #include <QVBoxLayout>
 #include <QMenu>
@@ -330,6 +331,16 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
 
     if ( m_windowMenu )
         m_windowMenu->addAction( m_taskPanelDock->toggleViewAction() );
+
+    m_taskCenterDock = new sicnu::TaskCenterDock( this );
+    addDockWidget( Qt::RightDockWidgetArea, m_taskCenterDock );
+    if ( m_windowMenu )
+        m_windowMenu->addAction( m_taskCenterDock->toggleViewAction() );
+
+    connect( m_taskCenterDock, &sicnu::TaskCenterDock::layerAutoLoadRequested,
+             this, [this]( const QString &path ) {
+                 loadRasterLayer( path );
+             } );
 
     // Session controller bridges TaskPanelHost ↔ WorkflowRuntime
     m_sessionController = new WorkflowSessionController( this );

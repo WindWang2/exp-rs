@@ -24,6 +24,7 @@ add_library(sicnu_processing SHARED
     framework/progress_callback.cpp
     framework/error_reporter.cpp
     framework/input_validator.cpp
+    framework/algorithm_engine.cpp
 
     providers/gdal_tools/provider.cpp
     providers/gdal_tools/gdal_tool_wrapper.cpp
@@ -142,6 +143,10 @@ target_link_libraries(sicnu_processing PRIVATE
     qgis_core
     GDAL::GDAL
 )
+
+add_library(sicnu_task_center STATIC framework/task_center.cpp)
+target_include_directories(sicnu_task_center PUBLIC ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(sicnu_task_center PUBLIC Qt6::Core qgis_core sicnu_processing sicnu_jobs)
 
 install(TARGETS sicnu_processing
     LIBRARY DESTINATION ${QGIS_LIB_SUBDIR}

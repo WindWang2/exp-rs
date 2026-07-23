@@ -30,6 +30,9 @@ function(sicnu_add_test NAME)
     Qt6::Widgets
     qgis_core
     qgis_gui
+    sicnu_processing
+    sicnu_jobs
+    sicnu_task_center
   )
   target_include_directories(${NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -43,6 +46,28 @@ sicnu_add_test(test_smoke)
 sicnu_add_test(test_crs)
 sicnu_add_test(test_geometry)
 sicnu_add_test(test_layers)
+sicnu_add_test(test_algorithm_engine)
+sicnu_add_test(test_task_center)
+
+add_executable(test_task_center_dock
+    test_task_center_dock.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/panels/task_center_dock.cpp
+)
+target_link_libraries(test_task_center_dock PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    sicnu_processing
+    sicnu_task_center
+)
+target_include_directories(test_task_center_dock PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_task_center_dock)
 
 # test_paths has custom main (needs QCoreApplication for AppPaths)
 add_executable(test_paths test_paths.cpp)

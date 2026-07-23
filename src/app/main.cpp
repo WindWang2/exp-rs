@@ -41,6 +41,7 @@
 #include "app/app_paths.h"
 #include "app/main_window.h"
 #include "agent/mcp_server.h"
+#include "processing/framework/algorithm_engine.h"
 
 // Processing providers
 #include "processing/providers/gdal_tools/provider.h"
@@ -118,23 +119,9 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Load custom GDAL/OTB tool paths from preferences
-    {
-        QSettings toolSettings;
-        const QString gdalPath = toolSettings.value( QStringLiteral( "tools/gdalPath" ) ).toString();
-        const QString otbPath = toolSettings.value( QStringLiteral( "tools/otbPath" ) ).toString();
-        if ( !gdalPath.isEmpty() )
-            ToolPathManager::instance().setGdalPath( gdalPath );
-        if ( !otbPath.isEmpty() )
-            ToolPathManager::instance().setOtbPath( otbPath );
-    }
-
-    // Register processing providers
-    QgsApplication::processingRegistry()->addProvider(new GdalToolsProvider());
-    QgsApplication::processingRegistry()->addProvider(new OtbToolsProvider());
-    QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
-    QgsApplication::processingRegistry()->addProvider(new GenericCliProvider());
-    qDebug() << "Processing providers registered";
+    // Initialize AlgorithmEngine facade (registers providers and tool paths)
+    sicnu::AlgorithmEngine::instance().initialize();
+    qDebug() << "AlgorithmEngine initialized with" << sicnu::AlgorithmEngine::instance().registeredAlgorithms().size() << "algorithms";
 
     if (mcpMode) {
         std::cerr << "Initializing MCP Mode..." << std::endl;
