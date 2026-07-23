@@ -185,9 +185,27 @@ TEST_CASE( "ClassificationWindow: public post-process start submits a Task Cente
   REQUIRE( taskId > 0 );
   REQUIRE( sicnu::TaskCenter::instance().getTaskInfo( taskId ).algorithmId
            == QStringLiteral( "module:classify:postprocess" ) );
+  REQUIRE_FALSE( sicnu::TaskCenter::instance().getTaskInfo( taskId ).autoLoadLayer );
+  REQUIRE_FALSE( sicnu::TaskCenter::instance().getTaskInfo( taskId ).parameterMap
+                   .value( QStringLiteral( "loadOutputsToMain" ) ).toBool() );
   REQUIRE( waitForTerminalTask( taskId ).status == sicnu::TaskStatus::Completed );
   QCoreApplication::processEvents( QEventLoop::AllEvents, 100 );
   REQUIRE( QFile::exists( config.outputRasterPath ) );
+
+  RsPostProcessConfig loadConfig = config;
+  loadConfig.outputRasterPath = tmp.path() + QStringLiteral( "/post-process-loaded.tif" );
+  const long loadTaskId = window.startPostProcessTask(
+    loadConfig, true, QStringLiteral( "Test post-process load" ),
+    QStringLiteral( "module:classify:postprocess" ) );
+
+  REQUIRE( loadTaskId > 0 );
+  const sicnu::AlgorithmTaskInfo loadInfo =
+    sicnu::TaskCenter::instance().getTaskInfo( loadTaskId );
+  REQUIRE_FALSE( loadInfo.autoLoadLayer );
+  REQUIRE( loadInfo.parameterMap.value( QStringLiteral( "loadOutputsToMain" ) ).toBool() );
+  REQUIRE( waitForTerminalTask( loadTaskId ).status == sicnu::TaskStatus::Completed );
+  QCoreApplication::processEvents( QEventLoop::AllEvents, 100 );
+  REQUIRE( QFile::exists( loadConfig.outputRasterPath ) );
 }
 
 TEST_CASE( "ClassificationWindow: public cross-validation start submits a Task Center job", "[classify][task_center]" )
@@ -198,13 +216,17 @@ TEST_CASE( "ClassificationWindow: public cross-validation start submits a Task C
   makeGaussianData( features, labels );
 
   QgsClassificationMainWindow window( nullptr );
+  QString resultDialogText;
   QTimer closeResultDialog;
   closeResultDialog.setInterval( 0 );
-  QObject::connect( &closeResultDialog, &QTimer::timeout, [] {
+  QObject::connect( &closeResultDialog, &QTimer::timeout, [&resultDialogText] {
     for ( QWidget *widget : QApplication::topLevelWidgets() )
     {
       if ( auto *dialog = qobject_cast<QMessageBox *>( widget ) )
+      {
+        resultDialogText = dialog->text();
         dialog->accept();
+      }
     }
   } );
   closeResultDialog.start();
@@ -221,5 +243,7 @@ TEST_CASE( "ClassificationWindow: public cross-validation start submits a Task C
   REQUIRE( waitForTerminalTask( taskId ).status == sicnu::TaskStatus::Completed );
   QCoreApplication::processEvents( QEventLoop::AllEvents, 100 );
   closeResultDialog.stop();
+  REQUIRE( resultDialogText.contains( QStringLiteral( "\n\n" ) ) );
+  REQUIRE_FALSE( resultDialogText.contains( QStringLiteral( "\\\\n" ) ) );
   REQUIRE( window.centralWidget() != nullptr );
 }

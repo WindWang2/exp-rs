@@ -79,7 +79,8 @@ public:
     long submitJob(const sicnu::jobs::JobRequest& request);
     long submitJob(const sicnu::jobs::JobRequest& request,
                    JobExecutor executor,
-                   CancelHook onCancel = {});
+                   CancelHook onCancel = {},
+                   bool autoLoad = true);
 
     void attachQgsTask(long taskId, QgsTask* qgsTask);
 
@@ -117,7 +118,8 @@ private:
     QString substitutePlaceholders(const QString& val);
     long submitJobImpl(const sicnu::jobs::JobRequest& request,
                        JobExecutor executor,
-                       CancelHook onCancel);
+                       CancelHook onCancel,
+                       bool autoLoad);
     void watchSubmittedJob(long taskId, std::string jobId);
 
     mutable QMutex m_mutex;

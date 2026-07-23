@@ -70,19 +70,21 @@ long TaskCenter::enqueueTask(const QString& algorithmId,
 
 long TaskCenter::submitJob(const sicnu::jobs::JobRequest& request)
 {
-    return submitJobImpl(request, {}, {});
+    return submitJobImpl(request, {}, {}, true);
 }
 
 long TaskCenter::submitJob(const sicnu::jobs::JobRequest& request,
                            JobExecutor executor,
-                           CancelHook onCancel)
+                           CancelHook onCancel,
+                           bool autoLoad)
 {
-    return submitJobImpl(request, std::move(executor), std::move(onCancel));
+    return submitJobImpl(request, std::move(executor), std::move(onCancel), autoLoad);
 }
 
 long TaskCenter::submitJobImpl(const sicnu::jobs::JobRequest& request,
                                JobExecutor executor,
-                               CancelHook onCancel)
+                               CancelHook onCancel,
+                               bool autoLoad)
 {
     QVariantMap params;
     for (const auto& name : request.params.getMemberNames()) {
@@ -95,7 +97,7 @@ long TaskCenter::submitJobImpl(const sicnu::jobs::JobRequest& request,
             params.insert(QString::fromStdString(name), value.asDouble());
     }
 
-    const long taskId = enqueueTask(QString::fromStdString(request.algorithmId), params);
+    const long taskId = enqueueTask(QString::fromStdString(request.algorithmId), params, autoLoad);
     const std::string jobId = executor
         ? sicnu::jobs::JobEngine::instance().submit(request, std::move(executor), std::move(onCancel))
         : sicnu::jobs::JobEngine::instance().submit(request);

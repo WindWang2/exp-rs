@@ -101,3 +101,56 @@ Classification window. `git diff --check` exits successfully.
   actually returns, so the listener cannot delete a running worker.
 - Existing build warnings (Qt deprecations and the QCA include-path warning)
   remain unrelated; all requested targets succeed.
+
+## Review-fix addendum
+
+Addressed the two Important review findings without changing the Task 3
+workflow scope:
+
+- `TaskCenter::submitJob` now accepts an explicit `autoLoad` option and
+  records it in the submitted task metadata. Classification post-processing
+  submits with Task Center auto-load disabled, so its `loadToLayers` request
+  metadata remains observable while the Classification terminal branch is the
+  only code that adds session layers. This prevents the Task Center default
+  from loading output when `loadToLayers` is false and avoids double-loading
+  when it is true.
+- Restored actual newline escapes in the CV result dialog text and per-fold
+  summary.
+
+The window-level regression checks post-process jobs preserve both false and
+true `loadOutputsToMain` request metadata while always setting
+`autoLoadLayer == false`; this leaves true-only loading to the existing
+Classification session-layer terminal branch. It also captures the displayed
+CV dialog and requires actual blank-line formatting while rejecting a literal
+`\\n` sequence.
+
+### Red-green evidence
+
+After adding the regression assertions but before the Classification call-site
+and dialog fixes, the focused window test built and failed as expected:
+
+```text
+REQUIRE_FALSE( TaskCenter::instance().getTaskInfo( taskId ).autoLoadLayer )
+with expansion: !true
+
+REQUIRE( resultDialogText.contains( QStringLiteral( "\n\n" ) ) )
+with expansion: false
+```
+
+After the fix:
+
+```text
+$ QT_QPA_PLATFORM=offscreen build-task-center-26/tests/test_classification_window "[task_center]"
+(exit 0; FastExitListener intentionally suppresses Catch output)
+
+$ build-task-center-26/tests/test_classification_task_center
+All tests passed (24 assertions in 6 test cases)
+
+$ build-task-center-26/tests/test_task_center
+All tests passed (35 assertions in 8 test cases)
+
+$ cmake --build build-task-center-26 --target sicnu_geo_rs -j2
+[100%] Built target sicnu_geo_rs
+```
+
+`git diff --check` also exits successfully.

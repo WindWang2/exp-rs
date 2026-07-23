@@ -2587,12 +2587,12 @@ void QgsClassificationMainWindow::onClassificationTaskUpdated(
     {
       QString perFold;
       for ( int i = 0; i < res.foldAccuracies.size(); ++i )
-        perFold += QString( "  fold%1: %2%\\n" )
+        perFold += QString( "  fold%1: %2%\n" )
                      .arg( i + 1 )
                      .arg( res.foldAccuracies[i] * 100, 0, 'f', 1 );
       QMessageBox::information(
         this, tr( "5-fold Cross Validation" ),
-        tr( "Mean accuracy: %1% ± %2%\\n\\n%3" )
+        tr( "Mean accuracy: %1% ± %2%\n\n%3" )
           .arg( res.meanAccuracy * 100, 0, 'f', 1 )
           .arg( res.stdAccuracy * 100, 0, 'f', 1 )
           .arg( perFold ) );
@@ -2877,7 +2877,8 @@ long QgsClassificationMainWindow::startPostProcessTask(
         result["outputVector"] = task->config().outputVectorPath.toStdString();
       return result;
     },
-    [task]() { task->cancel(); } );
+    [task]() { task->cancel(); },
+    false );
 
   if ( statusBar() )
     statusBar()->showMessage( tr( "后处理中…" ), 3000 );
