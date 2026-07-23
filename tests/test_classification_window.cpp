@@ -244,6 +244,6 @@ TEST_CASE( "ClassificationWindow: public cross-validation start submits a Task C
   QCoreApplication::processEvents( QEventLoop::AllEvents, 100 );
   closeResultDialog.stop();
   REQUIRE( resultDialogText.contains( QStringLiteral( "\n\n" ) ) );
-  REQUIRE_FALSE( resultDialogText.contains( QStringLiteral( "\\\\n" ) ) );
+  REQUIRE_FALSE( resultDialogText.contains( QStringLiteral( "\\n" ) ) );
   REQUIRE( window.centralWidget() != nullptr );
 }

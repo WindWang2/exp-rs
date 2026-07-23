@@ -438,7 +438,7 @@ bool TaskCenter::retryTask(long taskId)
         oldInfo = m_tasks[taskId];
     }
     if (oldInfo.hasJobRequest)
-        return submitJob(oldInfo.jobRequest) > 0;
+        return submitJob(oldInfo.jobRequest, {}, {}, oldInfo.autoLoadLayer) > 0;
     return enqueueTask(oldInfo.algorithmId, oldInfo.parameterMap, oldInfo.autoLoadLayer, oldInfo.priority, oldInfo.parentTaskIds) > 0;
 }
 

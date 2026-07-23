@@ -154,3 +154,31 @@ $ cmake --build build-task-center-26 --target sicnu_geo_rs -j2
 ```
 
 `git diff --check` also exits successfully.
+
+## Retry metadata regression fix
+
+`TaskCenter::retryTask()` now forwards the original `autoLoadLayer` value when
+it resubmits a stored JobEngine request. This preserves Classification
+post-process jobs' `autoLoadLayer == false` behavior during retry.
+
+### Red-green evidence
+
+Added a focused Task Center regression test using a submitted
+`module:classify:postprocess` request with auto-load disabled. Before the
+production fix, the focused test failed because retry used the default true:
+
+```text
+REQUIRE_FALSE( retriedInfo.autoLoadLayer )
+with expansion: !true
+```
+
+After forwarding `oldInfo.autoLoadLayer` through the resubmission overload:
+
+```text
+$ cmake --build build-task-center-26 --target test_task_center -j2
+$ build-task-center-26/tests/test_task_center "[retry]"
+All tests passed (7 assertions in 1 test case)
+```
+
+The CV dialog regression now rejects the actual legacy one-backslash-plus-n
+literal with `QStringLiteral( "\\n" )` rather than the two-backslash form.

@@ -139,6 +139,33 @@ TEST_CASE("TaskCenter - Preserves a submitted job result", "[processing][task_ce
     REQUIRE(info.logBuffer.join('\n').contains(QStringLiteral("tracer completed")));
 }
 
+TEST_CASE("TaskCenter - Retry preserves a submitted job's auto-load preference", "[processing][task_center][retry]") {
+    auto& engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.registerExecutor("module:classify:postprocess", [](const sicnu::jobs::JobRequest&,
+                                                                 sicnu::operators::RSOperatorContext&) {
+        return Json::Value(Json::objectValue);
+    });
+
+    sicnu::jobs::JobRequest request;
+    request.algorithmId = "module:classify:postprocess";
+    request.source = "classification";
+    const long taskId = sicnu::TaskCenter::instance().submitJob(
+        request, sicnu::TaskCenter::JobExecutor{}, {}, false);
+
+    REQUIRE(taskId > 0);
+    REQUIRE_FALSE(sicnu::TaskCenter::instance().getTaskInfo(taskId).autoLoadLayer);
+    engine.waitUntilIdleForTests();
+    REQUIRE(sicnu::TaskCenter::instance().retryTask(taskId));
+
+    const auto tasks = sicnu::TaskCenter::instance().allTasks();
+    REQUIRE(tasks.size() >= 2);
+    const auto retriedInfo = tasks.last();
+    REQUIRE(retriedInfo.taskId != taskId);
+    REQUIRE(retriedInfo.algorithmId == QStringLiteral("module:classify:postprocess"));
+    REQUIRE_FALSE(retriedInfo.autoLoadLayer);
+}
+
 TEST_CASE("TaskCenter - Executes a callable job through the same task seam", "[processing][task_center][callable]") {
     auto& engine = sicnu::jobs::JobEngine::instance();
     engine.shutdownForTests();
