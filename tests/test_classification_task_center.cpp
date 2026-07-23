@@ -21,6 +21,48 @@
 namespace
 {
 
+std::atomic_int gGdalFailureCount = 0;
+
+void CPL_STDCALL countGdalFailures( CPLErr errorClass, CPLErrorNum errorNumber,
+                                    const char *message )
+{
+  if ( errorClass >= CE_Failure )
+    gGdalFailureCount.fetch_add( 1 );
+  CPLDefaultErrorHandler( errorClass, errorNumber, message );
+}
+
+class BlockingPostProcessTask final : public RsPostProcessTask
+{
+  public:
+    BlockingPostProcessTask( std::atomic_bool &started, std::atomic_bool &cancelled,
+                             std::atomic_bool &release )
+      : RsPostProcessTask( RsPostProcessConfig{} )
+      , mStarted( started )
+      , mCancelled( cancelled )
+      , mRelease( release )
+    {
+    }
+
+    bool run() override
+    {
+      mStarted.store( true );
+      while ( !mRelease.load() )
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+      return true;
+    }
+
+    void cancel() override
+    {
+      mCancelled.store( true );
+      RsPostProcessTask::cancel();
+    }
+
+  private:
+    std::atomic_bool &mStarted;
+    std::atomic_bool &mCancelled;
+    std::atomic_bool &mRelease;
+};
+
 RsPostProcessConfig validPostProcessConfig( const QTemporaryDir &tmp )
 {
   GDALAllRegister();
@@ -140,9 +182,13 @@ TEST_CASE( "Classification Task Center completes post-processing workers", "[cla
   REQUIRE( tmp.isValid() );
 
   auto worker = std::make_unique<RsPostProcessTask>( validPostProcessConfig( tmp ) );
+  gGdalFailureCount.store( 0 );
+  const CPLErrorHandler previousHandler = CPLSetErrorHandler( countGdalFailures );
   const auto info = waitForTerminalTask( submitPostProcess( worker ) );
+  CPLSetErrorHandler( previousHandler );
 
   REQUIRE( info.status == sicnu::TaskStatus::Completed );
+  REQUIRE( gGdalFailureCount.load() == 0 );
   REQUIRE( info.resultPayload["output"].asString()
            == worker->config().outputRasterPath.toStdString() );
   REQUIRE( QFile::exists( worker->config().outputRasterPath ) );
@@ -167,28 +213,18 @@ TEST_CASE( "Classification Task Center keeps cancellation running until its work
 {
   sicnu::jobs::JobEngine::instance().shutdownForTests();
   std::atomic_bool started = false;
-  std::atomic_bool cancelHookCalled = false;
+  std::atomic_bool workerCancelled = false;
   std::atomic_bool releaseWorker = false;
 
-  sicnu::jobs::JobRequest request;
-  request.algorithmId = "callable:classification-cancel";
-  request.source = "test";
-  const long taskId = sicnu::TaskCenter::instance().submitJob(
-    request,
-    [&started, &releaseWorker]( const sicnu::jobs::JobRequest &,
-                                sicnu::operators::RSOperatorContext & ) {
-      started.store( true );
-      while ( !releaseWorker.load() )
-        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
-      return Json::Value( Json::objectValue );
-    },
-    [&cancelHookCalled] { cancelHookCalled.store( true ); } );
+  std::unique_ptr<RsPostProcessTask> worker = std::make_unique<BlockingPostProcessTask>(
+    started, workerCancelled, releaseWorker );
+  const long taskId = submitPostProcess( worker );
 
   for ( int attempt = 0; attempt < 100 && !started.load(); ++attempt )
     std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
   REQUIRE( started.load() );
   REQUIRE( sicnu::TaskCenter::instance().cancelTask( taskId ) );
-  REQUIRE( cancelHookCalled.load() );
+  REQUIRE( workerCancelled.load() );
   REQUIRE( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status
            == sicnu::TaskStatus::Running );
   releaseWorker.store( true );
