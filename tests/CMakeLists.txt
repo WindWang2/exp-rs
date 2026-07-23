@@ -1473,6 +1473,7 @@ if(TARGET qgis_app_classify)
     qgis_analysis
     qgis_app_classify
     sicnu_jobs
+    sicnu_task_center
   )
   target_include_directories(test_classification_window PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -1483,6 +1484,9 @@ if(TARGET qgis_app_classify)
     ${CMAKE_BINARY_DIR}
   )
   set_target_properties(test_classification_window PROPERTIES AUTOMOC ON)
+  target_compile_definitions(test_classification_window PRIVATE
+    SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
   sicnu_discover_tests(test_classification_window)
 
   # Phase 10A Task 10.3 — Class table widget tests.

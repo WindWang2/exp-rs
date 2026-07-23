@@ -340,6 +340,7 @@ void TaskCenter::markTaskCanceled(long taskId, const QString& reason)
 bool TaskCenter::cancelTask(long taskId)
 {
     std::string jobId;
+    bool cancelImmediately = false;
     {
         QMutexLocker locker(&m_mutex);
         if (!m_tasks.contains(taskId)) {
@@ -354,20 +355,30 @@ bool TaskCenter::cancelTask(long taskId)
             m_tasks[taskId].taskHandle->cancel();
         }
         jobId = m_tasks[taskId].jobId;
-        m_tasks[taskId].status = TaskStatus::Canceled;
-        m_tasks[taskId].errorMessage = QStringLiteral("Task canceled");
-        m_tasks[taskId].endTime = QDateTime::currentDateTime();
-        m_tasks[taskId].logBuffer.append(QStringLiteral("Task canceled by user."));
+        cancelImmediately = jobId.empty();
+        if (cancelImmediately) {
+            m_tasks[taskId].status = TaskStatus::Canceled;
+            m_tasks[taskId].errorMessage = QStringLiteral("Task canceled");
+            m_tasks[taskId].endTime = QDateTime::currentDateTime();
+            m_tasks[taskId].logBuffer.append(QStringLiteral("Task canceled by user."));
+        } else {
+            // A callable worker may still be reading its task-owned state.
+            // Publish the terminal Canceled state only once JobEngine reports
+            // that the worker has actually observed cancellation and exited.
+            m_tasks[taskId].logBuffer.append(QStringLiteral("Cancellation requested by user."));
+        }
         emit taskUpdated(m_tasks[taskId]);
 
-        // Cascade cancel to downstream child tasks
-        QList<long> keys = m_tasks.keys();
-        for (long id : keys) {
-            if (m_tasks[id].parentTaskIds.contains(taskId) && m_tasks[id].status == TaskStatus::Queued) {
-                m_tasks[id].status = TaskStatus::Canceled;
-                m_tasks[id].endTime = QDateTime::currentDateTime();
-                m_tasks[id].logBuffer.append(QStringLiteral("Canceled due to upstream parent task failure."));
-                emit taskUpdated(m_tasks[id]);
+        if (cancelImmediately) {
+            // Cascade only after this task has a terminal cancellation state.
+            QList<long> keys = m_tasks.keys();
+            for (long id : keys) {
+                if (m_tasks[id].parentTaskIds.contains(taskId) && m_tasks[id].status == TaskStatus::Queued) {
+                    m_tasks[id].status = TaskStatus::Canceled;
+                    m_tasks[id].endTime = QDateTime::currentDateTime();
+                    m_tasks[id].logBuffer.append(QStringLiteral("Canceled due to upstream parent task failure."));
+                    emit taskUpdated(m_tasks[id]);
+                }
             }
         }
 

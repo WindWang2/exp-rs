@@ -51,6 +51,12 @@ class RsAccuracyPanel;
 class RsClassifierSetupBar;
 class RsClassifyStepperBar;
 class RsClassifyStepHost;
+class RsClassificationTask;
+
+namespace sicnu
+{
+  struct AlgorithmTaskInfo;
+}
 
 /**
  * \brief Pixel-based supervised classification window.
@@ -139,6 +145,7 @@ class QgsClassificationMainWindow : public QMainWindow
     int resolveActiveClassId( int preferred = 0 ) const;
     void ensureSampleLayerEditing( bool on );
     void deleteSelectedSamples();
+    void onClassificationTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
     QgisInterface *m_iface = nullptr;
     QgsMapCanvas *m_canvas = nullptr;
@@ -179,6 +186,11 @@ class QgsClassificationMainWindow : public QMainWindow
     QPushButton *m_stepApplyBtn = nullptr;
     bool m_trainSampleRole = true;
     bool m_classifyBusy = false;
+    long m_pendingClassificationTaskId = -1;
+    RsClassificationTask *m_pendingClassificationWorker = nullptr;
+    bool m_pendingClassificationIsPreview = false;
+    QString m_pendingClassificationAlgorithm;
+    QString m_pendingClassificationOutput;
 
     RsAccuracyPanel *m_accuracyPanel = nullptr;
     QPushButton *m_stepAccuracyPopupBtn = nullptr;

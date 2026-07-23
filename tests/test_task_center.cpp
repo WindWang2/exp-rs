@@ -6,6 +6,7 @@
 #include "jobs/job_types.h"
 
 #include <chrono>
+#include <atomic>
 #include <thread>
 
 TEST_CASE("TaskCenter - Enqueue, Info Query, and Lifecycle State Transitions", "[processing][task_center]") {
@@ -187,10 +188,50 @@ TEST_CASE("TaskCenter - Cancels the underlying submitted job", "[processing][tas
     REQUIRE(sicnu::TaskCenter::instance().cancelTask(taskId));
     engine.waitUntilIdleForTests();
 
-    const auto info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
+    sicnu::AlgorithmTaskInfo info;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
+        if (info.status == sicnu::TaskStatus::Canceled)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
     REQUIRE(info.status == sicnu::TaskStatus::Canceled);
     REQUIRE_FALSE(info.jobId.empty());
     const auto job = engine.snapshot(info.jobId);
     REQUIRE(job.has_value());
     REQUIRE(job->state == sicnu::jobs::JobState::Cancelled);
+}
+
+TEST_CASE("TaskCenter - Running cancellation waits for the worker terminal state", "[processing][task_center][cancellation]") {
+    auto& engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    std::atomic_bool started = false;
+    std::atomic_bool releaseWorker = false;
+
+    sicnu::jobs::JobRequest request;
+    request.algorithmId = "callable:cancel-lifecycle";
+    request.source = "task_panel";
+    const long taskId = sicnu::TaskCenter::instance().submitJob(
+        request,
+        [&started, &releaseWorker](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext&) {
+            started.store(true);
+            while (!releaseWorker.load())
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return Json::Value(Json::objectValue);
+        });
+
+    for (int attempt = 0; attempt < 100 && !started.load(); ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE(started.load());
+    REQUIRE(sicnu::TaskCenter::instance().cancelTask(taskId));
+    REQUIRE(sicnu::TaskCenter::instance().getTaskInfo(taskId).status == sicnu::TaskStatus::Running);
+
+    releaseWorker.store(true);
+    engine.waitUntilIdleForTests();
+    for (int attempt = 0; attempt < 20
+                      && sicnu::TaskCenter::instance().getTaskInfo(taskId).status == sicnu::TaskStatus::Running;
+         ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    REQUIRE(sicnu::TaskCenter::instance().getTaskInfo(taskId).status == sicnu::TaskStatus::Canceled);
 }

@@ -4,6 +4,7 @@
 
 #include <QApplication>
 #include <QDockWidget>
+#include <QFile>
 
 #include "qgsclassificationmainwindow.h"
 
@@ -60,4 +61,31 @@ TEST_CASE( "ClassificationWindow: title and central canvas", "[classify][window]
   QgsClassificationMainWindow w( nullptr );
   REQUIRE( w.windowTitle().contains( "Classification" ) );
   REQUIRE( w.centralWidget() != nullptr );
+}
+
+TEST_CASE( "ClassificationWindow: apply and preview submit through Task Center", "[classify][task_center]" )
+{
+  QFile source( QStringLiteral( SICNU_SOURCE_DIR "/src/app/classification/qgsclassificationmainwindow.cpp" ) );
+  REQUIRE( source.open( QIODevice::ReadOnly | QIODevice::Text ) );
+  const QString text = QString::fromUtf8( source.readAll() );
+
+  const auto methodBody = [&text]( const QString &signature, const QString &nextSignature ) {
+    const int begin = text.indexOf( signature );
+    REQUIRE( begin >= 0 );
+    const int end = text.indexOf( nextSignature, begin + signature.size() );
+    REQUIRE( end >= 0 );
+    return text.mid( begin, end - begin );
+  };
+
+  const QString apply = methodBody(
+    QStringLiteral( "void QgsClassificationMainWindow::applyClassification()" ),
+    QStringLiteral( "void QgsClassificationMainWindow::applyPreview()" ) );
+  const QString preview = methodBody(
+    QStringLiteral( "void QgsClassificationMainWindow::applyPreview()" ),
+    QStringLiteral( "void QgsClassificationMainWindow::openPostProcessDialog" ) );
+
+  REQUIRE( apply.contains( QStringLiteral( "TaskCenter::instance().submitJob" ) ) );
+  REQUIRE_FALSE( apply.contains( QStringLiteral( "RsJobRunner::run" ) ) );
+  REQUIRE( preview.contains( QStringLiteral( "TaskCenter::instance().submitJob" ) ) );
+  REQUIRE_FALSE( preview.contains( QStringLiteral( "RsJobRunner::run" ) ) );
 }
