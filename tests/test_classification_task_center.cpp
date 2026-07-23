@@ -96,6 +96,38 @@ class BlockingPostProcessTask final : public RsPostProcessTask
     std::atomic_bool &mRelease;
 };
 
+class BlockingCrossValidationTask final : public RsCvTask
+{
+  public:
+    BlockingCrossValidationTask( std::atomic_bool &started, std::atomic_bool &cancelled,
+                                 std::atomic_bool &release )
+      : RsCvTask( cv::Mat{}, cv::Mat{}, [] { return std::unique_ptr<RsClassifierBackend>{}; } )
+      , mStarted( started )
+      , mCancelled( cancelled )
+      , mRelease( release )
+    {
+    }
+
+    bool run() override
+    {
+      mStarted.store( true );
+      while ( !mRelease.load() )
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+      return true;
+    }
+
+    void cancel() override
+    {
+      mCancelled.store( true );
+      RsCvTask::cancel();
+    }
+
+  private:
+    std::atomic_bool &mStarted;
+    std::atomic_bool &mCancelled;
+    std::atomic_bool &mRelease;
+};
+
 RsPostProcessConfig validPostProcessConfig( const QTemporaryDir &tmp )
 {
   GDALAllRegister();
@@ -264,6 +296,28 @@ TEST_CASE( "Classification Task Center keeps cancellation running until its work
   REQUIRE( waitForTerminalTask( taskId ).status == sicnu::TaskStatus::Canceled );
 }
 
+TEST_CASE( "Classification Task Center keeps cross-validation cancellation running until its worker exits", "[classify][cv][cancel]" )
+{
+  sicnu::jobs::JobEngine::instance().shutdownForTests();
+  std::atomic_bool started = false;
+  std::atomic_bool workerCancelled = false;
+  std::atomic_bool releaseWorker = false;
+
+  std::unique_ptr<RsCvTask> worker = std::make_unique<BlockingCrossValidationTask>(
+    started, workerCancelled, releaseWorker );
+  const long taskId = submitCrossValidation( worker );
+
+  for ( int attempt = 0; attempt < 100 && !started.load(); ++attempt )
+    std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+  REQUIRE( started.load() );
+  REQUIRE( sicnu::TaskCenter::instance().cancelTask( taskId ) );
+  REQUIRE( workerCancelled.load() );
+  REQUIRE( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status
+           == sicnu::TaskStatus::Running );
+  releaseWorker.store( true );
+  REQUIRE( waitForTerminalTask( taskId ).status == sicnu::TaskStatus::Canceled );
+}
+
 TEST_CASE( "Classification Task Center completes cross-validation workers", "[classify][cv]" )
 {
   cv::Mat features;
@@ -278,6 +332,7 @@ TEST_CASE( "Classification Task Center completes cross-validation workers", "[cl
   const auto completed = waitForTerminalTask( submitCrossValidation( worker ) );
 
   REQUIRE( completed.status == sicnu::TaskStatus::Completed );
+  REQUIRE( completed.resultPayload.isMember( "meanAccuracy" ) );
   REQUIRE( completed.resultPayload["meanAccuracy"].asDouble() > 0.85 );
   REQUIRE( completed.resultPayload.isMember( "stdAccuracy" ) );
 }
