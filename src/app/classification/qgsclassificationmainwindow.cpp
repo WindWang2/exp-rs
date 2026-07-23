@@ -65,7 +65,6 @@
 #include "qgsvectorlayer.h"
 #include "qgis.h"
 
-#include "shell/rs_job_runner.h"
 #include "shell/rs_session_map_workspace.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
@@ -2286,7 +2285,8 @@ void QgsClassificationMainWindow::applyClassification()
   req.params["output"] = outForLog.toStdString();
 
   m_pendingClassificationWorker = task;
-  m_pendingClassificationIsPreview = false;
+  m_pendingClassificationOperation = PendingClassificationOperation::Apply;
+  m_pendingPostProcessLoadsLayers = false;
   m_pendingClassificationAlgorithm = algoForLog;
   m_pendingClassificationOutput = outForLog;
   m_pendingClassificationTaskId = sicnu::TaskCenter::instance().submitJob(
@@ -2437,7 +2437,8 @@ void QgsClassificationMainWindow::applyPreview()
   req.params["output"] = outForLog.toStdString();
 
   m_pendingClassificationWorker = task;
-  m_pendingClassificationIsPreview = true;
+  m_pendingClassificationOperation = PendingClassificationOperation::Preview;
+  m_pendingPostProcessLoadsLayers = false;
   m_pendingClassificationAlgorithm.clear();
   m_pendingClassificationOutput = outForLog;
   m_pendingClassificationTaskId = sicnu::TaskCenter::instance().submitJob(
@@ -2481,13 +2482,16 @@ void QgsClassificationMainWindow::onClassificationTaskUpdated(
     return;
   }
 
-  RsClassificationTask *task = m_pendingClassificationWorker;
-  const bool preview = m_pendingClassificationIsPreview;
+  QgsTask *task = m_pendingClassificationWorker;
+  const PendingClassificationOperation operation = m_pendingClassificationOperation;
+  const bool preview = operation == PendingClassificationOperation::Preview;
   const QString algoForLog = m_pendingClassificationAlgorithm;
   const QString outForLog = m_pendingClassificationOutput;
+  const bool loadPostProcessLayers = m_pendingPostProcessLoadsLayers;
   m_pendingClassificationTaskId = -1;
   m_pendingClassificationWorker = nullptr;
-  m_pendingClassificationIsPreview = false;
+  m_pendingClassificationOperation = PendingClassificationOperation::None;
+  m_pendingPostProcessLoadsLayers = false;
   m_pendingClassificationAlgorithm.clear();
   m_pendingClassificationOutput.clear();
   setClassifyBusy( false );
@@ -2495,7 +2499,124 @@ void QgsClassificationMainWindow::onClassificationTaskUpdated(
   if ( !task )
     return;
 
-  const auto &r = task->result();
+  if ( operation == PendingClassificationOperation::PostProcess )
+  {
+    auto *postProcessTask = static_cast<RsPostProcessTask *>( task );
+    const auto &r = postProcessTask->result();
+    const auto &cfg = postProcessTask->config();
+    const QString outRaster = cfg.outputRasterPath;
+    const QString outVector = cfg.outputVectorPath;
+    const bool doPoly = cfg.runPolygonize;
+
+    if ( info.status == sicnu::TaskStatus::Completed && r.ok )
+    {
+      if ( m_workflow )
+        m_workflow->setHasPostProcessResult( true );
+
+      if ( !outRaster.isEmpty() )
+        m_lastPostRasterPath = outRaster;
+      if ( doPoly && !outVector.isEmpty() )
+        m_lastPostVectorPath = outVector;
+
+      if ( loadPostProcessLayers )
+      {
+        if ( !doPoly && !outRaster.isEmpty() && QFileInfo::exists( outRaster ) )
+        {
+          auto *resultLayer = new QgsRasterLayer(
+            outRaster, QFileInfo( outRaster ).baseName() + tr( " (后处理)" ),
+            QStringLiteral( "gdal" ) );
+          if ( resultLayer->isValid() )
+          {
+            m_previewLayer = resultLayer;
+            addSessionLayer( resultLayer, true );
+          }
+          else
+          {
+            delete resultLayer;
+          }
+        }
+        if ( doPoly && !outVector.isEmpty() && QFileInfo::exists( outVector ) )
+        {
+          auto *vlayer = new QgsVectorLayer(
+            outVector, QFileInfo( outVector ).baseName() + tr( " (矢量)" ),
+            QStringLiteral( "ogr" ) );
+          if ( vlayer->isValid() )
+            addSessionLayer( vlayer, true );
+          else
+            delete vlayer;
+        }
+      }
+
+      if ( statusBar() )
+      {
+        QString msg = tr( "后处理完成 (%1 ms)" ).arg( r.durationMs );
+        if ( !outRaster.isEmpty() )
+          msg += QStringLiteral( ": " ) + QFileInfo( outRaster ).fileName();
+        if ( doPoly && !outVector.isEmpty() )
+          msg += tr( "；矢量 %1" ).arg( QFileInfo( outVector ).fileName() );
+        if ( loadPostProcessLayers )
+          msg += tr( "（已加载到图层）" );
+        statusBar()->showMessage( msg, 6000 );
+      }
+      refreshWorkflowUi();
+    }
+    else if ( info.status == sicnu::TaskStatus::Canceled )
+    {
+      if ( statusBar() )
+        statusBar()->showMessage( tr( "后处理已取消" ), 3000 );
+    }
+    else
+    {
+      const QString err = !r.errorMessage.isEmpty()
+                            ? r.errorMessage
+                            : ( !info.errorMessage.isEmpty() ? info.errorMessage : tr( "未知错误" ) );
+      SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                       QStringLiteral( "Post-process failed: %1" ).arg( err ) );
+      if ( statusBar() )
+        statusBar()->showMessage( tr( "后处理失败: %1" ).arg( err ), 6000 );
+    }
+    task->deleteLater();
+    return;
+  }
+
+  if ( operation == PendingClassificationOperation::CrossValidation )
+  {
+    auto *cvTask = static_cast<RsCvTask *>( task );
+    const auto res = cvTask->result();
+    if ( info.status == sicnu::TaskStatus::Completed && res.ok() )
+    {
+      QString perFold;
+      for ( int i = 0; i < res.foldAccuracies.size(); ++i )
+        perFold += QString( "  fold%1: %2%\\n" )
+                     .arg( i + 1 )
+                     .arg( res.foldAccuracies[i] * 100, 0, 'f', 1 );
+      QMessageBox::information(
+        this, tr( "5-fold Cross Validation" ),
+        tr( "Mean accuracy: %1% ± %2%\\n\\n%3" )
+          .arg( res.meanAccuracy * 100, 0, 'f', 1 )
+          .arg( res.stdAccuracy * 100, 0, 'f', 1 )
+          .arg( perFold ) );
+      if ( statusBar() )
+        statusBar()->showMessage( tr( "交叉验证完成" ), 3000 );
+    }
+    else if ( info.status == sicnu::TaskStatus::Canceled )
+    {
+      if ( statusBar() )
+        statusBar()->showMessage( tr( "交叉验证已取消" ), 3000 );
+    }
+    else if ( statusBar() )
+    {
+      const QString err = !res.errorMessage.isEmpty()
+                            ? res.errorMessage
+                            : ( !info.errorMessage.isEmpty() ? info.errorMessage : tr( "未知错误" ) );
+      statusBar()->showMessage( tr( "交叉验证失败: %1" ).arg( err ), 5000 );
+    }
+    task->deleteLater();
+    return;
+  }
+
+  auto *classificationTask = static_cast<RsClassificationTask *>( task );
+  const auto &r = classificationTask->result();
   if ( info.status == sicnu::TaskStatus::Completed && r.ok )
   {
     if ( preview )
@@ -2692,14 +2813,21 @@ void QgsClassificationMainWindow::runPostProcess( const RsPostProcessConfig &cfg
                                                   const QString &jobTitle,
                                                   const QString &algorithmId )
 {
+  startPostProcessTask( cfgIn, loadToLayers, jobTitle, algorithmId );
+}
+
+long QgsClassificationMainWindow::startPostProcessTask(
+  const RsPostProcessConfig &cfgIn,
+  bool loadToLayers,
+  const QString &jobTitle,
+  const QString &algorithmId )
+{
   if ( m_classifyBusy )
-    return;
+    return -1;
 
   RsPostProcessConfig cfg = cfgIn;
   const QString outRaster = cfg.outputRasterPath;
   const QString outVector = cfg.outputVectorPath;
-  const bool doPoly = cfg.runPolygonize;
-  const bool rasterOut = !doPoly || !outRaster.isEmpty();
   auto *task = new RsPostProcessTask( std::move( cfg ) );
   setClassifyBusy( true );
 
@@ -2717,8 +2845,13 @@ void QgsClassificationMainWindow::runPostProcess( const RsPostProcessConfig &cfg
     req.params["outputVector"] = outVector.toStdString();
   req.params["loadOutputsToMain"] = loadToLayers;
 
-  RsJobRunner::run(
-    std::move( req ),
+  m_pendingClassificationWorker = task;
+  m_pendingClassificationOperation = PendingClassificationOperation::PostProcess;
+  m_pendingPostProcessLoadsLayers = loadToLayers;
+  m_pendingClassificationAlgorithm.clear();
+  m_pendingClassificationOutput.clear();
+  m_pendingClassificationTaskId = sicnu::TaskCenter::instance().submitJob(
+    req,
     [task]( const sicnu::jobs::JobRequest &,
             sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running classification post-process" );
@@ -2744,86 +2877,11 @@ void QgsClassificationMainWindow::runPostProcess( const RsPostProcessConfig &cfg
         result["outputVector"] = task->config().outputVectorPath.toStdString();
       return result;
     },
-    [this, task, outRaster, outVector, doPoly, loadToLayers]( const RsJobFinish &fin ) {
-      setClassifyBusy( false );
-      const auto &r = task->result();
-
-      if ( fin.succeeded() && r.ok )
-      {
-        if ( m_workflow )
-          m_workflow->setHasPostProcessResult( true );
-
-        if ( !outRaster.isEmpty() )
-          m_lastPostRasterPath = outRaster;
-        if ( doPoly && !outVector.isEmpty() )
-          m_lastPostVectorPath = outVector;
-
-        if ( loadToLayers )
-        {
-          if ( !doPoly && !outRaster.isEmpty() && QFileInfo::exists( outRaster ) )
-          {
-            auto *resultLayer = new QgsRasterLayer(
-              outRaster,
-              QFileInfo( outRaster ).baseName() + tr( " (后处理)" ),
-              QStringLiteral( "gdal" ) );
-            if ( resultLayer->isValid() )
-            {
-              m_previewLayer = resultLayer;
-              addSessionLayer( resultLayer, true );
-            }
-            else
-            {
-              delete resultLayer;
-            }
-          }
-          if ( doPoly && !outVector.isEmpty() && QFileInfo::exists( outVector ) )
-          {
-            auto *vlayer = new QgsVectorLayer(
-              outVector,
-              QFileInfo( outVector ).baseName() + tr( " (矢量)" ),
-              QStringLiteral( "ogr" ) );
-            if ( vlayer->isValid() )
-              addSessionLayer( vlayer, true );
-            else
-              delete vlayer;
-          }
-        }
-
-        if ( statusBar() )
-        {
-          QString msg = tr( "后处理完成 (%1 ms)" ).arg( r.durationMs );
-          if ( !outRaster.isEmpty() )
-            msg += QStringLiteral( ": " ) + QFileInfo( outRaster ).fileName();
-          if ( doPoly && !outVector.isEmpty() )
-            msg += tr( "；矢量 %1" ).arg( QFileInfo( outVector ).fileName() );
-          if ( loadToLayers )
-            msg += tr( "（已加载到图层）" );
-          statusBar()->showMessage( msg, 6000 );
-        }
-        refreshWorkflowUi();
-      }
-      else if ( fin.cancelled() )
-      {
-        if ( statusBar() )
-          statusBar()->showMessage( tr( "后处理已取消" ), 3000 );
-      }
-      else
-      {
-        const QString err = !r.errorMessage.isEmpty()
-                              ? r.errorMessage
-                              : ( !fin.error.isEmpty() ? fin.error : tr( "未知错误" ) );
-        SICNU_LOG_ERROR( SicnuLogTags::Classification,
-                         QStringLiteral( "Post-process failed: %1" ).arg( err ) );
-        if ( statusBar() )
-          statusBar()->showMessage( tr( "后处理失败: %1" ).arg( err ), 6000 );
-      }
-      delete task;
-    },
-    [task]() { task->cancel(); },
-    this );
+    [task]() { task->cancel(); } );
 
   if ( statusBar() )
     statusBar()->showMessage( tr( "后处理中…" ), 3000 );
+  return m_pendingClassificationTaskId;
 }
 
 void QgsClassificationMainWindow::runCrossValidation()
@@ -2877,8 +2935,19 @@ void QgsClassificationMainWindow::runCrossValidation()
     }
   };
 
-  // Run cross-validation via JobEngine (appears in unified task panel)
-  auto *task = new RsCvTask( X, y, factory, 5, tr( "5-fold Cross Validation" ) );
+  startCrossValidationTask( X, y, std::move( factory ) );
+}
+
+long QgsClassificationMainWindow::startCrossValidationTask(
+  const cv::Mat &X,
+  const cv::Mat &y,
+  RsCvTask::ClassifierFactory factory )
+{
+  if ( m_classifyBusy )
+    return -1;
+
+  auto *task = new RsCvTask( X, y, std::move( factory ), 5,
+                              tr( "5-fold Cross Validation" ) );
   setClassifyBusy( true );
 
   sicnu::jobs::JobRequest req;
@@ -2887,8 +2956,13 @@ void QgsClassificationMainWindow::runCrossValidation()
   req.source = "module";
   req.exclusive = false;
 
-  RsJobRunner::run(
-    std::move( req ),
+  m_pendingClassificationWorker = task;
+  m_pendingClassificationOperation = PendingClassificationOperation::CrossValidation;
+  m_pendingPostProcessLoadsLayers = false;
+  m_pendingClassificationAlgorithm.clear();
+  m_pendingClassificationOutput.clear();
+  m_pendingClassificationTaskId = sicnu::TaskCenter::instance().submitJob(
+    req,
     [task]( const sicnu::jobs::JobRequest &,
             sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running 5-fold cross validation" );
@@ -2912,45 +2986,11 @@ void QgsClassificationMainWindow::runCrossValidation()
       result["stdAccuracy"] = task->result().stdAccuracy;
       return result;
     },
-    [this, task]( const RsJobFinish &fin ) {
-      setClassifyBusy( false );
-      const auto res = task->result();
-      delete task;
-
-      if ( fin.succeeded() && res.ok() )
-      {
-        QString perFold;
-        for ( int i = 0; i < res.foldAccuracies.size(); ++i )
-          perFold += QString( "  fold%1: %2%\n" )
-                       .arg( i + 1 )
-                       .arg( res.foldAccuracies[i] * 100, 0, 'f', 1 );
-        QMessageBox::information(
-          this, tr( "5-fold Cross Validation" ),
-          tr( "Mean accuracy: %1% ± %2%\n\n%3" )
-            .arg( res.meanAccuracy * 100, 0, 'f', 1 )
-            .arg( res.stdAccuracy * 100, 0, 'f', 1 )
-            .arg( perFold ) );
-        if ( statusBar() )
-          statusBar()->showMessage( tr( "交叉验证完成" ), 3000 );
-      }
-      else if ( fin.cancelled() )
-      {
-        if ( statusBar() )
-          statusBar()->showMessage( tr( "交叉验证已取消" ), 3000 );
-      }
-      else if ( statusBar() )
-      {
-        statusBar()->showMessage(
-          tr( "交叉验证失败: %1" )
-            .arg( !fin.error.isEmpty() ? fin.error : tr( "未知错误" ) ),
-          5000 );
-      }
-    },
-    [task]() { task->cancel(); },
-    this );
+    [task]() { task->cancel(); } );
 
   if ( statusBar() )
     statusBar()->showMessage( tr( "5-fold CV 运行中…" ), 3000 );
+  return m_pendingClassificationTaskId;
 }
 
 void QgsClassificationMainWindow::recomputeSpectralCurves()

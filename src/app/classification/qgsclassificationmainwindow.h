@@ -15,6 +15,7 @@
 #include "rs_classify_workflow_controller.h"
 #include "rs_feature_scaler.h"
 #include "rs_pixel_ignore_options.h"
+#include "rs_cv_task.h"
 #include "rs_post_process_task.h"
 
 class QCheckBox;
@@ -52,6 +53,7 @@ class RsClassifierSetupBar;
 class RsClassifyStepperBar;
 class RsClassifyStepHost;
 class RsClassificationTask;
+class QgsTask;
 
 namespace sicnu
 {
@@ -80,6 +82,13 @@ class QgsClassificationMainWindow : public QMainWindow
     void applyClassification();
     void applyPreview();
     void runCrossValidation();
+    long startPostProcessTask( const RsPostProcessConfig &cfg,
+                               bool loadToLayers,
+                               const QString &jobTitle,
+                               const QString &algorithmId );
+    long startCrossValidationTask( const cv::Mat &X,
+                                   const cv::Mat &y,
+                                   RsCvTask::ClassifierFactory factory );
     void recomputeSpectralCurves();
     void recomputeJmMatrix();
     void exportRois();
@@ -92,6 +101,15 @@ class QgsClassificationMainWindow : public QMainWindow
     void closeEvent( QCloseEvent *e ) override;
 
   private:
+    enum class PendingClassificationOperation
+    {
+      None,
+      Apply,
+      Preview,
+      PostProcess,
+      CrossValidation
+    };
+
     void setupMenus();
     void setupToolbars();
     void setupDocks();
@@ -187,8 +205,9 @@ class QgsClassificationMainWindow : public QMainWindow
     bool m_trainSampleRole = true;
     bool m_classifyBusy = false;
     long m_pendingClassificationTaskId = -1;
-    RsClassificationTask *m_pendingClassificationWorker = nullptr;
-    bool m_pendingClassificationIsPreview = false;
+    QgsTask *m_pendingClassificationWorker = nullptr;
+    PendingClassificationOperation m_pendingClassificationOperation = PendingClassificationOperation::None;
+    bool m_pendingPostProcessLoadsLayers = false;
     QString m_pendingClassificationAlgorithm;
     QString m_pendingClassificationOutput;
 
