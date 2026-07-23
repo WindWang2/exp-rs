@@ -1451,6 +1451,37 @@ sicnu_discover_tests(test_band_ratio)
 # Phase 10A Task 10.2 — Classification main window shell tests.
 # Only built when OpenCV ml component is available (qgis_app_classify exists).
 if(TARGET qgis_app_classify)
+  add_executable(test_classification_task_center
+    test_classification_task_center.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/rs_session_map_workspace.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  )
+  target_link_libraries(test_classification_task_center PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_analysis
+    qgis_app_classify
+    sicnu_jobs
+    sicnu_task_center
+    GDAL::GDAL
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_classification_task_center PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${CMAKE_SOURCE_DIR}/src/app/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_classification_task_center PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_classification_task_center)
+
   # Shell QObject TUs live on sicnu_geo_rs only (not qgis_app_classify) to avoid
   # MOC ODR. Full-window classify tests must compile the same shell sources here.
   # Follow-up: extract a shared OBJECT/static lib (e.g. sicnu_app_shell) once more
