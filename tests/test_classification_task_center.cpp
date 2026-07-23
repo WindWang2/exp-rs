@@ -4,10 +4,12 @@
 #include <QTemporaryDir>
 
 #include <gdal_priv.h>
+#include <opencv2/core.hpp>
 
 #include "jobs/job_engine.h"
 #include "operators/framework/rs_operator_error.h"
 #include "processing/framework/task_center.h"
+#include "rs_classifier_normalbayes.h"
 #include "rs_cv_task.h"
 #include "rs_post_process_task.h"
 
@@ -22,6 +24,37 @@ namespace
 {
 
 std::atomic_int gGdalFailureCount = 0;
+
+void makeGaussianData( cv::Mat &features, cv::Mat &labels, int perClass = 200,
+                       int seed = 42 )
+{
+  cv::RNG rng( seed );
+  const int total = perClass * 3;
+  features.create( total, 2, CV_32F );
+  labels.create( total, 1, CV_32S );
+  for ( int i = 0; i < perClass; ++i )
+  {
+    features.at<float>( i, 0 ) = static_cast<float>( rng.gaussian( 2.0 ) ) + 5.0f;
+    features.at<float>( i, 1 ) = static_cast<float>( rng.gaussian( 2.0 ) ) + 5.0f;
+    labels.at<int>( i, 0 ) = 1;
+  }
+  for ( int i = 0; i < perClass; ++i )
+  {
+    features.at<float>( perClass + i, 0 )
+      = static_cast<float>( rng.gaussian( 2.0 ) ) + 20.0f;
+    features.at<float>( perClass + i, 1 )
+      = static_cast<float>( rng.gaussian( 2.0 ) ) + 20.0f;
+    labels.at<int>( perClass + i, 0 ) = 2;
+  }
+  for ( int i = 0; i < perClass; ++i )
+  {
+    features.at<float>( 2 * perClass + i, 0 )
+      = static_cast<float>( rng.gaussian( 2.0 ) ) + 5.0f;
+    features.at<float>( 2 * perClass + i, 1 )
+      = static_cast<float>( rng.gaussian( 2.0 ) ) + 20.0f;
+    labels.at<int>( 2 * perClass + i, 0 ) = 3;
+  }
+}
 
 void CPL_STDCALL countGdalFailures( CPLErr errorClass, CPLErrorNum errorNumber,
                                     const char *message )
@@ -229,4 +262,38 @@ TEST_CASE( "Classification Task Center keeps cancellation running until its work
            == sicnu::TaskStatus::Running );
   releaseWorker.store( true );
   REQUIRE( waitForTerminalTask( taskId ).status == sicnu::TaskStatus::Canceled );
+}
+
+TEST_CASE( "Classification Task Center completes cross-validation workers", "[classify][cv]" )
+{
+  cv::Mat features;
+  cv::Mat labels;
+  makeGaussianData( features, labels );
+  auto worker = std::make_unique<RsCvTask>(
+    features, labels,
+    []() -> std::unique_ptr<RsClassifierBackend> {
+      return std::make_unique<RsClassifierNormalBayes>();
+    } );
+
+  const auto completed = waitForTerminalTask( submitCrossValidation( worker ) );
+
+  REQUIRE( completed.status == sicnu::TaskStatus::Completed );
+  REQUIRE( completed.resultPayload["meanAccuracy"].asDouble() > 0.85 );
+  REQUIRE( completed.resultPayload.isMember( "stdAccuracy" ) );
+}
+
+TEST_CASE( "Classification Task Center reports cross-validation failures", "[classify][cv]" )
+{
+  cv::Mat features;
+  cv::Mat labels;
+  auto worker = std::make_unique<RsCvTask>(
+    features, labels,
+    []() -> std::unique_ptr<RsClassifierBackend> {
+      return std::make_unique<RsClassifierNormalBayes>();
+    } );
+
+  const auto failed = waitForTerminalTask( submitCrossValidation( worker ) );
+
+  REQUIRE( failed.status == sicnu::TaskStatus::Failed );
+  REQUIRE_FALSE( failed.errorMessage.isEmpty() );
 }
