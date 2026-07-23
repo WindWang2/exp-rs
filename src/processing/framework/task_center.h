@@ -10,10 +10,15 @@
 #include <QPointer>
 #include <memory>
 #include <string>
+#include <functional>
 
 #include "qgstaskmanager.h"
 #include "algorithm_engine.h"
 #include "jobs/job_types.h"
+
+namespace sicnu::operators {
+class RSOperatorContext;
+}
 
 namespace sicnu {
 
@@ -58,6 +63,10 @@ struct AlgorithmTaskInfo {
 class TaskCenter : public QObject {
     Q_OBJECT
 public:
+    using JobExecutor = std::function<Json::Value(const sicnu::jobs::JobRequest&,
+                                                   sicnu::operators::RSOperatorContext&)>;
+    using CancelHook = std::function<void()>;
+
     static TaskCenter& instance();
 
     long enqueueTask(const QString& algorithmId,
@@ -68,6 +77,9 @@ public:
 
     /// Submit a JobEngine request while keeping Task Center as the caller-facing seam.
     long submitJob(const sicnu::jobs::JobRequest& request);
+    long submitJob(const sicnu::jobs::JobRequest& request,
+                   JobExecutor executor,
+                   CancelHook onCancel = {});
 
     void attachQgsTask(long taskId, QgsTask* qgsTask);
 
@@ -103,6 +115,10 @@ private:
 
     void processNextQueuedTasks();
     QString substitutePlaceholders(const QString& val);
+    long submitJobImpl(const sicnu::jobs::JobRequest& request,
+                       JobExecutor executor,
+                       CancelHook onCancel);
+    void watchSubmittedJob(long taskId, std::string jobId);
 
     mutable QMutex m_mutex;
     QMap<long, AlgorithmTaskInfo> m_tasks;

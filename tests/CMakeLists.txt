@@ -2350,7 +2350,7 @@ sicnu_discover_tests(test_dialog_edge_cases)
 add_executable(test_raster_processing_dialog_base
   test_raster_processing_dialog_base.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
 )
@@ -2362,6 +2362,7 @@ target_link_libraries(test_raster_processing_dialog_base PRIVATE
   Qt6::Widgets
   sicnu_jobs
   sicnu_operators
+  sicnu_task_center
 
   Qt6::Concurrent
   qgis_core
@@ -2369,6 +2370,7 @@ target_link_libraries(test_raster_processing_dialog_base PRIVATE
 )
 target_include_directories(test_raster_processing_dialog_base PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_raster_processing_dialog_base)

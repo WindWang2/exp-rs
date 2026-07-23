@@ -70,6 +70,20 @@ long TaskCenter::enqueueTask(const QString& algorithmId,
 
 long TaskCenter::submitJob(const sicnu::jobs::JobRequest& request)
 {
+    return submitJobImpl(request, {}, {});
+}
+
+long TaskCenter::submitJob(const sicnu::jobs::JobRequest& request,
+                           JobExecutor executor,
+                           CancelHook onCancel)
+{
+    return submitJobImpl(request, std::move(executor), std::move(onCancel));
+}
+
+long TaskCenter::submitJobImpl(const sicnu::jobs::JobRequest& request,
+                               JobExecutor executor,
+                               CancelHook onCancel)
+{
     QVariantMap params;
     for (const auto& name : request.params.getMemberNames()) {
         const Json::Value& value = request.params[name];
@@ -82,7 +96,9 @@ long TaskCenter::submitJob(const sicnu::jobs::JobRequest& request)
     }
 
     const long taskId = enqueueTask(QString::fromStdString(request.algorithmId), params);
-    const std::string jobId = sicnu::jobs::JobEngine::instance().submit(request);
+    const std::string jobId = executor
+        ? sicnu::jobs::JobEngine::instance().submit(request, std::move(executor), std::move(onCancel))
+        : sicnu::jobs::JobEngine::instance().submit(request);
     if (jobId.empty()) {
         markTaskFailed(taskId, QStringLiteral("Task Center could not submit the job"));
         return taskId;
@@ -98,7 +114,13 @@ long TaskCenter::submitJob(const sicnu::jobs::JobRequest& request)
     }
 
     markTaskRunning(taskId);
-    std::thread([taskId, jobId]() {
+    watchSubmittedJob(taskId, jobId);
+    return taskId;
+}
+
+void TaskCenter::watchSubmittedJob(long taskId, std::string jobId)
+{
+    std::thread([taskId, jobId = std::move(jobId)]() {
         auto& engine = sicnu::jobs::JobEngine::instance();
         std::size_t forwardedLogCount = 0;
         double lastProgress = -2.0;
@@ -135,7 +157,6 @@ long TaskCenter::submitJob(const sicnu::jobs::JobRequest& request)
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
     }).detach();
-    return taskId;
 }
 
 void TaskCenter::processNextQueuedTasks()

@@ -138,6 +138,36 @@ TEST_CASE("TaskCenter - Preserves a submitted job result", "[processing][task_ce
     REQUIRE(info.logBuffer.join('\n').contains(QStringLiteral("tracer completed")));
 }
 
+TEST_CASE("TaskCenter - Executes a callable job through the same task seam", "[processing][task_center][callable]") {
+    auto& engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    const auto taskCountBefore = sicnu::TaskCenter::instance().allTasks().size();
+
+    sicnu::jobs::JobRequest request;
+    request.algorithmId = "callable:dialog-test";
+    request.source = "dialog";
+
+    const long taskId = sicnu::TaskCenter::instance().submitJob(
+        request,
+        [](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext&) {
+            Json::Value result(Json::objectValue);
+            result["output"] = "/tmp/callable-task-center-result.tif";
+            return result;
+        });
+
+    REQUIRE(taskId > 0);
+    REQUIRE(sicnu::TaskCenter::instance().allTasks().size() == taskCountBefore + 1);
+    engine.waitUntilIdleForTests();
+    for (int attempt = 0; attempt < 20
+                      && sicnu::TaskCenter::instance().getTaskInfo(taskId).status == sicnu::TaskStatus::Running;
+         ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    const auto info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
+    REQUIRE(info.status == sicnu::TaskStatus::Completed);
+    REQUIRE(info.resultPayload["output"].asString() == "/tmp/callable-task-center-result.tif");
+}
+
 TEST_CASE("TaskCenter - Cancels the underlying submitted job", "[processing][task_center]") {
     auto& engine = sicnu::jobs::JobEngine::instance();
     engine.shutdownForTests();
