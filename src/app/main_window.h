@@ -43,6 +43,7 @@ class QgsMapToolRotateFeature;
 class QgsMapToolScaleFeature;
 
 namespace sicnu {
+class DataManagerPanel;
 namespace app {
 class ProjectContext;
 }
@@ -329,6 +330,7 @@ private:
     QgsBrowserGuiModel *m_browserModel = nullptr;
     QgsDockWidget *m_processingDock = nullptr;
     QgsDockWidget *m_overviewDock = nullptr;
+    sicnu::DataManagerPanel *m_dataManagerPanel = nullptr;
     QgsMapOverviewCanvas *m_overviewCanvas = nullptr;
     QgsDockWidget *m_identifyDock = nullptr;
     QgsDockWidget *m_spectralDock = nullptr;

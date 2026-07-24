@@ -306,19 +306,21 @@ application target builds successfully.
 - Modify `src/app/CMakeLists.txt`
 - Modify `tests/CMakeLists.txt`
 
-- [ ] Write minimal offscreen tests for:
+- [x] Write minimal offscreen tests for:
   - one row per Data Asset, not per Display Layer;
   - status and temporary/persistent indicators;
   - double-click emits a request to display an Asset ID;
   - remove action invokes unload planning rather than layer removal;
   - panel selection does not change renderer state;
   - reference count reflects Display Layer leases.
-- [ ] Implement the panel as a projection of immutable Data Manager snapshots.
-- [ ] Keep all dialogs and user confirmation in the UI shell.
-- [ ] Wire double-click/drag intent to Display Manager, not Data Manager.
-- [ ] Keep the existing layer tree visible and semantically separate.
+- [x] Implement the panel as a projection of immutable Data Manager snapshots.
+- [x] Keep all dialogs and user confirmation in the UI shell.
+- [x] Wire double-click/drag intent to Display Manager, not Data Manager.
+- [x] Keep the existing layer tree visible and semantically separate.
 
-**Verification:** Run `test_data_manager_panel` offscreen and manually inspect light/dark theme behavior.
+**Verification:** `QT_QPA_PLATFORM=offscreen ./build/tests/test_data_manager_panel`
+passes 37 assertions in 6 test cases, and the `sicnu_geo_rs` application target
+builds successfully. Light/dark theme behavior to be inspected manually.
 
 **Commit:** `feat(ui): add project data manager panel`
 

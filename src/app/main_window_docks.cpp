@@ -4,6 +4,9 @@
 
 #include "layer_manager.h"
 #include "log_panel.h"
+#include "panels/data_manager_panel.h"
+#include "project_context.h"
+#include "data/data_manager.h"
 #include "shell/job_engine_qt_bridge.h"
 #include "shell/processing_job_adapter.h"
 #include "shell/ribbon_controller.h"
@@ -16,6 +19,7 @@
 
 #include <QVBoxLayout>
 #include <QMenu>
+#include <QMessageBox>
 #include <QTextBrowser>
 #include <QAction>
 #include <QFileInfo>
@@ -78,6 +82,63 @@ void QgisDesktopWindow::setupDockWidgets()
     // Tabify the left dock widgets
     tabifyDockWidget(m_layersDock, m_browserDock);
     m_layersDock->raise();
+
+    // Project Data Manager panel — asset catalog, separate from the layer tree.
+    // Double-click asks the Display Manager for a layer; remove runs unload
+    // planning with confirmation here in the UI shell.
+    if ( m_projectContext )
+    {
+        m_dataManagerPanel =
+            new sicnu::DataManagerPanel( &m_projectContext->dataManager(), this );
+        addDockWidget( Qt::LeftDockWidgetArea, m_dataManagerPanel );
+        tabifyDockWidget( m_layersDock, m_dataManagerPanel );
+
+        connect( m_dataManagerPanel, &sicnu::DataManagerPanel::displayRequested,
+                 this, [this]( sicnu::data::AssetId assetId ) {
+            if ( !m_projectContext )
+                return;
+            const auto added = m_projectContext->displayManager().addLayer(
+                m_projectContext->mainViewId(), assetId );
+            if ( !added )
+            {
+                QMessageBox::warning(
+                    this, tr( "Add to Display" ),
+                    tr( "The data asset could not be displayed." ) );
+            }
+        } );
+
+        connect( m_dataManagerPanel, &sicnu::DataManagerPanel::unloadRequested,
+                 this, [this]( sicnu::data::AssetId assetId ) {
+            if ( !m_projectContext )
+                return;
+            sicnu::data::DataManager &dataManager = m_projectContext->dataManager();
+            const sicnu::data::UnloadPlan plan = dataManager.planUnload( assetId );
+
+            QString detail = tr( "Unload this data asset from the project?" );
+            if ( !plan.activeLeases().isEmpty() )
+            {
+                detail = tr( "This asset is referenced by %1 display/processing "
+                             "lease(s). Unloading will remove those presentations.\n\n"
+                             "Continue with cascade unload?" )
+                             .arg( plan.activeLeases().size() );
+            }
+            const auto choice = QMessageBox::question(
+                this, tr( "Unload Data Asset" ), detail,
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+            if ( choice != QMessageBox::Yes )
+                return;
+
+            const sicnu::data::UnloadPlan confirmed =
+                plan.activeLeases().isEmpty() ? plan : plan.confirmedCascade();
+            const auto unloaded = dataManager.unload( confirmed );
+            if ( !unloaded )
+            {
+                QMessageBox::warning(
+                    this, tr( "Unload Data Asset" ),
+                    tr( "The data asset could not be unloaded." ) );
+            }
+        } );
+    }
 
     // Processing Toolbox Panel (Right, with Overview)
     m_processingDock = new QgsDockWidget("Processing Toolbox", this);

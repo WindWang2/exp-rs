@@ -1,0 +1,232 @@
+#include <catch2/catch_test_macros.hpp>
+
+#include <QApplication>
+#include <QFileInfo>
+#include <QSignalSpy>
+
+#include <qgsapplication.h>
+#include <qgslayertree.h>
+#include <qgsmapcanvas.h>
+#include <qgsmaplayer.h>
+#include <qgsmaplayerstore.h>
+#include <qgsrasterlayer.h>
+
+#include "app/display/qgis_display_manager.h"
+#include "app/panels/data_manager_panel.h"
+#include "data/data_manager.h"
+
+using sicnu::data::AssetId;
+using sicnu::data::AssetState;
+using sicnu::data::DataManager;
+using sicnu::data::PersistencePolicy;
+using sicnu::data::RegisterRequest;
+using sicnu::data::SourceDescriptor;
+using sicnu::display::DisplayViewId;
+using sicnu::display::DisplayViewSpec;
+using sicnu::display::QgisDisplayManager;
+
+namespace
+{
+
+void ensureQgisApplication()
+{
+  if ( QApplication::instance() )
+    return;
+
+  static int argc = 1;
+  static char applicationName[] = "test_data_manager_panel";
+  static char *argv[] = { applicationName, nullptr };
+  static auto *application = new QgsApplication( argc, argv, true );
+  ( void ) application;
+  QgsApplication::initQgis();
+}
+
+QString fixturePath( const QString &relative )
+{
+  const QString here = QFileInfo( __FILE__ ).absolutePath();
+  return QFileInfo( here + QStringLiteral( "/../data/" ) + relative ).absoluteFilePath();
+}
+
+SourceDescriptor gdalSource( const QString &path )
+{
+  SourceDescriptor source;
+  source.providerKey = QStringLiteral( "gdal" );
+  source.canonicalSource = path;
+  return source;
+}
+
+AssetId registerRaster( DataManager &manager, const QString &path,
+                        PersistencePolicy persistence = PersistencePolicy::ProjectPersistent )
+{
+  RegisterRequest request;
+  request.source = gdalSource( path );
+  request.persistence = persistence;
+  const auto registered = manager.registerSource( request );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+  return registered.assetId;
+}
+
+DisplayViewId createView( QgisDisplayManager &manager, QgsMapCanvas &canvas,
+                          QgsLayerTree &tree, QgsMapLayerStore &store )
+{
+  DisplayViewSpec spec;
+  spec.canvas = &canvas;
+  spec.layerTree = &tree;
+  spec.layerStore = &store;
+  const auto created = manager.createView( spec );
+  REQUIRE( created );
+  return created.value();
+}
+
+} // namespace
+
+TEST_CASE( "The panel shows one row per Data Asset, not per Display Layer",
+           "[data_manager_panel]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgsMapCanvas canvas;
+  QgsLayerTree layerTree;
+  QgsMapLayerStore layerStore;
+  QgisDisplayManager displayManager( &dataManager );
+  const DisplayViewId viewId = createView( displayManager, canvas, layerTree, layerStore );
+
+  const AssetId first =
+    registerRaster( dataManager, fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ) );
+  const AssetId second =
+    registerRaster( dataManager, fixturePath( QStringLiteral( "phr_xs.tif" ) ) );
+
+  // Two Display Layers present the first asset; a separate asset is also shown.
+  REQUIRE( displayManager.addLayer( viewId, first ) );
+  REQUIRE( displayManager.addLayer( viewId, first ) );
+  REQUIRE( displayManager.addLayer( viewId, second ) );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+
+  // The panel projects assets, not display layers: two assets, two rows.
+  CHECK( panel.rowCount() == 2 );
+}
+
+TEST_CASE( "Rows show status and persistence indicators", "[data_manager_panel]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+
+  const AssetId ready = registerRaster(
+    dataManager, fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ),
+    PersistencePolicy::ProjectPersistent );
+  const AssetId missing = registerRaster(
+    dataManager, fixturePath( QStringLiteral( "does-not-exist.tif" ) ),
+    PersistencePolicy::SessionTemporary );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+
+  CHECK( panel.rowText( ready, 2 ) == QStringLiteral( "Ready" ) );
+  CHECK( panel.rowText( ready, 3 ) == QStringLiteral( "Persistent" ) );
+  CHECK( panel.rowText( missing, 2 ) == QStringLiteral( "Missing" ) );
+  CHECK( panel.rowText( missing, 3 ) == QStringLiteral( "Session" ) );
+}
+
+TEST_CASE( "Double-clicking a row emits a display request for the Asset ID",
+           "[data_manager_panel]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  const AssetId id =
+    registerRaster( dataManager, fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ) );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+  QSignalSpy displaySpy( &panel, &sicnu::DataManagerPanel::displayRequested );
+  QSignalSpy unloadSpy( &panel, &sicnu::DataManagerPanel::unloadRequested );
+
+  // The double-click / activation intent carries the asset to the Display Manager.
+  panel.activateAsset( id );
+
+  REQUIRE( displaySpy.count() == 1 );
+  CHECK( displaySpy.first().first().value<AssetId>() == id );
+  // Activation must not be confused with the remove intent.
+  CHECK( unloadSpy.count() == 0 );
+}
+
+TEST_CASE( "The remove action emits an unload request, not a layer removal",
+           "[data_manager_panel]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgsMapCanvas canvas;
+  QgsLayerTree layerTree;
+  QgsMapLayerStore layerStore;
+  QgisDisplayManager displayManager( &dataManager );
+  const DisplayViewId viewId = createView( displayManager, canvas, layerTree, layerStore );
+
+  const AssetId id =
+    registerRaster( dataManager, fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ) );
+  const auto displayed = displayManager.addLayer( viewId, id );
+  REQUIRE( displayed );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+  QSignalSpy unloadSpy( &panel, &sicnu::DataManagerPanel::unloadRequested );
+
+  panel.requestRemove( id );
+
+  REQUIRE( unloadSpy.count() == 1 );
+  CHECK( unloadSpy.first().first().value<AssetId>() == id );
+
+  // The panel must not remove the display layer or touch the data itself.
+  CHECK( displayManager.layer( displayed.value() ).has_value() );
+  CHECK( dataManager.asset( id ).has_value() );
+}
+
+TEST_CASE( "Selecting a row does not change renderer state", "[data_manager_panel]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgsMapCanvas canvas;
+  QgsLayerTree layerTree;
+  QgsMapLayerStore layerStore;
+  QgisDisplayManager displayManager( &dataManager );
+  const DisplayViewId viewId = createView( displayManager, canvas, layerTree, layerStore );
+
+  const AssetId id =
+    registerRaster( dataManager, fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ) );
+  const auto displayed = displayManager.addLayer( viewId, id );
+  REQUIRE( displayed );
+
+  QgsMapLayer *layer = displayManager.mapLayer( displayed.value() );
+  REQUIRE( layer != nullptr );
+  layer->setOpacity( 0.33 );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+  panel.selectAsset( id );
+
+  // Selection is a pure projection read: the display layer's renderer/opacity is
+  // untouched.
+  CHECK( layer->opacity() == 0.33 );
+  CHECK( displayManager.mapLayer( displayed.value() ) == layer );
+}
+
+TEST_CASE( "The reference count reflects Display Layer view leases",
+           "[data_manager_panel]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgsMapCanvas canvas;
+  QgsLayerTree layerTree;
+  QgsMapLayerStore layerStore;
+  QgisDisplayManager displayManager( &dataManager );
+  const DisplayViewId viewId = createView( displayManager, canvas, layerTree, layerStore );
+
+  const AssetId id =
+    registerRaster( dataManager, fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ) );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+  CHECK( panel.rowText( id, 4 ) == QStringLiteral( "0" ) );
+
+  REQUIRE( displayManager.addLayer( viewId, id ) );
+  panel.refresh();
+  CHECK( panel.rowText( id, 4 ) == QStringLiteral( "1" ) );
+
+  REQUIRE( displayManager.addLayer( viewId, id ) );
+  panel.refresh();
+  CHECK( panel.rowText( id, 4 ) == QStringLiteral( "2" ) );
+}
