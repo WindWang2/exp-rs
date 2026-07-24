@@ -403,23 +403,76 @@ assertions in 3 test cases; `test_data_manager` (200/27),
 - Update historical display specification with a supersession note
 - Remove dead compatibility code only when no callers remain
 
-- [ ] Add an end-to-end offscreen test covering one asset, two independently styled layers, one layer removal, unload rejection, project round trip, missing source, and relocation.
-- [ ] Run existing layer, vector editing, project, display stretch, classification workspace, georeferencing workspace, and Task Center tests.
-- [ ] Verify standard QGIS can parse the saved main-view layer definitions.
+- [x] Add an end-to-end offscreen test covering one asset, two independently styled layers, one layer removal, unload rejection, project round trip, missing source, and relocation.
+- [x] Run existing layer, vector editing, project, display stretch, classification workspace, georeferencing workspace, and Task Center tests.
+- [x] Verify standard QGIS can parse the saved main-view layer definitions.
 - [x] Record that ADR-0009 supersedes the old display specification's data-entity framing while retaining renderer-pipeline guidance.
-- [ ] Document `src/data`, Project Context, and Display Manager in the repository layout.
-- [ ] Confirm the eight specification acceptance behaviors.
-- [ ] Record remaining direct layer ownership paths as follow-up work with exact files.
+- [x] Document `src/data`, Project Context, and Display Manager in the repository layout.
+- [x] Confirm the eight specification acceptance behaviors.
+- [x] Record remaining direct layer ownership paths as follow-up work with exact files.
 
-**Verification:**
+**Verification:** `test_data_phase1_acceptance` passes 52 assertions in 1
+end-to-end case. The eight specification acceptance behaviors are each covered:
 
-```bash
-cmake --build build -j2
-QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure \
-  -R "data_manager|data_source|qgis_display|data_project|layers|layer_tree|vector|display_stretch"
-```
+1. One raster opened twice → one Data Asset + two independently styled Display
+   Layers (acceptance test step 1; `test_qgis_display_manager`).
+2. Removing one Display Layer leaves the Data Asset registered (step 2;
+   `test_layer_manager_data_context`).
+3. Unload of a referenced asset is rejected until cascade is confirmed (step 3;
+   `test_data_manager`).
+4. Raster and vector share Data Asset identity; vector editing allows one Edit
+   Lease (`test_data_manager` edit-lease cases; `test_qgis_display_manager`
+   read-only integration).
+5. Save/reopen preserves Asset IDs, display relationships, order, and style
+   (step 4; `test_data_project_roundtrip`).
+6. Standard QGIS layers are auto-adopted without losing style or tree
+   placement (`test_data_project_roundtrip`; `test_layer_adoption_safety_net`).
+7. Missing sources survive project load and recover through relocation (step 5;
+   `test_data_project_roundtrip` missing case).
+8. `sicnu_data` has no Widgets/canvas dependency (CMake link assertion in
+   `src/data/CMakeLists.txt`) and new load paths route through the Project
+   Context instead of treating `QgsProject::instance()` as the data authority
+   (Tasks 6 and 11).
+
+The saved `.qgs` keeps a well-formed standard `projectlayers` element alongside
+the `sicnuDataManager` extension, so standard QGIS parses the main-view layer
+definitions (acceptance test step 4). Existing suites pass offscreen:
+`test_data_manager` (200/27), `test_data_source_providers` (89/10),
+`test_qgis_display_manager` (143/10), `test_data_project_roundtrip` (102/4),
+`test_data_manager_panel` (37/6), `test_layer_adoption_safety_net` (21/3),
+`test_layer_manager_data_context` (36/5), `test_layers` (11/3),
+`test_layer_tree_bridge` (11/3), `test_vector_properties` (15/2),
+`test_display_stretch` (41/12), `test_classification_project` (29/3),
+`test_task_center` (15/3), `test_georef_session_state` (16/3),
+`test_classification_window`, `test_georef_window_rpc_mode`, and
+`test_georef_task_list`.
+
+Pre-existing failures unrelated to this migration (present before Phase 1):
+`test_raster_ndvi` / `test_algorithm_schema` do not compile
+(`algorithm_help_catalog.h` include path); `test_georef_window` /
+`test_georef_dual_window` fail to link (their CMake omits
+`job_engine_qt_bridge.cpp` / `dialog_utils.cpp`); `test_task_center_dock` hangs
+offscreen; `test_vector_warper_NOT_BUILT` is an unbuilt ctest placeholder. These
+belong to the processing/georef/Task-Center areas, not the data/display seam.
 
 **Commit:** `test(data): close phase one data display separation`
+
+### Remaining direct layer-ownership paths (follow-up, exact files)
+
+- Attribute-table and feature-form edit entry points do not acquire the Edit
+  Lease: `src/app/qgis_app_facade.cpp`, `src/app/qgsguivectorlayertools.cpp`,
+  `src/app/qgsattributetabledialog.cpp`.
+- Georeferencer session-workspace layer stores (`mLayerStore->addMapLayer`),
+  not the main project: `src/app/georeferencer/qgsgeoreferencermainwindow.cpp`,
+  `src/app/georeferencer/qgsgeoref_shell_window.cpp`.
+- STAC `/vsicurl/` remote COG (Wave 5 remote-map providers):
+  `src/app/dialogs/stac_browser_dialog.cpp`.
+- OBIA and georeferencer raster outputs currently adopted via the safety net
+  (could be made explicit later): `src/app/obia/rs_obia_main_window.cpp`,
+  `src/app/georeferencer/qgsgeoref_shell_window.cpp`.
+- `LayerManager` retains active-layer / properties-dialog / tree-helper facade
+  behavior until remaining callers migrate:
+  `src/app/layer_manager.h`, `src/app/layer_manager.cpp`.
 
 ## Deferred Follow-Up Order
 

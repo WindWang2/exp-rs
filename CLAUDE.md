@@ -13,6 +13,8 @@ Pure C++ Remote Sensing analysis platform built on the QGIS engine.
 See [docs/repo-layout.md](docs/repo-layout.md) for the full directory map.
 
 *   `src/app/main.cpp`: Pure C++ Qt6 desktop application (QgisDesktopWindow).
+*   `src/data/`: `sicnu_data` — project Data Manager (Data Asset identity, revision, leases, relocation, GDAL/OGR source providers). No Qt Widgets / `qgis_gui` dependency (ADR-0009).
+*   `src/app/display/`, `src/app/project_context.*`: `QgisDisplayManager` (independent `QgsMapLayer` Display Layers) and the per-project `ProjectContext` composition root.
 *   `src/core/`: QGIS core library — layers, rendering, CRS, geometry, providers, expressions.
 *   `src/gui/`: QGIS GUI library — map canvas, map tools, layer tree, dialogs.
 *   `src/analysis/`: Analysis libraries — classification, georeferencing, segmentation.

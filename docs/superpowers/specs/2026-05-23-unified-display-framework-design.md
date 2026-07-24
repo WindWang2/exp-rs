@@ -1,5 +1,7 @@
 # Unified Display Framework (QGIS Architecture Port)
 
+> **Architecture note (2026-07-24):** [ADR-0009](../../adr/0009-separate-data-assets-from-display-layers.md) supersedes this document's treatment of `QgsMapLayer` as the data entity. Its QGIS renderer, map-settings, map-tool, and asynchronous rendering guidance remains applicable; project data identity now belongs to the Data Manager, while each `QgsMapLayer` is an independent Display Layer adapter.
+
 ## 1. Overview
 This design implements a unified geospatial display framework for the Antigravity RS platform, strictly adhering to the architectural patterns found in the QGIS source code. The goal is to move from a monolithic, UI-blocking canvas to a decoupled, multi-threaded rendering pipeline capable of handling large-scale raster and vector datasets smoothly.
 

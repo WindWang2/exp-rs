@@ -51,6 +51,17 @@ Design note: [superpowers/specs/2026-07-19-repo-layout-reorg-design.md](superpow
 
 Runtime resolvers try `refs/qgis` first, then legacy `qgis_ref` and install `share/.../qgis_ref`.
 
+## `src/` — data/display separation (Phase 1, ADR-0009)
+
+| Path | Role |
+|------|------|
+| `src/data/` | `sicnu_data` — the project Data Manager: Data Asset identity, revision, leases, relocation, and GDAL/OGR source providers. Links `Qt6::Core` + `GDAL::GDAL` only; **no Qt Widgets / `qgis_gui`** (enforced by a CMake assertion). See `docs/superpowers/specs/2026-07-24-data-manager-architecture-spec.md`. |
+| `src/app/display/` | `QgisDisplayManager` — owns Display Views and independent `QgsMapLayer`-backed Display Layers, one per presentation, each holding an Asset view lease. Built into `sicnu_qgis_display`. |
+| `src/app/project_context.*` | `ProjectContext` — the per-project composition root owning one Data Manager + one Display Manager + the adoption safety net for legacy QGIS layers. |
+| `src/app/data_project_serializer.*` | QGIS project (`.qgs/.qgz`) round trip: SICNU extension XML + standard-layer adoption. |
+| `src/app/panels/data_manager_panel.*` | Data Manager asset-catalog dock, a read-only projection of asset snapshots, separate from the layer tree. |
+| `src/app/layer_manager.*` | Temporary compatibility facade routing legacy `loadRasterLayer`/`loadVectorLayer` through the Project Context. |
+
 ## Icons symlink
 
 `resources/icons` → `docs/design/ui/svg-icons/icons` (used by `resources/icons.qrc`).

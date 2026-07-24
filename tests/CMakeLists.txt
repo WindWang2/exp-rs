@@ -2497,3 +2497,23 @@ target_include_directories(test_layer_adoption_safety_net PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_layer_adoption_safety_net)
+
+# Phase 1 first-deliverable acceptance — end-to-end data/display separation
+add_executable(test_data_phase1_acceptance
+  test_data_phase1_acceptance.cpp
+)
+target_link_libraries(test_data_phase1_acceptance PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Xml
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+)
+target_include_directories(test_data_phase1_acceptance PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_data_phase1_acceptance)
