@@ -44,6 +44,9 @@ class QgsMapToolScaleFeature;
 
 namespace sicnu {
 class DataManagerPanel;
+namespace data {
+class AssetId;
+}
 namespace app {
 class ProjectContext;
 }
@@ -274,6 +277,15 @@ private:
 
     bool confirmSaveEdits(QgsVectorLayer *vl);
     bool checkUnsavedChanges();
+    /** Acquire the exclusive Edit Lease for an Asset-backed vector layer. */
+    bool acquireEditLease(QgsVectorLayer *vlayer, bool showConflictWarning = true);
+    /** Commit the Edit Lease (advances Asset Revision, refreshes other layers). */
+    void commitEditLease(QgsVectorLayer *vlayer);
+    /** Release the Edit Lease without advancing the revision. */
+    void rollbackEditLease(QgsVectorLayer *vlayer);
+    /** Set every Display Layer of an asset read-only except the edit owner. */
+    void setAssetLayersReadOnly(const sicnu::data::AssetId &assetId,
+                                QgsVectorLayer *exceptLayer, bool readOnly);
     void applyDarkPalette();
 
     // QGIS C++ components

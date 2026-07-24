@@ -714,3 +714,117 @@ TEST_CASE( "Relocating an unknown asset is rejected without side effects",
   CHECK( result.diagnostics().first().code == QStringLiteral( "relocate.unknown_asset" ) );
   CHECK( manager->assets().isEmpty() );
 }
+
+namespace
+{
+
+AssetId registerOneVector( DataManager *manager )
+{
+  RegisterRequest request;
+  request.source = memorySource( QStringLiteral( "memory-vector" ), QStringLiteral( "vector" ) );
+  const auto registered = manager->registerSource( request );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+  return registered.assetId;
+}
+
+} // namespace
+
+TEST_CASE( "Only one Edit Lease may exist per Vector Asset", "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId id = registerOneVector( manager.get() );
+
+  auto firstEdit = manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::Edit } );
+  REQUIRE( firstEdit );
+
+  // A second Edit Lease on the same asset is rejected.
+  const auto secondEdit = manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::Edit } );
+  REQUIRE_FALSE( secondEdit );
+  REQUIRE( secondEdit.diagnostics().size() == 1 );
+  CHECK( secondEdit.diagnostics().first().code ==
+         QStringLiteral( "asset.edit_lease_conflict" ) );
+
+  // View and Task leases are unconstrained by the Edit exclusivity.
+  CHECK( manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::View } ) );
+  CHECK( manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::Task } ) );
+
+  // After the Edit Lease is released, editing can begin again.
+  AssetLease released = firstEdit.take();
+  CHECK( released.release() == LeaseOutcome::Released );
+  CHECK( manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::Edit } ) );
+}
+
+TEST_CASE( "Committing an edit advances the revision and emits one change event",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId id = registerOneVector( manager.get() );
+
+  int changeEvents = 0;
+  AssetId changedId;
+  QObject::connect( manager.get(), &DataManager::assetChanged, [&]( AssetId emitted ) {
+    ++changeEvents;
+    changedId = emitted;
+  } );
+
+  AssetLease editLease = manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::Edit } ).take();
+  CHECK( manager->leases( id ).size() == 1 );
+
+  const auto committed = manager->commitEdit( id );
+  REQUIRE( committed );
+
+  // The revision advanced and the Edit Lease was released.
+  const auto asset = manager->asset( id );
+  REQUIRE( asset.has_value() );
+  CHECK( asset->revision() == AssetRevision::initial().next() );
+  CHECK( manager->leases( id ).isEmpty() );
+
+  CHECK( changeEvents == 1 );
+  CHECK( changedId == id );
+
+  // Editing can begin again after the commit released the lease.
+  CHECK( manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::Edit } ) );
+}
+
+TEST_CASE( "Rolling back an edit releases the lease without advancing the revision",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId id = registerOneVector( manager.get() );
+
+  int changeEvents = 0;
+  QObject::connect( manager.get(), &DataManager::assetChanged, [&]( AssetId ) {
+    ++changeEvents;
+  } );
+
+  AssetLease editLease = manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::Edit } ).take();
+  const auto rolledBack = manager->rollbackEdit( id );
+  REQUIRE( rolledBack );
+
+  const auto asset = manager->asset( id );
+  REQUIRE( asset.has_value() );
+  CHECK( asset->revision() == AssetRevision::initial() );
+  CHECK( manager->leases( id ).isEmpty() );
+  CHECK( changeEvents == 0 );
+
+  // Editing can begin again after the rollback released the lease.
+  CHECK( manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::Edit } ) );
+}
+
+TEST_CASE( "Commit or rollback without an active Edit Lease is rejected",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId id = registerOneVector( manager.get() );
+
+  const auto committed = manager->commitEdit( id );
+  REQUIRE_FALSE( committed );
+  CHECK( committed.diagnostics().first().code == QStringLiteral( "asset.no_edit_lease" ) );
+
+  const auto rolledBack = manager->rollbackEdit( id );
+  REQUIRE_FALSE( rolledBack );
+  CHECK( rolledBack.diagnostics().first().code == QStringLiteral( "asset.no_edit_lease" ) );
+
+  // The revision is untouched by the rejected operations.
+  CHECK( manager->asset( id )->revision() == AssetRevision::initial() );
+}

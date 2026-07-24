@@ -15,7 +15,10 @@
 #include <qgslayertreegroup.h>
 
 #include "layer_manager.h"
+#include "project_context.h"
 #include "qgsclipboard.h"
+
+#include "data/data_manager.h"
 
 #include "qgsmaptooladdfeature.h"
 #include "qgsmaptooladdpart.h"
@@ -257,15 +260,27 @@ void QgisDesktopWindow::toggleEditing()
                 tr("Do you want to save changes to %1?").arg(vlayer->name()),
                 QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
             if (res == QMessageBox::Cancel) return;
-            if (res == QMessageBox::Save) vlayer->commitChanges();
-            else vlayer->rollBack();
+            if (res == QMessageBox::Save) {
+                if (vlayer->commitChanges())
+                    commitEditLease(vlayer);
+            }
+            else {
+                vlayer->rollBack();
+                rollbackEditLease(vlayer);
+            }
         }
         else
         {
             vlayer->rollBack();
+            rollbackEditLease(vlayer);
         }
         vlayer->triggerRepaint();
     } else {
+        // Acquire the exclusive Edit Lease before entering edit mode. A Display
+        // Layer backed by a Data Asset may only be edited by one view at a time;
+        // layers without an Asset ID (external/standard) keep QGIS behavior.
+        if (!acquireEditLease(vlayer))
+            return;
         vlayer->startEditing();
     }
 
@@ -283,6 +298,12 @@ void QgisDesktopWindow::saveEdits()
     if (!vlayer->commitChanges()) {
         QMessageBox::warning(this, tr("Save Edits"),
             tr("Failed to save edits: %1").arg(vlayer->commitErrors().join("\n")));
+    }
+    else {
+        // Committing advances the Asset Revision and releases the Edit Lease;
+        // re-acquire it because saving stays in edit mode.
+        commitEditLease(vlayer);
+        ( void ) acquireEditLease(vlayer, /*showConflictWarning=*/false);
     }
     vlayer->startEditing();
     statusBar()->showMessage(tr("Edits saved for %1").arg(vlayer->name()), 3000);
@@ -348,4 +369,100 @@ void QgisDesktopWindow::openAttributeTable()
     QgsAttributeTableDialog *dlg = new QgsAttributeTableDialog(vlayer, QgsAttributeTableFilterModel::ShowAll, this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     dlg->show();
+}
+
+// --- Edit Lease helpers -----------------------------------------------------
+// A Display Layer backed by a Data Asset carries its Asset ID as a custom
+// property. Editing such a layer requires the exclusive Edit Lease from the
+// Data Manager; layers without an Asset ID keep native QGIS editing behavior.
+//
+// The layer that acquires the Edit Lease is the edit owner and stays editable.
+// Every other Display Layer of the same asset is read-only for the duration of
+// the edit session, per the one-edit-lease-per-asset rule.
+
+void QgisDesktopWindow::setAssetLayersReadOnly( const sicnu::data::AssetId &assetId,
+                                                QgsVectorLayer *exceptLayer,
+                                                bool readOnly )
+{
+    if ( assetId.isNull() )
+        return;
+
+    for ( QgsMapLayer *layer : QgsProject::instance()->mapLayers() )
+    {
+        auto *otherVector = qobject_cast<QgsVectorLayer *>( layer );
+        if ( !otherVector || otherVector == exceptLayer )
+            continue;
+        const auto otherAsset = sicnu::data::AssetId::fromString(
+            otherVector->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() );
+        if ( otherAsset && *otherAsset == assetId )
+            otherVector->setReadOnly( readOnly );
+    }
+}
+
+bool QgisDesktopWindow::acquireEditLease( QgsVectorLayer *vlayer,
+                                          bool showConflictWarning )
+{
+    if ( !m_projectContext || !vlayer )
+        return true; // No data context: nothing to lease against.
+
+    const auto assetId = sicnu::data::AssetId::fromString(
+        vlayer->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() );
+    if ( !assetId )
+        return true; // External / standard layer: native QGIS editing.
+
+    sicnu::data::DataManager &dataManager = m_projectContext->dataManager();
+    const auto asset = dataManager.asset( *assetId );
+    if ( !asset )
+        return true;
+
+    auto acquired = dataManager.acquire(
+        sicnu::data::AssetRef{ *assetId, asset->revision() },
+        sicnu::data::AssetUse{ sicnu::data::LeaseKind::Edit,
+                               QStringLiteral( "Vector edit session" ) } );
+    if ( acquired )
+    {
+        // This layer becomes the edit owner; all other Display Layers of the
+        // same asset become read-only.
+        setAssetLayersReadOnly( *assetId, vlayer, true );
+        return true;
+    }
+
+    if ( showConflictWarning )
+    {
+        QMessageBox::warning(
+            this, tr( "Start Editing" ),
+            tr( "%1 is being edited in another view.\n"
+                "Commit or roll back that edit session before editing here." )
+                .arg( vlayer->name() ) );
+    }
+    return false;
+}
+
+void QgisDesktopWindow::commitEditLease( QgsVectorLayer *vlayer )
+{
+    if ( !m_projectContext || !vlayer )
+        return;
+
+    const auto assetId = sicnu::data::AssetId::fromString(
+        vlayer->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() );
+    if ( !assetId )
+        return;
+
+    ( void ) m_projectContext->dataManager().commitEdit( *assetId );
+    // The edit session ended; other Display Layers of the asset are editable again.
+    setAssetLayersReadOnly( *assetId, nullptr, false );
+}
+
+void QgisDesktopWindow::rollbackEditLease( QgsVectorLayer *vlayer )
+{
+    if ( !m_projectContext || !vlayer )
+        return;
+
+    const auto assetId = sicnu::data::AssetId::fromString(
+        vlayer->customProperty( QStringLiteral( "sicnu/assetId" ) ).toString() );
+    if ( !assetId )
+        return;
+
+    ( void ) m_projectContext->dataManager().rollbackEdit( *assetId );
+    setAssetLayersReadOnly( *assetId, nullptr, false );
 }

@@ -316,6 +316,15 @@ QgisDisplayManager::addLayer(DisplayViewId viewId, data::AssetId assetId,
   }
   qgisLayer.release();
 
+  // A Vector Asset being edited in another view is read-only here: only the
+  // Edit Lease owner may modify features. The owning layer is the one that
+  // acquired the Edit Lease; every other Display Layer of the same asset stays
+  // read-only until the edit session commits or rolls back.
+  if (auto *vectorLayer = qobject_cast<QgsVectorLayer *>(storedLayer)) {
+    if (m_impl->dataManager->hasActiveEditLease(assetId))
+      vectorLayer->setReadOnly(true);
+  }
+
   if (options.insertOnTop)
     viewRecord->layerTree->insertLayer(0, storedLayer);
   else

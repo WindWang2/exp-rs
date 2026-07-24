@@ -70,6 +70,16 @@ class DataManager : public QObject
     Result<AssetLease> acquire( const AssetRef &asset, const AssetUse &use );
     int leaseCount( AssetId id ) const;
     QVector<LeaseRef> leases( AssetId id ) const;
+    /// True while an active Edit Lease exists for the asset (some view is editing).
+    bool hasActiveEditLease( AssetId id ) const;
+
+    /// Commits the active Edit Lease for a Vector Asset: advances the asset
+    /// revision, releases the Edit Lease, and emits one assetChanged so other
+    /// Display Layers refresh. Fails if no active Edit Lease exists.
+    Result<void> commitEdit( AssetId id );
+    /// Rolls back the active Edit Lease without advancing the revision. The Edit
+    /// Lease is released and no change event is emitted.
+    Result<void> rollbackEdit( AssetId id );
 
     UnloadPlan planUnload( AssetId id ) const;
     Result<void> unload( const UnloadPlan &confirmedPlan );

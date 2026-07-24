@@ -369,6 +369,25 @@ Result<AssetLease> DataManager::acquire( const AssetRef &asset, const AssetUse &
                   DiagnosticSeverity::Error } );
   }
 
+  // One Vector Asset may grant at most one Edit Lease at a time. View and Task
+  // leases are unconstrained; editing is exclusive so that uncommitted QGIS
+  // edit buffers never become a cross-view collaboration mechanism.
+  if ( use.kind == LeaseKind::Edit )
+  {
+    for ( const Impl::LeaseRecord &lease : m_impl->leases )
+    {
+      if ( lease.control->assetId == asset.id && lease.control->active &&
+           lease.control->kind == LeaseKind::Edit )
+      {
+        return Result<AssetLease>::failure(
+          Diagnostic{ QStringLiteral( "asset.edit_lease_conflict" ),
+                      QStringLiteral( "The asset is already being edited; commit or "
+                                      "roll back the current edit session first" ),
+                      DiagnosticSeverity::Error } );
+      }
+    }
+  }
+
   const quint64 token = m_impl->nextLeaseToken++;
   auto control = std::make_shared<internal::AssetLeaseControl>(
     internal::AssetLeaseControl{ asset.id, token, use.kind, use.purpose, this, true } );
@@ -376,6 +395,94 @@ Result<AssetLease> DataManager::acquire( const AssetRef &asset, const AssetUse &
   m_impl->catalogGeneration++;
 
   return Result<AssetLease>::success( AssetLease{ std::move( control ) } );
+}
+
+Result<void> DataManager::commitEdit( AssetId id )
+{
+  if ( QThread::currentThread() != thread() )
+    return Result<void>::failure( wrongThreadDiagnostic() );
+
+  const auto recordIt = m_impl->findRecord( id );
+  if ( recordIt == m_impl->records.end() )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "asset.unknown" ),
+                  QStringLiteral( "No registered asset matches the requested id" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  const auto leaseIt =
+    std::find_if( m_impl->leases.begin(), m_impl->leases.end(),
+                  [&]( const Impl::LeaseRecord &lease ) {
+                    return lease.control->assetId == id && lease.control->active &&
+                           lease.control->kind == LeaseKind::Edit;
+                  } );
+  if ( leaseIt == m_impl->leases.end() )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "asset.no_edit_lease" ),
+                  QStringLiteral( "The asset has no active Edit Lease to commit" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  // A successful commit advances the Asset Revision and refreshes other Display
+  // Layers via assetChanged.
+  const AssetRevision newRevision = recordIt->snapshot.revision().next();
+  recordIt->snapshot = AssetSnapshot{ recordIt->snapshot.id(),
+                                      newRevision,
+                                      recordIt->snapshot.source(),
+                                      recordIt->snapshot.kind(),
+                                      recordIt->snapshot.state(),
+                                      recordIt->snapshot.capabilities(),
+                                      recordIt->snapshot.persistence(),
+                                      recordIt->snapshot.storageKind(),
+                                      recordIt->snapshot.displayName(),
+                                      recordIt->snapshot.structure() };
+
+  ( *leaseIt ).control->active = false;
+  ( *leaseIt ).control->manager.clear();
+  m_impl->leases.erase( leaseIt );
+  m_impl->catalogGeneration++;
+
+  emit assetChanged( id );
+  return Result<void>::success();
+}
+
+Result<void> DataManager::rollbackEdit( AssetId id )
+{
+  if ( QThread::currentThread() != thread() )
+    return Result<void>::failure( wrongThreadDiagnostic() );
+
+  const auto recordIt = m_impl->findRecord( id );
+  if ( recordIt == m_impl->records.end() )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "asset.unknown" ),
+                  QStringLiteral( "No registered asset matches the requested id" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  const auto leaseIt =
+    std::find_if( m_impl->leases.begin(), m_impl->leases.end(),
+                  [&]( const Impl::LeaseRecord &lease ) {
+                    return lease.control->assetId == id && lease.control->active &&
+                           lease.control->kind == LeaseKind::Edit;
+                  } );
+  if ( leaseIt == m_impl->leases.end() )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "asset.no_edit_lease" ),
+                  QStringLiteral( "The asset has no active Edit Lease to roll back" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  // Rollback releases the Edit Lease without advancing the revision.
+  ( *leaseIt ).control->active = false;
+  ( *leaseIt ).control->manager.clear();
+  m_impl->leases.erase( leaseIt );
+  m_impl->catalogGeneration++;
+
+  return Result<void>::success();
 }
 
 int DataManager::leaseCount( AssetId id ) const
@@ -399,6 +506,17 @@ QVector<LeaseRef> DataManager::leases( AssetId id ) const
     }
   }
   return result;
+}
+
+bool DataManager::hasActiveEditLease( AssetId id ) const
+{
+  for ( const Impl::LeaseRecord &lease : m_impl->leases )
+  {
+    if ( lease.control->assetId == id && lease.control->active &&
+         lease.control->kind == LeaseKind::Edit )
+      return true;
+  }
+  return false;
 }
 
 UnloadPlan DataManager::planUnload( AssetId id ) const

@@ -335,14 +335,22 @@ builds successfully. Light/dark theme behavior to be inspected manually.
 - Extend `tests/test_data_manager.cpp`
 - Add or extend vector editing integration tests
 
-- [ ] Write failing tests that only one Edit Lease may exist per Vector Asset.
-- [ ] Write a UI integration test that the non-owner Display Layer remains read-only.
-- [ ] Require commit or rollback before transferring edit ownership.
-- [ ] On successful commit, advance Asset Revision and refresh other Display Layers.
-- [ ] On rollback, release Edit Lease without advancing revision.
-- [ ] Keep existing QGIS edit buffer and undo behavior inside the edit-owning Display Layer.
+- [x] Write failing tests that only one Edit Lease may exist per Vector Asset.
+- [x] Write a UI integration test that the non-owner Display Layer remains read-only.
+- [x] Require commit or rollback before transferring edit ownership.
+- [x] On successful commit, advance Asset Revision and refresh other Display Layers.
+- [x] On rollback, release Edit Lease without advancing revision.
+- [x] Keep existing QGIS edit buffer and undo behavior inside the edit-owning Display Layer.
 
-**Verification:** Run Data Manager and vector editing tests.
+The Edit Lease is wired at the main `toggleEditing`/`saveEdits` path
+(`main_window_vector.cpp`). The attribute-table facade (`QgisApp`) and the
+feature-form path (`QgsGuiVectorLayerTools`) are deferred bypass entry points;
+they do not yet acquire the Edit Lease (recorded as follow-up work).
+
+**Verification:** `test_data_manager` (200 assertions / 27 cases),
+`test_qgis_display_manager` (143 / 10), `test_layer_manager_data_context`
+(36 / 5), and `test_data_project_roundtrip` (102 / 4) all pass offscreen; the
+`sicnu_geo_rs` application target builds successfully.
 
 **Commit:** `feat(vector): enforce one edit lease per data asset`
 

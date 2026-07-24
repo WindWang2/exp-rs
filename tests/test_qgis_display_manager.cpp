@@ -19,8 +19,12 @@
 #include "data/data_asset.h"
 #include "data/data_manager.h"
 
+using sicnu::data::AssetLease;
+using sicnu::data::AssetRef;
 using sicnu::data::AssetState;
+using sicnu::data::AssetUse;
 using sicnu::data::DataManager;
+using sicnu::data::LeaseKind;
 using sicnu::data::RegisterRequest;
 using sicnu::data::RelocateRequest;
 using sicnu::data::SourceDescriptor;
@@ -451,4 +455,62 @@ TEST_CASE("Relocating an asset that stays missing keeps the Display Layer identi
   REQUIRE(snapshot.has_value());
   CHECK(snapshot->assetId() == assetId);
   CHECK(displayManager.mapLayer(layerId) != nullptr);
+}
+
+TEST_CASE("A Display Layer created while the asset is being edited is read-only",
+          "[qgis_display_manager][edit_lease]") {
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgsMapCanvas canvas;
+  QgsLayerTree layerTree;
+  QgsMapLayerStore layerStore;
+  QgisDisplayManager displayManager(&dataManager);
+  const DisplayViewId viewId =
+      createView(displayManager, canvas, layerTree, layerStore);
+  const sicnu::data::AssetId assetId = registerVector(dataManager);
+
+  // Before any edit session, a new Display Layer is writable.
+  const auto ownerDisplay = displayManager.addLayer(viewId, assetId);
+  REQUIRE(ownerDisplay);
+  auto *ownerLayer = qobject_cast<QgsVectorLayer *>(
+      displayManager.mapLayer(ownerDisplay.value()));
+  REQUIRE(ownerLayer != nullptr);
+  CHECK_FALSE(ownerLayer->readOnly());
+
+  // The owner begins an edit session (acquires the exclusive Edit Lease).
+  AssetLease editLease = dataManager
+                             .acquire(AssetRef{assetId},
+                                      AssetUse{LeaseKind::Edit,
+                                               QStringLiteral("edit session")})
+                             .take();
+  REQUIRE(editLease.isValid());
+  CHECK(dataManager.hasActiveEditLease(assetId));
+
+  // A second Display Layer of the same asset created during the edit session is
+  // read-only: only the Edit Lease owner may modify features.
+  const auto nonOwnerDisplay = displayManager.addLayer(viewId, assetId);
+  REQUIRE(nonOwnerDisplay);
+  auto *nonOwnerLayer = qobject_cast<QgsVectorLayer *>(
+      displayManager.mapLayer(nonOwnerDisplay.value()));
+  REQUIRE(nonOwnerLayer != nullptr);
+  CHECK(nonOwnerLayer->readOnly());
+
+  // A second Edit Lease on the same asset is rejected while the owner edits.
+  const auto secondEdit = dataManager.acquire(
+      AssetRef{assetId}, AssetUse{LeaseKind::Edit, QStringLiteral("other view")});
+  REQUIRE_FALSE(secondEdit);
+  CHECK(secondEdit.diagnostics().first().code ==
+        QStringLiteral("asset.edit_lease_conflict"));
+
+  // After the owner commits, the Edit Lease is released and a new Display Layer
+  // is writable again; the commit also advanced the revision.
+  REQUIRE(dataManager.commitEdit(assetId));
+  CHECK_FALSE(dataManager.hasActiveEditLease(assetId));
+
+  const auto afterCommitDisplay = displayManager.addLayer(viewId, assetId);
+  REQUIRE(afterCommitDisplay);
+  auto *afterCommitLayer = qobject_cast<QgsVectorLayer *>(
+      displayManager.mapLayer(afterCommitDisplay.value()));
+  REQUIRE(afterCommitLayer != nullptr);
+  CHECK_FALSE(afterCommitLayer->readOnly());
 }
