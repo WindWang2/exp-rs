@@ -2,7 +2,12 @@ qt_add_library(sicnu_data STATIC
   asset_types.cpp
   asset_types.h
   data_asset.h
+  data_manager.cpp
+  data_manager.h
   data_result.h
+  internal/source_provider.h
+  internal/source_provider_registry.cpp
+  internal/source_provider_registry.h
   source_descriptor.cpp
   source_descriptor.h
 )

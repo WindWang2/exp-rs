@@ -92,18 +92,18 @@ QT_QPA_PLATFORM=offscreen ./build/tests/test_data_manager
 - Create `src/data/internal/source_provider_registry.h/.cpp`
 - Modify `tests/test_data_manager.cpp`
 
-- [ ] Write an in-memory source-provider adapter inside the test.
-- [ ] Write failing interface tests for:
+- [x] Write an in-memory source-provider adapter inside the test.
+- [x] Write failing interface tests for:
   - registering a source returns an Asset ID;
   - registering the same SourceKey returns the same ID with `reusedExisting=true`;
   - display-only values cannot affect SourceKey;
   - asset lookup returns immutable snapshots;
   - list/query behavior distinguishes kind, state, and persistence;
   - provider-resolution errors are returned as diagnostics without UI side effects.
-- [ ] Implement provider registration as an internal seam.
-- [ ] Implement `DataManager::registerSource()`, `asset()`, and `assets()`.
-- [ ] Emit `assetAdded` exactly once for a newly registered SourceKey.
-- [ ] Keep provider registry and mutable records private to Data Manager implementation.
+- [x] Implement provider registration as an internal seam.
+- [x] Implement `DataManager::registerSource()`, `asset()`, and `assets()`.
+- [x] Emit `assetAdded` exactly once for a newly registered SourceKey.
+- [x] Keep provider registry and mutable records private to Data Manager implementation.
 
 **Verification:** Run `test_data_manager`.
 
