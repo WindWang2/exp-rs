@@ -2517,3 +2517,17 @@ target_include_directories(test_data_phase1_acceptance PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_data_phase1_acceptance)
+
+# Processing Asset Resolver tests — AssetRef to immutable snapshot with Task lease
+qt_add_executable(test_processing_asset_resolver
+  test_processing_asset_resolver.cpp
+)
+target_link_libraries(test_processing_asset_resolver PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+)
+target_include_directories(test_processing_asset_resolver PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_processing_asset_resolver)
