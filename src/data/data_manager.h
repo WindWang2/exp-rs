@@ -61,6 +61,7 @@ class DataManager : public QObject
 
     RegisterResult registerSource( const RegisterRequest &request );
     Result<AssetId> restoreSource( const RestoreRequest &request );
+    Result<RelocateResult> relocate( const RelocateRequest &request );
     std::optional<AssetSnapshot> asset( AssetId id ) const;
     QVector<AssetSnapshot> assets( const AssetQuery &query = {} ) const;
 
@@ -75,6 +76,7 @@ class DataManager : public QObject
 
   signals:
     void assetAdded( AssetId id );
+    void assetChanged( AssetId id );
     void assetAboutToUnload( AssetId id );
     void assetRemoved( AssetId id );
 

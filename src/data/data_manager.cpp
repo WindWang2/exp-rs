@@ -230,6 +230,92 @@ Result<AssetId> DataManager::restoreSource( const RestoreRequest &request )
   return Result<AssetId>::success( request.id, resolved.diagnostics() );
 }
 
+Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
+{
+  if ( QThread::currentThread() != thread() )
+    return Result<RelocateResult>::failure( wrongThreadDiagnostic() );
+
+  const auto recordIt = m_impl->findRecord( request.id );
+  if ( recordIt == m_impl->records.end() )
+  {
+    return Result<RelocateResult>::failure(
+      Diagnostic{ QStringLiteral( "relocate.unknown_asset" ),
+                  QStringLiteral( "No registered asset matches the requested id" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  const AssetSnapshot &current = recordIt->snapshot;
+
+  // Resolve the replacement through the provider seam so its canonical identity
+  // and structural metadata are computed the same way as a fresh registration.
+  const Result<internal::ResolvedSource> resolved =
+    m_impl->providers->resolve( request.replacement );
+  if ( !resolved )
+    return Result<RelocateResult>::failure( resolved.diagnostics() );
+
+  const internal::ResolvedSource &replacement = resolved.value();
+
+  // Relocation cannot change what the asset is. The replacement must be the
+  // same kind of data.
+  if ( replacement.kind != current.kind() )
+  {
+    return Result<RelocateResult>::failure(
+      Diagnostic{ QStringLiteral( "relocate.kind_mismatch" ),
+                  QStringLiteral( "The replacement source is a different kind of data" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  // Validate the replacement's structure before mutating the catalog, so a
+  // moved source cannot silently swap in an incompatible dataset under the
+  // existing Asset ID.
+  if ( !structuresCompatible( current.structure(), replacement.structure ) )
+  {
+    return Result<RelocateResult>::failure(
+      Diagnostic{ QStringLiteral( "relocate.structure_mismatch" ),
+                  QStringLiteral( "The replacement source has an incompatible structure" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  SourceDescriptor normalizedDescriptor = request.replacement;
+  if ( !replacement.canonicalSource.isEmpty() )
+    normalizedDescriptor.canonicalSource = replacement.canonicalSource;
+  if ( !replacement.canonicalProviderKey.isEmpty() )
+    normalizedDescriptor.providerKey = replacement.canonicalProviderKey;
+  const SourceKey newSourceKey = normalizedDescriptor.sourceKey();
+
+  // The relocated source must not collide with another registered asset.
+  for ( const Impl::AssetRecord &record : m_impl->records )
+  {
+    if ( record.snapshot.id() != request.id && record.sourceKey == newSourceKey )
+    {
+      return Result<RelocateResult>::failure(
+        Diagnostic{ QStringLiteral( "relocate.source_conflict" ),
+                    QStringLiteral( "The replacement source is already bound to another Asset ID" ),
+                    DiagnosticSeverity::Error } );
+    }
+  }
+
+  // Recompute the SourceKey index in place — the same Asset ID is preserved.
+  const AssetRevision newRevision = current.revision().next();
+  AssetSnapshot updated{ current.id(),
+                         newRevision,
+                         normalizedDescriptor,
+                         replacement.kind,
+                         replacement.state,
+                         replacement.capabilities,
+                         current.persistence(),
+                         replacement.storageKind,
+                         replacement.displayName,
+                         replacement.structure };
+  recordIt->sourceKey = newSourceKey;
+  recordIt->snapshot = std::move( updated );
+  m_impl->catalogGeneration++;
+
+  emit assetChanged( request.id );
+  return Result<RelocateResult>::success(
+    RelocateResult{ request.id, newRevision, resolved.diagnostics() } );
+}
+
 std::optional<AssetSnapshot> DataManager::asset( AssetId id ) const
 {
   const auto it = m_impl->findRecord( id );

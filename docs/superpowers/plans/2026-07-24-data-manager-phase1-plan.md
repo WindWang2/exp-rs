@@ -276,18 +276,23 @@ successfully.
 - Modify `src/app/display/qgis_display_manager.cpp`
 - Modify tests from Tasks 2, 4, 5, and 7
 
-- [ ] Write failing tests for:
+- [x] Write failing tests for:
   - reopening after moving a source preserves Asset ID and Display Layer record;
   - missing source produces Missing state;
   - relocation validates kind/structure before mutation;
   - relocation preserves Asset ID, advances revision, and emits one change event;
   - relocation to an incompatible source is rejected;
   - renderer state is restored after the replacement layer materializes.
-- [ ] Implement `relocate()` as a validated Data Manager transaction.
-- [ ] Recompute SourceKey indexes without creating a second Asset.
-- [ ] Let Display Manager recreate the QGIS layer while retaining its display identity and serialized presentation state.
+- [x] Implement `relocate()` as a validated Data Manager transaction.
+- [x] Recompute SourceKey indexes without creating a second Asset.
+- [x] Let Display Manager recreate the QGIS layer while retaining its display identity and serialized presentation state.
 
-**Verification:** Run the four focused test targets.
+**Verification:** the four focused test targets pass —
+`test_data_manager` (169 assertions / 23 cases),
+`test_data_source_providers` (89 / 10),
+`test_qgis_display_manager` (126 / 9), and
+`test_data_project_roundtrip` (102 / 4), all offscreen. The `sicnu_geo_rs`
+application target builds successfully.
 
 **Commit:** `feat(data): preserve missing assets and support relocation`
 

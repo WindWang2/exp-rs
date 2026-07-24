@@ -13,6 +13,7 @@
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
 #include <qgsmaplayerstore.h>
+#include <qgsmaplayerstyle.h>
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
 
@@ -177,6 +178,20 @@ QgisDisplayManager::QgisDisplayManager(data::DataManager *dataManager,
               }
               for (const DisplayLayerId layerId : affected)
                 (void)removeLayer(layerId);
+            });
+    connect(dataManager, &data::DataManager::assetChanged, this,
+            [this](data::AssetId assetId) {
+              // A relocation or reload changed the asset's source. Recreate the
+              // QGIS layer for every Display Layer that presents it, keeping each
+              // Display Layer's identity and presentation state.
+              QVector<DisplayLayerId> affected;
+              for (const auto &[key, record] : m_impl->layers) {
+                (void)key;
+                if (record->snapshot.assetId() == assetId)
+                  affected.append(record->snapshot.id());
+              }
+              for (const DisplayLayerId layerId : affected)
+                (void)relocateLayer(layerId);
             });
   }
 }
@@ -429,32 +444,45 @@ QgisDisplayManager::adoptLayer(DisplayViewId viewId, data::AssetId assetId,
         QStringLiteral("display.view_unavailable"),
         QStringLiteral("The target Display View is unavailable")));
   }
-  if (!mapLayer || !mapLayer->isValid() ||
-      viewRecord->layerStore->mapLayer(mapLayer->id()) != mapLayer) {
-    return data::Result<DisplayLayerId>::failure(
-        displayDiagnostic(QStringLiteral("display.layer_not_adoptable"),
-                          QStringLiteral("The QGIS layer is invalid or does "
-                                         "not belong to the target view")));
-  }
   if (m_impl->dataManager.isNull()) {
     return data::Result<DisplayLayerId>::failure(displayDiagnostic(
         QStringLiteral("display.data_manager_unavailable"),
         QStringLiteral("The Data Manager is no longer available")));
   }
 
+  const std::optional<data::AssetSnapshot> asset =
+      m_impl->dataManager->asset(assetId);
+  if (!asset) {
+    return data::Result<DisplayLayerId>::failure(displayDiagnostic(
+        QStringLiteral("display.asset_not_found"),
+        QStringLiteral("No registered Data Asset matches the requested id")));
+  }
+
+  // A Ready asset requires a live QGIS layer. A Missing asset is still adopted
+  // so its Display Layer record survives project load; the layer QGIS produced
+  // for the absent source may be invalid, and relocateLayer() rebuilds it once
+  // the source is recovered.
+  const bool assetAvailable = asset->state() == data::AssetState::Ready &&
+      asset->capabilities().testFlag(data::AssetCapability::Renderable);
+  const bool layerBelongsToView =
+      mapLayer && viewRecord->layerStore->mapLayer(mapLayer->id()) == mapLayer;
+  if (assetAvailable && (!mapLayer || !mapLayer->isValid() || !layerBelongsToView)) {
+    return data::Result<DisplayLayerId>::failure(
+        displayDiagnostic(QStringLiteral("display.layer_not_adoptable"),
+                          QStringLiteral("The QGIS layer is invalid or does "
+                                         "not belong to the target view")));
+  }
+  if (!assetAvailable && !layerBelongsToView) {
+    return data::Result<DisplayLayerId>::failure(
+        displayDiagnostic(QStringLiteral("display.layer_not_adoptable"),
+                          QStringLiteral("The QGIS layer does not belong to "
+                                         "the target view")));
+  }
+
   for (const auto &[key, record] : m_impl->layers) {
     (void)key;
     if (record->mapLayer == mapLayer)
       return data::Result<DisplayLayerId>::success(record->snapshot.id());
-  }
-
-  const std::optional<data::AssetSnapshot> asset =
-      m_impl->dataManager->asset(assetId);
-  if (!asset || asset->state() != data::AssetState::Ready ||
-      !asset->capabilities().testFlag(data::AssetCapability::Renderable)) {
-    return data::Result<DisplayLayerId>::failure(displayDiagnostic(
-        QStringLiteral("display.asset_not_ready"),
-        QStringLiteral("The Data Asset is unavailable for layer adoption")));
   }
 
   const DisplayLayerId layerId =
@@ -488,6 +516,129 @@ QgisDisplayManager::adoptLayer(DisplayViewId viewId, data::AssetId assetId,
   if (viewRecord->bridge)
     viewRecord->bridge->setCanvasLayers();
   return data::Result<DisplayLayerId>::success(layerId);
+}
+
+data::Result<void> QgisDisplayManager::relocateLayer(DisplayLayerId layerId) {
+  if (QThread::currentThread() != thread()) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.wrong_thread"),
+        QStringLiteral(
+            "Display mutations must run on the manager's owning thread")));
+  }
+
+  const auto layerIt = m_impl->layers.find(layerId.toString());
+  if (layerIt == m_impl->layers.end()) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.layer_not_found"),
+        QStringLiteral("No Display Layer matches the requested id")));
+  }
+
+  Impl::LayerRecord *layerRecord = layerIt->second.get();
+  Impl::ViewRecord *viewRecord = m_impl->findView(layerRecord->snapshot.viewId());
+  if (!viewRecord || viewRecord->layerTree.isNull() ||
+      viewRecord->layerStore.isNull()) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.view_unavailable"),
+        QStringLiteral("The display view's QGIS objects are no longer available")));
+  }
+  if (m_impl->dataManager.isNull()) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.data_manager_unavailable"),
+        QStringLiteral("The Data Manager is no longer available")));
+  }
+
+  const std::optional<data::AssetSnapshot> asset =
+      m_impl->dataManager->asset(layerRecord->snapshot.assetId());
+  if (!asset) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.asset_not_found"),
+        QStringLiteral("No registered Data Asset matches the layer's asset id")));
+  }
+
+  // A still-missing asset keeps its Display Layer identity without materializing
+  // a replacement; there is no source to open yet.
+  if (asset->state() != data::AssetState::Ready)
+    return data::Result<void>::success();
+
+  // Capture the authoritative runtime presentation state before replacing the
+  // layer, so the relocated layer keeps its renderer.
+  QgsMapLayerStyle presentation;
+  if (!layerRecord->mapLayer.isNull())
+    presentation.readFromLayer(layerRecord->mapLayer);
+
+  // Remember the tree position so the replacement lands in the same slot.
+  const QString oldQgisLayerId = layerRecord->snapshot.qgisLayerId();
+  int treeIndex = -1;
+  QgsLayerTreeGroup *parentGroup = nullptr;
+  if (QgsLayerTreeLayer *oldNode = viewRecord->layerTree->findLayer(oldQgisLayerId)) {
+    parentGroup = qobject_cast<QgsLayerTreeGroup *>(oldNode->parent());
+    if (parentGroup)
+      treeIndex = parentGroup->children().indexOf(oldNode);
+  }
+
+  std::unique_ptr<QgsMapLayer> replacementLayer =
+      materializeLayer(*asset, AddLayerOptions{});
+  if (!replacementLayer || !replacementLayer->isValid()) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.materialization_failed"),
+        QStringLiteral(
+            "QGIS could not create a replacement layer for the relocated asset")));
+  }
+
+  // Restore the captured presentation state onto the new layer.
+  presentation.writeToLayer(replacementLayer.get());
+
+  // Acquire a lease pinned to the asset's new revision.
+  data::Result<data::AssetLease> acquired = m_impl->dataManager->acquire(
+      data::AssetRef{asset->id(), asset->revision()},
+      data::AssetUse{data::LeaseKind::View,
+                     QStringLiteral("Relocated QGIS display layer in view %1")
+                         .arg(layerRecord->snapshot.viewId().toString())});
+  if (!acquired)
+    return data::Result<void>::failure(acquired.diagnostics());
+
+  const DisplayLayerId keptId = layerRecord->snapshot.id();
+  replacementLayer->setCustomProperty(QStringLiteral("sicnu/assetId"),
+                                      asset->id().toString());
+  replacementLayer->setCustomProperty(QStringLiteral("sicnu/displayLayerId"),
+                                      keptId.toString());
+  replacementLayer->setCustomProperty(QStringLiteral("sicnu/displayViewId"),
+                                      layerRecord->snapshot.viewId().toString());
+
+  QgsMapLayer *storedLayer =
+      viewRecord->layerStore->addMapLayer(replacementLayer.get());
+  if (!storedLayer) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.store_rejected_layer"),
+        QStringLiteral("The layer store rejected the replacement QGIS layer")));
+  }
+  replacementLayer.release();
+
+  // Replace the tree node in place, preserving the original position.
+  if (parentGroup && treeIndex >= 0) {
+    parentGroup->insertLayer(treeIndex, storedLayer);
+  } else {
+    viewRecord->layerTree->addLayer(storedLayer);
+  }
+  if (QgsLayerTreeLayer *oldNode = viewRecord->layerTree->findLayer(oldQgisLayerId)) {
+    if (QgsLayerTreeGroup *parent = qobject_cast<QgsLayerTreeGroup *>(oldNode->parent()))
+      parent->removeChildNode(oldNode);
+  }
+
+  // Remove the stale layer from the store after the replacement is registered.
+  if (viewRecord->layerStore->mapLayer(oldQgisLayerId))
+    viewRecord->layerStore->removeMapLayer(oldQgisLayerId);
+  if (viewRecord->bridge)
+    viewRecord->bridge->setCanvasLayers();
+
+  // Update the record: same DisplayLayerId and asset, new QGIS layer and lease.
+  // The old lease is released by reassigning the move-only AssetLease.
+  layerRecord->snapshot = DisplayLayerSnapshot{
+      keptId, layerRecord->snapshot.viewId(), asset->id(), storedLayer->id()};
+  layerRecord->mapLayer = storedLayer;
+  layerRecord->lease = acquired.take();
+
+  return data::Result<void>::success();
 }
 
 data::Result<void> QgisDisplayManager::removeLayer(DisplayLayerId layerId) {

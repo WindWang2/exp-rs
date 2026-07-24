@@ -30,8 +30,10 @@ using sicnu::data::LeaseKind;
 using sicnu::data::LeaseOutcome;
 using sicnu::data::LeaseRef;
 using sicnu::data::PersistencePolicy;
+using sicnu::data::RasterStructure;
 using sicnu::data::RegisterRequest;
 using sicnu::data::RegisterResult;
+using sicnu::data::RelocateRequest;
 using sicnu::data::Result;
 using sicnu::data::SourceDescriptor;
 using sicnu::data::StorageKind;
@@ -83,6 +85,28 @@ class InMemorySourceProvider final : public SourceProvider
                           AssetCapability::Renderable | AssetCapability::OfflineCacheable,
                           StorageKind::Remote,
                           QStringLiteral( "Test remote map" ) } );
+      }
+
+      // Structured raster used by relocation tests. The shape is keyed off the
+      // source string so two spellings with the same shape are compatible, while
+      // a "-wide" spelling reports a wider raster and is therefore incompatible.
+      if ( source.providerKey == QStringLiteral( "memory-structured-raster" ) )
+      {
+        RasterStructure structure;
+        structure.driverName = QStringLiteral( "GTiff" );
+        structure.width = source.canonicalSource.endsWith( QStringLiteral( "-wide" ) ) ? 200 : 100;
+        structure.height = 50;
+        structure.bandCount = 3;
+
+        return Result<ResolvedSource>::success(
+          ResolvedSource{ AssetKind::Raster,
+                          AssetState::Ready,
+                          AssetCapability::Renderable | AssetCapability::ReadablePixels,
+                          StorageKind::Memory,
+                          QStringLiteral( "Structured raster" ),
+                          QString(),
+                          QString(),
+                          structure } );
       }
 
       return Result<ResolvedSource>::success(
@@ -529,4 +553,164 @@ TEST_CASE( "Ordinary unload has no source-deletion side effect",
   const auto reregistered = manager->registerSource( again );
   CHECK_FALSE( reregistered.assetId.isNull() );
   CHECK_FALSE( reregistered.reusedExisting );
+}
+
+namespace
+{
+
+AssetId registerStructuredRaster( DataManager *manager, const QString &source )
+{
+  RegisterRequest request;
+  request.source = memorySource( QStringLiteral( "memory-structured-raster" ), source );
+  const auto registered = manager->registerSource( request );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+  return registered.assetId;
+}
+
+} // namespace
+
+TEST_CASE( "Relocating an asset preserves its ID and advances the revision once",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId id = registerStructuredRaster( manager.get(), QStringLiteral( "scene-a" ) );
+
+  int changeEvents = 0;
+  AssetId changedId;
+  QObject::connect( manager.get(), &DataManager::assetChanged, [&]( AssetId emitted ) {
+    ++changeEvents;
+    changedId = emitted;
+  } );
+
+  RelocateRequest relocate;
+  relocate.id = id;
+  relocate.replacement =
+    memorySource( QStringLiteral( "memory-structured-raster" ), QStringLiteral( "scene-b" ) );
+  const auto result = manager->relocate( relocate );
+
+  REQUIRE( result );
+  CHECK( result.value().assetId == id );
+  CHECK( result.value().revision == AssetRevision::initial().next() );
+
+  const auto asset = manager->asset( id );
+  REQUIRE( asset.has_value() );
+  CHECK( asset->id() == id );
+  CHECK( asset->revision() == AssetRevision::initial().next() );
+  CHECK( asset->source().canonicalSource == QStringLiteral( "scene-b" ) );
+  CHECK( asset->state() == AssetState::Ready );
+
+  CHECK( changeEvents == 1 );
+  CHECK( changedId == id );
+
+  // The relocation recomputed the SourceKey index in place: no second asset.
+  CHECK( manager->assets().size() == 1 );
+}
+
+TEST_CASE( "Relocating to the moved source's new spelling deduplicates the identity",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId id = registerStructuredRaster( manager.get(), QStringLiteral( "scene-a" ) );
+
+  RelocateRequest relocate;
+  relocate.id = id;
+  relocate.replacement =
+    memorySource( QStringLiteral( "memory-structured-raster" ), QStringLiteral( "scene-b" ) );
+  REQUIRE( manager->relocate( relocate ) );
+
+  // Re-registering the relocated source now reuses the same Asset ID, proving
+  // the SourceKey index was recomputed rather than duplicated.
+  RegisterRequest again;
+  again.source =
+    memorySource( QStringLiteral( "memory-structured-raster" ), QStringLiteral( "scene-b" ) );
+  const auto reregistered = manager->registerSource( again );
+  CHECK( reregistered.assetId == id );
+  CHECK( reregistered.reusedExisting );
+  CHECK( manager->assets().size() == 1 );
+}
+
+TEST_CASE( "Relocation validates structure and rejects an incompatible replacement",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId id = registerStructuredRaster( manager.get(), QStringLiteral( "scene-a" ) );
+  const AssetRevision originalRevision = manager->asset( id )->revision();
+
+  int changeEvents = 0;
+  QObject::connect( manager.get(), &DataManager::assetChanged, [&]( AssetId ) {
+    ++changeEvents;
+  } );
+
+  RelocateRequest relocate;
+  relocate.id = id;
+  relocate.replacement = memorySource( QStringLiteral( "memory-structured-raster" ),
+                                       QStringLiteral( "scene-wide" ) );
+  const auto result = manager->relocate( relocate );
+
+  REQUIRE_FALSE( result );
+  REQUIRE( result.diagnostics().size() == 1 );
+  CHECK( result.diagnostics().first().code ==
+         QStringLiteral( "relocate.structure_mismatch" ) );
+
+  // A rejected relocation mutates nothing and emits no change event.
+  const auto asset = manager->asset( id );
+  REQUIRE( asset.has_value() );
+  CHECK( asset->revision() == originalRevision );
+  CHECK( asset->source().canonicalSource == QStringLiteral( "scene-a" ) );
+  CHECK( changeEvents == 0 );
+}
+
+TEST_CASE( "Relocation rejects a replacement of a different data kind",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId id = registerStructuredRaster( manager.get(), QStringLiteral( "scene-a" ) );
+
+  RelocateRequest relocate;
+  relocate.id = id;
+  relocate.replacement =
+    memorySource( QStringLiteral( "memory-vector" ), QStringLiteral( "scene-a" ) );
+  const auto result = manager->relocate( relocate );
+
+  REQUIRE_FALSE( result );
+  REQUIRE( result.diagnostics().size() == 1 );
+  CHECK( result.diagnostics().first().code == QStringLiteral( "relocate.kind_mismatch" ) );
+  CHECK( manager->asset( id )->source().canonicalSource == QStringLiteral( "scene-a" ) );
+}
+
+TEST_CASE( "Relocation is rejected when the replacement belongs to another asset",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId first = registerStructuredRaster( manager.get(), QStringLiteral( "scene-a" ) );
+  const AssetId second = registerStructuredRaster( manager.get(), QStringLiteral( "scene-b" ) );
+  REQUIRE( first != second );
+
+  RelocateRequest relocate;
+  relocate.id = first;
+  relocate.replacement =
+    memorySource( QStringLiteral( "memory-structured-raster" ), QStringLiteral( "scene-b" ) );
+  const auto result = manager->relocate( relocate );
+
+  REQUIRE_FALSE( result );
+  REQUIRE( result.diagnostics().size() == 1 );
+  CHECK( result.diagnostics().first().code == QStringLiteral( "relocate.source_conflict" ) );
+  CHECK( manager->assets().size() == 2 );
+}
+
+TEST_CASE( "Relocating an unknown asset is rejected without side effects",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+
+  RelocateRequest relocate;
+  relocate.id = AssetId::generate();
+  relocate.replacement =
+    memorySource( QStringLiteral( "memory-structured-raster" ), QStringLiteral( "scene" ) );
+  const auto result = manager->relocate( relocate );
+
+  REQUIRE_FALSE( result );
+  REQUIRE( result.diagnostics().size() == 1 );
+  CHECK( result.diagnostics().first().code == QStringLiteral( "relocate.unknown_asset" ) );
+  CHECK( manager->assets().isEmpty() );
 }

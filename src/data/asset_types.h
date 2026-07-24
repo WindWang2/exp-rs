@@ -44,6 +44,13 @@ class AssetRevision
       return AssetRevision( value );
     }
 
+    /// The next revision after this one. An explicit reload, relocation, or
+    /// authorized in-place change advances the revision by one step.
+    constexpr AssetRevision next() const
+    {
+      return AssetRevision( m_value + 1 );
+    }
+
     constexpr bool isValid() const
     {
       return m_value != 0;

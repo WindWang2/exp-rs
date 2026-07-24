@@ -261,6 +261,10 @@ TEST_CASE( "A missing source registers as Missing rather than disappearing",
   CHECK( asset->kind() == AssetKind::Raster );
   // The asset remains in the catalog despite the missing source.
   CHECK( manager.assets().size() == 1 );
+
+  // A missing source resolves to no structure, so a later recovery relocation is
+  // validated against nothing and may adopt the replacement's structure.
+  CHECK( std::holds_alternative<std::monostate>( asset->structure() ) );
 }
 
 TEST_CASE( "Provider results carry no renderer state or credentials",

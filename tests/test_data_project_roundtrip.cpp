@@ -21,6 +21,11 @@
 
 #include "app/data_project_serializer.h"
 #include "app/project_context.h"
+#include "data/data_asset.h"
+#include "data/data_manager.h"
+
+using sicnu::data::AssetState;
+using sicnu::data::RelocateRequest;
 
 namespace {
 
@@ -327,4 +332,88 @@ TEST_CASE("Standard QGIS layers are adopted once by source capability",
   CHECK(reconciledView->layerIds().size() == 2);
   CHECK(context->dataManager().assets().size() == 1);
   CHECK(context->dataManager().leaseCount(adoptedAsset) == 2);
+}
+
+TEST_CASE("Reopening after moving a source preserves the Asset and Display records",
+          "[project][data_roundtrip][missing]") {
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QTemporaryDir dataDirectory;
+  REQUIRE(dataDirectory.isValid());
+  const QString originalRaster =
+      dataDirectory.filePath(QStringLiteral("scene.tif"));
+  REQUIRE(QFile::copy(fixturePath(QStringLiteral("samples/dem_sample.tif")),
+                      originalRaster));
+
+  QgsMapCanvas canvas;
+  const sicnu::display::DisplayViewSpec viewSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore()};
+  auto createdContext = sicnu::app::ProjectContext::create(viewSpec);
+  REQUIRE(createdContext);
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+
+  sicnu::data::SourceDescriptor source;
+  source.providerKey = QStringLiteral("gdal");
+  source.canonicalSource = originalRaster;
+  const auto registered = context->dataManager().registerSource(
+      sicnu::data::RegisterRequest{source});
+  REQUIRE_FALSE(registered.assetId.isNull());
+  const auto displayed = context->displayManager().addLayer(
+      context->mainViewId(), registered.assetId);
+  REQUIRE(displayed);
+
+  sicnu::app::DataProjectSerializer serializer;
+  QObject signalReceiver;
+  bool readSucceeded = false;
+  QObject::connect(project, &QgsProject::writeProject, &signalReceiver,
+                   [&](QDomDocument &document) {
+                     REQUIRE(static_cast<bool>(
+                         serializer.write(document, *context)));
+                   });
+  QObject::connect(project, &QgsProject::readProject, &signalReceiver,
+                   [&](const QDomDocument &document) {
+                     readSucceeded = static_cast<bool>(
+                         serializer.read(document, *project, *context));
+                   });
+
+  const QString projectPath =
+      dataDirectory.filePath(QStringLiteral("moving.qgs"));
+  REQUIRE(project->write(projectPath));
+
+  // Move the source away, then reopen the project.
+  const QString movedRaster =
+      dataDirectory.filePath(QStringLiteral("scene-moved.tif"));
+  REQUIRE(QFile::rename(originalRaster, movedRaster));
+
+  REQUIRE(context->clearProject(*project));
+  REQUIRE(project->read(projectPath));
+  REQUIRE(readSucceeded);
+
+  // The Asset ID and its persisted identity survive the missing source.
+  const auto missingAsset = context->dataManager().asset(registered.assetId);
+  REQUIRE(missingAsset);
+  CHECK(missingAsset->id() == registered.assetId);
+  CHECK(missingAsset->state() == AssetState::Missing);
+
+  // The Display Layer record is preserved even though the source is missing.
+  const auto missingView =
+      context->displayManager().view(context->mainViewId());
+  REQUIRE(missingView);
+  CHECK(missingView->layerIds().size() == 1);
+  CHECK(missingView->layerIds().first() == displayed.value());
+
+  // Relocating to the moved source recovers the asset and advances the revision.
+  RelocateRequest relocate;
+  relocate.id = registered.assetId;
+  relocate.replacement = sicnu::data::SourceDescriptor{
+      QStringLiteral("gdal"), movedRaster, {}, {}, {}};
+  const auto relocated = context->dataManager().relocate(relocate);
+  REQUIRE(relocated);
+
+  const auto recoveredAsset = context->dataManager().asset(registered.assetId);
+  REQUIRE(recoveredAsset);
+  CHECK(recoveredAsset->id() == registered.assetId);
+  CHECK(recoveredAsset->state() == AssetState::Ready);
+  CHECK(recoveredAsset->revision() == sicnu::data::AssetRevision::initial().next());
 }

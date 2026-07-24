@@ -1,7 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QTemporaryDir>
 
 #include <qgsapplication.h>
 #include <qgslayertree.h>
@@ -13,11 +16,13 @@
 #include <qgsvectorlayer.h>
 
 #include "app/display/qgis_display_manager.h"
+#include "data/data_asset.h"
 #include "data/data_manager.h"
 
 using sicnu::data::AssetState;
 using sicnu::data::DataManager;
 using sicnu::data::RegisterRequest;
+using sicnu::data::RelocateRequest;
 using sicnu::data::SourceDescriptor;
 using sicnu::display::DisplayLayerId;
 using sicnu::display::DisplayViewId;
@@ -322,4 +327,128 @@ TEST_CASE(
   CHECK_FALSE(dataManager.asset(assetId).has_value());
   CHECK_FALSE(displayManager.layer(added.value()).has_value());
   CHECK(layerStore.count() == 0);
+}
+
+TEST_CASE(
+    "Relocating an asset recreates the QGIS layer but keeps display identity and renderer",
+    "[qgis_display_manager]") {
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgsMapCanvas canvas;
+  QgsLayerTree layerTree;
+  QgsMapLayerStore layerStore;
+  QgisDisplayManager displayManager(&dataManager);
+  const DisplayViewId viewId =
+      createView(displayManager, canvas, layerTree, layerStore);
+
+  // Copy the raster fixture to a second location with identical structure so the
+  // relocation validates as compatible.
+  QTemporaryDir tempDir;
+  REQUIRE(tempDir.isValid());
+  const QString originalPath = fixturePath(QStringLiteral("samples/dem_sample.tif"));
+  const QString movedPath = tempDir.filePath(QStringLiteral("dem_sample.tif"));
+  REQUIRE(QFile::copy(originalPath, movedPath));
+
+  SourceDescriptor source;
+  source.providerKey = QStringLiteral("gdal");
+  source.canonicalSource = originalPath;
+  const auto registered = dataManager.registerSource(RegisterRequest{source});
+  REQUIRE_FALSE(registered.assetId.isNull());
+  const sicnu::data::AssetId assetId = registered.assetId;
+
+  const auto added = displayManager.addLayer(viewId, assetId);
+  REQUIRE(added);
+  const DisplayLayerId layerId = added.value();
+
+  QgsMapLayer *beforeLayer = displayManager.mapLayer(layerId);
+  REQUIRE(beforeLayer != nullptr);
+  auto *beforeRaster = qobject_cast<QgsRasterLayer *>(beforeLayer);
+  REQUIRE(beforeRaster != nullptr);
+
+  // Make the presentation state distinctive so we can verify it survives.
+  beforeLayer->setOpacity(0.42);
+
+  const QString beforeQgisLayerId = beforeLayer->id();
+
+  // Relocate the asset's source to the moved copy. The Data Manager emits
+  // assetChanged, which the Display Manager observes to rebuild the layer.
+  RelocateRequest relocate;
+  relocate.id = assetId;
+  relocate.replacement = SourceDescriptor{QStringLiteral("gdal"), movedPath, {}, {}, {}};
+  const auto relocated = dataManager.relocate(relocate);
+  REQUIRE(relocated);
+
+  // Display identity is preserved: same DisplayLayerId, still exactly one layer.
+  const auto snapshot = displayManager.layer(layerId);
+  REQUIRE(snapshot.has_value());
+  CHECK(snapshot->assetId() == assetId);
+  const auto viewSnapshot = displayManager.view(viewId);
+  REQUIRE(viewSnapshot.has_value());
+  CHECK(viewSnapshot->layerIds().size() == 1);
+  CHECK(viewSnapshot->layerIds().first() == layerId);
+
+  // The QGIS layer was recreated as a distinct instance with a new layer id.
+  QgsMapLayer *afterLayer = displayManager.mapLayer(layerId);
+  REQUIRE(afterLayer != nullptr);
+  CHECK(afterLayer != beforeLayer);
+  CHECK(afterLayer->id() != beforeQgisLayerId);
+  CHECK(afterLayer->isValid());
+
+  // The renderer/presentation state survived the replacement.
+  CHECK(afterLayer->opacity() == 0.42);
+
+  // Only the replacement layer remains in the store.
+  CHECK(layerStore.count() == 1);
+  CHECK(layerStore.mapLayer(afterLayer->id()) == afterLayer);
+}
+
+TEST_CASE("Relocating an asset that stays missing keeps the Display Layer identity",
+          "[qgis_display_manager]") {
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgsMapCanvas canvas;
+  QgsLayerTree layerTree;
+  QgsMapLayerStore layerStore;
+  QgisDisplayManager displayManager(&dataManager);
+  const DisplayViewId viewId =
+      createView(displayManager, canvas, layerTree, layerStore);
+
+  // Copy the raster to a temp location, register, display, then delete the file
+  // so a later relocation targets a missing source.
+  QTemporaryDir tempDir;
+  REQUIRE(tempDir.isValid());
+  const QString originalPath = fixturePath(QStringLiteral("samples/dem_sample.tif"));
+  const QString movedPath = tempDir.filePath(QStringLiteral("dem_sample.tif"));
+  REQUIRE(QFile::copy(originalPath, movedPath));
+
+  SourceDescriptor source;
+  source.providerKey = QStringLiteral("gdal");
+  source.canonicalSource = originalPath;
+  const auto registered = dataManager.registerSource(RegisterRequest{source});
+  REQUIRE_FALSE(registered.assetId.isNull());
+  const sicnu::data::AssetId assetId = registered.assetId;
+
+  const auto added = displayManager.addLayer(viewId, assetId);
+  REQUIRE(added);
+  const DisplayLayerId layerId = added.value();
+
+  // Remove the moved copy so the relocation targets a missing source. The
+  // provider cannot resolve a structure for a missing file, so the relocation is
+  // rejected as structurally incompatible — the asset and its Display Layer are
+  // left untouched.
+  REQUIRE(QFile::remove(movedPath));
+
+  RelocateRequest relocate;
+  relocate.id = assetId;
+  relocate.replacement = SourceDescriptor{QStringLiteral("gdal"), movedPath, {}, {}, {}};
+  const auto relocated = dataManager.relocate(relocate);
+
+  // The relocation is rejected; the catalog and the Display Layer are unchanged.
+  REQUIRE_FALSE(relocated);
+  CHECK(relocated.diagnostics().first().code ==
+        QStringLiteral("relocate.structure_mismatch"));
+  const auto snapshot = displayManager.layer(layerId);
+  REQUIRE(snapshot.has_value());
+  CHECK(snapshot->assetId() == assetId);
+  CHECK(displayManager.mapLayer(layerId) != nullptr);
 }

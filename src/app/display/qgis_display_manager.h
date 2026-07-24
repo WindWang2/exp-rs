@@ -129,6 +129,10 @@ public:
   data::Result<DisplayLayerId>
   adoptLayer(DisplayViewId viewId, data::AssetId assetId, QgsMapLayer *mapLayer,
              const AdoptLayerOptions &options = {});
+  /// Recreates the QGIS layer for an asset whose source was relocated, keeping
+  /// the Display Layer identity, tree position, and presentation state. Emitted
+  /// automatically when the Data Manager reports the asset changed.
+  data::Result<void> relocateLayer(DisplayLayerId layerId);
   data::Result<void> removeLayer(DisplayLayerId layerId);
 
   std::optional<DisplayViewSnapshot> view(DisplayViewId viewId) const;
