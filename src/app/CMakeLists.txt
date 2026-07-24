@@ -1,3 +1,33 @@
+qt_add_library(sicnu_qgis_display STATIC
+    data_project_serializer.cpp
+    data_project_serializer.h
+    display/qgis_display_manager.cpp
+    display/qgis_display_manager.h
+    project_context.cpp
+    project_context.h
+)
+add_library(Sicnu::qgis_display ALIAS sicnu_qgis_display)
+target_include_directories(sicnu_qgis_display
+    PUBLIC
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}
+)
+target_link_libraries(sicnu_qgis_display
+    PUBLIC
+        Qt6::Core
+        Sicnu::data
+    PRIVATE
+        Qt6::Gui
+        Qt6::Widgets
+        Qt6::Xml
+        qgis_core
+        qgis_gui
+)
+set_target_properties(sicnu_qgis_display PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+)
+
 add_executable(sicnu_geo_rs
     main.cpp
     main_window.cpp
@@ -170,6 +200,7 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     qgis_gui
     qgis_native
     qgis_app_georef
+    Sicnu::qgis_display
     sicnu_core
     sicnu_processing
     sicnu_operators
@@ -207,6 +238,7 @@ if(TARGET qgis_app_obia)
 endif()
 
 set_target_properties(sicnu_geo_rs PROPERTIES
+    AUTOUIC OFF
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     OUTPUT_NAME "sicnu_geo_rs"

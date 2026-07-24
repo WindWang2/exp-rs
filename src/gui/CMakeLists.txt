@@ -2003,7 +2003,10 @@ if (USE_PRECOMPILED_HEADERS)
   target_precompile_headers(qgis_gui PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/src/core/qgis.h>)
 endif()
 
-set_target_properties(qgis_gui PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILDS})
+set_target_properties(qgis_gui PROPERTIES
+  AUTOUIC OFF
+  UNITY_BUILD ${ENABLE_UNITY_BUILDS}
+)
 
 target_include_directories(qgis_gui SYSTEM PUBLIC
   ${CMAKE_SOURCE_DIR}/src/stubs
