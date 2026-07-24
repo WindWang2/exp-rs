@@ -44,6 +44,19 @@ sicnu_add_test(test_crs)
 sicnu_add_test(test_geometry)
 sicnu_add_test(test_layers)
 
+qt_add_executable(test_data_manager
+  test_data_manager.cpp
+)
+target_link_libraries(test_data_manager PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+)
+target_include_directories(test_data_manager PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_data_manager)
+
 # test_paths has custom main (needs QCoreApplication for AppPaths)
 add_executable(test_paths test_paths.cpp)
 target_link_libraries(test_paths PRIVATE
