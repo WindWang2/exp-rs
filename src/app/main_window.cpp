@@ -1,6 +1,7 @@
 #include "main_window.h"
 #include "dialogs/dialog_help_catalog.h"
 #include "layer_manager.h"
+#include "project_context.h"
 #include "map_tools/map_tool_manager.h"
 #include "app_paths.h"
 #include "qgis_app_facade.h"
@@ -55,6 +56,7 @@
 #include <qgsapplication.h>
 #include <qgis.h>
 #include <qgsmapcanvas.h>
+#include <qgsproject.h>
 #include <qgsmaptool.h>
 #include <qgsmaptoolpan.h>
 #include <qgsmaptoolzoom.h>
@@ -93,9 +95,26 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     qDebug() << "Setting up dock widgets...";
     setupDockWidgets();
 
-    // Create LayerManager (must come after map canvas + layer tree view exist)
-    m_layerManager = std::make_unique<LayerManager>( m_mapCanvas, m_layerTreeView,
-                                                     m_overviewCanvas, this );
+    // One project-scoped Data/Display authority for the main QGIS view.
+    const sicnu::display::DisplayViewSpec mainViewSpec{
+        m_mapCanvas,
+        QgsProject::instance()->layerTreeRoot(),
+        QgsProject::instance()->layerStore()
+    };
+    auto context = sicnu::app::ProjectContext::create( mainViewSpec );
+    if ( context )
+        m_projectContext = context.take();
+    else
+        qCritical() << "Failed to create project data context";
+
+    // Temporary compatibility facade over the project Data/Display seam.
+    m_layerManager = std::make_unique<LayerManager>(
+        m_mapCanvas, m_layerTreeView, m_overviewCanvas,
+        m_projectContext ? &m_projectContext->dataManager() : nullptr,
+        m_projectContext ? &m_projectContext->displayManager() : nullptr,
+        m_projectContext ? m_projectContext->mainViewId()
+                         : sicnu::display::DisplayViewId{},
+        this );
     qDebug() << "Setting up ribbon and task panel...";
     setupRibbonAndTaskPanel();
     qDebug() << "Setting up status bar...";
@@ -186,6 +205,7 @@ QgisDesktopWindow::~QgisDesktopWindow()
     // declaration; force explicit reset here for clarity.
     m_toolManager.reset();
     m_layerManager.reset();
+    m_projectContext.reset();
     m_pluginManager.reset();
 }
 

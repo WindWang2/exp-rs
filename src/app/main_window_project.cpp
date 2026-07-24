@@ -3,6 +3,7 @@
 
 #include "app_paths.h"
 #include "layer_manager.h"
+#include "project_context.h"
 #include "dialogs/stac_browser_dialog.h"
 #include "operators/framework/rs_operation_logger.h"
 
@@ -10,6 +11,7 @@
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QStatusBar>
+#include <QStringList>
 
 #include <qgsproject.h>
 #include <qgsmapcanvas.h>
@@ -24,7 +26,28 @@ void QgisDesktopWindow::newProject()
     if (!checkUnsavedChanges())
         return;
 
-    QgsProject::instance()->clear();
+    if ( !m_projectContext )
+    {
+        QMessageBox::warning( this, tr( "New Project" ),
+                              tr( "The project Data Context is unavailable." ) );
+        return;
+    }
+
+    const auto cleared =
+        m_projectContext->clearProject( *QgsProject::instance() );
+    if ( !cleared )
+    {
+        QStringList details;
+        for ( const auto &diagnostic : cleared.diagnostics() )
+            details.append( QStringLiteral( "[%1] %2" )
+                                .arg( diagnostic.code, diagnostic.message ) );
+        QMessageBox::warning(
+            this, tr( "New Project" ),
+            tr( "Failed to clear the project data context:\n%1" )
+                .arg( details.join( '\n' ) ) );
+        return;
+    }
+
     m_mapCanvas->setLayers({});
     m_mapCanvas->refresh();
     updateEditingUI(nullptr);
@@ -54,7 +77,37 @@ void QgisDesktopWindow::openProject()
         "QGIS Projects (*.qgs *.qgz);;All Files (*.*)"
     );
     if (!filePath.isEmpty()) {
-        QgsProject::instance()->read(filePath);
+        if ( !m_projectContext )
+        {
+            QMessageBox::warning(
+                this, tr( "Open Project" ),
+                tr( "The project Data Context is unavailable." ) );
+            return;
+        }
+
+        const auto cleared =
+            m_projectContext->clearProject( *QgsProject::instance() );
+        if ( !cleared )
+        {
+            QStringList details;
+            for ( const auto &diagnostic : cleared.diagnostics() )
+                details.append( QStringLiteral( "[%1] %2" )
+                                    .arg( diagnostic.code,
+                                          diagnostic.message ) );
+            QMessageBox::warning(
+                this, tr( "Open Project" ),
+                tr( "Failed to release the current project data:\n%1" )
+                    .arg( details.join( '\n' ) ) );
+            return;
+        }
+
+        if ( !QgsProject::instance()->read(filePath) )
+        {
+            QMessageBox::warning(
+                this, tr( "Open Project" ),
+                tr( "Failed to open project:\n%1" ).arg( filePath ) );
+            return;
+        }
         refreshCanvasLayers();
         updateCrsDisplay();
         updateEditingUI(currentVectorLayer());
@@ -97,10 +150,7 @@ void QgisDesktopWindow::importLayer()
     if ( path.isEmpty() )
         return;
 
-    if ( LayerManager::isLikelyRasterPath( path ) )
-        m_layerManager->loadRasterLayer( path );
-    else
-        m_layerManager->loadVectorLayer( path );
+    ( void ) m_layerManager->loadLayer( path );
 }
 
 void QgisDesktopWindow::browseStacCatalog()

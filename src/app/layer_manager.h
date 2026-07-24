@@ -5,16 +5,22 @@
 #include <QObject>
 #include <QList>
 
+#include "display/qgis_display_manager.h"
+
 class QWidget;
 class QgsMapCanvas;
 class QgsLayerTreeView;
 class QgsLayerTreeModel;
 class QgsLayerTreeGroup;
-class QgsLayerTreeMapCanvasBridge;
 class QgsMapLayer;
 class QgsVectorLayer;
 class QgsMapOverviewCanvas;
 class QString;
+
+namespace sicnu::data {
+class DataManager;
+struct SourceDescriptor;
+}
 
 /**
  * @brief Manages all layer-related operations for the main window.
@@ -34,6 +40,9 @@ class LayerManager : public QObject
     explicit LayerManager( QgsMapCanvas *canvas,
                            QgsLayerTreeView *treeView,
                            QgsMapOverviewCanvas *overviewCanvas,
+                           sicnu::data::DataManager *dataManager,
+                           sicnu::display::QgisDisplayManager *displayManager,
+                           sicnu::display::DisplayViewId mainViewId,
                            QWidget *parentWidget );
 
     ~LayerManager() override;
@@ -42,19 +51,12 @@ class LayerManager : public QObject
     void initLayerTree();
 
     // ── Core layer loading (programmatic, no dialogs) ─────────────────
-    void loadRasterLayer( const QString &filePath );
-    void loadVectorLayer( const QString &filePath );
-
-    /**
-     * Resolve a user-picked path to the path GDAL should open.
-     * ENVI: GDAL requires the binary data file, not the .hdr header —
-     * if \a filePath is a .hdr, returns the sibling data file when found.
-     * Otherwise returns \a filePath unchanged.
-     */
-    static QString resolveRasterOpenPath( const QString &filePath );
-
-    /** True if the path looks like a raster (extension or ENVI pair). */
-    static bool isLikelyRasterPath( const QString &filePath );
+    sicnu::data::Result<sicnu::display::DisplayLayerId>
+    loadLayer( const QString &filePath );
+    sicnu::data::Result<sicnu::display::DisplayLayerId>
+    loadRasterLayer( const QString &filePath );
+    sicnu::data::Result<sicnu::display::DisplayLayerId>
+    loadVectorLayer( const QString &filePath );
 
     // ── Layer operations ──────────────────────────────────────────────
     void showLayerProperties( QgsMapLayer *layer );
@@ -75,8 +77,15 @@ class LayerManager : public QObject
     QgsMapCanvas *m_mapCanvas = nullptr;
     QgsLayerTreeView *m_layerTreeView = nullptr;
     QgsMapOverviewCanvas *m_overviewCanvas = nullptr;
+    sicnu::data::DataManager *m_dataManager = nullptr;
+    sicnu::display::QgisDisplayManager *m_displayManager = nullptr;
+    sicnu::display::DisplayViewId m_mainViewId;
     QWidget *m_parentWidget = nullptr;
 
     QgsLayerTreeModel *m_layerTreeModel = nullptr;
-    QgsLayerTreeMapCanvasBridge *m_layerTreeBridge = nullptr;
+
+    sicnu::data::Result<sicnu::display::DisplayLayerId>
+    loadSource( sicnu::data::SourceDescriptor source );
+    void reportDiagnostics( const QString &title,
+                            const QVector<sicnu::data::Diagnostic> &diagnostics );
 };

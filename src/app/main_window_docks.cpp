@@ -72,18 +72,7 @@ void QgisDesktopWindow::setupDockWidgets()
     connect(m_browserDock, &QgsBrowserDockWidget::openFile, this, [this](const QString &fileName, const QString &fileTypeHint) {
         Q_UNUSED(fileTypeHint);
         if (fileName.isEmpty()) return;
-        if ( LayerManager::isLikelyRasterPath( fileName ) )
-            m_layerManager->loadRasterLayer( fileName );
-        else
-        {
-            const QString suffix = QFileInfo( fileName ).suffix().toLower();
-            if ( suffix == QLatin1String( "shp" ) || suffix == QLatin1String( "gpkg" )
-                 || suffix == QLatin1String( "geojson" ) || suffix == QLatin1String( "kml" )
-                 || suffix == QLatin1String( "gml" ) )
-                m_layerManager->loadVectorLayer( fileName );
-            else
-                statusBar()->showMessage( tr( "Unsupported file type: %1" ).arg( suffix.isEmpty() ? fileName : suffix ), 3000 );
-        }
+        ( void ) m_layerManager->loadLayer( fileName );
     });
 
     // Tabify the left dock widgets

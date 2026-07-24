@@ -41,6 +41,12 @@ class QgsMapToolAddFeature;
 class QgsMapToolMoveFeature;
 class QgsMapToolRotateFeature;
 class QgsMapToolScaleFeature;
+
+namespace sicnu {
+namespace app {
+class ProjectContext;
+}
+}
 class QgsMapToolOffsetCurve;
 class QgsMapToolReshape;
 class QgsMapToolSplitFeatures;
@@ -366,6 +372,7 @@ private:
     QMainWindow *m_obiaWindow = nullptr;
 
     std::unique_ptr<class MapToolManager> m_toolManager;
+    std::unique_ptr<sicnu::app::ProjectContext> m_projectContext;
     std::unique_ptr<LayerManager> m_layerManager;
     std::unique_ptr<class PluginManager> m_pluginManager;
 

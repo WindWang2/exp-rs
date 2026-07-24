@@ -1,5 +1,7 @@
 #include "layer_manager.h"
 
+#include <utility>
+
 #include <qgsmapcanvas.h>
 #include <qgslayertree.h>
 #include <qgslayertreegroup.h>
@@ -7,7 +9,6 @@
 #include <qgslayertreemodel.h>
 #include <qgslayertreeview.h>
 #include <layertree/qgslayertreeviewdefaultactions.h>
-#include <qgslayertreemapcanvasbridge.h>
 #include <qgsmapoverviewcanvas.h>
 #include <qgsproject.h>
 #include <qgsmaplayer.h>
@@ -18,108 +19,14 @@
 #include <raster/qgsrasterlayerproperties.h>
 #include <vector/qgsvectorlayerproperties.h>
 
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
-#include <QFileDialog>
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QStatusBar>
+#include <QDebug>
+#include <QStringList>
 
-#include "app_paths.h"
-
-// ---------------------------------------------------------------------------
-// ENVI / path helpers
-// ---------------------------------------------------------------------------
-
-namespace
-{
-
-/**
- * GDAL's ENVI driver opens the binary data file, not the .hdr.
- * If the user selected a header, locate the paired data file.
- * Common layouts: name.dat+name.hdr, name+name.hdr, name.img+name.hdr.
- */
-QString resolveEnviDataPath( const QString &path )
-{
-    const QFileInfo fi( path );
-    const QString suffix = fi.suffix().toLower();
-    if ( suffix != QLatin1String( "hdr" ) )
-        return path;
-
-    const QString dir = fi.absolutePath();
-    const QString base = fi.completeBaseName(); // strip .hdr / .HDR
-
-    // Prefer same-stem with no extension (GF_1 + GF_1.HDR), then common data suffixes
-    const QStringList candidates = {
-        QDir( dir ).filePath( base ),
-        QDir( dir ).filePath( base + QStringLiteral( ".dat" ) ),
-        QDir( dir ).filePath( base + QStringLiteral( ".img" ) ),
-        QDir( dir ).filePath( base + QStringLiteral( ".bil" ) ),
-        QDir( dir ).filePath( base + QStringLiteral( ".bsq" ) ),
-        QDir( dir ).filePath( base + QStringLiteral( ".bip" ) ),
-        QDir( dir ).filePath( base + QStringLiteral( ".raw" ) ),
-    };
-
-    for ( const QString &candidate : candidates )
-    {
-        const QFileInfo cfi( candidate );
-        if ( cfi.exists() && cfi.isFile() )
-            return cfi.absoluteFilePath();
-    }
-
-    // No sibling data file found — return original so GDAL can report a clear error
-    return path;
-}
-
-bool hasEnviHeaderSibling( const QString &path )
-{
-    const QFileInfo fi( path );
-    if ( !fi.exists() || !fi.isFile() )
-        return false;
-    const QString stem = fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName();
-    // For extensionless files, completeBaseName() == fileName()
-    const QString bare = fi.absoluteFilePath();
-    return QFile::exists( bare + QStringLiteral( ".hdr" ) )
-           || QFile::exists( bare + QStringLiteral( ".HDR" ) )
-           || QFile::exists( stem + QStringLiteral( ".hdr" ) )
-           || QFile::exists( stem + QStringLiteral( ".HDR" ) );
-}
-
-} // namespace
-
-QString LayerManager::resolveRasterOpenPath( const QString &filePath )
-{
-    return resolveEnviDataPath( filePath );
-}
-
-bool LayerManager::isLikelyRasterPath( const QString &filePath )
-{
-    const QFileInfo fi( filePath );
-    const QString ext = fi.suffix().toLower();
-
-    static const QStringList kRasterExts = {
-        QStringLiteral( "tif" ),  QStringLiteral( "tiff" ), QStringLiteral( "img" ),
-        QStringLiteral( "jp2" ),  QStringLiteral( "png" ),  QStringLiteral( "jpg" ),
-        QStringLiteral( "jpeg" ), QStringLiteral( "asc" ),  QStringLiteral( "dat" ),
-        QStringLiteral( "hdr" ),  QStringLiteral( "bil" ),  QStringLiteral( "bsq" ),
-        QStringLiteral( "bip" ),  QStringLiteral( "nc" ),   QStringLiteral( "hdf" ),
-        QStringLiteral( "h5" ),   QStringLiteral( "vrt" ),  QStringLiteral( "kea" ),
-    };
-
-    if ( kRasterExts.contains( ext ) )
-        return true;
-
-    // Extensionless ENVI binary (e.g. GF_1 next to GF_1.HDR)
-    if ( ext.isEmpty() && hasEnviHeaderSibling( filePath ) )
-        return true;
-
-    // Any file with a sibling .hdr is treated as ENVI raster data
-    if ( !ext.isEmpty() && hasEnviHeaderSibling( filePath ) )
-        return true;
-
-    return false;
-}
+#include "data/data_manager.h"
+#include "data/source_descriptor.h"
 
 // ---------------------------------------------------------------------------
 // Construction / destruction
@@ -128,13 +35,26 @@ bool LayerManager::isLikelyRasterPath( const QString &filePath )
 LayerManager::LayerManager( QgsMapCanvas *canvas,
                             QgsLayerTreeView *treeView,
                             QgsMapOverviewCanvas *overviewCanvas,
+                            sicnu::data::DataManager *dataManager,
+                            sicnu::display::QgisDisplayManager *displayManager,
+                            sicnu::display::DisplayViewId mainViewId,
                             QWidget *parentWidget )
     : QObject( parentWidget )
     , m_mapCanvas( canvas )
     , m_layerTreeView( treeView )
     , m_overviewCanvas( overviewCanvas )
+    , m_dataManager( dataManager )
+    , m_displayManager( displayManager )
+    , m_mainViewId( mainViewId )
     , m_parentWidget( parentWidget )
 {
+    if ( m_mapCanvas && m_overviewCanvas )
+    {
+        connect( m_mapCanvas, &QgsMapCanvas::layersChanged, this, [this] {
+            if ( m_mapCanvas && m_overviewCanvas )
+                m_overviewCanvas->setLayers( m_mapCanvas->layers() );
+        } );
+    }
 }
 
 LayerManager::~LayerManager() = default;
@@ -170,103 +90,158 @@ void LayerManager::initLayerTree()
     // Expand all nodes by default (QGIS behavior)
     m_layerTreeView->expandAll();
 
-    // Bridge: automatic layer tree -> canvas synchronization
-    m_layerTreeBridge = new QgsLayerTreeMapCanvasBridge( root, m_mapCanvas, this );
-    connect( m_layerTreeBridge, &QgsLayerTreeMapCanvasBridge::canvasLayersChanged,
-             this, [this]() {
-                 if ( m_overviewCanvas )
-                     m_overviewCanvas->setLayers( m_mapCanvas->layers() );
-             } );
 }
 
 // ---------------------------------------------------------------------------
 // Layer loading (programmatic)
 // ---------------------------------------------------------------------------
 
-void LayerManager::loadRasterLayer( const QString &filePath )
+sicnu::data::Result<sicnu::display::DisplayLayerId>
+LayerManager::loadLayer( const QString &filePath )
 {
-    if ( !m_mapCanvas )
-        return;
-
-    const QString openPath = resolveRasterOpenPath( filePath );
-    QFileInfo fi( openPath );
-    // Prefer stem name for ENVI (dem.dat → dem, GF_1 → GF_1)
-    QString name = fi.completeBaseName();
-    if ( name.isEmpty() )
-        name = fi.fileName();
-
-    QgsRasterLayer *layer = new QgsRasterLayer( openPath, name, QStringLiteral( "gdal" ) );
-
-    if ( !layer->isValid() )
-    {
-        QString hint;
-        if ( QFileInfo( filePath ).suffix().toLower() == QLatin1String( "hdr" )
-             && openPath == filePath )
-        {
-            hint = QObject::tr(
-                "\n\nENVI header selected but no data file was found next to it "
-                "(expected e.g. same name without .hdr, or .dat / .img)." );
-        }
-        QMessageBox::warning( m_parentWidget, QObject::tr( "Load Layer" ),
-                              QObject::tr( "Failed to load raster layer:\n%1\n\nError: %2%3" )
-                                  .arg( openPath, layer->error().message(), hint ) );
-        delete layer;
-        return;
-    }
-
-    QgsProject::instance()->addMapLayer( layer, /*addToLegend=*/false );
-
-    QgsLayerTreeGroup *group = findOrCreateGroup( "Raster Layers" );
-    group->addLayer( layer );
-
-    // Only zoom to new layer if canvas has no other visible layers
-    if ( m_mapCanvas->layers().isEmpty() )
-        m_mapCanvas->setExtent( layer->extent() );
-    refreshCanvasLayers();
-
-    if ( auto *win = qobject_cast<QMainWindow *>( m_parentWidget ) )
-        win->statusBar()->showMessage( QObject::tr( "Loaded: %1 (%2x%3, %4 bands)" )
-                                           .arg( name )
-                                           .arg( layer->width() )
-                                           .arg( layer->height() )
-                                           .arg( layer->bandCount() ),
-                                       3000 );
+    sicnu::data::SourceDescriptor source;
+    source.canonicalSource = filePath;
+    const auto loaded = loadSource( std::move( source ) );
+    if ( !loaded )
+        reportDiagnostics( QObject::tr( "Load Layer" ), loaded.diagnostics() );
+    return loaded;
 }
 
-void LayerManager::loadVectorLayer( const QString &filePath )
+sicnu::data::Result<sicnu::display::DisplayLayerId>
+LayerManager::loadRasterLayer( const QString &filePath )
 {
-    if ( !m_mapCanvas )
-        return;
+    sicnu::data::SourceDescriptor source;
+    source.providerKey = QStringLiteral( "gdal" );
+    source.canonicalSource = filePath;
+    const auto loaded = loadSource( std::move( source ) );
+    if ( !loaded )
+        reportDiagnostics( QObject::tr( "Load Raster Layer" ),
+                           loaded.diagnostics() );
+    return loaded;
+}
 
-    QFileInfo fi( filePath );
-    QString name = fi.fileName();
+sicnu::data::Result<sicnu::display::DisplayLayerId>
+LayerManager::loadVectorLayer( const QString &filePath )
+{
+    sicnu::data::SourceDescriptor source;
+    source.providerKey = QStringLiteral( "ogr" );
+    source.canonicalSource = filePath;
+    const auto loaded = loadSource( std::move( source ) );
+    if ( !loaded )
+        reportDiagnostics( QObject::tr( "Load Vector Layer" ),
+                           loaded.diagnostics() );
+    return loaded;
+}
 
-    QgsVectorLayer *layer = new QgsVectorLayer( filePath, name, "ogr" );
+sicnu::data::Result<sicnu::display::DisplayLayerId>
+LayerManager::loadSource( sicnu::data::SourceDescriptor source )
+{
+    using sicnu::data::Diagnostic;
+    using sicnu::data::DiagnosticSeverity;
+    using sicnu::data::Result;
+    using sicnu::display::DisplayLayerId;
 
-    if ( !layer->isValid() )
+    if ( !m_mapCanvas || !m_dataManager || !m_displayManager
+         || m_mainViewId.isNull() )
     {
-        QMessageBox::warning( m_parentWidget, QObject::tr( "Load Layer" ),
-                              QObject::tr( "Failed to load vector layer:\n%1\n\nError: %2" )
-                                  .arg( filePath, layer->error().message() ) );
-        delete layer;
-        return;
+        return Result<DisplayLayerId>::failure(
+            Diagnostic{ QStringLiteral( "layer.context_unavailable" ),
+                        QObject::tr( "The project Data Context is unavailable" ),
+                        DiagnosticSeverity::Error } );
     }
 
-    QgsProject::instance()->addMapLayer( layer, /*addToLegend=*/false );
+    const bool hadVisibleLayers = !m_mapCanvas->layers().isEmpty();
+    const sicnu::data::RegisterResult registered =
+        m_dataManager->registerSource(
+            sicnu::data::RegisterRequest{ std::move( source ) } );
+    if ( registered.assetId.isNull() )
+    {
+        if ( !registered.diagnostics.isEmpty() )
+            return Result<DisplayLayerId>::failure( registered.diagnostics );
+        return Result<DisplayLayerId>::failure(
+            Diagnostic{ QStringLiteral( "layer.registration_failed" ),
+                        QObject::tr( "The source could not be registered" ),
+                        DiagnosticSeverity::Error } );
+    }
 
-    QgsLayerTreeGroup *group = findOrCreateGroup( "Vector Layers" );
-    group->addLayer( layer );
+    const Result<DisplayLayerId> displayed =
+        m_displayManager->addLayer( m_mainViewId, registered.assetId );
+    if ( !displayed )
+        return displayed;
 
-    // Only zoom to new layer if canvas has no other visible layers
-    if ( m_mapCanvas->layers().isEmpty() )
-        m_mapCanvas->setExtent( layer->extent() );
+    QgsMapLayer *layer = m_displayManager->mapLayer( displayed.value() );
+    const std::optional<sicnu::data::AssetSnapshot> asset =
+        m_dataManager->asset( registered.assetId );
+    if ( !layer || !asset )
+    {
+        ( void ) m_displayManager->removeLayer( displayed.value() );
+        return Result<DisplayLayerId>::failure(
+            Diagnostic{ QStringLiteral( "layer.display_adapter_missing" ),
+                        QObject::tr( "The QGIS display adapter was not created" ),
+                        DiagnosticSeverity::Error } );
+    }
+
+    const QString groupName =
+        asset->kind() == sicnu::data::AssetKind::Raster
+            ? QObject::tr( "Raster Layers" )
+            : QObject::tr( "Vector Layers" );
+    QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
+    if ( QgsLayerTreeLayer *node = root->findLayer( layer->id() ) )
+    {
+        if ( QgsLayerTreeGroup *parent =
+                 qobject_cast<QgsLayerTreeGroup *>( node->parent() ) )
+            parent->removeChildNode( node );
+    }
+    findOrCreateGroup( groupName )->addLayer( layer );
+
     refreshCanvasLayers();
+    if ( !hadVisibleLayers )
+        m_mapCanvas->setExtent( layer->extent() );
 
     if ( auto *win = qobject_cast<QMainWindow *>( m_parentWidget ) )
-        win->statusBar()->showMessage( QObject::tr( "Loaded: %1 (%2 features)" )
-                                           .arg( name )
-                                           .arg( layer->featureCount() ),
-                                       3000 );
+    {
+        if ( auto *raster = qobject_cast<QgsRasterLayer *>( layer ) )
+        {
+            win->statusBar()->showMessage(
+                QObject::tr( "Loaded: %1 (%2x%3, %4 bands)" )
+                    .arg( layer->name() )
+                    .arg( raster->width() )
+                    .arg( raster->height() )
+                    .arg( raster->bandCount() ),
+                3000 );
+        }
+        else if ( auto *vector = qobject_cast<QgsVectorLayer *>( layer ) )
+        {
+            win->statusBar()->showMessage(
+                QObject::tr( "Loaded: %1 (%2 features)" )
+                    .arg( layer->name() )
+                    .arg( vector->featureCount() ),
+                3000 );
+        }
+    }
+
+    return Result<DisplayLayerId>::success( displayed.value(),
+                                            registered.diagnostics );
+}
+
+void LayerManager::reportDiagnostics(
+    const QString &title,
+    const QVector<sicnu::data::Diagnostic> &diagnostics )
+{
+    QStringList details;
+    details.reserve( diagnostics.size() );
+    for ( const sicnu::data::Diagnostic &diagnostic : diagnostics )
+    {
+        details.append( QStringLiteral( "[%1] %2" )
+                            .arg( diagnostic.code, diagnostic.message ) );
+    }
+    if ( details.isEmpty() )
+        details.append( QObject::tr( "The operation failed without details" ) );
+
+    if ( m_parentWidget )
+        QMessageBox::warning( m_parentWidget, title, details.join( '\n' ) );
+    else
+        qWarning().noquote() << title << details.join( '\n' );
 }
 
 // ---------------------------------------------------------------------------
@@ -312,7 +287,24 @@ void LayerManager::removeSelectedLayers()
 
     for ( QgsMapLayer *layer : selected )
     {
-        QgsProject::instance()->removeMapLayer( layer->id() );
+        const std::optional<sicnu::display::DisplayLayerId> displayLayerId =
+            sicnu::display::DisplayLayerId::fromString(
+                layer->customProperty(
+                         QStringLiteral( "sicnu/displayLayerId" ) )
+                    .toString() );
+        if ( displayLayerId && m_displayManager )
+        {
+            const sicnu::data::Result<void> removed =
+                m_displayManager->removeLayer( *displayLayerId );
+            if ( !removed )
+                reportDiagnostics( QObject::tr( "Remove Layer" ),
+                                   removed.diagnostics() );
+        }
+        else
+        {
+            // Standard/external QGIS layers are still presentation-only here.
+            QgsProject::instance()->removeMapLayer( layer->id() );
+        }
     }
     refreshCanvasLayers();
 
@@ -325,14 +317,8 @@ void LayerManager::refreshCanvasLayers()
     if ( !m_mapCanvas )
         return;
 
-    // Prefer the layer-tree bridge (respects visibility / checked state and order).
-    if ( m_layerTreeBridge )
-    {
-        m_layerTreeBridge->setCanvasLayers();
-        return;
-    }
-
-    // Fallback: only checked/visible layers from the layer tree.
+    // The Display Manager owns the main tree/canvas bridge. This explicit
+    // synchronization retains compatibility for callers that request a refresh.
     QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
     QList<QgsMapLayer *> layers = root->checkedLayers();
     m_mapCanvas->setLayers( layers );
