@@ -118,4 +118,47 @@ struct AssetQuery
   std::optional<PersistencePolicy> persistence;
 };
 
+struct AssetRef
+{
+  AssetId id;
+  AssetRevision expectedRevision;
+};
+
+struct AssetUse
+{
+  LeaseKind kind = LeaseKind::View;
+  QString purpose;
+};
+
+struct LeaseRef
+{
+  AssetId assetId;
+  quint64 token = 0;
+  LeaseKind kind = LeaseKind::View;
+
+  friend bool operator==( const LeaseRef &, const LeaseRef & ) = default;
+};
+
+struct LeaseImpact
+{
+  LeaseRef lease;
+  QString purpose;
+};
+
+struct UnloadPlan
+{
+  AssetId assetId;
+  AssetRevision revision;
+  quint64 catalogGeneration = 0;
+  bool cascade = false;
+  QVector<LeaseImpact> activeLeases;
+
+  bool canUnload() const
+  {
+    if ( cascade )
+      return true;
+    return activeLeases.isEmpty();
+  }
+};
+
 } // namespace sicnu::data

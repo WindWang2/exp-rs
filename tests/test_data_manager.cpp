@@ -11,20 +11,28 @@
 #include "data/source_descriptor.h"
 
 using sicnu::data::AssetId;
+using sicnu::data::AssetLease;
 using sicnu::data::AssetCapability;
 using sicnu::data::AssetCapabilities;
 using sicnu::data::AssetKind;
 using sicnu::data::AssetQuery;
+using sicnu::data::AssetRef;
 using sicnu::data::AssetRevision;
 using sicnu::data::AssetState;
+using sicnu::data::AssetUse;
 using sicnu::data::DataManager;
 using sicnu::data::Diagnostic;
 using sicnu::data::DiagnosticSeverity;
+using sicnu::data::LeaseImpact;
+using sicnu::data::LeaseKind;
+using sicnu::data::LeaseOutcome;
+using sicnu::data::LeaseRef;
 using sicnu::data::PersistencePolicy;
 using sicnu::data::RegisterRequest;
 using sicnu::data::Result;
 using sicnu::data::SourceDescriptor;
 using sicnu::data::StorageKind;
+using sicnu::data::UnloadPlan;
 using sicnu::data::internal::ResolvedSource;
 using sicnu::data::internal::SourceProvider;
 using sicnu::data::internal::SourceProviderRegistry;
@@ -297,4 +305,190 @@ TEST_CASE( "Provider resolution errors return diagnostics without catalog side e
   CHECK( result.diagnostics.at( 1 ).severity == DiagnosticSeverity::Info );
   CHECK( additions == 0 );
   CHECK( manager->assets().isEmpty() );
+}
+
+namespace
+{
+
+AssetId registerOneRaster( const DataManager *manager, DataManager *nonConstManager )
+{
+  RegisterRequest request;
+  request.source = memoryRaster( QStringLiteral( "scene" ) );
+  const auto registered = nonConstManager->registerSource( request );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+  ( void ) manager;
+  return registered.assetId;
+}
+
+} // namespace
+
+TEST_CASE( "Acquiring a view task or edit lease counts against the asset", "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId id = registerOneRaster( manager.get(), manager.get() );
+
+  const auto view =
+    manager->acquire( AssetRef{ id, AssetRevision::initial() }, AssetUse{ LeaseKind::View } );
+  REQUIRE( view );
+  CHECK( view.value().isValid() );
+  CHECK( view.value().assetId() == id );
+  CHECK( view.value().kind() == LeaseKind::View );
+  CHECK( manager->leaseCount( id ) == 1 );
+
+  const auto task = manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::Task } );
+  REQUIRE( task );
+  CHECK( manager->leaseCount( id ) == 2 );
+
+  const auto edit = manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::Edit } );
+  REQUIRE( edit );
+  CHECK( manager->leaseCount( id ) == 3 );
+
+  const QVector<LeaseRef> refs = manager->leases( id );
+  REQUIRE( refs.size() == 3 );
+  CHECK( refs.at( 0 ).kind == LeaseKind::View );
+  CHECK( refs.at( 1 ).kind == LeaseKind::Task );
+  CHECK( refs.at( 2 ).kind == LeaseKind::Edit );
+}
+
+TEST_CASE( "An asset lease is move-only and releases itself through RAII",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId id = registerOneRaster( manager.get(), manager.get() );
+
+  AssetLease moved = manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::View } ).take();
+  CHECK( moved.isValid() );
+  CHECK( manager->leaseCount( id ) == 1 );
+
+  AssetLease reassigned;
+  reassigned = std::move( moved );
+  CHECK( reassigned.isValid() );
+  CHECK( manager->leaseCount( id ) == 1 );
+
+  // Releasing explicitly returns Released and drops the only record.
+  CHECK( reassigned.release() == LeaseOutcome::Released );
+  CHECK_FALSE( reassigned.isValid() );
+  CHECK( manager->leaseCount( id ) == 0 );
+
+  // A second release on an already-released lease is a safe no-op.
+  CHECK( reassigned.release() == LeaseOutcome::Invalid );
+
+  AssetLease empty;
+  CHECK_FALSE( empty.isValid() );
+  CHECK( empty.release() == LeaseOutcome::Invalid );
+}
+
+TEST_CASE( "Unloading a leased asset reports every active lease and is rejected",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId id = registerOneRaster( manager.get(), manager.get() );
+
+  const auto view =
+    manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::View, QStringLiteral( "main view" ) } );
+  REQUIRE( view );
+  const auto task =
+    manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::Task, QStringLiteral( "ndvi" ) } );
+  REQUIRE( task );
+
+  const UnloadPlan plan = manager->planUnload( id );
+  CHECK( plan.assetId == id );
+  CHECK( plan.revision == AssetRevision::initial() );
+  CHECK( plan.activeLeases.size() == 2 );
+  CHECK_FALSE( plan.canUnload() );
+
+  const Result<void> unloadResult = manager->unload( plan );
+  CHECK_FALSE( unloadResult );
+  REQUIRE( unloadResult.diagnostics().size() >= 3 );
+  CHECK( unloadResult.diagnostics().first().code == QStringLiteral( "unload.leased" ) );
+  CHECK( manager->leaseCount( id ) == 2 );
+  REQUIRE( manager->asset( id ).has_value() );
+}
+
+TEST_CASE( "A confirmed cascade unload revokes leases and removes the asset once",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId id = registerOneRaster( manager.get(), manager.get() );
+
+  const auto view =
+    manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::View, QStringLiteral( "main view" ) } );
+  REQUIRE( view );
+
+  int aboutToUnload = 0;
+  int removed = 0;
+  AssetId unloadedId;
+  AssetId removedId;
+  QObject::connect( manager.get(), &DataManager::assetAboutToUnload,
+                    [&]( AssetId emitted ) {
+                      ++aboutToUnload;
+                      unloadedId = emitted;
+                    } );
+  QObject::connect( manager.get(), &DataManager::assetRemoved, [&]( AssetId emitted ) {
+    ++removed;
+    removedId = emitted;
+  } );
+
+  UnloadPlan plan = manager->planUnload( id );
+  plan.cascade = true;
+  CHECK( plan.canUnload() );
+
+  const Result<void> unloadResult = manager->unload( plan );
+  REQUIRE( unloadResult );
+  CHECK( aboutToUnload == 1 );
+  CHECK( unloadedId == id );
+  CHECK( removed == 1 );
+  CHECK( removedId == id );
+  CHECK_FALSE( manager->asset( id ).has_value() );
+  CHECK( manager->leaseCount( id ) == 0 );
+}
+
+TEST_CASE( "A stale unload plan is rejected after the catalog changes",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId firstId = registerOneRaster( manager.get(), manager.get() );
+
+  const quint64 generationBefore = manager->catalogGeneration();
+
+  RegisterRequest second;
+  second.source = memoryRaster( QStringLiteral( "scene-b" ) );
+  REQUIRE_FALSE( manager->registerSource( second ).assetId.isNull() );
+
+  // planUnload captured the generation before the catalog changed, but the
+  // planned asset itself is still registered. The generation mismatch must
+  // still reject the apply so callers re-plan against current state.
+  UnloadPlan stalePlan;
+  stalePlan.assetId = firstId;
+  stalePlan.revision = AssetRevision::initial();
+  stalePlan.catalogGeneration = generationBefore;
+
+  const Result<void> unloadResult = manager->unload( stalePlan );
+  CHECK_FALSE( unloadResult );
+  REQUIRE( unloadResult.diagnostics().size() == 1 );
+  CHECK( unloadResult.diagnostics().first().code == QStringLiteral( "unload.stale_plan" ) );
+  REQUIRE( manager->asset( firstId ).has_value() );
+}
+
+TEST_CASE( "Ordinary unload has no source-deletion side effect",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  const AssetId id = registerOneRaster( manager.get(), manager.get() );
+
+  const UnloadPlan plan = manager->planUnload( id );
+  CHECK( plan.canUnload() );
+
+  const Result<void> unloadResult = manager->unload( plan );
+  REQUIRE( unloadResult );
+
+  // The catalog no longer tracks the asset, but the underlying source string
+  // (the simulated file) is untouched and can be re-registered.
+  CHECK_FALSE( manager->asset( id ).has_value() );
+
+  RegisterRequest again;
+  again.source = memoryRaster( QStringLiteral( "scene" ) );
+  const auto reregistered = manager->registerSource( again );
+  CHECK_FALSE( reregistered.assetId.isNull() );
+  CHECK_FALSE( reregistered.reusedExisting );
 }

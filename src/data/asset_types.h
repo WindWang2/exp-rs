@@ -112,6 +112,19 @@ enum class StorageKind
   Remote,
 };
 
+enum class LeaseKind
+{
+  View,
+  Task,
+  Edit,
+};
+
+enum class LeaseOutcome
+{
+  Released,
+  Invalid,
+};
+
 } // namespace sicnu::data
 
 Q_DECLARE_OPERATORS_FOR_FLAGS( sicnu::data::AssetCapabilities )

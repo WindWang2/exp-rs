@@ -117,7 +117,7 @@ QT_QPA_PLATFORM=offscreen ./build/tests/test_data_manager
 - Modify `src/data/data_manager.h/.cpp`
 - Modify `tests/test_data_manager.cpp`
 
-- [ ] Write failing tests for:
+- [x] Write failing tests for:
   - acquiring a View, Task, or Edit lease;
   - RAII lease release;
   - unload planning reports every active lease;
@@ -125,10 +125,10 @@ QT_QPA_PLATFORM=offscreen ./build/tests/test_data_manager
   - a confirmed cascade plan removes the asset exactly once;
   - stale unload plans are rejected after the catalog changes;
   - ordinary unload has no source-deletion side effect.
-- [ ] Implement move-only `AssetLease`.
-- [ ] Implement `planUnload()` as a read-only impact snapshot with a catalog generation.
-- [ ] Implement `unload(confirmedPlan)` as an atomic catalog mutation.
-- [ ] Add `assetAboutToUnload` and `assetRemoved` observable events.
+- [x] Implement move-only `AssetLease`.
+- [x] Implement `planUnload()` as a read-only impact snapshot with a catalog generation.
+- [x] Implement `unload(confirmedPlan)` as an atomic catalog mutation.
+- [x] Add `assetAboutToUnload` and `assetRemoved` observable events.
 
 **Verification:** Run `test_data_manager`, including sanitizer configuration if available.
 

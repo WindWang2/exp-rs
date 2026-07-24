@@ -52,6 +52,13 @@ class Result
       return m_value.value();
     }
 
+    /// Moves the contained value out of the result for move-only payload types.
+    /// The result must be successful.
+    T take()
+    {
+      return std::move( m_value.value() );
+    }
+
     const QVector<Diagnostic> &diagnostics() const
     {
       return m_diagnostics;
@@ -70,6 +77,46 @@ class Result
     }
 
     std::optional<T> m_value;
+    QVector<Diagnostic> m_diagnostics;
+};
+
+template <>
+class Result<void>
+{
+  public:
+    static Result success( QVector<Diagnostic> diagnostics = {} )
+    {
+      return Result( true, std::move( diagnostics ) );
+    }
+
+    static Result failure( Diagnostic diagnostic )
+    {
+      return Result( false, QVector<Diagnostic>{ std::move( diagnostic ) } );
+    }
+
+    static Result failure( QVector<Diagnostic> diagnostics )
+    {
+      return Result( false, std::move( diagnostics ) );
+    }
+
+    explicit operator bool() const
+    {
+      return m_success;
+    }
+
+    const QVector<Diagnostic> &diagnostics() const
+    {
+      return m_diagnostics;
+    }
+
+  private:
+    Result( bool success, QVector<Diagnostic> diagnostics )
+      : m_success( success )
+      , m_diagnostics( std::move( diagnostics ) )
+    {
+    }
+
+    bool m_success;
     QVector<Diagnostic> m_diagnostics;
 };
 
