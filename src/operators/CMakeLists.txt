@@ -8,6 +8,7 @@ set(SICNU_OPERATORS_SOURCES
     framework/rs_operator_registry.cpp
     framework/rs_operation_logger.cpp
     framework/rs_json_params.cpp
+    framework/asset_index_pipeline.cpp
 )
 
 # OpenCV-based operators (only when OpenCV imgproc is available)
@@ -95,6 +96,7 @@ target_link_libraries(sicnu_operators
         sicnu_processing
     PRIVATE
         ${JSONCPP_LIBRARIES}
+        Sicnu::data
 )
 
 if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)

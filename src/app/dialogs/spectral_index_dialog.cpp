@@ -5,12 +5,24 @@
 
 #include <raster/qgsrasterlayer.h>
 
+#include <QCheckBox>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
 #include <QFrame>
 #include <QLabel>
 #include <QComboBox>
+#include <QMessageBox>
+#include <QTemporaryDir>
+#include <QTemporaryFile>
+
+#include "data/asset_types.h"
+#include "data/data_asset.h"
+#include "data/data_manager.h"
+#include "data/processing_asset_resolver.h"
+#include "operators/framework/asset_index_pipeline.h"
+#include "processing/framework/output_committer.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 SpectralIndexDialog::SpectralIndexDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
@@ -25,16 +37,41 @@ void SpectralIndexDialog::setRasterLayer( QgsRasterLayer *layer )
   populateBandCombos();
 }
 
+void SpectralIndexDialog::setDataManager( sicnu::data::DataManager *dataManager )
+{
+  m_dataManager = dataManager;
+  m_inputAssetCombo->setVisible( dataManager != nullptr );
+  m_inputAssetLabel->setVisible( dataManager != nullptr );
+  if ( dataManager )
+    populateInputAssets();
+}
+
 void SpectralIndexDialog::setupUi()
 {
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
 
   setupHelpBanner( mainLayout );
 
-  // ---- 参数：指数类型 + 波段映射 ----
+  // ---- 输入资产 ----
   QFrame *sec = SicnuUi::makeSection(
     this, tr( "参数" ),
     tr( "选择光谱指数并映射传感器波段。波段号从 1 起。" ) );
+
+  m_inputAssetLabel = new QLabel( tr( "输入数据资产" ), sec );
+  m_inputAssetCombo = new QComboBox( sec );
+  m_inputAssetCombo->setVisible( false );
+  m_inputAssetLabel->setVisible( false );
+  SicnuDialogHelp::tip( m_inputAssetCombo, tr(
+    "选择一个已注册的栅格数据资产作为输入。运行时会校验资产版本；"
+    "若版本已变更将拒绝执行。" ) );
+  connect( m_inputAssetCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+           this, &SpectralIndexDialog::onInputAssetChanged );
+  auto *assetForm = new QFormLayout();
+  assetForm->setContentsMargins( 0, 0, 0, 0 );
+  assetForm->addRow( m_inputAssetLabel, m_inputAssetCombo );
+  qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( assetForm );
+
+  // ---- 参数：指数类型 + 波段映射 ----
   auto *form = new QFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
   form->setHorizontalSpacing( 12 );
@@ -87,18 +124,73 @@ void SpectralIndexDialog::setupUi()
   mainLayout->addWidget( sec );
 
   setupOutputRow( mainLayout );
+
+  m_addToCanvasCheck = new QCheckBox( tr( "完成后将结果加入画布（可选）" ), this );
+  mainLayout->addWidget( m_addToCanvasCheck );
+
   setupButtonBar( mainLayout );
   mainLayout->addStretch( 1 );
 
   updateBandVisibility();
 }
 
-void SpectralIndexDialog::populateBandCombos()
+void SpectralIndexDialog::populateInputAssets()
 {
-  if ( !m_rasterLayer || !m_rasterLayer->isValid() )
+  if ( !m_dataManager )
     return;
 
-  int bandCount = m_rasterLayer->bandCount();
+  m_inputAssetCombo->blockSignals( true );
+  m_inputAssetCombo->clear();
+
+  sicnu::data::AssetQuery query;
+  query.kind = sicnu::data::AssetKind::Raster;
+  for ( const sicnu::data::AssetSnapshot &snapshot : m_dataManager->assets( query ) )
+    m_inputAssetCombo->addItem( snapshot.displayName(), snapshot.id().toString() );
+  m_inputAssetCombo->blockSignals( false );
+
+  if ( m_inputAssetCombo->count() > 0 )
+  {
+    onInputAssetChanged( 0 );
+    m_inputAssetCombo->setCurrentIndex( 0 );
+  }
+}
+
+void SpectralIndexDialog::onInputAssetChanged( int comboIndex )
+{
+  populateBandCombos();
+}
+
+int SpectralIndexDialog::inputBandCount() const
+{
+  // Asset path: read band count from the selected asset's resolved source.
+  if ( m_dataManager && m_inputAssetCombo->isVisible() && m_inputAssetCombo->count() > 0 )
+  {
+    const QString idText = m_inputAssetCombo->currentData().toString();
+    const auto assetId = sicnu::data::AssetId::fromString( idText );
+    if ( assetId )
+    {
+      const auto snapshot = m_dataManager->asset( *assetId );
+      if ( snapshot )
+      {
+        GdalDatasetWrapper ds;
+        if ( ds.open( snapshot->source().canonicalSource ) )
+          return ds.bandCount();
+      }
+    }
+    return 0;
+  }
+
+  // Layer fallback path.
+  if ( m_rasterLayer && m_rasterLayer->isValid() )
+    return m_rasterLayer->bandCount();
+  return 0;
+}
+
+void SpectralIndexDialog::populateBandCombos()
+{
+  const int bandCount = inputBandCount();
+  if ( bandCount <= 0 )
+    return;
 
   m_nirCombo->clear();
   m_redCombo->clear();
@@ -155,15 +247,113 @@ void SpectralIndexDialog::onIndexChanged( int /*index*/ )
 
 void SpectralIndexDialog::onRun()
 {
-  Json::Value params( Json::objectValue );
-  params["input"] = m_rasterLayer->source().toStdString();
-  params["output"] = outputPath().toStdString();
-  params["index"] = m_indexCombo->currentData().toString().toStdString();
-  params["nir"] = m_nirCombo->currentData().toInt();
-  params["red"] = m_redCombo->currentData().toInt();
-  params["green"] = m_greenCombo->currentData().toInt();
-  params["blue"] = m_blueCombo->currentData().toInt();
-  params["swir"] = m_swirCombo->currentData().toInt();
-
-  runOperatorTask( QStringLiteral( "rs:spectral_index" ), params );
+  // Asset path: when a Data Manager is set and an asset is selected, run
+  // through the resolver + committer seams.
+  if ( m_dataManager && m_inputAssetCombo->isVisible() && m_inputAssetCombo->count() > 0 )
+  {
+    runFromAsset();
+    return;
+  }
+  runFromLayer();
 }
+
+/// Builds the spectral-index parameters from the shared band combo widgets.
+static sicnu::operators::SpectralIndexParams buildSpectralIndexParams(
+  QComboBox *indexCombo, QComboBox *nirCombo, QComboBox *redCombo,
+  QComboBox *greenCombo, QComboBox *blueCombo, QComboBox *swirCombo )
+{
+  sicnu::operators::SpectralIndexParams params;
+  params.index = indexCombo->currentData().toString();
+  params.nir = nirCombo->currentData().toInt();
+  params.red = redCombo->currentData().toInt();
+  params.green = greenCombo->currentData().toInt();
+  params.blue = blueCombo->currentData().toInt();
+  params.swir = swirCombo->currentData().toInt();
+  return params;
+}
+
+void SpectralIndexDialog::runFromAsset()
+{
+  const QString idText = m_inputAssetCombo->currentData().toString();
+  const auto assetId = sicnu::data::AssetId::fromString( idText );
+  if ( !assetId )
+  {
+    QMessageBox::warning( this, dialogTitle(), tr( "请选择一个有效的输入数据资产。" ) );
+    return;
+  }
+  const auto snapshot = m_dataManager->asset( *assetId );
+  if ( !snapshot )
+  {
+    QMessageBox::warning( this, dialogTitle(), tr( "所选资产已不存在。" ) );
+    return;
+  }
+
+  const sicnu::operators::SpectralIndexParams params = buildSpectralIndexParams(
+    m_indexCombo, m_nirCombo, m_redCombo, m_greenCombo, m_blueCombo, m_swirCombo );
+
+  // The operator writes to a temporary file; the committer publishes it to the
+  // user's chosen stable path.
+  const QString stablePath = outputPath();
+  QTemporaryFile tempFile( QStringLiteral( "spectral_index_XXXXXX.tif" ) );
+  tempFile.setAutoRemove( false );
+  if ( !tempFile.open() )
+  {
+    handleFailed( tr( "无法创建临时输出文件。" ) );
+    return;
+  }
+  const QString tempPath = tempFile.fileName();
+  tempFile.close();
+  QFile::remove( tempPath ); // the operator writes a fresh GeoTIFF
+
+  sicnu::operators::StableOutputSpec output;
+  output.tempPath = tempPath;
+  output.stablePath = stablePath;
+  // Display is the user's opt-in decision; when checked, the committer emits
+  // displayRequested and the dialog loads the result on success.
+  output.autoLoad = m_addToCanvasCheck->isChecked();
+
+  startRun();
+
+  sicnu::data::ProcessingAssetResolver resolver( m_dataManager );
+  sicnu::OutputCommitter committer( m_dataManager );
+
+  // The committer's displayRequested is the opt-in display seam. On fire,
+  // surface the stable path so the host (openRasterDialog) loads it.
+  connect( &committer, &sicnu::OutputCommitter::displayRequested, this,
+           [this]( sicnu::data::AssetId ) { m_outputEdit->setText( outputPath() ); } );
+
+  const auto result = sicnu::operators::runSpectralIndexFromAsset(
+    sicnu::data::AssetRef{ *assetId, snapshot->revision() }, params, output,
+    resolver, committer );
+
+  if ( !result )
+  {
+    const QString message =
+      result.diagnostics().isEmpty()
+        ? tr( "光谱指数计算失败。" )
+        : result.diagnostics().first().message;
+    handleFailed( message );
+    return;
+  }
+
+  handleCompleted( stablePath );
+}
+
+void SpectralIndexDialog::runFromLayer()
+{
+  const sicnu::operators::SpectralIndexParams params = buildSpectralIndexParams(
+    m_indexCombo, m_nirCombo, m_redCombo, m_greenCombo, m_blueCombo, m_swirCombo );
+
+  Json::Value json( Json::objectValue );
+  json["input"] = m_rasterLayer->source().toStdString();
+  json["output"] = outputPath().toStdString();
+  json["index"] = params.index.toStdString();
+  json["nir"] = params.nir;
+  json["red"] = params.red;
+  json["green"] = params.green;
+  json["blue"] = params.blue;
+  json["swir"] = params.swir;
+
+  runOperatorTask( QStringLiteral( "rs:spectral_index" ), json );
+}
+

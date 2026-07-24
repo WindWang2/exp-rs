@@ -2563,3 +2563,22 @@ target_include_directories(test_output_committer PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_output_committer)
+
+# Spectral-index asset pipeline tests — first real caller of resolver + committer
+qt_add_executable(test_spectral_index_asset_pipeline
+  test_spectral_index_asset_pipeline.cpp
+)
+target_link_libraries(test_spectral_index_asset_pipeline PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_operators
+  sicnu_processing
+  sicnu_data
+)
+target_include_directories(test_spectral_index_asset_pipeline PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_spectral_index_asset_pipeline)

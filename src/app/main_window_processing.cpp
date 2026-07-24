@@ -7,6 +7,8 @@
 // callers) and for tools not yet registered as atomic definitions.
 #include "main_window.h"
 
+#include "project_context.h"
+
 #include "dialogs/image_enhancement_panel.h"
 #include "dialogs/band_math_dialog.h"
 #include "dialogs/spectral_index_dialog.h"
@@ -174,7 +176,18 @@ void QgisDesktopWindow::openSpectralIndexDialog()
                                  tr("Please select a raster layer first."));
         return;
     }
-    openRasterDialog<SpectralIndexDialog>(this, tr("Spectral Index"), rasterLayer);
+
+    SpectralIndexDialog dialog(this);
+    dialog.setRasterLayer(rasterLayer);
+    // Let the user pick a registered Data Asset as input and commit the output
+    // transactionally, when a Data Manager is available.
+    if (m_projectContext)
+        dialog.setDataManager(&m_projectContext->dataManager());
+    if (dialog.exec() == QDialog::Accepted) {
+        QString outPath = dialog.outputPath();
+        if (!outPath.isEmpty() && QFile::exists(outPath))
+            loadRasterLayer(outPath);
+    }
 }
 
 // ---------------------------------------------------------------------------

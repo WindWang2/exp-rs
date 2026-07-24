@@ -139,11 +139,17 @@ target_include_directories(sicnu_processing PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_link_libraries(sicnu_processing PRIVATE
+target_link_libraries(sicnu_processing PUBLIC
     Qt6::Core
     Qt6::Gui
     qgis_core
     GDAL::GDAL
+)
+# Sicnu::data is linked PRIVATE here: output_committer (in this target) is the
+# only consumer of data headers from sicnu_processing. Downstream targets that
+# need data headers (e.g. sicnu_operators' asset_index_pipeline) link
+# Sicnu::data themselves.
+target_link_libraries(sicnu_processing PRIVATE
     Sicnu::data
 )
 
