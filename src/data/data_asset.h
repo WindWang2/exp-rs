@@ -21,6 +21,11 @@ struct RegisterRequest
 {
   SourceDescriptor source;
   PersistencePolicy persistence = PersistencePolicy::ProjectPersistent;
+  /// Capabilities the registrar asserts in addition to those the source
+  /// provider inferred. Used by publishers (e.g. the OutputCommitter) to
+  /// declare `DeletableSource` on an asset whose file the Data Manager owns
+  /// and may legitimately delete on reap.
+  AssetCapabilities additionalCapabilities;
 };
 
 struct RegisterResult
@@ -333,11 +338,34 @@ class UnloadPlan
     {
     }
 
-    AssetId m_assetId;
-    AssetRevision m_revision;
-    quint64 m_catalogGeneration = 0;
-    bool m_cascade = false;
-    QVector<LeaseImpact> m_activeLeases;
+  AssetId m_assetId;
+  AssetRevision m_revision;
+  quint64 m_catalogGeneration = 0;
+  bool m_cascade = false;
+  QVector<LeaseImpact> m_activeLeases;
+};
+
+/// Request to reap a temporary Data Asset: remove it from the catalog and,
+/// when it declares `DeletableSource`, delete its on-disk source file. Reaping
+/// is the capability-limited deletion command distinct from unload (unload
+/// never deletes source data). Only `SessionTemporary` / `TaskTemporary`
+/// assets may be reaped; an asset holding an active lease is refused.
+struct ReapRequest
+{
+  AssetId id;
+};
+
+/// Outcome of a reap. `unloaded` is true when the asset was removed from the
+/// catalog; `sourceDeleted` is true only when the on-disk file was deleted
+/// (false when the asset was not `DeletableSource`, or when deletion failed).
+/// A failed deletion is reported as a Warning diagnostic alongside a true
+/// `unloaded` - the catalog never points at a deleted file, and disk orphans
+/// are surfaced rather than hidden.
+struct ReapResult
+{
+  bool unloaded = false;
+  bool sourceDeleted = false;
+  QVector<Diagnostic> diagnostics;
 };
 
 } // namespace sicnu::data

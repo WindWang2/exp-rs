@@ -2582,3 +2582,20 @@ target_include_directories(test_spectral_index_asset_pipeline PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_spectral_index_asset_pipeline)
+
+# Data Manager reap tests - temporary-asset reaping with DeletableSource
+qt_add_executable(test_data_manager_reap
+  test_data_manager_reap.cpp
+)
+target_link_libraries(test_data_manager_reap PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_processing
+  sicnu_data
+)
+target_include_directories(test_data_manager_reap PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_data_manager_reap)

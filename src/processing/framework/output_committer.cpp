@@ -123,6 +123,10 @@ CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
   RegisterRequest registration;
   registration.source = source;
   registration.persistence = request.persistence;
+  // The committer owns the published stable path, so the resulting asset may
+  // be reaped (catalog removal + file deletion). DeletableSource is the
+  // capability that gates physical deletion at reap time.
+  registration.additionalCapabilities = AssetCapability::DeletableSource;
 
   const RegisterResult registered = m_dataManager->registerSource( registration );
   if ( registered.assetId.isNull() )

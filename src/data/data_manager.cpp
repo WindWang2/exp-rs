@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <utility>
 
+#include <QFile>
 #include <QPointer>
 #include <QThread>
 
@@ -21,6 +22,32 @@ Diagnostic wrongThreadDiagnostic()
   return Diagnostic{ QStringLiteral( "data.wrong_thread" ),
                      QStringLiteral( "Data Manager mutations must run on its owning thread" ),
                      DiagnosticSeverity::Error };
+}
+
+/// Builds the diagnostics for refusing to remove a leased asset, shared by
+/// unload() and reap(). `codePrefix` selects the per-operation code
+/// ("unload" / "reap").
+QVector<Diagnostic> leasedRefusalDiagnostics( const QString &codePrefix,
+                                              const QVector<LeaseImpact> &impacts )
+{
+  Diagnostic block{ QStringLiteral( "%1.leased" ).arg( codePrefix ),
+                    QStringLiteral( "The asset is referenced by %1 active lease(s)" )
+                      .arg( impacts.size() ),
+                    DiagnosticSeverity::Error };
+  QVector<Diagnostic> diagnostics{ std::move( block ) };
+  for ( const LeaseImpact &impact : impacts )
+  {
+    diagnostics.append(
+      Diagnostic{ QStringLiteral( "%1.lease" ).arg( codePrefix ),
+                  QStringLiteral( "Held by %1 lease" )
+                    .arg( impact.lease.kind == LeaseKind::View
+                            ? QStringLiteral( "a view" )
+                            : impact.lease.kind == LeaseKind::Task
+                                ? QStringLiteral( "a task" )
+                                : QStringLiteral( "an edit" ) ),
+                  DiagnosticSeverity::Info } );
+  }
+  return diagnostics;
 }
 
 } // namespace
@@ -149,12 +176,14 @@ RegisterResult DataManager::registerSource( const RegisterRequest &request )
   }
 
   const AssetId id = AssetId::generate();
+  const AssetCapabilities capabilities =
+    source.capabilities | request.additionalCapabilities;
   AssetSnapshot snapshot{ id,
                           AssetRevision::initial(),
                           normalizedDescriptor,
                           source.kind,
                           source.state,
-                          source.capabilities,
+                          capabilities,
                           request.persistence,
                           source.storageKind,
                           source.displayName,
@@ -598,24 +627,8 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
   // plan revokes those leases atomically rather than silently dropping them.
   if ( !confirmedPlan.cascade() && !liveLeaseImpacts.isEmpty() )
   {
-    Diagnostic block{ QStringLiteral( "unload.leased" ),
-                      QStringLiteral( "The asset is referenced by %1 active lease(s)" )
-                        .arg( liveLeaseImpacts.size() ),
-                      DiagnosticSeverity::Error };
-    QVector<Diagnostic> diagnostics{ std::move( block ) };
-    for ( const LeaseImpact &impact : liveLeaseImpacts )
-    {
-      diagnostics.append(
-        Diagnostic{ QStringLiteral( "unload.lease" ),
-                    QStringLiteral( "Held by %1 lease" )
-                      .arg( impact.lease.kind == LeaseKind::View
-                              ? QStringLiteral( "a view" )
-                              : impact.lease.kind == LeaseKind::Task
-                                  ? QStringLiteral( "a task" )
-                                  : QStringLiteral( "an edit" ) ),
-                    DiagnosticSeverity::Info } );
-    }
-    return Result<void>::failure( std::move( diagnostics ) );
+    return Result<void>::failure( leasedRefusalDiagnostics( QStringLiteral( "unload" ),
+                                                            liveLeaseImpacts ) );
   }
 
   emit assetAboutToUnload( confirmedPlan.assetId() );
@@ -631,6 +644,91 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
 
   emit assetRemoved( confirmedPlan.assetId() );
   return Result<void>::success();
+}
+
+ReapResult DataManager::reap( const ReapRequest &request )
+{
+  ReapResult result;
+
+  if ( QThread::currentThread() != thread() )
+  {
+    result.diagnostics.append( wrongThreadDiagnostic() );
+    return result;
+  }
+
+  const auto recordIt = m_impl->findRecord( request.id );
+  if ( recordIt == m_impl->records.end() )
+  {
+    result.diagnostics.append(
+      Diagnostic{ QStringLiteral( "reap.unknown_asset" ),
+                  QStringLiteral( "The asset is no longer registered" ),
+                  DiagnosticSeverity::Error } );
+    return result;
+  }
+
+  const AssetSnapshot &snapshot = recordIt->snapshot;
+
+  // Reaping is the capability-limited deletion command for temporary assets
+  // only. A persistent asset is never reaped - its source is not owned by the
+  // Data Manager's lifecycle.
+  if ( snapshot.persistence() == PersistencePolicy::ProjectPersistent )
+  {
+    result.diagnostics.append(
+      Diagnostic{ QStringLiteral( "reap.persistent" ),
+                  QStringLiteral( "A ProjectPersistent asset cannot be reaped; "
+                                  "use unload to remove it from the catalog" ),
+                  DiagnosticSeverity::Error } );
+    return result;
+  }
+
+  // The lease is the "still in use" signal. Reaping a leased asset would
+  // revoke leases out from under a viewer or processor; refuse instead.
+  const QVector<LeaseImpact> liveLeaseImpacts = m_impl->leaseImpacts( request.id );
+  if ( !liveLeaseImpacts.isEmpty() )
+  {
+    result.diagnostics = leasedRefusalDiagnostics( QStringLiteral( "reap" ), liveLeaseImpacts );
+    return result;
+  }
+
+  // Announce before mutation so the Display Manager removes the layer, exactly
+  // as unload does.
+  emit assetAboutToUnload( request.id );
+
+  const QString sourcePath = snapshot.source().canonicalSource;
+  const bool deletable =
+    snapshot.capabilities().testFlag( AssetCapability::DeletableSource );
+
+  m_impl->records.erase( recordIt );
+  m_impl->catalogGeneration++;
+  result.unloaded = true;
+
+  // Physical deletion is gated by DeletableSource. A temporary asset the Data
+  // Manager did not publish (e.g. an imported scratch file) is unloaded but
+  // its file is left on disk. NOTE: this deletes the single canonical source
+  // file; multi-file resource sets (ENVI .hdr/.dat pairs, Shapefile components)
+  // are a known follow-up to route through a provider deleteSource seam.
+  if ( deletable && !sourcePath.isEmpty() && QFile::exists( sourcePath ) )
+  {
+    if ( !QFile::remove( sourcePath ) )
+    {
+      // The catalog entry is already gone; surface the orphaned file rather
+      // than hiding it. The catalog never points at a deleted file because the
+      // record is already removed.
+      result.diagnostics.append(
+        Diagnostic{ QStringLiteral( "reap.delete_failed" ),
+                    QStringLiteral( "The asset was removed from the catalog but its "
+                                    "source file could not be deleted: %1" )
+                      .arg( sourcePath ),
+                    DiagnosticSeverity::Warning } );
+    }
+    else
+    {
+      result.sourceDeleted = true;
+    }
+  }
+
+  emit assetRemoved( request.id );
+  return result;
 }
 
 LeaseOutcome DataManager::releaseLease( const LeaseRef &lease )

@@ -86,8 +86,16 @@ class DataManager : public QObject
     /// Lease is released and no change event is emitted.
     Result<void> rollbackEdit( AssetId id );
 
-    UnloadPlan planUnload( AssetId id ) const;
-    Result<void> unload( const UnloadPlan &confirmedPlan );
+  UnloadPlan planUnload( AssetId id ) const;
+  Result<void> unload( const UnloadPlan &confirmedPlan );
+
+  /// Reaps a temporary Data Asset: removes it from the catalog and, when the
+  /// asset declares `DeletableSource`, deletes its on-disk source file. A
+  /// distinct operation from unload (unload never deletes source data).
+  /// Refuses a `ProjectPersistent` asset, an asset holding an active lease,
+  /// and an unknown asset. A file-deletion failure still unloads the catalog
+  /// entry and reports a warning; the catalog never points at a deleted file.
+  ReapResult reap( const ReapRequest &request );
 
     /// Attaches a Derivation Record to an existing asset, the final step of a
     /// transactional algorithm-output commit performed outside this layer. The
