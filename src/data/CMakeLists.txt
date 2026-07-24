@@ -8,6 +8,12 @@ qt_add_library(sicnu_data STATIC
   internal/source_provider.h
   internal/source_provider_registry.cpp
   internal/source_provider_registry.h
+  providers/gdal_runtime.cpp
+  providers/gdal_runtime.h
+  providers/gdal_raster_source_provider.cpp
+  providers/gdal_raster_source_provider.h
+  providers/ogr_vector_source_provider.cpp
+  providers/ogr_vector_source_provider.h
   source_descriptor.cpp
   source_descriptor.h
 )
@@ -22,6 +28,7 @@ target_include_directories(sicnu_data
 target_link_libraries(sicnu_data
   PUBLIC
     Qt6::Core
+    GDAL::GDAL
 )
 
 get_target_property(SICNU_DATA_DIRECT_LINKS sicnu_data LINK_LIBRARIES)

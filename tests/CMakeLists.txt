@@ -2383,3 +2383,17 @@ if(TARGET sicnu_jobs)
   target_include_directories(test_job_engine PRIVATE ${CMAKE_SOURCE_DIR}/src)
   sicnu_discover_tests(test_job_engine)
 endif()
+
+# Data source provider tests — GDAL raster + OGR vector structural resolution
+qt_add_executable(test_data_source_providers
+  test_data_source_providers.cpp
+)
+target_link_libraries(test_data_source_providers PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+)
+target_include_directories(test_data_source_providers PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_data_source_providers)

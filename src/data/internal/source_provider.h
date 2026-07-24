@@ -16,6 +16,11 @@ struct ResolvedSource
   AssetCapabilities capabilities;
   StorageKind storageKind = StorageKind::File;
   QString displayName;
+  /// Canonical, provider-normalized source location used for deduplication.
+  /// For file-backed providers this is the resolved, symlink-followed absolute
+  /// path (e.g. the ENVI binary data file, not its `.hdr` sidecar). Callers must
+  /// use this — not the raw request string — as the SourceKey identity.
+  QString canonicalSource;
 };
 
 class SourceProvider

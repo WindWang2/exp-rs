@@ -144,7 +144,7 @@ QT_QPA_PLATFORM=offscreen ./build/tests/test_data_manager
 - Modify `src/data/CMakeLists.txt`
 - Modify `tests/CMakeLists.txt`
 
-- [ ] Write failing tests using repository fixtures for:
+- [x] Write failing tests using repository fixtures for:
   - GeoTIFF structural metadata and capabilities;
   - memory or fixture OGR vector structural metadata and capabilities;
   - canonical path SourceKey generation;
@@ -152,10 +152,10 @@ QT_QPA_PLATFORM=offscreen ./build/tests/test_data_manager
   - ENVI `.hdr` and its paired binary resolve to the same SourceKey;
   - missing source registers or resolves to Missing rather than disappearing;
   - no provider result contains renderer state or credentials.
-- [ ] Move ENVI path-pair knowledge from `LayerManager` into the GDAL provider implementation.
-- [ ] Resolve only structural metadata in this task; do not calculate histograms or exact statistics.
-- [ ] Declare capabilities explicitly per provider.
-- [ ] Ensure providers return immutable display/processing source descriptions rather than open handles.
+- [ ] Move ENVI path-pair knowledge from `LayerManager` into the GDAL provider implementation. *(Knowledge now lives in `GdalRasterSourceProvider`; the legacy copy in `LayerManager` is removed in Task 6 when that facade routes through the provider, so the live ENVI load path is not broken mid-migration.)*
+- [x] Resolve only structural metadata in this task; do not calculate histograms or exact statistics.
+- [x] Declare capabilities explicitly per provider.
+- [x] Ensure providers return immutable display/processing source descriptions rather than open handles.
 
 **Verification:**
 

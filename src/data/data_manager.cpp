@@ -4,6 +4,8 @@
 #include <utility>
 
 #include "internal/source_provider_registry.h"
+#include "providers/gdal_raster_source_provider.h"
+#include "providers/ogr_vector_source_provider.h"
 
 namespace sicnu::data
 {
@@ -50,8 +52,16 @@ struct DataManager::Impl
   }
 };
 
+std::unique_ptr<internal::SourceProviderRegistry> DataManager::defaultProviders()
+{
+  auto registry = std::make_unique<internal::SourceProviderRegistry>();
+  registry->add( std::make_unique<providers::GdalRasterSourceProvider>() );
+  registry->add( std::make_unique<providers::OgrVectorSourceProvider>() );
+  return registry;
+}
+
 DataManager::DataManager( QObject *parent )
-  : DataManager( std::make_unique<internal::SourceProviderRegistry>(), parent )
+  : DataManager( defaultProviders(), parent )
 {
 }
 
@@ -66,22 +76,31 @@ DataManager::~DataManager() = default;
 
 RegisterResult DataManager::registerSource( const RegisterRequest &request )
 {
-  const SourceKey sourceKey = request.source.sourceKey();
+  // Resolve first so providers can normalize the canonical identity (e.g. GDAL
+  // rewrites an ENVI `.hdr` sidecar to its paired binary data file, and follows
+  // symlinks). Deduplication is then keyed on that normalized identity rather
+  // than the caller's raw string.
+  const Result<internal::ResolvedSource> resolved = m_impl->providers->resolve( request.source );
+  if ( !resolved )
+    return RegisterResult{ {}, false, resolved.diagnostics() };
+
+  const internal::ResolvedSource &source = resolved.value();
+
+  SourceDescriptor normalizedDescriptor = request.source;
+  if ( !source.canonicalSource.isEmpty() )
+    normalizedDescriptor.canonicalSource = source.canonicalSource;
+
+  const SourceKey sourceKey = normalizedDescriptor.sourceKey();
   for ( const Impl::AssetRecord &record : m_impl->records )
   {
     if ( record.sourceKey == sourceKey )
       return RegisterResult{ record.snapshot.id(), true, {} };
   }
 
-  const Result<internal::ResolvedSource> resolved = m_impl->providers->resolve( request.source );
-  if ( !resolved )
-    return RegisterResult{ {}, false, resolved.diagnostics() };
-
   const AssetId id = AssetId::generate();
-  const internal::ResolvedSource &source = resolved.value();
   AssetSnapshot snapshot{ id,
                           AssetRevision::initial(),
-                          request.source,
+                          normalizedDescriptor,
                           source.kind,
                           source.state,
                           source.capabilities,

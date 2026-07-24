@@ -154,6 +154,11 @@ class DataManager : public QObject
     explicit DataManager( std::unique_ptr<internal::SourceProviderRegistry> providers,
                           QObject *parent = nullptr );
 
+    /// Registry seeded with the built-in local GDAL raster and OGR vector
+    /// providers. Used by the public constructor so the application resolves real
+    /// sources by default; tests inject their own registry to stay hermetic.
+    static std::unique_ptr<internal::SourceProviderRegistry> defaultProviders();
+
     struct Impl;
     std::unique_ptr<Impl> m_impl;
 
