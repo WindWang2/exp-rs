@@ -3,6 +3,7 @@
 #include <QString>
 
 #include "../asset_types.h"
+#include "../data_asset.h"
 #include "../data_result.h"
 #include "../source_descriptor.h"
 
@@ -21,6 +22,9 @@ struct ResolvedSource
   /// path (e.g. the ENVI binary data file, not its `.hdr` sidecar). Callers must
   /// use this — not the raw request string — as the SourceKey identity.
   QString canonicalSource;
+  /// Stable provider identity used to collapse aliases and inferred providers.
+  QString canonicalProviderKey;
+  AssetStructure structure;
 };
 
 class SourceProvider

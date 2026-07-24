@@ -15,6 +15,7 @@ namespace sicnu::data
 namespace internal
 {
 class SourceProviderRegistry;
+struct AssetLeaseControl;
 }
 
 class DataManager;
@@ -27,68 +28,16 @@ class AssetLease
     AssetLease( const AssetLease & ) = delete;
     AssetLease &operator=( const AssetLease & ) = delete;
 
-    AssetLease( AssetLease &&other ) noexcept
-      : m_assetId( other.m_assetId )
-      , m_token( other.m_token )
-      , m_kind( other.m_kind )
-      , m_purpose( std::move( other.m_purpose ) )
-      , m_manager( other.m_manager )
-    {
-      other.m_manager = nullptr;
-      other.m_token = 0;
-    }
+    AssetLease( AssetLease &&other ) noexcept;
+    AssetLease &operator=( AssetLease &&other ) noexcept;
+    ~AssetLease();
 
-    AssetLease &operator=( AssetLease &&other ) noexcept
-    {
-      if ( this == &other )
-        return *this;
-
-      release();
-
-      m_assetId = other.m_assetId;
-      m_token = other.m_token;
-      m_kind = other.m_kind;
-      m_purpose = std::move( other.m_purpose );
-      m_manager = other.m_manager;
-      other.m_manager = nullptr;
-      other.m_token = 0;
-      return *this;
-    }
-
-    ~AssetLease()
-    {
-      release();
-    }
-
-    bool isValid() const
-    {
-      return m_manager != nullptr && m_token != 0;
-    }
-
-    const AssetId &assetId() const
-    {
-      return m_assetId;
-    }
-
-    quint64 token() const
-    {
-      return m_token;
-    }
-
-    LeaseKind kind() const
-    {
-      return m_kind;
-    }
-
-    const QString &purpose() const
-    {
-      return m_purpose;
-    }
-
-    LeaseRef toRef() const
-    {
-      return LeaseRef{ m_assetId, m_token, m_kind };
-    }
+    bool isValid() const;
+    const AssetId &assetId() const;
+    quint64 token() const;
+    LeaseKind kind() const;
+    const QString &purpose() const;
+    LeaseRef toRef() const;
 
     /// Releases the lease explicitly. Returns Released on success, Invalid when
     /// already released or detached. After this call isValid() is false.
@@ -97,28 +46,9 @@ class AssetLease
   private:
     friend class DataManager;
 
-    AssetLease( AssetId assetId,
-                quint64 token,
-                LeaseKind kind,
-                QString purpose,
-                DataManager *manager )
-      : m_assetId( assetId )
-      , m_token( token )
-      , m_kind( kind )
-      , m_purpose( std::move( purpose ) )
-      , m_manager( manager )
-    {
-    }
+    explicit AssetLease( std::shared_ptr<internal::AssetLeaseControl> control );
 
-    /// Detaches ownership without notifying the manager. Used by the manager
-    /// when it reclaims the lease itself during unload so release() is a no-op.
-    void detach();
-
-    AssetId m_assetId;
-    quint64 m_token = 0;
-    LeaseKind m_kind = LeaseKind::View;
-    QString m_purpose;
-    DataManager *m_manager = nullptr;
+    std::shared_ptr<internal::AssetLeaseControl> m_control;
 };
 
 class DataManager : public QObject
@@ -130,6 +60,7 @@ class DataManager : public QObject
     ~DataManager() override;
 
     RegisterResult registerSource( const RegisterRequest &request );
+    Result<AssetId> restoreSource( const RestoreRequest &request );
     std::optional<AssetSnapshot> asset( AssetId id ) const;
     QVector<AssetSnapshot> assets( const AssetQuery &query = {} ) const;
 
@@ -163,7 +94,7 @@ class DataManager : public QObject
     std::unique_ptr<Impl> m_impl;
 
     LeaseOutcome releaseLease( const LeaseRef &lease );
-    void detachLease( const LeaseRef &lease );
+    void revokeLease( const LeaseRef &lease );
 };
 
 } // namespace sicnu::data

@@ -2436,3 +2436,23 @@ target_include_directories(test_layer_manager_data_context PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_layer_manager_data_context)
+
+# Project persistence — SICNU Data identity plus standard QGIS presentation
+qt_add_executable(test_data_project_roundtrip
+  test_data_project_roundtrip.cpp
+)
+target_link_libraries(test_data_project_roundtrip PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Xml
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+)
+target_include_directories(test_data_project_roundtrip PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_data_project_roundtrip)

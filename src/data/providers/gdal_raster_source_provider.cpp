@@ -1,5 +1,8 @@
 #include "gdal_raster_source_provider.h"
 
+#include <algorithm>
+#include <array>
+
 #include <QDir>
 #include <QFileInfo>
 #include <QString>
@@ -121,6 +124,7 @@ Result<internal::ResolvedSource> GdalRasterSourceProvider::resolve(
   resolved.kind = AssetKind::Raster;
   resolved.storageKind = StorageKind::File;
   resolved.canonicalSource = normalizedPath;
+  resolved.canonicalProviderKey = QStringLiteral( "gdal" );
   resolved.displayName = QFileInfo( normalizedPath ).completeBaseName();
 
   const QFileInfo info( normalizedPath );
@@ -154,6 +158,65 @@ Result<internal::ResolvedSource> GdalRasterSourceProvider::resolve(
   resolved.capabilities = AssetCapability::Renderable | AssetCapability::ReadablePixels |
                           AssetCapability::BandMetadata | AssetCapability::BandStatistics |
                           AssetCapability::Relocatable;
+
+  RasterStructure structure;
+  if ( GDALDriverH driver = GDALGetDatasetDriver( dataset ) )
+    structure.driverName = QString::fromUtf8( GDALGetDriverShortName( driver ) );
+  structure.width = GDALGetRasterXSize( dataset );
+  structure.height = GDALGetRasterYSize( dataset );
+  structure.bandCount = GDALGetRasterCount( dataset );
+  structure.crsWkt = QString::fromUtf8( GDALGetProjectionRef( dataset ) );
+
+  structure.hasGeoTransform =
+    GDALGetGeoTransform( dataset, structure.geoTransform.data() ) == CE_None;
+  if ( structure.hasGeoTransform )
+  {
+    const auto corner = [&]( double pixelX, double pixelY ) {
+      const auto &transform = structure.geoTransform;
+      return std::array<double, 2>{
+        transform[0] + pixelX * transform[1] + pixelY * transform[2],
+        transform[3] + pixelX * transform[4] + pixelY * transform[5] };
+    };
+    const std::array<std::array<double, 2>, 4> corners{
+      corner( 0.0, 0.0 ),
+      corner( structure.width, 0.0 ),
+      corner( 0.0, structure.height ),
+      corner( structure.width, structure.height ),
+    };
+    structure.extent.minimumX = corners.front()[0];
+    structure.extent.maximumX = corners.front()[0];
+    structure.extent.minimumY = corners.front()[1];
+    structure.extent.maximumY = corners.front()[1];
+    for ( const auto &point : corners )
+    {
+      structure.extent.minimumX = std::min( structure.extent.minimumX, point[0] );
+      structure.extent.maximumX = std::max( structure.extent.maximumX, point[0] );
+      structure.extent.minimumY = std::min( structure.extent.minimumY, point[1] );
+      structure.extent.maximumY = std::max( structure.extent.maximumY, point[1] );
+    }
+    structure.extent.valid = true;
+  }
+
+  structure.bands.reserve( structure.bandCount );
+  for ( int bandNumber = 1; bandNumber <= structure.bandCount; ++bandNumber )
+  {
+    GDALRasterBandH band = GDALGetRasterBand( dataset, bandNumber );
+    if ( band == nullptr )
+      continue;
+
+    RasterBandStructure bandStructure;
+    bandStructure.number = bandNumber;
+    bandStructure.dataType =
+      QString::fromUtf8( GDALGetDataTypeName( GDALGetRasterDataType( band ) ) );
+    int hasNoData = 0;
+    const double noData = GDALGetRasterNoDataValue( band, &hasNoData );
+    if ( hasNoData )
+      bandStructure.noDataValue = noData;
+    bandStructure.colorInterpretation = QString::fromUtf8(
+      GDALGetColorInterpretationName( GDALGetRasterColorInterpretation( band ) ) );
+    structure.bands.append( std::move( bandStructure ) );
+  }
+  resolved.structure = std::move( structure );
 
   GDALClose( dataset );
   return Result<internal::ResolvedSource>::success( std::move( resolved ) );

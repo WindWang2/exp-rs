@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
+#include <thread>
+#include <type_traits>
 
 #include "data/asset_types.h"
 #include "data/data_asset.h"
@@ -29,6 +31,7 @@ using sicnu::data::LeaseOutcome;
 using sicnu::data::LeaseRef;
 using sicnu::data::PersistencePolicy;
 using sicnu::data::RegisterRequest;
+using sicnu::data::RegisterResult;
 using sicnu::data::Result;
 using sicnu::data::SourceDescriptor;
 using sicnu::data::StorageKind;
@@ -307,6 +310,25 @@ TEST_CASE( "Provider resolution errors return diagnostics without catalog side e
   CHECK( manager->assets().isEmpty() );
 }
 
+TEST_CASE( "Catalog mutations are rejected outside the Data Manager owning thread",
+           "[data_manager]" )
+{
+  const auto manager = makeDataManager();
+  RegisterResult result;
+
+  std::thread worker( [&] {
+    RegisterRequest request;
+    request.source = memoryRaster( QStringLiteral( "worker-thread-source" ) );
+    result = manager->registerSource( request );
+  } );
+  worker.join();
+
+  CHECK( result.assetId.isNull() );
+  REQUIRE( result.diagnostics.size() == 1 );
+  CHECK( result.diagnostics.first().code == QStringLiteral( "data.wrong_thread" ) );
+  CHECK( manager->assets().isEmpty() );
+}
+
 namespace
 {
 
@@ -384,17 +406,19 @@ TEST_CASE( "Unloading a leased asset reports every active lease and is rejected"
   const auto manager = makeDataManager();
   const AssetId id = registerOneRaster( manager.get(), manager.get() );
 
-  const auto view =
-    manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::View, QStringLiteral( "main view" ) } );
-  REQUIRE( view );
+  AssetLease view =
+    manager->acquire( AssetRef{ id },
+                      AssetUse{ LeaseKind::View, QStringLiteral( "main view" ) } )
+      .take();
+  REQUIRE( view.isValid() );
   const auto task =
     manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::Task, QStringLiteral( "ndvi" ) } );
   REQUIRE( task );
 
   const UnloadPlan plan = manager->planUnload( id );
-  CHECK( plan.assetId == id );
-  CHECK( plan.revision == AssetRevision::initial() );
-  CHECK( plan.activeLeases.size() == 2 );
+  CHECK( plan.assetId() == id );
+  CHECK( plan.revision() == AssetRevision::initial() );
+  CHECK( plan.activeLeases().size() == 2 );
   CHECK_FALSE( plan.canUnload() );
 
   const Result<void> unloadResult = manager->unload( plan );
@@ -405,15 +429,35 @@ TEST_CASE( "Unloading a leased asset reports every active lease and is rejected"
   REQUIRE( manager->asset( id ).has_value() );
 }
 
+TEST_CASE( "Unload plans are read-only impact snapshots", "[data_manager]" )
+{
+  STATIC_CHECK_FALSE( std::is_aggregate_v<UnloadPlan> );
+
+  const auto manager = makeDataManager();
+  const AssetId id = registerOneRaster( manager.get(), manager.get() );
+  const auto view =
+    manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::View, QStringLiteral( "main view" ) } );
+  REQUIRE( view );
+
+  const UnloadPlan plan = manager->planUnload( id );
+  CHECK( plan.assetId() == id );
+  CHECK( plan.revision() == AssetRevision::initial() );
+  REQUIRE( plan.activeLeases().size() == 1 );
+  CHECK( plan.activeLeases().first().purpose == QStringLiteral( "main view" ) );
+  CHECK_FALSE( plan.cascade() );
+}
+
 TEST_CASE( "A confirmed cascade unload revokes leases and removes the asset once",
            "[data_manager]" )
 {
   const auto manager = makeDataManager();
   const AssetId id = registerOneRaster( manager.get(), manager.get() );
 
-  const auto view =
-    manager->acquire( AssetRef{ id }, AssetUse{ LeaseKind::View, QStringLiteral( "main view" ) } );
-  REQUIRE( view );
+  AssetLease view =
+    manager->acquire( AssetRef{ id },
+                      AssetUse{ LeaseKind::View, QStringLiteral( "main view" ) } )
+      .take();
+  REQUIRE( view.isValid() );
 
   int aboutToUnload = 0;
   int removed = 0;
@@ -429,8 +473,8 @@ TEST_CASE( "A confirmed cascade unload revokes leases and removes the asset once
     removedId = emitted;
   } );
 
-  UnloadPlan plan = manager->planUnload( id );
-  plan.cascade = true;
+  const UnloadPlan plan = manager->planUnload( id ).confirmedCascade();
+  CHECK( plan.cascade() );
   CHECK( plan.canUnload() );
 
   const Result<void> unloadResult = manager->unload( plan );
@@ -441,6 +485,8 @@ TEST_CASE( "A confirmed cascade unload revokes leases and removes the asset once
   CHECK( removedId == id );
   CHECK_FALSE( manager->asset( id ).has_value() );
   CHECK( manager->leaseCount( id ) == 0 );
+  CHECK_FALSE( view.isValid() );
+  CHECK( view.release() == LeaseOutcome::Invalid );
 }
 
 TEST_CASE( "A stale unload plan is rejected after the catalog changes",
@@ -449,19 +495,11 @@ TEST_CASE( "A stale unload plan is rejected after the catalog changes",
   const auto manager = makeDataManager();
   const AssetId firstId = registerOneRaster( manager.get(), manager.get() );
 
-  const quint64 generationBefore = manager->catalogGeneration();
+  const UnloadPlan stalePlan = manager->planUnload( firstId );
 
   RegisterRequest second;
   second.source = memoryRaster( QStringLiteral( "scene-b" ) );
   REQUIRE_FALSE( manager->registerSource( second ).assetId.isNull() );
-
-  // planUnload captured the generation before the catalog changed, but the
-  // planned asset itself is still registered. The generation mismatch must
-  // still reject the apply so callers re-plan against current state.
-  UnloadPlan stalePlan;
-  stalePlan.assetId = firstId;
-  stalePlan.revision = AssetRevision::initial();
-  stalePlan.catalogGeneration = generationBefore;
 
   const Result<void> unloadResult = manager->unload( stalePlan );
   CHECK_FALSE( unloadResult );

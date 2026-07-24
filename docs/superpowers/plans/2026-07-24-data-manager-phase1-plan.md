@@ -152,7 +152,7 @@ QT_QPA_PLATFORM=offscreen ./build/tests/test_data_manager
   - ENVI `.hdr` and its paired binary resolve to the same SourceKey;
   - missing source registers or resolves to Missing rather than disappearing;
   - no provider result contains renderer state or credentials.
-- [ ] Move ENVI path-pair knowledge from `LayerManager` into the GDAL provider implementation. *(Knowledge now lives in `GdalRasterSourceProvider`; the legacy copy in `LayerManager` is removed in Task 6 when that facade routes through the provider, so the live ENVI load path is not broken mid-migration.)*
+- [x] Move ENVI path-pair knowledge from `LayerManager` into the GDAL provider implementation.
 - [x] Resolve only structural metadata in this task; do not calculate histograms or exact statistics.
 - [x] Declare capabilities explicitly per provider.
 - [x] Ensure providers return immutable display/processing source descriptions rather than open handles.
@@ -174,8 +174,10 @@ QT_QPA_PLATFORM=offscreen ./build/tests/test_data_source_providers
 - Create `tests/test_qgis_display_manager.cpp`
 - Modify `src/app/CMakeLists.txt`
 - Modify `tests/CMakeLists.txt`
+- Modify `src/gui/CMakeLists.txt` *(disable target-level AUTOUIC for the vendored
+  QGIS GUI target, which already uses its own generated `ui` target)*
 
-- [ ] Write failing tests for:
+- [x] Write failing tests for:
   - creating the main Display View over a canvas/tree/store fixture;
   - adding one asset creates one Display Layer and one `QgsMapLayer`;
   - adding the same asset again creates a distinct `QgsMapLayer`;
@@ -184,12 +186,13 @@ QT_QPA_PLATFORM=offscreen ./build/tests/test_data_source_providers
   - removing a Display Layer releases its lease but leaves the Data Asset;
   - a Display Layer belongs to exactly one Display View;
   - invalid or Missing assets produce structured display diagnostics.
-- [ ] Implement a small Display Manager interface: create/register view, add layer, clone layer, remove layer, and snapshot.
-- [ ] Let the QGIS adapter own the runtime `QgsMapLayer` display state.
-- [ ] Store `AssetId`, `DisplayLayerId`, and `DisplayViewId` as QGIS custom properties.
-- [ ] Keep canvas, tree, and QGIS layer ownership entirely outside `sicnu_data`.
+- [x] Implement a small Display Manager interface: create/register view, add layer, clone layer, remove layer, and snapshot.
+- [x] Let the QGIS adapter own the runtime `QgsMapLayer` display state.
+- [x] Store `AssetId`, `DisplayLayerId`, and `DisplayViewId` as QGIS custom properties.
+- [x] Keep canvas, tree, and QGIS layer ownership entirely outside `sicnu_data`.
 
-**Verification:** Run `test_qgis_display_manager` offscreen.
+**Verification:** `QT_QPA_PLATFORM=offscreen ./build/tests/test_qgis_display_manager`
+passes 95 assertions in 7 test cases.
 
 **Commit:** `feat(display): create independent qgis display layers from assets`
 
@@ -200,23 +203,26 @@ QT_QPA_PLATFORM=offscreen ./build/tests/test_data_source_providers
 - Create `src/app/project_context.h/.cpp`
 - Modify `src/app/layer_manager.h/.cpp`
 - Modify `src/app/main_window.h/.cpp`
-- Modify `src/app/main_window_layers.cpp`
+- Modify `src/app/main_window_docks.cpp`
 - Modify `src/app/main_window_project.cpp`
 - Modify `src/app/CMakeLists.txt`
 - Add or modify a focused integration test
 
-- [ ] Write a failing integration test that `loadRasterLayer(path)` registers one asset and adds one main-view Display Layer through a single seam.
-- [ ] Construct one Project Context per main window/project.
-- [ ] Inject its Data Manager and Display Manager into the temporary LayerManager facade.
-- [ ] Change `loadRasterLayer()` and `loadVectorLayer()` to:
+- [x] Write a failing integration test that `loadRasterLayer(path)` registers one asset and adds one main-view Display Layer through a single seam.
+- [x] Construct one Project Context per main window/project.
+- [x] Inject its Data Manager and Display Manager into the temporary LayerManager facade.
+- [x] Change `loadRasterLayer()` and `loadVectorLayer()` to:
   1. register or reuse an asset;
   2. add a Display Layer to the main view;
   3. report structured errors through the UI shell.
-- [ ] Change selected-layer removal to remove Display Layers only.
-- [ ] Retain active-layer, properties-dialog, and tree helper behavior in the facade until later callers migrate.
-- [ ] Ensure `newProject()` clears the Project Context through an explicit project operation rather than treating `QgsProject::clear()` as sufficient data cleanup.
+- [x] Change selected-layer removal to remove Display Layers only.
+- [x] Retain active-layer, properties-dialog, and tree helper behavior in the facade until later callers migrate.
+- [x] Ensure `newProject()` clears the Project Context through an explicit project operation rather than treating `QgsProject::clear()` as sufficient data cleanup.
 
-**Verification:** Run focused integration tests plus existing `test_layers` and `test_layer_tree_bridge`.
+**Verification:** `QT_QPA_PLATFORM=offscreen ./build/tests/test_layer_manager_data_context`
+passes 36 assertions in 5 test cases. Existing `test_layers` and
+`test_layer_tree_bridge` each pass 11 assertions in 3 test cases, and the
+`sicnu_geo_rs` application target builds successfully.
 
 **Commit:** `refactor(app): route main layer loading through project data context`
 
@@ -226,12 +232,18 @@ QT_QPA_PLATFORM=offscreen ./build/tests/test_data_source_providers
 
 - Create `src/app/data_project_serializer.h/.cpp`
 - Create `tests/test_data_project_roundtrip.cpp`
+- Modify `src/data/asset_types.h`
+- Modify `src/data/data_asset.h`
+- Modify `src/data/data_manager.h/.cpp` *(restore persisted Asset IDs through
+  the Data Manager seam)*
+- Modify `src/app/display/qgis_display_manager.h/.cpp` *(adopt existing QGIS
+  presentation objects without recreating renderer/tree state)*
 - Modify `src/app/main_window_connections.cpp`
 - Modify `src/app/main_window_project.cpp`
 - Modify `src/app/CMakeLists.txt`
 - Modify `tests/CMakeLists.txt`
 
-- [ ] Write failing round-trip tests for:
+- [x] Write failing round-trip tests for:
   - stable Asset IDs after save/reopen;
   - Display Layer ID and Asset ID mapping;
   - independent renderer states survive;
@@ -240,14 +252,17 @@ QT_QPA_PLATFORM=offscreen ./build/tests/test_data_source_providers
   - reopening a standard QGIS project adopts supported layers;
   - two same-source QGIS layers adopt one Data Asset and two Display Layers;
   - unsupported provider layers remain External Display Layers.
-- [ ] Define one versioned SICNU extension XML root.
-- [ ] Serialize Data Asset descriptions without live handles, caches, or credentials.
-- [ ] Store QGIS identity custom properties for main-view interoperability.
-- [ ] On read, restore extension assets before reconciling QGIS layers.
-- [ ] Add an adoption guard so Display Manager-created layers do not re-enter as new external additions.
-- [ ] Preserve QGIS renderer and tree state as the QGIS adapter's authoritative presentation state.
+- [x] Define one versioned SICNU extension XML root.
+- [x] Serialize Data Asset descriptions without live handles, caches, or credentials.
+- [x] Store QGIS identity custom properties for main-view interoperability.
+- [x] On read, restore extension assets before reconciling QGIS layers.
+- [x] Add an adoption guard so Display Manager-created layers do not re-enter as new external additions.
+- [x] Preserve QGIS renderer and tree state as the QGIS adapter's authoritative presentation state.
 
-**Verification:** Run `test_data_project_roundtrip` and existing project/layer-tree tests.
+**Verification:** `QT_QPA_PLATFORM=offscreen ./build/tests/test_data_project_roundtrip`
+passes 80 assertions in 3 test cases. Existing layer-tree and classification
+project tests pass, and the `sicnu_geo_rs` application target builds
+successfully.
 
 **Commit:** `feat(project): persist and adopt data asset relationships`
 

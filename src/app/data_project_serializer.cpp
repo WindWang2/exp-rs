@@ -1,0 +1,258 @@
+#include "data_project_serializer.h"
+
+#include <optional>
+#include <utility>
+
+#include <QDomDocument>
+#include <QMap>
+#include <QSet>
+#include <QVariantMap>
+
+#include <providers/qgsproviderregistry.h>
+#include <qgslayertree.h>
+#include <qgsmaplayer.h>
+#include <qgsproject.h>
+
+#include "project_context.h"
+
+namespace sicnu::app {
+
+namespace {
+
+constexpr auto extensionName = "sicnuDataManager";
+constexpr auto extensionVersion = "1";
+
+data::Diagnostic projectDiagnostic(const QString &code,
+                                   const QString &message) {
+  return data::Diagnostic{code, message, data::DiagnosticSeverity::Error};
+}
+
+bool isSensitiveOption(const QString &key) {
+  const QString normalized = key.toLower();
+  return normalized.contains(QStringLiteral("password")) ||
+         normalized.contains(QStringLiteral("passwd")) ||
+         normalized.contains(QStringLiteral("token")) ||
+         normalized.contains(QStringLiteral("secret")) ||
+         normalized.contains(QStringLiteral("credential")) ||
+         normalized.contains(QStringLiteral("apikey")) ||
+         normalized.contains(QStringLiteral("api_key"));
+}
+
+std::optional<data::SourceDescriptor> sourceForLayer(QgsMapLayer &layer) {
+  const QString providerKey = layer.providerType();
+  if (providerKey != QStringLiteral("gdal") &&
+      providerKey != QStringLiteral("ogr"))
+    return std::nullopt;
+
+  const QVariantMap decoded =
+      QgsProviderRegistry::instance()->decodeUri(providerKey, layer.source());
+  data::SourceDescriptor source;
+  source.providerKey = providerKey;
+  source.canonicalSource =
+      decoded.value(QStringLiteral("path"), layer.source()).toString();
+  source.authConfigId = decoded.value(QStringLiteral("authcfg")).toString();
+  if (providerKey == QStringLiteral("ogr"))
+    source.subdataset = decoded.value(QStringLiteral("layerName")).toString();
+  return source;
+}
+
+QList<QgsMapLayer *> orderedProjectLayers(QgsProject &project) {
+  QList<QgsMapLayer *> ordered = project.layerTreeRoot()->layerOrder();
+  QSet<QString> seen;
+  for (QgsMapLayer *layer : std::as_const(ordered)) {
+    if (layer)
+      seen.insert(layer->id());
+  }
+  for (QgsMapLayer *layer : project.mapLayers()) {
+    if (layer && !seen.contains(layer->id()))
+      ordered.append(layer);
+  }
+  return ordered;
+}
+
+} // namespace
+
+data::Result<void>
+DataProjectSerializer::write(QDomDocument &document,
+                             const ProjectContext &context) const {
+  QDomElement root = document.documentElement();
+  if (root.isNull()) {
+    return data::Result<void>::failure(projectDiagnostic(
+        QStringLiteral("project.missing_root"),
+        QStringLiteral("The QGIS project document has no root element")));
+  }
+
+  for (QDomElement existing =
+           root.firstChildElement(QString::fromLatin1(extensionName));
+       !existing.isNull();) {
+    const QDomElement next =
+        existing.nextSiblingElement(QString::fromLatin1(extensionName));
+    root.removeChild(existing);
+    existing = next;
+  }
+
+  QDomElement extension =
+      document.createElement(QString::fromLatin1(extensionName));
+  extension.setAttribute(QStringLiteral("version"),
+                         QString::fromLatin1(extensionVersion));
+  QDomElement assetsElement = document.createElement(QStringLiteral("assets"));
+
+  for (const data::AssetSnapshot &asset : context.dataManager().assets()) {
+    if (asset.persistence() != data::PersistencePolicy::ProjectPersistent)
+      continue;
+
+    QDomElement assetElement = document.createElement(QStringLiteral("asset"));
+    assetElement.setAttribute(QStringLiteral("id"), asset.id().toString());
+    assetElement.setAttribute(QStringLiteral("revision"),
+                              QString::number(asset.revision().value()));
+
+    const data::SourceDescriptor &source = asset.source();
+    QDomElement sourceElement =
+        document.createElement(QStringLiteral("source"));
+    sourceElement.setAttribute(QStringLiteral("provider"), source.providerKey);
+    sourceElement.setAttribute(QStringLiteral("canonical"),
+                               source.canonicalSource);
+    if (!source.subdataset.isEmpty())
+      sourceElement.setAttribute(QStringLiteral("subdataset"),
+                                 source.subdataset);
+    if (!source.authConfigId.isEmpty())
+      sourceElement.setAttribute(QStringLiteral("authConfigId"),
+                                 source.authConfigId);
+
+    for (auto option = source.dataOptions.cbegin();
+         option != source.dataOptions.cend(); ++option) {
+      if (isSensitiveOption(option.key()))
+        continue;
+      QDomElement optionElement =
+          document.createElement(QStringLiteral("option"));
+      optionElement.setAttribute(QStringLiteral("key"), option.key());
+      optionElement.setAttribute(QStringLiteral("value"), option.value());
+      sourceElement.appendChild(optionElement);
+    }
+
+    assetElement.appendChild(sourceElement);
+    assetsElement.appendChild(assetElement);
+  }
+
+  extension.appendChild(assetsElement);
+  root.appendChild(extension);
+  return data::Result<void>::success();
+}
+
+data::Result<void> DataProjectSerializer::read(const QDomDocument &document,
+                                               QgsProject &project,
+                                               ProjectContext &context) const {
+  const QDomElement extension = document.documentElement().firstChildElement(
+      QString::fromLatin1(extensionName));
+  QVector<data::Diagnostic> diagnostics;
+  bool failed = false;
+
+  if (!extension.isNull()) {
+    if (extension.attribute(QStringLiteral("version")) !=
+        QString::fromLatin1(extensionVersion)) {
+      return data::Result<void>::failure(projectDiagnostic(
+          QStringLiteral("project.unsupported_data_version"),
+          QStringLiteral("The SICNU Data extension version is unsupported")));
+    }
+
+    const QDomElement assets =
+        extension.firstChildElement(QStringLiteral("assets"));
+    for (QDomElement asset = assets.firstChildElement(QStringLiteral("asset"));
+         !asset.isNull();
+         asset = asset.nextSiblingElement(QStringLiteral("asset"))) {
+      const std::optional<data::AssetId> assetId =
+          data::AssetId::fromString(asset.attribute(QStringLiteral("id")));
+      bool revisionOk = false;
+      const quint64 revisionValue =
+          asset.attribute(QStringLiteral("revision"), QStringLiteral("1"))
+              .toULongLong(&revisionOk);
+      const QDomElement sourceElement =
+          asset.firstChildElement(QStringLiteral("source"));
+      if (!assetId || sourceElement.isNull() || !revisionOk) {
+        diagnostics.append(projectDiagnostic(
+            QStringLiteral("project.invalid_asset"),
+            QStringLiteral("A persisted Data Asset description is invalid")));
+        failed = true;
+        continue;
+      }
+
+      data::SourceDescriptor source;
+      source.providerKey = sourceElement.attribute(QStringLiteral("provider"));
+      source.canonicalSource =
+          sourceElement.attribute(QStringLiteral("canonical"));
+      source.subdataset = sourceElement.attribute(QStringLiteral("subdataset"));
+      source.authConfigId =
+          sourceElement.attribute(QStringLiteral("authConfigId"));
+      for (QDomElement option =
+               sourceElement.firstChildElement(QStringLiteral("option"));
+           !option.isNull();
+           option = option.nextSiblingElement(QStringLiteral("option"))) {
+        const QString key = option.attribute(QStringLiteral("key"));
+        if (!key.isEmpty() && !isSensitiveOption(key))
+          source.dataOptions.insert(key,
+                                    option.attribute(QStringLiteral("value")));
+      }
+
+      const data::Result<data::AssetId> restored =
+          context.dataManager().restoreSource(data::RestoreRequest{
+              *assetId, data::AssetRevision::fromValue(revisionValue), source,
+              data::PersistencePolicy::ProjectPersistent});
+      diagnostics += restored.diagnostics();
+      if (!restored)
+        failed = true;
+    }
+  }
+
+  for (QgsMapLayer *layer : orderedProjectLayers(project)) {
+    if (!layer)
+      continue;
+
+    std::optional<data::AssetId> assetId = data::AssetId::fromString(
+        layer->customProperty(QStringLiteral("sicnu/assetId")).toString());
+    if (!assetId || !context.dataManager().asset(*assetId)) {
+      const std::optional<data::SourceDescriptor> source =
+          sourceForLayer(*layer);
+      if (!source)
+        continue;
+
+      if (assetId) {
+        const data::Result<data::AssetId> restored =
+            context.dataManager().restoreSource(data::RestoreRequest{
+                *assetId, data::AssetRevision::initial(), *source,
+                data::PersistencePolicy::ProjectPersistent});
+        diagnostics += restored.diagnostics();
+        if (!restored) {
+          failed = true;
+          continue;
+        }
+      } else {
+        const data::RegisterResult registered =
+            context.dataManager().registerSource(
+                data::RegisterRequest{*source});
+        diagnostics += registered.diagnostics;
+        if (registered.assetId.isNull()) {
+          failed = true;
+          continue;
+        }
+        assetId = registered.assetId;
+      }
+    }
+
+    display::AdoptLayerOptions options;
+    options.displayLayerId = display::DisplayLayerId::fromString(
+        layer->customProperty(QStringLiteral("sicnu/displayLayerId"))
+            .toString());
+    const data::Result<display::DisplayLayerId> adopted =
+        context.displayManager().adoptLayer(context.mainViewId(), *assetId,
+                                            layer, options);
+    diagnostics += adopted.diagnostics();
+    if (!adopted)
+      failed = true;
+  }
+
+  if (failed)
+    return data::Result<void>::failure(std::move(diagnostics));
+  return data::Result<void>::success(std::move(diagnostics));
+}
+
+} // namespace sicnu::app

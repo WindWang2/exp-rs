@@ -39,6 +39,11 @@ class AssetRevision
       return AssetRevision( 1 );
     }
 
+    static constexpr AssetRevision fromValue( quint64 value )
+    {
+      return AssetRevision( value );
+    }
+
     constexpr bool isValid() const
     {
       return m_value != 0;

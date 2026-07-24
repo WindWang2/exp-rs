@@ -1,11 +1,15 @@
 // main_window_connections.cpp — Signal/slot wiring and canvas updates
 #include "main_window.h"
 
+#include "data_project_serializer.h"
 #include "layer_manager.h"
 #include "layer_tree_menu.h"
+#include "project_context.h"
 #include "widgets/histogram_stretch_widget.h"
 
 #include <QStatusBar>
+#include <QMessageBox>
+#include <QStringList>
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
@@ -20,6 +24,24 @@
 #include <qgscoordinatereferencesystem.h>
 
 #include <QPainter>
+
+namespace
+{
+
+QString formatProjectDiagnostics(
+    const QVector<sicnu::data::Diagnostic> &diagnostics )
+{
+    QStringList details;
+    details.reserve( diagnostics.size() );
+    for ( const sicnu::data::Diagnostic &diagnostic : diagnostics )
+    {
+        details.append( QStringLiteral( "[%1] %2" )
+                            .arg( diagnostic.code, diagnostic.message ) );
+    }
+    return details.join( '\n' );
+}
+
+} // namespace
 
 void QgisDesktopWindow::setupConnections()
 {
@@ -148,7 +170,21 @@ void QgisDesktopWindow::onRenderComplete(QPainter *painter)
 
 void QgisDesktopWindow::onProjectRead(const QDomDocument &doc)
 {
-    Q_UNUSED(doc);
+    if ( m_projectContext )
+    {
+        const sicnu::app::DataProjectSerializer serializer;
+        const sicnu::data::Result<void> restored =
+            serializer.read( doc, *QgsProject::instance(), *m_projectContext );
+        if ( !restored )
+        {
+            QMessageBox::warning(
+                this, tr( "Project Data" ),
+                tr( "The QGIS project opened, but some SICNU data relationships "
+                    "could not be restored:\n%1" )
+                    .arg( formatProjectDiagnostics(
+                        restored.diagnostics() ) ) );
+        }
+    }
     refreshCanvasLayers();
     updateCrsDisplay();
 
@@ -171,7 +207,20 @@ void QgisDesktopWindow::onProjectRead(const QDomDocument &doc)
 
 void QgisDesktopWindow::onProjectWrite(QDomDocument &doc)
 {
-    Q_UNUSED(doc);
+    if ( m_projectContext )
+    {
+        const sicnu::app::DataProjectSerializer serializer;
+        const sicnu::data::Result<void> written =
+            serializer.write( doc, *m_projectContext );
+        if ( !written )
+        {
+            QMessageBox::warning(
+                this, tr( "Project Data" ),
+                tr( "The project could not include the SICNU data catalog:\n%1" )
+                    .arg( formatProjectDiagnostics(
+                        written.diagnostics() ) ) );
+        }
+    }
     statusBar()->showMessage("Project saved", 2000);
 }
 

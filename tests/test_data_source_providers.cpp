@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QString>
+#include <QTemporaryDir>
 
 #include "data/data_asset.h"
 #include "data/data_manager.h"
@@ -18,8 +21,10 @@ using sicnu::data::AssetState;
 using sicnu::data::DataManager;
 using sicnu::data::PersistencePolicy;
 using sicnu::data::RegisterRequest;
+using sicnu::data::RasterStructure;
 using sicnu::data::SourceDescriptor;
 using sicnu::data::StorageKind;
+using sicnu::data::VectorStructure;
 using sicnu::data::internal::ResolvedSource;
 using sicnu::data::providers::GdalRasterSourceProvider;
 using sicnu::data::providers::OgrVectorSourceProvider;
@@ -72,6 +77,27 @@ TEST_CASE( "GeoTIFF raster resolves structural metadata and capabilities",
   CHECK( value.capabilities.testFlag( AssetCapability::BandMetadata ) );
   CHECK( value.capabilities.testFlag( AssetCapability::BandStatistics ) );
   CHECK( value.capabilities.testFlag( AssetCapability::Relocatable ) );
+
+  const auto *structure = std::get_if<RasterStructure>( &value.structure );
+  REQUIRE( structure != nullptr );
+  CHECK( structure->driverName == QStringLiteral( "GTiff" ) );
+  CHECK( structure->width == 256 );
+  CHECK( structure->height == 256 );
+  CHECK( structure->bandCount == 1 );
+  REQUIRE( structure->bands.size() == 1 );
+  CHECK( structure->bands.first().dataType == QStringLiteral( "Float32" ) );
+  CHECK( structure->bands.first().colorInterpretation == QStringLiteral( "Gray" ) );
+  CHECK_FALSE( structure->bands.first().noDataValue.has_value() );
+  CHECK( structure->crsWkt.contains( QStringLiteral( "WGS 84" ) ) );
+  CHECK( structure->hasGeoTransform );
+  CHECK( structure->geoTransform.at( 0 ) == Catch::Approx( 116.0 ) );
+  CHECK( structure->geoTransform.at( 1 ) == Catch::Approx( 0.001 ) );
+  CHECK( structure->geoTransform.at( 3 ) == Catch::Approx( 40.0 ) );
+  CHECK( structure->geoTransform.at( 5 ) == Catch::Approx( -0.001 ) );
+  CHECK( structure->extent.minimumX == Catch::Approx( 116.0 ) );
+  CHECK( structure->extent.maximumX == Catch::Approx( 116.256 ) );
+  CHECK( structure->extent.minimumY == Catch::Approx( 39.744 ) );
+  CHECK( structure->extent.maximumY == Catch::Approx( 40.0 ) );
 }
 
 TEST_CASE( "OGR vector resolves structural metadata and capabilities",
@@ -93,6 +119,44 @@ TEST_CASE( "OGR vector resolves structural metadata and capabilities",
   CHECK( value.capabilities.testFlag( AssetCapability::QueryableFeatures ) );
   CHECK( value.capabilities.testFlag( AssetCapability::EditableFeatures ) );
   CHECK_FALSE( value.displayName.isEmpty() );
+
+  const auto *structure = std::get_if<VectorStructure>( &value.structure );
+  REQUIRE( structure != nullptr );
+  CHECK( structure->driverName == QStringLiteral( "GeoJSON" ) );
+  CHECK( structure->layerCount == 1 );
+  REQUIRE( structure->layers.size() == 1 );
+  const auto &layer = structure->layers.first();
+  CHECK( layer.name == QStringLiteral( "test_points" ) );
+  CHECK( layer.featureCount == 3 );
+  CHECK_FALSE( layer.geometryType.isEmpty() );
+  CHECK( layer.crsWkt.contains( QStringLiteral( "WGS 84" ) ) );
+  CHECK( layer.extent.valid );
+  CHECK( layer.extent.minimumX == Catch::Approx( 5.0 ) );
+  CHECK( layer.extent.minimumY == Catch::Approx( 5.0 ) );
+  CHECK( layer.extent.maximumX == Catch::Approx( 20.0 ) );
+  CHECK( layer.extent.maximumY == Catch::Approx( 20.0 ) );
+}
+
+TEST_CASE( "Read-only vector sources do not advertise editable features",
+           "[data_source_providers]" )
+{
+  QTemporaryDir temporaryDirectory;
+  REQUIRE( temporaryDirectory.isValid() );
+  const QString readOnlyPath =
+    temporaryDirectory.filePath( QStringLiteral( "readonly.geojson" ) );
+  REQUIRE( QFile::copy( fixturePath( QStringLiteral( "test_vectors.geojson" ) ),
+                        readOnlyPath ) );
+  REQUIRE( QFile::setPermissions(
+    readOnlyPath,
+    QFileDevice::ReadOwner | QFileDevice::ReadGroup | QFileDevice::ReadOther ) );
+
+  const OgrVectorSourceProvider provider;
+  const auto resolved = provider.resolve( ogrDescriptor( readOnlyPath ) );
+
+  REQUIRE( resolved );
+  CHECK( resolved.value().state == AssetState::Ready );
+  CHECK_FALSE(
+    resolved.value().capabilities.testFlag( AssetCapability::EditableFeatures ) );
 }
 
 TEST_CASE( "Providers produce a normalized canonical SourceKey", "[data_source_providers]" )
@@ -132,6 +196,32 @@ TEST_CASE( "Same source reached through different path spellings deduplicates",
   // reused rather than duplicated.
   CHECK( secondResult.assetId == firstResult.assetId );
   CHECK( secondResult.reusedExisting );
+  CHECK( manager.assets().size() == 1 );
+}
+
+TEST_CASE( "Equivalent raster provider hints share one canonical SourceKey",
+           "[data_source_providers]" )
+{
+  DataManager manager;
+  const QString path = fixturePath( QStringLiteral( "samples/dem_sample.tif" ) );
+
+  SourceDescriptor inferred;
+  inferred.canonicalSource = path;
+  const auto first = manager.registerSource( RegisterRequest{ inferred } );
+  REQUIRE_FALSE( first.assetId.isNull() );
+
+  SourceDescriptor explicitGdal = inferred;
+  explicitGdal.providerKey = QStringLiteral( "gdal" );
+  const auto second = manager.registerSource( RegisterRequest{ explicitGdal } );
+
+  SourceDescriptor rasterAlias = inferred;
+  rasterAlias.providerKey = QStringLiteral( "raster" );
+  const auto third = manager.registerSource( RegisterRequest{ rasterAlias } );
+
+  CHECK( second.assetId == first.assetId );
+  CHECK( second.reusedExisting );
+  CHECK( third.assetId == first.assetId );
+  CHECK( third.reusedExisting );
   CHECK( manager.assets().size() == 1 );
 }
 
