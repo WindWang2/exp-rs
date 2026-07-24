@@ -2531,3 +2531,17 @@ target_include_directories(test_processing_asset_resolver PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_processing_asset_resolver)
+
+# Derivation Record tests — serializable provenance value, credential exclusion
+qt_add_executable(test_derivation_record
+  test_derivation_record.cpp
+)
+target_link_libraries(test_derivation_record PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+)
+target_include_directories(test_derivation_record PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_derivation_record)

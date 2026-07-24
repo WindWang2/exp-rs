@@ -5,6 +5,8 @@ qt_add_library(sicnu_data STATIC
   data_manager.cpp
   data_manager.h
   data_result.h
+  derivation_record.cpp
+  derivation_record.h
   internal/source_provider.h
   internal/source_provider_registry.cpp
   internal/source_provider_registry.h
