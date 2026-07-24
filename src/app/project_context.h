@@ -5,6 +5,7 @@
 #include "data/data_manager.h"
 #include "display/qgis_display_manager.h"
 
+class QgsMapLayer;
 class QgsProject;
 
 namespace sicnu::app {
@@ -14,6 +15,10 @@ namespace sicnu::app {
  *
  * The QGIS project remains the standard presentation container, while this
  * module explicitly owns SICNU Data Asset identity and the main Display View.
+ *
+ * It also adopts legacy layers that enter the QGIS project outside the Data
+ * Manager seam (e.g. from independent windows), so they receive a Data Asset
+ * identity without each call site needing a ProjectContext reference.
  */
 class ProjectContext {
 public:
@@ -41,6 +46,16 @@ public:
 
 private:
   ProjectContext();
+
+  /// Adopts a layer that entered the QGIS project outside the Data Manager
+  /// seam. Local GDAL rasters and OGR vectors are registered and adopted;
+  /// remote and unsupported layers are left as External Display Layers. Layers
+  /// that already carry a Data Asset identity are skipped (adoption is
+  /// non-recursive).
+  void adoptExternalLayer(QgsMapLayer *layer);
+
+  /// Connects the QGIS project's layersAdded signal to adoptExternalLayer.
+  void installAdoptionSafetyNet(QgsProject &project);
 
   data::DataManager m_dataManager;
   display::QgisDisplayManager m_displayManager;

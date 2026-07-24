@@ -125,6 +125,12 @@ public:
     QgsMapCanvas *mapCanvas() const { return m_mapCanvas; }
     QgsMapLayer *activeLayer();
     QList<QgsMapLayer*> selectedLayers();
+    /**
+     * Load a local raster/vector source through the project Data Context
+     * (registers a Data Asset and adds a main-view Display Layer). Returns true
+     * on success. Loading errors are reported through the UI shell.
+     */
+    bool loadDataLayer(const QString &filePath);
 
 public slots:
     void addRasterLayer();

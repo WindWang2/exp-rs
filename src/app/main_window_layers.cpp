@@ -271,3 +271,10 @@ QList<QgsMapLayer*> QgisDesktopWindow::selectedLayers()
 {
     return m_layerManager->selectedLayers();
 }
+
+bool QgisDesktopWindow::loadDataLayer( const QString &filePath )
+{
+    if ( !m_layerManager )
+        return false;
+    return static_cast<bool>( m_layerManager->loadLayer( filePath ) );
+}

@@ -212,19 +212,9 @@ int main(int argc, char *argv[])
         QPointer<QgisDesktopWindow> safeWindow(window.get());
         QTimer::singleShot(500, [safeWindow, samplePath]() {
             if (!safeWindow) return;
-            auto *layer = new QgsRasterLayer(samplePath, "sample_crops");
-            if (layer->isValid()) {
-                QgsProject::instance()->addMapLayer(layer);
-                QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
-                QgsLayerTreeGroup *group = root->findGroup("Raster Layers");
-                if (!group) group = root->addGroup("Raster Layers");
-                group->addLayer(layer);
-                safeWindow->mapCanvas()->setExtent(layer->extent());
-                safeWindow->mapCanvas()->setLayers(root->layerOrder());
-                safeWindow->mapCanvas()->refresh();
-            } else {
-                delete layer;
-            }
+            // Load through the project Data Context so the sample raster is
+            // registered as a Data Asset and displayed via a Display Layer.
+            ( void ) safeWindow->loadDataLayer( samplePath );
         });
     }
 

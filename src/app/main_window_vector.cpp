@@ -183,22 +183,16 @@ void QgisDesktopWindow::newVectorLayer()
     if (fileName.isEmpty())
         return;
 
-    // Add the new layer to the project
-    QgsVectorLayer *layer = new QgsVectorLayer(fileName, QFileInfo(fileName).completeBaseName(), QLatin1String("ogr"));
-    if (layer->isValid())
+    // Register and display through the project Data Context so the new vector
+    // layer becomes a Data Asset with a main-view Display Layer.
+    const auto loaded = m_layerManager->loadLayer( fileName );
+    if ( loaded )
     {
-        QgsProject::instance()->addMapLayer(layer, /*addToLegend=*/false);
-        QgsLayerTreeGroup *group = m_layerManager->findOrCreateGroup("Vector Layers");
-        group->addLayer(layer);
-        if (m_mapCanvas->layers().isEmpty())
-            m_mapCanvas->setExtent(layer->extent());
-        m_layerManager->refreshCanvasLayers();
         statusBar()->showMessage(tr("Created new layer: %1").arg(fileName), 5000);
     }
     else
     {
         QMessageBox::warning(this, tr("New Vector Layer"), tr("Failed to create layer: %1").arg(errorMessage));
-        delete layer;
     }
 }
 

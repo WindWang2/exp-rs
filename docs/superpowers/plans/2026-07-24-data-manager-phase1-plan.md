@@ -362,21 +362,35 @@ they do not yet acquire the Edit Lease (recorded as follow-up work).
 - Modify `src/app/main_window_connections.cpp`
 - Add architecture/integration tests
 
-- [ ] Inventory every remaining application `QgsProject::addMapLayer()` call.
-- [ ] Route Phase-1 local raster/vector entry points through Project Context.
-- [ ] Listen for unavoidable external `layersAdded` events and adopt supported layers.
-- [ ] Prevent recursive adoption of Display Manager-created layers.
-- [ ] Change Task Center's UI auto-load receiver to register output then optionally display it; do not change Task Center execution semantics in this phase.
-- [ ] Add a test that a legacy direct QGIS layer is adopted and receives Asset identity.
-- [ ] Document deferred complex paths rather than hiding them behind untested special cases.
+- [x] Inventory every remaining application `QgsProject::addMapLayer()` call.
+- [x] Route Phase-1 local raster/vector entry points through Project Context.
+- [x] Listen for unavoidable external `layersAdded` events and adopt supported layers.
+- [x] Prevent recursive adoption of Display Manager-created layers.
+- [x] Change Task Center's UI auto-load receiver to register output then optionally display it; do not change Task Center execution semantics in this phase.
+- [x] Add a test that a legacy direct QGIS layer is adopted and receives Asset identity.
+- [x] Document deferred complex paths rather than hiding them behind untested special cases.
 
-**Verification:**
+Explicitly migrated (now through Project Context): startup sample load
+(`main.cpp`), new-vector-layer creation (`main_window_vector.cpp`), and the
+processing auto-load first choice (`sicnu_algorithm_dialog.cpp`, already via
+`mainWin->loadRasterLayer`/`loadVectorLayer`). `ProjectContext` installs a
+`layersAdded` adoption safety net that registers + adopts local GDAL/OGR layers
+entering the project outside the seam, is non-recursive for Display
+Manager-created layers, and skips remote sources.
 
-```bash
-rg -n "QgsProject::instance\\(\\)->addMapLayer|project->addMapLayer" src/app
-```
-
-Every remaining match must be either migrated, an adapter implementation, or documented as a deferred external/complex path.
+**Verification:** `rg -n "QgsProject::instance\(\)->addMapLayer|project->addMapLayer" src/app`
+leaves six matches, all accounted for: OBIA classification output (×2,
+`rs_obia_main_window.cpp`), georeferencer warp output (×1,
+`qgsgeoref_shell_window.cpp`), and the processing auto-load fallback (×2,
+`sicnu_algorithm_dialog.cpp`) — all local GDAL rasters adopted by the safety
+net — plus the STAC `/vsicurl/` remote COG (×1, `stac_browser_dialog.cpp`)
+deferred to the Wave 5 remote-map providers. The georeferencer session
+`mLayerStore->addMapLayer` calls are session-workspace stores, not the main
+project, and are deferred. `test_layer_adoption_safety_net` passes 21
+assertions in 3 test cases; `test_data_manager` (200/27),
+`test_qgis_display_manager` (143/10), `test_layer_manager_data_context` (36/5),
+`test_data_project_roundtrip` (102/4), `test_layers` (11/3), and
+`test_layer_tree_bridge` (11/3) all pass offscreen; `sicnu_geo_rs` builds.
 
 **Commit:** `refactor(app): adopt legacy qgis layers into data manager`
 
