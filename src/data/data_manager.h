@@ -8,6 +8,7 @@
 
 #include "data_asset.h"
 #include "data_result.h"
+#include "derivation_record.h"
 
 namespace sicnu::data
 {
@@ -65,6 +66,10 @@ class DataManager : public QObject
     std::optional<AssetSnapshot> asset( AssetId id ) const;
     QVector<AssetSnapshot> assets( const AssetQuery &query = {} ) const;
 
+    /// Structured provenance attached to an asset, if any. Algorithm-produced
+    /// assets carry a Derivation Record; directly-registered assets do not.
+    std::optional<DerivationRecord> provenance( AssetId id ) const;
+
     quint64 catalogGeneration() const;
 
     Result<AssetLease> acquire( const AssetRef &asset, const AssetUse &use );
@@ -83,6 +88,13 @@ class DataManager : public QObject
 
     UnloadPlan planUnload( AssetId id ) const;
     Result<void> unload( const UnloadPlan &confirmedPlan );
+
+    /// Attaches a Derivation Record to an existing asset, the final step of a
+    /// transactional algorithm-output commit performed outside this layer. The
+    /// record's `outputAssetId` is stamped with `id` (its caller-supplied value
+    /// is ignored) so provenance always agrees with the registered asset. Does
+    /// not emit `assetChanged` — registration already emitted `assetAdded`.
+    Result<void> attachDerivationRecord( AssetId id, const DerivationRecord &derivation );
 
   signals:
     void assetAdded( AssetId id );

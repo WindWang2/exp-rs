@@ -2545,3 +2545,21 @@ target_include_directories(test_derivation_record PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_derivation_record)
+
+# Output Committer tests — transactional algorithm output commit via Task Center seam
+qt_add_executable(test_output_committer
+  test_output_committer.cpp
+)
+target_link_libraries(test_output_committer PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_data
+)
+target_include_directories(test_output_committer PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_output_committer)

@@ -46,6 +46,9 @@ struct DataManager::Impl
   {
     SourceKey sourceKey;
     AssetSnapshot snapshot;
+    /// Provenance attached by a transactional algorithm-output commit; absent
+    /// for assets that were registered directly.
+    std::optional<DerivationRecord> derivation;
   };
 
   struct LeaseRecord
@@ -345,6 +348,34 @@ QVector<AssetSnapshot> DataManager::assets( const AssetQuery &query ) const
 quint64 DataManager::catalogGeneration() const
 {
   return m_impl->catalogGeneration;
+}
+
+std::optional<DerivationRecord> DataManager::provenance( AssetId id ) const
+{
+  const auto it = m_impl->findRecord( id );
+  if ( it == m_impl->records.end() )
+    return std::nullopt;
+  return it->derivation;
+}
+
+Result<void> DataManager::attachDerivationRecord( AssetId id,
+                                                  const DerivationRecord &derivation )
+{
+  if ( QThread::currentThread() != thread() )
+    return Result<void>::failure( wrongThreadDiagnostic() );
+
+  const auto it = m_impl->findRecord( id );
+  if ( it == m_impl->records.end() )
+  {
+    return Result<void>::failure(
+      { QStringLiteral( "data.asset.unknown" ),
+        QStringLiteral( "Cannot attach a Derivation Record to an unregistered asset" ) } );
+  }
+
+  DerivationRecord stamped = derivation;
+  stamped.outputAssetId = id;
+  it->derivation = stamped;
+  return Result<void>::success();
 }
 
 Result<AssetLease> DataManager::acquire( const AssetRef &asset, const AssetUse &use )

@@ -24,6 +24,9 @@ add_library(sicnu_processing SHARED
     framework/progress_callback.cpp
     framework/error_reporter.cpp
     framework/input_validator.cpp
+    framework/algorithm_engine.cpp
+    framework/task_center.cpp
+    framework/output_committer.cpp
 
     providers/gdal_tools/provider.cpp
     providers/gdal_tools/gdal_tool_wrapper.cpp
@@ -141,6 +144,7 @@ target_link_libraries(sicnu_processing PRIVATE
     Qt6::Gui
     qgis_core
     GDAL::GDAL
+    Sicnu::data
 )
 
 install(TARGETS sicnu_processing
