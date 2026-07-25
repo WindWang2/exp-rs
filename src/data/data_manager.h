@@ -97,6 +97,15 @@ class DataManager : public QObject
   /// entry and reports a warning; the catalog never points at a deleted file.
   ReapResult reap( const ReapRequest &request );
 
+  /// Promotes a `SessionTemporary` or `TaskTemporary` asset to
+  /// `ProjectPersistent` so it survives the session and is serialized into the
+  /// `.qgz`. A policy flip on the same file - identity, revision, source,
+  /// structure, capabilities, and provenance are all unchanged; one
+  /// `assetChanged` is emitted so observers refresh. Promoting an already-
+  /// persistent asset is a successful no-op (no signal). Promoting an unknown
+  /// id is rejected.
+  Result<void> promote( AssetId id );
+
   /// Reaps every idle `SessionTemporary` asset in one sweep - the batch form
   /// of `reap()`. Leased session-temporaries are skipped and reported (not
   /// force-revoked); the host decides what to do. `TaskTemporary` and

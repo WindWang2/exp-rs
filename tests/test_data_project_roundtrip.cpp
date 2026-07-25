@@ -417,3 +417,83 @@ TEST_CASE("Reopening after moving a source preserves the Asset and Display recor
   CHECK(recoveredAsset->state() == AssetState::Ready);
   CHECK(recoveredAsset->revision() == sicnu::data::AssetRevision::initial().next());
 }
+
+TEST_CASE("A promoted temporary asset round-trips into the saved project",
+          "[project][data_roundtrip][promote]") {
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  const sicnu::display::DisplayViewSpec viewSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore()};
+  auto createdContext = sicnu::app::ProjectContext::create(viewSpec);
+  REQUIRE(createdContext);
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+
+  // Register a SESSION-TEMPORARY asset. The serializer filters out
+  // non-ProjectPersistent assets, so before promotion this asset would NOT be
+  // saved. Promote it so it survives the round trip.
+  sicnu::data::SourceDescriptor source;
+  source.providerKey = QStringLiteral("gdal");
+  source.canonicalSource =
+      fixturePath(QStringLiteral("samples/dem_sample.tif"));
+  sicnu::data::RegisterRequest request{source};
+  request.persistence = sicnu::data::PersistencePolicy::SessionTemporary;
+  const sicnu::data::RegisterResult registered =
+      context->dataManager().registerSource(request);
+  REQUIRE_FALSE(registered.assetId.isNull());
+  CHECK(context->dataManager().asset(registered.assetId)->persistence() ==
+        sicnu::data::PersistencePolicy::SessionTemporary);
+
+  // Attach provenance so the round trip can prove it survives promote + reopen.
+  sicnu::data::DerivationRecord derivation;
+  derivation.algorithmId = QStringLiteral("sicnu:ndvi");
+  REQUIRE(context->dataManager().attachDerivationRecord(registered.assetId,
+                                                        derivation));
+
+  REQUIRE(context->dataManager().promote(registered.assetId));
+  CHECK(context->dataManager().asset(registered.assetId)->persistence() ==
+        sicnu::data::PersistencePolicy::ProjectPersistent);
+
+  sicnu::app::DataProjectSerializer serializer;
+  bool writeSucceeded = false;
+  bool readSucceeded = false;
+  QObject signalReceiver;
+  QObject::connect(project, &QgsProject::writeProject, &signalReceiver,
+                   [&](QDomDocument &document) {
+                     writeSucceeded = static_cast<bool>(
+                         serializer.write(document, *context));
+                   });
+  QObject::connect(project, &QgsProject::readProject, &signalReceiver,
+                   [&](const QDomDocument &document) {
+                     readSucceeded = static_cast<bool>(
+                         serializer.read(document, *project, *context));
+                   });
+
+  QTemporaryDir temporaryDirectory;
+  REQUIRE(temporaryDirectory.isValid());
+  const QString projectPath =
+      temporaryDirectory.filePath(QStringLiteral("promote_roundtrip.qgs"));
+
+  REQUIRE(project->write(projectPath));
+  REQUIRE(writeSucceeded);
+
+  REQUIRE(context->clearProject(*project));
+  REQUIRE(project->read(projectPath));
+  REQUIRE(readSucceeded);
+
+  // The promoted asset is restored with its original identity and the
+  // ProjectPersistent policy it was promoted to.
+  const auto restoredAsset = context->dataManager().asset(registered.assetId);
+  REQUIRE(restoredAsset);
+  CHECK(restoredAsset->id() == registered.assetId);
+  CHECK(restoredAsset->persistence() ==
+        sicnu::data::PersistencePolicy::ProjectPersistent);
+
+  // Provenance survives promote + save + reopen.
+  const auto restoredProvenance =
+      context->dataManager().provenance(registered.assetId);
+  REQUIRE(restoredProvenance);
+  CHECK(restoredProvenance->algorithmId == QStringLiteral("sicnu:ndvi"));
+  CHECK(restoredProvenance->outputAssetId == registered.assetId);
+}

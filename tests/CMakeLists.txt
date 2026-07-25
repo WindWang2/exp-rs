@@ -2618,3 +2618,19 @@ target_include_directories(test_project_context_reap PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_project_context_reap)
+
+# Data Manager promote tests - temporary -> ProjectPersistent
+qt_add_executable(test_data_manager_promote
+  test_data_manager_promote.cpp
+)
+target_link_libraries(test_data_manager_promote PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_data
+)
+target_include_directories(test_data_manager_promote PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_data_manager_promote)

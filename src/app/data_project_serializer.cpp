@@ -4,6 +4,7 @@
 #include <utility>
 
 #include <QDomDocument>
+#include <QJsonDocument>
 #include <QMap>
 #include <QSet>
 #include <QVariantMap>
@@ -131,6 +132,20 @@ DataProjectSerializer::write(QDomDocument &document,
     }
 
     assetElement.appendChild(sourceElement);
+
+    // Persist the Derivation Record (provenance) when the asset carries one,
+    // so promoted algorithm outputs keep their provenance across save/reopen.
+    const std::optional<data::DerivationRecord> provenance =
+        context.dataManager().provenance(asset.id());
+    if (provenance) {
+      QDomElement derivationElement =
+          document.createElement(QStringLiteral("derivation"));
+      derivationElement.appendChild(
+          document.createTextNode(QString::fromUtf8(
+              QJsonDocument(provenance->toJson()).toJson(QJsonDocument::Compact))));
+      assetElement.appendChild(derivationElement);
+    }
+
     assetsElement.appendChild(assetElement);
   }
 
@@ -200,6 +215,22 @@ data::Result<void> DataProjectSerializer::read(const QDomDocument &document,
       diagnostics += restored.diagnostics();
       if (!restored)
         failed = true;
+
+      // Restore the Derivation Record (provenance) if it was persisted.
+      const QDomElement derivationElement =
+          asset.firstChildElement(QStringLiteral("derivation"));
+      if (!derivationElement.isNull() && restored) {
+        const QJsonDocument parsed = QJsonDocument::fromJson(
+            derivationElement.text().toUtf8());
+        const data::Result<data::DerivationRecord> derivation =
+            data::DerivationRecord::fromJson(parsed.object());
+        if (derivation) {
+          context.dataManager().attachDerivationRecord(*assetId,
+                                                       derivation.value());
+        } else {
+          diagnostics += derivation.diagnostics();
+        }
+      }
     }
   }
 

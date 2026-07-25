@@ -731,6 +731,48 @@ ReapResult DataManager::reap( const ReapRequest &request )
   return result;
 }
 
+Result<void> DataManager::promote( AssetId id )
+{
+  if ( QThread::currentThread() != thread() )
+    return Result<void>::failure( wrongThreadDiagnostic() );
+
+  const auto recordIt = m_impl->findRecord( id );
+  if ( recordIt == m_impl->records.end() )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "promote.unknown_asset" ),
+                  QStringLiteral( "The asset is no longer registered" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  // Promoting an already-persistent asset is a successful no-op: no catalog
+  // mutation, no signal.
+  if ( recordIt->snapshot.persistence() == PersistencePolicy::ProjectPersistent )
+    return Result<void>::success();
+
+  // Rebuild the snapshot with the policy flipped; identity, revision, source,
+  // structure, capabilities, and provenance are all preserved. AssetSnapshot
+  // is immutable, so a fresh instance replaces the record (the same pattern
+  // commitEdit uses to advance a revision; provenance lives in a separate
+  // optional on the record and is untouched here).
+  const AssetSnapshot &current = recordIt->snapshot;
+  AssetSnapshot promoted{ current.id(),
+                          current.revision(),
+                          current.source(),
+                          current.kind(),
+                          current.state(),
+                          current.capabilities(),
+                          PersistencePolicy::ProjectPersistent,
+                          current.storageKind(),
+                          current.displayName(),
+                          current.structure() };
+  recordIt->snapshot = std::move( promoted );
+  m_impl->catalogGeneration++;
+
+  emit assetChanged( id );
+  return Result<void>::success();
+}
+
 TemporaryReapResult DataManager::reapSessionTemporaries()
 {
   return reapTemporaries( PersistencePolicy::SessionTemporary );
