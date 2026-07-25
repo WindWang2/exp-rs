@@ -160,6 +160,14 @@ void DataManagerPanel::requestRemove( sicnu::data::AssetId id )
     emit unloadRequested( id );
 }
 
+void DataManagerPanel::requestPromote( sicnu::data::AssetId id )
+{
+  // Promote applies only to a registered temporary asset; the shell promotes
+  // it. This mirrors the context menu's enable/disable gate.
+  if ( isPromotable( id ) )
+    emit promoteRequested( id );
+}
+
 void DataManagerPanel::refresh()
 {
   // Remember the current selection so a refresh does not change which asset the
@@ -208,11 +216,18 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
 
   QMenu menu( this );
   QAction *displayAction = menu.addAction( tr( "Add to Display" ) );
+
+  // Promote is offered only for temporary assets; disabled for persistent ones.
+  QAction *promoteAction = menu.addAction( tr( "Promote to Project…" ) );
+  promoteAction->setEnabled( !isProjectPersistent( id ) );
+
   QAction *unloadAction = menu.addAction( tr( "Unload…" ) );
 
   QAction *chosen = menu.exec( m_tree->viewport()->mapToGlobal( pos ) );
   if ( chosen == displayAction )
     emit displayRequested( id );
+  else if ( chosen == promoteAction )
+    emit promoteRequested( id );
   else if ( chosen == unloadAction )
     emit unloadRequested( id );
 }
@@ -226,11 +241,27 @@ sicnu::data::AssetId DataManagerPanel::assetForItem( QTreeWidgetItem *item ) con
   return id.value_or( sicnu::data::AssetId() );
 }
 
+bool DataManagerPanel::isProjectPersistent( sicnu::data::AssetId id ) const
+{
+  if ( !m_dataManager || id.isNull() )
+    return false;
+  const auto snapshot = m_dataManager->asset( id );
+  return snapshot &&
+         snapshot->persistence() == sicnu::data::PersistencePolicy::ProjectPersistent;
+}
+
+bool DataManagerPanel::isPromotable( sicnu::data::AssetId id ) const
+{
+  if ( !m_dataManager || id.isNull() )
+    return false;
+  const auto snapshot = m_dataManager->asset( id );
+  return snapshot && !isProjectPersistent( id );
+}
+
 int DataManagerPanel::referenceCount( sicnu::data::AssetId id ) const
 {
   if ( !m_dataManager )
     return 0;
-
   int count = 0;
   for ( const sicnu::data::LeaseRef &lease : m_dataManager->leases( id ) )
   {

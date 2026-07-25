@@ -21,8 +21,9 @@ namespace sicnu
  * immutable asset snapshots, kept semantically separate from the layer tree.
  *
  * One row per Data Asset (never per Display Layer). The panel holds no business
- * logic: double-click and remove intents are emitted as signals for the UI
- * shell to wire to the Display Manager and to unload planning respectively.
+ * logic: double-click, remove, and promote intents are emitted as signals for
+ * the UI shell to wire to the Display Manager, unload planning, and promotion
+ * respectively.
  */
 class DataManagerPanel : public QDockWidget
 {
@@ -52,6 +53,10 @@ class DataManagerPanel : public QDockWidget
     /// Triggers the remove intent for the row presenting `id` (context action).
     void requestRemove( sicnu::data::AssetId id );
 
+    /// Triggers the promote intent for a temporary asset (context action). The
+    /// shell calls DataManager::promote; the panel refreshes via assetChanged.
+    void requestPromote( sicnu::data::AssetId id );
+
     /// Re-projects the Data Manager snapshots. Called automatically on asset
     /// add/change/remove; call it after Display Layer (lease) changes, which do
     /// not emit asset signals.
@@ -62,6 +67,9 @@ class DataManagerPanel : public QDockWidget
     void displayRequested( sicnu::data::AssetId id );
     /// Remove intent: the UI shell should run unload planning (with confirmation).
     void unloadRequested( sicnu::data::AssetId id );
+    /// Promote intent: the UI shell should call DataManager::promote so a
+    /// temporary asset survives the session and is saved into the .qgz.
+    void promoteRequested( sicnu::data::AssetId id );
 
   private slots:
     void onItemActivated( QTreeWidgetItem *item, int column );
@@ -70,6 +78,11 @@ class DataManagerPanel : public QDockWidget
   private:
     sicnu::data::AssetId assetForItem( QTreeWidgetItem *item ) const;
     int referenceCount( sicnu::data::AssetId id ) const;
+    /// True when `id` is a registered ProjectPersistent asset. Shared by the
+    /// promote request guard and the context-menu enable/disable gate.
+    bool isProjectPersistent( sicnu::data::AssetId id ) const;
+    /// True when `id` is a registered temporary asset eligible for promotion.
+    bool isPromotable( sicnu::data::AssetId id ) const;
 
     sicnu::data::DataManager *m_dataManager = nullptr; // not owned
     QTreeWidget *m_tree = nullptr;

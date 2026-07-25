@@ -1,8 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QFile>
 #include <QFileInfo>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 
 #include <qgsapplication.h>
 #include <qgslayertree.h>
@@ -229,4 +231,107 @@ TEST_CASE( "The reference count reflects Display Layer view leases",
   REQUIRE( displayManager.addLayer( viewId, id ) );
   panel.refresh();
   CHECK( panel.rowText( id, 4 ) == QStringLiteral( "2" ) );
+}
+
+TEST_CASE( "The persistence column distinguishes all three policies",
+           "[data_manager_panel]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  QTemporaryDir dir;
+
+  // Three distinct source paths so the assets are not deduped to one.
+  const auto stagedPath = [&dir]( const QString &name ) {
+    const QString path = dir.filePath( name );
+    REQUIRE( QFile::copy(
+      fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ), path ) );
+    return path;
+  };
+
+  const AssetId persistent =
+    registerRaster( dataManager, stagedPath( QStringLiteral( "a.tif" ) ),
+                    PersistencePolicy::ProjectPersistent );
+  const AssetId session =
+    registerRaster( dataManager, stagedPath( QStringLiteral( "b.tif" ) ),
+                    PersistencePolicy::SessionTemporary );
+  const AssetId task =
+    registerRaster( dataManager, stagedPath( QStringLiteral( "c.tif" ) ),
+                    PersistencePolicy::TaskTemporary );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+
+  CHECK( panel.rowText( persistent, 3 ) == QStringLiteral( "Persistent" ) );
+  CHECK( panel.rowText( session, 3 ) == QStringLiteral( "Session" ) );
+  CHECK( panel.rowText( task, 3 ) == QStringLiteral( "Task" ) );
+}
+
+TEST_CASE( "A promote request is emitted for a temporary asset's id",
+           "[data_manager_panel][promote]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  const AssetId id = registerRaster(
+    dataManager, fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ),
+    PersistencePolicy::SessionTemporary );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+  QSignalSpy promoteSpy( &panel, &sicnu::DataManagerPanel::promoteRequested );
+
+  // The promote intent carries the temporary asset's id to the shell, which
+  // calls DataManager::promote. The panel itself holds no promote business logic.
+  panel.requestPromote( id );
+
+  REQUIRE( promoteSpy.count() == 1 );
+  CHECK( promoteSpy.first().first().value<AssetId>() == id );
+}
+
+TEST_CASE( "requestPromote on an unknown asset emits nothing",
+           "[data_manager_panel][promote]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+
+  sicnu::DataManagerPanel panel( &dataManager );
+  QSignalSpy promoteSpy( &panel, &sicnu::DataManagerPanel::promoteRequested );
+
+  panel.requestPromote( AssetId::generate() );
+
+  CHECK( promoteSpy.count() == 0 );
+}
+
+TEST_CASE( "requestPromote on a persistent asset emits nothing",
+           "[data_manager_panel][promote]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  const AssetId id = registerRaster(
+    dataManager, fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ),
+    PersistencePolicy::ProjectPersistent );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+  QSignalSpy promoteSpy( &panel, &sicnu::DataManagerPanel::promoteRequested );
+
+  panel.requestPromote( id );
+
+  CHECK( promoteSpy.count() == 0 );
+}
+
+TEST_CASE( "A promoted asset is reflected immediately in the panel",
+           "[data_manager_panel][promote]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  const AssetId id = registerRaster(
+    dataManager, fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ),
+    PersistencePolicy::SessionTemporary );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+  REQUIRE( panel.rowText( id, 3 ) == QStringLiteral( "Session" ) );
+
+  // The shell consumes promoteRequested and calls DataManager::promote. The
+  // panel refreshes automatically via the assetChanged -> refresh connection
+  // wired in its constructor - no project reload, no manual refresh needed.
+  REQUIRE( dataManager.promote( id ) );
+
+  CHECK( panel.rowText( id, 3 ) == QStringLiteral( "Persistent" ) );
 }
