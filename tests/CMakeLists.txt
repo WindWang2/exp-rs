@@ -2690,3 +2690,17 @@ target_include_directories(test_landsat_import_dialog PRIVATE
 )
 set_target_properties(test_landsat_import_dialog PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_landsat_import_dialog)
+
+# Virtual raster recipe tests - recipe value type + JSON round-trip (#55)
+qt_add_executable(test_virtual_raster_recipe
+  test_virtual_raster_recipe.cpp
+)
+target_link_libraries(test_virtual_raster_recipe PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+)
+target_include_directories(test_virtual_raster_recipe PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_virtual_raster_recipe)
