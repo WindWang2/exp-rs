@@ -14,7 +14,10 @@
 #include "internal/source_provider_registry.h"
 #include "providers/gdal_raster_source_provider.h"
 #include "providers/ogr_vector_source_provider.h"
+#include "providers/tms_source_provider.h"
 #include "providers/virtual_raster_source_provider.h"
+#include "providers/wms_source_provider.h"
+#include "providers/wmts_source_provider.h"
 #include "providers/xyz_source_provider.h"
 #include "virtual_raster_preflight.h"
 
@@ -186,6 +189,12 @@ std::unique_ptr<internal::SourceProviderRegistry> DataManager::defaultProviders(
   // re-resolve Ready once a probe is wired (a host-side follow-up to this wave,
   // not a src/data concern). Tests inject a stub probe.
   registry->add( std::make_unique<providers::XyzSourceProvider>() );
+  // WMS/WMTS/TMS share the XYZ shape (spec #63); each claims its own provider
+  // key and probes through the same NetworkProbe seam (NoNetworkProbe default
+  // until the host injects a real one — see #66).
+  registry->add( std::make_unique<providers::WmsSourceProvider>() );
+  registry->add( std::make_unique<providers::WmtsSourceProvider>() );
+  registry->add( std::make_unique<providers::TmsSourceProvider>() );
   return registry;
 }
 

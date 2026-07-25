@@ -2786,3 +2786,17 @@ target_include_directories(test_xyz_source_provider PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_xyz_source_provider)
+
+# WMS/WMTS/TMS source providers - shared XYZ shape (#63)
+qt_add_executable(test_remote_map_services
+  test_remote_map_services.cpp
+)
+target_link_libraries(test_remote_map_services PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+)
+target_include_directories(test_remote_map_services PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_remote_map_services)
