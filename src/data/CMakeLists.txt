@@ -1,6 +1,8 @@
 qt_add_library(sicnu_data STATIC
   asset_types.cpp
   asset_types.h
+  collection_types.cpp
+  collection_types.h
   data_asset.h
   data_manager.cpp
   data_manager.h

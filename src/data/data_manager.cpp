@@ -83,6 +83,15 @@ struct DataManager::Impl
     std::shared_ptr<internal::AssetLeaseControl> control;
   };
 
+  /// A Data Collection catalog node. Organizational only; groups child assets.
+  struct CollectionRecord
+  {
+    CollectionId id;
+    QString displayName;
+    ProductMetadata metadata;
+    QVector<AssetId> childAssetIds;
+  };
+
   explicit Impl( std::unique_ptr<internal::SourceProviderRegistry> sourceProviders )
     : providers( std::move( sourceProviders ) )
   {
@@ -91,6 +100,7 @@ struct DataManager::Impl
   std::unique_ptr<internal::SourceProviderRegistry> providers;
   QVector<AssetRecord> records;
   QVector<LeaseRecord> leases;
+  QVector<CollectionRecord> collections;
   quint64 catalogGeneration = 1;
   quint64 nextLeaseToken = 1;
 
@@ -106,6 +116,20 @@ struct DataManager::Impl
     return std::find_if(
       records.begin(), records.end(),
       [&]( const AssetRecord &record ) { return record.snapshot.id() == id; } );
+  }
+
+  QVector<CollectionRecord>::iterator findCollection( CollectionId id )
+  {
+    return std::find_if(
+      collections.begin(), collections.end(),
+      [&]( const CollectionRecord &c ) { return c.id == id; } );
+  }
+
+  QVector<CollectionRecord>::const_iterator findCollection( CollectionId id ) const
+  {
+    return std::find_if(
+      collections.begin(), collections.end(),
+      [&]( const CollectionRecord &c ) { return c.id == id; } );
   }
 
   QVector<LeaseImpact> leaseImpacts( AssetId id ) const
@@ -640,6 +664,7 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
   }
 
   m_impl->records.erase( recordIt );
+  pruneChildFromCollections( confirmedPlan.assetId() );
   m_impl->catalogGeneration++;
 
   emit assetRemoved( confirmedPlan.assetId() );
@@ -699,6 +724,7 @@ ReapResult DataManager::reap( const ReapRequest &request )
     snapshot.capabilities().testFlag( AssetCapability::DeletableSource );
 
   m_impl->records.erase( recordIt );
+  pruneChildFromCollections( request.id );
   m_impl->catalogGeneration++;
   result.unloaded = true;
 
@@ -829,6 +855,12 @@ TemporaryReapResult DataManager::reapTemporaries( PersistencePolicy policy )
   return result;
 }
 
+void DataManager::pruneChildFromCollections( AssetId childId )
+{
+  for ( Impl::CollectionRecord &collection : m_impl->collections )
+    collection.childAssetIds.removeAll( childId );
+}
+
 LeaseOutcome DataManager::releaseLease( const LeaseRef &lease )
 {
   if ( QThread::currentThread() != thread() )
@@ -931,6 +963,150 @@ LeaseOutcome AssetLease::release()
   DataManager *manager = m_control->manager.data();
   const LeaseOutcome outcome = manager->releaseLease( toRef() );
   return outcome;
+}
+
+CollectionCreateResult DataManager::createCollection( const CollectionCreateRequest &request )
+{
+  if ( QThread::currentThread() != thread() )
+    return CollectionCreateResult{ {}, { wrongThreadDiagnostic() } };
+
+  Impl::CollectionRecord record;
+  record.id = CollectionId::generate();
+  record.displayName = request.displayName;
+  record.metadata = request.metadata;
+  m_impl->collections.push_back( std::move( record ) );
+  m_impl->catalogGeneration++;
+  emit collectionAdded( m_impl->collections.last().id );
+  return CollectionCreateResult{ m_impl->collections.last().id, {} };
+}
+
+std::optional<CollectionSnapshot> DataManager::collection( CollectionId id ) const
+{
+  const auto it = m_impl->findCollection( id );
+  if ( it == m_impl->collections.end() )
+    return std::nullopt;
+  // Reflect only children that still exist (a child reaped independently is
+  // removed from the persisted list lazily on read).
+  CollectionSnapshot snapshot;
+  snapshot.id = it->id;
+  snapshot.displayName = it->displayName;
+  snapshot.metadata = it->metadata;
+  for ( const AssetId &childId : it->childAssetIds )
+  {
+    if ( m_impl->findRecord( childId ) != m_impl->records.end() )
+      snapshot.childAssetIds.append( childId );
+  }
+  return snapshot;
+}
+
+QVector<CollectionId> DataManager::collections() const
+{
+  QVector<CollectionId> ids;
+  ids.reserve( m_impl->collections.size() );
+  for ( const Impl::CollectionRecord &c : m_impl->collections )
+    ids.append( c.id );
+  return ids;
+}
+
+Result<void> DataManager::addChildToCollection( CollectionId collectionId,
+                                                AssetId childAssetId )
+{
+  if ( QThread::currentThread() != thread() )
+    return Result<void>::failure( wrongThreadDiagnostic() );
+
+  const auto collectionIt = m_impl->findCollection( collectionId );
+  if ( collectionIt == m_impl->collections.end() )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "collection.unknown" ),
+                  QStringLiteral( "The collection is not registered" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  const auto assetIt = m_impl->findRecord( childAssetId );
+  if ( assetIt == m_impl->records.end() )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "collection.child_unknown" ),
+                  QStringLiteral( "The child asset is not registered" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  // A child has at most one parent collection (flat one-level pointer).
+  // Reparenting would silently steal the child from its current collection and
+  // leave a dangling entry there, so refuse instead.
+  if ( assetIt->snapshot.parentCollectionId().has_value() &&
+       assetIt->snapshot.parentCollectionId() != collectionId )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "collection.child_already_owned" ),
+                  QStringLiteral( "The child asset already belongs to another collection" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  collectionIt->childAssetIds.append( childAssetId );
+  assetIt->snapshot.m_parentCollectionId = collectionId;
+  m_impl->catalogGeneration++;
+  return Result<void>::success();
+}
+
+Result<void> DataManager::unloadCollection( CollectionId id, bool cascade )
+{
+  if ( QThread::currentThread() != thread() )
+    return Result<void>::failure( wrongThreadDiagnostic() );
+
+  const auto collectionIt = m_impl->findCollection( id );
+  if ( collectionIt == m_impl->collections.end() )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "collection.unknown" ),
+                  QStringLiteral( "The collection is not registered" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  if ( cascade )
+  {
+    // Refuse while any child holds an active lease, mirroring the asset
+    // lease-safety rule. Reaped/already-removed children are skipped.
+    for ( const AssetId &childId : collectionIt->childAssetIds )
+    {
+      if ( m_impl->findRecord( childId ) == m_impl->records.end() )
+        continue;
+      if ( !m_impl->leaseImpacts( childId ).isEmpty() )
+      {
+        return Result<void>::failure( leasedRefusalDiagnostics(
+          QStringLiteral( "collection" ), m_impl->leaseImpacts( childId ) ) );
+      }
+    }
+
+    // Cascade: unload each existing child first, then the collection node.
+    const QVector<AssetId> children = collectionIt->childAssetIds;
+    for ( const AssetId &childId : children )
+    {
+      const auto childIt = m_impl->findRecord( childId );
+      if ( childIt == m_impl->records.end() )
+        continue;
+      emit assetAboutToUnload( childId );
+      m_impl->records.erase( childIt );
+      m_impl->catalogGeneration++;
+      emit assetRemoved( childId );
+    }
+  }
+  else
+  {
+    // Non-cascade: children become standalone (clear their parent pointer).
+    for ( const AssetId &childId : collectionIt->childAssetIds )
+    {
+      const auto childIt = m_impl->findRecord( childId );
+      if ( childIt != m_impl->records.end() )
+        childIt->snapshot.m_parentCollectionId = std::nullopt;
+    }
+  }
+
+  m_impl->collections.erase( collectionIt );
+  m_impl->catalogGeneration++;
+  emit collectionRemoved( id );
+  return Result<void>::success();
 }
 
 } // namespace sicnu::data

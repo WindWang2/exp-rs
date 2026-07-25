@@ -9,6 +9,7 @@
 #include <QVector>
 
 #include "asset_types.h"
+#include "collection_types.h"
 #include "data_result.h"
 #include "source_descriptor.h"
 
@@ -212,6 +213,13 @@ class AssetSnapshot
       return m_structure;
     }
 
+    /// The parent Data Collection this asset belongs to, if any. A standalone
+    /// asset has no parent; a child of a collection carries its CollectionId.
+    std::optional<CollectionId> parentCollectionId() const
+    {
+      return m_parentCollectionId;
+    }
+
   private:
     friend class DataManager;
 
@@ -248,6 +256,7 @@ class AssetSnapshot
     StorageKind m_storageKind;
     QString m_displayName;
     AssetStructure m_structure;
+    std::optional<CollectionId> m_parentCollectionId;
 };
 
 struct AssetQuery

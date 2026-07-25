@@ -2634,3 +2634,19 @@ target_include_directories(test_data_manager_promote PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_data_manager_promote)
+
+# Data Manager collection tests - Data Collection catalog node
+qt_add_executable(test_data_manager_collection
+  test_data_manager_collection.cpp
+)
+target_link_libraries(test_data_manager_collection PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_data
+)
+target_include_directories(test_data_manager_collection PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_data_manager_collection)

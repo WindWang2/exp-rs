@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QVector>
 
+#include "collection_types.h"
 #include "data_asset.h"
 #include "data_result.h"
 #include "derivation_record.h"
@@ -121,6 +122,27 @@ class DataManager : public QObject
   /// no asset record is widened with task ownership.
   TemporaryReapResult reapTaskTemporaries();
 
+  /// Creates a Data Collection (organizational catalog node) with the given
+  /// display name and product metadata. Emits `collectionAdded`.
+  CollectionCreateResult createCollection( const CollectionCreateRequest &request );
+
+  /// Returns a snapshot of the collection, if it exists.
+  std::optional<CollectionSnapshot> collection( CollectionId id ) const;
+
+  /// Lists all collection ids.
+  QVector<CollectionId> collections() const;
+
+  /// Adds a registered asset as a child of a collection. The child's
+  /// `parentCollectionId` is set. Fails if the collection or asset is unknown.
+  Result<void> addChildToCollection( CollectionId collectionId, AssetId childAssetId );
+
+  /// Unloads a collection. Without cascade, only the collection node is removed
+  /// (children become standalone assets with no parent). With cascade, the
+  /// collection and all its children are removed. Cascade unload is refused
+  /// while any child holds an active lease (mirroring the asset lease-safety
+  /// rule). Emits `collectionRemoved` (and `assetRemoved` per cascaded child).
+  Result<void> unloadCollection( CollectionId id, bool cascade );
+
     /// Attaches a Derivation Record to an existing asset, the final step of a
     /// transactional algorithm-output commit performed outside this layer. The
     /// record's `outputAssetId` is stamped with `id` (its caller-supplied value
@@ -133,6 +155,8 @@ class DataManager : public QObject
     void assetChanged( AssetId id );
     void assetAboutToUnload( AssetId id );
     void assetRemoved( AssetId id );
+    void collectionAdded( CollectionId id );
+    void collectionRemoved( CollectionId id );
 
   private:
     friend class internal::SourceProviderRegistry;
@@ -156,6 +180,10 @@ class DataManager : public QObject
     /// reaps every idle temporary asset of `policy`, skipping and reporting
     /// leased ones.
     TemporaryReapResult reapTemporaries( PersistencePolicy policy );
+
+    /// Removes `childId` from every collection's child list (eager pruning so
+    /// the persisted lists never hold dead asset ids). Called on unload/reap.
+    void pruneChildFromCollections( AssetId childId );
 };
 
 } // namespace sicnu::data
