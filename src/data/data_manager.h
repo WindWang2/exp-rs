@@ -102,7 +102,15 @@ class DataManager : public QObject
   /// force-revoked); the host decides what to do. `TaskTemporary` and
   /// `ProjectPersistent` assets are never touched. Called by the host on
   /// session close.
-  SessionReapResult reapSessionTemporaries();
+  TemporaryReapResult reapSessionTemporaries();
+
+  /// Reaps every idle `TaskTemporary` asset in one sweep - the task-scope
+  /// counterpart of `reapSessionTemporaries()`. Leased task-temporaries are
+  /// skipped and reported; `SessionTemporary` and `ProjectPersistent` assets
+  /// are never touched. Called by the host when a task scope ends. Uses a
+  /// `persistence == TaskTemporary` query rather than a per-task-id binding, so
+  /// no asset record is widened with task ownership.
+  TemporaryReapResult reapTaskTemporaries();
 
     /// Attaches a Derivation Record to an existing asset, the final step of a
     /// transactional algorithm-output commit performed outside this layer. The
@@ -134,6 +142,11 @@ class DataManager : public QObject
 
     LeaseOutcome releaseLease( const LeaseRef &lease );
     void revokeLease( const LeaseRef &lease );
+
+    /// Shared sweep body for `reapSessionTemporaries` / `reapTaskTemporaries`:
+    /// reaps every idle temporary asset of `policy`, skipping and reporting
+    /// leased ones.
+    TemporaryReapResult reapTemporaries( PersistencePolicy policy );
 };
 
 } // namespace sicnu::data

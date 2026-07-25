@@ -52,7 +52,7 @@ public:
    * the host on session close; also run by the destructor so app exit reaps
    * scratch outputs even when clearProject was not invoked.
    */
-  data::SessionReapResult closeSession();
+  data::TemporaryReapResult closeSession();
 
 private:
   ProjectContext();

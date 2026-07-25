@@ -59,7 +59,7 @@ ProjectContext::~ProjectContext() {
   // under a holder during teardown - and their ids are logged here so they are
   // not silently dropped. (emit from the destructor is safe because the
   // DisplayManager is a member destroyed in the same step as the DataManager.)
-  const data::SessionReapResult reaped = closeSession();
+  const data::TemporaryReapResult reaped = closeSession();
   for ( const data::AssetId &id : reaped.skippedLeased )
   {
     qWarning( "ProjectContext: SessionTemporary asset %s still held a lease at "
@@ -138,7 +138,7 @@ void ProjectContext::adoptExternalLayer(QgsMapLayer *layer) {
   (void)m_displayManager.adoptLayer(m_mainViewId, registered.assetId, layer);
 }
 
-data::SessionReapResult ProjectContext::closeSession() {
+data::TemporaryReapResult ProjectContext::closeSession() {
   // Reap idle SessionTemporary assets (catalog removal + DeletableSource file
   // deletion). Leased ones are skipped and reported; ProjectPersistent and
   // TaskTemporary are untouched. This runs on explicit session close and on

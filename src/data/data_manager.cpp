@@ -731,9 +731,19 @@ ReapResult DataManager::reap( const ReapRequest &request )
   return result;
 }
 
-SessionReapResult DataManager::reapSessionTemporaries()
+TemporaryReapResult DataManager::reapSessionTemporaries()
 {
-  SessionReapResult result;
+  return reapTemporaries( PersistencePolicy::SessionTemporary );
+}
+
+TemporaryReapResult DataManager::reapTaskTemporaries()
+{
+  return reapTemporaries( PersistencePolicy::TaskTemporary );
+}
+
+TemporaryReapResult DataManager::reapTemporaries( PersistencePolicy policy )
+{
+  TemporaryReapResult result;
 
   if ( QThread::currentThread() != thread() )
   {
@@ -741,13 +751,13 @@ SessionReapResult DataManager::reapSessionTemporaries()
     return result;
   }
 
-  // Collect the SessionTemporary asset ids first; reaping mutates the records
-  // vector, so we cannot iterate it while removing. Leased assets are skipped
-  // and reported (not force-revoked); the host decides what to do about them.
+  // Collect the matching temporary asset ids first; reaping mutates the
+  // records vector, so we cannot iterate it while removing. Leased assets are
+  // skipped and reported (not force-revoked); the host decides what to do.
   QVector<AssetId> idle;
   for ( const Impl::AssetRecord &record : m_impl->records )
   {
-    if ( record.snapshot.persistence() != PersistencePolicy::SessionTemporary )
+    if ( record.snapshot.persistence() != policy )
       continue;
     if ( m_impl->leaseImpacts( record.snapshot.id() ).isEmpty() )
       idle.append( record.snapshot.id() );
@@ -766,8 +776,9 @@ SessionReapResult DataManager::reapSessionTemporaries()
     {
       // An asset that was idle at collect-time but became leased (or was
       // otherwise refused) by reap-time is reported as skipped so the result's
-      // skipped set stays complete - the host sees every SessionTemporary that
-      // remained in the catalog, not just the ones leased at classification.
+      // skipped set stays complete - the host sees every temporary of this
+      // policy that remained in the catalog, not just the ones leased at
+      // classification.
       result.skippedLeased.append( id );
     }
     result.diagnostics.append( one.diagnostics );
