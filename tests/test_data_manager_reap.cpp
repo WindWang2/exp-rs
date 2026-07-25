@@ -236,3 +236,93 @@ TEST_CASE( "An OutputCommitter-published output carries DeletableSource and is r
   CHECK_FALSE( manager.asset( id ).has_value() );
   CHECK_FALSE( QFile::exists( stablePath ) );
 }
+
+TEST_CASE( "reapSessionTemporaries removes only idle SessionTemporary assets",
+           "[data_manager][reap][sweep]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+
+  // A persistent asset - must survive the sweep untouched.
+  const QString persistentPath =
+    stageFixture( dir, QStringLiteral( "samples/dem_sample.tif" ),
+                  QStringLiteral( "persistent.tif" ) );
+  SourceDescriptor persistentSource;
+  persistentSource.providerKey = QStringLiteral( "gdal" );
+  persistentSource.canonicalSource = persistentPath;
+  RegisterRequest persistentReq;
+  persistentReq.source = persistentSource;
+  persistentReq.persistence = PersistencePolicy::ProjectPersistent;
+  persistentReq.additionalCapabilities = AssetCapability::DeletableSource;
+  const AssetId persistentId = manager.registerSource( persistentReq ).assetId;
+
+  // A task-temporary asset - must survive the sweep untouched.
+  const QString taskPath =
+    stageFixture( dir, QStringLiteral( "samples/dem_sample.tif" ),
+                  QStringLiteral( "task.tif" ) );
+  const AssetId taskId =
+    registerDeletableTemporaryRaster( manager, taskPath, PersistencePolicy::TaskTemporary );
+
+  // An idle session-temporary asset - must be reaped (catalog + file).
+  const QString sessionPath =
+    stageFixture( dir, QStringLiteral( "samples/dem_sample.tif" ),
+                  QStringLiteral( "session.tif" ) );
+  const AssetId sessionId =
+    registerDeletableTemporaryRaster( manager, sessionPath, PersistencePolicy::SessionTemporary );
+
+  // A leased session-temporary asset - must be skipped and reported.
+  const QString leasedPath =
+    stageFixture( dir, QStringLiteral( "samples/dem_sample.tif" ),
+                  QStringLiteral( "leased.tif" ) );
+  const AssetId leasedId =
+    registerDeletableTemporaryRaster( manager, leasedPath, PersistencePolicy::SessionTemporary );
+  auto lease = manager
+                 .acquire( AssetRef{ leasedId, AssetRevision::initial() },
+                           AssetUse{ LeaseKind::View, QStringLiteral( "viewer" ) } )
+                 .take();
+  REQUIRE( lease.isValid() );
+
+  const SessionReapResult result = manager.reapSessionTemporaries();
+
+  CHECK( result.reapedCount == 1 );
+  REQUIRE( result.skippedLeased.size() == 1 );
+  CHECK( result.skippedLeased.first() == leasedId );
+
+  // The idle session-temporary is gone from catalog and disk.
+  CHECK_FALSE( manager.asset( sessionId ).has_value() );
+  CHECK_FALSE( QFile::exists( sessionPath ) );
+
+  // The leased session-temporary remains (host decides what to do).
+  CHECK( manager.asset( leasedId ).has_value() );
+  CHECK( QFile::exists( leasedPath ) );
+
+  // Persistent and task-temporary are untouched.
+  CHECK( manager.asset( persistentId ).has_value() );
+  CHECK( QFile::exists( persistentPath ) );
+  CHECK( manager.asset( taskId ).has_value() );
+  CHECK( QFile::exists( taskPath ) );
+}
+
+TEST_CASE( "reapSessionTemporaries with no temporaries reaps nothing",
+           "[data_manager][reap][sweep]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+
+  const QString persistentPath =
+    stageFixture( dir, QStringLiteral( "samples/dem_sample.tif" ),
+                  QStringLiteral( "persistent.tif" ) );
+  SourceDescriptor source;
+  source.providerKey = QStringLiteral( "gdal" );
+  source.canonicalSource = persistentPath;
+  RegisterRequest request;
+  request.source = source;
+  request.persistence = PersistencePolicy::ProjectPersistent;
+  const AssetId id = manager.registerSource( request ).assetId;
+
+  const SessionReapResult result = manager.reapSessionTemporaries();
+
+  CHECK( result.reapedCount == 0 );
+  CHECK( result.skippedLeased.isEmpty() );
+  CHECK( manager.asset( id ).has_value() );
+}

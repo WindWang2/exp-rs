@@ -97,6 +97,13 @@ class DataManager : public QObject
   /// entry and reports a warning; the catalog never points at a deleted file.
   ReapResult reap( const ReapRequest &request );
 
+  /// Reaps every idle `SessionTemporary` asset in one sweep - the batch form
+  /// of `reap()`. Leased session-temporaries are skipped and reported (not
+  /// force-revoked); the host decides what to do. `TaskTemporary` and
+  /// `ProjectPersistent` assets are never touched. Called by the host on
+  /// session close.
+  SessionReapResult reapSessionTemporaries();
+
     /// Attaches a Derivation Record to an existing asset, the final step of a
     /// transactional algorithm-output commit performed outside this layer. The
     /// record's `outputAssetId` is stamped with `id` (its caller-supplied value

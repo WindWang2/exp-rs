@@ -368,4 +368,18 @@ struct ReapResult
   QVector<Diagnostic> diagnostics;
 };
 
+/// Outcome of a session-scope sweep that reaps every idle `SessionTemporary`
+/// asset. Leased session-temporaries are skipped (not force-revoked) and their
+/// ids reported so the host can decide what to do. `TaskTemporary` and
+/// `ProjectPersistent` assets are never touched by the sweep.
+struct SessionReapResult
+{
+  /// Number of SessionTemporary assets reaped (removed from the catalog).
+  int reapedCount = 0;
+  /// SessionTemporary assets that held an active lease and were left in place.
+  QVector<AssetId> skippedLeased;
+  /// Per-asset diagnostics from the sweep (e.g. file-deletion warnings).
+  QVector<Diagnostic> diagnostics;
+};
+
 } // namespace sicnu::data

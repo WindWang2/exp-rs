@@ -731,6 +731,51 @@ ReapResult DataManager::reap( const ReapRequest &request )
   return result;
 }
 
+SessionReapResult DataManager::reapSessionTemporaries()
+{
+  SessionReapResult result;
+
+  if ( QThread::currentThread() != thread() )
+  {
+    result.diagnostics.append( wrongThreadDiagnostic() );
+    return result;
+  }
+
+  // Collect the SessionTemporary asset ids first; reaping mutates the records
+  // vector, so we cannot iterate it while removing. Leased assets are skipped
+  // and reported (not force-revoked); the host decides what to do about them.
+  QVector<AssetId> idle;
+  for ( const Impl::AssetRecord &record : m_impl->records )
+  {
+    if ( record.snapshot.persistence() != PersistencePolicy::SessionTemporary )
+      continue;
+    if ( m_impl->leaseImpacts( record.snapshot.id() ).isEmpty() )
+      idle.append( record.snapshot.id() );
+    else
+      result.skippedLeased.append( record.snapshot.id() );
+  }
+
+  for ( const AssetId &id : idle )
+  {
+    const ReapResult one = reap( ReapRequest{ id } );
+    if ( one.unloaded )
+    {
+      ++result.reapedCount;
+    }
+    else
+    {
+      // An asset that was idle at collect-time but became leased (or was
+      // otherwise refused) by reap-time is reported as skipped so the result's
+      // skipped set stays complete - the host sees every SessionTemporary that
+      // remained in the catalog, not just the ones leased at classification.
+      result.skippedLeased.append( id );
+    }
+    result.diagnostics.append( one.diagnostics );
+  }
+
+  return result;
+}
+
 LeaseOutcome DataManager::releaseLease( const LeaseRef &lease )
 {
   if ( QThread::currentThread() != thread() )
