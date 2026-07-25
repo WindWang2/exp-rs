@@ -407,3 +407,74 @@ TEST_CASE( "A session sweep skips a temporary asset that has a dependent",
   CHECK( result.diagnostics.isEmpty() );
   CHECK( manager.asset( input ).has_value() );
 }
+
+TEST_CASE(
+  "Cascade-unloading a collection refuses while a child is an external input",
+  "[data_manager][dependency][collection]" )
+{
+  // AC1 (#60): a collection whose child is a strong-dependency INPUT consumed
+  // by a dependent living OUTSIDE the collection cannot be cascade-unloaded
+  // silently. Doing so would erase the child and prune the edge, leaving the
+  // external dependent (e.g. a Virtual Raster) registered but broken. The
+  // refusal names the dependent and leaves both the child and the dependent
+  // registered, mirroring the lease-safety refusal shape.
+  QTemporaryDir dir;
+  DataManager manager;
+
+  const AssetId input =
+    registerRaster( manager, stageRaster( dir, QStringLiteral( "in.tif" ) ) );
+  const AssetId dependent =
+    registerRaster( manager, stageRaster( dir, QStringLiteral( "dep.tif" ) ) );
+  REQUIRE( manager.addStrongDependency( dependent, input ) );
+
+  // The INPUT lives in the collection; the dependent is external to it.
+  const CollectionId collectionId =
+    manager.createCollection( { QStringLiteral( "scene" ), ProductMetadata() } ).collectionId;
+  REQUIRE( manager.addChildToCollection( collectionId, input ) );
+
+  const Result<void> result = manager.unloadCollection( collectionId, /*cascade=*/true );
+
+  REQUIRE_FALSE( result );
+  // The refusal names the external dependent that would be orphaned.
+  CHECK( result.diagnostics().first().code ==
+         QStringLiteral( "collection.has_external_dependents" ) );
+  CHECK( result.diagnostics().first().message.contains( dependent.toString() ) );
+
+  // Nothing was removed: the collection, the child input, and the dependent
+  // all remain registered and the edge is intact.
+  REQUIRE( manager.collection( collectionId ).has_value() );
+  CHECK( manager.asset( input ).has_value() );
+  CHECK( manager.asset( dependent ).has_value() );
+  CHECK( manager.strongDependentsOf( input ) == QVector<AssetId>{ dependent } );
+}
+
+TEST_CASE(
+  "Cascade-unloading a collection whose child is the dependent still unloads cleanly",
+  "[data_manager][dependency][collection]" )
+{
+  // AC2 (#60): the other sub-case is safe. A collection child that IS a
+  // dependent with edges to external inputs cascade-unloads without refusal:
+  // removing the dependent simply prunes its edges, which is harmless.
+  QTemporaryDir dir;
+  DataManager manager;
+
+  const AssetId externalInput =
+    registerRaster( manager, stageRaster( dir, QStringLiteral( "in.tif" ) ) );
+  const AssetId dependent =
+    registerRaster( manager, stageRaster( dir, QStringLiteral( "dep.tif" ) ) );
+  REQUIRE( manager.addStrongDependency( dependent, externalInput ) );
+
+  // The DEPENDENT lives in the collection; its input is external.
+  const CollectionId collectionId =
+    manager.createCollection( { QStringLiteral( "scene" ), ProductMetadata() } ).collectionId;
+  REQUIRE( manager.addChildToCollection( collectionId, dependent ) );
+
+  REQUIRE( manager.unloadCollection( collectionId, /*cascade=*/true ) );
+
+  // The collection and the dependent are gone; the external input survives and
+  // its consumer list is now empty (edge pruned, not orphaned).
+  CHECK_FALSE( manager.collection( collectionId ).has_value() );
+  CHECK_FALSE( manager.asset( dependent ).has_value() );
+  CHECK( manager.asset( externalInput ).has_value() );
+  CHECK( manager.strongDependentsOf( externalInput ).isEmpty() );
+}

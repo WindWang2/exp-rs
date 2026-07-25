@@ -1600,8 +1600,46 @@ Result<void> DataManager::unloadCollection( CollectionId id, bool cascade )
       }
     }
 
-    // Cascade: unload each existing child first, then the collection node.
+    // Refuse while any child is a strong-dependency INPUT consumed by a
+    // dependent that lives OUTSIDE this collection. Cascading would erase the
+    // child and prune the edge, silently orphaning the external dependent
+    // (e.g. a Virtual Raster) - registered but broken. A dependent that is
+    // itself a child of this collection is removed by the cascade below, so it
+    // is internal and safe. (The inverse - a child that IS a dependent with
+    // edges to external inputs - is also safe: pruning the edge is harmless.)
     const QVector<AssetId> children = collectionIt->childAssetIds;
+    const auto isExternal = [&]( const AssetId &candidate ) {
+      return !children.contains( candidate );
+    };
+    // Aggregate every external dependent across all children so a multi-child
+    // refusal reports them all at once (mirrors unload.has_dependents), rather
+    // than forcing a fix-and-retry cycle per dependent.
+    QVector<Diagnostic> externalDependentDiagnostics;
+    for ( const AssetId &childId : children )
+    {
+      if ( m_impl->findRecord( childId ) == m_impl->records.end() )
+        continue;
+      const QVector<AssetId> dependents = strongDependentsOf( childId );
+      for ( const AssetId &dependent : dependents )
+      {
+        if ( isExternal( dependent ) )
+        {
+          externalDependentDiagnostics.append(
+            Diagnostic{ QStringLiteral( "collection.has_external_dependents" ),
+                        QStringLiteral( "The collection cannot be cascade-"
+                                        "unloaded: child %1 is a strong "
+                                        "dependency of %2 which lives outside "
+                                        "the collection; unload the dependent "
+                                        "first" )
+                          .arg( childId.toString(), dependent.toString() ),
+                        DiagnosticSeverity::Error } );
+        }
+      }
+    }
+    if ( !externalDependentDiagnostics.isEmpty() )
+      return Result<void>::failure( externalDependentDiagnostics );
+
+    // Cascade: unload each existing child first, then the collection node.
     for ( const AssetId &childId : children )
     {
       const auto childIt = m_impl->findRecord( childId );
