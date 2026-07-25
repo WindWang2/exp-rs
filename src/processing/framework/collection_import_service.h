@@ -135,16 +135,16 @@ class ProductDiscoverer
     discover( const QString &source ) = 0;
 };
 
-/// Real adapter around `SatelliteProducts::discoverProduct`. Produces one
-/// `DiscoveredGridGroup` (the discoverer's preferred resolution, "10m" by
-/// default). True multi-grid extraction for Sentinel-2 L2A (separate 10 m /
-/// 20 m / 60 m groups) and MODIS (subdatasets on independent grids) is a
-/// deferred follow-up: the stub discoverer proves the grid-splitting contract
-/// (different grids -> distinct child candidates), and this adapter will
-/// eventually honor it by calling `discoverSentinel2` per resolution. The spec
-/// body lists multi-grid as the headline invariant; the single-group adapter
-/// satisfies the wiring acceptance (#51 AC: discoverer is injectable, real
-/// path is wired) while the multi-grid extraction is tracked separately.
+/// Real adapter around `SatelliteProducts::discoverProduct`. Groups the
+/// discovered bands by source path: bands in different files are DISTINCT
+/// child candidates (so the user can select which bands to import, spec user
+/// story 2), while bands sharing one file form a single child. This makes a
+/// Landsat scene - where each band is its own file - import band-by-band. The
+/// grid label comes from the discoverer's `resolution` attribute when present
+/// (Sentinel-2 L2A), else "default". True multi-grid extraction for
+/// Sentinel-2 L2A (separate 10 m / 20 m / 60 m groups, which `discoverProduct`
+/// filters to one preferred resolution) is a deferred follow-up: calling
+/// `discoverSentinel2` per resolution would emit one group per grid.
 class SatelliteProductsDiscoverer : public ProductDiscoverer
 {
   public:

@@ -19,8 +19,11 @@
 
 using sicnu::data::AssetId;
 using sicnu::data::AssetState;
+using sicnu::data::CollectionCreateRequest;
+using sicnu::data::CollectionId;
 using sicnu::data::DataManager;
 using sicnu::data::PersistencePolicy;
+using sicnu::data::ProductMetadata;
 using sicnu::data::RegisterRequest;
 using sicnu::data::SourceDescriptor;
 using sicnu::display::DisplayViewId;
@@ -334,4 +337,99 @@ TEST_CASE( "A promoted asset is reflected immediately in the panel",
   REQUIRE( dataManager.promote( id ) );
 
   CHECK( panel.rowText( id, 3 ) == QStringLiteral( "Persistent" ) );
+}
+
+// --- Collections (#53) ---
+
+TEST_CASE( "The panel shows a collection as a parent row with its children nested",
+           "[data_manager_panel][collection]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  QTemporaryDir dir;
+
+  const auto stagedPath = [&dir]( const QString &name ) {
+    const QString path = dir.filePath( name );
+    REQUIRE( QFile::copy(
+      fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ), path ) );
+    return path;
+  };
+
+  const AssetId childA = registerRaster( dataManager, stagedPath( QStringLiteral( "a.tif" ) ) );
+  const AssetId childB = registerRaster( dataManager, stagedPath( QStringLiteral( "b.tif" ) ) );
+
+  ProductMetadata metadata;
+  metadata.platform = QStringLiteral( "Sentinel-2A" );
+  CollectionCreateRequest collectionRequest{ QStringLiteral( "S2A scene" ), metadata };
+  const CollectionId collectionId =
+    dataManager.createCollection( collectionRequest ).collectionId;
+  REQUIRE( dataManager.addChildToCollection( collectionId, childA ) );
+  REQUIRE( dataManager.addChildToCollection( collectionId, childB ) );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+
+  // The collection is one parent row (the two children are nested under it, so
+  // topLevelItemCount is 1 for this collection).
+  CHECK( panel.rowCount() == 1 );
+  // Both children are present, carrying their own AssetIds.
+  CHECK( panel.rowText( childA, 0 ) == QStringLiteral( "a" ) );
+  CHECK( panel.rowText( childB, 0 ) == QStringLiteral( "b" ) );
+}
+
+TEST_CASE( "Double-clicking a collection's child emits a display request for the child",
+           "[data_manager_panel][collection]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  QTemporaryDir dir;
+
+  const QString path = dir.filePath( QStringLiteral( "child.tif" ) );
+  REQUIRE( QFile::copy(
+    fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ), path ) );
+  const AssetId child = registerRaster( dataManager, path );
+
+  const CollectionId collectionId = dataManager
+    .createCollection( { QStringLiteral( "scene" ), ProductMetadata() } ).collectionId;
+  REQUIRE( dataManager.addChildToCollection( collectionId, child ) );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+  QSignalSpy displaySpy( &panel, &sicnu::DataManagerPanel::displayRequested );
+
+  // A collection's child is a full Data Asset: activating it still emits a
+  // display request for the child's AssetId (collection membership does not
+  // limit what the user can do with the band).
+  panel.activateAsset( child );
+
+  REQUIRE( displaySpy.count() == 1 );
+  CHECK( displaySpy.first().first().value<AssetId>() == child );
+}
+
+TEST_CASE( "Standalone assets stay top-level alongside collection parent rows",
+           "[data_manager_panel][collection]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  QTemporaryDir dir;
+
+  const auto stagedPath = [&dir]( const QString &name ) {
+    const QString path = dir.filePath( name );
+    REQUIRE( QFile::copy(
+      fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ), path ) );
+    return path;
+  };
+
+  const AssetId standalone = registerRaster( dataManager, stagedPath( QStringLiteral( "s.tif" ) ) );
+  const AssetId child = registerRaster( dataManager, stagedPath( QStringLiteral( "c.tif" ) ) );
+
+  const CollectionId collectionId = dataManager
+    .createCollection( { QStringLiteral( "scene" ), ProductMetadata() } ).collectionId;
+  REQUIRE( dataManager.addChildToCollection( collectionId, child ) );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+
+  // One collection parent row + one standalone asset row = 2 top-level items.
+  CHECK( panel.rowCount() == 2 );
+  // Both the standalone asset and the collection's child are findable.
+  CHECK( panel.rowText( standalone, 0 ) == QStringLiteral( "s" ) );
+  CHECK( panel.rowText( child, 0 ) == QStringLiteral( "c" ) );
 }

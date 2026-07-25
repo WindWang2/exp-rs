@@ -314,19 +314,38 @@ Result<DiscoveredProduct> SatelliteProductsDiscoverer::discover( const QString &
   product.acquisitionDate = info.acquisitionDate;
   product.attributes = info.attributes;
 
-  // One grid group for the discovered (preferred-resolution) band set. The
-  // grid label comes from the discoverer's `resolution` attribute when present
-  // (Sentinel-2 L2A sets it), else "default". Real multi-grid extraction
-  // (separate groups for S2 10m/20m/60m, or MODIS subdatasets on independent
-  // grids) is a deferred follow-up; the stub discoverer already proves the
-  // grid-splitting contract this adapter will eventually honor.
-  DiscoveredGridGroup group;
-  group.gridLabel = info.attributes.value(
+  // Group bands by source path: bands that live in different files are
+  // DISTINCT child candidates (so the user can select which bands to import,
+  // spec user story 2), while bands sharing one file (a multi-band raster, or
+  // one MODIS/HDF container) form a single child. This is what makes a Landsat
+  // scene - where each band is its own file - import band-by-band rather than
+  // collapsing to a single first-band child. Grid-label comes from the
+  // discoverer's `resolution` attribute when present (Sentinel-2 L2A sets it),
+  // else "default".
+  const QString gridLabel = info.attributes.value(
     QStringLiteral( "resolution" ), QStringLiteral( "default" ) );
-  group.displayName = QStringLiteral( "%1 (%2)" ).arg( info.productId, group.gridLabel );
-  group.sourcePath = info.bands.isEmpty() ? info.metadataPath : info.bands.first().path;
-  group.bands = info.bands;
-  product.gridGroups.append( group );
+
+  QMap<QString, int> groupIndexByPath; // source path -> index in gridGroups
+  for ( const BandFile &band : info.bands )
+  {
+    const QString path = band.path.isEmpty() ? info.metadataPath : band.path;
+    const auto it = groupIndexByPath.constFind( path );
+    if ( it == groupIndexByPath.constEnd() )
+    {
+      DiscoveredGridGroup group;
+      group.gridLabel = gridLabel;
+      group.displayName = QStringLiteral( "%1 (%2)" ).arg( band.name, gridLabel );
+      group.sourcePath = path;
+      product.gridGroups.append( group );
+      groupIndexByPath.insert( path, product.gridGroups.size() - 1 );
+      product.gridGroups.last().bands.append( band );
+    }
+    else
+    {
+      // A band in an already-seen file: same child candidate (same grid).
+      product.gridGroups[it.value()].bands.append( band );
+    }
+  }
 
   return Result<DiscoveredProduct>::success( std::move( product ) );
 }

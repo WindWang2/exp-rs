@@ -74,6 +74,7 @@ add_executable(sicnu_geo_rs
     dialogs/stac_browser_dialog.cpp
     dialogs/raster_processing_dialog_base.cpp
     dialogs/extract_band_dialog.cpp
+    dialogs/landsat_import_dialog.cpp
     layout/qgslayoutdesignerdialog.cpp
     map_tools/measure_tool.cpp
     widgets/histogram_widget.cpp

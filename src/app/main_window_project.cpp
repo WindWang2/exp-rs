@@ -5,6 +5,7 @@
 #include "layer_manager.h"
 #include "project_context.h"
 #include "dialogs/stac_browser_dialog.h"
+#include "dialogs/landsat_import_dialog.h"
 #include "operators/framework/rs_operation_logger.h"
 
 #include <QFileDialog>
@@ -157,6 +158,23 @@ void QgisDesktopWindow::browseStacCatalog()
 {
     StacBrowserDialog dlg(m_mapCanvas, this);
     dlg.exec();
+}
+
+void QgisDesktopWindow::openLandsatImportDialog()
+{
+    if ( !m_projectContext )
+    {
+        QMessageBox::information( this, tr( "导入 Landsat 产品" ),
+                                  tr( "工程数据上下文不可用。" ) );
+        return;
+    }
+
+    LandsatImportDialog dialog( this );
+    dialog.setDataManager( &m_projectContext->dataManager() );
+    // The dialog runs the probe-preview-commit transaction itself; on accept
+    // the collection + selected band children are registered and the Data
+    // Manager panel refreshes via collectionAdded/assetAdded.
+    dialog.exec();
 }
 
 void QgisDesktopWindow::exportLabReport()

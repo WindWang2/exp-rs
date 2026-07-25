@@ -361,11 +361,16 @@ TEST_CASE( "Real SatelliteProducts discoverer is wired and maps a SAFE product t
 
   REQUIRE( result );
   const ImportPreview &preview = result.value();
-  // discoverProduct prefers 10m, so one grid group is produced. (Real multi-grid
-  // extraction for L2A 20m/60m is a documented follow-up; this proves the wiring.)
-  REQUIRE( preview.children.size() == 1 );
-  CHECK( preview.children[0].gridLabel == QStringLiteral( "10m" ) );
-  CHECK_FALSE( preview.children[0].bands.isEmpty() );
+  // discoverProduct prefers 10m, so the four R10m band files are discovered.
+  // Each band lives in its own file, so each becomes a DISTINCT child candidate
+  // (band-by-band selection; bands in one file would share a candidate). All
+  // four children carry the 10m grid label.
+  REQUIRE( preview.children.size() == 4 );
+  for ( const ChildCandidate &child : preview.children )
+  {
+    CHECK( child.gridLabel == QStringLiteral( "10m" ) );
+    CHECK_FALSE( child.bands.isEmpty() );
+  }
   CHECK( preview.metadata.platform.contains( QStringLiteral( "Sentinel-2" ) ) );
   CHECK( preview.metadata.processingLevel == QStringLiteral( "L2A" ) );
   // The integration probe is still read-only.

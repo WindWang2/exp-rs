@@ -107,6 +107,9 @@ void QgisDesktopWindow::setupMenu()
     tip( projectMenu->addAction( ic( "i_ort" ), tr( "导入图层..." ),
                                  this, &QgisDesktopWindow::importLayer ),
          tr( "导入栅格或矢量图层到工程。" ) );
+    tip( projectMenu->addAction( ic( "i_ort" ), tr( "导入 Landsat 产品..." ),
+                                 this, &QgisDesktopWindow::openLandsatImportDialog ),
+         tr( "按产品导入 Landsat 场景：预览波段/网格组并选择导入为数据集合。" ) );
     tip( projectMenu->addAction( ic( "cloud_sync" ), tr( "浏览 STAC 目录..." ),
                                  this, &QgisDesktopWindow::browseStacCatalog ),
          tr( "浏览 STAC 目录检索遥感数据。" ) );

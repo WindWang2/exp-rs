@@ -2667,3 +2667,26 @@ target_include_directories(test_collection_import_service PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_collection_import_service)
+
+# Landsat import dialog tests - probe-preview-commit transaction (headless)
+add_executable(test_landsat_import_dialog
+  test_landsat_import_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/landsat_import_dialog.cpp
+)
+target_link_libraries(test_landsat_import_dialog PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_data
+)
+target_include_directories(test_landsat_import_dialog PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_landsat_import_dialog PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_landsat_import_dialog)

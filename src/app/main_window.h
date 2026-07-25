@@ -140,6 +140,7 @@ public slots:
     void saveProject();
     void saveProjectAs();
     void importLayer();
+    void openLandsatImportDialog();
     void browseStacCatalog();
     void newLayout();
     void exportLabReport();

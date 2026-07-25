@@ -11,6 +11,7 @@ class QTreeWidgetItem;
 namespace sicnu::data
 {
 class DataManager;
+class AssetSnapshot;
 }
 
 namespace sicnu
@@ -18,12 +19,15 @@ namespace sicnu
 
 /**
  * Project Data Manager panel — a read-only projection of the Data Manager's
- * immutable asset snapshots, kept semantically separate from the layer tree.
+ * immutable asset snapshots and Data Collections, kept semantically separate
+ * from the layer tree.
  *
- * One row per Data Asset (never per Display Layer). The panel holds no business
- * logic: double-click, remove, and promote intents are emitted as signals for
- * the UI shell to wire to the Display Manager, unload planning, and promotion
- * respectively.
+ * Standalone Data Assets appear as top-level rows; a Data Collection appears
+ * as a top-level parent row with its child assets nested beneath it. One row
+ * per Data Asset (never per Display Layer); collection rows are organizational
+ * and carry no AssetId. The panel holds no business logic: double-click,
+ * remove, and promote intents are emitted as signals for the UI shell to wire
+ * to the Display Manager, unload planning, and promotion respectively.
  */
 class DataManagerPanel : public QDockWidget
 {
@@ -34,14 +38,18 @@ class DataManagerPanel : public QDockWidget
                                QWidget *parent = nullptr );
     ~DataManagerPanel() override = default;
 
-    /// Number of asset rows currently shown (one per Data Asset).
+    /// Number of top-level rows (one per standalone Data Asset + one per
+    /// Data Collection; collection children are nested, not top-level).
     int rowCount() const;
 
     /// Text of a column for the row presenting `id`, or empty if absent.
     /// Columns: 0 name, 1 kind, 2 status, 3 persistence, 4 references.
+    /// Finds the asset row whether it is top-level (standalone) or nested
+    /// under a collection.
     QString rowText( sicnu::data::AssetId id, int column ) const;
 
-    /// The Asset ID of the currently selected row, if any.
+    /// The Asset ID of the currently selected row, if any. A collection
+    /// parent row carries no AssetId and returns a null id.
     sicnu::data::AssetId selectedAssetId() const;
 
     /// Selects the row presenting `id` without triggering display/unload intents.
@@ -58,8 +66,8 @@ class DataManagerPanel : public QDockWidget
     void requestPromote( sicnu::data::AssetId id );
 
     /// Re-projects the Data Manager snapshots. Called automatically on asset
-    /// add/change/remove; call it after Display Layer (lease) changes, which do
-    /// not emit asset signals.
+    /// add/change/remove and collection add/remove; call it after Display Layer
+    /// (lease) changes, which do not emit asset signals.
     void refresh();
 
   signals:
@@ -83,6 +91,9 @@ class DataManagerPanel : public QDockWidget
     bool isProjectPersistent( sicnu::data::AssetId id ) const;
     /// True when `id` is a registered temporary asset eligible for promotion.
     bool isPromotable( sicnu::data::AssetId id ) const;
+
+    /// Populates one asset row (top-level or a collection child) from `snapshot`.
+    void addAssetRow( QTreeWidgetItem *parent, const sicnu::data::AssetSnapshot &snapshot );
 
     sicnu::data::DataManager *m_dataManager = nullptr; // not owned
     QTreeWidget *m_tree = nullptr;

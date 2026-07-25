@@ -4,8 +4,10 @@
 #include <QMenu>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
+#include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
 
+#include "data/collection_types.h"
 #include "data/data_manager.h"
 
 namespace sicnu
@@ -84,7 +86,9 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   m_tree->setColumnCount( 5 );
   m_tree->setHeaderLabels(
     { tr( "Name" ), tr( "Kind" ), tr( "Status" ), tr( "Persistence" ), tr( "Refs" ) } );
-  m_tree->setRootIsDecorated( false );
+  // Collections nest their children, so the tree shows a root decoration for
+  // expand/collapse.
+  m_tree->setRootIsDecorated( true );
   m_tree->setSelectionMode( QAbstractItemView::SingleSelection );
   m_tree->setContextMenuPolicy( Qt::CustomContextMenu );
   m_tree->header()->setStretchLastSection( false );
@@ -109,6 +113,10 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
              &DataManagerPanel::refresh );
     connect( m_dataManager, &sicnu::data::DataManager::assetRemoved, this,
              &DataManagerPanel::refresh );
+    connect( m_dataManager, &sicnu::data::DataManager::collectionAdded, this,
+             &DataManagerPanel::refresh );
+    connect( m_dataManager, &sicnu::data::DataManager::collectionRemoved, this,
+             &DataManagerPanel::refresh );
   }
 
   refresh();
@@ -121,11 +129,13 @@ int DataManagerPanel::rowCount() const
 
 QString DataManagerPanel::rowText( sicnu::data::AssetId id, int column ) const
 {
-  for ( int row = 0; row < m_tree->topLevelItemCount(); ++row )
+  // Recurse into nested collection children, not just top-level rows.
+  QTreeWidgetItemIterator it( m_tree );
+  while ( *it )
   {
-    const QTreeWidgetItem *item = m_tree->topLevelItem( row );
-    if ( item->data( 0, kAssetIdRole ).toString() == id.toString() )
-      return item->text( column );
+    if ( ( *it )->data( 0, kAssetIdRole ).toString() == id.toString() )
+      return ( *it )->text( column );
+    ++it;
   }
   return QString();
 }
@@ -137,14 +147,16 @@ sicnu::data::AssetId DataManagerPanel::selectedAssetId() const
 
 void DataManagerPanel::selectAsset( sicnu::data::AssetId id )
 {
-  for ( int row = 0; row < m_tree->topLevelItemCount(); ++row )
+  // Recurse into nested collection children, not just top-level rows.
+  QTreeWidgetItemIterator it( m_tree );
+  while ( *it )
   {
-    QTreeWidgetItem *item = m_tree->topLevelItem( row );
-    if ( item->data( 0, kAssetIdRole ).toString() == id.toString() )
+    if ( ( *it )->data( 0, kAssetIdRole ).toString() == id.toString() )
     {
-      m_tree->setCurrentItem( item );
+      m_tree->setCurrentItem( *it );
       return;
     }
+    ++it;
   }
 }
 
@@ -168,6 +180,21 @@ void DataManagerPanel::requestPromote( sicnu::data::AssetId id )
     emit promoteRequested( id );
 }
 
+void DataManagerPanel::addAssetRow( QTreeWidgetItem *parent,
+                                    const sicnu::data::AssetSnapshot &snapshot )
+{
+  auto *item = parent ? new QTreeWidgetItem( parent )
+                      : new QTreeWidgetItem( m_tree );
+  item->setText( 0, snapshot.displayName() );
+  item->setText( 1, kindText( snapshot.kind() ) );
+  item->setText( 2, statusText( snapshot.state() ) );
+  item->setText( 3, persistenceText( snapshot.persistence() ) );
+  item->setText( 4, QString::number( referenceCount( snapshot.id() ) ) );
+  item->setData( 0, kAssetIdRole, snapshot.id().toString() );
+  if ( snapshot.state() == sicnu::data::AssetState::Missing )
+    item->setToolTip( 2, tr( "The source is missing; relocate to recover" ) );
+}
+
 void DataManagerPanel::refresh()
 {
   // Remember the current selection so a refresh does not change which asset the
@@ -178,17 +205,37 @@ void DataManagerPanel::refresh()
   if ( !m_dataManager )
     return;
 
+  // One top-level parent row per collection, with its child assets nested
+  // beneath it. Collection rows are organizational: they carry no AssetId, so
+  // double-click / context actions only apply to their child rows.
+  for ( const sicnu::data::CollectionId &collectionId : m_dataManager->collections() )
+  {
+    const std::optional<sicnu::data::CollectionSnapshot> collection =
+      m_dataManager->collection( collectionId );
+    if ( !collection.has_value() )
+      continue;
+
+    auto *collectionItem = new QTreeWidgetItem( m_tree );
+    collectionItem->setText( 0, collection->displayName );
+    collectionItem->setText( 1, tr( "集合" ) );
+    collectionItem->setText( 4, QString::number( collection->childAssetIds.size() ) );
+
+    for ( const sicnu::data::AssetId &childId : collection->childAssetIds )
+    {
+      const std::optional<sicnu::data::AssetSnapshot> snapshot =
+        m_dataManager->asset( childId );
+      if ( snapshot.has_value() )
+        addAssetRow( collectionItem, *snapshot );
+    }
+    collectionItem->setExpanded( true );
+  }
+
+  // Standalone assets (no parent collection) appear as top-level rows.
   for ( const sicnu::data::AssetSnapshot &snapshot : m_dataManager->assets() )
   {
-    auto *item = new QTreeWidgetItem( m_tree );
-    item->setText( 0, snapshot.displayName() );
-    item->setText( 1, kindText( snapshot.kind() ) );
-    item->setText( 2, statusText( snapshot.state() ) );
-    item->setText( 3, persistenceText( snapshot.persistence() ) );
-    item->setText( 4, QString::number( referenceCount( snapshot.id() ) ) );
-    item->setData( 0, kAssetIdRole, snapshot.id().toString() );
-    if ( snapshot.state() == sicnu::data::AssetState::Missing )
-      item->setToolTip( 2, tr( "The source is missing; relocate to recover" ) );
+    if ( snapshot.parentCollectionId().has_value() )
+      continue;
+    addAssetRow( nullptr, snapshot );
   }
 
   if ( !previouslySelected.isEmpty() )
