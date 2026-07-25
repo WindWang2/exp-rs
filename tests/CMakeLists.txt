@@ -2599,3 +2599,22 @@ target_include_directories(test_data_manager_reap PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_data_manager_reap)
+
+# ProjectContext session-close reap tests
+add_executable(test_project_context_reap
+  test_project_context_reap.cpp
+)
+target_link_libraries(test_project_context_reap PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+)
+target_include_directories(test_project_context_reap PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_project_context_reap)

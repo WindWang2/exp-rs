@@ -52,7 +52,21 @@ std::optional<data::SourceDescriptor> localSourceForLayer(QgsMapLayer &layer) {
 
 ProjectContext::ProjectContext() : m_displayManager(&m_dataManager) {}
 
-ProjectContext::~ProjectContext() = default;
+ProjectContext::~ProjectContext() {
+  // App exit / context teardown may not have run clearProject (e.g. the user
+  // just quits). Reap session temporaries so scratch outputs do not leak onto
+  // disk. Leased assets are skipped - they cannot be safely deleted out from
+  // under a holder during teardown - and their ids are logged here so they are
+  // not silently dropped. (emit from the destructor is safe because the
+  // DisplayManager is a member destroyed in the same step as the DataManager.)
+  const data::SessionReapResult reaped = closeSession();
+  for ( const data::AssetId &id : reaped.skippedLeased )
+  {
+    qWarning( "ProjectContext: SessionTemporary asset %s still held a lease at "
+              "teardown and was not reaped",
+              qPrintable( id.toString() ) );
+  }
+}
 
 data::Result<std::unique_ptr<ProjectContext>>
 ProjectContext::create(const display::DisplayViewSpec &mainViewSpec) {
@@ -124,7 +138,20 @@ void ProjectContext::adoptExternalLayer(QgsMapLayer *layer) {
   (void)m_displayManager.adoptLayer(m_mainViewId, registered.assetId, layer);
 }
 
+data::SessionReapResult ProjectContext::closeSession() {
+  // Reap idle SessionTemporary assets (catalog removal + DeletableSource file
+  // deletion). Leased ones are skipped and reported; ProjectPersistent and
+  // TaskTemporary are untouched. This runs on explicit session close and on
+  // destruction, so scratch outputs never leak past the session.
+  return m_dataManager.reapSessionTemporaries();
+}
+
 data::Result<void> ProjectContext::clearProject(QgsProject &project) {
+  // Reap scratch outputs first so their files are deleted before the catalog
+  // is torn down. ProjectPersistent assets are unloaded below (and re-read by
+  // the project on open); TaskTemporary are left for their own task-scope reap.
+  closeSession();
+
   const std::optional<display::DisplayViewSnapshot> mainView =
       m_displayManager.view(m_mainViewId);
   if (mainView) {

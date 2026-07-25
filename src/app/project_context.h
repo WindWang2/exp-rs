@@ -44,6 +44,16 @@ public:
    */
   data::Result<void> clearProject(QgsProject &project);
 
+  /**
+   * Closes the session: reaps every idle SessionTemporary asset (removing it
+   * from the catalog and deleting its DeletableSource file) and reports any
+   * SessionTemporary asset still holding a lease that could not be reaped.
+   * ProjectPersistent and TaskTemporary assets are left untouched. Called by
+   * the host on session close; also run by the destructor so app exit reaps
+   * scratch outputs even when clearProject was not invoked.
+   */
+  data::SessionReapResult closeSession();
+
 private:
   ProjectContext();
 
