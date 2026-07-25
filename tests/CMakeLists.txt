@@ -2720,3 +2720,20 @@ target_include_directories(test_data_manager_dependency PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_data_manager_dependency)
+
+# Virtual raster preflight tests - pure classification over snapshots (#57)
+qt_add_executable(test_virtual_raster_preflight
+  test_virtual_raster_preflight.cpp
+)
+target_link_libraries(test_virtual_raster_preflight PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_processing
+  sicnu_data
+)
+target_include_directories(test_virtual_raster_preflight PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_virtual_raster_preflight)

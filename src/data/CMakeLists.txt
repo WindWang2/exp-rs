@@ -22,6 +22,8 @@ qt_add_library(sicnu_data STATIC
   processing_asset_resolver.h
   source_descriptor.cpp
   source_descriptor.h
+  virtual_raster_preflight.cpp
+  virtual_raster_preflight.h
   virtual_raster_recipe.cpp
   virtual_raster_recipe.h
 )

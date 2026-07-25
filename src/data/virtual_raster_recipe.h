@@ -107,8 +107,10 @@ enum class PreflightVerdict
 };
 
 /// The result of preflighting a recipe against the input assets' snapshots.
-/// `canCreate` is false exactly for hard-failure verdicts; `diagnostics`
-/// carries human-readable detail the UI can present verbatim.
+/// `canCreate` is false for hard-failure verdicts, and also for warning
+/// verdicts (`RequiresReprojection` / `RequiresResampling`) that the recipe
+/// does not resolve with an explicit target CRS / target resolution;
+/// `diagnostics` carries human-readable detail the UI can present verbatim.
 struct PreflightResult
 {
   PreflightVerdict verdict = PreflightVerdict::Compatible;
