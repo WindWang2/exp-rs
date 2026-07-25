@@ -2658,6 +2658,7 @@ qt_add_executable(test_collection_import_service
 target_link_libraries(test_collection_import_service PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
+  Qt6::Test
   qgis_core
   sicnu_processing
   sicnu_data

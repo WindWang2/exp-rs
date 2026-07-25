@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTextStream>
 
@@ -26,12 +27,26 @@
 #include "processing/framework/collection_import_service.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+using sicnu::data::AssetCapabilities;
+using sicnu::data::AssetCapability;
+using sicnu::data::AssetId;
 using sicnu::data::AssetKind;
+using sicnu::data::AssetRef;
+using sicnu::data::AssetRevision;
+using sicnu::data::AssetSnapshot;
+using sicnu::data::AssetUse;
 using sicnu::data::DataManager;
+using sicnu::data::LeaseKind;
+using sicnu::data::PersistencePolicy;
 using sicnu::data::ProductMetadata;
+using sicnu::data::RegisterRequest;
+using sicnu::data::SourceDescriptor;
+using sicnu::data::UnloadPlan;
 using sicnu::ChildBandInfo;
 using sicnu::ChildCandidate;
 using sicnu::CollectionImportService;
+using sicnu::CommitImportRequest;
+using sicnu::CommitImportResult;
 using sicnu::DiscoveredGridGroup;
 using sicnu::DiscoveredProduct;
 using sicnu::ImportPreview;
@@ -95,6 +110,50 @@ DiscoveredProduct sentinelLikeProduct( const QVector<DiscoveredGridGroup> &group
   product.attributes.insert( QStringLiteral( "tile" ), QStringLiteral( "T48RVT" ) );
   product.gridGroups = groups;
   return product;
+}
+
+/// Resolve a fixture path relative to this source file (tests/ -> ../data).
+QString fixturePath( const QString &relative )
+{
+  const QString here = QFileInfo( __FILE__ ).absolutePath();
+  return QFileInfo( here + QStringLiteral( "/../data/" ) + relative ).absoluteFilePath();
+}
+
+/// Stage a distinct copy of the DEM fixture into the temp dir so two children
+/// get distinct source paths (the Data Manager dedups by SourceKey).
+QString stageRaster( QTemporaryDir &dir, const QString &name )
+{
+  const QString path = dir.filePath( name );
+  REQUIRE( QFile::copy( fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ), path ) );
+  return path;
+}
+
+/// Build a ChildCandidate pointing at `sourcePath` with one band. The band's
+/// `sourcePath` is what the commit registers; `kind` defaults to Raster.
+ChildCandidate rasterChild( const QString &sourcePath, const QString &displayName = {} )
+{
+  ChildCandidate candidate;
+  candidate.kind = AssetKind::Raster;
+  candidate.displayName = displayName.isEmpty() ? sourcePath : displayName;
+  candidate.gridLabel = QStringLiteral( "default" );
+  candidate.sourcePath = sourcePath;
+  ChildBandInfo band;
+  band.name = QStringLiteral( "B1" );
+  band.sourcePath = sourcePath;
+  band.sourceBand = 1;
+  candidate.bands.append( band );
+  return candidate;
+}
+
+/// Build an ImportPreview over the given children, with placeholder metadata.
+ImportPreview previewOver( const QVector<ChildCandidate> &children )
+{
+  ImportPreview preview;
+  preview.collectionDisplayName = QStringLiteral( "test-product" );
+  preview.metadata.platform = QStringLiteral( "Sentinel-2A" );
+  preview.metadata.processingLevel = QStringLiteral( "L2A" );
+  preview.children = children;
+  return preview;
 }
 
 } // namespace
@@ -312,4 +371,325 @@ TEST_CASE( "Real SatelliteProducts discoverer is wired and maps a SAFE product t
   // The integration probe is still read-only.
   CHECK( manager.assets().isEmpty() );
   CHECK( manager.collections().isEmpty() );
+}
+
+// --- Atomic commit transaction (#52) ---
+//
+// The commit cases use the default DataManager (real GDAL/OGR providers) so
+// registerSource resolves real staged rasters. A mid-commit failure is forced
+// by pointing a child at an unresolvable source path.
+
+TEST_CASE( "Commit registers one collection and one child asset per selection",
+           "[collection_import][commit]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  QSignalSpy collectionSpy( &manager, &DataManager::collectionAdded );
+  QSignalSpy assetSpy( &manager, &DataManager::assetAdded );
+  StubDiscoverer discoverer; // unused by commit; required by the constructor
+  CollectionImportService service( &manager, &discoverer );
+
+  const QString pathA = stageRaster( dir, QStringLiteral( "a.tif" ) );
+  const QString pathB = stageRaster( dir, QStringLiteral( "b.tif" ) );
+  const ImportPreview preview =
+    previewOver( { rasterChild( pathA, QStringLiteral( "10m" ) ),
+                   rasterChild( pathB, QStringLiteral( "20m" ) ) } );
+
+  const CommitImportResult result =
+    service.commit( { preview, { 0, 1 }, PersistencePolicy::ProjectPersistent } );
+
+  REQUIRE( !result.collectionId.isNull() );
+  REQUIRE( result.childAssetIds.size() == 2 );
+  CHECK( collectionSpy.count() == 1 );
+  CHECK( assetSpy.count() == 2 );
+  // Each child carries the collection as its parent.
+  for ( const AssetId &childId : result.childAssetIds )
+  {
+    const auto snapshot = manager.asset( childId );
+    REQUIRE( snapshot.has_value() );
+    CHECK( snapshot->parentCollectionId() == result.collectionId );
+  }
+  // The collection lists both children in selection order.
+  const auto collection = manager.collection( result.collectionId );
+  REQUIRE( collection.has_value() );
+  REQUIRE( collection->childAssetIds.size() == 2 );
+  CHECK( collection->childAssetIds == result.childAssetIds );
+}
+
+TEST_CASE( "A mid-commit child registration failure rolls back the whole import",
+           "[collection_import][commit][rollback]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  StubDiscoverer discoverer;
+  CollectionImportService service( &manager, &discoverer );
+
+  const QString validPath = stageRaster( dir, QStringLiteral( "valid.tif" ) );
+  // Child 1 points at a source no registered provider supports, so
+  // registerSource genuinely fails (source.unsupported), triggering rollback.
+  // (A .tif path that merely doesn't resolve would register as a Missing
+  // asset, not fail - the provider is intentionally lenient about missing
+  // sources. An unsupported extension is the true registerSource failure.)
+  const ImportPreview preview =
+    previewOver( { rasterChild( validPath, QStringLiteral( "10m" ) ),
+                   rasterChild( QStringLiteral( "/nonexistent/bogus.xyz123" ),
+                                QStringLiteral( "20m" ) ) } );
+
+  const CommitImportResult result =
+    service.commit( { preview, { 0, 1 }, PersistencePolicy::ProjectPersistent } );
+
+  // All-or-nothing: the failed second child rolls back the collection and the
+  // first child. The catalog is fully clean - no half-imported product.
+  CHECK( result.collectionId.isNull() );
+  CHECK( result.childAssetIds.isEmpty() );
+  REQUIRE_FALSE( result.diagnostics.isEmpty() );
+  CHECK( result.diagnostics.first().code ==
+         QStringLiteral( "source.unsupported" ) );
+  CHECK( manager.assets().isEmpty() );
+  CHECK( manager.collections().isEmpty() );
+}
+
+TEST_CASE( "Selecting a subset of children registers only those children",
+           "[collection_import][commit][subset]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  StubDiscoverer discoverer;
+  CollectionImportService service( &manager, &discoverer );
+
+  const QString pathA = stageRaster( dir, QStringLiteral( "a.tif" ) );
+  const QString pathB = stageRaster( dir, QStringLiteral( "b.tif" ) );
+  const QString pathC = stageRaster( dir, QStringLiteral( "c.tif" ) );
+  const ImportPreview preview =
+    previewOver( { rasterChild( pathA, QStringLiteral( "10m" ) ),
+                   rasterChild( pathB, QStringLiteral( "20m" ) ),
+                   rasterChild( pathC, QStringLiteral( "60m" ) ) } );
+
+  // Select only the 10m and 60m groups (indices 0 and 2); skip the 20m group.
+  const CommitImportResult result = service.commit( { preview, { 0, 2 } } );
+
+  REQUIRE( !result.collectionId.isNull() );
+  REQUIRE( result.childAssetIds.size() == 2 );
+  // The unselected middle child is absent from the catalog.
+  const QVector<AssetSnapshot> assets = manager.assets();
+  REQUIRE( assets.size() == 2 );
+  for ( const AssetSnapshot &asset : assets )
+  {
+    CHECK( asset.source().canonicalSource != pathB );
+    CHECK( asset.parentCollectionId() == result.collectionId );
+  }
+}
+
+TEST_CASE( "Committed children are full Data Assets (lease, promote, unload)",
+           "[collection_import][commit][full_asset]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  StubDiscoverer discoverer;
+  CollectionImportService service( &manager, &discoverer );
+
+  const QString pathA = stageRaster( dir, QStringLiteral( "a.tif" ) );
+  const QString pathB = stageRaster( dir, QStringLiteral( "b.tif" ) );
+  const ImportPreview preview =
+    previewOver( { rasterChild( pathA, QStringLiteral( "10m" ) ),
+                   rasterChild( pathB, QStringLiteral( "20m" ) ) } );
+
+  // Register as SessionTemporary so the promote assertion below is meaningful
+  // (promoting an already-persistent asset is a no-op).
+  const CommitImportResult result =
+    service.commit( { preview, { 0, 1 }, PersistencePolicy::SessionTemporary } );
+  REQUIRE( !result.collectionId.isNull() );
+  REQUIRE( result.childAssetIds.size() == 2 );
+  const AssetId childA = result.childAssetIds[0];
+  const AssetId childB = result.childAssetIds[1];
+
+  // The child can be leased like any asset.
+  auto lease = manager
+                 .acquire( AssetRef{ childA, AssetRevision::initial() },
+                           AssetUse{ LeaseKind::View, QStringLiteral( "viewer" ) } )
+                 .take();
+  REQUIRE( lease.isValid() );
+
+  // The child can be promoted (becomes ProjectPersistent, survives the session).
+  REQUIRE( manager.promote( childB ) );
+  CHECK( manager.asset( childB )->persistence() == PersistencePolicy::ProjectPersistent );
+
+  // The leased child can be unloaded once the lease is released, like any
+  // standalone asset. Unloading it prunes it from the collection's list.
+  ( void ) lease.release();
+  const UnloadPlan plan = manager.planUnload( childA ).confirmedCascade();
+  REQUIRE( manager.unload( plan ) );
+  CHECK_FALSE( manager.asset( childA ).has_value() );
+
+  const auto collection = manager.collection( result.collectionId );
+  REQUIRE( collection.has_value() );
+  REQUIRE( collection->childAssetIds.size() == 1 );
+  CHECK( collection->childAssetIds.first() == childB );
+}
+
+TEST_CASE( "Committing the same product twice creates two distinct collections",
+           "[collection_import][commit][dedup]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  StubDiscoverer discoverer;
+  CollectionImportService service( &manager, &discoverer );
+
+  // Two independent imports of the same logical product - the product arrives
+  // in two directories (e.g. re-downloaded), so each commit registers its own
+  // child asset. The transaction does NOT dedup collections across commits:
+  // each commit creates its own collection with its own children. (A child can
+  // belong to only one collection, so two collections of the same product must
+  // hold distinct child assets - which they do here because the sources differ.)
+  const QString path1 = stageRaster( dir, QStringLiteral( "import1.tif" ) );
+  const QString path2 = stageRaster( dir, QStringLiteral( "import2.tif" ) );
+  const ImportPreview preview1 = previewOver( { rasterChild( path1, QStringLiteral( "10m" ) ) } );
+  const ImportPreview preview2 = previewOver( { rasterChild( path2, QStringLiteral( "10m" ) ) } );
+
+  const CommitImportResult first = service.commit( { preview1, { 0 } } );
+  const CommitImportResult second = service.commit( { preview2, { 0 } } );
+
+  REQUIRE( !first.collectionId.isNull() );
+  REQUIRE( !second.collectionId.isNull() );
+  CHECK( first.collectionId != second.collectionId );
+  CHECK( manager.collections().size() == 2 );
+  CHECK( manager.assets().size() == 2 );
+  // Each collection owns its own child.
+  CHECK( manager.collection( first.collectionId )->childAssetIds.first() ==
+         first.childAssetIds.first() );
+  CHECK( manager.collection( second.collectionId )->childAssetIds.first() ==
+         second.childAssetIds.first() );
+}
+
+TEST_CASE( "Two selections of the same source within one commit register one asset",
+           "[collection_import][commit][dedup]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  StubDiscoverer discoverer;
+  CollectionImportService service( &manager, &discoverer );
+
+  // Per-child-source dedup WITHIN a commit: two children that resolve to the
+  // same source register a single underlying asset, listed under the
+  // collection once per selection.
+  const QString path = stageRaster( dir, QStringLiteral( "shared.tif" ) );
+  const ImportPreview preview =
+    previewOver( { rasterChild( path, QStringLiteral( "10m" ) ),
+                   rasterChild( path, QStringLiteral( "10m-copy" ) ) } );
+
+  const CommitImportResult result = service.commit( { preview, { 0, 1 } } );
+
+  REQUIRE( !result.collectionId.isNull() );
+  // Both selections record the (single) deduped asset id, once each.
+  REQUIRE( result.childAssetIds.size() == 2 );
+  CHECK( result.childAssetIds[0] == result.childAssetIds[1] );
+  // The catalog holds exactly one asset for the shared source.
+  CHECK( manager.assets().size() == 1 );
+  CHECK( manager.collection( result.collectionId )->childAssetIds.size() == 1 );
+}
+
+TEST_CASE( "An invalid selection registers nothing",
+           "[collection_import][commit][validation]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  StubDiscoverer discoverer;
+  CollectionImportService service( &manager, &discoverer );
+
+  const QString path = stageRaster( dir, QStringLiteral( "a.tif" ) );
+  const ImportPreview preview = previewOver( { rasterChild( path, QStringLiteral( "10m" ) ) } );
+
+  // Out-of-range index.
+  CommitImportResult result = service.commit( { preview, { 99 } } );
+  CHECK( result.collectionId.isNull() );
+  CHECK( result.childAssetIds.isEmpty() );
+  REQUIRE_FALSE( result.diagnostics.isEmpty() );
+  CHECK( manager.assets().isEmpty() );
+  CHECK( manager.collections().isEmpty() );
+
+  // Duplicate index.
+  result = service.commit( { preview, { 0, 0 } } );
+  CHECK( result.collectionId.isNull() );
+  CHECK( manager.assets().isEmpty() );
+  CHECK( manager.collections().isEmpty() );
+}
+
+TEST_CASE( "A child already imported into another collection fails fast without touching it",
+           "[collection_import][commit][ownership]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  StubDiscoverer discoverer;
+  CollectionImportService service( &manager, &discoverer );
+
+  // First commit imports the source into collection 1.
+  const QString path = stageRaster( dir, QStringLiteral( "shared.tif" ) );
+  const ImportPreview preview = previewOver( { rasterChild( path, QStringLiteral( "10m" ) ) } );
+  const CommitImportResult first = service.commit( { preview, { 0 } } );
+  REQUIRE( !first.collectionId.isNull() );
+  REQUIRE( first.childAssetIds.size() == 1 );
+  const AssetId firstChild = first.childAssetIds.first();
+
+  // Second commit selects the SAME source (registerSource dedups to the same
+  // asset, which already belongs to collection 1). A child can belong to only
+  // one collection, so the second commit fails fast - and must NOT destroy the
+  // first collection's child.
+  const CommitImportResult second = service.commit( { preview, { 0 } } );
+  CHECK( second.collectionId.isNull() );
+  CHECK( second.childAssetIds.isEmpty() );
+  REQUIRE_FALSE( second.diagnostics.isEmpty() );
+  CHECK( second.diagnostics.first().code ==
+         QStringLiteral( "import.child_in_other_collection" ) );
+
+  // The first collection and its child are untouched by the failed second
+  // commit (the ownership fix: rollback never unloads a reused asset).
+  REQUIRE( manager.collection( first.collectionId ).has_value() );
+  REQUIRE( manager.collection( first.collectionId )->childAssetIds.size() == 1 );
+  const auto firstChildSnapshot = manager.asset( firstChild );
+  REQUIRE( firstChildSnapshot.has_value() );
+  CHECK( firstChildSnapshot->parentCollectionId() == first.collectionId );
+  // No second collection was created.
+  CHECK( manager.collections().size() == 1 );
+  CHECK( manager.assets().size() == 1 );
+}
+
+TEST_CASE( "An adopted standalone asset survives a rollback as a standalone asset",
+           "[collection_import][commit][ownership]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  StubDiscoverer discoverer;
+  CollectionImportService service( &manager, &discoverer );
+
+  // Pre-register a standalone asset (no collection) - simulating an asset
+  // another component registered earlier.
+  const QString path = stageRaster( dir, QStringLiteral( "standalone.tif" ) );
+  SourceDescriptor source;
+  source.providerKey = QStringLiteral( "gdal" );
+  source.canonicalSource = path;
+  RegisterRequest regRequest;
+  regRequest.source = source;
+  const AssetId standalone = manager.registerSource( regRequest ).assetId;
+  REQUIRE( !standalone.isNull() );
+  REQUIRE( manager.assets().size() == 1 );
+
+  // Commit a preview whose child 0 adopts the standalone asset (dedup hits it),
+  // and whose child 1 is unresolvable, forcing a rollback.
+  const ImportPreview preview =
+    previewOver( { rasterChild( path, QStringLiteral( "10m" ) ),
+                   rasterChild( QStringLiteral( "/nonexistent/bogus.xyz123" ),
+                                QStringLiteral( "20m" ) ) } );
+
+  const CommitImportResult result = service.commit( { preview, { 0, 1 } } );
+
+  // The commit rolled back (child 1 failed).
+  CHECK( result.collectionId.isNull() );
+  // The standalone asset was merely unparented, NOT unloaded - it survives as a
+  // standalone asset (owned by whichever component pre-registered it).
+  const auto snapshot = manager.asset( standalone );
+  REQUIRE( snapshot.has_value() );
+  CHECK( !snapshot->parentCollectionId().has_value() );
+  // The collection is gone; only the pre-existing standalone asset remains.
+  CHECK( manager.collections().isEmpty() );
+  CHECK( manager.assets().size() == 1 );
 }

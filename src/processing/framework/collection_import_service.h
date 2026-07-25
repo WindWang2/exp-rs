@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QMap>
+#include <QSet>
 #include <QString>
 #include <QVector>
 
@@ -57,6 +58,37 @@ struct ImportPreview
   QVector<ChildCandidate> children;
 
   friend bool operator==( const ImportPreview &, const ImportPreview & ) = default;
+};
+
+/// Request to atomically commit an import: register the collection from the
+/// preview's metadata, then register each selected child as a full Data Asset
+/// attached to the collection. All-or-nothing - any child registration failure
+/// rolls back the collection and every previously-registered child so the
+/// catalog never holds a half-imported product.
+struct CommitImportRequest
+{
+  ImportPreview preview;
+  /// Indices into `preview.children`. An empty selection registers the
+  /// collection with no children (a valid degenerate case). Out-of-range or
+  /// duplicate indices are rejected before any registration.
+  QVector<int> selectedChildIndices;
+  /// Persistence policy for the registered children. Collections themselves
+  /// carry no persistence concept; this applies to the child assets. Defaults
+  /// to `ProjectPersistent` - an imported product is meant to survive the
+  /// session and round-trip into the `.qgz`. Tests may use `SessionTemporary`.
+  sicnu::data::PersistencePolicy persistence =
+    sicnu::data::PersistencePolicy::ProjectPersistent;
+};
+
+/// Outcome of an atomic import commit. `collectionId` is null on failure (and
+/// no children remain). `childAssetIds` is ordered to match the request's
+/// selected-child order; a reused (deduped) source appears once per selection
+/// but registers a single underlying asset (per-child-source dedup).
+struct CommitImportResult
+{
+  sicnu::data::CollectionId collectionId;
+  QVector<sicnu::data::AssetId> childAssetIds;
+  QVector<sicnu::data::Diagnostic> diagnostics;
 };
 
 /// One grid group of a discovered product, as emitted by a `ProductDiscoverer`.
@@ -126,8 +158,10 @@ class SatelliteProductsDiscoverer : public ProductDiscoverer
 /// holds the DataManager so its signature is stable across both waves.
 class CollectionImportService : public QObject
 {
-  // Q_OBJECT retained so #52 can add commit-progress signals (the probe itself
-  // has no signals/slots). The base matches OutputCommitter's composition style.
+  // Q_OBJECT retained for parent-ownership consistency with OutputCommitter.
+  // The service declares no signals of its own: probe is read-only, and commit
+  // composes the DataManager's collectionAdded/assetAdded signals rather than
+  // re-emitting them. A commit-progress signal, if ever needed, is a #53 concern.
   Q_OBJECT
 
   public:
@@ -140,8 +174,21 @@ class CollectionImportService : public QObject
     /// is returned as `import.discover_failed` diagnostics.
     sicnu::data::Result<ImportPreview> probe( const QString &source );
 
+    /// Atomically commits an import: registers the collection + each selected
+    /// child. The DataManager fires one `collectionAdded`, then one
+    /// `assetAdded` per child (the service composes those signals; it does not
+    /// re-emit). On any child registration failure, rolls back the collection
+    /// and every child THIS commit created, so the catalog never holds a
+    /// half-imported product. Rollback never unloads a reused (deduped) asset -
+    /// a source already imported as a child of another collection fails fast
+    /// with `import.child_in_other_collection` (a child can belong to only one
+    /// collection), and a standalone pre-existing asset is adopted (parented to
+    /// this collection) and merely unparented on rollback. Returns a null
+    /// `collectionId` and the failure diagnostics.
+    CommitImportResult commit( const CommitImportRequest &request );
+
   private:
-    sicnu::data::DataManager *m_dataManager; ///< Unused by probe; for #52 commit.
+    sicnu::data::DataManager *m_dataManager; ///< Used by commit() (probe is read-only).
     ProductDiscoverer *m_discoverer;          ///< Not owned.
 };
 
