@@ -90,6 +90,21 @@ class DataManager : public QObject
   UnloadPlan planUnload( AssetId id ) const;
   Result<void> unload( const UnloadPlan &confirmedPlan );
 
+  /// Records a strong dependency edge: `dependent` consumes `input` (e.g. a
+  /// Virtual Raster Asset depends on its input bands). Strong dependencies
+  /// form a directed acyclic graph — adding an edge that would close a cycle
+  /// (direct, transitive, or self) fails with `dependency.cycle` and mutates
+  /// nothing. Both assets must be registered; a duplicate edge is a successful
+  /// no-op. Normal unload of `input` is refused while the edge exists.
+  Result<void> addStrongDependency( AssetId dependent, AssetId input );
+
+  /// The inputs `id` depends on (outgoing edges), in edge-insertion order.
+  QVector<AssetId> strongDependenciesOf( AssetId id ) const;
+
+  /// The assets that depend on `id` (incoming edges), in edge-insertion
+  /// order. Normal unload of `id` is refused while this list is non-empty.
+  QVector<AssetId> strongDependentsOf( AssetId id ) const;
+
   /// Reaps a temporary Data Asset: removes it from the catalog and, when the
   /// asset declares `DeletableSource`, deletes its on-disk source file. A
   /// distinct operation from unload (unload never deletes source data).
@@ -189,6 +204,11 @@ class DataManager : public QObject
     /// Removes `childId` from every collection's child list (eager pruning so
     /// the persisted lists never hold dead asset ids). Called on unload/reap.
     void pruneChildFromCollections( AssetId childId );
+
+    /// Removes every strong-dependency edge touching `id` (either endpoint).
+    /// Called whenever an asset leaves the catalog so the DAG never holds dead
+    /// asset ids.
+    void pruneDependencyEdgesOf( AssetId id );
 };
 
 } // namespace sicnu::data

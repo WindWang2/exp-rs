@@ -321,9 +321,17 @@ class UnloadPlan
       return m_activeLeases;
     }
 
+    /// Assets with a strong dependency on this asset (its consumers), in
+    /// edge-insertion order. Normal unload is refused while this list is
+    /// non-empty; a confirmed cascade removes them transitively, deepest-first.
+    const QVector<AssetId> &strongDependents() const
+    {
+      return m_strongDependents;
+    }
+
     bool canUnload() const
     {
-      return m_cascade || m_activeLeases.isEmpty();
+      return m_cascade || ( m_activeLeases.isEmpty() && m_strongDependents.isEmpty() );
     }
 
     UnloadPlan confirmedCascade() const
@@ -339,11 +347,13 @@ class UnloadPlan
     UnloadPlan( AssetId assetId,
                 AssetRevision revision,
                 quint64 catalogGeneration,
-                QVector<LeaseImpact> activeLeases )
+                QVector<LeaseImpact> activeLeases,
+                QVector<AssetId> strongDependents = {} )
       : m_assetId( assetId )
       , m_revision( revision )
       , m_catalogGeneration( catalogGeneration )
       , m_activeLeases( std::move( activeLeases ) )
+      , m_strongDependents( std::move( strongDependents ) )
     {
     }
 
@@ -352,6 +362,7 @@ class UnloadPlan
   quint64 m_catalogGeneration = 0;
   bool m_cascade = false;
   QVector<LeaseImpact> m_activeLeases;
+  QVector<AssetId> m_strongDependents;
 };
 
 /// Request to reap a temporary Data Asset: remove it from the catalog and,
@@ -385,7 +396,9 @@ struct TemporaryReapResult
 {
   /// Number of temporary assets reaped (removed from the catalog).
   int reapedCount = 0;
-  /// Temporary assets that held an active lease and were left in place.
+  /// Temporary assets left in place because they were not idle: they held an
+  /// active lease or were consumed by a strong dependent (reaping either
+  /// would be refused).
   QVector<AssetId> skippedLeased;
   /// Per-asset diagnostics from the sweep (e.g. file-deletion warnings).
   QVector<Diagnostic> diagnostics;

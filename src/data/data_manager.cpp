@@ -1,6 +1,7 @@
 #include "data_manager.h"
 
 #include <algorithm>
+#include <functional>
 #include <utility>
 
 #include <QFile>
@@ -92,6 +93,15 @@ struct DataManager::Impl
     QVector<AssetId> childAssetIds;
   };
 
+  /// One strong-dependency edge: `dependent` consumes `input`. Edges form a
+  /// DAG (cycle-checked at insertion). Kept as an insertion-ordered list — the
+  /// graph is small (one edge per virtual-raster input) and queries are scans.
+  struct DependencyEdge
+  {
+    AssetId dependent;
+    AssetId input;
+  };
+
   explicit Impl( std::unique_ptr<internal::SourceProviderRegistry> sourceProviders )
     : providers( std::move( sourceProviders ) )
   {
@@ -101,6 +111,7 @@ struct DataManager::Impl
   QVector<AssetRecord> records;
   QVector<LeaseRecord> leases;
   QVector<CollectionRecord> collections;
+  QVector<DependencyEdge> dependencyEdges;
   quint64 catalogGeneration = 1;
   quint64 nextLeaseToken = 1;
 
@@ -611,7 +622,106 @@ UnloadPlan DataManager::planUnload( AssetId id ) const
     revision = recordIt->snapshot.revision();
 
   return UnloadPlan{
-    id, revision, m_impl->catalogGeneration, m_impl->leaseImpacts( id ) };
+    id, revision, m_impl->catalogGeneration, m_impl->leaseImpacts( id ),
+    strongDependentsOf( id ) };
+}
+
+Result<void> DataManager::addStrongDependency( AssetId dependent, AssetId input )
+{
+  if ( QThread::currentThread() != thread() )
+    return Result<void>::failure( wrongThreadDiagnostic() );
+
+  if ( dependent == input )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "dependency.cycle" ),
+                  QStringLiteral( "An asset cannot strongly depend on itself" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  if ( m_impl->findRecord( dependent ) == m_impl->records.end() ||
+       m_impl->findRecord( input ) == m_impl->records.end() )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "dependency.unknown_asset" ),
+                  QStringLiteral( "Both assets must be registered to record a "
+                                  "strong dependency" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  // Duplicate edge: successful no-op.
+  for ( const Impl::DependencyEdge &edge : m_impl->dependencyEdges )
+  {
+    if ( edge.dependent == dependent && edge.input == input )
+      return Result<void>::success();
+  }
+
+  // Cycle check: adding dependent -> input closes a cycle exactly when
+  // `dependent` is reachable from `input` following existing edges (i.e. the
+  // input already depends on the dependent, transitively).
+  {
+    QVector<AssetId> stack{ input };
+    QVector<AssetId> visited;
+    while ( !stack.isEmpty() )
+    {
+      const AssetId current = stack.takeLast();
+      if ( current == dependent )
+      {
+        return Result<void>::failure(
+          Diagnostic{ QStringLiteral( "dependency.cycle" ),
+                      QStringLiteral( "Adding this dependency would close a cycle "
+                                      "in the strong-dependency graph" ),
+                      DiagnosticSeverity::Error } );
+      }
+      if ( visited.contains( current ) )
+        continue;
+      visited.append( current );
+      for ( const Impl::DependencyEdge &edge : m_impl->dependencyEdges )
+      {
+        if ( edge.dependent == current )
+          stack.append( edge.input );
+      }
+    }
+  }
+
+  m_impl->dependencyEdges.append( Impl::DependencyEdge{ dependent, input } );
+  // The edge changes the catalog's dependency state: any UnloadPlan captured
+  // before this point is stale (its strongDependents impact is out of date),
+  // exactly as with any other catalog mutation.
+  m_impl->catalogGeneration++;
+  return Result<void>::success();
+}
+
+QVector<AssetId> DataManager::strongDependenciesOf( AssetId id ) const
+{
+  QVector<AssetId> inputs;
+  for ( const Impl::DependencyEdge &edge : m_impl->dependencyEdges )
+  {
+    if ( edge.dependent == id )
+      inputs.append( edge.input );
+  }
+  return inputs;
+}
+
+QVector<AssetId> DataManager::strongDependentsOf( AssetId id ) const
+{
+  QVector<AssetId> dependents;
+  for ( const Impl::DependencyEdge &edge : m_impl->dependencyEdges )
+  {
+    if ( edge.input == id )
+      dependents.append( edge.dependent );
+  }
+  return dependents;
+}
+
+void DataManager::pruneDependencyEdgesOf( AssetId id )
+{
+  m_impl->dependencyEdges.erase(
+    std::remove_if( m_impl->dependencyEdges.begin(), m_impl->dependencyEdges.end(),
+                    [&]( const Impl::DependencyEdge &edge ) {
+                      return edge.dependent == id || edge.input == id;
+                    } ),
+    m_impl->dependencyEdges.end() );
 }
 
 Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
@@ -655,6 +765,68 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
                                                             liveLeaseImpacts ) );
   }
 
+  // Normal unload is likewise rejected while any strong dependent consumes
+  // this asset: unloading the input would silently break the dependent (e.g. a
+  // Virtual Raster Asset's composition). A confirmed cascade removes the
+  // dependents transitively, deepest-first, before this asset.
+  const QVector<AssetId> dependents = strongDependentsOf( confirmedPlan.assetId() );
+  if ( !confirmedPlan.cascade() && !dependents.isEmpty() )
+  {
+    QVector<Diagnostic> diagnostics;
+    for ( const AssetId &dependent : dependents )
+    {
+      diagnostics.append(
+        Diagnostic{ QStringLiteral( "unload.has_dependents" ),
+                    QStringLiteral( "The asset cannot be unloaded: it is a strong "
+                                    "dependency of asset %1; confirm a cascade to "
+                                    "remove the dependent as well" )
+                      .arg( dependent.toString() ),
+                    DiagnosticSeverity::Error } );
+    }
+    return Result<void>::failure( diagnostics );
+  }
+
+  if ( confirmedPlan.cascade() )
+  {
+    // Remove every transitive dependent, deepest-first (post-order), so a
+    // dependent is always removed before the assets it consumes. Leases on
+    // dependents (e.g. their display layers) are revoked just like the main
+    // asset's below.
+    QVector<AssetId> removalOrder;
+    QVector<AssetId> visited;
+    // The collection pass runs entirely before any mutation, so iterating the
+    // live edge list is safe; `visited` guards diamonds (a dependent reachable
+    // through two paths is collected once).
+    const std::function<void( AssetId )> collectDependents = [&]( AssetId id ) {
+      for ( const Impl::DependencyEdge &edge : m_impl->dependencyEdges )
+      {
+        if ( edge.input != id || visited.contains( edge.dependent ) )
+          continue;
+        visited.append( edge.dependent );
+        collectDependents( edge.dependent );
+        removalOrder.append( edge.dependent );
+      }
+    };
+    collectDependents( confirmedPlan.assetId() );
+
+    for ( const AssetId &dependentId : removalOrder )
+    {
+      // Emit before locating: a connected slot may re-enter the manager and
+      // mutate the records (mirroring the main-erase revalidation below).
+      emit assetAboutToUnload( dependentId );
+      const auto dependentIt = m_impl->findRecord( dependentId );
+      if ( dependentIt == m_impl->records.end() )
+        continue;
+      for ( const LeaseImpact &impact : m_impl->leaseImpacts( dependentId ) )
+        revokeLease( impact.lease );
+      m_impl->records.erase( dependentIt );
+      pruneChildFromCollections( dependentId );
+      pruneDependencyEdgesOf( dependentId );
+      m_impl->catalogGeneration++;
+      emit assetRemoved( dependentId );
+    }
+  }
+
   emit assetAboutToUnload( confirmedPlan.assetId() );
 
   if ( confirmedPlan.cascade() )
@@ -663,8 +835,19 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
       revokeLease( impact.lease );
   }
 
-  m_impl->records.erase( recordIt );
+  // Re-locate the record: the cascade dependent removals above erased records,
+  // invalidating the earlier iterator.
+  const auto eraseIt = m_impl->findRecord( confirmedPlan.assetId() );
+  if ( eraseIt == m_impl->records.end() )
+  {
+    return Result<void>::failure(
+      Diagnostic{ QStringLiteral( "unload.unknown_asset" ),
+                  QStringLiteral( "The asset is no longer registered" ),
+                  DiagnosticSeverity::Error } );
+  }
+  m_impl->records.erase( eraseIt );
   pruneChildFromCollections( confirmedPlan.assetId() );
+  pruneDependencyEdgesOf( confirmedPlan.assetId() );
   m_impl->catalogGeneration++;
 
   emit assetRemoved( confirmedPlan.assetId() );
@@ -715,6 +898,23 @@ ReapResult DataManager::reap( const ReapRequest &request )
     return result;
   }
 
+  // Reaping an asset that a strong dependent consumes would silently break the
+  // dependent, exactly as unload would; refuse with the same rule.
+  const QVector<AssetId> dependents = strongDependentsOf( request.id );
+  if ( !dependents.isEmpty() )
+  {
+    for ( const AssetId &dependent : dependents )
+    {
+      result.diagnostics.append(
+        Diagnostic{ QStringLiteral( "reap.has_dependents" ),
+                    QStringLiteral( "The asset cannot be reaped: it is a strong "
+                                    "dependency of asset %1" )
+                      .arg( dependent.toString() ),
+                    DiagnosticSeverity::Error } );
+    }
+    return result;
+  }
+
   // Announce before mutation so the Display Manager removes the layer, exactly
   // as unload does.
   emit assetAboutToUnload( request.id );
@@ -725,6 +925,7 @@ ReapResult DataManager::reap( const ReapRequest &request )
 
   m_impl->records.erase( recordIt );
   pruneChildFromCollections( request.id );
+  pruneDependencyEdgesOf( request.id );
   m_impl->catalogGeneration++;
   result.unloaded = true;
 
@@ -821,16 +1022,24 @@ TemporaryReapResult DataManager::reapTemporaries( PersistencePolicy policy )
 
   // Collect the matching temporary asset ids first; reaping mutates the
   // records vector, so we cannot iterate it while removing. Leased assets are
-  // skipped and reported (not force-revoked); the host decides what to do.
+  // skipped and reported (not force-revoked); the host decides what to do. An
+  // asset with strong dependents is likewise not idle - reaping it would be
+  // refused, so classify it as skipped up front rather than misreporting a
+  // dependent-blocked asset as leased.
   QVector<AssetId> idle;
   for ( const Impl::AssetRecord &record : m_impl->records )
   {
     if ( record.snapshot.persistence() != policy )
       continue;
-    if ( m_impl->leaseImpacts( record.snapshot.id() ).isEmpty() )
-      idle.append( record.snapshot.id() );
-    else
+    if ( !m_impl->leaseImpacts( record.snapshot.id() ).isEmpty() ||
+         !strongDependentsOf( record.snapshot.id() ).isEmpty() )
+    {
       result.skippedLeased.append( record.snapshot.id() );
+    }
+    else
+    {
+      idle.append( record.snapshot.id() );
+    }
   }
 
   for ( const AssetId &id : idle )
@@ -1104,6 +1313,7 @@ Result<void> DataManager::unloadCollection( CollectionId id, bool cascade )
         continue;
       emit assetAboutToUnload( childId );
       m_impl->records.erase( childIt );
+      pruneDependencyEdgesOf( childId );
       m_impl->catalogGeneration++;
       emit assetRemoved( childId );
     }

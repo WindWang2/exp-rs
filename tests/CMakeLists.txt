@@ -2704,3 +2704,19 @@ target_include_directories(test_virtual_raster_recipe PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_virtual_raster_recipe)
+
+# Data Manager dependency tests - strong-dependency DAG (#56)
+qt_add_executable(test_data_manager_dependency
+  test_data_manager_dependency.cpp
+)
+target_link_libraries(test_data_manager_dependency PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_data
+)
+target_include_directories(test_data_manager_dependency PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_data_manager_dependency)
