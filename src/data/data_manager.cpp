@@ -967,17 +967,33 @@ LeaseOutcome AssetLease::release()
 
 CollectionCreateResult DataManager::createCollection( const CollectionCreateRequest &request )
 {
+  return restoreCollection( CollectionId::generate(), request );
+}
+
+CollectionCreateResult
+DataManager::restoreCollection( CollectionId id, const CollectionCreateRequest &request )
+{
   if ( QThread::currentThread() != thread() )
     return CollectionCreateResult{ {}, { wrongThreadDiagnostic() } };
 
+  // Guard against a duplicate id (e.g. a double-read or a stale extension),
+  // mirroring restoreSource's id-conflict handling.
+  if ( m_impl->findCollection( id ) != m_impl->collections.end() )
+  {
+    return CollectionCreateResult{ {}, { Diagnostic{
+      QStringLiteral( "collection.duplicate_id" ),
+      QStringLiteral( "A collection with this id is already registered" ),
+      DiagnosticSeverity::Error } } };
+  }
+
   Impl::CollectionRecord record;
-  record.id = CollectionId::generate();
+  record.id = id;
   record.displayName = request.displayName;
   record.metadata = request.metadata;
   m_impl->collections.push_back( std::move( record ) );
   m_impl->catalogGeneration++;
-  emit collectionAdded( m_impl->collections.last().id );
-  return CollectionCreateResult{ m_impl->collections.last().id, {} };
+  emit collectionAdded( id );
+  return CollectionCreateResult{ id, {} };
 }
 
 std::optional<CollectionSnapshot> DataManager::collection( CollectionId id ) const

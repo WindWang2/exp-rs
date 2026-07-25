@@ -172,6 +172,15 @@ data::Result<void> ProjectContext::clearProject(QgsProject &project) {
       return data::Result<void>::failure(unloaded.diagnostics());
   }
 
+  // Remove collection nodes (children are already unloaded above; non-cascade
+  // so the orphaned nodes are simply dropped).
+  const QVector<data::CollectionId> collections = m_dataManager.collections();
+  for (const data::CollectionId &cid : collections) {
+    const data::Result<void> removed = m_dataManager.unloadCollection(cid, false);
+    if (!removed)
+      return data::Result<void>::failure(removed.diagnostics());
+  }
+
   project.clear();
   return data::Result<void>::success();
 }

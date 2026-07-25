@@ -126,6 +126,11 @@ class DataManager : public QObject
   /// display name and product metadata. Emits `collectionAdded`.
   CollectionCreateResult createCollection( const CollectionCreateRequest &request );
 
+  /// Restores a collection with a specific id (from project deserialization),
+  /// mirroring restoreSource for assets. Emits `collectionAdded`.
+  CollectionCreateResult restoreCollection( CollectionId id,
+                                             const CollectionCreateRequest &request );
+
   /// Returns a snapshot of the collection, if it exists.
   std::optional<CollectionSnapshot> collection( CollectionId id ) const;
 

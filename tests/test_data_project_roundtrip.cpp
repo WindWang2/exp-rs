@@ -497,3 +497,155 @@ TEST_CASE("A promoted temporary asset round-trips into the saved project",
   CHECK(restoredProvenance->algorithmId == QStringLiteral("sicnu:ndvi"));
   CHECK(restoredProvenance->outputAssetId == registered.assetId);
 }
+
+TEST_CASE("A Data Collection and its children round-trip into the saved project",
+          "[project][data_roundtrip][collection]") {
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  const sicnu::display::DisplayViewSpec viewSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore()};
+  auto createdContext = sicnu::app::ProjectContext::create(viewSpec);
+  REQUIRE(createdContext);
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+
+  // Two distinct staged rasters as collection children.
+  QTemporaryDir dir;
+  const auto stagedPath = [&dir](const QString &name) {
+    const QString p = dir.filePath(name);
+    REQUIRE(QFile::copy(
+        fixturePath(QStringLiteral("samples/dem_sample.tif")), p));
+    return p;
+  };
+
+  sicnu::data::SourceDescriptor sourceA;
+  sourceA.providerKey = QStringLiteral("gdal");
+  sourceA.canonicalSource = stagedPath(QStringLiteral("a.tif"));
+  const sicnu::data::RegisterResult childA =
+      context->dataManager().registerSource({sourceA});
+
+  sicnu::data::SourceDescriptor sourceB;
+  sourceB.providerKey = QStringLiteral("gdal");
+  sourceB.canonicalSource = stagedPath(QStringLiteral("b.tif"));
+  const sicnu::data::RegisterResult childB =
+      context->dataManager().registerSource({sourceB});
+
+  // Create a collection with product metadata and add both children.
+  sicnu::data::ProductMetadata metadata;
+  metadata.platform = QStringLiteral("Landsat-8");
+  metadata.sensor = QStringLiteral("OLI");
+  metadata.productLevel = QStringLiteral("L1TP");
+  metadata.acquisitionDate = QStringLiteral("2026-07-25");
+  metadata.processingLevel = QStringLiteral("DN");
+  metadata.attributes.insert(QStringLiteral("path"), QStringLiteral("125"));
+  metadata.attributes.insert(QStringLiteral("row"), QStringLiteral("034"));
+
+  const sicnu::data::CollectionCreateResult collection =
+      context->dataManager().createCollection(
+          {QStringLiteral("Landsat-8 scene 125/034"), metadata});
+  REQUIRE_FALSE(collection.collectionId.isNull());
+  REQUIRE(context->dataManager().addChildToCollection(
+      collection.collectionId, childA.assetId));
+  REQUIRE(context->dataManager().addChildToCollection(
+      collection.collectionId, childB.assetId));
+
+  sicnu::app::DataProjectSerializer serializer;
+  bool writeSucceeded = false;
+  bool readSucceeded = false;
+  QObject signalReceiver;
+  QObject::connect(project, &QgsProject::writeProject, &signalReceiver,
+                   [&](QDomDocument &document) {
+                     writeSucceeded =
+                         static_cast<bool>(serializer.write(document, *context));
+                   });
+  QObject::connect(project, &QgsProject::readProject, &signalReceiver,
+                   [&](const QDomDocument &document) {
+                     readSucceeded = static_cast<bool>(
+                         serializer.read(document, *project, *context));
+                   });
+
+  QTemporaryDir temporaryDirectory;
+  const QString projectPath =
+      temporaryDirectory.filePath(QStringLiteral("collection_roundtrip.qgs"));
+  REQUIRE(project->write(projectPath));
+  REQUIRE(writeSucceeded);
+
+  REQUIRE(context->clearProject(*project));
+  REQUIRE(project->read(projectPath));
+  REQUIRE(readSucceeded);
+
+  // The collection is restored with its original id, name, metadata, and
+  // ordered children.
+  const auto restored =
+      context->dataManager().collection(collection.collectionId);
+  REQUIRE(restored);
+  CHECK(restored->displayName == QStringLiteral("Landsat-8 scene 125/034"));
+  CHECK(restored->metadata.platform == QStringLiteral("Landsat-8"));
+  CHECK(restored->metadata.sensor == QStringLiteral("OLI"));
+  CHECK(restored->metadata.productLevel == QStringLiteral("L1TP"));
+  CHECK(restored->metadata.acquisitionDate == QStringLiteral("2026-07-25"));
+  CHECK(restored->metadata.attributes.value(QStringLiteral("path")) ==
+        QStringLiteral("125"));
+  CHECK(restored->metadata.attributes.value(QStringLiteral("row")) ==
+        QStringLiteral("034"));
+  REQUIRE(restored->childAssetIds.size() == 2);
+  CHECK(restored->childAssetIds.first() == childA.assetId);
+  CHECK(restored->childAssetIds.last() == childB.assetId);
+
+  // Children carry their parent collection id.
+  CHECK(context->dataManager().asset(childA.assetId)->parentCollectionId() ==
+        collection.collectionId);
+  CHECK(context->dataManager().asset(childB.assetId)->parentCollectionId() ==
+        collection.collectionId);
+}
+
+TEST_CASE("A project with no collections round-trips correctly",
+          "[project][data_roundtrip][collection]") {
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  const sicnu::display::DisplayViewSpec viewSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore()};
+  auto createdContext = sicnu::app::ProjectContext::create(viewSpec);
+  REQUIRE(createdContext);
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+
+  // Register a standalone asset (no collection).
+  const sicnu::data::RegisterResult asset = registerRaster(*context);
+  REQUIRE_FALSE(asset.assetId.isNull());
+  CHECK(context->dataManager().collections().isEmpty());
+
+  sicnu::app::DataProjectSerializer serializer;
+  bool writeSucceeded = false;
+  bool readSucceeded = false;
+  QObject signalReceiver;
+  QObject::connect(project, &QgsProject::writeProject, &signalReceiver,
+                   [&](QDomDocument &document) {
+                     writeSucceeded =
+                         static_cast<bool>(serializer.write(document, *context));
+                   });
+  QObject::connect(project, &QgsProject::readProject, &signalReceiver,
+                   [&](const QDomDocument &document) {
+                     readSucceeded = static_cast<bool>(
+                         serializer.read(document, *project, *context));
+                   });
+
+  QTemporaryDir temporaryDirectory;
+  const QString projectPath =
+      temporaryDirectory.filePath(QStringLiteral("no_collection.qgs"));
+  REQUIRE(project->write(projectPath));
+  REQUIRE(writeSucceeded);
+
+  REQUIRE(context->clearProject(*project));
+  REQUIRE(project->read(projectPath));
+  REQUIRE(readSucceeded);
+
+  // The standalone asset round-trips; no collections appear.
+  const auto restored = context->dataManager().asset(asset.assetId);
+  REQUIRE(restored);
+  CHECK(restored->id() == asset.assetId);
+  CHECK_FALSE(restored->parentCollectionId().has_value());
+  CHECK(context->dataManager().collections().isEmpty());
+}

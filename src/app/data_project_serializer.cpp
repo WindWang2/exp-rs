@@ -150,6 +150,51 @@ DataProjectSerializer::write(QDomDocument &document,
   }
 
   extension.appendChild(assetsElement);
+
+  // Persist Data Collections so their grouping and product metadata survive
+  // save/reopen. Children carry their parent collection id on their own record;
+  // this element records the collection node + its ordered child list.
+  QDomElement collectionsElement =
+      document.createElement(QStringLiteral("collections"));
+  for (const data::CollectionId &cid : context.dataManager().collections()) {
+    const auto snapshot = context.dataManager().collection(cid);
+    if (!snapshot)
+      continue;
+    QDomElement collectionElement =
+        document.createElement(QStringLiteral("collection"));
+    collectionElement.setAttribute(QStringLiteral("id"),
+                                   snapshot->id.toString());
+    collectionElement.setAttribute(QStringLiteral("name"),
+                                   snapshot->displayName);
+    collectionElement.setAttribute(QStringLiteral("platform"),
+                                   snapshot->metadata.platform);
+    collectionElement.setAttribute(QStringLiteral("sensor"),
+                                   snapshot->metadata.sensor);
+    collectionElement.setAttribute(QStringLiteral("productLevel"),
+                                   snapshot->metadata.productLevel);
+    collectionElement.setAttribute(QStringLiteral("acquisitionDate"),
+                                   snapshot->metadata.acquisitionDate);
+    collectionElement.setAttribute(QStringLiteral("processingLevel"),
+                                   snapshot->metadata.processingLevel);
+    for (auto it = snapshot->metadata.attributes.cbegin();
+         it != snapshot->metadata.attributes.cend(); ++it) {
+      QDomElement attrElement =
+          document.createElement(QStringLiteral("attribute"));
+      attrElement.setAttribute(QStringLiteral("key"), it.key());
+      attrElement.setAttribute(QStringLiteral("value"), it.value());
+      collectionElement.appendChild(attrElement);
+    }
+    for (const data::AssetId &childId : snapshot->childAssetIds) {
+      QDomElement childElement =
+          document.createElement(QStringLiteral("child"));
+      childElement.setAttribute(QStringLiteral("assetId"),
+                                childId.toString());
+      collectionElement.appendChild(childElement);
+    }
+    collectionsElement.appendChild(collectionElement);
+  }
+  extension.appendChild(collectionsElement);
+
   root.appendChild(extension);
   return data::Result<void>::success();
 }
@@ -229,6 +274,62 @@ data::Result<void> DataProjectSerializer::read(const QDomDocument &document,
                                                        derivation.value());
         } else {
           diagnostics += derivation.diagnostics();
+        }
+      }
+    }
+  }
+
+  // Restore Data Collections. Children are already restored as assets above;
+  // this recreates the collection nodes and re-binds the children.
+  const QDomElement collections =
+      extension.firstChildElement(QStringLiteral("collections"));
+  for (QDomElement coll =
+           collections.firstChildElement(QStringLiteral("collection"));
+       !coll.isNull();
+       coll = coll.nextSiblingElement(QStringLiteral("collection"))) {
+    const std::optional<data::CollectionId> collectionId =
+        data::CollectionId::fromString(coll.attribute(QStringLiteral("id")));
+    if (!collectionId) {
+      diagnostics.append(projectDiagnostic(
+          QStringLiteral("project.invalid_collection"),
+          QStringLiteral("A persisted collection description is invalid")));
+      failed = true;
+      continue;
+    }
+
+    data::ProductMetadata metadata;
+    metadata.platform = coll.attribute(QStringLiteral("platform"));
+    metadata.sensor = coll.attribute(QStringLiteral("sensor"));
+    metadata.productLevel = coll.attribute(QStringLiteral("productLevel"));
+    metadata.acquisitionDate = coll.attribute(QStringLiteral("acquisitionDate"));
+    metadata.processingLevel = coll.attribute(QStringLiteral("processingLevel"));
+    for (QDomElement attr = coll.firstChildElement(QStringLiteral("attribute"));
+         !attr.isNull();
+         attr = attr.nextSiblingElement(QStringLiteral("attribute"))) {
+      const QString key = attr.attribute(QStringLiteral("key"));
+      if (!key.isEmpty())
+        metadata.attributes.insert(key, attr.attribute(QStringLiteral("value")));
+    }
+
+    const data::CollectionCreateResult restored = context.dataManager()
+        .restoreCollection(*collectionId,
+                           {coll.attribute(QStringLiteral("name")), metadata});
+    diagnostics += restored.diagnostics;
+    if (restored.collectionId.isNull())
+      failed = true;
+
+    // Re-bind the persisted children (in order).
+    for (QDomElement child = coll.firstChildElement(QStringLiteral("child"));
+         !child.isNull();
+         child = child.nextSiblingElement(QStringLiteral("child"))) {
+      const std::optional<data::AssetId> childId =
+          data::AssetId::fromString(child.attribute(QStringLiteral("assetId")));
+      if (childId) {
+        const data::Result<void> added = context.dataManager().addChildToCollection(
+            *collectionId, *childId);
+        if (!added) {
+          diagnostics += added.diagnostics();
+          failed = true;
         }
       }
     }
