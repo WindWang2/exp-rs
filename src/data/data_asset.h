@@ -6,7 +6,13 @@
 #include <variant>
 
 #include <QString>
+#include <QStringList>
 #include <QVector>
+
+// QJsonObject/QJsonArray are used only by RemoteMapStructure's diagnostics-only
+// toJson/fromJson, defined in data_asset.cpp; the header forwards them via
+// incomplete types in the declarations.
+class QJsonObject;
 
 #include "asset_types.h"
 #include "collection_types.h"
@@ -127,8 +133,44 @@ struct VectorStructure
   friend bool operator==( const VectorStructure &, const VectorStructure & ) = default;
 };
 
+/// Structural metadata for a Remote Map Asset (WMS/WMTS/TMS/XYZ). It carries
+/// only what a web-map service can honestly report: the declared layer set,
+/// advertised CRS list, service-reported extent, image format, and (for tiled
+/// services) tile-matrix resolution + z-range. It deliberately does NOT model
+/// bands, data types, or statistics — a remote map is renderable but not a
+/// pixel-analysis source (parent spec line 109).
+///
+/// The toJson()/fromJson() round-trip is a deliberate new affordance (the
+/// raster/vector structures are plain aggregates without JSON); it is used for
+/// diagnostics/debugging only — the persisted identity of a remote map is its
+/// SourceDescriptor, and the structure is re-derived by re-probing on restore.
+struct RemoteMapStructure
+{
+  RemoteMapService service = RemoteMapService::Wms;
+  QStringList layerNames;
+  QStringList crsList;
+  SpatialExtent extent;
+  QString imageFormat;
+  std::optional<double> pixelSizeX;
+  std::optional<double> pixelSizeY;
+  int zMin = 0;
+  int zMax = 0;
+  bool valid = false;
+
+  friend bool operator==( const RemoteMapStructure &,
+                          const RemoteMapStructure & ) = default;
+
+  // Definitions live in data_asset.cpp (keeps the QJsonObject assembly out of
+  // this widely-included header). Diagnostics-only serialization: the persisted
+  // identity of a remote map is its SourceDescriptor, not this structure.
+  QJsonObject toJson() const;
+  static Result<RemoteMapStructure> fromJson( const QJsonObject &json );
+  static QString serviceToString( RemoteMapService kind );
+  static std::optional<RemoteMapService> serviceFromString( const QString &name );
+};
+
 using AssetStructure =
-  std::variant<std::monostate, RasterStructure, VectorStructure>;
+  std::variant<std::monostate, RasterStructure, VectorStructure, RemoteMapStructure>;
 
 /// True when a replacement source is structurally compatible with the current
 /// asset — same kind and the same essential shape (raster: driver, dimensions,
@@ -171,7 +213,24 @@ inline bool structuresCompatible( const AssetStructure &current,
            currentVector->layers == replacementVector->layers;
   }
 
-  return true;
+  // A remote map relocates compatibly when the service family and the declared
+  // layer set match (the identity-relevant shape). Content drift a service may
+  // publish over time (a newly advertised CRS, a tweaked extent) does NOT block
+  // the move — relocate surfaces it via assetChanged rather than refusing.
+  if ( const auto *currentRemote = std::get_if<RemoteMapStructure>( &current ) )
+  {
+    const auto *replacementRemote =
+      std::get_if<RemoteMapStructure>( &replacement );
+    return replacementRemote &&
+           currentRemote->service == replacementRemote->service &&
+           currentRemote->layerNames == replacementRemote->layerNames;
+  }
+
+  // Every variant arm is handled above; reaching here means a future arm was
+  // added without a compatibility branch. Fail loudly rather than silently
+  // approving an incompatible relocation.
+  Q_UNREACHABLE();
+  return false;
 }
 
 class AssetSnapshot

@@ -2758,3 +2758,17 @@ target_include_directories(test_virtual_raster_create PRIVATE
 )
 set_target_properties(test_virtual_raster_create PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_virtual_raster_create)
+
+# Remote map structure model tests - RemoteMapStructure + AssetStructure arm (#61)
+qt_add_executable(test_remote_map_structure
+  test_remote_map_structure.cpp
+)
+target_link_libraries(test_remote_map_structure PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+)
+target_include_directories(test_remote_map_structure PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_remote_map_structure)

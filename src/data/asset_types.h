@@ -128,6 +128,18 @@ enum class StorageKind
   Remote,
 };
 
+/// Web-map service family for a Remote Map Asset. Remote maps are renderable
+/// catalog citizens whose structure reports only service-derived metadata
+/// (declared layers, CRS list, extent, format, tile-matrix resolution, z-range)
+/// — never the pixel/statistics shape a remote map cannot honor.
+enum class RemoteMapService
+{
+  Wms,
+  Wmts,
+  Tms,
+  Xyz,
+};
+
 enum class LeaseKind
 {
   View,
