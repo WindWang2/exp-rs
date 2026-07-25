@@ -12,6 +12,7 @@
 #include "collection_types.h"
 #include "data_result.h"
 #include "source_descriptor.h"
+#include "virtual_raster_recipe.h"
 
 namespace sicnu::data
 {
@@ -41,6 +42,19 @@ struct RestoreRequest
   AssetId id;
   AssetRevision revision = AssetRevision::initial();
   SourceDescriptor source;
+  PersistencePolicy persistence = PersistencePolicy::ProjectPersistent;
+};
+
+/// Restore a Virtual Raster Asset from a persisted recipe. The recipe - not any
+/// scratch `.vrt` path - is the identity: the artifact is regenerated on
+/// resolve. An input that was not restored is tolerated: the virtual asset is
+/// kept in the catalog in a non-Ready state and its dependency edge is skipped
+/// with a Warning (missing dependencies do not drop the asset).
+struct RestoreVirtualRasterRequest
+{
+  AssetId id;
+  VirtualRasterRecipe recipe;
+  AssetRevision revision = AssetRevision::initial();
   PersistencePolicy persistence = PersistencePolicy::ProjectPersistent;
 };
 

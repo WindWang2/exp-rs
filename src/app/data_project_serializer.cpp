@@ -39,6 +39,28 @@ bool isSensitiveOption(const QString &key) {
          normalized.contains(QStringLiteral("api_key"));
 }
 
+QString persistenceToString(data::PersistencePolicy policy) {
+  switch (policy) {
+  case data::PersistencePolicy::ProjectPersistent:
+    return QStringLiteral("persistent");
+  case data::PersistencePolicy::SessionTemporary:
+    return QStringLiteral("session");
+  case data::PersistencePolicy::TaskTemporary:
+    return QStringLiteral("task");
+  }
+  return QStringLiteral("persistent");
+}
+
+std::optional<data::PersistencePolicy> persistenceFromString(const QString &text) {
+  if (text == QStringLiteral("persistent"))
+    return data::PersistencePolicy::ProjectPersistent;
+  if (text == QStringLiteral("session"))
+    return data::PersistencePolicy::SessionTemporary;
+  if (text == QStringLiteral("task"))
+    return data::PersistencePolicy::TaskTemporary;
+  return std::nullopt;
+}
+
 std::optional<data::SourceDescriptor> sourceForLayer(QgsMapLayer &layer) {
   const QString providerKey = layer.providerType();
   if (providerKey != QStringLiteral("gdal") &&
@@ -100,6 +122,12 @@ DataProjectSerializer::write(QDomDocument &document,
 
   for (const data::AssetSnapshot &asset : context.dataManager().assets()) {
     if (asset.persistence() != data::PersistencePolicy::ProjectPersistent)
+      continue;
+    // Virtual rasters are persisted as identity-bearing recipes in the
+    // <virtualRasters> block below, NOT as <asset> rows: their <source>
+    // canonical path is a session-local scratch .vrt that must never be
+    // persisted (the artifact is regenerated on restore from the recipe).
+    if (asset.kind() == data::AssetKind::VirtualRaster)
       continue;
 
     QDomElement assetElement = document.createElement(QStringLiteral("asset"));
@@ -195,6 +223,39 @@ DataProjectSerializer::write(QDomDocument &document,
   }
   extension.appendChild(collectionsElement);
 
+  // Persist Virtual Rasters as identity-bearing recipes (NOT their scratch .vrt
+  // paths, which are regenerated on restore). Each entry carries the saved
+  // AssetId/revision/persistence so the restored asset preserves identity, and
+  // the recipe JSON as a single text node (mirrors the <derivation> payload).
+  QDomElement virtualsElement =
+      document.createElement(QStringLiteral("virtualRasters"));
+  const data::AssetQuery virtualQuery{data::AssetKind::VirtualRaster};
+  for (const data::AssetSnapshot &virtualAsset :
+       context.dataManager().assets(virtualQuery)) {
+    if (virtualAsset.persistence() != data::PersistencePolicy::ProjectPersistent)
+      continue;
+    const std::optional<data::VirtualRasterRecipe> recipe =
+        context.dataManager().virtualRasterRecipe(virtualAsset.id());
+    if (!recipe)
+      continue;
+    QDomElement virtualElement =
+        document.createElement(QStringLiteral("virtualRaster"));
+    virtualElement.setAttribute(QStringLiteral("id"),
+                                virtualAsset.id().toString());
+    virtualElement.setAttribute(QStringLiteral("revision"),
+                                QString::number(virtualAsset.revision().value()));
+    virtualElement.setAttribute(
+        QStringLiteral("persistence"),
+        persistenceToString(virtualAsset.persistence()));
+    QDomElement recipeElement =
+        document.createElement(QStringLiteral("recipe"));
+    recipeElement.appendChild(document.createTextNode(QString::fromUtf8(
+        QJsonDocument(recipe->toJson()).toJson(QJsonDocument::Compact))));
+    virtualElement.appendChild(recipeElement);
+    virtualsElement.appendChild(virtualElement);
+  }
+  extension.appendChild(virtualsElement);
+
   root.appendChild(extension);
   return data::Result<void>::success();
 }
@@ -277,6 +338,69 @@ data::Result<void> DataProjectSerializer::read(const QDomDocument &document,
         }
       }
     }
+  }
+
+  // Restore Virtual Rasters. Inputs were already restored as assets above, so
+  // a recipe referencing a missing input can be detected and recorded as a
+  // non-Ready asset with a Warning - the asset is NOT dropped (spec: missing
+  // dependencies remain in the project). The recipe - not any scratch .vrt
+  // path - is the identity, so restore rebuilds from the recipe.
+  const QDomElement virtuals =
+      extension.firstChildElement(QStringLiteral("virtualRasters"));
+  for (QDomElement virt =
+           virtuals.firstChildElement(QStringLiteral("virtualRaster"));
+       !virt.isNull();
+       virt = virt.nextSiblingElement(QStringLiteral("virtualRaster"))) {
+    const std::optional<data::AssetId> virtualId =
+        data::AssetId::fromString(virt.attribute(QStringLiteral("id")));
+    const QDomElement recipeElement =
+        virt.firstChildElement(QStringLiteral("recipe"));
+    if (!virtualId || recipeElement.isNull()) {
+      diagnostics.append(projectDiagnostic(
+          QStringLiteral("project.invalid_virtual_raster"),
+          QStringLiteral("A persisted virtual raster description is invalid")));
+      failed = true;
+      continue;
+    }
+
+    const QJsonDocument parsed =
+        QJsonDocument::fromJson(recipeElement.text().toUtf8());
+    const data::Result<data::VirtualRasterRecipe> recipe =
+        data::VirtualRasterRecipe::fromJson(parsed.object());
+    if (!recipe) {
+      diagnostics.append(projectDiagnostic(
+          QStringLiteral("project.invalid_virtual_raster"),
+          QStringLiteral("A persisted virtual raster recipe could not be parsed")));
+      failed = true;
+      continue;
+    }
+
+    // Mirror the <asset> revision validation: a corrupt/missing revision is a
+    // corrupt description, not a silently-coerced revision 0.
+    bool revisionOk = false;
+    const quint64 revisionValue =
+        virt.attribute(QStringLiteral("revision"), QStringLiteral("1"))
+            .toULongLong(&revisionOk);
+    if (!revisionOk) {
+      diagnostics.append(projectDiagnostic(
+          QStringLiteral("project.invalid_virtual_raster"),
+          QStringLiteral("A persisted virtual raster description is invalid")));
+      failed = true;
+      continue;
+    }
+    const data::AssetRevision revision =
+        data::AssetRevision::fromValue(revisionValue);
+    const data::PersistencePolicy persistence =
+        persistenceFromString(virt.attribute(QStringLiteral("persistence")))
+            .value_or(data::PersistencePolicy::ProjectPersistent);
+
+    const data::Result<data::AssetId> restored =
+        context.dataManager().restoreVirtualRaster(
+            data::RestoreVirtualRasterRequest{*virtualId, recipe.value(),
+                                              revision, persistence});
+    diagnostics += restored.diagnostics();
+    if (!restored)
+      failed = true;
   }
 
   // Restore Data Collections. Children are already restored as assets above;

@@ -78,6 +78,10 @@ enum class AssetState
   Resolving,
   Ready,
   Missing,
+  /// A virtual raster whose inputs are not all present in the catalog (e.g. a
+  /// saved project that dropped a dependency). The record is kept so the asset
+  /// survives; re-resolving after the inputs return restores it to Ready.
+  UnavailableSource,
   Offline,
   AuthenticationRequired,
   Error,

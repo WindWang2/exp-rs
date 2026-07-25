@@ -164,7 +164,12 @@ data::Result<void> ProjectContext::clearProject(QgsProject &project) {
   }
 
   const QVector<data::AssetSnapshot> assets = m_dataManager.assets();
-  for (const data::AssetSnapshot &asset : assets) {
+  for ( const data::AssetSnapshot &asset : assets ) {
+    // A cascade unload (from a strong-dependency edge, e.g. a virtual raster
+    // consuming an input) may have removed a later asset already; skip it so
+    // the clear is idempotent across the cascade.
+    if ( !m_dataManager.asset( asset.id() ) )
+      continue;
     const data::UnloadPlan plan =
         m_dataManager.planUnload(asset.id()).confirmedCascade();
     const data::Result<void> unloaded = m_dataManager.unload(plan);

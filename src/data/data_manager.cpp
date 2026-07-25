@@ -863,6 +863,153 @@ std::optional<VirtualRasterRecipe> DataManager::virtualRasterRecipe(
   return recordIt->virtualRecipe;
 }
 
+Result<AssetId> DataManager::restoreVirtualRaster(
+  const RestoreVirtualRasterRequest &request )
+{
+  if ( QThread::currentThread() != thread() )
+    return Result<AssetId>::failure( wrongThreadDiagnostic() );
+
+  if ( request.id.isNull() )
+  {
+    return Result<AssetId>::failure(
+      Diagnostic{ QStringLiteral( "restore.invalid_asset_id" ),
+                  QStringLiteral( "A persisted virtual raster requires a valid id" ),
+                  DiagnosticSeverity::Error } );
+  }
+  if ( request.recipe.inputs.isEmpty() )
+  {
+    return Result<AssetId>::failure(
+      Diagnostic{ QStringLiteral( "recipe.invalid" ),
+                  QStringLiteral( "A persisted virtual raster recipe has no inputs" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  // The recipe hash keys the descriptor and the deterministic scratch path,
+  // exactly as createVirtualRaster derives them - same recipe -> same path ->
+  // same SourceKey -> dedup across save/restore.
+  const QJsonDocument recipeDoc( request.recipe.toJson() );
+  const QString recipeHash = QString::fromUtf8(
+    QCryptographicHash::hash( recipeDoc.toJson( QJsonDocument::Compact ),
+                              QCryptographicHash::Sha1 )
+      .toHex() );
+
+  if ( !m_impl->vrtScratchDir )
+    m_impl->vrtScratchDir = std::make_unique<QTemporaryDir>();
+  const QString vrtPath = QStringLiteral( "%1/vrt_%2.vrt" )
+                            .arg( m_impl->vrtScratchDir->path(), recipeHash );
+
+  SourceDescriptor descriptor;
+  descriptor.providerKey = QStringLiteral( "vrt" );
+  descriptor.canonicalSource = vrtPath;
+  descriptor.dataOptions.insert( QStringLiteral( "recipe" ),
+                                 QString::fromUtf8(
+                                   recipeDoc.toJson( QJsonDocument::Compact ) ) );
+  const SourceKey sourceKey = descriptor.sourceKey();
+
+  // Conflict guards mirror restoreSource: an id already bound to a different
+  // source, or this source already bound to a different id, are both refused.
+  const auto existing = m_impl->findRecord( request.id );
+  if ( existing != m_impl->records.end() )
+  {
+    if ( existing->sourceKey == sourceKey )
+    {
+      // Idempotent re-restore of the same virtual asset: re-bind any missing
+      // edges whose inputs have since appeared, then return.
+      QVector<Diagnostic> edgeDiagnostics;
+      restoreVirtualRasterEdges( request, edgeDiagnostics );
+      return Result<AssetId>::success( request.id, std::move( edgeDiagnostics ) );
+    }
+    return Result<AssetId>::failure(
+      Diagnostic{ QStringLiteral( "restore.asset_id_conflict" ),
+                  QStringLiteral( "The persisted Asset ID is already bound to "
+                                  "another source" ),
+                  DiagnosticSeverity::Error } );
+  }
+  for ( const Impl::AssetRecord &record : m_impl->records )
+  {
+    if ( record.sourceKey == sourceKey )
+    {
+      return Result<AssetId>::failure(
+        Diagnostic{ QStringLiteral( "restore.source_conflict" ),
+                    QStringLiteral( "The persisted source is already bound to "
+                                    "another Asset ID" ),
+                    DiagnosticSeverity::Error } );
+    }
+  }
+
+  QVector<Diagnostic> diagnostics;
+
+  // Resolve through the provider. The provider looks up each input via the
+  // bound AssetLookup; a missing input fails with virtual_raster.input_unavailable,
+  // which we treat as a non-dropping Warning: the asset is still recorded in a
+  // non-Ready state and its dependency edges are skipped.
+  const Result<internal::ResolvedSource> resolved =
+    m_impl->providers->resolve( descriptor );
+  const bool inputsPresent = bool( resolved );
+
+  AssetSnapshot snapshot{ request.id,
+                          request.revision.isValid() ? request.revision
+                                                     : AssetRevision::initial(),
+                          descriptor,
+                          AssetKind::VirtualRaster,
+                          inputsPresent ? resolved.value().state
+                                        : AssetState::UnavailableSource,
+                          // A non-Ready virtual raster with absent inputs cannot
+                          // honor relocation (the relocate path re-resolves
+                          // inputs); advertise no capabilities until the inputs
+                          // return and the asset re-resolves to Ready.
+                          inputsPresent ? resolved.value().capabilities
+                                        : AssetCapability::None,
+                          request.persistence,
+                          StorageKind::File,
+                          inputsPresent ? resolved.value().displayName
+                                        : QStringLiteral( "VRT(unavailable)" ),
+                          inputsPresent ? resolved.value().structure : AssetStructure{} };
+  if ( resolved )
+    diagnostics += resolved.diagnostics();
+
+  Impl::AssetRecord record{ sourceKey, std::move( snapshot ) };
+  record.virtualRecipe = request.recipe;
+  m_impl->records.push_back( std::move( record ) );
+  m_impl->catalogGeneration++;
+  emit assetAdded( request.id );
+
+  restoreVirtualRasterEdges( request, diagnostics );
+
+  return Result<AssetId>::success( request.id, std::move( diagnostics ) );
+}
+
+void DataManager::restoreVirtualRasterEdges(
+  const RestoreVirtualRasterRequest &request, QVector<Diagnostic> &diagnostics )
+{
+  QVector<AssetId> distinctInputs;
+  for ( const BandRef &bandRef : request.recipe.inputs )
+  {
+    if ( !distinctInputs.contains( bandRef.asset ) )
+      distinctInputs.append( bandRef.asset );
+  }
+  for ( const AssetId &input : distinctInputs )
+  {
+    if ( m_impl->findRecord( input ) == m_impl->records.end() )
+    {
+      // A missing input is not a dropping condition: record a Warning and skip
+      // the edge. The recipe still references the (persisted) AssetId, so a
+      // future restore of that input can re-bind via idempotent re-restore.
+      diagnostics.append(
+        Diagnostic{ QStringLiteral( "virtual_raster.missing_input" ),
+                    QStringLiteral( "A virtual raster input (%1) is missing from "
+                                    "the restored project; its dependency edge "
+                                    "is skipped" )
+                      .arg( input.toString() ),
+                    DiagnosticSeverity::Warning } );
+      continue;
+    }
+    const Result<void> edge = addStrongDependency( request.id, input );
+    if ( !edge )
+      diagnostics += edge.diagnostics();
+  }
+}
+
 void DataManager::pruneDependencyEdgesOf( AssetId id )
 {
   m_impl->dependencyEdges.erase(

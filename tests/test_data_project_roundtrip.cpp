@@ -23,6 +23,7 @@
 #include "app/project_context.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
+#include "data/virtual_raster_recipe.h"
 
 using sicnu::data::AssetState;
 using sicnu::data::RelocateRequest;
@@ -648,4 +649,198 @@ TEST_CASE("A project with no collections round-trips correctly",
   CHECK(restored->id() == asset.assetId);
   CHECK_FALSE(restored->parentCollectionId().has_value());
   CHECK(context->dataManager().collections().isEmpty());
+}
+
+TEST_CASE("A virtual raster and its dependencies round-trip into the saved project",
+          "[project][data_roundtrip][virtual_raster]") {
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  const sicnu::display::DisplayViewSpec viewSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore()};
+  auto createdContext = sicnu::app::ProjectContext::create(viewSpec);
+  REQUIRE(createdContext);
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+
+  // Two staged rasters as the virtual raster's inputs.
+  QTemporaryDir dir;
+  const auto stagedPath = [&dir](const QString &name) {
+    const QString p = dir.filePath(name);
+    REQUIRE(QFile::copy(
+        fixturePath(QStringLiteral("samples/dem_sample.tif")), p));
+    return p;
+  };
+
+  sicnu::data::SourceDescriptor sourceA;
+  sourceA.providerKey = QStringLiteral("gdal");
+  sourceA.canonicalSource = stagedPath(QStringLiteral("a.tif"));
+  const sicnu::data::RegisterResult inputA =
+      context->dataManager().registerSource({sourceA});
+
+  sicnu::data::SourceDescriptor sourceB;
+  sourceB.providerKey = QStringLiteral("gdal");
+  sourceB.canonicalSource = stagedPath(QStringLiteral("b.tif"));
+  const sicnu::data::RegisterResult inputB =
+      context->dataManager().registerSource({sourceB});
+
+  // Promote both inputs to ProjectPersistent so they survive the save.
+  REQUIRE(context->dataManager().promote(inputA.assetId));
+  REQUIRE(context->dataManager().promote(inputB.assetId));
+
+  sicnu::data::VirtualRasterRecipe recipe;
+  recipe.inputs = {sicnu::data::BandRef{inputA.assetId, 1},
+                   sicnu::data::BandRef{inputB.assetId, 1}};
+  const sicnu::data::Result<sicnu::data::AssetId> created =
+      context->dataManager().createVirtualRaster(recipe);
+  REQUIRE(created);
+  const sicnu::data::AssetId virtualId = created.value();
+
+  sicnu::app::DataProjectSerializer serializer;
+  bool writeSucceeded = false;
+  bool readSucceeded = false;
+  QObject signalReceiver;
+  QObject::connect(project, &QgsProject::writeProject, &signalReceiver,
+                   [&](QDomDocument &document) {
+                     writeSucceeded =
+                         static_cast<bool>(serializer.write(document, *context));
+                   });
+  QObject::connect(project, &QgsProject::readProject, &signalReceiver,
+                   [&](const QDomDocument &document) {
+                     readSucceeded = static_cast<bool>(
+                         serializer.read(document, *project, *context));
+                   });
+
+  QTemporaryDir temporaryDirectory;
+  const QString projectPath =
+      temporaryDirectory.filePath(QStringLiteral("virtual_roundtrip.qgs"));
+  REQUIRE(project->write(projectPath));
+  REQUIRE(writeSucceeded);
+
+  // The recipe - not the scratch .vrt path - is persisted; verify the .vrt
+  // path does NOT appear in the written project.
+  QFile written(projectPath);
+  REQUIRE(written.open(QIODevice::ReadOnly | QIODevice::Text));
+  const QString xml = QString::fromUtf8(written.readAll());
+  written.close();
+  CHECK_FALSE(xml.contains(QStringLiteral(".vrt")));
+  CHECK(xml.contains(QStringLiteral("<virtualRasters")));
+
+  REQUIRE(context->clearProject(*project));
+  REQUIRE(project->read(projectPath));
+  REQUIRE(readSucceeded);
+
+  // Identity: same AssetId, same recipe, same edges in both directions.
+  const auto restored = context->dataManager().asset(virtualId);
+  REQUIRE(restored);
+  CHECK(restored->id() == virtualId);
+  CHECK(restored->kind() == sicnu::data::AssetKind::VirtualRaster);
+
+  const std::optional<sicnu::data::VirtualRasterRecipe> restoredRecipe =
+      context->dataManager().virtualRasterRecipe(virtualId);
+  REQUIRE(restoredRecipe);
+  REQUIRE(restoredRecipe->inputs.size() == 2);
+  CHECK(restoredRecipe->inputs.first().asset == inputA.assetId);
+  CHECK(restoredRecipe->inputs.last().asset == inputB.assetId);
+
+  CHECK(context->dataManager().strongDependenciesOf(virtualId) ==
+        QVector<sicnu::data::AssetId>{inputA.assetId, inputB.assetId});
+  CHECK(context->dataManager().strongDependentsOf(inputA.assetId) ==
+        QVector<sicnu::data::AssetId>{virtualId});
+}
+
+TEST_CASE("A virtual raster whose input was not saved is restored, not dropped",
+          "[project][data_roundtrip][virtual_raster]") {
+  // The virtual raster references a SessionTemporary input that is NOT
+  // persisted; on restore the input is gone. The spec requires the virtual
+  // asset to remain in the catalog (missing dependencies do not drop assets),
+  // in a non-Ready state, with the edge skipped and a Warning surfaced.
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  const sicnu::display::DisplayViewSpec viewSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore()};
+  auto createdContext = sicnu::app::ProjectContext::create(viewSpec);
+  REQUIRE(createdContext);
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+
+  QTemporaryDir dir;
+  // One persistent input that survives, one session-temporary that does not.
+  sicnu::data::SourceDescriptor sourcePersistent;
+  sourcePersistent.providerKey = QStringLiteral("gdal");
+  sourcePersistent.canonicalSource = dir.filePath(QStringLiteral("a.tif"));
+  REQUIRE(QFile::copy(
+      fixturePath(QStringLiteral("samples/dem_sample.tif")),
+      sourcePersistent.canonicalSource));
+  const sicnu::data::RegisterResult persistentInput =
+      context->dataManager().registerSource({sourcePersistent});
+  REQUIRE(context->dataManager().promote(persistentInput.assetId));
+
+  sicnu::data::SourceDescriptor sourceSession;
+  sourceSession.providerKey = QStringLiteral("gdal");
+  sourceSession.canonicalSource = dir.filePath(QStringLiteral("b.tif"));
+  REQUIRE(QFile::copy(
+      fixturePath(QStringLiteral("samples/dem_sample.tif")),
+      sourceSession.canonicalSource));
+  const sicnu::data::RegisterResult sessionInput =
+      context->dataManager().registerSource(
+          {sourceSession, sicnu::data::PersistencePolicy::SessionTemporary});
+
+  sicnu::data::VirtualRasterRecipe recipe;
+  recipe.inputs = {sicnu::data::BandRef{persistentInput.assetId, 1},
+                   sicnu::data::BandRef{sessionInput.assetId, 1}};
+  const sicnu::data::Result<sicnu::data::AssetId> created =
+      context->dataManager().createVirtualRaster(recipe);
+  REQUIRE(created);
+  const sicnu::data::AssetId virtualId = created.value();
+
+  sicnu::app::DataProjectSerializer serializer;
+  sicnu::data::Result<void> readResult =
+      sicnu::data::Result<void>::failure(
+          sicnu::data::Diagnostic{QStringLiteral("test.not_run"),
+                                  QStringLiteral("read hook has not fired")});
+  QObject signalReceiver;
+  QObject::connect(project, &QgsProject::writeProject, &signalReceiver,
+                   [&](QDomDocument &document) {
+                     ( void ) serializer.write(document, *context);
+                   });
+  QObject::connect(project, &QgsProject::readProject, &signalReceiver,
+                   [&](const QDomDocument &document) {
+                     readResult = serializer.read(document, *project, *context);
+                   });
+
+  QTemporaryDir temporaryDirectory;
+  const QString projectPath =
+      temporaryDirectory.filePath(QStringLiteral("virtual_missing_input.qgs"));
+  REQUIRE(project->write(projectPath));
+  REQUIRE(context->clearProject(*project));
+  REQUIRE(project->read(projectPath));
+  REQUIRE(readResult);
+
+  // The virtual asset is NOT dropped; it is restored in UnavailableSource
+  // state (the ticket's named state for a dependency that did not survive).
+  const auto restored = context->dataManager().asset(virtualId);
+  REQUIRE(restored);
+  CHECK(restored->id() == virtualId);
+  CHECK(restored->state() ==
+        sicnu::data::AssetState::UnavailableSource);
+  // The recipe is preserved (including the missing-input AssetId reference).
+  const std::optional<sicnu::data::VirtualRasterRecipe> restoredRecipe =
+      context->dataManager().virtualRasterRecipe(virtualId);
+  REQUIRE(restoredRecipe);
+  REQUIRE(restoredRecipe->inputs.size() == 2);
+
+  // The surviving input keeps its edge; the missing input's edge is skipped
+  // (addStrongDependency would reject an unknown input), and a Warning was
+  // surfaced by the restore.
+  CHECK(context->dataManager().strongDependenciesOf(virtualId) ==
+        QVector<sicnu::data::AssetId>{persistentInput.assetId});
+  bool sawMissingDependencyWarning = false;
+  for (const sicnu::data::Diagnostic &d : readResult.diagnostics()) {
+    if (d.severity == sicnu::data::DiagnosticSeverity::Warning &&
+        d.message.contains(QStringLiteral("missing"), Qt::CaseInsensitive))
+      sawMissingDependencyWarning = true;
+  }
+  CHECK(sawMissingDependencyWarning);
 }

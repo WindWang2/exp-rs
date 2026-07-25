@@ -123,6 +123,17 @@ class DataManager : public QObject
   /// The recipe a Virtual Raster Asset was created from, if any.
   std::optional<VirtualRasterRecipe> virtualRasterRecipe( AssetId id ) const;
 
+  /// Restores a Virtual Raster Asset from a persisted recipe, preserving the
+  /// caller-supplied AssetId (mirroring `restoreSource`/`restoreCollection`).
+  /// The recipe is identity: the scratch `.vrt` is regenerated at the
+  /// deterministic recipe-hash path. A recipe whose inputs are all present
+  /// resolves to Ready and records one strong-dependency edge per distinct
+  /// input; an input that is not registered (the saved project dropped it) is
+  /// tolerated: the asset is still recorded in a non-Ready state, the missing
+  /// input's edge is skipped, and a Warning is surfaced. Conflicts on the id
+  /// or the recipe SourceKey are refused like `restoreSource`.
+  Result<AssetId> restoreVirtualRaster( const RestoreVirtualRasterRequest &request );
+
   /// Reaps a temporary Data Asset: removes it from the catalog and, when the
   /// asset declares `DeletableSource`, deletes its on-disk source file. A
   /// distinct operation from unload (unload never deletes source data).
@@ -227,6 +238,13 @@ class DataManager : public QObject
     /// Called whenever an asset leaves the catalog so the DAG never holds dead
     /// asset ids.
     void pruneDependencyEdgesOf( AssetId id );
+
+    /// Re-binds the strong-dependency edges for a restored virtual raster: one
+    /// edge per distinct input that is present in the catalog; a missing input
+    /// appends a Warning to `diagnostics` and is skipped (not a drop). Shared
+    /// by `restoreVirtualRaster` and its idempotent re-restore path.
+    void restoreVirtualRasterEdges( const RestoreVirtualRasterRequest &request,
+                                    QVector<Diagnostic> &diagnostics );
 };
 
 } // namespace sicnu::data
