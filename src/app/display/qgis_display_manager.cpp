@@ -50,13 +50,15 @@ std::unique_ptr<QgsMapLayer> materializeLayer(const data::AssetSnapshot &asset,
 
   switch (asset.kind()) {
   case data::AssetKind::Raster:
+  // A VirtualRaster resolves to a GDAL-readable managed .vrt scratch file, so
+  // it materializes through the same raster path as an ordinary file raster.
+  case data::AssetKind::VirtualRaster:
     return std::make_unique<QgsRasterLayer>(source, name,
                                             QStringLiteral("gdal"));
   case data::AssetKind::Vector:
     return std::make_unique<QgsVectorLayer>(source, name,
                                             QStringLiteral("ogr"));
   case data::AssetKind::RemoteMap:
-  case data::AssetKind::VirtualRaster:
     return {};
   }
   return {};

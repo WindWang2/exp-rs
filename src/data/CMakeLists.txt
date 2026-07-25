@@ -18,6 +18,8 @@ qt_add_library(sicnu_data STATIC
   providers/gdal_raster_source_provider.h
   providers/ogr_vector_source_provider.cpp
   providers/ogr_vector_source_provider.h
+  providers/virtual_raster_source_provider.cpp
+  providers/virtual_raster_source_provider.h
   processing_asset_resolver.cpp
   processing_asset_resolver.h
   source_descriptor.cpp

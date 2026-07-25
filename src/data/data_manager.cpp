@@ -4,13 +4,18 @@
 #include <functional>
 #include <utility>
 
+#include <QCryptographicHash>
 #include <QFile>
+#include <QJsonDocument>
 #include <QPointer>
+#include <QTemporaryDir>
 #include <QThread>
 
 #include "internal/source_provider_registry.h"
 #include "providers/gdal_raster_source_provider.h"
 #include "providers/ogr_vector_source_provider.h"
+#include "providers/virtual_raster_source_provider.h"
+#include "virtual_raster_preflight.h"
 
 namespace sicnu::data
 {
@@ -77,6 +82,10 @@ struct DataManager::Impl
     /// Provenance attached by a transactional algorithm-output commit; absent
     /// for assets that were registered directly.
     std::optional<DerivationRecord> derivation;
+    /// The recipe a Virtual Raster Asset was created from; absent for
+    /// non-virtual assets. The recipe is the identity; the generated `.vrt`
+    /// at the snapshot's canonicalSource is a disposable artifact.
+    std::optional<VirtualRasterRecipe> virtualRecipe;
   };
 
   struct LeaseRecord
@@ -112,6 +121,10 @@ struct DataManager::Impl
   QVector<LeaseRecord> leases;
   QVector<CollectionRecord> collections;
   QVector<DependencyEdge> dependencyEdges;
+  /// Managed scratch directory for generated virtual-raster artifacts. Lazily
+  /// created by createVirtualRaster; the `.vrt` files inside are disposable
+  /// build artifacts (the recipes are the identity).
+  std::unique_ptr<QTemporaryDir> vrtScratchDir;
   quint64 catalogGeneration = 1;
   quint64 nextLeaseToken = 1;
 
@@ -171,6 +184,12 @@ std::unique_ptr<internal::SourceProviderRegistry> DataManager::defaultProviders(
 DataManager::DataManager( QObject *parent )
   : DataManager( defaultProviders(), parent )
 {
+  // The virtual-raster provider needs the owning DataManager to look up input
+  // snapshots when realizing a recipe; bind it here (internal seam - the
+  // public interface never exposes it). Both live as long as the DataManager.
+  m_impl->providers->add(
+    std::make_unique<providers::VirtualRasterSourceProvider>(
+      [this]( AssetId id ) { return asset( id ); } ) );
 }
 
 DataManager::DataManager( std::unique_ptr<internal::SourceProviderRegistry> providers,
@@ -377,6 +396,47 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
   recordIt->sourceKey = newSourceKey;
   recordIt->snapshot = std::move( updated );
   m_impl->catalogGeneration++;
+
+  // Regenerate dependent virtual rasters: their recipes reference this asset
+  // by AssetId, so a relocation must rewrite the generated VRT against the new
+  // canonical source. The artifact path is unchanged; each dependent's
+  // structure is unchanged (relocation validated it), but its file content
+  // changed - report the change so displays reload.
+  for ( const AssetId &dependentId : strongDependentsOf( request.id ) )
+  {
+    const auto dependentIt = m_impl->findRecord( dependentId );
+    if ( dependentIt == m_impl->records.end() ||
+         !dependentIt->virtualRecipe.has_value() )
+      continue;
+
+    QVector<AssetSnapshot> inputSnapshots;
+    bool allAvailable = true;
+    for ( const BandRef &bandRef : dependentIt->virtualRecipe->inputs )
+    {
+      const std::optional<AssetSnapshot> snapshot = asset( bandRef.asset );
+      if ( !snapshot.has_value() )
+      {
+        allAvailable = false;
+        break;
+      }
+      inputSnapshots.append( *snapshot );
+    }
+    if ( !allAvailable )
+      continue;
+
+    const QString xml = providers::buildVirtualRasterXml(
+      *dependentIt->virtualRecipe, inputSnapshots );
+    if ( xml.isEmpty() )
+      continue;
+
+    QFile vrtFile( dependentIt->snapshot.source().canonicalSource );
+    if ( vrtFile.open( QIODevice::WriteOnly | QIODevice::Text ) )
+    {
+      vrtFile.write( xml.toUtf8() );
+      vrtFile.close();
+      emit assetChanged( dependentId );
+    }
+  }
 
   emit assetChanged( request.id );
   return Result<RelocateResult>::success(
@@ -712,6 +772,95 @@ QVector<AssetId> DataManager::strongDependentsOf( AssetId id ) const
       dependents.append( edge.dependent );
   }
   return dependents;
+}
+
+Result<AssetId> DataManager::createVirtualRaster(
+  const VirtualRasterRecipe &recipe, PersistencePolicy persistence )
+{
+  if ( QThread::currentThread() != thread() )
+    return Result<AssetId>::failure( wrongThreadDiagnostic() );
+
+  // Preflight first: a hard-failure verdict registers nothing.
+  const PreflightResult preflight = preflightVirtualRaster( recipe, *this );
+  if ( !preflight.canCreate )
+    return Result<AssetId>::failure( preflight.diagnostics );
+
+  // Cross-CRS composition needs a warped VRT, which this wave does not
+  // generate; refuse honestly rather than writing a geo-wrong artifact.
+  if ( preflight.verdict == PreflightVerdict::RequiresReprojection )
+  {
+    return Result<AssetId>::failure(
+      Diagnostic{ QStringLiteral( "virtual_raster.reprojection_unsupported" ),
+                  QStringLiteral( "Composing inputs across differing CRSs is not "
+                                  "supported yet (warped virtual rasters are a "
+                                  "follow-up)" ),
+                  DiagnosticSeverity::Error } );
+  }
+
+  // The recipe hash keys both dedup (via the descriptor) and the scratch
+  // artifact path: same recipe -> same path -> same SourceKey -> reuse.
+  const QJsonDocument recipeDoc( recipe.toJson() );
+  const QString recipeHash = QString::fromUtf8(
+    QCryptographicHash::hash( recipeDoc.toJson( QJsonDocument::Compact ),
+                              QCryptographicHash::Sha1 )
+      .toHex() );
+
+  if ( !m_impl->vrtScratchDir )
+    m_impl->vrtScratchDir = std::make_unique<QTemporaryDir>();
+  const QString vrtPath = QStringLiteral( "%1/vrt_%2.vrt" )
+                            .arg( m_impl->vrtScratchDir->path(), recipeHash );
+
+  SourceDescriptor source;
+  source.providerKey = QStringLiteral( "vrt" );
+  source.canonicalSource = vrtPath;
+  source.dataOptions.insert( QStringLiteral( "recipe" ),
+                             QString::fromUtf8(
+                               recipeDoc.toJson( QJsonDocument::Compact ) ) );
+
+  RegisterRequest request;
+  request.source = source;
+  request.persistence = persistence;
+  const RegisterResult registered = registerSource( request );
+  if ( registered.assetId.isNull() )
+    return Result<AssetId>::failure( registered.diagnostics );
+
+  // A dedup hit already carries the recipe and its edges.
+  if ( registered.reusedExisting )
+    return Result<AssetId>::success( registered.assetId );
+
+  const auto recordIt = m_impl->findRecord( registered.assetId );
+  recordIt->virtualRecipe = recipe;
+
+  // One edge per DISTINCT input asset (a recipe may reference one asset in
+  // several bands). On a cycle (a recipe consuming its own dependents), roll
+  // the registration back so nothing partial remains.
+  QVector<AssetId> distinctInputs;
+  for ( const BandRef &bandRef : recipe.inputs )
+  {
+    if ( !distinctInputs.contains( bandRef.asset ) )
+      distinctInputs.append( bandRef.asset );
+  }
+  for ( const AssetId &input : distinctInputs )
+  {
+    const Result<void> edge = addStrongDependency( registered.assetId, input );
+    if ( !edge )
+    {
+      const UnloadPlan plan = planUnload( registered.assetId ).confirmedCascade();
+      ( void ) unload( plan );
+      return Result<AssetId>::failure( edge.diagnostics() );
+    }
+  }
+
+  return Result<AssetId>::success( registered.assetId );
+}
+
+std::optional<VirtualRasterRecipe> DataManager::virtualRasterRecipe(
+  AssetId id ) const
+{
+  const auto recordIt = m_impl->findRecord( id );
+  if ( recordIt == m_impl->records.end() )
+    return std::nullopt;
+  return recordIt->virtualRecipe;
 }
 
 void DataManager::pruneDependencyEdgesOf( AssetId id )

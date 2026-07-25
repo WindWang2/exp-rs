@@ -10,6 +10,7 @@
 #include "data_asset.h"
 #include "data_result.h"
 #include "derivation_record.h"
+#include "virtual_raster_recipe.h"
 
 namespace sicnu::data
 {
@@ -104,6 +105,23 @@ class DataManager : public QObject
   /// The assets that depend on `id` (incoming edges), in edge-insertion
   /// order. Normal unload of `id` is refused while this list is non-empty.
   QVector<AssetId> strongDependentsOf( AssetId id ) const;
+
+  /// Creates a Virtual Raster Asset from `recipe`. Runs the preflight against
+  /// the input snapshots and refuses hard-failure verdicts (registering
+  /// nothing); registers the composition through the normal pipeline (dedup
+  /// by recipe - a same-recipe creation reuses the existing virtual asset);
+  /// records one strong-dependency edge per distinct input (rolling back on a
+  /// cycle); and stores the recipe. The provider generates the `.vrt`
+  /// artifact in a managed scratch location - the recipe, not the file, is
+  /// the identity. Cross-CRS recipes (RequiresReprojection) are refused in
+  /// this wave with `virtual_raster.reprojection_unsupported` (warped VRT is
+  /// a follow-up).
+  Result<AssetId> createVirtualRaster(
+    const VirtualRasterRecipe &recipe,
+    PersistencePolicy persistence = PersistencePolicy::ProjectPersistent );
+
+  /// The recipe a Virtual Raster Asset was created from, if any.
+  std::optional<VirtualRasterRecipe> virtualRasterRecipe( AssetId id ) const;
 
   /// Reaps a temporary Data Asset: removes it from the catalog and, when the
   /// asset declares `DeletableSource`, deletes its on-disk source file. A
