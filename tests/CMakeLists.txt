@@ -2650,3 +2650,19 @@ target_include_directories(test_data_manager_collection PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_data_manager_collection)
+
+# Collection import service tests - read-only probe with stub + real discoverer
+qt_add_executable(test_collection_import_service
+  test_collection_import_service.cpp
+)
+target_link_libraries(test_collection_import_service PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_data
+)
+target_include_directories(test_collection_import_service PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_collection_import_service)

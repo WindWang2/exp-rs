@@ -1,0 +1,148 @@
+#pragma once
+
+#include <QObject>
+#include <QMap>
+#include <QString>
+#include <QVector>
+
+#include "processing/algorithms/satellite_products.h"
+#include "data/asset_types.h"
+#include "data/collection_types.h"
+#include "data/data_result.h"
+
+namespace sicnu::data
+{
+class DataManager;
+}
+
+namespace sicnu
+{
+
+/// One band of a child candidate, normalized from a provider
+/// `SatelliteProducts::BandFile`. The raw provider type is mapped into this
+/// shape by the probe so the preview never exposes provider types through the
+/// import-service boundary.
+struct ChildBandInfo
+{
+  QString name;            ///< "B4", "sur_refl_b01"
+  QString sourcePath;      ///< band's file path or GDAL subdataset string
+  int sourceBand = 1;      ///< 1-based band index inside @a sourcePath
+  int wavelengthNm = 0;    ///< Approximate centre wavelength (0 if unknown)
+
+  friend bool operator==( const ChildBandInfo &, const ChildBandInfo & ) = default;
+};
+
+/// A candidate child asset: one distinct grid group of a product. Different
+/// grids (a Sentinel-2 10 m vs 20 m group, or HDF subdatasets on independent
+/// grids) are distinct child candidates - they are never merged into a single
+/// multi-band raster at preview time.
+struct ChildCandidate
+{
+  sicnu::data::AssetKind kind = sicnu::data::AssetKind::Raster;
+  QString displayName;     ///< "10 m group", "Subdataset: ..."
+  QString gridLabel;       ///< "10m", "20m", "default"
+  QString sourcePath;      ///< Anchor source for kind/structure read (#52)
+  QVector<ChildBandInfo> bands;
+
+  friend bool operator==( const ChildCandidate &, const ChildCandidate & ) = default;
+};
+
+/// Read-only preview of a complex product before commit. Pure: holds no
+/// catalog state. Probing the same source twice yields equal previews, and a
+/// probe followed by no commit changes nothing in the catalog.
+struct ImportPreview
+{
+  QString collectionDisplayName;
+  sicnu::data::ProductMetadata metadata;
+  QVector<ChildCandidate> children;
+
+  friend bool operator==( const ImportPreview &, const ImportPreview & ) = default;
+};
+
+/// One grid group of a discovered product, as emitted by a `ProductDiscoverer`.
+/// A discoverer groups a product's band files by grid before returning, so the
+/// probe is a pure mechanical mapper and never re-derives grids itself. (The
+/// existing `SatelliteProducts::ProductInfo` flattens everything into one
+/// list; grid grouping lives in the discoverer, not in the provider.)
+struct DiscoveredGridGroup
+{
+  QString gridLabel;
+  QString displayName;
+  QString sourcePath;
+  QVector<SatelliteProducts::BandFile> bands;
+};
+
+/// A discovered complex product, normalized and grid-grouped. This is the
+/// discoverer's output and the probe's input - it carries normalized product
+/// metadata plus per-grid child candidates, not the raw `ProductInfo`.
+struct DiscoveredProduct
+{
+  QString productId;
+  QString spacecraft;
+  QString processingLevel;
+  QString acquisitionDate;
+  QMap<QString, QString> attributes;
+  QVector<DiscoveredGridGroup> gridGroups;
+};
+
+/// Abstract discoverer: maps provider inputs (SatelliteProducts::ProductInfo,
+/// GDAL subdatasets) to the normalized, grid-grouped `DiscoveredProduct`. The
+/// probe is unit-tested with a stub implementation; the real adapter wraps
+/// `SatelliteProducts::discoverProduct`.
+class ProductDiscoverer
+{
+  public:
+    virtual ~ProductDiscoverer() = default;
+
+    /// Discover and normalize the product at @a source. Failures are returned
+    /// via `Result::failure` (the probe forwards the diagnostics verbatim and
+    /// registers nothing). There is no `errorMessage` out-param - `Result`
+    /// already carries `QVector<Diagnostic>`, the house error type, mirroring
+    /// `registerSource`/`OutputCommitter::commit`.
+    virtual sicnu::data::Result<DiscoveredProduct>
+    discover( const QString &source ) = 0;
+};
+
+/// Real adapter around `SatelliteProducts::discoverProduct`. Produces one
+/// `DiscoveredGridGroup` (the discoverer's preferred resolution, "10m" by
+/// default). True multi-grid extraction for Sentinel-2 L2A (separate 10 m /
+/// 20 m / 60 m groups) and MODIS (subdatasets on independent grids) is a
+/// deferred follow-up: the stub discoverer proves the grid-splitting contract
+/// (different grids -> distinct child candidates), and this adapter will
+/// eventually honor it by calling `discoverSentinel2` per resolution. The spec
+/// body lists multi-grid as the headline invariant; the single-group adapter
+/// satisfies the wiring acceptance (#51 AC: discoverer is injectable, real
+/// path is wired) while the multi-grid extraction is tracked separately.
+class SatelliteProductsDiscoverer : public ProductDiscoverer
+{
+  public:
+    sicnu::data::Result<DiscoveredProduct>
+    discover( const QString &source ) override;
+};
+
+/// Read-only discovery probe over a DataManager. Maps a `DiscoveredProduct`
+/// into an `ImportPreview` without mutating the catalog. The `commit` step
+/// (atomic collection + child registration) arrives in #52; the constructor
+/// holds the DataManager so its signature is stable across both waves.
+class CollectionImportService : public QObject
+{
+  // Q_OBJECT retained so #52 can add commit-progress signals (the probe itself
+  // has no signals/slots). The base matches OutputCommitter's composition style.
+  Q_OBJECT
+
+  public:
+    CollectionImportService( sicnu::data::DataManager *dataManager,
+                             ProductDiscoverer *discoverer,
+                             QObject *parent = nullptr );
+
+    /// Probes @a source and returns a normalized preview. Does not register
+    /// anything in the catalog - the probe is read-only. A discoverer failure
+    /// is returned as `import.discover_failed` diagnostics.
+    sicnu::data::Result<ImportPreview> probe( const QString &source );
+
+  private:
+    sicnu::data::DataManager *m_dataManager; ///< Unused by probe; for #52 commit.
+    ProductDiscoverer *m_discoverer;          ///< Not owned.
+};
+
+} // namespace sicnu

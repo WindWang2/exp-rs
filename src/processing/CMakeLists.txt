@@ -27,6 +27,7 @@ add_library(sicnu_processing SHARED
     framework/algorithm_engine.cpp
     framework/task_center.cpp
     framework/output_committer.cpp
+    framework/collection_import_service.cpp
 
     providers/gdal_tools/provider.cpp
     providers/gdal_tools/gdal_tool_wrapper.cpp
