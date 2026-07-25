@@ -2772,3 +2772,17 @@ target_include_directories(test_remote_map_structure PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_remote_map_structure)
+
+# XYZ source provider + NetworkProbe + registration tests (#62)
+qt_add_executable(test_xyz_source_provider
+  test_xyz_source_provider.cpp
+)
+target_link_libraries(test_xyz_source_provider PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+)
+target_include_directories(test_xyz_source_provider PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_xyz_source_provider)

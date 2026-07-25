@@ -15,6 +15,7 @@
 #include "providers/gdal_raster_source_provider.h"
 #include "providers/ogr_vector_source_provider.h"
 #include "providers/virtual_raster_source_provider.h"
+#include "providers/xyz_source_provider.h"
 #include "virtual_raster_preflight.h"
 
 namespace sicnu::data
@@ -178,6 +179,13 @@ std::unique_ptr<internal::SourceProviderRegistry> DataManager::defaultProviders(
   auto registry = std::make_unique<internal::SourceProviderRegistry>();
   registry->add( std::make_unique<providers::GdalRasterSourceProvider>() );
   registry->add( std::make_unique<providers::OgrVectorSourceProvider>() );
+  // XYZ tiles register with a NoNetworkProbe default so an asset still records
+  // (resolving Offline) when the host has not injected a real HTTP probe. The
+  // real Qt-Network-backed probe lives in src/app (the network-free invariant
+  // for src/data) and is host-injected; until then assets register Offline and
+  // re-resolve Ready once a probe is wired (a host-side follow-up to this wave,
+  // not a src/data concern). Tests inject a stub probe.
+  registry->add( std::make_unique<providers::XyzSourceProvider>() );
   return registry;
 }
 

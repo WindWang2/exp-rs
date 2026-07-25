@@ -21,6 +21,8 @@ qt_add_library(sicnu_data STATIC
   providers/ogr_vector_source_provider.h
   providers/virtual_raster_source_provider.cpp
   providers/virtual_raster_source_provider.h
+  providers/xyz_source_provider.cpp
+  providers/xyz_source_provider.h
   processing_asset_resolver.cpp
   processing_asset_resolver.h
   source_descriptor.cpp
@@ -45,10 +47,15 @@ target_link_libraries(sicnu_data
 )
 
 get_target_property(SICNU_DATA_DIRECT_LINKS sicnu_data LINK_LIBRARIES)
-foreach(SICNU_DATA_FORBIDDEN_LINK Qt6::Widgets qgis_gui)
+# src/data must stay free of GUI AND network dependencies: GUI couples the data
+# layer to the shell, and network I/O belongs to the host (src/app) so the data
+# layer's remote-map providers probe through an injected NetworkProbe rather
+# than touching Qt Network directly. Guard both here so a regression fails the
+# build rather than silently widening the layer's dependency surface.
+foreach(SICNU_DATA_FORBIDDEN_LINK Qt6::Widgets qgis_gui Qt6::Network)
   if(SICNU_DATA_FORBIDDEN_LINK IN_LIST SICNU_DATA_DIRECT_LINKS)
     message(FATAL_ERROR
-      "sicnu_data must not depend on GUI target ${SICNU_DATA_FORBIDDEN_LINK}"
+      "sicnu_data must not depend on forbidden target ${SICNU_DATA_FORBIDDEN_LINK}"
     )
   endif()
 endforeach()
