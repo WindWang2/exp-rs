@@ -17,9 +17,58 @@
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
 
+#include "auth_resolver.h"
 #include "data/data_manager.h"
+#include "remote_map_uri.h"
 
 namespace sicnu::display {
+
+// Pure, testable per-service URI builder (declared in remote_map_uri.h). No
+// QGIS, no auth — auth is applied by materializeLayer after this returns.
+QString buildRemoteMapUri( const QString &providerKey,
+                           const QString &canonicalSource,
+                           const QMap<QString, QString> &dataOptions )
+{
+  // WMS/WMTS encode their parameters as a key=value query string on the URI.
+  if ( providerKey == QStringLiteral( "wms" ) ||
+       providerKey == QStringLiteral( "wmts" ) )
+  {
+    QStringList params;
+    // A WMS GetMap may request several layers; WMTS advertises one "layer".
+    const QString layers = dataOptions.value( QStringLiteral( "layers" ) );
+    const QString layer = dataOptions.value( QStringLiteral( "layer" ) );
+    if ( !layers.isEmpty() )
+      params << QStringLiteral( "layers=" ) + layers;
+    else if ( !layer.isEmpty() )
+      params << QStringLiteral( "layers=" ) + layer;
+    if ( dataOptions.contains( QStringLiteral( "crs" ) ) )
+      params << QStringLiteral( "crs=" ) + dataOptions.value( QStringLiteral( "crs" ) );
+    if ( dataOptions.contains( QStringLiteral( "format" ) ) )
+      params << QStringLiteral( "format=" ) + dataOptions.value( QStringLiteral( "format" ) );
+    if ( dataOptions.contains( QStringLiteral( "tileMatrixSet" ) ) )
+      params << QStringLiteral( "tileMatrixSet=" ) +
+                  dataOptions.value( QStringLiteral( "tileMatrixSet" ) );
+    params << QStringLiteral( "url=" ) + canonicalSource;
+    return params.join( QStringLiteral( "&" ) );
+  }
+
+  // XYZ/TMS: the canonical source IS the tile template. Append the declared
+  // z-range so the service's bounds are honored at display time.
+  QString uri = canonicalSource;
+  const QString zMin = dataOptions.value( QStringLiteral( "zMin" ) );
+  const QString zMax = dataOptions.value( QStringLiteral( "zMax" ) );
+  if ( !zMin.isEmpty() || !zMax.isEmpty() )
+  {
+    const QChar separator = uri.contains( QChar( '?' ) ) ? QChar( '&' ) : QChar( '?' );
+    QStringList range;
+    if ( !zMin.isEmpty() )
+      range << QStringLiteral( "zmin=" ) + zMin;
+    if ( !zMax.isEmpty() )
+      range << QStringLiteral( "zmax=" ) + zMax;
+    uri += separator + range.join( QStringLiteral( "&" ) );
+  }
+  return uri;
+}
 
 namespace {
 
@@ -43,7 +92,9 @@ QString materializationSource(const data::AssetSnapshot &asset) {
 }
 
 std::unique_ptr<QgsMapLayer> materializeLayer(const data::AssetSnapshot &asset,
-                                              const AddLayerOptions &options) {
+                                              const AddLayerOptions &options,
+                                              const AuthResolver &authResolver,
+                                              QVector<Diagnostic> &diagnostics) {
   const QString name =
       options.displayName.isEmpty() ? asset.displayName() : options.displayName;
   const QString source = materializationSource(asset);
@@ -58,8 +109,26 @@ std::unique_ptr<QgsMapLayer> materializeLayer(const data::AssetSnapshot &asset,
   case data::AssetKind::Vector:
     return std::make_unique<QgsVectorLayer>(source, name,
                                             QStringLiteral("ogr"));
-  case data::AssetKind::RemoteMap:
-    return {};
+  case data::AssetKind::RemoteMap: {
+    // A remote map materializes through QgsRasterLayer under its service's
+    // provider key (wms/wmts/xyz/tms). Build the per-service URI, then apply
+    // the auth config BEFORE constructing the layer so it is authenticated from
+    // the start. An auth failure refuses materialization — never fall back to
+    // an unauthenticated URI.
+    const data::SourceDescriptor &remoteSource = asset.source();
+    const QString providerKey = remoteSource.providerKey;
+    const QString serviceUri =
+      buildRemoteMapUri( providerKey, remoteSource.canonicalSource,
+                         remoteSource.dataOptions );
+    const data::Result<QString> configured =
+      authResolver.applyAuthConfig( remoteSource.authConfigId, providerKey, serviceUri );
+    if ( !configured )
+    {
+      diagnostics += configured.diagnostics();
+      return nullptr;
+    }
+    return std::make_unique<QgsRasterLayer>( configured.value(), name, providerKey );
+  }
   }
   return {};
 }
@@ -141,6 +210,10 @@ struct QgisDisplayManager::Impl {
   };
 
   QPointer<data::DataManager> dataManager;
+  /// The auth resolver. Owned (a QgisAuthResolver default) when no resolver is
+  /// injected; non-owning when the caller injects one (tests).
+  std::unique_ptr<AuthResolver> ownedAuthResolver;
+  AuthResolver *authResolver = nullptr;
   std::map<QString, std::unique_ptr<ViewRecord>> views;
   std::map<QString, std::unique_ptr<LayerRecord>> layers;
 
@@ -167,8 +240,21 @@ struct QgisDisplayManager::Impl {
 
 QgisDisplayManager::QgisDisplayManager(data::DataManager *dataManager,
                                        QObject *parent)
+    : QgisDisplayManager(dataManager, nullptr, parent) {}
+
+QgisDisplayManager::QgisDisplayManager(data::DataManager *dataManager,
+                                       AuthResolver *authResolver,
+                                       QObject *parent)
     : QObject(parent), m_impl(std::make_unique<Impl>()) {
   m_impl->dataManager = dataManager;
+  // Default to the production QgisAuthManager-backed resolver when none is
+  // injected (keeps the existing two-arg constructor backward-compatible).
+  if (authResolver != nullptr) {
+    m_impl->authResolver = authResolver;
+  } else {
+    m_impl->ownedAuthResolver = std::make_unique<QgisAuthResolver>();
+    m_impl->authResolver = m_impl->ownedAuthResolver.get();
+  }
   if (dataManager) {
     connect(dataManager, &data::DataManager::assetAboutToUnload, this,
             [this](data::AssetId assetId) {
@@ -284,12 +370,17 @@ QgisDisplayManager::addLayer(DisplayViewId viewId, data::AssetId assetId,
         QStringLiteral("The Data Asset does not declare display capability")));
   }
 
-  std::unique_ptr<QgsMapLayer> qgisLayer = materializeLayer(*asset, options);
+  // Materialization (esp. a remote map's auth injection) may surface warnings
+  // to fold into the materialization-failure diagnostic.
+  QVector<Diagnostic> diagnostics;
+  std::unique_ptr<QgsMapLayer> qgisLayer =
+      materializeLayer(*asset, options, *m_impl->authResolver, diagnostics);
   if (!qgisLayer || !qgisLayer->isValid()) {
-    return data::Result<DisplayLayerId>::failure(displayDiagnostic(
-        QStringLiteral("display.materialization_failed"),
-        QStringLiteral(
-            "QGIS could not create a valid layer for the Data Asset")));
+    if ( diagnostics.isEmpty() )
+      diagnostics.append( displayDiagnostic(
+          QStringLiteral("display.materialization_failed"),
+          QStringLiteral("QGIS could not create a valid layer for the Data Asset")) );
+    return data::Result<DisplayLayerId>::failure( diagnostics );
   }
 
   data::Result<data::AssetLease> acquired = m_impl->dataManager->acquire(
@@ -587,13 +678,16 @@ data::Result<void> QgisDisplayManager::relocateLayer(DisplayLayerId layerId) {
       treeIndex = parentGroup->children().indexOf(oldNode);
   }
 
+  QVector<Diagnostic> diagnostics;
   std::unique_ptr<QgsMapLayer> replacementLayer =
-      materializeLayer(*asset, AddLayerOptions{});
+      materializeLayer(*asset, AddLayerOptions{}, *m_impl->authResolver, diagnostics);
   if (!replacementLayer || !replacementLayer->isValid()) {
-    return data::Result<void>::failure(displayDiagnostic(
-        QStringLiteral("display.materialization_failed"),
-        QStringLiteral(
-            "QGIS could not create a replacement layer for the relocated asset")));
+    if ( diagnostics.isEmpty() )
+      diagnostics.append( displayDiagnostic(
+          QStringLiteral("display.materialization_failed"),
+          QStringLiteral("QGIS could not create a replacement layer for the "
+                         "relocated asset")) );
+    return data::Result<void>::failure( diagnostics );
   }
 
   // Restore the captured presentation state onto the new layer.

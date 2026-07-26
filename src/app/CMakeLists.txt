@@ -2,6 +2,9 @@ qt_add_library(sicnu_qgis_display STATIC
     data_project_serializer.cpp
     data_project_serializer.h
     display/qgis_display_manager.cpp
+    display/auth_resolver.cpp
+    display/auth_resolver.h
+    display/remote_map_uri.h
     display/qgis_display_manager.h
     project_context.cpp
     project_context.h

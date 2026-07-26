@@ -22,6 +22,8 @@ class DataManager;
 
 namespace sicnu::display {
 
+class AuthResolver;
+
 class DisplayViewId {
 public:
   DisplayViewId() = default;
@@ -117,6 +119,12 @@ private:
 class QgisDisplayManager : public QObject {
 public:
   explicit QgisDisplayManager(data::DataManager *dataManager,
+                              QObject *parent = nullptr);
+  /// Constructs with an injected `AuthResolver` (ownership not taken; must
+  /// outlive the manager). Used by tests to stub the auth seam; the default
+  /// constructor uses a `QgisAuthResolver`.
+  explicit QgisDisplayManager(data::DataManager *dataManager,
+                              AuthResolver *authResolver,
                               QObject *parent = nullptr);
   ~QgisDisplayManager() override;
 

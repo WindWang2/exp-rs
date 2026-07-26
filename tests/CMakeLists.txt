@@ -2800,3 +2800,37 @@ target_include_directories(test_remote_map_services PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_remote_map_services)
+
+# Remote-map display materialization + AuthResolver seam (#64)
+qt_add_executable(test_remote_map_display
+  test_remote_map_display.cpp
+)
+target_link_libraries(test_remote_map_display PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  sicnu_data
+)
+target_include_directories(test_remote_map_display PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_remote_map_display)
+
+# Per-service remote-map URI builder (pure function) (#64)
+qt_add_executable(test_remote_map_uri
+  test_remote_map_uri.cpp
+)
+target_link_libraries(test_remote_map_uri PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::qgis_display
+)
+target_include_directories(test_remote_map_uri PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_remote_map_uri)
