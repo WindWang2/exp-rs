@@ -114,8 +114,11 @@ TEST_CASE("Remote and unsupported layers are not adopted",
   QgsMapCanvas canvas;
   auto context = createContext(canvas, *project);
 
-  // A remote COG streamed over vsicurl is a remote map source (Wave 5), not a
-  // local raster asset; it must not be adopted as ReadablePixels-capable data.
+  // A remote COG streamed over vsicurl is a raw-URI remote source that bypassed
+  // the catalog (not registered as a Remote Map Asset); it must not be adopted
+  // as a local raster asset. The isRemoteSource adoption guard (#65) keeps this
+  // rejection — a catalog-registered Remote Map Asset is unaffected because
+  // registration never routes through adoption.
   auto *remoteLayer = new QgsRasterLayer(
       QStringLiteral("/vsicurl/https://example.invalid/data/cog.tif"),
       QStringLiteral("remote"), QStringLiteral("gdal"));

@@ -13,8 +13,12 @@ namespace sicnu::app {
 namespace {
 
 /// True when a GDAL/OGR source string refers to a remote or virtual-streamed
-/// dataset rather than a local file. Remote sources are not adopted as local
-/// raster/vector assets; remote map providers are deferred (Wave 5).
+/// dataset rather than a local file. This guards the LEGACY QGIS-layer adoption
+/// path only (localSourceForLayer): a raw-URI remote raster/vector layer that
+/// bypasses the catalog is not adopted as a local asset. It does NOT gate
+/// registration — a Remote Map Asset (whose canonicalSource is a URL, registered
+/// through the catalog's remote-map providers) is unaffected, because
+/// registration never routes through this function.
 bool isRemoteSource(const QString &source) {
   return source.startsWith(QStringLiteral("/vsicurl/")) ||
          source.startsWith(QStringLiteral("/vsis3/")) ||

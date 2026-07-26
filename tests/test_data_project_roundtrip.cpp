@@ -844,3 +844,101 @@ TEST_CASE("A virtual raster whose input was not saved is restored, not dropped",
   }
   CHECK(sawMissingDependencyWarning);
 }
+
+TEST_CASE("A remote-map asset round-trips with its descriptor and identity",
+          "[project][data_roundtrip][remote_map]") {
+  // The wave's serialization claim: no new XML element is needed — the existing
+  // <source provider canonical subdataset authConfigId> + <option> children
+  // already round-trip a remote-map SourceDescriptor. The asset is restored
+  // with the same AssetId and the same descriptor (provider/canonical/layer/
+  // crs/format/authConfigId). The structure is re-derived on restore, not
+  // stored as a snapshot.
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  const sicnu::display::DisplayViewSpec viewSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore()};
+  auto createdContext = sicnu::app::ProjectContext::create(viewSpec);
+  REQUIRE(createdContext);
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+
+  // A remote-map descriptor with the full option set + an authConfigId.
+  sicnu::data::SourceDescriptor remoteSource;
+  remoteSource.providerKey = QStringLiteral("wms");
+  remoteSource.canonicalSource = QStringLiteral("https://wms.example.com/service");
+  remoteSource.authConfigId = QStringLiteral("cfg-abc");
+  remoteSource.dataOptions.insert(QStringLiteral("layers"),
+                                  QStringLiteral("imagery,labels"));
+  remoteSource.dataOptions.insert(QStringLiteral("crs"), QStringLiteral("EPSG:4326"));
+  remoteSource.dataOptions.insert(QStringLiteral("format"), QStringLiteral("image/png"));
+  const sicnu::data::RegisterResult registered =
+      context->dataManager().registerSource({remoteSource});
+  REQUIRE_FALSE(registered.assetId.isNull());
+  // The default DataManager (NoNetworkProbe) resolves a remote map Offline; the
+  // asset still registers — registration of a URL source is NOT blocked. The
+  // Offline state is the re-probe outcome (not a stored snapshot), so it must
+  // match before save and after restore.
+  const auto snapshot = context->dataManager().asset(registered.assetId);
+  REQUIRE(snapshot);
+  CHECK(snapshot->kind() == sicnu::data::AssetKind::RemoteMap);
+  CHECK(snapshot->state() == sicnu::data::AssetState::Offline);
+
+  sicnu::app::DataProjectSerializer serializer;
+  bool writeSucceeded = false;
+  bool readSucceeded = false;
+  QObject signalReceiver;
+  QObject::connect(project, &QgsProject::writeProject, &signalReceiver,
+                   [&](QDomDocument &document) {
+                     writeSucceeded =
+                         static_cast<bool>(serializer.write(document, *context));
+                   });
+  QObject::connect(project, &QgsProject::readProject, &signalReceiver,
+                   [&](const QDomDocument &document) {
+                     readSucceeded = static_cast<bool>(
+                         serializer.read(document, *project, *context));
+                   });
+
+  QTemporaryDir temporaryDirectory;
+  const QString projectPath =
+      temporaryDirectory.filePath(QStringLiteral("remote_map_roundtrip.qgs"));
+  REQUIRE(project->write(projectPath));
+  REQUIRE(writeSucceeded);
+
+  // No remote-map-specific XML element was introduced: the existing <source>
+  // element round-trips the descriptor. The persisted project must NOT carry a
+  // new <remoteMaps>/<remoteMap> tag (the descriptor rides in <assets>).
+  QFile written(projectPath);
+  REQUIRE(written.open(QIODevice::ReadOnly | QIODevice::Text));
+  const QString xml = QString::fromUtf8(written.readAll());
+  written.close();
+  CHECK_FALSE(xml.contains(QStringLiteral("<remoteMaps")));
+  CHECK_FALSE(xml.contains(QStringLiteral("<remoteMap")));
+  // The descriptor fields ARE persisted through the existing <source> element.
+  CHECK(xml.contains(QStringLiteral("https://wms.example.com/service")));
+  CHECK(xml.contains(QStringLiteral("cfg-abc")));
+
+  REQUIRE(context->clearProject(*project));
+  REQUIRE(project->read(projectPath));
+  REQUIRE(readSucceeded);
+
+  // Identity + descriptor preserved. The Offline state matches the pre-save
+  // probe outcome — the structure was re-derived by re-probe, not restored from
+  // a stored snapshot.
+  const auto restored = context->dataManager().asset(registered.assetId);
+  REQUIRE(restored);
+  CHECK(restored->id() == registered.assetId);
+  CHECK(restored->kind() == sicnu::data::AssetKind::RemoteMap);
+  CHECK(restored->state() == sicnu::data::AssetState::Offline);
+  CHECK(restored->source().providerKey == QStringLiteral("wms"));
+  CHECK(restored->source().canonicalSource ==
+        QStringLiteral("https://wms.example.com/service"));
+  CHECK(restored->source().authConfigId == QStringLiteral("cfg-abc"));
+  CHECK(restored->source().dataOptions.value(QStringLiteral("layers")) ==
+        QStringLiteral("imagery,labels"));
+  CHECK(restored->source().dataOptions.value(QStringLiteral("crs")) ==
+        QStringLiteral("EPSG:4326"));
+  CHECK(restored->source().dataOptions.value(QStringLiteral("format")) ==
+        QStringLiteral("image/png"));
+}
+
