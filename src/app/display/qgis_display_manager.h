@@ -117,6 +117,7 @@ private:
  * Asset view lease; its QgsMapLayer is owned by the registered view's store.
  */
 class QgisDisplayManager : public QObject {
+  Q_OBJECT
 public:
   explicit QgisDisplayManager(data::DataManager *dataManager,
                               QObject *parent = nullptr);
@@ -143,11 +144,33 @@ public:
   data::Result<void> relocateLayer(DisplayLayerId layerId);
   data::Result<void> removeLayer(DisplayLayerId layerId);
 
+  /// The live Display View ids in stable creation order (NOT UUID-string
+  /// order). Re-query for freshness.
+  QVector<DisplayViewId> listViews() const;
+
+  /// Removes a view: drops every Display Layer in it (releasing each lease via
+  /// the removeLayer path), then erases the view record. Emits
+  /// viewAboutToBeRemoved before the layers are dropped (canvas/tree/store
+  /// still valid so observers can detach widgets) and viewRemoved after the
+  /// record is gone. A view whose asset is also shown in another view does not
+  /// unload that asset (the other lease holds).
+  data::Result<void> removeView(DisplayViewId viewId);
+
   std::optional<DisplayViewSnapshot> view(DisplayViewId viewId) const;
   std::optional<DisplayLayerSnapshot> layer(DisplayLayerId layerId) const;
 
   /// Non-owning access to the authoritative runtime presentation object.
   QgsMapLayer *mapLayer(DisplayLayerId layerId) const;
+
+Q_SIGNALS:
+  /// Fired by createView once the view record is stored.
+  void viewAdded(DisplayViewId id);
+  /// Fired by removeView before the view's layers are dropped — the view's
+  /// canvas/tree/store are still valid, so observers can detach widgets.
+  void viewAboutToBeRemoved(DisplayViewId id);
+  /// Fired by removeView after the view record is erased, for post-teardown
+  /// bookkeeping (e.g. a host re-querying listViews).
+  void viewRemoved(DisplayViewId id);
 
 private:
   struct Impl;

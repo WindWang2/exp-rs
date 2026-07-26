@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 
 #include <qgsapplication.h>
@@ -514,3 +515,103 @@ TEST_CASE("A Display Layer created while the asset is being edited is read-only"
   REQUIRE(afterCommitLayer != nullptr);
   CHECK_FALSE(afterCommitLayer->readOnly());
 }
+
+TEST_CASE("createView emits viewAdded and listViews reports creation order",
+          "[qgis_display_manager][multi_view]") {
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgisDisplayManager displayManager(&dataManager);
+
+  QSignalSpy addedSpy(&displayManager, &QgisDisplayManager::viewAdded);
+  QgsMapCanvas canvasA, canvasB;
+  QgsLayerTree treeA, treeB;
+  QgsMapLayerStore storeA, storeB;
+  const DisplayViewId first = createView(displayManager, canvasA, treeA, storeA);
+  const DisplayViewId second = createView(displayManager, canvasB, treeB, storeB);
+
+  // viewAdded fired once per create, carrying the new id.
+  REQUIRE(addedSpy.count() == 2);
+  CHECK(addedSpy.at(0).first().value<DisplayViewId>() == first);
+  CHECK(addedSpy.at(1).first().value<DisplayViewId>() == second);
+
+  // listViews reports the live ids in creation order (NOT UUID-string order).
+  const QVector<DisplayViewId> live = displayManager.listViews();
+  REQUIRE(live.size() == 2);
+  CHECK(live.at(0) == first);
+  CHECK(live.at(1) == second);
+}
+
+TEST_CASE("removeView drops its layers and leases, then the record",
+          "[qgis_display_manager][multi_view]") {
+  ensureQgisApplication();
+  DataManager dataManager;
+  // Declare the QGIS view objects before the display manager so the manager is
+  // destroyed before them (the manager's destructor touches live canvases).
+  QgsMapCanvas canvas;
+  QgsLayerTree tree;
+  QgsMapLayerStore store;
+  QgisDisplayManager displayManager(&dataManager);
+  const DisplayViewId view = createView(displayManager, canvas, tree, store);
+  const sicnu::data::AssetId assetId = registerRaster(dataManager);
+  const auto added = displayManager.addLayer(view, assetId);
+  REQUIRE(added);
+  REQUIRE(dataManager.leaseCount(assetId) == 1);
+
+  QSignalSpy aboutSpy(&displayManager, &QgisDisplayManager::viewAboutToBeRemoved);
+  QSignalSpy removedSpy(&displayManager, &QgisDisplayManager::viewRemoved);
+  REQUIRE(displayManager.removeView(view));
+
+  // viewAboutToBeRemoved fires before the record is gone (canvas still valid);
+  // viewRemoved fires after. Both carry the id.
+  REQUIRE(aboutSpy.count() == 1);
+  CHECK(aboutSpy.at(0).first().value<DisplayViewId>() == view);
+  REQUIRE(removedSpy.count() == 1);
+  CHECK(removedSpy.at(0).first().value<DisplayViewId>() == view);
+
+  // The view's layer (and its lease) was released; the view is gone.
+  CHECK_FALSE(displayManager.view(view).has_value());
+  CHECK(dataManager.leaseCount(assetId) == 0);
+  CHECK(displayManager.listViews().isEmpty());
+}
+
+TEST_CASE("removeView refuses an unknown view",
+          "[qgis_display_manager][multi_view]") {
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgisDisplayManager displayManager(&dataManager);
+
+  const auto result = displayManager.removeView(DisplayViewId::generate());
+  REQUIRE_FALSE(result);
+  CHECK(result.diagnostics().first().code ==
+        QStringLiteral("display.invalid_view"));
+}
+
+TEST_CASE("Removing a view whose asset is also shown in another view keeps the asset loaded",
+          "[qgis_display_manager][multi_view]") {
+  // The asset has layers in two views (two leases). Removing one view drops its
+  // layer+lease but the other view's lease holds, so the asset stays loaded.
+  ensureQgisApplication();
+  DataManager dataManager;
+  // Declare the QGIS view objects before the display manager so the manager
+  // is destroyed before them (the manager's destructor touches live canvases).
+  QgsMapCanvas canvasA, canvasB;
+  QgsLayerTree treeA, treeB;
+  QgsMapLayerStore storeA, storeB;
+  QgisDisplayManager displayManager(&dataManager);
+  const DisplayViewId viewA = createView(displayManager, canvasA, treeA, storeA);
+  const DisplayViewId viewB = createView(displayManager, canvasB, treeB, storeB);
+  const sicnu::data::AssetId assetId = registerRaster(dataManager);
+
+  REQUIRE(displayManager.addLayer(viewA, assetId));
+  REQUIRE(displayManager.addLayer(viewB, assetId));
+  REQUIRE(dataManager.leaseCount(assetId) == 2);
+
+  REQUIRE(displayManager.removeView(viewA));
+  // viewA's lease released; viewB's lease still holds.
+  CHECK(dataManager.leaseCount(assetId) == 1);
+  CHECK(dataManager.asset(assetId).has_value());
+  // viewB's layer is unaffected.
+  CHECK(displayManager.view(viewB).has_value());
+  CHECK(displayManager.view(viewB)->layerIds().size() == 1);
+}
+

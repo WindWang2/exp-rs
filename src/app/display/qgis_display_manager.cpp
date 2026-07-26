@@ -215,6 +215,10 @@ struct QgisDisplayManager::Impl {
   std::unique_ptr<AuthResolver> ownedAuthResolver;
   AuthResolver *authResolver = nullptr;
   std::map<QString, std::unique_ptr<ViewRecord>> views;
+  /// Live view ids in creation order (the map is keyed by id string and so
+  /// iterates in UUID-string order, not creation order). Pushed on create,
+  /// erased on remove.
+  QVector<DisplayViewId> viewOrder;
   std::map<QString, std::unique_ptr<LayerRecord>> layers;
 
   ViewRecord *findView(DisplayViewId id) {
@@ -320,6 +324,8 @@ QgisDisplayManager::createView(const DisplayViewSpec &spec) {
       new QgsLayerTreeMapCanvasBridge(spec.layerTree, spec.canvas, this);
   record->bridge->setAutoSetupOnFirstLayer(false);
   m_impl->views.emplace(id.toString(), std::move(record));
+  m_impl->viewOrder.append(id);
+  emit viewAdded(id);
   return data::Result<DisplayViewId>::success(id);
 }
 
@@ -787,6 +793,42 @@ data::Result<void> QgisDisplayManager::removeLayer(DisplayLayerId layerId) {
   }
 
   m_impl->layers.erase(layerIt);
+  return data::Result<void>::success();
+}
+
+QVector<DisplayViewId> QgisDisplayManager::listViews() const {
+  return m_impl->viewOrder;
+}
+
+data::Result<void> QgisDisplayManager::removeView(DisplayViewId viewId) {
+  if (QThread::currentThread() != thread()) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.wrong_thread"),
+        QStringLiteral(
+            "Display mutations must run on the manager's owning thread")));
+  }
+
+  const auto viewIt = m_impl->views.find(viewId.toString());
+  if (viewIt == m_impl->views.end()) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.invalid_view"),
+        QStringLiteral("No registered display view matches the requested id")));
+  }
+
+  // Announce impending removal while the canvas/tree/store are still valid, so
+  // observers can detach widgets.
+  emit viewAboutToBeRemoved(viewId);
+
+  // Drop every Display Layer in this view via the established removeLayer path
+  // (removes from the view's tree/store; erasing the LayerRecord releases each
+  // lease via ~AssetLease). Copy first — removeLayer mutates viewRecord->layerIds.
+  const QVector<DisplayLayerId> layersInView = viewIt->second->layerIds;
+  for (const DisplayLayerId layerId : layersInView)
+    (void)removeLayer(layerId);
+
+  m_impl->views.erase(viewIt);
+  m_impl->viewOrder.removeAll(viewId);
+  emit viewRemoved(viewId);
   return data::Result<void>::success();
 }
 
