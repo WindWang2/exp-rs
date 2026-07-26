@@ -54,14 +54,18 @@ QString fixturePath(const QString &relative) {
       .absoluteFilePath();
 }
 
-sicnu::data::AssetId registerRaster(DataManager &manager) {
+sicnu::data::AssetId registerRasterAt(DataManager &manager,
+                                       const QString &relative) {
   SourceDescriptor source;
   source.providerKey = QStringLiteral("gdal");
-  source.canonicalSource =
-      fixturePath(QStringLiteral("samples/dem_sample.tif"));
+  source.canonicalSource = fixturePath(relative);
   const auto registered = manager.registerSource(RegisterRequest{source});
   REQUIRE_FALSE(registered.assetId.isNull());
   return registered.assetId;
+}
+
+sicnu::data::AssetId registerRaster(DataManager &manager) {
+  return registerRasterAt(manager, QStringLiteral("samples/dem_sample.tif"));
 }
 
 sicnu::data::AssetId registerVector(DataManager &manager) {
@@ -613,5 +617,157 @@ TEST_CASE("Removing a view whose asset is also shown in another view keeps the a
   // viewB's layer is unaffected.
   CHECK(displayManager.view(viewB).has_value());
   CHECK(displayManager.view(viewB)->layerIds().size() == 1);
+}
+
+TEST_CASE("Adding one asset to two views via two independent addLayer calls "
+          "produces independent layers with isolated renderers",
+          "[qgis_display_manager][multi_view]") {
+  // The core multi-view invariant: the SAME asset shown in two views through
+  // two independent addLayer calls yields two distinct QgsMapLayers in two
+  // stores, two leases, and per-view renderer isolation — exactly like
+  // cloneLayer (the prior-art case at line 226). A regression here would
+  // silently break the "same dataset, independent composition/renderer" use
+  // case when layers are created via addLayer rather than clone.
+  ensureQgisApplication();
+  DataManager dataManager;
+  // Declare the QGIS view objects before the display manager so the manager
+  // is destroyed before them (the manager's destructor touches live canvases).
+  QgsMapCanvas canvasA, canvasB;
+  QgsLayerTree treeA, treeB;
+  QgsMapLayerStore storeA, storeB;
+  QgisDisplayManager displayManager(&dataManager);
+  const DisplayViewId viewA = createView(displayManager, canvasA, treeA, storeA);
+  const DisplayViewId viewB = createView(displayManager, canvasB, treeB, storeB);
+  const sicnu::data::AssetId assetId = registerRaster(dataManager);
+
+  // Two independent addLayer calls (NOT a clone) — each materializes its own
+  // QgsMapLayer from the asset.
+  const auto addedA = displayManager.addLayer(viewA, assetId);
+  const auto addedB = displayManager.addLayer(viewB, assetId);
+  REQUIRE(addedA);
+  REQUIRE(addedB);
+
+  // Two distinct DisplayLayerIds.
+  CHECK(addedA.value() != addedB.value());
+  // Each layer belongs to its own view.
+  const auto snapA = displayManager.layer(addedA.value());
+  const auto snapB = displayManager.layer(addedB.value());
+  REQUIRE(snapA);
+  REQUIRE(snapB);
+  CHECK(snapA->viewId() == viewA);
+  CHECK(snapB->viewId() == viewB);
+  // Same underlying asset, different presentation instances.
+  CHECK(snapA->assetId() == assetId);
+  CHECK(snapB->assetId() == assetId);
+
+  // Two distinct QgsMapLayers, in two distinct stores.
+  auto *layerA =
+      qobject_cast<QgsRasterLayer *>(displayManager.mapLayer(addedA.value()));
+  auto *layerB =
+      qobject_cast<QgsRasterLayer *>(displayManager.mapLayer(addedB.value()));
+  REQUIRE(layerA != nullptr);
+  REQUIRE(layerB != nullptr);
+  CHECK(layerA != layerB);
+  CHECK(storeA.count() == 1);
+  CHECK(storeB.count() == 1);
+  CHECK(storeA.mapLayer(layerA->id()) == layerA);
+  CHECK(storeB.mapLayer(layerB->id()) == layerB);
+
+  // Two leases on the asset (one per presentation instance).
+  CHECK(dataManager.leaseCount(assetId) == 2);
+
+  // Per-view renderer isolation: set opacity on A, B is unaffected. This is
+  // the "true-color in one view, false-color in another" guarantee (opacity is
+  // one axis of renderer state; band-composition independence is the broader
+  // invariant but is out of scope for this test — the spec's Testing Decisions
+  // bullet pins opacity, matching the prior-art cloneLayer case).
+  REQUIRE(layerA->renderer() != nullptr);
+  REQUIRE(layerB->renderer() != nullptr);
+  CHECK(layerA->renderer() != layerB->renderer());
+  // A freshly materialized renderer defaults to opacity 1.0.
+  REQUIRE(layerA->renderer()->opacity() == 1.0);
+  REQUIRE(layerB->renderer()->opacity() == 1.0);
+  layerA->renderer()->setOpacity(0.3);
+  // A's edit persists on A; B stays at its prior value (truly "unaffected",
+  // not merely "not equal to 0.3").
+  CHECK(layerA->renderer()->opacity() == 0.3);
+  CHECK(layerB->renderer()->opacity() == 1.0);
+  layerB->renderer()->setOpacity(0.8);
+  CHECK(layerA->renderer()->opacity() == 0.3);
+  CHECK(layerB->renderer()->opacity() == 0.8);
+}
+
+TEST_CASE("addLayer-twice and cloneLayer both yield leaseCount 2 and "
+          "independent renderers for the same asset",
+          "[qgis_display_manager][multi_view]") {
+  // Locks that the core multi-view promise holds regardless of how the second
+  // presentation was created (independent addLayer vs cloneLayer): both paths
+  // land at leaseCount == 2 with independent renderers. If a future change
+  // diverged the two paths (e.g. clone started sharing a layer), this test
+  // would catch the asymmetry. Two DISTINCT fixture files are registered so the
+  // two paths operate on two distinct Data Assets (registerSource dedups by
+  // SourceKey, so the same fixture would collapse to one asset).
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgsMapCanvas canvasA, canvasB;
+  QgsLayerTree treeA, treeB;
+  QgsMapLayerStore storeA, storeB;
+  QgisDisplayManager displayManager(&dataManager);
+  const DisplayViewId viewA = createView(displayManager, canvasA, treeA, storeA);
+  const DisplayViewId viewB = createView(displayManager, canvasB, treeB, storeB);
+
+  // Path 1: two independent addLayer calls on assetAddTwice.
+  const sicnu::data::AssetId assetAddTwice =
+      registerRasterAt(dataManager, QStringLiteral("samples/dem_sample.tif"));
+  const auto addA = displayManager.addLayer(viewA, assetAddTwice);
+  const auto addB = displayManager.addLayer(viewB, assetAddTwice);
+  REQUIRE(addA);
+  REQUIRE(addB);
+  CHECK(dataManager.leaseCount(assetAddTwice) == 2);
+
+  // Path 2: one addLayer + one cloneLayer on a DIFFERENT asset (distinct
+  // fixture so it is not deduped into assetAddTwice).
+  const sicnu::data::AssetId assetClone =
+      registerRasterAt(dataManager, QStringLiteral("samples/landsat_sample.tif"));
+  REQUIRE(assetClone != assetAddTwice);
+  const auto cloneSource = displayManager.addLayer(viewA, assetClone);
+  REQUIRE(cloneSource);
+  const auto cloned = displayManager.cloneLayer(cloneSource.value(), viewB);
+  REQUIRE(cloned);
+  CHECK(dataManager.leaseCount(assetClone) == 2);
+
+  // Both paths land at leaseCount == 2. Renderer isolation holds on each: set
+  // opacity on the viewA layer, the viewB layer is unaffected. Uses the exact
+  // layer ids captured above (NOT positional .at(0), since viewA now holds both
+  // assetAddTwice and assetClone layers).
+  auto *rasterAddA =
+      qobject_cast<QgsRasterLayer *>(displayManager.mapLayer(addA.value()));
+  auto *rasterAddB =
+      qobject_cast<QgsRasterLayer *>(displayManager.mapLayer(addB.value()));
+  auto *rasterCloneA =
+      qobject_cast<QgsRasterLayer *>(displayManager.mapLayer(cloneSource.value()));
+  auto *rasterCloneB =
+      qobject_cast<QgsRasterLayer *>(displayManager.mapLayer(cloned.value()));
+  REQUIRE(rasterAddA != nullptr);
+  REQUIRE(rasterAddB != nullptr);
+  REQUIRE(rasterCloneA != nullptr);
+  REQUIRE(rasterCloneB != nullptr);
+  REQUIRE(rasterAddA->renderer() != nullptr);
+  REQUIRE(rasterAddB->renderer() != nullptr);
+  REQUIRE(rasterCloneA->renderer() != nullptr);
+  REQUIRE(rasterCloneB->renderer() != nullptr);
+
+  // addLayer-twice path isolation: distinct renderer objects, A's edit persists
+  // on A, B stays at its prior value (symmetric, positive assertions — matching
+  // the rigor of the standalone addLayer-twice case above).
+  CHECK(rasterAddA->renderer() != rasterAddB->renderer());
+  rasterAddA->renderer()->setOpacity(0.5);
+  CHECK(rasterAddA->renderer()->opacity() == 0.5);
+  CHECK(rasterAddB->renderer()->opacity() == 1.0);
+  // cloneLayer path isolation.
+  CHECK(rasterCloneA->renderer() != rasterCloneB->renderer());
+  rasterCloneA->renderer()->setOpacity(0.6);
+  CHECK(rasterCloneA->renderer()->opacity() == 0.6);
+  CHECK(rasterCloneB->renderer()->opacity() == 1.0);
 }
 
