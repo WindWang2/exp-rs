@@ -12,6 +12,11 @@ namespace sicnu::app {
 
 namespace {
 
+/// Builds a project-scoped error diagnostic for a failed host operation.
+data::Diagnostic projectDiagnostic(const QString &code, const QString &message) {
+  return data::Diagnostic{code, message, data::DiagnosticSeverity::Error};
+}
+
 /// True when a GDAL/OGR source string refers to a remote or virtual-streamed
 /// dataset rather than a local file. This guards the LEGACY QGIS-layer adoption
 /// path only (localSourceForLayer): a raw-URI remote raster/vector layer that
@@ -105,6 +110,84 @@ display::DisplayViewId ProjectContext::mainViewId() const {
   return m_mainViewId;
 }
 
+QVector<display::DisplayViewId> ProjectContext::views() const {
+  // The engine is the source of truth for the live view record: a view only
+  // leaves listViews() once it has been explicitly removed via removeView()
+  // (canvas destruction nulls the record's QPointers but does not drop it — a
+  // latent engine gap, out of scope for this wave). Filtering against
+  // listViews() keeps views() consistent with the engine when a view was
+  // removed through the host's removeView() path, and orders the result main
+  // first, then secondaries in creation order.
+  const QVector<display::DisplayViewId> live = m_displayManager.listViews();
+  QVector<display::DisplayViewId> result;
+  result.reserve( live.size() );
+  // Main first, if still live.
+  if ( live.contains( m_mainViewId ) )
+    result.append( m_mainViewId );
+  // Then secondaries in creation order, only those still live.
+  for ( const display::DisplayViewId &id : m_secondaryViews )
+  {
+    if ( id != m_mainViewId && live.contains( id ) )
+      result.append( id );
+  }
+  return result;
+}
+
+data::Result<display::DisplayViewId>
+ProjectContext::createSecondaryView( const display::DisplayViewSpec &spec ) {
+  const data::Result<display::DisplayViewId> created =
+      m_displayManager.createView( spec );
+  if ( !created )
+    return data::Result<display::DisplayViewId>::failure( created.diagnostics() );
+
+  const display::DisplayViewId id = created.value();
+  m_secondaryViews.append( id );
+  return data::Result<display::DisplayViewId>::success( id );
+}
+
+data::Result<void>
+ProjectContext::removeView( display::DisplayViewId viewId ) {
+  // The main view is the QGIS-interop view: its layer tree is the project's
+  // layerTreeRoot() and ordinary QGIS reads it. It cannot be torn down through
+  // the secondary-view path.
+  if ( viewId == m_mainViewId )
+    return data::Result<void>::failure( projectDiagnostic(
+        QStringLiteral( "project.main_view_not_removable" ),
+        QStringLiteral( "The main (QGIS-interop) Display View cannot be "
+                        "removed through the secondary-view path." ) ) );
+
+  const data::Result<void> removed = m_displayManager.removeView( viewId );
+  if ( !removed )
+    return removed;
+
+  // Drop our bookkeeping entry (removeAll matches at most one id).
+  m_secondaryViews.removeAll( viewId );
+  return data::Result<void>::success();
+}
+
+data::Result<void> ProjectContext::removeAllDisplayLayers() {
+  // Iterate every live view (main + secondaries) so a secondary view's layers
+  // and the leases they hold are torn down here — not leaked to the destructor.
+  // removeView-then-erase per view would also work, but dropping layers keeps
+  // the view records intact (the host may reuse them) and is the minimal fix
+  // for the clearProject leak.
+  const QVector<display::DisplayViewId> live = m_displayManager.listViews();
+  for ( const display::DisplayViewId &viewId : live )
+  {
+    const std::optional<display::DisplayViewSnapshot> snapshot =
+        m_displayManager.view( viewId );
+    if ( !snapshot )
+      continue;
+    for ( const display::DisplayLayerId layerId : snapshot->layerIds() )
+    {
+      const data::Result<void> removed = m_displayManager.removeLayer( layerId );
+      if ( !removed )
+        return data::Result<void>::failure( removed.diagnostics() );
+    }
+  }
+  return data::Result<void>::success();
+}
+
 void ProjectContext::installAdoptionSafetyNet(QgsProject &project) {
   // The Data Manager is a QObject owned by this context; using it as the
   // connection context keeps the slot alive exactly as long as the context.
@@ -147,6 +230,14 @@ data::TemporaryReapResult ProjectContext::closeSession() {
   // deletion). Leased ones are skipped and reported; ProjectPersistent and
   // TaskTemporary are untouched. This runs on explicit session close and on
   // destruction, so scratch outputs never leak past the session.
+  //
+  // This reaps only catalog-side temporaries; it does NOT touch display layers
+  // or iterate views. That is intentional: the two call sites are the
+  // destructor (where the display manager is destroyed in the same step, so its
+  // layers/leases are reaped by destruction anyway) and clearProject (which
+  // tears down all display layers via removeAllDisplayLayers BEFORE unloading
+  // assets). There is no standalone host path that closes a session without
+  // also clearing the project, so no secondary-view leak path remains.
   return m_dataManager.reapSessionTemporaries();
 }
 
@@ -156,16 +247,13 @@ data::Result<void> ProjectContext::clearProject(QgsProject &project) {
   // the project on open); TaskTemporary are left for their own task-scope reap.
   closeSession();
 
-  const std::optional<display::DisplayViewSnapshot> mainView =
-      m_displayManager.view(m_mainViewId);
-  if (mainView) {
-    const QVector<display::DisplayLayerId> displayLayers = mainView->layerIds();
-    for (const display::DisplayLayerId layerId : displayLayers) {
-      const data::Result<void> removed = m_displayManager.removeLayer(layerId);
-      if (!removed)
-        return data::Result<void>::failure(removed.diagnostics());
-    }
-  }
+  // Tear down display layers across ALL views (main + secondaries). Pre-fix,
+  // only the main view was cleared, so a secondary view's layers and the asset
+  // leases they held survived clearProject — blocking asset unload and leaking
+  // to the destructor. removeAllDisplayLayers closes that leak.
+  const data::Result<void> layersCleared = removeAllDisplayLayers();
+  if ( !layersCleared )
+    return layersCleared;
 
   const QVector<data::AssetSnapshot> assets = m_dataManager.assets();
   for ( const data::AssetSnapshot &asset : assets ) {

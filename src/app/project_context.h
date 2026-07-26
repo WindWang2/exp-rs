@@ -2,6 +2,8 @@
 
 #include <memory>
 
+#include <QVector>
+
 #include "data/data_manager.h"
 #include "display/qgis_display_manager.h"
 
@@ -14,7 +16,10 @@ namespace sicnu::app {
  * Owns the project-scoped Data and Display authorities.
  *
  * The QGIS project remains the standard presentation container, while this
- * module explicitly owns SICNU Data Asset identity and the main Display View.
+ * module explicitly owns SICNU Data Asset identity and a set of Display Views.
+ * The main view is the QGIS-interop view (its layer tree is the project's
+ * layerTreeRoot()); secondary views are engine-only, managed through the
+ * createSecondaryView/removeView pair below.
  *
  * It also adopts legacy layers that enter the QGIS project outside the Data
  * Manager seam (e.g. from independent windows), so they receive a Data Asset
@@ -38,9 +43,27 @@ public:
 
   display::DisplayViewId mainViewId() const;
 
+  /// The live Display View ids: the main view first, then secondaries in
+  /// creation order. Re-query for freshness (the engine is the source of
+  /// truth; this is a host-side snapshot).
+  QVector<display::DisplayViewId> views() const;
+
+  /// Creates a secondary (engine-only) Display View backed by the host-supplied
+  /// {canvas, layerTree, layerStore}. Does NOT auto-add any layers — the host
+  /// decides what to show. Returns the new view id (distinct from the main
+  /// view).
+  data::Result<display::DisplayViewId>
+  createSecondaryView(const display::DisplayViewSpec &spec);
+
+  /// Removes a secondary view: drops every Display Layer in it (releasing each
+  /// lease) and drops the view record. Refuses the main view (the QGIS-interop
+  /// view is owned by the project and cannot be destroyed out from under it);
+  /// a refusal is reported as a diagnostic, not a crash.
+  data::Result<void> removeView(display::DisplayViewId viewId);
+
   /**
-   * Explicitly starts a new project: removes Display Layers, unloads Data
-   * Assets, then clears the standard QGIS project state.
+   * Explicitly starts a new project: removes Display Layers across ALL views,
+   * unloads Data Assets, then clears the standard QGIS project state.
    */
   data::Result<void> clearProject(QgsProject &project);
 
@@ -57,6 +80,12 @@ public:
 private:
   ProjectContext();
 
+  /// Removes every Display Layer in every live view. Used by clearProject so a
+  /// secondary view's layers/leases never survive a project clear (the engine's
+  /// removeLayer releases each lease; a view whose asset is also shown elsewhere
+  /// keeps the asset loaded via that other lease).
+  data::Result<void> removeAllDisplayLayers();
+
   /// Adopts a layer that entered the QGIS project outside the Data Manager
   /// seam. Local GDAL rasters and OGR vectors are registered and adopted;
   /// remote and unsupported layers are left as External Display Layers. Layers
@@ -70,6 +99,9 @@ private:
   data::DataManager m_dataManager;
   display::QgisDisplayManager m_displayManager;
   display::DisplayViewId m_mainViewId;
+  /// Secondary view ids in creation order. The main view is tracked separately
+  /// (m_mainViewId) because of its QGIS-interop role and removeView refusal.
+  QVector<display::DisplayViewId> m_secondaryViews;
 };
 
 } // namespace sicnu::app

@@ -5,9 +5,12 @@
 #include <QTemporaryDir>
 
 #include <qgsapplication.h>
+#include <qgslayertree.h>
 #include <qgsmapcanvas.h>
+#include <qgsmaplayerstore.h>
 #include <qgsproject.h>
 
+#include "app/display/qgis_display_manager.h"
 #include "app/project_context.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
@@ -212,6 +215,152 @@ TEST_CASE( "clearProject reaps session temporaries then unloads the rest",
     CHECK_FALSE( QFile::exists( sessionPath ) );
     CHECK_FALSE( manager.asset( persistentId ).has_value() );
     CHECK( QFile::exists( persistentPath ) ); // unload never deletes
+  }
+  QgsProject::instance()->clear();
+}
+
+// ---------------------------------------------------------------------------
+// #68: ProjectContext multi-view host — createSecondaryView / views() /
+// removeView, and the clear-all-views leak fix.
+//
+// Pre-fix, clearProject only cleared the main view's display layers; a
+// secondary view's layers (and the asset leases they held) survived until the
+// destructor reaped them — at which point closeSession had already skipped
+// them as leased. These tests pin the multi-view host contract.
+// ---------------------------------------------------------------------------
+
+/// A secondary view's host-owned {canvas, tree, store} triple. Lives on the
+/// stack for the test so the display manager's QPointers stay valid.
+struct SecondaryViewHost {
+  QgsMapCanvas canvas;
+  QgsLayerTree tree;
+  QgsMapLayerStore store;
+
+  sicnu::display::DisplayViewSpec spec() {
+    return sicnu::display::DisplayViewSpec{ &canvas, &tree, &store };
+  }
+};
+
+TEST_CASE( "createSecondaryView returns a distinct id tracked in views()",
+           "[project_context][multi_view]" )
+{
+  {
+    QgsProject *project = QgsProject::instance();
+    project->clear();
+    QgsMapCanvas canvas;
+    auto context = createContext( canvas, *project );
+
+    SecondaryViewHost secondary;
+    const auto created = context->createSecondaryView( secondary.spec() );
+    REQUIRE( created );
+    const sicnu::display::DisplayViewId secondaryId = created.value();
+
+    // The secondary id is distinct from the main view id.
+    CHECK( secondaryId != context->mainViewId() );
+
+    // views() reports both, main first then the secondary in creation order.
+    const QVector<sicnu::display::DisplayViewId> live = context->views();
+    REQUIRE( live.size() == 2 );
+    CHECK( live.at( 0 ) == context->mainViewId() );
+    CHECK( live.at( 1 ) == secondaryId );
+  }
+  QgsProject::instance()->clear();
+}
+
+TEST_CASE( "removeView refuses the main view (QGIS-interop view is non-removable)",
+           "[project_context][multi_view]" )
+{
+  {
+    QgsProject *project = QgsProject::instance();
+    project->clear();
+    QgsMapCanvas canvas;
+    auto context = createContext( canvas, *project );
+
+    const auto removed = context->removeView( context->mainViewId() );
+
+    // The main view is not removable through the secondary-view path.
+    REQUIRE_FALSE( removed );
+    REQUIRE_FALSE( removed.diagnostics().isEmpty() );
+
+    // The main view is still live (the refusal changed nothing).
+    const QVector<sicnu::display::DisplayViewId> live = context->views();
+    REQUIRE( live.size() == 1 );
+    CHECK( live.at( 0 ) == context->mainViewId() );
+  }
+  QgsProject::instance()->clear();
+}
+
+TEST_CASE( "removeView drops a secondary view from views()",
+           "[project_context][multi_view]" )
+{
+  {
+    QgsProject *project = QgsProject::instance();
+    project->clear();
+    QgsMapCanvas canvas;
+    auto context = createContext( canvas, *project );
+
+    SecondaryViewHost secondary;
+    const auto created = context->createSecondaryView( secondary.spec() );
+    REQUIRE( created );
+    const sicnu::display::DisplayViewId secondaryId = created.value();
+
+    REQUIRE( context->views().size() == 2 );
+
+    const auto removed = context->removeView( secondaryId );
+    REQUIRE( removed );
+
+    // Only the main view remains.
+    const QVector<sicnu::display::DisplayViewId> live = context->views();
+    REQUIRE( live.size() == 1 );
+    CHECK( live.at( 0 ) == context->mainViewId() );
+  }
+  QgsProject::instance()->clear();
+}
+
+TEST_CASE( "clearProject removes layers across ALL views (no secondary leak)",
+           "[project_context][multi_view]" )
+{
+  {
+    QgsProject *project = QgsProject::instance();
+    project->clear();
+    QgsMapCanvas canvas;
+    QTemporaryDir dir;
+    auto context = createContext( canvas, *project );
+    DataManager &manager = context->dataManager();
+    sicnu::display::QgisDisplayManager &display = context->displayManager();
+
+    SecondaryViewHost secondary;
+    const auto created = context->createSecondaryView( secondary.spec() );
+    REQUIRE( created );
+    const sicnu::display::DisplayViewId secondaryId = created.value();
+
+    // A persistent raster shown ONLY in the secondary view. Its lease is held
+    // by the secondary view's display layer.
+    const QString rasterPath =
+      stageFixture( dir, QStringLiteral( "samples/dem_sample.tif" ),
+                    QStringLiteral( "secondary_only.tif" ) );
+    const AssetId assetId =
+      registerRasterAsset( manager, rasterPath, PersistencePolicy::ProjectPersistent );
+
+    const auto added =
+      display.addLayer( secondaryId, assetId,
+                        sicnu::display::AddLayerOptions{
+                          QStringLiteral( "secondary" ), true } );
+    REQUIRE( added );
+    REQUIRE( manager.leaseCount( assetId ) == 1 );
+
+    // clearProject must tear down the secondary view's layer too, releasing its
+    // lease. Pre-fix, the lease survived clearProject (only the main view was
+    // cleared) and the asset was NOT unloaded — leaked until the destructor.
+    const auto cleared = context->clearProject( *project );
+    REQUIRE( cleared );
+
+    // The lease is gone (the secondary's display layer was removed), and the
+    // asset was unloaded from the catalog.
+    CHECK( manager.leaseCount( assetId ) == 0 );
+    CHECK_FALSE( manager.asset( assetId ).has_value() );
+    // The secondary view's layer record is gone.
+    CHECK_FALSE( display.layer( added.value() ).has_value() );
   }
   QgsProject::instance()->clear();
 }
