@@ -1,7 +1,7 @@
 // main_window_layers.cpp — Layer management and identify results
 #include "main_window.h"
 
-#include "layer_manager.h"
+#include "active_view_host.h"
 #include "app_paths.h"
 #include "dialogs/crs_preset_dialog.h"
 #include "panels/data_manager_panel.h"
@@ -183,7 +183,7 @@ void QgisDesktopWindow::addRasterLayer()
       tr( "Raster files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.jpeg *.asc *.dat *.hdr *.bil *.bsq *.bip);;"
           "ENVI raster (*.dat *.hdr *.img *.bil *.bsq *.bip);;"
           "All files (*)" ) );
-    if ( paths.isEmpty() || !m_layerManager )
+    if ( paths.isEmpty() || !m_activeViewHost )
       return;
 
     int ok = 0;
@@ -192,7 +192,7 @@ void QgisDesktopWindow::addRasterLayer()
     {
       if ( filePath.isEmpty() )
         continue;
-      if ( m_layerManager->loadRasterLayer( filePath ) )
+      if ( m_activeViewHost->openRasterPath( filePath ) )
         ++ok;
       else
         ++failed;
@@ -214,7 +214,7 @@ void QgisDesktopWindow::addVectorLayer()
       this, tr( "打开矢量图层（可多选）" ),
       AppPaths::dataDir(),
       tr( "Vector Files (*.shp *.gpkg *.geojson *.kml *.gml);;All Files (*.*)" ) );
-    if ( paths.isEmpty() || !m_layerManager )
+    if ( paths.isEmpty() || !m_activeViewHost )
       return;
 
     int ok = 0;
@@ -223,7 +223,7 @@ void QgisDesktopWindow::addVectorLayer()
     {
       if ( filePath.isEmpty() )
         continue;
-      if ( m_layerManager->loadVectorLayer( filePath ) )
+      if ( m_activeViewHost->openVectorPath( filePath ) )
         ++ok;
       else
         ++failed;
@@ -241,19 +241,19 @@ void QgisDesktopWindow::addVectorLayer()
 
 void QgisDesktopWindow::layerProperties()
 {
-    QList<QgsMapLayer*> selected = m_layerManager->selectedLayers();
+    QList<QgsMapLayer*> selected = m_activeViewHost->selectedLayers();
     if (selected.isEmpty()) {
         QMessageBox::information(this, "Layer Properties", "No layer selected");
         return;
     }
 
     QgsMapLayer *layer = selected.first();
-    m_layerManager->showLayerProperties(layer);
+    m_activeViewHost->showLayerProperties(layer);
 }
 
 void QgisDesktopWindow::removeLayer()
 {
-    m_layerManager->removeSelectedLayers();
+    m_activeViewHost->removeSelectedDisplayLayers();
 }
 
 void QgisDesktopWindow::setProjectCrs()
@@ -278,43 +278,43 @@ void QgisDesktopWindow::setProjectCrs()
 }
 QgsLayerTreeGroup *QgisDesktopWindow::findOrCreateGroup(const QString &name)
 {
-    return m_layerManager->findOrCreateGroup(name);
+    return m_activeViewHost->findOrCreateGroup(name);
 }
 
-// ── Layer Loading (delegated to LayerManager) ─────────────────────────────
+// ── Layer Loading (delegated to ActiveViewHost / active Display View) ─────
 void QgisDesktopWindow::loadRasterLayer(const QString &filePath)
 {
-    m_layerManager->loadRasterLayer(filePath);
+    m_activeViewHost->openRasterPath(filePath);
 }
 
 void QgisDesktopWindow::loadVectorLayer(const QString &filePath)
 {
-    m_layerManager->loadVectorLayer(filePath);
+    m_activeViewHost->openVectorPath(filePath);
 }
 
 void QgisDesktopWindow::showLayerProperties(QgsMapLayer *layer)
 {
-    m_layerManager->showLayerProperties(layer);
+    m_activeViewHost->showLayerProperties(layer);
 }
 
 void QgisDesktopWindow::refreshCanvasLayers()
 {
-    m_layerManager->refreshCanvasLayers();
+    m_activeViewHost->refreshCanvasLayers();
 }
 
 QgsMapLayer *QgisDesktopWindow::activeLayer()
 {
-    return m_layerManager->activeLayer();
+    return m_activeViewHost->activeLayer();
 }
 
 QList<QgsMapLayer*> QgisDesktopWindow::selectedLayers()
 {
-    return m_layerManager->selectedLayers();
+    return m_activeViewHost->selectedLayers();
 }
 
 bool QgisDesktopWindow::loadDataLayer( const QString &filePath )
 {
-    if ( !m_layerManager )
+    if ( !m_activeViewHost )
         return false;
-    return static_cast<bool>( m_layerManager->loadLayer( filePath ) );
+    return static_cast<bool>( m_activeViewHost->openPath( filePath ) );
 }

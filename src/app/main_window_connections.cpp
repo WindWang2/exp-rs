@@ -2,7 +2,7 @@
 #include "main_window.h"
 
 #include "data_project_serializer.h"
-#include "layer_manager.h"
+#include "active_view_host.h"
 #include "layer_tree_menu.h"
 #include "project_context.h"
 #include "widgets/histogram_stretch_widget.h"
@@ -137,9 +137,9 @@ void QgisDesktopWindow::setupConnections()
 
 void QgisDesktopWindow::initLayerTree()
 {
-    // Delegate layer tree model + bridge setup to LayerManager
-    m_layerManager->initLayerTree();
-    m_layerTreeModel = m_layerManager->layerTreeModel();
+    // Delegate layer tree model + bridge setup to ActiveViewHost
+    m_activeViewHost->initLayerTree();
+    m_layerTreeModel = m_activeViewHost->layerTreeModel();
 
     // Connect layer tree signals (UI events remain in the window)
     connect(m_layerTreeView, &QgsLayerTreeView::clicked,

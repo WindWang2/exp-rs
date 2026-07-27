@@ -14,7 +14,7 @@
 #include <qgsattributetablefiltermodel.h>
 #include <qgslayertreegroup.h>
 
-#include "layer_manager.h"
+#include "active_view_host.h"
 #include "project_context.h"
 #include "qgsclipboard.h"
 
@@ -185,7 +185,7 @@ void QgisDesktopWindow::newVectorLayer()
 
     // Register and display through the project Data Context so the new vector
     // layer becomes a Data Asset with a main-view Display Layer.
-    const auto loaded = m_layerManager->loadLayer( fileName );
+    const auto loaded = m_activeViewHost->loadLayer( fileName );
     if ( loaded )
     {
         statusBar()->showMessage(tr("Created new layer: %1").arg(fileName), 5000);

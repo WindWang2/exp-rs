@@ -105,7 +105,7 @@ add_executable(sicnu_geo_rs
     qgis_app_facade.cpp
 
     # Layer and map tool managers
-    layer_manager.cpp
+    active_view_host.cpp
     map_tools/map_tool_manager.cpp
     map_tools/swipe_map_tool.cpp
 

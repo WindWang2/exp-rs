@@ -28,7 +28,7 @@ class QMenuBar;
 class QSlider;
 class QToolBar;
 class QVBoxLayout;
-class LayerManager;
+class ActiveViewHost;
 class QPainter;
 class QTextBrowser;
 class LayerTreeMenuProvider;
@@ -441,7 +441,7 @@ private:
 
     std::unique_ptr<class MapToolManager> m_toolManager;
     std::unique_ptr<sicnu::app::ProjectContext> m_projectContext;
-    std::unique_ptr<LayerManager> m_layerManager;
+    std::unique_ptr<ActiveViewHost> m_activeViewHost;
     std::unique_ptr<class PluginManager> m_pluginManager;
 
     // Lazy-loaded modules

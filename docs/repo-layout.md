@@ -60,7 +60,7 @@ Runtime resolvers try `refs/qgis` first, then legacy `qgis_ref` and install `sha
 | `src/app/project_context.*` | `ProjectContext` — the per-project composition root owning one Data Manager + one Display Manager + the adoption safety net for legacy QGIS layers. |
 | `src/app/data_project_serializer.*` | QGIS project (`.qgs/.qgz`) round trip: SICNU extension XML + standard-layer adoption. |
 | `src/app/panels/data_manager_panel.*` | Data Manager asset-catalog dock, a read-only projection of asset snapshots, separate from the layer tree. |
-| `src/app/layer_manager.*` | Temporary compatibility facade routing legacy `loadRasterLayer`/`loadVectorLayer` through the Project Context. |
+| `src/app/active_view_host.*` | Active Display View host: open path / display asset on the active view (ex-LayerManager). |
 
 ## Icons symlink
 

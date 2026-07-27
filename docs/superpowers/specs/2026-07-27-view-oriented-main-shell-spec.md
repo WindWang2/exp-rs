@@ -1,7 +1,7 @@
 # Spec: View-Oriented Main Shell (elevate Data Manager)
 
 **Parent:** ADR 0009, ADR 0010, `2026-07-24-data-manager-architecture-spec.md`, `2026-07-26-multiple-display-views-spec.md`  
-**Status:** In progress — Wave A done; Wave B partial (main-map load routes).
+**Status:** In progress — Waves A–C landed (shell language, load routes, ActiveViewHost).
 
 ## Problem
 
@@ -75,11 +75,13 @@ Migrate call sites (priority order):
 
 **Done when:** grep for `QgsProject::instance()->addMapLayer` in `src/app` only remains for true QGIS interop adoption or session-private stores that later call ProjectContext adopt.
 
-### Wave C — ActiveViewHost rename + API
+### Wave C — ActiveViewHost rename + API ✅
 
-- Rename `LayerManager` → `ActiveViewHost` (or keep file, change class name in a dedicated PR).
-- Interface: `openPath`, `displayAsset`, `removeSelectedDisplayLayers`, `activeViewId`, `setActiveViewId`.
-- Tests: open path twice → one Asset, two Display Layers if displayed twice on two views; remove display keeps Asset.
+- Renamed `LayerManager` → `ActiveViewHost` (`src/app/active_view_host.*`).
+- Interface: `openPath` / `openRasterPath` / `openVectorPath`, `displayAsset`, `removeSelectedDisplayLayers`, `activeViewId` / `setActiveViewId` / `mainViewId`.
+- Compatibility aliases: `loadLayer` / `loadRasterLayer` / `loadVectorLayer` / `removeSelectedLayers`.
+- Data Manager panel “显示” routes through `displayAsset`.
+- Tests: `test_active_view_host_data_context` (includes displayAsset + setActiveViewId).
 
 ### Wave D — Multi-view shell chrome
 

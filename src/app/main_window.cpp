@@ -1,6 +1,6 @@
 #include "main_window.h"
 #include "dialogs/dialog_help_catalog.h"
-#include "layer_manager.h"
+#include "active_view_host.h"
 #include "project_context.h"
 #include "map_tools/map_tool_manager.h"
 #include "app_paths.h"
@@ -108,7 +108,7 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
         qCritical() << "Failed to create project data context";
 
     // Temporary compatibility facade over the project Data/Display seam.
-    m_layerManager = std::make_unique<LayerManager>(
+    m_activeViewHost = std::make_unique<ActiveViewHost>(
         m_mapCanvas, m_layerTreeView, m_overviewCanvas,
         m_projectContext ? &m_projectContext->dataManager() : nullptr,
         m_projectContext ? &m_projectContext->displayManager() : nullptr,
@@ -213,7 +213,7 @@ QgisDesktopWindow::~QgisDesktopWindow()
         m_mapCanvas->setLayers({});
     }
 
-    // Detach the layer tree view from its model before m_layerManager (the
+    // Detach the layer tree view from its model before m_activeViewHost (the
     // model's owner) is reset below. The view outlives the manager — it is a
     // child widget destroyed later by ~QObject — and would otherwise query a
     // dead model from its close/hide events (exit SIGSEGV).
@@ -224,7 +224,7 @@ QgisDesktopWindow::~QgisDesktopWindow()
     // safely reparent/unset. unique_ptr destruction order is reverse of
     // declaration; force explicit reset here for clarity.
     m_toolManager.reset();
-    m_layerManager.reset();
+    m_activeViewHost.reset();
     m_projectContext.reset();
     m_pluginManager.reset();
 }

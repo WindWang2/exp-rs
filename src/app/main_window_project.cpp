@@ -2,7 +2,7 @@
 #include "main_window.h"
 
 #include "app_paths.h"
-#include "layer_manager.h"
+#include "active_view_host.h"
 #include "project_context.h"
 #include "dialogs/stac_browser_dialog.h"
 #include "dialogs/landsat_import_dialog.h"
@@ -150,7 +150,7 @@ void QgisDesktopWindow::importLayer()
       "All files (*)" );
     const QStringList paths = QFileDialog::getOpenFileNames(
       this, tr( "导入数据（可多选）" ), AppPaths::dataDir(), filter );
-    if ( paths.isEmpty() || !m_layerManager )
+    if ( paths.isEmpty() || !m_activeViewHost )
       return;
 
     int ok = 0;
@@ -159,7 +159,7 @@ void QgisDesktopWindow::importLayer()
     {
       if ( path.isEmpty() )
         continue;
-      if ( m_layerManager->loadLayer( path ) )
+      if ( m_activeViewHost->loadLayer( path ) )
         ++ok;
       else
         ++failed;

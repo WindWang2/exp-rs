@@ -2,7 +2,7 @@
 // Extracted from main_window.cpp for maintainability
 #include "main_window.h"
 
-#include "layer_manager.h"
+#include "active_view_host.h"
 #include "log_panel.h"
 #include "panels/data_manager_panel.h"
 #include "project_context.h"
@@ -86,7 +86,7 @@ void QgisDesktopWindow::setupDockWidgets()
     connect(m_browserDock, &QgsBrowserDockWidget::openFile, this, [this](const QString &fileName, const QString &fileTypeHint) {
         Q_UNUSED(fileTypeHint);
         if (fileName.isEmpty()) return;
-        ( void ) m_layerManager->loadLayer( fileName );
+        ( void ) m_activeViewHost->loadLayer( fileName );
     });
 
     // Tabify the left dock widgets
@@ -348,15 +348,13 @@ void QgisDesktopWindow::setupDataManagerPanel()
 
     connect( m_dataManagerPanel, &sicnu::DataManagerPanel::displayRequested,
              this, [this]( sicnu::data::AssetId assetId ) {
-        if ( !m_projectContext )
-            return;
-        const auto added = m_projectContext->displayManager().addLayer(
-            m_projectContext->mainViewId(), assetId );
-        if ( !added )
+        // ActiveViewHost owns active-view display routing (Wave C).
+        if ( !m_activeViewHost
+             || !m_activeViewHost->displayAsset( assetId ) )
         {
             QMessageBox::warning(
                 this, tr( "添加到显示" ),
-                tr( "无法将数据资产添加到地图显示。" ) );
+                tr( "无法将数据资产添加到当前视图。" ) );
         }
     } );
 

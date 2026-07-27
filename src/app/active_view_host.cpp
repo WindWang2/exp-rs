@@ -1,4 +1,4 @@
-#include "layer_manager.h"
+#include "active_view_host.h"
 
 #include <utility>
 
@@ -15,7 +15,6 @@
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
 
-// Layer properties dialogs
 #include <raster/qgsrasterlayerproperties.h>
 #include <vector/qgsvectorlayerproperties.h>
 
@@ -32,13 +31,13 @@
 // Construction / destruction
 // ---------------------------------------------------------------------------
 
-LayerManager::LayerManager( QgsMapCanvas *canvas,
-                            QgsLayerTreeView *treeView,
-                            QgsMapOverviewCanvas *overviewCanvas,
-                            sicnu::data::DataManager *dataManager,
-                            sicnu::display::QgisDisplayManager *displayManager,
-                            sicnu::display::DisplayViewId mainViewId,
-                            QWidget *parentWidget )
+ActiveViewHost::ActiveViewHost( QgsMapCanvas *canvas,
+                                QgsLayerTreeView *treeView,
+                                QgsMapOverviewCanvas *overviewCanvas,
+                                sicnu::data::DataManager *dataManager,
+                                sicnu::display::QgisDisplayManager *displayManager,
+                                sicnu::display::DisplayViewId mainViewId,
+                                QWidget *parentWidget )
     : QObject( parentWidget )
     , m_mapCanvas( canvas )
     , m_layerTreeView( treeView )
@@ -46,6 +45,7 @@ LayerManager::LayerManager( QgsMapCanvas *canvas,
     , m_dataManager( dataManager )
     , m_displayManager( displayManager )
     , m_mainViewId( mainViewId )
+    , m_activeViewId( mainViewId )
     , m_parentWidget( parentWidget )
 {
     if ( m_mapCanvas && m_overviewCanvas )
@@ -57,27 +57,34 @@ LayerManager::LayerManager( QgsMapCanvas *canvas,
     }
 }
 
-LayerManager::~LayerManager() = default;
+ActiveViewHost::~ActiveViewHost() = default;
+
+bool ActiveViewHost::setActiveViewId( sicnu::display::DisplayViewId viewId )
+{
+    if ( viewId.isNull() || !m_displayManager )
+        return false;
+    if ( !m_displayManager->view( viewId ).has_value() )
+        return false;
+    m_activeViewId = viewId;
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // Layer tree initialization
 // ---------------------------------------------------------------------------
 
-void LayerManager::initLayerTree()
+void ActiveViewHost::initLayerTree()
 {
     QgsProject *project = QgsProject::instance();
     QgsLayerTree *root = project->layerTreeRoot();
 
-    // Create layer tree model with QGIS-compatible flags
     m_layerTreeModel = new QgsLayerTreeModel( root, this );
 
-    // Display flags (matching QGIS defaults)
     m_layerTreeModel->setFlag( QgsLayerTreeModel::ShowLegend );
     m_layerTreeModel->setFlag( QgsLayerTreeModel::ShowLegendAsTree );
     m_layerTreeModel->setFlag( QgsLayerTreeModel::UseEmbeddedWidgets );
     m_layerTreeModel->setFlag( QgsLayerTreeModel::UseTextFormatting );
 
-    // Behavioral flags (matching QGIS defaults)
     m_layerTreeModel->setFlag( QgsLayerTreeModel::AllowNodeReorder );
     m_layerTreeModel->setFlag( QgsLayerTreeModel::AllowNodeRename );
     m_layerTreeModel->setFlag( QgsLayerTreeModel::AllowNodeChangeVisibility );
@@ -86,55 +93,50 @@ void LayerManager::initLayerTree()
 
     m_layerTreeView->setLayerTreeModel( m_layerTreeModel );
     m_layerTreeView->setModel( m_layerTreeModel );
-
-    // Expand all nodes by default (QGIS behavior)
     m_layerTreeView->expandAll();
-
 }
 
 // ---------------------------------------------------------------------------
-// Layer loading (programmatic)
+// Open path / display asset
 // ---------------------------------------------------------------------------
 
 sicnu::data::Result<sicnu::display::DisplayLayerId>
-LayerManager::loadLayer( const QString &filePath )
+ActiveViewHost::openPath( const QString &filePath )
 {
     sicnu::data::SourceDescriptor source;
     source.canonicalSource = filePath;
-    const auto loaded = loadSource( std::move( source ) );
+    const auto loaded = openSource( std::move( source ) );
     if ( !loaded )
-        reportDiagnostics( QObject::tr( "Load Layer" ), loaded.diagnostics() );
+        reportDiagnostics( QObject::tr( "Open Path" ), loaded.diagnostics() );
     return loaded;
 }
 
 sicnu::data::Result<sicnu::display::DisplayLayerId>
-LayerManager::loadRasterLayer( const QString &filePath )
+ActiveViewHost::openRasterPath( const QString &filePath )
 {
     sicnu::data::SourceDescriptor source;
     source.providerKey = QStringLiteral( "gdal" );
     source.canonicalSource = filePath;
-    const auto loaded = loadSource( std::move( source ) );
+    const auto loaded = openSource( std::move( source ) );
     if ( !loaded )
-        reportDiagnostics( QObject::tr( "Load Raster Layer" ),
-                           loaded.diagnostics() );
+        reportDiagnostics( QObject::tr( "Open Raster" ), loaded.diagnostics() );
     return loaded;
 }
 
 sicnu::data::Result<sicnu::display::DisplayLayerId>
-LayerManager::loadVectorLayer( const QString &filePath )
+ActiveViewHost::openVectorPath( const QString &filePath )
 {
     sicnu::data::SourceDescriptor source;
     source.providerKey = QStringLiteral( "ogr" );
     source.canonicalSource = filePath;
-    const auto loaded = loadSource( std::move( source ) );
+    const auto loaded = openSource( std::move( source ) );
     if ( !loaded )
-        reportDiagnostics( QObject::tr( "Load Vector Layer" ),
-                           loaded.diagnostics() );
+        reportDiagnostics( QObject::tr( "Open Vector" ), loaded.diagnostics() );
     return loaded;
 }
 
 sicnu::data::Result<sicnu::display::DisplayLayerId>
-LayerManager::loadSource( sicnu::data::SourceDescriptor source )
+ActiveViewHost::displayAsset( sicnu::data::AssetId assetId )
 {
     using sicnu::data::Diagnostic;
     using sicnu::data::DiagnosticSeverity;
@@ -142,11 +144,62 @@ LayerManager::loadSource( sicnu::data::SourceDescriptor source )
     using sicnu::display::DisplayLayerId;
 
     if ( !m_mapCanvas || !m_dataManager || !m_displayManager
-         || m_mainViewId.isNull() )
+         || m_activeViewId.isNull() || assetId.isNull() )
     {
         return Result<DisplayLayerId>::failure(
-            Diagnostic{ QStringLiteral( "layer.context_unavailable" ),
-                        QObject::tr( "The project Data Context is unavailable" ),
+            Diagnostic{ QStringLiteral( "view.context_unavailable" ),
+                        QObject::tr( "The active Display View context is unavailable" ),
+                        DiagnosticSeverity::Error } );
+    }
+
+    if ( !m_dataManager->asset( assetId ).has_value() )
+    {
+        return Result<DisplayLayerId>::failure(
+            Diagnostic{ QStringLiteral( "view.asset_missing" ),
+                        QObject::tr( "Data Asset is not in the project catalog" ),
+                        DiagnosticSeverity::Error } );
+    }
+
+    const bool hadVisibleLayers = !m_mapCanvas->layers().isEmpty();
+    const Result<DisplayLayerId> displayed =
+        m_displayManager->addLayer( m_activeViewId, assetId );
+    if ( !displayed )
+        return displayed;
+
+    QgsMapLayer *layer = m_displayManager->mapLayer( displayed.value() );
+    const std::optional<sicnu::data::AssetSnapshot> asset =
+        m_dataManager->asset( assetId );
+    if ( !layer || !asset )
+    {
+        ( void ) m_displayManager->removeLayer( displayed.value() );
+        return Result<DisplayLayerId>::failure(
+            Diagnostic{ QStringLiteral( "view.display_adapter_missing" ),
+                        QObject::tr( "The QGIS display adapter was not created" ),
+                        DiagnosticSeverity::Error } );
+    }
+
+    placeInTreeGroup( layer, asset->kind() );
+    refreshCanvasLayers();
+    if ( !hadVisibleLayers )
+        m_mapCanvas->setExtent( layer->extent() );
+
+    return Result<DisplayLayerId>::success( displayed.value() );
+}
+
+sicnu::data::Result<sicnu::display::DisplayLayerId>
+ActiveViewHost::openSource( sicnu::data::SourceDescriptor source )
+{
+    using sicnu::data::Diagnostic;
+    using sicnu::data::DiagnosticSeverity;
+    using sicnu::data::Result;
+    using sicnu::display::DisplayLayerId;
+
+    if ( !m_mapCanvas || !m_dataManager || !m_displayManager
+         || m_activeViewId.isNull() )
+    {
+        return Result<DisplayLayerId>::failure(
+            Diagnostic{ QStringLiteral( "view.context_unavailable" ),
+                        QObject::tr( "The active Display View context is unavailable" ),
                         DiagnosticSeverity::Error } );
     }
 
@@ -159,13 +212,13 @@ LayerManager::loadSource( sicnu::data::SourceDescriptor source )
         if ( !registered.diagnostics.isEmpty() )
             return Result<DisplayLayerId>::failure( registered.diagnostics );
         return Result<DisplayLayerId>::failure(
-            Diagnostic{ QStringLiteral( "layer.registration_failed" ),
+            Diagnostic{ QStringLiteral( "view.registration_failed" ),
                         QObject::tr( "The source could not be registered" ),
                         DiagnosticSeverity::Error } );
     }
 
     const Result<DisplayLayerId> displayed =
-        m_displayManager->addLayer( m_mainViewId, registered.assetId );
+        m_displayManager->addLayer( m_activeViewId, registered.assetId );
     if ( !displayed )
         return displayed;
 
@@ -176,31 +229,12 @@ LayerManager::loadSource( sicnu::data::SourceDescriptor source )
     {
         ( void ) m_displayManager->removeLayer( displayed.value() );
         return Result<DisplayLayerId>::failure(
-            Diagnostic{ QStringLiteral( "layer.display_adapter_missing" ),
+            Diagnostic{ QStringLiteral( "view.display_adapter_missing" ),
                         QObject::tr( "The QGIS display adapter was not created" ),
                         DiagnosticSeverity::Error } );
     }
 
-    const QString groupName =
-        asset->kind() == sicnu::data::AssetKind::Raster
-            ? QObject::tr( "Raster Layers" )
-            : QObject::tr( "Vector Layers" );
-    QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
-    // Re-parent like drag'n'drop does: insert the new node FIRST, then remove
-    // the old one. QgsLayerTreeRegistryBridge queues a project-side removal
-    // for any tree node whose layer is no longer in the tree; removing first
-    // would make it drop (and delete) the QgsMapLayer on the next event-loop
-    // turn — leaving the canvas empty and the Display Manager holding a
-    // dangling pointer.
-    QgsLayerTreeLayer *oldNode = root->findLayer( layer->id() );
-    findOrCreateGroup( groupName )->addLayer( layer );
-    if ( oldNode )
-    {
-        if ( QgsLayerTreeGroup *parent =
-                 qobject_cast<QgsLayerTreeGroup *>( oldNode->parent() ) )
-            parent->removeChildNode( oldNode );
-    }
-
+    placeInTreeGroup( layer, asset->kind() );
     refreshCanvasLayers();
     if ( !hadVisibleLayers )
         m_mapCanvas->setExtent( layer->extent() );
@@ -231,7 +265,32 @@ LayerManager::loadSource( sicnu::data::SourceDescriptor source )
                                             registered.diagnostics );
 }
 
-void LayerManager::reportDiagnostics(
+void ActiveViewHost::placeInTreeGroup( QgsMapLayer *layer, sicnu::data::AssetKind kind )
+{
+    if ( !layer )
+        return;
+    // Tree grouping applies to the main QGIS project tree (main view). Secondary
+    // views own independent trees via DisplayManager; host only groups main.
+    if ( m_activeViewId != m_mainViewId )
+        return;
+
+    const QString groupName =
+        kind == sicnu::data::AssetKind::Raster
+            ? QObject::tr( "Raster Layers" )
+            : QObject::tr( "Vector Layers" );
+    QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
+    // Insert new node FIRST, then remove old — see QgsLayerTreeRegistryBridge note.
+    QgsLayerTreeLayer *oldNode = root->findLayer( layer->id() );
+    findOrCreateGroup( groupName )->addLayer( layer );
+    if ( oldNode )
+    {
+        if ( QgsLayerTreeGroup *parent =
+                 qobject_cast<QgsLayerTreeGroup *>( oldNode->parent() ) )
+            parent->removeChildNode( oldNode );
+    }
+}
+
+void ActiveViewHost::reportDiagnostics(
     const QString &title,
     const QVector<sicnu::data::Diagnostic> &diagnostics )
 {
@@ -252,10 +311,10 @@ void LayerManager::reportDiagnostics(
 }
 
 // ---------------------------------------------------------------------------
-// Layer operations
+// Display-layer operations
 // ---------------------------------------------------------------------------
 
-void LayerManager::showLayerProperties( QgsMapLayer *layer )
+void ActiveViewHost::showLayerProperties( QgsMapLayer *layer )
 {
     if ( !layer )
         return;
@@ -282,7 +341,7 @@ void LayerManager::showLayerProperties( QgsMapLayer *layer )
     }
 }
 
-void LayerManager::removeSelectedLayers()
+void ActiveViewHost::removeSelectedDisplayLayers()
 {
     QList<QgsMapLayer *> selected = selectedLayers();
     if ( selected.isEmpty() )
@@ -304,55 +363,51 @@ void LayerManager::removeSelectedLayers()
             const sicnu::data::Result<void> removed =
                 m_displayManager->removeLayer( *displayLayerId );
             if ( !removed )
-                reportDiagnostics( QObject::tr( "Remove Layer" ),
+                reportDiagnostics( QObject::tr( "Remove Display Layer" ),
                                    removed.diagnostics() );
         }
         else
         {
-            // Standard/external QGIS layers are still presentation-only here.
+            // Legacy/external QGIS layers: presentation-only removal.
             QgsProject::instance()->removeMapLayer( layer->id() );
         }
     }
     refreshCanvasLayers();
 
     if ( auto *win = qobject_cast<QMainWindow *>( m_parentWidget ) )
-        win->statusBar()->showMessage( QObject::tr( "Layer removed" ), 2000 );
+        win->statusBar()->showMessage( QObject::tr( "Removed from view (data kept)" ), 2000 );
 }
 
-void LayerManager::refreshCanvasLayers()
+void ActiveViewHost::refreshCanvasLayers()
 {
     if ( !m_mapCanvas )
         return;
 
-    // The Display Manager owns the main tree/canvas bridge. This explicit
-    // synchronization retains compatibility for callers that request a refresh.
     QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
     QList<QgsMapLayer *> layers = root->checkedLayers();
     m_mapCanvas->setLayers( layers );
 
-    // Keep overview canvas in sync with the main canvas layers
     if ( m_overviewCanvas )
-    {
         m_overviewCanvas->setLayers( layers );
-    }
 }
 
 // ---------------------------------------------------------------------------
-// Layer queries
+// Queries
 // ---------------------------------------------------------------------------
 
-QgsMapLayer *LayerManager::activeLayer()
+QgsMapLayer *ActiveViewHost::activeLayer()
 {
-    // Priority: canvas current layer -> tree selection
     if ( m_mapCanvas && m_mapCanvas->currentLayer() )
         return m_mapCanvas->currentLayer();
     QList<QgsMapLayer *> layers = selectedLayers();
     return layers.isEmpty() ? nullptr : layers.first();
 }
 
-QList<QgsMapLayer *> LayerManager::selectedLayers()
+QList<QgsMapLayer *> ActiveViewHost::selectedLayers()
 {
     QList<QgsMapLayer *> result;
+    if ( !m_layerTreeView || !m_layerTreeView->selectionModel() )
+        return result;
     QModelIndexList selected = m_layerTreeView->selectionModel()->selectedIndexes();
     for ( const QModelIndex &idx : selected )
     {
@@ -361,25 +416,17 @@ QList<QgsMapLayer *> LayerManager::selectedLayers()
         {
             QgsLayerTreeLayer *layerNode = static_cast<QgsLayerTreeLayer *>( node );
             if ( layerNode->layer() )
-            {
                 result.append( layerNode->layer() );
-            }
         }
     }
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-QgsLayerTreeGroup *LayerManager::findOrCreateGroup( const QString &name )
+QgsLayerTreeGroup *ActiveViewHost::findOrCreateGroup( const QString &name )
 {
     QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
     QgsLayerTreeGroup *group = root->findGroup( name );
     if ( !group )
-    {
         group = root->addGroup( name );
-    }
     return group;
 }

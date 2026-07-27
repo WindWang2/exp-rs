@@ -2643,11 +2643,11 @@ target_include_directories(test_qgis_display_manager PRIVATE
 sicnu_discover_tests(test_qgis_display_manager)
 
 # LayerManager compatibility facade — one legacy load seam into project data/display
-qt_add_executable(test_layer_manager_data_context
-  test_layer_manager_data_context.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/layer_manager.cpp
+qt_add_executable(test_active_view_host_data_context
+  test_active_view_host_data_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp
 )
-target_link_libraries(test_layer_manager_data_context PRIVATE
+target_link_libraries(test_active_view_host_data_context PRIVATE
   Catch2::Catch2
   Qt6::Core
   Qt6::Gui
@@ -2656,11 +2656,11 @@ target_link_libraries(test_layer_manager_data_context PRIVATE
   qgis_gui
   Sicnu::qgis_display
 )
-target_include_directories(test_layer_manager_data_context PRIVATE
+target_include_directories(test_active_view_host_data_context PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_layer_manager_data_context)
+sicnu_discover_tests(test_active_view_host_data_context)
 
 # Project persistence — SICNU Data identity plus standard QGIS presentation
 qt_add_executable(test_data_project_roundtrip
