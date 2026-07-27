@@ -51,6 +51,8 @@ class QgsGeorefShellWindow : public QMainWindow
     void setWarpInProgressForTest( bool on );
     void setSourceRasterPath( const QString &p ) { mSourceRasterPath = p; }
     RsGeorefSessionState *sessionStateForTest() { return &mSession; }
+    /// Deep Georeferencing Session (GCP fit + warp snapshots + Task Center).
+    RsGeoreferencingSession *georefSessionForTest() { return &mGeorefSession; }
 
     QgsMapCanvas *srcCanvas() const { return mSrcCanvas; }
     QgsMapCanvas *dstCanvas() const { return mDstCanvas; }
