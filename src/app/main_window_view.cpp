@@ -1,7 +1,12 @@
 // main_window_view.cpp — Map view and navigation actions
 #include "main_window.h"
+#include "active_view_host.h"
+#include "project_context.h"
+#include "shell/secondary_map_view_widget.h"
 
 #include <QMessageBox>
+#include <QSignalBlocker>
+#include <QSplitter>
 #include <QStatusBar>
 
 #include <qgsmapcanvas.h>
@@ -118,6 +123,147 @@ void QgisDesktopWindow::openObiaWindow() {
 }
 #endif
 
+
+// ── Multi-view shell (Wave D) ─────────────────────────────────────────────
+
+void QgisDesktopWindow::toggleSecondaryMapView( bool on )
+{
+    if ( on )
+        openSecondaryMapView();
+    else
+        closeSecondaryMapView();
+}
+
+void QgisDesktopWindow::openSecondaryMapView()
+{
+    if ( !m_projectContext || !m_mapSplitter )
+        return;
+
+    if ( !m_secondaryMapView )
+    {
+        m_secondaryMapView = new SecondaryMapViewWidget( m_mapSplitter );
+        m_mapSplitter->addWidget( m_secondaryMapView );
+        m_mapSplitter->setStretchFactor( 0, 1 );
+        m_mapSplitter->setStretchFactor( 1, 1 );
+        m_mapSplitter->setSizes( { 600, 600 } );
+
+        connect( m_secondaryMapView, &SecondaryMapViewWidget::activateRequested,
+                 this, &QgisDesktopWindow::activateSecondaryMapView );
+        connect( m_secondaryMapView, &SecondaryMapViewWidget::closeRequested,
+                 this, &QgisDesktopWindow::closeSecondaryMapView );
+        connect( m_secondaryMapView, &SecondaryMapViewWidget::syncFromMainRequested,
+                 this, &QgisDesktopWindow::syncMainLayersToSecondaryView );
+    }
+
+    if ( m_secondaryViewId.isNull() )
+    {
+        const auto created =
+            m_projectContext->createSecondaryView( m_secondaryMapView->viewSpec() );
+        if ( !created )
+        {
+            QMessageBox::warning( this, tr( "第二视图" ),
+                                  tr( "无法创建第二显示视图。" ) );
+            if ( m_secondaryViewAction )
+            {
+                QSignalBlocker b( m_secondaryViewAction );
+                m_secondaryViewAction->setChecked( false );
+            }
+            return;
+        }
+        m_secondaryViewId = created.value();
+        m_secondaryMapView->setViewId( m_secondaryViewId );
+    }
+
+    m_secondaryMapView->show();
+    if ( m_secondaryViewAction )
+    {
+        QSignalBlocker b( m_secondaryViewAction );
+        m_secondaryViewAction->setChecked( true );
+    }
+    statusBar()->showMessage( tr( "第二视图已打开。可用「活动」切换显示目标。" ), 4000 );
+}
+
+void QgisDesktopWindow::closeSecondaryMapView()
+{
+    if ( m_projectContext && !m_secondaryViewId.isNull() )
+    {
+        // If secondary was active, fall back to main before teardown.
+        if ( m_activeViewHost
+             && m_activeViewHost->activeViewId() == m_secondaryViewId )
+            activateMainMapView();
+
+        ( void ) m_projectContext->removeView( m_secondaryViewId );
+        m_secondaryViewId = {};
+    }
+
+    if ( m_secondaryMapView )
+    {
+        m_secondaryMapView->hide();
+        m_secondaryMapView->setViewId( {} );
+        m_secondaryMapView->setActiveHighlight( false );
+    }
+    if ( m_secondaryViewAction )
+    {
+        QSignalBlocker b( m_secondaryViewAction );
+        m_secondaryViewAction->setChecked( false );
+    }
+    statusBar()->showMessage( tr( "第二视图已关闭" ), 2500 );
+}
+
+void QgisDesktopWindow::activateMainMapView()
+{
+    if ( !m_activeViewHost || !m_projectContext )
+        return;
+    m_activeViewHost->setActiveViewId( m_projectContext->mainViewId() );
+    if ( m_secondaryMapView )
+        m_secondaryMapView->setActiveHighlight( false );
+    statusBar()->showMessage( tr( "活动视图：主视图" ), 2500 );
+}
+
+void QgisDesktopWindow::activateSecondaryMapView()
+{
+    if ( !m_activeViewHost || m_secondaryViewId.isNull() )
+    {
+        openSecondaryMapView();
+        if ( m_secondaryViewId.isNull() )
+            return;
+    }
+    if ( !m_activeViewHost->setActiveViewId( m_secondaryViewId ) )
+    {
+        statusBar()->showMessage( tr( "无法激活第二视图" ), 3000 );
+        return;
+    }
+    if ( m_secondaryMapView )
+        m_secondaryMapView->setActiveHighlight( true );
+    statusBar()->showMessage( tr( "活动视图：第二视图（打开/显示将路由到此）" ), 3500 );
+}
+
+void QgisDesktopWindow::syncMainLayersToSecondaryView()
+{
+    if ( !m_projectContext || m_secondaryViewId.isNull() )
+    {
+        statusBar()->showMessage( tr( "请先打开第二视图" ), 3000 );
+        return;
+    }
+
+    auto &display = m_projectContext->displayManager();
+    const auto mainView = display.view( m_projectContext->mainViewId() );
+    if ( !mainView || mainView->layerIds().isEmpty() )
+    {
+        statusBar()->showMessage( tr( "主视图没有可同步的显示图层" ), 3000 );
+        return;
+    }
+
+    int cloned = 0;
+    for ( const auto &layerId : mainView->layerIds() )
+    {
+        const auto result = display.cloneLayer( layerId, m_secondaryViewId );
+        if ( result )
+            ++cloned;
+    }
+    statusBar()->showMessage(
+        tr( "已将 %1 个主视图图层克隆到第二视图" ).arg( cloned ), 4000 );
+}
 
 void QgisDesktopWindow::zoomFullExtent()
 {

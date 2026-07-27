@@ -48,6 +48,7 @@
 #include <QDockWidget>
 #include <QMenuBar>
 #include <QSettings>
+#include <QSplitter>
 #include <QStatusBar>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -238,9 +239,17 @@ void QgisDesktopWindow::setupUi()
     centralLayout->setContentsMargins(0, 0, 0, 0);
     centralLayout->setSpacing(0);
 
-    m_mapCanvasContainer = new QWidget(centralWidget);
-    m_mapCanvasContainer->setMinimumSize(800, 600);
-    centralLayout->addWidget(m_mapCanvasContainer);
+    // Horizontal split: main canvas | optional secondary Display View (Wave D).
+    m_mapSplitter = new QSplitter( Qt::Horizontal, centralWidget );
+    m_mapSplitter->setObjectName( QStringLiteral( "rsMapViewSplitter" ) );
+    m_mapSplitter->setChildrenCollapsible( false );
+
+    m_mapCanvasContainer = new QWidget( m_mapSplitter );
+    m_mapCanvasContainer->setObjectName( QStringLiteral( "rsMainMapView" ) );
+    m_mapCanvasContainer->setMinimumSize( 400, 300 );
+    m_mapSplitter->addWidget( m_mapCanvasContainer );
+
+    centralLayout->addWidget( m_mapSplitter );
 }
 
 void QgisDesktopWindow::setupMapCanvas()

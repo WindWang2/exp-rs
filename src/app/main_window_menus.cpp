@@ -297,6 +297,24 @@ void QgisDesktopWindow::setupMenu()
                               this, &QgisDesktopWindow::toggleSwipeTool, QKeySequence( "Ctrl+Shift+S" ) ),
          tr( "在地图上拖动分割线对比上下图层。" ) );
     viewMenu->addSeparator();
+    // Multi-view shell (Wave D): secondary Display View beside main canvas.
+    m_secondaryViewAction = viewMenu->addAction( ic( "dis_l_y" ), tr( "第二视图" ) );
+    m_secondaryViewAction->setCheckable( true );
+    m_secondaryViewAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+2" ) ) );
+    tip( m_secondaryViewAction,
+         tr( "打开/关闭第二显示视图（独立图层栈与渲染，可设为活动视图）。" ) );
+    connect( m_secondaryViewAction, &QAction::toggled,
+             this, &QgisDesktopWindow::toggleSecondaryMapView );
+    tip( viewMenu->addAction( tr( "激活主视图" ),
+                              this, &QgisDesktopWindow::activateMainMapView ),
+         tr( "打开/显示操作路由到主地图。" ) );
+    tip( viewMenu->addAction( tr( "激活第二视图" ),
+                              this, &QgisDesktopWindow::activateSecondaryMapView ),
+         tr( "打开/显示操作路由到第二视图（需已打开）。" ) );
+    tip( viewMenu->addAction( tr( "同步主视图图层到第二视图" ),
+                              this, &QgisDesktopWindow::syncMainLayersToSecondaryView ),
+         tr( "将主视图显示图层克隆到第二视图（独立渲染器）。" ) );
+    viewMenu->addSeparator();
     tip( viewMenu->addAction( ic( "refresh_view" ), tr( "刷新" ),
                               this, &QgisDesktopWindow::refreshMap, QKeySequence( "F5" ) ),
          tr( "刷新地图渲染。" ) );

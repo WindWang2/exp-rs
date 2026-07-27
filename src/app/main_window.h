@@ -29,7 +29,11 @@ class QSlider;
 class QToolBar;
 class QVBoxLayout;
 class ActiveViewHost;
+class QSplitter;
+class SecondaryMapViewWidget;
 class QPainter;
+
+#include "display/qgis_display_manager.h"
 class QTextBrowser;
 class LayerTreeMenuProvider;
 class QgsBrowserDockWidget;
@@ -260,6 +264,14 @@ public:
     // OBIA Classification (Phase 10B Task 10B.5)
     void openObiaWindow();
 
+    // Multi-view shell (Wave D) — secondary Display View chrome
+    void toggleSecondaryMapView( bool on );
+    void openSecondaryMapView();
+    void closeSecondaryMapView();
+    void activateMainMapView();
+    void activateSecondaryMapView();
+    void syncMainLayersToSecondaryView();
+
     // Layer loading (public for template helper in main_window_processing.cpp)
     void loadRasterLayer(const QString &filePath);
     void loadVectorLayer(const QString &filePath);
@@ -328,6 +340,10 @@ private:
     QgsLayerTreeView *m_layerTreeView = nullptr;
     QgsLayerTreeModel *m_layerTreeModel = nullptr;
     QWidget *m_mapCanvasContainer = nullptr;
+    QSplitter *m_mapSplitter = nullptr;
+    class SecondaryMapViewWidget *m_secondaryMapView = nullptr;
+    sicnu::display::DisplayViewId m_secondaryViewId;
+    QAction *m_secondaryViewAction = nullptr;
     QgsProjectionSelectionWidget *m_crsSelector = nullptr;
     LayerTreeMenuProvider *m_layerTreeMenuProvider = nullptr;
     QgsProcessingToolboxTreeView *m_toolboxView = nullptr;

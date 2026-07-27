@@ -1,7 +1,7 @@
 # Spec: View-Oriented Main Shell (elevate Data Manager)
 
 **Parent:** ADR 0009, ADR 0010, `2026-07-24-data-manager-architecture-spec.md`, `2026-07-26-multiple-display-views-spec.md`  
-**Status:** In progress — Waves A–C landed (shell language, load routes, ActiveViewHost).
+**Status:** In progress — Waves A–D landed (shell multi-view chrome included).
 
 ## Problem
 
@@ -83,15 +83,16 @@ Migrate call sites (priority order):
 - Data Manager panel “显示” routes through `displayAsset`.
 - Tests: `test_active_view_host_data_context` (includes displayAsset + setActiveViewId).
 
-### Wave D — Multi-view shell chrome
+### Wave D — Multi-view shell chrome ✅
 
-Depends on #68/#69 engine host (largely present). Shell:
+Depends on ProjectContext multi-view host (createSecondaryView / removeView). Shell:
 
-- Split / second canvas dock
-- Active view switcher
-- “在当前视图显示” vs “在新视图打开”
+- Horizontal `QSplitter`: main canvas | `SecondaryMapViewWidget` (independent tree + store + canvas)
+- 视图菜单：**第二视图** (Ctrl+Shift+2)、激活主/第二、同步主视图图层
+- ActiveViewHost routes open/display to active view id
+- Secondary header: 活动 / 同步主视图 / 关闭
 
-Out of scope until ActiveViewHost + bypass kill list is green.
+Out of scope still: persist secondary views to .qgz; linked extents; more than two views.
 
 ### Wave E — Session windows as Display Views
 

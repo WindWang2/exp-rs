@@ -106,6 +106,7 @@ add_executable(sicnu_geo_rs
 
     # Layer and map tool managers
     active_view_host.cpp
+    shell/secondary_map_view_widget.cpp
     map_tools/map_tool_manager.cpp
     map_tools/swipe_map_tool.cpp
 
