@@ -1251,6 +1251,28 @@ sicnu_discover_tests(test_crs_picker_persists)
 # Task 11.6.1 — Georef session state (dirty + settings)
 # Compiles session_state.cpp directly (Qt-only unit) so the test does not
 # require a full qgis_app_georef link chain. Source is still in the library.
+# #32 — Georeferencing Session (GCP fit + immutable warp snapshot)
+add_executable(test_georeferencing_session test_georeferencing_session.cpp)
+target_link_libraries(test_georeferencing_session PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+  sicnu_jobs
+  sicnu_task_center
+)
+target_include_directories(test_georeferencing_session PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_georeferencing_session PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_georeferencing_session)
+
 add_executable(test_georef_session_state
   test_georef_session_state.cpp
   ${CMAKE_SOURCE_DIR}/src/app/georeferencer/rs_georef_session_state.cpp

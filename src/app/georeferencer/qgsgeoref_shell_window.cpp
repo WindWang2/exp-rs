@@ -251,6 +251,56 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   // Default tool: pan (browse first, then switch to Add GCP)
   if ( mPanAction )
     mPanAction->setChecked( true );
+
+  connect( &mGeorefSession, &RsGeoreferencingSession::warpFinished, this,
+           [this]( long taskCenterId, bool success, const QString &errorMessage,
+                   const QString &outputPath ) {
+             int listId = -1;
+             for ( auto it = mActiveWarpTaskCenterIds.constBegin();
+                   it != mActiveWarpTaskCenterIds.constEnd(); ++it )
+             {
+               if ( it.value() == taskCenterId )
+               {
+                 listId = it.key();
+                 break;
+               }
+             }
+             if ( listId < 0 )
+               return;
+             mActiveWarpTaskCenterIds.remove( listId );
+             mWarpInProgress = !mActiveWarpTaskCenterIds.isEmpty();
+             recomputeFit();
+
+             if ( success )
+             {
+               if ( mTaskList )
+                 mTaskList->finishSuccess( listId, 0, 0 );
+               if ( mWorkflowBridge && mWorkflowBridge->isOpen() )
+               {
+                 mWorkflowBridge->setOutputArtifact( outputPath.toStdString() );
+                 mWorkflowBridge->markStepComplete( "warp" );
+                 mWorkflowBridge->gotoStep( "load_result" );
+               }
+               statusBar()->showMessage(
+                 tr( "任务 #%1 完成: %2 — 双击可加载到主工程" )
+                   .arg( listId )
+                   .arg( QFileInfo( outputPath ).fileName() ),
+                 6000 );
+             }
+             else if ( errorMessage.contains( QStringLiteral( "ancel" ), Qt::CaseInsensitive ) )
+             {
+               if ( mTaskList )
+                 mTaskList->finishCancelled( listId, 0 );
+               statusBar()->showMessage( tr( "任务 #%1 已取消" ).arg( listId ), 4000 );
+             }
+             else
+             {
+               if ( mTaskList )
+                 mTaskList->finishFailed( listId, errorMessage, 0 );
+               statusBar()->showMessage(
+                 tr( "任务 #%1 失败: %2" ).arg( listId ).arg( errorMessage ), 6000 );
+             }
+           } );
 }
 
 void QgsGeorefShellWindow::setupStatusBar( const QString &coordObj, const QString &crsObj, const QString &rmsObj )
@@ -1449,13 +1499,44 @@ void QgsGeorefShellWindow::applyTransform()
     return;
   }
 
-  // Snapshot parameters at enqueue time so later panel edits don't affect this job.
+  // Freeze GCP + method + paths into an immutable session snapshot (#32),
+  // then run the warp through Task Center so later panel edits cannot affect it.
   const QString sourcePath = mSourceRasterPath;
   const QString outputPath = mParamsPanel->outputPath();
   const double rmsAtStart = mLastRms;
   const auto resampling = mParamsPanel->resamplingMethod();
   const auto destCrs = mParamsPanel->destCrs();
   const double pixelSize = mParamsPanel->outputPixelSize();
+
+  QVector<RsGeorefGcpPair> pairs;
+  pairs.reserve( mGcps->size() );
+  for ( const QgsGcpPoint *p : std::as_const( *mGcps ) )
+  {
+    if ( !p )
+      continue;
+    RsGeorefGcpPair pair;
+    pair.source = p->sourcePoint();
+    pair.destination = p->destinationPoint();
+    pair.enabled = p->isEnabled();
+    pairs.append( pair );
+  }
+
+  mGeorefSession.setSourceRasterPath( sourcePath );
+  mGeorefSession.setTransformMethod( method );
+  mGeorefSession.setGcps( pairs );
+  if ( !mGeorefSession.refit().ready )
+  {
+    statusBar()->showMessage( tr( "变换尚未完成拟合" ), 3000 );
+    return;
+  }
+
+  const auto snapOpt = mGeorefSession.createWarpSnapshot(
+    outputPath, resampling, destCrs, pixelSize );
+  if ( !snapOpt.has_value() )
+  {
+    statusBar()->showMessage( tr( "无法创建校正快照" ), 3000 );
+    return;
+  }
 
   QString methodLabel;
   {
@@ -1477,146 +1558,37 @@ void QgsGeorefShellWindow::applyTransform()
                                            sourcePath, outputPath,
                                            enabled, rmsAtStart );
 
-  // Raise task dock so the user sees the new row.
   if ( mTaskDock )
   {
     mTaskDock->show();
     mTaskDock->raise();
   }
 
-  auto *task = new RsWarpTask( sourcePath, outputPath,
-                               mTransform.get(), resampling,
-                               destCrs, pixelSize );
-  mActiveWarpTasks.insert( taskId, task );
+  const long tcId = mGeorefSession.startWarpTask( *snapOpt );
+  if ( tcId < 0 )
+  {
+    if ( mTaskList )
+      mTaskList->finishFailed( taskId, tr( "Task Center 提交失败" ), 0 );
+    statusBar()->showMessage( tr( "无法提交校正任务" ), 3000 );
+    return;
+  }
 
-  connect( task, &QgsTask::progressChanged, this,
-           [this, taskId]( double p ) {
-             if ( mTaskList )
-               mTaskList->setProgress( taskId, p );
-             // Mirror 0–100 QgsTask progress into JobEngine 0–1 when possible.
-             const auto jit = mActiveWarpJobIds.constFind( taskId );
-             if ( jit != mActiveWarpJobIds.constEnd() )
-             {
-               // Progress is written by the worker via ctx; best-effort local list only here.
-               Q_UNUSED( jit );
-             }
-           } );
-
-  sicnu::jobs::JobRequest req;
-  req.algorithmId = "module:georef:warp";
-  req.title = title.toStdString();
-  req.source = "module";
-  req.exclusive = true;
-  req.params["output"] = outputPath.toStdString();
-  req.params["input"] = sourcePath.toStdString();
-  req.clientTag = QString::number( taskId ).toStdString();
-
-  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
-    std::move( req ),
-    [task]( const sicnu::jobs::JobRequest &request,
-            sicnu::operators::RSOperatorContext &ctx ) {
-      ctx.logInfo( "Georef warp" );
-      ctx.reportProgress( 0.0, "Warping" );
-      const bool ok = task->run();
-      if ( ctx.isCancelled()
-           || task->result().status == QgsImageWarper::WarpStatus::Cancelled )
-      {
-        throw sicnu::operators::RSOperatorError(
-          sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
-      }
-      if ( !ok || task->result().status != QgsImageWarper::WarpStatus::Ok )
-      {
-        throw sicnu::operators::RSOperatorError(
-          sicnu::operators::ErrorCode::ComputationError,
-          task->result().errorMessage.toStdString() );
-      }
-      Json::Value result( Json::objectValue );
-      result["output"] = request.params.get( "output", "" ).asString();
-      result["durationMs"] = static_cast<Json::Int64>( task->result().durationMs );
-      result["outputBytes"] = static_cast<Json::Int64>( task->result().outputBytes );
-      return result;
-    },
-    [task]() { task->cancel(); } );
-
-  const QString jobIdQ = QString::fromStdString( jobId );
-  mActiveWarpJobIds.insert( taskId, jobIdQ );
-
-  auto *bridge = JobEngineQtBridge::instance();
-  auto *conn = new QMetaObject::Connection;
-  *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
-                   [this, task, taskId, outputPath, jobIdQ, conn]( const QString &id ) {
-                     if ( id != jobIdQ )
-                       return;
-                     disconnect( *conn );
-                     delete conn;
-                     mActiveWarpTasks.remove( taskId );
-                     mActiveWarpJobIds.remove( taskId );
-
-                     emitStructuredLog( task->result() );
-                     const auto &r = task->result();
-                     const auto snapOpt =
-                       sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
-
-                     if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Succeeded
-                          && r.status == QgsImageWarper::WarpStatus::Ok )
-                     {
-                       if ( mTaskList )
-                         mTaskList->finishSuccess( taskId, r.durationMs, r.outputBytes );
-                       if ( mWorkflowBridge && mWorkflowBridge->isOpen() )
-                       {
-                         mWorkflowBridge->setOutputArtifact( outputPath.toStdString() );
-                         mWorkflowBridge->markStepComplete( "warp" );
-                         mWorkflowBridge->gotoStep( "load_result" );
-                       }
-                       statusBar()->showMessage(
-                         tr( "任务 #%1 完成: %2 (%3 字节, %4 ms) — 双击可加载到主工程" )
-                           .arg( taskId )
-                           .arg( QFileInfo( outputPath ).fileName() )
-                           .arg( r.outputBytes )
-                           .arg( r.durationMs ), 6000 );
-                     }
-                     else if ( ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
-                               || r.status == QgsImageWarper::WarpStatus::Cancelled )
-                     {
-                       if ( mTaskList )
-                         mTaskList->finishCancelled( taskId, r.durationMs );
-                       statusBar()->showMessage( tr( "任务 #%1 已取消" ).arg( taskId ), 4000 );
-                     }
-                     else
-                     {
-                       const QString err = !r.errorMessage.isEmpty()
-                                            ? r.errorMessage
-                                            : ( snapOpt ? QString::fromStdString( snapOpt->error )
-                                                        : tr( "失败" ) );
-                       if ( mTaskList )
-                         mTaskList->finishFailed( taskId, err, r.durationMs );
-                       statusBar()->showMessage(
-                         tr( "任务 #%1 失败: %2" ).arg( taskId ).arg( err ), 6000 );
-                     }
-                     task->deleteLater();
-                   } );
-
+  mActiveWarpTaskCenterIds.insert( taskId, tcId );
+  mWarpInProgress = true;
+  recomputeFit();
   statusBar()->showMessage( tr( "已加入任务列表 #%1 并开始运行…" ).arg( taskId ), 3000 );
 }
 
 void QgsGeorefShellWindow::cancelWarpTask( int taskId )
 {
-  const auto jit = mActiveWarpJobIds.constFind( taskId );
-  if ( jit != mActiveWarpJobIds.constEnd() )
-  {
-    sicnu::jobs::JobEngine::instance().cancel( jit.value().toStdString() );
-    if ( statusBar() )
-      statusBar()->showMessage( tr( "正在取消任务 #%1…" ).arg( taskId ), 3000 );
-    return;
-  }
-  const auto it = mActiveWarpTasks.constFind( taskId );
-  if ( it == mActiveWarpTasks.constEnd() || !it.value() )
+  const auto it = mActiveWarpTaskCenterIds.constFind( taskId );
+  if ( it == mActiveWarpTaskCenterIds.constEnd() )
   {
     if ( statusBar() )
       statusBar()->showMessage( tr( "任务 #%1 已不在运行" ).arg( taskId ), 3000 );
     return;
   }
-  it.value()->cancel();
+  mGeorefSession.cancelWarpTask( it.value() );
   if ( statusBar() )
     statusBar()->showMessage( tr( "正在取消任务 #%1…" ).arg( taskId ), 3000 );
 }

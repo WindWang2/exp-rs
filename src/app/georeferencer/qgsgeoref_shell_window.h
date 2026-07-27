@@ -10,6 +10,7 @@
 #include "qgsimagewarper.h"
 #include "rs_georef_params_panel.h"
 #include "rs_georef_session_state.h"
+#include "rs_georeferencing_session.h"
 #include "rs_georef_task_list.h"
 #include "rs_georef_workflow_bridge.h"
 
@@ -279,12 +280,12 @@ class QgsGeorefShellWindow : public QMainWindow
     QString mSourceRasterPath;
 
     RsGeorefSessionState mSession;
+    /// Deep Georeferencing Session: GCP fit + immutable warp snapshots + Task Center (#32).
+    RsGeoreferencingSession mGeorefSession;
     bool mSuppressDirtyFromList = false;
     bool mWarpInProgress = false;
-    /// task-list id → live QgsTask body (run under JobEngine; for cancel / result).
-    QHash<int, QPointer<RsWarpTask>> mActiveWarpTasks;
-    /// task-list id → JobEngine job id.
-    QHash<int, QString> mActiveWarpJobIds;
+    /// task-list id → Task Center task id for the running warp.
+    QHash<int, long> mActiveWarpTaskCenterIds;
 
     /// lab.georef.image_to_map session (opened by I2M shell only).
     std::unique_ptr<RsGeorefWorkflowBridge> mWorkflowBridge;
