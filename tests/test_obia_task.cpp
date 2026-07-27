@@ -12,9 +12,12 @@
 #include <gdal.h>
 #include <cpl_error.h>
 
+#include <QColor>
 #include <QCoreApplication>
 #include <QFile>
 #include <QTemporaryDir>
+
+#include <algorithm>
 
 // Ensure GDAL drivers are registered
 static bool g_gdalInit = ( GDALAllRegister(), true );
@@ -166,6 +169,60 @@ TEST_CASE( "ObiaTask: empty segmentLabels fails gracefully", "[obia][classificat
 
     REQUIRE( !ok );
     REQUIRE( task.result().errorMessage.contains( "No labeled segments" ) );
+}
+
+TEST_CASE( "ObiaTask: labeled pipeline fills training accuracy", "[obia][classification][accuracy]" )
+{
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+
+    const QString inputPath = createTestRaster( tempDir.path(), 32, 32, 3 );
+    REQUIRE( !inputPath.isEmpty() );
+    const QString outputPath = tempDir.path() + "/obia_acc.tif";
+
+    // First pass: segment only (no labels) to discover segment ids.
+    {
+        RsObiaTask::Config cfg;
+        cfg.sourceRaster = inputPath;
+        cfg.outputRaster = tempDir.path() + "/_seg_probe.tif";
+        cfg.bandIndices = { 1, 2, 3 };
+        cfg.useOtb = false;
+        cfg.smoothKernel = 3;
+        cfg.quantizeBins = 4;
+        cfg.minRegionSize = 10;
+        cfg.backend = std::make_unique<RsClassifierNormalBayes>();
+        RsObiaTask probe( std::move( cfg ) );
+        ( void ) probe.run(); // expected fail: no labels
+        REQUIRE( !probe.segmentMap().isEmpty() );
+
+        const auto ids = probe.segmentMap().uniqueLabels();
+        REQUIRE( ids.size() >= 2 );
+
+        // Label first two segments with different classes.
+        QList<quint32> sorted = ids.values();
+        std::sort( sorted.begin(), sorted.end() );
+        RsObiaTask::Config trainCfg;
+        trainCfg.sourceRaster = inputPath;
+        trainCfg.outputRaster = outputPath;
+        trainCfg.bandIndices = { 1, 2, 3 };
+        trainCfg.useOtb = false;
+        trainCfg.existingSegMap = probe.segmentMap();
+        trainCfg.backend = std::make_unique<RsClassifierNormalBayes>();
+        trainCfg.segmentLabels[sorted[0]] = 1;
+        trainCfg.segmentLabels[sorted[1]] = 2;
+        trainCfg.classColors[1] = QColor( Qt::red );
+        trainCfg.classColors[2] = QColor( Qt::green );
+        trainCfg.algoName = "NormalBayes";
+
+        RsObiaTask task( std::move( trainCfg ) );
+        REQUIRE( task.run() );
+        REQUIRE( task.result().ok );
+        REQUIRE( task.result().labeledSegments >= 2 );
+        REQUIRE( !task.result().accuracy.classIds.isEmpty() );
+        REQUIRE( task.result().accuracy.overallAccuracy >= 0.0 );
+        REQUIRE( task.result().accuracy.overallAccuracy <= 1.0 );
+        REQUIRE( QFile::exists( outputPath ) );
+    }
 }
 
 #endif // SICNU_HAS_OPENCV

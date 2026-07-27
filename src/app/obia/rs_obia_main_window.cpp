@@ -15,6 +15,8 @@
 #include "rs_object_classify.h"
 #include "rs_class_raster.h"
 #include "rs_segmenter_port.h"
+#include "rs_accuracy_assessment.h"
+#include "classification/rs_accuracy_dialog.h"
 
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
@@ -187,6 +189,13 @@ void RsObiaMainWindow::setupToolbar()
     auto *roiAct = mToolbar->addAction( tr( "Import ROI" ), this, &RsObiaMainWindow::importRoiLabels );
     SicnuDialogHelp::tip( roiAct, tr(
       "从训练多边形按多数票标注对象；与点击标注冲突时后写覆盖并提示。" ) );
+
+    mToolbar->addSeparator();
+    auto *accAct = mToolbar->addAction( tr( "精度评价" ), this, &RsObiaMainWindow::showAccuracyAssessment );
+    SicnuDialogHelp::tip( accAct, tr( "查看最近一次对象分类的训练样本精度（混淆矩阵 / OA / Kappa）。" ) );
+
+    auto *toMainAct = mToolbar->addAction( tr( "加载到主图" ), this, &RsObiaMainWindow::loadResultToMainMap );
+    SicnuDialogHelp::tip( toMainAct, tr( "将分类结果栅格加载到主窗口地图。" ) );
 
     mToolbar->addSeparator();
     auto *expAct = mToolbar->addAction( tr( "Export" ), this, &RsObiaMainWindow::exportResult );
@@ -463,6 +472,51 @@ void RsObiaMainWindow::loadClassifiedRaster( const QString &outputPath )
     }
 }
 
+void RsObiaMainWindow::rememberClassification( const QString &outputPath,
+                                               const RsAccuracyAssessment::Result &accuracy )
+{
+    mLastClassRasterPath = outputPath;
+    mLastAccuracy = accuracy;
+    mHasAccuracy = !accuracy.classIds.isEmpty();
+    emit classificationFinished( outputPath, accuracy );
+}
+
+QHash<int, QString> RsObiaMainWindow::classNameMap() const
+{
+    QHash<int, QString> names;
+    for ( const ClassDef &c : mClassDefs )
+        names.insert( c.id, c.name );
+    return names;
+}
+
+void RsObiaMainWindow::showAccuracyAssessment()
+{
+    if ( !mHasAccuracy )
+    {
+        QMessageBox::information(
+            this, tr( "精度评价" ),
+            tr( "尚无精度结果。请先完成对象分类（基于已标注对象计算训练精度）。" ) );
+        return;
+    }
+    auto *dlg = new RsAccuracyDialog( mLastAccuracy, classNameMap(), this );
+    dlg->setAttribute( Qt::WA_DeleteOnClose );
+    dlg->setWindowTitle( tr( "OBIA 精度评价（训练样本）" ) );
+    dlg->show();
+}
+
+void RsObiaMainWindow::loadResultToMainMap()
+{
+    if ( mLastClassRasterPath.isEmpty() || !QFileInfo::exists( mLastClassRasterPath ) )
+    {
+        QMessageBox::information(
+            this, tr( "加载到主图" ),
+            tr( "尚无分类结果。请先运行 Classify。" ) );
+        return;
+    }
+    emit requestLoadToMainMap( mLastClassRasterPath );
+    statusBar()->showMessage( tr( "已请求将结果加载到主图：%1" ).arg( mLastClassRasterPath ), 4000 );
+}
+
 void RsObiaMainWindow::onObiaTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
 {
     if ( info.taskId != m_pendingTaskId || m_pendingTaskId < 0 )
@@ -552,12 +606,28 @@ void RsObiaMainWindow::onObiaTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
         }
         if ( info.status == sicnu::TaskStatus::Completed && hierClsWork && hierClsWork->ok )
         {
-            QMessageBox::information(
-                this, tr( "OBIA Classification" ),
-                tr( "Classification complete on level %1!\nOutput: %2" )
-                    .arg( hierClsWork->clsLevel )
-                    .arg( hierClsWork->outputPath ) );
+            rememberClassification( hierClsWork->outputPath, hierClsWork->accuracy );
             loadClassifiedRaster( hierClsWork->outputPath );
+            const QString accLine = mHasAccuracy
+                                      ? tr( "\nOA=%1  Kappa=%2 (训练样本)" )
+                                            .arg( mLastAccuracy.overallAccuracy, 0, 'f', 3 )
+                                            .arg( mLastAccuracy.kappa, 0, 'f', 3 )
+                                      : QString();
+            QMessageBox box( this );
+            box.setIcon( QMessageBox::Information );
+            box.setWindowTitle( tr( "OBIA Classification" ) );
+            box.setText( tr( "层级 %1 分类完成！\n输出：%2%3" )
+                           .arg( hierClsWork->clsLevel )
+                           .arg( hierClsWork->outputPath )
+                           .arg( accLine ) );
+            auto *accBtn = box.addButton( tr( "精度评价" ), QMessageBox::ActionRole );
+            auto *mainBtn = box.addButton( tr( "加载到主图" ), QMessageBox::ActionRole );
+            box.addButton( QMessageBox::Ok );
+            box.exec();
+            if ( box.clickedButton() == accBtn )
+                showAccuracyAssessment();
+            else if ( box.clickedButton() == mainBtn )
+                loadResultToMainMap();
             return;
         }
         const QString err = ( hierClsWork && !hierClsWork->error.isEmpty() )
@@ -579,10 +649,25 @@ void RsObiaMainWindow::onObiaTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
         }
         if ( info.status == sicnu::TaskStatus::Completed && flatTask && flatTask->result().ok )
         {
-            QMessageBox::information(
-                this, tr( "OBIA Classification" ),
-                tr( "Classification complete!\nOutput: %1" ).arg( flatOut ) );
+            rememberClassification( flatOut, flatTask->result().accuracy );
             loadClassifiedRaster( flatOut );
+            const QString accLine = mHasAccuracy
+                                      ? tr( "\nOA=%1  Kappa=%2 (训练样本)" )
+                                            .arg( mLastAccuracy.overallAccuracy, 0, 'f', 3 )
+                                            .arg( mLastAccuracy.kappa, 0, 'f', 3 )
+                                      : QString();
+            QMessageBox box( this );
+            box.setIcon( QMessageBox::Information );
+            box.setWindowTitle( tr( "OBIA Classification" ) );
+            box.setText( tr( "对象分类完成！\n输出：%1%2" ).arg( flatOut ).arg( accLine ) );
+            auto *accBtn = box.addButton( tr( "精度评价" ), QMessageBox::ActionRole );
+            auto *mainBtn = box.addButton( tr( "加载到主图" ), QMessageBox::ActionRole );
+            box.addButton( QMessageBox::Ok );
+            box.exec();
+            if ( box.clickedButton() == accBtn )
+                showAccuracyAssessment();
+            else if ( box.clickedButton() == mainBtn )
+                loadResultToMainMap();
         }
         else
         {
@@ -1047,6 +1132,20 @@ long RsObiaMainWindow::startHierarchyClassifyTask(
                 throw sicnu::operators::RSOperatorError(
                     sicnu::operators::ErrorCode::ComputationError,
                     cls.errorMessage.toStdString() );
+            }
+
+            // Training-set accuracy (true labels vs predicted class for labeled objects).
+            {
+                QVector<int> yTrue;
+                QVector<int> yPred;
+                for ( auto it = trainLabels.constBegin(); it != trainLabels.constEnd(); ++it )
+                {
+                    if ( !cls.segmentClasses.contains( it.key() ) )
+                        continue;
+                    yTrue.append( it.value() );
+                    yPred.append( cls.segmentClasses.value( it.key() ) );
+                }
+                work->accuracy = RsAccuracyAssessment::compute( yTrue, yPred );
             }
 
             if ( isCanceled() )

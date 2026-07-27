@@ -785,17 +785,19 @@ Workflow GuidedWorkflowWidget::createObiaWorkflow()
 
     WorkflowStep step3;
     step3.title = tr( "Segment and Classify" );
-    step3.instructions = tr( "<p>Run the OBIA pipeline:</p>"
+    step3.instructions = tr( "<p>Run the OBIA pipeline in the OBIA window:</p>"
                               "<ol>"
-                              "<li>Adjust segmentation parameters (kernel / bins) if needed</li>"
-                              "<li>Click <b>Segment</b> to create image objects</li>"
-                              "<li>Click segments on the map and assign classes</li>"
+                              "<li>Adjust segmentation parameters if needed, then click <b>Segment</b> (or hierarchical segment)</li>"
+                              "<li>Click objects on the map and assign classes, or use <b>Import ROI</b></li>"
                               "<li>Choose a classifier and click <b>Classify</b></li>"
-                              "<li>Click <b>Export</b> to save the result GeoTIFF</li>"
+                              "<li>Review <b>精度评价</b> (training OA / Kappa / confusion matrix)</li>"
+                              "<li>Click <b>加载到主图</b> to place the result on the main canvas</li>"
+                              "<li>Optional: <b>Export</b> polygons from the class raster</li>"
                               "</ol>"
-                              "<p>When OTB is installed, MeanShift segmentation is used automatically; otherwise a built-in segmenter is used.</p>" );
+                              "<p>When OTB is installed, MeanShift is preferred; otherwise a built-in segmenter is used. "
+                              "Pipeline JSON labs: <code>data/pipelines/obia_*.json</code> / workflow id <code>lab.obia</code>.</p>" );
     step3.actionId = "";
-    step3.completionHint = tr( "Classification map exported with segment-level class colors." );
+    step3.completionHint = tr( "Class map produced; accuracy reviewed; result available on main map." );
     wf.steps << step3;
 
     return wf;

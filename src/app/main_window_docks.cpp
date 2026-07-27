@@ -505,6 +505,13 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
              this, [this]( const QString &msg ) {
                  statusBar()->showMessage( msg, 5000 );
              } );
+    connect( m_sessionController, &WorkflowSessionController::requestOpenWorkspace,
+             this, [this]( const QString &kind ) {
+                 if ( kind == QLatin1String( "obia" ) )
+                     openObiaWindow();
+                 else if ( kind == QLatin1String( "classify" ) )
+                     openClassificationWindow();
+             } );
     connect( m_taskPanel, &TaskPanelHost::closeClicked, this, [this]() {
         if ( m_taskPanelDock )
             m_taskPanelDock->hide();

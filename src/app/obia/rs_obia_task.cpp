@@ -181,6 +181,20 @@ bool RsObiaTask::run()
     for ( int i = 0; i < segmentIds.size(); ++i )
         segmentClasses[segmentIds[i]] = predictions.at<int>( i, 0 );
 
+    // Training-set accuracy (true labels vs predicted class of labeled segments).
+    {
+        QVector<int> yTrue;
+        QVector<int> yPred;
+        yTrue.reserve( static_cast<int>( trainRows.size() ) );
+        yPred.reserve( static_cast<int>( trainRows.size() ) );
+        for ( int i = 0; i < static_cast<int>( trainRows.size() ); ++i )
+        {
+            yTrue.append( trainLabels[static_cast<size_t>( i )] );
+            yPred.append( predictions.at<int>( trainRows[static_cast<size_t>( i )], 0 ) );
+        }
+        mResult.accuracy = RsAccuracyAssessment::compute( yTrue, yPred );
+    }
+
     if ( isCanceled() )
         return false;
 

@@ -40,6 +40,8 @@ class WorkflowSessionController : public QObject
   signals:
     void requestLoadRaster( const QString &path );
     void statusMessage( const QString &msg );
+    /** Workspace-hosted labs (e.g. lab.obia → open OBIA window). */
+    void requestOpenWorkspace( const QString &workspaceKind );
 
   private slots:
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );

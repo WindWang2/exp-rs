@@ -8,6 +8,7 @@
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "workflow/builtin_definitions.h"
+#include "workflow/workflow_types.h"
 
 #include <exception>
 #include <string>
@@ -17,6 +18,7 @@
 using sicnu::jobs::JobRequest;
 using sicnu::operators::RSOperatorRegistry;
 using sicnu::workflow::CanRunResult;
+using sicnu::workflow::HostKind;
 using sicnu::workflow::StepDef;
 using sicnu::workflow::StepKind;
 
@@ -146,6 +148,15 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
     title = definitionId;
 
   m_activeTitle = title;
+
+  // Workspace labs (OBIA / classify) open their dedicated shell windows.
+  if ( def->host == HostKind::Workspace && !def->workspaceKind.empty() )
+  {
+    emit requestOpenWorkspace( QString::fromStdString( def->workspaceKind ) );
+    helpSummary = tr( "工作空间「%1」已打开。请在专用窗口中完成交互步骤；"
+                      "任务面板可查看算子型步骤（如 rs:obia_segment / rs:obia_classify）的参数。" )
+                    .arg( QString::fromStdString( def->workspaceKind ) );
+  }
 
   m_panel->showTool( title, helpSummary, schema );
   m_panel->setRasterLayerChoices( m_layerIds, m_layerNames );

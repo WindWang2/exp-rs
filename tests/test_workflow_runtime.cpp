@@ -372,7 +372,7 @@ TEST_CASE( "Builtin lab.obia has 5 steps in order", "[workflow]" )
     "open_image", "segment", "label", "classify", "export"
   };
   const std::vector<std::string> expectedTitles = {
-    "打开影像", "分割", "对象标注", "对象分类", "导出"
+    "打开影像", "分割", "对象标注", "对象分类", "导出 / 精度 / 上主图"
   };
   const std::vector<StepKind> expectedKinds = {
     StepKind::Interactive,
@@ -391,8 +391,10 @@ TEST_CASE( "Builtin lab.obia has 5 steps in order", "[workflow]" )
 
   REQUIRE( d->steps[1].operatorId == "rs:obia_segment" );
   REQUIRE( d->steps[1].artifactOnSuccess == "segment_map" );
+  REQUIRE( d->steps[0].artifactOnSuccess == "source_raster" );
   REQUIRE( d->steps[3].operatorId == "rs:obia_classify" );
   REQUIRE( d->steps[3].artifactOnSuccess == "classified_output" );
+  REQUIRE( d->steps[4].title == "导出 / 精度 / 上主图" );
 
   REQUIRE_FALSE( d->steps[1].gates.empty() );
   REQUIRE( d->steps[1].gates[0].require == "hasArtifact:source_raster" );

@@ -47,6 +47,14 @@ target_link_libraries(qgis_app_obia PUBLIC
     GDAL::GDAL
 )
 
+# Accuracy dialog/panel shared with pixel classification UI.
+if(TARGET qgis_app_classify)
+    target_link_libraries(qgis_app_obia PUBLIC qgis_app_classify)
+    target_include_directories(qgis_app_obia PUBLIC
+        ${CMAKE_SOURCE_DIR}/src/app/classification
+    )
+endif()
+
 target_compile_definitions(qgis_app_obia PUBLIC SICNU_HAS_OPENCV=1)
 
 set_target_properties(qgis_app_obia PROPERTIES

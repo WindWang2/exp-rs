@@ -93,8 +93,18 @@ void QgisDesktopWindow::openObiaWindow()
 {
     if ( !m_obiaWindow )
     {
-        m_obiaWindow = new RsObiaMainWindow( this );
-        m_obiaWindow->setAttribute( Qt::WA_DeleteOnClose, false );
+        auto *obia = new RsObiaMainWindow( this );
+        obia->setAttribute( Qt::WA_DeleteOnClose, false );
+        // Product UX: load classified result into main project map on request.
+        connect( obia, &RsObiaMainWindow::requestLoadToMainMap,
+                 this, [this]( const QString &path ) {
+                     if ( path.isEmpty() )
+                         return;
+                     ( void ) loadDataLayer( path );
+                     statusBar()->showMessage(
+                         tr( "已加载 OBIA 分类结果到主图：%1" ).arg( path ), 5000 );
+                 } );
+        m_obiaWindow = obia;
     }
     m_obiaWindow->show();
     m_obiaWindow->raise();

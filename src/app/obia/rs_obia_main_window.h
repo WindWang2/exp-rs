@@ -10,6 +10,7 @@
 #include "rs_segment_select_tool.h"
 #include "rs_obia_segmentation.h"
 #include "rs_obia_task.h"
+#include "rs_accuracy_assessment.h"
 
 #include "processing/framework/task_center.h"
 
@@ -59,6 +60,18 @@ class RsObiaMainWindow : public QMainWindow
     long pendingTaskId() const { return m_pendingTaskId; }
     int segmentCount() const { return static_cast<int>( mSegMap.segmentCount() ); }
 
+    /// Last classification output path (empty if none).
+    QString lastClassRasterPath() const { return mLastClassRasterPath; }
+    bool hasAccuracyResult() const { return mHasAccuracy; }
+    RsAccuracyAssessment::Result lastAccuracy() const { return mLastAccuracy; }
+
+  signals:
+    /// Ask main window to load the classified raster into the project canvas.
+    void requestLoadToMainMap( const QString &rasterPath );
+    /// Classification finished with optional training-set accuracy.
+    void classificationFinished( const QString &rasterPath,
+                                 const RsAccuracyAssessment::Result &accuracy );
+
   private slots:
     void loadRaster();
     void runSegmentation();
@@ -73,6 +86,8 @@ class RsObiaMainWindow : public QMainWindow
     void onSelectionCleared();
     void onAssignClass();
     void onObiaTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
+    void showAccuracyAssessment();
+    void loadResultToMainMap();
 
   private:
     enum class PendingOp
@@ -121,6 +136,12 @@ class RsObiaMainWindow : public QMainWindow
     int mClassifyLevel = 0; // default finest
     bool mHasHierarchy = false;
     QString mLastClassRasterPath;
+    RsAccuracyAssessment::Result mLastAccuracy;
+    bool mHasAccuracy = false;
+
+    void rememberClassification( const QString &outputPath,
+                                 const RsAccuracyAssessment::Result &accuracy );
+    QHash<int, QString> classNameMap() const;
 
   public:
     struct ClassDef
@@ -167,6 +188,7 @@ class RsObiaMainWindow : public QMainWindow
         QString error;
         QString outputPath;
         int clsLevel = 0;
+        RsAccuracyAssessment::Result accuracy;
     };
 
     PendingOp m_pendingOp = PendingOp::None;

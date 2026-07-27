@@ -149,9 +149,9 @@ void registerGeorefImageToMap( WorkflowRegistry &reg )
   reg.registerDefinition( std::move( d ) );
 }
 
-/// OBIA workspace stub (mirrors RsObiaMainWindow toolbar: load → segment →
-/// label → classify → export). UI still owns RsObiaMainWindow / RsObiaTask;
-/// Runtime binding can land later without changing the definition id.
+/// OBIA lab workflow — mirrors RsObiaMainWindow: open → segment → label →
+/// classify → export. Workspace host opens the OBIA window (HostKind::Workspace);
+/// operator steps use rs:obia_segment / rs:obia_classify (same ids as pipelines).
 void registerObia( WorkflowRegistry &reg )
 {
   WorkflowDefinition d;
@@ -164,6 +164,7 @@ void registerObia( WorkflowRegistry &reg )
   openImage.id = "open_image";
   openImage.title = "打开影像";
   openImage.kind = StepKind::Interactive;
+  openImage.artifactOnSuccess = "source_raster";
 
   StepDef segment;
   segment.id = "segment";
@@ -189,7 +190,7 @@ void registerObia( WorkflowRegistry &reg )
 
   StepDef exportStep;
   exportStep.id = "export";
-  exportStep.title = "导出";
+  exportStep.title = "导出 / 精度 / 上主图";
   exportStep.kind = StepKind::Review;
   exportStep.gates.push_back( {"hasArtifact:classified_output", "请先完成对象分类"} );
 
