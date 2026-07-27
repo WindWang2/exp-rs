@@ -237,6 +237,7 @@ if(SICNU_EMBED_PYTHON)
         ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_console.cpp
         ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_api.cpp
         ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
+        ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_runner.cpp
     )
     target_include_directories(sicnu_geo_rs PRIVATE ${CMAKE_SOURCE_DIR}/src/python)
     target_link_libraries(sicnu_geo_rs PRIVATE Python::Python)

@@ -166,8 +166,9 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     applyProductShellLayout();
 
 #ifdef SICNU_EMBED_PYTHON
-    // Initialize Python API with map canvas
+    // Initialize Python API with map canvas and active view host
     SicnuPythonApi::instance().initialize(m_mapCanvas);
+    SicnuPythonApi::instance().setActiveViewHost(m_activeViewHost.get());
 #endif
 
     // Restore theme preference

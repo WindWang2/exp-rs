@@ -10,6 +10,8 @@ class QgsProject;
 class QgsRasterLayer;
 class QgsVectorLayer;
 
+class ActiveViewHost;
+
 /**
  * Provides Python-accessible API to the SICNU GEO RS platform.
  * This class exposes core functionality that Python scripts can use.
@@ -22,6 +24,8 @@ public:
     static SicnuPythonApi &instance();
 
     void initialize(QgsMapCanvas *canvas);
+    void setActiveViewHost(ActiveViewHost *host) { m_activeViewHost = host; }
+    ActiveViewHost *activeViewHost() const { return m_activeViewHost; }
 
     // ---- Project ----
     Q_INVOKABLE QString projectPath() const;
@@ -66,4 +70,5 @@ private:
     SicnuPythonApi(QObject *parent = nullptr);
 
     QgsMapCanvas *m_canvas = nullptr;
+    ActiveViewHost *m_activeViewHost = nullptr;
 };

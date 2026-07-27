@@ -5,6 +5,8 @@
 
 #include "qgis_python.h"
 #include "sicnu_python_api.h"
+#include "sicnu_python_runner.h"
+#include "qgspythonrunner.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -230,6 +232,7 @@ print(f"SICNU: Available packages: {', '.join(available)}")
     runString(verifyPackages, error);
 
     m_initialized = true;
+    QgsPythonRunner::setInstance( new SicnuPythonRunner() );
     qDebug() << "Python initialized:" << pythonVersion();
     return true;
 }

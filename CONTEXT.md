@@ -89,3 +89,14 @@ _Avoid_: File timestamp, Layer version
 **Derivation Record**:
 The structured provenance of an algorithm-produced Data Asset, including the algorithm version, parameter snapshot, and input Asset IDs and revisions.
 _Avoid_: Log entry, Processing note, History string
+
+## Python Plugin Infrastructure
+
+**Plugin Host**:
+The unified lifecycle and discovery manager (`PluginManager`) hosting both C++ (`QPluginLoader`) and Python (`classFactory(iface)`) plugins.
+_Avoid_: Script runner, Plugin store
+
+**Application Interface Facade (`iface`)**:
+The application interface facade (`SicnuAppInterface` subclassing `QgisInterface`) passed into Python plugins, wrapping `QgisDesktopWindow`, `ActiveViewHost`, and `ProjectContext` while enforcing the Data/Display seam.
+_Avoid_: Raw main window pointer, Global QgisApp instance
+

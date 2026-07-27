@@ -17,6 +17,8 @@
 #include <processing/qgsprocessingcontext.h>
 #include <processing/qgsprocessingfeedback.h>
 
+#include "active_view_host.h"
+
 #include <QFileInfo>
 #include <QCoreApplication>
 
@@ -72,6 +74,14 @@ int SicnuPythonApi::layerCount() const
 
 QString SicnuPythonApi::addRasterLayer(const QString &path, const QString &name)
 {
+    if (m_activeViewHost) {
+        const auto res = m_activeViewHost->openRasterPath(path);
+        if (res) {
+            return QFileInfo(path).baseName();
+        }
+        return QString();
+    }
+    // Fallback when no active view host bound (headless tests)
     QString layerName = name.isEmpty() ? QFileInfo(path).baseName() : name;
     auto *layer = new QgsRasterLayer(path, layerName);
     if (!layer->isValid()) {
@@ -85,6 +95,14 @@ QString SicnuPythonApi::addRasterLayer(const QString &path, const QString &name)
 
 QString SicnuPythonApi::addVectorLayer(const QString &path, const QString &name)
 {
+    if (m_activeViewHost) {
+        const auto res = m_activeViewHost->openVectorPath(path);
+        if (res) {
+            return QFileInfo(path).baseName();
+        }
+        return QString();
+    }
+    // Fallback when no active view host bound (headless tests)
     QString layerName = name.isEmpty() ? QFileInfo(path).baseName() : name;
     auto *layer = new QgsVectorLayer(path, layerName, "ogr");
     if (!layer->isValid()) {

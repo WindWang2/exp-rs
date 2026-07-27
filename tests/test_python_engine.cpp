@@ -1,0 +1,107 @@
+#include <catch2/catch_session.hpp>
+#include <catch2/catch_test_macros.hpp>
+
+#include "python/qgis_python.h"
+#include "python/sicnu_python_api.h"
+#include "python/sicnu_python_runner.h"
+#include "qgspythonrunner.h"
+
+#include "active_view_host.h"
+#include "project_context.h"
+#include "data/data_manager.h"
+#include "display/qgis_display_manager.h"
+
+#include <qgsapplication.h>
+#include <qgsproject.h>
+#include <qgsmapcanvas.h>
+#include <qgslayertreeview.h>
+
+#include <QFileInfo>
+#include <QDir>
+
+static QString fixturePath( const QString &relativePath )
+{
+  return QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( relativePath );
+}
+
+int main( int argc, char *argv[] )
+{
+  QgsApplication application( argc, argv, true );
+  QgsApplication::initQgis();
+  const int result = Catch::Session().run( argc, argv );
+  QgsProject::instance()->clear();
+  QgsApplication::exitQgis();
+  return result;
+}
+
+TEST_CASE( "QgisPython singleton initializes and runs embedded code", "[python][engine]" )
+{
+  REQUIRE( QgisPython::instance().initialize() );
+  CHECK( QgisPython::instance().isInitialized() );
+
+  QString error;
+  bool ok = QgisPython::instance().runString( QStringLiteral( "x = 100 + 200" ), error );
+  REQUIRE( ok );
+
+  QString result;
+  ok = QgisPython::instance().evalString( QStringLiteral( "str(x)" ), result, error );
+  REQUIRE( ok );
+  CHECK( result == QStringLiteral( "300" ) );
+}
+
+TEST_CASE( "SicnuPythonRunner is registered globally with QgsPythonRunner", "[python][runner]" )
+{
+  REQUIRE( QgisPython::instance().initialize() );
+  REQUIRE( QgsPythonRunner::isValid() );
+
+  QString result;
+  bool ok = QgsPythonRunner::eval( QStringLiteral( "5 * 9" ), result );
+  REQUIRE( ok );
+  CHECK( result == QStringLiteral( "45" ) );
+
+  ok = QgsPythonRunner::run( QStringLiteral( "y = 'sicnu_geo'" ) );
+  REQUIRE( ok );
+
+  ok = QgsPythonRunner::eval( QStringLiteral( "y" ), result );
+  REQUIRE( ok );
+  CHECK( result == QStringLiteral( "sicnu_geo" ) );
+}
+
+TEST_CASE( "SicnuPythonApi routes layer addition through ActiveViewHost and Data/Display seam", "[python][api]" )
+{
+  REQUIRE( QgisPython::instance().initialize() );
+
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  QgsLayerTreeView treeView;
+  const sicnu::display::DisplayViewSpec viewSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore()};
+  auto createdContext = sicnu::app::ProjectContext::create(viewSpec);
+  REQUIRE(createdContext);
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+
+  ActiveViewHost activeViewHost(&canvas, &treeView, nullptr,
+                                &context->dataManager(), &context->displayManager(),
+                                context->mainViewId(), nullptr);
+  activeViewHost.initLayerTree();
+
+  SicnuPythonApi::instance().initialize(&canvas);
+  SicnuPythonApi::instance().setActiveViewHost(&activeViewHost);
+
+  const QString demPath = fixturePath(QStringLiteral("samples/dem_sample.tif"));
+  const QString addedName = SicnuPythonApi::instance().addRasterLayer(demPath);
+  REQUIRE_FALSE(addedName.isEmpty());
+
+  // Verify Data Asset was registered in DataManager
+  CHECK(context->dataManager().assets().size() == 1);
+  const auto assetId = context->dataManager().assets().first().id();
+  CHECK(context->dataManager().leaseCount(assetId) == 1);
+
+  // Verify Display Layer was created in DisplayManager's main view
+  const auto mainView = context->displayManager().view(context->mainViewId());
+  REQUIRE(mainView);
+  CHECK(mainView->layerIds().size() == 1);
+  CHECK(project->count() == 1);
+}
