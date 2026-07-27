@@ -593,7 +593,7 @@ void QgisDesktopWindow::layoutToolbarsUnderRibbon()
     if ( !stripLay )
         return;
 
-    // Detach any restoreState main-window toolbars.
+    // Drop any restoreState main-window toolbars (non-product).
     for ( QToolBar *tb : findChildren<QToolBar *>() )
     {
         if ( !tb || tb == m_mapToolsToolBar || tb == m_digitizeToolBar )
@@ -601,56 +601,78 @@ void QgisDesktopWindow::layoutToolbarsUnderRibbon()
         tb->hide();
         removeToolBar( tb );
     }
+    // Ensure product bars are not in the main-window toolbar area.
     if ( m_mapToolsToolBar )
         removeToolBar( m_mapToolsToolBar );
     if ( m_digitizeToolBar )
         removeToolBar( m_digitizeToolBar );
 
-    // Rebuild strip: at most two visible rows, fixed order.
+    // Clear strip layout entries without destroying the toolbars.
     while ( QLayoutItem *item = stripLay->takeAt( 0 ) )
-    {
-        if ( QWidget *w = item->widget() )
-            w->setParent( this );
         delete item;
-    }
 
-    QList<QToolBar *> ordered = { m_mapToolsToolBar, m_digitizeToolBar };
+    const QList<QToolBar *> ordered = { m_mapToolsToolBar, m_digitizeToolBar };
     int visibleRows = 0;
     for ( QToolBar *tb : ordered )
     {
         if ( !tb )
             continue;
+
+        // Source of truth: checkable toggleViewAction (synced by QToolBar::setVisible).
+        QAction *toggle = tb->toggleViewAction();
+        const bool wantVisible = toggle ? toggle->isChecked() : !tb->isHidden();
+
         tb->setParent( m_toolbarStrip );
         tb->setMovable( false );
         tb->setFloatable( false );
-        // isHidden tracks toggleViewAction; only visible bars occupy a row.
-        if ( !tb->isHidden() && visibleRows < 2 )
+        tb->setAllowedAreas( {} );
+
+        if ( wantVisible && visibleRows < 2 )
         {
             stripLay->addWidget( tb );
-            tb->show();
+            tb->setVisible( true );
+            if ( toggle )
+                toggle->setChecked( true );
             ++visibleRows;
         }
-        else if ( tb->isHidden() )
+        else
         {
-            tb->hide();
+            tb->setVisible( false );
+            if ( toggle && !wantVisible )
+                toggle->setChecked( false );
+            // Cap at two rows: force uncheck if we would exceed.
+            if ( toggle && wantVisible && visibleRows >= 2 )
+                toggle->setChecked( false );
         }
     }
 
     constexpr int kRowH = 32;
     constexpr int kBaseChrome = 184;
     const int stripH = visibleRows * kRowH;
+    m_toolbarStrip->setUpdatesEnabled( false );
     m_toolbarStrip->setFixedHeight( stripH );
+    m_toolbarStrip->setMinimumHeight( stripH );
+    m_toolbarStrip->setMaximumHeight( stripH );
     m_toolbarStrip->setVisible( visibleRows > 0 );
+    m_toolbarStrip->setUpdatesEnabled( true );
 
     const int chromeH = kBaseChrome + stripH;
     if ( m_topChrome )
+    {
         m_topChrome->setFixedHeight( chromeH );
+        m_topChrome->setMinimumHeight( chromeH );
+        m_topChrome->setMaximumHeight( kBaseChrome + 2 * kRowH );
+    }
     if ( QDockWidget *ribbonDock = findChild<QDockWidget *>( QStringLiteral( "rsRibbonDock" ) ) )
     {
         ribbonDock->setFixedHeight( chromeH );
         ribbonDock->setMinimumHeight( chromeH );
         ribbonDock->setMaximumHeight( kBaseChrome + 2 * kRowH );
+        // Force dock to re-layout after height change.
+        ribbonDock->updateGeometry();
     }
+    if ( m_topChrome )
+        m_topChrome->updateGeometry();
 }
 
 void QgisDesktopWindow::applyProductShellLayout()
@@ -663,11 +685,19 @@ void QgisDesktopWindow::applyProductShellLayout()
     setCorner( Qt::TopRightCorner, Qt::TopDockWidgetArea );
     setMenuWidget( nullptr );
 
-    // Default: toolbars off (user re-enables via ribbon context menu → 工具栏).
+    // Default: show 导航与显示 under the ribbon (1 row); digitize stays optional.
     if ( m_mapToolsToolBar )
-        m_mapToolsToolBar->hide();
+    {
+        m_mapToolsToolBar->show();
+        if ( m_mapToolsToolBar->toggleViewAction() )
+            m_mapToolsToolBar->toggleViewAction()->setChecked( true );
+    }
     if ( m_digitizeToolBar )
+    {
         m_digitizeToolBar->hide();
+        if ( m_digitizeToolBar->toggleViewAction() )
+            m_digitizeToolBar->toggleViewAction()->setChecked( false );
+    }
     layoutToolbarsUnderRibbon();
 
     auto hideDock = []( QDockWidget *dock ) {

@@ -324,10 +324,7 @@ QMenu *QgisDesktopWindow::createPopupMenu()
             continue;
         if ( act->text().trimmed().isEmpty() )
             act->setText( tb->windowTitle() );
-        // Re-host under the ribbon strip and resize chrome when toggled.
-        connect( act, &QAction::toggled, this, [this]( bool ) {
-            layoutToolbarsUnderRibbon();
-        }, Qt::UniqueConnection );
+        // Visibility wiring is done once in setupToolbars(); menu only lists actions.
         toolbarActions.append( act );
     }
 

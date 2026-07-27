@@ -20,6 +20,7 @@
 #include <QPair>
 #include <QStyle>
 #include <QSignalBlocker>
+#include <QTimer>
 
 #include <qgsmaplayer.h>
 #include <qgsmapcanvas.h>
@@ -620,7 +621,10 @@ void QgisDesktopWindow::setupToolbars()
     tip( mapToolsToolBar->addAction( ic( "dis_l_y" ), tr( "图层属性" ),
                                      this, &QgisDesktopWindow::layerProperties ),
          tr( "打开当前图层属性" ) );
-    mapToolsToolBar->hide();
+    // Visible by default under the ribbon (hosted later in rsToolbarStrip).
+    mapToolsToolBar->show();
+    if ( mapToolsToolBar->toggleViewAction() )
+        mapToolsToolBar->toggleViewAction()->setChecked( true );
 
     // Row 2 (when shown): digitizing / vector edit
     m_digitizeToolBar = new QToolBar( tr( "数字化" ), this );
@@ -681,6 +685,22 @@ void QgisDesktopWindow::setupToolbars()
     for ( QAction *a : m_editingToolActions )
         digitizeToolBar->addAction( a );
     digitizeToolBar->hide();
+    if ( digitizeToolBar->toggleViewAction() )
+        digitizeToolBar->toggleViewAction()->setChecked( false );
+
+    // Keep strip geometry in sync when the user toggles bars (ribbon context menu).
+    auto wireToggle = [this]( QToolBar *tb ) {
+        if ( !tb || !tb->toggleViewAction() )
+            return;
+        connect( tb->toggleViewAction(), &QAction::toggled, this,
+                 [this]( bool ) {
+                     // Defer until QToolBar has applied visibility.
+                     QTimer::singleShot( 0, this, &QgisDesktopWindow::layoutToolbarsUnderRibbon );
+                 },
+                 Qt::UniqueConnection );
+    };
+    wireToggle( m_mapToolsToolBar );
+    wireToggle( m_digitizeToolBar );
 
     // CRS picker lives on the status bar; create here for wiring.
     m_crsSelector = new QgsProjectionSelectionWidget( this );
