@@ -1,0 +1,3 @@
+# 0009 Separate Data Assets from Display Layers
+
+We decided that project data identity and presentation are separate architectural authorities. A project-scoped Data Manager owns Data Assets, revisions, capabilities, dependencies, leases, and persistence policy; a Display Manager owns Display Views and independent Display Layers backed by distinct `QgsMapLayer` instances. Algorithms reference Asset IDs rather than the current canvas layer, while `.qgs/.qgz` remains the project container. This rejects both a raster-only manager and `QgsProject`/`QgsMapLayer` as the sole data model because they cannot provide independent multi-view rendering, non-displayed processing inputs, remote-map capability safety, or explicit data lifecycle semantics.
