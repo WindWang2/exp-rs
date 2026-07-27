@@ -1,63 +1,72 @@
 /***************************************************************************
- * rs_job_runner.cpp
+ * rs_job_runner.cpp — routes through Task Center (no direct JobEngine submit)
  ***************************************************************************/
 #include "rs_job_runner.h"
 
-#include "job_engine_qt_bridge.h"
-
 #include <QMetaObject>
 
-using sicnu::jobs::JobEngine;
-using sicnu::jobs::JobRecord;
+using sicnu::TaskStatus;
 using sicnu::jobs::JobState;
 
 namespace {
 
-QString watchJob( const std::string &id,
-                  RsJobRunner::FinishedFn onFinished,
-                  QObject *context )
+sicnu::jobs::JobState mapStatus( TaskStatus status )
 {
-  if ( id.empty() || !onFinished )
+  switch ( status )
+  {
+    case TaskStatus::Queued:
+      return JobState::Queued;
+    case TaskStatus::Running:
+    case TaskStatus::Paused:
+      return JobState::Running;
+    case TaskStatus::Completed:
+      return JobState::Succeeded;
+    case TaskStatus::Canceled:
+      return JobState::Cancelled;
+    case TaskStatus::Failed:
+    default:
+      return JobState::Failed;
+  }
+}
+
+QString watchTask( long taskId,
+                   RsJobRunner::FinishedFn onFinished,
+                   QObject *context )
+{
+  if ( taskId <= 0 || !onFinished )
     return {};
 
-  const QString jobId = QString::fromStdString( id );
-  auto *bridge = JobEngineQtBridge::instance();
-
-  // Lifetime: parent a tiny holder under context (or bridge) so closing a
-  // window drops the connection before the callback fires.
-  QObject *lifetime = context ? context : static_cast<QObject *>( bridge );
+  auto *lifetime = context ? context
+                           : static_cast<QObject *>(
+                               const_cast<sicnu::TaskCenter *>( &sicnu::TaskCenter::instance() ) );
   auto *holder = new QObject( lifetime );
   auto *conn = new QMetaObject::Connection;
 
   *conn = QObject::connect(
-    bridge, &JobEngineQtBridge::jobFinished, holder,
-    [jobId, onFinished, conn, holder]( const QString &finishedId ) {
-      if ( finishedId != jobId )
+    &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, holder,
+    [taskId, onFinished, conn, holder]( const sicnu::AlgorithmTaskInfo &info ) {
+      if ( info.taskId != taskId )
         return;
+      if ( info.status != TaskStatus::Completed
+           && info.status != TaskStatus::Failed
+           && info.status != TaskStatus::Canceled )
+        return;
+
       QObject::disconnect( *conn );
       delete conn;
 
       RsJobFinish fin;
-      fin.jobId = jobId;
-      if ( auto snap = JobEngine::instance().snapshot( jobId.toStdString() ) )
-      {
-        fin.state = snap->state;
-        fin.record = *snap;
-        fin.result = snap->result;
-        fin.error = QString::fromStdString( snap->error );
-      }
-      else
-      {
-        fin.state = JobState::Failed;
-        fin.error = QObject::tr( "任务记录丢失" );
-      }
-
+      fin.taskId = taskId;
+      fin.jobId = QString::fromStdString( info.jobId );
+      fin.state = mapStatus( info.status );
+      fin.result = info.resultPayload;
+      fin.error = info.errorMessage;
       onFinished( fin );
       holder->deleteLater();
     },
     Qt::QueuedConnection );
 
-  return jobId;
+  return QString::number( taskId );
 }
 
 } // namespace
@@ -71,9 +80,9 @@ QString RsJobRunner::run( sicnu::jobs::JobRequest req,
   if ( !onFinished )
     return {};
 
-  const std::string id = JobEngine::instance().submit(
-    std::move( req ), std::move( body ), std::move( onCancel ) );
-  return watchJob( id, std::move( onFinished ), context );
+  const long taskId = sicnu::TaskCenter::instance().submitJob(
+    req, std::move( body ), std::move( onCancel ) );
+  return watchTask( taskId, std::move( onFinished ), context );
 }
 
 QString RsJobRunner::runOperator( sicnu::jobs::JobRequest req,
@@ -83,6 +92,6 @@ QString RsJobRunner::runOperator( sicnu::jobs::JobRequest req,
   if ( !onFinished )
     return {};
 
-  const std::string id = JobEngine::instance().submit( std::move( req ) );
-  return watchJob( id, std::move( onFinished ), context );
+  const long taskId = sicnu::TaskCenter::instance().submitJob( std::move( req ) );
+  return watchTask( taskId, std::move( onFinished ), context );
 }

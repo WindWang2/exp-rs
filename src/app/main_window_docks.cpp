@@ -290,12 +290,12 @@ void QgisDesktopWindow::setupDockWidgets()
     m_logDock->setObjectName("logDock");
     addDockWidget(Qt::BottomDockWidgetArea, m_logDock);
 
-    // Unified JobEngine panel (Bottom, tabified with Log)
+    // Unified Task Center projection panel (Bottom, tabified with Log)
     m_jobPanel = new RsJobPanel( this );
     addDockWidget( Qt::BottomDockWidgetArea, m_jobPanel );
     tabifyDockWidget( m_logDock, m_jobPanel );
     m_jobPanel->raise();
-    JobEngineQtBridge::instance(); // ensure listener is installed
+    JobEngineQtBridge::instance(); // keep Qt bridge for internal JobEngine events
     ProcessingJobAdapter::registerProcessingJobExecutor();
 
     // Guided Workflow Panel (Right, tabified with processing)

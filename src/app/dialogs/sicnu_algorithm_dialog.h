@@ -1,8 +1,8 @@
 // sicnu_algorithm_dialog.h — Concrete processing algorithm dialog that uses
 // the full QGIS widget wrapper system (QgsProcessingGuiRegistry).
 //
-// Run path submits to JobEngine (processing: prefix / per-job callable) so
-// toolbox algorithms appear in RsJobPanel with the rest of the unified queue.
+// Run path submits through Task Center (processing: prefix / per-job callable)
+// so toolbox algorithms appear in the unified task list with the rest of the queue.
 #pragma once
 
 #include <gui/processing/qgsprocessingalgorithmdialogbase.h>
@@ -14,6 +14,8 @@
 
 #include <memory>
 
+#include "processing/framework/task_center.h"
+
 class QCheckBox;
 class QPlainTextEdit;
 class QGroupBox;
@@ -22,7 +24,7 @@ class QgsProcessingParametersWidget;
 class QgsProcessingAlgorithm;
 
 /**
- * Shared state for one JobEngine-backed processing run.
+ * Shared state for one Task Center-backed processing run.
  * prepare() on GUI thread; runPrepared() on worker; postProcess() on GUI.
  */
 struct SicnuProcessingRunState
@@ -33,7 +35,7 @@ struct SicnuProcessingRunState
   std::unique_ptr<QgsProcessingAlgorithm> algorithm;
   QVariantMap parameters;
   QVariantMap results;
-  /** True once the JobEngine worker entered runPrepared (postProcess required). */
+  /** True once the worker entered runPrepared (postProcess required). */
   bool workerStarted = false;
 };
 
@@ -50,7 +52,7 @@ class SicnuAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
     // QgsProcessingContextGenerator interface
     QgsProcessingContext *processingContext() override;
 
-    // Called when user clicks "Run" — submits to JobEngine
+    // Called when user clicks "Run" — submits via Task Center
     void runAlgorithm() override;
 
     // Called by the main window to set up the parameter UI
@@ -64,11 +66,11 @@ class SicnuAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
     void finished( bool successful, const QVariantMap &result,
                    QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override;
 
-    /** Stay alive while a JobEngine job is in flight (no mAlgorithmTask). */
+    /** Stay alive while a Task Center job is in flight (no mAlgorithmTask). */
     bool isFinalized() override;
 
   private slots:
-    void onProcessingJobFinished( const QString &jobId );
+    void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
   private:
     QgsProcessingContext mContext;
@@ -82,7 +84,6 @@ class SicnuAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
     QGroupBox *mCommandGroup = nullptr;
     QPlainTextEdit *mCommandPreview = nullptr;
 
-    QString mPendingJobId;
+    long mPendingTaskId = -1;
     std::shared_ptr<SicnuProcessingRunState> mRunState;
-    bool mJobBridgeConnected = false;
 };

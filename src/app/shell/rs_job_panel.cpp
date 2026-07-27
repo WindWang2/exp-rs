@@ -1,13 +1,9 @@
 /***************************************************************************
- * rs_job_panel.cpp — 任务中心：详情 / 右键 / 加载到主图
+ * rs_job_panel.cpp — Task Center projection: 详情 / 右键 / 加载到主图
  ***************************************************************************/
 #include "rs_job_panel.h"
 
-#include "job_engine_qt_bridge.h"
 #include "main_window.h"
-
-#include "jobs/job_engine.h"
-#include "jobs/job_types.h"
 
 #include <QAbstractItemView>
 #include <QApplication>
@@ -34,33 +30,14 @@
 #include <sstream>
 #include <vector>
 
-using sicnu::jobs::JobEngine;
-using sicnu::jobs::JobLogLevel;
-using sicnu::jobs::JobRecord;
-using sicnu::jobs::JobState;
-
 namespace {
 
-constexpr int RoleJobId = Qt::UserRole;
+constexpr int RoleTaskId = Qt::UserRole;
 constexpr int RoleState = Qt::UserRole + 1;
 constexpr int ColTitle = 0;
 constexpr int ColState = 1;
 constexpr int ColProgress = 2;
 constexpr int ColLoad = 3;
-
-QString logLevelPrefix( JobLogLevel level )
-{
-  switch ( level )
-  {
-    case JobLogLevel::Warning:
-      return QStringLiteral( "WARN" );
-    case JobLogLevel::Error:
-      return QStringLiteral( "ERROR" );
-    case JobLogLevel::Info:
-    default:
-      return QStringLiteral( "INFO" );
-  }
-}
 
 bool looksLikePathKey( const QString &key )
 {
@@ -82,7 +59,6 @@ bool isExistingPath( const QString &s )
 {
   if ( s.isEmpty() || s.size() < 2 )
     return false;
-  // Absolute path or Windows drive / UNC-ish
   if ( s.startsWith( QLatin1Char( '/' ) ) || ( s.size() > 2 && s[1] == QLatin1Char( ':' ) ) )
     return QFileInfo::exists( s );
   return QFileInfo::exists( s );
@@ -98,25 +74,45 @@ void collectStringPaths( const Json::Value &v, QStringList &out )
     else if ( !s.isEmpty() && ( s.endsWith( QLatin1String( ".tif" ), Qt::CaseInsensitive )
                                 || s.endsWith( QLatin1String( ".tiff" ), Qt::CaseInsensitive )
                                 || s.endsWith( QLatin1String( ".shp" ), Qt::CaseInsensitive )
-                                || s.endsWith( QLatin1String( ".gpkg" ), Qt::CaseInsensitive )
-                                || s.endsWith( QLatin1String( ".img" ), Qt::CaseInsensitive )
-                                || s.endsWith( QLatin1String( ".vrt" ), Qt::CaseInsensitive ) )
+                                || s.endsWith( QLatin1String( ".gpkg" ), Qt::CaseInsensitive ) )
               && !out.contains( s ) )
     {
-      // Include likely outputs even if not yet on disk (failed jobs) — load will skip missing.
       out.append( s );
     }
   }
   else if ( v.isArray() )
   {
-    for ( const auto &e : v )
-      collectStringPaths( e, out );
+    for ( Json::ArrayIndex i = 0; i < v.size(); ++i )
+      collectStringPaths( v[i], out );
   }
   else if ( v.isObject() )
   {
     for ( const auto &name : v.getMemberNames() )
       collectStringPaths( v[name], out );
   }
+}
+
+bool isActiveStatus( sicnu::TaskStatus status )
+{
+  return status == sicnu::TaskStatus::Queued
+         || status == sicnu::TaskStatus::Running
+         || status == sicnu::TaskStatus::Paused;
+}
+
+bool isTerminalStatus( sicnu::TaskStatus status )
+{
+  return status == sicnu::TaskStatus::Completed
+         || status == sicnu::TaskStatus::Failed
+         || status == sicnu::TaskStatus::Canceled;
+}
+
+QString taskTitle( const sicnu::AlgorithmTaskInfo &info )
+{
+  if ( info.hasJobRequest && !info.jobRequest.title.empty() )
+    return QString::fromStdString( info.jobRequest.title );
+  if ( !info.algorithmName.isEmpty() )
+    return info.algorithmName;
+  return info.algorithmId;
 }
 
 } // namespace
@@ -129,9 +125,10 @@ RsJobPanel::RsJobPanel( QWidget *parent )
 
   setupUi();
 
-  auto *bridge = JobEngineQtBridge::instance();
-  connect( bridge, &JobEngineQtBridge::jobUpdated, this, &RsJobPanel::onJobUpdated );
-  connect( bridge, &JobEngineQtBridge::jobFinished, this, &RsJobPanel::onJobFinished );
+  auto &center = sicnu::TaskCenter::instance();
+  connect( &center, &sicnu::TaskCenter::taskAdded, this, &RsJobPanel::onTaskAdded, Qt::QueuedConnection );
+  connect( &center, &sicnu::TaskCenter::taskUpdated, this, &RsJobPanel::onTaskUpdated, Qt::QueuedConnection );
+  connect( &center, &sicnu::TaskCenter::taskLogAdded, this, &RsJobPanel::onTaskLogAdded, Qt::QueuedConnection );
 
   refreshAll();
 }
@@ -222,8 +219,8 @@ void RsJobPanel::setupUi()
   connect( m_jobTree, &QTreeWidget::itemChanged, this, &RsJobPanel::onItemChanged );
   connect( m_cancelBtn, &QPushButton::clicked, this, &RsJobPanel::onCancelClicked );
   connect( m_loadBtn, &QPushButton::clicked, this, [this]() {
-    const QString id = selectedJobId();
-    if ( id.isEmpty() )
+    const long id = selectedTaskId();
+    if ( id < 0 )
       return;
     const int n = loadPathsToMain( collectOutputPaths( id ) );
     if ( n <= 0 )
@@ -235,22 +232,24 @@ void RsJobPanel::setupUi()
            this, &RsJobPanel::onFilterChanged );
 }
 
-QString RsJobPanel::stateToString( int state )
+QString RsJobPanel::statusToString( sicnu::TaskStatus status )
 {
-  switch ( static_cast<JobState>( state ) )
+  switch ( status )
   {
-    case JobState::Queued:
-      return tr( "排队" );
-    case JobState::Running:
-      return tr( "运行中" );
-    case JobState::Succeeded:
-      return tr( "成功" );
-    case JobState::Failed:
-      return tr( "失败" );
-    case JobState::Cancelled:
-      return tr( "已取消" );
+    case sicnu::TaskStatus::Queued:
+      return QObject::tr( "排队" );
+    case sicnu::TaskStatus::Running:
+      return QObject::tr( "运行中" );
+    case sicnu::TaskStatus::Paused:
+      return QObject::tr( "已暂停" );
+    case sicnu::TaskStatus::Completed:
+      return QObject::tr( "成功" );
+    case sicnu::TaskStatus::Failed:
+      return QObject::tr( "失败" );
+    case sicnu::TaskStatus::Canceled:
+      return QObject::tr( "已取消" );
   }
-  return tr( "未知" );
+  return QObject::tr( "未知" );
 }
 
 QString RsJobPanel::formatProgress( double progress )
@@ -289,7 +288,7 @@ bool RsJobPanel::passesFilter( const QString &stateText ) const
   if ( key == QLatin1String( "all" ) )
     return true;
   if ( key == QLatin1String( "active" ) )
-    return stateText == tr( "排队" ) || stateText == tr( "运行中" );
+    return stateText == tr( "排队" ) || stateText == tr( "运行中" ) || stateText == tr( "已暂停" );
   if ( key == QLatin1String( "failed" ) )
     return stateText == tr( "失败" );
   if ( key == QLatin1String( "finished" ) )
@@ -297,65 +296,54 @@ bool RsJobPanel::passesFilter( const QString &stateText ) const
   return true;
 }
 
-bool RsJobPanel::loadToMainPreference( const QString &jobId ) const
+bool RsJobPanel::loadToMainPreference( long taskId ) const
 {
-  if ( m_loadToMain.contains( jobId ) )
-    return m_loadToMain.value( jobId );
-  auto snap = JobEngine::instance().snapshot( jobId.toStdString() );
-  if ( !snap )
+  if ( m_loadToMain.contains( taskId ) )
+    return m_loadToMain.value( taskId );
+  const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+  if ( info.taskId != taskId )
     return false;
-  // Optional request.params.loadOutputsToMain boolean
-  const auto &p = snap->request.params;
-  if ( p.isObject() && p.isMember( "loadOutputsToMain" ) && p["loadOutputsToMain"].isBool() )
-    return p["loadOutputsToMain"].asBool();
-  if ( p.isObject() && p.isMember( "loadToMain" ) && p["loadToMain"].isBool() )
-    return p["loadToMain"].asBool();
-  return false;
+  return info.autoLoadLayer;
 }
 
-void RsJobPanel::setLoadToMainPreference( const QString &jobId, bool on )
+void RsJobPanel::setLoadToMainPreference( long taskId, bool on )
 {
-  m_loadToMain.insert( jobId, on );
+  m_loadToMain.insert( taskId, on );
 }
 
 void RsJobPanel::refreshAll()
 {
-  const QString keepId = selectedJobId();
+  const long keepId = selectedTaskId();
   m_blockItemChanged = true;
   m_jobTree->clear();
 
-  const auto jobs = JobEngine::instance().list();
-  std::vector<JobRecord> sorted = jobs;
-  std::sort( sorted.begin(), sorted.end(), []( const JobRecord &a, const JobRecord &b ) {
-    return a.createdAtMs > b.createdAtMs;
+  auto tasks = sicnu::TaskCenter::instance().allTasks();
+  std::sort( tasks.begin(), tasks.end(), []( const sicnu::AlgorithmTaskInfo &a,
+                                             const sicnu::AlgorithmTaskInfo &b ) {
+    return a.taskId > b.taskId;
   } );
 
   QTreeWidgetItem *selectItem = nullptr;
-  for ( const JobRecord &rec : sorted )
+  for ( const sicnu::AlgorithmTaskInfo &info : tasks )
   {
-    const QString id = QString::fromStdString( rec.id );
-    const QString title = rec.request.title.empty()
-                            ? QString::fromStdString( rec.request.algorithmId )
-                            : QString::fromStdString( rec.request.title );
-    const QString state = stateToString( static_cast<int>( rec.state ) );
+    const QString state = statusToString( info.status );
     if ( !passesFilter( state ) )
       continue;
 
     auto *item = new QTreeWidgetItem( m_jobTree );
-    item->setText( ColTitle, title );
+    item->setText( ColTitle, taskTitle( info ) );
     item->setText( ColState, state );
-    item->setText( ColProgress, formatProgress( rec.progress ) );
-    item->setData( ColTitle, RoleJobId, id );
-    item->setData( ColTitle, RoleState, static_cast<int>( rec.state ) );
+    item->setText( ColProgress, formatProgress( info.progressPercentage ) );
+    item->setData( ColTitle, RoleTaskId, static_cast<qlonglong>( info.taskId ) );
+    item->setData( ColTitle, RoleState, static_cast<int>( info.status ) );
     item->setFlags( item->flags() | Qt::ItemIsUserCheckable );
-    item->setCheckState( ColLoad, loadToMainPreference( id ) ? Qt::Checked : Qt::Unchecked );
+    item->setCheckState( ColLoad, loadToMainPreference( info.taskId ) ? Qt::Checked : Qt::Unchecked );
     item->setToolTip( ColTitle,
-                      tr( "ID: %1\n方法: %2\n来源: %3\n右键查看详情 / 停止 / 加载" )
-                        .arg( id,
-                              QString::fromStdString( rec.request.algorithmId ),
-                              QString::fromStdString( rec.request.source ) ) );
+                      tr( "任务 ID: %1\n方法: %2\n右键查看详情 / 停止 / 加载" )
+                        .arg( info.taskId )
+                        .arg( info.algorithmId ) );
     item->setToolTip( ColLoad, tr( "勾选后任务成功时自动加载输出到主程序" ) );
-    if ( id == keepId )
+    if ( info.taskId == keepId )
       selectItem = item;
   }
   m_blockItemChanged = false;
@@ -364,33 +352,26 @@ void RsJobPanel::refreshAll()
   {
     m_jobTree->setCurrentItem( selectItem );
   }
-  else if ( !m_selectedId.isEmpty() )
+  else if ( m_selectedId >= 0 )
   {
-    m_selectedId.clear();
+    m_selectedId = -1;
     m_detailView->clear();
     m_logView->clear();
   }
   updateActionEnabled();
 }
 
-void RsJobPanel::upsertJobRow( const QString &jobId )
+void RsJobPanel::upsertTaskRow( const sicnu::AlgorithmTaskInfo &info )
 {
-  auto snap = JobEngine::instance().snapshot( jobId.toStdString() );
-  if ( !snap )
-    return;
-
-  const JobRecord &rec = *snap;
-  const QString title = rec.request.title.empty()
-                          ? QString::fromStdString( rec.request.algorithmId )
-                          : QString::fromStdString( rec.request.title );
-  const QString state = stateToString( static_cast<int>( rec.state ) );
+  const QString state = statusToString( info.status );
   const bool show = passesFilter( state );
+  const long taskId = info.taskId;
 
   QTreeWidgetItem *found = nullptr;
   for ( int i = 0; i < m_jobTree->topLevelItemCount(); ++i )
   {
     QTreeWidgetItem *item = m_jobTree->topLevelItem( i );
-    if ( item->data( ColTitle, RoleJobId ).toString() == jobId )
+    if ( item->data( ColTitle, RoleTaskId ).toLongLong() == taskId )
     {
       found = item;
       break;
@@ -401,9 +382,9 @@ void RsJobPanel::upsertJobRow( const QString &jobId )
   {
     if ( found )
       delete found;
-    if ( m_selectedId == jobId )
+    if ( m_selectedId == taskId )
     {
-      m_selectedId.clear();
+      m_selectedId = -1;
       m_detailView->clear();
       m_logView->clear();
       updateActionEnabled();
@@ -417,48 +398,41 @@ void RsJobPanel::upsertJobRow( const QString &jobId )
     found = new QTreeWidgetItem();
     m_jobTree->insertTopLevelItem( 0, found );
     found->setFlags( found->flags() | Qt::ItemIsUserCheckable );
-    found->setCheckState( ColLoad, loadToMainPreference( jobId ) ? Qt::Checked : Qt::Unchecked );
+    found->setCheckState( ColLoad, loadToMainPreference( taskId ) ? Qt::Checked : Qt::Unchecked );
   }
 
-  found->setText( ColTitle, title );
+  found->setText( ColTitle, taskTitle( info ) );
   found->setText( ColState, state );
-  found->setText( ColProgress, formatProgress( rec.progress ) );
-  found->setData( ColTitle, RoleJobId, jobId );
-  found->setData( ColTitle, RoleState, static_cast<int>( rec.state ) );
+  found->setText( ColProgress, formatProgress( info.progressPercentage ) );
+  found->setData( ColTitle, RoleTaskId, static_cast<qlonglong>( taskId ) );
+  found->setData( ColTitle, RoleState, static_cast<int>( info.status ) );
   found->setToolTip( ColTitle,
-                     tr( "ID: %1\n方法: %2\n来源: %3\n右键查看详情 / 停止 / 加载" )
-                       .arg( jobId,
-                             QString::fromStdString( rec.request.algorithmId ),
-                             QString::fromStdString( rec.request.source ) ) );
+                     tr( "任务 ID: %1\n方法: %2\n右键查看详情 / 停止 / 加载" )
+                       .arg( taskId )
+                       .arg( info.algorithmId ) );
   m_blockItemChanged = false;
 
-  if ( m_selectedId.isEmpty() && rec.state == JobState::Running )
+  if ( m_selectedId < 0 && info.status == sicnu::TaskStatus::Running )
     m_jobTree->setCurrentItem( found );
 }
 
-void RsJobPanel::fillLogForJob( const QString &jobId )
+void RsJobPanel::fillLogForTask( long taskId )
 {
   m_logView->clear();
-  auto snap = JobEngine::instance().snapshot( jobId.toStdString() );
-  if ( !snap )
+  const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+  if ( info.taskId != taskId )
   {
     m_logView->setPlainText( tr( "(任务不存在)" ) );
     return;
   }
 
   QStringList lines;
-  lines.reserve( static_cast<int>( snap->logLines.size() ) + 4 );
-  lines.append( tr( "—— 任务日志 · %1 ——" )
-                  .arg( snap->request.title.empty()
-                          ? QString::fromStdString( snap->request.algorithmId )
-                          : QString::fromStdString( snap->request.title ) ) );
-  for ( const auto &line : snap->logLines )
-  {
-    lines.append( QStringLiteral( "[%1] %2" )
-                    .arg( logLevelPrefix( line.level ), QString::fromStdString( line.text ) ) );
-  }
-  if ( !snap->error.empty() )
-    lines.append( QStringLiteral( "[ERROR] %1" ).arg( QString::fromStdString( snap->error ) ) );
+  lines.reserve( info.logBuffer.size() + 4 );
+  lines.append( tr( "—— 任务日志 · %1 ——" ).arg( taskTitle( info ) ) );
+  for ( const QString &line : info.logBuffer )
+    lines.append( line );
+  if ( !info.errorMessage.isEmpty() )
+    lines.append( QStringLiteral( "[ERROR] %1" ).arg( info.errorMessage ) );
   if ( lines.size() == 1 )
     lines.append( tr( "(暂无日志)" ) );
 
@@ -468,64 +442,70 @@ void RsJobPanel::fillLogForJob( const QString &jobId )
   m_logView->setTextCursor( cursor );
 }
 
-void RsJobPanel::fillDetailsForJob( const QString &jobId )
+void RsJobPanel::fillDetailsForTask( long taskId )
 {
   m_detailView->clear();
-  auto snap = JobEngine::instance().snapshot( jobId.toStdString() );
-  if ( !snap )
+  const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+  if ( info.taskId != taskId )
   {
     m_detailView->setPlainText( tr( "(任务不存在)" ) );
     return;
   }
 
-  const JobRecord &rec = *snap;
   QStringList lines;
   lines << tr( "【基本信息】" );
-  lines << tr( "任务 ID：%1" ).arg( jobId );
-  lines << tr( "标题：%1" )
-             .arg( rec.request.title.empty()
-                     ? QString::fromStdString( rec.request.algorithmId )
-                     : QString::fromStdString( rec.request.title ) );
-  lines << tr( "方法 (algorithmId)：%1" )
-             .arg( QString::fromStdString( rec.request.algorithmId ) );
-  lines << tr( "来源：%1" ).arg( QString::fromStdString( rec.request.source ) );
-  if ( !rec.request.clientTag.empty() )
-    lines << tr( "客户端标记：%1" ).arg( QString::fromStdString( rec.request.clientTag ) );
-  lines << tr( "独占执行：%1" ).arg( rec.request.exclusive ? tr( "是" ) : tr( "否" ) );
-  lines << tr( "状态：%1" ).arg( stateToString( static_cast<int>( rec.state ) ) );
-  lines << tr( "进度：%1" ).arg( formatProgress( rec.progress ) );
-  if ( !rec.statusMessage.empty() )
-    lines << tr( "状态消息：%1" ).arg( QString::fromStdString( rec.statusMessage ) );
+  lines << tr( "任务 ID：%1" ).arg( taskId );
+  lines << tr( "标题：%1" ).arg( taskTitle( info ) );
+  lines << tr( "方法 (algorithmId)：%1" ).arg( info.algorithmId );
+  if ( info.hasJobRequest && !info.jobRequest.source.empty() )
+    lines << tr( "来源：%1" ).arg( QString::fromStdString( info.jobRequest.source ) );
+  if ( info.hasJobRequest && !info.jobRequest.clientTag.empty() )
+    lines << tr( "客户端标记：%1" ).arg( QString::fromStdString( info.jobRequest.clientTag ) );
+  if ( info.hasJobRequest )
+    lines << tr( "独占执行：%1" ).arg( info.jobRequest.exclusive ? tr( "是" ) : tr( "否" ) );
+  if ( !info.jobId.empty() )
+    lines << tr( "内部 jobId：%1" ).arg( QString::fromStdString( info.jobId ) );
+  lines << tr( "状态：%1" ).arg( statusToString( info.status ) );
+  lines << tr( "进度：%1" ).arg( formatProgress( info.progressPercentage ) );
   lines << tr( "成功后加载到主图：%1" )
-             .arg( loadToMainPreference( jobId ) ? tr( "是" ) : tr( "否" ) );
-  lines << tr( "创建时间 (ms)：%1" ).arg( rec.createdAtMs );
-  if ( rec.startedAtMs > 0 )
-    lines << tr( "开始时间 (ms)：%1" ).arg( rec.startedAtMs );
-  if ( rec.finishedAtMs > 0 )
-    lines << tr( "结束时间 (ms)：%1" ).arg( rec.finishedAtMs );
-  if ( !rec.error.empty() )
-    lines << tr( "错误：%1" ).arg( QString::fromStdString( rec.error ) );
+             .arg( loadToMainPreference( taskId ) ? tr( "是" ) : tr( "否" ) );
+  if ( info.startTime.isValid() )
+    lines << tr( "开始时间：%1" ).arg( info.startTime.toString( Qt::ISODate ) );
+  if ( info.endTime.isValid() )
+    lines << tr( "结束时间：%1" ).arg( info.endTime.toString( Qt::ISODate ) );
+  if ( !info.errorMessage.isEmpty() )
+    lines << tr( "错误：%1" ).arg( info.errorMessage );
 
   lines << QString();
   lines << tr( "【方法参数 params】" );
-  if ( rec.request.params.isNull() || ( rec.request.params.isObject() && rec.request.params.empty() ) )
-    lines << tr( "(无参数)" );
+  if ( info.hasJobRequest
+       && !( info.jobRequest.params.isNull()
+             || ( info.jobRequest.params.isObject() && info.jobRequest.params.empty() ) ) )
+  {
+    lines << prettyJsonValue( info.jobRequest.params );
+  }
+  else if ( !info.parameterMap.isEmpty() )
+  {
+    for ( auto it = info.parameterMap.constBegin(); it != info.parameterMap.constEnd(); ++it )
+      lines << QStringLiteral( "  %1 = %2" ).arg( it.key(), it.value().toString() );
+  }
   else
-    lines << prettyJsonValue( rec.request.params );
+  {
+    lines << tr( "(无参数)" );
+  }
 
-  // Highlight input-like keys from params
   lines << QString();
   lines << tr( "【输入 / 路径类参数】" );
   bool anyIn = false;
-  if ( rec.request.params.isObject() )
+  if ( info.hasJobRequest && info.jobRequest.params.isObject() )
   {
-    for ( const auto &name : rec.request.params.getMemberNames() )
+    for ( const auto &name : info.jobRequest.params.getMemberNames() )
     {
       const QString qn = QString::fromStdString( name );
       if ( !looksLikePathKey( qn ) )
         continue;
       anyIn = true;
-      const Json::Value &v = rec.request.params[name];
+      const Json::Value &v = info.jobRequest.params[name];
       if ( v.isString() )
         lines << QStringLiteral( "  %1 = %2" ).arg( qn, QString::fromStdString( v.asString() ) );
       else
@@ -533,16 +513,34 @@ void RsJobPanel::fillDetailsForJob( const QString &jobId )
     }
   }
   if ( !anyIn )
+  {
+    for ( auto it = info.parameterMap.constBegin(); it != info.parameterMap.constEnd(); ++it )
+    {
+      if ( !looksLikePathKey( it.key() ) )
+        continue;
+      anyIn = true;
+      lines << QStringLiteral( "  %1 = %2" ).arg( it.key(), it.value().toString() );
+    }
+  }
+  if ( !anyIn )
     lines << tr( "  (未识别到路径类输入键)" );
 
   lines << QString();
   lines << tr( "【结果 / 输出 result】" );
-  if ( rec.result.isNull() || ( rec.result.isObject() && rec.result.empty() ) )
-    lines << tr( "(尚无结果)" );
+  if ( info.resultPayload.isNull()
+       || ( info.resultPayload.isObject() && info.resultPayload.empty() ) )
+  {
+    if ( !info.outputLayerPath.isEmpty() )
+      lines << QStringLiteral( "  output = %1" ).arg( info.outputLayerPath );
+    else
+      lines << tr( "(尚无结果)" );
+  }
   else
-    lines << prettyJsonValue( rec.result );
+  {
+    lines << prettyJsonValue( info.resultPayload );
+  }
 
-  const QStringList outs = collectOutputPaths( jobId );
+  const QStringList outs = collectOutputPaths( taskId );
   lines << QString();
   lines << tr( "【可加载输出路径】" );
   if ( outs.isEmpty() )
@@ -560,15 +558,17 @@ void RsJobPanel::fillDetailsForJob( const QString &jobId )
   m_detailView->setPlainText( lines.join( QLatin1Char( '\n' ) ) );
 }
 
-QStringList RsJobPanel::collectOutputPaths( const QString &jobId ) const
+QStringList RsJobPanel::collectOutputPaths( long taskId ) const
 {
   QStringList out;
-  auto snap = JobEngine::instance().snapshot( jobId.toStdString() );
-  if ( !snap )
+  const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+  if ( info.taskId != taskId )
     return out;
 
-  // Prefer result.output / known keys
-  if ( snap->result.isObject() )
+  if ( !info.outputLayerPath.isEmpty() && !out.contains( info.outputLayerPath ) )
+    out.append( info.outputLayerPath );
+
+  if ( info.resultPayload.isObject() )
   {
     static const char *kKeys[] = {
       "output", "OUTPUT", "outputPath", "out", "dest", "destination",
@@ -576,24 +576,22 @@ QStringList RsJobPanel::collectOutputPaths( const QString &jobId ) const
     };
     for ( const char *k : kKeys )
     {
-      if ( snap->result.isMember( k ) )
-        collectStringPaths( snap->result[k], out );
+      if ( info.resultPayload.isMember( k ) )
+        collectStringPaths( info.resultPayload[k], out );
     }
-    // Also scan all result strings
-    collectStringPaths( snap->result, out );
+    collectStringPaths( info.resultPayload, out );
   }
 
-  // Fallback: output-like params (some jobs only echo paths in params)
-  if ( snap->request.params.isObject() )
+  if ( info.hasJobRequest && info.jobRequest.params.isObject() )
   {
-    for ( const auto &name : snap->request.params.getMemberNames() )
+    for ( const auto &name : info.jobRequest.params.getMemberNames() )
     {
       const QString qn = QString::fromStdString( name );
       if ( qn.contains( QLatin1String( "output" ), Qt::CaseInsensitive )
            || qn.contains( QLatin1String( "dest" ), Qt::CaseInsensitive )
            || qn.endsWith( QLatin1String( "out" ), Qt::CaseInsensitive ) )
       {
-        collectStringPaths( snap->request.params[name], out );
+        collectStringPaths( info.jobRequest.params[name], out );
       }
     }
   }
@@ -636,28 +634,27 @@ int RsJobPanel::loadPathsToMain( const QStringList &paths )
   return loaded;
 }
 
-void RsJobPanel::tryAutoLoadOutputs( const QString &jobId )
+void RsJobPanel::tryAutoLoadOutputs( const sicnu::AlgorithmTaskInfo &info )
 {
-  if ( !loadToMainPreference( jobId ) )
+  if ( info.status != sicnu::TaskStatus::Completed )
     return;
-  auto snap = JobEngine::instance().snapshot( jobId.toStdString() );
-  if ( !snap || snap->state != JobState::Succeeded )
+  if ( !loadToMainPreference( info.taskId ) )
     return;
-  loadPathsToMain( collectOutputPaths( jobId ) );
+  loadPathsToMain( collectOutputPaths( info.taskId ) );
 }
 
-QString RsJobPanel::selectedJobId() const
+long RsJobPanel::selectedTaskId() const
 {
   const auto items = m_jobTree->selectedItems();
   if ( items.isEmpty() )
-    return {};
-  return items.first()->data( ColTitle, RoleJobId ).toString();
+    return -1;
+  return items.first()->data( ColTitle, RoleTaskId ).toLongLong();
 }
 
 void RsJobPanel::updateActionEnabled()
 {
-  const QString id = selectedJobId();
-  if ( id.isEmpty() )
+  const long id = selectedTaskId();
+  if ( id < 0 )
   {
     m_cancelBtn->setEnabled( false );
     m_loadBtn->setEnabled( false );
@@ -665,81 +662,80 @@ void RsJobPanel::updateActionEnabled()
   }
   const auto items = m_jobTree->selectedItems();
   const int state = items.isEmpty() ? -1 : items.first()->data( ColTitle, RoleState ).toInt();
-  const bool cancellable = ( state == static_cast<int>( JobState::Queued )
-                             || state == static_cast<int>( JobState::Running ) );
-  m_cancelBtn->setEnabled( cancellable );
+  const auto status = static_cast<sicnu::TaskStatus>( state );
+  m_cancelBtn->setEnabled( isActiveStatus( status ) );
 
-  const bool canLoad = ( state == static_cast<int>( JobState::Succeeded ) )
+  const bool canLoad = ( status == sicnu::TaskStatus::Completed )
                        && !collectOutputPaths( id ).isEmpty();
-  m_loadBtn->setEnabled( canLoad || state == static_cast<int>( JobState::Succeeded ) );
+  m_loadBtn->setEnabled( canLoad || status == sicnu::TaskStatus::Completed );
 }
 
-void RsJobPanel::onJobUpdated( const QString &jobId )
+void RsJobPanel::onTaskAdded( const sicnu::AlgorithmTaskInfo &info )
 {
-  upsertJobRow( jobId );
-  if ( jobId == m_selectedId || jobId == selectedJobId() )
-  {
-    m_selectedId = jobId;
-    fillLogForJob( jobId );
-    fillDetailsForJob( jobId );
-    updateActionEnabled();
-  }
+  upsertTaskRow( info );
 }
 
-void RsJobPanel::onJobFinished( const QString &jobId )
+void RsJobPanel::onTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
 {
-  upsertJobRow( jobId );
-  if ( jobId == selectedJobId() || jobId == m_selectedId )
+  upsertTaskRow( info );
+  if ( info.taskId == m_selectedId || info.taskId == selectedTaskId() )
   {
-    fillLogForJob( jobId );
-    fillDetailsForJob( jobId );
+    m_selectedId = info.taskId;
+    fillLogForTask( info.taskId );
+    fillDetailsForTask( info.taskId );
     updateActionEnabled();
   }
-  tryAutoLoadOutputs( jobId );
+  if ( isTerminalStatus( info.status ) )
+    tryAutoLoadOutputs( info );
+}
+
+void RsJobPanel::onTaskLogAdded( long taskId, const QString & )
+{
+  if ( taskId == m_selectedId || taskId == selectedTaskId() )
+    fillLogForTask( taskId );
 }
 
 void RsJobPanel::onSelectionChanged()
 {
-  m_selectedId = selectedJobId();
-  if ( m_selectedId.isEmpty() )
+  m_selectedId = selectedTaskId();
+  if ( m_selectedId < 0 )
   {
     m_detailView->clear();
     m_logView->clear();
     updateActionEnabled();
     return;
   }
-  fillDetailsForJob( m_selectedId );
-  fillLogForJob( m_selectedId );
+  fillDetailsForTask( m_selectedId );
+  fillLogForTask( m_selectedId );
   updateActionEnabled();
 }
 
 void RsJobPanel::onCancelClicked()
 {
-  const QString id = selectedJobId();
-  if ( id.isEmpty() )
+  const long id = selectedTaskId();
+  if ( id < 0 )
     return;
-  JobEngine::instance().cancel( id.toStdString() );
+  sicnu::TaskCenter::instance().cancelTask( id );
 }
 
 void RsJobPanel::onClearFinishedClicked()
 {
+  sicnu::TaskCenter::instance().clearCompletedTasks();
   for ( int i = m_jobTree->topLevelItemCount() - 1; i >= 0; --i )
   {
     QTreeWidgetItem *item = m_jobTree->topLevelItem( i );
-    const int state = item->data( ColTitle, RoleState ).toInt();
-    if ( state == static_cast<int>( JobState::Succeeded )
-         || state == static_cast<int>( JobState::Failed )
-         || state == static_cast<int>( JobState::Cancelled ) )
+    const auto status = static_cast<sicnu::TaskStatus>(
+      item->data( ColTitle, RoleState ).toInt() );
+    if ( !isTerminalStatus( status ) )
+      continue;
+    const long id = item->data( ColTitle, RoleTaskId ).toLongLong();
+    delete item;
+    m_loadToMain.remove( id );
+    if ( m_selectedId == id )
     {
-      const QString id = item->data( ColTitle, RoleJobId ).toString();
-      delete item;
-      m_loadToMain.remove( id );
-      if ( m_selectedId == id )
-      {
-        m_selectedId.clear();
-        m_detailView->clear();
-        m_logView->clear();
-      }
+      m_selectedId = -1;
+      m_detailView->clear();
+      m_logView->clear();
     }
   }
   updateActionEnabled();
@@ -754,12 +750,12 @@ void RsJobPanel::onItemChanged( QTreeWidgetItem *item, int column )
 {
   if ( m_blockItemChanged || !item || column != ColLoad )
     return;
-  const QString id = item->data( ColTitle, RoleJobId ).toString();
-  if ( id.isEmpty() )
+  const long id = item->data( ColTitle, RoleTaskId ).toLongLong();
+  if ( id < 0 )
     return;
   setLoadToMainPreference( id, item->checkState( ColLoad ) == Qt::Checked );
   if ( id == m_selectedId )
-    fillDetailsForJob( id );
+    fillDetailsForTask( id );
 }
 
 void RsJobPanel::copyText( const QString &text )
@@ -772,11 +768,11 @@ void RsJobPanel::showAboutDialog()
 {
   QMessageBox::information(
     this, tr( "任务中心" ),
-    tr( "任务中心汇总所有经 JobEngine 提交的算法任务。\n\n"
+    tr( "任务中心汇总所有经 Task Center 提交的算法任务（JobEngine 为内部执行适配器）。\n\n"
         "• 列表显示标题、状态、进度；「加载」列勾选后，任务成功时自动把输出加载到主图。\n"
         "• 右键任务：查看详情（方法/参数/输入输出）、停止、加载输出、复制信息。\n"
         "• 列表空白处右键：刷新、清空已完成、本说明。\n"
-        "• 右侧「详情」页显示 algorithmId、params、result；「日志」页为任务绑定日志。" ) );
+        "• 取消、日志与终态均以 Task Center 为准；本面板为投影，不持有独立生命周期状态。" ) );
 }
 
 void RsJobPanel::onContextMenuRequested( const QPoint &pos )
@@ -786,57 +782,55 @@ void RsJobPanel::onContextMenuRequested( const QPoint &pos )
 
   if ( !item )
   {
-    // Empty area — still offer useful actions
     menu.addAction( tr( "刷新列表" ), this, [this]() { refreshAll(); } );
     menu.addAction( tr( "清空已完成" ), this, &RsJobPanel::onClearFinishedClicked );
     menu.addSeparator();
     menu.addAction( tr( "任务中心说明…" ), this, &RsJobPanel::showAboutDialog );
-    // Show engine stats
-    const auto jobs = JobEngine::instance().list();
+    const auto tasks = sicnu::TaskCenter::instance().allTasks();
     int active = 0, done = 0;
-    for ( const auto &j : jobs )
+    for ( const auto &t : tasks )
     {
-      if ( j.state == JobState::Queued || j.state == JobState::Running )
+      if ( isActiveStatus( t.status ) )
         ++active;
       else
         ++done;
     }
     auto *info = menu.addAction(
-      tr( "当前：%1 个活动 / %2 个已结束（引擎共 %3）" )
+      tr( "当前：%1 个活动 / %2 个已结束（Task Center 共 %3）" )
         .arg( active )
         .arg( done )
-        .arg( static_cast<int>( jobs.size() ) ) );
+        .arg( tasks.size() ) );
     info->setEnabled( false );
     menu.exec( m_jobTree->viewport()->mapToGlobal( pos ) );
     return;
   }
 
   m_jobTree->setCurrentItem( item );
-  const QString jobId = item->data( ColTitle, RoleJobId ).toString();
-  const int state = item->data( ColTitle, RoleState ).toInt();
-  const bool cancellable = ( state == static_cast<int>( JobState::Queued )
-                             || state == static_cast<int>( JobState::Running ) );
-  const bool succeeded = ( state == static_cast<int>( JobState::Succeeded ) );
+  const long taskId = item->data( ColTitle, RoleTaskId ).toLongLong();
+  const auto status = static_cast<sicnu::TaskStatus>(
+    item->data( ColTitle, RoleState ).toInt() );
+  const bool cancellable = isActiveStatus( status );
+  const bool succeeded = ( status == sicnu::TaskStatus::Completed );
 
-  menu.addAction( tr( "查看详情" ), this, [this, jobId]() {
+  menu.addAction( tr( "查看详情" ), this, [this, taskId]() {
     if ( m_detailTabs )
       m_detailTabs->setCurrentWidget( m_detailView );
-    fillDetailsForJob( jobId );
+    fillDetailsForTask( taskId );
   } );
-  menu.addAction( tr( "查看日志" ), this, [this, jobId]() {
+  menu.addAction( tr( "查看日志" ), this, [this, taskId]() {
     if ( m_detailTabs )
       m_detailTabs->setCurrentWidget( m_logView );
-    fillLogForJob( jobId );
+    fillLogForTask( taskId );
   } );
   menu.addSeparator();
 
-  QAction *stopAct = menu.addAction( tr( "停止 / 取消" ), this, [jobId]() {
-    JobEngine::instance().cancel( jobId.toStdString() );
+  QAction *stopAct = menu.addAction( tr( "停止 / 取消" ), this, [taskId]() {
+    sicnu::TaskCenter::instance().cancelTask( taskId );
   } );
   stopAct->setEnabled( cancellable );
 
-  QAction *loadAct = menu.addAction( tr( "加载输出到主图" ), this, [this, jobId]() {
-    const int n = loadPathsToMain( collectOutputPaths( jobId ) );
+  QAction *loadAct = menu.addAction( tr( "加载输出到主图" ), this, [this, taskId]() {
+    const int n = loadPathsToMain( collectOutputPaths( taskId ) );
     if ( n <= 0 )
       QMessageBox::information( this, tr( "加载到主图" ),
                                 tr( "未找到可加载的输出文件。" ) );
@@ -845,45 +839,47 @@ void RsJobPanel::onContextMenuRequested( const QPoint &pos )
 
   QAction *autoLoad = menu.addAction( tr( "成功后加载到主图" ) );
   autoLoad->setCheckable( true );
-  autoLoad->setChecked( loadToMainPreference( jobId ) );
-  connect( autoLoad, &QAction::toggled, this, [this, jobId, item]( bool on ) {
-    setLoadToMainPreference( jobId, on );
+  autoLoad->setChecked( loadToMainPreference( taskId ) );
+  connect( autoLoad, &QAction::toggled, this, [this, taskId, item]( bool on ) {
+    setLoadToMainPreference( taskId, on );
     m_blockItemChanged = true;
     item->setCheckState( ColLoad, on ? Qt::Checked : Qt::Unchecked );
     m_blockItemChanged = false;
-    if ( jobId == m_selectedId )
-      fillDetailsForJob( jobId );
+    if ( taskId == m_selectedId )
+      fillDetailsForTask( taskId );
   } );
 
   menu.addSeparator();
-  menu.addAction( tr( "复制任务 ID" ), this, [this, jobId]() { copyText( jobId ); } );
-  menu.addAction( tr( "复制方法 ID" ), this, [this, jobId]() {
-    auto snap = JobEngine::instance().snapshot( jobId.toStdString() );
-    if ( snap )
-      copyText( QString::fromStdString( snap->request.algorithmId ) );
+  menu.addAction( tr( "复制任务 ID" ), this, [this, taskId]() {
+    copyText( QString::number( taskId ) );
   } );
-  menu.addAction( tr( "复制参数 JSON" ), this, [this, jobId]() {
-    auto snap = JobEngine::instance().snapshot( jobId.toStdString() );
-    if ( snap )
-      copyText( prettyJsonValue( snap->request.params ) );
+  menu.addAction( tr( "复制方法 ID" ), this, [this, taskId]() {
+    const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+    if ( info.taskId == taskId )
+      copyText( info.algorithmId );
   } );
-  menu.addAction( tr( "复制结果 JSON" ), this, [this, jobId]() {
-    auto snap = JobEngine::instance().snapshot( jobId.toStdString() );
-    if ( snap )
-      copyText( prettyJsonValue( snap->result ) );
+  menu.addAction( tr( "复制参数 JSON" ), this, [this, taskId]() {
+    const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+    if ( info.taskId == taskId && info.hasJobRequest )
+      copyText( prettyJsonValue( info.jobRequest.params ) );
   } );
-  menu.addAction( tr( "复制详情全文" ), this, [this, jobId]() {
-    fillDetailsForJob( jobId );
+  menu.addAction( tr( "复制结果 JSON" ), this, [this, taskId]() {
+    const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+    if ( info.taskId == taskId )
+      copyText( prettyJsonValue( info.resultPayload ) );
+  } );
+  menu.addAction( tr( "复制详情全文" ), this, [this, taskId]() {
+    fillDetailsForTask( taskId );
     copyText( m_detailView->toPlainText() );
   } );
 
   menu.addSeparator();
-  QAction *removeAct = menu.addAction( tr( "从列表移除" ), this, [this, item, jobId]() {
+  QAction *removeAct = menu.addAction( tr( "从列表移除" ), this, [this, item, taskId]() {
     delete item;
-    m_loadToMain.remove( jobId );
-    if ( m_selectedId == jobId )
+    m_loadToMain.remove( taskId );
+    if ( m_selectedId == taskId )
     {
-      m_selectedId.clear();
+      m_selectedId = -1;
       m_detailView->clear();
       m_logView->clear();
     }

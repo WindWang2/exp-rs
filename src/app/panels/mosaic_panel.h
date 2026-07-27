@@ -3,6 +3,8 @@
 
 #include <QWidget>
 
+#include "processing/framework/task_center.h"
+
 class QListWidget;
 class QLineEdit;
 class QPushButton;
@@ -12,6 +14,7 @@ class QProgressBar;
 /**
  * Panel for mosaicking (stitching) multiple raster files into a single output.
  * Can be embedded in the main window or used as a standalone panel.
+ * Execution goes through Task Center (no direct JobEngine submit).
  */
 class MosaicPanel : public QWidget
 {
@@ -53,6 +56,7 @@ private slots:
     void runMosaic();
     void onCompleted(const QString &outputPath);
     void onFailed(const QString &error);
+    void onTaskUpdated(const sicnu::AlgorithmTaskInfo &info);
 
 private:
     void setupUi();
@@ -62,6 +66,5 @@ private:
     QPushButton *m_runButton = nullptr;
     QLabel *m_statusLabel = nullptr;
     QProgressBar *m_progressBar = nullptr;
-    QString m_pendingJobId;
-    bool m_jobBridgeConnected = false;
+    long m_pendingTaskId = -1;
 };
