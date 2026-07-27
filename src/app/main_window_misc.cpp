@@ -219,7 +219,8 @@ void QgisDesktopWindow::restorePanelState()
     // v2: product shell (Ribbon + Task panel). Old state restored classic toolbars
     // and a crowded right dock stack that fought the new chrome.
     // v7: full-width top ribbon dock (setCorner Top*→TopDock) — drop prior states.
-    constexpr int kShellLayoutVersion = 7;
+    // v8: toolbars hosted in chrome strip under ribbon (not TopToolBarArea).
+    constexpr int kShellLayoutVersion = 8;
     const int savedVersion = settings.value( QStringLiteral( "mainwindow/shellLayoutVersion" ), 0 ).toInt();
 
     if ( savedVersion >= kShellLayoutVersion )
@@ -353,7 +354,7 @@ void QgisDesktopWindow::resetPanelLayout()
     QSettings settings;
     settings.remove( QStringLiteral( "mainwindow/state" ) );
     settings.remove( QStringLiteral( "mainwindow/geometry" ) );
-    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 7 );
+    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 8 );
 
     // Dock areas back to defaults, then apply product shell visibility.
     if ( m_layersDock )
@@ -389,7 +390,7 @@ void QgisDesktopWindow::savePanelState()
     QSettings settings;
     settings.setValue( QStringLiteral( "mainwindow/state" ), saveState() );
     settings.setValue( QStringLiteral( "mainwindow/geometry" ), saveGeometry() );
-    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 7 );
+    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 8 );
 }
 
 void QgisDesktopWindow::closeEvent( QCloseEvent *event )

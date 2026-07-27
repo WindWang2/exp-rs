@@ -23,6 +23,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QSignalBlocker>
 #include <QTextBrowser>
 #include <QAction>
 #include <QEvent>
@@ -586,6 +587,10 @@ void QgisDesktopWindow::layoutToolbarsUnderRibbon()
 {
     // Host product toolbars inside rsToolbarStrip under the ribbon/band rail.
     // Never use QMainWindow TopToolBarArea — it stacks above top docks.
+    //
+    // Critical: QToolBar created with a QMainWindow parent gets Qt::Tool window
+    // flags and will NOT paint correctly as a normal layout child until flags
+    // are reset to Qt::Widget (see Qt docs for QToolBar as a child widget).
     if ( !m_toolbarStrip )
         return;
 
@@ -601,13 +606,11 @@ void QgisDesktopWindow::layoutToolbarsUnderRibbon()
         tb->hide();
         removeToolBar( tb );
     }
-    // Ensure product bars are not in the main-window toolbar area.
     if ( m_mapToolsToolBar )
         removeToolBar( m_mapToolsToolBar );
     if ( m_digitizeToolBar )
         removeToolBar( m_digitizeToolBar );
 
-    // Clear strip layout entries without destroying the toolbars.
     while ( QLayoutItem *item = stripLay->takeAt( 0 ) )
         delete item;
 
@@ -618,43 +621,55 @@ void QgisDesktopWindow::layoutToolbarsUnderRibbon()
         if ( !tb )
             continue;
 
-        // Source of truth: checkable toggleViewAction (synced by QToolBar::setVisible).
         QAction *toggle = tb->toggleViewAction();
-        const bool wantVisible = toggle ? toggle->isChecked() : !tb->isHidden();
+        // Prefer checked state; fall back to not-hidden for first layout before
+        // toggle action has been synced.
+        bool wantVisible = toggle ? toggle->isChecked() : true;
+        if ( toggle && !toggle->isChecked() && !tb->isHidden() )
+            wantVisible = true; // keep programmatic show()
 
-        tb->setParent( m_toolbarStrip );
+        // Embed as a plain widget under the band rail (not a floating tool window).
+        tb->setParent( m_toolbarStrip, Qt::Widget );
+        tb->setWindowFlags( Qt::Widget );
         tb->setMovable( false );
         tb->setFloatable( false );
         tb->setAllowedAreas( {} );
+        tb->setFixedHeight( 32 );
+        tb->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
 
         if ( wantVisible && visibleRows < 2 )
         {
             stripLay->addWidget( tb );
-            tb->setVisible( true );
+            tb->show();
             if ( toggle )
+            {
+                QSignalBlocker blocker( toggle );
                 toggle->setChecked( true );
+            }
             ++visibleRows;
         }
         else
         {
-            tb->setVisible( false );
-            if ( toggle && !wantVisible )
+            tb->hide();
+            if ( toggle )
+            {
+                QSignalBlocker blocker( toggle );
                 toggle->setChecked( false );
-            // Cap at two rows: force uncheck if we would exceed.
-            if ( toggle && wantVisible && visibleRows >= 2 )
-                toggle->setChecked( false );
+            }
         }
     }
 
     constexpr int kRowH = 32;
     constexpr int kBaseChrome = 184;
     const int stripH = visibleRows * kRowH;
-    m_toolbarStrip->setUpdatesEnabled( false );
+
     m_toolbarStrip->setFixedHeight( stripH );
     m_toolbarStrip->setMinimumHeight( stripH );
-    m_toolbarStrip->setMaximumHeight( stripH );
-    m_toolbarStrip->setVisible( visibleRows > 0 );
-    m_toolbarStrip->setUpdatesEnabled( true );
+    m_toolbarStrip->setMaximumHeight( 2 * kRowH );
+    if ( visibleRows > 0 )
+        m_toolbarStrip->show();
+    else
+        m_toolbarStrip->hide();
 
     const int chromeH = kBaseChrome + stripH;
     if ( m_topChrome )
@@ -662,17 +677,17 @@ void QgisDesktopWindow::layoutToolbarsUnderRibbon()
         m_topChrome->setFixedHeight( chromeH );
         m_topChrome->setMinimumHeight( chromeH );
         m_topChrome->setMaximumHeight( kBaseChrome + 2 * kRowH );
+        m_topChrome->updateGeometry();
     }
     if ( QDockWidget *ribbonDock = findChild<QDockWidget *>( QStringLiteral( "rsRibbonDock" ) ) )
     {
         ribbonDock->setFixedHeight( chromeH );
         ribbonDock->setMinimumHeight( chromeH );
         ribbonDock->setMaximumHeight( kBaseChrome + 2 * kRowH );
-        // Force dock to re-layout after height change.
         ribbonDock->updateGeometry();
+        // Ensure the dock is not clipped by a stale saved size.
+        resizeDocks( { ribbonDock }, { chromeH }, Qt::Vertical );
     }
-    if ( m_topChrome )
-        m_topChrome->updateGeometry();
 }
 
 void QgisDesktopWindow::applyProductShellLayout()

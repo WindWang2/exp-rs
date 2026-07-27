@@ -582,9 +582,11 @@ void QgisDesktopWindow::setupToolbars()
         tb->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
     };
 
-    // Row 1 (when shown): map navigation + identify / measure / display
-    // Parent is the main window until the chrome strip adopts them.
+    // Row 1 (when shown): map navigation + identify / measure / display.
+    // Construct with Qt::Widget flags so the bar can live inside the chrome
+    // strip (not as a Qt::Tool floating window under QMainWindow).
     m_mapToolsToolBar = new QToolBar( tr( "导航与显示" ), this );
+    m_mapToolsToolBar->setWindowFlags( Qt::Widget );
     auto *mapToolsToolBar = m_mapToolsToolBar;
     mapToolsToolBar->setObjectName( QStringLiteral( "mapToolsToolBar" ) );
     mapToolsToolBar->setWindowTitle( tr( "导航与显示" ) );
@@ -628,6 +630,7 @@ void QgisDesktopWindow::setupToolbars()
 
     // Row 2 (when shown): digitizing / vector edit
     m_digitizeToolBar = new QToolBar( tr( "数字化" ), this );
+    m_digitizeToolBar->setWindowFlags( Qt::Widget );
     auto *digitizeToolBar = m_digitizeToolBar;
     digitizeToolBar->setObjectName( QStringLiteral( "digitizeToolBar" ) );
     digitizeToolBar->setWindowTitle( tr( "数字化" ) );

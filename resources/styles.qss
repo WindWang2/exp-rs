@@ -1124,8 +1124,9 @@ QTreeView::item:selected, QTreeWidget::item:selected, QListView::item:selected {
     titlebar-normal-icon: none;
     padding: 0;
     margin: 0;
+    /* Base chrome 184 + up to 2 toolbar rows (32px each) under the band rail */
     min-height: 184px;
-    max-height: 184px;
+    max-height: 248px;
 }
 #rsRibbonDock > QWidget {
     border: none;
@@ -1134,8 +1135,22 @@ QTreeView::item:selected, QTreeWidget::item:selected, QListView::item:selected {
 }
 #rsTopChrome {
     min-height: 184px;
-    max-height: 184px;
+    max-height: 248px;
     background: #FFFFFF;
+}
+/* Product toolbars embedded under the band rail (not QMainWindow top area) */
+#rsToolbarStrip {
+    background: #FFFFFF;
+    border-top: 1px solid #E2E6EB;
+}
+#rsToolbarStrip > QToolBar {
+    background: #FFFFFF;
+    border: none;
+    border-bottom: 1px solid #E2E6EB;
+    min-height: 28px;
+    max-height: 32px;
+    padding: 2px 6px;
+    spacing: 2px;
 }
 #rsRibbonHost {
     background: #FFFFFF;
