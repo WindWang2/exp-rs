@@ -6,6 +6,7 @@
 #include "project_context.h"
 #include "dialogs/stac_browser_dialog.h"
 #include "dialogs/landsat_import_dialog.h"
+#include "panels/data_manager_panel.h"
 #include "operators/framework/rs_operation_logger.h"
 
 #include <QFileDialog>
@@ -141,17 +142,46 @@ void QgisDesktopWindow::saveProjectAs()
 void QgisDesktopWindow::importLayer()
 {
     // Raster includes ENVI (.dat / .hdr; extensionless binaries via All files)
-    QString filter = tr( "All supported files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.jpeg *.asc *.dat *.hdr *.bil *.bsq *.bip *.shp *.gpkg *.geojson *.kml *.gml);;"
-                         "Raster files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.jpeg *.asc *.dat *.hdr *.bil *.bsq *.bip);;"
-                         "ENVI raster (*.dat *.hdr *.img *.bil *.bsq *.bip);;"
-                         "Vector files (*.shp *.gpkg *.geojson *.kml *.gml);;"
-                         "All files (*)" );
-    QString path = QFileDialog::getOpenFileName( this, tr( "Import Layer" ),
-                                                 AppPaths::dataDir(), filter );
-    if ( path.isEmpty() )
-        return;
+    const QString filter = tr(
+      "All supported files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.jpeg *.asc *.dat *.hdr *.bil *.bsq *.bip *.shp *.gpkg *.geojson *.kml *.gml);;"
+      "Raster files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.jpeg *.asc *.dat *.hdr *.bil *.bsq *.bip);;"
+      "ENVI raster (*.dat *.hdr *.img *.bil *.bsq *.bip);;"
+      "Vector files (*.shp *.gpkg *.geojson *.kml *.gml);;"
+      "All files (*)" );
+    const QStringList paths = QFileDialog::getOpenFileNames(
+      this, tr( "导入数据（可多选）" ), AppPaths::dataDir(), filter );
+    if ( paths.isEmpty() || !m_layerManager )
+      return;
 
-    ( void ) m_layerManager->loadLayer( path );
+    int ok = 0;
+    int failed = 0;
+    for ( const QString &path : paths )
+    {
+      if ( path.isEmpty() )
+        continue;
+      if ( m_layerManager->loadLayer( path ) )
+        ++ok;
+      else
+        ++failed;
+    }
+
+    if ( m_dataManagerPanel )
+    {
+      m_dataManagerPanel->show();
+      m_dataManagerPanel->raise();
+      m_dataManagerPanel->refresh();
+    }
+
+    if ( failed == 0 )
+    {
+      statusBar()->showMessage(
+        tr( "已导入 %1 个文件" ).arg( ok ), 4000 );
+    }
+    else
+    {
+      statusBar()->showMessage(
+        tr( "导入完成：成功 %1，失败 %2" ).arg( ok ).arg( failed ), 6000 );
+    }
 }
 
 void QgisDesktopWindow::browseStacCatalog()

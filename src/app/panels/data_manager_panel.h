@@ -1,12 +1,18 @@
 #pragma once
 
+#include <optional>
+
 #include <QDockWidget>
 #include <QString>
 
 #include "data/asset_types.h"
+#include "data/collection_types.h"
 
 class QTreeWidget;
 class QTreeWidgetItem;
+class QTextBrowser;
+class QSplitter;
+class QLabel;
 
 namespace sicnu::data
 {
@@ -18,16 +24,11 @@ namespace sicnu
 {
 
 /**
- * Project Data Manager panel — a read-only projection of the Data Manager's
- * immutable asset snapshots and Data Collections, kept semantically separate
- * from the layer tree.
+ * Project Data Manager panel — catalog projection + metadata inspector.
  *
- * Standalone Data Assets appear as top-level rows; a Data Collection appears
- * as a top-level parent row with its child assets nested beneath it. One row
- * per Data Asset (never per Display Layer); collection rows are organizational
- * and carry no AssetId. The panel holds no business logic: double-click,
- * remove, and promote intents are emitted as signals for the UI shell to wire
- * to the Display Manager, unload planning, and promotion respectively.
+ * Left: tree of Data Assets and Collections (not Display Layers).
+ * Right: dedicated metadata panel for the selection (structure, source, product
+ * fields). Shell wires display / unload / promote signals.
  */
 class DataManagerPanel : public QDockWidget
 {
@@ -38,65 +39,52 @@ class DataManagerPanel : public QDockWidget
                                QWidget *parent = nullptr );
     ~DataManagerPanel() override = default;
 
-    /// Number of top-level rows (one per standalone Data Asset + one per
-    /// Data Collection; collection children are nested, not top-level).
     int rowCount() const;
 
-    /// Text of a column for the row presenting `id`, or empty if absent.
-    /// Columns: 0 name, 1 kind, 2 status, 3 persistence, 4 references.
-    /// Finds the asset row whether it is top-level (standalone) or nested
-    /// under a collection.
     QString rowText( sicnu::data::AssetId id, int column ) const;
 
-    /// The Asset ID of the currently selected row, if any. A collection
-    /// parent row carries no AssetId and returns a null id.
     sicnu::data::AssetId selectedAssetId() const;
 
-    /// Selects the row presenting `id` without triggering display/unload intents.
+    /// HTML currently shown in the metadata inspector (for tests).
+    QString detailHtml() const;
+
     void selectAsset( sicnu::data::AssetId id );
 
-    /// Triggers the activation (double-click) intent for the row presenting `id`.
     void activateAsset( sicnu::data::AssetId id );
 
-    /// Triggers the remove intent for the row presenting `id` (context action).
     void requestRemove( sicnu::data::AssetId id );
 
-    /// Triggers the promote intent for a temporary asset (context action). The
-    /// shell calls DataManager::promote; the panel refreshes via assetChanged.
     void requestPromote( sicnu::data::AssetId id );
 
-    /// Re-projects the Data Manager snapshots. Called automatically on asset
-    /// add/change/remove and collection add/remove; call it after Display Layer
-    /// (lease) changes, which do not emit asset signals.
     void refresh();
 
   signals:
-    /// Double-click / activation intent: the UI shell should add a Display Layer.
     void displayRequested( sicnu::data::AssetId id );
-    /// Remove intent: the UI shell should run unload planning (with confirmation).
     void unloadRequested( sicnu::data::AssetId id );
-    /// Promote intent: the UI shell should call DataManager::promote so a
-    /// temporary asset survives the session and is saved into the .qgz.
     void promoteRequested( sicnu::data::AssetId id );
 
   private slots:
     void onItemActivated( QTreeWidgetItem *item, int column );
     void onContextMenu( const QPoint &pos );
+    void onSelectionChanged();
 
   private:
     sicnu::data::AssetId assetForItem( QTreeWidgetItem *item ) const;
+    std::optional<sicnu::data::CollectionId> collectionForItem( QTreeWidgetItem *item ) const;
     int referenceCount( sicnu::data::AssetId id ) const;
-    /// True when `id` is a registered ProjectPersistent asset. Shared by the
-    /// promote request guard and the context-menu enable/disable gate.
     bool isProjectPersistent( sicnu::data::AssetId id ) const;
-    /// True when `id` is a registered temporary asset eligible for promotion.
     bool isPromotable( sicnu::data::AssetId id ) const;
 
-    /// Populates one asset row (top-level or a collection child) from `snapshot`.
     void addAssetRow( QTreeWidgetItem *parent, const sicnu::data::AssetSnapshot &snapshot );
+    void showAssetDetails( const sicnu::data::AssetSnapshot &snapshot );
+    void showCollectionDetails( const sicnu::data::CollectionSnapshot &collection );
+    void clearDetails( const QString &message = QString() );
 
     sicnu::data::DataManager *m_dataManager = nullptr; // not owned
     QTreeWidget *m_tree = nullptr;
+    QTextBrowser *m_detailView = nullptr;
+    QLabel *m_detailTitle = nullptr;
+    QSplitter *m_splitter = nullptr;
 };
 
 } // namespace sicnu

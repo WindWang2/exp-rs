@@ -126,10 +126,10 @@ TEST_CASE( "Rows show status and persistence indicators", "[data_manager_panel]"
 
   sicnu::DataManagerPanel panel( &dataManager );
 
-  CHECK( panel.rowText( ready, 2 ) == QStringLiteral( "Ready" ) );
-  CHECK( panel.rowText( ready, 3 ) == QStringLiteral( "Persistent" ) );
-  CHECK( panel.rowText( missing, 2 ) == QStringLiteral( "Missing" ) );
-  CHECK( panel.rowText( missing, 3 ) == QStringLiteral( "Session" ) );
+  CHECK( panel.rowText( ready, 2 ) == QStringLiteral( "就绪" ) );
+  CHECK( panel.rowText( ready, 3 ) == QStringLiteral( "工程持久" ) );
+  CHECK( panel.rowText( missing, 2 ) == QStringLiteral( "源缺失" ) );
+  CHECK( panel.rowText( missing, 3 ) == QStringLiteral( "会话临时" ) );
 }
 
 TEST_CASE( "Double-clicking a row emits a display request for the Asset ID",
@@ -263,9 +263,9 @@ TEST_CASE( "The persistence column distinguishes all three policies",
 
   sicnu::DataManagerPanel panel( &dataManager );
 
-  CHECK( panel.rowText( persistent, 3 ) == QStringLiteral( "Persistent" ) );
-  CHECK( panel.rowText( session, 3 ) == QStringLiteral( "Session" ) );
-  CHECK( panel.rowText( task, 3 ) == QStringLiteral( "Task" ) );
+  CHECK( panel.rowText( persistent, 3 ) == QStringLiteral( "工程持久" ) );
+  CHECK( panel.rowText( session, 3 ) == QStringLiteral( "会话临时" ) );
+  CHECK( panel.rowText( task, 3 ) == QStringLiteral( "任务临时" ) );
 }
 
 TEST_CASE( "A promote request is emitted for a temporary asset's id",
@@ -329,14 +329,14 @@ TEST_CASE( "A promoted asset is reflected immediately in the panel",
     PersistencePolicy::SessionTemporary );
 
   sicnu::DataManagerPanel panel( &dataManager );
-  REQUIRE( panel.rowText( id, 3 ) == QStringLiteral( "Session" ) );
+  REQUIRE( panel.rowText( id, 3 ) == QStringLiteral( "会话临时" ) );
 
   // The shell consumes promoteRequested and calls DataManager::promote. The
   // panel refreshes automatically via the assetChanged -> refresh connection
   // wired in its constructor - no project reload, no manual refresh needed.
   REQUIRE( dataManager.promote( id ) );
 
-  CHECK( panel.rowText( id, 3 ) == QStringLiteral( "Persistent" ) );
+  CHECK( panel.rowText( id, 3 ) == QStringLiteral( "工程持久" ) );
 }
 
 // --- Collections (#53) ---
@@ -432,4 +432,24 @@ TEST_CASE( "Standalone assets stay top-level alongside collection parent rows",
   // Both the standalone asset and the collection's child are findable.
   CHECK( panel.rowText( standalone, 0 ) == QStringLiteral( "s" ) );
   CHECK( panel.rowText( child, 0 ) == QStringLiteral( "c" ) );
+}
+
+TEST_CASE( "Selecting an asset fills the metadata detail panel",
+           "[data_manager_panel][detail]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  const AssetId id =
+    registerRaster( dataManager, fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ) );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+  panel.selectAsset( id );
+
+  const QString html = panel.detailHtml();
+  REQUIRE_FALSE( html.isEmpty() );
+  CHECK( html.contains( QStringLiteral( "资产 ID" ) ) );
+  CHECK( html.contains( id.toString() ) );
+  CHECK( html.contains( QStringLiteral( "数据源" ) ) );
+  CHECK( ( html.contains( QStringLiteral( "栅格结构" ) )
+           || html.contains( QStringLiteral( "结构" ) ) ) );
 }

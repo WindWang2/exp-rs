@@ -4,6 +4,7 @@
 #include "layer_manager.h"
 #include "app_paths.h"
 #include "dialogs/crs_preset_dialog.h"
+#include "panels/data_manager_panel.h"
 #include "widgets/spectral_profile_widget.h"
 
 #include <QFileDialog>
@@ -176,27 +177,66 @@ void QgisDesktopWindow::onIdentifyResults(const QList<QgsMapToolIdentify::Identi
 }
 void QgisDesktopWindow::addRasterLayer()
 {
-    QString filePath = QFileDialog::getOpenFileName(
-        this, tr( "Open Raster Layer" ),
-        AppPaths::dataDir(),
-        tr( "Raster files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.jpeg *.asc *.dat *.hdr *.bil *.bsq *.bip);;"
-            "ENVI raster (*.dat *.hdr *.img *.bil *.bsq *.bip);;"
-            "All files (*)" )
-    );
-    if ( !filePath.isEmpty() )
-        m_layerManager->loadRasterLayer( filePath );
+    const QStringList paths = QFileDialog::getOpenFileNames(
+      this, tr( "打开栅格图层（可多选）" ),
+      AppPaths::dataDir(),
+      tr( "Raster files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.jpeg *.asc *.dat *.hdr *.bil *.bsq *.bip);;"
+          "ENVI raster (*.dat *.hdr *.img *.bil *.bsq *.bip);;"
+          "All files (*)" ) );
+    if ( paths.isEmpty() || !m_layerManager )
+      return;
+
+    int ok = 0;
+    int failed = 0;
+    for ( const QString &filePath : paths )
+    {
+      if ( filePath.isEmpty() )
+        continue;
+      if ( m_layerManager->loadRasterLayer( filePath ) )
+        ++ok;
+      else
+        ++failed;
+    }
+    if ( m_dataManagerPanel )
+    {
+      m_dataManagerPanel->show();
+      m_dataManagerPanel->raise();
+    }
+    statusBar()->showMessage(
+      failed == 0 ? tr( "已加载 %1 个栅格" ).arg( ok )
+                  : tr( "栅格加载：成功 %1，失败 %2" ).arg( ok ).arg( failed ),
+      4000 );
 }
 
 void QgisDesktopWindow::addVectorLayer()
 {
-    QString filePath = QFileDialog::getOpenFileName(
-        this, "Open Vector Layer",
-        AppPaths::dataDir(),
-        "Vector Files (*.shp *.gpkg *.geojson *.kml *.gml);;All Files (*.*)"
-    );
-    if (!filePath.isEmpty()) {
-        m_layerManager->loadVectorLayer(filePath);
+    const QStringList paths = QFileDialog::getOpenFileNames(
+      this, tr( "打开矢量图层（可多选）" ),
+      AppPaths::dataDir(),
+      tr( "Vector Files (*.shp *.gpkg *.geojson *.kml *.gml);;All Files (*.*)" ) );
+    if ( paths.isEmpty() || !m_layerManager )
+      return;
+
+    int ok = 0;
+    int failed = 0;
+    for ( const QString &filePath : paths )
+    {
+      if ( filePath.isEmpty() )
+        continue;
+      if ( m_layerManager->loadVectorLayer( filePath ) )
+        ++ok;
+      else
+        ++failed;
     }
+    if ( m_dataManagerPanel )
+    {
+      m_dataManagerPanel->show();
+      m_dataManagerPanel->raise();
+    }
+    statusBar()->showMessage(
+      failed == 0 ? tr( "已加载 %1 个矢量" ).arg( ok )
+                  : tr( "矢量加载：成功 %1，失败 %2" ).arg( ok ).arg( failed ),
+      4000 );
 }
 
 void QgisDesktopWindow::layerProperties()
