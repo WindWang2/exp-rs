@@ -354,10 +354,7 @@ void ActiveViewHost::removeSelectedDisplayLayers()
     for ( QgsMapLayer *layer : selected )
     {
         const std::optional<sicnu::display::DisplayLayerId> displayLayerId =
-            sicnu::display::DisplayLayerId::fromString(
-                layer->customProperty(
-                         QStringLiteral( "sicnu/displayLayerId" ) )
-                    .toString() );
+            sicnu::display::DisplayLayerId::fromMapLayer( layer );
         if ( displayLayerId && m_displayManager )
         {
             const sicnu::data::Result<void> removed =

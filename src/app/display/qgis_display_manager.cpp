@@ -160,6 +160,12 @@ std::optional<DisplayLayerId> DisplayLayerId::fromString(const QString &text) {
   return DisplayLayerId(value);
 }
 
+std::optional<DisplayLayerId> DisplayLayerId::fromMapLayer(const QgsMapLayer *layer) {
+  if (!layer)
+    return std::nullopt;
+  return fromString(layer->customProperty(QStringLiteral("sicnu/displayLayerId")).toString());
+}
+
 bool DisplayLayerId::isNull() const { return m_value.isNull(); }
 
 QString DisplayLayerId::toString() const {

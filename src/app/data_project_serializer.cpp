@@ -495,9 +495,7 @@ data::Result<void> DataProjectSerializer::read(const QDomDocument &document,
     }
 
     display::AdoptLayerOptions options;
-    options.displayLayerId = display::DisplayLayerId::fromString(
-        layer->customProperty(QStringLiteral("sicnu/displayLayerId"))
-            .toString());
+    options.displayLayerId = display::DisplayLayerId::fromMapLayer(layer);
     const data::Result<display::DisplayLayerId> adopted =
         context.displayManager().adoptLayer(context.mainViewId(), *assetId,
                                             layer, options);

@@ -48,6 +48,7 @@ public:
 
   static DisplayLayerId generate();
   static std::optional<DisplayLayerId> fromString(const QString &text);
+  static std::optional<DisplayLayerId> fromMapLayer(const QgsMapLayer *layer);
 
   bool isNull() const;
   QString toString() const;
