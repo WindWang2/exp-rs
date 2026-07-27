@@ -62,6 +62,18 @@ _Avoid_: RGB layer, Temporary composite, Display stack
 A map viewport with its own coordinate reference system, extent, rotation, and temporal context. A Display View contains an ordered set of Display Layers.
 _Avoid_: Data view, Canvas layer set
 
+**Main Display View**:
+The QGIS-interop Display View bound to the project’s primary `QgsMapCanvas` and `layerTreeRoot()`. It is non-removable through the secondary-view API. Secondary views are engine-only until shell chrome hosts them.
+_Avoid_: The only canvas, Default layer list
+
+**Active Display View**:
+The Display View currently targeted by shell open/display actions. Until a view switcher exists, Active Display View equals the Main Display View.
+_Avoid_: Selected layer, Focused canvas (without view identity)
+
+**View layer tree**:
+The shell UI projection of Display Layers in the Active Display View (dock title 视图图层). It is not the project data catalog.
+_Avoid_: Layer manager tree, Project data list
+
 **Display Layer**:
 One independent presentation of a Data Asset inside exactly one Display View. Its QGIS adapter owns renderer, band composition, stretch, opacity, and other display state without changing the referenced Data Asset.
 _Avoid_: Data Asset, Dataset, Shared layer

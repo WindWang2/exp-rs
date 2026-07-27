@@ -222,7 +222,8 @@ void QgisDesktopWindow::restorePanelState()
     // v8: toolbars hosted in chrome strip under ribbon (not TopToolBarArea).
     // v9: hide empty Task Center by default; drop dual TaskCenterDock layouts.
     // v10: remove band composition rail from top chrome; content-width toolbars.
-    constexpr int kShellLayoutVersion = 10;
+    // v11: view-oriented shell — Data Manager raised; Layers retitled 视图图层.
+    constexpr int kShellLayoutVersion = 11;
     const int savedVersion = settings.value( QStringLiteral( "mainwindow/shellLayoutVersion" ), 0 ).toInt();
 
     if ( savedVersion >= kShellLayoutVersion )
@@ -356,7 +357,7 @@ void QgisDesktopWindow::resetPanelLayout()
     QSettings settings;
     settings.remove( QStringLiteral( "mainwindow/state" ) );
     settings.remove( QStringLiteral( "mainwindow/geometry" ) );
-    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 10 );
+    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 11 );
 
     // Dock areas back to defaults, then apply product shell visibility.
     if ( m_layersDock )
@@ -409,7 +410,7 @@ void QgisDesktopWindow::savePanelState()
     QSettings settings;
     settings.setValue( QStringLiteral( "mainwindow/state" ), saveState() );
     settings.setValue( QStringLiteral( "mainwindow/geometry" ), saveGeometry() );
-    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 10 );
+    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 11 );
 }
 
 void QgisDesktopWindow::closeEvent( QCloseEvent *event )

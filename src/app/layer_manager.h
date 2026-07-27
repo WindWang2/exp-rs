@@ -23,14 +23,18 @@ struct SourceDescriptor;
 }
 
 /**
- * @brief Manages all layer-related operations for the main window.
+ * Active-view display host for the main window (legacy name: LayerManager).
  *
- * Extracted from QgisDesktopWindow as the first step of god-class decomposition.
- * Handles layer loading (raster/vector), removal, properties display,
- * layer tree initialization, and canvas-layer synchronization.
+ * **Not** the project data authority — that is `sicnu::data::DataManager`
+ * (ADR 0009 / 0010). This façade only:
+ *   - registers a local path as a Data Asset (when DataManager is wired), and
+ *   - adds a Display Layer to the **active / main** Display View, and
+ *   - drives the main view’s layer tree selection, properties, and canvas refresh.
  *
- * This is an internal implementation detail of QgisDesktopWindow;
- * the public API of the main window remains unchanged.
+ * Planned rename: ActiveViewHost. Callers that need catalog identity must use
+ * DataManager; callers that need multi-view must use DisplayManager + view id.
+ *
+ * Internal to QgisDesktopWindow; main-window public API stays stable.
  */
 class LayerManager : public QObject
 {
@@ -47,10 +51,10 @@ class LayerManager : public QObject
 
     ~LayerManager() override;
 
-    // ── Layer tree initialization ─────────────────────────────────────
+    // ── Layer tree initialization (main Display View) ─────────────────
     void initLayerTree();
 
-    // ── Core layer loading (programmatic, no dialogs) ─────────────────
+    // ── Open path → register Asset + display on main/active view ──────
     sicnu::data::Result<sicnu::display::DisplayLayerId>
     loadLayer( const QString &filePath );
     sicnu::data::Result<sicnu::display::DisplayLayerId>

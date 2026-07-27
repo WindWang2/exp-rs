@@ -56,10 +56,11 @@
 
 void QgisDesktopWindow::setupDockWidgets()
 {
-    // Layers Panel (Left)
-    m_layersDock = new QgsDockWidget("Layers", this);
-    m_layersDock->setObjectName("layersDock");
-    m_layersDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    // View layer tree (Left) — presentation stack of the active Display View only.
+    // Project data identity lives in Data Manager (tabified with this dock).
+    m_layersDock = new QgsDockWidget( tr( "视图图层" ), this );
+    m_layersDock->setObjectName( "layersDock" ); // stable for saveState / layout
+    m_layersDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
 
     QWidget *layersContainer = new QWidget(m_layersDock);
     QVBoxLayout *layersLayout = new QVBoxLayout(layersContainer);
@@ -331,15 +332,19 @@ void QgisDesktopWindow::setupDockWidgets()
 
 void QgisDesktopWindow::setupDataManagerPanel()
 {
-    // Must run after ProjectContext is created. Catalog is separate from the layer tree.
+    // Must run after ProjectContext is created.
+    // Data Manager = project data catalog (elevated); layer tree = active view only.
     if ( !m_projectContext || m_dataManagerPanel )
         return;
 
     m_dataManagerPanel =
         new sicnu::DataManagerPanel( &m_projectContext->dataManager(), this );
+    m_dataManagerPanel->setWindowTitle( tr( "数据管理" ) );
     addDockWidget( Qt::LeftDockWidgetArea, m_dataManagerPanel );
     if ( m_layersDock )
         tabifyDockWidget( m_layersDock, m_dataManagerPanel );
+    // Prefer catalog front after setup (product shell also raises it).
+    m_dataManagerPanel->raise();
 
     connect( m_dataManagerPanel, &sicnu::DataManagerPanel::displayRequested,
              this, [this]( sicnu::data::AssetId assetId ) {
@@ -788,17 +793,22 @@ void QgisDesktopWindow::applyProductShellLayout()
     if ( QDockWidget *legacyTc = findChild<QDockWidget *>( QStringLiteral( "TaskCenterDock" ) ) )
         legacyTc->hide();
 
-    // Layers stay on the left; browser tabified under it can stay hidden until needed.
+    // Left: Data Manager is the elevated catalog; view layer tree is secondary tab.
+    // Browser stays hidden until needed.
     if ( m_browserDock )
         m_browserDock->hide();
     if ( m_layersDock )
-    {
         m_layersDock->show();
+    // Data Manager = project data identity (ADR 0010). Raise over 视图图层.
+    if ( m_dataManagerPanel )
+    {
+        m_dataManagerPanel->show();
+        m_dataManagerPanel->raise();
+    }
+    else if ( m_layersDock )
+    {
         m_layersDock->raise();
     }
-    // Data Manager stays available as a left tab (catalog ≠ layer tree).
-    if ( m_dataManagerPanel )
-        m_dataManagerPanel->show();
 
     // Workflow tool host (rsTaskPanelDock) only when a tool is open.
     hideDock( m_taskPanelDock );
