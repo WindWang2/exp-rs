@@ -11,6 +11,8 @@
 
 #include <json/json.h>
 
+#include "processing/framework/task_center.h"
+
 class QgsRasterLayer;
 class QgsProcessingAlgorithm;
 class QgsProcessingContext;
@@ -67,7 +69,7 @@ public:
     void finishRun();
 
     /**
-     * Run a GDAL I/O lambda via RsJobRunner / JobEngine (callable:gdal_task).
+     * Run a GDAL I/O lambda through Task Center (callable:gdal_task).
      * Task return contract (legacy AsyncGdalRunner):
      *   - non-empty path → success
      *   - empty → generic failure
@@ -77,7 +79,7 @@ public:
     void runGdalTask(const std::function<QString()> &task);
 
     /**
-     * Run a QGIS Processing algorithm via RsJobRunner (processing: prefix id).
+     * Run a QGIS Processing algorithm through Task Center (processing: prefix id).
      * Completes via onCompleted/onFailed on the GUI thread.
      * Prefer SicnuAlgorithmDialog for full toolbox parameter UIs.
      */
@@ -86,7 +88,7 @@ public:
                           QgsProcessingContext &context);
 
     /**
-     * Run an RSOperator via RsJobRunner (registry / prefix path).
+     * Run an RSOperator through Task Center (registry / prefix path).
      *
      * Prefer this over direct algorithm calls so GUI, CLI, and MCP share one
      * execution path. Parameters must match the operator schema(); the result
@@ -173,11 +175,14 @@ public slots:
      */
     void onFailed(const QString &errorMessage);
 
+private slots:
+    void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
+
 protected:
     // --- Members ---
     QgsRasterLayer *m_rasterLayer = nullptr;
     QLineEdit *m_outputEdit = nullptr;
     QPushButton *m_runButton = nullptr;
     bool m_running = false;
-    QString m_pendingJobId;
+    long m_pendingTaskId = -1;
 };

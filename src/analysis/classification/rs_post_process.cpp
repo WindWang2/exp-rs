@@ -449,6 +449,7 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
   // Remove existing file so Create succeeds.
   GDALDriver *existing = GetGDALDriverManager()->GetDriverByName(
     driverName.toUtf8().constData() );
+  if ( QFileInfo::exists( path ) )
   {
     GDALDataset *old = static_cast<GDALDataset *>(
       GDALOpen( path.toUtf8().constData(), GA_ReadOnly ) );

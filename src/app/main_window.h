@@ -38,6 +38,10 @@ class QgsAdvancedDigitizingDockWidget;
 class QgsMessageBar;
 class QgsMapToolSelect;
 class QgsMapToolAddFeature;
+
+namespace sicnu {
+class TaskCenterDock;
+}
 class QgsMapToolMoveFeature;
 class QgsMapToolRotateFeature;
 class QgsMapToolScaleFeature;
@@ -358,6 +362,7 @@ private:
     RsJobPanel *m_jobPanel = nullptr;
     QgsDockWidget *m_workflowDock = nullptr;
     QgsDockWidget *m_taskPanelDock = nullptr;
+    sicnu::TaskCenterDock *m_taskCenterDock = nullptr;
     TaskPanelHost *m_taskPanel = nullptr;
     WorkflowSessionController *m_sessionController = nullptr;
     RibbonController *m_ribbonController = nullptr;

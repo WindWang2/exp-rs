@@ -30,6 +30,9 @@ function(sicnu_add_test NAME)
     Qt6::Widgets
     qgis_core
     qgis_gui
+    sicnu_processing
+    sicnu_jobs
+    sicnu_task_center
   )
   target_include_directories(${NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -43,6 +46,28 @@ sicnu_add_test(test_smoke)
 sicnu_add_test(test_crs)
 sicnu_add_test(test_geometry)
 sicnu_add_test(test_layers)
+sicnu_add_test(test_algorithm_engine)
+sicnu_add_test(test_task_center)
+
+add_executable(test_task_center_dock
+    test_task_center_dock.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/panels/task_center_dock.cpp
+)
+target_link_libraries(test_task_center_dock PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    sicnu_processing
+    sicnu_task_center
+)
+target_include_directories(test_task_center_dock PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_task_center_dock)
 
 qt_add_executable(test_data_manager
   test_data_manager.cpp
@@ -1439,6 +1464,37 @@ sicnu_discover_tests(test_band_ratio)
 # Phase 10A Task 10.2 — Classification main window shell tests.
 # Only built when OpenCV ml component is available (qgis_app_classify exists).
 if(TARGET qgis_app_classify)
+  add_executable(test_classification_task_center
+    test_classification_task_center.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/rs_session_map_workspace.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  )
+  target_link_libraries(test_classification_task_center PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_analysis
+    qgis_app_classify
+    sicnu_jobs
+    sicnu_task_center
+    GDAL::GDAL
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_classification_task_center PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${CMAKE_SOURCE_DIR}/src/app/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_classification_task_center PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_classification_task_center)
+
   # Shell QObject TUs live on sicnu_geo_rs only (not qgis_app_classify) to avoid
   # MOC ODR. Full-window classify tests must compile the same shell sources here.
   # Follow-up: extract a shared OBJECT/static lib (e.g. sicnu_app_shell) once more
@@ -1461,6 +1517,7 @@ if(TARGET qgis_app_classify)
     qgis_analysis
     qgis_app_classify
     sicnu_jobs
+    sicnu_task_center
   )
   target_include_directories(test_classification_window PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -1471,6 +1528,9 @@ if(TARGET qgis_app_classify)
     ${CMAKE_BINARY_DIR}
   )
   set_target_properties(test_classification_window PROPERTIES AUTOMOC ON)
+  target_compile_definitions(test_classification_window PRIVATE
+    SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
   sicnu_discover_tests(test_classification_window)
 
   # Phase 10A Task 10.3 — Class table widget tests.
@@ -2338,7 +2398,7 @@ sicnu_discover_tests(test_dialog_edge_cases)
 add_executable(test_raster_processing_dialog_base
   test_raster_processing_dialog_base.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
 )
@@ -2350,6 +2410,7 @@ target_link_libraries(test_raster_processing_dialog_base PRIVATE
   Qt6::Widgets
   sicnu_jobs
   sicnu_operators
+  sicnu_task_center
 
   Qt6::Concurrent
   qgis_core
@@ -2357,6 +2418,7 @@ target_link_libraries(test_raster_processing_dialog_base PRIVATE
 )
 target_include_directories(test_raster_processing_dialog_base PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_raster_processing_dialog_base)
@@ -2558,6 +2620,7 @@ target_link_libraries(test_output_committer PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
+  sicnu_task_center
   sicnu_data
 )
 target_include_directories(test_output_committer PRIVATE

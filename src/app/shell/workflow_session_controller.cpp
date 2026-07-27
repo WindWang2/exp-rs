@@ -3,10 +3,8 @@
  ***************************************************************************/
 #include "workflow_session_controller.h"
 
-#include "job_engine_qt_bridge.h"
 #include "task_panel_host.h"
 
-#include "jobs/job_engine.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "workflow/builtin_definitions.h"
@@ -16,9 +14,7 @@
 #include <utility>
 #include <vector>
 
-using sicnu::jobs::JobEngine;
 using sicnu::jobs::JobRequest;
-using sicnu::jobs::JobState;
 using sicnu::operators::RSOperatorRegistry;
 using sicnu::workflow::CanRunResult;
 using sicnu::workflow::StepDef;
@@ -56,7 +52,8 @@ WorkflowSessionController::WorkflowSessionController( QObject *parent )
   , m_registry()
   , m_runtime( m_registry )
 {
-  ensureJobBridgeConnected();
+  connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
+           this, &WorkflowSessionController::onTaskUpdated, Qt::QueuedConnection );
 }
 
 void WorkflowSessionController::registerBuiltins()
@@ -175,16 +172,6 @@ void WorkflowSessionController::ensureRunConnected()
   m_runConnected = true;
 }
 
-void WorkflowSessionController::ensureJobBridgeConnected()
-{
-  if ( m_jobBridgeConnected )
-    return;
-  auto *bridge = JobEngineQtBridge::instance();
-  connect( bridge, &JobEngineQtBridge::jobFinished,
-           this, &WorkflowSessionController::onJobFinished );
-  m_jobBridgeConnected = true;
-}
-
 void WorkflowSessionController::onRunClicked()
 {
   if ( !m_panel || m_activeSession.isEmpty() || m_activeStepId.isEmpty() )
@@ -236,8 +223,6 @@ void WorkflowSessionController::onRunClicked()
     return;
   }
 
-  ensureJobBridgeConnected();
-
   JobRequest req;
   req.algorithmId = step->operatorId;
   req.params = params;
@@ -246,42 +231,36 @@ void WorkflowSessionController::onRunClicked()
                 : m_activeTitle.toStdString();
   req.source = "task_panel";
 
-  const std::string jobId = JobEngine::instance().submit( std::move( req ) );
+  const long taskId = sicnu::TaskCenter::instance().submitJob( req );
 
   m_runInFlight = true;
-  m_pendingJobId = QString::fromStdString( jobId );
+  m_pendingTaskId = taskId;
   m_pendingLoadToMap = m_panel->loadResultToMap();
   m_panel->setRunning( true );
   emit statusMessage( tr( "正在运行…" ) );
 }
 
-void WorkflowSessionController::onJobFinished( const QString &jobId )
+void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
 {
-  if ( m_pendingJobId.isEmpty() || jobId != m_pendingJobId )
+  if ( m_pendingTaskId < 0 || info.taskId != m_pendingTaskId )
+    return;
+  if ( info.status != sicnu::TaskStatus::Completed
+       && info.status != sicnu::TaskStatus::Failed
+       && info.status != sicnu::TaskStatus::Canceled )
     return;
 
-  m_pendingJobId.clear();
+  m_pendingTaskId = -1;
   m_runInFlight = false;
 
   if ( m_panel )
     m_panel->setRunning( false );
 
-  const auto snapOpt = JobEngine::instance().snapshot( jobId.toStdString() );
-  if ( !snapOpt )
+  if ( info.status != sicnu::TaskStatus::Completed )
   {
-    if ( m_panel )
-      m_panel->setFailed( tr( "任务记录丢失" ) );
-    emit statusMessage( tr( "任务记录丢失" ) );
-    return;
-  }
-
-  const auto &rec = *snapOpt;
-  if ( rec.state != JobState::Succeeded )
-  {
-    QString error = QString::fromStdString( rec.error );
+    QString error = info.errorMessage;
     if ( error.isEmpty() )
     {
-      if ( rec.state == JobState::Cancelled )
+      if ( info.status == sicnu::TaskStatus::Canceled )
         error = tr( "已取消" );
       else
         error = tr( "运行失败" );
@@ -295,11 +274,11 @@ void WorkflowSessionController::onJobFinished( const QString &jobId )
   const std::string sessionId = m_activeSession.toStdString();
   const std::string stepId = m_activeStepId.toStdString();
   if ( !sessionId.empty() && !stepId.empty() )
-    applyJobResultToSession( sessionId, stepId, rec.result );
+    applyJobResultToSession( sessionId, stepId, info.resultPayload );
 
   QString outputPath;
-  if ( rec.result.isMember( "output" ) && rec.result["output"].isString() )
-    outputPath = QString::fromStdString( rec.result["output"].asString() );
+  if ( info.resultPayload.isMember( "output" ) && info.resultPayload["output"].isString() )
+    outputPath = QString::fromStdString( info.resultPayload["output"].asString() );
 
   if ( m_pendingLoadToMap && !outputPath.isEmpty() )
     emit requestLoadRaster( outputPath );
