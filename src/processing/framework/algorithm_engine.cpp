@@ -107,6 +107,11 @@ void AlgorithmEngine::initialize()
         ToolPathManager::instance().setOtbPath( otbPath );
 
     if (QgsApplication::processingRegistry()) {
+        QObject::connect( QgsApplication::processingRegistry(), &QgsProcessingRegistry::providerAdded, [this]( const QString &providerId ) {
+            Q_UNUSED( providerId );
+            populateFromProcessingRegistry();
+        } );
+
         QgsApplication::processingRegistry()->addProvider(new GdalToolsProvider());
         QgsApplication::processingRegistry()->addProvider(new OtbToolsProvider());
         QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());

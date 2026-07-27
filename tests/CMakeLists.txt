@@ -2731,6 +2731,42 @@ target_compile_definitions(test_python_plugin_manager PRIVATE
   TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
 )
 sicnu_discover_tests(test_python_plugin_manager)
+
+qt_add_executable(test_python_processing_provider
+  test_python_processing_provider.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
+  ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_api.cpp
+  ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_runner.cpp
+)
+target_link_libraries(test_python_processing_provider PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  Sicnu::qgis_display
+  Python::Python
+  CURL::libcurl
+  ${PCRE2_16}
+  ${PCRE2_8}
+)
+target_include_directories(test_python_processing_provider PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/core
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_SOURCE_DIR}/src/processing/framework
+  ${CMAKE_SOURCE_DIR}/src/python
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_python_processing_provider PRIVATE
+  SICNU_EMBED_PYTHON=1
+  TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
+)
+sicnu_discover_tests(test_python_processing_provider)
 endif()
 
 # Project persistence — SICNU Data identity plus standard QGIS presentation
