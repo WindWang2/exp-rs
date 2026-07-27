@@ -91,6 +91,23 @@ RibbonController::RibbonController( QgisDesktopWindow *window, QObject *parent )
 {
 }
 
+void RibbonController::installChromeContextMenu( QWidget *widget )
+{
+  if ( !widget || !m_window )
+    return;
+  widget->setContextMenuPolicy( Qt::CustomContextMenu );
+  // Disconnect prior hook if re-installed (idempotent for nested installs).
+  disconnect( widget, &QWidget::customContextMenuRequested, this, nullptr );
+  connect( widget, &QWidget::customContextMenuRequested, this,
+           [this, widget]( const QPoint &pos ) {
+             QMenu *menu = m_window->createPopupMenu();
+             if ( !menu )
+               return;
+             menu->setAttribute( Qt::WA_DeleteOnClose );
+             menu->popup( widget->mapToGlobal( pos ) );
+           } );
+}
+
 QgsRasterLayer *RibbonController::currentRasterLayer() const
 {
   if ( !m_window || !m_window->mapCanvas() )
@@ -937,6 +954,21 @@ QWidget *RibbonController::createRibbonBar()
 
   wireBandComboSignals();
   syncBandCombos();
+
+  // QGIS-style: right-click ribbon to toggle panels / toolbars.
+  installChromeContextMenu( bar );
+  installChromeContextMenu( tabRow );
+  installChromeContextMenu( stack );
+  if ( QWidget *qat = bar->findChild<QWidget *>( QStringLiteral( "rsRibbonQat" ) ) )
+    installChromeContextMenu( qat );
+  // Nested scroll pages / empty group areas
+  const auto scrolls = bar->findChildren<QScrollArea *>();
+  for ( QScrollArea *s : scrolls )
+  {
+    installChromeContextMenu( s );
+    if ( s->widget() )
+      installChromeContextMenu( s->widget() );
+  }
 
   return bar;
 }

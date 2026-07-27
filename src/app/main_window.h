@@ -132,6 +132,13 @@ public:
      */
     QMenuBar *appMenuBar();
 
+    /**
+     * QGIS-style panel/toolbar visibility menu (checkable toggles).
+     * Used by ribbon right-click and QMainWindow empty-area popup.
+     * Caller owns the returned menu (prefer WA_DeleteOnClose + popup).
+     */
+    QMenu *createPopupMenu() override;
+
     QgsMapCanvas *mapCanvas() const { return m_mapCanvas; }
     QgsMapLayer *activeLayer();
     QList<QgsMapLayer*> selectedLayers();

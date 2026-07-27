@@ -15,14 +15,20 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QLabel>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPalette>
 #include <QPushButton>
+#include <QSet>
 #include <QSettings>
 #include <QStatusBar>
 #include <QStyleFactory>
+#include <QToolBar>
 #include <QVBoxLayout>
+#include <QWidgetAction>
 #include <QDebug>
+
+#include <algorithm>
 
 #include <qgsbrowserdockwidget.h>
 #include <qgsdockwidget.h>
@@ -232,6 +238,117 @@ void QgisDesktopWindow::restorePanelState()
     const QByteArray geometry = settings.value( QStringLiteral( "mainwindow/geometry" ) ).toByteArray();
     if ( !geometry.isEmpty() )
         restoreGeometry( geometry );
+}
+
+QMenu *QgisDesktopWindow::createPopupMenu()
+{
+    // QGIS-style: checkable toggles for panels and toolbars (see QgisApp::createPopupMenu).
+    auto *menu = new QMenu( this );
+    menu->setObjectName( QStringLiteral( "rsPanelToolbarPopup" ) );
+    menu->setToolTipsVisible( true );
+
+    auto makeSectionTitle = [menu]( const QString &title ) {
+        auto *titleAction = new QWidgetAction( menu );
+        auto *label = new QLabel( QStringLiteral( "<b>%1</b>" ).arg( title ) );
+        label->setMargin( 4 );
+        label->setAlignment( Qt::AlignHCenter );
+        label->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+        titleAction->setDefaultWidget( label );
+        menu->addAction( titleAction );
+    };
+
+    // ── 面板 ──────────────────────────────────────────────────────────────
+    makeSectionTitle( tr( "面板" ) );
+
+    QList<QAction *> panelActions;
+    const QList<QDockWidget *> docks = findChildren<QDockWidget *>(
+      QString(), Qt::FindDirectChildrenOnly );
+    // Also nested docks (some are children of the window via addDockWidget).
+    QList<QDockWidget *> allDocks = findChildren<QDockWidget *>();
+    QSet<QDockWidget *> seen;
+    for ( QDockWidget *dock : allDocks )
+    {
+        if ( !dock || seen.contains( dock ) )
+            continue;
+        seen.insert( dock );
+
+        // Ribbon chrome must stay; empty titles are not user-facing panels.
+        if ( dock->objectName() == QLatin1String( "rsRibbonDock" ) )
+            continue;
+        if ( dock->windowTitle().trimmed().isEmpty() )
+            continue;
+        // Hidden title-bar-only placeholders
+        if ( dock->objectName().isEmpty() && !dock->toggleViewAction() )
+            continue;
+
+        QAction *act = dock->toggleViewAction();
+        if ( !act )
+            continue;
+        // Append "面板" once (QGIS appends " Panel").
+        if ( !act->property( "fixed_title" ).toBool() )
+        {
+            const QString base = act->text().trimmed();
+            if ( !base.isEmpty() && !base.endsWith( tr( "面板" ) ) )
+                act->setText( tr( "%1 面板" ).arg( base ) );
+            act->setProperty( "fixed_title", true );
+        }
+        panelActions.append( act );
+    }
+
+    std::sort( panelActions.begin(), panelActions.end(),
+               []( const QAction *a, const QAction *b ) {
+                   return a->text().localeAwareCompare( b->text() ) < 0;
+               } );
+    for ( QAction *a : panelActions )
+        menu->addAction( a );
+
+    if ( panelActions.isEmpty() )
+    {
+        QAction *empty = menu->addAction( tr( "（无面板）" ) );
+        empty->setEnabled( false );
+    }
+
+    menu->addSeparator();
+
+    // ── 工具栏 ────────────────────────────────────────────────────────────
+    makeSectionTitle( tr( "工具栏" ) );
+
+    QList<QAction *> toolbarActions;
+    for ( QToolBar *tb : findChildren<QToolBar *>() )
+    {
+        if ( !tb )
+            continue;
+        // Product shell hides classic toolbars by default; still list them so
+        // users can re-show via this menu (QGIS does the same).
+        if ( tb->objectName() == QLatin1String( "rsRibbonHost" ) )
+            continue;
+        QAction *act = tb->toggleViewAction();
+        if ( !act )
+            continue;
+        if ( tb->windowTitle().trimmed().isEmpty() && tb->objectName().isEmpty() )
+            continue;
+        if ( act->text().trimmed().isEmpty() )
+            act->setText( tb->objectName().isEmpty() ? tr( "工具栏" ) : tb->objectName() );
+        toolbarActions.append( act );
+    }
+
+    std::sort( toolbarActions.begin(), toolbarActions.end(),
+               []( const QAction *a, const QAction *b ) {
+                   return a->text().localeAwareCompare( b->text() ) < 0;
+               } );
+    for ( QAction *a : toolbarActions )
+        menu->addAction( a );
+
+    if ( toolbarActions.isEmpty() )
+    {
+        QAction *empty = menu->addAction( tr( "（无工具栏 — 已由 Ribbon 承接）" ) );
+        empty->setEnabled( false );
+    }
+
+    menu->addSeparator();
+    menu->addAction( tr( "重置布局" ), this, &QgisDesktopWindow::resetPanelLayout );
+
+    return menu;
 }
 
 void QgisDesktopWindow::resetPanelLayout()

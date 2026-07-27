@@ -79,6 +79,8 @@ class RibbonController : public QObject
     void applyBandCompositionFromCombos();
     void applyRenderModeFromCombo();
     void wireBandComboSignals();
+    /** Right-click on ribbon chrome → panels/toolbars toggle menu (QGIS-style). */
+    void installChromeContextMenu( QWidget *widget );
 
     QgisDesktopWindow *m_window = nullptr;
 

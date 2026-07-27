@@ -530,6 +530,23 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
 
     m_topChrome = chrome;
 
+    // Ribbon right-click → panel/toolbar toggles (also on ribbon internals).
+    auto installChromeMenu = [this]( QWidget *w ) {
+        if ( !w )
+            return;
+        w->setContextMenuPolicy( Qt::CustomContextMenu );
+        connect( w, &QWidget::customContextMenuRequested, this,
+                 [this, w]( const QPoint &pos ) {
+                     QMenu *menu = createPopupMenu();
+                     if ( !menu )
+                         return;
+                     menu->setAttribute( Qt::WA_DeleteOnClose );
+                     menu->popup( w->mapToGlobal( pos ) );
+                 } );
+    };
+    installChromeMenu( chrome );
+    installChromeMenu( m_bandRail );
+
     // Corners claim the top strip so the dock spans over left/right docks.
     setCorner( Qt::TopLeftCorner, Qt::TopDockWidgetArea );
     setCorner( Qt::TopRightCorner, Qt::TopDockWidgetArea );
