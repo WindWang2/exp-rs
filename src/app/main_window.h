@@ -45,7 +45,7 @@ class QgsMapToolRotateFeature;
 class QgsMapToolScaleFeature;
 
 namespace sicnu {
-class TaskCenterDock;
+
 class DataManagerPanel;
 namespace data {
 class AssetId;
@@ -373,7 +373,7 @@ private:
     RsJobPanel *m_jobPanel = nullptr;
     QgsDockWidget *m_workflowDock = nullptr;
     QgsDockWidget *m_taskPanelDock = nullptr;
-    sicnu::TaskCenterDock *m_taskCenterDock = nullptr;
+
     sicnu::DataManagerPanel *m_dataManagerPanel = nullptr;
     TaskPanelHost *m_taskPanel = nullptr;
     WorkflowSessionController *m_sessionController = nullptr;

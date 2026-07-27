@@ -909,7 +909,8 @@ QWidget *RibbonController::createRibbonBar()
                                     tr( "队列、进度与日志" ) ) )
     {
       connect( btn, &QToolButton::clicked, m_window, [this]() {
-        if ( auto *dock = m_window->findChild<QDockWidget *>( QStringLiteral( "TaskCenterDock" ) ) )
+        // Sole product task list: bottom RsJobPanel (not the old right TaskCenterDock).
+        if ( auto *dock = m_window->findChild<QDockWidget *>( QStringLiteral( "rsJobPanelDock" ) ) )
         {
           dock->show();
           dock->raise();

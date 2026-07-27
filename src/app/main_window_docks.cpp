@@ -5,9 +5,9 @@
 #include "layer_manager.h"
 #include "log_panel.h"
 #include "panels/data_manager_panel.h"
-#include "panels/task_center_dock.h"
 #include "project_context.h"
 #include "data/data_manager.h"
+#include "processing/framework/task_center.h"
 #include "shell/job_engine_qt_bridge.h"
 #include "shell/processing_job_adapter.h"
 #include "shell/ribbon_controller.h"
@@ -479,12 +479,9 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     if ( m_windowMenu )
         m_windowMenu->addAction( m_taskPanelDock->toggleViewAction() );
 
-    m_taskCenterDock = new sicnu::TaskCenterDock( this );
-    addDockWidget( Qt::RightDockWidgetArea, m_taskCenterDock );
-    if ( m_windowMenu )
-        m_windowMenu->addAction( m_taskCenterDock->toggleViewAction() );
-
-    connect( m_taskCenterDock, &sicnu::TaskCenterDock::layerAutoLoadRequested,
+    // Single Task Center UI is the bottom RsJobPanel (rsJobPanelDock).
+    // Do not also create TaskCenterDock — that duplicated the same projection.
+    connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::layerAutoLoadRequested,
              this, [this]( const QString &path ) {
                  loadRasterLayer( path );
              } );
