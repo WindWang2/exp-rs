@@ -86,6 +86,8 @@ void QgisDesktopWindow::setupDockWidgets()
     // Tabify the left dock widgets
     tabifyDockWidget(m_layersDock, m_browserDock);
     m_layersDock->raise();
+    // Data Manager panel is created later in setupDataManagerPanel() once
+    // ProjectContext exists (setupDockWidgets runs before context creation).
 
     // Processing Toolbox Panel (Right, with Overview)
     m_processingDock = new QgsDockWidget("Processing Toolbox", this);
@@ -263,6 +265,7 @@ void QgisDesktopWindow::setupDockWidgets()
     tabifyDockWidget(m_processingDock, m_workflowDock);
 
     // Window menu — add dock toggle actions
+    // Data Manager toggle is added in setupDataManagerPanel() (created later).
     if (m_windowMenu) {
         m_windowMenu->addSeparator();
         m_windowMenu->addAction(m_layersDock->toggleViewAction());
@@ -318,6 +321,90 @@ void QgisDesktopWindow::setupDockWidgets()
         QAction *resetLayoutAction = m_windowMenu->addAction(tr("Reset Layout"));
         connect(resetLayoutAction, &QAction::triggered, this, &QgisDesktopWindow::resetPanelLayout);
     }
+}
+
+void QgisDesktopWindow::setupDataManagerPanel()
+{
+    // Must run after ProjectContext is created. Catalog is separate from the layer tree.
+    if ( !m_projectContext || m_dataManagerPanel )
+        return;
+
+    m_dataManagerPanel =
+        new sicnu::DataManagerPanel( &m_projectContext->dataManager(), this );
+    addDockWidget( Qt::LeftDockWidgetArea, m_dataManagerPanel );
+    if ( m_layersDock )
+        tabifyDockWidget( m_layersDock, m_dataManagerPanel );
+
+    connect( m_dataManagerPanel, &sicnu::DataManagerPanel::displayRequested,
+             this, [this]( sicnu::data::AssetId assetId ) {
+        if ( !m_projectContext )
+            return;
+        const auto added = m_projectContext->displayManager().addLayer(
+            m_projectContext->mainViewId(), assetId );
+        if ( !added )
+        {
+            QMessageBox::warning(
+                this, tr( "添加到显示" ),
+                tr( "无法将数据资产添加到地图显示。" ) );
+        }
+    } );
+
+    connect( m_dataManagerPanel, &sicnu::DataManagerPanel::unloadRequested,
+             this, [this]( sicnu::data::AssetId assetId ) {
+        if ( !m_projectContext )
+            return;
+        sicnu::data::DataManager &dataManager = m_projectContext->dataManager();
+        const sicnu::data::UnloadPlan plan = dataManager.planUnload( assetId );
+
+        QString detail = tr( "从工程卸载此数据资产？" );
+        if ( !plan.activeLeases().isEmpty() )
+        {
+            detail = tr( "该资产正被 %1 个显示/处理租约引用。卸载将移除对应呈现。\n\n"
+                         "继续级联卸载？" )
+                         .arg( plan.activeLeases().size() );
+        }
+        const auto choice = QMessageBox::question(
+            this, tr( "卸载数据资产" ), detail,
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+        if ( choice != QMessageBox::Yes )
+            return;
+
+        const sicnu::data::UnloadPlan confirmed =
+            plan.activeLeases().isEmpty() ? plan : plan.confirmedCascade();
+        const auto unloaded = dataManager.unload( confirmed );
+        if ( !unloaded )
+        {
+            QMessageBox::warning(
+                this, tr( "卸载数据资产" ),
+                tr( "无法卸载该数据资产。" ) );
+        }
+    } );
+
+    connect( m_dataManagerPanel, &sicnu::DataManagerPanel::promoteRequested,
+             this, [this]( sicnu::data::AssetId assetId ) {
+        if ( !m_projectContext )
+            return;
+        const auto promoted = m_projectContext->dataManager().promote( assetId );
+        if ( !promoted )
+        {
+            QMessageBox::warning(
+                this, tr( "提升为工程持久" ),
+                tr( "无法提升该临时数据资产。" ) );
+        }
+    } );
+
+    if ( m_windowMenu )
+        m_windowMenu->addAction( m_dataManagerPanel->toggleViewAction() );
+}
+
+void QgisDesktopWindow::showDataManagerPanel()
+{
+    if ( !m_dataManagerPanel )
+        setupDataManagerPanel();
+    if ( !m_dataManagerPanel )
+        return;
+    m_dataManagerPanel->show();
+    m_dataManagerPanel->raise();
 }
 
 void QgisDesktopWindow::setupRibbonAndTaskPanel()
@@ -458,6 +545,9 @@ void QgisDesktopWindow::applyProductShellLayout()
         m_layersDock->show();
         m_layersDock->raise();
     }
+    // Data Manager stays available as a left tab (catalog ≠ layer tree).
+    if ( m_dataManagerPanel )
+        m_dataManagerPanel->show();
 
     // Task panel only when a tool is open — do not leave an empty right dock open.
     if ( m_taskPanelDock && !m_taskPanelDock->isVisible() )

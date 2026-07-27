@@ -115,6 +115,9 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
         m_projectContext ? m_projectContext->mainViewId()
                          : sicnu::display::DisplayViewId{},
         this );
+    // Data Manager panel needs ProjectContext; setupDockWidgets runs earlier.
+    qDebug() << "Setting up Data Manager panel...";
+    setupDataManagerPanel();
     qDebug() << "Setting up ribbon and task panel...";
     setupRibbonAndTaskPanel();
     qDebug() << "Setting up status bar...";

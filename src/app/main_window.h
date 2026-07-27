@@ -242,6 +242,8 @@ public:
     void openGeoreferencer(); ///< Compatibility alias → openGeorefImageToImage()
     void openGeorefImageToImage();
     void openGeorefImageToMap();
+    /** Show / raise the Data Manager catalog dock (left, tabified with Layers). */
+    void showDataManagerPanel();
 
     // Classification (Phase 10A Task 10.2)
     void openClassificationWindow();
@@ -272,6 +274,8 @@ private:
     void setupMenu();
     void setupToolbars();
     void setupDockWidgets();
+    /// Create Data Manager dock after ProjectContext exists (needs DataManager*).
+    void setupDataManagerPanel();
     void setupRibbonAndTaskPanel();
     void setupStatusBar();
     void setupConnections();

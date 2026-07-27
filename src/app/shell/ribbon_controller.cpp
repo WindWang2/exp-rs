@@ -754,6 +754,11 @@ QWidget *RibbonController::createRibbonBar()
   {
     QWidget *pageW = makeTabPage();
     QHBoxLayout *pl = pageLayoutOf( pageW );
+    auto catalog = addGroup( pl, tr( "数据目录" ) );
+    if ( auto *btn = addToolButton( catalog, tr( "数据管理" ), "d_t_b_se",
+                                    tr( "打开数据资产目录（Data Manager）" ) ) )
+      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::showDataManagerPanel );
+    addGroupSeparator( pl );
     auto layer = addGroup( pl, tr( "添加图层" ) );
     if ( auto *btn = addToolButton( layer, tr( "栅格" ), "r_ster", tr( "添加栅格图层" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::addRasterLayer );
