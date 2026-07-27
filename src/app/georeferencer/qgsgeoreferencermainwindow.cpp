@@ -32,11 +32,10 @@
 #include "qgsgcplist.h"
 #include "qgsgcppoint.h"
 
-#include "shell/job_engine_qt_bridge.h"
-#include "jobs/job_engine.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
+#include "processing/framework/task_center.h"
 
 #include "qgsfeedback.h"
 
@@ -239,8 +238,8 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
   req.source = "module";
   req.exclusive = true;
 
-  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
-    std::move( req ),
+  const long taskId = sicnu::TaskCenter::instance().submitJob(
+    req,
     [task]( const sicnu::jobs::JobRequest &,
             sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running SIFT matching" );
@@ -265,35 +264,38 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
       result["inlierRatio"] = task->result().inlierRatio;
       return result;
     },
-    [task]() { task->cancel(); } );
+    [task]() { task->cancel(); },
+    /*autoLoad=*/false );
 
-  const QString jobIdQ = QString::fromStdString( jobId );
-  auto *bridge = JobEngineQtBridge::instance();
   auto *conn = new QMetaObject::Connection;
-  *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
-                   [this, task, jobIdQ, conn]( const QString &id ) {
-                     if ( id != jobIdQ )
+  *conn = connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, this,
+                   [this, task, taskId, conn]( const sicnu::AlgorithmTaskInfo &info ) {
+                     if ( info.taskId != taskId )
+                       return;
+                     if ( info.status != sicnu::TaskStatus::Completed
+                          && info.status != sicnu::TaskStatus::Failed
+                          && info.status != sicnu::TaskStatus::Canceled )
                        return;
                      disconnect( *conn );
                      delete conn;
 
-                     const auto snapOpt =
-                       sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
                      const auto r = task->result();
-                     delete task;
+                     task->deleteLater();
 
-                     if ( !snapOpt || snapOpt->state != sicnu::jobs::JobState::Succeeded || !r.ok() )
+                     if ( info.status == sicnu::TaskStatus::Canceled )
                      {
-                       if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
-                         statusBar()->showMessage( tr( "SIFT 已取消" ), 3000 );
-                       else
-                         statusBar()->showMessage(
-                           tr( "SIFT 失败：%1" )
-                             .arg( r.errorMessage.isEmpty()
-                                     ? ( snapOpt ? QString::fromStdString( snapOpt->error )
-                                                 : tr( "未知错误" ) )
-                                     : r.errorMessage ),
-                           5000 );
+                       statusBar()->showMessage( tr( "SIFT 已取消" ), 3000 );
+                       return;
+                     }
+                     if ( info.status != sicnu::TaskStatus::Completed || !r.ok() )
+                     {
+                       statusBar()->showMessage(
+                         tr( "SIFT 失败：%1" )
+                           .arg( r.errorMessage.isEmpty()
+                                   ? ( !info.errorMessage.isEmpty() ? info.errorMessage
+                                                                   : tr( "未知错误" ) )
+                                   : r.errorMessage ),
+                         5000 );
                        return;
                      }
 
@@ -304,8 +306,14 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
                      if ( QMessageBox::question( this, tr( "SIFT 匹配结果" ), msg ) != QMessageBox::Yes )
                        return;
                      const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
+                     QVector<RsGeorefGcpPair> pairs;
+                     pairs.reserve( r.inliers.size() );
                      for ( const auto &m : r.inliers )
+                     {
                        mGcps->appendPoint( QgsGcpPoint( m.srcPx, m.dstWorld, destCrs, true ) );
+                       pairs.append( { m.srcPx, m.dstWorld, true } );
+                     }
+                     georefSession().applyAcceptedMatches( pairs );
                      QJsonObject o {
                        { QStringLiteral( "event" ),        QStringLiteral( "sift_match" ) },
                        { QStringLiteral( "matches" ),      r.totalMatches },
@@ -362,7 +370,7 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
     }
   }
 
-  // Heap-allocate so JobEngine worker can own the result until UI completion.
+  // Heap-allocate so the Task Center worker can fill results until UI terminal.
   auto *resultHolder = new RsTemplateMatcher::Result;
   auto *fb = new QgsFeedback;
   auto paramsCopy = params;
@@ -377,11 +385,12 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
   req.source = "module";
   req.exclusive = true;
 
-  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
-    std::move( req ),
+  const long taskId = sicnu::TaskCenter::instance().submitJob(
+    req,
     [resultHolder, fb, paramsCopy, seedsCopy, srcPath, refPath, destCrs](
       const sicnu::jobs::JobRequest &,
       sicnu::operators::RSOperatorContext &ctx ) {
+      Q_UNUSED( destCrs );
       ctx.logInfo( "Running geo-initialized template matching (NCC)" );
       ctx.reportProgress( 0.0, "Template match" );
       RsTemplateMatcher matcher( fb );
@@ -402,36 +411,39 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
       result["attempted"] = resultHolder->attempted;
       return result;
     },
-    [fb]() { fb->cancel(); } );
+    [fb]() { fb->cancel(); },
+    /*autoLoad=*/false );
 
-  const QString jobIdQ = QString::fromStdString( jobId );
-  auto *bridge = JobEngineQtBridge::instance();
   auto *conn = new QMetaObject::Connection;
-  *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
-                   [this, resultHolder, fb, destCrs, jobIdQ, conn]( const QString &id ) {
-                     if ( id != jobIdQ )
+  *conn = connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, this,
+                   [this, resultHolder, fb, destCrs, taskId, conn]( const sicnu::AlgorithmTaskInfo &info ) {
+                     if ( info.taskId != taskId )
+                       return;
+                     if ( info.status != sicnu::TaskStatus::Completed
+                          && info.status != sicnu::TaskStatus::Failed
+                          && info.status != sicnu::TaskStatus::Canceled )
                        return;
                      disconnect( *conn );
                      delete conn;
 
-                     const auto snapOpt =
-                       sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
                      const auto r = *resultHolder;
                      delete resultHolder;
                      delete fb;
 
-                     if ( !snapOpt || snapOpt->state != sicnu::jobs::JobState::Succeeded || !r.ok() )
+                     if ( info.status == sicnu::TaskStatus::Canceled )
                      {
-                       if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
-                         statusBar()->showMessage( tr( "模板匹配已取消" ), 3000 );
-                       else
-                         statusBar()->showMessage(
-                           tr( "模板匹配失败：%1" )
-                             .arg( r.errorMessage.isEmpty()
-                                     ? ( snapOpt ? QString::fromStdString( snapOpt->error )
-                                                 : tr( "未知错误" ) )
-                                     : r.errorMessage ),
-                           6000 );
+                       statusBar()->showMessage( tr( "模板匹配已取消" ), 3000 );
+                       return;
+                     }
+                     if ( info.status != sicnu::TaskStatus::Completed || !r.ok() )
+                     {
+                       statusBar()->showMessage(
+                         tr( "模板匹配失败：%1" )
+                           .arg( r.errorMessage.isEmpty()
+                                   ? ( !info.errorMessage.isEmpty() ? info.errorMessage
+                                                                   : tr( "未知错误" ) )
+                                   : r.errorMessage ),
+                         6000 );
                        return;
                      }
 
@@ -441,8 +453,14 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
                      if ( QMessageBox::question( this, tr( "模板匹配结果" ), msg ) != QMessageBox::Yes )
                        return;
 
+                     QVector<RsGeorefGcpPair> pairs;
+                     pairs.reserve( r.matches.size() );
                      for ( const auto &m : r.matches )
+                     {
                        mGcps->appendPoint( QgsGcpPoint( m.srcPx, m.dstWorld, destCrs, true ) );
+                       pairs.append( { m.srcPx, m.dstWorld, true } );
+                     }
+                     georefSession().applyAcceptedMatches( pairs );
 
                      QJsonObject o {
                        { QStringLiteral( "event" ),     QStringLiteral( "template_match" ) },

@@ -85,6 +85,11 @@ class RsGeoreferencingSession : public QObject
     const QVector<RsGeorefGcpPair> &gcps() const { return mGcps; }
     void clearGcps();
 
+    /// Thin push (#34 / #71): append accepted match pairs without replacing the
+    /// live shell list. Shell remains the UI source of truth; this keeps Session
+    /// aware of accepted matches for tests and future consumers.
+    void applyAcceptedMatches( const QVector<RsGeorefGcpPair> &pairs );
+
     /// Re-estimate transform parameters from enabled GCPs.
     RsGeorefFitResult refit();
     const RsGeorefFitResult &lastFit() const { return mLastFit; }

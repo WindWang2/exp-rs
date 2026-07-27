@@ -108,6 +108,26 @@ TEST_CASE( "GeoreferencingSession: warp snapshot is immutable after session edit
                    .has_value() );
 }
 
+TEST_CASE( "GeoreferencingSession: applyAcceptedMatches thin-pushes pairs",
+           "[georef][session][match]" )
+{
+  RsGeoreferencingSession session;
+  REQUIRE( session.gcps().isEmpty() );
+
+  QVector<RsGeorefGcpPair> pairs;
+  pairs.append( { QgsPointXY( 1, 2 ), QgsPointXY( 10, 20 ), true } );
+  pairs.append( { QgsPointXY( 3, 4 ), QgsPointXY( 30, 40 ), true } );
+  session.applyAcceptedMatches( pairs );
+
+  REQUIRE( session.gcps().size() == 2 );
+  REQUIRE( session.gcps().at( 0 ).source == QgsPointXY( 1, 2 ) );
+  REQUIRE( session.gcps().at( 1 ).destination == QgsPointXY( 30, 40 ) );
+
+  // Second accept appends, does not replace.
+  session.applyAcceptedMatches( pairs );
+  REQUIRE( session.gcps().size() == 4 );
+}
+
 TEST_CASE( "GeoreferencingSession: transformFromSnapshot uses frozen GCPs",
            "[georef][session][snapshot]" )
 {

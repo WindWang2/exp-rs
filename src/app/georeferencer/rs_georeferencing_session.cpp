@@ -71,6 +71,15 @@ void RsGeoreferencingSession::clearGcps()
   emit fitChanged( mLastFit );
 }
 
+void RsGeoreferencingSession::applyAcceptedMatches( const QVector<RsGeorefGcpPair> &pairs )
+{
+  if ( pairs.isEmpty() )
+    return;
+  mGcps.reserve( mGcps.size() + pairs.size() );
+  for ( const auto &p : pairs )
+    mGcps.append( p );
+}
+
 RsGeorefFitResult RsGeoreferencingSession::refit()
 {
   RsGeorefFitResult fit;
