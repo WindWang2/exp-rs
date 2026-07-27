@@ -16,8 +16,6 @@
 #include "rs_class_raster.h"
 #include "rs_segmenter_port.h"
 
-#include "shell/job_engine_qt_bridge.h"
-#include "jobs/job_engine.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -92,7 +90,7 @@ RsObiaMainWindow::RsObiaMainWindow( QWidget *parent )
     updateStatusLabel();
 
     connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
-             this, &RsObiaMainWindow::onSegmentationTaskUpdated );
+             this, &RsObiaMainWindow::onObiaTaskUpdated );
 }
 
 RsObiaMainWindow::~RsObiaMainWindow() = default;
@@ -348,14 +346,14 @@ void RsObiaMainWindow::runSegmentation()
     if ( startSegmentationTask( segCfg, bandIndices ) < 0 )
     {
         QMessageBox::information( this, tr( "OBIA" ),
-                                  tr( "A segmentation task is already running." ) );
+                                  tr( "An OBIA task is already running." ) );
     }
 }
 
 long RsObiaMainWindow::startSegmentationTask( const RsObiaSegmentationConfig &segCfg,
                                               const QVector<int> &bandIndices )
 {
-    if ( m_pendingSegmentationTaskId >= 0 )
+    if ( isBusy() )
         return -1;
 
     const QString rasterPath = segCfg.rasterPath;
@@ -375,7 +373,6 @@ long RsObiaMainWindow::startSegmentationTask( const RsObiaSegmentationConfig &se
     QGuiApplication::setOverrideCursor( Qt::WaitCursor );
     statusBar()->showMessage( progress->labelText() );
 
-    // Bundle segmentation + feature extraction on Task Center (JobEngine internal).
     sicnu::jobs::JobRequest req;
     req.algorithmId = "module:obia:segment";
     req.title = tr( "OBIA segmentation" ).toStdString();
@@ -383,9 +380,10 @@ long RsObiaMainWindow::startSegmentationTask( const RsObiaSegmentationConfig &se
     req.exclusive = true;
     req.params["input"] = rasterPath.toStdString();
 
+    m_pendingOp = PendingOp::Segmentation;
     m_pendingSegWork = work;
-    m_pendingSegCanceled = canceled;
-    m_pendingSegProgress = progress;
+    m_pendingCanceled = canceled;
+    m_pendingProgress = progress;
 
     const long taskId = sicnu::TaskCenter::instance().submitJob(
       req,
@@ -431,75 +429,172 @@ long RsObiaMainWindow::startSegmentationTask( const RsObiaSegmentationConfig &se
       [canceled]() { canceled->store( true ); },
       /*autoLoad=*/false );
 
-    m_pendingSegmentationTaskId = taskId;
-
+    m_pendingTaskId = taskId;
     connect( progress, &QProgressDialog::canceled, this, [this, taskId, canceled]() {
         canceled->store( true );
         sicnu::TaskCenter::instance().cancelTask( taskId );
     } );
-
     return taskId;
 }
 
-void RsObiaMainWindow::finishPendingSegmentationUi()
+void RsObiaMainWindow::finishPendingUi()
 {
     QGuiApplication::restoreOverrideCursor();
-    if ( m_pendingSegProgress )
+    if ( m_pendingProgress )
     {
-        m_pendingSegProgress->reset();
-        m_pendingSegProgress->deleteLater();
-        m_pendingSegProgress = nullptr;
+        m_pendingProgress->reset();
+        m_pendingProgress->deleteLater();
+        m_pendingProgress = nullptr;
     }
 }
 
-void RsObiaMainWindow::onSegmentationTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
+void RsObiaMainWindow::loadClassifiedRaster( const QString &outputPath )
 {
-    if ( info.taskId != m_pendingSegmentationTaskId || m_pendingSegmentationTaskId < 0 )
+    mLastClassRasterPath = outputPath;
+    auto *resultLayer = new QgsRasterLayer( outputPath, QFileInfo( outputPath ).baseName() );
+    if ( resultLayer->isValid() )
+    {
+        QgsProject::instance()->addMapLayer( resultLayer );
+        mCanvas->refresh();
+    }
+    else
+    {
+        delete resultLayer;
+    }
+}
+
+void RsObiaMainWindow::onObiaTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
+{
+    if ( info.taskId != m_pendingTaskId || m_pendingTaskId < 0 )
         return;
     if ( info.status != sicnu::TaskStatus::Completed
          && info.status != sicnu::TaskStatus::Failed
          && info.status != sicnu::TaskStatus::Canceled )
         return;
 
-    const long taskId = m_pendingSegmentationTaskId;
-    auto work = m_pendingSegWork;
-    m_pendingSegmentationTaskId = -1;
+    const PendingOp op = m_pendingOp;
+    auto segWork = m_pendingSegWork;
+    auto hierWork = m_pendingHierWork;
+    auto hierClsWork = m_pendingHierClsWork;
+    RsObiaTask *flatTask = m_pendingFlatTask;
+    const QString flatOut = m_pendingFlatOutputPath;
+
+    m_pendingTaskId = -1;
+    m_pendingOp = PendingOp::None;
     m_pendingSegWork.reset();
-    m_pendingSegCanceled.reset();
-    finishPendingSegmentationUi();
+    m_pendingHierWork.reset();
+    m_pendingHierClsWork.reset();
+    m_pendingFlatTask = nullptr;
+    m_pendingFlatOutputPath.clear();
+    m_pendingCanceled.reset();
+    finishPendingUi();
 
-    Q_UNUSED( taskId );
-
-    if ( !work )
+    if ( op == PendingOp::Segmentation )
     {
-        updateStatusLabel();
-        return;
-    }
-
-    if ( info.status == sicnu::TaskStatus::Canceled )
-    {
-        statusBar()->showMessage( tr( "Segmentation canceled" ), 3000 );
-        updateStatusLabel();
-        return;
-    }
-
-    if ( info.status != sicnu::TaskStatus::Completed || !work->seg.ok )
-    {
-        if ( work->seg.errorMessage.contains( QStringLiteral( "cancel" ), Qt::CaseInsensitive ) )
+        if ( !segWork )
+        {
+            updateStatusLabel();
+            return;
+        }
+        if ( info.status == sicnu::TaskStatus::Canceled )
+        {
             statusBar()->showMessage( tr( "Segmentation canceled" ), 3000 );
+            updateStatusLabel();
+            return;
+        }
+        if ( info.status != sicnu::TaskStatus::Completed || !segWork->seg.ok )
+        {
+            if ( segWork->seg.errorMessage.contains( QStringLiteral( "cancel" ), Qt::CaseInsensitive ) )
+                statusBar()->showMessage( tr( "Segmentation canceled" ), 3000 );
+            else
+            {
+                const QString err = !segWork->seg.errorMessage.isEmpty()
+                                      ? segWork->seg.errorMessage
+                                      : ( !info.errorMessage.isEmpty() ? info.errorMessage
+                                                                       : tr( "Segmentation failed" ) );
+                QMessageBox::warning( this, tr( "Error" ), err );
+            }
+            updateStatusLabel();
+            return;
+        }
+        applySegmentationResult( segWork->seg.segMap, segWork->seg.usedOtb, segWork->stats );
+        return;
+    }
+
+    if ( op == PendingOp::Hierarchy )
+    {
+        if ( info.status == sicnu::TaskStatus::Canceled )
+        {
+            statusBar()->showMessage( tr( "Hierarchy build canceled" ), 3000 );
+            updateStatusLabel();
+            return;
+        }
+        if ( info.status != sicnu::TaskStatus::Completed || !hierWork || !hierWork->ok )
+        {
+            const QString err = ( hierWork && !hierWork->error.isEmpty() )
+                                  ? hierWork->error
+                                  : ( !info.errorMessage.isEmpty() ? info.errorMessage
+                                                                   : tr( "Hierarchy build failed" ) );
+            QMessageBox::warning( this, tr( "Error" ), err );
+            updateStatusLabel();
+            return;
+        }
+        applyHierarchyResult( std::move( hierWork->hierarchy ), 0, std::move( hierWork->stats ) );
+        return;
+    }
+
+    if ( op == PendingOp::HierarchyClassify )
+    {
+        if ( info.status == sicnu::TaskStatus::Canceled )
+        {
+            statusBar()->showMessage( tr( "Hierarchy classify canceled" ), 3000 );
+            return;
+        }
+        if ( info.status == sicnu::TaskStatus::Completed && hierClsWork && hierClsWork->ok )
+        {
+            QMessageBox::information(
+                this, tr( "OBIA Classification" ),
+                tr( "Classification complete on level %1!\nOutput: %2" )
+                    .arg( hierClsWork->clsLevel )
+                    .arg( hierClsWork->outputPath ) );
+            loadClassifiedRaster( hierClsWork->outputPath );
+            return;
+        }
+        const QString err = ( hierClsWork && !hierClsWork->error.isEmpty() )
+                              ? hierClsWork->error
+                              : ( !info.errorMessage.isEmpty() ? info.errorMessage
+                                                               : tr( "Classification failed" ) );
+        QMessageBox::warning( this, tr( "Error" ), err );
+        return;
+    }
+
+    if ( op == PendingOp::FlatClassify )
+    {
+        if ( info.status == sicnu::TaskStatus::Canceled )
+        {
+            statusBar()->showMessage( tr( "OBIA classify cancelled" ), 3000 );
+            if ( flatTask )
+                flatTask->deleteLater();
+            return;
+        }
+        if ( info.status == sicnu::TaskStatus::Completed && flatTask && flatTask->result().ok )
+        {
+            QMessageBox::information(
+                this, tr( "OBIA Classification" ),
+                tr( "Classification complete!\nOutput: %1" ).arg( flatOut ) );
+            loadClassifiedRaster( flatOut );
+        }
         else
         {
-            const QString err = !work->seg.errorMessage.isEmpty()
-                                  ? work->seg.errorMessage
+            const QString err = ( flatTask && !flatTask->result().errorMessage.isEmpty() )
+                                  ? flatTask->result().errorMessage
                                   : ( !info.errorMessage.isEmpty() ? info.errorMessage
-                                                                   : tr( "Segmentation failed" ) );
+                                                                   : tr( "Classification failed" ) );
             QMessageBox::warning( this, tr( "Error" ), err );
         }
-        updateStatusLabel();
-        return;
+        if ( flatTask )
+            flatTask->deleteLater();
     }
-
-    applySegmentationResult( work->seg.segMap, work->seg.usedOtb, work->stats );
 }
 
 void RsObiaMainWindow::applySegmentationResult(
@@ -659,8 +754,30 @@ void RsObiaMainWindow::runHierarchicalSegmentation()
         return;
     }
 
+    auto *kernelSpin = findChild<QSpinBox *>( "kernelSpin" );
+    auto *binsSpin = findChild<QSpinBox *>( "binsSpin" );
+    auto *minRegionSpin = findChild<QSpinBox *>( "minRegionSpin" );
+    const int spatialRadius = kernelSpin ? kernelSpin->value() : 5;
+    const double rangeRadius = binsSpin ? static_cast<double>( binsSpin->value() ) * 0.5 : 15.0;
+    const int minRegionSize = minRegionSpin ? minRegionSpin->value() : 100;
+
+    if ( startHierarchyTask( spatialRadius, rangeRadius, minRegionSize ) < 0 )
+    {
+        QMessageBox::information( this, tr( "OBIA" ),
+                                  tr( "An OBIA task is already running." ) );
+    }
+}
+
+long RsObiaMainWindow::startHierarchyTask( int spatialRadius, double rangeRadius, int minRegionSize,
+                                           double watershedThreshold )
+{
+    if ( isBusy() || mRasterPath.isEmpty() )
+        return -1;
+
     const QString rasterPath = mRasterPath;
     auto canceled = std::make_shared<std::atomic<bool>>( false );
+    auto work = std::make_shared<PendingHierWork>();
+    const QVector<int> bandIndices = allBandIndices();
 
     auto *progress = new QProgressDialog(
         tr( "Building 2-level hierarchy (MeanShift + Watershed)..." ),
@@ -671,26 +788,6 @@ void RsObiaMainWindow::runHierarchicalSegmentation()
     QGuiApplication::setOverrideCursor( Qt::WaitCursor );
     statusBar()->showMessage( progress->labelText() );
 
-    struct HierWork
-    {
-        bool ok = false;
-        QString error;
-        RsObjectHierarchy hierarchy;
-        QMap<quint32, RsSegmentFeatures::SegmentStat> stats;
-    };
-    auto work = std::make_shared<HierWork>();
-    const QVector<int> bandIndices = allBandIndices();
-
-    // Reuse toolbar spins for fine MeanShift; Watershed threshold default.
-    auto *kernelSpin = findChild<QSpinBox *>( "kernelSpin" );
-    auto *binsSpin = findChild<QSpinBox *>( "binsSpin" );
-    auto *minRegionSpin = findChild<QSpinBox *>( "minRegionSpin" );
-    const int spatialRadius = kernelSpin ? kernelSpin->value() : 5;
-    // binsSpin (quantize levels in simple segmenter) maps to range radius scale for MeanShift.
-    const double rangeRadius = binsSpin ? static_cast<double>( binsSpin->value() ) * 0.5 : 15.0;
-    const int minRegionSize = minRegionSpin ? minRegionSpin->value() : 100;
-    const double watershedThreshold = 0.01;
-
     sicnu::jobs::JobRequest req;
     req.algorithmId = "module:obia:hierarchy";
     req.title = tr( "OBIA hierarchical segment" ).toStdString();
@@ -698,8 +795,13 @@ void RsObiaMainWindow::runHierarchicalSegmentation()
     req.exclusive = true;
     req.params["input"] = rasterPath.toStdString();
 
-    const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
-        std::move( req ),
+    m_pendingOp = PendingOp::Hierarchy;
+    m_pendingHierWork = work;
+    m_pendingCanceled = canceled;
+    m_pendingProgress = progress;
+
+    const long taskId = sicnu::TaskCenter::instance().submitJob(
+        req,
         [rasterPath, bandIndices, canceled, work, spatialRadius, rangeRadius, minRegionSize,
          watershedThreshold](
             const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
@@ -707,7 +809,6 @@ void RsObiaMainWindow::runHierarchicalSegmentation()
             static bool s_gdalInit = ( GDALAllRegister(), true );
             Q_UNUSED( s_gdalInit );
 
-            // Toolbar: kernelSpin→spatialr, binsSpin→range scale, minRegionSpin→minsize.
             RsLevelSpec fine;
             fine.filter = RsLevelSpec::Filter::MeanShift;
             fine.name = QStringLiteral( "fine" );
@@ -750,47 +851,15 @@ void RsObiaMainWindow::runHierarchicalSegmentation()
                 result["coarseSegments"] = work->hierarchy.level( 1 ).segmentCount();
             return result;
         },
-        [canceled]() { canceled->store( true ); } );
+        [canceled]() { canceled->store( true ); },
+        /*autoLoad=*/false );
 
-    const QString jobIdQ = QString::fromStdString( jobId );
-    connect( progress, &QProgressDialog::canceled, this, [jobIdQ, canceled]() {
+    m_pendingTaskId = taskId;
+    connect( progress, &QProgressDialog::canceled, this, [this, taskId, canceled]() {
         canceled->store( true );
-        sicnu::jobs::JobEngine::instance().cancel( jobIdQ.toStdString() );
+        sicnu::TaskCenter::instance().cancelTask( taskId );
     } );
-
-    auto *bridge = JobEngineQtBridge::instance();
-    auto *conn = new QMetaObject::Connection;
-    *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
-                     [this, work, progress, jobIdQ, conn]( const QString &id ) {
-                         if ( id != jobIdQ )
-                             return;
-                         disconnect( *conn );
-                         delete conn;
-                         QGuiApplication::restoreOverrideCursor();
-                         progress->reset();
-                         progress->deleteLater();
-
-                         const auto snapOpt =
-                             sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
-                         if ( !snapOpt || snapOpt->state != sicnu::jobs::JobState::Succeeded
-                              || !work->ok )
-                         {
-                             if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
-                                 statusBar()->showMessage( tr( "Hierarchy build canceled" ), 3000 );
-                             else
-                             {
-                                 const QString err = !work->error.isEmpty()
-                                                       ? work->error
-                                                       : ( snapOpt ? QString::fromStdString( snapOpt->error )
-                                                                   : tr( "Hierarchy build failed" ) );
-                                 QMessageBox::warning( this, tr( "Error" ), err );
-                             }
-                             updateStatusLabel();
-                             return;
-                         }
-
-                         applyHierarchyResult( std::move( work->hierarchy ), 0, std::move( work->stats ) );
-                     } );
+    return taskId;
 }
 
 void RsObiaMainWindow::onActiveLevelChanged( int level )
@@ -859,7 +928,6 @@ void RsObiaMainWindow::runClassification()
     if ( outputPath.isEmpty() )
         return;
 
-    // Hierarchical path: F2a + classify + paint on JobEngine (cancelable, non-blocking UI)
     if ( mHasHierarchy && mHierarchy.levelCount() > 0 )
     {
         const int clsLevel = currentClassifyLevel();
@@ -869,164 +937,16 @@ void RsObiaMainWindow::runClassification()
             return;
         }
 
-        auto canceled = std::make_shared<std::atomic<bool>>( false );
-        auto *progress = new QProgressDialog(
-            tr( "Classifying hierarchy level %1..." ).arg( clsLevel ),
-            tr( "Cancel" ), 0, 0, this );
-        progress->setWindowModality( Qt::WindowModal );
-        progress->setMinimumDuration( 0 );
-        progress->show();
-        QGuiApplication::setOverrideCursor( Qt::WaitCursor );
-        statusBar()->showMessage( progress->labelText() );
-
-        struct HierClsWork
-        {
-            bool ok = false;
-            QString error;
-        };
-        auto work = std::make_shared<HierClsWork>();
-
-        // Capture hierarchy snapshot + labels for worker thread
-        const RsObjectHierarchy hierarchy = mHierarchy;
-        const QMap<quint32, int> trainLabels = mSegmentLabels;
-        const QString rasterPath = mRasterPath;
-        // Move backend into shared_ptr for worker ownership
         auto backendShared = std::shared_ptr<RsClassifierBackend>( std::move( backend ) );
-        const QHash<int, QColor> colors = classColors;
-        const QVector<int> bands = bandIndices;
-
-        sicnu::jobs::JobRequest req;
-        req.algorithmId = "module:obia:hierarchy_classify";
-        req.title = QStringLiteral( "OBIA hierarchy classify L%1" ).arg( clsLevel ).toStdString();
-        req.source = "module";
-        req.exclusive = true;
-        req.params["output"] = outputPath.toStdString();
-
-        const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
-            std::move( req ),
-            [hierarchy, trainLabels, rasterPath, outputPath, clsLevel, bands, colors,
-             backendShared, canceled, work](
-                const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
-                ctx.logInfo( "OBIA hierarchy classify" );
-                static bool s_gdalInit = ( GDALAllRegister(), true );
-                Q_UNUSED( s_gdalInit );
-
-                auto isCanceled = [canceled, &ctx]() {
-                    return canceled->load() || ctx.isCancelled();
-                };
-
-                ctx.reportProgress( 0.1, "F2a features" );
-                if ( isCanceled() )
-                    throw sicnu::operators::RSOperatorError(
-                        sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
-
-                auto feat = RsHierarchyFeatures::buildFeatureMatrix(
-                    hierarchy, rasterPath, clsLevel, bands );
-                if ( !feat.ok )
-                {
-                    work->error = feat.errorMessage;
-                    throw sicnu::operators::RSOperatorError(
-                        sicnu::operators::ErrorCode::ComputationError,
-                        feat.errorMessage.toStdString() );
-                }
-
-                if ( isCanceled() )
-                    throw sicnu::operators::RSOperatorError(
-                        sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
-
-                ctx.reportProgress( 0.5, "Train/predict" );
-                auto cls = RsObjectClassify::classify(
-                    feat.X, feat.meta.segmentIds, trainLabels, *backendShared );
-                if ( !cls.ok )
-                {
-                    work->error = cls.errorMessage;
-                    throw sicnu::operators::RSOperatorError(
-                        sicnu::operators::ErrorCode::ComputationError,
-                        cls.errorMessage.toStdString() );
-                }
-
-                if ( isCanceled() )
-                    throw sicnu::operators::RSOperatorError(
-                        sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
-
-                ctx.reportProgress( 0.85, "Paint class raster" );
-                auto paint = RsClassRaster::paint(
-                    hierarchy.level( clsLevel ), cls.segmentClasses, rasterPath, outputPath, colors );
-                if ( !paint.ok )
-                {
-                    work->error = paint.errorMessage;
-                    throw sicnu::operators::RSOperatorError(
-                        sicnu::operators::ErrorCode::GdalError,
-                        paint.errorMessage.toStdString() );
-                }
-
-                work->ok = true;
-                Json::Value result( Json::objectValue );
-                result["output"] = outputPath.toStdString();
-                result["classifyLevel"] = clsLevel;
-                return result;
-            },
-            [canceled]() { canceled->store( true ); } );
-
-        const QString jobIdQ = QString::fromStdString( jobId );
-        connect( progress, &QProgressDialog::canceled, this, [jobIdQ, canceled]() {
-            canceled->store( true );
-            sicnu::jobs::JobEngine::instance().cancel( jobIdQ.toStdString() );
-        } );
-
-        auto *bridge = JobEngineQtBridge::instance();
-        auto *conn = new QMetaObject::Connection;
-        *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
-                         [this, work, progress, outputPath, clsLevel, jobIdQ, conn]( const QString &id ) {
-                             if ( id != jobIdQ )
-                                 return;
-                             disconnect( *conn );
-                             delete conn;
-                             QGuiApplication::restoreOverrideCursor();
-                             progress->reset();
-                             progress->deleteLater();
-
-                             const auto snapOpt =
-                                 sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
-                             if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Succeeded
-                                  && work->ok )
-                             {
-                                 mLastClassRasterPath = outputPath;
-                                 QMessageBox::information(
-                                     this, tr( "OBIA Classification" ),
-                                     tr( "Classification complete on level %1!\nOutput: %2" )
-                                         .arg( clsLevel )
-                                         .arg( outputPath ) );
-
-                                 auto *resultLayer = new QgsRasterLayer(
-                                     outputPath, QFileInfo( outputPath ).baseName() );
-                                 if ( resultLayer->isValid() )
-                                 {
-                                     QgsProject::instance()->addMapLayer( resultLayer );
-                                     mCanvas->refresh();
-                                 }
-                                 else
-                                 {
-                                     delete resultLayer;
-                                 }
-                             }
-                             else if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
-                             {
-                                 statusBar()->showMessage( tr( "Hierarchy classify canceled" ), 3000 );
-                             }
-                             else
-                             {
-                                 const QString err = !work->error.isEmpty()
-                                                       ? work->error
-                                                       : ( snapOpt ? QString::fromStdString( snapOpt->error )
-                                                                   : tr( "Classification failed" ) );
-                                 QMessageBox::warning( this, tr( "Error" ), err );
-                             }
-                         } );
+        if ( startHierarchyClassifyTask( clsLevel, outputPath, backendShared, bandIndices,
+                                         classColors, mSegmentLabels ) < 0 )
+        {
+            QMessageBox::information( this, tr( "OBIA" ),
+                                      tr( "An OBIA task is already running." ) );
+        }
         return;
     }
 
-    // Flat path (existing RsObiaTask)
     RsObiaTask::Config cfg;
     cfg.sourceRaster = mRasterPath;
     cfg.outputRaster = outputPath;
@@ -1038,8 +958,137 @@ void RsObiaMainWindow::runClassification()
     cfg.classColors = classColors;
     cfg.algoName = algoName;
 
-    QGuiApplication::setOverrideCursor( Qt::WaitCursor );
     auto *task = new RsObiaTask( std::move( cfg ) );
+    if ( startFlatClassifyTask( task, outputPath, algoName ) < 0 )
+    {
+        task->deleteLater();
+        QMessageBox::information( this, tr( "OBIA" ),
+                                  tr( "An OBIA task is already running." ) );
+    }
+}
+
+long RsObiaMainWindow::startHierarchyClassifyTask(
+    int clsLevel, const QString &outputPath,
+    std::shared_ptr<RsClassifierBackend> backend,
+    const QVector<int> &bandIndices,
+    const QHash<int, QColor> &classColors,
+    const QMap<quint32, int> &trainLabels )
+{
+    if ( isBusy() || !mHasHierarchy || clsLevel < 0 || clsLevel >= mHierarchy.levelCount() )
+        return -1;
+
+    auto canceled = std::make_shared<std::atomic<bool>>( false );
+    auto work = std::make_shared<PendingHierClsWork>();
+    work->outputPath = outputPath;
+    work->clsLevel = clsLevel;
+
+    auto *progress = new QProgressDialog(
+        tr( "Classifying hierarchy level %1..." ).arg( clsLevel ),
+        tr( "Cancel" ), 0, 0, this );
+    progress->setWindowModality( Qt::WindowModal );
+    progress->setMinimumDuration( 0 );
+    progress->show();
+    QGuiApplication::setOverrideCursor( Qt::WaitCursor );
+    statusBar()->showMessage( progress->labelText() );
+
+    const RsObjectHierarchy hierarchy = mHierarchy;
+    const QString rasterPath = mRasterPath;
+
+    sicnu::jobs::JobRequest req;
+    req.algorithmId = "module:obia:hierarchy_classify";
+    req.title = QStringLiteral( "OBIA hierarchy classify L%1" ).arg( clsLevel ).toStdString();
+    req.source = "module";
+    req.exclusive = true;
+    req.params["output"] = outputPath.toStdString();
+
+    m_pendingOp = PendingOp::HierarchyClassify;
+    m_pendingHierClsWork = work;
+    m_pendingCanceled = canceled;
+    m_pendingProgress = progress;
+
+    const long taskId = sicnu::TaskCenter::instance().submitJob(
+        req,
+        [hierarchy, trainLabels, rasterPath, outputPath, clsLevel, bandIndices, classColors,
+         backend, canceled, work](
+            const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
+            ctx.logInfo( "OBIA hierarchy classify" );
+            static bool s_gdalInit = ( GDALAllRegister(), true );
+            Q_UNUSED( s_gdalInit );
+
+            auto isCanceled = [canceled, &ctx]() {
+                return canceled->load() || ctx.isCancelled();
+            };
+
+            ctx.reportProgress( 0.1, "F2a features" );
+            if ( isCanceled() )
+                throw sicnu::operators::RSOperatorError(
+                    sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
+
+            auto feat = RsHierarchyFeatures::buildFeatureMatrix(
+                hierarchy, rasterPath, clsLevel, bandIndices );
+            if ( !feat.ok )
+            {
+                work->error = feat.errorMessage;
+                throw sicnu::operators::RSOperatorError(
+                    sicnu::operators::ErrorCode::ComputationError,
+                    feat.errorMessage.toStdString() );
+            }
+
+            if ( isCanceled() )
+                throw sicnu::operators::RSOperatorError(
+                    sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
+
+            ctx.reportProgress( 0.5, "Train/predict" );
+            auto cls = RsObjectClassify::classify(
+                feat.X, feat.meta.segmentIds, trainLabels, *backend );
+            if ( !cls.ok )
+            {
+                work->error = cls.errorMessage;
+                throw sicnu::operators::RSOperatorError(
+                    sicnu::operators::ErrorCode::ComputationError,
+                    cls.errorMessage.toStdString() );
+            }
+
+            if ( isCanceled() )
+                throw sicnu::operators::RSOperatorError(
+                    sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
+
+            ctx.reportProgress( 0.85, "Paint class raster" );
+            auto paint = RsClassRaster::paint(
+                hierarchy.level( clsLevel ), cls.segmentClasses, rasterPath, outputPath, classColors );
+            if ( !paint.ok )
+            {
+                work->error = paint.errorMessage;
+                throw sicnu::operators::RSOperatorError(
+                    sicnu::operators::ErrorCode::GdalError,
+                    paint.errorMessage.toStdString() );
+            }
+
+            work->ok = true;
+            Json::Value result( Json::objectValue );
+            result["output"] = outputPath.toStdString();
+            result["classifyLevel"] = clsLevel;
+            return result;
+        },
+        [canceled]() { canceled->store( true ); },
+        /*autoLoad=*/false );
+
+    m_pendingTaskId = taskId;
+    connect( progress, &QProgressDialog::canceled, this, [this, taskId, canceled]() {
+        canceled->store( true );
+        sicnu::TaskCenter::instance().cancelTask( taskId );
+    } );
+    return taskId;
+}
+
+long RsObiaMainWindow::startFlatClassifyTask( RsObiaTask *task, const QString &outputPath,
+                                              const QString &algoName )
+{
+    if ( isBusy() || !task )
+        return -1;
+
+    QGuiApplication::setOverrideCursor( Qt::WaitCursor );
+    statusBar()->showMessage( tr( "Classifying objects..." ) );
 
     sicnu::jobs::JobRequest req;
     req.algorithmId = "module:obia:classify";
@@ -1048,14 +1097,21 @@ void RsObiaMainWindow::runClassification()
     req.exclusive = true;
     req.params["output"] = outputPath.toStdString();
 
-    const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
-        std::move( req ),
+    m_pendingOp = PendingOp::FlatClassify;
+    m_pendingFlatTask = task;
+    m_pendingFlatOutputPath = outputPath;
+    m_pendingProgress = nullptr;
+
+    const long taskId = sicnu::TaskCenter::instance().submitJob(
+        req,
         [task]( const sicnu::jobs::JobRequest &request,
                 sicnu::operators::RSOperatorContext &ctx ) {
             ctx.logInfo( "OBIA classify" );
             ctx.reportProgress( 0.0, "Classifying objects" );
             const bool ok = task->run();
-            if ( ctx.isCancelled() )
+            if ( ctx.isCancelled()
+                 || ( !ok && task->result().errorMessage.contains(
+                                 QStringLiteral( "cancel" ), Qt::CaseInsensitive ) ) )
             {
                 throw sicnu::operators::RSOperatorError(
                     sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
@@ -1071,55 +1127,11 @@ void RsObiaMainWindow::runClassification()
             result["durationMs"] = task->result().durationMs;
             return result;
         },
-        [task]() { task->cancel(); } );
+        [task]() { task->cancel(); },
+        /*autoLoad=*/false );
 
-    const QString jobIdQ = QString::fromStdString( jobId );
-    auto *bridge = JobEngineQtBridge::instance();
-    auto *conn = new QMetaObject::Connection;
-    *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
-                     [this, task, outputPath, jobIdQ, conn]( const QString &id ) {
-                         if ( id != jobIdQ )
-                             return;
-                         disconnect( *conn );
-                         delete conn;
-                         QGuiApplication::restoreOverrideCursor();
-
-                         const auto snapOpt =
-                             sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
-                         if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Succeeded
-                              && task->result().ok )
-                         {
-                             mLastClassRasterPath = outputPath;
-                             QMessageBox::information(
-                                 this, tr( "OBIA Classification" ),
-                                 tr( "Classification complete!\nOutput: %1" ).arg( outputPath ) );
-
-                             auto *resultLayer = new QgsRasterLayer(
-                                 outputPath, QFileInfo( outputPath ).baseName() );
-                             if ( resultLayer->isValid() )
-                             {
-                                 QgsProject::instance()->addMapLayer( resultLayer );
-                                 mCanvas->refresh();
-                             }
-                             else
-                             {
-                                 delete resultLayer;
-                             }
-                         }
-                         else if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
-                         {
-                             statusBar()->showMessage( tr( "OBIA classify cancelled" ), 3000 );
-                         }
-                         else
-                         {
-                             const QString err = !task->result().errorMessage.isEmpty()
-                                                   ? task->result().errorMessage
-                                                   : ( snapOpt ? QString::fromStdString( snapOpt->error )
-                                                               : tr( "Classification failed" ) );
-                             QMessageBox::warning( this, tr( "Error" ), err );
-                         }
-                         task->deleteLater();
-                     } );
+    m_pendingTaskId = taskId;
+    return taskId;
 }
 
 void RsObiaMainWindow::importRoiLabels()

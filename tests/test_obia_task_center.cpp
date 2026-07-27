@@ -155,6 +155,88 @@ TEST_CASE( "OBIA Task Center reports segmentation failure",
   REQUIRE_FALSE( info.errorMessage.isEmpty() );
 }
 
+TEST_CASE( "OBIA Task Center hierarchy job id enters the same seam",
+           "[obia][task_center][hierarchy]" )
+{
+  sicnu::jobs::JobRequest req;
+  req.algorithmId = "module:obia:hierarchy";
+  req.title = "hierarchy seam";
+  req.source = "test";
+  req.exclusive = true;
+
+  const long taskId = sicnu::TaskCenter::instance().submitJob(
+    req,
+    []( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
+      ctx.logInfo( "fake hierarchy" );
+      Json::Value result( Json::objectValue );
+      result["levels"] = 2;
+      result["fineSegments"] = 4;
+      result["coarseSegments"] = 2;
+      return result;
+    },
+    {},
+    false );
+
+  REQUIRE( taskId > 0 );
+  const auto info = waitForTerminalTask( taskId );
+  REQUIRE( info.status == sicnu::TaskStatus::Completed );
+  REQUIRE( info.algorithmId == QStringLiteral( "module:obia:hierarchy" ) );
+  REQUIRE( info.resultPayload["levels"].asInt() == 2 );
+  REQUIRE( info.resultPayload["fineSegments"].asInt() == 4 );
+}
+
+TEST_CASE( "OBIA Task Center hierarchy_classify failure surfaces at the seam",
+           "[obia][task_center][hierarchy_classify]" )
+{
+  sicnu::jobs::JobRequest req;
+  req.algorithmId = "module:obia:hierarchy_classify";
+  req.title = "hierarchy classify fail";
+  req.source = "test";
+
+  const long taskId = sicnu::TaskCenter::instance().submitJob(
+    req,
+    []( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) -> Json::Value {
+      throw sicnu::operators::RSOperatorError(
+        sicnu::operators::ErrorCode::ComputationError, "no training labels" );
+    },
+    {},
+    false );
+
+  REQUIRE( taskId > 0 );
+  const auto info = waitForTerminalTask( taskId );
+  REQUIRE( info.status == sicnu::TaskStatus::Failed );
+  REQUIRE( info.errorMessage.contains( QStringLiteral( "no training labels" ) ) );
+}
+
+TEST_CASE( "OBIA Task Center flat classify algorithm id completes",
+           "[obia][task_center][classify]" )
+{
+  sicnu::jobs::JobRequest req;
+  req.algorithmId = "module:obia:classify";
+  req.title = "flat classify seam";
+  req.source = "test";
+  req.params["output"] = "/tmp/obia_out.tif";
+
+  const long taskId = sicnu::TaskCenter::instance().submitJob(
+    req,
+    []( const sicnu::jobs::JobRequest &request,
+        sicnu::operators::RSOperatorContext &ctx ) {
+      ctx.logInfo( "fake flat classify" );
+      Json::Value result( Json::objectValue );
+      result["output"] = request.params.get( "output", "" ).asString();
+      result["durationMs"] = 1;
+      return result;
+    },
+    {},
+    false );
+
+  REQUIRE( taskId > 0 );
+  const auto info = waitForTerminalTask( taskId );
+  REQUIRE( info.status == sicnu::TaskStatus::Completed );
+  REQUIRE( info.algorithmId == QStringLiteral( "module:obia:classify" ) );
+  REQUIRE( info.resultPayload["output"].asString() == "/tmp/obia_out.tif" );
+}
+
 TEST_CASE( "OBIA Task Center keeps cancellation running until the worker exits",
            "[obia][task_center][segment][cancel]" )
 {

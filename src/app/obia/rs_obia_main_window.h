@@ -9,6 +9,7 @@
 #include "rs_segment_info_dock.h"
 #include "rs_segment_select_tool.h"
 #include "rs_obia_segmentation.h"
+#include "rs_obia_task.h"
 
 #include "processing/framework/task_center.h"
 
@@ -36,13 +37,26 @@ class RsObiaMainWindow : public QMainWindow
     explicit RsObiaMainWindow( QWidget *parent = nullptr );
     ~RsObiaMainWindow() override;
 
-    /// Submit flat OBIA segmentation through Task Center. Returns the task id,
-    /// or -1 if a segmentation is already pending. Production UI entry and
-    /// tests both use this seam.
+    /// Flat OBIA segmentation via Task Center. Returns task id, or -1 if busy.
     long startSegmentationTask( const RsObiaSegmentationConfig &segCfg,
                                 const QVector<int> &bandIndices );
 
-    long pendingSegmentationTaskId() const { return m_pendingSegmentationTaskId; }
+    /// Two-level hierarchy build via Task Center. Returns task id, or -1 if busy.
+    long startHierarchyTask( int spatialRadius, double rangeRadius, int minRegionSize,
+                             double watershedThreshold = 0.01 );
+
+    /// Hierarchy-level classify + paint via Task Center.
+    long startHierarchyClassifyTask( int clsLevel, const QString &outputPath,
+                                     std::shared_ptr<RsClassifierBackend> backend,
+                                     const QVector<int> &bandIndices,
+                                     const QHash<int, QColor> &classColors,
+                                     const QMap<quint32, int> &trainLabels );
+
+    /// Flat classify via Task Center (owns the RsObiaTask until terminal).
+    long startFlatClassifyTask( RsObiaTask *task, const QString &outputPath,
+                                const QString &algoName );
+
+    long pendingTaskId() const { return m_pendingTaskId; }
     int segmentCount() const { return static_cast<int>( mSegMap.segmentCount() ); }
 
   private slots:
@@ -58,9 +72,18 @@ class RsObiaMainWindow : public QMainWindow
     void onSegmentSelected( quint32 segmentId );
     void onSelectionCleared();
     void onAssignClass();
-    void onSegmentationTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
+    void onObiaTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
   private:
+    enum class PendingOp
+    {
+      None,
+      Segmentation,
+      Hierarchy,
+      HierarchyClassify,
+      FlatClassify,
+    };
+
     void setupUi();
     void setupToolbar();
     void setupDocks();
@@ -76,7 +99,9 @@ class RsObiaMainWindow : public QMainWindow
     void setActiveLevelMap( int level );
     QVector<int> allBandIndices() const;
     int currentClassifyLevel() const;
-    void finishPendingSegmentationUi();
+    void finishPendingUi();
+    bool isBusy() const { return m_pendingTaskId >= 0; }
+    void loadClassifiedRaster( const QString &outputPath );
 
     // Map canvas
     QgsMapCanvas *mCanvas = nullptr;
@@ -97,7 +122,7 @@ class RsObiaMainWindow : public QMainWindow
     bool mHasHierarchy = false;
     QString mLastClassRasterPath;
 
-public:
+  public:
     struct ClassDef
     {
         int id;
@@ -105,7 +130,7 @@ public:
         QColor color;
     };
 
-private:
+  private:
     QVector<ClassDef> mClassDefs;
     int mCurrentClassId = 1;
 
@@ -123,14 +148,35 @@ private:
     int mBandCount = 0;
     int mSelectedClassRow = 0;
 
-    // Flat segmentation Task Center pending state (#30).
+    // Shared Task Center pending state (#30 + #31).
     struct PendingSegWork
     {
         RsObiaSegmentationResult seg;
         QMap<quint32, RsSegmentFeatures::SegmentStat> stats;
     };
-    long m_pendingSegmentationTaskId = -1;
+    struct PendingHierWork
+    {
+        bool ok = false;
+        QString error;
+        RsObjectHierarchy hierarchy;
+        QMap<quint32, RsSegmentFeatures::SegmentStat> stats;
+    };
+    struct PendingHierClsWork
+    {
+        bool ok = false;
+        QString error;
+        QString outputPath;
+        int clsLevel = 0;
+    };
+
+    PendingOp m_pendingOp = PendingOp::None;
+    long m_pendingTaskId = -1;
+    std::shared_ptr<std::atomic<bool>> m_pendingCanceled;
+    QProgressDialog *m_pendingProgress = nullptr;
+
     std::shared_ptr<PendingSegWork> m_pendingSegWork;
-    std::shared_ptr<std::atomic<bool>> m_pendingSegCanceled;
-    QProgressDialog *m_pendingSegProgress = nullptr;
+    std::shared_ptr<PendingHierWork> m_pendingHierWork;
+    std::shared_ptr<PendingHierClsWork> m_pendingHierClsWork;
+    RsObiaTask *m_pendingFlatTask = nullptr; // deleteLater after terminal
+    QString m_pendingFlatOutputPath;
 };
