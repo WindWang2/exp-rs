@@ -4,6 +4,7 @@
 #include <QFileInfo>
 
 #include <qgsapplication.h>
+#include <qgslayertree.h>
 #include <qgslayertreeview.h>
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
@@ -186,4 +187,41 @@ TEST_CASE("ENVI path-pair resolution stays inside the GDAL provider",
   REQUIRE(rasterAssets.size() == 1);
   CHECK(QFileInfo(rasterAssets.first().source().canonicalSource).fileName() ==
         QStringLiteral("dem.dat"));
+}
+
+TEST_CASE("Loaded layer survives event-loop turns (registry bridge re-parenting)",
+          "[layer_manager][data_context]") {
+  // Regression: loadSource() re-parents the tree node via removeChildNode().
+  // QgsLayerTreeRegistryBridge reacts to the removal by *queueing* the layer
+  // for removal from QgsProject (Qt::QueuedConnection), so the loss only
+  // becomes visible after the event loop spins — synchronous checks pass.
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  QgsLayerTreeView treeView;
+  const sicnu::display::DisplayViewSpec viewSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore()};
+  auto createdContext = sicnu::app::ProjectContext::create(viewSpec);
+  REQUIRE(createdContext);
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+  LayerManager layerManager(&canvas, &treeView, nullptr,
+                            &context->dataManager(), &context->displayManager(),
+                            context->mainViewId(), nullptr);
+  layerManager.initLayerTree();
+
+  REQUIRE(layerManager.loadRasterLayer(
+      fixturePath(QStringLiteral("samples/dem_sample.tif"))));
+
+  // Spin the event loop so queued registry-bridge removals (if any) execute.
+  QCoreApplication::processEvents();
+  QCoreApplication::processEvents();
+
+  CHECK(project->count() == 1);
+  CHECK(canvas.layerCount() == 1);
+  QgsLayerTreeLayer *node =
+      project->layerTreeRoot()->findLayer(project->mapLayers().first()->id());
+  REQUIRE(node != nullptr);
+  CHECK(node->parent() == layerManager.findOrCreateGroup(
+                              QStringLiteral("Raster Layers")));
 }

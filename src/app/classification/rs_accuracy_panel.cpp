@@ -42,7 +42,7 @@ RsAccuracyPanel::RsAccuracyPanel( QWidget *parent )
     this );
   mEmptyHint->setObjectName( QStringLiteral( "rsAccuracyEmptyHint" ) );
   mEmptyHint->setWordWrap( true );
-  mEmptyHint->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+  mEmptyHint->setObjectName( QStringLiteral( "rsEmptyHint" ) );
   SicnuDialogHelp::tip( mEmptyHint, tr(
     "总体精度 OA、Kappa、混淆矩阵（行=真实，列=预测）、制图/用户精度与 F1。" ) );
   layout->addWidget( mEmptyHint );

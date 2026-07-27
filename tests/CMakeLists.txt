@@ -22,7 +22,7 @@ endfunction()
 
 # Helper function to add a test executable
 function(sicnu_add_test NAME)
-  add_executable(${NAME} ${NAME}.cpp)
+  qt_add_executable(${NAME} ${NAME}.cpp)
   target_link_libraries(${NAME} PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -2418,6 +2418,52 @@ target_include_directories(test_histogram_widget PRIVATE
 )
 sicnu_discover_tests(test_histogram_widget)
 
+# Display stretch core — pure resolve + port apply (no GUI)
+add_executable(test_display_stretch
+  test_display_stretch.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_types.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_resolve.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_apply.cpp
+)
+target_link_libraries(test_display_stretch PRIVATE
+  Catch2::Catch2WithMain
+)
+target_include_directories(test_display_stretch PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_display_stretch)
+
+# Display stretch panel — algorithm switch / deleted-layer safety (UAF regression)
+add_executable(test_histogram_stretch_widget
+  test_histogram_stretch_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_stretch_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_types.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_resolve.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/display_stretch_apply.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/piecewise_linear_enhancement.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/display/qgs_display_stretch.cpp
+)
+target_link_libraries(test_histogram_stretch_widget PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  GDAL::GDAL
+)
+target_include_directories(test_histogram_stretch_widget PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_histogram_stretch_widget PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_histogram_stretch_widget)
+
 # Guided Workflow Widget tests
 add_executable(test_guided_workflow_widget test_guided_workflow_widget.cpp)
 target_link_libraries(test_guided_workflow_widget PRIVATE
@@ -2885,60 +2931,6 @@ target_include_directories(test_virtual_raster_recipe PRIVATE
 )
 sicnu_discover_tests(test_virtual_raster_recipe)
 
-# Data Manager dependency tests - strong-dependency DAG (#56)
-qt_add_executable(test_data_manager_dependency
-  test_data_manager_dependency.cpp
-)
-target_link_libraries(test_data_manager_dependency PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Test
-  qgis_core
-  sicnu_data
-)
-target_include_directories(test_data_manager_dependency PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-)
-sicnu_discover_tests(test_data_manager_dependency)
-
-# Virtual raster preflight tests - pure classification over snapshots (#57)
-qt_add_executable(test_virtual_raster_preflight
-  test_virtual_raster_preflight.cpp
-)
-target_link_libraries(test_virtual_raster_preflight PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Test
-  qgis_core
-  sicnu_processing
-  sicnu_data
-)
-target_include_directories(test_virtual_raster_preflight PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-)
-sicnu_discover_tests(test_virtual_raster_preflight)
-# Virtual raster creation tests - provider + createVirtualRaster (#58)
-add_executable(test_virtual_raster_create
-  test_virtual_raster_create.cpp
-)
-target_link_libraries(test_virtual_raster_create PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  Qt6::Test
-  qgis_core
-  qgis_gui
-  Sicnu::qgis_display
-  sicnu_data
-)
-target_include_directories(test_virtual_raster_create PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_BINARY_DIR}
-)
-set_target_properties(test_virtual_raster_create PROPERTIES AUTOMOC ON)
-sicnu_discover_tests(test_virtual_raster_create)
-
 # Remote map structure model tests - RemoteMapStructure + AssetStructure arm (#61)
 qt_add_executable(test_remote_map_structure
   test_remote_map_structure.cpp
@@ -3014,3 +3006,107 @@ target_include_directories(test_remote_map_uri PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_remote_map_uri)
+
+# Data Manager dependency tests - strong-dependency DAG (#56)
+qt_add_executable(test_data_manager_dependency
+  test_data_manager_dependency.cpp
+)
+target_link_libraries(test_data_manager_dependency PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_data
+)
+target_include_directories(test_data_manager_dependency PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_data_manager_dependency)
+
+# Virtual raster preflight tests - pure classification over snapshots (#57)
+qt_add_executable(test_virtual_raster_preflight
+  test_virtual_raster_preflight.cpp
+)
+target_link_libraries(test_virtual_raster_preflight PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_processing
+  sicnu_data
+)
+target_include_directories(test_virtual_raster_preflight PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_virtual_raster_preflight)
+
+# Virtual raster creation tests - provider + createVirtualRaster (#58)
+add_executable(test_virtual_raster_create
+  test_virtual_raster_create.cpp
+)
+target_link_libraries(test_virtual_raster_create PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  sicnu_data
+)
+target_include_directories(test_virtual_raster_create PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_virtual_raster_create PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_virtual_raster_create)
+
+# #66 real NetworkProbe: pure GetCapabilities XML parser (TDD slice 1). The
+# parser lives in sicnu_qgis_display; the test links it (transitively pulls
+# Qt6::Xml + Sicnu::data).
+qt_add_executable(test_remote_map_capabilities_parser
+  test_remote_map_capabilities_parser.cpp
+)
+target_link_libraries(test_remote_map_capabilities_parser PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::qgis_display
+)
+target_include_directories(test_remote_map_capabilities_parser PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_remote_map_capabilities_parser)
+
+# #66 real NetworkProbe: the concrete QgisNetworkProbe with an injected stub
+# fetcher (TDD slice 2). The probe + parser live in sicnu_qgis_display.
+qt_add_executable(test_network_probe
+  test_network_probe.cpp
+)
+target_link_libraries(test_network_probe PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::qgis_display
+)
+target_include_directories(test_network_probe PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_network_probe)
+
+# #66 real NetworkProbe: end-to-end host wiring (TDD slice 3). The probe +
+# parser live in sicnu_qgis_display, which also owns project_context.cpp.
+qt_add_executable(test_project_context_remote_probe
+  test_project_context_remote_probe.cpp
+)
+target_link_libraries(test_project_context_remote_probe PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+)
+target_include_directories(test_project_context_remote_probe PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_project_context_remote_probe)

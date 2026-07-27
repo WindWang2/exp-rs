@@ -10,6 +10,7 @@
 #include <processing/qgsprocessingcontext.h>
 #include <processing/qgsprocessingfeedback.h>
 #include <processing/qgsprocessingalgrunnertask.h>
+#include "processing/framework/task_center.h"
 
 AsyncAlgorithmRunner::AsyncAlgorithmRunner(QWidget *parentWidget, QObject *parent)
     : AsyncRunnerBase(parentWidget, parent)
@@ -38,15 +39,20 @@ void AsyncAlgorithmRunner::run(const QgsProcessingAlgorithm *algorithm,
     beginRun();
     m_startTime = QDateTime::currentMSecsSinceEpoch();
 
+    QString algoId = algorithm ? algorithm->id() : QStringLiteral("algorithm");
+    long centerTaskId = sicnu::TaskCenter::instance().enqueueTask(algoId, parameters, true);
+
     // Create feedback for progress tracking
     QgsProcessingFeedback *feedback = new QgsProcessingFeedback(this);
 
     // Create async task
     m_task = new QgsProcessingAlgRunnerTask(algorithm, parameters, context, feedback);
+    sicnu::TaskCenter::instance().attachQgsTask(centerTaskId, m_task);
+    sicnu::TaskCenter::instance().markTaskRunning(centerTaskId);
 
     // Connect to executed signal (bool successful, QVariantMap results)
     connect(m_task, &QgsProcessingAlgRunnerTask::executed, this,
-            [this, feedback](bool successful, const QVariantMap &results) {
+            [this, feedback, centerTaskId](bool successful, const QVariantMap &results) {
         m_task = nullptr;
         endRun();
 
@@ -56,19 +62,22 @@ void AsyncAlgorithmRunner::run(const QgsProcessingAlgorithm *algorithm,
             QgsMessageLog::logMessage(
                 QObject::tr("Algorithm completed in %1 seconds").arg(elapsed, 0, 'f', 2),
                 "async_runner", Qgis::MessageLevel::Success);
+            sicnu::TaskCenter::instance().markTaskCompleted(centerTaskId, results);
             emit completed(results);
         } else {
             QString errorMsg = feedback ? feedback->textLog() : "Unknown error";
             QgsMessageLog::logMessage(
                 QObject::tr("Algorithm failed after %1 seconds: %2").arg(elapsed, 0, 'f', 2).arg(errorMsg),
                 "async_runner", Qgis::MessageLevel::Critical);
+            sicnu::TaskCenter::instance().markTaskFailed(centerTaskId, errorMsg);
             emit failed(errorMsg);
         }
 
         feedback->deleteLater();
     });
 
-    connect(m_task, &QgsTask::progressChanged, this, [this](double progress) {
+    connect(m_task, &QgsTask::progressChanged, this, [this, centerTaskId](double progress) {
+        sicnu::TaskCenter::instance().updateTaskProgress(centerTaskId, progress / 100.0);
         emit progressChanged(progress);
     });
 

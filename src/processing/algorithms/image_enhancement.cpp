@@ -135,6 +135,49 @@ void ImageEnhancement::histogramEqualize(const float *input, float *output, size
     }
 }
 
+void ImageEnhancement::piecewiseLinearStretch(const float *input, float *output, size_t count,
+                                           const std::vector<std::pair<float, float>> &controlPoints,
+                                           float nodata)
+{
+    if (controlPoints.size() < 2) {
+        for (size_t i = 0; i < count; i++) {
+            output[i] = (input[i] == nodata || std::isnan(input[i])) ? nodata : input[i];
+        }
+        return;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        float val = input[i];
+        if (val == nodata || std::isnan(val)) {
+            output[i] = nodata;
+            continue;
+        }
+
+        if (val <= controlPoints.front().first) {
+            output[i] = controlPoints.front().second;
+            continue;
+        }
+        if (val >= controlPoints.back().first) {
+            output[i] = controlPoints.back().second;
+            continue;
+        }
+
+        for (size_t p = 0; p < controlPoints.size() - 1; p++) {
+            float x1 = controlPoints[p].first;
+            float y1 = controlPoints[p].second;
+            float x2 = controlPoints[p + 1].first;
+            float y2 = controlPoints[p + 1].second;
+
+            if (val >= x1 && val <= x2) {
+                float dx = std::max(1e-6f, x2 - x1);
+                float ratio = (val - x1) / dx;
+                output[i] = y1 + ratio * (y2 - y1);
+                break;
+            }
+        }
+    }
+}
+
 // ---- Spatial filter helpers ----
 
 void ImageEnhancement::generateGaussianKernel(float *kernel, int size, float sigma)

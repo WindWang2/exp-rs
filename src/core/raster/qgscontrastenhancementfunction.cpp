@@ -38,6 +38,11 @@ QgsContrastEnhancementFunction::QgsContrastEnhancementFunction( const QgsContras
   , mMinimumValuePossible( f.mMinimumValuePossible )
 {}
 
+QgsContrastEnhancementFunction *QgsContrastEnhancementFunction::clone() const
+{
+  return new QgsContrastEnhancementFunction( *this );
+}
+
 int QgsContrastEnhancementFunction::enhance( double value )
 {
   if ( mQgsRasterDataType == Qgis::DataType::Byte )

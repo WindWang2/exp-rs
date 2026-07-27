@@ -38,6 +38,14 @@ class CORE_EXPORT QgsContrastEnhancementFunction
     virtual ~QgsContrastEnhancementFunction() = default;
 
     /**
+     * Returns a deep copy of the enhancement function.
+     *
+     * Custom enhancement functions must override this method so that raster
+     * renderer clones used by map rendering preserve their concrete function.
+     */
+    virtual QgsContrastEnhancementFunction *clone() const SIP_FACTORY;
+
+    /**
      * A customizable method that takes in a double \a value and returns a int between 0 and 255.
      */
     virtual int enhance( double value );

@@ -33,6 +33,10 @@ public:
     static void histogramEqualize(const float *input, float *output, size_t count,
                                   int bins = 256, float nodata = -9999.0f);
 
+    static void piecewiseLinearStretch(const float *input, float *output, size_t count,
+                                       const std::vector<std::pair<float, float>> &controlPoints,
+                                       float nodata = -9999.0f);
+
     // Band ratio
     static void bandRatio(const float *band1, const float *band2, float *output, size_t count);
 

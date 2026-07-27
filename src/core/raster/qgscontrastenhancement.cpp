@@ -60,8 +60,18 @@ QgsContrastEnhancement::QgsContrastEnhancement( const QgsContrastEnhancement &ce
 {
   mLookupTableOffset = minimumValuePossible( mRasterDataType ) * -1;
 
-  // setContrastEnhancementAlgorithm sets also QgsContrastEnhancementFunction
-  setContrastEnhancementAlgorithm( ce.mContrastEnhancementAlgorithm, false );
+  if ( ce.mContrastEnhancementAlgorithm == UserDefinedEnhancement
+       && ce.mContrastEnhancementFunction )
+  {
+    mContrastEnhancementFunction.reset( ce.mContrastEnhancementFunction->clone() );
+    mContrastEnhancementAlgorithm = UserDefinedEnhancement;
+  }
+  else
+  {
+    // setContrastEnhancementAlgorithm also creates the matching built-in
+    // QgsContrastEnhancementFunction.
+    setContrastEnhancementAlgorithm( ce.mContrastEnhancementAlgorithm, false );
+  }
 
   //If the data type is larger than 16-bit do not generate a lookup table
   if ( mRasterDataTypeRange <= 65535.0 )

@@ -92,7 +92,7 @@ QLabel *makeHintLabel( QWidget *parent, const QString &text )
   auto *lbl = new QLabel( text, parent );
   lbl->setObjectName( QStringLiteral( "rsDialogHint" ) );
   lbl->setWordWrap( true );
-  lbl->setStyleSheet( QStringLiteral( "color:#8a92a0; font-size:11px;" ) );
+  lbl->setObjectName( QStringLiteral( "rsDialogHint" ) );
   return lbl;
 }
 

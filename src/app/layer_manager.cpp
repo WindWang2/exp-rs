@@ -186,13 +186,20 @@ LayerManager::loadSource( sicnu::data::SourceDescriptor source )
             ? QObject::tr( "Raster Layers" )
             : QObject::tr( "Vector Layers" );
     QgsLayerTree *root = QgsProject::instance()->layerTreeRoot();
-    if ( QgsLayerTreeLayer *node = root->findLayer( layer->id() ) )
+    // Re-parent like drag'n'drop does: insert the new node FIRST, then remove
+    // the old one. QgsLayerTreeRegistryBridge queues a project-side removal
+    // for any tree node whose layer is no longer in the tree; removing first
+    // would make it drop (and delete) the QgsMapLayer on the next event-loop
+    // turn — leaving the canvas empty and the Display Manager holding a
+    // dangling pointer.
+    QgsLayerTreeLayer *oldNode = root->findLayer( layer->id() );
+    findOrCreateGroup( groupName )->addLayer( layer );
+    if ( oldNode )
     {
         if ( QgsLayerTreeGroup *parent =
-                 qobject_cast<QgsLayerTreeGroup *>( node->parent() ) )
-            parent->removeChildNode( node );
+                 qobject_cast<QgsLayerTreeGroup *>( oldNode->parent() ) )
+            parent->removeChildNode( oldNode );
     }
-    findOrCreateGroup( groupName )->addLayer( layer );
 
     refreshCanvasLayers();
     if ( !hadVisibleLayers )

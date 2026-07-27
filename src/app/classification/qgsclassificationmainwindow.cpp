@@ -1288,7 +1288,7 @@ void QgsClassificationMainWindow::populateStepPanels()
     auto *help = new QLabel(
       tr( "在类别管理中编辑名称与颜色；至少 2 个类别后可进入下一步。" ), body );
     help->setWordWrap( true );
-    help->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    help->setObjectName( QStringLiteral( "rsDialogHint" ) );
     lay->addWidget( help );
     lay->addStretch( 1 );
   }

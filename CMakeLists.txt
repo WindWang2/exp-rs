@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.20)
 project(sicnu_geo VERSION 1.0 LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
@@ -29,7 +28,8 @@ if(SICNU_VENDOR_GDAL)
     message(STATUS "SICNU_VENDOR_GDAL=ON — building GDAL/PROJ/GEOS from vendor/")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia Core5Compat Test)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia Core5Compat Test)
+qt_standard_project_setup(REQUIRES 6.8)
 
 # When vendoring, directly include the config files to bypass Find module cache
 if(SICNU_VENDOR_GDAL)

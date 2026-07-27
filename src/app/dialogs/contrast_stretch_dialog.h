@@ -6,11 +6,12 @@
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
+class HistogramStretchWidget;
 
 /**
- * Dialog for Contrast Stretch operations.
- * Supports Linear, Percentage Clip, Std Dev, and Histogram Equalization
- * using the ImageEnhancement algorithm library.
+ * Dialog for Photoshop-style Interactive Contrast Stretch and Levels Adjustment.
+ * Supports Multi-channel RGB/Grayscale interactive histograms, Level cut-off handles,
+ * live map canvas rendering, and async TaskCenter GeoTIFF processing.
  */
 class ContrastStretchDialog : public RasterProcessingDialogBase
 {
@@ -19,9 +20,11 @@ class ContrastStretchDialog : public RasterProcessingDialogBase
 public:
     explicit ContrastStretchDialog(QWidget *parent = nullptr);
 
+    void setRasterLayer(QgsRasterLayer *layer) override;
+
 protected:
     QString toolName() const override { return QStringLiteral("contrast_stretch"); }
-    QString dialogTitle() const override { return tr("Contrast Stretch"); }
+    QString dialogTitle() const override { return tr("Photoshop 风格对比度拉伸 (Contrast Stretch & Levels)"); }
     void onRun() override;
 
 private slots:
@@ -30,6 +33,7 @@ private slots:
 private:
     void setupUi();
 
+    HistogramStretchWidget *m_stretchWidget = nullptr;
     QComboBox *m_methodCombo = nullptr;
     QDoubleSpinBox *m_clipSpin = nullptr;
     QDoubleSpinBox *m_stddevSpin = nullptr;
