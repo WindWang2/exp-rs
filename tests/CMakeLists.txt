@@ -1012,6 +1012,34 @@ target_include_directories(test_georef_dual_window PRIVATE
 set_target_properties(test_georef_dual_window PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_georef_dual_window)
 
+# #33 — I2I / I2M adapters share Georeferencing Session type with independence
+add_executable(test_georef_session_adapters
+  test_georef_session_adapters.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+)
+target_link_libraries(test_georef_session_adapters PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+  sicnu_jobs
+  sicnu_task_center
+)
+target_include_directories(test_georef_session_adapters PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_georef_session_adapters PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_georef_session_adapters)
+
 # Georef task list (Apply → enqueue UI)
 add_executable(test_georef_task_list test_georef_task_list.cpp)
 target_link_libraries(test_georef_task_list PRIVATE
