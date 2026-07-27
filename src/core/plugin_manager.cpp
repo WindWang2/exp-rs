@@ -1,10 +1,12 @@
-// src/core/plugin_manager.cpp
 #include "plugin_manager.h"
+#include "app/python/python_plugin_adapter.h"
 
 #include <QDir>
 #include <QPluginLoader>
-#include <QDebug>
+#include <QLibrary>
 #include <QJsonObject>
+#include <QSettings>
+#include <QFileInfo>
 
 PluginManager::PluginManager(QgsMapCanvas *canvas, QgsLayerTreeView *layerTree, QObject *parent)
     : QObject(parent)
@@ -28,9 +30,20 @@ void PluginManager::loadPlugins(const QString &pluginDir)
 
     qDebug() << "Loading plugins from:" << pluginDir;
 
+    // 1. Scan for C++ plugin libraries (.so / .dll)
     for (const QString &fileName : dir.entryList(QDir::Files)) {
         QString filePath = dir.absoluteFilePath(fileName);
-        loadPlugin(filePath);
+        if (QLibrary::isLibrary(filePath)) {
+            loadPlugin(filePath);
+        }
+    }
+
+    // 2. Scan for Python plugin directories containing metadata.txt + __init__.py
+    for (const QString &subDirName : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        QString subDirPath = dir.absoluteFilePath(subDirName);
+        if (QFileInfo::exists(subDirPath + "/metadata.txt") && QFileInfo::exists(subDirPath + "/__init__.py")) {
+            loadPythonPlugin(subDirPath);
+        }
     }
 }
 
@@ -72,10 +85,60 @@ bool PluginManager::loadPlugin(const QString &pluginPath)
     info.instance = interface;
     info.loader = loader;
     info.loaded = true;
+    info.isPython = false;
     m_plugins[interface->name()] = info;
 
-    qDebug() << "Loaded plugin:" << interface->name();
+    qDebug() << "Loaded C++ plugin:" << interface->name();
     emit pluginLoaded(interface->name());
+
+    return true;
+}
+
+bool PluginManager::loadPythonPlugin(const QString &pluginDir)
+{
+    const QString metadataPath = pluginDir + "/metadata.txt";
+    if (!QFileInfo::exists(metadataPath)) {
+        return false;
+    }
+
+    QMap<QString, QString> metadata;
+    QFile file(metadataPath);
+    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QTextStream in(&file);
+        while (!in.atEnd()) {
+            QString line = in.readLine().trimmed();
+            if (line.isEmpty() || line.startsWith('#') || line.startsWith('['))
+                continue;
+            int idx = line.indexOf('=');
+            if (idx > 0) {
+                QString key = line.left(idx).trimmed();
+                QString val = line.mid(idx + 1).trimmed();
+                metadata[key] = val;
+            }
+        }
+    }
+
+    const QString packageName = QDir(pluginDir).dirName();
+    const QString name = metadata.value(QStringLiteral("name"), packageName);
+    const QString description = metadata.value(QStringLiteral("description"), QString());
+    const QString version = metadata.value(QStringLiteral("version"), QStringLiteral("1.0"));
+
+    auto *adapter = new PythonPluginAdapter(pluginDir, packageName, name, description, version, m_appInterface);
+    if (!adapter->initialize(m_canvas, m_layerTree)) {
+        emit pluginError(name, "Python plugin initialization failed");
+        delete adapter;
+        return false;
+    }
+
+    PluginInfo info;
+    info.instance = adapter;
+    info.loader = nullptr;
+    info.loaded = true;
+    info.isPython = true;
+    m_plugins[name] = info;
+
+    qDebug() << "Loaded Python plugin:" << name;
+    emit pluginLoaded(name);
 
     return true;
 }
@@ -85,7 +148,11 @@ void PluginManager::unloadAll()
     for (auto it = m_plugins.begin(); it != m_plugins.end(); ++it) {
         if (it.value().loaded) {
             it.value().instance->unload();
-            it.value().loader->unload();
+            if (it.value().loader) {
+                it.value().loader->unload();
+            } else if (it.value().isPython) {
+                delete it.value().instance;
+            }
             emit pluginUnloaded(it.key());
         }
     }

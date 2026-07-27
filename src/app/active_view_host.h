@@ -56,6 +56,8 @@ class ActiveViewHost : public QObject
     // ── Active view ───────────────────────────────────────────────────
     sicnu::display::DisplayViewId mainViewId() const { return m_mainViewId; }
     sicnu::display::DisplayViewId activeViewId() const { return m_activeViewId; }
+    QgsLayerTreeView *layerTreeView() const { return m_layerTreeView; }
+    QgsMapCanvas *mapCanvas() const { return m_mapCanvas; }
     /// Target view for open/display. Must be a live view known to DisplayManager.
     /// Defaults to mainViewId. Returns false if id is null / unknown.
     bool setActiveViewId( sicnu::display::DisplayViewId viewId );

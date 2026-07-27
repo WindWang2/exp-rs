@@ -10,8 +10,10 @@ class QPluginLoader;
 class QgsMapCanvas;
 class QgsLayerTreeView;
 
+class SicnuAppInterface;
+
 /**
- * @brief Manages loading and unloading of plugins
+ * @brief Manages loading and unloading of plugins (C++ and Python)
  */
 class PluginManager : public QObject
 {
@@ -21,8 +23,12 @@ public:
     explicit PluginManager(QgsMapCanvas *canvas, QgsLayerTreeView *layerTree, QObject *parent = nullptr);
     ~PluginManager();
 
+    void setAppInterface(SicnuAppInterface *iface) { m_appInterface = iface; }
+    SicnuAppInterface *appInterface() const { return m_appInterface; }
+
     void loadPlugins(const QString &pluginDir);
     bool loadPlugin(const QString &pluginPath);
+    bool loadPythonPlugin(const QString &pluginDir);
     void unloadAll();
 
     QStringList loadedPlugins() const;
@@ -37,11 +43,13 @@ signals:
 private:
     struct PluginInfo {
         SicnuPluginInterface *instance;
-        QPluginLoader *loader;
+        QPluginLoader *loader; // nullptr for Python plugins
         bool loaded;
+        bool isPython = false;
     };
 
     QMap<QString, PluginInfo> m_plugins;
     QgsMapCanvas *m_canvas;
     QgsLayerTreeView *m_layerTree;
+    SicnuAppInterface *m_appInterface = nullptr;
 };

@@ -244,22 +244,13 @@ bool QgisPython::runString(const QString &command, QString &error)
         return false;
     }
 
-    // Wrap command in try/except to catch Python exceptions
-    QString wrappedCmd = QString(
-        "try:\n"
-        "    %1\n"
-        "except Exception as e:\n"
-        "    import sys\n"
-        "    print(f'ERROR: {e}', file=sys.stderr)\n"
-        "    raise\n"
-    ).arg(command);
-
-    QByteArray cmdBytes = wrappedCmd.toUtf8();
+    QByteArray cmdBytes = command.toUtf8();
     int result = PyRun_SimpleStringFlags(cmdBytes.constData(), nullptr);
 
     if (result != 0) {
-        // Get error from Python
-        PyErr_Print();
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
         error = "Python execution error";
         return false;
     }
