@@ -1,9 +1,13 @@
 #include "data_manager_panel.h"
 
+#include <QApplication>
 #include <QHeaderView>
+#include <QIcon>
 #include <QLabel>
 #include <QMenu>
+#include <QSize>
 #include <QSplitter>
+#include <QStyle>
 #include <QTextBrowser>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
@@ -24,6 +28,72 @@ namespace
 
 constexpr int kAssetIdRole = Qt::UserRole;
 constexpr int kCollectionIdRole = Qt::UserRole + 1;
+/// Human-readable label for icon-only columns (kind / status) — used by rowText().
+constexpr int kColumnLabelRole = Qt::UserRole + 2;
+
+QIcon appIcon( const char *alias )
+{
+  return QIcon( QStringLiteral( ":/icons/" ) + QLatin1String( alias ) );
+}
+
+QIcon styleIcon( QStyle::StandardPixmap sp )
+{
+  if ( qApp && qApp->style() )
+    return qApp->style()->standardIcon( sp );
+  return {};
+}
+
+QIcon kindIcon( sicnu::data::AssetKind kind )
+{
+  switch ( kind )
+  {
+    case sicnu::data::AssetKind::Raster:
+      return appIcon( "r_ster" );
+    case sicnu::data::AssetKind::Vector:
+      return appIcon( "vector" );
+    case sicnu::data::AssetKind::RemoteMap:
+      return appIcon( "s_tellite" );
+    case sicnu::data::AssetKind::VirtualRaster:
+      return appIcon( "l_yer_st_ck" );
+  }
+  return styleIcon( QStyle::SP_FileIcon );
+}
+
+QIcon statusIcon( sicnu::data::AssetState state )
+{
+  switch ( state )
+  {
+    case sicnu::data::AssetState::Ready:
+      return appIcon( "v_lid_tion_ok" );
+    case sicnu::data::AssetState::Registered:
+      return styleIcon( QStyle::SP_FileDialogInfoView );
+    case sicnu::data::AssetState::Resolving:
+      return styleIcon( QStyle::SP_BrowserReload );
+    case sicnu::data::AssetState::Missing:
+    case sicnu::data::AssetState::UnavailableSource:
+      return appIcon( "w_rning_l_bel" );
+    case sicnu::data::AssetState::Offline:
+      return appIcon( "cloud_sync" );
+    case sicnu::data::AssetState::AuthenticationRequired:
+      return styleIcon( QStyle::SP_MessageBoxQuestion );
+    case sicnu::data::AssetState::Error:
+      return styleIcon( QStyle::SP_MessageBoxCritical );
+    case sicnu::data::AssetState::Stale:
+      return appIcon( "w_rning_l_bel" );
+  }
+  return styleIcon( QStyle::SP_MessageBoxInformation );
+}
+
+void setIconColumn( QTreeWidgetItem *item, int column, const QIcon &icon, const QString &label )
+{
+  if ( !item )
+    return;
+  item->setText( column, QString() );
+  item->setIcon( column, icon );
+  item->setToolTip( column, label );
+  item->setData( column, kColumnLabelRole, label );
+  item->setTextAlignment( column, Qt::AlignCenter );
+}
 
 QString escapeHtml( const QString &text )
 {
@@ -311,8 +381,18 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   m_tree->setRootIsDecorated( true );
   m_tree->setSelectionMode( QAbstractItemView::SingleSelection );
   m_tree->setContextMenuPolicy( Qt::CustomContextMenu );
+  m_tree->setIconSize( QSize( 18, 18 ) );
+  m_tree->setUniformRowHeights( true );
   m_tree->header()->setStretchLastSection( false );
   m_tree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
+  m_tree->header()->setSectionResizeMode( 1, QHeaderView::Fixed );
+  m_tree->header()->setSectionResizeMode( 2, QHeaderView::Fixed );
+  m_tree->header()->setSectionResizeMode( 3, QHeaderView::ResizeToContents );
+  m_tree->header()->setSectionResizeMode( 4, QHeaderView::ResizeToContents );
+  m_tree->setColumnWidth( 1, 44 );
+  m_tree->setColumnWidth( 2, 44 );
+  m_tree->headerItem()->setToolTip( 1, tr( "类型（悬停查看文字）" ) );
+  m_tree->headerItem()->setToolTip( 2, tr( "状态（悬停查看文字）" ) );
   m_tree->setMinimumWidth( 220 );
 
   auto *detailHost = new QWidget( this );
@@ -377,7 +457,16 @@ QString DataManagerPanel::rowText( sicnu::data::AssetId id, int column ) const
   while ( *it )
   {
     if ( ( *it )->data( 0, kAssetIdRole ).toString() == id.toString() )
+    {
+      // Kind / status are icon-only; expose the label via tool-role for tests/API.
+      if ( column == 1 || column == 2 )
+      {
+        const QString label = ( *it )->data( column, kColumnLabelRole ).toString();
+        if ( !label.isEmpty() )
+          return label;
+      }
       return ( *it )->text( column );
+    }
     ++it;
   }
   return QString();
@@ -431,14 +520,18 @@ void DataManagerPanel::addAssetRow( QTreeWidgetItem *parent,
   auto *item = parent ? new QTreeWidgetItem( parent )
                       : new QTreeWidgetItem( m_tree );
   item->setText( 0, snapshot.displayName() );
-  item->setText( 1, kindText( snapshot.kind() ) );
-  item->setText( 2, statusText( snapshot.state() ) );
+  setIconColumn( item, 1, kindIcon( snapshot.kind() ), kindText( snapshot.kind() ) );
+  const QString statusLabel = statusText( snapshot.state() );
+  setIconColumn( item, 2, statusIcon( snapshot.state() ), statusLabel );
   item->setText( 3, persistenceText( snapshot.persistence() ) );
   item->setText( 4, QString::number( referenceCount( snapshot.id() ) ) );
   item->setData( 0, kAssetIdRole, snapshot.id().toString() );
   item->setToolTip( 0, snapshot.source().canonicalSource );
   if ( snapshot.state() == sicnu::data::AssetState::Missing )
-    item->setToolTip( 2, tr( "源文件缺失，可通过重定位恢复" ) );
+  {
+    item->setToolTip( 2, tr( "源缺失 — 可通过重定位恢复" ) );
+    item->setData( 2, kColumnLabelRole, statusLabel );
+  }
 }
 
 void DataManagerPanel::refresh()
@@ -461,7 +554,8 @@ void DataManagerPanel::refresh()
 
     auto *collectionItem = new QTreeWidgetItem( m_tree );
     collectionItem->setText( 0, collection->displayName );
-    collectionItem->setText( 1, tr( "集合" ) );
+    setIconColumn( collectionItem, 1, appIcon( "d_t_b_se" ), tr( "集合" ) );
+    setIconColumn( collectionItem, 2, styleIcon( QStyle::SP_DirIcon ), tr( "集合" ) );
     collectionItem->setText( 4, QString::number( collection->childAssetIds.size() ) );
     collectionItem->setData( 0, kCollectionIdRole, collection->id.toString() );
 
