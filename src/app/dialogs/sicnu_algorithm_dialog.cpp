@@ -2,13 +2,12 @@
 #include "sicnu_algorithm_dialog.h"
 #include "dialog_help_catalog.h"
 #include "main_window.h"
-#include "shell/job_engine_qt_bridge.h"
 #include "shell/processing_job_adapter.h"
 
-#include "jobs/job_engine.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
+#include "processing/framework/task_center.h"
 
 #include <gui/processing/qgsprocessingguiregistry.h>
 #include <gui/processing/qgsprocessingwidgetwrapper.h>
@@ -343,6 +342,8 @@ SicnuAlgorithmDialog::SicnuAlgorithmDialog( QWidget *parent )
     mContext.setProject( project );
     mContext.setTransformContext( project->transformContext() );
   }
+  connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
+           this, &SicnuAlgorithmDialog::onTaskUpdated, Qt::QueuedConnection );
 }
 
 SicnuAlgorithmDialog::~SicnuAlgorithmDialog()
@@ -606,14 +607,14 @@ QgsProcessingContext *SicnuAlgorithmDialog::processingContext()
 }
 
 // ---------------------------------------------------------------------------
-// runAlgorithm — JobEngine-backed async execution
+// runAlgorithm — Task Center-backed async execution
 // prepare() on GUI thread; runPrepared() on worker; postProcess() on GUI.
 // ---------------------------------------------------------------------------
 
 bool SicnuAlgorithmDialog::isFinalized()
 {
-  // Keep the dialog alive while a JobEngine job is outstanding (no QgsTask).
-  if ( !mPendingJobId.isEmpty() )
+  // Keep the dialog alive while a Task Center job is outstanding (no QgsTask).
+  if ( mPendingTaskId >= 0 )
     return false;
   return QgsProcessingAlgorithmDialogBase::isFinalized();
 }
@@ -623,7 +624,7 @@ void SicnuAlgorithmDialog::runAlgorithm()
   if ( !algorithm() )
     return;
 
-  if ( !mPendingJobId.isEmpty() )
+  if ( mPendingTaskId >= 0 )
     return;
 
   if ( mLoadResultsCheck )
@@ -700,7 +701,7 @@ void SicnuAlgorithmDialog::runAlgorithm()
 
   QgsGui::processingRecentAlgorithmLog()->push( algorithm()->id() );
 
-  // prepare on GUI thread (context affinity), then JobEngine runs runPrepared.
+  // prepare on GUI thread (context affinity), then Task Center runs runPrepared.
   auto state = std::make_shared<SicnuProcessingRunState>();
   state->parameters = params;
   state->algorithm.reset( algorithm()->create() );
@@ -734,24 +735,17 @@ void SicnuAlgorithmDialog::runAlgorithm()
 
   mRunState = state;
 
-  if ( !mJobBridgeConnected )
-  {
-    auto *bridge = JobEngineQtBridge::instance();
-    connect( bridge, &JobEngineQtBridge::jobFinished, this,
-             &SicnuAlgorithmDialog::onProcessingJobFinished );
-    mJobBridgeConnected = true;
-  }
-
   sicnu::jobs::JobRequest req;
   req.algorithmId = ProcessingJobAdapter::processingAlgorithmId( algorithm()->id() );
   req.title = algorithm()->displayName().toStdString();
   req.source = "toolbox";
 
+  const bool autoLoad = !mLoadResultsCheck || mLoadResultsCheck->isChecked();
   QgsProcessingContext *contextPtr = &mContext;
   QgsProcessingFeedback *feedbackPtr = feedback;
 
-  const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
-    std::move( req ),
+  mPendingTaskId = sicnu::TaskCenter::instance().submitJob(
+    req,
     [state, contextPtr, feedbackPtr]( const sicnu::jobs::JobRequest &,
                                       sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running QgsProcessingAlgorithm (runPrepared)" );
@@ -788,22 +782,32 @@ void SicnuAlgorithmDialog::runAlgorithm()
     [feedbackPtr]() {
       if ( feedbackPtr )
         feedbackPtr->cancel();
-    } );
+    },
+    autoLoad );
 
-  mPendingJobId = QString::fromStdString( jobId );
-  feedback->pushInfo( tr( "Submitted as job %1" ).arg( mPendingJobId ) );
+  if ( feedbackPtr )
+  {
+    const long taskId = mPendingTaskId;
+    connect( feedbackPtr, &QgsFeedback::progressChanged, this, [taskId]( double progress ) {
+      sicnu::TaskCenter::instance().updateTaskProgress( taskId, progress / 100.0 );
+    } );
+  }
+
+  feedback->pushInfo( tr( "Submitted as task %1" ).arg( mPendingTaskId ) );
 }
 
-void SicnuAlgorithmDialog::onProcessingJobFinished( const QString &jobId )
+void SicnuAlgorithmDialog::onTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
 {
-  if ( mPendingJobId.isEmpty() || jobId != mPendingJobId )
+  if ( mPendingTaskId < 0 || info.taskId != mPendingTaskId )
+    return;
+  if ( info.status != sicnu::TaskStatus::Completed
+       && info.status != sicnu::TaskStatus::Failed
+       && info.status != sicnu::TaskStatus::Canceled )
     return;
 
-  mPendingJobId.clear();
+  mPendingTaskId = -1;
 
-  const auto snapOpt = sicnu::jobs::JobEngine::instance().snapshot( jobId.toStdString() );
-  bool successful = snapOpt
-                    && snapOpt->state == sicnu::jobs::JobState::Succeeded;
+  bool successful = info.status == sicnu::TaskStatus::Completed;
 
   // postProcess must run on the context's thread (GUI), and only if the
   // worker entered runPrepared (mHasExecuted). Queued-cancel skips this.
@@ -829,11 +833,10 @@ void SicnuAlgorithmDialog::onProcessingJobFinished( const QString &jobId )
     results = mRunState->results;
   }
 
-  if ( !successful && mFeedback && snapOpt && !snapOpt->error.empty() )
+  if ( !successful && mFeedback && !info.errorMessage.isEmpty() )
   {
-    // Surface JobEngine error if feedback log is thin
     if ( mFeedback->textLog().isEmpty() )
-      mFeedback->reportError( QString::fromStdString( snapOpt->error ) );
+      mFeedback->reportError( info.errorMessage );
   }
 
   algExecuted( successful, results );

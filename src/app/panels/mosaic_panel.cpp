@@ -1,10 +1,9 @@
 // src/app/panels/mosaic_panel.cpp
 #include "mosaic_panel.h"
-#include "shell/job_engine_qt_bridge.h"
-#include "jobs/job_engine.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
+#include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_safe_call.h"
 #include "processing/algorithms/mosaic.h"
@@ -36,6 +35,8 @@ MosaicPanel::MosaicPanel(QWidget *parent)
 {
     setWindowTitle(tr("Mosaic"));
     setupUi();
+    connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
+             this, &MosaicPanel::onTaskUpdated, Qt::QueuedConnection );
 }
 
 void MosaicPanel::setupUi()
@@ -147,34 +148,13 @@ void MosaicPanel::runMosaic()
         return;
     }
 
+    if ( m_pendingTaskId >= 0 )
+        return;
+
     // Capture input paths for async execution
     QStringList inputPaths;
     for (int i = 0; i < m_inputList->count(); ++i) {
         inputPaths.append(m_inputList->item(i)->text());
-    }
-
-    if ( !m_jobBridgeConnected )
-    {
-        auto *bridge = JobEngineQtBridge::instance();
-        connect( bridge, &JobEngineQtBridge::jobFinished, this, [this]( const QString &jobId ) {
-            if ( m_pendingJobId.isEmpty() || jobId != m_pendingJobId )
-                return;
-            m_pendingJobId.clear();
-            const auto snapOpt = sicnu::jobs::JobEngine::instance().snapshot( jobId.toStdString() );
-            if ( !snapOpt || snapOpt->state != sicnu::jobs::JobState::Succeeded )
-            {
-                QString err = snapOpt ? QString::fromStdString( snapOpt->error ) : tr( "Task lost" );
-                if ( err.isEmpty() )
-                    err = tr( "Mosaic failed" );
-                onFailed( err );
-                return;
-            }
-            if ( snapOpt->result.isMember( "output" ) && snapOpt->result["output"].isString() )
-                onCompleted( QString::fromStdString( snapOpt->result["output"].asString() ) );
-            else
-                onFailed( tr( "Mosaic did not return an output path" ) );
-        } );
-        m_jobBridgeConnected = true;
     }
 
     m_runButton->setEnabled(false);
@@ -183,7 +163,7 @@ void MosaicPanel::runMosaic()
     m_progressBar->setRange(0, 0); // Indeterminate progress
 
     // Prefer the rs:mosaic operator path (MosaicDialog). This panel keeps a
-    // lightweight JobEngine callable for embedded use; prefer MosaicDialog when
+    // lightweight Task Center callable for embedded use; prefer MosaicDialog when
     // available so CRS/write paths stay consistent.
     sicnu::jobs::JobRequest req;
     req.algorithmId = "callable:mosaic_panel";
@@ -191,8 +171,8 @@ void MosaicPanel::runMosaic()
     req.source = "dialog";
     req.exclusive = true;
 
-    const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
-      std::move( req ),
+    m_pendingTaskId = sicnu::TaskCenter::instance().submitJob(
+      req,
       [inputPaths, outPath]( const sicnu::jobs::JobRequest &,
                              sicnu::operators::RSOperatorContext &ctx ) -> Json::Value {
         ctx.logInfo( "Mosaic panel task" );
@@ -376,8 +356,34 @@ void MosaicPanel::runMosaic()
               sicnu::operators::ErrorCode::ComputationError, e.what() );
         }
       } );
+}
 
-    m_pendingJobId = QString::fromStdString( jobId );
+void MosaicPanel::onTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
+{
+    if ( m_pendingTaskId < 0 || info.taskId != m_pendingTaskId )
+        return;
+    if ( info.status != sicnu::TaskStatus::Completed
+         && info.status != sicnu::TaskStatus::Failed
+         && info.status != sicnu::TaskStatus::Canceled )
+        return;
+
+    m_pendingTaskId = -1;
+    if ( info.status == sicnu::TaskStatus::Completed
+         && info.resultPayload.isMember( "output" )
+         && info.resultPayload["output"].isString() )
+    {
+        onCompleted( QString::fromStdString( info.resultPayload["output"].asString() ) );
+        return;
+    }
+    if ( info.status == sicnu::TaskStatus::Canceled )
+    {
+        onFailed( tr( "已取消" ) );
+        return;
+    }
+    QString err = info.errorMessage;
+    if ( err.isEmpty() )
+        err = tr( "Mosaic failed" );
+    onFailed( err );
 }
 
 void MosaicPanel::onCompleted(const QString &outputPath)

@@ -1,5 +1,9 @@
 /***************************************************************************
  * rs_job_panel.h  —  统一任务中心：列表 + 详情/日志 + 右键操作
+ *
+ * Read-only projection of Task Center Algorithm Tasks. Lifecycle actions
+ * (cancel, clear completed) route through Task Center; this panel does not
+ * own independent job state or submit to JobEngine.
  ***************************************************************************/
 #pragma once
 
@@ -10,6 +14,8 @@
 #include <QHash>
 #include <QString>
 #include <QStringList>
+
+#include "processing/framework/task_center.h"
 
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -22,7 +28,7 @@ class QPoint;
 class QLabel;
 
 /**
- * 统一 JobEngine 任务中心。
+ * Unified task list projected from Task Center.
  *
  * - 列表：标题 / 状态 / 进度 /「加载到主图」勾选
  * - 右键菜单：无任务时也可刷新/说明；有任务时显示详情、停止、加载输出等
@@ -36,8 +42,9 @@ class RsJobPanel : public QgsDockWidget
     explicit RsJobPanel( QWidget *parent = nullptr );
 
   public slots:
-    void onJobUpdated( const QString &jobId );
-    void onJobFinished( const QString &jobId );
+    void onTaskAdded( const sicnu::AlgorithmTaskInfo &info );
+    void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
+    void onTaskLogAdded( long taskId, const QString &message );
 
   private slots:
     void onSelectionChanged();
@@ -50,22 +57,22 @@ class RsJobPanel : public QgsDockWidget
   private:
     void setupUi();
     void refreshAll();
-    void upsertJobRow( const QString &jobId );
-    void fillLogForJob( const QString &jobId );
-    void fillDetailsForJob( const QString &jobId );
+    void upsertTaskRow( const sicnu::AlgorithmTaskInfo &info );
+    void fillLogForTask( long taskId );
+    void fillDetailsForTask( long taskId );
     void updateActionEnabled();
-    QString selectedJobId() const;
+    long selectedTaskId() const;
     bool passesFilter( const QString &stateText ) const;
-    static QString stateToString( int state );
+    static QString statusToString( sicnu::TaskStatus status );
     static QString formatProgress( double progress );
     static QString prettyJson( const std::string &jsonText );
     static QString prettyJsonValue( const Json::Value &v );
 
-    bool loadToMainPreference( const QString &jobId ) const;
-    void setLoadToMainPreference( const QString &jobId, bool on );
-    QStringList collectOutputPaths( const QString &jobId ) const;
+    bool loadToMainPreference( long taskId ) const;
+    void setLoadToMainPreference( long taskId, bool on );
+    QStringList collectOutputPaths( long taskId ) const;
     int loadPathsToMain( const QStringList &paths );
-    void tryAutoLoadOutputs( const QString &jobId );
+    void tryAutoLoadOutputs( const sicnu::AlgorithmTaskInfo &info );
     void showAboutDialog();
     void copyText( const QString &text );
 
@@ -78,8 +85,8 @@ class RsJobPanel : public QgsDockWidget
     QPushButton *m_clearFinishedBtn = nullptr;
     QComboBox *m_filterCombo = nullptr;
     QLabel *m_hintLabel = nullptr;
-    QString m_selectedId;
-    /// Per-job "load outputs to main map" preference (UI + optional request flag).
-    QHash<QString, bool> m_loadToMain;
+    long m_selectedId = -1;
+    /// Per-task "load outputs to main map" preference (UI override of autoLoad).
+    QHash<long, bool> m_loadToMain;
     bool m_blockItemChanged = false;
 };

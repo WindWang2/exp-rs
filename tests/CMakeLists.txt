@@ -49,6 +49,23 @@ sicnu_add_test(test_layers)
 sicnu_add_test(test_algorithm_engine)
 sicnu_add_test(test_task_center)
 
+# #35 — UI callers must not bypass Task Center; task views are projections.
+add_executable(test_ui_task_center_contract test_ui_task_center_contract.cpp)
+target_link_libraries(test_ui_task_center_contract PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_jobs
+  sicnu_task_center
+)
+target_include_directories(test_ui_task_center_contract PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_ui_task_center_contract PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_ui_task_center_contract)
+
 add_executable(test_task_center_dock
     test_task_center_dock.cpp
     ${CMAKE_SOURCE_DIR}/src/app/panels/task_center_dock.cpp
