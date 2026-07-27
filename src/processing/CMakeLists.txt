@@ -158,7 +158,12 @@ target_link_libraries(sicnu_processing PRIVATE
 # Task Center (#26–#29): separate static lib so JobEngine can be linked without
 # a processing↔jobs↔operators cycle. OutputCommitter keeps only a TaskCenter*
 # and resolves symbols when final targets also link sicnu_task_center.
-add_library(sicnu_task_center STATIC framework/task_center.cpp)
+add_library(sicnu_task_center STATIC
+    framework/task_center.cpp
+    # Task Center seam for OutputCommitter — kept out of sicnu_processing so
+    # that library does not need JobEngine / TaskCenter link deps.
+    framework/output_committer_task_center.cpp
+)
 target_include_directories(sicnu_task_center PUBLIC
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}
