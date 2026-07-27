@@ -8,6 +8,9 @@
 #include "rs_segment_features.h"
 #include "rs_segment_info_dock.h"
 #include "rs_segment_select_tool.h"
+#include "rs_obia_segmentation.h"
+
+#include "processing/framework/task_center.h"
 
 #include <qgsmapcanvas.h>
 #include <qgsrasterlayer.h>
@@ -18,11 +21,13 @@
 #include <QTableWidget>
 #include <QToolBar>
 
+#include <atomic>
 #include <memory>
 
 class QgsLayerTree;
 class QgsLayerTreeModel;
 class QgsLayerTreeView;
+class QProgressDialog;
 
 class RsObiaMainWindow : public QMainWindow
 {
@@ -30,6 +35,15 @@ class RsObiaMainWindow : public QMainWindow
   public:
     explicit RsObiaMainWindow( QWidget *parent = nullptr );
     ~RsObiaMainWindow() override;
+
+    /// Submit flat OBIA segmentation through Task Center. Returns the task id,
+    /// or -1 if a segmentation is already pending. Production UI entry and
+    /// tests both use this seam.
+    long startSegmentationTask( const RsObiaSegmentationConfig &segCfg,
+                                const QVector<int> &bandIndices );
+
+    long pendingSegmentationTaskId() const { return m_pendingSegmentationTaskId; }
+    int segmentCount() const { return static_cast<int>( mSegMap.segmentCount() ); }
 
   private slots:
     void loadRaster();
@@ -44,6 +58,7 @@ class RsObiaMainWindow : public QMainWindow
     void onSegmentSelected( quint32 segmentId );
     void onSelectionCleared();
     void onAssignClass();
+    void onSegmentationTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
   private:
     void setupUi();
@@ -61,6 +76,7 @@ class RsObiaMainWindow : public QMainWindow
     void setActiveLevelMap( int level );
     QVector<int> allBandIndices() const;
     int currentClassifyLevel() const;
+    void finishPendingSegmentationUi();
 
     // Map canvas
     QgsMapCanvas *mCanvas = nullptr;
@@ -106,4 +122,15 @@ private:
     QString mRasterPath;
     int mBandCount = 0;
     int mSelectedClassRow = 0;
+
+    // Flat segmentation Task Center pending state (#30).
+    struct PendingSegWork
+    {
+        RsObiaSegmentationResult seg;
+        QMap<quint32, RsSegmentFeatures::SegmentStat> stats;
+    };
+    long m_pendingSegmentationTaskId = -1;
+    std::shared_ptr<PendingSegWork> m_pendingSegWork;
+    std::shared_ptr<std::atomic<bool>> m_pendingSegCanceled;
+    QProgressDialog *m_pendingSegProgress = nullptr;
 };

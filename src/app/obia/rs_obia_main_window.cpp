@@ -21,6 +21,7 @@
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
+#include "processing/framework/task_center.h"
 
 #include <qgsapplication.h>
 #include <qgslayertree.h>
@@ -89,6 +90,9 @@ RsObiaMainWindow::RsObiaMainWindow( QWidget *parent )
     setupDocks();
     setupMapCanvas();
     updateStatusLabel();
+
+    connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
+             this, &RsObiaMainWindow::onSegmentationTaskUpdated );
 }
 
 RsObiaMainWindow::~RsObiaMainWindow() = default;
@@ -341,10 +345,22 @@ void RsObiaMainWindow::runSegmentation()
     segCfg.quantizeBins = binsSpin ? binsSpin->value() : 32;
     segCfg.minRegionSize = minRegionSpin ? minRegionSpin->value() : 100;
 
-    const QString rasterPath = mRasterPath;
+    if ( startSegmentationTask( segCfg, bandIndices ) < 0 )
+    {
+        QMessageBox::information( this, tr( "OBIA" ),
+                                  tr( "A segmentation task is already running." ) );
+    }
+}
 
-    // Shared cancel token: JobEngine cancel flag + optional progress dialog.
+long RsObiaMainWindow::startSegmentationTask( const RsObiaSegmentationConfig &segCfg,
+                                              const QVector<int> &bandIndices )
+{
+    if ( m_pendingSegmentationTaskId >= 0 )
+        return -1;
+
+    const QString rasterPath = segCfg.rasterPath;
     auto canceled = std::make_shared<std::atomic<bool>>( false );
+    auto work = std::make_shared<PendingSegWork>();
 
     auto *progress = new QProgressDialog(
         RsObiaSegmentation::isOtbAvailable()
@@ -359,15 +375,7 @@ void RsObiaMainWindow::runSegmentation()
     QGuiApplication::setOverrideCursor( Qt::WaitCursor );
     statusBar()->showMessage( progress->labelText() );
 
-    // Bundle segmentation + feature extraction on JobEngine (exclusive).
-    struct SegWorkResult
-    {
-        RsObiaSegmentationResult seg;
-        QMap<quint32, RsSegmentFeatures::SegmentStat> stats;
-    };
-    // Heap-allocate so the worker lambda can fill it and the UI handler read it.
-    auto work = std::make_shared<SegWorkResult>();
-
+    // Bundle segmentation + feature extraction on Task Center (JobEngine internal).
     sicnu::jobs::JobRequest req;
     req.algorithmId = "module:obia:segment";
     req.title = tr( "OBIA segmentation" ).toStdString();
@@ -375,8 +383,12 @@ void RsObiaMainWindow::runSegmentation()
     req.exclusive = true;
     req.params["input"] = rasterPath.toStdString();
 
-    const std::string jobId = sicnu::jobs::JobEngine::instance().submit(
-      std::move( req ),
+    m_pendingSegWork = work;
+    m_pendingSegCanceled = canceled;
+    m_pendingSegProgress = progress;
+
+    const long taskId = sicnu::TaskCenter::instance().submitJob(
+      req,
       [segCfg, bandIndices, rasterPath, canceled, work](
         const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
           ctx.logInfo( "OBIA segmentation" );
@@ -416,50 +428,78 @@ void RsObiaMainWindow::runSegmentation()
           result["usedOtb"] = work->seg.usedOtb;
           return result;
       },
-      [canceled]() { canceled->store( true ); } );
+      [canceled]() { canceled->store( true ); },
+      /*autoLoad=*/false );
 
-    const QString jobIdQ = QString::fromStdString( jobId );
-    connect( progress, &QProgressDialog::canceled, this, [jobIdQ, canceled]() {
+    m_pendingSegmentationTaskId = taskId;
+
+    connect( progress, &QProgressDialog::canceled, this, [this, taskId, canceled]() {
         canceled->store( true );
-        sicnu::jobs::JobEngine::instance().cancel( jobIdQ.toStdString() );
+        sicnu::TaskCenter::instance().cancelTask( taskId );
     } );
 
-    auto *bridge = JobEngineQtBridge::instance();
-    auto *conn = new QMetaObject::Connection;
-    *conn = connect( bridge, &JobEngineQtBridge::jobFinished, this,
-                     [this, work, progress, jobIdQ, conn]( const QString &id ) {
-                         if ( id != jobIdQ )
-                             return;
-                         disconnect( *conn );
-                         delete conn;
-                         QGuiApplication::restoreOverrideCursor();
-                         progress->reset();
-                         progress->deleteLater();
+    return taskId;
+}
 
-                         const auto snapOpt =
-                           sicnu::jobs::JobEngine::instance().snapshot( id.toStdString() );
-                         if ( !snapOpt || snapOpt->state != sicnu::jobs::JobState::Succeeded
-                              || !work->seg.ok )
-                         {
-                             if ( snapOpt && snapOpt->state == sicnu::jobs::JobState::Cancelled )
-                                 statusBar()->showMessage( tr( "Segmentation canceled" ), 3000 );
-                             else if ( work->seg.errorMessage.contains(
-                                         QStringLiteral( "cancel" ), Qt::CaseInsensitive ) )
-                                 statusBar()->showMessage( tr( "Segmentation canceled" ), 3000 );
-                             else
-                             {
-                                 const QString err = !work->seg.errorMessage.isEmpty()
-                                                       ? work->seg.errorMessage
-                                                       : ( snapOpt ? QString::fromStdString( snapOpt->error )
+void RsObiaMainWindow::finishPendingSegmentationUi()
+{
+    QGuiApplication::restoreOverrideCursor();
+    if ( m_pendingSegProgress )
+    {
+        m_pendingSegProgress->reset();
+        m_pendingSegProgress->deleteLater();
+        m_pendingSegProgress = nullptr;
+    }
+}
+
+void RsObiaMainWindow::onSegmentationTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
+{
+    if ( info.taskId != m_pendingSegmentationTaskId || m_pendingSegmentationTaskId < 0 )
+        return;
+    if ( info.status != sicnu::TaskStatus::Completed
+         && info.status != sicnu::TaskStatus::Failed
+         && info.status != sicnu::TaskStatus::Canceled )
+        return;
+
+    const long taskId = m_pendingSegmentationTaskId;
+    auto work = m_pendingSegWork;
+    m_pendingSegmentationTaskId = -1;
+    m_pendingSegWork.reset();
+    m_pendingSegCanceled.reset();
+    finishPendingSegmentationUi();
+
+    Q_UNUSED( taskId );
+
+    if ( !work )
+    {
+        updateStatusLabel();
+        return;
+    }
+
+    if ( info.status == sicnu::TaskStatus::Canceled )
+    {
+        statusBar()->showMessage( tr( "Segmentation canceled" ), 3000 );
+        updateStatusLabel();
+        return;
+    }
+
+    if ( info.status != sicnu::TaskStatus::Completed || !work->seg.ok )
+    {
+        if ( work->seg.errorMessage.contains( QStringLiteral( "cancel" ), Qt::CaseInsensitive ) )
+            statusBar()->showMessage( tr( "Segmentation canceled" ), 3000 );
+        else
+        {
+            const QString err = !work->seg.errorMessage.isEmpty()
+                                  ? work->seg.errorMessage
+                                  : ( !info.errorMessage.isEmpty() ? info.errorMessage
                                                                    : tr( "Segmentation failed" ) );
-                                 QMessageBox::warning( this, tr( "Error" ), err );
-                             }
-                             updateStatusLabel();
-                             return;
-                         }
+            QMessageBox::warning( this, tr( "Error" ), err );
+        }
+        updateStatusLabel();
+        return;
+    }
 
-                         applySegmentationResult( work->seg.segMap, work->seg.usedOtb, work->stats );
-                     } );
+    applySegmentationResult( work->seg.segMap, work->seg.usedOtb, work->stats );
 }
 
 void RsObiaMainWindow::applySegmentationResult(

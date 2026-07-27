@@ -1968,6 +1968,32 @@ sicnu_discover_tests(test_object_hierarchy)
 
 # Phase 10B.4 — OBIA classification task tests (OpenCV required)
 if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
+  # #30 — OBIA flat segmentation Task Center seam
+  add_executable(test_obia_task_center test_obia_task_center.cpp)
+  target_link_libraries(test_obia_task_center PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    qgis_core
+    qgis_analysis
+    qgis_app_obia
+    sicnu_jobs
+    sicnu_task_center
+    GDAL::GDAL
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_obia_task_center PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app
+    ${CMAKE_SOURCE_DIR}/src/app/obia
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/segmentation
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_obia_task_center PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_obia_task_center)
+
   add_executable(test_obia_task test_obia_task.cpp)
   target_link_libraries(test_obia_task PRIVATE
     Catch2::Catch2WithMain
@@ -2034,6 +2060,7 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
     qgis_analysis
     qgis_app_obia
     sicnu_jobs
+    sicnu_task_center
     GDAL::GDAL
     ${OpenCV_LIBS}
   )
