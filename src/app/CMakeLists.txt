@@ -1,10 +1,14 @@
 qt_add_library(sicnu_qgis_display STATIC
     data_project_serializer.cpp
     data_project_serializer.h
-    display/qgis_display_manager.cpp
     display/auth_resolver.cpp
     display/auth_resolver.h
     display/remote_map_uri.h
+    display/network_probe.cpp
+    display/network_probe.h
+    display/remote_map_capabilities_parser.cpp
+    display/remote_map_capabilities_parser.h
+    display/qgis_display_manager.cpp
     display/qgis_display_manager.h
     project_context.cpp
     project_context.h
@@ -23,6 +27,7 @@ target_link_libraries(sicnu_qgis_display
         Qt6::Gui
         Qt6::Widgets
         Qt6::Xml
+        Qt6::Network
         qgis_core
         qgis_gui
 )
@@ -82,6 +87,12 @@ add_executable(sicnu_geo_rs
     map_tools/measure_tool.cpp
     widgets/histogram_widget.cpp
     widgets/histogram_stretch_widget.cpp
+    widgets/band_composition_rail.cpp
+    display/display_stretch_types.cpp
+    display/display_stretch_resolve.cpp
+    display/display_stretch_apply.cpp
+    display/piecewise_linear_enhancement.cpp
+    display/qgs_display_stretch.cpp
     widgets/spectral_profile_widget.cpp
     widgets/progress_dialog.cpp
     widgets/comparison_widget.cpp
@@ -261,7 +272,9 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources/fonts
         DESTINATION share/sicnu_geo_rs/resources)
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources/icons
         DESTINATION share/sicnu_geo_rs/resources)
-install(FILES ${CMAKE_SOURCE_DIR}/resources/styles.qss
+install(FILES
+        ${CMAKE_SOURCE_DIR}/resources/styles.qss
+        ${CMAKE_SOURCE_DIR}/resources/styles-dark.qss
         DESTINATION share/sicnu_geo_rs/resources)
 install(FILES ${CMAKE_SOURCE_DIR}/resources/icons.qrc
         DESTINATION share/sicnu_geo_rs/resources)

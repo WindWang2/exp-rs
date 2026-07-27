@@ -18,8 +18,22 @@ namespace sicnu::data
 namespace internal
 {
 class SourceProviderRegistry;
+class NetworkProbe;
 struct AssetLeaseControl;
 }
+
+} // namespace sicnu::data
+
+// Forward declaration: ProjectContext (in src/app, a SIBLING of sicnu::data) is
+// the host that injects the NetworkProbe; it is friended inside DataManager for
+// the private probe-accepting ctor (#66 host-injection seam).
+namespace sicnu::app
+{
+class ProjectContext;
+}
+
+namespace sicnu::data
+{
 
 class DataManager;
 
@@ -210,14 +224,33 @@ class DataManager : public QObject
   private:
     friend class internal::SourceProviderRegistry;
     friend class AssetLease;
+    // ProjectContext is the application's host for the DataManager; it injects
+    // the host-side NetworkProbe (#66) through the private probe-accepting
+    // constructor. This is a host-injection seam, not a public API widening.
+    friend class ::sicnu::app::ProjectContext;
 
     explicit DataManager( std::unique_ptr<internal::SourceProviderRegistry> providers,
+                          QObject *parent = nullptr );
+
+    /// Constructs with the built-in providers, forwarding `probe` to the four
+    /// remote-map providers (WMS/WMTS/TMS/XYZ) so the host can inject a real
+    /// HTTP-backed NetworkProbe (which lives in src/app — src/data is
+    /// network-free). A null probe falls back to NoNetworkProbe (assets
+    /// register Offline). This is the host-injection seam for #66; it stays
+    /// private/friend-gated so no public API widens.
+    explicit DataManager( const internal::NetworkProbe *probe,
                           QObject *parent = nullptr );
 
     /// Registry seeded with the built-in local GDAL raster and OGR vector
     /// providers. Used by the public constructor so the application resolves real
     /// sources by default; tests inject their own registry to stay hermetic.
     static std::unique_ptr<internal::SourceProviderRegistry> defaultProviders();
+
+    /// Same as defaultProviders(), but forwards `probe` to the four remote-map
+    /// providers. A null probe (the default-providers() case) yields the
+    /// NoNetworkProbe fallback — backward-compatible.
+    static std::unique_ptr<internal::SourceProviderRegistry>
+    defaultProviders( const internal::NetworkProbe *probe );
 
     struct Impl;
     std::unique_ptr<Impl> m_impl;

@@ -24,6 +24,8 @@
 #include "map_tools/measure_tool.h"
 
 class QDomDocument;
+class QMenuBar;
+class QSlider;
 class LayerManager;
 class QPainter;
 class QTextBrowser;
@@ -38,15 +40,12 @@ class QgsAdvancedDigitizingDockWidget;
 class QgsMessageBar;
 class QgsMapToolSelect;
 class QgsMapToolAddFeature;
-
-namespace sicnu {
-class TaskCenterDock;
-}
 class QgsMapToolMoveFeature;
 class QgsMapToolRotateFeature;
 class QgsMapToolScaleFeature;
 
 namespace sicnu {
+class TaskCenterDock;
 class DataManagerPanel;
 namespace data {
 class AssetId;
@@ -126,6 +125,13 @@ public:
     void setupMapCanvas();
     void initLayerTree();
 
+    /**
+     * Detached QMenuBar used only as an action/shortcut host.
+     * Must NOT use QMainWindow::menuBar() after setMenuWidget(chrome) —
+     * menuBar() recreates a QMenuBar and deletes the top chrome.
+     */
+    QMenuBar *appMenuBar();
+
     QgsMapCanvas *mapCanvas() const { return m_mapCanvas; }
     QgsMapLayer *activeLayer();
     QList<QgsMapLayer*> selectedLayers();
@@ -136,7 +142,7 @@ public:
      */
     bool loadDataLayer(const QString &filePath);
 
-public slots:
+  public slots:
     void addRasterLayer();
     void addVectorLayer();
     void newProject();
@@ -298,6 +304,8 @@ private:
     void setAssetLayersReadOnly(const sicnu::data::AssetId &assetId,
                                 QgsVectorLayer *exceptLayer, bool readOnly);
     void applyDarkPalette();
+    /** Apply light/dark Canopy Lab theme (Fusion + QSS). */
+    void applyUiTheme( const QString &theme );
 
     // QGIS C++ components
     QgsMapCanvas *m_mapCanvas = nullptr;
@@ -353,7 +361,6 @@ private:
     QgsBrowserGuiModel *m_browserModel = nullptr;
     QgsDockWidget *m_processingDock = nullptr;
     QgsDockWidget *m_overviewDock = nullptr;
-    sicnu::DataManagerPanel *m_dataManagerPanel = nullptr;
     QgsMapOverviewCanvas *m_overviewCanvas = nullptr;
     QgsDockWidget *m_identifyDock = nullptr;
     QgsDockWidget *m_spectralDock = nullptr;
@@ -363,10 +370,13 @@ private:
     QgsDockWidget *m_workflowDock = nullptr;
     QgsDockWidget *m_taskPanelDock = nullptr;
     sicnu::TaskCenterDock *m_taskCenterDock = nullptr;
+    sicnu::DataManagerPanel *m_dataManagerPanel = nullptr;
     TaskPanelHost *m_taskPanel = nullptr;
     WorkflowSessionController *m_sessionController = nullptr;
     RibbonController *m_ribbonController = nullptr;
     QWidget *m_ribbonBar = nullptr;
+    QWidget *m_topChrome = nullptr;
+    QMenuBar *m_hiddenMenuBar = nullptr;
     QMenu *m_windowMenu = nullptr;
 
     // Identify results display
@@ -378,14 +388,23 @@ private:
     // Histogram stretch display
     class HistogramStretchWidget *m_histogramStretch = nullptr;
 
-    // Status bar widgets
+    // Signature chrome: band composition rail under ribbon
+    class BandCompositionRail *m_bandRail = nullptr;
+
+    // Status bar widgets (session meta — not on band rail)
     QLabel *m_readyLabel = nullptr;
     QLabel *m_crsLabel = nullptr;
     QLabel *m_coordinatesLabel = nullptr;
     QLabel *m_scaleLabel = nullptr;
+    QLabel *m_layerStatusLabel = nullptr;
+    QSlider *m_statusOpacitySlider = nullptr;
+    QLabel *m_statusOpacityValue = nullptr;
     QLabel *m_renderTimeLabel = nullptr;
     QLabel *m_cacheLabel = nullptr;
     QElapsedTimer m_renderTimer;
+
+    void syncStatusBarLayer( QgsMapLayer *layer = nullptr );
+    void refreshStatusTaskSummary();
 
     // Image Registration windows (lazy-constructed singletons)
     QgsGeoreferencerMainWindow *m_georefI2I = nullptr;

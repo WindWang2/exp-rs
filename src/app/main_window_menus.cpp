@@ -11,12 +11,17 @@
 #include <QIcon>
 #include <QMenu>
 #include <QLabel>
+#include <QSlider>
 #include <QAction>
 #include <QApplication>
 #include <QKeySequence>
 #include <QList>
 #include <QPair>
 #include <QStyle>
+#include <QSignalBlocker>
+
+#include <qgsmaplayer.h>
+#include <qgsmapcanvas.h>
 
 #include <qgsrasterlayer.h>
 
@@ -52,6 +57,21 @@ void setMenuIcon( QMenu *m, const QIcon &icon )
 }
 } // namespace
 
+QMenuBar *QgisDesktopWindow::appMenuBar()
+{
+    // Never call QMainWindow::menuBar() after product chrome is installed:
+    // menuBar() creates a real menubar and Qt deletes setMenuWidget() chrome.
+    if ( !m_hiddenMenuBar )
+    {
+        m_hiddenMenuBar = new QMenuBar( this );
+        m_hiddenMenuBar->setObjectName( QStringLiteral( "rsHiddenMenuBar" ) );
+        m_hiddenMenuBar->setNativeMenuBar( false );
+        m_hiddenMenuBar->hide();
+        m_hiddenMenuBar->setMaximumHeight( 0 );
+    }
+    return m_hiddenMenuBar;
+}
+
 void QgisDesktopWindow::setupMenu()
 {
     // Brand logo (left corner) — app icon + short product name
@@ -73,12 +93,12 @@ void QgisDesktopWindow::setupMenu()
     name->setObjectName("rsBrandName");
     brandLayout->addWidget(logo);
     brandLayout->addWidget(name);
-    menuBar()->setCornerWidget(brandWidget, Qt::TopLeftCorner);
+    appMenuBar()->setCornerWidget(brandWidget, Qt::TopLeftCorner);
 
     // Version label (right corner)
     QLabel *versionLabel = new QLabel("v0.9.2-dev");
     versionLabel->setObjectName("rsBrandVersion");
-    menuBar()->setCornerWidget(versionLabel, Qt::TopRightCorner);
+    appMenuBar()->setCornerWidget(versionLabel, Qt::TopRightCorner);
 
     // Helper: enable tooltips on every top-level / submenu we create.
     auto makeMenu = []( QMenu *m ) -> QMenu * {
@@ -90,7 +110,7 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     // 工程 Project — file I/O, data import, layout, quit
     // ------------------------------------------------------------------
-    QMenu *projectMenu = makeMenu( menuBar()->addMenu( tr( "工程(&P)" ) ) );
+    QMenu *projectMenu = makeMenu( appMenuBar()->addMenu( tr( "工程(&P)" ) ) );
     tip( projectMenu->addAction( ic( "new_project" ), tr( "新建工程" ),
                                  this, &QgisDesktopWindow::newProject, QKeySequence::New ),
          tr( "创建空白工程，清除当前图层与视图状态。" ) );
@@ -128,7 +148,7 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     // 编辑 Edit — feature edit + 数字化 as submenu (no longer top-level)
     // ------------------------------------------------------------------
-    QMenu *editMenu = makeMenu( menuBar()->addMenu( tr( "编辑(&E)" ) ) );
+    QMenu *editMenu = makeMenu( appMenuBar()->addMenu( tr( "编辑(&E)" ) ) );
     m_toggleEditingAction = editMenu->addAction(
       ic( "mActionToggleEditing" ), tr( "切换编辑" ),
       this, &QgisDesktopWindow::toggleEditing );
@@ -240,7 +260,7 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     // 视图 View — navigation, measure, compare
     // ------------------------------------------------------------------
-    QMenu *viewMenu = makeMenu( menuBar()->addMenu( tr( "视图(&V)" ) ) );
+    QMenu *viewMenu = makeMenu( appMenuBar()->addMenu( tr( "视图(&V)" ) ) );
     tip( viewMenu->addAction( ic( "zoo_in" ), tr( "放大" ),
                               this, &QgisDesktopWindow::zoomIn, QKeySequence::ZoomIn ),
          tr( "放大地图视图。" ) );
@@ -282,7 +302,7 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     // 图层 Layer — add/manage layers only
     // ------------------------------------------------------------------
-    QMenu *layerMenu = makeMenu( menuBar()->addMenu( tr( "图层(&L)" ) ) );
+    QMenu *layerMenu = makeMenu( appMenuBar()->addMenu( tr( "图层(&L)" ) ) );
     tip( layerMenu->addAction( ic( "r_ster" ), tr( "添加栅格图层..." ),
                                this, &QgisDesktopWindow::addRasterLayer ),
          tr( "从文件添加栅格图层。" ) );
@@ -308,7 +328,7 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     // 栅格 Raster — 预处理 + 增强 + 波段（数据准备）
     // ------------------------------------------------------------------
-    QMenu *rasterMenu = makeMenu( menuBar()->addMenu( tr( "栅格(&R)" ) ) );
+    QMenu *rasterMenu = makeMenu( appMenuBar()->addMenu( tr( "栅格(&R)" ) ) );
 
     // 预处理（几何/辐射准备：配准、大气、镶嵌、波段）
     QMenu *preprocessMenu = makeMenu( rasterMenu->addMenu( tr( "预处理" ) ) );
@@ -382,7 +402,7 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     // 分析 Analysis — 配准、指数、变化、分类、地形、融合（专题）
     // ------------------------------------------------------------------
-    QMenu *analysisMenu = makeMenu( menuBar()->addMenu( tr( "分析(&A)" ) ) );
+    QMenu *analysisMenu = makeMenu( appMenuBar()->addMenu( tr( "分析(&A)" ) ) );
 
     tip( analysisMenu->addAction( ic( "veget_tion_index" ), tr( "光谱指数..." ),
                                   this, &QgisDesktopWindow::openSpectralIndexDialog ),
@@ -422,7 +442,7 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     // 矢量 Vector — 按功能分组
     // ------------------------------------------------------------------
-    QMenu *vectorMenu = makeMenu( menuBar()->addMenu( tr( "矢量(&T)" ) ) );
+    QMenu *vectorMenu = makeMenu( appMenuBar()->addMenu( tr( "矢量(&T)" ) ) );
 
     QMenu *vecGeo = makeMenu( vectorMenu->addMenu( tr( "几何处理" ) ) );
     setMenuIcon( vecGeo, ic( "buffer" ) );
@@ -491,7 +511,7 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     // 处理 Processing — toolbox / history / batch only
     // ------------------------------------------------------------------
-    QMenu *processingMenu = makeMenu( menuBar()->addMenu( tr( "处理(&O)" ) ) );
+    QMenu *processingMenu = makeMenu( appMenuBar()->addMenu( tr( "处理(&O)" ) ) );
     tip( processingMenu->addAction( ic( "toolbox" ), tr( "工具箱" ),
                                     this, &QgisDesktopWindow::showProcessingToolbox ),
          tr( "打开处理工具箱：GDAL / OTB / 内置算法。" ) );
@@ -506,7 +526,7 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     // 设置 Settings
     // ------------------------------------------------------------------
-    QMenu *settingsMenu = makeMenu( menuBar()->addMenu( tr( "设置(&S)" ) ) );
+    QMenu *settingsMenu = makeMenu( appMenuBar()->addMenu( tr( "设置(&S)" ) ) );
     tip( settingsMenu->addAction( ic( "settings" ), tr( "选项..." ),
                                   this, &QgisDesktopWindow::options ),
          tr( "主题、默认 CRS、日志、GDAL/OTB 路径。" ) );
@@ -516,13 +536,13 @@ void QgisDesktopWindow::setupMenu()
          tr( "浏览并选择常用坐标系预设。" ) );
 
     // Window Menu (dock toggle actions added in setupDockWidgets)
-    m_windowMenu = makeMenu( menuBar()->addMenu( tr( "窗口(&W)" ) ) );
+    m_windowMenu = makeMenu( appMenuBar()->addMenu( tr( "窗口(&W)" ) ) );
     setMenuIcon( m_windowMenu, ic( "p_nel_l_yout" ) );
 
     // ------------------------------------------------------------------
     // 帮助 Help
     // ------------------------------------------------------------------
-    QMenu *helpMenu = makeMenu( menuBar()->addMenu( tr( "帮助(&H)" ) ) );
+    QMenu *helpMenu = makeMenu( appMenuBar()->addMenu( tr( "帮助(&H)" ) ) );
     tip( helpMenu->addAction( ic( "hel_" ), tr( "帮助内容" ),
                               this, &QgisDesktopWindow::helpContents, QKeySequence::HelpContents ),
          tr( "打开帮助文档。" ) );
@@ -544,237 +564,138 @@ void QgisDesktopWindow::setupMenu()
 
 void QgisDesktopWindow::setupToolbars()
 {
-    // Unified toolbar chrome
-    auto polishBar = []( QToolBar *bar ) {
-      if ( !bar )
-        return;
-      bar->setIconSize( QSize( 22, 22 ) );
-      bar->setToolButtonStyle( Qt::ToolButtonIconOnly );
-      bar->setMovable( true );
-      bar->setFloatable( false );
-    };
+    // Product shell: no classic QToolBars on the main window.
+    // All former toolbar actions live on the Ribbon (地图 / 编辑 / 数据 / …).
 
-    // File Toolbar
-    QToolBar *fileToolBar = addToolBar( tr( "文件" ) );
-    fileToolBar->setObjectName( "fileToolBar" );
-    polishBar( fileToolBar );
-
-    tip( fileToolBar->addAction( ic( "new_project" ), tr( "新建工程" ),
-                                 this, &QgisDesktopWindow::newProject ),
-         tr( "新建工程 (Ctrl+N)" ) );
-    tip( fileToolBar->addAction( ic( "o_en" ), tr( "打开工程" ),
-                                 this, &QgisDesktopWindow::openProject ),
-         tr( "打开工程 (Ctrl+O)" ) );
-    tip( fileToolBar->addAction( ic( "s_ve" ), tr( "保存工程" ),
-                                 this, &QgisDesktopWindow::saveProject ),
-         tr( "保存工程 (Ctrl+S)" ) );
-    fileToolBar->addSeparator();
-    tip( fileToolBar->addAction( ic( "r_ster" ), tr( "添加栅格" ),
-                                 this, &QgisDesktopWindow::addRasterLayer ),
-         tr( "添加栅格图层" ) );
-    tip( fileToolBar->addAction( ic( "vector" ), tr( "添加矢量" ),
-                                 this, &QgisDesktopWindow::addVectorLayer ),
-         tr( "添加矢量图层" ) );
-
-    // Navigation + display toolbar (always visible under Ribbon)
-    QToolBar *mapToolsToolBar = addToolBar( tr( "导航与显示" ) );
-    mapToolsToolBar->setObjectName( "mapToolsToolBar" );
-    polishBar( mapToolsToolBar );
-
-    tip( mapToolsToolBar->addAction( ic( "p_n" ), tr( "平移" ),
-                                     this, &QgisDesktopWindow::panMap ),
-         tr( "平移 (Space)" ) );
-    tip( mapToolsToolBar->addAction( ic( "zoo_in" ), tr( "放大" ),
-                                     this, &QgisDesktopWindow::zoomIn ),
-         tr( "放大" ) );
-    tip( mapToolsToolBar->addAction( ic( "zoo_out" ), tr( "缩小" ),
-                                     this, &QgisDesktopWindow::zoomOut ),
-         tr( "缩小" ) );
-    tip( mapToolsToolBar->addAction( ic( "full_extent" ), tr( "全图" ),
-                                     this, &QgisDesktopWindow::zoomFullExtent ),
-         tr( "全图 (Ctrl+Shift+F)" ) );
-    tip( mapToolsToolBar->addAction( ic( "refresh_view" ), tr( "刷新" ),
-                                     this, &QgisDesktopWindow::refreshMap ),
-         tr( "刷新地图" ) );
-    mapToolsToolBar->addSeparator();
-    tip( mapToolsToolBar->addAction( ic( "identify" ), tr( "识别" ),
-                                     this, &QgisDesktopWindow::identifyFeatures ),
-         tr( "识别 (Ctrl+Shift+I)" ) );
-    tip( mapToolsToolBar->addAction( ic( "me_sure_dist" ), tr( "测距" ),
-                                     this, &QgisDesktopWindow::measureDistance ),
-         tr( "测距 (Ctrl+Shift+D)" ) );
-    tip( mapToolsToolBar->addAction( ic( "me_sure_are_" ), tr( "测面" ),
-                                     this, &QgisDesktopWindow::measureArea ),
-         tr( "测面 (Ctrl+Shift+A)" ) );
-    mapToolsToolBar->addSeparator();
-    // Display-only stretch (layer renderer / symbology) — NOT export processing
-    tip( mapToolsToolBar->addAction( ic( "enh_nce" ), tr( "显示拉伸" ),
-                                     this, &QgisDesktopWindow::openDisplayStretchPanel ),
-         tr( "显示对比度拉伸（线性 / 百分比裁剪 / 标准差）。\n"
-             "只改图层渲染，不导出新文件，对应图层属性中的显示增强。" ) );
-    tip( mapToolsToolBar->addAction( ic( "dis_l_y" ), tr( "图层属性" ),
-                                     this, &QgisDesktopWindow::layerProperties ),
-         tr( "打开当前图层属性（符号化 / 透明度 / 显示等完整设置）" ) );
-
-    // CRS picker lives on the status bar (compact product shell); create here for wiring.
+    // CRS picker lives on the status bar; create here for wiring.
     m_crsSelector = new QgsProjectionSelectionWidget( this );
     m_crsSelector->setOptionVisible( QgsProjectionSelectionWidget::ProjectCrs, true );
     connect( m_crsSelector, &QgsProjectionSelectionWidget::crsChanged,
              this, &QgisDesktopWindow::onCrsChanged );
 
-    // Remote Sensing Toolbar — 分析快捷入口（与「分析」菜单对应）
-    QToolBar *rsToolBar = addToolBar( tr( "遥感分析" ) );
-    rsToolBar->setObjectName( "rsToolBar" );
-    polishBar( rsToolBar );
+    if ( m_toggleEditingAction )
+        m_toggleEditingAction->setToolTip( tr( "切换编辑 (Ctrl+E)" ) );
+    if ( m_saveEditsAction )
+        m_saveEditsAction->setToolTip( tr( "保存编辑" ) );
 
-    tip( rsToolBar->addAction( QIcon( ":/icons/veget_tion_index" ), tr( "光谱指数" ),
-                               this, &QgisDesktopWindow::openSpectralIndexDialog ),
-         tr( "光谱指数：NDVI / EVI 等。" ) );
-    tip( rsToolBar->addAction( QIcon( ":/icons/at_os_corr" ), tr( "大气校正" ),
-                               this, &QgisDesktopWindow::openAtmosphericCorrectionDialog ),
-         tr( "大气校正：DOS1 / DOS2。" ) );
-    tip( rsToolBar->addAction( QIcon( ":/icons/mos_ic" ), tr( "镶嵌" ),
-                               this, &QgisDesktopWindow::openMosaicDialog ),
-         tr( "多景镶嵌。" ) );
-    tip( rsToolBar->addAction( QIcon( ":/icons/b_nd_m_th" ), tr( "波段运算" ),
-                               this, &QgisDesktopWindow::openBandMathDialog ),
-         tr( "波段运算表达式。" ) );
-    rsToolBar->addSeparator();
-    tip( rsToolBar->addAction( QIcon( ":/icons/r_ster_calc" ), tr( "配准 I2I" ),
-                               this, &QgisDesktopWindow::openGeorefImageToImage ),
-         tr( "影像对影像配准。" ) );
-    tip( rsToolBar->addAction( QIcon( ":/icons/su_ervised" ), tr( "监督分类" ),
-                               this, &QgisDesktopWindow::openClassificationWindow ),
-         tr( "像元级监督分类。" ) );
-
-    // Digitizing Toolbar
-    QToolBar *digitizeToolBar = addToolBar( tr( "数字化" ) );
-    digitizeToolBar->setObjectName( "digitizeToolBar" );
-    polishBar( digitizeToolBar );
-
-    m_toggleEditingAction->setToolTip( tr( "切换编辑 (Ctrl+E)" ) );
-    digitizeToolBar->addAction( m_toggleEditingAction );
-    m_saveEditsAction->setToolTip( tr( "保存编辑" ) );
-    digitizeToolBar->addAction( m_saveEditsAction );
-    digitizeToolBar->addSeparator();
-    auto *actSelect = digitizeToolBar->addAction(
-      QIcon( ":/icons/mActionSelectRectangle" ), tr( "选择" ),
-      this, &QgisDesktopWindow::selectFeatures );
-    actSelect->setToolTip( tr( "选择要素" ) );
-    auto *actAddFeature = digitizeToolBar->addAction(
-      QIcon( ":/icons/mActionCapturePoint" ), tr( "添加要素" ),
-      this, &QgisDesktopWindow::addFeature );
-    actAddFeature->setToolTip( tr( "添加要素" ) );
-    auto *actVertex = digitizeToolBar->addAction(
-      QIcon( ":/icons/mActionVertexTool" ), tr( "节点" ),
-      this, &QgisDesktopWindow::vertexTool );
-    actVertex->setToolTip( tr( "节点工具" ) );
-    digitizeToolBar->addSeparator();
-    auto *actMove = digitizeToolBar->addAction(
-      QIcon( ":/icons/mActionMoveFeature" ), tr( "移动" ),
-      this, &QgisDesktopWindow::moveFeature );
-    actMove->setToolTip( tr( "移动要素" ) );
-    auto *actRotate = digitizeToolBar->addAction(
-      QIcon( ":/icons/mActionRotateFeature" ), tr( "旋转" ),
-      this, &QgisDesktopWindow::rotateFeature );
-    actRotate->setToolTip( tr( "旋转要素" ) );
-    auto *actReshape = digitizeToolBar->addAction(
-      QIcon( ":/icons/mActionReshape" ), tr( "重塑" ),
-      this, &QgisDesktopWindow::reshapeGeometry );
-    actReshape->setToolTip( tr( "重塑几何" ) );
-    auto *actSplit = digitizeToolBar->addAction(
-      QIcon( ":/icons/mActionSplitFeatures" ), tr( "分割" ),
-      this, &QgisDesktopWindow::splitFeatures );
-    actSplit->setToolTip( tr( "分割要素" ) );
-    digitizeToolBar->addSeparator();
-    auto *actOffset = digitizeToolBar->addAction(
-      QIcon( ":/icons/mActionOffsetCurve" ), tr( "偏移" ),
-      this, &QgisDesktopWindow::offsetCurve );
-    actOffset->setToolTip( tr( "偏移线" ) );
-    auto *actSimplify = digitizeToolBar->addAction(
-      QIcon( ":/icons/mActionSimplify" ), tr( "简化" ),
-      this, &QgisDesktopWindow::simplifyFeature );
-    actSimplify->setToolTip( tr( "简化" ) );
-    auto *actReverse = digitizeToolBar->addAction(
-      QIcon( ":/icons/mActionReverseLine" ), tr( "反转" ),
-      this, &QgisDesktopWindow::reverseLine );
-    actReverse->setToolTip( tr( "反转线方向" ) );
-    auto *actAddRing = digitizeToolBar->addAction(
-      QIcon( ":/icons/mActionAddRing" ), tr( "添加环" ),
-      this, &QgisDesktopWindow::addRing );
-    actAddRing->setToolTip( tr( "添加环" ) );
-    auto *actFillRing = digitizeToolBar->addAction(
-      QIcon( ":/icons/mActionFillRing" ), tr( "填充环" ),
-      this, &QgisDesktopWindow::fillRing );
-    actFillRing->setToolTip( tr( "填充环" ) );
-    auto *actDelPart = digitizeToolBar->addAction(
-      QIcon( ":/icons/mActionDeletePart" ), tr( "删除部件" ),
-      this, &QgisDesktopWindow::deletePart );
-    actDelPart->setToolTip( tr( "删除部件" ) );
-
-    // Editing tool actions — enabled only when a vector layer is in editing mode
-    m_editingToolActions = { actSelect, actAddFeature, actVertex, actMove, actRotate,
-                             actReshape, actSplit, actOffset, actSimplify, actReverse,
-                             actAddRing, actFillRing, actDelPart };
-    for ( QAction *a : m_editingToolActions )
-      a->setEnabled( false );
-
-    // Fill empty tooltips with cleaned action text
-    for ( QAction *a : findChildren<QAction *>() )
-    {
-      if ( !a || a->isSeparator() )
-        continue;
-      if ( a->toolTip().isEmpty() )
-      {
-        const QString t = a->text().remove( QLatin1Char( '&' ) ).trimmed();
-        if ( !t.isEmpty() )
-        {
-          a->setToolTip( t );
-          a->setStatusTip( t );
-        }
-      }
-    }
+    // Editing tool actions (owned by the window, not a QToolBar).
+    // Enabled only when a vector layer is in editing mode.
+    auto makeEditAct = [this]( const char *icon, const QString &text, const QString &tipText,
+                               void ( QgisDesktopWindow::*slot )() ) -> QAction * {
+        auto *a = new QAction( QIcon( QStringLiteral( ":/icons/" ) + QLatin1String( icon ) ), text, this );
+        a->setToolTip( tipText );
+        a->setEnabled( false );
+        connect( a, &QAction::triggered, this, slot );
+        return a;
+    };
+    m_editingToolActions = {
+        makeEditAct( "mActionSelectRectangle", tr( "选择" ), tr( "选择要素" ),
+                     &QgisDesktopWindow::selectFeatures ),
+        makeEditAct( "mActionCapturePoint", tr( "添加要素" ), tr( "添加要素" ),
+                     &QgisDesktopWindow::addFeature ),
+        makeEditAct( "mActionVertexTool", tr( "节点" ), tr( "节点工具" ),
+                     &QgisDesktopWindow::vertexTool ),
+        makeEditAct( "mActionMoveFeature", tr( "移动" ), tr( "移动要素" ),
+                     &QgisDesktopWindow::moveFeature ),
+        makeEditAct( "mActionRotateFeature", tr( "旋转" ), tr( "旋转要素" ),
+                     &QgisDesktopWindow::rotateFeature ),
+        makeEditAct( "mActionReshape", tr( "重塑" ), tr( "重塑几何" ),
+                     &QgisDesktopWindow::reshapeGeometry ),
+        makeEditAct( "mActionSplitFeatures", tr( "分割" ), tr( "分割要素" ),
+                     &QgisDesktopWindow::splitFeatures ),
+        makeEditAct( "mActionOffsetCurve", tr( "偏移" ), tr( "偏移线" ),
+                     &QgisDesktopWindow::offsetCurve ),
+        makeEditAct( "mActionSimplify", tr( "简化" ), tr( "简化" ),
+                     &QgisDesktopWindow::simplifyFeature ),
+        makeEditAct( "mActionReverseLine", tr( "反转" ), tr( "反转线方向" ),
+                     &QgisDesktopWindow::reverseLine ),
+        makeEditAct( "mActionAddRing", tr( "添加环" ), tr( "添加环" ),
+                     &QgisDesktopWindow::addRing ),
+        makeEditAct( "mActionFillRing", tr( "填充环" ), tr( "填充环" ),
+                     &QgisDesktopWindow::fillRing ),
+        makeEditAct( "mActionDeletePart", tr( "删除部件" ), tr( "删除部件" ),
+                     &QgisDesktopWindow::deletePart ),
+    };
 }
 void QgisDesktopWindow::setupStatusBar()
 {
     QStatusBar *bar = statusBar();
-    bar->setObjectName("rsStatusBar");
-    bar->setFixedHeight(26);
+    bar->setObjectName( "rsStatusBar" );
+    bar->setFixedHeight( 28 );
 
-    // Ready status (left side)
-    m_readyLabel = new QLabel("Ready", bar);
-    m_readyLabel->setObjectName("rsReadyLabel");
-    bar->addWidget(m_readyLabel);
+    // Ready / task summary (left)
+    m_readyLabel = new QLabel( tr( "Ready" ), bar );
+    m_readyLabel->setObjectName( QStringLiteral( "rsReadyLabel" ) );
+    bar->addWidget( m_readyLabel );
 
-    // Coordinates display
-    m_coordinatesLabel = new QLabel("0.000000, 0.000000", bar);
-    m_coordinatesLabel->setObjectName("rsCoordLabel");
-    bar->addPermanentWidget(m_coordinatesLabel);
+    // Coordinates
+    m_coordinatesLabel = new QLabel( QStringLiteral( "0.00, 0.00" ), bar );
+    m_coordinatesLabel->setObjectName( QStringLiteral( "rsCoordLabel" ) );
+    bar->addPermanentWidget( m_coordinatesLabel );
 
-    // Scale display
-    m_scaleLabel = new QLabel("Scale: 1:1,000", bar);
-    m_scaleLabel->setObjectName("rsScaleLabel");
-    bar->addPermanentWidget(m_scaleLabel);
+    // Scale (single source — not on band rail)
+    m_scaleLabel = new QLabel( tr( "比例 —" ), bar );
+    m_scaleLabel->setObjectName( QStringLiteral( "rsScaleLabel" ) );
+    bar->addPermanentWidget( m_scaleLabel );
 
-    // CRS picker (interactive) — keep label for readouts if needed
+    // CRS picker
     if ( m_crsSelector )
     {
         m_crsSelector->setParent( bar );
-        m_crsSelector->setMaximumWidth( 220 );
+        m_crsSelector->setMaximumWidth( 200 );
         m_crsSelector->setMaximumHeight( 22 );
         bar->addPermanentWidget( m_crsSelector );
     }
-    m_crsLabel = new QLabel("EPSG:3857", bar);
-    m_crsLabel->setObjectName("rsCrsLabel");
-    m_crsLabel->hide(); // selector supersedes plain label
+    m_crsLabel = new QLabel( QStringLiteral( "EPSG:3857" ), bar );
+    m_crsLabel->setObjectName( QStringLiteral( "rsCrsLabel" ) );
+    m_crsLabel->hide();
 
-    // Render time display
-    m_renderTimeLabel = new QLabel("", bar);
-    m_renderTimeLabel->setObjectName("rsRenderLabel");
-    bar->addPermanentWidget(m_renderTimeLabel);
+    // Active layer name
+    m_layerStatusLabel = new QLabel( tr( "无图层" ), bar );
+    m_layerStatusLabel->setObjectName( QStringLiteral( "rsLayerStatusLabel" ) );
+    m_layerStatusLabel->setMinimumWidth( 80 );
+    m_layerStatusLabel->setMaximumWidth( 180 );
+    m_layerStatusLabel->setToolTip( tr( "当前活动图层" ) );
+    bar->addPermanentWidget( m_layerStatusLabel );
 
-    // Cache usage
-    m_cacheLabel = new QLabel("Cache: 0 MB", bar);
-    m_cacheLabel->setObjectName("rsCacheLabel");
-    bar->addPermanentWidget(m_cacheLabel);
+    // Opacity (single control — not on band rail)
+    auto *opacityTitle = new QLabel( tr( "不透明度" ), bar );
+    opacityTitle->setObjectName( QStringLiteral( "rsStatusMetaLabel" ) );
+    bar->addPermanentWidget( opacityTitle );
+    m_statusOpacitySlider = new QSlider( Qt::Horizontal, bar );
+    m_statusOpacitySlider->setObjectName( QStringLiteral( "rsStatusOpacitySlider" ) );
+    m_statusOpacitySlider->setRange( 0, 100 );
+    m_statusOpacitySlider->setValue( 100 );
+    m_statusOpacitySlider->setFixedWidth( 88 );
+    m_statusOpacitySlider->setFixedHeight( 16 );
+    m_statusOpacitySlider->setToolTip( tr( "当前图层不透明度" ) );
+    bar->addPermanentWidget( m_statusOpacitySlider );
+    m_statusOpacityValue = new QLabel( QStringLiteral( "100%" ), bar );
+    m_statusOpacityValue->setObjectName( QStringLiteral( "rsStatusMetaLabel" ) );
+    m_statusOpacityValue->setMinimumWidth( 36 );
+    bar->addPermanentWidget( m_statusOpacityValue );
+    connect( m_statusOpacitySlider, &QSlider::valueChanged, this, [this]( int v ) {
+        if ( m_statusOpacityValue )
+            m_statusOpacityValue->setText( QStringLiteral( "%1%" ).arg( v ) );
+        QgsMapLayer *layer = m_mapCanvas ? m_mapCanvas->currentLayer() : nullptr;
+        if ( !layer && m_mapCanvas )
+        {
+            const auto layers = m_mapCanvas->layers();
+            if ( !layers.isEmpty() )
+                layer = layers.first();
+        }
+        if ( layer )
+        {
+            layer->setOpacity( v / 100.0 );
+            layer->triggerRepaint();
+        }
+    } );
+
+    m_renderTimeLabel = new QLabel( QString(), bar );
+    m_renderTimeLabel->setObjectName( QStringLiteral( "rsRenderLabel" ) );
+    bar->addPermanentWidget( m_renderTimeLabel );
+
+    m_cacheLabel = new QLabel( tr( "Cache: 0 MB" ), bar );
+    m_cacheLabel->setObjectName( QStringLiteral( "rsCacheLabel" ) );
+    bar->addPermanentWidget( m_cacheLabel );
 }

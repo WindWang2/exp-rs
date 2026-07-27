@@ -6,10 +6,14 @@
 #include "layer_tree_menu.h"
 #include "project_context.h"
 #include "widgets/histogram_stretch_widget.h"
+#include "widgets/band_composition_rail.h"
+#include "processing/framework/task_center.h"
 
 #include <QStatusBar>
+#include <QSignalBlocker>
 #include <QMessageBox>
 #include <QStringList>
+#include <cmath>
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
@@ -54,24 +58,71 @@ void QgisDesktopWindow::setupConnections()
             this, &QgisDesktopWindow::updateExtents);
     connect(m_mapCanvas, &QgsMapCanvas::renderComplete,
             this, &QgisDesktopWindow::onRenderComplete);
-    m_renderTimer.start();
-
-    // Task manager — update ready status when tasks start/end
-    connect(QgsApplication::taskManager(), &QgsTaskManager::statusChanged,
-            this, [this](long taskId, int status) {
-        Q_UNUSED(taskId);
-        Q_UNUSED(status);
-        if (m_readyLabel) {
-            int activeCount = QgsApplication::taskManager()->countActiveTasks();
-            if (activeCount > 0) {
-                m_readyLabel->setText(tr("Processing (%1 tasks)...").arg(activeCount));
-                m_readyLabel->setStyleSheet("color: #e67e22; font-weight: bold;");
-            } else {
-                m_readyLabel->setText(tr("Ready"));
-                m_readyLabel->setStyleSheet("");
+    // Band rail + status bar: follow active map layer.
+    auto syncActiveLayerChrome = [this]( QgsMapLayer *layer ) {
+        syncStatusBarLayer( layer );
+        if ( !m_bandRail )
+            return;
+        if ( auto *rl = qobject_cast<QgsRasterLayer *>( layer ) )
+            m_bandRail->setRasterLayer( rl );
+        else
+            m_bandRail->setRasterLayer( nullptr );
+    };
+    connect( m_mapCanvas, &QgsMapCanvas::currentLayerChanged,
+             this, [syncActiveLayerChrome]( QgsMapLayer *layer ) {
+                 syncActiveLayerChrome( layer );
+             } );
+    connect( m_mapCanvas, &QgsMapCanvas::layersChanged, this, [this, syncActiveLayerChrome]() {
+        if ( !m_mapCanvas )
+            return;
+        QgsMapLayer *layer = m_mapCanvas->currentLayer();
+        if ( !layer )
+        {
+            for ( QgsMapLayer *l : m_mapCanvas->layers() )
+            {
+                if ( l )
+                {
+                    layer = l;
+                    break;
+                }
             }
         }
-    });
+        // Prefer raster for band rail when current is not raster.
+        if ( m_bandRail )
+        {
+            if ( auto *rl = qobject_cast<QgsRasterLayer *>( layer ) )
+                m_bandRail->setRasterLayer( rl );
+            else
+            {
+                QgsRasterLayer *firstRaster = nullptr;
+                for ( QgsMapLayer *l : m_mapCanvas->layers() )
+                {
+                    if ( auto *rl = qobject_cast<QgsRasterLayer *>( l ) )
+                    {
+                        firstRaster = rl;
+                        break;
+                    }
+                }
+                m_bandRail->setRasterLayer( firstRaster );
+            }
+        }
+        syncStatusBarLayer( layer );
+    } );
+    m_renderTimer.start();
+
+    // QgsTaskManager → Ready line (legacy tasks)
+    connect( QgsApplication::taskManager(), &QgsTaskManager::statusChanged,
+             this, [this]( long taskId, int status ) {
+                 Q_UNUSED( taskId );
+                 Q_UNUSED( status );
+                 refreshStatusTaskSummary();
+             } );
+
+    // Task Center → Ready line (product job queue)
+    connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskAdded,
+             this, [this]( const sicnu::AlgorithmTaskInfo & ) { refreshStatusTaskSummary(); } );
+    connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
+             this, [this]( const sicnu::AlgorithmTaskInfo & ) { refreshStatusTaskSummary(); } );
 
     // Identify tool results
     connect(m_identifyTool, &CustomIdentifyTool::identifyCompleted,
@@ -113,8 +164,16 @@ void QgisDesktopWindow::showCoordinates(const QgsPointXY &point)
 
 void QgisDesktopWindow::updateScale()
 {
-    double s = m_mapCanvas->scale();
-    m_scaleLabel->setText(QString("Scale: 1:%1").arg(static_cast<int>(s)));
+    const double s = m_mapCanvas ? m_mapCanvas->scale() : 0.0;
+    QString scaleText;
+    // Guard invalid / huge scales (NaN, Inf, or overflow of int) → "—"
+    if ( !std::isfinite( s ) || s <= 0.0 || s > 1.0e12 )
+        scaleText = QStringLiteral( "—" );
+    else
+        scaleText = QStringLiteral( "1:%1" ).arg( static_cast<qint64>( std::llround( s ) ) );
+
+    if ( m_scaleLabel )
+        m_scaleLabel->setText( tr( "比例 %1" ).arg( scaleText ) );
 }
 
 void QgisDesktopWindow::updateExtents()
@@ -132,9 +191,81 @@ void QgisDesktopWindow::updateExtents()
 void QgisDesktopWindow::updateCrsDisplay()
 {
     QgsCoordinateReferenceSystem crs = QgsProject::instance()->crs();
-    m_crsLabel->setText(crs.authid());
-    if (m_crsSelector) {
-        m_crsSelector->setCrs(crs);
+    if ( m_crsLabel )
+        m_crsLabel->setText( crs.authid() );
+    if ( m_crsSelector )
+        m_crsSelector->setCrs( crs );
+}
+
+void QgisDesktopWindow::syncStatusBarLayer( QgsMapLayer *layer )
+{
+    if ( !layer && m_mapCanvas )
+        layer = m_mapCanvas->currentLayer();
+
+    if ( m_layerStatusLabel )
+    {
+        if ( layer && layer->isValid() )
+        {
+            m_layerStatusLabel->setText( layer->name() );
+            m_layerStatusLabel->setToolTip( layer->name() );
+        }
+        else
+        {
+            m_layerStatusLabel->setText( tr( "无图层" ) );
+            m_layerStatusLabel->setToolTip( tr( "当前活动图层" ) );
+        }
+    }
+
+    if ( m_statusOpacitySlider )
+    {
+        const int pct = layer
+                          ? qBound( 0, static_cast<int>( std::lround( layer->opacity() * 100.0 ) ), 100 )
+                          : 100;
+        const QSignalBlocker blocker( m_statusOpacitySlider );
+        m_statusOpacitySlider->setValue( pct );
+        m_statusOpacitySlider->setEnabled( layer != nullptr );
+        if ( m_statusOpacityValue )
+            m_statusOpacityValue->setText( QStringLiteral( "%1%" ).arg( pct ) );
+    }
+}
+
+void QgisDesktopWindow::refreshStatusTaskSummary()
+{
+    if ( !m_readyLabel )
+        return;
+
+    int running = 0;
+    int queued = 0;
+    const auto tasks = sicnu::TaskCenter::instance().allTasks();
+    for ( const auto &t : tasks )
+    {
+        if ( t.status == sicnu::TaskStatus::Running )
+            ++running;
+        else if ( t.status == sicnu::TaskStatus::Queued || t.status == sicnu::TaskStatus::Paused )
+            ++queued;
+    }
+
+    const int qgisActive = QgsApplication::taskManager()
+                             ? QgsApplication::taskManager()->countActiveTasks()
+                             : 0;
+
+    if ( running > 0 || queued > 0 )
+    {
+        m_readyLabel->setText( tr( "运行 %1 · 排队 %2" ).arg( running ).arg( queued ) );
+        m_readyLabel->setObjectName( QStringLiteral( "rsReadyBusy" ) );
+        m_readyLabel->setStyleSheet( QStringLiteral( "color: #B58100; font-weight: 600;" ) );
+    }
+    else if ( qgisActive > 0 )
+    {
+        m_readyLabel->setText( tr( "Processing (%1)..." ).arg( qgisActive ) );
+        m_readyLabel->setObjectName( QStringLiteral( "rsReadyBusy" ) );
+        m_readyLabel->setStyleSheet( QStringLiteral( "color: #B58100; font-weight: 600;" ) );
+    }
+    else
+    {
+        m_readyLabel->setText( tr( "Ready" ) );
+        m_readyLabel->setObjectName( QStringLiteral( "rsReadyLabel" ) );
+        m_readyLabel->setStyleSheet( QString() );
     }
 }
 
@@ -266,9 +397,18 @@ void QgisDesktopWindow::onLayerTreeClicked(const QModelIndex &index)
                       tr( "显示拉伸 — %1" ).arg( rl->name() ) );
             }
         }
+        if ( m_bandRail )
+        {
+            if ( auto *rl = qobject_cast<QgsRasterLayer *>( layer ) )
+                m_bandRail->setRasterLayer( rl );
+            else
+                m_bandRail->setRasterLayer( nullptr );
+        }
+        syncStatusBarLayer( layer );
     } else {
         m_mapCanvas->setCurrentLayer(nullptr);
         updateEditingUI(nullptr);
+        syncStatusBarLayer( nullptr );
     }
 }
 

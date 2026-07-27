@@ -59,7 +59,26 @@ std::optional<data::SourceDescriptor> localSourceForLayer(QgsMapLayer &layer) {
 
 } // namespace
 
-ProjectContext::ProjectContext() : m_displayManager(&m_dataManager) {}
+ProjectContext::ProjectContext()
+  : m_fetcher( display::makeProductionCapabilitiesFetcher() )
+  , m_probe( std::make_unique<display::QgisNetworkProbe>( m_fetcher.get() ) )
+  // The DataManager's remote-map providers receive the probe; a real HTTP
+  // reachability + metadata probe now backs remote-map registration (#66). The
+  // probe (and its owning fetcher) are declared before m_dataManager so they
+  // outlive it.
+  , m_dataManager( m_probe.get() )
+  , m_displayManager( &m_dataManager )
+{
+}
+
+ProjectContext::ProjectContext( const data::internal::NetworkProbe *probe )
+  // A test-injected probe: the test owns the probe (and any fetcher backing
+  // it), so this ctor does not own a fetcher. m_probe is left null; the
+  // injected `probe` flows straight to the DataManager.
+  : m_dataManager( probe )
+  , m_displayManager( &m_dataManager )
+{
+}
 
 ProjectContext::~ProjectContext() {
   // App exit / context teardown may not have run clearProject (e.g. the user
@@ -80,6 +99,22 @@ ProjectContext::~ProjectContext() {
 data::Result<std::unique_ptr<ProjectContext>>
 ProjectContext::create(const display::DisplayViewSpec &mainViewSpec) {
   auto context = std::unique_ptr<ProjectContext>(new ProjectContext);
+  const data::Result<display::DisplayViewId> createdView =
+      context->m_displayManager.createView(mainViewSpec);
+  if (!createdView)
+    return data::Result<std::unique_ptr<ProjectContext>>::failure(
+        createdView.diagnostics());
+
+  context->m_mainViewId = createdView.value();
+  context->installAdoptionSafetyNet(*QgsProject::instance());
+  return data::Result<std::unique_ptr<ProjectContext>>::success(
+      std::move(context));
+}
+
+data::Result<std::unique_ptr<ProjectContext>>
+ProjectContext::createForTesting(const display::DisplayViewSpec &mainViewSpec,
+                                 const data::internal::NetworkProbe *probe) {
+  auto context = std::unique_ptr<ProjectContext>(new ProjectContext(probe));
   const data::Result<display::DisplayViewId> createdView =
       context->m_displayManager.createView(mainViewSpec);
   if (!createdView)

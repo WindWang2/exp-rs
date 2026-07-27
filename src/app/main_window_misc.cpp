@@ -12,6 +12,7 @@
 #include <QDialog>
 #include <QDir>
 #include <QDockWidget>
+#include <QFile>
 #include <QFileInfo>
 #include <QLabel>
 #include <QMessageBox>
@@ -21,6 +22,7 @@
 #include <QStatusBar>
 #include <QStyleFactory>
 #include <QVBoxLayout>
+#include <QDebug>
 
 #include <qgsbrowserdockwidget.h>
 #include <qgsdockwidget.h>
@@ -29,23 +31,59 @@
 #include <history/qgshistorywidget.h>
 
 // ── Settings Actions ──────────────────────────────────────────────────────
+namespace {
+
+bool loadThemeQss( const QString &relativePath )
+{
+    const QString qssPath = AppPaths::resolveDataPath( relativePath );
+    QFile styleFile( qssPath );
+    if ( !styleFile.open( QFile::ReadOnly ) )
+        return false;
+    qApp->setStyleSheet( QString::fromUtf8( styleFile.readAll() ) );
+    styleFile.close();
+    return true;
+}
+
+} // namespace
+
 void QgisDesktopWindow::applyDarkPalette()
 {
+    // Fusion base palette aligned with Canopy Lab Night surfaces
     QPalette darkPalette;
-    darkPalette.setColor(QPalette::Window, QColor(53, 53, 53));
-    darkPalette.setColor(QPalette::WindowText, Qt::white);
-    darkPalette.setColor(QPalette::Base, QColor(25, 25, 25));
-    darkPalette.setColor(QPalette::AlternateBase, QColor(53, 53, 53));
-    darkPalette.setColor(QPalette::ToolTipBase, Qt::white);
-    darkPalette.setColor(QPalette::ToolTipText, Qt::white);
-    darkPalette.setColor(QPalette::Text, Qt::white);
-    darkPalette.setColor(QPalette::Button, QColor(53, 53, 53));
-    darkPalette.setColor(QPalette::ButtonText, Qt::white);
-    darkPalette.setColor(QPalette::BrightText, Qt::red);
-    darkPalette.setColor(QPalette::Link, QColor(42, 130, 218));
-    darkPalette.setColor(QPalette::Highlight, QColor(42, 130, 218));
-    darkPalette.setColor(QPalette::HighlightedText, Qt::black);
-    qApp->setPalette(darkPalette);
+    darkPalette.setColor( QPalette::Window, QColor( 0x1A, 0x1D, 0x23 ) );
+    darkPalette.setColor( QPalette::WindowText, QColor( 0xE8, 0xEC, 0xF1 ) );
+    darkPalette.setColor( QPalette::Base, QColor( 0x1E, 0x22, 0x29 ) );
+    darkPalette.setColor( QPalette::AlternateBase, QColor( 0x25, 0x2A, 0x33 ) );
+    darkPalette.setColor( QPalette::ToolTipBase, QColor( 0x25, 0x2A, 0x33 ) );
+    darkPalette.setColor( QPalette::ToolTipText, QColor( 0xE8, 0xEC, 0xF1 ) );
+    darkPalette.setColor( QPalette::Text, QColor( 0xE8, 0xEC, 0xF1 ) );
+    darkPalette.setColor( QPalette::Button, QColor( 0x25, 0x2A, 0x33 ) );
+    darkPalette.setColor( QPalette::ButtonText, QColor( 0xE8, 0xEC, 0xF1 ) );
+    darkPalette.setColor( QPalette::BrightText, QColor( 0xF0, 0x71, 0x67 ) );
+    darkPalette.setColor( QPalette::Link, QColor( 0x4D, 0xA3, 0xE0 ) );
+    darkPalette.setColor( QPalette::Highlight, QColor( 0x2B, 0xB6, 0x73 ) );
+    darkPalette.setColor( QPalette::HighlightedText, QColor( 0x1A, 0x1D, 0x23 ) );
+    darkPalette.setColor( QPalette::PlaceholderText, QColor( 0xA8, 0xB0, 0xBC ) );
+    qApp->setPalette( darkPalette );
+}
+
+void QgisDesktopWindow::applyUiTheme( const QString &theme )
+{
+    if ( QStyle *fusion = QStyleFactory::create( QStringLiteral( "Fusion" ) ) )
+        qApp->setStyle( fusion );
+
+    if ( theme == QLatin1String( "dark" ) )
+    {
+        applyDarkPalette();
+        if ( !loadThemeQss( QStringLiteral( "resources/styles-dark.qss" ) ) )
+            qWarning( "Could not load dark theme QSS" );
+    }
+    else
+    {
+        qApp->setPalette( QApplication::style()->standardPalette() );
+        if ( !loadThemeQss( QStringLiteral( "resources/styles.qss" ) ) )
+            qWarning( "Could not load light theme QSS" );
+    }
 }
 
 void QgisDesktopWindow::options()
@@ -56,18 +94,7 @@ void QgisDesktopWindow::options()
         ToolPathManager::instance().setGdalPath( dialog.gdalPath() );
         ToolPathManager::instance().setOtbPath( dialog.otbPath() );
 
-        // Apply theme if changed
-        QString theme = dialog.theme();
-        if (theme == "dark")
-        {
-            qApp->setStyle(QStyleFactory::create("Fusion"));
-            applyDarkPalette();
-        }
-        else
-        {
-            // Reset to default light theme
-            qApp->setPalette(QApplication::style()->standardPalette());
-        }
+        applyUiTheme( dialog.theme() );
 
         // Log-to-file takes effect after restart (sink is opened in main.cpp at startup).
         if ( dialog.logToFile() )
@@ -185,7 +212,8 @@ void QgisDesktopWindow::restorePanelState()
     QSettings settings;
     // v2: product shell (Ribbon + Task panel). Old state restored classic toolbars
     // and a crowded right dock stack that fought the new chrome.
-    constexpr int kShellLayoutVersion = 2;
+    // v7: full-width top ribbon dock (setCorner Top*→TopDock) — drop prior states.
+    constexpr int kShellLayoutVersion = 7;
     const int savedVersion = settings.value( QStringLiteral( "mainwindow/shellLayoutVersion" ), 0 ).toInt();
 
     if ( savedVersion >= kShellLayoutVersion )
@@ -211,7 +239,7 @@ void QgisDesktopWindow::resetPanelLayout()
     QSettings settings;
     settings.remove( QStringLiteral( "mainwindow/state" ) );
     settings.remove( QStringLiteral( "mainwindow/geometry" ) );
-    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 2 );
+    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 7 );
 
     // Dock areas back to defaults, then apply product shell visibility.
     if ( m_layersDock )
@@ -246,7 +274,7 @@ void QgisDesktopWindow::savePanelState()
     QSettings settings;
     settings.setValue( QStringLiteral( "mainwindow/state" ), saveState() );
     settings.setValue( QStringLiteral( "mainwindow/geometry" ), saveGeometry() );
-    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 2 );
+    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 7 );
 }
 
 void QgisDesktopWindow::closeEvent( QCloseEvent *event )

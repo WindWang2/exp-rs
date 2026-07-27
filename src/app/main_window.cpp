@@ -77,7 +77,7 @@
 QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     : QMainWindow(parent)
 {
-    setWindowTitle("RS Studio — Remote Sensing Analysis");
+    setWindowTitle( tr( "SICNU GEO RS — 遥感分析平台" ) );
     setToolTip( SicnuDialogHelp::shortForTool( QStringLiteral( "main_window" ), windowTitle() ) );
     setWhatsThis( SicnuDialogHelp::htmlForTool( QStringLiteral( "main_window" ), windowTitle() ) );
     setStatusTip( toolTip() );
@@ -89,7 +89,7 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     setupMapCanvas();
 
     qDebug() << "Setting up menu...";
-    setupMenu();
+    setupMenu(); // builds detached QMenuBar (action host only — not shown)
     qDebug() << "Setting up toolbars...";
     setupToolbars();
     qDebug() << "Setting up dock widgets...";
@@ -126,6 +126,13 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     // Must run AFTER restoreState so old QSettings do not resurrect duplicate chrome.
     applyProductShellLayout();
 
+    // Apply saved light/dark theme (Canopy Lab QSS)
+    {
+        QSettings settings;
+        applyUiTheme( settings.value( QStringLiteral( "preferences/theme" ),
+                                      QStringLiteral( "light" ) ).toString() );
+    }
+
     // Load plugins
     qDebug() << "Loading plugins...";
     m_pluginManager = std::make_unique<PluginManager>(m_mapCanvas, m_layerTreeView);
@@ -141,15 +148,18 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
             dock->setWidget(widget);
             addDockWidget(Qt::RightDockWidgetArea, dock);
         }
-        // Add plugin menu actions
+        // Plugin menus go on the detached bar (never QMainWindow::menuBar()).
         for (QAction *action : plugin->menuActions()) {
-            menuBar()->addAction(action);
+            appMenuBar()->addAction(action);
         }
         // Add plugin toolbar actions
         for (QAction *action : plugin->toolbarActions()) {
             statusBar()->showMessage(tr("Plugin '%1' loaded").arg(plugin->name()), 3000);
         }
     }
+
+    // Re-assert top chrome after any code path that might have touched menuBar().
+    applyProductShellLayout();
 
 #ifdef SICNU_EMBED_PYTHON
     // Initialize Python API with map canvas
@@ -199,6 +209,13 @@ QgisDesktopWindow::~QgisDesktopWindow()
             m_mapCanvas->unsetMapTool(tool);
         m_mapCanvas->setLayers({});
     }
+
+    // Detach the layer tree view from its model before m_layerManager (the
+    // model's owner) is reset below. The view outlives the manager — it is a
+    // child widget destroyed later by ~QObject — and would otherwise query a
+    // dead model from its close/hide events (exit SIGSEGV).
+    if ( m_layerTreeView )
+        m_layerTreeView->QTreeView::setModel( nullptr );
 
     // Destroy tool owners while the canvas QObject still exists so tools can
     // safely reparent/unset. unique_ptr destruction order is reverse of
@@ -303,5 +320,3 @@ void QgisDesktopWindow::setupMapCanvas()
     // Set default tool (QGIS default: pan)
     m_mapCanvas->setMapTool(m_panTool);
 }
-
-

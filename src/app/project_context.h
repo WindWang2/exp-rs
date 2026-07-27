@@ -5,6 +5,7 @@
 #include <QVector>
 
 #include "data/data_manager.h"
+#include "display/network_probe.h"
 #include "display/qgis_display_manager.h"
 
 class QgsMapLayer;
@@ -29,6 +30,15 @@ class ProjectContext {
 public:
   static data::Result<std::unique_ptr<ProjectContext>>
   create(const display::DisplayViewSpec &mainViewSpec);
+
+  /// Test seam: like create(), but injects a NetworkProbe into the DataManager's
+  /// remote-map providers (the production create() builds its own probe-backed
+  /// fetcher). The caller owns `probe` (and any fetcher backing it); it must
+  /// outlive the returned context. Used by #66's end-to-end test to assert a
+  /// remote-map asset registers Ready through the host wiring.
+  static data::Result<std::unique_ptr<ProjectContext>>
+  createForTesting(const display::DisplayViewSpec &mainViewSpec,
+                   const data::internal::NetworkProbe *probe);
 
   ~ProjectContext();
 
@@ -80,6 +90,11 @@ public:
 private:
   ProjectContext();
 
+  /// Test seam: constructs with an injected NetworkProbe (the host's
+  /// production path uses the default ctor, which builds its own probe-backed
+  /// fetcher). The probe (and any owning fetcher) must outlive the DataManager.
+  explicit ProjectContext( const data::internal::NetworkProbe *probe );
+
   /// Removes every Display Layer in every live view. Used by clearProject so a
   /// secondary view's layers/leases never survive a project clear (the engine's
   /// removeLayer releases each lease; a view whose asset is also shown elsewhere
@@ -96,6 +111,12 @@ private:
   /// Connects the QGIS project's layersAdded signal to adoptExternalLayer.
   void installAdoptionSafetyNet(QgsProject &project);
 
+  // Members initialize in declaration order. The fetcher + probe are owned
+  // here and must outlive the DataManager (which holds a non-owning pointer to
+  // the probe), so they are declared FIRST. The test-seam ctor injects a probe
+  // without an owning fetcher (the test owns both).
+  std::unique_ptr<display::CapabilitiesFetcher> m_fetcher;
+  std::unique_ptr<display::QgisNetworkProbe> m_probe;
   data::DataManager m_dataManager;
   display::QgisDisplayManager m_displayManager;
   display::DisplayViewId m_mainViewId;

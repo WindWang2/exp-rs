@@ -13,8 +13,6 @@ Pure C++ Remote Sensing analysis platform built on the QGIS engine.
 See [docs/repo-layout.md](docs/repo-layout.md) for the full directory map.
 
 *   `src/app/main.cpp`: Pure C++ Qt6 desktop application (QgisDesktopWindow).
-*   `src/data/`: `sicnu_data` — project Data Manager (Data Asset identity, revision, leases, relocation, GDAL/OGR source providers). No Qt Widgets / `qgis_gui` dependency (ADR-0009).
-*   `src/app/display/`, `src/app/project_context.*`: `QgisDisplayManager` (independent `QgsMapLayer` Display Layers) and the per-project `ProjectContext` composition root.
 *   `src/core/`: QGIS core library — layers, rendering, CRS, geometry, providers, expressions.
 *   `src/gui/`: QGIS GUI library — map canvas, map tools, layer tree, dialogs.
 *   `src/analysis/`: Analysis libraries — classification, georeferencing, segmentation.
@@ -53,7 +51,18 @@ See [docs/repo-layout.md](docs/repo-layout.md) for the full directory map.
 
 ## Skills
 
-Project skills live under `.agents/skills/` (mattpocock/skills and others). Prefer those for engineering workflows (`tdd`, `implement`, `to-spec`, `code-review`, …).
+Project skills live under `.agents/skills/` (mirrored to `.claude/skills/` for Claude Code). Prefer those for engineering workflows (`tdd`, `implement`, `to-spec`, `code-review`, …).
+
+Additional vendor skills (see `.agents/vendor/` for provenance):
+
+* **Qt AI skills** ([TheQtCompanyRnD/agent-skills](https://github.com/TheQtCompanyRnD/agent-skills)): `qt-cpp-review`, `qt-qml-review`, `qt-qml`, `qt-ui-design`, `qt-cmake-project`, `qt-cpp-docs`, `qt-qml-docs`, `qt-qml-test`, `qt-qml-test-run`, `qt-qml-profiler`, `qt-figma-token-extraction`, `qt-figma-component-generation`.
+* **frontend-design** ([anthropics/claude-code](https://github.com/anthropics/claude-code) plugin): distinctive UI/visual design guidance.
+
+## UI theme (Canopy Lab)
+
+* Light: `resources/styles.qss` (default, Fusion + QSS).
+* Dark: `resources/styles-dark.qss` (Preferences → Theme, or `preferences/theme=dark`).
+* Signature chrome: `BandCompositionRail` under the ribbon (band chips + Real Data Range).
 
 ## Agent skills
 

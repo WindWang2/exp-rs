@@ -12,6 +12,7 @@
 #include <QThread>
 
 #include "internal/source_provider_registry.h"
+#include "internal/network_probe.h"
 #include "providers/gdal_raster_source_provider.h"
 #include "providers/ogr_vector_source_provider.h"
 #include "providers/tms_source_provider.h"
@@ -179,22 +180,27 @@ struct DataManager::Impl
 
 std::unique_ptr<internal::SourceProviderRegistry> DataManager::defaultProviders()
 {
+  return defaultProviders( nullptr );
+}
+
+std::unique_ptr<internal::SourceProviderRegistry>
+DataManager::defaultProviders( const internal::NetworkProbe *probe )
+{
   auto registry = std::make_unique<internal::SourceProviderRegistry>();
   registry->add( std::make_unique<providers::GdalRasterSourceProvider>() );
   registry->add( std::make_unique<providers::OgrVectorSourceProvider>() );
-  // XYZ tiles register with a NoNetworkProbe default so an asset still records
-  // (resolving Offline) when the host has not injected a real HTTP probe. The
-  // real Qt-Network-backed probe lives in src/app (the network-free invariant
-  // for src/data) and is host-injected; until then assets register Offline and
-  // re-resolve Ready once a probe is wired (a host-side follow-up to this wave,
-  // not a src/data concern). Tests inject a stub probe.
-  registry->add( std::make_unique<providers::XyzSourceProvider>() );
+  // The four remote-map providers take a NetworkProbe*; a null probe (the
+  // defaultProviders() case) yields the NoNetworkProbe fallback so an asset
+  // still records (resolving Offline) when the host has not injected a real
+  // HTTP probe. The real Qt-Network-backed probe lives in src/app (the
+  // network-free invariant for src/data) and is host-injected (#66). Tests
+  // inject a stub probe.
+  registry->add( std::make_unique<providers::XyzSourceProvider>( probe ) );
   // WMS/WMTS/TMS share the XYZ shape (spec #63); each claims its own provider
-  // key and probes through the same NetworkProbe seam (NoNetworkProbe default
-  // until the host injects a real one — see #66).
-  registry->add( std::make_unique<providers::WmsSourceProvider>() );
-  registry->add( std::make_unique<providers::WmtsSourceProvider>() );
-  registry->add( std::make_unique<providers::TmsSourceProvider>() );
+  // key and probes through the same NetworkProbe seam.
+  registry->add( std::make_unique<providers::WmsSourceProvider>( probe ) );
+  registry->add( std::make_unique<providers::WmtsSourceProvider>( probe ) );
+  registry->add( std::make_unique<providers::TmsSourceProvider>( probe ) );
   return registry;
 }
 
@@ -204,6 +210,17 @@ DataManager::DataManager( QObject *parent )
   // The virtual-raster provider needs the owning DataManager to look up input
   // snapshots when realizing a recipe; bind it here (internal seam - the
   // public interface never exposes it). Both live as long as the DataManager.
+  m_impl->providers->add(
+    std::make_unique<providers::VirtualRasterSourceProvider>(
+      [this]( AssetId id ) { return asset( id ); } ) );
+}
+
+DataManager::DataManager( const internal::NetworkProbe *probe, QObject *parent )
+  : DataManager( defaultProviders( probe ), parent )
+{
+  // Same virtual-raster bind as the public constructor; only the remote-map
+  // providers differ (they received `probe`). This is the host-injection seam
+  // for #66 — private/friend-gated so no public API widens.
   m_impl->providers->add(
     std::make_unique<providers::VirtualRasterSourceProvider>(
       [this]( AssetId id ) { return asset( id ); } ) );

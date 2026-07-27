@@ -5,6 +5,7 @@
 #include "layer_manager.h"
 #include "log_panel.h"
 #include "panels/data_manager_panel.h"
+#include "panels/task_center_dock.h"
 #include "project_context.h"
 #include "data/data_manager.h"
 #include "shell/job_engine_qt_bridge.h"
@@ -16,16 +17,18 @@
 #include "widgets/spectral_profile_widget.h"
 #include "widgets/guided_workflow_widget.h"
 #include "widgets/histogram_stretch_widget.h"
-#include "panels/task_center_dock.h"
+#include "widgets/band_composition_rail.h"
 
 #include <QVBoxLayout>
 #include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QTextBrowser>
 #include <QAction>
-#include <QFileInfo>
+#include <QEvent>
 #include <QStatusBar>
 #include <QToolBar>
+#include <QSizePolicy>
 
 #include <qgsapplication.h>
 #include <processing/qgsprocessingalgorithm.h>
@@ -83,63 +86,6 @@ void QgisDesktopWindow::setupDockWidgets()
     // Tabify the left dock widgets
     tabifyDockWidget(m_layersDock, m_browserDock);
     m_layersDock->raise();
-
-    // Project Data Manager panel — asset catalog, separate from the layer tree.
-    // Double-click asks the Display Manager for a layer; remove runs unload
-    // planning with confirmation here in the UI shell.
-    if ( m_projectContext )
-    {
-        m_dataManagerPanel =
-            new sicnu::DataManagerPanel( &m_projectContext->dataManager(), this );
-        addDockWidget( Qt::LeftDockWidgetArea, m_dataManagerPanel );
-        tabifyDockWidget( m_layersDock, m_dataManagerPanel );
-
-        connect( m_dataManagerPanel, &sicnu::DataManagerPanel::displayRequested,
-                 this, [this]( sicnu::data::AssetId assetId ) {
-            if ( !m_projectContext )
-                return;
-            const auto added = m_projectContext->displayManager().addLayer(
-                m_projectContext->mainViewId(), assetId );
-            if ( !added )
-            {
-                QMessageBox::warning(
-                    this, tr( "Add to Display" ),
-                    tr( "The data asset could not be displayed." ) );
-            }
-        } );
-
-        connect( m_dataManagerPanel, &sicnu::DataManagerPanel::unloadRequested,
-                 this, [this]( sicnu::data::AssetId assetId ) {
-            if ( !m_projectContext )
-                return;
-            sicnu::data::DataManager &dataManager = m_projectContext->dataManager();
-            const sicnu::data::UnloadPlan plan = dataManager.planUnload( assetId );
-
-            QString detail = tr( "Unload this data asset from the project?" );
-            if ( !plan.activeLeases().isEmpty() )
-            {
-                detail = tr( "This asset is referenced by %1 display/processing "
-                             "lease(s). Unloading will remove those presentations.\n\n"
-                             "Continue with cascade unload?" )
-                             .arg( plan.activeLeases().size() );
-            }
-            const auto choice = QMessageBox::question(
-                this, tr( "Unload Data Asset" ), detail,
-                QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
-            if ( choice != QMessageBox::Yes )
-                return;
-
-            const sicnu::data::UnloadPlan confirmed =
-                plan.activeLeases().isEmpty() ? plan : plan.confirmedCascade();
-            const auto unloaded = dataManager.unload( confirmed );
-            if ( !unloaded )
-            {
-                QMessageBox::warning(
-                    this, tr( "Unload Data Asset" ),
-                    tr( "The data asset could not be unloaded." ) );
-            }
-        } );
-    }
 
     // Processing Toolbox Panel (Right, with Overview)
     m_processingDock = new QgsDockWidget("Processing Toolbox", this);
@@ -280,6 +226,15 @@ void QgisDesktopWindow::setupDockWidgets()
     m_histogramStretchDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
 
     m_histogramStretch = new HistogramStretchWidget( m_histogramStretchDock );
+    connect( m_histogramStretch, &HistogramStretchWidget::stretchApplied,
+             this, [this]
+    {
+        // The renderer is replaced by the stretch widget. Force the canvas to
+        // schedule a fresh map-render job after that replacement instead of
+        // relying solely on the layer repaint notification.
+        if ( m_mapCanvas )
+            m_mapCanvas->refresh();
+    } );
     m_histogramStretchDock->setWidget( m_histogramStretch );
     addDockWidget( Qt::RightDockWidgetArea, m_histogramStretchDock );
     tabifyDockWidget( m_spectralDock, m_histogramStretchDock );
@@ -410,48 +365,70 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
             m_taskPanelDock->hide();
     } );
 
-    // Compact product ribbon under the menu bar (top chrome), not over the canvas.
+    // ArcGIS Pro style: full-width top chrome ABOVE left/right docks.
+    // setMenuWidget() only gets a menubar-height slot in practice and compresses
+    // the ribbon; top-dock + setCorner(Top*Corner, TopDock) is the reliable
+    // way to 置顶拉通 across the whole window.
     m_ribbonController = new RibbonController( this, this );
     m_ribbonBar = m_ribbonController->createRibbonBar();
     connect( m_ribbonController, &RibbonController::openWorkflowTool,
              this, &QgisDesktopWindow::openWorkflowTool );
 
-    auto *ribbonHost = new QToolBar( tr( "功能区" ), this );
-    ribbonHost->setObjectName( QStringLiteral( "rsRibbonHost" ) );
-    ribbonHost->setMovable( false );
-    ribbonHost->setFloatable( false );
-    ribbonHost->setAllowedAreas( Qt::TopToolBarArea );
-    ribbonHost->setContextMenuPolicy( Qt::PreventContextMenu );
-    ribbonHost->setIconSize( QSize( 16, 16 ) );
-    ribbonHost->setToolButtonStyle( Qt::ToolButtonIconOnly );
-    ribbonHost->setMinimumHeight( 80 );
-    ribbonHost->setMaximumHeight( 84 );
-    ribbonHost->addWidget( m_ribbonBar );
+    auto *chrome = new QWidget;
+    chrome->setObjectName( QStringLiteral( "rsTopChrome" ) );
+    chrome->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+    // QAT(28) + tabs(30) + content(96) + band rail(30) = 184
+    chrome->setFixedHeight( 184 );
 
-    // Insert as the first top toolbar so it sits directly under the menu bar.
-    if ( QToolBar *mapBar = findChild<QToolBar *>( QStringLiteral( "mapToolsToolBar" ) ) )
-        insertToolBar( mapBar, ribbonHost );
-    else
-        addToolBar( Qt::TopToolBarArea, ribbonHost );
+    auto *chromeLay = new QVBoxLayout( chrome );
+    chromeLay->setContentsMargins( 0, 0, 0, 0 );
+    chromeLay->setSpacing( 0 );
+    chromeLay->addWidget( m_ribbonBar );
+
+    m_bandRail = new BandCompositionRail( chrome );
+    m_bandRail->setFixedHeight( 30 );
+    chromeLay->addWidget( m_bandRail );
+
+    m_topChrome = chrome;
+
+    // Corners claim the top strip so the dock spans over left/right docks.
+    setCorner( Qt::TopLeftCorner, Qt::TopDockWidgetArea );
+    setCorner( Qt::TopRightCorner, Qt::TopDockWidgetArea );
+
+    auto *ribbonDock = new QDockWidget( this );
+    ribbonDock->setObjectName( QStringLiteral( "rsRibbonDock" ) );
+    ribbonDock->setWindowTitle( QString() );
+    ribbonDock->setFeatures( QDockWidget::NoDockWidgetFeatures );
+    ribbonDock->setAllowedAreas( Qt::TopDockWidgetArea );
+    ribbonDock->setTitleBarWidget( new QWidget( ribbonDock ) ); // no title chrome
+    ribbonDock->setWidget( chrome );
+    ribbonDock->setFixedHeight( 184 );
+    ribbonDock->setMinimumHeight( 184 );
+    ribbonDock->setMaximumHeight( 184 );
+    addDockWidget( Qt::TopDockWidgetArea, ribbonDock );
+    // Ensure no menu-widget leftovers steal vertical space.
+    setMenuWidget( nullptr );
 }
 
 void QgisDesktopWindow::applyProductShellLayout()
 {
-    // Product shell: Ribbon (top) + map tools + layers are primary.
-    // Hide chrome that duplicates the same entry points (classic RS toolbar,
-    // file toolbar, processing toolbox stack, guided-workflow dock).
+    // Product shell = ArcGIS Pro style: full-width Ribbon at top. No classic QToolBars.
+    // All former toolbar actions live on Ribbon tabs (地图 / 编辑 / 数据 / …).
 
-    if ( QToolBar *tb = findChild<QToolBar *>( QStringLiteral( "rsToolBar" ) ) )
-        tb->hide();
-    if ( QToolBar *tb = findChild<QToolBar *>( QStringLiteral( "fileToolBar" ) ) )
-        tb->hide();
-    // Keep compact 导航与显示 toolbar (pan/zoom + contrast stretch shortcuts).
-    if ( QToolBar *tb = findChild<QToolBar *>( QStringLiteral( "mapToolsToolBar" ) ) )
+    // Full-width top strip over left/right docks.
+    setCorner( Qt::TopLeftCorner, Qt::TopDockWidgetArea );
+    setCorner( Qt::TopRightCorner, Qt::TopDockWidgetArea );
+    setMenuWidget( nullptr );
+
+    // Detach + hide every QToolBar (including restoreState leftovers).
+    const QList<QToolBar *> bars = findChildren<QToolBar *>();
+    for ( QToolBar *tb : bars )
     {
-        tb->show();
-        // Sit directly under the ribbon host.
-        if ( QToolBar *ribbonHost = findChild<QToolBar *>( QStringLiteral( "rsRibbonHost" ) ) )
-            insertToolBarBreak( ribbonHost );
+        if ( !tb )
+            continue;
+        tb->setVisible( false );
+        tb->hide();
+        removeToolBar( tb );
     }
 
     auto hideDock = []( QDockWidget *dock ) {
@@ -486,8 +463,35 @@ void QgisDesktopWindow::applyProductShellLayout()
     if ( m_taskPanelDock && !m_taskPanelDock->isVisible() )
         m_taskPanelDock->hide();
 
+    // Pin ribbon dock to top with fixed product height.
+    if ( QDockWidget *ribbonDock = findChild<QDockWidget *>( QStringLiteral( "rsRibbonDock" ) ) )
+    {
+        ribbonDock->setFeatures( QDockWidget::NoDockWidgetFeatures );
+        ribbonDock->setAllowedAreas( Qt::TopDockWidgetArea );
+        if ( !ribbonDock->titleBarWidget() )
+            ribbonDock->setTitleBarWidget( new QWidget( ribbonDock ) );
+        ribbonDock->setFixedHeight( 184 );
+        ribbonDock->show();
+        addDockWidget( Qt::TopDockWidgetArea, ribbonDock );
+        ribbonDock->raise();
+    }
+    if ( m_topChrome )
+    {
+        m_topChrome->setFixedHeight( 184 );
+        m_topChrome->show();
+    }
     if ( m_ribbonBar )
         m_ribbonBar->show();
+    if ( m_bandRail )
+        m_bandRail->show();
+
+    // Keep the detached action-host menubar hidden (never install it).
+    if ( m_hiddenMenuBar )
+    {
+        m_hiddenMenuBar->setNativeMenuBar( false );
+        m_hiddenMenuBar->setMaximumHeight( 0 );
+        m_hiddenMenuBar->hide();
+    }
 }
 
 void QgisDesktopWindow::refreshWorkflowLayerChoices()

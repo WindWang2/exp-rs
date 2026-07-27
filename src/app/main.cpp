@@ -19,6 +19,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QDateTime>
+#include <QStyleFactory>
 #include <memory>
 
 // QGIS C++ includes
@@ -171,7 +172,9 @@ int main(int argc, char *argv[])
     QFontDatabase::addApplicationFont(fontDir + "/IBMPlexSans.ttf");
     QFontDatabase::addApplicationFont(fontDir + "/IBMPlexMono-Regular.ttf");
 
-    // Load QSS theme
+    // Light theme: Fusion + Canopy Lab QSS
+    if ( QStyle *fusion = QStyleFactory::create( QStringLiteral( "Fusion" ) ) )
+        app->setStyle( fusion );
     QString qssPath = AppPaths::resolveDataPath("resources/styles.qss");
     QFile styleFile(qssPath);
     if (styleFile.open(QFile::ReadOnly)) {

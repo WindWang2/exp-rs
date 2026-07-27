@@ -29,7 +29,7 @@ TaskPanelHost::TaskPanelHost( QWidget *parent )
   m_help = new QLabel( this );
   m_help->setObjectName( QStringLiteral( "rsTaskPanelHelp" ) );
   m_help->setWordWrap( true );
-  m_help->setStyleSheet( QStringLiteral( "color: #5b6473;" ) );
+  m_help->setObjectName( QStringLiteral( "rsDialogHint" ) );
   root->addWidget( m_help );
 
   m_form = new SchemaFormBuilder( this );
