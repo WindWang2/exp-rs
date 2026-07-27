@@ -1301,6 +1301,28 @@ target_include_directories(test_georeferencing_session PRIVATE
 set_target_properties(test_georeferencing_session PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_georeferencing_session)
 
+# #34 — SIFT / template match Task Center seams + Session thin push
+add_executable(test_georef_match_task_center test_georef_match_task_center.cpp)
+target_link_libraries(test_georef_match_task_center PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+  sicnu_jobs
+  sicnu_task_center
+)
+target_include_directories(test_georef_match_task_center PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_georef_match_task_center PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_georef_match_task_center)
+
 add_executable(test_georef_session_state
   test_georef_session_state.cpp
   ${CMAKE_SOURCE_DIR}/src/app/georeferencer/rs_georef_session_state.cpp

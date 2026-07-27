@@ -53,6 +53,7 @@ class QgsGeorefShellWindow : public QMainWindow
     RsGeorefSessionState *sessionStateForTest() { return &mSession; }
     /// Deep Georeferencing Session (GCP fit + warp snapshots + Task Center).
     RsGeoreferencingSession *georefSessionForTest() { return &mGeorefSession; }
+    RsGeoreferencingSession &georefSession() { return mGeorefSession; }
 
     QgsMapCanvas *srcCanvas() const { return mSrcCanvas; }
     QgsMapCanvas *dstCanvas() const { return mDstCanvas; }
