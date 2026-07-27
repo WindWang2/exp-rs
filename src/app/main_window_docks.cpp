@@ -566,26 +566,52 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     setMenuWidget( nullptr );
 }
 
+void QgisDesktopWindow::layoutToolbarsUnderRibbon()
+{
+    // Product toolbars live under the top ribbon dock, at most two rows.
+    // Row break is already set between mapToolsToolBar and digitizeToolBar.
+    QList<QToolBar *> productBars;
+    if ( auto *tb = findChild<QToolBar *>( QStringLiteral( "mapToolsToolBar" ) ) )
+        productBars.append( tb );
+    if ( auto *tb = findChild<QToolBar *>( QStringLiteral( "digitizeToolBar" ) ) )
+        productBars.append( tb );
+
+    // Hide non-product / restoreState leftovers so they cannot create a 3rd row.
+    for ( QToolBar *tb : findChildren<QToolBar *>() )
+    {
+        if ( !tb || productBars.contains( tb ) )
+            continue;
+        tb->hide();
+        removeToolBar( tb );
+    }
+
+    for ( QToolBar *tb : productBars )
+    {
+        if ( !tb )
+            continue;
+        tb->setAllowedAreas( Qt::TopToolBarArea | Qt::BottomToolBarArea );
+        addToolBar( Qt::TopToolBarArea, tb );
+    }
+    if ( productBars.size() >= 2 )
+        insertToolBarBreak( productBars[1] );
+}
+
 void QgisDesktopWindow::applyProductShellLayout()
 {
-    // Product shell = ArcGIS Pro style: full-width Ribbon at top. No classic QToolBars.
-    // All former toolbar actions live on Ribbon tabs (地图 / 编辑 / 数据 / …).
+    // Product shell: full-width Ribbon on top; optional classic toolbars under it
+    // (max two rows — 导航与显示 / 数字化). Primary tools remain on the Ribbon.
 
     // Full-width top strip over left/right docks.
     setCorner( Qt::TopLeftCorner, Qt::TopDockWidgetArea );
     setCorner( Qt::TopRightCorner, Qt::TopDockWidgetArea );
     setMenuWidget( nullptr );
 
-    // Detach + hide every QToolBar (including restoreState leftovers).
-    const QList<QToolBar *> bars = findChildren<QToolBar *>();
-    for ( QToolBar *tb : bars )
-    {
-        if ( !tb )
-            continue;
-        tb->setVisible( false );
+    layoutToolbarsUnderRibbon();
+    // Default: toolbars off (user re-enables via ribbon context menu → 工具栏).
+    if ( auto *tb = findChild<QToolBar *>( QStringLiteral( "mapToolsToolBar" ) ) )
         tb->hide();
-        removeToolBar( tb );
-    }
+    if ( auto *tb = findChild<QToolBar *>( QStringLiteral( "digitizeToolBar" ) ) )
+        tb->hide();
 
     auto hideDock = []( QDockWidget *dock ) {
         if ( dock )

@@ -564,22 +564,75 @@ void QgisDesktopWindow::setupMenu()
 
 void QgisDesktopWindow::setupToolbars()
 {
-    // Product shell: no classic QToolBars on the main window.
-    // All former toolbar actions live on the Ribbon (地图 / 编辑 / 数据 / …).
+    // Optional classic toolbars sit under the Ribbon (max 2 rows). Toggle via
+    // ribbon right-click → 工具栏. Default: hidden; Ribbon remains primary.
 
-    // CRS picker lives on the status bar; create here for wiring.
-    m_crsSelector = new QgsProjectionSelectionWidget( this );
-    m_crsSelector->setOptionVisible( QgsProjectionSelectionWidget::ProjectCrs, true );
-    connect( m_crsSelector, &QgsProjectionSelectionWidget::crsChanged,
-             this, &QgisDesktopWindow::onCrsChanged );
+    auto polishBar = []( QToolBar *tb ) {
+        if ( !tb )
+            return;
+        tb->setMovable( true );
+        tb->setFloatable( false );
+        tb->setIconSize( QSize( 20, 20 ) );
+        tb->setToolButtonStyle( Qt::ToolButtonIconOnly );
+        tb->setAllowedAreas( Qt::TopToolBarArea | Qt::BottomToolBarArea );
+    };
+
+    // Row 1 (when shown): map navigation + identify / measure / display
+    auto *mapToolsToolBar = addToolBar( tr( "导航与显示" ) );
+    mapToolsToolBar->setObjectName( QStringLiteral( "mapToolsToolBar" ) );
+    polishBar( mapToolsToolBar );
+    tip( mapToolsToolBar->addAction( ic( "p_n" ), tr( "平移" ),
+                                     this, &QgisDesktopWindow::panMap ),
+         tr( "平移 (Space)" ) );
+    tip( mapToolsToolBar->addAction( ic( "zoo_in" ), tr( "放大" ),
+                                     this, &QgisDesktopWindow::zoomIn ),
+         tr( "放大" ) );
+    tip( mapToolsToolBar->addAction( ic( "zoo_out" ), tr( "缩小" ),
+                                     this, &QgisDesktopWindow::zoomOut ),
+         tr( "缩小" ) );
+    tip( mapToolsToolBar->addAction( ic( "full_extent" ), tr( "全图" ),
+                                     this, &QgisDesktopWindow::zoomFullExtent ),
+         tr( "全图 (Ctrl+Shift+F)" ) );
+    tip( mapToolsToolBar->addAction( ic( "refresh_view" ), tr( "刷新" ),
+                                     this, &QgisDesktopWindow::refreshMap ),
+         tr( "刷新地图" ) );
+    mapToolsToolBar->addSeparator();
+    tip( mapToolsToolBar->addAction( ic( "identify" ), tr( "识别" ),
+                                     this, &QgisDesktopWindow::identifyFeatures ),
+         tr( "识别 (Ctrl+Shift+I)" ) );
+    tip( mapToolsToolBar->addAction( ic( "me_sure_dist" ), tr( "测距" ),
+                                     this, &QgisDesktopWindow::measureDistance ),
+         tr( "测距 (Ctrl+Shift+D)" ) );
+    tip( mapToolsToolBar->addAction( ic( "me_sure_are_" ), tr( "测面" ),
+                                     this, &QgisDesktopWindow::measureArea ),
+         tr( "测面 (Ctrl+Shift+A)" ) );
+    mapToolsToolBar->addSeparator();
+    tip( mapToolsToolBar->addAction( ic( "enh_nce" ), tr( "显示拉伸" ),
+                                     this, &QgisDesktopWindow::openDisplayStretchPanel ),
+         tr( "显示对比度拉伸（仅改渲染，不导出文件）" ) );
+    tip( mapToolsToolBar->addAction( ic( "dis_l_y" ), tr( "图层属性" ),
+                                     this, &QgisDesktopWindow::layerProperties ),
+         tr( "打开当前图层属性" ) );
+    mapToolsToolBar->hide();
+
+    // Row 2 (when shown): digitizing / vector edit
+    auto *digitizeToolBar = addToolBar( tr( "数字化" ) );
+    digitizeToolBar->setObjectName( QStringLiteral( "digitizeToolBar" ) );
+    polishBar( digitizeToolBar );
 
     if ( m_toggleEditingAction )
+    {
         m_toggleEditingAction->setToolTip( tr( "切换编辑 (Ctrl+E)" ) );
+        digitizeToolBar->addAction( m_toggleEditingAction );
+    }
     if ( m_saveEditsAction )
+    {
         m_saveEditsAction->setToolTip( tr( "保存编辑" ) );
+        digitizeToolBar->addAction( m_saveEditsAction );
+    }
+    digitizeToolBar->addSeparator();
 
-    // Editing tool actions (owned by the window, not a QToolBar).
-    // Enabled only when a vector layer is in editing mode.
+    // Editing tool actions (also used when toolbar is hidden — window-owned).
     auto makeEditAct = [this]( const char *icon, const QString &text, const QString &tipText,
                                void ( QgisDesktopWindow::*slot )() ) -> QAction * {
         auto *a = new QAction( QIcon( QStringLiteral( ":/icons/" ) + QLatin1String( icon ) ), text, this );
@@ -616,6 +669,18 @@ void QgisDesktopWindow::setupToolbars()
         makeEditAct( "mActionDeletePart", tr( "删除部件" ), tr( "删除部件" ),
                      &QgisDesktopWindow::deletePart ),
     };
+    for ( QAction *a : m_editingToolActions )
+        digitizeToolBar->addAction( a );
+    digitizeToolBar->hide();
+
+    // At most two rows under the ribbon: nav row, then digitize row.
+    insertToolBarBreak( digitizeToolBar );
+
+    // CRS picker lives on the status bar; create here for wiring.
+    m_crsSelector = new QgsProjectionSelectionWidget( this );
+    m_crsSelector->setOptionVisible( QgsProjectionSelectionWidget::ProjectCrs, true );
+    connect( m_crsSelector, &QgsProjectionSelectionWidget::crsChanged,
+             this, &QgisDesktopWindow::onCrsChanged );
 }
 void QgisDesktopWindow::setupStatusBar()
 {

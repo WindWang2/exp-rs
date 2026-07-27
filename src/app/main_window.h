@@ -300,6 +300,8 @@ private:
     void savePanelState();
     void restorePanelState();
     void resetPanelLayout();
+    /** Place product toolbars under the ribbon; enforce max two toolbar rows. */
+    void layoutToolbarsUnderRibbon();
     /** Hide chrome that duplicates the Ribbon + Task panel product shell. */
     void applyProductShellLayout();
 

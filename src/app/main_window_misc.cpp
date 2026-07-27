@@ -310,39 +310,44 @@ QMenu *QgisDesktopWindow::createPopupMenu()
 
     menu->addSeparator();
 
-    // ── 工具栏 ────────────────────────────────────────────────────────────
+    // ── 工具栏（Ribbon 下方，最多两行）──────────────────────────────────
     makeSectionTitle( tr( "工具栏" ) );
 
     QList<QAction *> toolbarActions;
-    for ( QToolBar *tb : findChildren<QToolBar *>() )
+    // Only product toolbars — avoids a third row from restoreState leftovers.
+    const QStringList productToolbarNames = {
+        QStringLiteral( "mapToolsToolBar" ),
+        QStringLiteral( "digitizeToolBar" ),
+    };
+    for ( const QString &name : productToolbarNames )
     {
+        auto *tb = findChild<QToolBar *>( name );
         if ( !tb )
-            continue;
-        // Product shell hides classic toolbars by default; still list them so
-        // users can re-show via this menu (QGIS does the same).
-        if ( tb->objectName() == QLatin1String( "rsRibbonHost" ) )
             continue;
         QAction *act = tb->toggleViewAction();
         if ( !act )
             continue;
-        if ( tb->windowTitle().trimmed().isEmpty() && tb->objectName().isEmpty() )
-            continue;
         if ( act->text().trimmed().isEmpty() )
-            act->setText( tb->objectName().isEmpty() ? tr( "工具栏" ) : tb->objectName() );
+            act->setText( tb->windowTitle() );
+        // Keep bars under the ribbon when re-shown.
+        connect( act, &QAction::toggled, this, [this]( bool ) {
+            layoutToolbarsUnderRibbon();
+        }, Qt::UniqueConnection );
         toolbarActions.append( act );
     }
 
-    std::sort( toolbarActions.begin(), toolbarActions.end(),
-               []( const QAction *a, const QAction *b ) {
-                   return a->text().localeAwareCompare( b->text() ) < 0;
-               } );
     for ( QAction *a : toolbarActions )
         menu->addAction( a );
 
     if ( toolbarActions.isEmpty() )
     {
-        QAction *empty = menu->addAction( tr( "（无工具栏 — 已由 Ribbon 承接）" ) );
+        QAction *empty = menu->addAction( tr( "（无工具栏）" ) );
         empty->setEnabled( false );
+    }
+    else
+    {
+        QAction *hint = menu->addAction( tr( "提示：工具栏显示在 Ribbon 下方（最多两行）" ) );
+        hint->setEnabled( false );
     }
 
     menu->addSeparator();
@@ -383,7 +388,8 @@ void QgisDesktopWindow::resetPanelLayout()
         addDockWidget( Qt::BottomDockWidgetArea, m_logDock );
 
     applyProductShellLayout();
-    statusBar()->showMessage( tr( "布局已重置为 Ribbon + 任务面板模式" ), 3000 );
+    layoutToolbarsUnderRibbon();
+    statusBar()->showMessage( tr( "布局已重置为 Ribbon 模式（工具栏可选，最多两行）" ), 3000 );
 }
 
 void QgisDesktopWindow::savePanelState()
