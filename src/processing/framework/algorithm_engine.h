@@ -1,0 +1,73 @@
+#pragma once
+
+#include <QString>
+#include <QVariantMap>
+#include <QList>
+#include <QMap>
+#include <memory>
+#include <functional>
+
+#include "qgsprocessingalgorithm.h"
+#include "qgsprocessingcontext.h"
+#include "qgsprocessingfeedback.h"
+
+namespace sicnu {
+
+struct AlgorithmDescriptor {
+    QString id;
+    QString name;
+    QString group;
+    QString description;
+    QVariantMap parameterSchema;
+};
+
+class TaskAlgorithmAdapter {
+public:
+    virtual ~TaskAlgorithmAdapter() = default;
+    virtual AlgorithmDescriptor descriptor() const = 0;
+    virtual bool validateParameters(const QVariantMap& params, QString& error) const = 0;
+    virtual bool execute(const QVariantMap& params, std::function<void(double)> progressCallback, QString& error) = 0;
+};
+
+class QgsProcessingAlgorithmAdapter : public TaskAlgorithmAdapter {
+public:
+    explicit QgsProcessingAlgorithmAdapter(std::unique_ptr<QgsProcessingAlgorithm> algo);
+    ~QgsProcessingAlgorithmAdapter() override = default;
+
+    AlgorithmDescriptor descriptor() const override;
+    bool validateParameters(const QVariantMap& params, QString& error) const override;
+    bool execute(const QVariantMap& params, std::function<void(double)> progressCallback, QString& error) override;
+
+    QgsProcessingAlgorithm* algorithm() const { return m_algo.get(); }
+
+private:
+    std::unique_ptr<QgsProcessingAlgorithm> m_algo;
+};
+
+class AlgorithmEngine {
+public:
+    static AlgorithmEngine& instance();
+
+    void registerAlgorithm(std::shared_ptr<TaskAlgorithmAdapter> adapter);
+    void registerProcessingAlgorithm(std::unique_ptr<QgsProcessingAlgorithm> algo);
+
+    QList<AlgorithmDescriptor> registeredAlgorithms() const;
+    std::shared_ptr<TaskAlgorithmAdapter> findAlgorithm(const QString& id) const;
+
+    void initialize();
+    void populateFromProcessingRegistry();
+
+    bool validateParameters(const QString& id, const QVariantMap& params, QString& error) const;
+    bool executeAlgorithm(const QString& id, const QVariantMap& params, std::function<void(double)> progressCallback, QString& error);
+    void clear();
+
+private:
+    AlgorithmEngine() = default;
+    ~AlgorithmEngine() = default;
+    AlgorithmEngine(const AlgorithmEngine&) = delete;
+    AlgorithmEngine& operator=(const AlgorithmEngine&) = delete;
+
+    QMap<QString, std::shared_ptr<TaskAlgorithmAdapter>> m_adapters;
+};
+
+} // namespace sicnu

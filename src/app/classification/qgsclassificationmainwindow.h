@@ -15,6 +15,7 @@
 #include "rs_classify_workflow_controller.h"
 #include "rs_feature_scaler.h"
 #include "rs_pixel_ignore_options.h"
+#include "rs_cv_task.h"
 #include "rs_post_process_task.h"
 
 class QCheckBox;
@@ -51,6 +52,13 @@ class RsAccuracyPanel;
 class RsClassifierSetupBar;
 class RsClassifyStepperBar;
 class RsClassifyStepHost;
+class RsClassificationTask;
+class QgsTask;
+
+namespace sicnu
+{
+  struct AlgorithmTaskInfo;
+}
 
 /**
  * \brief Pixel-based supervised classification window.
@@ -74,6 +82,13 @@ class QgsClassificationMainWindow : public QMainWindow
     void applyClassification();
     void applyPreview();
     void runCrossValidation();
+    long startPostProcessTask( const RsPostProcessConfig &cfg,
+                               bool loadToLayers,
+                               const QString &jobTitle,
+                               const QString &algorithmId );
+    long startCrossValidationTask( const cv::Mat &X,
+                                   const cv::Mat &y,
+                                   RsCvTask::ClassifierFactory factory );
     void recomputeSpectralCurves();
     void recomputeJmMatrix();
     void exportRois();
@@ -86,6 +101,15 @@ class QgsClassificationMainWindow : public QMainWindow
     void closeEvent( QCloseEvent *e ) override;
 
   private:
+    enum class PendingClassificationOperation
+    {
+      None,
+      Apply,
+      Preview,
+      PostProcess,
+      CrossValidation
+    };
+
     void setupMenus();
     void setupToolbars();
     void setupDocks();
@@ -139,6 +163,7 @@ class QgsClassificationMainWindow : public QMainWindow
     int resolveActiveClassId( int preferred = 0 ) const;
     void ensureSampleLayerEditing( bool on );
     void deleteSelectedSamples();
+    void onClassificationTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
     QgisInterface *m_iface = nullptr;
     QgsMapCanvas *m_canvas = nullptr;
@@ -179,6 +204,12 @@ class QgsClassificationMainWindow : public QMainWindow
     QPushButton *m_stepApplyBtn = nullptr;
     bool m_trainSampleRole = true;
     bool m_classifyBusy = false;
+    long m_pendingClassificationTaskId = -1;
+    QgsTask *m_pendingClassificationWorker = nullptr;
+    PendingClassificationOperation m_pendingClassificationOperation = PendingClassificationOperation::None;
+    bool m_pendingPostProcessLoadsLayers = false;
+    QString m_pendingClassificationAlgorithm;
+    QString m_pendingClassificationOutput;
 
     RsAccuracyPanel *m_accuracyPanel = nullptr;
     QPushButton *m_stepAccuracyPopupBtn = nullptr;

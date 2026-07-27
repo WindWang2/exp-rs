@@ -25,7 +25,8 @@ add_library(sicnu_processing SHARED
     framework/error_reporter.cpp
     framework/input_validator.cpp
     framework/algorithm_engine.cpp
-    framework/task_center.cpp
+    # task_center.cpp lives in sicnu_task_center (below): JobEngine link would
+    # form a cycle if pulled into this shared lib (processing→jobs→operators→processing).
     framework/output_committer.cpp
     framework/collection_import_service.cpp
 
@@ -152,6 +153,26 @@ target_link_libraries(sicnu_processing PUBLIC
 # Sicnu::data themselves.
 target_link_libraries(sicnu_processing PRIVATE
     Sicnu::data
+)
+
+# Task Center (#26–#29): separate static lib so JobEngine can be linked without
+# a processing↔jobs↔operators cycle. OutputCommitter keeps only a TaskCenter*
+# and resolves symbols when final targets also link sicnu_task_center.
+add_library(sicnu_task_center STATIC
+    framework/task_center.cpp
+    # Task Center seam for OutputCommitter — kept out of sicnu_processing so
+    # that library does not need JobEngine / TaskCenter link deps.
+    framework/output_committer_task_center.cpp
+)
+target_include_directories(sicnu_task_center PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(sicnu_task_center PUBLIC
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+    sicnu_jobs
 )
 
 install(TARGETS sicnu_processing

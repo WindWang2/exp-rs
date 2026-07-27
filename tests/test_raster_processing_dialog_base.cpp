@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "app/dialogs/raster_processing_dialog_base.h"
+#include "processing/framework/task_center.h"
 
 #include <QApplication>
 #include <QVBoxLayout>
@@ -34,6 +35,7 @@ public:
     }
 
     QPushButton *runButton() const { return m_runButton; }
+    long pendingTaskId() const { return m_pendingTaskId; }
 
 protected:
     QString toolName() const override { return QStringLiteral("test_dialog"); }
@@ -86,6 +88,7 @@ TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
     {
         bool accepted = false;
         QObject::connect(&dialog, &QDialog::accepted, [&]() { accepted = true; });
+        const auto taskCountBefore = sicnu::TaskCenter::instance().allTasks().size();
 
         dialog.runGdalTask([]() -> QString {
             return QStringLiteral("/tmp/test_out.tif");
@@ -93,6 +96,8 @@ TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
 
         REQUIRE_FALSE(dialog.runButton()->isEnabled());
         REQUIRE(dialog.isRunning());
+        REQUIRE(dialog.pendingTaskId() > 0);
+        REQUIRE(sicnu::TaskCenter::instance().allTasks().size() == taskCountBefore + 1);
 
         QEventLoop loop;
         QTimer::singleShot(5000, &loop, &QEventLoop::quit);

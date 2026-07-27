@@ -76,6 +76,7 @@ target_link_libraries(qgis_app_classify PUBLIC
     sicnu_processing
     sicnu_workflow
     sicnu_jobs
+    sicnu_task_center
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
