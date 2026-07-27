@@ -28,6 +28,8 @@ namespace sicnu
  * Project Data Manager panel — catalog projection + metadata inspector.
  *
  * Top: tree of Data Assets and Collections (multi-select for batch actions).
+ *   Name cell: status color bar + kind icon/prefix + display name
+ *   (no separate kind/status columns).
  * Bottom: metadata inspector for the current selection.
  * Shell wires display / unload / promote signals.
  */

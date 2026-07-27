@@ -1,13 +1,17 @@
 #include "data_manager_panel.h"
 
 #include <QApplication>
+#include <QColor>
 #include <QHeaderView>
 #include <QIcon>
 #include <QLabel>
 #include <QMenu>
+#include <QPainter>
 #include <QSize>
 #include <QSplitter>
 #include <QStyle>
+#include <QStyledItemDelegate>
+#include <QStyleOptionViewItem>
 #include <QTextBrowser>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
@@ -28,8 +32,13 @@ namespace
 
 constexpr int kAssetIdRole = Qt::UserRole;
 constexpr int kCollectionIdRole = Qt::UserRole + 1;
-/// Human-readable label for icon-only columns (kind / status) — used by rowText().
-constexpr int kColumnLabelRole = Qt::UserRole + 2;
+constexpr int kDisplayNameRole = Qt::UserRole + 2;
+constexpr int kKindLabelRole = Qt::UserRole + 3;
+constexpr int kStatusLabelRole = Qt::UserRole + 4;
+constexpr int kStatusColorRole = Qt::UserRole + 5;
+
+constexpr int kStatusBarWidth = 4;
+constexpr int kStatusBarGap = 6;
 
 QIcon appIcon( const char *alias )
 {
@@ -59,41 +68,64 @@ QIcon kindIcon( sicnu::data::AssetKind kind )
   return styleIcon( QStyle::SP_FileIcon );
 }
 
-QIcon statusIcon( sicnu::data::AssetState state )
+QColor statusColor( sicnu::data::AssetState state )
 {
   switch ( state )
   {
     case sicnu::data::AssetState::Ready:
-      return appIcon( "v_lid_tion_ok" );
+      return QColor( 0x1a, 0x7f, 0x37 ); // green — available
     case sicnu::data::AssetState::Registered:
-      return styleIcon( QStyle::SP_FileDialogInfoView );
     case sicnu::data::AssetState::Resolving:
-      return styleIcon( QStyle::SP_BrowserReload );
+      return QColor( 0x9a, 0x67, 0x00 ); // amber — in progress
     case sicnu::data::AssetState::Missing:
     case sicnu::data::AssetState::UnavailableSource:
-      return appIcon( "w_rning_l_bel" );
-    case sicnu::data::AssetState::Offline:
-      return appIcon( "cloud_sync" );
-    case sicnu::data::AssetState::AuthenticationRequired:
-      return styleIcon( QStyle::SP_MessageBoxQuestion );
     case sicnu::data::AssetState::Error:
-      return styleIcon( QStyle::SP_MessageBoxCritical );
+      return QColor( 0xcf, 0x22, 0x2e ); // red — unavailable
+    case sicnu::data::AssetState::Offline:
+    case sicnu::data::AssetState::AuthenticationRequired:
+      return QColor( 0x65, 0x6d, 0x76 ); // gray
     case sicnu::data::AssetState::Stale:
-      return appIcon( "w_rning_l_bel" );
+      return QColor( 0xbf, 0x87, 0x00 ); // orange
   }
-  return styleIcon( QStyle::SP_MessageBoxInformation );
+  return QColor( 0x8c, 0x95, 0x9f );
 }
 
-void setIconColumn( QTreeWidgetItem *item, int column, const QIcon &icon, const QString &label )
+/// Paints a tall status color bar on the left of the name cell, then icon + text.
+class NameWithStatusBarDelegate : public QStyledItemDelegate
 {
-  if ( !item )
-    return;
-  item->setText( column, QString() );
-  item->setIcon( column, icon );
-  item->setToolTip( column, label );
-  item->setData( column, kColumnLabelRole, label );
-  item->setTextAlignment( column, Qt::AlignCenter );
-}
+  public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    void paint( QPainter *painter, const QStyleOptionViewItem &option,
+                const QModelIndex &index ) const override
+    {
+      QStyleOptionViewItem opt = option;
+      initStyleOption( &opt, index );
+
+      const QColor barColor = index.data( kStatusColorRole ).value<QColor>();
+      QRect barRect = opt.rect;
+      barRect.setWidth( kStatusBarWidth );
+      // Slight vertical inset so the bar reads as a stripe, not a full cell fill.
+      barRect.adjust( 0, 2, 0, -2 );
+
+      painter->save();
+      if ( barColor.isValid() )
+      {
+        painter->fillRect( barRect, barColor );
+        opt.rect.adjust( kStatusBarWidth + kStatusBarGap, 0, 0, 0 );
+      }
+      QStyledItemDelegate::paint( painter, opt, index );
+      painter->restore();
+    }
+
+    QSize sizeHint( const QStyleOptionViewItem &option,
+                    const QModelIndex &index ) const override
+    {
+      QSize s = QStyledItemDelegate::sizeHint( option, index );
+      s.setWidth( s.width() + kStatusBarWidth + kStatusBarGap );
+      return s;
+    }
+};
 
 QString escapeHtml( const QString &text )
 {
@@ -119,6 +151,55 @@ QString kindText( sicnu::data::AssetKind kind )
       return QObject::tr( "虚拟栅格" );
   }
   return QObject::tr( "未知" );
+}
+
+/// Detailed type label used as a name prefix (e.g. 多波段栅格 / 单波段栅格).
+QString kindPrefix( const sicnu::data::AssetSnapshot &snapshot )
+{
+  switch ( snapshot.kind() )
+  {
+    case sicnu::data::AssetKind::Raster:
+    {
+      if ( const auto *raster =
+             std::get_if<sicnu::data::RasterStructure>( &snapshot.structure() ) )
+      {
+        if ( raster->bandCount <= 1 )
+          return QObject::tr( "单波段栅格" );
+        return QObject::tr( "多波段栅格" );
+      }
+      return QObject::tr( "栅格" );
+    }
+    case sicnu::data::AssetKind::Vector:
+      return QObject::tr( "矢量" );
+    case sicnu::data::AssetKind::RemoteMap:
+      return QObject::tr( "远程地图" );
+    case sicnu::data::AssetKind::VirtualRaster:
+      return QObject::tr( "虚拟栅格" );
+  }
+  return QObject::tr( "未知" );
+}
+
+void configureNameCell( QTreeWidgetItem *item,
+                        const QString &displayName,
+                        const QString &kindLabel,
+                        const QIcon &icon,
+                        const QString &statusLabel,
+                        const QColor &barColor,
+                        const QString &sourcePath = {} )
+{
+  if ( !item )
+    return;
+  item->setIcon( 0, icon );
+  item->setText( 0, QStringLiteral( "%1 · %2" ).arg( kindLabel, displayName ) );
+  item->setData( 0, kDisplayNameRole, displayName );
+  item->setData( 0, kKindLabelRole, kindLabel );
+  item->setData( 0, kStatusLabelRole, statusLabel );
+  item->setData( 0, kStatusColorRole, barColor );
+  QString tip = QStringLiteral( "%1\n%2: %3" )
+                  .arg( displayName, QObject::tr( "状态" ), statusLabel );
+  if ( !sourcePath.isEmpty() )
+    tip += QStringLiteral( "\n%1" ).arg( sourcePath );
+  item->setToolTip( 0, tip );
 }
 
 QString statusText( sicnu::data::AssetState state )
@@ -375,24 +456,21 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
 
   m_tree = new QTreeWidget( this );
   m_tree->setObjectName( QStringLiteral( "dataManagerTree" ) );
-  m_tree->setColumnCount( 5 );
-  m_tree->setHeaderLabels(
-    { tr( "名称" ), tr( "类型" ), tr( "状态" ), tr( "持久性" ), tr( "引用" ) } );
+  // Name embeds status bar + kind prefix/icon; no separate kind/status columns.
+  m_tree->setColumnCount( 3 );
+  m_tree->setHeaderLabels( { tr( "名称" ), tr( "持久性" ), tr( "引用" ) } );
   m_tree->setRootIsDecorated( true );
   m_tree->setSelectionMode( QAbstractItemView::ExtendedSelection );
   m_tree->setContextMenuPolicy( Qt::CustomContextMenu );
   m_tree->setIconSize( QSize( 18, 18 ) );
   m_tree->setUniformRowHeights( true );
+  m_tree->setItemDelegateForColumn( 0, new NameWithStatusBarDelegate( m_tree ) );
   m_tree->header()->setStretchLastSection( false );
   m_tree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
-  m_tree->header()->setSectionResizeMode( 1, QHeaderView::Fixed );
-  m_tree->header()->setSectionResizeMode( 2, QHeaderView::Fixed );
-  m_tree->header()->setSectionResizeMode( 3, QHeaderView::ResizeToContents );
-  m_tree->header()->setSectionResizeMode( 4, QHeaderView::ResizeToContents );
-  m_tree->setColumnWidth( 1, 44 );
-  m_tree->setColumnWidth( 2, 44 );
-  m_tree->headerItem()->setToolTip( 1, tr( "类型（悬停查看文字）" ) );
-  m_tree->headerItem()->setToolTip( 2, tr( "状态（悬停查看文字）" ) );
+  m_tree->header()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
+  m_tree->header()->setSectionResizeMode( 2, QHeaderView::ResizeToContents );
+  m_tree->headerItem()->setToolTip(
+    0, tr( "左侧色条表示状态（绿=可用，红=不可用）；类型作为名称前缀" ) );
   m_tree->setMinimumWidth( 220 );
 
   auto *detailHost = new QWidget( this );
@@ -454,19 +532,28 @@ int DataManagerPanel::rowCount() const
 
 QString DataManagerPanel::rowText( sicnu::data::AssetId id, int column ) const
 {
+  // Logical columns (stable for tests/API, independent of visible tree columns):
+  // 0 display name, 1 kind label, 2 status label, 3 persistence, 4 refs
   QTreeWidgetItemIterator it( m_tree );
   while ( *it )
   {
     if ( ( *it )->data( 0, kAssetIdRole ).toString() == id.toString() )
     {
-      // Kind / status are icon-only; expose the label via tool-role for tests/API.
-      if ( column == 1 || column == 2 )
+      switch ( column )
       {
-        const QString label = ( *it )->data( column, kColumnLabelRole ).toString();
-        if ( !label.isEmpty() )
-          return label;
+        case 0:
+          return ( *it )->data( 0, kDisplayNameRole ).toString();
+        case 1:
+          return ( *it )->data( 0, kKindLabelRole ).toString();
+        case 2:
+          return ( *it )->data( 0, kStatusLabelRole ).toString();
+        case 3:
+          return ( *it )->text( 1 );
+        case 4:
+          return ( *it )->text( 2 );
+        default:
+          return QString();
       }
-      return ( *it )->text( column );
     }
     ++it;
   }
@@ -540,18 +627,24 @@ void DataManagerPanel::addAssetRow( QTreeWidgetItem *parent,
 {
   auto *item = parent ? new QTreeWidgetItem( parent )
                       : new QTreeWidgetItem( m_tree );
-  item->setText( 0, snapshot.displayName() );
-  setIconColumn( item, 1, kindIcon( snapshot.kind() ), kindText( snapshot.kind() ) );
+  const QString kindLabel = kindPrefix( snapshot );
   const QString statusLabel = statusText( snapshot.state() );
-  setIconColumn( item, 2, statusIcon( snapshot.state() ), statusLabel );
-  item->setText( 3, persistenceText( snapshot.persistence() ) );
-  item->setText( 4, QString::number( referenceCount( snapshot.id() ) ) );
+  configureNameCell( item,
+                     snapshot.displayName(),
+                     kindLabel,
+                     kindIcon( snapshot.kind() ),
+                     statusLabel,
+                     statusColor( snapshot.state() ),
+                     snapshot.source().canonicalSource );
+  item->setText( 1, persistenceText( snapshot.persistence() ) );
+  item->setText( 2, QString::number( referenceCount( snapshot.id() ) ) );
   item->setData( 0, kAssetIdRole, snapshot.id().toString() );
-  item->setToolTip( 0, snapshot.source().canonicalSource );
   if ( snapshot.state() == sicnu::data::AssetState::Missing )
   {
-    item->setToolTip( 2, tr( "源缺失 — 可通过重定位恢复" ) );
-    item->setData( 2, kColumnLabelRole, statusLabel );
+    item->setToolTip( 0,
+                      tr( "%1\n状态: 源缺失 — 可通过重定位恢复\n%2" )
+                        .arg( snapshot.displayName(),
+                              snapshot.source().canonicalSource ) );
   }
 }
 
@@ -574,10 +667,13 @@ void DataManagerPanel::refresh()
       continue;
 
     auto *collectionItem = new QTreeWidgetItem( m_tree );
-    collectionItem->setText( 0, collection->displayName );
-    setIconColumn( collectionItem, 1, appIcon( "d_t_b_se" ), tr( "集合" ) );
-    setIconColumn( collectionItem, 2, styleIcon( QStyle::SP_DirIcon ), tr( "集合" ) );
-    collectionItem->setText( 4, QString::number( collection->childAssetIds.size() ) );
+    configureNameCell( collectionItem,
+                       collection->displayName,
+                       tr( "集合" ),
+                       appIcon( "d_t_b_se" ),
+                       tr( "集合" ),
+                       QColor( 0x09, 0x69, 0xda ) ); // blue stripe for collections
+    collectionItem->setText( 2, QString::number( collection->childAssetIds.size() ) );
     collectionItem->setData( 0, kCollectionIdRole, collection->id.toString() );
 
     for ( const sicnu::data::AssetId &childId : collection->childAssetIds )
