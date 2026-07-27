@@ -7,6 +7,7 @@
 #include <QMenuBar>
 #include <QToolBar>
 #include <QStatusBar>
+#include <QSizePolicy>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QMenu>
@@ -570,16 +571,22 @@ void QgisDesktopWindow::setupToolbars()
     auto polishBar = []( QToolBar *tb ) {
         if ( !tb )
             return;
-        tb->setMovable( true );
+        // Not a QMainWindow toolbar area child — lives in the top chrome strip
+        // under the ribbon so it cannot paint above the ribbon dock.
+        tb->setMovable( false );
         tb->setFloatable( false );
         tb->setIconSize( QSize( 20, 20 ) );
         tb->setToolButtonStyle( Qt::ToolButtonIconOnly );
-        tb->setAllowedAreas( Qt::TopToolBarArea | Qt::BottomToolBarArea );
+        tb->setFixedHeight( 32 );
+        tb->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
     };
 
     // Row 1 (when shown): map navigation + identify / measure / display
-    auto *mapToolsToolBar = addToolBar( tr( "导航与显示" ) );
+    // Parent is the main window until the chrome strip adopts them.
+    m_mapToolsToolBar = new QToolBar( tr( "导航与显示" ), this );
+    auto *mapToolsToolBar = m_mapToolsToolBar;
     mapToolsToolBar->setObjectName( QStringLiteral( "mapToolsToolBar" ) );
+    mapToolsToolBar->setWindowTitle( tr( "导航与显示" ) );
     polishBar( mapToolsToolBar );
     tip( mapToolsToolBar->addAction( ic( "p_n" ), tr( "平移" ),
                                      this, &QgisDesktopWindow::panMap ),
@@ -616,8 +623,10 @@ void QgisDesktopWindow::setupToolbars()
     mapToolsToolBar->hide();
 
     // Row 2 (when shown): digitizing / vector edit
-    auto *digitizeToolBar = addToolBar( tr( "数字化" ) );
+    m_digitizeToolBar = new QToolBar( tr( "数字化" ), this );
+    auto *digitizeToolBar = m_digitizeToolBar;
     digitizeToolBar->setObjectName( QStringLiteral( "digitizeToolBar" ) );
+    digitizeToolBar->setWindowTitle( tr( "数字化" ) );
     polishBar( digitizeToolBar );
 
     if ( m_toggleEditingAction )
@@ -672,9 +681,6 @@ void QgisDesktopWindow::setupToolbars()
     for ( QAction *a : m_editingToolActions )
         digitizeToolBar->addAction( a );
     digitizeToolBar->hide();
-
-    // At most two rows under the ribbon: nav row, then digitize row.
-    insertToolBarBreak( digitizeToolBar );
 
     // CRS picker lives on the status bar; create here for wiring.
     m_crsSelector = new QgsProjectionSelectionWidget( this );

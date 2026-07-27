@@ -26,6 +26,8 @@
 class QDomDocument;
 class QMenuBar;
 class QSlider;
+class QToolBar;
+class QVBoxLayout;
 class LayerManager;
 class QPainter;
 class QTextBrowser;
@@ -389,6 +391,10 @@ private:
     RibbonController *m_ribbonController = nullptr;
     QWidget *m_ribbonBar = nullptr;
     QWidget *m_topChrome = nullptr;
+    /** Host under band rail for product toolbars (never QMainWindow top area). */
+    QWidget *m_toolbarStrip = nullptr;
+    QToolBar *m_mapToolsToolBar = nullptr;
+    QToolBar *m_digitizeToolBar = nullptr;
     QMenuBar *m_hiddenMenuBar = nullptr;
     QMenu *m_windowMenu = nullptr;
 

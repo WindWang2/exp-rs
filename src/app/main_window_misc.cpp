@@ -314,14 +314,9 @@ QMenu *QgisDesktopWindow::createPopupMenu()
     makeSectionTitle( tr( "工具栏" ) );
 
     QList<QAction *> toolbarActions;
-    // Only product toolbars — avoids a third row from restoreState leftovers.
-    const QStringList productToolbarNames = {
-        QStringLiteral( "mapToolsToolBar" ),
-        QStringLiteral( "digitizeToolBar" ),
-    };
-    for ( const QString &name : productToolbarNames )
+    const QList<QToolBar *> productBars = { m_mapToolsToolBar, m_digitizeToolBar };
+    for ( QToolBar *tb : productBars )
     {
-        auto *tb = findChild<QToolBar *>( name );
         if ( !tb )
             continue;
         QAction *act = tb->toggleViewAction();
@@ -329,7 +324,7 @@ QMenu *QgisDesktopWindow::createPopupMenu()
             continue;
         if ( act->text().trimmed().isEmpty() )
             act->setText( tb->windowTitle() );
-        // Keep bars under the ribbon when re-shown.
+        // Re-host under the ribbon strip and resize chrome when toggled.
         connect( act, &QAction::toggled, this, [this]( bool ) {
             layoutToolbarsUnderRibbon();
         }, Qt::UniqueConnection );
