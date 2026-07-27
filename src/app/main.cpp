@@ -20,6 +20,11 @@
 #include <QStandardPaths>
 #include <QDateTime>
 #include <QStyleFactory>
+#include <QToolBar>
+#include <QToolButton>
+#include <QSplitter>
+#include <QDockWidget>
+#include <iostream>
 #include <memory>
 
 // QGIS C++ includes
@@ -196,16 +201,245 @@ int main(int argc, char *argv[])
     window->show();
     qDebug() << "Window shown";
 
-    // Auto-load sample data if available
-    QString samplePath = AppPaths::resolveDataPath("data/sample_crops.tif");
-    if (QFileInfo::exists(samplePath)) {
-        QPointer<QgisDesktopWindow> safeWindow(window.get());
-        QTimer::singleShot(500, [safeWindow, samplePath]() {
-            if (!safeWindow) return;
-            // Load through the project Data Context so the sample raster is
-            // registered as a Data Asset and displayed via a Display Layer.
-            ( void ) safeWindow->loadDataLayer( samplePath );
-        });
+    // Diagnostic feedback loop (diagnosing-bugs): geometry dump for under-ribbon
+    // toolbars. Run: SICNU_DUMP_CHROME=1 QT_QPA_PLATFORM=offscreen ./build/sicnu_geo_rs
+    // Exit 0 = strip+map toolbar visible with height>0 under band rail; 1 = red.
+    if ( qEnvironmentVariableIsSet( "SICNU_DUMP_CHROME" ) )
+    {
+        QPointer<QgisDesktopWindow> safeWindow( window.get() );
+        QTimer::singleShot( 200, [safeWindow, app]() {
+            if ( !safeWindow )
+            {
+                std::cerr << "[DEBUG-tb] FAIL: window gone\n";
+                app->exit( 1 );
+                return;
+            }
+            auto dumpW = []( const char *tag, QWidget *w ) {
+                if ( !w )
+                {
+                    std::cerr << "[DEBUG-tb] " << tag << " = null\n";
+                    return;
+                }
+                const QRect g = w->geometry();
+                const QPoint tl = w->mapToGlobal( QPoint( 0, 0 ) );
+                std::cerr << "[DEBUG-tb] " << tag
+                          << " name=" << w->objectName().toStdString()
+                          << " class=" << w->metaObject()->className()
+                          << " visible=" << w->isVisible()
+                          << " hidden=" << w->isHidden()
+                          << " geom=" << g.x() << "," << g.y()
+                          << " " << g.width() << "x" << g.height()
+                          << " globalY=" << tl.y()
+                          << " minH=" << w->minimumHeight()
+                          << " maxH=" << w->maximumHeight()
+                          << " parent=" << ( w->parentWidget()
+                                               ? w->parentWidget()->objectName().toStdString()
+                                               : std::string( "null" ) )
+                          << " winFlags=0x" << std::hex << int( w->windowFlags() ) << std::dec
+                          << "\n";
+            };
+
+            QWidget *chrome = safeWindow->findChild<QWidget *>( QStringLiteral( "rsTopChrome" ) );
+            QWidget *strip = safeWindow->findChild<QWidget *>( QStringLiteral( "rsToolbarStrip" ) );
+            QDockWidget *ribbonDock = safeWindow->findChild<QDockWidget *>( QStringLiteral( "rsRibbonDock" ) );
+            QToolBar *mapTb = safeWindow->findChild<QToolBar *>( QStringLiteral( "mapToolsToolBar" ) );
+            QToolBar *digTb = safeWindow->findChild<QToolBar *>( QStringLiteral( "digitizeToolBar" ) );
+            QWidget *band = safeWindow->findChild<QWidget *>( QStringLiteral( "rsBandRail" ) );
+            if ( !band )
+            {
+                // BandCompositionRail may use different object name
+                const auto all = safeWindow->findChildren<QWidget *>();
+                for ( QWidget *w : all )
+                {
+                    if ( w && w->metaObject()->className()
+                         && QString::fromLatin1( w->metaObject()->className() ).contains( QLatin1String( "BandComposition" ) ) )
+                    {
+                        band = w;
+                        break;
+                    }
+                }
+            }
+
+            dumpW( "window", safeWindow.data() );
+            dumpW( "ribbonDock", ribbonDock );
+            dumpW( "chrome", chrome );
+            dumpW( "band", band );
+            dumpW( "strip", strip );
+            dumpW( "mapTools", mapTb );
+            dumpW( "digitize", digTb );
+
+            if ( mapTb && mapTb->toggleViewAction() )
+            {
+                std::cerr << "[DEBUG-tb] mapTools.toggleChecked="
+                          << mapTb->toggleViewAction()->isChecked()
+                          << " actions=" << mapTb->actions().size()
+                          << "\n";
+            }
+
+            int toolBtnVisible = 0;
+            int toolBtnWithIcon = 0;
+            if ( mapTb )
+            {
+                const auto buttons = mapTb->findChildren<QToolButton *>();
+                std::cerr << "[DEBUG-tb] mapTools.toolButtons=" << buttons.size() << "\n";
+                for ( QToolButton *btn : buttons )
+                {
+                    if ( !btn )
+                        continue;
+                    const QRect bg = btn->geometry();
+                    const bool vis = btn->isVisible();
+                    const bool hasIcon = !btn->icon().isNull();
+                    if ( vis )
+                        ++toolBtnVisible;
+                    if ( hasIcon )
+                        ++toolBtnWithIcon;
+                    if ( toolBtnVisible + toolBtnWithIcon < 8 ) // sample first few
+                    {
+                        std::cerr << "[DEBUG-tb]   btn text=" << btn->text().toStdString()
+                                  << " vis=" << vis
+                                  << " icon=" << hasIcon
+                                  << " geom=" << bg.width() << "x" << bg.height()
+                                  << "+" << bg.x() << "+" << bg.y()
+                                  << "\n";
+                    }
+                }
+            }
+
+            // List all QToolBars and their parents
+            for ( QToolBar *tb : safeWindow->findChildren<QToolBar *>() )
+            {
+                dumpW( "toolbar", tb );
+            }
+
+            bool ok = true;
+            if ( !strip || !strip->isVisible() || strip->height() < 28 )
+            {
+                std::cerr << "[DEBUG-tb] FAIL: rsToolbarStrip not visible or height<28"
+                          << " (height=" << ( strip ? strip->height() : -1 ) << ")\n";
+                ok = false;
+            }
+            if ( !mapTb || !mapTb->isVisible() || mapTb->height() < 28 )
+            {
+                std::cerr << "[DEBUG-tb] FAIL: mapToolsToolBar not visible or height<28\n";
+                ok = false;
+            }
+            if ( toolBtnVisible < 3 )
+            {
+                std::cerr << "[DEBUG-tb] FAIL: mapTools has too few visible toolbuttons ("
+                          << toolBtnVisible << ")\n";
+                ok = false;
+            }
+            if ( toolBtnWithIcon < 3 )
+            {
+                std::cerr << "[DEBUG-tb] FAIL: mapTools has too few icons ("
+                          << toolBtnWithIcon << ")\n";
+                ok = false;
+            }
+            if ( mapTb && strip && !strip->isAncestorOf( mapTb ) )
+            {
+                std::cerr << "[DEBUG-tb] FAIL: mapToolsToolBar is not under rsToolbarStrip"
+                          << " (parent=" << ( mapTb->parentWidget()
+                                                ? mapTb->parentWidget()->objectName().toStdString()
+                                                : "null" )
+                          << ")\n";
+                ok = false;
+            }
+            // Ribbon 154 + one toolbar row 32 => expect ~186
+            if ( ribbonDock && ribbonDock->height() < 180 )
+            {
+                std::cerr << "[DEBUG-tb] FAIL: rsRibbonDock height too small for toolbar row"
+                          << " (height=" << ribbonDock->height() << ", expect>=186)\n";
+                ok = false;
+            }
+            // Band composition rail must stay out of product chrome.
+            if ( band && band->isVisible() && band->height() > 2 )
+            {
+                std::cerr << "[DEBUG-tb] FAIL: band composition rail still visible\n";
+                ok = false;
+            }
+            // Flow host: map tools should live under rsToolbarFlowHost when visible.
+            if ( mapTb && mapTb->isVisible() )
+            {
+                QWidget *flow = safeWindow->findChild<QWidget *>( QStringLiteral( "rsToolbarFlowHost" ) );
+                if ( !flow || !flow->isAncestorOf( mapTb ) )
+                {
+                    std::cerr << "[DEBUG-tb] FAIL: mapToolsToolBar not under rsToolbarFlowHost\n";
+                    ok = false;
+                }
+            }
+            // Digitize default-off; when forced on, strip must grow to two rows.
+            if ( digTb )
+            {
+                digTb->setProperty( "rsWantVisible", true );
+                if ( digTb->toggleViewAction() )
+                    digTb->toggleViewAction()->setChecked( true );
+                if ( mapTb )
+                {
+                    mapTb->setProperty( "rsWantVisible", true );
+                    if ( mapTb->toggleViewAction() )
+                        mapTb->toggleViewAction()->setChecked( true );
+                }
+                safeWindow->layoutToolbarsUnderRibbon();
+                QCoreApplication::processEvents();
+                strip = safeWindow->findChild<QWidget *>( QStringLiteral( "rsToolbarStrip" ) );
+                dumpW( "stripAfterDigitize", strip );
+                dumpW( "digitizeForced", digTb );
+                // Adaptive flow: both bars may share one row when widths fit —
+                // strip height is 32 (1 row) or 64 (2 rows). Either is valid.
+                if ( strip && strip->height() < 28 )
+                {
+                    std::cerr << "[DEBUG-tb] FAIL: strip collapsed when digitize forced on"
+                              << " (height=" << strip->height() << ")\n";
+                    ok = false;
+                }
+                if ( !digTb->isVisible() )
+                {
+                    std::cerr << "[DEBUG-tb] FAIL: digitizeToolBar not visible when forced on\n";
+                    ok = false;
+                }
+                if ( mapTb && !mapTb->isVisible() )
+                {
+                    std::cerr << "[DEBUG-tb] FAIL: mapTools hidden after digitize forced on\n";
+                    ok = false;
+                }
+            }
+
+            // Product shell: empty Task Center should not be open by default.
+            QDockWidget *jobDock = safeWindow->findChild<QDockWidget *>( QStringLiteral( "rsJobPanelDock" ) );
+            QDockWidget *legacyTc = safeWindow->findChild<QDockWidget *>( QStringLiteral( "TaskCenterDock" ) );
+            dumpW( "jobPanel", jobDock );
+            dumpW( "legacyTaskCenterDock", legacyTc );
+            if ( jobDock && jobDock->isVisible() )
+            {
+                std::cerr << "[DEBUG-tb] FAIL: rsJobPanelDock should be hidden by default\n";
+                ok = false;
+            }
+            if ( legacyTc && legacyTc->isVisible() )
+            {
+                std::cerr << "[DEBUG-tb] FAIL: legacy TaskCenterDock is visible\n";
+                ok = false;
+            }
+
+            if ( ok )
+                std::cerr << "[DEBUG-tb] PASS: under-ribbon toolbar + task chrome defaults OK\n";
+            else
+                std::cerr << "[DEBUG-tb] RED: under-ribbon toolbar / task chrome failed\n";
+            app->exit( ok ? 0 : 1 );
+        } );
+    }
+    else
+    {
+        // Auto-load sample data if available
+        QString samplePath = AppPaths::resolveDataPath( "data/sample_crops.tif" );
+        if ( QFileInfo::exists( samplePath ) )
+        {
+            QPointer<QgisDesktopWindow> safeWindow( window.get() );
+            QTimer::singleShot( 500, [safeWindow, samplePath]() {
+                if ( !safeWindow )
+                    return;
+                ( void ) safeWindow->loadDataLayer( samplePath );
+            } );
+        }
     }
 
     const int result = app->exec();

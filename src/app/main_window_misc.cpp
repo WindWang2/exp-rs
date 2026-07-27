@@ -220,7 +220,9 @@ void QgisDesktopWindow::restorePanelState()
     // and a crowded right dock stack that fought the new chrome.
     // v7: full-width top ribbon dock (setCorner Top*→TopDock) — drop prior states.
     // v8: toolbars hosted in chrome strip under ribbon (not TopToolBarArea).
-    constexpr int kShellLayoutVersion = 8;
+    // v9: hide empty Task Center by default; drop dual TaskCenterDock layouts.
+    // v10: remove band composition rail from top chrome; content-width toolbars.
+    constexpr int kShellLayoutVersion = 10;
     const int savedVersion = settings.value( QStringLiteral( "mainwindow/shellLayoutVersion" ), 0 ).toInt();
 
     if ( savedVersion >= kShellLayoutVersion )
@@ -354,7 +356,7 @@ void QgisDesktopWindow::resetPanelLayout()
     QSettings settings;
     settings.remove( QStringLiteral( "mainwindow/state" ) );
     settings.remove( QStringLiteral( "mainwindow/geometry" ) );
-    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 8 );
+    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 10 );
 
     // Dock areas back to defaults, then apply product shell visibility.
     if ( m_layersDock )
@@ -380,9 +382,26 @@ void QgisDesktopWindow::resetPanelLayout()
     if ( m_logDock )
         addDockWidget( Qt::BottomDockWidgetArea, m_logDock );
 
+    // Toolbar defaults on reset: 导航与显示 on, 数字化 off (second row optional).
+    if ( m_mapToolsToolBar )
+    {
+        m_mapToolsToolBar->show();
+        if ( m_mapToolsToolBar->toggleViewAction() )
+            m_mapToolsToolBar->toggleViewAction()->setChecked( true );
+        m_mapToolsToolBar->setProperty( "rsWantVisible", true );
+    }
+    if ( m_digitizeToolBar )
+    {
+        m_digitizeToolBar->hide();
+        if ( m_digitizeToolBar->toggleViewAction() )
+            m_digitizeToolBar->toggleViewAction()->setChecked( false );
+        m_digitizeToolBar->setProperty( "rsWantVisible", false );
+    }
+
     applyProductShellLayout();
     layoutToolbarsUnderRibbon();
-    statusBar()->showMessage( tr( "布局已重置为 Ribbon 模式（工具栏可选，最多两行）" ), 3000 );
+    statusBar()->showMessage(
+      tr( "布局已重置为 Ribbon 模式（工具栏可选；任务中心默认收起）" ), 3000 );
 }
 
 void QgisDesktopWindow::savePanelState()
@@ -390,7 +409,7 @@ void QgisDesktopWindow::savePanelState()
     QSettings settings;
     settings.setValue( QStringLiteral( "mainwindow/state" ), saveState() );
     settings.setValue( QStringLiteral( "mainwindow/geometry" ), saveGeometry() );
-    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 8 );
+    settings.setValue( QStringLiteral( "mainwindow/shellLayoutVersion" ), 10 );
 }
 
 void QgisDesktopWindow::closeEvent( QCloseEvent *event )

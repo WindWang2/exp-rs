@@ -1124,9 +1124,9 @@ QTreeView::item:selected, QTreeWidget::item:selected, QListView::item:selected {
     titlebar-normal-icon: none;
     padding: 0;
     margin: 0;
-    /* Base chrome 184 + up to 2 toolbar rows (32px each) under the band rail */
-    min-height: 184px;
-    max-height: 248px;
+    /* Base chrome 154 (ribbon only) + up to 2 toolbar rows (32px each) */
+    min-height: 154px;
+    max-height: 218px;
 }
 #rsRibbonDock > QWidget {
     border: none;
@@ -1134,23 +1134,56 @@ QTreeView::item:selected, QTreeWidget::item:selected, QListView::item:selected {
     margin: 0;
 }
 #rsTopChrome {
-    min-height: 184px;
-    max-height: 248px;
+    min-height: 154px;
+    max-height: 218px;
     background: #FFFFFF;
 }
-/* Product toolbars embedded under the band rail (not QMainWindow top area) */
+/* Product toolbars under ribbon — content-width bars (not full-window stretch).
+   Override global QToolBar { min-height: 38px } so a 32px strip row can paint icons. */
 #rsToolbarStrip {
     background: #FFFFFF;
     border-top: 1px solid #E2E6EB;
 }
-#rsToolbarStrip > QToolBar {
+#rsToolbarStrip QToolBar,
+#rsToolbarRow QToolBar {
     background: #FFFFFF;
     border: none;
-    border-bottom: 1px solid #E2E6EB;
-    min-height: 28px;
+    border-bottom: none;
+    min-height: 32px;
     max-height: 32px;
-    padding: 2px 6px;
+    padding: 1px 4px;
     spacing: 2px;
+}
+#rsToolbarStrip QToolButton,
+#rsToolbarRow QToolButton {
+    min-height: 24px;
+    max-height: 28px;
+    min-width: 24px;
+    padding: 2px;
+    icon-size: 18px;
+}
+/* Adaptive flow toolbars under ribbon */
+#rsToolbarFlowHost {
+    background: #FFFFFF;
+}
+#rsToolbarChip {
+    background: #FFFFFF;
+    border: 1px solid #E2E6EB;
+    border-radius: 4px;
+}
+#rsToolbarDragGrip {
+    background: #EEF1F4;
+    border-right: 1px solid #E2E6EB;
+}
+#rsToolbarDragGrip:hover {
+    background: #0B6E4F;
+}
+#rsToolbarResizeGrip {
+    background: #E2E6EB;
+    border-left: 1px solid #C5CDD6;
+}
+#rsToolbarResizeGrip:hover {
+    background: #0B6E4F;
 }
 #rsRibbonHost {
     background: #FFFFFF;

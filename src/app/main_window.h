@@ -264,6 +264,9 @@ public:
     void loadRasterLayer(const QString &filePath);
     void loadVectorLayer(const QString &filePath);
 
+    /** Place product toolbars under the ribbon (max two rows). */
+    void layoutToolbarsUnderRibbon();
+
 private slots:
     void onProjectRead(const QDomDocument &doc);
     void onProjectWrite(QDomDocument &doc);
@@ -302,8 +305,6 @@ private:
     void savePanelState();
     void restorePanelState();
     void resetPanelLayout();
-    /** Place product toolbars under the ribbon; enforce max two toolbar rows. */
-    void layoutToolbarsUnderRibbon();
     /** Hide chrome that duplicates the Ribbon + Task panel product shell. */
     void applyProductShellLayout();
 
@@ -391,8 +392,11 @@ private:
     RibbonController *m_ribbonController = nullptr;
     QWidget *m_ribbonBar = nullptr;
     QWidget *m_topChrome = nullptr;
-    /** Host under band rail for product toolbars (never QMainWindow top area). */
+    /** Host under ribbon for product toolbars (never QMainWindow top area). */
     QWidget *m_toolbarStrip = nullptr;
+    class RsToolbarFlowHost *m_toolbarFlowHost = nullptr;
+    /** Guard against re-entrant layout (show/hide syncs toggleViewAction → loop). */
+    bool m_layoutingToolbarsUnderRibbon = false;
     QToolBar *m_mapToolsToolBar = nullptr;
     QToolBar *m_digitizeToolBar = nullptr;
     QMenuBar *m_hiddenMenuBar = nullptr;

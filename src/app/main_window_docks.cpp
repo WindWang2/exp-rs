@@ -18,6 +18,7 @@
 #include "widgets/guided_workflow_widget.h"
 #include "widgets/histogram_stretch_widget.h"
 #include "widgets/band_composition_rail.h"
+#include "widgets/rs_toolbar_flow_host.h"
 
 #include <QVBoxLayout>
 #include <QMenu>
@@ -27,9 +28,12 @@
 #include <QTextBrowser>
 #include <QAction>
 #include <QEvent>
+#include <QHash>
 #include <QStatusBar>
 #include <QToolBar>
 #include <QSizePolicy>
+
+#include <memory>
 
 #include <qgsapplication.h>
 #include <processing/qgsprocessingalgorithm.h>
@@ -248,11 +252,12 @@ void QgisDesktopWindow::setupDockWidgets()
     m_logDock->setObjectName("logDock");
     addDockWidget(Qt::BottomDockWidgetArea, m_logDock);
 
-    // Unified Task Center projection panel (Bottom, tabified with Log)
+    // Unified Task Center projection panel (Bottom, tabified with Log).
+    // Hidden by default — open from Ribbon 任务 → 任务中心 when needed.
     m_jobPanel = new RsJobPanel( this );
     addDockWidget( Qt::BottomDockWidgetArea, m_jobPanel );
     tabifyDockWidget( m_logDock, m_jobPanel );
-    m_jobPanel->raise();
+    m_jobPanel->hide();
     JobEngineQtBridge::instance(); // keep Qt bridge for internal JobEngine events
     ProcessingJobAdapter::registerProcessingJobExecutor();
 
@@ -517,21 +522,24 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     auto *chrome = new QWidget;
     chrome->setObjectName( QStringLiteral( "rsTopChrome" ) );
     chrome->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
-    // Base: QAT(28) + tabs(30) + content(96) + band rail(30) = 184
-    // + optional toolbar strip (0–2 × 32) under the band rail.
-    chrome->setFixedHeight( 184 );
+    // Base: QAT(28) + tabs(30) + content(96) = 154 (band rail removed from product chrome).
+    // + optional toolbar strip (0–2 × 32) under the ribbon.
+    constexpr int kRibbonOnlyH = 154;
+    chrome->setFixedHeight( kRibbonOnlyH );
 
     auto *chromeLay = new QVBoxLayout( chrome );
     chromeLay->setContentsMargins( 0, 0, 0, 0 );
     chromeLay->setSpacing( 0 );
     chromeLay->addWidget( m_ribbonBar );
 
+    // Keep BandCompositionRail instance for layer-sync code paths, but do not
+    // show it in the top chrome (Ribbon already exposes band composition).
     m_bandRail = new BandCompositionRail( chrome );
-    m_bandRail->setFixedHeight( 30 );
-    chromeLay->addWidget( m_bandRail );
+    m_bandRail->setFixedHeight( 0 );
+    m_bandRail->setMaximumHeight( 0 );
+    m_bandRail->hide();
 
-    // Toolbars are embedded here (below ribbon), not in QMainWindow::TopToolBarArea
-    // — that area paints above top docks and put bars on top of the ribbon.
+    // Adaptive 1–2 row toolbar flow under the ribbon (draggable, resizable).
     m_toolbarStrip = new QWidget( chrome );
     m_toolbarStrip->setObjectName( QStringLiteral( "rsToolbarStrip" ) );
     m_toolbarStrip->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
@@ -540,6 +548,39 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     auto *stripLay = new QVBoxLayout( m_toolbarStrip );
     stripLay->setContentsMargins( 0, 0, 0, 0 );
     stripLay->setSpacing( 0 );
+    m_toolbarFlowHost = new RsToolbarFlowHost( m_toolbarStrip );
+    stripLay->addWidget( m_toolbarFlowHost );
+    connect( m_toolbarFlowHost, &RsToolbarFlowHost::geometryChanged, this, [this]() {
+        if ( m_layoutingToolbarsUnderRibbon )
+            return;
+        // Only adjust chrome height when user drags/resizes inside the flow host.
+        const int stripH = m_toolbarFlowHost ? m_toolbarFlowHost->usedHeight() : 0;
+        constexpr int kBaseChrome = 154;
+        constexpr int kRowH = 32;
+        m_toolbarStrip->setFixedHeight( stripH );
+        m_toolbarStrip->setMinimumHeight( stripH );
+        m_toolbarStrip->setMaximumHeight( 2 * kRowH );
+        if ( stripH > 0 )
+            m_toolbarStrip->show();
+        else
+            m_toolbarStrip->hide();
+        const int chromeH = kBaseChrome + stripH;
+        if ( m_topChrome )
+        {
+            m_topChrome->setFixedHeight( chromeH );
+            m_topChrome->setMinimumHeight( chromeH );
+            m_topChrome->setMaximumHeight( kBaseChrome + 2 * kRowH );
+            m_topChrome->updateGeometry();
+        }
+        if ( QDockWidget *ribbonDock = findChild<QDockWidget *>( QStringLiteral( "rsRibbonDock" ) ) )
+        {
+            ribbonDock->setFixedHeight( chromeH );
+            ribbonDock->setMinimumHeight( chromeH );
+            ribbonDock->setMaximumHeight( kBaseChrome + 2 * kRowH );
+            ribbonDock->updateGeometry();
+            resizeDocks( { ribbonDock }, { chromeH }, Qt::Vertical );
+        }
+    } );
     chromeLay->addWidget( m_toolbarStrip );
 
     m_topChrome = chrome;
@@ -559,7 +600,6 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
                  } );
     };
     installChromeMenu( chrome );
-    installChromeMenu( m_bandRail );
 
     // Corners claim the top strip so the dock spans over left/right docks.
     setCorner( Qt::TopLeftCorner, Qt::TopDockWidgetArea );
@@ -572,9 +612,9 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     ribbonDock->setAllowedAreas( Qt::TopDockWidgetArea );
     ribbonDock->setTitleBarWidget( new QWidget( ribbonDock ) ); // no title chrome
     ribbonDock->setWidget( chrome );
-    ribbonDock->setFixedHeight( 184 );
-    ribbonDock->setMinimumHeight( 184 );
-    ribbonDock->setMaximumHeight( 248 ); // 184 + 2×32 toolbar rows
+    ribbonDock->setFixedHeight( kRibbonOnlyH );
+    ribbonDock->setMinimumHeight( kRibbonOnlyH );
+    ribbonDock->setMaximumHeight( kRibbonOnlyH + 64 ); // + 2×32 toolbar rows
     addDockWidget( Qt::TopDockWidgetArea, ribbonDock );
     // Ensure no menu-widget leftovers steal vertical space.
     setMenuWidget( nullptr );
@@ -585,88 +625,91 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
 
 void QgisDesktopWindow::layoutToolbarsUnderRibbon()
 {
-    // Host product toolbars inside rsToolbarStrip under the ribbon/band rail.
-    // Never use QMainWindow TopToolBarArea — it stacks above top docks.
+    // Host product toolbars in RsToolbarFlowHost under the ribbon:
+    // 1–2 adaptive rows, each bar draggable + resizable.
     //
-    // Critical: QToolBar created with a QMainWindow parent gets Qt::Tool window
-    // flags and will NOT paint correctly as a normal layout child until flags
-    // are reset to Qt::Widget (see Qt docs for QToolBar as a child widget).
-    if ( !m_toolbarStrip )
+    // Never use QMainWindow TopToolBarArea — it stacks above top docks.
+    // Guard re-entry: show/hide syncs toggleViewAction and can loop.
+    if ( !m_toolbarStrip || !m_toolbarFlowHost || m_layoutingToolbarsUnderRibbon )
         return;
 
-    auto *stripLay = qobject_cast<QVBoxLayout *>( m_toolbarStrip->layout() );
-    if ( !stripLay )
-        return;
+    m_layoutingToolbarsUnderRibbon = true;
+    struct LayoutGuard
+    {
+        bool &flag;
+        ~LayoutGuard() { flag = false; }
+    } guard{ m_layoutingToolbarsUnderRibbon };
 
-    // Drop any restoreState main-window toolbars (non-product).
+    const QList<QToolBar *> ordered = { m_mapToolsToolBar, m_digitizeToolBar };
+
+    QAction *mapToggle = m_mapToolsToolBar ? m_mapToolsToolBar->toggleViewAction() : nullptr;
+    QAction *digToggle = m_digitizeToolBar ? m_digitizeToolBar->toggleViewAction() : nullptr;
+    std::unique_ptr<QSignalBlocker> blockMap;
+    std::unique_ptr<QSignalBlocker> blockDig;
+    if ( mapToggle )
+        blockMap = std::make_unique<QSignalBlocker>( mapToggle );
+    if ( digToggle )
+        blockDig = std::make_unique<QSignalBlocker>( digToggle );
+
+    QHash<QToolBar *, bool> wantByBar;
+    for ( QToolBar *tb : ordered )
+    {
+        if ( !tb )
+            continue;
+        QAction *toggle = tb->toggleViewAction();
+        bool wantVisible = false;
+        const QVariant forced = tb->property( "rsWantVisible" );
+        if ( forced.isValid() )
+        {
+            wantVisible = forced.toBool();
+            tb->setProperty( "rsWantVisible", QVariant() );
+        }
+        else
+        {
+            wantVisible = toggle ? toggle->isChecked() : true;
+            if ( toggle && !toggle->isChecked() && !tb->isHidden() )
+                wantVisible = true;
+        }
+        wantByBar.insert( tb, wantVisible );
+        if ( toggle )
+            toggle->setChecked( wantVisible );
+    }
+
+    // Drop non-product main-window toolbars from restoreState.
     for ( QToolBar *tb : findChildren<QToolBar *>() )
     {
         if ( !tb || tb == m_mapToolsToolBar || tb == m_digitizeToolBar )
             continue;
         tb->hide();
-        removeToolBar( tb );
+        if ( toolBarArea( tb ) != Qt::NoToolBarArea )
+            removeToolBar( tb );
     }
-    if ( m_mapToolsToolBar )
-        removeToolBar( m_mapToolsToolBar );
-    if ( m_digitizeToolBar )
-        removeToolBar( m_digitizeToolBar );
-
-    while ( QLayoutItem *item = stripLay->takeAt( 0 ) )
-        delete item;
-
-    const QList<QToolBar *> ordered = { m_mapToolsToolBar, m_digitizeToolBar };
-    int visibleRows = 0;
     for ( QToolBar *tb : ordered )
     {
-        if ( !tb )
-            continue;
-
-        QAction *toggle = tb->toggleViewAction();
-        // Prefer checked state; fall back to not-hidden for first layout before
-        // toggle action has been synced.
-        bool wantVisible = toggle ? toggle->isChecked() : true;
-        if ( toggle && !toggle->isChecked() && !tb->isHidden() )
-            wantVisible = true; // keep programmatic show()
-
-        // Embed as a plain widget under the band rail (not a floating tool window).
-        tb->setParent( m_toolbarStrip, Qt::Widget );
-        tb->setWindowFlags( Qt::Widget );
-        tb->setMovable( false );
-        tb->setFloatable( false );
-        tb->setAllowedAreas( {} );
-        tb->setFixedHeight( 32 );
-        tb->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
-
-        if ( wantVisible && visibleRows < 2 )
+        if ( tb && toolBarArea( tb ) != Qt::NoToolBarArea )
+            removeToolBar( tb );
+        if ( tb )
         {
-            stripLay->addWidget( tb );
-            tb->show();
-            if ( toggle )
-            {
-                QSignalBlocker blocker( toggle );
-                toggle->setChecked( true );
-            }
-            ++visibleRows;
-        }
-        else
-        {
-            tb->hide();
-            if ( toggle )
-            {
-                QSignalBlocker blocker( toggle );
-                toggle->setChecked( false );
-            }
+            tb->setWindowFlags( Qt::Widget );
+            tb->setMovable( false );
+            tb->setFloatable( false );
+            tb->setAllowedAreas( {} );
         }
     }
 
+    // Register bars once; subsequent layouts only update visibility / reflow.
+    if ( !m_toolbarFlowHost->hasProductToolbars() )
+        m_toolbarFlowHost->setProductToolbars( ordered );
+    m_toolbarFlowHost->applyVisibility( wantByBar );
+
+    constexpr int kBaseChrome = 154;
     constexpr int kRowH = 32;
-    constexpr int kBaseChrome = 184;
-    const int stripH = visibleRows * kRowH;
+    const int stripH = m_toolbarFlowHost->usedHeight();
 
     m_toolbarStrip->setFixedHeight( stripH );
     m_toolbarStrip->setMinimumHeight( stripH );
     m_toolbarStrip->setMaximumHeight( 2 * kRowH );
-    if ( visibleRows > 0 )
+    if ( stripH > 0 )
         m_toolbarStrip->show();
     else
         m_toolbarStrip->hide();
@@ -685,7 +728,6 @@ void QgisDesktopWindow::layoutToolbarsUnderRibbon()
         ribbonDock->setMinimumHeight( chromeH );
         ribbonDock->setMaximumHeight( kBaseChrome + 2 * kRowH );
         ribbonDock->updateGeometry();
-        // Ensure the dock is not clipped by a stale saved size.
         resizeDocks( { ribbonDock }, { chromeH }, Qt::Vertical );
     }
 }
@@ -700,18 +742,21 @@ void QgisDesktopWindow::applyProductShellLayout()
     setCorner( Qt::TopRightCorner, Qt::TopDockWidgetArea );
     setMenuWidget( nullptr );
 
-    // Default: show 导航与显示 under the ribbon (1 row); digitize stays optional.
+    // Default product bar: keep 导航与显示 on. Do NOT force-off 数字化 here —
+    // that wiped the user's context-menu toggle after every shell re-apply.
+    // Digitize default-off is set once in setupToolbars() / resetPanelLayout().
     if ( m_mapToolsToolBar )
     {
         m_mapToolsToolBar->show();
         if ( m_mapToolsToolBar->toggleViewAction() )
             m_mapToolsToolBar->toggleViewAction()->setChecked( true );
+        m_mapToolsToolBar->setProperty( "rsWantVisible", true );
     }
-    if ( m_digitizeToolBar )
+    // Honor current digitize toggle (checked → second row).
+    if ( m_digitizeToolBar && m_digitizeToolBar->toggleViewAction() )
     {
-        m_digitizeToolBar->hide();
-        if ( m_digitizeToolBar->toggleViewAction() )
-            m_digitizeToolBar->toggleViewAction()->setChecked( false );
+        const bool digOn = m_digitizeToolBar->toggleViewAction()->isChecked();
+        m_digitizeToolBar->setProperty( "rsWantVisible", digOn );
     }
     layoutToolbarsUnderRibbon();
 
@@ -727,12 +772,14 @@ void QgisDesktopWindow::applyProductShellLayout()
     hideDock( m_histogramStretchDock );
     // Log stays available but collapsed by default to reduce vertical noise.
     hideDock( m_logDock );
-    // Job panel is primary observability surface — show by default.
-    if ( m_jobPanel )
-    {
-      m_jobPanel->show();
-      m_jobPanel->raise();
-    }
+    // Task Center (RsJobPanel) is on-demand — empty list should not steal map height.
+    // Open via Ribbon 任务 → 任务中心, or panel context menu.
+    hideDock( m_jobPanel );
+
+    // Legacy right-side TaskCenterDock is no longer created; hide if any stale
+    // widget/object still appears (old binaries / accidental construction).
+    if ( QDockWidget *legacyTc = findChild<QDockWidget *>( QStringLiteral( "TaskCenterDock" ) ) )
+        legacyTc->hide();
 
     // Layers stay on the left; browser tabified under it can stay hidden until needed.
     if ( m_browserDock )
@@ -746,9 +793,8 @@ void QgisDesktopWindow::applyProductShellLayout()
     if ( m_dataManagerPanel )
         m_dataManagerPanel->show();
 
-    // Task panel only when a tool is open — do not leave an empty right dock open.
-    if ( m_taskPanelDock && !m_taskPanelDock->isVisible() )
-        m_taskPanelDock->hide();
+    // Workflow tool host (rsTaskPanelDock) only when a tool is open.
+    hideDock( m_taskPanelDock );
 
     // Pin ribbon dock to top with fixed product height.
     if ( QDockWidget *ribbonDock = findChild<QDockWidget *>( QStringLiteral( "rsRibbonDock" ) ) )
@@ -767,8 +813,13 @@ void QgisDesktopWindow::applyProductShellLayout()
     layoutToolbarsUnderRibbon();
     if ( m_ribbonBar )
         m_ribbonBar->show();
+    // Band rail is retired from product chrome (Ribbon has band composition).
     if ( m_bandRail )
-        m_bandRail->show();
+    {
+        m_bandRail->hide();
+        m_bandRail->setFixedHeight( 0 );
+        m_bandRail->setMaximumHeight( 0 );
+    }
 
     // Keep the detached action-host menubar hidden (never install it).
     if ( m_hiddenMenuBar )

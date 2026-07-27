@@ -88,6 +88,7 @@ add_executable(sicnu_geo_rs
     widgets/histogram_widget.cpp
     widgets/histogram_stretch_widget.cpp
     widgets/band_composition_rail.cpp
+    widgets/rs_toolbar_flow_host.cpp
     display/display_stretch_types.cpp
     display/display_stretch_resolve.cpp
     display/display_stretch_apply.cpp

@@ -567,7 +567,7 @@ void QgisDesktopWindow::setupMenu()
 void QgisDesktopWindow::setupToolbars()
 {
     // Optional classic toolbars sit under the Ribbon (max 2 rows). Toggle via
-    // ribbon right-click → 工具栏. Default: hidden; Ribbon remains primary.
+    // ribbon right-click → 工具栏. Default: 导航与显示 on, 数字化 off.
 
     auto polishBar = []( QToolBar *tb ) {
         if ( !tb )
@@ -692,15 +692,22 @@ void QgisDesktopWindow::setupToolbars()
         digitizeToolBar->toggleViewAction()->setChecked( false );
 
     // Keep strip geometry in sync when the user toggles bars (ribbon context menu).
+    // Pass the toggled value via rsWantVisible so layout does not race isChecked().
+    // Skip while layoutToolbarsUnderRibbon is running (avoids show→toggled→layout loop).
     auto wireToggle = [this]( QToolBar *tb ) {
         if ( !tb || !tb->toggleViewAction() )
             return;
         connect( tb->toggleViewAction(), &QAction::toggled, this,
-                 [this]( bool ) {
-                     // Defer until QToolBar has applied visibility.
-                     QTimer::singleShot( 0, this, &QgisDesktopWindow::layoutToolbarsUnderRibbon );
-                 },
-                 Qt::UniqueConnection );
+                 [this, tb]( bool on ) {
+                     if ( !tb || m_layoutingToolbarsUnderRibbon )
+                         return;
+                     tb->setProperty( "rsWantVisible", on );
+                     // Defer until QToolBar finishes its own show/hide.
+                     QTimer::singleShot( 0, this, [this]() {
+                         if ( !m_layoutingToolbarsUnderRibbon )
+                             layoutToolbarsUnderRibbon();
+                     } );
+                 } );
     };
     wireToggle( m_mapToolsToolBar );
     wireToggle( m_digitizeToolBar );
