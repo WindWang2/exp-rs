@@ -349,13 +349,38 @@ void QgisDesktopWindow::setupDataManagerPanel()
         }
     } );
 
-    connect( m_dataManagerPanel, &sicnu::DataManagerPanel::unloadRequested,
-             this, [this]( sicnu::data::AssetId assetId ) {
+    auto unloadOne = [this]( sicnu::data::AssetId assetId, bool confirm ) -> bool {
         if ( !m_projectContext )
-            return;
+            return false;
         sicnu::data::DataManager &dataManager = m_projectContext->dataManager();
         const sicnu::data::UnloadPlan plan = dataManager.planUnload( assetId );
+        if ( confirm )
+        {
+            QString detail = tr( "从工程卸载此数据资产？" );
+            if ( !plan.activeLeases().isEmpty() )
+            {
+                detail = tr( "该资产正被 %1 个显示/处理租约引用。卸载将移除对应呈现。\n\n"
+                             "继续级联卸载？" )
+                             .arg( plan.activeLeases().size() );
+            }
+            const auto choice = QMessageBox::question(
+                this, tr( "卸载数据资产" ), detail,
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+            if ( choice != QMessageBox::Yes )
+                return false;
+        }
+        const sicnu::data::UnloadPlan confirmed =
+            plan.activeLeases().isEmpty() ? plan : plan.confirmedCascade();
+        return static_cast<bool>( dataManager.unload( confirmed ) );
+    };
 
+    connect( m_dataManagerPanel, &sicnu::DataManagerPanel::unloadRequested,
+             this, [this, unloadOne]( sicnu::data::AssetId assetId ) {
+        if ( !m_projectContext )
+            return;
+        // Confirm path: if the user accepts and unload fails, surface a warning.
+        sicnu::data::DataManager &dataManager = m_projectContext->dataManager();
+        const sicnu::data::UnloadPlan plan = dataManager.planUnload( assetId );
         QString detail = tr( "从工程卸载此数据资产？" );
         if ( !plan.activeLeases().isEmpty() )
         {
@@ -368,15 +393,45 @@ void QgisDesktopWindow::setupDataManagerPanel()
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
         if ( choice != QMessageBox::Yes )
             return;
-
-        const sicnu::data::UnloadPlan confirmed =
-            plan.activeLeases().isEmpty() ? plan : plan.confirmedCascade();
-        const auto unloaded = dataManager.unload( confirmed );
-        if ( !unloaded )
+        if ( !unloadOne( assetId, false ) )
         {
             QMessageBox::warning(
                 this, tr( "卸载数据资产" ),
                 tr( "无法卸载该数据资产。" ) );
+        }
+    } );
+
+    connect( m_dataManagerPanel, &sicnu::DataManagerPanel::unloadRequestedMany,
+             this, [this, unloadOne]( const QList<sicnu::data::AssetId> &ids ) {
+        if ( ids.isEmpty() || !m_projectContext )
+            return;
+        const auto choice = QMessageBox::question(
+            this, tr( "批量卸载" ),
+            tr( "从工程卸载选中的 %1 个数据资产？\n"
+                "若存在显示/处理引用，将级联移除对应呈现。" )
+              .arg( ids.size() ),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+        if ( choice != QMessageBox::Yes )
+            return;
+
+        int ok = 0;
+        int failed = 0;
+        for ( const sicnu::data::AssetId &id : ids )
+        {
+            if ( unloadOne( id, false ) )
+                ++ok;
+            else
+                ++failed;
+        }
+        if ( failed > 0 )
+        {
+            QMessageBox::warning(
+                this, tr( "批量卸载" ),
+                tr( "完成：成功 %1，失败 %2。" ).arg( ok ).arg( failed ) );
+        }
+        else if ( statusBar() )
+        {
+            statusBar()->showMessage( tr( "已卸载 %1 个数据资产" ).arg( ok ), 4000 );
         }
     } );
 

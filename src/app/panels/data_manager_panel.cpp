@@ -379,7 +379,7 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   m_tree->setHeaderLabels(
     { tr( "名称" ), tr( "类型" ), tr( "状态" ), tr( "持久性" ), tr( "引用" ) } );
   m_tree->setRootIsDecorated( true );
-  m_tree->setSelectionMode( QAbstractItemView::SingleSelection );
+  m_tree->setSelectionMode( QAbstractItemView::ExtendedSelection );
   m_tree->setContextMenuPolicy( Qt::CustomContextMenu );
   m_tree->setIconSize( QSize( 18, 18 ) );
   m_tree->setUniformRowHeights( true );
@@ -409,15 +409,16 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   m_detailView = new QTextBrowser( detailHost );
   m_detailView->setObjectName( QStringLiteral( "dataManagerDetailView" ) );
   m_detailView->setOpenExternalLinks( false );
-  m_detailView->setMinimumWidth( 240 );
+  m_detailView->setMinimumHeight( 120 );
   detailLay->addWidget( m_detailView, 1 );
 
-  m_splitter = new QSplitter( Qt::Horizontal, this );
+  // Catalog on top, metadata inspector below (vertical split).
+  m_splitter = new QSplitter( Qt::Vertical, this );
   m_splitter->setObjectName( QStringLiteral( "dataManagerSplitter" ) );
   m_splitter->addWidget( m_tree );
   m_splitter->addWidget( detailHost );
-  m_splitter->setStretchFactor( 0, 2 );
-  m_splitter->setStretchFactor( 1, 3 );
+  m_splitter->setStretchFactor( 0, 3 );
+  m_splitter->setStretchFactor( 1, 2 );
   m_splitter->setChildrenCollapsible( false );
   setWidget( m_splitter );
 
@@ -479,17 +480,37 @@ QString DataManagerPanel::detailHtml() const
 
 sicnu::data::AssetId DataManagerPanel::selectedAssetId() const
 {
-  return assetForItem( m_tree->currentItem() );
+  const QList<sicnu::data::AssetId> ids = selectedAssetIds();
+  return ids.isEmpty() ? sicnu::data::AssetId() : ids.first();
+}
+
+QList<sicnu::data::AssetId> DataManagerPanel::selectedAssetIds() const
+{
+  QList<sicnu::data::AssetId> ids;
+  if ( !m_tree )
+    return ids;
+  const QList<QTreeWidgetItem *> items = m_tree->selectedItems();
+  for ( QTreeWidgetItem *item : items )
+  {
+    const sicnu::data::AssetId id = assetForItem( item );
+    if ( !id.isNull() && !ids.contains( id ) )
+      ids.append( id );
+  }
+  return ids;
 }
 
 void DataManagerPanel::selectAsset( sicnu::data::AssetId id )
 {
+  if ( !m_tree )
+    return;
+  m_tree->clearSelection();
   QTreeWidgetItemIterator it( m_tree );
   while ( *it )
   {
     if ( ( *it )->data( 0, kAssetIdRole ).toString() == id.toString() )
     {
       m_tree->setCurrentItem( *it );
+      ( *it )->setSelected( true );
       return;
     }
     ++it;
@@ -588,46 +609,91 @@ void DataManagerPanel::refresh()
 void DataManagerPanel::onItemActivated( QTreeWidgetItem *item, int column )
 {
   Q_UNUSED( column );
-  const sicnu::data::AssetId id = assetForItem( item );
-  if ( !id.isNull() )
+  // Activate applies to all currently selected assets (or the double-clicked row).
+  QList<sicnu::data::AssetId> ids = selectedAssetIds();
+  if ( ids.isEmpty() )
+  {
+    const sicnu::data::AssetId id = assetForItem( item );
+    if ( !id.isNull() )
+      ids.append( id );
+  }
+  for ( const sicnu::data::AssetId &id : ids )
     emit displayRequested( id );
 }
 
 void DataManagerPanel::onContextMenu( const QPoint &pos )
 {
   QTreeWidgetItem *item = m_tree->itemAt( pos );
-  const sicnu::data::AssetId id = assetForItem( item );
-  if ( id.isNull() )
+  if ( item && !item->isSelected() )
+  {
+    m_tree->clearSelection();
+    item->setSelected( true );
+    m_tree->setCurrentItem( item );
+  }
+
+  const QList<sicnu::data::AssetId> ids = selectedAssetIds();
+  if ( ids.isEmpty() )
     return;
 
   QMenu menu( this );
-  QAction *displayAction = menu.addAction( tr( "添加到显示" ) );
-  QAction *promoteAction = menu.addAction( tr( "提升为工程持久…" ) );
-  promoteAction->setEnabled( isPromotable( id ) );
-  QAction *unloadAction = menu.addAction( tr( "卸载…" ) );
+  const int n = ids.size();
+  QAction *displayAction = menu.addAction(
+    n == 1 ? tr( "添加到显示" ) : tr( "添加到显示（%1 项）" ).arg( n ) );
+
+  int promotable = 0;
+  for ( const sicnu::data::AssetId &id : ids )
+  {
+    if ( isPromotable( id ) )
+      ++promotable;
+  }
+  QAction *promoteAction = menu.addAction(
+    promotable <= 1 ? tr( "提升为工程持久…" )
+                    : tr( "提升为工程持久（%1 项）…" ).arg( promotable ) );
+  promoteAction->setEnabled( promotable > 0 );
+
+  QAction *unloadAction = menu.addAction(
+    n == 1 ? tr( "卸载…" ) : tr( "卸载（%1 项）…" ).arg( n ) );
 
   QAction *chosen = menu.exec( m_tree->viewport()->mapToGlobal( pos ) );
   if ( chosen == displayAction )
-    emit displayRequested( id );
+  {
+    for ( const sicnu::data::AssetId &id : ids )
+      emit displayRequested( id );
+  }
   else if ( chosen == promoteAction )
-    emit promoteRequested( id );
+  {
+    for ( const sicnu::data::AssetId &id : ids )
+    {
+      if ( isPromotable( id ) )
+        emit promoteRequested( id );
+    }
+  }
   else if ( chosen == unloadAction )
-    emit unloadRequested( id );
+  {
+    if ( n == 1 )
+      emit unloadRequested( ids.first() );
+    else
+      emit unloadRequestedMany( ids );
+  }
 }
 
 void DataManagerPanel::onSelectionChanged()
 {
-  QTreeWidgetItem *item = m_tree->currentItem();
-  if ( !item || !m_dataManager )
+  if ( !m_dataManager )
   {
-    clearDetails( tr( "选择数据资产或集合以查看元信息。" ) );
+    clearDetails( tr( "数据管理器不可用。" ) );
     return;
   }
 
-  const sicnu::data::AssetId assetId = assetForItem( item );
-  if ( !assetId.isNull() )
+  const QList<sicnu::data::AssetId> ids = selectedAssetIds();
+  if ( ids.size() > 1 )
   {
-    const auto snapshot = m_dataManager->asset( assetId );
+    showMultiSelectionDetails( ids );
+    return;
+  }
+  if ( ids.size() == 1 )
+  {
+    const auto snapshot = m_dataManager->asset( ids.first() );
     if ( snapshot )
     {
       showAssetDetails( *snapshot );
@@ -635,18 +701,23 @@ void DataManagerPanel::onSelectionChanged()
     }
   }
 
-  const auto collectionId = collectionForItem( item );
-  if ( collectionId )
+  // No asset selected: maybe a collection parent row.
+  QTreeWidgetItem *item = m_tree->currentItem();
+  if ( item )
   {
-    const auto collection = m_dataManager->collection( *collectionId );
-    if ( collection )
+    const auto collectionId = collectionForItem( item );
+    if ( collectionId )
     {
-      showCollectionDetails( *collection );
-      return;
+      const auto collection = m_dataManager->collection( *collectionId );
+      if ( collection )
+      {
+        showCollectionDetails( *collection );
+        return;
+      }
     }
   }
 
-  clearDetails( tr( "选择数据资产或集合以查看元信息。" ) );
+  clearDetails( tr( "选择数据资产或集合以查看元信息。Ctrl/Shift 可多选。" ) );
 }
 
 void DataManagerPanel::showAssetDetails( const sicnu::data::AssetSnapshot &snapshot )
@@ -694,6 +765,56 @@ void DataManagerPanel::showAssetDetails( const sicnu::data::AssetSnapshot &snaps
     + section( tr( "标识与状态" ), identity )
     + section( tr( "数据源" ), source )
     + formatStructure( snapshot.structure() );
+
+  m_detailView->setHtml( wrapHtml( body ) );
+}
+
+void DataManagerPanel::showMultiSelectionDetails(
+  const QList<sicnu::data::AssetId> &ids )
+{
+  if ( m_detailTitle )
+    m_detailTitle->setText( tr( "多选 — %1 项" ).arg( ids.size() ) );
+
+  int ready = 0, temporary = 0, raster = 0, vector = 0;
+  QString list;
+  for ( const sicnu::data::AssetId &id : ids )
+  {
+    const auto snap = m_dataManager ? m_dataManager->asset( id ) : std::nullopt;
+    if ( !snap )
+    {
+      list += QStringLiteral( "• %1<br/>" ).arg( escapeHtml( id.toString() ) );
+      continue;
+    }
+    if ( snap->state() == sicnu::data::AssetState::Ready )
+      ++ready;
+    if ( snap->persistence() != sicnu::data::PersistencePolicy::ProjectPersistent )
+      ++temporary;
+    if ( snap->kind() == sicnu::data::AssetKind::Raster
+         || snap->kind() == sicnu::data::AssetKind::VirtualRaster )
+      ++raster;
+    else if ( snap->kind() == sicnu::data::AssetKind::Vector )
+      ++vector;
+
+    list += QStringLiteral( "• %1 <span style='color:#656d76'>(%2 · %3)</span><br/>" )
+              .arg( escapeHtml( snap->displayName() ),
+                    escapeHtml( kindText( snap->kind() ) ),
+                    escapeHtml( statusText( snap->state() ) ) );
+  }
+
+  QString summary;
+  summary += row( tr( "选中数量" ), QString::number( ids.size() ) );
+  summary += row( tr( "就绪" ), QString::number( ready ) );
+  summary += row( tr( "临时资产" ), QString::number( temporary ) );
+  summary += row( tr( "栅格类" ), QString::number( raster ) );
+  summary += row( tr( "矢量" ), QString::number( vector ) );
+
+  const QString body =
+    QStringLiteral( "<h2>%1</h2>" ).arg( escapeHtml( tr( "已选择 %1 个资产" ).arg( ids.size() ) ) )
+    + section( tr( "汇总" ), summary )
+    + QStringLiteral( "<h3>%1</h3><div class='block'>%2</div>" )
+        .arg( escapeHtml( tr( "列表" ) ), list )
+    + QStringLiteral( "<p style='color:#656d76'>%1</p>" )
+        .arg( escapeHtml( tr( "右键可批量：添加到显示 / 提升 / 卸载。" ) ) );
 
   m_detailView->setHtml( wrapHtml( body ) );
 }

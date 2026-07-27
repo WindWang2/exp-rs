@@ -3,6 +3,7 @@
 #include <optional>
 
 #include <QDockWidget>
+#include <QList>
 #include <QString>
 
 #include "data/asset_types.h"
@@ -26,9 +27,9 @@ namespace sicnu
 /**
  * Project Data Manager panel — catalog projection + metadata inspector.
  *
- * Left: tree of Data Assets and Collections (not Display Layers).
- * Right: dedicated metadata panel for the selection (structure, source, product
- * fields). Shell wires display / unload / promote signals.
+ * Top: tree of Data Assets and Collections (multi-select for batch actions).
+ * Bottom: metadata inspector for the current selection.
+ * Shell wires display / unload / promote signals.
  */
 class DataManagerPanel : public QDockWidget
 {
@@ -43,7 +44,11 @@ class DataManagerPanel : public QDockWidget
 
     QString rowText( sicnu::data::AssetId id, int column ) const;
 
+    /// First selected asset (if any). Prefer selectedAssetIds() for multi-select.
     sicnu::data::AssetId selectedAssetId() const;
+
+    /// All selected asset rows (collection parent rows are skipped).
+    QList<sicnu::data::AssetId> selectedAssetIds() const;
 
     /// HTML currently shown in the metadata inspector (for tests).
     QString detailHtml() const;
@@ -61,6 +66,8 @@ class DataManagerPanel : public QDockWidget
   signals:
     void displayRequested( sicnu::data::AssetId id );
     void unloadRequested( sicnu::data::AssetId id );
+    /// Batch unload (multi-select). Shell should confirm once then unload each.
+    void unloadRequestedMany( const QList<sicnu::data::AssetId> &ids );
     void promoteRequested( sicnu::data::AssetId id );
 
   private slots:
@@ -78,6 +85,7 @@ class DataManagerPanel : public QDockWidget
     void addAssetRow( QTreeWidgetItem *parent, const sicnu::data::AssetSnapshot &snapshot );
     void showAssetDetails( const sicnu::data::AssetSnapshot &snapshot );
     void showCollectionDetails( const sicnu::data::CollectionSnapshot &collection );
+    void showMultiSelectionDetails( const QList<sicnu::data::AssetId> &ids );
     void clearDetails( const QString &message = QString() );
 
     sicnu::data::DataManager *m_dataManager = nullptr; // not owned
