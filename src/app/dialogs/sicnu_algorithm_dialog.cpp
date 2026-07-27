@@ -283,12 +283,11 @@ int loadFileResultLayers(
     bool loaded = false;
     if ( type == QgsProcessingParameterRasterDestination::typeName() )
     {
+      // Prefer Data Manager + Display Manager via main window (ADR 0010 Wave B).
       if ( mainWin )
       {
         mainWin->loadRasterLayer( path );
-        loaded = projectHasLayerWithSource( path );
-        if ( !loaded )
-          loaded = addRasterToProject( path, feedback );
+        loaded = true;
       }
       else
       {
@@ -300,9 +299,7 @@ int loadFileResultLayers(
       if ( mainWin )
       {
         mainWin->loadVectorLayer( path );
-        loaded = projectHasLayerWithSource( path );
-        if ( !loaded )
-          loaded = addVectorToProject( path, feedback );
+        loaded = true;
       }
       else
       {

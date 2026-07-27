@@ -1,4 +1,5 @@
 #include "qgsgeoref_shell_window.h"
+#include "main_window.h"
 
 #include "qgsmaptoolpan.h"
 #include "qgsmaptoolzoom.h"
@@ -1598,6 +1599,26 @@ void QgsGeorefShellWindow::loadWarpOutputToProject( const QString &path )
   if ( path.isEmpty() )
     return;
 
+  // Prefer Data Manager + Display Manager via main window (ADR 0010 Wave B).
+  QWidget *w = parentWidget();
+  while ( w )
+  {
+    if ( auto *mw = qobject_cast<QgisDesktopWindow *>( w ) )
+    {
+      mw->loadRasterLayer( path );
+      if ( mWorkflowBridge && mWorkflowBridge->isOpen() )
+      {
+        mWorkflowBridge->setOutputArtifact( path.toStdString() );
+        mWorkflowBridge->markStepComplete( "load_result" );
+      }
+      if ( statusBar() )
+        statusBar()->showMessage( tr( "已加载到主工程: %1" ).arg( QFileInfo( path ).fileName() ), 5000 );
+      return;
+    }
+    w = w->parentWidget();
+  }
+
+  // Fallback when no main window host (standalone / tests).
   auto *layer = new QgsRasterLayer( path, QFileInfo( path ).baseName(),
                                     QStringLiteral( "gdal" ) );
   if ( !layer->isValid() )

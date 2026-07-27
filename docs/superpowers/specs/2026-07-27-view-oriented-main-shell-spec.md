@@ -1,7 +1,7 @@
 # Spec: View-Oriented Main Shell (elevate Data Manager)
 
 **Parent:** ADR 0009, ADR 0010, `2026-07-24-data-manager-architecture-spec.md`, `2026-07-26-multiple-display-views-spec.md`  
-**Status:** In progress — Wave A.
+**Status:** In progress — Wave A done; Wave B partial (main-map load routes).
 
 ## Problem
 
@@ -61,16 +61,17 @@ QgisDesktopWindow (shell)
 
 Single entry for “put this file/path on the main view as data”:
 
-`ProjectContext` or `ActiveViewHost::openAndDisplay(path) → AssetId + DisplayLayerId`
+`LayerManager` / `loadDataLayer(path)` → `DataManager::registerSource` + `DisplayManager::addLayer(mainViewId)`.
 
 Migrate call sites (priority order):
 
-1. `loadDataLayer` / `loadRasterLayer` / sample load (already mostly LayerManager)
-2. Task Center / job panel “load result”
-3. Algorithm dialog success → main
-4. STAC browser
-5. OBIA “加载到主图” (already signals main; ensure register+addLayer not raw QgsProject on main)
-6. Georef “load to main” paths
+1. ~~`loadDataLayer` / `loadRasterLayer` / sample load~~ (LayerManager already Data+Display)
+2. ~~Task Center / job panel “load result”~~ → `loadDataLayer` / loadVector
+3. ~~Algorithm dialog success → main~~ (no dual `addMapLayer` fallback when mainWin present)
+4. ~~STAC browser~~ → `loadDataLayer(/vsicurl/…)`
+5. ~~OBIA session canvas~~ → private shared_ptr layers only; 加载到主图 → `loadDataLayer`
+6. ~~Georef load to main~~ → walk parent to main window `loadRasterLayer`
+7. Remaining: session-private `QgsMapLayerStore` (classify/georef dual-canvas) — Wave E
 
 **Done when:** grep for `QgsProject::instance()->addMapLayer` in `src/app` only remains for true QGIS interop adoption or session-private stores that later call ProjectContext adopt.
 

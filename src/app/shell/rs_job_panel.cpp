@@ -625,10 +625,11 @@ int RsJobPanel::loadPathsToMain( const QStringList &paths )
                               || lower.endsWith( QLatin1String( ".json" ) )
                               || lower.endsWith( QLatin1String( ".kml" ) )
                               || lower.endsWith( QLatin1String( ".gml" ) );
+    // Always via main-window Data/Display seam (register Asset + main view).
     if ( preferVector )
       mw->loadVectorLayer( path );
     else
-      mw->loadRasterLayer( path );
+      ( void ) mw->loadDataLayer( path );
     ++loaded;
   }
   return loaded;

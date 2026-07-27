@@ -2,6 +2,7 @@
 #include "stac_browser_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
+#include "main_window.h"
 #include "agent/stac_client.h"
 
 #include <QPushButton>
@@ -186,17 +187,33 @@ void StacBrowserDialog::loadSelectedAsset()
         return;
     }
 
-    const QString vsicurl = QStringLiteral("/vsicurl/") + cogUrl;
-    auto *layer = new QgsRasterLayer(vsicurl, feature.value(QStringLiteral("id")).toString());
-    if (!layer->isValid()) {
-        delete layer;
-        QMessageBox::warning(this, tr("Error"), tr("Failed to load COG from STAC asset."));
+    const QString vsicurl = QStringLiteral( "/vsicurl/" ) + cogUrl;
+
+    // Route through main shell Data/Display seam (ADR 0010 Wave B) — no raw addMapLayer.
+    if ( auto *mw = qobject_cast<QgisDesktopWindow *>( parentWidget() ) )
+    {
+        if ( !mw->loadDataLayer( vsicurl ) )
+        {
+            QMessageBox::warning( this, tr( "Error" ),
+                                  tr( "Failed to register/display STAC COG via Data Manager." ) );
+            return;
+        }
+        if ( m_canvas )
+            m_canvas->zoomToFullExtent();
+        accept();
         return;
     }
 
-    QgsProject::instance()->addMapLayer(layer);
-    if (m_canvas)
-        m_canvas->setExtent(layer->extent());
-
+    // Headless / no main window: best-effort GDAL open (tests only).
+    auto *layer = new QgsRasterLayer( vsicurl, feature.value( QStringLiteral( "id" ) ).toString() );
+    if ( !layer->isValid() )
+    {
+        delete layer;
+        QMessageBox::warning( this, tr( "Error" ), tr( "Failed to load COG from STAC asset." ) );
+        return;
+    }
+    QgsProject::instance()->addMapLayer( layer );
+    if ( m_canvas )
+        m_canvas->setExtent( layer->extent() );
     accept();
 }

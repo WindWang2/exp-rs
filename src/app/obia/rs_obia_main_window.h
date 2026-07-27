@@ -118,9 +118,10 @@ class RsObiaMainWindow : public QMainWindow
     bool isBusy() const { return m_pendingTaskId >= 0; }
     void loadClassifiedRaster( const QString &outputPath );
 
-    // Map canvas
+    // Map canvas (session-local layers; not the main project catalog)
     QgsMapCanvas *mCanvas = nullptr;
     std::shared_ptr<QgsRasterLayer> mRasterLayer;
+    std::shared_ptr<QgsRasterLayer> mClassifiedLayer;
 
     // Layer tree
     QgsLayerTree *mLayerTree = nullptr;

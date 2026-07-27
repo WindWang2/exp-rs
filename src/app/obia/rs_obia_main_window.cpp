@@ -460,16 +460,22 @@ void RsObiaMainWindow::finishPendingUi()
 void RsObiaMainWindow::loadClassifiedRaster( const QString &outputPath )
 {
     mLastClassRasterPath = outputPath;
-    auto *resultLayer = new QgsRasterLayer( outputPath, QFileInfo( outputPath ).baseName() );
-    if ( resultLayer->isValid() )
+    // Session canvas only — do not inject into main QgsProject catalog (ADR 0010).
+    // Main map load is explicit via requestLoadToMainMap → loadDataLayer.
+    auto resultLayer = std::make_shared<QgsRasterLayer>(
+        outputPath, QFileInfo( outputPath ).baseName(), QStringLiteral( "gdal" ) );
+    if ( !resultLayer->isValid() )
     {
-        QgsProject::instance()->addMapLayer( resultLayer );
-        mCanvas->refresh();
+        statusBar()->showMessage( tr( "Invalid classification raster: %1" ).arg( outputPath ), 5000 );
+        return;
     }
-    else
-    {
-        delete resultLayer;
-    }
+    mClassifiedLayer = resultLayer;
+    QList<QgsMapLayer *> layers;
+    if ( mRasterLayer )
+        layers << mRasterLayer.get();
+    layers << mClassifiedLayer.get();
+    mCanvas->setLayers( layers );
+    mCanvas->refresh();
 }
 
 void RsObiaMainWindow::rememberClassification( const QString &outputPath,

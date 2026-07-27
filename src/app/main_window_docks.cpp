@@ -494,7 +494,8 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     // Do not also create TaskCenterDock — that duplicated the same projection.
     connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::layerAutoLoadRequested,
              this, [this]( const QString &path ) {
-                 loadRasterLayer( path );
+                 // Generic path open → DataManager + main Display View.
+                 ( void ) loadDataLayer( path );
              } );
 
     // Session controller bridges TaskPanelHost ↔ WorkflowRuntime
@@ -504,7 +505,7 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
 
     connect( m_sessionController, &WorkflowSessionController::requestLoadRaster,
              this, [this]( const QString &path ) {
-                 loadRasterLayer( path );
+                 ( void ) loadDataLayer( path );
              } );
     connect( m_sessionController, &WorkflowSessionController::statusMessage,
              this, [this]( const QString &msg ) {
