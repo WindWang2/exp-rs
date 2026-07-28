@@ -249,6 +249,25 @@ void AgentCopilotDockWidget::onContentTokenReceived( const QString &text )
 
 void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
 {
+  QJsonObject funcObj = toolCallJson[QStringLiteral( "function" )].toObject();
+  QString algName = funcObj[QStringLiteral( "name" )].toString();
+
+  QJsonObject argsObj;
+  if ( funcObj[QStringLiteral( "arguments" )].isObject() )
+    argsObj = funcObj[QStringLiteral( "arguments" )].toObject();
+  else
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( funcObj[QStringLiteral( "arguments" )].toString().toUtf8() );
+    if ( doc.isObject() )
+      argsObj = doc.object();
+  }
+
+  if ( algName == QStringLiteral( "executeAgentPlan" ) || argsObj.contains( QStringLiteral( "steps" ) ) )
+  {
+    appendPlanApprovalCard( argsObj.contains( QStringLiteral( "steps" ) ) ? argsObj : funcObj );
+    return;
+  }
+
   appendToolCallCard( toolCallJson );
 
   // Execute tool call via AgentWorkflowExecutor
@@ -280,6 +299,53 @@ void AgentCopilotDockWidget::appendToolCallCard( const QJsonObject &toolCallJson
   layout->addWidget( title );
 
   m_chatLayout->addWidget( card );
+}
+
+void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson )
+{
+  auto *card = new QFrame( m_chatContainer );
+  card->setFrameShape( QFrame::StyledPanel );
+  card->setStyleSheet( QStringLiteral( "background-color: #0f172a; border: 1px solid #10b981; border-radius: 6px; padding: 8px;" ) );
+
+  auto *layout = new QVBoxLayout( card );
+
+  int stepCount = 0;
+  if ( planJson.contains( QStringLiteral( "steps" ) ) && planJson[QStringLiteral( "steps" )].isArray() )
+    stepCount = planJson[QStringLiteral( "steps" )].toArray().size();
+
+  auto *title = new QLabel( QString( "📋 AI Agent 提出了 <b>%1 步骤</b> 的遥感处理工作流计划" ).arg( stepCount ), card );
+  title->setStyleSheet( QStringLiteral( "color: #10b981; font-weight: bold;" ) );
+  layout->addWidget( title );
+
+  auto *btnLayout = new QHBoxLayout();
+  auto *previewBtn = new QPushButton( QStringLiteral( "👁️ 在画布中预览" ), card );
+  auto *runBtn = new QPushButton( QStringLiteral( "▶ 确认并执行" ), card );
+  runBtn->setStyleSheet( QStringLiteral( "background-color: #059669; color: white; font-weight: bold;" ) );
+
+  btnLayout->addWidget( previewBtn );
+  btnLayout->addWidget( runBtn );
+  layout->addLayout( btnLayout );
+
+  m_chatLayout->addWidget( card );
+
+  connect( previewBtn, &QPushButton::clicked, this, [this, planJson]() {
+    emit viewPlanInCanvasRequested( planJson );
+  } );
+
+  connect( runBtn, &QPushButton::clicked, this, [this, planJson]() {
+    emit planApprovalRequested( planJson );
+
+    Json::Value cppPlan;
+    std::string jsonStr = QJsonDocument( planJson ).toJson( QJsonDocument::Compact ).toStdString();
+    Json::CharReaderBuilder builder;
+    std::string errs;
+    std::istringstream sstream( jsonStr );
+    Json::parseFromStream( builder, sstream, &cppPlan, &errs );
+
+    Json::Value resultPayload = m_workflowExecutor.executeAgentPlan( cppPlan );
+    QJsonObject resultJson = QJsonDocument::fromJson( QByteArray::fromStdString( resultPayload.toStyledString() ) ).object();
+    emit toolExecutionFinished( resultJson );
+  } );
 }
 
 void AgentCopilotDockWidget::onLlmFinished()

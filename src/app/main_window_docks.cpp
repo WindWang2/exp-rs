@@ -15,6 +15,7 @@
 #include "shell/task_panel_host.h"
 #include "shell/workflow_session_controller.h"
 #include "workflow/pipeline_editor_dock.h"
+#include "workflow/workflow_definition.h"
 #include "agent/agent_copilot_dock_widget.h"
 #include "widgets/spectral_profile_widget.h"
 #include "widgets/guided_workflow_widget.h"
@@ -514,6 +515,34 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     if ( m_projectContext )
         agentCopilotDock->setContext( &m_projectContext->dataManager(), m_activeViewHost );
     agentCopilotDock->hide();
+
+    connect( agentCopilotDock, &sicnu::agent::AgentCopilotDockWidget::viewPlanInCanvasRequested,
+             this, [this]( const QJsonObject &planJson ) {
+                 if ( m_pipelineDock && m_pipelineDock->pipelineCanvas() )
+                 {
+                     m_pipelineDock->show();
+                     m_pipelineDock->raise();
+
+                     Json::Value cppPlan;
+                     std::string jsonStr = QJsonDocument( planJson ).toJson( QJsonDocument::Compact ).toStdString();
+                     Json::CharReaderBuilder builder;
+                     std::string errs;
+                     std::istringstream sstream( jsonStr );
+                     Json::parseFromStream( builder, sstream, &cppPlan, &errs );
+
+                     if ( !cppPlan.isMember( "id" ) )
+                         cppPlan["id"] = "agent_plan";
+                     if ( !cppPlan.isMember( "title" ) )
+                         cppPlan["title"] = "AI Agent Generated Workflow";
+
+                     sicnu::workflow::WorkflowDefinition def;
+                     std::string parseErr;
+                     if ( sicnu::workflow::workflowDefinitionFromJson( cppPlan, def, parseErr ) )
+                     {
+                         m_pipelineDock->pipelineCanvas()->loadWorkflowDefinition( def );
+                     }
+                 }
+             } );
 
     m_sessionController->bindCanvas( m_pipelineDock->pipelineCanvas() );
 

@@ -40,6 +40,7 @@ class AgentCopilotDockWidget : public QDockWidget
     void sendPrompt( const QString &promptText );
 
   signals:
+    void viewPlanInCanvasRequested( const QJsonObject &planJson );
     void planApprovalRequested( const QJsonObject &planJson );
     void toolExecutionFinished( const QJsonObject &resultJson );
 
@@ -59,6 +60,7 @@ class AgentCopilotDockWidget : public QDockWidget
     void appendUserMessageCard( const QString &text );
     void appendAssistantMessageCard();
     void appendToolCallCard( const QJsonObject &toolCallJson );
+    void appendPlanApprovalCard( const QJsonObject &planJson );
 
     data::DataManager *m_dataManager = nullptr;
     ActiveViewHost *m_viewHost = nullptr;
