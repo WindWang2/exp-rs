@@ -100,3 +100,19 @@ _Avoid_: Script runner, Plugin store
 The application interface facade (`SicnuAppInterface` subclassing `QgisInterface`) passed into Python plugins, wrapping `QgisDesktopWindow`, `ActiveViewHost`, and `ProjectContext` while enforcing the Data/Display seam.
 _Avoid_: Raw main window pointer, Global QgisApp instance
 
+**Pipeline Node Canvas**:
+The visual DAG editor canvas (`PipelineCanvasWidget` using Qt Graphics View) for constructing, editing, and monitoring processing task pipelines. Spatial metadata $(X,Y)$ is embedded in `WorkflowDefinition` JSON.
+_Avoid_: Node graph window, Flow editor dialog
+
+## Architectural Decision Records (ADRs)
+
+### ADR 0011: Task Pipeline & Workflow Editor UI Architecture
+
+- **Context**: Users need a visual DAG editor to construct, configure, execute, and monitor multi-step processing algorithm pipelines (e.g. Landsat pre-processing, spectral indices, OBIA classification).
+- **Decision**:
+  1. **Rendering Engine**: Use Qt's native Graphics View framework (`QGraphicsScene` / `QGraphicsView`) for zero extra 3rd-party dependencies and high-performance node graph rendering.
+  2. **Data Model Sync**: Maintain two-way synchronization between canvas nodes/edges and `WorkflowDefinition` / `WorkflowSessionController`. Embed visual node coordinates $(X,Y)$ as spatial metadata inside `WorkflowDefinition` JSON (`"meta": {"ui": {"x": 120, "y": 250}}`).
+  3. **Execution & Badging**: Support dual execution modes (Full DAG run / Step-by-step up to selected node) with real-time status color overlays (⚪ Idle, 🔵 Running, 🟢 Success, 🔴 Failure) and log stream inspection.
+  4. **Data Seam Integration**: Intermediate step outputs are registered as `TaskTemporary` Data Assets in `DataManager` (ADR 0009/0010 compliant). Only output ports with the 👁️ *"Add to Map"* toggle enabled call `ActiveViewHost::openPath()` to add display layers to the canvas.
+  5. **Shell Hosting**: Host the canvas in a dockable central panel (`PipelineEditorDock`) with dedicated ribbon actions under a **"Workflow / 流程"** tab and a drag-and-drop preset workflow catalog.
+
