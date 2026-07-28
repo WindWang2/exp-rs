@@ -9,9 +9,11 @@
 #include <qgsmapcanvas.h>
 #include <qgsmaplayerstore.h>
 #include <qgsproject.h>
+#include <qgsvectorlayer.h>
 
 #include "app/display/qgis_display_manager.h"
 #include "app/project_context.h"
+#include "app/shell/rs_session_map_workspace.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
 
@@ -361,6 +363,54 @@ TEST_CASE( "clearProject removes layers across ALL views (no secondary leak)",
     CHECK_FALSE( manager.asset( assetId ).has_value() );
     // The secondary view's layer record is gone.
     CHECK_FALSE( display.layer( added.value() ).has_value() );
+  }
+  QgsProject::instance()->clear();
+}
+
+// ---------------------------------------------------------------------------
+// Wave E: RsSessionMapWorkspace as secondary Display View (no dual bridges).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "session map workspace binds as secondary view without local bridge",
+           "[project_context][multi_view][wave_e]" )
+{
+  {
+    QgsProject *project = QgsProject::instance();
+    project->clear();
+    QgsMapCanvas mainCanvas;
+    auto context = createContext( mainCanvas, *project );
+
+    QgsMapCanvas sessionCanvas;
+    RsSessionMapWorkspace session( &sessionCanvas );
+    REQUIRE( session.hasLocalBridge() );
+
+    // Host must release the session-local bridge before createSecondaryView
+    // (DisplayManager creates the sole bridge for that tree+canvas).
+    session.releaseLocalBridge();
+    REQUIRE_FALSE( session.hasLocalBridge() );
+
+    const auto created = context->createSecondaryView( session.viewSpec() );
+    REQUIRE( created );
+    const sicnu::display::DisplayViewId sessionViewId = created.value();
+
+    CHECK( sessionViewId != context->mainViewId() );
+    REQUIRE( context->views().size() == 2 );
+    CHECK( context->views().at( 1 ) == sessionViewId );
+
+    // Session-private add still works; DM bridge owns canvas membership.
+    auto *mem = new QgsVectorLayer(
+      QStringLiteral( "Polygon?crs=EPSG:4326" ), QStringLiteral( "samples" ),
+      QStringLiteral( "memory" ) );
+    REQUIRE( mem->isValid() );
+    session.addLayer( mem, true );
+    CHECK( session.layerStore()->mapLayer( mem->id() ) == mem );
+    CHECK( session.layerTree()->findLayer( mem->id() ) != nullptr );
+
+    REQUIRE( context->removeView( sessionViewId ) );
+    REQUIRE( context->views().size() == 1 );
+
+    session.restoreLocalBridge();
+    REQUIRE( session.hasLocalBridge() );
   }
   QgsProject::instance()->clear();
 }

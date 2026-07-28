@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — migration in progress (Wave A shell language + routing).
+Accepted — migration in progress (Waves A–D done; Wave E partial: classify session view + load-to-main).
 
 ## Context
 

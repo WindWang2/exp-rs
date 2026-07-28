@@ -2,6 +2,7 @@
 #include "main_window.h"
 #include "active_view_host.h"
 #include "project_context.h"
+#include "shell/rs_session_map_workspace.h"
 #include "shell/secondary_map_view_widget.h"
 
 #include <QMessageBox>
@@ -75,9 +76,45 @@ void QgisDesktopWindow::openClassificationWindow()
 {
     if ( !m_classifyWindow )
     {
-        // iface = nullptr for now; later tasks may pass a real QgisInterface.
+        // iface = nullptr: load-to-main uses requestLoadToMainMap → loadDataLayer.
         m_classifyWindow = new QgsClassificationMainWindow( nullptr, this );
         m_classifyWindow->setAttribute( Qt::WA_DeleteOnClose, false );
+
+        connect( m_classifyWindow, &QgsClassificationMainWindow::requestLoadToMainMap,
+                 this, [this]( const QString &path ) {
+                     if ( path.isEmpty() )
+                         return;
+                     if ( loadDataLayer( path ) )
+                     {
+                         statusBar()->showMessage(
+                             tr( "已加载分类结果到主图：%1" ).arg( path ), 5000 );
+                     }
+                     else
+                     {
+                         statusBar()->showMessage(
+                             tr( "加载分类结果到主图失败：%1" ).arg( path ), 6000 );
+                     }
+                 } );
+
+        // Wave E: register session map as secondary Display View (DM owns bridge).
+        if ( m_projectContext && m_classifyWindow->sessionMap()
+             && m_classifyViewId.isNull() )
+        {
+            RsSessionMapWorkspace *session = m_classifyWindow->sessionMap();
+            session->releaseLocalBridge();
+            const auto created =
+                m_projectContext->createSecondaryView( session->viewSpec() );
+            if ( created )
+            {
+                m_classifyViewId = created.value();
+            }
+            else
+            {
+                session->restoreLocalBridge();
+                statusBar()->showMessage(
+                    tr( "分类会话未注册为显示视图（使用会话本地图层栈）" ), 4000 );
+            }
+        }
     }
     m_classifyWindow->show();
     m_classifyWindow->raise();
@@ -101,13 +138,21 @@ void QgisDesktopWindow::openObiaWindow()
         auto *obia = new RsObiaMainWindow( this );
         obia->setAttribute( Qt::WA_DeleteOnClose, false );
         // Product UX: load classified result into main project map on request.
+        // Session canvas stays private (shared_ptr layers); only 加载到主图 uses DM.
         connect( obia, &RsObiaMainWindow::requestLoadToMainMap,
                  this, [this]( const QString &path ) {
                      if ( path.isEmpty() )
                          return;
-                     ( void ) loadDataLayer( path );
-                     statusBar()->showMessage(
-                         tr( "已加载 OBIA 分类结果到主图：%1" ).arg( path ), 5000 );
+                     if ( loadDataLayer( path ) )
+                     {
+                         statusBar()->showMessage(
+                             tr( "已加载 OBIA 分类结果到主图：%1" ).arg( path ), 5000 );
+                     }
+                     else
+                     {
+                         statusBar()->showMessage(
+                             tr( "加载 OBIA 结果到主图失败：%1" ).arg( path ), 6000 );
+                     }
                  } );
         m_obiaWindow = obia;
     }

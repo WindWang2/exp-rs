@@ -187,6 +187,21 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
 
 QgisDesktopWindow::~QgisDesktopWindow()
 {
+    // Unregister session secondary views while their canvas/tree/store are valid.
+    if ( m_projectContext )
+    {
+        if ( !m_classifyViewId.isNull() )
+        {
+            ( void ) m_projectContext->removeView( m_classifyViewId );
+            m_classifyViewId = sicnu::display::DisplayViewId();
+        }
+        if ( !m_secondaryViewId.isNull() )
+        {
+            ( void ) m_projectContext->removeView( m_secondaryViewId );
+            m_secondaryViewId = sicnu::display::DisplayViewId();
+        }
+    }
+
     // Tear down child windows that rebind QgisApp / own canvases first.
     // Use QWidget* so we don't need full type definitions here.
     auto disposeChildWindow = []( QWidget *w ) {

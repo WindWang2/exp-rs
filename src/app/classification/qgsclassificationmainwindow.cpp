@@ -3506,29 +3506,17 @@ void QgsClassificationMainWindow::loadClassificationResultToMain()
     return;
   }
 
-  if ( !m_iface )
-  {
-    if ( statusBar() )
-      statusBar()->showMessage(
-        tr( "主窗口接口不可用，无法加载图层（请从主程序打开分类窗口）" ), 6000 );
-    return;
-  }
-
+  // Wave E: never bypass Data Manager via QgisInterface::addRasterLayer.
+  // Main shell connects requestLoadToMainMap → loadDataLayer (ActiveViewHost).
   const QString baseName = QFileInfo( path ).completeBaseName();
-  QgsRasterLayer *layer = m_iface->addRasterLayer( path, baseName );
-  if ( !layer || !layer->isValid() )
-  {
-    if ( statusBar() )
-      statusBar()->showMessage( tr( "加载到主窗口失败: %1" ).arg( path ), 5000 );
-    return;
-  }
+  emit requestLoadToMainMap( path );
 
   if ( m_workflow )
     m_workflow->setHasExportedOrLoadedToMain( true );
   refreshWorkflowUi();
   if ( statusBar() )
     statusBar()->showMessage(
-      tr( "已加载到主窗口: %1" ).arg( baseName ), 5000 );
+      tr( "已请求将结果加载到主图: %1" ).arg( baseName ), 5000 );
 }
 
 bool QgsClassificationMainWindow::saveClassificationProject( QString path )

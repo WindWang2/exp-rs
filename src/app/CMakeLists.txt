@@ -240,6 +240,8 @@ if(SICNU_EMBED_PYTHON)
         ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_runner.cpp
         ${CMAKE_SOURCE_DIR}/src/app/python/sicnu_app_interface.cpp
         ${CMAKE_SOURCE_DIR}/src/app/python/python_plugin_adapter.cpp
+        widgets/python_script_editor.cpp
+        widgets/python_script_editor.h
     )
     target_include_directories(sicnu_geo_rs PRIVATE ${CMAKE_SOURCE_DIR}/src/python ${CMAKE_SOURCE_DIR}/src/app/python)
     target_link_libraries(sicnu_geo_rs PRIVATE Python::Python)

@@ -76,6 +76,9 @@ class QgsClassificationMainWindow : public QMainWindow
     explicit QgsClassificationMainWindow( QgisInterface *iface, QWidget *parent = nullptr );
     ~QgsClassificationMainWindow() override;
 
+    /// Session map workspace (store + tree + optional local bridge). Wave E host.
+    RsSessionMapWorkspace *sessionMap() const { return m_sessionMap; }
+
   public slots:
     bool openSourceRaster();
     bool openSourceRaster( const QString &path );
@@ -96,6 +99,10 @@ class QgsClassificationMainWindow : public QMainWindow
     void loadClassifierModel();
     bool saveClassificationProject( QString path = QString() );
     bool loadProjectFromFile( QString path = QString() );
+
+  signals:
+    /// Ask main shell to load the classified/post-processed raster via ActiveViewHost.
+    void requestLoadToMainMap( const QString &rasterPath );
 
   protected:
     void closeEvent( QCloseEvent *e ) override;

@@ -42,6 +42,30 @@ RsSessionMapWorkspace::RsSessionMapWorkspace( QgsMapCanvas *canvas, QObject *par
 
 RsSessionMapWorkspace::~RsSessionMapWorkspace() = default;
 
+sicnu::display::DisplayViewSpec RsSessionMapWorkspace::viewSpec() const
+{
+  return sicnu::display::DisplayViewSpec{ m_canvas, m_layerTree, m_layerStore };
+}
+
+void RsSessionMapWorkspace::releaseLocalBridge()
+{
+  if ( !m_layerTreeBridge )
+    return;
+  // Delete immediately so createSecondaryView can attach DisplayManager's bridge
+  // without two bridges listening on the same tree/canvas.
+  delete m_layerTreeBridge;
+  m_layerTreeBridge = nullptr;
+}
+
+void RsSessionMapWorkspace::restoreLocalBridge()
+{
+  if ( m_layerTreeBridge || !m_canvas || !m_layerTree )
+    return;
+  m_layerTreeBridge = new QgsLayerTreeMapCanvasBridge( m_layerTree, m_canvas, this );
+  m_layerTreeBridge->setAutoSetupOnFirstLayer( false );
+  m_layerTreeBridge->setCanvasLayers();
+}
+
 void RsSessionMapWorkspace::syncCanvasLayers()
 {
   if ( m_layerTreeBridge )
@@ -50,6 +74,9 @@ void RsSessionMapWorkspace::syncCanvasLayers()
     m_layerTreeBridge->setCanvasLayers();
     return;
   }
+  // No local bridge: either standalone without canvas, or DisplayManager owns the
+  // bridge (Wave E secondary view). Tree mutations still notify that bridge;
+  // a refresh keeps the canvas painting after store-only repairs.
   if ( m_canvas )
     m_canvas->refresh();
 }

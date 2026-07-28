@@ -2936,6 +2936,7 @@ sicnu_discover_tests(test_data_manager_reap)
 # ProjectContext session-close reap tests
 add_executable(test_project_context_reap
   test_project_context_reap.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/rs_session_map_workspace.cpp
 )
 target_link_libraries(test_project_context_reap PRIVATE
   Catch2::Catch2
@@ -2948,6 +2949,7 @@ target_link_libraries(test_project_context_reap PRIVATE
 )
 target_include_directories(test_project_context_reap PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_project_context_reap)

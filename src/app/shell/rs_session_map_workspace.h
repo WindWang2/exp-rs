@@ -1,16 +1,22 @@
 /***************************************************************************
  * rs_session_map_workspace.h  —  session-local map stack (store + tree + bridge)
  *
- * Owns the layer store, layer tree, model, and canvas bridge for a single
- * map session (e.g. classification window). Canvas is non-owning.
+ * Owns the layer store, layer tree, model, and (optionally) a canvas bridge
+ * for a single map session (e.g. classification window). Canvas is non-owning.
  *
  * Destination CRS and extent policy are shell responsibilities; the bridge
  * is constructed with auto-setup-on-first-layer disabled so sessions do not
  * mutate QgsProject CRS / zoom from the first memory layer.
+ *
+ * Wave E: when registered as a ProjectContext secondary Display View, call
+ * releaseLocalBridge() before createSecondaryView — DisplayManager owns the
+ * only QgsLayerTreeMapCanvasBridge (dual bridges fight over canvas layers).
  ***************************************************************************/
 #pragma once
 
 #include <QObject>
+
+#include "display/qgis_display_manager.h"
 
 class QgsLayerTree;
 class QgsLayerTreeMapCanvasBridge;
@@ -61,9 +67,28 @@ class RsSessionMapWorkspace : public QObject
     void zoomToLayer( QgsMapLayer *layer );
     void setCurrentLayer( QgsMapLayer *layer );
 
+    QgsMapCanvas *canvas() const { return m_canvas; }
     QgsLayerTree *layerTree() const { return m_layerTree; }
     QgsLayerTreeModel *layerTreeModel() const { return m_layerTreeModel; }
     QgsMapLayerStore *layerStore() const { return m_layerStore; }
+
+    /// Host-supplied triple for ProjectContext::createSecondaryView.
+    sicnu::display::DisplayViewSpec viewSpec() const;
+
+    /// True while this object owns a session-local canvas bridge.
+    bool hasLocalBridge() const { return m_layerTreeBridge != nullptr; }
+
+    /**
+     * Destroy the session-local bridge so a DisplayManager-owned bridge can
+     * attach to the same tree+canvas. Safe when already released.
+     */
+    void releaseLocalBridge();
+
+    /**
+     * Recreate a session-local bridge after the Display View is removed.
+     * No-op if a local bridge already exists or canvas is null.
+     */
+    void restoreLocalBridge();
 
   private:
     /// Push tree → canvas membership (sync when bridge present).

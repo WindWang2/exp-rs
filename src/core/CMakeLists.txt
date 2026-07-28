@@ -2920,6 +2920,7 @@ add_library(sicnu_core SHARED
 target_include_directories(sicnu_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/interfaces
+  ${CMAKE_SOURCE_DIR}/src
 )
 
 target_link_libraries(sicnu_core PUBLIC

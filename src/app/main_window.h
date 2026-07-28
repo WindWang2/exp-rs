@@ -343,6 +343,8 @@ private:
     QSplitter *m_mapSplitter = nullptr;
     class SecondaryMapViewWidget *m_secondaryMapView = nullptr;
     sicnu::display::DisplayViewId m_secondaryViewId;
+    /// Classification session map registered as secondary Display View (Wave E).
+    sicnu::display::DisplayViewId m_classifyViewId;
     QAction *m_secondaryViewAction = nullptr;
     QgsProjectionSelectionWidget *m_crsSelector = nullptr;
     LayerTreeMenuProvider *m_layerTreeMenuProvider = nullptr;
