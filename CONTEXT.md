@@ -140,3 +140,11 @@ _Avoid_: Node graph window, Flow editor dialog
   4. **Declarative UI Proxy**: Bind `PythonAppInterfaceProxy` inside `PythonPluginAdapter` during `initialize()` to translate `iface.addPluginToMenu()` IPC requests into C++ `QAction` menu items with automatic lifetime cleanup upon plugin `unload()`.
   5. **Sub-Second Auto-Healing**: If a Python plugin worker process segfaults or calls `os._exit()`, `PythonWorkerProcessPool` catches the process failure, auto-restarts a pre-warmed replacement worker in sub-second time, and emits a clean failure signal without crashing the `exp-rs` C++ main process.
   6. **API Compatibility Layer**: Expose `iface.activeLayer()`, `iface.mapCanvas().extent()`, `iface.messageBar().pushMessage()`, and `iface.addRasterLayer()` over JSON-RPC 2.0 (`catalog.get_active_layer`, `canvas.get_state`, `ui.push_message_bar`, `data.add_layer`), providing QGIS 3.x Python plugin source compatibility.
+
+### ADR 0015: ActiveViewHost Deepening & GIS Shell Facade Architecture
+- **Context**: Passing multiple raw UI pointers (`QgsMapCanvas*`, `QgsMessageBar*`, `ActiveViewHost*`) into IPC proxies (`PythonAppInterfaceProxy`) and plugin facades (`SicnuAppInterface`) creates shallowness and coupling friction.
+- **Decision**:
+  1. **Facade Encapsulation**: Deepen `ActiveViewHost` to absorb canvas extent/scale queries (`mapCanvasExtent()`, `mapCanvasScale()`), user message bar alerts (`pushMessageBarAlert()`), active layer state (`activeLayer()`), and dataset opening (`openPath()`).
+  2. **Single Seam Coupling**: `PythonAppInterfaceProxy` and `SicnuAppInterface` hold ONLY a single `ActiveViewHost*` pointer, completely isolating IPC handlers from raw C++ GUI widget trees.
+  3. **Dual-Layer QGIS Bridge**: `SicnuAppInterface` delegates `QgisInterface` C++ API overrides directly to `ActiveViewHost`, preserving full QGIS C++ plugin source compatibility.
+
