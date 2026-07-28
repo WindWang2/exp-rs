@@ -48,6 +48,7 @@ sicnu_add_test(test_geometry)
 sicnu_add_test(test_layers)
 sicnu_add_test(test_algorithm_engine)
 sicnu_add_test(test_task_center)
+sicnu_add_test(test_atomic_algorithm_adapter)
 
 # #35 — UI callers must not bypass Task Center; task views are projections.
 add_executable(test_ui_task_center_contract test_ui_task_center_contract.cpp)
