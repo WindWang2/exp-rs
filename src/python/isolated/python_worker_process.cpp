@@ -55,7 +55,7 @@ bool PythonWorkerProcess::startWorker( const QString &socketName, const QString 
   args << workerScript << QStringLiteral( "--socket" ) << socketName;
 
   m_process->start( pythonExec, args );
-  if ( !m_process->waitForStarted( 3000 ) )
+  if ( !m_process->waitForStarted( 500 ) )
   {
     qWarning() << "PythonWorkerProcess: Failed to start process" << pythonExec << args << m_process->errorString();
     return false;
@@ -69,11 +69,12 @@ void PythonWorkerProcess::stopWorker()
 {
   if ( m_process && m_process->state() != QProcess::NotRunning )
   {
+    m_process->disconnect();
     m_process->terminate();
-    if ( !m_process->waitForFinished( 2000 ) )
+    if ( !m_process->waitForFinished( 500 ) )
     {
       m_process->kill();
-      m_process->waitForFinished( 1000 );
+      m_process->waitForFinished( 500 );
     }
   }
 }
@@ -95,6 +96,10 @@ QProcess::ProcessState PythonWorkerProcess::state() const
 
 void PythonWorkerProcess::onProcessFinished( int exitCode, QProcess::ExitStatus exitStatus )
 {
+  if ( exitStatus == QProcess::CrashExit || ( exitCode != 0 && exitCode != 137 && exitCode != 15 && exitCode != 9 && exitCode != 1 ) )
+  {
+    emit workerCrashed();
+  }
   emit workerFinished( exitCode, exitStatus );
 }
 

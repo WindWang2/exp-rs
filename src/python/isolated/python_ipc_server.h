@@ -23,6 +23,7 @@ class PythonIpcServer : public QObject
     bool listen( const QString &serverName );
     void close();
     bool isListening() const;
+    bool hasClient() const;
     QString serverName() const;
 
     void sendRequest( const QString &method, const QJsonObject &params,

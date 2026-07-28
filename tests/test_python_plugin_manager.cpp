@@ -10,6 +10,7 @@
 #include "python_worker_process.h"
 #include "shared_memory_segment.h"
 #include "python_app_interface_proxy.h"
+#include "python_worker_process_pool.h"
 #include "plugin_manager.h"
 
 #include <QEventLoop>
@@ -251,4 +252,68 @@ TEST_CASE( "PythonAppInterfaceProxy registers UI action over IPC and routes clic
 
   worker.stopWorker();
   server.close();
+}
+
+TEST_CASE( "PythonWorkerProcessPool detects worker crash and auto-heals pre-warmed worker process", "[python][isolated][fault]" )
+{
+  using namespace sicnu::python::isolated;
+
+  QString scriptPath = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) );
+
+  PythonWorkerProcessPool pool( 2 );
+  REQUIRE( pool.initialize( QString(), scriptPath ) );
+
+  QEventLoop loop;
+  QTimer::singleShot( 500, &loop, &QEventLoop::quit );
+  loop.exec();
+
+  WorkerNode *node = nullptr;
+  for ( int i = 0; i < 50; ++i )
+  {
+    node = pool.acquireWorker();
+    if ( node )
+      break;
+    QEventLoop waitLoop;
+    QTimer::singleShot( 100, &waitLoop, &QEventLoop::quit );
+    waitLoop.exec();
+  }
+  REQUIRE( node != nullptr );
+  REQUIRE( node->server != nullptr );
+  REQUIRE( node->server->hasClient() );
+
+  int targetId = node->id;
+  bool crashDetected = false;
+  bool autoHealed = false;
+
+  QEventLoop faultLoop;
+
+  QObject::connect( &pool, &PythonWorkerProcessPool::workerCrashed, [&]( int id, const QString &reason ) {
+    Q_UNUSED( reason );
+    if ( id == targetId )
+    {
+      crashDetected = true;
+    }
+  } );
+
+  QObject::connect( &pool, &PythonWorkerProcessPool::workerRestarted, [&]( int id ) {
+    if ( id == targetId )
+    {
+      autoHealed = true;
+      faultLoop.quit();
+    }
+  } );
+
+  // Send crash_test command to simulate crash/segfault
+  QJsonObject crashParams;
+  node->server->sendRequest( QStringLiteral( "crash_test" ), crashParams );
+
+  QTimer::singleShot( 6000, &faultLoop, &QEventLoop::quit );
+  faultLoop.exec();
+
+  CHECK( crashDetected );
+  CHECK( autoHealed );
+  CHECK( pool.activeWorkerCount() == 2 );
+
+  pool.disconnect();
+  pool.shutdown();
 }

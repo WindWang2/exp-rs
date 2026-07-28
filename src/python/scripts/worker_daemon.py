@@ -107,6 +107,10 @@ def main():
                             "id": req_id,
                             "result": {"status": "action_executed", "callback_id": cb_id}
                         }
+                    elif method == "crash_test":
+                        sys.stderr.write("WorkerDaemon simulating segfault crash!\n")
+                        sys.stderr.flush()
+                        os._exit(139)
                     else:
                         resp = {
                             "jsonrpc": "2.0",

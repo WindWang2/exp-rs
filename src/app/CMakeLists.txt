@@ -290,6 +290,7 @@ if(SICNU_EMBED_PYTHON)
         ${CMAKE_SOURCE_DIR}/src/python/isolated/python_worker_process.cpp
         ${CMAKE_SOURCE_DIR}/src/python/isolated/shared_memory_segment.cpp
         ${CMAKE_SOURCE_DIR}/src/python/isolated/python_app_interface_proxy.cpp
+        ${CMAKE_SOURCE_DIR}/src/python/isolated/python_worker_process_pool.cpp
         ${CMAKE_SOURCE_DIR}/src/app/python/sicnu_app_interface.cpp
         ${CMAKE_SOURCE_DIR}/src/app/python/python_plugin_adapter.cpp
         widgets/python_script_editor.cpp

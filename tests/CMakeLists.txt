@@ -2711,6 +2711,7 @@ qt_add_executable(test_python_plugin_manager
   ${CMAKE_SOURCE_DIR}/src/python/isolated/python_worker_process.cpp
   ${CMAKE_SOURCE_DIR}/src/python/isolated/shared_memory_segment.cpp
   ${CMAKE_SOURCE_DIR}/src/python/isolated/python_app_interface_proxy.cpp
+  ${CMAKE_SOURCE_DIR}/src/python/isolated/python_worker_process_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/core/plugin_manager.cpp
 )
 target_link_libraries(test_python_plugin_manager PRIVATE

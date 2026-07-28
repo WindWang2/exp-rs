@@ -45,6 +45,11 @@ bool PythonIpcServer::isListening() const
   return m_server && m_server->isListening();
 }
 
+bool PythonIpcServer::hasClient() const
+{
+  return m_socket && m_socket->state() == QLocalSocket::ConnectedState;
+}
+
 QString PythonIpcServer::serverName() const
 {
   return m_server ? m_server->serverName() : QString();
