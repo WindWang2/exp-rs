@@ -120,6 +120,20 @@ class SicnuPythonIface:
         }
         self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
 
+    def registerProcessingAlgorithm(self, algo_id, name="", group="Python Plugins", description=""):
+        req_msg = {
+            "jsonrpc": "2.0",
+            "method": "processing.register_algorithm",
+            "params": {
+                "id": algo_id,
+                "name": name,
+                "group": group,
+                "description": description
+            },
+            "id": 8005
+        }
+        self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
+
 def process_shm(shm_key, multiply_factor=2.0):
     shm_name = shm_key.lstrip('/')
     shm_file = f"/dev/shm/{shm_name}"

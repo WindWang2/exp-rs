@@ -2722,6 +2722,8 @@ target_link_libraries(test_python_plugin_manager PRIVATE
   qgis_core
   qgis_gui
   Sicnu::qgis_display
+  sicnu_processing
+  sicnu_operators
   Python::Python
   CURL::libcurl
   xml2

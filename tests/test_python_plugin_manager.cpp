@@ -12,6 +12,7 @@
 #include "python_app_interface_proxy.h"
 #include "python_worker_process_pool.h"
 #include "plugin_manager.h"
+#include "processing/framework/algorithm_engine.h"
 
 #include <QEventLoop>
 #include <QTimer>
@@ -389,6 +390,24 @@ TEST_CASE( "PythonAppInterfaceProxy handles catalog.get_active_layer, canvas.get
   layerMsg[QStringLiteral( "method" )] = QStringLiteral( "catalog.get_active_layer" );
   layerMsg[QStringLiteral( "id" )] = 103;
   uiProxy.handleIpcMessage( layerMsg );
+
+  // Test processing.register_algorithm IPC message handling
+  QJsonObject regAlgoMsg;
+  regAlgoMsg[QStringLiteral( "method" )] = QStringLiteral( "processing.register_algorithm" );
+  regAlgoMsg[QStringLiteral( "id" )] = 104;
+  QJsonObject algoParams;
+  algoParams[QStringLiteral( "id" )] = QStringLiteral( "py:test_ndvi" );
+  algoParams[QStringLiteral( "name" )] = QStringLiteral( "Test Python NDVI" );
+  algoParams[QStringLiteral( "group" )] = QStringLiteral( "Python Plugins" );
+  regAlgoMsg[QStringLiteral( "params" )] = algoParams;
+  uiProxy.handleIpcMessage( regAlgoMsg );
+
+  auto foundAlgo = sicnu::AlgorithmEngine::instance().findAlgorithm( QStringLiteral( "py:test_ndvi" ) );
+  CHECK( foundAlgo != nullptr );
+  if ( foundAlgo )
+  {
+    CHECK( foundAlgo->descriptor().name == QStringLiteral( "Test Python NDVI" ) );
+  }
 
   CHECK( uiProxy.registeredActionCount() == 0 );
 }

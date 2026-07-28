@@ -28,6 +28,7 @@ add_library(sicnu_processing SHARED
     framework/algorithm_descriptor.cpp
     framework/atomic_algorithm_adapter.cpp
     framework/atomic_algorithm_registry.cpp
+    framework/python_algorithm_adapter.cpp
     framework/agent_tool_call_exporter.cpp
     framework/agent_workflow_executor.cpp
     # task_center.cpp lives in sicnu_task_center (below): JobEngine link would

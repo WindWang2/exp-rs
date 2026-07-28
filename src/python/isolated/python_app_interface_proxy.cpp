@@ -1,5 +1,7 @@
 #include "python_app_interface_proxy.h"
 #include "active_view_host.h"
+#include "processing/framework/python_algorithm_adapter.h"
+#include "processing/framework/algorithm_engine.h"
 
 #include <qgsmaplayer.h>
 
@@ -154,6 +156,45 @@ void PythonAppInterfaceProxy::handleIpcMessage( const QJsonObject &message )
     {
       QJsonObject res;
       res[QStringLiteral( "status" )] = QStringLiteral( "pushed" );
+      m_ipcServer->sendResponse( msgId, res );
+    }
+  }
+  else if ( method == QStringLiteral( "processing.register_algorithm" ) )
+  {
+    QString algoId = params[QStringLiteral( "id" )].toString();
+    QString name = params[QStringLiteral( "name" )].toString();
+    QString group = params[QStringLiteral( "group" )].toString();
+    QString desc = params[QStringLiteral( "description" )].toString();
+
+    sicnu::AlgorithmDescriptor algoDesc;
+    algoDesc.id = algoId;
+    algoDesc.name = name.isEmpty() ? algoId : name;
+    algoDesc.group = group.isEmpty() ? QStringLiteral( "Python Plugins" ) : group;
+    algoDesc.description = desc;
+
+    auto adapter = std::make_shared<sicnu::PythonAlgorithmAdapter>(
+      algoDesc,
+      [this, algoId]( const QVariantMap &execParams, std::function<void(double)> progress, QString &err ) -> bool {
+        if ( !m_ipcServer )
+        {
+          err = QStringLiteral( "IPC Server not available" );
+          return false;
+        }
+        QJsonObject req;
+        req[QStringLiteral( "id" )] = algoId;
+        m_ipcServer->sendRequest( QStringLiteral( "processing.execute_algorithm" ), req );
+        if ( progress ) progress( 1.0 );
+        return true;
+      }
+    );
+
+    sicnu::AlgorithmEngine::instance().registerAlgorithm( adapter );
+
+    if ( m_ipcServer && msgId > 0 )
+    {
+      QJsonObject res;
+      res[QStringLiteral( "status" )] = QStringLiteral( "registered" );
+      res[QStringLiteral( "id" )] = algoId;
       m_ipcServer->sendResponse( msgId, res );
     }
   }
