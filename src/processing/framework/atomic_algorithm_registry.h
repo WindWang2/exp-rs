@@ -42,6 +42,16 @@ public:
   std::vector<AlgorithmDescriptor> listDescriptors() const;
 
   /**
+   * Exports all registered algorithms into OpenAI / Qwen Tool Call Function Format JSON array.
+   */
+  Json::Value exportOpenAiToolDefinitions() const;
+
+  /**
+   * Exports all registered algorithms into a Markdown System Prompt tool catalog.
+   */
+  std::string exportSystemPromptCatalog() const;
+
+  /**
    * Total number of registered adapters.
    */
   size_t adapterCount() const;

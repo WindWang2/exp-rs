@@ -44,3 +44,36 @@ TEST_CASE( "AtomicAlgorithmRegistry singleton registers, looks up, and resets ad
   registry.reset();
   REQUIRE( registry.findAdapter( "rs:spectral_index" ) != nullptr );
 }
+
+TEST_CASE( "AgentToolCallExporter exports OpenAI Tool Call JSON and Markdown Prompt Catalog", "[processing][exporter]" )
+{
+  auto &registry = AtomicAlgorithmRegistry::instance();
+  registry.reset();
+
+  Json::Value toolsJson = registry.exportOpenAiToolDefinitions();
+  REQUIRE( toolsJson.isArray() );
+  REQUIRE( toolsJson.size() > 0 );
+
+  bool foundSpectralIndex = false;
+  for ( const auto &item : toolsJson )
+  {
+    REQUIRE( item.isObject() );
+    REQUIRE( item["type"].asString() == "function" );
+    REQUIRE( item["function"].isObject() );
+
+    std::string funcName = item["function"]["name"].asString();
+    if ( funcName == "rs_spectral_index" )
+    {
+      foundSpectralIndex = true;
+      REQUIRE( item["function"]["parameters"]["type"].asString() == "object" );
+      REQUIRE( item["function"]["parameters"]["properties"].isMember( "input" ) );
+    }
+  }
+  REQUIRE( foundSpectralIndex == true );
+
+  std::string markdownCatalog = registry.exportSystemPromptCatalog();
+  REQUIRE( !markdownCatalog.empty() );
+  REQUIRE( markdownCatalog.find( "# AI Agent Remote Sensing Tool Catalog" ) != std::string::npos );
+  REQUIRE( markdownCatalog.find( "`rs:spectral_index`" ) != std::string::npos );
+}
+

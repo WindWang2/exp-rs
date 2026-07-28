@@ -1,5 +1,6 @@
 // src/processing/framework/atomic_algorithm_registry.cpp
 #include "atomic_algorithm_registry.h"
+#include "agent_tool_call_exporter.h"
 #include "operators/framework/rs_operator_registry.h"
 
 namespace sicnu::processing {
@@ -69,6 +70,16 @@ std::vector<AlgorithmDescriptor> AtomicAlgorithmRegistry::listDescriptors() cons
     }
   }
   return result;
+}
+
+Json::Value AtomicAlgorithmRegistry::exportOpenAiToolDefinitions() const
+{
+  return AgentToolCallExporter::exportOpenAiToolDefinitions( listDescriptors() );
+}
+
+std::string AtomicAlgorithmRegistry::exportSystemPromptCatalog() const
+{
+  return AgentToolCallExporter::exportSystemPromptCatalog( listDescriptors() );
 }
 
 size_t AtomicAlgorithmRegistry::adapterCount() const
