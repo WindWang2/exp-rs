@@ -131,5 +131,11 @@ _Avoid_: Node graph window, Flow editor dialog
   4. **Canvas Pipeline Synchronization**: Multi-step DAG plans from LLM responses automatically instantiate as visual `WorkflowDefinition` node graphs on `PipelineCanvasWidget` for interactive preview, parameter tuning, and execution via `AgentWorkflowExecutor::executeAgentPlan`.
   5. **Config & Profile Persistence**: `LlmConfigManager` manages API Key, Base URL, Model Name, and Temperature settings via `QSettings` with pre-configured provider templates (DeepSeek, Qwen, Ollama, OpenAI) and a ⚙️ **Model Settings** dialog.
 
-
-
+### ADR 0014: Out-of-Process Python Plugin Host Architecture
+- **Context**: Embedded CPython engine calls (`PyRun_SimpleString`) inside the main C++ application process introduce crash vulnerabilities: a Segfault in any third-party Python plugin crashes the entire C++ GIS application host.
+- **Decision**:
+  1. **Out-of-Process Isolation**: Completely cut over `PythonPluginAdapter` to delegate Python plugin discovery, loading, and execution to an out-of-process worker daemon via `PythonWorkerProcessPool`.
+  2. **Dedicated Worker Allocation**: Assign a dedicated daemon process from `PythonWorkerProcessPool` to each loaded Python plugin to guarantee zero global Python state pollution and absolute crash boundary isolation.
+  3. **IPC & Shared Memory**: Execute plugin commands over line-delimited JSON-RPC 2.0 Unix Domain Sockets (`PythonIpcServer`), transferring high-throughput raster matrices using zero-copy POSIX shared memory (`SharedMemorySegment` / `/dev/shm`).
+  4. **Declarative UI Proxy**: Bind `PythonAppInterfaceProxy` inside `PythonPluginAdapter` during `initialize()` to translate `iface.addPluginToMenu()` IPC requests into C++ `QAction` menu items with automatic lifetime cleanup upon plugin `unload()`.
+  5. **Sub-Second Auto-Healing**: If a Python plugin worker process segfaults or calls `os._exit()`, `PythonWorkerProcessPool` catches the process failure, auto-restarts a pre-warmed replacement worker in sub-second time, and emits a clean failure signal without crashing the `exp-rs` C++ main process.
