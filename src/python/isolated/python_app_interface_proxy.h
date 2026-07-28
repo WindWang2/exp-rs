@@ -8,6 +8,10 @@
 
 #include "python_ipc_server.h"
 
+class ActiveViewHost;
+class QgsMapCanvas;
+class QgsMessageBar;
+
 namespace sicnu::python::isolated
 {
 
@@ -20,6 +24,10 @@ class PythonAppInterfaceProxy : public QObject
     ~PythonAppInterfaceProxy() override = default;
 
     void setParentMenu( QMenu *parentMenu );
+    void setActiveViewHost( ActiveViewHost *host );
+    void setMapCanvas( QgsMapCanvas *canvas );
+    void setMessageBar( QgsMessageBar *bar );
+
     int registeredActionCount() const;
 
   public slots:
@@ -31,6 +39,9 @@ class PythonAppInterfaceProxy : public QObject
   private:
     PythonIpcServer *m_ipcServer = nullptr;
     QMenu *m_parentMenu = nullptr;
+    ActiveViewHost *m_activeViewHost = nullptr;
+    QgsMapCanvas *m_mapCanvas = nullptr;
+    QgsMessageBar *m_messageBar = nullptr;
     QMap<QString, QAction *> m_registeredActions;
 };
 

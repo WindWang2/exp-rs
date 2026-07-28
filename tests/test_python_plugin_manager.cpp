@@ -355,3 +355,43 @@ TEST_CASE( "PythonPluginAdapter initializes and unloads Python plugin over Pytho
   pool.shutdown();
 }
 
+TEST_CASE( "PythonAppInterfaceProxy handles catalog.get_active_layer, canvas.get_state, ui.push_message_bar over IPC", "[python][isolated][api]" )
+{
+  using namespace sicnu::python::isolated;
+
+  PythonIpcServer server;
+  QMenu parentMenu;
+  QgsMapCanvas canvas;
+  QgsMessageBar messageBar;
+
+  PythonAppInterfaceProxy uiProxy( &server, &parentMenu );
+  uiProxy.setMapCanvas( &canvas );
+  uiProxy.setMessageBar( &messageBar );
+
+  // Test canvas.get_state IPC message handling
+  QJsonObject canvasMsg;
+  canvasMsg[QStringLiteral( "method" )] = QStringLiteral( "canvas.get_state" );
+  canvasMsg[QStringLiteral( "id" )] = 101;
+  uiProxy.handleIpcMessage( canvasMsg );
+
+  // Test ui.push_message_bar IPC message handling
+  QJsonObject msgBarMsg;
+  msgBarMsg[QStringLiteral( "method" )] = QStringLiteral( "ui.push_message_bar" );
+  msgBarMsg[QStringLiteral( "id" )] = 102;
+  QJsonObject msgParams;
+  msgParams[QStringLiteral( "title" )] = QStringLiteral( "Test Title" );
+  msgParams[QStringLiteral( "text" )] = QStringLiteral( "Test Text" );
+  msgBarMsg[QStringLiteral( "params" )] = msgParams;
+  uiProxy.handleIpcMessage( msgBarMsg );
+
+  // Test catalog.get_active_layer IPC message handling
+  QJsonObject layerMsg;
+  layerMsg[QStringLiteral( "method" )] = QStringLiteral( "catalog.get_active_layer" );
+  layerMsg[QStringLiteral( "id" )] = 103;
+  uiProxy.handleIpcMessage( layerMsg );
+
+  CHECK( uiProxy.registeredActionCount() == 0 );
+}
+
+
+

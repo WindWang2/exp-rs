@@ -14,9 +14,61 @@ import importlib
 callbacks = {}
 loaded_plugins = {}
 
+class SicnuMapCanvasProxy:
+    def __init__(self, socket_conn):
+        self._s = socket_conn
+
+    def _get_state(self):
+        req_msg = {
+            "jsonrpc": "2.0",
+            "method": "canvas.get_state",
+            "params": {},
+            "id": 8001
+        }
+        self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
+        buf = ""
+        while True:
+            data = self._s.recv(4096)
+            if not data:
+                break
+            buf += data.decode("utf-8")
+            if "\n" in buf:
+                line, _ = buf.split("\n", 1)
+                return json.loads(line).get("result", {})
+        return {}
+
+    def extent(self):
+        st = self._get_state()
+        return st.get("extent", [0, 0, 0, 0])
+
+    def scale(self):
+        st = self._get_state()
+        return st.get("scale", 1.0)
+
+
+class SicnuMessageBarProxy:
+    def __init__(self, socket_conn):
+        self._s = socket_conn
+
+    def pushMessage(self, title, text, level="info"):
+        req_msg = {
+            "jsonrpc": "2.0",
+            "method": "ui.push_message_bar",
+            "params": {
+                "title": title,
+                "text": text,
+                "level": level
+            },
+            "id": 8002
+        }
+        self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
+
+
 class SicnuPythonIface:
     def __init__(self, socket_conn):
         self._s = socket_conn
+        self._canvas_proxy = SicnuMapCanvasProxy(socket_conn)
+        self._message_bar_proxy = SicnuMessageBarProxy(socket_conn)
 
     def addPluginToMenu(self, title, action):
         cb_id = f"cb_{id(action)}"
@@ -31,6 +83,40 @@ class SicnuPythonIface:
                 "callback_id": cb_id
             },
             "id": 9999
+        }
+        self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
+
+    def activeLayer(self):
+        req_msg = {
+            "jsonrpc": "2.0",
+            "method": "catalog.get_active_layer",
+            "params": {},
+            "id": 8003
+        }
+        self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
+        buf = ""
+        while True:
+            data = self._s.recv(4096)
+            if not data:
+                break
+            buf += data.decode("utf-8")
+            if "\n" in buf:
+                line, _ = buf.split("\n", 1)
+                return json.loads(line).get("result", {})
+        return None
+
+    def mapCanvas(self):
+        return self._canvas_proxy
+
+    def messageBar(self):
+        return self._message_bar_proxy
+
+    def addRasterLayer(self, path, name):
+        req_msg = {
+            "jsonrpc": "2.0",
+            "method": "data.add_layer",
+            "params": {"path": path, "name": name, "type": "raster"},
+            "id": 8004
         }
         self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
 
