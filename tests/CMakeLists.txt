@@ -2773,6 +2773,13 @@ target_link_libraries(test_llm_streaming_client PRIVATE
   sicnu_agent
   sicnu_processing
 )
+
+sicnu_add_test(test_agent_context_resolver)
+target_link_libraries(test_agent_context_resolver PRIVATE
+  sicnu_agent
+  sicnu_data
+  sicnu_processing
+)
 endif()
 
 # Project persistence — SICNU Data identity plus standard QGIS presentation
