@@ -2759,10 +2759,6 @@ target_link_libraries(test_python_processing_provider PRIVATE
 )
 target_include_directories(test_python_processing_provider PRIVATE
   ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/src/core
-  ${CMAKE_SOURCE_DIR}/src/app
-  ${CMAKE_SOURCE_DIR}/src/processing
-  ${CMAKE_SOURCE_DIR}/src/processing/framework
   ${CMAKE_SOURCE_DIR}/src/python
   ${CMAKE_BINARY_DIR}
 )
@@ -2771,6 +2767,12 @@ target_compile_definitions(test_python_processing_provider PRIVATE
   TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
 )
 sicnu_discover_tests(test_python_processing_provider)
+
+sicnu_add_test(test_llm_streaming_client)
+target_link_libraries(test_llm_streaming_client PRIVATE
+  sicnu_agent
+  sicnu_processing
+)
 endif()
 
 # Project persistence — SICNU Data identity plus standard QGIS presentation
