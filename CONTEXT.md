@@ -122,12 +122,16 @@ _Avoid_: Node graph window, Flow editor dialog
   1. **Atomic Adapter Seam**: Define `AtomicAlgorithmAdapter` interface and `AlgorithmDescriptor` C++ struct with 12 `DataType` port type enums (`Raster`, `Vector`, `Table`, `Numeric`, `Integer`, `String`, `Boolean`, `Enum`, `BoundingBox`, `Crs`, `Json`, `Any`).
   2. **Heterogeneous Adapter Family**: Provide zero-modification reflection wrappers for `RsOperatorAdapter`, `QgsProcessingAdapter` (QGIS algorithms), and `PythonPluginAdapter` (Python plugins).
   3. **Central Registry Singleton**: Manage all algorithm adapters in a thread-safe `AtomicAlgorithmRegistry` singleton with auto-population on application startup.
+**Workspace Snapshot**:
+An immutable, serializable C++ value object (`WorkspaceSnapshot`) captured atomically from `DataManager` (Data Asset metadata, paths, band counts, CRS) and `ActiveViewHost` (map canvas extent, scale, active layer). Serves as the single seam for `AgentContextResolver` to generate LLM system prompts without touching live Qt/QGIS GUI widgets.
+_Avoid_: Workspace state map, Context dict, UI state dump
+
 ### ADR 0013: AI Agent Copilot UI & Streaming LLM Client Architecture
 - **Context**: Users need a natural language conversational interface (AI Copilot Panel) in the GIS shell to query workspace layers, auto-generate single/multi-step algorithm execution plans, and run tool calls directly on the system.
 - **Decision**:
   1. **Shell UI Hosting**: Host the AI Agent in a right-dockable panel (`AgentCopilotDockWidget`) with a streaming message history view, reasoning chain cards (DeepSeek-R1 support), tool call progress widgets, and interactive plan approval cards.
   2. **Streaming LLM Client**: Build native C++ `LlmStreamingClient` over `QNetworkAccessManager` with SSE (Server-Sent Events) stream parsing, supporting OpenAI-compatible APIs (DeepSeek, Qwen, Ollama, vLLM, OpenAI). Auto-injects algorithm tool schemas from `AtomicAlgorithmRegistry`.
-  3. **Workspace Context Resolver**: `AgentContextResolver` dynamically inspects `DataManager` (active Data Assets, asset paths, CRS, band references) and `ActiveViewHost` (selected layers, canvas extent) to inject structured context snapshots into LLM System Prompts.
+  3. **Workspace Context Resolver**: `AgentContextResolver` dynamically captures an immutable `WorkspaceSnapshot` from `DataManager` and `ActiveViewHost` facades to inject structured context snapshots into LLM System Prompts without GUI widget coupling.
   4. **Canvas Pipeline Synchronization**: Multi-step DAG plans from LLM responses automatically instantiate as visual `WorkflowDefinition` node graphs on `PipelineCanvasWidget` for interactive preview, parameter tuning, and execution via `AgentWorkflowExecutor::executeAgentPlan`.
   5. **Config & Profile Persistence**: `LlmConfigManager` manages API Key, Base URL, Model Name, and Temperature settings via `QSettings` with pre-configured provider templates (DeepSeek, Qwen, Ollama, OpenAI) and a ⚙️ **Model Settings** dialog.
 
