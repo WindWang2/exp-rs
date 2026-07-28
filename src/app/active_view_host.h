@@ -5,17 +5,20 @@
 #include <QObject>
 #include <QList>
 
+#include "qgis.h"
 #include "data/asset_types.h"
 #include "display/qgis_display_manager.h"
 
 class QWidget;
 class QgsMapCanvas;
+class QgsMessageBar;
 class QgsLayerTreeView;
 class QgsLayerTreeModel;
 class QgsLayerTreeGroup;
 class QgsMapLayer;
 class QgsVectorLayer;
 class QgsMapOverviewCanvas;
+class QgsRectangle;
 class QString;
 
 namespace sicnu::data {
@@ -58,9 +61,17 @@ class ActiveViewHost : public QObject
     sicnu::display::DisplayViewId activeViewId() const { return m_activeViewId; }
     QgsLayerTreeView *layerTreeView() const { return m_layerTreeView; }
     QgsMapCanvas *mapCanvas() const { return m_mapCanvas; }
+    void setMessageBar( QgsMessageBar *messageBar ) { m_messageBar = messageBar; }
+    QgsMessageBar *messageBar() const { return m_messageBar; }
+
     /// Target view for open/display. Must be a live view known to DisplayManager.
     /// Defaults to mainViewId. Returns false if id is null / unknown.
     bool setActiveViewId( sicnu::display::DisplayViewId viewId );
+
+    // ── Shell facade methods ──────────────────────────────────────────
+    void pushMessageBarAlert( const QString &title, const QString &text, Qgis::MessageLevel level = Qgis::MessageLevel::Info );
+    QgsRectangle mapCanvasExtent() const;
+    double mapCanvasScale() const;
 
     // ── Layer tree (active / main QGIS tree for main view) ────────────
     void initLayerTree();
@@ -100,6 +111,7 @@ class ActiveViewHost : public QObject
     QgsMapCanvas *m_mapCanvas = nullptr;
     QgsLayerTreeView *m_layerTreeView = nullptr;
     QgsMapOverviewCanvas *m_overviewCanvas = nullptr;
+    QgsMessageBar *m_messageBar = nullptr;
     sicnu::data::DataManager *m_dataManager = nullptr;
     sicnu::display::QgisDisplayManager *m_displayManager = nullptr;
     sicnu::display::DisplayViewId m_mainViewId;

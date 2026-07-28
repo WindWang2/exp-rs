@@ -57,13 +57,9 @@ QgsMapLayer *SicnuAppInterface::activeLayer()
 
 QgsMapCanvas *SicnuAppInterface::mapCanvas()
 {
-    if ( m_canvas )
-        return m_canvas;
-    if ( m_activeViewHost && m_activeViewHost->layerTreeModel() )
-    {
-        // Fallback
-    }
-    return nullptr;
+    if ( m_activeViewHost && m_activeViewHost->mapCanvas() )
+        return m_activeViewHost->mapCanvas();
+    return m_canvas;
 }
 
 QWidget *SicnuAppInterface::mainWindow()
@@ -73,6 +69,8 @@ QWidget *SicnuAppInterface::mainWindow()
 
 QgsMessageBar *SicnuAppInterface::messageBar()
 {
+    if ( m_activeViewHost && m_activeViewHost->messageBar() )
+        return m_activeViewHost->messageBar();
     return m_messageBar;
 }
 

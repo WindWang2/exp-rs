@@ -3,6 +3,7 @@
 #include <utility>
 
 #include <qgsmapcanvas.h>
+#include <qgsmessagebar.h>
 #include <qgslayertree.h>
 #include <qgslayertreegroup.h>
 #include <qgslayertreelayer.h>
@@ -58,6 +59,24 @@ ActiveViewHost::ActiveViewHost( QgsMapCanvas *canvas,
 }
 
 ActiveViewHost::~ActiveViewHost() = default;
+
+void ActiveViewHost::pushMessageBarAlert( const QString &title, const QString &text, Qgis::MessageLevel level )
+{
+    if ( m_messageBar )
+    {
+        m_messageBar->pushMessage( title, text, level );
+    }
+}
+
+QgsRectangle ActiveViewHost::mapCanvasExtent() const
+{
+    return m_mapCanvas ? m_mapCanvas->extent() : QgsRectangle();
+}
+
+double ActiveViewHost::mapCanvasScale() const
+{
+    return m_mapCanvas ? m_mapCanvas->scale() : 1.0;
+}
 
 bool ActiveViewHost::setActiveViewId( sicnu::display::DisplayViewId viewId )
 {

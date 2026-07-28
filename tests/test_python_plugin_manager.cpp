@@ -363,10 +363,10 @@ TEST_CASE( "PythonAppInterfaceProxy handles catalog.get_active_layer, canvas.get
   QMenu parentMenu;
   QgsMapCanvas canvas;
   QgsMessageBar messageBar;
+  ActiveViewHost activeViewHost( &canvas, nullptr, nullptr, nullptr, nullptr, sicnu::display::DisplayViewId(), nullptr );
+  activeViewHost.setMessageBar( &messageBar );
 
-  PythonAppInterfaceProxy uiProxy( &server, &parentMenu );
-  uiProxy.setMapCanvas( &canvas );
-  uiProxy.setMessageBar( &messageBar );
+  PythonAppInterfaceProxy uiProxy( &server, &parentMenu, &activeViewHost );
 
   // Test canvas.get_state IPC message handling
   QJsonObject canvasMsg;

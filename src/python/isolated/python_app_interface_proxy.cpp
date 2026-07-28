@@ -1,8 +1,6 @@
 #include "python_app_interface_proxy.h"
 #include "active_view_host.h"
 
-#include <qgsmapcanvas.h>
-#include <qgsmessagebar.h>
 #include <qgsmaplayer.h>
 
 #include <QDebug>
@@ -12,10 +10,11 @@
 namespace sicnu::python::isolated
 {
 
-PythonAppInterfaceProxy::PythonAppInterfaceProxy( PythonIpcServer *ipcServer, QMenu *parentMenu, QObject *parent )
+PythonAppInterfaceProxy::PythonAppInterfaceProxy( PythonIpcServer *ipcServer, QMenu *parentMenu, ActiveViewHost *activeViewHost, QObject *parent )
   : QObject( parent )
   , m_ipcServer( ipcServer )
   , m_parentMenu( parentMenu )
+  , m_activeViewHost( activeViewHost )
 {
   if ( m_ipcServer )
   {
@@ -31,16 +30,6 @@ void PythonAppInterfaceProxy::setParentMenu( QMenu *parentMenu )
 void PythonAppInterfaceProxy::setActiveViewHost( ActiveViewHost *host )
 {
   m_activeViewHost = host;
-}
-
-void PythonAppInterfaceProxy::setMapCanvas( QgsMapCanvas *canvas )
-{
-  m_mapCanvas = canvas;
-}
-
-void PythonAppInterfaceProxy::setMessageBar( QgsMessageBar *bar )
-{
-  m_messageBar = bar;
 }
 
 int PythonAppInterfaceProxy::registeredActionCount() const
@@ -131,9 +120,9 @@ void PythonAppInterfaceProxy::handleIpcMessage( const QJsonObject &message )
   else if ( method == QStringLiteral( "canvas.get_state" ) )
   {
     QJsonObject res;
-    if ( m_mapCanvas )
+    if ( m_activeViewHost )
     {
-      QgsRectangle extent = m_mapCanvas->extent();
+      QgsRectangle extent = m_activeViewHost->mapCanvasExtent();
       QJsonArray extentArr;
       extentArr.append( extent.xMinimum() );
       extentArr.append( extent.yMinimum() );
@@ -141,8 +130,7 @@ void PythonAppInterfaceProxy::handleIpcMessage( const QJsonObject &message )
       extentArr.append( extent.yMaximum() );
 
       res[QStringLiteral( "extent" )] = extentArr;
-      res[QStringLiteral( "scale" )] = m_mapCanvas->scale();
-      res[QStringLiteral( "crs" )] = m_mapCanvas->mapSettings().destinationCrs().authid();
+      res[QStringLiteral( "scale" )] = m_activeViewHost->mapCanvasScale();
       res[QStringLiteral( "status" )] = QStringLiteral( "ok" );
     }
     else
@@ -158,9 +146,9 @@ void PythonAppInterfaceProxy::handleIpcMessage( const QJsonObject &message )
   {
     QString title = params[QStringLiteral( "title" )].toString();
     QString text = params[QStringLiteral( "text" )].toString();
-    if ( m_messageBar )
+    if ( m_activeViewHost )
     {
-      m_messageBar->pushMessage( title, text, Qgis::MessageLevel::Info );
+      m_activeViewHost->pushMessageBarAlert( title, text, Qgis::MessageLevel::Info );
     }
     if ( m_ipcServer && msgId > 0 )
     {
