@@ -75,6 +75,10 @@ public:
                      TaskPriority priority = TaskPriority::Normal,
                      const QList<long>& parentTaskIds = QList<long>());
 
+    long enqueueToolCall( const std::string &jsonToolCall,
+                          bool autoLoad = true,
+                          TaskPriority priority = TaskPriority::Normal );
+
     /// Submit a JobEngine request while keeping Task Center as the caller-facing seam.
     long submitJob(const sicnu::jobs::JobRequest& request);
     long submitJob(const sicnu::jobs::JobRequest& request,

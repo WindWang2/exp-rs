@@ -58,14 +58,49 @@ long TaskCenter::enqueueTask(const QString& algorithmId,
     }
 
     info.logBuffer.append(QString(QStringLiteral("[%1] Task queued with priority %2."))
-                          .arg(info.startTime.toString(QStringLiteral("hh:mm:ss")))
+                          .arg(info.startTime.toString(QStringLiteral("yyyy-MM-dd hh:mm:ss")))
                           .arg(static_cast<int>(priority)));
 
-    m_tasks.insert(id, info);
-    emit taskAdded(info);
+    m_tasks[id] = info;
+    emit taskAdded(m_tasks[id]);
 
     processNextQueuedTasks();
     return id;
+}
+
+long TaskCenter::enqueueToolCall( const std::string &jsonToolCall, bool autoLoad, TaskPriority priority )
+{
+    Json::CharReaderBuilder builder;
+    Json::Value root;
+    std::string errs;
+    std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+
+    std::string toolName = "unknown_tool";
+    QVariantMap variantParams;
+
+    if ( reader->parse( jsonToolCall.c_str(), jsonToolCall.c_str() + jsonToolCall.length(), &root, &errs ) )
+    {
+        if ( root.isMember( "name" ) )
+            toolName = root["name"].asString();
+        else if ( root.isMember( "function" ) && root["function"].isMember( "name" ) )
+            toolName = root["function"]["name"].asString();
+
+        Json::Value paramsNode;
+        if ( root.isMember( "parameters" ) )
+            paramsNode = root["parameters"];
+        else if ( root.isMember( "function" ) && root["function"].isMember( "arguments" ) )
+            paramsNode = root["function"]["arguments"];
+
+        if ( paramsNode.isObject() )
+        {
+            for ( const auto &key : paramsNode.getMemberNames() )
+            {
+                variantParams[QString::fromStdString( key )] = QString::fromStdString( paramsNode[key].asString() );
+            }
+        }
+    }
+
+    return enqueueTask( QString::fromStdString( toolName ), variantParams, autoLoad, priority );
 }
 
 long TaskCenter::submitJob(const sicnu::jobs::JobRequest& request)

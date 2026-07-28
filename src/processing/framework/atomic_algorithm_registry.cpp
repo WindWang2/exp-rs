@@ -2,6 +2,7 @@
 #include "atomic_algorithm_registry.h"
 #include "agent_tool_call_exporter.h"
 #include "operators/framework/rs_operator_registry.h"
+#include "task_center.h"
 
 namespace sicnu::processing {
 

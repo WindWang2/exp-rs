@@ -92,4 +92,18 @@ TEST_CASE( "AtomicAlgorithmRegistry handles invalid tool call JSON string direct
   REQUIRE( resultJson.find( "Algorithm adapter not found" ) != std::string::npos );
 }
 
+TEST_CASE( "AtomicAlgorithmRegistry submits tool call asynchronously to TaskCenter", "[processing][registry][tool_call]" )
+{
+  auto &registry = AtomicAlgorithmRegistry::instance();
+  registry.reset();
+
+  std::string toolJson = R"({
+    "name": "rs:spectral_index",
+    "parameters": {"input": "/path/raster.tif", "output": "/path/out.tif"}
+  })";
+
+  long taskId = registry.submitToolCall( toolJson );
+  REQUIRE( taskId > 0 );
+}
+
 

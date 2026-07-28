@@ -165,6 +165,7 @@ target_link_libraries(sicnu_processing PRIVATE
 # and resolves symbols when final targets also link sicnu_task_center.
 add_library(sicnu_task_center STATIC
     framework/task_center.cpp
+    framework/atomic_algorithm_registry_task_center.cpp
     # Task Center seam for OutputCommitter — kept out of sicnu_processing so
     # that library does not need JobEngine / TaskCenter link deps.
     framework/output_committer_task_center.cpp
