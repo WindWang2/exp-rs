@@ -2707,6 +2707,8 @@ qt_add_executable(test_python_plugin_manager
   ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
   ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_api.cpp
   ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/python/isolated/python_ipc_server.cpp
+  ${CMAKE_SOURCE_DIR}/src/python/isolated/python_worker_process.cpp
   ${CMAKE_SOURCE_DIR}/src/core/plugin_manager.cpp
 )
 target_link_libraries(test_python_plugin_manager PRIVATE
@@ -2719,6 +2721,7 @@ target_link_libraries(test_python_plugin_manager PRIVATE
   Sicnu::qgis_display
   Python::Python
   CURL::libcurl
+  xml2
   ${PCRE2_16}
   ${PCRE2_8}
 )
@@ -2728,6 +2731,7 @@ target_include_directories(test_python_plugin_manager PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_SOURCE_DIR}/src/app/python
   ${CMAKE_SOURCE_DIR}/src/python
+  ${CMAKE_SOURCE_DIR}/src/python/isolated
   ${CMAKE_BINARY_DIR}
 )
 target_compile_definitions(test_python_plugin_manager PRIVATE

@@ -286,12 +286,14 @@ if(SICNU_EMBED_PYTHON)
         ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_api.cpp
         ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
         ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_runner.cpp
+        ${CMAKE_SOURCE_DIR}/src/python/isolated/python_ipc_server.cpp
+        ${CMAKE_SOURCE_DIR}/src/python/isolated/python_worker_process.cpp
         ${CMAKE_SOURCE_DIR}/src/app/python/sicnu_app_interface.cpp
         ${CMAKE_SOURCE_DIR}/src/app/python/python_plugin_adapter.cpp
         widgets/python_script_editor.cpp
         widgets/python_script_editor.h
     )
-    target_include_directories(sicnu_geo_rs PRIVATE ${CMAKE_SOURCE_DIR}/src/python ${CMAKE_SOURCE_DIR}/src/app/python)
+    target_include_directories(sicnu_geo_rs PRIVATE ${CMAKE_SOURCE_DIR}/src/python ${CMAKE_SOURCE_DIR}/src/python/isolated ${CMAKE_SOURCE_DIR}/src/app/python)
     target_link_libraries(sicnu_geo_rs PRIVATE Python::Python)
     target_compile_definitions(sicnu_geo_rs PRIVATE SICNU_EMBED_PYTHON=1)
 endif()
