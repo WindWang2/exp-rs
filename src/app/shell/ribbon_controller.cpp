@@ -941,6 +941,65 @@ QWidget *RibbonController::createRibbonBar()
     addTab( tr( "任务" ), pageW );
   }
 
+  // --- TAB: 流程 (Workflow Editor & Execution) ---
+  {
+    QWidget *pageW = makeTabPage();
+    auto *pLayout = qobject_cast<QHBoxLayout *>( pageW->layout() );
+
+    GroupHost editGrp = addGroup( pLayout, tr( "流程编辑" ) );
+    if ( auto *btn = addToolButton( editGrp, tr( "新建流程" ), "file_new", tr( "新建空白工作流画布" ) ) )
+    {
+      connect( btn, &QToolButton::clicked, m_window, [this]() {
+        if ( auto *dock = m_window->findChild<QDockWidget *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
+        {
+          dock->show();
+          dock->raise();
+        }
+      } );
+    }
+    if ( auto *btn = addToolButton( editGrp, tr( "打开流程" ), "file_open", tr( "打开工作流 JSON 定义" ) ) )
+    {
+      connect( btn, &QToolButton::clicked, m_window, [this]() {
+        if ( auto *dock = m_window->findChild<QDockWidget *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
+        {
+          dock->show();
+          dock->raise();
+        }
+      } );
+    }
+    if ( auto *btn = addToolButton( editGrp, tr( "流程编辑器" ), "model_builder", tr( "显示/隐藏工作流图形编辑器" ) ) )
+    {
+      connect( btn, &QToolButton::clicked, m_window, [this]() {
+        if ( auto *dock = m_window->findChild<QDockWidget *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
+        {
+          dock->setVisible( !dock->isVisible() );
+          if ( dock->isVisible() )
+            dock->raise();
+        }
+      } );
+    }
+
+    GroupHost execGrp = addGroup( pLayout, tr( "流程控制" ) );
+    if ( auto *btn = addToolButton( execGrp, tr( "运行全流程" ), "task_run", tr( "按 DAG 拓扑顺序顺序执行全流程" ) ) )
+    {
+      connect( btn, &QToolButton::clicked, m_window, [this]() {
+        if ( auto *dock = m_window->findChild<QDockWidget *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
+        {
+          dock->show();
+          dock->raise();
+        }
+      } );
+    }
+    if ( auto *btn = addToolButton( execGrp, tr( "停止运行" ), "task_cancel", tr( "停止当前正在运行的工作流" ) ) )
+    {
+      connect( btn, &QToolButton::clicked, m_window, [this]() {
+        // Stop action
+      } );
+    }
+
+    addTab( tr( "流程" ), pageW );
+  }
+
   tabLay->addStretch( 1 );
   root->addWidget( tabRow );
   root->addWidget( stack );

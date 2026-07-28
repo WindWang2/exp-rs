@@ -11,6 +11,8 @@
 #include "shell/workflow_session_controller.h"
 #include "workflow_definition.h"
 #include "data/data_manager.h"
+#include "app/workflow/preset_catalog_widget.h"
+#include "app/workflow/pipeline_editor_dock.h"
 
 using namespace sicnu::workflow;
 using namespace sicnu::workflow::gui;
@@ -297,5 +299,77 @@ TEST_CASE( "WorkflowSessionController integrates DataManager TaskTemporary asset
   auto reapResult = controller.reapTaskTemporaries();
   REQUIRE( reapResult.reapedCount == 0 );
 }
+
+TEST_CASE( "PresetCatalogWidget provides built-in remote sensing workflow recipes", "[workflow][presets]" )
+{
+  ensureApp();
+
+  auto presets = PresetCatalogWidget::builtinPresets();
+  REQUIRE( !presets.empty() );
+  REQUIRE( presets.size() >= 4 );
+
+  bool foundLandsat = false;
+  bool foundDEM = false;
+  bool foundOBIA = false;
+  bool foundNDWI = false;
+
+  for ( const auto &p : presets )
+  {
+    if ( p.id == "preset_landsat_ndvi_change" )
+    {
+      foundLandsat = true;
+      REQUIRE( p.definition.steps.size() == 4 );
+    }
+    else if ( p.id == "preset_dem_terrain_slope" )
+    {
+      foundDEM = true;
+      REQUIRE( p.definition.steps.size() == 3 );
+    }
+    else if ( p.id == "preset_obia_seg_classify" )
+    {
+      foundOBIA = true;
+      REQUIRE( p.definition.steps.size() == 3 );
+    }
+    else if ( p.id == "preset_ndwi_water_extraction" )
+    {
+      foundNDWI = true;
+      REQUIRE( p.definition.steps.size() == 2 );
+    }
+  }
+
+  REQUIRE( foundLandsat == true );
+  REQUIRE( foundDEM == true );
+  REQUIRE( foundOBIA == true );
+  REQUIRE( foundNDWI == true );
+
+  PresetCatalogWidget widget;
+  bool signalEmitted = false;
+  WorkflowDefinition selectedDef;
+
+  QObject::connect( &widget, &PresetCatalogWidget::presetSelected, [&]( const WorkflowDefinition &def ) {
+    signalEmitted = true;
+    selectedDef = def;
+  } );
+
+  emit widget.presetSelected( presets[0].definition );
+  REQUIRE( signalEmitted == true );
+  REQUIRE( selectedDef.id == presets[0].definition.id );
+}
+
+TEST_CASE( "PipelineEditorDock integrates canvas and preset sidebar", "[workflow][dock]" )
+{
+  ensureApp();
+
+  PipelineEditorDock dock;
+  REQUIRE( dock.pipelineCanvas() != nullptr );
+  REQUIRE( dock.presetCatalog() != nullptr );
+
+  auto presets = PresetCatalogWidget::builtinPresets();
+  REQUIRE( !presets.empty() );
+
+  dock.pipelineCanvas()->loadWorkflowDefinition( presets[0].definition );
+  REQUIRE( dock.pipelineCanvas()->pipelineScene()->findNode( QString::fromStdString( presets[0].definition.steps[0].id ) ) != nullptr );
+}
+
 
 

@@ -14,6 +14,7 @@
 #include "shell/rs_job_panel.h"
 #include "shell/task_panel_host.h"
 #include "shell/workflow_session_controller.h"
+#include "workflow/pipeline_editor_dock.h"
 #include "widgets/spectral_profile_widget.h"
 #include "widgets/guided_workflow_widget.h"
 #include "widgets/histogram_stretch_widget.h"
@@ -498,8 +499,21 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
 
     // Session controller bridges TaskPanelHost ↔ WorkflowRuntime
     m_sessionController = new WorkflowSessionController( this );
+    if ( m_projectContext )
+        m_sessionController->setDataManager( &m_projectContext->dataManager() );
     m_sessionController->registerBuiltins();
     m_sessionController->bindPanel( m_taskPanel );
+
+    m_pipelineDock = new sicnu::workflow::gui::PipelineEditorDock( this );
+    addDockWidget( Qt::RightDockWidgetArea, m_pipelineDock );
+    m_pipelineDock->hide();
+
+    m_sessionController->bindCanvas( m_pipelineDock->pipelineCanvas() );
+
+    connect( m_pipelineDock, &sicnu::workflow::gui::PipelineEditorDock::runFullWorkflowRequested,
+             m_sessionController, &WorkflowSessionController::runFullWorkflow );
+    connect( m_pipelineDock, &sicnu::workflow::gui::PipelineEditorDock::stopWorkflowRequested,
+             m_sessionController, &WorkflowSessionController::stopWorkflow );
 
     connect( m_sessionController, &WorkflowSessionController::requestLoadRaster,
              this, [this]( const QString &path ) {

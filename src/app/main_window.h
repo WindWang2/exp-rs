@@ -85,6 +85,8 @@ class WorkflowSessionController;
 class RibbonController;
 class RsJobPanel;
 
+namespace sicnu::workflow::gui { class PipelineEditorDock; }
+
 namespace Sicnu { class PythonScriptEditor; }
 
 /**
@@ -411,6 +413,7 @@ private:
     sicnu::DataManagerPanel *m_dataManagerPanel = nullptr;
     TaskPanelHost *m_taskPanel = nullptr;
     WorkflowSessionController *m_sessionController = nullptr;
+    sicnu::workflow::gui::PipelineEditorDock *m_pipelineDock = nullptr;
     RibbonController *m_ribbonController = nullptr;
     QWidget *m_ribbonBar = nullptr;
     QWidget *m_topChrome = nullptr;

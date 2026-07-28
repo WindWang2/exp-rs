@@ -101,6 +101,8 @@ add_executable(sicnu_geo_rs
     workflow/pipeline_node_item.cpp
     workflow/pipeline_scene.cpp
     workflow/pipeline_canvas_widget.cpp
+    workflow/preset_catalog_widget.cpp
+    workflow/pipeline_editor_dock.cpp
     layer_tree_menu.cpp
     crs_presets.cpp
     log_panel.cpp
