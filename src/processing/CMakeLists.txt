@@ -27,6 +27,7 @@ add_library(sicnu_processing SHARED
     framework/algorithm_engine.cpp
     framework/algorithm_descriptor.cpp
     framework/atomic_algorithm_adapter.cpp
+    framework/atomic_algorithm_registry.cpp
     # task_center.cpp lives in sicnu_task_center (below): JobEngine link would
     # form a cycle if pulled into this shared lib (processing→jobs→operators→processing).
     framework/output_committer.cpp

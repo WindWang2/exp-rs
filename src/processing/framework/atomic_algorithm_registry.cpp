@@ -1,0 +1,94 @@
+// src/processing/framework/atomic_algorithm_registry.cpp
+#include "atomic_algorithm_registry.h"
+#include "operators/framework/rs_operator_registry.h"
+
+namespace sicnu::processing {
+
+AtomicAlgorithmRegistry& AtomicAlgorithmRegistry::instance()
+{
+  static AtomicAlgorithmRegistry sInstance;
+  return sInstance;
+}
+
+AtomicAlgorithmRegistry::AtomicAlgorithmRegistry()
+{
+  registerBuiltinRsOperators();
+}
+
+void AtomicAlgorithmRegistry::reset()
+{
+  std::lock_guard<std::mutex> lock( mMutex );
+  mAdapters.clear();
+  
+  // Re-register builtins
+  auto names = operators::RSOperatorRegistry::instance().operatorNames();
+  for ( const auto &name : names )
+  {
+    auto op = operators::RSOperatorRegistry::instance().create( name );
+    if ( op )
+    {
+      auto adapter = std::make_shared<RsOperatorAdapter>( std::move( op ) );
+      mAdapters[adapter->algorithmId()] = adapter;
+    }
+  }
+}
+
+void AtomicAlgorithmRegistry::registerAdapter( AtomicAlgorithmAdapterPtr adapter )
+{
+  if ( !adapter ) return;
+  std::lock_guard<std::mutex> lock( mMutex );
+  mAdapters[adapter->algorithmId()] = adapter;
+}
+
+bool AtomicAlgorithmRegistry::unregisterAdapter( const std::string &algorithmId )
+{
+  std::lock_guard<std::mutex> lock( mMutex );
+  return mAdapters.erase( algorithmId ) > 0;
+}
+
+AtomicAlgorithmAdapterPtr AtomicAlgorithmRegistry::findAdapter( const std::string &algorithmId ) const
+{
+  std::lock_guard<std::mutex> lock( mMutex );
+  auto it = mAdapters.find( algorithmId );
+  if ( it != mAdapters.end() )
+    return it->second;
+  return nullptr;
+}
+
+std::vector<AlgorithmDescriptor> AtomicAlgorithmRegistry::listDescriptors() const
+{
+  std::lock_guard<std::mutex> lock( mMutex );
+  std::vector<AlgorithmDescriptor> result;
+  result.reserve( mAdapters.size() );
+
+  for ( const auto &pair : mAdapters )
+  {
+    if ( pair.second )
+    {
+      result.push_back( pair.second->descriptor() );
+    }
+  }
+  return result;
+}
+
+size_t AtomicAlgorithmRegistry::adapterCount() const
+{
+  std::lock_guard<std::mutex> lock( mMutex );
+  return mAdapters.size();
+}
+
+void AtomicAlgorithmRegistry::registerBuiltinRsOperators()
+{
+  auto names = operators::RSOperatorRegistry::instance().operatorNames();
+  for ( const auto &name : names )
+  {
+    auto op = operators::RSOperatorRegistry::instance().create( name );
+    if ( op )
+    {
+      auto adapter = std::make_shared<RsOperatorAdapter>( std::move( op ) );
+      mAdapters[adapter->algorithmId()] = adapter;
+    }
+  }
+}
+
+} // namespace sicnu::processing
