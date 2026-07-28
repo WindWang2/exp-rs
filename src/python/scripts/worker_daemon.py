@@ -9,6 +9,8 @@ import struct
 import mmap
 import numpy as np
 
+callbacks = {}
+
 def process_shm(shm_key, multiply_factor=2.0):
     shm_name = shm_key.lstrip('/')
     shm_file = f"/dev/shm/{shm_name}"
@@ -80,6 +82,30 @@ def main():
                             "jsonrpc": "2.0",
                             "id": req_id,
                             "result": res
+                        }
+                    elif method == "ui.test_register_action":
+                        cb_id = params.get("callback_id", "cb_test_001")
+                        callbacks[cb_id] = True
+                        req_msg = {
+                            "jsonrpc": "2.0",
+                            "method": "ui.add_plugin_menu",
+                            "params": {
+                                "menu_title": "测试菜单",
+                                "action_title": "运行测试动作",
+                                "callback_id": cb_id
+                            },
+                            "id": req_id
+                        }
+                        s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
+                        continue
+                    elif method == "ui.on_action_triggered":
+                        cb_id = params.get("callback_id")
+                        if cb_id in callbacks:
+                            callbacks[cb_id] = "triggered"
+                        resp = {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "result": {"status": "action_executed", "callback_id": cb_id}
                         }
                     else:
                         resp = {

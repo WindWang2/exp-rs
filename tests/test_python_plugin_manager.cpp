@@ -9,6 +9,7 @@
 #include "python_ipc_server.h"
 #include "python_worker_process.h"
 #include "shared_memory_segment.h"
+#include "python_app_interface_proxy.h"
 #include "plugin_manager.h"
 
 #include <QEventLoop>
@@ -187,6 +188,66 @@ TEST_CASE( "SharedMemorySegment transfers 10MB raster matrix with zero-copy to P
   CHECK( floatPtr[0] == 2.0f );
   CHECK( floatPtr[1] == 4.0f );
   CHECK( floatPtr[99] == 200.0f );
+
+  worker.stopWorker();
+  server.close();
+}
+
+TEST_CASE( "PythonAppInterfaceProxy registers UI action over IPC and routes click callbacks", "[python][isolated][ui]" )
+{
+  using namespace sicnu::python::isolated;
+
+  PythonIpcServer server;
+  QString socketName = QString( "sicnu_py_ui_%1" ).arg( QCoreApplication::applicationPid() );
+
+  REQUIRE( server.listen( socketName ) );
+
+  QMenu parentMenu;
+  PythonAppInterfaceProxy uiProxy( &server, &parentMenu );
+
+  PythonWorkerProcess worker;
+  QString scriptPath = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) );
+
+  REQUIRE( worker.startWorker( socketName, QString(), scriptPath ) );
+
+  QEventLoop loop;
+  QObject::connect( &server, &PythonIpcServer::clientConnected, &loop, &QEventLoop::quit );
+  QTimer::singleShot( 5000, &loop, &QEventLoop::quit );
+  loop.exec();
+
+  // Ask Python worker to register a test UI action
+  bool actionRegistered = false;
+  QJsonObject params;
+  params[QStringLiteral( "callback_id" )] = QStringLiteral( "cb_ui_test_001" );
+
+  server.sendRequest( QStringLiteral( "ui.test_register_action" ), params, [&]( const QJsonObject &result, bool isErr ) {
+    if ( !isErr )
+    {
+      actionRegistered = true;
+    }
+    loop.quit();
+  } );
+
+  QTimer::singleShot( 5000, &loop, &QEventLoop::quit );
+  loop.exec();
+
+  CHECK( actionRegistered );
+  CHECK( uiProxy.registeredActionCount() == 1 );
+  CHECK( parentMenu.actions().size() == 1 );
+
+  // Trigger C++ action click to verify RPC callback to Python
+  bool callbackTriggered = false;
+  QObject::connect( &uiProxy, &PythonAppInterfaceProxy::actionTriggered, [&]( const QString &cbId ) {
+    if ( cbId == QStringLiteral( "cb_ui_test_001" ) )
+    {
+      callbackTriggered = true;
+    }
+  } );
+
+  QAction *action = parentMenu.actions().first();
+  action->trigger();
+
+  CHECK( callbackTriggered );
 
   worker.stopWorker();
   server.close();
