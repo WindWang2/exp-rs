@@ -30,6 +30,7 @@ function(sicnu_add_test NAME)
     Qt6::Widgets
     qgis_core
     qgis_gui
+    sicnu_data
     sicnu_processing
     sicnu_jobs
     sicnu_task_center

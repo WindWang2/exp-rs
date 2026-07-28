@@ -32,14 +32,22 @@ public:
    * 
    * Returns a structured JSON result payload:
    * {
-   *   "status": "success", // or "error"
-   *   "algorithmId": "rs:spectral_index",
-   *   "output": { ... },
    *   "executionTimeMs": 120,
    *   "errorMessage": ""
    * }
    */
   Json::Value executeToolCall( const Json::Value &toolCallJson, ProgressCallback progressCb = nullptr );
+
+  /**
+   * Executes a multi-step sequential Agent DAG Plan JSON request:
+   * {
+   *   "steps": [
+   *     { "id": "s1", "name": "rs_spectral_index", "arguments": { ... } },
+   *     { "id": "s2", "name": "opencv_gaussian_blur", "arguments": { "input": "$s1.output" } }
+   *   ]
+   * }
+   */
+  Json::Value executeAgentPlan( const Json::Value &planJson, ProgressCallback progressCb = nullptr );
 
 private:
   data::DataManager *mDataManager = nullptr;

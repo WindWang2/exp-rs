@@ -1,6 +1,8 @@
 // src/processing/framework/agent_workflow_executor.cpp
 #include "agent_workflow_executor.h"
+#include "data/data_manager.h"
 
+#include <QString>
 #include <chrono>
 #include <iostream>
 
@@ -129,6 +131,26 @@ Json::Value AgentWorkflowExecutor::executeToolCall( const Json::Value &toolCallJ
     resultPayload["status"] = "success";
     resultPayload["output"] = output;
     resultPayload["executionTimeMs"] = elapsedMs;
+
+    // Data Manager registration seam (ADR 0009/0010 compliant)
+    if ( mDataManager && output.isObject() )
+    {
+      std::string outPath;
+      if ( output.isMember( "output" ) && output["output"].isString() )
+        outPath = output["output"].asString();
+      else if ( output.isMember( "outputPath" ) && output["outputPath"].isString() )
+        outPath = output["outputPath"].asString();
+
+      if ( !outPath.empty() )
+      {
+        data::RegisterRequest regReq;
+        regReq.source.canonicalSource = QString::fromStdString( outPath );
+        regReq.persistence = data::PersistencePolicy::TaskTemporary;
+        regReq.additionalCapabilities = data::AssetCapability::DeletableSource;
+        mDataManager->registerSource( regReq );
+      }
+    }
+
     return resultPayload;
   }
   catch ( const std::exception &ex )
@@ -141,6 +163,80 @@ Json::Value AgentWorkflowExecutor::executeToolCall( const Json::Value &toolCallJ
     resultPayload["errorMessage"] = ex.what();
     return resultPayload;
   }
+}
+
+Json::Value AgentWorkflowExecutor::executeAgentPlan( const Json::Value &planJson, ProgressCallback progressCb )
+{
+  Json::Value planResult( Json::objectValue );
+  planResult["status"] = "error";
+  planResult["completedSteps"] = 0;
+  planResult["totalSteps"] = 0;
+  planResult["stepResults"] = Json::Value( Json::arrayValue );
+  planResult["errorMessage"] = "";
+
+  if ( !planJson.isObject() || !planJson.isMember( "steps" ) || !planJson["steps"].isArray() )
+  {
+    planResult["errorMessage"] = "Agent plan must contain a 'steps' array.";
+    return planResult;
+  }
+
+  const auto &stepsArr = planJson["steps"];
+  planResult["totalSteps"] = static_cast<int>( stepsArr.size() );
+
+  std::unordered_map<std::string, Json::Value> completedStepOutputs;
+
+  for ( Json::ArrayIndex i = 0; i < stepsArr.size(); ++i )
+  {
+    const auto &stepObj = stepsArr[i];
+    std::string stepId = stepObj.isMember( "id" ) && stepObj["id"].isString() ? stepObj["id"].asString() : ( "step_" + std::to_string( i ) );
+
+    // Clone stepObj to resolve references
+    Json::Value stepPayload = stepObj;
+    if ( stepPayload.isMember( "arguments" ) && stepPayload["arguments"].isObject() )
+    {
+      auto &args = stepPayload["arguments"];
+      for ( const auto &key : args.getMemberNames() )
+      {
+        if ( args[key].isString() )
+        {
+          std::string strVal = args[key].asString();
+          if ( !strVal.empty() && strVal[0] == '$' )
+          {
+            // Parse reference e.g. "$step1.output"
+            std::string ref = strVal.substr( 1 );
+            auto dotPos = ref.find( '.' );
+            std::string refStepId = ( dotPos != std::string::npos ) ? ref.substr( 0, dotPos ) : ref;
+            std::string refKey = ( dotPos != std::string::npos ) ? ref.substr( dotPos + 1 ) : "output";
+
+            if ( completedStepOutputs.count( refStepId ) > 0 )
+            {
+              const auto &refOut = completedStepOutputs[refStepId];
+              if ( refOut.isObject() && refOut.isMember( refKey ) && refOut[refKey].isString() )
+              {
+                args[key] = refOut[refKey].asString();
+              }
+            }
+          }
+        }
+      }
+    }
+
+    Json::Value stepRes = executeToolCall( stepPayload, progressCb );
+    stepRes["stepId"] = stepId;
+    planResult["stepResults"].append( stepRes );
+
+    if ( stepRes["status"].asString() != "success" )
+    {
+      planResult["errorMessage"] = "Step '" + stepId + "' failed: " + stepRes["errorMessage"].asString();
+      return planResult;
+    }
+
+    completedStepOutputs[stepId] = stepRes["output"];
+    planResult["completedSteps"] = static_cast<int>( i + 1 );
+  }
+
+  planResult["status"] = "success";
+  return planResult;
 }
 
 } // namespace sicnu::processing
