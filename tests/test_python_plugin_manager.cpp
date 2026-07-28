@@ -317,3 +317,41 @@ TEST_CASE( "PythonWorkerProcessPool detects worker crash and auto-heals pre-warm
   pool.disconnect();
   pool.shutdown();
 }
+
+TEST_CASE( "PythonPluginAdapter initializes and unloads Python plugin over PythonWorkerProcessPool out-of-process IPC", "[python][adapter][isolated]" )
+{
+  using namespace sicnu::python::isolated;
+
+  QString scriptPath = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) );
+
+  PythonWorkerProcessPool pool( 2 );
+  REQUIRE( pool.initialize( QString(), scriptPath ) );
+
+  QEventLoop loop;
+  QTimer::singleShot( 500, &loop, &QEventLoop::quit );
+  loop.exec();
+
+  QMainWindow mainWindow;
+  QgsMapCanvas canvas;
+  QgsMessageBar messageBar;
+
+  SicnuAppInterface iface( &mainWindow, nullptr, nullptr, &canvas, &messageBar );
+
+  const QString pluginDir = fixturePath( QStringLiteral( "plugins/sample_plugin" ) );
+  PythonPluginAdapter adapter( pluginDir,
+                               QStringLiteral( "sample_plugin" ),
+                               QStringLiteral( "Sample Python Plugin" ),
+                               QStringLiteral( "Sample Description" ),
+                               QStringLiteral( "1.0" ),
+                               &iface,
+                               &pool );
+
+  REQUIRE( adapter.initialize( &canvas, nullptr ) );
+
+  // Unload plugin
+  adapter.unload();
+
+  pool.disconnect();
+  pool.shutdown();
+}
+

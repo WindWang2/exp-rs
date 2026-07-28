@@ -1,24 +1,32 @@
 // python_plugin_adapter.cpp — C++ adapter wrapping Python plugins for PluginManager
 #include "python_plugin_adapter.h"
 #include "sicnu_app_interface.h"
-#include "qgis_python.h"
+#include "python_app_interface_proxy.h"
+#include "python_worker_process_pool.h"
 
 #include <QDebug>
 #include <QDir>
+#include <QEventLoop>
 #include <QFileInfo>
+#include <QJsonObject>
+#include <QTimer>
+
+using namespace sicnu::python::isolated;
 
 PythonPluginAdapter::PythonPluginAdapter( const QString &pluginDir,
                                           const QString &packageName,
                                           const QString &name,
                                           const QString &description,
                                           const QString &version,
-                                          SicnuAppInterface *appInterface )
+                                          SicnuAppInterface *appInterface,
+                                          PythonWorkerProcessPool *pool )
     : m_pluginDir( pluginDir )
     , m_packageName( packageName )
     , m_name( name )
     , m_description( description )
     , m_version( version )
     , m_appInterface( appInterface )
+    , m_pool( pool )
 {
     const QString iconPath = QDir( pluginDir ).filePath( QStringLiteral( "icon.png" ) );
     if ( QFileInfo::exists( iconPath ) )
@@ -43,35 +51,80 @@ bool PythonPluginAdapter::initialize( QgsMapCanvas *canvas, QgsLayerTreeView *la
     if ( m_initialized )
         return true;
 
-    if ( !QgisPython::instance().initialize() )
+    if ( !m_pool )
     {
-        qWarning() << "PythonPluginAdapter: Failed to initialize Python engine";
+        qWarning() << "PythonPluginAdapter: No PythonWorkerProcessPool provided";
         return false;
     }
 
-    // Add plugin parent directory to sys.path
-    QDir dir( m_pluginDir );
-    dir.cdUp();
-    QgisPython::instance().addPath( dir.absolutePath() );
-
-    QString error;
-
-    // Standard QGIS plugin loading contract: import module, invoke classFactory(iface), call initGui()
-    QString script = QString( R"(
-import importlib
-import sys
-
-_mod = importlib.import_module('%1')
-if hasattr(_mod, 'classFactory'):
-    _plugin = _mod.classFactory(None)
-    if hasattr(_plugin, 'initGui'):
-        _plugin.initGui()
-)" ).arg( m_packageName );
-
-    bool ok = QgisPython::instance().runString( script, error );
-    if ( !ok )
+    m_workerNode = m_pool->acquireWorker();
+    if ( !m_workerNode )
     {
-        qWarning() << "Failed to start Python plugin:" << m_packageName << error;
+        QEventLoop waitLoop;
+        QTimer waitTimer;
+        waitTimer.setSingleShot( true );
+        waitTimer.setInterval( 3000 );
+
+        QTimer pollTimer;
+        pollTimer.setInterval( 50 );
+        QObject::connect( &pollTimer, &QTimer::timeout, [&]() {
+            m_workerNode = m_pool->acquireWorker();
+            if ( m_workerNode )
+            {
+                waitLoop.quit();
+            }
+        } );
+        QObject::connect( &waitTimer, &QTimer::timeout, &waitLoop, &QEventLoop::quit );
+        pollTimer.start();
+        waitTimer.start();
+        waitLoop.exec();
+    }
+
+    if ( !m_workerNode || !m_workerNode->server )
+    {
+        qWarning() << "PythonPluginAdapter: Failed to acquire worker process from pool";
+        return false;
+    }
+
+    // Attach UI RPC Proxy Facade
+    QMenu *pluginMenu = m_appInterface ? m_appInterface->pluginMenu() : nullptr;
+    m_uiProxy = std::make_unique<PythonAppInterfaceProxy>( m_workerNode->server, pluginMenu );
+
+    // Send RPC load_plugin request
+    QJsonObject params;
+    params[QStringLiteral( "plugin_dir" )] = m_pluginDir;
+    params[QStringLiteral( "package_name" )] = m_packageName;
+
+    QEventLoop loop;
+    bool success = false;
+    QTimer timer;
+    timer.setSingleShot( true );
+    timer.setInterval( 5000 ); // 5 second timeout
+
+    m_workerNode->server->sendRequest( QStringLiteral( "load_plugin" ), params, [&]( const QJsonObject &response, bool isError ) {
+        if ( !isError && response.contains( QStringLiteral( "status" ) ) && response[QStringLiteral( "status" )].toString() == QStringLiteral( "loaded" ) )
+        {
+            success = true;
+        }
+        else if ( isError )
+        {
+            qWarning() << "PythonPluginAdapter load_plugin error:" << response;
+        }
+        loop.quit();
+    } );
+
+    QObject::connect( &timer, &QTimer::timeout, &loop, &QEventLoop::quit );
+    timer.start();
+    loop.exec();
+
+    if ( !success )
+    {
+        qWarning() << "PythonPluginAdapter: Timed out or failed to load plugin:" << m_packageName;
+        if ( m_pool && m_workerNode )
+        {
+            m_pool->releaseWorker( m_workerNode );
+            m_workerNode = nullptr;
+        }
         return false;
     }
 
@@ -81,18 +134,35 @@ if hasattr(_mod, 'classFactory'):
 
 void PythonPluginAdapter::unload()
 {
-    if ( !m_initialized )
+    if ( !m_initialized || !m_workerNode || !m_workerNode->server )
         return;
 
-    QString error;
-    QString script = QString( R"(
-import sys
-if '%1' in sys.modules:
-    _mod = sys.modules['%1']
-    if hasattr(_mod, '_plugin') and hasattr(_mod._plugin, 'unload'):
-        _mod._plugin.unload()
-)" ).arg( m_packageName );
+    QJsonObject params;
+    params[QStringLiteral( "package_name" )] = m_packageName;
 
-    QgisPython::instance().runString( script, error );
+    QEventLoop loop;
+    QTimer timer;
+    timer.setSingleShot( true );
+    timer.setInterval( 3000 );
+
+    m_workerNode->server->sendRequest( QStringLiteral( "unload_plugin" ), params, [&]( const QJsonObject &, bool ) {
+        loop.quit();
+    } );
+
+    QObject::connect( &timer, &QTimer::timeout, &loop, &QEventLoop::quit );
+    timer.start();
+    loop.exec();
+
+    if ( m_uiProxy )
+    {
+        m_uiProxy.reset();
+    }
+
+    if ( m_pool && m_workerNode )
+    {
+        m_pool->releaseWorker( m_workerNode );
+        m_workerNode = nullptr;
+    }
+
     m_initialized = false;
 }

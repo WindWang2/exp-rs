@@ -13,6 +13,12 @@ class SicnuAppInterface;
  * as a C++ SicnuPluginInterface instance, allowing PluginManager to manage both
  * C++ shared-library and Python plugins uniformly.
  */
+namespace sicnu::python::isolated {
+    class PythonWorkerProcessPool;
+    struct WorkerNode;
+    class PythonAppInterfaceProxy;
+}
+
 class PythonPluginAdapter : public SicnuPluginInterface
 {
 public:
@@ -21,7 +27,8 @@ public:
                                   const QString &name,
                                   const QString &description,
                                   const QString &version,
-                                  SicnuAppInterface *appInterface );
+                                  SicnuAppInterface *appInterface,
+                                  sicnu::python::isolated::PythonWorkerProcessPool *pool = nullptr );
 
     ~PythonPluginAdapter() override;
 
@@ -45,5 +52,8 @@ private:
     QString m_version;
     QIcon m_icon;
     SicnuAppInterface *m_appInterface = nullptr;
+    sicnu::python::isolated::PythonWorkerProcessPool *m_pool = nullptr;
+    sicnu::python::isolated::WorkerNode *m_workerNode = nullptr;
+    std::unique_ptr<sicnu::python::isolated::PythonAppInterfaceProxy> m_uiProxy;
     bool m_initialized = false;
 };

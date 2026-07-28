@@ -1,12 +1,16 @@
 #include "plugin_manager.h"
 #include "app/python/python_plugin_adapter.h"
+#include "python_worker_process_pool.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QPluginLoader>
 #include <QLibrary>
 #include <QJsonObject>
 #include <QSettings>
 #include <QFileInfo>
+
+using namespace sicnu::python::isolated;
 
 PluginManager::PluginManager(QgsMapCanvas *canvas, QgsLayerTreeView *layerTree, QObject *parent)
     : QObject(parent)
@@ -18,6 +22,11 @@ PluginManager::PluginManager(QgsMapCanvas *canvas, QgsLayerTreeView *layerTree, 
 PluginManager::~PluginManager()
 {
     unloadAll();
+    if (m_ownsPythonPool && m_pythonPool) {
+        m_pythonPool->shutdown();
+        delete m_pythonPool;
+        m_pythonPool = nullptr;
+    }
 }
 
 void PluginManager::loadPlugins(const QString &pluginDir)
@@ -123,7 +132,17 @@ bool PluginManager::loadPythonPlugin(const QString &pluginDir)
     const QString description = metadata.value(QStringLiteral("description"), QString());
     const QString version = metadata.value(QStringLiteral("version"), QStringLiteral("1.0"));
 
-    auto *adapter = new PythonPluginAdapter(pluginDir, packageName, name, description, version, m_appInterface);
+    if (!m_pythonPool) {
+        QString scriptPath = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../src/python/scripts/worker_daemon.py"));
+        if (!QFileInfo::exists(scriptPath)) {
+            scriptPath = QDir::current().filePath(QStringLiteral("src/python/scripts/worker_daemon.py"));
+        }
+        m_pythonPool = new PythonWorkerProcessPool(2, this);
+        m_pythonPool->initialize(QString(), scriptPath);
+        m_ownsPythonPool = true;
+    }
+
+    auto *adapter = new PythonPluginAdapter(pluginDir, packageName, name, description, version, m_appInterface, m_pythonPool);
     if (!adapter->initialize(m_canvas, m_layerTree)) {
         emit pluginError(name, "Python plugin initialization failed");
         delete adapter;

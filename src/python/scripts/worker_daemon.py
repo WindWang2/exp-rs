@@ -9,7 +9,30 @@ import struct
 import mmap
 import numpy as np
 
+import importlib
+
 callbacks = {}
+loaded_plugins = {}
+
+class SicnuPythonIface:
+    def __init__(self, socket_conn):
+        self._s = socket_conn
+
+    def addPluginToMenu(self, title, action):
+        cb_id = f"cb_{id(action)}"
+        callbacks[cb_id] = action
+        action_text = action.text() if hasattr(action, "text") and callable(action.text) else str(action)
+        req_msg = {
+            "jsonrpc": "2.0",
+            "method": "ui.add_plugin_menu",
+            "params": {
+                "menu_title": title,
+                "action_title": action_text,
+                "callback_id": cb_id
+            },
+            "id": 9999
+        }
+        self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
 
 def process_shm(shm_key, multiply_factor=2.0):
     shm_name = shm_key.lstrip('/')
@@ -83,6 +106,36 @@ def main():
                             "id": req_id,
                             "result": res
                         }
+                    elif method == "load_plugin":
+                        plugin_dir = params.get("plugin_dir")
+                        package_name = params.get("package_name")
+                        if plugin_dir:
+                            parent_dir = os.path.dirname(os.path.abspath(plugin_dir))
+                            if parent_dir not in sys.path:
+                                sys.path.insert(0, parent_dir)
+                        mod = importlib.import_module(package_name)
+                        if hasattr(mod, "classFactory"):
+                            iface_obj = SicnuPythonIface(s)
+                            plugin_obj = mod.classFactory(iface_obj)
+                            if hasattr(plugin_obj, "initGui"):
+                                plugin_obj.initGui()
+                            loaded_plugins[package_name] = plugin_obj
+                        resp = {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "result": {"status": "loaded", "package_name": package_name}
+                        }
+                    elif method == "unload_plugin":
+                        package_name = params.get("package_name")
+                        if package_name in loaded_plugins:
+                            plugin_obj = loaded_plugins.pop(package_name)
+                            if hasattr(plugin_obj, "unload"):
+                                plugin_obj.unload()
+                        resp = {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "result": {"status": "unloaded", "package_name": package_name}
+                        }
                     elif method == "ui.test_register_action":
                         cb_id = params.get("callback_id", "cb_test_001")
                         callbacks[cb_id] = True
@@ -101,7 +154,13 @@ def main():
                     elif method == "ui.on_action_triggered":
                         cb_id = params.get("callback_id")
                         if cb_id in callbacks:
-                            callbacks[cb_id] = "triggered"
+                            cb = callbacks[cb_id]
+                            if callable(cb):
+                                cb()
+                            elif hasattr(cb, "trigger") and callable(cb.trigger):
+                                cb.trigger()
+                            elif hasattr(cb, "run") and callable(cb.run):
+                                cb.run()
                         resp = {
                             "jsonrpc": "2.0",
                             "id": req_id,
