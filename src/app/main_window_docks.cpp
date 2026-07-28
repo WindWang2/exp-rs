@@ -15,6 +15,7 @@
 #include "shell/task_panel_host.h"
 #include "shell/workflow_session_controller.h"
 #include "workflow/pipeline_editor_dock.h"
+#include "agent/agent_copilot_dock_widget.h"
 #include "widgets/spectral_profile_widget.h"
 #include "widgets/guided_workflow_widget.h"
 #include "widgets/histogram_stretch_widget.h"
@@ -507,6 +508,12 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     m_pipelineDock = new sicnu::workflow::gui::PipelineEditorDock( this );
     addDockWidget( Qt::RightDockWidgetArea, m_pipelineDock );
     m_pipelineDock->hide();
+
+    auto *agentCopilotDock = new sicnu::agent::AgentCopilotDockWidget( this );
+    addDockWidget( Qt::RightDockWidgetArea, agentCopilotDock );
+    if ( m_projectContext )
+        agentCopilotDock->setContext( &m_projectContext->dataManager(), m_activeViewHost );
+    agentCopilotDock->hide();
 
     m_sessionController->bindCanvas( m_pipelineDock->pipelineCanvas() );
 

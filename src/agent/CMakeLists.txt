@@ -2,8 +2,12 @@
 add_library(sicnu_agent SHARED
   agent_context_resolver.cpp
   agent_context_resolver.h
+  agent_copilot_dock_widget.cpp
+  agent_copilot_dock_widget.h
   llm_config_manager.cpp
   llm_config_manager.h
+  llm_settings_dialog.cpp
+  llm_settings_dialog.h
   llm_streaming_client.cpp
   llm_streaming_client.h
 )

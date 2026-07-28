@@ -1,0 +1,300 @@
+// src/agent/agent_copilot_dock_widget.cpp
+#include "agent_copilot_dock_widget.h"
+#include "llm_settings_dialog.h"
+
+#include <QFrame>
+#include <QHBoxLayout>
+#include <QJsonDocument>
+#include <QMessageBox>
+
+namespace sicnu::agent
+{
+
+AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
+  : QDockWidget( QStringLiteral( "🤖 AI Copilot 智能助手" ), parent )
+{
+  setObjectName( QStringLiteral( "AgentCopilotDockWidget" ) );
+  setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+
+  auto *mainWidget = new QWidget( this );
+  auto *mainLayout = new QVBoxLayout( mainWidget );
+  mainLayout->setContentsMargins( 4, 4, 4, 4 );
+  mainLayout->setSpacing( 4 );
+
+  // 1. Header Toolbar
+  auto *headerLayout = new QHBoxLayout();
+  m_providerCombo = new QComboBox( mainWidget );
+  m_settingsBtn = new QPushButton( QStringLiteral( "⚙️ 设置" ), mainWidget );
+  m_clearBtn = new QPushButton( QStringLiteral( "🧹 清空对话" ), mainWidget );
+
+  headerLayout->addWidget( new QLabel( QStringLiteral( "模型:" ), mainWidget ) );
+  headerLayout->addWidget( m_providerCombo, 1 );
+  headerLayout->addWidget( m_settingsBtn );
+  headerLayout->addWidget( m_clearBtn );
+
+  mainLayout->addLayout( headerLayout );
+
+  // 2. Chat Scroll Area
+  m_scrollArea = new QScrollArea( mainWidget );
+  m_scrollArea->setWidgetResizable( true );
+  m_chatContainer = new QWidget( m_scrollArea );
+  m_chatLayout = new QVBoxLayout( m_chatContainer );
+  m_chatLayout->setAlignment( Qt::AlignTop );
+  m_chatLayout->setSpacing( 8 );
+  m_chatContainer->setLayout( m_chatLayout );
+  m_scrollArea->setWidget( m_chatContainer );
+
+  mainLayout->addWidget( m_scrollArea, 1 );
+
+  // 3. Bottom Input Bar
+  auto *inputLayout = new QHBoxLayout();
+  m_inputEdit = new QTextEdit( mainWidget );
+  m_inputEdit->setPlaceholderText( QStringLiteral( "输入遥感指令 (例: 对当前 Landsat 图像计算 NDVI)..." ) );
+  m_inputEdit->setFixedHeight( 60 );
+
+  m_sendBtn = new QPushButton( QStringLiteral( "发送 ▶" ), mainWidget );
+  m_sendBtn->setFixedHeight( 60 );
+
+  inputLayout->addWidget( m_inputEdit, 1 );
+  inputLayout->addWidget( m_sendBtn );
+
+  mainLayout->addLayout( inputLayout );
+  setWidget( mainWidget );
+
+  // Setup Client & Signals
+  m_client = new LlmStreamingClient( this );
+  m_profiles = LlmConfigManager::loadProfiles();
+
+  for ( const auto &p : m_profiles )
+  {
+    m_providerCombo->addItem( p.name, p.id );
+  }
+
+  LlmProviderProfile active = LlmConfigManager::activeProfile();
+  for ( int i = 0; i < m_profiles.size(); ++i )
+  {
+    if ( m_profiles[i].id == active.id )
+    {
+      m_providerCombo->setCurrentIndex( i );
+      break;
+    }
+  }
+
+  connect( m_providerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+           this, &AgentCopilotDockWidget::onProviderChanged );
+  connect( m_settingsBtn, &QPushButton::clicked, this, &AgentCopilotDockWidget::onSettingsClicked );
+  connect( m_clearBtn, &QPushButton::clicked, this, &AgentCopilotDockWidget::onClearClicked );
+  connect( m_sendBtn, &QPushButton::clicked, this, &AgentCopilotDockWidget::onSendClicked );
+
+  connect( m_client, &LlmStreamingClient::reasoningTokenReceived,
+           this, &AgentCopilotDockWidget::onReasoningTokenReceived );
+  connect( m_client, &LlmStreamingClient::contentTokenReceived,
+           this, &AgentCopilotDockWidget::onContentTokenReceived );
+  connect( m_client, &LlmStreamingClient::toolCallParsed,
+           this, &AgentCopilotDockWidget::onToolCallParsed );
+  connect( m_client, &LlmStreamingClient::finished,
+           this, &AgentCopilotDockWidget::onLlmFinished );
+  connect( m_client, &LlmStreamingClient::errorOccurred,
+           this, &AgentCopilotDockWidget::onErrorOccurred );
+}
+
+void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, ActiveViewHost *viewHost )
+{
+  m_dataManager = dataManager;
+  m_viewHost = viewHost;
+  m_workflowExecutor.setDataManager( dataManager );
+}
+
+void AgentCopilotDockWidget::onProviderChanged( int index )
+{
+  if ( index >= 0 && index < m_profiles.size() )
+  {
+    LlmConfigManager::setActiveProfile( m_profiles[index] );
+    m_client->setProfile( m_profiles[index] );
+  }
+}
+
+void AgentCopilotDockWidget::onSettingsClicked()
+{
+  LlmSettingsDialog dlg( this );
+  if ( dlg.exec() == QDialog::Accepted )
+  {
+    LlmProviderProfile selected = dlg.selectedProfile();
+    LlmConfigManager::setActiveProfile( selected );
+
+    m_profiles = LlmConfigManager::loadProfiles();
+    m_providerCombo->blockSignals( true );
+    m_providerCombo->clear();
+    int activeIdx = 0;
+    for ( int i = 0; i < m_profiles.size(); ++i )
+    {
+      m_providerCombo->addItem( m_profiles[i].name, m_profiles[i].id );
+      if ( m_profiles[i].id == selected.id )
+        activeIdx = i;
+    }
+    m_providerCombo->setCurrentIndex( activeIdx );
+    m_providerCombo->blockSignals( false );
+
+    m_client->setProfile( selected );
+  }
+}
+
+void AgentCopilotDockWidget::onClearClicked()
+{
+  m_messageHistory = QJsonArray();
+  QLayoutItem *child;
+  while ( ( child = m_chatLayout->takeAt( 0 ) ) != nullptr )
+  {
+    if ( child->widget() )
+      child->widget()->deleteLater();
+    delete child;
+  }
+}
+
+void AgentCopilotDockWidget::onSendClicked()
+{
+  if ( m_isStreaming )
+  {
+    m_client->cancel();
+    onLlmFinished();
+    return;
+  }
+
+  QString prompt = m_inputEdit->toPlainText().trimmed();
+  if ( prompt.isEmpty() )
+    return;
+
+  m_inputEdit->clear();
+  sendPrompt( prompt );
+}
+
+void AgentCopilotDockWidget::sendPrompt( const QString &promptText )
+{
+  appendUserMessageCard( promptText );
+
+  // Build Workspace System Context
+  QJsonObject snapshot = AgentContextResolver::buildContextSnapshot( m_dataManager, m_viewHost );
+  QString systemPrompt = AgentContextResolver::formatSystemContextPrompt( snapshot );
+
+  m_messageHistory = QJsonArray();
+
+  QJsonObject sysMsg;
+  sysMsg[QStringLiteral( "role" )] = QStringLiteral( "system" );
+  sysMsg[QStringLiteral( "content" )] = systemPrompt;
+  m_messageHistory.append( sysMsg );
+
+  QJsonObject userMsg;
+  userMsg[QStringLiteral( "role" )] = QStringLiteral( "user" );
+  userMsg[QStringLiteral( "content" )] = promptText;
+  m_messageHistory.append( userMsg );
+
+  appendAssistantMessageCard();
+
+  m_isStreaming = true;
+  m_sendBtn->setText( QStringLiteral( "停止 ⏹" ) );
+
+  m_client->sendChatCompletion( m_messageHistory, true );
+}
+
+void AgentCopilotDockWidget::appendUserMessageCard( const QString &text )
+{
+  auto *card = new QFrame( m_chatContainer );
+  card->setFrameShape( QFrame::StyledPanel );
+  card->setStyleSheet( QStringLiteral( "background-color: #0284c7; color: white; border-radius: 6px; padding: 6px;" ) );
+
+  auto *layout = new QVBoxLayout( card );
+  auto *label = new QLabel( QString( "<b>你:</b> %1" ).arg( text.toHtmlEscaped() ), card );
+  label->setWordWrap( true );
+  layout->addWidget( label );
+
+  m_chatLayout->addWidget( card );
+}
+
+void AgentCopilotDockWidget::appendAssistantMessageCard()
+{
+  auto *card = new QFrame( m_chatContainer );
+  card->setFrameShape( QFrame::StyledPanel );
+  card->setStyleSheet( QStringLiteral( "background-color: #1e293b; color: #f8fafc; border-radius: 6px; padding: 6px;" ) );
+
+  auto *layout = new QVBoxLayout( card );
+
+  m_currentReasoningLabel = new QLabel( card );
+  m_currentReasoningLabel->setWordWrap( true );
+  m_currentReasoningLabel->setStyleSheet( QStringLiteral( "color: #94a3b8; font-style: italic;" ) );
+  m_currentReasoningLabel->setVisible( false );
+  layout->addWidget( m_currentReasoningLabel );
+
+  m_currentContentLabel = new QLabel( card );
+  m_currentContentLabel->setWordWrap( true );
+  layout->addWidget( m_currentContentLabel );
+
+  m_accumulatedReasoning.clear();
+  m_accumulatedContent.clear();
+
+  m_chatLayout->addWidget( card );
+}
+
+void AgentCopilotDockWidget::onReasoningTokenReceived( const QString &text )
+{
+  m_accumulatedReasoning += text;
+  m_currentReasoningLabel->setVisible( true );
+  m_currentReasoningLabel->setText( QString( "🧠 思考过程:\n%1" ).arg( m_accumulatedReasoning.toHtmlEscaped() ) );
+}
+
+void AgentCopilotDockWidget::onContentTokenReceived( const QString &text )
+{
+  m_accumulatedContent += text;
+  m_currentContentLabel->setText( m_accumulatedContent );
+}
+
+void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
+{
+  appendToolCallCard( toolCallJson );
+
+  // Execute tool call via AgentWorkflowExecutor
+  Json::Value cppToolCall;
+  std::string jsonStr = QJsonDocument( toolCallJson ).toJson( QJsonDocument::Compact ).toStdString();
+  Json::CharReaderBuilder builder;
+  std::string errs;
+  std::istringstream sstream( jsonStr );
+  Json::parseFromStream( builder, sstream, &cppToolCall, &errs );
+
+  Json::Value resultPayload = m_workflowExecutor.executeToolCall( cppToolCall );
+
+  QJsonObject resultJson = QJsonDocument::fromJson( QByteArray::fromStdString( resultPayload.toStyledString() ) ).object();
+  emit toolExecutionFinished( resultJson );
+}
+
+void AgentCopilotDockWidget::appendToolCallCard( const QJsonObject &toolCallJson )
+{
+  auto *card = new QFrame( m_chatContainer );
+  card->setFrameShape( QFrame::StyledPanel );
+  card->setStyleSheet( QStringLiteral( "background-color: #0f172a; border: 1px solid #38bdf8; border-radius: 6px; padding: 6px;" ) );
+
+  auto *layout = new QVBoxLayout( card );
+  QJsonObject funcObj = toolCallJson[QStringLiteral( "function" )].toObject();
+  QString algName = funcObj[QStringLiteral( "name" )].toString();
+
+  auto *title = new QLabel( QString( "⚡ 准备执行工具: <b>%1</b>" ).arg( algName ), card );
+  title->setStyleSheet( QStringLiteral( "color: #38bdf8;" ) );
+  layout->addWidget( title );
+
+  m_chatLayout->addWidget( card );
+}
+
+void AgentCopilotDockWidget::onLlmFinished()
+{
+  m_isStreaming = false;
+  m_sendBtn->setText( QStringLiteral( "发送 ▶" ) );
+}
+
+void AgentCopilotDockWidget::onErrorOccurred( const QString &errorMsg )
+{
+  if ( m_currentContentLabel )
+  {
+    m_currentContentLabel->setText( QString( "<font color='red'>错误: %1</font>" ).arg( errorMsg ) );
+  }
+  onLlmFinished();
+}
+
+} // namespace sicnu::agent

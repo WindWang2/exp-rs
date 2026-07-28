@@ -273,6 +273,7 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     sicnu_workflow
     sicnu_jobs
     sicnu_task_center
+    sicnu_agent
     jsoncpp
     CURL::libcurl
     ${PCRE2_16}
