@@ -8,7 +8,9 @@
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "workflow/builtin_definitions.h"
+#include "workflow/workflow_definition.h"
 #include "workflow/workflow_types.h"
+#include "workflow/pipeline_canvas_widget.h"
 
 #include <exception>
 #include <string>
@@ -75,6 +77,18 @@ void WorkflowSessionController::bindPanel( TaskPanelHost *panel )
     if ( !m_layerIds.isEmpty() || !m_layerNames.isEmpty() )
       m_panel->setRasterLayerChoices( m_layerIds, m_layerNames );
     ensureRunConnected();
+  }
+}
+
+void WorkflowSessionController::bindCanvas( sicnu::workflow::gui::PipelineCanvasWidget *canvas )
+{
+  m_canvas = canvas;
+  if ( m_canvas )
+  {
+    connect( m_canvas, &sicnu::workflow::gui::PipelineCanvasWidget::runUpToNodeRequested,
+             this, &WorkflowSessionController::runUpToNode );
+    connect( this, &WorkflowSessionController::stepStatusChanged,
+             m_canvas, &sicnu::workflow::gui::PipelineCanvasWidget::updateStepStatus );
   }
 }
 
@@ -248,7 +262,158 @@ void WorkflowSessionController::onRunClicked()
   m_pendingTaskId = taskId;
   m_pendingLoadToMap = m_panel->loadResultToMap();
   m_panel->setRunning( true );
+  emit stepStatusChanged( m_activeStepId, "running" );
   emit statusMessage( tr( "正在运行…" ) );
+}
+
+void WorkflowSessionController::runFullWorkflow()
+{
+  if ( m_activeSession.isEmpty() )
+    return;
+
+  std::string definitionId;
+  try
+  {
+    definitionId = m_runtime.state( m_activeSession.toStdString() ).definitionId;
+  }
+  catch ( const std::exception &e )
+  {
+    emit statusMessage( QString::fromUtf8( e.what() ) );
+    return;
+  }
+
+  const auto *def = m_registry.find( definitionId );
+  if ( !def )
+    return;
+
+  std::vector<std::string> ordered;
+  std::string error;
+  if ( !topologicalSortSteps( *def, ordered, error ) )
+  {
+    emit statusMessage( tr( "DAG排序错误: %1" ).arg( QString::fromStdString( error ) ) );
+    return;
+  }
+
+  m_executionQueue = ordered;
+  m_currentQueueIndex = 0;
+  m_isBatchExecuting = true;
+
+  for ( const auto &stepId : m_executionQueue )
+  {
+    emit stepStatusChanged( QString::fromStdString( stepId ), "idle" );
+  }
+
+  runNextQueuedStep();
+}
+
+void WorkflowSessionController::runUpToNode( const QString &targetStepId )
+{
+  if ( m_activeSession.isEmpty() || targetStepId.isEmpty() )
+    return;
+
+  std::string definitionId;
+  try
+  {
+    definitionId = m_runtime.state( m_activeSession.toStdString() ).definitionId;
+  }
+  catch ( const std::exception &e )
+  {
+    emit statusMessage( QString::fromUtf8( e.what() ) );
+    return;
+  }
+
+  const auto *def = m_registry.find( definitionId );
+  if ( !def )
+    return;
+
+  std::vector<std::string> ordered;
+  std::string error;
+  if ( !topologicalSortSteps( *def, ordered, error ) )
+  {
+    emit statusMessage( tr( "DAG排序错误: %1" ).arg( QString::fromStdString( error ) ) );
+    return;
+  }
+
+  std::vector<std::string> targetQueue;
+  for ( const auto &sId : ordered )
+  {
+    targetQueue.push_back( sId );
+    if ( sId == targetStepId.toStdString() )
+      break;
+  }
+
+  m_executionQueue = targetQueue;
+  m_currentQueueIndex = 0;
+  m_isBatchExecuting = true;
+
+  runNextQueuedStep();
+}
+
+void WorkflowSessionController::stopWorkflow()
+{
+  m_isBatchExecuting = false;
+  m_executionQueue.clear();
+
+  if ( m_pendingTaskId >= 0 )
+  {
+    sicnu::TaskCenter::instance().cancelTask( m_pendingTaskId );
+    m_pendingTaskId = -1;
+  }
+
+  m_runInFlight = false;
+  if ( m_panel )
+    m_panel->setRunning( false );
+
+  emit statusMessage( tr( "工作流运行已停止" ) );
+}
+
+void WorkflowSessionController::runNextQueuedStep()
+{
+  if ( !m_isBatchExecuting || m_currentQueueIndex >= m_executionQueue.size() )
+  {
+    m_isBatchExecuting = false;
+    emit statusMessage( tr( "工作流全流程运行完成！" ) );
+    return;
+  }
+
+  std::string nextStepId = m_executionQueue[m_currentQueueIndex];
+  m_activeStepId = QString::fromStdString( nextStepId );
+
+  emit stepStatusChanged( m_activeStepId, "running" );
+  emit statusMessage( tr( "正在运行步骤 [%1]..." ).arg( m_activeStepId ) );
+
+  // Execute step via TaskCenter
+  std::string definitionId;
+  try
+  {
+    definitionId = m_runtime.state( m_activeSession.toStdString() ).definitionId;
+  }
+  catch ( const std::exception &e )
+  {
+    emit statusMessage( QString::fromUtf8( e.what() ) );
+    m_isBatchExecuting = false;
+    return;
+  }
+
+  const StepDef *step = findStep( m_registry.find( definitionId ), nextStepId );
+  if ( !step || step->kind != StepKind::Operator || step->operatorId.empty() )
+  {
+    // Non-operator or interactive step completed automatically
+    m_runtime.markStepComplete( m_activeSession.toStdString(), nextStepId );
+    emit stepStatusChanged( m_activeStepId, "success" );
+    m_currentQueueIndex++;
+    runNextQueuedStep();
+    return;
+  }
+
+  JobRequest req;
+  req.algorithmId = step->operatorId;
+  req.params = ( m_panel ? m_panel->formValues() : Json::Value( Json::objectValue ) );
+  req.title = step->title.empty() ? step->operatorId : step->title;
+  req.source = "pipeline_editor";
+
+  m_pendingTaskId = sicnu::TaskCenter::instance().submitJob( req );
+  m_runInFlight = true;
 }
 
 void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
@@ -276,9 +441,13 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
       else
         error = tr( "运行失败" );
     }
+    emit stepStatusChanged( m_activeStepId, "failed" );
     if ( m_panel )
       m_panel->setFailed( error );
     emit statusMessage( error );
+
+    m_isBatchExecuting = false;
+    m_executionQueue.clear();
     return;
   }
 
@@ -286,6 +455,8 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
   const std::string stepId = m_activeStepId.toStdString();
   if ( !sessionId.empty() && !stepId.empty() )
     applyJobResultToSession( sessionId, stepId, info.resultPayload );
+
+  emit stepStatusChanged( m_activeStepId, "success" );
 
   QString outputPath;
   if ( info.resultPayload.isMember( "output" ) && info.resultPayload["output"].isString() )
@@ -300,6 +471,12 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
   if ( m_panel )
     m_panel->setSuccess( msg );
   emit statusMessage( msg );
+
+  if ( m_isBatchExecuting )
+  {
+    m_currentQueueIndex++;
+    runNextQueuedStep();
+  }
 }
 
 void WorkflowSessionController::applyJobResultToSession( const std::string &sessionId,

@@ -11,10 +11,14 @@
 #include <QString>
 #include <QStringList>
 
+namespace sicnu::workflow::gui {
+class PipelineCanvasWidget;
+}
+
 class TaskPanelHost;
 
 /**
- * Owns process-local workflow registry/runtime and drives TaskPanelHost.
+ * Owns process-local workflow registry/runtime and drives TaskPanelHost and PipelineCanvasWidget.
  * Run submits through Task Center; UI updates arrive from the owning task.
  */
 class WorkflowSessionController : public QObject
@@ -25,6 +29,7 @@ class WorkflowSessionController : public QObject
 
     void registerBuiltins();
     void bindPanel( TaskPanelHost *panel );
+    void bindCanvas( sicnu::workflow::gui::PipelineCanvasWidget *canvas );
 
     /**
      * Open a workflow definition, fill the panel from the first operator step
@@ -36,12 +41,17 @@ class WorkflowSessionController : public QObject
 
   public slots:
     void onRunClicked();
+    void runFullWorkflow();
+    void runUpToNode( const QString &targetStepId );
+    void stopWorkflow();
 
   signals:
     void requestLoadRaster( const QString &path );
     void statusMessage( const QString &msg );
     /** Workspace-hosted labs (e.g. lab.obia → open OBIA window). */
     void requestOpenWorkspace( const QString &workspaceKind );
+    void stepStatusChanged( const QString &stepId, const QString &statusStr );
+    void showLogsRequested( const QString &stepId );
 
   private slots:
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
@@ -51,6 +61,7 @@ class WorkflowSessionController : public QObject
     void applyJobResultToSession( const std::string &sessionId,
                                   const std::string &stepId,
                                   const Json::Value &result );
+    void runNextQueuedStep();
 
     // Member order: registry must outlive runtime (runtime holds a reference).
     sicnu::workflow::WorkflowRegistry m_registry;
@@ -62,9 +73,16 @@ class WorkflowSessionController : public QObject
     long m_pendingTaskId = -1;
     bool m_pendingLoadToMap = false;
     TaskPanelHost *m_panel = nullptr;
+    sicnu::workflow::gui::PipelineCanvasWidget *m_canvas = nullptr;
+
+    std::vector<std::string> m_executionQueue;
+    size_t m_currentQueueIndex = 0;
+    bool m_isBatchExecuting = false;
+
     QStringList m_layerIds;
     QStringList m_layerNames;
     bool m_builtinsRegistered = false;
     bool m_runConnected = false;
     bool m_runInFlight = false;
 };
+

@@ -8,6 +8,7 @@
 #include "app/workflow/pipeline_node_item.h"
 #include "app/workflow/pipeline_port_item.h"
 #include "app/workflow/pipeline_connection_item.h"
+#include "shell/workflow_session_controller.h"
 #include "workflow_definition.h"
 
 using namespace sicnu::workflow;
@@ -185,3 +186,36 @@ TEST_CASE( "PipelineCanvasWidget loads and exports workflow definitions", "[work
   WorkflowDefinition exported = canvas.exportWorkflowDefinition( wf );
   REQUIRE( exported.steps.size() == 2 );
 }
+
+TEST_CASE( "WorkflowSessionController drives canvas step status updates", "[workflow][controller]" )
+{
+  ensureApp();
+
+  WorkflowSessionController controller;
+  PipelineCanvasWidget canvas;
+  controller.bindCanvas( &canvas );
+
+  WorkflowDefinition wf;
+  wf.id = "status_pipeline";
+  wf.title = "Status Test Pipeline";
+
+  StepDef s1;
+  s1.id = "step_1";
+  s1.title = "Step 1";
+  s1.uiMeta = { 10.0, 10.0 };
+
+  wf.steps.push_back( s1 );
+  canvas.loadWorkflowDefinition( wf );
+
+  auto *nodeItem = canvas.pipelineScene()->findNode( "step_1" );
+  REQUIRE( nodeItem != nullptr );
+  REQUIRE( nodeItem->status() == NodeStatus::Idle );
+
+  // Emit status change signal from controller
+  emit controller.stepStatusChanged( "step_1", "running" );
+  REQUIRE( nodeItem->status() == NodeStatus::Running );
+
+  emit controller.stepStatusChanged( "step_1", "success" );
+  REQUIRE( nodeItem->status() == NodeStatus::Success );
+}
+

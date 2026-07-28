@@ -3241,13 +3241,21 @@ qt_add_executable(test_workflow_pipeline_ui
   ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_node_item.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_scene.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_canvas_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/workflow_session_controller.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/task_panel_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
 )
 target_link_libraries(test_workflow_pipeline_ui PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_operators
   sicnu_workflow
+  sicnu_task_center
 )
 target_include_directories(test_workflow_pipeline_ui PRIVATE
   ${CMAKE_SOURCE_DIR}/src
