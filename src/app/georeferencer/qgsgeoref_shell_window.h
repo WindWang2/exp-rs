@@ -27,6 +27,7 @@ class QgsMapLayerStore;
 class QgsMapToolPan;
 class QgsMapToolZoom;
 class QgsRasterLayer;
+class RsSessionMapWorkspace;
 class QgsGeorefToolAddPoint;
 class QgsGeorefToolMovePoint;
 class QgsGeorefToolDeletePoint;
@@ -57,6 +58,9 @@ class QgsGeorefShellWindow : public QMainWindow
 
     QgsMapCanvas *srcCanvas() const { return mSrcCanvas; }
     QgsMapCanvas *dstCanvas() const { return mDstCanvas; }
+    /// Wave E session stacks (SRC always; DST for I2I REF canvas only).
+    RsSessionMapWorkspace *srcSessionMap() const { return mSrcSession; }
+    RsSessionMapWorkspace *dstSessionMap() const { return mDstSession; }
     RsGeorefTaskList *taskListForTest() { return mTaskList; }
     /// Runtime session for lab.georef.image_to_map (I2M only; null on I2I).
     RsGeorefWorkflowBridge *workflowBridgeForTest() { return mWorkflowBridge.get(); }
@@ -87,6 +91,10 @@ class QgsGeorefShellWindow : public QMainWindow
     void loadPoints();
     void savePoints();
 
+  signals:
+    /// Ask main shell to load warp output via ActiveViewHost / loadDataLayer.
+    void requestLoadToMainMap( const QString &rasterPath );
+
   protected:
     explicit QgsGeorefShellWindow( QgisInterface *iface, QWidget *parent = nullptr );
     ~QgsGeorefShellWindow() override;
@@ -97,6 +105,8 @@ class QgsGeorefShellWindow : public QMainWindow
     void finishCommonSetup( RsGeorefParamsPanel::Profile profile,
                             const QString &gcpDockObjectName,
                             const QString &paramDockObjectName );
+    /// Build session map workspaces for existing SRC/DST canvases (Wave E).
+    void setupSessionMaps();
 
     void setupStatusBar( const QString &coordObj, const QString &crsObj, const QString &rmsObj );
     void createMapTools();
@@ -224,7 +234,10 @@ class QgsGeorefShellWindow : public QMainWindow
 
     QgsMapCanvas *mSrcCanvas = nullptr;
     QgsMapCanvas *mDstCanvas = nullptr; ///< REF (I2I) or Map (I2M)
+    /// Legacy single store (still used if session maps unavailable). Prefer sessions.
     QgsMapLayerStore *mLayerStore = nullptr;
+    RsSessionMapWorkspace *mSrcSession = nullptr;
+    RsSessionMapWorkspace *mDstSession = nullptr;
     QgsRasterLayer *mSrcRaster = nullptr;
     /// REF raster for I2I (null for I2M map mode). Used for pixel/CRS helpers.
     QgsRasterLayer *mDstRaster = nullptr;

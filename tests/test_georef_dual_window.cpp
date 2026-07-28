@@ -39,7 +39,8 @@ static QApplication *app = []() {
   return &a;
 }();
 
-TEST_CASE( "I2I window has horizontal twin canvases", "[georef][dual]" )
+TEST_CASE( "I2I window has horizontal twin canvases and dual session maps",
+           "[georef][dual][wave_e]" )
 {
   QgsGeoreferencerMainWindow w( nullptr, nullptr );
   w.setWindowTitle( QStringLiteral( "Image Registration · Image 2 Image" ) );
@@ -48,6 +49,9 @@ TEST_CASE( "I2I window has horizontal twin canvases", "[georef][dual]" )
   auto *ref = w.findChild<QgsMapCanvas *>( QStringLiteral( "rsRefCanvas" ) );
   REQUIRE( src != nullptr );
   REQUIRE( ref != nullptr );
+  REQUIRE( w.srcSessionMap() != nullptr );
+  REQUIRE( w.dstSessionMap() != nullptr );
+  REQUIRE( w.srcSessionMap() != w.dstSessionMap() );
   auto *splitter = w.findChild<QSplitter *>( QStringLiteral( "rsGeorefSplitter" ) );
   REQUIRE( splitter != nullptr );
   REQUIRE( splitter->orientation() == Qt::Horizontal );
@@ -71,23 +75,21 @@ TEST_CASE( "I2I window has horizontal twin canvases", "[georef][dual]" )
   REQUIRE( refLabel->text().contains( QStringLiteral( "Base" ) ) );
 }
 
-TEST_CASE( "I2M window has SRC and Map canvases", "[georef][dual]" )
+TEST_CASE( "I2M window has SRC canvas only (map coords via dialog / main canvas)",
+           "[georef][dual][wave_e]" )
 {
   QgsGeorefImageToMapWindow w( nullptr, nullptr );
   auto *src = w.findChild<QgsMapCanvas *>( QStringLiteral( "rsGeorefI2MSrcCanvas" ) );
-  auto *map = w.findChild<QgsMapCanvas *>( QStringLiteral( "rsGeorefI2MMapCanvas" ) );
   REQUIRE( src != nullptr );
-  REQUIRE( map != nullptr );
-  auto *splitter = w.findChild<QSplitter *>( QStringLiteral( "rsGeorefI2MSplitter" ) );
-  REQUIRE( splitter != nullptr );
-  REQUIRE( splitter->orientation() == Qt::Vertical );
+  // QGIS-style I2M: no embedded base/map panel; destination from dialog or main map.
+  REQUIRE( w.dstCanvas() == nullptr );
+  REQUIRE( w.usesMapCoordsDialogForGcp() == true );
+  REQUIRE( w.srcSessionMap() != nullptr );
+  REQUIRE( w.dstSessionMap() == nullptr );
 
   auto *srcLabel = w.findChild<QLabel *>( QStringLiteral( "rsGeorefI2MSrcLayerLabel" ) );
-  auto *mapLabel = w.findChild<QLabel *>( QStringLiteral( "rsGeorefI2MMapLayerLabel" ) );
   REQUIRE( srcLabel != nullptr );
-  REQUIRE( mapLabel != nullptr );
   REQUIRE( srcLabel->text().contains( QStringLiteral( "Warp" ) ) );
-  REQUIRE( mapLabel->text().contains( QStringLiteral( "Base" ) ) );
 }
 
 TEST_CASE( "I2I GCP tools disabled until both source and reference open", "[georef][dual][tools]" )

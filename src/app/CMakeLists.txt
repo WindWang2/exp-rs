@@ -36,6 +36,46 @@ set_target_properties(sicnu_qgis_display PROPERTIES
     CXX_STANDARD_REQUIRED ON
 )
 
+# Session map stack (store + tree + optional local bridge). Shared by classify,
+# OBIA, georef, and the main shell so secondary Display Views share one object.
+qt_add_library(sicnu_session_map STATIC
+    shell/rs_session_map_workspace.cpp
+    shell/rs_session_map_workspace.h
+)
+add_library(Sicnu::session_map ALIAS sicnu_session_map)
+target_include_directories(sicnu_session_map
+    PUBLIC
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/app
+        ${CMAKE_BINARY_DIR}
+)
+target_link_libraries(sicnu_session_map
+    PUBLIC
+        Qt6::Core
+        Qt6::Widgets
+        qgis_core
+        qgis_gui
+        Sicnu::qgis_display
+)
+set_target_properties(sicnu_session_map PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    POSITION_INDEPENDENT_CODE ON
+    AUTOMOC ON
+)
+
+# Session windows are built before this file (root order: georef/classify/obia → app).
+# Attach the shared session-map library once it exists.
+if(TARGET qgis_app_georef)
+    target_link_libraries(qgis_app_georef PUBLIC Sicnu::session_map)
+endif()
+if(TARGET qgis_app_classify)
+    target_link_libraries(qgis_app_classify PUBLIC Sicnu::session_map)
+endif()
+if(TARGET qgis_app_obia)
+    target_link_libraries(qgis_app_obia PUBLIC Sicnu::session_map)
+endif()
+
 add_executable(sicnu_geo_rs
     main.cpp
     main_window.cpp
@@ -54,7 +94,6 @@ add_executable(sicnu_geo_rs
     shell/ribbon_controller.cpp
     shell/job_engine_qt_bridge.cpp
     shell/rs_job_runner.cpp
-    shell/rs_session_map_workspace.cpp
     shell/processing_job_adapter.cpp
     shell/rs_job_panel.cpp
     layer_tree_menu.cpp
@@ -220,6 +259,7 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     qgis_native
     qgis_app_georef
     Sicnu::qgis_display
+    Sicnu::session_map
     sicnu_core
     sicnu_processing
     sicnu_operators

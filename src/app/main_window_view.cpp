@@ -14,6 +14,7 @@
 #include <qgsmaplayer.h>
 #include <georeferencer/qgsgeoreferencermainwindow.h>
 #include <georeferencer/qgsgeoref_image_to_map_window.h>
+#include <georeferencer/qgsgeoref_shell_window.h>
 
 #ifdef SICNU_HAS_CLASSIFY
 #include "classification/qgsclassificationmainwindow.h"
@@ -45,6 +46,27 @@ void QgisDesktopWindow::openGeoreferencer()
     openGeorefImageToImage();
 }
 
+namespace
+{
+/// Register a session map as a secondary Display View (no dual bridges).
+bool bindSessionSecondaryView( sicnu::app::ProjectContext *ctx,
+                               RsSessionMapWorkspace *session,
+                               sicnu::display::DisplayViewId &outId )
+{
+    if ( !ctx || !session || !outId.isNull() )
+        return false;
+    session->releaseLocalBridge();
+    const auto created = ctx->createSecondaryView( session->viewSpec() );
+    if ( !created )
+    {
+        session->restoreLocalBridge();
+        return false;
+    }
+    outId = created.value();
+    return true;
+}
+} // namespace
+
 void QgisDesktopWindow::openGeorefImageToImage()
 {
     if ( !m_georefI2I )
@@ -52,6 +74,26 @@ void QgisDesktopWindow::openGeorefImageToImage()
         m_georefI2I = new QgsGeoreferencerMainWindow( nullptr, this );
         m_georefI2I->setAttribute( Qt::WA_DeleteOnClose, false );
         m_georefI2I->setWindowTitle( tr( "Image Registration · Image 2 Image" ) );
+
+        connect( m_georefI2I, &QgsGeorefShellWindow::requestLoadToMainMap,
+                 this, [this]( const QString &path ) {
+                     if ( path.isEmpty() )
+                         return;
+                     if ( loadDataLayer( path ) )
+                         statusBar()->showMessage(
+                             tr( "已加载校正结果到主图：%1" ).arg( path ), 5000 );
+                     else
+                         statusBar()->showMessage(
+                             tr( "加载校正结果到主图失败：%1" ).arg( path ), 6000 );
+                 } );
+
+        if ( m_projectContext )
+        {
+            ( void ) bindSessionSecondaryView(
+                m_projectContext.get(), m_georefI2I->srcSessionMap(), m_georefI2ISrcViewId );
+            ( void ) bindSessionSecondaryView(
+                m_projectContext.get(), m_georefI2I->dstSessionMap(), m_georefI2IDstViewId );
+        }
     }
     m_georefI2I->show();
     m_georefI2I->raise();
@@ -65,6 +107,24 @@ void QgisDesktopWindow::openGeorefImageToMap()
         m_georefI2M = new QgsGeorefImageToMapWindow( nullptr, this );
         m_georefI2M->setAttribute( Qt::WA_DeleteOnClose, false );
         m_georefI2M->setWindowTitle( tr( "Image Registration · Image 2 Map" ) );
+
+        connect( m_georefI2M, &QgsGeorefShellWindow::requestLoadToMainMap,
+                 this, [this]( const QString &path ) {
+                     if ( path.isEmpty() )
+                         return;
+                     if ( loadDataLayer( path ) )
+                         statusBar()->showMessage(
+                             tr( "已加载校正结果到主图：%1" ).arg( path ), 5000 );
+                     else
+                         statusBar()->showMessage(
+                             tr( "加载校正结果到主图失败：%1" ).arg( path ), 6000 );
+                 } );
+
+        if ( m_projectContext )
+        {
+            ( void ) bindSessionSecondaryView(
+                m_projectContext.get(), m_georefI2M->srcSessionMap(), m_georefI2MSrcViewId );
+        }
     }
     m_georefI2M->show();
     m_georefI2M->raise();
@@ -97,23 +157,13 @@ void QgisDesktopWindow::openClassificationWindow()
                  } );
 
         // Wave E: register session map as secondary Display View (DM owns bridge).
-        if ( m_projectContext && m_classifyWindow->sessionMap()
-             && m_classifyViewId.isNull() )
+        if ( m_projectContext
+             && !bindSessionSecondaryView( m_projectContext.get(),
+                                           m_classifyWindow->sessionMap(),
+                                           m_classifyViewId ) )
         {
-            RsSessionMapWorkspace *session = m_classifyWindow->sessionMap();
-            session->releaseLocalBridge();
-            const auto created =
-                m_projectContext->createSecondaryView( session->viewSpec() );
-            if ( created )
-            {
-                m_classifyViewId = created.value();
-            }
-            else
-            {
-                session->restoreLocalBridge();
-                statusBar()->showMessage(
-                    tr( "分类会话未注册为显示视图（使用会话本地图层栈）" ), 4000 );
-            }
+            statusBar()->showMessage(
+                tr( "分类会话未注册为显示视图（使用会话本地图层栈）" ), 4000 );
         }
     }
     m_classifyWindow->show();
@@ -138,7 +188,6 @@ void QgisDesktopWindow::openObiaWindow()
         auto *obia = new RsObiaMainWindow( this );
         obia->setAttribute( Qt::WA_DeleteOnClose, false );
         // Product UX: load classified result into main project map on request.
-        // Session canvas stays private (shared_ptr layers); only 加载到主图 uses DM.
         connect( obia, &RsObiaMainWindow::requestLoadToMainMap,
                  this, [this]( const QString &path ) {
                      if ( path.isEmpty() )
@@ -154,6 +203,16 @@ void QgisDesktopWindow::openObiaWindow()
                              tr( "加载 OBIA 结果到主图失败：%1" ).arg( path ), 6000 );
                      }
                  } );
+
+        // Wave E: register OBIA session map as secondary Display View.
+        if ( m_projectContext
+             && !bindSessionSecondaryView( m_projectContext.get(),
+                                           obia->sessionMap(),
+                                           m_obiaViewId ) )
+        {
+            statusBar()->showMessage(
+                tr( "OBIA 会话未注册为显示视图（使用会话本地图层栈）" ), 4000 );
+        }
         m_obiaWindow = obia;
     }
     m_obiaWindow->show();

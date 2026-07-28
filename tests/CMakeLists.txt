@@ -1557,7 +1557,6 @@ if(TARGET qgis_app_classify)
     test_classification_task_center.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shell/rs_session_map_workspace.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   )
   target_link_libraries(test_classification_task_center PRIVATE
@@ -1568,6 +1567,7 @@ if(TARGET qgis_app_classify)
     qgis_core
     qgis_analysis
     qgis_app_classify
+    Sicnu::session_map
     sicnu_jobs
     sicnu_task_center
     GDAL::GDAL
@@ -1592,7 +1592,6 @@ if(TARGET qgis_app_classify)
     test_classification_window.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shell/rs_session_map_workspace.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   )
   target_link_libraries(test_classification_window PRIVATE
@@ -1605,6 +1604,7 @@ if(TARGET qgis_app_classify)
     qgis_gui
     qgis_analysis
     qgis_app_classify
+    Sicnu::session_map
     sicnu_jobs
     sicnu_task_center
   )
@@ -2936,7 +2936,6 @@ sicnu_discover_tests(test_data_manager_reap)
 # ProjectContext session-close reap tests
 add_executable(test_project_context_reap
   test_project_context_reap.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/rs_session_map_workspace.cpp
 )
 target_link_libraries(test_project_context_reap PRIVATE
   Catch2::Catch2
@@ -2946,6 +2945,7 @@ target_link_libraries(test_project_context_reap PRIVATE
   qgis_core
   qgis_gui
   Sicnu::qgis_display
+  Sicnu::session_map
 )
 target_include_directories(test_project_context_reap PRIVATE
   ${CMAKE_SOURCE_DIR}/src

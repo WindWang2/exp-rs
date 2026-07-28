@@ -1,6 +1,6 @@
 #include "qgsgeoref_shell_window.h"
-#include "main_window.h"
 
+#include "shell/rs_session_map_workspace.h"
 #include "qgsmaptoolpan.h"
 #include "qgsmaptoolzoom.h"
 #include "qgsmapcanvas.h"
@@ -26,6 +26,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMetaEnum>
+#include <QMetaMethod>
 #include <QStringList>
 #include <QSet>
 #include <QSignalBlocker>
@@ -129,6 +130,7 @@ QgsGeorefShellWindow::QgsGeorefShellWindow( QgisInterface *iface, QWidget *paren
     if ( !mSuppressDirtyFromList )
       mSession.markDirty();
   } );
+  // Prefer session map stores (setupSessionMaps); keep legacy store for early paths.
   mLayerStore = new QgsMapLayerStore( this );
 }
 
@@ -140,10 +142,21 @@ QgsGeorefShellWindow::~QgsGeorefShellWindow()
   mDataPoints.clear();
 }
 
+void QgsGeorefShellWindow::setupSessionMaps()
+{
+  if ( mSrcCanvas && !mSrcSession )
+    mSrcSession = new RsSessionMapWorkspace( mSrcCanvas, this );
+  if ( mDstCanvas && !mDstSession )
+    mDstSession = new RsSessionMapWorkspace( mDstCanvas, this );
+}
+
 void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profile,
                                               const QString &gcpDockObjectName,
                                               const QString &paramDockObjectName )
 {
+  // Subclass has created canvases; wire session stacks before loading layers.
+  setupSessionMaps();
+
   mGcpDock = new QDockWidget( tr( "GCP 表" ), this );
   mGcpDock->setObjectName( gcpDockObjectName );
   mGcpDock->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea );
@@ -1599,43 +1612,51 @@ void QgsGeorefShellWindow::loadWarpOutputToProject( const QString &path )
   if ( path.isEmpty() )
     return;
 
-  // Prefer Data Manager + Display Manager via main window (ADR 0010 Wave B).
-  QWidget *w = parentWidget();
-  while ( w )
+  // Wave E: prefer signal so main can route through loadDataLayer once.
+  const QMetaMethod loadSig =
+      QMetaMethod::fromSignal( &QgsGeorefShellWindow::requestLoadToMainMap );
+  if ( isSignalConnected( loadSig ) )
   {
-    if ( auto *mw = qobject_cast<QgisDesktopWindow *>( w ) )
+    emit requestLoadToMainMap( path );
+  }
+  else
+  {
+    // No shell host (tests / standalone): try parent slot, then QgsProject.
+    bool loaded = false;
+    QWidget *w = parentWidget();
+    while ( w )
     {
-      mw->loadRasterLayer( path );
-      if ( mWorkflowBridge && mWorkflowBridge->isOpen() )
+      if ( QMetaObject::invokeMethod( w, "loadRasterLayer", Q_ARG( QString, path ) ) ||
+           QMetaObject::invokeMethod( w, "loadDataLayer", Q_ARG( QString, path ) ) )
       {
-        mWorkflowBridge->setOutputArtifact( path.toStdString() );
-        mWorkflowBridge->markStepComplete( "load_result" );
+        loaded = true;
+        break;
       }
-      if ( statusBar() )
-        statusBar()->showMessage( tr( "已加载到主工程: %1" ).arg( QFileInfo( path ).fileName() ), 5000 );
-      return;
+      w = w->parentWidget();
     }
-    w = w->parentWidget();
+    if ( !loaded )
+    {
+      auto *layer = new QgsRasterLayer( path, QFileInfo( path ).baseName(),
+                                        QStringLiteral( "gdal" ) );
+      if ( !layer->isValid() )
+      {
+        delete layer;
+        if ( statusBar() )
+          statusBar()->showMessage( tr( "无法加载结果: %1" ).arg( path ), 5000 );
+        return;
+      }
+      QgsProject::instance()->addMapLayer( layer );
+    }
   }
 
-  // Fallback when no main window host (standalone / tests).
-  auto *layer = new QgsRasterLayer( path, QFileInfo( path ).baseName(),
-                                    QStringLiteral( "gdal" ) );
-  if ( !layer->isValid() )
-  {
-    delete layer;
-    if ( statusBar() )
-      statusBar()->showMessage( tr( "无法加载结果: %1" ).arg( path ), 5000 );
-    return;
-  }
-  QgsProject::instance()->addMapLayer( layer );
   if ( mWorkflowBridge && mWorkflowBridge->isOpen() )
   {
     mWorkflowBridge->setOutputArtifact( path.toStdString() );
     mWorkflowBridge->markStepComplete( "load_result" );
   }
   if ( statusBar() )
-    statusBar()->showMessage( tr( "已加载到主工程: %1" ).arg( layer->name() ), 5000 );
+    statusBar()->showMessage(
+      tr( "已请求加载到主工程: %1" ).arg( QFileInfo( path ).fileName() ), 5000 );
 }
 
 void QgsGeorefShellWindow::emitStructuredLog( const QgsImageWarper::WarpResult &r )
@@ -1959,13 +1980,20 @@ bool QgsGeorefShellWindow::loadSourceRaster( const QString &path, const QString 
   }
 
   setSourceRasterPath( path );
-  if ( mLayerStore )
+  if ( mSrcSession )
+  {
+    if ( mSrcRaster )
+    {
+      mSrcSession->removeLayer( mSrcRaster );
+      delete mSrcRaster;
+      mSrcRaster = nullptr;
+    }
+    mSrcSession->addLayer( layer, true );
+  }
+  else if ( mLayerStore )
     mLayerStore->addMapLayer( layer );
   else
-  {
-    // Should not happen after finishCommonSetup; avoid leak.
     layer->setParent( this );
-  }
   mSrcRaster = layer;
   if ( mSrcCanvas )
   {
@@ -1973,9 +2001,14 @@ bool QgsGeorefShellWindow::loadSourceRaster( const QString &path, const QString 
     // layer/map units (not an unrelated project CRS). Critical for dual pick.
     if ( layer->crs().isValid() )
       mSrcCanvas->setDestinationCrs( layer->crs() );
-    mSrcCanvas->setLayers( { layer } );
-    mSrcCanvas->setExtent( layer->extent() );
-    mSrcCanvas->refresh();
+    if ( mSrcSession )
+      mSrcSession->zoomToLayer( layer );
+    else
+    {
+      mSrcCanvas->setLayers( { layer } );
+      mSrcCanvas->setExtent( layer->extent() );
+      mSrcCanvas->refresh();
+    }
   }
   updateSourceLayerCaption();
   updateGcpTableRasterPaths();

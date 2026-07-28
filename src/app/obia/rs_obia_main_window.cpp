@@ -17,6 +17,7 @@
 #include "rs_segmenter_port.h"
 #include "rs_accuracy_assessment.h"
 #include "classification/rs_accuracy_dialog.h"
+#include "shell/rs_session_map_workspace.h"
 
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
@@ -262,12 +263,8 @@ void RsObiaMainWindow::setupDocks()
 
 void RsObiaMainWindow::setupMapCanvas()
 {
-    // HIGH #4 fix: QgsLayerTree has no QObject parent, so we manage it manually.
-    // mLayerTreeModel takes ownership of mLayerTree. mLayerView parented to this.
-    mLayerTree = new QgsLayerTree;
-    mLayerTreeModel = new QgsLayerTreeModel( mLayerTree ); // takes ownership
-    mLayerView = new QgsLayerTreeView( this );
-    mLayerView->setModel( mLayerTreeModel );
+    // Wave E: store + tree + bridge (local until ProjectContext registers a view).
+    m_sessionMap = new RsSessionMapWorkspace( mCanvas, this );
 
     mCanvas->setLayers( {} );
     mCanvas->setDestinationCrs( QgsCoordinateReferenceSystem() );
@@ -289,22 +286,42 @@ void RsObiaMainWindow::loadRaster()
 
     SICNU_LOG_INFO( SicnuLogTags::OBIA, QString( "Loading raster: %1" ).arg( path ) );
 
-    auto layer = std::make_shared<QgsRasterLayer>( path, QFileInfo( path ).baseName() );
+    auto *layer = new QgsRasterLayer( path, QFileInfo( path ).baseName() );
     if ( !layer->isValid() )
     {
         SICNU_LOG_ERROR( SicnuLogTags::OBIA, QString( "Invalid raster: %1" ).arg( path ) );
         QMessageBox::warning( this, tr( "Error" ), tr( "Cannot open raster: %1" ).arg( path ) );
+        delete layer;
+        return;
+    }
+
+    // Clear previous session display layers (store takes ownership after add).
+    if ( m_sessionMap )
+    {
+        if ( mClassifiedLayer )
+        {
+            m_sessionMap->removeLayer( mClassifiedLayer );
+            delete mClassifiedLayer;
+            mClassifiedLayer = nullptr;
+        }
+        if ( mRasterLayer )
+        {
+            m_sessionMap->removeLayer( mRasterLayer );
+            delete mRasterLayer;
+            mRasterLayer = nullptr;
+        }
+        m_sessionMap->addLayer( layer, /*insertOnTop=*/false );
+    }
+    else
+    {
+        delete layer;
         return;
     }
 
     mRasterLayer = layer;
     mRasterPath = path;
     mBandCount = layer->bandCount();
-
-    // Update canvas
-    mCanvas->setLayers( { mRasterLayer.get() } );
-    mCanvas->setExtent( layer->extent() );
-    mCanvas->refresh();
+    m_sessionMap->zoomToLayer( layer );
 
     // Reset segmentation / hierarchy
     mSegMap = RsSegmentMap();
@@ -462,20 +479,27 @@ void RsObiaMainWindow::loadClassifiedRaster( const QString &outputPath )
     mLastClassRasterPath = outputPath;
     // Session canvas only — do not inject into main QgsProject catalog (ADR 0010).
     // Main map load is explicit via requestLoadToMainMap → loadDataLayer.
-    auto resultLayer = std::make_shared<QgsRasterLayer>(
+    auto *resultLayer = new QgsRasterLayer(
         outputPath, QFileInfo( outputPath ).baseName(), QStringLiteral( "gdal" ) );
     if ( !resultLayer->isValid() )
     {
+        delete resultLayer;
         statusBar()->showMessage( tr( "Invalid classification raster: %1" ).arg( outputPath ), 5000 );
         return;
     }
+    if ( !m_sessionMap )
+    {
+        delete resultLayer;
+        return;
+    }
+    if ( mClassifiedLayer )
+    {
+        m_sessionMap->removeLayer( mClassifiedLayer );
+        delete mClassifiedLayer;
+        mClassifiedLayer = nullptr;
+    }
+    m_sessionMap->addLayer( resultLayer, /*insertOnTop=*/true );
     mClassifiedLayer = resultLayer;
-    QList<QgsMapLayer *> layers;
-    if ( mRasterLayer )
-        layers << mRasterLayer.get();
-    layers << mClassifiedLayer.get();
-    mCanvas->setLayers( layers );
-    mCanvas->refresh();
 }
 
 void RsObiaMainWindow::rememberClassification( const QString &outputPath,

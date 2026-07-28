@@ -1,4 +1,5 @@
 #include "qgsgeoreferencermainwindow.h"
+#include "shell/rs_session_map_workspace.h"
 
 #include <QAction>
 #include <QFileDialog>
@@ -523,7 +524,18 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
       statusBar()->showMessage( tr( "无法打开参考影像: %1" ).arg( path ), 5000 );
     return false;
   }
-  if ( mLayerStore )
+  if ( mDstSession )
+  {
+    if ( mRefRaster )
+    {
+      mDstSession->removeLayer( mRefRaster );
+      delete mRefRaster;
+      mRefRaster = nullptr;
+      mDstRaster = nullptr;
+    }
+    mDstSession->addLayer( layer, true );
+  }
+  else if ( mLayerStore )
     mLayerStore->addMapLayer( layer );
   mRefRaster = layer;
   mRefRasterPath = path;
@@ -536,9 +548,14 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
     // the image's native coordinates (not project CRS).
     if ( layer->crs().isValid() )
       mDstCanvas->setDestinationCrs( layer->crs() );
-    mDstCanvas->setLayers( { layer } );
-    mDstCanvas->setExtent( layer->extent() );
-    mDstCanvas->refresh();
+    if ( mDstSession )
+      mDstSession->zoomToLayer( layer );
+    else
+    {
+      mDstCanvas->setLayers( { layer } );
+      mDstCanvas->setExtent( layer->extent() );
+      mDstCanvas->refresh();
+    }
   }
   // Align target CRS with reference image.
   if ( mParamsPanel && layer->crs().isValid() )

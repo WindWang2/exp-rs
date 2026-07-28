@@ -30,6 +30,7 @@ class QgsLayerTree;
 class QgsLayerTreeModel;
 class QgsLayerTreeView;
 class QProgressDialog;
+class RsSessionMapWorkspace;
 
 class RsObiaMainWindow : public QMainWindow
 {
@@ -37,6 +38,9 @@ class RsObiaMainWindow : public QMainWindow
   public:
     explicit RsObiaMainWindow( QWidget *parent = nullptr );
     ~RsObiaMainWindow() override;
+
+    /// Session map stack (Wave E secondary Display View host).
+    RsSessionMapWorkspace *sessionMap() const { return m_sessionMap; }
 
     /// Flat OBIA segmentation via Task Center. Returns task id, or -1 if busy.
     long startSegmentationTask( const RsObiaSegmentationConfig &segCfg,
@@ -118,15 +122,12 @@ class RsObiaMainWindow : public QMainWindow
     bool isBusy() const { return m_pendingTaskId >= 0; }
     void loadClassifiedRaster( const QString &outputPath );
 
-    // Map canvas (session-local layers; not the main project catalog)
+    // Map canvas + session workspace (not the main project catalog)
     QgsMapCanvas *mCanvas = nullptr;
-    std::shared_ptr<QgsRasterLayer> mRasterLayer;
-    std::shared_ptr<QgsRasterLayer> mClassifiedLayer;
-
-    // Layer tree
-    QgsLayerTree *mLayerTree = nullptr;
-    QgsLayerTreeModel *mLayerTreeModel = nullptr;
-    QgsLayerTreeView *mLayerView = nullptr;
+    RsSessionMapWorkspace *m_sessionMap = nullptr;
+    /// Non-owning; owned by session store after addLayer.
+    QgsRasterLayer *mRasterLayer = nullptr;
+    QgsRasterLayer *mClassifiedLayer = nullptr;
 
     // Segment data (active level surface)
     RsSegmentMap mSegMap;

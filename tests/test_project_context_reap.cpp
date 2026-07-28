@@ -415,6 +415,42 @@ TEST_CASE( "session map workspace binds as secondary view without local bridge",
   QgsProject::instance()->clear();
 }
 
+TEST_CASE( "dual session maps register as two secondary views (georef I2I shape)",
+           "[project_context][multi_view][wave_e]" )
+{
+  {
+    QgsProject *project = QgsProject::instance();
+    project->clear();
+    QgsMapCanvas mainCanvas;
+    auto context = createContext( mainCanvas, *project );
+
+    QgsMapCanvas srcCanvas;
+    QgsMapCanvas dstCanvas;
+    RsSessionMapWorkspace src( &srcCanvas );
+    RsSessionMapWorkspace dst( &dstCanvas );
+
+    src.releaseLocalBridge();
+    dst.releaseLocalBridge();
+
+    const auto srcId = context->createSecondaryView( src.viewSpec() );
+    const auto dstId = context->createSecondaryView( dst.viewSpec() );
+    REQUIRE( srcId );
+    REQUIRE( dstId );
+    CHECK( srcId.value() != dstId.value() );
+
+    const QVector<sicnu::display::DisplayViewId> live = context->views();
+    REQUIRE( live.size() == 3 );
+    CHECK( live.at( 0 ) == context->mainViewId() );
+    CHECK( live.at( 1 ) == srcId.value() );
+    CHECK( live.at( 2 ) == dstId.value() );
+
+    REQUIRE( context->removeView( srcId.value() ) );
+    REQUIRE( context->removeView( dstId.value() ) );
+    REQUIRE( context->views().size() == 1 );
+  }
+  QgsProject::instance()->clear();
+}
+
 int main( int argc, char *argv[] )
 {
   QgsApplication application( argc, argv, true );

@@ -94,16 +94,17 @@ Depends on ProjectContext multi-view host (createSecondaryView / removeView). Sh
 
 Out of scope still: persist secondary views to .qgz; linked extents; more than two views.
 
-### Wave E — Session windows as Display Views (partial)
+### Wave E — Session windows as Display Views
 
-**Done (this slice):**
+**Done:**
 
-- `RsSessionMapWorkspace`: `viewSpec()` / `releaseLocalBridge()` / `restoreLocalBridge()` — host must release the session-local bridge before `ProjectContext::createSecondaryView` so DisplayManager owns the only `QgsLayerTreeMapCanvasBridge`.
-- Classification window: registered as secondary Display View on open; `requestLoadToMainMap` → `loadDataLayer` (no `QgisInterface::addRasterLayer` bypass).
-- OBIA: load-to-main already via `loadDataLayer`; session canvas remains private `shared_ptr` layers (full DM registration deferred).
-- Test: `session map workspace binds as secondary view without local bridge` in `test_project_context_reap`.
+- `Sicnu::session_map` shared lib: `RsSessionMapWorkspace` (`viewSpec` / `releaseLocalBridge` / `restoreLocalBridge`).
+- Classification + OBIA: session map registered as secondary Display View on open; load-to-main via `requestLoadToMainMap` → `loadDataLayer`.
+- Georef I2I: SRC + REF each get a session workspace and secondary view; I2M: SRC session view only.
+- Georef warp output: `requestLoadToMainMap` → `loadDataLayer` (no silent dual-path when host is connected).
+- Tests: session bind without dual bridge; dual session maps (I2I shape) in `test_project_context_reap`.
 
-**Remaining:** OBIA session store + secondary view; georef dual-canvas as views; session layers that are assets via `addLayer(assetId)` rather than raw `QgsMapLayer*`.
+**Remaining (optional follow-ups):** session layers as Data Assets via `DisplayManager::addLayer(assetId)` rather than raw `QgsMapLayer*`; persist session view ids.
 
 ## Testing
 

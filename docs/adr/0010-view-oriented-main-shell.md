@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — migration in progress (Waves A–D done; Wave E partial: classify session view + load-to-main).
+Accepted — Waves A–E shell migration complete (session windows as secondary Display Views; asset-backed session layers optional follow-up).
 
 ## Context
 

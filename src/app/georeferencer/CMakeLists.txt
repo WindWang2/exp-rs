@@ -37,6 +37,7 @@ add_library(qgis_app_georef STATIC
     rs_georef_task_list.cpp
     rs_georef_workflow_bridge.cpp
     ../dialogs/dialog_help_catalog.cpp
+    ../dialogs/dialog_utils.cpp
 )
 
 target_include_directories(qgis_app_georef PUBLIC

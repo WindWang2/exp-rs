@@ -190,16 +190,19 @@ QgisDesktopWindow::~QgisDesktopWindow()
     // Unregister session secondary views while their canvas/tree/store are valid.
     if ( m_projectContext )
     {
-        if ( !m_classifyViewId.isNull() )
-        {
-            ( void ) m_projectContext->removeView( m_classifyViewId );
-            m_classifyViewId = sicnu::display::DisplayViewId();
-        }
-        if ( !m_secondaryViewId.isNull() )
-        {
-            ( void ) m_projectContext->removeView( m_secondaryViewId );
-            m_secondaryViewId = sicnu::display::DisplayViewId();
-        }
+        auto dropView = [this]( sicnu::display::DisplayViewId &id ) {
+            if ( !id.isNull() )
+            {
+                ( void ) m_projectContext->removeView( id );
+                id = sicnu::display::DisplayViewId();
+            }
+        };
+        dropView( m_classifyViewId );
+        dropView( m_obiaViewId );
+        dropView( m_georefI2ISrcViewId );
+        dropView( m_georefI2IDstViewId );
+        dropView( m_georefI2MSrcViewId );
+        dropView( m_secondaryViewId );
     }
 
     // Tear down child windows that rebind QgisApp / own canvases first.
