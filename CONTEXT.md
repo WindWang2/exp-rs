@@ -116,3 +116,12 @@ _Avoid_: Node graph window, Flow editor dialog
   4. **Data Seam Integration**: Intermediate step outputs are registered as `TaskTemporary` Data Assets in `DataManager` (ADR 0009/0010 compliant). Only output ports with the 👁️ *"Add to Map"* toggle enabled call `ActiveViewHost::openPath()` to add display layers to the canvas.
   5. **Shell Hosting**: Host the canvas in a dockable central panel (`PipelineEditorDock`) with dedicated ribbon actions under a **"Workflow / 流程"** tab and a drag-and-drop preset workflow catalog.
 
+### ADR 0012: Atomic Algorithm Adapter & LLM Agent Tool Calling
+- **Context**: Autonomous AI Agents (OpenAI Tool Calling / Qwen Function Call) and Task Pipeline editors require a strongly typed, platform-agnostic schema interface for executing algorithms without code modification.
+- **Decision**:
+  1. **Atomic Adapter Seam**: Define `AtomicAlgorithmAdapter` interface and `AlgorithmDescriptor` C++ struct with 12 `DataType` port type enums (`Raster`, `Vector`, `Table`, `Numeric`, `Integer`, `String`, `Boolean`, `Enum`, `BoundingBox`, `Crs`, `Json`, `Any`).
+  2. **Heterogeneous Adapter Family**: Provide zero-modification reflection wrappers for `RsOperatorAdapter`, `QgsProcessingAdapter` (QGIS algorithms), and `PythonPluginAdapter` (Python plugins).
+  3. **Central Registry Singleton**: Manage all algorithm adapters in a thread-safe `AtomicAlgorithmRegistry` singleton with auto-population on application startup.
+  4. **Tool Call & Execution Engine**: `AgentToolCallExporter` formats descriptors into standard OpenAI tool call function JSON schemas and Markdown System Prompt catalogs. `AgentWorkflowExecutor` validates JSON parameters, executes algorithms, forwards progress callbacks, and orchestrates multi-step DAG agent plans (`executeAgentPlan`) with `$step1.output` reference resolution.
+
+
