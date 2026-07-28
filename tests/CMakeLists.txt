@@ -3219,3 +3219,18 @@ target_include_directories(test_project_context_remote_probe PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 sicnu_discover_tests(test_project_context_remote_probe)
+
+qt_add_executable(test_workflow_pipeline
+  test_workflow_pipeline.cpp
+)
+target_link_libraries(test_workflow_pipeline PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  sicnu_workflow
+)
+target_include_directories(test_workflow_pipeline PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/workflow
+)
+sicnu_discover_tests(test_workflow_pipeline)
+

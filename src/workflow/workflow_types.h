@@ -17,6 +17,17 @@ struct GateDef {
   std::string hint;
 };
 
+struct StepUiMeta {
+  double x = 0.0;
+  double y = 0.0;
+};
+
+struct StepConnection {
+  std::string fromStepId;
+  std::string fromPort; // e.g. "output" or "result"
+  std::string toPort;   // e.g. "input" or "A"
+};
+
 struct StepDef {
   std::string id;
   std::string title;
@@ -24,6 +35,8 @@ struct StepDef {
   std::string operatorId; // when kind == Operator
   std::vector<GateDef> gates;
   std::string artifactOnSuccess = "output"; // default artifact name from operator result["output"]
+  StepUiMeta uiMeta;
+  std::vector<StepConnection> inputs; // incoming dependency edges
 };
 
 struct WorkflowDefinition {
