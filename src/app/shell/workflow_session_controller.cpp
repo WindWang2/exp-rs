@@ -304,24 +304,22 @@ void WorkflowSessionController::runFullWorkflow()
   if ( !def )
     return;
 
-  std::vector<std::string> ordered;
-  std::string error;
-  if ( !topologicalSortSteps( *def, ordered, error ) )
+  for ( const auto &step : def->steps )
   {
-    emit statusMessage( tr( "DAG排序错误: %1" ).arg( QString::fromStdString( error ) ) );
+    emit stepStatusChanged( QString::fromStdString( step.id ), "idle" );
+  }
+
+  m_activePipelineId = sicnu::TaskCenter::instance().submitPipeline( *def );
+  if ( m_activePipelineId < 0 )
+  {
+    emit statusMessage( tr( "工作流 DAG 提交失败" ) );
     return;
   }
 
-  m_executionQueue = ordered;
-  m_currentQueueIndex = 0;
-  m_isBatchExecuting = true;
-
-  for ( const auto &stepId : m_executionQueue )
-  {
-    emit stepStatusChanged( QString::fromStdString( stepId ), "idle" );
-  }
-
-  runNextQueuedStep();
+  m_runInFlight = true;
+  if ( m_panel )
+    m_panel->setRunning( true );
+  emit statusMessage( tr( "工作流 TaskPipeline 已提交至 TaskCenter 运行…" ) );
 }
 
 void WorkflowSessionController::runUpToNode( const QString &targetStepId )
@@ -344,33 +342,51 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
   if ( !def )
     return;
 
+  sicnu::workflow::WorkflowDefinition targetDef = *def;
   std::vector<std::string> ordered;
   std::string error;
-  if ( !topologicalSortSteps( *def, ordered, error ) )
+  if ( topologicalSortSteps( *def, ordered, error ) )
   {
-    emit statusMessage( tr( "DAG排序错误: %1" ).arg( QString::fromStdString( error ) ) );
+    std::unordered_set<std::string> keepStepIds;
+    for ( const auto &sId : ordered )
+    {
+      keepStepIds.insert( sId );
+      if ( sId == targetStepId.toStdString() )
+        break;
+    }
+    std::vector<sicnu::workflow::StepDef> steps;
+    for ( const auto &s : targetDef.steps )
+    {
+      if ( keepStepIds.count( s.id ) )
+        steps.push_back( s );
+    }
+    targetDef.steps = steps;
+  }
+
+  m_activePipelineId = sicnu::TaskCenter::instance().submitPipeline( targetDef );
+  if ( m_activePipelineId < 0 )
+  {
+    emit statusMessage( tr( "工作流 DAG 提交失败" ) );
     return;
   }
 
-  std::vector<std::string> targetQueue;
-  for ( const auto &sId : ordered )
-  {
-    targetQueue.push_back( sId );
-    if ( sId == targetStepId.toStdString() )
-      break;
-  }
-
-  m_executionQueue = targetQueue;
-  m_currentQueueIndex = 0;
-  m_isBatchExecuting = true;
-
-  runNextQueuedStep();
+  m_runInFlight = true;
+  if ( m_panel )
+    m_panel->setRunning( true );
+  emit statusMessage( tr( "工作流 TaskPipeline (至 %1) 已提交运行…" ).arg( targetStepId ) );
 }
 
 void WorkflowSessionController::stopWorkflow()
 {
-  m_isBatchExecuting = false;
-  m_executionQueue.clear();
+  if ( m_activePipelineId >= 0 )
+  {
+    auto pipeInfo = sicnu::TaskCenter::instance().getPipelineInfo( m_activePipelineId );
+    for ( const auto &tId : pipeInfo.stepToTaskId.values() )
+    {
+      sicnu::TaskCenter::instance().cancelTask( tId );
+    }
+    m_activePipelineId = -1;
+  }
 
   if ( m_pendingTaskId >= 0 )
   {
@@ -385,69 +401,36 @@ void WorkflowSessionController::stopWorkflow()
   emit statusMessage( tr( "工作流运行已停止" ) );
 }
 
-void WorkflowSessionController::runNextQueuedStep()
-{
-  if ( !m_isBatchExecuting || m_currentQueueIndex >= m_executionQueue.size() )
-  {
-    m_isBatchExecuting = false;
-    emit statusMessage( tr( "工作流全流程运行完成！" ) );
-    return;
-  }
-
-  std::string nextStepId = m_executionQueue[m_currentQueueIndex];
-  m_activeStepId = QString::fromStdString( nextStepId );
-
-  emit stepStatusChanged( m_activeStepId, "running" );
-  emit statusMessage( tr( "正在运行步骤 [%1]..." ).arg( m_activeStepId ) );
-
-  // Execute step via TaskCenter
-  std::string definitionId;
-  try
-  {
-    definitionId = m_runtime.state( m_activeSession.toStdString() ).definitionId;
-  }
-  catch ( const std::exception &e )
-  {
-    emit statusMessage( QString::fromUtf8( e.what() ) );
-    m_isBatchExecuting = false;
-    return;
-  }
-
-  const StepDef *step = findStep( m_registry.find( definitionId ), nextStepId );
-  if ( !step || step->kind != StepKind::Operator || step->operatorId.empty() )
-  {
-    // Non-operator or interactive step completed automatically
-    m_runtime.markStepComplete( m_activeSession.toStdString(), nextStepId );
-    emit stepStatusChanged( m_activeStepId, "success" );
-    m_currentQueueIndex++;
-    runNextQueuedStep();
-    return;
-  }
-
-  JobRequest req;
-  req.algorithmId = step->operatorId;
-  req.params = ( m_panel ? m_panel->formValues() : Json::Value( Json::objectValue ) );
-  req.title = step->title.empty() ? step->operatorId : step->title;
-  req.source = "pipeline_editor";
-
-  m_pendingTaskId = sicnu::TaskCenter::instance().submitJob( req );
-  m_runInFlight = true;
-}
-
 void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
 {
-  if ( m_pendingTaskId < 0 || info.taskId != m_pendingTaskId )
+  bool isSingleJob = ( m_pendingTaskId >= 0 && info.taskId == m_pendingTaskId );
+  bool isPipelineJob = ( m_activePipelineId >= 0 && info.pipelineId == m_activePipelineId );
+
+  if ( !isSingleJob && !isPipelineJob )
     return;
+
+  QString targetStepId = isSingleJob ? m_activeStepId : info.stepId;
+  if ( targetStepId.isEmpty() && isSingleJob )
+    targetStepId = m_activeStepId;
+
+  if ( info.status == sicnu::TaskStatus::Running )
+  {
+    emit stepStatusChanged( targetStepId, "running" );
+    return;
+  }
+
   if ( info.status != sicnu::TaskStatus::Completed
        && info.status != sicnu::TaskStatus::Failed
        && info.status != sicnu::TaskStatus::Canceled )
     return;
 
-  m_pendingTaskId = -1;
-  m_runInFlight = false;
-
-  if ( m_panel )
-    m_panel->setRunning( false );
+  if ( isSingleJob )
+  {
+    m_pendingTaskId = -1;
+    m_runInFlight = false;
+    if ( m_panel )
+      m_panel->setRunning( false );
+  }
 
   if ( info.status != sicnu::TaskStatus::Completed )
   {
@@ -459,22 +442,19 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
       else
         error = tr( "运行失败" );
     }
-    emit stepStatusChanged( m_activeStepId, "failed" );
-    if ( m_panel )
+    emit stepStatusChanged( targetStepId, "failed" );
+    if ( m_panel && isSingleJob )
       m_panel->setFailed( error );
     emit statusMessage( error );
-
-    m_isBatchExecuting = false;
-    m_executionQueue.clear();
     return;
   }
 
   const std::string sessionId = m_activeSession.toStdString();
-  const std::string stepId = m_activeStepId.toStdString();
-  if ( !sessionId.empty() && !stepId.empty() )
-    applyJobResultToSession( sessionId, stepId, info.resultPayload );
+  const std::string stepIdStr = targetStepId.toStdString();
+  if ( !sessionId.empty() && !stepIdStr.empty() )
+    applyJobResultToSession( sessionId, stepIdStr, info.resultPayload );
 
-  emit stepStatusChanged( m_activeStepId, "success" );
+  emit stepStatusChanged( targetStepId, "success" );
 
   QString outputPath;
   if ( info.resultPayload.isMember( "output" ) && info.resultPayload["output"].isString() )

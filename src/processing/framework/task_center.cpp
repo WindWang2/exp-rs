@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include "jobs/job_engine.h"
+#include "workflow/workflow_definition.h"
 
 namespace sicnu {
 
@@ -244,20 +245,26 @@ void TaskCenter::processNextQueuedTasks()
     for (long id : eligibleIds) {
         if (runningCount >= maxThreads) break;
 
-        // Perform placeholder substitution: ${task.<parent_id>.output}
+        // Perform placeholder substitution: $stepId.output, ${stepId.output}, ${task.<parent_id>.output}
         QVariantMap& pMap = m_tasks[id].parameterMap;
         for (auto pIt = pMap.begin(); pIt != pMap.end(); ++pIt) {
             if (pIt.value().canConvert<QString>()) {
                 QString valStr = pIt.value().toString();
                 for (long parentId : m_tasks[id].parentTaskIds) {
                     if (m_tasks.contains(parentId)) {
+                        QString pOut = m_tasks[parentId].outputLayerPath;
+                        if (pOut.isEmpty() && m_tasks[parentId].resultPayload.isMember("output") && m_tasks[parentId].resultPayload["output"].isString()) {
+                            pOut = QString::fromStdString(m_tasks[parentId].resultPayload["output"].asString());
+                        }
+                        QString parentStepId = m_tasks[parentId].stepId;
+                        if (!parentStepId.isEmpty()) {
+                            valStr.replace(QString(QStringLiteral("$%1.output")).arg(parentStepId), pOut);
+                            valStr.replace(QString(QStringLiteral("${%1.output}")).arg(parentStepId), pOut);
+                        }
                         QString pattern = QString(QStringLiteral("${task.%1.output}")).arg(parentId);
                         QString defaultPattern = QStringLiteral("${task.parent.output}");
-                        if (valStr.contains(pattern)) {
-                            valStr.replace(pattern, m_tasks[parentId].outputLayerPath);
-                        } else if (valStr.contains(defaultPattern)) {
-                            valStr.replace(defaultPattern, m_tasks[parentId].outputLayerPath);
-                        }
+                        valStr.replace(pattern, pOut);
+                        valStr.replace(defaultPattern, pOut);
                     }
                 }
                 *pIt = valStr;
@@ -500,6 +507,135 @@ void TaskCenter::clearCompletedTasks()
             m_tasks.remove(id);
         }
     }
+}
+
+long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def, bool autoLoad )
+{
+    std::vector<std::string> ordered;
+    std::string sortError;
+    if ( !sicnu::workflow::topologicalSortSteps( def, ordered, sortError ) )
+    {
+        return -1;
+    }
+
+    QMutexLocker locker( &m_mutex );
+    long pipelineId = m_nextPipelineId++;
+    PipelineExecutionInfo pipeInfo;
+    pipeInfo.pipelineId = pipelineId;
+    pipeInfo.definitionId = QString::fromStdString( def.id );
+    pipeInfo.orderedStepIds = ordered;
+
+    QMap<std::string, long> stepToTaskId;
+
+    for ( const auto &stepId : ordered )
+    {
+        const sicnu::workflow::StepDef *step = nullptr;
+        for ( const auto &s : def.steps )
+        {
+            if ( s.id == stepId )
+            {
+                step = &s;
+                break;
+            }
+        }
+        if ( !step || step->kind != sicnu::workflow::StepKind::Operator || step->operatorId.empty() )
+            continue;
+
+        QList<long> parentTaskIds;
+        for ( const auto &conn : def.connections )
+        {
+            if ( conn.targetStepId == stepId )
+            {
+                if ( stepToTaskId.contains( conn.sourceStepId ) )
+                {
+                    long pTaskId = stepToTaskId[conn.sourceStepId];
+                    if ( !parentTaskIds.contains( pTaskId ) )
+                        parentTaskIds.append( pTaskId );
+                }
+            }
+        }
+
+        QVariantMap params;
+        if ( step->params.isObject() )
+        {
+            for ( const auto &key : step->params.getMemberNames() )
+            {
+                const auto &val = step->params[key];
+                if ( val.isString() )
+                    params[QString::fromStdString( key )] = QString::fromStdString( val.asString() );
+                else if ( val.isBool() )
+                    params[QString::fromStdString( key )] = val.asBool();
+                else if ( val.isNumeric() )
+                    params[QString::fromStdString( key )] = val.asDouble();
+            }
+        }
+
+        long taskId = m_nextTaskId++;
+        AlgorithmTaskInfo info;
+        info.taskId = taskId;
+        info.algorithmId = QString::fromStdString( step->operatorId );
+        info.algorithmName = step->title.empty() ? QString::fromStdString( step->operatorId ) : QString::fromStdString( step->title );
+        info.status = TaskStatus::Queued;
+        info.priority = TaskPriority::Normal;
+        info.parentTaskIds = parentTaskIds;
+        info.startTime = QDateTime::currentDateTime();
+        info.parameterMap = params;
+        info.autoLoadLayer = autoLoad;
+        info.stepId = QString::fromStdString( stepId );
+        info.pipelineId = pipelineId;
+
+        for ( auto it = params.begin(); it != params.end(); ++it )
+        {
+            if ( it.key().contains( QStringLiteral("OUTPUT"), Qt::CaseInsensitive ) ||
+                 it.key().contains( QStringLiteral("RESULT"), Qt::CaseInsensitive ) )
+            {
+                info.outputLayerPath = it.value().toString();
+                break;
+            }
+        }
+
+        info.logBuffer.append( QString( QStringLiteral("[%1] Pipeline step %2 queued.") )
+                              .arg( info.startTime.toString( QStringLiteral("yyyy-MM-dd hh:mm:ss") ), QString::fromStdString( stepId ) ) );
+
+        m_tasks[taskId] = info;
+        stepToTaskId[stepId] = taskId;
+        pipeInfo.stepToTaskId[stepId] = taskId;
+        pipeInfo.taskToStepId[taskId] = stepId;
+        pipeInfo.stepStatuses[stepId] = TaskStatus::Queued;
+
+        emit taskAdded( m_tasks[taskId] );
+    }
+
+    m_pipelines[pipelineId] = pipeInfo;
+    processNextQueuedTasks();
+    return pipelineId;
+}
+
+long TaskCenter::submitPipelineJson( const std::string &jsonPipeline, bool autoLoad )
+{
+    Json::CharReaderBuilder builder;
+    Json::Value root;
+    std::string errs;
+    std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    if ( !reader->parse( jsonPipeline.c_str(), jsonPipeline.c_str() + jsonPipeline.length(), &root, &errs ) )
+    {
+        return -1;
+    }
+
+    sicnu::workflow::WorkflowDefinition def;
+    std::string parseErr;
+    if ( !sicnu::workflow::workflowDefinitionFromJson( root, def, parseErr ) )
+    {
+        return -1;
+    }
+
+    return submitPipeline( def, autoLoad );
+}
+
+PipelineExecutionInfo TaskCenter::getPipelineInfo( long pipelineId ) const
+{
+    QMutexLocker locker( &m_mutex );
+    return m_pipelines.value( pipelineId );
 }
 
 } // namespace sicnu

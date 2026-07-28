@@ -20,6 +20,10 @@ namespace sicnu::operators {
 class RSOperatorContext;
 }
 
+namespace sicnu::workflow {
+struct WorkflowDefinition;
+}
+
 namespace sicnu {
 
 enum class TaskStatus {
@@ -58,6 +62,20 @@ struct AlgorithmTaskInfo {
     bool hasJobRequest = false;
     bool autoLoadLayer = true;
     QString outputLayerPath;
+    QString stepId;
+    long pipelineId = -1;
+};
+
+struct PipelineExecutionInfo {
+    long pipelineId = -1;
+    QString definitionId;
+    std::vector<std::string> orderedStepIds;
+    QMap<std::string, long> stepToTaskId;
+    QMap<long, std::string> taskToStepId;
+    QMap<std::string, TaskStatus> stepStatuses;
+    bool isCompleted = false;
+    bool isFailed = false;
+    QString errorMessage;
 };
 
 class TaskCenter : public QObject {
@@ -78,6 +96,10 @@ public:
     long enqueueToolCall( const std::string &jsonToolCall,
                           bool autoLoad = true,
                           TaskPriority priority = TaskPriority::Normal );
+
+    /// Submit a DAG Task Pipeline for execution
+    long submitPipeline( const sicnu::workflow::WorkflowDefinition &def, bool autoLoad = true );
+    long submitPipelineJson( const std::string &jsonPipeline, bool autoLoad = true );
 
     /// Submit a JobEngine request while keeping Task Center as the caller-facing seam.
     long submitJob(const sicnu::jobs::JobRequest& request);
@@ -104,6 +126,7 @@ public:
 
     QList<AlgorithmTaskInfo> allTasks() const;
     AlgorithmTaskInfo getTaskInfo(long taskId) const;
+    PipelineExecutionInfo getPipelineInfo(long pipelineId) const;
     void clearCompletedTasks();
 
 signals:
@@ -125,10 +148,13 @@ private:
                        CancelHook onCancel,
                        bool autoLoad);
     void watchSubmittedJob(long taskId, std::string jobId);
+    void resolveUpstreamPipelineParameters(long completedTaskId, const QString& outputPath);
 
     mutable QMutex m_mutex;
     QMap<long, AlgorithmTaskInfo> m_tasks;
+    QMap<long, PipelineExecutionInfo> m_pipelines;
     long m_nextTaskId = 1;
+    long m_nextPipelineId = 1;
 };
 
 } // namespace sicnu

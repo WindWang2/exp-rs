@@ -152,3 +152,11 @@ _Avoid_: Workspace state map, Context dict, UI state dump
   2. **Single Seam Coupling**: `PythonAppInterfaceProxy` and `SicnuAppInterface` hold ONLY a single `ActiveViewHost*` pointer, completely isolating IPC handlers from raw C++ GUI widget trees.
   3. **Dual-Layer QGIS Bridge**: `SicnuAppInterface` delegates `QgisInterface` C++ API overrides directly to `ActiveViewHost`, preserving full QGIS C++ plugin source compatibility.
 
+### ADR 0016: TaskCenter Deepening & Native DAG Task Pipeline Engine Architecture
+- **Context**: Executing visual DAG task pipelines previously required `WorkflowSessionController` to maintain manual step-index iteration loops (`m_executionQueue`, `m_currentQueueIndex`) in Qt UI slots, creating shallowness and preventing headless execution across Agent and CLI surfaces.
+- **Decision**:
+  1. **Native Pipeline Seam**: Deepen `TaskCenter` to natively accept DAG pipelines via `TaskCenter::submitPipeline(WorkflowDefinition)` and `submitPipelineJson(std::string)`.
+  2. **Automated Upstream Parameter Resolution**: `TaskCenter` resolves `$stepId.output` placeholders in downstream task parameters automatically upon upstream task completion before launching dependent tasks.
+  3. **Reactive UI & Headless Seam**: `WorkflowSessionController`, `AgentWorkflowExecutor`, and headless CLI execute pipelines through `TaskCenter`'s single interface seam, observing reactive `taskUpdated` signals for node status badging without maintaining UI execution loops.
+
+

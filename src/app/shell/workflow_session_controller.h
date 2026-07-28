@@ -70,7 +70,6 @@ class WorkflowSessionController : public QObject
     void applyJobResultToSession( const std::string &sessionId,
                                   const std::string &stepId,
                                   const Json::Value &result );
-    void runNextQueuedStep();
 
     // Member order: registry must outlive runtime (runtime holds a reference).
     sicnu::workflow::WorkflowRegistry m_registry;
@@ -80,14 +79,11 @@ class WorkflowSessionController : public QObject
     QString m_activeStepId;
     QString m_activeTitle;
     long m_pendingTaskId = -1;
+    long m_activePipelineId = -1;
     bool m_pendingLoadToMap = false;
     TaskPanelHost *m_panel = nullptr;
     sicnu::workflow::gui::PipelineCanvasWidget *m_canvas = nullptr;
     sicnu::data::DataManager *m_dataManager = nullptr;
-
-    std::vector<std::string> m_executionQueue;
-    size_t m_currentQueueIndex = 0;
-    bool m_isBatchExecuting = false;
 
     QStringList m_layerIds;
     QStringList m_layerNames;

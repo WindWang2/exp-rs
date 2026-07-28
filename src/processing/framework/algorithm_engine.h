@@ -11,6 +11,8 @@
 #include "qgsprocessingcontext.h"
 #include "qgsprocessingfeedback.h"
 
+#include "algorithm_provider_adapter.h"
+
 namespace sicnu {
 
 struct AlgorithmDescriptor {
@@ -19,6 +21,7 @@ struct AlgorithmDescriptor {
     QString group;
     QString description;
     QVariantMap parameterSchema;
+    ProviderResourceProfile resourceProfile = ProviderResourceProfile::InProcessThread;
 };
 
 class TaskAlgorithmAdapter {
@@ -51,6 +54,9 @@ public:
     void registerAlgorithm(std::shared_ptr<TaskAlgorithmAdapter> adapter);
     void registerProcessingAlgorithm(std::unique_ptr<QgsProcessingAlgorithm> algo);
 
+    void registerProvider( AlgorithmProviderAdapterPtr provider );
+    QList<AlgorithmProviderAdapterPtr> registeredProviders() const;
+
     QList<AlgorithmDescriptor> registeredAlgorithms() const;
     std::shared_ptr<TaskAlgorithmAdapter> findAlgorithm(const QString& id) const;
 
@@ -68,6 +74,7 @@ private:
     AlgorithmEngine& operator=(const AlgorithmEngine&) = delete;
 
     QMap<QString, std::shared_ptr<TaskAlgorithmAdapter>> m_adapters;
+    QMap<QString, AlgorithmProviderAdapterPtr> m_providers;
 };
 
 } // namespace sicnu

@@ -14,6 +14,7 @@
 #include "rs_modis_import_operator.h"
 #include "rs_modis_georeference_operator.h"
 #include "operators/framework/rs_operator_registry.h"
+#include "processing/framework/atomic_algorithm_registry.h"
 
 #ifdef SICNU_HAS_OPENCV
 #include "rs_kmeans_operator.h"
@@ -47,5 +48,21 @@ REGISTER_RS_OPERATOR(RsObiaClassifyOperator, "rs:obia_classify")
 REGISTER_RS_OPERATOR(RsObiaHierarchyOperator, "rs:obia_hierarchy")
 REGISTER_RS_OPERATOR(RsSegmentStatsOperator, "rs:segment_stats")
 #endif
+
+struct AtomicRsOperatorProviderRegistration {
+  AtomicRsOperatorProviderRegistration() {
+    sicnu::processing::AtomicAlgorithmRegistry::setRsOperatorProvider([](sicnu::processing::AtomicAlgorithmRegistry &registry) {
+      auto names = RSOperatorRegistry::instance().operatorNames();
+      for ( const auto &name : names ) {
+        auto op = RSOperatorRegistry::instance().create( name );
+        if ( op ) {
+          auto adapter = std::make_shared<sicnu::processing::RsOperatorAdapter>( std::move( op ) );
+          registry.registerAdapter( adapter );
+        }
+      }
+    });
+  }
+};
+static AtomicRsOperatorProviderRegistration sAtomicRsOperatorProviderReg;
 
 } // namespace sicnu::operators::rs

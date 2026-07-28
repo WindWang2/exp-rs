@@ -81,6 +81,21 @@ void AlgorithmEngine::registerProcessingAlgorithm(std::unique_ptr<QgsProcessingA
     }
 }
 
+void AlgorithmEngine::registerProvider( AlgorithmProviderAdapterPtr provider )
+{
+    if ( provider )
+    {
+        m_providers.insert( provider->providerId(), provider );
+        provider->initialize();
+        provider->discoverAlgorithms( *this );
+    }
+}
+
+QList<AlgorithmProviderAdapterPtr> AlgorithmEngine::registeredProviders() const
+{
+    return m_providers.values();
+}
+
 QList<AlgorithmDescriptor> AlgorithmEngine::registeredAlgorithms() const
 {
     QList<AlgorithmDescriptor> list;

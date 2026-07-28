@@ -4,6 +4,7 @@
 #include "processing/framework/algorithm_engine.h"
 #include "jobs/job_engine.h"
 #include "jobs/job_types.h"
+#include "workflow/workflow_definition.h"
 
 #include <chrono>
 #include <atomic>
@@ -261,4 +262,52 @@ TEST_CASE("TaskCenter - Running cancellation waits for the worker terminal state
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     REQUIRE(sicnu::TaskCenter::instance().getTaskInfo(taskId).status == sicnu::TaskStatus::Canceled);
+}
+
+TEST_CASE("TaskCenter - Native submitPipeline and $stepId.output Placeholder Resolution", "[processing][task_center][pipeline]") {
+    auto& center = sicnu::TaskCenter::instance();
+
+    sicnu::workflow::WorkflowDefinition def;
+    def.id = "test_pipeline_def";
+    def.title = "Test Pipeline";
+
+    sicnu::workflow::StepDef step1;
+    step1.id = "step1";
+    step1.title = "Step 1 Operator";
+    step1.kind = sicnu::workflow::StepKind::Operator;
+    step1.operatorId = "rs:spectral_index";
+    step1.params["output"] = "/tmp/step1_ndvi.tif";
+
+    sicnu::workflow::StepDef step2;
+    step2.id = "step2";
+    step2.title = "Step 2 Operator";
+    step2.kind = sicnu::workflow::StepKind::Operator;
+    step2.operatorId = "opencv:gaussian_blur";
+    step2.params["input"] = "$step1.output";
+    step2.params["output"] = "/tmp/step2_blur.tif";
+
+    def.steps = { step1, step2 };
+
+    sicnu::workflow::StepConnection conn;
+    conn.sourceStepId = "step1";
+    conn.targetStepId = "step2";
+    def.connections = { conn };
+
+    long pId = center.submitPipeline(def);
+    REQUIRE(pId > 0);
+
+    auto pipeInfo = center.getPipelineInfo(pId);
+    REQUIRE(pipeInfo.pipelineId == pId);
+    REQUIRE(pipeInfo.stepToTaskId.contains("step1"));
+    REQUIRE(pipeInfo.stepToTaskId.contains("step2"));
+
+    long s1TaskId = pipeInfo.stepToTaskId["step1"];
+    long s2TaskId = pipeInfo.stepToTaskId["step2"];
+
+    QVariantMap s1Results;
+    s1Results["output"] = "/tmp/step1_ndvi.tif";
+    center.markTaskCompleted(s1TaskId, s1Results);
+
+    auto s2Info = center.getTaskInfo(s2TaskId);
+    REQUIRE(s2Info.parameterMap.value("input").toString() == "/tmp/step1_ndvi.tif");
 }
