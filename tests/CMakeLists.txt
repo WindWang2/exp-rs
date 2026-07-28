@@ -3234,3 +3234,26 @@ target_include_directories(test_workflow_pipeline PRIVATE
 )
 sicnu_discover_tests(test_workflow_pipeline)
 
+qt_add_executable(test_workflow_pipeline_ui
+  test_workflow_pipeline_ui.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_port_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_connection_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_node_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_scene.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_canvas_widget.cpp
+)
+target_link_libraries(test_workflow_pipeline_ui PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  sicnu_workflow
+)
+target_include_directories(test_workflow_pipeline_ui PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/workflow
+)
+sicnu_discover_tests(test_workflow_pipeline_ui)
+
+

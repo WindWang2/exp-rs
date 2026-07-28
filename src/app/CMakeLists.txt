@@ -96,6 +96,11 @@ add_executable(sicnu_geo_rs
     shell/rs_job_runner.cpp
     shell/processing_job_adapter.cpp
     shell/rs_job_panel.cpp
+    workflow/pipeline_port_item.cpp
+    workflow/pipeline_connection_item.cpp
+    workflow/pipeline_node_item.cpp
+    workflow/pipeline_scene.cpp
+    workflow/pipeline_canvas_widget.cpp
     layer_tree_menu.cpp
     crs_presets.cpp
     log_panel.cpp
