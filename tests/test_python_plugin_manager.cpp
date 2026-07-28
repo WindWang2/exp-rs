@@ -8,6 +8,7 @@
 #include "python/python_plugin_adapter.h"
 #include "python_ipc_server.h"
 #include "python_worker_process.h"
+#include "shared_memory_segment.h"
 #include "plugin_manager.h"
 
 #include <QEventLoop>
@@ -127,6 +128,65 @@ TEST_CASE( "PythonWorkerProcess & PythonIpcServer start subprocess and achieve P
   loop.exec();
 
   CHECK( receivedPong );
+
+  worker.stopWorker();
+  server.close();
+}
+
+TEST_CASE( "SharedMemorySegment transfers 10MB raster matrix with zero-copy to Python worker", "[python][isolated][shm]" )
+{
+  using namespace sicnu::python::isolated;
+
+  PythonIpcServer server;
+  QString socketName = QString( "sicnu_py_shm_%1" ).arg( QCoreApplication::applicationPid() );
+
+  REQUIRE( server.listen( socketName ) );
+
+  PythonWorkerProcess worker;
+  QString scriptPath = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) );
+
+  REQUIRE( worker.startWorker( socketName, QString(), scriptPath ) );
+
+  QEventLoop loop;
+  QObject::connect( &server, &PythonIpcServer::clientConnected, &loop, &QEventLoop::quit );
+  QTimer::singleShot( 5000, &loop, &QEventLoop::quit );
+  loop.exec();
+
+  SharedMemorySegment shm;
+  QString shmKey = QString( "sicnu_shm_test_%1" ).arg( QCoreApplication::applicationPid() );
+  size_t elementCount = 2500000; // 10 MB of floats
+  size_t bytes = elementCount * sizeof( float );
+
+  REQUIRE( shm.create( shmKey, bytes, 2500, 1000, 1, 0 ) );
+  REQUIRE( shm.isAttached() );
+
+  float *floatPtr = static_cast<float *>( shm.payload() );
+  for ( size_t i = 0; i < 100; ++i )
+  {
+    floatPtr[i] = static_cast<float>( i + 1 );
+  }
+
+  bool shmProcessed = false;
+  QJsonObject params;
+  params[QStringLiteral( "shm_key" )] = shmKey;
+  params[QStringLiteral( "multiply" )] = 2.0;
+
+  server.sendRequest( QStringLiteral( "shm_process" ), params, [&]( const QJsonObject &result, bool isErr ) {
+    if ( !isErr && result[QStringLiteral( "status" )].toString() == QStringLiteral( "success" ) )
+    {
+      shmProcessed = true;
+    }
+    loop.quit();
+  } );
+
+  QTimer::singleShot( 5000, &loop, &QEventLoop::quit );
+  loop.exec();
+
+  CHECK( shmProcessed );
+  // Verify Python modified data in place (zero copy!)
+  CHECK( floatPtr[0] == 2.0f );
+  CHECK( floatPtr[1] == 4.0f );
+  CHECK( floatPtr[99] == 200.0f );
 
   worker.stopWorker();
   server.close();

@@ -5,6 +5,31 @@ import os
 import argparse
 import socket
 import json
+import struct
+import mmap
+import numpy as np
+
+def process_shm(shm_key, multiply_factor=2.0):
+    shm_name = shm_key.lstrip('/')
+    shm_file = f"/dev/shm/{shm_name}"
+    if not os.path.exists(shm_file):
+        raise FileNotFoundError(f"Shared memory file not found: {shm_file}")
+
+    with open(shm_file, "r+b") as f:
+        mm = mmap.mmap(f.fileno(), 0)
+        header_data = mm[:64]
+        uuid, width, height, bands, data_type, ref_count, data_size = struct.unpack("36siiiiiQ", header_data)
+
+        element_count = width * height * bands
+        if element_count == 0:
+            element_count = data_size // 4
+
+        arr = np.frombuffer(mm, dtype=np.float32, count=element_count, offset=64)
+        arr *= multiply_factor
+        del arr
+        mm.close()
+
+    return {"status": "success", "element_count": element_count}
 
 def main():
     parser = argparse.ArgumentParser(description="SICNU GEO RS Python Worker Daemon")
@@ -47,18 +72,31 @@ def main():
                             "id": req_id,
                             "result": {"status": "pong", "pid": os.getpid()}
                         }
-                        payload = (json.dumps(resp) + "\n").encode("utf-8")
-                        s.sendall(payload)
+                    elif method == "shm_process":
+                        shm_key = params.get("shm_key")
+                        factor = float(params.get("multiply", 2.0))
+                        res = process_shm(shm_key, factor)
+                        resp = {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "result": res
+                        }
                     else:
                         resp = {
                             "jsonrpc": "2.0",
                             "id": req_id,
                             "result": {"status": "ok"}
                         }
-                        payload = (json.dumps(resp) + "\n").encode("utf-8")
-                        s.sendall(payload)
+                    payload = (json.dumps(resp) + "\n").encode("utf-8")
+                    s.sendall(payload)
                 except Exception as ex:
                     sys.stderr.write(f"WorkerDaemon processing error: {ex}\n")
+                    err_resp = {
+                        "jsonrpc": "2.0",
+                        "id": msg.get("id"),
+                        "error": {"message": str(ex)}
+                    }
+                    s.sendall((json.dumps(err_resp) + "\n").encode("utf-8"))
         except Exception as e:
             sys.stderr.write(f"WorkerDaemon loop error: {e}\n")
             break
