@@ -11,6 +11,11 @@
 #include <QString>
 #include <QStringList>
 
+namespace sicnu::data {
+class DataManager;
+struct TemporaryReapResult;
+}
+
 namespace sicnu::workflow::gui {
 class PipelineCanvasWidget;
 }
@@ -30,6 +35,10 @@ class WorkflowSessionController : public QObject
     void registerBuiltins();
     void bindPanel( TaskPanelHost *panel );
     void bindCanvas( sicnu::workflow::gui::PipelineCanvasWidget *canvas );
+    void setDataManager( sicnu::data::DataManager *dataManager );
+    sicnu::data::DataManager *dataManager() const { return m_dataManager; }
+
+    sicnu::data::TemporaryReapResult reapTaskTemporaries();
 
     /**
      * Open a workflow definition, fill the panel from the first operator step
@@ -74,6 +83,7 @@ class WorkflowSessionController : public QObject
     bool m_pendingLoadToMap = false;
     TaskPanelHost *m_panel = nullptr;
     sicnu::workflow::gui::PipelineCanvasWidget *m_canvas = nullptr;
+    sicnu::data::DataManager *m_dataManager = nullptr;
 
     std::vector<std::string> m_executionQueue;
     size_t m_currentQueueIndex = 0;

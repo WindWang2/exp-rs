@@ -3256,6 +3256,7 @@ target_link_libraries(test_workflow_pipeline_ui PRIVATE
   sicnu_operators
   sicnu_workflow
   sicnu_task_center
+  sicnu_data
 )
 target_include_directories(test_workflow_pipeline_ui PRIVATE
   ${CMAKE_SOURCE_DIR}/src

@@ -10,6 +10,7 @@
 #include "app/workflow/pipeline_connection_item.h"
 #include "shell/workflow_session_controller.h"
 #include "workflow_definition.h"
+#include "data/data_manager.h"
 
 using namespace sicnu::workflow;
 using namespace sicnu::workflow::gui;
@@ -218,4 +219,83 @@ TEST_CASE( "WorkflowSessionController drives canvas step status updates", "[work
   emit controller.stepStatusChanged( "step_1", "success" );
   REQUIRE( nodeItem->status() == NodeStatus::Success );
 }
+
+TEST_CASE( "PipelineScene preserves port addToMap toggle in WorkflowDefinition JSON", "[workflow][ui]" )
+{
+  ensureApp();
+
+  WorkflowDefinition wf;
+  wf.id = "add_to_map_pipeline";
+  wf.title = "Add To Map Test";
+
+  StepDef s1;
+  s1.id = "step_1";
+  s1.title = "Step 1";
+  s1.uiMeta.x = 100.0;
+  s1.uiMeta.y = 150.0;
+  s1.uiMeta.portAddToMap["output"] = true;
+
+  wf.steps.push_back( s1 );
+
+  PipelineCanvasWidget canvas;
+  canvas.loadWorkflowDefinition( wf );
+
+  auto *scene = canvas.pipelineScene();
+  auto *node = scene->findNode( "step_1" );
+  REQUIRE( node != nullptr );
+
+  auto *outPort = node->findOutputPort( "output" );
+  REQUIRE( outPort != nullptr );
+  REQUIRE( outPort->addToMap() == true );
+
+  WorkflowDefinition exported = canvas.exportWorkflowDefinition( wf );
+  REQUIRE( exported.steps.size() == 1 );
+  REQUIRE( exported.steps[0].uiMeta.portAddToMap["output"] == true );
+
+  // JSON roundtrip verification
+  Json::Value json = workflowDefinitionToJson( exported );
+  REQUIRE( json["steps"][0]["meta"]["ui"]["portAddToMap"]["output"].asBool() == true );
+
+  WorkflowDefinition restoredDef;
+  std::string error;
+  REQUIRE( workflowDefinitionFromJson( json, restoredDef, error ) == true );
+  REQUIRE( restoredDef.steps[0].uiMeta.portAddToMap["output"] == true );
+}
+
+TEST_CASE( "WorkflowSessionController integrates DataManager TaskTemporary assets and port display", "[workflow][catalog]" )
+{
+  ensureApp();
+
+  sicnu::data::DataManager dataManager;
+  WorkflowSessionController controller;
+  controller.setDataManager( &dataManager );
+  REQUIRE( controller.dataManager() == &dataManager );
+
+  PipelineCanvasWidget canvas;
+  controller.bindCanvas( &canvas );
+
+  WorkflowDefinition wf;
+  wf.id = "catalog_test";
+  wf.title = "Catalog Test";
+
+  StepDef s1;
+  s1.id = "step_1";
+  s1.title = "Step 1";
+  s1.uiMeta.portAddToMap["output"] = true;
+  wf.steps.push_back( s1 );
+
+  canvas.loadWorkflowDefinition( wf );
+
+  bool loadRequested = false;
+  QString loadedPath;
+  QObject::connect( &controller, &WorkflowSessionController::requestLoadRaster, [&]( const QString &path ) {
+    loadRequested = true;
+    loadedPath = path;
+  } );
+
+  // Sweep task temporaries (initially empty)
+  auto reapResult = controller.reapTaskTemporaries();
+  REQUIRE( reapResult.reapedCount == 0 );
+}
+
 

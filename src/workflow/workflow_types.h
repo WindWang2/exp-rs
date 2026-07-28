@@ -20,6 +20,7 @@ struct GateDef {
 struct StepUiMeta {
   double x = 0.0;
   double y = 0.0;
+  std::unordered_map<std::string, bool> portAddToMap;
 };
 
 struct StepConnection {

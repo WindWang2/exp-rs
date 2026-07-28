@@ -25,10 +25,19 @@ Json::Value workflowDefinitionToJson( const WorkflowDefinition &def )
     stepVal["operatorId"] = step.operatorId;
     stepVal["artifactOnSuccess"] = step.artifactOnSuccess;
 
-    // Spatial UI Metadata
+    // Spatial & Port UI Metadata
     Json::Value uiObj( Json::objectValue );
     uiObj["x"] = step.uiMeta.x;
     uiObj["y"] = step.uiMeta.y;
+    if ( !step.uiMeta.portAddToMap.empty() )
+    {
+      Json::Value mapObj( Json::objectValue );
+      for ( const auto &[pName, enabled] : step.uiMeta.portAddToMap )
+      {
+        mapObj[pName] = enabled;
+      }
+      uiObj["portAddToMap"] = mapObj;
+    }
     stepVal["meta"]["ui"] = uiObj;
 
     // Gates
@@ -101,6 +110,14 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
           step.uiMeta.x = uiObj["x"].asDouble();
         if ( uiObj.isMember( "y" ) )
           step.uiMeta.y = uiObj["y"].asDouble();
+        if ( uiObj.isMember( "portAddToMap" ) && uiObj["portAddToMap"].isObject() )
+        {
+          const auto &mapObj = uiObj["portAddToMap"];
+          for ( const auto &pName : mapObj.getMemberNames() )
+          {
+            step.uiMeta.portAddToMap[pName] = mapObj[pName].asBool();
+          }
+        }
       }
 
       if ( stepVal.isMember( "gates" ) && stepVal["gates"].isArray() )

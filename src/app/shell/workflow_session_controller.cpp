@@ -5,12 +5,16 @@
 
 #include "task_panel_host.h"
 
+#include "data/data_manager.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "workflow/builtin_definitions.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_types.h"
 #include "workflow/pipeline_canvas_widget.h"
+#include "workflow/pipeline_scene.h"
+#include "workflow/pipeline_node_item.h"
+#include "workflow/pipeline_port_item.h"
 
 #include <exception>
 #include <string>
@@ -90,6 +94,20 @@ void WorkflowSessionController::bindCanvas( sicnu::workflow::gui::PipelineCanvas
     connect( this, &WorkflowSessionController::stepStatusChanged,
              m_canvas, &sicnu::workflow::gui::PipelineCanvasWidget::updateStepStatus );
   }
+}
+
+void WorkflowSessionController::setDataManager( sicnu::data::DataManager *dataManager )
+{
+  m_dataManager = dataManager;
+}
+
+sicnu::data::TemporaryReapResult WorkflowSessionController::reapTaskTemporaries()
+{
+  if ( m_dataManager )
+  {
+    return m_dataManager->reapTaskTemporaries();
+  }
+  return {};
 }
 
 QString WorkflowSessionController::openTool( const QString &definitionId )
@@ -462,7 +480,33 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
   if ( info.resultPayload.isMember( "output" ) && info.resultPayload["output"].isString() )
     outputPath = QString::fromStdString( info.resultPayload["output"].asString() );
 
-  if ( m_pendingLoadToMap && !outputPath.isEmpty() )
+  if ( !outputPath.isEmpty() && m_dataManager )
+  {
+    sicnu::data::RegisterRequest regReq;
+    regReq.source.canonicalSource = outputPath;
+    regReq.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
+    regReq.additionalCapabilities = sicnu::data::AssetCapability::DeletableSource;
+    m_dataManager->registerSource( regReq );
+  }
+
+  bool shouldLoadToMap = m_pendingLoadToMap;
+  if ( m_canvas && m_canvas->pipelineScene() )
+  {
+    auto *nodeItem = m_canvas->pipelineScene()->findNode( m_activeStepId );
+    if ( nodeItem )
+    {
+      for ( auto *outPort : nodeItem->outputPorts() )
+      {
+        if ( outPort && outPort->addToMap() )
+        {
+          shouldLoadToMap = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if ( shouldLoadToMap && !outputPath.isEmpty() )
     emit requestLoadRaster( outputPath );
 
   const QString msg = outputPath.isEmpty()

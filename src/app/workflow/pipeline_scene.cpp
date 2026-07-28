@@ -174,7 +174,18 @@ void PipelineScene::loadWorkflowDefinition( const WorkflowDefinition &def )
 
   for ( const auto &stepDef : def.steps )
   {
-    addNode( stepDef );
+    auto *node = addNode( stepDef );
+    if ( node )
+    {
+      for ( const auto &[pName, enabled] : stepDef.uiMeta.portAddToMap )
+      {
+        auto *outPort = node->findOutputPort( QString::fromStdString( pName ) );
+        if ( outPort )
+        {
+          outPort->setAddToMap( enabled );
+        }
+      }
+    }
   }
 
   for ( const auto &stepDef : def.steps )
@@ -207,6 +218,14 @@ WorkflowDefinition PipelineScene::exportWorkflowDefinition( const WorkflowDefini
 
     step.uiMeta.x = node->pos().x();
     step.uiMeta.y = node->pos().y();
+
+    for ( const auto *outPort : node->outputPorts() )
+    {
+      if ( outPort && outPort->addToMap() )
+      {
+        step.uiMeta.portAddToMap[outPort->portName().toStdString()] = true;
+      }
+    }
 
     if ( !node->outputPorts().empty() )
     {
