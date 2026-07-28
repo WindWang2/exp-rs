@@ -47,6 +47,7 @@ class LlmStreamingClient : public QObject
     void reasoningTokenReceived( const QString &reasoningText );
     void contentTokenReceived( const QString &textDelta );
     void toolCallParsed( const QJsonObject &toolCallJson );
+    void toolCallExecuted( const QString &toolName, const QJsonObject &resultJson );
     void finished();
     void errorOccurred( const QString &errorMessage );
 

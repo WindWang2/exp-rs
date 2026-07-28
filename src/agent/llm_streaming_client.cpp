@@ -231,6 +231,32 @@ void LlmStreamingClient::onReplyFinished()
         parseSseLine( line );
       m_buffer.clear();
     }
+
+    if ( !m_toolFunctionName.isEmpty() )
+    {
+      QJsonObject tcObj;
+      tcObj[QStringLiteral( "id" )] = m_toolCallId;
+      tcObj[QStringLiteral( "name" )] = m_toolFunctionName;
+      tcObj[QStringLiteral( "arguments" )] = m_toolArgumentsBuffer;
+
+      emit toolCallParsed( tcObj );
+
+      QJsonObject toolCallEnvelope;
+      toolCallEnvelope[QStringLiteral( "name" )] = m_toolFunctionName;
+
+      QJsonDocument argsDoc = QJsonDocument::fromJson( m_toolArgumentsBuffer.toUtf8() );
+      if ( argsDoc.isObject() )
+      {
+        toolCallEnvelope[QStringLiteral( "parameters" )] = argsDoc.object();
+      }
+
+      std::string toolCallJsonStr = QJsonDocument( toolCallEnvelope ).toJson( QJsonDocument::Compact ).toStdString();
+      std::string resultJsonStr = processing::AtomicAlgorithmRegistry::instance().executeToolCall( toolCallJsonStr );
+
+      QJsonObject resultObj = QJsonDocument::fromJson( QByteArray::fromStdString( resultJsonStr ) ).object();
+      emit toolCallExecuted( m_toolFunctionName, resultObj );
+    }
+
     emit finished();
   }
 }
