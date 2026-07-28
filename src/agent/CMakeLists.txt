@@ -2,6 +2,8 @@
 add_library(sicnu_agent SHARED
   agent_context_resolver.cpp
   agent_context_resolver.h
+  workspace_snapshot.cpp
+  workspace_snapshot.h
   agent_copilot_dock_widget.cpp
   agent_copilot_dock_widget.h
   llm_config_manager.cpp

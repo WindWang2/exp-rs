@@ -34,6 +34,7 @@ function(sicnu_add_test NAME)
     sicnu_processing
     sicnu_jobs
     sicnu_task_center
+    sicnu_agent
   )
   target_include_directories(${NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -52,6 +53,7 @@ sicnu_add_test(test_task_center)
 sicnu_add_test(test_atomic_algorithm_adapter)
 sicnu_add_test(test_atomic_algorithm_registry)
 sicnu_add_test(test_agent_workflow_executor)
+sicnu_add_test(test_workspace_snapshot)
 
 # #35 — UI callers must not bypass Task Center; task views are projections.
 add_executable(test_ui_task_center_contract test_ui_task_center_contract.cpp)

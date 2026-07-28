@@ -5,9 +5,9 @@ Implement `DataAssetInfo`, `MapViewSnapshot`, and `WorkspaceSnapshot` C++ value 
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Define `DataAssetInfo`, `MapViewSnapshot`, and `WorkspaceSnapshot` value structs in `sicnu::agent` namespace.
-- [ ] Implement `WorkspaceSnapshot::toJson()` and `WorkspaceSnapshot::toSystemPromptHeader()`.
-- [ ] Add Catch2 unit test executable `test_workspace_snapshot` verifying JSON and Prompt string output assertions.
-- [ ] Ensure CMake build passes and Catch2 tests run cleanly.
+- [x] Define `DataAssetInfo`, `MapViewSnapshot`, and `WorkspaceSnapshot` value structs in `sicnu::agent` namespace.
+- [x] Implement `WorkspaceSnapshot::toJson()` and `WorkspaceSnapshot::toSystemPromptHeader()`.
+- [x] Add Catch2 unit test executable `test_workspace_snapshot` verifying JSON and Prompt string output assertions.
+- [x] Ensure CMake build passes and Catch2 tests run cleanly.
