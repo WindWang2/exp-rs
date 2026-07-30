@@ -486,6 +486,43 @@ TEST_CASE( "AppInterfaceBridge consolidates QGIS query routing and JSON serializ
   }
 }
 
+TEST_CASE( "SicnuAppInterface addRasterLayer returns opened layer regardless of host active layer selection", "[python][iface][contract]" )
+{
+  REQUIRE( QgisPython::instance().initialize() );
+
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  QgsLayerTreeView treeView;
+  const sicnu::display::DisplayViewSpec viewSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore()};
+  auto createdContext = sicnu::app::ProjectContext::create(viewSpec);
+  REQUIRE( createdContext );
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+
+  ActiveViewHost activeViewHost( &canvas, &treeView, nullptr,
+                                &context->dataManager(), &context->displayManager(),
+                                context->mainViewId(), nullptr );
+  activeViewHost.initLayerTree();
+
+  SicnuAppInterface iface( nullptr, &activeViewHost, context.get() );
+
+  const QString demPath = fixturePath( QStringLiteral( "samples/dem_sample.tif" ) );
+  QgsRasterLayer *layer1 = iface.addRasterLayer( demPath, QStringLiteral( "DEM 1" ) );
+  REQUIRE( layer1 != nullptr );
+  CHECK( layer1->source() == demPath );
+
+  // Force active layer on canvas to nullptr to verify addRasterLayer returns the newly opened layer
+  canvas.setCurrentLayer( nullptr );
+
+  QgsRasterLayer *layer2 = iface.addRasterLayer( demPath, QStringLiteral( "DEM 2" ) );
+  REQUIRE( layer2 != nullptr );
+  CHECK( layer2->source() == demPath );
+  CHECK( layer2 != layer1 );
+}
+
+
 
 
 

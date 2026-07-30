@@ -32,6 +32,7 @@ void PythonProcessingProviderAdapter::initialize()
 
 void PythonProcessingProviderAdapter::discoverAlgorithms( AlgorithmEngine &engine )
 {
+    m_boundEngine = &engine;
     for ( auto it = m_algorithms.begin(); it != m_algorithms.end(); ++it )
     {
         if ( !engine.findAlgorithm( it.key() ) )
@@ -47,8 +48,13 @@ void PythonProcessingProviderAdapter::addAlgorithm( std::shared_ptr<TaskAlgorith
         return;
 
     m_algorithms.insert( algoAdapter->descriptor().id, algoAdapter );
-    // Automatically register with global AlgorithmEngine
-    AlgorithmEngine::instance().registerAlgorithm( algoAdapter );
+    if ( m_boundEngine )
+    {
+        if ( !m_boundEngine->findAlgorithm( algoAdapter->descriptor().id ) )
+        {
+            m_boundEngine->registerAlgorithm( algoAdapter );
+        }
+    }
 }
 
 void PythonProcessingProviderAdapter::removeAlgorithm( const QString &algoId )

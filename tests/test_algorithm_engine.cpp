@@ -142,5 +142,13 @@ TEST_CASE("AlgorithmEngine - PythonProcessingProviderAdapter resource profile an
     REQUIRE(found != nullptr);
     CHECK(found->descriptor().id == QStringLiteral("py:test_algorithm_108"));
     CHECK(found->descriptor().resourceProfile == sicnu::ProviderResourceProfile::PythonWorkerProcess);
+
+    // Verify discoverAlgorithms re-populates stored algorithms into a cleared engine
+    engine.clear();
+    CHECK(engine.findAlgorithm(QStringLiteral("py:test_algorithm_108")) == nullptr);
+
+    pythonProvider->discoverAlgorithms(engine);
+    CHECK(engine.findAlgorithm(QStringLiteral("py:test_algorithm_108")) != nullptr);
 }
+
 

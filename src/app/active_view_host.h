@@ -64,6 +64,11 @@ class ActiveViewHost : public QObject
     QgsMapCanvas *mapCanvas() const { return m_mapCanvas; }
     void setMessageBar( QgsMessageBar *messageBar ) { m_messageBar = messageBar; }
     QgsMessageBar *messageBar() const { return m_messageBar; }
+    sicnu::display::QgisDisplayManager *displayManager() const { return m_displayManager; }
+    QgsMapLayer *mapLayer( sicnu::display::DisplayLayerId displayLayerId ) const
+    {
+        return m_displayManager ? m_displayManager->mapLayer( displayLayerId ) : nullptr;
+    }
 
     /// Target view for open/display. Must be a live view known to DisplayManager.
     /// Defaults to mainViewId. Returns false if id is null / unknown.

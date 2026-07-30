@@ -36,6 +36,7 @@ private:
     QString m_providerId;
     QString m_providerName;
     bool m_initialized = false;
+    AlgorithmEngine *m_boundEngine = nullptr;
     QMap<QString, std::shared_ptr<TaskAlgorithmAdapter>> m_algorithms;
 };
 

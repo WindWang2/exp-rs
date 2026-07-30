@@ -109,8 +109,7 @@ QgsRasterLayer *SicnuAppInterface::addRasterLayer( const QString &rasterLayerPat
           m_projectContext->displayManager().mapLayer( res.value() ) );
     }
 
-    // Host opened the layer; prefer current active layer as the best-effort return.
-    return qobject_cast<QgsRasterLayer *>( m_activeViewHost->activeLayer() );
+    return qobject_cast<QgsRasterLayer *>( m_activeViewHost->mapLayer( res.value() ) );
 }
 
 QgsVectorLayer *SicnuAppInterface::addVectorLayer( const QString &vectorLayerPath, const QString &baseName, const QString &providerKey )
@@ -130,7 +129,7 @@ QgsVectorLayer *SicnuAppInterface::addVectorLayer( const QString &vectorLayerPat
           m_projectContext->displayManager().mapLayer( res.value() ) );
     }
 
-    return qobject_cast<QgsVectorLayer *>( m_activeViewHost->activeLayer() );
+    return qobject_cast<QgsVectorLayer *>( m_activeViewHost->mapLayer( res.value() ) );
 }
 
 void SicnuAppInterface::addPluginToMenu( const QString &name, QAction *action )
