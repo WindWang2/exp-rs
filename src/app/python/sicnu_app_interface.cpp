@@ -23,7 +23,6 @@ SicnuAppInterface::SicnuAppInterface( QWidget *mainWindow,
     : QgisInterface()
     , m_mainWindow( mainWindow )
     , m_activeViewHost( activeViewHost )
-    , m_bridge( activeViewHost )
     , m_projectContext( projectContext )
 {
     setParent( parent );

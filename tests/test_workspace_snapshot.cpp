@@ -110,7 +110,7 @@ TEST_CASE( "WorkspaceSnapshot - Pure C++ Serialization & Prompt Formatting", "[a
     asset.id = QStringLiteral( "asset-101" );
     asset.displayName = QStringLiteral( "landsat_sample.tif" );
     asset.path = QStringLiteral( "/tmp/landsat_sample.tif" );
-    asset.kind = QStringLiteral( "Raster" );
+    asset.kind = AssetKind::Raster;
     asset.width = 1024;
     asset.height = 768;
     asset.bandCount = 4;
@@ -128,6 +128,7 @@ TEST_CASE( "WorkspaceSnapshot - Pure C++ Serialization & Prompt Formatting", "[a
 
     QJsonObject assetObj = json[QStringLiteral( "assets" )].toArray().at( 0 ).toObject();
     REQUIRE( assetObj[QStringLiteral( "id" )].toString() == QStringLiteral( "asset-101" ) );
+    REQUIRE( assetObj[QStringLiteral( "kind" )].toString() == QStringLiteral( "Raster" ) );
     REQUIRE( assetObj[QStringLiteral( "width" )].toInt() == 1024 );
     REQUIRE( assetObj[QStringLiteral( "bands" )].toInt() == 4 );
 
@@ -166,7 +167,7 @@ TEST_CASE( "WorkspaceSnapshot::capture extracts assets from DataManager", "[agen
 
   const auto snapshot = sicnu::agent::WorkspaceSnapshot::capture( manager.get(), nullptr );
   REQUIRE( snapshot.assets.size() == 1 );
-  CHECK( snapshot.assets.first().kind == QStringLiteral( "Raster" ) );
+  CHECK( snapshot.assets.first().kind == AssetKind::Raster );
   CHECK( snapshot.assets.first().path == QStringLiteral( "capture-scene.tif" ) );
   CHECK( snapshot.assets.first().width == 256 );
   CHECK( snapshot.assets.first().height == 128 );

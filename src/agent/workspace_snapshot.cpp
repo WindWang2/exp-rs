@@ -27,14 +27,7 @@ WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager, Ac
       info.displayName = asset.displayName();
       info.path = asset.source().canonicalSource;
 
-      if ( asset.kind() == data::AssetKind::Raster )
-        info.kind = QStringLiteral( "Raster" );
-      else if ( asset.kind() == data::AssetKind::Vector )
-        info.kind = QStringLiteral( "Vector" );
-      else if ( asset.kind() == data::AssetKind::RemoteMap )
-        info.kind = QStringLiteral( "RemoteMap" );
-      else if ( asset.kind() == data::AssetKind::VirtualRaster )
-        info.kind = QStringLiteral( "VirtualRaster" );
+      info.kind = asset.kind();
 
       const auto &structure = asset.structure();
       if ( const auto *raster = std::get_if<data::RasterStructure>( &structure ) )
@@ -87,9 +80,26 @@ QJsonObject WorkspaceSnapshot::toJson() const
     assetObj[QStringLiteral( "id" )] = asset.id;
     assetObj[QStringLiteral( "displayName" )] = asset.displayName;
     assetObj[QStringLiteral( "path" )] = asset.path;
-    assetObj[QStringLiteral( "kind" )] = asset.kind;
+    QString kindStr;
+    switch ( asset.kind )
+    {
+      case data::AssetKind::Raster:
+        kindStr = QStringLiteral( "Raster" );
+        break;
+      case data::AssetKind::Vector:
+        kindStr = QStringLiteral( "Vector" );
+        break;
+      case data::AssetKind::RemoteMap:
+        kindStr = QStringLiteral( "RemoteMap" );
+        break;
+      case data::AssetKind::VirtualRaster:
+        kindStr = QStringLiteral( "VirtualRaster" );
+        break;
+    }
 
-    if ( asset.kind == QStringLiteral( "Raster" ) || asset.kind == QStringLiteral( "VirtualRaster" ) )
+    assetObj[QStringLiteral( "kind" )] = kindStr;
+
+    if ( asset.kind == data::AssetKind::Raster || asset.kind == data::AssetKind::VirtualRaster )
     {
       assetObj[QStringLiteral( "width" )] = asset.width;
       assetObj[QStringLiteral( "height" )] = asset.height;
@@ -97,7 +107,7 @@ QJsonObject WorkspaceSnapshot::toJson() const
       if ( !asset.crsWkt.isEmpty() )
         assetObj[QStringLiteral( "crsWkt" )] = asset.crsWkt;
     }
-    else if ( asset.kind == QStringLiteral( "Vector" ) )
+    else if ( asset.kind == data::AssetKind::Vector )
     {
       assetObj[QStringLiteral( "layerCount" )] = asset.layerCount;
       if ( !asset.crsWkt.isEmpty() )
@@ -141,7 +151,23 @@ QString WorkspaceSnapshot::toSystemPromptHeader() const
     prompt += QStringLiteral( "Loaded Data Assets:\n" );
     for ( const auto &asset : assets )
     {
-      prompt += QString( "- Asset '%1' (%2) [%3]" ).arg( asset.id, asset.displayName, asset.kind );
+      QString kindStr;
+      switch ( asset.kind )
+      {
+        case data::AssetKind::Raster:
+          kindStr = QStringLiteral( "Raster" );
+          break;
+        case data::AssetKind::Vector:
+          kindStr = QStringLiteral( "Vector" );
+          break;
+        case data::AssetKind::RemoteMap:
+          kindStr = QStringLiteral( "RemoteMap" );
+          break;
+        case data::AssetKind::VirtualRaster:
+          kindStr = QStringLiteral( "VirtualRaster" );
+          break;
+      }
+      prompt += QString( "- Asset '%1' (%2) [%3]" ).arg( asset.id, asset.displayName, kindStr );
 
       if ( asset.bandCount > 0 )
       {

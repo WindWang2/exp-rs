@@ -36,10 +36,13 @@ struct CanvasViewportSummary
   QJsonObject toJsonObject() const;
 };
 
-/// Unified bridge module consolidating Python QGIS method routing
-/// (activeLayer, openPath, canvasState, pushMessageBarAlert) to ActiveViewHost.
-/// Serves both in-process C++ facades (SicnuAppInterface) and out-of-process
-/// JSON-RPC IPC proxies (PythonAppInterfaceProxy).
+/**
+ * AppInterfaceBridge — JSON-RPC serialization bridge module.
+ *
+ * Consolidates Python QGIS method routing (activeLayer, openPath, canvasState, pushMessageBarAlert)
+ * to ActiveViewHost. Serves as the dedicated JSON-RPC IPC presentation & state serialization layer
+ * consumed by PythonAppInterfaceProxy for out-of-process Python plugin workers (ADR 0014).
+ */
 class AppInterfaceBridge : public QObject
 {
   Q_OBJECT

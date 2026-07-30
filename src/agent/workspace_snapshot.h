@@ -6,6 +6,8 @@
 #include <QList>
 #include <QString>
 
+#include "data/asset_types.h"
+
 namespace sicnu::data
 {
 class DataManager;
@@ -21,7 +23,7 @@ struct DataAssetInfo
     QString id;
     QString displayName;
     QString path;
-    QString kind = QStringLiteral( "Unknown" );
+    data::AssetKind kind = data::AssetKind::Raster;
     int width = 0;
     int height = 0;
     int bandCount = 0;

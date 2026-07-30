@@ -3,8 +3,6 @@
 
 #include "qgisinterface.h"
 
-#include "app_interface_bridge.h"
-
 class QWidget;
 class QgsMapCanvas;
 class QgsLayerTreeView;
@@ -43,12 +41,8 @@ public:
     void setActiveViewHost( ActiveViewHost *host )
     {
       m_activeViewHost = host;
-      m_bridge.setActiveViewHost( host );
     }
     ActiveViewHost *activeViewHost() const { return m_activeViewHost; }
-
-    sicnu::python::isolated::AppInterfaceBridge &bridge() { return m_bridge; }
-    const sicnu::python::isolated::AppInterfaceBridge &bridge() const { return m_bridge; }
 
     void setProjectContext( sicnu::app::ProjectContext *context ) { m_projectContext = context; }
     sicnu::app::ProjectContext *projectContext() const { return m_projectContext; }
@@ -339,7 +333,6 @@ public:
 private:
     QWidget *m_mainWindow = nullptr;
     ActiveViewHost *m_activeViewHost = nullptr;
-    sicnu::python::isolated::AppInterfaceBridge m_bridge;
     sicnu::app::ProjectContext *m_projectContext = nullptr;
 
     QMenu *m_pluginMenu = nullptr;
