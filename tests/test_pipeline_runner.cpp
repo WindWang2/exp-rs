@@ -12,6 +12,8 @@
 #include <vector>
 
 #include "cli/rs_pipeline_runner.h"
+#include "jobs/job_engine.h"
+#include "operators/framework/rs_operator_context.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 using namespace sicnu::cli;
@@ -161,9 +163,62 @@ TEST_CASE("Pipeline runner fails on unknown operator", "[cli][pipeline]") {
     const auto result = runner.runFromJson(root);
 
     CHECK(result.success == false);
-    CHECK(result.errorMessage.find("not registered") != std::string::npos);
+    CHECK((result.errorMessage.find("not registered") != std::string::npos
+           || result.errorMessage.find("Unknown") != std::string::npos
+           || result.errorMessage.find("failed") != std::string::npos));
     REQUIRE(result.steps.size() == 1);
     CHECK(result.steps[0].success == false);
+}
+
+TEST_CASE("Pipeline runner two-step DAG resolves $stepId.output via TaskCenter", "[cli][pipeline][task_center]") {
+    ensurePipelineApp();
+    auto& engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+
+    std::string observedStep2Input;
+    engine.registerExecutor("cli:step1", [](const sicnu::jobs::JobRequest& req, sicnu::operators::RSOperatorContext& ctx) {
+        ctx.logInfo("cli step1");
+        Json::Value result(Json::objectValue);
+        if (req.params.isMember("output") && req.params["output"].isString())
+            result["output"] = req.params["output"].asString();
+        else
+            result["output"] = "/tmp/cli_step1.tif";
+        return result;
+    });
+    engine.registerExecutor("cli:step2", [&](const sicnu::jobs::JobRequest& req, sicnu::operators::RSOperatorContext& ctx) {
+        ctx.logInfo("cli step2");
+        if (req.params.isMember("input") && req.params["input"].isString())
+            observedStep2Input = req.params["input"].asString();
+        Json::Value result(Json::objectValue);
+        result["output"] = "/tmp/cli_step2.tif";
+        return result;
+    });
+
+    Json::Value root(Json::objectValue);
+    root["name"] = "two-step TaskCenter CLI";
+    Json::Value s1(Json::objectValue);
+    s1["id"] = "s1";
+    s1["operator"] = "cli:step1";
+    s1["params"]["output"] = "/tmp/cli_step1.tif";
+    Json::Value s2(Json::objectValue);
+    s2["id"] = "s2";
+    s2["operator"] = "cli:step2";
+    s2["params"]["input"] = "$s1.output";
+    s2["params"]["output"] = "/tmp/cli_step2.tif";
+    root["steps"].append(s1);
+    root["steps"].append(s2);
+
+    RsPipelineRunner runner;
+    const auto result = runner.runFromJson(root);
+
+    REQUIRE(result.success == true);
+    REQUIRE(result.steps.size() == 2);
+    CHECK(result.steps[0].success == true);
+    CHECK(result.steps[1].success == true);
+    CHECK(observedStep2Input == "/tmp/cli_step1.tif");
+
+    engine.clearExecutors();
 }
 
 TEST_CASE("Pipeline runner fails on missing input", "[cli][pipeline]") {

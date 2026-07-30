@@ -39,18 +39,27 @@ Json::Value TaskCenter::variantMapToJsonParams( const QVariantMap &params )
     {
         const QString key = it.key();
         const QVariant &val = it.value();
-        if ( val.typeId() == QMetaType::Bool )
+        switch ( val.typeId() )
+        {
+          case QMetaType::Bool:
             root[key.toStdString()] = val.toBool();
-        else if ( val.typeId() == QMetaType::Int
-                  || val.typeId() == QMetaType::LongLong
-                  || val.typeId() == QMetaType::UInt
-                  || val.typeId() == QMetaType::ULongLong )
+            break;
+          case QMetaType::Int:
+          case QMetaType::LongLong:
+          case QMetaType::UInt:
+          case QMetaType::ULongLong:
+          case QMetaType::Long:
+          case QMetaType::Short:
             root[key.toStdString()] = static_cast<Json::Value::Int64>( val.toLongLong() );
-        else if ( val.typeId() == QMetaType::Double
-                  || val.typeId() == QMetaType::Float )
+            break;
+          case QMetaType::Double:
+          case QMetaType::Float:
             root[key.toStdString()] = val.toDouble();
-        else
+            break;
+          default:
             root[key.toStdString()] = val.toString().toStdString();
+            break;
+        }
     }
     return root;
 }
@@ -63,7 +72,9 @@ void TaskCenter::applyPlaceholdersForTask( long taskId )
     QVariantMap &pMap = m_tasks[taskId].parameterMap;
     for ( auto pIt = pMap.begin(); pIt != pMap.end(); ++pIt )
     {
-        if ( !pIt.value().canConvert<QString>() )
+        // Only string parameters participate in $step.output substitution.
+        // Converting numbers to QString here would break integer JobEngine params.
+        if ( pIt.value().typeId() != QMetaType::QString )
             continue;
 
         QString valStr = pIt.value().toString();
@@ -239,6 +250,8 @@ long TaskCenter::enqueueToolCall( const std::string &jsonToolCall, bool autoLoad
                     variantParams[QString::fromStdString( key )] = QString::fromStdString( val.asString() );
                 else if ( val.isBool() )
                     variantParams[QString::fromStdString( key )] = val.asBool();
+                else if ( val.isInt() || val.isUInt() || val.isInt64() || val.isUInt64() )
+                    variantParams[QString::fromStdString( key )] = static_cast<qint64>( val.asInt64() );
                 else if ( val.isNumeric() )
                     variantParams[QString::fromStdString( key )] = val.asDouble();
                 else
@@ -276,6 +289,8 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
             params.insert( QString::fromStdString( name ), QString::fromStdString( value.asString() ) );
         else if ( value.isBool() )
             params.insert( QString::fromStdString( name ), value.asBool() );
+        else if ( value.isInt() || value.isUInt() || value.isInt64() || value.isUInt64() )
+            params.insert( QString::fromStdString( name ), static_cast<qint64>( value.asInt64() ) );
         else if ( value.isNumeric() )
             params.insert( QString::fromStdString( name ), value.asDouble() );
     }
@@ -798,6 +813,8 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                         params[QString::fromStdString( key )] = QString::fromStdString( val.asString() );
                     else if ( val.isBool() )
                         params[QString::fromStdString( key )] = val.asBool();
+                    else if ( val.isInt() || val.isUInt() || val.isInt64() || val.isUInt64() )
+                        params[QString::fromStdString( key )] = static_cast<qint64>( val.asInt64() );
                     else if ( val.isNumeric() )
                         params[QString::fromStdString( key )] = val.asDouble();
                 }

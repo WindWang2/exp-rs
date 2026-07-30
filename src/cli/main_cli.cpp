@@ -23,8 +23,8 @@ int main(int argc, char *argv[])
 
     QCommandLineParser parser;
     parser.setApplicationDescription(
-        "SICNU GEO RS — headless pipeline executor.\n"
-        "Runs a JSON-defined chain of RSOperator steps without GUI.");
+        "SICNU GEO RS — headless pipeline executor (TaskCenter).\n"
+        "Runs a JSON-defined DAG of algorithm steps without GUI via TaskCenter.");
     parser.addHelpOption();
     parser.addVersionOption();
 

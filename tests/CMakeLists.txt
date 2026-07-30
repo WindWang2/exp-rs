@@ -2230,6 +2230,9 @@ if(TARGET sicnu_operators)
     Qt6::Core
     sicnu_operators
     sicnu_processing
+    sicnu_task_center
+    sicnu_jobs
+    sicnu_workflow
     GDAL::GDAL
   )
   target_include_directories(test_pipeline_runner PRIVATE

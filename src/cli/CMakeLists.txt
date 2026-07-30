@@ -20,6 +20,9 @@ target_link_libraries(sicnu_geo_rs_cli PRIVATE
     Qt6::Core
     sicnu_operators
     sicnu_processing
+    sicnu_task_center
+    sicnu_jobs
+    sicnu_workflow
     GDAL::GDAL
 )
 

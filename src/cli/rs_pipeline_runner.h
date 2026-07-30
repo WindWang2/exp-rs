@@ -12,21 +12,26 @@
 namespace sicnu::cli {
 
 /**
- * \brief Executes a pipeline of RSOperator steps from a JSON definition.
+ * \brief Headless multi-step pipeline executor (ADR 0016).
+ *
+ * Converts CLI pipeline JSON into a TaskCenter DAG and runs it only through
+ * `TaskCenter::submitPipeline` — no local step-index execution loop.
  *
  * Pipeline JSON format:
  * \code{.json}
  * {
  *   "name": "NDVI then smooth",
  *   "steps": [
- *     {"operator": "rs:spectral_index", "params": {"input": "in.tif", "output": "ndvi.tif", "index": "NDVI"}},
- *     {"operator": "opencv:gaussian_blur", "params": {"input": "ndvi.tif", "output": "smooth.tif", "kernelSize": 5}}
+ *     {"id": "s1", "operator": "rs:spectral_index", "params": {"input": "in.tif", "output": "ndvi.tif", "index": "NDVI"}},
+ *     {"id": "s2", "operator": "opencv:gaussian_blur", "params": {"input": "$s1.output", "output": "smooth.tif", "kernelSize": 5}}
  *   ]
  * }
  * \endcode
  *
- * The runner is thread-agnostic and emits progress/log messages through
- * callbacks so the caller can print to stdout, a GUI, or a log file.
+ * Sequential steps are parent-gated automatically. Optional `$stepId.output`
+ * placeholders are resolved by TaskCenter before launching dependents.
+ *
+ * Progress/log callbacks remain for stdout / GUI / log file reporting.
  */
 class RsPipelineRunner {
 public:
