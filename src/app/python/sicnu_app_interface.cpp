@@ -6,7 +6,6 @@
 #include <qgsmapcanvas.h>
 #include <layertree/qgslayertreeview.h>
 #include <qgsmessagebar.h>
-#include <qgsproject.h>
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
 
@@ -15,51 +14,41 @@
 #include <QMenuBar>
 #include <QToolBar>
 #include <QDockWidget>
-#include <QFileInfo>
 #include <QApplication>
 
 SicnuAppInterface::SicnuAppInterface( QWidget *mainWindow,
                                       ActiveViewHost *activeViewHost,
                                       sicnu::app::ProjectContext *projectContext,
-                                      QgsMapCanvas *canvas,
-                                      QgsMessageBar *messageBar,
                                       QObject *parent )
     : QgisInterface()
     , m_mainWindow( mainWindow )
     , m_activeViewHost( activeViewHost )
+    , m_bridge( activeViewHost )
     , m_projectContext( projectContext )
-    , m_canvas( canvas )
-    , m_messageBar( messageBar )
 {
     setParent( parent );
 }
 
 QgsLayerTreeView *SicnuAppInterface::layerTreeView()
 {
-    if ( m_activeViewHost )
-        return m_activeViewHost->layerTreeView();
-    return nullptr;
+    return m_activeViewHost ? m_activeViewHost->layerTreeView() : nullptr;
 }
 
 QList<QgsMapCanvas *> SicnuAppInterface::mapCanvases()
 {
-    if ( m_canvas )
-        return { m_canvas };
+    if ( m_activeViewHost && m_activeViewHost->mapCanvas() )
+        return { m_activeViewHost->mapCanvas() };
     return {};
 }
 
 QgsMapLayer *SicnuAppInterface::activeLayer()
 {
-    if ( m_activeViewHost )
-        return m_activeViewHost->activeLayer();
-    return nullptr;
+    return m_activeViewHost ? m_activeViewHost->activeLayer() : nullptr;
 }
 
 QgsMapCanvas *SicnuAppInterface::mapCanvas()
 {
-    if ( m_activeViewHost && m_activeViewHost->mapCanvas() )
-        return m_activeViewHost->mapCanvas();
-    return m_canvas;
+    return m_activeViewHost ? m_activeViewHost->mapCanvas() : nullptr;
 }
 
 QWidget *SicnuAppInterface::mainWindow()
@@ -69,9 +58,7 @@ QWidget *SicnuAppInterface::mainWindow()
 
 QgsMessageBar *SicnuAppInterface::messageBar()
 {
-    if ( m_activeViewHost && m_activeViewHost->messageBar() )
-        return m_activeViewHost->messageBar();
-    return m_messageBar;
+    return m_activeViewHost ? m_activeViewHost->messageBar() : nullptr;
 }
 
 QFont SicnuAppInterface::defaultStyleSheetFont()
@@ -106,57 +93,44 @@ QToolBar *SicnuAppInterface::pluginToolBar()
 
 QgsRasterLayer *SicnuAppInterface::addRasterLayer( const QString &rasterLayerPath, const QString &baseName )
 {
-    if ( m_activeViewHost )
+    Q_UNUSED( baseName );
+    // Data/Display seam (ADR 0009/0010/0015): register + display only via ActiveViewHost.
+    // No QgsProject::addMapLayer bypass.
+    if ( !m_activeViewHost || rasterLayerPath.isEmpty() )
+        return nullptr;
+
+    const auto res = m_activeViewHost->openRasterPath( rasterLayerPath );
+    if ( !res )
+        return nullptr;
+
+    if ( m_projectContext )
     {
-        const auto res = m_activeViewHost->openRasterPath( rasterLayerPath );
-        if ( res && m_projectContext )
-        {
-            const auto mainView = m_projectContext->displayManager().view( m_projectContext->mainViewId() );
-            if ( mainView && !mainView->layerIds().isEmpty() )
-            {
-                const auto displayLayerId = mainView->layerIds().last();
-                return qobject_cast<QgsRasterLayer *>( m_projectContext->displayManager().mapLayer( displayLayerId ) );
-            }
-        }
+        return qobject_cast<QgsRasterLayer *>(
+          m_projectContext->displayManager().mapLayer( res.value() ) );
     }
-    // Headless / fallback
-    const QString name = baseName.isEmpty() ? QFileInfo( rasterLayerPath ).baseName() : baseName;
-    auto *layer = new QgsRasterLayer( rasterLayerPath, name );
-    if ( layer->isValid() )
-    {
-        QgsProject::instance()->addMapLayer( layer );
-        return layer;
-    }
-    delete layer;
-    return nullptr;
+
+    // Host opened the layer; prefer current active layer as the best-effort return.
+    return qobject_cast<QgsRasterLayer *>( m_activeViewHost->activeLayer() );
 }
 
 QgsVectorLayer *SicnuAppInterface::addVectorLayer( const QString &vectorLayerPath, const QString &baseName, const QString &providerKey )
 {
+    Q_UNUSED( baseName );
     Q_UNUSED( providerKey );
-    if ( m_activeViewHost )
+    if ( !m_activeViewHost || vectorLayerPath.isEmpty() )
+        return nullptr;
+
+    const auto res = m_activeViewHost->openVectorPath( vectorLayerPath );
+    if ( !res )
+        return nullptr;
+
+    if ( m_projectContext )
     {
-        const auto res = m_activeViewHost->openVectorPath( vectorLayerPath );
-        if ( res && m_projectContext )
-        {
-            const auto mainView = m_projectContext->displayManager().view( m_projectContext->mainViewId() );
-            if ( mainView && !mainView->layerIds().isEmpty() )
-            {
-                const auto displayLayerId = mainView->layerIds().last();
-                return qobject_cast<QgsVectorLayer *>( m_projectContext->displayManager().mapLayer( displayLayerId ) );
-            }
-        }
+        return qobject_cast<QgsVectorLayer *>(
+          m_projectContext->displayManager().mapLayer( res.value() ) );
     }
-    // Headless / fallback
-    const QString name = baseName.isEmpty() ? QFileInfo( vectorLayerPath ).baseName() : baseName;
-    auto *layer = new QgsVectorLayer( vectorLayerPath, name, QStringLiteral( "ogr" ) );
-    if ( layer->isValid() )
-    {
-        QgsProject::instance()->addMapLayer( layer );
-        return layer;
-    }
-    delete layer;
-    return nullptr;
+
+    return qobject_cast<QgsVectorLayer *>( m_activeViewHost->activeLayer() );
 }
 
 void SicnuAppInterface::addPluginToMenu( const QString &name, QAction *action )

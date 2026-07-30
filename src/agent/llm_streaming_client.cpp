@@ -2,11 +2,14 @@
 #include "llm_streaming_client.h"
 #include "processing/framework/agent_tool_call_exporter.h"
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/task_center.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
+#include <chrono>
+#include <thread>
 #include <json/json.h>
 
 namespace sicnu::agent
@@ -53,6 +56,7 @@ void LlmStreamingClient::sendChatCompletion( const QJsonArray &messages, bool en
 
   QNetworkRequest request;
   request.setUrl( QUrl( endpointUrl ) );
+  request.setTransferTimeout( 10000 );
   request.setHeader( QNetworkRequest::ContentTypeHeader, QStringLiteral( "application/json" ) );
 
   if ( !m_profile.apiKey.isEmpty() )
@@ -251,9 +255,60 @@ void LlmStreamingClient::onReplyFinished()
       }
 
       std::string toolCallJsonStr = QJsonDocument( toolCallEnvelope ).toJson( QJsonDocument::Compact ).toStdString();
-      std::string resultJsonStr = processing::AtomicAlgorithmRegistry::instance().executeToolCall( toolCallJsonStr );
 
-      QJsonObject resultObj = QJsonDocument::fromJson( QByteArray::fromStdString( resultJsonStr ) ).object();
+      // Route through TaskCenter so tool calls get progress, cancel, and dock visibility (ADR 0016).
+      const long taskId = processing::AtomicAlgorithmRegistry::instance().submitToolCall( toolCallJsonStr, true );
+      QJsonObject resultObj;
+      if ( taskId <= 0 )
+      {
+        resultObj[QStringLiteral( "status" )] = QStringLiteral( "error" );
+        resultObj[QStringLiteral( "error" )] = QStringLiteral( "Failed to enqueue tool call in TaskCenter" );
+      }
+      else
+      {
+        using clock = std::chrono::steady_clock;
+        const auto deadline = clock::now() + std::chrono::minutes( 10 );
+        for ( ;; )
+        {
+          const auto info = TaskCenter::instance().getTaskInfo( taskId );
+          if ( info.status == TaskStatus::Completed
+               || info.status == TaskStatus::Failed
+               || info.status == TaskStatus::Canceled )
+          {
+            resultObj[QStringLiteral( "taskId" )] = static_cast<qint64>( taskId );
+            resultObj[QStringLiteral( "algorithmId" )] = info.algorithmId;
+            if ( info.status == TaskStatus::Completed )
+            {
+              resultObj[QStringLiteral( "status" )] = QStringLiteral( "success" );
+              if ( info.resultPayload.isObject() )
+              {
+                // Prefer structured payload; fall back to output path.
+                const std::string styled = info.resultPayload.toStyledString();
+                QJsonDocument payloadDoc = QJsonDocument::fromJson( QByteArray::fromStdString( styled ) );
+                if ( payloadDoc.isObject() )
+                  resultObj[QStringLiteral( "output" )] = payloadDoc.object();
+              }
+              if ( !info.outputLayerPath.isEmpty() )
+                resultObj[QStringLiteral( "outputPath" )] = info.outputLayerPath;
+            }
+            else
+            {
+              resultObj[QStringLiteral( "status" )] = QStringLiteral( "error" );
+              resultObj[QStringLiteral( "error" )] = info.errorMessage;
+            }
+            break;
+          }
+          if ( clock::now() > deadline )
+          {
+            resultObj[QStringLiteral( "status" )] = QStringLiteral( "error" );
+            resultObj[QStringLiteral( "error" )] = QStringLiteral( "Tool call timed out in TaskCenter" );
+            resultObj[QStringLiteral( "taskId" )] = static_cast<qint64>( taskId );
+            break;
+          }
+          std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+        }
+      }
+
       emit toolCallExecuted( m_toolFunctionName, resultObj );
     }
 

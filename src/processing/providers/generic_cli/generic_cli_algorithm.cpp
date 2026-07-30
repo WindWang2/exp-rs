@@ -1,6 +1,6 @@
 // generic_cli_algorithm.cpp — Generic CLI tool wrapper for user-defined tools
 #include "generic_cli_algorithm.h"
-#include "algorithm_help_catalog.h"
+#include "processing/algorithm_help_catalog.h"
 #include "tools/tool_path_manager.h"
 
 #include <QJsonArray>

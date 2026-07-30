@@ -16,7 +16,7 @@ PythonAppInterfaceProxy::PythonAppInterfaceProxy( PythonIpcServer *ipcServer, QM
   : QObject( parent )
   , m_ipcServer( ipcServer )
   , m_parentMenu( parentMenu )
-  , m_activeViewHost( activeViewHost )
+  , m_bridge( activeViewHost, this )
 {
   if ( m_ipcServer )
   {
@@ -31,7 +31,7 @@ void PythonAppInterfaceProxy::setParentMenu( QMenu *parentMenu )
 
 void PythonAppInterfaceProxy::setActiveViewHost( ActiveViewHost *host )
 {
-  m_activeViewHost = host;
+  m_bridge.setActiveViewHost( host );
 }
 
 int PythonAppInterfaceProxy::registeredActionCount() const
@@ -82,20 +82,7 @@ void PythonAppInterfaceProxy::handleIpcMessage( const QJsonObject &message )
   }
   else if ( method == QStringLiteral( "catalog.get_active_layer" ) )
   {
-    QJsonObject res;
-    QgsMapLayer *activeLyr = m_activeViewHost ? m_activeViewHost->activeLayer() : nullptr;
-    if ( activeLyr )
-    {
-      res[QStringLiteral( "name" )] = activeLyr->name();
-      res[QStringLiteral( "source" )] = activeLyr->source();
-      res[QStringLiteral( "type" )] = ( activeLyr->type() == Qgis::LayerType::Raster ) ? QStringLiteral( "raster" ) : QStringLiteral( "vector" );
-      res[QStringLiteral( "crs" )] = activeLyr->crs().authid();
-      res[QStringLiteral( "status" )] = QStringLiteral( "ok" );
-    }
-    else
-    {
-      res[QStringLiteral( "status" )] = QStringLiteral( "no_active_layer" );
-    }
+    QJsonObject res = m_bridge.getActiveLayerSummary().toJsonObject();
     if ( m_ipcServer && msgId > 0 )
     {
       m_ipcServer->sendResponse( msgId, res );
@@ -104,13 +91,7 @@ void PythonAppInterfaceProxy::handleIpcMessage( const QJsonObject &message )
   else if ( method == QStringLiteral( "data.add_layer" ) )
   {
     QString path = params[QStringLiteral( "path" )].toString();
-    QString name = params[QStringLiteral( "name" )].toString();
-    bool ok = false;
-    if ( m_activeViewHost && !path.isEmpty() )
-    {
-      auto openRes = m_activeViewHost->openPath( path );
-      ok = static_cast<bool>( openRes );
-    }
+    bool ok = m_bridge.openPath( path );
     if ( m_ipcServer && msgId > 0 )
     {
       QJsonObject res;
@@ -121,24 +102,7 @@ void PythonAppInterfaceProxy::handleIpcMessage( const QJsonObject &message )
   }
   else if ( method == QStringLiteral( "canvas.get_state" ) )
   {
-    QJsonObject res;
-    if ( m_activeViewHost )
-    {
-      QgsRectangle extent = m_activeViewHost->mapCanvasExtent();
-      QJsonArray extentArr;
-      extentArr.append( extent.xMinimum() );
-      extentArr.append( extent.yMinimum() );
-      extentArr.append( extent.xMaximum() );
-      extentArr.append( extent.yMaximum() );
-
-      res[QStringLiteral( "extent" )] = extentArr;
-      res[QStringLiteral( "scale" )] = m_activeViewHost->mapCanvasScale();
-      res[QStringLiteral( "status" )] = QStringLiteral( "ok" );
-    }
-    else
-    {
-      res[QStringLiteral( "status" )] = QStringLiteral( "no_canvas" );
-    }
+    QJsonObject res = m_bridge.getCanvasViewportSummary().toJsonObject();
     if ( m_ipcServer && msgId > 0 )
     {
       m_ipcServer->sendResponse( msgId, res );
@@ -148,14 +112,30 @@ void PythonAppInterfaceProxy::handleIpcMessage( const QJsonObject &message )
   {
     QString title = params[QStringLiteral( "title" )].toString();
     QString text = params[QStringLiteral( "text" )].toString();
-    if ( m_activeViewHost )
+    // Worker may send level as string ("info"/"warning"/"critical"/"success") or int (Qgis::MessageLevel).
+    int level = 0;
+    const QJsonValue levelVal = params.value( QStringLiteral( "level" ) );
+    if ( levelVal.isString() )
     {
-      m_activeViewHost->pushMessageBarAlert( title, text, Qgis::MessageLevel::Info );
+      const QString levelStr = levelVal.toString().toLower();
+      if ( levelStr == QStringLiteral( "warning" ) || levelStr == QStringLiteral( "warn" ) )
+        level = static_cast<int>( Qgis::MessageLevel::Warning );
+      else if ( levelStr == QStringLiteral( "critical" ) || levelStr == QStringLiteral( "error" ) )
+        level = static_cast<int>( Qgis::MessageLevel::Critical );
+      else if ( levelStr == QStringLiteral( "success" ) )
+        level = static_cast<int>( Qgis::MessageLevel::Success );
+      else
+        level = static_cast<int>( Qgis::MessageLevel::Info );
     }
+    else if ( levelVal.isDouble() )
+    {
+      level = levelVal.toInt();
+    }
+    bool ok = m_bridge.pushMessageBarAlert( title, text, level );
     if ( m_ipcServer && msgId > 0 )
     {
       QJsonObject res;
-      res[QStringLiteral( "status" )] = QStringLiteral( "pushed" );
+      res[QStringLiteral( "status" )] = ok ? QStringLiteral( "pushed" ) : QStringLiteral( "failed" );
       m_ipcServer->sendResponse( msgId, res );
     }
   }

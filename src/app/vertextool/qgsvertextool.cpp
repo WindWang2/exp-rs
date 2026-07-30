@@ -78,7 +78,8 @@ static bool isEndpointAtVertexIndex( const QgsGeometry &geom, int vertexIndex )
     for ( int i = 0; i < multiCurve->numGeometries(); ++i )
     {
       const QgsCurve *part = multiCurve->curveN( i );
-      Q_ASSERT( part );
+      if ( !part )
+        continue;
       if ( vertexIndex < part->numPoints() )
         return vertexIndex == 0 || vertexIndex == part->numPoints() - 1;
       vertexIndex -= part->numPoints();

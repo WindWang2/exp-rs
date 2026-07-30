@@ -26,11 +26,16 @@ add_library(sicnu_processing SHARED
     framework/input_validator.cpp
     framework/algorithm_engine.cpp
     framework/algorithm_descriptor.cpp
+    framework/algorithm_provider_adapter.h
+    framework/qgs_processing_provider_adapter.cpp
+    framework/qgs_processing_provider_adapter.h
     framework/atomic_algorithm_adapter.cpp
     framework/atomic_algorithm_registry.cpp
+    ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator_context.cpp
+    ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator_error.cpp
     framework/python_algorithm_adapter.cpp
     framework/agent_tool_call_exporter.cpp
-    framework/agent_workflow_executor.cpp
+    # agent_workflow_executor.cpp lives in sicnu_task_center: it routes through TaskCenter/JobEngine.
     # task_center.cpp lives in sicnu_task_center (below): JobEngine link would
     # form a cycle if pulled into this shared lib (processing→jobs→operators→processing).
     framework/output_committer.cpp
@@ -160,6 +165,14 @@ target_link_libraries(sicnu_processing PUBLIC
 target_link_libraries(sicnu_processing PRIVATE
     Sicnu::data
 )
+if(TARGET jsoncpp)
+  target_link_libraries(sicnu_processing PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(sicnu_processing PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(sicnu_processing PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(sicnu_processing PRIVATE jsoncpp)
+endif()
 
 # Task Center (#26–#29): separate static lib so JobEngine can be linked without
 # a processing↔jobs↔operators cycle. OutputCommitter keeps only a TaskCenter*
@@ -167,6 +180,7 @@ target_link_libraries(sicnu_processing PRIVATE
 add_library(sicnu_task_center STATIC
     framework/task_center.cpp
     framework/atomic_algorithm_registry_task_center.cpp
+    framework/agent_workflow_executor.cpp
     # Task Center seam for OutputCommitter — kept out of sicnu_processing so
     # that library does not need JobEngine / TaskCenter link deps.
     framework/output_committer_task_center.cpp
@@ -180,6 +194,10 @@ target_link_libraries(sicnu_task_center PUBLIC
     qgis_core
     sicnu_processing
     sicnu_jobs
+    sicnu_workflow
+)
+set_target_properties(sicnu_task_center PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
 )
 
 install(TARGETS sicnu_processing

@@ -26,6 +26,9 @@ struct WorkflowDefinition;
 
 namespace sicnu {
 
+using JobExecutor = std::function<Json::Value(const sicnu::jobs::JobRequest&,
+                                               sicnu::operators::RSOperatorContext&)>;
+
 enum class TaskStatus {
     Queued,
     Running,
@@ -60,7 +63,10 @@ struct AlgorithmTaskInfo {
     Json::Value resultPayload;
     sicnu::jobs::JobRequest jobRequest;
     bool hasJobRequest = false;
+    JobExecutor jobExecutor;
     bool autoLoadLayer = true;
+    /// When true, processNextQueuedTasks submits the task to JobEngine once parents complete.
+    bool autoDispatch = false;
     QString outputLayerPath;
     QString stepId;
     long pipelineId = -1;
@@ -91,13 +97,14 @@ public:
                      const QVariantMap& params,
                      bool autoLoad = true,
                      TaskPriority priority = TaskPriority::Normal,
-                     const QList<long>& parentTaskIds = QList<long>());
+                     const QList<long>& parentTaskIds = QList<long>(),
+                     bool autoDispatch = false);
 
     long enqueueToolCall( const std::string &jsonToolCall,
                           bool autoLoad = true,
                           TaskPriority priority = TaskPriority::Normal );
 
-    /// Submit a DAG Task Pipeline for execution
+    /// Submit a DAG Task Pipeline for execution (auto-dispatched via JobEngine).
     long submitPipeline( const sicnu::workflow::WorkflowDefinition &def, bool autoLoad = true );
     long submitPipelineJson( const std::string &jsonPipeline, bool autoLoad = true );
 
@@ -141,18 +148,30 @@ private:
     TaskCenter(const TaskCenter&) = delete;
     TaskCenter& operator=(const TaskCenter&) = delete;
 
+    /// Must be called with m_mutex held. Stages auto-dispatch work into m_pendingLaunches.
     void processNextQueuedTasks();
-    QString substitutePlaceholders(const QString& val);
+    /// Must be called without m_mutex held.
+    void flushPendingLaunches();
+    void applyPlaceholdersForTask(long taskId);
+    void updatePipelineForTaskLocked(long taskId);
     long submitJobImpl(const sicnu::jobs::JobRequest& request,
                        JobExecutor executor,
                        CancelHook onCancel,
                        bool autoLoad);
     void watchSubmittedJob(long taskId, std::string jobId);
-    void resolveUpstreamPipelineParameters(long completedTaskId, const QString& outputPath);
+    static Json::Value variantMapToJsonParams(const QVariantMap& params);
+
+    struct PendingLaunch {
+        long taskId = -1;
+        sicnu::jobs::JobRequest request;
+        JobExecutor executor;
+        bool hasExecutor = false;
+    };
 
     mutable QMutex m_mutex;
     QMap<long, AlgorithmTaskInfo> m_tasks;
     QMap<long, PipelineExecutionInfo> m_pipelines;
+    QList<PendingLaunch> m_pendingLaunches;
     long m_nextTaskId = 1;
     long m_nextPipelineId = 1;
 };

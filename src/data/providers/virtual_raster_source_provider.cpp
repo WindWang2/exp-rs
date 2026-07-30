@@ -222,6 +222,13 @@ Result<internal::ResolvedSource> VirtualRasterSourceProvider::resolve(
   const QString recipeText = source.dataOptions.value( QStringLiteral( "recipe" ) );
   const QJsonDocument recipeDoc =
     QJsonDocument::fromJson( recipeText.toUtf8() );
+  if ( recipeDoc.isNull() || !recipeDoc.isObject() )
+  {
+    return Result<internal::ResolvedSource>::failure(
+      diagnostic( QStringLiteral( "virtual_raster.recipe_invalid" ),
+                  QStringLiteral( "The virtual raster descriptor carries no valid "
+                                  "recipe JSON" ) ) );
+  }
   const Result<VirtualRasterRecipe> recipeResult =
     VirtualRasterRecipe::fromJson( recipeDoc.object() );
   if ( !recipeResult )

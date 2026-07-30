@@ -156,6 +156,7 @@ class SatelliteProductsDiscoverer : public ProductDiscoverer
 /// into an `ImportPreview` without mutating the catalog. The `commit` step
 /// (atomic collection + child registration) arrives in #52; the constructor
 /// holds the DataManager so its signature is stable across both waves.
+
 class CollectionImportService : public QObject
 {
   // Q_OBJECT retained for parent-ownership consistency with OutputCommitter.
@@ -186,6 +187,16 @@ class CollectionImportService : public QObject
     /// this collection) and merely unparented on rollback. Returns a null
     /// `collectionId` and the failure diagnostics.
     CommitImportResult commit( const CommitImportRequest &request );
+
+    /// High-leverage one-step import seam: automatically probes @a sourcePath,
+    /// selects all discovered child bands, and commits the collection + child Data Assets
+    /// into DataManager in a single atomic transaction.
+    /// If @a autoLoad is true and @a pathOpener is provided, automatically
+    /// opens the primary child asset via the callback.
+    sicnu::data::Result<CommitImportResult> importCollection( const QString &sourcePath,
+                                                               sicnu::data::PersistencePolicy persistence = sicnu::data::PersistencePolicy::ProjectPersistent,
+                                                               bool autoLoad = false,
+                                                               std::function<void(const QString &path)> pathOpener = nullptr );
 
   private:
     sicnu::data::DataManager *m_dataManager; ///< Used by commit() (probe is read-only).

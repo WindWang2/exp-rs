@@ -1,4 +1,4 @@
-#include "algorithm_help_catalog.h"
+#include "processing/algorithm_help_catalog.h"
 #include <QHash>
 #include <QObject>
 

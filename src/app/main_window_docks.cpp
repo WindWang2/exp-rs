@@ -513,7 +513,7 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     auto *agentCopilotDock = new sicnu::agent::AgentCopilotDockWidget( this );
     addDockWidget( Qt::RightDockWidgetArea, agentCopilotDock );
     if ( m_projectContext )
-        agentCopilotDock->setContext( &m_projectContext->dataManager(), m_activeViewHost );
+        agentCopilotDock->setContext( &m_projectContext->dataManager(), m_activeViewHost.get() );
     agentCopilotDock->hide();
 
     connect( agentCopilotDock, &sicnu::agent::AgentCopilotDockWidget::viewPlanInCanvasRequested,

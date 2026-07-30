@@ -1,3 +1,4 @@
+#include <filesystem>
 #include "histogram_widget.h"
 #include "core/sicnu_logging.h"
 

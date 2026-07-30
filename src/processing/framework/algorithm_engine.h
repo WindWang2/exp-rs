@@ -34,7 +34,8 @@ public:
 
 class QgsProcessingAlgorithmAdapter : public TaskAlgorithmAdapter {
 public:
-    explicit QgsProcessingAlgorithmAdapter(std::unique_ptr<QgsProcessingAlgorithm> algo);
+    explicit QgsProcessingAlgorithmAdapter(std::unique_ptr<QgsProcessingAlgorithm> algo,
+                                           ProviderResourceProfile profile = ProviderResourceProfile::InProcessThread);
     ~QgsProcessingAlgorithmAdapter() override = default;
 
     AlgorithmDescriptor descriptor() const override;
@@ -45,6 +46,7 @@ public:
 
 private:
     std::unique_ptr<QgsProcessingAlgorithm> m_algo;
+    ProviderResourceProfile m_resourceProfile = ProviderResourceProfile::InProcessThread;
 };
 
 class AlgorithmEngine {

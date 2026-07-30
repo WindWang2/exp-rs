@@ -62,6 +62,8 @@ Json::Value workflowDefinitionToJson( const WorkflowDefinition &def )
       inputsArr.append( connVal );
     }
     stepVal["inputs"] = inputsArr;
+    if ( !step.params.isNull() )
+      stepVal["params"] = step.params;
 
     stepsArr.append( stepVal );
   }
@@ -147,6 +149,9 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
           step.inputs.push_back( conn );
         }
       }
+
+      if ( stepVal.isMember( "params" ) )
+        step.params = stepVal["params"];
 
       def.steps.push_back( step );
     }

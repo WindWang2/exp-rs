@@ -3,6 +3,8 @@
 
 #include "qgisinterface.h"
 
+#include "app_interface_bridge.h"
+
 class QWidget;
 class QgsMapCanvas;
 class QgsLayerTreeView;
@@ -28,22 +30,28 @@ class SicnuAppInterface : public QgisInterface
     Q_OBJECT
 
 public:
+    /// Single-seam facade (ADR 0015): GIS shell state flows only through @a activeViewHost.
+    /// @a mainWindow remains for plugin menu/toolbar hosting; @a projectContext is optional
+    /// for display-manager lookups after openPath.
     explicit SicnuAppInterface( QWidget *mainWindow = nullptr,
                                 ActiveViewHost *activeViewHost = nullptr,
                                 sicnu::app::ProjectContext *projectContext = nullptr,
-                                QgsMapCanvas *canvas = nullptr,
-                                QgsMessageBar *messageBar = nullptr,
                                 QObject *parent = nullptr );
 
     ~SicnuAppInterface() override = default;
 
-    void setActiveViewHost( ActiveViewHost *host ) { m_activeViewHost = host; }
+    void setActiveViewHost( ActiveViewHost *host )
+    {
+      m_activeViewHost = host;
+      m_bridge.setActiveViewHost( host );
+    }
     ActiveViewHost *activeViewHost() const { return m_activeViewHost; }
+
+    sicnu::python::isolated::AppInterfaceBridge &bridge() { return m_bridge; }
+    const sicnu::python::isolated::AppInterfaceBridge &bridge() const { return m_bridge; }
 
     void setProjectContext( sicnu::app::ProjectContext *context ) { m_projectContext = context; }
     sicnu::app::ProjectContext *projectContext() const { return m_projectContext; }
-
-    void setMessageBar( QgsMessageBar *bar ) { m_messageBar = bar; }
 
     // ── QGIS Interface Implementations ─────────────────────────────────
     QgsPluginManagerInterface *pluginManagerInterface() override { return nullptr; }
@@ -331,9 +339,8 @@ public:
 private:
     QWidget *m_mainWindow = nullptr;
     ActiveViewHost *m_activeViewHost = nullptr;
+    sicnu::python::isolated::AppInterfaceBridge m_bridge;
     sicnu::app::ProjectContext *m_projectContext = nullptr;
-    QgsMapCanvas *m_canvas = nullptr;
-    QgsMessageBar *m_messageBar = nullptr;
 
     QMenu *m_pluginMenu = nullptr;
     QToolBar *m_pluginToolBar = nullptr;

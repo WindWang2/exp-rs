@@ -157,6 +157,7 @@ void StacClient::search(const QString &endpoint, const QString &collection,
     const QUrl url = buildSearchUrl(endpoint, collection, datetime, bbox);
 
     QNetworkRequest request(url);
+    request.setTransferTimeout(10000);
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::UserVerifiedRedirectPolicy);

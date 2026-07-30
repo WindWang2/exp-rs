@@ -264,7 +264,30 @@ TEST_CASE("TaskCenter - Running cancellation waits for the worker terminal state
     REQUIRE(sicnu::TaskCenter::instance().getTaskInfo(taskId).status == sicnu::TaskStatus::Canceled);
 }
 
-TEST_CASE("TaskCenter - Native submitPipeline and $stepId.output Placeholder Resolution", "[processing][task_center][pipeline]") {
+TEST_CASE("TaskCenter - Native submitPipeline dispatches DAG and resolves $stepId.output", "[processing][task_center][pipeline]") {
+    auto& engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+
+    std::string observedStep2Input;
+    engine.registerExecutor("pipe:step1", [](const sicnu::jobs::JobRequest& req, sicnu::operators::RSOperatorContext& context) {
+        context.logInfo("step1 done");
+        Json::Value result(Json::objectValue);
+        if (req.params.isMember("output") && req.params["output"].isString())
+            result["output"] = req.params["output"].asString();
+        else
+            result["output"] = "/tmp/step1_ndvi.tif";
+        return result;
+    });
+    engine.registerExecutor("pipe:step2", [&](const sicnu::jobs::JobRequest& req, sicnu::operators::RSOperatorContext& context) {
+        context.logInfo("step2 done");
+        if (req.params.isMember("input") && req.params["input"].isString())
+            observedStep2Input = req.params["input"].asString();
+        Json::Value result(Json::objectValue);
+        result["output"] = "/tmp/step2_blur.tif";
+        return result;
+    });
+
     auto& center = sicnu::TaskCenter::instance();
 
     sicnu::workflow::WorkflowDefinition def;
@@ -275,25 +298,26 @@ TEST_CASE("TaskCenter - Native submitPipeline and $stepId.output Placeholder Res
     step1.id = "step1";
     step1.title = "Step 1 Operator";
     step1.kind = sicnu::workflow::StepKind::Operator;
-    step1.operatorId = "rs:spectral_index";
+    step1.operatorId = "pipe:step1";
     step1.params["output"] = "/tmp/step1_ndvi.tif";
 
     sicnu::workflow::StepDef step2;
     step2.id = "step2";
     step2.title = "Step 2 Operator";
     step2.kind = sicnu::workflow::StepKind::Operator;
-    step2.operatorId = "opencv:gaussian_blur";
+    step2.operatorId = "pipe:step2";
     step2.params["input"] = "$step1.output";
     step2.params["output"] = "/tmp/step2_blur.tif";
 
+    sicnu::workflow::StepConnection conn;
+    conn.fromStepId = "step1";
+    conn.fromPort = "output";
+    conn.toPort = "input";
+    step2.inputs.push_back( conn );
+
     def.steps = { step1, step2 };
 
-    sicnu::workflow::StepConnection conn;
-    conn.sourceStepId = "step1";
-    conn.targetStepId = "step2";
-    def.connections = { conn };
-
-    long pId = center.submitPipeline(def);
+    long pId = center.submitPipeline(def, /*autoLoad=*/false);
     REQUIRE(pId > 0);
 
     auto pipeInfo = center.getPipelineInfo(pId);
@@ -304,10 +328,33 @@ TEST_CASE("TaskCenter - Native submitPipeline and $stepId.output Placeholder Res
     long s1TaskId = pipeInfo.stepToTaskId["step1"];
     long s2TaskId = pipeInfo.stepToTaskId["step2"];
 
-    QVariantMap s1Results;
-    s1Results["output"] = "/tmp/step1_ndvi.tif";
-    center.markTaskCompleted(s1TaskId, s1Results);
+    // Root step must auto-dispatch (not remain Queued forever).
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        auto st = center.getTaskInfo(s1TaskId).status;
+        if (st == sicnu::TaskStatus::Running || st == sicnu::TaskStatus::Completed || st == sicnu::TaskStatus::Failed)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    {
+        auto st = center.getTaskInfo(s1TaskId).status;
+        REQUIRE((st == sicnu::TaskStatus::Running || st == sicnu::TaskStatus::Completed || st == sicnu::TaskStatus::Failed));
+    }
 
-    auto s2Info = center.getTaskInfo(s2TaskId);
-    REQUIRE(s2Info.parameterMap.value("input").toString() == "/tmp/step1_ndvi.tif");
+    engine.waitUntilIdleForTests();
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        auto info = center.getPipelineInfo(pId);
+        if (info.isCompleted)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    pipeInfo = center.getPipelineInfo(pId);
+    REQUIRE(pipeInfo.isCompleted);
+    REQUIRE_FALSE(pipeInfo.isFailed);
+    REQUIRE(center.getTaskInfo(s1TaskId).status == sicnu::TaskStatus::Completed);
+    REQUIRE(center.getTaskInfo(s2TaskId).status == sicnu::TaskStatus::Completed);
+    REQUIRE(observedStep2Input == "/tmp/step1_ndvi.tif");
+    REQUIRE(center.getTaskInfo(s2TaskId).parameterMap.value("input").toString() == QStringLiteral("/tmp/step1_ndvi.tif"));
+
+    engine.clearExecutors();
 }

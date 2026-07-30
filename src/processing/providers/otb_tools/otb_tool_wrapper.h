@@ -4,7 +4,7 @@
 #include <processing/qgsprocessingalgorithm.h>
 #include <QProcess>
 
-#include "algorithm_help_catalog.h"
+#include "processing/algorithm_help_catalog.h"
 
 class OtbToolWrapper : public QgsProcessingAlgorithm
 {

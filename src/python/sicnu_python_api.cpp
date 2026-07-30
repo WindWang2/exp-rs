@@ -74,44 +74,26 @@ int SicnuPythonApi::layerCount() const
 
 QString SicnuPythonApi::addRasterLayer(const QString &path, const QString &name)
 {
-    if (m_activeViewHost) {
-        const auto res = m_activeViewHost->openRasterPath(path);
-        if (res) {
-            return QFileInfo(path).baseName();
-        }
+    Q_UNUSED(name);
+    // Data/Display seam (ADR 0009/0010/0015): ActiveViewHost only — no QgsProject::addMapLayer fallback.
+    if (!m_activeViewHost || path.isEmpty())
         return QString();
-    }
-    // Fallback when no active view host bound (headless tests)
-    QString layerName = name.isEmpty() ? QFileInfo(path).baseName() : name;
-    auto *layer = new QgsRasterLayer(path, layerName);
-    if (!layer->isValid()) {
-        delete layer;
+    const auto res = m_activeViewHost->openRasterPath(path);
+    if (!res)
         return QString();
-    }
-    QgsProject::instance()->addMapLayer(layer);
-    if (m_canvas) m_canvas->refresh();
-    return layer->name();
+    return QFileInfo(path).baseName();
 }
 
 QString SicnuPythonApi::addVectorLayer(const QString &path, const QString &name)
 {
-    if (m_activeViewHost) {
-        const auto res = m_activeViewHost->openVectorPath(path);
-        if (res) {
-            return QFileInfo(path).baseName();
-        }
+    Q_UNUSED(name);
+    // Data/Display seam (ADR 0009/0010/0015): ActiveViewHost only — no QgsProject::addMapLayer fallback.
+    if (!m_activeViewHost || path.isEmpty())
         return QString();
-    }
-    // Fallback when no active view host bound (headless tests)
-    QString layerName = name.isEmpty() ? QFileInfo(path).baseName() : name;
-    auto *layer = new QgsVectorLayer(path, layerName, "ogr");
-    if (!layer->isValid()) {
-        delete layer;
+    const auto res = m_activeViewHost->openVectorPath(path);
+    if (!res)
         return QString();
-    }
-    QgsProject::instance()->addMapLayer(layer);
-    if (m_canvas) m_canvas->refresh();
-    return layer->name();
+    return QFileInfo(path).baseName();
 }
 
 bool SicnuPythonApi::removeLayer(const QString &layerName)

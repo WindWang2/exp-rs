@@ -280,7 +280,8 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
 
   Json::Value resultPayload = m_workflowExecutor.executeToolCall( cppToolCall );
 
-  QJsonObject resultJson = QJsonDocument::fromJson( QByteArray::fromStdString( resultPayload.toStyledString() ) ).object();
+  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( resultPayload.toStyledString() ) );
+  QJsonObject resultJson = doc.isObject() ? doc.object() : QJsonObject();
   emit toolExecutionFinished( resultJson );
 }
 
@@ -343,7 +344,8 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
     Json::parseFromStream( builder, sstream, &cppPlan, &errs );
 
     Json::Value resultPayload = m_workflowExecutor.executeAgentPlan( cppPlan );
-    QJsonObject resultJson = QJsonDocument::fromJson( QByteArray::fromStdString( resultPayload.toStyledString() ) ).object();
+    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( resultPayload.toStyledString() ) );
+    QJsonObject resultJson = doc.isObject() ? doc.object() : QJsonObject();
     emit toolExecutionFinished( resultJson );
   } );
 }

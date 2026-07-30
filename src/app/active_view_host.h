@@ -6,11 +6,12 @@
 #include <QList>
 
 #include "qgis.h"
+#include <qgsmapcanvas.h>
+#include <qgsrectangle.h>
 #include "data/asset_types.h"
 #include "display/qgis_display_manager.h"
 
 class QWidget;
-class QgsMapCanvas;
 class QgsMessageBar;
 class QgsLayerTreeView;
 class QgsLayerTreeModel;
@@ -70,8 +71,9 @@ class ActiveViewHost : public QObject
 
     // ── Shell facade methods ──────────────────────────────────────────
     void pushMessageBarAlert( const QString &title, const QString &text, Qgis::MessageLevel level = Qgis::MessageLevel::Info );
-    QgsRectangle mapCanvasExtent() const;
-    double mapCanvasScale() const;
+    QgsRectangle mapCanvasExtent() const { return m_mapCanvas ? m_mapCanvas->extent() : QgsRectangle(); }
+    double mapCanvasScale() const { return m_mapCanvas ? m_mapCanvas->scale() : 1.0; }
+    QString mapCanvasCrsAuthId() const { return m_mapCanvas ? m_mapCanvas->mapSettings().destinationCrs().authid() : QString(); }
 
     // ── Layer tree (active / main QGIS tree for main view) ────────────
     void initLayerTree();
@@ -104,8 +106,16 @@ class ActiveViewHost : public QObject
     void removeSelectedLayers() { removeSelectedDisplayLayers(); }
     void refreshCanvasLayers();
 
-    QgsMapLayer *activeLayer();
-    QList<QgsMapLayer *> selectedLayers();
+    /// Prefer the map canvas current layer; fall back to the first layer-tree selection.
+    QgsMapLayer *activeLayer() const;
+    /// Inline-safe name query for agent snapshot capture (no app .cpp link required).
+    QString activeLayerName() const
+    {
+      if ( m_mapCanvas && m_mapCanvas->currentLayer() )
+        return m_mapCanvas->currentLayer()->name();
+      return QString();
+    }
+    QList<QgsMapLayer *> selectedLayers() const;
 
   private:
     QgsMapCanvas *m_mapCanvas = nullptr;

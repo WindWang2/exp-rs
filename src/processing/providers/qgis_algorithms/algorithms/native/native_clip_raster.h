@@ -3,7 +3,7 @@
 
 #include <memory>
 #include <processing/qgsprocessingalgorithm.h>
-#include "algorithm_help_catalog.h"
+#include "processing/algorithm_help_catalog.h"
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsrasterlayer.h>

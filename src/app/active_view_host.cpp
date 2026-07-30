@@ -68,15 +68,7 @@ void ActiveViewHost::pushMessageBarAlert( const QString &title, const QString &t
     }
 }
 
-QgsRectangle ActiveViewHost::mapCanvasExtent() const
-{
-    return m_mapCanvas ? m_mapCanvas->extent() : QgsRectangle();
-}
 
-double ActiveViewHost::mapCanvasScale() const
-{
-    return m_mapCanvas ? m_mapCanvas->scale() : 1.0;
-}
 
 bool ActiveViewHost::setActiveViewId( sicnu::display::DisplayViewId viewId )
 {
@@ -411,15 +403,17 @@ void ActiveViewHost::refreshCanvasLayers()
 // Queries
 // ---------------------------------------------------------------------------
 
-QgsMapLayer *ActiveViewHost::activeLayer()
+
+
+QgsMapLayer *ActiveViewHost::activeLayer() const
 {
     if ( m_mapCanvas && m_mapCanvas->currentLayer() )
         return m_mapCanvas->currentLayer();
-    QList<QgsMapLayer *> layers = selectedLayers();
+    const QList<QgsMapLayer *> layers = selectedLayers();
     return layers.isEmpty() ? nullptr : layers.first();
 }
 
-QList<QgsMapLayer *> ActiveViewHost::selectedLayers()
+QList<QgsMapLayer *> ActiveViewHost::selectedLayers() const
 {
     QList<QgsMapLayer *> result;
     if ( !m_layerTreeView || !m_layerTreeView->selectionModel() )

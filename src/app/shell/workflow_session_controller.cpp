@@ -443,8 +443,17 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
         error = tr( "运行失败" );
     }
     emit stepStatusChanged( targetStepId, "failed" );
-    if ( m_panel && isSingleJob )
+    if ( isPipelineJob )
+    {
+      m_runInFlight = false;
+      m_activePipelineId = -1;
+      if ( m_panel )
+        m_panel->setFailed( error );
+    }
+    else if ( m_panel && isSingleJob )
+    {
       m_panel->setFailed( error );
+    }
     emit statusMessage( error );
     return;
   }
@@ -472,7 +481,7 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
   bool shouldLoadToMap = m_pendingLoadToMap;
   if ( m_canvas && m_canvas->pipelineScene() )
   {
-    auto *nodeItem = m_canvas->pipelineScene()->findNode( m_activeStepId );
+    auto *nodeItem = m_canvas->pipelineScene()->findNode( targetStepId );
     if ( nodeItem )
     {
       for ( auto *outPort : nodeItem->outputPorts() )
@@ -489,18 +498,34 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
   if ( shouldLoadToMap && !outputPath.isEmpty() )
     emit requestLoadRaster( outputPath );
 
+  if ( isPipelineJob )
+  {
+    const auto pipeInfo = sicnu::TaskCenter::instance().getPipelineInfo( m_activePipelineId );
+    if ( pipeInfo.isCompleted )
+    {
+      m_runInFlight = false;
+      m_activePipelineId = -1;
+      const QString msg = pipeInfo.isFailed
+                            ? tr( "工作流结束（有步骤失败）" )
+                            : tr( "工作流全流程运行完成！" );
+      if ( m_panel )
+      {
+        if ( pipeInfo.isFailed )
+          m_panel->setFailed( msg );
+        else
+          m_panel->setSuccess( msg );
+      }
+      emit statusMessage( msg );
+    }
+    return;
+  }
+
   const QString msg = outputPath.isEmpty()
                         ? tr( "运行成功" )
                         : tr( "运行成功：%1" ).arg( outputPath );
   if ( m_panel )
     m_panel->setSuccess( msg );
   emit statusMessage( msg );
-
-  if ( m_isBatchExecuting )
-  {
-    m_currentQueueIndex++;
-    runNextQueuedStep();
-  }
 }
 
 void WorkflowSessionController::applyJobResultToSession( const std::string &sessionId,

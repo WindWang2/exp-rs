@@ -38,6 +38,7 @@ struct StepDef {
   std::string artifactOnSuccess = "output"; // default artifact name from operator result["output"]
   StepUiMeta uiMeta;
   std::vector<StepConnection> inputs; // incoming dependency edges
+  Json::Value params; // default or configured operator parameters
 };
 
 struct WorkflowDefinition {

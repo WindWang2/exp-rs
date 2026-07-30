@@ -94,7 +94,8 @@ void QgsSelectByFormDialog::flashFeatures( const QString &filter )
 
 void QgsSelectByFormDialog::openFeaturesAttributeTable( const QString &filter )
 {
-  Q_ASSERT( mLayer );
+  if ( !mLayer )
+    return;
   QgsFeatureIterator it = mLayer->getFeatures( filter );
   QgsFeature f;
   if ( it.isValid() && it.nextFeature( f ) )

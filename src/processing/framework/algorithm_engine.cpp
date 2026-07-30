@@ -3,6 +3,7 @@
 #include <processing/qgsprocessingregistry.h>
 #include <QSettings>
 
+#include "qgs_processing_provider_adapter.h"
 #include "providers/gdal_tools/provider.h"
 #include "providers/otb_tools/provider.h"
 #include "providers/qgis_algorithms/provider.h"
@@ -11,8 +12,10 @@
 
 namespace sicnu {
 
-QgsProcessingAlgorithmAdapter::QgsProcessingAlgorithmAdapter(std::unique_ptr<QgsProcessingAlgorithm> algo)
+QgsProcessingAlgorithmAdapter::QgsProcessingAlgorithmAdapter(std::unique_ptr<QgsProcessingAlgorithm> algo,
+                                                             ProviderResourceProfile profile)
     : m_algo(std::move(algo))
+    , m_resourceProfile(profile)
 {
 }
 
@@ -24,6 +27,7 @@ AlgorithmDescriptor QgsProcessingAlgorithmAdapter::descriptor() const
         desc.name = m_algo->displayName();
         desc.group = m_algo->group();
         desc.description = m_algo->shortDescription();
+        desc.resourceProfile = m_resourceProfile;
     }
     return desc;
 }
@@ -121,19 +125,36 @@ void AlgorithmEngine::initialize()
     if ( !otbPath.isEmpty() )
         ToolPathManager::instance().setOtbPath( otbPath );
 
-    if (QgsApplication::processingRegistry()) {
-        QObject::connect( QgsApplication::processingRegistry(), &QgsProcessingRegistry::providerAdded, [this]( const QString &providerId ) {
-            Q_UNUSED( providerId );
-            populateFromProcessingRegistry();
-        } );
-
-        QgsApplication::processingRegistry()->addProvider(new GdalToolsProvider());
-        QgsApplication::processingRegistry()->addProvider(new OtbToolsProvider());
-        QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
-        QgsApplication::processingRegistry()->addProvider(new GenericCliProvider());
+    if ( QgsApplication::processingRegistry() )
+    {
+        QObject::connect( QgsApplication::processingRegistry(), &QgsProcessingRegistry::providerAdded,
+                          [this]( const QString &providerId ) {
+                            Q_UNUSED( providerId );
+                            // Keep legacy bulk population for providers added outside this seam.
+                            populateFromProcessingRegistry();
+                          } );
     }
 
-    populateFromProcessingRegistry();
+    // Deep AlgorithmProviderAdapter seam: each backend declares a resource profile.
+    registerProvider( std::make_shared<QgsProcessingProviderAdapter>(
+      QStringLiteral( "gdal_tools" ), QStringLiteral( "GDAL Tools" ),
+      ProviderResourceProfile::ExternalCliSubprocess,
+      []() -> QgsProcessingProvider * { return new GdalToolsProvider(); } ) );
+
+    registerProvider( std::make_shared<QgsProcessingProviderAdapter>(
+      QStringLiteral( "otb_tools" ), QStringLiteral( "OTB Tools" ),
+      ProviderResourceProfile::ExternalCliSubprocess,
+      []() -> QgsProcessingProvider * { return new OtbToolsProvider(); } ) );
+
+    registerProvider( std::make_shared<QgsProcessingProviderAdapter>(
+      QStringLiteral( "qgis_algorithms" ), QStringLiteral( "QGIS Algorithms" ),
+      ProviderResourceProfile::QgsTaskThread,
+      []() -> QgsProcessingProvider * { return new QgisAlgorithmsProvider(); } ) );
+
+    registerProvider( std::make_shared<QgsProcessingProviderAdapter>(
+      QStringLiteral( "custom_tools" ), QStringLiteral( "Generic CLI" ),
+      ProviderResourceProfile::ExternalCliSubprocess,
+      []() -> QgsProcessingProvider * { return new GenericCliProvider(); } ) );
 }
 
 void AlgorithmEngine::populateFromProcessingRegistry()
@@ -172,6 +193,7 @@ bool AlgorithmEngine::executeAlgorithm(const QString& id, const QVariantMap& par
 void AlgorithmEngine::clear()
 {
     m_adapters.clear();
+    m_providers.clear();
 }
 
 } // namespace sicnu

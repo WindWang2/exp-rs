@@ -35,6 +35,7 @@ function(sicnu_add_test NAME)
     sicnu_jobs
     sicnu_task_center
     sicnu_agent
+    sicnu_operators
   )
   target_include_directories(${NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -53,7 +54,29 @@ sicnu_add_test(test_task_center)
 sicnu_add_test(test_atomic_algorithm_adapter)
 sicnu_add_test(test_atomic_algorithm_registry)
 sicnu_add_test(test_agent_workflow_executor)
-sicnu_add_test(test_workspace_snapshot)
+
+# WorkspaceSnapshot capture needs ActiveViewHost translation unit + display types.
+qt_add_executable(test_workspace_snapshot
+  test_workspace_snapshot.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp
+)
+target_link_libraries(test_workspace_snapshot PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_agent
+  Sicnu::qgis_display
+)
+target_include_directories(test_workspace_snapshot PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_workspace_snapshot)
 
 # #35 — UI callers must not bypass Task Center; task views are projections.
 add_executable(test_ui_task_center_contract test_ui_task_center_contract.cpp)
@@ -451,6 +474,7 @@ target_link_libraries(test_processing PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
+  sicnu_operators
 )
 target_include_directories(test_processing PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -468,6 +492,7 @@ target_link_libraries(test_algorithm_organization PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
+  sicnu_operators
 )
 target_include_directories(test_algorithm_organization PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -485,6 +510,7 @@ target_link_libraries(test_toolbox_coverage PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
+  sicnu_operators
 )
 target_include_directories(test_toolbox_coverage PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -502,6 +528,7 @@ target_link_libraries(test_generic_cli_manifest PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
+  sicnu_operators
 )
 target_include_directories(test_generic_cli_manifest PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -2688,6 +2715,7 @@ target_link_libraries(test_python_engine PRIVATE
   CURL::libcurl
   ${PCRE2_16}
   ${PCRE2_8}
+  xml2
 )
 target_include_directories(test_python_engine PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -2712,6 +2740,7 @@ qt_add_executable(test_python_plugin_manager
   ${CMAKE_SOURCE_DIR}/src/python/isolated/python_ipc_server.cpp
   ${CMAKE_SOURCE_DIR}/src/python/isolated/python_worker_process.cpp
   ${CMAKE_SOURCE_DIR}/src/python/isolated/shared_memory_segment.cpp
+  ${CMAKE_SOURCE_DIR}/src/python/isolated/app_interface_bridge.cpp
   ${CMAKE_SOURCE_DIR}/src/python/isolated/python_app_interface_proxy.cpp
   ${CMAKE_SOURCE_DIR}/src/python/isolated/python_worker_process_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/core/plugin_manager.cpp

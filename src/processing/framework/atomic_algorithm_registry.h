@@ -72,6 +72,11 @@ public:
    */
   void registerBuiltinRsOperators();
 
+  /**
+   * Registers a provider callback that populates RSOperators into this registry.
+   */
+  static void setRsOperatorProvider( std::function<void(AtomicAlgorithmRegistry&)> provider );
+
 private:
   AtomicAlgorithmRegistry();
   ~AtomicAlgorithmRegistry() = default;

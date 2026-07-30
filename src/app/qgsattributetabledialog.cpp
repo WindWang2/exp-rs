@@ -634,7 +634,8 @@ void QgsAttributeTableDialog::runFieldCalculation( QgsVectorLayer *layer, const 
 void QgsAttributeTableDialog::layerActionTriggered()
 {
   QAction *qAction = qobject_cast<QAction *>( sender() );
-  Q_ASSERT( qAction );
+  if ( !qAction )
+    return;
 
   QgsAction action = qAction->data().value<QgsAction>();
 

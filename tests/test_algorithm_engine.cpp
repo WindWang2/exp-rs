@@ -72,3 +72,31 @@ TEST_CASE("AlgorithmEngine - Parameter Validation", "[processing][algorithm_engi
     REQUIRE_FALSE(unregisteredValid);
     REQUIRE(error.contains(QStringLiteral("Algorithm not registered")));
 }
+
+TEST_CASE("AlgorithmEngine - AlgorithmProviderAdapter registration seam", "[processing][algorithm_engine][provider]") {
+    auto& engine = sicnu::AlgorithmEngine::instance();
+    engine.clear();
+
+    class StubProviderAdapter : public sicnu::AlgorithmProviderAdapter {
+    public:
+        QString providerId() const override { return QStringLiteral("stub_provider"); }
+        QString providerName() const override { return QStringLiteral("Stub Provider"); }
+        sicnu::ProviderResourceProfile resourceProfile() const override {
+            return sicnu::ProviderResourceProfile::InProcessThread;
+        }
+        void initialize() override { m_initialized = true; }
+        void discoverAlgorithms(sicnu::AlgorithmEngine &eng) override {
+            eng.registerAlgorithm(std::make_shared<DummyCustomTaskAdapter>());
+        }
+        bool m_initialized = false;
+    };
+
+    auto provider = std::make_shared<StubProviderAdapter>();
+    engine.registerProvider(provider);
+
+    REQUIRE(provider->m_initialized);
+    REQUIRE(engine.registeredProviders().size() == 1);
+    REQUIRE(engine.registeredProviders().first()->providerId() == QStringLiteral("stub_provider"));
+    REQUIRE(engine.findAlgorithm(QStringLiteral("dummy_custom_algo")) != nullptr);
+    REQUIRE(engine.registeredAlgorithms().first().id == QStringLiteral("dummy_custom_algo"));
+}

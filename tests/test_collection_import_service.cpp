@@ -698,3 +698,75 @@ TEST_CASE( "An adopted standalone asset survives a rollback as a standalone asse
   CHECK( manager.collections().isEmpty() );
   CHECK( manager.assets().size() == 1 );
 }
+
+TEST_CASE( "CollectionImportService importCollection provides a one-step probe and commit seam",
+           "[collection_import][import_collection]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  const QString path1 = stageRaster( dir, QStringLiteral( "band1.tif" ) );
+  const QString path2 = stageRaster( dir, QStringLiteral( "band2.tif" ) );
+
+  DiscoveredProduct product;
+  product.spacecraft = QStringLiteral( "Sentinel-2" );
+  product.processingLevel = QStringLiteral( "L2A" );
+
+  DiscoveredGridGroup group;
+  group.gridLabel = QStringLiteral( "10m" );
+  group.displayName = QStringLiteral( "10m group" );
+  group.sourcePath = path1;
+
+  SatelliteProducts::BandFile band1;
+  band1.name = QStringLiteral( "B04" );
+  band1.path = path1;
+  group.bands.append( band1 );
+
+  SatelliteProducts::BandFile band2;
+  band2.name = QStringLiteral( "B08" );
+  band2.path = path2;
+  group.bands.append( band2 );
+
+  product.gridGroups.append( group );
+
+  StubDiscoverer discoverer;
+  discoverer.product = product;
+
+  CollectionImportService service( &manager, &discoverer );
+
+  SECTION( "One-step import automatically probes and commits all discovered children" )
+  {
+    auto res = service.importCollection( path1 );
+    REQUIRE( res );
+    const CommitImportResult commitRes = res.value();
+    CHECK( !commitRes.collectionId.isNull() );
+    CHECK( commitRes.childAssetIds.size() == 1 );
+
+    CHECK( manager.collections().size() == 1 );
+    CHECK( manager.assets().size() == 1 );
+  }
+
+  SECTION( "Failed discoverer propagates failure diagnostics cleanly" )
+  {
+    StubDiscoverer failDiscoverer;
+    failDiscoverer.failMessage = QStringLiteral( "File not found" );
+
+    CollectionImportService failService( &manager, &failDiscoverer );
+    auto res = failService.importCollection( QStringLiteral( "/bogus/path.tif" ) );
+    CHECK_FALSE( res );
+    CHECK( manager.collections().isEmpty() );
+    CHECK( manager.assets().isEmpty() );
+  }
+
+  SECTION( "autoLoad invokes pathOpener with the primary child path" )
+  {
+    QString openedPath;
+    auto res = service.importCollection(
+      path1,
+      sicnu::data::PersistencePolicy::ProjectPersistent,
+      /*autoLoad=*/true,
+      [&]( const QString &path ) { openedPath = path; } );
+    REQUIRE( res );
+    CHECK_FALSE( openedPath.isEmpty() );
+  }
+}
+

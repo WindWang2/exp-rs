@@ -6,6 +6,13 @@
 #include <QList>
 #include <QString>
 
+namespace sicnu::data
+{
+class DataManager;
+}
+
+class ActiveViewHost;
+
 namespace sicnu::agent
 {
 
@@ -34,6 +41,8 @@ struct WorkspaceSnapshot
 {
     QList<DataAssetInfo> assets;
     MapViewSnapshot mapView;
+
+    static WorkspaceSnapshot capture( data::DataManager *dataManager, ActiveViewHost *viewHost = nullptr );
 
     QJsonObject toJson() const;
     QString toSystemPromptHeader() const;

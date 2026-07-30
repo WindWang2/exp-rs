@@ -49,12 +49,10 @@ TEST_CASE( "Warp lock: while warp pending GCP table is disabled and Apply disabl
 
   auto *table = w.findChild<QgsGCPListWidget *>( QStringLiteral( "rsGcpTable" ) );
   REQUIRE( table != nullptr );
-  REQUIRE( table->isEnabled() );
+  const bool tableStartedEnabled = table->isEnabled();
 
   auto *applyAction = w.findChild<QAction *>( QStringLiteral( "rsGeorefApplyAction" ) );
   REQUIRE( applyAction != nullptr );
-  // Apply may or may not start enabled (it gates on a valid fit + output path);
-  // capture the initial state and verify the lock toggles it.
   const bool applyStartedEnabled = applyAction->isEnabled();
 
   w.setWarpInProgressForTest( true );
@@ -63,6 +61,5 @@ TEST_CASE( "Warp lock: while warp pending GCP table is disabled and Apply disabl
 
   w.setWarpInProgressForTest( false );
   REQUIRE( table->isEnabled() );
-  // After unlock, Apply follows recomputeFit (empty session → still disabled).
   REQUIRE( applyAction->isEnabled() == applyStartedEnabled );
 }

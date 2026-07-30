@@ -41,6 +41,7 @@ qt_add_library(qgis_app_classify STATIC
     # Classification workflow — stepper bar + step host skeleton.
     rs_classify_stepper_bar.cpp
     ../dialogs/dialog_help_catalog.cpp
+    ../dialogs/dialog_utils.cpp
     rs_classify_step_host.cpp
     # Classification workflow — post-process task + dialog.
     rs_post_process_task.cpp

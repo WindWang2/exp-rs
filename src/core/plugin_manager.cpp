@@ -1,6 +1,6 @@
 #include "plugin_manager.h"
 #include "app/python/python_plugin_adapter.h"
-#include "python_worker_process_pool.h"
+#include "python/isolated/python_worker_process_pool.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -133,12 +133,32 @@ bool PluginManager::loadPythonPlugin(const QString &pluginDir)
     const QString version = metadata.value(QStringLiteral("version"), QStringLiteral("1.0"));
 
     if (!m_pythonPool) {
-        QString scriptPath = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../src/python/scripts/worker_daemon.py"));
-        if (!QFileInfo::exists(scriptPath)) {
-            scriptPath = QDir::current().filePath(QStringLiteral("src/python/scripts/worker_daemon.py"));
+        // Resolve worker_daemon.py from common layouts: installed app, source tree
+        // relative to the test binary, and cwd when developing from the repo root.
+        const QStringList candidates = {
+            QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../src/python/scripts/worker_daemon.py")),
+            QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../../src/python/scripts/worker_daemon.py")),
+            QDir::current().filePath(QStringLiteral("src/python/scripts/worker_daemon.py")),
+            QDir::current().filePath(QStringLiteral("../src/python/scripts/worker_daemon.py")),
+        };
+        QString scriptPath;
+        for (const QString &candidate : candidates) {
+            if (QFileInfo::exists(candidate)) {
+                scriptPath = QFileInfo(candidate).absoluteFilePath();
+                break;
+            }
+        }
+        if (scriptPath.isEmpty()) {
+            qWarning() << "PluginManager: worker_daemon.py not found; Python plugins cannot load";
+            return false;
         }
         m_pythonPool = new PythonWorkerProcessPool(2, this);
-        m_pythonPool->initialize(QString(), scriptPath);
+        if (!m_pythonPool->initialize(QString(), scriptPath)) {
+            qWarning() << "PluginManager: PythonWorkerProcessPool initialize failed:" << scriptPath;
+            delete m_pythonPool;
+            m_pythonPool = nullptr;
+            return false;
+        }
         m_ownsPythonPool = true;
     }
 

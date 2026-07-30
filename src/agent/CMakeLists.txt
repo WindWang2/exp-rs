@@ -22,6 +22,7 @@ target_link_libraries(sicnu_agent PUBLIC
   qgis_gui
   sicnu_data
   sicnu_processing
+  sicnu_task_center
 )
 
 target_include_directories(sicnu_agent PUBLIC

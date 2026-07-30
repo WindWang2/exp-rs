@@ -9,6 +9,7 @@
 #include "python_ipc_server.h"
 #include "python_worker_process.h"
 #include "shared_memory_segment.h"
+#include "app_interface_bridge.h"
 #include "python_app_interface_proxy.h"
 #include "python_worker_process_pool.h"
 #include "plugin_manager.h"
@@ -52,12 +53,16 @@ TEST_CASE( "SicnuAppInterface implements QgisInterface facade", "[python][iface]
   QMainWindow mainWindow;
   QgsMapCanvas canvas;
   QgsMessageBar messageBar;
+  ActiveViewHost host( &canvas, nullptr, nullptr, nullptr, nullptr,
+                       sicnu::display::DisplayViewId(), &mainWindow );
+  host.setMessageBar( &messageBar );
 
-  SicnuAppInterface iface( &mainWindow, nullptr, nullptr, &canvas, &messageBar );
+  SicnuAppInterface iface( &mainWindow, &host, nullptr );
 
   CHECK( iface.mainWindow() == &mainWindow );
   CHECK( iface.mapCanvas() == &canvas );
   CHECK( iface.messageBar() == &messageBar );
+  CHECK( iface.activeViewHost() == &host );
   CHECK( iface.pluginMenu() != nullptr );
   CHECK( iface.pluginToolBar() != nullptr );
 
@@ -74,8 +79,11 @@ TEST_CASE( "PluginManager scans and loads Python plugin directory", "[python][pl
   QgsMapCanvas canvas;
   QgsLayerTreeView treeView;
   QgsMessageBar messageBar;
+  ActiveViewHost host( &canvas, &treeView, nullptr, nullptr, nullptr,
+                       sicnu::display::DisplayViewId(), &mainWindow );
+  host.setMessageBar( &messageBar );
 
-  SicnuAppInterface iface( &mainWindow, nullptr, nullptr, &canvas, &messageBar );
+  SicnuAppInterface iface( &mainWindow, &host, nullptr );
   PluginManager manager( &canvas, &treeView );
   manager.setAppInterface( &iface );
 
@@ -335,8 +343,11 @@ TEST_CASE( "PythonPluginAdapter initializes and unloads Python plugin over Pytho
   QMainWindow mainWindow;
   QgsMapCanvas canvas;
   QgsMessageBar messageBar;
+  ActiveViewHost host( &canvas, nullptr, nullptr, nullptr, nullptr,
+                       sicnu::display::DisplayViewId(), &mainWindow );
+  host.setMessageBar( &messageBar );
 
-  SicnuAppInterface iface( &mainWindow, nullptr, nullptr, &canvas, &messageBar );
+  SicnuAppInterface iface( &mainWindow, &host, nullptr );
 
   const QString pluginDir = fixturePath( QStringLiteral( "plugins/sample_plugin" ) );
   PythonPluginAdapter adapter( pluginDir,
@@ -375,15 +386,26 @@ TEST_CASE( "PythonAppInterfaceProxy handles catalog.get_active_layer, canvas.get
   canvasMsg[QStringLiteral( "id" )] = 101;
   uiProxy.handleIpcMessage( canvasMsg );
 
-  // Test ui.push_message_bar IPC message handling
+  // Test ui.push_message_bar IPC message handling (string + int level passthrough)
   QJsonObject msgBarMsg;
   msgBarMsg[QStringLiteral( "method" )] = QStringLiteral( "ui.push_message_bar" );
   msgBarMsg[QStringLiteral( "id" )] = 102;
   QJsonObject msgParams;
   msgParams[QStringLiteral( "title" )] = QStringLiteral( "Test Title" );
   msgParams[QStringLiteral( "text" )] = QStringLiteral( "Test Text" );
+  msgParams[QStringLiteral( "level" )] = QStringLiteral( "warning" );
   msgBarMsg[QStringLiteral( "params" )] = msgParams;
   uiProxy.handleIpcMessage( msgBarMsg );
+
+  QJsonObject msgBarMsgInt;
+  msgBarMsgInt[QStringLiteral( "method" )] = QStringLiteral( "ui.push_message_bar" );
+  msgBarMsgInt[QStringLiteral( "id" )] = 105;
+  QJsonObject msgParamsInt;
+  msgParamsInt[QStringLiteral( "title" )] = QStringLiteral( "Critical Title" );
+  msgParamsInt[QStringLiteral( "text" )] = QStringLiteral( "Critical Text" );
+  msgParamsInt[QStringLiteral( "level" )] = static_cast<int>( Qgis::MessageLevel::Critical );
+  msgBarMsgInt[QStringLiteral( "params" )] = msgParamsInt;
+  uiProxy.handleIpcMessage( msgBarMsgInt );
 
   // Test catalog.get_active_layer IPC message handling
   QJsonObject layerMsg;
@@ -411,6 +433,58 @@ TEST_CASE( "PythonAppInterfaceProxy handles catalog.get_active_layer, canvas.get
 
   CHECK( uiProxy.registeredActionCount() == 0 );
 }
+
+TEST_CASE( "AppInterfaceBridge consolidates QGIS query routing and JSON serialization", "[python][bridge]" )
+{
+  sicnu::python::isolated::AppInterfaceBridge bridge( nullptr );
+
+  SECTION( "Null ActiveViewHost produces clean fallback summaries" )
+  {
+    auto layerSummary = bridge.getActiveLayerSummary();
+    CHECK( !layerSummary.isValid );
+    QJsonObject layerJson = layerSummary.toJsonObject();
+    CHECK( layerJson[QStringLiteral( "status" )].toString() == QStringLiteral( "no_active_layer" ) );
+
+    auto canvasSummary = bridge.getCanvasViewportSummary();
+    CHECK( !canvasSummary.isValid );
+    QJsonObject canvasJson = canvasSummary.toJsonObject();
+    CHECK( canvasJson[QStringLiteral( "status" )].toString() == QStringLiteral( "no_canvas" ) );
+
+    CHECK( bridge.activeLayer() == nullptr );
+    CHECK_FALSE( bridge.openPath( QStringLiteral( "" ) ) );
+    CHECK_FALSE( bridge.pushMessageBarAlert( QStringLiteral( "Title" ), QStringLiteral( "Message" ) ) );
+    CHECK_FALSE( bridge.pushMessageBarAlert( QStringLiteral( "Title" ), QStringLiteral( "Message" ),
+                                             static_cast<int>( Qgis::MessageLevel::Warning ) ) );
+  }
+
+  SECTION( "ActiveViewHost integration maps queries correctly" )
+  {
+    QgsMapCanvas canvas;
+    ActiveViewHost host( &canvas, nullptr, nullptr, nullptr, nullptr,
+                         sicnu::display::DisplayViewId(), nullptr );
+    bridge.setActiveViewHost( &host );
+    CHECK( bridge.activeViewHost() == &host );
+
+    auto canvasSummary = bridge.getCanvasViewportSummary();
+    CHECK( canvasSummary.isValid );
+    QJsonObject canvasJson = canvasSummary.toJsonObject();
+    CHECK( canvasJson[QStringLiteral( "status" )].toString() == QStringLiteral( "ok" ) );
+    CHECK( canvasJson.contains( QStringLiteral( "extent" ) ) );
+    CHECK( canvasJson.contains( QStringLiteral( "scale" ) ) );
+  }
+
+  SECTION( "Host without canvas yields no_canvas status" )
+  {
+    ActiveViewHost host( nullptr, nullptr, nullptr, nullptr, nullptr,
+                         sicnu::display::DisplayViewId(), nullptr );
+    bridge.setActiveViewHost( &host );
+    auto canvasSummary = bridge.getCanvasViewportSummary();
+    CHECK( !canvasSummary.isValid );
+    CHECK( canvasSummary.toJsonObject()[QStringLiteral( "status" )].toString()
+           == QStringLiteral( "no_canvas" ) );
+  }
+}
+
 
 
 

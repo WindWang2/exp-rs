@@ -1,5 +1,10 @@
 // src/agent/workspace_snapshot.cpp
 #include "workspace_snapshot.h"
+#include "data/data_asset.h"
+#include "data/data_manager.h"
+#include "active_view_host.h"
+#include <qgsmaplayer.h>
+#include <qgsrectangle.h>
 
 #include <QJsonArray>
 #include <QJsonObject>
@@ -7,6 +12,69 @@
 
 namespace sicnu::agent
 {
+
+WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager, ActiveViewHost *viewHost )
+{
+  WorkspaceSnapshot snapshot;
+
+  if ( dataManager )
+  {
+    auto assets = dataManager->assets();
+    for ( const auto &asset : assets )
+    {
+      DataAssetInfo info;
+      info.id = asset.id().toString();
+      info.displayName = asset.displayName();
+      info.path = asset.source().canonicalSource;
+
+      if ( asset.kind() == data::AssetKind::Raster )
+        info.kind = QStringLiteral( "Raster" );
+      else if ( asset.kind() == data::AssetKind::Vector )
+        info.kind = QStringLiteral( "Vector" );
+      else if ( asset.kind() == data::AssetKind::RemoteMap )
+        info.kind = QStringLiteral( "RemoteMap" );
+      else if ( asset.kind() == data::AssetKind::VirtualRaster )
+        info.kind = QStringLiteral( "VirtualRaster" );
+
+      const auto &structure = asset.structure();
+      if ( const auto *raster = std::get_if<data::RasterStructure>( &structure ) )
+      {
+        info.width = raster->width;
+        info.height = raster->height;
+        info.bandCount = raster->bandCount;
+        info.crsWkt = raster->crsWkt;
+      }
+      else if ( const auto *vector = std::get_if<data::VectorStructure>( &structure ) )
+      {
+        info.layerCount = vector->layerCount;
+        if ( !vector->layers.isEmpty() )
+        {
+          info.crsWkt = vector->layers.first().crsWkt;
+        }
+      }
+
+      snapshot.assets.append( info );
+    }
+  }
+
+  if ( viewHost )
+  {
+    snapshot.mapView.crsAuthId = viewHost->mapCanvasCrsAuthId();
+    QgsRectangle extent = viewHost->mapCanvasExtent();
+    if ( !extent.isEmpty() && !extent.isNull() )
+    {
+      snapshot.mapView.extentStr = QString( "%1,%2,%3,%4" )
+                                     .arg( extent.xMinimum() )
+                                     .arg( extent.yMinimum() )
+                                     .arg( extent.xMaximum() )
+                                     .arg( extent.yMaximum() );
+    }
+    snapshot.mapView.scale = viewHost->mapCanvasScale();
+    snapshot.mapView.activeLayerName = viewHost->activeLayerName();
+  }
+
+  return snapshot;
+}
 
 QJsonObject WorkspaceSnapshot::toJson() const
 {

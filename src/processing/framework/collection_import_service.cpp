@@ -294,6 +294,45 @@ CommitImportResult CollectionImportService::commit( const CommitImportRequest &r
   return result;
 }
 
+Result<CommitImportResult> CollectionImportService::importCollection( const QString &sourcePath,
+                                                                         sicnu::data::PersistencePolicy persistence,
+                                                                         bool autoLoad,
+                                                                         std::function<void(const QString &path)> pathOpener )
+{
+  auto probeRes = probe( sourcePath );
+  if ( !probeRes )
+  {
+    return Result<CommitImportResult>::failure( probeRes.diagnostics() );
+  }
+
+  const ImportPreview preview = probeRes.value();
+  CommitImportRequest request;
+  request.preview = preview;
+  request.persistence = persistence;
+
+  for ( int i = 0; i < preview.children.size(); ++i )
+  {
+    request.selectedChildIndices.append( i );
+  }
+
+  CommitImportResult commitResult = commit( request );
+  if ( commitResult.collectionId.isNull() )
+  {
+    return Result<CommitImportResult>::failure( commitResult.diagnostics );
+  }
+
+  if ( autoLoad && pathOpener && !preview.children.isEmpty() )
+  {
+    const QString primaryPath = preview.children.first().sourcePath;
+    if ( !primaryPath.isEmpty() )
+    {
+      pathOpener( primaryPath );
+    }
+  }
+
+  return Result<CommitImportResult>::success( commitResult );
+}
+
 // --- SatelliteProductsDiscoverer ---
 
 Result<DiscoveredProduct> SatelliteProductsDiscoverer::discover( const QString &source )

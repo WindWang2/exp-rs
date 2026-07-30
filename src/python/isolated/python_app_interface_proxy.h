@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QString>
 
+#include "app_interface_bridge.h"
 #include "python_ipc_server.h"
 
 class ActiveViewHost;
@@ -24,6 +25,9 @@ class PythonAppInterfaceProxy : public QObject
     void setParentMenu( QMenu *parentMenu );
     void setActiveViewHost( ActiveViewHost *host );
 
+    AppInterfaceBridge &bridge() { return m_bridge; }
+    const AppInterfaceBridge &bridge() const { return m_bridge; }
+
     int registeredActionCount() const;
 
   public slots:
@@ -35,7 +39,7 @@ class PythonAppInterfaceProxy : public QObject
   private:
     PythonIpcServer *m_ipcServer = nullptr;
     QMenu *m_parentMenu = nullptr;
-    ActiveViewHost *m_activeViewHost = nullptr;
+    AppInterfaceBridge m_bridge;
     QMap<QString, QAction *> m_registeredActions;
 };
 

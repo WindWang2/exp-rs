@@ -1,10 +1,10 @@
-// src/processing/framework/atomic_algorithm_registry.cpp
 #include "atomic_algorithm_registry.h"
 #include "agent_tool_call_exporter.h"
-#include "operators/framework/rs_operator_registry.h"
 #include "task_center.h"
 
 namespace sicnu::processing {
+
+static std::function<void(AtomicAlgorithmRegistry&)> sRsOperatorProvider;
 
 AtomicAlgorithmRegistry& AtomicAlgorithmRegistry::instance()
 {
@@ -17,21 +17,27 @@ AtomicAlgorithmRegistry::AtomicAlgorithmRegistry()
   registerBuiltinRsOperators();
 }
 
+void AtomicAlgorithmRegistry::setRsOperatorProvider( std::function<void(AtomicAlgorithmRegistry&)> provider )
+{
+  sRsOperatorProvider = std::move( provider );
+  // Populate after storing the provider. registerAdapter takes mMutex itself.
+  if ( sRsOperatorProvider )
+  {
+    sRsOperatorProvider( instance() );
+  }
+}
+
 void AtomicAlgorithmRegistry::reset()
 {
-  std::lock_guard<std::mutex> lock( mMutex );
-  mAdapters.clear();
-  
-  // Re-register builtins
-  auto names = operators::RSOperatorRegistry::instance().operatorNames();
-  for ( const auto &name : names )
   {
-    auto op = operators::RSOperatorRegistry::instance().create( name );
-    if ( op )
-    {
-      auto adapter = std::make_shared<RsOperatorAdapter>( std::move( op ) );
-      mAdapters[adapter->algorithmId()] = adapter;
-    }
+    std::lock_guard<std::mutex> lock( mMutex );
+    mAdapters.clear();
+  }
+
+  // Provider callbacks re-enter via registerAdapter(); never hold mMutex across them.
+  if ( sRsOperatorProvider )
+  {
+    sRsOperatorProvider( *this );
   }
 }
 
@@ -152,15 +158,9 @@ std::string AtomicAlgorithmRegistry::executeToolCall( const std::string &jsonToo
 
 void AtomicAlgorithmRegistry::registerBuiltinRsOperators()
 {
-  auto names = operators::RSOperatorRegistry::instance().operatorNames();
-  for ( const auto &name : names )
+  if ( sRsOperatorProvider )
   {
-    auto op = operators::RSOperatorRegistry::instance().create( name );
-    if ( op )
-    {
-      auto adapter = std::make_shared<RsOperatorAdapter>( std::move( op ) );
-      mAdapters[adapter->algorithmId()] = adapter;
-    }
+    sRsOperatorProvider( *this );
   }
 }
 
