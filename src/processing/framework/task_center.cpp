@@ -64,6 +64,48 @@ Json::Value TaskCenter::variantMapToJsonParams( const QVariantMap &params )
     return root;
 }
 
+void TaskCenter::queueTaskAddedLocked( long taskId )
+{
+    if ( m_tasks.contains( taskId ) )
+        m_pendingTaskAdded.append( m_tasks[taskId] );
+}
+
+void TaskCenter::queueTaskUpdatedLocked( long taskId )
+{
+    if ( m_tasks.contains( taskId ) )
+        m_pendingTaskUpdated.append( m_tasks[taskId] );
+}
+
+void TaskCenter::queueTaskLogLocked( long taskId, const QString &message )
+{
+    m_pendingLogs.append( PendingLog{ taskId, message } );
+}
+
+void TaskCenter::flushPendingSignals()
+{
+    // Drain until empty so nested mutations from slots still surface.
+    for ( ;; )
+    {
+        QList<AlgorithmTaskInfo> added;
+        QList<AlgorithmTaskInfo> updated;
+        QList<PendingLog> logs;
+        {
+            QMutexLocker locker( &m_mutex );
+            if ( m_pendingTaskAdded.isEmpty() && m_pendingTaskUpdated.isEmpty() && m_pendingLogs.isEmpty() )
+                return;
+            added.swap( m_pendingTaskAdded );
+            updated.swap( m_pendingTaskUpdated );
+            logs.swap( m_pendingLogs );
+        }
+        for ( const auto &info : added )
+            emit taskAdded( info );
+        for ( const auto &info : updated )
+            emit taskUpdated( info );
+        for ( const auto &log : logs )
+            emit taskLogAdded( log.taskId, log.message );
+    }
+}
+
 void TaskCenter::applyPlaceholdersForTask( long taskId )
 {
     if ( !m_tasks.contains( taskId ) )
@@ -210,11 +252,12 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
                                  .arg( static_cast<int>( priority ) ) );
 
         m_tasks[id] = info;
-        emit taskAdded( m_tasks[id] );
+        queueTaskAddedLocked( id );
 
         processNextQueuedTasks();
     }
     flushPendingLaunches();
+    flushPendingSignals();
     return id;
 }
 
@@ -460,7 +503,7 @@ void TaskCenter::processNextQueuedTasks()
             m_tasks[id].hasJobRequest = true;
         }
 
-        emit taskUpdated( m_tasks[id] );
+        queueTaskUpdatedLocked( id );
         m_pendingLaunches.append( std::move( launch ) );
         runningCount++;
     }
@@ -506,32 +549,41 @@ void TaskCenter::attachQgsTask( long taskId, QgsTask *qgsTask )
 
 void TaskCenter::updateTaskProgress( long taskId, double progress )
 {
-    QMutexLocker locker( &m_mutex );
-    if ( !m_tasks.contains( taskId ) || m_tasks[taskId].status == TaskStatus::Canceled )
-        return;
-    m_tasks[taskId].progressPercentage = progress;
-    m_tasks[taskId].status = TaskStatus::Running;
-    updatePipelineForTaskLocked( taskId );
-    emit taskUpdated( m_tasks[taskId] );
+    {
+        QMutexLocker locker( &m_mutex );
+        if ( !m_tasks.contains( taskId ) || m_tasks[taskId].status == TaskStatus::Canceled )
+            return;
+        m_tasks[taskId].progressPercentage = progress;
+        m_tasks[taskId].status = TaskStatus::Running;
+        updatePipelineForTaskLocked( taskId );
+        queueTaskUpdatedLocked( taskId );
+    }
+    flushPendingSignals();
 }
 
 void TaskCenter::appendTaskLog( long taskId, const QString &message )
 {
-    QMutexLocker locker( &m_mutex );
-    if ( !m_tasks.contains( taskId ) )
-        return;
-    m_tasks[taskId].logBuffer.append( message );
-    emit taskLogAdded( taskId, message );
+    {
+        QMutexLocker locker( &m_mutex );
+        if ( !m_tasks.contains( taskId ) )
+            return;
+        m_tasks[taskId].logBuffer.append( message );
+        queueTaskLogLocked( taskId, message );
+    }
+    flushPendingSignals();
 }
 
 void TaskCenter::markTaskRunning( long taskId )
 {
-    QMutexLocker locker( &m_mutex );
-    if ( !m_tasks.contains( taskId ) || m_tasks[taskId].status == TaskStatus::Canceled )
-        return;
-    m_tasks[taskId].status = TaskStatus::Running;
-    updatePipelineForTaskLocked( taskId );
-    emit taskUpdated( m_tasks[taskId] );
+    {
+        QMutexLocker locker( &m_mutex );
+        if ( !m_tasks.contains( taskId ) || m_tasks[taskId].status == TaskStatus::Canceled )
+            return;
+        m_tasks[taskId].status = TaskStatus::Running;
+        updatePipelineForTaskLocked( taskId );
+        queueTaskUpdatedLocked( taskId );
+    }
+    flushPendingSignals();
 }
 
 void TaskCenter::markTaskCompleted( long taskId,
@@ -573,10 +625,11 @@ void TaskCenter::markTaskCompleted( long taskId,
         autoLoadPath = m_tasks[taskId].outputLayerPath;
 
         updatePipelineForTaskLocked( taskId );
-        emit taskUpdated( m_tasks[taskId] );
+        queueTaskUpdatedLocked( taskId );
         processNextQueuedTasks();
     }
     flushPendingLaunches();
+    flushPendingSignals();
 
     if ( shouldAutoLoad && !autoLoadPath.isEmpty() )
         emit layerAutoLoadRequested( autoLoadPath );
@@ -594,7 +647,7 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] Task failed: %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), error ) );
         updatePipelineForTaskLocked( taskId );
-        emit taskUpdated( m_tasks[taskId] );
+        queueTaskUpdatedLocked( taskId );
 
         QList<long> keys = m_tasks.keys();
         for ( long id : keys )
@@ -606,13 +659,14 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
                 m_tasks[id].errorMessage = QStringLiteral( "Canceled due to upstream parent task failure." );
                 m_tasks[id].logBuffer.append( QStringLiteral( "Canceled due to upstream parent task failure." ) );
                 updatePipelineForTaskLocked( id );
-                emit taskUpdated( m_tasks[id] );
+                queueTaskUpdatedLocked( id );
             }
         }
 
         processNextQueuedTasks();
     }
     flushPendingLaunches();
+    flushPendingSignals();
 }
 
 void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
@@ -627,10 +681,11 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] %2" ) )
                                             .arg( m_tasks[taskId].endTime.toString( QStringLiteral( "hh:mm:ss" ) ), reason ) );
         updatePipelineForTaskLocked( taskId );
-        emit taskUpdated( m_tasks[taskId] );
+        queueTaskUpdatedLocked( taskId );
         processNextQueuedTasks();
     }
     flushPendingLaunches();
+    flushPendingSignals();
 }
 
 bool TaskCenter::cancelTask( long taskId )
@@ -659,7 +714,7 @@ bool TaskCenter::cancelTask( long taskId )
         {
             m_tasks[taskId].logBuffer.append( QStringLiteral( "Cancellation requested by user." ) );
         }
-        emit taskUpdated( m_tasks[taskId] );
+        queueTaskUpdatedLocked( taskId );
 
         if ( cancelImmediately )
         {
@@ -672,7 +727,7 @@ bool TaskCenter::cancelTask( long taskId )
                     m_tasks[id].endTime = QDateTime::currentDateTime();
                     m_tasks[id].logBuffer.append( QStringLiteral( "Canceled due to upstream parent task failure." ) );
                     updatePipelineForTaskLocked( id );
-                    emit taskUpdated( m_tasks[id] );
+                    queueTaskUpdatedLocked( id );
                 }
             }
         }
@@ -680,6 +735,7 @@ bool TaskCenter::cancelTask( long taskId )
         processNextQueuedTasks();
     }
     flushPendingLaunches();
+    flushPendingSignals();
     if ( !jobId.empty() )
         sicnu::jobs::JobEngine::instance().cancel( jobId );
     return true;
@@ -687,38 +743,48 @@ bool TaskCenter::cancelTask( long taskId )
 
 bool TaskCenter::pauseTask( long taskId )
 {
-    QMutexLocker locker( &m_mutex );
-    if ( !m_tasks.contains( taskId ) )
-        return false;
-    if ( m_tasks[taskId].status == TaskStatus::Running )
+    bool ok = false;
     {
-        if ( m_tasks[taskId].taskHandle )
-            m_tasks[taskId].taskHandle->hold();
-        m_tasks[taskId].status = TaskStatus::Paused;
-        m_tasks[taskId].logBuffer.append( QStringLiteral( "Task paused." ) );
-        updatePipelineForTaskLocked( taskId );
-        emit taskUpdated( m_tasks[taskId] );
-        return true;
+        QMutexLocker locker( &m_mutex );
+        if ( !m_tasks.contains( taskId ) )
+            return false;
+        if ( m_tasks[taskId].status == TaskStatus::Running )
+        {
+            if ( m_tasks[taskId].taskHandle )
+                m_tasks[taskId].taskHandle->hold();
+            m_tasks[taskId].status = TaskStatus::Paused;
+            m_tasks[taskId].logBuffer.append( QStringLiteral( "Task paused." ) );
+            updatePipelineForTaskLocked( taskId );
+            queueTaskUpdatedLocked( taskId );
+            ok = true;
+        }
     }
-    return false;
+    if ( ok )
+        flushPendingSignals();
+    return ok;
 }
 
 bool TaskCenter::resumeTask( long taskId )
 {
-    QMutexLocker locker( &m_mutex );
-    if ( !m_tasks.contains( taskId ) )
-        return false;
-    if ( m_tasks[taskId].status == TaskStatus::Paused )
+    bool ok = false;
     {
-        if ( m_tasks[taskId].taskHandle )
-            m_tasks[taskId].taskHandle->unhold();
-        m_tasks[taskId].status = TaskStatus::Running;
-        m_tasks[taskId].logBuffer.append( QStringLiteral( "Task resumed." ) );
-        updatePipelineForTaskLocked( taskId );
-        emit taskUpdated( m_tasks[taskId] );
-        return true;
+        QMutexLocker locker( &m_mutex );
+        if ( !m_tasks.contains( taskId ) )
+            return false;
+        if ( m_tasks[taskId].status == TaskStatus::Paused )
+        {
+            if ( m_tasks[taskId].taskHandle )
+                m_tasks[taskId].taskHandle->unhold();
+            m_tasks[taskId].status = TaskStatus::Running;
+            m_tasks[taskId].logBuffer.append( QStringLiteral( "Task resumed." ) );
+            updatePipelineForTaskLocked( taskId );
+            queueTaskUpdatedLocked( taskId );
+            ok = true;
+        }
     }
-    return false;
+    if ( ok )
+        flushPendingSignals();
+    return ok;
 }
 
 bool TaskCenter::retryTask( long taskId )
@@ -856,13 +922,14 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
             pipeInfo.taskToStepId[taskId] = stepId;
             pipeInfo.stepStatuses[stepId] = TaskStatus::Queued;
 
-            emit taskAdded( m_tasks[taskId] );
+            queueTaskAddedLocked( taskId );
         }
 
         m_pipelines[pipelineId] = pipeInfo;
         processNextQueuedTasks();
     }
     flushPendingLaunches();
+    flushPendingSignals();
     return pipelineId;
 }
 

@@ -6,6 +6,8 @@
 #include "jobs/job_types.h"
 #include "workflow/workflow_definition.h"
 
+#include <QObject>
+
 #include <chrono>
 #include <atomic>
 #include <thread>
@@ -357,4 +359,39 @@ TEST_CASE("TaskCenter - Native submitPipeline dispatches DAG and resolves $stepI
     REQUIRE(center.getTaskInfo(s2TaskId).parameterMap.value("input").toString() == QStringLiteral("/tmp/step1_ndvi.tif"));
 
     engine.clearExecutors();
+}
+
+TEST_CASE( "TaskCenter - reentrant taskUpdated slot does not deadlock",
+           "[processing][task_center][reentrancy]" )
+{
+    auto &center = sicnu::TaskCenter::instance();
+
+    std::atomic<int> slotEnterCount{ 0 };
+    std::atomic<int> slotDoneCount{ 0 };
+    std::atomic<bool> sawCompleted{ false };
+
+    QObject guard;
+    QObject::connect( &center, &sicnu::TaskCenter::taskUpdated, &guard,
+                      [&]( const sicnu::AlgorithmTaskInfo &info ) {
+                        ++slotEnterCount;
+                        // Re-enter TaskCenter while handling the signal (would deadlock
+                        // if taskUpdated were emitted while holding m_mutex).
+                        const auto snapshot = center.getTaskInfo( info.taskId );
+                        REQUIRE( snapshot.taskId == info.taskId );
+                        (void) center.allTasks();
+                        if ( info.status == sicnu::TaskStatus::Completed )
+                          sawCompleted.store( true );
+                        ++slotDoneCount;
+                      } );
+
+    long taskId = center.enqueueTask( QStringLiteral( "reentrancy_probe" ), {}, false );
+    REQUIRE( taskId > 0 );
+
+    center.markTaskRunning( taskId );
+    center.markTaskCompleted( taskId );
+
+    REQUIRE( slotEnterCount.load() >= 1 );
+    REQUIRE( slotDoneCount.load() == slotEnterCount.load() );
+    REQUIRE( sawCompleted.load() );
+    REQUIRE( center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Completed );
 }

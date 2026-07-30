@@ -137,6 +137,8 @@ public:
     void clearCompletedTasks();
 
 signals:
+    /// Lifecycle notifications are always emitted **outside** m_mutex so slots may
+    /// safely re-enter TaskCenter (getTaskInfo, enqueue, cancel, …) without deadlock.
     void taskAdded(const AlgorithmTaskInfo& info);
     void taskUpdated(const AlgorithmTaskInfo& info);
     void taskLogAdded(long taskId, const QString& message);
@@ -152,6 +154,12 @@ private:
     void processNextQueuedTasks();
     /// Must be called without m_mutex held.
     void flushPendingLaunches();
+    /// Queue signal payloads while holding m_mutex (copies task snapshot).
+    void queueTaskAddedLocked( long taskId );
+    void queueTaskUpdatedLocked( long taskId );
+    void queueTaskLogLocked( long taskId, const QString &message );
+    /// Drain queued signals; never holds m_mutex across emit. Safe if slots re-enter.
+    void flushPendingSignals();
     void applyPlaceholdersForTask(long taskId);
     void updatePipelineForTaskLocked(long taskId);
     long submitJobImpl(const sicnu::jobs::JobRequest& request,
@@ -168,10 +176,18 @@ private:
         bool hasExecutor = false;
     };
 
+    struct PendingLog {
+        long taskId = -1;
+        QString message;
+    };
+
     mutable QMutex m_mutex;
     QMap<long, AlgorithmTaskInfo> m_tasks;
     QMap<long, PipelineExecutionInfo> m_pipelines;
     QList<PendingLaunch> m_pendingLaunches;
+    QList<AlgorithmTaskInfo> m_pendingTaskAdded;
+    QList<AlgorithmTaskInfo> m_pendingTaskUpdated;
+    QList<PendingLog> m_pendingLogs;
     long m_nextTaskId = 1;
     long m_nextPipelineId = 1;
 };
