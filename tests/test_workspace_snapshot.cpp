@@ -102,6 +102,23 @@ TEST_CASE( "WorkspaceSnapshot - Pure C++ Serialization & Prompt Formatting", "[a
     REQUIRE( prompt.contains( QStringLiteral( "Loaded Data Assets: (None)" ) ) );
   }
 
+  SECTION( "Asset with unset kind serializes as Unknown" )
+  {
+    sicnu::agent::WorkspaceSnapshot snapshot;
+
+    sicnu::agent::DataAssetInfo asset;
+    asset.id = QStringLiteral( "asset-unknown" );
+    asset.displayName = QStringLiteral( "mystery.dat" );
+    snapshot.assets.append( asset );
+
+    const QJsonObject json = snapshot.toJson();
+    const QJsonObject assetObj = json[QStringLiteral( "assets" )].toArray().at( 0 ).toObject();
+    REQUIRE( assetObj[QStringLiteral( "kind" )].toString() == QStringLiteral( "Unknown" ) );
+
+    const QString prompt = snapshot.toSystemPromptHeader();
+    REQUIRE( prompt.contains( QStringLiteral( "[Unknown]" ) ) );
+  }
+
   SECTION( "Populated WorkspaceSnapshot serializes raster & map view info" )
   {
     sicnu::agent::WorkspaceSnapshot snapshot;

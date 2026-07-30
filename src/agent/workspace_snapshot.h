@@ -6,6 +6,8 @@
 #include <QList>
 #include <QString>
 
+#include <optional>
+
 #include "data/asset_types.h"
 
 namespace sicnu::data
@@ -23,7 +25,8 @@ struct DataAssetInfo
     QString id;
     QString displayName;
     QString path;
-    data::AssetKind kind = data::AssetKind::Raster;
+    /// Unset until capture() fills it from the asset; serializes as "Unknown".
+    std::optional<data::AssetKind> kind;
     int width = 0;
     int height = 0;
     int bandCount = 0;

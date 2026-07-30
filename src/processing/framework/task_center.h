@@ -43,6 +43,10 @@ inline bool isTerminalStatus( TaskStatus status )
     return status == TaskStatus::Completed || status == TaskStatus::Failed || status == TaskStatus::Canceled;
 }
 
+/// Shared timeout surface for tool-call waiters: report this when waitForTask()
+/// returns a non-terminal status with an empty error message.
+inline const QString kToolCallTimeoutMessage = QStringLiteral( "Tool call timed out in TaskCenter" );
+
 enum class TaskPriority {
     High,
     Normal,

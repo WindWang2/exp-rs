@@ -15,7 +15,6 @@
 
 #include <chrono>
 #include <sstream>
-#include <thread>
 
 namespace sicnu::cli {
 
@@ -240,7 +239,8 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
   const auto deadline = std::chrono::steady_clock::now() + kPipelineTimeout;
   for ( ;; )
   {
-    const auto pipeInfo = sicnu::TaskCenter::instance().getPipelineInfo( pipelineId );
+    // Wait for completion, waking every poll interval to emit progress.
+    const auto pipeInfo = sicnu::TaskCenter::instance().waitForPipeline( pipelineId, kPipelinePollInterval );
 
     // Emit coarse progress from task states.
     int completedCount = 0;
@@ -349,8 +349,6 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
       reportLog( "error", result.errorMessage );
       return result;
     }
-
-    std::this_thread::sleep_for( kPipelinePollInterval );
   }
 }
 

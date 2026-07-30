@@ -13,6 +13,31 @@
 namespace sicnu::agent
 {
 
+namespace
+{
+
+/// Stringify at the JSON / prompt boundary; unset or unrecognized kinds become "Unknown".
+QString assetKindToString( const std::optional<data::AssetKind> &kind )
+{
+  if ( !kind.has_value() )
+    return QStringLiteral( "Unknown" );
+
+  switch ( *kind )
+  {
+    case data::AssetKind::Raster:
+      return QStringLiteral( "Raster" );
+    case data::AssetKind::Vector:
+      return QStringLiteral( "Vector" );
+    case data::AssetKind::RemoteMap:
+      return QStringLiteral( "RemoteMap" );
+    case data::AssetKind::VirtualRaster:
+      return QStringLiteral( "VirtualRaster" );
+  }
+  return QStringLiteral( "Unknown" );
+}
+
+} // namespace
+
 WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager, ActiveViewHost *viewHost )
 {
   WorkspaceSnapshot snapshot;
@@ -80,24 +105,7 @@ QJsonObject WorkspaceSnapshot::toJson() const
     assetObj[QStringLiteral( "id" )] = asset.id;
     assetObj[QStringLiteral( "displayName" )] = asset.displayName;
     assetObj[QStringLiteral( "path" )] = asset.path;
-    QString kindStr;
-    switch ( asset.kind )
-    {
-      case data::AssetKind::Raster:
-        kindStr = QStringLiteral( "Raster" );
-        break;
-      case data::AssetKind::Vector:
-        kindStr = QStringLiteral( "Vector" );
-        break;
-      case data::AssetKind::RemoteMap:
-        kindStr = QStringLiteral( "RemoteMap" );
-        break;
-      case data::AssetKind::VirtualRaster:
-        kindStr = QStringLiteral( "VirtualRaster" );
-        break;
-    }
-
-    assetObj[QStringLiteral( "kind" )] = kindStr;
+    assetObj[QStringLiteral( "kind" )] = assetKindToString( asset.kind );
 
     if ( asset.kind == data::AssetKind::Raster || asset.kind == data::AssetKind::VirtualRaster )
     {
@@ -151,23 +159,7 @@ QString WorkspaceSnapshot::toSystemPromptHeader() const
     prompt += QStringLiteral( "Loaded Data Assets:\n" );
     for ( const auto &asset : assets )
     {
-      QString kindStr;
-      switch ( asset.kind )
-      {
-        case data::AssetKind::Raster:
-          kindStr = QStringLiteral( "Raster" );
-          break;
-        case data::AssetKind::Vector:
-          kindStr = QStringLiteral( "Vector" );
-          break;
-        case data::AssetKind::RemoteMap:
-          kindStr = QStringLiteral( "RemoteMap" );
-          break;
-        case data::AssetKind::VirtualRaster:
-          kindStr = QStringLiteral( "VirtualRaster" );
-          break;
-      }
-      prompt += QString( "- Asset '%1' (%2) [%3]" ).arg( asset.id, asset.displayName, kindStr );
+      prompt += QString( "- Asset '%1' (%2) [%3]" ).arg( asset.id, asset.displayName, assetKindToString( asset.kind ) );
 
       if ( asset.bandCount > 0 )
       {

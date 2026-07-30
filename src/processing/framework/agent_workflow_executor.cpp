@@ -193,7 +193,7 @@ Json::Value AgentWorkflowExecutor::executeToolCall( const Json::Value &toolCallJ
   {
     resultPayload["status"] = "error";
     resultPayload["errorMessage"] = info.errorMessage.isEmpty()
-                                      ? "Tool call timed out in TaskCenter"
+                                      ? kToolCallTimeoutMessage.toStdString()
                                       : info.errorMessage.toStdString();
   }
   return resultPayload;

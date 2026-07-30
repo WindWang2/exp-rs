@@ -287,7 +287,7 @@ void LlmStreamingClient::onReplyFinished()
         {
           resultObj[QStringLiteral( "status" )] = QStringLiteral( "error" );
           resultObj[QStringLiteral( "error" )] = info.errorMessage.isEmpty()
-                                                   ? QStringLiteral( "Tool call timed out in TaskCenter" )
+                                                   ? kToolCallTimeoutMessage
                                                    : info.errorMessage;
         }
       }
