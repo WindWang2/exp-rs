@@ -66,6 +66,19 @@ TEST_CASE( "QgisPython version and package probes use expression-form eval", "[p
     QStringLiteral( "definitely_not_a_real_package_xyz_103" ) ) );
 }
 
+TEST_CASE( "qgis.utils stub keeps project clear free of spurious NameError", "[python][engine]" )
+{
+  REQUIRE( QgisPython::instance().initialize() );
+  REQUIRE( QgsPythonRunner::isValid() );
+
+  // The vendored QgsProject::clear() path calls this via QgsPythonRunner;
+  // without the stub it raises NameError: name 'qgis' is not defined (#103).
+  CHECK( QgsPythonRunner::run( QStringLiteral( "qgis.utils.clean_project_expression_functions()" ) ) );
+
+  // Exercise the real call path.
+  QgsProject::instance()->clear();
+}
+
 TEST_CASE( "SicnuPythonRunner is registered globally with QgsPythonRunner", "[python][runner]" )
 {
   REQUIRE( QgisPython::instance().initialize() );

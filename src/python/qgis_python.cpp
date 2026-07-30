@@ -231,6 +231,22 @@ print(f"SICNU: Available packages: {', '.join(available)}")
 
     runString(verifyPackages, error);
 
+    // Provide a minimal qgis.utils stub. Vendored QGIS core calls
+    // qgis.utils.clean_project_expression_functions() from QgsProject::clear();
+    // real QGIS gets that module from its Python plugin environment, which our
+    // embedded interpreter lacks — without the stub every project clear prints
+    // a spurious NameError (#103).
+    // NOTE: runString() refuses to execute until m_initialized is set, so this
+    // must run through the C API directly.
+    PyRun_SimpleStringFlags(
+        "import sys, types\n"
+        "qgis = types.ModuleType('qgis')\n"
+        "qgis.utils = types.ModuleType('qgis.utils')\n"
+        "qgis.utils.clean_project_expression_functions = lambda: None\n"
+        "sys.modules['qgis'] = qgis\n"
+        "sys.modules['qgis.utils'] = qgis.utils\n",
+        nullptr);
+
     m_initialized = true;
     QgsPythonRunner::setInstance( new SicnuPythonRunner() );
     qDebug() << "Python initialized:" << pythonVersion();
