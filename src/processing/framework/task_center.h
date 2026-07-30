@@ -38,6 +38,11 @@ enum class TaskStatus {
     Canceled
 };
 
+inline bool isTerminalStatus( TaskStatus status )
+{
+    return status == TaskStatus::Completed || status == TaskStatus::Failed || status == TaskStatus::Canceled;
+}
+
 enum class TaskPriority {
     High,
     Normal,
@@ -140,6 +145,16 @@ public:
     PipelineExecutionInfo getPipelineInfo(long pipelineId) const;
     void clearCompletedTasks();
 
+    /// Wait for task to reach a terminal status or timeout.
+    AlgorithmTaskInfo waitForTask( long taskId,
+                                    std::chrono::milliseconds timeout = std::chrono::minutes( 30 ),
+                                    std::chrono::milliseconds pollInterval = std::chrono::milliseconds( 10 ) ) const;
+
+    /// Wait for pipeline execution to complete or timeout.
+    PipelineExecutionInfo waitForPipeline( long pipelineId,
+                                            std::chrono::milliseconds timeout = std::chrono::minutes( 30 ),
+                                            std::chrono::milliseconds pollInterval = std::chrono::milliseconds( 10 ) ) const;
+
     /// Cap concurrent Running tasks for @a profile (minimum 1). Used by processNextQueuedTasks.
     void setResourceProfileLimit( ProviderResourceProfile profile, unsigned int maxConcurrent );
     unsigned int resourceProfileLimit( ProviderResourceProfile profile ) const;
@@ -180,7 +195,10 @@ private:
                        CancelHook onCancel,
                        bool autoLoad);
     void watchSubmittedJob(long taskId, std::string jobId);
+public:
     static Json::Value variantMapToJsonParams(const QVariantMap& params);
+    static QVariantMap jsonParamsToVariantMap(const Json::Value& params);
+private:
     ProviderResourceProfile resolveResourceProfile( const QString &algorithmId ) const;
     unsigned int defaultLimitForProfile( ProviderResourceProfile profile ) const;
     unsigned int limitForProfileLocked( ProviderResourceProfile profile ) const;

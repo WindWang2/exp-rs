@@ -34,12 +34,7 @@ std::string normalizeAlgorithmId( const std::string &rawName )
   return algorithmId;
 }
 
-bool isTerminal( TaskStatus status )
-{
-  return status == TaskStatus::Completed
-      || status == TaskStatus::Failed
-      || status == TaskStatus::Canceled;
-}
+
 
 } // namespace
 
@@ -159,60 +154,49 @@ Json::Value AgentWorkflowExecutor::executeToolCall( const Json::Value &toolCallJ
   resultPayload["taskId"] = static_cast<Json::Int64>( taskId );
 
   using clock = std::chrono::steady_clock;
-  const auto deadline = clock::now() + std::chrono::minutes( 30 );
-  for ( ;; )
+  const auto info = TaskCenter::instance().waitForTask( taskId, std::chrono::minutes( 30 ) );
+
+  auto endTime = clock::now();
+  resultPayload["executionTimeMs"] = static_cast<int>(
+    std::chrono::duration_cast<std::chrono::milliseconds>( endTime - startTime ).count() );
+
+  if ( info.status == TaskStatus::Completed )
   {
-    const auto info = TaskCenter::instance().getTaskInfo( taskId );
-    if ( isTerminal( info.status ) )
+    resultPayload["status"] = "success";
+    resultPayload["output"] = info.resultPayload.isNull() ? Json::Value( Json::objectValue ) : info.resultPayload;
+    if ( !info.outputLayerPath.isEmpty() && resultPayload["output"].isObject()
+         && !resultPayload["output"].isMember( "output" ) )
     {
-      auto endTime = clock::now();
-      resultPayload["executionTimeMs"] = static_cast<int>(
-        std::chrono::duration_cast<std::chrono::milliseconds>( endTime - startTime ).count() );
-
-      if ( info.status == TaskStatus::Completed )
-      {
-        resultPayload["status"] = "success";
-        resultPayload["output"] = info.resultPayload.isNull() ? Json::Value( Json::objectValue ) : info.resultPayload;
-        if ( !info.outputLayerPath.isEmpty() && resultPayload["output"].isObject()
-             && !resultPayload["output"].isMember( "output" ) )
-        {
-          resultPayload["output"]["output"] = info.outputLayerPath.toStdString();
-        }
-
-        if ( mDataManager && resultPayload["output"].isObject() )
-        {
-          std::string outPath;
-          const auto &output = resultPayload["output"];
-          if ( output.isMember( "output" ) && output["output"].isString() )
-            outPath = output["output"].asString();
-          else if ( output.isMember( "outputPath" ) && output["outputPath"].isString() )
-            outPath = output["outputPath"].asString();
-
-          if ( !outPath.empty() )
-          {
-            data::RegisterRequest regReq;
-            regReq.source.canonicalSource = QString::fromStdString( outPath );
-            regReq.persistence = data::PersistencePolicy::TaskTemporary;
-            regReq.additionalCapabilities = data::AssetCapability::DeletableSource;
-            mDataManager->registerSource( regReq );
-          }
-        }
-      }
-      else
-      {
-        resultPayload["status"] = "error";
-        resultPayload["errorMessage"] = info.errorMessage.toStdString();
-      }
-      return resultPayload;
+      resultPayload["output"]["output"] = info.outputLayerPath.toStdString();
     }
 
-    if ( clock::now() > deadline )
+    if ( mDataManager && resultPayload["output"].isObject() )
     {
-      resultPayload["errorMessage"] = "Tool call timed out in TaskCenter";
-      return resultPayload;
+      std::string outPath;
+      const auto &output = resultPayload["output"];
+      if ( output.isMember( "output" ) && output["output"].isString() )
+        outPath = output["output"].asString();
+      else if ( output.isMember( "outputPath" ) && output["outputPath"].isString() )
+        outPath = output["outputPath"].asString();
+
+      if ( !outPath.empty() )
+      {
+        data::RegisterRequest regReq;
+        regReq.source.canonicalSource = QString::fromStdString( outPath );
+        regReq.persistence = data::PersistencePolicy::TaskTemporary;
+        regReq.additionalCapabilities = data::AssetCapability::DeletableSource;
+        mDataManager->registerSource( regReq );
+      }
     }
-    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
   }
+  else
+  {
+    resultPayload["status"] = "error";
+    resultPayload["errorMessage"] = info.errorMessage.isEmpty()
+                                      ? "Tool call timed out in TaskCenter"
+                                      : info.errorMessage.toStdString();
+  }
+  return resultPayload;
 }
 
 Json::Value AgentWorkflowExecutor::executeAgentPlan( const Json::Value &planJson, ProgressCallback progressCb )

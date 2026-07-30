@@ -266,46 +266,29 @@ void LlmStreamingClient::onReplyFinished()
       }
       else
       {
-        using clock = std::chrono::steady_clock;
-        const auto deadline = clock::now() + std::chrono::minutes( 10 );
-        for ( ;; )
+        const auto info = TaskCenter::instance().waitForTask( taskId, std::chrono::minutes( 10 ) );
+        resultObj[QStringLiteral( "taskId" )] = static_cast<qint64>( taskId );
+        resultObj[QStringLiteral( "algorithmId" )] = info.algorithmId;
+        if ( info.status == TaskStatus::Completed )
         {
-          const auto info = TaskCenter::instance().getTaskInfo( taskId );
-          if ( info.status == TaskStatus::Completed
-               || info.status == TaskStatus::Failed
-               || info.status == TaskStatus::Canceled )
+          resultObj[QStringLiteral( "status" )] = QStringLiteral( "success" );
+          if ( info.resultPayload.isObject() )
           {
-            resultObj[QStringLiteral( "taskId" )] = static_cast<qint64>( taskId );
-            resultObj[QStringLiteral( "algorithmId" )] = info.algorithmId;
-            if ( info.status == TaskStatus::Completed )
-            {
-              resultObj[QStringLiteral( "status" )] = QStringLiteral( "success" );
-              if ( info.resultPayload.isObject() )
-              {
-                // Prefer structured payload; fall back to output path.
-                const std::string styled = info.resultPayload.toStyledString();
-                QJsonDocument payloadDoc = QJsonDocument::fromJson( QByteArray::fromStdString( styled ) );
-                if ( payloadDoc.isObject() )
-                  resultObj[QStringLiteral( "output" )] = payloadDoc.object();
-              }
-              if ( !info.outputLayerPath.isEmpty() )
-                resultObj[QStringLiteral( "outputPath" )] = info.outputLayerPath;
-            }
-            else
-            {
-              resultObj[QStringLiteral( "status" )] = QStringLiteral( "error" );
-              resultObj[QStringLiteral( "error" )] = info.errorMessage;
-            }
-            break;
+            // Prefer structured payload; fall back to output path.
+            const std::string styled = info.resultPayload.toStyledString();
+            QJsonDocument payloadDoc = QJsonDocument::fromJson( QByteArray::fromStdString( styled ) );
+            if ( payloadDoc.isObject() )
+              resultObj[QStringLiteral( "output" )] = payloadDoc.object();
           }
-          if ( clock::now() > deadline )
-          {
-            resultObj[QStringLiteral( "status" )] = QStringLiteral( "error" );
-            resultObj[QStringLiteral( "error" )] = QStringLiteral( "Tool call timed out in TaskCenter" );
-            resultObj[QStringLiteral( "taskId" )] = static_cast<qint64>( taskId );
-            break;
-          }
-          std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+          if ( !info.outputLayerPath.isEmpty() )
+            resultObj[QStringLiteral( "outputPath" )] = info.outputLayerPath;
+        }
+        else
+        {
+          resultObj[QStringLiteral( "status" )] = QStringLiteral( "error" );
+          resultObj[QStringLiteral( "error" )] = info.errorMessage.isEmpty()
+                                                   ? QStringLiteral( "Tool call timed out in TaskCenter" )
+                                                   : info.errorMessage;
         }
       }
 

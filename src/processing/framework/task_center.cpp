@@ -10,16 +10,22 @@
 
 namespace sicnu {
 
-namespace {
-
-bool isTerminalStatus( TaskStatus status )
+static QString findOutputPathInParams( const QVariantMap &params )
 {
-    return status == TaskStatus::Completed
-        || status == TaskStatus::Failed
-        || status == TaskStatus::Canceled;
+    for ( auto it = params.begin(); it != params.end(); ++it )
+    {
+        if ( it.key().contains( QStringLiteral( "OUTPUT" ), Qt::CaseInsensitive )
+             || it.key().contains( QStringLiteral( "RESULT" ), Qt::CaseInsensitive ) )
+        {
+            const QString path = it.value().toString();
+            if ( !path.isEmpty() && !path.startsWith( QLatin1Char( '$' ) ) )
+                return path;
+        }
+    }
+    return QString();
 }
 
-} // namespace
+
 
 TaskCenter& TaskCenter::instance()
 {
@@ -133,6 +139,29 @@ Json::Value TaskCenter::variantMapToJsonParams( const QVariantMap &params )
     return root;
 }
 
+QVariantMap TaskCenter::jsonParamsToVariantMap( const Json::Value &params )
+{
+    QVariantMap variantMap;
+    if ( !params.isObject() )
+        return variantMap;
+
+    for ( const auto &key : params.getMemberNames() )
+    {
+        const auto &val = params[key];
+        if ( val.isString() )
+            variantMap[QString::fromStdString( key )] = QString::fromStdString( val.asString() );
+        else if ( val.isBool() )
+            variantMap[QString::fromStdString( key )] = val.asBool();
+        else if ( val.isInt() || val.isUInt() || val.isInt64() || val.isUInt64() )
+            variantMap[QString::fromStdString( key )] = static_cast<qint64>( val.asInt64() );
+        else if ( val.isNumeric() )
+            variantMap[QString::fromStdString( key )] = val.asDouble();
+        else
+            variantMap[QString::fromStdString( key )] = QString::fromStdString( val.toStyledString() );
+    }
+    return variantMap;
+}
+
 void TaskCenter::queueTaskAddedLocked( long taskId )
 {
     if ( m_tasks.contains( taskId ) )
@@ -215,17 +244,9 @@ void TaskCenter::applyPlaceholdersForTask( long taskId )
     }
 
     // Refresh detected output path after substitution
-    for ( auto it = pMap.begin(); it != pMap.end(); ++it )
-    {
-        if ( it.key().contains( QStringLiteral( "OUTPUT" ), Qt::CaseInsensitive )
-             || it.key().contains( QStringLiteral( "RESULT" ), Qt::CaseInsensitive ) )
-        {
-            const QString path = it.value().toString();
-            if ( !path.isEmpty() && !path.startsWith( QLatin1Char( '$' ) ) )
-                m_tasks[taskId].outputLayerPath = path;
-            break;
-        }
-    }
+    const QString detectedPath = findOutputPathInParams( pMap );
+    if ( !detectedPath.isEmpty() )
+        m_tasks[taskId].outputLayerPath = detectedPath;
 }
 
 void TaskCenter::updatePipelineForTaskLocked( long taskId )
@@ -307,15 +328,7 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         info.parameterMap = params;
         info.autoLoadLayer = autoLoad;
 
-        for ( auto it = params.begin(); it != params.end(); ++it )
-        {
-            if ( it.key().contains( QStringLiteral( "OUTPUT" ), Qt::CaseInsensitive )
-                 || it.key().contains( QStringLiteral( "RESULT" ), Qt::CaseInsensitive ) )
-            {
-                info.outputLayerPath = it.value().toString();
-                break;
-            }
-        }
+        info.outputLayerPath = findOutputPathInParams( params );
 
         info.logBuffer.append( QString( QStringLiteral( "[%1] Task queued with priority %2." ) )
                                  .arg( info.startTime.toString( QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) ) )
@@ -356,20 +369,7 @@ long TaskCenter::enqueueToolCall( const std::string &jsonToolCall, bool autoLoad
 
         if ( paramsNode.isObject() )
         {
-            for ( const auto &key : paramsNode.getMemberNames() )
-            {
-                const auto &val = paramsNode[key];
-                if ( val.isString() )
-                    variantParams[QString::fromStdString( key )] = QString::fromStdString( val.asString() );
-                else if ( val.isBool() )
-                    variantParams[QString::fromStdString( key )] = val.asBool();
-                else if ( val.isInt() || val.isUInt() || val.isInt64() || val.isUInt64() )
-                    variantParams[QString::fromStdString( key )] = static_cast<qint64>( val.asInt64() );
-                else if ( val.isNumeric() )
-                    variantParams[QString::fromStdString( key )] = val.asDouble();
-                else
-                    variantParams[QString::fromStdString( key )] = QString::fromStdString( val.toStyledString() );
-            }
+            variantParams = jsonParamsToVariantMap( paramsNode );
         }
     }
 
@@ -394,19 +394,7 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
                                 CancelHook onCancel,
                                 bool autoLoad )
 {
-    QVariantMap params;
-    for ( const auto &name : request.params.getMemberNames() )
-    {
-        const Json::Value &value = request.params[name];
-        if ( value.isString() )
-            params.insert( QString::fromStdString( name ), QString::fromStdString( value.asString() ) );
-        else if ( value.isBool() )
-            params.insert( QString::fromStdString( name ), value.asBool() );
-        else if ( value.isInt() || value.isUInt() || value.isInt64() || value.isUInt64() )
-            params.insert( QString::fromStdString( name ), static_cast<qint64>( value.asInt64() ) );
-        else if ( value.isNumeric() )
-            params.insert( QString::fromStdString( name ), value.asDouble() );
-    }
+    QVariantMap params = jsonParamsToVariantMap( request.params );
 
     // Tracking-only enqueue; this path owns JobEngine submission itself.
     const long taskId = enqueueTask( QString::fromStdString( request.algorithmId ), params, autoLoad,
@@ -951,22 +939,7 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                 }
             }
 
-            QVariantMap params;
-            if ( step->params.isObject() )
-            {
-                for ( const auto &key : step->params.getMemberNames() )
-                {
-                    const auto &val = step->params[key];
-                    if ( val.isString() )
-                        params[QString::fromStdString( key )] = QString::fromStdString( val.asString() );
-                    else if ( val.isBool() )
-                        params[QString::fromStdString( key )] = val.asBool();
-                    else if ( val.isInt() || val.isUInt() || val.isInt64() || val.isUInt64() )
-                        params[QString::fromStdString( key )] = static_cast<qint64>( val.asInt64() );
-                    else if ( val.isNumeric() )
-                        params[QString::fromStdString( key )] = val.asDouble();
-                }
-            }
+            QVariantMap params = jsonParamsToVariantMap( step->params );
 
             long taskId = m_nextTaskId++;
             AlgorithmTaskInfo info;
@@ -985,15 +958,7 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
             info.stepId = QString::fromStdString( stepId );
             info.pipelineId = pipelineId;
 
-            for ( auto it = params.begin(); it != params.end(); ++it )
-            {
-                if ( it.key().contains( QStringLiteral( "OUTPUT" ), Qt::CaseInsensitive )
-                     || it.key().contains( QStringLiteral( "RESULT" ), Qt::CaseInsensitive ) )
-                {
-                    info.outputLayerPath = it.value().toString();
-                    break;
-                }
-            }
+            info.outputLayerPath = findOutputPathInParams( params );
 
             info.logBuffer.append( QString( QStringLiteral( "[%1] Pipeline step %2 queued." ) )
                                      .arg( info.startTime.toString( QStringLiteral( "yyyy-MM-dd hh:mm:ss" ) ),
@@ -1037,6 +1002,48 @@ PipelineExecutionInfo TaskCenter::getPipelineInfo( long pipelineId ) const
 {
     QMutexLocker locker( &m_mutex );
     return m_pipelines.value( pipelineId );
+}
+
+AlgorithmTaskInfo TaskCenter::waitForTask( long taskId,
+                                            std::chrono::milliseconds timeout,
+                                            std::chrono::milliseconds pollInterval ) const
+{
+    using clock = std::chrono::steady_clock;
+    const auto deadline = clock::now() + timeout;
+    for ( ;; )
+    {
+        AlgorithmTaskInfo info = getTaskInfo( taskId );
+        if ( info.taskId < 0 || isTerminalStatus( info.status ) )
+        {
+            return info;
+        }
+        if ( clock::now() >= deadline )
+        {
+            return info;
+        }
+        std::this_thread::sleep_for( pollInterval );
+    }
+}
+
+PipelineExecutionInfo TaskCenter::waitForPipeline( long pipelineId,
+                                                    std::chrono::milliseconds timeout,
+                                                    std::chrono::milliseconds pollInterval ) const
+{
+    using clock = std::chrono::steady_clock;
+    const auto deadline = clock::now() + timeout;
+    for ( ;; )
+    {
+        PipelineExecutionInfo info = getPipelineInfo( pipelineId );
+        if ( info.pipelineId < 0 || info.isCompleted || info.isFailed )
+        {
+            return info;
+        }
+        if ( clock::now() >= deadline )
+        {
+            return info;
+        }
+        std::this_thread::sleep_for( pollInterval );
+    }
 }
 
 } // namespace sicnu
