@@ -66,6 +66,29 @@ TEST_CASE( "QgisPython version and package probes use expression-form eval", "[p
     QStringLiteral( "definitely_not_a_real_package_xyz_103" ) ) );
 }
 
+TEST_CASE( "QgisPython initialize executes init snippets (sicnu module, stdout redirection, qgis.utils stub)", "[python][engine][init_snippets]" )
+{
+  REQUIRE( QgisPython::instance().initialize() );
+
+  QString result, error;
+
+  // 1. Verify sicnu helper module exists in sys.modules
+  bool ok = QgisPython::instance().evalString( QStringLiteral( "'sicnu' in sys.modules" ), result, error );
+  REQUIRE( ok );
+  CHECK( result == QStringLiteral( "True" ) );
+
+  // 2. Verify stdout redirection to SICNUStdout
+  ok = QgisPython::instance().evalString( QStringLiteral( "type(sys.stdout).__name__" ), result, error );
+  REQUIRE( ok );
+  CHECK( result == QStringLiteral( "SICNUStdout" ) );
+
+  // 3. Verify qgis.utils stub exists in sys.modules
+  ok = QgisPython::instance().evalString( QStringLiteral( "'qgis.utils' in sys.modules" ), result, error );
+  REQUIRE( ok );
+  CHECK( result == QStringLiteral( "True" ) );
+}
+
+
 TEST_CASE( "qgis.utils stub keeps project clear free of spurious NameError", "[python][engine]" )
 {
   REQUIRE( QgisPython::instance().initialize() );

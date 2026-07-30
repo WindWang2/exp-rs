@@ -79,6 +79,9 @@ bool QgisPython::initialize()
     // Add custom print function
     PyModule_AddFunctions(static_cast<PyObject *>(m_mainModule), PrintMethods);
 
+    // Mark as initialized so runString and addPath work during initialize()
+    m_initialized = true;
+
     // Redirect stdout/stderr to our custom print
     QString redirectCode = R"(
 import sys
@@ -198,56 +201,30 @@ class _SicnuHelper:
     @staticmethod
     def project_info():
         """Get current project information."""
-        from osgeo import gdal
-        import json
-        # This will be replaced by actual API call
         return "Use 'sicnu.project_path()' for project info"
 
 sicnu = _SicnuHelper()
 sys.modules['sicnu'] = sicnu
-print("SICNU helper loaded. Use 'sicnu.packages()' to list packages.")
 )";
 
     runString(createHelper, error);
-
-    // Import common scientific packages to verify they're available
-    QString verifyPackages = R"(
-import sys
-packages = [
-    'numpy', 'scipy', 'sklearn', 'skimage',
-    'osgeo', 'gdal',
-    'matplotlib', 'pandas', 'geopandas',
-    'shapely', 'fiona', 'rasterio', 'pyproj'
-]
-available = []
-for pkg in packages:
-    try:
-        __import__(pkg)
-        available.append(pkg)
-    except ImportError:
-        pass
-print(f"SICNU: Available packages: {', '.join(available)}")
-)";
-
-    runString(verifyPackages, error);
 
     // Provide a minimal qgis.utils stub. Vendored QGIS core calls
     // qgis.utils.clean_project_expression_functions() from QgsProject::clear();
     // real QGIS gets that module from its Python plugin environment, which our
     // embedded interpreter lacks — without the stub every project clear prints
     // a spurious NameError (#103).
-    // NOTE: runString() refuses to execute until m_initialized is set, so this
-    // must run through the C API directly.
-    PyRun_SimpleStringFlags(
-        "import sys, types\n"
-        "qgis = types.ModuleType('qgis')\n"
-        "qgis.utils = types.ModuleType('qgis.utils')\n"
-        "qgis.utils.clean_project_expression_functions = lambda: None\n"
-        "sys.modules['qgis'] = qgis\n"
-        "sys.modules['qgis.utils'] = qgis.utils\n",
-        nullptr);
+    QString qgisStub = R"(
+import sys, types
+qgis = types.ModuleType('qgis')
+qgis.utils = types.ModuleType('qgis.utils')
+qgis.utils.clean_project_expression_functions = lambda: None
+sys.modules['qgis'] = qgis
+sys.modules['qgis.utils'] = qgis.utils
+)";
 
-    m_initialized = true;
+    runString(qgisStub, error);
+
     QgsPythonRunner::setInstance( new SicnuPythonRunner() );
     qDebug() << "Python initialized:" << pythonVersion();
     return true;
