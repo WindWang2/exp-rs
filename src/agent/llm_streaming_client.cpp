@@ -283,12 +283,16 @@ void LlmStreamingClient::onReplyFinished()
           if ( !info.outputLayerPath.isEmpty() )
             resultObj[QStringLiteral( "outputPath" )] = info.outputLayerPath;
         }
-        else
+        else if ( isTerminalStatus( info.status ) )
         {
           resultObj[QStringLiteral( "status" )] = QStringLiteral( "error" );
-          resultObj[QStringLiteral( "error" )] = info.errorMessage.isEmpty()
-                                                   ? kToolCallTimeoutMessage
-                                                   : info.errorMessage;
+          resultObj[QStringLiteral( "error" )] = info.errorMessage;
+        }
+        else
+        {
+          // Wait timed out before the task reached a terminal status.
+          resultObj[QStringLiteral( "status" )] = QStringLiteral( "error" );
+          resultObj[QStringLiteral( "error" )] = kToolCallTimeoutMessage;
         }
       }
 

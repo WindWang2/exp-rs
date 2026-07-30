@@ -189,12 +189,15 @@ Json::Value AgentWorkflowExecutor::executeToolCall( const Json::Value &toolCallJ
       }
     }
   }
-  else
+  else if ( isTerminalStatus( info.status ) )
   {
     resultPayload["status"] = "error";
-    resultPayload["errorMessage"] = info.errorMessage.isEmpty()
-                                      ? kToolCallTimeoutMessage.toStdString()
-                                      : info.errorMessage.toStdString();
+    resultPayload["errorMessage"] = info.errorMessage.toStdString();
+  }
+  else
+  {
+    // Wait timed out before the task reached a terminal status.
+    resultPayload["errorMessage"] = kToolCallTimeoutMessage.toStdString();
   }
   return resultPayload;
 }

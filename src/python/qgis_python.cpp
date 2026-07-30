@@ -205,6 +205,7 @@ class _SicnuHelper:
 
 sicnu = _SicnuHelper()
 sys.modules['sicnu'] = sicnu
+print("SICNU helper loaded. Use 'sicnu.packages()' to list packages.")
 )";
 
     runString(createHelper, error);
