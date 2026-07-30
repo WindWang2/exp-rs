@@ -49,6 +49,23 @@ TEST_CASE( "QgisPython singleton initializes and runs embedded code", "[python][
   CHECK( result == QStringLiteral( "300" ) );
 }
 
+TEST_CASE( "QgisPython version and package probes use expression-form eval", "[python][engine]" )
+{
+  REQUIRE( QgisPython::instance().initialize() );
+
+  // Must be a real version string (not empty / not leftover SyntaxError spam path).
+  const QString version = QgisPython::instance().pythonVersion();
+  REQUIRE_FALSE( version.isEmpty() );
+  REQUIRE( version != QStringLiteral( "Not initialized" ) );
+  // Typical sys.version starts with major.minor (e.g. "3.12.0 ...").
+  CHECK( version.at( 0 ).isDigit() );
+
+  // Built-in module should be available; nonsense name should not.
+  CHECK( QgisPython::instance().isPackageAvailable( QStringLiteral( "sys" ) ) );
+  CHECK_FALSE( QgisPython::instance().isPackageAvailable(
+    QStringLiteral( "definitely_not_a_real_package_xyz_103" ) ) );
+}
+
 TEST_CASE( "SicnuPythonRunner is registered globally with QgsPythonRunner", "[python][runner]" )
 {
   REQUIRE( QgisPython::instance().initialize() );

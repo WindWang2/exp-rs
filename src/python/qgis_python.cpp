@@ -337,7 +337,8 @@ QString QgisPython::pythonVersion() const
         return "Not initialized";
 
     QString result, error;
-    const_cast<QgisPython *>(this)->evalString("import sys; sys.version", result, error);
+    // Expression form only — evalString uses Py_eval_input (no statements).
+    const_cast<QgisPython *>(this)->evalString("__import__('sys').version", result, error);
     return result;
 }
 
@@ -379,7 +380,11 @@ bool QgisPython::isPackageAvailable(const QString &packageName) const
     if (!m_initialized)
         return false;
 
-    QString code = QString("import importlib.util; print(importlib.util.find_spec('%1') is not None)").arg(packageName);
+    // Expression form only — evalString uses Py_eval_input (no statements/imports).
+    // fromlist ensures __import__ returns importlib.util, not the top-level importlib package.
+    QString code = QStringLiteral(
+        "__import__('importlib.util', fromlist=['find_spec']).find_spec('%1') is not None")
+        .arg(packageName);
     QString result, error;
     const_cast<QgisPython *>(this)->evalString(code, result, error);
     return result.trimmed() == "True";
