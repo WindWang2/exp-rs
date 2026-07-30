@@ -2802,6 +2802,7 @@ target_link_libraries(test_python_processing_provider PRIVATE
 )
 target_include_directories(test_python_processing_provider PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_SOURCE_DIR}/src/python
   ${CMAKE_BINARY_DIR}
 )
