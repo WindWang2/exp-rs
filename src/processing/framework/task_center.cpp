@@ -30,6 +30,75 @@ TaskCenter& TaskCenter::instance()
 TaskCenter::TaskCenter()
 {
     qRegisterMetaType<AlgorithmTaskInfo>("sicnu::AlgorithmTaskInfo");
+    resetResourceProfileLimits();
+}
+
+ProviderResourceProfile TaskCenter::resolveResourceProfile( const QString &algorithmId ) const
+{
+    auto adapter = AlgorithmEngine::instance().findAlgorithm( algorithmId );
+    if ( adapter )
+        return adapter->descriptor().resourceProfile;
+    // Documented fallback when the algorithm is not registered on AlgorithmEngine
+    // (e.g. pure JobEngine / RSOperator ids used only at runtime).
+    return ProviderResourceProfile::InProcessThread;
+}
+
+unsigned int TaskCenter::defaultLimitForProfile( ProviderResourceProfile profile ) const
+{
+    const unsigned int hw = std::max( 1u, std::thread::hardware_concurrency() );
+    const unsigned int inProcessDefault = std::max( 1u, hw > 1 ? hw - 1 : 1u );
+    switch ( profile )
+    {
+      case ProviderResourceProfile::ExternalCliSubprocess:
+        return std::min( 2u, inProcessDefault );
+      case ProviderResourceProfile::PythonWorkerProcess:
+        return std::min( 2u, inProcessDefault );
+      case ProviderResourceProfile::QgsTaskThread:
+        return std::max( 1u, inProcessDefault / 2 );
+      case ProviderResourceProfile::InProcessThread:
+      default:
+        return inProcessDefault;
+    }
+}
+
+unsigned int TaskCenter::limitForProfileLocked( ProviderResourceProfile profile ) const
+{
+    if ( m_profileLimits.contains( profile ) )
+        return std::max( 1u, m_profileLimits.value( profile ) );
+    return defaultLimitForProfile( profile );
+}
+
+void TaskCenter::setResourceProfileLimit( ProviderResourceProfile profile, unsigned int maxConcurrent )
+{
+    QMutexLocker locker( &m_mutex );
+    m_profileLimits[profile] = std::max( 1u, maxConcurrent );
+}
+
+unsigned int TaskCenter::resourceProfileLimit( ProviderResourceProfile profile ) const
+{
+    QMutexLocker locker( &m_mutex );
+    return limitForProfileLocked( profile );
+}
+
+void TaskCenter::resetResourceProfileLimits()
+{
+    QMutexLocker locker( &m_mutex );
+    m_profileLimits.clear();
+    m_globalConcurrencyLimit = 0;
+}
+
+void TaskCenter::setGlobalConcurrencyLimit( unsigned int maxConcurrent )
+{
+    QMutexLocker locker( &m_mutex );
+    m_globalConcurrencyLimit = std::max( 1u, maxConcurrent );
+}
+
+unsigned int TaskCenter::globalConcurrencyLimit() const
+{
+    QMutexLocker locker( &m_mutex );
+    if ( m_globalConcurrencyLimit > 0 )
+        return m_globalConcurrencyLimit;
+    return defaultLimitForProfile( ProviderResourceProfile::InProcessThread );
 }
 
 Json::Value TaskCenter::variantMapToJsonParams( const QVariantMap &params )
@@ -224,6 +293,7 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         info.priority = priority;
         info.parentTaskIds = parentTaskIds;
         info.autoDispatch = autoDispatch;
+        info.resourceProfile = resolveResourceProfile( algorithmId );
 
         auto adapter = AlgorithmEngine::instance().findAlgorithm( algorithmId );
         if ( adapter )
@@ -424,18 +494,23 @@ void TaskCenter::watchSubmittedJob( long taskId, std::string jobId )
 void TaskCenter::processNextQueuedTasks()
 {
     // Called with m_mutex held. Only stages work; callers must flushPendingLaunches() outside the lock.
-    unsigned int maxThreads = std::max( 1u, std::thread::hardware_concurrency() - 1 );
-    unsigned int runningCount = 0;
+    const unsigned int globalMax = m_globalConcurrencyLimit > 0
+                                     ? m_globalConcurrencyLimit
+                                     : defaultLimitForProfile( ProviderResourceProfile::InProcessThread );
 
+    QMap<ProviderResourceProfile, unsigned int> runningByProfile;
+    unsigned int totalRunning = 0;
+
+    // Pending launches already have status Running; count only Running tasks once.
     for ( const auto &t : m_tasks )
     {
-        if ( t.status == TaskStatus::Running )
-            runningCount++;
+        if ( t.status != TaskStatus::Running )
+            continue;
+        runningByProfile[t.resourceProfile] = runningByProfile.value( t.resourceProfile, 0u ) + 1;
+        ++totalRunning;
     }
-    // Count launches already staged but not yet submitted.
-    runningCount += static_cast<unsigned int>( m_pendingLaunches.size() );
 
-    if ( runningCount >= maxThreads )
+    if ( totalRunning >= globalMax )
         return;
 
     QList<long> eligibleIds;
@@ -466,7 +541,7 @@ void TaskCenter::processNextQueuedTasks()
 
     for ( long id : eligibleIds )
     {
-        if ( runningCount >= maxThreads )
+        if ( totalRunning >= globalMax )
             break;
 
         applyPlaceholdersForTask( id );
@@ -478,10 +553,16 @@ void TaskCenter::processNextQueuedTasks()
         if ( m_tasks[id].status != TaskStatus::Queued )
             continue;
 
+        const ProviderResourceProfile profile = m_tasks[id].resourceProfile;
+        const unsigned int profileMax = limitForProfileLocked( profile );
+        if ( runningByProfile.value( profile, 0u ) >= profileMax )
+            continue; // leave queued; another profile may still launch
+
         m_tasks[id].status = TaskStatus::Running;
         m_tasks[id].logBuffer.append(
-          QString( QStringLiteral( "[%1] Dispatching to JobEngine." ) )
-            .arg( QDateTime::currentDateTime().toString( QStringLiteral( "hh:mm:ss" ) ) ) );
+          QString( QStringLiteral( "[%1] Dispatching to JobEngine (profile=%2)." ) )
+            .arg( QDateTime::currentDateTime().toString( QStringLiteral( "hh:mm:ss" ) ) )
+            .arg( static_cast<int>( profile ) ) );
         updatePipelineForTaskLocked( id );
 
         PendingLaunch launch;
@@ -505,7 +586,8 @@ void TaskCenter::processNextQueuedTasks()
 
         queueTaskUpdatedLocked( id );
         m_pendingLaunches.append( std::move( launch ) );
-        runningCount++;
+        runningByProfile[profile] = runningByProfile.value( profile, 0u ) + 1;
+        ++totalRunning;
     }
 }
 
@@ -899,6 +981,7 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
             info.parameterMap = params;
             info.autoLoadLayer = autoLoad;
             info.autoDispatch = true;
+            info.resourceProfile = resolveResourceProfile( info.algorithmId );
             info.stepId = QString::fromStdString( stepId );
             info.pipelineId = pipelineId;
 

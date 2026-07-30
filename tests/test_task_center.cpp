@@ -361,6 +361,150 @@ TEST_CASE("TaskCenter - Native submitPipeline dispatches DAG and resolves $stepI
     engine.clearExecutors();
 }
 
+TEST_CASE( "TaskCenter - resource profile throttling distinguishes concurrency caps",
+           "[processing][task_center][throttling]" )
+{
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+
+    auto &center = sicnu::TaskCenter::instance();
+    center.resetResourceProfileLimits();
+    center.setGlobalConcurrencyLimit( 8 );
+    center.setResourceProfileLimit( sicnu::ProviderResourceProfile::InProcessThread, 2 );
+    center.setResourceProfileLimit( sicnu::ProviderResourceProfile::ExternalCliSubprocess, 1 );
+
+    class ProfiledAdapter : public sicnu::TaskAlgorithmAdapter
+    {
+      public:
+        ProfiledAdapter( QString id, sicnu::ProviderResourceProfile profile )
+          : m_id( std::move( id ) )
+          , m_profile( profile )
+        {
+        }
+        sicnu::AlgorithmDescriptor descriptor() const override
+        {
+            sicnu::AlgorithmDescriptor d;
+            d.id = m_id;
+            d.name = m_id;
+            d.resourceProfile = m_profile;
+            return d;
+        }
+        bool validateParameters( const QVariantMap &, QString & ) const override { return true; }
+        bool execute( const QVariantMap &, std::function<void( double )>, QString & ) override { return true; }
+
+      private:
+        QString m_id;
+        sicnu::ProviderResourceProfile m_profile;
+    };
+
+    auto &algEngine = sicnu::AlgorithmEngine::instance();
+    algEngine.clear();
+    algEngine.registerAlgorithm(
+      std::make_shared<ProfiledAdapter>( QStringLiteral( "throttle:inproc" ),
+                                         sicnu::ProviderResourceProfile::InProcessThread ) );
+    algEngine.registerAlgorithm(
+      std::make_shared<ProfiledAdapter>( QStringLiteral( "throttle:cli" ),
+                                         sicnu::ProviderResourceProfile::ExternalCliSubprocess ) );
+
+    std::atomic<int> inFlightCli{ 0 };
+    std::atomic<int> maxCli{ 0 };
+    std::atomic<int> inFlightInproc{ 0 };
+    std::atomic<int> maxInproc{ 0 };
+    std::atomic<bool> releaseWorkers{ false };
+
+    auto holdExecutor = []( std::atomic<int> &inFlight, std::atomic<int> &maxSeen,
+                            std::atomic<bool> &release ) {
+        return [&inFlight, &maxSeen, &release]( const sicnu::jobs::JobRequest &,
+                                                sicnu::operators::RSOperatorContext & ) {
+            const int cur = ++inFlight;
+            int prev = maxSeen.load();
+            while ( cur > prev && !maxSeen.compare_exchange_weak( prev, cur ) )
+            {
+            }
+            while ( !release.load() )
+                std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            --inFlight;
+            Json::Value result( Json::objectValue );
+            result["output"] = "/tmp/throttle.tif";
+            return result;
+        };
+    };
+
+    engine.registerExecutor( "throttle:cli", holdExecutor( inFlightCli, maxCli, releaseWorkers ) );
+    engine.registerExecutor( "throttle:inproc", holdExecutor( inFlightInproc, maxInproc, releaseWorkers ) );
+
+    // Enqueue three CLI tasks — only 1 may run at a time.
+    QList<long> cliIds;
+    for ( int i = 0; i < 3; ++i )
+        cliIds.append( center.enqueueTask( QStringLiteral( "throttle:cli" ), {}, false,
+                                           sicnu::TaskPriority::Normal, {}, true ) );
+
+    // Enqueue three in-process tasks — up to 2 may run concurrently.
+    QList<long> inprocIds;
+    for ( int i = 0; i < 3; ++i )
+        inprocIds.append( center.enqueueTask( QStringLiteral( "throttle:inproc" ), {}, false,
+                                              sicnu::TaskPriority::Normal, {}, true ) );
+
+    for ( int attempt = 0; attempt < 200; ++attempt )
+    {
+        if ( maxCli.load() >= 1 && maxInproc.load() >= 1 )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+
+    // Snapshot how many are Running before release.
+    int cliRunning = 0;
+    int inprocRunning = 0;
+    int cliQueued = 0;
+    for ( long id : cliIds )
+    {
+        const auto st = center.getTaskInfo( id ).status;
+        if ( st == sicnu::TaskStatus::Running )
+            ++cliRunning;
+        if ( st == sicnu::TaskStatus::Queued )
+            ++cliQueued;
+    }
+    for ( long id : inprocIds )
+    {
+        if ( center.getTaskInfo( id ).status == sicnu::TaskStatus::Running )
+            ++inprocRunning;
+    }
+
+    CHECK( center.getTaskInfo( cliIds.first() ).resourceProfile
+           == sicnu::ProviderResourceProfile::ExternalCliSubprocess );
+    CHECK( center.getTaskInfo( inprocIds.first() ).resourceProfile
+           == sicnu::ProviderResourceProfile::InProcessThread );
+    CHECK( cliRunning <= 1 );
+    CHECK( cliQueued >= 1 );
+    CHECK( inprocRunning <= 2 );
+    CHECK( maxCli.load() <= 1 );
+    CHECK( maxInproc.load() <= 2 );
+
+    releaseWorkers.store( true );
+    engine.waitUntilIdleForTests();
+    for ( int attempt = 0; attempt < 200; ++attempt )
+    {
+        bool allDone = true;
+        for ( long id : cliIds )
+            allDone = allDone && center.getTaskInfo( id ).status == sicnu::TaskStatus::Completed;
+        for ( long id : inprocIds )
+            allDone = allDone && center.getTaskInfo( id ).status == sicnu::TaskStatus::Completed;
+        if ( allDone )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+
+    for ( long id : cliIds )
+        REQUIRE( center.getTaskInfo( id ).status == sicnu::TaskStatus::Completed );
+    for ( long id : inprocIds )
+        REQUIRE( center.getTaskInfo( id ).status == sicnu::TaskStatus::Completed );
+
+    engine.clearExecutors();
+    center.resetResourceProfileLimits();
+    algEngine.clear();
+}
+
 TEST_CASE( "TaskCenter - reentrant taskUpdated slot does not deadlock",
            "[processing][task_center][reentrancy]" )
 {

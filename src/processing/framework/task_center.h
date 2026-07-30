@@ -67,6 +67,10 @@ struct AlgorithmTaskInfo {
     bool autoLoadLayer = true;
     /// When true, processNextQueuedTasks submits the task to JobEngine once parents complete.
     bool autoDispatch = false;
+    /// Scheduling class used by resource-profile throttling (ADR Algorithm Provider Adapter).
+    /// Resolved from AlgorithmEngine when the algorithm is registered; otherwise
+    /// defaults to InProcessThread.
+    ProviderResourceProfile resourceProfile = ProviderResourceProfile::InProcessThread;
     QString outputLayerPath;
     QString stepId;
     long pipelineId = -1;
@@ -136,6 +140,15 @@ public:
     PipelineExecutionInfo getPipelineInfo(long pipelineId) const;
     void clearCompletedTasks();
 
+    /// Cap concurrent Running tasks for @a profile (minimum 1). Used by processNextQueuedTasks.
+    void setResourceProfileLimit( ProviderResourceProfile profile, unsigned int maxConcurrent );
+    unsigned int resourceProfileLimit( ProviderResourceProfile profile ) const;
+    /// Restore built-in per-profile defaults (InProcess ≈ hardware_concurrency-1, CLI/Python lower).
+    void resetResourceProfileLimits();
+    /// Global concurrent Running cap across all profiles (minimum 1).
+    void setGlobalConcurrencyLimit( unsigned int maxConcurrent );
+    unsigned int globalConcurrencyLimit() const;
+
 signals:
     /// Lifecycle notifications are always emitted **outside** m_mutex so slots may
     /// safely re-enter TaskCenter (getTaskInfo, enqueue, cancel, …) without deadlock.
@@ -168,6 +181,9 @@ private:
                        bool autoLoad);
     void watchSubmittedJob(long taskId, std::string jobId);
     static Json::Value variantMapToJsonParams(const QVariantMap& params);
+    ProviderResourceProfile resolveResourceProfile( const QString &algorithmId ) const;
+    unsigned int defaultLimitForProfile( ProviderResourceProfile profile ) const;
+    unsigned int limitForProfileLocked( ProviderResourceProfile profile ) const;
 
     struct PendingLaunch {
         long taskId = -1;
@@ -188,6 +204,8 @@ private:
     QList<AlgorithmTaskInfo> m_pendingTaskAdded;
     QList<AlgorithmTaskInfo> m_pendingTaskUpdated;
     QList<PendingLog> m_pendingLogs;
+    QMap<ProviderResourceProfile, unsigned int> m_profileLimits; ///< empty entry → use defaultLimitForProfile
+    unsigned int m_globalConcurrencyLimit = 0; ///< 0 → hardware_concurrency()-1 (min 1)
     long m_nextTaskId = 1;
     long m_nextPipelineId = 1;
 };
