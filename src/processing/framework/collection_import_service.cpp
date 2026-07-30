@@ -321,13 +321,26 @@ Result<CommitImportResult> CollectionImportService::importCollection( const QStr
     return Result<CommitImportResult>::failure( commitResult.diagnostics );
   }
 
-  if ( autoLoad && pathOpener && !preview.children.isEmpty() )
+  if ( autoLoad && pathOpener )
   {
-    const QString primaryPath = preview.children.first().sourcePath;
-    if ( !primaryPath.isEmpty() )
+    // Prefer the committed Data Asset's canonical source (post-register path)
+    // so autoLoad tracks catalog identity, not only the probe preview string.
+    QString primaryPath;
+    if ( !commitResult.childAssetIds.isEmpty() && m_dataManager )
     {
-      pathOpener( primaryPath );
+      const auto snapshot = m_dataManager->asset( commitResult.childAssetIds.first() );
+      if ( snapshot.has_value() )
+        primaryPath = snapshot->source().canonicalSource;
     }
+    if ( primaryPath.isEmpty() && !preview.children.isEmpty() )
+    {
+      const ChildCandidate &primary = preview.children.first();
+      primaryPath = primary.sourcePath;
+      if ( primaryPath.isEmpty() && !primary.bands.isEmpty() )
+        primaryPath = primary.bands.first().sourcePath;
+    }
+    if ( !primaryPath.isEmpty() )
+      pathOpener( primaryPath );
   }
 
   return Result<CommitImportResult>::success( commitResult );

@@ -8,6 +8,10 @@ Core domain terminology and vocabulary for the SICNU GEO RS platform.
 The unified registry, environment manager, and execution facade that manages provider loading (`GdalToolsProvider`, `OtbToolsProvider`, `QgisAlgorithmsProvider`, `GenericCliProvider`), tool path discovery, and algorithm adapters through a self-contained `AlgorithmEngine::initialize()` seam.
 _Avoid_: Processing framework, Tool registry, Run manager
 
+**Algorithm Provider Adapter**:
+The uniform C++ interface seam (`AlgorithmProviderAdapter`) implemented by provider plugins (`GdalToolsProvider`, `OtbToolsProvider`, `QgisAlgorithmsProvider`, `GenericCliProvider`, `PythonProcessingProvider`) to declare provider resource profiles (`InProcessThread`, `PythonWorkerProcess`, `ExternalCliSubprocess`, `QgsTaskThread`), initialize execution backends, and populate `AtomicAlgorithmRegistry`.
+_Avoid_: Provider manager, Plugin loader script, Tool finder
+
 **Task Center**:
 The central execution owner for Algorithm Tasks: it queues, tracks lifecycle (Pause/Resume/Cancel/Retry), exposes logs and parameters, applies priority scheduling and Task Pipeline gating, and makes results available for canvas loading. Workspace task views may present its tasks, but do not own their lifecycle. It delegates execution to internal worker adapters (including `JobEngine` and `QgsTask`).
 _Avoid_: Job manager, Background runner, Process monitor
@@ -158,5 +162,14 @@ _Avoid_: Workspace state map, Context dict, UI state dump
   1. **Native Pipeline Seam**: Deepen `TaskCenter` to natively accept DAG pipelines via `TaskCenter::submitPipeline(WorkflowDefinition)` and `submitPipelineJson(std::string)`.
   2. **Automated Upstream Parameter Resolution**: `TaskCenter` resolves `$stepId.output` placeholders in downstream task parameters automatically upon upstream task completion before launching dependent tasks.
   3. **Reactive UI & Headless Seam**: `WorkflowSessionController`, `AgentWorkflowExecutor`, and headless CLI execute pipelines through `TaskCenter`'s single interface seam, observing reactive `taskUpdated` signals for node status badging without maintaining UI execution loops.
+
+### ADR 0018: CollectionImportService Deepening & One-Step Dataset Import Architecture
+- **Context**: Importing Remote Sensing product scenes (Sentinel-2 SAFE, Landsat scenes, HDF5 containers) previously forced callers across GUI, Python API, and LLM Agent tools to manually orchestrate two-step probe and commit loops to select and register child band assets.
+- **Decision**:
+  1. **One-Step Import Seam**: Deepen `CollectionImportService` with `importCollection(sourcePath, persistence, autoLoad, pathOpener)` to automatically probe, select all discovered children, and register the `DataCollection` and child `DataAsset` items in `DataManager` in a single atomic transaction. The service stays free of GUI types so it can run headlessly (processing layer).
+  2. **Opt-In Canvas Auto-Loading via Display Seam**: When `autoLoad = true` and a `pathOpener` callback is provided, after a successful commit the service invokes the opener with the **primary committed child** path (preferring the registered asset's `canonicalSource`). GUI / Agent hosts bind `pathOpener` to `ActiveViewHost::openPath` (or equivalent) so map loading preserves the Data/Display seam (ADR 0010/0015). Headless callers omit the opener.
+  3. **Headless Testability**: `importCollection()` is tested headlessly using stub discoverers in `test_collection_import_service.cpp`, including autoLoad opener capture and failure rollback.
+
+
 
 

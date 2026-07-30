@@ -757,16 +757,51 @@ TEST_CASE( "CollectionImportService importCollection provides a one-step probe a
     CHECK( manager.assets().isEmpty() );
   }
 
-  SECTION( "autoLoad invokes pathOpener with the primary child path" )
+  SECTION( "autoLoad invokes pathOpener with the primary committed child path" )
   {
     QString openedPath;
+    int openCount = 0;
     auto res = service.importCollection(
       path1,
       sicnu::data::PersistencePolicy::ProjectPersistent,
       /*autoLoad=*/true,
-      [&]( const QString &path ) { openedPath = path; } );
+      [&]( const QString &path ) {
+        openedPath = path;
+        ++openCount;
+      } );
     REQUIRE( res );
-    CHECK_FALSE( openedPath.isEmpty() );
+    REQUIRE( openCount == 1 );
+    // Primary path is the registered asset's canonical source (Data/Display seam input).
+    const auto &childIds = res.value().childAssetIds;
+    REQUIRE( !childIds.isEmpty() );
+    const auto snap = manager.asset( childIds.first() );
+    REQUIRE( snap.has_value() );
+    CHECK( openedPath == snap->source().canonicalSource );
+    CHECK( openedPath == path1 );
+  }
+
+  SECTION( "autoLoad without pathOpener still commits and never opens" )
+  {
+    auto res = service.importCollection(
+      path1,
+      sicnu::data::PersistencePolicy::ProjectPersistent,
+      /*autoLoad=*/true,
+      nullptr );
+    REQUIRE( res );
+    CHECK( manager.collections().size() == 1 );
+    CHECK( manager.assets().size() == 1 );
+  }
+
+  SECTION( "autoLoad false does not invoke pathOpener" )
+  {
+    int openCount = 0;
+    auto res = service.importCollection(
+      path1,
+      sicnu::data::PersistencePolicy::ProjectPersistent,
+      /*autoLoad=*/false,
+      [&]( const QString & ) { ++openCount; } );
+    REQUIRE( res );
+    CHECK( openCount == 0 );
   }
 }
 

@@ -191,8 +191,12 @@ class CollectionImportService : public QObject
     /// High-leverage one-step import seam: automatically probes @a sourcePath,
     /// selects all discovered child bands, and commits the collection + child Data Assets
     /// into DataManager in a single atomic transaction.
-    /// If @a autoLoad is true and @a pathOpener is provided, automatically
-    /// opens the primary child asset via the callback.
+    ///
+    /// When @a autoLoad is true and @a pathOpener is set, opens the **primary
+    /// committed child** path after a successful commit. GUI callers preserve
+    /// the Data/Display seam (ADR 0010/0018) by binding @a pathOpener to
+    /// `ActiveViewHost::openPath` (or equivalent). Headless callers omit the
+    /// opener or pass a no-op — import still succeeds.
     sicnu::data::Result<CommitImportResult> importCollection( const QString &sourcePath,
                                                                sicnu::data::PersistencePolicy persistence = sicnu::data::PersistencePolicy::ProjectPersistent,
                                                                bool autoLoad = false,
