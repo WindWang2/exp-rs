@@ -429,6 +429,7 @@ TEST_CASE( "PythonAppInterfaceProxy handles catalog.get_active_layer, canvas.get
   if ( foundAlgo )
   {
     CHECK( foundAlgo->descriptor().name == QStringLiteral( "Test Python NDVI" ) );
+    CHECK( foundAlgo->descriptor().resourceProfile == sicnu::ProviderResourceProfile::PythonWorkerProcess );
   }
 
   CHECK( uiProxy.registeredActionCount() == 0 );

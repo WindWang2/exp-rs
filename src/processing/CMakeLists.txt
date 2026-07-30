@@ -34,6 +34,8 @@ add_library(sicnu_processing SHARED
     ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator_context.cpp
     ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator_error.cpp
     framework/python_algorithm_adapter.cpp
+    framework/python_processing_provider_adapter.cpp
+    framework/python_processing_provider_adapter.h
     framework/agent_tool_call_exporter.cpp
     # agent_workflow_executor.cpp lives in sicnu_task_center: it routes through TaskCenter/JobEngine.
     # task_center.cpp lives in sicnu_task_center (below): JobEngine link would

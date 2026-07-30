@@ -100,3 +100,47 @@ TEST_CASE("AlgorithmEngine - AlgorithmProviderAdapter registration seam", "[proc
     REQUIRE(engine.findAlgorithm(QStringLiteral("dummy_custom_algo")) != nullptr);
     REQUIRE(engine.registeredAlgorithms().first().id == QStringLiteral("dummy_custom_algo"));
 }
+
+#include "processing/framework/python_processing_provider_adapter.h"
+
+TEST_CASE("AlgorithmEngine - PythonProcessingProviderAdapter resource profile and discovery", "[processing][algorithm_engine][python_provider]") {
+    auto& engine = sicnu::AlgorithmEngine::instance();
+    engine.clear();
+
+    engine.initialize();
+
+    auto providers = engine.registeredProviders();
+    sicnu::AlgorithmProviderAdapterPtr pythonProvider = nullptr;
+    for (const auto& p : providers) {
+        if (p && p->providerId() == QStringLiteral("python_plugins")) {
+            pythonProvider = p;
+            break;
+        }
+    }
+
+    REQUIRE(pythonProvider != nullptr);
+    CHECK(pythonProvider->providerName() == QStringLiteral("Python Plugins"));
+    CHECK(pythonProvider->resourceProfile() == sicnu::ProviderResourceProfile::PythonWorkerProcess);
+
+    auto adapterPtr = std::dynamic_pointer_cast<sicnu::PythonProcessingProviderAdapter>(pythonProvider);
+    REQUIRE(adapterPtr != nullptr);
+
+    sicnu::AlgorithmDescriptor desc;
+    desc.id = QStringLiteral("py:test_algorithm_108");
+    desc.name = QStringLiteral("Test Python Algo 108");
+    desc.group = QStringLiteral("Python Test");
+    desc.description = QStringLiteral("Test algorithm for issue 108");
+    desc.resourceProfile = sicnu::ProviderResourceProfile::PythonWorkerProcess;
+
+    auto pyAlgo = std::make_shared<sicnu::PythonAlgorithmAdapter>(desc, [](const QVariantMap&, std::function<void(double)>, QString&) {
+        return true;
+    });
+
+    adapterPtr->addAlgorithm(pyAlgo);
+
+    auto found = engine.findAlgorithm(QStringLiteral("py:test_algorithm_108"));
+    REQUIRE(found != nullptr);
+    CHECK(found->descriptor().id == QStringLiteral("py:test_algorithm_108"));
+    CHECK(found->descriptor().resourceProfile == sicnu::ProviderResourceProfile::PythonWorkerProcess);
+}
+

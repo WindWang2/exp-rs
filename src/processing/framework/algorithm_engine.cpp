@@ -4,6 +4,7 @@
 #include <QSettings>
 
 #include "qgs_processing_provider_adapter.h"
+#include "python_processing_provider_adapter.h"
 #include "providers/gdal_tools/provider.h"
 #include "providers/otb_tools/provider.h"
 #include "providers/qgis_algorithms/provider.h"
@@ -155,6 +156,9 @@ void AlgorithmEngine::initialize()
       QStringLiteral( "custom_tools" ), QStringLiteral( "Generic CLI" ),
       ProviderResourceProfile::ExternalCliSubprocess,
       []() -> QgsProcessingProvider * { return new GenericCliProvider(); } ) );
+
+    registerProvider( std::make_shared<PythonProcessingProviderAdapter>(
+      QStringLiteral( "python_plugins" ), QStringLiteral( "Python Plugins" ) ) );
 }
 
 void AlgorithmEngine::populateFromProcessingRegistry()

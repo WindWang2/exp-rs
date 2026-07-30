@@ -1,6 +1,7 @@
 #include "python_app_interface_proxy.h"
 #include "active_view_host.h"
 #include "processing/framework/python_algorithm_adapter.h"
+#include "processing/framework/python_processing_provider_adapter.h"
 #include "processing/framework/algorithm_engine.h"
 
 #include <qgsmaplayer.h>
@@ -151,6 +152,7 @@ void PythonAppInterfaceProxy::handleIpcMessage( const QJsonObject &message )
     algoDesc.name = name.isEmpty() ? algoId : name;
     algoDesc.group = group.isEmpty() ? QStringLiteral( "Python Plugins" ) : group;
     algoDesc.description = desc;
+    algoDesc.resourceProfile = sicnu::ProviderResourceProfile::PythonWorkerProcess;
 
     auto adapter = std::make_shared<sicnu::PythonAlgorithmAdapter>(
       algoDesc,
@@ -162,13 +164,32 @@ void PythonAppInterfaceProxy::handleIpcMessage( const QJsonObject &message )
         }
         QJsonObject req;
         req[QStringLiteral( "id" )] = algoId;
+        req[QStringLiteral( "params" )] = QJsonObject::fromVariantMap( execParams );
         m_ipcServer->sendRequest( QStringLiteral( "processing.execute_algorithm" ), req );
         if ( progress ) progress( 1.0 );
         return true;
       }
     );
 
-    sicnu::AlgorithmEngine::instance().registerAlgorithm( adapter );
+    auto providers = sicnu::AlgorithmEngine::instance().registeredProviders();
+    std::shared_ptr<sicnu::PythonProcessingProviderAdapter> pythonProvider;
+    for ( const auto &provider : providers )
+    {
+      if ( provider && provider->providerId() == QStringLiteral( "python_plugins" ) )
+      {
+        pythonProvider = std::dynamic_pointer_cast<sicnu::PythonProcessingProviderAdapter>( provider );
+        break;
+      }
+    }
+
+    if ( pythonProvider )
+    {
+      pythonProvider->addAlgorithm( adapter );
+    }
+    else
+    {
+      sicnu::AlgorithmEngine::instance().registerAlgorithm( adapter );
+    }
 
     if ( m_ipcServer && msgId > 0 )
     {
