@@ -37,7 +37,7 @@ The source-of-truth registry (`RSOperatorRegistry`) where Operators are register
 _Avoid_: Algorithm list, CLI registry
 
 **Tool Call Dispatcher**:
-The single seam between Agent-facing surfaces and the Task Center for LLM tool calls: it parses and normalizes a tool-call envelope once, classifies it as a single Tool Call or a Plan Request, and submits single calls to the Task Center through one typed path. No caller parses envelopes or executes tool calls itself; Plan Requests continue to the plan-approval flow.
+The single deep seam between Agent-facing surfaces (Agent Copilot, MCP Server, Headless Runner) and the Task Center for LLM tool calls (`ToolCallDispatcher` in `src/processing/framework`). It encapsulates tool-call envelope parsing, algorithm ID normalization, required parameter validation, task submission, terminal status completion watching (`TaskCenter`), transactional output asset committing via `OutputCommitter`, and synchronous/asynchronous execution (`dispatchAndAwait`). Callers interact solely through its interface without writing custom polling loops or error/output payload formatting code.
 _Avoid_: Tool-call handler, Function-call runner, Agent executor
 
 **MCP Server**:
