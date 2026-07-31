@@ -971,3 +971,41 @@ TEST_CASE( "DataManager reapSessionTemporaries sweeps idle temporary assets", "[
   CHECK_FALSE( manager->asset( id1 ).has_value() );
   CHECK( manager->asset( id2 ).has_value() );
 }
+
+TEST_CASE( "DataManager reapTaskTemporaries sweeps idle TaskTemporary assets and leaves SessionTemporary and ProjectPersistent assets", "[data_manager][reap_sweep]" )
+{
+  const auto manager = makeDataManager();
+
+  SourceDescriptor source1;
+  source1.providerKey = QStringLiteral( "memory-raster" );
+  source1.canonicalSource = QStringLiteral( "/tmp/fake_task_temp.tif" );
+
+  SourceDescriptor source2;
+  source2.providerKey = QStringLiteral( "memory-raster" );
+  source2.canonicalSource = QStringLiteral( "/tmp/fake_session_temp.tif" );
+
+  SourceDescriptor source3;
+  source3.providerKey = QStringLiteral( "memory-raster" );
+  source3.canonicalSource = QStringLiteral( "/tmp/fake_persistent_temp.tif" );
+
+  RegisterRequest req1;
+  req1.source = source1;
+  req1.persistence = PersistencePolicy::TaskTemporary;
+  const AssetId taskId = manager->registerSource( req1 ).assetId;
+
+  RegisterRequest req2;
+  req2.source = source2;
+  req2.persistence = PersistencePolicy::SessionTemporary;
+  const AssetId sessionId = manager->registerSource( req2 ).assetId;
+
+  RegisterRequest req3;
+  req3.source = source3;
+  req3.persistence = PersistencePolicy::ProjectPersistent;
+  const AssetId persistentId = manager->registerSource( req3 ).assetId;
+
+  const auto sweepRes = manager->reapTaskTemporaries();
+  CHECK( sweepRes.reapedCount == 1 );
+  CHECK_FALSE( manager->asset( taskId ).has_value() );
+  CHECK( manager->asset( sessionId ).has_value() );
+  CHECK( manager->asset( persistentId ).has_value() );
+}
