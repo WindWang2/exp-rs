@@ -141,6 +141,19 @@ QColor classColor(int classId) {
         case E::RasterOpenFailed:
         case E::RasterReadFailed:
             throw RSOperatorError(ErrorCode::GdalError, msg);
+        case E::VectorOpenFailed:
+            throw RSOperatorError(ErrorCode::GdalError, msg);
+        case E::VectorNoLayers:
+            throw RSOperatorError(ErrorCode::InvalidInputData, msg);
+        case E::ClassFieldNotFound:
+            throw RSOperatorError(ErrorCode::InvalidParameter, msg);
+        case E::NoValidPixels:
+            throw RSOperatorError(ErrorCode::InvalidInputData,
+                                  "No valid training pixels extracted (check CRS overlap and classField)");
+        case E::InsufficientSamples:
+            throw RSOperatorError(ErrorCode::InvalidInputData, "Insufficient training samples");
+        case E::ModelOpenFailed:
+            throw RSOperatorError(ErrorCode::FileNotReadable, msg);
         default:
             throw RSOperatorError(ErrorCode::ComputationError, msg);
     }
@@ -236,6 +249,7 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
     }
     const std::string classField = getString(params, "classField", "class_id");
     const int maxPerClass = getInt(params, "maxSamplesPerClass", 5000);
+    const std::string method = getEnum(params, "method", s_methods, "svm");
 
     // Parameter completeness first (stable error codes for Agent/tests)
     if (!predictOnly && trainingPath.empty()) {
@@ -272,158 +286,30 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
     cfg.sourceRaster = QString::fromStdString(inputPath);
     cfg.outputRaster = QString::fromStdString(outputPath);
     cfg.bandIndices = QVector<int>(bands.begin(), bands.end());
-
-    std::string method;
-    int nSamples = 0;
-    int nClasses = 0;
-    int featureCount = 0;
-    std::string mode = "train_predict";
+    cfg.methodName = QString::fromStdString(method);
+    cfg.fitScaler = scale;
+    cfg.testSplit = testSplit;
 
     if (predictOnly) {
-        mode = "predict_only";
-        context.reportProgress(0.35, "Loading model " + modelIn);
-
-        // Superset sidecar (method + fitted scaler + class metadata). When
-        // missing/unreadable, fall back to the legacy "<model>.meta.json"
-        // for the method and predict unscaled — matching how pre-ADR-0019
-        // models were trained.
-        const QString modelInQ = QString::fromStdString(modelIn);
-        QString sidecarMethod;
-        RsFeatureScaler sidecarScaler;
-        QHash<int, QColor> sidecarColors;
-        const bool sidecarPresent =
-            QFile::exists(RsClassificationPipeline::sidecarPathForModel(modelInQ));
-        const bool sidecarOk =
-            sidecarPresent && RsClassificationPipeline::loadModelSidecar(
-                                  modelInQ, sidecarMethod, sidecarScaler, sidecarColors);
-        if (sidecarPresent && !sidecarOk) {
-            context.logWarning("Model sidecar present but unreadable — predicting without scaling");
-        }
-
-        if (!params.isMember("method")) {
-            if (sidecarOk) {
-                method = canonicalMethod(sidecarMethod.toStdString(), "svm");
-            } else {
-                method = canonicalMethod(readLegacyMethodFromMeta(modelIn, "svm"), "svm");
-            }
-        } else {
-            method = getEnum(params, "method", s_methods, "svm");
-        }
-
-        if (sidecarOk) {
-            cfg.scaler = sidecarScaler; // applied automatically when fitted
-            cfg.classColors = sidecarColors;
-        }
-
-        cfg.backend = makeBackend(method);
-        if (!cfg.backend->load(modelInQ)) {
-            throw RSOperatorError(ErrorCode::FileNotReadable,
-                                  "Failed to load " +
-                                      std::string(method == "normal_bayes" ? "NormalBayes" : "SVM") +
-                                      ": " + modelIn);
-        }
-        context.logInfo("Loaded model (" + method + ") from " + modelIn);
+        cfg.modelLoadPath = QString::fromStdString(modelIn);
     } else {
-        method = getEnum(params, "method", s_methods, "svm");
-        context.reportProgress(0.25, "Collecting training samples from " + trainingPath);
-
-        RsTrainingDataExtraction::Options exOptions;
-        exOptions.maxSamplesPerClass = maxPerClass;
-        const RsTrainingDataResult ex = RsTrainingDataExtraction::extractFromVector(
-            QString::fromStdString(inputPath),
-            cfg.bandIndices,
-            QString::fromStdString(trainingPath),
-            QString::fromStdString(classField),
-            exOptions,
-            [&context](double fraction, const QString& message) {
-                context.throwIfCancelled();
-                context.reportProgress(0.25 + 0.2 * fraction, message.toStdString());
-                return true;
-            });
-
-        if (!ex.ok) {
-            switch (ex.error) {
-                case RsTrainingDataResult::Error::VectorOpenFailed:
-                    throw RSOperatorError(ErrorCode::GdalError, ex.errorMessage.toStdString());
-                case RsTrainingDataResult::Error::VectorNoLayers:
-                    throw RSOperatorError(ErrorCode::InvalidInputData, ex.errorMessage.toStdString());
-                case RsTrainingDataResult::Error::ClassFieldNotFound:
-                    throw RSOperatorError(ErrorCode::InvalidParameter, ex.errorMessage.toStdString());
-                case RsTrainingDataResult::Error::NoValidPixels:
-                    throw RSOperatorError(
-                        ErrorCode::InvalidInputData,
-                        "No valid training pixels extracted (check CRS overlap and classField)");
-                case RsTrainingDataResult::Error::Cancelled:
-                    throw RSOperatorError(ErrorCode::Cancelled, "Cancelled");
-                default:
-                    throw RSOperatorError(ErrorCode::GdalError, ex.errorMessage.toStdString());
-            }
-        }
-
-        featureCount = ex.featuresRead;
-        nSamples = ex.X.rows;
-        nClasses = static_cast<int>(ex.classCounts.size());
-        if (nSamples < 2) {
-            throw RSOperatorError(ErrorCode::InvalidInputData, "Insufficient training samples");
-        }
-
-        context.reportProgress(0.45,
-                               "Training " + method + " on " + std::to_string(nSamples) +
-                                   " samples, " + std::to_string(nClasses) + " classes");
-
-        // Optional stratified holdout (testSplit) then optional scaler fit —
-        // same order as the GUI (split raw, fit scaler on the train split,
-        // transform train + test).
-        cv::Mat trainX = ex.X;
-        cv::Mat trainY = ex.y;
-        cv::Mat testX;
-        cv::Mat testY;
-        if (testSplit > 0.0) {
-            const RsTrainTestSplit split =
-                RsClassificationSplit::stratifiedSplit(ex.X, ex.y, 1.0 - testSplit);
-            trainX = split.trainX;
-            trainY = split.trainY;
-            testX = split.testX;
-            testY = split.testY;
-        }
-
-        RsFeatureScaler scaler;
-        if (scale) {
-            if (!scaler.fit(trainX)) {
-                throw RSOperatorError(ErrorCode::ComputationError, "Feature scaling failed");
-            }
-            trainX = scaler.transform(trainX);
-            if (!testX.empty())
-                testX = scaler.transform(testX);
-        }
-
-        cfg.trainX = trainX;
-        cfg.trainY = trainY;
-        cfg.testX = testX;
-        cfg.testY = testY;
-        cfg.scaler = scaler;
-        for (auto it = ex.classCounts.constBegin(); it != ex.classCounts.constEnd(); ++it)
-            cfg.classColors[it.key()] = classColor(it.key());
+        cfg.trainingVector = QString::fromStdString(trainingPath);
+        cfg.classField = QString::fromStdString(classField);
+        cfg.maxSamplesPerClass = maxPerClass;
         cfg.backend = makeBackend(method);
         if (!modelOut.empty())
             cfg.modelSavePath = QString::fromStdString(modelOut);
     }
 
-    cfg.methodName = QString::fromStdString(method);
-
-    // Bridge: pipeline fraction [0,1] → operator progress 0.45–0.98; cancel
-    // via the sink's return value so the pipeline removes a partially-written
-    // output before reporting Error::Cancelled.
     const RsClassificationPipelineResult res = RsClassificationPipeline::run(
         std::move(cfg),
         [&context](double fraction, const QString& message) {
             if (context.isCancelled())
                 return false;
-            // Preserve the operator's progress message style.
             const std::string msg = message == QStringLiteral("Predicting tiles")
                                         ? "Classifying"
                                         : message.toStdString();
-            context.reportProgress(0.45 + 0.53 * fraction, msg);
+            context.reportProgress(0.1 + 0.88 * fraction, msg);
             return true;
         });
 
@@ -436,13 +322,13 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
     Json::Value result(Json::objectValue);
     result["output"] = outputPath;
     result["method"] = method;
-    result["mode"] = mode;
-    result["trainSamples"] = nSamples;
-    result["classes"] = nClasses;
+    result["mode"] = predictOnly ? "predict_only" : "train_predict";
+    result["trainSamples"] = res.trainSamples;
+    result["classes"] = res.classCount;
     result["features"] = nFeat;
     result["width"] = width;
     result["height"] = height;
-    result["featuresExtracted"] = featureCount;
+    result["featuresExtracted"] = res.featuresExtracted;
     if (predictOnly)
         result["modelIn"] = modelIn;
     if (!modelOut.empty())

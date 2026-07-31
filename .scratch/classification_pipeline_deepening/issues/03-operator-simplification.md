@@ -4,9 +4,9 @@
 
 **Blocked by:** 02 — RsClassificationPipeline Predict-Only Mode & Sidecar Loading
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Refactor `RsSupervisedClassificationOperator::run()` into a thin adapter over `RsClassificationPipeline::run()`.
-- [ ] Map `RsClassificationPipelineResult::Error` to `RSOperatorError` error codes.
-- [ ] Remove duplicated sample extraction, feature scaling, and sidecar loading code from `rs_supervised_classification_operator.cpp`.
-- [ ] Unit tests in `tests/test_rs_operators.cpp` and `tests/test_classification_pipeline.cpp` verify operator parity and error handling.
+- [x] Refactor `RsSupervisedClassificationOperator::run()` into a thin adapter over `RsClassificationPipeline::run()`.
+- [x] Map `RsClassificationPipelineResult::Error` to `RSOperatorError` error codes.
+- [x] Remove duplicated sample extraction, feature scaling, and sidecar loading code from `rs_supervised_classification_operator.cpp`.
+- [x] Unit tests in `tests/test_rs_operators.cpp` and `tests/test_classification_pipeline.cpp` verify operator parity and error handling.

@@ -419,3 +419,86 @@ TEST_CASE(
   REQUIRE( res.errorMessage == QStringLiteral( "Backend not fitted and no training data supplied" ) );
   REQUIRE( !QFile::exists( tmp.path() + "/out.tif" ) );
 }
+
+TEST_CASE(
+  "Classification pipeline: invalid vector file reports typed VectorOpenFailed error",
+  "[classify][pipeline][vector][errors]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  RsClassificationPipeline::Config cfg = baseConfig( srcPath, tmp.path() + "/out.tif" );
+  cfg.backend.reset( new RsClassifierNormalBayes );
+  cfg.trainingVector = tmp.path() + "/nonexistent.shp";
+
+  const RsClassificationPipelineResult res = RsClassificationPipeline::run( std::move( cfg ) );
+  REQUIRE( !res.ok );
+  REQUIRE( res.error == RsClassificationPipelineResult::Error::VectorOpenFailed );
+  REQUIRE( !QFile::exists( tmp.path() + "/out.tif" ) );
+}
+
+TEST_CASE(
+  "Classification pipeline: fitScaler and testSplit parameters operate during run()",
+  "[classify][pipeline][scaler][split]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  cv::Mat X, y;
+  makeTraining( X, y );
+
+  RsClassificationPipeline::Config cfg = baseConfig( srcPath, tmp.path() + "/out.tif" );
+  cfg.backend.reset( new RsClassifierNormalBayes );
+  cfg.trainX = X;
+  cfg.trainY = y;
+  const RsClassificationPipelineResult res = RsClassificationPipeline::run( std::move( cfg ) );
+  INFO( res.errorMessage.toStdString() );
+  REQUIRE( res.ok );
+  REQUIRE( res.error == RsClassificationPipelineResult::Error::None );
+  REQUIRE( QFile::exists( tmp.path() + "/out.tif" ) );
+}
+
+TEST_CASE(
+  "Classification pipeline: modelLoadPath automatically loads model and sidecar for predict-only mode",
+  "[classify][pipeline][predict_only]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  cv::Mat X, y;
+  makeTraining( X, y );
+
+  const QString modelPath = tmp.path() + "/model.yml";
+
+  // Step 1: Train & save model
+  RsClassificationPipeline::Config trainCfg = baseConfig( srcPath, tmp.path() + "/out1.tif" );
+  trainCfg.backend.reset( new RsClassifierNormalBayes );
+  trainCfg.trainX = X;
+  trainCfg.trainY = y;
+  trainCfg.modelSavePath = modelPath;
+
+  const RsClassificationPipelineResult trainRes = RsClassificationPipeline::run( std::move( trainCfg ) );
+  REQUIRE( trainRes.ok );
+  REQUIRE( QFile::exists( modelPath ) );
+
+  // Step 2: Predict-only via modelLoadPath (no backend or trainX/trainY supplied)
+  RsClassificationPipeline::Config predictCfg = baseConfig( srcPath, tmp.path() + "/out2.tif" );
+  predictCfg.modelLoadPath = modelPath;
+
+  const RsClassificationPipelineResult predictRes = RsClassificationPipeline::run( std::move( predictCfg ) );
+  INFO( predictRes.errorMessage.toStdString() );
+  REQUIRE( predictRes.ok );
+  REQUIRE( predictRes.error == RsClassificationPipelineResult::Error::None );
+  REQUIRE( QFile::exists( tmp.path() + "/out2.tif" ) );
+}
+
+

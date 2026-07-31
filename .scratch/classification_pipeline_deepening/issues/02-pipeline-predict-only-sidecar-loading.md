@@ -4,9 +4,9 @@
 
 **Blocked by:** 01 — RsClassificationPipeline Sample Extraction, Split, and Scaler Integration
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Add `modelLoadPath` field to `RsClassificationPipeline::Config`.
-- [ ] Implement automatic model & sidecar resolution in `RsClassificationPipeline::run()` for predict-only mode.
-- [ ] Add `ModelOpenFailed` to `RsClassificationPipelineResult::Error`.
-- [ ] Unit tests in `tests/test_classification_pipeline.cpp` verify model save & load predict-only workflows.
+- [x] Add `modelLoadPath` field to `RsClassificationPipeline::Config`.
+- [x] Implement automatic model & sidecar resolution in `RsClassificationPipeline::run()` for predict-only mode.
+- [x] Add `ModelOpenFailed` to `RsClassificationPipelineResult::Error`.
+- [x] Unit tests in `tests/test_classification_pipeline.cpp` verify model save & load predict-only workflows.

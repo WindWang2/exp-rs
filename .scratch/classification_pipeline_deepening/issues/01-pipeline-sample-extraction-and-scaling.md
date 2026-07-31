@@ -4,10 +4,10 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Add `trainingVector`, `classField`, `maxSamplesPerClass`, `fitScaler`, `testSplit` fields to `RsClassificationPipeline::Config`.
-- [ ] Implement vector sample extraction in `RsClassificationPipeline::run()` when `trainingVector` is set.
-- [ ] Implement stratified holdout split and `RsFeatureScaler` fitting in `RsClassificationPipeline::run()` when `fitScaler` is enabled.
-- [ ] Add `VectorOpenFailed`, `VectorNoLayers`, `ClassFieldNotFound`, `NoValidPixels`, and `InsufficientSamples` to `RsClassificationPipelineResult::Error`.
-- [ ] Unit tests in `tests/test_classification_pipeline.cpp` verify vector training extraction, feature scaling, and accuracy assessment.
+- [x] Add `trainingVector`, `classField`, `maxSamplesPerClass`, `fitScaler`, `testSplit` fields to `RsClassificationPipeline::Config`.
+- [x] Implement vector sample extraction in `RsClassificationPipeline::run()` when `trainingVector` is set.
+- [x] Implement stratified holdout split and `RsFeatureScaler` fitting in `RsClassificationPipeline::run()` when `fitScaler` is enabled.
+- [x] Add `VectorOpenFailed`, `VectorNoLayers`, `ClassFieldNotFound`, `NoValidPixels`, and `InsufficientSamples` to `RsClassificationPipelineResult::Error`.
+- [x] Unit tests in `tests/test_classification_pipeline.cpp` verify vector training extraction, feature scaling, and accuracy assessment.

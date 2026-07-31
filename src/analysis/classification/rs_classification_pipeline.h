@@ -63,6 +63,12 @@ struct QGIS_ANALYSIS_EXPORT RsClassificationPipelineResult
       ScalingFailed,
       PredictionFailed,
       PredictionSizeMismatch,
+      VectorOpenFailed,
+      VectorNoLayers,
+      ClassFieldNotFound,
+      NoValidPixels,
+      InsufficientSamples,
+      ModelOpenFailed,
     };
 
     bool ok = false;
@@ -70,6 +76,9 @@ struct QGIS_ANALYSIS_EXPORT RsClassificationPipelineResult
     QString errorMessage;      ///< Human-readable detail, set when !ok.
     int totalPixels = 0;
     int durationMs = 0;
+    int trainSamples = 0;
+    int classCount = 0;
+    int featuresExtracted = 0;
     /// Confusion matrix + Kappa + per-class P/R/F1, populated when
     /// Config.testX / testY are non-empty. KMeans uses Hungarian-remapped
     /// cluster IDs so labels align with ROI class IDs.
@@ -92,6 +101,17 @@ class QGIS_ANALYSIS_EXPORT RsClassificationPipeline
         QString outputRaster;
         QVector<int> bandIndices;                       // 1-based GDAL bands
         std::unique_ptr<RsClassifierBackend> backend;   // owned
+
+        // Sample extraction & pre-processing parameters
+        QString trainingVector;                         // OGR vector shapefile/layer path
+        QString classField = QStringLiteral( "class_id" );
+        int maxSamplesPerClass = 5000;
+        bool fitScaler = false;
+        double testSplit = 0.0;                         // 0-0.9 holdout fraction for accuracy
+
+        // Predict-only mode model loading path (model YAML + .meta.json sidecar)
+        QString modelLoadPath;
+
         cv::Mat trainX;                                 // CV_32F NxB (scaled if scaler fitted)
         cv::Mat trainY;                                 // CV_32S Nx1
         // Held-out split for accuracy assessment. When non-empty, run()

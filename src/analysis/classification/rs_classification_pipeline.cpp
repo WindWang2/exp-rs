@@ -4,9 +4,13 @@
 
 #include "rs_classification_pipeline.h"
 
+#include "rs_classification_split.h"
+#include "rs_classifier_normalbayes.h"
+#include "rs_classifier_svm.h"
 #include "rs_cross_validation.h"
-#include "sicnu_logging.h"
 #include "rs_hungarian_assignment.h"
+#include "rs_training_data_extraction.h"
+#include "sicnu_logging.h"
 
 #include <QDebug>
 #include <QElapsedTimer>
@@ -145,14 +149,140 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   QElapsedTimer timer;
   timer.start();
 
-  SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Classification task started: algo=%1, bands=%2, output=%3" )
-    .arg( config.methodName ).arg( config.bandIndices.size() ).arg( QFileInfo( config.outputRaster ).fileName() ) );
+  // Predict-only mode: auto-load model and sidecar when modelLoadPath is specified
+  if ( config.trainX.empty() && !config.modelLoadPath.isEmpty() )
+  {
+    QString sidecarMethod;
+    RsFeatureScaler sidecarScaler;
+    QHash<int, QColor> sidecarColors;
+    if ( loadModelSidecar( config.modelLoadPath, sidecarMethod, sidecarScaler, sidecarColors ) )
+    {
+      if ( sidecarScaler.isFitted() )
+        config.scaler = sidecarScaler;
+      if ( config.classColors.isEmpty() )
+        config.classColors = sidecarColors;
+      if ( config.methodName.isEmpty() )
+        config.methodName = sidecarMethod;
+    }
+
+    if ( !config.backend )
+    {
+      if ( config.methodName.contains( QStringLiteral( "bayes" ), Qt::CaseInsensitive ) )
+      {
+        config.backend = std::make_unique<RsClassifierNormalBayes>();
+      }
+      else
+      {
+        config.backend = std::make_unique<RsClassifierSvm>();
+      }
+    }
+
+    if ( !config.backend->load( config.modelLoadPath ) )
+    {
+      result.ok = false;
+      result.error = RsClassificationPipelineResult::Error::ModelOpenFailed;
+      result.errorMessage = QStringLiteral( "Failed to load model from %1" ).arg( config.modelLoadPath );
+      return result;
+    }
+  }
 
   if ( !config.backend )
   {
     result.error = RsClassificationPipelineResult::Error::NoBackend;
     result.errorMessage = QStringLiteral( "No classifier backend supplied" );
     return result;
+  }
+
+  // Auto-extract training data from vector polygons when specified and trainX is empty
+  if ( config.trainX.empty() && !config.trainingVector.isEmpty() )
+  {
+    RsTrainingDataExtraction::Options exOptions;
+    exOptions.maxSamplesPerClass = config.maxSamplesPerClass;
+    const RsTrainingDataResult ex = RsTrainingDataExtraction::extractFromVector(
+      config.sourceRaster,
+      config.bandIndices,
+      config.trainingVector,
+      config.classField,
+      exOptions,
+      [&progress]( double fraction, const QString &message ) {
+        return reportProgress( progress, 0.15 * fraction, message );
+      } );
+
+    if ( !ex.ok )
+    {
+      result.ok = false;
+      result.errorMessage = ex.errorMessage;
+      switch ( ex.error )
+      {
+        case RsTrainingDataResult::Error::VectorOpenFailed:
+          result.error = RsClassificationPipelineResult::Error::VectorOpenFailed;
+          break;
+        case RsTrainingDataResult::Error::VectorNoLayers:
+          result.error = RsClassificationPipelineResult::Error::VectorNoLayers;
+          break;
+        case RsTrainingDataResult::Error::ClassFieldNotFound:
+          result.error = RsClassificationPipelineResult::Error::ClassFieldNotFound;
+          break;
+        case RsTrainingDataResult::Error::NoValidPixels:
+          result.error = RsClassificationPipelineResult::Error::NoValidPixels;
+          break;
+        case RsTrainingDataResult::Error::Cancelled:
+          result.error = RsClassificationPipelineResult::Error::Cancelled;
+          break;
+        default:
+          result.error = RsClassificationPipelineResult::Error::VectorOpenFailed;
+          break;
+      }
+      return result;
+    }
+
+    if ( ex.X.rows < 2 )
+    {
+      result.ok = false;
+      result.error = RsClassificationPipelineResult::Error::InsufficientSamples;
+      result.errorMessage = QStringLiteral( "Insufficient training samples" );
+      return result;
+    }
+
+    if ( config.classColors.isEmpty() )
+    {
+      for ( auto it = ex.classCounts.constBegin(); it != ex.classCounts.constEnd(); ++it )
+      {
+        config.classColors[it.key()] = QColor::fromHsv( ( it.key() * 47 ) % 360, 200, 230 );
+      }
+    }
+
+    result.featuresExtracted = ex.featuresRead;
+    result.trainSamples = ex.X.rows;
+    result.classCount = static_cast<int>( ex.classCounts.size() );
+
+    cv::Mat trainX = ex.X;
+    cv::Mat trainY = ex.y;
+    if ( config.testSplit > 0.0 )
+    {
+      const RsTrainTestSplit split = RsClassificationSplit::stratifiedSplit( ex.X, ex.y, 1.0 - config.testSplit );
+      trainX = split.trainX;
+      trainY = split.trainY;
+      config.testX = split.testX;
+      config.testY = split.testY;
+    }
+
+    if ( config.fitScaler )
+    {
+      if ( !config.scaler.fit( trainX ) )
+      {
+        result.ok = false;
+        result.error = RsClassificationPipelineResult::Error::ScalingFailed;
+        result.errorMessage = QStringLiteral( "Feature scaling failed" );
+        return result;
+      }
+      trainX = config.scaler.transform( trainX );
+      if ( !config.testX.empty() )
+        config.testX = config.scaler.transform( config.testX );
+    }
+
+    config.trainX = trainX;
+    config.trainY = trainY;
   }
 
   // 1. Train — skipped when the backend was loaded from disk
