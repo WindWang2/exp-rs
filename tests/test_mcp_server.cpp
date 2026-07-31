@@ -305,11 +305,13 @@ TEST_CASE("McpServer synchronously rejects unknown algorithms and operators", "[
     TestMcpServer server;
 
     SECTION("execute_algorithm throws Algorithm not found for unresolvable id") {
-        try {
-            server.testExecuteAlgorithm("gdal:no_such_algorithm", QVariantMap());
-            FAIL("expected std::runtime_error");
-        } catch (const std::runtime_error &e) {
-            REQUIRE(QString::fromStdString(e.what()) == "Algorithm not found: gdal:no_such_algorithm");
+        for (const char *id : { "gdal:no_such_algorithm", "processing:gdal:no_such_algorithm", "rs:no_such_algorithm" }) {
+            try {
+                server.testExecuteAlgorithm(id, QVariantMap());
+                FAIL(std::string("expected std::runtime_error for ") + id);
+            } catch (const std::runtime_error &e) {
+                REQUIRE(QString::fromStdString(e.what()) == QString("Algorithm not found: ") + id);
+            }
         }
     }
 

@@ -4,6 +4,7 @@
 
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/framework/rs_operator.h"
+#include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/json_params_converter.h"
 #include "shell/processing_job_adapter.h"
 
@@ -59,6 +60,11 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
     if (isCustomTools)
         *isCustomTools = false;
 
+    QString checkId = id;
+    if (checkId.startsWith(QStringLiteral("processing:"))) {
+        checkId = checkId.mid(11);
+    }
+
     static const QStringList kAllowed = {
         QStringLiteral("rs:"),
         QStringLiteral("gdal:"),
@@ -69,7 +75,7 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("opencv:"), // operator surface uses opencv: filters
     };
     for (const QString &prefix : kAllowed) {
-        if (id.startsWith(prefix))
+        if (checkId.startsWith(prefix))
             return true;
     }
     if (id.startsWith(QStringLiteral("custom_tools:"))) {
@@ -722,8 +728,29 @@ QVariantMap McpServer::handleExecuteAlgorithm(const QString &algorithmId, const 
         throw std::runtime_error(denyReason.toStdString());
     }
 
-    std::unique_ptr<QgsProcessingAlgorithm> alg(QgsApplication::processingRegistry()->createAlgorithmById(algorithmId));
-    if (!alg) {
+    QString lookupId = algorithmId;
+    if (lookupId.startsWith(QStringLiteral("processing:"))) {
+        lookupId = lookupId.mid(11);
+    }
+
+    bool exists = false;
+    if (QgsApplication::processingRegistry()) {
+        if (QgsApplication::processingRegistry()->algorithmById(lookupId)) {
+            exists = true;
+        }
+    }
+    if (!exists) {
+        if (sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(lookupId.toStdString())) {
+            exists = true;
+        }
+    }
+    if (!exists) {
+        if (sicnu::operators::RSOperatorRegistry::instance().create(lookupId.toStdString())) {
+            exists = true;
+        }
+    }
+
+    if (!exists) {
         const QString msg = QStringLiteral("Algorithm not found: ") + algorithmId;
         SICNU_LOG_ERROR(SicnuLogTags::MCP, msg);
         throw std::runtime_error(msg.toStdString());
