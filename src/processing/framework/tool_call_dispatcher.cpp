@@ -3,6 +3,7 @@
 
 #include "atomic_algorithm_registry.h"
 #include "json_params_converter.h"
+#include "task_center.h"
 
 #include <condition_variable>
 #include <memory>
@@ -209,7 +210,7 @@ bool ToolCallDispatcher::submit( const Json::Value &envelope, CompletionCallback
   return true;
 }
 
-Json::Value ToolCallDispatcher::submitBlocking( const Json::Value &envelope, std::chrono::milliseconds timeout )
+Json::Value ToolCallDispatcher::dispatchAndAwait( const Json::Value &envelope, std::chrono::milliseconds timeout )
 {
   std::mutex mutex;
   std::condition_variable cv;
@@ -243,6 +244,51 @@ Json::Value ToolCallDispatcher::submitBlocking( const Json::Value &envelope, std
     return errorResult;
   }
   return captured;
+}
+
+Json::Value ToolCallDispatcher::submitBlocking( const Json::Value &envelope, std::chrono::milliseconds timeout )
+{
+  return dispatchAndAwait( envelope, timeout );
+}
+
+Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTaskInfo &info,
+                                              const OutputCommitterHandler &committerHandler )
+{
+  Json::Value payload = info.resultPayload.isNull() ? Json::Value( Json::objectValue ) : info.resultPayload;
+  payload["algorithmId"] = info.algorithmId.toStdString();
+  payload["taskId"] = static_cast<Json::Int64>( info.taskId );
+
+  if ( info.status == sicnu::TaskStatus::Completed )
+  {
+    payload["status"] = "success";
+    if ( !info.outputLayerPath.isEmpty() && payload.isObject() && !payload.isMember( "output" ) )
+    {
+      if ( committerHandler )
+      {
+        std::string committedPath;
+        std::string commitError;
+        if ( committerHandler( info, committedPath, commitError ) )
+        {
+          payload["output"] = committedPath;
+        }
+        else
+        {
+          payload["commitError"] = commitError.empty() ? "OutputCommitter refused the tool-call output." : commitError;
+          payload["output"] = info.outputLayerPath.toStdString();
+        }
+      }
+      else
+      {
+        payload["output"] = info.outputLayerPath.toStdString();
+      }
+    }
+  }
+  else
+  {
+    payload["status"] = "error";
+    payload["errorMessage"] = info.errorMessage.toStdString();
+  }
+  return payload;
 }
 
 } // namespace sicnu::processing

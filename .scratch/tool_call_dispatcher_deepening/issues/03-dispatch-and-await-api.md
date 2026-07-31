@@ -4,9 +4,9 @@
 
 **Blocked by:** 02 — ToolCallDispatcher Output Asset Committing (OutputCommitter) Integration
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Implement `dispatchAndAwait(envelope, timeout)` on `ToolCallDispatcher`.
-- [ ] Refactor `submitBlocking` to delegate directly to `dispatchAndAwait`.
-- [ ] Migrate callers (`MCPServer`, `AgentCopilotDockWidget`, `AgentWorkflowExecutor`) to consume the unified API.
-- [ ] Unit tests in `tests/test_tool_call_dispatcher.cpp` verify synchronous execution, timeout handling, and payload consistency.
+- [x] Implement `dispatchAndAwait(envelope, timeout)` on `ToolCallDispatcher`.
+- [x] Refactor `submitBlocking` to delegate directly to `dispatchAndAwait`.
+- [x] Migrate callers (`MCPServer`, `AgentCopilotDockWidget`, `AgentWorkflowExecutor`) to consume the unified API.
+- [x] Unit tests in `tests/test_tool_call_dispatcher.cpp` verify synchronous execution, timeout handling, and payload consistency.

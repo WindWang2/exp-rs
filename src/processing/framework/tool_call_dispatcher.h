@@ -9,6 +9,11 @@
 #include <chrono>
 #include <functional>
 
+namespace sicnu {
+struct AlgorithmTaskInfo;
+class OutputCommitter;
+}
+
 namespace sicnu::processing {
 
 /// How a parsed LLM tool-call envelope should be handled.
@@ -59,10 +64,29 @@ public:
   bool submit( const Json::Value &envelope, CompletionCallback onComplete,
                QString *errorOut = nullptr, long *taskIdOut = nullptr );
 
+  /// Handler invoked to transactionally commit output assets upon completion.
+  /// Returns true on success and sets @a outCommittedPath; returns false on failure and sets @a outCommitError.
+  using OutputCommitterHandler = std::function<bool( const sicnu::AlgorithmTaskInfo &info,
+                                                     std::string &outCommittedPath,
+                                                     std::string &outCommitError )>;
+
+  void setOutputCommitterHandler( OutputCommitterHandler handler ) { mOutputCommitterHandler = std::move( handler ); }
+  const OutputCommitterHandler &outputCommitterHandler() const { return mOutputCommitterHandler; }
+
+  /// Build a standardized result payload (status "completed" / "error", output,
+  /// errorMessage, etc.) from an AlgorithmTaskInfo struct. If @a committerHandler is
+  /// provided and the task succeeded with an output path, transactionally commits
+  /// the asset and rewrites output to the committed stable path.
+  static Json::Value buildTaskResultPayload( const sicnu::AlgorithmTaskInfo &info,
+                                              const OutputCommitterHandler &committerHandler = {} );
+
+  /// Synchronous entry point: submits task, awaits completion or timeout,
+  /// applies OutputCommitterHandler if configured, and returns standardized result JSON.
+  Json::Value dispatchAndAwait( const Json::Value &envelope,
+                                std::chrono::milliseconds timeout = std::chrono::minutes( 30 ) );
+
   /// Tests/headless convenience: submit + block until completion or timeout.
-  /// Never needed by GUI surfaces. Returns an error payload
-  /// {"status":"error","errorMessage":...} on invalid envelopes, sink
-  /// rejection, or timeout.
+  /// Delegates directly to dispatchAndAwait.
   Json::Value submitBlocking( const Json::Value &envelope,
                               std::chrono::milliseconds timeout = std::chrono::minutes( 30 ) );
 
@@ -86,6 +110,7 @@ private:
 
   SubmissionSink mSink;
   CompletionWatcher mWatcher;
+  OutputCommitterHandler mOutputCommitterHandler;
 };
 
 } // namespace sicnu::processing

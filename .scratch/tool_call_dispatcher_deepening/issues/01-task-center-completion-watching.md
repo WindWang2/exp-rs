@@ -4,8 +4,8 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] `ToolCallDispatcher` encapsulates `TaskCenter` completion watching and task status transitions.
-- [ ] `ToolCallDispatcher` formats standardized completion and failure result JSON payloads.
-- [ ] Unit tests in `tests/test_tool_call_dispatcher.cpp` verify task completion payload generation.
+- [x] `ToolCallDispatcher` encapsulates `TaskCenter` completion watching and task status transitions.
+- [x] `ToolCallDispatcher` formats standardized completion and failure result JSON payloads.
+- [x] Unit tests in `tests/test_tool_call_dispatcher.cpp` verify task completion payload generation.

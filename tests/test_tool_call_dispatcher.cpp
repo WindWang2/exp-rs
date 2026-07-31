@@ -15,6 +15,7 @@
 
 #include "processing/framework/tool_call_dispatcher.h"
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/task_center.h"
 #include "operators/rs/rs_spectral_index_operator.h"
 
 using namespace sicnu::processing;
@@ -551,3 +552,122 @@ TEST_CASE( "ToolCallDispatcher honors optional parameters for operator schema", 
     REQUIRE( harness.dispatcher.rejectionReason( envelope ).contains( "Missing required parameter: input" ) );
   }
 }
+
+TEST_CASE( "ToolCallDispatcher builds standardized result payloads", "[processing][tool_call_dispatcher][payload]" )
+{
+  SECTION( "completed task with output path" )
+  {
+    sicnu::AlgorithmTaskInfo info;
+    info.taskId = 42;
+    info.algorithmId = QStringLiteral( "rs:spectral_index" );
+    info.status = sicnu::TaskStatus::Completed;
+    info.outputLayerPath = QStringLiteral( "/tmp/ndvi_out.tif" );
+
+    Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info );
+    REQUIRE( payload["status"].asString() == "success" );
+    REQUIRE( payload["taskId"].asInt64() == 42 );
+    REQUIRE( payload["algorithmId"].asString() == "rs:spectral_index" );
+    REQUIRE( payload["output"].asString() == "/tmp/ndvi_out.tif" );
+  }
+
+  SECTION( "failed task with error message" )
+  {
+    sicnu::AlgorithmTaskInfo info;
+    info.taskId = 43;
+    info.algorithmId = QStringLiteral( "rs:spectral_index" );
+    info.status = sicnu::TaskStatus::Failed;
+    info.errorMessage = QStringLiteral( "Invalid raster format" );
+
+    Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info );
+    REQUIRE( payload["status"].asString() == "error" );
+    REQUIRE( payload["taskId"].asInt64() == 43 );
+    REQUIRE( payload["errorMessage"].asString() == "Invalid raster format" );
+  }
+}
+
+TEST_CASE( "ToolCallDispatcher supports OutputCommitterHandler for output asset publication", "[processing][tool_call_dispatcher][committer]" )
+{
+  FakeDispatcherHarness harness;
+  REQUIRE( !harness.dispatcher.outputCommitterHandler() );
+
+  SECTION( "successful handler rewrites output path" )
+  {
+    ToolCallDispatcher::OutputCommitterHandler handler = []( const sicnu::AlgorithmTaskInfo &,
+                                                             std::string &outCommittedPath,
+                                                             std::string & ) -> bool {
+      outCommittedPath = "/committed/ndvi_out.tif";
+      return true;
+    };
+    harness.dispatcher.setOutputCommitterHandler( handler );
+    REQUIRE( harness.dispatcher.outputCommitterHandler() );
+
+    sicnu::AlgorithmTaskInfo info;
+    info.taskId = 10;
+    info.algorithmId = QStringLiteral( "rs:spectral_index" );
+    info.status = sicnu::TaskStatus::Completed;
+    info.outputLayerPath = QStringLiteral( "/tmp/raw_out.tif" );
+
+    Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info, harness.dispatcher.outputCommitterHandler() );
+    REQUIRE( payload["status"].asString() == "success" );
+    REQUIRE( payload["output"].asString() == "/committed/ndvi_out.tif" );
+  }
+
+  SECTION( "refused handler sets commitError diagnostic" )
+  {
+    ToolCallDispatcher::OutputCommitterHandler handler = []( const sicnu::AlgorithmTaskInfo &,
+                                                             std::string &,
+                                                             std::string &outCommitError ) -> bool {
+      outCommitError = "Disk space quota exceeded";
+      return false;
+    };
+
+    sicnu::AlgorithmTaskInfo info;
+    info.taskId = 11;
+    info.algorithmId = QStringLiteral( "rs:spectral_index" );
+    info.status = sicnu::TaskStatus::Completed;
+    info.outputLayerPath = QStringLiteral( "/tmp/raw_out.tif" );
+
+    Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info, handler );
+    REQUIRE( payload["status"].asString() == "success" );
+    REQUIRE( payload["output"].asString() == "/tmp/raw_out.tif" );
+    REQUIRE( payload["commitError"].asString() == "Disk space quota exceeded" );
+  }
+}
+
+TEST_CASE( "ToolCallDispatcher dispatchAndAwait executes synchronously and formats payload", "[processing][tool_call_dispatcher][dispatch_and_await]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+  AtomicAlgorithmRegistry::instance().registerAdapter( std::make_shared<StubAdapter>( "stub:echo" ) );
+
+  const Json::Value envelope = objectEnvelope( "stub:echo", "parameters", Json::Value( Json::objectValue ) );
+
+  SECTION( "returns completion payload via dispatchAndAwait" )
+  {
+    ToolCallDispatcher dispatcher(
+      []( const QString &, const QVariantMap & ) -> long { return 15; },
+      []( long, ToolCallDispatcher::CompletionCallback onComplete ) {
+        Json::Value payload( Json::objectValue );
+        payload["status"] = "success";
+        payload["output"] = "/path/out.tif";
+        onComplete( payload );
+      } );
+
+    const Json::Value result = dispatcher.dispatchAndAwait( envelope );
+    REQUIRE( result["status"].asString() == "success" );
+    REQUIRE( result["output"].asString() == "/path/out.tif" );
+  }
+
+  SECTION( "dispatchAndAwait handles timeout cleanly" )
+  {
+    ToolCallDispatcher dispatcher(
+      []( const QString &, const QVariantMap & ) -> long { return 16; },
+      []( long, ToolCallDispatcher::CompletionCallback ) {} );
+
+    const Json::Value result = dispatcher.dispatchAndAwait( envelope, std::chrono::milliseconds( 20 ) );
+    REQUIRE( result["status"].asString() == "error" );
+    REQUIRE( result["errorMessage"].asString() == "Tool call timed out" );
+  }
+}
+
+
+

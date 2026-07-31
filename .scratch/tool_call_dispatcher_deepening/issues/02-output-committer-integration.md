@@ -4,9 +4,9 @@
 
 **Blocked by:** 01 — ToolCallDispatcher TaskCenter Completion Watching & Standard Payload
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Add `setOutputCommitter(OutputCommitter *committer)` to `ToolCallDispatcher`.
-- [ ] Upon task completion, if `OutputCommitter` is configured and task output exists, commit the asset and rewrite `payload["output"]`.
-- [ ] On commit refusal diagnostics, set `payload["commitError"]`.
-- [ ] Unit tests in `tests/test_tool_call_dispatcher.cpp` verify output path rewriting and commit refusal diagnostics.
+- [x] Add `setOutputCommitterHandler` to `ToolCallDispatcher`.
+- [x] Upon task completion, if `OutputCommitterHandler` is configured and task output exists, commit the asset and rewrite `payload["output"]`.
+- [x] On commit refusal diagnostics, set `payload["commitError"]`.
+- [x] Unit tests in `tests/test_tool_call_dispatcher.cpp` verify output path rewriting and commit refusal diagnostics.
