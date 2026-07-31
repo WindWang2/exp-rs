@@ -41,8 +41,6 @@ RasterProcessingDialogBase::RasterProcessingDialogBase( QWidget *parent )
   : QDialog( parent )
 {
   SicnuUi::polishDialog( this, 460 );
-  connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
-           this, &RasterProcessingDialogBase::onTaskUpdated, Qt::QueuedConnection );
 }
 
 void RasterProcessingDialogBase::reject()
@@ -249,7 +247,7 @@ void RasterProcessingDialogBase::runGdalTask( const std::function<QString()> &ta
   req.clientTag = toolName().toStdString();
 
   const QString errMarker = gdalErrorMarker();
-  m_pendingTaskId = sicnu::TaskCenter::instance().submitJob(
+  m_jobHandle.submitJob(
     req,
     [task, errMarker]( const sicnu::jobs::JobRequest &,
                        sicnu::operators::RSOperatorContext &ctx ) {
@@ -270,7 +268,16 @@ void RasterProcessingDialogBase::runGdalTask( const std::function<QString()> &ta
       Json::Value out( Json::objectValue );
       out["output"] = result.toStdString();
       return out;
-    } );
+    },
+    /*cancelCallback=*/nullptr,
+    /*autoLoad=*/false,
+    [this]( const QString &outPath, const Json::Value & ) {
+      onCompleted( outPath );
+    },
+    [this]( const QString &err, bool isCanceled ) {
+      onFailed( isCanceled ? tr( "已取消" ) : err );
+    }
+  );
 }
 
 void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm *algorithm,
@@ -290,7 +297,7 @@ void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm 
   std::shared_ptr<QgsProcessingAlgorithm> algClone( algorithm->create() );
   if ( !algClone )
   {
-    finishRun();
+    cleanupRunResources();
     onFailed( tr( "Failed to create algorithm instance" ) );
     return;
   }
@@ -304,7 +311,7 @@ void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm 
   req.clientTag = toolName().toStdString();
 
   const QString fallbackOutput = outputPath();
-  m_pendingTaskId = sicnu::TaskCenter::instance().submitJob(
+  m_jobHandle.submitJob(
     req,
     [algClone, parameters, project, fallbackOutput](
       const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
@@ -321,12 +328,10 @@ void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm 
       {
         if ( !algClone->prepare( parameters, localCtx, &feedback ) )
         {
-          const QString err = feedback.textLog();
           throw sicnu::operators::RSOperatorError(
-            sicnu::operators::ErrorCode::QgisProcessingError,
-            err.isEmpty() ? "prepare() failed" : err.toStdString() );
+            sicnu::operators::ErrorCode::QgisProcessingError, "Algorithm prepare() returned false" );
         }
-        const QVariantMap runRes =
+        QVariantMap runRes =
           algClone->runPrepared( parameters, localCtx, &feedback );
         if ( feedback.isCanceled() || ctx.isCancelled() )
         {
@@ -366,7 +371,16 @@ void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm 
         throw sicnu::operators::RSOperatorError(
           sicnu::operators::ErrorCode::QgisProcessingError, e.what().toStdString() );
       }
-    } );
+    },
+    /*cancelCallback=*/nullptr,
+    /*autoLoad=*/false,
+    [this]( const QString &outPath, const Json::Value & ) {
+      onCompleted( outPath );
+    },
+    [this]( const QString &err, bool isCanceled ) {
+      onFailed( isCanceled ? tr( "已取消" ) : err );
+    }
+  );
 }
 
 void RasterProcessingDialogBase::runOperatorTask( const QString &operatorId,
@@ -383,36 +397,15 @@ void RasterProcessingDialogBase::runOperatorTask( const QString &operatorId,
   req.title = dialogTitle().toStdString();
   req.source = "dialog";
 
-  m_pendingTaskId = sicnu::TaskCenter::instance().submitJob( req );
-}
-
-void RasterProcessingDialogBase::onTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
-{
-  if ( m_pendingTaskId < 0 || info.taskId != m_pendingTaskId )
-    return;
-  if ( info.status != sicnu::TaskStatus::Completed
-       && info.status != sicnu::TaskStatus::Failed
-       && info.status != sicnu::TaskStatus::Canceled )
-    return;
-
-  m_pendingTaskId = -1;
-  if ( info.status == sicnu::TaskStatus::Completed
-       && info.resultPayload.isMember( "output" )
-       && info.resultPayload["output"].isString() )
-  {
-    onCompleted( QString::fromStdString( info.resultPayload["output"].asString() ) );
-    return;
-  }
-
-  if ( info.status == sicnu::TaskStatus::Canceled )
-  {
-    onFailed( tr( "已取消" ) );
-    return;
-  }
-
-  onFailed( info.errorMessage.isEmpty()
-              ? tr( "Operator did not return an output path" )
-              : info.errorMessage );
+  m_jobHandle.submitJob(
+    req,
+    [this]( const QString &outputPath, const Json::Value & ) {
+      onCompleted( outputPath );
+    },
+    [this]( const QString &err, bool isCanceled ) {
+      onFailed( isCanceled ? tr( "已取消" ) : err );
+    }
+  );
 }
 
 void RasterProcessingDialogBase::handleCompleted( const QString &outputPath )

@@ -1,4 +1,5 @@
 #include "stac_client.h"
+#include "env_flag.h"
 
 #include <QAbstractSocket>
 #include <QHostAddress>
@@ -7,16 +8,6 @@
 #include <QUrlQuery>
 
 namespace {
-
-bool envFlagEnabled(const char *name)
-{
-    const QByteArray v = qgetenv(name);
-    if (v.isEmpty())
-        return false;
-    const QString s = QString::fromUtf8(v).trimmed().toLower();
-    return s == QLatin1String("1") || s == QLatin1String("true") || s == QLatin1String("yes")
-           || s == QLatin1String("on");
-}
 
 bool isPrivateOrLocalHost(const QString &host)
 {

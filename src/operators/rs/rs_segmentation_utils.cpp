@@ -222,20 +222,21 @@ void writeLabelGeoTiff(const std::string& outputPath,
     GDALClose(outDs);
 }
 
-void writeByteGeoTiff(const std::string& outputPath,
-                      const std::vector<uint8_t>& data,
-                      int width, int height,
-                      const double gt[6],
-                      const std::string& projectionWkt) {
+void writeClassGeoTiff(const std::string& outputPath,
+                       const std::vector<int32_t>& data,
+                       int width, int height,
+                       const double gt[6],
+                       const std::string& projectionWkt,
+                       GDALDataType type) {
     if (data.size() != static_cast<size_t>(width) * static_cast<size_t>(height)) {
-        throw RSOperatorError(ErrorCode::InvalidParameter, "Byte buffer size mismatch");
+        throw RSOperatorError(ErrorCode::InvalidParameter, "Class buffer size mismatch");
     }
     GDALDriverH driver = GDALGetDriverByName("GTiff");
     if (!driver)
         throw RSOperatorError(ErrorCode::GdalError, "GTiff driver missing");
     char** opts = nullptr;
     opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
-    GDALDatasetH outDs = GDALCreate(driver, outputPath.c_str(), width, height, 1, GDT_Byte, opts);
+    GDALDatasetH outDs = GDALCreate(driver, outputPath.c_str(), width, height, 1, type, opts);
     CSLDestroy(opts);
     if (!outDs)
         throw RSOperatorError(ErrorCode::GdalError, "Failed to create output: " + outputPath);
@@ -244,7 +245,7 @@ void writeByteGeoTiff(const std::string& outputPath,
         GDALSetProjection(outDs, projectionWkt.c_str());
     GDALRasterBandH band = GDALGetRasterBand(outDs, 1);
     if (GDALRasterIO(band, GF_Write, 0, 0, width, height,
-                     const_cast<uint8_t*>(data.data()), width, height, GDT_Byte, 0, 0) != CE_None) {
+                     const_cast<int32_t*>(data.data()), width, height, GDT_Int32, 0, 0) != CE_None) {
         GDALClose(outDs);
         throw RSOperatorError(ErrorCode::GdalError, "Failed to write class map");
     }

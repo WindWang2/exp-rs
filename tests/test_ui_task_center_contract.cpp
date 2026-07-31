@@ -58,7 +58,11 @@ void requireUsesTaskCenterSubmit( const QString &relativePath )
 {
   const QString text = readSource( relativePath );
   REQUIRE_FALSE( text.isEmpty() );
-  REQUIRE( text.contains( QStringLiteral( "TaskCenter::instance().submitJob" ) ) );
+  const bool usesTaskCenter = text.contains( QStringLiteral( "TaskCenter::instance().submitJob" ) )
+                           || text.contains( QStringLiteral( "TaskCenter::instance().submitPipeline" ) )
+                           || text.contains( QStringLiteral( "JobHandle.submitJob" ) )
+                           || text.contains( QStringLiteral( "jobHandle.submitJob" ) );
+  REQUIRE( usesTaskCenter );
 }
 
 } // namespace
@@ -75,7 +79,7 @@ TEST_CASE( "UI contract inventory: no direct JobEngine submit in migrated caller
     QStringLiteral( "src/app/dialogs/raster_processing_dialog_base.cpp" ),
     QStringLiteral( "src/app/obia/rs_obia_main_window.cpp" ),
     QStringLiteral( "src/app/classification/qgsclassificationmainwindow.cpp" ),
-    QStringLiteral( "src/app/georeferencer/rs_georeferencing_session.cpp" ),
+    QStringLiteral( "src/app/georeferencer/rs_georef_task_center_executor.cpp" ),
     QStringLiteral( "src/app/georeferencer/qgsgeoreferencermainwindow.cpp" ),
     QStringLiteral( "src/app/shell/workflow_session_controller.cpp" ),
   };

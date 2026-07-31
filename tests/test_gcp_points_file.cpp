@@ -11,23 +11,23 @@
 
 TEST_CASE( "GCP .points v2: write+read round-trip preserves type", "[georef][points]" )
 {
-  QgsGCPList list;
   QgsCoordinateReferenceSystem crs( QStringLiteral( "EPSG:32650" ) );
+  QVector<QgsGcpPoint> points;
   {
     QgsGcpPoint p( QgsPointXY( 100, 200 ), QgsPointXY( 400000, 4280000 ), crs, true );
     p.setPointType( "road" );
-    list.appendPoint( p );
+    points.append( p );
   }
   {
     QgsGcpPoint p( QgsPointXY( 300, 400 ), QgsPointXY( 401000, 4281000 ), crs, false );
     p.setPointType( "bridge" );
-    list.appendPoint( p );
+    points.append( p );
   }
 
   QTemporaryDir tmp;
   REQUIRE( tmp.isValid() );
   const QString path = tmp.path() + "/round.points";
-  REQUIRE( list.saveGcps( path ) );
+  REQUIRE( rsSaveGcpPointsFile( path, points ) );
 
   // Verify on-disk marker line.
   QFile f( path );
@@ -38,13 +38,13 @@ TEST_CASE( "GCP .points v2: write+read round-trip preserves type", "[georef][poi
   f.close();
 
   // Round-trip.
-  QgsGCPList loaded;
-  REQUIRE( loaded.loadGcps( path, crs ) );
+  QVector<QgsGcpPoint> loaded;
+  REQUIRE( rsLoadGcpPointsFile( path, crs, loaded ) );
   REQUIRE( loaded.size() == 2 );
-  REQUIRE( loaded.at( 0 )->pointType() == QString( "road" ) );
-  REQUIRE( loaded.at( 1 )->pointType() == QString( "bridge" ) );
-  REQUIRE( loaded.at( 0 )->isEnabled() );
-  REQUIRE_FALSE( loaded.at( 1 )->isEnabled() );
+  REQUIRE( loaded.at( 0 ).pointType() == QString( "road" ) );
+  REQUIRE( loaded.at( 1 ).pointType() == QString( "bridge" ) );
+  REQUIRE( loaded.at( 0 ).isEnabled() );
+  REQUIRE_FALSE( loaded.at( 1 ).isEnabled() );
 }
 
 TEST_CASE( "GCP .points v1: legacy file without header reads with empty type", "[georef][points]" )
@@ -62,10 +62,10 @@ TEST_CASE( "GCP .points v1: legacy file without header reads with empty type", "
   }
   f.close();
 
-  QgsGCPList loaded;
+  QVector<QgsGcpPoint> loaded;
   QgsCoordinateReferenceSystem crs( QStringLiteral( "EPSG:32650" ) );
-  REQUIRE( loaded.loadGcps( path, crs ) );
+  REQUIRE( rsLoadGcpPointsFile( path, crs, loaded ) );
   REQUIRE( loaded.size() == 1 );
-  REQUIRE( loaded.at( 0 )->pointType().isEmpty() );
-  REQUIRE( loaded.at( 0 )->isEnabled() );
+  REQUIRE( loaded.at( 0 ).pointType().isEmpty() );
+  REQUIRE( loaded.at( 0 ).isEnabled() );
 }

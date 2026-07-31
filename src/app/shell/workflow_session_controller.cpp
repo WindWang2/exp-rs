@@ -6,6 +6,7 @@
 #include "task_panel_host.h"
 
 #include "data/data_manager.h"
+#include "processing/framework/output_committer.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "workflow/builtin_definitions.h"
@@ -309,7 +310,7 @@ void WorkflowSessionController::runFullWorkflow()
     emit stepStatusChanged( QString::fromStdString( step.id ), "idle" );
   }
 
-  m_activePipelineId = sicnu::TaskCenter::instance().submitPipeline( *def );
+  m_activePipelineId = sicnu::TaskCenter::instance().submitPipeline( *def, /*autoLoad=*/false );
   if ( m_activePipelineId < 0 )
   {
     emit statusMessage( tr( "工作流 DAG 提交失败" ) );
@@ -363,7 +364,7 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
     targetDef.steps = steps;
   }
 
-  m_activePipelineId = sicnu::TaskCenter::instance().submitPipeline( targetDef );
+  m_activePipelineId = sicnu::TaskCenter::instance().submitPipeline( targetDef, /*autoLoad=*/false );
   if ( m_activePipelineId < 0 )
   {
     emit statusMessage( tr( "工作流 DAG 提交失败" ) );
@@ -380,11 +381,7 @@ void WorkflowSessionController::stopWorkflow()
 {
   if ( m_activePipelineId >= 0 )
   {
-    auto pipeInfo = sicnu::TaskCenter::instance().getPipelineInfo( m_activePipelineId );
-    for ( const auto &tId : pipeInfo.stepToTaskId.values() )
-    {
-      sicnu::TaskCenter::instance().cancelTask( tId );
-    }
+    sicnu::TaskCenter::instance().cancelPipeline( m_activePipelineId );
     m_activePipelineId = -1;
   }
 
@@ -471,11 +468,14 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
 
   if ( !outputPath.isEmpty() && m_dataManager )
   {
-    sicnu::data::RegisterRequest regReq;
-    regReq.source.canonicalSource = outputPath;
-    regReq.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
-    regReq.additionalCapabilities = sicnu::data::AssetCapability::DeletableSource;
-    m_dataManager->registerSource( regReq );
+    sicnu::OutputCommitter committer( m_dataManager, this );
+    committer.commitTaskOutput( &sicnu::TaskCenter::instance(),
+                                info.taskId,
+                                sicnu::data::AssetKind::RasterDataset,
+                                outputPath,
+                                sicnu::data::PersistencePolicy::TaskTemporary,
+                                /*autoLoad=*/false,
+                                {} );
   }
 
   bool shouldLoadToMap = m_pendingLoadToMap;

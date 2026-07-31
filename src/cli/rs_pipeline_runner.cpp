@@ -6,6 +6,7 @@
 #include "processing/framework/task_center.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_types.h"
+#include "workflow/placeholder_grammar.h"
 
 #include <QDir>
 #include <QFile>
@@ -152,31 +153,22 @@ bool cliJsonToWorkflowDefinition( const Json::Value &pipelineJson,
         if ( !stepDef.params[key].isString() )
           continue;
         const std::string strVal = stepDef.params[key].asString();
-        if ( strVal.empty() || strVal[0] != '$' )
-          continue;
-        std::string ref = strVal.substr( 1 );
-        if ( !ref.empty() && ref.front() == '{' && ref.back() == '}' )
-          ref = ref.substr( 1, ref.size() - 2 );
-        const auto dot = ref.find( '.' );
-        const std::string refStepId = ( dot != std::string::npos ) ? ref.substr( 0, dot ) : ref;
-        if ( refStepId.empty() )
-          continue;
-        bool hasEdge = false;
-        for ( const auto &c : stepDef.inputs )
+        auto inferredConns = sicnu::workflow::inferStepConnections( key, strVal );
+        for ( const auto &conn : inferredConns )
         {
-          if ( c.fromStepId == refStepId )
+          bool hasEdge = false;
+          for ( const auto &c : stepDef.inputs )
           {
-            hasEdge = true;
-            break;
+            if ( c.fromStepId == conn.fromStepId )
+            {
+              hasEdge = true;
+              break;
+            }
           }
-        }
-        if ( !hasEdge )
-        {
-          sicnu::workflow::StepConnection conn;
-          conn.fromStepId = refStepId;
-          conn.fromPort = ( dot != std::string::npos ) ? ref.substr( dot + 1 ) : "output";
-          conn.toPort = key;
-          stepDef.inputs.push_back( conn );
+          if ( !hasEdge )
+          {
+            stepDef.inputs.push_back( conn );
+          }
         }
       }
     }

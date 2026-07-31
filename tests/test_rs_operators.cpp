@@ -8,6 +8,9 @@
 
 #include <json/json.h>
 
+#include <gdal_priv.h>
+#include <ogr_api.h>
+
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -26,6 +29,66 @@ std::string writeTestRaster(const QString &path, int width, int height,
         return error.toStdString();
     }
     return {};
+}
+
+/// Create a single-layer GPKG with one integer field and one axis-aligned
+/// square feature. Coordinates are map units of a raster with GT
+/// {0,1,0,0,0,-1} (i.e. rows run into negative y).
+void writeTestVector(const QString &path, const QString &fieldName, int classId,
+                     double x0, double y0, double x1, double y1, bool append = false) {
+    GDALDriverH drv = GDALGetDriverByName("GPKG");
+    REQUIRE(drv != nullptr);
+    GDALDatasetH ds = append
+        ? GDALOpenEx(path.toUtf8().constData(), GDAL_OF_VECTOR | GDAL_OF_UPDATE,
+                     nullptr, nullptr, nullptr)
+        : GDALCreate(drv, path.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr);
+    REQUIRE(ds != nullptr);
+    OGRLayerH lyr = append
+        ? GDALDatasetGetLayer(ds, 0)
+        : GDALDatasetCreateLayer(ds, "training", nullptr, wkbPolygon, nullptr);
+    REQUIRE(lyr != nullptr);
+
+    int fieldIdx = 0;
+    if (!append) {
+        OGRFieldDefnH fld = OGR_Fld_Create(fieldName.toUtf8().constData(), OFTInteger);
+        REQUIRE(OGR_L_CreateField(lyr, fld, true) == OGRERR_NONE);
+        OGR_Fld_Destroy(fld);
+    }
+
+    OGRGeometryH ring = OGR_G_CreateGeometry(wkbLinearRing);
+    OGR_G_AddPoint_2D(ring, x0, y0);
+    OGR_G_AddPoint_2D(ring, x1, y0);
+    OGR_G_AddPoint_2D(ring, x1, y1);
+    OGR_G_AddPoint_2D(ring, x0, y1);
+    OGR_G_AddPoint_2D(ring, x0, y0);
+    OGRGeometryH poly = OGR_G_CreateGeometry(wkbPolygon);
+    REQUIRE(OGR_G_AddGeometryDirectly(poly, ring) == OGRERR_NONE);
+
+    OGRFeatureH feat = OGR_F_Create(OGR_L_GetLayerDefn(lyr));
+    OGR_F_SetFieldInteger(feat, fieldIdx, classId);
+    REQUIRE(OGR_F_SetGeometryDirectly(feat, poly) == OGRERR_NONE);
+    REQUIRE(OGR_L_CreateFeature(lyr, feat) == OGRERR_NONE);
+    OGR_F_Destroy(feat);
+    GDALClose(ds);
+}
+
+/// Two-class 16x16 raster (left half dark, right half bright) + matching
+/// training polygons (class 1 left, class 2 right).
+void makeTwoClassFixture(const QString &rasterPath, const QString &vectorPath) {
+    constexpr int W = 16;
+    constexpr int H = 16;
+    std::vector<std::vector<float>> bands(2);
+    for (int b = 0; b < 2; ++b) {
+        bands[b].resize(W * H);
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < W; ++x)
+                bands[b][y * W + x] = (x < W / 2)
+                    ? static_cast<float>(10 * (b + 1))
+                    : static_cast<float>(100 * (b + 1));
+    }
+    REQUIRE(writeTestRaster(rasterPath, W, H, bands).empty());
+    writeTestVector(vectorPath, QStringLiteral("class_id"), 1, 0, -16, 8, 0);
+    writeTestVector(vectorPath, QStringLiteral("class_id"), 2, 8, -16, 16, 0, true);
 }
 
 } // namespace
@@ -359,6 +422,7 @@ TEST_CASE("RS kmeans classification runs on multi-band raster", "[operators][rs]
     Json::Value result = op->run(params, ctx);
     CHECK(result["output"].asString() == outputPath.toStdString());
     CHECK(result["k"].asInt() == 2);
+    CHECK(result["samplesUsed"].asInt() == W * H);
     CHECK(QFile::exists(outputPath));
 
     GdalDatasetWrapper ds;
@@ -366,6 +430,36 @@ TEST_CASE("RS kmeans classification runs on multi-band raster", "[operators][rs]
     CHECK(ds.width() == W);
     CHECK(ds.height() == H);
     CHECK(ds.bandCount() == 1);
+
+    // ADR 0019 S4 — the adapter routes through RsClassificationPipeline with
+    // an RsClassifierKMeans backend. With two spectrally disjoint halves the
+    // clustering is seed-independent: left gets one 1-based cluster id, right
+    // the other.
+    std::vector<float> px(W * H);
+    REQUIRE(ds.readBandData(1, px.data(), W, H));
+    const float leftLabel = px[0];
+    const float rightLabel = px[W * H - 1];
+    CHECK(leftLabel >= 1.0f);
+    CHECK(leftLabel <= 2.0f);
+    CHECK(rightLabel >= 1.0f);
+    CHECK(rightLabel <= 2.0f);
+    CHECK(leftLabel != rightLabel);
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            const float expect = (x < W / 2) ? leftLabel : rightLabel;
+            CHECK(px[y * W + x] == Catch::Approx(expect));
+        }
+    }
+
+    // Subsample policy unchanged: maxSamples caps the centroid-fit samples.
+    const QString outputPath2 = tmp.path() + "/km_sub.tif";
+    Json::Value params2 = params;
+    params2["output"] = outputPath2.toStdString();
+    params2["maxSamples"] = 64;
+    RSOperatorContext ctx2;
+    Json::Value result2 = op->run(params2, ctx2);
+    CHECK(result2["samplesUsed"].asInt() == 64);
+    CHECK(QFile::exists(outputPath2));
 }
 #endif
 
@@ -379,6 +473,11 @@ TEST_CASE("RS supervised classification schema registered", "[operators][rs]") {
     CHECK(schema["properties"].isMember("training"));
     CHECK(schema["properties"].isMember("method"));
     CHECK(schema["properties"].isMember("classField"));
+    // ADR 0019 S3 — parity params
+    CHECK(schema["properties"].isMember("scale"));
+    CHECK(schema["properties"].isMember("testSplit"));
+    CHECK(schema["properties"]["scale"]["default"].asBool() == true);
+    CHECK(schema["properties"]["testSplit"]["default"].asDouble() == 0.0);
 }
 
 TEST_CASE("RS supervised classification rejects missing training", "[operators][rs]") {
@@ -394,6 +493,171 @@ TEST_CASE("RS supervised classification rejects missing training", "[operators][
     } catch (const RSOperatorError &e) {
         CHECK(e.code() == ErrorCode::MissingRequiredParameter);
     }
+}
+
+TEST_CASE("RS supervised classification testSplit returns accuracy", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:supervised_classification");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString trainingPath = tmp.path() + "/training.gpkg";
+    const QString outputPath = tmp.path() + "/map.tif";
+    makeTwoClassFixture(inputPath, trainingPath);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["training"] = trainingPath.toStdString();
+    params["classField"] = "class_id";
+    params["testSplit"] = 0.3;
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+
+    CHECK(result["mode"].asString() == "train_predict");
+    CHECK(result["classes"].asInt() == 2);
+    CHECK(result["trainSamples"].asInt() > 0);
+    REQUIRE(result.isMember("overallAccuracy"));
+    REQUIRE(result.isMember("kappa"));
+    REQUIRE(result.isMember("confusionMatrix"));
+    // Spectrally separable classes: held-out accuracy should be perfect.
+    CHECK(result["overallAccuracy"].asDouble() == Catch::Approx(1.0));
+    CHECK(result["kappa"].asDouble() == Catch::Approx(1.0));
+    CHECK(result["confusionMatrix"].size() == 2);
+    CHECK(result["confusionMatrix"][0].size() == 2);
+    CHECK(QFile::exists(outputPath));
+}
+
+TEST_CASE("RS supervised classification rejects out-of-range testSplit", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:supervised_classification");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+    Json::Value params(Json::objectValue);
+    params["input"] = "missing.tif";
+    params["output"] = "out.tif";
+    params["training"] = "missing.gpkg";
+    params["testSplit"] = 0.95;
+    try {
+        op->run(params, ctx);
+        FAIL("Expected RSOperatorError");
+    } catch (const RSOperatorError &e) {
+        CHECK(e.code() == ErrorCode::OutOfRange);
+    }
+}
+
+TEST_CASE("RS supervised classification scale model round-trip", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:supervised_classification");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString trainingPath = tmp.path() + "/training.gpkg";
+    const QString trainOut = tmp.path() + "/train_map.tif";
+    const QString predictOut = tmp.path() + "/predict_map.tif";
+    const QString modelPath = tmp.path() + "/model.xml";
+    makeTwoClassFixture(inputPath, trainingPath);
+
+    // Train with scaling + modelOut.
+    Json::Value trainParams(Json::objectValue);
+    trainParams["input"] = inputPath.toStdString();
+    trainParams["output"] = trainOut.toStdString();
+    trainParams["training"] = trainingPath.toStdString();
+    trainParams["classField"] = "class_id";
+    trainParams["scale"] = true;
+    trainParams["modelOut"] = modelPath.toStdString();
+
+    RSOperatorContext ctx;
+    Json::Value trainResult = op->run(trainParams, ctx);
+    CHECK(trainResult["modelOut"].asString() == modelPath.toStdString());
+    REQUIRE(QFile::exists(modelPath));
+
+    // Superset sidecar next to the model carries the fitted scaler.
+    const QString sidecarPath = tmp.path() + "/model.meta.json";
+    REQUIRE(QFile::exists(sidecarPath));
+    QFile sidecar(sidecarPath);
+    REQUIRE(sidecar.open(QIODevice::ReadOnly));
+    CHECK(sidecar.readAll().contains("\"scaler\""));
+
+    // Predict-only via modelIn: sidecar scaler applied automatically.
+    Json::Value predictParams(Json::objectValue);
+    predictParams["input"] = inputPath.toStdString();
+    predictParams["output"] = predictOut.toStdString();
+    predictParams["modelIn"] = modelPath.toStdString();
+
+    RSOperatorContext ctx2;
+    Json::Value predictResult = op->run(predictParams, ctx2);
+    CHECK(predictResult["mode"].asString() == "predict_only");
+    CHECK(predictResult["method"].asString() == "svm");
+    REQUIRE(QFile::exists(predictOut));
+
+    // Same class map from both runs.
+    constexpr int W = 16;
+    constexpr int H = 16;
+    std::vector<float> a(W * H), b(W * H);
+    GdalDatasetWrapper dsA, dsB;
+    REQUIRE(dsA.open(trainOut));
+    REQUIRE(dsB.open(predictOut));
+    REQUIRE(dsA.readBandData(1, a.data(), W, H));
+    REQUIRE(dsB.readBandData(1, b.data(), W, H));
+    CHECK(a == b);
+    // Sanity: both classes present, left = 1, right = 2.
+    CHECK(a[0] == Catch::Approx(1.0f));
+    CHECK(a[W * H - 1] == Catch::Approx(2.0f));
+}
+
+TEST_CASE("RS supervised classification escalates dtype for large class ids", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:supervised_classification");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString trainingPath = tmp.path() + "/training.gpkg";
+    const QString outputPath = tmp.path() + "/map16.tif";
+    makeTwoClassFixture(inputPath, trainingPath);
+    // Re-tag the second class with an id > 255: old operator clamped to 255;
+    // the pipeline escalates the output dtype instead.
+    {
+        GDALDatasetH ds = GDALOpenEx(trainingPath.toUtf8().constData(),
+                                     GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr);
+        REQUIRE(ds != nullptr);
+        OGRLayerH lyr = GDALDatasetGetLayer(ds, 0);
+        REQUIRE(lyr != nullptr);
+        OGRFeatureH feat;
+        while ((feat = OGR_L_GetNextFeature(lyr)) != nullptr) {
+            if (OGR_F_GetFieldAsInteger(feat, 0) == 2)
+                OGR_F_SetFieldInteger(feat, 0, 300);
+            REQUIRE(OGR_L_SetFeature(lyr, feat) == OGRERR_NONE);
+            OGR_F_Destroy(feat);
+        }
+        GDALClose(ds);
+    }
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["training"] = trainingPath.toStdString();
+    params["classField"] = "class_id";
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    CHECK(result["classes"].asInt() == 2);
+    REQUIRE(QFile::exists(outputPath));
+
+    // Output band is UInt16 (escalated, not clamped) and class 300 survives.
+    GDALDatasetH out = GDALOpenEx(outputPath.toUtf8().constData(), GDAL_OF_RASTER,
+                                  nullptr, nullptr, nullptr);
+    REQUIRE(out != nullptr);
+    CHECK(GDALGetRasterDataType(GDALGetRasterBand(out, 1)) == GDT_UInt16);
+    std::vector<float> px(16 * 16);
+    REQUIRE(GDALRasterIO(GDALGetRasterBand(out, 1), GF_Read, 0, 0, 16, 16,
+                         px.data(), 16, 16, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(out);
+    CHECK(px.front() == Catch::Approx(1.0f));
+    CHECK(px.back() == Catch::Approx(300.0f));
 }
 #endif
 
@@ -438,5 +702,99 @@ TEST_CASE("RS obia_classify schema", "[operators][rs]") {
     auto schema = op->schema();
     CHECK(schema["properties"].isMember("training"));
     CHECK(schema["properties"].isMember("minLabelPixels"));
+}
+
+TEST_CASE("RS obia_classify runs end-to-end on grid segments", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:obia_classify");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString trainingPath = tmp.path() + "/training.gpkg";
+    const QString outputPath = tmp.path() + "/obia_map.tif";
+    makeTwoClassFixture(inputPath, trainingPath);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["training"] = trainingPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["classField"] = "class_id";
+    params["segmentMethod"] = "grid";
+    params["cellSize"] = 8;
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    CHECK(result["segments"].asInt() == 4); // 16x16 raster, 8px cells
+    CHECK(result["labeledSegments"].asInt() == 4);
+    CHECK(result["classes"].asInt() == 2);
+    REQUIRE(QFile::exists(outputPath));
+
+    // Segments align with the spectral halves: left = class 1, right = 2.
+    constexpr int W = 16;
+    constexpr int H = 16;
+    std::vector<float> px(W * H);
+    GdalDatasetWrapper ds;
+    REQUIRE(ds.open(outputPath));
+    REQUIRE(ds.readBandData(1, px.data(), W, H));
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            const float expect = (x < W / 2) ? 1.0f : 2.0f;
+            CHECK(px[y * W + x] == Catch::Approx(expect));
+        }
+    }
+}
+
+TEST_CASE("RS obia_classify escalates dtype for large class ids", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:obia_classify");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString trainingPath = tmp.path() + "/training.gpkg";
+    const QString outputPath = tmp.path() + "/obia_map16.tif";
+    makeTwoClassFixture(inputPath, trainingPath);
+    // Re-tag the second class with an id > 255: the pre-ADR-0019 operator
+    // silently clamped to 255; the pipeline dtype policy escalates instead.
+    {
+        GDALDatasetH ds = GDALOpenEx(trainingPath.toUtf8().constData(),
+                                     GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr);
+        REQUIRE(ds != nullptr);
+        OGRLayerH lyr = GDALDatasetGetLayer(ds, 0);
+        REQUIRE(lyr != nullptr);
+        OGRFeatureH feat;
+        while ((feat = OGR_L_GetNextFeature(lyr)) != nullptr) {
+            if (OGR_F_GetFieldAsInteger(feat, 0) == 2)
+                OGR_F_SetFieldInteger(feat, 0, 300);
+            REQUIRE(OGR_L_SetFeature(lyr, feat) == OGRERR_NONE);
+            OGR_F_Destroy(feat);
+        }
+        GDALClose(ds);
+    }
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["training"] = trainingPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["classField"] = "class_id";
+    params["segmentMethod"] = "grid";
+    params["cellSize"] = 8;
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    CHECK(result["classes"].asInt() == 2);
+    REQUIRE(QFile::exists(outputPath));
+
+    GDALDatasetH out = GDALOpenEx(outputPath.toUtf8().constData(), GDAL_OF_RASTER,
+                                  nullptr, nullptr, nullptr);
+    REQUIRE(out != nullptr);
+    CHECK(GDALGetRasterDataType(GDALGetRasterBand(out, 1)) == GDT_UInt16);
+    std::vector<float> px(16 * 16);
+    REQUIRE(GDALRasterIO(GDALGetRasterBand(out, 1), GF_Read, 0, 0, 16, 16,
+                         px.data(), 16, 16, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(out);
+    CHECK(px.front() == Catch::Approx(1.0f));
+    CHECK(px.back() == Catch::Approx(300.0f));
 }
 #endif

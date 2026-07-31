@@ -13,18 +13,28 @@
 #ifndef QGS_GCP_LIST_MODEL_H
 #define QGS_GCP_LIST_MODEL_H
 
-#include "qgis.h"
 #include "qgscoordinatereferencesystem.h"
 #include "qgscoordinatetransformcontext.h"
-#include "qgsrasterchangecoords.h"
+#include "qgspointxy.h"
 
 #include <QAbstractTableModel>
 #include <QString>
 
-class QgsGcpPoint;
-class QgsGeorefTransform;
-class QgsGCPList;
+#include <functional>
 
+class RsGeoreferencingSession;
+
+/**
+ * GCP table model (ADR 0020 S3): session-backed ONLY.
+ *
+ * Rows, enabled flags, point types and residuals are pulled from the
+ * Georeferencing Session (the sole owner of GCP/fit state); edits are
+ * forwarded to the session's granular mutation methods. The model is pure
+ * presentation — it holds no QgsGCPList, no QgsGeorefTransform and no GDAL
+ * geotransform readers. Source/destination pixel conversion for the col/row
+ * columns is injected by the shell as plain converter callables
+ * (setPixelConverters).
+ */
 class QgsGCPListModel : public QAbstractTableModel
 {
     Q_OBJECT
@@ -56,8 +66,12 @@ class QgsGCPListModel : public QAbstractTableModel
 
     explicit QgsGCPListModel( QObject *parent = nullptr );
 
-    void setGCPList( QgsGCPList *theGCPList );
-    void setGeorefTransform( QgsGeorefTransform *georefTransform );
+    /**
+     * Attach the Georeferencing Session: rows, enabled flags, point types and
+     * residuals are pulled from it (the sole owner of GCP/fit state); edits
+     * are forwarded to the session's granular mutation methods.
+     */
+    void setGcpsSource( RsGeoreferencingSession *session );
 
     void setTargetCrs( const QgsCoordinateReferenceSystem &targetCrs, const QgsCoordinateTransformContext &context );
 
@@ -68,8 +82,14 @@ class QgsGCPListModel : public QAbstractTableModel
     void setCoordinateDisplayMode( bool sourceIsMap, bool residualIsMap,
                                    const QString &destCrsAuth = QString() );
 
-    /// Enable col/row display via GDAL geotransform of source and dest rasters.
-    void setRasterPaths( const QString &sourcePath, const QString &destPath );
+    /**
+     * Enable col/row display via injected pixel converters (ADR 0020 S3).
+     * The shell computes GDAL geotransforms and injects them here as plain
+     * callables so the model never touches GDAL itself. An empty callable
+     * disables the corresponding col/row columns (rendered as a dash).
+     */
+    void setPixelConverters( std::function<QgsPointXY( const QgsPointXY & )> sourceToPixel,
+                             std::function<QgsPointXY( const QgsPointXY & )> destToPixel );
 
     int rowCount( const QModelIndex &parent = QModelIndex() ) const override;
     int columnCount( const QModelIndex &parent = QModelIndex() ) const override;
@@ -78,7 +98,6 @@ class QgsGCPListModel : public QAbstractTableModel
     Qt::ItemFlags flags( const QModelIndex &index ) const override;
     QVariant headerData( int section, Qt::Orientation orientation, int role = Qt::DisplayRole ) const override;
 
-    void updateResiduals();
     void refreshAll();
 
     static QString formatNumber( double number );
@@ -86,28 +105,33 @@ class QgsGCPListModel : public QAbstractTableModel
     bool sourceIsMapCoords() const { return mSourceIsMap; }
     bool residualIsMapUnits() const { return mResidualIsMap; }
 
-  signals:
-    void pointEnabled( QgsGcpPoint *pnt, int i );
+    /// True when the source raster has a georeference (converter injected),
+    /// i.e. source picks are layer/map coordinates rather than raw pixels.
+    bool sourceHasExistingGeoreference() const;
 
   private:
-    Qgis::RenderUnit residualUnit() const;
     QgsPointXY toSourcePixel( const QgsPointXY &mapOrPixel ) const;
     QgsPointXY toDestPixel( const QgsPointXY &mapOrPixel ) const;
+
+    /// Session row accessors.
+    int gcpRowCount() const;
+    bool rowEnabled( int row ) const;
+    QgsPointXY rowSourcePoint( int row ) const;
+    QgsPointXY rowDestinationPoint( int row ) const;
+    QString rowPointType( int row ) const;
+    QPointF rowResidual( int row ) const;
 
     QgsCoordinateReferenceSystem mTargetCrs;
     QgsCoordinateTransformContext mTransformContext;
 
-    QgsGCPList *mGCPList = nullptr;
-    QgsGeorefTransform *mGeorefTransform = nullptr;
+    RsGeoreferencingSession *mSession = nullptr;
 
     bool mSourceIsMap = false;
     bool mResidualIsMap = false;
     QString mDestCrsAuth;
 
-    QgsRasterChangeCoords mSrcCoords;
-    QgsRasterChangeCoords mDstCoords;
-    bool mHasSrcRaster = false;
-    bool mHasDstRaster = false;
+    std::function<QgsPointXY( const QgsPointXY & )> mSourceToPixel;
+    std::function<QgsPointXY( const QgsPointXY & )> mDestToPixel;
 };
 
 #endif

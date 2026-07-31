@@ -35,8 +35,6 @@ MosaicPanel::MosaicPanel(QWidget *parent)
 {
     setWindowTitle(tr("Mosaic"));
     setupUi();
-    connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
-             this, &MosaicPanel::onTaskUpdated, Qt::QueuedConnection );
 }
 
 void MosaicPanel::setupUi()
@@ -171,7 +169,7 @@ void MosaicPanel::runMosaic()
     req.source = "dialog";
     req.exclusive = true;
 
-    m_pendingTaskId = sicnu::TaskCenter::instance().submitJob(
+    m_jobHandle.submitJob(
       req,
       [inputPaths, outPath]( const sicnu::jobs::JobRequest &,
                              sicnu::operators::RSOperatorContext &ctx ) -> Json::Value {
@@ -221,71 +219,53 @@ void MosaicPanel::runMosaic()
                                        inputs[static_cast<size_t>( i )].height ) )
                 {
                     throw sicnu::operators::RSOperatorError(
-                      sicnu::operators::ErrorCode::GdalError, "Failed to read band 1" );
+                      sicnu::operators::ErrorCode::FileNotReadable,
+                      "Failed to read band 1 data" );
                 }
             }
 
-            QgsCoordinateReferenceSystem refCrs;
-            refCrs.createFromWkt( inputs[0].projection );
+            const auto &gt0 = inputs[0].geotransform;
+            double unionMinX = gt0[0];
+            double unionMaxY = gt0[3];
+            double unionMaxX = gt0[0] + inputs[0].width * gt0[1];
+            double unionMinY = gt0[3] + inputs[0].height * gt0[5];
+
             for ( int i = 1; i < inputCount; ++i ) {
-                QgsCoordinateReferenceSystem crs;
-                crs.createFromWkt( inputs[static_cast<size_t>( i )].projection );
-                if ( refCrs != crs )
-                {
-                    throw sicnu::operators::RSOperatorError(
-                      sicnu::operators::ErrorCode::InvalidInputData,
-                      "Input CRS mismatch" );
-                }
-            }
-
-            double unionMinX = std::numeric_limits<double>::max();
-            double unionMinY = std::numeric_limits<double>::max();
-            double unionMaxX = std::numeric_limits<double>::lowest();
-            double unionMaxY = std::numeric_limits<double>::lowest();
-
-            double refPixelW = inputs[0].geotransform[1];
-            double refPixelH = inputs[0].geotransform[5];
-
-            for ( int i = 0; i < inputCount; ++i ) {
                 const auto &gt = inputs[static_cast<size_t>( i )].geotransform;
-                double originX = gt[0];
-                double originY = gt[3];
-                double pixelW = gt[1];
-                double pixelH = gt[5];
+                double minX = gt[0];
+                double maxY = gt[3];
+                double maxX = gt[0] + inputs[static_cast<size_t>( i )].width * gt[1];
+                double minY = gt[3] + inputs[static_cast<size_t>( i )].height * gt[5];
 
-                double tlX = originX;
-                double tlY = originY;
-                double brX = originX + inputs[static_cast<size_t>( i )].width * pixelW;
-                double brY = originY + inputs[static_cast<size_t>( i )].height * pixelH;
-
-                unionMinX = std::min( unionMinX, std::min( tlX, brX ) );
-                unionMinY = std::min( unionMinY, std::min( tlY, brY ) );
-                unionMaxX = std::max( unionMaxX, std::max( tlX, brX ) );
-                unionMaxY = std::max( unionMaxY, std::max( tlY, brY ) );
+                unionMinX = std::min( unionMinX, minX );
+                unionMaxY = std::max( unionMaxY, maxY );
+                unionMaxX = std::max( unionMaxX, maxX );
+                unionMinY = std::min( unionMinY, minY );
             }
 
-            int outWidth = static_cast<int>( std::round( ( unionMaxX - unionMinX ) / std::abs( refPixelW ) ) );
-            int outHeight = static_cast<int>( std::round( ( unionMaxY - unionMinY ) / std::abs( refPixelH ) ) );
-            if ( outWidth <= 0 || outHeight <= 0 )
-            {
+            double refPixelW = std::abs( gt0[1] );
+            double refPixelH = std::abs( gt0[5] );
+
+            int outWidth = static_cast<int>( std::ceil( ( unionMaxX - unionMinX ) / refPixelW ) );
+            int outHeight = static_cast<int>( std::ceil( ( unionMaxY - unionMinY ) / refPixelH ) );
+
+            if ( outWidth <= 0 || outHeight <= 0 ) {
                 throw sicnu::operators::RSOperatorError(
-                  sicnu::operators::ErrorCode::InvalidInputData, "Invalid mosaic extent" );
+                  sicnu::operators::ErrorCode::InvalidInputData, "Calculated mosaic dimensions invalid" );
             }
 
             size_t outPixelCount = static_cast<size_t>( outWidth ) * static_cast<size_t>( outHeight );
+            constexpr size_t kMaxPixels = 500000000ULL;
+            if ( outPixelCount > kMaxPixels ) {
+                throw sicnu::operators::RSOperatorError(
+                  sicnu::operators::ErrorCode::InvalidInputData, "Calculated output raster too large" );
+            }
 
-            std::array<double, 6> outGT{};
-            outGT[0] = unionMinX;
-            outGT[1] = refPixelW;
-            outGT[2] = inputs[0].geotransform[2];
-            outGT[3] = unionMaxY;
-            outGT[4] = inputs[0].geotransform[4];
-            outGT[5] = refPixelH;
+            std::array<double, 6> outGT = { unionMinX, refPixelW, 0.0, unionMaxY, 0.0, -refPixelH };
 
-            std::vector<Mosaic::MosaicSource> sources( static_cast<size_t>( inputCount ) );
+            std::vector<Mosaic::SourceImage> sources( static_cast<size_t>( inputCount ) );
             for ( int i = 0; i < inputCount; ++i ) {
                 const auto &gt = inputs[static_cast<size_t>( i )].geotransform;
-
                 size_t offX = static_cast<size_t>(
                   std::round( ( gt[0] - unionMinX ) / std::abs( refPixelW ) ) );
                 size_t offY = static_cast<size_t>(
@@ -328,13 +308,6 @@ void MosaicPanel::runMosaic()
                 GDALSetProjection( dst, inputs[0].projection.toUtf8().constData() );
 
             GDALRasterBandH band = GDALGetRasterBand( dst, 1 );
-            if ( !band )
-            {
-                GDALClose( dst );
-                throw sicnu::operators::RSOperatorError(
-                  sicnu::operators::ErrorCode::GdalError, "Failed to open mosaic band" );
-            }
-
             CPLErr err = GDALRasterIO( band, GF_Write, 0, 0, outWidth, outHeight,
                                        outBuf.data(), outWidth, outHeight, GDT_Float32, 0, 0 );
             float nodata = std::numeric_limits<float>::quiet_NaN();
@@ -355,35 +328,16 @@ void MosaicPanel::runMosaic()
             throw sicnu::operators::RSOperatorError(
               sicnu::operators::ErrorCode::ComputationError, e.what() );
         }
-      } );
-}
-
-void MosaicPanel::onTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
-{
-    if ( m_pendingTaskId < 0 || info.taskId != m_pendingTaskId )
-        return;
-    if ( info.status != sicnu::TaskStatus::Completed
-         && info.status != sicnu::TaskStatus::Failed
-         && info.status != sicnu::TaskStatus::Canceled )
-        return;
-
-    m_pendingTaskId = -1;
-    if ( info.status == sicnu::TaskStatus::Completed
-         && info.resultPayload.isMember( "output" )
-         && info.resultPayload["output"].isString() )
-    {
-        onCompleted( QString::fromStdString( info.resultPayload["output"].asString() ) );
-        return;
-    }
-    if ( info.status == sicnu::TaskStatus::Canceled )
-    {
-        onFailed( tr( "已取消" ) );
-        return;
-    }
-    QString err = info.errorMessage;
-    if ( err.isEmpty() )
-        err = tr( "Mosaic failed" );
-    onFailed( err );
+      },
+      /*cancelCallback=*/nullptr,
+      /*autoLoad=*/false,
+      [this]( const QString &outPath, const Json::Value & ) {
+        onCompleted( outPath );
+      },
+      [this]( const QString &err, bool isCanceled ) {
+        onFailed( isCanceled ? tr( "已取消" ) : err );
+      }
+    );
 }
 
 void MosaicPanel::onCompleted(const QString &outputPath)

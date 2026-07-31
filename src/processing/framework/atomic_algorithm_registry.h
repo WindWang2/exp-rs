@@ -52,17 +52,6 @@ public:
   std::string exportSystemPromptCatalog() const;
 
   /**
-   * Directly parses an LLM OpenAI/Qwen tool call JSON string,
-   * executes the target algorithm adapter, and returns a JSON string result.
-   */
-  std::string executeToolCall( const std::string &jsonToolCall );
-
-  /**
-   * Enqueues an LLM tool call asynchronously in TaskCenter for background scheduling and progress tracking.
-   */
-  long submitToolCall( const std::string &jsonToolCall, bool autoLoad = true );
-
-  /**
    * Total number of registered adapters.
    */
   size_t adapterCount() const;

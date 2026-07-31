@@ -6,10 +6,9 @@
     Email                : marco at sourcepole dot ch
 
     SICNU port (2026-06-03, Task 11.5.2): adapted to the project's
-    QgsGCPList (which holds QgsGcpPoint* rather than QgsGeorefDataPoint).
-    Stores its own snapshot of (id, sourcePoint, residual, enabled) so
-    it does not depend on QgsGeorefDataPoint and stays decoupled from
-    the live list.
+    GCP handling. Stores its own snapshot of (id, sourcePoint, residual,
+    enabled) so it does not depend on QgsGeorefDataPoint and stays
+    decoupled from the live GCP state.
  ***************************************************************************
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -22,7 +21,6 @@
 #ifndef QGSRESIDUALPLOTITEM_H
 #define QGSRESIDUALPLOTITEM_H
 
-#include "qgsgcplist.h"
 #include "qgslayoutitem.h"
 #include "qgspointxy.h"
 #include "qgsrectangle.h"
@@ -58,13 +56,9 @@ class QgsResidualPlotItem : public QgsLayoutItem
     void paint( QPainter *painter, const QStyleOptionGraphicsItem *itemStyle, QWidget *pWidget ) override;
 
     /// Sets a snapshot of the GCP list. Caller-prepared entries decouple us from
-    /// QgsGeorefDataPoint and from the live QgsGCPList.
+    /// QgsGeorefDataPoint and from the live GCP state.
     void setEntries( const QVector<Entry> &entries );
     const QVector<Entry> &entries() const { return mEntries; }
-
-    /// Convenience helper: copy a live QgsGCPList into a snapshot. ids are
-    /// assigned by list order (0..N-1).
-    void setGCPList( const QgsGCPList &list );
 
     void setExtent( const QgsRectangle &rect ) { mExtent = rect; }
     QgsRectangle extent() const { return mExtent; }

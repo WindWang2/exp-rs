@@ -1,5 +1,19 @@
 /***************************************************************************
  * rs_kmeans_operator.cpp  —  Unsupervised K-Means classification
+ *
+ * ADR 0019 slice S4 — thin JSON adapter over the analysis-layer
+ * classification pipeline:
+ *
+ *   params → full-band read + deterministic std::mt19937(42) subsample
+ *            (the operator's long-standing sampling policy, unchanged) →
+ *            RsClassificationPipeline::run with an RsClassifierKMeans
+ *            backend.
+ *
+ * Tiled prediction, GTiff creation options, NoData/ignore policy and the
+ * Byte color table all come from the pipeline (parity with the GUI path by
+ * construction). The backend is the analysis-layer RsClassifierKMeans, so
+ * K-Means init / attempts / termination criteria cannot drift from the GUI
+ * again.
  ***************************************************************************/
 #include "rs_kmeans_operator.h"
 
@@ -9,23 +23,64 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
-#include <QFile>
-#include <QString>
+#include "rs_classification_pipeline.h"
+#include "rs_classifier_kmeans.h"
 
-#include <gdal.h>
-#include <cpl_string.h>
+#include <QColor>
+#include <QString>
+#include <QVector>
 
 #include <opencv2/core.hpp>
 
 #include <algorithm>
-#include <cmath>
-#include <limits>
 #include <random>
+#include <string>
 #include <vector>
 
 namespace sicnu::operators::rs {
 
 using namespace params;
+
+namespace {
+
+/// Deterministic per-cluster colors, same synthesis as the supervised
+/// adapter (headless runs have no ROI class defs; the palette also feeds
+/// the pipeline's max-class-id dtype check).
+QColor classColor(int classId) {
+    return QColor::fromHsv((classId * 47) % 360, 200, 230);
+}
+
+/// Map a failed pipeline run back onto the operator's stable error codes.
+[[noreturn]] void throwPipelineError(const RsClassificationPipelineResult& res) {
+    using E = RsClassificationPipelineResult::Error;
+    const std::string msg = res.errorMessage.toStdString();
+    switch (res.error) {
+        case E::Cancelled:
+            throw RSOperatorError(ErrorCode::Cancelled, "Cancelled");
+        case E::TrainingFailed:
+            // RsClassifierKMeans swallows the cv::kmeans exception text and
+            // returns false; the old hand-rolled fit surfaced e.what().
+            throw RSOperatorError(ErrorCode::OpenCvError, "K-Means training failed");
+        case E::NotFittedNoTrainingData:
+            throw RSOperatorError(ErrorCode::InvalidInputData, msg);
+        case E::InvalidBand:
+            throw RSOperatorError(ErrorCode::OutOfRange, msg);
+        case E::OutputDriverUnavailable:
+            throw RSOperatorError(ErrorCode::GdalError, "GTiff driver not available");
+        case E::OutputCreateFailed:
+            throw RSOperatorError(ErrorCode::GdalError, "Failed to create output");
+        case E::PredictionFailed:
+        case E::PredictionSizeMismatch:
+            throw RSOperatorError(ErrorCode::OpenCvError, msg);
+        case E::RasterOpenFailed:
+        case E::RasterReadFailed:
+            throw RSOperatorError(ErrorCode::GdalError, msg);
+        default:
+            throw RSOperatorError(ErrorCode::ComputationError, msg);
+    }
+}
+
+} // namespace
 
 Json::Value RsKmeansOperator::schema() const {
     using namespace schema;
@@ -114,7 +169,8 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
         context.throwIfCancelled();
     }
 
-    // Subsample for centroid fitting when raster is large.
+    // Subsample for centroid fitting when raster is large (unchanged
+    // operator policy: deterministic std::mt19937(42) shuffle).
     std::vector<size_t> sampleIdx;
     sampleIdx.reserve(nPix);
     for (size_t i = 0; i < nPix; ++i)
@@ -143,91 +199,42 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
         }
     }
 
-    context.reportProgress(0.45, "Running K-Means (k=" + std::to_string(k) + ")");
-    context.throwIfCancelled();
+    RsClassificationPipeline::Config cfg;
+    cfg.sourceRaster = QString::fromStdString(inputPath);
+    cfg.outputRaster = QString::fromStdString(outputPath);
+    cfg.bandIndices = QVector<int>(bands.begin(), bands.end());
+    cfg.trainX = trainX;
+    // KMeans fit() ignores y, but the pipeline requires a non-empty trainY
+    // when the backend is not fitted. Dummy zeros satisfy the check; the
+    // methodName deliberately stays lowercase so the pipeline's "KMeans"
+    // Hungarian cluster→class remap (supervised accuracy only) is skipped —
+    // there are no true class ids here and the operator's 1-based cluster
+    // ids must survive verbatim.
+    cfg.trainY = cv::Mat::zeros(nSamples, 1, CV_32S);
+    cfg.methodName = QStringLiteral("kmeans");
+    for (int id = 1; id <= k; ++id)
+        cfg.classColors[id] = classColor(id);
+    cfg.backend = std::make_unique<RsClassifierKMeans>(k);
 
-    cv::Mat labels;
-    cv::Mat centers;
-    const cv::TermCriteria term(cv::TermCriteria::MAX_ITER + cv::TermCriteria::EPS, 100, 1.0);
-    try {
-        cv::kmeans(trainX, k, labels, term, 3, cv::KMEANS_PP_CENTERS, centers);
-    } catch (const cv::Exception& e) {
-        throw RSOperatorError(ErrorCode::OpenCvError,
-                              std::string("cv::kmeans failed: ") + e.what());
+    // Bridge: pipeline fraction [0,1] → operator progress 0.40–0.98; cancel
+    // via the sink's return value so the pipeline removes a partially-written
+    // output before reporting Error::Cancelled.
+    const RsClassificationPipelineResult res = RsClassificationPipeline::run(
+        std::move(cfg),
+        [&context](double fraction, const QString& message) {
+            if (context.isCancelled())
+                return false;
+            // Preserve the operator's progress message style.
+            const std::string msg = message == QStringLiteral("Predicting tiles")
+                                        ? "Classifying"
+                                        : message.toStdString();
+            context.reportProgress(0.40 + 0.58 * fraction, msg);
+            return true;
+        });
+
+    if (!res.ok) {
+        throwPipelineError(res);
     }
-
-    if (centers.empty() || centers.rows != k || centers.cols != nFeat) {
-        throw RSOperatorError(ErrorCode::ComputationError, "K-Means produced empty centers");
-    }
-
-    context.reportProgress(0.65, "Assigning all pixels to clusters");
-    context.throwIfCancelled();
-
-    // Predict every pixel: nearest centroid (Euclidean), 1-based labels.
-    std::vector<uint8_t> classMap(nPix);
-    for (size_t pix = 0; pix < nPix; ++pix) {
-        int best = 0;
-        float bestDist = std::numeric_limits<float>::max();
-        for (int c = 0; c < k; ++c) {
-            float dist = 0.0f;
-            for (int f = 0; f < nFeat; ++f) {
-                const float d = bandData[static_cast<size_t>(f)][pix] -
-                                centers.at<float>(c, f);
-                dist += d * d;
-            }
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = c;
-            }
-        }
-        classMap[pix] = static_cast<uint8_t>(best + 1); // 1-based
-        if ((pix & 0xFFFF) == 0) {
-            context.throwIfCancelled();
-            context.reportProgress(0.65 + 0.25 * static_cast<double>(pix) / static_cast<double>(nPix),
-                                   "Classifying");
-        }
-    }
-
-    context.reportProgress(0.92, "Writing class map");
-
-    // Write Byte GeoTIFF with geotransform from source.
-    GDALDriverH driver = GDALGetDriverByName("GTiff");
-    if (!driver) {
-        throw RSOperatorError(ErrorCode::GdalError, "GTiff driver not available");
-    }
-
-    char** opts = nullptr;
-    opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
-    GDALDatasetH outDs = GDALCreate(driver, outputPath.c_str(), width, height, 1, GDT_Byte, opts);
-    CSLDestroy(opts);
-    if (!outDs) {
-        throw RSOperatorError(ErrorCode::GdalError, "Failed to create output: " + outputPath);
-    }
-
-    const auto gt = ds.geoTransform();
-    double gtArr[6] = {gt[0], gt[1], gt[2], gt[3], gt[4], gt[5]};
-    GDALSetGeoTransform(outDs, gtArr);
-    const QString proj = ds.projection();
-    if (!proj.isEmpty())
-        GDALSetProjection(outDs, proj.toUtf8().constData());
-
-    GDALRasterBandH outBand = GDALGetRasterBand(outDs, 1);
-    if (!outBand) {
-        GDALClose(outDs);
-        QFile::remove(QString::fromStdString(outputPath));
-        throw RSOperatorError(ErrorCode::GdalError, "Failed to get output band for class map");
-    }
-
-    const CPLErr err = GDALRasterIO(outBand, GF_Write, 0, 0, width, height,
-                                    classMap.data(), width, height, GDT_Byte, 0, 0);
-    if (err != CE_None) {
-        GDALClose(outDs);
-        QFile::remove(QString::fromStdString(outputPath));
-        throw RSOperatorError(ErrorCode::GdalError, "Failed to write class map");
-    }
-
-    GDALSetRasterNoDataValue(outBand, 0);
-    GDALClose(outDs);
 
     context.reportProgress(1.0, "K-Means complete");
 

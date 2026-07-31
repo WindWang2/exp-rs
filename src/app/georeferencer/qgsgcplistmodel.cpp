@@ -12,10 +12,7 @@
  ***************************************************************************/
 #include "qgsgcplistmodel.h"
 
-#include "qgis.h"
-#include "qgsgcplist.h"
-#include "qgsgcppoint.h"
-#include "qgsgeoreftransform.h"
+#include "rs_georeferencing_session.h"
 
 #include <QBrush>
 #include <QColor>
@@ -44,34 +41,33 @@ QgsGCPListModel::QgsGCPListModel( QObject *parent )
 {
 }
 
-void QgsGCPListModel::setGCPList( QgsGCPList *theGCPList )
+void QgsGCPListModel::setGcpsSource( RsGeoreferencingSession *session )
 {
   beginResetModel();
-  if ( mGCPList )
-    disconnect( mGCPList, nullptr, this, nullptr );
-  mGCPList = theGCPList;
-  if ( mGCPList )
+  if ( mSession )
+    disconnect( mSession, nullptr, this, nullptr );
+  mSession = session;
+  if ( mSession )
   {
-    connect( mGCPList, &QgsGCPList::changed, this, [this]() {
+    connect( mSession, &RsGeoreferencingSession::gcpsChanged, this, [this]() {
       beginResetModel();
       endResetModel();
     } );
+    connect( mSession, &RsGeoreferencingSession::fitChanged, this, [this]( const RsGeorefFitResult & ) {
+      if ( rowCount() > 0 )
+      {
+        emit dataChanged( index( 0, static_cast<int>( Column::ResidualDx ) ),
+                          index( rowCount() - 1, static_cast<int>( Column::TotalResidual ) ) );
+      }
+    } );
   }
   endResetModel();
-  updateResiduals();
-}
-
-void QgsGCPListModel::setGeorefTransform( QgsGeorefTransform *georefTransform )
-{
-  mGeorefTransform = georefTransform;
-  updateResiduals();
 }
 
 void QgsGCPListModel::setTargetCrs( const QgsCoordinateReferenceSystem &targetCrs, const QgsCoordinateTransformContext &context )
 {
   mTargetCrs = targetCrs;
   mTransformContext = context;
-  updateResiduals();
   if ( rowCount() > 0 )
   {
     emit dataChanged( index( 0, static_cast<int>( Column::DestMapX ) ),
@@ -90,43 +86,75 @@ void QgsGCPListModel::setCoordinateDisplayMode( bool sourceIsMap, bool residualI
   refreshAll();
 }
 
-void QgsGCPListModel::setRasterPaths( const QString &sourcePath, const QString &destPath )
+void QgsGCPListModel::setPixelConverters( std::function<QgsPointXY( const QgsPointXY & )> sourceToPixel,
+                                          std::function<QgsPointXY( const QgsPointXY & )> destToPixel )
 {
-  mHasSrcRaster = false;
-  mHasDstRaster = false;
-  if ( !sourcePath.isEmpty() )
-  {
-    mSrcCoords.loadRaster( sourcePath );
-    mHasSrcRaster = mSrcCoords.hasExistingGeoreference();
-  }
-  if ( !destPath.isEmpty() )
-  {
-    mDstCoords.loadRaster( destPath );
-    mHasDstRaster = mDstCoords.hasExistingGeoreference();
-  }
+  mSourceToPixel = std::move( sourceToPixel );
+  mDestToPixel = std::move( destToPixel );
   refreshAll();
   emit headerDataChanged( Qt::Horizontal, 0, columnCount() - 1 );
 }
 
+bool QgsGCPListModel::sourceHasExistingGeoreference() const
+{
+  return static_cast<bool>( mSourceToPixel );
+}
+
+int QgsGCPListModel::gcpRowCount() const
+{
+  return mSession ? mSession->gcps().size() : 0;
+}
+
+bool QgsGCPListModel::rowEnabled( int row ) const
+{
+  return mSession && row >= 0 && row < mSession->gcps().size() && mSession->gcps().at( row ).enabled;
+}
+
+QgsPointXY QgsGCPListModel::rowSourcePoint( int row ) const
+{
+  return ( mSession && row >= 0 && row < mSession->gcps().size() ) ? mSession->gcps().at( row ).source : QgsPointXY();
+}
+
+QgsPointXY QgsGCPListModel::rowDestinationPoint( int row ) const
+{
+  return ( mSession && row >= 0 && row < mSession->gcps().size() ) ? mSession->gcps().at( row ).destination : QgsPointXY();
+}
+
+QString QgsGCPListModel::rowPointType( int row ) const
+{
+  return ( mSession && row >= 0 && row < mSession->gcps().size() ) ? mSession->gcps().at( row ).pointType : QString();
+}
+
+QPointF QgsGCPListModel::rowResidual( int row ) const
+{
+  // Residuals come from the session's last fit. The invalid sentinel
+  // (unfit / disabled / failed back-transform) maps to (0,0), mirroring the
+  // legacy clearResiduals() display state.
+  if ( !mSession )
+    return QPointF( 0.0, 0.0 );
+  const RsGeorefFitResult &fit = mSession->lastFit();
+  if ( row >= 0 && row < fit.residuals.size() && rsGeorefResidualIsValid( fit.residuals.at( row ) ) )
+    return fit.residuals.at( row );
+  return QPointF( 0.0, 0.0 );
+}
+
 QgsPointXY QgsGCPListModel::toSourcePixel( const QgsPointXY &mapOrPixel ) const
 {
-  if ( mGeorefTransform && mGeorefTransform->hasExistingGeoreference() )
-    return mGeorefTransform->toSourcePixel( mapOrPixel );
-  if ( mHasSrcRaster )
-    return mSrcCoords.toColumnLine( mapOrPixel );
+  if ( mSourceToPixel )
+    return mSourceToPixel( mapOrPixel );
   return mapOrPixel;
 }
 
 QgsPointXY QgsGCPListModel::toDestPixel( const QgsPointXY &mapOrPixel ) const
 {
-  if ( mHasDstRaster )
-    return mDstCoords.toColumnLine( mapOrPixel );
+  if ( mDestToPixel )
+    return mDestToPixel( mapOrPixel );
   return QgsPointXY(); // unknown
 }
 
 int QgsGCPListModel::rowCount( const QModelIndex & ) const
 {
-  return mGCPList ? mGCPList->size() : 0;
+  return gcpRowCount();
 }
 
 int QgsGCPListModel::columnCount( const QModelIndex & ) const
@@ -136,25 +164,24 @@ int QgsGCPListModel::columnCount( const QModelIndex & ) const
 
 QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
 {
-  if ( !mGCPList || index.row() < 0 || index.row() >= mGCPList->size()
+  if ( index.row() < 0 || index.row() >= gcpRowCount()
        || index.column() < 0 || index.column() >= columnCount() )
     return QVariant();
 
   const Column column = static_cast<Column>( index.column() );
-  const QgsGcpPoint *point = mGCPList->at( index.row() );
-  if ( !point )
-    return QVariant();
 
-  const double dX = point->residual().x();
-  const double dY = point->residual().y();
+  const double dX = rowResidual( index.row() ).x();
+  const double dY = rowResidual( index.row() ).y();
   const double residual = std::sqrt( dX * dX + dY * dY );
   // Pixel residual: warn above 2 px; map residual: warn above 30 m
   const double warnThr = mResidualIsMap ? 30.0 : 2.0;
-  const bool warn = point->isEnabled() && residual >= warnThr;
+  const bool enabled = rowEnabled( index.row() );
+  const bool warn = enabled && residual >= warnThr;
   const QString dash = QStringLiteral( "—" );
 
-  const QgsPointXY destMap = point->destinationPoint();
-  const QgsPointXY srcPx = toSourcePixel( point->sourcePoint() );
+  const QgsPointXY sourcePt = rowSourcePoint( index.row() );
+  const QgsPointXY destMap = rowDestinationPoint( index.row() );
+  const QgsPointXY srcPx = toSourcePixel( sourcePt );
   const QgsPointXY dstPx = toDestPixel( destMap );
 
   switch ( role )
@@ -169,15 +196,15 @@ QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
         case Column::ID:
           return index.row() + 1;
         case Column::SourceMapX:
-          return formatFixed( point->sourcePoint().x(), 2 );
+          return formatFixed( sourcePt.x(), 2 );
         case Column::SourceMapY:
-          return formatFixed( point->sourcePoint().y(), 2 );
+          return formatFixed( sourcePt.y(), 2 );
         case Column::SourceCol:
-          return ( mHasSrcRaster || ( mGeorefTransform && mGeorefTransform->hasExistingGeoreference() ) )
+          return sourceHasExistingGeoreference()
                    ? formatFixed( srcPx.x(), 1 )
                    : dash;
         case Column::SourceRow:
-          return ( mHasSrcRaster || ( mGeorefTransform && mGeorefTransform->hasExistingGeoreference() ) )
+          return sourceHasExistingGeoreference()
                    ? formatFixed( srcPx.y(), 1 )
                    : dash;
         case Column::DestMapX:
@@ -185,23 +212,23 @@ QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
         case Column::DestMapY:
           return formatFixed( destMap.y(), 2 );
         case Column::DestCol:
-          return mHasDstRaster ? formatFixed( dstPx.x(), 1 ) : dash;
+          return mDestToPixel ? formatFixed( dstPx.x(), 1 ) : dash;
         case Column::DestRow:
-          return mHasDstRaster ? formatFixed( dstPx.y(), 1 ) : dash;
+          return mDestToPixel ? formatFixed( dstPx.y(), 1 ) : dash;
         case Column::ResidualDx:
-          if ( !point->isEnabled() )
+          if ( !enabled )
             return dash;
           return formatFixed( dX, 2, true );
         case Column::ResidualDy:
-          if ( !point->isEnabled() )
+          if ( !enabled )
             return dash;
           return formatFixed( dY, 2, true );
         case Column::TotalResidual:
-          if ( !point->isEnabled() )
+          if ( !enabled )
             return dash;
           return formatFixed( residual, 2 );
         case Column::PointType:
-          return point->pointType();
+          return rowPointType( index.row() );
         case Column::LastColumn:
           break;
       }
@@ -213,15 +240,15 @@ QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
       switch ( column )
       {
         case Column::SourceMapX:
-          return point->sourcePoint().x();
+          return sourcePt.x();
         case Column::SourceMapY:
-          return point->sourcePoint().y();
+          return sourcePt.y();
         case Column::DestMapX:
           return destMap.x();
         case Column::DestMapY:
           return destMap.y();
         case Column::PointType:
-          return point->pointType();
+          return rowPointType( index.row() );
         default:
           break;
       }
@@ -230,7 +257,7 @@ QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
 
     case Qt::CheckStateRole:
       if ( column == Column::Enabled )
-        return point->isEnabled() ? Qt::Checked : Qt::Unchecked;
+        return enabled ? Qt::Checked : Qt::Unchecked;
       break;
 
     case Qt::TextAlignmentRole:
@@ -252,83 +279,80 @@ QVariant QgsGCPListModel::data( const QModelIndex &index, int role ) const
       break;
 
     case static_cast<int>( Role::SourcePointRole ):
-      return point->sourcePoint();
+      return sourcePt;
   }
   return QVariant();
 }
 
 bool QgsGCPListModel::setData( const QModelIndex &index, const QVariant &value, int role )
 {
-  if ( !mGCPList || index.row() < 0 || index.row() >= mGCPList->size()
+  if ( !mSession )
+    return false;
+  if ( index.row() < 0 || index.row() >= gcpRowCount()
        || index.column() < 0 || index.column() >= columnCount() )
     return false;
 
-  QgsGcpPoint *point = mGCPList->at( index.row() );
-  if ( !point )
-    return false;
-
   const Column column = static_cast<Column>( index.column() );
+  const int row = index.row();
+
+  // Session mode (ADR 0020): forward edits to the session's granular
+  // mutations. The session's gcpsChanged() resets the model and refit()
+  // refreshes the residual columns; the per-cell dataChanged below keeps
+  // the widget's pointEnabled / pointTypeChanged signals working.
   switch ( column )
   {
     case Column::Enabled:
       if ( role == Qt::CheckStateRole )
       {
-        const bool checked = static_cast<Qt::CheckState>( value.toInt() ) == Qt::Checked;
-        point->setEnabled( checked );
+        mSession->setGcpEnabled( row, static_cast<Qt::CheckState>( value.toInt() ) == Qt::Checked );
         emit dataChanged( index, index, { Qt::CheckStateRole, Qt::DisplayRole } );
-        emit pointEnabled( point, index.row() );
-        mGCPList->notifyPointsMutated();
         return true;
       }
-      break;
+      return false;
 
     case Column::SourceMapX:
     case Column::SourceMapY:
     {
-      QgsPointXY sourcePoint = point->sourcePoint();
+      QgsPointXY sourcePoint = rowSourcePoint( row );
       if ( column == Column::SourceMapX )
         sourcePoint.setX( value.toDouble() );
       else
         sourcePoint.setY( value.toDouble() );
-      point->setSourcePoint( sourcePoint );
+      mSession->setGcpSource( row, sourcePoint );
       emit dataChanged( index, index );
-      mGCPList->notifyPointsMutated();
       return true;
     }
 
     case Column::DestMapX:
     case Column::DestMapY:
     {
-      QgsPointXY destinationPoint = point->destinationPoint();
+      QgsPointXY destinationPoint = rowDestinationPoint( row );
       if ( column == Column::DestMapX )
         destinationPoint.setX( value.toDouble() );
       else
         destinationPoint.setY( value.toDouble() );
-      point->setDestinationPoint( destinationPoint );
+      mSession->setGcpDestination( row, destinationPoint );
       emit dataChanged( index, index );
-      mGCPList->notifyPointsMutated();
       return true;
     }
 
     case Column::PointType:
       if ( role == Qt::EditRole || role == Qt::DisplayRole )
       {
-        point->setPointType( value.toString() );
+        mSession->setGcpPointType( row, value.toString() );
         emit dataChanged( index, index, { Qt::EditRole, Qt::DisplayRole } );
-        mGCPList->notifyPointsMutated();
         return true;
       }
-      break;
+      return false;
 
     default:
       return false;
   }
-  return false;
 }
 
 Qt::ItemFlags QgsGCPListModel::flags( const QModelIndex &index ) const
 {
-  if ( !mGCPList || index.row() < 0 || index.row() >= mGCPList->size()
+  if ( index.row() < 0 || index.row() >= gcpRowCount()
        || index.column() < 0 || index.column() >= columnCount() )
     return QAbstractTableModel::flags( index );
 
@@ -401,31 +425,12 @@ QVariant QgsGCPListModel::headerData( int section, Qt::Orientation orientation, 
   return QVariant();
 }
 
-Qgis::RenderUnit QgsGCPListModel::residualUnit() const
-{
-  if ( mResidualIsMap )
-    return Qgis::RenderUnit::MapUnits;
-  return Qgis::RenderUnit::Pixels;
-}
-
 void QgsGCPListModel::refreshAll()
 {
   if ( rowCount() <= 0 )
     return;
   emit dataChanged( index( 0, 0 ),
                     index( rowCount() - 1, columnCount() - 1 ) );
-}
-
-void QgsGCPListModel::updateResiduals()
-{
-  if ( !mGCPList )
-    return;
-  mGCPList->updateResiduals( mGeorefTransform, mTargetCrs, mTransformContext, residualUnit() );
-  if ( rowCount() > 0 )
-  {
-    emit dataChanged( index( 0, static_cast<int>( Column::ResidualDx ) ),
-                      index( rowCount() - 1, static_cast<int>( Column::TotalResidual ) ) );
-  }
 }
 
 QString QgsGCPListModel::formatNumber( double number )

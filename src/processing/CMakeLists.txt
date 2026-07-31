@@ -31,6 +31,8 @@ add_library(sicnu_processing SHARED
     framework/qgs_processing_provider_adapter.h
     framework/atomic_algorithm_adapter.cpp
     framework/atomic_algorithm_registry.cpp
+    framework/json_params_converter.h
+    framework/tool_call_dispatcher.cpp
     ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator_context.cpp
     ${CMAKE_SOURCE_DIR}/src/operators/framework/rs_operator_error.cpp
     framework/python_algorithm_adapter.cpp
@@ -181,7 +183,6 @@ endif()
 # and resolves symbols when final targets also link sicnu_task_center.
 add_library(sicnu_task_center STATIC
     framework/task_center.cpp
-    framework/atomic_algorithm_registry_task_center.cpp
     framework/agent_workflow_executor.cpp
     # Task Center seam for OutputCommitter — kept out of sicnu_processing so
     # that library does not need JobEngine / TaskCenter link deps.

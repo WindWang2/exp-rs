@@ -25,6 +25,7 @@
 #include "qgsgcplistwidget.h"
 #include "qgsgeoreferencermainwindow.h"
 #include "qgsmapcanvas.h"
+#include "rs_georeferencing_session.h"
 #include "rs_georef_mode_toggle.h"
 #include "rs_georef_params_panel.h"
 #include "rs_twincanvas_sync_controller.h"
@@ -204,86 +205,78 @@ TEST_CASE( "RsGeorefModeToggle: setMode with same value doesn't emit signal",
 }
 
 // ============================================================================
-// Signal Emissions: QgsGCPList
+// Signal Emissions: RsGeoreferencingSession GCP mutations (ADR 0020)
 // ============================================================================
 
-TEST_CASE( "QgsGCPList: appendPoint emits changed signal",
+TEST_CASE( "Session: addGcp emits gcpsChanged signal",
            "[hooks][signals][gcplist]" )
 {
-  QgsGCPList list;
-  QSignalSpy spy( &list, &QgsGCPList::changed );
+  RsGeoreferencingSession session;
+  QSignalSpy spy( &session, &RsGeoreferencingSession::gcpsChanged );
   REQUIRE( spy.isValid() );
 
-  QgsGcpPoint p( QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ),
-                 QgsCoordinateReferenceSystem( "EPSG:32650" ), true );
-  list.appendPoint( p );
+  RsGeorefGcpPair pair{ QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ),
+                        true, QString() };
+  session.addGcp( pair );
   REQUIRE( spy.count() == 1 );
 }
 
-TEST_CASE( "QgsGCPList: removePointAt emits changed signal",
+TEST_CASE( "Session: removeGcpAt emits gcpsChanged signal",
            "[hooks][signals][gcplist]" )
 {
-  QgsGCPList list;
-  QSignalSpy spy( &list, &QgsGCPList::changed );
+  RsGeoreferencingSession session;
+  QSignalSpy spy( &session, &RsGeoreferencingSession::gcpsChanged );
 
-  // Add a point first
-  QgsGcpPoint p( QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ),
-                 QgsCoordinateReferenceSystem( "EPSG:32650" ), true );
-  list.appendPoint( p );
+  RsGeorefGcpPair pair{ QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ),
+                        true, QString() };
+  session.addGcp( pair );
   REQUIRE( spy.count() == 1 );
 
-  // Remove the point
-  list.removePointAt( 0 );
+  session.removeGcpAt( 0 );
   REQUIRE( spy.count() == 2 );
 }
 
-TEST_CASE( "QgsGCPList: clearPoints emits changed signal",
+TEST_CASE( "Session: clearGcps emits gcpsChanged signal",
            "[hooks][signals][gcplist]" )
 {
-  QgsGCPList list;
-  QSignalSpy spy( &list, &QgsGCPList::changed );
+  RsGeoreferencingSession session;
+  QSignalSpy spy( &session, &RsGeoreferencingSession::gcpsChanged );
 
-  // Add multiple points
   for ( int i = 0; i < 5; ++i )
   {
-    QgsGcpPoint p( QgsPointXY( i * 10, i * 20 ), QgsPointXY( i * 100, i * 200 ),
-                   QgsCoordinateReferenceSystem( "EPSG:32650" ), true );
-    list.appendPoint( p );
+    RsGeorefGcpPair pair{ QgsPointXY( i * 10, i * 20 ), QgsPointXY( i * 100, i * 200 ),
+                          true, QString() };
+    session.addGcp( pair );
   }
   REQUIRE( spy.count() == 5 );
 
-  // clearPoints should emit signal
-  list.clearPoints();
+  session.clearGcps();
   REQUIRE( spy.count() == 6 );
 }
 
-TEST_CASE( "QgsGCPList: clearPoints on empty list does not emit signal",
+TEST_CASE( "Session: clearGcps on empty does not emit signal",
            "[hooks][signals][gcplist]" )
 {
-  QgsGCPList list;
-  QSignalSpy spy( &list, &QgsGCPList::changed );
+  RsGeoreferencingSession session;
+  QSignalSpy spy( &session, &RsGeoreferencingSession::gcpsChanged );
 
-  // clearPoints on empty list should not emit signal
-  list.clearPoints();
+  session.clearGcps();
   REQUIRE( spy.count() == 0 );
 }
 
-TEST_CASE( "QgsGCPList: multiple operations emit correct number of signals",
+TEST_CASE( "Session: multiple operations emit correct number of signals",
            "[hooks][signals][gcplist]" )
 {
-  QgsGCPList list;
-  QSignalSpy spy( &list, &QgsGCPList::changed );
+  RsGeoreferencingSession session;
+  QSignalSpy spy( &session, &RsGeoreferencingSession::gcpsChanged );
 
-  // Complex sequence of operations
-  QgsGcpPoint p1( QgsPointXY( 0, 0 ), QgsPointXY( 0, 0 ),
-                  QgsCoordinateReferenceSystem( "EPSG:4326" ), true );
-  QgsGcpPoint p2( QgsPointXY( 10, 10 ), QgsPointXY( 100, 100 ),
-                  QgsCoordinateReferenceSystem( "EPSG:4326" ), true );
+  RsGeorefGcpPair p1{ QgsPointXY( 0, 0 ), QgsPointXY( 0, 0 ), true, QString() };
+  RsGeorefGcpPair p2{ QgsPointXY( 10, 10 ), QgsPointXY( 100, 100 ), true, QString() };
 
-  list.appendPoint( p1 );      // 1
-  list.appendPoint( p2 );      // 2
-  list.removePointAt( 0 );     // 3
-  list.clearPoints();          // 4
+  session.addGcp( p1 );      // 1
+  session.addGcp( p2 );      // 2
+  session.removeGcpAt( 0 );  // 3
+  session.clearGcps();       // 4
 
   REQUIRE( spy.count() == 4 );
 }
@@ -385,38 +378,31 @@ TEST_CASE( "QgsGCPListWidget: keyPressEvent handles Delete key",
 {
   ensureApp();
   QgsGCPListWidget widget;
-  QgsGCPList list;
-  widget.setGCPList( &list );
+  RsGeoreferencingSession session;
+  widget.setGcpsSource( &session );
 
   // Add a point to delete
-  QgsGcpPoint p( QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ),
-                 QgsCoordinateReferenceSystem( "EPSG:32650" ), true );
-  list.appendPoint( p );
+  RsGeorefGcpPair pair{ QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ), true, QString() };
+  session.addGcp( pair );
 
   QSignalSpy spy( &widget, &QgsGCPListWidget::deleteRowsRequested );
   REQUIRE( spy.isValid() );
-
-  // Note: keyPressEvent is protected, so we test it indirectly through
-  // the widget's public interface and signal emissions.
-  // The deleteRowsRequested signal is emitted when Delete key is pressed
-  // with selected rows.
 }
 
-TEST_CASE( "QgsGCPListWidget: setGCPList updates model",
+TEST_CASE( "QgsGCPListWidget: setGcpsSource updates model",
            "[hooks][virtual][gcplistwidget]" )
 {
   ensureApp();
   QgsGCPListWidget widget;
-  QgsGCPList list;
+  RsGeoreferencingSession session;
 
-  widget.setGCPList( &list );
+  widget.setGcpsSource( &session );
   REQUIRE( widget.model() != nullptr );
   REQUIRE( widget.model()->rowCount() == 0 );
 
-  // Add points and verify model updates
-  QgsGcpPoint p( QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ),
-                 QgsCoordinateReferenceSystem( "EPSG:32650" ), true );
-  list.appendPoint( p );
+  // Add a point and verify model updates via gcpsChanged
+  RsGeorefGcpPair pair{ QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ), true, QString() };
+  session.addGcp( pair );
 
   // Model should reflect the change
   REQUIRE( widget.model()->rowCount() == 1 );
@@ -431,14 +417,11 @@ TEST_CASE( "QgsGCPListWidget: pointEnabled signal emission",
 {
   ensureApp();
   QgsGCPListWidget widget;
-  QgsGCPList list;
-  widget.setGCPList( &list );
+  RsGeoreferencingSession session;
+  widget.setGcpsSource( &session );
 
   QSignalSpy spy( &widget, &QgsGCPListWidget::pointEnabled );
   REQUIRE( spy.isValid() );
-
-  // The signal is emitted when checkbox state changes in the model
-  // This requires user interaction in real usage, but we can verify the signal exists
 }
 
 TEST_CASE( "QgsGCPListWidget: pointTypeChanged signal emission",
@@ -446,8 +429,8 @@ TEST_CASE( "QgsGCPListWidget: pointTypeChanged signal emission",
 {
   ensureApp();
   QgsGCPListWidget widget;
-  QgsGCPList list;
-  widget.setGCPList( &list );
+  RsGeoreferencingSession session;
+  widget.setGcpsSource( &session );
 
   QSignalSpy spy( &widget, &QgsGCPListWidget::pointTypeChanged );
   REQUIRE( spy.isValid() );
@@ -458,8 +441,8 @@ TEST_CASE( "QgsGCPListWidget: deleteRowsRequested signal emission",
 {
   ensureApp();
   QgsGCPListWidget widget;
-  QgsGCPList list;
-  widget.setGCPList( &list );
+  RsGeoreferencingSession session;
+  widget.setGcpsSource( &session );
 
   QSignalSpy spy( &widget, &QgsGCPListWidget::deleteRowsRequested );
   REQUIRE( spy.isValid() );
@@ -526,7 +509,7 @@ TEST_CASE( "Hook integration: GCP list changes trigger recompute",
   auto *panel = w.findChild<RsGeorefParamsPanel *>();
   REQUIRE( panel != nullptr );
 
-  // The recomputeFit() slot is connected to QgsGCPList::changed
+  // The session's gcpsChanged signal drives refit → fitChanged
   // When GCPs change, the fit should be recomputed
   // This is tested indirectly through signal emissions
 
@@ -586,27 +569,24 @@ TEST_CASE( "Hook edge case: mode toggle rapid switching",
   REQUIRE( spy.count() == initialCount + 50 );
 }
 
-TEST_CASE( "Hook edge case: GCP list with many points",
+TEST_CASE( "Hook edge case: session with many points",
            "[hooks][edgecase][gcplist]" )
 {
-  QgsGCPList list;
-  QSignalSpy spy( &list, &QgsGCPList::changed );
+  RsGeoreferencingSession session;
+  QSignalSpy spy( &session, &RsGeoreferencingSession::gcpsChanged );
 
-  // Add many points
   for ( int i = 0; i < 1000; ++i )
   {
-    QgsGcpPoint p( QgsPointXY( i, i ), QgsPointXY( i * 10, i * 10 ),
-                   QgsCoordinateReferenceSystem( "EPSG:4326" ), true );
-    list.appendPoint( p );
+    RsGeorefGcpPair pair{ QgsPointXY( i, i ), QgsPointXY( i * 10, i * 10 ), true, QString() };
+    session.addGcp( pair );
   }
 
   REQUIRE( spy.count() == 1000 );
-  REQUIRE( list.size() == 1000 );
+  REQUIRE( session.gcps().size() == 1000 );
 
-  // Clear all using clearPoints()
-  list.clearPoints();
+  session.clearGcps();
   REQUIRE( spy.count() == 1001 );
-  REQUIRE( list.size() == 0 );
+  REQUIRE( session.gcps().size() == 0 );
 }
 
 // ============================================================================
@@ -662,35 +642,33 @@ TEST_CASE( "Coverage: RsGeorefModeToggle all mode values",
   // All mode values covered
 }
 
-TEST_CASE( "Coverage: QgsGCPList all operations",
+TEST_CASE( "Coverage: session all operations",
            "[hooks][coverage][gcplist]" )
 {
-  QgsGCPList list;
-  QSignalSpy spy( &list, &QgsGCPList::changed );
+  RsGeoreferencingSession session;
+  QSignalSpy spy( &session, &RsGeoreferencingSession::gcpsChanged );
 
-  // Operation 1: appendPoint
-  QgsGcpPoint p1( QgsPointXY( 0, 0 ), QgsPointXY( 0, 0 ),
-                  QgsCoordinateReferenceSystem( "EPSG:4326" ), true );
-  list.appendPoint( p1 );
+  // Operation 1: addGcp
+  RsGeorefGcpPair p1{ QgsPointXY( 0, 0 ), QgsPointXY( 0, 0 ), true, QString() };
+  session.addGcp( p1 );
   REQUIRE( spy.count() == 1 );
 
-  // Operation 2: appendPoint (second point)
-  QgsGcpPoint p2( QgsPointXY( 10, 10 ), QgsPointXY( 100, 100 ),
-                  QgsCoordinateReferenceSystem( "EPSG:4326" ), true );
-  list.appendPoint( p2 );
+  // Operation 2: addGcp (second point)
+  RsGeorefGcpPair p2{ QgsPointXY( 10, 10 ), QgsPointXY( 100, 100 ), true, QString() };
+  session.addGcp( p2 );
   REQUIRE( spy.count() == 2 );
 
-  // Operation 3: removePointAt
-  list.removePointAt( 0 );
+  // Operation 3: removeGcpAt
+  session.removeGcpAt( 0 );
   REQUIRE( spy.count() == 3 );
 
-  // Operation 4: clearPoints
-  list.clearPoints();
+  // Operation 4: clearGcps
+  session.clearGcps();
   REQUIRE( spy.count() == 4 );
 
-  // Operation 5: clearPoints on empty list (no signal)
-  list.clearPoints();
-  REQUIRE( spy.count() == 4 ); // No change
+  // Operation 5: clearGcps on empty (no signal)
+  session.clearGcps();
+  REQUIRE( spy.count() == 4 );
 
   // All operations covered
 }

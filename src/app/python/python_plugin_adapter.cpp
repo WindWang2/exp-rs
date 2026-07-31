@@ -89,6 +89,10 @@ bool PythonPluginAdapter::initialize( QgsMapCanvas *canvas, QgsLayerTreeView *la
     // Attach UI RPC Proxy Facade
     QMenu *pluginMenu = m_appInterface ? m_appInterface->pluginMenu() : nullptr;
     m_uiProxy = std::make_unique<PythonAppInterfaceProxy>( m_workerNode->server, pluginMenu );
+    if ( m_appInterface && m_appInterface->activeViewHost() )
+    {
+        m_uiProxy->setActiveViewHost( m_appInterface->activeViewHost() );
+    }
 
     // Send RPC load_plugin request
     QJsonObject params;

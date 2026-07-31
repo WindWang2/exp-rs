@@ -1,44 +1,55 @@
-# Task Plan: Algorithm Engine Modularization & TaskCenter Alignment Map
+# Task Plan: Code Review #109–#112(origin/master...HEAD)与发现修复
 
 ## Goal
-Chart and specify the architectural decision map for Algorithm Engine modularization and `TaskCenter` execution alignment, defining provider adapter seams, heterogeneous resource throttling, zero-copy shared memory transports, and reactive DAG task pipeline scheduling.
+对本地 `master` 领先 `origin/master` 的 4 个 commit(#109–#112)执行双轴 code review(Standards + Spec),并修复全部审查发现。
 
 ## Current Phase
-Phase 5: Delivery
+Phase 4: Delivery
 
 ## Phases
 
-### Phase 1: Wayfinder Scope & Destination Charting
-- [x] Name the destination: Architectural Specification & Seam Decision Map for Algorithm Engine Modularization & TaskCenter Alignment
-- [x] Create Wayfinder Map file [MAP_algorithm_engine_modularization.md](file:///home/kevin/projects/exp-rs/docs/tickets/MAP_algorithm_engine_modularization.md)
-- [x] Create [TICKET_00_destination.md](file:///home/kevin/projects/exp-rs/docs/tickets/TICKET_00_destination.md)
+### Phase 1: 双轴并行审查
+- [x] 固定基准点 `origin/master`(4 commit,#109–#112;#108 已在 origin 上)
+- [x] 拉取 GitHub issue #109–#112 作为 spec 来源
+- [x] Standards 子代理:CLAUDE.md 文档标准 + Fowler smell 基线 → 0 硬违规,4 项 judgement call
+- [x] Spec 子代理:4 份 issue 验收标准对照 → 1 缺失、2 scope creep、2 实现偏差
 - **Status:** complete
 
-### Phase 2: Frontier Decision Mapping & Grilling
-- [x] Decision 1: Provider Auto-Registration Seam (`AlgorithmProviderAdapter`) -> [TICKET_01](file:///home/kevin/projects/exp-rs/docs/tickets/TICKET_01_algorithm_provider_adapter_seam.md)
-- [x] Decision 2: Heterogeneous Resource Throttling (`ProviderResourceProfile`) -> [TICKET_02](file:///home/kevin/projects/exp-rs/docs/tickets/TICKET_02_heterogeneous_resource_throttling.md)
-- [x] Decision 3: Output Artifact & Shared Memory Seam (`OutputCommitter`) -> [TICKET_03](file:///home/kevin/projects/exp-rs/docs/tickets/TICKET_03_output_committer_shared_memory_seam.md)
+### Phase 2: 核心修复(commit `ab4fa3969e`)
+- [x] `workspace_snapshot.cpp` 提取单一 `assetKindToString()`(消除重复 switch,未识别值回落 `"Unknown"`)
+- [x] `DataAssetInfo::kind` 改为 `std::optional<data::AssetKind>`(默认值不再误标为 Raster,JSON 恢复 `"Unknown"`)
+- [x] `rs_pipeline_runner.cpp` 轮询循环迁移到 `TaskCenter::waitForPipeline()`(#110 缺口 + 消除零调用者 API)
+- [x] `task_center.h` 新增共享常量 `kToolCallTimeoutMessage`(消除两处重复字面量)
+- [x] `test_workspace_snapshot.cpp` 新增 Unknown 默认值 SECTION
+- **Status:** complete(由用户会话提交并推送为 `ab4fa3969e`)
+
+### Phase 3: Scope Creep 还原(commit `54412c0636`)
+- [x] 恢复 #109 `createHelper` 横幅 `print("SICNU helper loaded…")`
+- [x] `agent_workflow_executor.cpp` 还原超时语义:仅终态失败设 `status="error"`;超时只设 `errorMessage`
+- [x] `llm_streaming_client.cpp` 区分终态失败(原始 errorMessage)与超时(共享常量)
 - **Status:** complete
 
-### Phase 3: TaskCenter Native DAG Engine Implementation
-- [x] Implement native `submitPipeline` & `submitPipelineJson` in `TaskCenter`
-- [x] Refactor `WorkflowSessionController` into reactive UI observer
-- [x] Record ADR 0016 in `CONTEXT.md`
+### Phase 4: Verification & Delivery
+- [x] 构建并运行 6 个测试套件全绿(见 progress.md)
+- [x] 提交 scope creep 还原为 `54412c0636`
+- [x] 同步规划文件
 - **Status:** complete
 
-### Phase 4: Verification & Ticket Indexing
-- [x] Create ticket files in `docs/tickets/`
-- [x] Link all closed decision tickets in Wayfinder Map
-- **Status:** complete
-
-### Phase 5: Delivery
-- [x] Deliver Wayfinder Map and decision tickets to user
-- **Status:** complete
+## Key Questions
+1. `AssetKind` 默认值如何修复而不波及全域枚举?
+   *Resolution*: 不动 `src/data/asset_types.h` 的 `AssetKind`(6+ 处 switch 使用),在 agent 层用 `std::optional` 表达"未设置"。
+2. runner 循环有进度上报副作用,如何迁移到 wait helper?
+   *Resolution*: 外层循环保留进度上报,每轮调用 `waitForPipeline(pipelineId, kPipelinePollInterval)` 委托轮询/休眠机制。
+3. 两处 scope creep 是否还原?
+   *Resolution*: 用户确认还原。#110 超时不再补 `status="error"`(恢复 #110 前契约);#109 横幅 print 恢复。
 
 ## Decisions Made
-| Decision | Ticket Link | Summary |
-|----------|-------------|---------|
-| Destination Scope | [TICKET-00](file:///home/kevin/projects/exp-rs/docs/tickets/TICKET_00_destination.md) | Locked Architectural Specification & Seam Decision Map. |
-| Provider Adapter Seam | [TICKET-01](file:///home/kevin/projects/exp-rs/docs/tickets/TICKET_01_algorithm_provider_adapter_seam.md) | Uniform `AlgorithmProviderAdapter` interface for provider discovery. |
-| Resource Throttling | [TICKET-02](file:///home/kevin/projects/exp-rs/docs/tickets/TICKET_02_heterogeneous_resource_throttling.md) | Provider-aware `ResourceThrottler` for in-process, IPC pool, and sub-processes. |
-| Output Committer | [TICKET-03](file:///home/kevin/projects/exp-rs/docs/tickets/TICKET_03_output_committer_shared_memory_seam.md) | Unified `OutputCommitter` handling zero-copy shared memory and `DerivationRecord` provenance. |
+| Decision | Rationale |
+|----------|-----------|
+| `std::optional<AssetKind>` 而非新增 `Unknown` 枚举值 | 避免修改共享域枚举波及 data_manager_panel / qgis_display_manager 等 6+ 处 switch |
+| `waitForPipeline` 小超时嵌套外层进度循环 | 保留 CLI 进度上报行为,同时消除手工 getPipelineInfo+sleep_for 轮询 |
+| 共享 `kToolCallTimeoutMessage` 常量 | 两个 tool-call 调用点(executor std::string / llm QString)统一超时文案 |
+| 超时与终态失败分支分离 | 消除"空 errorMessage ⇒ 超时"推断在残留错误信息下的误报边界 |
+
+---
+*上一任务(CollectionImportService Deepening,ADR 0018)已于 2026-07-29 全部交付,详见 git 历史与 progress.md。*

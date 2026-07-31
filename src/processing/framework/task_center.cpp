@@ -5,8 +5,10 @@
 #include <thread>
 #include <algorithm>
 #include <chrono>
+#include "framework/json_params_converter.h"
 #include "jobs/job_engine.h"
 #include "workflow/workflow_definition.h"
+#include "workflow/placeholder_grammar.h"
 
 namespace sicnu {
 
@@ -141,25 +143,10 @@ Json::Value TaskCenter::variantMapToJsonParams( const QVariantMap &params )
 
 QVariantMap TaskCenter::jsonParamsToVariantMap( const Json::Value &params )
 {
-    QVariantMap variantMap;
-    if ( !params.isObject() )
-        return variantMap;
-
-    for ( const auto &key : params.getMemberNames() )
-    {
-        const auto &val = params[key];
-        if ( val.isString() )
-            variantMap[QString::fromStdString( key )] = QString::fromStdString( val.asString() );
-        else if ( val.isBool() )
-            variantMap[QString::fromStdString( key )] = val.asBool();
-        else if ( val.isInt() || val.isUInt() || val.isInt64() || val.isUInt64() )
-            variantMap[QString::fromStdString( key )] = static_cast<qint64>( val.asInt64() );
-        else if ( val.isNumeric() )
-            variantMap[QString::fromStdString( key )] = val.asDouble();
-        else
-            variantMap[QString::fromStdString( key )] = QString::fromStdString( val.toStyledString() );
-    }
-    return variantMap;
+    // Shared converter — see json_params_converter.h. Kept as a static wrapper
+    // for existing callers; both TaskCenter and ToolCallDispatcher use the
+    // same conversion so typed handoff cannot drift apart.
+    return sicnu::processing::jsonParamsToVariantMap( params );
 }
 
 void TaskCenter::queueTaskAddedLocked( long taskId )
@@ -212,35 +199,44 @@ void TaskCenter::applyPlaceholdersForTask( long taskId )
     QVariantMap &pMap = m_tasks[taskId].parameterMap;
     for ( auto pIt = pMap.begin(); pIt != pMap.end(); ++pIt )
     {
-        // Only string parameters participate in $step.output substitution.
-        // Converting numbers to QString here would break integer JobEngine params.
+        // Only string parameters participate in placeholder substitution.
         if ( pIt.value().typeId() != QMetaType::QString )
             continue;
 
-        QString valStr = pIt.value().toString();
-        for ( long parentId : m_tasks[taskId].parentTaskIds )
-        {
-            if ( !m_tasks.contains( parentId ) )
-                continue;
-
-            QString pOut = m_tasks[parentId].outputLayerPath;
-            if ( pOut.isEmpty()
-                 && m_tasks[parentId].resultPayload.isMember( "output" )
-                 && m_tasks[parentId].resultPayload["output"].isString() )
+        std::string rawVal = pIt.value().toString().toStdString();
+        std::string substituted = sicnu::workflow::substitutePlaceholders( rawVal, [&]( const sicnu::workflow::PlaceholderRef &ref ) -> std::string {
+            for ( long parentId : m_tasks[taskId].parentTaskIds )
             {
-                pOut = QString::fromStdString( m_tasks[parentId].resultPayload["output"].asString() );
-            }
+                if ( !m_tasks.contains( parentId ) )
+                    continue;
 
-            const QString parentStepId = m_tasks[parentId].stepId;
-            if ( !parentStepId.isEmpty() )
-            {
-                valStr.replace( QString( QStringLiteral( "$%1.output" ) ).arg( parentStepId ), pOut );
-                valStr.replace( QString( QStringLiteral( "${%1.output}" ) ).arg( parentStepId ), pOut );
+                const QString parentStepId = m_tasks[parentId].stepId;
+                bool isMatch = false;
+                if ( !parentStepId.isEmpty() && ref.stepId == parentStepId.toStdString() )
+                {
+                    isMatch = true;
+                }
+                else if ( ref.parentTaskId == parentId || ref.isParentKeyword )
+                {
+                    isMatch = true;
+                }
+
+                if ( isMatch )
+                {
+                    QString pOut = m_tasks[parentId].outputLayerPath;
+                    if ( pOut.isEmpty()
+                         && m_tasks[parentId].resultPayload.isMember( "output" )
+                         && m_tasks[parentId].resultPayload["output"].isString() )
+                    {
+                        pOut = QString::fromStdString( m_tasks[parentId].resultPayload["output"].asString() );
+                    }
+                    return pOut.toStdString();
+                }
             }
-            valStr.replace( QString( QStringLiteral( "${task.%1.output}" ) ).arg( parentId ), pOut );
-            valStr.replace( QStringLiteral( "${task.parent.output}" ), pOut );
-        }
-        *pIt = valStr;
+            return ref.rawRef;
+        } );
+
+        *pIt = QString::fromStdString( substituted );
     }
 
     // Refresh detected output path after substitution
@@ -342,38 +338,6 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
     flushPendingLaunches();
     flushPendingSignals();
     return id;
-}
-
-long TaskCenter::enqueueToolCall( const std::string &jsonToolCall, bool autoLoad, TaskPriority priority )
-{
-    Json::CharReaderBuilder builder;
-    Json::Value root;
-    std::string errs;
-    std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-
-    std::string toolName = "unknown_tool";
-    QVariantMap variantParams;
-
-    if ( reader->parse( jsonToolCall.c_str(), jsonToolCall.c_str() + jsonToolCall.length(), &root, &errs ) )
-    {
-        if ( root.isMember( "name" ) )
-            toolName = root["name"].asString();
-        else if ( root.isMember( "function" ) && root["function"].isMember( "name" ) )
-            toolName = root["function"]["name"].asString();
-
-        Json::Value paramsNode;
-        if ( root.isMember( "parameters" ) )
-            paramsNode = root["parameters"];
-        else if ( root.isMember( "function" ) && root["function"].isMember( "arguments" ) )
-            paramsNode = root["function"]["arguments"];
-
-        if ( paramsNode.isObject() )
-        {
-            variantParams = jsonParamsToVariantMap( paramsNode );
-        }
-    }
-
-    return enqueueTask( QString::fromStdString( toolName ), variantParams, autoLoad, priority, {}, true );
 }
 
 long TaskCenter::submitJob( const sicnu::jobs::JobRequest &request )
@@ -809,6 +773,24 @@ bool TaskCenter::cancelTask( long taskId )
     if ( !jobId.empty() )
         sicnu::jobs::JobEngine::instance().cancel( jobId );
     return true;
+}
+
+bool TaskCenter::cancelPipeline( long pipelineId )
+{
+    if ( pipelineId < 0 )
+        return false;
+
+    PipelineExecutionInfo pipeInfo = getPipelineInfo( pipelineId );
+    if ( pipeInfo.pipelineId < 0 )
+        return false;
+
+    bool canceledAny = false;
+    for ( long taskId : pipeInfo.stepToTaskId.values() )
+    {
+        if ( cancelTask( taskId ) )
+            canceledAny = true;
+    }
+    return canceledAny;
 }
 
 bool TaskCenter::pauseTask( long taskId )

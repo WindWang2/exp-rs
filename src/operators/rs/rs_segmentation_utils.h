@@ -42,11 +42,17 @@ void writeLabelGeoTiff(const std::string& outputPath,
                        const double gt[6],
                        const std::string& projectionWkt);
 
-/** Write Byte class map GeoTIFF. */
-void writeByteGeoTiff(const std::string& outputPath,
-                      const std::vector<uint8_t>& data,
-                      int width, int height,
-                      const double gt[6],
-                      const std::string& projectionWkt);
+/**
+ * Write single-band class map GeoTIFF from Int32 class ids (GDAL converts
+ * to the band dtype). Caller picks \a type with the pipeline's escalation
+ * policy (Byte only when all class ids fit 0..255 — never a silent clamp).
+ * NoData is 0 (unclassified).
+ */
+void writeClassGeoTiff(const std::string& outputPath,
+                       const std::vector<int32_t>& data,
+                       int width, int height,
+                       const double gt[6],
+                       const std::string& projectionWkt,
+                       GDALDataType type);
 
 } // namespace sicnu::operators::rs::segutil

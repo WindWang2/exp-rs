@@ -1,5 +1,16 @@
 /***************************************************************************
  * rs_obia_classify_operator.cpp  —  Object-based classification pipeline
+ *
+ * ADR 0019 slice S4 — the segmentation front-end (grid/quantize via
+ * segutil, per-segment mean spectra, ROI majority labeling, segment-paint
+ * output) stays here: it is genuinely segment-level and does not fit the
+ * pixel pipeline. Everything downstream of labeling is re-based on the
+ * analysis layer exactly like the supervised adapter (S3): backends are
+ * constructed via RsClassifierSvm / RsClassifierNormalBayes (one
+ * construction path, no hyperparameter drift), the class-field fallback
+ * comes from RsTrainingDataExtraction::classFieldIndex, and the class-map
+ * write follows the pipeline's dtype escalation + NoData policy (class ids
+ * come from a user vector field and can exceed 255 — no silent clamp).
  ***************************************************************************/
 #include "rs_obia_classify_operator.h"
 #include "rs_segmentation_utils.h"
@@ -10,16 +21,20 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include "rs_classifier_normalbayes.h"
+#include "rs_classifier_svm.h"
+#include "rs_training_data_extraction.h"
+
 #include <QString>
 
 #include <gdal.h>
 #include <ogr_api.h>
 
-#include <opencv2/ml.hpp>
+#include <opencv2/core.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <map>
+#include <memory>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -31,24 +46,13 @@ namespace {
 
 const std::vector<std::string> s_methods = {"svm", "normal_bayes"};
 
-cv::Ptr<cv::ml::StatModel> trainModel(const std::string& method,
-                                      const cv::Mat& X, const cv::Mat& y) {
-    if (method == "normal_bayes") {
-        auto clf = cv::ml::NormalBayesClassifier::create();
-        if (!clf->train(X, cv::ml::ROW_SAMPLE, y))
-            throw RSOperatorError(ErrorCode::OpenCvError, "NormalBayes training failed");
-        return clf;
-    }
-    auto svm = cv::ml::SVM::create();
-    svm->setType(cv::ml::SVM::C_SVC);
-    svm->setKernel(cv::ml::SVM::RBF);
-    svm->setC(10.0);
-    svm->setGamma(0.5);
-    svm->setTermCriteria(cv::TermCriteria(cv::TermCriteria::MAX_ITER + cv::TermCriteria::EPS,
-                                          1000, 1e-3));
-    if (!svm->train(X, cv::ml::ROW_SAMPLE, y))
-        throw RSOperatorError(ErrorCode::OpenCvError, "SVM training failed");
-    return svm;
+/// Single backend construction path shared with the GUI and the supervised
+/// adapter (ADR 0019 S3/S4 — hyperparameters live in the analysis-layer
+/// classes only).
+std::unique_ptr<RsClassifierBackend> makeBackend(const std::string& method) {
+    if (method == "normal_bayes")
+        return std::make_unique<RsClassifierNormalBayes>();
+    return std::make_unique<RsClassifierSvm>();
 }
 
 } // namespace
@@ -222,11 +226,10 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
         throw RSOperatorError(ErrorCode::InvalidInputData, "Training has no layers");
     }
     OGRFeatureDefnH defn = OGR_L_GetLayerDefn(layer);
-    int fieldIdx = OGR_FD_GetFieldIndex(defn, classField.c_str());
-    if (fieldIdx < 0)
-        fieldIdx = OGR_FD_GetFieldIndex(defn, "class");
-    if (fieldIdx < 0)
-        fieldIdx = OGR_FD_GetFieldIndex(defn, "id");
+    // Shared fallback chain (classField → "class" → "id") from the analysis
+    // layer — same resolution the pixel-level extraction module applies.
+    const int fieldIdx = RsTrainingDataExtraction::classFieldIndex(
+        defn, QString::fromStdString(classField));
     if (fieldIdx < 0) {
         GDALClose(vecDs);
         throw RSOperatorError(ErrorCode::InvalidParameter, "classField not found: " + classField);
@@ -301,7 +304,12 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
 
     context.reportProgress(0.65, "Training " + method + " on " +
                                      std::to_string(labeledSegments) + " labeled objects");
-    cv::Ptr<cv::ml::StatModel> model = trainModel(method, trainX, trainY);
+    std::unique_ptr<RsClassifierBackend> backend = makeBackend(method);
+    if (!backend->fit(trainX, trainY)) {
+        throw RSOperatorError(ErrorCode::OpenCvError,
+                              method == "normal_bayes" ? "NormalBayes training failed"
+                                                       : "SVM training failed");
+    }
 
     // Predict all segments
     context.reportProgress(0.75, "Predicting all segments");
@@ -310,24 +318,33 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
         for (int f = 0; f < nFeat; ++f)
             allX.at<float>(s - 1, f) = feats[static_cast<size_t>(s)][static_cast<size_t>(f)];
     }
-    cv::Mat pred;
-    try {
-        model->predict(allX, pred);
-    } catch (const cv::Exception& e) {
-        throw RSOperatorError(ErrorCode::OpenCvError, std::string("predict failed: ") + e.what());
+    const cv::Mat pred = backend->predict(allX);
+    if (pred.empty() || pred.rows < nSeg) {
+        throw RSOperatorError(ErrorCode::OpenCvError, "predict failed");
     }
 
-    std::vector<uint8_t> classOfSeg(static_cast<size_t>(nSeg + 1), 0);
+    std::vector<int32_t> classOfSeg(static_cast<size_t>(nSeg + 1), 0);
+    int maxClassId = 0;
     for (int s = 1; s <= nSeg; ++s) {
-        float v = (pred.cols >= 1) ? pred.at<float>(s - 1, 0) : pred.at<float>(s - 1);
-        int label = static_cast<int>(std::lround(v));
-        label = std::clamp(label, 0, 255);
-        classOfSeg[static_cast<size_t>(s)] = static_cast<uint8_t>(label);
+        // Backend predictions are integral class ids already; negative is
+        // defensive only (SVM/Bayes predict within the trained label set).
+        const int label = std::max(0, pred.at<int>(s - 1, 0));
+        classOfSeg[static_cast<size_t>(s)] = label;
+        maxClassId = std::max(maxClassId, label);
     }
+
+    // Pipeline dtype policy (ADR 0019 S4): class ids come from a user vector
+    // field and can exceed 255 — escalate the output dtype instead of the
+    // old silent 0-255 clamp.
+    GDALDataType outType = GDT_Byte;
+    if (maxClassId > 65535)
+        outType = GDT_Int32;
+    else if (maxClassId > 255)
+        outType = GDT_UInt16;
 
     // Paint class map
     context.reportProgress(0.9, "Writing class map");
-    std::vector<uint8_t> classMap(nPix, 0);
+    std::vector<int32_t> classMap(nPix, 0);
     for (int y = 0; y < height; ++y) {
         const int* rowL = labels.ptr<int>(y);
         for (int x = 0; x < width; ++x) {
@@ -337,7 +354,8 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
                     classOfSeg[static_cast<size_t>(sid)];
         }
     }
-    writeByteGeoTiff(outputPath, classMap, width, height, gt, ds.projection().toStdString());
+    writeClassGeoTiff(outputPath, classMap, width, height, gt,
+                      ds.projection().toStdString(), outType);
 
     context.reportProgress(1.0, "OBIA classification complete");
 

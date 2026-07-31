@@ -171,27 +171,6 @@ void QgsResidualPlotItem::setEntries( const QVector<Entry> &entries )
   mEntries = entries;
 }
 
-void QgsResidualPlotItem::setGCPList( const QgsGCPList &list )
-{
-  mEntries.clear();
-  mEntries.reserve( list.size() );
-  int idCounter = 0;
-  for ( const QgsGcpPoint *p : list )
-  {
-    if ( !p )
-    {
-      ++idCounter;
-      continue;
-    }
-    Entry e;
-    e.id = idCounter++;
-    e.sourcePoint = p->sourcePoint();
-    e.residual = p->residual();
-    e.enabled = p->isEnabled();
-    mEntries.append( e );
-  }
-}
-
 void QgsResidualPlotItem::draw( QgsLayoutItemRenderContext & )
 {}
 

@@ -46,6 +46,8 @@ qt_add_library(qgis_app_classify STATIC
     # Classification workflow — post-process task + dialog.
     rs_post_process_task.cpp
     rs_post_process_dialog.cpp
+    # ADR 0019 — GuiJobHandle for async task submission.
+    ../shell/gui_job_adapter.cpp
 )
 
 # Layer tree for session layer manager

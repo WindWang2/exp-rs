@@ -7,6 +7,7 @@ set(SICNU_WORKFLOW_SOURCES
   workflow_runner.cpp
   workflow_runtime.cpp
   builtin_definitions.cpp
+  placeholder_grammar.cpp
 )
 add_library(sicnu_workflow STATIC ${SICNU_WORKFLOW_SOURCES})
 target_include_directories(sicnu_workflow PUBLIC

@@ -2,14 +2,11 @@
 #include "llm_streaming_client.h"
 #include "processing/framework/agent_tool_call_exporter.h"
 #include "processing/framework/atomic_algorithm_registry.h"
-#include "processing/framework/task_center.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
-#include <chrono>
-#include <thread>
 #include <json/json.h>
 
 namespace sicnu::agent
@@ -41,7 +38,6 @@ void LlmStreamingClient::sendChatCompletion( const QJsonArray &messages, bool en
 {
   cancel();
   m_buffer.clear();
-  m_currentToolCall = QJsonObject();
   m_toolCallId.clear();
   m_toolFunctionName.clear();
   m_toolArgumentsBuffer.clear();
@@ -138,28 +134,9 @@ void LlmStreamingClient::parseSseLine( const QString &line )
   QString jsonStr = line.mid( 5 ).trimmed();
   if ( jsonStr == QStringLiteral( "[DONE]" ) )
   {
-    if ( !m_toolFunctionName.isEmpty() )
-    {
-      QJsonObject funcObj;
-      funcObj[QStringLiteral( "name" )] = m_toolFunctionName;
-
-      QJsonDocument argsDoc = QJsonDocument::fromJson( m_toolArgumentsBuffer.toUtf8() );
-      if ( argsDoc.isObject() )
-      {
-        funcObj[QStringLiteral( "arguments" )] = argsDoc.object();
-      }
-      else
-      {
-        funcObj[QStringLiteral( "arguments" )] = m_toolArgumentsBuffer;
-      }
-
-      QJsonObject toolCallObj;
-      toolCallObj[QStringLiteral( "id" )] = m_toolCallId;
-      toolCallObj[QStringLiteral( "type" )] = QStringLiteral( "function" );
-      toolCallObj[QStringLiteral( "function" )] = funcObj;
-
-      emit toolCallParsed( toolCallObj );
-    }
+    // A [DONE] token finalizes any accumulated tool call. emitParsedToolCallOnce
+    // clears the accumulation, so the onReplyFinished fallback stays silent.
+    emitParsedToolCallOnce();
 
     emit finished();
     return;
@@ -224,6 +201,36 @@ void LlmStreamingClient::parseSseLine( const QString &line )
   }
 }
 
+void LlmStreamingClient::emitParsedToolCallOnce()
+{
+  if ( m_toolFunctionName.isEmpty() )
+    return;
+
+  QJsonObject funcObj;
+  funcObj[QStringLiteral( "name" )] = m_toolFunctionName;
+
+  QJsonDocument argsDoc = QJsonDocument::fromJson( m_toolArgumentsBuffer.toUtf8() );
+  if ( argsDoc.isObject() )
+  {
+    funcObj[QStringLiteral( "arguments" )] = argsDoc.object();
+  }
+  else
+  {
+    funcObj[QStringLiteral( "arguments" )] = m_toolArgumentsBuffer;
+  }
+
+  QJsonObject toolCallObj;
+  toolCallObj[QStringLiteral( "id" )] = m_toolCallId;
+  toolCallObj[QStringLiteral( "type" )] = QStringLiteral( "function" );
+  toolCallObj[QStringLiteral( "function" )] = funcObj;
+
+  emit toolCallParsed( toolCallObj );
+
+  m_toolFunctionName.clear();
+  m_toolArgumentsBuffer.clear();
+  m_toolCallId.clear();
+}
+
 void LlmStreamingClient::onReplyFinished()
 {
   if ( m_currentReply && m_currentReply->error() == QNetworkReply::NoError )
@@ -236,68 +243,9 @@ void LlmStreamingClient::onReplyFinished()
       m_buffer.clear();
     }
 
-    if ( !m_toolFunctionName.isEmpty() )
-    {
-      QJsonObject tcObj;
-      tcObj[QStringLiteral( "id" )] = m_toolCallId;
-      tcObj[QStringLiteral( "name" )] = m_toolFunctionName;
-      tcObj[QStringLiteral( "arguments" )] = m_toolArgumentsBuffer;
-
-      emit toolCallParsed( tcObj );
-
-      QJsonObject toolCallEnvelope;
-      toolCallEnvelope[QStringLiteral( "name" )] = m_toolFunctionName;
-
-      QJsonDocument argsDoc = QJsonDocument::fromJson( m_toolArgumentsBuffer.toUtf8() );
-      if ( argsDoc.isObject() )
-      {
-        toolCallEnvelope[QStringLiteral( "parameters" )] = argsDoc.object();
-      }
-
-      std::string toolCallJsonStr = QJsonDocument( toolCallEnvelope ).toJson( QJsonDocument::Compact ).toStdString();
-
-      // Route through TaskCenter so tool calls get progress, cancel, and dock visibility (ADR 0016).
-      const long taskId = processing::AtomicAlgorithmRegistry::instance().submitToolCall( toolCallJsonStr, true );
-      QJsonObject resultObj;
-      if ( taskId <= 0 )
-      {
-        resultObj[QStringLiteral( "status" )] = QStringLiteral( "error" );
-        resultObj[QStringLiteral( "error" )] = QStringLiteral( "Failed to enqueue tool call in TaskCenter" );
-      }
-      else
-      {
-        const auto info = TaskCenter::instance().waitForTask( taskId, std::chrono::minutes( 10 ) );
-        resultObj[QStringLiteral( "taskId" )] = static_cast<qint64>( taskId );
-        resultObj[QStringLiteral( "algorithmId" )] = info.algorithmId;
-        if ( info.status == TaskStatus::Completed )
-        {
-          resultObj[QStringLiteral( "status" )] = QStringLiteral( "success" );
-          if ( info.resultPayload.isObject() )
-          {
-            // Prefer structured payload; fall back to output path.
-            const std::string styled = info.resultPayload.toStyledString();
-            QJsonDocument payloadDoc = QJsonDocument::fromJson( QByteArray::fromStdString( styled ) );
-            if ( payloadDoc.isObject() )
-              resultObj[QStringLiteral( "output" )] = payloadDoc.object();
-          }
-          if ( !info.outputLayerPath.isEmpty() )
-            resultObj[QStringLiteral( "outputPath" )] = info.outputLayerPath;
-        }
-        else if ( isTerminalStatus( info.status ) )
-        {
-          resultObj[QStringLiteral( "status" )] = QStringLiteral( "error" );
-          resultObj[QStringLiteral( "error" )] = info.errorMessage;
-        }
-        else
-        {
-          // Wait timed out before the task reached a terminal status.
-          resultObj[QStringLiteral( "status" )] = QStringLiteral( "error" );
-          resultObj[QStringLiteral( "error" )] = kToolCallTimeoutMessage;
-        }
-      }
-
-      emit toolCallExecuted( m_toolFunctionName, resultObj );
-    }
+    // If no [DONE] token finalized the tool call, emit it now. No-op when the
+    // [DONE] path already emitted it — a parsed tool call is emitted exactly once.
+    emitParsedToolCallOnce();
 
     emit finished();
   }

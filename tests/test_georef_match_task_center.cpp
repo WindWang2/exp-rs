@@ -138,14 +138,14 @@ TEST_CASE( "Georef match Task Center cancel waits for worker exit",
   REQUIRE( terminal.status == sicnu::TaskStatus::Canceled );
 }
 
-TEST_CASE( "Accept path thin-pushes match pairs into Session",
+TEST_CASE( "Accept path pushes match pairs into Session",
            "[georef][match][session]" )
 {
-  // Simulates bulk-Yes acceptance: shell would also append to mGcps.
+  // Simulates bulk-Yes acceptance: pairs go straight into the session.
   RsGeoreferencingSession session;
   QVector<RsGeorefGcpPair> fromSift;
   fromSift.append( { QgsPointXY( 0, 0 ), QgsPointXY( 100, 200 ), true } );
   fromSift.append( { QgsPointXY( 10, 10 ), QgsPointXY( 110, 210 ), true } );
-  session.applyAcceptedMatches( fromSift );
+  session.appendGcps( fromSift );
   REQUIRE( session.gcps().size() == 2 );
 }

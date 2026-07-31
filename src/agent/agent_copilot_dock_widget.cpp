@@ -3,15 +3,34 @@
 #include "llm_settings_dialog.h"
 
 #include <QFrame>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QMessageBox>
+#include <QPointer>
+#include <thread>
 
 namespace sicnu::agent
 {
 
 AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
   : QDockWidget( QStringLiteral( "🤖 AI Copilot 智能助手" ), parent )
+  , m_toolCallDispatcher(
+      // Production sink: submit typed tool calls to TaskCenter for background
+      // scheduling, progress, and cancel support (ADR 0016 / ADR 0021). The
+      // output is committed by OutputCommitter on completion, so auto-loading
+      // the raw task output path here would race the commit's file move.
+      []( const QString &algorithmId, const QVariantMap &params ) -> long {
+        return sicnu::TaskCenter::instance().enqueueTask(
+          algorithmId, params, /*autoLoad=*/false, sicnu::TaskPriority::Normal,
+          QList<long>(), /*autoDispatch=*/true );
+      },
+      // Production watcher: observe TaskCenter completion signals. taskUpdated
+      // is emitted from the JobEngine watcher thread; the queued connection to
+      // onTaskCenterTaskUpdated marshals the callback onto the GUI thread.
+      [this]( long taskId, processing::ToolCallDispatcher::CompletionCallback onComplete ) {
+        watchToolCallCompletion( taskId, std::move( onComplete ) );
+      } )
 {
   setObjectName( QStringLiteral( "AgentCopilotDockWidget" ) );
   setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
@@ -96,6 +115,12 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
            this, &AgentCopilotDockWidget::onLlmFinished );
   connect( m_client, &LlmStreamingClient::errorOccurred,
            this, &AgentCopilotDockWidget::onErrorOccurred );
+
+  // Tool-call completion watcher. Connected once in the constructor so no
+  // completion can race watcher registration; the JobEngine worker thread
+  // emits taskUpdated, so Qt delivers this queued onto the GUI thread.
+  connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
+           this, &AgentCopilotDockWidget::onTaskCenterTaskUpdated );
 }
 
 void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, ActiveViewHost *viewHost )
@@ -103,6 +128,8 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, ActiveV
   m_dataManager = dataManager;
   m_viewHost = viewHost;
   m_workflowExecutor.setDataManager( dataManager );
+  if ( dataManager )
+    m_outputCommitter = std::make_unique<sicnu::OutputCommitter>( dataManager, this );
 }
 
 void AgentCopilotDockWidget::onProviderChanged( int index )
@@ -249,40 +276,177 @@ void AgentCopilotDockWidget::onContentTokenReceived( const QString &text )
 
 void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
 {
-  QJsonObject funcObj = toolCallJson[QStringLiteral( "function" )].toObject();
-  QString algName = funcObj[QStringLiteral( "name" )].toString();
+  Json::Value cppEnvelope;
+  std::string jsonStr = QJsonDocument( toolCallJson ).toJson( QJsonDocument::Compact ).toStdString();
+  Json::CharReaderBuilder builder;
+  std::string errs;
+  std::istringstream sstream( jsonStr );
+  Json::parseFromStream( builder, sstream, &cppEnvelope, &errs );
 
-  QJsonObject argsObj;
-  if ( funcObj[QStringLiteral( "arguments" )].isObject() )
-    argsObj = funcObj[QStringLiteral( "arguments" )].toObject();
-  else
+  // The dispatcher owns parsing, classification, id normalization, and
+  // submission (ADR 0021). Plan requests keep the existing approval flow.
+  const auto classification = m_toolCallDispatcher.classify( cppEnvelope );
+  if ( classification == processing::ToolCallClassification::PlanRequest )
   {
-    QJsonDocument doc = QJsonDocument::fromJson( funcObj[QStringLiteral( "arguments" )].toString().toUtf8() );
-    if ( doc.isObject() )
-      argsObj = doc.object();
-  }
-
-  if ( algName == QStringLiteral( "executeAgentPlan" ) || argsObj.contains( QStringLiteral( "steps" ) ) )
-  {
-    appendPlanApprovalCard( argsObj.contains( QStringLiteral( "steps" ) ) ? argsObj : funcObj );
+    appendPlanApprovalCard( planArgumentsFor( toolCallJson ) );
     return;
   }
 
   appendToolCallCard( toolCallJson );
 
-  // Execute tool call via AgentWorkflowExecutor
-  Json::Value cppToolCall;
-  std::string jsonStr = QJsonDocument( toolCallJson ).toJson( QJsonDocument::Compact ).toStdString();
-  Json::CharReaderBuilder builder;
-  std::string errs;
-  std::istringstream sstream( jsonStr );
-  Json::parseFromStream( builder, sstream, &cppToolCall, &errs );
+  if ( classification == processing::ToolCallClassification::Invalid )
+  {
+    // rejectionReason reports the same reason submit() would give, without
+    // the side-effect of a doomed submission.
+    handleToolCallRejection( m_toolCallDispatcher.rejectionReason( cppEnvelope ) );
+    return;
+  }
 
-  Json::Value resultPayload = m_workflowExecutor.executeToolCall( cppToolCall );
+  // Single tool call: submit asynchronously; the completion payload arrives
+  // via the watcher (never blocks the GUI thread).
+  QString error;
+  const bool ok = m_toolCallDispatcher.submit( cppEnvelope, [this]( const Json::Value &resultPayload ) {
+    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( resultPayload.toStyledString() ) );
+    QJsonObject resultJson = doc.isObject() ? doc.object() : QJsonObject();
+    emit toolExecutionFinished( resultJson );
+  }, &error );
 
-  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( resultPayload.toStyledString() ) );
-  QJsonObject resultJson = doc.isObject() ? doc.object() : QJsonObject();
-  emit toolExecutionFinished( resultJson );
+  if ( !ok )
+  {
+    handleToolCallRejection( error );
+  }
+}
+
+void AgentCopilotDockWidget::handleToolCallRejection( const QString &errorMsg )
+{
+  appendErrorMessage( errorMsg.isEmpty() ? QStringLiteral( "工具调用失败。" ) : errorMsg );
+  QJsonObject errorResult;
+  errorResult[QStringLiteral( "status" )] = QStringLiteral( "error" );
+  errorResult[QStringLiteral( "error" )] = errorMsg;
+  emit toolExecutionFinished( errorResult );
+}
+
+QJsonObject AgentCopilotDockWidget::planArgumentsFor( const QJsonObject &toolCallJson ) const
+{
+  QJsonObject funcObj = toolCallJson[QStringLiteral( "function" )].toObject();
+
+  QJsonObject argsObj;
+  const QJsonValue funcArgs = funcObj[QStringLiteral( "arguments" )];
+  if ( funcArgs.isObject() )
+    argsObj = funcArgs.toObject();
+  else if ( funcArgs.isString() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( funcArgs.toString().toUtf8() );
+    if ( doc.isObject() )
+      argsObj = doc.object();
+  }
+  else if ( toolCallJson[QStringLiteral( "arguments" )].isObject() )
+    argsObj = toolCallJson[QStringLiteral( "arguments" )].toObject();
+
+  if ( argsObj.contains( QStringLiteral( "steps" ) ) )
+    return argsObj;
+  if ( !funcObj.isEmpty() )
+    return funcObj;
+  return toolCallJson;
+}
+
+void AgentCopilotDockWidget::watchToolCallCompletion( long taskId, processing::ToolCallDispatcher::CompletionCallback onComplete )
+{
+  // The task may already be terminal (completed synchronously): deliver the
+  // payload immediately instead of waiting for a signal that already fired.
+  const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+  if ( isTerminalStatus( info.status ) )
+  {
+    onComplete( buildToolCallResultPayload( info ) );
+    return;
+  }
+  m_pendingToolCallCompletions.insert( taskId, std::move( onComplete ) );
+}
+
+void AgentCopilotDockWidget::onTaskCenterTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
+{
+  if ( !isTerminalStatus( info.status ) )
+    return;
+
+  auto it = m_pendingToolCallCompletions.find( info.taskId );
+  if ( it == m_pendingToolCallCompletions.end() )
+    return;
+
+  const auto callback = it.value();
+  m_pendingToolCallCompletions.erase( it );
+
+  Json::Value payload = buildToolCallResultPayload( info );
+  if ( info.status == sicnu::TaskStatus::Completed )
+    commitToolCallOutput( info, payload );
+
+  callback( payload );
+}
+
+void AgentCopilotDockWidget::commitToolCallOutput( const sicnu::AlgorithmTaskInfo &info, Json::Value &payload )
+{
+  if ( !m_outputCommitter || info.outputLayerPath.isEmpty() )
+    return;
+
+  // Publish the task output to a stable sibling path and register it as a
+  // TaskTemporary, deletable asset (legacy behavior) — but through the
+  // OutputCommitter so validation, atomic publish, registration, and the
+  // Derivation Record happen transactionally (ADR 0021).
+  const QFileInfo outInfo( info.outputLayerPath );
+  const QString suffix = outInfo.suffix().isEmpty() ? QStringLiteral( "tif" ) : outInfo.suffix();
+  const QString stablePath = outInfo.absolutePath() + QStringLiteral( "/" )
+                             + outInfo.completeBaseName() + QStringLiteral( "_committed." ) + suffix;
+
+  sicnu::data::DerivationRecord derivation;
+  derivation.algorithmId = info.algorithmId;
+
+  const auto commitResult = m_outputCommitter->commitTaskOutput(
+    &sicnu::TaskCenter::instance(), info.taskId, sicnu::data::AssetKind::Raster,
+    stablePath, sicnu::data::PersistencePolicy::TaskTemporary, /*autoLoad=*/false, derivation );
+
+  if ( commitResult )
+  {
+    // The committed path is the live output now; report it and ask the host to
+    // load it (the task's original output path was moved by the commit).
+    payload["output"] = stablePath.toStdString();
+    emit toolOutputLayerRequested( stablePath );
+  }
+  else
+  {
+    // Commit refused: nothing moved, nothing registered — the payload keeps
+    // the task's original output path. Surface the diagnostics.
+    const QString message = commitResult.diagnostics().isEmpty()
+                              ? QStringLiteral( "OutputCommitter refused the tool-call output." )
+                              : commitResult.diagnostics().first().message;
+    payload["commitError"] = message.toStdString();
+  }
+}
+
+Json::Value AgentCopilotDockWidget::buildToolCallResultPayload( const sicnu::AlgorithmTaskInfo &info )
+{
+  Json::Value payload = info.resultPayload.isNull() ? Json::Value( Json::objectValue ) : info.resultPayload;
+  payload["algorithmId"] = info.algorithmId.toStdString();
+  payload["taskId"] = static_cast<Json::Int64>( info.taskId );
+
+  if ( info.status == sicnu::TaskStatus::Completed )
+  {
+    payload["status"] = "success";
+    if ( !info.outputLayerPath.isEmpty() && payload.isObject() && !payload.isMember( "output" ) )
+      payload["output"] = info.outputLayerPath.toStdString();
+  }
+  else
+  {
+    payload["status"] = "error";
+    payload["errorMessage"] = info.errorMessage.toStdString();
+  }
+  return payload;
+}
+
+void AgentCopilotDockWidget::appendErrorMessage( const QString &errorMsg )
+{
+  if ( m_currentContentLabel )
+  {
+    m_currentContentLabel->setText( QString( "<font color='red'>错误: %1</font>" ).arg( errorMsg.toHtmlEscaped() ) );
+  }
 }
 
 void AgentCopilotDockWidget::appendToolCallCard( const QJsonObject &toolCallJson )
@@ -336,17 +500,29 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
   connect( runBtn, &QPushButton::clicked, this, [this, planJson]() {
     emit planApprovalRequested( planJson );
 
-    Json::Value cppPlan;
-    std::string jsonStr = QJsonDocument( planJson ).toJson( QJsonDocument::Compact ).toStdString();
-    Json::CharReaderBuilder builder;
-    std::string errs;
-    std::istringstream sstream( jsonStr );
-    Json::parseFromStream( builder, sstream, &cppPlan, &errs );
+    QPointer<AgentCopilotDockWidget> self( this );
+    std::thread( [self, planJson]() {
+      Json::Value cppPlan;
+      std::string jsonStr = QJsonDocument( planJson ).toJson( QJsonDocument::Compact ).toStdString();
+      Json::CharReaderBuilder builder;
+      std::string errs;
+      std::istringstream sstream( jsonStr );
+      Json::parseFromStream( builder, sstream, &cppPlan, &errs );
 
-    Json::Value resultPayload = m_workflowExecutor.executeAgentPlan( cppPlan );
-    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( resultPayload.toStyledString() ) );
-    QJsonObject resultJson = doc.isObject() ? doc.object() : QJsonObject();
-    emit toolExecutionFinished( resultJson );
+      Json::Value resultPayload = self ? self->m_workflowExecutor.executeAgentPlan( cppPlan ) : Json::Value();
+      QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( resultPayload.toStyledString() ) );
+      QJsonObject resultJson = doc.isObject() ? doc.object() : QJsonObject();
+
+      if ( self )
+      {
+        QMetaObject::invokeMethod( self, [self, resultJson]() {
+          if ( self )
+          {
+            emit self->toolExecutionFinished( resultJson );
+          }
+        }, Qt::QueuedConnection );
+      }
+    } ).detach();
   } );
 }
 

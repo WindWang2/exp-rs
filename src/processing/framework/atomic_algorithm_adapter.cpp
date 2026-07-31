@@ -1,6 +1,7 @@
 // src/processing/framework/atomic_algorithm_adapter.cpp
 #include "atomic_algorithm_adapter.h"
 #include "operators/framework/rs_operator_context.h"
+#include <unordered_set>
 
 namespace sicnu::processing {
 
@@ -16,6 +17,20 @@ AlgorithmDescriptor AlgorithmDescriptorBuilder::buildFromRsOperator( const opera
   desc.agentMetadata = AgentMetadata::fromJson( meta );
 
   Json::Value schema = op.schema();
+  std::unordered_set<std::string> requiredSet;
+  bool hasRequiredList = false;
+  if ( schema.isObject() && schema.isMember( "required" ) && schema["required"].isArray() )
+  {
+    hasRequiredList = true;
+    for ( const auto &req : schema["required"] )
+    {
+      if ( req.isString() )
+      {
+        requiredSet.insert( req.asString() );
+      }
+    }
+  }
+
   if ( schema.isObject() && schema.isMember( "properties" ) && schema["properties"].isObject() )
   {
     const auto &props = schema["properties"];
@@ -24,6 +39,10 @@ AlgorithmDescriptor AlgorithmDescriptorBuilder::buildFromRsOperator( const opera
       const auto &pObj = props[key];
       PortDescriptor pDesc;
       pDesc.name = key;
+      if ( hasRequiredList )
+      {
+        pDesc.required = ( requiredSet.count( key ) > 0 );
+      }
       if ( pObj.isMember( "title" ) && pObj["title"].isString() )
         pDesc.displayName = pObj["title"].asString();
       else

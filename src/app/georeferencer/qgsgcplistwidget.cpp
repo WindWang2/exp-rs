@@ -12,10 +12,10 @@
  ***************************************************************************/
 #include "qgsgcplistwidget.h"
 
-#include "qgsgcplist.h"
 #include "qgsgcplistmodel.h"
 #include "qgsgcppoint.h"
 #include "qgsgeorefdelegates.h"
+#include "rs_georeferencing_session.h"
 
 #include <QAbstractItemModel>
 #include <QAction>
@@ -70,10 +70,10 @@ QgsGCPListWidget::QgsGCPListWidget( QWidget *parent )
            this, &QgsGCPListWidget::onSelectionChanged );
 }
 
-void QgsGCPListWidget::setGCPList( QgsGCPList *list )
+void QgsGCPListWidget::setGcpsSource( RsGeoreferencingSession *session )
 {
-  mList = list;
-  mModel->setGCPList( list );
+  mSession = session;
+  mModel->setGcpsSource( session );
 }
 
 QList<int> QgsGCPListWidget::selectedRows() const
@@ -95,7 +95,7 @@ QList<int> QgsGCPListWidget::selectedRows() const
 
 void QgsGCPListWidget::onModelDataChanged( const QModelIndex &topLeft, const QModelIndex &bottomRight, const QList<int> &roles )
 {
-  if ( !mList || !topLeft.isValid() )
+  if ( !mSession || !topLeft.isValid() )
     return;
   // Only react to single-cell edits originating from the user; bulk residual
   // updates span multiple columns/rows and are ignored.
@@ -103,20 +103,18 @@ void QgsGCPListWidget::onModelDataChanged( const QModelIndex &topLeft, const QMo
     return;
 
   const int row = topLeft.row();
-  if ( row < 0 || row >= mList->size() )
-    return;
-  const QgsGcpPoint *point = mList->at( row );
-  if ( !point )
+  if ( row < 0 || row >= mModel->rowCount() )
     return;
 
   const int col = topLeft.column();
   if ( col == 0 && ( roles.isEmpty() || roles.contains( Qt::CheckStateRole ) ) )
   {
-    emit pointEnabled( row, point->isEnabled() );
+    const bool enabled = mModel->data( mModel->index( row, 0 ), Qt::CheckStateRole ).toInt() == Qt::Checked;
+    emit pointEnabled( row, enabled );
   }
   else if ( col == 13 && ( roles.isEmpty() || roles.contains( Qt::EditRole ) || roles.contains( Qt::DisplayRole ) ) )
   {
-    emit pointTypeChanged( row, point->pointType() );
+    emit pointTypeChanged( row, mModel->data( mModel->index( row, 13 ), Qt::DisplayRole ).toString() );
   }
 }
 
@@ -159,7 +157,7 @@ void QgsGCPListWidget::mouseDoubleClickEvent( QMouseEvent *event )
 void QgsGCPListWidget::contextMenuEvent( QContextMenuEvent *event )
 {
   const QModelIndex idx = indexAt( event->pos() );
-  if ( !idx.isValid() || !mList || !mModel )
+  if ( !idx.isValid() || !mSession || !mModel )
   {
     QTableView::contextMenuEvent( event );
     return;
@@ -180,8 +178,10 @@ void QgsGCPListWidget::contextMenuEvent( QContextMenuEvent *event )
   zoomBoth->setToolTip( tr( "同时在源与目标画布上定位该点" ) );
   menu.addSeparator();
 
-  QgsGcpPoint *pt = ( row >= 0 && row < mList->size() ) ? mList->at( row ) : nullptr;
-  auto *toggle = menu.addAction( pt && pt->isEnabled() ? tr( "禁用" ) : tr( "启用" ) );
+  const bool rowValid = row >= 0 && row < mModel->rowCount();
+  const bool enabled = rowValid
+                         && mModel->data( mModel->index( row, 0 ), Qt::CheckStateRole ).toInt() == Qt::Checked;
+  auto *toggle = menu.addAction( rowValid && enabled ? tr( "禁用" ) : tr( "启用" ) );
   auto *editSrc = menu.addAction( tr( "编辑源坐标…" ) );
   auto *editDst = menu.addAction( tr( "编辑目标坐标…" ) );
   menu.addSeparator();
@@ -200,10 +200,10 @@ void QgsGCPListWidget::contextMenuEvent( QContextMenuEvent *event )
     emit zoomToDestRequested( row );
   else if ( chosen == zoomBoth )
     emit zoomToBothRequested( row );
-  else if ( chosen == toggle && pt )
+  else if ( chosen == toggle && rowValid )
   {
     mModel->setData( mModel->index( row, 0 ),
-                     pt->isEnabled() ? Qt::Unchecked : Qt::Checked,
+                     enabled ? Qt::Unchecked : Qt::Checked,
                      Qt::CheckStateRole );
   }
   else if ( chosen == editSrc )

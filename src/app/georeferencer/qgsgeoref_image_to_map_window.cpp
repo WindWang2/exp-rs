@@ -35,7 +35,10 @@ QgsGeorefImageToMapWindow::QgsGeorefImageToMapWindow( QgisInterface *iface, QWid
                      QStringLiteral( "rsGcpDockI2M" ),
                      QStringLiteral( "rsParamDockI2M" ) );
 
-  // Runtime session for lab.georef.image_to_map — step/artifact mirror only.
+  // Runtime session for lab.georef.image_to_map — step/artifact mirror.
+  // The workflow bridge is synced from session signals (gcpsChanged,
+  // warpFinished); the only constructor-side write is source raster + open
+  // step if a raster is already loaded (interaction-driven, not session-driven).
   mWorkflowBridge = std::make_unique<RsGeorefWorkflowBridge>();
   if ( !mWorkflowBridge->open() )
   {
@@ -50,12 +53,9 @@ QgsGeorefImageToMapWindow::QgsGeorefImageToMapWindow( QgisInterface *iface, QWid
       mWorkflowBridge->markStepComplete( "open_image" );
       mWorkflowBridge->gotoStep( "gcp" );
     }
-    if ( mGcps && !mGcps->isEmpty() )
-    {
-      mWorkflowBridge->setGcpCountArtifact( static_cast<int>( mGcps->size() ) );
-      mWorkflowBridge->markStepComplete( "gcp" );
-      mWorkflowBridge->gotoStep( "transform" );
-    }
+    // GCP count artifact is synced by syncWorkflowGcps on gcpsChanged;
+    // seed it once now to cover GCPs loaded before the bridge opened.
+    syncWorkflowGcps();
   }
 }
 

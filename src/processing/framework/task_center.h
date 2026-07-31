@@ -43,10 +43,6 @@ inline bool isTerminalStatus( TaskStatus status )
     return status == TaskStatus::Completed || status == TaskStatus::Failed || status == TaskStatus::Canceled;
 }
 
-/// Shared timeout surface for tool-call waiters: report this when waitForTask()
-/// returns a non-terminal status with an empty error message.
-inline const QString kToolCallTimeoutMessage = QStringLiteral( "Tool call timed out in TaskCenter" );
-
 enum class TaskPriority {
     High,
     Normal,
@@ -113,10 +109,6 @@ public:
                      const QList<long>& parentTaskIds = QList<long>(),
                      bool autoDispatch = false);
 
-    long enqueueToolCall( const std::string &jsonToolCall,
-                          bool autoLoad = true,
-                          TaskPriority priority = TaskPriority::Normal );
-
     /// Submit a DAG Task Pipeline for execution (auto-dispatched via JobEngine).
     long submitPipeline( const sicnu::workflow::WorkflowDefinition &def, bool autoLoad = true );
     long submitPipelineJson( const std::string &jsonPipeline, bool autoLoad = true );
@@ -131,6 +123,7 @@ public:
     void attachQgsTask(long taskId, QgsTask* qgsTask);
 
     bool cancelTask(long taskId);
+    bool cancelPipeline(long pipelineId);
     bool pauseTask(long taskId);
     bool resumeTask(long taskId);
     bool retryTask(long taskId);

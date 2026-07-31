@@ -1,6 +1,9 @@
 #include "plugin_manager.h"
+
+#if defined( SICNU_EMBED_PYTHON ) && SICNU_EMBED_PYTHON
 #include "app/python/python_plugin_adapter.h"
 #include "python/isolated/python_worker_process_pool.h"
+#endif
 
 #include <QCoreApplication>
 #include <QDir>
@@ -22,11 +25,13 @@ PluginManager::PluginManager(QgsMapCanvas *canvas, QgsLayerTreeView *layerTree, 
 PluginManager::~PluginManager()
 {
     unloadAll();
+#if defined( SICNU_EMBED_PYTHON ) && SICNU_EMBED_PYTHON
     if (m_ownsPythonPool && m_pythonPool) {
         m_pythonPool->shutdown();
         delete m_pythonPool;
         m_pythonPool = nullptr;
     }
+#endif
 }
 
 void PluginManager::loadPlugins(const QString &pluginDir)
@@ -105,6 +110,11 @@ bool PluginManager::loadPlugin(const QString &pluginPath)
 
 bool PluginManager::loadPythonPlugin(const QString &pluginDir)
 {
+#if !defined( SICNU_EMBED_PYTHON ) || !SICNU_EMBED_PYTHON
+    Q_UNUSED( pluginDir )
+    qWarning() << "PluginManager: Python plugin support is disabled (SICNU_EMBED_PYTHON=OFF)";
+    return false;
+#else
     const QString metadataPath = pluginDir + "/metadata.txt";
     if (!QFileInfo::exists(metadataPath)) {
         return false;
@@ -180,6 +190,7 @@ bool PluginManager::loadPythonPlugin(const QString &pluginDir)
     emit pluginLoaded(name);
 
     return true;
+#endif
 }
 
 void PluginManager::unloadAll()

@@ -164,9 +164,9 @@ TEST_CASE( "ClassificationWindow: apply and preview submit through Task Center",
     QStringLiteral( "void QgsClassificationMainWindow::applyPreview()" ),
     QStringLiteral( "void QgsClassificationMainWindow::openPostProcessDialog" ) );
 
-  REQUIRE( apply.contains( QStringLiteral( "TaskCenter::instance().submitJob" ) ) );
+  REQUIRE( apply.contains( QStringLiteral( "m_jobHandle.submitJob" ) ) );
   REQUIRE_FALSE( apply.contains( QStringLiteral( "RsJobRunner::run" ) ) );
-  REQUIRE( preview.contains( QStringLiteral( "TaskCenter::instance().submitJob" ) ) );
+  REQUIRE( preview.contains( QStringLiteral( "m_jobHandle.submitJob" ) ) );
   REQUIRE_FALSE( preview.contains( QStringLiteral( "RsJobRunner::run" ) ) );
 }
 

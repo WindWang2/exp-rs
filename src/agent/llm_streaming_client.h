@@ -46,8 +46,10 @@ class LlmStreamingClient : public QObject
   signals:
     void reasoningTokenReceived( const QString &reasoningText );
     void contentTokenReceived( const QString &textDelta );
+    // Emitted exactly once per parsed tool-call envelope (OpenAI shape:
+    // {id, type, function:{name, arguments}}). The client never executes tool
+    // calls — it is pure transport; execution is the caller's decision.
     void toolCallParsed( const QJsonObject &toolCallJson );
-    void toolCallExecuted( const QString &toolName, const QJsonObject &resultJson );
     void finished();
     void errorOccurred( const QString &errorMessage );
 
@@ -57,12 +59,17 @@ class LlmStreamingClient : public QObject
     void onReplyError( QNetworkReply::NetworkError code );
 
   private:
+    /// Emits toolCallParsed for the accumulated tool call, then clears the
+    /// accumulation. No-op when no tool call is pending, so a stream that
+    /// ended with [DONE] emits exactly once (the [DONE] path and the
+    /// reply-finished path never double-emit).
+    void emitParsedToolCallOnce();
+
     QNetworkAccessManager *m_networkManager = nullptr;
     QNetworkReply *m_currentReply = nullptr;
     LlmProviderProfile m_profile;
     QByteArray m_buffer;
 
-    QJsonObject m_currentToolCall;
     QString m_toolCallId;
     QString m_toolFunctionName;
     QString m_toolArgumentsBuffer;

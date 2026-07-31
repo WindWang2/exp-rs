@@ -339,8 +339,6 @@ SicnuAlgorithmDialog::SicnuAlgorithmDialog( QWidget *parent )
     mContext.setProject( project );
     mContext.setTransformContext( project->transformContext() );
   }
-  connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
-           this, &SicnuAlgorithmDialog::onTaskUpdated, Qt::QueuedConnection );
 }
 
 SicnuAlgorithmDialog::~SicnuAlgorithmDialog()
@@ -611,7 +609,7 @@ QgsProcessingContext *SicnuAlgorithmDialog::processingContext()
 bool SicnuAlgorithmDialog::isFinalized()
 {
   // Keep the dialog alive while a Task Center job is outstanding (no QgsTask).
-  if ( mPendingTaskId >= 0 )
+  if ( mJobHandle.isRunning() )
     return false;
   return QgsProcessingAlgorithmDialogBase::isFinalized();
 }
@@ -741,7 +739,7 @@ void SicnuAlgorithmDialog::runAlgorithm()
   QgsProcessingContext *contextPtr = &mContext;
   QgsProcessingFeedback *feedbackPtr = feedback;
 
-  mPendingTaskId = sicnu::TaskCenter::instance().submitJob(
+  const long taskId = mJobHandle.submitJob(
     req,
     [state, contextPtr, feedbackPtr]( const sicnu::jobs::JobRequest &,
                                       sicnu::operators::RSOperatorContext &ctx ) {
@@ -753,8 +751,6 @@ void SicnuAlgorithmDialog::runAlgorithm()
       }
       ctx.throwIfCancelled();
 
-      // Marks that postProcess() is required on the GUI thread even on failure
-      // (runPrepared sets mHasExecuted before processAlgorithm).
       state->workerStarted = true;
 
       try
@@ -780,64 +776,56 @@ void SicnuAlgorithmDialog::runAlgorithm()
       if ( feedbackPtr )
         feedbackPtr->cancel();
     },
-    autoLoad );
+    autoLoad,
+    [this]( const QString &, const Json::Value & ) {
+      bool successful = true;
+      QVariantMap results;
+      if ( mRunState && mRunState->algorithm && mRunState->workerStarted )
+      {
+        try
+        {
+          const QVariantMap pp = mRunState->algorithm->postProcess(
+            mContext, mFeedback, successful );
+          results = !pp.isEmpty() ? pp : mRunState->results;
+        }
+        catch ( const QgsProcessingException &e )
+        {
+          if ( mFeedback )
+            mFeedback->reportError( e.what() );
+          successful = false;
+          results = mRunState->results;
+        }
+      }
+      else if ( mRunState )
+      {
+        results = mRunState->results;
+      }
+      algExecuted( successful, results );
+      mRunState.reset();
+    },
+    [this]( const QString &err, bool ) {
+      bool successful = false;
+      QVariantMap results = mRunState ? mRunState->results : QVariantMap();
+      if ( mFeedback && !err.isEmpty() && mFeedback->textLog().isEmpty() )
+      {
+        mFeedback->reportError( err );
+      }
+      algExecuted( successful, results );
+      mRunState.reset();
+    }
+  );
 
-  if ( feedbackPtr )
+  if ( feedbackPtr && taskId > 0 )
   {
-    const long taskId = mPendingTaskId;
     connect( feedbackPtr, &QgsFeedback::progressChanged, this, [taskId]( double progress ) {
       sicnu::TaskCenter::instance().updateTaskProgress( taskId, progress / 100.0 );
     } );
   }
 
-  feedback->pushInfo( tr( "Submitted as task %1" ).arg( mPendingTaskId ) );
-}
-
-void SicnuAlgorithmDialog::onTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
-{
-  if ( mPendingTaskId < 0 || info.taskId != mPendingTaskId )
-    return;
-  if ( info.status != sicnu::TaskStatus::Completed
-       && info.status != sicnu::TaskStatus::Failed
-       && info.status != sicnu::TaskStatus::Canceled )
-    return;
-
-  mPendingTaskId = -1;
-
-  bool successful = info.status == sicnu::TaskStatus::Completed;
-
-  // postProcess must run on the context's thread (GUI), and only if the
-  // worker entered runPrepared (mHasExecuted). Queued-cancel skips this.
-  QVariantMap results;
-  if ( mRunState && mRunState->algorithm && mRunState->workerStarted )
+  if ( feedback && taskId > 0 )
   {
-    try
-    {
-      const QVariantMap pp = mRunState->algorithm->postProcess(
-        mContext, mFeedback, successful );
-      results = !pp.isEmpty() ? pp : mRunState->results;
-    }
-    catch ( const QgsProcessingException &e )
-    {
-      if ( mFeedback )
-        mFeedback->reportError( e.what() );
-      successful = false;
-      results = mRunState->results;
-    }
+    feedback->pushInfo( tr( "Submitted as task %1" ).arg( taskId ) );
   }
-  else if ( mRunState )
-  {
-    results = mRunState->results;
-  }
-
-  if ( !successful && mFeedback && !info.errorMessage.isEmpty() )
-  {
-    if ( mFeedback->textLog().isEmpty() )
-      mFeedback->reportError( info.errorMessage );
-  }
-
-  algExecuted( successful, results );
-  mRunState.reset();
 }
 
 // ---------------------------------------------------------------------------

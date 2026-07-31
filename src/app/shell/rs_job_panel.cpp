@@ -99,13 +99,6 @@ bool isActiveStatus( sicnu::TaskStatus status )
          || status == sicnu::TaskStatus::Paused;
 }
 
-bool isTerminalStatus( sicnu::TaskStatus status )
-{
-  return status == sicnu::TaskStatus::Completed
-         || status == sicnu::TaskStatus::Failed
-         || status == sicnu::TaskStatus::Canceled;
-}
-
 QString taskTitle( const sicnu::AlgorithmTaskInfo &info )
 {
   if ( info.hasJobRequest && !info.jobRequest.title.empty() )

@@ -1,7 +1,8 @@
 // rs_georeferencing_session.h — Shared Georeferencing Session (#32)
 //
-// Owns GCP pairing, transform fit readiness, residual summary, and immutable
-// warp snapshots. Warp execution is submitted through Task Center.
+// Owns GCP pairing, transform fit readiness, per-point residual summary, and
+// immutable warp snapshots. Warp execution is submitted through an injected
+// executor seam (ADR 0020 decision 3); production delegates to Task Center.
 #pragma once
 
 #include <QObject>
@@ -9,6 +10,8 @@
 #include <QVector>
 #include <QPointF>
 
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <optional>
 
@@ -23,6 +26,30 @@ class QgsGeorefTransform;
 class RsWarpTask;
 
 /**
+ * Warp-execution seam (ADR 0020 decision 3). The session submits and cancels
+ * warp jobs and observes terminal task updates through this interface only.
+ * The production adapter (rs_georef_task_center_executor.h) delegates to
+ * sicnu::TaskCenter::instance(); tests inject a fake.
+ */
+class RsGeorefWarpExecutor : public QObject
+{
+  Q_OBJECT
+  public:
+    explicit RsGeorefWarpExecutor( QObject *parent = nullptr ) : QObject( parent ) {}
+    ~RsGeorefWarpExecutor() override = default;
+
+    /// Submit a warp job. Returns a task id (>= 0) or -1 on refusal.
+    virtual long submitWarp( const sicnu::jobs::JobRequest &request,
+                             const sicnu::TaskCenter::JobExecutor &executor,
+                             const sicnu::TaskCenter::CancelHook &onCancel ) = 0;
+    virtual bool cancelWarp( long taskId ) = 0;
+
+  signals:
+    /// Mirrors sicnu::TaskCenter::taskUpdated for submitted warp tasks.
+    void taskUpdated( const sicnu::AlgorithmTaskInfo &info );
+};
+
+/**
  * One Ground Control Point pairing in the session.
  * Source is in source-image coordinates (same as QgsGcpPoint source);
  * destination is map / reference coordinates.
@@ -32,18 +59,50 @@ struct RsGeorefGcpPair
   QgsPointXY source;
   QgsPointXY destination;
   bool enabled = true;
+  /// User-defined point type label (SICNU `.points` v2 / table 类型 column).
+  QString pointType;
 };
 
 /**
+ * Sentinel stored in RsGeorefFitResult::residuals for entries with no valid
+ * residual (disabled GCPs, failed back-transform, or unfit points).
+ */
+inline QPointF rsGeorefInvalidResidual()
+{
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  return QPointF( nan, nan );
+}
+
+inline bool rsGeorefResidualIsValid( const QPointF &r )
+{
+  return !std::isnan( r.x() ) && !std::isnan( r.y() );
+}
+
+/**
  * Outcome of the last fit (parameter estimation from enabled GCPs).
+ *
+ * Residual semantics (ADR 0020 decision 2): residuals live in source-image
+ * PIXELS. Per enabled GCP, the destination point is back-transformed into
+ * source pixel space (QgsGeorefTransform::transformWorldToRaster) and the
+ * residual is the Euclidean delta against the observed source pixel
+ * (QgsGeorefTransform::toSourcePixel). rms is the root-mean-square of the
+ * per-point residual magnitudes over enabled GCPs.
  */
 struct RsGeorefFitResult
 {
   bool ready = false;
-  double rms = -1.0;
+  double rms = -1.0; ///< source-pixel RMS over enabled GCPs
   int enabledGcpCount = 0;
   int minimumGcpCount = 0;
   QString errorMessage;
+  /// Per-point residual (dx, dy) in source pixels, aligned with gcps()
+  /// ordering. Always sized to gcps().size(); disabled GCPs and points whose
+  /// back-transform failed carry rsGeorefInvalidResidual().
+  QVector<QPointF> residuals;
+  /// RPC refinement diagnostic: source-pixel RMS of the unrefined RPC fit
+  /// (before GCP-bias refinement). -1 when not applicable (non-RPC method,
+  /// fewer than 3 enabled GCPs, or unrefined fit failed).
+  double refinementRmsBefore = -1.0;
 };
 
 /**
@@ -73,6 +132,10 @@ class RsGeoreferencingSession : public QObject
   Q_OBJECT
   public:
     explicit RsGeoreferencingSession( QObject *parent = nullptr );
+    /// Inject a warp executor (ADR 0020 decision 3). When \a executor is null,
+    /// a production adapter over sicnu::TaskCenter::instance() is created.
+    explicit RsGeoreferencingSession( std::shared_ptr<RsGeorefWarpExecutor> executor,
+                                      QObject *parent = nullptr );
     ~RsGeoreferencingSession() override;
 
     void setSourceRasterPath( const QString &path );
@@ -81,14 +144,31 @@ class RsGeoreferencingSession : public QObject
     void setTransformMethod( QgsGcpTransformerInterface::TransformMethod method );
     QgsGcpTransformerInterface::TransformMethod transformMethod() const { return mMethod; }
 
+    /// RPC transform options (mirror of the params panel DEM row). Only used
+    /// when the method is RpcPhysical; injected into QgsRpcGcpTransformer
+    /// during refit().
+    void setDemPath( const QString &path ) { mDemPath = path; }
+    QString demPath() const { return mDemPath; }
+    void setDemZOffset( double z ) { mDemZOffset = z; }
+    double demZOffset() const { return mDemZOffset; }
+
     void setGcps( const QVector<RsGeorefGcpPair> &gcps );
     const QVector<RsGeorefGcpPair> &gcps() const { return mGcps; }
     void clearGcps();
 
-    /// Thin push (#34 / #71): append accepted match pairs without replacing the
-    /// live shell list. Shell remains the UI source of truth; this keeps Session
-    /// aware of accepted matches for tests and future consumers.
-    void applyAcceptedMatches( const QVector<RsGeorefGcpPair> &pairs );
+    /**
+     * Granular GCP mutations (ADR 0020 S2): the session is the sole owner of
+     * the GCP list. Each mutation emits gcpsChanged() and re-runs refit()
+     * (which emits fitChanged). setGcps() stays wholesale and does NOT refit
+     * (callers refit explicitly), preserving the stale-fit snapshot gating.
+     */
+    void addGcp( const RsGeorefGcpPair &gcp );
+    void appendGcps( const QVector<RsGeorefGcpPair> &gcps );
+    void removeGcpAt( int row );
+    void setGcpEnabled( int row, bool enabled );
+    void setGcpSource( int row, const QgsPointXY &source );
+    void setGcpDestination( int row, const QgsPointXY &destination );
+    void setGcpPointType( int row, const QString &pointType );
 
     /// Re-estimate transform parameters from enabled GCPs.
     RsGeorefFitResult refit();
@@ -96,7 +176,10 @@ class RsGeoreferencingSession : public QObject
     bool isFitReady() const { return mLastFit.ready; }
 
     /// Frozen snapshot for a warp job. Does not start execution.
-    /// Returns nullopt if source/output empty or fit is not ready.
+    /// Returns nullopt unless the session alone can gate warp submission
+    /// (mirrors QgsGeorefShellWindow::applyTransform validation): source and
+    /// output paths non-empty, enabled GCP count >= the method minimum, and a
+    /// successful fit.
     std::optional<RsGeorefWarpSnapshot> createWarpSnapshot(
       const QString &outputPath,
       QgsImageWarper::ResamplingMethod resampling,
@@ -107,13 +190,16 @@ class RsGeoreferencingSession : public QObject
     static std::unique_ptr<QgsGeorefTransform> transformFromSnapshot(
       const RsGeorefWarpSnapshot &snap );
 
-    /// Submit warp of \a snap through Task Center. Returns Task Center id or -1.
+    /// Submit warp of \a snap through the warp executor. Returns task id or -1.
     long startWarpTask( const RsGeorefWarpSnapshot &snap );
 
     bool cancelWarpTask( long taskCenterId );
     long pendingWarpTaskId() const { return mPendingWarpTaskId; }
 
   signals:
+    /// GCP list structure or contents changed (any mutation, incl. setGcps).
+    /// Emitted BEFORE the fitChanged() that follows from the mutation's refit.
+    void gcpsChanged();
     void fitChanged( const RsGeorefFitResult &fit );
     /// Terminal warp outcome for the pending Task Center task.
     void warpFinished( long taskCenterId, bool success, const QString &errorMessage,
@@ -123,11 +209,20 @@ class RsGeoreferencingSession : public QObject
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
   private:
+    /// Build a transform for the current method, loading the source raster and
+    /// (for RpcPhysical) injecting source path + DEM/Z-offset/refinement into
+    /// QgsRpcGcpTransformer — mirrors the shell's recomputeFit configuration.
+    std::unique_ptr<QgsGeorefTransform> makeConfiguredTransform( bool rpcRefinement ) const;
+
     QString mSourcePath;
     QgsGcpTransformerInterface::TransformMethod mMethod =
       QgsGcpTransformerInterface::TransformMethod::Linear;
+    QString mDemPath;
+    double mDemZOffset = 0.0;
     QVector<RsGeorefGcpPair> mGcps;
     RsGeorefFitResult mLastFit;
+
+    std::shared_ptr<RsGeorefWarpExecutor> mExecutor;
 
     long mPendingWarpTaskId = -1;
     RsWarpTask *mPendingWarpTask = nullptr; // deleteLater on terminal

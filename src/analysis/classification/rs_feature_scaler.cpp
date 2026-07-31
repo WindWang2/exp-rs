@@ -48,19 +48,10 @@ bool RsFeatureScaler::saveJson( const QString &path ) const
 {
   if ( !mFitted )
     return false;
-  QJsonArray meanArr, stdArr;
-  for ( double v : mMean )
-    meanArr.append( v );
-  for ( double v : mStd )
-    stdArr.append( v );
-  QJsonObject root;
-  root.insert( QStringLiteral( "version" ), 1 );
-  root.insert( QStringLiteral( "mean" ), meanArr );
-  root.insert( QStringLiteral( "std" ), stdArr );
   QFile f( path );
   if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
     return false;
-  f.write( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
+  f.write( QJsonDocument( toJson() ).toJson( QJsonDocument::Compact ) );
   return true;
 }
 
@@ -75,8 +66,30 @@ bool RsFeatureScaler::loadJson( const QString &path )
   const QJsonDocument doc = QJsonDocument::fromJson( f.readAll() );
   if ( !doc.isObject() )
     return false;
-  const QJsonArray meanArr = doc.object().value( QStringLiteral( "mean" ) ).toArray();
-  const QJsonArray stdArr = doc.object().value( QStringLiteral( "std" ) ).toArray();
+  return fromJson( doc.object() );
+}
+
+QJsonObject RsFeatureScaler::toJson() const
+{
+  QJsonArray meanArr, stdArr;
+  for ( double v : mMean )
+    meanArr.append( v );
+  for ( double v : mStd )
+    stdArr.append( v );
+  QJsonObject root;
+  root.insert( QStringLiteral( "version" ), 1 );
+  root.insert( QStringLiteral( "mean" ), meanArr );
+  root.insert( QStringLiteral( "std" ), stdArr );
+  return root;
+}
+
+bool RsFeatureScaler::fromJson( const QJsonObject &obj )
+{
+  mFitted = false;
+  mMean.clear();
+  mStd.clear();
+  const QJsonArray meanArr = obj.value( QStringLiteral( "mean" ) ).toArray();
+  const QJsonArray stdArr = obj.value( QStringLiteral( "std" ) ).toArray();
   if ( meanArr.isEmpty() || meanArr.size() != stdArr.size() )
     return false;
   mMean.resize( meanArr.size() );

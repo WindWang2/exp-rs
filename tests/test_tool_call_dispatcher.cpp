@@ -1,0 +1,553 @@
+// tests/test_tool_call_dispatcher.cpp
+//
+// ToolCallDispatcher (ADR 0021) — headless suite. Uses a FAKE sink/watcher,
+// never touches the real TaskCenter singleton. Registry lookups use the real
+// AtomicAlgorithmRegistry with stub adapters registered by the tests.
+#include <catch2/catch_session.hpp>
+#include <catch2/catch_test_macros.hpp>
+
+#include <QMetaType>
+#include <QString>
+#include <QVariantMap>
+
+#include <chrono>
+#include <thread>
+
+#include "processing/framework/tool_call_dispatcher.h"
+#include "processing/framework/atomic_algorithm_registry.h"
+#include "operators/rs/rs_spectral_index_operator.h"
+
+using namespace sicnu::processing;
+
+namespace {
+
+// Minimal stub adapter with a caller-chosen ID, for registry lookups.
+class StubAdapter : public AtomicAlgorithmAdapter
+{
+  public:
+    explicit StubAdapter( std::string id, AlgorithmDescriptor desc = AlgorithmDescriptor{} )
+      : mId( std::move( id ) )
+      , mDesc( std::move( desc ) ) {}
+
+    std::string algorithmId() const override { return mId; }
+    AlgorithmDescriptor descriptor() const override { return mDesc; }
+    Json::Value execute( const Json::Value &params, ProgressCallback ) override
+    {
+      Json::Value result( Json::objectValue );
+      result["status"] = "ok";
+      result["echo"] = params;
+      return result;
+    }
+
+  private:
+    std::string mId;
+    AlgorithmDescriptor mDesc;
+};
+
+// Fake submission sink + completion watcher. Default sink assigns increasing
+// task ids; default watcher captures the completion callback so the test can
+// fire it manually (see fireCompletion).
+struct FakeDispatcherHarness
+{
+  FakeDispatcherHarness( ToolCallDispatcher::SubmissionSink sink = {},
+                         ToolCallDispatcher::CompletionWatcher watcher = {} )
+    : dispatcher( sink ? sink : defaultSink(), watcher ? watcher : defaultWatcher() ) {}
+
+  // Submission side
+  int sinkCalls = 0;
+  QString submittedAlgorithmId;
+  QVariantMap submittedParams;
+  long submittedTaskId = -1;
+
+  // Watcher side
+  int watcherCalls = 0;
+  long watchedTaskId = -1;
+  ToolCallDispatcher::CompletionCallback pendingCallback;
+
+  ToolCallDispatcher::SubmissionSink defaultSink()
+  {
+    return [this]( const QString &algorithmId, const QVariantMap &params ) -> long {
+      ++sinkCalls;
+      submittedAlgorithmId = algorithmId;
+      submittedParams = params;
+      submittedTaskId = 1000 + sinkCalls;
+      return submittedTaskId;
+    };
+  }
+
+  ToolCallDispatcher::CompletionWatcher defaultWatcher()
+  {
+    return [this]( long taskId, ToolCallDispatcher::CompletionCallback onComplete ) {
+      ++watcherCalls;
+      watchedTaskId = taskId;
+      pendingCallback = std::move( onComplete );
+    };
+  }
+
+  void fireCompletion( const Json::Value &payload )
+  {
+    REQUIRE( pendingCallback );
+    pendingCallback( payload );
+  }
+
+  ToolCallDispatcher dispatcher;
+};
+
+Json::Value objectEnvelope( const std::string &name, const char *argsKey, const Json::Value &args )
+{
+  Json::Value envelope( Json::objectValue );
+  envelope["name"] = name;
+  envelope[argsKey] = args;
+  return envelope;
+}
+
+} // namespace
+
+TEST_CASE( "ToolCallDispatcher classifies all historical envelope shapes", "[processing][tool_call_dispatcher][classify]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+  FakeDispatcherHarness harness;
+
+  SECTION( "shape {name, parameters}" )
+  {
+    Json::Value params( Json::objectValue );
+    params["index"] = "NDVI";
+    REQUIRE( harness.dispatcher.classify( objectEnvelope( "rs_spectral_index", "parameters", params ) )
+             == ToolCallClassification::ToolCall );
+  }
+
+  SECTION( "shape {function:{name, arguments}} with arguments as JSON string" )
+  {
+    Json::Value envelope( Json::objectValue );
+    Json::Value func( Json::objectValue );
+    func["name"] = "rs_spectral_index";
+    func["arguments"] = R"({"index":"NDVI"})";
+    envelope["function"] = func;
+    REQUIRE( harness.dispatcher.classify( envelope ) == ToolCallClassification::ToolCall );
+  }
+
+  SECTION( "shape {function:{name, arguments}} with arguments as object" )
+  {
+    Json::Value envelope( Json::objectValue );
+    Json::Value func( Json::objectValue );
+    func["name"] = "rs:spectral_index";
+    Json::Value args( Json::objectValue );
+    args["index"] = "NDVI";
+    func["arguments"] = args;
+    envelope["function"] = func;
+    REQUIRE( harness.dispatcher.classify( envelope ) == ToolCallClassification::ToolCall );
+  }
+
+  SECTION( "shape {name, arguments}" )
+  {
+    Json::Value args( Json::objectValue );
+    args["index"] = "NDVI";
+    REQUIRE( harness.dispatcher.classify( objectEnvelope( "rs_spectral_index", "arguments", args ) )
+             == ToolCallClassification::ToolCall );
+  }
+
+  SECTION( "shape {name, params}" )
+  {
+    Json::Value args( Json::objectValue );
+    args["index"] = "NDVI";
+    REQUIRE( harness.dispatcher.classify( objectEnvelope( "rs_spectral_index", "params", args ) )
+             == ToolCallClassification::ToolCall );
+  }
+
+  SECTION( "missing arguments is accepted with empty params" )
+  {
+    Json::Value envelope( Json::objectValue );
+    envelope["name"] = "rs:spectral_index";
+    REQUIRE( harness.dispatcher.classify( envelope ) == ToolCallClassification::ToolCall );
+  }
+
+  SECTION( "steps array classifies as PlanRequest before name resolution" )
+  {
+    Json::Value steps( Json::arrayValue );
+    steps.append( Json::Value( Json::objectValue ) );
+
+    Json::Value params( Json::objectValue );
+    params["steps"] = steps;
+    REQUIRE( harness.dispatcher.classify( objectEnvelope( "executeAgentPlan", "parameters", params ) )
+             == ToolCallClassification::PlanRequest );
+
+    Json::Value envelope( Json::objectValue );
+    Json::Value func( Json::objectValue );
+    func["name"] = "executeAgentPlan";
+    Json::Value args( Json::objectValue );
+    args["steps"] = steps;
+    func["arguments"] = args;
+    envelope["function"] = func;
+    REQUIRE( harness.dispatcher.classify( envelope ) == ToolCallClassification::PlanRequest );
+  }
+
+  SECTION( "steps that is not an array does not classify as a plan" )
+  {
+    Json::Value args( Json::objectValue );
+    args["steps"] = "not-an-array";
+    REQUIRE( harness.dispatcher.classify( objectEnvelope( "rs_spectral_index", "arguments", args ) )
+             == ToolCallClassification::ToolCall );
+    REQUIRE( harness.dispatcher.classify( objectEnvelope( "unknown_tool", "arguments", args ) )
+             == ToolCallClassification::Invalid );
+  }
+
+  SECTION( "unparseable argument strings are Invalid" )
+  {
+    Json::Value envelope( Json::objectValue );
+    Json::Value func( Json::objectValue );
+    func["name"] = "rs_spectral_index";
+    func["arguments"] = "this is not json";
+    envelope["function"] = func;
+    REQUIRE( harness.dispatcher.classify( envelope ) == ToolCallClassification::Invalid );
+
+    REQUIRE( harness.dispatcher.classify( objectEnvelope( "rs_spectral_index", "arguments", "also not json" ) )
+             == ToolCallClassification::Invalid );
+  }
+
+  SECTION( "non-object, unnamed, and non-string-name envelopes are Invalid" )
+  {
+    REQUIRE( harness.dispatcher.classify( Json::Value( 42 ) ) == ToolCallClassification::Invalid );
+    REQUIRE( harness.dispatcher.classify( Json::Value( Json::arrayValue ) ) == ToolCallClassification::Invalid );
+
+    Json::Value steps( Json::arrayValue );
+    steps.append( Json::Value( Json::objectValue ) );
+    Json::Value bareSteps( Json::objectValue );
+    bareSteps["steps"] = steps;
+    REQUIRE( harness.dispatcher.classify( bareSteps ) == ToolCallClassification::Invalid );
+
+    Json::Value numericName( Json::objectValue );
+    numericName["name"] = 42;
+    numericName["parameters"] = Json::Value( Json::objectValue );
+    REQUIRE( harness.dispatcher.classify( numericName ) == ToolCallClassification::Invalid );
+  }
+
+  SECTION( "unresolvable names are Invalid" )
+  {
+    REQUIRE( harness.dispatcher.classify( objectEnvelope( "not_registered_anywhere", "parameters", Json::Value( Json::objectValue ) ) )
+             == ToolCallClassification::Invalid );
+  }
+}
+
+TEST_CASE( "ToolCallDispatcher resolves ids as-is before rewriting the first underscore", "[processing][tool_call_dispatcher][normalize]" )
+{
+  auto &registry = AtomicAlgorithmRegistry::instance();
+  registry.reset();
+  registry.registerAdapter( std::make_shared<StubAdapter>( "stub:echo" ) );
+  registry.registerAdapter( std::make_shared<StubAdapter>( "stub_under_score" ) );
+  registry.registerAdapter( std::make_shared<StubAdapter>( "stub:under_score" ) );
+  registry.registerAdapter( std::make_shared<StubAdapter>( "a:b_c" ) );
+  FakeDispatcherHarness harness;
+
+  SECTION( "colon id resolves as-is" )
+  {
+    REQUIRE( harness.dispatcher.classify( objectEnvelope( "stub:echo", "parameters", Json::Value( Json::objectValue ) ) )
+             == ToolCallClassification::ToolCall );
+  }
+
+  SECTION( "underscore id is rewritten to the first colon on miss" )
+  {
+    REQUIRE( harness.dispatcher.classify( objectEnvelope( "stub_echo", "parameters", Json::Value( Json::objectValue ) ) )
+             == ToolCallClassification::ToolCall );
+  }
+
+  SECTION( "only the first underscore is rewritten" )
+  {
+    REQUIRE( harness.dispatcher.classify( objectEnvelope( "a_b_c", "parameters", Json::Value( Json::objectValue ) ) )
+             == ToolCallClassification::ToolCall );
+  }
+
+  SECTION( "an id that already resolves is never rewritten" )
+  {
+    Json::Value envelope = objectEnvelope( "stub_under_score", "parameters", Json::Value( Json::objectValue ) );
+    QString error;
+    REQUIRE( harness.dispatcher.submit( envelope, []( const Json::Value & ) {}, &error ) );
+    REQUIRE( harness.submittedAlgorithmId == QStringLiteral( "stub_under_score" ) );
+  }
+
+  SECTION( "id unresolvable as-is and after rewrite is Invalid" )
+  {
+    REQUIRE( harness.dispatcher.classify( objectEnvelope( "stub_missing", "parameters", Json::Value( Json::objectValue ) ) )
+             == ToolCallClassification::Invalid );
+  }
+}
+
+TEST_CASE( "ToolCallDispatcher submits typed parameters through the injected sink", "[processing][tool_call_dispatcher][submit]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+  AtomicAlgorithmRegistry::instance().registerAdapter( std::make_shared<StubAdapter>( "stub:echo" ) );
+  FakeDispatcherHarness harness;
+
+  Json::Value params( Json::objectValue );
+  params["input"] = "/path/raster.tif";
+  params["output"] = "/tmp/out.tif";
+  params["index"] = "NDVI";
+  params["count"] = 5;
+  params["ratio"] = 0.5;
+  params["flag"] = true;
+  const Json::Value envelope = objectEnvelope( "stub_echo", "parameters", params );
+
+  QString error;
+  bool completionDelivered = false;
+  Json::Value deliveredPayload;
+  const bool ok = harness.dispatcher.submit( envelope, [&]( const Json::Value &payload ) {
+    completionDelivered = true;
+    deliveredPayload = payload;
+  }, &error );
+
+  REQUIRE( ok );
+  REQUIRE( error.isEmpty() );
+  REQUIRE( harness.sinkCalls == 1 );
+  REQUIRE( harness.submittedAlgorithmId == QStringLiteral( "stub:echo" ) );
+  REQUIRE( harness.submittedParams[QStringLiteral( "input" )].toString() == QStringLiteral( "/path/raster.tif" ) );
+  REQUIRE( harness.submittedParams[QStringLiteral( "output" )].toString() == QStringLiteral( "/tmp/out.tif" ) );
+  REQUIRE( harness.submittedParams[QStringLiteral( "index" )].toString() == QStringLiteral( "NDVI" ) );
+  REQUIRE( harness.submittedParams[QStringLiteral( "count" )].typeId() == QMetaType::LongLong );
+  REQUIRE( harness.submittedParams[QStringLiteral( "count" )].toLongLong() == 5 );
+  REQUIRE( harness.submittedParams[QStringLiteral( "ratio" )].typeId() == QMetaType::Double );
+  REQUIRE( harness.submittedParams[QStringLiteral( "ratio" )].toDouble() == 0.5 );
+  REQUIRE( harness.submittedParams[QStringLiteral( "flag" )].typeId() == QMetaType::Bool );
+  REQUIRE( harness.submittedParams[QStringLiteral( "flag" )].toBool() );
+
+  REQUIRE( harness.watcherCalls == 1 );
+  REQUIRE( harness.watchedTaskId == harness.submittedTaskId );
+
+  // Firing the watcher delivers the payload through the submit() callback.
+  Json::Value payload( Json::objectValue );
+  payload["status"] = "success";
+  payload["output"] = "/out.tif";
+  harness.fireCompletion( payload );
+  REQUIRE( completionDelivered );
+  REQUIRE( deliveredPayload["output"].asString() == "/out.tif" );
+}
+
+TEST_CASE( "ToolCallDispatcher submit converts string-arguments envelopes to typed params", "[processing][tool_call_dispatcher][submit]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+  AtomicAlgorithmRegistry::instance().registerAdapter( std::make_shared<StubAdapter>( "stub:echo" ) );
+  FakeDispatcherHarness harness;
+
+  Json::Value envelope( Json::objectValue );
+  Json::Value func( Json::objectValue );
+  func["name"] = "stub:echo";
+  func["arguments"] = R"({"input":"/a.tif","index":"NDVI","count":3})";
+  envelope["function"] = func;
+
+  QString error;
+  REQUIRE( harness.dispatcher.submit( envelope, []( const Json::Value & ) {}, &error ) );
+  REQUIRE( error.isEmpty() );
+  REQUIRE( harness.submittedAlgorithmId == QStringLiteral( "stub:echo" ) );
+  REQUIRE( harness.submittedParams[QStringLiteral( "input" )].toString() == QStringLiteral( "/a.tif" ) );
+  REQUIRE( harness.submittedParams[QStringLiteral( "index" )].toString() == QStringLiteral( "NDVI" ) );
+  REQUIRE( harness.submittedParams[QStringLiteral( "count" )].toLongLong() == 3 );
+}
+
+TEST_CASE( "ToolCallDispatcher submit rejects invalid and plan envelopes without touching sink or watcher", "[processing][tool_call_dispatcher][submit]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+  FakeDispatcherHarness harness;
+
+  SECTION( "invalid envelope returns false with an error" )
+  {
+    Json::Value envelope = objectEnvelope( "not_registered_anywhere", "parameters", Json::Value( Json::objectValue ) );
+    QString error;
+    REQUIRE_FALSE( harness.dispatcher.submit( envelope, []( const Json::Value & ) {}, &error ) );
+    REQUIRE_FALSE( error.isEmpty() );
+    REQUIRE( harness.sinkCalls == 0 );
+    REQUIRE( harness.watcherCalls == 0 );
+  }
+
+  SECTION( "plan envelope returns false with an error" )
+  {
+    Json::Value args( Json::objectValue );
+    args["steps"] = Json::Value( Json::arrayValue );
+    Json::Value envelope = objectEnvelope( "executeAgentPlan", "arguments", args );
+    QString error;
+    REQUIRE_FALSE( harness.dispatcher.submit( envelope, []( const Json::Value & ) {}, &error ) );
+    REQUIRE_FALSE( error.isEmpty() );
+    REQUIRE( harness.sinkCalls == 0 );
+    REQUIRE( harness.watcherCalls == 0 );
+  }
+
+  SECTION( "null error out is tolerated" )
+  {
+    Json::Value envelope = objectEnvelope( "not_registered_anywhere", "parameters", Json::Value( Json::objectValue ) );
+    REQUIRE_FALSE( harness.dispatcher.submit( envelope, []( const Json::Value & ) {}, nullptr ) );
+  }
+
+  SECTION( "sink rejection surfaces as an error and never registers a watcher" )
+  {
+    AtomicAlgorithmRegistry::instance().registerAdapter( std::make_shared<StubAdapter>( "stub:echo" ) );
+    FakeDispatcherHarness rejectingHarness( []( const QString &, const QVariantMap & ) -> long { return -1; }, {} );
+    const Json::Value envelope = objectEnvelope( "stub:echo", "parameters", Json::Value( Json::objectValue ) );
+    QString error;
+    REQUIRE_FALSE( rejectingHarness.dispatcher.submit( envelope, []( const Json::Value & ) {}, &error ) );
+    REQUIRE_FALSE( error.isEmpty() );
+    REQUIRE( rejectingHarness.watcherCalls == 0 );
+  }
+}
+
+TEST_CASE( "ToolCallDispatcher validates required descriptor inputs before submitting", "[processing][tool_call_dispatcher][validate]" )
+{
+  auto &registry = AtomicAlgorithmRegistry::instance();
+  registry.reset();
+
+  AlgorithmDescriptor desc;
+  PortDescriptor port;
+  port.name = "input";
+  port.required = true;
+  desc.inputs.push_back( port );
+  registry.registerAdapter( std::make_shared<StubAdapter>( "stub:validate", desc ) );
+  FakeDispatcherHarness harness;
+
+  SECTION( "missing required parameter rejects without calling the sink" )
+  {
+    const Json::Value envelope = objectEnvelope( "stub:validate", "parameters", Json::Value( Json::objectValue ) );
+    QString error;
+    REQUIRE_FALSE( harness.dispatcher.submit( envelope, []( const Json::Value & ) {}, &error ) );
+    REQUIRE( error.contains( QStringLiteral( "Missing required parameter: input" ) ) );
+    REQUIRE( harness.sinkCalls == 0 );
+    REQUIRE( harness.watcherCalls == 0 );
+  }
+
+  SECTION( "underscore name is normalized before required-parameter validation" )
+  {
+    const Json::Value envelope = objectEnvelope( "stub_validate", "parameters", Json::Value( Json::objectValue ) );
+    QString error;
+    REQUIRE_FALSE( harness.dispatcher.submit( envelope, []( const Json::Value & ) {}, &error ) );
+    REQUIRE( error.contains( QStringLiteral( "Missing required parameter: input" ) ) );
+    REQUIRE( harness.sinkCalls == 0 );
+  }
+
+  SECTION( "all required parameters present submits through the sink" )
+  {
+    Json::Value params( Json::objectValue );
+    params["input"] = "/tmp/in.tif";
+    const Json::Value envelope = objectEnvelope( "stub:validate", "parameters", params );
+    QString error;
+    REQUIRE( harness.dispatcher.submit( envelope, []( const Json::Value & ) {}, &error ) );
+    REQUIRE( error.isEmpty() );
+    REQUIRE( harness.sinkCalls == 1 );
+    REQUIRE( harness.submittedAlgorithmId == QStringLiteral( "stub:validate" ) );
+    REQUIRE( harness.submittedParams[QStringLiteral( "input" )].toString() == QStringLiteral( "/tmp/in.tif" ) );
+  }
+}
+
+TEST_CASE( "ToolCallDispatcher submit yields the submitted task id", "[processing][tool_call_dispatcher][submit]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+  AtomicAlgorithmRegistry::instance().registerAdapter( std::make_shared<StubAdapter>( "stub:echo" ) );
+  FakeDispatcherHarness harness;
+
+  SECTION( "successful submission writes the sink task id" )
+  {
+    const Json::Value envelope = objectEnvelope( "stub:echo", "parameters", Json::Value( Json::objectValue ) );
+    long taskIdOut = -1;
+    QString error;
+    REQUIRE( harness.dispatcher.submit( envelope, []( const Json::Value & ) {}, &error, &taskIdOut ) );
+    REQUIRE( taskIdOut == harness.submittedTaskId );
+    REQUIRE( harness.watcherCalls == 1 );
+  }
+
+  SECTION( "failed submission leaves the out-param untouched" )
+  {
+    const Json::Value envelope = objectEnvelope( "not_registered_anywhere", "parameters", Json::Value( Json::objectValue ) );
+    long taskIdOut = -1;
+    REQUIRE_FALSE( harness.dispatcher.submit( envelope, []( const Json::Value & ) {}, nullptr, &taskIdOut ) );
+    REQUIRE( taskIdOut == -1 );
+  }
+}
+
+TEST_CASE( "ToolCallDispatcher submitBlocking waits for completion or times out", "[processing][tool_call_dispatcher][blocking]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+  AtomicAlgorithmRegistry::instance().registerAdapter( std::make_shared<StubAdapter>( "stub:echo" ) );
+
+  const Json::Value envelope = objectEnvelope( "stub:echo", "parameters", Json::Value( Json::objectValue ) );
+
+  SECTION( "returns the completion payload for an immediate watcher" )
+  {
+    ToolCallDispatcher immediateDispatcher(
+      []( const QString &, const QVariantMap & ) -> long { return 7; },
+      []( long, ToolCallDispatcher::CompletionCallback onComplete ) {
+        Json::Value payload( Json::objectValue );
+        payload["status"] = "success";
+        onComplete( payload );
+      } );
+    const Json::Value result = immediateDispatcher.submitBlocking( envelope );
+    REQUIRE( result["status"].asString() == "success" );
+  }
+
+  SECTION( "waits for an asynchronous watcher to fire" )
+  {
+    ToolCallDispatcher asyncDispatcher(
+      []( const QString &, const QVariantMap & ) -> long { return 8; },
+      []( long, ToolCallDispatcher::CompletionCallback onComplete ) {
+        std::thread( [onComplete]() {
+          std::this_thread::sleep_for( std::chrono::milliseconds( 25 ) );
+          Json::Value payload( Json::objectValue );
+          payload["status"] = "success";
+          payload["output"] = "/async/out.tif";
+          onComplete( payload );
+        } ).detach();
+      } );
+    const Json::Value result = asyncDispatcher.submitBlocking( envelope, std::chrono::seconds( 5 ) );
+    REQUIRE( result["status"].asString() == "success" );
+    REQUIRE( result["output"].asString() == "/async/out.tif" );
+  }
+
+  SECTION( "returns an error payload on timeout" )
+  {
+    ToolCallDispatcher neverDispatcher(
+      []( const QString &, const QVariantMap & ) -> long { return 9; },
+      []( long, ToolCallDispatcher::CompletionCallback ) {
+        // never completes
+      } );
+    const auto start = std::chrono::steady_clock::now();
+    const Json::Value result = neverDispatcher.submitBlocking( envelope, std::chrono::milliseconds( 50 ) );
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    REQUIRE( result["status"].asString() == "error" );
+    REQUIRE( result.isMember( "errorMessage" ) );
+    REQUIRE( elapsed < std::chrono::seconds( 5 ) );
+  }
+
+  SECTION( "returns an error payload for invalid envelopes without hanging" )
+  {
+    ToolCallDispatcher dispatcher(
+      []( const QString &, const QVariantMap & ) -> long { return 1; },
+      []( long, ToolCallDispatcher::CompletionCallback ) {} );
+    Json::Value invalid = objectEnvelope( "not_registered_anywhere", "parameters", Json::Value( Json::objectValue ) );
+    const Json::Value result = dispatcher.submitBlocking( invalid, std::chrono::milliseconds( 100 ) );
+    REQUIRE( result["status"].asString() == "error" );
+    REQUIRE( result.isMember( "errorMessage" ) );
+  }
+}
+
+TEST_CASE( "ToolCallDispatcher honors optional parameters for operator schema", "[processing][tool_call_dispatcher][schema]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+  AtomicAlgorithmRegistry::instance().registerAdapter(
+    std::make_shared<RsOperatorAdapter>( std::make_unique<sicnu::operators::rs::RsSpectralIndexOperator>() ) );
+
+  FakeDispatcherHarness harness;
+
+  SECTION( "accepts calls omitting optional parameters (e.g. nir, red, swir)" )
+  {
+    Json::Value args( Json::objectValue );
+    args["input"] = "/path/to/input.tif";
+    args["output"] = "/path/to/output.tif";
+    args["index"] = "NDVI";
+
+    const Json::Value envelope = objectEnvelope( "rs_spectral_index", "parameters", args );
+    REQUIRE( harness.dispatcher.rejectionReason( envelope ).isEmpty() );
+  }
+
+  SECTION( "rejects calls missing required parameter (e.g. input)" )
+  {
+    Json::Value args( Json::objectValue );
+    args["output"] = "/path/to/output.tif";
+    args["index"] = "NDVI";
+
+    const Json::Value envelope = objectEnvelope( "rs_spectral_index", "parameters", args );
+    REQUIRE( harness.dispatcher.rejectionReason( envelope ).contains( "Missing required parameter: input" ) );
+  }
+}

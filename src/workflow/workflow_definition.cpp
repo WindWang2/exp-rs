@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "placeholder_grammar.h"
+
 namespace sicnu::workflow {
 
 Json::Value workflowDefinitionToJson( const WorkflowDefinition &def )
@@ -74,18 +76,23 @@ Json::Value workflowDefinitionToJson( const WorkflowDefinition &def )
 
 bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &def, std::string &error )
 {
-  if ( !json.isObject() || !json.isMember( "id" ) )
+  if ( !json.isObject() )
   {
-    error = "Invalid JSON: missing 'id' field";
+    error = "Invalid JSON: root must be an object";
     return false;
   }
 
-  def.id = json["id"].asString();
-  if ( json.isMember( "title" ) )
+  def.id = json.isMember( "id" ) && json["id"].isString() ? json["id"].asString() : "agent_plan";
+  if ( json.isMember( "title" ) && json["title"].isString() )
     def.title = json["title"].asString();
-  if ( json.isMember( "workspaceKind" ) )
+  else if ( json.isMember( "name" ) && json["name"].isString() )
+    def.title = json["name"].asString();
+  else
+    def.title = "Agent Plan";
+
+  if ( json.isMember( "workspaceKind" ) && json["workspaceKind"].isString() )
     def.workspaceKind = json["workspaceKind"].asString();
-  if ( json.isMember( "host" ) )
+  if ( json.isMember( "host" ) && json["host"].isInt() )
     def.host = static_cast<HostKind>( json["host"].asInt() );
 
   def.steps.clear();
@@ -93,16 +100,30 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
   {
     for ( const auto &stepVal : json["steps"] )
     {
+      if ( !stepVal.isObject() )
+        continue;
+
       StepDef step;
-      if ( stepVal.isMember( "id" ) )
+      if ( stepVal.isMember( "id" ) && stepVal["id"].isString() )
         step.id = stepVal["id"].asString();
-      if ( stepVal.isMember( "title" ) )
+      if ( stepVal.isMember( "title" ) && stepVal["title"].isString() )
         step.title = stepVal["title"].asString();
-      if ( stepVal.isMember( "kind" ) )
+      if ( stepVal.isMember( "kind" ) && stepVal["kind"].isInt() )
         step.kind = static_cast<StepKind>( stepVal["kind"].asInt() );
-      if ( stepVal.isMember( "operatorId" ) )
+      else
+        step.kind = StepKind::Operator;
+
+      if ( stepVal.isMember( "operatorId" ) && stepVal["operatorId"].isString() )
         step.operatorId = stepVal["operatorId"].asString();
-      if ( stepVal.isMember( "artifactOnSuccess" ) )
+      else if ( stepVal.isMember( "operator" ) && stepVal["operator"].isString() )
+        step.operatorId = stepVal["operator"].asString();
+      else if ( stepVal.isMember( "name" ) && stepVal["name"].isString() )
+        step.operatorId = stepVal["name"].asString();
+
+      if ( step.title.empty() )
+        step.title = step.operatorId;
+
+      if ( stepVal.isMember( "artifactOnSuccess" ) && stepVal["artifactOnSuccess"].isString() )
         step.artifactOnSuccess = stepVal["artifactOnSuccess"].asString();
 
       if ( stepVal.isMember( "meta" ) && stepVal["meta"].isMember( "ui" ) )
@@ -127,9 +148,9 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
         for ( const auto &gVal : stepVal["gates"] )
         {
           GateDef gate;
-          if ( gVal.isMember( "require" ) )
+          if ( gVal.isMember( "require" ) && gVal["require"].isString() )
             gate.require = gVal["require"].asString();
-          if ( gVal.isMember( "hint" ) )
+          if ( gVal.isMember( "hint" ) && gVal["hint"].isString() )
             gate.hint = gVal["hint"].asString();
           step.gates.push_back( gate );
         }
@@ -140,18 +161,37 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
         for ( const auto &connVal : stepVal["inputs"] )
         {
           StepConnection conn;
-          if ( connVal.isMember( "fromStepId" ) )
+          if ( connVal.isMember( "fromStepId" ) && connVal["fromStepId"].isString() )
             conn.fromStepId = connVal["fromStepId"].asString();
-          if ( connVal.isMember( "fromPort" ) )
+          if ( connVal.isMember( "fromPort" ) && connVal["fromPort"].isString() )
             conn.fromPort = connVal["fromPort"].asString();
-          if ( connVal.isMember( "toPort" ) )
+          if ( connVal.isMember( "toPort" ) && connVal["toPort"].isString() )
             conn.toPort = connVal["toPort"].asString();
           step.inputs.push_back( conn );
         }
       }
 
-      if ( stepVal.isMember( "params" ) )
+      if ( stepVal.isMember( "params" ) && stepVal["params"].isObject() )
         step.params = stepVal["params"];
+      else if ( stepVal.isMember( "arguments" ) && stepVal["arguments"].isObject() )
+        step.params = stepVal["arguments"];
+      else
+        step.params = Json::Value( Json::objectValue );
+
+      if ( step.inputs.empty() && step.params.isObject() )
+      {
+        for ( const auto &key : step.params.getMemberNames() )
+        {
+          if ( !step.params[key].isString() )
+            continue;
+          const std::string strVal = step.params[key].asString();
+          auto inferred = inferStepConnections( key, strVal );
+          for ( auto &conn : inferred )
+          {
+            step.inputs.push_back( std::move( conn ) );
+          }
+        }
+      }
 
       def.steps.push_back( step );
     }

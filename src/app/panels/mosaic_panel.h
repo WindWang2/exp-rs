@@ -56,7 +56,6 @@ private slots:
     void runMosaic();
     void onCompleted(const QString &outputPath);
     void onFailed(const QString &error);
-    void onTaskUpdated(const sicnu::AlgorithmTaskInfo &info);
 
 private:
     void setupUi();
@@ -66,5 +65,5 @@ private:
     QPushButton *m_runButton = nullptr;
     QLabel *m_statusLabel = nullptr;
     QProgressBar *m_progressBar = nullptr;
-    long m_pendingTaskId = -1;
+    sicnu::app::GuiJobHandle m_jobHandle{ this };
 };

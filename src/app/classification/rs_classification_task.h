@@ -1,19 +1,16 @@
-// rs_classification_task.h — Phase 10A Task 10.8.
+// rs_classification_task.h — Phase 10A Task 10.8 / ADR 0019 slice S2.
 //
-// QgsTask subclass that runs the full pixel-based classification pipeline on
-// a worker thread:
+// Thin QgsTask adapter over RsClassificationPipeline (src/analysis/
+// classification). The pipeline core (train → persist → tiled predict →
+// class map → accuracy) lives in the analysis module; this task only:
 //
-//   1. backend->fit(trainX, trainY) when not already fitted
-//   2. optional accuracy assessment on held-out testX/testY (Task 10.9)
-//   3. open source raster (GDAL)
-//   4. create destination GTiff with same georeferencing + ColorTable (Byte only)
-//   5. tile-stream predict (256x256) writing class IDs
-//      - GDT_Byte when max class id ≤ 255
-//      - GDT_UInt16 / GDT_Int16 when class ids exceed 255 (no silent clamp)
-//   6. NoData / user ignore values → output unclassified (default class 0)
+//   * maps Config → RsClassificationPipeline::Config,
+//   * bridges QgsFeedback (progress + cancel) to the pipeline's
+//     progress/cancel sink,
+//   * maps the typed pipeline result back to Result.
 //
 // Cancellation: a QgsFeedback is connected to setProgress + cancel(). If
-// cancelled mid-tile the partially-written output file is removed.
+// cancelled mid-tile the pipeline removes the partially-written output file.
 #pragma once
 
 #include "qgstaskmanager.h"
@@ -55,15 +52,16 @@ class RsClassificationTask : public QgsTask
       cv::Mat testY;                                  // CV_32S Mx1 (may be empty)
       QHash<int, QColor> classColors;                 // classId -> RGB
       QString algoName;                               // for structured log
-      // If fitted, Task transforms tile X before predict. Caller scales train/test.
+      // If fitted, the pipeline transforms tile X before predict. Caller scales train/test.
       RsFeatureScaler scaler;
-      // Optional: after successful fit, persist model YAML + .scale.json sidecar.
-      // Empty = do not save. Non-empty: hard-fails the task if model or
-      // sidecar write fails (orphan model file is removed on sidecar failure).
+      // Optional: after successful fit, persist model YAML + .meta.json
+      // superset sidecar (ADR 0019 decision 3). Empty = do not save.
+      // Non-empty: hard-fails the task if model or sidecar write fails
+      // (orphan model file is removed on sidecar failure).
       QString modelSavePath;
       // GDAL GTiff creation options. Defaults favour tiled DEFLATE suitable
       // for large lab scenes. On Create failure with non-empty options the
-      // task retries once with no options.
+      // pipeline retries once with no options.
       QStringList creationOptions{
         QStringLiteral( "TILED=YES" ),
         QStringLiteral( "COMPRESS=DEFLATE" ),

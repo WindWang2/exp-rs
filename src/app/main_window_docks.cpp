@@ -516,6 +516,13 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
         agentCopilotDock->setContext( &m_projectContext->dataManager(), m_activeViewHost.get() );
     agentCopilotDock->hide();
 
+    // Committed single tool-call outputs are loaded like any task auto-load
+    // (the OutputCommitter moved the file to its stable path by this point).
+    connect( agentCopilotDock, &sicnu::agent::AgentCopilotDockWidget::toolOutputLayerRequested,
+             this, [this]( const QString &path ) {
+                 ( void ) loadDataLayer( path );
+             } );
+
     connect( agentCopilotDock, &sicnu::agent::AgentCopilotDockWidget::viewPlanInCanvasRequested,
              this, [this]( const QJsonObject &planJson ) {
                  if ( m_pipelineDock && m_pipelineDock->pipelineCanvas() )

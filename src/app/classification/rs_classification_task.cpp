@@ -1,26 +1,15 @@
-// rs_classification_task.cpp — Phase 10A Task 10.8.
+// rs_classification_task.cpp — Phase 10A Task 10.8 / ADR 0019 slice S2.
+//
+// Thin QgsTask adapter: the full classify flow lives in
+// RsClassificationPipeline (analysis layer); this file only maps the config,
+// bridges QgsFeedback to the pipeline's progress/cancel sink, and maps the
+// typed pipeline result back.
 
 #include "rs_classification_task.h"
 
-#include "core/sicnu_logging.h"
-#include "rs_hungarian_assignment.h"
+#include "rs_classification_pipeline.h"
 
-#include <QElapsedTimer>
-#include <QFile>
 #include <QFileInfo>
-#include <QHash>
-#include <QList>
-#include <QSet>
-
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
-#include <vector>
-
-#include "processing/gdal/gdal_dataset_wrapper.h"
-
-#include <cpl_string.h>
-#include <gdal_priv.h>
 
 RsClassificationTask::RsClassificationTask( Config cfg )
   : QgsTask( tr( "Classifying %1" ).arg( QFileInfo( cfg.sourceRaster ).fileName() ),
@@ -39,479 +28,39 @@ void RsClassificationTask::cancel()
 
 bool RsClassificationTask::run()
 {
-  // Progress milestones: training finishes at 30%, tile prediction spans
-  // 30%-95%, and final bookkeeping fills to 100%.
-  constexpr double kProgressAfterTrain   = 30.0;
-  constexpr double kProgressPredictSpan  = 65.0;
-  constexpr double kProgressComplete     = 100.0;
+  RsClassificationPipeline::Config pcfg;
+  pcfg.sourceRaster = std::move( mCfg.sourceRaster );
+  pcfg.outputRaster = std::move( mCfg.outputRaster );
+  pcfg.bandIndices = std::move( mCfg.bandIndices );
+  pcfg.backend = std::move( mCfg.backend );
+  pcfg.trainX = std::move( mCfg.trainX );
+  pcfg.trainY = std::move( mCfg.trainY );
+  pcfg.testX = std::move( mCfg.testX );
+  pcfg.testY = std::move( mCfg.testY );
+  pcfg.classColors = std::move( mCfg.classColors );
+  pcfg.methodName = std::move( mCfg.algoName );
+  pcfg.scaler = std::move( mCfg.scaler );
+  pcfg.modelSavePath = std::move( mCfg.modelSavePath );
+  pcfg.creationOptions = std::move( mCfg.creationOptions );
+  pcfg.cropToWindow = mCfg.cropToWindow;
+  pcfg.window = mCfg.window;
+  pcfg.ignoreOptions = std::move( mCfg.ignoreOptions );
 
-  QElapsedTimer timer;
-  timer.start();
-
-  SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Classification task started: algo=%1, bands=%2, output=%3" )
-    .arg( mCfg.algoName ).arg( mCfg.bandIndices.size() ).arg( QFileInfo( mCfg.outputRaster ).fileName() ) );
-
-  if ( !mCfg.backend )
-  {
-    mResult.errorMessage = QStringLiteral( "No classifier backend supplied" );
-    return false;
-  }
-
-  // 1. Train — skipped when the backend was loaded from disk
-  //    (Phase 10A.1.3). When fit is required, empty trainX/trainY is fatal.
-  if ( !mCfg.backend->isFitted() )
-  {
-    if ( mCfg.trainX.empty() || mCfg.trainY.empty() )
+  // Bridge: pipeline fraction [0,1] → QgsFeedback percent; cancel via the
+  // sink's return value (pipeline then fails with Error::Cancelled and
+  // removes the partially-written output).
+  const RsClassificationPipelineResult res = RsClassificationPipeline::run(
+    std::move( pcfg ),
+    [this]( double fraction, const QString & )
     {
-      mResult.errorMessage = QStringLiteral(
-        "Backend not fitted and no training data supplied" );
-      return false;
-    }
-    if ( !mCfg.backend->fit( mCfg.trainX, mCfg.trainY ) )
-    {
-      mResult.errorMessage = QStringLiteral( "Backend training failed" );
-      return false;
-    }
-  }
+      mFb.setProgress( fraction * 100.0 );
+      return !mFb.isCanceled();
+    } );
 
-  // Optional model persistence — write OpenCV YAML + feature-scaler sidecar
-  // next to it so loadClassifierModel() can restore both.
-  // Hard-fail when modelSavePath is set and either half of the pair fails;
-  // if the model wrote successfully but the sidecar did not, remove the
-  // orphan model so callers never load a scaled-trained model without its
-  // matching scale.json.
-  if ( !mCfg.modelSavePath.isEmpty() )
-  {
-    if ( !mCfg.backend->save( mCfg.modelSavePath ) )
-    {
-      mResult.errorMessage = QStringLiteral( "Failed to save classifier model: %1" )
-                               .arg( mCfg.modelSavePath );
-      SICNU_LOG_ERROR( SicnuLogTags::Classification, mResult.errorMessage );
-      return false;
-    }
-    SICNU_LOG_INFO( SicnuLogTags::Classification,
-                    QString( "Classifier model saved: %1" )
-                      .arg( mCfg.modelSavePath ) );
-    if ( mCfg.scaler.isFitted() )
-    {
-      const QFileInfo mi( mCfg.modelSavePath );
-      const QString scalePath = mi.absolutePath() + QLatin1Char( '/' )
-                                + mi.completeBaseName()
-                                + QStringLiteral( ".scale.json" );
-      if ( !mCfg.scaler.saveJson( scalePath ) )
-      {
-        QFile::remove( mCfg.modelSavePath );
-        mResult.errorMessage =
-          QStringLiteral( "Failed to save scale.json sidecar: %1 (model file removed)" )
-            .arg( scalePath );
-        SICNU_LOG_ERROR( SicnuLogTags::Classification, mResult.errorMessage );
-        return false;
-      }
-      SICNU_LOG_INFO( SicnuLogTags::Classification,
-                      QString( "Feature scaler sidecar saved: %1" )
-                        .arg( scalePath ) );
-    }
-  }
-
-  mFb.setProgress( kProgressAfterTrain );
-  if ( mFb.isCanceled() )
-  {
-    mResult.errorMessage = QStringLiteral( "Cancelled" );
-    return false;
-  }
-
-  // Hungarian remapping table for K-Means to align cluster IDs (1..K) with true class IDs.
-  QHash<int, int> kmeansRemap;
-  if ( mCfg.algoName == QStringLiteral( "KMeans" ) && !mCfg.trainX.empty() && !mCfg.trainY.empty() )
-  {
-    try
-    {
-      const cv::Mat trainPred = mCfg.backend->predict( mCfg.trainX );
-      QSet<int> trueSet, clusterSet;
-      for ( int i = 0; i < mCfg.trainY.rows; ++i )
-        trueSet.insert( mCfg.trainY.at<int>( i, 0 ) );
-      for ( int i = 0; i < trainPred.rows; ++i )
-        clusterSet.insert( trainPred.at<int>( i, 0 ) );
-
-      if ( !trueSet.isEmpty() )
-      {
-        QList<int> tList( trueSet.begin(), trueSet.end() );
-        QList<int> cList( clusterSet.begin(), clusterSet.end() );
-        std::sort( tList.begin(), tList.end() );
-        std::sort( cList.begin(), cList.end() );
-        const int N = tList.size();
-        const int M = cList.size();
-        // Rectangular n×m cost (n=true classes, m=clusters). Hungarian pads
-        // safely with kPadCost=1e9 when N != M; pad matches return -1.
-        cv::Mat cost = cv::Mat::zeros( N, M, CV_64F );
-        for ( int i = 0; i < mCfg.trainY.rows; ++i )
-        {
-          const int ti = tList.indexOf( mCfg.trainY.at<int>( i, 0 ) );
-          const int ci = cList.indexOf( trainPred.at<int>( i, 0 ) );
-          if ( ti >= 0 && ci >= 0 )
-            cost.at<double>( ti, ci ) -= 1.0;
-        }
-
-        const QVector<int> assign = RsHungarianAssignment::solve( cost );
-        for ( int i = 0; i < N && i < assign.size(); ++i )
-        {
-          const int clusterIdx = assign[i];
-          if ( clusterIdx >= 0 && clusterIdx < M )
-            kmeansRemap[cList[clusterIdx]] = tList[i];
-        }
-      }
-    }
-    catch ( ... )
-    {
-      qWarning() << "KMeans Hungarian remap failed, using un-remapped cluster IDs";
-    }
-  }
-
-  // 1b. Phase 10A Task 10.9 + 10A.1.1 — accuracy assessment on the held-out split.
-  // NormalBayes / SVM: predictions are already in class-ID space.
-  // K-Means: cluster IDs are remapped to true class IDs.
-  if ( mCfg.testX.rows > 0 && mCfg.testY.rows > 0 )
-  {
-    try
-    {
-      const cv::Mat pred = mCfg.backend->predict( mCfg.testX );
-      QVector<int> yt;
-      QVector<int> yp;
-
-      if ( mCfg.algoName == QStringLiteral( "KMeans" ) )
-      {
-        yt.reserve( mCfg.testY.rows );
-        yp.reserve( mCfg.testY.rows );
-        for ( int i = 0; i < mCfg.testY.rows; ++i )
-        {
-          yt.append( mCfg.testY.at<int>( i, 0 ) );
-          yp.append( kmeansRemap.value( pred.at<int>( i, 0 ), pred.at<int>( i, 0 ) ) );
-        }
-      }
-      else
-      {
-        // Supervised: predictions already in class-ID space.
-        yt.reserve( pred.rows );
-        yp.reserve( pred.rows );
-        for ( int i = 0; i < pred.rows; ++i )
-        {
-          yt.append( mCfg.testY.at<int>( i, 0 ) );
-          yp.append( pred.at<int>( i, 0 ) );
-        }
-      }
-
-      if ( !yt.isEmpty() )
-        mResult.accuracy = RsAccuracyAssessment::compute( yt, yp );
-    }
-    catch ( const cv::Exception &e )
-    {
-      qWarning() << "Accuracy assessment failed:" << e.what();
-    }
-  }
-
-  // 2. Open source raster
-  ensureGdalInit();
-  GDALDataset *srcDs = static_cast<GDALDataset *>(
-    GDALOpen( mCfg.sourceRaster.toUtf8().constData(), GA_ReadOnly ) );
-  if ( !srcDs )
-  {
-    mResult.errorMessage = QStringLiteral( "Cannot open source raster: %1" )
-                             .arg( mCfg.sourceRaster );
-    return false;
-  }
-  const int srcW = srcDs->GetRasterXSize();
-  const int srcH = srcDs->GetRasterYSize();
-  double gt[6];
-  srcDs->GetGeoTransform( gt );
-  const char *proj = srcDs->GetProjectionRef();
-
-  // Optional viewport crop (preview). Full-raster Apply leaves crop off.
-  const bool crop = mCfg.cropToWindow && mCfg.window.valid
-                    && mCfg.window.width() > 0 && mCfg.window.height() > 0;
-  // Clamp half-open window into source extents (0,0 / full size when !crop).
-  const int x0 = std::clamp( crop ? mCfg.window.x0 : 0, 0, srcW );
-  const int y0 = std::clamp( crop ? mCfg.window.y0 : 0, 0, srcH );
-  const int x1 = std::clamp( crop ? mCfg.window.x1 : srcW, 0, srcW );
-  const int y1 = std::clamp( crop ? mCfg.window.y1 : srcH, 0, srcH );
-  if ( x1 <= x0 || y1 <= y0 )
-  {
-    GDALClose( srcDs );
-    mResult.errorMessage = QStringLiteral( "Crop window is empty or outside the source raster" );
-    return false;
-  }
-  const int outW = x1 - x0;
-  const int outH = y1 - y0;
-
-  // Destination geotransform: shift origin to window top-left pixel.
-  double outGt[6] = { gt[0], gt[1], gt[2], gt[3], gt[4], gt[5] };
-  if ( crop )
-  {
-    outGt[0] = gt[0] + x0 * gt[1] + y0 * gt[2];
-    outGt[3] = gt[3] + x0 * gt[4] + y0 * gt[5];
-  }
-
-  // Sanity-check requested bands
-  const int nBands = srcDs->GetRasterCount();
-  for ( int b : mCfg.bandIndices )
-  {
-    if ( b < 1 || b > nBands )
-    {
-      GDALClose( srcDs );
-      mResult.errorMessage = QStringLiteral( "Band index %1 out of range (1..%2)" )
-                               .arg( b )
-                               .arg( nBands );
-      return false;
-    }
-  }
-
-  // Max class id drives output datatype: Byte only when all ids fit in 0..255.
-  // Never silently clamp large class IDs into uint8.
-  int maxClassId = 0;
-  for ( auto it = mCfg.classColors.constBegin(); it != mCfg.classColors.constEnd(); ++it )
-    maxClassId = std::max( maxClassId, it.key() );
-  for ( int i = 0; i < mCfg.trainY.rows; ++i )
-    maxClassId = std::max( maxClassId, mCfg.trainY.at<int>( i, 0 ) );
-  for ( int i = 0; i < mCfg.testY.rows; ++i )
-    maxClassId = std::max( maxClassId, mCfg.testY.at<int>( i, 0 ) );
-
-  GDALDataType outType = GDT_Byte;
-  if ( maxClassId > 65535 )
-    outType = GDT_Int32;
-  else if ( maxClassId > 255 )
-    outType = GDT_UInt16;
-
-  // 3. Create destination GTiff (tiled+DEFLATE by default; fall back on fail)
-  GDALDriver *drv = GetGDALDriverManager()->GetDriverByName( "GTiff" );
-  if ( !drv )
-  {
-    GDALClose( srcDs );
-    mResult.errorMessage = QStringLiteral( "GTiff driver unavailable" );
-    return false;
-  }
-  char **papsz = nullptr;
-  for ( const QString &o : mCfg.creationOptions )
-    papsz = CSLAddString( papsz, o.toUtf8().constData() );
-  GDALDataset *dstDs = drv->Create(
-    mCfg.outputRaster.toUtf8().constData(), outW, outH, 1, outType, papsz );
-  if ( !dstDs && papsz )
-  {
-    CSLDestroy( papsz );
-    papsz = nullptr;
-    qWarning() << "RsClassificationTask: Create with options failed; retrying without options";
-    dstDs = drv->Create(
-      mCfg.outputRaster.toUtf8().constData(), outW, outH, 1, outType, nullptr );
-  }
-  else
-  {
-    CSLDestroy( papsz );
-    papsz = nullptr;
-  }
-  if ( !dstDs )
-  {
-    GDALClose( srcDs );
-    mResult.errorMessage = QStringLiteral( "Cannot create output: %1" )
-                             .arg( mCfg.outputRaster );
-    return false;
-  }
-  dstDs->SetGeoTransform( outGt );
-  if ( proj && *proj )
-    dstDs->SetProjection( proj );
-
-  // ColorTable is palette-index based and only meaningful for Byte output.
-  // Index 0 is reserved for unclassified / NoData (transparent).
-  if ( outType == GDT_Byte )
-  {
-    GDALColorTable ct( GPI_RGB );
-    {
-      GDALColorEntry bg;
-      bg.c1 = 0;
-      bg.c2 = 0;
-      bg.c3 = 0;
-      bg.c4 = 0; // alpha 0 → transparent
-      ct.SetColorEntry( 0, &bg );
-    }
-    for ( auto it = mCfg.classColors.constBegin(); it != mCfg.classColors.constEnd(); ++it )
-    {
-      GDALColorEntry e;
-      e.c1 = static_cast<short>( it.value().red() );
-      e.c2 = static_cast<short>( it.value().green() );
-      e.c3 = static_cast<short>( it.value().blue() );
-      e.c4 = 255;
-      ct.SetColorEntry( it.key(), &e );
-    }
-    dstDs->GetRasterBand( 1 )->SetColorTable( &ct );
-    dstDs->GetRasterBand( 1 )->SetColorInterpretation( GCI_PaletteIndex );
-  }
-  const int unclassified = mCfg.ignoreOptions.unclassifiedValue;
-  if ( mCfg.ignoreOptions.writeOutputNodata )
-    dstDs->GetRasterBand( 1 )->SetNoDataValue( unclassified );
-
-  // Per-band source NoData (optional) + user ignore values → unclassified.
-  const int B = mCfg.bandIndices.size();
-  std::vector<bool> bandHasNodata( static_cast<size_t>( B ), false );
-  std::vector<float> bandNodata( static_cast<size_t>( B ), 0.0f );
-  if ( mCfg.ignoreOptions.useSourceNodata )
-  {
-    for ( int bi = 0; bi < B; ++bi )
-    {
-      int success = 0;
-      const double nd = srcDs->GetRasterBand( mCfg.bandIndices[bi] )->GetNoDataValue( &success );
-      if ( success )
-      {
-        bandHasNodata[static_cast<size_t>( bi )] = true;
-        bandNodata[static_cast<size_t>( bi )] = static_cast<float>( nd );
-      }
-    }
-  }
-
-  // 4. Tile-streamed predict over [x0,x1)×[y0,y1) in source pixel space;
-  // write relative to the destination origin (0,0).
-  constexpr int kTileSize = 256;
-  const int totalTiles = std::max( 1,
-    ( ( outW + kTileSize - 1 ) / kTileSize )
-    * ( ( outH + kTileSize - 1 ) / kTileSize ) );
-  int doneTiles = 0;
-
-  std::vector<float> tileBuf( static_cast<size_t>( kTileSize ) * kTileSize );
-  // Int32 write buffer; GDAL converts to the band datatype on RasterIO.
-  std::vector<int32_t> outBuf( static_cast<size_t>( kTileSize ) * kTileSize );
-  std::vector<uint8_t> pixelNodata( static_cast<size_t>( kTileSize ) * kTileSize );
-
-  for ( int ty = y0; ty < y1; ty += kTileSize )
-  {
-    const int th = std::min( kTileSize, y1 - ty );
-    for ( int tx = x0; tx < x1; tx += kTileSize )
-    {
-      if ( mFb.isCanceled() )
-      {
-        GDALClose( srcDs );
-        GDALClose( dstDs );
-        QFile::remove( mCfg.outputRaster );
-        mResult.errorMessage = QStringLiteral( "Cancelled" );
-        return false;
-      }
-      const int tw = std::min( kTileSize, x1 - tx );
-      const int npx = th * tw;
-
-      std::fill( pixelNodata.begin(), pixelNodata.begin() + npx, 0 );
-
-      cv::Mat X( npx, B, CV_32F );
-      for ( int bi = 0; bi < B; ++bi )
-      {
-        const int bandIdx = mCfg.bandIndices[bi];
-        const CPLErr err = srcDs->GetRasterBand( bandIdx )->RasterIO(
-          GF_Read, tx, ty, tw, th, tileBuf.data(),
-          tw, th, GDT_Float32, 0, 0 );
-        if ( err != CE_None )
-        {
-          GDALClose( srcDs );
-          GDALClose( dstDs );
-          QFile::remove( mCfg.outputRaster );
-          mResult.errorMessage =
-            QStringLiteral( "RasterIO read failed at tile (%1,%2)" ).arg( tx ).arg( ty );
-          return false;
-        }
-        for ( int p = 0; p < npx; ++p )
-        {
-          const float v = tileBuf[static_cast<size_t>( p )];
-          X.at<float>( p, bi ) = v;
-        }
-      }
-      // Mark ignore / edge pixels after all bands are filled.
-      std::vector<float> feat( static_cast<size_t>( B ) );
-      for ( int p = 0; p < npx; ++p )
-      {
-        for ( int bi = 0; bi < B; ++bi )
-          feat[static_cast<size_t>( bi )] = X.at<float>( p, bi );
-        if ( mCfg.ignoreOptions.isIgnorePixel( feat.data(), B, bandHasNodata, bandNodata ) )
-          pixelNodata[static_cast<size_t>( p )] = 1;
-      }
-
-      if ( mCfg.scaler.isFitted() )
-      {
-        X = mCfg.scaler.transform( X );
-        if ( X.empty() )
-        {
-          GDALClose( srcDs );
-          GDALClose( dstDs );
-          QFile::remove( mCfg.outputRaster );
-          mResult.errorMessage = QStringLiteral(
-            "Feature scaling failed at tile (%1,%2)" ).arg( tx ).arg( ty );
-          return false;
-        }
-      }
-
-      cv::Mat pred;
-      try
-      {
-        pred = mCfg.backend->predict( X );
-      }
-      catch ( const cv::Exception &ex )
-      {
-        GDALClose( srcDs );
-        GDALClose( dstDs );
-        QFile::remove( mCfg.outputRaster );
-        mResult.errorMessage = QStringLiteral( "Classifier prediction threw OpenCV exception: %1" )
-                                 .arg( QString::fromStdString( ex.what() ) );
-        return false;
-      }
-      catch ( ... )
-      {
-        GDALClose( srcDs );
-        GDALClose( dstDs );
-        QFile::remove( mCfg.outputRaster );
-        mResult.errorMessage = QStringLiteral( "Classifier prediction threw unknown exception" );
-        return false;
-      }
-
-      // Verify prediction output size matches tile pixel count
-      if ( pred.rows < npx )
-      {
-        GDALClose( srcDs );
-        GDALClose( dstDs );
-        QFile::remove( mCfg.outputRaster );
-        mResult.errorMessage = QStringLiteral( "Classifier returned fewer predictions (%1) than expected (%2)" )
-                                   .arg( pred.rows ).arg( npx );
-        return false;
-      }
-
-      for ( int p = 0; p < npx; ++p )
-      {
-        if ( pixelNodata[static_cast<size_t>( p )] )
-        {
-          outBuf[static_cast<size_t>( p )] = static_cast<int32_t>( unclassified );
-          continue;
-        }
-        int v = pred.at<int>( p, 0 );
-        if ( mCfg.algoName == QStringLiteral( "KMeans" ) )
-        {
-          v = kmeansRemap.value( v, v );
-        }
-        if ( v < 0 )
-          v = unclassified;
-        outBuf[static_cast<size_t>( p )] = static_cast<int32_t>( v );
-      }
-      // Destination offsets are relative to the crop window origin.
-      // GDAL converts Int32 buffer to the band datatype (Byte / UInt16 / Int32).
-      const int dstX = tx - x0;
-      const int dstY = ty - y0;
-      dstDs->GetRasterBand( 1 )->RasterIO(
-        GF_Write, dstX, dstY, tw, th, outBuf.data(),
-        tw, th, GDT_Int32, 0, 0 );
-
-      ++doneTiles;
-      mFb.setProgress( kProgressAfterTrain + kProgressPredictSpan * doneTiles / totalTiles );
-    }
-  }
-
-  GDALClose( srcDs );
-  GDALClose( dstDs );
-
-  mResult.totalPixels = outW * outH;
-  mResult.durationMs = static_cast<int>( timer.elapsed() );
-  mResult.ok = true;
-  mFb.setProgress( kProgressComplete );
-  SICNU_LOG_SUCCESS( SicnuLogTags::Classification, QString( "Classification completed: %1 pixels, %2 ms" )
-    .arg( mResult.totalPixels ).arg( mResult.durationMs ) );
-  return true;
+  mResult.ok = res.ok;
+  mResult.errorMessage = res.errorMessage;
+  mResult.totalPixels = res.totalPixels;
+  mResult.durationMs = res.durationMs;
+  mResult.accuracy = res.accuracy;
+  return res.ok;
 }

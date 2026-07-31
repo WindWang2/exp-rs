@@ -4,16 +4,25 @@
 #include <QObject>
 #include <QVariantMap>
 #include <QThread>
-#include <QMutex>
-#include <QMap>
-#include <QPointer>
-#include <atomic>
-#include <memory>
 #include <QCoreApplication>
+
+#include <atomic>
+
+#include "processing/framework/task_center.h"
+#include "processing/framework/tool_call_dispatcher.h"
 
 class QgsProcessingAlgorithm;
 class QgsProcessingContext;
 class QgsProcessingFeedback;
+
+/// MCP status shape for a TaskCenter task (ADR 0022 status mapping):
+/// - Queued / Running / Paused → "running"
+/// - Completed → "completed" + `result` from resultPayload (omitted when null)
+/// - Failed → "failed" + `errorMessage`
+/// - Canceled → "canceled"
+/// `progress` ← progressPercentage; `progressText` ← last logBuffer line
+/// (omitted when empty).
+QVariantMap mcpStatusForTask(const sicnu::AlgorithmTaskInfo &info);
 
 class StdinReader : public QThread
 {
@@ -29,35 +38,11 @@ private:
     std::atomic<bool> m_stopRequested{false};
 };
 
-struct AlgorithmExecution {
-    QString id;
-    QString algorithmId;
-    mutable QMutex mutex;
-    double progress = 0;
-    QString progressText;
-    QString error;
-    bool completed = false;
-    bool canceled = false;
-    QVariantMap result;
-};
-
-class AlgorithmWorker : public QThread
-{
-    Q_OBJECT
-public:
-    AlgorithmWorker(const QString &execId, QgsProcessingAlgorithm *algo, const QVariantMap &parameters, std::shared_ptr<AlgorithmExecution> execState, QObject *parent = nullptr);
-    ~AlgorithmWorker() override;
-
-protected:
-    void run() override;
-
-private:
-    QString mExecId;
-    std::unique_ptr<QgsProcessingAlgorithm> mAlgo;
-    QVariantMap mParameters;
-    std::shared_ptr<AlgorithmExecution> mState;
-};
-
+/// Stateless JSON-RPC protocol adapter at the Task Center seam (ADR 0022):
+/// owns stdio framing, the tool allow-list / workspace-path policy, and status
+/// mapping — no execution machinery of its own. Single calls reach the Task
+/// Center through ToolCallDispatcher (rs: operators) or TaskCenter::enqueueTask
+/// (provider algorithms); execution ids are TaskCenter task ids ("task-<id>").
 class McpServer : public QObject
 {
     Q_OBJECT
@@ -98,12 +83,14 @@ private:
     static bool isOperatorIdAllowed(const QString &operatorId, QString *reason = nullptr);
     /// When SICNU_MCP_WORKSPACE is set, reject absolute string params outside that root.
     static bool validateWorkspacePaths(const QVariantMap &parameters, QString *reason = nullptr);
+    /// Parses "task-<id>" into @a taskId. Returns false for malformed ids.
+    static bool parseExecutionId(const QString &executionId, long *taskId);
+    /// Formats a TaskCenter task id as an MCP execution id ("task-<id>").
+    static QString toExecutionId(long taskId);
 
     StdinReader *mReader = nullptr;
-    QMap<QString, std::shared_ptr<AlgorithmExecution>> mExecutions;
-    QMap<QString, std::shared_ptr<std::atomic<bool>>> mOperatorCancelFlags;
-    QMutex mMutex;
-    int mExecutionCounter = 0;
+    /// TaskCenter sink for rs: operator calls (autoLoad=false; MCP has no canvas).
+    sicnu::processing::ToolCallDispatcher mDispatcher;
     QCoreApplication *mApp = nullptr;
 };
 

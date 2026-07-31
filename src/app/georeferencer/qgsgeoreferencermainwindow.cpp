@@ -19,19 +19,14 @@
 #include "qgis.h"
 #include "qgsapplication.h"
 #include "qgscoordinatereferencesystem.h"
-#include "qgsgcplist.h"
-#include "qgsgcppoint.h"
 #include "qgsmapcanvas.h"
 #include "qgsmessagelog.h"
 #include "qgsrasterlayer.h"
-#include "qgsproject.h"
 #include "rs_sift_dialog.h"
 #include "rs_sift_task.h"
 #include "rs_template_match_dialog.h"
 #include "rs_template_matcher.h"
 #include "rs_twincanvas_sync_controller.h"
-#include "qgsgcplist.h"
-#include "qgsgcppoint.h"
 
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
@@ -306,15 +301,18 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
                                            .arg( int( r.inlierRatio * 100 ) );
                      if ( QMessageBox::question( this, tr( "SIFT 匹配结果" ), msg ) != QMessageBox::Yes )
                        return;
-                     const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
                      QVector<RsGeorefGcpPair> pairs;
                      pairs.reserve( r.inliers.size() );
                      for ( const auto &m : r.inliers )
                      {
-                       mGcps->appendPoint( QgsGcpPoint( m.srcPx, m.dstWorld, destCrs, true ) );
-                       pairs.append( { m.srcPx, m.dstWorld, true } );
+                       RsGeorefGcpPair pair;
+                       pair.source = m.srcPx;
+                       pair.destination = m.dstWorld;
+                       pair.enabled = true;
+                       pairs.append( pair );
                      }
-                     georefSession().applyAcceptedMatches( pairs );
+                     // Accepted matches go straight into the session (sole GCP owner).
+                     georefSession().appendGcps( pairs );
                      QJsonObject o {
                        { QStringLiteral( "event" ),        QStringLiteral( "sift_match" ) },
                        { QStringLiteral( "matches" ),      r.totalMatches },
@@ -356,14 +354,17 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
   QVector<QgsPointXY> seeds;
   if ( params.seedMode == RsTemplateMatcher::SeedMode::ExistingSeeds )
   {
-    if ( !mGcps || mGcps->isEmpty() )
+    if ( georefSession().gcps().isEmpty() )
     {
       statusBar()->showMessage( tr( "种子模式需要至少一个已有 GCP" ), 5000 );
       return;
     }
-    QVector<QgsPointXY> dstDummy;
-    mGcps->createGCPVectors( seeds, dstDummy, mParamsPanel->destCrs(),
-                             QgsProject::instance()->transformContext() );
+    // Enabled source points of the session's GCP list are the match seeds.
+    for ( const RsGeorefGcpPair &g : georefSession().gcps() )
+    {
+      if ( g.enabled )
+        seeds.append( g.source );
+    }
     if ( seeds.isEmpty() )
     {
       statusBar()->showMessage( tr( "没有可用的种子点" ), 5000 );
@@ -417,7 +418,7 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
 
   auto *conn = new QMetaObject::Connection;
   *conn = connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, this,
-                   [this, resultHolder, fb, destCrs, taskId, conn]( const sicnu::AlgorithmTaskInfo &info ) {
+                   [this, resultHolder, fb, taskId, conn]( const sicnu::AlgorithmTaskInfo &info ) {
                      if ( info.taskId != taskId )
                        return;
                      if ( info.status != sicnu::TaskStatus::Completed
@@ -458,10 +459,14 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
                      pairs.reserve( r.matches.size() );
                      for ( const auto &m : r.matches )
                      {
-                       mGcps->appendPoint( QgsGcpPoint( m.srcPx, m.dstWorld, destCrs, true ) );
-                       pairs.append( { m.srcPx, m.dstWorld, true } );
+                       RsGeorefGcpPair pair;
+                       pair.source = m.srcPx;
+                       pair.destination = m.dstWorld;
+                       pair.enabled = true;
+                       pairs.append( pair );
                      }
-                     georefSession().applyAcceptedMatches( pairs );
+                     // Accepted matches go straight into the session (sole GCP owner).
+                     georefSession().appendGcps( pairs );
 
                      QJsonObject o {
                        { QStringLiteral( "event" ),     QStringLiteral( "template_match" ) },
@@ -568,7 +573,7 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
             layer->crs().isValid() ? layer->crs().authid() : tr( "—" ) ) );
   updateGcpTableRasterPaths();
   updateToolAvailability();
-  recomputeFit();
+  refreshFit();
   mSession.saveWorkflow( captureWorkflowSnapshot() );
   if ( statusBar() )
     statusBar()->showMessage( tr( "已加载参考影像 (Base): %1" ).arg( layer->name() ), 4000 );

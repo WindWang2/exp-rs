@@ -77,33 +77,4 @@ TEST_CASE( "AgentToolCallExporter exports OpenAI Tool Call JSON and Markdown Pro
   REQUIRE( markdownCatalog.find( "`rs:spectral_index`" ) != std::string::npos );
 }
 
-TEST_CASE( "AtomicAlgorithmRegistry handles invalid tool call JSON string directly", "[processing][registry][tool_call]" )
-{
-  auto &registry = AtomicAlgorithmRegistry::instance();
-  registry.reset();
-
-  std::string invalidToolJson = R"({
-    "name": "non_existent_tool",
-    "parameters": {}
-  })";
-
-  std::string resultJson = registry.executeToolCall( invalidToolJson );
-  REQUIRE( !resultJson.empty() );
-  REQUIRE( resultJson.find( "Algorithm adapter not found" ) != std::string::npos );
-}
-
-TEST_CASE( "AtomicAlgorithmRegistry submits tool call asynchronously to TaskCenter", "[processing][registry][tool_call]" )
-{
-  auto &registry = AtomicAlgorithmRegistry::instance();
-  registry.reset();
-
-  std::string toolJson = R"({
-    "name": "rs:spectral_index",
-    "parameters": {"input": "/path/raster.tif", "output": "/path/out.tif"}
-  })";
-
-  long taskId = registry.submitToolCall( toolJson );
-  REQUIRE( taskId > 0 );
-}
-
 

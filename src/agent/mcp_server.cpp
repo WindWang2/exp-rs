@@ -1,17 +1,38 @@
 #include "mcp_server.h"
 #include "core/sicnu_logging.h"
+#include "env_flag.h"
 
 #include "operators/framework/rs_operator_registry.h"
-#include "operators/framework/rs_operator_context.h"
-#include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator.h"
+#include "processing/framework/json_params_converter.h"
+#include "shell/processing_job_adapter.h"
 
 #include <iostream>
 #include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QDebug>
 #include <qgis.h>
 #include <json/json.h>
 
+#include <QDir>
+#include <QFileInfo>
+#include <QProcessEnvironment>
+
+#include <qgsapplication.h>
+#include <qgsproject.h>
+#include <qgsrasterlayer.h>
+#include <qgsvectorlayer.h>
+#include <qgsrasterdataprovider.h>
+#include <qgsvectordataprovider.h>
+#include <processing/qgsprocessingregistry.h>
+#include <processing/qgsprocessingalgorithm.h>
+#include <qgscoordinatereferencesystem.h>
+#include <qgsrectangle.h>
+#include <qgsfields.h>
+
 namespace {
+
 QString mcpDataTypeToString( Qgis::DataType type ) {
     switch ( type ) {
         case Qgis::DataType::UnknownDataType: return QStringLiteral("Unknown");
@@ -32,42 +53,6 @@ QString mcpDataTypeToString( Qgis::DataType type ) {
         default: return QStringLiteral("Unknown");
     }
 }
-}
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonArray>
-#include <QDebug>
-
-#include <QDir>
-#include <QFileInfo>
-#include <QProcessEnvironment>
-
-#include <qgsapplication.h>
-#include <qgsproject.h>
-#include <qgsrasterlayer.h>
-#include <qgsvectorlayer.h>
-#include <qgsrasterdataprovider.h>
-#include <qgsvectordataprovider.h>
-#include <processing/qgsprocessingregistry.h>
-#include <processing/qgsprocessingalgorithm.h>
-#include <processing/qgsprocessingcontext.h>
-#include <processing/qgsprocessingfeedback.h>
-#include <qgsfeedback.h>
-#include <qgscoordinatereferencesystem.h>
-#include <qgsrectangle.h>
-#include <qgsfields.h>
-
-namespace {
-
-bool envFlagEnabled(const char *name)
-{
-    const QByteArray v = qgetenv(name);
-    if (v.isEmpty())
-        return false;
-    const QString s = QString::fromUtf8(v).trimmed().toLower();
-    return s == QLatin1String("1") || s == QLatin1String("true") || s == QLatin1String("yes")
-           || s == QLatin1String("on");
-}
 
 bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
 {
@@ -79,6 +64,8 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("gdal:"),
         QStringLiteral("gdal_tools:"),
         QStringLiteral("otb:"),
+        QStringLiteral("qgis:"),
+        QStringLiteral("qgis_algorithms:"),
         QStringLiteral("opencv:"), // operator surface uses opencv: filters
     };
     for (const QString &prefix : kAllowed) {
@@ -165,7 +152,120 @@ bool collectOutsideWorkspace(const QVariant &value, const QString &workspaceRoot
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// Meta-tool catalog for tools/list. Tool names, descriptions, and inputSchema
+// are the client protocol contract (ADR 0022): the table below mirrors the
+// previous construction — same names, descriptions, property types, and
+// required-input sets.
+// ---------------------------------------------------------------------------
+struct MetaToolSchemaInput {
+    const char *name;
+    const char *type;
+    const char *description;
+};
+
+struct MetaToolDef {
+    const char *name;
+    const char *description;
+    QList<MetaToolSchemaInput> inputs;
+};
+
+const MetaToolDef kMetaTools[] = {
+    { "list_algorithms",
+      "List all available remote sensing and GIS processing algorithms.",
+      {} },
+    { "get_algorithm_schema",
+      "Get the detailed input parameter JSON Schema for a specific algorithm.",
+      { { "algorithm_id", "string", "Unique ID of the algorithm, e.g., 'qgis:rs_band_math'" } } },
+    { "execute_algorithm",
+      "Asynchronously run a processing algorithm with the specified parameters.",
+      { { "algorithm_id", "string", "ID of the algorithm to execute" },
+        { "parameters", "object", "Parameter name-value pairs for the algorithm" } } },
+    { "get_execution_status",
+      "Get progress, execution status, and results of an ongoing or completed algorithm execution.",
+      { { "execution_id", "string", "The execution ID returned by execute_algorithm" } } },
+    { "cancel_execution",
+      "Cancel an actively running algorithm execution.",
+      { { "execution_id", "string", "The execution ID of the run to cancel" } } },
+    { "list_operators",
+      "List all registered RSOperator algorithms (Agent-ready kernel: rs:/opencv:/gdal:/otb:).",
+      {} },
+    { "get_operator_schema",
+      "Get JSON Schema and metadata for an RSOperator (e.g. 'rs:spectral_index').",
+      { { "operator_id", "string", "Operator id, e.g. 'gdal:reproject'" } } },
+    { "execute_operator",
+      "Asynchronously run an RSOperator with JSON parameters. Returns execution_id.",
+      { { "operator_id", "string", "Operator id to execute" },
+        { "parameters", "object", "JSON parameter object" } } },
+    { "list_layers",
+      "List all raster and vector layers loaded in the current QGIS project.",
+      {} },
+    { "describe_dataset",
+      "Get detailed layer metadata, including spatial extent, coordinate reference system (CRS), and band/field details.",
+      { { "layer_id", "string", "Name or ID of the layer to describe" } } },
+};
+
+QVariantMap metaToolInputSchema(const MetaToolDef &def)
+{
+    QVariantMap schema;
+    schema[QStringLiteral("type")] = QStringLiteral("object");
+    QVariantMap properties;
+    QStringList required;
+    for (const MetaToolSchemaInput &input : def.inputs) {
+        QVariantMap prop;
+        prop[QStringLiteral("type")] = QString::fromUtf8(input.type);
+        prop[QStringLiteral("description")] = QString::fromUtf8(input.description);
+        properties[QString::fromUtf8(input.name)] = prop;
+        required.append(QString::fromUtf8(input.name));
+    }
+    schema[QStringLiteral("properties")] = properties;
+    if (!required.isEmpty())
+        schema[QStringLiteral("required")] = required;
+    return schema;
+}
+
+/// MCP response envelope for a TaskCenter task: mcpStatusForTask shape plus
+/// the execution/algorithm identity echoed from the caller's execution id.
+/// Shared by get_execution_status and cancel_execution's terminal fallback.
+QVariantMap executionStatusResponse(const QString &executionId, const sicnu::AlgorithmTaskInfo &info)
+{
+    QVariantMap result = mcpStatusForTask(info);
+    result[QStringLiteral("execution_id")] = executionId;
+    result[QStringLiteral("algorithm_id")] = info.algorithmId;
+    return result;
+}
+
 } // namespace
+
+QVariantMap mcpStatusForTask(const sicnu::AlgorithmTaskInfo &info)
+{
+    QVariantMap result;
+    switch (info.status) {
+    case sicnu::TaskStatus::Completed:
+        result[QStringLiteral("status")] = QStringLiteral("completed");
+        if (!info.resultPayload.isNull()) {
+            result[QStringLiteral("result")] = sicnu::processing::jsonValueToVariant(info.resultPayload);
+        }
+        break;
+    case sicnu::TaskStatus::Failed:
+        result[QStringLiteral("status")] = QStringLiteral("failed");
+        result[QStringLiteral("errorMessage")] = info.errorMessage;
+        break;
+    case sicnu::TaskStatus::Canceled:
+        result[QStringLiteral("status")] = QStringLiteral("canceled");
+        break;
+    case sicnu::TaskStatus::Queued:
+    case sicnu::TaskStatus::Running:
+    case sicnu::TaskStatus::Paused:
+    default:
+        result[QStringLiteral("status")] = QStringLiteral("running");
+        break;
+    }
+    result[QStringLiteral("progress")] = info.progressPercentage;
+    if (!info.logBuffer.isEmpty())
+        result[QStringLiteral("progressText")] = info.logBuffer.last();
+    return result;
+}
 
 // StdinReader implementation
 void StdinReader::requestStop()
@@ -186,265 +286,22 @@ void StdinReader::run()
     }
 }
 
-// AlgorithmWorker implementation
-AlgorithmWorker::AlgorithmWorker(const QString &execId, QgsProcessingAlgorithm *algo, const QVariantMap &parameters, std::shared_ptr<AlgorithmExecution> execState, QObject *parent)
-    : QThread(parent)
-    , mExecId(execId)
-    , mAlgo(algo)
-    , mParameters(parameters)
-    , mState(execState)
-{
-}
-
-AlgorithmWorker::~AlgorithmWorker()
-{
-    wait();
-}
-
-namespace {
-
-QVariant jsonValueToVariant(const Json::Value &value);
-Json::Value variantToJsonValue(const QVariant &value);
-
-QVariantMap jsonObjectToVariantMap(const Json::Value &obj)
-{
-    QVariantMap map;
-    if (!obj.isObject())
-        return map;
-    for (const auto &name : obj.getMemberNames()) {
-        map.insert(QString::fromStdString(name), jsonValueToVariant(obj[name]));
-    }
-    return map;
-}
-
-QVariant jsonValueToVariant(const Json::Value &value)
-{
-    if (value.isNull())
-        return QVariant();
-    if (value.isBool())
-        return value.asBool();
-    if (value.isInt() || value.isUInt())
-        return value.asInt();
-    if (value.isInt64() || value.isUInt64())
-        return static_cast<qlonglong>(value.asInt64());
-    if (value.isDouble())
-        return value.asDouble();
-    if (value.isString())
-        return QString::fromStdString(value.asString());
-    if (value.isArray()) {
-        QVariantList list;
-        for (Json::ArrayIndex i = 0; i < value.size(); ++i)
-            list.append(jsonValueToVariant(value[i]));
-        return list;
-    }
-    if (value.isObject())
-        return jsonObjectToVariantMap(value);
-    return QVariant();
-}
-
-Json::Value variantToJsonValue(const QVariant &value)
-{
-    if (!value.isValid() || value.isNull())
-        return Json::Value(Json::nullValue);
-
-    switch (value.userType()) {
-    case QMetaType::Bool:
-        return Json::Value(value.toBool());
-    case QMetaType::Int:
-    case QMetaType::UInt:
-    case QMetaType::LongLong:
-    case QMetaType::ULongLong:
-        return Json::Value(static_cast<Json::Int64>(value.toLongLong()));
-    case QMetaType::Double:
-    case QMetaType::Float:
-        return Json::Value(value.toDouble());
-    case QMetaType::QString:
-        return Json::Value(value.toString().toStdString());
-    case QMetaType::QVariantList: {
-        Json::Value arr(Json::arrayValue);
-        const QVariantList list = value.toList();
-        for (const QVariant &item : list)
-            arr.append(variantToJsonValue(item));
-        return arr;
-    }
-    case QMetaType::QStringList: {
-        Json::Value arr(Json::arrayValue);
-        const QStringList list = value.toStringList();
-        for (const QString &item : list)
-            arr.append(item.toStdString());
-        return arr;
-    }
-    case QMetaType::QVariantMap: {
-        Json::Value obj(Json::objectValue);
-        const QVariantMap map = value.toMap();
-        for (auto it = map.constBegin(); it != map.constEnd(); ++it)
-            obj[it.key().toStdString()] = variantToJsonValue(it.value());
-        return obj;
-    }
-    default:
-        // Fallback: stringify unknown types
-        return Json::Value(value.toString().toStdString());
-    }
-}
-
-/**
- * Background worker that runs an RSOperator without blocking the MCP I/O thread.
- */
-class OperatorWorker : public QThread
-{
-public:
-    OperatorWorker(const QString &execId,
-                   const QString &operatorId,
-                   const QVariantMap &parameters,
-                   std::shared_ptr<AlgorithmExecution> execState,
-                   std::shared_ptr<std::atomic<bool>> cancelFlag,
-                   QObject *parent = nullptr)
-        : QThread(parent)
-        , mExecId(execId)
-        , mOperatorId(operatorId)
-        , mParameters(parameters)
-        , mState(std::move(execState))
-        , mCancelFlag(std::move(cancelFlag))
-    {
-    }
-
-    ~OperatorWorker() override { wait(); }
-
-protected:
-    void run() override
-    {
-        try {
-            auto op = sicnu::operators::RSOperatorRegistry::instance().create(
-                mOperatorId.toStdString());
-            if (!op) {
-                QMutexLocker locker(&mState->mutex);
-                mState->error = QStringLiteral("Operator not found: ") + mOperatorId;
-                mState->completed = true;
-                return;
-            }
-
-            sicnu::operators::RSOperatorContext context;
-            auto state = mState;
-            context.setCancelFlag(mCancelFlag.get());
-            context.setProgressCallback([state](double progress, const std::string &message) {
-                QMutexLocker locker(&state->mutex);
-                state->progress = progress;
-                state->progressText = QString::fromStdString(message);
-            });
-
-            const Json::Value params = variantToJsonValue(mParameters);
-            const Json::Value result = op->execute(params, context);
-
-            QMutexLocker locker(&mState->mutex);
-            if (mState->canceled || (mCancelFlag && mCancelFlag->load())) {
-                mState->canceled = true;
-                mState->completed = true;
-                return;
-            }
-            mState->result = jsonObjectToVariantMap(result.isObject() ? result : Json::Value(Json::objectValue));
-            if (!result.isObject()) {
-                mState->result[QStringLiteral("value")] = jsonValueToVariant(result);
-            }
-            mState->progress = 1.0;
-            mState->completed = true;
-        } catch (const sicnu::operators::RSOperatorError &e) {
-            QMutexLocker locker(&mState->mutex);
-            if (e.code() == sicnu::operators::ErrorCode::Cancelled) {
-                mState->canceled = true;
-            } else {
-                mState->error = QString::fromStdString(e.message());
-            }
-            mState->completed = true;
-        } catch (const std::exception &e) {
-            QMutexLocker locker(&mState->mutex);
-            mState->error = QString::fromUtf8(e.what());
-            mState->completed = true;
-        } catch (...) {
-            QMutexLocker locker(&mState->mutex);
-            mState->error = QStringLiteral("Unknown operator error");
-            mState->completed = true;
-        }
-    }
-
-private:
-    QString mExecId;
-    QString mOperatorId;
-    QVariantMap mParameters;
-    std::shared_ptr<AlgorithmExecution> mState;
-    std::shared_ptr<std::atomic<bool>> mCancelFlag;
-};
-
-} // namespace
-
-class McpFeedback : public QgsProcessingFeedback
-{
-public:
-    McpFeedback(std::shared_ptr<AlgorithmExecution> state) : mState(state) {}
-
-    void setProgressText(const QString &text) override {
-        QgsProcessingFeedback::setProgressText(text);
-        QMutexLocker locker(&mState->mutex);
-        mState->progressText = text;
-    }
-
-    void reportError(const QString &error, bool fatalError = false) override {
-        QgsProcessingFeedback::reportError(error, fatalError);
-        QMutexLocker locker(&mState->mutex);
-        mState->error = error;
-    }
-
-    void pushInfo(const QString &info) override {
-        QgsProcessingFeedback::pushInfo(info);
-        QMutexLocker locker(&mState->mutex);
-        if (mState->progressText.isEmpty() || mState->progressText == info) {
-            mState->progressText = info;
-        }
-    }
-
-private:
-    std::shared_ptr<AlgorithmExecution> mState;
-};
-
-void AlgorithmWorker::run()
-{
-    QgsProcessingContext context;
-    McpFeedback feedback(mState);
-
-    // Track progress and check cancellation (DirectConnection since we only write to mutex-protected state)
-    connect(&feedback, &QgsFeedback::progressChanged, this, [this, &feedback](double p) {
-        QMutexLocker locker(&mState->mutex);
-        mState->progress = p;
-        // Propagate MCP cancellation to feedback
-        if (mState->canceled && !feedback.isCanceled()) {
-            feedback.cancel();
-        }
-    }, Qt::DirectConnection);
-
-    bool ok = false;
-    try {
-        QVariantMap res = mAlgo->run(mParameters, context, &feedback, &ok);
-        QMutexLocker locker(&mState->mutex);
-        mState->result = res;
-        mState->completed = true;
-        if (!ok && mState->error.isEmpty())
-        {
-            mState->error = QStringLiteral("Algorithm run reported failure (ok is false)");
-        }
-    } catch (const std::exception &e) {
-        QMutexLocker locker(&mState->mutex);
-        mState->error = QString::fromUtf8(e.what());
-        mState->completed = true;
-    } catch (...) {
-        QMutexLocker locker(&mState->mutex);
-        mState->error = QStringLiteral("Unknown exception occurred during execution");
-        mState->completed = true;
-    }
-}
-
 // McpServer implementation
 McpServer::McpServer(QObject *parent)
     : QObject(parent)
+    , mDispatcher(
+          // rs: operator calls are typed Task Center submissions. autoLoad=false:
+          // MCP has no canvas — results travel via get_execution_status.
+          [](const QString &algorithmId, const QVariantMap &params) -> long {
+              return sicnu::TaskCenter::instance().enqueueTask(
+                  algorithmId, params, /*autoLoad=*/false, sicnu::TaskPriority::Normal,
+                  QList<long>(), /*autoDispatch=*/true);
+          },
+          // MCP never uses completion callbacks; status is polled via
+          // get_execution_status, so the watcher is a no-op.
+          [](long, sicnu::processing::ToolCallDispatcher::CompletionCallback) {})
 {
+    ProcessingJobAdapter::registerProcessingJobExecutor();
 }
 
 McpServer::~McpServer()
@@ -458,6 +315,7 @@ McpServer::~McpServer()
 
 void McpServer::start(QCoreApplication *app)
 {
+    ProcessingJobAdapter::registerProcessingJobExecutor();
     mApp = app;
     mReader = new StdinReader(this);
     connect(mReader, &StdinReader::lineRead, this, &McpServer::onLineRead);
@@ -496,160 +354,13 @@ void McpServer::handleRequest(const QVariantMap &request)
     {
         QVariantMap result;
         QVariantList tools;
-
-        // list_algorithms tool
-        QVariantMap listAlgTool;
-        listAlgTool[QStringLiteral("name")] = QStringLiteral("list_algorithms");
-        listAlgTool[QStringLiteral("description")] = QStringLiteral("List all available remote sensing and GIS processing algorithms.");
-        listAlgTool[QStringLiteral("inputSchema")] = QVariantMap{
-            {QStringLiteral("type"), QStringLiteral("object")},
-            {QStringLiteral("properties"), QVariantMap()}
-        };
-        tools.append(listAlgTool);
-
-        // get_algorithm_schema tool
-        QVariantMap schemaTool;
-        schemaTool[QStringLiteral("name")] = QStringLiteral("get_algorithm_schema");
-        schemaTool[QStringLiteral("description")] = QStringLiteral("Get the detailed input parameter JSON Schema for a specific algorithm.");
-        schemaTool[QStringLiteral("inputSchema")] = QVariantMap{
-            {QStringLiteral("type"), QStringLiteral("object")},
-            {QStringLiteral("properties"), QVariantMap{
-                {QStringLiteral("algorithm_id"), QVariantMap{
-                    {QStringLiteral("type"), QStringLiteral("string")},
-                    {QStringLiteral("description"), QStringLiteral("Unique ID of the algorithm, e.g., 'qgis:rs_band_math'")}
-                }}
-            }},
-            {QStringLiteral("required"), QStringList{QStringLiteral("algorithm_id")}}
-        };
-        tools.append(schemaTool);
-
-        // execute_algorithm tool
-        QVariantMap execTool;
-        execTool[QStringLiteral("name")] = QStringLiteral("execute_algorithm");
-        execTool[QStringLiteral("description")] = QStringLiteral("Asynchronously run a processing algorithm with the specified parameters.");
-        execTool[QStringLiteral("inputSchema")] = QVariantMap{
-            {QStringLiteral("type"), QStringLiteral("object")},
-            {QStringLiteral("properties"), QVariantMap{
-                {QStringLiteral("algorithm_id"), QVariantMap{
-                    {QStringLiteral("type"), QStringLiteral("string")},
-                    {QStringLiteral("description"), QStringLiteral("ID of the algorithm to execute")}
-                }},
-                {QStringLiteral("parameters"), QVariantMap{
-                    {QStringLiteral("type"), QStringLiteral("object")},
-                    {QStringLiteral("description"), QStringLiteral("Parameter name-value pairs for the algorithm")}
-                }}
-            }},
-            {QStringLiteral("required"), QStringList{QStringLiteral("algorithm_id"), QStringLiteral("parameters")}}
-        };
-        tools.append(execTool);
-
-        // get_execution_status tool
-        QVariantMap statusTool;
-        statusTool[QStringLiteral("name")] = QStringLiteral("get_execution_status");
-        statusTool[QStringLiteral("description")] = QStringLiteral("Get progress, execution status, and results of an ongoing or completed algorithm execution.");
-        statusTool[QStringLiteral("inputSchema")] = QVariantMap{
-            {QStringLiteral("type"), QStringLiteral("object")},
-            {QStringLiteral("properties"), QVariantMap{
-                {QStringLiteral("execution_id"), QVariantMap{
-                    {QStringLiteral("type"), QStringLiteral("string")},
-                    {QStringLiteral("description"), QStringLiteral("The execution ID returned by execute_algorithm")}
-                }}
-            }},
-            {QStringLiteral("required"), QStringList{QStringLiteral("execution_id")}}
-        };
-        tools.append(statusTool);
-
-        // cancel_execution tool
-        QVariantMap cancelTool;
-        cancelTool[QStringLiteral("name")] = QStringLiteral("cancel_execution");
-        cancelTool[QStringLiteral("description")] = QStringLiteral("Cancel an actively running algorithm execution.");
-        cancelTool[QStringLiteral("inputSchema")] = QVariantMap{
-            {QStringLiteral("type"), QStringLiteral("object")},
-            {QStringLiteral("properties"), QVariantMap{
-                {QStringLiteral("execution_id"), QVariantMap{
-                    {QStringLiteral("type"), QStringLiteral("string")},
-                    {QStringLiteral("description"), QStringLiteral("The execution ID of the run to cancel")}
-                }}
-            }},
-            {QStringLiteral("required"), QStringList{QStringLiteral("execution_id")}}
-        };
-        tools.append(cancelTool);
-
-        // list_operators tool (RSOperator kernel)
-        QVariantMap listOpsTool;
-        listOpsTool[QStringLiteral("name")] = QStringLiteral("list_operators");
-        listOpsTool[QStringLiteral("description")] = QStringLiteral(
-            "List all registered RSOperator algorithms (Agent-ready kernel: rs:/opencv:/gdal:/otb:).");
-        listOpsTool[QStringLiteral("inputSchema")] = QVariantMap{
-            {QStringLiteral("type"), QStringLiteral("object")},
-            {QStringLiteral("properties"), QVariantMap()}
-        };
-        tools.append(listOpsTool);
-
-        // get_operator_schema tool
-        QVariantMap opSchemaTool;
-        opSchemaTool[QStringLiteral("name")] = QStringLiteral("get_operator_schema");
-        opSchemaTool[QStringLiteral("description")] = QStringLiteral(
-            "Get JSON Schema and metadata for an RSOperator (e.g. 'rs:spectral_index').");
-        opSchemaTool[QStringLiteral("inputSchema")] = QVariantMap{
-            {QStringLiteral("type"), QStringLiteral("object")},
-            {QStringLiteral("properties"), QVariantMap{
-                {QStringLiteral("operator_id"), QVariantMap{
-                    {QStringLiteral("type"), QStringLiteral("string")},
-                    {QStringLiteral("description"), QStringLiteral("Operator id, e.g. 'gdal:reproject'")}
-                }}
-            }},
-            {QStringLiteral("required"), QStringList{QStringLiteral("operator_id")}}
-        };
-        tools.append(opSchemaTool);
-
-        // execute_operator tool
-        QVariantMap execOpTool;
-        execOpTool[QStringLiteral("name")] = QStringLiteral("execute_operator");
-        execOpTool[QStringLiteral("description")] = QStringLiteral(
-            "Asynchronously run an RSOperator with JSON parameters. Returns execution_id.");
-        execOpTool[QStringLiteral("inputSchema")] = QVariantMap{
-            {QStringLiteral("type"), QStringLiteral("object")},
-            {QStringLiteral("properties"), QVariantMap{
-                {QStringLiteral("operator_id"), QVariantMap{
-                    {QStringLiteral("type"), QStringLiteral("string")},
-                    {QStringLiteral("description"), QStringLiteral("Operator id to execute")}
-                }},
-                {QStringLiteral("parameters"), QVariantMap{
-                    {QStringLiteral("type"), QStringLiteral("object")},
-                    {QStringLiteral("description"), QStringLiteral("JSON parameter object")}
-                }}
-            }},
-            {QStringLiteral("required"), QStringList{QStringLiteral("operator_id"), QStringLiteral("parameters")}}
-        };
-        tools.append(execOpTool);
-
-        // list_layers tool
-        QVariantMap listLayersTool;
-        listLayersTool[QStringLiteral("name")] = QStringLiteral("list_layers");
-        listLayersTool[QStringLiteral("description")] = QStringLiteral("List all raster and vector layers loaded in the current QGIS project.");
-        listLayersTool[QStringLiteral("inputSchema")] = QVariantMap{
-            {QStringLiteral("type"), QStringLiteral("object")},
-            {QStringLiteral("properties"), QVariantMap()}
-        };
-        tools.append(listLayersTool);
-
-        // describe_dataset tool
-        QVariantMap describeTool;
-        describeTool[QStringLiteral("name")] = QStringLiteral("describe_dataset");
-        describeTool[QStringLiteral("description")] = QStringLiteral("Get detailed layer metadata, including spatial extent, coordinate reference system (CRS), and band/field details.");
-        describeTool[QStringLiteral("inputSchema")] = QVariantMap{
-            {QStringLiteral("type"), QStringLiteral("object")},
-            {QStringLiteral("properties"), QVariantMap{
-                {QStringLiteral("layer_id"), QVariantMap{
-                    {QStringLiteral("type"), QStringLiteral("string")},
-                    {QStringLiteral("description"), QStringLiteral("Name or ID of the layer to describe")}
-                }}
-            }},
-            {QStringLiteral("required"), QStringList{QStringLiteral("layer_id")}}
-        };
-        tools.append(describeTool);
-
+        for (const MetaToolDef &def : kMetaTools) {
+            QVariantMap tool;
+            tool[QStringLiteral("name")] = QString::fromUtf8(def.name);
+            tool[QStringLiteral("description")] = QString::fromUtf8(def.description);
+            tool[QStringLiteral("inputSchema")] = metaToolInputSchema(def);
+            tools.append(tool);
+        }
         result[QStringLiteral("tools")] = tools;
         sendResponse(id, result);
     }
@@ -822,7 +533,7 @@ QVariantMap McpServer::handleListOperators()
 
         const Json::Value meta = op->metadata();
         if (meta.isObject() && !meta.empty()) {
-            opMap[QStringLiteral("metadata")] = jsonObjectToVariantMap(meta);
+            opMap[QStringLiteral("metadata")] = sicnu::processing::jsonObjectToVariantMap(meta);
         }
 
         opList.append(opMap);
@@ -842,9 +553,9 @@ QVariantMap McpServer::handleGetOperatorSchema(const QString &operatorId)
         return err;
     }
 
-    QVariantMap result = jsonObjectToVariantMap(op->schema());
+    QVariantMap result = sicnu::processing::jsonObjectToVariantMap(op->schema());
     result[QStringLiteral("operator_id")] = operatorId;
-    result[QStringLiteral("metadata")] = jsonObjectToVariantMap(op->metadata());
+    result[QStringLiteral("metadata")] = sicnu::processing::jsonObjectToVariantMap(op->metadata());
     return result;
 }
 
@@ -915,6 +626,23 @@ bool McpServer::validateWorkspacePaths(const QVariantMap &parameters, QString *r
     return true;
 }
 
+bool McpServer::parseExecutionId(const QString &executionId, long *taskId)
+{
+    if (!executionId.startsWith(QStringLiteral("task-")))
+        return false;
+    bool ok = false;
+    const long id = executionId.mid(5).toLong(&ok);
+    if (!ok || id <= 0)
+        return false;
+    *taskId = id;
+    return true;
+}
+
+QString McpServer::toExecutionId(long taskId)
+{
+    return QStringLiteral("task-%1").arg(taskId);
+}
+
 QVariantMap McpServer::handleExecuteOperator(const QString &operatorId, const QVariantMap &parameters)
 {
     SICNU_LOG_INFO(SicnuLogTags::MCP, QString("Executing operator: %1").arg(operatorId));
@@ -929,28 +657,39 @@ QVariantMap McpServer::handleExecuteOperator(const QString &operatorId, const QV
         throw std::runtime_error(denyReason.toStdString());
     }
 
-    if (!sicnu::operators::RSOperatorRegistry::instance().hasOperator(operatorId.toStdString())) {
-        SICNU_LOG_ERROR(SicnuLogTags::MCP, QString("Operator not found: %1").arg(operatorId));
-        throw std::runtime_error("Operator not found: " + operatorId.toStdString());
+    // rs: operator calls enter the Task Center through the ToolCallDispatcher,
+    // which re-parses the envelope, normalizes the id, and validates required
+    // descriptor inputs before the sink (ADR 0022). MCP never blocks on
+    // completion — results travel via get_execution_status.
+    Json::Value envelope(Json::objectValue);
+    envelope["name"] = operatorId.toStdString();
+    envelope["parameters"] = sicnu::processing::variantToJsonValue(parameters);
+
+    const QString reason = mDispatcher.rejectionReason(envelope);
+    if (!reason.isEmpty()) {
+        // Historical contract: an unresolvable operator reports
+        // "Operator not found: <id>" with the same text as before.
+        if (reason.startsWith(QStringLiteral("Algorithm not registered:"))) {
+            const QString msg = QStringLiteral("Operator not found: ") + operatorId;
+            SICNU_LOG_ERROR(SicnuLogTags::MCP, msg);
+            throw std::runtime_error(msg.toStdString());
+        }
+        SICNU_LOG_ERROR(SicnuLogTags::MCP, reason);
+        throw std::runtime_error(reason.toStdString());
     }
 
-    mMutex.lock();
-    mExecutionCounter++;
-    QString execId = QStringLiteral("op_exec_%1").arg(mExecutionCounter);
-    auto state = std::make_shared<AlgorithmExecution>();
-    state->id = execId;
-    state->algorithmId = operatorId;
-    mExecutions[execId] = state;
-    auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
-    mOperatorCancelFlags[execId] = cancelFlag;
-    mMutex.unlock();
-
-    OperatorWorker *worker = new OperatorWorker(execId, operatorId, parameters, state, cancelFlag, this);
-    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
-    worker->start();
+    long taskId = -1;
+    QString submitError;
+    if (!mDispatcher.submit(envelope, {}, &submitError, &taskId) || taskId <= 0) {
+        const QString msg = submitError.isEmpty()
+            ? QStringLiteral("Failed to submit operator to Task Center")
+            : submitError;
+        SICNU_LOG_ERROR(SicnuLogTags::MCP, msg);
+        throw std::runtime_error(msg.toStdString());
+    }
 
     QVariantMap result;
-    result[QStringLiteral("execution_id")] = execId;
+    result[QStringLiteral("execution_id")] = toExecutionId(taskId);
     result[QStringLiteral("status")] = QStringLiteral("running");
     result[QStringLiteral("operator_id")] = operatorId;
     return result;
@@ -983,86 +722,59 @@ QVariantMap McpServer::handleExecuteAlgorithm(const QString &algorithmId, const 
         throw std::runtime_error(denyReason.toStdString());
     }
 
-    QgsProcessingAlgorithm *alg = QgsApplication::processingRegistry()->createAlgorithmById(algorithmId);
-    if (!alg)
-    {
-        SICNU_LOG_ERROR(SicnuLogTags::MCP, QString("Algorithm not found: %1").arg(algorithmId));
-        throw std::runtime_error("Algorithm not found: " + algorithmId.toStdString());
+    std::unique_ptr<QgsProcessingAlgorithm> alg(QgsApplication::processingRegistry()->createAlgorithmById(algorithmId));
+    if (!alg) {
+        const QString msg = QStringLiteral("Algorithm not found: ") + algorithmId;
+        SICNU_LOG_ERROR(SicnuLogTags::MCP, msg);
+        throw std::runtime_error(msg.toStdString());
     }
 
-    mMutex.lock();
-    mExecutionCounter++;
-    QString execId = QStringLiteral("exec_%1").arg(mExecutionCounter);
-    auto state = std::make_shared<AlgorithmExecution>();
-    state->id = execId;
-    state->algorithmId = algorithmId;
-    mExecutions[execId] = state;
-    mMutex.unlock();
+    // Provider algorithms (gdal:/otb:/qgis:) run directly in the Task Center
+    // with autoDispatch so they progress to a terminal state (ADR 0022).
+    QString effectiveAlgId = algorithmId;
+    if (!effectiveAlgId.startsWith(QStringLiteral("processing:")) &&
+        !effectiveAlgId.startsWith(QStringLiteral("rs:")))
+    {
+        effectiveAlgId = QString::fromStdString(ProcessingJobAdapter::processingAlgorithmId(algorithmId));
+    }
 
-    // Start Worker
-    AlgorithmWorker *worker = new AlgorithmWorker(execId, alg, parameters, state, this);
-    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
-    worker->start();
+    const long taskId = sicnu::TaskCenter::instance().enqueueTask(
+        effectiveAlgId, parameters, /*autoLoad=*/false, sicnu::TaskPriority::Normal,
+        QList<long>(), /*autoDispatch=*/true);
 
     QVariantMap result;
-    result[QStringLiteral("execution_id")] = execId;
+    result[QStringLiteral("execution_id")] = toExecutionId(taskId);
     result[QStringLiteral("status")] = QStringLiteral("running");
     return result;
 }
 
 QVariantMap McpServer::handleGetExecutionStatus(const QString &executionId)
 {
-    QMutexLocker locker(&mMutex);
-    if (!mExecutions.contains(executionId))
-    {
+    long taskId = 0;
+    if (!parseExecutionId(executionId, &taskId))
         throw std::runtime_error("Execution ID not found: " + executionId.toStdString());
-    }
 
-    auto state = mExecutions[executionId];
-    QMutexLocker stateLocker(&state->mutex);
-    QVariantMap result;
-    result[QStringLiteral("execution_id")] = state->id;
-    result[QStringLiteral("algorithm_id")] = state->algorithmId;
-    result[QStringLiteral("progress")] = state->progress;
-    result[QStringLiteral("progressText")] = state->progressText;
+    const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
+    if (info.taskId != taskId)
+        throw std::runtime_error("Execution ID not found: " + executionId.toStdString());
 
-    if (!state->error.isEmpty())
-    {
-        result[QStringLiteral("status")] = QStringLiteral("failed");
-        result[QStringLiteral("error")] = state->error;
-    }
-    else if (state->completed)
-    {
-        result[QStringLiteral("status")] = QStringLiteral("completed");
-        result[QStringLiteral("result")] = state->result;
-    }
-    else if (state->canceled)
-    {
-        result[QStringLiteral("status")] = QStringLiteral("canceled");
-    }
-    else
-    {
-        result[QStringLiteral("status")] = QStringLiteral("running");
-    }
-
-    return result;
+    return executionStatusResponse(executionId, info);
 }
 
 QVariantMap McpServer::handleCancelExecution(const QString &executionId)
 {
-    QMutexLocker locker(&mMutex);
-    if (!mExecutions.contains(executionId))
-    {
+    long taskId = 0;
+    if (!parseExecutionId(executionId, &taskId))
         throw std::runtime_error("Execution ID not found: " + executionId.toStdString());
-    }
 
-    auto state = mExecutions[executionId];
-    {
-        QMutexLocker stateLocker(&state->mutex);
-        state->canceled = true;
-    }
-    if (mOperatorCancelFlags.contains(executionId)) {
-        mOperatorCancelFlags[executionId]->store(true);
+    if (!sicnu::TaskCenter::instance().cancelTask(taskId)) {
+        // cancelTask returned false: the task is already terminal (or gone).
+        // Report its ACTUAL status instead of a blanket "canceled" (ADR 0022).
+        const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
+        if (info.taskId != taskId)
+            throw std::runtime_error("Execution ID not found: " + executionId.toStdString());
+
+        return executionStatusResponse(executionId, info);
     }
 
     QVariantMap result;
@@ -1119,7 +831,7 @@ QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
     result[QStringLiteral("name")] = layer->name();
     result[QStringLiteral("type")] = (layer->type() == Qgis::LayerType::Raster) ? QStringLiteral("raster") : QStringLiteral("vector");
     result[QStringLiteral("crs")] = layer->crs().authid();
-    
+
     QgsRectangle extent = layer->extent();
     result[QStringLiteral("extent")] = QVariantMap{
         {QStringLiteral("xmin"), extent.xMinimum()},
@@ -1161,7 +873,7 @@ QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
         if (vector)
         {
             result[QStringLiteral("feature_count")] = static_cast<qlonglong>(vector->featureCount());
-            
+
             QString geomType = QStringLiteral("Unknown");
             switch (vector->geometryType())
             {

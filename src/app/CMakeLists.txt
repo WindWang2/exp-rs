@@ -153,6 +153,8 @@ add_executable(sicnu_geo_rs
     # Layer and map tool managers
     active_view_host.cpp
     shell/secondary_map_view_widget.cpp
+    shell/gui_job_adapter.cpp
+    shell/gui_job_adapter.h
     map_tools/map_tool_manager.cpp
     map_tools/swipe_map_tool.cpp
 
@@ -288,7 +290,6 @@ if(SICNU_EMBED_PYTHON)
         ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_runner.cpp
         ${CMAKE_SOURCE_DIR}/src/python/isolated/python_ipc_server.cpp
         ${CMAKE_SOURCE_DIR}/src/python/isolated/python_worker_process.cpp
-        ${CMAKE_SOURCE_DIR}/src/python/isolated/shared_memory_segment.cpp
         ${CMAKE_SOURCE_DIR}/src/python/isolated/app_interface_bridge.cpp
         ${CMAKE_SOURCE_DIR}/src/python/isolated/python_app_interface_proxy.cpp
         ${CMAKE_SOURCE_DIR}/src/python/isolated/python_worker_process_pool.cpp

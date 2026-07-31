@@ -1,5 +1,21 @@
 /***************************************************************************
  * rs_supervised_classification_operator.cpp
+ *
+ * ADR 0019 slice S3 — thin JSON adapter over the analysis-layer
+ * classification modules:
+ *
+ *   train mode:      params → RsTrainingDataExtraction (OGR vector) →
+ *                    optional RsClassificationSplit stratified holdout →
+ *                    optional RsFeatureScaler fit → RsClassificationPipeline
+ *   predict-only:    params → loadModelSidecar + backend->load(modelIn) →
+ *                    RsClassificationPipeline
+ *
+ * Tiled prediction, dtype escalation (no 0-255 clamp), NoData/ignore policy,
+ * scaler transform, accuracy assessment and the superset .meta.json model
+ * sidecar all come from the pipeline (parity with the GUI path by
+ * construction). Backends are constructed via the analysis-layer classes
+ * (RsClassifierSvm / RsClassifierNormalBayes) so hyperparameters cannot
+ * drift from the GUI again.
  ***************************************************************************/
 #include "rs_supervised_classification_operator.h"
 
@@ -9,26 +25,27 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include "rs_classification_pipeline.h"
+#include "rs_classification_split.h"
+#include "rs_classifier_normalbayes.h"
+#include "rs_classifier_svm.h"
+#include "rs_training_data_extraction.h"
+
+#include <QColor>
 #include <QFile>
 #include <QIODevice>
 #include <QString>
+#include <QVector>
 
 #include <memory>
 
 #include <gdal.h>
-#include <gdal_alg.h>
 #include <ogr_api.h>
-#include <cpl_string.h>
 
 #include <opencv2/core.hpp>
-#include <opencv2/ml.hpp>
 
 #include <algorithm>
-#include <cmath>
-#include <limits>
-#include <map>
-#include <random>
-#include <set>
+#include <string>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -40,112 +57,28 @@ namespace {
 const std::vector<std::string> s_methods = {"svm", "normal_bayes"};
 
 /**
- * Rasterize one OGR geometry into a Byte mask (1 = inside) matching the
- * reference raster geotransform/size.
+ * Canonicalize a method string from params or a model sidecar. The GUI
+ * writes "SVM_RBF" / "NormalBayes" into its sidecars; this operator writes
+ * its enum values. Anything unrecognized falls back.
  */
-std::vector<uint8_t> rasterizeGeometry(OGRGeometryH geom, int width, int height,
-                                       const double gt[6]) {
-    std::vector<uint8_t> mask(static_cast<size_t>(width) * height, 0);
-
-    GDALDriverH memDriver = GDALGetDriverByName("MEM");
-    if (!memDriver) {
-        throw RSOperatorError(ErrorCode::GdalError, "MEM driver unavailable");
-    }
-
-    GDALDatasetH memDs = GDALCreate(memDriver, "", width, height, 1, GDT_Byte, nullptr);
-    if (!memDs) {
-        throw RSOperatorError(ErrorCode::GdalError, "Failed to create MEM raster");
-    }
-    GDALSetGeoTransform(memDs, const_cast<double*>(gt));
-
-    char** options = nullptr;
-    options = CSLSetNameValue(options, "ALL_TOUCHED", "TRUE");
-
-    int bandList[1] = {1};
-    double burn[1] = {1.0};
-    OGRGeometryH geoms[1] = {geom};
-
-    const CPLErr err = GDALRasterizeGeometries(
-        memDs, 1, bandList, 1, geoms, nullptr, nullptr, burn, options, nullptr, nullptr);
-    CSLDestroy(options);
-
-    if (err != CE_None) {
-        GDALClose(memDs);
-        throw RSOperatorError(ErrorCode::GdalError, "GDALRasterizeGeometries failed");
-    }
-
-    GDALRasterBandH band = GDALGetRasterBand(memDs, 1);
-    if (GDALRasterIO(band, GF_Read, 0, 0, width, height, mask.data(), width, height,
-                     GDT_Byte, 0, 0) != CE_None) {
-        GDALClose(memDs);
-        throw RSOperatorError(ErrorCode::GdalError, "Failed to read rasterized mask");
-    }
-    GDALClose(memDs);
-    return mask;
+std::string canonicalMethod(const std::string& raw, const std::string& fallback) {
+    std::string m = raw;
+    std::transform(m.begin(), m.end(), m.begin(), ::tolower);
+    if (m.find("bayes") != std::string::npos)
+        return "normal_bayes";
+    if (m.find("svm") != std::string::npos)
+        return "svm";
+    return fallback;
 }
 
-cv::Ptr<cv::ml::StatModel> trainModel(const std::string& method,
-                                      const cv::Mat& X, const cv::Mat& y) {
-    if (method == "normal_bayes") {
-        auto clf = cv::ml::NormalBayesClassifier::create();
-        if (!clf->train(X, cv::ml::ROW_SAMPLE, y)) {
-            throw RSOperatorError(ErrorCode::OpenCvError, "NormalBayes training failed");
-        }
-        return clf;
-    }
-
-    // default SVM
-    auto svm = cv::ml::SVM::create();
-    svm->setType(cv::ml::SVM::C_SVC);
-    svm->setKernel(cv::ml::SVM::RBF);
-    svm->setC(10.0);
-    svm->setGamma(0.5);
-    svm->setTermCriteria(cv::TermCriteria(cv::TermCriteria::MAX_ITER + cv::TermCriteria::EPS,
-                                          1000, 1e-3));
-    if (!svm->train(X, cv::ml::ROW_SAMPLE, y)) {
-        throw RSOperatorError(ErrorCode::OpenCvError, "SVM training failed");
-    }
-    return svm;
-}
-
-cv::Ptr<cv::ml::StatModel> loadModel(const std::string& method, const std::string& path) {
-    try {
-        if (method == "normal_bayes") {
-            auto m = cv::Algorithm::load<cv::ml::NormalBayesClassifier>(path);
-            if (m.empty())
-                throw RSOperatorError(ErrorCode::FileNotReadable, "Failed to load NormalBayes: " + path);
-            return m;
-        }
-        auto m = cv::Algorithm::load<cv::ml::SVM>(path);
-        if (m.empty())
-            throw RSOperatorError(ErrorCode::FileNotReadable, "Failed to load SVM: " + path);
-        return m;
-    } catch (const RSOperatorError&) {
-        throw;
-    } catch (const cv::Exception& e) {
-        throw RSOperatorError(ErrorCode::OpenCvError,
-                              std::string("Model load failed: ") + e.what());
-    }
-}
-
-void writeModelMeta(const std::string& modelPath, const std::string& method,
-                    const std::vector<int>& bands) {
-    const std::string metaPath = modelPath + ".meta.json";
-    Json::Value meta(Json::objectValue);
-    meta["method"] = method;
-    meta["bands"] = Json::Value(Json::arrayValue);
-    for (int b : bands)
-        meta["bands"].append(b);
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "  ";
-    const std::string body = Json::writeString(builder, meta);
-    QFile f(QString::fromStdString(metaPath));
-    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        f.write(body.c_str(), static_cast<qint64>(body.size()));
-    }
-}
-
-std::string readMethodFromMeta(const std::string& modelPath, const std::string& fallback) {
+/**
+ * Legacy sidecar written by the pre-ADR-0019 operator:
+ * "<modelPath>.meta.json" with {"method", "bands"} and no version field.
+ * Read for the method only; such models were trained unscaled, which matches
+ * the unfitted scaler the predict-only path uses when no superset sidecar
+ * is found.
+ */
+std::string readLegacyMethodFromMeta(const std::string& modelPath, const std::string& fallback) {
     const std::string metaPath = modelPath + ".meta.json";
     QFile f(QString::fromStdString(metaPath));
     if (!f.open(QIODevice::ReadOnly))
@@ -162,6 +95,55 @@ std::string readMethodFromMeta(const std::string& modelPath, const std::string& 
     if (root.isMember("method") && root["method"].isString())
         return root["method"].asString();
     return fallback;
+}
+
+/// Single backend construction path shared with the GUI (ADR 0019 S3 —
+/// hyperparameters live in the analysis-layer classes only).
+std::unique_ptr<RsClassifierBackend> makeBackend(const std::string& method) {
+    if (method == "normal_bayes")
+        return std::make_unique<RsClassifierNormalBayes>();
+    return std::make_unique<RsClassifierSvm>();
+}
+
+/// Deterministic per-class colors (the GUI takes them from ROI class defs;
+/// headless runs synthesize them so Byte outputs get a color table and the
+/// sidecar carries class metadata).
+QColor classColor(int classId) {
+    return QColor::fromHsv((classId * 47) % 360, 200, 230);
+}
+
+/// Map a failed pipeline run back onto the operator's stable error codes.
+[[noreturn]] void throwPipelineError(const RsClassificationPipelineResult& res,
+                                     const std::string& method) {
+    using E = RsClassificationPipelineResult::Error;
+    const std::string msg = res.errorMessage.toStdString();
+    switch (res.error) {
+        case E::Cancelled:
+            throw RSOperatorError(ErrorCode::Cancelled, "Cancelled");
+        case E::TrainingFailed:
+            throw RSOperatorError(ErrorCode::OpenCvError,
+                                  method == "normal_bayes" ? "NormalBayes training failed"
+                                                           : "SVM training failed");
+        case E::ModelSaveFailed:
+        case E::SidecarSaveFailed:
+            throw RSOperatorError(ErrorCode::FileNotWritable, msg);
+        case E::NotFittedNoTrainingData:
+            throw RSOperatorError(ErrorCode::InvalidInputData, msg);
+        case E::InvalidBand:
+            throw RSOperatorError(ErrorCode::OutOfRange, msg);
+        case E::OutputDriverUnavailable:
+            throw RSOperatorError(ErrorCode::GdalError, "GTiff driver not available");
+        case E::OutputCreateFailed:
+            throw RSOperatorError(ErrorCode::GdalError, "Failed to create output");
+        case E::PredictionFailed:
+        case E::PredictionSizeMismatch:
+            throw RSOperatorError(ErrorCode::OpenCvError, msg);
+        case E::RasterOpenFailed:
+        case E::RasterReadFailed:
+            throw RSOperatorError(ErrorCode::GdalError, msg);
+        default:
+            throw RSOperatorError(ErrorCode::ComputationError, msg);
+    }
 }
 
 } // namespace
@@ -182,6 +164,20 @@ Json::Value RsSupervisedClassificationOperator::schema() const {
     props["modelOut"]["required"] = false;
     props["maxSamplesPerClass"] = makeIntegerParam(
         "maxSamplesPerClass", "Cap training samples per class (0 = unlimited)", 5000);
+    props["scale"] = makeBooleanParam(
+        "scale",
+        "Fit a feature scaler (standardization) on the training split and embed it in the "
+        "model sidecar. In predict-only mode the sidecar's scaler is always applied when "
+        "present, regardless of this flag.",
+        true);
+    Json::Value testSplit = makeNumberParam(
+        "testSplit",
+        "Stratified holdout fraction (0 = off, train mode only). When > 0, samples are "
+        "split per class with a deterministic seed and accuracy metrics "
+        "(overallAccuracy, kappa, confusionMatrix) are returned.",
+        0.0);
+    setRange(testSplit, 0.0, 0.9);
+    props["testSplit"] = testSplit;
 
     Json::Value bands = makeStringParam("bands", "Optional 1-based band indices", "");
     bands["type"] = "array";
@@ -195,6 +191,10 @@ Json::Value RsSupervisedClassificationOperator::schema() const {
     outputs["trainSamples"] = makeIntegerParam("trainSamples", "Training samples used", 0);
     outputs["classes"] = makeIntegerParam("classes", "Unique class count", 0);
     outputs["mode"] = makeStringParam("mode", "train_predict or predict_only", "");
+    outputs["overallAccuracy"] = makeNumberParam(
+        "overallAccuracy", "Held-out overall accuracy (only when testSplit > 0)", 0.0);
+    outputs["kappa"] = makeNumberParam(
+        "kappa", "Held-out Cohen's kappa (only when testSplit > 0)", 0.0);
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
     root["required"] = makeRequired({"input", "output"});
@@ -214,6 +214,7 @@ Json::Value RsSupervisedClassificationOperator::metadata() const {
     meta["useCases"] = Json::Value(Json::arrayValue);
     meta["useCases"].append("Land-cover mapping from ROI polygons");
     meta["useCases"].append("Apply a previously trained model (modelIn) to a new scene");
+    meta["useCases"].append("Held-out accuracy assessment via testSplit");
     meta["prerequisites"] = Json::Value(Json::arrayValue);
     meta["prerequisites"].append("Train mode: training polygons must overlap the raster");
     meta["prerequisites"].append("Predict-only: modelIn must match method and band set");
@@ -228,14 +229,10 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
     const std::string modelOut = getString(params, "modelOut", "");
     const std::string trainingPath = getString(params, "training", "");
     const bool predictOnly = !modelIn.empty();
-    std::string method;
-    if (predictOnly && !params.isMember("method")) {
-        method = readMethodFromMeta(modelIn, "svm");
-        std::transform(method.begin(), method.end(), method.begin(), ::tolower);
-        if (std::find(s_methods.begin(), s_methods.end(), method) == s_methods.end())
-            method = "svm";
-    } else {
-        method = getEnum(params, "method", s_methods, "svm");
+    const bool scale = getBool(params, "scale", true);
+    const double testSplit = getDouble(params, "testSplit", 0.0);
+    if (testSplit < 0.0 || testSplit > 0.9) {
+        throw RSOperatorError(ErrorCode::OutOfRange, "testSplit must be in [0, 0.9]");
     }
     const std::string classField = getString(params, "classField", "class_id");
     const int maxPerClass = getInt(params, "maxSamplesPerClass", 5000);
@@ -268,25 +265,15 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
     const int width = ds.width();
     const int height = ds.height();
     const int bandCount = ds.bandCount();
-    const auto gtArr = ds.geoTransform();
-    double gt[6] = {gtArr[0], gtArr[1], gtArr[2], gtArr[3], gtArr[4], gtArr[5]};
     const std::vector<int> bands = parseBands(params, bandCount);
     const int nFeat = static_cast<int>(bands.size());
-    const size_t nPix = static_cast<size_t>(width) * static_cast<size_t>(height);
 
-    context.reportProgress(0.05, "Reading raster bands");
-    std::vector<std::vector<float>> bandData(static_cast<size_t>(nFeat));
-    for (int i = 0; i < nFeat; ++i) {
-        bandData[static_cast<size_t>(i)].resize(nPix);
-        if (!ds.readBandData(bands[static_cast<size_t>(i)],
-                             bandData[static_cast<size_t>(i)].data(), width, height)) {
-            throw RSOperatorError(ErrorCode::GdalError,
-                                  "Failed to read band " + std::to_string(bands[static_cast<size_t>(i)]));
-        }
-        context.throwIfCancelled();
-    }
+    RsClassificationPipeline::Config cfg;
+    cfg.sourceRaster = QString::fromStdString(inputPath);
+    cfg.outputRaster = QString::fromStdString(outputPath);
+    cfg.bandIndices = QVector<int>(bands.begin(), bands.end());
 
-    cv::Ptr<cv::ml::StatModel> model;
+    std::string method;
     int nSamples = 0;
     int nClasses = 0;
     int featureCount = 0;
@@ -295,85 +282,87 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
     if (predictOnly) {
         mode = "predict_only";
         context.reportProgress(0.35, "Loading model " + modelIn);
-        model = loadModel(method, modelIn);
+
+        // Superset sidecar (method + fitted scaler + class metadata). When
+        // missing/unreadable, fall back to the legacy "<model>.meta.json"
+        // for the method and predict unscaled — matching how pre-ADR-0019
+        // models were trained.
+        const QString modelInQ = QString::fromStdString(modelIn);
+        QString sidecarMethod;
+        RsFeatureScaler sidecarScaler;
+        QHash<int, QColor> sidecarColors;
+        const bool sidecarPresent =
+            QFile::exists(RsClassificationPipeline::sidecarPathForModel(modelInQ));
+        const bool sidecarOk =
+            sidecarPresent && RsClassificationPipeline::loadModelSidecar(
+                                  modelInQ, sidecarMethod, sidecarScaler, sidecarColors);
+        if (sidecarPresent && !sidecarOk) {
+            context.logWarning("Model sidecar present but unreadable — predicting without scaling");
+        }
+
+        if (!params.isMember("method")) {
+            if (sidecarOk) {
+                method = canonicalMethod(sidecarMethod.toStdString(), "svm");
+            } else {
+                method = canonicalMethod(readLegacyMethodFromMeta(modelIn, "svm"), "svm");
+            }
+        } else {
+            method = getEnum(params, "method", s_methods, "svm");
+        }
+
+        if (sidecarOk) {
+            cfg.scaler = sidecarScaler; // applied automatically when fitted
+            cfg.classColors = sidecarColors;
+        }
+
+        cfg.backend = makeBackend(method);
+        if (!cfg.backend->load(modelInQ)) {
+            throw RSOperatorError(ErrorCode::FileNotReadable,
+                                  "Failed to load " +
+                                      std::string(method == "normal_bayes" ? "NormalBayes" : "SVM") +
+                                      ": " + modelIn);
+        }
         context.logInfo("Loaded model (" + method + ") from " + modelIn);
     } else {
+        method = getEnum(params, "method", s_methods, "svm");
         context.reportProgress(0.25, "Collecting training samples from " + trainingPath);
 
-        GDALDatasetH vecDs = GDALOpenEx(trainingPath.c_str(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr);
-        if (!vecDs) {
-            throw RSOperatorError(ErrorCode::GdalError, "Failed to open training vector: " + trainingPath);
-        }
+        RsTrainingDataExtraction::Options exOptions;
+        exOptions.maxSamplesPerClass = maxPerClass;
+        const RsTrainingDataResult ex = RsTrainingDataExtraction::extractFromVector(
+            QString::fromStdString(inputPath),
+            cfg.bandIndices,
+            QString::fromStdString(trainingPath),
+            QString::fromStdString(classField),
+            exOptions,
+            [&context](double fraction, const QString& message) {
+                context.throwIfCancelled();
+                context.reportProgress(0.25 + 0.2 * fraction, message.toStdString());
+                return true;
+            });
 
-        OGRLayerH layer = GDALDatasetGetLayer(vecDs, 0);
-        if (!layer) {
-            GDALClose(vecDs);
-            throw RSOperatorError(ErrorCode::InvalidInputData, "Training dataset has no layers");
-        }
-
-        OGRFeatureDefnH defn = OGR_L_GetLayerDefn(layer);
-        int fieldIdx = OGR_FD_GetFieldIndex(defn, classField.c_str());
-        if (fieldIdx < 0)
-            fieldIdx = OGR_FD_GetFieldIndex(defn, "class");
-        if (fieldIdx < 0)
-            fieldIdx = OGR_FD_GetFieldIndex(defn, "id");
-        if (fieldIdx < 0) {
-            GDALClose(vecDs);
-            throw RSOperatorError(ErrorCode::InvalidParameter,
-                                  "Class field not found: " + classField +
-                                      " (also tried 'class', 'id')");
-        }
-
-        std::map<int, std::vector<size_t>> classPixels;
-        OGR_L_ResetReading(layer);
-        OGRFeatureH feat = nullptr;
-        while ((feat = OGR_L_GetNextFeature(layer)) != nullptr) {
-            ++featureCount;
-            context.throwIfCancelled();
-
-            const int classId = OGR_F_GetFieldAsInteger(feat, fieldIdx);
-            if (classId <= 0) {
-                OGR_F_Destroy(feat);
-                continue;
-            }
-
-            OGRGeometryH geom = OGR_F_GetGeometryRef(feat);
-            if (!geom) {
-                OGR_F_Destroy(feat);
-                continue;
-            }
-
-            std::vector<uint8_t> mask = rasterizeGeometry(geom, width, height, gt);
-            auto& pixels = classPixels[classId];
-            for (size_t i = 0; i < mask.size(); ++i) {
-                if (mask[i])
-                    pixels.push_back(i);
-            }
-            OGR_F_Destroy(feat);
-        }
-        GDALClose(vecDs);
-
-        if (classPixels.empty()) {
-            throw RSOperatorError(ErrorCode::InvalidInputData,
-                                  "No valid training pixels extracted (check CRS overlap and classField)");
-        }
-
-        std::mt19937 rng(42);
-        std::vector<size_t> sampleIdx;
-        std::vector<int> sampleY;
-        for (auto& [cid, pixels] : classPixels) {
-            if (maxPerClass > 0 && static_cast<int>(pixels.size()) > maxPerClass) {
-                std::shuffle(pixels.begin(), pixels.end(), rng);
-                pixels.resize(static_cast<size_t>(maxPerClass));
-            }
-            for (size_t pix : pixels) {
-                sampleIdx.push_back(pix);
-                sampleY.push_back(cid);
+        if (!ex.ok) {
+            switch (ex.error) {
+                case RsTrainingDataResult::Error::VectorOpenFailed:
+                    throw RSOperatorError(ErrorCode::GdalError, ex.errorMessage.toStdString());
+                case RsTrainingDataResult::Error::VectorNoLayers:
+                    throw RSOperatorError(ErrorCode::InvalidInputData, ex.errorMessage.toStdString());
+                case RsTrainingDataResult::Error::ClassFieldNotFound:
+                    throw RSOperatorError(ErrorCode::InvalidParameter, ex.errorMessage.toStdString());
+                case RsTrainingDataResult::Error::NoValidPixels:
+                    throw RSOperatorError(
+                        ErrorCode::InvalidInputData,
+                        "No valid training pixels extracted (check CRS overlap and classField)");
+                case RsTrainingDataResult::Error::Cancelled:
+                    throw RSOperatorError(ErrorCode::Cancelled, "Cancelled");
+                default:
+                    throw RSOperatorError(ErrorCode::GdalError, ex.errorMessage.toStdString());
             }
         }
 
-        nSamples = static_cast<int>(sampleIdx.size());
-        nClasses = static_cast<int>(classPixels.size());
+        featureCount = ex.featuresRead;
+        nSamples = ex.X.rows;
+        nClasses = static_cast<int>(ex.classCounts.size());
         if (nSamples < 2) {
             throw RSOperatorError(ErrorCode::InvalidInputData, "Insufficient training samples");
         }
@@ -382,98 +371,65 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
                                "Training " + method + " on " + std::to_string(nSamples) +
                                    " samples, " + std::to_string(nClasses) + " classes");
 
-        cv::Mat trainX(nSamples, nFeat, CV_32F);
-        cv::Mat trainY(nSamples, 1, CV_32S);
-        for (int r = 0; r < nSamples; ++r) {
-            const size_t pix = sampleIdx[static_cast<size_t>(r)];
-            for (int c = 0; c < nFeat; ++c) {
-                trainX.at<float>(r, c) = bandData[static_cast<size_t>(c)][pix];
+        // Optional stratified holdout (testSplit) then optional scaler fit —
+        // same order as the GUI (split raw, fit scaler on the train split,
+        // transform train + test).
+        cv::Mat trainX = ex.X;
+        cv::Mat trainY = ex.y;
+        cv::Mat testX;
+        cv::Mat testY;
+        if (testSplit > 0.0) {
+            const RsTrainTestSplit split =
+                RsClassificationSplit::stratifiedSplit(ex.X, ex.y, 1.0 - testSplit);
+            trainX = split.trainX;
+            trainY = split.trainY;
+            testX = split.testX;
+            testY = split.testY;
+        }
+
+        RsFeatureScaler scaler;
+        if (scale) {
+            if (!scaler.fit(trainX)) {
+                throw RSOperatorError(ErrorCode::ComputationError, "Feature scaling failed");
             }
-            trainY.at<int>(r, 0) = sampleY[static_cast<size_t>(r)];
+            trainX = scaler.transform(trainX);
+            if (!testX.empty())
+                testX = scaler.transform(testX);
         }
 
-        model = trainModel(method, trainX, trainY);
-
-        if (!modelOut.empty()) {
-            try {
-                model->save(modelOut);
-                writeModelMeta(modelOut, method, bands);
-                context.logInfo("Saved model to " + modelOut);
-            } catch (const cv::Exception& e) {
-                context.logWarning(std::string("Model save failed: ") + e.what());
-            }
-        }
+        cfg.trainX = trainX;
+        cfg.trainY = trainY;
+        cfg.testX = testX;
+        cfg.testY = testY;
+        cfg.scaler = scaler;
+        for (auto it = ex.classCounts.constBegin(); it != ex.classCounts.constEnd(); ++it)
+            cfg.classColors[it.key()] = classColor(it.key());
+        cfg.backend = makeBackend(method);
+        if (!modelOut.empty())
+            cfg.modelSavePath = QString::fromStdString(modelOut);
     }
 
-    context.reportProgress(0.6, "Classifying full raster");
-    context.throwIfCancelled();
+    cfg.methodName = QString::fromStdString(method);
 
-    std::vector<uint8_t> classMap(nPix, 0);
-    // Process in row chunks to limit peak temp memory for predict matrix
-    constexpr int chunkRows = 64;
-    for (int row0 = 0; row0 < height; row0 += chunkRows) {
-        const int rows = std::min(chunkRows, height - row0);
-        const int n = rows * width;
-        cv::Mat chunk(n, nFeat, CV_32F);
-        for (int r = 0; r < rows; ++r) {
-            for (int col = 0; col < width; ++col) {
-                const size_t pix = static_cast<size_t>(row0 + r) * width + col;
-                const int sample = r * width + col;
-                for (int f = 0; f < nFeat; ++f) {
-                    chunk.at<float>(sample, f) = bandData[static_cast<size_t>(f)][pix];
-                }
-            }
-        }
+    // Bridge: pipeline fraction [0,1] → operator progress 0.45–0.98; cancel
+    // via the sink's return value so the pipeline removes a partially-written
+    // output before reporting Error::Cancelled.
+    const RsClassificationPipelineResult res = RsClassificationPipeline::run(
+        std::move(cfg),
+        [&context](double fraction, const QString& message) {
+            if (context.isCancelled())
+                return false;
+            // Preserve the operator's progress message style.
+            const std::string msg = message == QStringLiteral("Predicting tiles")
+                                        ? "Classifying"
+                                        : message.toStdString();
+            context.reportProgress(0.45 + 0.53 * fraction, msg);
+            return true;
+        });
 
-        cv::Mat pred;
-        try {
-            model->predict(chunk, pred);
-        } catch (const cv::Exception& e) {
-            throw RSOperatorError(ErrorCode::OpenCvError,
-                                  std::string("predict failed: ") + e.what());
-        }
-
-        for (int i = 0; i < n; ++i) {
-            float v = (pred.cols >= 1) ? pred.at<float>(i, 0) : pred.at<float>(i);
-            // NormalBayes may return float class ids; SVM returns float labels
-            int label = static_cast<int>(std::lround(v));
-            if (label < 0) label = 0;
-            if (label > 255) label = 255;
-            const size_t pix = static_cast<size_t>(row0) * width + static_cast<size_t>(i);
-            classMap[pix] = static_cast<uint8_t>(label);
-        }
-
-        context.throwIfCancelled();
-        context.reportProgress(0.6 + 0.3 * static_cast<double>(row0 + rows) / height,
-                               "Classifying");
+    if (!res.ok) {
+        throwPipelineError(res, method);
     }
-
-    context.reportProgress(0.92, "Writing output");
-
-    GDALDriverH driver = GDALGetDriverByName("GTiff");
-    if (!driver) {
-        throw RSOperatorError(ErrorCode::GdalError, "GTiff driver not available");
-    }
-    char** opts = nullptr;
-    opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
-    GDALDatasetH outDs = GDALCreate(driver, outputPath.c_str(), width, height, 1, GDT_Byte, opts);
-    CSLDestroy(opts);
-    if (!outDs) {
-        throw RSOperatorError(ErrorCode::GdalError, "Failed to create output");
-    }
-    GDALSetGeoTransform(outDs, gt);
-    const QString proj = ds.projection();
-    if (!proj.isEmpty())
-        GDALSetProjection(outDs, proj.toUtf8().constData());
-
-    GDALRasterBandH outBand = GDALGetRasterBand(outDs, 1);
-    if (GDALRasterIO(outBand, GF_Write, 0, 0, width, height, classMap.data(), width, height,
-                     GDT_Byte, 0, 0) != CE_None) {
-        GDALClose(outDs);
-        throw RSOperatorError(ErrorCode::GdalError, "Failed to write class map");
-    }
-    GDALSetRasterNoDataValue(outBand, 0);
-    GDALClose(outDs);
 
     context.reportProgress(1.0, "Supervised classification complete");
 
@@ -491,6 +447,22 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
         result["modelIn"] = modelIn;
     if (!modelOut.empty())
         result["modelOut"] = modelOut;
+    if (res.accuracy.confusion.rows > 0) {
+        result["overallAccuracy"] = res.accuracy.overallAccuracy;
+        result["kappa"] = res.accuracy.kappa;
+        Json::Value cm(Json::arrayValue);
+        for (int r = 0; r < res.accuracy.confusion.rows; ++r) {
+            Json::Value row(Json::arrayValue);
+            for (int c = 0; c < res.accuracy.confusion.cols; ++c)
+                row.append(res.accuracy.confusion.at<int>(r, c));
+            cm.append(row);
+        }
+        result["confusionMatrix"] = cm;
+        Json::Value classes(Json::arrayValue);
+        for (int id : res.accuracy.classIds)
+            classes.append(id);
+        result["confusionClasses"] = classes;
+    }
     return result;
 }
 

@@ -12,6 +12,7 @@
 #include "rs_classification_project.h"
 #include "rs_classification_split.h"
 #include "rs_classification_task.h"
+#include "rs_classification_pipeline.h"
 #include "rs_classifier_kmeans.h"
 #include "rs_post_process_dialog.h"
 #include "rs_post_process_task.h"
@@ -27,6 +28,7 @@
 #include "rs_classify_workflow_controller.h"
 #include "rs_cross_validation.h"
 #include "rs_cv_task.h"
+#include "rs_training_data_extraction.h"
 #include "rs_jm_matrix_widget.h"
 #include "rs_jm_separability.h"
 #include "rs_pixel_rasterizer.h"
@@ -208,9 +210,6 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
   : QMainWindow( parent )
   , m_iface( iface )
 {
-  connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
-           this, &QgsClassificationMainWindow::onClassificationTaskUpdated,
-           Qt::QueuedConnection );
   SICNU_LOG_INFO( SicnuLogTags::Classification, QStringLiteral( "Classification window opened" ) );
   setWindowTitle( tr( "Classification · 监督分类" ) );
   setWhatsThis( SicnuDialogHelp::htmlForTool( QStringLiteral( "classification" ), windowTitle() ) );
@@ -1987,142 +1986,27 @@ bool QgsClassificationMainWindow::buildTrainingData( const QVector<int> &bands,
   if ( m_sourceWidth <= 0 || m_sourceHeight <= 0 )
     return false;
 
-  ensureGdalInit();
-  GDALDataset *ds = static_cast<GDALDataset *>(
-    GDALOpen( m_sourceRasterPath.toUtf8().constData(), GA_ReadOnly ) );
-  if ( !ds )
-    return false;
-  const int W = ds->GetRasterXSize();
-  const int H = ds->GetRasterYSize();
-  const int nBands = ds->GetRasterCount();
-  for ( int b : bands )
-  {
-    if ( b < 1 || b > nBands )
-    {
-      GDALClose( ds );
-      return false;
-    }
-  }
-
-  // Collect samples with pixel-index dedup (last class wins on overlapping ROIs).
-  QHash<quint64, int> pixelClass;
+  QVector<RsTrainingGeometry> geometries;
+  geometries.reserve( m_rois->rois().size() );
   for ( const RsRoi &roi : m_rois->rois() )
   {
-    if ( roi.classId() <= 0 )
-      continue;
-    QVector<quint64> idx = roi.pixelIndices();
-    if ( idx.isEmpty() )
-    {
-      const QSet<quint64> px = RsPixelRasterizer::rasterize(
-        roi.geometry(), m_sourceGt, W, H );
-      idx = QVector<quint64>( px.begin(), px.end() );
-    }
-    for ( quint64 i : idx )
-    {
-      if ( i < static_cast<quint64>( W ) * static_cast<quint64>( H ) )
-        pixelClass.insert( i, roi.classId() );
-    }
+    RsTrainingGeometry tg;
+    tg.classId = roi.classId();
+    tg.geometry = roi.geometry();
+    tg.pixelIndices = roi.pixelIndices();
+    geometries.push_back( tg );
   }
 
-  if ( pixelClass.size() < 10 )
-  {
-    GDALClose( ds );
+  RsTrainingDataExtraction::Options options;
+  options.ignore = currentIgnoreOptions();
+  options.minSamples = 10;
+
+  const RsTrainingDataResult res = RsTrainingDataExtraction::extract(
+    m_sourceRasterPath, bands, geometries, options );
+  if ( !res.ok )
     return false;
-  }
-
-  // Flatten to (classId, pixelIdx) and group sample columns by row so each
-  // unique row is read once per band (scanline) instead of 1×1 RasterIO.
-  QVector<QPair<int, quint64>> samples;
-  samples.reserve( pixelClass.size() );
-  for ( auto it = pixelClass.constBegin(); it != pixelClass.constEnd(); ++it )
-    samples.push_back( qMakePair( it.value(), it.key() ) );
-
-  // row -> list of (sampleIndex, col)
-  QHash<int, QVector<QPair<int, int>>> byRow;
-  byRow.reserve( samples.size() );
-  for ( int s = 0; s < samples.size(); ++s )
-  {
-    const quint64 idx = samples[s].second;
-    const int r = static_cast<int>( idx / static_cast<quint64>( W ) );
-    const int c = static_cast<int>( idx % static_cast<quint64>( W ) );
-    byRow[r].append( qMakePair( s, c ) );
-  }
-
-  X.create( samples.size(), bands.size(), CV_32F );
-  y.create( samples.size(), 1, CV_32S );
-  for ( int s = 0; s < samples.size(); ++s )
-    y.at<int>( s, 0 ) = samples[s].first;
-
-  std::vector<float> rowBuf( static_cast<size_t>( W ) );
-  for ( int bi = 0; bi < bands.size(); ++bi )
-  {
-    GDALRasterBand *band = ds->GetRasterBand( bands[bi] );
-    for ( auto it = byRow.constBegin(); it != byRow.constEnd(); ++it )
-    {
-      const int r = it.key();
-      const CPLErr err = band->RasterIO(
-        GF_Read, 0, r, W, 1, rowBuf.data(),
-        W, 1, GDT_Float32, 0, 0 );
-      if ( err != CE_None )
-      {
-        GDALClose( ds );
-        return false;
-      }
-      for ( const QPair<int, int> &sc : it.value() )
-        X.at<float>( sc.first, bi ) = rowBuf[static_cast<size_t>( sc.second )];
-    }
-  }
-
-  // Drop ROI samples that fall on NoData / user ignore values (edge/background).
-  const RsPixelIgnoreOptions ignore = currentIgnoreOptions();
-  const int B = bands.size();
-  std::vector<bool> bandHasNodata( static_cast<size_t>( B ), false );
-  std::vector<float> bandNodata( static_cast<size_t>( B ), 0.f );
-  if ( ignore.useSourceNodata )
-  {
-    for ( int bi = 0; bi < B; ++bi )
-    {
-      int success = 0;
-      const double nd = ds->GetRasterBand( bands[bi] )->GetNoDataValue( &success );
-      if ( success )
-      {
-        bandHasNodata[static_cast<size_t>( bi )] = true;
-        bandNodata[static_cast<size_t>( bi )] = static_cast<float>( nd );
-      }
-    }
-  }
-
-  std::vector<float> feat( static_cast<size_t>( B ) );
-  QVector<int> keepRows;
-  keepRows.reserve( samples.size() );
-  for ( int s = 0; s < samples.size(); ++s )
-  {
-    for ( int bi = 0; bi < B; ++bi )
-      feat[static_cast<size_t>( bi )] = X.at<float>( s, bi );
-    if ( !ignore.isIgnorePixel( feat.data(), B, bandHasNodata, bandNodata ) )
-      keepRows.push_back( s );
-  }
-
-  if ( keepRows.size() < 10 )
-  {
-    GDALClose( ds );
-    return false;
-  }
-
-  if ( keepRows.size() != samples.size() )
-  {
-    cv::Mat X2( keepRows.size(), B, CV_32F );
-    cv::Mat y2( keepRows.size(), 1, CV_32S );
-    for ( int i = 0; i < keepRows.size(); ++i )
-    {
-      X.row( keepRows[i] ).copyTo( X2.row( i ) );
-      y2.at<int>( i, 0 ) = y.at<int>( keepRows[i], 0 );
-    }
-    X = X2;
-    y = y2;
-  }
-
-  GDALClose( ds );
+  X = res.X;
+  y = res.y;
   return true;
 }
 
@@ -2213,9 +2097,6 @@ void QgsClassificationMainWindow::applyClassification()
       return;
     }
 
-    // Phase 10A review patch — stratified 70/30 split (default ratio comes
-    // from the train-ratio spinbox). testX/testY are reserved for Task 10.9
-    // accuracy assessment.
     const auto split = RsClassificationSplit::stratifiedSplit(
       X, y, m_classifierBar->trainRatio() );
     if ( !fitScalerOntoConfig( split, cfg ) )
@@ -2236,7 +2117,6 @@ void QgsClassificationMainWindow::applyClassification()
         break;
       case RsClassifierKind::KMeans:
       {
-        // k from unique labels that actually have training samples, not empty classDefs.
         QSet<int> uniqueLabels;
         for ( int i = 0; i < y.rows; ++i )
           uniqueLabels.insert( y.at<int>( i, 0 ) );
@@ -2247,10 +2127,6 @@ void QgsClassificationMainWindow::applyClassification()
       }
     }
 
-    // Optional model save (training path only). Cancel leaves modelSavePath
-    // empty so the task skips persistence. Sidecar .scale.json is written
-    // next to the YAML by RsClassificationTask::run after fit.
-    // KMeans has no OpenCV Algorithm serialisation — skip the dialog.
     if ( m_classifierBar->currentKind() != RsClassifierKind::KMeans )
     {
       QString modelPath = QFileDialog::getSaveFileName(
@@ -2274,7 +2150,6 @@ void QgsClassificationMainWindow::applyClassification()
   const QString outForLog = outPath;
   SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Classification started: algo=%1, bands=%2, output=%3" )
     .arg( cfg.algoName ).arg( cfg.bandIndices.size() ).arg( QFileInfo( outPath ).fileName() ) );
-  auto *task = new RsClassificationTask( std::move( cfg ) );
   setClassifyBusy( true );
 
   sicnu::jobs::JobRequest req;
@@ -2284,48 +2159,130 @@ void QgsClassificationMainWindow::applyClassification()
   req.exclusive = true;
   req.params["output"] = outForLog.toStdString();
 
-  m_pendingClassificationWorker = task;
-  m_pendingClassificationOperation = PendingClassificationOperation::Apply;
-  m_pendingPostProcessLoadsLayers = false;
-  m_pendingClassificationAlgorithm = algoForLog;
-  m_pendingClassificationOutput = outForLog;
-  m_pendingClassificationTaskId = sicnu::TaskCenter::instance().submitJob(
+  auto cfgPtr = std::make_shared<RsClassificationTask::Config>( std::move( cfg ) );
+
+  m_jobHandle.submitJob(
     req,
-    [task]( const sicnu::jobs::JobRequest &request,
-            sicnu::operators::RSOperatorContext &ctx ) {
+    [cfgPtr]( const sicnu::jobs::JobRequest &request,
+              sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running supervised classification apply" );
       ctx.reportProgress( 0.0, "Classifying" );
-      const bool ok = task->run();
-      if ( ctx.isCancelled() || ( !ok && task->result().errorMessage
-                                    == QStringLiteral( "Cancelled" ) ) )
+
+      RsClassificationPipeline::Config pcfg;
+      pcfg.sourceRaster = cfgPtr->sourceRaster;
+      pcfg.outputRaster = cfgPtr->outputRaster;
+      pcfg.bandIndices = cfgPtr->bandIndices;
+      pcfg.backend = std::move( cfgPtr->backend );
+      pcfg.trainX = cfgPtr->trainX;
+      pcfg.trainY = cfgPtr->trainY;
+      pcfg.testX = cfgPtr->testX;
+      pcfg.testY = cfgPtr->testY;
+      pcfg.classColors = cfgPtr->classColors;
+      pcfg.methodName = cfgPtr->algoName;
+      pcfg.scaler = cfgPtr->scaler;
+      pcfg.modelSavePath = cfgPtr->modelSavePath;
+      pcfg.creationOptions = cfgPtr->creationOptions;
+      pcfg.cropToWindow = cfgPtr->cropToWindow;
+      pcfg.window = cfgPtr->window;
+      pcfg.ignoreOptions = cfgPtr->ignoreOptions;
+
+      const auto res = RsClassificationPipeline::run(
+        std::move( pcfg ),
+        [&ctx]( double fraction, const QString &msg ) {
+          ctx.reportProgress( fraction, msg.toStdString() );
+          return !ctx.isCancelled();
+        } );
+
+      if ( ctx.isCancelled() || res.error == RsClassificationPipelineResult::Error::Cancelled )
       {
         throw sicnu::operators::RSOperatorError(
           sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
       }
-      if ( !ok )
+      if ( !res.ok )
       {
         throw sicnu::operators::RSOperatorError(
           sicnu::operators::ErrorCode::ComputationError,
-          task->result().errorMessage.toStdString() );
+          res.errorMessage.toStdString() );
       }
       Json::Value result( Json::objectValue );
       result["output"] = request.params.get( "output", "" ).asString();
-      result["totalPixels"] = task->result().totalPixels;
-      result["durationMs"] = task->result().durationMs;
+      result["totalPixels"] = res.totalPixels;
+      result["durationMs"] = res.durationMs;
+      if ( !res.accuracy.classIds.isEmpty() )
+      {
+        result["overallAccuracy"] = res.accuracy.overallAccuracy;
+        result["kappa"] = res.accuracy.kappa;
+      }
       return result;
     },
-    [task]() { task->cancel(); }
-    );
+    /*cancelCallback=*/nullptr,
+    /*autoLoad=*/false,
+    [this, outForLog, algoForLog]( const QString &, const Json::Value &payload ) {
+      setClassifyBusy( false );
+      m_lastClassifyPath = outForLog;
+
+      if ( m_workflow )
+        m_workflow->setHasFullClassifyResult( true );
+
+      auto *classLayer = new QgsRasterLayer(
+        outForLog,
+        QFileInfo( outForLog ).baseName() + tr( " (分类)" ),
+        QStringLiteral( "gdal" ) );
+      if ( classLayer->isValid() )
+      {
+        m_previewLayer = classLayer;
+        addSessionLayer( classLayer, true );
+      }
+      else
+      {
+        delete classLayer;
+      }
+      if ( m_workflowBridge )
+        m_workflowBridge->setClassifiedOutputArtifact( outForLog.toStdString() );
+
+      const int totalPixels = payload.get( "totalPixels", 0 ).asInt();
+      const int durationMs = payload.get( "durationMs", 0 ).asInt();
+
+      QJsonObject obj{
+        { QStringLiteral( "event" ), QStringLiteral( "classify_finished" ) },
+        { QStringLiteral( "algo" ), algoForLog },
+        { QStringLiteral( "total_pixels" ), totalPixels },
+        { QStringLiteral( "duration_ms" ), durationMs },
+        { QStringLiteral( "status" ), QStringLiteral( "ok" ) }
+      };
+      if ( payload.isMember( "overallAccuracy" ) )
+      {
+        obj.insert( QStringLiteral( "overall_accuracy" ), payload["overallAccuracy"].asDouble() );
+        obj.insert( QStringLiteral( "kappa" ), payload["kappa"].asDouble() );
+      }
+      if ( statusBar() )
+        statusBar()->showMessage(
+          tr( "分类完成: %1 (%2 ms)" )
+            .arg( QFileInfo( outForLog ).fileName() )
+            .arg( durationMs ),
+          6000 );
+      refreshWorkflowUi();
+    },
+    [this]( const QString &err, bool isCanceled ) {
+      setClassifyBusy( false );
+      if ( isCanceled )
+      {
+        SICNU_LOG_WARN( SicnuLogTags::Classification, QStringLiteral( "Classification cancelled" ) );
+        if ( statusBar() )
+          statusBar()->showMessage( tr( "分类已取消" ), 3000 );
+      }
+      else
+      {
+        SICNU_LOG_ERROR( SicnuLogTags::Classification, QString( "Classification failed: %1" ).arg( err ) );
+        if ( statusBar() )
+          statusBar()->showMessage( tr( "分类失败: %1" ).arg( err ), 6000 );
+      }
+    }
+  );
 
   if ( statusBar() )
     statusBar()->showMessage( tr( "分类中…" ), 3000 );
 }
-
-
-
-// ---------------------------------------------------------------------------
-// Phase 10A review patch — slot implementations.
-// ---------------------------------------------------------------------------
 
 void QgsClassificationMainWindow::applyPreview()
 {
@@ -2364,7 +2321,6 @@ void QgsClassificationMainWindow::applyPreview()
   }
 
   // Viewport-cropped preview: only classify the current canvas extent.
-  // Reject when the viewport does not intersect the source raster.
   if ( !m_canvas )
     return;
   const RsPixelWindow win = rsMapExtentToPixelWindow(
@@ -2376,8 +2332,6 @@ void QgsClassificationMainWindow::applyPreview()
     return;
   }
 
-  // Route output to a temp file, skip the file dialog, and add the result
-  // as a temporary canvas layer. Accuracy dialog is intentionally not shown.
   const QString outPath = QDir::temp().filePath(
     QStringLiteral( "classify_preview.tif" ) );
 
@@ -2414,7 +2368,6 @@ void QgsClassificationMainWindow::applyPreview()
       break;
     case RsClassifierKind::KMeans:
     {
-      // k from unique labels that actually have training samples, not empty classDefs.
       QSet<int> uniqueLabels;
       for ( int i = 0; i < y.rows; ++i )
         uniqueLabels.insert( y.at<int>( i, 0 ) );
@@ -2425,7 +2378,7 @@ void QgsClassificationMainWindow::applyPreview()
     }
   }
 
-  auto *task = new RsClassificationTask( std::move( cfg ) );
+  auto cfgPtr = std::make_shared<RsClassificationTask::Config>( std::move( cfg ) );
   const QString outForLog = outPath;
   setClassifyBusy( true );
 
@@ -2436,191 +2389,54 @@ void QgsClassificationMainWindow::applyPreview()
   req.exclusive = false;
   req.params["output"] = outForLog.toStdString();
 
-  m_pendingClassificationWorker = task;
-  m_pendingClassificationOperation = PendingClassificationOperation::Preview;
-  m_pendingPostProcessLoadsLayers = false;
-  m_pendingClassificationAlgorithm.clear();
-  m_pendingClassificationOutput = outForLog;
-  m_pendingClassificationTaskId = sicnu::TaskCenter::instance().submitJob(
+  m_jobHandle.submitJob(
     req,
-    [task]( const sicnu::jobs::JobRequest &request,
-            sicnu::operators::RSOperatorContext &ctx ) {
+    [cfgPtr]( const sicnu::jobs::JobRequest &request,
+              sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running classification preview" );
-      const bool ok = task->run();
-      if ( ctx.isCancelled() || ( !ok && task->result().errorMessage
-                                    == QStringLiteral( "Cancelled" ) ) )
+      RsClassificationPipeline::Config pcfg;
+      pcfg.sourceRaster = cfgPtr->sourceRaster;
+      pcfg.outputRaster = cfgPtr->outputRaster;
+      pcfg.bandIndices = cfgPtr->bandIndices;
+      pcfg.backend = std::move( cfgPtr->backend );
+      pcfg.trainX = cfgPtr->trainX;
+      pcfg.trainY = cfgPtr->trainY;
+      pcfg.testX = cfgPtr->testX;
+      pcfg.testY = cfgPtr->testY;
+      pcfg.classColors = cfgPtr->classColors;
+      pcfg.methodName = cfgPtr->algoName;
+      pcfg.scaler = cfgPtr->scaler;
+      pcfg.creationOptions = cfgPtr->creationOptions;
+      pcfg.cropToWindow = cfgPtr->cropToWindow;
+      pcfg.window = cfgPtr->window;
+      pcfg.ignoreOptions = cfgPtr->ignoreOptions;
+      const auto res = RsClassificationPipeline::run(
+        std::move( pcfg ),
+        [&ctx]( double fraction, const QString &msg ) {
+          ctx.reportProgress( fraction, msg.toStdString() );
+          return !ctx.isCancelled();
+        } );
+
+      if ( ctx.isCancelled() || res.error == RsClassificationPipelineResult::Error::Cancelled )
       {
         throw sicnu::operators::RSOperatorError(
           sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
       }
-      if ( !ok )
+      if ( !res.ok )
       {
         throw sicnu::operators::RSOperatorError(
           sicnu::operators::ErrorCode::ComputationError,
-          task->result().errorMessage.toStdString() );
+          res.errorMessage.toStdString() );
       }
       Json::Value result( Json::objectValue );
       result["output"] = request.params.get( "output", "" ).asString();
-      result["durationMs"] = task->result().durationMs;
+      result["durationMs"] = res.durationMs;
       return result;
     },
-    [task]() { task->cancel(); }
-    );
-
-  if ( statusBar() )
-    statusBar()->showMessage( tr( "预览中…" ), 3000 );
-}
-
-void QgsClassificationMainWindow::onClassificationTaskUpdated(
-  const sicnu::AlgorithmTaskInfo &info )
-{
-  if ( info.taskId != m_pendingClassificationTaskId
-       || ( info.status != sicnu::TaskStatus::Completed
-            && info.status != sicnu::TaskStatus::Canceled
-            && info.status != sicnu::TaskStatus::Failed ) )
-  {
-    return;
-  }
-
-  QgsTask *task = m_pendingClassificationWorker;
-  const PendingClassificationOperation operation = m_pendingClassificationOperation;
-  const bool preview = operation == PendingClassificationOperation::Preview;
-  const QString algoForLog = m_pendingClassificationAlgorithm;
-  const QString outForLog = m_pendingClassificationOutput;
-  const bool loadPostProcessLayers = m_pendingPostProcessLoadsLayers;
-  m_pendingClassificationTaskId = -1;
-  m_pendingClassificationWorker = nullptr;
-  m_pendingClassificationOperation = PendingClassificationOperation::None;
-  m_pendingPostProcessLoadsLayers = false;
-  m_pendingClassificationAlgorithm.clear();
-  m_pendingClassificationOutput.clear();
-  setClassifyBusy( false );
-
-  if ( !task )
-    return;
-
-  if ( operation == PendingClassificationOperation::PostProcess )
-  {
-    auto *postProcessTask = static_cast<RsPostProcessTask *>( task );
-    const auto &r = postProcessTask->result();
-    const auto &cfg = postProcessTask->config();
-    const QString outRaster = cfg.outputRasterPath;
-    const QString outVector = cfg.outputVectorPath;
-    const bool doPoly = cfg.runPolygonize;
-
-    if ( info.status == sicnu::TaskStatus::Completed && r.ok )
-    {
-      if ( m_workflow )
-        m_workflow->setHasPostProcessResult( true );
-
-      if ( !outRaster.isEmpty() )
-        m_lastPostRasterPath = outRaster;
-      if ( doPoly && !outVector.isEmpty() )
-        m_lastPostVectorPath = outVector;
-
-      if ( loadPostProcessLayers )
-      {
-        if ( !doPoly && !outRaster.isEmpty() && QFileInfo::exists( outRaster ) )
-        {
-          auto *resultLayer = new QgsRasterLayer(
-            outRaster, QFileInfo( outRaster ).baseName() + tr( " (后处理)" ),
-            QStringLiteral( "gdal" ) );
-          if ( resultLayer->isValid() )
-          {
-            m_previewLayer = resultLayer;
-            addSessionLayer( resultLayer, true );
-          }
-          else
-          {
-            delete resultLayer;
-          }
-        }
-        if ( doPoly && !outVector.isEmpty() && QFileInfo::exists( outVector ) )
-        {
-          auto *vlayer = new QgsVectorLayer(
-            outVector, QFileInfo( outVector ).baseName() + tr( " (矢量)" ),
-            QStringLiteral( "ogr" ) );
-          if ( vlayer->isValid() )
-            addSessionLayer( vlayer, true );
-          else
-            delete vlayer;
-        }
-      }
-
-      if ( statusBar() )
-      {
-        QString msg = tr( "后处理完成 (%1 ms)" ).arg( r.durationMs );
-        if ( !outRaster.isEmpty() )
-          msg += QStringLiteral( ": " ) + QFileInfo( outRaster ).fileName();
-        if ( doPoly && !outVector.isEmpty() )
-          msg += tr( "；矢量 %1" ).arg( QFileInfo( outVector ).fileName() );
-        if ( loadPostProcessLayers )
-          msg += tr( "（已加载到图层）" );
-        statusBar()->showMessage( msg, 6000 );
-      }
-      refreshWorkflowUi();
-    }
-    else if ( info.status == sicnu::TaskStatus::Canceled )
-    {
-      if ( statusBar() )
-        statusBar()->showMessage( tr( "后处理已取消" ), 3000 );
-    }
-    else
-    {
-      const QString err = !r.errorMessage.isEmpty()
-                            ? r.errorMessage
-                            : ( !info.errorMessage.isEmpty() ? info.errorMessage : tr( "未知错误" ) );
-      SICNU_LOG_ERROR( SicnuLogTags::Classification,
-                       QStringLiteral( "Post-process failed: %1" ).arg( err ) );
-      if ( statusBar() )
-        statusBar()->showMessage( tr( "后处理失败: %1" ).arg( err ), 6000 );
-    }
-    task->deleteLater();
-    return;
-  }
-
-  if ( operation == PendingClassificationOperation::CrossValidation )
-  {
-    auto *cvTask = static_cast<RsCvTask *>( task );
-    const auto res = cvTask->result();
-    if ( info.status == sicnu::TaskStatus::Completed && res.ok() )
-    {
-      QString perFold;
-      for ( int i = 0; i < res.foldAccuracies.size(); ++i )
-        perFold += QString( "  fold%1: %2%\n" )
-                     .arg( i + 1 )
-                     .arg( res.foldAccuracies[i] * 100, 0, 'f', 1 );
-      QMessageBox::information(
-        this, tr( "5-fold Cross Validation" ),
-        tr( "Mean accuracy: %1% ± %2%\n\n%3" )
-          .arg( res.meanAccuracy * 100, 0, 'f', 1 )
-          .arg( res.stdAccuracy * 100, 0, 'f', 1 )
-          .arg( perFold ) );
-      if ( statusBar() )
-        statusBar()->showMessage( tr( "交叉验证完成" ), 3000 );
-    }
-    else if ( info.status == sicnu::TaskStatus::Canceled )
-    {
-      if ( statusBar() )
-        statusBar()->showMessage( tr( "交叉验证已取消" ), 3000 );
-    }
-    else if ( statusBar() )
-    {
-      const QString err = !res.errorMessage.isEmpty()
-                            ? res.errorMessage
-                            : ( !info.errorMessage.isEmpty() ? info.errorMessage : tr( "未知错误" ) );
-      statusBar()->showMessage( tr( "交叉验证失败: %1" ).arg( err ), 5000 );
-    }
-    task->deleteLater();
-    return;
-  }
-
-  auto *classificationTask = static_cast<RsClassificationTask *>( task );
-  const auto &r = classificationTask->result();
-  if ( info.status == sicnu::TaskStatus::Completed && r.ok )
-  {
-    if ( preview )
-    {
+    /*cancelCallback=*/nullptr,
+    /*autoLoad=*/false,
+    [this, outForLog]( const QString &, const Json::Value &payload ) {
+      setClassifyBusy( false );
       auto *previewLayer = new QgsRasterLayer(
         outForLog, QStringLiteral( "classify_preview" ),
         QStringLiteral( "gdal" ) );
@@ -2628,7 +2444,6 @@ void QgsClassificationMainWindow::onClassificationTaskUpdated(
       {
         if ( m_previewLayer )
         {
-          // R2 take transfers ownership out of the store — delete on replace.
           removeSessionLayer( m_previewLayer );
           delete m_previewLayer;
           m_previewLayer = nullptr;
@@ -2640,114 +2455,19 @@ void QgsClassificationMainWindow::onClassificationTaskUpdated(
       {
         delete previewLayer;
       }
+      const int durationMs = payload.get( "durationMs", 0 ).asInt();
       if ( statusBar() )
-        statusBar()->showMessage( tr( "预览完成 (%1 ms)" ).arg( r.durationMs ), 5000 );
+        statusBar()->showMessage( tr( "预览完成 (%1 ms)" ).arg( durationMs ), 5000 );
+    },
+    [this]( const QString &err, bool isCanceled ) {
+      setClassifyBusy( false );
+      if ( statusBar() )
+        statusBar()->showMessage( isCanceled ? tr( "预览已取消" ) : tr( "预览失败: %1" ).arg( err ), 6000 );
     }
-    else
-    {
-      m_lastClassifyPath = outForLog;
+  );
 
-      if ( m_workflow )
-        m_workflow->setHasFullClassifyResult( true );
-
-      auto *classLayer = new QgsRasterLayer(
-        outForLog,
-        QFileInfo( outForLog ).baseName() + tr( " (分类)" ),
-        QStringLiteral( "gdal" ) );
-      if ( classLayer->isValid() )
-      {
-        m_previewLayer = classLayer;
-        addSessionLayer( classLayer, true );
-      }
-      else
-      {
-        delete classLayer;
-      }
-      if ( m_workflowBridge )
-        m_workflowBridge->setClassifiedOutputArtifact( outForLog.toStdString() );
-
-      QJsonObject obj{
-        { QStringLiteral( "event" ), QStringLiteral( "classify_finished" ) },
-        { QStringLiteral( "algo" ), algoForLog },
-        { QStringLiteral( "total_pixels" ), r.totalPixels },
-        { QStringLiteral( "duration_ms" ), r.durationMs },
-        { QStringLiteral( "status" ), QStringLiteral( "ok" ) }
-      };
-      if ( !r.accuracy.classIds.isEmpty() )
-      {
-        obj.insert( QStringLiteral( "overall_accuracy" ), r.accuracy.overallAccuracy );
-        obj.insert( QStringLiteral( "kappa" ), r.accuracy.kappa );
-      }
-      QgsMessageLog::logMessage(
-        QString::fromUtf8( QJsonDocument( obj ).toJson( QJsonDocument::Compact ) ),
-        QStringLiteral( "Classification" ),
-        Qgis::MessageLevel::Info );
-      if ( statusBar() )
-        statusBar()->showMessage(
-          tr( "分类完成: %1 (%2 ms)" )
-            .arg( QFileInfo( outForLog ).fileName() )
-            .arg( r.durationMs ),
-          6000 );
-
-      if ( !r.accuracy.classIds.isEmpty() )
-      {
-        QHash<int, QString> classNames;
-        if ( m_rois )
-        {
-          const auto defs = m_rois->classDefs();
-          for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
-            classNames[it.key()] = it.value().name();
-        }
-        if ( m_accuracyPanel )
-          m_accuracyPanel->setResult( r.accuracy, classNames );
-        if ( m_stepAccuracyPopupBtn )
-          m_stepAccuracyPopupBtn->setEnabled( true );
-        m_accuracySource = QStringLiteral( "holdout" );
-        if ( m_workflow )
-          m_workflow->setHasAccuracyMetrics( true );
-        if ( m_workflow )
-          m_workflow->setCurrentStep( RsClassifyStep::Accuracy );
-      }
-      refreshWorkflowUi();
-    }
-  }
-  else if ( info.status == sicnu::TaskStatus::Canceled )
-  {
-    if ( preview )
-    {
-      if ( statusBar() )
-        statusBar()->showMessage( tr( "预览已取消" ), 3000 );
-    }
-    else
-    {
-      SICNU_LOG_WARN( SicnuLogTags::Classification,
-                      QStringLiteral( "Classification cancelled" ) );
-      if ( statusBar() )
-        statusBar()->showMessage( tr( "分类已取消" ), 3000 );
-    }
-  }
-  else
-  {
-    const QString err = !r.errorMessage.isEmpty()
-                          ? r.errorMessage
-                          : ( !info.errorMessage.isEmpty()
-                                ? info.errorMessage
-                                : tr( "运行失败" ) );
-    if ( preview )
-    {
-      if ( statusBar() )
-        statusBar()->showMessage( tr( "预览失败: %1" ).arg( err ), 6000 );
-    }
-    else
-    {
-      SICNU_LOG_ERROR( SicnuLogTags::Classification,
-                       QString( "Classification failed: %1" ).arg( err ) );
-      if ( statusBar() )
-        statusBar()->showMessage( tr( "分类失败: %1" ).arg( err ), 6000 );
-    }
-  }
-
-  task->deleteLater();
+  if ( statusBar() )
+    statusBar()->showMessage( tr( "预览中…" ), 3000 );
 }
 
 void QgsClassificationMainWindow::openPostProcessDialog( int algorithm )
@@ -2828,7 +2548,7 @@ long QgsClassificationMainWindow::startPostProcessTask(
   RsPostProcessConfig cfg = cfgIn;
   const QString outRaster = cfg.outputRasterPath;
   const QString outVector = cfg.outputVectorPath;
-  auto *task = new RsPostProcessTask( std::move( cfg ) );
+  const bool doPoly = cfg.runPolygonize;
   setClassifyBusy( true );
 
   sicnu::jobs::JobRequest req;
@@ -2845,20 +2565,16 @@ long QgsClassificationMainWindow::startPostProcessTask(
     req.params["outputVector"] = outVector.toStdString();
   req.params["loadOutputsToMain"] = loadToLayers;
 
-  m_pendingClassificationWorker = task;
-  m_pendingClassificationOperation = PendingClassificationOperation::PostProcess;
-  m_pendingPostProcessLoadsLayers = loadToLayers;
-  m_pendingClassificationAlgorithm.clear();
-  m_pendingClassificationOutput.clear();
-  m_pendingClassificationTaskId = sicnu::TaskCenter::instance().submitJob(
+  const long taskId = m_jobHandle.submitJob(
     req,
-    [task]( const sicnu::jobs::JobRequest &,
-            sicnu::operators::RSOperatorContext &ctx ) {
+    [cfg]( const sicnu::jobs::JobRequest &,
+           sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running classification post-process" );
       ctx.reportProgress( 0.0, "Post-process" );
-      const bool ok = task->run();
+      RsPostProcessTask task( cfg );
+      const bool ok = task.run();
       if ( ctx.isCancelled()
-           || ( !ok && task->result().errorMessage == QStringLiteral( "Cancelled" ) ) )
+           || ( !ok && task.result().errorMessage == QStringLiteral( "Cancelled" ) ) )
       {
         throw sicnu::operators::RSOperatorError(
           sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
@@ -2867,27 +2583,95 @@ long QgsClassificationMainWindow::startPostProcessTask(
       {
         throw sicnu::operators::RSOperatorError(
           sicnu::operators::ErrorCode::ComputationError,
-          task->result().errorMessage.toStdString() );
+          task.result().errorMessage.toStdString() );
       }
       Json::Value result( Json::objectValue );
-      result["durationMs"] = task->result().durationMs;
-      if ( !task->config().outputRasterPath.isEmpty() )
-        result["output"] = task->config().outputRasterPath.toStdString();
-      if ( !task->config().outputVectorPath.isEmpty() )
-        result["outputVector"] = task->config().outputVectorPath.toStdString();
+      result["durationMs"] = task.result().durationMs;
+      if ( !task.config().outputRasterPath.isEmpty() )
+        result["output"] = task.config().outputRasterPath.toStdString();
+      if ( !task.config().outputVectorPath.isEmpty() )
+        result["outputVector"] = task.config().outputVectorPath.toStdString();
       return result;
     },
-    [task]() { task->cancel(); },
-    false );
+    /*cancelCallback=*/nullptr,
+    /*autoLoad=*/false,
+    [this, outRaster, outVector, doPoly, loadToLayers]( const QString &, const Json::Value &payload ) {
+      setClassifyBusy( false );
+      if ( m_workflow )
+        m_workflow->setHasPostProcessResult( true );
+
+      if ( !outRaster.isEmpty() )
+        m_lastPostRasterPath = outRaster;
+      if ( doPoly && !outVector.isEmpty() )
+        m_lastPostVectorPath = outVector;
+
+      if ( loadToLayers )
+      {
+        if ( !doPoly && !outRaster.isEmpty() && QFileInfo::exists( outRaster ) )
+        {
+          auto *resultLayer = new QgsRasterLayer(
+            outRaster, QFileInfo( outRaster ).baseName() + tr( " (后处理)" ),
+            QStringLiteral( "gdal" ) );
+          if ( resultLayer->isValid() )
+          {
+            m_previewLayer = resultLayer;
+            addSessionLayer( resultLayer, true );
+          }
+          else
+          {
+            delete resultLayer;
+          }
+        }
+        if ( doPoly && !outVector.isEmpty() && QFileInfo::exists( outVector ) )
+        {
+          auto *vlayer = new QgsVectorLayer(
+            outVector, QFileInfo( outVector ).baseName() + tr( " (矢量)" ),
+            QStringLiteral( "ogr" ) );
+          if ( vlayer->isValid() )
+            addSessionLayer( vlayer, true );
+          else
+            delete vlayer;
+        }
+      }
+
+      const int durationMs = payload.get( "durationMs", 0 ).asInt();
+      if ( statusBar() )
+      {
+        QString msg = tr( "后处理完成 (%1 ms)" ).arg( durationMs );
+        if ( !outRaster.isEmpty() )
+          msg += QStringLiteral( ": " ) + QFileInfo( outRaster ).fileName();
+        if ( doPoly && !outVector.isEmpty() )
+          msg += tr( "；矢量 %1" ).arg( QFileInfo( outVector ).fileName() );
+        if ( loadToLayers )
+          msg += tr( "（已加载到图层）" );
+        statusBar()->showMessage( msg, 6000 );
+      }
+      refreshWorkflowUi();
+    },
+    [this]( const QString &err, bool isCanceled ) {
+      setClassifyBusy( false );
+      if ( isCanceled )
+      {
+        if ( statusBar() )
+          statusBar()->showMessage( tr( "后处理已取消" ), 3000 );
+      }
+      else
+      {
+        SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                         QStringLiteral( "Post-process failed: %1" ).arg( err ) );
+        if ( statusBar() )
+          statusBar()->showMessage( tr( "后处理失败: %1" ).arg( err ), 6000 );
+      }
+    }
+  );
 
   if ( statusBar() )
     statusBar()->showMessage( tr( "后处理中…" ), 3000 );
-  return m_pendingClassificationTaskId;
+  return taskId;
 }
 
 void QgsClassificationMainWindow::runCrossValidation()
 {
-  // Phase 10A.1.2 — stratified 5-fold CV on the current ROIs.
   if ( m_classifyBusy )
     return;
   if ( m_sourceRasterPath.isEmpty() )
@@ -2947,8 +2731,6 @@ long QgsClassificationMainWindow::startCrossValidationTask(
   if ( m_classifyBusy )
     return -1;
 
-  auto *task = new RsCvTask( X, y, std::move( factory ), 5,
-                              tr( "5-fold Cross Validation" ) );
   setClassifyBusy( true );
 
   sicnu::jobs::JobRequest req;
@@ -2957,41 +2739,71 @@ long QgsClassificationMainWindow::startCrossValidationTask(
   req.source = "module";
   req.exclusive = false;
 
-  m_pendingClassificationWorker = task;
-  m_pendingClassificationOperation = PendingClassificationOperation::CrossValidation;
-  m_pendingPostProcessLoadsLayers = false;
-  m_pendingClassificationAlgorithm.clear();
-  m_pendingClassificationOutput.clear();
-  m_pendingClassificationTaskId = sicnu::TaskCenter::instance().submitJob(
+  const long taskId = m_jobHandle.submitJob(
     req,
-    [task]( const sicnu::jobs::JobRequest &,
-            sicnu::operators::RSOperatorContext &ctx ) {
+    [X, y, factory]( const sicnu::jobs::JobRequest &,
+                     sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running 5-fold cross validation" );
       ctx.reportProgress( 0.0, "CV" );
-      const bool ok = task->run();
-      if ( ctx.isCancelled() || !ok )
+      const auto res = RsClassificationPipeline::runCrossValidation(
+        X, y, factory, 5, /*scaleFeatures=*/true,
+        [&ctx]( double fraction, const QString &msg ) {
+          ctx.reportProgress( fraction, msg.toStdString() );
+          return !ctx.isCancelled();
+        } );
+
+      if ( ctx.isCancelled() || !res.ok() )
       {
-        if ( task->result().errorMessage == QStringLiteral( "Cancelled" ) || ctx.isCancelled() )
+        if ( ctx.isCancelled() )
         {
           throw sicnu::operators::RSOperatorError(
             sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
         }
         throw sicnu::operators::RSOperatorError(
           sicnu::operators::ErrorCode::ComputationError,
-          task->result().errorMessage.isEmpty()
+          res.errorMessage.isEmpty()
             ? "Cross validation failed"
-            : task->result().errorMessage.toStdString() );
+            : res.errorMessage.toStdString() );
       }
       Json::Value result( Json::objectValue );
-      result["meanAccuracy"] = task->result().meanAccuracy;
-      result["stdAccuracy"] = task->result().stdAccuracy;
+      result["meanAccuracy"] = res.meanAccuracy;
+      result["stdAccuracy"] = res.stdAccuracy;
+      Json::Value folds( Json::arrayValue );
+      for ( double acc : res.foldAccuracies )
+        folds.append( acc );
+      result["foldAccuracies"] = folds;
       return result;
     },
-    [task]() { task->cancel(); } );
+    /*cancelCallback=*/nullptr,
+    /*autoLoad=*/false,
+    [this]( const QString &, const Json::Value &payload ) {
+      setClassifyBusy( false );
+      const double meanAcc = payload.get( "meanAccuracy", 0.0 ).asDouble();
+      const double stdAcc = payload.get( "stdAccuracy", 0.0 ).asDouble();
+      QStringList lines;
+      const Json::Value &folds = payload["foldAccuracies"];
+      for ( Json::ArrayIndex i = 0; i < folds.size(); ++i )
+        lines << tr( "Fold %1: %2%" ).arg( i + 1 ).arg( folds[i].asDouble() * 100, 0, 'f', 1 );
+      lines << QString();
+      lines << tr( "Mean accuracy: %1% ± %2%" )
+                  .arg( meanAcc * 100, 0, 'f', 1 )
+                  .arg( stdAcc * 100, 0, 'f', 1 );
+      QMessageBox::information(
+        this, tr( "5-fold Cross Validation" ),
+        lines.join( QStringLiteral( "\n" ) ) );
+      if ( statusBar() )
+        statusBar()->showMessage( tr( "交叉验证完成" ), 3000 );
+    },
+    [this]( const QString &err, bool isCanceled ) {
+      setClassifyBusy( false );
+      if ( statusBar() )
+        statusBar()->showMessage( isCanceled ? tr( "交叉验证已取消" ) : tr( "交叉验证失败: %1" ).arg( err ), 5000 );
+    }
+  );
 
   if ( statusBar() )
     statusBar()->showMessage( tr( "5-fold CV 运行中…" ), 3000 );
-  return m_pendingClassificationTaskId;
+  return taskId;
 }
 
 void QgsClassificationMainWindow::recomputeSpectralCurves()
@@ -3340,36 +3152,42 @@ void QgsClassificationMainWindow::loadClassifierModel()
   }
   m_loadedBackend = std::move( backend );
 
-  // Optional sidecar: <model-stem>.scale.json next to the YAML/XML model.
+  // ADR 0019 S2 — superset sidecar: <model-stem>.meta.json next to the
+  // YAML/XML model (method + fitted scaler + class metadata). Replaces the
+  // legacy .scale.json sidecar; there is no legacy read path.
   m_loadedScaler = RsFeatureScaler();
-  const QFileInfo mi( dlg.modelPath() );
-  const QString scalePath = mi.absolutePath() + QLatin1Char( '/' )
-                            + mi.completeBaseName() + QStringLiteral( ".scale.json" );
+  const QString metaPath = RsClassificationPipeline::sidecarPathForModel( dlg.modelPath() );
   bool scaleMissing = false;
-  if ( QFile::exists( scalePath ) )
+  if ( QFile::exists( metaPath ) )
   {
-    if ( !m_loadedScaler.loadJson( scalePath ) )
+    QString sidecarMethod;
+    RsFeatureScaler sidecarScaler;
+    QHash<int, QColor> sidecarColors;
+    if ( !RsClassificationPipeline::loadModelSidecar(
+           dlg.modelPath(), sidecarMethod, sidecarScaler, sidecarColors ) )
     {
       m_loadedScaler = RsFeatureScaler();
       SICNU_LOG_WARN( SicnuLogTags::Classification,
-                      QString( "scale.json present but failed to load: %1 — predicting without scaling" )
-                        .arg( scalePath ) );
+                      QString( "meta.json present but failed to load: %1 — predicting without scaling" )
+                        .arg( metaPath ) );
       if ( statusBar() )
         statusBar()->showMessage(
-          tr( "警告：scale.json 损坏，将不缩放特征" ), 6000 );
+          tr( "警告：meta.json 损坏，将不缩放特征" ), 6000 );
     }
     else
     {
+      m_loadedScaler = sidecarScaler;
       SICNU_LOG_INFO( SicnuLogTags::Classification,
-                      QString( "Loaded feature scaler sidecar: %1" ).arg( scalePath ) );
+                      QString( "Loaded model sidecar: %1 (method=%2)" )
+                        .arg( metaPath, sidecarMethod ) );
     }
   }
   else
   {
     scaleMissing = true;
     SICNU_LOG_INFO( SicnuLogTags::Classification,
-                    QString( "No scale.json sidecar at %1 — predicting without feature scaling (compat with old models)" )
-                      .arg( scalePath ) );
+                    QString( "No meta.json sidecar at %1 — predicting without feature scaling" )
+                      .arg( metaPath ) );
   }
 
   SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Classifier model loaded: %1" ).arg( dlg.modelPath() ) );
@@ -3377,7 +3195,7 @@ void QgsClassificationMainWindow::loadClassifierModel()
   {
     if ( scaleMissing )
       statusBar()->showMessage(
-        tr( "已加载模型（无 scale.json，将不缩放特征，兼容旧模型）— 下次 Apply 将跳过训练" ), 0 );
+        tr( "已加载模型（无 meta.json，将不缩放特征）— 下次 Apply 将跳过训练" ), 0 );
     else
       statusBar()->showMessage(
         tr( "已加载模型 — 下次 Apply 将跳过训练，直接 predict" ), 0 );

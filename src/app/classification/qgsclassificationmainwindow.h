@@ -17,6 +17,7 @@
 #include "rs_pixel_ignore_options.h"
 #include "rs_cv_task.h"
 #include "rs_post_process_task.h"
+#include "shell/gui_job_adapter.h"
 
 class QCheckBox;
 class QCloseEvent;
@@ -101,21 +102,15 @@ class QgsClassificationMainWindow : public QMainWindow
     bool loadProjectFromFile( QString path = QString() );
 
   signals:
-    /// Ask main shell to load the classified/post-processed raster via ActiveViewHost.
     void requestLoadToMainMap( const QString &rasterPath );
 
   protected:
     void closeEvent( QCloseEvent *e ) override;
 
   private:
-    enum class PendingClassificationOperation
-    {
-      None,
-      Apply,
-      Preview,
-      PostProcess,
-      CrossValidation
-    };
+    bool m_trainSampleRole = true;
+    bool m_classifyBusy = false;
+    sicnu::app::GuiJobHandle m_jobHandle{ this };
 
     void setupMenus();
     void setupToolbars();
@@ -170,7 +165,6 @@ class QgsClassificationMainWindow : public QMainWindow
     int resolveActiveClassId( int preferred = 0 ) const;
     void ensureSampleLayerEditing( bool on );
     void deleteSelectedSamples();
-    void onClassificationTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
     QgisInterface *m_iface = nullptr;
     QgsMapCanvas *m_canvas = nullptr;
@@ -209,14 +203,6 @@ class QgsClassificationMainWindow : public QMainWindow
     QPushButton *m_stepCvBtn = nullptr;
     QPushButton *m_stepPreviewBtn = nullptr;
     QPushButton *m_stepApplyBtn = nullptr;
-    bool m_trainSampleRole = true;
-    bool m_classifyBusy = false;
-    long m_pendingClassificationTaskId = -1;
-    QgsTask *m_pendingClassificationWorker = nullptr;
-    PendingClassificationOperation m_pendingClassificationOperation = PendingClassificationOperation::None;
-    bool m_pendingPostProcessLoadsLayers = false;
-    QString m_pendingClassificationAlgorithm;
-    QString m_pendingClassificationOutput;
 
     RsAccuracyPanel *m_accuracyPanel = nullptr;
     QPushButton *m_stepAccuracyPopupBtn = nullptr;

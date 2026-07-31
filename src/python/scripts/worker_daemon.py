@@ -134,28 +134,6 @@ class SicnuPythonIface:
         }
         self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
 
-def process_shm(shm_key, multiply_factor=2.0):
-    shm_name = shm_key.lstrip('/')
-    shm_file = f"/dev/shm/{shm_name}"
-    if not os.path.exists(shm_file):
-        raise FileNotFoundError(f"Shared memory file not found: {shm_file}")
-
-    with open(shm_file, "r+b") as f:
-        mm = mmap.mmap(f.fileno(), 0)
-        header_data = mm[:64]
-        uuid, width, height, bands, data_type, ref_count, data_size = struct.unpack("36siiiiiQ", header_data)
-
-        element_count = width * height * bands
-        if element_count == 0:
-            element_count = data_size // 4
-
-        arr = np.frombuffer(mm, dtype=np.float32, count=element_count, offset=64)
-        arr *= multiply_factor
-        del arr
-        mm.close()
-
-    return {"status": "success", "element_count": element_count}
-
 def main():
     parser = argparse.ArgumentParser(description="SICNU GEO RS Python Worker Daemon")
     parser.add_argument("--socket", required=True, help="Socket name / path for IPC")
@@ -187,6 +165,9 @@ def main():
 
                 try:
                     msg = json.loads(line)
+                    if "method" not in msg and ("result" in msg or "error" in msg):
+                        continue
+
                     req_id = msg.get("id")
                     method = msg.get("method")
                     params = msg.get("params", {})
@@ -196,15 +177,6 @@ def main():
                             "jsonrpc": "2.0",
                             "id": req_id,
                             "result": {"status": "pong", "pid": os.getpid()}
-                        }
-                    elif method == "shm_process":
-                        shm_key = params.get("shm_key")
-                        factor = float(params.get("multiply", 2.0))
-                        res = process_shm(shm_key, factor)
-                        resp = {
-                            "jsonrpc": "2.0",
-                            "id": req_id,
-                            "result": res
                         }
                     elif method == "load_plugin":
                         plugin_dir = params.get("plugin_dir")
@@ -247,10 +219,14 @@ def main():
                                 "action_title": "运行测试动作",
                                 "callback_id": cb_id
                             },
-                            "id": req_id
+                            "id": 9999
                         }
                         s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
-                        continue
+                        resp = {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "result": {"status": "action_registered", "callback_id": cb_id}
+                        }
                     elif method == "ui.on_action_triggered":
                         cb_id = params.get("callback_id")
                         if cb_id in callbacks:
@@ -266,6 +242,15 @@ def main():
                             "id": req_id,
                             "result": {"status": "action_executed", "callback_id": cb_id}
                         }
+                    elif method == "processing.execute_algorithm":
+                        resp = {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "error": {
+                                "code": -32601,
+                                "message": f"Method not found: {method} is not implemented in worker daemon"
+                            }
+                        }
                     elif method == "crash_test":
                         sys.stderr.write("WorkerDaemon simulating segfault crash!\n")
                         sys.stderr.flush()
@@ -274,7 +259,10 @@ def main():
                         resp = {
                             "jsonrpc": "2.0",
                             "id": req_id,
-                            "result": {"status": "ok"}
+                            "error": {
+                                "code": -32601,
+                                "message": f"Method not found: {method}"
+                            }
                         }
                     payload = (json.dumps(resp) + "\n").encode("utf-8")
                     s.sendall(payload)

@@ -18,8 +18,9 @@ TEST_CASE( "AlgorithmDescriptor builds schema and Tool Call definition from RSOp
   REQUIRE( desc.displayName == "Spectral Index" );
   REQUIRE( !desc.inputs.empty() );
 
-  // Check PortDescriptor for 'input'
+  // Check PortDescriptor for 'input' and 'nir'
   bool foundInput = false;
+  bool foundNir = false;
   for ( const auto &port : desc.inputs )
   {
     if ( port.name == "input" )
@@ -28,8 +29,14 @@ TEST_CASE( "AlgorithmDescriptor builds schema and Tool Call definition from RSOp
       REQUIRE( port.type == DataType::Raster );
       REQUIRE( port.required == true );
     }
+    else if ( port.name == "nir" )
+    {
+      foundNir = true;
+      REQUIRE( port.required == false );
+    }
   }
   REQUIRE( foundInput == true );
+  REQUIRE( foundNir == true );
 
   // Check AgentMetadata
   REQUIRE( !desc.agentMetadata.purpose.empty() );

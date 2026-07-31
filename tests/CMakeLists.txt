@@ -55,6 +55,30 @@ sicnu_add_test(test_atomic_algorithm_adapter)
 sicnu_add_test(test_atomic_algorithm_registry)
 sicnu_add_test(test_agent_workflow_executor)
 
+# ToolCallDispatcher (ADR 0021) — headless; fake sink/watcher, real registry.
+# Deliberately avoids the full sicnu_add_test link set: the dispatcher module
+# is GUI-free (QtCore + jsoncpp only).
+add_executable(test_tool_call_dispatcher test_tool_call_dispatcher.cpp)
+target_link_libraries(test_tool_call_dispatcher PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+  sicnu_operators
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_tool_call_dispatcher PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_tool_call_dispatcher PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_tool_call_dispatcher PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_tool_call_dispatcher PRIVATE jsoncpp)
+endif()
+target_include_directories(test_tool_call_dispatcher PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_tool_call_dispatcher)
+
 # WorkspaceSnapshot capture needs ActiveViewHost translation unit + display types.
 qt_add_executable(test_workspace_snapshot
   test_workspace_snapshot.cpp
@@ -290,8 +314,35 @@ target_include_directories(test_algorithm_schema PRIVATE
 )
 sicnu_discover_tests(test_algorithm_schema)
 
+# Placeholder Grammar tests
+add_executable(test_placeholder_grammar test_placeholder_grammar.cpp)
+target_link_libraries(test_placeholder_grammar PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_workflow
+)
+target_include_directories(test_placeholder_grammar PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_placeholder_grammar)
+
+# GuiJobAdapter tests
+add_executable(test_gui_job_adapter test_gui_job_adapter.cpp ../src/app/shell/gui_job_adapter.cpp)
+target_link_libraries(test_gui_job_adapter PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Widgets
+  sicnu_task_center
+)
+target_include_directories(test_gui_job_adapter PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_gui_job_adapter)
+
 # MCP server tests
-add_executable(test_mcp_server test_mcp_server.cpp ../src/agent/mcp_server.cpp)
+add_executable(test_mcp_server test_mcp_server.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
 target_link_libraries(test_mcp_server PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
@@ -300,6 +351,7 @@ target_link_libraries(test_mcp_server PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
+  sicnu_task_center
   GDAL::GDAL
 )
 if(TARGET sicnu_operators)
@@ -320,6 +372,7 @@ else()
 endif()
 target_include_directories(test_mcp_server PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_mcp_server)
@@ -1340,6 +1393,7 @@ target_link_libraries(test_georeferencing_session PRIVATE
   qgis_app_georef
   sicnu_jobs
   sicnu_task_center
+  GDAL::GDAL
 )
 target_include_directories(test_georeferencing_session PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -2043,6 +2097,46 @@ if(TARGET qgis_app_classify)
   )
   set_target_properties(test_classification_e2e PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(test_classification_e2e)
+
+  # ADR 0019 S1 — unified training-sample extraction module tests.
+  add_executable(test_training_data_extraction test_training_data_extraction.cpp)
+  target_link_libraries(test_training_data_extraction PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    qgis_core
+    qgis_analysis
+    GDAL::GDAL
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_training_data_extraction PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_training_data_extraction)
+
+  # ADR 0019 S2 — classification pipeline module tests (seam-level, no QgsTask).
+  add_executable(test_classification_pipeline test_classification_pipeline.cpp)
+  target_link_libraries(test_classification_pipeline PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    qgis_core
+    qgis_analysis
+    GDAL::GDAL
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_classification_pipeline PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_classification_pipeline)
 endif()
 
 # Phase 10B.1 — Segment data model + feature extraction tests
@@ -2269,6 +2363,35 @@ if(TARGET sicnu_operators)
     target_link_libraries(test_rs_operator PRIVATE jsoncpp)
   endif()
   sicnu_discover_tests(test_rs_operator)
+
+  # Native RS operator integration tests (registry, schema, execution on
+  # synthetic rasters; OpenCV-backed cases compile out without OpenCV).
+  # ADR 0019 S3 — previously an orphan file registered in no target.
+  add_executable(test_rs_operators test_rs_operators.cpp)
+  target_link_libraries(test_rs_operators PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    sicnu_processing
+    sicnu_operators
+    GDAL::GDAL
+  )
+  target_include_directories(test_rs_operators PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  if(TARGET jsoncpp)
+    target_link_libraries(test_rs_operators PRIVATE jsoncpp)
+  elseif(JSONCPP_LIBRARIES)
+    target_include_directories(test_rs_operators PRIVATE ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(test_rs_operators PRIVATE ${JSONCPP_LIBRARIES})
+  else()
+    target_link_libraries(test_rs_operators PRIVATE jsoncpp)
+  endif()
+  sicnu_discover_tests(test_rs_operators)
 
   # OpenCV-backed operators (only when OpenCV operators were compiled in)
   if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
@@ -2742,7 +2865,6 @@ qt_add_executable(test_python_plugin_manager
   ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_runner.cpp
   ${CMAKE_SOURCE_DIR}/src/python/isolated/python_ipc_server.cpp
   ${CMAKE_SOURCE_DIR}/src/python/isolated/python_worker_process.cpp
-  ${CMAKE_SOURCE_DIR}/src/python/isolated/shared_memory_segment.cpp
   ${CMAKE_SOURCE_DIR}/src/python/isolated/app_interface_bridge.cpp
   ${CMAKE_SOURCE_DIR}/src/python/isolated/python_app_interface_proxy.cpp
   ${CMAKE_SOURCE_DIR}/src/python/isolated/python_worker_process_pool.cpp

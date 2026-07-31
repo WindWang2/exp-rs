@@ -15,8 +15,8 @@
 
 #include <QTableView>
 
-class QgsGCPList;
 class QgsGCPListModel;
+class RsGeoreferencingSession;
 class QContextMenuEvent;
 class QMouseEvent;
 
@@ -36,8 +36,8 @@ class QgsGCPListWidget : public QTableView
   public:
     explicit QgsGCPListWidget( QWidget *parent = nullptr );
 
-    /// Attach a non-owning GCP list. Recreates the model bindings.
-    void setGCPList( QgsGCPList *list );
+    /// Session-backed (ADR 0020): rows/edits go through the session.
+    void setGcpsSource( RsGeoreferencingSession *session );
 
     QgsGCPListModel *gcpModel() const { return mModel; }
 
@@ -73,7 +73,7 @@ class QgsGCPListWidget : public QTableView
 
   private:
     QgsGCPListModel *mModel = nullptr;
-    QgsGCPList *mList = nullptr;
+    RsGeoreferencingSession *mSession = nullptr;
 };
 
 #endif

@@ -11,7 +11,7 @@
 
 #include <json/json.h>
 
-#include "processing/framework/task_center.h"
+#include "shell/gui_job_adapter.h"
 
 class QgsRasterLayer;
 class QgsProcessingAlgorithm;
@@ -56,7 +56,7 @@ public:
     /**
      * True while a GDAL task is running (Run button disabled).
      */
-    bool isRunning() const { return m_running; }
+    bool isRunning() const { return m_running || m_jobHandle.isRunning(); }
 
     /**
      * Disable Run and mark dialog as busy. Called automatically by runGdalTask().

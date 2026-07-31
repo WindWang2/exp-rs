@@ -1,6 +1,5 @@
 #pragma once
 
-#include <QHash>
 #include <QMainWindow>
 #include <QPointer>
 #include <memory>
@@ -31,10 +30,8 @@ class RsSessionMapWorkspace;
 class QgsGeorefToolAddPoint;
 class QgsGeorefToolMovePoint;
 class QgsGeorefToolDeletePoint;
-class QgsGCPList;
 class QgsGCPListWidget;
 class QgsGeorefDataPoint;
-class QgsGeorefTransform;
 class RsWarpTask;
 
 /**
@@ -50,7 +47,8 @@ class QgsGeorefShellWindow : public QMainWindow
     bool isDirtyForTest() const;
     void markDirtyForTest();
     void setWarpInProgressForTest( bool on );
-    void setSourceRasterPath( const QString &p ) { mSourceRasterPath = p; }
+    /// Also mirrors the path into the Georeferencing Session.
+    void setSourceRasterPath( const QString &p );
     RsGeorefSessionState *sessionStateForTest() { return &mSession; }
     /// Deep Georeferencing Session (GCP fit + warp snapshots + Task Center).
     RsGeoreferencingSession *georefSessionForTest() { return &mGeorefSession; }
@@ -167,8 +165,16 @@ class QgsGeorefShellWindow : public QMainWindow
     QgsRasterLayer *pickProjectRasterLayer( const QString &dialogTitle );
 
   protected slots:
-    void recomputeFit();
+    /**
+     * Push panel config (method / DEM / source path) into the session and
+     * refit. fitChanged → onSessionFitChanged updates panel, table, markers.
+     */
+    void refreshFit();
+    /// Observer of RsGeoreferencingSession::fitChanged — sole fit UI updater.
+    void onSessionFitChanged( const RsGeorefFitResult &fit );
     void onPointsChanged();
+    /// Workflow bridge sync: mirrors GCP count + step progress from session signals.
+    void syncWorkflowGcps();
     void deleteGcpRows( const QList<int> &rows );
     void selectPoint( const QgsPointXY &p );
     void movePoint( const QgsPointXY &p );
@@ -212,6 +218,8 @@ class QgsGeorefShellWindow : public QMainWindow
     void panCanvasToPoint( QgsMapCanvas *canvas, const QgsPointXY &mapPoint );
     void setSelectedGcpRow( int row );
     void syncAllMarkers();
+    /// Apply-action gating from session fit + panel + readiness (no refit).
+    void updateApplyEnabled();
     /// Keep Add-GCP tools armed on both canvases (no shared QAction on tools).
     void rearmAddPointTools();
     /// Convert canvas map pick into the raster layer's CRS (avoids CRS mix-ups).
@@ -282,26 +290,32 @@ class QgsGeorefShellWindow : public QMainWindow
     QgsGcpPoint *mPendingGcp = nullptr;              // owned while pending
     QgsGeorefDataPoint *mPendingDataPoint = nullptr; // owned; parented to this
 
-    QgsGCPList *mGcps = nullptr;
+    /**
+     * Per-row display adapters for the session's GCP list (ADR 0020 S2).
+     * mGcpViewPoints[i] is a shell-owned QgsGcpPoint view model synced FROM
+     * RsGeoreferencingSession::gcps()[i] (the sole owner); mDataPoints[i]
+     * wraps it with canvas markers. The move tool mutates the view model
+     * live, then releasePoint() pushes the row back to the session.
+     */
+    QVector<QgsGcpPoint *> mGcpViewPoints;
+    QVector<QgsGeorefDataPoint *> mDataPoints;
     QgsGCPListWidget *mGcpTable = nullptr;
     QDockWidget *mGcpDock = nullptr;
-    QHash<QgsGcpPoint *, QgsGeorefDataPoint *> mDataPoints;
 
     RsGeorefParamsPanel *mParamsPanel = nullptr;
     QDockWidget *mParamDock = nullptr;
     RsGeorefTaskList *mTaskList = nullptr;
     QDockWidget *mTaskDock = nullptr;
-    std::unique_ptr<QgsGeorefTransform> mTransform;
-    double mLastRms = 0.0;
     QString mSourceRasterPath;
 
     RsGeorefSessionState mSession;
-    /// Deep Georeferencing Session: GCP fit + immutable warp snapshots + Task Center (#32).
+    /// Deep Georeferencing Session: GCP list + fit + warp snapshots + Task Center.
     RsGeoreferencingSession mGeorefSession;
     bool mSuppressDirtyFromList = false;
     bool mWarpInProgress = false;
-    /// task-list id → Task Center task id for the running warp.
-    QHash<int, long> mActiveWarpTaskCenterIds;
+    /// Task-list row id of the running warp (the session tracks the Task
+    /// Center id via pendingWarpTaskId()). -1 when no warp is in flight.
+    int mActiveWarpTaskListId = -1;
 
     /// lab.georef.image_to_map session (opened by I2M shell only).
     std::unique_ptr<RsGeorefWorkflowBridge> mWorkflowBridge;

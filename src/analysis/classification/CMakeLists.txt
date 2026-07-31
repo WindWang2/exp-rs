@@ -33,6 +33,12 @@ if(SICNU_HAS_OPENCV)
         rs_hungarian_assignment.cpp
         # Phase 10A.1.2 — Stratified 5-fold cross validation.
         rs_cross_validation.cpp
+        # ADR 0019 S1 — unified training-sample extraction (ROIs/vector → X/y).
+        rs_training_data_extraction.cpp
+        # ADR 0019 S2 — classification pipeline core (train → persist →
+        # tiled predict → class map → accuracy); GUI-free, consumed by the
+        # RsClassificationTask QgsTask adapter.
+        rs_classification_pipeline.cpp
         # Async cross-validation task (QgsTask-based, non-blocking UI).
         rs_cv_task.cpp
         rs_cv_task.h

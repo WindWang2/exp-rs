@@ -28,12 +28,32 @@ _Avoid_: Workflow graph, Execution chain, Process tree
 The scheduling subsystem responsible for managing task priority queues (`High`, `Normal`, `Low`), sorting queued task execution, and automatically capping max concurrent background threads to `std::thread::hardware_concurrency() - 1`.
 _Avoid_: Core limiter, Thread pool filter
 
+**Operator**:
+A headless, self-describing algorithm unit with JSON parameter and result I/O, registered by name in the Operator Registry. Operators are one kind of Algorithm: the kind shared by the headless CLI, MCP tools, and GUI task helpers (`runOperatorTask`). Provider algorithms (QGIS/OTB/GDAL) reach the Agent surface through adapter wrappers instead of being Operators.
+_Avoid_: RS algorithm, Kernel op, JSON task
+
+**Operator Registry**:
+The source-of-truth registry (`RSOperatorRegistry`) where Operators are registered by name and from which the headless CLI, MCP tools, and GUI task helpers execute them. The Agent surface does not consume it directly: each Operator is mirrored into the `AtomicAlgorithmRegistry` through a thin `RsOperatorAdapter` wrapper, so the Agent sees Operators and provider algorithms through one uniform adapter interface.
+_Avoid_: Algorithm list, CLI registry
+
+**Tool Call Dispatcher**:
+The single seam between Agent-facing surfaces and the Task Center for LLM tool calls: it parses and normalizes a tool-call envelope once, classifies it as a single Tool Call or a Plan Request, and submits single calls to the Task Center through one typed path. No caller parses envelopes or executes tool calls itself; Plan Requests continue to the plan-approval flow.
+_Avoid_: Tool-call handler, Function-call runner, Agent executor
+
+**MCP Server**:
+The stateless external-agent JSON-RPC protocol adapter at the Task Center seam: it owns stdio framing, the tool allow-list / workspace-path security policy, the meta-tool catalog, and the `mcpStatusForTask` status mapping — but no execution machinery of its own. Single calls become Task Center tasks (`execution_id` = `"task-<taskId>"`); `rs:` operators route through the Tool Call Dispatcher, provider algorithms through `TaskCenter::enqueueTask`.
+_Avoid_: MCP worker, Agent runner, Tool executor
+
+**Classification Pipeline**:
+The deep, GUI-free module in `src/analysis/classification` that owns the full pixel-classification flow: sample extraction from ROIs, feature scaling, stratified split, classifier training, model persistence, tiled prediction, class-map writing, and accuracy assessment. The GUI classification task and the classification Operators are thin adapters at its seam. Post-processing (sieve/majority/clump/recode) is a separate stage outside the pipeline.
+_Avoid_: Classify task, Training helper, ML pipeline
+
 **Piecewise Linear Stretch**:
 An image enhancement method that maps input pixel values to output display values via a set of user-defined interactive control points $(x_i, y_i)$ using linear interpolation across segments.
 _Avoid_: Multi-segment curve, Custom LUT splitter
 
 **Georeferencing Session**:
-The user’s source and destination context for image registration: its Ground Control Points, fit and residual state, immutable warp snapshots, and persisted workspace state. Image-to-Image and Image-to-Map adapt the same Georeferencing Session to their different destination-pick interactions.
+The sole owner of the user's source and destination context for image registration: the Ground Control Point list, the transform fit (including RPC refinement) and per-point residuals, warp-readiness validation, and immutable warp snapshots. Residuals and RMS are reported in source-image pixels. Shell windows and the GCP table observe the session (`fitChanged`) and render its state read-only; Image-to-Image and Image-to-Map adapt the same session to their different destination-pick interactions. Warp execution reaches Task Center through an injected executor seam, never a hardwired singleton.
 _Avoid_: Registration session, Georeferencer window state
 
 **Real Data Range**:
@@ -169,6 +189,42 @@ _Avoid_: Workspace state map, Context dict, UI state dump
   1. **One-Step Import Seam**: Deepen `CollectionImportService` with `importCollection(sourcePath, persistence, autoLoad, pathOpener)` to automatically probe, select all discovered children, and register the `DataCollection` and child `DataAsset` items in `DataManager` in a single atomic transaction. The service stays free of GUI types so it can run headlessly (processing layer).
   2. **Opt-In Canvas Auto-Loading via Display Seam**: When `autoLoad = true` and a `pathOpener` callback is provided, after a successful commit the service invokes the opener with the **primary committed child** path (preferring the registered asset's `canonicalSource`). GUI / Agent hosts bind `pathOpener` to `ActiveViewHost::openPath` (or equivalent) so map loading preserves the Data/Display seam (ADR 0010/0015). Headless callers omit the opener.
   3. **Headless Testability**: `importCollection()` is tested headlessly using stub discoverers in `test_collection_import_service.cpp`, including autoLoad opener capture and failure rollback.
+
+### ADR 0019: Classification Pipeline Deepening & Single Train/Predict Seam Architecture
+- **Context**: Pixel classification was implemented three times with proven divergence — the GUI task (`RsClassificationTask`), the supervised Operator, and the OBIA Operator each carried their own training, extraction, and prediction logic (SVM hyperparameters had already drifted, and defect fixes made in the GUI path never reached the Operator path). Classification was the last subsystem violating the "teaching UI consumes the operator kernel" norm.
+- **Decision**:
+  1. **Single Deep Module**: Introduce the **Classification Pipeline** module in `src/analysis/classification` owning sample extraction, feature scaling, stratified split, training, model persistence, tiled prediction, class-map writing, and accuracy assessment. `RsClassificationTask` and the classification Operators (`rs:supervised_classification`, `rs:kmeans_classification`, `rs:obia_classify`) become thin async/JSON adapters at its seam. Post-processing (sieve/majority/clump/recode) remains a separate stage outside the pipeline.
+  2. **Synchronous Core, Own Progress Sink**: The pipeline runs synchronously on the caller's thread behind a minimal progress/cancel sink it owns; the GUI task bridges to `QgsFeedback`, Operators bridge to `RSOperatorContext`. No `QgsTask` or operator-kernel types cross into the module.
+  3. **One Model Format**: The module owns a single superset sidecar (method + scaler + class metadata + format version); the legacy `.scale.json` sidecar is dropped with no legacy read path.
+  4. **Parity Through the Schema**: Stratified split, scaling, and accuracy assessment become optional Operator schema params, with OA/Kappa/confusion matrix returned in results on request — GUI checkboxes and Agent/CLI params map to the same pipeline options.
+  5. **Interface as Test Surface**: The primary test suite crosses the pipeline's seam with `QCoreApplication` only; task/Operator tests shrink to thin-adapter smokes.
+
+### ADR 0020: Georeferencing Session Deepening & Sole GCP/Fit Ownership Architecture
+- **Context**: The Georeferencing Session existed but was a write-through copy: the shell window owned the real GCP list (`QgsGCPList`) and re-implemented the fit, so the two diverged (deleted GCPs never left the session copy) and the two fit implementations disagreed on RMS semantics (source pixels vs destination units). `fitChanged` had zero subscribers; GCP state was mirrored across nine stores including the table model's cached transform pointer and GDAL geotransform readers.
+- **Decision**:
+  1. **Sole Ownership**: The session owns the GCP list, the transform fit (RPC/DEM refinement ported from the shell's `recomputeFit`), per-point residuals, and warp-readiness validation. The GCP table model and canvas markers render session state read-only; `applyAcceptedMatches`, the shell's `mTransform`/`mLastRms`, and the hand dual-writes are deleted. Pairing interaction and `.points`/QSettings persistence remain shell concerns.
+  2. **Source-Pixel RMS**: Residuals and RMS are reported in source-image pixels (QGIS georeferencer convention), computed by back-transforming destination coordinates to source. The destination-unit variant in the old session `refit` is dropped.
+  3. **Injected Executor Seam**: Warp submission reaches Task Center through a minimal executor interface accepted by the session's constructor — a TaskCenter adapter in production, a fake in tests. The session never touches the Task Center singleton directly.
+  4. **Interface as Test Surface**: A headless Catch2 suite crosses the session seam (`QCoreApplication` + fake executor) covering add/remove/enable → refit, RMS semantics, min-GCP validation, the RPC/DEM branch, snapshot immutability, and warp submit/cancel; window tests shrink to UI wiring.
+
+### ADR 0021: Tool Call Dispatcher Deepening & Single Tool-Call Seam Architecture
+- **Context**: LLM tool calls were parsed three times (`TaskCenter::enqueueToolCall`, `AtomicAlgorithmRegistry::executeToolCall`, `AgentWorkflowExecutor::executeToolCall`) with divergent envelope coverage, and executed through two paths: the registry ran calls synchronously off-record, while `LlmStreamingClient` and the Copilot dock each submitted the same call — up to three executions per logical call, twice blocking the GUI thread for 10–30 minutes; the client's own result signal had no consumers. Multi-step plan orchestration polling and MCP tool execution remain separate follow-ups.
+- **Decision**:
+  1. **Single Deep Module**: Introduce the **Tool Call Dispatcher** in `src/processing/framework` owning envelope parsing (all historical shapes), algorithm-id normalization, and classification into single Tool Call vs Plan Request. It stays GUI-free so it can run and be tested headlessly.
+  2. **Typed TaskCenter Handoff**: Single calls enter the Task Center through a typed submission (normalized algorithm id + parameter map); the string-JSON `enqueueToolCall`, the registry's synchronous `executeToolCall`, and the `submitToolCall` pass-through are deleted.
+  3. **Callback-Primary Results**: Callers submit with a completion callback and never block the GUI thread; a blocking variant with a default 30-minute, per-call-overridable timeout exists only for tests and headless callers.
+  4. **Client as Pure Transport**: `LlmStreamingClient` emits each parsed tool call exactly once (streamed envelope shape) and never executes; the Copilot dock is the sole submitter — single calls to the dispatcher, Plan Requests to the existing plan-approval flow.
+  5. **Interface as Test Surface**: The three legacy parsers' test cases merge into the dispatcher's headless suite; the registry and executor tool-call entry points and their tests are removed with them.
+
+### ADR 0022: MCP Server Deepening & Stateless Task Center Adapter Architecture
+- **Context**: `McpServer` ran a parallel execution path invisible to TaskCenter: its own worker threads (`AlgorithmWorker`, `OperatorWorker`), an in-process execution registry (`mExecutions`), and cancel flags (`mOperatorCancelFlags`) — so MCP executions had no progress/cancel/result visibility in the Task Center and bypassed its scheduling, throttling, and lifecycle rules.
+- **Decision**:
+  1. **Stateless Protocol Adapter**: `McpServer` becomes a stateless JSON-RPC protocol adapter at the Task Center seam. The execution registry, worker threads, cancel flags, and execution counter are deleted; `execution_id` is the TaskCenter task id (`"task-<taskId>"`). The stdio framing, the 10 meta-tool handlers, and the allow-list / workspace-path security policy (`isAlgorithmIdAllowed`, `isOperatorIdAllowed`, `validateWorkspacePaths`) are kept.
+  2. **Split Routing**: `handleExecuteOperator` (`rs:` ids) submits through the **Tool Call Dispatcher** (gaining required-parameter validation and underscore→colon id normalization); `handleExecuteAlgorithm` (`gdal:`/`otb:`/`qgis:` ids) submits directly to `TaskCenter::enqueueTask`. Both use `autoLoad=false` (MCP has no canvas; results travel via `resultPayload`) and report `status: "running"` with the new `execution_id`.
+  3. **Status Mapping & Truthful Cancel**: `mcpStatusForTask(AlgorithmTaskInfo)` maps Queued/Running/Paused → `"running"`, Completed → `"completed"` + `result`, Failed → `"failed"` + `errorMessage`, Canceled → `"canceled"`, with `progress` and last-log-line `progressText`. `cancel_execution` reports `"canceled"` only when `TaskCenter::cancelTask` accepted the cancel; for already-terminal tasks it reports the task's actual status — never a blanket `"canceled"`.
+  4. **Catalog as Protocol Contract**: The ~160-line `tools/list` construction is compressed into a static meta-tool table; names, descriptions, and input schemas stay byte-equivalent — the catalog is the client protocol contract.
+  5. **Shared Json↔Variant Converters**: MCP's private `jsonValueToVariant` / `variantToJsonValue` / `jsonObjectToVariantMap` move into the shared converter header (`src/processing/framework/json_params_converter.h`) next to `jsonParamsToVariantMap`; the duplicated `envFlagEnabled` moves to a shared `env_flag.h` used by both MCP and the STAC client.
+  6. **Interface as Test Surface**: Headless tests fabricate `AlgorithmTaskInfo` in all six states, drive a registered no-op operator through execute → status → cancel via the real TaskCenter, and assert cancel truthfulness for terminal tasks; the pre-existing six MCP sections pass unchanged.
 
 
 

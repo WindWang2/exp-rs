@@ -15,6 +15,7 @@
 #include <memory>
 
 #include "processing/framework/task_center.h"
+#include "shell/gui_job_adapter.h"
 
 class QCheckBox;
 class QPlainTextEdit;
@@ -69,9 +70,6 @@ class SicnuAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
     /** Stay alive while a Task Center job is in flight (no mAlgorithmTask). */
     bool isFinalized() override;
 
-  private slots:
-    void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
-
   private:
     QgsProcessingContext mContext;
     QgsProcessingParametersWidget *mParamWidget = nullptr;
@@ -84,6 +82,6 @@ class SicnuAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
     QGroupBox *mCommandGroup = nullptr;
     QPlainTextEdit *mCommandPreview = nullptr;
 
-    long mPendingTaskId = -1;
+    sicnu::app::GuiJobHandle mJobHandle{ this };
     std::shared_ptr<SicnuProcessingRunState> mRunState;
 };
