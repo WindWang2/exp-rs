@@ -47,6 +47,10 @@ public:
     void setProjectContext( sicnu::app::ProjectContext *context ) { m_projectContext = context; }
     sicnu::app::ProjectContext *projectContext() const { return m_projectContext; }
 
+    /// Injected plugin menu takes priority over the lazy QMainWindow::menuBar()
+    /// fallback — required in shells where menuBar() destroys installed chrome.
+    void setPluginMenu( QMenu *menu ) { m_pluginMenu = menu; }
+
     // ── QGIS Interface Implementations ─────────────────────────────────
     QgsPluginManagerInterface *pluginManagerInterface() override { return nullptr; }
     QgsLayerTreeView *layerTreeView() override;

@@ -29,6 +29,7 @@
 #include <qgsmessagebar.h>
 
 #include <QMainWindow>
+#include <QMenuBar>
 #include <QDir>
 #include <QFileInfo>
 
@@ -70,6 +71,22 @@ TEST_CASE( "SicnuAppInterface implements QgisInterface facade", "[python][iface]
   QAction testAction( QStringLiteral( "Test Plugin Action" ), &mainWindow );
   iface.addPluginToMenu( QStringLiteral( "Test Submenu" ), &testAction );
   CHECK( iface.addToolBarIcon( &testAction ) == 0 );
+}
+
+TEST_CASE( "SicnuAppInterface injected plugin menu takes priority over lazy menuBar creation", "[python][iface]" )
+{
+  REQUIRE( QgisPython::instance().initialize() );
+
+  QMainWindow mainWindow;
+  SicnuAppInterface iface( &mainWindow, nullptr, nullptr );
+
+  QMenu injectedMenu( QStringLiteral( "插件" ) );
+  iface.setPluginMenu( &injectedMenu );
+
+  CHECK( iface.pluginMenu() == &injectedMenu );
+  // The lazy QMainWindow::menuBar() fallback must not run when a menu is
+  // injected: the real menu bar stays empty.
+  CHECK( mainWindow.menuBar()->actions().isEmpty() );
 }
 
 TEST_CASE( "PluginManager scans and loads Python plugin directory", "[python][plugin_manager]" )
@@ -473,6 +490,7 @@ TEST_CASE( "AppInterfaceBridge headless asset seam via DataManager", "[python][b
     REQUIRE( summary.isValid );
     CHECK( summary.source == demPath );
     CHECK( summary.type == QStringLiteral( "raster" ) );
+    CHECK( !summary.crs.isEmpty() );
     CHECK( summary.toJsonObject()[QStringLiteral( "status" )].toString() == QStringLiteral( "ok" ) );
   }
 

@@ -67,7 +67,14 @@ QFont SicnuAppInterface::defaultStyleSheetFont()
 
 QMenu *SicnuAppInterface::pluginMenu()
 {
-    if ( !m_pluginMenu && m_mainWindow )
+    // An injected menu (e.g. hosted on a detached QMenuBar) takes priority;
+    // the lazy menuBar() fallback must never run in shells whose menu-widget
+    // chrome forbids QMainWindow::menuBar().
+    if ( m_pluginMenu )
+    {
+        return m_pluginMenu;
+    }
+    if ( m_mainWindow )
     {
         if ( auto *mainWin = qobject_cast<QMainWindow *>( m_mainWindow ) )
         {
