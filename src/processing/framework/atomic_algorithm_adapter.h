@@ -7,6 +7,8 @@
 #include <memory>
 #include <functional>
 
+class QgsProcessingAlgorithm;
+
 namespace sicnu::processing {
 
 using ProgressCallback = std::function<void( int percent, const std::string &message )>;
@@ -43,6 +45,7 @@ class AlgorithmDescriptorBuilder
 {
 public:
   static AlgorithmDescriptor buildFromRsOperator( const operators::RSOperator &op );
+  static AlgorithmDescriptor buildFromQgsAlgorithm( const QgsProcessingAlgorithm &alg );
 };
 
 } // namespace sicnu::processing

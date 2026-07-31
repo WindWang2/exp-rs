@@ -1,0 +1,241 @@
+// src/processing/framework/provider_algorithm_adapter.cpp
+#include "provider_algorithm_adapter.h"
+#include "json_params_converter.h"
+
+#include "qgsprocessingalgorithm.h"
+#include "qgsprocessingcontext.h"
+#include "qgsprocessingfeedback.h"
+#include "qgsprocessingoutputs.h"
+#include "qgsprocessingparameters.h"
+#include "qgis.h"
+
+#include <memory>
+
+namespace sicnu::processing {
+
+// ---------------------------------------------------------------------------
+// Descriptor builder
+// ---------------------------------------------------------------------------
+
+static DataType mapParameterType( const QgsProcessingParameterDefinition &param )
+{
+  const QString t = param.type();
+
+  if ( t == QLatin1String( "boolean" ) )
+    return DataType::Boolean;
+  if ( t == QLatin1String( "number" ) || t == QLatin1String( "distance" )
+       || t == QLatin1String( "duration" ) || t == QLatin1String( "scale" )
+       || t == QLatin1String( "area" ) || t == QLatin1String( "volume" ) )
+  {
+    // Try to detect integer sub-type
+    if ( const auto *numParam = dynamic_cast<const QgsProcessingParameterNumber *>( &param ) )
+    {
+      if ( numParam->dataType() == Qgis::ProcessingNumberParameterType::Integer )
+        return DataType::Integer;
+    }
+    return DataType::Numeric;
+  }
+  if ( t == QLatin1String( "enum" ) )
+    return DataType::Enum;
+  if ( t == QLatin1String( "raster" ) || t == QLatin1String( "rasterDestination" ) )
+    return DataType::Raster;
+  if ( t == QLatin1String( "vector" ) || t == QLatin1String( "source" )
+       || t == QLatin1String( "vectorDestination" ) || t == QLatin1String( "sink" ) )
+    return DataType::Vector;
+  if ( t == QLatin1String( "multilayer" ) || t == QLatin1String( "layer" ) )
+    return DataType::Raster; // generic layer → Raster as reasonable default
+  if ( t == QLatin1String( "crs" ) )
+    return DataType::Crs;
+  if ( t == QLatin1String( "extent" ) )
+    return DataType::BoundingBox;
+  if ( t == QLatin1String( "band" ) )
+    return DataType::Integer;
+  if ( t == QLatin1String( "range" ) )
+    return DataType::String; // represented as "min;max"
+  if ( t == QLatin1String( "string" ) || t == QLatin1String( "expression" )
+       || t == QLatin1String( "field" ) || t == QLatin1String( "file" )
+       || t == QLatin1String( "folder" ) || t == QLatin1String( "fileDestination" )
+       || t == QLatin1String( "folderDestination" ) )
+    return DataType::String;
+
+  return DataType::Any;
+}
+
+static DataType mapOutputType( const QgsProcessingOutputDefinition &out )
+{
+  const QString t = out.type();
+  if ( t == QLatin1String( "outputRaster" ) )
+    return DataType::Raster;
+  if ( t == QLatin1String( "outputVector" ) || t == QLatin1String( "outputMultilayer" ) )
+    return DataType::Vector;
+  if ( t == QLatin1String( "outputNumber" ) )
+    return DataType::Numeric;
+  if ( t == QLatin1String( "outputBoolean" ) )
+    return DataType::Boolean;
+  if ( t == QLatin1String( "outputString" ) || t == QLatin1String( "outputHtml" )
+       || t == QLatin1String( "outputFile" ) || t == QLatin1String( "outputFolder" ) )
+    return DataType::String;
+  return DataType::Any;
+}
+
+static AlgorithmDescriptor buildDescriptor( const QgsProcessingAlgorithm &alg )
+{
+  AlgorithmDescriptor desc;
+  desc.id = alg.id().toStdString();
+  desc.displayName = alg.displayName().toStdString();
+  desc.group = alg.group().toStdString();
+
+  const QString help = alg.shortHelpString();
+  desc.description = help.isEmpty()
+                       ? alg.shortDescription().toStdString()
+                       : help.toStdString();
+
+  // Inputs -------------------------------------------------------------------
+  const auto params = alg.parameterDefinitions();
+  for ( const QgsProcessingParameterDefinition *param : params )
+  {
+    if ( !param )
+      continue;
+    // Skip hidden parameters — they are not meant for user/agent interaction.
+    if ( param->flags() & Qgis::ProcessingParameterFlag::Hidden )
+      continue;
+
+    PortDescriptor port;
+    port.name = param->name().toStdString();
+    port.displayName = param->description().toStdString();
+    port.description = param->help().toStdString();
+    port.type = mapParameterType( *param );
+    port.required = !( param->flags() & Qgis::ProcessingParameterFlag::Optional );
+
+    // Default value
+    const QVariant def = param->defaultValue();
+    if ( def.isValid() && !def.isNull() )
+      port.defaultValue = def.toString().toStdString();
+
+    // Enum options
+    if ( port.type == DataType::Enum )
+    {
+      if ( const auto *enumParam = dynamic_cast<const QgsProcessingParameterEnum *>( param ) )
+      {
+        const QStringList opts = enumParam->options();
+        port.enumOptions.reserve( opts.size() );
+        for ( const QString &opt : opts )
+          port.enumOptions.push_back( opt.toStdString() );
+      }
+    }
+
+    desc.inputs.push_back( std::move( port ) );
+  }
+
+  // Outputs ------------------------------------------------------------------
+  const auto outputs = alg.outputDefinitions();
+  for ( const QgsProcessingOutputDefinition *out : outputs )
+  {
+    if ( !out )
+      continue;
+
+    PortDescriptor port;
+    port.name = out->name().toStdString();
+    port.displayName = out->description().toStdString();
+    port.type = mapOutputType( *out );
+    port.required = true;
+    desc.outputs.push_back( std::move( port ) );
+  }
+
+  // If no explicit outputs, add a generic "OUTPUT" port (most algorithms
+  // declare destination parameters instead of output definitions).
+  if ( desc.outputs.empty() )
+  {
+    for ( const QgsProcessingParameterDefinition *param : params )
+    {
+      if ( param && param->isDestination() )
+      {
+        PortDescriptor port;
+        port.name = param->name().toStdString();
+        port.displayName = param->description().toStdString();
+        port.type = mapParameterType( *param );
+        port.required = true;
+        desc.outputs.push_back( std::move( port ) );
+      }
+    }
+  }
+
+  // Agent metadata: auto-generate purpose from display name
+  desc.agentMetadata.purpose = desc.description;
+  const QStringList tags = alg.tags();
+  for ( const QString &tag : tags )
+    desc.agentMetadata.tags.push_back( tag.toStdString() );
+
+  return desc;
+}
+
+// ---------------------------------------------------------------------------
+// ProviderAlgorithmAdapter
+// ---------------------------------------------------------------------------
+
+ProviderAlgorithmAdapter::ProviderAlgorithmAdapter( const QgsProcessingAlgorithm &alg )
+  : mAlg( &alg )
+  , mDesc( buildDescriptor( alg ) )
+{
+}
+
+std::string ProviderAlgorithmAdapter::algorithmId() const
+{
+  return mDesc.id;
+}
+
+AlgorithmDescriptor ProviderAlgorithmAdapter::descriptor() const
+{
+  return mDesc;
+}
+
+Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, ProgressCallback progressCb )
+{
+  if ( !mAlg )
+  {
+    Json::Value err( Json::objectValue );
+    err["error"] = "Null algorithm pointer";
+    return err;
+  }
+
+  // Create a fresh clone for this execution.
+  std::unique_ptr<QgsProcessingAlgorithm> clone( mAlg->create() );
+  if ( !clone )
+  {
+    Json::Value err( Json::objectValue );
+    err["error"] = "Failed to clone algorithm";
+    return err;
+  }
+
+  QgsProcessingContext context;
+  QgsProcessingFeedback feedback;
+
+  if ( progressCb )
+  {
+    QObject::connect( &feedback, &QgsFeedback::progressChanged,
+                      [progressCb]( double progress ) {
+                        progressCb( static_cast<int>( progress ), "Processing..." );
+                      } );
+  }
+
+  const QVariantMap variantParams = jsonParamsToVariantMap( params );
+
+  bool ok = false;
+  const QVariantMap results = clone->run( variantParams, context, &feedback, &ok );
+
+  Json::Value result( Json::objectValue );
+  if ( !ok )
+  {
+    result["error"] = feedback.textLog().toStdString();
+    return result;
+  }
+
+  // Convert QVariantMap results → Json::Value
+  for ( auto it = results.constBegin(); it != results.constEnd(); ++it )
+  {
+    result[it.key().toStdString()] = variantToJsonValue( it.value() );
+  }
+  return result;
+}
+
+} // namespace sicnu::processing

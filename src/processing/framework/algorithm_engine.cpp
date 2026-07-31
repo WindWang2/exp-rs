@@ -1,4 +1,6 @@
 #include "algorithm_engine.h"
+#include "atomic_algorithm_registry.h"
+#include "provider_algorithm_adapter.h"
 #include <qgsapplication.h>
 #include <processing/qgsprocessingregistry.h>
 #include <QSettings>
@@ -159,6 +161,23 @@ void AlgorithmEngine::initialize()
 
     registerProvider( std::make_shared<PythonProcessingProviderAdapter>(
       QStringLiteral( "python_plugins" ), QStringLiteral( "Python Plugins" ) ) );
+
+    // ADR 0012 — mirror provider algorithms into the Atomic Algorithm Registry
+    // so the Agent's exported tool schema covers GDAL/OTB/QGIS algorithms.
+    sicnu::processing::AtomicAlgorithmRegistry::setProviderAlgorithmProvider(
+      []( sicnu::processing::AtomicAlgorithmRegistry &reg ) {
+        if ( !QgsApplication::processingRegistry() )
+          return;
+        for ( const QgsProcessingAlgorithm *alg :
+              QgsApplication::processingRegistry()->algorithms() )
+        {
+          if ( alg && !reg.findAdapter( alg->id().toStdString() ) )
+          {
+            reg.registerAdapter(
+              std::make_shared<sicnu::processing::ProviderAlgorithmAdapter>( *alg ) );
+          }
+        }
+      } );
 }
 
 void AlgorithmEngine::populateFromProcessingRegistry()

@@ -53,6 +53,7 @@ sicnu_add_test(test_algorithm_engine)
 sicnu_add_test(test_task_center)
 sicnu_add_test(test_atomic_algorithm_adapter)
 sicnu_add_test(test_atomic_algorithm_registry)
+sicnu_add_test(test_provider_algorithm_adapter)
 sicnu_add_test(test_agent_workflow_executor)
 
 # ToolCallDispatcher (ADR 0021) — headless; fake sink/watcher, real registry.

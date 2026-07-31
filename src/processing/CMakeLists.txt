@@ -30,6 +30,7 @@ add_library(sicnu_processing SHARED
     framework/qgs_processing_provider_adapter.cpp
     framework/qgs_processing_provider_adapter.h
     framework/atomic_algorithm_adapter.cpp
+    framework/provider_algorithm_adapter.cpp
     framework/atomic_algorithm_registry.cpp
     framework/json_params_converter.h
     framework/tool_call_dispatcher.cpp
