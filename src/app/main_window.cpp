@@ -73,6 +73,7 @@
 #include "python/qgis_python.h"
 #include "python/sicnu_python_console.h"
 #include "python/sicnu_python_api.h"
+#include "app/python/sicnu_app_interface.h"
 #endif
 
 QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
@@ -140,6 +141,15 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     // Load plugins
     qDebug() << "Loading plugins...";
     m_pluginManager = std::make_unique<PluginManager>(m_mapCanvas, m_layerTreeView);
+#ifdef SICNU_EMBED_PYTHON
+    // Wire the application interface facade so Python plugins get a live
+    // plugin menu, the DataManager asset seam, and the view host. The menu
+    // is hosted on the detached appMenuBar(): QMainWindow::menuBar() is
+    // forbidden here (it deletes the installed top chrome).
+    m_appInterface = std::make_unique<SicnuAppInterface>( this, m_activeViewHost.get(), m_projectContext.get() );
+    m_appInterface->setPluginMenu( appMenuBar()->addMenu( tr( "插件" ) ) );
+    m_pluginManager->setAppInterface( m_appInterface.get() );
+#endif
     m_pluginManager->loadPlugins(QCoreApplication::applicationDirPath() + "/../plugins");
     for (const QString &pluginName : m_pluginManager->loadedPlugins()) {
         SicnuPluginInterface *plugin = m_pluginManager->plugin(pluginName);

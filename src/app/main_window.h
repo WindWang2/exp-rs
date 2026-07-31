@@ -89,6 +89,8 @@ namespace sicnu::workflow::gui { class PipelineEditorDock; }
 
 namespace Sicnu { class PythonScriptEditor; }
 
+class SicnuAppInterface;
+
 /**
  * \brief Custom identify tool that emits results as a signal.
  *
@@ -468,6 +470,10 @@ private:
     std::unique_ptr<sicnu::app::ProjectContext> m_projectContext;
     std::unique_ptr<ActiveViewHost> m_activeViewHost;
     std::unique_ptr<class PluginManager> m_pluginManager;
+
+#ifdef SICNU_EMBED_PYTHON
+    std::unique_ptr<SicnuAppInterface> m_appInterface;
+#endif
 
     // Lazy-loaded modules
 #ifdef SICNU_EMBED_PYTHON
