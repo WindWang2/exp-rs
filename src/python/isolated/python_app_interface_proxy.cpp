@@ -1,5 +1,7 @@
 #include "python_app_interface_proxy.h"
 #include "active_view_host.h"
+#include "data/asset_types.h"
+#include "data/data_manager.h"
 #include "processing/framework/python_algorithm_adapter.h"
 #include "processing/framework/python_processing_provider_adapter.h"
 #include "processing/framework/algorithm_engine.h"
@@ -13,11 +15,11 @@
 namespace sicnu::python::isolated
 {
 
-PythonAppInterfaceProxy::PythonAppInterfaceProxy( PythonIpcServer *ipcServer, QMenu *parentMenu, ActiveViewHost *activeViewHost, QObject *parent )
+PythonAppInterfaceProxy::PythonAppInterfaceProxy( PythonIpcServer *ipcServer, sicnu::data::DataManager *dataManager, QMenu *parentMenu, ActiveViewHost *activeViewHost, QObject *parent )
   : QObject( parent )
   , m_ipcServer( ipcServer )
   , m_parentMenu( parentMenu )
-  , m_bridge( nullptr, activeViewHost, this )
+  , m_bridge( dataManager, activeViewHost, this )
 {
   if ( m_ipcServer )
   {
@@ -55,13 +57,23 @@ void PythonAppInterfaceProxy::handleIpcMessage( const QJsonObject &message )
     QString actionTitle = params[QStringLiteral( "action_title" )].toString();
     QString callbackId = params[QStringLiteral( "callback_id" )].toString();
 
+    if ( !m_parentMenu )
+    {
+      // Headless mode: no menu host — report ui_unavailable instead of
+      // registering a dead QAction.
+      if ( m_ipcServer && msgId > 0 )
+      {
+        QJsonObject res;
+        res[QStringLiteral( "status" )] = QStringLiteral( "ui_unavailable" );
+        res[QStringLiteral( "callback_id" )] = callbackId;
+        m_ipcServer->sendResponse( msgId, res );
+      }
+      return;
+    }
+
     auto *action = new QAction( actionTitle, this );
     m_registeredActions[callbackId] = action;
-
-    if ( m_parentMenu )
-    {
-      m_parentMenu->addAction( action );
-    }
+    m_parentMenu->addAction( action );
 
     connect( action, &QAction::triggered, this, [this, callbackId]() {
       emit actionTriggered( callbackId );
@@ -86,6 +98,19 @@ void PythonAppInterfaceProxy::handleIpcMessage( const QJsonObject &message )
     QJsonObject res = m_bridge.getActiveLayerSummary().toJsonObject();
     if ( m_ipcServer && msgId > 0 )
     {
+      m_ipcServer->sendResponse( msgId, res );
+    }
+  }
+  else if ( method == QStringLiteral( "catalog.set_active_layer" ) )
+  {
+    const QString assetIdText = params[QStringLiteral( "asset_id" )].toString();
+    const std::optional<sicnu::data::AssetId> assetId = sicnu::data::AssetId::fromString( assetIdText );
+    const bool ok = assetId.has_value() && m_bridge.setActiveAsset( *assetId );
+    if ( m_ipcServer && msgId > 0 )
+    {
+      QJsonObject res;
+      res[QStringLiteral( "status" )] = ok ? QStringLiteral( "ok" ) : QStringLiteral( "unknown_asset" );
+      res[QStringLiteral( "asset_id" )] = assetIdText;
       m_ipcServer->sendResponse( msgId, res );
     }
   }

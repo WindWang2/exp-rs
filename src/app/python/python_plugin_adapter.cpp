@@ -3,6 +3,9 @@
 #include "sicnu_app_interface.h"
 #include "python_app_interface_proxy.h"
 #include "python_worker_process_pool.h"
+#include "project_context.h"
+
+#include "data/data_manager.h"
 
 #include <QDebug>
 #include <QDir>
@@ -88,7 +91,12 @@ bool PythonPluginAdapter::initialize( QgsMapCanvas *canvas, QgsLayerTreeView *la
 
     // Attach UI RPC Proxy Facade
     QMenu *pluginMenu = m_appInterface ? m_appInterface->pluginMenu() : nullptr;
-    m_uiProxy = std::make_unique<PythonAppInterfaceProxy>( m_workerNode->server, pluginMenu );
+    sicnu::data::DataManager *dataManager = nullptr;
+    if ( m_appInterface && m_appInterface->projectContext() )
+    {
+        dataManager = &m_appInterface->projectContext()->dataManager();
+    }
+    m_uiProxy = std::make_unique<PythonAppInterfaceProxy>( m_workerNode->server, dataManager, pluginMenu );
     if ( m_appInterface && m_appInterface->activeViewHost() )
     {
         m_uiProxy->setActiveViewHost( m_appInterface->activeViewHost() );

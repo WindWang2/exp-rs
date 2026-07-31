@@ -181,7 +181,7 @@ TEST_CASE( "PythonAppInterfaceProxy registers UI action over IPC and routes clic
   REQUIRE( server.listen( socketName ) );
 
   QMenu parentMenu;
-  PythonAppInterfaceProxy uiProxy( &server, &parentMenu );
+  PythonAppInterfaceProxy uiProxy( &server, nullptr, &parentMenu );
 
   PythonWorkerProcess worker;
   QString scriptPath = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) );
@@ -346,7 +346,7 @@ TEST_CASE( "PythonAppInterfaceProxy handles catalog.get_active_layer, canvas.get
   ActiveViewHost activeViewHost( &canvas, nullptr, nullptr, nullptr, nullptr, sicnu::display::DisplayViewId(), nullptr );
   activeViewHost.setMessageBar( &messageBar );
 
-  PythonAppInterfaceProxy uiProxy( &server, &parentMenu, &activeViewHost );
+  PythonAppInterfaceProxy uiProxy( &server, nullptr, &parentMenu, &activeViewHost );
 
   // Test canvas.get_state IPC message handling
   QJsonObject canvasMsg;
@@ -500,6 +500,67 @@ TEST_CASE( "AppInterfaceBridge headless asset seam via DataManager", "[python][b
     CHECK( bridge.activeLayer() == nullptr );
     CHECK_FALSE( bridge.pushMessageBarAlert( QStringLiteral( "Title" ), QStringLiteral( "Message" ) ) );
   }
+}
+
+TEST_CASE( "PythonAppInterfaceProxy serves the asset IPC chain without any QWidget", "[python][isolated][api][headless]" )
+{
+  using namespace sicnu::python::isolated;
+
+  PythonIpcServer server;
+  sicnu::data::DataManager dataManager;
+  PythonAppInterfaceProxy proxy( &server, &dataManager );
+
+  const QString demPath = fixturePath( QStringLiteral( "samples/dem_sample.tif" ) );
+
+  // data.add_layer registers through the Data Manager and auto-sets active.
+  QJsonObject addMsg;
+  addMsg[QStringLiteral( "method" )] = QStringLiteral( "data.add_layer" );
+  addMsg[QStringLiteral( "id" )] = 201;
+  QJsonObject addParams;
+  addParams[QStringLiteral( "path" )] = demPath;
+  addMsg[QStringLiteral( "params" )] = addParams;
+  proxy.handleIpcMessage( addMsg );
+
+  const sicnu::data::AssetId addedId = proxy.bridge().activeAssetId();
+  REQUIRE( !addedId.isNull() );
+
+  // catalog.get_active_layer resolves the active asset from the catalog.
+  QJsonObject getMsg;
+  getMsg[QStringLiteral( "method" )] = QStringLiteral( "catalog.get_active_layer" );
+  getMsg[QStringLiteral( "id" )] = 202;
+  proxy.handleIpcMessage( getMsg );
+  const auto summary = proxy.bridge().getActiveLayerSummary();
+  REQUIRE( summary.isValid );
+  CHECK( summary.source == demPath );
+
+  // catalog.set_active_layer with an unknown id fails cleanly and changes nothing.
+  QJsonObject setMsg;
+  setMsg[QStringLiteral( "method" )] = QStringLiteral( "catalog.set_active_layer" );
+  setMsg[QStringLiteral( "id" )] = 203;
+  QJsonObject setParams;
+  setParams[QStringLiteral( "asset_id" )] = sicnu::data::AssetId::generate().toString();
+  setMsg[QStringLiteral( "params" )] = setParams;
+  proxy.handleIpcMessage( setMsg );
+  CHECK( proxy.bridge().activeAssetId() == addedId );
+
+  // catalog.set_active_layer with the registered id succeeds.
+  setParams[QStringLiteral( "asset_id" )] = addedId.toString();
+  setMsg[QStringLiteral( "params" )] = setParams;
+  setMsg[QStringLiteral( "id" )] = 204;
+  proxy.handleIpcMessage( setMsg );
+  CHECK( proxy.bridge().activeAssetId() == addedId );
+
+  // ui.add_plugin_menu with no menu host degrades without registering an action.
+  QJsonObject menuMsg;
+  menuMsg[QStringLiteral( "method" )] = QStringLiteral( "ui.add_plugin_menu" );
+  menuMsg[QStringLiteral( "id" )] = 205;
+  QJsonObject menuParams;
+  menuParams[QStringLiteral( "menu_title" )] = QStringLiteral( "Plugins" );
+  menuParams[QStringLiteral( "action_title" )] = QStringLiteral( "Headless Action" );
+  menuParams[QStringLiteral( "callback_id" )] = QStringLiteral( "cb_headless_001" );
+  menuMsg[QStringLiteral( "params" )] = menuParams;
+  proxy.handleIpcMessage( menuMsg );
+  CHECK( proxy.registeredActionCount() == 0 );
 }
 
 TEST_CASE( "SicnuAppInterface addRasterLayer returns opened layer regardless of host active layer selection", "[python][iface][contract]" )

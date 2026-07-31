@@ -11,6 +11,11 @@
 
 class ActiveViewHost;
 
+namespace sicnu::data
+{
+class DataManager;
+}
+
 namespace sicnu::python::isolated
 {
 
@@ -19,7 +24,11 @@ class PythonAppInterfaceProxy : public QObject
   Q_OBJECT
 
   public:
-    explicit PythonAppInterfaceProxy( PythonIpcServer *ipcServer, QMenu *parentMenu = nullptr, ActiveViewHost *activeViewHost = nullptr, QObject *parent = nullptr );
+    explicit PythonAppInterfaceProxy( PythonIpcServer *ipcServer,
+                                      sicnu::data::DataManager *dataManager = nullptr,
+                                      QMenu *parentMenu = nullptr,
+                                      ActiveViewHost *activeViewHost = nullptr,
+                                      QObject *parent = nullptr );
     ~PythonAppInterfaceProxy() override = default;
 
     void setParentMenu( QMenu *parentMenu );
