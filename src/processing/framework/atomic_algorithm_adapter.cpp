@@ -39,10 +39,8 @@ AlgorithmDescriptor AlgorithmDescriptorBuilder::buildFromRsOperator( const opera
       const auto &pObj = props[key];
       PortDescriptor pDesc;
       pDesc.name = key;
-      if ( hasRequiredList )
-      {
-        pDesc.required = ( requiredSet.count( key ) > 0 );
-      }
+      pDesc.required = ( requiredSet.count( key ) > 0 ) ||
+                        ( pObj.isMember( "required" ) && pObj["required"].isBool() && pObj["required"].asBool() );
       if ( pObj.isMember( "title" ) && pObj["title"].isString() )
         pDesc.displayName = pObj["title"].asString();
       else
