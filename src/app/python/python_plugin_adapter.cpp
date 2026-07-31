@@ -89,7 +89,8 @@ bool PythonPluginAdapter::initialize( QgsMapCanvas *canvas, QgsLayerTreeView *la
         return false;
     }
 
-    // Attach UI RPC Proxy Facade
+    // Attach UI RPC Proxy Facade (headless asset seam: DataManager is the
+    // asset authority; menu and view host remain optional GUI enhancements).
     QMenu *pluginMenu = m_appInterface ? m_appInterface->pluginMenu() : nullptr;
     sicnu::data::DataManager *dataManager = nullptr;
     if ( m_appInterface && m_appInterface->projectContext() )
