@@ -19,6 +19,8 @@
 
 #include "active_view_host.h"
 #include "project_context.h"
+#include "data/data_manager.h"
+#include "data/asset_types.h"
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
@@ -449,6 +451,54 @@ TEST_CASE( "AppInterfaceBridge consolidates QGIS query routing and JSON serializ
     CHECK( !canvasSummary.isValid );
     CHECK( canvasSummary.toJsonObject()[QStringLiteral( "status" )].toString()
            == QStringLiteral( "no_canvas" ) );
+  }
+}
+
+TEST_CASE( "AppInterfaceBridge headless asset seam via DataManager", "[python][bridge][headless]" )
+{
+  using namespace sicnu::python::isolated;
+
+  sicnu::data::DataManager dataManager;
+  AppInterfaceBridge bridge( &dataManager );
+
+  const QString demPath = fixturePath( QStringLiteral( "samples/dem_sample.tif" ) );
+
+  SECTION( "openPath registers the asset headlessly and auto-sets the active asset" )
+  {
+    REQUIRE( bridge.openPath( demPath ) );
+    CHECK( !bridge.activeAssetId().isNull() );
+    CHECK( dataManager.asset( bridge.activeAssetId() ).has_value() );
+
+    const auto summary = bridge.getActiveLayerSummary();
+    REQUIRE( summary.isValid );
+    CHECK( summary.source == demPath );
+    CHECK( summary.type == QStringLiteral( "raster" ) );
+    CHECK( summary.toJsonObject()[QStringLiteral( "status" )].toString() == QStringLiteral( "ok" ) );
+  }
+
+  SECTION( "setActiveAsset validates against the catalog" )
+  {
+    CHECK( bridge.getActiveLayerSummary().toJsonObject()[QStringLiteral( "status" )].toString()
+           == QStringLiteral( "no_active_layer" ) );
+
+    CHECK_FALSE( bridge.setActiveAsset( sicnu::data::AssetId() ) );
+    CHECK_FALSE( bridge.setActiveAsset( sicnu::data::AssetId::generate() ) );
+
+    REQUIRE( bridge.openPath( demPath ) );
+    const sicnu::data::AssetId registeredId = bridge.activeAssetId();
+    CHECK( bridge.setActiveAsset( registeredId ) );
+    CHECK( bridge.activeAssetId() == registeredId );
+    CHECK( bridge.getActiveLayerSummary().isValid );
+  }
+
+  SECTION( "Null view host degrades canvas and message bar gracefully" )
+  {
+    const auto canvasSummary = bridge.getCanvasViewportSummary();
+    CHECK( !canvasSummary.isValid );
+    CHECK( canvasSummary.toJsonObject()[QStringLiteral( "status" )].toString()
+           == QStringLiteral( "no_canvas" ) );
+    CHECK( bridge.activeLayer() == nullptr );
+    CHECK_FALSE( bridge.pushMessageBarAlert( QStringLiteral( "Title" ), QStringLiteral( "Message" ) ) );
   }
 }
 

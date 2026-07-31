@@ -17,7 +17,7 @@ PythonAppInterfaceProxy::PythonAppInterfaceProxy( PythonIpcServer *ipcServer, QM
   : QObject( parent )
   , m_ipcServer( ipcServer )
   , m_parentMenu( parentMenu )
-  , m_bridge( activeViewHost, this )
+  , m_bridge( nullptr, activeViewHost, this )
 {
   if ( m_ipcServer )
   {

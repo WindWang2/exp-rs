@@ -1,10 +1,15 @@
 // src/python/isolated/app_interface_bridge.cpp
 #include "app_interface_bridge.h"
 #include "active_view_host.h"
+#include "data/data_asset.h"
+#include "data/data_manager.h"
 
 #include <qgsmaplayer.h>
 
 #include <QJsonArray>
+
+#include <optional>
+#include <variant>
 
 namespace sicnu::python::isolated
 {
@@ -49,10 +54,21 @@ QJsonObject CanvasViewportSummary::toJsonObject() const
   return res;
 }
 
-AppInterfaceBridge::AppInterfaceBridge( ActiveViewHost *activeViewHost, QObject *parent )
+AppInterfaceBridge::AppInterfaceBridge( sicnu::data::DataManager *dataManager, ActiveViewHost *activeViewHost, QObject *parent )
   : QObject( parent )
+  , m_dataManager( dataManager )
   , m_activeViewHost( activeViewHost )
 {
+}
+
+void AppInterfaceBridge::setDataManager( sicnu::data::DataManager *dataManager )
+{
+  m_dataManager = dataManager;
+}
+
+sicnu::data::DataManager *AppInterfaceBridge::dataManager() const
+{
+  return m_dataManager;
 }
 
 void AppInterfaceBridge::setActiveViewHost( ActiveViewHost *host )
@@ -68,19 +84,36 @@ ActiveViewHost *AppInterfaceBridge::activeViewHost() const
 ActiveLayerSummary AppInterfaceBridge::getActiveLayerSummary() const
 {
   ActiveLayerSummary summary;
-  if ( !m_activeViewHost )
+  if ( !m_dataManager || m_activeAssetId.isNull() )
   {
     return summary;
   }
 
-  QgsMapLayer *activeLyr = m_activeViewHost->activeLayer();
-  if ( activeLyr )
+  const std::optional<sicnu::data::AssetSnapshot> asset = m_dataManager->asset( m_activeAssetId );
+  if ( !asset )
   {
-    summary.isValid = true;
-    summary.name = activeLyr->name();
-    summary.source = activeLyr->source();
-    summary.type = ( activeLyr->type() == Qgis::LayerType::Raster ) ? QStringLiteral( "raster" ) : QStringLiteral( "vector" );
-    summary.crs = activeLyr->crs().authid();
+    return summary;
+  }
+
+  summary.isValid = true;
+  summary.name = asset->displayName();
+  summary.source = asset->source().canonicalSource;
+  const bool isRaster = asset->kind() == sicnu::data::AssetKind::Raster ||
+                        asset->kind() == sicnu::data::AssetKind::VirtualRaster;
+  summary.type = isRaster ? QStringLiteral( "raster" ) : QStringLiteral( "vector" );
+
+  // CRS is reported as WKT from the probed structure (previously authid from
+  // the QgsMapLayer); the Python side treats it as an opaque string.
+  if ( const auto *raster = std::get_if<sicnu::data::RasterStructure>( &asset->structure() ) )
+  {
+    summary.crs = raster->crsWkt;
+  }
+  else if ( const auto *vector = std::get_if<sicnu::data::VectorStructure>( &asset->structure() ) )
+  {
+    if ( !vector->layers.isEmpty() )
+    {
+      summary.crs = vector->layers.first().crsWkt;
+    }
   }
   return summary;
 }
@@ -92,12 +125,56 @@ QgsMapLayer *AppInterfaceBridge::activeLayer() const
 
 bool AppInterfaceBridge::openPath( const QString &path )
 {
-  if ( !m_activeViewHost || path.isEmpty() )
+  if ( path.isEmpty() )
   {
     return false;
   }
-  auto res = m_activeViewHost->openPath( path );
-  return static_cast<bool>( res );
+
+  // Asset authority (headless-safe): register through the Data Manager and
+  // auto-set the freshly added asset as the plugin-visible active one.
+  if ( m_dataManager )
+  {
+    sicnu::data::SourceDescriptor source;
+    source.canonicalSource = path;
+    const sicnu::data::RegisterResult registered =
+      m_dataManager->registerSource( sicnu::data::RegisterRequest{ std::move( source ) } );
+    if ( registered.assetId.isNull() )
+    {
+      return false;
+    }
+    m_activeAssetId = registered.assetId;
+  }
+  else if ( !m_activeViewHost )
+  {
+    return false;
+  }
+
+  // Optional display enhancement: route through the view host when bound.
+  // Registration via the view host dedups against the same SourceKey.
+  if ( m_activeViewHost )
+  {
+    const auto displayed = m_activeViewHost->openPath( path );
+    if ( !m_dataManager )
+    {
+      return static_cast<bool>( displayed );
+    }
+  }
+  return true;
+}
+
+bool AppInterfaceBridge::setActiveAsset( const sicnu::data::AssetId &assetId )
+{
+  if ( !m_dataManager || assetId.isNull() || !m_dataManager->asset( assetId ) )
+  {
+    return false;
+  }
+  m_activeAssetId = assetId;
+  return true;
+}
+
+sicnu::data::AssetId AppInterfaceBridge::activeAssetId() const
+{
+  return m_activeAssetId;
 }
 
 CanvasViewportSummary AppInterfaceBridge::getCanvasViewportSummary() const
