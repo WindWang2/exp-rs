@@ -3,6 +3,8 @@
 #include <memory>
 #include <thread>
 #include <type_traits>
+#include <QFile>
+#include <QTemporaryFile>
 
 #include "data/asset_types.h"
 #include "data/data_asset.h"
@@ -827,4 +829,145 @@ TEST_CASE( "Commit or rollback without an active Edit Lease is rejected",
 
   // The revision is untouched by the rejected operations.
   CHECK( manager->asset( id )->revision() == AssetRevision::initial() );
+}
+
+TEST_CASE( "DataManager reap deletes file for DeletableSource temporary asset", "[data_manager][reap]" )
+{
+  QTemporaryFile tempFile;
+  REQUIRE( tempFile.open() );
+  const QString tempFilePath = tempFile.fileName();
+  tempFile.close();
+  REQUIRE( QFile::exists( tempFilePath ) );
+
+  const auto manager = makeDataManager();
+
+  SourceDescriptor source;
+  source.providerKey = QStringLiteral( "memory-raster" );
+  source.canonicalSource = tempFilePath;
+
+  RegisterRequest req;
+  req.source = source;
+  req.persistence = PersistencePolicy::SessionTemporary;
+  req.additionalCapabilities = AssetCapability::DeletableSource;
+
+  const auto regResult = manager->registerSource( req );
+  const AssetId id = regResult.assetId;
+  REQUIRE_FALSE( id.isNull() );
+
+  int unloadSignalCount = 0;
+  QObject::connect( manager.get(), &DataManager::assetAboutToUnload,
+                    [&]( AssetId targetId ) {
+                      if ( targetId == id )
+                        unloadSignalCount++;
+                    } );
+
+  const auto reapRes = manager->reap( { id } );
+  REQUIRE( reapRes.unloaded );
+  REQUIRE( reapRes.sourceDeleted );
+  CHECK( unloadSignalCount == 1 );
+  CHECK_FALSE( manager->asset( id ).has_value() );
+  CHECK_FALSE( QFile::exists( tempFilePath ) );
+}
+
+TEST_CASE( "DataManager reap refuses ProjectPersistent and leased assets", "[data_manager][reap]" )
+{
+  const auto manager = makeDataManager();
+
+  SourceDescriptor source;
+  source.providerKey = QStringLiteral( "memory-raster" );
+  source.canonicalSource = QStringLiteral( "/tmp/fake_persistent.tif" );
+
+  RegisterRequest req;
+  req.source = source;
+  req.persistence = PersistencePolicy::ProjectPersistent;
+  req.additionalCapabilities = AssetCapability::DeletableSource;
+
+  const auto regResult = manager->registerSource( req );
+  const AssetId persistentId = regResult.assetId;
+
+  // Persistent asset refusal
+  const auto persistentReap = manager->reap( { persistentId } );
+  REQUIRE_FALSE( persistentReap.unloaded );
+  REQUIRE_FALSE( persistentReap.sourceDeleted );
+  REQUIRE_FALSE( persistentReap.diagnostics.isEmpty() );
+  CHECK( persistentReap.diagnostics.first().code == QStringLiteral( "reap.persistent" ) );
+  CHECK( manager->asset( persistentId ).has_value() );
+
+  // Leased temporary refusal
+  RegisterRequest tempReq;
+  tempReq.source = source;
+  tempReq.persistence = PersistencePolicy::SessionTemporary;
+  tempReq.additionalCapabilities = AssetCapability::DeletableSource;
+  const AssetId tempId = manager->registerSource( tempReq ).assetId;
+
+  auto lease = manager->acquire( AssetRef{ tempId }, AssetUse{ LeaseKind::View } ).take();
+  const auto leasedReap = manager->reap( { tempId } );
+  REQUIRE_FALSE( leasedReap.unloaded );
+  REQUIRE_FALSE( leasedReap.sourceDeleted );
+  CHECK( manager->asset( tempId ).has_value() );
+}
+
+TEST_CASE( "DataManager promote flips policy to ProjectPersistent and preserves identity", "[data_manager][promote]" )
+{
+  const auto manager = makeDataManager();
+
+  SourceDescriptor source;
+  source.providerKey = QStringLiteral( "memory-raster" );
+  source.canonicalSource = QStringLiteral( "/tmp/fake_temp.tif" );
+
+  RegisterRequest req;
+  req.source = source;
+  req.persistence = PersistencePolicy::SessionTemporary;
+
+  const AssetId id = manager->registerSource( req ).assetId;
+  REQUIRE( manager->asset( id )->persistence() == PersistencePolicy::SessionTemporary );
+
+  int changeSignalCount = 0;
+  QObject::connect( manager.get(), &DataManager::assetChanged,
+                    [&]( AssetId targetId ) {
+                      if ( targetId == id )
+                        changeSignalCount++;
+                    } );
+
+  const auto promoteRes = manager->promote( id );
+  REQUIRE( promoteRes );
+  CHECK( manager->asset( id )->persistence() == PersistencePolicy::ProjectPersistent );
+  CHECK( changeSignalCount == 1 );
+
+  // Promoting again is no-op success
+  const auto promoteAgain = manager->promote( id );
+  REQUIRE( promoteAgain );
+  CHECK( changeSignalCount == 1 );
+}
+
+TEST_CASE( "DataManager reapSessionTemporaries sweeps idle temporary assets", "[data_manager][reap_sweep]" )
+{
+  const auto manager = makeDataManager();
+
+  SourceDescriptor source;
+  source.providerKey = QStringLiteral( "memory-raster" );
+  source.canonicalSource = QStringLiteral( "/tmp/fake_temp_sweep1.tif" );
+
+  SourceDescriptor source2;
+  source2.providerKey = QStringLiteral( "memory-raster" );
+  source2.canonicalSource = QStringLiteral( "/tmp/fake_temp_sweep2.tif" );
+
+  RegisterRequest req1;
+  req1.source = source;
+  req1.persistence = PersistencePolicy::SessionTemporary;
+  const AssetId id1 = manager->registerSource( req1 ).assetId;
+
+  RegisterRequest req2;
+  req2.source = source2;
+  req2.persistence = PersistencePolicy::SessionTemporary;
+  const AssetId id2 = manager->registerSource( req2 ).assetId;
+
+  // Lease id2 so it is skipped during sweep
+  auto lease2 = manager->acquire( AssetRef{ id2 }, AssetUse{ LeaseKind::View } ).take();
+
+  const auto sweepRes = manager->reapSessionTemporaries();
+  CHECK( sweepRes.reapedCount == 1 );
+  CHECK( sweepRes.skippedLeased.contains( id2 ) );
+  CHECK_FALSE( manager->asset( id1 ).has_value() );
+  CHECK( manager->asset( id2 ).has_value() );
 }
