@@ -254,9 +254,16 @@ QgisDesktopWindow::~QgisDesktopWindow()
     // safely reparent/unset. unique_ptr destruction order is reverse of
     // declaration; force explicit reset here for clarity.
     m_toolManager.reset();
+    // Plugin teardown (unloadAll) spins a nested QEventLoop via IPC while the
+    // plugin proxy still holds live pointers through m_appInterface — destroy
+    // the plugin manager first, then the interface, then the view host and
+    // project context it references.
+    m_pluginManager.reset();
+#ifdef SICNU_EMBED_PYTHON
+    m_appInterface.reset();
+#endif
     m_activeViewHost.reset();
     m_projectContext.reset();
-    m_pluginManager.reset();
 }
 
 void QgisDesktopWindow::setupUi()

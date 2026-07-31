@@ -469,11 +469,15 @@ private:
     std::unique_ptr<class MapToolManager> m_toolManager;
     std::unique_ptr<sicnu::app::ProjectContext> m_projectContext;
     std::unique_ptr<ActiveViewHost> m_activeViewHost;
-    std::unique_ptr<class PluginManager> m_pluginManager;
 
+    // Declared before m_pluginManager so it is destroyed after it: the
+    // plugin proxy holds live DataManager*/view-host pointers through the
+    // interface, so the interface must outlive the plugin manager.
 #ifdef SICNU_EMBED_PYTHON
     std::unique_ptr<SicnuAppInterface> m_appInterface;
 #endif
+
+    std::unique_ptr<class PluginManager> m_pluginManager;
 
     // Lazy-loaded modules
 #ifdef SICNU_EMBED_PYTHON
