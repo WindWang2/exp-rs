@@ -124,6 +124,10 @@ _Avoid_: Script runner, Plugin store
 The application interface facade (`SicnuAppInterface` subclassing `QgisInterface`) passed into Python plugins, wrapping `QgisDesktopWindow`, `ActiveViewHost`, and `ProjectContext` while enforcing the Data/Display seam.
 _Avoid_: Raw main window pointer, Global QgisApp instance
 
+**Headless Asset Seam (`AppInterfaceBridge`)**:
+The JSON-RPC serialization bridge (`AppInterfaceBridge` in `src/python/isolated`) consumed by `PythonAppInterfaceProxy` for out-of-process Python plugin workers. `DataManager` is its required asset authority — catalog queries, source registration (`openPath`), and the explicit plugin-driven active asset (`setActiveAsset`/`activeAssetId`, replacing the canvas current layer) — while `ActiveViewHost` is an optional enhancement bound only in GUI mode for display, canvas state, and message bar. IPC methods degrade gracefully without a view host (`no_canvas`, `no_active_layer`, `ui_unavailable`), so the seam works without any QWidget.
+_Avoid_: GUI proxy, QgisInterface IPC shim
+
 **Pipeline Node Canvas**:
 The visual DAG editor canvas (`PipelineCanvasWidget` using Qt Graphics View) for constructing, editing, and monitoring processing task pipelines. Spatial metadata $(X,Y)$ is embedded in `WorkflowDefinition` JSON.
 _Avoid_: Node graph window, Flow editor dialog
