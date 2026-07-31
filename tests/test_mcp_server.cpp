@@ -8,6 +8,7 @@
 #include <thread>
 
 #include "agent/mcp_server.h"
+#include "jobs/job_engine.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/task_center.h"
 #include "operators/framework/rs_operator_registry.h"
@@ -346,4 +347,5 @@ TEST_CASE("McpServer executes qgis processing algorithms to terminal state", "[a
     QVariantMap status = server.testGetExecutionStatus(execId);
     REQUIRE(status.value("execution_id").toString() == execId);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    sicnu::jobs::JobEngine::instance().shutdown();
 }

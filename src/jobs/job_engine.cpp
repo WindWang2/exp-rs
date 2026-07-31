@@ -34,8 +34,15 @@ JobEngine::JobEngine() = default;
 
 JobEngine::~JobEngine()
 {
+  shutdown();
+}
+
+void JobEngine::shutdown()
+{
   {
     std::lock_guard<std::mutex> lock( m_mutex );
+    if ( m_stop.load() )
+      return;
     m_stop.store( true );
   }
   m_cv.notify_all();
@@ -44,6 +51,7 @@ JobEngine::~JobEngine()
     if ( t.joinable() )
       t.join();
   }
+  m_workers.clear();
 }
 
 void JobEngine::setMaxWorkers( int n )

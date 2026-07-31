@@ -52,6 +52,9 @@ class JobEngine
     void setMaxWorkers( int n ); // clamp 2..4
     int maxWorkers() const;
 
+    /** Stop and join all worker threads. Safe to call multiple times. */
+    void shutdown();
+
     /** Submit RSOperator (or prefix-registered executor) job. */
     std::string submit( JobRequest req );
 
