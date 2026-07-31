@@ -1645,6 +1645,7 @@ if(TARGET qgis_app_classify)
     test_classification_task_center.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   )
   target_link_libraries(test_classification_task_center PRIVATE
@@ -1680,6 +1681,7 @@ if(TARGET qgis_app_classify)
     test_classification_window.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   )
   target_link_libraries(test_classification_window PRIVATE
@@ -1711,7 +1713,8 @@ if(TARGET qgis_app_classify)
   sicnu_discover_tests(test_classification_window)
 
   # Phase 10A Task 10.3 — Class table widget tests.
-  add_executable(test_class_table_widget test_class_table_widget.cpp)
+  add_executable(test_class_table_widget test_class_table_widget.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
   target_link_libraries(test_class_table_widget PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -1750,7 +1753,8 @@ if(TARGET qgis_app_classify)
   sicnu_discover_tests(test_pixel_rasterizer)
 
   # Phase 10A Task 10.4 — ROI polygon map tool (3 clicks + dblclk -> emit)
-  add_executable(test_roi_tool_polygon test_roi_tool_polygon.cpp)
+  add_executable(test_roi_tool_polygon test_roi_tool_polygon.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
   target_link_libraries(test_roi_tool_polygon PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -1773,7 +1777,8 @@ if(TARGET qgis_app_classify)
   sicnu_discover_tests(test_roi_tool_polygon)
 
   # Phase 10A Task 10.5 — Spectral curve widget tests.
-  add_executable(test_spectral_curve test_spectral_curve.cpp)
+  add_executable(test_spectral_curve test_spectral_curve.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
   target_link_libraries(test_spectral_curve PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -1971,6 +1976,7 @@ if(TARGET qgis_app_classify)
   add_executable(test_classify_workflow_controller test_classify_workflow_controller.cpp
     # SicnuUi chrome symbols pulled transitively via qgis_app_classify moc unit.
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   )
   target_link_libraries(test_classify_workflow_controller PRIVATE
     Catch2::Catch2WithMain
@@ -2077,7 +2083,8 @@ if(TARGET qgis_app_classify)
   sicnu_discover_tests(test_classifier_load_save)
 
   # Phase 10A Task 10.8 — End-to-end classification task test.
-  add_executable(test_classification_e2e test_classification_e2e.cpp)
+  add_executable(test_classification_e2e test_classification_e2e.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
   target_link_libraries(test_classification_e2e PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -2721,6 +2728,7 @@ add_executable(test_raster_processing_dialog_base
   test_raster_processing_dialog_base.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
 )

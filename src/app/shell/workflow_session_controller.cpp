@@ -471,7 +471,7 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
     sicnu::OutputCommitter committer( m_dataManager, this );
     committer.commitTaskOutput( &sicnu::TaskCenter::instance(),
                                 info.taskId,
-                                sicnu::data::AssetKind::RasterDataset,
+                                sicnu::data::AssetKind::Raster,
                                 outputPath,
                                 sicnu::data::PersistencePolicy::TaskTemporary,
                                 /*autoLoad=*/false,

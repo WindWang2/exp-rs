@@ -46,8 +46,8 @@ qt_add_library(qgis_app_classify STATIC
     # Classification workflow — post-process task + dialog.
     rs_post_process_task.cpp
     rs_post_process_dialog.cpp
-    # ADR 0019 — GuiJobHandle for async task submission.
-    ../shell/gui_job_adapter.cpp
+    # ADR 0019 — GuiJobHandle lives on sicnu_geo_rs (shell QObject TU, see
+    # tests/CMakeLists.txt MOC ODR note); tests compile it directly.
 )
 
 # Layer tree for session layer manager

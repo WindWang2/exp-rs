@@ -175,14 +175,11 @@ public slots:
      */
     void onFailed(const QString &errorMessage);
 
-private slots:
-    void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
-
 protected:
     // --- Members ---
     QgsRasterLayer *m_rasterLayer = nullptr;
     QLineEdit *m_outputEdit = nullptr;
     QPushButton *m_runButton = nullptr;
     bool m_running = false;
-    long m_pendingTaskId = -1;
+    sicnu::app::GuiJobHandle m_jobHandle{ this };
 };

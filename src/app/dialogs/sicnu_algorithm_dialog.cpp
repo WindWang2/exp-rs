@@ -619,7 +619,7 @@ void SicnuAlgorithmDialog::runAlgorithm()
   if ( !algorithm() )
     return;
 
-  if ( mPendingTaskId >= 0 )
+  if ( mJobHandle.isRunning() )
     return;
 
   if ( mLoadResultsCheck )

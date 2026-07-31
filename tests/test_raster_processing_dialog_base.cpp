@@ -35,7 +35,7 @@ public:
     }
 
     QPushButton *runButton() const { return m_runButton; }
-    long pendingTaskId() const { return m_pendingTaskId; }
+    long pendingTaskId() const { return m_jobHandle.taskId(); }
 
 protected:
     QString toolName() const override { return QStringLiteral("test_dialog"); }
