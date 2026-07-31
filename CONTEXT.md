@@ -45,7 +45,7 @@ The stateless external-agent JSON-RPC protocol adapter at the Task Center seam: 
 _Avoid_: MCP worker, Agent runner, Tool executor
 
 **Classification Pipeline**:
-The deep, GUI-free module in `src/analysis/classification` that owns the full pixel-classification flow: sample extraction from ROIs, feature scaling, stratified split, classifier training, model persistence, tiled prediction, class-map writing, and accuracy assessment. The GUI classification task and the classification Operators are thin adapters at its seam. Post-processing (sieve/majority/clump/recode) is a separate stage outside the pipeline.
+The deep, GUI-free module in `src/analysis/classification` (`RsClassificationPipeline`) that owns the full pixel-classification flow: vector sample extraction from training polygons, feature scaling (`RsFeatureScaler`), stratified holdout split (`RsClassificationSplit`), classifier training & OpenCV backend creation, model persistence & superset sidecar parsing (`loadModelSidecar`), predict-only mode (`modelLoadPath`), tiled prediction with dtype escalation, class-map writing, and accuracy assessment (`RsAccuracyAssessment`). The GUI classification task and `RsSupervisedClassificationOperator` are thin adapters at its seam. Post-processing (sieve/majority/clump/recode) is a separate stage outside the pipeline.
 _Avoid_: Classify task, Training helper, ML pipeline
 
 **Piecewise Linear Stretch**:
