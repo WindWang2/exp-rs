@@ -4,14 +4,24 @@
 #include "rs_pipeline_runner.h"
 
 #include "processing/framework/task_center.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_types.h"
 #include "workflow/placeholder_grammar.h"
 
+#include "data/data_manager.h"
+#include "data/data_asset.h"
+#include "data/derivation_record.h"
+#include "data/source_descriptor.h"
+
+#include <gdal.h>
+
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonObject>
 #include <QProcessEnvironment>
 #include <QTextStream>
 
@@ -336,6 +346,10 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
       }
 
       result.success = true;
+      if ( m_dataManager && result.success )
+      {
+        registerStepOutputs( pipelineId );
+      }
       reportLog( "info", "Pipeline completed successfully: " + def.title );
       return result;
     }
@@ -346,6 +360,62 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
       reportLog( "error", result.errorMessage );
       return result;
     }
+  }
+}
+
+void RsPipelineRunner::setAssetRegistry( sicnu::data::DataManager *dataManager )
+{
+  m_dataManager = dataManager;
+}
+
+void RsPipelineRunner::registerStepOutputs( long pipelineId )
+{
+  auto &taskCenter = sicnu::TaskCenter::instance();
+  const auto pipeInfo = taskCenter.getPipelineInfo( pipelineId );
+  for ( const auto &stepId : pipeInfo.orderedStepIds )
+  {
+    if ( !pipeInfo.stepToTaskId.contains( stepId ) )
+      continue;
+    const long taskId = pipeInfo.stepToTaskId[stepId];
+    const auto task = taskCenter.getTaskInfo( taskId );
+    if ( task.status != sicnu::TaskStatus::Completed || task.outputLayerPath.isEmpty() )
+      continue;
+
+    const QString path = task.outputLayerPath;
+    ensureGdalInit();
+    GDALDatasetH ds = GDALOpenEx( path.toUtf8().constData(),
+                                 GDAL_OF_READONLY | GDAL_OF_RASTER | GDAL_OF_VECTOR,
+                                 nullptr, nullptr, nullptr );
+    if ( !ds )
+    {
+      reportLog( "warning", "Skipping asset registration; output not openable: " +
+                            path.toStdString() );
+      continue;
+    }
+    const bool isRaster = GDALGetRasterCount( ds ) > 0;
+    GDALClose( ds );
+
+    sicnu::data::SourceDescriptor source;
+    source.providerKey = isRaster ? QStringLiteral( "gdal" ) : QStringLiteral( "ogr" );
+    source.canonicalSource = path;
+
+    sicnu::data::RegisterRequest request;
+    request.source = source;
+    request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
+
+    const auto registered = m_dataManager->registerSource( request );
+    if ( registered.assetId.isNull() )
+    {
+      reportLog( "warning", "Asset registration failed for: " + path.toStdString() );
+      continue;
+    }
+
+    sicnu::data::DerivationRecord derivation;
+    derivation.algorithmId = task.algorithmId;
+    derivation.parameters = QJsonObject::fromVariantMap( task.parameterMap );
+    derivation.taskReference = QString::number( taskId );
+    derivation.completedAtUtc = QDateTime::currentDateTimeUtc();
+    m_dataManager->attachDerivationRecord( registered.assetId, derivation );
   }
 }
 

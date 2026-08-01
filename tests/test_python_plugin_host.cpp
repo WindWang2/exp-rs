@@ -155,3 +155,70 @@ TEST_CASE( "CLI runner executes a py: pipeline step end-to-end", "[python][host]
   REQUIRE( result.steps.size() == 1 );
   CHECK( result.steps[0].success );
 }
+
+#include "operators/framework/rs_operator.h"
+#include "operators/framework/rs_operator_registry.h"
+
+#include <gdal.h>
+#include <gdal_priv.h>
+
+namespace
+{
+
+/// Test operator writing a tiny valid GeoTIFF to params["output"].
+class TiffMakerOperator : public sicnu::operators::RSOperator
+{
+  public:
+    std::string name() const override { return "test:tiff_maker"; }
+
+    Json::Value run( const Json::Value &params, sicnu::operators::RSOperatorContext &context ) override
+    {
+      Q_UNUSED( context );
+      const std::string output = params["output"].asString();
+      GDALAllRegister();
+      GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+      if ( !driver )
+        throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::GdalError, "GTiff driver unavailable" );
+      GDALDatasetH ds = GDALCreate( driver, output.c_str(), 4, 4, 1, GDT_Byte, nullptr );
+      if ( !ds )
+        throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::GdalError, "Failed to create " + output );
+      GDALClose( ds );
+      Json::Value result( Json::objectValue );
+      result["output"] = output;
+      return result;
+    }
+};
+
+REGISTER_RS_OPERATOR( TiffMakerOperator, "test:tiff_maker" )
+
+} // namespace
+
+TEST_CASE( "CLI runner registers completed step outputs as Data Assets", "[python][host][assets]" )
+{
+  sicnu::data::DataManager dataManager;
+  // No plugin host needed for this case — registration is operator-driven.
+  const QString outputPath = QDir::temp().filePath( QStringLiteral( "sicnu_tiff_maker_test.tif" ) );
+  QFile::remove( outputPath );
+
+  sicnu::cli::RsPipelineRunner runner;
+  runner.setAssetRegistry( &dataManager );
+
+  Json::Value pipeline( Json::objectValue );
+  pipeline["name"] = "tiff-pipeline";
+  Json::Value step( Json::objectValue );
+  step["id"] = "s1";
+  step["operator"] = "test:tiff_maker";
+  step["params"]["output"] = outputPath.toStdString();
+  pipeline["steps"].append( step );
+
+  const auto result = runner.runFromJson( pipeline );
+  INFO( result.errorMessage );
+  CHECK( result.success );
+
+  const auto assets = dataManager.assets();
+  REQUIRE( assets.size() == 1 );
+  CHECK( assets[0].source().canonicalSource == outputPath );
+  CHECK( dataManager.provenance( assets[0].id() ).has_value() );
+
+  QFile::remove( outputPath );
+}

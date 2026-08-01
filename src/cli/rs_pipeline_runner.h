@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+namespace sicnu::data { class DataManager; }
+
 namespace sicnu::cli {
 
 /**
@@ -66,6 +68,12 @@ public:
                               LogCallback logCallback = {});
 
     /**
+     * \brief Optional DataManager receiving completed step outputs as
+     * TaskTemporary Data Assets (ADR 0023). Null by default: no registration.
+     */
+    void setAssetRegistry(sicnu::data::DataManager* dataManager);
+
+    /**
      * \brief Run a pipeline from a JSON string.
      *
      * @param pipelineJson JSON object with a "steps" array.
@@ -95,9 +103,11 @@ private:
     void reportProgress(int stepIndex, int totalSteps, double stepProgress,
                         const std::string& message) const;
     void reportLog(const std::string& level, const std::string& message) const;
+    void registerStepOutputs(long pipelineId);
 
     ProgressCallback m_progressCallback;
     LogCallback m_logCallback;
+    sicnu::data::DataManager* m_dataManager = nullptr;
 };
 
 } // namespace sicnu::cli
