@@ -2866,17 +2866,10 @@ sicnu_discover_tests(test_python_engine)
 
 qt_add_executable(test_python_plugin_manager
   test_python_plugin_manager.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp
   ${CMAKE_SOURCE_DIR}/src/app/python/sicnu_app_interface.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/python/python_plugin_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
   ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_api.cpp
   ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_runner.cpp
-  ${CMAKE_SOURCE_DIR}/src/python/isolated/python_ipc_server.cpp
-  ${CMAKE_SOURCE_DIR}/src/python/isolated/python_worker_process.cpp
-  ${CMAKE_SOURCE_DIR}/src/python/isolated/app_interface_bridge.cpp
-  ${CMAKE_SOURCE_DIR}/src/python/isolated/python_app_interface_proxy.cpp
-  ${CMAKE_SOURCE_DIR}/src/python/isolated/python_worker_process_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/core/plugin_manager.cpp
 )
 target_link_libraries(test_python_plugin_manager PRIVATE
@@ -2884,6 +2877,7 @@ target_link_libraries(test_python_plugin_manager PRIVATE
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  sicnu_python_isolated
   qgis_core
   qgis_gui
   Sicnu::qgis_display

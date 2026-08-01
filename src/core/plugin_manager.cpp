@@ -1,7 +1,7 @@
 #include "plugin_manager.h"
 
 #if defined( SICNU_EMBED_PYTHON ) && SICNU_EMBED_PYTHON
-#include "app/python/python_plugin_adapter.h"
+#include "python/isolated/python_plugin_adapter.h"
 #include "app/python/sicnu_app_interface.h"
 #include "app/project_context.h"
 #include "python/isolated/python_worker_process_pool.h"

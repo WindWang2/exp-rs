@@ -5,7 +5,7 @@
 #include "python/sicnu_python_api.h"
 #include "python/sicnu_python_runner.h"
 #include "python/sicnu_app_interface.h"
-#include "python/python_plugin_adapter.h"
+#include "python/isolated/python_plugin_adapter.h"
 #include "python_ipc_server.h"
 #include "python_worker_process.h"
 #include "app_interface_bridge.h"
