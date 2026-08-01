@@ -188,6 +188,53 @@ TEST_CASE( "PythonWorkerProcess & PythonIpcServer start subprocess and achieve P
   server.close();
 }
 
+TEST_CASE( "PythonIpcServer sendRequestAndAwait correlates responses and fails fast without a client", "[python][isolated][await]" )
+{
+  using namespace sicnu::python::isolated;
+
+  SECTION( "No client connected fails immediately" )
+  {
+    PythonIpcServer server;
+    QJsonObject result;
+    bool isError = false;
+    CHECK( server.sendRequestAndAwait( QStringLiteral( "ping" ), QJsonObject(), result, isError, 1000 )
+           == AwaitStatus::NoClient );
+  }
+
+  SECTION( "Real worker round trip and error passthrough" )
+  {
+    PythonIpcServer server;
+    QString socketName = QString( "sicnu_py_await_%1" ).arg( QCoreApplication::applicationPid() );
+    REQUIRE( server.listen( socketName ) );
+
+    PythonWorkerProcess worker;
+    QString scriptPath = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) );
+    REQUIRE( worker.startWorker( socketName, QString(), scriptPath ) );
+
+    QEventLoop loop;
+    QObject::connect( &server, &PythonIpcServer::clientConnected, &loop, &QEventLoop::quit );
+    QTimer::singleShot( 5000, &loop, &QEventLoop::quit );
+    loop.exec();
+
+    QJsonObject result;
+    bool isError = false;
+    CHECK( server.sendRequestAndAwait( QStringLiteral( "ping" ), QJsonObject(), result, isError, 5000 )
+           == AwaitStatus::Ok );
+    CHECK( !isError );
+    CHECK( result[QStringLiteral( "status" )].toString() == QStringLiteral( "pong" ) );
+
+    QJsonObject errResult;
+    bool errIsError = false;
+    CHECK( server.sendRequestAndAwait( QStringLiteral( "non_existent_method" ), QJsonObject(), errResult, errIsError, 5000 )
+           == AwaitStatus::Ok );
+    CHECK( errIsError );
+    CHECK( errResult[QStringLiteral( "message" )].toString().contains( QStringLiteral( "Method not found" ) ) );
+
+    worker.stopWorker();
+    server.close();
+  }
+}
+
 TEST_CASE( "PythonAppInterfaceProxy registers UI action over IPC and routes click callbacks", "[python][isolated][ui]" )
 {
   using namespace sicnu::python::isolated;

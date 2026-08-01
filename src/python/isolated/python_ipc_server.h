@@ -12,6 +12,15 @@
 namespace sicnu::python::isolated
 {
 
+/// Outcome of a correlated sendRequestAndAwait round trip.
+enum class AwaitStatus
+{
+  Ok,           ///< Response received (check isError for JSON-RPC errors)
+  NoClient,     ///< No worker connected; nothing was sent
+  Timeout,      ///< timeoutMs elapsed without a response
+  Disconnected, ///< Worker disconnected while awaiting the response
+};
+
 class PythonIpcServer : public QObject
 {
   Q_OBJECT
@@ -28,6 +37,14 @@ class PythonIpcServer : public QObject
 
     void sendRequest( const QString &method, const QJsonObject &params,
                       std::function<void( const QJsonObject &result, bool isError )> callback = nullptr );
+
+    /// Sends a request and blocks the calling thread in a nested event loop
+    /// until the correlated response arrives, the timeout elapses, or the
+    /// client disconnects. On AwaitStatus::Ok, result/isError carry the
+    /// response payload. Main-thread only (mirrors the rest of this class).
+    AwaitStatus sendRequestAndAwait( const QString &method, const QJsonObject &params,
+                                     QJsonObject &result, bool &isError, int timeoutMs );
+
     void sendResponse( int id, const QJsonObject &result );
     void sendError( int id, const QString &errorMessage );
 

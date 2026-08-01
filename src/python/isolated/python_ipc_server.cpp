@@ -2,7 +2,9 @@
 #include "python_ipc_server.h"
 
 #include <QDebug>
+#include <QEventLoop>
 #include <QJsonArray>
+#include <QTimer>
 
 namespace sicnu::python::isolated
 {
@@ -147,6 +149,53 @@ void PythonIpcServer::sendRequest( const QString &method, const QJsonObject &par
   data.append( '\n' );
   m_socket->write( data );
   m_socket->flush();
+}
+
+AwaitStatus PythonIpcServer::sendRequestAndAwait( const QString &method, const QJsonObject &params,
+                                                  QJsonObject &result, bool &isError, int timeoutMs )
+{
+  result = QJsonObject();
+  isError = false;
+  if ( !hasClient() )
+  {
+    return AwaitStatus::NoClient;
+  }
+
+  QEventLoop loop;
+  QTimer timeoutTimer;
+  timeoutTimer.setSingleShot( true );
+
+  bool responded = false;
+  bool disconnected = false;
+
+  QMetaObject::Connection disconnectConn =
+    connect( this, &PythonIpcServer::clientDisconnected, &loop, [&disconnected, &loop]() {
+      disconnected = true;
+      loop.quit();
+    } );
+
+  sendRequest( method, params, [&]( const QJsonObject &response, bool responseIsError ) {
+    responded = true;
+    result = response;
+    isError = responseIsError;
+    loop.quit();
+  } );
+
+  connect( &timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit );
+  timeoutTimer.start( timeoutMs );
+  loop.exec();
+
+  disconnect( disconnectConn );
+
+  if ( disconnected && !responded )
+  {
+    return AwaitStatus::Disconnected;
+  }
+  if ( !responded )
+  {
+    return AwaitStatus::Timeout;
+  }
+  return AwaitStatus::Ok;
 }
 
 void PythonIpcServer::sendResponse( int id, const QJsonObject &result )
