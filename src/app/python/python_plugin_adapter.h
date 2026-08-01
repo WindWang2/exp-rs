@@ -6,7 +6,9 @@
 #include <QIcon>
 #include <memory>
 
-class SicnuAppInterface;
+class QMenu;
+class ActiveViewHost;
+namespace sicnu::data { class DataManager; }
 
 /**
  * Adapter that wraps a Python plugin (folder with metadata.txt + __init__.py)
@@ -27,7 +29,9 @@ public:
                                   const QString &name,
                                   const QString &description,
                                   const QString &version,
-                                  SicnuAppInterface *appInterface,
+                                  sicnu::data::DataManager *dataManager,
+                                  QMenu *pluginMenu,
+                                  ActiveViewHost *activeViewHost,
                                   sicnu::python::isolated::PythonWorkerProcessPool *pool = nullptr );
 
     ~PythonPluginAdapter() override;
@@ -51,7 +55,9 @@ private:
     QString m_description;
     QString m_version;
     QIcon m_icon;
-    SicnuAppInterface *m_appInterface = nullptr;
+    sicnu::data::DataManager *m_dataManager = nullptr;
+    QMenu *m_pluginMenu = nullptr;
+    ActiveViewHost *m_activeViewHost = nullptr;
     sicnu::python::isolated::PythonWorkerProcessPool *m_pool = nullptr;
     sicnu::python::isolated::WorkerNode *m_workerNode = nullptr;
     std::unique_ptr<sicnu::python::isolated::PythonAppInterfaceProxy> m_uiProxy;

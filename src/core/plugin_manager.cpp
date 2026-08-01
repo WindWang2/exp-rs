@@ -2,6 +2,8 @@
 
 #if defined( SICNU_EMBED_PYTHON ) && SICNU_EMBED_PYTHON
 #include "app/python/python_plugin_adapter.h"
+#include "app/python/sicnu_app_interface.h"
+#include "app/project_context.h"
 #include "python/isolated/python_worker_process_pool.h"
 #endif
 
@@ -172,7 +174,15 @@ bool PluginManager::loadPythonPlugin(const QString &pluginDir)
         m_ownsPythonPool = true;
     }
 
-    auto *adapter = new PythonPluginAdapter(pluginDir, packageName, name, description, version, m_appInterface, m_pythonPool);
+    QMenu *pluginMenu = m_appInterface ? m_appInterface->pluginMenu() : nullptr;
+    sicnu::data::DataManager *dataManager = nullptr;
+    if ( m_appInterface && m_appInterface->projectContext() )
+    {
+        dataManager = &m_appInterface->projectContext()->dataManager();
+    }
+    ActiveViewHost *activeViewHost = m_appInterface ? m_appInterface->activeViewHost() : nullptr;
+    auto *adapter = new PythonPluginAdapter( pluginDir, packageName, name, description, version,
+                                             dataManager, pluginMenu, activeViewHost, m_pythonPool );
     if (!adapter->initialize(m_canvas, m_layerTree)) {
         emit pluginError(name, "Python plugin initialization failed");
         delete adapter;

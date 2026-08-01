@@ -384,12 +384,15 @@ TEST_CASE( "PythonPluginAdapter initializes and unloads Python plugin over Pytho
   SicnuAppInterface iface( &mainWindow, &host, nullptr );
 
   const QString pluginDir = fixturePath( QStringLiteral( "plugins/sample_plugin" ) );
+  sicnu::data::DataManager *dataManager = iface.projectContext() ? &iface.projectContext()->dataManager() : nullptr;
   PythonPluginAdapter adapter( pluginDir,
                                QStringLiteral( "sample_plugin" ),
                                QStringLiteral( "Sample Python Plugin" ),
                                QStringLiteral( "Sample Description" ),
                                QStringLiteral( "1.0" ),
-                               &iface,
+                               dataManager,
+                               iface.pluginMenu(),
+                               iface.activeViewHost(),
                                &pool );
 
   REQUIRE( adapter.initialize( &canvas, nullptr ) );

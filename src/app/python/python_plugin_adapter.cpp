@@ -1,9 +1,7 @@
 // python_plugin_adapter.cpp — C++ adapter wrapping Python plugins for PluginManager
 #include "python_plugin_adapter.h"
-#include "sicnu_app_interface.h"
 #include "python_app_interface_proxy.h"
 #include "python_worker_process_pool.h"
-#include "project_context.h"
 
 #include "data/data_manager.h"
 
@@ -21,14 +19,18 @@ PythonPluginAdapter::PythonPluginAdapter( const QString &pluginDir,
                                           const QString &name,
                                           const QString &description,
                                           const QString &version,
-                                          SicnuAppInterface *appInterface,
+                                          sicnu::data::DataManager *dataManager,
+                                          QMenu *pluginMenu,
+                                          ActiveViewHost *activeViewHost,
                                           PythonWorkerProcessPool *pool )
     : m_pluginDir( pluginDir )
     , m_packageName( packageName )
     , m_name( name )
     , m_description( description )
     , m_version( version )
-    , m_appInterface( appInterface )
+    , m_dataManager( dataManager )
+    , m_pluginMenu( pluginMenu )
+    , m_activeViewHost( activeViewHost )
     , m_pool( pool )
 {
     const QString iconPath = QDir( pluginDir ).filePath( QStringLiteral( "icon.png" ) );
@@ -91,16 +93,10 @@ bool PythonPluginAdapter::initialize( QgsMapCanvas *canvas, QgsLayerTreeView *la
 
     // Attach UI RPC Proxy Facade (headless asset seam: DataManager is the
     // asset authority; menu and view host remain optional GUI enhancements).
-    QMenu *pluginMenu = m_appInterface ? m_appInterface->pluginMenu() : nullptr;
-    sicnu::data::DataManager *dataManager = nullptr;
-    if ( m_appInterface && m_appInterface->projectContext() )
+    m_uiProxy = std::make_unique<PythonAppInterfaceProxy>( m_workerNode->server, m_dataManager, m_pluginMenu );
+    if ( m_activeViewHost )
     {
-        dataManager = &m_appInterface->projectContext()->dataManager();
-    }
-    m_uiProxy = std::make_unique<PythonAppInterfaceProxy>( m_workerNode->server, dataManager, pluginMenu );
-    if ( m_appInterface && m_appInterface->activeViewHost() )
-    {
-        m_uiProxy->setActiveViewHost( m_appInterface->activeViewHost() );
+        m_uiProxy->setActiveViewHost( m_activeViewHost );
     }
 
     // Send RPC load_plugin request
