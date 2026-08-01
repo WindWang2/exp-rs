@@ -132,7 +132,7 @@ QgsGeorefShellWindow::QgsGeorefShellWindow( QgisInterface *iface, QWidget *paren
   // marks the window dirty (unless suppressed during .points load).
   connect( &mGeorefSession, &RsGeoreferencingSession::gcpsChanged, this, [this]() {
     if ( !mSuppressDirtyFromList )
-      mSession.markDirty();
+      mGeorefSession.markDirty();
   } );
   // Prefer session map stores (setupSessionMaps); keep legacy store for early paths.
   mLayerStore = new QgsMapLayerStore( this );
@@ -262,8 +262,8 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   onTransformMethodChanged();
   refreshFit();
 
-  mSession.restoreWindow( this );
-  applyWorkflowSnapshot( mSession.restoreWorkflow() );
+  mGeorefSession.restoreWindow( this );
+  applyWorkflowSnapshot( mGeorefSession.restoreWorkflow() );
   mParamsPanel->setProfile( profile );
   if ( profile == RsGeorefParamsPanel::Profile::ImageToImage )
     mParamsPanel->setRpcMode( false );
@@ -1634,8 +1634,8 @@ void QgsGeorefShellWindow::setWarpInProgressForTest( bool on )
   }
 }
 
-bool QgsGeorefShellWindow::isDirtyForTest() const { return mSession.isDirty(); }
-void QgsGeorefShellWindow::markDirtyForTest() { mSession.markDirty(); }
+bool QgsGeorefShellWindow::isDirtyForTest() const { return mGeorefSession.isDirty(); }
+void QgsGeorefShellWindow::markDirtyForTest() { mGeorefSession.markDirty(); }
 
 void QgsGeorefShellWindow::setSourceRasterPath( const QString &p )
 {
@@ -1648,9 +1648,9 @@ int QgsGeorefShellWindow::gcpCountForTest() const
   return mGeorefSession.gcps().size();
 }
 
-RsGeorefSessionState::WorkflowSnapshot QgsGeorefShellWindow::captureWorkflowSnapshot() const
+RsGeoreferencingSession::WorkflowSnapshot QgsGeorefShellWindow::captureWorkflowSnapshot() const
 {
-  RsGeorefSessionState::WorkflowSnapshot s;
+  RsGeoreferencingSession::WorkflowSnapshot s;
   if ( mParamsPanel )
   {
     s.transformMethod = static_cast<int>( mParamsPanel->transformMethod() );
@@ -1661,12 +1661,12 @@ RsGeorefSessionState::WorkflowSnapshot QgsGeorefShellWindow::captureWorkflowSnap
     s.demZOffset = mParamsPanel->demZOffset();
   }
   s.lastSourcePath = mSourceRasterPath;
-  s.lastPointsPath = mSession.lastPointsPath();
+  s.lastPointsPath = mGeorefSession.lastPointsPath();
   captureShellSpecific( s );
   return s;
 }
 
-void QgsGeorefShellWindow::applyWorkflowSnapshot( const RsGeorefSessionState::WorkflowSnapshot &s )
+void QgsGeorefShellWindow::applyWorkflowSnapshot( const RsGeoreferencingSession::WorkflowSnapshot &s )
 {
   if ( mParamsPanel )
   {
@@ -1953,7 +1953,7 @@ bool QgsGeorefShellWindow::loadSourceRaster( const QString &path, const QString 
   updateGcpTableRasterPaths();
   updateToolAvailability();
   refreshFit();
-  mSession.saveWorkflow( captureWorkflowSnapshot() );
+  mGeorefSession.saveWorkflow( captureWorkflowSnapshot() );
   if ( mWorkflowBridge && mWorkflowBridge->isOpen() )
   {
     mWorkflowBridge->setSourceRasterArtifact( path.toStdString() );
@@ -2075,7 +2075,7 @@ void QgsGeorefShellWindow::closeEvent( QCloseEvent *e )
       QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
     if ( ans != QMessageBox::Yes ) { e->ignore(); return; }
   }
-  if ( mSession.isDirty() )
+  if ( mGeorefSession.isDirty() )
   {
     const auto ans = QMessageBox::question(
       this, tr( "未保存的控制点" ),
@@ -2084,7 +2084,7 @@ void QgsGeorefShellWindow::closeEvent( QCloseEvent *e )
     if ( ans == QMessageBox::Cancel ) { e->ignore(); return; }
     if ( ans == QMessageBox::Save )
     {
-      QString path = mSession.lastPointsPath();
+      QString path = mGeorefSession.lastPointsPath();
       if ( path.isEmpty() )
       {
         path = QFileDialog::getSaveFileName(
@@ -2100,19 +2100,19 @@ void QgsGeorefShellWindow::closeEvent( QCloseEvent *e )
         e->ignore();
         return;
       }
-      mSession.setLastPointsPath( path );
-      mSession.clearDirty();
+      mGeorefSession.setLastPointsPath( path );
+      mGeorefSession.clearDirty();
     }
   }
-  mSession.saveWorkflow( captureWorkflowSnapshot() );
-  mSession.saveWindow( this );
+  mGeorefSession.saveWorkflow( captureWorkflowSnapshot() );
+  mGeorefSession.saveWindow( this );
   e->accept();
 }
 
 void QgsGeorefShellWindow::loadPoints()
 {
   const QString path = QFileDialog::getOpenFileName(
-    this, tr( "Load GCP points" ), mSession.lastPointsPath(),
+    this, tr( "Load GCP points" ), mGeorefSession.lastPointsPath(),
     tr( "GCP Points (*.points *.gcp);;All files (*)" ) );
   if ( path.isEmpty() ) return;
   const QgsCoordinateReferenceSystem destCrs =
@@ -2141,14 +2141,14 @@ void QgsGeorefShellWindow::loadPoints()
   mSuppressDirtyFromList = false;
   mGeorefSession.refit();
 
-  mSession.setLastPointsPath( path );
-  mSession.clearDirty();
+  mGeorefSession.setLastPointsPath( path );
+  mGeorefSession.clearDirty();
 }
 
 void QgsGeorefShellWindow::savePoints()
 {
   const QString path = QFileDialog::getSaveFileName(
-    this, tr( "Save GCP points" ), mSession.lastPointsPath(),
+    this, tr( "Save GCP points" ), mGeorefSession.lastPointsPath(),
     tr( "GCP Points (*.points *.gcp);;All files (*)" ) );
   if ( path.isEmpty() ) return;
   QString finalPath = path;
@@ -2158,8 +2158,8 @@ void QgsGeorefShellWindow::savePoints()
     QMessageBox::warning( this, tr( "Save GCPs" ), tr( "Failed to save GCP points to %1" ).arg( finalPath ) );
   else
   {
-    mSession.setLastPointsPath( finalPath );
-    mSession.clearDirty();
+    mGeorefSession.setLastPointsPath( finalPath );
+    mGeorefSession.clearDirty();
   }
 }
 

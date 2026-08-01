@@ -574,7 +574,7 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
   updateGcpTableRasterPaths();
   updateToolAvailability();
   refreshFit();
-  mSession.saveWorkflow( captureWorkflowSnapshot() );
+  mGeorefSession.saveWorkflow( captureWorkflowSnapshot() );
   if ( statusBar() )
     statusBar()->showMessage( tr( "已加载参考影像 (Base): %1" ).arg( layer->name() ), 4000 );
   return true;
@@ -594,14 +594,14 @@ void QgsGeoreferencerMainWindow::updateToolAvailability()
     mSyncZoomAction->setEnabled( hasSourceReady() && hasDestReady() );
 }
 
-void QgsGeoreferencerMainWindow::captureShellSpecific( RsGeorefSessionState::WorkflowSnapshot &s ) const
+void QgsGeoreferencerMainWindow::captureShellSpecific( RsGeoreferencingSession::WorkflowSnapshot &s ) const
 {
   s.mode = static_cast<int>( RsGeorefModeToggle::ImageToImage );
   s.lastRefPath = mRefRasterPath;
   s.syncZoom = mSyncZoomAction ? mSyncZoomAction->isChecked() : true;
 }
 
-void QgsGeoreferencerMainWindow::applyShellSpecific( const RsGeorefSessionState::WorkflowSnapshot &s )
+void QgsGeoreferencerMainWindow::applyShellSpecific( const RsGeoreferencingSession::WorkflowSnapshot &s )
 {
   if ( !s.lastRefPath.isEmpty() )
   {

@@ -30,8 +30,8 @@ class QgsGeoreferencerMainWindow : public QgsGeorefShellWindow
   protected:
     QString shellId() const override { return QStringLiteral( "i2i" ); }
     QString windowHelpText() const override;
-    void captureShellSpecific( RsGeorefSessionState::WorkflowSnapshot &s ) const override;
-    void applyShellSpecific( const RsGeorefSessionState::WorkflowSnapshot &s ) override;
+    void captureShellSpecific( RsGeoreferencingSession::WorkflowSnapshot &s ) const override;
+    void applyShellSpecific( const RsGeoreferencingSession::WorkflowSnapshot &s ) override;
     bool hasDestReady() const override;
     void updateToolAvailability() override;
 

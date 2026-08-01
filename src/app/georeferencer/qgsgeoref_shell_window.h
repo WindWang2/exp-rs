@@ -8,7 +8,6 @@
 #include "qgspointxy.h"
 #include "qgsimagewarper.h"
 #include "rs_georef_params_panel.h"
-#include "rs_georef_session_state.h"
 #include "rs_georeferencing_session.h"
 #include "rs_georef_task_list.h"
 #include "rs_georef_workflow_bridge.h"
@@ -49,7 +48,7 @@ class QgsGeorefShellWindow : public QMainWindow
     void setWarpInProgressForTest( bool on );
     /// Also mirrors the path into the Georeferencing Session.
     void setSourceRasterPath( const QString &p );
-    RsGeorefSessionState *sessionStateForTest() { return &mSession; }
+    RsGeoreferencingSession *sessionStateForTest() { return &mGeorefSession; }
     /// Deep Georeferencing Session (GCP fit + warp snapshots + Task Center).
     RsGeoreferencingSession *georefSessionForTest() { return &mGeorefSession; }
     RsGeoreferencingSession &georefSession() { return mGeorefSession; }
@@ -150,9 +149,11 @@ class QgsGeorefShellWindow : public QMainWindow
     virtual QString shellId() const { return QStringLiteral( "georef" ); }
     /// Multi-line help text for Help → 关于本窗口.
     virtual QString windowHelpText() const;
-    /// Extra snapshot fields (e.g. ref path, sync zoom).
-    virtual void captureShellSpecific( RsGeorefSessionState::WorkflowSnapshot & ) const {}
-    virtual void applyShellSpecific( const RsGeorefSessionState::WorkflowSnapshot & ) {}
+    virtual RsGeoreferencingSession::WorkflowSnapshot captureWorkflowSnapshot() const;
+    virtual void applyWorkflowSnapshot( const RsGeoreferencingSession::WorkflowSnapshot &s );
+
+    virtual void captureShellSpecific( RsGeoreferencingSession::WorkflowSnapshot & ) const {}
+    virtual void applyShellSpecific( const RsGeoreferencingSession::WorkflowSnapshot & ) {}
     /// Called when transform method combo changes (I2M toggles DEM).
     virtual void onTransformMethodChangedExtra() {}
     /// Source (Warp) raster is loaded and valid.
@@ -208,8 +209,6 @@ class QgsGeorefShellWindow : public QMainWindow
 
   protected:
     void emitStructuredLog( const QgsImageWarper::WarpResult &r );
-    void applyWorkflowSnapshot( const RsGeorefSessionState::WorkflowSnapshot &s );
-    RsGeorefSessionState::WorkflowSnapshot captureWorkflowSnapshot() const;
     QgsGeorefDataPoint *findDataPoint( const QgsPointXY &p, QgsGcpPoint::PointType type );
     void cancelWarpTask( int taskId );
     void loadWarpOutputToProject( const QString &path );
@@ -307,8 +306,6 @@ class QgsGeorefShellWindow : public QMainWindow
     RsGeorefTaskList *mTaskList = nullptr;
     QDockWidget *mTaskDock = nullptr;
     QString mSourceRasterPath;
-
-    RsGeorefSessionState mSession;
     /// Deep Georeferencing Session: GCP list + fit + warp snapshots + Task Center.
     RsGeoreferencingSession mGeorefSession;
     bool mSuppressDirtyFromList = false;

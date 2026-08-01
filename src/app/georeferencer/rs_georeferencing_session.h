@@ -137,6 +137,33 @@ class RsGeoreferencingSession : public QObject
     explicit RsGeoreferencingSession( std::shared_ptr<RsGeorefWarpExecutor> executor,
                                       QObject *parent = nullptr );
     ~RsGeoreferencingSession() override;
+    struct WorkflowSnapshot
+    {
+      int mode = 0;
+      int transformMethod = 0;
+      int resamplingMethod = 0;
+      QString lastSourcePath;
+      QString lastRefPath;
+      QString lastOutputPath;
+      QString lastDemPath;
+      QString lastPointsPath;
+      QString lastDestCrsAuthId;
+      double demZOffset = 0.0;
+      bool syncZoom = true;
+    };
+
+    bool isDirty() const { return mDirty; }
+    void markDirty() { mDirty = true; }
+    void clearDirty() { mDirty = false; }
+
+    QString lastPointsPath() const { return mLastPointsPath; }
+    void setLastPointsPath( const QString &path );
+
+    void saveWindow( QWidget *w );
+    void restoreWindow( QWidget *w );
+
+    void saveWorkflow( const WorkflowSnapshot &s );
+    WorkflowSnapshot restoreWorkflow();
 
     void setSourceRasterPath( const QString &path );
     QString sourceRasterPath() const { return mSourcePath; }
@@ -214,6 +241,8 @@ class RsGeoreferencingSession : public QObject
     /// QgsRpcGcpTransformer — mirrors the shell's recomputeFit configuration.
     std::unique_ptr<QgsGeorefTransform> makeConfiguredTransform( bool rpcRefinement ) const;
 
+    bool mDirty = false;
+    QString mLastPointsPath;
     QString mSourcePath;
     QgsGcpTransformerInterface::TransformMethod mMethod =
       QgsGcpTransformerInterface::TransformMethod::Linear;

@@ -9,10 +9,16 @@
 #include "rs_georef_task_center_executor.h"
 #include "rs_warp_task.h"
 
+#include <QByteArray>
+#include <QMainWindow>
+#include <QSettings>
+#include <QWidget>
 #include <cmath>
 
 namespace
 {
+
+constexpr auto kPrefix = "Georeferencer/";
 
 int enabledCount( const QVector<RsGeorefGcpPair> &gcps )
 {
@@ -84,20 +90,91 @@ RsGeoreferencingSession::RsGeoreferencingSession(
 
 RsGeoreferencingSession::~RsGeoreferencingSession() = default;
 
+void RsGeoreferencingSession::setLastPointsPath( const QString &path )
+{
+  mLastPointsPath = path;
+  QSettings().setValue( QStringLiteral( "%1lastPointsPath" ).arg( QLatin1String( kPrefix ) ), path );
+}
+
+void RsGeoreferencingSession::saveWindow( QWidget *w )
+{
+  if ( !w )
+    return;
+  QSettings s;
+  s.setValue( QStringLiteral( "%1geometry" ).arg( QLatin1String( kPrefix ) ), w->saveGeometry() );
+  if ( auto *mw = qobject_cast<QMainWindow *>( w ) )
+    s.setValue( QStringLiteral( "%1windowState" ).arg( QLatin1String( kPrefix ) ), mw->saveState() );
+}
+
+void RsGeoreferencingSession::restoreWindow( QWidget *w )
+{
+  if ( !w )
+    return;
+  QSettings s;
+  const QByteArray geo = s.value( QStringLiteral( "%1geometry" ).arg( QLatin1String( kPrefix ) ) ).toByteArray();
+  if ( !geo.isEmpty() )
+    w->restoreGeometry( geo );
+  if ( auto *mw = qobject_cast<QMainWindow *>( w ) )
+  {
+    const QByteArray st = s.value( QStringLiteral( "%1windowState" ).arg( QLatin1String( kPrefix ) ) ).toByteArray();
+    if ( !st.isEmpty() )
+      mw->restoreState( st );
+  }
+}
+
+void RsGeoreferencingSession::saveWorkflow( const WorkflowSnapshot &snap )
+{
+  QSettings s;
+  s.setValue( QStringLiteral( "%1mode" ).arg( QLatin1String( kPrefix ) ), snap.mode );
+  s.setValue( QStringLiteral( "%1transformMethod" ).arg( QLatin1String( kPrefix ) ), snap.transformMethod );
+  s.setValue( QStringLiteral( "%1resamplingMethod" ).arg( QLatin1String( kPrefix ) ), snap.resamplingMethod );
+  s.setValue( QStringLiteral( "%1lastSourcePath" ).arg( QLatin1String( kPrefix ) ), snap.lastSourcePath );
+  s.setValue( QStringLiteral( "%1lastRefPath" ).arg( QLatin1String( kPrefix ) ), snap.lastRefPath );
+  s.setValue( QStringLiteral( "%1lastOutputPath" ).arg( QLatin1String( kPrefix ) ), snap.lastOutputPath );
+  s.setValue( QStringLiteral( "%1lastDemPath" ).arg( QLatin1String( kPrefix ) ), snap.lastDemPath );
+  s.setValue( QStringLiteral( "%1lastPointsPath" ).arg( QLatin1String( kPrefix ) ), snap.lastPointsPath );
+  s.setValue( QStringLiteral( "%1lastDestCrs" ).arg( QLatin1String( kPrefix ) ), snap.lastDestCrsAuthId );
+  s.setValue( QStringLiteral( "%1demZOffset" ).arg( QLatin1String( kPrefix ) ), snap.demZOffset );
+  s.setValue( QStringLiteral( "%1syncZoom" ).arg( QLatin1String( kPrefix ) ), snap.syncZoom );
+  mLastPointsPath = snap.lastPointsPath;
+}
+
+RsGeoreferencingSession::WorkflowSnapshot RsGeoreferencingSession::restoreWorkflow()
+{
+  QSettings s;
+  WorkflowSnapshot o;
+  o.mode = s.value( QStringLiteral( "%1mode" ).arg( QLatin1String( kPrefix ) ), 0 ).toInt();
+  o.transformMethod = s.value( QStringLiteral( "%1transformMethod" ).arg( QLatin1String( kPrefix ) ), 0 ).toInt();
+  o.resamplingMethod = s.value( QStringLiteral( "%1resamplingMethod" ).arg( QLatin1String( kPrefix ) ), 0 ).toInt();
+  o.lastSourcePath = s.value( QStringLiteral( "%1lastSourcePath" ).arg( QLatin1String( kPrefix ) ) ).toString();
+  o.lastRefPath = s.value( QStringLiteral( "%1lastRefPath" ).arg( QLatin1String( kPrefix ) ) ).toString();
+  o.lastOutputPath = s.value( QStringLiteral( "%1lastOutputPath" ).arg( QLatin1String( kPrefix ) ) ).toString();
+  o.lastDemPath = s.value( QStringLiteral( "%1lastDemPath" ).arg( QLatin1String( kPrefix ) ) ).toString();
+  o.lastPointsPath = s.value( QStringLiteral( "%1lastPointsPath" ).arg( QLatin1String( kPrefix ) ) ).toString();
+  o.lastDestCrsAuthId = s.value( QStringLiteral( "%1lastDestCrs" ).arg( QLatin1String( kPrefix ) ) ).toString();
+  o.demZOffset = s.value( QStringLiteral( "%1demZOffset" ).arg( QLatin1String( kPrefix ) ), 0.0 ).toDouble();
+  o.syncZoom = s.value( QStringLiteral( "%1syncZoom" ).arg( QLatin1String( kPrefix ) ), true ).toBool();
+  mLastPointsPath = o.lastPointsPath;
+  return o;
+}
+
 void RsGeoreferencingSession::setSourceRasterPath( const QString &path )
 {
   mSourcePath = path;
+  markDirty();
 }
 
 void RsGeoreferencingSession::setTransformMethod(
   QgsGcpTransformerInterface::TransformMethod method )
 {
   mMethod = method;
+  markDirty();
 }
 
 void RsGeoreferencingSession::setGcps( const QVector<RsGeorefGcpPair> &gcps )
 {
   mGcps = gcps;
+  markDirty();
   emit gcpsChanged();
 }
 
@@ -107,6 +184,7 @@ void RsGeoreferencingSession::clearGcps()
     return;
   mGcps.clear();
   mLastFit = RsGeorefFitResult{};
+  markDirty();
   emit gcpsChanged();
   emit fitChanged( mLastFit );
 }
@@ -114,6 +192,7 @@ void RsGeoreferencingSession::clearGcps()
 void RsGeoreferencingSession::addGcp( const RsGeorefGcpPair &gcp )
 {
   mGcps.append( gcp );
+  markDirty();
   emit gcpsChanged();
   refit();
 }
@@ -125,6 +204,7 @@ void RsGeoreferencingSession::appendGcps( const QVector<RsGeorefGcpPair> &gcps )
   mGcps.reserve( mGcps.size() + gcps.size() );
   for ( const auto &p : gcps )
     mGcps.append( p );
+  markDirty();
   emit gcpsChanged();
   refit();
 }
@@ -134,6 +214,7 @@ void RsGeoreferencingSession::removeGcpAt( int row )
   if ( row < 0 || row >= mGcps.size() )
     return;
   mGcps.removeAt( row );
+  markDirty();
   emit gcpsChanged();
   refit();
 }
@@ -145,6 +226,7 @@ void RsGeoreferencingSession::setGcpEnabled( int row, bool enabled )
   if ( mGcps[row].enabled == enabled )
     return;
   mGcps[row].enabled = enabled;
+  markDirty();
   emit gcpsChanged();
   refit();
 }
@@ -154,6 +236,7 @@ void RsGeoreferencingSession::setGcpSource( int row, const QgsPointXY &source )
   if ( row < 0 || row >= mGcps.size() )
     return;
   mGcps[row].source = source;
+  markDirty();
   emit gcpsChanged();
   refit();
 }
@@ -163,6 +246,7 @@ void RsGeoreferencingSession::setGcpDestination( int row, const QgsPointXY &dest
   if ( row < 0 || row >= mGcps.size() )
     return;
   mGcps[row].destination = destination;
+  markDirty();
   emit gcpsChanged();
   refit();
 }
@@ -174,6 +258,7 @@ void RsGeoreferencingSession::setGcpPointType( int row, const QString &pointType
   if ( mGcps[row].pointType == pointType )
     return;
   mGcps[row].pointType = pointType;
+  markDirty();
   emit gcpsChanged();
   refit();
 }

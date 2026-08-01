@@ -114,6 +114,10 @@ _Avoid_: File timestamp, Layer version
 The structured provenance of an algorithm-produced Data Asset, including the algorithm version, parameter snapshot, and input Asset IDs and revisions.
 _Avoid_: Log entry, Processing note, History string
 
+**Georeferencing Session (`RsGeoreferencingSession`)**:
+The single deep module owning GCP pairing, transform fitting (`refit()`), residual calculations, dirty state tracking (`isDirty()`), `QSettings` workflow snapshot persistence (`saveWorkflow`/`restoreWorkflow`), and Task Center warp task dispatch.
+_Avoid_: Session state sidecar, Split GCP manager, Dialog dirty flag
+
 ## Python Plugin Infrastructure
 
 **Plugin Host**:

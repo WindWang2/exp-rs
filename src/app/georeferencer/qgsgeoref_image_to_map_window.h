@@ -27,7 +27,7 @@ class QgsGeorefImageToMapWindow : public QgsGeorefShellWindow
     QString shellId() const override { return QStringLiteral( "i2m" ); }
     QString windowHelpText() const override;
     void onTransformMethodChangedExtra() override;
-    void captureShellSpecific( RsGeorefSessionState::WorkflowSnapshot &s ) const override;
+    void captureShellSpecific( RsGeoreferencingSession::WorkflowSnapshot &s ) const override;
     bool hasDestReady() const override;
     void updateToolAvailability() override;
 

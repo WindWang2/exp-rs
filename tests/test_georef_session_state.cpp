@@ -4,7 +4,7 @@
 #include <QSettings>
 #include <QWidget>
 
-#include "rs_georef_session_state.h"
+#include "rs_georeferencing_session.h"
 
 namespace {
   int argc = 1;
@@ -20,10 +20,10 @@ namespace {
   }
 }
 
-TEST_CASE( "SessionState: dirty mark and clear", "[georef][session]" )
+TEST_CASE( "RsGeoreferencingSession: dirty mark and clear", "[georef][session]" )
 {
   ensureCore();
-  RsGeorefSessionState s;
+  RsGeoreferencingSession s;
   REQUIRE_FALSE( s.isDirty() );
   s.markDirty();
   REQUIRE( s.isDirty() );
@@ -31,12 +31,12 @@ TEST_CASE( "SessionState: dirty mark and clear", "[georef][session]" )
   REQUIRE_FALSE( s.isDirty() );
 }
 
-TEST_CASE( "SessionState: workflow snapshot round-trip", "[georef][session]" )
+TEST_CASE( "RsGeoreferencingSession: workflow snapshot round-trip", "[georef][session]" )
 {
   ensureCore();
   QSettings().clear();
 
-  RsGeorefSessionState::WorkflowSnapshot in;
+  RsGeoreferencingSession::WorkflowSnapshot in;
   in.mode = 1;
   in.transformMethod = 2;
   in.resamplingMethod = 1;
@@ -49,7 +49,7 @@ TEST_CASE( "SessionState: workflow snapshot round-trip", "[georef][session]" )
   in.demZOffset = 12.5;
   in.syncZoom = false;
 
-  RsGeorefSessionState s;
+  RsGeoreferencingSession s;
   s.saveWorkflow( in );
   s.setLastPointsPath( in.lastPointsPath );
 
@@ -68,7 +68,7 @@ TEST_CASE( "SessionState: workflow snapshot round-trip", "[georef][session]" )
   REQUIRE( s.lastPointsPath() == QStringLiteral( "/tmp/a.points" ) );
 }
 
-TEST_CASE( "SessionState: window geometry save/restore", "[georef][session]" )
+TEST_CASE( "RsGeoreferencingSession: window geometry save/restore", "[georef][session]" )
 {
   ensureCore();
   QSettings().remove( QStringLiteral( "Georeferencer/geometry" ) );
@@ -76,12 +76,11 @@ TEST_CASE( "SessionState: window geometry save/restore", "[georef][session]" )
   QWidget w;
   w.resize( 640, 480 );
   w.move( 12, 34 );
-  RsGeorefSessionState s;
+  RsGeoreferencingSession s;
   s.saveWindow( &w );
 
   QWidget w2;
   s.restoreWindow( &w2 );
-  // restoreGeometry may be platform-sensitive; at least settings key must exist
   QSettings st;
   REQUIRE( st.contains( QStringLiteral( "Georeferencer/geometry" ) ) );
 }

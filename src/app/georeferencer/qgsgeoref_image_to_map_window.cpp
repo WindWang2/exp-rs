@@ -147,7 +147,7 @@ void QgsGeorefImageToMapWindow::onTransformMethodChangedExtra()
   // Params panel already toggles DEM for RPC on ImageToMap profile.
 }
 
-void QgsGeorefImageToMapWindow::captureShellSpecific( RsGeorefSessionState::WorkflowSnapshot & ) const
+void QgsGeorefImageToMapWindow::captureShellSpecific( RsGeoreferencingSession::WorkflowSnapshot & ) const
 {
 }
 

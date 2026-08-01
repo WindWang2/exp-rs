@@ -32,7 +32,6 @@ add_library(qgis_app_georef STATIC
     rs_sift_task.cpp
     rs_template_matcher.cpp
     rs_template_match_dialog.cpp
-    rs_georef_session_state.cpp
     rs_georeferencing_session.cpp
     rs_georef_task_center_executor.cpp
     rs_georef_task_list.cpp

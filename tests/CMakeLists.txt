@@ -1430,10 +1430,10 @@ sicnu_discover_tests(test_georef_match_task_center)
 
 add_executable(test_georef_session_state
   test_georef_session_state.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/georeferencer/rs_georef_session_state.cpp
 )
 target_link_libraries(test_georef_session_state PRIVATE
   Catch2::Catch2WithMain
+  qgis_app_georef
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
