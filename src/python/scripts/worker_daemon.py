@@ -13,6 +13,7 @@ import importlib
 
 callbacks = {}
 loaded_plugins = {}
+algo_executors = {}
 
 class SicnuMapCanvasProxy:
     def __init__(self, socket_conn):
@@ -120,7 +121,9 @@ class SicnuPythonIface:
         }
         self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
 
-    def registerProcessingAlgorithm(self, algo_id, name="", group="Python Plugins", description=""):
+    def registerProcessingAlgorithm(self, algo_id, name="", group="Python Plugins", description="", execute_fn=None):
+        if execute_fn is not None:
+            algo_executors[algo_id] = execute_fn
         req_msg = {
             "jsonrpc": "2.0",
             "method": "processing.register_algorithm",
@@ -243,13 +246,44 @@ def main():
                             "result": {"status": "action_executed", "callback_id": cb_id}
                         }
                     elif method == "processing.execute_algorithm":
+                        algo_id = params.get("id")
+                        if algo_id not in algo_executors:
+                            resp = {
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "error": {
+                                    "code": -32602,
+                                    "message": f"Unknown algorithm: {algo_id}"
+                                }
+                            }
+                        else:
+                            try:
+                                exec_result = algo_executors[algo_id](params.get("params", {}))
+                                resp = {
+                                    "jsonrpc": "2.0",
+                                    "id": req_id,
+                                    "result": {"status": "ok", "result": exec_result}
+                                }
+                            except Exception as ex:
+                                resp = {
+                                    "jsonrpc": "2.0",
+                                    "id": req_id,
+                                    "error": {
+                                        "code": -32000,
+                                        "message": f"Algorithm {algo_id} failed: {ex}"
+                                    }
+                                }
+                    elif method == "processing.test_register_algorithm":
+                        iface_obj = SicnuPythonIface(s)
+                        iface_obj.registerProcessingAlgorithm(
+                            "py:echo_test",
+                            "Echo Test",
+                            execute_fn=lambda p: {"echo": p}
+                        )
                         resp = {
                             "jsonrpc": "2.0",
                             "id": req_id,
-                            "error": {
-                                "code": -32601,
-                                "message": f"Method not found: {method} is not implemented in worker daemon"
-                            }
+                            "result": {"status": "algorithm_registered"}
                         }
                     elif method == "crash_test":
                         sys.stderr.write("WorkerDaemon simulating segfault crash!\n")

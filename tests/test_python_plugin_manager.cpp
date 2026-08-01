@@ -171,18 +171,20 @@ TEST_CASE( "PythonWorkerProcess & PythonIpcServer start subprocess and achieve P
   loop.exec();
   CHECK( receivedUnknownError );
 
-  // Test processing.execute_algorithm error
-  bool receivedProcError = false;
-  server.sendRequest( QStringLiteral( "processing.execute_algorithm" ), QJsonObject(), [&]( const QJsonObject &result, bool isErr ) {
-    if ( isErr && result.contains( QStringLiteral( "message" ) ) && result[QStringLiteral( "message" )].toString().contains( QStringLiteral( "Method not found" ) ) )
+  // Test processing.execute_algorithm with an unknown algorithm id
+  bool receivedUnknownAlgoError = false;
+  QJsonObject unknownAlgoParams;
+  unknownAlgoParams[QStringLiteral( "id" )] = QStringLiteral( "py:nonexistent" );
+  server.sendRequest( QStringLiteral( "processing.execute_algorithm" ), unknownAlgoParams, [&]( const QJsonObject &result, bool isErr ) {
+    if ( isErr && result.contains( QStringLiteral( "message" ) ) && result[QStringLiteral( "message" )].toString().contains( QStringLiteral( "Unknown algorithm" ) ) )
     {
-      receivedProcError = true;
+      receivedUnknownAlgoError = true;
     }
     loop.quit();
   } );
   QTimer::singleShot( 5000, &loop, &QEventLoop::quit );
   loop.exec();
-  CHECK( receivedProcError );
+  CHECK( receivedUnknownAlgoError );
 
   worker.stopWorker();
   server.close();
