@@ -666,6 +666,56 @@ TEST_CASE( "SicnuAppInterface addRasterLayer returns opened layer regardless of 
   CHECK( layer2 != layer1 );
 }
 
+TEST_CASE( "Python algorithm executes end-to-end through the daemon executor registry", "[python][isolated][exec]" )
+{
+  using namespace sicnu::python::isolated;
+
+  PythonIpcServer server;
+  QString socketName = QString( "sicnu_py_exec_%1" ).arg( QCoreApplication::applicationPid() );
+  REQUIRE( server.listen( socketName ) );
+
+  PythonAppInterfaceProxy proxy( &server, nullptr );
+
+  PythonWorkerProcess worker;
+  QString scriptPath = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) );
+  REQUIRE( worker.startWorker( socketName, QString(), scriptPath ) );
+
+  QEventLoop loop;
+  QObject::connect( &server, &PythonIpcServer::clientConnected, &loop, &QEventLoop::quit );
+  QTimer::singleShot( 5000, &loop, &QEventLoop::quit );
+  loop.exec();
+
+  // Daemon-side helper registers py:echo_test through the public path
+  // (executor map + IPC registration -> AlgorithmEngine adapter).
+  QJsonObject regResult;
+  bool regIsError = false;
+  REQUIRE( server.sendRequestAndAwait( QStringLiteral( "processing.test_register_algorithm" ), QJsonObject(), regResult, regIsError, 5000 )
+           == AwaitStatus::Ok );
+  REQUIRE( !regIsError );
+
+  QString execError;
+  QVariantMap execParams;
+  execParams[QStringLiteral( "value" )] = 42;
+  CHECK( sicnu::AlgorithmEngine::instance().executeAlgorithm( QStringLiteral( "py:echo_test" ), execParams, nullptr, execError ) );
+
+  // An adapter registered over IPC with no daemon executor reports the daemon error.
+  QJsonObject ghostMsg;
+  ghostMsg[QStringLiteral( "method" )] = QStringLiteral( "processing.register_algorithm" );
+  ghostMsg[QStringLiteral( "id" )] = 901;
+  QJsonObject ghostParams;
+  ghostParams[QStringLiteral( "id" )] = QStringLiteral( "py:ghost" );
+  ghostParams[QStringLiteral( "name" )] = QStringLiteral( "Ghost" );
+  ghostMsg[QStringLiteral( "params" )] = ghostParams;
+  proxy.handleIpcMessage( ghostMsg );
+
+  QString ghostError;
+  CHECK_FALSE( sicnu::AlgorithmEngine::instance().executeAlgorithm( QStringLiteral( "py:ghost" ), QVariantMap(), nullptr, ghostError ) );
+  CHECK( ghostError.contains( QStringLiteral( "Unknown algorithm" ) ) );
+
+  worker.stopWorker();
+  server.close();
+}
+
 
 
 

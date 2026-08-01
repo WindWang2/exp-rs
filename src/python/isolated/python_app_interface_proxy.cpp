@@ -190,7 +190,35 @@ void PythonAppInterfaceProxy::handleIpcMessage( const QJsonObject &message )
         QJsonObject req;
         req[QStringLiteral( "id" )] = algoId;
         req[QStringLiteral( "params" )] = QJsonObject::fromVariantMap( execParams );
-        m_ipcServer->sendRequest( QStringLiteral( "processing.execute_algorithm" ), req );
+
+        QJsonObject execResult;
+        bool execIsError = false;
+        const AwaitStatus awaitStatus = m_ipcServer->sendRequestAndAwait(
+          QStringLiteral( "processing.execute_algorithm" ), req, execResult, execIsError, 300000 );
+        switch ( awaitStatus )
+        {
+          case AwaitStatus::NoClient:
+            err = QStringLiteral( "IPC client not connected" );
+            return false;
+          case AwaitStatus::Disconnected:
+            err = QStringLiteral( "Python worker disconnected during algorithm execution" );
+            return false;
+          case AwaitStatus::Timeout:
+            err = QStringLiteral( "Python algorithm execution timed out" );
+            return false;
+          case AwaitStatus::Ok:
+            break;
+        }
+        if ( execIsError )
+        {
+          err = execResult[QStringLiteral( "message" )].toString( QStringLiteral( "Python algorithm execution failed" ) );
+          return false;
+        }
+        if ( execResult[QStringLiteral( "status" )].toString() != QStringLiteral( "ok" ) )
+        {
+          err = QStringLiteral( "Python algorithm execution failed" );
+          return false;
+        }
         if ( progress ) progress( 1.0 );
         return true;
       }
