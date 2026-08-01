@@ -127,3 +127,31 @@ TEST_CASE( "py: prefix executor executes from a worker thread marshaled to the m
 
   host.pool()->releaseWorker( node );
 }
+
+#include "cli/rs_pipeline_runner.h"
+
+TEST_CASE( "CLI runner executes a py: pipeline step end-to-end", "[python][host][pipeline]" )
+{
+  sicnu::data::DataManager dataManager;
+  PythonPluginHost host( 2 );
+
+  const QString pluginDir = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "../tests/data/plugins/echo_plugin" ) );
+  QString error;
+  INFO( error.toStdString() );
+  REQUIRE( host.loadPlugin( pluginDir, &dataManager, nullptr, nullptr, &error ) != nullptr );
+
+  sicnu::cli::RsPipelineRunner runner;
+  Json::Value pipeline( Json::objectValue );
+  pipeline["name"] = "echo-pipeline";
+  Json::Value step( Json::objectValue );
+  step["id"] = "s1";
+  step["operator"] = "py:echo_plugin";
+  step["params"]["value"] = 7;
+  pipeline["steps"].append( step );
+
+  const auto result = runner.runFromJson( pipeline );
+  INFO( result.errorMessage );
+  CHECK( result.success );
+  REQUIRE( result.steps.size() == 1 );
+  CHECK( result.steps[0].success );
+}

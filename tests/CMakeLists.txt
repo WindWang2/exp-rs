@@ -2906,6 +2906,7 @@ sicnu_discover_tests(test_python_plugin_manager)
 
 qt_add_executable(test_python_plugin_host
   test_python_plugin_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/cli/rs_pipeline_runner.cpp
 )
 target_link_libraries(test_python_plugin_host PRIVATE
   Catch2::Catch2WithMain

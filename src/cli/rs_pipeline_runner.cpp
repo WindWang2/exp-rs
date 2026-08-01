@@ -8,6 +8,7 @@
 #include "workflow/workflow_types.h"
 #include "workflow/placeholder_grammar.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -233,6 +234,10 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
   {
     // Wait for completion, waking every poll interval to emit progress.
     const auto pipeInfo = sicnu::TaskCenter::instance().waitForPipeline( pipelineId, kPipelinePollInterval );
+
+    // Deliver marshaled py: executions (ADR 0023): the py: prefix executor
+    // blocks a JobEngine worker on a BlockingQueuedConnection to this thread.
+    QCoreApplication::processEvents();
 
     // Emit coarse progress from task states.
     int completedCount = 0;

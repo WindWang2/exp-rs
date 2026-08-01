@@ -1,0 +1,4 @@
+[general]
+name=Echo Test Plugin
+description=Headless test plugin registering py:echo_plugin
+version=1.0
