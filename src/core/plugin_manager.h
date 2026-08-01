@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QMap>
 #include <QStringList>
+#include <memory>
 #include "interfaces/sicnu_plugin_interface.h"
 
 class QPluginLoader;
@@ -16,7 +17,7 @@ class SicnuAppInterface;
  * @brief Manages loading and unloading of plugins (C++ and Python)
  */
 namespace sicnu::python::isolated {
-    class PythonWorkerProcessPool;
+    class PythonPluginHost;
 }
 
 class PluginManager : public QObject
@@ -30,8 +31,7 @@ public:
     void setAppInterface(SicnuAppInterface *iface) { m_appInterface = iface; }
     SicnuAppInterface *appInterface() const { return m_appInterface; }
 
-    void setPythonWorkerProcessPool(sicnu::python::isolated::PythonWorkerProcessPool *pool) { m_pythonPool = pool; }
-    sicnu::python::isolated::PythonWorkerProcessPool *pythonWorkerProcessPool() const { return m_pythonPool; }
+    sicnu::python::isolated::PythonPluginHost *pythonPluginHost() const { return m_pythonHost.get(); }
 
     void loadPlugins(const QString &pluginDir);
     bool loadPlugin(const QString &pluginPath);
@@ -59,6 +59,5 @@ private:
     QgsMapCanvas *m_canvas;
     QgsLayerTreeView *m_layerTree;
     SicnuAppInterface *m_appInterface = nullptr;
-    sicnu::python::isolated::PythonWorkerProcessPool *m_pythonPool = nullptr;
-    bool m_ownsPythonPool = false;
+    std::unique_ptr<sicnu::python::isolated::PythonPluginHost> m_pythonHost;
 };

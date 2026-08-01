@@ -4,7 +4,7 @@
 #include "python/isolated/python_plugin_adapter.h"
 #include "app/python/sicnu_app_interface.h"
 #include "app/project_context.h"
-#include "python/isolated/python_worker_process_pool.h"
+#include "python/isolated/python_plugin_host.h"
 #endif
 
 #include <QCoreApplication>
@@ -27,13 +27,6 @@ PluginManager::PluginManager(QgsMapCanvas *canvas, QgsLayerTreeView *layerTree, 
 PluginManager::~PluginManager()
 {
     unloadAll();
-#if defined( SICNU_EMBED_PYTHON ) && SICNU_EMBED_PYTHON
-    if (m_ownsPythonPool && m_pythonPool) {
-        m_pythonPool->shutdown();
-        delete m_pythonPool;
-        m_pythonPool = nullptr;
-    }
-#endif
 }
 
 void PluginManager::loadPlugins(const QString &pluginDir)
@@ -117,61 +110,9 @@ bool PluginManager::loadPythonPlugin(const QString &pluginDir)
     qWarning() << "PluginManager: Python plugin support is disabled (SICNU_EMBED_PYTHON=OFF)";
     return false;
 #else
-    const QString metadataPath = pluginDir + "/metadata.txt";
-    if (!QFileInfo::exists(metadataPath)) {
-        return false;
-    }
-
-    QMap<QString, QString> metadata;
-    QFile file(metadataPath);
-    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QTextStream in(&file);
-        while (!in.atEnd()) {
-            QString line = in.readLine().trimmed();
-            if (line.isEmpty() || line.startsWith('#') || line.startsWith('['))
-                continue;
-            int idx = line.indexOf('=');
-            if (idx > 0) {
-                QString key = line.left(idx).trimmed();
-                QString val = line.mid(idx + 1).trimmed();
-                metadata[key] = val;
-            }
-        }
-    }
-
-    const QString packageName = QDir(pluginDir).dirName();
-    const QString name = metadata.value(QStringLiteral("name"), packageName);
-    const QString description = metadata.value(QStringLiteral("description"), QString());
-    const QString version = metadata.value(QStringLiteral("version"), QStringLiteral("1.0"));
-
-    if (!m_pythonPool) {
-        // Resolve worker_daemon.py from common layouts: installed app, source tree
-        // relative to the test binary, and cwd when developing from the repo root.
-        const QStringList candidates = {
-            QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../src/python/scripts/worker_daemon.py")),
-            QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../../src/python/scripts/worker_daemon.py")),
-            QDir::current().filePath(QStringLiteral("src/python/scripts/worker_daemon.py")),
-            QDir::current().filePath(QStringLiteral("../src/python/scripts/worker_daemon.py")),
-        };
-        QString scriptPath;
-        for (const QString &candidate : candidates) {
-            if (QFileInfo::exists(candidate)) {
-                scriptPath = QFileInfo(candidate).absoluteFilePath();
-                break;
-            }
-        }
-        if (scriptPath.isEmpty()) {
-            qWarning() << "PluginManager: worker_daemon.py not found; Python plugins cannot load";
-            return false;
-        }
-        m_pythonPool = new PythonWorkerProcessPool(2, this);
-        if (!m_pythonPool->initialize(QString(), scriptPath)) {
-            qWarning() << "PluginManager: PythonWorkerProcessPool initialize failed:" << scriptPath;
-            delete m_pythonPool;
-            m_pythonPool = nullptr;
-            return false;
-        }
-        m_ownsPythonPool = true;
+    if ( !m_pythonHost )
+    {
+        m_pythonHost = std::make_unique<PythonPluginHost>( 2, this );
     }
 
     QMenu *pluginMenu = m_appInterface ? m_appInterface->pluginMenu() : nullptr;
@@ -181,11 +122,13 @@ bool PluginManager::loadPythonPlugin(const QString &pluginDir)
         dataManager = &m_appInterface->projectContext()->dataManager();
     }
     ActiveViewHost *activeViewHost = m_appInterface ? m_appInterface->activeViewHost() : nullptr;
-    auto *adapter = new PythonPluginAdapter( pluginDir, packageName, name, description, version,
-                                             dataManager, pluginMenu, activeViewHost, m_pythonPool );
-    if (!adapter->initialize(m_canvas, m_layerTree)) {
-        emit pluginError(name, "Python plugin initialization failed");
-        delete adapter;
+
+    QString error;
+    PythonPluginAdapter *adapter = m_pythonHost->loadPlugin( pluginDir, dataManager, pluginMenu, activeViewHost, &error );
+    if ( !adapter )
+    {
+        emit pluginError( QDir( pluginDir ).dirName(), error );
+        qWarning() << "PluginManager: Python plugin load failed:" << pluginDir << error;
         return false;
     }
 
@@ -194,10 +137,10 @@ bool PluginManager::loadPythonPlugin(const QString &pluginDir)
     info.loader = nullptr;
     info.loaded = true;
     info.isPython = true;
-    m_plugins[name] = info;
+    m_plugins[adapter->name()] = info;
 
-    qDebug() << "Loaded Python plugin:" << name;
-    emit pluginLoaded(name);
+    qDebug() << "Loaded Python plugin:" << adapter->name();
+    emit pluginLoaded( adapter->name() );
 
     return true;
 #endif
@@ -210,12 +153,15 @@ void PluginManager::unloadAll()
             it.value().instance->unload();
             if (it.value().loader) {
                 it.value().loader->unload();
-            } else if (it.value().isPython) {
-                delete it.value().instance;
             }
             emit pluginUnloaded(it.key());
         }
     }
+#if defined( SICNU_EMBED_PYTHON ) && SICNU_EMBED_PYTHON
+    if ( m_pythonHost ) {
+        m_pythonHost->unloadAll();
+    }
+#endif
     m_plugins.clear();
 }
 
