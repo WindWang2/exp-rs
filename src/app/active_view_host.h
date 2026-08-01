@@ -59,7 +59,13 @@ class ActiveViewHost : public QObject
 
     // ── Active view ───────────────────────────────────────────────────
     sicnu::display::DisplayViewId mainViewId() const { return m_mainViewId; }
-    sicnu::display::DisplayViewId activeViewId() const { return m_activeViewId; }
+    /// The active view id is owned by the display manager (single source of
+    /// truth, ADR 0019); this host only forwards to it.
+    sicnu::display::DisplayViewId activeViewId() const
+    {
+        return m_displayManager ? m_displayManager->activeViewId()
+                                : sicnu::display::DisplayViewId();
+    }
     QgsLayerTreeView *layerTreeView() const { return m_layerTreeView; }
     QgsMapCanvas *mapCanvas() const { return m_mapCanvas; }
     void setMessageBar( QgsMessageBar *messageBar ) { m_messageBar = messageBar; }
@@ -110,6 +116,8 @@ class ActiveViewHost : public QObject
     void removeSelectedDisplayLayers();
     void removeSelectedLayers() { removeSelectedDisplayLayers(); }
     void refreshCanvasLayers();
+    void zoomToLayer( QgsMapLayer *layer = nullptr );
+    void zoomToNativeResolution( QgsMapLayer *layer = nullptr );
 
     /// Prefer the map canvas current layer; fall back to the first layer-tree selection.
     QgsMapLayer *activeLayer() const;
@@ -130,7 +138,6 @@ class ActiveViewHost : public QObject
     sicnu::data::DataManager *m_dataManager = nullptr;
     sicnu::display::QgisDisplayManager *m_displayManager = nullptr;
     sicnu::display::DisplayViewId m_mainViewId;
-    sicnu::display::DisplayViewId m_activeViewId;
     QWidget *m_parentWidget = nullptr;
 
     QgsLayerTreeModel *m_layerTreeModel = nullptr;

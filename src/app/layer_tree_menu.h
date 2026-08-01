@@ -12,17 +12,16 @@
 #include <qgslayertreelayer.h>
 #include <qgsrasterlayer.h>
 
-class QgisDesktopWindow;
+class ActiveViewHost;
 
 class LayerTreeMenuProvider : public QgsLayerTreeViewMenuProvider
 {
 public:
-    LayerTreeMenuProvider(QgsLayerTreeView *view, QgsMapCanvas *canvas, QgisDesktopWindow *window);
+    LayerTreeMenuProvider(QgsLayerTreeView *view, ActiveViewHost *activeViewHost);
 
     QMenu *createContextMenu() override;
 
 private:
-    QgsLayerTreeView *mView;
-    QgsMapCanvas *mCanvas;
-    QgisDesktopWindow *mWindow;
+    QgsLayerTreeView *mView = nullptr;
+    ActiveViewHost *m_activeViewHost = nullptr;
 };

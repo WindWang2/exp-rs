@@ -181,7 +181,7 @@ _Avoid_: Workspace state map, Context dict, UI state dump
 - **Context**: Passing multiple raw UI pointers (`QgsMapCanvas*`, `QgsMessageBar*`, `ActiveViewHost*`) into IPC proxies (`PythonAppInterfaceProxy`) and plugin facades (`SicnuAppInterface`) creates shallowness and coupling friction.
 - **Decision**:
   1. **Facade Encapsulation**: Deepen `ActiveViewHost` to absorb canvas extent/scale queries (`mapCanvasExtent()`, `mapCanvasScale()`), user message bar alerts (`pushMessageBarAlert()`), active layer state (`activeLayer()`), and dataset opening (`openPath()`).
-  2. **Single Seam Coupling**: `PythonAppInterfaceProxy` and `SicnuAppInterface` hold ONLY a single `ActiveViewHost*` pointer, completely isolating IPC handlers from raw C++ GUI widget trees.
+  2. **Single Seam Coupling**: `PythonAppInterfaceProxy`, `SicnuAppInterface`, and `LayerTreeMenuProvider` hold ONLY a single `ActiveViewHost*` pointer, completely isolating IPC handlers and layer-tree context menus from raw C++ GUI widget trees.
   3. **Dual-Layer QGIS Bridge**: `SicnuAppInterface` delegates `QgisInterface` C++ API overrides directly to `ActiveViewHost`, preserving full QGIS C++ plugin source compatibility.
 
 ### ADR 0016: TaskCenter Deepening & Native DAG Task Pipeline Engine Architecture

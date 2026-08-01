@@ -1,5 +1,5 @@
 #include "layer_tree_menu.h"
-#include "main_window.h"
+#include "active_view_host.h"
 
 // QGIS includes
 #include <layertree/qgslayertreeview.h>
@@ -12,27 +12,35 @@
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
 
-LayerTreeMenuProvider::LayerTreeMenuProvider(QgsLayerTreeView *view, QgsMapCanvas *canvas, QgisDesktopWindow *window)
-    : mView(view), mCanvas(canvas), mWindow(window) {}
+LayerTreeMenuProvider::LayerTreeMenuProvider(QgsLayerTreeView *view, ActiveViewHost *activeViewHost)
+    : mView(view), m_activeViewHost(activeViewHost) {}
 
 QMenu *LayerTreeMenuProvider::createContextMenu()
 {
     QMenu *menu = new QMenu();
-    QModelIndex index = mView->currentIndex();
+    QModelIndex index = mView ? mView->currentIndex() : QModelIndex();
     QgsLayerTreeNode *node = index.isValid() ? mView->index2node(index) : nullptr;
 
     if (!node) {
-        menu->addAction(QObject::tr("Add Raster Layer..."), mWindow, &QgisDesktopWindow::addRasterLayer);
-        menu->addAction(QObject::tr("Add Vector Layer..."), mWindow, &QgisDesktopWindow::addVectorLayer);
+        if (m_activeViewHost) {
+            menu->addAction(QObject::tr("Add Raster Layer..."), [this]() {
+                m_activeViewHost->openRasterPath(QString());
+            });
+            menu->addAction(QObject::tr("Add Vector Layer..."), [this]() {
+                m_activeViewHost->openVectorPath(QString());
+            });
+        }
         menu->addSeparator();
-        menu->addAction(mView->defaultActions()->actionAddGroup());
+        if (mView) {
+            menu->addAction(mView->defaultActions()->actionAddGroup());
+        }
         return menu;
     }
 
     QgsLayerTreeViewDefaultActions *defActions = mView->defaultActions();
 
     if (node->nodeType() == QgsLayerTreeNode::NodeGroup) {
-        menu->addAction(defActions->actionZoomToGroup(mCanvas));
+        menu->addAction(defActions->actionZoomToGroup(nullptr));
         menu->addAction(defActions->actionRenameGroupOrLayer());
         menu->addAction(defActions->actionRemoveGroupOrLayer());
         menu->addSeparator();
@@ -42,28 +50,27 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
         QgsLayerTreeLayer *layerNode = static_cast<QgsLayerTreeLayer *>(node);
         QgsMapLayer *layer = layerNode->layer();
 
-        menu->addAction(defActions->actionZoomToLayers(mCanvas));
+        if (m_activeViewHost) {
+            QAction *zoomAction = menu->addAction(QObject::tr("Zoom to Layer"));
+            QObject::connect(zoomAction, &QAction::triggered, [this, layer]() {
+                m_activeViewHost->zoomToLayer(layer);
+            });
+        }
 
         if (layer && layer->type() == Qgis::LayerType::Raster) {
             QAction *zoomNative = menu->addAction(QObject::tr("Zoom to Native Resolution (1:1)"));
             QObject::connect(zoomNative, &QAction::triggered, [this, layer]() {
-                QgsRasterLayer *rl = qobject_cast<QgsRasterLayer *>(layer);
-                if (rl) {
-                    double xRes = rl->rasterUnitsPerPixelX();
-                    double yRes = rl->rasterUnitsPerPixelY();
-                    QgsRectangle ext = rl->extent();
-                    double cx = (ext.xMinimum() + ext.xMaximum()) / 2.0;
-                    double cy = (ext.yMinimum() + ext.yMaximum()) / 2.0;
-                    double w = mCanvas->width() * xRes;
-                    double h = mCanvas->height() * yRes;
-                    mCanvas->setExtent(QgsRectangle(cx - w/2, cy - h/2, cx + w/2, cy + h/2));
-                    mCanvas->refresh();
+                if (m_activeViewHost) {
+                    m_activeViewHost->zoomToNativeResolution(layer);
                 }
             });
         }
 
-        menu->addAction(QObject::tr("Properties..."), mWindow, &QgisDesktopWindow::layerProperties);
-        menu->addAction(QObject::tr("Set Layer CRS from Preset..."), mWindow, &QgisDesktopWindow::setLayerCrsFromPreset);
+        if (m_activeViewHost) {
+            menu->addAction(QObject::tr("Properties..."), [this, layer]() {
+                m_activeViewHost->showLayerProperties(layer);
+            });
+        }
         menu->addSeparator();
         menu->addAction(defActions->actionRenameGroupOrLayer());
         menu->addAction(defActions->actionShowFeatureCount());
@@ -75,8 +82,14 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
     }
 
     menu->addSeparator();
-    menu->addAction(QObject::tr("Add Raster Layer..."), mWindow, &QgisDesktopWindow::addRasterLayer);
-    menu->addAction(QObject::tr("Add Vector Layer..."), mWindow, &QgisDesktopWindow::addVectorLayer);
+    if (m_activeViewHost) {
+        menu->addAction(QObject::tr("Add Raster Layer..."), [this]() {
+            m_activeViewHost->openRasterPath(QString());
+        });
+        menu->addAction(QObject::tr("Add Vector Layer..."), [this]() {
+            m_activeViewHost->openVectorPath(QString());
+        });
+    }
 
     return menu;
 }

@@ -152,7 +152,7 @@ void QgisDesktopWindow::initLayerTree()
             this, &QgisDesktopWindow::updateCrsDisplay);
 
     // Set up native QGIS context menu for layer tree
-    m_layerTreeMenuProvider = new LayerTreeMenuProvider(m_layerTreeView, m_mapCanvas, this);
+    m_layerTreeMenuProvider = new LayerTreeMenuProvider(m_layerTreeView, m_activeViewHost.get());
     m_layerTreeView->setMenuProvider(m_layerTreeMenuProvider);
 }
 void QgisDesktopWindow::showCoordinates(const QgsPointXY &point)

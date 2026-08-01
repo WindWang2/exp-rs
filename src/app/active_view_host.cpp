@@ -46,9 +46,13 @@ ActiveViewHost::ActiveViewHost( QgsMapCanvas *canvas,
     , m_dataManager( dataManager )
     , m_displayManager( displayManager )
     , m_mainViewId( mainViewId )
-    , m_activeViewId( mainViewId )
     , m_parentWidget( parentWidget )
 {
+    // The display manager owns the active view id; align it with the main view
+    // so both sides start from the same state.
+    if ( m_displayManager )
+        m_displayManager->setActiveViewId( mainViewId );
+
     if ( m_mapCanvas && m_overviewCanvas )
     {
         connect( m_mapCanvas, &QgsMapCanvas::layersChanged, this, [this] {
@@ -76,7 +80,7 @@ bool ActiveViewHost::setActiveViewId( sicnu::display::DisplayViewId viewId )
         return false;
     if ( !m_displayManager->view( viewId ).has_value() )
         return false;
-    m_activeViewId = viewId;
+    m_displayManager->setActiveViewId( viewId );
     return true;
 }
 
@@ -155,7 +159,7 @@ ActiveViewHost::displayAsset( sicnu::data::AssetId assetId )
     using sicnu::display::DisplayLayerId;
 
     if ( !m_mapCanvas || !m_dataManager || !m_displayManager
-         || m_activeViewId.isNull() || assetId.isNull() )
+         || activeViewId().isNull() || assetId.isNull() )
     {
         return Result<DisplayLayerId>::failure(
             Diagnostic{ QStringLiteral( "view.context_unavailable" ),
@@ -173,7 +177,7 @@ ActiveViewHost::displayAsset( sicnu::data::AssetId assetId )
 
     const bool hadVisibleLayers = !m_mapCanvas->layers().isEmpty();
     const Result<DisplayLayerId> displayed =
-        m_displayManager->addLayer( m_activeViewId, assetId );
+        m_displayManager->addLayer( activeViewId(), assetId );
     if ( !displayed )
         return displayed;
 
@@ -206,7 +210,7 @@ ActiveViewHost::openSource( sicnu::data::SourceDescriptor source )
     using sicnu::display::DisplayLayerId;
 
     if ( !m_mapCanvas || !m_dataManager || !m_displayManager
-         || m_activeViewId.isNull() )
+         || activeViewId().isNull() )
     {
         return Result<DisplayLayerId>::failure(
             Diagnostic{ QStringLiteral( "view.context_unavailable" ),
@@ -229,7 +233,7 @@ ActiveViewHost::openSource( sicnu::data::SourceDescriptor source )
     }
 
     const Result<DisplayLayerId> displayed =
-        m_displayManager->addLayer( m_activeViewId, registered.assetId );
+        m_displayManager->addLayer( activeViewId(), registered.assetId );
     if ( !displayed )
         return displayed;
 
@@ -282,7 +286,7 @@ void ActiveViewHost::placeInTreeGroup( QgsMapLayer *layer, sicnu::data::AssetKin
         return;
     // Tree grouping applies to the main QGIS project tree (main view). Secondary
     // views own independent trees via DisplayManager; host only groups main.
-    if ( m_activeViewId != m_mainViewId )
+    if ( activeViewId() != m_mainViewId )
         return;
 
     const QString groupName =
@@ -384,6 +388,46 @@ void ActiveViewHost::removeSelectedDisplayLayers()
 
     if ( auto *win = qobject_cast<QMainWindow *>( m_parentWidget ) )
         win->statusBar()->showMessage( QObject::tr( "Removed from view (data kept)" ), 2000 );
+}
+
+void ActiveViewHost::zoomToLayer( QgsMapLayer *layer )
+{
+    if ( !m_mapCanvas )
+        return;
+
+    QgsMapLayer *target = layer ? layer : activeLayer();
+    if ( !target )
+        return;
+
+    m_mapCanvas->setExtent( target->extent() );
+    m_mapCanvas->refresh();
+}
+
+void ActiveViewHost::zoomToNativeResolution( QgsMapLayer *layer )
+{
+    if ( !m_mapCanvas )
+        return;
+
+    QgsMapLayer *target = layer ? layer : activeLayer();
+    if ( !target )
+        return;
+
+    QgsRasterLayer *rl = qobject_cast<QgsRasterLayer *>( target );
+    if ( !rl )
+    {
+        zoomToLayer( target );
+        return;
+    }
+
+    double xRes = rl->rasterUnitsPerPixelX();
+    double yRes = rl->rasterUnitsPerPixelY();
+    QgsRectangle ext = rl->extent();
+    double cx = ( ext.xMinimum() + ext.xMaximum() ) / 2.0;
+    double cy = ( ext.yMinimum() + ext.yMaximum() ) / 2.0;
+    double w = m_mapCanvas->width() * xRes;
+    double h = m_mapCanvas->height() * yRes;
+    m_mapCanvas->setExtent( QgsRectangle( cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0 ) );
+    m_mapCanvas->refresh();
 }
 
 void ActiveViewHost::refreshCanvasLayers()
