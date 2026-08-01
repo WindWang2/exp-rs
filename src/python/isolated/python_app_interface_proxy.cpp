@@ -93,77 +93,14 @@ void PythonAppInterfaceProxy::handleIpcMessage( const QJsonObject &message )
       m_ipcServer->sendResponse( msgId, res );
     }
   }
-  else if ( method == QStringLiteral( "catalog.get_active_layer" ) )
+  QJsonObject response;
+  if ( m_bridge.dispatchIpcMessage( message, response ) )
   {
-    QJsonObject res = m_bridge.getActiveLayerSummary().toJsonObject();
     if ( m_ipcServer && msgId > 0 )
     {
-      m_ipcServer->sendResponse( msgId, res );
+      m_ipcServer->sendResponse( msgId, response );
     }
-  }
-  else if ( method == QStringLiteral( "catalog.set_active_layer" ) )
-  {
-    const QString assetIdText = params[QStringLiteral( "asset_id" )].toString();
-    const std::optional<sicnu::data::AssetId> assetId = sicnu::data::AssetId::fromString( assetIdText );
-    const bool ok = assetId.has_value() && m_bridge.setActiveAsset( *assetId );
-    if ( m_ipcServer && msgId > 0 )
-    {
-      QJsonObject res;
-      res[QStringLiteral( "status" )] = ok ? QStringLiteral( "ok" ) : QStringLiteral( "unknown_asset" );
-      res[QStringLiteral( "asset_id" )] = assetIdText;
-      m_ipcServer->sendResponse( msgId, res );
-    }
-  }
-  else if ( method == QStringLiteral( "data.add_layer" ) )
-  {
-    QString path = params[QStringLiteral( "path" )].toString();
-    bool ok = m_bridge.openPath( path );
-    if ( m_ipcServer && msgId > 0 )
-    {
-      QJsonObject res;
-      res[QStringLiteral( "status" )] = ok ? QStringLiteral( "added" ) : QStringLiteral( "failed" );
-      res[QStringLiteral( "path" )] = path;
-      m_ipcServer->sendResponse( msgId, res );
-    }
-  }
-  else if ( method == QStringLiteral( "canvas.get_state" ) )
-  {
-    QJsonObject res = m_bridge.getCanvasViewportSummary().toJsonObject();
-    if ( m_ipcServer && msgId > 0 )
-    {
-      m_ipcServer->sendResponse( msgId, res );
-    }
-  }
-  else if ( method == QStringLiteral( "ui.push_message_bar" ) )
-  {
-    QString title = params[QStringLiteral( "title" )].toString();
-    QString text = params[QStringLiteral( "text" )].toString();
-    // Worker may send level as string ("info"/"warning"/"critical"/"success") or int (Qgis::MessageLevel).
-    int level = 0;
-    const QJsonValue levelVal = params.value( QStringLiteral( "level" ) );
-    if ( levelVal.isString() )
-    {
-      const QString levelStr = levelVal.toString().toLower();
-      if ( levelStr == QStringLiteral( "warning" ) || levelStr == QStringLiteral( "warn" ) )
-        level = static_cast<int>( Qgis::MessageLevel::Warning );
-      else if ( levelStr == QStringLiteral( "critical" ) || levelStr == QStringLiteral( "error" ) )
-        level = static_cast<int>( Qgis::MessageLevel::Critical );
-      else if ( levelStr == QStringLiteral( "success" ) )
-        level = static_cast<int>( Qgis::MessageLevel::Success );
-      else
-        level = static_cast<int>( Qgis::MessageLevel::Info );
-    }
-    else if ( levelVal.isDouble() )
-    {
-      level = levelVal.toInt();
-    }
-    bool ok = m_bridge.pushMessageBarAlert( title, text, level );
-    if ( m_ipcServer && msgId > 0 )
-    {
-      QJsonObject res;
-      res[QStringLiteral( "status" )] = ok ? QStringLiteral( "pushed" ) : QStringLiteral( "failed" );
-      m_ipcServer->sendResponse( msgId, res );
-    }
+    return;
   }
   else if ( method == QStringLiteral( "processing.register_algorithm" ) )
   {

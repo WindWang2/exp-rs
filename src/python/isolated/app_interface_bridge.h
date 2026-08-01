@@ -82,6 +82,11 @@ class AppInterfaceBridge : public QObject
 
     bool pushMessageBarAlert( const QString &title, const QString &text, int level = 0 );
 
+    /// Deep JSON-RPC IPC method dispatch seam (ADR 0025).
+    /// Decodes request, executes domain action, populates response JSON, and
+    /// returns true if handled headlessly.
+    bool dispatchIpcMessage( const QJsonObject &message, QJsonObject &response );
+
   private:
     sicnu::data::DataManager *m_dataManager = nullptr;
     ActiveViewHost *m_activeViewHost = nullptr;

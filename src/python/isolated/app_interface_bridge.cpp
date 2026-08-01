@@ -222,4 +222,69 @@ bool AppInterfaceBridge::pushMessageBarAlert( const QString &title, const QStrin
   return true;
 }
 
+bool AppInterfaceBridge::dispatchIpcMessage( const QJsonObject &message, QJsonObject &response )
+{
+  if ( !message.contains( QStringLiteral( "method" ) ) )
+    return false;
+
+  QString method = message[QStringLiteral( "method" )].toString();
+  QJsonObject params = message[QStringLiteral( "params" )].toObject();
+
+  if ( method == QStringLiteral( "catalog.get_active_layer" ) )
+  {
+    response = getActiveLayerSummary().toJsonObject();
+    return true;
+  }
+  else if ( method == QStringLiteral( "catalog.set_active_layer" ) )
+  {
+    const QString assetIdText = params[QStringLiteral( "asset_id" )].toString();
+    const std::optional<sicnu::data::AssetId> assetId = sicnu::data::AssetId::fromString( assetIdText );
+    const bool ok = assetId.has_value() && setActiveAsset( *assetId );
+    response[QStringLiteral( "status" )] = ok ? QStringLiteral( "ok" ) : QStringLiteral( "unknown_asset" );
+    response[QStringLiteral( "asset_id" )] = assetIdText;
+    return true;
+  }
+  else if ( method == QStringLiteral( "data.add_layer" ) )
+  {
+    QString path = params[QStringLiteral( "path" )].toString();
+    bool ok = openPath( path );
+    response[QStringLiteral( "status" )] = ok ? QStringLiteral( "added" ) : QStringLiteral( "failed" );
+    response[QStringLiteral( "path" )] = path;
+    return true;
+  }
+  else if ( method == QStringLiteral( "canvas.get_state" ) )
+  {
+    response = getCanvasViewportSummary().toJsonObject();
+    return true;
+  }
+  else if ( method == QStringLiteral( "ui.push_message_bar" ) )
+  {
+    QString title = params[QStringLiteral( "title" )].toString();
+    QString text = params[QStringLiteral( "text" )].toString();
+    int level = 0;
+    const QJsonValue levelVal = params.value( QStringLiteral( "level" ) );
+    if ( levelVal.isString() )
+    {
+      const QString levelStr = levelVal.toString().toLower();
+      if ( levelStr == QStringLiteral( "warning" ) || levelStr == QStringLiteral( "warn" ) )
+        level = static_cast<int>( Qgis::MessageLevel::Warning );
+      else if ( levelStr == QStringLiteral( "critical" ) || levelStr == QStringLiteral( "error" ) )
+        level = static_cast<int>( Qgis::MessageLevel::Critical );
+      else if ( levelStr == QStringLiteral( "success" ) )
+        level = static_cast<int>( Qgis::MessageLevel::Success );
+      else
+        level = static_cast<int>( Qgis::MessageLevel::Info );
+    }
+    else if ( levelVal.isDouble() )
+    {
+      level = levelVal.toInt();
+    }
+    bool ok = pushMessageBarAlert( title, text, level );
+    response[QStringLiteral( "status" )] = ok ? QStringLiteral( "pushed" ) : QStringLiteral( "failed" );
+    return true;
+  }
+
+  return false;
+}
+
 } // namespace sicnu::python::isolated

@@ -521,6 +521,29 @@ TEST_CASE( "AppInterfaceBridge consolidates QGIS query routing and JSON serializ
     CHECK( canvasSummary.toJsonObject()[QStringLiteral( "status" )].toString()
            == QStringLiteral( "no_canvas" ) );
   }
+
+  SECTION( "dispatchIpcMessage handles JSON-RPC request and response payload generation headlessly (ADR 0025)" )
+  {
+    sicnu::data::DataManager dataManager;
+    bridge.setDataManager( &dataManager );
+
+    QJsonObject req;
+    req[QStringLiteral( "method" )] = QStringLiteral( "catalog.get_active_layer" );
+    QJsonObject res;
+    CHECK( bridge.dispatchIpcMessage( req, res ) );
+    CHECK( res[QStringLiteral( "status" )].toString() == QStringLiteral( "no_active_layer" ) );
+
+    QJsonObject reqCanvas;
+    reqCanvas[QStringLiteral( "method" )] = QStringLiteral( "canvas.get_state" );
+    QJsonObject resCanvas;
+    CHECK( bridge.dispatchIpcMessage( reqCanvas, resCanvas ) );
+    CHECK( resCanvas[QStringLiteral( "status" )].toString() == QStringLiteral( "no_canvas" ) );
+
+    QJsonObject reqUnknown;
+    reqUnknown[QStringLiteral( "method" )] = QStringLiteral( "unknown.method" );
+    QJsonObject resUnknown;
+    CHECK_FALSE( bridge.dispatchIpcMessage( reqUnknown, resUnknown ) );
+  }
 }
 
 TEST_CASE( "AppInterfaceBridge headless asset seam via DataManager", "[python][bridge][headless]" )

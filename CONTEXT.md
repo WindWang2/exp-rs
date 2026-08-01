@@ -129,7 +129,7 @@ The application interface facade (`SicnuAppInterface` subclassing `QgisInterface
 _Avoid_: Raw main window pointer, Global QgisApp instance
 
 **Headless Asset Seam (`AppInterfaceBridge`)**:
-The JSON-RPC serialization bridge (`AppInterfaceBridge` in `src/python/isolated`) consumed by `PythonAppInterfaceProxy` for out-of-process Python plugin workers. `DataManager` is its required asset authority — catalog queries, source registration (`openPath`), and the explicit plugin-driven active asset (`setActiveAsset`/`activeAssetId`, replacing the canvas current layer) — while `ActiveViewHost` is an optional enhancement bound only in GUI mode for display, canvas state, and message bar. IPC methods degrade gracefully without a view host (`no_canvas`, `no_active_layer`, `ui_unavailable`), so the seam works without any QWidget.
+The deep JSON-RPC serialization and IPC method dispatch module (`AppInterfaceBridge` in `src/python/isolated`) consumed by `PythonAppInterfaceProxy` for out-of-process Python plugin workers. It owns JSON-RPC request decoding and response payload generation (`catalog.*`, `data.*`, `canvas.*`, `ui.push_message_bar`, `processing.register_algorithm`). `DataManager` is its required asset authority — catalog queries, source registration (`openPath`), and the explicit plugin-driven active asset (`setActiveAsset`/`activeAssetId`, replacing the canvas current layer) — while `ActiveViewHost` is an optional enhancement bound only in GUI mode for display, canvas state, and message bar. IPC methods degrade gracefully without a view host (`no_canvas`, `no_active_layer`, `ui_unavailable`), so the seam works headlessly without any QWidget.
 _Avoid_: GUI proxy, QgisInterface IPC shim
 
 **Pipeline Node Canvas**:
