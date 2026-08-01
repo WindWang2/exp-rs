@@ -2914,7 +2914,7 @@ install(TARGETS qgis_core
 # sicnu_core: Plugin manager and plugin interface library
 ############################################################
 add_library(sicnu_core SHARED
-  plugin_manager.cpp
+  plugin_host.cpp
 )
 
 target_include_directories(sicnu_core PUBLIC
@@ -2928,3 +2928,16 @@ target_link_libraries(sicnu_core PUBLIC
   Qt6::Gui
   qgis_core
 )
+
+# Embedded-Python plugin hosting: PluginHost pulls in PythonPluginHost and the
+# headless ProjectContext/AppInterface seam (mirrors the app/CLI/test wiring).
+if(SICNU_EMBED_PYTHON)
+  target_sources(sicnu_core PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/app/python/sicnu_app_interface.cpp
+  )
+  target_compile_definitions(sicnu_core PRIVATE SICNU_EMBED_PYTHON=1)
+  target_link_libraries(sicnu_core PUBLIC
+    sicnu_python_isolated
+    Sicnu::qgis_display
+  )
+endif()

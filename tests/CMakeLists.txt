@@ -2218,7 +2218,10 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
   set_target_properties(test_obia_task_center PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(test_obia_task_center)
 
-  add_executable(test_obia_task test_obia_task.cpp)
+  add_executable(test_obia_task
+    test_obia_task.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  )
   target_link_libraries(test_obia_task PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -2244,7 +2247,10 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
   sicnu_discover_tests(test_obia_task)
 
   # Phase 10B.6 — OBIA end-to-end integration tests
-  add_executable(test_obia_integration test_obia_integration.cpp)
+  add_executable(test_obia_integration
+    test_obia_integration.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  )
   target_link_libraries(test_obia_integration PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
@@ -2273,6 +2279,7 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
   add_executable(test_obia_main_window
     test_obia_main_window.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   )
   target_link_libraries(test_obia_main_window PRIVATE
     Catch2::Catch2WithMain
@@ -2330,17 +2337,41 @@ if(TARGET sicnu_operators)
   target_link_libraries(test_pipeline_runner PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
     sicnu_operators
     sicnu_processing
     sicnu_task_center
     sicnu_jobs
     sicnu_workflow
+    sicnu_python_isolated
+    Sicnu::qgis_display
+    Sicnu::data
+    qgis_core
+    qgis_gui
     GDAL::GDAL
   )
   target_include_directories(test_pipeline_runner PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
   )
+  target_compile_definitions(test_pipeline_runner PRIVATE
+    TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data"
+  )
+  # Headless plugin hosting (ADR 0023): the runner composes PluginHost with a
+  # view-less ProjectContext and a widget-free SicnuAppInterface — compiled in
+  # only when embedded-Python support is enabled (mirrors plugin_host.cpp).
+  if(SICNU_EMBED_PYTHON)
+    target_sources(test_pipeline_runner PRIVATE
+      ${CMAKE_SOURCE_DIR}/src/core/plugin_host.cpp
+      ${CMAKE_SOURCE_DIR}/src/app/python/sicnu_app_interface.cpp
+    )
+    target_include_directories(test_pipeline_runner PRIVATE
+      ${CMAKE_SOURCE_DIR}/src/core
+      ${CMAKE_SOURCE_DIR}/src/app
+    )
+    target_compile_definitions(test_pipeline_runner PRIVATE SICNU_EMBED_PYTHON=1)
+  endif()
   if(TARGET jsoncpp)
     target_link_libraries(test_pipeline_runner PRIVATE jsoncpp)
   elseif(JSONCPP_LIBRARIES)
@@ -2870,7 +2901,7 @@ qt_add_executable(test_python_plugin_manager
   ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
   ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_api.cpp
   ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_runner.cpp
-  ${CMAKE_SOURCE_DIR}/src/core/plugin_manager.cpp
+  ${CMAKE_SOURCE_DIR}/src/core/plugin_host.cpp
 )
 target_link_libraries(test_python_plugin_manager PRIVATE
   Catch2::Catch2
@@ -2878,6 +2909,7 @@ target_link_libraries(test_python_plugin_manager PRIVATE
   Qt6::Gui
   Qt6::Widgets
   sicnu_python_isolated
+  sicnu_jobs
   qgis_core
   qgis_gui
   Sicnu::qgis_display
@@ -2886,6 +2918,7 @@ target_link_libraries(test_python_plugin_manager PRIVATE
   Python::Python
   CURL::libcurl
   xml2
+  jsoncpp
   ${PCRE2_16}
   ${PCRE2_8}
 )
@@ -2904,9 +2937,53 @@ target_compile_definitions(test_python_plugin_manager PRIVATE
 )
 sicnu_discover_tests(test_python_plugin_manager)
 
+qt_add_executable(test_plugin_host
+  test_plugin_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/python/sicnu_app_interface.cpp
+  ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
+  ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_api.cpp
+  ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/core/plugin_host.cpp
+)
+target_link_libraries(test_plugin_host PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  sicnu_python_isolated
+  sicnu_jobs
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  sicnu_processing
+  sicnu_operators
+  Python::Python
+  CURL::libcurl
+  xml2
+  jsoncpp
+  ${PCRE2_16}
+  ${PCRE2_8}
+)
+target_include_directories(test_plugin_host PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/core
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/python
+  ${CMAKE_SOURCE_DIR}/src/python
+  ${CMAKE_SOURCE_DIR}/src/python/isolated
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_plugin_host PRIVATE
+  SICNU_EMBED_PYTHON=1
+  TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
+)
+sicnu_discover_tests(test_plugin_host)
+
 qt_add_executable(test_python_plugin_host
   test_python_plugin_host.cpp
   ${CMAKE_SOURCE_DIR}/src/cli/rs_pipeline_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/core/plugin_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/python/sicnu_app_interface.cpp
 )
 target_link_libraries(test_python_plugin_host PRIVATE
   Catch2::Catch2WithMain
@@ -2927,6 +3004,7 @@ target_link_libraries(test_python_plugin_host PRIVATE
 target_include_directories(test_python_plugin_host PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/core
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_SOURCE_DIR}/src/python/isolated
   ${CMAKE_BINARY_DIR}
 )

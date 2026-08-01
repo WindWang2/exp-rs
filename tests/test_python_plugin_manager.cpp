@@ -11,7 +11,7 @@
 #include "app_interface_bridge.h"
 #include "python_app_interface_proxy.h"
 #include "python_worker_process_pool.h"
-#include "plugin_manager.h"
+#include "plugin_host.h"
 #include "processing/framework/algorithm_engine.h"
 
 #include <QEventLoop>
@@ -89,7 +89,7 @@ TEST_CASE( "SicnuAppInterface injected plugin menu takes priority over lazy menu
   CHECK( mainWindow.menuBar()->actions().isEmpty() );
 }
 
-TEST_CASE( "PluginManager scans and loads Python plugin directory", "[python][plugin_manager]" )
+TEST_CASE( "PluginHost scans and loads Python plugin directory", "[python][plugin_host]" )
 {
   REQUIRE( QgisPython::instance().initialize() );
 
@@ -102,22 +102,22 @@ TEST_CASE( "PluginManager scans and loads Python plugin directory", "[python][pl
   host.setMessageBar( &messageBar );
 
   SicnuAppInterface iface( &mainWindow, &host, nullptr );
-  PluginManager manager( &canvas, &treeView );
-  manager.setAppInterface( &iface );
+  PluginHost pluginHost( 2 );
+  pluginHost.setAppInterface( &iface );
 
   const QString pluginDir = fixturePath( QStringLiteral( "plugins" ) );
-  manager.loadPlugins( pluginDir );
+  pluginHost.loadPlugins( pluginDir );
 
-  CHECK( manager.isPluginLoaded( QStringLiteral( "Sample Python Plugin" ) ) );
-  CHECK( manager.loadedPlugins().contains( QStringLiteral( "Sample Python Plugin" ) ) );
+  CHECK( pluginHost.isPluginLoaded( QStringLiteral( "Sample Python Plugin" ) ) );
+  CHECK( pluginHost.loadedPlugins().contains( QStringLiteral( "Sample Python Plugin" ) ) );
 
-  SicnuPluginInterface *plugin = manager.plugin( QStringLiteral( "Sample Python Plugin" ) );
+  SicnuPluginInterface *plugin = pluginHost.plugin( QStringLiteral( "Sample Python Plugin" ) );
   REQUIRE( plugin != nullptr );
   CHECK( plugin->name() == QStringLiteral( "Sample Python Plugin" ) );
   CHECK( plugin->version() == QStringLiteral( "1.0" ) );
 
-  manager.unloadAll();
-  CHECK_FALSE( manager.isPluginLoaded( QStringLiteral( "Sample Python Plugin" ) ) );
+  pluginHost.unloadAll();
+  CHECK_FALSE( pluginHost.isPluginLoaded( QStringLiteral( "Sample Python Plugin" ) ) );
 }
 
 TEST_CASE( "PythonWorkerProcess & PythonIpcServer start subprocess and achieve Ping/Pong handshake", "[python][isolated]" )
@@ -395,7 +395,7 @@ TEST_CASE( "PythonPluginAdapter initializes and unloads Python plugin over Pytho
                                iface.activeViewHost(),
                                &pool );
 
-  REQUIRE( adapter.initialize( &canvas, nullptr ) );
+  REQUIRE( adapter.initialize( &iface ) );
 
   // Unload plugin
   adapter.unload();

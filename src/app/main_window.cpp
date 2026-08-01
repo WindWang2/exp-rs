@@ -66,7 +66,7 @@
 #include <qgsdockwidget.h>
 
 // Plugin system
-#include <core/plugin_manager.h>
+#include <core/plugin_host.h>
 #include <core/interfaces/sicnu_plugin_interface.h>
 
 #ifdef SICNU_EMBED_PYTHON
@@ -117,6 +117,10 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
         m_projectContext ? m_projectContext->mainViewId()
                          : sicnu::display::DisplayViewId{},
         this );
+    // TICKET-40: enable the auto-display policy — assets added to the Data
+    // Manager are presented on the active view automatically.
+    if ( m_activeViewHost->displayManager() )
+        m_activeViewHost->displayManager()->setAutoDisplayOnAssetAdded( true );
     // Data Manager panel needs ProjectContext; setupDockWidgets runs earlier.
     qDebug() << "Setting up Data Manager panel...";
     setupDataManagerPanel();
@@ -140,19 +144,15 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
 
     // Load plugins
     qDebug() << "Loading plugins...";
-    m_pluginManager = std::make_unique<PluginManager>(m_mapCanvas, m_layerTreeView);
+    m_pluginHost = std::make_unique<PluginHost>();
 #ifdef SICNU_EMBED_PYTHON
-    // Wire the application interface facade so Python plugins get a live
-    // plugin menu, the DataManager asset seam, and the view host. The menu
-    // is hosted on the detached appMenuBar(): QMainWindow::menuBar() is
-    // forbidden here (it deletes the installed top chrome).
     m_appInterface = std::make_unique<SicnuAppInterface>( this, m_activeViewHost.get(), m_projectContext.get() );
     m_appInterface->setPluginMenu( appMenuBar()->addMenu( tr( "插件" ) ) );
-    m_pluginManager->setAppInterface( m_appInterface.get() );
+    m_pluginHost->setAppInterface(m_appInterface.get());
 #endif
-    m_pluginManager->loadPlugins(QCoreApplication::applicationDirPath() + "/../plugins");
-    for (const QString &pluginName : m_pluginManager->loadedPlugins()) {
-        SicnuPluginInterface *plugin = m_pluginManager->plugin(pluginName);
+    m_pluginHost->loadPlugins(QCoreApplication::applicationDirPath() + "/../plugins");
+    for (const QString &pluginName : m_pluginHost->loadedPlugins()) {
+        SicnuPluginInterface *plugin = m_pluginHost->plugin(pluginName);
         if (!plugin) continue;
 
         // Add plugin widgets as dock widgets
@@ -258,7 +258,7 @@ QgisDesktopWindow::~QgisDesktopWindow()
     // plugin proxy still holds live pointers through m_appInterface — destroy
     // the plugin manager first, then the interface, then the view host and
     // project context it references.
-    m_pluginManager.reset();
+    m_pluginHost.reset();
 #ifdef SICNU_EMBED_PYTHON
     m_appInterface.reset();
 #endif

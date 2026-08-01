@@ -117,8 +117,12 @@ _Avoid_: Log entry, Processing note, History string
 ## Python Plugin Infrastructure
 
 **Plugin Host**:
-The unified lifecycle and discovery manager (`PluginManager`) hosting both C++ (`QPluginLoader`) and Python (`classFactory(iface)`) plugins.
-_Avoid_: Script runner, Plugin store
+The unified lifecycle and discovery manager (`PluginHost`) hosting both C++ (`QPluginLoader`) and Python (`classFactory(iface)`) plugins. It owns no Python hosting machinery of its own: it composes the Python Plugin Host and adds menu injection and window wiring.
+_Avoid_: Plugin manager, Script runner, Plugin store
+
+**Python Plugin Host**:
+The GUI-free lifecycle owner for Python plugins (`classFactory(iface)`): it owns the `PythonWorkerProcessPool`, the `PythonAppInterfaceProxy` / Headless Asset Seam wiring, and the registration of plugin-provided `py:` processing algorithms. It requires a `DataManager` asset authority but no QWidget — UI-dependent plugin calls degrade through the Headless Asset Seam (`ui_unavailable`, `no_canvas`, `no_active_layer`). The desktop Plugin Host composes it and adds menu/window wiring; headless surfaces (the CLI pipeline runner, later the MCP Server) consume it directly, declaring which plugins to load explicitly.
+_Avoid_: Headless plugin manager, Script host, CLI plugin loader
 
 **Application Interface Facade (`iface`)**:
 The application interface facade (`SicnuAppInterface` subclassing `QgisInterface`) passed into Python plugins, wrapping `QgisDesktopWindow`, `ActiveViewHost`, and `ProjectContext` while enforcing the Data/Display seam.
@@ -229,6 +233,15 @@ _Avoid_: Workspace state map, Context dict, UI state dump
   4. **Catalog as Protocol Contract**: The ~160-line `tools/list` construction is compressed into a static meta-tool table; names, descriptions, and input schemas stay byte-equivalent — the catalog is the client protocol contract.
   5. **Shared Json↔Variant Converters**: MCP's private `jsonValueToVariant` / `variantToJsonValue` / `jsonObjectToVariantMap` move into the shared converter header (`src/processing/framework/json_params_converter.h`) next to `jsonParamsToVariantMap`; the duplicated `envFlagEnabled` moves to a shared `env_flag.h` used by both MCP and the STAC client.
   6. **Interface as Test Surface**: Headless tests fabricate `AlgorithmTaskInfo` in all six states, drive a registered no-op operator through execute → status → cancel via the real TaskCenter, and assert cancel truthfulness for terminal tasks; the pre-existing six MCP sections pass unchanged.
+
+### ADR 0023: Python Plugin Host Extraction & Headless CLI Plugin Loading Architecture
+- **Context**: `py:` algorithms were unreachable from every headless surface: `PluginManager`/`PythonPluginAdapter` lived in the app shell, no headless entry point owned a `DataManager`, JobEngine had no `py:` prefix executor, and the only `py:` execution face (`PythonAlgorithmAdapter::execute` → `sendRequestAndAwait`) assumes the main thread while CLI pipeline tasks run on JobEngine worker threads with a wait loop that never pumps Qt events. Spec: `docs/superpowers/specs/2026-08-01-cli-python-plugin-host-spec.md`.
+- **Decision**:
+  1. **Single Hosting Core**: Extract the Python hosting machinery (worker pool, proxy/bridge wiring, `classFactory` lifecycle, `py:` algorithm registration) from `PluginManager` into the GUI-free **Python Plugin Host**. `PluginManager` keeps C++ plugins, directory scanning, and menu/window wiring, and composes the host — one implementation, no parallel headless copy.
+  2. **Full Lifecycle, Degraded UI**: Headless loading runs the complete plugin lifecycle (`metadata.txt`, `classFactory(iface)`, algorithm registration); UI-dependent plugin calls degrade through the Headless Asset Seam's existing status codes (`ui_unavailable`, `no_canvas`, `no_active_layer`).
+  3. **Headless DataManager Ownership**: The CLI creates and owns a `DataManager`, injects it into the host's bridge wiring, and registers completed pipeline task outputs as `TaskTemporary` Data Assets via `DataManager::registerSource` + `attachDerivationRecord`, so plugin catalog calls see real state. `OutputCommitter` is deliberately not used: its atomic temp→stable rename and `DeletableSource` ownership fit TaskCenter-owned temp files, not user-declared final output paths.
+  4. **Main-Thread Marshaling**: A `py:` JobEngine prefix executor marshals `AlgorithmEngine::executeAlgorithm` to the main thread (`Qt::BlockingQueuedConnection`, direct call when already there); the CLI pipeline wait loop interleaves `processEvents()`. `PythonIpcServer` and ticket 02's verified await mechanism stay untouched.
+  5. **Explicit Plugin Declaration**: The CLI loads only plugins named by repeatable `--python-plugin` options and aborts before the pipeline starts if any declared plugin fails to load; the host itself holds no loading policy, so the desktop (scan-all) and MCP (config) plug in their own.
 
 
 

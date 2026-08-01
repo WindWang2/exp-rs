@@ -37,7 +37,7 @@
 #include <processing/qgsprocessingregistry.h>
 #include <processing/qgsprocessingtoolboxtreeview.h>
 
-#include "core/plugin_manager.h"
+#include "core/plugin_host.h"
 
 SicnuMainWindow::SicnuMainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -48,7 +48,7 @@ SicnuMainWindow::SicnuMainWindow(QWidget *parent)
 
 SicnuMainWindow::~SicnuMainWindow()
 {
-    delete m_pluginManager;
+    delete m_pluginHost;
 }
 
 void SicnuMainWindow::initialize()
@@ -270,18 +270,18 @@ void SicnuMainWindow::initLayerTree()
 
 void SicnuMainWindow::loadPlugins()
 {
-    m_pluginManager = new PluginManager(m_mapCanvas, m_layerTree, this);
+    m_pluginHost = new PluginHost(2, this);
 
-    connect(m_pluginManager, &PluginManager::pluginLoaded, this, [this](const QString &name) {
+    connect(m_pluginHost, &PluginHost::pluginLoaded, this, [this](const QString &name) {
         statusBar()->showMessage(QString("Plugin loaded: %1").arg(name), 3000);
     });
 
-    connect(m_pluginManager, &PluginManager::pluginError, this, [this](const QString &name, const QString &error) {
+    connect(m_pluginHost, &PluginHost::pluginError, this, [this](const QString &name, const QString &error) {
         qWarning() << "Plugin error:" << name << error;
     });
 
     QString pluginDir = QCoreApplication::applicationDirPath() + "/../plugins";
-    m_pluginManager->loadPlugins(pluginDir);
+    m_pluginHost->loadPlugins(pluginDir);
 }
 
 void SicnuMainWindow::addPluginDockWidget(const QString &pluginName, QDockWidget *dock)

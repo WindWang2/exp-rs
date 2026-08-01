@@ -18,7 +18,7 @@ class QgsProcessingToolboxTreeView;
 class QgsMapToolPan;
 class QgsMapToolZoom;
 class QgsMapToolIdentify;
-class PluginManager;
+class PluginHost;
 
 class SicnuMainWindow : public QMainWindow
 {
@@ -39,7 +39,7 @@ public:
     QgsMapCanvas *mapCanvas() const { return m_mapCanvas; }
     QgsLayerTreeView *layerTreeView() const { return m_layerTree; }
     QgsLayerTreeModel *layerTreeModel() const { return m_layerTreeModel; }
-    PluginManager *pluginManager() const { return m_pluginManager; }
+    PluginHost *pluginHost() const { return m_pluginHost; }
 
     // Layer operations
     void addRasterLayer();
@@ -121,8 +121,8 @@ private:
     QLabel *m_scaleLabel = nullptr;
     QLabel *m_renderTimeLabel = nullptr;
 
-    // Plugin manager
-    PluginManager *m_pluginManager = nullptr;
+    // Plugin host
+    PluginHost *m_pluginHost = nullptr;
 
     // Plugin UI containers
     QMap<QString, QDockWidget*> m_pluginDocks;

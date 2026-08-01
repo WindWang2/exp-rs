@@ -470,14 +470,35 @@ private:
     std::unique_ptr<sicnu::app::ProjectContext> m_projectContext;
     std::unique_ptr<ActiveViewHost> m_activeViewHost;
 
-    // Declared before m_pluginManager so it is destroyed after it: the
-    // plugin proxy holds live DataManager*/view-host pointers through the
-    // interface, so the interface must outlive the plugin manager.
+    // Declared before m_pluginHost so it is destroyed after it: the
+    // plugin proxy (`PythonAppInterfaceProxy`) holds a raw `ActiveViewHost*`
+    // and `ProjectContext*` passed through `m_appInterface`. Python plugin
+    // teardown (`unloadAll`) spins a nested event loop while communicating
+    // over IPC to close worker processes, so worker responses can still call
+    // into `m_appInterface`. `m_appInterface` itself holds raw pointers to
+    // `m_activeViewHost` and `m_projectContext`. Destroy `m_pluginHost` first
+    // (unloading all plugins), then `m_appInterface`, then the view host and
+    // project context.
+    //
+    // Note on construction: `m_appInterface` needs `m_activeViewHost` and
+    // `m_projectContext`, which are created early in `setupUi()`, so
+    // `m_appInterface` is instantiated lazily in `loadPlugins()`. `m_pluginHost`
+    // needs `m_appInterface`, so `m_appInterface` is passed to `m_pluginHost`
+    // when created. `m_appInterface` holds a raw `this` pointer to the main
+    // window; `m_pluginHost` is owned by `this`. `m_pluginHost` outlives
+    // `m_appInterface` on destruction if declarations are in order, BUT
+    // `unloadAll()` is called in the destructor before `m_appInterface` is
+    // destroyed to ensure workers drop their proxies before `m_appInterface`
+    // dies.
+    //
+    // `m_appInterface` comes BEFORE `m_pluginHost` in declaration order so
+    // C++ member destruction order (reverse declaration) destroys
+    // `m_pluginHost` first, THEN `m_appInterface`.
 #ifdef SICNU_EMBED_PYTHON
     std::unique_ptr<SicnuAppInterface> m_appInterface;
 #endif
 
-    std::unique_ptr<class PluginManager> m_pluginManager;
+    std::unique_ptr<class PluginHost> m_pluginHost;
 
     // Lazy-loaded modules
 #ifdef SICNU_EMBED_PYTHON
