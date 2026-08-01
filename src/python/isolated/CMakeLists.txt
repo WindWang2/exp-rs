@@ -5,6 +5,7 @@ qt_add_library(sicnu_python_isolated STATIC
     python_app_interface_proxy.cpp
     python_ipc_server.cpp
     python_plugin_adapter.cpp
+    python_plugin_host.cpp
     python_worker_process.cpp
     python_worker_process_pool.cpp
     ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp

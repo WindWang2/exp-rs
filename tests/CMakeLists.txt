@@ -2904,6 +2904,37 @@ target_compile_definitions(test_python_plugin_manager PRIVATE
 )
 sicnu_discover_tests(test_python_plugin_manager)
 
+qt_add_executable(test_python_plugin_host
+  test_python_plugin_host.cpp
+)
+target_link_libraries(test_python_plugin_host PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  sicnu_python_isolated
+  Sicnu::qgis_display
+  sicnu_processing
+  sicnu_operators
+  sicnu_task_center
+  sicnu_jobs
+  sicnu_workflow
+  Sicnu::data
+  qgis_core
+  GDAL::GDAL
+)
+target_include_directories(test_python_plugin_host PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/core
+  ${CMAKE_SOURCE_DIR}/src/python/isolated
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_python_plugin_host PRIVATE
+  SICNU_EMBED_PYTHON=1
+  TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
+)
+sicnu_discover_tests(test_python_plugin_host)
+
 qt_add_executable(test_python_processing_provider
   test_python_processing_provider.cpp
   ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp
