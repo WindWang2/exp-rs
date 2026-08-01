@@ -1,22 +1,73 @@
-// src/python/isolated/python_plugin_host.cpp
 #include "python_plugin_host.h"
 
 #include "python_plugin_adapter.h"
 #include "python_worker_process_pool.h"
+#include "processing/framework/algorithm_engine.h"
+#include "processing/framework/json_params_converter.h"
+#include "jobs/job_engine.h"
 
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QPointer>
 #include <QTextStream>
+#include <QThread>
 
 using namespace sicnu::python::isolated;
+
+namespace
+{
+
+/// Main-thread context for marshaled py: execution. Written by the most
+/// recently constructed PythonPluginHost (main thread, before any job runs);
+/// QPointer self-clears when the host dies. py: adapters and the IPC server
+/// are main-thread citizens (ticket 02), so worker-thread jobs must marshal.
+QPointer<QObject> g_pyMainContext;
+
+Json::Value runPythonPrefixJob( const sicnu::jobs::JobRequest &req,
+                                sicnu::operators::RSOperatorContext &operatorContext )
+{
+  Q_UNUSED( operatorContext );
+  if ( g_pyMainContext.isNull() )
+  {
+    throw std::runtime_error( "No PythonPluginHost alive on the main thread for py: execution" );
+  }
+
+  const QString algoId = QString::fromStdString( req.algorithmId );
+  const QVariantMap params = sicnu::processing::jsonParamsToVariantMap( req.params );
+
+  QString error;
+  bool ok = false;
+  auto execute = [&]() {
+    ok = sicnu::AlgorithmEngine::instance().executeAlgorithm( algoId, params, nullptr, error );
+  };
+
+  if ( QThread::currentThread() == g_pyMainContext->thread() )
+  {
+    execute();
+  }
+  else if ( !QMetaObject::invokeMethod( g_pyMainContext, std::move( execute ), Qt::BlockingQueuedConnection ) )
+  {
+    throw std::runtime_error( "Failed to marshal py: execution to the main thread" );
+  }
+
+  if ( !ok )
+  {
+    throw std::runtime_error( error.toStdString() );
+  }
+  return Json::Value( Json::objectValue );
+}
+
+} // namespace
 
 PythonPluginHost::PythonPluginHost( int poolSize, QObject *parent )
   : QObject( parent )
   , m_poolSize( poolSize )
 {
+  g_pyMainContext = this;
+  sicnu::jobs::JobEngine::instance().registerExecutor( "py:", &runPythonPrefixJob );
 }
 
 PythonPluginHost::~PythonPluginHost()
