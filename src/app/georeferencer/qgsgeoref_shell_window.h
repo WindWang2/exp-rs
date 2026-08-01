@@ -10,7 +10,6 @@
 #include "rs_georef_params_panel.h"
 #include "rs_georeferencing_session.h"
 #include "rs_georef_task_list.h"
-#include "rs_georef_workflow_bridge.h"
 
 class QAction;
 class QActionGroup;
@@ -59,8 +58,6 @@ class QgsGeorefShellWindow : public QMainWindow
     RsSessionMapWorkspace *srcSessionMap() const { return mSrcSession; }
     RsSessionMapWorkspace *dstSessionMap() const { return mDstSession; }
     RsGeorefTaskList *taskListForTest() { return mTaskList; }
-    /// Runtime session for lab.georef.image_to_map (I2M only; null on I2I).
-    RsGeorefWorkflowBridge *workflowBridgeForTest() { return mWorkflowBridge.get(); }
     /**
      * QGIS-style Image→Map GCP: click source image, then enter map X/Y or pick
      * from the main application canvas (no embedded base-image panel).
@@ -174,8 +171,6 @@ class QgsGeorefShellWindow : public QMainWindow
     /// Observer of RsGeoreferencingSession::fitChanged — sole fit UI updater.
     void onSessionFitChanged( const RsGeorefFitResult &fit );
     void onPointsChanged();
-    /// Workflow bridge sync: mirrors GCP count + step progress from session signals.
-    void syncWorkflowGcps();
     void deleteGcpRows( const QList<int> &rows );
     void selectPoint( const QgsPointXY &p );
     void movePoint( const QgsPointXY &p );
@@ -313,7 +308,4 @@ class QgsGeorefShellWindow : public QMainWindow
     /// Task-list row id of the running warp (the session tracks the Task
     /// Center id via pendingWarpTaskId()). -1 when no warp is in flight.
     int mActiveWarpTaskListId = -1;
-
-    /// lab.georef.image_to_map session (opened by I2M shell only).
-    std::unique_ptr<RsGeorefWorkflowBridge> mWorkflowBridge;
 };

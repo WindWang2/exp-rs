@@ -1,4 +1,5 @@
 #include "qgsgeoref_shell_window.h"
+#include <QMainWindow>
 
 #include "shell/rs_session_map_workspace.h"
 #include "qgsmaptoolpan.h"
@@ -140,8 +141,6 @@ QgsGeorefShellWindow::QgsGeorefShellWindow( QgisInterface *iface, QWidget *paren
 
 QgsGeorefShellWindow::~QgsGeorefShellWindow()
 {
-  if ( mWorkflowBridge )
-    mWorkflowBridge->close();
   qDeleteAll( mDataPoints );
   mDataPoints.clear();
   qDeleteAll( mGcpViewPoints );
@@ -230,8 +229,6 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
 
   connect( &mGeorefSession, &RsGeoreferencingSession::gcpsChanged,
            this, &QgsGeorefShellWindow::onPointsChanged );
-  connect( &mGeorefSession, &RsGeoreferencingSession::gcpsChanged,
-           this, &QgsGeorefShellWindow::syncWorkflowGcps );
   connect( &mGeorefSession, &RsGeoreferencingSession::fitChanged,
            this, &QgsGeorefShellWindow::onSessionFitChanged );
   connect( mParamsPanel, &RsGeorefParamsPanel::transformMethodChanged,
@@ -293,12 +290,6 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
              {
                if ( mTaskList )
                  mTaskList->finishSuccess( listId, 0, 0 );
-               if ( mWorkflowBridge && mWorkflowBridge->isOpen() )
-               {
-                 mWorkflowBridge->setOutputArtifact( outputPath.toStdString() );
-                 mWorkflowBridge->markStepComplete( "warp" );
-                 mWorkflowBridge->gotoStep( "load_result" );
-               }
                statusBar()->showMessage(
                  tr( "任务 #%1 完成: %2 — 双击可加载到主工程" )
                    .arg( listId )
@@ -1129,20 +1120,6 @@ void QgsGeorefShellWindow::onTransformMethodChanged()
   refreshFit();
 }
 
-void QgsGeorefShellWindow::syncWorkflowGcps()
-{
-  if ( !mWorkflowBridge || !mWorkflowBridge->isOpen() )
-    return;
-  const auto &gcps = mGeorefSession.gcps();
-  mWorkflowBridge->setGcpCountArtifact( static_cast<int>( gcps.size() ) );
-  if ( !gcps.isEmpty() )
-  {
-    mWorkflowBridge->markStepComplete( "gcp" );
-    if ( mWorkflowBridge->runtime().state( mWorkflowBridge->sessionId() ).currentStepId == "gcp" )
-      mWorkflowBridge->gotoStep( "transform" );
-  }
-}
-
 void QgsGeorefShellWindow::onPointsChanged()
 {
   // Session is the sole owner of the GCP list — reconcile view rows/markers.
@@ -1583,11 +1560,6 @@ void QgsGeorefShellWindow::loadWarpOutputToProject( const QString &path )
     }
   }
 
-  if ( mWorkflowBridge && mWorkflowBridge->isOpen() )
-  {
-    mWorkflowBridge->setOutputArtifact( path.toStdString() );
-    mWorkflowBridge->markStepComplete( "load_result" );
-  }
   if ( statusBar() )
     statusBar()->showMessage(
       tr( "已请求加载到主工程: %1" ).arg( QFileInfo( path ).fileName() ), 5000 );
@@ -1954,12 +1926,6 @@ bool QgsGeorefShellWindow::loadSourceRaster( const QString &path, const QString 
   updateToolAvailability();
   refreshFit();
   mGeorefSession.saveWorkflow( captureWorkflowSnapshot() );
-  if ( mWorkflowBridge && mWorkflowBridge->isOpen() )
-  {
-    mWorkflowBridge->setSourceRasterArtifact( path.toStdString() );
-    mWorkflowBridge->markStepComplete( "open_image" );
-    mWorkflowBridge->gotoStep( "gcp" );
-  }
   if ( statusBar() )
     statusBar()->showMessage( tr( "已加载源影像 (Warp): %1" ).arg( layer->name() ), 4000 );
   return true;

@@ -115,8 +115,8 @@ The structured provenance of an algorithm-produced Data Asset, including the alg
 _Avoid_: Log entry, Processing note, History string
 
 **Georeferencing Session (`RsGeoreferencingSession`)**:
-The single deep module owning GCP pairing, transform fitting (`refit()`), residual calculations, dirty state tracking (`isDirty()`), `QSettings` workflow snapshot persistence (`saveWorkflow`/`restoreWorkflow`), and Task Center warp task dispatch.
-_Avoid_: Session state sidecar, Split GCP manager, Dialog dirty flag
+The single deep module owning GCP pairing, transform fitting (`refit()`), residual calculations, dirty state tracking (`isDirty()`), `QSettings` workflow snapshot persistence (`saveWorkflow`/`restoreWorkflow`), `WorkflowRuntime` session mirror (`enableWorkflowMirror`), and Task Center warp task dispatch.
+_Avoid_: Session state sidecar, Workflow bridge sidecar, Split GCP manager, Dialog dirty flag
 
 ## Python Plugin Infrastructure
 

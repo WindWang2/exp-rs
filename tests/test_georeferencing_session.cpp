@@ -669,4 +669,21 @@ TEST_CASE( "GeoreferencingSession: RPC below 3 GCPs skips refinement",
   }
 }
 
+TEST_CASE( "GeoreferencingSession: WorkflowRuntime mirror integration (ADR 0028)",
+           "[georef][session][workflow]" )
+{
+  RsGeoreferencingSession session;
+  REQUIRE_FALSE( session.isWorkflowMirrorActive() );
+
+  REQUIRE( session.enableWorkflowMirror( "lab.georef.image_to_map" ) );
+  REQUIRE( session.isWorkflowMirrorActive() );
+  REQUIRE_FALSE( session.workflowSessionId().empty() );
+
+  session.setSourceRasterPath( QStringLiteral( "/tmp/source.tif" ) );
+  session.setGcps( linearGcps() );
+
+  session.setWorkflowStep( "gcp" );
+  session.markWorkflowStepComplete( "gcp" );
+}
+
 #include "test_georeferencing_session.moc"

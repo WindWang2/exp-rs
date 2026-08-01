@@ -21,7 +21,11 @@
 #include "qgspointxy.h"
 
 #include "processing/framework/task_center.h"
+#include "workflow/builtin_definitions.h"
+#include "workflow/workflow_registry.h"
+#include "workflow/workflow_runtime.h"
 
+class QWidget;
 class QgsGeorefTransform;
 class RsWarpTask;
 
@@ -124,8 +128,11 @@ struct RsGeorefWarpSnapshot
 };
 
 /**
- * Deep Georeferencing Session: GCP + fit + snapshot + Task Center warp.
- * Independent per window instance (one session object per shell).
+ * Deep Georeferencing Session (ADR 0027, ADR 0028).
+ *
+ * Single deep module owning GCP pairing, transform fitting, residual calculations,
+ * dirty state tracking, QSettings snapshot persistence, WorkflowRuntime session mirror
+ * (lab.georef.image_to_map), and Task Center warp task dispatch.
  */
 class RsGeoreferencingSession : public QObject
 {
@@ -164,6 +171,13 @@ class RsGeoreferencingSession : public QObject
 
     void saveWorkflow( const WorkflowSnapshot &s );
     WorkflowSnapshot restoreWorkflow();
+
+    /// WorkflowRuntime mirror for lab.georef.image_to_map (ADR 0028).
+    bool enableWorkflowMirror( const std::string &definitionId = "lab.georef.image_to_map" );
+    bool isWorkflowMirrorActive() const { return !mWorkflowSessionId.empty(); }
+    const std::string &workflowSessionId() const { return mWorkflowSessionId; }
+    void setWorkflowStep( const std::string &stepId );
+    void markWorkflowStepComplete( const std::string &stepId );
 
     void setSourceRasterPath( const QString &path );
     QString sourceRasterPath() const { return mSourcePath; }
@@ -240,6 +254,7 @@ class RsGeoreferencingSession : public QObject
     /// (for RpcPhysical) injecting source path + DEM/Z-offset/refinement into
     /// QgsRpcGcpTransformer — mirrors the shell's recomputeFit configuration.
     std::unique_ptr<QgsGeorefTransform> makeConfiguredTransform( bool rpcRefinement ) const;
+    void syncWorkflowGcps();
 
     bool mDirty = false;
     QString mLastPointsPath;
@@ -256,4 +271,10 @@ class RsGeoreferencingSession : public QObject
     long mPendingWarpTaskId = -1;
     RsWarpTask *mPendingWarpTask = nullptr; // deleteLater on terminal
     RsGeorefWarpSnapshot mPendingSnap;
+
+    // WorkflowRuntime mirror (ADR 0028)
+    sicnu::workflow::WorkflowRegistry mWorkflowRegistry;
+    sicnu::workflow::WorkflowRuntime mWorkflowRuntime;
+    std::string mWorkflowSessionId;
+    bool mWorkflowBuiltinsRegistered = false;
 };

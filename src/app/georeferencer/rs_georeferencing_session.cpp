@@ -81,6 +81,7 @@ RsGeoreferencingSession::RsGeoreferencingSession(
   std::shared_ptr<RsGeorefWarpExecutor> executor, QObject *parent )
   : QObject( parent )
   , mExecutor( std::move( executor ) )
+  , mWorkflowRuntime( mWorkflowRegistry )
 {
   if ( !mExecutor )
     mExecutor = std::make_shared<RsGeorefTaskCenterExecutor>();
@@ -100,26 +101,16 @@ void RsGeoreferencingSession::saveWindow( QWidget *w )
 {
   if ( !w )
     return;
-  QSettings s;
-  s.setValue( QStringLiteral( "%1geometry" ).arg( QLatin1String( kPrefix ) ), w->saveGeometry() );
-  if ( auto *mw = qobject_cast<QMainWindow *>( w ) )
-    s.setValue( QStringLiteral( "%1windowState" ).arg( QLatin1String( kPrefix ) ), mw->saveState() );
+  QSettings().setValue( QStringLiteral( "%1geometry" ).arg( QLatin1String( kPrefix ) ), w->saveGeometry() );
 }
 
 void RsGeoreferencingSession::restoreWindow( QWidget *w )
 {
   if ( !w )
     return;
-  QSettings s;
-  const QByteArray geo = s.value( QStringLiteral( "%1geometry" ).arg( QLatin1String( kPrefix ) ) ).toByteArray();
-  if ( !geo.isEmpty() )
-    w->restoreGeometry( geo );
-  if ( auto *mw = qobject_cast<QMainWindow *>( w ) )
-  {
-    const QByteArray st = s.value( QStringLiteral( "%1windowState" ).arg( QLatin1String( kPrefix ) ) ).toByteArray();
-    if ( !st.isEmpty() )
-      mw->restoreState( st );
-  }
+  const auto g = QSettings().value( QStringLiteral( "%1geometry" ).arg( QLatin1String( kPrefix ) ) ).toByteArray();
+  if ( !g.isEmpty() )
+    w->restoreGeometry( g );
 }
 
 void RsGeoreferencingSession::saveWorkflow( const WorkflowSnapshot &snap )
@@ -158,10 +149,58 @@ RsGeoreferencingSession::WorkflowSnapshot RsGeoreferencingSession::restoreWorkfl
   return o;
 }
 
+bool RsGeoreferencingSession::enableWorkflowMirror( const std::string &definitionId )
+{
+  if ( !mWorkflowBuiltinsRegistered )
+  {
+    sicnu::workflow::registerBuiltinWorkflows( mWorkflowRegistry );
+    mWorkflowBuiltinsRegistered = true;
+  }
+  mWorkflowSessionId = mWorkflowRuntime.open( definitionId );
+  if ( mWorkflowSessionId.empty() )
+    return false;
+
+  if ( !mSourcePath.isEmpty() )
+  {
+    mWorkflowRuntime.setArtifact( mWorkflowSessionId, "source_raster", mSourcePath.toStdString() );
+    mWorkflowRuntime.markStepComplete( mWorkflowSessionId, "open_image" );
+    mWorkflowRuntime.gotoStep( mWorkflowSessionId, "gcp" );
+  }
+  syncWorkflowGcps();
+  return true;
+}
+
+void RsGeoreferencingSession::setWorkflowStep( const std::string &stepId )
+{
+  if ( isWorkflowMirrorActive() )
+    mWorkflowRuntime.gotoStep( mWorkflowSessionId, stepId );
+}
+
+void RsGeoreferencingSession::markWorkflowStepComplete( const std::string &stepId )
+{
+  if ( isWorkflowMirrorActive() )
+    mWorkflowRuntime.markStepComplete( mWorkflowSessionId, stepId );
+}
+
+void RsGeoreferencingSession::syncWorkflowGcps()
+{
+  if ( !isWorkflowMirrorActive() )
+    return;
+  const int n = enabledCount( mGcps );
+  mWorkflowRuntime.setArtifact(
+    mWorkflowSessionId, "gcp_count", n > 0 ? std::to_string( n ) : std::string() );
+}
+
 void RsGeoreferencingSession::setSourceRasterPath( const QString &path )
 {
   mSourcePath = path;
   markDirty();
+  if ( isWorkflowMirrorActive() && !path.isEmpty() )
+  {
+    mWorkflowRuntime.setArtifact( mWorkflowSessionId, "source_raster", path.toStdString() );
+    mWorkflowRuntime.markStepComplete( mWorkflowSessionId, "open_image" );
+    mWorkflowRuntime.gotoStep( mWorkflowSessionId, "gcp" );
+  }
 }
 
 void RsGeoreferencingSession::setTransformMethod(
@@ -175,6 +214,7 @@ void RsGeoreferencingSession::setGcps( const QVector<RsGeorefGcpPair> &gcps )
 {
   mGcps = gcps;
   markDirty();
+  syncWorkflowGcps();
   emit gcpsChanged();
 }
 
@@ -185,6 +225,7 @@ void RsGeoreferencingSession::clearGcps()
   mGcps.clear();
   mLastFit = RsGeorefFitResult{};
   markDirty();
+  syncWorkflowGcps();
   emit gcpsChanged();
   emit fitChanged( mLastFit );
 }
@@ -193,6 +234,7 @@ void RsGeoreferencingSession::addGcp( const RsGeorefGcpPair &gcp )
 {
   mGcps.append( gcp );
   markDirty();
+  syncWorkflowGcps();
   emit gcpsChanged();
   refit();
 }
@@ -205,6 +247,7 @@ void RsGeoreferencingSession::appendGcps( const QVector<RsGeorefGcpPair> &gcps )
   for ( const auto &p : gcps )
     mGcps.append( p );
   markDirty();
+  syncWorkflowGcps();
   emit gcpsChanged();
   refit();
 }
@@ -215,6 +258,7 @@ void RsGeoreferencingSession::removeGcpAt( int row )
     return;
   mGcps.removeAt( row );
   markDirty();
+  syncWorkflowGcps();
   emit gcpsChanged();
   refit();
 }
@@ -227,6 +271,7 @@ void RsGeoreferencingSession::setGcpEnabled( int row, bool enabled )
     return;
   mGcps[row].enabled = enabled;
   markDirty();
+  syncWorkflowGcps();
   emit gcpsChanged();
   refit();
 }
@@ -523,6 +568,13 @@ void RsGeoreferencingSession::onTaskUpdated( const sicnu::AlgorithmTaskInfo &inf
             : info.errorMessage;
     if ( err.isEmpty() )
       err = QStringLiteral( "Warp failed" );
+  }
+
+  if ( ok && isWorkflowMirrorActive() )
+  {
+    mWorkflowRuntime.setArtifact( mWorkflowSessionId, "output", out.toStdString() );
+    mWorkflowRuntime.markStepComplete( mWorkflowSessionId, "warp" );
+    mWorkflowRuntime.gotoStep( mWorkflowSessionId, "warp" );
   }
 
   if ( task )
