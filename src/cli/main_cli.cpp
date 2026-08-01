@@ -1,16 +1,16 @@
-/***************************************************************************
- * main_cli.cpp  —  Headless CLI entry point for SICNU GEO RS pipelines
- ***************************************************************************/
 #include "rs_pipeline_runner.h"
 
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "python/isolated/python_plugin_host.h"
+#include "data/data_manager.h"
 
 #include <QCoreApplication>
 #include <QCommandLineParser>
 #include <QDebug>
 
 #include <iostream>
+#include <memory>
 
 using namespace sicnu::cli;
 namespace operators = sicnu::operators;
@@ -45,9 +45,33 @@ int main(int argc, char *argv[])
         "operator");
     parser.addOption(schemaOption);
 
+    const QCommandLineOption pythonPluginOption(
+        QStringList() << "python-plugin",
+        "Load the Python plugin directory before running the pipeline (repeatable).",
+        "dir");
+    parser.addOption(pythonPluginOption);
+
     parser.process(app);
 
     ensureGdalInit();
+
+    // Headless Python Plugin Host (ADR 0023): explicit declaration only.
+    const QStringList pythonPluginDirs = parser.values(pythonPluginOption);
+    std::unique_ptr<sicnu::data::DataManager> dataManager;
+    std::unique_ptr<sicnu::python::isolated::PythonPluginHost> pythonHost;
+    if (!pythonPluginDirs.isEmpty()) {
+        dataManager = std::make_unique<sicnu::data::DataManager>();
+        pythonHost = std::make_unique<sicnu::python::isolated::PythonPluginHost>(2);
+        for (const QString& dir : pythonPluginDirs) {
+            QString error;
+            if (!pythonHost->loadPlugin(dir, dataManager.get(), nullptr, nullptr, &error)) {
+                std::cerr << "Failed to load Python plugin '" << dir.toStdString()
+                          << "': " << error.toStdString() << "\n";
+                return 1;
+            }
+            std::cout << "Loaded Python plugin: " << dir.toStdString() << "\n";
+        }
+    }
 
     // List operators
     if (parser.isSet(listOption)) {
@@ -92,6 +116,9 @@ int main(int argc, char *argv[])
     };
 
     RsPipelineRunner runner(progressCb, logCb);
+    if (dataManager) {
+        runner.setAssetRegistry(dataManager.get());
+    }
     const auto result = runner.runFromFile(pipelinePath.toStdString());
 
     if (!result.success) {

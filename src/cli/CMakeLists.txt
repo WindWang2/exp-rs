@@ -19,6 +19,8 @@ target_include_directories(sicnu_geo_rs_cli PRIVATE
 target_link_libraries(sicnu_geo_rs_cli PRIVATE
     Qt6::Core
     Sicnu::data
+    sicnu_python_isolated
+    Sicnu::qgis_display
     sicnu_operators
     sicnu_processing
     sicnu_task_center
