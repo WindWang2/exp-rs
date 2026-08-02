@@ -7,8 +7,7 @@
 #include <QAction>
 #include <QList>
 
-class QgsMapCanvas;
-class QgsLayerTreeView;
+class SicnuAppInterface;
 
 /**
  * @brief Interface for SICNU GEO RS plugins
@@ -28,7 +27,7 @@ public:
     virtual QIcon icon() const = 0;
 
     // Lifecycle
-    virtual bool initialize(QgsMapCanvas *canvas, QgsLayerTreeView *layerTree) = 0;
+    virtual bool initialize(SicnuAppInterface *iface) = 0;
     virtual void unload() = 0;
 
     // UI contributions (optional)

@@ -34,6 +34,7 @@ target_link_libraries(sicnu_qgis_display
 set_target_properties(sicnu_qgis_display PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
+    POSITION_INDEPENDENT_CODE ON
 )
 
 # Session map stack (store + tree + optional local bridge). Shared by classify,

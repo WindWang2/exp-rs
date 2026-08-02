@@ -159,7 +159,7 @@ PythonPluginAdapter *PythonPluginHost::loadPlugin( const QString &pluginDir,
 
   auto adapter = std::make_unique<PythonPluginAdapter>( pluginDir, packageName, name, description, version,
                                                         dataManager, pluginMenu, activeViewHost, m_pool );
-  if ( !adapter->initialize( nullptr, nullptr ) )
+  if ( !adapter->initialize( nullptr ) )
   {
     if ( errorOut ) *errorOut = QStringLiteral( "Python plugin initialization failed: %1" ).arg( name );
     return nullptr;

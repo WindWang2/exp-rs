@@ -29,3 +29,8 @@ target_link_libraries(sicnu_python_isolated PUBLIC
     qgis_core
     qgis_gui
 )
+
+# Linkable into shared libs (sicnu_core's PluginHost under SICNU_EMBED_PYTHON).
+set_target_properties(sicnu_python_isolated PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+)

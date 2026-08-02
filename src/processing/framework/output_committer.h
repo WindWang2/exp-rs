@@ -22,10 +22,7 @@ class TaskCenter;
 namespace sicnu
 {
 
-/// Request describing one algorithm output to commit transactionally. The
-/// algorithm writes to `tempPath`; the committer validates, atomically moves
-/// it to `stablePath`, registers the stable output as a Data Asset, and
-/// attaches `derivation` as its provenance.
+/// Request describing one algorithm output to commit transactionally.
 struct AlgorithmOutputRequest
 {
   /// Kind of output. Selects the validation provider (raster vs vector).

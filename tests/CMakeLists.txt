@@ -2986,7 +2986,7 @@ qt_add_executable(test_python_plugin_host
   ${CMAKE_SOURCE_DIR}/src/app/python/sicnu_app_interface.cpp
 )
 target_link_libraries(test_python_plugin_host PRIVATE
-  Catch2::Catch2WithMain
+  Catch2::Catch2
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets

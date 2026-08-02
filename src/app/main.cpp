@@ -27,6 +27,8 @@
 #include <iostream>
 #include <memory>
 
+#include "data/data_manager.h"
+
 // QGIS C++ includes
 #include <qgsapplication.h>
 #include <qgsmessagelog.h>
@@ -131,7 +133,11 @@ int main(int argc, char *argv[])
 
     if (mcpMode) {
         std::cerr << "Initializing MCP Mode..." << std::endl;
+        // Bare DataManager gives the MCP tool-call dispatcher its asset
+        // authority headlessly (same idiom as RsPipelineRunner, TICKET-23).
+        auto mcpDataManager = std::make_unique<sicnu::data::DataManager>();
         McpServer server;
+        server.setDataManager( mcpDataManager.get() );
         server.start(app);
         int result = app->exec();
         delete app;

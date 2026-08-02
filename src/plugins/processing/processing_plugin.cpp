@@ -27,12 +27,11 @@ QIcon ProcessingPlugin::icon() const
     return QIcon::fromTheme("processing");
 }
 
-bool ProcessingPlugin::initialize(QgsMapCanvas *canvas, QgsLayerTreeView *layerTree)
+bool ProcessingPlugin::initialize(SicnuAppInterface *iface)
 {
-    m_canvas = canvas;
-    m_layerTree = layerTree;
-
-    // Providers are registered in main.cpp — no duplicate registration needed
+    // Deliberate no-op: algorithm providers are registered in main.cpp, so
+    // registering them here would duplicate registration.
+    Q_UNUSED(iface);
 
     qDebug() << "ProcessingPlugin initialized";
     return true;

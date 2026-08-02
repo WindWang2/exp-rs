@@ -127,6 +127,16 @@ ProjectContext::createForTesting(const display::DisplayViewSpec &mainViewSpec,
       std::move(context));
 }
 
+data::Result<std::unique_ptr<ProjectContext>> ProjectContext::createHeadless() {
+  auto context = std::unique_ptr<ProjectContext>(new ProjectContext);
+  // No createView: a Display View requires a QgsMapCanvas (a QWidget), which a
+  // headless host does not have. m_mainViewId stays null. The adoption safety
+  // net is skipped too — adoptExternalLayer adopts layers into the main view,
+  // which does not exist here.
+  return data::Result<std::unique_ptr<ProjectContext>>::success(
+      std::move(context));
+}
+
 data::DataManager &ProjectContext::dataManager() { return m_dataManager; }
 
 const data::DataManager &ProjectContext::dataManager() const {

@@ -3,9 +3,7 @@
 #include <QObject>
 #include "core/interfaces/sicnu_plugin_interface.h"
 
-class QgsLayerTreeView;
 class QgsLayerTreeModel;
-class QgsMapCanvas;
 class SicnuMainWindow;
 
 class LayerTreePlugin : public QObject, public SicnuPluginInterface
@@ -22,14 +20,12 @@ public:
     QString version() const override { return "1.0.0"; }
     QIcon icon() const override;
 
-    bool initialize(QgsMapCanvas *canvas, QgsLayerTreeView *layerTree) override;
+    bool initialize(SicnuAppInterface *iface) override;
     void unload() override;
 
     QWidget *createWidget(QWidget *parent) override;
     QList<QAction*> menuActions() override;
 
 private:
-    QgsMapCanvas *m_canvas = nullptr;
-    QgsLayerTreeView *m_layerTree = nullptr;
     QgsLayerTreeModel *m_model = nullptr;
 };

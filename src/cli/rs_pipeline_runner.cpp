@@ -9,6 +9,12 @@
 #include "workflow/workflow_types.h"
 #include "workflow/placeholder_grammar.h"
 
+#if defined( SICNU_EMBED_PYTHON ) && SICNU_EMBED_PYTHON
+#include "core/plugin_host.h"
+#include "app/project_context.h"
+#include "app/python/sicnu_app_interface.h"
+#endif
+
 #include "data/data_manager.h"
 #include "data/data_asset.h"
 #include "data/derivation_record.h"
@@ -206,10 +212,81 @@ RsPipelineRunner::RsPipelineRunner( ProgressCallback progressCallback,
 {
 }
 
+RsPipelineRunner::~RsPipelineRunner() = default;
+
+bool RsPipelineRunner::addPythonPluginDirectory( const std::string &dirPath, std::string *errorOut )
+{
+  if ( dirPath.empty() )
+  {
+    if ( errorOut )
+      *errorOut = "Directory path is empty";
+    return false;
+  }
+  if ( !QDir( QString::fromStdString( dirPath ) ).exists() )
+  {
+    if ( errorOut )
+      *errorOut = "Plugin directory does not exist: " + dirPath;
+    return false;
+  }
+  m_pythonPluginDirs.push_back( dirPath );
+  return true;
+}
+
+bool RsPipelineRunner::ensurePythonPluginsLoaded()
+{
+  if ( m_pythonPluginDirs.empty() )
+    return true;
+
+  if ( m_pluginHost )
+    return true;
+
+#if defined( SICNU_EMBED_PYTHON ) && SICNU_EMBED_PYTHON
+  if ( !m_dataManager )
+  {
+    m_ownedDataManager = std::make_unique<sicnu::data::DataManager>();
+    m_dataManager = m_ownedDataManager.get();
+  }
+
+  // Headless plugin stack (ADR 0023, TICKET-14): a view-less ProjectContext, a
+  // widget-free SicnuAppInterface, and the sanctioned PluginHost lifecycle owner.
+  auto createdContext = sicnu::app::ProjectContext::createHeadless();
+  if ( !createdContext )
+  {
+    reportLog( "error", "Failed to create headless project context for Python plugins" );
+    return false;
+  }
+  m_projectContext = createdContext.take();
+
+  m_appInterface = std::make_unique<SicnuAppInterface>( nullptr, nullptr, m_projectContext.get() );
+  m_pluginHost = std::make_unique<PluginHost>( 2 );
+  m_pluginHost->setAppInterface( m_appInterface.get() );
+
+  for ( const auto &dir : m_pythonPluginDirs )
+  {
+    if ( !m_pluginHost->loadPythonPlugin( QString::fromStdString( dir ) ) )
+    {
+      reportLog( "error", "Failed to load Python plugin '" + dir + "'" );
+      return false;
+    }
+    reportLog( "info", "Loaded Python plugin: " + dir );
+  }
+  return true;
+#else
+  reportLog( "error", "Python plugin support is disabled (SICNU_EMBED_PYTHON=OFF)" );
+  return false;
+#endif
+}
+
 RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Value &pipelineJson )
 {
   PipelineResult result;
   result.success = false;
+
+  if ( !ensurePythonPluginsLoaded() )
+  {
+    result.errorMessage = "Failed to initialize Python plugins";
+    return result;
+  }
 
   std::string validationError;
   if ( !validatePipelineJson( pipelineJson, &validationError ) )
@@ -370,8 +447,12 @@ void RsPipelineRunner::setAssetRegistry( sicnu::data::DataManager *dataManager )
 
 void RsPipelineRunner::registerStepOutputs( long pipelineId )
 {
+  if ( !m_dataManager )
+    return;
+
   auto &taskCenter = sicnu::TaskCenter::instance();
   const auto pipeInfo = taskCenter.getPipelineInfo( pipelineId );
+
   for ( const auto &stepId : pipeInfo.orderedStepIds )
   {
     if ( !pipeInfo.stepToTaskId.contains( stepId ) )
@@ -395,6 +476,8 @@ void RsPipelineRunner::registerStepOutputs( long pipelineId )
     const bool isRaster = GDALGetRasterCount( ds ) > 0;
     GDALClose( ds );
 
+    // ADR 0023: user-declared final output paths are registered in place as
+    // TaskTemporary assets — no temp->stable move, no DeletableSource ownership.
     sicnu::data::SourceDescriptor source;
     source.providerKey = isRaster ? QStringLiteral( "gdal" ) : QStringLiteral( "ogr" );
     source.canonicalSource = path;
@@ -410,6 +493,7 @@ void RsPipelineRunner::registerStepOutputs( long pipelineId )
       continue;
     }
 
+    // Provenance is attached after successful registration (ADR 0023).
     sicnu::data::DerivationRecord derivation;
     derivation.algorithmId = task.algorithmId;
     derivation.parameters = QJsonObject::fromVariantMap( task.parameterMap );

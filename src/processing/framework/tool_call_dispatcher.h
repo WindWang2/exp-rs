@@ -9,6 +9,10 @@
 #include <chrono>
 #include <functional>
 
+namespace sicnu::data {
+class DataManager;
+}
+
 namespace sicnu {
 struct AlgorithmTaskInfo;
 class OutputCommitter;
@@ -40,6 +44,10 @@ public:
   using CompletionCallback = std::function<void( const Json::Value &resultPayload )>;
 
   ToolCallDispatcher( SubmissionSink sink, CompletionWatcher watcher );
+
+  /// Injects DataManager asset authority to automatically handle transactional output asset committing.
+  void setDataManager( sicnu::data::DataManager *dataManager );
+  sicnu::data::DataManager *dataManager() const { return mDataManager; }
 
   /// Classifies an envelope without side effects:
   /// - PlanRequest when the arguments contain a top-level `steps` array;
@@ -73,10 +81,12 @@ public:
   void setOutputCommitterHandler( OutputCommitterHandler handler ) { mOutputCommitterHandler = std::move( handler ); }
   const OutputCommitterHandler &outputCommitterHandler() const { return mOutputCommitterHandler; }
 
-  /// Build a standardized result payload (status "completed" / "error", output,
+  /// Build a standardized result payload (status "success" / "error", output,
   /// errorMessage, etc.) from an AlgorithmTaskInfo struct. If @a committerHandler is
   /// provided and the task succeeded with an output path, transactionally commits
-  /// the asset and rewrites output to the committed stable path.
+  /// the asset and rewrites output to the committed stable path. A refused commit
+  /// downgrades the payload to status "error" (commitError and errorMessage set)
+  /// and keeps the task's original output path.
   static Json::Value buildTaskResultPayload( const sicnu::AlgorithmTaskInfo &info,
                                               const OutputCommitterHandler &committerHandler = {} );
 
@@ -111,6 +121,7 @@ private:
   SubmissionSink mSink;
   CompletionWatcher mWatcher;
   OutputCommitterHandler mOutputCommitterHandler;
+  sicnu::data::DataManager *mDataManager = nullptr;
 };
 
 } // namespace sicnu::processing

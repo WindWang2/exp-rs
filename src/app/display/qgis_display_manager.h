@@ -130,6 +130,14 @@ public:
                               QObject *parent = nullptr);
   ~QgisDisplayManager() override;
 
+  /// Active view identity tracking (ADR 0019).
+  void setActiveViewId(DisplayViewId viewId);
+  DisplayViewId activeViewId() const;
+
+  /// Global auto-display policy when DataManager emits assetAdded.
+  void setAutoDisplayOnAssetAdded(bool enabled);
+  bool autoDisplayOnAssetAdded() const;
+
   data::Result<DisplayViewId> createView(const DisplayViewSpec &spec);
   data::Result<DisplayLayerId> addLayer(DisplayViewId viewId,
                                         data::AssetId assetId,
@@ -164,6 +172,11 @@ public:
   QgsMapLayer *mapLayer(DisplayLayerId layerId) const;
 
 Q_SIGNALS:
+  /// Fired when activeViewId changes.
+  void activeViewChanged(DisplayViewId viewId);
+  /// Fired when the auto-display policy (autoDisplayOnAssetAdded) could not
+  /// present a newly added Data Asset — no active view, or addLayer failed.
+  void autoDisplayFailed( const QString &assetId, const QString &reason );
   /// Fired by createView once the view record is stored.
   void viewAdded(DisplayViewId id);
   /// Fired by removeView before the view's layers are dropped — the view's

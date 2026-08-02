@@ -6,10 +6,14 @@
 #include <json/json.h>
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace sicnu::data { class DataManager; }
+namespace sicnu::app { class ProjectContext; }
+class PluginHost;
+class SicnuAppInterface;
 
 namespace sicnu::cli {
 
@@ -67,6 +71,15 @@ public:
     explicit RsPipelineRunner(ProgressCallback progressCallback = {},
                               LogCallback logCallback = {});
 
+    ~RsPipelineRunner();
+
+    /**
+     * \brief Register a Python plugin directory to load before running the pipeline.
+     * Returns false (setting `errorOut`) for an empty or nonexistent directory.
+     * Loading itself stays lazy — it happens on the first run.
+     */
+    bool addPythonPluginDirectory(const std::string& dirPath, std::string* errorOut = nullptr);
+
     /**
      * \brief Optional DataManager receiving completed step outputs as
      * TaskTemporary Data Assets (ADR 0023). Null by default: no registration.
@@ -104,10 +117,19 @@ private:
                         const std::string& message) const;
     void reportLog(const std::string& level, const std::string& message) const;
     void registerStepOutputs(long pipelineId);
+    bool ensurePythonPluginsLoaded();
 
     ProgressCallback m_progressCallback;
     LogCallback m_logCallback;
     sicnu::data::DataManager* m_dataManager = nullptr;
+    std::unique_ptr<sicnu::data::DataManager> m_ownedDataManager;
+    // Headless plugin stack (ADR 0023, TICKET-14), created lazily on first use.
+    // Declaration order is destruction-safety: the PluginHost tears down first,
+    // then the interface, then the context that owns the DataManager plugins see.
+    std::unique_ptr<sicnu::app::ProjectContext> m_projectContext;
+    std::unique_ptr<SicnuAppInterface> m_appInterface;
+    std::unique_ptr<PluginHost> m_pluginHost;
+    std::vector<std::string> m_pythonPluginDirs;
 };
 
 } // namespace sicnu::cli

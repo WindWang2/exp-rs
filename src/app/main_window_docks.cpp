@@ -516,12 +516,9 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
         agentCopilotDock->setContext( &m_projectContext->dataManager(), m_activeViewHost.get() );
     agentCopilotDock->hide();
 
-    // Committed single tool-call outputs are loaded like any task auto-load
-    // (the OutputCommitter moved the file to its stable path by this point).
-    connect( agentCopilotDock, &sicnu::agent::AgentCopilotDockWidget::toolOutputLayerRequested,
-             this, [this]( const QString &path ) {
-                 ( void ) loadDataLayer( path );
-             } );
+    // Committed tool-call outputs are loaded by QgisDisplayManager auto-display
+    // on DataManager::assetAdded (the dispatcher commits via the injected
+    // DataManager); no explicit layer-request hookup is needed here.
 
     connect( agentCopilotDock, &sicnu::agent::AgentCopilotDockWidget::viewPlanInCanvasRequested,
              this, [this]( const QJsonObject &planJson ) {

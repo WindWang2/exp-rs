@@ -3,6 +3,7 @@
 #include <map>
 #include <utility>
 
+#include <QDebug>
 #include <QPointer>
 #include <QThread>
 
@@ -226,6 +227,8 @@ struct QgisDisplayManager::Impl {
   /// erased on remove.
   QVector<DisplayViewId> viewOrder;
   std::map<QString, std::unique_ptr<LayerRecord>> layers;
+  DisplayViewId activeViewId;
+  bool autoDisplayOnAssetAdded = false;
 
   ViewRecord *findView(DisplayViewId id) {
     const auto it = views.find(id.toString());
@@ -266,6 +269,31 @@ QgisDisplayManager::QgisDisplayManager(data::DataManager *dataManager,
     m_impl->authResolver = m_impl->ownedAuthResolver.get();
   }
   if (dataManager) {
+    connect(dataManager, &data::DataManager::assetAdded, this,
+            [this](data::AssetId assetId) {
+              if (!m_impl->autoDisplayOnAssetAdded)
+                return;
+              QMetaObject::invokeMethod(this, [this, assetId]() {
+                if (m_impl->activeViewId.isNull()) {
+                  qWarning() << "Auto-display skipped: no active display view for asset"
+                             << assetId.toString();
+                  emit autoDisplayFailed(
+                      assetId.toString(),
+                      QStringLiteral("No active display view"));
+                  return;
+                }
+                const data::Result<DisplayLayerId> added =
+                    addLayer(m_impl->activeViewId, assetId);
+                if (!added) {
+                  const QString message = added.diagnostics().isEmpty()
+                      ? QStringLiteral("addLayer failed without details")
+                      : added.diagnostics().first().message;
+                  qWarning() << "Auto-display failed for asset"
+                             << assetId.toString() << ":" << message;
+                  emit autoDisplayFailed(assetId.toString(), message);
+                }
+              }, Qt::QueuedConnection);
+            });
     connect(dataManager, &data::DataManager::assetAboutToUnload, this,
             [this](data::AssetId assetId) {
               QVector<DisplayLayerId> affected;
@@ -305,6 +333,25 @@ QgisDisplayManager::~QgisDisplayManager() {
     (void)removeLayer(layerId);
 }
 
+void QgisDisplayManager::setActiveViewId(DisplayViewId viewId) {
+  if (!(m_impl->activeViewId == viewId)) {
+    m_impl->activeViewId = viewId;
+    emit activeViewChanged(viewId);
+  }
+}
+
+DisplayViewId QgisDisplayManager::activeViewId() const {
+  return m_impl->activeViewId;
+}
+
+void QgisDisplayManager::setAutoDisplayOnAssetAdded(bool enabled) {
+  m_impl->autoDisplayOnAssetAdded = enabled;
+}
+
+bool QgisDisplayManager::autoDisplayOnAssetAdded() const {
+  return m_impl->autoDisplayOnAssetAdded;
+}
+
 data::Result<DisplayViewId>
 QgisDisplayManager::createView(const DisplayViewSpec &spec) {
   if (QThread::currentThread() != thread()) {
@@ -331,6 +378,11 @@ QgisDisplayManager::createView(const DisplayViewSpec &spec) {
   record->bridge->setAutoSetupOnFirstLayer(false);
   m_impl->views.emplace(id.toString(), std::move(record));
   m_impl->viewOrder.append(id);
+
+  if (m_impl->activeViewId.isNull()) {
+    setActiveViewId(id);
+  }
+
   emit viewAdded(id);
   return data::Result<DisplayViewId>::success(id);
 }

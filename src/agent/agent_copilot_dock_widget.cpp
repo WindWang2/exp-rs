@@ -3,7 +3,6 @@
 #include "llm_settings_dialog.h"
 
 #include <QFrame>
-#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QMessageBox>
@@ -128,8 +127,7 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, ActiveV
   m_dataManager = dataManager;
   m_viewHost = viewHost;
   m_workflowExecutor.setDataManager( dataManager );
-  if ( dataManager )
-    m_outputCommitter = std::make_unique<sicnu::OutputCommitter>( dataManager, this );
+  m_toolCallDispatcher.setDataManager( dataManager );
 }
 
 void AgentCopilotDockWidget::onProviderChanged( int index )
@@ -357,7 +355,7 @@ void AgentCopilotDockWidget::watchToolCallCompletion( long taskId, processing::T
   const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
   if ( isTerminalStatus( info.status ) )
   {
-    onComplete( buildToolCallResultPayload( info ) );
+    onComplete( processing::ToolCallDispatcher::buildTaskResultPayload( info, m_toolCallDispatcher.outputCommitterHandler() ) );
     return;
   }
   m_pendingToolCallCompletions.insert( taskId, std::move( onComplete ) );
@@ -375,70 +373,10 @@ void AgentCopilotDockWidget::onTaskCenterTaskUpdated( const sicnu::AlgorithmTask
   const auto callback = it.value();
   m_pendingToolCallCompletions.erase( it );
 
-  Json::Value payload = buildToolCallResultPayload( info );
-  if ( info.status == sicnu::TaskStatus::Completed )
-    commitToolCallOutput( info, payload );
-
-  callback( payload );
-}
-
-void AgentCopilotDockWidget::commitToolCallOutput( const sicnu::AlgorithmTaskInfo &info, Json::Value &payload )
-{
-  if ( !m_outputCommitter || info.outputLayerPath.isEmpty() )
-    return;
-
-  // Publish the task output to a stable sibling path and register it as a
-  // TaskTemporary, deletable asset (legacy behavior) — but through the
-  // OutputCommitter so validation, atomic publish, registration, and the
-  // Derivation Record happen transactionally (ADR 0021).
-  const QFileInfo outInfo( info.outputLayerPath );
-  const QString suffix = outInfo.suffix().isEmpty() ? QStringLiteral( "tif" ) : outInfo.suffix();
-  const QString stablePath = outInfo.absolutePath() + QStringLiteral( "/" )
-                             + outInfo.completeBaseName() + QStringLiteral( "_committed." ) + suffix;
-
-  sicnu::data::DerivationRecord derivation;
-  derivation.algorithmId = info.algorithmId;
-
-  const auto commitResult = m_outputCommitter->commitTaskOutput(
-    &sicnu::TaskCenter::instance(), info.taskId, sicnu::data::AssetKind::Raster,
-    stablePath, sicnu::data::PersistencePolicy::TaskTemporary, /*autoLoad=*/false, derivation );
-
-  if ( commitResult )
-  {
-    // The committed path is the live output now; report it and ask the host to
-    // load it (the task's original output path was moved by the commit).
-    payload["output"] = stablePath.toStdString();
-    emit toolOutputLayerRequested( stablePath );
-  }
-  else
-  {
-    // Commit refused: nothing moved, nothing registered — the payload keeps
-    // the task's original output path. Surface the diagnostics.
-    const QString message = commitResult.diagnostics().isEmpty()
-                              ? QStringLiteral( "OutputCommitter refused the tool-call output." )
-                              : commitResult.diagnostics().first().message;
-    payload["commitError"] = message.toStdString();
-  }
-}
-
-Json::Value AgentCopilotDockWidget::buildToolCallResultPayload( const sicnu::AlgorithmTaskInfo &info )
-{
-  Json::Value payload = info.resultPayload.isNull() ? Json::Value( Json::objectValue ) : info.resultPayload;
-  payload["algorithmId"] = info.algorithmId.toStdString();
-  payload["taskId"] = static_cast<Json::Int64>( info.taskId );
-
-  if ( info.status == sicnu::TaskStatus::Completed )
-  {
-    payload["status"] = "success";
-    if ( !info.outputLayerPath.isEmpty() && payload.isObject() && !payload.isMember( "output" ) )
-      payload["output"] = info.outputLayerPath.toStdString();
-  }
-  else
-  {
-    payload["status"] = "error";
-    payload["errorMessage"] = info.errorMessage.toStdString();
-  }
-  return payload;
+  // Committing and payload shape live in ToolCallDispatcher (injected
+  // DataManager); layer loading after commit is handled by QgisDisplayManager
+  // auto-display on DataManager::assetAdded.
+  callback( processing::ToolCallDispatcher::buildTaskResultPayload( info, m_toolCallDispatcher.outputCommitterHandler() ) );
 }
 
 void AgentCopilotDockWidget::appendErrorMessage( const QString &errorMsg )

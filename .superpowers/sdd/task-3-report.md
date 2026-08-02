@@ -1,184 +1,48 @@
-# Task 3 report: Classification post-process and CV Task Center migration
+# Task 3 Report: Inject `DataManager` in `PythonPluginAdapter::initialize`
 
-## Scope and APIs
+**Status: DONE**
 
-Changed only the Classification window implementation/header, its window-level
-tests, and this report. The existing UI helpers now route through these public
-production APIs:
+## What was changed / confirmed already present
 
-- `startPostProcessTask(const RsPostProcessConfig &, bool, const QString &,
-  const QString &)`, returning the Task Center ID or `-1` while the
-  Classification window is busy;
-- `startCrossValidationTask(const cv::Mat &, const cv::Mat &,
-  RsCvTask::ClassifierFactory)`, with the same return contract.
+Task 2 (commit `64776fde2d`) had already adapted `src/app/python/python_plugin_adapter.cpp` to the brief's Step 1 code (the test target would not compile otherwise). Reconciliation against the brief:
 
-The pending state is now a `PendingClassificationOperation` enum covering
-Apply, Preview, PostProcess, and CrossValidation. It keeps a generic
-`QgsTask *` worker plus the post-process layer-loading option. The existing
-Task Center `taskUpdated` listener performs all terminal UI behavior and calls
-`deleteLater()` only after it receives the matching terminal Task Center
-update.
+- `#include "project_context.h"` — already present (line 6, after `sicnu_app_interface.h`), matches brief.
+- `#include "data/data_manager.h"` — extra include, kept per instructions (reviewer judged it defensible).
+- Code block (brief lines 21–34) — already present verbatim: `pluginMenu` from `m_appInterface`, `dataManager` sourced from `m_appInterface->projectContext()->dataManager()` (null when interface or ProjectContext absent), `make_unique<PythonAppInterfaceProxy>( m_workerNode->server, dataManager, pluginMenu )`, then conditional `setActiveViewHost`.
+- **Only real change needed:** the explanatory comment. Existing `// Attach UI RPC Proxy Facade` was replaced with the brief's two-line comment:
+  ```cpp
+  // Attach UI RPC Proxy Facade (headless asset seam: DataManager is the
+  // asset authority; menu and view host remain optional GUI enhancements).
+  ```
+- No other restructuring; file otherwise untouched.
 
-`runPostProcess()` and `runCrossValidation()` retain their UI preparation and
-now call the public start APIs. The APIs submit the existing workers with
-`TaskCenter::submitJob`, preserve the `module:classify:postprocess` and
-`module:classify:cv` IDs (or the supplied post-process algorithm ID), forward
-their cancellation hooks, and preserve the prior payload keys, layers,
-workflow state, status text, failure/cancellation reporting, and CV result
-dialog.
+## Test command + results
 
-## RED evidence
-
-Added two `[classify][task_center]` window-level tests before the public APIs
-existed. The post-process test creates a 32x32 temporary class-ID GeoTIFF,
-starts the window API, checks Task Center metadata, waits for completion, and
-checks the output file. The CV test supplies known-good Gaussian data, checks
-the Task Center metadata, uses a zero-delay timer to close the result dialog,
-and confirms the window remains usable.
-
-The initial requested build failed because neither public production method
-existed:
-
-```text
-$ cmake --build build-task-center-26 --target test_classification_window -j2
-.../test_classification_window.cpp:178:30: error:
-  ‘class QgsClassificationMainWindow’ has no member named ‘startPostProcessTask’
-.../test_classification_window.cpp:209:30: error:
-  ‘class QgsClassificationMainWindow’ has no member named ‘startCrossValidationTask’
+```
+cmake --build build --target test_python_plugin_manager -j"$(nproc)" && ./build/tests/test_python_plugin_manager "[python]"
 ```
 
-## GREEN evidence
+- Build: succeeded (only pre-existing `QVariant::Type` deprecation warnings from Qt 6 headers, unrelated to this change).
+- Test run:
+  ```
+  Filters: [python]
+  Randomness seeded to: 694656539
+  All tests passed (87 assertions in 11 test cases)
+  ```
+- All 11 `[python]` cases PASS, including `[python][adapter][isolated]` (null-ProjectContext interface → null `DataManager` degradation) and the subprocess cases `[python][isolated]`, `[python][isolated][fault]`.
 
-After implementing the two APIs and terminal listener branches:
+## Files changed
 
-```text
-$ cmake --build build-task-center-26 --target test_classification_window -j2
-[100%] Built target test_classification_window
+- `src/app/python/python_plugin_adapter.cpp` — comment only (2 insertions, 1 deletion); the functional code was already in place from Task 2.
 
-$ QT_QPA_PLATFORM=offscreen build-task-center-26/tests/test_classification_window "[task_center]"
-(exit 0; this target's FastExitListener intentionally suppresses Catch output)
-```
+## Commit
 
-## Regression verification
+- `a994c1407c` — `feat(python): inject DataManager asset seam into plugin adapter proxy` (brief's exact message, adapter file only).
 
-```text
-$ cmake --build build-task-center-26 --target test_task_center \
-    test_classification_task_center test_classification_window \
-    test_post_process test_cross_validation -j2
-(all five targets built successfully)
+Note: working tree had an unrelated pre-existing modification to `.superpowers/sdd/task-2-report.md`; left untouched, not included in the commit.
 
-$ build-task-center-26/tests/test_task_center
-All tests passed (35 assertions in 8 test cases)
+## Self-review findings / concerns
 
-$ build-task-center-26/tests/test_classification_task_center
-All tests passed (24 assertions in 6 test cases)
-
-$ QT_QPA_PLATFORM=offscreen build-task-center-26/tests/test_classification_window
-(exit 0; FastExitListener)
-
-$ build-task-center-26/tests/test_post_process
-All tests passed (7 assertions in 3 test cases)
-
-$ build-task-center-26/tests/test_cross_validation
-All tests passed (8 assertions in 4 test cases)
-
-$ cmake --build build-task-center-26 --target sicnu_geo_rs -j2
-[100%] Built target sicnu_geo_rs
-```
-
-Scoped source checks confirm the two public start methods call
-`TaskCenter::instance().submitJob` and neither old UI path contains
-`RsJobRunner::run`; there are no remaining `RsJobRunner::run` calls in the
-Classification window. `git diff --check` exits successfully.
-
-## Self-review and concerns
-
-- The UI helper indirection is intentional: the requested public production
-  seam owns callable submission, while the pre-existing private UI slots
-  continue validating/preparing their dialog and ROI data before calling it.
-- Cancellation remains worker-owned through `[task] { task->cancel(); }`.
-  Task Center's #28 behavior keeps cancellation non-terminal until the worker
-  actually returns, so the listener cannot delete a running worker.
-- Existing build warnings (Qt deprecations and the QCA include-path warning)
-  remain unrelated; all requested targets succeed.
-
-## Review-fix addendum
-
-Addressed the two Important review findings without changing the Task 3
-workflow scope:
-
-- `TaskCenter::submitJob` now accepts an explicit `autoLoad` option and
-  records it in the submitted task metadata. Classification post-processing
-  submits with Task Center auto-load disabled, so its `loadToLayers` request
-  metadata remains observable while the Classification terminal branch is the
-  only code that adds session layers. This prevents the Task Center default
-  from loading output when `loadToLayers` is false and avoids double-loading
-  when it is true.
-- Restored actual newline escapes in the CV result dialog text and per-fold
-  summary.
-
-The window-level regression checks post-process jobs preserve both false and
-true `loadOutputsToMain` request metadata while always setting
-`autoLoadLayer == false`; this leaves true-only loading to the existing
-Classification session-layer terminal branch. It also captures the displayed
-CV dialog and requires actual blank-line formatting while rejecting a literal
-`\\n` sequence.
-
-### Red-green evidence
-
-After adding the regression assertions but before the Classification call-site
-and dialog fixes, the focused window test built and failed as expected:
-
-```text
-REQUIRE_FALSE( TaskCenter::instance().getTaskInfo( taskId ).autoLoadLayer )
-with expansion: !true
-
-REQUIRE( resultDialogText.contains( QStringLiteral( "\n\n" ) ) )
-with expansion: false
-```
-
-After the fix:
-
-```text
-$ QT_QPA_PLATFORM=offscreen build-task-center-26/tests/test_classification_window "[task_center]"
-(exit 0; FastExitListener intentionally suppresses Catch output)
-
-$ build-task-center-26/tests/test_classification_task_center
-All tests passed (24 assertions in 6 test cases)
-
-$ build-task-center-26/tests/test_task_center
-All tests passed (35 assertions in 8 test cases)
-
-$ cmake --build build-task-center-26 --target sicnu_geo_rs -j2
-[100%] Built target sicnu_geo_rs
-```
-
-`git diff --check` also exits successfully.
-
-## Retry metadata regression fix
-
-`TaskCenter::retryTask()` now forwards the original `autoLoadLayer` value when
-it resubmits a stored JobEngine request. This preserves Classification
-post-process jobs' `autoLoadLayer == false` behavior during retry.
-
-### Red-green evidence
-
-Added a focused Task Center regression test using a submitted
-`module:classify:postprocess` request with auto-load disabled. Before the
-production fix, the focused test failed because retry used the default true:
-
-```text
-REQUIRE_FALSE( retriedInfo.autoLoadLayer )
-with expansion: !true
-```
-
-After forwarding `oldInfo.autoLoadLayer` through the resubmission overload:
-
-```text
-$ cmake --build build-task-center-26 --target test_task_center -j2
-$ build-task-center-26/tests/test_task_center "[retry]"
-All tests passed (7 assertions in 1 test case)
-```
-
-The CV dialog regression now rejects the actual legacy one-backslash-plus-n
-literal with `QStringLiteral( "\\n" )` rather than the two-backslash form.
+- Adapter call matches Task 2's proxy ctor: `PythonAppInterfaceProxy( PythonIpcServer*, DataManager*, QMenu*, ActiveViewHost*, QObject* )` at `src/python/isolated/python_app_interface_proxy.h:27` — verified signature, calls `setActiveViewHost` afterwards as designed.
+- Null-safety: `m_appInterface->projectContext()` guarded by `&&` before deref; `dataManager` stays `nullptr` in production (no interface) — behavior unchanged, proxy default parameter aligns.
+- No concerns.

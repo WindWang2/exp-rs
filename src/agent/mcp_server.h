@@ -52,6 +52,10 @@ public:
 
     void start(QCoreApplication *app);
 
+    /// Injects DataManager asset authority so the dispatcher commits tool-call
+    /// outputs transactionally (TICKET-23). Call before start().
+    void setDataManager( sicnu::data::DataManager *dataManager ) { mDispatcher.setDataManager( dataManager ); }
+
 private slots:
     void onLineRead(const QString &line);
 

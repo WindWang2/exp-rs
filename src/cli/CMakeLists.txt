@@ -11,6 +11,27 @@ add_executable(sicnu_geo_rs_cli
     rs_pipeline_runner.cpp
 )
 
+# Headless plugin hosting (ADR 0023): the runner composes PluginHost with a
+# view-less ProjectContext and a widget-free SicnuAppInterface. Compiled in
+# only when embedded-Python support is enabled, mirroring the
+# SICNU_EMBED_PYTHON guards in plugin_host.cpp / rs_pipeline_runner.cpp.
+if(SICNU_EMBED_PYTHON)
+    target_sources(sicnu_geo_rs_cli PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/core/plugin_host.cpp
+        ${CMAKE_SOURCE_DIR}/src/app/python/sicnu_app_interface.cpp
+    )
+    target_include_directories(sicnu_geo_rs_cli PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/core
+        ${CMAKE_SOURCE_DIR}/src/app
+    )
+    target_link_libraries(sicnu_geo_rs_cli PRIVATE
+        Qt6::Gui
+        Qt6::Widgets
+        qgis_gui
+    )
+    target_compile_definitions(sicnu_geo_rs_cli PRIVATE SICNU_EMBED_PYTHON=1)
+endif()
+
 target_include_directories(sicnu_geo_rs_cli PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}

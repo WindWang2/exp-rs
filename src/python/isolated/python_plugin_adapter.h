@@ -42,11 +42,15 @@ public:
     QString version() const override { return m_version; }
     QIcon icon() const override { return m_icon; }
 
-    bool initialize( QgsMapCanvas *canvas, QgsLayerTreeView *layerTree ) override;
+    bool initialize( SicnuAppInterface *iface ) override;
     void unload() override;
 
     QString pluginDir() const { return m_pluginDir; }
     QString packageName() const { return m_packageName; }
+
+    /// The pool worker this plugin is resident on (its IPC server carries the
+    /// PythonAppInterfaceProxy that handles processing.register_algorithm).
+    sicnu::python::isolated::WorkerNode *workerNode() const { return m_workerNode; }
 
 private:
     QString m_pluginDir;

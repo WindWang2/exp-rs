@@ -612,7 +612,7 @@ TEST_CASE( "ToolCallDispatcher supports OutputCommitterHandler for output asset 
     REQUIRE( payload["output"].asString() == "/committed/ndvi_out.tif" );
   }
 
-  SECTION( "refused handler sets commitError diagnostic" )
+  SECTION( "refused handler fails the payload with commitError diagnostic" )
   {
     ToolCallDispatcher::OutputCommitterHandler handler = []( const sicnu::AlgorithmTaskInfo &,
                                                              std::string &,
@@ -628,9 +628,10 @@ TEST_CASE( "ToolCallDispatcher supports OutputCommitterHandler for output asset 
     info.outputLayerPath = QStringLiteral( "/tmp/raw_out.tif" );
 
     Json::Value payload = ToolCallDispatcher::buildTaskResultPayload( info, handler );
-    REQUIRE( payload["status"].asString() == "success" );
+    REQUIRE( payload["status"].asString() == "error" );
     REQUIRE( payload["output"].asString() == "/tmp/raw_out.tif" );
     REQUIRE( payload["commitError"].asString() == "Disk space quota exceeded" );
+    REQUIRE( payload["errorMessage"].asString() == "Disk space quota exceeded" );
   }
 }
 
@@ -667,6 +668,20 @@ TEST_CASE( "ToolCallDispatcher dispatchAndAwait executes synchronously and forma
     REQUIRE( result["status"].asString() == "error" );
     REQUIRE( result["errorMessage"].asString() == "Tool call timed out" );
   }
+}
+
+TEST_CASE( "ToolCallDispatcher setDataManager sets authority cleanly", "[processing][tool_call_dispatcher][data_manager]" )
+{
+  ToolCallDispatcher dispatcher(
+    []( const QString &, const QVariantMap & ) -> long { return 1; },
+    []( long, ToolCallDispatcher::CompletionCallback ) {} );
+
+  REQUIRE( dispatcher.dataManager() == nullptr );
+  REQUIRE_FALSE( dispatcher.outputCommitterHandler() );
+
+  dispatcher.setDataManager( nullptr );
+  REQUIRE( dispatcher.dataManager() == nullptr );
+  REQUIRE_FALSE( dispatcher.outputCommitterHandler() );
 }
 
 

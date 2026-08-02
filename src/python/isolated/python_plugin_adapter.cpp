@@ -3,6 +3,8 @@
 #include "python_app_interface_proxy.h"
 #include "python_worker_process_pool.h"
 
+#include "app/project_context.h"
+#include "app/python/sicnu_app_interface.h"
 #include "data/data_manager.h"
 
 #include <QDebug>
@@ -48,10 +50,23 @@ PythonPluginAdapter::~PythonPluginAdapter()
     }
 }
 
-bool PythonPluginAdapter::initialize( QgsMapCanvas *canvas, QgsLayerTreeView *layerTree )
+bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
 {
-    Q_UNUSED( canvas );
-    Q_UNUSED( layerTree );
+    if ( iface )
+    {
+        if ( !m_dataManager && iface->projectContext() )
+        {
+            m_dataManager = &iface->projectContext()->dataManager();
+        }
+        if ( !m_pluginMenu )
+        {
+            m_pluginMenu = iface->pluginMenu();
+        }
+        if ( !m_activeViewHost )
+        {
+            m_activeViewHost = iface->activeViewHost();
+        }
+    }
 
     if ( m_initialized )
         return true;

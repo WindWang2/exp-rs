@@ -5,6 +5,11 @@
 #include "json_params_converter.h"
 #include "task_center.h"
 
+#include "output_committer.h"
+#include <QDateTime>
+#include <QDebug>
+#include <QFileInfo>
+#include <QJsonObject>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -29,6 +34,53 @@ ToolCallDispatcher::ToolCallDispatcher( SubmissionSink sink, CompletionWatcher w
   : mSink( std::move( sink ) )
   , mWatcher( std::move( watcher ) )
 {
+}
+
+void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
+{
+  mDataManager = dataManager;
+  if ( dataManager )
+  {
+    mOutputCommitterHandler = [dataManager]( const sicnu::AlgorithmTaskInfo &info,
+                                             std::string &outCommittedPath,
+                                             std::string &outCommitError ) -> bool {
+      sicnu::OutputCommitter committer( dataManager );
+      const QFileInfo outInfo( info.outputLayerPath );
+      const QString suffix = outInfo.suffix().isEmpty() ? QStringLiteral( "tif" ) : outInfo.suffix();
+      const QString stablePath = outInfo.absolutePath() + QStringLiteral( "/" )
+                                 + outInfo.completeBaseName() + QStringLiteral( "_committed." ) + suffix;
+
+      sicnu::AlgorithmOutputRequest request;
+      request.kind = sicnu::data::AssetKind::Raster;
+      request.tempPath = info.outputLayerPath;
+      request.stablePath = stablePath;
+      request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
+      request.autoLoad = false;
+      request.derivation.algorithmId = info.algorithmId;
+      request.derivation.parameters = QJsonObject::fromVariantMap( info.parameterMap );
+      request.derivation.taskReference = QString::number( info.taskId );
+      request.derivation.completedAtUtc = QDateTime::currentDateTimeUtc();
+
+      const auto commitResult = committer.commit( request );
+
+      if ( commitResult )
+      {
+        outCommittedPath = stablePath.toStdString();
+        return true;
+      }
+      else
+      {
+        outCommitError = commitResult.diagnostics().isEmpty()
+                           ? "OutputCommitter refused the tool-call output."
+                           : commitResult.diagnostics().first().message.toStdString();
+        return false;
+      }
+    };
+  }
+  else
+  {
+    mOutputCommitterHandler = nullptr;
+  }
 }
 
 ToolCallDispatcher::ParsedEnvelope ToolCallDispatcher::parseEnvelope( const Json::Value &envelope )
@@ -273,8 +325,13 @@ Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTa
         }
         else
         {
-          payload["commitError"] = commitError.empty() ? "OutputCommitter refused the tool-call output." : commitError;
+          const std::string message = commitError.empty() ? "OutputCommitter refused the tool-call output." : commitError;
+          payload["status"] = "error";
+          payload["commitError"] = message;
+          payload["errorMessage"] = message;
           payload["output"] = info.outputLayerPath.toStdString();
+          qWarning() << "ToolCallDispatcher: output commit failed for task" << info.taskId
+                     << "-" << QString::fromStdString( message );
         }
       }
       else

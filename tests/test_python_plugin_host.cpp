@@ -1,4 +1,5 @@
 // test_python_plugin_host.cpp — headless Python Plugin Host seam tests (ADR 0023)
+#include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "python_plugin_host.h"
@@ -7,8 +8,18 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QEventLoop>
+#include <QTimer>
 
 using namespace sicnu::python::isolated;
+
+// QLocalSocket-based IPC needs a QCoreApplication event loop — without one the
+// worker handshake never completes and the suite spins (see test_python_plugin_manager).
+int main( int argc, char *argv[] )
+{
+  QCoreApplication app( argc, argv );
+  return Catch::Session().run( argc, argv );
+}
 
 TEST_CASE( "PythonPluginHost loads a Python plugin headlessly with a real DataManager", "[python][host]" )
 {
@@ -53,15 +64,18 @@ TEST_CASE( "py: prefix executor executes from a worker thread marshaled to the m
   sicnu::data::DataManager dataManager;
   PythonPluginHost host( 2 );
 
-  // Occupy one worker with the sample plugin, then use the second worker to
-  // register py:echo_test through the daemon's public-path test helper.
+  // Register py:echo_test on the worker hosting the plugin: only a worker with
+  // a resident plugin adapter has a PythonAppInterfaceProxy on its IPC server,
+  // and the proxy is what lands processing.register_algorithm in AlgorithmEngine.
   const QString pluginDir = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "plugins/sample_plugin" ) );
   QString loadError;
-  REQUIRE( host.loadPlugin( pluginDir, &dataManager, nullptr, nullptr, &loadError ) != nullptr );
+  PythonPluginAdapter *pluginAdapter = host.loadPlugin( pluginDir, &dataManager, nullptr, nullptr, &loadError );
+  REQUIRE( pluginAdapter != nullptr );
 
-  WorkerNode *node = host.pool()->acquireWorker();
+  WorkerNode *node = pluginAdapter->workerNode();
   REQUIRE( node != nullptr );
   REQUIRE( node->server != nullptr );
+  REQUIRE( node->server->hasClient() );
 
   QJsonObject regResult;
   bool regIsError = false;
@@ -113,7 +127,7 @@ TEST_CASE( "py: prefix executor executes from a worker thread marshaled to the m
       if ( snap && ( snap->state == JobState::Succeeded || snap->state == JobState::Failed ) )
       {
         CHECK( snap->state == JobState::Failed );
-        CHECK( snap->error.find( "Unknown algorithm" ) != std::string::npos );
+        CHECK( snap->error.find( "Algorithm not registered" ) != std::string::npos );
         break;
       }
       if ( std::chrono::steady_clock::now() > deadline )
@@ -124,8 +138,7 @@ TEST_CASE( "py: prefix executor executes from a worker thread marshaled to the m
       QThread::msleep( 5 );
     }
   }
-
-  host.pool()->releaseWorker( node );
+  // NOTE: the plugin adapter owns its worker — no releaseWorker here.
 }
 
 #include "cli/rs_pipeline_runner.h"

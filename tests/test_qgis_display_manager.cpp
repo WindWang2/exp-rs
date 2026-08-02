@@ -8,6 +8,7 @@
 #include <QTemporaryDir>
 
 #include <qgsapplication.h>
+#include <qgsproject.h>
 #include <qgslayertree.h>
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
@@ -769,5 +770,66 @@ TEST_CASE("addLayer-twice and cloneLayer both yield leaseCount 2 and "
   rasterCloneA->renderer()->setOpacity(0.6);
   CHECK(rasterCloneA->renderer()->opacity() == 0.6);
   CHECK(rasterCloneB->renderer()->opacity() == 1.0);
+}
+
+TEST_CASE( "QgisDisplayManager active view and auto-display tracking", "[display][qgis_display_manager][active_view]" )
+{
+  ensureQgisApplication();
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  DataManager dataManager;
+  QgisDisplayManager displayManager( &dataManager );
+
+  CHECK( displayManager.activeViewId().isNull() );
+  CHECK_FALSE( displayManager.autoDisplayOnAssetAdded() );
+
+  QgsMapCanvas canvas;
+  DisplayViewSpec spec{ &canvas, project->layerTreeRoot(), project->layerStore() };
+
+  const auto viewResult = displayManager.createView( spec );
+  REQUIRE( viewResult );
+  const DisplayViewId viewId = viewResult.value();
+
+  // First created view automatically becomes active view
+  CHECK( displayManager.activeViewId() == viewId );
+
+  displayManager.setAutoDisplayOnAssetAdded( true );
+  CHECK( displayManager.autoDisplayOnAssetAdded() );
+
+  // Registering asset automatically adds display layer to active view when autoDisplayOnAssetAdded is true
+  const sicnu::data::AssetId assetId = registerRaster( dataManager );
+  REQUIRE( !assetId.isNull() );
+  QCoreApplication::processEvents();
+
+  const auto snapshot = displayManager.view( viewId );
+  REQUIRE( snapshot.has_value() );
+  CHECK( snapshot->layerIds().size() == 1 );
+}
+
+TEST_CASE( "QgisDisplayManager auto-display emits autoDisplayFailed without an active view", "[display][qgis_display_manager][active_view]" )
+{
+  ensureQgisApplication();
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  DataManager dataManager;
+  QgisDisplayManager displayManager( &dataManager );
+
+  // No view created: activeViewId stays null.
+  REQUIRE( displayManager.activeViewId().isNull() );
+  displayManager.setAutoDisplayOnAssetAdded( true );
+
+  QSignalSpy failedSpy( &displayManager, &QgisDisplayManager::autoDisplayFailed );
+
+  const sicnu::data::AssetId assetId = registerRaster( dataManager );
+  REQUIRE( !assetId.isNull() );
+  QCoreApplication::processEvents();
+
+  // The auto-display policy reports the failure instead of silently no-op'ing.
+  REQUIRE( failedSpy.count() == 1 );
+  const QList<QVariant> args = failedSpy.takeFirst();
+  CHECK( args.at( 0 ).toString() == assetId.toString() );
+  CHECK( !args.at( 1 ).toString().isEmpty() );
 }
 

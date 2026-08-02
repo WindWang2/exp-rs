@@ -40,6 +40,13 @@ public:
   createForTesting(const display::DisplayViewSpec &mainViewSpec,
                    const data::internal::NetworkProbe *probe);
 
+  /// Headless seam for CLI/tests (ADR 0023, TICKET-14): constructs the context
+  /// (DataManager + QgisDisplayManager) without creating any Display View, so
+  /// no QgsMapCanvas/QWidget is required. mainViewId() stays null on the
+  /// returned context and the adoption safety net is not installed (adoption
+  /// targets the main view); callers must not assume a main view exists.
+  static data::Result<std::unique_ptr<ProjectContext>> createHeadless();
+
   ~ProjectContext();
 
   ProjectContext(const ProjectContext &) = delete;
@@ -51,6 +58,8 @@ public:
   display::QgisDisplayManager &displayManager();
   const display::QgisDisplayManager &displayManager() const;
 
+  /// The main (QGIS-interop) view id. Null when the context was created
+  /// through createHeadless() — headless contexts have no display view.
   display::DisplayViewId mainViewId() const;
 
   /// The live Display View ids: the main view first, then secondaries in

@@ -55,24 +55,6 @@ int main(int argc, char *argv[])
 
     ensureGdalInit();
 
-    // Headless Python Plugin Host (ADR 0023): explicit declaration only.
-    const QStringList pythonPluginDirs = parser.values(pythonPluginOption);
-    std::unique_ptr<sicnu::data::DataManager> dataManager;
-    std::unique_ptr<sicnu::python::isolated::PythonPluginHost> pythonHost;
-    if (!pythonPluginDirs.isEmpty()) {
-        dataManager = std::make_unique<sicnu::data::DataManager>();
-        pythonHost = std::make_unique<sicnu::python::isolated::PythonPluginHost>(2);
-        for (const QString& dir : pythonPluginDirs) {
-            QString error;
-            if (!pythonHost->loadPlugin(dir, dataManager.get(), nullptr, nullptr, &error)) {
-                std::cerr << "Failed to load Python plugin '" << dir.toStdString()
-                          << "': " << error.toStdString() << "\n";
-                return 1;
-            }
-            std::cout << "Loaded Python plugin: " << dir.toStdString() << "\n";
-        }
-    }
-
     // List operators
     if (parser.isSet(listOption)) {
         const auto names = operators::RSOperatorRegistry::instance().operatorNames();
@@ -116,9 +98,14 @@ int main(int argc, char *argv[])
     };
 
     RsPipelineRunner runner(progressCb, logCb);
-    if (dataManager) {
-        runner.setAssetRegistry(dataManager.get());
+    for (const QString& dir : parser.values(pythonPluginOption)) {
+        std::string error;
+        if (!runner.addPythonPluginDirectory(dir.toStdString(), &error)) {
+            std::cerr << "Invalid Python plugin directory: " << error << "\n";
+            return 1;
+        }
     }
+
     const auto result = runner.runFromFile(pipelinePath.toStdString());
 
     if (!result.success) {

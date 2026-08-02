@@ -27,8 +27,9 @@ class PythonWorkerProcessPool;
  *
  * Owns the PythonWorkerProcessPool and the full plugin lifecycle: metadata
  * parse, adapter creation, worker acquisition, classFactory init, and unload.
- * Headless surfaces (CLI, later MCP) consume it directly; the desktop
- * PluginManager composes it and adds menu/window wiring. The host holds no
+ * Headless surfaces (CLI, later MCP) consume it directly; PluginHost
+ * (src/core) composes it, and the desktop PluginManager only wraps PluginHost.
+ * The host holds no
  * loading policy — callers decide which plugin directories to load.
  */
 class PythonPluginHost : public QObject

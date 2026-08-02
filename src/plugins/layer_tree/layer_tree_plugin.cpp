@@ -17,6 +17,9 @@
 #include <qgsrasterlayer.h>
 #include <qgsdockwidget.h>
 
+#include "app/active_view_host.h"
+#include "app/python/sicnu_app_interface.h"
+
 LayerTreePlugin::LayerTreePlugin(QObject *parent)
     : QObject(parent)
 {
@@ -27,17 +30,20 @@ QIcon LayerTreePlugin::icon() const
     return QIcon::fromTheme("layer-tree");
 }
 
-bool LayerTreePlugin::initialize(QgsMapCanvas *canvas, QgsLayerTreeView *layerTree)
+bool LayerTreePlugin::initialize(SicnuAppInterface *iface)
 {
-    m_canvas = canvas;
-    m_layerTree = layerTree;
-
-    if (!m_layerTree) {
-        qWarning() << "LayerTreePlugin: layerTree is null";
+    if (!iface) {
+        qWarning() << "LayerTreePlugin: no SicnuAppInterface provided, initialization failed";
         return false;
     }
 
-    // Set up the layer tree model
+    ActiveViewHost *viewHost = iface->activeViewHost();
+    QgsLayerTreeView *layerTree = viewHost ? viewHost->layerTreeView() : nullptr;
+    if (!layerTree) {
+        qWarning() << "LayerTreePlugin: no layer tree view available, initialization failed";
+        return false;
+    }
+
     QgsProject *project = QgsProject::instance();
     QgsLayerTree *root = project->layerTreeRoot();
 
@@ -52,9 +58,9 @@ bool LayerTreePlugin::initialize(QgsMapCanvas *canvas, QgsLayerTreeView *layerTr
     m_model->setFlag(QgsLayerTreeModel::AllowLegendChangeState);
     m_model->setFlag(QgsLayerTreeModel::ActionHierarchical);
 
-    m_layerTree->setLayerTreeModel(m_model);
-    m_layerTree->setModel(m_model);
-    m_layerTree->expandAll();
+    layerTree->setLayerTreeModel(m_model);
+    layerTree->setModel(m_model);
+    layerTree->expandAll();
 
     qDebug() << "LayerTreePlugin initialized";
     return true;
