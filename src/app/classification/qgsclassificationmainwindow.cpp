@@ -11,7 +11,6 @@
 #include "rs_class_table_widget.h"
 #include "rs_classification_project.h"
 #include "rs_classification_split.h"
-#include "rs_classification_task.h"
 #include "rs_classification_pipeline.h"
 #include "rs_classifier_kmeans.h"
 #include "rs_post_process_dialog.h"
@@ -27,7 +26,6 @@
 #include "rs_classify_workflow_bridge.h"
 #include "rs_classify_workflow_controller.h"
 #include "rs_cross_validation.h"
-#include "rs_cv_task.h"
 #include "rs_training_data_extraction.h"
 #include "rs_jm_matrix_widget.h"
 #include "rs_jm_separability.h"
@@ -190,7 +188,7 @@ class SampleSelectTool : public QgsMapTool
 /// Fit a feature scaler on the train split and write scaled matrices +
 /// the fitted scaler onto \a cfg. Returns false if fit fails.
 bool fitScalerOntoConfig( const RsTrainTestSplit &split,
-                          RsClassificationTask::Config &cfg )
+                          RsClassificationPipeline::Config &cfg )
 {
   RsFeatureScaler scaler;
   if ( !scaler.fit( split.trainX ) )
@@ -2053,7 +2051,7 @@ void QgsClassificationMainWindow::applyClassification()
     m_classifierBar->setOutputPath( outPath );
   }
 
-  RsClassificationTask::Config cfg;
+  RsClassificationPipeline::Config cfg;
   cfg.sourceRaster = m_sourceRasterPath;
   cfg.outputRaster = outPath;
   cfg.bandIndices = bands;
@@ -2071,8 +2069,8 @@ void QgsClassificationMainWindow::applyClassification()
   {
     // Phase 10A.1.3 — a model was loaded from disk via File → "Load
     // classifier model...". Consume it (one-shot) and skip training.
-    // testX/testY left empty so RsClassificationTask::run() skips accuracy.
-    cfg.algoName = QStringLiteral( "Loaded (%1)" ).arg( m_loadedBackend->name() );
+    // testX/testY left empty so the pipeline run() skips accuracy.
+    cfg.methodName = QStringLiteral( "Loaded (%1)" ).arg( m_loadedBackend->name() );
     cfg.backend = std::move( m_loadedBackend );
     // Apply sidecar scaler so tile features match training feature space.
     cfg.scaler = m_loadedScaler;
@@ -2102,11 +2100,11 @@ void QgsClassificationMainWindow::applyClassification()
     {
       case RsClassifierKind::NormalBayes:
         cfg.backend.reset( new RsClassifierNormalBayes );
-        cfg.algoName = QStringLiteral( "NormalBayes" );
+        cfg.methodName = QStringLiteral( "NormalBayes" );
         break;
       case RsClassifierKind::SvmRbf:
         cfg.backend.reset( new RsClassifierSvm );
-        cfg.algoName = QStringLiteral( "SVM_RBF" );
+        cfg.methodName = QStringLiteral( "SVM_RBF" );
         break;
       case RsClassifierKind::KMeans:
       {
@@ -2115,7 +2113,7 @@ void QgsClassificationMainWindow::applyClassification()
           uniqueLabels.insert( y.at<int>( i, 0 ) );
         cfg.backend.reset( new RsClassifierKMeans(
           std::max( 2, static_cast<int>( uniqueLabels.size() ) ) ) );
-        cfg.algoName = QStringLiteral( "KMeans" );
+        cfg.methodName = QStringLiteral( "KMeans" );
         break;
       }
     }
@@ -2139,10 +2137,10 @@ void QgsClassificationMainWindow::applyClassification()
     }
   }
 
-  const QString algoForLog = cfg.algoName;
+  const QString algoForLog = cfg.methodName;
   const QString outForLog = outPath;
   SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Classification started: algo=%1, bands=%2, output=%3" )
-    .arg( cfg.algoName ).arg( cfg.bandIndices.size() ).arg( QFileInfo( outPath ).fileName() ) );
+    .arg( cfg.methodName ).arg( cfg.bandIndices.size() ).arg( QFileInfo( outPath ).fileName() ) );
   setClassifyBusy( true );
 
   sicnu::jobs::JobRequest req;
@@ -2152,7 +2150,7 @@ void QgsClassificationMainWindow::applyClassification()
   req.exclusive = true;
   req.params["output"] = outForLog.toStdString();
 
-  auto cfgPtr = std::make_shared<RsClassificationTask::Config>( std::move( cfg ) );
+  auto cfgPtr = std::make_shared<RsClassificationPipeline::Config>( std::move( cfg ) );
 
   m_jobHandle.submitJob(
     req,
@@ -2161,26 +2159,8 @@ void QgsClassificationMainWindow::applyClassification()
       ctx.logInfo( "Running supervised classification apply" );
       ctx.reportProgress( 0.0, "Classifying" );
 
-      RsClassificationPipeline::Config pcfg;
-      pcfg.sourceRaster = cfgPtr->sourceRaster;
-      pcfg.outputRaster = cfgPtr->outputRaster;
-      pcfg.bandIndices = cfgPtr->bandIndices;
-      pcfg.backend = std::move( cfgPtr->backend );
-      pcfg.trainX = cfgPtr->trainX;
-      pcfg.trainY = cfgPtr->trainY;
-      pcfg.testX = cfgPtr->testX;
-      pcfg.testY = cfgPtr->testY;
-      pcfg.classColors = cfgPtr->classColors;
-      pcfg.methodName = cfgPtr->algoName;
-      pcfg.scaler = cfgPtr->scaler;
-      pcfg.modelSavePath = cfgPtr->modelSavePath;
-      pcfg.creationOptions = cfgPtr->creationOptions;
-      pcfg.cropToWindow = cfgPtr->cropToWindow;
-      pcfg.window = cfgPtr->window;
-      pcfg.ignoreOptions = cfgPtr->ignoreOptions;
-
       const auto res = RsClassificationPipeline::run(
-        std::move( pcfg ),
+        std::move( *cfgPtr ),
         [&ctx]( double fraction, const QString &msg ) {
           ctx.reportProgress( fraction, msg.toStdString() );
           return !ctx.isCancelled();
@@ -2328,7 +2308,7 @@ void QgsClassificationMainWindow::applyPreview()
   const QString outPath = QDir::temp().filePath(
     QStringLiteral( "classify_preview.tif" ) );
 
-  RsClassificationTask::Config cfg;
+  RsClassificationPipeline::Config cfg;
   cfg.sourceRaster = m_sourceRasterPath;
   cfg.outputRaster = outPath;
   cfg.bandIndices = bands;
@@ -2353,11 +2333,11 @@ void QgsClassificationMainWindow::applyPreview()
   {
     case RsClassifierKind::NormalBayes:
       cfg.backend.reset( new RsClassifierNormalBayes );
-      cfg.algoName = QStringLiteral( "NormalBayes" );
+      cfg.methodName = QStringLiteral( "NormalBayes" );
       break;
     case RsClassifierKind::SvmRbf:
       cfg.backend.reset( new RsClassifierSvm );
-      cfg.algoName = QStringLiteral( "SVM_RBF" );
+      cfg.methodName = QStringLiteral( "SVM_RBF" );
       break;
     case RsClassifierKind::KMeans:
     {
@@ -2366,12 +2346,12 @@ void QgsClassificationMainWindow::applyPreview()
         uniqueLabels.insert( y.at<int>( i, 0 ) );
       cfg.backend.reset( new RsClassifierKMeans(
         std::max( 2, static_cast<int>( uniqueLabels.size() ) ) ) );
-      cfg.algoName = QStringLiteral( "KMeans" );
+      cfg.methodName = QStringLiteral( "KMeans" );
       break;
     }
   }
 
-  auto cfgPtr = std::make_shared<RsClassificationTask::Config>( std::move( cfg ) );
+  auto cfgPtr = std::make_shared<RsClassificationPipeline::Config>( std::move( cfg ) );
   const QString outForLog = outPath;
   setClassifyBusy( true );
 
@@ -2387,24 +2367,8 @@ void QgsClassificationMainWindow::applyPreview()
     [cfgPtr]( const sicnu::jobs::JobRequest &request,
               sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running classification preview" );
-      RsClassificationPipeline::Config pcfg;
-      pcfg.sourceRaster = cfgPtr->sourceRaster;
-      pcfg.outputRaster = cfgPtr->outputRaster;
-      pcfg.bandIndices = cfgPtr->bandIndices;
-      pcfg.backend = std::move( cfgPtr->backend );
-      pcfg.trainX = cfgPtr->trainX;
-      pcfg.trainY = cfgPtr->trainY;
-      pcfg.testX = cfgPtr->testX;
-      pcfg.testY = cfgPtr->testY;
-      pcfg.classColors = cfgPtr->classColors;
-      pcfg.methodName = cfgPtr->algoName;
-      pcfg.scaler = cfgPtr->scaler;
-      pcfg.creationOptions = cfgPtr->creationOptions;
-      pcfg.cropToWindow = cfgPtr->cropToWindow;
-      pcfg.window = cfgPtr->window;
-      pcfg.ignoreOptions = cfgPtr->ignoreOptions;
       const auto res = RsClassificationPipeline::run(
-        std::move( pcfg ),
+        std::move( *cfgPtr ),
         [&ctx]( double fraction, const QString &msg ) {
           ctx.reportProgress( fraction, msg.toStdString() );
           return !ctx.isCancelled();
@@ -2719,7 +2683,7 @@ void QgsClassificationMainWindow::runCrossValidation()
 long QgsClassificationMainWindow::startCrossValidationTask(
   const cv::Mat &X,
   const cv::Mat &y,
-  RsCvTask::ClassifierFactory factory )
+  std::function<std::unique_ptr<RsClassifierBackend>()> factory )
 {
   if ( m_classifyBusy )
     return -1;
@@ -2738,11 +2702,15 @@ long QgsClassificationMainWindow::startCrossValidationTask(
                      sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running 5-fold cross validation" );
       ctx.reportProgress( 0.0, "CV" );
-      const auto res = RsClassificationPipeline::runCrossValidation(
+      // Port of the deleted pipeline CV pass-through (ADR 0053): the
+      // between-fold cancel check reports a fixed 0.5 progress fraction, so
+      // the UI sits at 50% during the run.
+      const auto res = RsCrossValidation::kFold(
         X, y, factory, 5, /*scaleFeatures=*/true,
-        [&ctx]( double fraction, const QString &msg ) {
-          ctx.reportProgress( fraction, msg.toStdString() );
-          return !ctx.isCancelled();
+        [&ctx]() {
+          ctx.reportProgress( 0.5,
+                              QStringLiteral( "Cross validation running..." ).toStdString() );
+          return ctx.isCancelled();
         } );
 
       if ( ctx.isCancelled() || !res.ok() )
@@ -2956,83 +2924,32 @@ void QgsClassificationMainWindow::recomputeJmMatrix()
   if ( bands.isEmpty() )
     return;
 
-  ensureGdalInit();
-  GDALDataset *ds = static_cast<GDALDataset *>(
-    GDALOpen( m_sourceRasterPath.toUtf8().constData(), GA_ReadOnly ) );
-  if ( !ds )
-    return;
-  const int W = ds->GetRasterXSize();
-  const int H = ds->GetRasterYSize();
-  const int nBands = ds->GetRasterCount();
-  for ( int b : bands )
-  {
-    if ( b < 1 || b > nBands )
-    {
-      GDALClose( ds );
-      return;
-    }
-  }
-  // Collect ROI pixel indices per class
-  QHash<int, QVector<quint64>> idxByClass;
+  // Reuse the canonical extraction seam (ADR 0055): scanline-grouped band
+  // reads plus the same NoData / user-ignore filtering the classify path
+  // applies — the old hand-rolled 1x1 RasterIO loop let NoData pixels leak
+  // into the JM statistics. Overlapping ROIs dedup by pixel, last class
+  // wins, exactly like buildTrainingData().
+  QVector<RsTrainingGeometry> geometries;
+  geometries.reserve( m_rois->rois().size() );
   for ( const RsRoi &roi : m_rois->rois() )
   {
-    if ( roi.classId() <= 0 )
-      continue;
-    QVector<quint64> idx = roi.pixelIndices();
-    if ( idx.isEmpty() )
-    {
-      const QSet<quint64> px = RsPixelRasterizer::rasterize(
-        roi.geometry(), m_sourceGt, W, H );
-      idx = QVector<quint64>( px.begin(), px.end() );
-    }
-    auto &bucket = idxByClass[roi.classId()];
-    for ( quint64 i : idx )
-    {
-      if ( i < static_cast<quint64>( W ) * H )
-        bucket.push_back( i );
-    }
+    RsTrainingGeometry tg;
+    tg.classId = roi.classId();
+    tg.geometry = roi.geometry();
+    tg.pixelIndices = roi.pixelIndices();
+    geometries.push_back( tg );
   }
 
-  // Read only ROI pixel values per band (much less memory than full raster)
-  QHash<int, cv::Mat> samplesByClass;
-  for ( auto it = idxByClass.constBegin(); it != idxByClass.constEnd(); ++it )
-  {
-    const auto &px = it.value();
-    if ( px.size() < 2 )
-      continue;
-    cv::Mat m( px.size(), bands.size(), CV_32F );
-    for ( int bi = 0; bi < bands.size(); ++bi )
-    {
-      GDALRasterBandH band = ds->GetRasterBand( bands[bi] );
-      if ( !band ) continue;
-      for ( int r = 0; r < px.size(); ++r )
-      {
-        int row = static_cast<int>( px[r] / W );
-        int col = static_cast<int>( px[r] % W );
-        float val = 0.0f;
-        GDALRasterIO( band, GF_Read, col, row, 1, 1, &val, 1, 1, GDT_Float32, 0, 0 );
-        m.at<float>( r, bi ) = val;
-      }
-    }
-    samplesByClass.insert( it.key(), m );
-  }
-  GDALClose( ds );
+  RsTrainingDataExtraction::Options options;
+  options.ignore = currentIgnoreOptions();
 
-  // Sorted class id list for pairwise iteration.
-  QList<int> ids = samplesByClass.keys();
-  std::sort( ids.begin(), ids.end() );
+  const RsTrainingDataResult res = RsTrainingDataExtraction::extract(
+    m_sourceRasterPath, bands, geometries, options );
+  if ( !res.ok )
+    return;
 
-  QHash<QPair<int, int>, double> jm;
-  for ( int i = 0; i < ids.size(); ++i )
-  {
-    for ( int j = i + 1; j < ids.size(); ++j )
-    {
-      const double d = RsJmSeparability::pairJm(
-        samplesByClass.value( ids[i] ),
-        samplesByClass.value( ids[j] ) );
-      jm.insert( qMakePair( ids[i], ids[j] ), d );
-    }
-  }
+  const QHash<QPair<int, int>, double> jm = RsJmSeparability::computeAll(
+    res.X, res.y );
 
   QVector<RsJmMatrixWidget::ClassEntry> classes;
   const QHash<int, RsClassDef> classDefs = m_rois->classDefs();

@@ -3,8 +3,7 @@
 // Mahalanobis / UNet).
 //
 // Each backend wraps an OpenCV ML algorithm and exposes a uniform fit/predict
-// API so the GUI shell and RsClassificationTask can drive any concrete
-// classifier without #ifdefs.
+// API so the GUI shell can drive any concrete classifier without #ifdefs.
 #pragma once
 
 #include "qgis_analysis_export.h"
@@ -34,7 +33,15 @@ class QGIS_ANALYSIS_EXPORT RsClassifierBackend
     virtual bool load( const QString & /*path*/ ) { return false; }
 
     /// True if backend can run predict() without fit() first.
-    /// Phase 10A.1.3 — used by RsClassificationTask to skip retraining
-    /// when a model has been loaded from disk via RsClassifierLoadDialog.
+    /// Phase 10A.1.3 — used by the classification pipeline to skip
+    /// retraining when a model has been loaded from disk via
+    /// RsClassifierLoadDialog.
     virtual bool isFitted() const { return false; }
+
+    /// True when predicted labels are not in the training-label space and
+    /// must be remapped onto the true class ids before use (K-Means emits
+    /// arbitrary 1..K cluster ids). The classification pipeline builds a
+    /// Hungarian-assignment table when this is set (ADR 0061 — replaces the
+    /// former methodName == "KMeans" string branch).
+    virtual bool needsLabelRemap() const { return false; }
 };

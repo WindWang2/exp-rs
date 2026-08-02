@@ -1,8 +1,8 @@
 // Phase 10A Task 10.8 — End-to-end classification test.
 //
 // Build a 32x32 3-band synthetic raster with 3 distinct regions, train a
-// NormalBayes backend on 30 hand-labelled pixels (10 / class), run the task
-// synchronously and spot-check the output GeoTIFF.
+// NormalBayes backend on 30 hand-labelled pixels (10 / class), run the
+// pipeline synchronously and spot-check the output GeoTIFF.
 #include <catch2/catch_test_macros.hpp>
 
 #include <QColor>
@@ -11,7 +11,7 @@
 
 #include <gdal_priv.h>
 
-#include "rs_classification_task.h"
+#include "rs_classification_pipeline.h"
 #include "rs_classifier_normalbayes.h"
 
 TEST_CASE(
@@ -79,8 +79,8 @@ TEST_CASE(
     y.at<int>( 20 + i, 0 ) = 3;
   }
 
-  // --- Build the task config ------------------------------------------------
-  RsClassificationTask::Config cfg;
+  // --- Build the pipeline config ---------------------------------------------
+  RsClassificationPipeline::Config cfg;
   cfg.sourceRaster = srcPath;
   cfg.outputRaster = tmp.path() + "/out.tif";
   cfg.bandIndices = { 1, 2, 3 };
@@ -90,13 +90,13 @@ TEST_CASE(
   cfg.classColors[1] = QColor( "#cc0000" );
   cfg.classColors[2] = QColor( "#00cc00" );
   cfg.classColors[3] = QColor( "#0000cc" );
-  cfg.algoName = QStringLiteral( "NormalBayes" );
+  cfg.methodName = QStringLiteral( "NormalBayes" );
 
-  RsClassificationTask task( std::move( cfg ) );
-  REQUIRE( task.run() );
-  REQUIRE( task.result().ok );
+  const RsClassificationPipelineResult res =
+    RsClassificationPipeline::run( std::move( cfg ) );
+  REQUIRE( res.ok );
   REQUIRE( QFile::exists( tmp.path() + "/out.tif" ) );
-  REQUIRE( task.result().totalPixels == 32 * 32 );
+  REQUIRE( res.totalPixels == 32 * 32 );
 
   // --- Spot-check output pixels ---------------------------------------------
   GDALDataset *outDs = static_cast<GDALDataset *>(

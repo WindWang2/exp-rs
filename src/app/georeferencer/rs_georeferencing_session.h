@@ -8,15 +8,15 @@
 #include <QObject>
 #include <QString>
 #include <QVector>
-#include <QPointF>
 
-#include <cmath>
-#include <limits>
+#include <functional>
 #include <memory>
 #include <optional>
 
 #include "qgscoordinatereferencesystem.h"
+#include "qgsgcppoint.h"
 #include "qgsgcptransformer.h"
+#include "qgsgeoreftransform.h"
 #include "qgsimagewarper.h"
 #include "qgspointxy.h"
 
@@ -25,10 +25,7 @@
 #include "workflow/workflow_runtime.h"
 
 class QWidget;
-class QgsGeorefTransform;
 class RsWarpTask;
-
-#include <functional>
 
 struct CustomWarpExecutor
 {
@@ -39,62 +36,6 @@ struct CustomWarpExecutor
 };
 
 /**
- * One Ground Control Point pairing in the session.
- * Source is in source-image coordinates (same as QgsGcpPoint source);
- * destination is map / reference coordinates.
- */
-struct RsGeorefGcpPair
-{
-  QgsPointXY source;
-  QgsPointXY destination;
-  bool enabled = true;
-  /// User-defined point type label (SICNU `.points` v2 / table 类型 column).
-  QString pointType;
-};
-
-/**
- * Sentinel stored in RsGeorefFitResult::residuals for entries with no valid
- * residual (disabled GCPs, failed back-transform, or unfit points).
- */
-inline QPointF rsGeorefInvalidResidual()
-{
-  const double nan = std::numeric_limits<double>::quiet_NaN();
-  return QPointF( nan, nan );
-}
-
-inline bool rsGeorefResidualIsValid( const QPointF &r )
-{
-  return !std::isnan( r.x() ) && !std::isnan( r.y() );
-}
-
-/**
- * Outcome of the last fit (parameter estimation from enabled GCPs).
- *
- * Residual semantics (ADR 0020 decision 2): residuals live in source-image
- * PIXELS. Per enabled GCP, the destination point is back-transformed into
- * source pixel space (QgsGeorefTransform::transformWorldToRaster) and the
- * residual is the Euclidean delta against the observed source pixel
- * (QgsGeorefTransform::toSourcePixel). rms is the root-mean-square of the
- * per-point residual magnitudes over enabled GCPs.
- */
-struct RsGeorefFitResult
-{
-  bool ready = false;
-  double rms = -1.0; ///< source-pixel RMS over enabled GCPs
-  int enabledGcpCount = 0;
-  int minimumGcpCount = 0;
-  QString errorMessage;
-  /// Per-point residual (dx, dy) in source pixels, aligned with gcps()
-  /// ordering. Always sized to gcps().size(); disabled GCPs and points whose
-  /// back-transform failed carry rsGeorefInvalidResidual().
-  QVector<QPointF> residuals;
-  /// RPC refinement diagnostic: source-pixel RMS of the unrefined RPC fit
-  /// (before GCP-bias refinement). -1 when not applicable (non-RPC method,
-  /// fewer than 3 enabled GCPs, or unrefined fit failed).
-  double refinementRmsBefore = -1.0;
-};
-
-/**
  * Immutable warp request frozen at enqueue time. Mutating the live session
  * after createWarpSnapshot() must not change fields of an existing snapshot.
  */
@@ -102,7 +43,7 @@ struct RsGeorefWarpSnapshot
 {
   QString sourcePath;
   QString outputPath;
-  QVector<RsGeorefGcpPair> gcps; // includes disabled; warp uses enabled only
+  QVector<QgsGcpPoint> gcps; // includes disabled; warp uses enabled only
   QgsGcpTransformerInterface::TransformMethod method =
     QgsGcpTransformerInterface::TransformMethod::Linear;
   QgsImageWarper::ResamplingMethod resampling =
@@ -178,8 +119,8 @@ class RsGeoreferencingSession : public QObject
     void setDemZOffset( double z );
     double demZOffset() const { return mDemZOffset; }
 
-    void setGcps( const QVector<RsGeorefGcpPair> &gcps );
-    const QVector<RsGeorefGcpPair> &gcps() const { return mGcps; }
+    void setGcps( const QVector<QgsGcpPoint> &gcps );
+    const QVector<QgsGcpPoint> &gcps() const { return mGcps; }
     void clearGcps();
 
     /**
@@ -188,8 +129,8 @@ class RsGeoreferencingSession : public QObject
      * (which emits fitChanged). setGcps() stays wholesale and does NOT refit
      * (callers refit explicitly), preserving the stale-fit snapshot gating.
      */
-    void addGcp( const RsGeorefGcpPair &gcp );
-    void appendGcps( const QVector<RsGeorefGcpPair> &gcps );
+    void addGcp( const QgsGcpPoint &gcp );
+    void appendGcps( const QVector<QgsGcpPoint> &gcps );
     void removeGcpAt( int row );
     void setGcpEnabled( int row, bool enabled );
     void setGcpSource( int row, const QgsPointXY &source );
@@ -235,10 +176,6 @@ class RsGeoreferencingSession : public QObject
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
   private:
-    /// Build a transform for the current method, loading the source raster and
-    /// (for RpcPhysical) injecting source path + DEM/Z-offset/refinement into
-    /// QgsRpcGcpTransformer — mirrors the shell's recomputeFit configuration.
-    std::unique_ptr<QgsGeorefTransform> makeConfiguredTransform( bool rpcRefinement ) const;
     void syncWorkflowGcps();
 
     bool mDirty = false;
@@ -248,7 +185,7 @@ class RsGeoreferencingSession : public QObject
       QgsGcpTransformerInterface::TransformMethod::Linear;
     QString mDemPath;
     double mDemZOffset = 0.0;
-    QVector<RsGeorefGcpPair> mGcps;
+    QVector<QgsGcpPoint> mGcps;
     RsGeorefFitResult mLastFit;
 
     CustomWarpExecutor mCustomExecutor;

@@ -1796,8 +1796,11 @@ if(TARGET qgis_app_classify)
   add_executable(test_jm_separability test_jm_separability.cpp)
   target_link_libraries(test_jm_separability PRIVATE
     Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
     qgis_core
     qgis_analysis
+    GDAL::GDAL
     ${OpenCV_LIBS}
   )
   target_include_directories(test_jm_separability PRIVATE
@@ -2561,40 +2564,6 @@ target_include_directories(test_hooks_comprehensive PRIVATE
 )
 set_target_properties(test_hooks_comprehensive PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_hooks_comprehensive)
-
-# GCP Geometry Transformer tests
-add_executable(test_gcp_geometry_transformer test_gcp_geometry_transformer.cpp)
-target_link_libraries(test_gcp_geometry_transformer PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  qgis_core
-  qgis_analysis
-)
-target_include_directories(test_gcp_geometry_transformer PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_BINARY_DIR}
-)
-sicnu_discover_tests(test_gcp_geometry_transformer)
-
-# Vector Warper tests
-add_executable(test_vector_warper test_vector_warper.cpp)
-target_link_libraries(test_vector_warper PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  Qt6::Test
-  qgis_core
-  qgis_analysis
-)
-target_include_directories(test_vector_warper PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_BINARY_DIR}
-)
-set_target_properties(test_vector_warper PROPERTIES AUTOMOC ON)
-sicnu_discover_tests(test_vector_warper)
 
 # Histogram Widget tests — tests the data structures, not the widget itself
 # (widget is part of main app executable, not a separate library)

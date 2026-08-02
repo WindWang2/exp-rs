@@ -26,14 +26,14 @@ TEST_CASE( "RPC Z-offset: changing zOffset shifts forward transform",
   REQUIRE_FALSE( rpcPath.isEmpty() );
 
   QgsRpcGcpTransformer t0( rpcPath );
-  t0.setRpcOptions( QString(), 0.0, false );
+  t0.setRpcOptions( rpcPath, QString(), 0.0, false );
   REQUIRE( t0.updateParametersFromGcps( {}, {}, false ) );
   double x0 = 32.0;
   double y0 = 32.0;
   REQUIRE( t0.transform( x0, y0, false ) );
 
   QgsRpcGcpTransformer t100( rpcPath );
-  t100.setRpcOptions( QString(), 100.0, false );
+  t100.setRpcOptions( rpcPath, QString(), 100.0, false );
   REQUIRE( t100.updateParametersFromGcps( {}, {}, false ) );
   double x1 = 32.0;
   double y1 = 32.0;

@@ -37,7 +37,7 @@ TEST_CASE( "RPC refinement: 3 biased GCPs reduce mean residual",
 
   // Without refinement
   QgsRpcGcpTransformer noref( rpcPath );
-  noref.setRpcOptions( QString(), 0.0, /*useRefine=*/false );
+  noref.setRpcOptions( rpcPath, QString(), 0.0, /*useRefine=*/false );
   REQUIRE( noref.updateParametersFromGcps( src, dst, false ) );
   double x = 32.0;
   double y = 32.0;
@@ -46,7 +46,7 @@ TEST_CASE( "RPC refinement: 3 biased GCPs reduce mean residual",
 
   // With refinement
   QgsRpcGcpTransformer wref( rpcPath );
-  wref.setRpcOptions( QString(), 0.0, /*useRefine=*/true );
+  wref.setRpcOptions( rpcPath, QString(), 0.0, /*useRefine=*/true );
   REQUIRE( wref.updateParametersFromGcps( src, dst, false ) );
   double x2 = 32.0;
   double y2 = 32.0;
@@ -68,7 +68,7 @@ TEST_CASE( "RPC refinement: <3 GCPs skips refinement gracefully",
   QVector<QgsPointXY> dst = { { 116.5, 39.5 } };
 
   QgsRpcGcpTransformer t( rpcPath );
-  t.setRpcOptions( QString(), 0.0, true );
+  t.setRpcOptions( rpcPath, QString(), 0.0, true );
   REQUIRE( t.updateParametersFromGcps( src, dst, false ) );
   REQUIRE( t.isValid() );
 }

@@ -31,7 +31,6 @@
 #include "qgslogger.h"
 #include "qgsmessagelog.h"
 #include "qgsogrutils.h"
-#include "qgsrpcgcptransformer.h"
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -313,29 +312,26 @@ QgsImageWarper::WarpResult QgsImageWarper::warpFile(
 
   // Task 11.4.8 — RPC mode: if the inner transformer carries a DEM, warn when
   // its CRS does not match the target CRS (results may shift several pixels).
-  if ( const QgsRpcGcpTransformer *rpc =
-         dynamic_cast<const QgsRpcGcpTransformer *>( georefTransform->gcpTransformer() ) )
+  // The DEM query flows through the interface (ADR 0057) — no downcast.
+  const QString demPath = georefTransform->gcpTransformer()->demPath();
+  if ( !demPath.isEmpty() )
   {
-    const QString demPath = rpc->demPath();
-    if ( !demPath.isEmpty() )
+    GDALDatasetH demDs = GDALOpen( demPath.toUtf8().constData(), GA_ReadOnly );
+    if ( demDs )
     {
-      GDALDatasetH demDs = GDALOpen( demPath.toUtf8().constData(), GA_ReadOnly );
-      if ( demDs )
-      {
-        const char *proj = GDALGetProjectionRef( demDs );
-        QgsCoordinateReferenceSystem demCrs;
-        if ( proj && *proj )
-          demCrs = QgsCoordinateReferenceSystem::fromWkt( QString::fromUtf8( proj ) );
-        GDALClose( demDs );
+      const char *proj = GDALGetProjectionRef( demDs );
+      QgsCoordinateReferenceSystem demCrs;
+      if ( proj && *proj )
+        demCrs = QgsCoordinateReferenceSystem::fromWkt( QString::fromUtf8( proj ) );
+      GDALClose( demDs );
 
-        if ( demCrs.isValid() && crs.isValid() && demCrs != crs )
-        {
-          QgsMessageLog::logMessage(
-            QObject::tr( "DEM CRS (%1) differs from target CRS (%2); RPC results may shift" )
-              .arg( demCrs.authid(), crs.authid() ),
-            QStringLiteral( "Georeferencer" ),
-            Qgis::MessageLevel::Warning );
-        }
+      if ( demCrs.isValid() && crs.isValid() && demCrs != crs )
+      {
+        QgsMessageLog::logMessage(
+          QObject::tr( "DEM CRS (%1) differs from target CRS (%2); RPC results may shift" )
+            .arg( demCrs.authid(), crs.authid() ),
+          QStringLiteral( "Georeferencer" ),
+          Qgis::MessageLevel::Warning );
       }
     }
   }

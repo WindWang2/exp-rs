@@ -5,7 +5,6 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "qgsgeoreftransform.h"
-#include "qgsrpcgcptransformer.h"
 #include "rs_warp_task.h"
 
 #include <QByteArray>
@@ -18,56 +17,6 @@ namespace
 {
 
 constexpr auto kPrefix = "Georeferencer/";
-
-int enabledCount( const QVector<RsGeorefGcpPair> &gcps )
-{
-  int n = 0;
-  for ( const auto &g : gcps )
-  {
-    if ( g.enabled )
-      ++n;
-  }
-  return n;
-}
-
-void collectEnabled( const QVector<RsGeorefGcpPair> &gcps,
-                     QVector<QgsPointXY> &src, QVector<QgsPointXY> &dst )
-{
-  src.clear();
-  dst.clear();
-  for ( const auto &g : gcps )
-  {
-    if ( !g.enabled )
-      continue;
-    src.append( g.source );
-    dst.append( g.destination );
-  }
-}
-
-// Source-pixel RMS over (src, dst) pairs: back-transform each destination
-// point into source pixel space, residual = predicted - observed pixel,
-// RMS = sqrt( mean( dx^2 + dy^2 ) ). Returns -1 when no point transforms.
-double pixelRms( QgsGeorefTransform *xf,
-                 const QVector<QgsPointXY> &src,
-                 const QVector<QgsPointXY> &dst )
-{
-  if ( !xf )
-    return -1.0;
-  double sumSq = 0.0;
-  int n = 0;
-  for ( int i = 0; i < src.size(); ++i )
-  {
-    QgsPointXY predicted;
-    if ( !xf->transformWorldToRaster( dst.at( i ), predicted ) )
-      continue;
-    const QgsPointXY observed = xf->toSourcePixel( src.at( i ) );
-    const double dx = predicted.x() - observed.x();
-    const double dy = predicted.y() - observed.y();
-    sumSq += dx * dx + dy * dy;
-    ++n;
-  }
-  return ( n > 0 ) ? std::sqrt( sumSq / static_cast<double>( n ) ) : -1.0;
-}
 
 } // namespace
 
@@ -181,7 +130,7 @@ void RsGeoreferencingSession::syncWorkflowGcps()
 {
   if ( !isWorkflowMirrorActive() )
     return;
-  const int n = enabledCount( mGcps );
+  const int n = QgsGeorefTransform::enabledGcpCount( mGcps );
   mWorkflowRuntime.setArtifact(
     mWorkflowSessionId, "gcp_count", n > 0 ? std::to_string( n ) : std::string() );
 }
@@ -221,7 +170,7 @@ void RsGeoreferencingSession::setDemZOffset( double z )
   markDirty();
 }
 
-void RsGeoreferencingSession::setGcps( const QVector<RsGeorefGcpPair> &gcps )
+void RsGeoreferencingSession::setGcps( const QVector<QgsGcpPoint> &gcps )
 {
   mGcps = gcps;
   markDirty();
@@ -241,7 +190,7 @@ void RsGeoreferencingSession::clearGcps()
   emit fitChanged( mLastFit );
 }
 
-void RsGeoreferencingSession::addGcp( const RsGeorefGcpPair &gcp )
+void RsGeoreferencingSession::addGcp( const QgsGcpPoint &gcp )
 {
   mGcps.append( gcp );
   markDirty();
@@ -250,7 +199,7 @@ void RsGeoreferencingSession::addGcp( const RsGeorefGcpPair &gcp )
   refit();
 }
 
-void RsGeoreferencingSession::appendGcps( const QVector<RsGeorefGcpPair> &gcps )
+void RsGeoreferencingSession::appendGcps( const QVector<QgsGcpPoint> &gcps )
 {
   if ( gcps.isEmpty() )
     return;
@@ -278,9 +227,9 @@ void RsGeoreferencingSession::setGcpEnabled( int row, bool enabled )
 {
   if ( row < 0 || row >= mGcps.size() )
     return;
-  if ( mGcps[row].enabled == enabled )
+  if ( mGcps[row].isEnabled() == enabled )
     return;
-  mGcps[row].enabled = enabled;
+  mGcps[row].setEnabled( enabled );
   markDirty();
   syncWorkflowGcps();
   emit gcpsChanged();
@@ -291,7 +240,7 @@ void RsGeoreferencingSession::setGcpSource( int row, const QgsPointXY &source )
 {
   if ( row < 0 || row >= mGcps.size() )
     return;
-  mGcps[row].source = source;
+  mGcps[row].setSourcePoint( source );
   markDirty();
   emit gcpsChanged();
   refit();
@@ -301,7 +250,7 @@ void RsGeoreferencingSession::setGcpDestination( int row, const QgsPointXY &dest
 {
   if ( row < 0 || row >= mGcps.size() )
     return;
-  mGcps[row].destination = destination;
+  mGcps[row].setDestinationPoint( destination );
   markDirty();
   emit gcpsChanged();
   refit();
@@ -311,9 +260,9 @@ void RsGeoreferencingSession::setGcpPointType( int row, const QString &pointType
 {
   if ( row < 0 || row >= mGcps.size() )
     return;
-  if ( mGcps[row].pointType == pointType )
+  if ( mGcps[row].pointType() == pointType )
     return;
-  mGcps[row].pointType = pointType;
+  mGcps[row].setPointType( pointType );
   markDirty();
   emit gcpsChanged();
   refit();
@@ -321,120 +270,12 @@ void RsGeoreferencingSession::setGcpPointType( int row, const QString &pointType
 
 RsGeorefFitResult RsGeoreferencingSession::refit()
 {
-  RsGeorefFitResult fit;
-  fit.enabledGcpCount = enabledCount( mGcps );
-  fit.residuals = QVector<QPointF>( mGcps.size(), rsGeorefInvalidResidual() );
-
-  QgsGeorefTransform probe( mMethod );
-  fit.minimumGcpCount = probe.minimumGcpCount();
-
-  if ( fit.enabledGcpCount < fit.minimumGcpCount )
-  {
-    fit.ready = false;
-    fit.errorMessage = QStringLiteral( "Need at least %1 GCPs, have %2" )
-                         .arg( fit.minimumGcpCount )
-                         .arg( fit.enabledGcpCount );
-    mLastFit = fit;
-    emit fitChanged( mLastFit );
-    return mLastFit;
-  }
-
-  QVector<QgsPointXY> src;
-  QVector<QgsPointXY> dst;
-  collectEnabled( mGcps, src, dst );
-
-  // Match shell: always invert Y for GCP parameter estimation.
-  constexpr bool kInvertYAxis = true;
-
-  std::unique_ptr<QgsGeorefTransform> transform;
-  bool fitOk = false;
-
-  if ( mMethod == QgsGcpTransformerInterface::TransformMethod::RpcPhysical
-       && fit.enabledGcpCount >= 3 )
-  {
-    // RPC refinement (ported from the shell's recomputeFit): fit once without
-    // GCP-bias refinement for the before/after diagnostic, then fit the live
-    // transform with refinement enabled.
-    {
-      auto beforeXf = makeConfiguredTransform( /*rpcRefinement=*/false );
-      try
-      {
-        if ( beforeXf && beforeXf->updateParametersFromGcps( src, dst, kInvertYAxis ) )
-          fit.refinementRmsBefore = pixelRms( beforeXf.get(), src, dst );
-      }
-      catch ( ... ) {}
-    }
-    transform = makeConfiguredTransform( /*rpcRefinement=*/true );
-    try
-    {
-      fitOk = transform && transform->updateParametersFromGcps( src, dst, kInvertYAxis );
-    }
-    catch ( ... )
-    {
-      fitOk = false;
-    }
-  }
-  else
-  {
-    transform = makeConfiguredTransform( /*rpcRefinement=*/false );
-    try
-    {
-      fitOk = transform && transform->updateParametersFromGcps( src, dst, kInvertYAxis );
-    }
-    catch ( ... )
-    {
-      fitOk = false;
-    }
-  }
-
-  if ( !fitOk )
-  {
-    fit.ready = false;
-    fit.errorMessage = QStringLiteral( "Parameter estimation failed" );
-    mLastFit = fit;
-    emit fitChanged( mLastFit );
-    return mLastFit;
-  }
-
-  // Per-point residuals in SOURCE PIXELS (ADR 0020 decision 2): back-transform
-  // each destination point into source pixel space and take the Euclidean
-  // delta against the observed source pixel. Disabled GCPs keep the sentinel.
-  double sumSq = 0.0;
-  int n = 0;
-  for ( int i = 0; i < mGcps.size(); ++i )
-  {
-    const RsGeorefGcpPair &g = mGcps.at( i );
-    if ( !g.enabled )
-      continue;
-    QgsPointXY predicted;
-    if ( !transform->transformWorldToRaster( g.destination, predicted ) )
-      continue;
-    const QgsPointXY observed = transform->toSourcePixel( g.source );
-    const QPointF r( predicted.x() - observed.x(), predicted.y() - observed.y() );
-    fit.residuals[i] = r;
-    sumSq += r.x() * r.x() + r.y() * r.y();
-    ++n;
-  }
-  fit.ready = true;
-  fit.rms = ( n > 0 ) ? std::sqrt( sumSq / static_cast<double>( n ) ) : -1.0;
-  fit.errorMessage.clear();
-  mLastFit = fit;
+  // All fit orchestration lives in QgsGeorefTransform::fit (ADR 0057):
+  // enabled-GCP collection, min-count gating, the RPC before/after
+  // double-fit, per-point source-pixel residuals, and RMS.
+  mLastFit = QgsGeorefTransform::fit( mGcps, mMethod, mSourcePath, mDemPath, mDemZOffset );
   emit fitChanged( mLastFit );
   return mLastFit;
-}
-
-std::unique_ptr<QgsGeorefTransform> RsGeoreferencingSession::makeConfiguredTransform(
-  bool rpcRefinement ) const
-{
-  auto transform = std::make_unique<QgsGeorefTransform>( mMethod );
-  if ( !mSourcePath.isEmpty() )
-    transform->loadRaster( mSourcePath );
-  if ( auto *rpc = dynamic_cast<QgsRpcGcpTransformer *>( transform->gcpTransformer() ) )
-  {
-    rpc->setSourceRasterPath( mSourcePath );
-    rpc->setRpcOptions( mDemPath, mDemZOffset, rpcRefinement );
-  }
-  return transform;
 }
 
 std::optional<RsGeorefWarpSnapshot> RsGeoreferencingSession::createWarpSnapshot(
@@ -449,8 +290,7 @@ std::optional<RsGeorefWarpSnapshot> RsGeoreferencingSession::createWarpSnapshot(
     return std::nullopt;
   // Mirror QgsGeorefShellWindow::applyTransform: refuse when the live GCP list
   // no longer meets the method minimum (e.g. GCPs disabled after the fit).
-  QgsGeorefTransform probe( mMethod );
-  if ( enabledCount( mGcps ) < probe.minimumGcpCount() )
+  if ( QgsGeorefTransform::enabledGcpCount( mGcps ) < QgsGeorefTransform::minimumGcpCountFor( mMethod ) )
     return std::nullopt;
 
   RsGeorefWarpSnapshot snap;
@@ -474,7 +314,7 @@ std::unique_ptr<QgsGeorefTransform> RsGeoreferencingSession::transformFromSnapsh
 
   QVector<QgsPointXY> src;
   QVector<QgsPointXY> dst;
-  collectEnabled( snap.gcps, src, dst );
+  QgsGeorefTransform::collectEnabledGcps( snap.gcps, src, dst );
 
   constexpr bool kInvertYAxis = true;
   if ( !transform->updateParametersFromGcps( src, dst, kInvertYAxis ) )

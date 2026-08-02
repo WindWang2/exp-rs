@@ -107,22 +107,22 @@ int QgsGCPListModel::gcpRowCount() const
 
 bool QgsGCPListModel::rowEnabled( int row ) const
 {
-  return mSession && row >= 0 && row < mSession->gcps().size() && mSession->gcps().at( row ).enabled;
+  return mSession && row >= 0 && row < mSession->gcps().size() && mSession->gcps().at( row ).isEnabled();
 }
 
 QgsPointXY QgsGCPListModel::rowSourcePoint( int row ) const
 {
-  return ( mSession && row >= 0 && row < mSession->gcps().size() ) ? mSession->gcps().at( row ).source : QgsPointXY();
+  return ( mSession && row >= 0 && row < mSession->gcps().size() ) ? mSession->gcps().at( row ).sourcePoint() : QgsPointXY();
 }
 
 QgsPointXY QgsGCPListModel::rowDestinationPoint( int row ) const
 {
-  return ( mSession && row >= 0 && row < mSession->gcps().size() ) ? mSession->gcps().at( row ).destination : QgsPointXY();
+  return ( mSession && row >= 0 && row < mSession->gcps().size() ) ? mSession->gcps().at( row ).destinationPoint() : QgsPointXY();
 }
 
 QString QgsGCPListModel::rowPointType( int row ) const
 {
-  return ( mSession && row >= 0 && row < mSession->gcps().size() ) ? mSession->gcps().at( row ).pointType : QString();
+  return ( mSession && row >= 0 && row < mSession->gcps().size() ) ? mSession->gcps().at( row ).pointType() : QString();
 }
 
 QPointF QgsGCPListModel::rowResidual( int row ) const

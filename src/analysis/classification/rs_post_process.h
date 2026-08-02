@@ -68,11 +68,18 @@ class QGIS_ANALYSIS_EXPORT RsPostProcess
     /**
      * Save a single-band label raster (CV_32S or CV_8U) as GeoTIFF (or driver
      * inferred from extension) with optional palette color table.
+     *
+     * Dtype policy (ADR 0019 S4, consolidated here per ADR 0055): Byte when
+     * every label fits 0..255, UInt16 up to 65535, Int32 beyond — labels are
+     * never silently clamped. A palette is attached only for Byte output
+     * (palette-index semantics). \a nodataValue is written as the GDAL
+     * NoData marker when it is not NaN.
      */
     static bool saveLabelRaster( const QString &path, const cv::Mat &labels,
                                  const double gt[6], const QString &wkt,
                                  const QVector<QRgb> &colorTable,
                                  const QStringList &creationOptions,
+                                 double nodataValue,
                                  QString *err = nullptr );
 
     /**

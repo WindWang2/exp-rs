@@ -5,15 +5,15 @@
  * classification pipeline:
  *
  *   params → full-band read + deterministic std::mt19937(42) subsample
- *            (the operator's long-standing sampling policy, unchanged) →
+ *            (the shared rsShuffleAndKeep policy, unchanged — ADR 0061) →
  *            RsClassificationPipeline::run with an RsClassifierKMeans
  *            backend.
  *
  * Tiled prediction, GTiff creation options, NoData/ignore policy and the
  * Byte color table all come from the pipeline (parity with the GUI path by
- * construction). The backend is the analysis-layer RsClassifierKMeans, so
- * K-Means init / attempts / termination criteria cannot drift from the GUI
- * again.
+ * construction). The backend is built by RsClassifierBackendFactory
+ * (createKMeans — one construction path, no drift), so K-Means init /
+ * attempts / termination criteria cannot drift from the GUI again.
  ***************************************************************************/
 #include "rs_kmeans_operator.h"
 
@@ -24,15 +24,14 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include "rs_classification_pipeline.h"
-#include "rs_classifier_kmeans.h"
+#include "rs_classifier_backend_factory.h"
+#include "rs_classification_utils.h"
 
-#include <QColor>
 #include <QString>
 #include <QVector>
 
 #include <opencv2/core.hpp>
 
-#include <algorithm>
 #include <random>
 #include <string>
 #include <vector>
@@ -42,13 +41,6 @@ namespace sicnu::operators::rs {
 using namespace params;
 
 namespace {
-
-/// Deterministic per-cluster colors, same synthesis as the supervised
-/// adapter (headless runs have no ROI class defs; the palette also feeds
-/// the pipeline's max-class-id dtype check).
-QColor classColor(int classId) {
-    return QColor::fromHsv((classId * 47) % 360, 200, 230);
-}
 
 /// Map a failed pipeline run back onto the operator's stable error codes.
 [[noreturn]] void throwPipelineError(const RsClassificationPipelineResult& res) {
@@ -169,8 +161,9 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
         context.throwIfCancelled();
     }
 
-    // Subsample for centroid fitting when raster is large (unchanged
-    // operator policy: deterministic std::mt19937(42) shuffle).
+    // Subsample for centroid fitting when raster is large (shared operator
+    // policy: deterministic std::mt19937(42) shuffle — rsShuffleAndKeep,
+    // ADR 0061; identical sequence to the former inline shuffle).
     std::vector<size_t> sampleIdx;
     sampleIdx.reserve(nPix);
     for (size_t i = 0; i < nPix; ++i)
@@ -178,8 +171,7 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
 
     if (maxSamples > 0 && static_cast<int>(nPix) > maxSamples) {
         std::mt19937 rng(42);
-        std::shuffle(sampleIdx.begin(), sampleIdx.end(), rng);
-        sampleIdx.resize(static_cast<size_t>(maxSamples));
+        rsShuffleAndKeep(rng, sampleIdx, static_cast<size_t>(maxSamples));
     }
 
     const int nSamples = static_cast<int>(sampleIdx.size());
@@ -205,16 +197,16 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
     cfg.bandIndices = QVector<int>(bands.begin(), bands.end());
     cfg.trainX = trainX;
     // KMeans fit() ignores y, but the pipeline requires a non-empty trainY
-    // when the backend is not fitted. Dummy zeros satisfy the check; the
-    // methodName deliberately stays lowercase so the pipeline's "KMeans"
-    // Hungarian cluster→class remap (supervised accuracy only) is skipped —
-    // there are no true class ids here and the operator's 1-based cluster
-    // ids must survive verbatim.
+    // when the backend is not fitted. Dummy zeros satisfy the check.
+    // methodName is metadata only (log + sidecar) — the cluster→class remap
+    // is gated on RsClassifierBackend::needsLabelRemap() (ADR 0061), so no
+    // lowercase spelling workaround is needed and 1-based cluster ids
+    // survive verbatim.
     cfg.trainY = cv::Mat::zeros(nSamples, 1, CV_32S);
     cfg.methodName = QStringLiteral("kmeans");
     for (int id = 1; id <= k; ++id)
-        cfg.classColors[id] = classColor(id);
-    cfg.backend = std::make_unique<RsClassifierKMeans>(k);
+        cfg.classColors[id] = rsSynthesizedClassColor(id);
+    cfg.backend = RsClassifierBackendFactory::createKMeans(k);
 
     // Bridge: pipeline fraction [0,1] → operator progress 0.40–0.98; cancel
     // via the sink's return value so the pipeline removes a partially-written

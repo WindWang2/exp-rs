@@ -119,6 +119,30 @@ class QGIS_ANALYSIS_EXPORT QgsGcpTransformerInterface
      */
     static std::unique_ptr<QgsGcpTransformerInterface> createFromParameters( TransformMethod method, const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates );
 
+    // SICNU GEO RS additions (ADR 0057) — optional RPC seam. Non-RPC
+    // transformers inherit the defaults and are unaffected.
+
+    /**
+     * Configures RPC-specific options for the next \ref updateParametersFromGcps
+     * call: the source raster path (RPC coefficients are read from its
+     * metadata), an optional DEM path, a constant Z-offset, and the GCP-bias
+     * refinement flag.
+     *
+     * Non-RPC transformers ignore the arguments and return FALSE. RPC
+     * transformers apply them and return TRUE.
+     *
+     * \since SICNU GEO RS Phase 11.6 (ADR 0057)
+     */
+    virtual bool setRpcOptions( const QString &sourceRasterPath, const QString &demPath, double zOffset, bool useGcpRefinement = false ) { Q_UNUSED( sourceRasterPath ) Q_UNUSED( demPath ) Q_UNUSED( zOffset ) Q_UNUSED( useGcpRefinement ) return false; }
+
+    /**
+     * Returns the DEM path configured for RPC-based methods, or an empty
+     * string when not applicable.
+     *
+     * \since SICNU GEO RS Phase 11.6 (ADR 0057)
+     */
+    virtual QString demPath() const { return QString(); }
+
 #ifndef SIP_RUN
 
     /**

@@ -301,15 +301,12 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
                                            .arg( int( r.inlierRatio * 100 ) );
                      if ( QMessageBox::question( this, tr( "SIFT 匹配结果" ), msg ) != QMessageBox::Yes )
                        return;
-                     QVector<RsGeorefGcpPair> pairs;
+                     QVector<QgsGcpPoint> pairs;
                      pairs.reserve( r.inliers.size() );
+                     const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
                      for ( const auto &m : r.inliers )
                      {
-                       RsGeorefGcpPair pair;
-                       pair.source = m.srcPx;
-                       pair.destination = m.dstWorld;
-                       pair.enabled = true;
-                       pairs.append( pair );
+                       pairs.append( QgsGcpPoint( m.srcPx, m.dstWorld, destCrs, true ) );
                      }
                      // Accepted matches go straight into the session (sole GCP owner).
                      georefSession().appendGcps( pairs );
@@ -360,10 +357,10 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
       return;
     }
     // Enabled source points of the session's GCP list are the match seeds.
-    for ( const RsGeorefGcpPair &g : georefSession().gcps() )
+    for ( const QgsGcpPoint &g : georefSession().gcps() )
     {
-      if ( g.enabled )
-        seeds.append( g.source );
+      if ( g.isEnabled() )
+        seeds.append( g.sourcePoint() );
     }
     if ( seeds.isEmpty() )
     {
@@ -455,15 +452,12 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
                      if ( QMessageBox::question( this, tr( "模板匹配结果" ), msg ) != QMessageBox::Yes )
                        return;
 
-                     QVector<RsGeorefGcpPair> pairs;
+                     QVector<QgsGcpPoint> pairs;
                      pairs.reserve( r.matches.size() );
+                     const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
                      for ( const auto &m : r.matches )
                      {
-                       RsGeorefGcpPair pair;
-                       pair.source = m.srcPx;
-                       pair.destination = m.dstWorld;
-                       pair.enabled = true;
-                       pairs.append( pair );
+                       pairs.append( QgsGcpPoint( m.srcPx, m.dstWorld, destCrs, true ) );
                      }
                      // Accepted matches go straight into the session (sole GCP owner).
                      georefSession().appendGcps( pairs );

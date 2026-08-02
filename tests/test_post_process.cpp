@@ -3,7 +3,15 @@
 
 #include "rs_post_process.h"
 
+#include <QColor>
+#include <QTemporaryDir>
+
+#include <gdal_priv.h>
+
 #include <opencv2/core.hpp>
+
+#include <limits>
+#include <vector>
 
 TEST_CASE( "PostProcess: recode maps ids", "[classify][post]" )
 {
@@ -33,4 +41,99 @@ TEST_CASE( "PostProcess: sieve removes small component", "[classify][post]" )
   cv::Mat dst;
   REQUIRE( RsPostProcess::sieve( src, dst, 2, 8, nullptr ) );
   REQUIRE( dst.at<int>( 0, 0 ) != 2 ); // replaced
+}
+
+namespace
+{
+
+/// Write \a labels via saveLabelRaster, reopen and return the band dtype.
+GDALDataType writeAndReopen( const QString &path, const cv::Mat &labels,
+                             double nodataValue, GDALDatasetH &out )
+{
+  double gt[6] = { 0, 1, 0, static_cast<double>( labels.rows ), 0, -1 };
+  if ( !RsPostProcess::saveLabelRaster( path, labels, gt, QString(),
+                                        QVector<QRgb>(), QStringList(),
+                                        nodataValue, nullptr ) )
+    return GDT_Unknown;
+  out = GDALOpenEx( path.toUtf8().constData(), GDAL_OF_RASTER,
+                    nullptr, nullptr, nullptr );
+  REQUIRE( out != nullptr );
+  return GDALGetRasterDataType( GDALGetRasterBand( out, 1 ) );
+}
+
+} // namespace
+
+// ADR 0055: saveLabelRaster is the canonical class-map writer — it owns the
+// ADR 0019 S4 dtype escalation (Byte <= 255, UInt16 <= 65535, Int32 beyond),
+// attaches a palette only when one is given, and sets the NoData marker only
+// when asked (NaN = none).
+TEST_CASE( "PostProcess: saveLabelRaster dtype escalation + no-palette", "[classify][post]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  GDALAllRegister();
+
+  SECTION( "labels <= 255 → Byte, no palette, NoData marker set" )
+  {
+    cv::Mat labels( 2, 2, CV_32S );
+    labels.setTo( 0 );
+    labels.at<int>( 0, 0 ) = 1;
+    labels.at<int>( 1, 1 ) = 200;
+
+    GDALDatasetH ds = nullptr;
+    const GDALDataType dt = writeAndReopen( tmp.path() + "/byte.tif", labels, 0.0, ds );
+    CHECK( dt == GDT_Byte );
+    // No palette requested → band must not be palette-indexed.
+    CHECK( GDALGetRasterColorInterpretation( GDALGetRasterBand( ds, 1 ) )
+           != GCI_PaletteIndex );
+    int success = 0;
+    CHECK( GDALGetRasterNoDataValue( GDALGetRasterBand( ds, 1 ), &success ) == 0.0 );
+    CHECK( success == 1 );
+    GDALClose( ds );
+  }
+
+  SECTION( "labels in 256..65535 → UInt16" )
+  {
+    cv::Mat labels( 1, 2, CV_32S );
+    labels.at<int>( 0, 0 ) = 255;
+    labels.at<int>( 0, 1 ) = 300;
+
+    GDALDatasetH ds = nullptr;
+    const GDALDataType dt = writeAndReopen( tmp.path() + "/u16.tif", labels,
+                                            std::numeric_limits<double>::quiet_NaN(), ds );
+    CHECK( dt == GDT_UInt16 );
+    std::vector<int> px( 2 );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Read, 0, 0, 2, 1,
+                           px.data(), 2, 1, GDT_Int32, 0, 0 ) == CE_None );
+    CHECK( px[0] == 255 );
+    CHECK( px[1] == 300 ); // escalated, never clamped
+    GDALClose( ds );
+  }
+
+  SECTION( "labels > 65535 → Int32" )
+  {
+    cv::Mat labels( 1, 2, CV_32S );
+    labels.at<int>( 0, 0 ) = 70000;
+    labels.at<int>( 0, 1 ) = -1; // negative forces Int32 too
+
+    GDALDatasetH ds = nullptr;
+    const GDALDataType dt = writeAndReopen( tmp.path() + "/i32.tif", labels,
+                                            std::numeric_limits<double>::quiet_NaN(), ds );
+    CHECK( dt == GDT_Int32 );
+    GDALClose( ds );
+  }
+
+  SECTION( "NaN nodataValue → no NoData marker" )
+  {
+    cv::Mat labels( 1, 1, CV_32S, cv::Scalar( 7 ) );
+
+    GDALDatasetH ds = nullptr;
+    const GDALDataType dt = writeAndReopen( tmp.path() + "/nond.tif", labels,
+                                            std::numeric_limits<double>::quiet_NaN(), ds );
+    CHECK( dt == GDT_Byte );
+    int success = 0;
+    GDALGetRasterNoDataValue( GDALGetRasterBand( ds, 1 ), &success );
+    CHECK( success == 0 );
+    GDALClose( ds );
+  }
 }

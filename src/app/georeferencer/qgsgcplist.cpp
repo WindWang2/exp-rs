@@ -19,8 +19,6 @@
 #include <QStringList>
 #include <QTextStream>
 
-#include <cmath>
-
 bool rsSaveGcpPointsFile( const QString &filePath, const QVector<QgsGcpPoint> &points )
 {
   QFile pointFile( filePath );
@@ -29,21 +27,18 @@ bool rsSaveGcpPointsFile( const QString &filePath, const QVector<QgsGcpPoint> &p
 
   QTextStream out( &pointFile );
   out << "# QGEOS .points v2\n";
-  out << "mapX,mapY,pixelX,pixelY,enable,dX,dY,residual,pointType\n";
+  out << "mapX,mapY,pixelX,pixelY,enable,dX,dY,residual,pointType,crs\n";
   for ( const QgsGcpPoint &p : points )
   {
-    const double resX = p.residual().x();
-    const double resY = p.residual().y();
-    const double resTotal = std::sqrt( resX * resX + resY * resY );
+    // Residuals live in RsGeorefFitResult (ADR 0056); dX,dY,residual are
+    // format-compat zeros (the loader never reads them).
     out << QString::number( p.destinationPoint().x(), 'f', 8 ) << ","
         << QString::number( p.destinationPoint().y(), 'f', 8 ) << ","
         << QString::number( p.sourcePoint().x(), 'f', 6 ) << ","
         << QString::number( -p.sourcePoint().y(), 'f', 6 ) << ","
-        << ( p.isEnabled() ? 1 : 0 ) << ","
-        << QString::number( resX, 'f', 6 ) << ","
-        << QString::number( resY, 'f', 6 ) << ","
-        << QString::number( resTotal, 'f', 6 ) << ","
-        << p.pointType() << "\n";
+        << ( p.isEnabled() ? 1 : 0 ) << ",0,0,0,"
+        << p.pointType() << ","
+        << p.destinationPointCrs().authid() << "\n";
   }
   return true;
 }
@@ -82,8 +77,17 @@ bool rsLoadGcpPointsFile( const QString &filePath, const QgsCoordinateReferenceS
     const double py = -cols[3].toDouble(); // pixelY stored negated
     const bool enabled = cols[4].toInt() != 0;
     const QString type = ( v2 && cols.size() >= 9 ) ? cols[8] : QString();
+    // Optional 10th column carries the destination CRS authid (ADR 0056).
+    // Files written before the column existed fall back to destCrs.
+    QgsCoordinateReferenceSystem pointCrs = destCrs;
+    if ( v2 && cols.size() >= 10 )
+    {
+      const QgsCoordinateReferenceSystem fileCrs( cols[9] );
+      if ( fileCrs.isValid() )
+        pointCrs = fileCrs;
+    }
 
-    QgsGcpPoint p( QgsPointXY( px, py ), QgsPointXY( mx, my ), destCrs, enabled );
+    QgsGcpPoint p( QgsPointXY( px, py ), QgsPointXY( mx, my ), pointCrs, enabled );
     p.setPointType( type );
     pointsOut.append( p );
   }

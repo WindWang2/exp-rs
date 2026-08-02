@@ -39,7 +39,6 @@
 #include "qgsgeoreftransform.h"
 #include "qgsimagewarper.h"
 #include "qgspointxy.h"
-#include "qgsrpcgcptransformer.h"
 #include "warper_test_helpers.h"
 
 namespace
@@ -67,14 +66,12 @@ TEST_CASE( "RPC golden: synthetic non-trivial warp matches captured SHA256",
   REQUIRE_FALSE( dem.isEmpty() );
   const QString out = tmp.path() + QStringLiteral( "/warp.tif" );
 
-  // Configure the RPC transformer through the QgsGeorefTransform shell so
-  // the same accessor (`gcpTransformer()`) the production code uses is
-  // exercised.
+  // Configure the RPC transformer through the QgsGeorefTransform shell via the
+  // interface seam (ADR 0057: setRpcOptions on the base-class pointer — no
+  // dynamic_cast).
   QgsGeorefTransform transform( QgsGcpTransformerInterface::TransformMethod::RpcPhysical );
-  auto *rpc = dynamic_cast<QgsRpcGcpTransformer *>( transform.gcpTransformer() );
-  REQUIRE( rpc != nullptr );
-  rpc->setSourceRasterPath( src );
-  rpc->setRpcOptions( dem, /*zOffset*/ 0.0, /*useGcpRefinement*/ false );
+  REQUIRE( transform.gcpTransformer() != nullptr );
+  REQUIRE( transform.gcpTransformer()->setRpcOptions( src, dem, /*zOffset*/ 0.0, /*useGcpRefinement*/ false ) );
   REQUIRE( transform.updateParametersFromGcps( {}, {}, false ) );
   REQUIRE( transform.parametersInitialized() );
 

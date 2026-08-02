@@ -25,6 +25,13 @@ class QGIS_ANALYSIS_EXPORT RsSegmentMap
     /// Returns an empty map on failure.
     static RsSegmentMap fromGeoTIFF( const QString &path );
 
+    /// Write the label image to a UInt32 GeoTIFF with LZW compression.
+    /// Geotransform/projection are copied from refPath; the reference grid size
+    /// must match this map. 0 is written as GDAL NoData (background/unclassified).
+    /// Fail-closed: on any error the message is set in error (when non-null) and
+    /// any incomplete output file is removed.
+    bool toGeoTIFF( const QString &path, const QString &refPath, QString *error = nullptr ) const;
+
     int width() const { return mWidth; }
     int height() const { return mHeight; }
 

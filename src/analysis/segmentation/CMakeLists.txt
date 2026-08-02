@@ -9,6 +9,9 @@ target_sources(qgis_analysis PRIVATE
     rs_hierarchy_features.cpp
     rs_class_raster.cpp
     rs_object_classify.cpp
+    # ADR 0060 — canonical ROI-majority segment labeling (rs_majority_vote.h
+    # is header-only and needs no source entry).
+    rs_roi_labeler.cpp
 )
 target_include_directories(qgis_analysis PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # ToolPathManager (OTB discovery) lives under src/processing.

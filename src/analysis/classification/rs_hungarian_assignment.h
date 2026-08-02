@@ -2,8 +2,8 @@
 //
 // Munkres O(n^3) Hungarian algorithm for min-cost assignment.
 // Accepts square or rectangular cost matrices (n true classes × m clusters).
-// Used by RsClassificationTask to remap K-Means cluster IDs to ROI class IDs
-// before accuracy assessment.
+// Used by the classification pipeline to remap K-Means cluster IDs to ROI
+// class IDs before accuracy assessment.
 #pragma once
 
 #include "qgis_analysis_export.h"

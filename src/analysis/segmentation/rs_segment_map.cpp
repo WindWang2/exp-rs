@@ -4,8 +4,24 @@
 
 #include <gdal.h>
 #include <cpl_error.h>
+#include <cpl_string.h>
+
+#include <QFile>
 
 #include <cmath>
+
+namespace
+{
+
+void removeIncompleteOutput( const QString &path )
+{
+    if ( path.isEmpty() )
+        return;
+    if ( QFile::exists( path ) )
+        QFile::remove( path );
+}
+
+} // namespace
 
 RsSegmentMap::RsSegmentMap( QVector<quint32> labels, int width, int height )
     : mLabels( std::move( labels ) )
@@ -61,6 +77,108 @@ RsSegmentMap RsSegmentMap::fromGeoTIFF( const QString &path )
 
     SICNU_LOG_SUCCESS( SicnuLogTags::Segmentation, QString( "Loaded segment map: %1x%2" ).arg( w ).arg( h ) );
     return RsSegmentMap( std::move( labels ), w, h );
+}
+
+bool RsSegmentMap::toGeoTIFF( const QString &path, const QString &refPath, QString *error ) const
+{
+    if ( isEmpty() )
+    {
+        if ( error )
+            *error = QStringLiteral( "toGeoTIFF: empty segment map" );
+        return false;
+    }
+    if ( path.isEmpty() )
+    {
+        if ( error )
+            *error = QStringLiteral( "toGeoTIFF: empty output path" );
+        return false;
+    }
+
+    // Fail closed when the reference raster cannot be opened: an unwritten
+    // label image must never silently lose its georeferencing.
+    GDALDatasetH srcDs = GDALOpen( refPath.toUtf8().constData(), GA_ReadOnly );
+    if ( !srcDs )
+    {
+        if ( error )
+            *error = QStringLiteral( "toGeoTIFF: cannot open reference raster: %1" ).arg( refPath );
+        return false;
+    }
+    const int refW = GDALGetRasterXSize( srcDs );
+    const int refH = GDALGetRasterYSize( srcDs );
+    if ( refW != mWidth || refH != mHeight )
+    {
+        if ( error )
+            *error = QStringLiteral( "toGeoTIFF: reference raster size %1x%2 != segment map %3x%4" )
+                        .arg( refW )
+                        .arg( refH )
+                        .arg( mWidth )
+                        .arg( mHeight );
+        GDALClose( srcDs );
+        return false;
+    }
+
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    if ( !driver )
+    {
+        if ( error )
+            *error = QStringLiteral( "GTiff driver not available" );
+        GDALClose( srcDs );
+        return false;
+    }
+
+    char **papszOptions = nullptr;
+    papszOptions = CSLSetNameValue( papszOptions, "COMPRESS", "LZW" );
+    GDALDatasetH dstDs = GDALCreate( driver, path.toUtf8().constData(),
+                                     mWidth, mHeight, 1, GDT_UInt32, papszOptions );
+    CSLDestroy( papszOptions );
+
+    if ( !dstDs )
+    {
+        if ( error )
+            *error = QStringLiteral( "Cannot create output: %1" ).arg( path );
+        GDALClose( srcDs );
+        return false;
+    }
+
+    // Copy georeferencing from the reference raster.
+    double geoTransform[6];
+    if ( GDALGetGeoTransform( srcDs, geoTransform ) == CE_None )
+        GDALSetGeoTransform( dstDs, geoTransform );
+    const char *proj = GDALGetProjectionRef( srcDs );
+    if ( proj && proj[0] )
+        GDALSetProjection( dstDs, proj );
+    GDALClose( srcDs );
+
+    GDALRasterBandH outBand = GDALGetRasterBand( dstDs, 1 );
+    // 0 = NoData (background / unclassified).
+    GDALSetRasterNoDataValue( outBand, 0 );
+
+    const auto &labels = mLabels;
+    QVector<quint32> rowBuf( mWidth );
+    for ( int r = 0; r < mHeight; ++r )
+    {
+        const int rowBase = r * mWidth;
+        for ( int c = 0; c < mWidth; ++c )
+            rowBuf[c] = labels[rowBase + c];
+        if ( GDALRasterIO( outBand, GF_Write, 0, r, mWidth, 1,
+                           rowBuf.data(), mWidth, 1, GDT_UInt32, 0, 0 ) != CE_None )
+        {
+            if ( error )
+                *error = QStringLiteral( "RasterIO write failed at row %1" ).arg( r );
+            GDALClose( dstDs );
+            removeIncompleteOutput( path );
+            return false;
+        }
+    }
+
+    GDALClose( dstDs );
+
+    SICNU_LOG_SUCCESS( SicnuLogTags::Segmentation,
+                       QStringLiteral( "Segment map written: %1 (%2x%3, NoData=0)" )
+                         .arg( path )
+                         .arg( mWidth )
+                         .arg( mHeight ) );
+    return true;
 }
 
 quint32 RsSegmentMap::labelAt( int row, int col ) const

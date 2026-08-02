@@ -1,8 +1,13 @@
 /***************************************************************************
- * rs_obia_segment_operator.cpp  —  thin wrapper over shared segutil
+ * rs_obia_segment_operator.cpp  —  teaching segmenter over the analysis layer
+ *
+ * ADR 0060 — the operator delegates to RsSimpleSegmenter (analysis, the
+ * single teaching segmenter) and writes labels via RsSegmentMap::toGeoTIFF
+ * (ADR 0054). The segutil cv::Mat stack is retired.
  ***************************************************************************/
 #include "rs_obia_segment_operator.h"
-#include "rs_segmentation_utils.h"
+
+#include "analysis/segmentation/rs_simple_segmenter.h"
 
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
@@ -10,12 +15,13 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <limits>
+#include <string>
 #include <vector>
 
 namespace sicnu::operators::rs {
 
 using namespace params;
-using namespace segutil;
 
 Json::Value RsObiaSegmentOperator::schema() const {
     using namespace schema;
@@ -74,40 +80,60 @@ Json::Value RsObiaSegmentOperator::run(const Json::Value& params, RSOperatorCont
     const int width = ds.width();
     const int height = ds.height();
     const std::vector<int> bands = parseBands(params, ds.bandCount());
+    const int nBands = static_cast<int>(bands.size());
     const size_t nPix = static_cast<size_t>(width) * static_cast<size_t>(height);
 
     context.reportProgress(0.1, "Reading bands for intensity mean");
-    std::vector<std::vector<float>> bandData(bands.size());
-    for (size_t bi = 0; bi < bands.size(); ++bi) {
-        bandData[bi].resize(nPix);
-        if (!ds.readBandData(bands[bi], bandData[bi].data(), width, height)) {
+    std::vector<std::vector<float>> bandData(static_cast<size_t>(nBands));
+    for (int bi = 0; bi < nBands; ++bi) {
+        bandData[static_cast<size_t>(bi)].resize(nPix);
+        if (!ds.readBandData(bands[static_cast<size_t>(bi)],
+                             bandData[static_cast<size_t>(bi)].data(), width, height)) {
             throw RSOperatorError(ErrorCode::GdalError,
-                                  "Failed to read band " + std::to_string(bands[bi]));
+                                  "Failed to read band " + std::to_string(bands[static_cast<size_t>(bi)]));
         }
         context.throwIfCancelled();
     }
 
-    cv::Mat labels = segmentQuantize(bandData, width, height, smoothKernel, quantizeBins,
-                                     minRegionSize, context);
+    // Nodata: band 1's declared value when present, else NaN (only actual NaN
+    // pixels become nodata). Label 0 = nodata follows the analysis convention.
+    bool hasNodata = false;
+    const double nodataValue = ds.bandNoDataValue(1, &hasNodata);
+    const float nodata = hasNodata ? static_cast<float>(nodataValue)
+                                   : std::numeric_limits<float>::quiet_NaN();
 
-    int maxId = 0;
-    for (int y = 0; y < height; ++y) {
-        const int* row = labels.ptr<int>(y);
-        for (int x = 0; x < width; ++x)
-            maxId = std::max(maxId, row[x]);
-    }
+    std::vector<const float*> bandPtrs(static_cast<size_t>(nBands));
+    for (int bi = 0; bi < nBands; ++bi)
+        bandPtrs[static_cast<size_t>(bi)] = bandData[static_cast<size_t>(bi)].data();
 
-    const auto gt = ds.geoTransform();
-    double gtArr[6] = {gt[0], gt[1], gt[2], gt[3], gt[4], gt[5]};
+    RsSimpleSegmenter::Params segParams;
+    segParams.smoothKernel = smoothKernel;
+    segParams.quantizeBins = quantizeBins;
+    segParams.minRegionSize = minRegionSize;
+
+    // ADR 0060: single teaching segmenter (analysis layer); cancel + progress
+    // are plumbed through RSOperatorContext hooks.
+    const RsSegmentMap segMap = RsSimpleSegmenter::segmentMultiBand(
+        bandPtrs.data(), nBands, width, height, nodata, segParams,
+        [&context]() { return context.isCancelled(); },
+        [&context](float f) { context.reportProgress(0.15 + 0.7 * f, "Segmenting"); });
+    context.throwIfCancelled();
+    if (segMap.isEmpty())
+        throw RSOperatorError(ErrorCode::ComputationError,
+                              "Segmentation produced an empty label map");
+
     context.reportProgress(0.9, "Writing label map");
-    writeLabelGeoTiff(outputPath, labels, width, height, gtArr,
-                      ds.projection().toStdString());
+    QString err;
+    // ADR 0054: RsSegmentMap owns the UInt32 GeoTIFF write (LZW, NoData=0).
+    if (!segMap.toGeoTIFF(QString::fromStdString(outputPath),
+                          QString::fromStdString(inputPath), &err))
+        throw RSOperatorError(ErrorCode::GdalError, err.toStdString());
 
     context.reportProgress(1.0, "Segmentation complete");
 
     Json::Value result(Json::objectValue);
     result["output"] = outputPath;
-    result["segments"] = maxId;
+    result["segments"] = segMap.segmentCount();
     result["width"] = width;
     result["height"] = height;
     return result;

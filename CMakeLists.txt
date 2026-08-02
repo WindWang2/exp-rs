@@ -463,6 +463,15 @@ if(SICNU_BUILD_OTB)
     set(SICNU_HAS_OTB TRUE)
 endif()
 
+# GSL: required for Helmert/projective least-squares in the georeferencer
+# (QgsLeastSquares::helmert uses LU decomposition, ::projective uses SVD).
+# Mirrors upstream QGIS: WITH_GSL gates the HAVE_GSL config macro.
+set(WITH_GSL TRUE CACHE BOOL "Determines whether GSL library should be used")
+if(WITH_GSL)
+  find_package(GSL REQUIRED)
+  set(HAVE_GSL TRUE)
+endif()
+
 # configure_file AFTER all HAVE_* variables are resolved
 configure_file(cmake_templates/qgsconfig.h.in ${CMAKE_BINARY_DIR}/qgsconfig.h)
 include_directories(${CMAKE_BINARY_DIR})

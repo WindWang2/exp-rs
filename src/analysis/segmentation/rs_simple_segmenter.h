@@ -12,6 +12,8 @@
 #include "qgis_analysis_export.h"
 #include "rs_segment_map.h"
 
+#include <functional>
+
 class QGIS_ANALYSIS_EXPORT RsSimpleSegmenter
 {
   public:
@@ -24,14 +26,25 @@ class QGIS_ANALYSIS_EXPORT RsSimpleSegmenter
 
     /// Segment a single-band image.
     /// Returns a label map (0 = nodata if input has nodata pixels).
+    ///
+    /// Optional hooks (ADR 0060 — operator callers report progress and
+    /// cancellation through RSOperatorContext):
+    ///   \a isCanceled is polled between phases and inside the component
+    ///   labeling; when it turns true an empty map is returned.
+    ///   \a onProgress receives a fraction in [0, 1] covering this call.
     static RsSegmentMap segment( const float *data, int width, int height,
-                                 float nodata, const Params &params );
+                                 float nodata, const Params &params,
+                                 const std::function<bool()> &isCanceled = {},
+                                 const std::function<void(float)> &onProgress = {} );
 
     /// Segment a multi-band image by first computing a scalar
     /// (mean of selected bands) then running single-band segmentation.
+    /// Progress covers the whole call (mean + single-band, scaled to [0, 1]).
     static RsSegmentMap segmentMultiBand( const float *const *bandData,
                                           int nBands, int width, int height,
-                                          float nodata, const Params &params );
+                                          float nodata, const Params &params,
+                                          const std::function<bool()> &isCanceled = {},
+                                          const std::function<void(float)> &onProgress = {} );
 
   private:
     /// Gaussian smoothing (separable, in-place).
@@ -41,11 +54,16 @@ class QGIS_ANALYSIS_EXPORT RsSimpleSegmenter
     static QVector<int> quantize( const float *data, size_t n, int bins, float nodata );
 
     /// 8-connected component labeling on quantized integer grid.
-    /// Returns label map (1-based; 0 = background/nodata).
+    /// Returns label map (1-based; 0 = background/nodata), or an empty vector
+    /// when isCanceled turns true.
     static QVector<quint32> connectedComponents( const QVector<int> &quantized,
-                                                  int w, int h, int nodataBin );
+                                                 int w, int h, int nodataBin,
+                                                 const std::function<bool()> &isCanceled );
 
     /// Merge small regions by assigning them to their most frequent neighbor.
+    /// Returns early (partial state, caller re-checks cancellation) when
+    /// isCanceled turns true.
     static void mergeSmallRegions( QVector<quint32> &labels, int w, int h,
-                                   int minSize );
+                                   int minSize,
+                                   const std::function<bool()> &isCanceled );
 };

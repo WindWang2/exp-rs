@@ -15,9 +15,10 @@
 #include "rs_classify_workflow_controller.h"
 #include "rs_feature_scaler.h"
 #include "rs_pixel_ignore_options.h"
-#include "rs_cv_task.h"
 #include "rs_post_process_task.h"
 #include "shell/gui_job_adapter.h"
+
+#include <functional>
 
 class QCheckBox;
 class QCloseEvent;
@@ -53,7 +54,6 @@ class RsAccuracyPanel;
 class RsClassifierSetupBar;
 class RsClassifyStepperBar;
 class RsClassifyStepHost;
-class RsClassificationTask;
 class QgsTask;
 
 namespace sicnu
@@ -92,7 +92,7 @@ class QgsClassificationMainWindow : public QMainWindow
                                const QString &algorithmId );
     long startCrossValidationTask( const cv::Mat &X,
                                    const cv::Mat &y,
-                                   RsCvTask::ClassifierFactory factory );
+                                   std::function<std::unique_ptr<RsClassifierBackend>()> factory );
     void recomputeSpectralCurves();
     void recomputeJmMatrix();
     void exportRois();

@@ -47,6 +47,28 @@ TEST_CASE( "GCP .points v2: write+read round-trip preserves type", "[georef][poi
   REQUIRE_FALSE( loaded.at( 1 ).isEnabled() );
 }
 
+TEST_CASE( "GCP .points v2: destination CRS survives save→load round-trip", "[georef][points][crs]" )
+{
+  QgsCoordinateReferenceSystem crs( QStringLiteral( "EPSG:32650" ) );
+  QVector<QgsGcpPoint> points;
+  points.append( QgsGcpPoint( QgsPointXY( 100, 200 ), QgsPointXY( 400000, 4280000 ), crs, true ) );
+  points.append( QgsGcpPoint( QgsPointXY( 300, 400 ), QgsPointXY( 401000, 4281000 ), crs, false ) );
+
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString path = tmp.path() + "/crs.points";
+  REQUIRE( rsSaveGcpPointsFile( path, points ) );
+
+  // Load with a DIFFERENT fallback CRS: the CRS stored in the file must win,
+  // otherwise saved GCPs silently lose their destination CRS.
+  QgsCoordinateReferenceSystem otherCrs( QStringLiteral( "EPSG:4326" ) );
+  QVector<QgsGcpPoint> loaded;
+  REQUIRE( rsLoadGcpPointsFile( path, otherCrs, loaded ) );
+  REQUIRE( loaded.size() == 2 );
+  REQUIRE( loaded.at( 0 ).destinationPointCrs().authid() == QString( "EPSG:32650" ) );
+  REQUIRE( loaded.at( 1 ).destinationPointCrs().authid() == QString( "EPSG:32650" ) );
+}
+
 TEST_CASE( "GCP .points v1: legacy file without header reads with empty type", "[georef][points]" )
 {
   QTemporaryDir tmp;

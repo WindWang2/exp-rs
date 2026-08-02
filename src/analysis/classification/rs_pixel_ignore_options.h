@@ -1,11 +1,15 @@
 // rs_pixel_ignore_options.h — Shared NoData / ignore-value rules for classify.
 #pragma once
 
+#include "qgis_analysis_export.h"
+
 #include <QString>
 #include <QVector>
 
 #include <cmath>
 #include <vector>
+
+class GDALDataset; // only used by rsCollectBandNodata() below (impl in .cpp)
 
 /**
  * Rules for treating source pixels as "edge / background / invalid"
@@ -85,3 +89,16 @@ struct RsPixelIgnoreOptions
       return false;
     }
 };
+
+/**
+ * Query per-band GDAL NoData values for \a bandIndices (1-based) into
+ * parallel vectors, each sized bandIndices.size(). Honors
+ * \a options.useSourceNodata — when unset (or the dataset is null) both
+ * vectors stay false / 0. Shared by training-data extraction and the
+ * classification pipeline tile path (ADR 0061 — one owner for NoData
+ * discovery, previously duplicated per caller).
+ */
+QGIS_ANALYSIS_EXPORT void rsCollectBandNodata(
+  GDALDataset *ds, const QVector<int> &bandIndices,
+  const RsPixelIgnoreOptions &options,
+  std::vector<bool> &bandHasNodata, std::vector<float> &bandNodata );

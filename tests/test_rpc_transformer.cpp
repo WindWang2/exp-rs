@@ -62,3 +62,34 @@ TEST_CASE( "RpcTransformer: invalid path returns false on fit", "[georef][rpc]" 
   REQUIRE_FALSE( t.updateParametersFromGcps( {}, {}, false ) );
   REQUIRE_FALSE( t.isValid() );
 }
+
+TEST_CASE( "RpcTransformer: options flow through the base-class interface (ADR 0057)",
+           "[georef][rpc]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString src = makeSyntheticRpcRaster( tmp.path() );
+  REQUIRE_FALSE( src.isEmpty() );
+
+  // Configure through QgsGcpTransformerInterface pointers — the seam that
+  // replaces the old dynamic_cast access — and verify the options take
+  // effect (source path + zOffset reach the GDAL transformer).
+  std::unique_ptr<QgsGcpTransformerInterface> t(
+    QgsGcpTransformerInterface::create(
+      QgsGcpTransformerInterface::TransformMethod::RpcPhysical ) );
+  REQUIRE( t != nullptr );
+  REQUIRE( t->setRpcOptions( src, QString(), 100.0, false ) );
+  REQUIRE( t->updateParametersFromGcps( {}, {}, false ) );
+
+  double x = 32.0;
+  double y = 32.0;
+  REQUIRE( t->transform( x, y, false ) );
+
+  // Non-RPC transformers ignore the call and report no DEM (default no-op).
+  std::unique_ptr<QgsGcpTransformerInterface> linear(
+    QgsGcpTransformerInterface::create(
+      QgsGcpTransformerInterface::TransformMethod::Linear ) );
+  REQUIRE( linear != nullptr );
+  REQUIRE_FALSE( linear->setRpcOptions( src, QString(), 100.0, true ) );
+  REQUIRE( linear->demPath().isEmpty() );
+}

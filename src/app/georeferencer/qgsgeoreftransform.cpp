@@ -16,8 +16,6 @@
 
 #include "qgsgeoreftransform.h"
 
-#include "qgsrpcgcptransformer.h"
-
 #include <cassert>
 #include <cmath>
 #include <gdal.h>
@@ -26,29 +24,81 @@
 
 namespace {
 
-//! Copy RPC source/DEM/options that setMethod() alone cannot recreate.
-void copyRpcStateIfPresent( const QgsGcpTransformerInterface *srcImpl,
-                            QgsGcpTransformerInterface *dstImpl )
+//! Build a configured transform for one fit pass (ADR 0057): fresh facade of
+//! \a method with the source raster loaded for pixel-space residuals, and RPC
+//! options pushed through the interface (no dynamic_cast needed).
+std::unique_ptr<QgsGeorefTransform> makeConfiguredTransform(
+  QgsGcpTransformerInterface::TransformMethod method,
+  const QString &sourceRasterPath, const QString &demPath,
+  double demZOffset, bool rpcRefinement )
 {
-  const auto *srcRpc = dynamic_cast<const QgsRpcGcpTransformer *>( srcImpl );
-  auto *dstRpc = dynamic_cast<QgsRpcGcpTransformer *>( dstImpl );
-  if ( !srcRpc || !dstRpc )
-    return;
+  auto transform = std::make_unique<QgsGeorefTransform>( method );
+  if ( !sourceRasterPath.isEmpty() )
+    transform->loadRaster( sourceRasterPath );
+  if ( QgsGcpTransformerInterface *impl = transform->gcpTransformer() )
+    impl->setRpcOptions( sourceRasterPath, demPath, demZOffset, rpcRefinement );
+  return transform;
+}
 
-  dstRpc->setSourceRasterPath( srcRpc->sourceRasterPath() );
-  dstRpc->setRpcOptions( srcRpc->demPath(), srcRpc->zOffset(), srcRpc->useGcpRefinement() );
+//! Source-pixel residuals over parallel (src, dst) arrays (ADR 0020 decision
+//! 2): back-transform each destination point into source pixel space,
+//! residual = predicted - observed pixel. Failed back-transforms yield
+//! rsGeorefInvalidResidual() and are not counted. Optionally accumulates the
+//! squared-error sum and count for the RMS.
+QVector<QPointF> sourcePixelResiduals( QgsGeorefTransform &xf,
+                                       const QVector<QgsPointXY> &src,
+                                       const QVector<QgsPointXY> &dst,
+                                       double *sumSqOut = nullptr,
+                                       int *countOut = nullptr )
+{
+  QVector<QPointF> res;
+  res.reserve( src.size() );
+  double sumSq = 0.0;
+  int n = 0;
+  for ( int i = 0; i < src.size(); ++i )
+  {
+    QgsPointXY predicted;
+    if ( !xf.transformWorldToRaster( dst.at( i ), predicted ) )
+    {
+      res.append( rsGeorefInvalidResidual() );
+      continue;
+    }
+    const QgsPointXY observed = xf.toSourcePixel( src.at( i ) );
+    const QPointF r( predicted.x() - observed.x(), predicted.y() - observed.y() );
+    res.append( r );
+    sumSq += r.x() * r.x() + r.y() * r.y();
+    ++n;
+  }
+  if ( sumSqOut )
+    *sumSqOut = sumSq;
+  if ( countOut )
+    *countOut = n;
+  return res;
+}
+
+//! Source-pixel RMS over (src, dst) pairs; -1 when no point transforms.
+double pixelRms( QgsGeorefTransform &xf,
+                 const QVector<QgsPointXY> &src,
+                 const QVector<QgsPointXY> &dst )
+{
+  double sumSq = 0.0;
+  int n = 0;
+  sourcePixelResiduals( xf, src, dst, &sumSq, &n );
+  return ( n > 0 ) ? std::sqrt( sumSq / static_cast<double>( n ) ) : -1.0;
 }
 
 } // namespace
 
 QgsGeorefTransform::QgsGeorefTransform( const QgsGeorefTransform &other )
+  : mGeorefTransformImplementation( other.mGeorefTransformImplementation
+                                      ? other.mGeorefTransformImplementation->clone()
+                                      : nullptr )
+  , mTransformParametrisation( other.mTransformParametrisation )
+  , mRasterChangeCoords( other.mRasterChangeCoords )
 {
-  setMethod( other.mTransformParametrisation );
-  mRasterChangeCoords = other.mRasterChangeCoords;
-  // RpcPhysical needs source raster path + DEM/Z-offset/refine options that
-  // setMethod() alone cannot recreate (fresh empty QgsRpcGcpTransformer).
-  copyRpcStateIfPresent( other.mGeorefTransformImplementation.get(),
-                         mGeorefTransformImplementation.get() );
+  // The inner implementation's clone() carries method-specific state,
+  // including RPC source/DEM/Z-offset/refine options, so no per-type
+  // reconstruction is needed here (ADR 0057).
 }
 
 QgsGeorefTransform::QgsGeorefTransform( TransformMethod parametrisation )
@@ -95,17 +145,18 @@ bool QgsGeorefTransform::parametersInitialized() const
   return mParametersInitialized;
 }
 
-std::unique_ptr<QgsGcpTransformerInterface> QgsGeorefTransform::clone() const
+std::unique_ptr<QgsGeorefTransform> QgsGeorefTransform::cloneTransform() const
 {
   auto res = std::make_unique<QgsGeorefTransform>( *this );
-  // Copy ctor already restored RPC path/options; re-assert from *this in case
-  // the implementation was replaced between construction and clone().
-  copyRpcStateIfPresent( mGeorefTransformImplementation.get(),
-                         res->mGeorefTransformImplementation.get() );
   // Re-fit so GDAL/RPC transformer args are live on the clone (required for
   // RpcPhysical validity which depends on source raster path + DEM options).
   res->updateParametersFromGcps( mSourceCoordinates, mDestinationCoordinates, mInvertYAxis );
   return res;
+}
+
+std::unique_ptr<QgsGcpTransformerInterface> QgsGeorefTransform::clone() const
+{
+  return cloneTransform();
 }
 
 bool QgsGeorefTransform::updateParametersFromGcps( const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates, bool invertYAxis )
@@ -228,4 +279,132 @@ bool QgsGeorefTransform::transformPrivate( const QgsPointXY &src, QgsPointXY &ds
   dst.setX( x );
   dst.setY( y );
   return true;
+}
+
+int QgsGeorefTransform::enabledGcpCount( const QVector<QgsGcpPoint> &gcps )
+{
+  int n = 0;
+  for ( const auto &g : gcps )
+  {
+    if ( g.isEnabled() )
+      ++n;
+  }
+  return n;
+}
+
+void QgsGeorefTransform::collectEnabledGcps( const QVector<QgsGcpPoint> &gcps,
+                                             QVector<QgsPointXY> &src, QVector<QgsPointXY> &dst )
+{
+  src.clear();
+  dst.clear();
+  for ( const auto &g : gcps )
+  {
+    if ( !g.isEnabled() )
+      continue;
+    src.append( g.sourcePoint() );
+    dst.append( g.destinationPoint() );
+  }
+}
+
+int QgsGeorefTransform::minimumGcpCountFor( TransformMethod method )
+{
+  std::unique_ptr<QgsGcpTransformerInterface> t( QgsGcpTransformerInterface::create( method ) );
+  return t ? t->minimumGcpCount() : 0;
+}
+
+RsGeorefFitResult QgsGeorefTransform::fit( const QVector<QgsGcpPoint> &gcps,
+                                           TransformMethod method,
+                                           const QString &sourceRasterPath,
+                                           const QString &demPath,
+                                           double demZOffset,
+                                           bool invertYAxis )
+{
+  RsGeorefFitResult fit;
+  fit.enabledGcpCount = enabledGcpCount( gcps );
+  fit.residuals = QVector<QPointF>( gcps.size(), rsGeorefInvalidResidual() );
+
+  fit.minimumGcpCount = minimumGcpCountFor( method );
+
+  if ( fit.enabledGcpCount < fit.minimumGcpCount )
+  {
+    fit.ready = false;
+    fit.errorMessage = QStringLiteral( "Need at least %1 GCPs, have %2" )
+                         .arg( fit.minimumGcpCount )
+                         .arg( fit.enabledGcpCount );
+    return fit;
+  }
+
+  QVector<QgsPointXY> src;
+  QVector<QgsPointXY> dst;
+  collectEnabledGcps( gcps, src, dst );
+
+  // Match the shell: always invert Y for GCP parameter estimation.
+  std::unique_ptr<QgsGeorefTransform> transform;
+  bool fitOk = false;
+
+  if ( method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical
+       && fit.enabledGcpCount >= 3 )
+  {
+    // RPC refinement (ported from the shell's recomputeFit): fit once without
+    // GCP-bias refinement for the before/after diagnostic, then fit the live
+    // transform with refinement enabled.
+    {
+      auto beforeXf = makeConfiguredTransform( method, sourceRasterPath, demPath, demZOffset, /*rpcRefinement=*/false );
+      try
+      {
+        if ( beforeXf && beforeXf->updateParametersFromGcps( src, dst, invertYAxis ) )
+          fit.refinementRmsBefore = pixelRms( *beforeXf, src, dst );
+      }
+      catch ( ... ) {}
+    }
+    transform = makeConfiguredTransform( method, sourceRasterPath, demPath, demZOffset, /*rpcRefinement=*/true );
+    try
+    {
+      fitOk = transform && transform->updateParametersFromGcps( src, dst, invertYAxis );
+    }
+    catch ( ... )
+    {
+      fitOk = false;
+    }
+  }
+  else
+  {
+    transform = makeConfiguredTransform( method, sourceRasterPath, demPath, demZOffset, /*rpcRefinement=*/false );
+    try
+    {
+      fitOk = transform && transform->updateParametersFromGcps( src, dst, invertYAxis );
+    }
+    catch ( ... )
+    {
+      fitOk = false;
+    }
+  }
+
+  if ( !fitOk )
+  {
+    fit.ready = false;
+    fit.errorMessage = QStringLiteral( "Parameter estimation failed" );
+    return fit;
+  }
+
+  // Per-point residuals in SOURCE PIXELS (ADR 0020 decision 2): the enabled
+  // residuals are computed once and scattered back into the gcps-aligned
+  // vector; disabled GCPs keep the sentinel from the initial fill.
+  double sumSq = 0.0;
+  int n = 0;
+  const QVector<QPointF> enabledResiduals =
+    sourcePixelResiduals( *transform, src, dst, &sumSq, &n );
+  int enabledIdx = 0;
+  for ( int i = 0; i < gcps.size(); ++i )
+  {
+    if ( !gcps.at( i ).isEnabled() )
+      continue;
+    const QPointF r = enabledResiduals.at( enabledIdx++ );
+    if ( rsGeorefResidualIsValid( r ) )
+      fit.residuals[i] = r;
+  }
+  fit.ready = true;
+  fit.rms = ( n > 0 ) ? std::sqrt( sumSq / static_cast<double>( n ) ) : -1.0;
+  fit.errorMessage.clear();
+  return fit;
 }

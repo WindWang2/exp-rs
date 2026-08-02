@@ -12,6 +12,7 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <queue>
 #include <unordered_map>
@@ -407,6 +408,7 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
                                      const double gt[6], const QString &wkt,
                                      const QVector<QRgb> &colorTable,
                                      const QStringList &creationOptions,
+                                     double nodataValue,
                                      QString *err )
 {
   cv::Mat lab;
@@ -436,11 +438,16 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
     return false;
   }
 
-  // Class labels are typically palette-index bytes.
+  // Dtype policy (ADR 0019 S4): Byte when all labels fit 0..255, UInt16 up
+  // to 65535, Int32 beyond — labels are never silently clamped. Negative
+  // labels (e.g. unset values) force Int32.
   double minV = 0, maxV = 0;
   cv::minMaxLoc( lab, &minV, &maxV );
-  const bool asByte = ( minV >= 0.0 && maxV <= 255.0 );
-  const GDALDataType gdt = asByte ? GDT_Byte : GDT_Int32;
+  GDALDataType gdt = GDT_Byte;
+  if ( minV < 0.0 || maxV > 65535.0 )
+    gdt = GDT_Int32;
+  else if ( maxV > 255.0 )
+    gdt = GDT_UInt16;
 
   char **papsz = nullptr;
   for ( const QString &opt : creationOptions )
@@ -474,13 +481,21 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
     ds->SetProjection( wkt.toUtf8().constData() );
 
   CPLErr rio = CE_Failure;
-  if ( asByte )
+  if ( gdt == GDT_Byte )
   {
     cv::Mat u8;
     lab.convertTo( u8, CV_8U );
     rio = ds->GetRasterBand( 1 )->RasterIO(
       GF_Write, 0, 0, u8.cols, u8.rows, u8.ptr<uchar>( 0 ), u8.cols, u8.rows, GDT_Byte,
       0, static_cast<GSpacing>( u8.step[0] ) );
+  }
+  else if ( gdt == GDT_UInt16 )
+  {
+    cv::Mat u16;
+    lab.convertTo( u16, CV_16U );
+    rio = ds->GetRasterBand( 1 )->RasterIO(
+      GF_Write, 0, 0, u16.cols, u16.rows, u16.ptr<ushort>( 0 ),
+      u16.cols, u16.rows, GDT_UInt16, 0, static_cast<GSpacing>( u16.step[0] ) );
   }
   else
   {
@@ -496,7 +511,7 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
     return false;
   }
 
-  if ( asByte && !colorTable.isEmpty() )
+  if ( gdt == GDT_Byte && !colorTable.isEmpty() )
   {
     GDALColorTable ct( GPI_RGB );
     for ( int i = 0; i < colorTable.size(); ++i )
@@ -512,6 +527,9 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
     ds->GetRasterBand( 1 )->SetColorTable( &ct );
     ds->GetRasterBand( 1 )->SetColorInterpretation( GCI_PaletteIndex );
   }
+
+  if ( !std::isnan( nodataValue ) )
+    ds->GetRasterBand( 1 )->SetNoDataValue( nodataValue );
 
   GDALClose( ds );
   return true;

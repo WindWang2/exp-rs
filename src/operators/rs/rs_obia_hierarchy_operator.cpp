@@ -10,8 +10,8 @@
 #include "analysis/segmentation/rs_object_classify.h"
 #include "analysis/segmentation/rs_class_raster.h"
 #include "analysis/segmentation/rs_segmenter_port.h"
-#include "analysis/classification/rs_classifier_svm.h"
-#include "analysis/classification/rs_classifier_normalbayes.h"
+#include "analysis/segmentation/rs_roi_labeler.h"
+#include "analysis/classification/rs_classifier_backend_factory.h"
 
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
@@ -22,12 +22,8 @@
 #include <QTextStream>
 
 #include <gdal.h>
-#include <cpl_string.h>
 #include <ogr_api.h>
 
-#include <algorithm>
-#include <cmath>
-#include <map>
 #include <memory>
 #include <vector>
 
@@ -37,41 +33,6 @@ using namespace params;
 
 namespace {
 
-void writeLabelGeoTiff(const QString& path, const RsSegmentMap& map,
-                       const QString& refPath) {
-    GDALDriverH drv = GDALGetDriverByName("GTiff");
-    if (!drv)
-        throw RSOperatorError(ErrorCode::GdalError, "GTiff driver missing");
-
-    char** opts = nullptr;
-    opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
-    GDALDatasetH ds = GDALCreate(drv, path.toUtf8().constData(),
-                                 map.width(), map.height(), 1, GDT_UInt32, opts);
-    CSLDestroy(opts);
-    if (!ds)
-        throw RSOperatorError(ErrorCode::GdalError, "Cannot create " + path.toStdString());
-
-    GDALDatasetH ref = GDALOpen(refPath.toUtf8().constData(), GA_ReadOnly);
-    if (ref) {
-        double gt[6];
-        if (GDALGetGeoTransform(ref, gt) == CE_None)
-            GDALSetGeoTransform(ds, gt);
-        const char* proj = GDALGetProjectionRef(ref);
-        if (proj && proj[0])
-            GDALSetProjection(ds, proj);
-        GDALClose(ref);
-    }
-
-    QVector<quint32> buf = map.labels();
-    // GDAL UInt32 write
-    if (GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, map.width(), map.height(),
-                     buf.data(), map.width(), map.height(), GDT_UInt32, 0, 0) != CE_None) {
-        GDALClose(ds);
-        throw RSOperatorError(ErrorCode::GdalError, "Failed writing labels " + path.toStdString());
-    }
-    GDALClose(ds);
-}
-
 void writeParentCsv(const QString& path, const QMap<quint32, quint32>& table) {
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Text))
@@ -80,114 +41,6 @@ void writeParentCsv(const QString& path, const QMap<quint32, quint32>& table) {
     out << "fine_id,parent_id\n";
     for (auto it = table.constBegin(); it != table.constEnd(); ++it)
         out << it.key() << ',' << it.value() << '\n';
-}
-
-QMap<quint32, int> labelFromRoi(const RsSegmentMap& segMap,
-                                const QString& rasterPath,
-                                const std::string& trainingPath,
-                                const std::string& classField,
-                                int minLabelPixels,
-                                RSOperatorContext& context) {
-    GDALDatasetH vecDs = GDALOpenEx(trainingPath.c_str(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr);
-    if (!vecDs)
-        throw RSOperatorError(ErrorCode::GdalError, "Failed to open training vector");
-
-    OGRLayerH layer = GDALDatasetGetLayer(vecDs, 0);
-    if (!layer) {
-        GDALClose(vecDs);
-        throw RSOperatorError(ErrorCode::InvalidInputData, "Training has no layers");
-    }
-
-    OGRFeatureDefnH defn = OGR_L_GetLayerDefn(layer);
-    int fieldIdx = OGR_FD_GetFieldIndex(defn, classField.c_str());
-    if (fieldIdx < 0)
-        fieldIdx = OGR_FD_GetFieldIndex(defn, "class");
-    if (fieldIdx < 0)
-        fieldIdx = OGR_FD_GetFieldIndex(defn, "id");
-    if (fieldIdx < 0) {
-        GDALClose(vecDs);
-        throw RSOperatorError(ErrorCode::InvalidParameter, "classField not found: " + classField);
-    }
-
-    double gt[6] = {0, 1, 0, 0, 0, 1};
-    GDALDatasetH rds = GDALOpen(rasterPath.toUtf8().constData(), GA_ReadOnly);
-    if (rds) {
-        GDALGetGeoTransform(rds, gt);
-        GDALClose(rds);
-    }
-
-    const int w = segMap.width();
-    const int h = segMap.height();
-    const auto& labels = segMap.labels();
-    QHash<quint32, QHash<int, int>> votes;
-
-    OGR_L_ResetReading(layer);
-    OGRFeatureH feat = nullptr;
-    while ((feat = OGR_L_GetNextFeature(layer)) != nullptr) {
-        context.throwIfCancelled();
-        const int classId = OGR_F_GetFieldAsInteger(feat, fieldIdx);
-        OGRGeometryH geom = OGR_F_GetGeometryRef(feat);
-        if (classId <= 0 || !geom) {
-            OGR_F_Destroy(feat);
-            continue;
-        }
-        if (std::abs(gt[1]) < 1e-12 || std::abs(gt[5]) < 1e-12) {
-            OGR_F_Destroy(feat);
-            continue;
-        }
-
-        OGREnvelope env;
-        OGR_G_GetEnvelope(geom, &env);
-        // Normalize for north-up or south-up geotransforms.
-        int cA = static_cast<int>(std::floor((env.MinX - gt[0]) / gt[1]));
-        int cB = static_cast<int>(std::ceil((env.MaxX - gt[0]) / gt[1]));
-        int rA = static_cast<int>(std::floor((env.MinY - gt[3]) / gt[5]));
-        int rB = static_cast<int>(std::ceil((env.MaxY - gt[3]) / gt[5]));
-        const int c0 = std::max(0, std::min(cA, cB));
-        const int c1 = std::min(w - 1, std::max(cA, cB));
-        const int r0 = std::max(0, std::min(rA, rB));
-        const int r1 = std::min(h - 1, std::max(rA, rB));
-        if (c0 > c1 || r0 > r1) {
-            OGR_F_Destroy(feat);
-            continue;
-        }
-
-        OGRGeometryH pt = OGR_G_CreateGeometry(wkbPoint);
-        for (int r = r0; r <= r1; ++r) {
-            for (int c = c0; c <= c1; ++c) {
-                const double x = gt[0] + (c + 0.5) * gt[1] + (r + 0.5) * gt[2];
-                const double y = gt[3] + (c + 0.5) * gt[4] + (r + 0.5) * gt[5];
-                OGR_G_SetPoint_2D(pt, 0, x, y);
-                if (!OGR_G_Contains(geom, pt) && !OGR_G_Intersects(geom, pt))
-                    continue;
-                const quint32 sid = labels[r * w + c];
-                if (sid != 0)
-                    ++votes[sid][classId];
-            }
-        }
-        OGR_G_DestroyGeometry(pt);
-        OGR_F_Destroy(feat);
-    }
-    GDALClose(vecDs);
-
-    QMap<quint32, int> result;
-    for (auto it = votes.constBegin(); it != votes.constEnd(); ++it) {
-        int bestClass = 0;
-        int bestCount = 0;
-        int total = 0;
-        for (auto cit = it.value().constBegin(); cit != it.value().constEnd(); ++cit) {
-            total += cit.value();
-            // Majority; ties → smaller classId (deterministic, mirrors parent-link P1).
-            if (cit.value() > bestCount
-                || (cit.value() == bestCount && (bestClass == 0 || cit.key() < bestClass))) {
-                bestCount = cit.value();
-                bestClass = cit.key();
-            }
-        }
-        if (total >= minLabelPixels && bestClass > 0)
-            result[it.key()] = bestClass;
-    }
-    return result;
 }
 
 } // namespace
@@ -294,10 +147,17 @@ Json::Value RsObiaHierarchyOperator::run(const Json::Value& params, RSOperatorCo
 
     context.throwIfCancelled();
     context.reportProgress(0.55, "Writing fine labels");
-    writeLabelGeoTiff(QString::fromStdString(outputFine), hierarchy.level(0), rasterQ);
+    {
+        QString err;
+        if (!hierarchy.level(0).toGeoTIFF(QString::fromStdString(outputFine), rasterQ, &err))
+            throw RSOperatorError(ErrorCode::GdalError, err.toStdString());
+    }
 
-    if (!outputCoarse.empty() && hierarchy.levelCount() > 1)
-        writeLabelGeoTiff(QString::fromStdString(outputCoarse), hierarchy.level(1), rasterQ);
+    if (!outputCoarse.empty() && hierarchy.levelCount() > 1) {
+        QString err;
+        if (!hierarchy.level(1).toGeoTIFF(QString::fromStdString(outputCoarse), rasterQ, &err))
+            throw RSOperatorError(ErrorCode::GdalError, err.toStdString());
+    }
 
     if (!outputParents.empty() && hierarchy.levelCount() > 1)
         writeParentCsv(QString::fromStdString(outputParents), hierarchy.parentTable(0));
@@ -308,8 +168,17 @@ Json::Value RsObiaHierarchyOperator::run(const Json::Value& params, RSOperatorCo
             throw RSOperatorError(ErrorCode::InvalidParameter, "classifyLevel out of range");
 
         context.reportProgress(0.65, "ROI majority labels");
-        QMap<quint32, int> trainLabels = labelFromRoi(
-            hierarchy.level(classifyLevel), rasterQ, training, classField, minLabelPixels, context);
+        QString roiErr;
+        // ADR 0060: canonical ROI-majority labeling (was the local
+        // labelFromRoi helper — point-in-polygon — in this file).
+        QMap<quint32, int> trainLabels = RsRoiLabeler::labelByMajority(
+            hierarchy.level(classifyLevel), rasterQ,
+            QString::fromStdString(training), QString::fromStdString(classField),
+            minLabelPixels, &roiErr,
+            [&context]() { return context.isCancelled(); });
+        context.throwIfCancelled();
+        if (trainLabels.isEmpty() && !roiErr.isEmpty())
+            throw RSOperatorError(ErrorCode::GdalError, roiErr.toStdString());
         labeledSegments = trainLabels.size();
         if (labeledSegments < 2)
             throw RSOperatorError(ErrorCode::InvalidInputData,
@@ -332,11 +201,10 @@ Json::Value RsObiaHierarchyOperator::run(const Json::Value& params, RSOperatorCo
         if (!feat.ok)
             throw RSOperatorError(ErrorCode::ComputationError, feat.errorMessage.toStdString());
 
-        std::unique_ptr<RsClassifierBackend> backend;
-        if (method == "normal_bayes")
-            backend = std::make_unique<RsClassifierNormalBayes>();
-        else
-            backend = std::make_unique<RsClassifierSvm>();
+        // ADR 0061 — backend construction through the single factory (was
+        // an inline normal_bayes/SVM branch here).
+        std::unique_ptr<RsClassifierBackend> backend =
+            RsClassifierBackendFactory::create(QString::fromStdString(method));
 
         auto cls = RsObjectClassify::classify(
             feat.X, feat.meta.segmentIds, trainLabels, *backend);
