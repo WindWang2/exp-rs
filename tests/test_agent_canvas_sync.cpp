@@ -4,6 +4,7 @@
 
 #include "agent/agent_copilot_dock_widget.h"
 #include "app/workflow/pipeline_canvas_widget.h"
+#include "processing/framework/json_params_converter.h"
 #include "workflow/workflow_definition.h"
 
 #include <QApplication>
@@ -54,13 +55,9 @@ TEST_CASE( "Agent plan converts to WorkflowDefinition and loads on PipelineCanva
 
   planJson[QStringLiteral( "steps" )] = stepsArr;
 
-  // Convert plan to WorkflowDefinition
-  Json::Value cppPlan;
-  std::string jsonStr = QJsonDocument( planJson ).toJson( QJsonDocument::Compact ).toStdString();
-  Json::CharReaderBuilder builder;
-  std::string errs;
-  std::istringstream sstream( jsonStr );
-  Json::parseFromStream( builder, sstream, &cppPlan, &errs );
+  // Convert plan to WorkflowDefinition via the shared QJson→Json::Value
+  // helper (ADR 0048)
+  const Json::Value cppPlan = sicnu::processing::jsonValueFromQJson( planJson );
 
   WorkflowDefinition def;
   std::string parseErr;

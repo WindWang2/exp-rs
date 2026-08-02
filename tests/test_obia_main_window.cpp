@@ -75,4 +75,21 @@ TEST_CASE( "ObiaMainWindow: dock panels exist", "[obia][ui]" )
     REQUIRE( window.findChild<QDockWidget *>( "obiaSegmentDock" ) != nullptr );
 }
 
+TEST_CASE( "ObiaMainWindow: initial task state queries and cancelActiveTask", "[obia][ui]" )
+{
+    ensureApp();
+
+    RsObiaMainWindow window;
+
+    CHECK_FALSE( window.isBusy() );
+    CHECK( window.pendingTaskId() == -1 );
+    CHECK( window.pendingOp() == RsObiaMainWindow::PendingOp::None );
+
+    window.cancelActiveTask();
+
+    CHECK_FALSE( window.isBusy() );
+    CHECK( window.pendingTaskId() == -1 );
+    CHECK( window.pendingOp() == RsObiaMainWindow::PendingOp::None );
+}
+
 #endif // SICNU_HAS_OPENCV

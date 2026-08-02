@@ -1,9 +1,42 @@
-// src/workflow/workflow_session.cpp
 #include "workflow_session.h"
+#include "placeholder_grammar.h"
 
 #include <algorithm>
 
 namespace sicnu::workflow {
+
+namespace {
+
+Json::Value resolveValuePlaceholders(
+  const Json::Value &val,
+  const std::function<std::string( const PlaceholderRef &ref )> &resolver )
+{
+  if ( val.isString() )
+  {
+    return substitutePlaceholders( val.asString(), resolver );
+  }
+  else if ( val.isArray() )
+  {
+    Json::Value arr( Json::arrayValue );
+    for ( const auto &item : val )
+    {
+      arr.append( resolveValuePlaceholders( item, resolver ) );
+    }
+    return arr;
+  }
+  else if ( val.isObject() )
+  {
+    Json::Value obj( Json::objectValue );
+    for ( auto it = val.begin(); it != val.end(); ++it )
+    {
+      obj[it.name()] = resolveValuePlaceholders( *it, resolver );
+    }
+    return obj;
+  }
+  return val;
+}
+
+} // namespace
 
 WorkflowSession::WorkflowSession( WorkflowDefinition def, std::string sessionId )
   : m_def( std::move( def ) )
@@ -47,6 +80,41 @@ Json::Value WorkflowSession::paramsFor( const std::string &stepId ) const
   if ( !m_paramsByStep.isObject() || !m_paramsByStep.isMember( stepId ) )
     return Json::Value( Json::objectValue );
   return m_paramsByStep[stepId];
+}
+
+Json::Value WorkflowSession::resolveParams( const std::string &stepId ) const
+{
+  const Json::Value raw = paramsFor( stepId );
+  if ( raw.isNull() || !raw.isObject() )
+    return raw;
+
+  auto resolver = [this]( const PlaceholderRef &ref ) -> std::string {
+    if ( !ref.stepId.empty() )
+    {
+      const StepDef *s = stepById( ref.stepId );
+      if ( s && !s->artifactOnSuccess.empty() )
+      {
+        auto it = m_artifacts.find( s->artifactOnSuccess );
+        if ( it != m_artifacts.end() )
+          return it->second;
+      }
+      std::string qualifiedKey = ref.stepId + "." + ref.portName;
+      auto itKey = m_artifacts.find( qualifiedKey );
+      if ( itKey != m_artifacts.end() )
+        return itKey->second;
+    }
+    auto itPort = m_artifacts.find( ref.portName );
+    if ( itPort != m_artifacts.end() )
+      return itPort->second;
+
+    auto itRaw = m_artifacts.find( ref.rawRef );
+    if ( itRaw != m_artifacts.end() )
+      return itRaw->second;
+
+    return ref.rawRef;
+  };
+
+  return resolveValuePlaceholders( raw, resolver );
 }
 
 void WorkflowSession::setArtifact( const std::string &name, const std::string &value )

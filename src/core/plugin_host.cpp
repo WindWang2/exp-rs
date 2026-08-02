@@ -19,9 +19,10 @@ using namespace sicnu::python::isolated;
 
 PluginHost::PluginHost(int pythonPoolSize, QObject *parent)
     : QObject(parent)
+    , m_pythonPoolSize(pythonPoolSize)
 {
 #if defined( SICNU_EMBED_PYTHON ) && SICNU_EMBED_PYTHON
-    m_pythonHost = std::make_unique<PythonPluginHost>(pythonPoolSize, this);
+    m_pythonHost = std::make_unique<PythonPluginHost>(m_pythonPoolSize, this);
 #else
     Q_UNUSED(pythonPoolSize);
 #endif
@@ -114,18 +115,20 @@ bool PluginHost::loadPythonPlugin(const QString &pluginDir)
     return false;
 #else
     if (!m_pythonHost) {
-        m_pythonHost = std::make_unique<PythonPluginHost>(2, this);
+        m_pythonHost = std::make_unique<PythonPluginHost>(m_pythonPoolSize, this);
     }
 
-    QMenu *pluginMenu = m_appInterface ? m_appInterface->pluginMenu() : nullptr;
-    sicnu::data::DataManager *dataManager = nullptr;
-    if (m_appInterface && m_appInterface->projectContext()) {
-        dataManager = &m_appInterface->projectContext()->dataManager();
+    // ADR 0044: consolidated context instead of 3 raw pointers.
+    sicnu::python::isolated::PluginLoadContext context;
+    if (m_appInterface) {
+        context.pluginMenu = m_appInterface->pluginMenu();
+        context.activeViewHost = m_appInterface->activeViewHost();
+        if (m_appInterface->projectContext())
+            context.dataManager = &m_appInterface->projectContext()->dataManager();
     }
-    ActiveViewHost *activeViewHost = m_appInterface ? m_appInterface->activeViewHost() : nullptr;
 
     QString error;
-    PythonPluginAdapter *adapter = m_pythonHost->loadPlugin(pluginDir, dataManager, pluginMenu, activeViewHost, &error);
+    PythonPluginAdapter *adapter = m_pythonHost->loadPlugin(pluginDir, context, &error);
     if (!adapter) {
         emit pluginError(QDir(pluginDir).dirName(), error);
         qWarning() << "PluginHost: Python plugin load failed:" << pluginDir << error;

@@ -6,7 +6,7 @@
 
 namespace rs::display {
 
-bool needsBandStats( const StretchSpec &spec )
+bool DisplayStretchPipeline::needsBandStats( const StretchSpec &spec )
 {
   switch ( spec.kind() )
   {
@@ -24,12 +24,12 @@ bool needsBandStats( const StretchSpec &spec )
   return false;
 }
 
-bool needsMeanStd( const StretchSpec &spec )
+bool DisplayStretchPipeline::needsMeanStd( const StretchSpec &spec )
 {
   return spec.kind() == StretchKind::StdDev;
 }
 
-std::optional<StretchError> validate( const StretchSpec &spec )
+std::optional<StretchError> DisplayStretchPipeline::validate( const StretchSpec &spec )
 {
   switch ( spec.kind() )
   {
@@ -90,7 +90,7 @@ static BandStats fallbackStats()
   return s;
 }
 
-ResolveStretchResult resolve( const StretchSpec &spec, const BandStats &statsIn )
+ResolveStretchResult DisplayStretchPipeline::resolve( const StretchSpec &spec, const BandStats &statsIn )
 {
   if ( auto err = validate( spec ) )
     return ResolveStretchResult::fail( *err );

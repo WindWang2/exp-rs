@@ -12,16 +12,8 @@
 
 namespace {
 
-int fake_argc = 1;
-char fake_arg0[] = "test";
-char *fake_argv[] = {fake_arg0, nullptr};
-
-QApplication *ensureApp()
-{
-    if (!QApplication::instance())
-        return new QApplication(fake_argc, fake_argv);
-    return static_cast<QApplication *>(QApplication::instance());
-}
+// The QApplication is created in test_raster_processing_dialog_base_main.cpp
+// and destroyed at the end of main() (see that file for why).
 
 class TestRasterDialog : public RasterProcessingDialogBase
 {
@@ -47,8 +39,6 @@ protected:
 
 TEST_CASE("RasterProcessingDialogBase run lifecycle", "[dialog][base]")
 {
-    ensureApp();
-
     TestRasterDialog dialog;
     REQUIRE(dialog.runButton() != nullptr);
     REQUIRE(dialog.runButton()->isEnabled());
@@ -80,8 +70,6 @@ TEST_CASE("RasterProcessingDialogBase run lifecycle", "[dialog][base]")
 
 TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
 {
-    ensureApp();
-
     TestRasterDialog dialog;
 
     SECTION("runGdalTask executes task off UI thread and completes")

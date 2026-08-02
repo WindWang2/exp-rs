@@ -75,13 +75,12 @@ TEST_CASE( "setWarpInProgressForTest: true disables GCP table and Apply action",
 
   auto *table = w.findChild<QgsGCPListWidget *>( QStringLiteral( "rsGcpTable" ) );
   REQUIRE( table != nullptr );
-  REQUIRE( table->isEnabled() );
+  // Initial enabled state is not asserted: since the "gate GCP tools"
+  // change (5047c4d9bd) the table stays disabled until SRC+REF rasters are
+  // loaded. This test only pins the warp-lock hook behavior.
 
   auto *applyAction = w.findChild<QAction *>( QStringLiteral( "rsGeorefApplyAction" ) );
   REQUIRE( applyAction != nullptr );
-
-  // Initially, table should be enabled
-  REQUIRE( table->isEnabled() );
 
   // Call hook with true — should disable both table and apply action
   w.setWarpInProgressForTest( true );
@@ -483,8 +482,9 @@ TEST_CASE( "Hook integration: warp lock during apply operation",
   REQUIRE( table != nullptr );
   REQUIRE( applyAction != nullptr );
 
-  // Initial state
-  REQUIRE( table->isEnabled() );
+  // Initial state is not pinned: since the "gate GCP tools" change
+  // (5047c4d9bd) the table stays disabled until SRC+REF rasters are loaded.
+  // The warp-lock cycle below is what this test pins.
 
   // Simulate warp start
   w.setWarpInProgressForTest( true );

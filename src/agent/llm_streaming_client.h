@@ -16,6 +16,15 @@
 namespace sicnu::agent
 {
 
+/// Wire payload assembled by LlmStreamingClient::buildChatRequest — the
+/// QNetworkRequest plus its JSON body. Exposed so the request builder is a
+/// pure, network-free test seam.
+struct ChatRequestPayload
+{
+  QNetworkRequest request;
+  QByteArray body;
+};
+
 class LlmStreamingClient : public QObject
 {
   Q_OBJECT
@@ -27,11 +36,19 @@ class LlmStreamingClient : public QObject
     void setProfile( const LlmProviderProfile &profile );
     LlmProviderProfile profile() const;
 
+    /// Pure request builder: normalizes the endpoint, sets headers (Bearer
+    /// auth when the profile has an apiKey), and assembles the JSON body —
+    /// no network access, unit-testable. The body always asks for a stream:
+    /// the transport is SSE-only, so profile.stream no longer shapes the wire.
+    static ChatRequestPayload buildChatRequest( const LlmProviderProfile &profile,
+                                                const QJsonArray &messages,
+                                                const QJsonArray &tools = QJsonArray() );
+
     /**
      * Sends a chat completion request to the configured LLM API.
-     * Auto-injects registered algorithm tools from AtomicAlgorithmRegistry if enableTools is true.
+     * Tools are caller-supplied: an empty tools array sends none.
      */
-    void sendChatCompletion( const QJsonArray &messages, bool enableTools = true );
+    void sendChatCompletion( const QJsonArray &messages, const QJsonArray &tools = QJsonArray() );
 
     /**
      * Cancels any in-flight streaming HTTP request.

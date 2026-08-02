@@ -2,6 +2,7 @@
 #pragma once
 
 #include "interfaces/sicnu_plugin_interface.h"
+#include "plugin_load_context.h"
 #include <QString>
 #include <QIcon>
 #include <memory>
@@ -18,12 +19,22 @@ namespace sicnu::data { class DataManager; }
 namespace sicnu::python::isolated {
     class PythonWorkerProcessPool;
     struct WorkerNode;
-    class PythonAppInterfaceProxy;
+    class AppInterfaceBridge;
 }
 
 class PythonPluginAdapter : public SicnuPluginInterface
 {
 public:
+    /// ADR 0044: accepts a PluginLoadContext instead of 3 raw pointers.
+    explicit PythonPluginAdapter( const QString &pluginDir,
+                                  const QString &packageName,
+                                  const QString &name,
+                                  const QString &description,
+                                  const QString &version,
+                                  const sicnu::python::isolated::PluginLoadContext &context,
+                                  sicnu::python::isolated::PythonWorkerProcessPool *pool = nullptr );
+
+    /// Backward-compatible constructor — wraps individual arguments into PluginLoadContext.
     explicit PythonPluginAdapter( const QString &pluginDir,
                                   const QString &packageName,
                                   const QString &name,
@@ -32,7 +43,12 @@ public:
                                   sicnu::data::DataManager *dataManager,
                                   QMenu *pluginMenu,
                                   ActiveViewHost *activeViewHost,
-                                  sicnu::python::isolated::PythonWorkerProcessPool *pool = nullptr );
+                                  sicnu::python::isolated::PythonWorkerProcessPool *pool = nullptr )
+      : PythonPluginAdapter( pluginDir, packageName, name, description, version,
+                             sicnu::python::isolated::PluginLoadContext{ dataManager, pluginMenu, activeViewHost },
+                             pool )
+    {
+    }
 
     ~PythonPluginAdapter() override;
 
@@ -64,6 +80,6 @@ private:
     ActiveViewHost *m_activeViewHost = nullptr;
     sicnu::python::isolated::PythonWorkerProcessPool *m_pool = nullptr;
     sicnu::python::isolated::WorkerNode *m_workerNode = nullptr;
-    std::unique_ptr<sicnu::python::isolated::PythonAppInterfaceProxy> m_uiProxy;
+    std::unique_ptr<sicnu::python::isolated::AppInterfaceBridge> m_bridge;
     bool m_initialized = false;
 };

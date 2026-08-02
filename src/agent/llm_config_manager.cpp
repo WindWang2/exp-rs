@@ -4,7 +4,23 @@
 namespace sicnu::agent
 {
 
+LlmConfigManager::LlmConfigManager( QObject *parent )
+  : QObject( parent )
+{
+}
+
+LlmConfigManager &LlmConfigManager::instance()
+{
+  static LlmConfigManager s_instance;
+  return s_instance;
+}
+
 QList<LlmProviderProfile> LlmConfigManager::presetProfiles()
+{
+  return instance().getPresetProfiles();
+}
+
+QList<LlmProviderProfile> LlmConfigManager::getPresetProfiles() const
 {
   QList<LlmProviderProfile> presets;
 
@@ -47,36 +63,81 @@ QList<LlmProviderProfile> LlmConfigManager::presetProfiles()
   return presets;
 }
 
-LlmProviderProfile LlmConfigManager::activeProfile()
+void LlmConfigManager::ensureLoaded()
 {
+  if ( m_loaded )
+    return;
+
   QSettings settings;
   settings.beginGroup( QStringLiteral( "AI_Agent" ) );
+  m_activeProfileId = settings.value( QStringLiteral( "activeProfileId" ), QStringLiteral( "deepseek" ) ).toString();
+  settings.endGroup();
 
-  QString activeId = settings.value( QStringLiteral( "activeProfileId" ), QStringLiteral( "deepseek" ) ).toString();
-  QList<LlmProviderProfile> profiles = loadProfiles();
-
-  for ( const auto &profile : profiles )
+  settings.beginGroup( QStringLiteral( "AI_AgentProfiles" ) );
+  int size = settings.beginReadArray( QStringLiteral( "profiles" ) );
+  if ( size == 0 )
   {
-    if ( profile.id == activeId )
+    settings.endArray();
+    settings.endGroup();
+    m_cachedProfiles = getPresetProfiles();
+  }
+  else
+  {
+    m_cachedProfiles.clear();
+    for ( int i = 0; i < size; ++i )
     {
-      settings.endGroup();
-      return profile;
+      settings.setArrayIndex( i );
+      LlmProviderProfile p;
+      p.id = settings.value( QStringLiteral( "id" ) ).toString();
+      p.name = settings.value( QStringLiteral( "name" ) ).toString();
+      p.baseUrl = settings.value( QStringLiteral( "baseUrl" ) ).toString();
+      p.apiKey = settings.value( QStringLiteral( "apiKey" ) ).toString();
+      p.modelName = settings.value( QStringLiteral( "modelName" ) ).toString();
+      p.temperature = settings.value( QStringLiteral( "temperature" ), 0.2 ).toDouble();
+      p.stream = settings.value( QStringLiteral( "stream" ), true ).toBool();
+      m_cachedProfiles.append( p );
     }
+    settings.endArray();
+    settings.endGroup();
   }
 
-  settings.endGroup();
-  return presetProfiles().first();
+  m_loaded = true;
+}
+
+LlmProviderProfile LlmConfigManager::activeProfile()
+{
+  return instance().getActiveProfile();
+}
+
+LlmProviderProfile LlmConfigManager::getActiveProfile()
+{
+  ensureLoaded();
+  for ( const auto &profile : m_cachedProfiles )
+  {
+    if ( profile.id == m_activeProfileId )
+      return profile;
+  }
+  return getPresetProfiles().first();
 }
 
 void LlmConfigManager::setActiveProfile( const LlmProviderProfile &profile )
 {
+  instance().updateActiveProfile( profile );
+}
+
+void LlmConfigManager::updateActiveProfile( const LlmProviderProfile &profile )
+{
+  ensureLoaded();
+
   QSettings settings;
   settings.beginGroup( QStringLiteral( "AI_Agent" ) );
   settings.setValue( QStringLiteral( "activeProfileId" ), profile.id );
+  settings.endGroup();
 
-  QList<LlmProviderProfile> profiles = loadProfiles();
+  m_activeProfileId = profile.id;
+
   bool found = false;
-  for ( auto &p : profiles )
+  for ( auto &p : m_cachedProfiles )
   {
     if ( p.id == profile.id )
     {
@@ -87,48 +148,34 @@ void LlmConfigManager::setActiveProfile( const LlmProviderProfile &profile )
   }
   if ( !found )
   {
-    profiles.append( profile );
+    m_cachedProfiles.append( profile );
   }
 
-  settings.endGroup();
-  saveProfiles( profiles );
+  updateProfiles( m_cachedProfiles );
+  emit activeProfileChanged( profile );
 }
 
 QList<LlmProviderProfile> LlmConfigManager::loadProfiles()
 {
-  QSettings settings;
-  settings.beginGroup( QStringLiteral( "AI_AgentProfiles" ) );
+  return instance().getProfiles();
+}
 
-  int size = settings.beginReadArray( QStringLiteral( "profiles" ) );
-  if ( size == 0 )
-  {
-    settings.endArray();
-    settings.endGroup();
-    return presetProfiles();
-  }
-
-  QList<LlmProviderProfile> profiles;
-  for ( int i = 0; i < size; ++i )
-  {
-    settings.setArrayIndex( i );
-    LlmProviderProfile p;
-    p.id = settings.value( QStringLiteral( "id" ) ).toString();
-    p.name = settings.value( QStringLiteral( "name" ) ).toString();
-    p.baseUrl = settings.value( QStringLiteral( "baseUrl" ) ).toString();
-    p.apiKey = settings.value( QStringLiteral( "apiKey" ) ).toString();
-    p.modelName = settings.value( QStringLiteral( "modelName" ) ).toString();
-    p.temperature = settings.value( QStringLiteral( "temperature" ), 0.2 ).toDouble();
-    p.stream = settings.value( QStringLiteral( "stream" ), true ).toBool();
-    profiles.append( p );
-  }
-
-  settings.endArray();
-  settings.endGroup();
-  return profiles;
+QList<LlmProviderProfile> LlmConfigManager::getProfiles()
+{
+  ensureLoaded();
+  return m_cachedProfiles;
 }
 
 void LlmConfigManager::saveProfiles( const QList<LlmProviderProfile> &profiles )
 {
+  instance().updateProfiles( profiles );
+}
+
+void LlmConfigManager::updateProfiles( const QList<LlmProviderProfile> &profiles )
+{
+  m_cachedProfiles = profiles;
+  m_loaded = true;
+
   QSettings settings;
   settings.beginGroup( QStringLiteral( "AI_AgentProfiles" ) );
 
@@ -147,6 +194,8 @@ void LlmConfigManager::saveProfiles( const QList<LlmProviderProfile> &profiles )
   }
   settings.endArray();
   settings.endGroup();
+
+  emit profilesChanged();
 }
 
 } // namespace sicnu::agent

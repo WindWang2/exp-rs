@@ -81,10 +81,10 @@ protected:
     QVariantMap handleExecuteOperator(const QString &operatorId, const QVariantMap &parameters);
 
 private:
-    /// Allow-list: rs:, gdal:, gdal_tools:, otb:; custom_tools: only with SICNU_MCP_TRUST_CUSTOM_TOOLS=1
-    static bool isAlgorithmIdAllowed(const QString &algorithmId, QString *reason = nullptr);
-    /// Same allow-list for operator ids (rs:, gdal:, otb:, opencv: prefix family).
-    static bool isOperatorIdAllowed(const QString &operatorId, QString *reason = nullptr);
+    /// Unified tool execution helper routing calls through ToolCallDispatcher
+    QVariantMap dispatchToolCall(const QString &toolId, const QVariantMap &parameters, bool isOperatorCall);
+    /// Allow-list: rs:, gdal:, gdal_tools:, otb:, qgis:, qgis_algorithms:, opencv:; custom_tools: only with SICNU_MCP_TRUST_CUSTOM_TOOLS=1
+    static bool isToolIdAllowed(const QString &toolId, QString *reason = nullptr);
     /// When SICNU_MCP_WORKSPACE is set, reject absolute string params outside that root.
     static bool validateWorkspacePaths(const QVariantMap &parameters, QString *reason = nullptr);
     /// Parses "task-<id>" into @a taskId. Returns false for malformed ids.

@@ -1,5 +1,5 @@
 #include "stac_client.h"
-#include "env_flag.h"
+#include "agent/env_flag.h"
 
 #include <QAbstractSocket>
 #include <QHostAddress>
@@ -112,6 +112,32 @@ QString StacClient::validateAssetHref(const QString &href)
         return QStringLiteral("Asset href scheme must be http or https (got '%1')").arg(scheme);
 
     return validateUrlPolicy(url, /*requireHttpsPreferred=*/true);
+}
+
+QString StacClient::selectCogHref(const QJsonObject &stacItemFeature)
+{
+    const QJsonObject assets = stacItemFeature.value(QStringLiteral("assets")).toObject();
+
+    QString cogHref;
+    for (auto it = assets.constBegin(); it != assets.constEnd(); ++it) {
+        const QJsonObject asset = it.value().toObject();
+        const QString href = asset.value(QStringLiteral("href")).toString();
+        if (href.endsWith(QStringLiteral(".tif"), Qt::CaseInsensitive) ||
+            asset.value(QStringLiteral("type")).toString().contains(QStringLiteral("image/tiff"))) {
+            cogHref = href;
+            break;
+        }
+    }
+
+    if (cogHref.isEmpty())
+        return {};
+
+    // SSRF policy applies to asset hrefs too (private hosts, bad schemes,
+    // pre-formed VSI paths are all rejected here).
+    if (!validateAssetHref(cogHref).isEmpty())
+        return {};
+
+    return QStringLiteral( "/vsicurl/" ) + cogHref;
 }
 
 QUrl StacClient::buildSearchUrl(const QString &endpoint, const QString &collection,

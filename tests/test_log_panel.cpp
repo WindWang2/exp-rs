@@ -1,9 +1,10 @@
 // tests/test_log_panel.cpp — TDD for logging and message handling
 #include <catch2/catch_test_macros.hpp>
 
-#include <qgsapplication.h>
 #include <qgsmessagelog.h>
 #include <qgis.h>
+
+#include <QCoreApplication>
 
 #include "app/log_panel.h"
 
@@ -11,29 +12,16 @@
 
 using namespace sicnu;
 
-static int argc = 0;
-static char *argv[] = {nullptr};
-static std::unique_ptr<QgsApplication> g_app;
-static void ensureApp()
-{
-    if (!g_app) {
-        g_app = std::make_unique<QgsApplication>(argc, argv, false);
-        g_app->init();
-        g_app->setPrefixPath(g_app->applicationDirPath(), true);
-    }
-}
+// The QgsApplication is created in test_log_panel_main.cpp and lives for the
+// whole process; it is destroyed at the end of main() (see that file for why).
 
 TEST_CASE("LogPanel can be created", "[logging]") {
-    ensureApp();
-
     LogPanel panel;
     CHECK(panel.widget() != nullptr);
     CHECK(panel.windowTitle().contains("Log", Qt::CaseInsensitive));
 }
 
 TEST_CASE("LogPanel receives messages from QgsMessageLog", "[logging]") {
-    ensureApp();
-
     LogPanel panel;
 
     QgsMessageLog::logMessage("test message", "test_tag", Qgis::MessageLevel::Info);
@@ -44,8 +32,6 @@ TEST_CASE("LogPanel receives messages from QgsMessageLog", "[logging]") {
 }
 
 TEST_CASE("LogPanel can filter by level", "[logging]") {
-    ensureApp();
-
     LogPanel panel;
 
     QgsMessageLog::logMessage("info msg", "test", Qgis::MessageLevel::Info);
@@ -57,8 +43,6 @@ TEST_CASE("LogPanel can filter by level", "[logging]") {
 }
 
 TEST_CASE("LogPanel can clear messages", "[logging]") {
-    ensureApp();
-
     LogPanel panel;
 
     QgsMessageLog::logMessage("to be cleared", "test", Qgis::MessageLevel::Info);
@@ -98,8 +82,6 @@ TEST_CASE("ErrorReporter invokes callback on error", "[logging]") {
 }
 
 TEST_CASE("ErrorReporter callback can route to QgsMessageLog", "[logging]") {
-    ensureApp();
-
     ErrorReporter reporter;
 
     // Wire callback → QgsMessageLog::logMessage

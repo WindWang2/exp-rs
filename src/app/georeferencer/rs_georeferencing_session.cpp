@@ -6,7 +6,6 @@
 #include "operators/framework/rs_operator_error.h"
 #include "qgsgeoreftransform.h"
 #include "qgsrpcgcptransformer.h"
-#include "rs_georef_task_center_executor.h"
 #include "rs_warp_task.h"
 
 #include <QByteArray>
@@ -73,19 +72,20 @@ double pixelRms( QgsGeorefTransform *xf,
 } // namespace
 
 RsGeoreferencingSession::RsGeoreferencingSession( QObject *parent )
-  : RsGeoreferencingSession( nullptr, parent )
+  : QObject( parent )
+  , mWorkflowRuntime()
 {
+  connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
+           this, &RsGeoreferencingSession::onTaskUpdated );
 }
 
 RsGeoreferencingSession::RsGeoreferencingSession(
-  std::shared_ptr<RsGeorefWarpExecutor> executor, QObject *parent )
+  CustomWarpExecutor customExecutor, QObject *parent )
   : QObject( parent )
-  , mExecutor( std::move( executor ) )
-  , mWorkflowRuntime( mWorkflowRegistry )
+  , mCustomExecutor( std::move( customExecutor ) )
+  , mWorkflowRuntime()
 {
-  if ( !mExecutor )
-    mExecutor = std::make_shared<RsGeorefTaskCenterExecutor>();
-  connect( mExecutor.get(), &RsGeorefWarpExecutor::taskUpdated,
+  connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
            this, &RsGeoreferencingSession::onTaskUpdated );
 }
 
@@ -151,11 +151,6 @@ RsGeoreferencingSession::WorkflowSnapshot RsGeoreferencingSession::restoreWorkfl
 
 bool RsGeoreferencingSession::enableWorkflowMirror( const std::string &definitionId )
 {
-  if ( !mWorkflowBuiltinsRegistered )
-  {
-    sicnu::workflow::registerBuiltinWorkflows( mWorkflowRegistry );
-    mWorkflowBuiltinsRegistered = true;
-  }
   mWorkflowSessionId = mWorkflowRuntime.open( definitionId );
   if ( mWorkflowSessionId.empty() )
     return false;
@@ -207,6 +202,22 @@ void RsGeoreferencingSession::setTransformMethod(
   QgsGcpTransformerInterface::TransformMethod method )
 {
   mMethod = method;
+  markDirty();
+}
+
+void RsGeoreferencingSession::setDemPath( const QString &path )
+{
+  if ( mDemPath == path )
+    return;
+  mDemPath = path;
+  markDirty();
+}
+
+void RsGeoreferencingSession::setDemZOffset( double z )
+{
+  if ( mDemZOffset == z )
+    return;
+  mDemZOffset = z;
   markDirty();
 }
 
@@ -497,32 +508,35 @@ long RsGeoreferencingSession::startWarpTask( const RsGeorefWarpSnapshot &snap )
   mPendingSnap = snap;
   mPendingWarpTask = task;
 
-  const long taskId = mExecutor->submitWarp(
-    req,
-    [task]( const sicnu::jobs::JobRequest &request,
-            sicnu::operators::RSOperatorContext &ctx ) {
-      ctx.logInfo( "Georef warp" );
-      ctx.reportProgress( 0.0, "Warping" );
-      const bool ok = task->run();
-      if ( ctx.isCancelled()
-           || task->result().status == QgsImageWarper::WarpStatus::Cancelled )
-      {
-        throw sicnu::operators::RSOperatorError(
-          sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
-      }
-      if ( !ok || task->result().status != QgsImageWarper::WarpStatus::Ok )
-      {
-        throw sicnu::operators::RSOperatorError(
-          sicnu::operators::ErrorCode::ComputationError,
-          task->result().errorMessage.toStdString() );
-      }
-      Json::Value result( Json::objectValue );
-      result["output"] = request.params.get( "output", "" ).asString();
-      result["durationMs"] = static_cast<Json::Int64>( task->result().durationMs );
-      result["outputBytes"] = static_cast<Json::Int64>( task->result().outputBytes );
-      return result;
-    },
-    [task]() { task->cancel(); } );
+  auto jobExec = [task]( const sicnu::jobs::JobRequest &request,
+                        sicnu::operators::RSOperatorContext &ctx ) {
+    ctx.logInfo( "Georef warp" );
+    ctx.reportProgress( 0.0, "Warping" );
+    const bool ok = task->run();
+    if ( ctx.isCancelled()
+         || task->result().status == QgsImageWarper::WarpStatus::Cancelled )
+    {
+      throw sicnu::operators::RSOperatorError(
+        sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
+    }
+    if ( !ok || task->result().status != QgsImageWarper::WarpStatus::Ok )
+    {
+      throw sicnu::operators::RSOperatorError(
+        sicnu::operators::ErrorCode::ComputationError,
+        task->result().errorMessage.toStdString() );
+    }
+    Json::Value result( Json::objectValue );
+    result["output"] = request.params.get( "output", "" ).asString();
+    result["durationMs"] = static_cast<Json::Int64>( task->result().durationMs );
+    result["outputBytes"] = static_cast<Json::Int64>( task->result().outputBytes );
+    return result;
+  };
+
+  auto cancelHook = [task]() { task->cancel(); };
+
+  const long taskId = mCustomExecutor.submit
+    ? mCustomExecutor.submit( req, jobExec, cancelHook )
+    : sicnu::TaskCenter::instance().submitJob( req, jobExec, cancelHook );
 
   mPendingWarpTaskId = taskId;
   return taskId;
@@ -532,7 +546,9 @@ bool RsGeoreferencingSession::cancelWarpTask( long taskCenterId )
 {
   if ( taskCenterId < 0 || taskCenterId != mPendingWarpTaskId )
     return false;
-  return mExecutor->cancelWarp( taskCenterId );
+  if ( mCustomExecutor.cancel )
+    return mCustomExecutor.cancel( taskCenterId );
+  return sicnu::TaskCenter::instance().cancelTask( taskCenterId );
 }
 
 void RsGeoreferencingSession::onTaskUpdated( const sicnu::AlgorithmTaskInfo &info )

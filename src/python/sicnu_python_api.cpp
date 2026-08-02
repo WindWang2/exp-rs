@@ -3,7 +3,6 @@
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
-#include <qgsmapcanvas.h>
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
 #include <qgsrasterdataprovider.h>
@@ -31,11 +30,6 @@ SicnuPythonApi &SicnuPythonApi::instance()
 SicnuPythonApi::SicnuPythonApi(QObject *parent)
     : QObject(parent)
 {
-}
-
-void SicnuPythonApi::initialize(QgsMapCanvas *canvas)
-{
-    m_canvas = canvas;
 }
 
 // ---- Project ----
@@ -75,7 +69,7 @@ int SicnuPythonApi::layerCount() const
 QString SicnuPythonApi::addRasterLayer(const QString &path, const QString &name)
 {
     Q_UNUSED(name);
-    // Data/Display seam (ADR 0009/0010/0015): ActiveViewHost only — no QgsProject::addMapLayer fallback.
+    // Data/Display seam (ADR 0009/0010/0015/0043): ActiveViewHost only.
     if (!m_activeViewHost || path.isEmpty())
         return QString();
     const auto res = m_activeViewHost->openRasterPath(path);
@@ -87,7 +81,7 @@ QString SicnuPythonApi::addRasterLayer(const QString &path, const QString &name)
 QString SicnuPythonApi::addVectorLayer(const QString &path, const QString &name)
 {
     Q_UNUSED(name);
-    // Data/Display seam (ADR 0009/0010/0015): ActiveViewHost only — no QgsProject::addMapLayer fallback.
+    // Data/Display seam (ADR 0009/0010/0015/0043): ActiveViewHost only.
     if (!m_activeViewHost || path.isEmpty())
         return QString();
     const auto res = m_activeViewHost->openVectorPath(path);
@@ -98,11 +92,14 @@ QString SicnuPythonApi::addVectorLayer(const QString &path, const QString &name)
 
 bool SicnuPythonApi::removeLayer(const QString &layerName)
 {
+    // Data/Display seam (ADR 0043): route through QgsProject layer lookup +
+    // ActiveViewHost refresh. The display manager owns layer presentation;
+    // QgsProject::removeMapLayer handles the legacy/external path.
     const auto layers = QgsProject::instance()->mapLayers();
     for (auto it = layers.constBegin(); it != layers.constEnd(); ++it) {
         if (it.value()->name() == layerName) {
             QgsProject::instance()->removeMapLayer(it.key());
-            if (m_canvas) m_canvas->refresh();
+            if (m_activeViewHost) m_activeViewHost->refreshCanvas();
             return true;
         }
     }
@@ -223,13 +220,13 @@ bool SicnuPythonApi::runAlgorithm(const QString &algorithmId, const QVariantMap 
     return ok;
 }
 
-// ---- Map Canvas ----
+// ---- Map Canvas (routed through ActiveViewHost, ADR 0043) ----
 
 QVariantMap SicnuPythonApi::canvasExtent() const
 {
     QVariantMap extent;
-    if (m_canvas) {
-        QgsRectangle ext = m_canvas->extent();
+    if (m_activeViewHost) {
+        QgsRectangle ext = m_activeViewHost->mapCanvasExtent();
         extent["xmin"] = ext.xMinimum();
         extent["ymin"] = ext.yMinimum();
         extent["xmax"] = ext.xMaximum();
@@ -240,30 +237,29 @@ QVariantMap SicnuPythonApi::canvasExtent() const
 
 void SicnuPythonApi::setCanvasExtent(double xmin, double ymin, double xmax, double ymax)
 {
-    if (m_canvas) {
-        m_canvas->setExtent(QgsRectangle(xmin, ymin, xmax, ymax));
-        m_canvas->refresh();
+    if (m_activeViewHost) {
+        m_activeViewHost->setExtent(QgsRectangle(xmin, ymin, xmax, ymax));
     }
 }
 
 void SicnuPythonApi::refreshCanvas()
 {
-    if (m_canvas) m_canvas->refresh();
+    if (m_activeViewHost) m_activeViewHost->refreshCanvas();
 }
 
 double SicnuPythonApi::canvasScale() const
 {
-    return m_canvas ? m_canvas->scale() : 0.0;
+    return m_activeViewHost ? m_activeViewHost->mapCanvasScale() : 0.0;
 }
 
 void SicnuPythonApi::setCanvasScale(double scale)
 {
-    if (m_canvas) {
-        m_canvas->zoomScale(scale);
+    if (m_activeViewHost) {
+        m_activeViewHost->setScale(scale);
     }
 }
 
-// ---- CRS ----
+// ---- CRS (routed through ActiveViewHost, ADR 0043) ----
 
 QString SicnuPythonApi::projectCrs() const
 {
@@ -275,7 +271,7 @@ bool SicnuPythonApi::setProjectCrs(const QString &crsString)
     QgsCoordinateReferenceSystem crs(crsString);
     if (!crs.isValid()) return false;
     QgsProject::instance()->setCrs(crs);
-    if (m_canvas) m_canvas->refresh();
+    if (m_activeViewHost) m_activeViewHost->refreshCanvas();
     return true;
 }
 

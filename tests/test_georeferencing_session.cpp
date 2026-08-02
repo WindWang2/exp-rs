@@ -43,9 +43,12 @@ namespace
 
 /// Records warp submissions/cancels and completes tasks on demand by emitting
 /// taskUpdated — the same seam the production TaskCenter adapter uses.
-class FakeWarpExecutor : public RsGeorefWarpExecutor
+class FakeWarpExecutor : public QObject
 {
   Q_OBJECT
+  public:
+  signals:
+    void taskUpdated( const sicnu::AlgorithmTaskInfo &info );
   public:
     struct Submission
     {
@@ -61,7 +64,7 @@ class FakeWarpExecutor : public RsGeorefWarpExecutor
 
     long submitWarp( const sicnu::jobs::JobRequest &request,
                      const sicnu::TaskCenter::JobExecutor &executor,
-                     const sicnu::TaskCenter::CancelHook &onCancel ) override
+                     const sicnu::TaskCenter::CancelHook &onCancel )
     {
       Submission s;
       s.taskId = nextTaskId++;
@@ -72,7 +75,7 @@ class FakeWarpExecutor : public RsGeorefWarpExecutor
       return s.taskId;
     }
 
-    bool cancelWarp( long taskId ) override
+    bool cancelWarp( long taskId )
     {
       cancelCalls.append( taskId );
       for ( const Submission &s : submissions )
@@ -505,7 +508,18 @@ TEST_CASE( "GeoreferencingSession: warp submit/cancel through injected executor"
 {
   ensureApp();
   auto executor = std::make_shared<FakeWarpExecutor>();
-  RsGeoreferencingSession session( executor );
+  CustomWarpExecutor customExec;
+  customExec.submit = [executor]( const sicnu::jobs::JobRequest &req,
+                                  const sicnu::TaskCenter::JobExecutor &exec,
+                                  const sicnu::TaskCenter::CancelHook &cancel ) {
+    return executor->submitWarp( req, exec, cancel );
+  };
+  customExec.cancel = [executor]( long taskId ) {
+    return executor->cancelWarp( taskId );
+  };
+  RsGeoreferencingSession session( customExec );
+  QObject::connect( executor.get(), &FakeWarpExecutor::taskUpdated,
+                    &session, &RsGeoreferencingSession::onTaskUpdated );
   session.setSourceRasterPath( QStringLiteral( "/tmp/source.tif" ) );
   session.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::Linear );
   session.setGcps( linearGcps() );
@@ -571,7 +585,18 @@ TEST_CASE( "GeoreferencingSession: warp job runs through fake executor (success 
   const QString outPath = tmp.path() + QStringLiteral( "/warped.tif" );
 
   auto executor = std::make_shared<FakeWarpExecutor>();
-  RsGeoreferencingSession session( executor );
+  CustomWarpExecutor customExec;
+  customExec.submit = [executor]( const sicnu::jobs::JobRequest &req,
+                                  const sicnu::TaskCenter::JobExecutor &exec,
+                                  const sicnu::TaskCenter::CancelHook &cancel ) {
+    return executor->submitWarp( req, exec, cancel );
+  };
+  customExec.cancel = [executor]( long taskId ) {
+    return executor->cancelWarp( taskId );
+  };
+  RsGeoreferencingSession session( customExec );
+  QObject::connect( executor.get(), &FakeWarpExecutor::taskUpdated,
+                    &session, &RsGeoreferencingSession::onTaskUpdated );
   session.setSourceRasterPath( srcPath );
   session.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::Linear );
   session.setGcps( linearGcps() );
@@ -669,6 +694,25 @@ TEST_CASE( "GeoreferencingSession: RPC below 3 GCPs skips refinement",
   }
 }
 
+TEST_CASE( "GeoreferencingSession: DEM setters mark dirty (ADR 0027)",
+           "[georef][session][dirty]" )
+{
+  RsGeoreferencingSession session;
+  session.clearDirty();
+  REQUIRE_FALSE( session.isDirty() );
+
+  session.setDemPath( QStringLiteral( "/tmp/dem.tif" ) );
+  REQUIRE( session.isDirty() );
+  REQUIRE( session.demPath() == QStringLiteral( "/tmp/dem.tif" ) );
+
+  session.clearDirty();
+  REQUIRE_FALSE( session.isDirty() );
+
+  session.setDemZOffset( 15.5 );
+  REQUIRE( session.isDirty() );
+  REQUIRE( session.demZOffset() == 15.5 );
+}
+
 TEST_CASE( "GeoreferencingSession: WorkflowRuntime mirror integration (ADR 0028)",
            "[georef][session][workflow]" )
 {
@@ -677,13 +721,24 @@ TEST_CASE( "GeoreferencingSession: WorkflowRuntime mirror integration (ADR 0028)
 
   REQUIRE( session.enableWorkflowMirror( "lab.georef.image_to_map" ) );
   REQUIRE( session.isWorkflowMirrorActive() );
-  REQUIRE_FALSE( session.workflowSessionId().empty() );
+  const std::string sid = session.workflowSessionId();
+  REQUIRE_FALSE( sid.empty() );
 
   session.setSourceRasterPath( QStringLiteral( "/tmp/source.tif" ) );
   session.setGcps( linearGcps() );
 
+  auto state = session.workflowRuntime().state( sid );
+  REQUIRE( state.currentStepId == "gcp" );
+  REQUIRE( state.artifacts.count( "source_raster" ) == 1 );
+  REQUIRE( state.artifacts["source_raster"] == "/tmp/source.tif" );
+  REQUIRE( state.artifacts.count( "gcp_count" ) == 1 );
+  REQUIRE( state.artifacts["gcp_count"] == "4" );
+
   session.setWorkflowStep( "gcp" );
   session.markWorkflowStepComplete( "gcp" );
+  state = session.workflowRuntime().state( sid );
+  const auto &completed = state.completedStepIds;
+  REQUIRE( std::find( completed.begin(), completed.end(), "gcp" ) != completed.end() );
 }
 
 #include "test_georeferencing_session.moc"

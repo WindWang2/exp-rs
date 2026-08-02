@@ -93,7 +93,6 @@ add_executable(sicnu_geo_rs
     shell/task_panel_host.cpp
     shell/workflow_session_controller.cpp
     shell/ribbon_controller.cpp
-    shell/job_engine_qt_bridge.cpp
     shell/rs_job_runner.cpp
     shell/processing_job_adapter.cpp
     shell/rs_job_panel.cpp
@@ -159,9 +158,10 @@ add_executable(sicnu_geo_rs
     map_tools/map_tool_manager.cpp
     map_tools/swipe_map_tool.cpp
 
-    # MCP server + STAC client
+    # MCP server (src/agent) + STAC client (app-local)
     ${CMAKE_SOURCE_DIR}/src/agent/mcp_server.cpp
-    ${CMAKE_SOURCE_DIR}/src/agent/stac_client.cpp
+    stac_client.cpp
+    stac_client.h
 
     # Image enhancement panel
     dialogs/image_enhancement_panel.cpp

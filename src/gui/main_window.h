@@ -19,6 +19,7 @@ class QgsMapToolPan;
 class QgsMapToolZoom;
 class QgsMapToolIdentify;
 class PluginHost;
+class SicnuAppInterface;
 
 class SicnuMainWindow : public QMainWindow
 {
@@ -121,8 +122,9 @@ private:
     QLabel *m_scaleLabel = nullptr;
     QLabel *m_renderTimeLabel = nullptr;
 
-    // Plugin host
+    // Plugin host facade
     PluginHost *m_pluginHost = nullptr;
+    SicnuAppInterface *m_appInterface = nullptr;
 
     // Plugin UI containers
     QMap<QString, QDockWidget*> m_pluginDocks;

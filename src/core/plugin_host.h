@@ -27,7 +27,9 @@ class PluginHost : public QObject
     Q_OBJECT
 
 public:
-    explicit PluginHost(int pythonPoolSize = 2, QObject *parent = nullptr);
+    static constexpr int DEFAULT_PYTHON_POOL_SIZE = 2;
+
+    explicit PluginHost(int pythonPoolSize = DEFAULT_PYTHON_POOL_SIZE, QObject *parent = nullptr);
     ~PluginHost() override;
 
     void setAppInterface(SicnuAppInterface *iface) { m_appInterface = iface; }
@@ -59,5 +61,6 @@ private:
 
     QMap<QString, PluginInfo> m_plugins;
     SicnuAppInterface *m_appInterface = nullptr;
+    int m_pythonPoolSize = DEFAULT_PYTHON_POOL_SIZE;
     std::unique_ptr<sicnu::python::isolated::PythonPluginHost> m_pythonHost;
 };

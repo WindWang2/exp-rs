@@ -1,24 +1,30 @@
 // src/workflow/workflow_runtime.h
 #pragma once
 
-#include "workflow_registry.h"
+#include "workflow_definition.h"
 #include "workflow_session.h"
 #include "workflow_types.h"
 
 #include <json/json.h>
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace sicnu::workflow {
 
-/// Process-local workflow session manager.
-/// open/canRun/runStep are pure orchestration; operator work goes through WorkflowRunner.
+/// Process-local workflow definition manager and session orchestrator.
 class WorkflowRuntime
 {
   public:
-    explicit WorkflowRuntime( WorkflowRegistry &registry );
+    explicit WorkflowRuntime( bool loadBuiltins = true );
+
+    void registerDefinition( WorkflowDefinition def );
+    bool hasDefinition( const std::string &id ) const;
+    const WorkflowDefinition *findDefinition( const std::string &id ) const;
+    std::vector<std::string> registeredDefinitionIds() const;
 
     /// Open a session for a registered definition.
     /// @return session id, or empty string if definition is missing
@@ -46,7 +52,8 @@ class WorkflowRuntime
     WorkflowSession *sessionMut( const std::string &sessionId );
     const WorkflowSession *sessionConst( const std::string &sessionId ) const;
 
-    WorkflowRegistry &m_registry;
+    mutable std::mutex m_mutex;
+    std::unordered_map<std::string, WorkflowDefinition> m_defs;
     std::unordered_map<std::string, std::unique_ptr<WorkflowSession>> m_sessions;
     int m_nextId = 1;
 };

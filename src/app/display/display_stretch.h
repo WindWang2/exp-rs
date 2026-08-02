@@ -6,26 +6,57 @@
 
 namespace rs::display {
 
-/** Validate Spec without I/O. nullopt = valid. */
-std::optional<StretchError> validate( const StretchSpec &spec );
-
 /**
- * Pure resolve: Spec + band stats → concrete display min/max.
- * Does not touch renderers.
+ * Deep module encapsulating raster display stretch validation, resolution, and application.
  */
-ResolveStretchResult resolve( const StretchSpec &spec, const BandStats &stats );
+class DisplayStretchPipeline {
+public:
+  /** Validate Spec without I/O. nullopt = valid. */
+  static std::optional<StretchError> validate( const StretchSpec &spec );
 
-/**
- * Resolve + apply through ports.
- * statsBand: 1-based; if Spec has statsBand, that wins.
- */
-ApplyStretchResult apply( RasterDisplayTarget &target,
-                          BandStatsSource &statsSource,
-                          void *layerToken,
-                          const StretchSpec &spec,
-                          int defaultStatsBand = 1 );
+  /**
+   * Pure resolve: Spec + band stats -> concrete display min/max.
+   * Does not touch renderers.
+   */
+  static ResolveStretchResult resolve( const StretchSpec &spec, const BandStats &stats );
 
-bool needsBandStats( const StretchSpec &spec );
-bool needsMeanStd( const StretchSpec &spec );
+  /**
+   * Resolve + apply through ports.
+   * statsBand: 1-based; if Spec has statsBand, that wins.
+   */
+  static ApplyStretchResult apply( RasterDisplayTarget &target,
+                                  BandStatsSource &statsSource,
+                                  void *layerToken,
+                                  const StretchSpec &spec,
+                                  int defaultStatsBand = 1 );
+
+  static bool needsBandStats( const StretchSpec &spec );
+  static bool needsMeanStd( const StretchSpec &spec );
+};
+
+// Backward-compatible free-function seam.
+inline std::optional<StretchError> validate( const StretchSpec &spec ) {
+  return DisplayStretchPipeline::validate( spec );
+}
+
+inline ResolveStretchResult resolve( const StretchSpec &spec, const BandStats &stats ) {
+  return DisplayStretchPipeline::resolve( spec, stats );
+}
+
+inline ApplyStretchResult apply( RasterDisplayTarget &target,
+                                 BandStatsSource &statsSource,
+                                 void *layerToken,
+                                 const StretchSpec &spec,
+                                 int defaultStatsBand = 1 ) {
+  return DisplayStretchPipeline::apply( target, statsSource, layerToken, spec, defaultStatsBand );
+}
+
+inline bool needsBandStats( const StretchSpec &spec ) {
+  return DisplayStretchPipeline::needsBandStats( spec );
+}
+
+inline bool needsMeanStd( const StretchSpec &spec ) {
+  return DisplayStretchPipeline::needsMeanStd( spec );
+}
 
 } // namespace rs::display

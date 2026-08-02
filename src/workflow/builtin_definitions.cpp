@@ -1,14 +1,14 @@
 // src/workflow/builtin_definitions.cpp
 #include "builtin_definitions.h"
 
-#include "workflow_registry.h"
+#include "workflow_runtime.h"
 #include "workflow_types.h"
 
 namespace sicnu::workflow {
 namespace {
 
 /// Single-step TaskPanel tool: one Operator step "run" with a paramNonEmpty gate.
-void registerAtomicTool( WorkflowRegistry &reg,
+void registerAtomicTool( WorkflowRuntime &runtime,
                          const char *definitionId,
                          const char *title,
                          const char *operatorId,
@@ -31,17 +31,12 @@ void registerAtomicTool( WorkflowRegistry &reg,
   } );
 
   d.steps = {s};
-  reg.registerDefinition( std::move( d ) );
+  runtime.registerDefinition( std::move( d ) );
 }
 
 } // namespace
 
-/// Supervised classification workspace (7 steps ↔ RsClassifyStep order).
-/// Soft GateDef hints use pure session artifacts only (source_raster /
-/// classified_output). Classify-specific gates (class count, train pixels,
-/// evaluate-reviewed, etc.) stay in RsClassifyWorkflowController this phase —
-/// controller remains gate authority for the UI; session tracks step/mode.
-void registerClassifySupervised( WorkflowRegistry &reg )
+void registerClassifySupervised( WorkflowRuntime &runtime )
 {
   WorkflowDefinition d;
   d.id = "lab.classify.supervised";
@@ -53,7 +48,6 @@ void registerClassifySupervised( WorkflowRegistry &reg )
   classes.id = "classes";
   classes.title = "分类体系";
   classes.kind = StepKind::Interactive;
-  // Class-count gate is controller-owned (needs ROI class defs).
 
   StepDef samples;
   samples.id = "samples";
@@ -65,12 +59,10 @@ void registerClassifySupervised( WorkflowRegistry &reg )
   evaluate.id = "evaluate";
   evaluate.title = "样本评价";
   evaluate.kind = StepKind::Review;
-  // Evaluate-reviewed flag is controller-owned.
 
   StepDef train;
   train.id = "train";
   train.title = "训练-分类";
-  // Operator id documents the catalog operator; UI still runs RsClassificationTask.
   train.kind = StepKind::Operator;
   train.operatorId = "rs:supervised_classification";
   train.artifactOnSuccess = "classified_output";
@@ -95,13 +87,10 @@ void registerClassifySupervised( WorkflowRegistry &reg )
   exportStep.gates.push_back( {"hasArtifact:classified_output", "请先完成全图分类或后处理"} );
 
   d.steps = {classes, samples, evaluate, train, accuracy, post, exportStep};
-  reg.registerDefinition( std::move( d ) );
+  runtime.registerDefinition( std::move( d ) );
 }
 
-/// Image-to-map georeferencing workspace (6 steps ↔ dual-window I2M flow).
-/// Soft gates use session artifacts only (source_raster / gcp_count / output).
-/// Warp stays Interactive — UI still runs RsWarpTask / QgsImageWarper.
-void registerGeorefImageToMap( WorkflowRegistry &reg )
+void registerGeorefImageToMap( WorkflowRuntime &runtime )
 {
   WorkflowDefinition d;
   d.id = "lab.georef.image_to_map";
@@ -135,7 +124,6 @@ void registerGeorefImageToMap( WorkflowRegistry &reg )
   StepDef warp;
   warp.id = "warp";
   warp.title = "重采样写出";
-  // No clean catalog operator for dual-window warp; UI owns RsWarpTask.
   warp.kind = StepKind::Interactive;
   warp.gates.push_back( {"hasArtifact:gcp_count", "请先采集控制点"} );
 
@@ -146,13 +134,10 @@ void registerGeorefImageToMap( WorkflowRegistry &reg )
   loadResult.gates.push_back( {"hasArtifact:output", "请先完成重采样写出"} );
 
   d.steps = {openImage, gcp, transform, residual, warp, loadResult};
-  reg.registerDefinition( std::move( d ) );
+  runtime.registerDefinition( std::move( d ) );
 }
 
-/// OBIA lab workflow — mirrors RsObiaMainWindow: open → segment → label →
-/// classify → export. Workspace host opens the OBIA window (HostKind::Workspace);
-/// operator steps use rs:obia_segment / rs:obia_classify (same ids as pipelines).
-void registerObia( WorkflowRegistry &reg )
+void registerObia( WorkflowRuntime &runtime )
 {
   WorkflowDefinition d;
   d.id = "lab.obia";
@@ -195,32 +180,47 @@ void registerObia( WorkflowRegistry &reg )
   exportStep.gates.push_back( {"hasArtifact:classified_output", "请先完成对象分类"} );
 
   d.steps = {openImage, segment, label, classify, exportStep};
-  reg.registerDefinition( std::move( d ) );
+  runtime.registerDefinition( std::move( d ) );
 }
 
-void registerBuiltinWorkflows( WorkflowRegistry &reg )
+void registerBuiltinWorkflows( WorkflowRuntime &runtime )
 {
-  // Primary input keys match each operator's schema() required fields.
-  registerAtomicTool( reg, "tool.rs.spectral_index", "光谱指数",
+  registerAtomicTool( runtime, "tool.rs.ndvi", "NDVI 植被指数",
+                      "rs:ndvi", "input", "请选择输入栅格" );
+  registerAtomicTool( runtime, "tool.rs.supervised_classification", "监督分类",
+                      "rs:supervised_classification", "image", "请选择输入栅格" );
+  registerAtomicTool( runtime, "tool.rs.pan_sharpening", "全色锐化",
+                      "rs:pan_sharpening", "pan", "请选择全色影像" );
+  registerAtomicTool( runtime, "tool.rs.pansharpen", "全色锐化",
+                      "rs:pansharpen", "pan", "请选择全色影像" );
+  registerAtomicTool( runtime, "tool.rs.kmeans_classification", "K-Means K均值聚类",
+                      "rs:kmeans_classification", "input", "请选择输入栅格" );
+  registerAtomicTool( runtime, "tool.rs.obia_segment", "面向对象分割",
+                      "rs:obia_segment", "input", "请选择输入栅格" );
+  registerAtomicTool( runtime, "tool.rs.obia_classify", "面向对象分类",
+                      "rs:obia_classify", "input", "请选择输入栅格" );
+  registerAtomicTool( runtime, "tool.rs.radiometric_calibration", "辐射定标",
+                      "rs:radiometric_calibration", "input", "请选择输入栅格" );
+  registerAtomicTool( runtime, "tool.rs.spectral_index", "光谱指数",
                       "rs:spectral_index", "input", "请选择输入栅格" );
-  registerAtomicTool( reg, "tool.rs.band_math", "波段运算",
+  registerAtomicTool( runtime, "tool.rs.band_math", "波段运算",
                       "rs:band_math", "input", "请选择输入栅格" );
-  registerAtomicTool( reg, "tool.rs.change_detection", "变化检测",
+  registerAtomicTool( runtime, "tool.rs.change_detection", "变化检测",
                       "rs:change_detection", "before", "请选择变化前影像" );
-  registerAtomicTool( reg, "tool.rs.image_fusion", "影像融合",
+  registerAtomicTool( runtime, "tool.rs.image_fusion", "影像融合",
                       "rs:image_fusion", "pan", "请选择全色影像" );
-  registerAtomicTool( reg, "tool.rs.mosaic", "镶嵌",
+  registerAtomicTool( runtime, "tool.rs.mosaic", "镶嵌",
                       "rs:mosaic", "inputs", "请添加待镶嵌栅格" );
-  registerAtomicTool( reg, "tool.rs.terrain_analysis", "地形分析",
+  registerAtomicTool( runtime, "tool.rs.terrain_analysis", "地形分析",
                       "rs:terrain_analysis", "input", "请选择 DEM 栅格" );
-  registerAtomicTool( reg, "tool.rs.pca", "PCA",
+  registerAtomicTool( runtime, "tool.rs.pca", "PCA",
                       "rs:pca", "input", "请选择输入栅格" );
-  registerAtomicTool( reg, "tool.rs.atmospheric_correction", "大气校正",
+  registerAtomicTool( runtime, "tool.rs.atmospheric_correction", "大气校正",
                       "rs:atmospheric_correction", "input", "请选择输入栅格" );
 
-  registerClassifySupervised( reg );
-  registerGeorefImageToMap( reg );
-  registerObia( reg );
+  registerClassifySupervised( runtime );
+  registerGeorefImageToMap( runtime );
+  registerObia( runtime );
 }
 
 } // namespace sicnu::workflow

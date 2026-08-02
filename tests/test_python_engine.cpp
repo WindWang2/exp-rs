@@ -140,7 +140,7 @@ TEST_CASE( "SicnuPythonApi routes layer addition through ActiveViewHost and Data
                                 context->mainViewId(), nullptr);
   activeViewHost.initLayerTree();
 
-  SicnuPythonApi::instance().initialize(&canvas);
+  // ADR 0043: no direct canvas — routes through ActiveViewHost.
   SicnuPythonApi::instance().setActiveViewHost(&activeViewHost);
 
   const QString demPath = fixturePath(QStringLiteral("samples/dem_sample.tif"));

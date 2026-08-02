@@ -22,35 +22,20 @@
 
 #include "processing/framework/task_center.h"
 #include "workflow/builtin_definitions.h"
-#include "workflow/workflow_registry.h"
 #include "workflow/workflow_runtime.h"
 
 class QWidget;
 class QgsGeorefTransform;
 class RsWarpTask;
 
-/**
- * Warp-execution seam (ADR 0020 decision 3). The session submits and cancels
- * warp jobs and observes terminal task updates through this interface only.
- * The production adapter (rs_georef_task_center_executor.h) delegates to
- * sicnu::TaskCenter::instance(); tests inject a fake.
- */
-class RsGeorefWarpExecutor : public QObject
+#include <functional>
+
+struct CustomWarpExecutor
 {
-  Q_OBJECT
-  public:
-    explicit RsGeorefWarpExecutor( QObject *parent = nullptr ) : QObject( parent ) {}
-    ~RsGeorefWarpExecutor() override = default;
-
-    /// Submit a warp job. Returns a task id (>= 0) or -1 on refusal.
-    virtual long submitWarp( const sicnu::jobs::JobRequest &request,
-                             const sicnu::TaskCenter::JobExecutor &executor,
-                             const sicnu::TaskCenter::CancelHook &onCancel ) = 0;
-    virtual bool cancelWarp( long taskId ) = 0;
-
-  signals:
-    /// Mirrors sicnu::TaskCenter::taskUpdated for submitted warp tasks.
-    void taskUpdated( const sicnu::AlgorithmTaskInfo &info );
+  std::function<long( const sicnu::jobs::JobRequest &request,
+                      const sicnu::TaskCenter::JobExecutor &executor,
+                      const sicnu::TaskCenter::CancelHook &onCancel )> submit;
+  std::function<bool( long taskId )> cancel;
 };
 
 /**
@@ -139,10 +124,9 @@ class RsGeoreferencingSession : public QObject
   Q_OBJECT
   public:
     explicit RsGeoreferencingSession( QObject *parent = nullptr );
-    /// Inject a warp executor (ADR 0020 decision 3). When \a executor is null,
-    /// a production adapter over sicnu::TaskCenter::instance() is created.
-    explicit RsGeoreferencingSession( std::shared_ptr<RsGeorefWarpExecutor> executor,
+    explicit RsGeoreferencingSession( CustomWarpExecutor customExecutor,
                                       QObject *parent = nullptr );
+    void setCustomWarpExecutor( CustomWarpExecutor executor ) { mCustomExecutor = std::move( executor ); }
     ~RsGeoreferencingSession() override;
     struct WorkflowSnapshot
     {
@@ -176,6 +160,7 @@ class RsGeoreferencingSession : public QObject
     bool enableWorkflowMirror( const std::string &definitionId = "lab.georef.image_to_map" );
     bool isWorkflowMirrorActive() const { return !mWorkflowSessionId.empty(); }
     const std::string &workflowSessionId() const { return mWorkflowSessionId; }
+    const sicnu::workflow::WorkflowRuntime &workflowRuntime() const { return mWorkflowRuntime; }
     void setWorkflowStep( const std::string &stepId );
     void markWorkflowStepComplete( const std::string &stepId );
 
@@ -188,9 +173,9 @@ class RsGeoreferencingSession : public QObject
     /// RPC transform options (mirror of the params panel DEM row). Only used
     /// when the method is RpcPhysical; injected into QgsRpcGcpTransformer
     /// during refit().
-    void setDemPath( const QString &path ) { mDemPath = path; }
+    void setDemPath( const QString &path );
     QString demPath() const { return mDemPath; }
-    void setDemZOffset( double z ) { mDemZOffset = z; }
+    void setDemZOffset( double z );
     double demZOffset() const { return mDemZOffset; }
 
     void setGcps( const QVector<RsGeorefGcpPair> &gcps );
@@ -246,7 +231,7 @@ class RsGeoreferencingSession : public QObject
     void warpFinished( long taskCenterId, bool success, const QString &errorMessage,
                        const QString &outputPath );
 
-  private slots:
+  public slots:
     void onTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
 
   private:
@@ -266,14 +251,13 @@ class RsGeoreferencingSession : public QObject
     QVector<RsGeorefGcpPair> mGcps;
     RsGeorefFitResult mLastFit;
 
-    std::shared_ptr<RsGeorefWarpExecutor> mExecutor;
+    CustomWarpExecutor mCustomExecutor;
 
     long mPendingWarpTaskId = -1;
     RsWarpTask *mPendingWarpTask = nullptr; // deleteLater on terminal
     RsGeorefWarpSnapshot mPendingSnap;
 
     // WorkflowRuntime mirror (ADR 0028)
-    sicnu::workflow::WorkflowRegistry mWorkflowRegistry;
     sicnu::workflow::WorkflowRuntime mWorkflowRuntime;
     std::string mWorkflowSessionId;
     bool mWorkflowBuiltinsRegistered = false;

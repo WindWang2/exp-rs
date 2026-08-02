@@ -8,7 +8,7 @@
 #include <QJsonArray>
 #include <QVariantMap>
 #include <QVariantList>
-#include "agent/stac_client.h"
+#include "stac_client.h"
 
 TEST_CASE("STAC URL construction", "[agent][stac]")
 {
@@ -115,5 +115,97 @@ TEST_CASE("STAC feature parsing", "[agent][stac]")
         QVariantList features = root.value("features").toList();
 
         REQUIRE(features.isEmpty());
+    }
+}
+
+TEST_CASE("StacClient::selectCogHref", "[agent][stac]")
+{
+    SECTION("COG-typed asset is selected and prefixed")
+    {
+        QJsonObject item{
+            {QStringLiteral("id"), QStringLiteral("item1")},
+            {QStringLiteral("assets"), QJsonObject{
+                {QStringLiteral("thumbnail"), QJsonObject{
+                    {QStringLiteral("href"), QStringLiteral("https://example.com/thumb.jpg")},
+                    {QStringLiteral("type"), QStringLiteral("image/jpeg")}}},
+                {QStringLiteral("visual"), QJsonObject{
+                    {QStringLiteral("href"), QStringLiteral("https://example.com/visual.tif")},
+                    {QStringLiteral("type"), QStringLiteral("image/tiff; application=geotiff")}}}
+            }}
+        };
+        REQUIRE(StacClient::selectCogHref(item)
+                == QStringLiteral("/vsicurl/https://example.com/visual.tif"));
+    }
+
+    SECTION(".tif href alone is enough")
+    {
+        QJsonObject item{
+            {QStringLiteral("assets"), QJsonObject{
+                {QStringLiteral("B01"), QJsonObject{
+                    {QStringLiteral("href"), QStringLiteral("https://example.com/B01.tif")}}}
+            }}
+        };
+        REQUIRE(StacClient::selectCogHref(item)
+                == QStringLiteral("/vsicurl/https://example.com/B01.tif"));
+    }
+
+    SECTION("First matching asset in key order wins")
+    {
+        QJsonObject item{
+            {QStringLiteral("assets"), QJsonObject{
+                {QStringLiteral("B02"), QJsonObject{
+                    {QStringLiteral("href"), QStringLiteral("https://example.com/B02.tif")}}},
+                {QStringLiteral("thumbnail"), QJsonObject{
+                    {QStringLiteral("href"), QStringLiteral("https://example.com/thumb.png")},
+                    {QStringLiteral("type"), QStringLiteral("image/png")}}},
+                {QStringLiteral("visual"), QJsonObject{
+                    {QStringLiteral("href"), QStringLiteral("https://example.com/visual.tif")},
+                    {QStringLiteral("type"), QStringLiteral("image/tiff")}}}
+            }}
+        };
+        REQUIRE(StacClient::selectCogHref(item)
+                == QStringLiteral("/vsicurl/https://example.com/B02.tif"));
+    }
+
+    SECTION("No suitable asset returns empty")
+    {
+        QJsonObject item{
+            {QStringLiteral("assets"), QJsonObject{
+                {QStringLiteral("thumbnail"), QJsonObject{
+                    {QStringLiteral("href"), QStringLiteral("https://example.com/thumb.jpg")},
+                    {QStringLiteral("type"), QStringLiteral("image/jpeg")}}},
+                {QStringLiteral("metadata"), QJsonObject{
+                    {QStringLiteral("href"), QStringLiteral("https://example.com/meta.json")}}}
+            }}
+        };
+        REQUIRE(StacClient::selectCogHref(item).isEmpty());
+    }
+
+    SECTION("Item without assets returns empty")
+    {
+        QJsonObject item{{QStringLiteral("id"), QStringLiteral("item2")}};
+        REQUIRE(StacClient::selectCogHref(item).isEmpty());
+    }
+
+    SECTION(".tiff extension alone does not match")
+    {
+        QJsonObject item{
+            {QStringLiteral("assets"), QJsonObject{
+                {QStringLiteral("data"), QJsonObject{
+                    {QStringLiteral("href"), QStringLiteral("https://example.com/data.tiff")}}}
+            }}
+        };
+        REQUIRE(StacClient::selectCogHref(item).isEmpty());
+    }
+
+    SECTION("Invalid href is rejected before prefixing")
+    {
+        QJsonObject item{
+            {QStringLiteral("assets"), QJsonObject{
+                {QStringLiteral("data"), QJsonObject{
+                    {QStringLiteral("href"), QStringLiteral("file:///etc/passwd.tif")}}}
+            }}
+        };
+        REQUIRE(StacClient::selectCogHref(item).isEmpty());
     }
 }

@@ -89,11 +89,6 @@ namespace
 #include "qgstaskmanager.h"
 #include "rs_georef_task_list.h"
 #include "rs_warp_task.h"
-#include "shell/job_engine_qt_bridge.h"
-#include "jobs/job_engine.h"
-#include "jobs/job_types.h"
-#include "operators/framework/rs_operator_context.h"
-#include "operators/framework/rs_operator_error.h"
 
 namespace
 {

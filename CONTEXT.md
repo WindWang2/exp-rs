@@ -238,15 +238,163 @@ _Avoid_: Workspace state map, Context dict, UI state dump
   5. **Shared Json↔Variant Converters**: MCP's private `jsonValueToVariant` / `variantToJsonValue` / `jsonObjectToVariantMap` move into the shared converter header (`src/processing/framework/json_params_converter.h`) next to `jsonParamsToVariantMap`; the duplicated `envFlagEnabled` moves to a shared `env_flag.h` used by both MCP and the STAC client.
   6. **Interface as Test Surface**: Headless tests fabricate `AlgorithmTaskInfo` in all six states, drive a registered no-op operator through execute → status → cancel via the real TaskCenter, and assert cancel truthfulness for terminal tasks; the pre-existing six MCP sections pass unchanged.
 
-### ADR 0023: Python Plugin Host Extraction & Headless CLI Plugin Loading Architecture
-- **Context**: `py:` algorithms were unreachable from every headless surface: `PluginManager`/`PythonPluginAdapter` lived in the app shell, no headless entry point owned a `DataManager`, JobEngine had no `py:` prefix executor, and the only `py:` execution face (`PythonAlgorithmAdapter::execute` → `sendRequestAndAwait`) assumes the main thread while CLI pipeline tasks run on JobEngine worker threads with a wait loop that never pumps Qt events. Spec: `docs/superpowers/specs/2026-08-01-cli-python-plugin-host-spec.md`.
+### ADR 0029: Collapse WorkflowRunner Pass-Through into WorkflowRuntime
+- **Context**: `WorkflowRunner` was a shallow static pass-through class (`workflow_runner.h` / `workflow_runner.cpp`) containing a single static method `run()`. Its sole caller in the entire codebase was `WorkflowRuntime::runStep`.
 - **Decision**:
-  1. **Single Hosting Core**: Extract the Python hosting machinery (worker pool, proxy/bridge wiring, `classFactory` lifecycle, `py:` algorithm registration) from `PluginManager` into the GUI-free **Python Plugin Host**. `PluginManager` keeps C++ plugins, directory scanning, and menu/window wiring, and composes the host — one implementation, no parallel headless copy.
-  2. **Full Lifecycle, Degraded UI**: Headless loading runs the complete plugin lifecycle (`metadata.txt`, `classFactory(iface)`, algorithm registration); UI-dependent plugin calls degrade through the Headless Asset Seam's existing status codes (`ui_unavailable`, `no_canvas`, `no_active_layer`).
-  3. **Headless DataManager Ownership**: The CLI creates and owns a `DataManager`, injects it into the host's bridge wiring, and registers completed pipeline task outputs as `TaskTemporary` Data Assets via `DataManager::registerSource` + `attachDerivationRecord`, so plugin catalog calls see real state. `OutputCommitter` is deliberately not used: its atomic temp→stable rename and `DeletableSource` ownership fit TaskCenter-owned temp files, not user-declared final output paths.
-  4. **Main-Thread Marshaling**: A `py:` JobEngine prefix executor marshals `AlgorithmEngine::executeAlgorithm` to the main thread (`Qt::BlockingQueuedConnection`, direct call when already there); the CLI pipeline wait loop interleaves `processEvents()`. `PythonIpcServer` and ticket 02's verified await mechanism stay untouched.
-  5. **Explicit Plugin Declaration**: The CLI loads only plugins named by repeatable `--python-plugin` options and aborts before the pipeline starts if any declared plugin fails to load; the host itself holds no loading policy, so the desktop (scan-all) and MCP (config) plug in their own.
+  1. **Delete `WorkflowRunner`**: Delete `workflow_runner.h` and `workflow_runner.cpp` completely and remove from `CMakeLists.txt`.
+  2. **Deepen `WorkflowRuntime`**: Inline operator creation, `RSOperatorContext` stack setup, and `RSOperatorError` $\rightarrow$ `std::runtime_error` exception translation directly inside `WorkflowRuntime::runStep`.
 
+### ADR 0030: Absorb WorkflowRegistry into WorkflowRuntime
+- **Context**: `WorkflowRegistry` was a shallow in-memory container wrapper. Callers (`RsGeoreferencingSession`, `WorkflowSessionController`, `RsClassifyWorkflowBridge`, unit tests) were forced to manage dual-object boilerplate (`WorkflowRegistry` + `WorkflowRuntime`).
+- **Decision**:
+  1. **Delete `WorkflowRegistry`**: Delete `workflow_registry.h` and `workflow_registry.cpp` completely and remove from `CMakeLists.txt`.
+  2. **Deepen `WorkflowRuntime`**: Add `registerDefinition`, `findDefinition`, `hasDefinition`, and `registeredDefinitionIds` directly to `WorkflowRuntime`. Auto-register built-in workflows on initialization.
+  3. **Caller Simplification**: All caller subsystems and test suites instantiate `WorkflowRuntime` directly as a single deep module.
 
+### ADR 0031: Integrate PlaceholderGrammar into WorkflowSession
+- **Context**: `PlaceholderGrammar` existed as a pure parsing helper module. Parameter values recorded in `WorkflowSession` often contained upstream artifact references such as `$step1.output` or `${step1.portName}`, forcing external callers to manually invoke `substitutePlaceholders`.
+- **Decision**:
+  1. **Add `resolveParams(stepId)`**: `paramsFor(stepId)` returns raw recorded parameter JSON (for UI form editing), while `resolveParams(stepId)` returns parameter JSON with all placeholders dynamically substituted.
+  2. **Artifact Lookup Locality**: Resolves placeholders against `m_artifacts` (via `artifactOnSuccess`, `stepId.portName`, or `portName`).
+  3. **`WorkflowRuntime` Deepening**: `WorkflowRuntime::runStep` calls `s->resolveParams(stepId)` to pass fully resolved parameter maps directly to operators.
 
+### ADR 0032: Stateful LlmConfigManager Facade Architecture
+- **Context**: `LlmConfigManager` was a shallow static `QSettings` utility. UI widgets and clients had to re-query `QSettings` or manually synchronize when active LLM provider profiles changed.
+- **Decision**:
+  1. **Stateful `QObject` Singleton**: Converted `LlmConfigManager` to a `QObject` singleton (`LlmConfigManager::instance()`) with in-memory profile caching.
+  2. **Reactive Signals**: Added `activeProfileChanged` and `profilesChanged` signals. `AgentCopilotDockWidget` connects to them to auto-update model selection UI reactively.
+  3. **Zero-Breakage Backwards Compatibility**: Retained static methods (`activeProfile()`, `setActiveProfile()`, etc.) as forwarding wrappers delegating to `LlmConfigManager::instance()`.
 
+### ADR 0033: Deepen RsClassifyWorkflowBridge Signal Synchronization
+- **Context**: `RsClassifyWorkflowBridge` was a thin helper requiring `QgsClassificationMainWindow` to manually invoke step transitions and completion sync methods across UI slots.
+- **Decision**:
+  1. **`QObject` Bridge Deepening**: `RsClassifyWorkflowBridge` inherits from `QObject` and provides `bindController(RsClassifyWorkflowController *controller)`.
+  2. **Automated Signal Binding**: Opens the `"lab.classify.supervised"` workflow session automatically and connects to `currentStepChanged` and `completionChanged` controller signals.
+  3. **Caller Simplification**: `QgsClassificationMainWindow` initializes the bridge via `bindController`, eliminating manual step-sync boilerplate.
+
+### ADR 0034: Consolidate Georeferencing Session Warp Execution
+- **Context**: `RsGeoreferencingSession` used an abstract interface `RsGeorefWarpExecutor` with `RsGeorefTaskCenterExecutor` being its only production implementation.
+- **Decision**:
+  1. **Direct TaskCenter Integration**: Warp tasks submit directly to `TaskCenter::instance()` by default.
+  2. **Deleted Shallow Seam**: Deleted `rs_georef_task_center_executor.h`/`.cpp` and removed `RsGeorefWarpExecutor`.
+  3. **Test Injection**: Added `CustomWarpExecutor` struct (`submit`, `cancel`) for headless Catch2 mock injection.
+
+### ADR 0035: Collapse PythonAppInterfaceProxy into AppInterfaceBridge
+- **Context**: `PythonAppInterfaceProxy` was a shallow middleman class wrapping `AppInterfaceBridge` to handle `ui.add_plugin_menu` IPC action creation.
+- **Decision**:
+  1. **Absorb Proxy Seam**: Deepened `AppInterfaceBridge` to accept an optional `QMenu *parentMenu`, handle `ui.add_plugin_menu`, and bind `PythonIpcServer`.
+  2. **Direct Ownership**: `PythonPluginAdapter` owns `AppInterfaceBridge` directly (`m_bridge`).
+  3. **Deleted Shallow Class**: Deleted `python_app_interface_proxy.h`/`.cpp` and removed them from build manifests.
+
+### ADR 0036: Deepen ActiveViewHost Canvas Viewport Seams
+- **Context**: `ActiveViewHost` exposed read-only viewport queries (`mapCanvasExtent()`, `mapCanvasScale()`), but callers were forced to dereference `activeViewHost->mapCanvas()` directly for viewport mutations.
+- **Decision**:
+  1. **Encapsulate Viewport Seam**: Deepened `ActiveViewHost` with `setExtent`, `setCenter`, `zoomToFullExtent`, and `refreshCanvas` methods.
+  2. **Headless Degradation**: Ensured all viewport mutation methods degrade gracefully as no-ops when running headlessly without a map canvas.
+
+### ADR 0037: Consolidate WorkflowSessionController Execution & Task Center Signals
+- **Context**: `WorkflowSessionController` managed asynchronous single-operator and pipeline execution state with internal fields (`m_pendingTaskId`, `m_activePipelineId`, `m_runInFlight`) unexposed to shell and lab window callers.
+- **Decision**:
+  1. **Encapsulate Execution Queries**: Exposed `isRunInFlight()`, `activeSessionId()`, `activeStepId()`, `activePipelineId()`, and `pendingTaskId()` getters.
+  2. **Unified Cancellation**: Added `cancelActiveRun()`, consolidating single-task and pipeline cancellation in one primary method and aliasing `stopWorkflow()` to it.
+
+### ADR 0038: Consolidate RsClassifyWorkflowBridge Artifact Sync
+- **Context**: `RsClassifyWorkflowBridge` required UI callers to manually invoke artifact setters whenever raster paths changed on `RsClassifyWorkflowController`.
+- **Decision**:
+  1. **Automated Completion Sync**: `syncCompletionsFromController` automatically syncs step completion state across `RsClassifyStep::Count`.
+  2. **Backward-Compatible Setters**: Retained `setSourceRasterArtifact` and `setClassifiedOutputArtifact` for explicit manual overrides.
+
+### ADR 0039: Deepen RsObiaMainWindow Task Execution & Cancellation Seams
+- **Context**: `RsObiaMainWindow` managed OBIA background tasks via private `m_pendingTaskId` and `PendingOp` fields without exposing execution state queries or task cancellation to window callers or test suites.
+- **Decision**:
+  1. **Public Execution State**: Made `enum class PendingOp` public and exposed `pendingOp()` getter along with public `isBusy()`.
+  2. **Unified Cancellation Seam**: Implemented `cancelActiveTask()` to cancel background operations via `TaskCenter::instance().cancelTask()` and reset pending UI state cleanly.
+
+### ADR 0040: Deepen QgisDisplayManager Layer Tree & Visibility Seams
+- **Context**: `QgisDisplayManager` managed presentation instances and Data Asset leases, but callers adjusting layer visibility or tree Z-ordering had to access QGIS `QgsLayerTree` nodes directly outside manager seams.
+- **Decision**:
+  1. **Visibility Seam**: Exposed `setLayerVisible(DisplayLayerId, bool)` and `isLayerVisible(DisplayLayerId) const` on `QgisDisplayManager`.
+  2. **Tree Ordering Seams**: Exposed `moveLayerTop(DisplayLayerId)` and `moveLayerBottom(DisplayLayerId)` to manage layer node positions in the associated `QgsLayerTree`.
+
+### ADR 0041: Encapsulate Raster Stretch Resolution in DisplayStretchPipeline
+- **Context**: Display stretch resolution and application logic was exposed via free functions (`validate`, `resolve`, `apply`) in `display_stretch.h`.
+- **Decision**:
+  1. **Pipeline Class**: Encapsulated stretch validation, resolution, and target application into a `DisplayStretchPipeline` deep module class.
+  2. **Backward-Compatible Free Functions**: Maintained inline free function wrappers forwarding to `DisplayStretchPipeline` for existing callers.
+
+### ADR 0042: Deepen AuthResolver Credential Cache Seams
+- **Context**: `AuthResolver` was a single-method interface (`applyAuthConfig`). Callers needing to check config existence or enumerate available configs had to reach into `QgsAuthManager` directly, bypassing the injectable seam.
+- **Decision**:
+  1. **Query Seam**: Added `hasAuthConfig(authConfigId)` pure-virtual to `AuthResolver` for config existence checks.
+  2. **Enumeration Seam**: Added `knownAuthConfigIds()` pure-virtual returning opaque ids (never credential material).
+  3. **Credential Discipline Preserved**: Neither new method exposes passwords or secrets.
+
+### ADR 0043: Route SicnuPythonApi Through ActiveViewHost
+- **Context**: `SicnuPythonApi` had inconsistent seam discipline — 7 methods reached directly into `QgsMapCanvas*` and `QgsProject::instance()` while `addRasterLayer`/`addVectorLayer` correctly used `ActiveViewHost`.
+- **Decision**:
+  1. **Removed `m_canvas` and `initialize(QgsMapCanvas*)`**: All canvas access now routes through `m_activeViewHost`.
+  2. **Added `ActiveViewHost::setScale(double)`**: Complements existing viewport methods (ADR 0036).
+
+### ADR 0044: Consolidate Plugin Load Context
+- **Context**: `PluginHost::loadPythonPlugin` manually unpacked 3 raw pointers from `SicnuAppInterface` and threaded them through `PythonPluginHost::loadPlugin` and `PythonPluginAdapter`.
+- **Decision**:
+  1. **`PluginLoadContext` struct**: Consolidated `DataManager*`, `QMenu*`, `ActiveViewHost*` into a single context object.
+  2. **Backward-Compatible Overloads**: Inline delegating constructors/methods accept the old 3-pointer signature.
+
+### ADR 0045: Add PythonWorkerProcessPool Health Snapshot
+- **Context**: `PythonWorkerProcessPool` exposed `activeWorkerCount()` and `availableWorkerCount()` as separate queries with no crash history visibility.
+- **Decision**:
+  1. **`PoolHealthSnapshot` struct**: Composite query with `total`, `active`, `available`, `totalRestarts`, and `isHealthy()` predicate.
+  2. **`poolHealth() const`**: Single deep-module query traversing the node list once.
+
+### ADR 0046: Delete AgentContextResolver Pass-Through Shim
+- **Context**: `AgentContextResolver` had collapsed into a pass-through — `buildContextSnapshot` forwarded one line to `WorkspaceSnapshot::capture().toJson()` while the JSON overload of `formatSystemContextPrompt` hand-duplicated `toSystemPromptHeader()`; the sole production caller used the JSON round-trip branch.
+- **Decision**:
+  1. **Delete `AgentContextResolver`**: removed the class, its unit test, and its CMake registrations.
+  2. **Call the seam directly**: `AgentCopilotDockWidget::sendPrompt` now invokes `WorkspaceSnapshot::capture( m_dataManager, m_viewHost ).toSystemPromptHeader()`.
+  3. **Delete `WorkspaceSnapshot::toJson()`**: no consumers remain; prompt-content coverage moved to `toSystemPromptHeader()` tests.
+
+### ADR 0047: Add Asynchronous Plan Execution to AgentWorkflowExecutor
+- **Context**: `AgentWorkflowExecutor::executeAgentPlan` was blocking-only (polling `waitForPipeline` up to 60 min), so `AgentCopilotDockWidget` spawned a detached `std::thread` reading UI-owned members — a lifetime/thread-safety hazard owned by a UI class.
+- **Decision**:
+  1. **Make `AgentWorkflowExecutor` a `QObject`**: the `TaskCenter::taskUpdated` watcher connection auto-disconnects on destruction.
+  2. **Add `executeAgentPlanAsync(planJson, callback, context)`**: returns the pipelineId immediately; invokes the callback exactly once at pipeline terminal state, marshaled onto `context`'s thread via `QMetaObject::invokeMethod`.
+  3. **Extract shared parse/normalize and planResult assembly helpers**: one owner of the result shape for both paths; sync output stays byte-identical.
+  4. **Remove the dock's detached thread and dead signals**: plan execution runs through the async API; `planApprovalRequested` / `toolExecutionFinished` deleted (zero connections anywhere).
+
+### ADR 0048: Consolidate Tool-Call Envelope Argument Extraction
+- **Context**: `AgentCopilotDockWidget::planArgumentsFor` re-implemented in QJson-land the envelope-shape parsing `ToolCallDispatcher::parseEnvelope` already owned; the same QJson→`Json::Value` conversion appeared at eight call sites with no shared helper.
+- **Decision**:
+  1. **`ToolCallDispatcher::argumentsFor(envelope)`**: public static delegating to `parseEnvelope` — one owner of envelope shape for `classify`/`submit`/`rejectionReason` and the plan path.
+  2. **`jsonValueFromQJson(const QJsonValue&)`** in `json_params_converter.h`: shared recursive QJson→`Json::Value` converter; migrated the agent dock, plan-preview handler, and canvas-sync test to it.
+  3. **Delete `planArgumentsFor`**: the plan approval card takes dispatcher-extracted arguments; the dock's run-button and completion paths read `Json::Value` directly instead of round-tripping through `QJsonDocument`.
+
+### ADR 0049: Make LlmStreamingClient a True Pure Transport
+- **Context**: `sendChatCompletion(messages, enableTools)` reached into `AtomicAlgorithmRegistry` to inject tool schemas — the caller could not choose which tools went on the wire; request assembly was inline with no test seam; the body honored `m_profile.stream` while the SSE parser only reads `data:` lines, so `stream=false` responses were silently dropped.
+- **Decision**:
+  1. **`sendChatCompletion(messages, tools = {})`**: caller-supplied tools; the Copilot dock now performs the registry lookup and converts via `json_params_converter.h` helpers.
+  2. **`buildChatRequest(profile, messages, tools)`**: pure static returning the `QNetworkRequest` + JSON body pair; `sendChatCompletion` is build → post → SSE-parse.
+  3. **Always send `"stream": true`**: the transport is SSE-only; `LlmProviderProfile.stream` stays for persistence/UI but no longer shapes the wire.
+  4. **Remove the dead `agent_tool_call_exporter.h` include**.
+
+### ADR 0050: Relocate StacClient to src/app/ and Absorb COG Asset Selection
+- **Context**: `StacClient` (src/agent/stac_client.{h,cpp}) was compiled into the app library while living in src/agent/ (absent from its CMakeLists) — an orphan whose sole consumer, `StacBrowserDialog`, also owned COG asset sniffing and `/vsicurl/` prefixing.
+- **Decision**:
+  1. **Move `StacClient` to `src/app/stac_client.{h,cpp}`**: app and test CMake paths and the dialog include updated; class name and API unchanged.
+  2. **`StacClient::selectCogHref(const QJsonObject&)`**: static helper selecting the COG asset (`.tif` href or `image/tiff` type, first in asset-key order), validating via `validateAssetHref`, prefixing `/vsicurl/`; empty when unusable. The dialog calls the one-liner.
+
+### ADR 0051: TaskCenter Owns the JobEngine Listener
+- **Context**: `TaskCenter::watchSubmittedJob` spawned a detached polling `std::thread` per job, re-implementing forwarding JobEngine's listener already provides — a watcher alive at process exit caused the flaky ctest #23 SEGFAULT. Dead `JobEngineQtBridge` held the single listener slot; `JobEngine::cancel` invoked CancelHooks while holding `m_mutex` (re-entrancy deadlock).
+- **Decision**:
+  1. **TaskCenter installs one JobEngine listener** (`onJobRecord`) replacing `watchSubmittedJob`; watcher threads deleted; dedup/delta logic ported with identical observable behavior; listener re-installed on every submit (self-healing after test-side resets); post-submit snapshot catch-up covers fast-finishing jobs; terminal `mark*` methods are terminal-idempotent; the destructor joins engine workers (`shutdown()`) so an in-flight job cannot notify destroyed state.
+  2. **Delete `JobEngineQtBridge`** (files, app/test CMake entries, `main_window_docks.cpp` instantiation, stale includes/comments).
+  3. **`JobEngine::cancel` invokes the CancelHook after releasing `m_mutex`**, mirroring `notify()`; cancels landing in the worker's pick-vs-arm window arm a pre-set flag the worker adopts.
+- **Consequences**: process-exit SEGFAULT race eliminated; single forwarding path; cancel hooks deadlock-free by contract; Running cancels cannot miss the flag window; tests installing their own listener must respect the single slot (ADR 0052 will add job-record pruning).
+
+### ADR 0052: JobEngine Record Retention Policy (Prune Completed Jobs)
+- **Context**: `JobEngine` retained every `JobRecord` (full `logLines` + `result` JSON) for the process lifetime — unbounded growth in production; `TaskCenter::clearCompletedTasks` cleared only its own task map and did not propagate to the engine.
+- **Decision**:
+  1. **`JobEngine::pruneCompleted(maxKeep)`**: evicts the oldest terminal records beyond `maxKeep` ("oldest" = `finishedAtMs`, then `createdAtMs`, then `id`); queued/running records never touched; returns count removed; `clearCompleted()` is `pruneCompleted(0)`.
+  2. **`JobEngine::removeCompleted(jobIds)`**: exact-set terminal-record eviction so TaskCenter prunes only the cleared tasks' records, leaving untracked engine jobs (direct submissions) intact.
+  3. **`TaskCenter::clearCompletedTasks` propagates**: after clearing its own map it drops the cleared tasks' listener-dispatch/dedup state and removes exactly their engine records; straggler terminal records for pruned jobs no-op as unknown jobIds.
+- **Consequences**: bounded engine retention with `list()` as the inspection seam; terminal notifies never lost (pruning happens after the terminal state is set under `m_mutex`, listener receives a copy); "cleared" now means gone from both layers.

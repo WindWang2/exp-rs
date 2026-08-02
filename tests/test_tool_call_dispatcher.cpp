@@ -229,6 +229,81 @@ TEST_CASE( "ToolCallDispatcher classifies all historical envelope shapes", "[pro
   }
 }
 
+TEST_CASE( "ToolCallDispatcher argumentsFor extracts arguments across historical envelope shapes", "[processing][tool_call_dispatcher][arguments]" )
+{
+  SECTION( "shape {name, arguments} with object arguments" )
+  {
+    Json::Value args( Json::objectValue );
+    args["input"] = "/data/a.tif";
+    args["index"] = "NDVI";
+    const Json::Value extracted = ToolCallDispatcher::argumentsFor( objectEnvelope( "rs_spectral_index", "arguments", args ) );
+    REQUIRE( extracted.isObject() );
+    REQUIRE( extracted["input"].asString() == "/data/a.tif" );
+    REQUIRE( extracted["index"].asString() == "NDVI" );
+    REQUIRE( extracted.size() == 2 );
+  }
+
+  SECTION( "shape {function:{name, arguments}} with arguments as object" )
+  {
+    Json::Value envelope( Json::objectValue );
+    Json::Value func( Json::objectValue );
+    func["name"] = "rs_spectral_index";
+    Json::Value args( Json::objectValue );
+    args["input"] = "/data/b.tif";
+    func["arguments"] = args;
+    envelope["function"] = func;
+    const Json::Value extracted = ToolCallDispatcher::argumentsFor( envelope );
+    REQUIRE( extracted.isObject() );
+    REQUIRE( extracted["input"].asString() == "/data/b.tif" );
+    REQUIRE( extracted.size() == 1 );
+  }
+
+  SECTION( "shape {function:{name, arguments}} with arguments as JSON string" )
+  {
+    Json::Value envelope( Json::objectValue );
+    Json::Value func( Json::objectValue );
+    func["name"] = "rs_spectral_index";
+    func["arguments"] = R"({"input":"/data/c.tif","index":"NDVI","count":3})";
+    envelope["function"] = func;
+    const Json::Value extracted = ToolCallDispatcher::argumentsFor( envelope );
+    REQUIRE( extracted.isObject() );
+    REQUIRE( extracted["input"].asString() == "/data/c.tif" );
+    REQUIRE( extracted["index"].asString() == "NDVI" );
+    REQUIRE( extracted["count"].asInt64() == 3 );
+    REQUIRE( extracted.size() == 3 );
+  }
+
+  SECTION( "shapes {name, parameters} and {name, params} extract the same way" )
+  {
+    Json::Value params( Json::objectValue );
+    params["input"] = "/data/p.tif";
+    const Json::Value viaParameters = ToolCallDispatcher::argumentsFor( objectEnvelope( "rs_spectral_index", "parameters", params ) );
+    REQUIRE( viaParameters.isObject() );
+    REQUIRE( viaParameters["input"].asString() == "/data/p.tif" );
+    REQUIRE( viaParameters.size() == 1 );
+
+    const Json::Value viaParams = ToolCallDispatcher::argumentsFor( objectEnvelope( "rs_spectral_index", "params", params ) );
+    REQUIRE( viaParams.isObject() );
+    REQUIRE( viaParams["input"].asString() == "/data/p.tif" );
+    REQUIRE( viaParams.size() == 1 );
+  }
+
+  SECTION( "envelope without an arguments member yields an empty object" )
+  {
+    Json::Value envelope( Json::objectValue );
+    envelope["name"] = "rs_spectral_index";
+    const Json::Value extracted = ToolCallDispatcher::argumentsFor( envelope );
+    REQUIRE( extracted.isObject() );
+    REQUIRE( extracted.size() == 0 );
+  }
+
+  SECTION( "malformed envelopes yield a null value" )
+  {
+    REQUIRE( ToolCallDispatcher::argumentsFor( Json::Value( 42 ) ).isNull() );
+    REQUIRE( ToolCallDispatcher::argumentsFor( objectEnvelope( "rs_spectral_index", "arguments", "this is not json" ) ).isNull() );
+  }
+}
+
 TEST_CASE( "ToolCallDispatcher resolves ids as-is before rewriting the first underscore", "[processing][tool_call_dispatcher][normalize]" )
 {
   auto &registry = AtomicAlgorithmRegistry::instance();

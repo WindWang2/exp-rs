@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 
 #include "data/data_result.h"
 
@@ -33,6 +34,13 @@ class AuthResolver
     virtual data::Result<QString> applyAuthConfig( const QString &authConfigId,
                                                     const QString &providerKey,
                                                     const QString &uri ) const = 0;
+
+    /// Query whether a given auth config id is known to the resolver.
+    /// Returns true for empty ids (open services).
+    virtual bool hasAuthConfig( const QString &authConfigId ) const = 0;
+
+    /// Return all currently known auth config ids (never credential material).
+    virtual QStringList knownAuthConfigIds() const = 0;
 };
 
 /// The production resolver: applies the auth config through `QgsAuthManager` /
@@ -43,6 +51,8 @@ class QgisAuthResolver final : public AuthResolver
     data::Result<QString> applyAuthConfig( const QString &authConfigId,
                                             const QString &providerKey,
                                             const QString &uri ) const override;
+    bool hasAuthConfig( const QString &authConfigId ) const override;
+    QStringList knownAuthConfigIds() const override;
 };
 
 } // namespace sicnu::display

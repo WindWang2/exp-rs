@@ -121,9 +121,7 @@ bool PythonPluginHost::ensurePool( QString *errorOut )
 }
 
 PythonPluginAdapter *PythonPluginHost::loadPlugin( const QString &pluginDir,
-                                                   sicnu::data::DataManager *dataManager,
-                                                   QMenu *pluginMenu,
-                                                   ActiveViewHost *activeViewHost,
+                                                   const PluginLoadContext &context,
                                                    QString *errorOut )
 {
   const QString metadataPath = pluginDir + QStringLiteral( "/metadata.txt" );
@@ -158,7 +156,7 @@ PythonPluginAdapter *PythonPluginHost::loadPlugin( const QString &pluginDir,
   const QString version = metadata.value( QStringLiteral( "version" ), QStringLiteral( "1.0" ) );
 
   auto adapter = std::make_unique<PythonPluginAdapter>( pluginDir, packageName, name, description, version,
-                                                        dataManager, pluginMenu, activeViewHost, m_pool );
+                                                        context, m_pool );
   if ( !adapter->initialize( nullptr ) )
   {
     if ( errorOut ) *errorOut = QStringLiteral( "Python plugin initialization failed: %1" ).arg( name );

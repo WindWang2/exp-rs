@@ -12,8 +12,6 @@
 #include "active_view_host.h"
 #include "app/display/qgis_display_manager.h"
 
-#include <QJsonArray>
-#include <QJsonObject>
 #include <qgsapplication.h>
 #include <qgsmapcanvas.h>
 #include <qgsproject.h>
@@ -41,6 +39,8 @@ using sicnu::data::RegisterRequest;
 using sicnu::data::Result;
 using sicnu::data::SourceDescriptor;
 using sicnu::data::StorageKind;
+using sicnu::data::VectorLayerStructure;
+using sicnu::data::VectorStructure;
 using sicnu::data::internal::ResolvedSource;
 using sicnu::data::internal::SourceProvider;
 using sicnu::data::internal::SourceProviderRegistry;
@@ -77,6 +77,41 @@ public:
   }
 };
 
+class SnapshotVectorSourceProvider : public SourceProvider
+{
+public:
+  bool supports( const SourceDescriptor &source ) const override
+  {
+    return source.providerKey == QStringLiteral( "snapshot-vector-test" );
+  }
+
+  Result<ResolvedSource> resolve( const SourceDescriptor &source ) const override
+  {
+    VectorStructure structure;
+    structure.driverName = QStringLiteral( "GeoJSON" );
+    structure.layerCount = 2;
+
+    VectorLayerStructure layer;
+    layer.name = QStringLiteral( "boundaries" );
+    layer.featureCount = 42;
+    layer.geometryType = QStringLiteral( "Polygon" );
+    layer.crsWkt = QStringLiteral( "EPSG:4326" );
+    structure.layers.append( layer );
+
+    return Result<ResolvedSource>::success(
+      ResolvedSource{ AssetKind::Vector,
+                      AssetState::Ready,
+                      AssetCapability::Renderable | AssetCapability::QueryableFeatures |
+                        AssetCapability::Relocatable,
+                      StorageKind::Memory,
+                      source.canonicalSource.isEmpty() ? QStringLiteral( "snapshot-vector" )
+                                                       : source.canonicalSource,
+                      QString(),
+                      QString(),
+                      structure } );
+  }
+};
+
 std::unique_ptr<DataManager> makeSnapshotDataManager()
 {
   SourceProviderRegistry providers;
@@ -88,21 +123,16 @@ std::unique_ptr<DataManager> makeSnapshotDataManager()
 
 TEST_CASE( "WorkspaceSnapshot - Pure C++ Serialization & Prompt Formatting", "[agent][workspace_snapshot]" )
 {
-  SECTION( "Empty WorkspaceSnapshot produces valid empty JSON and prompt string" )
+  SECTION( "Empty WorkspaceSnapshot produces empty prompt header" )
   {
     sicnu::agent::WorkspaceSnapshot snapshot;
-    QJsonObject json = snapshot.toJson();
-
-    REQUIRE( json.contains( QStringLiteral( "assets" ) ) );
-    REQUIRE( json[QStringLiteral( "assets" )].toArray().isEmpty() );
-    REQUIRE_FALSE( json.contains( QStringLiteral( "mapView" ) ) );
 
     QString prompt = snapshot.toSystemPromptHeader();
     REQUIRE( prompt.contains( QStringLiteral( "[WORKSPACE CONTEXT]" ) ) );
     REQUIRE( prompt.contains( QStringLiteral( "Loaded Data Assets: (None)" ) ) );
   }
 
-  SECTION( "Asset with unset kind serializes as Unknown" )
+  SECTION( "Asset with unset kind renders as Unknown in prompt" )
   {
     sicnu::agent::WorkspaceSnapshot snapshot;
 
@@ -111,15 +141,11 @@ TEST_CASE( "WorkspaceSnapshot - Pure C++ Serialization & Prompt Formatting", "[a
     asset.displayName = QStringLiteral( "mystery.dat" );
     snapshot.assets.append( asset );
 
-    const QJsonObject json = snapshot.toJson();
-    const QJsonObject assetObj = json[QStringLiteral( "assets" )].toArray().at( 0 ).toObject();
-    REQUIRE( assetObj[QStringLiteral( "kind" )].toString() == QStringLiteral( "Unknown" ) );
-
     const QString prompt = snapshot.toSystemPromptHeader();
     REQUIRE( prompt.contains( QStringLiteral( "[Unknown]" ) ) );
   }
 
-  SECTION( "Populated WorkspaceSnapshot serializes raster & map view info" )
+  SECTION( "Populated WorkspaceSnapshot renders raster & map view info in prompt" )
   {
     sicnu::agent::WorkspaceSnapshot snapshot;
 
@@ -140,22 +166,11 @@ TEST_CASE( "WorkspaceSnapshot - Pure C++ Serialization & Prompt Formatting", "[a
     snapshot.mapView.scale = 50000.0;
     snapshot.mapView.activeLayerName = QStringLiteral( "landsat_sample" );
 
-    QJsonObject json = snapshot.toJson();
-    REQUIRE( json[QStringLiteral( "assets" )].toArray().size() == 1 );
-
-    QJsonObject assetObj = json[QStringLiteral( "assets" )].toArray().at( 0 ).toObject();
-    REQUIRE( assetObj[QStringLiteral( "id" )].toString() == QStringLiteral( "asset-101" ) );
-    REQUIRE( assetObj[QStringLiteral( "kind" )].toString() == QStringLiteral( "Raster" ) );
-    REQUIRE( assetObj[QStringLiteral( "width" )].toInt() == 1024 );
-    REQUIRE( assetObj[QStringLiteral( "bands" )].toInt() == 4 );
-
-    QJsonObject mapObj = json[QStringLiteral( "mapView" )].toObject();
-    REQUIRE( mapObj[QStringLiteral( "crs" )].toString() == QStringLiteral( "EPSG:32648" ) );
-    REQUIRE( mapObj[QStringLiteral( "selectedLayer" )].toString() == QStringLiteral( "landsat_sample" ) );
-
     QString prompt = snapshot.toSystemPromptHeader();
     REQUIRE( prompt.contains( QStringLiteral( "landsat_sample.tif" ) ) );
     REQUIRE( prompt.contains( QStringLiteral( "1024x768, 4 bands" ) ) );
+    REQUIRE( prompt.contains( QStringLiteral( "- CRS: EPSG:32648" ) ) );
+    REQUIRE( prompt.contains( QStringLiteral( "- Extent: 100.0,20.0,105.0,25.0" ) ) );
     REQUIRE( prompt.contains( QStringLiteral( "Selected Layer: landsat_sample" ) ) );
   }
 
@@ -190,10 +205,38 @@ TEST_CASE( "WorkspaceSnapshot::capture extracts assets from DataManager", "[agen
   CHECK( snapshot.assets.first().height == 128 );
   CHECK( snapshot.assets.first().bandCount == 3 );
   CHECK( snapshot.assets.first().id == registered.assetId.toString() );
+}
 
-  const QJsonObject json = snapshot.toJson();
-  REQUIRE( json[QStringLiteral( "assets" )].toArray().size() == 1 );
-  CHECK_FALSE( json.contains( QStringLiteral( "mapView" ) ) );
+TEST_CASE( "WorkspaceSnapshot::capture prompt includes raster and vector asset details",
+           "[agent][workspace_snapshot][capture]" )
+{
+  SourceProviderRegistry providers;
+  providers.add( std::make_unique<SnapshotTestSourceProvider>() );
+  providers.add( std::make_unique<SnapshotVectorSourceProvider>() );
+  std::unique_ptr<DataManager> manager = providers.createDataManager();
+  REQUIRE( manager );
+
+  RegisterRequest rasterReq;
+  rasterReq.source.providerKey = QStringLiteral( "snapshot-test" );
+  rasterReq.source.canonicalSource = QStringLiteral( "/tmp/landsat_sample.tif" );
+  const auto rasterRes = manager->registerSource( rasterReq );
+  REQUIRE( !rasterRes.assetId.isNull() );
+
+  RegisterRequest vectorReq;
+  vectorReq.source.providerKey = QStringLiteral( "snapshot-vector-test" );
+  vectorReq.source.canonicalSource = QStringLiteral( "/tmp/boundaries.geojson" );
+  const auto vectorRes = manager->registerSource( vectorReq );
+  REQUIRE( !vectorRes.assetId.isNull() );
+
+  const auto snapshot = sicnu::agent::WorkspaceSnapshot::capture( manager.get(), nullptr );
+  REQUIRE( snapshot.assets.size() == 2 );
+
+  const QString prompt = snapshot.toSystemPromptHeader();
+  REQUIRE( prompt.contains( QStringLiteral( "[WORKSPACE CONTEXT]" ) ) );
+  REQUIRE( prompt.contains( QStringLiteral( "/tmp/landsat_sample.tif" ) ) );
+  REQUIRE( prompt.contains( QStringLiteral( "/tmp/boundaries.geojson" ) ) );
+  REQUIRE( prompt.contains( QStringLiteral( "[Vector]" ) ) );
+  REQUIRE( prompt.contains( QStringLiteral( "2 vector layers" ) ) );
 }
 
 TEST_CASE( "WorkspaceSnapshot::capture reads map view facades from ActiveViewHost",
@@ -217,7 +260,9 @@ TEST_CASE( "WorkspaceSnapshot::capture reads map view facades from ActiveViewHos
   }
   CHECK( snapshot.mapView.scale > 0.0 );
 
-  const QJsonObject json = snapshot.toJson();
-  REQUIRE( json.contains( QStringLiteral( "mapView" ) ) );
-  CHECK( json[QStringLiteral( "mapView" )].toObject().contains( QStringLiteral( "crs" ) ) );
+  const QString prompt = snapshot.toSystemPromptHeader();
+  REQUIRE( prompt.contains( QStringLiteral( "Map View State:" ) ) );
+  CHECK( prompt.contains( QStringLiteral( "- CRS:" ) ) );
+  if ( !snapshot.mapView.extentStr.isEmpty() )
+    CHECK( prompt.contains( QStringLiteral( "- Extent:" ) ) );
 }

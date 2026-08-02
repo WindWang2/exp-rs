@@ -86,6 +86,12 @@ class ActiveViewHost : public QObject
     double mapCanvasScale() const { return m_mapCanvas ? m_mapCanvas->scale() : 1.0; }
     QString mapCanvasCrsAuthId() const { return m_mapCanvas ? m_mapCanvas->mapSettings().destinationCrs().authid() : QString(); }
 
+    void setExtent( const QgsRectangle &extent );
+    void setCenter( const QgsPointXY &center );
+    void setScale( double scale );
+    void zoomToFullExtent();
+    void refreshCanvas();
+
     // ── Layer tree (active / main QGIS tree for main view) ────────────
     void initLayerTree();
     QgsLayerTreeModel *layerTreeModel() const { return m_layerTreeModel; }

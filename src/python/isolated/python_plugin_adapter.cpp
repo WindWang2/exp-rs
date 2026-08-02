@@ -1,6 +1,6 @@
 // python_plugin_adapter.cpp — C++ adapter wrapping Python plugins for PluginManager
 #include "python_plugin_adapter.h"
-#include "python_app_interface_proxy.h"
+#include "app_interface_bridge.h"
 #include "python_worker_process_pool.h"
 
 #include "app/project_context.h"
@@ -21,18 +21,16 @@ PythonPluginAdapter::PythonPluginAdapter( const QString &pluginDir,
                                           const QString &name,
                                           const QString &description,
                                           const QString &version,
-                                          sicnu::data::DataManager *dataManager,
-                                          QMenu *pluginMenu,
-                                          ActiveViewHost *activeViewHost,
+                                          const PluginLoadContext &context,
                                           PythonWorkerProcessPool *pool )
     : m_pluginDir( pluginDir )
     , m_packageName( packageName )
     , m_name( name )
     , m_description( description )
     , m_version( version )
-    , m_dataManager( dataManager )
-    , m_pluginMenu( pluginMenu )
-    , m_activeViewHost( activeViewHost )
+    , m_dataManager( context.dataManager )
+    , m_pluginMenu( context.pluginMenu )
+    , m_activeViewHost( context.activeViewHost )
     , m_pool( pool )
 {
     const QString iconPath = QDir( pluginDir ).filePath( QStringLiteral( "icon.png" ) );
@@ -106,13 +104,10 @@ bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
         return false;
     }
 
-    // Attach UI RPC Proxy Facade (headless asset seam: DataManager is the
+    // Attach AppInterfaceBridge (headless asset seam: DataManager is the
     // asset authority; menu and view host remain optional GUI enhancements).
-    m_uiProxy = std::make_unique<PythonAppInterfaceProxy>( m_workerNode->server, m_dataManager, m_pluginMenu );
-    if ( m_activeViewHost )
-    {
-        m_uiProxy->setActiveViewHost( m_activeViewHost );
-    }
+    m_bridge = std::make_unique<AppInterfaceBridge>( m_dataManager, m_activeViewHost, m_pluginMenu );
+    m_bridge->bindIpcServer( m_workerNode->server );
 
     // Send RPC load_plugin request
     QJsonObject params;
@@ -177,9 +172,9 @@ void PythonPluginAdapter::unload()
     timer.start();
     loop.exec();
 
-    if ( m_uiProxy )
+    if ( m_bridge )
     {
-        m_uiProxy.reset();
+        m_bridge.reset();
     }
 
     if ( m_pool && m_workerNode )

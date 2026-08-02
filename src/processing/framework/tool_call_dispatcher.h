@@ -62,6 +62,14 @@ public:
   /// matches what submit() reports via errorOut.
   QString rejectionReason( const Json::Value &envelope ) const;
 
+  /// Extracts the arguments object from an envelope in any historical shape
+  /// ({name, arguments} / {name, parameters} / {name, params}, or
+  /// {function:{name, arguments}} with arguments as object or JSON string).
+  /// Returns an empty object when the envelope has no arguments member and a
+  /// null value when the envelope is malformed. Shares parseEnvelope with
+  /// classify()/submit() so envelope-shape knowledge has a single owner.
+  static Json::Value argumentsFor( const Json::Value &envelope );
+
   /// Parses the envelope (all historical shapes), normalizes the id, validates
   /// the descriptor's required inputs, submits the typed parameters via the
   /// sink and registers completion via the watcher. Never blocks the calling

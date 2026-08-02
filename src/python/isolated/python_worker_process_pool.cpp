@@ -108,6 +108,26 @@ int PythonWorkerProcessPool::availableWorkerCount() const
   return count;
 }
 
+PoolHealthSnapshot PythonWorkerProcessPool::poolHealth() const
+{
+  PoolHealthSnapshot snapshot;
+  snapshot.total = m_nodes.size();
+  for ( const WorkerNode *node : m_nodes )
+  {
+    if ( node )
+    {
+      snapshot.totalRestarts += node->restartCount;
+      if ( node->worker && node->worker->isRunning() )
+      {
+        snapshot.active++;
+        if ( !node->isBusy )
+          snapshot.available++;
+      }
+    }
+  }
+  return snapshot;
+}
+
 WorkerNode *PythonWorkerProcessPool::createWorkerNode( int id )
 {
   auto *node = new WorkerNode();

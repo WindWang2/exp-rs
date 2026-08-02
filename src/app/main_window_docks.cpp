@@ -7,8 +7,8 @@
 #include "panels/data_manager_panel.h"
 #include "project_context.h"
 #include "data/data_manager.h"
+#include "processing/framework/json_params_converter.h"
 #include "processing/framework/task_center.h"
-#include "shell/job_engine_qt_bridge.h"
 #include "shell/processing_job_adapter.h"
 #include "shell/ribbon_controller.h"
 #include "shell/rs_job_panel.h"
@@ -262,7 +262,6 @@ void QgisDesktopWindow::setupDockWidgets()
     addDockWidget( Qt::BottomDockWidgetArea, m_jobPanel );
     tabifyDockWidget( m_logDock, m_jobPanel );
     m_jobPanel->hide();
-    JobEngineQtBridge::instance(); // keep Qt bridge for internal JobEngine events
     ProcessingJobAdapter::registerProcessingJobExecutor();
 
     // Guided Workflow Panel (Right, tabified with processing)
@@ -527,12 +526,10 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
                      m_pipelineDock->show();
                      m_pipelineDock->raise();
 
-                     Json::Value cppPlan;
-                     std::string jsonStr = QJsonDocument( planJson ).toJson( QJsonDocument::Compact ).toStdString();
-                     Json::CharReaderBuilder builder;
-                     std::string errs;
-                     std::istringstream sstream( jsonStr );
-                     Json::parseFromStream( builder, sstream, &cppPlan, &errs );
+                     // Convert once through the shared QJson→Json::Value
+                     // helper (ADR 0048) before applying plan id/title
+                     // defaults.
+                     Json::Value cppPlan = sicnu::processing::jsonValueFromQJson( planJson );
 
                      if ( !cppPlan.isMember( "id" ) )
                          cppPlan["id"] = "agent_plan";

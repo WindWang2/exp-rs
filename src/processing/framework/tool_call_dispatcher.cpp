@@ -143,6 +143,11 @@ ToolCallDispatcher::ParsedEnvelope ToolCallDispatcher::parseEnvelope( const Json
   return parsed;
 }
 
+Json::Value ToolCallDispatcher::argumentsFor( const Json::Value &envelope )
+{
+  return parseEnvelope( envelope ).arguments;
+}
+
 std::string ToolCallDispatcher::resolveAlgorithmId( const std::string &rawName )
 {
   auto &registry = AtomicAlgorithmRegistry::instance();

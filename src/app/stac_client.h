@@ -5,6 +5,7 @@
 #include <QVariantMap>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QJsonObject>
 #include <QString>
 #include <QUrl>
 
@@ -33,6 +34,16 @@ public:
      * Allows only http/https schemes (https preferred).
      */
     static QString validateAssetHref(const QString &href);
+
+    /**
+     * \brief Return the /vsicurl/ URL of the item's COG asset, or empty.
+     *
+     * Selects the first asset (in asset-key order) whose href ends with
+     * ".tif" or whose type is image/tiff, validates the href with
+     * validateAssetHref, and prefixes /vsicurl/. Returns empty when the
+     * item has no usable COG asset.
+     */
+    static QString selectCogHref(const QJsonObject &stacItemFeature);
 
     void search(const QString &endpoint, const QString &collection,
                 const QString &datetime, const QStringList &bbox);

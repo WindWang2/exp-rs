@@ -63,5 +63,18 @@ data::Result<QString> QgisAuthResolver::applyAuthConfig( const QString &authConf
   return data::Result<QString>::success( withAuthConfigParameter( uri, authConfigId ) );
 }
 
+bool QgisAuthResolver::hasAuthConfig( const QString &authConfigId ) const
+{
+  return authConfigExists( authConfigId );
+}
+
+QStringList QgisAuthResolver::knownAuthConfigIds() const
+{
+  const QgsAuthManager *manager = QgsApplication::authManager();
+  if ( manager == nullptr )
+    return {};
+  return manager->configIds();
+}
+
 } // namespace sicnu::display
 

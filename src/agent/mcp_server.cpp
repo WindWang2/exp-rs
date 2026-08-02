@@ -296,11 +296,17 @@ void StdinReader::run()
 McpServer::McpServer(QObject *parent)
     : QObject(parent)
     , mDispatcher(
-          // rs: operator calls are typed Task Center submissions. autoLoad=false:
+          // Tool calls are typed Task Center submissions. autoLoad=false:
           // MCP has no canvas — results travel via get_execution_status.
           [](const QString &algorithmId, const QVariantMap &params) -> long {
+              QString effectiveAlgId = algorithmId;
+              if (!effectiveAlgId.startsWith(QStringLiteral("processing:")) &&
+                  !effectiveAlgId.startsWith(QStringLiteral("rs:")))
+              {
+                  effectiveAlgId = QString::fromStdString(ProcessingJobAdapter::processingAlgorithmId(algorithmId));
+              }
               return sicnu::TaskCenter::instance().enqueueTask(
-                  algorithmId, params, /*autoLoad=*/false, sicnu::TaskPriority::Normal,
+                  effectiveAlgId, params, /*autoLoad=*/false, sicnu::TaskPriority::Normal,
                   QList<long>(), /*autoDispatch=*/true);
           },
           // MCP never uses completion callbacks; status is polled via
@@ -565,53 +571,27 @@ QVariantMap McpServer::handleGetOperatorSchema(const QString &operatorId)
     return result;
 }
 
-bool McpServer::isAlgorithmIdAllowed(const QString &algorithmId, QString *reason)
+bool McpServer::isToolIdAllowed(const QString &toolId, QString *reason)
 {
     bool isCustom = false;
-    if (idHasAllowedPrefix(algorithmId, &isCustom))
+    if (idHasAllowedPrefix(toolId, &isCustom))
         return true;
 
-    if (isCustom || algorithmId.startsWith(QStringLiteral("custom_tools:"))) {
+    if (isCustom || toolId.startsWith(QStringLiteral("custom_tools:"))) {
         if (envFlagEnabled("SICNU_MCP_TRUST_CUSTOM_TOOLS"))
             return true;
         if (reason) {
             *reason = QStringLiteral(
-                "Algorithm id '%1' is blocked by default (custom_tools). "
-                "Set SICNU_MCP_TRUST_CUSTOM_TOOLS=1 to allow.").arg(algorithmId);
+                "Tool id '%1' is blocked by default (custom_tools). "
+                "Set SICNU_MCP_TRUST_CUSTOM_TOOLS=1 to allow.").arg(toolId);
         }
         return false;
     }
 
     if (reason) {
         *reason = QStringLiteral(
-            "Algorithm id '%1' is not in the MCP allow-list "
-            "(rs:, gdal:, gdal_tools:, otb:).").arg(algorithmId);
-    }
-    return false;
-}
-
-bool McpServer::isOperatorIdAllowed(const QString &operatorId, QString *reason)
-{
-    bool isCustom = false;
-    if (idHasAllowedPrefix(operatorId, &isCustom))
-        return true;
-
-    if (isCustom || operatorId.startsWith(QStringLiteral("custom_tools:"))) {
-        if (envFlagEnabled("SICNU_MCP_TRUST_CUSTOM_TOOLS"))
-            return true;
-        if (reason) {
-            *reason = QStringLiteral(
-                "Operator id '%1' is blocked by default (custom_tools). "
-                "Set SICNU_MCP_TRUST_CUSTOM_TOOLS=1 to allow.").arg(operatorId);
-        }
-        return false;
-    }
-
-    // Operators also use opencv: which is already in allowed prefixes.
-    if (reason) {
-        *reason = QStringLiteral(
-            "Operator id '%1' is not in the MCP allow-list "
-            "(rs:, gdal:, gdal_tools:, otb:, opencv:).").arg(operatorId);
+            "Tool id '%1' is not in the MCP allow-list "
+            "(rs:, gdal:, gdal_tools:, otb:, qgis:, qgis_algorithms:, opencv:).").arg(toolId);
     }
     return false;
 }
@@ -649,12 +629,12 @@ QString McpServer::toExecutionId(long taskId)
     return QStringLiteral("task-%1").arg(taskId);
 }
 
-QVariantMap McpServer::handleExecuteOperator(const QString &operatorId, const QVariantMap &parameters)
+QVariantMap McpServer::dispatchToolCall(const QString &toolId, const QVariantMap &parameters, bool isOperatorCall)
 {
-    SICNU_LOG_INFO(SicnuLogTags::MCP, QString("Executing operator: %1").arg(operatorId));
+    SICNU_LOG_INFO(SicnuLogTags::MCP, QString("Executing tool: %1").arg(toolId));
 
     QString denyReason;
-    if (!isOperatorIdAllowed(operatorId, &denyReason)) {
+    if (!isToolIdAllowed(toolId, &denyReason)) {
         SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
         throw std::runtime_error(denyReason.toStdString());
     }
@@ -663,20 +643,19 @@ QVariantMap McpServer::handleExecuteOperator(const QString &operatorId, const QV
         throw std::runtime_error(denyReason.toStdString());
     }
 
-    // rs: operator calls enter the Task Center through the ToolCallDispatcher,
-    // which re-parses the envelope, normalizes the id, and validates required
-    // descriptor inputs before the sink (ADR 0022). MCP never blocks on
-    // completion — results travel via get_execution_status.
+    // Tool calls enter the Task Center through the ToolCallDispatcher,
+    // which parses the envelope, normalizes the id, and validates required
+    // descriptor inputs before submission. MCP never blocks on completion.
     Json::Value envelope(Json::objectValue);
-    envelope["name"] = operatorId.toStdString();
+    envelope["name"] = toolId.toStdString();
     envelope["parameters"] = sicnu::processing::variantToJsonValue(parameters);
 
     const QString reason = mDispatcher.rejectionReason(envelope);
     if (!reason.isEmpty()) {
-        // Historical contract: an unresolvable operator reports
-        // "Operator not found: <id>" with the same text as before.
         if (reason.startsWith(QStringLiteral("Algorithm not registered:"))) {
-            const QString msg = QStringLiteral("Operator not found: ") + operatorId;
+            const QString msg = isOperatorCall
+                ? (QStringLiteral("Operator not found: ") + toolId)
+                : (QStringLiteral("Algorithm not found: ") + toolId);
             SICNU_LOG_ERROR(SicnuLogTags::MCP, msg);
             throw std::runtime_error(msg.toStdString());
         }
@@ -688,7 +667,7 @@ QVariantMap McpServer::handleExecuteOperator(const QString &operatorId, const QV
     QString submitError;
     if (!mDispatcher.submit(envelope, {}, &submitError, &taskId) || taskId <= 0) {
         const QString msg = submitError.isEmpty()
-            ? QStringLiteral("Failed to submit operator to Task Center")
+            ? QStringLiteral("Failed to submit tool execution to Task Center")
             : submitError;
         SICNU_LOG_ERROR(SicnuLogTags::MCP, msg);
         throw std::runtime_error(msg.toStdString());
@@ -697,8 +676,17 @@ QVariantMap McpServer::handleExecuteOperator(const QString &operatorId, const QV
     QVariantMap result;
     result[QStringLiteral("execution_id")] = toExecutionId(taskId);
     result[QStringLiteral("status")] = QStringLiteral("running");
-    result[QStringLiteral("operator_id")] = operatorId;
+    if (isOperatorCall) {
+        result[QStringLiteral("operator_id")] = toolId;
+    } else {
+        result[QStringLiteral("algorithm_id")] = toolId;
+    }
     return result;
+}
+
+QVariantMap McpServer::handleExecuteOperator(const QString &operatorId, const QVariantMap &parameters)
+{
+    return dispatchToolCall(operatorId, parameters, /*isOperatorCall=*/true);
 }
 
 QVariantMap McpServer::handleGetAlgorithmSchema(const QString &algorithmId)
@@ -716,63 +704,7 @@ QVariantMap McpServer::handleGetAlgorithmSchema(const QString &algorithmId)
 
 QVariantMap McpServer::handleExecuteAlgorithm(const QString &algorithmId, const QVariantMap &parameters)
 {
-    SICNU_LOG_INFO(SicnuLogTags::MCP, QString("Executing algorithm: %1").arg(algorithmId));
-
-    QString denyReason;
-    if (!isAlgorithmIdAllowed(algorithmId, &denyReason)) {
-        SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
-        throw std::runtime_error(denyReason.toStdString());
-    }
-    if (!validateWorkspacePaths(parameters, &denyReason)) {
-        SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
-        throw std::runtime_error(denyReason.toStdString());
-    }
-
-    QString lookupId = algorithmId;
-    if (lookupId.startsWith(QStringLiteral("processing:"))) {
-        lookupId = lookupId.mid(11);
-    }
-
-    bool exists = false;
-    if (QgsApplication::processingRegistry()) {
-        if (QgsApplication::processingRegistry()->algorithmById(lookupId)) {
-            exists = true;
-        }
-    }
-    if (!exists) {
-        if (sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(lookupId.toStdString())) {
-            exists = true;
-        }
-    }
-    if (!exists) {
-        if (sicnu::operators::RSOperatorRegistry::instance().create(lookupId.toStdString())) {
-            exists = true;
-        }
-    }
-
-    if (!exists) {
-        const QString msg = QStringLiteral("Algorithm not found: ") + algorithmId;
-        SICNU_LOG_ERROR(SicnuLogTags::MCP, msg);
-        throw std::runtime_error(msg.toStdString());
-    }
-
-    // Provider algorithms (gdal:/otb:/qgis:) run directly in the Task Center
-    // with autoDispatch so they progress to a terminal state (ADR 0022).
-    QString effectiveAlgId = algorithmId;
-    if (!effectiveAlgId.startsWith(QStringLiteral("processing:")) &&
-        !effectiveAlgId.startsWith(QStringLiteral("rs:")))
-    {
-        effectiveAlgId = QString::fromStdString(ProcessingJobAdapter::processingAlgorithmId(algorithmId));
-    }
-
-    const long taskId = sicnu::TaskCenter::instance().enqueueTask(
-        effectiveAlgId, parameters, /*autoLoad=*/false, sicnu::TaskPriority::Normal,
-        QList<long>(), /*autoDispatch=*/true);
-
-    QVariantMap result;
-    result[QStringLiteral("execution_id")] = toExecutionId(taskId);
-    result[QStringLiteral("status")] = QStringLiteral("running");
-    return result;
+    return dispatchToolCall(algorithmId, parameters, /*isOperatorCall=*/false);
 }
 
 QVariantMap McpServer::handleGetExecutionStatus(const QString &executionId)

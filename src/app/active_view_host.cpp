@@ -84,6 +84,48 @@ bool ActiveViewHost::setActiveViewId( sicnu::display::DisplayViewId viewId )
     return true;
 }
 
+void ActiveViewHost::setExtent( const QgsRectangle &extent )
+{
+  if ( m_mapCanvas )
+  {
+    m_mapCanvas->setExtent( extent );
+    m_mapCanvas->refresh();
+  }
+}
+
+void ActiveViewHost::setCenter( const QgsPointXY &center )
+{
+  if ( m_mapCanvas )
+  {
+    m_mapCanvas->setCenter( center );
+    m_mapCanvas->refresh();
+  }
+}
+
+void ActiveViewHost::setScale( double scale )
+{
+  if ( m_mapCanvas )
+  {
+    m_mapCanvas->zoomScale( scale );
+  }
+}
+
+void ActiveViewHost::zoomToFullExtent()
+{
+  if ( m_mapCanvas )
+  {
+    m_mapCanvas->zoomToFullExtent();
+  }
+}
+
+void ActiveViewHost::refreshCanvas()
+{
+  if ( m_mapCanvas )
+  {
+    m_mapCanvas->refresh();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Layer tree initialization
 // ---------------------------------------------------------------------------

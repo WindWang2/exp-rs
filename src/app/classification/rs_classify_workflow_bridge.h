@@ -15,18 +15,23 @@
 #pragma once
 
 #include "rs_classify_workflow_controller.h"
-#include "workflow/workflow_registry.h"
 #include "workflow/workflow_runtime.h"
 
 #include <string>
 
+#include <QObject>
+
 /// Lightweight open/sync helper for the classification main window.
-class RsClassifyWorkflowBridge
+class RsClassifyWorkflowBridge : public QObject
 {
+    Q_OBJECT
   public:
     static constexpr const char *kDefinitionId = "lab.classify.supervised";
 
-    RsClassifyWorkflowBridge();
+    explicit RsClassifyWorkflowBridge( QObject *parent = nullptr );
+
+    /// Bind a classification controller to automatically open session and sync signals.
+    void bindController( RsClassifyWorkflowController *controller );
 
     /// Register builtins (once) and open a lab.classify.supervised session.
     /// @return true if session id is non-empty.
@@ -48,11 +53,8 @@ class RsClassifyWorkflowBridge
     void setClassifiedOutputArtifact( const std::string &path );
 
     sicnu::workflow::WorkflowRuntime &runtime() { return m_runtime; }
-    const sicnu::workflow::WorkflowRegistry &registry() const { return m_registry; }
 
   private:
-    // Member order: registry must outlive runtime (runtime holds a reference).
-    sicnu::workflow::WorkflowRegistry m_registry;
     sicnu::workflow::WorkflowRuntime m_runtime;
     std::string m_sessionId;
     bool m_builtinsRegistered = false;

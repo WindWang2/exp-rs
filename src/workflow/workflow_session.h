@@ -20,6 +20,7 @@ class WorkflowSession
     bool gotoStep( const std::string &stepId );
     void setParams( const std::string &stepId, const Json::Value &params );
     Json::Value paramsFor( const std::string &stepId ) const;
+    Json::Value resolveParams( const std::string &stepId ) const;
 
     void setArtifact( const std::string &name, const std::string &value );
     bool hasArtifact( const std::string &name ) const;

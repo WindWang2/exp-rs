@@ -805,9 +805,10 @@ sicnu_discover_tests(test_processing_integration)
 # Log panel tests
 add_executable(test_log_panel test_log_panel.cpp
   ${CMAKE_SOURCE_DIR}/src/app/log_panel.cpp
+  ${CMAKE_SOURCE_DIR}/tests/test_log_panel_main.cpp
 )
 target_link_libraries(test_log_panel PRIVATE
-  Catch2::Catch2WithMain
+  Catch2::Catch2
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
@@ -1119,7 +1120,6 @@ sicnu_discover_tests(test_georef_dual_window)
 # #33 — I2I / I2M adapters share Georeferencing Session type with independence
 add_executable(test_georef_session_adapters
   test_georef_session_adapters.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
 )
 target_link_libraries(test_georef_session_adapters PRIVATE
@@ -1296,8 +1296,6 @@ sicnu_discover_tests(test_rpc_transformer)
 # Task 11.4.8 — RPC mode UI test (DEM section visibility on toggle)
 add_executable(test_georef_window_rpc_mode
   test_georef_window_rpc_mode.cpp
-  # Georef lib references JobEngineQtBridge / SicnuUi helpers from the app.
-  ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
 )
 target_link_libraries(test_georef_window_rpc_mode PRIVATE
@@ -1643,7 +1641,6 @@ sicnu_discover_tests(test_band_ratio)
 if(TARGET qgis_app_classify)
   add_executable(test_classification_task_center
     test_classification_task_center.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
@@ -1679,7 +1676,6 @@ if(TARGET qgis_app_classify)
   # tests need this list — do not add these .cpp files to qgis_app_classify.
   add_executable(test_classification_window
     test_classification_window.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
@@ -2278,7 +2274,6 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
   # Phase 10B.5 — OBIA main window UI smoke tests
   add_executable(test_obia_main_window
     test_obia_main_window.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   )
   target_link_libraries(test_obia_main_window PRIVATE
@@ -2679,7 +2674,7 @@ sicnu_discover_tests(test_guided_workflow_widget)
 # STAC Client tests
 add_executable(test_stac_client
   test_stac_client.cpp
-  ${CMAKE_SOURCE_DIR}/src/agent/stac_client.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/stac_client.cpp
 )
 target_link_libraries(test_stac_client PRIVATE
   Catch2::Catch2WithMain
@@ -2688,9 +2683,10 @@ target_link_libraries(test_stac_client PRIVATE
 )
 target_include_directories(test_stac_client PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-# StacClient is header-only with Q_OBJECT — needs AUTOMOC
+# StacClient has Q_OBJECT — needs AUTOMOC
 set_target_properties(test_stac_client PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_stac_client)
 
@@ -2757,6 +2753,7 @@ sicnu_discover_tests(test_dialog_edge_cases)
 # Raster processing dialog base — run lifecycle (JobEngine-backed)
 add_executable(test_raster_processing_dialog_base
   test_raster_processing_dialog_base.cpp
+  test_raster_processing_dialog_base_main.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
@@ -2765,7 +2762,7 @@ add_executable(test_raster_processing_dialog_base
 )
 set_target_properties(test_raster_processing_dialog_base PROPERTIES AUTOMOC ON)
 target_link_libraries(test_raster_processing_dialog_base PRIVATE
-  Catch2::Catch2WithMain
+  Catch2::Catch2
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
@@ -2860,6 +2857,77 @@ target_include_directories(test_active_view_host_data_context PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_active_view_host_data_context)
+
+qt_add_executable(test_active_view_host_viewport
+  test_active_view_host_viewport.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp
+)
+target_link_libraries(test_active_view_host_viewport PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+)
+target_include_directories(test_active_view_host_viewport PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_active_view_host_viewport)
+
+qt_add_executable(test_workflow_session_controller
+  test_workflow_session_controller.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/workflow_session_controller.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/task_panel_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_port_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_connection_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_node_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_scene.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_canvas_widget.cpp
+)
+target_link_libraries(test_workflow_session_controller PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_operators
+  sicnu_workflow
+  sicnu_task_center
+  sicnu_core
+  sicnu_gui
+  Sicnu::data
+)
+target_include_directories(test_workflow_session_controller PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/workflow
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_workflow_session_controller)
+
+qt_add_executable(test_classify_workflow_bridge
+  test_classify_workflow_bridge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/classification/rs_classify_workflow_bridge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/classification/rs_classify_workflow_controller.cpp
+)
+target_link_libraries(test_classify_workflow_bridge PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_workflow
+)
+target_include_directories(test_classify_workflow_bridge PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/workflow
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_classify_workflow_bridge)
 
 if(SICNU_EMBED_PYTHON)
 qt_add_executable(test_python_engine
@@ -3050,13 +3118,6 @@ sicnu_discover_tests(test_python_processing_provider)
 sicnu_add_test(test_llm_streaming_client)
 target_link_libraries(test_llm_streaming_client PRIVATE
   sicnu_agent
-  sicnu_processing
-)
-
-sicnu_add_test(test_agent_context_resolver)
-target_link_libraries(test_agent_context_resolver PRIVATE
-  sicnu_agent
-  sicnu_data
   sicnu_processing
 )
 

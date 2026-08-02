@@ -1,13 +1,10 @@
 // src/agent/llm_streaming_client.cpp
 #include "llm_streaming_client.h"
-#include "processing/framework/agent_tool_call_exporter.h"
-#include "processing/framework/atomic_algorithm_registry.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
-#include <json/json.h>
 
 namespace sicnu::agent
 {
@@ -34,15 +31,13 @@ LlmProviderProfile LlmStreamingClient::profile() const
   return m_profile;
 }
 
-void LlmStreamingClient::sendChatCompletion( const QJsonArray &messages, bool enableTools )
+ChatRequestPayload LlmStreamingClient::buildChatRequest( const LlmProviderProfile &profile,
+                                                         const QJsonArray &messages,
+                                                         const QJsonArray &tools )
 {
-  cancel();
-  m_buffer.clear();
-  m_toolCallId.clear();
-  m_toolFunctionName.clear();
-  m_toolArgumentsBuffer.clear();
+  ChatRequestPayload payload;
 
-  QString endpointUrl = m_profile.baseUrl;
+  QString endpointUrl = profile.baseUrl;
   if ( !endpointUrl.endsWith( QStringLiteral( "/chat/completions" ) ) )
   {
     if ( !endpointUrl.endsWith( QStringLiteral( "/" ) ) )
@@ -50,39 +45,44 @@ void LlmStreamingClient::sendChatCompletion( const QJsonArray &messages, bool en
     endpointUrl += QStringLiteral( "chat/completions" );
   }
 
-  QNetworkRequest request;
-  request.setUrl( QUrl( endpointUrl ) );
-  request.setTransferTimeout( 10000 );
-  request.setHeader( QNetworkRequest::ContentTypeHeader, QStringLiteral( "application/json" ) );
+  payload.request.setUrl( QUrl( endpointUrl ) );
+  payload.request.setTransferTimeout( 10000 );
+  payload.request.setHeader( QNetworkRequest::ContentTypeHeader, QStringLiteral( "application/json" ) );
 
-  if ( !m_profile.apiKey.isEmpty() )
+  if ( !profile.apiKey.isEmpty() )
   {
-    request.setRawHeader( "Authorization", QString( "Bearer %1" ).arg( m_profile.apiKey ).toUtf8() );
+    payload.request.setRawHeader( "Authorization", QString( "Bearer %1" ).arg( profile.apiKey ).toUtf8() );
   }
 
   QJsonObject requestObj;
-  requestObj[QStringLiteral( "model" )] = m_profile.modelName;
+  requestObj[QStringLiteral( "model" )] = profile.modelName;
   requestObj[QStringLiteral( "messages" )] = messages;
-  requestObj[QStringLiteral( "stream" )] = m_profile.stream;
-  requestObj[QStringLiteral( "temperature" )] = m_profile.temperature;
+  // The transport is SSE-only: the parser understands `data:` lines and
+  // nothing else, so the request always asks for a stream. profile.stream is
+  // kept for persistence/UI but no longer shapes the wire format (ADR 0049).
+  requestObj[QStringLiteral( "stream" )] = true;
+  requestObj[QStringLiteral( "temperature" )] = profile.temperature;
 
-  if ( enableTools )
+  if ( !tools.isEmpty() )
   {
-    Json::Value cppTools = processing::AtomicAlgorithmRegistry::instance().exportOpenAiToolDefinitions();
-    Json::StreamWriterBuilder writer;
-    std::string toolsJsonStr = Json::writeString( writer, cppTools );
-
-    QJsonDocument toolsDoc = QJsonDocument::fromJson( QByteArray::fromStdString( toolsJsonStr ) );
-    if ( toolsDoc.isArray() && !toolsDoc.array().isEmpty() )
-    {
-      requestObj[QStringLiteral( "tools" )] = toolsDoc.array();
-    }
+    requestObj[QStringLiteral( "tools" )] = tools;
   }
 
-  QJsonDocument doc( requestObj );
-  QByteArray requestData = doc.toJson( QJsonDocument::Compact );
+  payload.body = QJsonDocument( requestObj ).toJson( QJsonDocument::Compact );
+  return payload;
+}
 
-  m_currentReply = m_networkManager->post( request, requestData );
+void LlmStreamingClient::sendChatCompletion( const QJsonArray &messages, const QJsonArray &tools )
+{
+  cancel();
+  m_buffer.clear();
+  m_toolCallId.clear();
+  m_toolFunctionName.clear();
+  m_toolArgumentsBuffer.clear();
+
+  const ChatRequestPayload payload = buildChatRequest( m_profile, messages, tools );
+
+  m_currentReply = m_networkManager->post( payload.request, payload.body );
 
   if ( m_currentReply )
   {

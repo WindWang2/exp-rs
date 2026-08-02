@@ -3,10 +3,10 @@
 
 namespace sicnu::workflow {
 
-class WorkflowRegistry;
+class WorkflowRuntime;
 
 /// Register catalog of built-in TaskPanel tools and Workspace labs
 /// (lab.classify.supervised, lab.georef.image_to_map, lab.obia stub).
-void registerBuiltinWorkflows( WorkflowRegistry &reg );
+void registerBuiltinWorkflows( WorkflowRuntime &runtime );
 
 } // namespace sicnu::workflow

@@ -142,6 +142,79 @@ TEST_CASE("TaskCenter - Preserves a submitted job result", "[processing][task_ce
     REQUIRE(info.logBuffer.join('\n').contains(QStringLiteral("tracer completed")));
 }
 
+TEST_CASE("TaskCenter - clearCompletedTasks also prunes the JobEngine records", "[processing][task_center][clear]") {
+    auto& engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.registerExecutor("test:clear-jobs", [](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext&) {
+        Json::Value result(Json::objectValue);
+        result["output"] = "/tmp/clear-me.tif";
+        return result;
+    });
+
+    auto& center = sicnu::TaskCenter::instance();
+
+    sicnu::jobs::JobRequest request;
+    request.algorithmId = "test:clear-jobs";
+    request.source = "task_panel";
+
+    const long taskA = center.submitJob(request);
+    const long taskB = center.submitJob(request);
+    REQUIRE(taskA > 0);
+    REQUIRE(taskB > 0);
+
+    engine.waitUntilIdleForTests();
+    for (int attempt = 0; attempt < 20
+                      && (center.getTaskInfo(taskA).status == sicnu::TaskStatus::Running
+                          || center.getTaskInfo(taskB).status == sicnu::TaskStatus::Running);
+         ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    REQUIRE(center.getTaskInfo(taskA).status == sicnu::TaskStatus::Completed);
+    REQUIRE(center.getTaskInfo(taskB).status == sicnu::TaskStatus::Completed);
+
+    const std::string jobA = center.getTaskInfo(taskA).jobId;
+    const std::string jobB = center.getTaskInfo(taskB).jobId;
+    REQUIRE_FALSE(jobA.empty());
+    REQUIRE_FALSE(jobB.empty());
+    REQUIRE(engine.snapshot(jobA).has_value());
+    REQUIRE(engine.snapshot(jobB).has_value());
+
+    // A job submitted directly to the engine (not tracked by TaskCenter)
+    // must survive the clear: only the cleared tasks' records are pruned.
+    sicnu::jobs::JobRequest direct;
+    direct.algorithmId = "test:clear-jobs";
+    direct.source = "test";
+    const auto directId = engine.submit(direct);
+    engine.waitUntilIdleForTests();
+    REQUIRE(engine.snapshot(directId).has_value());
+
+    center.clearCompletedTasks();
+    const auto tasksAfterClear = center.allTasks().size();
+
+    // TaskCenter no longer retains the cleared tasks...
+    REQUIRE(center.getTaskInfo(taskA).taskId == -1);
+    REQUIRE(center.getTaskInfo(taskB).taskId == -1);
+    // ...the engine records for exactly those tasks are gone...
+    REQUIRE_FALSE(engine.snapshot(jobA).has_value());
+    REQUIRE_FALSE(engine.snapshot(jobB).has_value());
+    // ...and no task survived under the cleared ids.
+    for (const auto& t : center.allTasks()) {
+        REQUIRE(t.taskId != taskA);
+        REQUIRE(t.taskId != taskB);
+    }
+
+    // The listener still fires for unknown jobIds (pruned/foreign records)
+    // without crashing or creating bookkeeping.
+    const auto directId2 = engine.submit(direct);
+    engine.waitUntilIdleForTests();
+    std::this_thread::sleep_for(std::chrono::milliseconds(20)); // let the terminal notify land
+    REQUIRE(engine.snapshot(directId2).has_value());
+    REQUIRE(center.allTasks().size() == tasksAfterClear);
+
+    engine.clearExecutors();
+}
+
 TEST_CASE("TaskCenter - Retry preserves a submitted job's auto-load preference", "[processing][task_center][retry]") {
     auto& engine = sicnu::jobs::JobEngine::instance();
     engine.shutdownForTests();

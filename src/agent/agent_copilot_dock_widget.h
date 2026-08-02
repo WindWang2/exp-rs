@@ -13,7 +13,6 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
-#include "agent_context_resolver.h"
 #include "processing/framework/agent_workflow_executor.h"
 #include "processing/framework/task_center.h"
 #include "processing/framework/tool_call_dispatcher.h"
@@ -45,8 +44,6 @@ class AgentCopilotDockWidget : public QDockWidget
 
   signals:
     void viewPlanInCanvasRequested( const QJsonObject &planJson );
-    void planApprovalRequested( const QJsonObject &planJson );
-    void toolExecutionFinished( const QJsonObject &resultJson );
 
   private slots:
     void onSendClicked();
@@ -72,8 +69,6 @@ class AgentCopilotDockWidget : public QDockWidget
     /// Shared rejection tail: surface the reason in the chat and emit an error
     /// result payload.
     void handleToolCallRejection( const QString &errorMsg );
-    /// Extracts the plan payload for the approval card from a parsed envelope.
-    QJsonObject planArgumentsFor( const QJsonObject &toolCallJson ) const;
     /// Registers a completion callback for a tool-call task; invokes it
     /// immediately when the task is already terminal.
     void watchToolCallCompletion( long taskId, processing::ToolCallDispatcher::CompletionCallback onComplete );

@@ -1163,12 +1163,9 @@ void QgsClassificationMainWindow::setupWorkflowUi()
 
   // Runtime session for lab.classify.supervised — mirrors step/complete only.
   // Soft classify-specific gates remain on m_workflow (controller authority).
-  m_workflowBridge = std::make_unique<RsClassifyWorkflowBridge>();
-  if ( !m_workflowBridge->open() )
-  {
-    SICNU_LOG_WARN( SicnuLogTags::Classification,
-                    QStringLiteral( "Failed to open workflow session lab.classify.supervised" ) );
-  }
+  m_workflowBridge = std::make_unique<RsClassifyWorkflowBridge>( this );
+  if ( m_workflow )
+    m_workflowBridge->bindController( m_workflow );
 
   m_stepper = new RsClassifyStepperBar( this );
   addToolBarBreak();
@@ -1195,8 +1192,6 @@ void QgsClassificationMainWindow::setupWorkflowUi()
 
   connect( m_workflow, &RsClassifyWorkflowController::currentStepChanged, this,
            [this]( RsClassifyStep s ) {
-             if ( m_workflowBridge )
-               m_workflowBridge->gotoStep( s );
              if ( m_stepper )
                m_stepper->setCurrentStep( s );
              if ( m_stepHost )
@@ -1215,8 +1210,6 @@ void QgsClassificationMainWindow::setupWorkflowUi()
            } );
 
   connect( m_workflow, &RsClassifyWorkflowController::completionChanged, this, [this]() {
-    if ( m_workflowBridge && m_workflow )
-      m_workflowBridge->syncCompletionsFromController( *m_workflow );
     refreshWorkflowUi();
   } );
 

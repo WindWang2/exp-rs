@@ -3,7 +3,6 @@
 
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_runtime.h"
-#include "workflow/workflow_registry.h"
 #include "workflow/builtin_definitions.h"
 
 #include <json/json.h>

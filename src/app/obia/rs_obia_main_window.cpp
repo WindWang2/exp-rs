@@ -547,6 +547,24 @@ void RsObiaMainWindow::loadResultToMainMap()
     statusBar()->showMessage( tr( "已请求将结果加载到主图：%1" ).arg( mLastClassRasterPath ), 4000 );
 }
 
+void RsObiaMainWindow::cancelActiveTask()
+{
+    if ( m_pendingTaskId >= 0 )
+    {
+        sicnu::TaskCenter::instance().cancelTask( m_pendingTaskId );
+        m_pendingTaskId = -1;
+        m_pendingOp = PendingOp::None;
+        m_pendingSegWork.reset();
+        m_pendingHierWork.reset();
+        m_pendingHierClsWork.reset();
+        m_pendingFlatTask = nullptr;
+        m_pendingFlatOutputPath.clear();
+        m_pendingCanceled.reset();
+        finishPendingUi();
+        statusBar()->showMessage( tr( "OBIA 任务已取消" ), 3000 );
+    }
+}
+
 void RsObiaMainWindow::onObiaTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
 {
     if ( info.taskId != m_pendingTaskId || m_pendingTaskId < 0 )
