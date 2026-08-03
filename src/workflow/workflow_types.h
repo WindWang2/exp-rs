@@ -1,6 +1,7 @@
 // src/workflow/workflow_types.h
 #pragma once
 #include <json/json.h>
+#include <functional>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -65,5 +66,15 @@ struct SessionSnapshot {
   Json::Value paramsByStep; // object: stepId -> params object
   std::unordered_map<std::string, std::string> artifacts; // name -> path/value
 };
+
+/// Status of an individual step as reported by the pipeline executor.
+enum class PipelineStepStatus { Queued, Running, Completed, Failed, Canceled };
+
+/// Callback that resolves step statuses for a given pipeline ID.
+/// Returns a map of stepId -> status.  Injected by the app layer to keep
+/// `WorkflowSession` decoupled from `TaskCenter`.
+using PipelineStatusResolver = std::function<
+    std::unordered_map<std::string, PipelineStepStatus>( long pipelineId )
+>;
 
 } // namespace sicnu::workflow

@@ -523,4 +523,43 @@ TEST_CASE( "WorkflowSession pipelineId binding stores pipeline reference in snap
   session.setPipelineId( 42 );
   REQUIRE( session.pipelineId() == 42 );
   REQUIRE( session.snapshot().pipelineId == 42 );
+
+  SECTION( "snapshot enriches completedStepIds from pipeline resolver" )
+  {
+    // Without a resolver, no enrichment — snapshot only has local state
+    REQUIRE( session.snapshot().completedStepIds.empty() );
+
+    // Inject a mock resolver that reports "configure" as Completed
+    session.setPipelineStatusResolver( []( long pipelineId ) {
+      REQUIRE( pipelineId == 42 );
+      return std::unordered_map<std::string, PipelineStepStatus>{
+          { "configure", PipelineStepStatus::Completed },
+          { "review", PipelineStepStatus::Running },
+      };
+    } );
+
+    const auto snap = session.snapshot();
+    // "configure" should be enriched into completedStepIds by the resolver
+    REQUIRE( snap.completedStepIds.size() == 1 );
+    REQUIRE( snap.completedStepIds[0] == "configure" );
+    // "review" is still Running — should NOT appear in completedStepIds
+  }
+
+  SECTION( "resolver enrichment does not duplicate locally completed steps" )
+  {
+    session.markStepComplete( "configure" );
+    REQUIRE( session.snapshot().completedStepIds.size() == 1 );
+
+    // Resolver also reports "configure" as Completed — should NOT duplicate
+    session.setPipelineStatusResolver( []( long ) {
+      return std::unordered_map<std::string, PipelineStepStatus>{
+          { "configure", PipelineStepStatus::Completed },
+      };
+    } );
+
+    const auto snap = session.snapshot();
+    REQUIRE( snap.completedStepIds.size() == 1 );
+    REQUIRE( snap.completedStepIds[0] == "configure" );
+  }
 }
+

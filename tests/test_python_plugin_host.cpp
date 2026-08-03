@@ -56,6 +56,30 @@ TEST_CASE( "PythonWorkerProcessPool poolSize and poolHealth queries work correct
 
   const auto health = pool.poolHealth();
   CHECK( health.total == 0 );
+
+  SECTION( "setPoolSize grows the pool" )
+  {
+    CHECK( pool.setPoolSize( 5 ) );
+    CHECK( pool.poolSize() == 5 );
+  }
+
+  SECTION( "setPoolSize shrinks the pool" )
+  {
+    CHECK( pool.setPoolSize( 1 ) );
+    CHECK( pool.poolSize() == 1 );
+  }
+
+  SECTION( "setPoolSize rejects zero" )
+  {
+    CHECK_FALSE( pool.setPoolSize( 0 ) );
+    CHECK( pool.poolSize() == 3 ); // unchanged
+  }
+
+  SECTION( "setPoolSize rejects negative" )
+  {
+    CHECK_FALSE( pool.setPoolSize( -1 ) );
+    CHECK( pool.poolSize() == 3 ); // unchanged
+  }
 }
 
 #include "python_ipc_server.h"

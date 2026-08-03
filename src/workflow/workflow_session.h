@@ -32,6 +32,8 @@ class WorkflowSession
     void setPipelineId( long pipelineId ) { m_pipelineId = pipelineId; }
     long pipelineId() const { return m_pipelineId; }
 
+    void setPipelineStatusResolver( PipelineStatusResolver resolver ) { m_pipelineResolver = std::move( resolver ); }
+
     const WorkflowDefinition &definition() const;
     const StepDef *currentStep() const;
     const StepDef *stepById( const std::string &id ) const;
@@ -46,6 +48,7 @@ class WorkflowSession
     bool m_dirty = false;
     Json::Value m_paramsByStep;
     std::unordered_map<std::string, std::string> m_artifacts;
+    PipelineStatusResolver m_pipelineResolver;
 };
 
 } // namespace sicnu::workflow

@@ -59,6 +59,24 @@ SessionSnapshot WorkflowSession::snapshot() const
   snap.pipelineId = m_pipelineId;
   snap.paramsByStep = m_paramsByStep;
   snap.artifacts = m_artifacts;
+
+  // ── Authoritative pipeline step status enrichment ──────────────────
+  // When bound to a TaskCenter pipeline, query the resolver for
+  // real-time step statuses and merge completed steps that the local
+  // m_completed list may not yet know about (async DAG execution).
+  if ( m_pipelineId >= 0 && m_pipelineResolver )
+  {
+    const auto statuses = m_pipelineResolver( m_pipelineId );
+    for ( const auto &[stepId, status] : statuses )
+    {
+      if ( status == PipelineStepStatus::Completed )
+      {
+        if ( std::find( snap.completedStepIds.begin(), snap.completedStepIds.end(), stepId ) == snap.completedStepIds.end() )
+          snap.completedStepIds.push_back( stepId );
+      }
+    }
+  }
+
   return snap;
 }
 

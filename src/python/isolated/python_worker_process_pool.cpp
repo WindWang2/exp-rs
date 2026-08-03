@@ -95,6 +95,58 @@ int PythonWorkerProcessPool::activeWorkerCount() const
   return count;
 }
 
+bool PythonWorkerProcessPool::setPoolSize( int newSize )
+{
+  if ( newSize < 1 )
+    return false;
+
+  if ( newSize > m_poolSize )
+  {
+    // ── Grow: add new worker nodes ──
+    for ( int i = m_poolSize; i < newSize; ++i )
+    {
+      WorkerNode *node = createWorkerNode( m_nextWorkerId++ );
+      if ( node )
+        m_nodes.append( node );
+    }
+  }
+  else if ( newSize < m_poolSize )
+  {
+    // ── Shrink: remove idle (non-busy) nodes from the tail ──
+    // Only need to remove nodes that actually exist beyond the new size.
+    const int excessNodes = qMax( 0, m_nodes.size() - newSize );
+    int toRemove = excessNodes;
+    for ( int i = m_nodes.size() - 1; i >= 0 && toRemove > 0; --i )
+    {
+      WorkerNode *node = m_nodes[i];
+      if ( node && !node->isBusy )
+      {
+        if ( node->worker )
+        {
+          node->worker->disconnect();
+          node->worker->stopWorker();
+          delete node->worker;
+        }
+        if ( node->server )
+        {
+          node->server->disconnect();
+          node->server->close();
+          delete node->server;
+        }
+        delete node;
+        m_nodes.removeAt( i );
+        --toRemove;
+      }
+    }
+    // If we couldn't remove enough (all remaining are busy), fail
+    if ( toRemove > 0 )
+      return false;
+  }
+
+  m_poolSize = newSize;
+  return true;
+}
+
 int PythonWorkerProcessPool::availableWorkerCount() const
 {
   int count = 0;

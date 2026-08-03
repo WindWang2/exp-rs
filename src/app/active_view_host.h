@@ -95,10 +95,12 @@ class ActiveViewHost : public QObject
     QString mapCanvasCrsAuthId() const { return m_mapCanvas ? m_mapCanvas->mapSettings().destinationCrs().authid() : QString(); }
     ViewportSnapshot viewportSnapshot() const
     {
+        if ( !m_mapCanvas )
+            return ViewportSnapshot{};
         ViewportSnapshot snap;
-        snap.extent = mapCanvasExtent();
-        snap.scale = mapCanvasScale();
-        snap.crsAuthId = mapCanvasCrsAuthId();
+        snap.extent = m_mapCanvas->extent();
+        snap.scale = m_mapCanvas->scale();
+        snap.crsAuthId = m_mapCanvas->mapSettings().destinationCrs().authid();
         snap.activeLayerName = activeLayerName();
         return snap;
     }
