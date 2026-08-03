@@ -61,6 +61,7 @@ struct SessionSnapshot {
   std::vector<std::string> completedStepIds;
   SessionMode mode = SessionMode::Wizard;
   bool dirty = false;
+  long pipelineId = -1;
   Json::Value paramsByStep; // object: stepId -> params object
   std::unordered_map<std::string, std::string> artifacts; // name -> path/value
 };

@@ -512,3 +512,15 @@ TEST_CASE( "WorkflowSession resolveParams resolves placeholders using artifacts"
   REQUIRE( resolved["input"].asString() == "/path/to/extracted.tif" );
   REQUIRE( resolved["mode"].asString() == "fast" );
 }
+
+TEST_CASE( "WorkflowSession pipelineId binding stores pipeline reference in snapshot", "[workflow][pipeline_id]" )
+{
+  WorkflowDefinition d = makeTwoStep();
+  WorkflowSession session( d, "sess-pipe" );
+  REQUIRE( session.pipelineId() == -1 );
+  REQUIRE( session.snapshot().pipelineId == -1 );
+
+  session.setPipelineId( 42 );
+  REQUIRE( session.pipelineId() == 42 );
+  REQUIRE( session.snapshot().pipelineId == 42 );
+}

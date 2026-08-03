@@ -29,6 +29,9 @@ class WorkflowSession
     void setMode( SessionMode mode );
     void setDirty( bool d );
 
+    void setPipelineId( long pipelineId ) { m_pipelineId = pipelineId; }
+    long pipelineId() const { return m_pipelineId; }
+
     const WorkflowDefinition &definition() const;
     const StepDef *currentStep() const;
     const StepDef *stepById( const std::string &id ) const;
@@ -38,6 +41,7 @@ class WorkflowSession
     std::string m_sessionId;
     std::string m_currentStepId;
     std::vector<std::string> m_completed;
+    long m_pipelineId = -1;
     SessionMode m_mode = SessionMode::Wizard;
     bool m_dirty = false;
     Json::Value m_paramsByStep;

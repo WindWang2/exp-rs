@@ -56,6 +56,7 @@ SessionSnapshot WorkflowSession::snapshot() const
   snap.completedStepIds = m_completed;
   snap.mode = m_mode;
   snap.dirty = m_dirty;
+  snap.pipelineId = m_pipelineId;
   snap.paramsByStep = m_paramsByStep;
   snap.artifacts = m_artifacts;
   return snap;
