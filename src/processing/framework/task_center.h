@@ -7,6 +7,7 @@
 #include <QMap>
 #include <QDateTime>
 #include <QMutex>
+#include <QWaitCondition>
 #include <QPointer>
 #include <memory>
 #include <string>
@@ -222,6 +223,7 @@ private:
     };
 
     mutable QMutex m_mutex;
+    mutable QWaitCondition m_waitCondition;
     QMap<long, AlgorithmTaskInfo> m_tasks;
     QMap<long, PipelineExecutionInfo> m_pipelines;
     QList<PendingLaunch> m_pendingLaunches;

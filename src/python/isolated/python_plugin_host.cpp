@@ -3,6 +3,7 @@
 #include "python_plugin_adapter.h"
 #include "python_worker_process_pool.h"
 #include "processing/framework/algorithm_engine.h"
+#include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/json_params_converter.h"
 #include "jobs/job_engine.h"
 
@@ -35,13 +36,24 @@ Json::Value runPythonPrefixJob( const sicnu::jobs::JobRequest &req,
     throw std::runtime_error( "No PythonPluginHost alive on the main thread for py: execution" );
   }
 
-  const QString algoId = QString::fromStdString( req.algorithmId );
-  const QVariantMap params = sicnu::processing::jsonParamsToVariantMap( req.params );
+  const std::string algoId = req.algorithmId;
+  const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( algoId );
+  if ( !adapter )
+  {
+    throw std::runtime_error( "Python algorithm not found in registry: " + algoId );
+  }
 
-  QString error;
-  bool ok = false;
+  Json::Value result;
+  std::string error;
   auto execute = [&]() {
-    ok = sicnu::AlgorithmEngine::instance().executeAlgorithm( algoId, params, nullptr, error );
+    try
+    {
+      result = adapter->execute( req.params, nullptr );
+    }
+    catch ( const std::exception &e )
+    {
+      error = e.what();
+    }
   };
 
   if ( QThread::currentThread() == g_pyMainContext->thread() )
@@ -53,11 +65,11 @@ Json::Value runPythonPrefixJob( const sicnu::jobs::JobRequest &req,
     throw std::runtime_error( "Failed to marshal py: execution to the main thread" );
   }
 
-  if ( !ok )
+  if ( !error.empty() )
   {
-    throw std::runtime_error( error.toStdString() );
+    throw std::runtime_error( error );
   }
-  return Json::Value( Json::objectValue );
+  return result;
 }
 
 } // namespace

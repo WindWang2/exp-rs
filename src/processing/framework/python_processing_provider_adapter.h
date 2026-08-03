@@ -29,7 +29,7 @@ public:
      * Register or update a Python algorithm in this provider.
      * The algorithm descriptor will have its resourceProfile forced to PythonWorkerProcess.
      */
-    void addAlgorithm( std::shared_ptr<TaskAlgorithmAdapter> algoAdapter );
+    void addAlgorithm( processing::AtomicAlgorithmAdapterPtr algoAdapter );
     void removeAlgorithm( const QString &algoId );
 
 private:
@@ -37,7 +37,7 @@ private:
     QString m_providerName;
     bool m_initialized = false;
     AlgorithmEngine *m_boundEngine = nullptr;
-    QMap<QString, std::shared_ptr<TaskAlgorithmAdapter>> m_algorithms;
+    QMap<QString, processing::AtomicAlgorithmAdapterPtr> m_algorithms;
 };
 
 } // namespace sicnu

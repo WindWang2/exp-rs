@@ -1,27 +1,22 @@
 #include "python_algorithm_adapter.h"
 
-namespace sicnu {
+#include <stdexcept>
 
-PythonAlgorithmAdapter::PythonAlgorithmAdapter(AlgorithmDescriptor desc, ExecuteCallback executor)
-    : m_desc(std::move(desc))
-    , m_executor(std::move(executor))
+namespace sicnu::processing {
+
+PythonAlgorithmAdapter::PythonAlgorithmAdapter( AlgorithmDescriptor desc, ExecuteCallback executor )
+  : mDesc( std::move( desc ) )
+  , mExecutor( std::move( executor ) )
 {
 }
 
-bool PythonAlgorithmAdapter::validateParameters(const QVariantMap& params, QString& error) const
+Json::Value PythonAlgorithmAdapter::execute( const Json::Value &params, ProgressCallback progressCb )
 {
-    Q_UNUSED(params);
-    Q_UNUSED(error);
-    return true;
+  if ( mExecutor )
+  {
+    return mExecutor( params, progressCb );
+  }
+  throw std::runtime_error( "No execution handler provided for Python algorithm" );
 }
 
-bool PythonAlgorithmAdapter::execute(const QVariantMap& params, std::function<void(double)> progressCallback, QString& error)
-{
-    if (m_executor) {
-        return m_executor(params, progressCallback, error);
-    }
-    error = QStringLiteral("No execution handler provided for Python algorithm");
-    return false;
-}
-
-} // namespace sicnu
+} // namespace sicnu::processing

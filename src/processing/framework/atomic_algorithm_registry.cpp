@@ -9,7 +9,6 @@
 namespace sicnu::processing {
 
 static std::function<void(AtomicAlgorithmRegistry&)> sRsOperatorProvider;
-static std::function<void(AtomicAlgorithmRegistry&)> sProviderAlgorithmProvider;
 
 AtomicAlgorithmRegistry& AtomicAlgorithmRegistry::instance()
 {
@@ -20,7 +19,6 @@ AtomicAlgorithmRegistry& AtomicAlgorithmRegistry::instance()
 AtomicAlgorithmRegistry::AtomicAlgorithmRegistry()
 {
   registerBuiltinRsOperators();
-  registerProviderAlgorithms();
 }
 
 void AtomicAlgorithmRegistry::setRsOperatorProvider( std::function<void(AtomicAlgorithmRegistry&)> provider )
@@ -44,10 +42,6 @@ void AtomicAlgorithmRegistry::reset()
   if ( sRsOperatorProvider )
   {
     sRsOperatorProvider( *this );
-  }
-  if ( sProviderAlgorithmProvider )
-  {
-    sProviderAlgorithmProvider( *this );
   }
 }
 
@@ -122,23 +116,6 @@ void AtomicAlgorithmRegistry::registerBuiltinRsOperators()
   if ( sRsOperatorProvider )
   {
     sRsOperatorProvider( *this );
-  }
-}
-
-void AtomicAlgorithmRegistry::registerProviderAlgorithms()
-{
-  if ( sProviderAlgorithmProvider )
-  {
-    sProviderAlgorithmProvider( *this );
-  }
-}
-
-void AtomicAlgorithmRegistry::setProviderAlgorithmProvider( std::function<void(AtomicAlgorithmRegistry&)> provider )
-{
-  sProviderAlgorithmProvider = std::move( provider );
-  if ( sProviderAlgorithmProvider )
-  {
-    sProviderAlgorithmProvider( instance() );
   }
 }
 

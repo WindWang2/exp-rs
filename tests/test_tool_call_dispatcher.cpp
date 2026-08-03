@@ -759,5 +759,26 @@ TEST_CASE( "ToolCallDispatcher setDataManager sets authority cleanly", "[process
   REQUIRE_FALSE( dispatcher.outputCommitterHandler() );
 }
 
+TEST_CASE( "ToolCallDispatcher zero-argument default constructor delegates directly to TaskCenter", "[processing][tool_call_dispatcher][default_ctor]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+  AtomicAlgorithmRegistry::instance().registerAdapter( std::make_shared<StubAdapter>( "stub:default_ctor" ) );
+
+  ToolCallDispatcher dispatcher; // zero-argument constructor
+
+  Json::Value params( Json::objectValue );
+  params["input"] = "/tmp/test.tif";
+  const Json::Value envelope = objectEnvelope( "stub:default_ctor", "parameters", params );
+
+  REQUIRE( dispatcher.classify( envelope ) == ToolCallClassification::ToolCall );
+  REQUIRE( dispatcher.rejectionReason( envelope ).isEmpty() );
+
+  long taskIdOut = -1;
+  QString error;
+  bool submitted = dispatcher.submit( envelope, []( const Json::Value & ) {}, &error, &taskIdOut );
+  REQUIRE( submitted );
+  REQUIRE( taskIdOut > 0 );
+}
+
 
 

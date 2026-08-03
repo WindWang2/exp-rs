@@ -90,7 +90,7 @@ TEST_CASE( "ProviderAlgorithmAdapter builds descriptor and executes QgsProcessin
   REQUIRE( result["OUTPUT_STR"].asString() == "processed_hello" );
 }
 
-TEST_CASE( "AtomicAlgorithmRegistry provider algorithms mirroring callback and duplicate handling", "[processing][registry]" )
+TEST_CASE("AtomicAlgorithmRegistry integrates ProviderAlgorithmAdapter", "[processing][provider_adapter]")
 {
   auto &registry = AtomicAlgorithmRegistry::instance();
   registry.reset();
@@ -100,22 +100,10 @@ TEST_CASE( "AtomicAlgorithmRegistry provider algorithms mirroring callback and d
   DummyTestAlgorithm alg;
   alg.initAlgorithm();
 
-  bool providerCalled = false;
-  AtomicAlgorithmRegistry::setProviderAlgorithmProvider( [&]( AtomicAlgorithmRegistry &reg ) {
-    providerCalled = true;
-    if ( !reg.findAdapter( alg.id().toStdString() ) )
-    {
-      reg.registerAdapter( std::make_shared<ProviderAlgorithmAdapter>( alg ) );
-    }
-  } );
+  registry.registerAdapter( std::make_shared<ProviderAlgorithmAdapter>( alg ) );
 
-  REQUIRE( providerCalled );
   REQUIRE( registry.adapterCount() == initialCount + 1 );
   REQUIRE( registry.findAdapter( "dummyalg" ) != nullptr );
-
-  // Duplicate call to registerProviderAlgorithms should not add duplicate entries or crash
-  registry.registerProviderAlgorithms();
-  REQUIRE( registry.adapterCount() == initialCount + 1 );
 
   // Verify exported tool definitions include the dummy algorithm
   Json::Value toolsJson = registry.exportOpenAiToolDefinitions();
@@ -130,8 +118,6 @@ TEST_CASE( "AtomicAlgorithmRegistry provider algorithms mirroring callback and d
     }
   }
   REQUIRE( foundDummy );
-
-  // Reset preserves provider registration
-  registry.reset();
-  REQUIRE( registry.findAdapter( "dummyalg" ) != nullptr );
 }
+
+

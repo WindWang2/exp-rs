@@ -7,6 +7,8 @@
 #include "processing/framework/python_algorithm_adapter.h"
 #include "processing/framework/python_processing_provider_adapter.h"
 #include "processing/framework/algorithm_engine.h"
+#include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/json_params_converter.h"
 
 #include <qgsmaplayer.h>
 
@@ -120,24 +122,22 @@ int AppInterfaceBridge::registeredActionCount() const
 void AppInterfaceBridge::setupDefaultAlgorithmHandler()
 {
   setAlgorithmRegisterHandler( [this]( const QString &algoId, const QString &name, const QString &group, const QString &desc ) -> bool {
-    sicnu::AlgorithmDescriptor algoDesc;
-    algoDesc.id = algoId;
-    algoDesc.name = name.isEmpty() ? algoId : name;
-    algoDesc.group = group.isEmpty() ? QStringLiteral( "Python Plugins" ) : group;
-    algoDesc.description = desc;
-    algoDesc.resourceProfile = sicnu::ProviderResourceProfile::PythonWorkerProcess;
+    sicnu::processing::AlgorithmDescriptor algoDesc;
+    algoDesc.id = algoId.toStdString();
+    algoDesc.displayName = name.isEmpty() ? algoId.toStdString() : name.toStdString();
+    algoDesc.group = group.isEmpty() ? "Python Plugins" : group.toStdString();
+    algoDesc.description = desc.toStdString();
 
-    auto adapter = std::make_shared<sicnu::PythonAlgorithmAdapter>(
+    auto adapter = std::make_shared<sicnu::processing::PythonAlgorithmAdapter>(
       algoDesc,
-      [this, algoId]( const QVariantMap &execParams, std::function<void(double)> progress, QString &err ) -> bool {
+      [this, algoId]( const Json::Value &execParams, sicnu::processing::ProgressCallback progress ) -> Json::Value {
         if ( !m_ipcServer )
         {
-          err = QStringLiteral( "IPC Server not available" );
-          return false;
+          throw std::runtime_error( "IPC Server not available" );
         }
         QJsonObject req;
         req[QStringLiteral( "id" )] = algoId;
-        req[QStringLiteral( "params" )] = QJsonObject::fromVariantMap( execParams );
+        req[QStringLiteral( "params" )] = QJsonObject::fromVariantMap( sicnu::processing::jsonParamsToVariantMap( execParams ) );
 
         QJsonObject execResult;
         bool execIsError = false;
@@ -146,29 +146,25 @@ void AppInterfaceBridge::setupDefaultAlgorithmHandler()
         switch ( awaitStatus )
         {
           case AwaitStatus::NoClient:
-            err = QStringLiteral( "IPC client not connected" );
-            return false;
+            throw std::runtime_error( "IPC client not connected" );
           case AwaitStatus::Disconnected:
-            err = QStringLiteral( "Python worker disconnected during algorithm execution" );
-            return false;
+            throw std::runtime_error( "Python worker disconnected during algorithm execution" );
           case AwaitStatus::Timeout:
-            err = QStringLiteral( "Python algorithm execution timed out" );
-            return false;
+            throw std::runtime_error( "Python algorithm execution timed out" );
           case AwaitStatus::Ok:
             break;
         }
         if ( execIsError )
         {
-          err = execResult[QStringLiteral( "message" )].toString( QStringLiteral( "Python algorithm execution failed" ) );
-          return false;
+          std::string errMsg = execResult[QStringLiteral( "message" )].toString( QStringLiteral( "Python algorithm execution failed" ) ).toStdString();
+          throw std::runtime_error( errMsg );
         }
         if ( execResult[QStringLiteral( "status" )].toString() != QStringLiteral( "ok" ) )
         {
-          err = QStringLiteral( "Python algorithm execution failed" );
-          return false;
+          throw std::runtime_error( "Python algorithm execution failed" );
         }
-        if ( progress ) progress( 1.0 );
-        return true;
+        if ( progress ) progress( 100, "Completed" );
+        return sicnu::processing::jsonValueFromQJson( execResult );
       }
     );
 
@@ -189,7 +185,7 @@ void AppInterfaceBridge::setupDefaultAlgorithmHandler()
     }
     else
     {
-      sicnu::AlgorithmEngine::instance().registerAlgorithm( adapter );
+      sicnu::processing::AtomicAlgorithmRegistry::instance().registerAdapter( adapter );
     }
     return true;
   } );

@@ -15,22 +15,6 @@ namespace sicnu::agent
 
 AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
   : QDockWidget( QStringLiteral( "🤖 AI Copilot 智能助手" ), parent )
-  , m_toolCallDispatcher(
-      // Production sink: submit typed tool calls to TaskCenter for background
-      // scheduling, progress, and cancel support (ADR 0016 / ADR 0021). The
-      // output is committed by OutputCommitter on completion, so auto-loading
-      // the raw task output path here would race the commit's file move.
-      []( const QString &algorithmId, const QVariantMap &params ) -> long {
-        return sicnu::TaskCenter::instance().enqueueTask(
-          algorithmId, params, /*autoLoad=*/false, sicnu::TaskPriority::Normal,
-          QList<long>(), /*autoDispatch=*/true );
-      },
-      // Production watcher: observe TaskCenter completion signals. taskUpdated
-      // is emitted from the JobEngine watcher thread; the queued connection to
-      // onTaskCenterTaskUpdated marshals the callback onto the GUI thread.
-      [this]( long taskId, processing::ToolCallDispatcher::CompletionCallback onComplete ) {
-        watchToolCallCompletion( taskId, std::move( onComplete ) );
-      } )
 {
   setObjectName( QStringLiteral( "AgentCopilotDockWidget" ) );
   setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );

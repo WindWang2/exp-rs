@@ -66,17 +66,6 @@ public:
    */
   static void setRsOperatorProvider( std::function<void(AtomicAlgorithmRegistry&)> provider );
 
-  /**
-   * Mirrors all QgsProcessingAlgorithms from the QGIS Processing Registry.
-   * Skips algorithms already registered (by id). Safe to call multiple times.
-   */
-  void registerProviderAlgorithms();
-
-  /**
-   * Registers a callback that populates provider algorithms into this registry.
-   */
-  static void setProviderAlgorithmProvider( std::function<void(AtomicAlgorithmRegistry&)> provider );
-
 private:
   AtomicAlgorithmRegistry();
   ~AtomicAlgorithmRegistry() = default;

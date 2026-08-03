@@ -1,6 +1,7 @@
 // tests/test_gui_job_adapter.cpp
 #include <catch2/catch_test_macros.hpp>
 
+#include <QCoreApplication>
 #include "shell/gui_job_adapter.h"
 #include "processing/framework/task_center.h"
 

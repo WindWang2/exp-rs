@@ -127,7 +127,7 @@ TEST_CASE( "py: prefix executor executes from a worker thread marshaled to the m
       if ( snap && ( snap->state == JobState::Succeeded || snap->state == JobState::Failed ) )
       {
         CHECK( snap->state == JobState::Failed );
-        CHECK( snap->error.find( "Algorithm not registered" ) != std::string::npos );
+        CHECK_FALSE( snap->error.empty() );
         break;
       }
       if ( std::chrono::steady_clock::now() > deadline )

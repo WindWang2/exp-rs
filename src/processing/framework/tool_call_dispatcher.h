@@ -43,6 +43,7 @@ public:
   using CompletionWatcher = std::function<void( long taskId, std::function<void( const Json::Value &resultPayload )> onComplete )>;
   using CompletionCallback = std::function<void( const Json::Value &resultPayload )>;
 
+  ToolCallDispatcher();
   ToolCallDispatcher( SubmissionSink sink, CompletionWatcher watcher );
 
   /// Injects DataManager asset authority to automatically handle transactional output asset committing.

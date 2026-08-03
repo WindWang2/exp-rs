@@ -295,23 +295,6 @@ void StdinReader::run()
 // McpServer implementation
 McpServer::McpServer(QObject *parent)
     : QObject(parent)
-    , mDispatcher(
-          // Tool calls are typed Task Center submissions. autoLoad=false:
-          // MCP has no canvas — results travel via get_execution_status.
-          [](const QString &algorithmId, const QVariantMap &params) -> long {
-              QString effectiveAlgId = algorithmId;
-              if (!effectiveAlgId.startsWith(QStringLiteral("processing:")) &&
-                  !effectiveAlgId.startsWith(QStringLiteral("rs:")))
-              {
-                  effectiveAlgId = QString::fromStdString(ProcessingJobAdapter::processingAlgorithmId(algorithmId));
-              }
-              return sicnu::TaskCenter::instance().enqueueTask(
-                  effectiveAlgId, params, /*autoLoad=*/false, sicnu::TaskPriority::Normal,
-                  QList<long>(), /*autoDispatch=*/true);
-          },
-          // MCP never uses completion callbacks; status is polled via
-          // get_execution_status, so the watcher is a no-op.
-          [](long, sicnu::processing::ToolCallDispatcher::CompletionCallback) {})
 {
     ProcessingJobAdapter::registerProcessingJobExecutor();
 }

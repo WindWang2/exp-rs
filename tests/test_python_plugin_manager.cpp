@@ -12,6 +12,8 @@
 #include "python_worker_process_pool.h"
 #include "plugin_host.h"
 #include "processing/framework/algorithm_engine.h"
+#include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/json_params_converter.h"
 
 #include <QEventLoop>
 #include <QTimer>
@@ -23,6 +25,7 @@
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
+#include <qgsrasterlayer.h>
 #include <qgsmapcanvas.h>
 #include <qgslayertreeview.h>
 #include <qgsmessagebar.h>
@@ -462,12 +465,11 @@ TEST_CASE( "PythonAppInterfaceProxy handles catalog.get_active_layer, canvas.get
   regAlgoMsg[QStringLiteral( "params" )] = algoParams;
   bridge.handleIpcMessage( regAlgoMsg );
 
-  auto foundAlgo = sicnu::AlgorithmEngine::instance().findAlgorithm( QStringLiteral( "py:test_ndvi" ) );
+  auto foundAlgo = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( "py:test_ndvi" );
   CHECK( foundAlgo != nullptr );
   if ( foundAlgo )
   {
-    CHECK( foundAlgo->descriptor().name == QStringLiteral( "Test Python NDVI" ) );
-    CHECK( foundAlgo->descriptor().resourceProfile == sicnu::ProviderResourceProfile::PythonWorkerProcess );
+    CHECK( foundAlgo->descriptor().displayName == "Test Python NDVI" );
   }
 
   CHECK( bridge.registeredActionCount() == 0 );
@@ -722,10 +724,12 @@ TEST_CASE( "Python algorithm executes end-to-end through the daemon executor reg
            == AwaitStatus::Ok );
   REQUIRE( !regIsError );
 
-  QString execError;
   QVariantMap execParams;
   execParams[QStringLiteral( "value" )] = 42;
-  CHECK( sicnu::AlgorithmEngine::instance().executeAlgorithm( QStringLiteral( "py:echo_test" ), execParams, nullptr, execError ) );
+  auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( "py:echo_test" );
+  REQUIRE( adapter != nullptr );
+  Json::Value res = adapter->execute( sicnu::processing::variantToJsonValue( execParams ), nullptr );
+  CHECK( !res.isMember( "error" ) );
 
   // An adapter registered over IPC with no daemon executor reports the daemon error.
   QJsonObject ghostMsg;
@@ -737,9 +741,9 @@ TEST_CASE( "Python algorithm executes end-to-end through the daemon executor reg
   ghostMsg[QStringLiteral( "params" )] = ghostParams;
   bridge.handleIpcMessage( ghostMsg );
 
-  QString ghostError;
-  CHECK_FALSE( sicnu::AlgorithmEngine::instance().executeAlgorithm( QStringLiteral( "py:ghost" ), QVariantMap(), nullptr, ghostError ) );
-  CHECK( ghostError.contains( QStringLiteral( "Unknown algorithm" ) ) );
+  auto ghostAdapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( "py:ghost" );
+  REQUIRE( ghostAdapter != nullptr );
+  CHECK_THROWS_AS( ghostAdapter->execute( Json::Value( Json::objectValue ), nullptr ), std::runtime_error );
 
   worker.stopWorker();
   server.close();

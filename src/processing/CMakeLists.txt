@@ -20,9 +20,6 @@ add_library(sicnu_processing SHARED
     algorithms/vector_optimizer.cpp
     algorithms/satellite_products.cpp
 
-    framework/processing_cache.cpp
-    framework/progress_callback.cpp
-    framework/error_reporter.cpp
     framework/input_validator.cpp
     framework/algorithm_engine.cpp
     framework/algorithm_descriptor.cpp
@@ -185,9 +182,10 @@ endif()
 add_library(sicnu_task_center STATIC
     framework/task_center.cpp
     framework/agent_workflow_executor.cpp
-    # Task Center seam for OutputCommitter — kept out of sicnu_processing so
-    # that library does not need JobEngine / TaskCenter link deps.
+    # Task Center seam for OutputCommitter and ToolCallDispatcher default constructor
+    # — kept out of sicnu_processing so that library does not need JobEngine / TaskCenter link deps.
     framework/output_committer_task_center.cpp
+    framework/tool_call_dispatcher_task_center.cpp
 )
 target_include_directories(sicnu_task_center PUBLIC
     ${CMAKE_SOURCE_DIR}/src

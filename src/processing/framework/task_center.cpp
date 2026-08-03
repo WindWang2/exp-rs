@@ -5,7 +5,10 @@
 #include <thread>
 #include <algorithm>
 #include <chrono>
+#include <QFile>
+#include <QSet>
 #include "framework/json_params_converter.h"
+#include "atomic_algorithm_registry.h"
 #include "jobs/job_engine.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/placeholder_grammar.h"
@@ -53,11 +56,14 @@ TaskCenter::TaskCenter()
 
 ProviderResourceProfile TaskCenter::resolveResourceProfile( const QString &algorithmId ) const
 {
-    auto adapter = AlgorithmEngine::instance().findAlgorithm( algorithmId );
-    if ( adapter )
-        return adapter->descriptor().resourceProfile;
-    // Documented fallback when the algorithm is not registered on AlgorithmEngine
-    // (e.g. pure JobEngine / RSOperator ids used only at runtime).
+    const auto providers = AlgorithmEngine::instance().registeredProviders();
+    for ( const auto &provider : providers )
+    {
+        if ( provider && algorithmId.startsWith( provider->providerId() + QStringLiteral( ":" ) ) )
+        {
+            return provider->resourceProfile();
+        }
+    }
     return ProviderResourceProfile::InProcessThread;
 }
 
@@ -162,13 +168,19 @@ QVariantMap TaskCenter::jsonParamsToVariantMap( const Json::Value &params )
 void TaskCenter::queueTaskAddedLocked( long taskId )
 {
     if ( m_tasks.contains( taskId ) )
+    {
         m_pendingTaskAdded.append( m_tasks[taskId] );
+        m_waitCondition.wakeAll();
+    }
 }
 
 void TaskCenter::queueTaskUpdatedLocked( long taskId )
 {
     if ( m_tasks.contains( taskId ) )
+    {
         m_pendingTaskUpdated.append( m_tasks[taskId] );
+        m_waitCondition.wakeAll();
+    }
 }
 
 void TaskCenter::queueTaskLogLocked( long taskId, const QString &message )
@@ -322,9 +334,9 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         info.autoDispatch = autoDispatch;
         info.resourceProfile = resolveResourceProfile( algorithmId );
 
-        auto adapter = AlgorithmEngine::instance().findAlgorithm( algorithmId );
+        auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( algorithmId.toStdString() );
         if ( adapter )
-            info.algorithmName = adapter->descriptor().name;
+            info.algorithmName = QString::fromStdString( adapter->descriptor().displayName );
         else
             info.algorithmName = algorithmId;
 
@@ -794,54 +806,88 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
 
 bool TaskCenter::cancelTask( long taskId )
 {
-    std::string jobId;
-    bool cancelImmediately = false;
+    std::vector<std::string> jobIdsToCancel;
     {
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) )
             return false;
         if ( isTerminalStatus( m_tasks[taskId].status ) )
             return false;
-        if ( m_tasks[taskId].taskHandle )
-            m_tasks[taskId].taskHandle->cancel();
-        jobId = m_tasks[taskId].jobId;
-        cancelImmediately = jobId.empty();
-        if ( cancelImmediately )
-        {
-            m_tasks[taskId].status = TaskStatus::Canceled;
-            m_tasks[taskId].errorMessage = QStringLiteral( "Task canceled" );
-            m_tasks[taskId].endTime = QDateTime::currentDateTime();
-            m_tasks[taskId].logBuffer.append( QStringLiteral( "Task canceled by user." ) );
-            updatePipelineForTaskLocked( taskId );
-        }
-        else
-        {
-            m_tasks[taskId].logBuffer.append( QStringLiteral( "Cancellation requested by user." ) );
-        }
-        queueTaskUpdatedLocked( taskId );
 
-        if ( cancelImmediately )
+        // Recursive search for all descendant task IDs in the DAG
+        QSet<long> canceledAncestors;
+        canceledAncestors.insert( taskId );
+        bool addedNew = true;
+        while ( addedNew )
         {
-            QList<long> keys = m_tasks.keys();
-            for ( long id : keys )
+            addedNew = false;
+            for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
             {
-                if ( m_tasks[id].parentTaskIds.contains( taskId ) && m_tasks[id].status == TaskStatus::Queued )
+                if ( isTerminalStatus( it.value().status ) )
+                    continue;
+                if ( canceledAncestors.contains( it.key() ) )
+                    continue;
+                for ( long parentId : it.value().parentTaskIds )
                 {
-                    m_tasks[id].status = TaskStatus::Canceled;
-                    m_tasks[id].endTime = QDateTime::currentDateTime();
-                    m_tasks[id].logBuffer.append( QStringLiteral( "Canceled due to upstream parent task failure." ) );
-                    updatePipelineForTaskLocked( id );
-                    queueTaskUpdatedLocked( id );
+                    if ( canceledAncestors.contains( parentId ) )
+                    {
+                        canceledAncestors.insert( it.key() );
+                        addedNew = true;
+                        break;
+                    }
                 }
             }
+        }
+
+        for ( long targetId : canceledAncestors )
+        {
+            auto &info = m_tasks[targetId];
+            if ( isTerminalStatus( info.status ) )
+                continue;
+
+            if ( info.taskHandle )
+                info.taskHandle->cancel();
+
+            if ( !info.jobId.empty() )
+            {
+                jobIdsToCancel.push_back( info.jobId );
+                info.logBuffer.append( ( targetId == taskId )
+                                         ? QStringLiteral( "Cancellation requested by user." )
+                                         : QStringLiteral( "Cancellation requested due to upstream parent task cancellation." ) );
+            }
+            else
+            {
+                info.status = TaskStatus::Canceled;
+                info.errorMessage = ( targetId == taskId )
+                                      ? QStringLiteral( "Task canceled" )
+                                      : QStringLiteral( "Canceled due to upstream parent task cancellation." );
+                info.endTime = QDateTime::currentDateTime();
+                info.logBuffer.append( ( targetId == taskId )
+                                         ? QStringLiteral( "Task canceled by user." )
+                                         : QStringLiteral( "Canceled due to upstream parent task cancellation." ) );
+
+                if ( !info.outputLayerPath.isEmpty() && QFile::exists( info.outputLayerPath ) )
+                {
+                    if ( info.outputLayerPath.startsWith( QStringLiteral( "/tmp/" ) )
+                         || info.outputLayerPath.contains( QStringLiteral( ".scratch" ) ) )
+                    {
+                        QFile::remove( info.outputLayerPath );
+                    }
+                }
+            }
+
+            updatePipelineForTaskLocked( targetId );
+            queueTaskUpdatedLocked( targetId );
         }
 
         processNextQueuedTasks();
     }
     flushPendingLaunches();
     flushPendingSignals();
-    if ( !jobId.empty() )
-        sicnu::jobs::JobEngine::instance().cancel( jobId );
+
+    for ( const auto &jId : jobIdsToCancel )
+        sicnu::jobs::JobEngine::instance().cancel( jId );
+
     return true;
 }
 
@@ -1089,18 +1135,26 @@ AlgorithmTaskInfo TaskCenter::waitForTask( long taskId,
 {
     using clock = std::chrono::steady_clock;
     const auto deadline = clock::now() + timeout;
+
+    QMutexLocker locker( &m_mutex );
     for ( ;; )
     {
-        AlgorithmTaskInfo info = getTaskInfo( taskId );
-        if ( info.taskId < 0 || isTerminalStatus( info.status ) )
+        auto it = m_tasks.find( taskId );
+        if ( it == m_tasks.end() || isTerminalStatus( it->status ) )
         {
-            return info;
+            return it != m_tasks.end() ? *it : AlgorithmTaskInfo{};
         }
-        if ( clock::now() >= deadline )
+
+        const auto now = clock::now();
+        if ( now >= deadline )
         {
-            return info;
+            return *it;
         }
-        std::this_thread::sleep_for( pollInterval );
+
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>( deadline - now );
+        const auto waitTime = std::min( remaining, pollInterval );
+
+        m_waitCondition.wait( &m_mutex, static_cast<unsigned long>( waitTime.count() ) );
     }
 }
 
@@ -1110,18 +1164,26 @@ PipelineExecutionInfo TaskCenter::waitForPipeline( long pipelineId,
 {
     using clock = std::chrono::steady_clock;
     const auto deadline = clock::now() + timeout;
+
+    QMutexLocker locker( &m_mutex );
     for ( ;; )
     {
-        PipelineExecutionInfo info = getPipelineInfo( pipelineId );
-        if ( info.pipelineId < 0 || info.isCompleted || info.isFailed )
+        auto it = m_pipelines.find( pipelineId );
+        if ( it == m_pipelines.end() || it->isCompleted || it->isFailed )
         {
-            return info;
+            return it != m_pipelines.end() ? *it : PipelineExecutionInfo{};
         }
-        if ( clock::now() >= deadline )
+
+        const auto now = clock::now();
+        if ( now >= deadline )
         {
-            return info;
+            return *it;
         }
-        std::this_thread::sleep_for( pollInterval );
+
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>( deadline - now );
+        const auto waitTime = std::min( remaining, pollInterval );
+
+        m_waitCondition.wait( &m_mutex, static_cast<unsigned long>( waitTime.count() ) );
     }
 }
 

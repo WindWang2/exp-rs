@@ -1,31 +1,29 @@
 #pragma once
 
-#include "algorithm_engine.h"
+#include "atomic_algorithm_adapter.h"
+
 #include <functional>
 #include <memory>
-#include <QString>
+#include <string>
 
-namespace sicnu {
+namespace sicnu::processing {
 
-/**
- * Adapter exposing out-of-process Python algorithms to AlgorithmEngine via IPC callbacks.
- */
-class PythonAlgorithmAdapter : public TaskAlgorithmAdapter {
+class PythonAlgorithmAdapter : public AtomicAlgorithmAdapter
+{
 public:
-    using ExecuteCallback = std::function<bool(const QVariantMap& params,
-                                              std::function<void(double)> progress,
-                                              QString& error)>;
+  using ExecuteCallback = std::function<Json::Value( const Json::Value &params, ProgressCallback progressCb )>;
 
-    PythonAlgorithmAdapter(AlgorithmDescriptor desc, ExecuteCallback executor);
-    ~PythonAlgorithmAdapter() override = default;
+  PythonAlgorithmAdapter( AlgorithmDescriptor desc, ExecuteCallback executor );
+  ~PythonAlgorithmAdapter() override = default;
 
-    AlgorithmDescriptor descriptor() const override { return m_desc; }
-    bool validateParameters(const QVariantMap& params, QString& error) const override;
-    bool execute(const QVariantMap& params, std::function<void(double)> progressCallback, QString& error) override;
+  std::string algorithmId() const override { return mDesc.id; }
+  AlgorithmDescriptor descriptor() const override { return mDesc; }
+
+  Json::Value execute( const Json::Value &params, ProgressCallback progressCb = nullptr ) override;
 
 private:
-    AlgorithmDescriptor m_desc;
-    ExecuteCallback m_executor;
+  AlgorithmDescriptor mDesc;
+  ExecuteCallback mExecutor;
 };
 
-} // namespace sicnu
+} // namespace sicnu::processing
