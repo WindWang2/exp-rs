@@ -20,4 +20,4 @@ All notable changes to the `exp-rs` project will be documented in this file.
 - **Skill Suites**: Installed `karpathy-guidelines` and the full `gstack` 59-skill suite for automated PR reviews, security auditing, and performance benchmarking.
 
 ---
-*Verified against Catch2 test suite (245/245 assertions passing).*
+*Verified against full Catch2 test suite (1,138/1,138 assertions passing).*
