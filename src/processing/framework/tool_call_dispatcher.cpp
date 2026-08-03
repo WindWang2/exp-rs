@@ -250,7 +250,7 @@ bool ToolCallDispatcher::submit( const Json::Value &envelope, CompletionCallback
   }
 
   const std::string algorithmId = resolveAlgorithmId( parsed.name );
-  const long taskId = mSink( QString::fromStdString( algorithmId ), jsonParamsToVariantMap( parsed.arguments ) );
+  const long taskId = mSink ? mSink( QString::fromStdString( algorithmId ), jsonParamsToVariantMap( parsed.arguments ) ) : -1;
   if ( taskId <= 0 )
   {
     if ( errorOut )

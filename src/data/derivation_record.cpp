@@ -43,7 +43,7 @@ Result<AssetId> assetIdFromJson( const QJsonObject &json, const QString &key )
   {
     return Result<AssetId>::failure(
       { QStringLiteral( "derivation.invalid" ),
-        QStringLiteral( "%1 is not a valid Asset ID: %2" ).arg( key, text ) } );
+        QStringLiteral( "%1 is not a valid Asset ID: %2" ).arg( key ).arg( text ) } );
   }
   return Result<AssetId>::success( *assetId );
 }
