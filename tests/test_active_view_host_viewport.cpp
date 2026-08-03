@@ -63,4 +63,13 @@ TEST_CASE( "ActiveViewHost viewport methods manipulate QgsMapCanvas", "[app][act
     CHECK( canvas.center().x() == 150.0 );
     CHECK( canvas.center().y() == 250.0 );
   }
+
+  SECTION( "viewportSnapshot captures extent and scale" )
+  {
+    const QgsRectangle rect( 100.0, 200.0, 300.0, 400.0 );
+    host.setExtent( rect );
+    const auto snap = host.viewportSnapshot();
+    CHECK_FALSE( snap.extent.isEmpty() );
+    CHECK( snap.scale == host.mapCanvasScale() );
+  }
 }
