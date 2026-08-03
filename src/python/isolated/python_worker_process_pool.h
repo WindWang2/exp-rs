@@ -46,6 +46,7 @@ class PythonWorkerProcessPool : public QObject
     WorkerNode *acquireWorker();
     void releaseWorker( WorkerNode *node );
 
+    int poolSize() const { return m_poolSize; }
     int activeWorkerCount() const;
     int availableWorkerCount() const;
 

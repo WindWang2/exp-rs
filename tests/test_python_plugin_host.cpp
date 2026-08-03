@@ -4,6 +4,7 @@
 
 #include "python_plugin_host.h"
 #include "python_plugin_adapter.h"
+#include "python_worker_process_pool.h"
 #include "data/data_manager.h"
 
 #include <QCoreApplication>
@@ -46,6 +47,15 @@ TEST_CASE( "PythonPluginHost reports a clean error for a missing plugin director
   QString error;
   CHECK( host.loadPlugin( QStringLiteral( "/nonexistent/plugin/dir" ), &dataManager, nullptr, nullptr, &error ) == nullptr );
   CHECK( !error.isEmpty() );
+}
+
+TEST_CASE( "PythonWorkerProcessPool poolSize and poolHealth queries work correctly", "[python][pool]" )
+{
+  PythonWorkerProcessPool pool( 3 );
+  CHECK( pool.poolSize() == 3 );
+
+  const auto health = pool.poolHealth();
+  CHECK( health.total == 0 );
 }
 
 #include "python_ipc_server.h"
