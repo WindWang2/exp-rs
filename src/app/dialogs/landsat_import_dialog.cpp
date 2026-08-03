@@ -148,8 +148,7 @@ bool LandsatImportDialog::probe()
     return false;
   }
 
-  SatelliteProductsDiscoverer discoverer;
-  CollectionImportService service( m_dataManager, &discoverer );
+  CollectionImportService service( m_dataManager );
   const Result<sicnu::ImportPreview> result = service.probe( source );
 
   if ( !result )
@@ -240,8 +239,7 @@ CollectionId LandsatImportDialog::commitSelection()
   request.selectedChildIndices = selection;
   request.persistence = PersistencePolicy::ProjectPersistent;
 
-  SatelliteProductsDiscoverer discoverer;
-  CollectionImportService service( m_dataManager, &discoverer );
+  CollectionImportService service( m_dataManager );
   const CommitImportResult result = service.commit( request );
 
   if ( result.collectionId.isNull() )

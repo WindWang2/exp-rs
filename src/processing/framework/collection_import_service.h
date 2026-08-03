@@ -11,6 +11,8 @@
 #include "data/collection_types.h"
 #include "data/data_result.h"
 
+#include <memory>
+
 namespace sicnu::data
 {
 class DataManager;
@@ -166,9 +168,9 @@ class CollectionImportService : public QObject
   Q_OBJECT
 
   public:
-    CollectionImportService( sicnu::data::DataManager *dataManager,
-                             ProductDiscoverer *discoverer,
-                             QObject *parent = nullptr );
+    explicit CollectionImportService( sicnu::data::DataManager *dataManager,
+                                       ProductDiscoverer *discoverer = nullptr,
+                                       QObject *parent = nullptr );
 
     /// Probes @a source and returns a normalized preview. Does not register
     /// anything in the catalog - the probe is read-only. A discoverer failure
@@ -204,7 +206,8 @@ class CollectionImportService : public QObject
 
   private:
     sicnu::data::DataManager *m_dataManager; ///< Used by commit() (probe is read-only).
-    ProductDiscoverer *m_discoverer;          ///< Not owned.
+    ProductDiscoverer *m_discoverer;          ///< Not owned (unless m_defaultDiscoverer is set).
+    std::unique_ptr<ProductDiscoverer> m_defaultDiscoverer;
 };
 
 } // namespace sicnu

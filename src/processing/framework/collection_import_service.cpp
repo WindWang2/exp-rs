@@ -97,7 +97,11 @@ CollectionImportService::CollectionImportService( DataManager *dataManager,
   , m_discoverer( discoverer )
 {
   Q_ASSERT( m_dataManager != nullptr );
-  Q_ASSERT( m_discoverer != nullptr );
+  if ( !m_discoverer )
+  {
+    m_defaultDiscoverer = std::make_unique<SatelliteProductsDiscoverer>();
+    m_discoverer = m_defaultDiscoverer.get();
+  }
 }
 
 Result<ImportPreview> CollectionImportService::probe( const QString &source )
