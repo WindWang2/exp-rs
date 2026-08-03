@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
+#include <algorithm>
 
 namespace sicnu::python::isolated
 {
@@ -113,8 +114,18 @@ bool PythonWorkerProcessPool::setPoolSize( int newSize )
   else if ( newSize < m_poolSize )
   {
     // ── Shrink: remove idle (non-busy) nodes from the tail ──
-    // Only need to remove nodes that actually exist beyond the new size.
-    const int excessNodes = qMax( 0, m_nodes.size() - newSize );
+    const int excessNodes = (std::max)( 0, static_cast<int>( m_nodes.size() ) - newSize );
+    
+    // Upfront transactional check: ensure enough idle nodes exist before mutating
+    int availableIdle = 0;
+    for ( const WorkerNode *node : m_nodes )
+    {
+      if ( node && !node->isBusy )
+        availableIdle++;
+    }
+    if ( availableIdle < excessNodes )
+      return false;
+
     int toRemove = excessNodes;
     for ( int i = m_nodes.size() - 1; i >= 0 && toRemove > 0; --i )
     {
@@ -138,9 +149,6 @@ bool PythonWorkerProcessPool::setPoolSize( int newSize )
         --toRemove;
       }
     }
-    // If we couldn't remove enough (all remaining are busy), fail
-    if ( toRemove > 0 )
-      return false;
   }
 
   m_poolSize = newSize;

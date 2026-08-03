@@ -69,7 +69,7 @@ SessionSnapshot WorkflowSession::snapshot() const
     const auto statuses = m_pipelineResolver( m_pipelineId );
     for ( const auto &[stepId, status] : statuses )
     {
-      if ( status == PipelineStepStatus::Completed )
+      if ( status == PipelineStepStatus::Completed && stepById( stepId ) )
       {
         if ( std::find( snap.completedStepIds.begin(), snap.completedStepIds.end(), stepId ) == snap.completedStepIds.end() )
           snap.completedStepIds.push_back( stepId );
@@ -148,7 +148,7 @@ bool WorkflowSession::hasArtifact( const std::string &name ) const
 
 void WorkflowSession::markStepComplete( const std::string &stepId )
 {
-  if ( !stepById( stepId ) )
+  if ( !stepById( stepId ) || m_completed.size() >= m_def.steps.size() )
     return;
   if ( std::find( m_completed.begin(), m_completed.end(), stepId ) == m_completed.end() )
     m_completed.push_back( stepId );
