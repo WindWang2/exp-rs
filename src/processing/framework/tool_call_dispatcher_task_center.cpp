@@ -12,9 +12,10 @@ ToolCallDispatcher::ToolCallDispatcher()
         algorithmId, params, /*autoLoad=*/true, sicnu::TaskPriority::Normal, {}, /*autoDispatch=*/true );
     } )
   , mWatcher( [this]( long taskId, CompletionCallback onComplete ) {
-      std::thread( [this, taskId, cb = std::move( onComplete )]() mutable {
+      OutputCommitterHandler committerHandler = mOutputCommitterHandler;
+      std::thread( [taskId, cb = std::move( onComplete ), committerHandler = std::move( committerHandler )]() mutable {
         const auto info = sicnu::TaskCenter::instance().waitForTask( taskId );
-        const Json::Value payload = buildTaskResultPayload( info, mOutputCommitterHandler );
+        const Json::Value payload = buildTaskResultPayload( info, committerHandler );
         if ( cb )
           cb( payload );
       } ).detach();

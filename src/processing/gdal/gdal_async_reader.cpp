@@ -50,7 +50,7 @@ GdalAsyncReader::Chunk GdalAsyncReader::readChunk(int chunkIndex)
 {
     Chunk chunk;
     chunk.startRow = chunkIndex * m_chunkHeight;
-    chunk.endRow = std::min(chunk.startRow + m_chunkHeight, m_height);
+    chunk.endRow = (std::min)(chunk.startRow + m_chunkHeight, m_height);
     chunk.height = chunk.endRow - chunk.startRow;
 
     size_t pixelCount = static_cast<size_t>(m_width) * chunk.height;
@@ -114,7 +114,7 @@ void GdalAsyncReader::prefetchNextChunk()
     m_prefetchFuture = QtConcurrent::run([dataset, bandCount, width, height, chunkHeight, nextChunk]() -> Chunk {
         Chunk chunk;
         chunk.startRow = nextChunk * chunkHeight;
-        chunk.endRow = std::min(chunk.startRow + chunkHeight, height);
+        chunk.endRow = (std::min)(chunk.startRow + chunkHeight, height);
         chunk.height = chunk.endRow - chunk.startRow;
 
         size_t pixelCount = static_cast<size_t>(width) * chunk.height;

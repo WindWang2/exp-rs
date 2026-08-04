@@ -155,6 +155,9 @@ void SicnuPythonConsole::addHistory(const QString &command)
 {
     if (!command.trimmed().isEmpty()) {
         m_history.append(command);
+        if (m_history.size() > 1000) {
+            m_history.removeFirst();
+        }
         m_historyIndex = m_history.size();
     }
 }
