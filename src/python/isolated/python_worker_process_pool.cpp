@@ -1,10 +1,10 @@
-// src/python/isolated/python_worker_process_pool.cpp
 #include "python_worker_process_pool.h"
 
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
 #include <algorithm>
+#include <thread>
 
 namespace sicnu::python::isolated
 {
@@ -64,13 +64,18 @@ void PythonWorkerProcessPool::shutdown()
 
 WorkerNode *PythonWorkerProcessPool::acquireWorker()
 {
-  for ( WorkerNode *node : m_nodes )
+  for ( int retry = 0; retry < 50; ++retry )
   {
-    if ( node && !node->isBusy && node->worker && node->worker->isRunning() && node->server && node->server->hasClient() )
+    for ( WorkerNode *node : m_nodes )
     {
-      node->isBusy = true;
-      return node;
+      if ( node && !node->isBusy && node->worker && node->worker->isRunning() && node->server && node->server->hasClient() )
+      {
+        node->isBusy = true;
+        return node;
+      }
     }
+    QCoreApplication::processEvents();
+    std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
   }
   return nullptr;
 }

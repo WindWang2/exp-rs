@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
+#include <QSslError>
 
 namespace sicnu::agent
 {
@@ -89,6 +90,12 @@ void LlmStreamingClient::sendChatCompletion( const QJsonArray &messages, const Q
     connect( m_currentReply, &QNetworkReply::readyRead, this, &LlmStreamingClient::onReadyRead );
     connect( m_currentReply, &QNetworkReply::finished, this, &LlmStreamingClient::onReplyFinished );
     connect( m_currentReply, &QNetworkReply::errorOccurred, this, &LlmStreamingClient::onReplyError );
+    connect( m_currentReply, &QNetworkReply::sslErrors, this, [this]( const QList<QSslError> &errors ) {
+      QStringList msgs;
+      for ( const auto &e : errors )
+        msgs.append( e.errorString() );
+      emit errorOccurred( QStringLiteral( "SSL Error: %1" ).arg( msgs.join( QStringLiteral( "; " ) ) ) );
+    } );
   }
 }
 
@@ -217,14 +224,21 @@ void LlmStreamingClient::emitParsedToolCallOnce()
   else
   {
     QString rawArgs = m_toolArgumentsBuffer.trimmed();
-    if ( rawArgs.startsWith( '"' ) && rawArgs.endsWith( '"' ) && rawArgs.length() > 2 )
+    if ( rawArgs.startsWith( '"' ) && rawArgs.endsWith( '"' ) && rawArgs.size() > 2 )
     {
-      rawArgs = rawArgs.mid( 1, rawArgs.length() - 2 );
-      rawArgs.replace( QStringLiteral( "\\\"" ), QStringLiteral( "\"" ) );
-      const QJsonDocument nestedDoc = QJsonDocument::fromJson( rawArgs.toUtf8() );
-      if ( nestedDoc.isObject() )
+      const QJsonDocument arrDoc = QJsonDocument::fromJson( QString( "[%1]" ).arg( rawArgs ).toUtf8() );
+      if ( arrDoc.isArray() && !arrDoc.array().isEmpty() && arrDoc.array()[0].isString() )
       {
-        funcObj[QStringLiteral( "arguments" )] = nestedDoc.object();
+        const QString unescapedStr = arrDoc.array()[0].toString();
+        const QJsonDocument nestedDoc = QJsonDocument::fromJson( unescapedStr.toUtf8() );
+        if ( nestedDoc.isObject() )
+        {
+          funcObj[QStringLiteral( "arguments" )] = nestedDoc.object();
+        }
+        else
+        {
+          funcObj[QStringLiteral( "arguments" )] = m_toolArgumentsBuffer;
+        }
       }
       else
       {

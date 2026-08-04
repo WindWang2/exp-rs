@@ -52,9 +52,8 @@ void RsClassTableWidget::setRoiCollection( RsRoiCollection *col )
 
 void RsClassTableWidget::rebuild()
 {
-  // Preserve selection: rebuild used to clear the table and drop currentClassId
-  // to 0, which made every subsequent ROI sample look "invalid" (classId<=0).
-  const int keepId = currentClassId() > 0 ? currentClassId() : mStickyClassId;
+  const QList<int> keepIds = selectedClassIds();
+  const int keepId = !keepIds.isEmpty() ? keepIds.first() : ( currentClassId() > 0 ? currentClassId() : mStickyClassId );
 
   mTable->blockSignals( true );
   mTable->setRowCount( 0 );
@@ -68,7 +67,8 @@ void RsClassTableWidget::rebuild()
   QList<int> ids = defs.keys();
   std::sort( ids.begin(), ids.end() );
 
-  int restoreRow = -1;
+  QList<int> restoreRows;
+  int primaryRestoreRow = -1;
   for ( int id : ids )
   {
     const RsClassDef d = defs.value( id );
@@ -93,15 +93,32 @@ void RsClassTableWidget::rebuild()
     pxCell->setTextAlignment( Qt::AlignRight | Qt::AlignVCenter );
     mTable->setItem( row, 3, pxCell );
 
-    if ( keepId > 0 && id == keepId )
-      restoreRow = row;
+    if ( keepIds.contains( id ) )
+    {
+      restoreRows.append( row );
+      if ( id == keepId )
+        primaryRestoreRow = row;
+    }
   }
 
-  if ( restoreRow < 0 && mTable->rowCount() > 0 )
-    restoreRow = 0;
+  if ( restoreRows.isEmpty() && mTable->rowCount() > 0 )
+  {
+    restoreRows.append( 0 );
+    primaryRestoreRow = 0;
+  }
 
-  if ( restoreRow >= 0 )
-    mTable->selectRow( restoreRow );
+  if ( mTable->selectionModel() )
+    mTable->selectionModel()->clearSelection();
+
+  for ( int row : restoreRows )
+  {
+    mTable->selectRow( row );
+  }
+
+  if ( primaryRestoreRow >= 0 && mTable->model() )
+  {
+    mTable->setCurrentIndex( mTable->model()->index( primaryRestoreRow, 0 ) );
+  }
 
   mTable->blockSignals( false );
 
@@ -160,9 +177,21 @@ void RsClassTableWidget::setCurrentClassId( int classId )
 
 int RsClassTableWidget::currentClassId() const
 {
+  if ( !mTable || mTable->rowCount() == 0 )
+    return 0;
+
   const auto rows = mTable->selectionModel()->selectedRows();
   if ( rows.isEmpty() )
     return mStickyClassId;
+
+  const QModelIndex curIdx = mTable->currentIndex();
+  if ( curIdx.isValid() && mTable->selectionModel()->isSelected( curIdx ) )
+  {
+    auto *it = mTable->item( curIdx.row(), 0 );
+    if ( it )
+      return it->data( Qt::UserRole ).toInt();
+  }
+
   auto *it = mTable->item( rows.first().row(), 0 );
   return it ? it->data( Qt::UserRole ).toInt() : mStickyClassId;
 }

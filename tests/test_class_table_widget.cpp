@@ -50,7 +50,7 @@ TEST_CASE( "ClassTable: currentClassChanged on row selection", "[classify][table
   w.setRoiCollection( &col );
   QSignalSpy spy( &w, &RsClassTableWidget::currentClassChanged );
   w.setCurrentRow( 1 );
-  REQUIRE( spy.count() >= 1 );
+  REQUIRE( spy.size() >= 1 );
   REQUIRE( w.currentClassId() == 2 );
 }
 
@@ -69,4 +69,26 @@ TEST_CASE( "ClassTable: selectedClassIds returns all selected IDs", "[classify][
   w.setCurrentClassId( 1 );
   const QList<int> sel = w.selectedClassIds();
   REQUIRE( sel.contains( 1 ) );
+}
+
+TEST_CASE( "ClassTable: rebuild preserves selection and empty table returns 0 classId", "[classify][table]" )
+{
+  ensureApp();
+  RsRoiCollection col;
+  col.setClassDef( RsClassDef( 1, "A", QColor( "#0a0" ) ) );
+  col.setClassDef( RsClassDef( 2, "B", QColor( "#a00" ) ) );
+
+  RsClassTableWidget w;
+  w.setRoiCollection( &col );
+  w.setCurrentClassId( 2 );
+  REQUIRE( w.currentClassId() == 2 );
+
+  // Rebuild on class def change
+  col.setClassDef( RsClassDef( 3, "C", QColor( "#00a" ) ) );
+  REQUIRE( w.currentClassId() == 2 );
+  REQUIRE( w.selectedClassIds().contains( 2 ) );
+
+  // Empty table returns 0
+  RsClassTableWidget emptyW;
+  REQUIRE( emptyW.currentClassId() == 0 );
 }

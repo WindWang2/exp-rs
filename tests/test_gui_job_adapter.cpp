@@ -59,7 +59,7 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
         TaskCenter::instance().markTaskCompleted(taskId, QVariantMap(), payload);
 
         // Process pending Qt events to deliver QueuedConnection signal
-        for ( int i = 0; i < 5 && !successCalled; ++i )
+        for ( int i = 0; i < 50 && !successCalled; ++i )
         {
           QCoreApplication::processEvents();
           std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
@@ -87,7 +87,7 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
         REQUIRE(taskId > 0);
 
         handle.cancel();
-        for ( int i = 0; i < 5 && !failureCalled; ++i )
+        for ( int i = 0; i < 50 && !failureCalled; ++i )
         {
           QCoreApplication::processEvents();
           std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );

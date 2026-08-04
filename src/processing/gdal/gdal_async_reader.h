@@ -4,6 +4,7 @@
 #include <vector>
 #include <functional>
 #include <atomic>
+#include <mutex>
 #include <QFuture>
 #include <QFutureWatcher>
 
@@ -93,6 +94,7 @@ private:
     QFuture<Chunk> m_prefetchFuture;
     QFutureWatcher<Chunk> *m_prefetchWatcher = nullptr;
     std::atomic<bool> m_prefetchReady{false};
+    mutable std::mutex m_gdalMutex;
 
     Chunk readChunk(int chunkIndex);
 };

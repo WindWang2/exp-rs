@@ -314,7 +314,7 @@ QWidget *QgsGeorefShellWindow::makeCanvasPanel( QgsMapCanvas *canvas,
   caption->setTextInteractionFlags( Qt::TextSelectableByMouse );
   QFont f = caption->font();
   f.setBold( true );
-  f.setPointSize( std::max( 9, f.pointSize() ) );
+  f.setPointSize( (std::max)( 9, f.pointSize() ) );
   caption->setFont( f );
   caption->setStyleSheet(
     QStringLiteral(
