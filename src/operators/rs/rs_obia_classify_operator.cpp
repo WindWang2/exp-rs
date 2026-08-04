@@ -207,7 +207,7 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
     const auto &segLabels = segMap.labels();
     quint32 maxLabel = 0;
     for (quint32 sid : segLabels)
-        maxLabel = std::max(maxLabel, sid);
+        maxLabel = (std::max)(maxLabel, sid);
     const int nSeg = static_cast<int>(maxLabel);
 
     context.reportProgress(0.35, "Extracting segment mean features (" + std::to_string(nSeg) + ")");
@@ -304,7 +304,7 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
     for (int s = 1; s <= nSeg; ++s) {
         // Backend predictions are integral class ids already; negative is
         // defensive only (SVM/Bayes predict within the trained label set).
-        classOfSeg[static_cast<size_t>(s)] = std::max(0, pred.at<int>(s - 1, 0));
+        classOfSeg[static_cast<size_t>(s)] = (std::max)(0, pred.at<int>(s - 1, 0));
     }
 
     // Paint class map. RsPostProcess::saveLabelRaster owns the dtype policy

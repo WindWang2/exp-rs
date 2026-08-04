@@ -821,12 +821,12 @@ void RsObiaMainWindow::applyHierarchyResult( RsObjectHierarchy hierarchy,
 
     if ( auto *ls = findChild<QSpinBox *>( "levelSpin" ) )
     {
-        ls->setMaximum( std::max( 0, mHierarchy.levelCount() - 1 ) );
+        ls->setMaximum( (std::max)( 0, mHierarchy.levelCount() - 1 ) );
         ls->setValue( activeLevel );
     }
     if ( auto *cs = findChild<QSpinBox *>( "classifyLevelSpin" ) )
     {
-        cs->setMaximum( std::max( 0, mHierarchy.levelCount() - 1 ) );
+        cs->setMaximum( (std::max)( 0, mHierarchy.levelCount() - 1 ) );
         cs->setValue( 0 );
     }
 
@@ -1376,10 +1376,10 @@ void RsObiaMainWindow::importRoiLabels()
         int cB = static_cast<int>( std::ceil( ( env.MaxX - gt[0] ) / gt[1] ) );
         int rA = static_cast<int>( std::floor( ( env.MinY - gt[3] ) / gt[5] ) );
         int rB = static_cast<int>( std::ceil( ( env.MaxY - gt[3] ) / gt[5] ) );
-        const int c0 = std::max( 0, std::min( cA, cB ) );
-        const int c1 = std::min( w - 1, std::max( cA, cB ) );
-        const int r0 = std::max( 0, std::min( rA, rB ) );
-        const int r1 = std::min( h - 1, std::max( rA, rB ) );
+        const int c0 = (std::max)( 0, (std::min)( cA, cB ) );
+        const int c1 = (std::min)( w - 1, (std::max)( cA, cB ) );
+        const int r0 = (std::max)( 0, (std::min)( rA, rB ) );
+        const int r1 = (std::min)( h - 1, (std::max)( rA, rB ) );
         if ( c0 > c1 || r0 > r1 )
         {
             OGR_F_Destroy( feat );
