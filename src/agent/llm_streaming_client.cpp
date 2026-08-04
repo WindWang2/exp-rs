@@ -216,7 +216,25 @@ void LlmStreamingClient::emitParsedToolCallOnce()
   }
   else
   {
-    funcObj[QStringLiteral( "arguments" )] = m_toolArgumentsBuffer;
+    QString rawArgs = m_toolArgumentsBuffer.trimmed();
+    if ( rawArgs.startsWith( '"' ) && rawArgs.endsWith( '"' ) && rawArgs.length() > 2 )
+    {
+      rawArgs = rawArgs.mid( 1, rawArgs.length() - 2 );
+      rawArgs.replace( QStringLiteral( "\\\"" ), QStringLiteral( "\"" ) );
+      const QJsonDocument nestedDoc = QJsonDocument::fromJson( rawArgs.toUtf8() );
+      if ( nestedDoc.isObject() )
+      {
+        funcObj[QStringLiteral( "arguments" )] = nestedDoc.object();
+      }
+      else
+      {
+        funcObj[QStringLiteral( "arguments" )] = m_toolArgumentsBuffer;
+      }
+    }
+    else
+    {
+      funcObj[QStringLiteral( "arguments" )] = m_toolArgumentsBuffer;
+    }
   }
 
   QJsonObject toolCallObj;
