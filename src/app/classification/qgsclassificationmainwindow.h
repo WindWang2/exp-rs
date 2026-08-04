@@ -59,6 +59,10 @@ class QgsTask;
 namespace sicnu
 {
   struct AlgorithmTaskInfo;
+  namespace data
+  {
+    class DataManager;
+  }
 }
 
 /**
@@ -79,6 +83,10 @@ class QgsClassificationMainWindow : public QMainWindow
 
     /// Session map workspace (store + tree + optional local bridge). Wave E host.
     RsSessionMapWorkspace *sessionMap() const { return m_sessionMap; }
+
+    /// Inject the shell Data Manager (nullptr-safe). When set, merged-class
+    /// outputs are registered as Data Assets in addition to the session layer.
+    void setDataManager( sicnu::data::DataManager *dm ) { m_dataManager = dm; }
 
   public slots:
     bool openSourceRaster();
@@ -157,6 +165,23 @@ class QgsClassificationMainWindow : public QMainWindow
     void ensureSampleLayer();
     /// Categorized renderer by cls_id using class colors.
     void applySampleLayerRenderer();
+    /// Re-apply current class names/colors to the result raster's paletted
+    /// renderer (live palette update). No-op if the result layer is absent or
+    /// not a paletted raster (e.g. Int32 output without a color table).
+    void applyPreviewLayerRenderer();
+    /// Persist class definitions alongside \a rasterPath as <name>.class.json.
+    /// No-op if the path is empty or there are no class definitions. Failure
+    /// is logged, never fatal.
+    void writeClassMetadataSidecar( const QString &rasterPath ) const;
+    /// Register \a rasterPath as a Data Asset in the shell DataManager when
+    /// available. No-op if no DataManager was injected; failure is logged.
+    void registerOutputInDataManager( const QString &rasterPath );
+    /// Merge \a sources into \a targetId via an async recode task. Builds the
+    /// recode config and submits through the existing post-process pipeline.
+    void runMergeClasses( const QList<int> &sources, int targetId,
+                          const QString &targetName, const QColor &targetColor );
+    /// Enable/disable the merge action based on current row selection count.
+    void updateMergeActionEnabled();
     /// Rebuild RsRoiCollection from sample layer features (training cache).
     void rebuildRoisFromSampleLayer();
     /// Push RsRoiCollection geometries into the sample layer (load path).
@@ -169,6 +194,7 @@ class QgsClassificationMainWindow : public QMainWindow
     QgisInterface *m_iface = nullptr;
     QgsMapCanvas *m_canvas = nullptr;
     RsRoiCollection *m_rois = nullptr;
+    sicnu::data::DataManager *m_dataManager = nullptr;
 
     /// Session-local map stack (store + tree + model + bridge).
     RsSessionMapWorkspace *m_sessionMap = nullptr;
@@ -210,6 +236,10 @@ class QgsClassificationMainWindow : public QMainWindow
     QString m_lastClassifyPath;
     QString m_lastPostRasterPath;
     QString m_lastPostVectorPath;
+    /// Output path of the most recent class-merge, set in runMergeClasses and
+    /// cleared at the start of each post-process task. Used to gate DataManager
+    /// registration so only merges (not sieve/majority/clump) are registered.
+    QString m_lastMergeOutputPath;
 
     QCheckBox *m_exportClassifiedCb = nullptr;
     QCheckBox *m_exportPostRasterCb = nullptr;
@@ -229,6 +259,7 @@ class QgsClassificationMainWindow : public QMainWindow
     QDockWidget *m_spectralDock = nullptr;
 
     RsClassTableWidget *m_classTableWidget = nullptr;
+    QAction *m_mergeClassesAction = nullptr;
     RsClassQuickList *m_classQuickListWidget = nullptr;
     RsSpectralCurveWidget *m_spectralCurve = nullptr;
     RsJmMatrixWidget *m_jmMatrix = nullptr;
@@ -260,4 +291,6 @@ class QgsClassificationMainWindow : public QMainWindow
     void onCurrentClassChanged( int classId );
     void onSampleLayerEdited();
     void onToggleEditing( bool on );
+    void onMergeClassesRequested( const QList<int> &sourceClassIds, int targetClassId,
+                                  const QString &targetName, const QColor &targetColor );
 };

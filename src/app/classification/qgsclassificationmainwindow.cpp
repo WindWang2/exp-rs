@@ -13,8 +13,13 @@
 #include "rs_classification_split.h"
 #include "rs_classification_pipeline.h"
 #include "rs_classifier_kmeans.h"
+#include "rs_post_process.h"
 #include "rs_post_process_dialog.h"
 #include "rs_post_process_task.h"
+#include "rs_merge_classes_dialog.h"
+#include "data/data_asset.h"
+#include "data/data_manager.h"
+#include "data/source_descriptor.h"
 #include "rs_classifier_load_dialog.h"
 #include "qgisinterface.h"
 #include "rs_classifier_normalbayes.h"
@@ -59,6 +64,7 @@
 #include "qgsmessagelog.h"
 #include "qgslayertreemodel.h"
 #include "qgslayertreeview.h"
+#include "qgspalettedrasterrenderer.h"
 #include "qgsrasterlayer.h"
 #include "qgssymbol.h"
 #include "qgstaskmanager.h"
@@ -98,6 +104,7 @@
 #include <QMessageBox>
 #include <QPair>
 #include <QPushButton>
+#include <QToolButton>
 #include <QSet>
 #include <QSizePolicy>
 #include <QSpinBox>
@@ -280,6 +287,7 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
     connect( m_rois, &RsRoiCollection::classDefChanged,
              this, [this]( int ) {
                applySampleLayerRenderer();
+               applyPreviewLayerRenderer();
                syncWorkflowFromRois();
              } );
   }
@@ -630,9 +638,27 @@ void QgsClassificationMainWindow::setupDocks()
 
   m_classListDock = new QDockWidget( tr( "类别管理" ), this );
   m_classListDock->setObjectName( QStringLiteral( "rsClassListDock" ) );
-  m_classTableWidget = new RsClassTableWidget( m_classListDock );
+  auto *classListHost = new QWidget( m_classListDock );
+  auto *classListLay = new QVBoxLayout( classListHost );
+  classListLay->setContentsMargins( 0, 0, 0, 0 );
+  classListLay->setSpacing( 0 );
+  m_classTableWidget = new RsClassTableWidget( classListHost );
   m_classTableWidget->setRoiCollection( m_rois );
-  m_classListDock->setWidget( m_classTableWidget );
+  classListLay->addWidget( m_classTableWidget );
+
+  // Multi-select merge entry point (action shared by button + context menu).
+  m_mergeClassesAction = new QAction( tr( "合并所选类别…" ), this );
+  m_mergeClassesAction->setObjectName( QStringLiteral( "rsMergeClassesAction" ) );
+  m_mergeClassesAction->setEnabled( false );
+  auto *mergeBtn = new QToolButton( classListHost );
+  mergeBtn->setText( tr( "合并所选类别…" ) );
+  mergeBtn->setObjectName( QStringLiteral( "rsMergeClassesBtn" ) );
+  mergeBtn->setToolButtonStyle( Qt::ToolButtonTextOnly );
+  mergeBtn->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+  mergeBtn->setDefaultAction( m_mergeClassesAction );
+  classListLay->addWidget( mergeBtn );
+
+  m_classListDock->setWidget( classListHost );
   addDockWidget( Qt::RightDockWidgetArea, m_classListDock );
   m_classListDock->resize( 380, m_classListDock->height() );
 
@@ -727,6 +753,31 @@ void QgsClassificationMainWindow::setupSampleVectorEditing()
   {
     connect( m_classTableWidget, &RsClassTableWidget::currentClassChanged,
              this, &QgsClassificationMainWindow::onCurrentClassChanged );
+    connect( m_classTableWidget, &RsClassTableWidget::currentClassChanged,
+             this, [this]( int ) { updateMergeActionEnabled(); } );
+    connect( m_classTableWidget, &RsClassTableWidget::mergeClassesRequested,
+             this, &QgsClassificationMainWindow::onMergeClassesRequested );
+    // Right-click the class table to merge the selected rows.
+    m_classTableWidget->setContextMenuPolicy( Qt::ActionsContextMenu );
+    if ( m_mergeClassesAction )
+    {
+      connect( m_mergeClassesAction, &QAction::triggered, this, [this]() {
+        if ( !m_classTableWidget || !m_rois )
+          return;
+        const QList<int> sel = m_classTableWidget->selectedClassIds();
+        if ( sel.size() < 2 )
+          return;
+        // Suggest the first selected class as the merge target.
+        const QHash<int, RsClassDef> defs = m_rois->classDefs();
+        const RsClassDef d = defs.value( sel.first() );
+        m_classTableWidget->mergeSelectedClasses(
+          sel.first(),
+          defs.contains( sel.first() ) ? d.name() : QString(),
+          defs.contains( sel.first() ) ? d.color() : QColor() );
+      } );
+      m_classTableWidget->addAction( m_mergeClassesAction );
+    }
+    updateMergeActionEnabled();
   }
   if ( m_classQuickListWidget )
   {
@@ -805,6 +856,133 @@ void QgsClassificationMainWindow::applySampleLayerRenderer()
   m_sampleLayer->triggerRepaint();
   if ( m_canvas )
     m_canvas->refresh();
+}
+
+void QgsClassificationMainWindow::applyPreviewLayerRenderer()
+{
+  // Live palette update on the result raster. Only meaningful for paletted
+  // (Byte-with-color-table) output; silently skipped otherwise.
+  if ( !m_previewLayer || !m_rois )
+    return;
+
+  auto *old = dynamic_cast<QgsPalettedRasterRenderer *>( m_previewLayer->renderer() );
+  if ( !old )
+    return;
+
+  // Rebuild class data from the existing renderer classes (preserves every
+  // pixel value present in the raster, including any not in m_rois), then
+  // overlay the current name/color for ids that have a class definition.
+  QgsPalettedRasterRenderer::ClassData classes = old->classes();
+  const QHash<int, RsClassDef> defs = m_rois->classDefs();
+  for ( auto &cls : classes )
+  {
+    const auto it = defs.find( static_cast<int>( cls.value ) );
+    if ( it == defs.end() )
+      continue;
+    cls.color = it.value().color();
+    cls.label = it.value().name();
+  }
+
+  auto *renderer = new QgsPalettedRasterRenderer(
+    m_previewLayer->dataProvider(), 1, classes );
+  m_previewLayer->setRenderer( renderer );
+  m_previewLayer->triggerRepaint();
+  if ( m_canvas )
+    m_canvas->refresh();
+}
+
+void QgsClassificationMainWindow::writeClassMetadataSidecar( const QString &rasterPath ) const
+{
+  if ( rasterPath.isEmpty() || !m_rois )
+    return;
+  const QHash<int, RsClassDef> defs = m_rois->classDefs();
+  if ( defs.isEmpty() )
+    return;
+  QString err;
+  if ( !RsPostProcess::saveClassMetaData( rasterPath, defs, &err ) )
+  {
+    SICNU_LOG_WARN( SicnuLogTags::Classification,
+                    QStringLiteral( "Failed to write class metadata sidecar for %1: %2" )
+                      .arg( rasterPath, err ) );
+  }
+}
+
+void QgsClassificationMainWindow::registerOutputInDataManager( const QString &rasterPath )
+{
+  if ( !m_dataManager || rasterPath.isEmpty() )
+    return;
+
+  sicnu::data::SourceDescriptor source;
+  source.providerKey = QStringLiteral( "gdal" );
+  source.canonicalSource = rasterPath;
+
+  const sicnu::data::RegisterResult registered =
+    m_dataManager->registerSource( sicnu::data::RegisterRequest{ std::move( source ) } );
+  if ( registered.assetId.isNull() )
+  {
+    SICNU_LOG_WARN( SicnuLogTags::Classification,
+                    QStringLiteral( "Failed to register merged raster in DataManager: %1" )
+                      .arg( rasterPath ) );
+  }
+}
+
+void QgsClassificationMainWindow::updateMergeActionEnabled()
+{
+  if ( m_mergeClassesAction )
+    m_mergeClassesAction->setEnabled( m_classTableWidget
+                                      && m_classTableWidget->selectedClassIds().size() >= 2 );
+}
+
+void QgsClassificationMainWindow::onMergeClassesRequested( const QList<int> &sourceClassIds,
+                                                           int /*targetClassId*/,
+                                                           const QString &suggestedName,
+                                                           const QColor &suggestedColor )
+{
+  if ( sourceClassIds.size() < 2 )
+    return;
+
+  RsMergeClassesDialog dlg( this );
+  dlg.setSourceClassIds( sourceClassIds, suggestedName, suggestedColor );
+  if ( dlg.exec() != QDialog::Accepted )
+    return;
+
+  runMergeClasses( sourceClassIds, dlg.targetClassId(),
+                   dlg.targetName(), dlg.targetColor() );
+}
+
+void QgsClassificationMainWindow::runMergeClasses( const QList<int> &sources,
+                                                   int targetId,
+                                                   const QString &targetName,
+                                                   const QColor &targetColor )
+{
+  const QString input = !m_lastPostRasterPath.isEmpty()
+                          ? m_lastPostRasterPath
+                          : m_lastClassifyPath;
+  if ( input.isEmpty() )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "没有可合并的分类结果栅格" ), 5000 );
+    return;
+  }
+
+  // Reconcile the target class definition so the recoded raster's palette and
+  // the post-process sidecar reflect the merged category.
+  if ( m_rois && targetId > 0 )
+    m_rois->setClassDef( RsClassDef( targetId, targetName, targetColor ) );
+
+  RsPostProcessConfig cfg;
+  cfg.inputPath = input;
+  cfg.runRecode = true;
+  cfg.recodeMap = buildRecodeMap( sources, targetId );
+
+  const QFileInfo fi( input );
+  cfg.outputRasterPath =
+    fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName()
+    + QStringLiteral( "_merged.tif" );
+
+  m_lastMergeOutputPath = cfg.outputRasterPath;
+  runPostProcess( cfg, /*loadToLayers=*/true, tr( "合并类别" ),
+                  QStringLiteral( "module:classify:postprocess:recode" ) );
 }
 
 
@@ -2193,6 +2371,7 @@ void QgsClassificationMainWindow::applyClassification()
     [this, outForLog, algoForLog]( const QString &, const Json::Value &payload ) {
       setClassifyBusy( false );
       m_lastClassifyPath = outForLog;
+      writeClassMetadataSidecar( outForLog );
 
       if ( m_workflow )
         m_workflow->setHasFullClassifyResult( true );
@@ -2506,6 +2685,10 @@ long QgsClassificationMainWindow::startPostProcessTask(
   const QString outRaster = cfg.outputRasterPath;
   const QString outVector = cfg.outputVectorPath;
   const bool doPoly = cfg.runPolygonize;
+  // A merge sets m_lastMergeOutputPath before submitting; every other entry
+  // clears it so the success callback only registers merges in DataManager.
+  if ( m_lastMergeOutputPath != outRaster )
+    m_lastMergeOutputPath.clear();
   setClassifyBusy( true );
 
   sicnu::jobs::JobRequest req;
@@ -2558,7 +2741,17 @@ long QgsClassificationMainWindow::startPostProcessTask(
         m_workflow->setHasPostProcessResult( true );
 
       if ( !outRaster.isEmpty() )
+      {
         m_lastPostRasterPath = outRaster;
+        writeClassMetadataSidecar( outRaster );
+        // Merge outputs are also registered in the shell Data Manager; every
+        // other post-process op only adds a session layer.
+        if ( m_lastMergeOutputPath == outRaster )
+        {
+          registerOutputInDataManager( outRaster );
+          m_lastMergeOutputPath.clear();
+        }
+      }
       if ( doPoly && !outVector.isEmpty() )
         m_lastPostVectorPath = outVector;
 
@@ -2607,6 +2800,7 @@ long QgsClassificationMainWindow::startPostProcessTask(
     },
     [this]( const QString &err, bool isCanceled ) {
       setClassifyBusy( false );
+      m_lastMergeOutputPath.clear();
       if ( isCanceled )
       {
         if ( statusBar() )
@@ -3291,6 +3485,12 @@ bool QgsClassificationMainWindow::saveClassificationProject( QString path )
   }
 
   m_projectPath = path;
+
+  // Re-write class metadata sidecars so post-create rename/recolor edits
+  // travel with the saved project's result rasters.
+  writeClassMetadataSidecar( m_lastClassifyPath );
+  writeClassMetadataSidecar( m_lastPostRasterPath );
+
   SICNU_LOG_INFO( SicnuLogTags::Classification,
                   QString( "Classification project saved: %1" ).arg( path ) );
   if ( statusBar() )
@@ -3365,6 +3565,30 @@ bool QgsClassificationMainWindow::loadProjectFromFile( QString path )
       applySampleLayerRenderer();
       mSession.setLastRoisPath( data.roisPath );
       mSession.clearDirty();
+    }
+  }
+
+  // Fallback: if the ROI restore yielded no class definitions, repopulate
+  // them from the result raster's <name>.class.json sidecar (if present),
+  // preferring the post-process result over the base classification.
+  if ( m_rois && m_rois->classDefs().isEmpty() )
+  {
+    const QString sidecarRaster = !m_lastPostRasterPath.isEmpty()
+                                    ? m_lastPostRasterPath
+                                    : m_lastClassifyPath;
+    if ( !sidecarRaster.isEmpty() )
+    {
+      QHash<int, RsClassDef> loaded;
+      QString err;
+      if ( RsPostProcess::loadClassMetaData( sidecarRaster, loaded, &err ) && !loaded.isEmpty() )
+      {
+        mSuppressDirty = true;
+        for ( auto it = loaded.constBegin(); it != loaded.constEnd(); ++it )
+          m_rois->setClassDef( it.value() );
+        mSuppressDirty = false;
+        applySampleLayerRenderer();
+        applyPreviewLayerRenderer();
+      }
     }
   }
 
