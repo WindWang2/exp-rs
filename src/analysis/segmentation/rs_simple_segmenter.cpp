@@ -117,42 +117,82 @@ RsSegmentMap RsSimpleSegmenter::segmentMultiBand( const float *const *bandData,
         return {};
     report( 0.0f );
 
-    // Compute mean across bands
-    QVector<float> meanBand( n, 0.0f );
-    for ( size_t i = 0; i < n; ++i )
+    // Multi-band processing: smooth each band individually, then quantize multi-spectral vectors
+    QVector<QVector<float>> smoothedBands( nBands );
+    for ( int b = 0; b < nBands; ++b )
     {
-        if ( ( i & 0xFFFu ) == 0 && canceled() )
+        if ( canceled() )
             return {};
-        bool isNodata = false;
-        float sum = 0;
-        int count = 0;
-        for ( int b = 0; b < nBands; ++b )
-        {
-            float v = bandData[b][i];
-            if ( v == nodata || std::isnan( v ) )
-            {
-                isNodata = true;
-                break;
-            }
-            sum += v;
-            count++;
-        }
-        if ( isNodata || count == 0 )
-            meanBand[i] = nodata;
-        else
-            meanBand[i] = sum / count;
+        smoothedBands[b] = QVector<float>( bandData[b], bandData[b] + n );
+        gaussianSmooth( smoothedBands[b], width, height, params.smoothKernel );
     }
 
     if ( canceled() )
         return {};
-    report( 0.1f );
+    report( 0.4f );
 
-    // Scale the single-band phase's [0, 1] progress into (0.1, 1.0].
-    const auto phaseProgress = onProgress
-        ? std::function<void(float)>(
-              [&onProgress]( float f ) { onProgress( 0.1f + 0.9f * f ); } )
-        : std::function<void(float)>();
-    return segment( meanBand.data(), width, height, nodata, params, isCanceled, phaseProgress );
+    // Quantize each band and combine into composite multi-band region keys
+    QVector<QVector<int>> quantizedBands( nBands );
+    for ( int b = 0; b < nBands; ++b )
+    {
+        quantizedBands[b] = quantize( smoothedBands[b].data(), n, params.quantizeBins, nodata );
+    }
+
+    QVector<int> compositeQuantized( n );
+    const int bins = std::max( 2, params.quantizeBins );
+    for ( size_t i = 0; i < n; ++i )
+    {
+        if ( ( i & 0xFFFu ) == 0 && canceled() )
+            return {};
+
+        bool isNodata = false;
+        for ( int b = 0; b < nBands; ++b )
+        {
+            if ( bandData[b][i] == nodata || std::isnan( bandData[b][i] ) || quantizedBands[b][i] == 0 )
+            {
+                isNodata = true;
+                break;
+            }
+        }
+
+        if ( isNodata )
+        {
+            compositeQuantized[i] = 0; // nodata bin
+        }
+        else
+        {
+            // Hash multi-band quantized tuple into a unique composite integer key
+            size_t hashKey = 0;
+            for ( int b = 0; b < nBands; ++b )
+            {
+                hashKey = hashKey * static_cast<size_t>( bins ) + static_cast<size_t>( quantizedBands[b][i] );
+            }
+            compositeQuantized[i] = static_cast<int>( hashKey & 0x7FFFFFFF );
+        }
+    }
+
+    if ( canceled() )
+        return {};
+    report( 0.6f );
+
+    // Connected components on composite multi-spectral grid
+    QVector<quint32> labels = connectedComponents( compositeQuantized, width, height, 0, isCanceled );
+    if ( labels.isEmpty() )
+        return {};
+
+    report( 0.8f );
+
+    // Merge small regions
+    mergeSmallRegions( labels, width, height, params.minRegionSize, isCanceled );
+    if ( canceled() )
+        return {};
+
+    report( 1.0f );
+
+    RsSegmentMap result( std::move( labels ), width, height );
+    SICNU_LOG_SUCCESS( SicnuLogTags::Segmentation, QString( "Multi-band segmentation complete: %1 segments found" )
+        .arg( result.segmentCount() ) );
+    return result;
 }
 
 // ---------------------------------------------------------------------------

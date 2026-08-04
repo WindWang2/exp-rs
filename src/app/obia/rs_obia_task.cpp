@@ -65,6 +65,7 @@ bool RsObiaTask::run()
         segCfg.maxIteration = mCfg.maxIteration;
         segCfg.smoothKernel = mCfg.smoothKernel;
         segCfg.quantizeBins = mCfg.quantizeBins;
+        segCfg.threshold = mCfg.threshold;
 
         const RsObiaSegmentationResult segResult = RsObiaSegmentation::run(
             segCfg, [this]() { return isCanceled(); } );

@@ -194,10 +194,11 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
     StepDef s2;
     s2.id = "obia_segment";
     s2.title = "MeanShift 图像分割";
-    s2.operatorId = "obia:segmentation";
+    s2.operatorId = "rs:obia_segment";
     s2.artifactOnSuccess = "segmented_vector";
     s2.uiMeta = { 400.0, 150.0 };
     s2.uiMeta.portAddToMap["segmented_vector"] = true;
+    s2.params["input"] = "$image_import.image_raster";
 
     StepConnection c1;
     c1.fromStepId = "image_import";
@@ -208,10 +209,11 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
     StepDef s3;
     s3.id = "obia_classify";
     s3.title = "随机森林分类";
-    s3.operatorId = "obia:classification";
+    s3.operatorId = "rs:obia_classify";
     s3.artifactOnSuccess = "classified_result";
     s3.uiMeta = { 700.0, 150.0 };
     s3.uiMeta.portAddToMap["classified_result"] = true;
+    s3.params["input"] = "$obia_segment.segmented_vector";
 
     StepConnection c2;
     c2.fromStepId = "obia_segment";
