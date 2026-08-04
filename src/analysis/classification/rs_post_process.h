@@ -12,6 +12,9 @@
 
 #include "qgis_analysis_export.h"
 
+#include "rs_class_def.h"
+
+#include <QHash>
 #include <QMap>
 #include <QRgb>
 #include <QString>
@@ -88,4 +91,14 @@ class QGIS_ANALYSIS_EXPORT RsPostProcess
      */
     static bool polygonize( const QString &labelRasterPath, const QString &vectorPath,
                             const QString &classField, QString *err = nullptr );
+
+    /**
+     * Save class definitions (id, name, color) to sidecar JSON metadata (<rasterPath>.class.json).
+     */
+    static bool saveClassMetaData( const QString &rasterPath, const QHash<int, RsClassDef> &defs, QString *err = nullptr );
+
+    /**
+     * Load class definitions from sidecar JSON metadata (<rasterPath>.class.json).
+     */
+    static bool loadClassMetaData( const QString &rasterPath, QHash<int, RsClassDef> &outDefs, QString *err = nullptr );
 };

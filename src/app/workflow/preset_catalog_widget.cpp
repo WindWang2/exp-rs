@@ -262,6 +262,57 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
     presets.push_back( p4 );
   }
 
+  // 5. Classification with Noise Removal & Class Merge
+  {
+    PresetItemInfo p5;
+    p5.id = "preset_classification_postprocess_merge";
+    p5.title = tr( "遥感分类、降噪过滤与类别合并" );
+    p5.category = tr( "遥感图像分类" );
+    p5.description = tr( "包含监督/非监督分类、3x3 众数滤波降噪以及类别重编码合并全流程。" );
+
+    WorkflowDefinition wf;
+    wf.id = "classification_postprocess_merge";
+    wf.title = "Classification Post-Processing & Class Merge";
+
+    StepDef s1;
+    s1.id = "classify_step";
+    s1.title = "遥感图像分类";
+    s1.operatorId = "rs:obia_classify";
+    s1.artifactOnSuccess = "class_map";
+    s1.uiMeta = { 100.0, 150.0 };
+
+    StepDef s2;
+    s2.id = "majority_filter";
+    s2.title = "3x3 众数滤波降噪";
+    s2.operatorId = "rs:majority_filter";
+    s2.artifactOnSuccess = "filter_map";
+    s2.uiMeta = { 400.0, 150.0 };
+
+    StepConnection c1;
+    c1.fromStepId = "classify_step";
+    c1.fromPort = "class_map";
+    c1.toPort = "input";
+    s2.inputs.push_back( c1 );
+
+    StepDef s3;
+    s3.id = "recode_step";
+    s3.title = "类别合并重编码";
+    s3.operatorId = "rs:recode";
+    s3.artifactOnSuccess = "final_class_map";
+    s3.uiMeta = { 700.0, 150.0 };
+    s3.uiMeta.portAddToMap["final_class_map"] = true;
+
+    StepConnection c2;
+    c2.fromStepId = "majority_filter";
+    c2.fromPort = "filter_map";
+    c2.toPort = "input";
+    s3.inputs.push_back( c2 );
+
+    wf.steps = { s1, s2, s3 };
+    p5.definition = wf;
+    presets.push_back( p5 );
+  }
+
   return presets;
 }
 

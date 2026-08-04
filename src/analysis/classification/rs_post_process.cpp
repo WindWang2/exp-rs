@@ -9,7 +9,13 @@
 #include <opencv2/imgproc.hpp>
 
 #include <QByteArray>
+#include <QColor>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include <algorithm>
 #include <cmath>
@@ -641,6 +647,101 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
   {
     setErr( err, QStringLiteral( "GDALPolygonize failed for %1" ).arg( labelRasterPath ) );
     return false;
+  }
+  return true;
+}
+
+bool RsPostProcess::saveClassMetaData( const QString &rasterPath, const QHash<int, RsClassDef> &defs, QString *err )
+{
+  if ( rasterPath.isEmpty() )
+  {
+    setErr( err, QStringLiteral( "Empty raster path" ) );
+    return false;
+  }
+
+  const QString sidecarPath = rasterPath.endsWith( QStringLiteral( ".class.json" ) ) ? rasterPath : rasterPath + QStringLiteral( ".class.json" );
+  QJsonArray classesArray;
+  QList<int> ids = defs.keys();
+  std::sort( ids.begin(), ids.end() );
+
+  for ( int id : ids )
+  {
+    const RsClassDef d = defs.value( id );
+    QJsonObject obj;
+    obj[QStringLiteral( "id" )] = d.id();
+    obj[QStringLiteral( "name" )] = d.name();
+    obj[QStringLiteral( "color" )] = d.color().name();
+    classesArray.append( obj );
+  }
+
+  QJsonObject rootObj;
+  rootObj[QStringLiteral( "version" )] = 1;
+  rootObj[QStringLiteral( "classes" )] = classesArray;
+
+  QFile file( sidecarPath );
+  if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+  {
+    setErr( err, QStringLiteral( "Failed to open sidecar metadata file for writing: %1" ).arg( sidecarPath ) );
+    return false;
+  }
+
+  file.write( QJsonDocument( rootObj ).toJson( QJsonDocument::Indented ) );
+  file.close();
+  return true;
+}
+
+bool RsPostProcess::loadClassMetaData( const QString &rasterPath, QHash<int, RsClassDef> &outDefs, QString *err )
+{
+  if ( rasterPath.isEmpty() )
+  {
+    setErr( err, QStringLiteral( "Empty raster path" ) );
+    return false;
+  }
+
+  const QString sidecarPath = rasterPath.endsWith( QStringLiteral( ".class.json" ) ) ? rasterPath : rasterPath + QStringLiteral( ".class.json" );
+  if ( !QFileInfo::exists( sidecarPath ) )
+  {
+    setErr( err, QStringLiteral( "Sidecar metadata file does not exist: %1" ).arg( sidecarPath ) );
+    return false;
+  }
+
+  QFile file( sidecarPath );
+  if ( !file.open( QIODevice::ReadOnly ) )
+  {
+    setErr( err, QStringLiteral( "Failed to open sidecar metadata file: %1" ).arg( sidecarPath ) );
+    return false;
+  }
+
+  const QJsonDocument doc = QJsonDocument::fromJson( file.readAll() );
+  file.close();
+
+  if ( !doc.isObject() )
+  {
+    setErr( err, QStringLiteral( "Malformed JSON in sidecar metadata: %1" ).arg( sidecarPath ) );
+    return false;
+  }
+
+  const QJsonObject rootObj = doc.object();
+  if ( !rootObj.contains( QStringLiteral( "classes" ) ) || !rootObj[QStringLiteral( "classes" )].isArray() )
+  {
+    setErr( err, QStringLiteral( "Missing classes array in sidecar metadata: %1" ).arg( sidecarPath ) );
+    return false;
+  }
+
+  outDefs.clear();
+  const QJsonArray classesArray = rootObj[QStringLiteral( "classes" )].toArray();
+  for ( const QJsonValue &val : classesArray )
+  {
+    if ( !val.isObject() )
+      continue;
+    const QJsonObject obj = val.toObject();
+    const int id = obj[QStringLiteral( "id" )].toInt();
+    const QString name = obj[QStringLiteral( "name" )].toString();
+    const QColor color( obj[QStringLiteral( "color" )].toString( QStringLiteral( "#808080" ) ) );
+    if ( id > 0 )
+    {
+      outDefs.insert( id, RsClassDef( id, name, color ) );
+    }
   }
   return true;
 }

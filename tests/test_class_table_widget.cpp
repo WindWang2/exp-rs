@@ -2,9 +2,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QFile>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 
 #include "rs_class_table_widget.h"
+#include "rs_post_process.h"
 #include "rs_roi_collection.h"
 #include "qgsgeometry.h"
 
@@ -91,4 +94,48 @@ TEST_CASE( "ClassTable: rebuild preserves selection and empty table returns 0 cl
   // Empty table returns 0
   RsClassTableWidget emptyW;
   REQUIRE( emptyW.currentClassId() == 0 );
+}
+
+TEST_CASE( "ClassTable: mergeSelectedClasses emits mergeClassesRequested signal", "[classify][table]" )
+{
+  ensureApp();
+  RsRoiCollection col;
+  col.setClassDef( RsClassDef( 1, "Deep Water", QColor( "#0000ff" ) ) );
+  col.setClassDef( RsClassDef( 2, "Shallow Water", QColor( "#0088ff" ) ) );
+
+  RsClassTableWidget w;
+  w.setRoiCollection( &col );
+  w.setCurrentClassId( 1 );
+
+  QSignalSpy mergeSpy( &w, &RsClassTableWidget::mergeClassesRequested );
+  w.mergeSelectedClasses( 1, "Water", QColor( "#0000ff" ) );
+  REQUIRE( mergeSpy.size() == 1 );
+
+  const auto args = mergeSpy.first();
+  const QList<int> sources = args.at( 0 ).value<QList<int>>();
+  REQUIRE( sources.contains( 1 ) );
+  REQUIRE( args.at( 1 ).toInt() == 1 );
+  REQUIRE( args.at( 2 ).toString() == "Water" );
+}
+
+TEST_CASE( "PostProcess: sidecar class.json metadata save and load round-trip", "[classify][postprocess]" )
+{
+  QTemporaryDir tempDir;
+  REQUIRE( tempDir.isValid() );
+  const QString rasterPath = tempDir.filePath( "classification_result.tif" );
+
+  QHash<int, RsClassDef> defs;
+  defs.insert( 1, RsClassDef( 1, "Water", QColor( "#0000ff" ) ) );
+  defs.insert( 2, RsClassDef( 2, "Forest", QColor( "#00ff00" ) ) );
+
+  QString err;
+  REQUIRE( RsPostProcess::saveClassMetaData( rasterPath, defs, &err ) );
+  REQUIRE( QFile::exists( rasterPath + ".class.json" ) );
+
+  QHash<int, RsClassDef> loadedDefs;
+  REQUIRE( RsPostProcess::loadClassMetaData( rasterPath, loadedDefs, &err ) );
+  REQUIRE( loadedDefs.size() == 2 );
+  REQUIRE( loadedDefs.value( 1 ).name() == "Water" );
+  REQUIRE( loadedDefs.value( 2 ).name() == "Forest" );
+  REQUIRE( loadedDefs.value( 1 ).color() == QColor( "#0000ff" ) );
 }
