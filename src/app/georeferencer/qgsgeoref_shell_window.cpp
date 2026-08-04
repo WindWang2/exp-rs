@@ -1975,7 +1975,7 @@ QgsRasterLayer *QgsGeorefShellWindow::pickProjectRasterLayer( const QString &dia
     const QString shortSrc = src.size() > 60
                                ? ( QStringLiteral( "…" ) + src.right( 59 ) )
                                : src;
-    labels << QStringLiteral( "%1  [%2]" ).arg( rl->name(), shortSrc );
+    labels << QStringLiteral( "%1  [%2]" ).arg( rl->name() ).arg( shortSrc );
   }
 
   bool ok = false;
