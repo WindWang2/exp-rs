@@ -137,6 +137,17 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
     const int minRegionSize = getInt(params, "minRegionSize", 20);
     const int minLabelPixels = getInt(params, "minLabelPixels", 3);
 
+    if (cellSize <= 0)
+        throw RSOperatorError(ErrorCode::InvalidParameter, "cellSize must be > 0");
+    if (smoothKernel <= 0 || smoothKernel % 2 == 0)
+        throw RSOperatorError(ErrorCode::InvalidParameter, "smoothKernel must be an odd positive integer");
+    if (quantizeBins <= 0 || quantizeBins > 256)
+        throw RSOperatorError(ErrorCode::InvalidParameter, "quantizeBins must be between 1 and 256");
+    if (minRegionSize < 0)
+        throw RSOperatorError(ErrorCode::InvalidParameter, "minRegionSize must be >= 0");
+    if (minLabelPixels <= 0)
+        throw RSOperatorError(ErrorCode::InvalidParameter, "minLabelPixels must be > 0");
+
     if (!fileExists(inputPath))
         throw RSOperatorError(ErrorCode::FileNotFound, "Input not found: " + inputPath);
     if (!fileExists(trainingPath))

@@ -7,6 +7,8 @@
 
 #include "app/obia/rs_obia_task.h"
 #include "analysis/classification/rs_classifier_normalbayes.h"
+#include "operators/rs/rs_obia_classify_operator.h"
+#include "operators/framework/rs_operator_error.h"
 
 #include <gdal.h>
 #include <cpl_error.h>
@@ -149,6 +151,40 @@ TEST_CASE( "OBIA integration: output GeoTIFF GDAL validation", "[obia][integrati
     }
 
     GDALClose( ds );
+}
+
+TEST_CASE( "OBIA classify operator: parameter validation guards", "[obia][operator]" )
+{
+    using namespace sicnu::operators;
+    using namespace sicnu::operators::rs;
+    RsObiaClassifyOperator op;
+    RSOperatorContext ctx;
+
+    Json::Value params( Json::objectValue );
+    params["input"] = "non_existent_input.tif";
+    params["training"] = "non_existent_training.shp";
+    params["output"] = "output.tif";
+
+    SECTION( "cellSize <= 0" )
+    {
+        params["cellSize"] = 0;
+        REQUIRE_THROWS_AS( op.run( params, ctx ), RSOperatorError );
+    }
+
+    SECTION( "smoothKernel <= 0 or even" )
+    {
+        params["cellSize"] = 16;
+        params["smoothKernel"] = 4; // even kernel
+        REQUIRE_THROWS_AS( op.run( params, ctx ), RSOperatorError );
+    }
+
+    SECTION( "quantizeBins <= 0" )
+    {
+        params["cellSize"] = 16;
+        params["smoothKernel"] = 3;
+        params["quantizeBins"] = 0;
+        REQUIRE_THROWS_AS( op.run( params, ctx ), RSOperatorError );
+    }
 }
 
 #endif // SICNU_HAS_OPENCV
