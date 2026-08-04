@@ -4,10 +4,10 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Remove `error_reporter.h` and `error_reporter.cpp` from `src/processing/framework/` and `CMakeLists.txt`.
-- [ ] Remove `processing_cache.h` and `processing_cache.cpp` from `src/processing/framework/` and `CMakeLists.txt`.
-- [ ] Remove `progress_callback.h` and `progress_callback.cpp` from `src/processing/framework/` and `CMakeLists.txt`.
-- [ ] Remove corresponding unit tests for `ProcessingCache` and `ErrorReporter` from `tests/`.
-- [ ] Project builds cleanly and full test suite passes.
+- [x] Remove `error_reporter.h` and `error_reporter.cpp` from `src/processing/framework/` and `CMakeLists.txt`.
+- [x] Remove `processing_cache.h` and `processing_cache.cpp` from `src/processing/framework/` and `CMakeLists.txt`.
+- [x] Remove `progress_callback.h` and `progress_callback.cpp` from `src/processing/framework/` and `CMakeLists.txt`.
+- [x] Remove corresponding unit tests for `ProcessingCache` and `ErrorReporter` from `tests/`.
+- [x] Project builds cleanly and full test suite passes.

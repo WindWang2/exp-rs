@@ -4,9 +4,9 @@
 
 **Blocked by:** 02 — Migrate Python Algorithm Adapters & Bridge to Atomic Algorithm Registry
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Change `AlgorithmProviderAdapter::discoverAlgorithms` parameter/behavior to populate `AtomicAlgorithmRegistry` directly.
-- [ ] Implement direct registration in `QgsProcessingProviderAdapter` creating `ProviderAlgorithmAdapter` instances.
-- [ ] Delete `QgsProcessingAlgorithmAdapter`, `TaskAlgorithmAdapter` interface, and `setProviderAlgorithmProvider` mirror callback.
-- [ ] Project builds cleanly and algorithm discovery tests pass.
+- [x] Change `AlgorithmProviderAdapter::discoverAlgorithms` parameter/behavior to populate `AtomicAlgorithmRegistry` directly.
+- [x] Implement direct registration in `QgsProcessingProviderAdapter` creating `ProviderAlgorithmAdapter` instances.
+- [x] Delete `QgsProcessingAlgorithmAdapter`, `TaskAlgorithmAdapter` interface, and `setProviderAlgorithmProvider` mirror callback.
+- [x] Project builds cleanly and algorithm discovery tests pass.

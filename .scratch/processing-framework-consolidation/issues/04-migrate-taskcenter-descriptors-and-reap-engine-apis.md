@@ -4,9 +4,9 @@
 
 **Blocked by:** 03 — Direct Provider Registration to Atomic Algorithm Registry
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Update `TaskCenter` algorithm descriptor resolution to call `AtomicAlgorithmRegistry::instance().findAdapter()`.
-- [ ] Remove `findAlgorithm`, `executeAlgorithm`, `validateParameters`, `registerAlgorithm`, `registerProcessingAlgorithm`, `populateFromProcessingRegistry`, `clear`, and `sicnu::AlgorithmDescriptor` from `AlgorithmEngine`.
-- [ ] Consolidate all callers to use `sicnu::processing::AlgorithmDescriptor`.
-- [ ] Project builds cleanly and full test suite passes.
+- [x] Update `TaskCenter` algorithm descriptor resolution to call `AtomicAlgorithmRegistry::instance().findAdapter()`.
+- [x] Remove `findAlgorithm`, `executeAlgorithm`, `validateParameters`, `registerAlgorithm`, `registerProcessingAlgorithm`, `populateFromProcessingRegistry`, `clear`, and `sicnu::AlgorithmDescriptor` from `AlgorithmEngine`.
+- [x] Consolidate all callers to use `sicnu::processing::AlgorithmDescriptor`.
+- [x] Project builds cleanly and full test suite passes.

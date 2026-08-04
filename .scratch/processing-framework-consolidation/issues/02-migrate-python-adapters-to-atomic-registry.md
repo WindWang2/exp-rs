@@ -4,9 +4,9 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Refactor `PythonAlgorithmAdapter` to inherit from `AtomicAlgorithmAdapter` instead of `TaskAlgorithmAdapter`.
-- [ ] Update `PythonProcessingProviderAdapter` and `app_interface_bridge` to register Python algorithm adapters into `AtomicAlgorithmRegistry`.
-- [ ] Update `python_plugin_host` execution to call `AtomicAlgorithmRegistry::instance().findAdapter(algoId)->execute(...)`.
-- [ ] Project builds cleanly and Python plugin host tests pass.
+- [x] Refactor `PythonAlgorithmAdapter` to inherit from `AtomicAlgorithmAdapter` instead of `TaskAlgorithmAdapter`.
+- [x] Update `PythonProcessingProviderAdapter` and `app_interface_bridge` to register Python algorithm adapters into `AtomicAlgorithmRegistry`.
+- [x] Update `python_plugin_host` execution to call `AtomicAlgorithmRegistry::instance().findAdapter(algoId)->execute(...)`.
+- [x] Project builds cleanly and Python plugin host tests pass.
