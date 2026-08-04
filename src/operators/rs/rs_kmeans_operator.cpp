@@ -127,6 +127,9 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
     if (k < 2 || k > 255) {
         throw RSOperatorError(ErrorCode::InvalidParameter, "k must be in [2, 255]");
     }
+    if (maxSamples < 0) {
+        throw RSOperatorError(ErrorCode::InvalidParameter, "maxSamples must be non-negative");
+    }
 
     ensureGdalInit();
     GdalDatasetWrapper ds;
