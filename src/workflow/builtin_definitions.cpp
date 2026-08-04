@@ -183,6 +183,45 @@ void registerObia( WorkflowRuntime &runtime )
   runtime.registerDefinition( std::move( d ) );
 }
 
+void registerClassificationPostprocessMerge( WorkflowRuntime &runtime )
+{
+  WorkflowDefinition wf;
+  wf.id = "classification_postprocess_merge";
+  wf.title = "Classification Post-Processing & Class Merge";
+
+  StepDef s1;
+  s1.id = "classify_step";
+  s1.title = "遥感图像分类";
+  s1.kind = StepKind::Operator;
+  s1.operatorId = "rs:obia_classify";
+  s1.artifactOnSuccess = "class_map";
+  s1.uiMeta = { 100.0, 150.0 };
+
+  StepDef s2;
+  s2.id = "majority_filter";
+  s2.title = "3x3 众数滤波降噪";
+  s2.kind = StepKind::Operator;
+  s2.operatorId = "rs:majority_filter";
+  s2.artifactOnSuccess = "filter_map";
+  s2.uiMeta = { 400.0, 150.0 };
+  s2.inputs.push_back( { "classify_step", "class_map", "input" } );
+  s2.params["input"] = "$classify_step.class_map";
+
+  StepDef s3;
+  s3.id = "recode_step";
+  s3.title = "类别合并重编码";
+  s3.kind = StepKind::Operator;
+  s3.operatorId = "rs:recode";
+  s3.artifactOnSuccess = "final_class_map";
+  s3.uiMeta = { 700.0, 150.0 };
+  s3.uiMeta.portAddToMap["final_class_map"] = true;
+  s3.inputs.push_back( { "majority_filter", "filter_map", "input" } );
+  s3.params["input"] = "$majority_filter.filter_map";
+
+  wf.steps = { s1, s2, s3 };
+  runtime.registerDefinition( std::move( wf ) );
+}
+
 void registerBuiltinWorkflows( WorkflowRuntime &runtime )
 {
   registerAtomicTool( runtime, "tool.rs.ndvi", "NDVI 植被指数",
@@ -221,6 +260,7 @@ void registerBuiltinWorkflows( WorkflowRuntime &runtime )
   registerClassifySupervised( runtime );
   registerGeorefImageToMap( runtime );
   registerObia( runtime );
+  registerClassificationPostprocessMerge( runtime );
 }
 
 } // namespace sicnu::workflow

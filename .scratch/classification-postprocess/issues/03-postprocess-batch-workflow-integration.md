@@ -4,8 +4,8 @@
 
 **Blocked by:** 02 — Class Merging & Recode Asynchronous Seam.
 
-**Status:** ready-for-agent
+**Status:** closed
 
-- [ ] Preset Catalog contains "Classification with Noise Removal & Class Merge" recipe.
-- [ ] Topological DAG execution runs `RsPostProcess::majorityFilter` followed by `RsPostProcess::recode`.
-- [ ] Final output raster toggles `addToMap = true` to render on the pipeline canvas and map view.
+- [x] Preset Catalog contains "Classification with Noise Removal & Class Merge" recipe.
+- [x] Topological DAG execution runs `RsPostProcess::majorityFilter` followed by `RsPostProcess::recode`.
+- [x] Final output raster toggles `addToMap = true` to render on the pipeline canvas and map view.

@@ -231,7 +231,8 @@ TEST_CASE( "Builtin workflows registered", "[workflow]" )
   REQUIRE( rt.hasDefinition( "lab.classify.supervised" ) );
   REQUIRE( rt.hasDefinition( "lab.georef.image_to_map" ) );
   REQUIRE( rt.hasDefinition( "lab.obia" ) );
-  REQUIRE( rt.registeredDefinitionIds().size() == 19 );
+  REQUIRE( rt.hasDefinition( "classification_postprocess_merge" ) );
+  REQUIRE( rt.registeredDefinitionIds().size() == 20 );
 
   const auto *d = rt.findDefinition( "tool.rs.spectral_index" );
   REQUIRE( d );

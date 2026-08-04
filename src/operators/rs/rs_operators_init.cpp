@@ -23,6 +23,8 @@
 #include "rs_obia_classify_operator.h"
 #include "rs_obia_hierarchy_operator.h"
 #include "rs_segment_stats_operator.h"
+#include "rs_majority_filter_operator.h"
+#include "rs_recode_operator.h"
 #endif
 
 namespace sicnu::operators::rs {
@@ -47,6 +49,8 @@ REGISTER_RS_OPERATOR(RsObiaSegmentOperator, "rs:obia_segment")
 REGISTER_RS_OPERATOR(RsObiaClassifyOperator, "rs:obia_classify")
 REGISTER_RS_OPERATOR(RsObiaHierarchyOperator, "rs:obia_hierarchy")
 REGISTER_RS_OPERATOR(RsSegmentStatsOperator, "rs:segment_stats")
+REGISTER_RS_OPERATOR(RsMajorityFilterOperator, "rs:majority_filter")
+REGISTER_RS_OPERATOR(RsRecodeOperator, "rs:recode")
 #endif
 
 struct AtomicRsOperatorProviderRegistration {

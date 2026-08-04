@@ -72,6 +72,8 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         rs/rs_obia_hierarchy_operator.cpp
         rs/rs_segment_stats_operator.cpp
         rs/rs_segmentation_utils.cpp
+        rs/rs_majority_filter_operator.cpp
+        rs/rs_recode_operator.cpp
     )
     message(STATUS "RS classification/OBIA operators enabled")
 endif()

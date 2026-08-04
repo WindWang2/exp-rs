@@ -1999,10 +1999,12 @@ if(TARGET qgis_app_classify)
     Catch2::Catch2WithMain
     qgis_core
     qgis_analysis
+    sicnu_operators
     Qt6::Core
     Qt6::Gui
     GDAL::GDAL
     ${OpenCV_LIBS}
+    ${JSONCPP_LIBRARIES}
   )
   target_include_directories(test_post_process PRIVATE
     ${CMAKE_SOURCE_DIR}/src

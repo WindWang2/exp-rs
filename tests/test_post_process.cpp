@@ -137,3 +137,72 @@ TEST_CASE( "PostProcess: saveLabelRaster dtype escalation + no-palette", "[class
     GDALClose( ds );
   }
 }
+
+#include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_registry.h"
+#include <QFile>
+
+TEST_CASE( "RsMajorityFilterOperator and RsRecodeOperator end-to-end execution", "[classify][post][operators]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString inputPath = tmp.path() + "/test_labels.tif";
+  const QString majPath = tmp.path() + "/test_maj.tif";
+  const QString recodePath = tmp.path() + "/test_recode.tif";
+
+  // Create a 5x5 label raster with a speckle pixel at (2,2)
+  cv::Mat labels( 5, 5, CV_32S, cv::Scalar( 1 ) );
+  labels.at<int>( 2, 2 ) = 9;
+
+  double gt[6] = { 0, 1, 0, 5, 0, -1 };
+  QString err;
+  REQUIRE( RsPostProcess::saveLabelRaster( inputPath, labels, gt, QString(),
+                                           QVector<QRgb>(), QStringList(),
+                                           std::numeric_limits<double>::quiet_NaN(), &err ) );
+
+  auto &registry = sicnu::operators::RSOperatorRegistry::instance();
+  REQUIRE( registry.hasOperator( "rs:majority_filter" ) );
+  REQUIRE( registry.hasOperator( "rs:recode" ) );
+
+  // 1. Run Majority Filter Operator
+  auto majOp = registry.create( "rs:majority_filter" );
+  REQUIRE( majOp != nullptr );
+
+  Json::Value majParams( Json::objectValue );
+  majParams["input"] = inputPath.toStdString();
+  majParams["output"] = majPath.toStdString();
+  majParams["kernel"] = 3;
+
+  sicnu::operators::RSOperatorContext ctx;
+  Json::Value majResult = majOp->run( majParams, ctx );
+  REQUIRE( majResult.isMember( "output" ) );
+  REQUIRE( QFile::exists( majPath ) );
+
+  // Verify majority filter smoothed out the speckle pixel at (2,2)
+  cv::Mat filteredLabels;
+  double outGt[6];
+  QString outWkt;
+  REQUIRE( RsPostProcess::loadLabelRaster( majPath, filteredLabels, outGt, outWkt, &err ) );
+  CHECK( filteredLabels.at<int>( 2, 2 ) == 1 );
+
+  // 2. Run Recode Operator (remap label 1 to label 10)
+  auto recodeOp = registry.create( "rs:recode" );
+  REQUIRE( recodeOp != nullptr );
+
+  Json::Value recodeParams( Json::objectValue );
+  recodeParams["input"] = majPath.toStdString();
+  recodeParams["output"] = recodePath.toStdString();
+  Json::Value map( Json::objectValue );
+  map["1"] = 10;
+  recodeParams["recode_map"] = map;
+
+  Json::Value recodeResult = recodeOp->run( recodeParams, ctx );
+  REQUIRE( recodeResult.isMember( "output" ) );
+  REQUIRE( QFile::exists( recodePath ) );
+
+  cv::Mat recodedLabels;
+  REQUIRE( RsPostProcess::loadLabelRaster( recodePath, recodedLabels, outGt, outWkt, &err ) );
+  CHECK( recodedLabels.at<int>( 0, 0 ) == 10 );
+  CHECK( recodedLabels.at<int>( 2, 2 ) == 10 );
+}
