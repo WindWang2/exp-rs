@@ -23,7 +23,7 @@ RsClassTableWidget::RsClassTableWidget( QWidget *parent )
   mTable->verticalHeader()->setVisible( false );
   mTable->verticalHeader()->setDefaultSectionSize( 26 );
   mTable->setSelectionBehavior( QAbstractItemView::SelectRows );
-  mTable->setSelectionMode( QAbstractItemView::SingleSelection );
+  mTable->setSelectionMode( QAbstractItemView::ExtendedSelection );
   mTable->setEditTriggers( QAbstractItemView::NoEditTriggers );
   mTable->horizontalHeader()->setStretchLastSection( false );
   mTable->setColumnWidth( 0, 24 );
@@ -165,6 +165,26 @@ int RsClassTableWidget::currentClassId() const
     return mStickyClassId;
   auto *it = mTable->item( rows.first().row(), 0 );
   return it ? it->data( Qt::UserRole ).toInt() : mStickyClassId;
+}
+
+QList<int> RsClassTableWidget::selectedClassIds() const
+{
+  QList<int> result;
+  if ( !mTable || !mTable->selectionModel() )
+    return result;
+
+  const auto rows = mTable->selectionModel()->selectedRows();
+  for ( const QModelIndex &idx : rows )
+  {
+    auto *it = mTable->item( idx.row(), 0 );
+    if ( it )
+    {
+      const int id = it->data( Qt::UserRole ).toInt();
+      if ( id > 0 && !result.contains( id ) )
+        result.append( id );
+    }
+  }
+  return result;
 }
 
 void RsClassTableWidget::onSelectionChanged()

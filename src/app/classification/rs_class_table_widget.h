@@ -32,6 +32,7 @@ class RsClassTableWidget : public QWidget
     /// Select the row whose class id matches; no-op if not found.
     void setCurrentClassId( int classId );
     int currentClassId() const;
+    QList<int> selectedClassIds() const;
 
   signals:
     void currentClassChanged( int classId );

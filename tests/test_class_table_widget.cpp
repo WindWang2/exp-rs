@@ -53,3 +53,20 @@ TEST_CASE( "ClassTable: currentClassChanged on row selection", "[classify][table
   REQUIRE( spy.count() >= 1 );
   REQUIRE( w.currentClassId() == 2 );
 }
+
+TEST_CASE( "ClassTable: selectedClassIds returns all selected IDs", "[classify][table]" )
+{
+  ensureApp();
+  RsRoiCollection col;
+  col.setClassDef( RsClassDef( 1, "A", QColor( "#0a0" ) ) );
+  col.setClassDef( RsClassDef( 2, "B", QColor( "#a00" ) ) );
+  col.setClassDef( RsClassDef( 3, "C", QColor( "#00a" ) ) );
+
+  RsClassTableWidget w;
+  w.setRoiCollection( &col );
+  REQUIRE( w.rowCount() == 3 );
+
+  w.setCurrentClassId( 1 );
+  const QList<int> sel = w.selectedClassIds();
+  REQUIRE( sel.contains( 1 ) );
+}
