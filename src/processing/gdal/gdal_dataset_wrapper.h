@@ -139,6 +139,13 @@ public:
      */
     double bandNoDataValue(int bandNum, bool *hasNodata = nullptr) const;
 
+    /**
+     * Get the GDAL description string for a band (e.g. "B4", "sur_refl_b01").
+     * Returns an empty string if no description is set.
+     * @param bandNum 1-based band number
+     */
+    QString bandDescription(int bandNum) const;
+
     /// Get the last error message (empty if no error).
     QString lastError() const;
 

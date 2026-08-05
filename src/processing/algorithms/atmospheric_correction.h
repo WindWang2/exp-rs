@@ -19,6 +19,16 @@
  */
 namespace AtmosphericCorrection
 {
+    /// Correction method identifiers (used by processFile/processFileMultiBand).
+    /// Values match the int codes consumed by the algorithm kernels and the
+    /// RS operator / QGIS algorithm wrappers.
+    enum Method : int {
+        DnToRadiance = 0,
+        Dos1         = 1,
+        Dos2         = 2,
+        Quac         = 3,
+    };
+
     /**
      * Convert DN to radiance: L = gain * DN + bias
      * @param dn     input DN values
@@ -80,7 +90,7 @@ namespace AtmosphericCorrection
 
     /**
      * Apply atmospheric correction to one band of a GeoTIFF and write output.
-     * @param method 0=DN to Radiance, 1=DOS1, 2=DOS2
+     * @param method 0=DnToRadiance, 1=Dos1, 2=Dos2 (see Method enum)
      */
     bool processFile(const QString &sourcePath, const QString &outputPath,
                      int bandNum, int method, float gain, float bias,
@@ -89,11 +99,11 @@ namespace AtmosphericCorrection
     /**
      * Apply multi-band atmospheric correction to a GeoTIFF and write output.
      *
-     * Currently supports method 3 (QUAC), which requires all bands in memory.
+     * Currently supports Method::Quac (3), which requires all bands in memory.
      * The output is a Float32 multi-band GeoTIFF preserving geotransform and
      * projection. Band order follows the source raster.
      *
-     * @param method 3=QUAC
+     * @param method Method::Quac
      */
     bool processFileMultiBand(const QString &sourcePath, const QString &outputPath,
                               int method, QString *errorMessage = nullptr,

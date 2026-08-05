@@ -64,9 +64,9 @@ QVariantMap AtmosphericCorrectionAlgorithm::processAlgorithm( const QVariantMap 
 
     QString dest = parameterAsOutputLayer( parameters, QStringLiteral( "OUTPUT" ), context );
 
-    // QUAC (method 3) is multi-band: delegate to processFileMultiBand which owns
+    // QUAC is multi-band: delegate to processFileMultiBand which owns
     // its own GDAL I/O, bypassing the single-band QgsRasterBlock path below.
-    if ( method == 3 )
+    if ( method == AtmosphericCorrection::Quac )
     {
         feedback->setProgressText( QObject::tr( "Running QUAC (multi-band)..." ) );
         QString error;

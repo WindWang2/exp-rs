@@ -1,5 +1,6 @@
 // src/processing/algorithms/radiometric_calibration.cpp — DN to physical units
 #include "radiometric_calibration.h"
+#include "math_utils.h"
 #include "satellite_products.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "core/sicnu_logging.h"
@@ -341,13 +342,9 @@ bool loadMetadata(const QString &rasterPath, const QString &metadataPath,
 
 bool toRadiance(const float *dn, float *radiance, size_t count, const BandCoefficients &c)
 {
-    if (!dn || !radiance || count == 0) return false;
-    if (std::isnan(c.radianceGain) || std::isnan(c.radianceBias)) return false;
-    const float gain = static_cast<float>(c.radianceGain);
-    const float bias = static_cast<float>(c.radianceBias);
-    for (size_t i = 0; i < count; i++)
-        radiance[i] = gain * dn[i] + bias;
-    return true;
+    return MathUtils::linearScale(dn, radiance, count,
+                                  static_cast<float>(c.radianceGain),
+                                  static_cast<float>(c.radianceBias));
 }
 
 bool toToaReflectance(const float *dn, float *reflectance, size_t count,
@@ -439,19 +436,10 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
     // descriptions are set, fall back to synthetic "B<index>" names so identity
     // band mapping still works (raster band i == MTL band i).
     QMap<int, QString> bandNames;
-    // GdalDatasetWrapper does not expose band descriptions; read them via raw GDAL.
-    ensureGdalInit();
-    GDALDatasetH rawDs = GDALOpen(sourcePath.toUtf8().constData(), GA_ReadOnly);
-    if (rawDs) {
-        for (int b = 1; b <= bandCount; ++b) {
-            GDALRasterBandH band = GDALGetRasterBand(rawDs, b);
-            if (band) {
-                const char *desc = GDALGetDescription(band);
-                if (desc && desc[0])
-                    bandNames.insert(b, QString::fromUtf8(desc));
-            }
-        }
-        GDALClose(rawDs);
+    for (int b = 1; b <= bandCount; ++b) {
+        const QString desc = srcDataset.bandDescription(b);
+        if (!desc.isEmpty())
+            bandNames.insert(b, desc);
     }
     if (bandNames.isEmpty()) {
         for (int b = 1; b <= bandCount; ++b)

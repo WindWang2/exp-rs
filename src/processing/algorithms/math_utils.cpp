@@ -176,4 +176,13 @@ bool normalizedDifference(const float *a, const float *b, float *out, size_t cou
     return true;
 }
 
+bool linearScale(const float *in, float *out, size_t count, float gain, float bias)
+{
+    if (!in || !out || count == 0) return false;
+    if (std::isnan(gain) || std::isnan(bias)) return false;
+    for (size_t i = 0; i < count; ++i)
+        out[i] = gain * in[i] + bias;
+    return true;
+}
+
 } // namespace MathUtils

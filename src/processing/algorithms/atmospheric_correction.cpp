@@ -1,5 +1,6 @@
 // src/processing/algorithms/atmospheric_correction.cpp — DOS atmospheric correction
 #include "atmospheric_correction.h"
+#include "math_utils.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "core/sicnu_logging.h"
 
@@ -38,12 +39,7 @@ static bool convertAndFindMin(const float *dn, std::vector<float> &radiance,
 
 bool dnToRadiance(const float *dn, float *radiance, size_t count, float gain, float bias)
 {
-    if (!dn || !radiance || count == 0) return false;
-    if (std::isnan(gain) || std::isnan(bias)) return false;
-    for (size_t i = 0; i < count; i++) {
-        radiance[i] = gain * dn[i] + bias;
-    }
-    return true;
+    return MathUtils::linearScale(dn, radiance, count, gain, bias);
 }
 
 bool dos1(const float *dn, float *surface, size_t count, float gain, float bias)
@@ -182,7 +178,7 @@ bool processFileMultiBand(const QString &sourcePath, const QString &outputPath,
                           int method, QString *errorMessage,
                           const std::function<void(double, const QString &)> &progress)
 {
-    if (method != 3) {
+    if (method != Method::Quac) {
         if (errorMessage)
             *errorMessage = QStringLiteral("processFileMultiBand: unsupported method %1").arg(method);
         return false;
