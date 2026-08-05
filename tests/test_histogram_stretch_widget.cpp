@@ -8,6 +8,12 @@
 #include <QFile>
 #include <QList>
 #include <QDoubleSpinBox>
+#include <QTemporaryDir>
+#include <QMap>
+
+#include <vector>
+#include <gdal.h>
+#include <cpl_conv.h>
 
 #include <qgsrasterlayer.h>
 #include <qgsrasterdataprovider.h>
@@ -22,18 +28,72 @@
 
 namespace {
 
+// Synthesise a small GeoTIFF per distinct sample `name` and cache it for the
+// process lifetime, so the test does not depend on committed sample rasters
+// under data/samples/. Returns a real on-disk path so QgsRasterLayer can open
+// it; multi-band variants are produced for the Landsat sample.
+QString syntheticSample( const QString &name )
+{
+    static QTemporaryDir dir;
+    static QMap<QString, QString> cache;
+    auto it = cache.constFind( name );
+    if ( it != cache.constEnd() )
+        return it.value();
+
+    GDALAllRegister();
+    const QString path = dir.path() + QLatin1Char('/') +
+                         QString::number(cache.size()) + QStringLiteral(".tif");
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    REQUIRE(driver != nullptr);
+    // landsat_sample.tif is multiband in production; mimic 7 bands so band-based
+    // tests exercise multiband paths. Others default to single band.
+    const int nBands = name.contains(QLatin1String("landsat")) ? 7 : 1;
+    constexpr int W = 16, H = 16;
+    GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(), W, H, nBands, GDT_Float32, nullptr);
+    REQUIRE(ds != nullptr);
+    double gt[6] = {0.0, 1.0, 0.0, static_cast<double>(H), 0.0, -1.0};
+    GDALSetGeoTransform(ds, gt);
+    GDALSetProjection(
+        ds, "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],"
+            "PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]");
+    // Per-band gradient over a 0..255 range so each band has real min/max and a
+    // midpoint near 128 (the stretch widget tests rely on a non-degenerate
+    // distribution). Bands are offset from each other so band-specific stats
+    // differ, mirroring real multispectral imagery.
+    for (int b = 1; b <= nBands; ++b) {
+        GDALRasterBandH band = GDALGetRasterBand(ds, b);
+        std::vector<float> line(W);
+        for (int row = 0; row < H; ++row) {
+            for (int col = 0; col < W; ++col)
+                line[col] = static_cast<float>((row * W + col) % 256);
+            GDALRasterIO(band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0);
+        }
+    }
+    GDALClose(ds);
+    cache.insert(name, path);
+    return path;
+}
+
 QString samplePath( const char *name )
 {
+    const QString qname = QString::fromUtf8( name );
+    // Committed sample rasters (dem/landsat) are no longer in VCS — synthesise
+    // them. CCD1.dat remains an optional local-only fixture resolved by path.
+    if ( qname == QLatin1String( "dem_sample.tif" ) ||
+         qname == QLatin1String( "landsat_sample.tif" ) )
+    {
+        return syntheticSample( qname );
+    }
     // Try cwd and common repo-relative locations (tests often run from build/).
     // ctest runs these tests from build/tests/, so repo-root data needs
     // two levels up ("../../data").
     const QStringList candidates = {
-        QStringLiteral( "data/samples/%1" ).arg( name ),
-        QStringLiteral( "../data/samples/%1" ).arg( name ),
-        QStringLiteral( "../../data/samples/%1" ).arg( name ),
-        QStringLiteral( "data/%1" ).arg( name ),
-        QStringLiteral( "../data/%1" ).arg( name ),
-        QStringLiteral( "../../data/%1" ).arg( name ),
+        QStringLiteral( "data/samples/%1" ).arg( qname ),
+        QStringLiteral( "../data/samples/%1" ).arg( qname ),
+        QStringLiteral( "../../data/samples/%1" ).arg( qname ),
+        QStringLiteral( "data/%1" ).arg( qname ),
+        QStringLiteral( "../data/%1" ).arg( qname ),
+        QStringLiteral( "../../data/%1" ).arg( qname ),
     };
     for ( const QString &p : candidates )
     {

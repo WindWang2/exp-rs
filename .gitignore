@@ -23,7 +23,9 @@ compile_commands.json
 # Screenshots / local images at root (assets live under images/ or docs/)
 /*.png
 
-# Local large rasters under data/; re-include tracked configs + samples
+# Local large rasters under data/; re-include tracked configs only.
+# Sample rasters/vectors (data/samples/, sample_crops.tif, test_vectors.geojson)
+# are intentionally NOT tracked — tests synthesise fixtures at runtime instead.
 data/*
 !data/processing/
 !data/processing/**
@@ -33,10 +35,6 @@ data/*
 !data/schemas/**
 !data/pipelines/
 !data/pipelines/**
-!data/samples/
-!data/samples/**
-!data/sample_crops.tif
-!data/test_vectors.geojson
 
 # Test golden data always tracked
 !tests/data/

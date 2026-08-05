@@ -7,10 +7,13 @@
 // endpoint leaves the catalog.
 #include <catch2/catch_test_macros.hpp>
 
-#include <QFile>
-#include <QFileInfo>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+
+#include <vector>
+
+#include <gdal.h>
+#include <cpl_conv.h>
 
 #include "data/asset_types.h"
 #include "data/data_asset.h"
@@ -22,10 +25,32 @@ using namespace sicnu::data;
 namespace
 {
 
-QString fixturePath( const QString &relative )
+// Synthesise a small GeoTIFF (16×16, single Float32 band) into `dir/name` so
+// the test does not depend on a committed sample raster under data/samples/.
+static QString createTestRaster( const QString &dir, const QString &name )
 {
-  const QString here = QFileInfo( __FILE__ ).absolutePath();
-  return QFileInfo( here + QStringLiteral( "/../data/" ) + relative ).absoluteFilePath();
+  GDALAllRegister(); // idempotent; ensures the GTiff driver is available.
+  const QString path = dir + QLatin1Char( '/' ) + name;
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  REQUIRE( driver != nullptr );
+
+  constexpr int W = 16, H = 16;
+  GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr );
+  REQUIRE( ds != nullptr );
+
+  double gt[6] = { 0.0, 1.0, 0.0, static_cast<double>( H ), 0.0, -1.0 };
+  GDALSetGeoTransform( ds, gt );
+  GDALSetProjection(
+    ds, "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],"
+        "PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]" );
+
+  GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+  std::vector<float> line( W, 1.0f );
+  for ( int row = 0; row < H; ++row )
+    GDALRasterIO( band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
+
+  GDALClose( ds );
+  return path;
 }
 
 AssetId registerRaster( DataManager &manager, const QString &path )
@@ -42,10 +67,7 @@ AssetId registerRaster( DataManager &manager, const QString &path )
 
 QString stageRaster( QTemporaryDir &dir, const QString &name )
 {
-  const QString path = dir.filePath( name );
-  REQUIRE( QFile::copy( fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ),
-                         path ) );
-  return path;
+  return createTestRaster( dir.path(), name );
 }
 
 } // namespace

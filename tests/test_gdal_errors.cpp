@@ -6,6 +6,27 @@
 
 #include <QString>
 #include <QFileInfo>
+#include <QTemporaryDir>
+#include <gdal.h>
+#include <cpl_conv.h>
+
+// A small valid GeoTIFF synthesised at runtime so the suite does not depend on
+// a committed sample raster under data/.
+static QString validRasterPath()
+{
+  static QTemporaryDir dir;
+  static const QString path = []() {
+    GDALAllRegister();
+    const QString p = dir.path() + QStringLiteral( "/sample.tif" );
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    GDALDatasetH ds = GDALCreate( driver, p.toUtf8().constData(), 8, 8, 1, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    GDALClose( ds );
+    return p;
+  }();
+  return path;
+}
 
 // --- Error handler basics ---
 
@@ -60,7 +81,7 @@ TEST_CASE("GdalErrorHandler no error on successful open", "[gdal][errors]")
     handler.install();
 
     GdalDatasetWrapper ds;
-    ds.open(QFileInfo(__FILE__).absolutePath() + "/../data/sample_crops.tif");
+    ds.open(validRasterPath());
 
     REQUIRE_FALSE(handler.hasError());
 }
@@ -96,7 +117,7 @@ TEST_CASE("GdalDatasetWrapper no error on success", "[gdal][errors][wrapper]")
     handler.install();
 
     GdalDatasetWrapper ds;
-    ds.open(QFileInfo(__FILE__).absolutePath() + "/../data/sample_crops.tif");
+    ds.open(validRasterPath());
 
     REQUIRE(ds.lastError().isEmpty());
 }

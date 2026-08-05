@@ -7,37 +7,115 @@
 #include <QString>
 #include <QStringList>
 #include <QFileInfo>
+#include <QTemporaryDir>
+#include <QMap>
 #include <vector>
 #include <cmath>
+#include <gdal.h>
+#include <cpl_conv.h>
 
-static QString testDataPath()
+// Synthesise the three rasters this suite used to read from data/ (sample_crops,
+// phr_xs, landsat) with the exact properties each test asserts, so the suite is
+// self-contained and does not depend on committed sample files. Files are
+// generated once and cached for the process lifetime.
+namespace
 {
-    // Resolve relative to project root
-    QString base = QFileInfo(__FILE__).absolutePath(); // tests/
-    return QFileInfo(base + "/../data/sample_crops.tif").absoluteFilePath();
+QTemporaryDir &sampleDir()
+{
+  static QTemporaryDir dir;
+  return dir;
 }
 
-static QString testPhrPath()
+// sample_crops.tif stand-in: 512×512×3, the exact geotransform asserted below,
+// and deliberately NO projection (the "empty projection" test relies on that).
+const QString &sampleCropsPath()
 {
-    QString base = QFileInfo(__FILE__).absolutePath();
-    return QFileInfo(base + "/../data/phr_xs.tif").absoluteFilePath();
-}
-
-static QString testLandsatPath()
-{
-    QString base = QFileInfo(__FILE__).absolutePath();
-    // Prefer reorganized refs/qgis/; keep legacy qgis_ref/ for local trees
-    const QStringList candidates = {
-        base + "/../refs/qgis/tests/testdata/landsat.tif",
-        base + "/../qgis_ref/tests/testdata/landsat.tif",
-    };
-    for ( const QString &c : candidates )
+  static const QString path = []() {
+    GDALAllRegister();
+    const QString p = sampleDir().path() + QStringLiteral( "/sample_crops.tif" );
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    GDALDatasetH ds = GDALCreate( driver, p.toUtf8().constData(), 512, 512, 3, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    double gt[6] = { -10000.0, 39.0625, 0.0, 10000.0, 0.0, -39.0625 };
+    GDALSetGeoTransform( ds, gt );
+    // Intentionally no GDALSetProjection: empty CRS, as sample_crops had.
+    for ( int b = 1; b <= 3; ++b )
     {
-        if ( QFileInfo::exists( c ) )
-            return QFileInfo( c ).absoluteFilePath();
+      GDALRasterBandH band = GDALGetRasterBand( ds, b );
+      std::vector<float> line( 512, static_cast<float>( b * 10 ) );
+      for ( int row = 0; row < 512; ++row )
+        GDALRasterIO( band, GF_Write, 0, row, 512, 1, line.data(), 512, 1, GDT_Float32, 0, 0 );
     }
-    return QFileInfo( candidates.first() ).absoluteFilePath();
+    GDALClose( ds );
+    return p;
+  }();
+  return path;
 }
+
+// phr_xs.tif stand-in: a different width than sample_crops (so the
+// "different widths" test holds) with non-zero band data.
+const QString &phrXsPath()
+{
+  static const QString path = []() {
+    GDALAllRegister();
+    const QString p = sampleDir().path() + QStringLiteral( "/phr_xs.tif" );
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    GDALDatasetH ds = GDALCreate( driver, p.toUtf8().constData(), 256, 256, 1, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    double gt[6] = { 0.0, 1.0, 0.0, 256.0, 0.0, -1.0 };
+    GDALSetGeoTransform( ds, gt );
+    GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+    std::vector<float> line( 256 );
+    for ( int row = 0; row < 256; ++row )
+    {
+      for ( int col = 0; col < 256; ++col )
+        line[col] = static_cast<float>( row * 256 + col ); // non-zero
+      GDALRasterIO( band, GF_Write, 0, row, 256, 1, line.data(), 256, 1, GDT_Float32, 0, 0 );
+    }
+    GDALClose( ds );
+    return p;
+  }();
+  return path;
+}
+
+// landsat stand-in: carries a UTM projection so the projection test passes
+// without depending on the gitignored refs/qgis tree.
+const QString &landsatPath()
+{
+  static const QString path = []() {
+    GDALAllRegister();
+    const QString p = sampleDir().path() + QStringLiteral( "/landsat_utm.tif" );
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    GDALDatasetH ds = GDALCreate( driver, p.toUtf8().constData(), 64, 64, 1, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    double gt[6] = { 300000.0, 30.0, 0.0, 4900000.0, 0.0, -30.0 };
+    GDALSetGeoTransform( ds, gt );
+    // UTM zone 17N WGS84 — proj4 string the wrapper surfaces as a WKT
+    // containing "UTM".
+    GDALSetProjection( ds,
+      "PROJCS[\"WGS 84 / UTM zone 17N\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\","
+      "SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],"
+      "UNIT[\"degree\",0.0174532925199433]],PROJECTION[\"Transverse_Mercator\"],"
+      "PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",-81],"
+      "PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],"
+      "PARAMETER[\"false_northing\",0],UNIT[\"metre\",1]]" );
+    GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+    std::vector<float> line( 64, 1.0f );
+    for ( int row = 0; row < 64; ++row )
+      GDALRasterIO( band, GF_Write, 0, row, 64, 1, line.data(), 64, 1, GDT_Float32, 0, 0 );
+    GDALClose( ds );
+    return p;
+  }();
+  return path;
+}
+} // namespace
+
+static QString testDataPath() { return sampleCropsPath(); }
+static QString testPhrPath() { return phrXsPath(); }
+static QString testLandsatPath() { return landsatPath(); }
 
 // --- Dataset open/close ---
 

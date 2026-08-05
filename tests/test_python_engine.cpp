@@ -18,9 +18,55 @@
 
 #include <QFileInfo>
 #include <QDir>
+#include <QMap>
+#include <QTemporaryDir>
+
+#include <vector>
+#include <gdal.h>
+#include <cpl_conv.h>
+
+// Synthesise a small GeoTIFF per distinct `relative` path and cache it for the
+// process lifetime, so the test does not depend on a committed sample raster
+// under data/samples/.
+static QString syntheticSample( const QString &relative )
+{
+  static QTemporaryDir dir;
+  static QMap<QString, QString> cache;
+  auto it = cache.constFind( relative );
+  if ( it != cache.constEnd() )
+    return it.value();
+
+  GDALAllRegister();
+  const QString path = dir.path() + QLatin1Char( '/' ) +
+                       QString::number( cache.size() ) + QStringLiteral( ".tif" );
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  REQUIRE( driver != nullptr );
+  constexpr int W = 16, H = 16;
+  GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr );
+  REQUIRE( ds != nullptr );
+  double gt[6] = { 0.0, 1.0, 0.0, static_cast<double>( H ), 0.0, -1.0 };
+  GDALSetGeoTransform( ds, gt );
+  GDALSetProjection(
+    ds, "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],"
+        "PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]" );
+  GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+  std::vector<float> line( W, 1.0f );
+  for ( int row = 0; row < H; ++row )
+    GDALRasterIO( band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
+  GDALClose( ds );
+  cache.insert( relative, path );
+  return path;
+}
 
 static QString fixturePath( const QString &relativePath )
 {
+  // Sample rasters under data/samples/ are no longer committed; redirect those
+  // to a synthesised GeoTIFF. Other paths (plugins/, etc.) resolve normally.
+  if ( relativePath.startsWith( QLatin1String( "samples/" ) ) ||
+       relativePath == QLatin1String( "phr_xs.tif" ) )
+  {
+    return syntheticSample( relativePath );
+  }
   return QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( relativePath );
 }
 

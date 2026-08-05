@@ -7,12 +7,33 @@
 #include <vector>
 #include <atomic>
 #include <QFileInfo>
+#include <QTemporaryDir>
+#include <gdal.h>
+#include <cpl_conv.h>
+
+// A small valid GeoTIFF synthesised at runtime so the suite does not depend on
+// a committed sample raster under data/.
+static QString validRasterPath()
+{
+  static QTemporaryDir dir;
+  static const QString path = []() {
+    GDALAllRegister();
+    const QString p = dir.path() + QStringLiteral( "/sample.tif" );
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    GDALDatasetH ds = GDALCreate( driver, p.toUtf8().constData(), 8, 8, 1, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    GDALClose( ds );
+    return p;
+  }();
+  return path;
+}
 
 TEST_CASE("GdalDatasetWrapper concurrent open does not crash", "[gdal][thread]")
 {
     // Open the same file from multiple threads concurrently
     // This exercises ensureGdalInit() under concurrent access
-    QString path = QFileInfo(__FILE__).absolutePath() + "/../data/sample_crops.tif";
+    QString path = validRasterPath();
 
     const int threadCount = 8;
     std::atomic<int> successCount(0);
@@ -41,8 +62,8 @@ TEST_CASE("GdalDatasetWrapper concurrent open does not crash", "[gdal][thread]")
 
 TEST_CASE("GdalDatasetWrapper concurrent open different files", "[gdal][thread]")
 {
-    QString path1 = QFileInfo(__FILE__).absolutePath() + "/../data/sample_crops.tif";
-    QString path2 = QFileInfo(__FILE__).absolutePath() + "/../data/phr_xs.tif";
+    QString path1 = validRasterPath();
+    QString path2 = validRasterPath(); // same synthetic file is fine — concurrency, not distinctness
 
     std::atomic<int> successCount(0);
     std::atomic<int> failCount(0);

@@ -10,11 +10,13 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QMap>
 #include <QTemporaryDir>
 
 #include <array>
 #include <vector>
 
+#include <cpl_conv.h>
 #include <gdal.h>
 #include <gdal_priv.h>
 
@@ -31,8 +33,54 @@ using namespace sicnu::data;
 namespace
 {
 
+// Synthesise a small GeoTIFF per distinct `relative` path and cache them (plus
+// the holding temp dir) for the process lifetime, so tests do not depend on a
+// committed sample raster under data/samples/. Distinct relative paths yield
+// distinct files so the Data Manager does not dedup them by SourceKey.
+QString syntheticSample( const QString &relative )
+{
+  static QTemporaryDir dir;
+  static QMap<QString, QString> cache;
+  auto it = cache.constFind( relative );
+  if ( it != cache.constEnd() )
+    return it.value();
+
+  GDALAllRegister();
+  const QString path = dir.path() + QLatin1Char( '/' ) +
+                       QString::number( cache.size() ) + QStringLiteral( ".tif" );
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  REQUIRE( driver != nullptr );
+  constexpr int W = 16, H = 16;
+  GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr );
+  REQUIRE( ds != nullptr );
+  double gt[6] = { 0.0, 1.0, 0.0, static_cast<double>( H ), 0.0, -1.0 };
+  GDALSetGeoTransform( ds, gt );
+  GDALSetProjection(
+    ds, "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],"
+        "PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]" );
+  GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+  std::vector<float> line( W, 1.0f );
+  for ( int row = 0; row < H; ++row )
+    GDALRasterIO( band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
+  GDALClose( ds );
+  cache.insert( relative, path );
+  return path;
+}
+
+// Resolve a fixture path. Sample rasters under data/samples/ are no longer
+// committed; raster paths are redirected to a synthesised GeoTIFF (one per
+// distinct path). Non-raster samples (e.g. samples/test.shp) fall through to
+// the real data tree so the OGR provider sees a genuine missing source once the
+// shapefile is gone.
 QString fixturePath( const QString &relative )
 {
+  if ( ( relative.startsWith( QLatin1String( "samples/" ) ) &&
+         ( relative.endsWith( QLatin1String( ".tif" ) ) ||
+           relative.endsWith( QLatin1String( ".tiff" ) ) ) ) ||
+       relative == QLatin1String( "phr_xs.tif" ) )
+  {
+    return syntheticSample( relative );
+  }
   const QString here = QFileInfo( __FILE__ ).absolutePath();
   return QFileInfo( here + QStringLiteral( "/../data/" ) + relative ).absoluteFilePath();
 }
@@ -472,6 +520,10 @@ TEST_CASE( "A vector input is UnavailableSource",
   QTemporaryDir dir;
   DataManager manager;
 
+  // samples/test.shp is no longer committed to VCS; fixturePath falls through
+  // for non-raster paths, so the OGR source resolves as Missing (and would be a
+  // Ready vector if the file were present). Either way the preflight must
+  // classify it UnavailableSource.
   SourceDescriptor source;
   source.providerKey = QStringLiteral( "ogr" );
   source.canonicalSource = fixturePath( QStringLiteral( "samples/test.shp" ) );

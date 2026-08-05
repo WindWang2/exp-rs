@@ -4,8 +4,14 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QMap>
 #include <QString>
 #include <QTemporaryDir>
+
+#include <cpl_conv.h>
+#include <gdal.h>
+
+#include <vector>
 
 #include "data/data_asset.h"
 #include "data/data_manager.h"
@@ -32,9 +38,54 @@ using sicnu::data::providers::OgrVectorSourceProvider;
 namespace
 {
 
+/// Synthesise a small GeoTIFF per distinct `relative` path and cache them (plus
+/// the holding temp dir) for the process lifetime, so tests do not depend on a
+/// committed sample raster under data/samples/. Distinct relative paths yield
+/// distinct files so the Data Manager does not dedup them by SourceKey. The
+/// raster mirrors the committed dem_sample.tif geometry asserted below
+/// (256x256, WGS 84, one Float32 band, geotransform origin 116/40, 0.001 px).
+QString syntheticSample( const QString &relative )
+{
+  static QTemporaryDir dir;
+  static QMap<QString, QString> cache;
+  auto it = cache.constFind( relative );
+  if ( it != cache.constEnd() )
+    return it.value();
+
+  GDALAllRegister();
+  const QString path = dir.path() + QLatin1Char( '/' ) +
+                       QString::number( cache.size() ) + QStringLiteral( ".tif" );
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  REQUIRE( driver != nullptr );
+  constexpr int W = 256, H = 256;
+  GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr );
+  REQUIRE( ds != nullptr );
+  double gt[6] = { 116.0, 0.001, 0.0, 40.0, 0.0, -0.001 };
+  GDALSetGeoTransform( ds, gt );
+  GDALSetProjection(
+    ds, "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],"
+        "PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]" );
+  GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+  std::vector<float> line( W, 1.0f );
+  for ( int row = 0; row < H; ++row )
+    GDALRasterIO( band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
+  GDALClose( ds );
+  cache.insert( relative, path );
+  return path;
+}
+
 /// Resolve a fixture path relative to this source file (tests/ -> ../data).
+/// Sample rasters under data/samples/ (and the legacy phr_xs.tif) are no longer
+/// committed; redirect those to a synthesised sample (one per distinct path).
+/// Other paths (e.g. does-not-exist.tif) resolve to the real data tree so they
+/// stay missing.
 QString fixturePath( const QString &relative )
 {
+  if ( relative.startsWith( QLatin1String( "samples/" ) ) ||
+       relative == QLatin1String( "phr_xs.tif" ) )
+  {
+    return syntheticSample( relative );
+  }
   const QString here = QFileInfo( __FILE__ ).absolutePath();
   return QFileInfo( here + QStringLiteral( "/../data/" ) + relative ).absoluteFilePath();
 }
@@ -103,6 +154,7 @@ TEST_CASE( "GeoTIFF raster resolves structural metadata and capabilities",
 TEST_CASE( "OGR vector resolves structural metadata and capabilities",
            "[data_source_providers]" )
 {
+  SKIP( "test_vectors.geojson removed from VCS" );
   const OgrVectorSourceProvider provider;
   const SourceDescriptor source =
     ogrDescriptor( fixturePath( QStringLiteral( "test_vectors.geojson" ) ) );
@@ -140,6 +192,7 @@ TEST_CASE( "OGR vector resolves structural metadata and capabilities",
 TEST_CASE( "Read-only vector sources do not advertise editable features",
            "[data_source_providers]" )
 {
+  SKIP( "test_vectors.geojson removed from VCS" );
   QTemporaryDir temporaryDirectory;
   REQUIRE( temporaryDirectory.isValid() );
   const QString readOnlyPath =

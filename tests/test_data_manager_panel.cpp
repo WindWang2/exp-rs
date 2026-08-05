@@ -6,6 +6,11 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 
+#include <vector>
+
+#include <gdal.h>
+#include <cpl_conv.h>
+
 #include <qgsapplication.h>
 #include <qgslayertree.h>
 #include <qgsmapcanvas.h>
@@ -46,8 +51,51 @@ void ensureQgisApplication()
   QgsApplication::initQgis();
 }
 
+// Synthesise a small GeoTIFF per distinct `relative` path and cache them (plus
+// the holding temp dir) for the process lifetime, so tests do not depend on a
+// committed sample raster under data/samples/. Distinct relative paths yield
+// distinct files so the Data Manager does not dedup them by SourceKey.
+QString syntheticSample( const QString &relative )
+{
+  static QTemporaryDir dir;
+  static QMap<QString, QString> cache;
+  auto it = cache.constFind( relative );
+  if ( it != cache.constEnd() )
+    return it.value();
+
+  GDALAllRegister();
+  const QString path = dir.path() + QLatin1Char( '/' ) +
+                       QString::number( cache.size() ) + QStringLiteral( ".tif" );
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  REQUIRE( driver != nullptr );
+  constexpr int W = 16, H = 16;
+  GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr );
+  REQUIRE( ds != nullptr );
+  double gt[6] = { 0.0, 1.0, 0.0, static_cast<double>( H ), 0.0, -1.0 };
+  GDALSetGeoTransform( ds, gt );
+  GDALSetProjection(
+    ds, "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],"
+        "PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]" );
+  GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+  std::vector<float> line( W, 1.0f );
+  for ( int row = 0; row < H; ++row )
+    GDALRasterIO( band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
+  GDALClose( ds );
+  cache.insert( relative, path );
+  return path;
+}
+
 QString fixturePath( const QString &relative )
 {
+  // Sample rasters under data/samples/ and the legacy phr_xs.tif are no longer
+  // committed; redirect those to a synthesised sample (one per distinct path).
+  // Other paths (e.g. does-not-exist.tif) resolve to the real data tree so
+  // they stay missing.
+  if ( relative.startsWith( QLatin1String( "samples/" ) ) ||
+       relative == QLatin1String( "phr_xs.tif" ) )
+  {
+    return syntheticSample( relative );
+  }
   const QString here = QFileInfo( __FILE__ ).absolutePath();
   return QFileInfo( here + QStringLiteral( "/../data/" ) + relative ).absoluteFilePath();
 }
