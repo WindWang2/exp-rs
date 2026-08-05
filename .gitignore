@@ -68,3 +68,14 @@ vendor/
 .superpowers/
 .gstack/
 .planning/
+.zcode/
+
+# IDE / editor / OS artifacts
+.vscode/
+.idea/
+.cache/
+*.swp
+*.swo
+*~
+.DS_Store
+compile_flags.txt
