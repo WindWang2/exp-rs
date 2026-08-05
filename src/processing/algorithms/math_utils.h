@@ -87,4 +87,20 @@ Stats computeStatsFromAccumulators(const AccumulatorStats &acc);
  */
 bool normalizedDifference(const float *a, const float *b, float *out, size_t count);
 
+/**
+ * Apply linear scaling: out[i] = gain * in[i] + bias.
+ *
+ * This is the single kernel for DN-to-radiance / radiometric calibration
+ * gain-bias conversion, shared by AtmosphericCorrection::dnToRadiance and
+ * RadiometricCalibration::toRadiance.
+ *
+ * @param in     Input values
+ * @param out    Output buffer
+ * @param count  Number of elements
+ * @param gain   Multiplicative gain
+ * @param bias   Additive bias
+ * @return true on success; false on null pointers, zero count, or NaN gain/bias
+ */
+bool linearScale(const float *in, float *out, size_t count, float gain, float bias);
+
 } // namespace MathUtils

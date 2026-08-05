@@ -18,6 +18,7 @@ class QgsMapCanvas;
 class QgsLayoutViewToolSelect;
 class QgsLayoutViewToolPan;
 class QgsLayoutViewToolZoom;
+class QgsLayoutViewToolMoveItemContent;
 
 /**
  * Layout designer implementing QgsLayoutDesignerInterface.
@@ -114,6 +115,7 @@ private:
     QgsLayoutViewToolSelect *mSelectTool = nullptr;
     QgsLayoutViewToolPan *mPanTool = nullptr;
     QgsLayoutViewToolZoom *mZoomTool = nullptr;
+    QgsLayoutViewToolMoveItemContent *mMoveContentTool = nullptr;
 
     // Menus
     QMenu *mLayoutMenu = nullptr;

@@ -81,17 +81,17 @@ Json::Value RsAtmosphericCorrectionOperator::run(const Json::Value& params,
     const float bias = static_cast<float>(getDouble(params, "bias", 0.0));
     const float airmass = static_cast<float>(getDouble(params, "airmass", 1.0));
 
-    int methodCode = 1; // DOS1
-    if (method == "dn_to_radiance") methodCode = 0;
-    else if (method == "dos2") methodCode = 2;
-    else if (method == "quac") methodCode = 3;
+    int methodCode = AtmosphericCorrection::Dos1;
+    if (method == "dn_to_radiance") methodCode = AtmosphericCorrection::DnToRadiance;
+    else if (method == "dos2") methodCode = AtmosphericCorrection::Dos2;
+    else if (method == "quac") methodCode = AtmosphericCorrection::Quac;
 
     context.logInfo("Applying " + method + " to " + inputPath);
     context.reportProgress(0.2, "Running atmospheric correction");
 
     QString errorMessage;
     bool ok = false;
-    if (methodCode == 3) {
+    if (methodCode == AtmosphericCorrection::Quac) {
         // QUAC processes all bands jointly (image-statistics based).
         ok = AtmosphericCorrection::processFileMultiBand(
             QString::fromStdString(inputPath),

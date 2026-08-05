@@ -26,6 +26,7 @@
 #include <gui/layout/qgslayoutviewtoolselect.h>
 #include <gui/layout/qgslayoutviewtoolpan.h>
 #include <gui/layout/qgslayoutviewtoolzoom.h>
+#include <gui/layout/qgslayoutviewtoolmoveitemcontent.h>
 
 #include <QMenuBar>
 #include <QToolBar>
@@ -120,9 +121,15 @@ void QgsLayoutDesignerDialog::removeDockWidget(QDockWidget *dock)
 
 void QgsLayoutDesignerDialog::activateTool(StandardTool tool)
 {
-    Q_UNUSED(tool);
-    // StandardTool only has ToolMoveItemContent / ToolMoveItemNodes.
-    // Select/Pan/Zoom tools are activated directly from toolbar actions.
+    // StandardTool values from the QGIS interface contract:
+    // ToolMoveItemContent and ToolMoveItemNodes. Select/Pan/Zoom are activated
+    // directly from the navigation toolbar lambdas (they are not StandardTool values).
+    if (!mView) return;
+    if (tool == ToolMoveItemContent && mMoveContentTool) {
+        mView->setTool(mMoveContentTool);
+    }
+    // ToolMoveItemNodes would require QgsLayoutViewToolEditNodes; not yet wired
+    // since the designer doesn't expose node editing in its current scope.
 }
 
 QgsLayoutDesignerInterface::ExportResults *QgsLayoutDesignerDialog::lastExportResults() const
@@ -228,6 +235,7 @@ void QgsLayoutDesignerDialog::setupToolbars()
     mSelectTool = new QgsLayoutViewToolSelect(mView);
     mPanTool = new QgsLayoutViewToolPan(mView);
     mZoomTool = new QgsLayoutViewToolZoom(mView);
+    mMoveContentTool = new QgsLayoutViewToolMoveItemContent(mView);
 
     auto *toolGroup = new QActionGroup(mNavigationToolbar);
 
