@@ -31,8 +31,9 @@ void BandMathDialog::setupUi()
   m_expressionEdit->setMinimumHeight( 32 );
   SicnuDialogHelp::tip( m_expressionEdit, tr(
     "波段运算表达式。波段写作 b1,b2…（从 1 起）。\n"
-    "示例：(b1-b2)/(b1+b2)；b1*0.0001\n"
-    "支持 + − * / 与括号。" ) );
+    "示例：(b1-b2)/(b1+b2)；b1*0.0001；sqrt(b1*b1+b2*b2)；b1>0.4?1:0\n"
+    "支持 + - * /、括号、比较(< > <= >= == !=)、逻辑(&& ||)、\n"
+    "条件(b1>x?true:false)、函数(sin/cos/exp/ln/sqrt/abs/pow/min/max/pi…)" ) );
   form->addRow( tr( "公式" ), m_expressionEdit );
   qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
   qobject_cast<QVBoxLayout *>( sec->layout() )->addWidget(  SicnuUi::makeHintLabel(
