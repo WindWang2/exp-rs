@@ -11,12 +11,26 @@
  *
  * Expression syntax:
  *   - Band references: b1, b2, ..., bN (1-based)
- *   - Constants: 42, 3.14, -1.5
- *   - Operators: +, -, *, /
+ *   - Constants: 42, 3.14, -1.5, 1e-6 (scientific notation supported)
+ *   - Arithmetic operators: +, -, *, / (precedence: * / before + -)
+ *   - Comparison operators: <, >, <=, >=, ==, != (return 1.0 / 0.0)
+ *   - Logical operators: &&, || (non-zero = true; short-circuit evaluated)
+ *   - Conditional: cond ? true_expr : false_expr
  *   - Parentheses: (expr)
- *   - Operator precedence: * / before + -
+ *   - Functions:
+ *       Single-arg: sin, cos, tan, exp, ln(log), log10, sqrt, abs, asin, acos, atan
+ *       Two-arg:    pow(base, exp), min(a, b), max(a, b), atan2(y, x)
+ *       Zero-arg:   pi()
  *
- * Example: "(b1 - b2) / (b1 + b2)" computes NDVI from bands 1 (NIR) and 2 (Red).
+ * Operator precedence (low → high):
+ *   ||  →  &&  →  comparison  →  + -  →  * /  →  unary -  →  ternary ?:  →  primary
+ *
+ * Examples:
+ *   "(b1 - b2) / (b1 + b2)"                          — NDVI
+ *   "sqrt(b1*b1 + b2*b2)"                            — vector magnitude
+ *   "b1 > 0.4 ? 1 : 0"                               — threshold mask
+ *   "(b1 > 0.3 && b2 < 0.25) ? b1 : 0"               — conditional with logic
+ *   "pow(b1 / (b1 + b2 + b3), 2)"                    — normalized ratio squared
  */
 namespace BandMath
 {

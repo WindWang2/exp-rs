@@ -237,6 +237,159 @@ TEST_CASE("BandMath respects operator precedence (* over -)", "[bandmath]")
     REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.5f * 2.0f - 0.1f, 0.001f)); // 0.9
 }
 
+// --- Functions ---
+
+TEST_CASE("BandMath evaluates sqrt function", "[bandmath][func]")
+{
+    auto bands = makeTwoBandData();
+    std::vector<float> out(4);
+    BandMath::evaluate("sqrt(b1)", bands, out.data(), 4);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(std::sqrt(0.5f), 0.001f));
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(std::sqrt(0.8f), 0.001f));
+}
+
+TEST_CASE("BandMath evaluates exp and ln functions", "[bandmath][func]")
+{
+    BandMath::BandData bands;
+    bands[1] = {1.0f};
+    std::vector<float> out(1);
+    BandMath::evaluate("exp(b1)", bands, out.data(), 1);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(std::exp(1.0f), 0.001f));
+    BandMath::evaluate("ln(b1)", bands, out.data(), 1);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.0f, 0.001f));
+}
+
+TEST_CASE("BandMath evaluates two-arg functions pow/min/max", "[bandmath][func]")
+{
+    auto bands = makeTwoBandData();
+    std::vector<float> out(4);
+    BandMath::evaluate("pow(b1, 2)", bands, out.data(), 4);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.25f, 0.001f));
+    BandMath::evaluate("min(b1, b2)", bands, out.data(), 4);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.1f, 0.001f)); // min(0.5, 0.1)
+    BandMath::evaluate("max(b1, b2)", bands, out.data(), 4);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.5f, 0.001f)); // max(0.5, 0.1)
+}
+
+TEST_CASE("BandMath evaluates pi() constant", "[bandmath][func]")
+{
+    BandMath::BandData bands;
+    std::vector<float> out(2);
+    BandMath::evaluate("pi()", bands, out.data(), 2);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(static_cast<float>(M_PI), 0.001f));
+}
+
+TEST_CASE("BandMath evaluates nested function sqrt(b1*b1+b2*b2)", "[bandmath][func]")
+{
+    auto bands = makeTwoBandData();
+    std::vector<float> out(4);
+    BandMath::evaluate("sqrt(b1*b1 + b2*b2)", bands, out.data(), 4);
+    float expected = std::sqrt(0.5f * 0.5f + 0.1f * 0.1f);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(expected, 0.001f));
+}
+
+TEST_CASE("BandMath rejects unknown function", "[bandmath][func]")
+{
+    auto bands = makeTwoBandData();
+    std::vector<float> out(4);
+    bool ok = BandMath::evaluate("foobar(b1)", bands, out.data(), 4);
+    REQUIRE_FALSE(ok);
+}
+
+TEST_CASE("BandMath rejects wrong argument count", "[bandmath][func]")
+{
+    auto bands = makeTwoBandData();
+    std::vector<float> out(4);
+    // sqrt is single-arg; two args should fail.
+    REQUIRE_FALSE(BandMath::evaluate("sqrt(b1, b2)", bands, out.data(), 4));
+}
+
+// --- Comparison operators ---
+
+TEST_CASE("BandMath evaluates comparison operators", "[bandmath][cmp]")
+{
+    auto bands = makeTwoBandData();
+    std::vector<float> out(4);
+    // b1 = [0.5, 0.8, 0.0, 0.3], b2 = [0.1, 0.2, 0.0, 0.3]
+    BandMath::evaluate("b1 > b2", bands, out.data(), 4);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(1.0f, 0.001f)); // 0.5 > 0.1 → true
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(0.0f, 0.001f)); // 0.0 > 0.0 → false
+
+    BandMath::evaluate("b1 >= 0.5", bands, out.data(), 4);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(1.0f, 0.001f)); // 0.5 >= 0.5
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(0.0f, 0.001f)); // 0.0 >= 0.5
+
+    BandMath::evaluate("b1 == b2", bands, out.data(), 4);
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(1.0f, 0.001f)); // 0.0 == 0.0
+    REQUIRE_THAT(out[3], Catch::Matchers::WithinAbs(1.0f, 0.001f)); // 0.3 == 0.3
+
+    BandMath::evaluate("b1 != b2", bands, out.data(), 4);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(1.0f, 0.001f)); // 0.5 != 0.1
+}
+
+// --- Logical operators ---
+
+TEST_CASE("BandMath evaluates logical AND/OR", "[bandmath][logic]")
+{
+    auto bands = makeTwoBandData();
+    std::vector<float> out(4);
+    // b1 = [0.5, 0.8, 0.0, 0.3], b2 = [0.1, 0.2, 0.0, 0.3]
+    BandMath::evaluate("b1 > 0.3 && b2 < 0.25", bands, out.data(), 4);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(1.0f, 0.001f)); // 0.5>0.3=T, 0.1<0.25=T → T
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(1.0f, 0.001f)); // 0.8>0.3=T, 0.2<0.25=T → T
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(0.0f, 0.001f)); // 0.0>0.3=F → F
+    REQUIRE_THAT(out[3], Catch::Matchers::WithinAbs(0.0f, 0.001f)); // 0.3>0.3=F → F
+}
+
+TEST_CASE("BandMath evaluates logical OR", "[bandmath][logic]")
+{
+    auto bands = makeTwoBandData();
+    std::vector<float> out(4);
+    BandMath::evaluate("b1 > 0.6 || b2 > 0.15", bands, out.data(), 4);
+    // b1=[0.5,0.8,0.0,0.3] b2=[0.1,0.2,0.0,0.3]
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.0f, 0.001f)); // 0.5>0.6=F, 0.1>0.15=F → F
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(1.0f, 0.001f)); // 0.8>0.6=T → T
+}
+
+// --- Conditional (ternary) ---
+
+TEST_CASE("BandMath evaluates ternary conditional", "[bandmath][cond]")
+{
+    auto bands = makeTwoBandData();
+    std::vector<float> out(4);
+    // b1 = [0.5, 0.8, 0.0, 0.3]
+    BandMath::evaluate("b1 > 0.4 ? b2 : 0", bands, out.data(), 4);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.1f, 0.001f)); // 0.5>0.4 → b2=0.1
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(0.2f, 0.001f)); // 0.8>0.4 → b2=0.2
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(0.0f, 0.001f)); // 0.0>0.4 → 0
+}
+
+TEST_CASE("BandMath evaluates nested conditional with function", "[bandmath][cond]")
+{
+    auto bands = makeTwoBandData();
+    std::vector<float> out(4);
+    // b1=[0.5,0.8,0.0,0.3] b2=[0.1,0.2,0.0,0.3]
+    BandMath::evaluate("b1 > 0.4 ? sqrt(b2) : b1 * 2", bands, out.data(), 4);
+    float expectedTrue = std::sqrt(0.1f);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(expectedTrue, 0.001f)); // 0.5>0.4 → sqrt(0.1)
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(0.0f, 0.001f));         // 0.0≤0.4 → 0*2
+}
+
+TEST_CASE("BandMath evaluates complex threshold mask", "[bandmath][cond]")
+{
+    auto bands = makeTwoBandData();
+    std::vector<float> out(4);
+    BandMath::evaluate("(b1 > 0.4 && b2 < 0.25) ? 1 : 0", bands, out.data(), 4);
+    // pixel 0: 0.5>0.4=T, 0.1<0.25=T → 1
+    // pixel 1: 0.8>0.4=T, 0.2<0.25=T → 1
+    // pixel 2: 0.0>0.4=F → 0
+    // pixel 3: 0.3>0.4=F → 0
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(out[3], Catch::Matchers::WithinAbs(0.0f, 0.001f));
+}
+
 // --- File-level processing (dialog async pipeline) ---
 
 #include "processing/gdal/gdal_dataset_wrapper.h"
