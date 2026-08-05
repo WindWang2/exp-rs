@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -235,8 +236,10 @@ bool RsPostProcessTask::run()
 
   // --- Save raster ---------------------------------------------------------
   mFb.setProgress( 85.0 );
+  // NaN → no GDAL NoData marker (caller preserves the source's semantics).
   if ( !RsPostProcess::saveLabelRaster( mCfg.outputRasterPath, labels, gt, wkt,
-                                        colorTable, mCfg.creationOptions, &err ) )
+                                        colorTable, mCfg.creationOptions,
+                                        std::numeric_limits<double>::quiet_NaN(), &err ) )
   {
     mResult.errorMessage = err.isEmpty()
                              ? QStringLiteral( "Failed to save output raster" )

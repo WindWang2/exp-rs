@@ -1,7 +1,8 @@
 // rs_classification_pipeline.h — ADR 0019 slice S2: deep, GUI-free
 // classification pipeline core ("train → persist → tiled predict → class map")
-// lifted out of RsClassificationTask, which is now a thin QgsTask adapter at
-// this seam.
+// at the single training/predict seam. The QgsTask adapter that originally
+// consumed this seam was deleted in ADR 0053 — GUI code now builds
+// RsClassificationPipeline::Config directly.
 //
 // Synchronous, no QgsTask / QWidget types. Owns the full classify flow:
 //   1. backend->fit(trainX, trainY) when not already fitted
@@ -24,7 +25,6 @@
 
 #include "qgis_analysis_export.h"
 #include "rs_classifier_backend.h"
-#include "rs_cross_validation.h"
 #include "rs_accuracy_assessment.h"
 #include "rs_feature_scaler.h"
 #include "rs_pixel_ignore_options.h"
@@ -120,7 +120,9 @@ class QGIS_ANALYSIS_EXPORT RsClassificationPipeline
         cv::Mat testX;                                  // CV_32F MxB (may be empty; scaled)
         cv::Mat testY;                                  // CV_32S Mx1 (may be empty)
         QHash<int, QColor> classColors;                 // classId -> RGB
-        QString methodName;                             // for log + sidecar ("KMeans" enables remap)
+        // for log + sidecar only — the cluster→class remap is backend-driven
+        // (RsClassifierBackend::needsLabelRemap(), ADR 0061).
+        QString methodName;
         // If fitted, run() transforms tile X before predict. Caller scales train/test.
         RsFeatureScaler scaler;
         // Optional: after successful fit, persist model YAML + .meta.json
@@ -147,14 +149,6 @@ class QGIS_ANALYSIS_EXPORT RsClassificationPipeline
     /// Run the full pipeline synchronously on the caller's thread.
     static RsClassificationPipelineResult run( Config config,
                                                const Progress &progress = Progress() );
-
-    /// Run stratified k-fold cross validation synchronously on caller's thread.
-    static RsCrossValidation::Result runCrossValidation(
-      const cv::Mat &X, const cv::Mat &y,
-      const std::function<std::unique_ptr<RsClassifierBackend>()> &factory,
-      int k = 5,
-      bool scaleFeatures = true,
-      const Progress &progress = Progress() );
 
     // -- ADR 0019 decision 3: single superset model sidecar -----------------
 

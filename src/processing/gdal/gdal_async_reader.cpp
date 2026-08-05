@@ -1,9 +1,9 @@
 // gdal_async_reader.cpp — GDAL async reader implementation
 #include "gdal_async_reader.h"
 
-#include <gdal.h>
-#include <algorithm>
 #include <QtConcurrent>
+#include <algorithm>
+#include <gdal.h>
 
 GdalAsyncReader::GdalAsyncReader(GDALDatasetH dataset, int bandCount)
     : m_dataset(dataset)
@@ -48,9 +48,11 @@ bool GdalAsyncReader::hasNextChunk() const
 
 GdalAsyncReader::Chunk GdalAsyncReader::readChunk(int chunkIndex)
 {
+    std::lock_guard<std::mutex> lock(m_gdalMutex);
+
     Chunk chunk;
     chunk.startRow = chunkIndex * m_chunkHeight;
-    chunk.endRow = std::min(chunk.startRow + m_chunkHeight, m_height);
+    chunk.endRow = (std::min)(chunk.startRow + m_chunkHeight, m_height);
     chunk.height = chunk.endRow - chunk.startRow;
 
     size_t pixelCount = static_cast<size_t>(m_width) * chunk.height;
@@ -104,40 +106,8 @@ void GdalAsyncReader::prefetchNextChunk()
         });
     }
 
-    // Capture values for async execution
-    GDALDatasetH dataset = m_dataset;
-    int bandCount = m_bandCount;
-    int width = m_width;
-    int height = m_height;
-    int chunkHeight = m_chunkHeight;
-
-    m_prefetchFuture = QtConcurrent::run([dataset, bandCount, width, height, chunkHeight, nextChunk]() -> Chunk {
-        Chunk chunk;
-        chunk.startRow = nextChunk * chunkHeight;
-        chunk.endRow = std::min(chunk.startRow + chunkHeight, height);
-        chunk.height = chunk.endRow - chunk.startRow;
-
-        size_t pixelCount = static_cast<size_t>(width) * chunk.height;
-        chunk.data.resize(pixelCount * bandCount);
-
-        for (int b = 0; b < bandCount; ++b) {
-            GDALRasterBandH band = GDALGetRasterBand(dataset, b + 1);
-            if (!band) {
-                chunk.data.clear();
-                return chunk;
-            }
-
-            CPLErr err = GDALRasterIO(band, GF_Read,
-                                       0, chunk.startRow, width, chunk.height,
-                                       chunk.data.data() + b * pixelCount,
-                                       width, chunk.height, GDT_Float32, 0, 0);
-            if (err != CE_None) {
-                chunk.data.clear();
-                return chunk;
-            }
-        }
-
-        return chunk;
+    m_prefetchFuture = QtConcurrent::run([this, nextChunk]() -> Chunk {
+        return readChunk(nextChunk);
     });
 
     m_prefetchWatcher->setFuture(m_prefetchFuture);
@@ -145,14 +115,12 @@ void GdalAsyncReader::prefetchNextChunk()
 
 GdalAsyncReader::Chunk GdalAsyncReader::getPrefetchedChunk()
 {
-    if (!m_prefetchReady) {
-        // Wait for prefetch to complete
-        if (m_prefetchWatcher && m_prefetchWatcher->isRunning()) {
-            m_prefetchWatcher->waitForFinished();
-        }
+    if (m_prefetchFuture.isValid()) {
+        m_prefetchFuture.waitForFinished();
+        m_prefetchReady = false;
+        m_currentChunk++;
+        return m_prefetchFuture.result();
     }
 
-    m_prefetchReady = false;
-    m_currentChunk++;
-    return m_prefetchFuture.result();
+    return readNextChunk();
 }

@@ -48,6 +48,7 @@
 // App includes
 #include "app/app_paths.h"
 #include "app/main_window.h"
+#include "processing/framework/atomic_algorithm_registry.h"
 #include "agent/mcp_server.h"
 #include "processing/framework/algorithm_engine.h"
 
@@ -129,7 +130,7 @@ int main(int argc, char *argv[])
 
     // Initialize AlgorithmEngine facade (registers providers and tool paths)
     sicnu::AlgorithmEngine::instance().initialize();
-    qDebug() << "AlgorithmEngine initialized with" << sicnu::AlgorithmEngine::instance().registeredAlgorithms().size() << "algorithms";
+    qDebug() << "AlgorithmEngine initialized with" << sicnu::processing::AtomicAlgorithmRegistry::instance().adapterCount() << "algorithms";
 
     if (mcpMode) {
         std::cerr << "Initializing MCP Mode..." << std::endl;

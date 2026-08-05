@@ -16,6 +16,7 @@
 #include <qgsmapcanvas.h>
 #include <qgsmaplayerstore.h>
 #include <qgsrasterlayer.h>
+#include <qgsvectorlayer.h>
 
 #include "app/display/auth_resolver.h"
 #include "app/display/qgis_display_manager.h"
@@ -111,6 +112,16 @@ class RecordingAuthResolver final : public AuthResolver
                                              : QStringLiteral( "?" ) ) +
         QStringLiteral( "authcfg=" ) + authConfigId;
       return sicnu::data::Result<QString>::success( configured );
+    }
+
+    bool hasAuthConfig( const QString &authConfigId ) const override
+    {
+      return authConfigId.isEmpty() || acceptConfig;
+    }
+
+    QStringList knownAuthConfigIds() const override
+    {
+      return {};
     }
 };
 
@@ -323,4 +334,47 @@ TEST_CASE( "An auth-config failure refuses materialization (no unauthenticated l
   const auto snapshot = displayManager.view( viewId );
   REQUIRE( snapshot.has_value() );
   CHECK( snapshot->layerIds().isEmpty() );
+}
+
+TEST_CASE( "QgisDisplayManager layer visibility and ordering encapsulation",
+           "[display][layer][visibility]" )
+{
+  ensureQgisApplication();
+  auto dataManager = makeManager();
+  const auto registered = dataManager->registerSource(
+    { xyzDescriptor( QStringLiteral( "https://tile.example.com/{z}/{x}/{y}.png" ) ) } );
+  REQUIRE_FALSE( registered.assetId.isNull() );
+
+  RecordingAuthResolver authResolver;
+  QgsMapCanvas canvas;
+  canvas.resize( 400, 400 );
+  QgsMapLayerStore layerStore;
+  QgsLayerTree layerTree;
+  QgisDisplayManager displayManager( dataManager.get(), &authResolver );
+  const DisplayViewId viewId = createView( displayManager, canvas, layerTree, layerStore );
+
+  auto mapLayer = std::make_unique<QgsVectorLayer>( QStringLiteral( "Point?crs=EPSG:4326" ),
+                                                    QStringLiteral( "TestLayer" ),
+                                                    QStringLiteral( "memory" ) );
+  REQUIRE( mapLayer->isValid() );
+  auto *layerPtr = mapLayer.release();
+  layerStore.addMapLayer( layerPtr );
+  layerTree.addLayer( layerPtr );
+
+  const auto layerResult = displayManager.adoptLayer( viewId, registered.assetId, layerPtr );
+  REQUIRE( layerResult );
+  const auto layerId = layerResult.value();
+
+  CHECK( displayManager.isLayerVisible( layerId ) );
+
+  REQUIRE( displayManager.setLayerVisible( layerId, false ) );
+  CHECK_FALSE( displayManager.isLayerVisible( layerId ) );
+
+  REQUIRE( displayManager.setLayerVisible( layerId, true ) );
+  CHECK( displayManager.isLayerVisible( layerId ) );
+
+  REQUIRE( displayManager.moveLayerTop( layerId ) );
+  REQUIRE( displayManager.moveLayerBottom( layerId ) );
+
+  QCoreApplication::processEvents();
 }

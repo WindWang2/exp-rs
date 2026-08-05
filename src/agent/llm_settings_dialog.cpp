@@ -135,7 +135,7 @@ void LlmSettingsDialog::onTestConnectionClicked()
   msg[QStringLiteral( "content" )] = QStringLiteral( "ping" );
   messages.append( msg );
 
-  m_testClient->sendChatCompletion( messages, false );
+  m_testClient->sendChatCompletion( messages );
 }
 
 } // namespace sicnu::agent

@@ -43,6 +43,7 @@ public:
   using CompletionWatcher = std::function<void( long taskId, std::function<void( const Json::Value &resultPayload )> onComplete )>;
   using CompletionCallback = std::function<void( const Json::Value &resultPayload )>;
 
+  ToolCallDispatcher();
   ToolCallDispatcher( SubmissionSink sink, CompletionWatcher watcher );
 
   /// Injects DataManager asset authority to automatically handle transactional output asset committing.
@@ -61,6 +62,14 @@ public:
   /// parameter). Empty when the envelope would be dispatched. The string
   /// matches what submit() reports via errorOut.
   QString rejectionReason( const Json::Value &envelope ) const;
+
+  /// Extracts the arguments object from an envelope in any historical shape
+  /// ({name, arguments} / {name, parameters} / {name, params}, or
+  /// {function:{name, arguments}} with arguments as object or JSON string).
+  /// Returns an empty object when the envelope has no arguments member and a
+  /// null value when the envelope is malformed. Shares parseEnvelope with
+  /// classify()/submit() so envelope-shape knowledge has a single owner.
+  static Json::Value argumentsFor( const Json::Value &envelope );
 
   /// Parses the envelope (all historical shapes), normalizes the id, validates
   /// the descriptor's required inputs, submits the typed parameters via the

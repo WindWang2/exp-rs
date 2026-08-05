@@ -22,6 +22,16 @@ struct WorkerNode
   bool isRestarting = false;
 };
 
+/// Composite health snapshot for the worker pool (ADR 0045).
+struct PoolHealthSnapshot
+{
+  int total = 0;           ///< Total nodes in the pool
+  int active = 0;          ///< Nodes with a running worker process
+  int available = 0;       ///< Active nodes that are not busy
+  int totalRestarts = 0;   ///< Cumulative crash restarts since pool init
+  bool isHealthy() const { return active > 0 && available > 0; }
+};
+
 class PythonWorkerProcessPool : public QObject
 {
   Q_OBJECT
@@ -36,8 +46,13 @@ class PythonWorkerProcessPool : public QObject
     WorkerNode *acquireWorker();
     void releaseWorker( WorkerNode *node );
 
+    int poolSize() const { return m_poolSize; }
+    bool setPoolSize( int newSize );
     int activeWorkerCount() const;
     int availableWorkerCount() const;
+
+    /// Single deep-module query returning a composite pool health snapshot (ADR 0045).
+    PoolHealthSnapshot poolHealth() const;
 
   signals:
     void workerCrashed( int workerId, const QString &reason );

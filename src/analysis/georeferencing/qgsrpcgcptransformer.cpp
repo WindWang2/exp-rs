@@ -50,14 +50,16 @@ std::unique_ptr<QgsGcpTransformerInterface> QgsRpcGcpTransformer::clone() const
   return c;
 }
 
-void QgsRpcGcpTransformer::setRpcOptions( const QString &demPath, double zOffset, bool useRefine )
+bool QgsRpcGcpTransformer::setRpcOptions( const QString &sourceRasterPath, const QString &demPath, double zOffset, bool useRefine )
 {
+  mSrc = sourceRasterPath;
   mDemPath = demPath;
   // Keep the legacy mDem in sync — downstream code (Task 11.4.8) still reads it
   // via demPath() and the existing setDemPath() codepath.
   mDem = demPath;
   mZOffset = zOffset;
   mUseGcpRefinement = useRefine;
+  return true;
 }
 
 bool QgsRpcGcpTransformer::updateParametersFromGcps( const QVector<QgsPointXY> &source,

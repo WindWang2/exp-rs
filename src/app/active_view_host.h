@@ -27,6 +27,14 @@ class DataManager;
 struct SourceDescriptor;
 }
 
+struct ViewportSnapshot
+{
+    QgsRectangle extent;
+    double scale = 1.0;
+    QString crsAuthId;
+    QString activeLayerName;
+};
+
 /**
  * ActiveViewHost — shell façade for the **active Display View**.
  *
@@ -85,6 +93,23 @@ class ActiveViewHost : public QObject
     QgsRectangle mapCanvasExtent() const { return m_mapCanvas ? m_mapCanvas->extent() : QgsRectangle(); }
     double mapCanvasScale() const { return m_mapCanvas ? m_mapCanvas->scale() : 1.0; }
     QString mapCanvasCrsAuthId() const { return m_mapCanvas ? m_mapCanvas->mapSettings().destinationCrs().authid() : QString(); }
+    ViewportSnapshot viewportSnapshot() const
+    {
+        if ( !m_mapCanvas )
+            return ViewportSnapshot{};
+        ViewportSnapshot snap;
+        snap.extent = m_mapCanvas->extent();
+        snap.scale = m_mapCanvas->scale();
+        snap.crsAuthId = m_mapCanvas->mapSettings().destinationCrs().authid();
+        snap.activeLayerName = activeLayerName();
+        return snap;
+    }
+
+    void setExtent( const QgsRectangle &extent );
+    void setCenter( const QgsPointXY &center );
+    void setScale( double scale );
+    void zoomToFullExtent();
+    void refreshCanvas();
 
     // ── Layer tree (active / main QGIS tree for main view) ────────────
     void initLayerTree();

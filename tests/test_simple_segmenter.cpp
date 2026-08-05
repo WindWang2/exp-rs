@@ -2,10 +2,13 @@
 //
 // Tests for the fallback segmenter (Gaussian + quantize + connected components).
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include "analysis/segmentation/rs_simple_segmenter.h"
 
 #include <cmath>
+
+using Catch::Approx;
 
 TEST_CASE( "SimpleSegmenter: uniform image produces single segment", "[segmentation][simple]" )
 {
@@ -117,4 +120,98 @@ TEST_CASE( "SimpleSegmenter: empty input returns empty map", "[segmentation][sim
     RsSimpleSegmenter::Params params;
     auto segMap = RsSimpleSegmenter::segment( nullptr, 0, 0, -9999.0f, params );
     REQUIRE( segMap.isEmpty() );
+}
+
+// ADR 0060 — operator callers drive cancel/progress through RSOperatorContext
+// hooks; the segmenter must honor them.
+
+TEST_CASE( "SimpleSegmenter: cancel before work returns empty map", "[segmentation][simple]" )
+{
+    const int w = 8, h = 8;
+    QVector<float> data( w * h, 100.0f );
+
+    RsSimpleSegmenter::Params params;
+    params.smoothKernel = 3;
+    params.quantizeBins = 16;
+    params.minRegionSize = 10;
+
+    bool cancel = true;
+    auto segMap = RsSimpleSegmenter::segment( data.data(), w, h, -9999.0f, params,
+                                              [&cancel]() { return cancel; } );
+    REQUIRE( segMap.isEmpty() );
+}
+
+TEST_CASE( "SimpleSegmenter: cancel mid-pipeline returns empty map", "[segmentation][simple]" )
+{
+    // 512x512 checkerboard — enough work that the phase/CC cancel polls run.
+    const int w = 512, h = 512;
+    QVector<float> data( w * h );
+    for ( int i = 0; i < data.size(); ++i )
+        data[i] = ( i % 2 == 0 ) ? 0.0f : 255.0f;
+
+    RsSimpleSegmenter::Params params;
+    params.smoothKernel = 3;
+    params.quantizeBins = 2;
+    params.minRegionSize = 1;
+
+    // Turn cancellation on at the second poll (after the start check), i.e.
+    // mid-pipeline — the result must still be an empty map.
+    int polls = 0;
+    auto segMap = RsSimpleSegmenter::segment(
+        data.data(), w, h, -9999.0f, params,
+        [&polls]() { return ++polls >= 2; } );
+    REQUIRE( segMap.isEmpty() );
+}
+
+TEST_CASE( "SimpleSegmenter: progress hook covers the full range", "[segmentation][simple]" )
+{
+    const int w = 8, h = 8;
+    QVector<float> data( w * h, 100.0f );
+
+    RsSimpleSegmenter::Params params;
+    params.smoothKernel = 3;
+    params.quantizeBins = 16;
+    params.minRegionSize = 10;
+
+    float first = -1.0f, last = -1.0f;
+    int calls = 0;
+    auto segMap = RsSimpleSegmenter::segment(
+        data.data(), w, h, -9999.0f, params, {},
+        [&]( float f ) {
+            if ( calls == 0 )
+                first = f;
+            last = f;
+            ++calls;
+        } );
+    REQUIRE( !segMap.isEmpty() );
+    REQUIRE( calls >= 2 );
+    REQUIRE( first == Approx( 0.0f ) );
+    REQUIRE( last == Approx( 1.0f ) );
+}
+
+TEST_CASE( "SimpleSegmenter: multi-band progress is scaled to the whole call", "[segmentation][simple]" )
+{
+    const int w = 6, h = 6, nBands = 2;
+    QVector<float> band0( w * h, 50.0f );
+    QVector<float> band1( w * h, 150.0f );
+    const float *bands[] = { band0.data(), band1.data() };
+
+    RsSimpleSegmenter::Params params;
+    params.smoothKernel = 3;
+    params.quantizeBins = 8;
+    params.minRegionSize = 5;
+
+    float first = -1.0f, last = -1.0f;
+    int calls = 0;
+    auto segMap = RsSimpleSegmenter::segmentMultiBand(
+        bands, nBands, w, h, -9999.0f, params, {},
+        [&]( float f ) {
+            if ( calls == 0 )
+                first = f;
+            last = f;
+            ++calls;
+        } );
+    REQUIRE( !segMap.isEmpty() );
+    REQUIRE( first == Approx( 0.0f ) );
+    REQUIRE( last == Approx( 1.0f ) );
 }

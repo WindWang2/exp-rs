@@ -231,3 +231,144 @@ TEST_CASE("AtmosphericCorrection processFile applies DOS1", "[atm][gdal]")
     REQUIRE(QFile::exists(outputPath));
     REQUIRE(error.isEmpty());
 }
+
+// --- QUAC (Quick Atmospheric Correction) ---
+
+TEST_CASE("QUAC rejects fewer than 2 bands", "[atm][quac]")
+{
+    std::vector<float> dn = {100.0f, 200.0f, 50.0f};
+    std::vector<float> out(3);
+    float *dnPtr = dn.data();
+    float *outPtr = out.data();
+    QString err;
+    REQUIRE_FALSE(AtmosphericCorrection::quac(&dnPtr, &outPtr, 1, 3, &err));
+}
+
+TEST_CASE("QUAC rejects null buffers", "[atm][quac]")
+{
+    std::vector<float> dn(3), out(3);
+    float *dnPtr = dn.data();
+    float *outPtr = out.data();
+    QString err;
+    REQUIRE_FALSE(AtmosphericCorrection::quac(nullptr, &outPtr, 2, 3, &err));
+    REQUIRE_FALSE(AtmosphericCorrection::quac(&dnPtr, nullptr, 2, 3, &err));
+}
+
+TEST_CASE("QUAC outputs values in [0, 1]", "[atm][quac]")
+{
+    // 3 bands, 100 pixels each with ascending DN so percentiles are meaningful.
+    const size_t n = 100;
+    std::vector<std::vector<float>> dnBands(3, std::vector<float>(n));
+    std::vector<std::vector<float>> outBands(3, std::vector<float>(n));
+    for (size_t i = 0; i < n; ++i) {
+        dnBands[0][i] = static_cast<float>(i);          // 0..99
+        dnBands[1][i] = static_cast<float>(i * 2);      // 0..198
+        dnBands[2][i] = static_cast<float>(i + 10);     // 10..109
+    }
+    std::vector<float *> dnPtrs = {dnBands[0].data(), dnBands[1].data(), dnBands[2].data()};
+    std::vector<float *> outPtrs = {outBands[0].data(), outBands[1].data(), outBands[2].data()};
+
+    QString err;
+    REQUIRE(AtmosphericCorrection::quac(dnPtrs.data(), outPtrs.data(), 3, n, &err));
+
+    // Every output pixel must be in [0, 1].
+    for (int b = 0; b < 3; ++b) {
+        for (size_t i = 0; i < n; ++i) {
+            REQUIRE(outBands[b][i] >= 0.0f);
+            REQUIRE(outBands[b][i] <= 1.0f);
+        }
+    }
+}
+
+TEST_CASE("QUAC dark pixel maps near zero", "[atm][quac]")
+{
+    // Minimum DN (1st percentile) should produce a near-zero reflectance.
+    const size_t n = 100;
+    std::vector<std::vector<float>> dnBands(2, std::vector<float>(n));
+    std::vector<std::vector<float>> outBands(2, std::vector<float>(n));
+    for (size_t i = 0; i < n; ++i) {
+        dnBands[0][i] = static_cast<float>(10 + i);     // 10..109
+        dnBands[1][i] = static_cast<float>(20 + i);     // 20..119
+    }
+    std::vector<float *> dnPtrs = {dnBands[0].data(), dnBands[1].data()};
+    std::vector<float *> outPtrs = {outBands[0].data(), outBands[1].data()};
+
+    QString err;
+    REQUIRE(AtmosphericCorrection::quac(dnPtrs.data(), outPtrs.data(), 2, n, &err));
+
+    // The smallest input DN (~10, the 1st percentile) should yield ~0 reflectance
+    // after the offset subtraction.
+    REQUIRE(outBands[0][0] >= 0.0f);
+    REQUIRE(outBands[0][0] < 0.05f);
+}
+
+TEST_CASE("QUAC rejects all-dark scene (meanBright==0)", "[atm][quac]")
+{
+    // All pixels zero -> bright percentile is 0 -> meanBright == 0 -> must reject.
+    const size_t n = 50;
+    std::vector<std::vector<float>> dnBands(2, std::vector<float>(n, 0.0f));
+    std::vector<std::vector<float>> outBands(2, std::vector<float>(n));
+    std::vector<float *> dnPtrs = {dnBands[0].data(), dnBands[1].data()};
+    std::vector<float *> outPtrs = {outBands[0].data(), outBands[1].data()};
+
+    QString err;
+    REQUIRE_FALSE(AtmosphericCorrection::quac(dnPtrs.data(), outPtrs.data(), 2, n, &err));
+    REQUIRE_FALSE(err.isEmpty());
+}
+
+TEST_CASE("QUAC rejects zero dynamic range", "[atm][quac]")
+{
+    // All pixels the same non-zero value -> range == 0 -> must reject.
+    const size_t n = 50;
+    std::vector<std::vector<float>> dnBands(2, std::vector<float>(n, 42.0f));
+    std::vector<std::vector<float>> outBands(2, std::vector<float>(n));
+    std::vector<float *> dnPtrs = {dnBands[0].data(), dnBands[1].data()};
+    std::vector<float *> outPtrs = {outBands[0].data(), outBands[1].data()};
+
+    QString err;
+    REQUIRE_FALSE(AtmosphericCorrection::quac(dnPtrs.data(), outPtrs.data(), 2, n, &err));
+    REQUIRE_FALSE(err.isEmpty());
+}
+
+TEST_CASE("processFileMultiBand applies QUAC", "[atm][quac][gdal]")
+{
+    ensureGdalInit();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    const QString sourcePath = dir.filePath(QStringLiteral("source.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("output.tif"));
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+
+    // 10x10, 3-band raster with a gradient so QUAC has dynamic range.
+    const int W = 10, H = 10, B = 3;
+    GDALDatasetH srcDs = createOutputTiff(sourcePath, W, H, B, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+    std::vector<float> band(W * H);
+    for (int b = 0; b < B; ++b) {
+        for (int i = 0; i < W * H; ++i)
+            band[i] = static_cast<float>(i * (b + 1));
+        GDALRasterBandH rb = GDALGetRasterBand(srcDs, b + 1);
+        REQUIRE(GDALRasterIO(rb, GF_Write, 0, 0, W, H, band.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+    }
+    GDALClose(srcDs);
+
+    QString error;
+    const bool ok = AtmosphericCorrection::processFileMultiBand(sourcePath, outputPath, 3, &error);
+    REQUIRE(ok);
+    REQUIRE(error.isEmpty());
+    REQUIRE(QFile::exists(outputPath));
+
+    // Verify output is 3-band Float32 with values in [0, 1].
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    REQUIRE(out.bandCount() == B);
+    std::vector<float> result(W * H);
+    for (int b = 0; b < B; ++b) {
+        REQUIRE(out.readBandData(b + 1, result.data(), W, H));
+        for (int i = 0; i < W * H; ++i) {
+            REQUIRE(result[i] >= 0.0f);
+            REQUIRE(result[i] <= 1.0f);
+        }
+    }
+}

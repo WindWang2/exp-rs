@@ -37,11 +37,11 @@ StretchResult<BandStats> RecordingBandStats::stats( void *layerToken, int band )
   return StretchResult<BandStats>::ok( canned );
 }
 
-ApplyStretchResult apply( RasterDisplayTarget &target,
-                          BandStatsSource &statsSource,
-                          void *layerToken,
-                          const StretchSpec &spec,
-                          int defaultStatsBand )
+ApplyStretchResult DisplayStretchPipeline::apply( RasterDisplayTarget &target,
+                                         BandStatsSource &statsSource,
+                                         void *layerToken,
+                                         const StretchSpec &spec,
+                                         int defaultStatsBand )
 {
   if ( !layerToken )
     return ApplyStretchResult::fail( StretchErrorCode::LayerGone, "layer is null" );

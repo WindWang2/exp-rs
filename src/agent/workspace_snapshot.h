@@ -1,8 +1,6 @@
 // src/agent/workspace_snapshot.h
 #pragma once
 
-#include <QJsonArray>
-#include <QJsonObject>
 #include <QList>
 #include <QString>
 
@@ -25,7 +23,7 @@ struct DataAssetInfo
     QString id;
     QString displayName;
     QString path;
-    /// Unset until capture() fills it from the asset; serializes as "Unknown".
+    /// Unset until capture() fills it from the asset; renders as "Unknown" in the prompt.
     std::optional<data::AssetKind> kind;
     int width = 0;
     int height = 0;
@@ -49,7 +47,6 @@ struct WorkspaceSnapshot
 
     static WorkspaceSnapshot capture( data::DataManager *dataManager, ActiveViewHost *viewHost = nullptr );
 
-    QJsonObject toJson() const;
     QString toSystemPromptHeader() const;
 };
 

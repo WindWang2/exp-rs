@@ -1,10 +1,14 @@
 #include "atomic_algorithm_registry.h"
 #include "agent_tool_call_exporter.h"
+#include "provider_algorithm_adapter.h"
+
+#include <qgsapplication.h>
+#include <processing/qgsprocessingregistry.h>
+#include <processing/qgsprocessingalgorithm.h>
 
 namespace sicnu::processing {
 
 static std::function<void(AtomicAlgorithmRegistry&)> sRsOperatorProvider;
-static std::function<void(AtomicAlgorithmRegistry&)> sProviderAlgorithmProvider;
 
 AtomicAlgorithmRegistry& AtomicAlgorithmRegistry::instance()
 {
@@ -15,7 +19,6 @@ AtomicAlgorithmRegistry& AtomicAlgorithmRegistry::instance()
 AtomicAlgorithmRegistry::AtomicAlgorithmRegistry()
 {
   registerBuiltinRsOperators();
-  registerProviderAlgorithms();
 }
 
 void AtomicAlgorithmRegistry::setRsOperatorProvider( std::function<void(AtomicAlgorithmRegistry&)> provider )
@@ -40,10 +43,6 @@ void AtomicAlgorithmRegistry::reset()
   {
     sRsOperatorProvider( *this );
   }
-  if ( sProviderAlgorithmProvider )
-  {
-    sProviderAlgorithmProvider( *this );
-  }
 }
 
 void AtomicAlgorithmRegistry::registerAdapter( AtomicAlgorithmAdapterPtr adapter )
@@ -65,6 +64,18 @@ AtomicAlgorithmAdapterPtr AtomicAlgorithmRegistry::findAdapter( const std::strin
   auto it = mAdapters.find( algorithmId );
   if ( it != mAdapters.end() )
     return it->second;
+
+  if ( QgsApplication::processingRegistry() )
+  {
+    const QString qid = QString::fromStdString( algorithmId );
+    if ( const QgsProcessingAlgorithm *alg = QgsApplication::processingRegistry()->algorithmById( qid ) )
+    {
+      auto adapter = std::make_shared<ProviderAlgorithmAdapter>( *alg );
+      const_cast<AtomicAlgorithmRegistry*>(this)->mAdapters[algorithmId] = adapter;
+      return adapter;
+    }
+  }
+
   return nullptr;
 }
 
@@ -105,23 +116,6 @@ void AtomicAlgorithmRegistry::registerBuiltinRsOperators()
   if ( sRsOperatorProvider )
   {
     sRsOperatorProvider( *this );
-  }
-}
-
-void AtomicAlgorithmRegistry::registerProviderAlgorithms()
-{
-  if ( sProviderAlgorithmProvider )
-  {
-    sProviderAlgorithmProvider( *this );
-  }
-}
-
-void AtomicAlgorithmRegistry::setProviderAlgorithmProvider( std::function<void(AtomicAlgorithmRegistry&)> provider )
-{
-  sProviderAlgorithmProvider = std::move( provider );
-  if ( sProviderAlgorithmProvider )
-  {
-    sProviderAlgorithmProvider( instance() );
   }
 }
 

@@ -5,16 +5,14 @@
 #include <QObject>
 #include <QVariantMap>
 
-class QgsMapCanvas;
-class QgsProject;
-class QgsRasterLayer;
-class QgsVectorLayer;
-
 class ActiveViewHost;
 
 /**
  * Provides Python-accessible API to the SICNU GEO RS platform.
- * This class exposes core functionality that Python scripts can use.
+ *
+ * All canvas and layer operations route through ActiveViewHost (ADR 0043),
+ * enforcing the Data/Display seam (ADR 0009/0010/0015). No direct
+ * QgsMapCanvas or QgsProject::instance() access.
  */
 class SicnuPythonApi : public QObject
 {
@@ -23,7 +21,6 @@ class SicnuPythonApi : public QObject
 public:
     static SicnuPythonApi &instance();
 
-    void initialize(QgsMapCanvas *canvas);
     void setActiveViewHost(ActiveViewHost *host) { m_activeViewHost = host; }
     ActiveViewHost *activeViewHost() const { return m_activeViewHost; }
 
@@ -69,6 +66,5 @@ public:
 private:
     SicnuPythonApi(QObject *parent = nullptr);
 
-    QgsMapCanvas *m_canvas = nullptr;
     ActiveViewHost *m_activeViewHost = nullptr;
 };

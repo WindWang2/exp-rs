@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
+#include <functional>
 
 #include "data/asset_types.h"
 #include "data/data_result.h"
@@ -16,8 +17,14 @@ namespace sicnu::data
 class DataManager;
 }
 
+#include <QAction>
+#include <QMenu>
+#include <QMap>
+
 namespace sicnu::python::isolated
 {
+
+class PythonIpcServer;
 
 struct ActiveLayerSummary
 {
@@ -43,14 +50,11 @@ struct CanvasViewportSummary
 };
 
 /**
- * AppInterfaceBridge — JSON-RPC serialization bridge module.
+ * AppInterfaceBridge — JSON-RPC IPC facade & state serialization layer (ADR 0025, ADR 0035).
  *
- * Headless asset seam: `DataManager` is the required asset authority
- * (catalog queries, source registration, active-asset tracking), while
- * `ActiveViewHost` is an optional display/canvas/message-bar enhancement
- * bound only in GUI mode. Serves as the dedicated JSON-RPC IPC presentation
- * & state serialization layer consumed by PythonAppInterfaceProxy for
- * out-of-process Python plugin workers (ADR 0014/0015).
+ * Headless asset seam: DataManager is the required asset authority (catalog queries,
+ * source registration, active-asset tracking), while ActiveViewHost and QMenu are
+ * optional display/canvas/menu enhancements bound when in GUI mode.
  */
 class AppInterfaceBridge : public QObject
 {
@@ -59,6 +63,7 @@ class AppInterfaceBridge : public QObject
   public:
     explicit AppInterfaceBridge( sicnu::data::DataManager *dataManager = nullptr,
                                  ActiveViewHost *activeViewHost = nullptr,
+                                 QMenu *parentMenu = nullptr,
                                  QObject *parent = nullptr );
     ~AppInterfaceBridge() override = default;
 
@@ -67,6 +72,14 @@ class AppInterfaceBridge : public QObject
 
     void setActiveViewHost( ActiveViewHost *host );
     ActiveViewHost *activeViewHost() const;
+
+    void setParentMenu( QMenu *parentMenu );
+    QMenu *parentMenu() const;
+
+    void bindIpcServer( PythonIpcServer *ipcServer );
+    PythonIpcServer *ipcServer() const;
+
+    int registeredActionCount() const;
 
     ActiveLayerSummary getActiveLayerSummary() const;
     QgsMapLayer *activeLayer() const;
@@ -82,15 +95,36 @@ class AppInterfaceBridge : public QObject
 
     bool pushMessageBarAlert( const QString &title, const QString &text, int level = 0 );
 
+    using AlgorithmRegisterHandler = std::function<bool( const QString &algoId,
+                                                          const QString &name,
+                                                          const QString &group,
+                                                          const QString &desc )>;
+    void setAlgorithmRegisterHandler( AlgorithmRegisterHandler handler )
+    {
+      m_algoRegisterHandler = std::move( handler );
+    }
+
     /// Deep JSON-RPC IPC method dispatch seam (ADR 0025).
     /// Decodes request, executes domain action, populates response JSON, and
     /// returns true if handled headlessly.
     bool dispatchIpcMessage( const QJsonObject &message, QJsonObject &response );
 
+  public slots:
+    void handleIpcMessage( const QJsonObject &message );
+
+  signals:
+    void actionTriggered( const QString &callbackId );
+
   private:
+    void setupDefaultAlgorithmHandler();
+
     sicnu::data::DataManager *m_dataManager = nullptr;
     ActiveViewHost *m_activeViewHost = nullptr;
+    QMenu *m_parentMenu = nullptr;
+    PythonIpcServer *m_ipcServer = nullptr;
     sicnu::data::AssetId m_activeAssetId;
+    AlgorithmRegisterHandler m_algoRegisterHandler;
+    QMap<QString, QAction *> m_registeredActions;
 };
 
 } // namespace sicnu::python::isolated

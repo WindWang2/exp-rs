@@ -1,6 +1,8 @@
 // rs_parent_link.cpp — Pixel-majority parent-link (P1).
 #include "rs_parent_link.h"
 
+#include "rs_majority_vote.h"
+
 #include <QHash>
 #include <QSet>
 
@@ -57,19 +59,9 @@ RsParentTable RsPixelMajorityParentLink::link( const RsSegmentMap &fine,
             continue;
         }
 
-        int bestVotes = -1;
-        quint32 bestParent = 0;
-        for ( auto cit = voteIt->constBegin(); cit != voteIt->constEnd(); ++cit )
-        {
-            const quint32 coarseId = cit.key();
-            const int v = cit.value();
-            if ( v > bestVotes || ( v == bestVotes && coarseId < bestParent ) )
-            {
-                bestVotes = v;
-                bestParent = coarseId;
-            }
-        }
-        table.fineToParent.insert( f, bestParent );
+        // ADR 0060: the majority decision (max votes, ties → smaller coarse
+        // id) is the single analysis-layer kernel, majorityKeyWithTieBreak.
+        table.fineToParent.insert( f, majorityKeyWithTieBreak( voteIt.value() ) );
     }
 
     table.ok = true;

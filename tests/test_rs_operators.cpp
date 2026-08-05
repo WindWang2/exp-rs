@@ -16,6 +16,8 @@
 #include "operators/framework/rs_operator_error.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include "analysis/segmentation/rs_otb_segmenter.h"
+
 using namespace sicnu::operators;
 
 namespace {
@@ -99,6 +101,7 @@ TEST_CASE("Native RS operators are registered", "[operators][rs]") {
     CHECK(registry.hasOperator("rs:spectral_index"));
     CHECK(registry.hasOperator("rs:band_math"));
     CHECK(registry.hasOperator("rs:atmospheric_correction"));
+    CHECK(registry.hasOperator("rs:radiometric_calibration"));
     CHECK(registry.hasOperator("rs:change_detection"));
     CHECK(registry.hasOperator("rs:image_fusion"));
     CHECK(registry.hasOperator("rs:terrain_analysis"));
@@ -109,6 +112,7 @@ TEST_CASE("Native RS operators are registered", "[operators][rs]") {
     CHECK(registry.hasOperator("rs:supervised_classification"));
     CHECK(registry.hasOperator("rs:obia_segment"));
     CHECK(registry.hasOperator("rs:obia_classify"));
+    CHECK(registry.hasOperator("rs:obia_hierarchy")); // ADR 0060: registration + smoke
     CHECK(registry.hasOperator("rs:segment_stats"));
 #endif
 }
@@ -693,6 +697,56 @@ TEST_CASE("RS obia_segment produces labels", "[operators][rs]") {
 }
 #endif
 
+
+#ifdef SICNU_HAS_OPENCV
+TEST_CASE("RS obia_hierarchy schema and OTB-gated execution", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:obia_hierarchy");
+    REQUIRE(op != nullptr);
+    CHECK(op->name() == "rs:obia_hierarchy");
+    auto schema = op->schema();
+    CHECK(schema["properties"].isMember("outputFine"));
+    CHECK(schema["properties"].isMember("training"));
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString inputPath = tmp.path() + "/in.tif";
+    const QString outputPath = tmp.path() + "/fine.tif";
+
+    // The run() gates on OTB after the input-exists check, so the fail-closed
+    // path still needs a real (any) raster.
+    constexpr int W = 16;
+    constexpr int H = 16;
+    std::vector<std::vector<float>> bands(1);
+    bands[0].assign(static_cast<size_t>(W) * H, 50.0f);
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["outputFine"] = outputPath.toStdString();
+
+    RSOperatorContext ctx;
+    if (!RsOtbSegmenter::isAvailable()) {
+        // No OTB: the operator must fail closed with a clear OtbError before
+        // touching the raster (its primary segmenters require OTB).
+        try {
+            op->run(params, ctx);
+            FAIL("Expected OtbError when OTB is unavailable");
+        } catch (const RSOperatorError& e) {
+            CHECK(e.code() == ErrorCode::OtbError);
+        }
+        return;
+    }
+
+    // OTB present: smoke the real two-level path (segment-only) on the
+    // two-class fixture; the training/classify stage stays untested here.
+    const QString trainingPath = tmp.path() + "/train.gpkg";
+    makeTwoClassFixture(inputPath, trainingPath);
+    Json::Value result = op->run(params, ctx);
+    CHECK(result.isMember("fineSegments"));
+    CHECK(result.isMember("coarseSegments"));
+    CHECK(QFile::exists(outputPath));
+}
+#endif
 
 #ifdef SICNU_HAS_OPENCV
 TEST_CASE("RS obia_classify schema", "[operators][rs]") {

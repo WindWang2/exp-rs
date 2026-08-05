@@ -1,6 +1,7 @@
 // tests/test_gui_job_adapter.cpp
 #include <catch2/catch_test_macros.hpp>
 
+#include <QCoreApplication>
 #include "shell/gui_job_adapter.h"
 #include "processing/framework/task_center.h"
 
@@ -58,7 +59,11 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
         TaskCenter::instance().markTaskCompleted(taskId, QVariantMap(), payload);
 
         // Process pending Qt events to deliver QueuedConnection signal
-        QCoreApplication::processEvents();
+        for ( int i = 0; i < 50 && !successCalled; ++i )
+        {
+          QCoreApplication::processEvents();
+          std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+        }
 
         CHECK(successCalled);
         CHECK(receivedPath == "/tmp/test_out.tif");
@@ -82,7 +87,11 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
         REQUIRE(taskId > 0);
 
         handle.cancel();
-        QCoreApplication::processEvents();
+        for ( int i = 0; i < 50 && !failureCalled; ++i )
+        {
+          QCoreApplication::processEvents();
+          std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+        }
 
         CHECK(failureCalled);
         CHECK(reportedCanceled);

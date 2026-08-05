@@ -153,6 +153,11 @@ public:
   data::Result<void> relocateLayer(DisplayLayerId layerId);
   data::Result<void> removeLayer(DisplayLayerId layerId);
 
+  data::Result<void> setLayerVisible(DisplayLayerId layerId, bool visible);
+  bool isLayerVisible(DisplayLayerId layerId) const;
+  data::Result<void> moveLayerTop(DisplayLayerId layerId);
+  data::Result<void> moveLayerBottom(DisplayLayerId layerId);
+
   /// The live Display View ids in stable creation order (NOT UUID-string
   /// order). Re-query for freshness.
   QVector<DisplayViewId> listViews() const;

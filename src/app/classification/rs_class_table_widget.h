@@ -1,10 +1,12 @@
 // rs_class_table_widget.h — Phase 10A Task 10.3 class table dock widget.
 #pragma once
 
+#include <QColor>
 #include <QWidget>
 #include <QtGlobal>
 
 class QTableWidget;
+class QTableWidgetItem;
 class RsRoiCollection;
 
 /**
@@ -32,16 +34,24 @@ class RsClassTableWidget : public QWidget
     /// Select the row whose class id matches; no-op if not found.
     void setCurrentClassId( int classId );
     int currentClassId() const;
+    QList<int> selectedClassIds() const;
+
+    void mergeSelectedClasses( int targetClassId, const QString &targetName, const QColor &targetColor );
 
   signals:
     void currentClassChanged( int classId );
+    void classDefEdited( int classId, const QString &name, const QColor &color );
+    void mergeClassesRequested( const QList<int> &sourceClassIds, int targetClassId, const QString &targetName, const QColor &targetColor );
 
   private slots:
     void rebuild();
     void onSelectionChanged();
+    void onCellDoubleClicked( int row, int column );
+    void onItemChanged( QTableWidgetItem *item );
 
   private:
     QTableWidget *mTable = nullptr;
     RsRoiCollection *mRois = nullptr;
     int mStickyClassId = 0; ///< Survives rebuild when the table temporarily clears selection.
+    bool mBlockItemChanged = false;
 };

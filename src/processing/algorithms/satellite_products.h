@@ -1,5 +1,5 @@
 /***************************************************************************
- * satellite_products.h  —  Landsat / Sentinel-2 / MODIS discovery & stacking
+ * satellite_products.h  -  Landsat / Sentinel-2 / MODIS discovery & stacking
  ***************************************************************************/
 #pragma once
 
@@ -42,6 +42,14 @@ struct ProductInfo {
     int modisTileH = -1;
     int modisTileV = -1;
 };
+
+/**
+ * Parse a Landsat MTL.txt into a flat key/value map (strips GROUP / END_GROUP
+ * lines, removes surrounding quotes). Used by radiometric calibration to read
+ * RADIANCE_MULT/ADD, REFLECTANCE_MULT/ADD, SUN_ELEVATION, K1/K2 constants.
+ * @return empty map (with @p errorMessage set) if the file cannot be opened.
+ */
+QMap<QString, QString> parseMtlKeyValues(const QString& mtlPath, QString* errorMessage = nullptr);
 
 /**
  * Discover a Landsat Collection 1/2 product from:

@@ -4,6 +4,7 @@
 #include "rs_spectral_index_operator.h"
 #include "rs_band_math_operator.h"
 #include "rs_atmospheric_correction_operator.h"
+#include "rs_radiometric_calibration_operator.h"
 #include "rs_change_detection_operator.h"
 #include "rs_image_fusion_operator.h"
 #include "rs_terrain_analysis_operator.h"
@@ -23,6 +24,8 @@
 #include "rs_obia_classify_operator.h"
 #include "rs_obia_hierarchy_operator.h"
 #include "rs_segment_stats_operator.h"
+#include "rs_majority_filter_operator.h"
+#include "rs_recode_operator.h"
 #endif
 
 namespace sicnu::operators::rs {
@@ -30,6 +33,7 @@ namespace sicnu::operators::rs {
 REGISTER_RS_OPERATOR(RsSpectralIndexOperator, "rs:spectral_index")
 REGISTER_RS_OPERATOR(RsBandMathOperator, "rs:band_math")
 REGISTER_RS_OPERATOR(RsAtmosphericCorrectionOperator, "rs:atmospheric_correction")
+REGISTER_RS_OPERATOR(RsRadiometricCalibrationOperator, "rs:radiometric_calibration")
 REGISTER_RS_OPERATOR(RsChangeDetectionOperator, "rs:change_detection")
 REGISTER_RS_OPERATOR(RsImageFusionOperator, "rs:image_fusion")
 REGISTER_RS_OPERATOR(RsTerrainAnalysisOperator, "rs:terrain_analysis")
@@ -47,6 +51,8 @@ REGISTER_RS_OPERATOR(RsObiaSegmentOperator, "rs:obia_segment")
 REGISTER_RS_OPERATOR(RsObiaClassifyOperator, "rs:obia_classify")
 REGISTER_RS_OPERATOR(RsObiaHierarchyOperator, "rs:obia_hierarchy")
 REGISTER_RS_OPERATOR(RsSegmentStatsOperator, "rs:segment_stats")
+REGISTER_RS_OPERATOR(RsMajorityFilterOperator, "rs:majority_filter")
+REGISTER_RS_OPERATOR(RsRecodeOperator, "rs:recode")
 #endif
 
 struct AtomicRsOperatorProviderRegistration {

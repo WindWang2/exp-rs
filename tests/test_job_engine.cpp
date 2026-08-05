@@ -385,3 +385,189 @@ TEST_CASE( "callable cancel hook fires while running", "[job]" )
   REQUIRE( snap.has_value() );
   REQUIRE( snap->state == JobState::Cancelled );
 }
+
+TEST_CASE( "pruneCompleted keeps the newest terminal records", "[job]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  // Isolate from records left by earlier cases (singleton engine).
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  // Staggered sleeps make the finish order == submission order with distinct
+  // finishedAtMs, so "oldest" (by finishedAtMs) is unambiguous.
+  std::vector<std::string> ids;
+  for ( int i = 0; i < 5; ++i )
+  {
+    JobRequest req;
+    req.algorithmId = "test:sleep";
+    req.params["ms"] = ( i + 1 ) * 40;
+    req.title = "prune-" + std::to_string( i );
+    req.source = "test";
+    ids.push_back( eng.submit( req ) );
+  }
+  eng.waitUntilIdleForTests();
+
+  const auto before = eng.list();
+  REQUIRE( before.size() == 5 );
+  for ( const auto &rec : before )
+    REQUIRE( rec.state == JobState::Succeeded );
+
+  const auto removed = eng.pruneCompleted( 2 );
+  REQUIRE( removed == 3 );
+
+  // Only the two newest (last-submitted) terminal records remain.
+  auto remaining = eng.list();
+  REQUIRE( remaining.size() == 2 );
+  for ( const auto &rec : remaining )
+  {
+    REQUIRE( rec.state == JobState::Succeeded );
+    REQUIRE( ( rec.id == ids[3] || rec.id == ids[4] ) );
+  }
+
+  // Pruned jobIds are unknown to snapshot().
+  for ( int i = 0; i < 3; ++i )
+    REQUIRE_FALSE( eng.snapshot( ids[i] ).has_value() );
+  REQUIRE( eng.snapshot( ids[3] ).has_value() );
+  REQUIRE( eng.snapshot( ids[4] ).has_value() );
+
+  // clearCompleted() == pruneCompleted(0): removes everything terminal.
+  eng.clearCompleted();
+  REQUIRE( eng.list().empty() );
+}
+
+TEST_CASE( "removeCompleted drops exactly the requested terminal records", "[job]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  // Isolate from records left by earlier cases (singleton engine).
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  std::vector<std::string> ids;
+  for ( int i = 0; i < 3; ++i )
+  {
+    JobRequest req;
+    req.algorithmId = "test:add";
+    req.params["a"] = i;
+    req.params["b"] = 1;
+    req.title = "remove-" + std::to_string( i );
+    req.source = "test";
+    ids.push_back( eng.submit( req ) );
+  }
+  eng.waitUntilIdleForTests();
+  REQUIRE( eng.list().size() == 3 );
+
+  // Unknown ids are ignored; only the exact terminal record is removed.
+  REQUIRE( eng.removeCompleted( {ids[1], "job-does-not-exist"} ) == 1 );
+  REQUIRE_FALSE( eng.snapshot( ids[1] ).has_value() );
+  REQUIRE( eng.snapshot( ids[0] ).has_value() );
+  REQUIRE( eng.snapshot( ids[2] ).has_value() );
+  REQUIRE( eng.list().size() == 2 );
+}
+
+TEST_CASE( "prune never touches queued or running records", "[job]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  // Isolate from records left by earlier cases (singleton engine).
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  // One completed job first, so there is a terminal record to prune.
+  JobRequest quick;
+  quick.algorithmId = "test:add";
+  quick.params["a"] = 1;
+  quick.params["b"] = 1;
+  quick.title = "quick";
+  quick.source = "test";
+  const auto quickId = eng.submit( quick );
+  eng.waitUntilIdleForTests();
+  {
+    auto snap = eng.snapshot( quickId );
+    REQUIRE( snap.has_value() );
+    REQUIRE( snap->state == JobState::Succeeded );
+  }
+
+  // Two blocking jobs occupy both workers; the next submission stays queued.
+  // Released on scope exit so a failed assertion cannot strand the workers.
+  std::atomic<bool> release{false};
+  struct ReleaseOnExit
+  {
+    std::atomic<bool> &flag;
+    ~ReleaseOnExit() { flag.store( true ); }
+  } releaseGuard{release};
+  auto blocking = [&release]( const JobRequest &, RSOperatorContext & ) {
+    while ( !release.load() )
+      std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    Json::Value r( Json::objectValue );
+    r["ok"] = true;
+    return r;
+  };
+
+  JobRequest blockReq;
+  blockReq.algorithmId = "callable:prune-block";
+  blockReq.title = "block";
+  blockReq.source = "test";
+  const auto blockA = eng.submit( blockReq, blocking );
+  const auto blockB = eng.submit( blockReq, blocking );
+
+  for ( int i = 0; i < 200; ++i )
+  {
+    const auto sa = eng.snapshot( blockA );
+    const auto sb = eng.snapshot( blockB );
+    if ( sa && sb && sa->state == JobState::Running && sb->state == JobState::Running )
+      break;
+    std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+  }
+
+  JobRequest queuedReq;
+  queuedReq.algorithmId = "test:add";
+  queuedReq.params["a"] = 2;
+  queuedReq.params["b"] = 2;
+  queuedReq.title = "queued";
+  queuedReq.source = "test";
+  const auto queuedId = eng.submit( queuedReq );
+
+  {
+    auto sa = eng.snapshot( blockA );
+    auto sb = eng.snapshot( blockB );
+    auto sq = eng.snapshot( queuedId );
+    REQUIRE( sa.has_value() );
+    REQUIRE( sa->state == JobState::Running );
+    REQUIRE( sb.has_value() );
+    REQUIRE( sb->state == JobState::Running );
+    REQUIRE( sq.has_value() );
+    REQUIRE( sq->state == JobState::Queued );
+  }
+
+  // pruneCompleted(0) removes ALL terminal records — only `quick` qualifies;
+  // the running and queued records must survive untouched.
+  REQUIRE( eng.pruneCompleted( 0 ) == 1 );
+  REQUIRE_FALSE( eng.snapshot( quickId ).has_value() );
+  {
+    auto sa = eng.snapshot( blockA );
+    auto sb = eng.snapshot( blockB );
+    auto sq = eng.snapshot( queuedId );
+    REQUIRE( sa.has_value() );
+    REQUIRE( sa->state == JobState::Running );
+    REQUIRE( sb.has_value() );
+    REQUIRE( sb->state == JobState::Running );
+    REQUIRE( sq.has_value() );
+    REQUIRE( sq->state == JobState::Queued );
+  }
+
+  release.store( true );
+  eng.waitUntilIdleForTests();
+  {
+    auto sa = eng.snapshot( blockA );
+    auto sb = eng.snapshot( blockB );
+    auto sq = eng.snapshot( queuedId );
+    REQUIRE( sa.has_value() );
+    REQUIRE( sa->state == JobState::Succeeded );
+    REQUIRE( sb.has_value() );
+    REQUIRE( sb->state == JobState::Succeeded );
+    REQUIRE( sq.has_value() );
+    REQUIRE( sq->state == JobState::Succeeded );
+  }
+}

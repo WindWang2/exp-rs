@@ -1,19 +1,29 @@
 /***************************************************************************
  * rs_obia_classify_operator.cpp  —  Object-based classification pipeline
  *
- * ADR 0019 slice S4 — the segmentation front-end (grid/quantize via
- * segutil, per-segment mean spectra, ROI majority labeling, segment-paint
- * output) stays here: it is genuinely segment-level and does not fit the
- * pixel pipeline. Everything downstream of labeling is re-based on the
- * analysis layer exactly like the supervised adapter (S3): backends are
- * constructed via RsClassifierSvm / RsClassifierNormalBayes (one
- * construction path, no hyperparameter drift), the class-field fallback
- * comes from RsTrainingDataExtraction::classFieldIndex, and the class-map
- * write follows the pipeline's dtype escalation + NoData policy (class ids
- * come from a user vector field and can exceed 255 — no silent clamp).
+ * ADR 0019 slice S4 — the segmentation front-end (grid superpixels via
+ * segutil, or the analysis-layer RsSimpleSegmenter quantize path), per-segment
+ * mean spectra, ROI majority labeling, segment-paint output) stays here: it is
+ * genuinely segment-level and does not fit the pixel pipeline. Everything
+ * downstream of labeling is re-based on the analysis layer exactly like the
+ * supervised adapter (S3): backends are constructed via the analysis-layer
+ * RsClassifierBackendFactory (one construction path, no hyperparameter
+ * drift — ADR 0061), the class-field fallback comes from
+ * RsTrainingDataExtraction::classFieldIndex,
+ * and the class-map write delegates to RsPostProcess::saveLabelRaster, which
+ * owns the dtype escalation + NoData policy (class ids come from a user vector
+ * field and can exceed 255 — no silent clamp; ADR 0055).
+ *
+ * ADR 0060 — segmentation delegates to RsSimpleSegmenter (the single teaching
+ * segmenter) and ROI labeling to RsRoiLabeler (the single ROI-majority owner);
+ * the segutil quantize stack is retired.
  ***************************************************************************/
 #include "rs_obia_classify_operator.h"
 #include "rs_segmentation_utils.h"
+
+#include "analysis/segmentation/rs_roi_labeler.h"
+#include "analysis/segmentation/rs_segment_map.h"
+#include "analysis/segmentation/rs_simple_segmenter.h"
 
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
@@ -21,18 +31,18 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
-#include "rs_classifier_normalbayes.h"
-#include "rs_classifier_svm.h"
-#include "rs_training_data_extraction.h"
+#include "rs_classifier_backend_factory.h"
+#include "rs_post_process.h"
 
+#include <QColor>
 #include <QString>
-
-#include <gdal.h>
-#include <ogr_api.h>
+#include <QStringList>
+#include <QVector>
 
 #include <opencv2/core.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <map>
 #include <memory>
 #include <vector>
@@ -46,13 +56,19 @@ namespace {
 
 const std::vector<std::string> s_methods = {"svm", "normal_bayes"};
 
-/// Single backend construction path shared with the GUI and the supervised
-/// adapter (ADR 0019 S3/S4 — hyperparameters live in the analysis-layer
-/// classes only).
-std::unique_ptr<RsClassifierBackend> makeBackend(const std::string& method) {
-    if (method == "normal_bayes")
-        return std::make_unique<RsClassifierNormalBayes>();
-    return std::make_unique<RsClassifierSvm>();
+/// segutil::segmentGrid (CV_32S labels 1..N) → analysis RsSegmentMap. The
+/// grid superpixel fallback is the classify-specific complement to the
+/// quantize path (ADR 0060); grid cells are always contiguous 1..N.
+RsSegmentMap gridSegmentMap(int width, int height, int cellSize,
+                            RSOperatorContext& context) {
+    const cv::Mat grid = segmentGrid(width, height, cellSize, context);
+    QVector<quint32> labels(static_cast<size_t>(width) * height);
+    for (int y = 0; y < height; ++y) {
+        const int* row = grid.ptr<int>(y);
+        for (int x = 0; x < width; ++x)
+            labels[static_cast<size_t>(y) * width + x] = static_cast<quint32>(row[x]);
+    }
+    return RsSegmentMap(std::move(labels), width, height);
 }
 
 } // namespace
@@ -121,14 +137,23 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
     const int minRegionSize = getInt(params, "minRegionSize", 20);
     const int minLabelPixels = getInt(params, "minLabelPixels", 3);
 
+    if (cellSize <= 0)
+        throw RSOperatorError(ErrorCode::InvalidParameter, "cellSize must be > 0");
+    if (smoothKernel <= 0 || smoothKernel % 2 == 0)
+        throw RSOperatorError(ErrorCode::InvalidParameter, "smoothKernel must be an odd positive integer");
+    if (quantizeBins <= 0 || quantizeBins > 256)
+        throw RSOperatorError(ErrorCode::InvalidParameter, "quantizeBins must be between 1 and 256");
+    if (minRegionSize < 0)
+        throw RSOperatorError(ErrorCode::InvalidParameter, "minRegionSize must be >= 0");
+    if (minLabelPixels <= 0)
+        throw RSOperatorError(ErrorCode::InvalidParameter, "minLabelPixels must be > 0");
+
     if (!fileExists(inputPath))
         throw RSOperatorError(ErrorCode::FileNotFound, "Input not found: " + inputPath);
     if (!fileExists(trainingPath))
         throw RSOperatorError(ErrorCode::FileNotFound, "Training not found: " + trainingPath);
 
     ensureGdalInit();
-    GDALAllRegister();
-    OGRRegisterAll();
 
     GdalDatasetWrapper ds;
     if (!ds.open(QString::fromStdString(inputPath)))
@@ -155,33 +180,46 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
         context.throwIfCancelled();
     }
 
-    // --- Segment (shared segutil) ---
-    cv::Mat labels;
+    // --- Segment: analysis RsSimpleSegmenter (quantize) or grid fallback ---
+    // ADR 0060: the segutil quantize stack is retired; the grid superpixel
+    // path stays as the classify-specific fallback (cell labels 1..N).
+    RsSegmentMap segMap;
     if (segmentMethod == "quantize") {
-        labels = segmentQuantize(bandData, width, height, smoothKernel, quantizeBins,
-                                 minRegionSize, context);
-        int maxCheck = 0;
-        for (int y = 0; y < height; ++y) {
-            const int* row = labels.ptr<int>(y);
-            for (int x = 0; x < width; ++x)
-                maxCheck = std::max(maxCheck, row[x]);
-        }
-        if (maxCheck < 8) {
+        bool hasNodata = false;
+        const double nodataValue = ds.bandNoDataValue(1, &hasNodata);
+        const float nodata = hasNodata ? static_cast<float>(nodataValue)
+                                       : std::numeric_limits<float>::quiet_NaN();
+        std::vector<const float*> bandPtrs(static_cast<size_t>(nFeat));
+        for (int i = 0; i < nFeat; ++i)
+            bandPtrs[static_cast<size_t>(i)] = bandData[static_cast<size_t>(i)].data();
+        RsSimpleSegmenter::Params segParams;
+        segParams.smoothKernel = smoothKernel;
+        segParams.quantizeBins = quantizeBins;
+        segParams.minRegionSize = minRegionSize;
+        segMap = RsSimpleSegmenter::segmentMultiBand(
+            bandPtrs.data(), nFeat, width, height, nodata, segParams,
+            [&context]() { return context.isCancelled(); },
+            [&context](float f) { context.reportProgress(0.15 + 0.15 * f, "Segmenting"); });
+        context.throwIfCancelled();
+        if (segMap.segmentCount() < 8) {
             context.logWarning("Quantize segmentation yielded few objects; falling back to grid");
-            labels = segmentGrid(width, height, cellSize, context);
+            segMap = gridSegmentMap(width, height, cellSize, context);
         }
     } else {
-        labels = segmentGrid(width, height, cellSize, context);
+        segMap = gridSegmentMap(width, height, cellSize, context);
     }
-    int maxSeg = 0;
-    for (int y = 0; y < height; ++y) {
-        const int* row = labels.ptr<int>(y);
-        for (int x = 0; x < width; ++x)
-            maxSeg = std::max(maxSeg, row[x]);
-    }
-    const int nSeg = maxSeg;
-    if (nSeg < 2)
+    if (segMap.isEmpty())
+        throw RSOperatorError(ErrorCode::ComputationError, "Segmentation produced an empty label map");
+    if (segMap.segmentCount() < 2)
         throw RSOperatorError(ErrorCode::ComputationError, "Segmentation produced too few objects");
+
+    // Segment ids are 1-based with 0 = nodata; after merges they may carry
+    // gaps, so per-segment arrays are indexed by the max label id.
+    const auto &segLabels = segMap.labels();
+    quint32 maxLabel = 0;
+    for (quint32 sid : segLabels)
+        maxLabel = (std::max)(maxLabel, sid);
+    const int nSeg = static_cast<int>(maxLabel);
 
     context.reportProgress(0.35, "Extracting segment mean features (" + std::to_string(nSeg) + ")");
 
@@ -190,12 +228,11 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
                                          std::vector<double>(static_cast<size_t>(nFeat), 0.0));
     std::vector<int> counts(static_cast<size_t>(nSeg + 1), 0);
     for (int y = 0; y < height; ++y) {
-        const int* row = labels.ptr<int>(y);
         for (int x = 0; x < width; ++x) {
-            const int sid = row[x];
-            if (sid <= 0)
-                continue;
             const size_t pix = static_cast<size_t>(y) * width + x;
+            const quint32 sid = segLabels[pix];
+            if (sid == 0)
+                continue;
             for (int f = 0; f < nFeat; ++f)
                 sum[static_cast<size_t>(sid)][static_cast<size_t>(f)] +=
                     bandData[static_cast<size_t>(f)][pix];
@@ -214,74 +251,24 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
                 static_cast<float>(sum[static_cast<size_t>(s)][static_cast<size_t>(f)] * inv);
     }
 
-    // --- Label segments by ROI majority ---
+    // --- Label segments by ROI majority (analysis canonical, ADR 0060) ---
     context.reportProgress(0.5, "Labeling segments from training polygons");
-    GDALDatasetH vecDs = GDALOpenEx(trainingPath.c_str(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr);
-    if (!vecDs)
-        throw RSOperatorError(ErrorCode::GdalError, "Failed to open training vector");
-
-    OGRLayerH layer = GDALDatasetGetLayer(vecDs, 0);
-    if (!layer) {
-        GDALClose(vecDs);
-        throw RSOperatorError(ErrorCode::InvalidInputData, "Training has no layers");
-    }
-    OGRFeatureDefnH defn = OGR_L_GetLayerDefn(layer);
-    // Shared fallback chain (classField → "class" → "id") from the analysis
-    // layer — same resolution the pixel-level extraction module applies.
-    const int fieldIdx = RsTrainingDataExtraction::classFieldIndex(
-        defn, QString::fromStdString(classField));
-    if (fieldIdx < 0) {
-        GDALClose(vecDs);
-        throw RSOperatorError(ErrorCode::InvalidParameter, "classField not found: " + classField);
-    }
-
-    // votes[segId][classId] = count
-    std::vector<std::map<int, int>> votes(static_cast<size_t>(nSeg + 1));
-    OGR_L_ResetReading(layer);
-    OGRFeatureH feat = nullptr;
-    while ((feat = OGR_L_GetNextFeature(layer)) != nullptr) {
-        context.throwIfCancelled();
-        const int classId = OGR_F_GetFieldAsInteger(feat, fieldIdx);
-        if (classId <= 0) {
-            OGR_F_Destroy(feat);
-            continue;
-        }
-        OGRGeometryH geom = OGR_F_GetGeometryRef(feat);
-        if (!geom) {
-            OGR_F_Destroy(feat);
-            continue;
-        }
-        std::vector<uint8_t> mask = rasterizeGeometry(geom, width, height, gt);
-        for (size_t i = 0; i < mask.size(); ++i) {
-            if (!mask[i])
-                continue;
-            const int y = static_cast<int>(i / static_cast<size_t>(width));
-            const int x = static_cast<int>(i % static_cast<size_t>(width));
-            const int sid = labels.at<int>(y, x);
-            if (sid > 0)
-                votes[static_cast<size_t>(sid)][classId]++;
-        }
-        OGR_F_Destroy(feat);
-    }
-    GDALClose(vecDs);
+    QString roiErr;
+    const QMap<quint32, int> segLabelMap = RsRoiLabeler::labelByMajority(
+        segMap, QString::fromStdString(inputPath), QString::fromStdString(trainingPath),
+        QString::fromStdString(classField), minLabelPixels, &roiErr,
+        [&context]() { return context.isCancelled(); });
+    context.throwIfCancelled();
+    if (segLabelMap.isEmpty() && !roiErr.isEmpty())
+        throw RSOperatorError(ErrorCode::GdalError, roiErr.toStdString());
 
     std::vector<int> segLabel(static_cast<size_t>(nSeg + 1), 0);
     int labeledSegments = 0;
-    for (int s = 1; s <= nSeg; ++s) {
-        int bestClass = 0;
-        int bestCount = 0;
-        int total = 0;
-        for (const auto& [cid, c] : votes[static_cast<size_t>(s)]) {
-            total += c;
-            if (c > bestCount) {
-                bestCount = c;
-                bestClass = cid;
-            }
-        }
-        if (total >= minLabelPixels && bestClass > 0) {
-            segLabel[static_cast<size_t>(s)] = bestClass;
-            ++labeledSegments;
-        }
+    for (auto it = segLabelMap.constBegin(); it != segLabelMap.constEnd(); ++it) {
+        if (it.key() > static_cast<quint32>(nSeg))
+            continue;
+        segLabel[static_cast<size_t>(it.key())] = it.value();
+        ++labeledSegments;
     }
 
     if (labeledSegments < 2)
@@ -304,7 +291,8 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
 
     context.reportProgress(0.65, "Training " + method + " on " +
                                      std::to_string(labeledSegments) + " labeled objects");
-    std::unique_ptr<RsClassifierBackend> backend = makeBackend(method);
+    std::unique_ptr<RsClassifierBackend> backend =
+        RsClassifierBackendFactory::create(QString::fromStdString(method));
     if (!backend->fit(trainX, trainY)) {
         throw RSOperatorError(ErrorCode::OpenCvError,
                               method == "normal_bayes" ? "NormalBayes training failed"
@@ -324,38 +312,35 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
     }
 
     std::vector<int32_t> classOfSeg(static_cast<size_t>(nSeg + 1), 0);
-    int maxClassId = 0;
     for (int s = 1; s <= nSeg; ++s) {
         // Backend predictions are integral class ids already; negative is
         // defensive only (SVM/Bayes predict within the trained label set).
-        const int label = std::max(0, pred.at<int>(s - 1, 0));
-        classOfSeg[static_cast<size_t>(s)] = label;
-        maxClassId = std::max(maxClassId, label);
+        classOfSeg[static_cast<size_t>(s)] = (std::max)(0, pred.at<int>(s - 1, 0));
     }
 
-    // Pipeline dtype policy (ADR 0019 S4): class ids come from a user vector
-    // field and can exceed 255 — escalate the output dtype instead of the
-    // old silent 0-255 clamp.
-    GDALDataType outType = GDT_Byte;
-    if (maxClassId > 65535)
-        outType = GDT_Int32;
-    else if (maxClassId > 255)
-        outType = GDT_UInt16;
-
-    // Paint class map
+    // Paint class map. RsPostProcess::saveLabelRaster owns the dtype policy
+    // (ADR 0019 S4: Byte <= 255, UInt16 <= 65535, Int32 beyond — never a
+    // silent clamp) plus the NoData marker; segutil::writeClassGeoTiff was
+    // deleted in ADR 0060 (no callers since ADR 0055).
     context.reportProgress(0.9, "Writing class map");
     std::vector<int32_t> classMap(nPix, 0);
     for (int y = 0; y < height; ++y) {
-        const int* rowL = labels.ptr<int>(y);
         for (int x = 0; x < width; ++x) {
-            const int sid = rowL[x];
+            const size_t pix = static_cast<size_t>(y) * width + x;
+            const quint32 sid = segLabels[pix];
             if (sid > 0)
-                classMap[static_cast<size_t>(y) * width + x] =
-                    classOfSeg[static_cast<size_t>(sid)];
+                classMap[pix] = classOfSeg[static_cast<size_t>(sid)];
         }
     }
-    writeClassGeoTiff(outputPath, classMap, width, height, gt,
-                      ds.projection().toStdString(), outType);
+    // Zero-copy CV_32S header over the flat class map (continuous buffer).
+    const cv::Mat classMapMat(height, width, CV_32S, classMap.data());
+    QString err;
+    if (!RsPostProcess::saveLabelRaster(
+            QString::fromStdString(outputPath), classMapMat, gt,
+            ds.projection(), QVector<QRgb>(),
+            QStringList{QStringLiteral("COMPRESS=LZW")},
+            0.0 /* NoData: unclassified */, &err))
+        throw RSOperatorError(ErrorCode::GdalError, err.toStdString());
 
     context.reportProgress(1.0, "OBIA classification complete");
 
@@ -369,7 +354,9 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
     Json::Value result(Json::objectValue);
     result["output"] = outputPath;
     result["method"] = method;
-    result["segments"] = nSeg;
+    // True object count (merge can leave id gaps, so maxLabel may exceed it;
+    // the old segutil remapped ids contiguously — same value in grid mode).
+    result["segments"] = segMap.segmentCount();
     result["labeledSegments"] = labeledSegments;
     result["trainSamples"] = labeledSegments;
     result["classes"] = static_cast<int>(classHist.size());

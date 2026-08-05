@@ -1,5 +1,7 @@
 #include "qgs_processing_provider_adapter.h"
 #include "algorithm_engine.h"
+#include "atomic_algorithm_registry.h"
+#include "provider_algorithm_adapter.h"
 
 #include <qgsapplication.h>
 #include <processing/qgsprocessingregistry.h>
@@ -56,6 +58,7 @@ void QgsProcessingProviderAdapter::initialize()
 
 void QgsProcessingProviderAdapter::discoverAlgorithms( AlgorithmEngine &engine )
 {
+  Q_UNUSED( engine );
   auto *registry = QgsApplication::processingRegistry();
   if ( !registry )
     return;
@@ -69,15 +72,13 @@ void QgsProcessingProviderAdapter::discoverAlgorithms( AlgorithmEngine &engine )
   {
     if ( !alg )
       continue;
-    if ( engine.findAlgorithm( alg->id() ) )
+
+    const std::string algId = alg->id().toStdString();
+    if ( processing::AtomicAlgorithmRegistry::instance().findAdapter( algId ) )
       continue;
 
-    auto cloned = std::unique_ptr<QgsProcessingAlgorithm>( alg->create() );
-    if ( !cloned )
-      continue;
-
-    engine.registerAlgorithm(
-      std::make_shared<QgsProcessingAlgorithmAdapter>( std::move( cloned ), m_profile ) );
+    processing::AtomicAlgorithmRegistry::instance().registerAdapter(
+      std::make_shared<processing::ProviderAlgorithmAdapter>( *alg ) );
   }
 }
 

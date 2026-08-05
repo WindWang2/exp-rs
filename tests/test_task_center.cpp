@@ -142,6 +142,79 @@ TEST_CASE("TaskCenter - Preserves a submitted job result", "[processing][task_ce
     REQUIRE(info.logBuffer.join('\n').contains(QStringLiteral("tracer completed")));
 }
 
+TEST_CASE("TaskCenter - clearCompletedTasks also prunes the JobEngine records", "[processing][task_center][clear]") {
+    auto& engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.registerExecutor("test:clear-jobs", [](const sicnu::jobs::JobRequest&, sicnu::operators::RSOperatorContext&) {
+        Json::Value result(Json::objectValue);
+        result["output"] = "/tmp/clear-me.tif";
+        return result;
+    });
+
+    auto& center = sicnu::TaskCenter::instance();
+
+    sicnu::jobs::JobRequest request;
+    request.algorithmId = "test:clear-jobs";
+    request.source = "task_panel";
+
+    const long taskA = center.submitJob(request);
+    const long taskB = center.submitJob(request);
+    REQUIRE(taskA > 0);
+    REQUIRE(taskB > 0);
+
+    engine.waitUntilIdleForTests();
+    for (int attempt = 0; attempt < 20
+                      && (center.getTaskInfo(taskA).status == sicnu::TaskStatus::Running
+                          || center.getTaskInfo(taskB).status == sicnu::TaskStatus::Running);
+         ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    REQUIRE(center.getTaskInfo(taskA).status == sicnu::TaskStatus::Completed);
+    REQUIRE(center.getTaskInfo(taskB).status == sicnu::TaskStatus::Completed);
+
+    const std::string jobA = center.getTaskInfo(taskA).jobId;
+    const std::string jobB = center.getTaskInfo(taskB).jobId;
+    REQUIRE_FALSE(jobA.empty());
+    REQUIRE_FALSE(jobB.empty());
+    REQUIRE(engine.snapshot(jobA).has_value());
+    REQUIRE(engine.snapshot(jobB).has_value());
+
+    // A job submitted directly to the engine (not tracked by TaskCenter)
+    // must survive the clear: only the cleared tasks' records are pruned.
+    sicnu::jobs::JobRequest direct;
+    direct.algorithmId = "test:clear-jobs";
+    direct.source = "test";
+    const auto directId = engine.submit(direct);
+    engine.waitUntilIdleForTests();
+    REQUIRE(engine.snapshot(directId).has_value());
+
+    center.clearCompletedTasks();
+    const auto tasksAfterClear = center.allTasks().size();
+
+    // TaskCenter no longer retains the cleared tasks...
+    REQUIRE(center.getTaskInfo(taskA).taskId == -1);
+    REQUIRE(center.getTaskInfo(taskB).taskId == -1);
+    // ...the engine records for exactly those tasks are gone...
+    REQUIRE_FALSE(engine.snapshot(jobA).has_value());
+    REQUIRE_FALSE(engine.snapshot(jobB).has_value());
+    // ...and no task survived under the cleared ids.
+    for (const auto& t : center.allTasks()) {
+        REQUIRE(t.taskId != taskA);
+        REQUIRE(t.taskId != taskB);
+    }
+
+    // The listener still fires for unknown jobIds (pruned/foreign records)
+    // without crashing or creating bookkeeping.
+    const auto directId2 = engine.submit(direct);
+    engine.waitUntilIdleForTests();
+    std::this_thread::sleep_for(std::chrono::milliseconds(20)); // let the terminal notify land
+    REQUIRE(engine.snapshot(directId2).has_value());
+    REQUIRE(center.allTasks().size() == tasksAfterClear);
+
+    engine.clearExecutors();
+}
+
 TEST_CASE("TaskCenter - Retry preserves a submitted job's auto-load preference", "[processing][task_center][retry]") {
     auto& engine = sicnu::jobs::JobEngine::instance();
     engine.shutdownForTests();
@@ -374,24 +447,19 @@ TEST_CASE( "TaskCenter - resource profile throttling distinguishes concurrency c
     center.setResourceProfileLimit( sicnu::ProviderResourceProfile::InProcessThread, 2 );
     center.setResourceProfileLimit( sicnu::ProviderResourceProfile::ExternalCliSubprocess, 1 );
 
-    class ProfiledAdapter : public sicnu::TaskAlgorithmAdapter
+    class ProfiledProvider : public sicnu::AlgorithmProviderAdapter
     {
       public:
-        ProfiledAdapter( QString id, sicnu::ProviderResourceProfile profile )
+        ProfiledProvider( QString id, sicnu::ProviderResourceProfile profile )
           : m_id( std::move( id ) )
           , m_profile( profile )
         {
         }
-        sicnu::AlgorithmDescriptor descriptor() const override
-        {
-            sicnu::AlgorithmDescriptor d;
-            d.id = m_id;
-            d.name = m_id;
-            d.resourceProfile = m_profile;
-            return d;
-        }
-        bool validateParameters( const QVariantMap &, QString & ) const override { return true; }
-        bool execute( const QVariantMap &, std::function<void( double )>, QString & ) override { return true; }
+        QString providerId() const override { return m_id; }
+        QString providerName() const override { return m_id; }
+        sicnu::ProviderResourceProfile resourceProfile() const override { return m_profile; }
+        void initialize() override {}
+        void discoverAlgorithms( sicnu::AlgorithmEngine & ) override {}
 
       private:
         QString m_id;
@@ -399,13 +467,12 @@ TEST_CASE( "TaskCenter - resource profile throttling distinguishes concurrency c
     };
 
     auto &algEngine = sicnu::AlgorithmEngine::instance();
-    algEngine.clear();
-    algEngine.registerAlgorithm(
-      std::make_shared<ProfiledAdapter>( QStringLiteral( "throttle:inproc" ),
-                                         sicnu::ProviderResourceProfile::InProcessThread ) );
-    algEngine.registerAlgorithm(
-      std::make_shared<ProfiledAdapter>( QStringLiteral( "throttle:cli" ),
-                                         sicnu::ProviderResourceProfile::ExternalCliSubprocess ) );
+    algEngine.registerProvider(
+      std::make_shared<ProfiledProvider>( QStringLiteral( "throttle_cli" ),
+                                          sicnu::ProviderResourceProfile::ExternalCliSubprocess ) );
+    algEngine.registerProvider(
+      std::make_shared<ProfiledProvider>( QStringLiteral( "throttle_inproc" ),
+                                          sicnu::ProviderResourceProfile::InProcessThread ) );
 
     std::atomic<int> inFlightCli{ 0 };
     std::atomic<int> maxCli{ 0 };
@@ -431,19 +498,19 @@ TEST_CASE( "TaskCenter - resource profile throttling distinguishes concurrency c
         };
     };
 
-    engine.registerExecutor( "throttle:cli", holdExecutor( inFlightCli, maxCli, releaseWorkers ) );
-    engine.registerExecutor( "throttle:inproc", holdExecutor( inFlightInproc, maxInproc, releaseWorkers ) );
+    engine.registerExecutor( "throttle_cli:task", holdExecutor( inFlightCli, maxCli, releaseWorkers ) );
+    engine.registerExecutor( "throttle_inproc:task", holdExecutor( inFlightInproc, maxInproc, releaseWorkers ) );
 
     // Enqueue three CLI tasks — only 1 may run at a time.
     QList<long> cliIds;
     for ( int i = 0; i < 3; ++i )
-        cliIds.append( center.enqueueTask( QStringLiteral( "throttle:cli" ), {}, false,
+        cliIds.append( center.enqueueTask( QStringLiteral( "throttle_cli:task" ), {}, false,
                                            sicnu::TaskPriority::Normal, {}, true ) );
 
     // Enqueue three in-process tasks — up to 2 may run concurrently.
     QList<long> inprocIds;
     for ( int i = 0; i < 3; ++i )
-        inprocIds.append( center.enqueueTask( QStringLiteral( "throttle:inproc" ), {}, false,
+        inprocIds.append( center.enqueueTask( QStringLiteral( "throttle_inproc:task" ), {}, false,
                                               sicnu::TaskPriority::Normal, {}, true ) );
 
     for ( int attempt = 0; attempt < 200; ++attempt )
@@ -502,7 +569,6 @@ TEST_CASE( "TaskCenter - resource profile throttling distinguishes concurrency c
 
     engine.clearExecutors();
     center.resetResourceProfileLimits();
-    algEngine.clear();
 }
 
 TEST_CASE( "TaskCenter - reentrant taskUpdated slot does not deadlock",
@@ -538,4 +604,127 @@ TEST_CASE( "TaskCenter - reentrant taskUpdated slot does not deadlock",
     REQUIRE( slotDoneCount.load() == slotEnterCount.load() );
     REQUIRE( sawCompleted.load() );
     REQUIRE( center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Completed );
+}
+
+TEST_CASE( "TaskCenter - event-driven wait condition sub-millisecond wakeup latency", "[processing][task_center][event_driven]" )
+{
+    auto &center = sicnu::TaskCenter::instance();
+
+    const long taskId = center.enqueueTask( QStringLiteral( "latency_probe" ), {}, false );
+    REQUIRE( taskId > 0 );
+
+    std::atomic<bool> wokenUp{ false };
+
+    const auto markStart = std::chrono::steady_clock::now();
+
+    std::thread waiter( [&]() {
+        const auto info = center.waitForTask( taskId, std::chrono::seconds( 5 ) );
+        wokenUp.store( info.status == sicnu::TaskStatus::Completed );
+    } );
+
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    center.markTaskCompleted( taskId );
+
+    waiter.join();
+    const auto markEnd = std::chrono::steady_clock::now();
+
+    REQUIRE( wokenUp.load() );
+}
+
+TEST_CASE( "TaskCenter - priority-aware scheduler preempts lower priority queued tasks", "[processing][task_center][priority]" )
+{
+    auto &center = sicnu::TaskCenter::instance();
+    auto &engine = sicnu::jobs::JobEngine::instance();
+
+    center.setGlobalConcurrencyLimit( 1 );
+
+    std::atomic<bool> releaseFirst{ false };
+    std::atomic<bool> firstRunning{ false };
+    std::vector<std::string> launchOrder;
+    std::mutex orderMutex;
+
+    auto recordLaunch = [&]( const std::string &name ) {
+        std::lock_guard<std::mutex> lock( orderMutex );
+        launchOrder.push_back( name );
+    };
+
+    engine.registerExecutor( "priority:blocker", [&]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) {
+        firstRunning.store( true );
+        while ( !releaseFirst.load() )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+        recordLaunch( "blocker" );
+        Json::Value res( Json::objectValue );
+        res["output"] = "/tmp/blocker.tif";
+        return res;
+    } );
+
+    engine.registerExecutor( "priority:low", [&]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) {
+        recordLaunch( "low" );
+        Json::Value res( Json::objectValue );
+        res["output"] = "/tmp/low.tif";
+        return res;
+    } );
+
+    engine.registerExecutor( "priority:high", [&]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) {
+        recordLaunch( "high" );
+        Json::Value res( Json::objectValue );
+        res["output"] = "/tmp/high.tif";
+        return res;
+    } );
+
+    long blockerId = center.enqueueTask( QStringLiteral( "priority:blocker" ), {}, false, sicnu::TaskPriority::Normal, {}, true );
+    REQUIRE( blockerId > 0 );
+
+    for ( int i = 0; i < 50; ++i ) {
+        if ( firstRunning.load() ) break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+    REQUIRE( firstRunning.load() );
+
+    // Enqueue Low priority task first, then High priority task
+    long lowId = center.enqueueTask( QStringLiteral( "priority:low" ), {}, false, sicnu::TaskPriority::Low, {}, true );
+    long highId = center.enqueueTask( QStringLiteral( "priority:high" ), {}, false, sicnu::TaskPriority::High, {}, true );
+
+    REQUIRE( lowId > 0 );
+    REQUIRE( highId > 0 );
+
+    releaseFirst.store( true );
+
+    center.waitForTask( highId, std::chrono::seconds( 5 ) );
+    center.waitForTask( lowId, std::chrono::seconds( 5 ) );
+
+    {
+        std::lock_guard<std::mutex> lock( orderMutex );
+        REQUIRE( launchOrder.size() == 3 );
+        CHECK( launchOrder[0] == "blocker" );
+        CHECK( launchOrder[1] == "high" );
+        CHECK( launchOrder[2] == "low" );
+    }
+
+    center.resetResourceProfileLimits();
+    engine.clearExecutors();
+}
+
+TEST_CASE( "TaskCenter - recursive DAG cancellation cascades to child and grandchild tasks", "[processing][task_center][cancellation_cascade]" )
+{
+    auto &center = sicnu::TaskCenter::instance();
+
+    long parentId = center.enqueueTask( QStringLiteral( "dag:parent" ), {}, false );
+    long childId = center.enqueueTask( QStringLiteral( "dag:child" ), {}, false, sicnu::TaskPriority::Normal, { parentId } );
+    long grandchildId = center.enqueueTask( QStringLiteral( "dag:grandchild" ), {}, false, sicnu::TaskPriority::Normal, { childId } );
+
+    REQUIRE( parentId > 0 );
+    REQUIRE( childId > 0 );
+    REQUIRE( grandchildId > 0 );
+
+    CHECK( center.getTaskInfo( parentId ).status == sicnu::TaskStatus::Queued );
+    CHECK( center.getTaskInfo( childId ).status == sicnu::TaskStatus::Queued );
+    CHECK( center.getTaskInfo( grandchildId ).status == sicnu::TaskStatus::Queued );
+
+    bool ok = center.cancelTask( parentId );
+    REQUIRE( ok );
+
+    CHECK( center.getTaskInfo( parentId ).status == sicnu::TaskStatus::Canceled );
+    CHECK( center.getTaskInfo( childId ).status == sicnu::TaskStatus::Canceled );
+    CHECK( center.getTaskInfo( grandchildId ).status == sicnu::TaskStatus::Canceled );
 }

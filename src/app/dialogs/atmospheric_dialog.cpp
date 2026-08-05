@@ -33,7 +33,7 @@ void AtmosphericDialog::setupUi()
 
   QFrame *sec = SicnuUi::makeSection(
     this, tr( "校正参数" ),
-    tr( "选择方法、波段与定标系数。DOS2 需气团。" ) );
+    tr( "选择方法、波段与定标系数。DOS2 需气团；QUAC 自动处理全波段。" ) );
   auto *form = new QFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
   form->setHorizontalSpacing( 12 );
@@ -43,8 +43,9 @@ void AtmosphericDialog::setupUi()
   m_methodCombo->addItem( tr( "DN → 辐射亮度" ), QStringLiteral( "dn_to_radiance" ) );
   m_methodCombo->addItem( tr( "DOS1 暗目标减法" ), QStringLiteral( "dos1" ) );
   m_methodCombo->addItem( tr( "DOS2（含透过率）" ), QStringLiteral( "dos2" ) );
+  m_methodCombo->addItem( tr( "QUAC 快速大气校正" ), QStringLiteral( "quac" ) );
   SicnuDialogHelp::tip( m_methodCombo, tr(
-    "• DN→辐射：L=gain×DN+bias\n• DOS1：暗目标减法\n• DOS2：DOS1 + 透过率" ) );
+    "• DN->辐射：L=gain×DN+bias\n• DOS1：暗目标减法\n• DOS2：DOS1 + 透过率\n• QUAC：基于图像统计的全波段快速校正" ) );
   connect( m_methodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &AtmosphericDialog::onMethodChanged );
   form->addRow( tr( "方法" ), m_methodCombo );
@@ -52,6 +53,7 @@ void AtmosphericDialog::setupUi()
   m_bandCombo = new QComboBox( sec );
   SicnuDialogHelp::tip( m_bandCombo, tr( "要校正的波段号。" ) );
   form->addRow( tr( "波段" ), m_bandCombo );
+  m_bandLabel = qobject_cast<QLabel *>( form->labelForField( m_bandCombo ) );
 
   m_gainSpin = new QDoubleSpinBox( sec );
   m_gainSpin->setRange( 0.0001, 1000.0 );
@@ -59,6 +61,7 @@ void AtmosphericDialog::setupUi()
   m_gainSpin->setValue( 0.01 );
   SicnuDialogHelp::tip( m_gainSpin, tr( "辐射定标增益 gain。" ) );
   form->addRow( tr( "增益 Gain" ), m_gainSpin );
+  m_gainLabel = qobject_cast<QLabel *>( form->labelForField( m_gainSpin ) );
 
   m_biasSpin = new QDoubleSpinBox( sec );
   m_biasSpin->setRange( -1000.0, 1000.0 );
@@ -66,6 +69,7 @@ void AtmosphericDialog::setupUi()
   m_biasSpin->setValue( 0.0 );
   SicnuDialogHelp::tip( m_biasSpin, tr( "辐射定标偏置 bias。" ) );
   form->addRow( tr( "偏置 Bias" ), m_biasSpin );
+  m_biasLabel = qobject_cast<QLabel *>( form->labelForField( m_biasSpin ) );
 
   m_airmassLabel = new QLabel( tr( "气团 Airmass" ), sec );
   m_airmassSpin = new QDoubleSpinBox( sec );
@@ -99,6 +103,15 @@ void AtmosphericDialog::onMethodChanged( int index )
   const bool showAirmass = ( index == 2 );
   m_airmassSpin->setVisible( showAirmass );
   m_airmassLabel->setVisible( showAirmass );
+
+  // QUAC (index 3) processes all bands jointly and needs no gain/bias/airmass.
+  const bool isQuac = ( index == 3 );
+  m_bandCombo->setVisible( !isQuac );
+  if ( m_bandLabel ) m_bandLabel->setVisible( !isQuac );
+  m_gainSpin->setVisible( !isQuac );
+  if ( m_gainLabel ) m_gainLabel->setVisible( !isQuac );
+  m_biasSpin->setVisible( !isQuac );
+  if ( m_biasLabel ) m_biasLabel->setVisible( !isQuac );
 }
 
 void AtmosphericDialog::onRun()

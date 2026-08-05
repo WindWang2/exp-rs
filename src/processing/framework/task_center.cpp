@@ -5,7 +5,10 @@
 #include <thread>
 #include <algorithm>
 #include <chrono>
+#include <QFile>
+#include <QSet>
 #include "framework/json_params_converter.h"
+#include "atomic_algorithm_registry.h"
 #include "jobs/job_engine.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/placeholder_grammar.h"
@@ -35,6 +38,16 @@ TaskCenter& TaskCenter::instance()
     return s_instance;
 }
 
+TaskCenter::~TaskCenter()
+{
+    // ADR 0051: the JobEngine listener fires on worker threads and a job may
+    // still be in flight when the singleton is destroyed at process exit
+    // (tests may end without waiting for every submitted job). Join the
+    // engine's workers so no notification can touch this instance once its
+    // members start being destroyed.
+    sicnu::jobs::JobEngine::instance().shutdown();
+}
+
 TaskCenter::TaskCenter()
 {
     qRegisterMetaType<AlgorithmTaskInfo>("sicnu::AlgorithmTaskInfo");
@@ -43,11 +56,14 @@ TaskCenter::TaskCenter()
 
 ProviderResourceProfile TaskCenter::resolveResourceProfile( const QString &algorithmId ) const
 {
-    auto adapter = AlgorithmEngine::instance().findAlgorithm( algorithmId );
-    if ( adapter )
-        return adapter->descriptor().resourceProfile;
-    // Documented fallback when the algorithm is not registered on AlgorithmEngine
-    // (e.g. pure JobEngine / RSOperator ids used only at runtime).
+    const auto providers = AlgorithmEngine::instance().registeredProviders();
+    for ( const auto &provider : providers )
+    {
+        if ( provider && algorithmId.startsWith( provider->providerId() + QStringLiteral( ":" ) ) )
+        {
+            return provider->resourceProfile();
+        }
+    }
     return ProviderResourceProfile::InProcessThread;
 }
 
@@ -152,13 +168,19 @@ QVariantMap TaskCenter::jsonParamsToVariantMap( const Json::Value &params )
 void TaskCenter::queueTaskAddedLocked( long taskId )
 {
     if ( m_tasks.contains( taskId ) )
+    {
         m_pendingTaskAdded.append( m_tasks[taskId] );
+        m_waitCondition.wakeAll();
+    }
 }
 
 void TaskCenter::queueTaskUpdatedLocked( long taskId )
 {
     if ( m_tasks.contains( taskId ) )
+    {
         m_pendingTaskUpdated.append( m_tasks[taskId] );
+        m_waitCondition.wakeAll();
+    }
 }
 
 void TaskCenter::queueTaskLogLocked( long taskId, const QString &message )
@@ -312,9 +334,9 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         info.autoDispatch = autoDispatch;
         info.resourceProfile = resolveResourceProfile( algorithmId );
 
-        auto adapter = AlgorithmEngine::instance().findAlgorithm( algorithmId );
+        auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( algorithmId.toStdString() );
         if ( adapter )
-            info.algorithmName = adapter->descriptor().name;
+            info.algorithmName = QString::fromStdString( adapter->descriptor().displayName );
         else
             info.algorithmName = algorithmId;
 
@@ -358,6 +380,8 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
                                 CancelHook onCancel,
                                 bool autoLoad )
 {
+    ensureJobListener();
+
     QVariantMap params = jsonParamsToVariantMap( request.params );
 
     // Tracking-only enqueue; this path owns JobEngine submission itself.
@@ -380,67 +404,108 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
             m_tasks[taskId].jobRequest = request;
             m_tasks[taskId].hasJobRequest = true;
             m_tasks[taskId].jobExecutor = std::move( executor );
+            m_taskByJobId[jobId] = taskId;
         }
     }
 
     markTaskRunning( taskId );
-    watchSubmittedJob( taskId, jobId );
+    // Catch-up: a job that reached a terminal state before the listener could
+    // dispatch it (mapping registered after submit returned) must still land
+    // in the bookkeeping. Delta logic makes this idempotent.
+    if ( const auto record = sicnu::jobs::JobEngine::instance().snapshot( jobId ) )
+        onJobRecord( *record );
     return taskId;
 }
 
-void TaskCenter::watchSubmittedJob( long taskId, std::string jobId )
+void TaskCenter::ensureJobListener()
 {
-    std::thread( [taskId, jobId = std::move( jobId )]() {
-        auto &engine = sicnu::jobs::JobEngine::instance();
-        std::size_t forwardedLogCount = 0;
-        double lastProgress = -2.0;
-        for ( ;; )
+    // Single replacing slot: re-claim it on every submit so a test-side reset
+    // (shutdownForTests / EngineGuard) cannot permanently detach bookkeeping.
+    sicnu::jobs::JobEngine::instance().setListener(
+      [this]( const sicnu::jobs::JobRecord &record ) { onJobRecord( record ); } );
+}
+
+void TaskCenter::onJobRecord( const sicnu::jobs::JobRecord &record )
+{
+    long taskId = -1;
+    {
+        QMutexLocker locker( &m_mutex );
+        auto it = m_taskByJobId.find( record.id );
+        if ( it == m_taskByJobId.end() )
+            return; // job not submitted through Task Center (e.g. direct engine use in tests)
+        taskId = it.value();
+    }
+    processJobRecord( taskId, record );
+}
+
+void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &record )
+{
+    // Same delta semantics as the retired watcher thread (ADR 0051): forward
+    // changed progress, new log lines, and exactly one terminal transition.
+    {
+        QMutexLocker locker( &m_mutex );
+        if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
+            return; // task gone, or stale/duplicate record (catch-up vs listener)
+    }
+
+    if ( record.progress >= 0.0 )
+    {
+        bool changed = false;
         {
-            const auto record = engine.snapshot( jobId );
-            if ( !record )
+            QMutexLocker locker( &m_mutex );
+            const double last = m_lastForwardedProgress.value( taskId, -2.0 );
+            if ( record.progress != last )
             {
-                TaskCenter::instance().markTaskFailed( taskId, QStringLiteral( "Task Center lost the job record" ) );
-                return;
+                m_lastForwardedProgress[taskId] = record.progress;
+                changed = true;
             }
-            if ( record->progress >= 0.0 && record->progress != lastProgress )
-            {
-                TaskCenter::instance().updateTaskProgress( taskId, record->progress );
-                lastProgress = record->progress;
-            }
-            while ( forwardedLogCount < record->logLines.size() )
-            {
-                TaskCenter::instance().appendTaskLog(
-                  taskId, QString::fromStdString( record->logLines[forwardedLogCount].text ) );
-                ++forwardedLogCount;
-            }
-            if ( record->state == sicnu::jobs::JobState::Succeeded
-                 || record->state == sicnu::jobs::JobState::Failed
-                 || record->state == sicnu::jobs::JobState::Cancelled )
-            {
-                if ( record->state == sicnu::jobs::JobState::Succeeded )
-                {
-                    QVariantMap results;
-                    for ( const auto &name : record->result.getMemberNames() )
-                    {
-                        if ( record->result[name].isString() )
-                            results.insert( QString::fromStdString( name ),
-                                            QString::fromStdString( record->result[name].asString() ) );
-                    }
-                    TaskCenter::instance().markTaskCompleted( taskId, results, record->result );
-                }
-                else if ( record->state == sicnu::jobs::JobState::Cancelled )
-                {
-                    TaskCenter::instance().markTaskCanceled( taskId );
-                }
-                else
-                {
-                    TaskCenter::instance().markTaskFailed( taskId, QString::fromStdString( record->error ) );
-                }
-                return;
-            }
-            std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
         }
-    } ).detach();
+        if ( changed )
+            updateTaskProgress( taskId, record.progress );
+    }
+
+    std::size_t forwarded = 0;
+    {
+        QMutexLocker locker( &m_mutex );
+        forwarded = m_forwardedLogCounts.value( taskId, 0 );
+        if ( record.logLines.size() > forwarded )
+            m_forwardedLogCounts[taskId] = record.logLines.size();
+    }
+    while ( forwarded < record.logLines.size() )
+    {
+        appendTaskLog( taskId, QString::fromStdString( record.logLines[forwarded].text ) );
+        ++forwarded;
+    }
+
+    if ( record.state == sicnu::jobs::JobState::Succeeded )
+    {
+        QVariantMap results;
+        for ( const auto &name : record.result.getMemberNames() )
+        {
+            if ( record.result[name].isString() )
+                results.insert( QString::fromStdString( name ),
+                                QString::fromStdString( record.result[name].asString() ) );
+        }
+        markTaskCompleted( taskId, results, record.result );
+    }
+    else if ( record.state == sicnu::jobs::JobState::Cancelled )
+    {
+        markTaskCanceled( taskId );
+    }
+    else if ( record.state == sicnu::jobs::JobState::Failed )
+    {
+        markTaskFailed( taskId, QString::fromStdString( record.error ) );
+    }
+    else
+    {
+        return; // Queued/Running records keep the per-task dispatch state
+    }
+
+    // Terminal job: release per-task dedup/dispatch state.
+    QMutexLocker locker( &m_mutex );
+    m_forwardedLogCounts.remove( taskId );
+    m_lastForwardedProgress.remove( taskId );
+    m_taskByJobId.remove( record.id );
 }
 
 void TaskCenter::processNextQueuedTasks()
@@ -551,6 +616,10 @@ void TaskCenter::flushPendingLaunches()
         launches.swap( m_pendingLaunches );
     }
 
+    if ( launches.isEmpty() )
+        return;
+    ensureJobListener();
+
     for ( auto &launch : launches )
     {
         std::string jobId;
@@ -565,12 +634,22 @@ void TaskCenter::flushPendingLaunches()
             continue;
         }
 
+        bool mapped = false;
         {
             QMutexLocker reLock( &m_mutex );
             if ( m_tasks.contains( launch.taskId ) )
+            {
                 m_tasks[launch.taskId].jobId = jobId;
+                m_taskByJobId[jobId] = launch.taskId;
+                mapped = true;
+            }
         }
-        watchSubmittedJob( launch.taskId, jobId );
+        if ( mapped )
+        {
+            // Catch-up snapshot; see submitJobImpl for the rationale.
+            if ( const auto record = sicnu::jobs::JobEngine::instance().snapshot( jobId ) )
+                onJobRecord( *record );
+        }
     }
 }
 
@@ -628,7 +707,8 @@ void TaskCenter::markTaskCompleted( long taskId,
     bool shouldAutoLoad = false;
     {
         QMutexLocker locker( &m_mutex );
-        if ( !m_tasks.contains( taskId ) || m_tasks[taskId].status == TaskStatus::Canceled )
+        // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
+        if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
             return;
         m_tasks[taskId].status = TaskStatus::Completed;
         m_tasks[taskId].resultPayload = resultPayload;
@@ -673,7 +753,8 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
 {
     {
         QMutexLocker locker( &m_mutex );
-        if ( !m_tasks.contains( taskId ) || m_tasks[taskId].status == TaskStatus::Canceled )
+        // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
+        if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
             return;
         m_tasks[taskId].status = TaskStatus::Failed;
         m_tasks[taskId].errorMessage = error;
@@ -707,7 +788,8 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
 {
     {
         QMutexLocker locker( &m_mutex );
-        if ( !m_tasks.contains( taskId ) || m_tasks[taskId].status == TaskStatus::Canceled )
+        // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
+        if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
             return;
         m_tasks[taskId].status = TaskStatus::Canceled;
         m_tasks[taskId].errorMessage = reason;
@@ -724,54 +806,88 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
 
 bool TaskCenter::cancelTask( long taskId )
 {
-    std::string jobId;
-    bool cancelImmediately = false;
+    std::vector<std::string> jobIdsToCancel;
     {
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) )
             return false;
         if ( isTerminalStatus( m_tasks[taskId].status ) )
             return false;
-        if ( m_tasks[taskId].taskHandle )
-            m_tasks[taskId].taskHandle->cancel();
-        jobId = m_tasks[taskId].jobId;
-        cancelImmediately = jobId.empty();
-        if ( cancelImmediately )
-        {
-            m_tasks[taskId].status = TaskStatus::Canceled;
-            m_tasks[taskId].errorMessage = QStringLiteral( "Task canceled" );
-            m_tasks[taskId].endTime = QDateTime::currentDateTime();
-            m_tasks[taskId].logBuffer.append( QStringLiteral( "Task canceled by user." ) );
-            updatePipelineForTaskLocked( taskId );
-        }
-        else
-        {
-            m_tasks[taskId].logBuffer.append( QStringLiteral( "Cancellation requested by user." ) );
-        }
-        queueTaskUpdatedLocked( taskId );
 
-        if ( cancelImmediately )
+        // Recursive search for all descendant task IDs in the DAG
+        QSet<long> canceledAncestors;
+        canceledAncestors.insert( taskId );
+        bool addedNew = true;
+        while ( addedNew )
         {
-            QList<long> keys = m_tasks.keys();
-            for ( long id : keys )
+            addedNew = false;
+            for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
             {
-                if ( m_tasks[id].parentTaskIds.contains( taskId ) && m_tasks[id].status == TaskStatus::Queued )
+                if ( isTerminalStatus( it.value().status ) )
+                    continue;
+                if ( canceledAncestors.contains( it.key() ) )
+                    continue;
+                for ( long parentId : it.value().parentTaskIds )
                 {
-                    m_tasks[id].status = TaskStatus::Canceled;
-                    m_tasks[id].endTime = QDateTime::currentDateTime();
-                    m_tasks[id].logBuffer.append( QStringLiteral( "Canceled due to upstream parent task failure." ) );
-                    updatePipelineForTaskLocked( id );
-                    queueTaskUpdatedLocked( id );
+                    if ( canceledAncestors.contains( parentId ) )
+                    {
+                        canceledAncestors.insert( it.key() );
+                        addedNew = true;
+                        break;
+                    }
                 }
             }
+        }
+
+        for ( long targetId : canceledAncestors )
+        {
+            auto &info = m_tasks[targetId];
+            if ( isTerminalStatus( info.status ) )
+                continue;
+
+            if ( info.taskHandle )
+                info.taskHandle->cancel();
+
+            if ( !info.jobId.empty() )
+            {
+                jobIdsToCancel.push_back( info.jobId );
+                info.logBuffer.append( ( targetId == taskId )
+                                         ? QStringLiteral( "Cancellation requested by user." )
+                                         : QStringLiteral( "Cancellation requested due to upstream parent task cancellation." ) );
+            }
+            else
+            {
+                info.status = TaskStatus::Canceled;
+                info.errorMessage = ( targetId == taskId )
+                                      ? QStringLiteral( "Task canceled" )
+                                      : QStringLiteral( "Canceled due to upstream parent task cancellation." );
+                info.endTime = QDateTime::currentDateTime();
+                info.logBuffer.append( ( targetId == taskId )
+                                         ? QStringLiteral( "Task canceled by user." )
+                                         : QStringLiteral( "Canceled due to upstream parent task cancellation." ) );
+
+                if ( !info.outputLayerPath.isEmpty() && QFile::exists( info.outputLayerPath ) )
+                {
+                    if ( info.outputLayerPath.startsWith( QStringLiteral( "/tmp/" ) )
+                         || info.outputLayerPath.contains( QStringLiteral( ".scratch" ) ) )
+                    {
+                        QFile::remove( info.outputLayerPath );
+                    }
+                }
+            }
+
+            updatePipelineForTaskLocked( targetId );
+            queueTaskUpdatedLocked( targetId );
         }
 
         processNextQueuedTasks();
     }
     flushPendingLaunches();
     flushPendingSignals();
-    if ( !jobId.empty() )
-        sicnu::jobs::JobEngine::instance().cancel( jobId );
+
+    for ( const auto &jId : jobIdsToCancel )
+        sicnu::jobs::JobEngine::instance().cancel( jId );
+
     return true;
 }
 
@@ -869,13 +985,40 @@ AlgorithmTaskInfo TaskCenter::getTaskInfo( long taskId ) const
 
 void TaskCenter::clearCompletedTasks()
 {
-    QMutexLocker locker( &m_mutex );
-    QList<long> keys = m_tasks.keys();
-    for ( long id : keys )
+    QList<long> clearedTaskIds;
+    std::vector<std::string> clearedJobIds;
     {
-        if ( isTerminalStatus( m_tasks[id].status ) )
+        QMutexLocker locker( &m_mutex );
+        const QList<long> keys = m_tasks.keys();
+        for ( long id : keys )
+        {
+            if ( !isTerminalStatus( m_tasks[id].status ) )
+                continue;
+            if ( !m_tasks[id].jobId.empty() )
+                clearedJobIds.push_back( m_tasks[id].jobId );
+            clearedTaskIds.append( id );
             m_tasks.remove( id );
+        }
+        // Drop listener-dispatch / delta-dedup state for the cleared tasks
+        // (ADR 0052): a straggler job record for a pruned job must no-op as
+        // an unknown jobId instead of re-materializing bookkeeping.
+        for ( long id : clearedTaskIds )
+        {
+            m_forwardedLogCounts.remove( id );
+            m_lastForwardedProgress.remove( id );
+        }
+        for ( auto it = m_taskByJobId.begin(); it != m_taskByJobId.end(); )
+        {
+            if ( !m_tasks.contains( it.value() ) )
+                it = m_taskByJobId.erase( it );
+            else
+                ++it;
+        }
     }
+    // Prune exactly the engine records of the cleared tasks (ADR 0052);
+    // untracked engine jobs (direct submissions) are left untouched.
+    if ( !clearedJobIds.empty() )
+        sicnu::jobs::JobEngine::instance().removeCompleted( clearedJobIds );
 }
 
 long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def, bool autoLoad )
@@ -992,18 +1135,26 @@ AlgorithmTaskInfo TaskCenter::waitForTask( long taskId,
 {
     using clock = std::chrono::steady_clock;
     const auto deadline = clock::now() + timeout;
+
+    QMutexLocker locker( &m_mutex );
     for ( ;; )
     {
-        AlgorithmTaskInfo info = getTaskInfo( taskId );
-        if ( info.taskId < 0 || isTerminalStatus( info.status ) )
+        auto it = m_tasks.find( taskId );
+        if ( it == m_tasks.end() || isTerminalStatus( it->status ) )
         {
-            return info;
+            return it != m_tasks.end() ? *it : AlgorithmTaskInfo{};
         }
-        if ( clock::now() >= deadline )
+
+        const auto now = clock::now();
+        if ( now >= deadline )
         {
-            return info;
+            return *it;
         }
-        std::this_thread::sleep_for( pollInterval );
+
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>( deadline - now );
+        const auto waitTime = std::min( remaining, pollInterval );
+
+        m_waitCondition.wait( &m_mutex, static_cast<unsigned long>( waitTime.count() ) );
     }
 }
 
@@ -1013,18 +1164,26 @@ PipelineExecutionInfo TaskCenter::waitForPipeline( long pipelineId,
 {
     using clock = std::chrono::steady_clock;
     const auto deadline = clock::now() + timeout;
+
+    QMutexLocker locker( &m_mutex );
     for ( ;; )
     {
-        PipelineExecutionInfo info = getPipelineInfo( pipelineId );
-        if ( info.pipelineId < 0 || info.isCompleted || info.isFailed )
+        auto it = m_pipelines.find( pipelineId );
+        if ( it == m_pipelines.end() || it->isCompleted || it->isFailed )
         {
-            return info;
+            return it != m_pipelines.end() ? *it : PipelineExecutionInfo{};
         }
-        if ( clock::now() >= deadline )
+
+        const auto now = clock::now();
+        if ( now >= deadline )
         {
-            return info;
+            return *it;
         }
-        std::this_thread::sleep_for( pollInterval );
+
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>( deadline - now );
+        const auto waitTime = std::min( remaining, pollInterval );
+
+        m_waitCondition.wait( &m_mutex, static_cast<unsigned long>( waitTime.count() ) );
     }
 }
 

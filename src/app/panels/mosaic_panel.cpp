@@ -237,10 +237,10 @@ void MosaicPanel::runMosaic()
                 double maxX = gt[0] + inputs[static_cast<size_t>( i )].width * gt[1];
                 double minY = gt[3] + inputs[static_cast<size_t>( i )].height * gt[5];
 
-                unionMinX = std::min( unionMinX, minX );
-                unionMaxY = std::max( unionMaxY, maxY );
-                unionMaxX = std::max( unionMaxX, maxX );
-                unionMinY = std::min( unionMinY, minY );
+                unionMinX = ( std::min )( unionMinX, minX );
+                unionMaxY = ( std::max )( unionMaxY, maxY );
+                unionMaxX = ( std::max )( unionMaxX, maxX );
+                unionMinY = ( std::min )( unionMinY, minY );
             }
 
             double refPixelW = std::abs( gt0[1] );

@@ -61,7 +61,20 @@ class RsObiaMainWindow : public QMainWindow
     long startFlatClassifyTask( RsObiaTask *task, const QString &outputPath,
                                 const QString &algoName );
 
+    enum class PendingOp
+    {
+      None,
+      Segmentation,
+      Hierarchy,
+      HierarchyClassify,
+      FlatClassify,
+    };
+
+    bool isBusy() const { return m_pendingTaskId >= 0; }
     long pendingTaskId() const { return m_pendingTaskId; }
+    PendingOp pendingOp() const { return m_pendingOp; }
+    void cancelActiveTask();
+
     int segmentCount() const { return static_cast<int>( mSegMap.segmentCount() ); }
 
     /// Last classification output path (empty if none).
@@ -94,15 +107,6 @@ class RsObiaMainWindow : public QMainWindow
     void loadResultToMainMap();
 
   private:
-    enum class PendingOp
-    {
-      None,
-      Segmentation,
-      Hierarchy,
-      HierarchyClassify,
-      FlatClassify,
-    };
-
     void setupUi();
     void setupToolbar();
     void setupDocks();
@@ -119,7 +123,6 @@ class RsObiaMainWindow : public QMainWindow
     QVector<int> allBandIndices() const;
     int currentClassifyLevel() const;
     void finishPendingUi();
-    bool isBusy() const { return m_pendingTaskId >= 0; }
     void loadClassifiedRaster( const QString &outputPath );
 
     // Map canvas + session workspace (not the main project catalog)

@@ -1,6 +1,7 @@
 // rs_training_data_extraction.cpp — see header for design notes.
 #include "rs_training_data_extraction.h"
 
+#include "rs_classification_utils.h"
 #include "rs_pixel_rasterizer.h"
 
 #include <gdal_priv.h>
@@ -82,16 +83,14 @@ void buildMatrices( GDALDataset *ds,
     for ( auto it = pixelClass.constBegin(); it != pixelClass.constEnd(); ++it )
       byClass[it.value()].push_back( it.key() );
 
+    // ADR 0061 — shared deterministic subsampling policy (mt19937(42) +
+    // shuffle, keep the first maxSamplesPerClass of each sorted bucket).
     std::mt19937 rng( 42u );
     for ( auto &kv : byClass )
     {
       std::vector<quint64> &px = kv.second;
       std::sort( px.begin(), px.end() );
-      if ( static_cast<int>( px.size() ) > options.maxSamplesPerClass )
-      {
-        std::shuffle( px.begin(), px.end(), rng );
-        px.resize( static_cast<size_t>( options.maxSamplesPerClass ) );
-      }
+      rsShuffleAndKeep( rng, px, static_cast<size_t>( options.maxSamplesPerClass ) );
       for ( quint64 p : px )
         samples.push_back( qMakePair( kv.first, p ) );
     }
@@ -161,22 +160,12 @@ void buildMatrices( GDALDataset *ds,
   }
 
   // Drop samples that fall on NoData / user ignore values (edge/background).
+  // ADR 0061 — per-band NoData discovery is owned by rsCollectBandNodata
+  // (shared with the pipeline tile path).
   const RsPixelIgnoreOptions &ignore = options.ignore;
-  std::vector<bool> bandHasNodata( static_cast<size_t>( B ), false );
-  std::vector<float> bandNodata( static_cast<size_t>( B ), 0.f );
-  if ( ignore.useSourceNodata )
-  {
-    for ( int bi = 0; bi < B; ++bi )
-    {
-      int success = 0;
-      const double nd = ds->GetRasterBand( bands[bi] )->GetNoDataValue( &success );
-      if ( success )
-      {
-        bandHasNodata[static_cast<size_t>( bi )] = true;
-        bandNodata[static_cast<size_t>( bi )] = static_cast<float>( nd );
-      }
-    }
-  }
+  std::vector<bool> bandHasNodata;
+  std::vector<float> bandNodata;
+  rsCollectBandNodata( ds, bands, ignore, bandHasNodata, bandNodata );
 
   std::vector<float> feat( static_cast<size_t>( B ) );
   QVector<int> keepRows;

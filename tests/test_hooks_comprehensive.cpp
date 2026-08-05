@@ -75,13 +75,12 @@ TEST_CASE( "setWarpInProgressForTest: true disables GCP table and Apply action",
 
   auto *table = w.findChild<QgsGCPListWidget *>( QStringLiteral( "rsGcpTable" ) );
   REQUIRE( table != nullptr );
-  REQUIRE( table->isEnabled() );
+  // Initial enabled state is not asserted: since the "gate GCP tools"
+  // change (5047c4d9bd) the table stays disabled until SRC+REF rasters are
+  // loaded. This test only pins the warp-lock hook behavior.
 
   auto *applyAction = w.findChild<QAction *>( QStringLiteral( "rsGeorefApplyAction" ) );
   REQUIRE( applyAction != nullptr );
-
-  // Initially, table should be enabled
-  REQUIRE( table->isEnabled() );
 
   // Call hook with true — should disable both table and apply action
   w.setWarpInProgressForTest( true );
@@ -215,8 +214,8 @@ TEST_CASE( "Session: addGcp emits gcpsChanged signal",
   QSignalSpy spy( &session, &RsGeoreferencingSession::gcpsChanged );
   REQUIRE( spy.isValid() );
 
-  RsGeorefGcpPair pair{ QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ),
-                        true, QString() };
+  const QgsGcpPoint pair( QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ),
+                          QgsCoordinateReferenceSystem(), true );
   session.addGcp( pair );
   REQUIRE( spy.count() == 1 );
 }
@@ -227,8 +226,8 @@ TEST_CASE( "Session: removeGcpAt emits gcpsChanged signal",
   RsGeoreferencingSession session;
   QSignalSpy spy( &session, &RsGeoreferencingSession::gcpsChanged );
 
-  RsGeorefGcpPair pair{ QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ),
-                        true, QString() };
+  const QgsGcpPoint pair( QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ),
+                          QgsCoordinateReferenceSystem(), true );
   session.addGcp( pair );
   REQUIRE( spy.count() == 1 );
 
@@ -244,8 +243,8 @@ TEST_CASE( "Session: clearGcps emits gcpsChanged signal",
 
   for ( int i = 0; i < 5; ++i )
   {
-    RsGeorefGcpPair pair{ QgsPointXY( i * 10, i * 20 ), QgsPointXY( i * 100, i * 200 ),
-                          true, QString() };
+    const QgsGcpPoint pair( QgsPointXY( i * 10, i * 20 ), QgsPointXY( i * 100, i * 200 ),
+                            QgsCoordinateReferenceSystem(), true );
     session.addGcp( pair );
   }
   REQUIRE( spy.count() == 5 );
@@ -270,8 +269,8 @@ TEST_CASE( "Session: multiple operations emit correct number of signals",
   RsGeoreferencingSession session;
   QSignalSpy spy( &session, &RsGeoreferencingSession::gcpsChanged );
 
-  RsGeorefGcpPair p1{ QgsPointXY( 0, 0 ), QgsPointXY( 0, 0 ), true, QString() };
-  RsGeorefGcpPair p2{ QgsPointXY( 10, 10 ), QgsPointXY( 100, 100 ), true, QString() };
+  const QgsGcpPoint p1( QgsPointXY( 0, 0 ), QgsPointXY( 0, 0 ), QgsCoordinateReferenceSystem(), true );
+  const QgsGcpPoint p2( QgsPointXY( 10, 10 ), QgsPointXY( 100, 100 ), QgsCoordinateReferenceSystem(), true );
 
   session.addGcp( p1 );      // 1
   session.addGcp( p2 );      // 2
@@ -382,7 +381,8 @@ TEST_CASE( "QgsGCPListWidget: keyPressEvent handles Delete key",
   widget.setGcpsSource( &session );
 
   // Add a point to delete
-  RsGeorefGcpPair pair{ QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ), true, QString() };
+  const QgsGcpPoint pair( QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ),
+                          QgsCoordinateReferenceSystem(), true );
   session.addGcp( pair );
 
   QSignalSpy spy( &widget, &QgsGCPListWidget::deleteRowsRequested );
@@ -401,7 +401,8 @@ TEST_CASE( "QgsGCPListWidget: setGcpsSource updates model",
   REQUIRE( widget.model()->rowCount() == 0 );
 
   // Add a point and verify model updates via gcpsChanged
-  RsGeorefGcpPair pair{ QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ), true, QString() };
+  const QgsGcpPoint pair( QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ),
+                          QgsCoordinateReferenceSystem(), true );
   session.addGcp( pair );
 
   // Model should reflect the change
@@ -483,8 +484,9 @@ TEST_CASE( "Hook integration: warp lock during apply operation",
   REQUIRE( table != nullptr );
   REQUIRE( applyAction != nullptr );
 
-  // Initial state
-  REQUIRE( table->isEnabled() );
+  // Initial state is not pinned: since the "gate GCP tools" change
+  // (5047c4d9bd) the table stays disabled until SRC+REF rasters are loaded.
+  // The warp-lock cycle below is what this test pins.
 
   // Simulate warp start
   w.setWarpInProgressForTest( true );
@@ -577,7 +579,8 @@ TEST_CASE( "Hook edge case: session with many points",
 
   for ( int i = 0; i < 1000; ++i )
   {
-    RsGeorefGcpPair pair{ QgsPointXY( i, i ), QgsPointXY( i * 10, i * 10 ), true, QString() };
+    const QgsGcpPoint pair( QgsPointXY( i, i ), QgsPointXY( i * 10, i * 10 ),
+                            QgsCoordinateReferenceSystem(), true );
     session.addGcp( pair );
   }
 
@@ -649,12 +652,12 @@ TEST_CASE( "Coverage: session all operations",
   QSignalSpy spy( &session, &RsGeoreferencingSession::gcpsChanged );
 
   // Operation 1: addGcp
-  RsGeorefGcpPair p1{ QgsPointXY( 0, 0 ), QgsPointXY( 0, 0 ), true, QString() };
+  const QgsGcpPoint p1( QgsPointXY( 0, 0 ), QgsPointXY( 0, 0 ), QgsCoordinateReferenceSystem(), true );
   session.addGcp( p1 );
   REQUIRE( spy.count() == 1 );
 
   // Operation 2: addGcp (second point)
-  RsGeorefGcpPair p2{ QgsPointXY( 10, 10 ), QgsPointXY( 100, 100 ), true, QString() };
+  const QgsGcpPoint p2( QgsPointXY( 10, 10 ), QgsPointXY( 100, 100 ), QgsCoordinateReferenceSystem(), true );
   session.addGcp( p2 );
   REQUIRE( spy.count() == 2 );
 

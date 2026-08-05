@@ -58,8 +58,7 @@ const StepDef *findStep( const sicnu::workflow::WorkflowDefinition *def, const s
 
 WorkflowSessionController::WorkflowSessionController( QObject *parent )
   : QObject( parent )
-  , m_registry()
-  , m_runtime( m_registry )
+  , m_runtime()
 {
   connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
            this, &WorkflowSessionController::onTaskUpdated, Qt::QueuedConnection );
@@ -69,7 +68,7 @@ void WorkflowSessionController::registerBuiltins()
 {
   if ( m_builtinsRegistered )
     return;
-  sicnu::workflow::registerBuiltinWorkflows( m_registry );
+  sicnu::workflow::registerBuiltinWorkflows( m_runtime );
   m_builtinsRegistered = true;
 }
 
@@ -129,7 +128,7 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
 
   m_activeSession = QString::fromStdString( sessionId );
 
-  const auto *def = m_registry.find( defId );
+  const auto *def = m_runtime.findDefinition( defId );
   if ( !def || def->steps.empty() )
   {
     m_panel->setFailed( tr( "工作流无步骤：%1" ).arg( definitionId ) );
@@ -260,7 +259,7 @@ void WorkflowSessionController::onRunClicked()
     return;
   }
 
-  const StepDef *step = findStep( m_registry.find( definitionId ), stepId );
+  const StepDef *step = findStep( m_runtime.findDefinition( definitionId ), stepId );
   if ( !step || step->kind != StepKind::Operator || step->operatorId.empty() )
   {
     m_panel->setFailed( tr( "当前步骤不是可运行算子" ) );
@@ -301,7 +300,7 @@ void WorkflowSessionController::runFullWorkflow()
     return;
   }
 
-  const auto *def = m_registry.find( definitionId );
+  const auto *def = m_runtime.findDefinition( definitionId );
   if ( !def )
     return;
 
@@ -339,7 +338,7 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
     return;
   }
 
-  const auto *def = m_registry.find( definitionId );
+  const auto *def = m_runtime.findDefinition( definitionId );
   if ( !def )
     return;
 
@@ -377,7 +376,7 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
   emit statusMessage( tr( "工作流 TaskPipeline (至 %1) 已提交运行…" ).arg( targetStepId ) );
 }
 
-void WorkflowSessionController::stopWorkflow()
+void WorkflowSessionController::cancelActiveRun()
 {
   if ( m_activePipelineId >= 0 )
   {
@@ -396,6 +395,11 @@ void WorkflowSessionController::stopWorkflow()
     m_panel->setRunning( false );
 
   emit statusMessage( tr( "工作流运行已停止" ) );
+}
+
+void WorkflowSessionController::stopWorkflow()
+{
+  cancelActiveRun();
 }
 
 void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
@@ -542,7 +546,7 @@ void WorkflowSessionController::applyJobResultToSession( const std::string &sess
     return;
   }
 
-  const StepDef *step = findStep( m_registry.find( definitionId ), stepId );
+  const StepDef *step = findStep( m_runtime.findDefinition( definitionId ), stepId );
 
   // Mirror WorkflowRuntime::runStep artifact side-effects.
   if ( result.isMember( "output" ) && result["output"].isString() )

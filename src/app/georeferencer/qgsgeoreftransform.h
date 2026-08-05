@@ -20,8 +20,15 @@
 #include <gdal_alg.h>
 
 
+#include "qgsgcppoint.h"
 #include "qgsgcptransformer.h"
 #include "qgsrasterchangecoords.h"
+
+#include <QPointF>
+#include <QString>
+
+#include <cmath>
+#include <limits>
 
 /**
  * \brief Transform class for different gcp-based transform methods.
@@ -33,7 +40,55 @@
  *
  * Delegates to concrete implementations of \ref QgsGeorefInterface. For exception safety,
  * this is preferred over using the subclasses directly.
+ *
+ * SICNU GEO RS (ADR 0057): also hosts the fit/residual engine — \ref fit()
+ * performs enabled-GCP collection, min-count gating, the RPC before/after
+ * double-fit, per-point source-pixel residuals, and RMS in one call.
  */
+
+/**
+ * Sentinel stored in RsGeorefFitResult::residuals for entries with no valid
+ * residual (disabled GCPs, failed back-transform, or unfit points).
+ */
+inline QPointF rsGeorefInvalidResidual()
+{
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  return QPointF( nan, nan );
+}
+
+inline bool rsGeorefResidualIsValid( const QPointF &r )
+{
+  return !std::isnan( r.x() ) && !std::isnan( r.y() );
+}
+
+/**
+ * Outcome of a GCP parameter fit (ADR 0057 engine; formerly owned by the
+ * georeferencing session header).
+ *
+ * Residual semantics (ADR 0020 decision 2): residuals live in source-image
+ * PIXELS. Per enabled GCP, the destination point is back-transformed into
+ * source pixel space (QgsGeorefTransform::transformWorldToRaster) and the
+ * residual is the Euclidean delta against the observed source pixel
+ * (QgsGeorefTransform::toSourcePixel). rms is the root-mean-square of the
+ * per-point residual magnitudes over enabled GCPs.
+ */
+struct RsGeorefFitResult
+{
+  bool ready = false;
+  double rms = -1.0; ///< source-pixel RMS over enabled GCPs
+  int enabledGcpCount = 0;
+  int minimumGcpCount = 0;
+  QString errorMessage;
+  /// Per-point residual (dx, dy) in source pixels, aligned with the input
+  /// GCP ordering. Always sized to the input gcps().size(); disabled GCPs
+  /// and points whose back-transform failed carry rsGeorefInvalidResidual().
+  QVector<QPointF> residuals;
+  /// RPC refinement diagnostic: source-pixel RMS of the unrefined RPC fit
+  /// (before GCP-bias refinement). -1 when not applicable (non-RPC method,
+  /// fewer than 3 enabled GCPs, or unrefined fit failed).
+  double refinementRmsBefore = -1.0;
+};
+
 class  QgsGeorefTransform : public QgsGcpTransformerInterface
 {
   public:
@@ -41,7 +96,7 @@ class  QgsGeorefTransform : public QgsGcpTransformerInterface
     QgsGeorefTransform();
     ~QgsGeorefTransform() override;
 
-    //! shallow copy constructor
+    //! copy constructor (deep-copies the inner transformer via its own clone())
     QgsGeorefTransform( const QgsGeorefTransform &other );
 
     /**
@@ -88,6 +143,13 @@ class  QgsGeorefTransform : public QgsGcpTransformerInterface
     bool invertYAxis() const { return mInvertYAxis; }
 
     std::unique_ptr<QgsGcpTransformerInterface> clone() const override;
+
+    /**
+     * Returns a fitted deep copy of this transform: same method, raster
+     * georeference, RPC options, and GCP fit (GDAL/RPC transformer args are
+     * re-created live). \ref clone() is implemented through this.
+     */
+    std::unique_ptr<QgsGeorefTransform> cloneTransform() const;
     bool updateParametersFromGcps( const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates, bool invertYAxis = false ) override;
     int minimumGcpCount() const override;
     TransformMethod method() const override;
@@ -124,10 +186,54 @@ class  QgsGeorefTransform : public QgsGcpTransformerInterface
 
     /**
      * \brief Returns a pointer to the underlying QgsGcpTransformerInterface implementation
-     * (non-owning). Returns nullptr until \ref setMethod has been called.  Used by
-     * QgsImageWarper to detect RPC mode and inspect DEM/source-raster paths.
+     * (non-owning). Returns nullptr until \ref setMethod has been called.  RPC
+     * configuration and DEM queries flow through the interface (ADR 0057:
+     * setRpcOptions() / demPath()), so callers no longer need to downcast.
      */
     QgsGcpTransformerInterface *gcpTransformer() const { return mGeorefTransformImplementation.get(); }
+
+    // SICNU GEO RS — fit/residual engine (ADR 0057). One seam for the fit
+    // orchestration the session and shell previously hand-rolled.
+
+    /**
+     * Number of enabled GCPs in \a gcps (shared count helper for fit gating
+     * and workflow mirroring).
+     */
+    static int enabledGcpCount( const QVector<QgsGcpPoint> &gcps );
+
+    /**
+     * Collects enabled GCPs from \a gcps into parallel source/destination
+     * coordinate vectors (shared helper for parameter estimation).
+     */
+    static void collectEnabledGcps( const QVector<QgsGcpPoint> &gcps,
+                                    QVector<QgsPointXY> &src, QVector<QgsPointXY> &dst );
+
+    /**
+     * Minimum GCP count for \a method without constructing a full transform
+     * facade (shared probe used by fit gating and shell validation).
+     */
+    static int minimumGcpCountFor( TransformMethod method );
+
+    /**
+     * One-shot fit/residual engine: collects enabled GCPs from \a gcps,
+     * gates on the method minimum, performs the RPC before/after double-fit
+     * when the method is RpcPhysical with >= 3 enabled GCPs, and computes
+     * per-point source-pixel residuals + RMS (ADR 0020 decision 2).
+     *
+     * \a sourceRasterPath feeds both the pixel-space georeference
+     * (QgsRasterChangeCoords) and, for RPC methods, the transformer itself
+     * (coefficients come from the raster metadata). \a demPath and
+     * \a demZOffset configure the RPC DEM/height terms.
+     *
+     * Returns a single RsGeorefFitResult; residuals align with \a gcps
+     * ordering (disabled points carry rsGeorefInvalidResidual()).
+     */
+    static RsGeorefFitResult fit( const QVector<QgsGcpPoint> &gcps,
+                                  TransformMethod method,
+                                  const QString &sourceRasterPath,
+                                  const QString &demPath,
+                                  double demZOffset,
+                                  bool invertYAxis = true );
 
   private:
     QgsGeorefTransform &operator=( const QgsGeorefTransform & ) = delete;

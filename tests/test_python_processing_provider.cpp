@@ -4,6 +4,8 @@
 #include "python/qgis_python.h"
 #include "python/sicnu_python_runner.h"
 #include "processing/framework/algorithm_engine.h"
+#include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/json_params_converter.h"
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
@@ -85,22 +87,20 @@ TEST_CASE( "AlgorithmEngine listens to processingRegistry providerAdded signal",
   auto *provider = new TestCustomProvider();
   QgsApplication::processingRegistry()->addProvider( provider );
 
-  // Check if AlgorithmEngine dynamically picked up 'test_custom_provider:test_custom_add'
+  // Check if AtomicAlgorithmRegistry picked up 'test_custom_provider:test_custom_add'
   const QString targetAlgoId = QStringLiteral( "test_custom_provider:test_custom_add" );
-  auto adapter = sicnu::AlgorithmEngine::instance().findAlgorithm( targetAlgoId );
+  auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( targetAlgoId.toStdString() );
   REQUIRE( adapter != nullptr );
-  CHECK( adapter->descriptor().id == targetAlgoId );
-  CHECK( adapter->descriptor().name == QStringLiteral( "Test Custom Add Algorithm" ) );
+  CHECK( adapter->descriptor().id == targetAlgoId.toStdString() );
+  CHECK( adapter->descriptor().displayName == "Test Custom Add Algorithm" );
 
-  // Execute algorithm via AlgorithmEngine
+  // Execute algorithm via AtomicAlgorithmAdapter
   QVariantMap params;
   params[QStringLiteral( "A" )] = 15;
   params[QStringLiteral( "B" )] = 27;
 
-  QString execError;
-  bool execOk = sicnu::AlgorithmEngine::instance().executeAlgorithm( targetAlgoId, params, nullptr, execError );
-  CHECK( execOk );
-  CHECK( execError.isEmpty() );
+  Json::Value res = adapter->execute( sicnu::processing::variantToJsonValue( params ), nullptr );
+  CHECK( !res.isMember( "error" ) );
 }
 
 TEST_CASE( "AlgorithmEngine interacts with Python engine", "[python][processing]" )

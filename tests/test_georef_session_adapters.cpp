@@ -59,11 +59,11 @@ TEST_CASE( "I2I and I2M each own an independent Georeferencing Session",
   REQUIRE( sI2i->sourceRasterPath() == QStringLiteral( "/tmp/i2i_src.tif" ) );
   REQUIRE( sI2m->sourceRasterPath() == QStringLiteral( "/tmp/i2m_src.tif" ) );
 
-  QVector<RsGeorefGcpPair> gcps;
-  gcps.append( { QgsPointXY( 0, 0 ), QgsPointXY( 10, 20 ), true } );
-  gcps.append( { QgsPointXY( 1, 0 ), QgsPointXY( 11, 20 ), true } );
-  gcps.append( { QgsPointXY( 0, 1 ), QgsPointXY( 10, 21 ), true } );
-  gcps.append( { QgsPointXY( 1, 1 ), QgsPointXY( 11, 21 ), true } );
+  QVector<QgsGcpPoint> gcps;
+  gcps.append( QgsGcpPoint( QgsPointXY( 0, 0 ), QgsPointXY( 10, 20 ), QgsCoordinateReferenceSystem(), true ) );
+  gcps.append( QgsGcpPoint( QgsPointXY( 1, 0 ), QgsPointXY( 11, 20 ), QgsCoordinateReferenceSystem(), true ) );
+  gcps.append( QgsGcpPoint( QgsPointXY( 0, 1 ), QgsPointXY( 10, 21 ), QgsCoordinateReferenceSystem(), true ) );
+  gcps.append( QgsGcpPoint( QgsPointXY( 1, 1 ), QgsPointXY( 11, 21 ), QgsCoordinateReferenceSystem(), true ) );
 
   sI2i->setTransformMethod( QgsGcpTransformerInterface::TransformMethod::Linear );
   sI2i->setGcps( gcps );
@@ -98,11 +98,11 @@ TEST_CASE( "I2M and I2I both expose Task Center warp via the shared session type
   REQUIRE( sI2i != nullptr );
   REQUIRE( sI2m != nullptr );
 
-  QVector<RsGeorefGcpPair> gcps;
-  gcps.append( { QgsPointXY( 0, 0 ), QgsPointXY( 100, 200 ), true } );
-  gcps.append( { QgsPointXY( 10, 0 ), QgsPointXY( 110, 200 ), true } );
-  gcps.append( { QgsPointXY( 0, 10 ), QgsPointXY( 100, 210 ), true } );
-  gcps.append( { QgsPointXY( 10, 10 ), QgsPointXY( 110, 210 ), true } );
+  QVector<QgsGcpPoint> gcps;
+  gcps.append( QgsGcpPoint( QgsPointXY( 0, 0 ), QgsPointXY( 100, 200 ), QgsCoordinateReferenceSystem(), true ) );
+  gcps.append( QgsGcpPoint( QgsPointXY( 10, 0 ), QgsPointXY( 110, 200 ), QgsCoordinateReferenceSystem(), true ) );
+  gcps.append( QgsGcpPoint( QgsPointXY( 0, 10 ), QgsPointXY( 100, 210 ), QgsCoordinateReferenceSystem(), true ) );
+  gcps.append( QgsGcpPoint( QgsPointXY( 10, 10 ), QgsPointXY( 110, 210 ), QgsCoordinateReferenceSystem(), true ) );
 
   sI2i->setSourceRasterPath( QStringLiteral( "/tmp/i2i.tif" ) );
   sI2i->setTransformMethod( QgsGcpTransformerInterface::TransformMethod::Linear );

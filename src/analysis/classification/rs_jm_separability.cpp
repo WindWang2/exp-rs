@@ -1,7 +1,60 @@
 #include "rs_jm_separability.h"
 
+#include <QList>
+#include <QVector>
+
 #include <algorithm>
 #include <cmath>
+
+namespace
+{
+
+/// Split extraction output (X rows, y class ids) into per-class row-sample
+/// matrices. Classes with fewer than 2 samples are omitted — their covariance
+/// would be degenerate (matches the pre-ADR-0055 GUI skip).
+QHash<int, cv::Mat> splitByClass( const cv::Mat &X, const cv::Mat &y )
+{
+  QHash<int, cv::Mat> buckets;
+  if ( X.empty() || y.empty() || X.rows != y.rows || X.cols <= 0 )
+    return buckets;
+
+  QHash<int, QVector<int>> rowsByClass;
+  rowsByClass.reserve( std::max( 1, X.rows / 2 ) );
+  for ( int s = 0; s < X.rows; ++s )
+    rowsByClass[y.at<int>( s, 0 )].push_back( s );
+
+  for ( auto it = rowsByClass.constBegin(); it != rowsByClass.constEnd(); ++it )
+  {
+    const QVector<int> &rows = it.value();
+    if ( rows.size() < 2 )
+      continue;
+    cv::Mat m( rows.size(), X.cols, CV_32F );
+    for ( int i = 0; i < rows.size(); ++i )
+      X.row( rows[i] ).copyTo( m.row( i ) );
+    buckets.insert( it.key(), m );
+  }
+  return buckets;
+}
+
+} // namespace
+
+QHash<QPair<int, int>, double> RsJmSeparability::computeAll( const cv::Mat &X,
+                                                             const cv::Mat &y )
+{
+  QHash<QPair<int, int>, double> jm;
+  const QHash<int, cv::Mat> buckets = splitByClass( X, y );
+  QList<int> ids = buckets.keys();
+  std::sort( ids.begin(), ids.end() );
+  for ( int i = 0; i < ids.size(); ++i )
+  {
+    for ( int j = i + 1; j < ids.size(); ++j )
+    {
+      jm.insert( qMakePair( ids[i], ids[j] ),
+                 pairJm( buckets.value( ids[i] ), buckets.value( ids[j] ) ) );
+    }
+  }
+  return jm;
+}
 
 double RsJmSeparability::pairJm( const cv::Mat &xA, const cv::Mat &xB )
 {

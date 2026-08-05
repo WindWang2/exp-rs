@@ -22,6 +22,11 @@ JobLogLevel logLevelFromString( const std::string &level )
   return JobLogLevel::Info;
 }
 
+bool isTerminalState( JobState state )
+{
+  return state == JobState::Succeeded || state == JobState::Failed || state == JobState::Cancelled;
+}
+
 } // namespace
 
 JobEngine &JobEngine::instance()
@@ -152,6 +157,7 @@ bool JobEngine::cancel( const std::string &jobId )
   JobRecord copy;
   bool changed = false;
   CancelHook cancelHook;
+  bool cancelRunning = false;
   {
     std::lock_guard<std::mutex> lock( m_mutex );
     auto it = m_jobs.find( jobId );
@@ -182,25 +188,38 @@ bool JobEngine::cancel( const std::string &jobId )
       case JobState::Running:
       {
         auto fit = m_cancelFlags.find( jobId );
-        if ( fit != m_cancelFlags.end() && fit->second )
+        if ( fit == m_cancelFlags.end() || !fit->second )
+        {
+          // Worker picked the job but has not armed the cancel flag yet
+          // (window between tryPickJobLocked and runOperatorJob). Arm a
+          // pre-set flag; runOperatorJob adopts it via setCancelFlag.
+          m_cancelFlags[jobId] = std::make_shared<std::atomic<bool>>( true );
+        }
+        else
+        {
           fit->second->store( true );
+        }
         auto bit = m_jobBodies.find( jobId );
         if ( bit != m_jobBodies.end() && bit->second.onCancel )
           cancelHook = bit->second.onCancel;
+        cancelRunning = true;
         // Terminal state set when operator observes cancel / exits
-        if ( cancelHook )
-        {
-          try
-          {
-            cancelHook();
-          }
-          catch ( ... )
-          {
-            // cancel hooks must not throw into engine
-          }
-        }
-        return true;
+        break;
       }
+    }
+  }
+
+  // Invoked WITHOUT m_mutex held (mirrors notify()): hooks may re-enter
+  // JobEngine (snapshot, cancel of siblings) without deadlocking.
+  if ( cancelHook )
+  {
+    try
+    {
+      cancelHook();
+    }
+    catch ( ... )
+    {
+      // cancel hooks must not throw into engine
     }
   }
 
@@ -209,7 +228,7 @@ bool JobEngine::cancel( const std::string &jobId )
     m_cv.notify_all();
     notify( copy );
   }
-  return changed;
+  return changed || cancelRunning;
 }
 
 std::optional<JobRecord> JobEngine::snapshot( const std::string &jobId ) const
@@ -229,6 +248,60 @@ std::vector<JobRecord> JobEngine::list() const
   for ( const auto &kv : m_jobs )
     out.push_back( kv.second );
   return out;
+}
+
+std::size_t JobEngine::pruneCompleted( std::size_t maxKeep )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+
+  // Terminal cleanup (finishJobLocked) already erases m_cancelFlags /
+  // m_jobBodies entries, so pruning only needs to drop the m_jobs records.
+  std::vector<std::string> terminal;
+  terminal.reserve( m_jobs.size() );
+  for ( const auto &kv : m_jobs )
+  {
+    if ( isTerminalState( kv.second.state ) )
+      terminal.push_back( kv.first );
+  }
+  if ( terminal.size() <= maxKeep )
+    return 0;
+
+  // Oldest first by the record's own timestamps: finishedAtMs, then
+  // createdAtMs, then id (unique, so the order is total).
+  std::sort( terminal.begin(), terminal.end(), [this]( const std::string &a, const std::string &b ) {
+    const JobRecord &ra = m_jobs.at( a );
+    const JobRecord &rb = m_jobs.at( b );
+    if ( ra.finishedAtMs != rb.finishedAtMs )
+      return ra.finishedAtMs < rb.finishedAtMs;
+    if ( ra.createdAtMs != rb.createdAtMs )
+      return ra.createdAtMs < rb.createdAtMs;
+    return a < b;
+  } );
+
+  const std::size_t toRemove = terminal.size() - maxKeep;
+  for ( std::size_t i = 0; i < toRemove; ++i )
+    m_jobs.erase( terminal[i] );
+  return toRemove;
+}
+
+std::size_t JobEngine::removeCompleted( const std::vector<std::string> &jobIds )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  std::size_t removed = 0;
+  for ( const auto &jobId : jobIds )
+  {
+    auto it = m_jobs.find( jobId );
+    if ( it == m_jobs.end() || !isTerminalState( it->second.state ) )
+      continue; // unknown, or queued/running — never pruned
+    m_jobs.erase( it );
+    ++removed;
+  }
+  return removed;
+}
+
+void JobEngine::clearCompleted()
+{
+  pruneCompleted( 0 );
 }
 
 void JobEngine::setListener( Listener listener )
@@ -433,8 +506,17 @@ void JobEngine::runOperatorJob( const std::string &jobId )
     JobRecord &rec = it->second;
     request = rec.request;
     wasExclusive = request.exclusive;
-    cancelFlag = std::make_shared<std::atomic<bool>>( false );
-    m_cancelFlags[jobId] = cancelFlag;
+    // Adopt an already-armed cancel flag if cancel() raced ahead of the
+    // worker (window between tryPickJobLocked and here); otherwise create a
+    // fresh one for this run.
+    auto flagIt = m_cancelFlags.find( jobId );
+    if ( flagIt != m_cancelFlags.end() && flagIt->second )
+      cancelFlag = flagIt->second;
+    else
+    {
+      cancelFlag = std::make_shared<std::atomic<bool>>( false );
+      m_cancelFlags[jobId] = cancelFlag;
+    }
     appendLog( rec, JobLogLevel::Info, "Started" );
     startedCopy = rec;
 

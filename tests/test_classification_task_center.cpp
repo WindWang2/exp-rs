@@ -10,11 +10,14 @@
 #include "operators/framework/rs_operator_error.h"
 #include "processing/framework/task_center.h"
 #include "rs_classifier_normalbayes.h"
-#include "rs_cv_task.h"
+#include "rs_cross_validation.h"
 #include "rs_post_process_task.h"
+
+#include <qgstaskmanager.h>
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <thread>
@@ -96,12 +99,64 @@ class BlockingPostProcessTask final : public RsPostProcessTask
     std::atomic_bool &mRelease;
 };
 
-class BlockingCrossValidationTask final : public RsCvTask
+/// Local stand-in for the deleted cross-validation task adapter (ADR 0053):
+/// these tests exercise Task Center submit/cancel/terminal-status
+/// integration, not the wrapper itself, so a minimal QgsTask that runs
+/// RsCrossValidation::kFold with the same progress/cancel behavior is enough.
+class TestCvTask : public QgsTask
+{
+  public:
+    using ClassifierFactory = std::function<std::unique_ptr<RsClassifierBackend>()>;
+
+    TestCvTask( const cv::Mat &X, const cv::Mat &y,
+                ClassifierFactory factory, int k = 5,
+                const QString &description = QStringLiteral( "Cross Validation" ) )
+      : QgsTask( description, QgsTask::CanCancel )
+      , mX( X.clone() )
+      , mY( y.clone() )
+      , mFactory( std::move( factory ) )
+      , mK( k )
+    {
+    }
+
+    bool run() override
+    {
+      setProgress( 5 );
+
+      if ( isCanceled() )
+        return false;
+
+      mResult = RsCrossValidation::kFold(
+        mX, mY, mFactory, mK,
+        /*scaleFeatures=*/true,
+        [this]() { return isCanceled(); } );
+
+      setProgress( 95 );
+
+      if ( isCanceled() || mResult.errorMessage == QStringLiteral( "Cancelled" ) )
+        return false;
+
+      setProgress( 100 );
+
+      return mResult.ok();
+    }
+
+    const RsCrossValidation::Result &result() const { return mResult; }
+
+  private:
+    cv::Mat mX;
+    cv::Mat mY;
+    ClassifierFactory mFactory;
+    int mK;
+    RsCrossValidation::Result mResult;
+};
+
+class BlockingCrossValidationTask final : public TestCvTask
 {
   public:
     BlockingCrossValidationTask( std::atomic_bool &started, std::atomic_bool &cancelled,
                                  std::atomic_bool &release )
-      : RsCvTask( cv::Mat{}, cv::Mat{}, [] { return std::unique_ptr<RsClassifierBackend>{}; } )
+      : TestCvTask( cv::Mat{}, cv::Mat{}, [] { return std::unique_ptr<RsClassifierBackend>{}; } )
       , mStarted( started )
       , mCancelled( cancelled )
       , mRelease( release )
@@ -119,7 +174,7 @@ class BlockingCrossValidationTask final : public RsCvTask
     void cancel() override
     {
       mCancelled.store( true );
-      RsCvTask::cancel();
+      QgsTask::cancel();
     }
 
   private:
@@ -206,7 +261,7 @@ long submitPostProcess( std::unique_ptr<RsPostProcessTask> &task )
     [worker = task.get()] { worker->cancel(); } );
 }
 
-long submitCrossValidation( std::unique_ptr<RsCvTask> &task )
+long submitCrossValidation( std::unique_ptr<TestCvTask> &task )
 {
   sicnu::jobs::JobRequest request;
   request.algorithmId = "module:classify:cv";
@@ -303,7 +358,7 @@ TEST_CASE( "Classification Task Center keeps cross-validation cancellation runni
   std::atomic_bool workerCancelled = false;
   std::atomic_bool releaseWorker = false;
 
-  std::unique_ptr<RsCvTask> worker = std::make_unique<BlockingCrossValidationTask>(
+  std::unique_ptr<TestCvTask> worker = std::make_unique<BlockingCrossValidationTask>(
     started, workerCancelled, releaseWorker );
   const long taskId = submitCrossValidation( worker );
 
@@ -323,7 +378,7 @@ TEST_CASE( "Classification Task Center completes cross-validation workers", "[cl
   cv::Mat features;
   cv::Mat labels;
   makeGaussianData( features, labels );
-  auto worker = std::make_unique<RsCvTask>(
+  auto worker = std::make_unique<TestCvTask>(
     features, labels,
     []() -> std::unique_ptr<RsClassifierBackend> {
       return std::make_unique<RsClassifierNormalBayes>();
@@ -341,7 +396,7 @@ TEST_CASE( "Classification Task Center reports cross-validation failures", "[cla
 {
   cv::Mat features;
   cv::Mat labels;
-  auto worker = std::make_unique<RsCvTask>(
+  auto worker = std::make_unique<TestCvTask>(
     features, labels,
     []() -> std::unique_ptr<RsClassifierBackend> {
       return std::make_unique<RsClassifierNormalBayes>();

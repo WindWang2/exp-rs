@@ -6,9 +6,18 @@
 //
 // Used by the classification GUI to populate the N x N separability matrix
 // dock so analysts can prune overlapping ROI classes before training.
+//
+// ADR 0055: computeAll() is the GUI's only seam for the full matrix — it
+// consumes RsTrainingDataExtraction output (X + y) directly, so the
+// scanline-grouped reads and NoData / ignore-value filtering of the classify
+// path apply to JM statistics too (previously the GUI hand-read 1×1 pixels
+// and let NoData leak into the per-class buckets).
 #pragma once
 
 #include "qgis_analysis_export.h"
+
+#include <QHash>
+#include <QPair>
 
 #include <opencv2/core.hpp>
 
@@ -33,4 +42,17 @@ class QGIS_ANALYSIS_EXPORT RsJmSeparability
      * \return JM distance in [0, 2]; returns 0 if either matrix is empty.
      */
     static double pairJm( const cv::Mat &xA, const cv::Mat &xB );
+
+    /**
+     * Full pairwise JM matrix from training-extraction output.
+     *
+     * \param X NxB CV_32F samples, \param y Nx1 CV_32S class ids — exactly
+     * the shape RsTrainingDataExtraction::extract() returns, already
+     * NoData/ignore-filtered.
+     * \return map keyed by qMakePair( a, b ) with a < b for every class pair
+     * having at least two samples (a covariance needs two observations;
+     * single-sample classes are skipped, matching the pre-ADR-0055 GUI).
+     */
+    static QHash<QPair<int, int>, double> computeAll( const cv::Mat &X,
+                                                      const cv::Mat &y );
 };

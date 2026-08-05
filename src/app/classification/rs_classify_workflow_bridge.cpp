@@ -23,19 +23,34 @@ static_assert( sizeof( kStepIds ) / sizeof( kStepIds[0] )
 
 } // namespace
 
-RsClassifyWorkflowBridge::RsClassifyWorkflowBridge()
-  : m_runtime( m_registry )
+RsClassifyWorkflowBridge::RsClassifyWorkflowBridge( QObject *parent )
+  : QObject( parent )
+  , m_runtime()
 {
+}
+
+void RsClassifyWorkflowBridge::bindController( RsClassifyWorkflowController *controller )
+{
+  if ( !controller )
+    return;
+
+  if ( m_sessionId.empty() )
+    open();
+
+  connect( controller, &RsClassifyWorkflowController::currentStepChanged, this, [this]( RsClassifyStep s ) {
+    gotoStep( s );
+  } );
+
+  connect( controller, &RsClassifyWorkflowController::completionChanged, this, [this, controller]() {
+    syncCompletionsFromController( *controller );
+  } );
+
+  syncCompletionsFromController( *controller );
+  gotoStep( controller->currentStep() );
 }
 
 bool RsClassifyWorkflowBridge::open()
 {
-  if ( !m_builtinsRegistered )
-  {
-    sicnu::workflow::registerBuiltinWorkflows( m_registry );
-    m_builtinsRegistered = true;
-  }
-
   if ( !m_sessionId.empty() )
     m_runtime.close( m_sessionId );
 

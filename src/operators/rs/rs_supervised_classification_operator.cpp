@@ -13,9 +13,9 @@
  * Tiled prediction, dtype escalation (no 0-255 clamp), NoData/ignore policy,
  * scaler transform, accuracy assessment and the superset .meta.json model
  * sidecar all come from the pipeline (parity with the GUI path by
- * construction). Backends are constructed via the analysis-layer classes
- * (RsClassifierSvm / RsClassifierNormalBayes) so hyperparameters cannot
- * drift from the GUI again.
+ * construction). Backends are constructed via the analysis-layer
+ * RsClassifierBackendFactory (ADR 0061 — the single method-name → backend
+ * mapping), so hyperparameters cannot drift from the GUI again.
  ***************************************************************************/
 #include "rs_supervised_classification_operator.h"
 
@@ -27,24 +27,17 @@
 
 #include "rs_classification_pipeline.h"
 #include "rs_classification_split.h"
-#include "rs_classifier_normalbayes.h"
-#include "rs_classifier_svm.h"
+#include "rs_classifier_backend_factory.h"
 #include "rs_training_data_extraction.h"
 
-#include <QColor>
-#include <QFile>
-#include <QIODevice>
 #include <QString>
 #include <QVector>
-
-#include <memory>
 
 #include <gdal.h>
 #include <ogr_api.h>
 
 #include <opencv2/core.hpp>
 
-#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -55,62 +48,6 @@ using namespace params;
 namespace {
 
 const std::vector<std::string> s_methods = {"svm", "normal_bayes"};
-
-/**
- * Canonicalize a method string from params or a model sidecar. The GUI
- * writes "SVM_RBF" / "NormalBayes" into its sidecars; this operator writes
- * its enum values. Anything unrecognized falls back.
- */
-std::string canonicalMethod(const std::string& raw, const std::string& fallback) {
-    std::string m = raw;
-    std::transform(m.begin(), m.end(), m.begin(), ::tolower);
-    if (m.find("bayes") != std::string::npos)
-        return "normal_bayes";
-    if (m.find("svm") != std::string::npos)
-        return "svm";
-    return fallback;
-}
-
-/**
- * Legacy sidecar written by the pre-ADR-0019 operator:
- * "<modelPath>.meta.json" with {"method", "bands"} and no version field.
- * Read for the method only; such models were trained unscaled, which matches
- * the unfitted scaler the predict-only path uses when no superset sidecar
- * is found.
- */
-std::string readLegacyMethodFromMeta(const std::string& modelPath, const std::string& fallback) {
-    const std::string metaPath = modelPath + ".meta.json";
-    QFile f(QString::fromStdString(metaPath));
-    if (!f.open(QIODevice::ReadOnly))
-        return fallback;
-    Json::CharReaderBuilder builder;
-    Json::Value root;
-    std::string errs;
-    const QByteArray data = f.readAll();
-    const char* begin = data.constData();
-    const char* end = begin + data.size();
-    std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
-    if (!reader->parse(begin, end, &root, &errs))
-        return fallback;
-    if (root.isMember("method") && root["method"].isString())
-        return root["method"].asString();
-    return fallback;
-}
-
-/// Single backend construction path shared with the GUI (ADR 0019 S3 —
-/// hyperparameters live in the analysis-layer classes only).
-std::unique_ptr<RsClassifierBackend> makeBackend(const std::string& method) {
-    if (method == "normal_bayes")
-        return std::make_unique<RsClassifierNormalBayes>();
-    return std::make_unique<RsClassifierSvm>();
-}
-
-/// Deterministic per-class colors (the GUI takes them from ROI class defs;
-/// headless runs synthesize them so Byte outputs get a color table and the
-/// sidecar carries class metadata).
-QColor classColor(int classId) {
-    return QColor::fromHsv((classId * 47) % 360, 200, 230);
-}
 
 /// Map a failed pipeline run back onto the operator's stable error codes.
 [[noreturn]] void throwPipelineError(const RsClassificationPipelineResult& res,
@@ -296,7 +233,7 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
         cfg.trainingVector = QString::fromStdString(trainingPath);
         cfg.classField = QString::fromStdString(classField);
         cfg.maxSamplesPerClass = maxPerClass;
-        cfg.backend = makeBackend(method);
+        cfg.backend = RsClassifierBackendFactory::create(QString::fromStdString(method));
         if (!modelOut.empty())
             cfg.modelSavePath = QString::fromStdString(modelOut);
     }

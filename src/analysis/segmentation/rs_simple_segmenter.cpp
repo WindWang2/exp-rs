@@ -16,7 +16,9 @@
 // ---------------------------------------------------------------------------
 
 RsSegmentMap RsSimpleSegmenter::segment( const float *data, int width, int height,
-                                          float nodata, const Params &params )
+                                          float nodata, const Params &params,
+                                          const std::function<bool()> &isCanceled,
+                                          const std::function<void(float)> &onProgress )
 {
     if ( !data || width <= 0 || height <= 0 )
     {
@@ -28,16 +30,30 @@ RsSegmentMap RsSimpleSegmenter::segment( const float *data, int width, int heigh
     SICNU_LOG_INFO( SicnuLogTags::Segmentation, QString( "Starting segmentation: %1x%2, kernel=%3, bins=%4, minRegion=%5" )
         .arg( width ).arg( height ).arg( params.smoothKernel ).arg( params.quantizeBins ).arg( params.minRegionSize ) );
 
+    auto canceled = [&isCanceled]() { return isCanceled && isCanceled(); };
+    auto report = [&onProgress]( float f ) {
+        if ( onProgress )
+            onProgress( f );
+    };
+
     const size_t n = static_cast<size_t>(width) * static_cast<size_t>(height);
+
+    if ( canceled() )
+        return {};
+    report( 0.0f );
 
     // 1. Copy data for in-place smoothing
     QVector<float> smoothed( data, data + n );
 
     // 2. Gaussian smoothing
     gaussianSmooth( smoothed, width, height, params.smoothKernel );
+    if ( canceled() )
+        return {};
+    report( 0.3f );
 
     // 3. Quantize
     QVector<int> quantized = quantize( smoothed.data(), n, params.quantizeBins, nodata );
+    report( 0.5f );
 
     // Find nodata bin value
     int nodataBin = -1;
@@ -50,11 +66,23 @@ RsSegmentMap RsSimpleSegmenter::segment( const float *data, int width, int heigh
         }
     }
 
+    if ( canceled() )
+        return {};
+    report( 0.55f );
+
     // 4. Connected components
-    QVector<quint32> labels = connectedComponents( quantized, width, height, nodataBin );
+    QVector<quint32> labels = connectedComponents( quantized, width, height, nodataBin, isCanceled );
+    if ( labels.isEmpty() )
+        return {}; // canceled during labeling
+
+    report( 0.8f );
 
     // 5. Merge small regions
-    mergeSmallRegions( labels, width, height, params.minRegionSize );
+    mergeSmallRegions( labels, width, height, params.minRegionSize, isCanceled );
+    if ( canceled() )
+        return {};
+
+    report( 1.0f );
 
     RsSegmentMap result( std::move( labels ), width, height );
     SICNU_LOG_SUCCESS( SicnuLogTags::Segmentation, QString( "Segmentation complete: %1 segments found" )
@@ -64,7 +92,9 @@ RsSegmentMap RsSimpleSegmenter::segment( const float *data, int width, int heigh
 
 RsSegmentMap RsSimpleSegmenter::segmentMultiBand( const float *const *bandData,
                                                    int nBands, int width, int height,
-                                                   float nodata, const Params &params )
+                                                   float nodata, const Params &params,
+                                                   const std::function<bool()> &isCanceled,
+                                                   const std::function<void(float)> &onProgress )
 {
     if ( !bandData || nBands <= 0 || width <= 0 || height <= 0 )
     {
@@ -75,33 +105,94 @@ RsSegmentMap RsSimpleSegmenter::segmentMultiBand( const float *const *bandData,
     SICNU_LOG_INFO( SicnuLogTags::Segmentation, QString( "Starting multi-band segmentation: %1 bands, %2x%3" )
         .arg( nBands ).arg( width ).arg( height ) );
 
+    auto canceled = [&isCanceled]() { return isCanceled && isCanceled(); };
+    auto report = [&onProgress]( float f ) {
+        if ( onProgress )
+            onProgress( f );
+    };
+
     const size_t n = static_cast<size_t>(width) * static_cast<size_t>(height);
 
-    // Compute mean across bands
-    QVector<float> meanBand( n, 0.0f );
+    if ( canceled() )
+        return {};
+    report( 0.0f );
+
+    // Multi-band processing: smooth each band individually, then quantize multi-spectral vectors
+    QVector<QVector<float>> smoothedBands( nBands );
+    for ( int b = 0; b < nBands; ++b )
+    {
+        if ( canceled() )
+            return {};
+        smoothedBands[b] = QVector<float>( bandData[b], bandData[b] + n );
+        gaussianSmooth( smoothedBands[b], width, height, params.smoothKernel );
+    }
+
+    if ( canceled() )
+        return {};
+    report( 0.4f );
+
+    // Quantize each band and combine into composite multi-band region keys
+    QVector<QVector<int>> quantizedBands( nBands );
+    for ( int b = 0; b < nBands; ++b )
+    {
+        quantizedBands[b] = quantize( smoothedBands[b].data(), n, params.quantizeBins, nodata );
+    }
+
+    QVector<int> compositeQuantized( n );
+    const int bins = std::max( 2, params.quantizeBins );
     for ( size_t i = 0; i < n; ++i )
     {
+        if ( ( i & 0xFFFu ) == 0 && canceled() )
+            return {};
+
         bool isNodata = false;
-        float sum = 0;
-        int count = 0;
         for ( int b = 0; b < nBands; ++b )
         {
-            float v = bandData[b][i];
-            if ( v == nodata || std::isnan( v ) )
+            if ( bandData[b][i] == nodata || std::isnan( bandData[b][i] ) || quantizedBands[b][i] == 0 )
             {
                 isNodata = true;
                 break;
             }
-            sum += v;
-            count++;
         }
-        if ( isNodata || count == 0 )
-            meanBand[i] = nodata;
+
+        if ( isNodata )
+        {
+            compositeQuantized[i] = 0; // nodata bin
+        }
         else
-            meanBand[i] = sum / count;
+        {
+            // Hash multi-band quantized tuple into a unique composite integer key
+            size_t hashKey = 0;
+            for ( int b = 0; b < nBands; ++b )
+            {
+                hashKey = hashKey * static_cast<size_t>( bins ) + static_cast<size_t>( quantizedBands[b][i] );
+            }
+            compositeQuantized[i] = static_cast<int>( hashKey & 0x7FFFFFFF );
+        }
     }
 
-    return segment( meanBand.data(), width, height, nodata, params );
+    if ( canceled() )
+        return {};
+    report( 0.6f );
+
+    // Connected components on composite multi-spectral grid
+    QVector<quint32> labels = connectedComponents( compositeQuantized, width, height, 0, isCanceled );
+    if ( labels.isEmpty() )
+        return {};
+
+    report( 0.8f );
+
+    // Merge small regions
+    mergeSmallRegions( labels, width, height, params.minRegionSize, isCanceled );
+    if ( canceled() )
+        return {};
+
+    report( 1.0f );
+
+    RsSegmentMap result( std::move( labels ), width, height );
+    SICNU_LOG_SUCCESS( SicnuLogTags::Segmentation, QString( "Multi-band segmentation complete: %1 segments found" )
+        .arg( result.segmentCount() ) );
+    return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +282,8 @@ QVector<int> RsSimpleSegmenter::quantize( const float *data, size_t n, int bins,
 }
 
 QVector<quint32> RsSimpleSegmenter::connectedComponents( const QVector<int> &quantized,
-                                                          int w, int h, int nodataBin )
+                                                          int w, int h, int nodataBin,
+                                                          const std::function<bool()> &isCanceled )
 {
     const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h);
     QVector<quint32> labels( n, 0 );
@@ -201,10 +293,22 @@ QVector<quint32> RsSimpleSegmenter::connectedComponents( const QVector<int> &qua
     const int dr[] = { -1, -1, -1, 0, 0, 1, 1, 1 };
     const int dc[] = { -1, 0, 1, -1, 1, -1, 0, 1 };
 
+    // Cancellation is polled every 4096 scanned pixels (cheap enough to not
+    // measurably slow the hot loops, fine-grained enough for cancel latency).
+    size_t scanned = 0;
+    auto cancelCheck = [&isCanceled, &scanned]() {
+        if ( isCanceled && ( scanned & 0xFFFu ) == 0 && isCanceled() )
+            return true;
+        ++scanned;
+        return false;
+    };
+
     for ( int r = 0; r < h; ++r )
     {
         for ( int c = 0; c < w; ++c )
         {
+            if ( cancelCheck() )
+                return {};
             const int idx = r * w + c;
             if ( quantized[idx] == nodataBin || quantized[idx] == 0 )
                 continue;
@@ -250,6 +354,9 @@ QVector<quint32> RsSimpleSegmenter::connectedComponents( const QVector<int> &qua
                     q.push( nidx );
                     segmentSize++;
                 }
+                if ( ( scanned & 0xFFFu ) == 0 && isCanceled && isCanceled() )
+                    return {};
+                ++scanned;
             }
             nextLabel++;
         }
@@ -259,7 +366,8 @@ QVector<quint32> RsSimpleSegmenter::connectedComponents( const QVector<int> &qua
 }
 
 void RsSimpleSegmenter::mergeSmallRegions( QVector<quint32> &labels, int w, int h,
-                                            int minSize )
+                                            int minSize,
+                                            const std::function<bool()> &isCanceled )
 {
     // Count region sizes
     std::unordered_map<quint32, int> sizeMap;
@@ -293,6 +401,8 @@ void RsSimpleSegmenter::mergeSmallRegions( QVector<quint32> &labels, int w, int 
     std::unordered_map<quint32, std::unordered_map<quint32, int>> adjacency;
     for ( size_t i = 0; i < static_cast<size_t>(w) * static_cast<size_t>(h); ++i )
     {
+        if ( ( i & 0xFFFFu ) == 0 && isCanceled && isCanceled() )
+            return;
         quint32 segId = labels[i];
         if ( segId == 0 || smallRegions.find( segId ) == smallRegions.end() )
             continue;
@@ -309,6 +419,9 @@ void RsSimpleSegmenter::mergeSmallRegions( QVector<quint32> &labels, int w, int 
                 adjacency[segId][neighbor]++;
         }
     }
+
+    if ( isCanceled && isCanceled() )
+        return;
 
     // Build merge map from adjacency (small → preferred neighbor).
     // Neighbor may itself be small, so chains must be resolved (multi-hop).
@@ -367,6 +480,8 @@ void RsSimpleSegmenter::mergeSmallRegions( QVector<quint32> &labels, int w, int 
     // Apply fully-resolved merges in a single pass over the full image
     for ( size_t i = 0; i < static_cast<size_t>(w) * static_cast<size_t>(h); ++i )
     {
+        if ( ( i & 0xFFFFu ) == 0 && isCanceled && isCanceled() )
+            return;
         const quint32 lab = labels[i];
         if ( lab == 0 )
             continue;

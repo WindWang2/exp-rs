@@ -128,18 +128,6 @@ class QGIS_ANALYSIS_EXPORT QgsGcpPoint
      */
     void setPointType( const QString &type ) { mPointType = type; }
 
-    /**
-     * Returns the cached residual (dx, dy) computed against a transform.
-     * Default is (0, 0). Updated by QgsGCPList::updateResiduals().
-     */
-    QPointF residual() const { return mResidual; }
-
-    /**
-     * Sets the cached residual (dx, dy).
-     * \see residual()
-     */
-    void setResidual( QPointF r ) { mResidual = r; }
-
     // TODO c++20 - replace with = default
     bool operator==( const QgsGcpPoint &other ) const
     {
@@ -154,7 +142,6 @@ class QGIS_ANALYSIS_EXPORT QgsGcpPoint
     QgsCoordinateReferenceSystem mDestinationCrs;
     bool mEnabled = true;
     QString mPointType;
-    QPointF mResidual;
 };
 
 #endif //QGSGCPPOINT_H

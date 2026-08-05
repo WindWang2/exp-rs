@@ -75,6 +75,7 @@ namespace
 #include "qgsgeoreftooladdpoint.h"
 #include "qgsgeoreftooldeletepoint.h"
 #include "qgsgeoreftoolmovepoint.h"
+#include "qgsgeoreftransform.h"
 #include "qgscoordinatetransform.h"
 #include "qgsmapcanvas.h"
 #include "qgsmapcoordsdialog.h"
@@ -89,41 +90,6 @@ namespace
 #include "qgstaskmanager.h"
 #include "rs_georef_task_list.h"
 #include "rs_warp_task.h"
-#include "shell/job_engine_qt_bridge.h"
-#include "jobs/job_engine.h"
-#include "jobs/job_types.h"
-#include "operators/framework/rs_operator_context.h"
-#include "operators/framework/rs_operator_error.h"
-
-namespace
-{
-  int minimumGcpCountFor( QgsGcpTransformerInterface::TransformMethod m )
-  {
-    std::unique_ptr<QgsGcpTransformerInterface> t( QgsGcpTransformerInterface::create( m ) );
-    return t ? t->minimumGcpCount() : 0;
-  }
-
-  /// Materialize the session's GCP rows (+ last-fit residuals) as QgsGcpPoint
-  /// values for the .points codec. Invalid residual sentinel maps to (0,0),
-  /// mirroring the legacy cleared-residual state.
-  QVector<QgsGcpPoint> gcpPointsForSave( const RsGeoreferencingSession &session )
-  {
-    const QVector<RsGeorefGcpPair> &gcps = session.gcps();
-    const QVector<QPointF> &residuals = session.lastFit().residuals;
-    QVector<QgsGcpPoint> out;
-    out.reserve( gcps.size() );
-    for ( int i = 0; i < gcps.size(); ++i )
-    {
-      QgsGcpPoint p( gcps.at( i ).source, gcps.at( i ).destination,
-                     QgsCoordinateReferenceSystem(), gcps.at( i ).enabled );
-      p.setPointType( gcps.at( i ).pointType );
-      if ( i < residuals.size() && rsGeorefResidualIsValid( residuals.at( i ) ) )
-        p.setResidual( residuals.at( i ) );
-      out.append( p );
-    }
-    return out;
-  }
-}
 
 QgsGeorefShellWindow::QgsGeorefShellWindow( QgisInterface *iface, QWidget *parent )
   : QMainWindow( parent )
@@ -348,7 +314,7 @@ QWidget *QgsGeorefShellWindow::makeCanvasPanel( QgsMapCanvas *canvas,
   caption->setTextInteractionFlags( Qt::TextSelectableByMouse );
   QFont f = caption->font();
   f.setBold( true );
-  f.setPointSize( std::max( 9, f.pointSize() ) );
+  f.setPointSize( (std::max)( 9, f.pointSize() ) );
   caption->setFont( f );
   caption->setStyleSheet(
     QStringLiteral(
@@ -1123,7 +1089,7 @@ void QgsGeorefShellWindow::onTransformMethodChanged()
 void QgsGeorefShellWindow::onPointsChanged()
 {
   // Session is the sole owner of the GCP list — reconcile view rows/markers.
-  const QVector<RsGeorefGcpPair> &gcps = mGeorefSession.gcps();
+  const QVector<QgsGcpPoint> &gcps = mGeorefSession.gcps();
 
   if ( mSaveGcpAction )
     mSaveGcpAction->setEnabled( hasSourceReady() && !gcps.isEmpty() );
@@ -1150,9 +1116,10 @@ void QgsGeorefShellWindow::onPointsChanged()
   // Grow new rows; 1-based ids on canvas badges.
   while ( mDataPoints.size() < gcps.size() )
   {
-    const RsGeorefGcpPair &pair = gcps.at( mDataPoints.size() );
-    auto *pt = new QgsGcpPoint( pair.source, pair.destination, destCrs, pair.enabled );
-    pt->setPointType( pair.pointType );
+    const QgsGcpPoint &pair = gcps.at( mDataPoints.size() );
+    auto *pt = new QgsGcpPoint( pair.sourcePoint(), pair.destinationPoint(),
+                                destCrs, pair.isEnabled() );
+    pt->setPointType( pair.pointType() );
     auto *dp = new QgsGeorefDataPoint( mSrcCanvas, mDstCanvas, pt );
     dp->setParent( this );
     mGcpViewPoints.append( pt );
@@ -1161,12 +1128,12 @@ void QgsGeorefShellWindow::onPointsChanged()
   // Sync every view row from the session (session → view direction only).
   for ( int i = 0; i < gcps.size(); ++i )
   {
-    const RsGeorefGcpPair &pair = gcps.at( i );
+    const QgsGcpPoint &pair = gcps.at( i );
     QgsGcpPoint *pt = mGcpViewPoints.at( i );
-    pt->setSourcePoint( pair.source );
-    pt->setDestinationPoint( pair.destination );
-    pt->setEnabled( pair.enabled );
-    pt->setPointType( pair.pointType );
+    pt->setSourcePoint( pair.sourcePoint() );
+    pt->setDestinationPoint( pair.destinationPoint() );
+    pt->setEnabled( pair.isEnabled() );
+    pt->setPointType( pair.pointType() );
     QgsGeorefDataPoint *dp = mDataPoints.at( i );
     dp->setId( i + 1 );
     dp->updateMarkers();
@@ -1232,7 +1199,7 @@ void QgsGeorefShellWindow::zoomToGcpSource( int row )
   if ( row < 0 || row >= mGeorefSession.gcps().size() )
     return;
   setSelectedGcpRow( row );
-  panCanvasToPoint( mSrcCanvas, mGeorefSession.gcps().at( row ).source );
+  panCanvasToPoint( mSrcCanvas, mGeorefSession.gcps().at( row ).sourcePoint() );
   if ( statusBar() )
     statusBar()->showMessage( tr( "已定位到源点 #%1" ).arg( row + 1 ), 3000 );
 }
@@ -1244,7 +1211,7 @@ void QgsGeorefShellWindow::zoomToGcpDest( int row )
   setSelectedGcpRow( row );
   QgsGeorefDataPoint *dp = mDataPoints.value( row, nullptr );
   const QgsPointXY dest = dp ? dp->destinationDisplayPoint()
-                             : mGeorefSession.gcps().at( row ).destination;
+                             : mGeorefSession.gcps().at( row ).destinationPoint();
   if ( mDstCanvas )
   {
     panCanvasToPoint( mDstCanvas, dest );
@@ -1299,7 +1266,7 @@ void QgsGeorefShellWindow::onSessionFitChanged( const RsGeorefFitResult &fit )
   if ( !mParamsPanel )
     return;
 
-  const QVector<RsGeorefGcpPair> &gcps = mGeorefSession.gcps();
+  const QVector<QgsGcpPoint> &gcps = mGeorefSession.gcps();
 
   mParamsPanel->setMinimumGcpCount( fit.minimumGcpCount );
   mParamsPanel->setActualGcpCount( fit.enabledGcpCount );
@@ -1342,7 +1309,7 @@ void QgsGeorefShellWindow::onSessionFitChanged( const RsGeorefFitResult &fit )
     scatter.reserve( fit.enabledGcpCount );
     for ( int i = 0; i < gcps.size() && i < fit.residuals.size(); ++i )
     {
-      if ( !gcps.at( i ).enabled )
+      if ( !gcps.at( i ).isEnabled() )
         continue;
       const QPointF r = fit.residuals.at( i );
       if ( !rsGeorefResidualIsValid( r ) )
@@ -1370,19 +1337,21 @@ void QgsGeorefShellWindow::onSessionFitChanged( const RsGeorefFitResult &fit )
   // Push residuals into the per-row view models (markers). Mirrors the old
   // updateResiduals/clearResiduals semantics: on a failed fit every row goes
   // to (0,0); on a good fit disabled rows keep their previous residual.
-  for ( int i = 0; i < mGcpViewPoints.size(); ++i )
+  // Residuals now live on QgsGeorefDataPoint (ADR 0056) — QgsGcpPoint no
+  // longer carries them.
+  for ( int i = 0; i < mDataPoints.size(); ++i )
   {
-    QgsGcpPoint *pt = mGcpViewPoints.at( i );
-    if ( !pt )
+    QgsGeorefDataPoint *dp = mDataPoints.at( i );
+    if ( !dp )
       continue;
     if ( !fit.ready )
     {
-      pt->setResidual( QPointF() );
+      dp->setResidual( QPointF() );
     }
-    else if ( i < gcps.size() && gcps.at( i ).enabled
+    else if ( i < gcps.size() && gcps.at( i ).isEnabled()
               && i < fit.residuals.size() && rsGeorefResidualIsValid( fit.residuals.at( i ) ) )
     {
-      pt->setResidual( fit.residuals.at( i ) );
+      dp->setResidual( fit.residuals.at( i ) );
     }
   }
 
@@ -1419,10 +1388,9 @@ void QgsGeorefShellWindow::applyTransform()
     return;
 
   const auto method = mParamsPanel->transformMethod();
-  const int minN = minimumGcpCountFor( method );
-  int enabled = 0;
-  for ( const RsGeorefGcpPair &p : mGeorefSession.gcps() )
-    if ( p.enabled ) ++enabled;
+  // Counts via the fit engine (ADR 0057) — same seam createWarpSnapshot uses.
+  const int minN = QgsGeorefTransform::minimumGcpCountFor( method );
+  const int enabled = QgsGeorefTransform::enabledGcpCount( mGeorefSession.gcps() );
 
   if ( enabled < minN )
   {
@@ -1729,11 +1697,11 @@ void QgsGeorefShellWindow::commitGcpPair( const QgsPointXY &sourceMap, const Qgs
     }
   }
 
-  RsGeorefGcpPair pair;
-  pair.source = src;
-  pair.destination = dst;
-  pair.enabled = true;
-  mGeorefSession.addGcp( pair );
+  // Session GCPs are QgsGcpPoint values; capture the destination CRS at add
+  // time so .points saves round-trip it (ADR 0056).
+  const QgsCoordinateReferenceSystem destCrs =
+    mParamsPanel ? mParamsPanel->destCrs() : QgsCoordinateReferenceSystem();
+  mGeorefSession.addGcp( QgsGcpPoint( src, dst, destCrs, true ) );
   rearmAddPointTools();
   if ( statusBar() )
     statusBar()->showMessage(
@@ -1807,11 +1775,9 @@ void QgsGeorefShellWindow::showCoordDialog( const QgsPointXY &sourcePixel )
     if ( statusBar() )
       statusBar()->showMessage(
         tr( "无法连接主地图画布：请在 GCP 表中直接填写目标 X/Y，或先打开主窗口。" ), 6000 );
-    RsGeorefGcpPair pair;
-    pair.source = sourcePixel;
-    pair.destination = QgsPointXY();
-    pair.enabled = true;
-    mGeorefSession.addGcp( pair );
+    const QgsCoordinateReferenceSystem destCrs =
+      mParamsPanel ? mParamsPanel->destCrs() : QgsCoordinateReferenceSystem();
+    mGeorefSession.addGcp( QgsGcpPoint( sourcePixel, QgsPointXY(), destCrs, true ) );
     return;
   }
 
@@ -1832,12 +1798,7 @@ void QgsGeorefShellWindow::showCoordDialog( const QgsPointXY &sourcePixel )
   connect( dlg, &QgsMapCoordsDialog::pointAdded, this,
            [this]( const QgsPointXY &srcCoord, const QgsPointXY &dstCoord,
                    const QgsCoordinateReferenceSystem &destCrs ) {
-             Q_UNUSED( destCrs );
-             RsGeorefGcpPair pair;
-             pair.source = srcCoord;
-             pair.destination = dstCoord;
-             pair.enabled = true;
-             mGeorefSession.addGcp( pair );
+             mGeorefSession.addGcp( QgsGcpPoint( srcCoord, dstCoord, destCrs, true ) );
              if ( statusBar() )
                statusBar()->showMessage( tr( "已添加 GCP（源像点 + 地图坐标）" ), 4000 );
              rearmAddPointTools();
@@ -2014,7 +1975,7 @@ QgsRasterLayer *QgsGeorefShellWindow::pickProjectRasterLayer( const QString &dia
     const QString shortSrc = src.size() > 60
                                ? ( QStringLiteral( "…" ) + src.right( 59 ) )
                                : src;
-    labels << QStringLiteral( "%1  [%2]" ).arg( rl->name(), shortSrc );
+    labels << QStringLiteral( "%1  [%2]" ).arg( rl->name() ).arg( shortSrc );
   }
 
   bool ok = false;
@@ -2060,7 +2021,7 @@ void QgsGeorefShellWindow::closeEvent( QCloseEvent *e )
         if ( QFileInfo( path ).suffix().isEmpty() )
           path += QStringLiteral( ".points" );
       }
-      if ( !rsSaveGcpPointsFile( path, gcpPointsForSave( mGeorefSession ) ) )
+      if ( !rsSaveGcpPointsFile( path, mGeorefSession.gcps() ) )
       {
         QMessageBox::warning( this, tr( "Save GCPs" ), tr( "保存失败，窗口未关闭。" ) );
         e->ignore();
@@ -2091,19 +2052,10 @@ void QgsGeorefShellWindow::loadPoints()
   }
 
   // Persistence codec only — the loaded rows become the session's GCP list.
-  QVector<RsGeorefGcpPair> pairs;
-  pairs.reserve( loaded.size() );
-  for ( const QgsGcpPoint &p : loaded )
-  {
-    RsGeorefGcpPair pair;
-    pair.source = p.sourcePoint();
-    pair.destination = p.destinationPoint();
-    pair.enabled = p.isEnabled();
-    pair.pointType = p.pointType();
-    pairs.append( pair );
-  }
+  // Each point keeps its file-stored destination CRS (ADR 0056) with the
+  // panel CRS as fallback for pre-CRS files.
   mSuppressDirtyFromList = true;
-  mGeorefSession.setGcps( pairs );
+  mGeorefSession.setGcps( loaded );
   mSuppressDirtyFromList = false;
   mGeorefSession.refit();
 
@@ -2120,7 +2072,9 @@ void QgsGeorefShellWindow::savePoints()
   QString finalPath = path;
   if ( QFileInfo( finalPath ).suffix().isEmpty() )
     finalPath += QStringLiteral( ".points" );
-  if ( !rsSaveGcpPointsFile( finalPath, gcpPointsForSave( mGeorefSession ) ) )
+  // Session GCPs are already QgsGcpPoint values carrying their destination
+  // CRS (ADR 0056); the codec serializes it back into the file.
+  if ( !rsSaveGcpPointsFile( finalPath, mGeorefSession.gcps() ) )
     QMessageBox::warning( this, tr( "Save GCPs" ), tr( "Failed to save GCP points to %1" ).arg( finalPath ) );
   else
   {

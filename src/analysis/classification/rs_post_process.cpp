@@ -9,9 +9,16 @@
 #include <opencv2/imgproc.hpp>
 
 #include <QByteArray>
+#include <QColor>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <queue>
 #include <unordered_map>
@@ -407,6 +414,7 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
                                      const double gt[6], const QString &wkt,
                                      const QVector<QRgb> &colorTable,
                                      const QStringList &creationOptions,
+                                     double nodataValue,
                                      QString *err )
 {
   cv::Mat lab;
@@ -436,11 +444,16 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
     return false;
   }
 
-  // Class labels are typically palette-index bytes.
+  // Dtype policy (ADR 0019 S4): Byte when all labels fit 0..255, UInt16 up
+  // to 65535, Int32 beyond — labels are never silently clamped. Negative
+  // labels (e.g. unset values) force Int32.
   double minV = 0, maxV = 0;
   cv::minMaxLoc( lab, &minV, &maxV );
-  const bool asByte = ( minV >= 0.0 && maxV <= 255.0 );
-  const GDALDataType gdt = asByte ? GDT_Byte : GDT_Int32;
+  GDALDataType gdt = GDT_Byte;
+  if ( minV < 0.0 || maxV > 65535.0 )
+    gdt = GDT_Int32;
+  else if ( maxV > 255.0 )
+    gdt = GDT_UInt16;
 
   char **papsz = nullptr;
   for ( const QString &opt : creationOptions )
@@ -474,13 +487,21 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
     ds->SetProjection( wkt.toUtf8().constData() );
 
   CPLErr rio = CE_Failure;
-  if ( asByte )
+  if ( gdt == GDT_Byte )
   {
     cv::Mat u8;
     lab.convertTo( u8, CV_8U );
     rio = ds->GetRasterBand( 1 )->RasterIO(
       GF_Write, 0, 0, u8.cols, u8.rows, u8.ptr<uchar>( 0 ), u8.cols, u8.rows, GDT_Byte,
       0, static_cast<GSpacing>( u8.step[0] ) );
+  }
+  else if ( gdt == GDT_UInt16 )
+  {
+    cv::Mat u16;
+    lab.convertTo( u16, CV_16U );
+    rio = ds->GetRasterBand( 1 )->RasterIO(
+      GF_Write, 0, 0, u16.cols, u16.rows, u16.ptr<ushort>( 0 ),
+      u16.cols, u16.rows, GDT_UInt16, 0, static_cast<GSpacing>( u16.step[0] ) );
   }
   else
   {
@@ -496,7 +517,7 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
     return false;
   }
 
-  if ( asByte && !colorTable.isEmpty() )
+  if ( gdt == GDT_Byte && !colorTable.isEmpty() )
   {
     GDALColorTable ct( GPI_RGB );
     for ( int i = 0; i < colorTable.size(); ++i )
@@ -512,6 +533,9 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
     ds->GetRasterBand( 1 )->SetColorTable( &ct );
     ds->GetRasterBand( 1 )->SetColorInterpretation( GCI_PaletteIndex );
   }
+
+  if ( !std::isnan( nodataValue ) )
+    ds->GetRasterBand( 1 )->SetNoDataValue( nodataValue );
 
   GDALClose( ds );
   return true;
@@ -623,6 +647,101 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
   {
     setErr( err, QStringLiteral( "GDALPolygonize failed for %1" ).arg( labelRasterPath ) );
     return false;
+  }
+  return true;
+}
+
+bool RsPostProcess::saveClassMetaData( const QString &rasterPath, const QHash<int, RsClassDef> &defs, QString *err )
+{
+  if ( rasterPath.isEmpty() )
+  {
+    setErr( err, QStringLiteral( "Empty raster path" ) );
+    return false;
+  }
+
+  const QString sidecarPath = rasterPath.endsWith( QStringLiteral( ".class.json" ) ) ? rasterPath : rasterPath + QStringLiteral( ".class.json" );
+  QJsonArray classesArray;
+  QList<int> ids = defs.keys();
+  std::sort( ids.begin(), ids.end() );
+
+  for ( int id : ids )
+  {
+    const RsClassDef d = defs.value( id );
+    QJsonObject obj;
+    obj[QStringLiteral( "id" )] = d.id();
+    obj[QStringLiteral( "name" )] = d.name();
+    obj[QStringLiteral( "color" )] = d.color().name();
+    classesArray.append( obj );
+  }
+
+  QJsonObject rootObj;
+  rootObj[QStringLiteral( "version" )] = 1;
+  rootObj[QStringLiteral( "classes" )] = classesArray;
+
+  QFile file( sidecarPath );
+  if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+  {
+    setErr( err, QStringLiteral( "Failed to open sidecar metadata file for writing: %1" ).arg( sidecarPath ) );
+    return false;
+  }
+
+  file.write( QJsonDocument( rootObj ).toJson( QJsonDocument::Indented ) );
+  file.close();
+  return true;
+}
+
+bool RsPostProcess::loadClassMetaData( const QString &rasterPath, QHash<int, RsClassDef> &outDefs, QString *err )
+{
+  if ( rasterPath.isEmpty() )
+  {
+    setErr( err, QStringLiteral( "Empty raster path" ) );
+    return false;
+  }
+
+  const QString sidecarPath = rasterPath.endsWith( QStringLiteral( ".class.json" ) ) ? rasterPath : rasterPath + QStringLiteral( ".class.json" );
+  if ( !QFileInfo::exists( sidecarPath ) )
+  {
+    setErr( err, QStringLiteral( "Sidecar metadata file does not exist: %1" ).arg( sidecarPath ) );
+    return false;
+  }
+
+  QFile file( sidecarPath );
+  if ( !file.open( QIODevice::ReadOnly ) )
+  {
+    setErr( err, QStringLiteral( "Failed to open sidecar metadata file: %1" ).arg( sidecarPath ) );
+    return false;
+  }
+
+  const QJsonDocument doc = QJsonDocument::fromJson( file.readAll() );
+  file.close();
+
+  if ( !doc.isObject() )
+  {
+    setErr( err, QStringLiteral( "Malformed JSON in sidecar metadata: %1" ).arg( sidecarPath ) );
+    return false;
+  }
+
+  const QJsonObject rootObj = doc.object();
+  if ( !rootObj.contains( QStringLiteral( "classes" ) ) || !rootObj[QStringLiteral( "classes" )].isArray() )
+  {
+    setErr( err, QStringLiteral( "Missing classes array in sidecar metadata: %1" ).arg( sidecarPath ) );
+    return false;
+  }
+
+  outDefs.clear();
+  const QJsonArray classesArray = rootObj[QStringLiteral( "classes" )].toArray();
+  for ( const QJsonValue &val : classesArray )
+  {
+    if ( !val.isObject() )
+      continue;
+    const QJsonObject obj = val.toObject();
+    const int id = obj[QStringLiteral( "id" )].toInt();
+    const QString name = obj[QStringLiteral( "name" )].toString();
+    const QColor color( obj[QStringLiteral( "color" )].toString( QStringLiteral( "#808080" ) ) );
+    if ( id > 0 )
+    {
+      outDefs.insert( id, RsClassDef( id, name, color ) );
+    }
   }
   return true;
 }

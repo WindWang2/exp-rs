@@ -13,6 +13,7 @@
 #include "data/data_manager.h"
 #include "app/workflow/preset_catalog_widget.h"
 #include "app/workflow/pipeline_editor_dock.h"
+#include "operators/framework/rs_operator_registry.h"
 
 using namespace sicnu::workflow;
 using namespace sicnu::workflow::gui;
@@ -370,6 +371,57 @@ TEST_CASE( "PipelineEditorDock integrates canvas and preset sidebar", "[workflow
   dock.pipelineCanvas()->loadWorkflowDefinition( presets[0].definition );
   REQUIRE( dock.pipelineCanvas()->pipelineScene()->findNode( QString::fromStdString( presets[0].definition.steps[0].id ) ) != nullptr );
 }
+
+TEST_CASE( "Classification postprocessing visual DAG recipe and operators", "[workflow][preset][postprocess]" )
+{
+  ensureApp();
+
+  auto presets = PresetCatalogWidget::builtinPresets();
+  bool foundPostprocessRecipe = false;
+  WorkflowDefinition postprocessDef;
+
+  for ( const auto &p : presets )
+  {
+    if ( p.id == "preset_classification_postprocess_merge" )
+    {
+      foundPostprocessRecipe = true;
+      postprocessDef = p.definition;
+      break;
+    }
+  }
+
+  REQUIRE( foundPostprocessRecipe == true );
+  REQUIRE( postprocessDef.steps.size() == 3 );
+  REQUIRE( postprocessDef.steps[0].id == "classify_step" );
+  REQUIRE( postprocessDef.steps[1].id == "majority_filter" );
+  REQUIRE( postprocessDef.steps[1].operatorId == "rs:majority_filter" );
+  REQUIRE( postprocessDef.steps[2].id == "recode_step" );
+  REQUIRE( postprocessDef.steps[2].operatorId == "rs:recode" );
+  REQUIRE( postprocessDef.steps[2].uiMeta.portAddToMap["final_class_map"] == true );
+
+  // Verify topological order
+  std::vector<std::string> orderedIds;
+  std::string error;
+  REQUIRE( topologicalSortSteps( postprocessDef, orderedIds, error ) == true );
+  REQUIRE( orderedIds.size() == 3 );
+  CHECK( orderedIds[0] == "classify_step" );
+  CHECK( orderedIds[1] == "majority_filter" );
+  CHECK( orderedIds[2] == "recode_step" );
+
+  // Verify operators registered in RSOperatorRegistry
+  auto &reg = sicnu::operators::RSOperatorRegistry::instance();
+  REQUIRE( reg.hasOperator( "rs:majority_filter" ) );
+  REQUIRE( reg.hasOperator( "rs:recode" ) );
+
+  auto majOp = reg.create( "rs:majority_filter" );
+  REQUIRE( majOp != nullptr );
+  CHECK( majOp->name() == "rs:majority_filter" );
+
+  auto recodeOp = reg.create( "rs:recode" );
+  REQUIRE( recodeOp != nullptr );
+  CHECK( recodeOp->name() == "rs:recode" );
+}
+
 
 
 

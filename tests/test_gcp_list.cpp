@@ -17,7 +17,7 @@ TEST_CASE( "Session GCP: addGcp emits gcpsChanged", "[georef][gcplist]" )
   RsGeoreferencingSession session;
   QSignalSpy spy( &session, &RsGeoreferencingSession::gcpsChanged );
   QgsCoordinateReferenceSystem crs( QStringLiteral( "EPSG:32650" ) );
-  RsGeorefGcpPair pair{ QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ), true, QString() };
+  const QgsGcpPoint pair( QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ), crs, true );
   session.addGcp( pair );
   REQUIRE( spy.count() == 1 );
 }
@@ -27,7 +27,8 @@ TEST_CASE( "Session GCP: removeGcpAt emits gcpsChanged", "[georef][gcplist]" )
   RsGeoreferencingSession session;
   QSignalSpy spy( &session, &RsGeoreferencingSession::gcpsChanged );
 
-  RsGeorefGcpPair pair{ QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ), true, QString() };
+  const QgsGcpPoint pair( QgsPointXY( 10, 20 ), QgsPointXY( 100, 200 ),
+                          QgsCoordinateReferenceSystem(), true );
   session.addGcp( pair );
   REQUIRE( spy.count() == 1 );
 
@@ -42,7 +43,8 @@ TEST_CASE( "Session GCP: clearGcps emits gcpsChanged", "[georef][gcplist]" )
 
   for ( int i = 0; i < 5; ++i )
   {
-    RsGeorefGcpPair pair{ QgsPointXY( i * 10, i * 20 ), QgsPointXY( i * 100, i * 200 ), true, QString() };
+    const QgsGcpPoint pair( QgsPointXY( i * 10, i * 20 ), QgsPointXY( i * 100, i * 200 ),
+                            QgsCoordinateReferenceSystem(), true );
     session.addGcp( pair );
   }
   REQUIRE( spy.count() == 5 );

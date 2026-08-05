@@ -21,13 +21,20 @@ class QGIS_ANALYSIS_EXPORT RsSegmentFeatures
   public:
     struct SegmentStat
     {
-        QVector<double> mean;     // per-band mean
-        QVector<double> stddev;   // per-band standard deviation
-        QVector<double> min;      // per-band minimum
-        QVector<double> max;      // per-band maximum
-        double area = 0;          // pixel count
-        double perimeter = 0;     // boundary pixel count
-        double shapeIndex = 0;    // perimeter / (4 * sqrt(area))
+        QVector<double> mean;             // per-band mean
+        QVector<double> stddev;           // per-band standard deviation
+        QVector<double> min;              // per-band minimum
+        QVector<double> max;              // per-band maximum
+        QVector<double> glcmContrast;     // per-band GLCM contrast
+        QVector<double> glcmCorrelation;  // per-band GLCM correlation
+        QVector<double> glcmEnergy;       // per-band GLCM energy (Angular Second Moment)
+        QVector<double> glcmHomogeneity;  // per-band GLCM homogeneity (Inverse Difference Moment)
+        double area = 0;                  // pixel count
+        double perimeter = 0;             // boundary pixel count
+        double shapeIndex = 0;            // perimeter / (4 * sqrt(area))
+        double compactness = 0;           // perimeter^2 / (4 * M_PI * area)
+        double rectangularity = 0;        // area / (bbox.width * bbox.height)
+        double aspectRatio = 0;           // max(bbox.w, bbox.h) / max(1, min(bbox.w, bbox.h))
     };
 
     /// Extract features for all segments from a raster.

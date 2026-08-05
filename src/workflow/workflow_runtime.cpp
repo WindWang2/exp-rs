@@ -1,8 +1,12 @@
 // src/workflow/workflow_runtime.cpp
 #include "workflow_runtime.h"
 
+#include "builtin_definitions.h"
 #include "workflow_gate.h"
-#include "workflow_runner.h"
+#include "operators/framework/rs_operator.h"
+#include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_error.h"
+#include "operators/framework/rs_operator_registry.h"
 
 #include <sstream>
 #include <stdexcept>
@@ -36,14 +40,49 @@ std::string joinHints( const std::vector<std::string> &hints )
 
 } // namespace
 
-WorkflowRuntime::WorkflowRuntime( WorkflowRegistry &registry )
-  : m_registry( registry )
+WorkflowRuntime::WorkflowRuntime( bool loadBuiltins )
 {
+  if ( loadBuiltins )
+  {
+    registerBuiltinWorkflows( *this );
+  }
+}
+
+void WorkflowRuntime::registerDefinition( WorkflowDefinition def )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  const std::string id = def.id;
+  m_defs.insert_or_assign( id, std::move( def ) );
+}
+
+bool WorkflowRuntime::hasDefinition( const std::string &id ) const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_defs.find( id ) != m_defs.end();
+}
+
+const WorkflowDefinition *WorkflowRuntime::findDefinition( const std::string &id ) const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  const auto it = m_defs.find( id );
+  if ( it == m_defs.end() )
+    return nullptr;
+  return &it->second;
+}
+
+std::vector<std::string> WorkflowRuntime::registeredDefinitionIds() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  std::vector<std::string> out;
+  out.reserve( m_defs.size() );
+  for ( const auto &kv : m_defs )
+    out.push_back( kv.first );
+  return out;
 }
 
 std::string WorkflowRuntime::open( const std::string &definitionId )
 {
-  const WorkflowDefinition *def = m_registry.find( definitionId );
+  const WorkflowDefinition *def = findDefinition( definitionId );
   if ( !def )
     return {};
 
@@ -127,8 +166,24 @@ Json::Value WorkflowRuntime::runStep( const std::string &sessionId, const std::s
     throw std::runtime_error( "Step has empty operatorId: " + stepId );
   }
 
-  const Json::Value params = s->paramsFor( stepId );
-  const Json::Value result = WorkflowRunner::run( step->operatorId, params );
+  const Json::Value params = s->resolveParams( stepId );
+
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( step->operatorId );
+  if ( !op )
+  {
+    throw std::runtime_error( "Operator not found: " + step->operatorId );
+  }
+
+  sicnu::operators::RSOperatorContext context;
+  Json::Value result;
+  try
+  {
+    result = op->execute( params, context );
+  }
+  catch ( const sicnu::operators::RSOperatorError &e )
+  {
+    throw std::runtime_error( e.message() );
+  }
 
   // Artifact side-effects from operator result
   if ( result.isMember( "output" ) && result["output"].isString() )

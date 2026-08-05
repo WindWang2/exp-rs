@@ -88,4 +88,40 @@ TEST_CASE( "ObiaSegmentation: preferOtb falls back when OTB unavailable", "[obia
         REQUIRE( !result.usedOtb );
 }
 
+TEST_CASE( "ObiaSegmentation: cancel probe plumbed through OTB delegate", "[obia][segmentation]" )
+{
+    // Boundary coverage for ADR 0058: the isCanceled probe is forwarded to
+    // RsOtbSegmenter::segment. Without live OTB the process never starts, so
+    // the probe must not fire and the fallback path must still succeed.
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+
+    const QString inputPath = createTestRaster( tempDir.path(), 16, 16 );
+    REQUIRE( !inputPath.isEmpty() );
+
+    int cancelCalls = 0;
+    auto isCanceled = [&]() {
+        ++cancelCalls;
+        return true; // would cancel a running OTB process
+    };
+
+    RsObiaSegmentationConfig cfg;
+    cfg.rasterPath = inputPath;
+    cfg.bandIndices = { 1 };
+    cfg.preferOtb = true;
+    cfg.smoothKernel = 3;
+    cfg.quantizeBins = 4;
+    cfg.minRegionSize = 10;
+
+    const RsObiaSegmentationResult result = RsObiaSegmentation::run( cfg, isCanceled );
+    REQUIRE( result.ok );
+    REQUIRE( result.segMap.segmentCount() > 0 );
+
+    if ( !RsObiaSegmentation::isOtbAvailable() )
+    {
+        REQUIRE( cancelCalls == 0 ); // never reached a running OTB process
+        REQUIRE( !result.usedOtb );
+    }
+}
+
 #endif // SICNU_HAS_OPENCV

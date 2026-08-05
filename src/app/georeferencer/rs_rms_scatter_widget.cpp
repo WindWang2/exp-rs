@@ -35,7 +35,7 @@ void RsRmsScatterWidget::paintEvent( QPaintEvent * )
   const int H = height();
   const int cx = W / 2;
   const int cy = H / 2;
-  const int R = std::min( W, H ) / 2 - 4;
+  const int R = (std::min)( W, H ) / 2 - 4;
 
   // White background
   p.fillRect( rect(), QColor( "#ffffff" ) );
@@ -47,12 +47,12 @@ void RsRmsScatterWidget::paintEvent( QPaintEvent * )
 
   // Map residual magnitude in px to widget pixels so the warn-circle
   // sits well inside the viewport.
-  const double scale = static_cast<double>( R ) / std::max( 1.5, mWarnPx * 1.4 );
+  const double scale = static_cast<double>( R ) / (std::max)( 1.5, mWarnPx * 1.4 );
 
   // Dashed warn-circle at threshold
   p.setPen( QPen( QColor( "#bf8700" ), 1, Qt::DashLine ) );
   p.setBrush( Qt::NoBrush );
-  const int warnR = std::min( R, static_cast<int>( mWarnPx * scale ) );
+  const int warnR = (std::min)( R, static_cast<int>( mWarnPx * scale ) );
   p.drawEllipse( QPoint( cx, cy ), warnR, warnR );
 
   // Dots

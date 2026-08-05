@@ -23,7 +23,7 @@ static constexpr int kKMeansMaxIter   = 100;
 static constexpr double kKMeansEps    = 1e-4;
 static constexpr int kKMeansAttempts  = 3;
 
-bool RsClassifierKMeans::fit( const cv::Mat &X, const cv::Mat & /*y*/ )
+bool RsClassifierKMeans::fit( const cv::Mat &X, const cv::Mat &y )
 {
   if ( X.empty() || X.rows < m_k )
   {
@@ -31,6 +31,15 @@ bool RsClassifierKMeans::fit( const cv::Mat &X, const cv::Mat & /*y*/ )
         .arg( X.rows ).arg( m_k ) );
     return false;
   }
+
+  // ADR 0061 — y is not used for training, but it decides whether the
+  // arbitrary cluster ids must later be remapped onto real class ids: any
+  // non-zero label means the caller trained against true labels (GUI ROI
+  // path); an all-zero y is the unsupervised operator's dummy and keeps raw
+  // 1..K cluster ids verbatim.
+  m_remapNeeded = false;
+  for ( int i = 0; i < y.rows && !m_remapNeeded; ++i )
+    m_remapNeeded = ( y.at<int>( i, 0 ) != 0 );
 
   SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "KMeans training: %1 samples, %2 features, k=%3" )
       .arg( X.rows ).arg( X.cols ).arg( m_k ) );

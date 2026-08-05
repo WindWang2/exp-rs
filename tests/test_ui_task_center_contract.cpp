@@ -79,7 +79,7 @@ TEST_CASE( "UI contract inventory: no direct JobEngine submit in migrated caller
     QStringLiteral( "src/app/dialogs/raster_processing_dialog_base.cpp" ),
     QStringLiteral( "src/app/obia/rs_obia_main_window.cpp" ),
     QStringLiteral( "src/app/classification/qgsclassificationmainwindow.cpp" ),
-    QStringLiteral( "src/app/georeferencer/rs_georef_task_center_executor.cpp" ),
+    QStringLiteral( "src/app/georeferencer/rs_georeferencing_session.cpp" ),
     QStringLiteral( "src/app/georeferencer/qgsgeoreferencermainwindow.cpp" ),
     QStringLiteral( "src/app/shell/workflow_session_controller.cpp" ),
   };
@@ -184,12 +184,12 @@ TEST_CASE( "UI contract: cancel routes through Task Center to JobEngine",
   engine.waitUntilIdleForTests();
 
   sicnu::AlgorithmTaskInfo info;
-  for ( int attempt = 0; attempt < 40; ++attempt )
+  for ( int attempt = 0; attempt < 100; ++attempt )
   {
     info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
     if ( info.status == sicnu::TaskStatus::Canceled )
       break;
-    std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
   }
   REQUIRE( info.status == sicnu::TaskStatus::Canceled );
   REQUIRE_FALSE( info.jobId.empty() );

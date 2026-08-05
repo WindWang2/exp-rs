@@ -140,6 +140,11 @@ void QgisDesktopWindow::openClassificationWindow()
         m_classifyWindow = new QgsClassificationMainWindow( nullptr, this );
         m_classifyWindow->setAttribute( Qt::WA_DeleteOnClose, false );
 
+        // Inject the shell Data Manager so merged-class outputs are registered
+        // as Data Assets (Ticket 02). Other post-process ops are unaffected.
+        if ( m_projectContext )
+            m_classifyWindow->setDataManager( &m_projectContext->dataManager() );
+
         connect( m_classifyWindow, &QgsClassificationMainWindow::requestLoadToMainMap,
                  this, [this]( const QString &path ) {
                      if ( path.isEmpty() )

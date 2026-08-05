@@ -24,9 +24,10 @@ qt_add_library(qgis_app_classify STATIC
     rs_roi_tool_magicwand.cpp
     rs_spectral_curve_widget.cpp
     rs_jm_matrix_widget.cpp
-    # Phase 10A Task 10.8 — ClassifierBar + RsClassificationTask.
+    # Phase 10A Task 10.8 — ClassifierBar (the QgsTask adapter was deleted
+    # in ADR 0053; the window builds RsClassificationPipeline::Config
+    # directly at the job seam).
     rs_classifier_setup_bar.cpp
-    rs_classification_task.cpp
     # Phase 10A Task 10.9 — accuracy assessment result dialog + embed panel.
     rs_accuracy_dialog.cpp
     rs_accuracy_panel.cpp
@@ -46,6 +47,8 @@ qt_add_library(qgis_app_classify STATIC
     # Classification workflow — post-process task + dialog.
     rs_post_process_task.cpp
     rs_post_process_dialog.cpp
+    # Classification workflow — merge sub-classes target chooser.
+    rs_merge_classes_dialog.cpp
     # ADR 0019 — GuiJobHandle lives on sicnu_geo_rs (shell QObject TU, see
     # tests/CMakeLists.txt MOC ODR note); tests compile it directly.
 )

@@ -7,6 +7,7 @@
 #include <QMap>
 #include <QDateTime>
 #include <QMutex>
+#include <QWaitCondition>
 #include <QPointer>
 #include <memory>
 #include <string>
@@ -171,7 +172,7 @@ signals:
 
 private:
     TaskCenter();
-    ~TaskCenter() override = default;
+    ~TaskCenter() override;
     TaskCenter(const TaskCenter&) = delete;
     TaskCenter& operator=(const TaskCenter&) = delete;
 
@@ -191,7 +192,16 @@ private:
                        JobExecutor executor,
                        CancelHook onCancel,
                        bool autoLoad);
-    void watchSubmittedJob(long taskId, std::string jobId);
+    /// Owns JobEngine's single listener slot (ADR 0051). Re-installed on every
+    /// submit so a test-side reset (shutdownForTests / EngineGuard) cannot
+    /// silently detach task bookkeeping; tests driving TaskCenter and
+    /// JobEngine in the same process must not install their own listener
+    /// while TaskCenter jobs are in flight (the slot replaces, not stacks).
+    void ensureJobListener();
+    /// JobEngine listener entry: dispatch by jobId, ignore foreign jobs.
+    void onJobRecord( const sicnu::jobs::JobRecord &record );
+    /// Forward progress/log deltas; on terminal records mark the task.
+    void processJobRecord( long taskId, const sicnu::jobs::JobRecord &record );
 public:
     static Json::Value variantMapToJsonParams(const QVariantMap& params);
     static QVariantMap jsonParamsToVariantMap(const Json::Value& params);
@@ -213,12 +223,16 @@ private:
     };
 
     mutable QMutex m_mutex;
+    mutable QWaitCondition m_waitCondition;
     QMap<long, AlgorithmTaskInfo> m_tasks;
     QMap<long, PipelineExecutionInfo> m_pipelines;
     QList<PendingLaunch> m_pendingLaunches;
     QList<AlgorithmTaskInfo> m_pendingTaskAdded;
     QList<AlgorithmTaskInfo> m_pendingTaskUpdated;
     QList<PendingLog> m_pendingLogs;
+    QMap<std::string, long> m_taskByJobId; ///< jobId → taskId, listener dispatch (ADR 0051)
+    QMap<long, std::size_t> m_forwardedLogCounts; ///< per-task log dedup key (logLines.size())
+    QMap<long, double> m_lastForwardedProgress; ///< per-task progress dedup
     QMap<ProviderResourceProfile, unsigned int> m_profileLimits; ///< empty entry → use defaultLimitForProfile
     unsigned int m_globalConcurrencyLimit = 0; ///< 0 → hardware_concurrency()-1 (min 1)
     long m_nextTaskId = 1;

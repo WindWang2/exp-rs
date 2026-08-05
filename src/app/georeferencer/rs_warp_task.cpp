@@ -21,7 +21,9 @@ RsWarpTask::RsWarpTask( const QString &in,
 {
   if ( transform )
   {
-    mTransform.reset( dynamic_cast<QgsGeorefTransform *>( transform->clone().release() ) );
+    // Concrete deep copy (cloneTransform) so the warp runs on a fitted
+    // transform with live GDAL/RPC args — no downcast needed (ADR 0057).
+    mTransform = transform->cloneTransform();
   }
   connect( &mFb, &QgsFeedback::progressChanged,
            this, [this]( double p ) { setProgress( p ); } );

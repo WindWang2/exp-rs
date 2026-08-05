@@ -25,7 +25,7 @@ bool parseJsonString( const std::string &jsonStr, Json::Value &out )
   Json::CharReaderBuilder builder;
   std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
   std::string errs;
-  return reader->parse( jsonStr.c_str(), jsonStr.c_str() + jsonStr.length(), &out, &errs );
+  return reader->parse( jsonStr.c_str(), jsonStr.c_str() + jsonStr.size(), &out, &errs );
 }
 
 } // namespace
@@ -143,6 +143,11 @@ ToolCallDispatcher::ParsedEnvelope ToolCallDispatcher::parseEnvelope( const Json
   return parsed;
 }
 
+Json::Value ToolCallDispatcher::argumentsFor( const Json::Value &envelope )
+{
+  return parseEnvelope( envelope ).arguments;
+}
+
 std::string ToolCallDispatcher::resolveAlgorithmId( const std::string &rawName )
 {
   auto &registry = AtomicAlgorithmRegistry::instance();
@@ -245,7 +250,7 @@ bool ToolCallDispatcher::submit( const Json::Value &envelope, CompletionCallback
   }
 
   const std::string algorithmId = resolveAlgorithmId( parsed.name );
-  const long taskId = mSink( QString::fromStdString( algorithmId ), jsonParamsToVariantMap( parsed.arguments ) );
+  const long taskId = mSink ? mSink( QString::fromStdString( algorithmId ), jsonParamsToVariantMap( parsed.arguments ) ) : -1;
   if ( taskId <= 0 )
   {
     if ( errorOut )
@@ -258,25 +263,33 @@ bool ToolCallDispatcher::submit( const Json::Value &envelope, CompletionCallback
   if ( taskIdOut )
     *taskIdOut = taskId;
 
-  mWatcher( taskId, std::move( onComplete ) );
+  if ( mWatcher )
+  {
+    mWatcher( taskId, std::move( onComplete ) );
+  }
   return true;
 }
 
 Json::Value ToolCallDispatcher::dispatchAndAwait( const Json::Value &envelope, std::chrono::milliseconds timeout )
 {
-  std::mutex mutex;
-  std::condition_variable cv;
-  bool done = false;
-  Json::Value captured;
+  struct AwaitState
+  {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool done = false;
+    Json::Value captured;
+  };
+
+  auto state = std::make_shared<AwaitState>();
 
   QString error;
-  const bool submitted = submit( envelope, [&]( const Json::Value &resultPayload ) {
+  const bool submitted = submit( envelope, [state]( const Json::Value &resultPayload ) {
     {
-      std::lock_guard<std::mutex> lock( mutex );
-      captured = resultPayload;
-      done = true;
+      std::lock_guard<std::mutex> lock( state->mutex );
+      state->captured = resultPayload;
+      state->done = true;
     }
-    cv.notify_all();
+    state->cv.notify_all();
   }, &error );
 
   if ( !submitted )
@@ -287,15 +300,15 @@ Json::Value ToolCallDispatcher::dispatchAndAwait( const Json::Value &envelope, s
     return errorResult;
   }
 
-  std::unique_lock<std::mutex> lock( mutex );
-  if ( !cv.wait_for( lock, timeout, [&]() { return done; } ) )
+  std::unique_lock<std::mutex> lock( state->mutex );
+  if ( !state->cv.wait_for( lock, timeout, [state]() { return state->done; } ) )
   {
     Json::Value errorResult( Json::objectValue );
     errorResult["status"] = "error";
     errorResult["errorMessage"] = "Tool call timed out";
     return errorResult;
   }
-  return captured;
+  return state->captured;
 }
 
 Json::Value ToolCallDispatcher::submitBlocking( const Json::Value &envelope, std::chrono::milliseconds timeout )

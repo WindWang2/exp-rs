@@ -73,7 +73,8 @@ make -j$(nproc)
 QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 ```
 
-**483 tests** covering core algorithms, GDAL utilities, dialog UI, OBIA pipeline, and processing framework.
+**1,138 tests** covering core algorithms, GDAL utilities, dialog UI, OBIA pipeline, TaskCenter DAG execution, and processing framework.
+Headless CLI binary built at `sicnu_geo_rs_cli` with `--list` operator discovery and `--schema` inspection.
 
 ### Toolbox coverage gate
 

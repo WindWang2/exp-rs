@@ -108,7 +108,8 @@ void QgsGeorefDataPoint::updateMarkers()
     return;
 
   ensureItems();
-  mResidual = mGcpPoint->residual();
+  // mResidual is fed by setResidual() (the shell pushes the session's last-fit
+  // residuals, ADR 0056); QgsGcpPoint no longer stores residuals.
 
   if ( mGCPSourceItem )
   {

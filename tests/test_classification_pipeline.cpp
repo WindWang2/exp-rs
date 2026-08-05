@@ -292,6 +292,53 @@ TEST_CASE(
 }
 
 TEST_CASE(
+  "Classification pipeline: KMeans remap is backend-driven (lowercase methodName still remaps permuted labels)",
+  "[classify][pipeline][kmeans][remap]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  // Non-contiguous training labels 5/9 (band-0-high ↔ 5, band-1-high ↔ 9):
+  // the Hungarian remap must map the arbitrary cluster ids onto the TRAINING
+  // labels — in the accuracy path and in the written class map — and must do
+  // so regardless of the methodName spelling (no "KMeans" magic string).
+  cv::Mat X, y;
+  makeTraining( X, y, { 5, 9 } );
+
+  RsClassificationPipeline::Config cfg;
+  cfg.sourceRaster = srcPath;
+  cfg.outputRaster = tmp.path() + "/out.tif";
+  cfg.bandIndices = { 1, 2, 3 };
+  cfg.backend.reset( new RsClassifierKMeans( 2 ) );
+  cfg.trainX = X;
+  cfg.trainY = y;
+  cfg.testX = X.clone();
+  cfg.testY = y.clone();
+  cfg.methodName = QStringLiteral( "kmeans" ); // lowercase — metadata only
+  cfg.classColors[5] = QColor( "#cc0000" );
+  cfg.classColors[9] = QColor( "#0000cc" );
+
+  const RsClassificationPipelineResult res = RsClassificationPipeline::run( std::move( cfg ) );
+  INFO( res.errorMessage.toStdString() );
+  REQUIRE( res.ok );
+  // Predictions align with the training labels, not with raw cluster ids 1/2.
+  REQUIRE( res.accuracy.classIds == QVector<int>( { 5, 9 } ) );
+  REQUIRE( res.accuracy.overallAccuracy == 1.0 );
+  REQUIRE( res.accuracy.kappa == 1.0 );
+
+  // Tile path: region 0 (band-0 high) → 5, region 1 (band-1 high) → 9.
+  GDALDataset *outDs = static_cast<GDALDataset *>(
+    GDALOpen( ( tmp.path() + "/out.tif" ).toUtf8().constData(), GA_ReadOnly ) );
+  REQUIRE( outDs != nullptr );
+  REQUIRE( readPixel( outDs, 2, 2 ) == 5 );
+  REQUIRE( readPixel( outDs, 28, 2 ) == 9 );
+  GDALClose( outDs );
+}
+
+TEST_CASE(
   "Classification pipeline: model + superset sidecar round-trip reproduces the class map",
   "[classify][pipeline][sidecar]" )
 {

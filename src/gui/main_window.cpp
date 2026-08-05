@@ -38,6 +38,7 @@
 #include <processing/qgsprocessingtoolboxtreeview.h>
 
 #include "core/plugin_host.h"
+#include "app/python/sicnu_app_interface.h"
 
 SicnuMainWindow::SicnuMainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -270,7 +271,9 @@ void SicnuMainWindow::initLayerTree()
 
 void SicnuMainWindow::loadPlugins()
 {
-    m_pluginHost = new PluginHost(2, this);
+    m_appInterface = new SicnuAppInterface(this, nullptr, nullptr, this);
+    m_pluginHost = new PluginHost(PluginHost::DEFAULT_PYTHON_POOL_SIZE, this);
+    m_pluginHost->setAppInterface(m_appInterface);
 
     connect(m_pluginHost, &PluginHost::pluginLoaded, this, [this](const QString &name) {
         statusBar()->showMessage(QString("Plugin loaded: %1").arg(name), 3000);

@@ -44,7 +44,11 @@ class JobEngine
     using JobExecutor = std::function<Json::Value( const JobRequest &req,
                                                    sicnu::operators::RSOperatorContext &ctx )>;
 
-    /** Optional: invoked when cancel() is requested while the job is Running. */
+    /**
+     * Optional: invoked when cancel() is requested while the job is Running.
+     * Hooks are invoked WITHOUT the engine lock held, so they may re-enter
+     * JobEngine (e.g. snapshot()) without deadlocking.
+     */
     using CancelHook = std::function<void()>;
 
     static JobEngine &instance();
@@ -76,11 +80,48 @@ class JobEngine
     /** Remove all prefix executors (tests). */
     void clearExecutors();
 
+    /**
+     * Cancel a job. For a Queued job the record is cancelled synchronously.
+     * For a Running job this returns immediately after setting the cancel flag
+     * and (if any) copying out the per-job CancelHook; the terminal state
+     * arrives asynchronously via the listener / snapshot once the operator
+     * observes cancellation and exits.
+     */
     bool cancel( const std::string &jobId );
     std::optional<JobRecord> snapshot( const std::string &jobId ) const;
     std::vector<JobRecord> list() const;
 
-    // Listener may be invoked from worker threads — UI must marshal.
+    /**
+     * Record retention (ADR 0052): prune terminal records so m_jobs stays
+     * bounded for the process lifetime. Queued/running records are never
+     * touched, and a record is only pruned after its terminal state was set
+     * under m_mutex (the final listener notification uses a pre-copied
+     * record, so an in-flight notify still lands).
+     *
+     * Remove the oldest terminal records beyond \a maxKeep ("oldest" = the
+     * record's own timestamps: finishedAtMs, then createdAtMs, then id) and
+     * return the count removed. \a maxKeep 0 removes all terminal records.
+     */
+    std::size_t pruneCompleted( std::size_t maxKeep );
+
+    /**
+     * Remove the terminal records identified by \a jobIds (unknown ids and
+     * non-terminal records are ignored). Returns the count removed.
+     * Used by TaskCenter::clearCompletedTasks to drop exactly the records of
+     * the tasks it cleared without touching untracked engine jobs.
+     */
+    std::size_t removeCompleted( const std::vector<std::string> &jobIds );
+
+    /** Remove ALL terminal records (equivalent to pruneCompleted(0)). */
+    void clearCompleted();
+
+    /**
+     * Install the single listener slot (REPLACING any previous listener).
+     * TaskCenter owns this slot in production (ADR 0051); tests may install
+     * their own listener instead, and must re-install TaskCenter's listener
+     * (implicitly done on TaskCenter's next submit) if they need both.
+     * The listener may be invoked from worker threads — UI must marshal.
+     */
     void setListener( Listener listener );
 
     // Test helpers

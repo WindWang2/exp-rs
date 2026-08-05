@@ -1,9 +1,10 @@
-// src/python/isolated/python_worker_process_pool.cpp
 #include "python_worker_process_pool.h"
 
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
+#include <algorithm>
+#include <thread>
 
 namespace sicnu::python::isolated
 {
@@ -63,13 +64,18 @@ void PythonWorkerProcessPool::shutdown()
 
 WorkerNode *PythonWorkerProcessPool::acquireWorker()
 {
-  for ( WorkerNode *node : m_nodes )
+  for ( int retry = 0; retry < 50; ++retry )
   {
-    if ( node && !node->isBusy && node->worker && node->worker->isRunning() && node->server && node->server->hasClient() )
+    for ( WorkerNode *node : m_nodes )
     {
-      node->isBusy = true;
-      return node;
+      if ( node && !node->isBusy && node->worker && node->worker->isRunning() && node->server && node->server->hasClient() )
+      {
+        node->isBusy = true;
+        return node;
+      }
     }
+    QCoreApplication::processEvents();
+    std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
   }
   return nullptr;
 }
@@ -95,6 +101,65 @@ int PythonWorkerProcessPool::activeWorkerCount() const
   return count;
 }
 
+bool PythonWorkerProcessPool::setPoolSize( int newSize )
+{
+  if ( newSize < 1 )
+    return false;
+
+  if ( newSize > m_poolSize )
+  {
+    // ── Grow: add new worker nodes ──
+    for ( int i = m_poolSize; i < newSize; ++i )
+    {
+      WorkerNode *node = createWorkerNode( m_nextWorkerId++ );
+      if ( node )
+        m_nodes.append( node );
+    }
+  }
+  else if ( newSize < m_poolSize )
+  {
+    // ── Shrink: remove idle (non-busy) nodes from the tail ──
+    const int excessNodes = (std::max)( 0, static_cast<int>( m_nodes.size() ) - newSize );
+    
+    // Upfront transactional check: ensure enough idle nodes exist before mutating
+    int availableIdle = 0;
+    for ( const WorkerNode *node : m_nodes )
+    {
+      if ( node && !node->isBusy )
+        availableIdle++;
+    }
+    if ( availableIdle < excessNodes )
+      return false;
+
+    int toRemove = excessNodes;
+    for ( int i = m_nodes.size() - 1; i >= 0 && toRemove > 0; --i )
+    {
+      WorkerNode *node = m_nodes[i];
+      if ( node && !node->isBusy )
+      {
+        if ( node->worker )
+        {
+          node->worker->disconnect();
+          node->worker->stopWorker();
+          delete node->worker;
+        }
+        if ( node->server )
+        {
+          node->server->disconnect();
+          node->server->close();
+          delete node->server;
+        }
+        delete node;
+        m_nodes.removeAt( i );
+        --toRemove;
+      }
+    }
+  }
+
+  m_poolSize = newSize;
+  return true;
+}
+
 int PythonWorkerProcessPool::availableWorkerCount() const
 {
   int count = 0;
@@ -106,6 +171,26 @@ int PythonWorkerProcessPool::availableWorkerCount() const
     }
   }
   return count;
+}
+
+PoolHealthSnapshot PythonWorkerProcessPool::poolHealth() const
+{
+  PoolHealthSnapshot snapshot;
+  snapshot.total = m_nodes.size();
+  for ( const WorkerNode *node : m_nodes )
+  {
+    if ( node )
+    {
+      snapshot.totalRestarts += node->restartCount;
+      if ( node->worker && node->worker->isRunning() )
+      {
+        snapshot.active++;
+        if ( !node->isBusy )
+          snapshot.available++;
+      }
+    }
+  }
+  return snapshot;
 }
 
 WorkerNode *PythonWorkerProcessPool::createWorkerNode( int id )

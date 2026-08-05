@@ -21,6 +21,7 @@ struct RsObiaSegmentationConfig
 
     int smoothKernel = 5;
     int quantizeBins = 32;
+    double threshold = 0.1;
 };
 
 struct RsObiaSegmentationResult

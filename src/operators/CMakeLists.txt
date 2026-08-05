@@ -50,6 +50,7 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_spectral_index_operator.cpp
     rs/rs_band_math_operator.cpp
     rs/rs_atmospheric_correction_operator.cpp
+    rs/rs_radiometric_calibration_operator.cpp
     rs/rs_change_detection_operator.cpp
     rs/rs_image_fusion_operator.cpp
     rs/rs_terrain_analysis_operator.cpp
@@ -72,6 +73,8 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         rs/rs_obia_hierarchy_operator.cpp
         rs/rs_segment_stats_operator.cpp
         rs/rs_segmentation_utils.cpp
+        rs/rs_majority_filter_operator.cpp
+        rs/rs_recode_operator.cpp
     )
     message(STATUS "RS classification/OBIA operators enabled")
 endif()

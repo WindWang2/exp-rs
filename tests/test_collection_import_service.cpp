@@ -805,3 +805,19 @@ TEST_CASE( "CollectionImportService importCollection provides a one-step probe a
   }
 }
 
+TEST_CASE( "CollectionImportService zero-arg discoverer constructor uses default discoverer",
+           "[collection_import][default_discoverer]" )
+{
+  ensureApp();
+  QTemporaryDir dir;
+  const QString safe = writeFakeSentinel2Safe( QDir( dir.path() ) );
+
+  DataManager manager;
+  CollectionImportService service( &manager ); // default discoverer
+
+  const Result<ImportPreview> result = service.probe( safe );
+  REQUIRE( result );
+  const ImportPreview &preview = result.value();
+  REQUIRE( preview.children.size() == 4 );
+}
+

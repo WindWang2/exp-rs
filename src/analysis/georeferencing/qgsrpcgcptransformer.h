@@ -49,24 +49,26 @@ class QGIS_ANALYSIS_EXPORT QgsRpcGcpTransformer : public QgsGcpTransformerInterf
     void setSourceRasterPath( const QString &p ) { mSrc = p; }
     void setDemPath( const QString &p ) { mDem = p; }
     QString sourceRasterPath() const { return mSrc; }
-    QString demPath() const { return mDem; }
+    QString demPath() const override { return mDem; }
 
     /**
-     * Configure DEM + Z-offset + GCP refinement flag for the next RPC fit.
+     * Configure source raster + DEM + Z-offset + GCP refinement flag for the
+     * next RPC fit (ADR 0057: interface-level seam replacing dynamic_cast
+     * access; the previous 3-argument form now carries the source raster path
+     * too).
      *
      * \a demPath is also written into the existing \c mDem member so that
-     * downstream code reading \c demPath() continues to work.  When
+     * downstream code reading \ref demPath continues to work.  When
      * \a zOffset is non-zero, the next call to \ref updateParametersFromGcps
      * pushes `RPC_HEIGHT=<zOffset>` into GDAL's `papszOptions` (placed
      * before any `RPC_DEM` so the DEM raster still wins when both are
      * present, per the GDAL convention).
      *
-     * \a useGcpRefinement is stored for the Task 11.5.5 linear-bias step
-     * but is not yet consumed in Task 11.5.4.
+     * \a useGcpRefinement is stored for the Task 11.5.5 linear-bias step.
      *
-     * \since SICNU GEO RS Phase 11.5
+     * \since SICNU GEO RS Phase 11.6
      */
-    void setRpcOptions( const QString &demPath, double zOffset, bool useGcpRefinement = false );
+    bool setRpcOptions( const QString &sourceRasterPath, const QString &demPath, double zOffset, bool useGcpRefinement = false ) override;
 
     double zOffset() const { return mZOffset; }
     bool useGcpRefinement() const { return mUseGcpRefinement; }

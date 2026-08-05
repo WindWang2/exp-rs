@@ -64,6 +64,7 @@ target_link_libraries(test_tool_call_dispatcher PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   sicnu_processing
+  sicnu_task_center
   sicnu_operators
 )
 if(TARGET jsoncpp)
@@ -206,6 +207,25 @@ target_include_directories(test_atmospheric PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_atmospheric)
+
+# Radiometric calibration tests
+add_executable(test_radiometric_calibration test_radiometric_calibration.cpp)
+target_link_libraries(test_radiometric_calibration PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Xml
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_radiometric_calibration PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_radiometric_calibration)
 
 # Band math tests
 add_executable(test_band_math test_band_math.cpp)
@@ -677,23 +697,6 @@ target_include_directories(test_preferences_dialog PRIVATE
 )
 sicnu_discover_tests(test_preferences_dialog)
 
-# Processing framework tests (cache, progress, errors)
-add_executable(test_processing_framework test_processing_framework.cpp)
-target_link_libraries(test_processing_framework PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  qgis_core
-  qgis_gui
-  sicnu_processing
-)
-target_include_directories(test_processing_framework PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_BINARY_DIR}
-)
-sicnu_discover_tests(test_processing_framework)
-
 # Processing dialog tests
 add_executable(test_processing_dialog test_processing_dialog.cpp)
 target_link_libraries(test_processing_dialog PRIVATE
@@ -805,9 +808,10 @@ sicnu_discover_tests(test_processing_integration)
 # Log panel tests
 add_executable(test_log_panel test_log_panel.cpp
   ${CMAKE_SOURCE_DIR}/src/app/log_panel.cpp
+  ${CMAKE_SOURCE_DIR}/tests/test_log_panel_main.cpp
 )
 target_link_libraries(test_log_panel PRIVATE
-  Catch2::Catch2WithMain
+  Catch2::Catch2
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
@@ -1119,7 +1123,6 @@ sicnu_discover_tests(test_georef_dual_window)
 # #33 — I2I / I2M adapters share Georeferencing Session type with independence
 add_executable(test_georef_session_adapters
   test_georef_session_adapters.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
 )
 target_link_libraries(test_georef_session_adapters PRIVATE
@@ -1296,8 +1299,6 @@ sicnu_discover_tests(test_rpc_transformer)
 # Task 11.4.8 — RPC mode UI test (DEM section visibility on toggle)
 add_executable(test_georef_window_rpc_mode
   test_georef_window_rpc_mode.cpp
-  # Georef lib references JobEngineQtBridge / SicnuUi helpers from the app.
-  ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
 )
 target_link_libraries(test_georef_window_rpc_mode PRIVATE
@@ -1643,7 +1644,6 @@ sicnu_discover_tests(test_band_ratio)
 if(TARGET qgis_app_classify)
   add_executable(test_classification_task_center
     test_classification_task_center.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
@@ -1679,7 +1679,6 @@ if(TARGET qgis_app_classify)
   # tests need this list — do not add these .cpp files to qgis_app_classify.
   add_executable(test_classification_window
     test_classification_window.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/rs_job_runner.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
@@ -1800,8 +1799,11 @@ if(TARGET qgis_app_classify)
   add_executable(test_jm_separability test_jm_separability.cpp)
   target_link_libraries(test_jm_separability PRIVATE
     Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
     qgis_core
     qgis_analysis
+    GDAL::GDAL
     ${OpenCV_LIBS}
   )
   target_include_directories(test_jm_separability PRIVATE
@@ -2016,10 +2018,12 @@ if(TARGET qgis_app_classify)
     Catch2::Catch2WithMain
     qgis_core
     qgis_analysis
+    sicnu_operators
     Qt6::Core
     Qt6::Gui
     GDAL::GDAL
     ${OpenCV_LIBS}
+    ${JSONCPP_LIBRARIES}
   )
   target_include_directories(test_post_process PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -2278,7 +2282,6 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
   # Phase 10B.5 — OBIA main window UI smoke tests
   add_executable(test_obia_main_window
     test_obia_main_window.cpp
-    ${CMAKE_SOURCE_DIR}/src/app/shell/job_engine_qt_bridge.cpp
     ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   )
   target_link_libraries(test_obia_main_window PRIVATE
@@ -2567,40 +2570,6 @@ target_include_directories(test_hooks_comprehensive PRIVATE
 set_target_properties(test_hooks_comprehensive PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_hooks_comprehensive)
 
-# GCP Geometry Transformer tests
-add_executable(test_gcp_geometry_transformer test_gcp_geometry_transformer.cpp)
-target_link_libraries(test_gcp_geometry_transformer PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  qgis_core
-  qgis_analysis
-)
-target_include_directories(test_gcp_geometry_transformer PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_BINARY_DIR}
-)
-sicnu_discover_tests(test_gcp_geometry_transformer)
-
-# Vector Warper tests
-add_executable(test_vector_warper test_vector_warper.cpp)
-target_link_libraries(test_vector_warper PRIVATE
-  Catch2::Catch2WithMain
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  Qt6::Test
-  qgis_core
-  qgis_analysis
-)
-target_include_directories(test_vector_warper PRIVATE
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_BINARY_DIR}
-)
-set_target_properties(test_vector_warper PROPERTIES AUTOMOC ON)
-sicnu_discover_tests(test_vector_warper)
-
 # Histogram Widget tests — tests the data structures, not the widget itself
 # (widget is part of main app executable, not a separate library)
 add_executable(test_histogram_widget test_histogram_widget.cpp)
@@ -2679,7 +2648,7 @@ sicnu_discover_tests(test_guided_workflow_widget)
 # STAC Client tests
 add_executable(test_stac_client
   test_stac_client.cpp
-  ${CMAKE_SOURCE_DIR}/src/agent/stac_client.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/stac_client.cpp
 )
 target_link_libraries(test_stac_client PRIVATE
   Catch2::Catch2WithMain
@@ -2688,9 +2657,10 @@ target_link_libraries(test_stac_client PRIVATE
 )
 target_include_directories(test_stac_client PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
-# StacClient is header-only with Q_OBJECT — needs AUTOMOC
+# StacClient has Q_OBJECT — needs AUTOMOC
 set_target_properties(test_stac_client PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_stac_client)
 
@@ -2757,6 +2727,7 @@ sicnu_discover_tests(test_dialog_edge_cases)
 # Raster processing dialog base — run lifecycle (JobEngine-backed)
 add_executable(test_raster_processing_dialog_base
   test_raster_processing_dialog_base.cpp
+  test_raster_processing_dialog_base_main.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
@@ -2765,7 +2736,7 @@ add_executable(test_raster_processing_dialog_base
 )
 set_target_properties(test_raster_processing_dialog_base PROPERTIES AUTOMOC ON)
 target_link_libraries(test_raster_processing_dialog_base PRIVATE
-  Catch2::Catch2WithMain
+  Catch2::Catch2
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
@@ -2860,6 +2831,77 @@ target_include_directories(test_active_view_host_data_context PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_active_view_host_data_context)
+
+qt_add_executable(test_active_view_host_viewport
+  test_active_view_host_viewport.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp
+)
+target_link_libraries(test_active_view_host_viewport PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+)
+target_include_directories(test_active_view_host_viewport PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_active_view_host_viewport)
+
+qt_add_executable(test_workflow_session_controller
+  test_workflow_session_controller.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/workflow_session_controller.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/task_panel_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_port_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_connection_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_node_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_scene.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_canvas_widget.cpp
+)
+target_link_libraries(test_workflow_session_controller PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_operators
+  sicnu_workflow
+  sicnu_task_center
+  sicnu_core
+  sicnu_gui
+  Sicnu::data
+)
+target_include_directories(test_workflow_session_controller PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/workflow
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_workflow_session_controller)
+
+qt_add_executable(test_classify_workflow_bridge
+  test_classify_workflow_bridge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/classification/rs_classify_workflow_bridge.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/classification/rs_classify_workflow_controller.cpp
+)
+target_link_libraries(test_classify_workflow_bridge PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_workflow
+)
+target_include_directories(test_classify_workflow_bridge PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/workflow
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_classify_workflow_bridge)
 
 if(SICNU_EMBED_PYTHON)
 qt_add_executable(test_python_engine
@@ -3029,6 +3071,7 @@ target_link_libraries(test_python_processing_provider PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
+  jsoncpp
   Sicnu::qgis_display
   Python::Python
   CURL::libcurl
@@ -3050,13 +3093,6 @@ sicnu_discover_tests(test_python_processing_provider)
 sicnu_add_test(test_llm_streaming_client)
 target_link_libraries(test_llm_streaming_client PRIVATE
   sicnu_agent
-  sicnu_processing
-)
-
-sicnu_add_test(test_agent_context_resolver)
-target_link_libraries(test_agent_context_resolver PRIVATE
-  sicnu_agent
-  sicnu_data
   sicnu_processing
 )
 

@@ -7,8 +7,6 @@ add_library(qgis_analysis STATIC
     georeferencing/qgsgcppoint.cpp
     georeferencing/qgsgcptransformer.cpp
     georeferencing/qgsleastsquares.cpp
-    georeferencing/qgsgcpgeometrytransformer.cpp
-    georeferencing/qgsvectorwarper.cpp
     georeferencing/qgsrpcgcptransformer.cpp
 )
 
@@ -25,6 +23,11 @@ target_link_libraries(qgis_analysis PUBLIC
     GDAL::GDAL
     Qt6::Core
 )
+
+# qgsleastsquares.cpp (helmert/projective) uses GSL LU/SVD.
+if(HAVE_GSL)
+    target_link_libraries(qgis_analysis PUBLIC GSL::gsl)
+endif()
 
 target_compile_features(qgis_analysis PUBLIC cxx_std_17)
 set_target_properties(qgis_analysis PROPERTIES POSITION_INDEPENDENT_CODE ON)

@@ -62,7 +62,9 @@ TEST_CASE( "GCP table: displays pointType in last type column", "[georef][table]
   ensureApp();
   QgsGCPListWidget w;
   RsGeoreferencingSession session;
-  RsGeorefGcpPair pair{ QgsPointXY( 0, 0 ), QgsPointXY( 0, 0 ), true, QStringLiteral( "river" ) };
+  QgsGcpPoint pair( QgsPointXY( 0, 0 ), QgsPointXY( 0, 0 ),
+                    QgsCoordinateReferenceSystem(), true );
+  pair.setPointType( QStringLiteral( "river" ) );
   session.addGcp( pair );
   w.setGcpsSource( &session );
   REQUIRE( w.model()->rowCount() == 1 );
@@ -76,7 +78,8 @@ TEST_CASE( "GCP table: residual warn foreground on total residual column", "[geo
   ensureApp();
   QgsGCPListWidget w;
   RsGeoreferencingSession session;
-  RsGeorefGcpPair pair{ QgsPointXY( 1, 2 ), QgsPointXY( 100, 200 ), true, QString() };
+  const QgsGcpPoint pair( QgsPointXY( 1, 2 ), QgsPointXY( 100, 200 ),
+                          QgsCoordinateReferenceSystem(), true );
   session.addGcp( pair );
   w.setGcpsSource( &session );
 

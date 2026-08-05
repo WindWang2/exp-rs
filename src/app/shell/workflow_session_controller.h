@@ -3,7 +3,6 @@
  ***************************************************************************/
 #pragma once
 
-#include "workflow/workflow_registry.h"
 #include "workflow/workflow_runtime.h"
 #include "processing/framework/task_center.h"
 
@@ -48,6 +47,13 @@ class WorkflowSessionController : public QObject
 
     void setLayerChoices( const QStringList &ids, const QStringList &names );
 
+    bool isRunInFlight() const { return m_runInFlight; }
+    QString activeSessionId() const { return m_activeSession; }
+    QString activeStepId() const { return m_activeStepId; }
+    long activePipelineId() const { return m_activePipelineId; }
+    long pendingTaskId() const { return m_pendingTaskId; }
+    void cancelActiveRun();
+
   public slots:
     void onRunClicked();
     void runFullWorkflow();
@@ -71,8 +77,6 @@ class WorkflowSessionController : public QObject
                                   const std::string &stepId,
                                   const Json::Value &result );
 
-    // Member order: registry must outlive runtime (runtime holds a reference).
-    sicnu::workflow::WorkflowRegistry m_registry;
     sicnu::workflow::WorkflowRuntime m_runtime;
 
     QString m_activeSession;

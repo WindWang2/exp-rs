@@ -33,8 +33,13 @@
  *
  * The v2 file consists of:
  *   1. `# QGEOS .points v2` marker line
- *   2. Header row `mapX,mapY,pixelX,pixelY,enable,dX,dY,residual,pointType`
+ *   2. Header row `mapX,mapY,pixelX,pixelY,enable,dX,dY,residual,pointType,crs`
  *   3. One data row per GCP
+ *
+ * The final `crs` column (optional, v2 only) carries the point's destination
+ * CRS authid (ADR 0056); rows without it fall back to the caller-supplied
+ * destCrs on load. The dX,dY,residual columns are format-compat zeros —
+ * residuals are owned by RsGeorefFitResult, not by the point value.
  */
 
 /// Writes \a points to \a filePath in SICNU .points v2 format.
@@ -43,7 +48,8 @@ bool rsSaveGcpPointsFile( const QString &filePath, const QVector<QgsGcpPoint> &p
 /**
  * Reads a .points file written by rsSaveGcpPointsFile() OR a legacy v1 file
  * (no marker, 8 columns). On v1, pointType is set to empty string.
- * Each loaded point uses \a destCrs as its destinationPointCrs().
+ * Each loaded point uses the CRS stored in its row (v2 10th column) when
+ * present and valid, else falls back to \a destCrs.
  */
 bool rsLoadGcpPointsFile( const QString &filePath, const QgsCoordinateReferenceSystem &destCrs,
                           QVector<QgsGcpPoint> &pointsOut );

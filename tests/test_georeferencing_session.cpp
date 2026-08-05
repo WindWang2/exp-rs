@@ -43,9 +43,12 @@ namespace
 
 /// Records warp submissions/cancels and completes tasks on demand by emitting
 /// taskUpdated — the same seam the production TaskCenter adapter uses.
-class FakeWarpExecutor : public RsGeorefWarpExecutor
+class FakeWarpExecutor : public QObject
 {
   Q_OBJECT
+  public:
+  signals:
+    void taskUpdated( const sicnu::AlgorithmTaskInfo &info );
   public:
     struct Submission
     {
@@ -61,7 +64,7 @@ class FakeWarpExecutor : public RsGeorefWarpExecutor
 
     long submitWarp( const sicnu::jobs::JobRequest &request,
                      const sicnu::TaskCenter::JobExecutor &executor,
-                     const sicnu::TaskCenter::CancelHook &onCancel ) override
+                     const sicnu::TaskCenter::CancelHook &onCancel )
     {
       Submission s;
       s.taskId = nextTaskId++;
@@ -72,7 +75,7 @@ class FakeWarpExecutor : public RsGeorefWarpExecutor
       return s.taskId;
     }
 
-    bool cancelWarp( long taskId ) override
+    bool cancelWarp( long taskId )
     {
       cancelCalls.append( taskId );
       for ( const Submission &s : submissions )
@@ -161,23 +164,29 @@ QCoreApplication *ensureApp()
   return QCoreApplication::instance();
 }
 
-QVector<RsGeorefGcpPair> linearGcps()
+/// Session GCP helper: value with default empty destination CRS.
+QgsGcpPoint mkGcp( const QgsPointXY &src, const QgsPointXY &dst, bool enabled = true )
+{
+  return QgsGcpPoint( src, dst, QgsCoordinateReferenceSystem(), enabled );
+}
+
+QVector<QgsGcpPoint> linearGcps()
 {
   // Four corners: identity-ish map (source pixel → dest map).
-  QVector<RsGeorefGcpPair> gcps;
-  gcps.append( { QgsPointXY( 0, 0 ), QgsPointXY( 100, 200 ), true } );
-  gcps.append( { QgsPointXY( 10, 0 ), QgsPointXY( 110, 200 ), true } );
-  gcps.append( { QgsPointXY( 0, 10 ), QgsPointXY( 100, 210 ), true } );
-  gcps.append( { QgsPointXY( 10, 10 ), QgsPointXY( 110, 210 ), true } );
+  QVector<QgsGcpPoint> gcps;
+  gcps.append( mkGcp( QgsPointXY( 0, 0 ), QgsPointXY( 100, 200 ) ) );
+  gcps.append( mkGcp( QgsPointXY( 10, 0 ), QgsPointXY( 110, 200 ) ) );
+  gcps.append( mkGcp( QgsPointXY( 0, 10 ), QgsPointXY( 100, 210 ) ) );
+  gcps.append( mkGcp( QgsPointXY( 10, 10 ), QgsPointXY( 110, 210 ) ) );
   return gcps;
 }
 
-QVector<RsGeorefGcpPair> gcpSet( const QVector<QgsPointXY> &src,
-                                 const QVector<QgsPointXY> &dst )
+QVector<QgsGcpPoint> gcpSet( const QVector<QgsPointXY> &src,
+                             const QVector<QgsPointXY> &dst )
 {
-  QVector<RsGeorefGcpPair> gcps;
+  QVector<QgsGcpPoint> gcps;
   for ( int i = 0; i < src.size(); ++i )
-    gcps.append( { src.at( i ), dst.at( i ), true } );
+    gcps.append( mkGcp( src.at( i ), dst.at( i ) ) );
   return gcps;
 }
 
@@ -191,8 +200,8 @@ TEST_CASE( "GeoreferencingSession: fit readiness from GCP pairing",
 
   SECTION( "too few GCPs is not ready" )
   {
-    QVector<RsGeorefGcpPair> one;
-    one.append( { QgsPointXY( 0, 0 ), QgsPointXY( 1, 1 ), true } );
+    QVector<QgsGcpPoint> one;
+    one.append( mkGcp( QgsPointXY( 0, 0 ), QgsPointXY( 1, 1 ) ) );
     session.setGcps( one );
     const auto fit = session.refit();
     REQUIRE_FALSE( fit.ready );
@@ -252,7 +261,7 @@ TEST_CASE( "GeoreferencingSession: per-point residuals, disabled GCP sentinel",
   // Exact affine fit for the first three points; fourth is disabled.
   auto gcps = gcpSet( { { 0, 0 }, { 4, 0 }, { 0, 3 }, { 4, 3 } },
                       { { 10, 20 }, { 18, 20 }, { 10, 26 }, { 18, 26 } } );
-  gcps[3].enabled = false;
+  gcps[3].setEnabled( false );
   session.setGcps( gcps );
 
   const auto fit = session.refit();
@@ -270,7 +279,7 @@ TEST_CASE( "GeoreferencingSession: per-point residuals, disabled GCP sentinel",
   REQUIRE( fit.residuals.at( 0 ).y() == Approx( 0.0 ).margin( 1e-9 ) );
 
   // Re-enable the point and refit: residual becomes valid again.
-  gcps[3].enabled = true;
+  gcps[3].setEnabled( true );
   session.setGcps( gcps );
   const auto fit2 = session.refit();
   REQUIRE( fit2.ready );
@@ -286,9 +295,9 @@ TEST_CASE( "GeoreferencingSession: minimum GCP count per method",
     RsGeoreferencingSession session;
     session.setTransformMethod( method );
     // One short of the minimum → not ready.
-    QVector<RsGeorefGcpPair> gcps;
+    QVector<QgsGcpPoint> gcps;
     for ( int i = 0; i < expectedMin - 1; ++i )
-      gcps.append( { QgsPointXY( i, i ), QgsPointXY( 10 + i, 20 + i ), true } );
+      gcps.append( mkGcp( QgsPointXY( i, i ), QgsPointXY( 10 + i, 20 + i ) ) );
     session.setGcps( gcps );
     const auto fit = session.refit();
     REQUIRE( fit.minimumGcpCount == expectedMin );
@@ -301,6 +310,51 @@ TEST_CASE( "GeoreferencingSession: minimum GCP count per method",
   checkMinimum( TM::PolynomialOrder1, 3 );
   checkMinimum( TM::PolynomialOrder2, 6 );
   checkMinimum( TM::Projective, 4 );
+}
+
+TEST_CASE( "GeoreferencingSession: engine seam QgsGeorefTransform::fit (ADR 0057)",
+           "[georef][session][fit][engine]" )
+{
+  using TM = QgsGcpTransformerInterface::TransformMethod;
+
+  SECTION( "Linear: gating and RMS through the engine directly" )
+  {
+    const auto tooFew = QgsGeorefTransform::fit(
+      gcpSet( { { 0, 0 } }, { { 10, 20 } } ), TM::Linear, QString(), QString(), 0.0 );
+    REQUIRE_FALSE( tooFew.ready );
+    REQUIRE( tooFew.minimumGcpCount == 2 );
+    REQUIRE( tooFew.enabledGcpCount == 1 );
+    REQUIRE_FALSE( tooFew.errorMessage.isEmpty() );
+    REQUIRE( tooFew.residuals.size() == 1 );
+    REQUIRE_FALSE( rsGeorefResidualIsValid( tooFew.residuals.at( 0 ) ) );
+
+    const auto ok = QgsGeorefTransform::fit(
+      gcpSet( { { 0, 0 }, { 4, 4 } }, { { 10, 20 }, { 14, 24 } } ),
+      TM::Linear, QString(), QString(), 0.0 );
+    REQUIRE( ok.ready );
+    REQUIRE( ok.rms == Approx( 0.0 ).margin( 1e-9 ) );
+    REQUIRE( ok.residuals.size() == 2 );
+  }
+
+  SECTION( "RpcPhysical: double-fit diagnostic via the engine" )
+  {
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString rpcPath = makeSyntheticRpcRaster( tmp.path() );
+    REQUIRE_FALSE( rpcPath.isEmpty() );
+
+    const auto fit = QgsGeorefTransform::fit(
+      gcpSet( { { 16, 16 }, { 32, 32 }, { 48, 48 } },
+              { { 116.0 - 0.016 + 0.01, 39.0 - 0.016 + 0.005 },
+                { 116.0 + 0.01, 39.0 + 0.005 },
+                { 116.0 + 0.016 + 0.01, 39.0 + 0.016 + 0.005 } } ),
+      TM::RpcPhysical, rpcPath, QString(), 0.0 );
+    REQUIRE( fit.ready );
+    REQUIRE( fit.minimumGcpCount == 0 );
+    REQUIRE( fit.refinementRmsBefore >= 0.0 );
+    REQUIRE( fit.rms >= 0.0 );
+    REQUIRE( fit.rms < fit.refinementRmsBefore );
+  }
 }
 
 TEST_CASE( "GeoreferencingSession: snapshot gating mirrors applyTransform",
@@ -359,7 +413,7 @@ TEST_CASE( "GeoreferencingSession: warp snapshot is immutable after session edit
   REQUIRE( snap.gcps.size() == 4 );
   REQUIRE( snap.sourcePath == QStringLiteral( "/tmp/source.tif" ) );
   REQUIRE( snap.outputPath == QStringLiteral( "/tmp/out.tif" ) );
-  const QgsPointXY firstSrc = snap.gcps.at( 0 ).source;
+  const QgsPointXY firstSrc = snap.gcps.at( 0 ).sourcePoint();
 
   // Later session edits must not mutate the frozen snapshot.
   session.clearGcps();
@@ -368,7 +422,7 @@ TEST_CASE( "GeoreferencingSession: warp snapshot is immutable after session edit
   REQUIRE_FALSE( session.isFitReady() );
 
   REQUIRE( snap.gcps.size() == 4 );
-  REQUIRE( snap.gcps.at( 0 ).source == firstSrc );
+  REQUIRE( snap.gcps.at( 0 ).sourcePoint() == firstSrc );
   REQUIRE( snap.sourcePath == QStringLiteral( "/tmp/source.tif" ) );
   REQUIRE( snap.outputPath == QStringLiteral( "/tmp/out.tif" ) );
 
@@ -387,14 +441,14 @@ TEST_CASE( "GeoreferencingSession: appendGcps bulk-appends and refits",
   session.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::Linear );
   REQUIRE( session.gcps().isEmpty() );
 
-  QVector<RsGeorefGcpPair> pairs;
-  pairs.append( { QgsPointXY( 1, 2 ), QgsPointXY( 10, 20 ), true } );
-  pairs.append( { QgsPointXY( 3, 4 ), QgsPointXY( 30, 40 ), true } );
+  QVector<QgsGcpPoint> pairs;
+  pairs.append( mkGcp( QgsPointXY( 1, 2 ), QgsPointXY( 10, 20 ) ) );
+  pairs.append( mkGcp( QgsPointXY( 3, 4 ), QgsPointXY( 30, 40 ) ) );
   session.appendGcps( pairs );
 
   REQUIRE( session.gcps().size() == 2 );
-  REQUIRE( session.gcps().at( 0 ).source == QgsPointXY( 1, 2 ) );
-  REQUIRE( session.gcps().at( 1 ).destination == QgsPointXY( 30, 40 ) );
+  REQUIRE( session.gcps().at( 0 ).sourcePoint() == QgsPointXY( 1, 2 ) );
+  REQUIRE( session.gcps().at( 1 ).destinationPoint() == QgsPointXY( 30, 40 ) );
 
   // Second accept appends, does not replace.
   session.appendGcps( pairs );
@@ -416,9 +470,9 @@ TEST_CASE( "GeoreferencingSession: granular GCP mutations emit and refit",
 
   SECTION( "addGcp / removeGcpAt mutate and refit" )
   {
-    session.addGcp( { QgsPointXY( 0, 0 ), QgsPointXY( 100, 200 ), true } );
-    session.addGcp( { QgsPointXY( 10, 0 ), QgsPointXY( 110, 200 ), true } );
-    session.addGcp( { QgsPointXY( 0, 10 ), QgsPointXY( 100, 210 ), true } );
+    session.addGcp( mkGcp( QgsPointXY( 0, 0 ), QgsPointXY( 100, 200 ) ) );
+    session.addGcp( mkGcp( QgsPointXY( 10, 0 ), QgsPointXY( 110, 200 ) ) );
+    session.addGcp( mkGcp( QgsPointXY( 0, 10 ), QgsPointXY( 100, 210 ) ) );
     REQUIRE( session.gcps().size() == 3 );
     REQUIRE( gcpsChangedCount == 3 );
     REQUIRE( fitChangedCount == 3 );
@@ -445,7 +499,7 @@ TEST_CASE( "GeoreferencingSession: granular GCP mutations emit and refit",
     session.setGcpEnabled( 3, false );
     REQUIRE( gcpsChangedCount == 1 );
     REQUIRE( fitChangedCount == 1 );
-    REQUIRE( session.gcps().at( 3 ).enabled == false );
+    REQUIRE( session.gcps().at( 3 ).isEnabled() == false );
     REQUIRE( session.lastFit().enabledGcpCount == 3 );
     REQUIRE_FALSE( rsGeorefResidualIsValid( session.lastFit().residuals.at( 3 ) ) );
 
@@ -471,9 +525,9 @@ TEST_CASE( "GeoreferencingSession: granular GCP mutations emit and refit",
     session.setGcpPointType( 0, QStringLiteral( "road" ) );
     REQUIRE( gcpsChangedCount == 3 );
     REQUIRE( fitChangedCount == 3 );
-    REQUIRE( session.gcps().at( 0 ).source == QgsPointXY( 2, 2 ) );
-    REQUIRE( session.gcps().at( 0 ).destination == QgsPointXY( 120, 220 ) );
-    REQUIRE( session.gcps().at( 0 ).pointType == QStringLiteral( "road" ) );
+    REQUIRE( session.gcps().at( 0 ).sourcePoint() == QgsPointXY( 2, 2 ) );
+    REQUIRE( session.gcps().at( 0 ).destinationPoint() == QgsPointXY( 120, 220 ) );
+    REQUIRE( session.gcps().at( 0 ).pointType() == QStringLiteral( "road" ) );
     // The fit follows the edited coordinates (no longer exact → non-zero RMS).
     REQUIRE( session.lastFit().ready );
     REQUIRE( session.lastFit().rms > 0.0 );
@@ -505,7 +559,18 @@ TEST_CASE( "GeoreferencingSession: warp submit/cancel through injected executor"
 {
   ensureApp();
   auto executor = std::make_shared<FakeWarpExecutor>();
-  RsGeoreferencingSession session( executor );
+  CustomWarpExecutor customExec;
+  customExec.submit = [executor]( const sicnu::jobs::JobRequest &req,
+                                  const sicnu::TaskCenter::JobExecutor &exec,
+                                  const sicnu::TaskCenter::CancelHook &cancel ) {
+    return executor->submitWarp( req, exec, cancel );
+  };
+  customExec.cancel = [executor]( long taskId ) {
+    return executor->cancelWarp( taskId );
+  };
+  RsGeoreferencingSession session( customExec );
+  QObject::connect( executor.get(), &FakeWarpExecutor::taskUpdated,
+                    &session, &RsGeoreferencingSession::onTaskUpdated );
   session.setSourceRasterPath( QStringLiteral( "/tmp/source.tif" ) );
   session.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::Linear );
   session.setGcps( linearGcps() );
@@ -571,7 +636,18 @@ TEST_CASE( "GeoreferencingSession: warp job runs through fake executor (success 
   const QString outPath = tmp.path() + QStringLiteral( "/warped.tif" );
 
   auto executor = std::make_shared<FakeWarpExecutor>();
-  RsGeoreferencingSession session( executor );
+  CustomWarpExecutor customExec;
+  customExec.submit = [executor]( const sicnu::jobs::JobRequest &req,
+                                  const sicnu::TaskCenter::JobExecutor &exec,
+                                  const sicnu::TaskCenter::CancelHook &cancel ) {
+    return executor->submitWarp( req, exec, cancel );
+  };
+  customExec.cancel = [executor]( long taskId ) {
+    return executor->cancelWarp( taskId );
+  };
+  RsGeoreferencingSession session( customExec );
+  QObject::connect( executor.get(), &FakeWarpExecutor::taskUpdated,
+                    &session, &RsGeoreferencingSession::onTaskUpdated );
   session.setSourceRasterPath( srcPath );
   session.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::Linear );
   session.setGcps( linearGcps() );
@@ -669,6 +745,25 @@ TEST_CASE( "GeoreferencingSession: RPC below 3 GCPs skips refinement",
   }
 }
 
+TEST_CASE( "GeoreferencingSession: DEM setters mark dirty (ADR 0027)",
+           "[georef][session][dirty]" )
+{
+  RsGeoreferencingSession session;
+  session.clearDirty();
+  REQUIRE_FALSE( session.isDirty() );
+
+  session.setDemPath( QStringLiteral( "/tmp/dem.tif" ) );
+  REQUIRE( session.isDirty() );
+  REQUIRE( session.demPath() == QStringLiteral( "/tmp/dem.tif" ) );
+
+  session.clearDirty();
+  REQUIRE_FALSE( session.isDirty() );
+
+  session.setDemZOffset( 15.5 );
+  REQUIRE( session.isDirty() );
+  REQUIRE( session.demZOffset() == 15.5 );
+}
+
 TEST_CASE( "GeoreferencingSession: WorkflowRuntime mirror integration (ADR 0028)",
            "[georef][session][workflow]" )
 {
@@ -677,13 +772,24 @@ TEST_CASE( "GeoreferencingSession: WorkflowRuntime mirror integration (ADR 0028)
 
   REQUIRE( session.enableWorkflowMirror( "lab.georef.image_to_map" ) );
   REQUIRE( session.isWorkflowMirrorActive() );
-  REQUIRE_FALSE( session.workflowSessionId().empty() );
+  const std::string sid = session.workflowSessionId();
+  REQUIRE_FALSE( sid.empty() );
 
   session.setSourceRasterPath( QStringLiteral( "/tmp/source.tif" ) );
   session.setGcps( linearGcps() );
 
+  auto state = session.workflowRuntime().state( sid );
+  REQUIRE( state.currentStepId == "gcp" );
+  REQUIRE( state.artifacts.count( "source_raster" ) == 1 );
+  REQUIRE( state.artifacts["source_raster"] == "/tmp/source.tif" );
+  REQUIRE( state.artifacts.count( "gcp_count" ) == 1 );
+  REQUIRE( state.artifacts["gcp_count"] == "4" );
+
   session.setWorkflowStep( "gcp" );
   session.markWorkflowStepComplete( "gcp" );
+  state = session.workflowRuntime().state( sid );
+  const auto &completed = state.completedStepIds;
+  REQUIRE( std::find( completed.begin(), completed.end(), "gcp" ) != completed.end() );
 }
 
 #include "test_georeferencing_session.moc"

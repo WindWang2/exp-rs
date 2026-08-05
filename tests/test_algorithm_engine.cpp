@@ -1,81 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "processing/framework/algorithm_engine.h"
-
-class DummyCustomTaskAdapter : public sicnu::TaskAlgorithmAdapter {
-public:
-    sicnu::AlgorithmDescriptor descriptor() const override {
-        sicnu::AlgorithmDescriptor desc;
-        desc.id = QStringLiteral("dummy_custom_algo");
-        desc.name = QStringLiteral("Dummy Custom Algorithm");
-        desc.group = QStringLiteral("Test Group");
-        desc.description = QStringLiteral("A dummy algorithm for testing AlgorithmEngine");
-        return desc;
-    }
-
-    bool validateParameters(const QVariantMap& params, QString& error) const override {
-        if (!params.contains(QStringLiteral("input"))) {
-            error = QStringLiteral("Missing required parameter: input");
-            return false;
-        }
-        return true;
-    }
-
-    bool execute(const QVariantMap& params, std::function<void(double)> progressCallback, QString& error) override {
-        Q_UNUSED(params);
-        if (progressCallback) {
-            progressCallback(0.5);
-            progressCallback(1.0);
-        }
-        return true;
-    }
-};
-
-TEST_CASE("AlgorithmEngine - Register and Find Custom Adapter", "[processing][algorithm_engine]") {
-    auto& engine = sicnu::AlgorithmEngine::instance();
-    engine.clear();
-
-    REQUIRE(engine.registeredAlgorithms().isEmpty());
-
-    auto dummyAdapter = std::make_shared<DummyCustomTaskAdapter>();
-    engine.registerAlgorithm(dummyAdapter);
-
-    auto list = engine.registeredAlgorithms();
-    REQUIRE(list.size() == 1);
-    REQUIRE(list.first().id == QStringLiteral("dummy_custom_algo"));
-    REQUIRE(list.first().name == QStringLiteral("Dummy Custom Algorithm"));
-
-    auto found = engine.findAlgorithm(QStringLiteral("dummy_custom_algo"));
-    REQUIRE(found != nullptr);
-    REQUIRE(found->descriptor().id == QStringLiteral("dummy_custom_algo"));
-}
-
-TEST_CASE("AlgorithmEngine - Parameter Validation", "[processing][algorithm_engine]") {
-    auto& engine = sicnu::AlgorithmEngine::instance();
-    engine.clear();
-
-    auto dummyAdapter = std::make_shared<DummyCustomTaskAdapter>();
-    engine.registerAlgorithm(dummyAdapter);
-
-    QString error;
-    QVariantMap invalidParams;
-    bool isValid = engine.validateParameters(QStringLiteral("dummy_custom_algo"), invalidParams, error);
-    REQUIRE_FALSE(isValid);
-    REQUIRE(error.contains(QStringLiteral("Missing required parameter")));
-
-    QVariantMap validParams;
-    validParams.insert(QStringLiteral("input"), QStringLiteral("/path/to/raster.tif"));
-    isValid = engine.validateParameters(QStringLiteral("dummy_custom_algo"), validParams, error);
-    REQUIRE(isValid);
-
-    bool unregisteredValid = engine.validateParameters(QStringLiteral("unknown_algo"), validParams, error);
-    REQUIRE_FALSE(unregisteredValid);
-    REQUIRE(error.contains(QStringLiteral("Algorithm not registered")));
-}
+#include "processing/framework/python_processing_provider_adapter.h"
+#include "processing/framework/atomic_algorithm_registry.h"
 
 TEST_CASE("AlgorithmEngine - AlgorithmProviderAdapter registration seam", "[processing][algorithm_engine][provider]") {
     auto& engine = sicnu::AlgorithmEngine::instance();
-    engine.clear();
 
     class StubProviderAdapter : public sicnu::AlgorithmProviderAdapter {
     public:
@@ -85,9 +15,7 @@ TEST_CASE("AlgorithmEngine - AlgorithmProviderAdapter registration seam", "[proc
             return sicnu::ProviderResourceProfile::InProcessThread;
         }
         void initialize() override { m_initialized = true; }
-        void discoverAlgorithms(sicnu::AlgorithmEngine &eng) override {
-            eng.registerAlgorithm(std::make_shared<DummyCustomTaskAdapter>());
-        }
+        void discoverAlgorithms(sicnu::AlgorithmEngine &) override {}
         bool m_initialized = false;
     };
 
@@ -95,18 +23,18 @@ TEST_CASE("AlgorithmEngine - AlgorithmProviderAdapter registration seam", "[proc
     engine.registerProvider(provider);
 
     REQUIRE(provider->m_initialized);
-    REQUIRE(engine.registeredProviders().size() == 1);
-    REQUIRE(engine.registeredProviders().first()->providerId() == QStringLiteral("stub_provider"));
-    REQUIRE(engine.findAlgorithm(QStringLiteral("dummy_custom_algo")) != nullptr);
-    REQUIRE(engine.registeredAlgorithms().first().id == QStringLiteral("dummy_custom_algo"));
+    bool foundStub = false;
+    for (const auto& p : engine.registeredProviders()) {
+        if (p && p->providerId() == QStringLiteral("stub_provider")) {
+            foundStub = true;
+            break;
+        }
+    }
+    REQUIRE(foundStub);
 }
-
-#include "processing/framework/python_processing_provider_adapter.h"
 
 TEST_CASE("AlgorithmEngine - PythonProcessingProviderAdapter resource profile and discovery", "[processing][algorithm_engine][python_provider]") {
     auto& engine = sicnu::AlgorithmEngine::instance();
-    engine.clear();
-
     engine.initialize();
 
     auto providers = engine.registeredProviders();
@@ -125,30 +53,26 @@ TEST_CASE("AlgorithmEngine - PythonProcessingProviderAdapter resource profile an
     auto adapterPtr = std::dynamic_pointer_cast<sicnu::PythonProcessingProviderAdapter>(pythonProvider);
     REQUIRE(adapterPtr != nullptr);
 
-    sicnu::AlgorithmDescriptor desc;
-    desc.id = QStringLiteral("py:test_algorithm_108");
-    desc.name = QStringLiteral("Test Python Algo 108");
-    desc.group = QStringLiteral("Python Test");
-    desc.description = QStringLiteral("Test algorithm for issue 108");
-    desc.resourceProfile = sicnu::ProviderResourceProfile::PythonWorkerProcess;
+    sicnu::processing::AlgorithmDescriptor desc;
+    desc.id = "py:test_algorithm_108";
+    desc.displayName = "Test Python Algo 108";
+    desc.group = "Python Test";
+    desc.description = "Test algorithm for issue 108";
 
-    auto pyAlgo = std::make_shared<sicnu::PythonAlgorithmAdapter>(desc, [](const QVariantMap&, std::function<void(double)>, QString&) {
-        return true;
+    auto pyAlgo = std::make_shared<sicnu::processing::PythonAlgorithmAdapter>(desc, [](const Json::Value&, sicnu::processing::ProgressCallback) {
+        return Json::Value(Json::objectValue);
     });
 
     adapterPtr->addAlgorithm(pyAlgo);
 
-    auto found = engine.findAlgorithm(QStringLiteral("py:test_algorithm_108"));
+    auto found = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter("py:test_algorithm_108");
     REQUIRE(found != nullptr);
-    CHECK(found->descriptor().id == QStringLiteral("py:test_algorithm_108"));
-    CHECK(found->descriptor().resourceProfile == sicnu::ProviderResourceProfile::PythonWorkerProcess);
+    CHECK(found->descriptor().id == "py:test_algorithm_108");
 
-    // Verify discoverAlgorithms re-populates stored algorithms into a cleared engine
-    engine.clear();
-    CHECK(engine.findAlgorithm(QStringLiteral("py:test_algorithm_108")) == nullptr);
+    // Verify discoverAlgorithms re-populates stored algorithms into AtomicAlgorithmRegistry
+    sicnu::processing::AtomicAlgorithmRegistry::instance().unregisterAdapter("py:test_algorithm_108");
+    CHECK(sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter("py:test_algorithm_108") == nullptr);
 
     pythonProvider->discoverAlgorithms(engine);
-    CHECK(engine.findAlgorithm(QStringLiteral("py:test_algorithm_108")) != nullptr);
+    CHECK(sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter("py:test_algorithm_108") != nullptr);
 }
-
-

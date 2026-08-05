@@ -8,6 +8,8 @@
 #include <memory>
 #include <vector>
 
+#include "plugin_load_context.h"
+
 class QMenu;
 class ActiveViewHost;
 class PythonPluginAdapter;
@@ -44,12 +46,22 @@ class PythonPluginHost : public QObject
      * Loads the Python plugin at @a pluginDir (metadata.txt + __init__.py).
      * Returns the adapter (the host retains ownership) or nullptr on failure,
      * in which case @a errorOut receives the reason.
+     *
+     * ADR 0044: accepts a PluginLoadContext instead of 3 raw pointers.
      */
+    PythonPluginAdapter *loadPlugin( const QString &pluginDir,
+                                     const PluginLoadContext &context,
+                                     QString *errorOut = nullptr );
+
+    /// Backward-compatible overload — wraps individual arguments into PluginLoadContext.
     PythonPluginAdapter *loadPlugin( const QString &pluginDir,
                                      sicnu::data::DataManager *dataManager,
                                      QMenu *pluginMenu,
                                      ActiveViewHost *activeViewHost,
-                                     QString *errorOut = nullptr );
+                                     QString *errorOut = nullptr )
+    {
+      return loadPlugin( pluginDir, PluginLoadContext{ dataManager, pluginMenu, activeViewHost }, errorOut );
+    }
 
     void unloadAll();
     QStringList loadedPlugins() const;

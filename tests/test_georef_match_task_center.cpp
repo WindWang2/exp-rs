@@ -143,9 +143,9 @@ TEST_CASE( "Accept path pushes match pairs into Session",
 {
   // Simulates bulk-Yes acceptance: pairs go straight into the session.
   RsGeoreferencingSession session;
-  QVector<RsGeorefGcpPair> fromSift;
-  fromSift.append( { QgsPointXY( 0, 0 ), QgsPointXY( 100, 200 ), true } );
-  fromSift.append( { QgsPointXY( 10, 10 ), QgsPointXY( 110, 210 ), true } );
+  QVector<QgsGcpPoint> fromSift;
+  fromSift.append( QgsGcpPoint( QgsPointXY( 0, 0 ), QgsPointXY( 100, 200 ), QgsCoordinateReferenceSystem(), true ) );
+  fromSift.append( QgsGcpPoint( QgsPointXY( 10, 10 ), QgsPointXY( 110, 210 ), QgsCoordinateReferenceSystem(), true ) );
   session.appendGcps( fromSift );
   REQUIRE( session.gcps().size() == 2 );
 }

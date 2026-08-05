@@ -1,5 +1,6 @@
 #include "python_processing_provider_adapter.h"
 #include "algorithm_engine.h"
+#include "atomic_algorithm_registry.h"
 
 namespace sicnu {
 
@@ -35,31 +36,24 @@ void PythonProcessingProviderAdapter::discoverAlgorithms( AlgorithmEngine &engin
     m_boundEngine = &engine;
     for ( auto it = m_algorithms.begin(); it != m_algorithms.end(); ++it )
     {
-        if ( !engine.findAlgorithm( it.key() ) )
-        {
-            engine.registerAlgorithm( it.value() );
-        }
+        processing::AtomicAlgorithmRegistry::instance().registerAdapter( it.value() );
     }
 }
 
-void PythonProcessingProviderAdapter::addAlgorithm( std::shared_ptr<TaskAlgorithmAdapter> algoAdapter )
+void PythonProcessingProviderAdapter::addAlgorithm( processing::AtomicAlgorithmAdapterPtr algoAdapter )
 {
     if ( !algoAdapter )
         return;
 
-    m_algorithms.insert( algoAdapter->descriptor().id, algoAdapter );
-    if ( m_boundEngine )
-    {
-        if ( !m_boundEngine->findAlgorithm( algoAdapter->descriptor().id ) )
-        {
-            m_boundEngine->registerAlgorithm( algoAdapter );
-        }
-    }
+    const QString algoId = QString::fromStdString( algoAdapter->algorithmId() );
+    m_algorithms.insert( algoId, algoAdapter );
+    processing::AtomicAlgorithmRegistry::instance().registerAdapter( algoAdapter );
 }
 
 void PythonProcessingProviderAdapter::removeAlgorithm( const QString &algoId )
 {
     m_algorithms.remove( algoId );
+    processing::AtomicAlgorithmRegistry::instance().unregisterAdapter( algoId.toStdString() );
 }
 
 } // namespace sicnu

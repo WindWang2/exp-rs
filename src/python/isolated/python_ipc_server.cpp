@@ -24,6 +24,7 @@ PythonIpcServer::~PythonIpcServer()
 bool PythonIpcServer::listen( const QString &serverName )
 {
   QLocalServer::removeServer( serverName );
+  m_server->setSocketOptions( QLocalServer::UserAccessOption );
   return m_server->listen( serverName );
 }
 

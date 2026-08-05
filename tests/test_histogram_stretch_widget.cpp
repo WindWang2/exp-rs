@@ -25,12 +25,15 @@ namespace {
 QString samplePath( const char *name )
 {
     // Try cwd and common repo-relative locations (tests often run from build/).
+    // ctest runs these tests from build/tests/, so repo-root data needs
+    // two levels up ("../../data").
     const QStringList candidates = {
         QStringLiteral( "data/samples/%1" ).arg( name ),
         QStringLiteral( "../data/samples/%1" ).arg( name ),
         QStringLiteral( "../../data/samples/%1" ).arg( name ),
         QStringLiteral( "data/%1" ).arg( name ),
         QStringLiteral( "../data/%1" ).arg( name ),
+        QStringLiteral( "../../data/%1" ).arg( name ),
     };
     for ( const QString &p : candidates )
     {

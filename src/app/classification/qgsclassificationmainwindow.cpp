@@ -11,11 +11,15 @@
 #include "rs_class_table_widget.h"
 #include "rs_classification_project.h"
 #include "rs_classification_split.h"
-#include "rs_classification_task.h"
 #include "rs_classification_pipeline.h"
 #include "rs_classifier_kmeans.h"
+#include "rs_post_process.h"
 #include "rs_post_process_dialog.h"
 #include "rs_post_process_task.h"
+#include "rs_merge_classes_dialog.h"
+#include "data/data_asset.h"
+#include "data/data_manager.h"
+#include "data/source_descriptor.h"
 #include "rs_classifier_load_dialog.h"
 #include "qgisinterface.h"
 #include "rs_classifier_normalbayes.h"
@@ -27,7 +31,6 @@
 #include "rs_classify_workflow_bridge.h"
 #include "rs_classify_workflow_controller.h"
 #include "rs_cross_validation.h"
-#include "rs_cv_task.h"
 #include "rs_training_data_extraction.h"
 #include "rs_jm_matrix_widget.h"
 #include "rs_jm_separability.h"
@@ -61,6 +64,7 @@
 #include "qgsmessagelog.h"
 #include "qgslayertreemodel.h"
 #include "qgslayertreeview.h"
+#include "qgspalettedrasterrenderer.h"
 #include "qgsrasterlayer.h"
 #include "qgssymbol.h"
 #include "qgstaskmanager.h"
@@ -100,6 +104,7 @@
 #include <QMessageBox>
 #include <QPair>
 #include <QPushButton>
+#include <QToolButton>
 #include <QSet>
 #include <QSizePolicy>
 #include <QSpinBox>
@@ -190,7 +195,7 @@ class SampleSelectTool : public QgsMapTool
 /// Fit a feature scaler on the train split and write scaled matrices +
 /// the fitted scaler onto \a cfg. Returns false if fit fails.
 bool fitScalerOntoConfig( const RsTrainTestSplit &split,
-                          RsClassificationTask::Config &cfg )
+                          RsClassificationPipeline::Config &cfg )
 {
   RsFeatureScaler scaler;
   if ( !scaler.fit( split.trainX ) )
@@ -282,6 +287,7 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
     connect( m_rois, &RsRoiCollection::classDefChanged,
              this, [this]( int ) {
                applySampleLayerRenderer();
+               applyPreviewLayerRenderer();
                syncWorkflowFromRois();
              } );
   }
@@ -632,9 +638,27 @@ void QgsClassificationMainWindow::setupDocks()
 
   m_classListDock = new QDockWidget( tr( "类别管理" ), this );
   m_classListDock->setObjectName( QStringLiteral( "rsClassListDock" ) );
-  m_classTableWidget = new RsClassTableWidget( m_classListDock );
+  auto *classListHost = new QWidget( m_classListDock );
+  auto *classListLay = new QVBoxLayout( classListHost );
+  classListLay->setContentsMargins( 0, 0, 0, 0 );
+  classListLay->setSpacing( 0 );
+  m_classTableWidget = new RsClassTableWidget( classListHost );
   m_classTableWidget->setRoiCollection( m_rois );
-  m_classListDock->setWidget( m_classTableWidget );
+  classListLay->addWidget( m_classTableWidget );
+
+  // Multi-select merge entry point (action shared by button + context menu).
+  m_mergeClassesAction = new QAction( tr( "合并所选类别…" ), this );
+  m_mergeClassesAction->setObjectName( QStringLiteral( "rsMergeClassesAction" ) );
+  m_mergeClassesAction->setEnabled( false );
+  auto *mergeBtn = new QToolButton( classListHost );
+  mergeBtn->setText( tr( "合并所选类别…" ) );
+  mergeBtn->setObjectName( QStringLiteral( "rsMergeClassesBtn" ) );
+  mergeBtn->setToolButtonStyle( Qt::ToolButtonTextOnly );
+  mergeBtn->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+  mergeBtn->setDefaultAction( m_mergeClassesAction );
+  classListLay->addWidget( mergeBtn );
+
+  m_classListDock->setWidget( classListHost );
   addDockWidget( Qt::RightDockWidgetArea, m_classListDock );
   m_classListDock->resize( 380, m_classListDock->height() );
 
@@ -729,6 +753,31 @@ void QgsClassificationMainWindow::setupSampleVectorEditing()
   {
     connect( m_classTableWidget, &RsClassTableWidget::currentClassChanged,
              this, &QgsClassificationMainWindow::onCurrentClassChanged );
+    connect( m_classTableWidget, &RsClassTableWidget::currentClassChanged,
+             this, [this]( int ) { updateMergeActionEnabled(); } );
+    connect( m_classTableWidget, &RsClassTableWidget::mergeClassesRequested,
+             this, &QgsClassificationMainWindow::onMergeClassesRequested );
+    // Right-click the class table to merge the selected rows.
+    m_classTableWidget->setContextMenuPolicy( Qt::ActionsContextMenu );
+    if ( m_mergeClassesAction )
+    {
+      connect( m_mergeClassesAction, &QAction::triggered, this, [this]() {
+        if ( !m_classTableWidget || !m_rois )
+          return;
+        const QList<int> sel = m_classTableWidget->selectedClassIds();
+        if ( sel.size() < 2 )
+          return;
+        // Suggest the first selected class as the merge target.
+        const QHash<int, RsClassDef> defs = m_rois->classDefs();
+        const RsClassDef d = defs.value( sel.first() );
+        m_classTableWidget->mergeSelectedClasses(
+          sel.first(),
+          defs.contains( sel.first() ) ? d.name() : QString(),
+          defs.contains( sel.first() ) ? d.color() : QColor() );
+      } );
+      m_classTableWidget->addAction( m_mergeClassesAction );
+    }
+    updateMergeActionEnabled();
   }
   if ( m_classQuickListWidget )
   {
@@ -807,6 +856,133 @@ void QgsClassificationMainWindow::applySampleLayerRenderer()
   m_sampleLayer->triggerRepaint();
   if ( m_canvas )
     m_canvas->refresh();
+}
+
+void QgsClassificationMainWindow::applyPreviewLayerRenderer()
+{
+  // Live palette update on the result raster. Only meaningful for paletted
+  // (Byte-with-color-table) output; silently skipped otherwise.
+  if ( !m_previewLayer || !m_rois )
+    return;
+
+  auto *old = dynamic_cast<QgsPalettedRasterRenderer *>( m_previewLayer->renderer() );
+  if ( !old )
+    return;
+
+  // Rebuild class data from the existing renderer classes (preserves every
+  // pixel value present in the raster, including any not in m_rois), then
+  // overlay the current name/color for ids that have a class definition.
+  QgsPalettedRasterRenderer::ClassData classes = old->classes();
+  const QHash<int, RsClassDef> defs = m_rois->classDefs();
+  for ( auto &cls : classes )
+  {
+    const auto it = defs.find( static_cast<int>( cls.value ) );
+    if ( it == defs.end() )
+      continue;
+    cls.color = it.value().color();
+    cls.label = it.value().name();
+  }
+
+  auto *renderer = new QgsPalettedRasterRenderer(
+    m_previewLayer->dataProvider(), 1, classes );
+  m_previewLayer->setRenderer( renderer );
+  m_previewLayer->triggerRepaint();
+  if ( m_canvas )
+    m_canvas->refresh();
+}
+
+void QgsClassificationMainWindow::writeClassMetadataSidecar( const QString &rasterPath ) const
+{
+  if ( rasterPath.isEmpty() || !m_rois )
+    return;
+  const QHash<int, RsClassDef> defs = m_rois->classDefs();
+  if ( defs.isEmpty() )
+    return;
+  QString err;
+  if ( !RsPostProcess::saveClassMetaData( rasterPath, defs, &err ) )
+  {
+    SICNU_LOG_WARN( SicnuLogTags::Classification,
+                    QStringLiteral( "Failed to write class metadata sidecar for %1: %2" )
+                      .arg( rasterPath, err ) );
+  }
+}
+
+void QgsClassificationMainWindow::registerOutputInDataManager( const QString &rasterPath )
+{
+  if ( !m_dataManager || rasterPath.isEmpty() )
+    return;
+
+  sicnu::data::SourceDescriptor source;
+  source.providerKey = QStringLiteral( "gdal" );
+  source.canonicalSource = rasterPath;
+
+  const sicnu::data::RegisterResult registered =
+    m_dataManager->registerSource( sicnu::data::RegisterRequest{ std::move( source ) } );
+  if ( registered.assetId.isNull() )
+  {
+    SICNU_LOG_WARN( SicnuLogTags::Classification,
+                    QStringLiteral( "Failed to register merged raster in DataManager: %1" )
+                      .arg( rasterPath ) );
+  }
+}
+
+void QgsClassificationMainWindow::updateMergeActionEnabled()
+{
+  if ( m_mergeClassesAction )
+    m_mergeClassesAction->setEnabled( m_classTableWidget
+                                      && m_classTableWidget->selectedClassIds().size() >= 2 );
+}
+
+void QgsClassificationMainWindow::onMergeClassesRequested( const QList<int> &sourceClassIds,
+                                                           int /*targetClassId*/,
+                                                           const QString &suggestedName,
+                                                           const QColor &suggestedColor )
+{
+  if ( sourceClassIds.size() < 2 )
+    return;
+
+  RsMergeClassesDialog dlg( this );
+  dlg.setSourceClassIds( sourceClassIds, suggestedName, suggestedColor );
+  if ( dlg.exec() != QDialog::Accepted )
+    return;
+
+  runMergeClasses( sourceClassIds, dlg.targetClassId(),
+                   dlg.targetName(), dlg.targetColor() );
+}
+
+void QgsClassificationMainWindow::runMergeClasses( const QList<int> &sources,
+                                                   int targetId,
+                                                   const QString &targetName,
+                                                   const QColor &targetColor )
+{
+  const QString input = !m_lastPostRasterPath.isEmpty()
+                          ? m_lastPostRasterPath
+                          : m_lastClassifyPath;
+  if ( input.isEmpty() )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "没有可合并的分类结果栅格" ), 5000 );
+    return;
+  }
+
+  // Reconcile the target class definition so the recoded raster's palette and
+  // the post-process sidecar reflect the merged category.
+  if ( m_rois && targetId > 0 )
+    m_rois->setClassDef( RsClassDef( targetId, targetName, targetColor ) );
+
+  RsPostProcessConfig cfg;
+  cfg.inputPath = input;
+  cfg.runRecode = true;
+  cfg.recodeMap = buildRecodeMap( sources, targetId );
+
+  const QFileInfo fi( input );
+  cfg.outputRasterPath =
+    fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName()
+    + QStringLiteral( "_merged.tif" );
+
+  m_lastMergeOutputPath = cfg.outputRasterPath;
+  runPostProcess( cfg, /*loadToLayers=*/true, tr( "合并类别" ),
+                  QStringLiteral( "module:classify:postprocess:recode" ) );
 }
 
 
@@ -1163,12 +1339,9 @@ void QgsClassificationMainWindow::setupWorkflowUi()
 
   // Runtime session for lab.classify.supervised — mirrors step/complete only.
   // Soft classify-specific gates remain on m_workflow (controller authority).
-  m_workflowBridge = std::make_unique<RsClassifyWorkflowBridge>();
-  if ( !m_workflowBridge->open() )
-  {
-    SICNU_LOG_WARN( SicnuLogTags::Classification,
-                    QStringLiteral( "Failed to open workflow session lab.classify.supervised" ) );
-  }
+  m_workflowBridge = std::make_unique<RsClassifyWorkflowBridge>( this );
+  if ( m_workflow )
+    m_workflowBridge->bindController( m_workflow );
 
   m_stepper = new RsClassifyStepperBar( this );
   addToolBarBreak();
@@ -1195,8 +1368,6 @@ void QgsClassificationMainWindow::setupWorkflowUi()
 
   connect( m_workflow, &RsClassifyWorkflowController::currentStepChanged, this,
            [this]( RsClassifyStep s ) {
-             if ( m_workflowBridge )
-               m_workflowBridge->gotoStep( s );
              if ( m_stepper )
                m_stepper->setCurrentStep( s );
              if ( m_stepHost )
@@ -1215,8 +1386,6 @@ void QgsClassificationMainWindow::setupWorkflowUi()
            } );
 
   connect( m_workflow, &RsClassifyWorkflowController::completionChanged, this, [this]() {
-    if ( m_workflowBridge && m_workflow )
-      m_workflowBridge->syncCompletionsFromController( *m_workflow );
     refreshWorkflowUi();
   } );
 
@@ -2060,7 +2229,7 @@ void QgsClassificationMainWindow::applyClassification()
     m_classifierBar->setOutputPath( outPath );
   }
 
-  RsClassificationTask::Config cfg;
+  RsClassificationPipeline::Config cfg;
   cfg.sourceRaster = m_sourceRasterPath;
   cfg.outputRaster = outPath;
   cfg.bandIndices = bands;
@@ -2078,8 +2247,8 @@ void QgsClassificationMainWindow::applyClassification()
   {
     // Phase 10A.1.3 — a model was loaded from disk via File → "Load
     // classifier model...". Consume it (one-shot) and skip training.
-    // testX/testY left empty so RsClassificationTask::run() skips accuracy.
-    cfg.algoName = QStringLiteral( "Loaded (%1)" ).arg( m_loadedBackend->name() );
+    // testX/testY left empty so the pipeline run() skips accuracy.
+    cfg.methodName = QStringLiteral( "Loaded (%1)" ).arg( m_loadedBackend->name() );
     cfg.backend = std::move( m_loadedBackend );
     // Apply sidecar scaler so tile features match training feature space.
     cfg.scaler = m_loadedScaler;
@@ -2109,11 +2278,11 @@ void QgsClassificationMainWindow::applyClassification()
     {
       case RsClassifierKind::NormalBayes:
         cfg.backend.reset( new RsClassifierNormalBayes );
-        cfg.algoName = QStringLiteral( "NormalBayes" );
+        cfg.methodName = QStringLiteral( "NormalBayes" );
         break;
       case RsClassifierKind::SvmRbf:
         cfg.backend.reset( new RsClassifierSvm );
-        cfg.algoName = QStringLiteral( "SVM_RBF" );
+        cfg.methodName = QStringLiteral( "SVM_RBF" );
         break;
       case RsClassifierKind::KMeans:
       {
@@ -2122,7 +2291,7 @@ void QgsClassificationMainWindow::applyClassification()
           uniqueLabels.insert( y.at<int>( i, 0 ) );
         cfg.backend.reset( new RsClassifierKMeans(
           std::max( 2, static_cast<int>( uniqueLabels.size() ) ) ) );
-        cfg.algoName = QStringLiteral( "KMeans" );
+        cfg.methodName = QStringLiteral( "KMeans" );
         break;
       }
     }
@@ -2146,10 +2315,10 @@ void QgsClassificationMainWindow::applyClassification()
     }
   }
 
-  const QString algoForLog = cfg.algoName;
+  const QString algoForLog = cfg.methodName;
   const QString outForLog = outPath;
   SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Classification started: algo=%1, bands=%2, output=%3" )
-    .arg( cfg.algoName ).arg( cfg.bandIndices.size() ).arg( QFileInfo( outPath ).fileName() ) );
+    .arg( cfg.methodName ).arg( cfg.bandIndices.size() ).arg( QFileInfo( outPath ).fileName() ) );
   setClassifyBusy( true );
 
   sicnu::jobs::JobRequest req;
@@ -2159,7 +2328,7 @@ void QgsClassificationMainWindow::applyClassification()
   req.exclusive = true;
   req.params["output"] = outForLog.toStdString();
 
-  auto cfgPtr = std::make_shared<RsClassificationTask::Config>( std::move( cfg ) );
+  auto cfgPtr = std::make_shared<RsClassificationPipeline::Config>( std::move( cfg ) );
 
   m_jobHandle.submitJob(
     req,
@@ -2168,26 +2337,8 @@ void QgsClassificationMainWindow::applyClassification()
       ctx.logInfo( "Running supervised classification apply" );
       ctx.reportProgress( 0.0, "Classifying" );
 
-      RsClassificationPipeline::Config pcfg;
-      pcfg.sourceRaster = cfgPtr->sourceRaster;
-      pcfg.outputRaster = cfgPtr->outputRaster;
-      pcfg.bandIndices = cfgPtr->bandIndices;
-      pcfg.backend = std::move( cfgPtr->backend );
-      pcfg.trainX = cfgPtr->trainX;
-      pcfg.trainY = cfgPtr->trainY;
-      pcfg.testX = cfgPtr->testX;
-      pcfg.testY = cfgPtr->testY;
-      pcfg.classColors = cfgPtr->classColors;
-      pcfg.methodName = cfgPtr->algoName;
-      pcfg.scaler = cfgPtr->scaler;
-      pcfg.modelSavePath = cfgPtr->modelSavePath;
-      pcfg.creationOptions = cfgPtr->creationOptions;
-      pcfg.cropToWindow = cfgPtr->cropToWindow;
-      pcfg.window = cfgPtr->window;
-      pcfg.ignoreOptions = cfgPtr->ignoreOptions;
-
       const auto res = RsClassificationPipeline::run(
-        std::move( pcfg ),
+        std::move( *cfgPtr ),
         [&ctx]( double fraction, const QString &msg ) {
           ctx.reportProgress( fraction, msg.toStdString() );
           return !ctx.isCancelled();
@@ -2220,6 +2371,7 @@ void QgsClassificationMainWindow::applyClassification()
     [this, outForLog, algoForLog]( const QString &, const Json::Value &payload ) {
       setClassifyBusy( false );
       m_lastClassifyPath = outForLog;
+      writeClassMetadataSidecar( outForLog );
 
       if ( m_workflow )
         m_workflow->setHasFullClassifyResult( true );
@@ -2335,7 +2487,7 @@ void QgsClassificationMainWindow::applyPreview()
   const QString outPath = QDir::temp().filePath(
     QStringLiteral( "classify_preview.tif" ) );
 
-  RsClassificationTask::Config cfg;
+  RsClassificationPipeline::Config cfg;
   cfg.sourceRaster = m_sourceRasterPath;
   cfg.outputRaster = outPath;
   cfg.bandIndices = bands;
@@ -2360,11 +2512,11 @@ void QgsClassificationMainWindow::applyPreview()
   {
     case RsClassifierKind::NormalBayes:
       cfg.backend.reset( new RsClassifierNormalBayes );
-      cfg.algoName = QStringLiteral( "NormalBayes" );
+      cfg.methodName = QStringLiteral( "NormalBayes" );
       break;
     case RsClassifierKind::SvmRbf:
       cfg.backend.reset( new RsClassifierSvm );
-      cfg.algoName = QStringLiteral( "SVM_RBF" );
+      cfg.methodName = QStringLiteral( "SVM_RBF" );
       break;
     case RsClassifierKind::KMeans:
     {
@@ -2373,12 +2525,12 @@ void QgsClassificationMainWindow::applyPreview()
         uniqueLabels.insert( y.at<int>( i, 0 ) );
       cfg.backend.reset( new RsClassifierKMeans(
         std::max( 2, static_cast<int>( uniqueLabels.size() ) ) ) );
-      cfg.algoName = QStringLiteral( "KMeans" );
+      cfg.methodName = QStringLiteral( "KMeans" );
       break;
     }
   }
 
-  auto cfgPtr = std::make_shared<RsClassificationTask::Config>( std::move( cfg ) );
+  auto cfgPtr = std::make_shared<RsClassificationPipeline::Config>( std::move( cfg ) );
   const QString outForLog = outPath;
   setClassifyBusy( true );
 
@@ -2394,24 +2546,8 @@ void QgsClassificationMainWindow::applyPreview()
     [cfgPtr]( const sicnu::jobs::JobRequest &request,
               sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running classification preview" );
-      RsClassificationPipeline::Config pcfg;
-      pcfg.sourceRaster = cfgPtr->sourceRaster;
-      pcfg.outputRaster = cfgPtr->outputRaster;
-      pcfg.bandIndices = cfgPtr->bandIndices;
-      pcfg.backend = std::move( cfgPtr->backend );
-      pcfg.trainX = cfgPtr->trainX;
-      pcfg.trainY = cfgPtr->trainY;
-      pcfg.testX = cfgPtr->testX;
-      pcfg.testY = cfgPtr->testY;
-      pcfg.classColors = cfgPtr->classColors;
-      pcfg.methodName = cfgPtr->algoName;
-      pcfg.scaler = cfgPtr->scaler;
-      pcfg.creationOptions = cfgPtr->creationOptions;
-      pcfg.cropToWindow = cfgPtr->cropToWindow;
-      pcfg.window = cfgPtr->window;
-      pcfg.ignoreOptions = cfgPtr->ignoreOptions;
       const auto res = RsClassificationPipeline::run(
-        std::move( pcfg ),
+        std::move( *cfgPtr ),
         [&ctx]( double fraction, const QString &msg ) {
           ctx.reportProgress( fraction, msg.toStdString() );
           return !ctx.isCancelled();
@@ -2549,6 +2685,10 @@ long QgsClassificationMainWindow::startPostProcessTask(
   const QString outRaster = cfg.outputRasterPath;
   const QString outVector = cfg.outputVectorPath;
   const bool doPoly = cfg.runPolygonize;
+  // A merge sets m_lastMergeOutputPath before submitting; every other entry
+  // clears it so the success callback only registers merges in DataManager.
+  if ( m_lastMergeOutputPath != outRaster )
+    m_lastMergeOutputPath.clear();
   setClassifyBusy( true );
 
   sicnu::jobs::JobRequest req;
@@ -2601,7 +2741,17 @@ long QgsClassificationMainWindow::startPostProcessTask(
         m_workflow->setHasPostProcessResult( true );
 
       if ( !outRaster.isEmpty() )
+      {
         m_lastPostRasterPath = outRaster;
+        writeClassMetadataSidecar( outRaster );
+        // Merge outputs are also registered in the shell Data Manager; every
+        // other post-process op only adds a session layer.
+        if ( m_lastMergeOutputPath == outRaster )
+        {
+          registerOutputInDataManager( outRaster );
+          m_lastMergeOutputPath.clear();
+        }
+      }
       if ( doPoly && !outVector.isEmpty() )
         m_lastPostVectorPath = outVector;
 
@@ -2650,6 +2800,7 @@ long QgsClassificationMainWindow::startPostProcessTask(
     },
     [this]( const QString &err, bool isCanceled ) {
       setClassifyBusy( false );
+      m_lastMergeOutputPath.clear();
       if ( isCanceled )
       {
         if ( statusBar() )
@@ -2726,7 +2877,7 @@ void QgsClassificationMainWindow::runCrossValidation()
 long QgsClassificationMainWindow::startCrossValidationTask(
   const cv::Mat &X,
   const cv::Mat &y,
-  RsCvTask::ClassifierFactory factory )
+  std::function<std::unique_ptr<RsClassifierBackend>()> factory )
 {
   if ( m_classifyBusy )
     return -1;
@@ -2745,11 +2896,15 @@ long QgsClassificationMainWindow::startCrossValidationTask(
                      sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running 5-fold cross validation" );
       ctx.reportProgress( 0.0, "CV" );
-      const auto res = RsClassificationPipeline::runCrossValidation(
+      // Port of the deleted pipeline CV pass-through (ADR 0053): the
+      // between-fold cancel check reports a fixed 0.5 progress fraction, so
+      // the UI sits at 50% during the run.
+      const auto res = RsCrossValidation::kFold(
         X, y, factory, 5, /*scaleFeatures=*/true,
-        [&ctx]( double fraction, const QString &msg ) {
-          ctx.reportProgress( fraction, msg.toStdString() );
-          return !ctx.isCancelled();
+        [&ctx]() {
+          ctx.reportProgress( 0.5,
+                              QStringLiteral( "Cross validation running..." ).toStdString() );
+          return ctx.isCancelled();
         } );
 
       if ( ctx.isCancelled() || !res.ok() )
@@ -2963,83 +3118,32 @@ void QgsClassificationMainWindow::recomputeJmMatrix()
   if ( bands.isEmpty() )
     return;
 
-  ensureGdalInit();
-  GDALDataset *ds = static_cast<GDALDataset *>(
-    GDALOpen( m_sourceRasterPath.toUtf8().constData(), GA_ReadOnly ) );
-  if ( !ds )
-    return;
-  const int W = ds->GetRasterXSize();
-  const int H = ds->GetRasterYSize();
-  const int nBands = ds->GetRasterCount();
-  for ( int b : bands )
-  {
-    if ( b < 1 || b > nBands )
-    {
-      GDALClose( ds );
-      return;
-    }
-  }
-  // Collect ROI pixel indices per class
-  QHash<int, QVector<quint64>> idxByClass;
+  // Reuse the canonical extraction seam (ADR 0055): scanline-grouped band
+  // reads plus the same NoData / user-ignore filtering the classify path
+  // applies — the old hand-rolled 1x1 RasterIO loop let NoData pixels leak
+  // into the JM statistics. Overlapping ROIs dedup by pixel, last class
+  // wins, exactly like buildTrainingData().
+  QVector<RsTrainingGeometry> geometries;
+  geometries.reserve( m_rois->rois().size() );
   for ( const RsRoi &roi : m_rois->rois() )
   {
-    if ( roi.classId() <= 0 )
-      continue;
-    QVector<quint64> idx = roi.pixelIndices();
-    if ( idx.isEmpty() )
-    {
-      const QSet<quint64> px = RsPixelRasterizer::rasterize(
-        roi.geometry(), m_sourceGt, W, H );
-      idx = QVector<quint64>( px.begin(), px.end() );
-    }
-    auto &bucket = idxByClass[roi.classId()];
-    for ( quint64 i : idx )
-    {
-      if ( i < static_cast<quint64>( W ) * H )
-        bucket.push_back( i );
-    }
+    RsTrainingGeometry tg;
+    tg.classId = roi.classId();
+    tg.geometry = roi.geometry();
+    tg.pixelIndices = roi.pixelIndices();
+    geometries.push_back( tg );
   }
 
-  // Read only ROI pixel values per band (much less memory than full raster)
-  QHash<int, cv::Mat> samplesByClass;
-  for ( auto it = idxByClass.constBegin(); it != idxByClass.constEnd(); ++it )
-  {
-    const auto &px = it.value();
-    if ( px.size() < 2 )
-      continue;
-    cv::Mat m( px.size(), bands.size(), CV_32F );
-    for ( int bi = 0; bi < bands.size(); ++bi )
-    {
-      GDALRasterBandH band = ds->GetRasterBand( bands[bi] );
-      if ( !band ) continue;
-      for ( int r = 0; r < px.size(); ++r )
-      {
-        int row = static_cast<int>( px[r] / W );
-        int col = static_cast<int>( px[r] % W );
-        float val = 0.0f;
-        GDALRasterIO( band, GF_Read, col, row, 1, 1, &val, 1, 1, GDT_Float32, 0, 0 );
-        m.at<float>( r, bi ) = val;
-      }
-    }
-    samplesByClass.insert( it.key(), m );
-  }
-  GDALClose( ds );
+  RsTrainingDataExtraction::Options options;
+  options.ignore = currentIgnoreOptions();
 
-  // Sorted class id list for pairwise iteration.
-  QList<int> ids = samplesByClass.keys();
-  std::sort( ids.begin(), ids.end() );
+  const RsTrainingDataResult res = RsTrainingDataExtraction::extract(
+    m_sourceRasterPath, bands, geometries, options );
+  if ( !res.ok )
+    return;
 
-  QHash<QPair<int, int>, double> jm;
-  for ( int i = 0; i < ids.size(); ++i )
-  {
-    for ( int j = i + 1; j < ids.size(); ++j )
-    {
-      const double d = RsJmSeparability::pairJm(
-        samplesByClass.value( ids[i] ),
-        samplesByClass.value( ids[j] ) );
-      jm.insert( qMakePair( ids[i], ids[j] ), d );
-    }
-  }
+  const QHash<QPair<int, int>, double> jm = RsJmSeparability::computeAll(
+    res.X, res.y );
 
   QVector<RsJmMatrixWidget::ClassEntry> classes;
   const QHash<int, RsClassDef> classDefs = m_rois->classDefs();
@@ -3381,6 +3485,12 @@ bool QgsClassificationMainWindow::saveClassificationProject( QString path )
   }
 
   m_projectPath = path;
+
+  // Re-write class metadata sidecars so post-create rename/recolor edits
+  // travel with the saved project's result rasters.
+  writeClassMetadataSidecar( m_lastClassifyPath );
+  writeClassMetadataSidecar( m_lastPostRasterPath );
+
   SICNU_LOG_INFO( SicnuLogTags::Classification,
                   QString( "Classification project saved: %1" ).arg( path ) );
   if ( statusBar() )
@@ -3455,6 +3565,30 @@ bool QgsClassificationMainWindow::loadProjectFromFile( QString path )
       applySampleLayerRenderer();
       mSession.setLastRoisPath( data.roisPath );
       mSession.clearDirty();
+    }
+  }
+
+  // Fallback: if the ROI restore yielded no class definitions, repopulate
+  // them from the result raster's <name>.class.json sidecar (if present),
+  // preferring the post-process result over the base classification.
+  if ( m_rois && m_rois->classDefs().isEmpty() )
+  {
+    const QString sidecarRaster = !m_lastPostRasterPath.isEmpty()
+                                    ? m_lastPostRasterPath
+                                    : m_lastClassifyPath;
+    if ( !sidecarRaster.isEmpty() )
+    {
+      QHash<int, RsClassDef> loaded;
+      QString err;
+      if ( RsPostProcess::loadClassMetaData( sidecarRaster, loaded, &err ) && !loaded.isEmpty() )
+      {
+        mSuppressDirty = true;
+        for ( auto it = loaded.constBegin(); it != loaded.constEnd(); ++it )
+          m_rois->setClassDef( it.value() );
+        mSuppressDirty = false;
+        applySampleLayerRenderer();
+        applyPreviewLayerRenderer();
+      }
     }
   }
 

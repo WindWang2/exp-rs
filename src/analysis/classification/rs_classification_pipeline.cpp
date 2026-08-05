@@ -1,13 +1,13 @@
 // rs_classification_pipeline.cpp — ADR 0019 slice S2: classification pipeline
-// core. Ported from RsClassificationTask::run() (Phase 10A Task 10.8); the
-// QgsTask/QgsFeedback plumbing lives in the app-layer adapter now.
+// core. Ported from the Phase 10A Task 10.8 app-layer task run() body. The
+// QgsTask adapter was deleted in ADR 0053 — the GUI now calls this seam
+// directly (RsClassificationPipeline::Config, one config vocabulary).
 
 #include "rs_classification_pipeline.h"
 
 #include "rs_classification_split.h"
-#include "rs_classifier_normalbayes.h"
-#include "rs_classifier_svm.h"
-#include "rs_cross_validation.h"
+#include "rs_classifier_backend_factory.h"
+#include "rs_classification_utils.h"
 #include "rs_hungarian_assignment.h"
 #include "rs_training_data_extraction.h"
 #include "sicnu_logging.h"
@@ -49,22 +49,6 @@ QString RsClassificationPipeline::sidecarPathForModel( const QString &modelPath 
   const QFileInfo mi( modelPath );
   return mi.absolutePath() + QLatin1Char( '/' )
          + mi.completeBaseName() + QStringLiteral( ".meta.json" );
-}
-
-RsCrossValidation::Result RsClassificationPipeline::runCrossValidation(
-  const cv::Mat &X, const cv::Mat &y,
-  const std::function<std::unique_ptr<RsClassifierBackend>()> &factory,
-  int k,
-  bool scaleFeatures,
-  const Progress &progress )
-{
-  return RsCrossValidation::kFold(
-    X, y, factory, k, scaleFeatures,
-    [progress]() {
-      if ( progress )
-        return !progress( 0.5, QStringLiteral( "Cross validation running..." ) );
-      return false;
-    } );
 }
 
 bool RsClassificationPipeline::saveModelSidecar( const QString &modelPath,
@@ -167,14 +151,10 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
 
     if ( !config.backend )
     {
-      if ( config.methodName.contains( QStringLiteral( "bayes" ), Qt::CaseInsensitive ) )
-      {
-        config.backend = std::make_unique<RsClassifierNormalBayes>();
-      }
-      else
-      {
-        config.backend = std::make_unique<RsClassifierSvm>();
-      }
+      // ADR 0061 — backend construction is owned by the factory (single
+      // method-name → backend mapping; preserves the historical "bayes"
+      // sidecar sniff).
+      config.backend = RsClassifierBackendFactory::create( config.methodName );
     }
 
     if ( !config.backend->load( config.modelLoadPath ) )
@@ -248,7 +228,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     {
       for ( auto it = ex.classCounts.constBegin(); it != ex.classCounts.constEnd(); ++it )
       {
-        config.classColors[it.key()] = QColor::fromHsv( ( it.key() * 47 ) % 360, 200, 230 );
+        config.classColors[it.key()] = rsSynthesizedClassColor( it.key() );
       }
     }
 
@@ -347,9 +327,12 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     return result;
   }
 
-  // Hungarian remapping table for K-Means to align cluster IDs (1..K) with true class IDs.
+  // Hungarian remapping table for backends whose predicted labels are not in
+  // the training-label space (K-Means cluster ids 1..K). Built only when the
+  // backend declares needsLabelRemap() and training data is available —
+  // ADR 0061, the former methodName == "KMeans" branch is gone.
   QHash<int, int> kmeansRemap;
-  if ( config.methodName == QStringLiteral( "KMeans" ) && !config.trainX.empty() && !config.trainY.empty() )
+  if ( config.backend->needsLabelRemap() && !config.trainX.empty() && !config.trainY.empty() )
   {
     try
     {
@@ -405,8 +388,9 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
       QVector<int> yt;
       QVector<int> yp;
 
-      if ( config.methodName == QStringLiteral( "KMeans" ) )
+      if ( config.backend->needsLabelRemap() )
       {
+        // K-Means: cluster IDs are remapped to true class IDs.
         yt.reserve( config.testY.rows );
         yp.reserve( config.testY.rows );
         for ( int i = 0; i < config.testY.rows; ++i )
@@ -579,22 +563,13 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     dstDs->GetRasterBand( 1 )->SetNoDataValue( unclassified );
 
   // Per-band source NoData (optional) + user ignore values → unclassified.
+  // ADR 0061 — NoData discovery is owned by rsCollectBandNodata (shared with
+  // training-data extraction).
   const int B = config.bandIndices.size();
-  std::vector<bool> bandHasNodata( static_cast<size_t>( B ), false );
-  std::vector<float> bandNodata( static_cast<size_t>( B ), 0.0f );
-  if ( config.ignoreOptions.useSourceNodata )
-  {
-    for ( int bi = 0; bi < B; ++bi )
-    {
-      int success = 0;
-      const double nd = srcDs->GetRasterBand( config.bandIndices[bi] )->GetNoDataValue( &success );
-      if ( success )
-      {
-        bandHasNodata[static_cast<size_t>( bi )] = true;
-        bandNodata[static_cast<size_t>( bi )] = static_cast<float>( nd );
-      }
-    }
-  }
+  std::vector<bool> bandHasNodata;
+  std::vector<float> bandNodata;
+  rsCollectBandNodata( srcDs, config.bandIndices, config.ignoreOptions,
+                       bandHasNodata, bandNodata );
 
   // Every failure past this point removes the partially-written output.
   const auto failWithPartialOutput = [&result, &srcDs, &dstDs, &config](
@@ -707,7 +682,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
           continue;
         }
         int v = pred.at<int>( p, 0 );
-        if ( config.methodName == QStringLiteral( "KMeans" ) )
+        if ( config.backend->needsLabelRemap() )
         {
           v = kmeansRemap.value( v, v );
         }

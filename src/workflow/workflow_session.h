@@ -20,6 +20,7 @@ class WorkflowSession
     bool gotoStep( const std::string &stepId );
     void setParams( const std::string &stepId, const Json::Value &params );
     Json::Value paramsFor( const std::string &stepId ) const;
+    Json::Value resolveParams( const std::string &stepId ) const;
 
     void setArtifact( const std::string &name, const std::string &value );
     bool hasArtifact( const std::string &name ) const;
@@ -27,6 +28,11 @@ class WorkflowSession
     void markStepComplete( const std::string &stepId );
     void setMode( SessionMode mode );
     void setDirty( bool d );
+
+    void setPipelineId( long pipelineId ) { m_pipelineId = pipelineId; }
+    long pipelineId() const { return m_pipelineId; }
+
+    void setPipelineStatusResolver( PipelineStatusResolver resolver ) { m_pipelineResolver = std::move( resolver ); }
 
     const WorkflowDefinition &definition() const;
     const StepDef *currentStep() const;
@@ -37,10 +43,12 @@ class WorkflowSession
     std::string m_sessionId;
     std::string m_currentStepId;
     std::vector<std::string> m_completed;
+    long m_pipelineId = -1;
     SessionMode m_mode = SessionMode::Wizard;
     bool m_dirty = false;
     Json::Value m_paramsByStep;
     std::unordered_map<std::string, std::string> m_artifacts;
+    PipelineStatusResolver m_pipelineResolver;
 };
 
 } // namespace sicnu::workflow

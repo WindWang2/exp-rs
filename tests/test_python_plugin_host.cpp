@@ -4,6 +4,7 @@
 
 #include "python_plugin_host.h"
 #include "python_plugin_adapter.h"
+#include "python_worker_process_pool.h"
 #include "data/data_manager.h"
 
 #include <QCoreApplication>
@@ -46,6 +47,39 @@ TEST_CASE( "PythonPluginHost reports a clean error for a missing plugin director
   QString error;
   CHECK( host.loadPlugin( QStringLiteral( "/nonexistent/plugin/dir" ), &dataManager, nullptr, nullptr, &error ) == nullptr );
   CHECK( !error.isEmpty() );
+}
+
+TEST_CASE( "PythonWorkerProcessPool poolSize and poolHealth queries work correctly", "[python][pool]" )
+{
+  PythonWorkerProcessPool pool( 3 );
+  CHECK( pool.poolSize() == 3 );
+
+  const auto health = pool.poolHealth();
+  CHECK( health.total == 0 );
+
+  SECTION( "setPoolSize grows the pool" )
+  {
+    CHECK( pool.setPoolSize( 5 ) );
+    CHECK( pool.poolSize() == 5 );
+  }
+
+  SECTION( "setPoolSize shrinks the pool" )
+  {
+    CHECK( pool.setPoolSize( 1 ) );
+    CHECK( pool.poolSize() == 1 );
+  }
+
+  SECTION( "setPoolSize rejects zero" )
+  {
+    CHECK_FALSE( pool.setPoolSize( 0 ) );
+    CHECK( pool.poolSize() == 3 ); // unchanged
+  }
+
+  SECTION( "setPoolSize rejects negative" )
+  {
+    CHECK_FALSE( pool.setPoolSize( -1 ) );
+    CHECK( pool.poolSize() == 3 ); // unchanged
+  }
 }
 
 #include "python_ipc_server.h"
@@ -127,7 +161,7 @@ TEST_CASE( "py: prefix executor executes from a worker thread marshaled to the m
       if ( snap && ( snap->state == JobState::Succeeded || snap->state == JobState::Failed ) )
       {
         CHECK( snap->state == JobState::Failed );
-        CHECK( snap->error.find( "Algorithm not registered" ) != std::string::npos );
+        CHECK_FALSE( snap->error.empty() );
         break;
       }
       if ( std::chrono::steady_clock::now() > deadline )

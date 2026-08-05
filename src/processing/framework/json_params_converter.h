@@ -1,6 +1,9 @@
 // src/processing/framework/json_params_converter.h
 #pragma once
 
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QMetaType>
 #include <QString>
 #include <QStringList>
@@ -135,6 +138,38 @@ inline Json::Value variantToJsonValue( const QVariant &value )
       // Fallback: stringify unknown types
       return Json::Value( value.toString().toStdString() );
   }
+}
+
+/// Lossless QJsonValue → JSON value (recursive). Shared by the agent dock
+/// (tool-call envelopes) and app/test callers so QJson↔Json::Value
+/// conversions cannot drift apart.
+inline Json::Value jsonValueFromQJson( const QJsonValue &value )
+{
+  if ( value.isUndefined() || value.isNull() )
+    return Json::Value( Json::nullValue );
+  if ( value.isBool() )
+    return Json::Value( value.toBool() );
+  if ( value.isDouble() )
+    return Json::Value( value.toDouble() );
+  if ( value.isString() )
+    return Json::Value( value.toString().toStdString() );
+  if ( value.isArray() )
+  {
+    Json::Value arr( Json::arrayValue );
+    const QJsonArray array = value.toArray();
+    for ( const QJsonValue &item : array )
+      arr.append( jsonValueFromQJson( item ) );
+    return arr;
+  }
+  if ( value.isObject() )
+  {
+    Json::Value obj( Json::objectValue );
+    const QJsonObject object = value.toObject();
+    for ( auto it = object.constBegin(); it != object.constEnd(); ++it )
+      obj[it.key().toStdString()] = jsonValueFromQJson( it.value() );
+    return obj;
+  }
+  return Json::Value( Json::nullValue );
 }
 
 } // namespace sicnu::processing

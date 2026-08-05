@@ -238,15 +238,238 @@ _Avoid_: Workspace state map, Context dict, UI state dump
   5. **Shared Json↔Variant Converters**: MCP's private `jsonValueToVariant` / `variantToJsonValue` / `jsonObjectToVariantMap` move into the shared converter header (`src/processing/framework/json_params_converter.h`) next to `jsonParamsToVariantMap`; the duplicated `envFlagEnabled` moves to a shared `env_flag.h` used by both MCP and the STAC client.
   6. **Interface as Test Surface**: Headless tests fabricate `AlgorithmTaskInfo` in all six states, drive a registered no-op operator through execute → status → cancel via the real TaskCenter, and assert cancel truthfulness for terminal tasks; the pre-existing six MCP sections pass unchanged.
 
-### ADR 0023: Python Plugin Host Extraction & Headless CLI Plugin Loading Architecture
-- **Context**: `py:` algorithms were unreachable from every headless surface: `PluginManager`/`PythonPluginAdapter` lived in the app shell, no headless entry point owned a `DataManager`, JobEngine had no `py:` prefix executor, and the only `py:` execution face (`PythonAlgorithmAdapter::execute` → `sendRequestAndAwait`) assumes the main thread while CLI pipeline tasks run on JobEngine worker threads with a wait loop that never pumps Qt events. Spec: `docs/superpowers/specs/2026-08-01-cli-python-plugin-host-spec.md`.
+### ADR 0029: Collapse WorkflowRunner Pass-Through into WorkflowRuntime
+- **Context**: `WorkflowRunner` was a shallow static pass-through class (`workflow_runner.h` / `workflow_runner.cpp`) containing a single static method `run()`. Its sole caller in the entire codebase was `WorkflowRuntime::runStep`.
 - **Decision**:
-  1. **Single Hosting Core**: Extract the Python hosting machinery (worker pool, proxy/bridge wiring, `classFactory` lifecycle, `py:` algorithm registration) from `PluginManager` into the GUI-free **Python Plugin Host**. `PluginManager` keeps C++ plugins, directory scanning, and menu/window wiring, and composes the host — one implementation, no parallel headless copy.
-  2. **Full Lifecycle, Degraded UI**: Headless loading runs the complete plugin lifecycle (`metadata.txt`, `classFactory(iface)`, algorithm registration); UI-dependent plugin calls degrade through the Headless Asset Seam's existing status codes (`ui_unavailable`, `no_canvas`, `no_active_layer`).
-  3. **Headless DataManager Ownership**: The CLI creates and owns a `DataManager`, injects it into the host's bridge wiring, and registers completed pipeline task outputs as `TaskTemporary` Data Assets via `DataManager::registerSource` + `attachDerivationRecord`, so plugin catalog calls see real state. `OutputCommitter` is deliberately not used: its atomic temp→stable rename and `DeletableSource` ownership fit TaskCenter-owned temp files, not user-declared final output paths.
-  4. **Main-Thread Marshaling**: A `py:` JobEngine prefix executor marshals `AlgorithmEngine::executeAlgorithm` to the main thread (`Qt::BlockingQueuedConnection`, direct call when already there); the CLI pipeline wait loop interleaves `processEvents()`. `PythonIpcServer` and ticket 02's verified await mechanism stay untouched.
-  5. **Explicit Plugin Declaration**: The CLI loads only plugins named by repeatable `--python-plugin` options and aborts before the pipeline starts if any declared plugin fails to load; the host itself holds no loading policy, so the desktop (scan-all) and MCP (config) plug in their own.
+  1. **Delete `WorkflowRunner`**: Delete `workflow_runner.h` and `workflow_runner.cpp` completely and remove from `CMakeLists.txt`.
+  2. **Deepen `WorkflowRuntime`**: Inline operator creation, `RSOperatorContext` stack setup, and `RSOperatorError` $\rightarrow$ `std::runtime_error` exception translation directly inside `WorkflowRuntime::runStep`.
 
+### ADR 0030: Absorb WorkflowRegistry into WorkflowRuntime
+- **Context**: `WorkflowRegistry` was a shallow in-memory container wrapper. Callers (`RsGeoreferencingSession`, `WorkflowSessionController`, `RsClassifyWorkflowBridge`, unit tests) were forced to manage dual-object boilerplate (`WorkflowRegistry` + `WorkflowRuntime`).
+- **Decision**:
+  1. **Delete `WorkflowRegistry`**: Delete `workflow_registry.h` and `workflow_registry.cpp` completely and remove from `CMakeLists.txt`.
+  2. **Deepen `WorkflowRuntime`**: Add `registerDefinition`, `findDefinition`, `hasDefinition`, and `registeredDefinitionIds` directly to `WorkflowRuntime`. Auto-register built-in workflows on initialization.
+  3. **Caller Simplification**: All caller subsystems and test suites instantiate `WorkflowRuntime` directly as a single deep module.
 
+### ADR 0031: Integrate PlaceholderGrammar into WorkflowSession
+- **Context**: `PlaceholderGrammar` existed as a pure parsing helper module. Parameter values recorded in `WorkflowSession` often contained upstream artifact references such as `$step1.output` or `${step1.portName}`, forcing external callers to manually invoke `substitutePlaceholders`.
+- **Decision**:
+  1. **Add `resolveParams(stepId)`**: `paramsFor(stepId)` returns raw recorded parameter JSON (for UI form editing), while `resolveParams(stepId)` returns parameter JSON with all placeholders dynamically substituted.
+  2. **Artifact Lookup Locality**: Resolves placeholders against `m_artifacts` (via `artifactOnSuccess`, `stepId.portName`, or `portName`).
+  3. **`WorkflowRuntime` Deepening**: `WorkflowRuntime::runStep` calls `s->resolveParams(stepId)` to pass fully resolved parameter maps directly to operators.
 
+### ADR 0032: Stateful LlmConfigManager Facade Architecture
+- **Context**: `LlmConfigManager` was a shallow static `QSettings` utility. UI widgets and clients had to re-query `QSettings` or manually synchronize when active LLM provider profiles changed.
+- **Decision**:
+  1. **Stateful `QObject` Singleton**: Converted `LlmConfigManager` to a `QObject` singleton (`LlmConfigManager::instance()`) with in-memory profile caching.
+  2. **Reactive Signals**: Added `activeProfileChanged` and `profilesChanged` signals. `AgentCopilotDockWidget` connects to them to auto-update model selection UI reactively.
+  3. **Zero-Breakage Backwards Compatibility**: Retained static methods (`activeProfile()`, `setActiveProfile()`, etc.) as forwarding wrappers delegating to `LlmConfigManager::instance()`.
 
+### ADR 0033: Deepen RsClassifyWorkflowBridge Signal Synchronization
+- **Context**: `RsClassifyWorkflowBridge` was a thin helper requiring `QgsClassificationMainWindow` to manually invoke step transitions and completion sync methods across UI slots.
+- **Decision**:
+  1. **`QObject` Bridge Deepening**: `RsClassifyWorkflowBridge` inherits from `QObject` and provides `bindController(RsClassifyWorkflowController *controller)`.
+  2. **Automated Signal Binding**: Opens the `"lab.classify.supervised"` workflow session automatically and connects to `currentStepChanged` and `completionChanged` controller signals.
+  3. **Caller Simplification**: `QgsClassificationMainWindow` initializes the bridge via `bindController`, eliminating manual step-sync boilerplate.
+
+### ADR 0034: Consolidate Georeferencing Session Warp Execution
+- **Context**: `RsGeoreferencingSession` used an abstract interface `RsGeorefWarpExecutor` with `RsGeorefTaskCenterExecutor` being its only production implementation.
+- **Decision**:
+  1. **Direct TaskCenter Integration**: Warp tasks submit directly to `TaskCenter::instance()` by default.
+  2. **Deleted Shallow Seam**: Deleted `rs_georef_task_center_executor.h`/`.cpp` and removed `RsGeorefWarpExecutor`.
+  3. **Test Injection**: Added `CustomWarpExecutor` struct (`submit`, `cancel`) for headless Catch2 mock injection.
+
+### ADR 0035: Collapse PythonAppInterfaceProxy into AppInterfaceBridge
+- **Context**: `PythonAppInterfaceProxy` was a shallow middleman class wrapping `AppInterfaceBridge` to handle `ui.add_plugin_menu` IPC action creation.
+- **Decision**:
+  1. **Absorb Proxy Seam**: Deepened `AppInterfaceBridge` to accept an optional `QMenu *parentMenu`, handle `ui.add_plugin_menu`, and bind `PythonIpcServer`.
+  2. **Direct Ownership**: `PythonPluginAdapter` owns `AppInterfaceBridge` directly (`m_bridge`).
+  3. **Deleted Shallow Class**: Deleted `python_app_interface_proxy.h`/`.cpp` and removed them from build manifests.
+
+### ADR 0036: Deepen ActiveViewHost Canvas Viewport Seams
+- **Context**: `ActiveViewHost` exposed read-only viewport queries (`mapCanvasExtent()`, `mapCanvasScale()`), but callers were forced to dereference `activeViewHost->mapCanvas()` directly for viewport mutations.
+- **Decision**:
+  1. **Encapsulate Viewport Seam**: Deepened `ActiveViewHost` with `setExtent`, `setCenter`, `zoomToFullExtent`, and `refreshCanvas` methods.
+  2. **Headless Degradation**: Ensured all viewport mutation methods degrade gracefully as no-ops when running headlessly without a map canvas.
+
+### ADR 0037: Consolidate WorkflowSessionController Execution & Task Center Signals
+- **Context**: `WorkflowSessionController` managed asynchronous single-operator and pipeline execution state with internal fields (`m_pendingTaskId`, `m_activePipelineId`, `m_runInFlight`) unexposed to shell and lab window callers.
+- **Decision**:
+  1. **Encapsulate Execution Queries**: Exposed `isRunInFlight()`, `activeSessionId()`, `activeStepId()`, `activePipelineId()`, and `pendingTaskId()` getters.
+  2. **Unified Cancellation**: Added `cancelActiveRun()`, consolidating single-task and pipeline cancellation in one primary method and aliasing `stopWorkflow()` to it.
+
+### ADR 0038: Consolidate RsClassifyWorkflowBridge Artifact Sync
+- **Context**: `RsClassifyWorkflowBridge` required UI callers to manually invoke artifact setters whenever raster paths changed on `RsClassifyWorkflowController`.
+- **Decision**:
+  1. **Automated Completion Sync**: `syncCompletionsFromController` automatically syncs step completion state across `RsClassifyStep::Count`.
+  2. **Backward-Compatible Setters**: Retained `setSourceRasterArtifact` and `setClassifiedOutputArtifact` for explicit manual overrides.
+
+### ADR 0039: Deepen RsObiaMainWindow Task Execution & Cancellation Seams
+- **Context**: `RsObiaMainWindow` managed OBIA background tasks via private `m_pendingTaskId` and `PendingOp` fields without exposing execution state queries or task cancellation to window callers or test suites.
+- **Decision**:
+  1. **Public Execution State**: Made `enum class PendingOp` public and exposed `pendingOp()` getter along with public `isBusy()`.
+  2. **Unified Cancellation Seam**: Implemented `cancelActiveTask()` to cancel background operations via `TaskCenter::instance().cancelTask()` and reset pending UI state cleanly.
+
+### ADR 0040: Deepen QgisDisplayManager Layer Tree & Visibility Seams
+- **Context**: `QgisDisplayManager` managed presentation instances and Data Asset leases, but callers adjusting layer visibility or tree Z-ordering had to access QGIS `QgsLayerTree` nodes directly outside manager seams.
+- **Decision**:
+  1. **Visibility Seam**: Exposed `setLayerVisible(DisplayLayerId, bool)` and `isLayerVisible(DisplayLayerId) const` on `QgisDisplayManager`.
+  2. **Tree Ordering Seams**: Exposed `moveLayerTop(DisplayLayerId)` and `moveLayerBottom(DisplayLayerId)` to manage layer node positions in the associated `QgsLayerTree`.
+
+### ADR 0041: Encapsulate Raster Stretch Resolution in DisplayStretchPipeline
+- **Context**: Display stretch resolution and application logic was exposed via free functions (`validate`, `resolve`, `apply`) in `display_stretch.h`.
+- **Decision**:
+  1. **Pipeline Class**: Encapsulated stretch validation, resolution, and target application into a `DisplayStretchPipeline` deep module class.
+  2. **Backward-Compatible Free Functions**: Maintained inline free function wrappers forwarding to `DisplayStretchPipeline` for existing callers.
+
+### ADR 0042: Deepen AuthResolver Credential Cache Seams
+- **Context**: `AuthResolver` was a single-method interface (`applyAuthConfig`). Callers needing to check config existence or enumerate available configs had to reach into `QgsAuthManager` directly, bypassing the injectable seam.
+- **Decision**:
+  1. **Query Seam**: Added `hasAuthConfig(authConfigId)` pure-virtual to `AuthResolver` for config existence checks.
+  2. **Enumeration Seam**: Added `knownAuthConfigIds()` pure-virtual returning opaque ids (never credential material).
+  3. **Credential Discipline Preserved**: Neither new method exposes passwords or secrets.
+
+### ADR 0043: Route SicnuPythonApi Through ActiveViewHost
+- **Context**: `SicnuPythonApi` had inconsistent seam discipline — 7 methods reached directly into `QgsMapCanvas*` and `QgsProject::instance()` while `addRasterLayer`/`addVectorLayer` correctly used `ActiveViewHost`.
+- **Decision**:
+  1. **Removed `m_canvas` and `initialize(QgsMapCanvas*)`**: All canvas access now routes through `m_activeViewHost`.
+  2. **Added `ActiveViewHost::setScale(double)`**: Complements existing viewport methods (ADR 0036).
+
+### ADR 0044: Consolidate Plugin Load Context
+- **Context**: `PluginHost::loadPythonPlugin` manually unpacked 3 raw pointers from `SicnuAppInterface` and threaded them through `PythonPluginHost::loadPlugin` and `PythonPluginAdapter`.
+- **Decision**:
+  1. **`PluginLoadContext` struct**: Consolidated `DataManager*`, `QMenu*`, `ActiveViewHost*` into a single context object.
+  2. **Backward-Compatible Overloads**: Inline delegating constructors/methods accept the old 3-pointer signature.
+
+### ADR 0045: Add PythonWorkerProcessPool Health Snapshot
+- **Context**: `PythonWorkerProcessPool` exposed `activeWorkerCount()` and `availableWorkerCount()` as separate queries with no crash history visibility.
+- **Decision**:
+  1. **`PoolHealthSnapshot` struct**: Composite query with `total`, `active`, `available`, `totalRestarts`, and `isHealthy()` predicate.
+  2. **`poolHealth() const`**: Single deep-module query traversing the node list once.
+
+### ADR 0046: Delete AgentContextResolver Pass-Through Shim
+- **Context**: `AgentContextResolver` had collapsed into a pass-through — `buildContextSnapshot` forwarded one line to `WorkspaceSnapshot::capture().toJson()` while the JSON overload of `formatSystemContextPrompt` hand-duplicated `toSystemPromptHeader()`; the sole production caller used the JSON round-trip branch.
+- **Decision**:
+  1. **Delete `AgentContextResolver`**: removed the class, its unit test, and its CMake registrations.
+  2. **Call the seam directly**: `AgentCopilotDockWidget::sendPrompt` now invokes `WorkspaceSnapshot::capture( m_dataManager, m_viewHost ).toSystemPromptHeader()`.
+  3. **Delete `WorkspaceSnapshot::toJson()`**: no consumers remain; prompt-content coverage moved to `toSystemPromptHeader()` tests.
+
+### ADR 0047: Add Asynchronous Plan Execution to AgentWorkflowExecutor
+- **Context**: `AgentWorkflowExecutor::executeAgentPlan` was blocking-only (polling `waitForPipeline` up to 60 min), so `AgentCopilotDockWidget` spawned a detached `std::thread` reading UI-owned members — a lifetime/thread-safety hazard owned by a UI class.
+- **Decision**:
+  1. **Make `AgentWorkflowExecutor` a `QObject`**: the `TaskCenter::taskUpdated` watcher connection auto-disconnects on destruction.
+  2. **Add `executeAgentPlanAsync(planJson, callback, context)`**: returns the pipelineId immediately; invokes the callback exactly once at pipeline terminal state, marshaled onto `context`'s thread via `QMetaObject::invokeMethod`.
+  3. **Extract shared parse/normalize and planResult assembly helpers**: one owner of the result shape for both paths; sync output stays byte-identical.
+  4. **Remove the dock's detached thread and dead signals**: plan execution runs through the async API; `planApprovalRequested` / `toolExecutionFinished` deleted (zero connections anywhere).
+
+### ADR 0048: Consolidate Tool-Call Envelope Argument Extraction
+- **Context**: `AgentCopilotDockWidget::planArgumentsFor` re-implemented in QJson-land the envelope-shape parsing `ToolCallDispatcher::parseEnvelope` already owned; the same QJson→`Json::Value` conversion appeared at eight call sites with no shared helper.
+- **Decision**:
+  1. **`ToolCallDispatcher::argumentsFor(envelope)`**: public static delegating to `parseEnvelope` — one owner of envelope shape for `classify`/`submit`/`rejectionReason` and the plan path.
+  2. **`jsonValueFromQJson(const QJsonValue&)`** in `json_params_converter.h`: shared recursive QJson→`Json::Value` converter; migrated the agent dock, plan-preview handler, and canvas-sync test to it.
+  3. **Delete `planArgumentsFor`**: the plan approval card takes dispatcher-extracted arguments; the dock's run-button and completion paths read `Json::Value` directly instead of round-tripping through `QJsonDocument`.
+
+### ADR 0049: Make LlmStreamingClient a True Pure Transport
+- **Context**: `sendChatCompletion(messages, enableTools)` reached into `AtomicAlgorithmRegistry` to inject tool schemas — the caller could not choose which tools went on the wire; request assembly was inline with no test seam; the body honored `m_profile.stream` while the SSE parser only reads `data:` lines, so `stream=false` responses were silently dropped.
+- **Decision**:
+  1. **`sendChatCompletion(messages, tools = {})`**: caller-supplied tools; the Copilot dock now performs the registry lookup and converts via `json_params_converter.h` helpers.
+  2. **`buildChatRequest(profile, messages, tools)`**: pure static returning the `QNetworkRequest` + JSON body pair; `sendChatCompletion` is build → post → SSE-parse.
+  3. **Always send `"stream": true`**: the transport is SSE-only; `LlmProviderProfile.stream` stays for persistence/UI but no longer shapes the wire.
+  4. **Remove the dead `agent_tool_call_exporter.h` include**.
+
+### ADR 0050: Relocate StacClient to src/app/ and Absorb COG Asset Selection
+- **Context**: `StacClient` (src/agent/stac_client.{h,cpp}) was compiled into the app library while living in src/agent/ (absent from its CMakeLists) — an orphan whose sole consumer, `StacBrowserDialog`, also owned COG asset sniffing and `/vsicurl/` prefixing.
+- **Decision**:
+  1. **Move `StacClient` to `src/app/stac_client.{h,cpp}`**: app and test CMake paths and the dialog include updated; class name and API unchanged.
+  2. **`StacClient::selectCogHref(const QJsonObject&)`**: static helper selecting the COG asset (`.tif` href or `image/tiff` type, first in asset-key order), validating via `validateAssetHref`, prefixing `/vsicurl/`; empty when unusable. The dialog calls the one-liner.
+
+### ADR 0051: TaskCenter Owns the JobEngine Listener
+- **Context**: `TaskCenter::watchSubmittedJob` spawned a detached polling `std::thread` per job, re-implementing forwarding JobEngine's listener already provides — a watcher alive at process exit caused the flaky ctest #23 SEGFAULT. Dead `JobEngineQtBridge` held the single listener slot; `JobEngine::cancel` invoked CancelHooks while holding `m_mutex` (re-entrancy deadlock).
+- **Decision**:
+  1. **TaskCenter installs one JobEngine listener** (`onJobRecord`) replacing `watchSubmittedJob`; watcher threads deleted; dedup/delta logic ported with identical observable behavior; listener re-installed on every submit (self-healing after test-side resets); post-submit snapshot catch-up covers fast-finishing jobs; terminal `mark*` methods are terminal-idempotent; the destructor joins engine workers (`shutdown()`) so an in-flight job cannot notify destroyed state.
+  2. **Delete `JobEngineQtBridge`** (files, app/test CMake entries, `main_window_docks.cpp` instantiation, stale includes/comments).
+  3. **`JobEngine::cancel` invokes the CancelHook after releasing `m_mutex`**, mirroring `notify()`; cancels landing in the worker's pick-vs-arm window arm a pre-set flag the worker adopts.
+- **Consequences**: process-exit SEGFAULT race eliminated; single forwarding path; cancel hooks deadlock-free by contract; Running cancels cannot miss the flag window; tests installing their own listener must respect the single slot (ADR 0052 will add job-record pruning).
+
+### ADR 0052: JobEngine Record Retention Policy (Prune Completed Jobs)
+- **Context**: `JobEngine` retained every `JobRecord` (full `logLines` + `result` JSON) for the process lifetime — unbounded growth in production; `TaskCenter::clearCompletedTasks` cleared only its own task map and did not propagate to the engine.
+- **Decision**:
+  1. **`JobEngine::pruneCompleted(maxKeep)`**: evicts the oldest terminal records beyond `maxKeep` ("oldest" = `finishedAtMs`, then `createdAtMs`, then `id`); queued/running records never touched; returns count removed; `clearCompleted()` is `pruneCompleted(0)`.
+  2. **`JobEngine::removeCompleted(jobIds)`**: exact-set terminal-record eviction so TaskCenter prunes only the cleared tasks' records, leaving untracked engine jobs (direct submissions) intact.
+  3. **`TaskCenter::clearCompletedTasks` propagates**: after clearing its own map it drops the cleared tasks' listener-dispatch/dedup state and removes exactly their engine records; straggler terminal records for pruned jobs no-op as unknown jobIds.
+- **Consequences**: bounded engine retention with `list()` as the inspection seam; terminal notifies never lost (pruning happens after the terminal state is set under `m_mutex`, listener receives a copy); "cleared" now means gone from both layers.
+
+### ADR 0053: Delete Dead Classification Task Adapters
+- **Context**: `RsClassificationTask` duplicated `RsClassificationPipeline::Config` (only `algoName` vs `methodName` differs) and the main window hand-mapped the same fields again in its apply and preview `submitJob` lambdas; `RsCvTask` was the only QgsTask-coupled file in the headless analysis dir; `RsClassificationPipeline::runCrossValidation` was a 14-line pass-through to `RsCrossValidation::kFold`. All three were production-dead — only tests constructed them.
+- **Decision**:
+  1. **Delete `RsClassificationTask`** (`rs_classification_task.{h,cpp}`); the main window builds `RsClassificationPipeline::Config` directly at both call sites (`algoName` → `methodName`) and drops the duplicated field-mapping blocks; the e2e test migrates to the pipeline seam (ADR 0019 decision 5).
+  2. **Delete `RsCvTask`** (`rs_cv_task.{h,cpp}`); the task-center tests now subclass `QgsTask` locally.
+  3. **Delete `RsClassificationPipeline::runCrossValidation`**; the main window calls `RsCrossValidation::kFold` directly, porting the fixed-fraction (0.5) progress bridge into its cancel lambda.
+- **Consequences**: one Config vocabulary across GUI and pipeline; `qgis_analysis` is GUI-free again; tests use the sanctioned seam; CV behavior (kFold call, 50% fixed-fraction progress, cancellation) unchanged.
+
+### ADR 0054: Give RsSegmentMap a Write Side; Re-point RsObiaTask onto paint + classify
+- **Context**: `RsSegmentMap` was read-only, so writers hand-rolled GDAL code: the hierarchy operator's `writeLabelGeoTiff` and `RsObiaTask::writeOutput` — 178 lines duplicating `RsClassRaster::paint` (same dtype escalation, palette, row loop) without its incomplete-output cleanup; `run()` steps 3–5 also re-implemented `RsObjectClassify::classify`'s train-row selection / fit-if-needed / predict.
+- **Decision**:
+  1. **`RsSegmentMap::toGeoTIFF(path, refPath, error)`**: UInt32, LZW, georef copied from the reference, NoData=0, fail-closed — missing or size-mismatched reference fails, partial output removed, error conventions matching `paint`.
+  2. **Delete the operator's `writeLabelGeoTiff`**; the hierarchy operator calls `toGeoTIFF` (outputs gain NoData=0 metadata; otherwise identical).
+  3. **`RsObiaTask` delegates**: `writeOutput` → `RsClassRaster::paint` (dtype keyed on class ids only, not color keys); run() steps 3–5 → one `RsObjectClassify::classify` call; accuracy-assessment block kept.
+- **Consequences**: one label writer + one paint path; partial outputs now cleaned up instead of leaked; dtype escalation pinned to class ids (high color key no longer forces UInt16); grid-size mismatch fails instead of reading out of bounds; "No labeled segments" error text and accuracy result preserved (tests pin them); segutil stack (0060), OTB adapter (0058), ROI majority (0060) deferred.
+
+### ADR 0055: Move JM Sample Extraction into the Analysis Layer; Consolidate Class-Map Writing + Dtype Policy
+- **Context**: `recomputeJmMatrix` hand-collected ROI pixel indices and read each band with per-pixel 1×1 `GDALRasterIO` — the exact pattern `RsTrainingDataExtraction::buildMatrices` eliminated — and skipped NoData/ignore filtering, so NoData pixels leaked into JM stats; the OBIA classify operator re-implemented the 255/65535 dtype escalation via `segutil::writeClassGeoTiff`, and the hierarchy operator hand-rolled the `classField`→`class`→`id` fallback owned by `RsTrainingDataExtraction::classFieldIndex`.
+- **Decision**:
+  1. **`RsJmSeparability::computeAll(X, y)`**: consumes `RsTrainingDataExtraction` output, splits into per-class buckets (≥2 samples), returns the full pairwise JM map; the main window's JM path now calls `extract()` + `computeAll` — scanline-grouped reads and the same NoData/ignore filtering as classify.
+  2. **`RsPostProcess::saveLabelRaster` becomes the canonical class-map writer**: adopts the ADR 0019 S4 three-tier dtype policy (Byte ≤ 255, UInt16 ≤ 65535, Int32 beyond), palette only for Byte, optional NoData marker (NaN = none); the OBIA classify operator delegates its write (LZW + NoData=0 preserved).
+  3. **`rs_obia_hierarchy_operator`** uses `RsTrainingDataExtraction::classFieldIndex` for training-field resolution.
+  4. **Pipeline inline writer left as-is**: it writes during tile-streamed predict with crop offsets, palette index 0, options-fallback create — not a clean win now.
+- **Consequences**: JM stats exclude NoData/ignore pixels (previously leaked) with pixel dedup matching training extraction; one canonical dtype policy + one class-field fallback; OBIA keeps UInt16 for 256..65535 ids (not the old saveLabelRaster Int32); GUI post-process task passes NaN and keeps its no-NoData behavior; `segutil::writeClassGeoTiff` remains for ADR 0060 scope.
+
+### ADR 0056: Collapse the GCP type Duplication onto QgsGcpPoint
+- **Context**: `RsGeorefGcpPair` (session) duplicated `QgsGcpPoint`'s four core fields plus pointType, forcing the shell to convert both ways around the `.points` codec; the save conversion built an empty `QgsCoordinateReferenceSystem()`, so saved GCPs lost their destination CRS; `QgsGcpPoint::mResidual` was a third residual store whose only writer was that save path, and its doc referenced the deleted `QgsGCPList::updateResiduals()`.
+- **Decision**:
+  1. **Session stores `QgsGcpPoint` values**; `RsGeorefGcpPair` deleted, both shell conversion loops removed; GCPs are created with the panel CRS (or coord-dialog CRS) at add time.
+  2. **`.points` v2 gains an optional 10th `crs` column** (authid); the loader prefers it per-point and falls back to the caller-supplied CRS for older files.
+  3. **`QgsGcpPoint::residual()`/`mResidual` removed** — residuals live only in `RsGeorefFitResult`, pushed to the view layer via `QgsGeorefDataPoint::setResidual()`; the codec writes format-compat zeros.
+- **Consequences**: lost-CRS bug fixed (regression-tested round-trip); one GCP vocabulary across session, warp snapshot, codec, and table; one residual owner (`RsGeorefFitResult`) with stale doc references gone.
+
+### ADR 0057: Consolidate the Fit/Residual Engine and Give RPC an Interface Seam
+- **Context**: `RsGeoreferencingSession::refit()` hand-orchestrated enabled-GCP collection, min-count gating, the RPC before/after double-fit, and per-point source-pixel residuals — a residual loop duplicated with `pixelRms()`, a triplicated min-GCP probe, and shell re-validation of what `createWarpSnapshot()` already gates; `QgsRpcGcpTransformer` configuration lived behind concrete-only methods, forcing four `dynamic_cast<QgsRpcGcpTransformer>` sites (session, clone path, warp task, image warper).
+- **Decision**:
+  1. **Fit/residual engine on `QgsGeorefTransform`**: static `fit(gcps, method, rasterPath, demPath, demZOffset, invertYAxis)` returns one `RsGeorefFitResult` (moved from the session header) — enabled-GCP collection, min-count gating, RPC double-fit, source-pixel residuals, RMS; shared `enabledGcpCount` / `collectEnabledGcps` / `minimumGcpCountFor` statics absorb the triplicated probe and shell re-validation; `refit()` collapses to one call.
+  2. **RPC interface seam**: one optional virtual `QgsGcpTransformerInterface::setRpcOptions(sourceRasterPath, demPath, zOffset, refine)` (default no-op returning false) plus a `demPath()` query; the four downcasts deleted; the clone path copies RPC state through the implementation's own `clone()` (kills `copyRpcStateIfPresent`); `RsWarpTask` uses the new concrete `cloneTransform()`.
+- **Consequences**: one fit seam — residual math appears once, session shrinks ~130 lines, RMS values / error strings / RPC refinement semantics unchanged; no fragile downcasts — RPC configuration flows through the interface; vendored files touched minimally (two additive virtuals; `QgsRpcGcpTransformer::setRpcOptions` gains the source-path argument).
+
+### ADR 0058: Delete the App Layer's Duplicate OTB Segmentation Adapter
+- **Context**: `RsObiaSegmentation::runOtb` re-implemented OTB `Segmentation` CLI orchestration (QProcess lifecycle, cancel polling, temp files) in a different dialect (`-mode meanshift -out shp labels.tif`, shp discarded by the GUI) while `RsOtbSegmenter::segment` already covered the same job in `-mode raster` dialect with input-exists + size validation and temp-dir hygiene — two CLI dialects for one OTB binary.
+- **Decision**:
+  1. **`runOtb` delegates** to `RsOtbSegmenter::segment(rasterPath, spec, isCanceled)`; `RsObiaSegmentationConfig` maps 1:1 onto `RsLevelSpec` (maxIteration → maxIterations); ~110 lines of QProcess orchestration deleted; no spec extension needed.
+  2. **preferOtb→fallback policy kept** as a documented, deliberate divergence from the hierarchy path's no-fallback rule, with an explicit comment.
+  3. **`-mode meanshift` vector dialect retired** for OBIA paths; raster mode produces the label image directly (identical GUI-visible behavior) plus stricter validation.
+- **Consequences**: one OTB CLI dialect for OBIA paths; cancellation plumbed through `RsOtbSegmenter` unchanged; tests pin `usedOtb`/fallback semantics, not log strings; future candidates untouched — `src/operators/otb/otb_segmentation_operator.cpp` (already raster dialect) and `src/processing/providers/otb_tools/algorithms/otb_segmentation.cpp` (still the retired `-mode meanshift` dialect).
+
+### ADR 0059: Delete the Vendored Vector Warper Cluster; Add Helmert/Projective Numeric Tests
+- **Context**: `QgsVectorWarper` (138+166 lines) and `QgsGcpGeometryTransformer` (97+64 lines) were vendored from QGIS for upstream-API parity but have zero production callers — only their own tests use them; the geometry transformer is a ~40-line pass-through to `QgsAbstractGeometryTransformer` (from qgis_core), mirroring the ADR 0020 S3 `QgsGCPList` deletion. Meanwhile `QgsLeastSquares::helmert`/`::projective` (GSL LU/SVD, SICNU-hardened with `SingularException`) had no numeric coverage — and were untestable anyway because no CMake code ever set `HAVE_GSL`, so both always threw `QgsNotSupportedException`.
+- **Decision**:
+  1. **Delete the warper cluster**: `qgsvectorwarper.h/.cpp`, `qgsgcpgeometrytransformer.h/.cpp`, `tests/test_vector_warper.cpp`, `tests/test_gcp_geometry_transformer.cpp`, and their CMake source-list entries; dead vendored surface is not a goal.
+  2. **Wire GSL into the build**: `find_package(GSL)` + `GSL::gsl` linked into `qgis_analysis`, `HAVE_GSL` set before `qgsconfig.h` configure — the GSL-backed helmert/projective fits become live (previously dead code).
+  3. **Numeric tests**: `test_least_squares.cpp` gains helmert (known rotation+scale+translation recovery from by-construction correspondences; singular input → `SingularException`) and projective (known homography recovered; degenerate input) cases; `test_gcp_transformer.cpp` gains Helmert/Projective round-trips plus `invertYAxis` cases, including ports of upstream QGIS reference values.
+- **Consequences**: ~400 lines of dead vendored code gone; the helmert fit (author's own "derived it myself late at night" doubt) and the SVD projective fit are pinned correct against synthetic ground truth and upstream literals (tolerance 1); GSL is now a real build dependency for the georeferencer, matching upstream QGIS.
+
+### ADR 0060: Converge the Segmentation Operator Stack onto the Analysis Layer
+- **Context**: `segutil::segmentQuantize` (operators, cv::Mat, no nodata, weaker merge) is a second teaching segmenter beside `RsSimpleSegmenter` (analysis, RsSegmentMap, nodata-aware); the majority tie-break rule (max votes, ties → smaller id) is re-implemented four times — `rs_parent_link.cpp` P1, `labelFromRoi` in the hierarchy operator (point-in-polygon), the classify operator's votes loop (ALL_TOUCHED rasterize), and an inline test copy; `writeLabelGeoTiff` duplicates `RsSegmentMap::toGeoTIFF` (ADR 0054) and `writeClassGeoTiff` is orphaned since ADR 0055.
+- **Decision**:
+  1. **One teaching segmenter**: `rs:obia_segment` and `rs:obia_classify` (quantize mode) delegate to `RsSimpleSegmenter::segmentMultiBand`, which gains optional `isCanceled`/`onProgress` hooks (GUI caller stays source-compatible); labels write via `RsSegmentMap::toGeoTIFF`; nodata = band-1 declared value, else NaN; label 0 = nodata.
+  2. **One majority kernel**: `majorityKeyWithTieBreak` (`rs_majority_vote.h`) — P1, `RsRoiLabeler`, and the operators' decisions all delegate; vote-collecting loops stay per-site.
+  3. **One ROI labeler**: `RsRoiLabeler::labelByMajority` — canonical membership is center-of-pixel rasterize via the existing `RsPixelRasterizer` (shared with training extraction, windowed allocation, matches the hierarchy path's pixel-center semantics); retires point-in-polygon and ALL_TOUCHED (double-counted shared boundaries).
+  4. **Deletions**: segutil loses `segmentQuantize`/`mergeSmallRegions`/`writeLabelGeoTiff`/`writeClassGeoTiff`/`rasterizeGeometry` (keeps `segmentGrid`); `labelFromRoi` deleted; the inline test copy becomes kernel tests; `rs:obia_hierarchy` gains registration + schema + OTB-gated smoke coverage.
+- **Consequences**: quantize-path output changes (different blur kernel, merge algorithm, id assignment) — accepted, no test pins old ids/counts; classify ROI labels converge to center-of-pixel boundary semantics (hierarchy path keeps pixel-center semantics via rasterize, gains windowed allocation); one `RsSegmentMap` stack for teaching segmentation; segutil shrinks to the grid fallback.
+
+### ADR 0061: Consolidate Classification Operator Helper Duplications; Replace the KMeans Magic String with a Backend Virtual
+- **Context**: backend construction existed in four copies (three byte-identical `makeBackend` bodies in the operators plus the pipeline predict-only "bayes" string sniff); the `(classId * 47) % 360` color formula and the `mt19937(42)` subsampling policy were re-implemented per adapter; per-band NoData discovery was duplicated between training extraction and the pipeline; the pipeline branched on `methodName == "KMeans"` to gate the Hungarian cluster→class remap, forcing the K-Means operator to pass a lowercase `"kmeans"` workaround string.
+- **Decision**:
+  1. **`RsClassifierBackendFactory`** (analysis classification layer, beside `RsClassifierBackend`): one `create(methodName)` — case-insensitive `bayes` → NormalBayes, `kmeans` → K-Means, fallback SVM — plus `createKMeans(k)`; the supervised / OBIA / K-Means operators and the pipeline predict-only path all construct here.
+  2. **`rs_classification_utils.h`** owns `rsSynthesizedClassColor` (exact formula) and `rsShuffleAndKeep` (mt19937(42) subsample policy, shared by training extraction and the K-Means operator).
+  3. **`rsCollectBandNodata`** (beside `RsPixelIgnoreOptions`) owns per-band GDAL NoData discovery (training extraction + pipeline tile path).
+  4. **`RsClassifierBackend::needsLabelRemap()`** virtual — K-Means returns true only when fitted with real (non-zero) labels, so the pipeline gates the Hungarian remap on the backend: the `"KMeans"` string branches and the lowercase workaround are deleted; dead `canonicalMethod` / `readLegacyMethodFromMeta` helpers in the supervised operator deleted.
+  5. **New remap test** trains K-Means with permuted label ids (5/9) and asserts predictions map to the training labels in the accuracy path and the written class map, with a lowercase `"kmeans"` methodName to pin the trap removal.
+- **Consequences**: one construction path, color formula, sampling policy and NoData discovery; remap semantics observably unchanged (identity when no table; the unsupervised operator's all-zero dummy trainY keeps raw 1..K cluster ids); `"kmeans"` strings now construct K-Means instead of falling back to SVM — only reachable via sidecar predict-only, which still fails cleanly (K-Means has no `load()`).

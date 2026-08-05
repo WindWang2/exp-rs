@@ -3,10 +3,17 @@
 #include "active_view_host.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
+#include "python_ipc_server.h"
+#include "processing/framework/python_algorithm_adapter.h"
+#include "processing/framework/python_processing_provider_adapter.h"
+#include "processing/framework/algorithm_engine.h"
+#include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/json_params_converter.h"
 
 #include <qgsmaplayer.h>
 
 #include <QJsonArray>
+#include <QHash>
 
 #include <optional>
 #include <variant>
@@ -54,10 +61,11 @@ QJsonObject CanvasViewportSummary::toJsonObject() const
   return res;
 }
 
-AppInterfaceBridge::AppInterfaceBridge( sicnu::data::DataManager *dataManager, ActiveViewHost *activeViewHost, QObject *parent )
+AppInterfaceBridge::AppInterfaceBridge( sicnu::data::DataManager *dataManager, ActiveViewHost *activeViewHost, QMenu *parentMenu, QObject *parent )
   : QObject( parent )
   , m_dataManager( dataManager )
   , m_activeViewHost( activeViewHost )
+  , m_parentMenu( parentMenu )
 {
 }
 
@@ -79,6 +87,172 @@ void AppInterfaceBridge::setActiveViewHost( ActiveViewHost *host )
 ActiveViewHost *AppInterfaceBridge::activeViewHost() const
 {
   return m_activeViewHost;
+}
+
+void AppInterfaceBridge::setParentMenu( QMenu *parentMenu )
+{
+  m_parentMenu = parentMenu;
+}
+
+QMenu *AppInterfaceBridge::parentMenu() const
+{
+  return m_parentMenu;
+}
+
+void AppInterfaceBridge::bindIpcServer( PythonIpcServer *ipcServer )
+{
+  m_ipcServer = ipcServer;
+  if ( m_ipcServer )
+  {
+    connect( m_ipcServer, &PythonIpcServer::messageReceived, this, &AppInterfaceBridge::handleIpcMessage );
+    setupDefaultAlgorithmHandler();
+  }
+}
+
+PythonIpcServer *AppInterfaceBridge::ipcServer() const
+{
+  return m_ipcServer;
+}
+
+int AppInterfaceBridge::registeredActionCount() const
+{
+  return m_registeredActions.size();
+}
+
+void AppInterfaceBridge::setupDefaultAlgorithmHandler()
+{
+  setAlgorithmRegisterHandler( [this]( const QString &algoId, const QString &name, const QString &group, const QString &desc ) -> bool {
+    sicnu::processing::AlgorithmDescriptor algoDesc;
+    algoDesc.id = algoId.toStdString();
+    algoDesc.displayName = name.isEmpty() ? algoId.toStdString() : name.toStdString();
+    algoDesc.group = group.isEmpty() ? "Python Plugins" : group.toStdString();
+    algoDesc.description = desc.toStdString();
+
+    auto adapter = std::make_shared<sicnu::processing::PythonAlgorithmAdapter>(
+      algoDesc,
+      [this, algoId]( const Json::Value &execParams, sicnu::processing::ProgressCallback progress ) -> Json::Value {
+        if ( !m_ipcServer )
+        {
+          throw std::runtime_error( "IPC Server not available" );
+        }
+        QJsonObject req;
+        req[QStringLiteral( "id" )] = algoId;
+        req[QStringLiteral( "params" )] = QJsonObject::fromVariantMap( sicnu::processing::jsonParamsToVariantMap( execParams ) );
+
+        QJsonObject execResult;
+        bool execIsError = false;
+        const AwaitStatus awaitStatus = m_ipcServer->sendRequestAndAwait(
+          QStringLiteral( "processing.execute_algorithm" ), req, execResult, execIsError, 300000 );
+        switch ( awaitStatus )
+        {
+          case AwaitStatus::NoClient:
+            throw std::runtime_error( "IPC client not connected" );
+          case AwaitStatus::Disconnected:
+            throw std::runtime_error( "Python worker disconnected during algorithm execution" );
+          case AwaitStatus::Timeout:
+            throw std::runtime_error( "Python algorithm execution timed out" );
+          case AwaitStatus::Ok:
+            break;
+        }
+        if ( execIsError )
+        {
+          std::string errMsg = execResult[QStringLiteral( "message" )].toString( QStringLiteral( "Python algorithm execution failed" ) ).toStdString();
+          throw std::runtime_error( errMsg );
+        }
+        if ( execResult[QStringLiteral( "status" )].toString() != QStringLiteral( "ok" ) )
+        {
+          throw std::runtime_error( "Python algorithm execution failed" );
+        }
+        if ( progress ) progress( 100, "Completed" );
+        return sicnu::processing::jsonValueFromQJson( execResult );
+      }
+    );
+
+    auto providers = sicnu::AlgorithmEngine::instance().registeredProviders();
+    std::shared_ptr<sicnu::PythonProcessingProviderAdapter> pythonProvider;
+    for ( const auto &provider : providers )
+    {
+      if ( provider && provider->providerId() == QStringLiteral( "python_plugins" ) )
+      {
+        pythonProvider = std::dynamic_pointer_cast<sicnu::PythonProcessingProviderAdapter>( provider );
+        break;
+      }
+    }
+
+    if ( pythonProvider )
+    {
+      pythonProvider->addAlgorithm( adapter );
+    }
+    else
+    {
+      sicnu::processing::AtomicAlgorithmRegistry::instance().registerAdapter( adapter );
+    }
+    return true;
+  } );
+}
+
+void AppInterfaceBridge::handleIpcMessage( const QJsonObject &message )
+{
+  if ( !message.contains( QStringLiteral( "method" ) ) )
+    return;
+
+  QString method = message[QStringLiteral( "method" )].toString();
+  int msgId = message.value( QStringLiteral( "id" ) ).toInt( 0 );
+  QJsonObject params = message[QStringLiteral( "params" )].toObject();
+
+  if ( method == QStringLiteral( "ui.add_plugin_menu" ) )
+  {
+    QString menuTitle = params[QStringLiteral( "menu_title" )].toString();
+    QString actionTitle = params[QStringLiteral( "action_title" )].toString();
+    QString callbackId = params[QStringLiteral( "callback_id" )].toString();
+
+    if ( !m_parentMenu )
+    {
+      // Headless mode: no menu host — report ui_unavailable instead of
+      // registering a dead QAction.
+      if ( m_ipcServer && msgId > 0 )
+      {
+        QJsonObject res;
+        res[QStringLiteral( "status" )] = QStringLiteral( "ui_unavailable" );
+        res[QStringLiteral( "callback_id" )] = callbackId;
+        m_ipcServer->sendResponse( msgId, res );
+      }
+      return;
+    }
+
+    auto *action = new QAction( actionTitle, this );
+    m_registeredActions[callbackId] = action;
+    m_parentMenu->addAction( action );
+
+    connect( action, &QAction::triggered, this, [this, callbackId]() {
+      emit actionTriggered( callbackId );
+      if ( m_ipcServer )
+      {
+        QJsonObject triggerParams;
+        triggerParams[QStringLiteral( "callback_id" )] = callbackId;
+        m_ipcServer->sendRequest( QStringLiteral( "ui.on_action_triggered" ), triggerParams );
+      }
+    } );
+
+    if ( m_ipcServer && msgId > 0 )
+    {
+      QJsonObject res;
+      res[QStringLiteral( "status" )] = QStringLiteral( "registered" );
+      res[QStringLiteral( "callback_id" )] = callbackId;
+      m_ipcServer->sendResponse( msgId, res );
+    }
+    return;
+  }
+
+  QJsonObject response;
+  if ( dispatchIpcMessage( message, response ) )
+  {
+    if ( m_ipcServer && msgId > 0 )
+    {
+      m_ipcServer->sendResponse( msgId, response );
+    }
+    return;
+  }
 }
 
 ActiveLayerSummary AppInterfaceBridge::getActiveLayerSummary() const
@@ -227,60 +401,74 @@ bool AppInterfaceBridge::dispatchIpcMessage( const QJsonObject &message, QJsonOb
   if ( !message.contains( QStringLiteral( "method" ) ) )
     return false;
 
-  QString method = message[QStringLiteral( "method" )].toString();
-  QJsonObject params = message[QStringLiteral( "params" )].toObject();
+  const QString method = message[QStringLiteral( "method" )].toString();
+  const QJsonObject params = message[QStringLiteral( "params" )].toObject();
 
-  if ( method == QStringLiteral( "catalog.get_active_layer" ) )
+  using HandlerFn = std::function<void( const QJsonObject &p, QJsonObject &r )>;
+  const QHash<QString, HandlerFn> handlers = {
+    { QStringLiteral( "catalog.get_active_layer" ), [this]( const QJsonObject &, QJsonObject &r ) {
+        r = getActiveLayerSummary().toJsonObject();
+      } },
+    { QStringLiteral( "catalog.set_active_layer" ), [this]( const QJsonObject &p, QJsonObject &r ) {
+        const QString assetIdText = p[QStringLiteral( "asset_id" )].toString();
+        const std::optional<sicnu::data::AssetId> assetId = sicnu::data::AssetId::fromString( assetIdText );
+        const bool ok = assetId.has_value() && setActiveAsset( *assetId );
+        r[QStringLiteral( "status" )] = ok ? QStringLiteral( "ok" ) : QStringLiteral( "unknown_asset" );
+        r[QStringLiteral( "asset_id" )] = assetIdText;
+      } },
+    { QStringLiteral( "data.add_layer" ), [this]( const QJsonObject &p, QJsonObject &r ) {
+        const QString path = p[QStringLiteral( "path" )].toString();
+        const bool ok = openPath( path );
+        r[QStringLiteral( "status" )] = ok ? QStringLiteral( "added" ) : QStringLiteral( "failed" );
+        r[QStringLiteral( "path" )] = path;
+      } },
+    { QStringLiteral( "canvas.get_state" ), [this]( const QJsonObject &, QJsonObject &r ) {
+        r = getCanvasViewportSummary().toJsonObject();
+      } },
+    { QStringLiteral( "ui.push_message_bar" ), [this]( const QJsonObject &p, QJsonObject &r ) {
+        const QString title = p[QStringLiteral( "title" )].toString();
+        const QString text = p[QStringLiteral( "text" )].toString();
+        int level = 0;
+        const QJsonValue levelVal = p.value( QStringLiteral( "level" ) );
+        if ( levelVal.isString() )
+        {
+          const QString levelStr = levelVal.toString().toLower();
+          if ( levelStr == QStringLiteral( "warning" ) || levelStr == QStringLiteral( "warn" ) )
+            level = static_cast<int>( Qgis::MessageLevel::Warning );
+          else if ( levelStr == QStringLiteral( "critical" ) || levelStr == QStringLiteral( "error" ) )
+            level = static_cast<int>( Qgis::MessageLevel::Critical );
+          else if ( levelStr == QStringLiteral( "success" ) )
+            level = static_cast<int>( Qgis::MessageLevel::Success );
+          else
+            level = static_cast<int>( Qgis::MessageLevel::Info );
+        }
+        else if ( levelVal.isDouble() )
+        {
+          level = levelVal.toInt();
+        }
+        const bool ok = pushMessageBarAlert( title, text, level );
+        r[QStringLiteral( "status" )] = ok ? QStringLiteral( "pushed" ) : QStringLiteral( "failed" );
+      } },
+    { QStringLiteral( "processing.register_algorithm" ), [this]( const QJsonObject &p, QJsonObject &r ) {
+        const QString algoId = p[QStringLiteral( "id" )].toString();
+        const QString name = p[QStringLiteral( "name" )].toString();
+        const QString group = p[QStringLiteral( "group" )].toString();
+        const QString desc = p[QStringLiteral( "description" )].toString();
+
+        bool registered = false;
+        if ( m_algoRegisterHandler )
+        {
+          registered = m_algoRegisterHandler( algoId, name, group, desc );
+        }
+        r[QStringLiteral( "status" )] = registered ? QStringLiteral( "registered" ) : QStringLiteral( "failed" );
+        r[QStringLiteral( "id" )] = algoId;
+      } }
+  };
+
+  const auto it = handlers.constFind( method );
+  if ( it != handlers.constEnd() )
   {
-    response = getActiveLayerSummary().toJsonObject();
-    return true;
-  }
-  else if ( method == QStringLiteral( "catalog.set_active_layer" ) )
-  {
-    const QString assetIdText = params[QStringLiteral( "asset_id" )].toString();
-    const std::optional<sicnu::data::AssetId> assetId = sicnu::data::AssetId::fromString( assetIdText );
-    const bool ok = assetId.has_value() && setActiveAsset( *assetId );
-    response[QStringLiteral( "status" )] = ok ? QStringLiteral( "ok" ) : QStringLiteral( "unknown_asset" );
-    response[QStringLiteral( "asset_id" )] = assetIdText;
-    return true;
-  }
-  else if ( method == QStringLiteral( "data.add_layer" ) )
-  {
-    QString path = params[QStringLiteral( "path" )].toString();
-    bool ok = openPath( path );
-    response[QStringLiteral( "status" )] = ok ? QStringLiteral( "added" ) : QStringLiteral( "failed" );
-    response[QStringLiteral( "path" )] = path;
-    return true;
-  }
-  else if ( method == QStringLiteral( "canvas.get_state" ) )
-  {
-    response = getCanvasViewportSummary().toJsonObject();
-    return true;
-  }
-  else if ( method == QStringLiteral( "ui.push_message_bar" ) )
-  {
-    QString title = params[QStringLiteral( "title" )].toString();
-    QString text = params[QStringLiteral( "text" )].toString();
-    int level = 0;
-    const QJsonValue levelVal = params.value( QStringLiteral( "level" ) );
-    if ( levelVal.isString() )
-    {
-      const QString levelStr = levelVal.toString().toLower();
-      if ( levelStr == QStringLiteral( "warning" ) || levelStr == QStringLiteral( "warn" ) )
-        level = static_cast<int>( Qgis::MessageLevel::Warning );
-      else if ( levelStr == QStringLiteral( "critical" ) || levelStr == QStringLiteral( "error" ) )
-        level = static_cast<int>( Qgis::MessageLevel::Critical );
-      else if ( levelStr == QStringLiteral( "success" ) )
-        level = static_cast<int>( Qgis::MessageLevel::Success );
-      else
-        level = static_cast<int>( Qgis::MessageLevel::Info );
-    }
-    else if ( levelVal.isDouble() )
-    {
-      level = levelVal.toInt();
-    }
-    bool ok = pushMessageBarAlert( title, text, level );
-    response[QStringLiteral( "status" )] = ok ? QStringLiteral( "pushed" ) : QStringLiteral( "failed" );
+    it.value()( params, response );
     return true;
   }
 

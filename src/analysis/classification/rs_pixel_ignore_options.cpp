@@ -3,6 +3,30 @@
 
 #include <QStringList>
 
+#include <gdal_priv.h>
+
+void rsCollectBandNodata( GDALDataset *ds, const QVector<int> &bandIndices,
+                          const RsPixelIgnoreOptions &options,
+                          std::vector<bool> &bandHasNodata,
+                          std::vector<float> &bandNodata )
+{
+  const size_t B = static_cast<size_t>( bandIndices.size() );
+  bandHasNodata.assign( B, false );
+  bandNodata.assign( B, 0.f );
+  if ( !ds || !options.useSourceNodata )
+    return;
+  for ( int bi = 0; bi < bandIndices.size(); ++bi )
+  {
+    int success = 0;
+    const double nd = ds->GetRasterBand( bandIndices[bi] )->GetNoDataValue( &success );
+    if ( success )
+    {
+      bandHasNodata[static_cast<size_t>( bi )] = true;
+      bandNodata[static_cast<size_t>( bi )] = static_cast<float>( nd );
+    }
+  }
+}
+
 void RsPixelIgnoreOptions::setIgnoreValuesFromText( const QString &text )
 {
   ignoreValues.clear();

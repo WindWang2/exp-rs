@@ -25,6 +25,8 @@ if(SICNU_HAS_OPENCV)
         rs_classifier_normalbayes.cpp
         rs_classifier_svm.cpp
         rs_classifier_kmeans.cpp
+        # ADR 0061 — single method-name → backend construction owner.
+        rs_classifier_backend_factory.cpp
         # Phase 10A review patch — stratified train/test split helper.
         rs_classification_split.cpp
         # Phase 10A Task 10.9 — confusion matrix + Kappa + per-class P/R/F1.
@@ -36,12 +38,9 @@ if(SICNU_HAS_OPENCV)
         # ADR 0019 S1 — unified training-sample extraction (ROIs/vector → X/y).
         rs_training_data_extraction.cpp
         # ADR 0019 S2 — classification pipeline core (train → persist →
-        # tiled predict → class map → accuracy); GUI-free, consumed by the
-        # RsClassificationTask QgsTask adapter.
+        # tiled predict → class map → accuracy); GUI-free seam consumed
+        # directly by the app (QgsTask adapter deleted in ADR 0053).
         rs_classification_pipeline.cpp
-        # Async cross-validation task (QgsTask-based, non-blocking UI).
-        rs_cv_task.cpp
-        rs_cv_task.h
         rs_feature_scaler.cpp
         # Classification workflow — post-process pure operators (sieve/majority/clump/recode).
         rs_post_process.cpp

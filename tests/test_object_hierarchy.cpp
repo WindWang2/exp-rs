@@ -9,7 +9,10 @@
 #include "analysis/segmentation/rs_hierarchy_features.h"
 #include "analysis/segmentation/rs_class_raster.h"
 #include "analysis/segmentation/rs_object_classify.h"
+#include "analysis/segmentation/rs_segment_map.h"
 #include "analysis/segmentation/rs_otb_segmenter.h"
+#include "analysis/segmentation/rs_majority_vote.h"
+#include "analysis/segmentation/rs_roi_labeler.h"
 
 #include <QDir>
 #include <QFile>
@@ -17,6 +20,7 @@
 
 #include <gdal.h>
 #include <gdal_priv.h>
+#include <ogr_api.h>
 
 using Catch::Approx;
 
@@ -551,6 +555,86 @@ TEST_CASE( "ClassRaster polygonize smoke masks background", "[hierarchy][writeba
     REQUIRE( QFile::exists( shpPath ) );
 }
 
+// ---------------------------------------------------------------------------
+// ADR 0054 SegmentMap write side: toGeoTIFF
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "SegmentMap toGeoTIFF round-trips ids and georeferencing", "[segmentmap][writeback]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString ref = writeTinyRefRaster( tmp.path() );
+    const QString out = tmp.path() + QStringLiteral( "/labels.tif" );
+
+    auto fine = makeFineMap(); // 4x4, ids 1..4 (two 2x2 blocks each)
+    QString err;
+    REQUIRE( fine.toGeoTIFF( out, ref, &err ) );
+
+    // UInt32 output with reference grid size
+    GDALDatasetH ds = GDALOpen( out.toUtf8().constData(), GA_ReadOnly );
+    REQUIRE( ds );
+    REQUIRE( GDALGetRasterXSize( ds ) == 4 );
+    REQUIRE( GDALGetRasterYSize( ds ) == 4 );
+    REQUIRE( GDALGetRasterDataType( GDALGetRasterBand( ds, 1 ) ) == GDT_UInt32 );
+
+    // Geotransform copied from the reference raster
+    double gt[6] = { 0, 0, 0, 0, 0, 0 };
+    REQUIRE( GDALGetGeoTransform( ds, gt ) == CE_None );
+    REQUIRE( gt[0] == Approx( 100.0 ) );
+    REQUIRE( gt[1] == Approx( 1.0 ) );
+    REQUIRE( gt[5] == Approx( -1.0 ) );
+
+    // NoData must be 0
+    int success = 0;
+    const double nd = GDALGetRasterNoDataValue( GDALGetRasterBand( ds, 1 ), &success );
+    GDALClose( ds );
+    REQUIRE( success );
+    REQUIRE( nd == Approx( 0.0 ) );
+
+    // Round-trip through fromGeoTIFF preserves ids (independent literals)
+    RsSegmentMap loaded = RsSegmentMap::fromGeoTIFF( out );
+    REQUIRE( loaded.width() == 4 );
+    REQUIRE( loaded.height() == 4 );
+    REQUIRE( loaded.segmentCount() == 4 );
+    REQUIRE( loaded.labelAt( 0, 0 ) == 1 );
+    REQUIRE( loaded.labelAt( 0, 3 ) == 2 );
+    REQUIRE( loaded.labelAt( 2, 0 ) == 3 );
+    REQUIRE( loaded.labelAt( 3, 3 ) == 4 );
+}
+
+TEST_CASE( "SegmentMap toGeoTIFF fails closed without reference raster", "[segmentmap][writeback]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString out = tmp.path() + QStringLiteral( "/nolabels.tif" );
+
+    auto fine = makeFineMap();
+    QString err;
+    REQUIRE_FALSE( fine.toGeoTIFF( out, tmp.path() + QStringLiteral( "/missing.tif" ), &err ) );
+    REQUIRE( !err.isEmpty() );
+    // Incomplete GeoTIFF from GDALCreate must be removed on failure.
+    REQUIRE_FALSE( QFile::exists( out ) );
+}
+
+TEST_CASE( "SegmentMap toGeoTIFF fails on grid size mismatch", "[segmentmap][writeback]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    GDALAllRegister();
+    const QString badRef = tmp.path() + QStringLiteral( "/badref.tif" );
+    GDALDriverH drv = GDALGetDriverByName( "GTiff" );
+    GDALDatasetH ds = GDALCreate( drv, badRef.toUtf8().constData(), 2, 2, 1, GDT_Byte, nullptr );
+    REQUIRE( ds );
+    GDALClose( ds );
+
+    const QString out = tmp.path() + QStringLiteral( "/mismatch.tif" );
+    auto fine = makeFineMap(); // 4x4
+    QString err;
+    REQUIRE_FALSE( fine.toGeoTIFF( out, badRef, &err ) );
+    REQUIRE( err.contains( QStringLiteral( "size" ), Qt::CaseInsensitive ) );
+    REQUIRE_FALSE( QFile::exists( out ) );
+}
+
 TEST_CASE( "buildLevels parent-link failure clears hierarchy", "[hierarchy][buildLevels]" )
 {
     class FailingLinker : public RsParentLinkStrategy
@@ -638,25 +722,197 @@ TEST_CASE( "buildLevels cancel path clears hierarchy", "[hierarchy][buildLevels]
 
 TEST_CASE( "ROI majority tie prefers smaller class id", "[hierarchy][roi]" )
 {
-    // Pure unit of the tie rule used by GUI/operator (inlined here for seam test).
+    // ADR 0060: the rule previously inlined here (and re-implemented in
+    // rs_parent_link.cpp plus both operator labelers) now delegates to the
+    // single analysis-layer owner, majorityKeyWithTieBreak.
     QHash<int, int> votes;
     votes[7] = 3;
     votes[5] = 3; // equal votes
     votes[9] = 1;
 
-    int bestClass = 0;
-    int bestCount = 0;
-    for ( auto cit = votes.constBegin(); cit != votes.constEnd(); ++cit )
+    REQUIRE( majorityKeyWithTieBreak( votes ) == 5 );
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0060 — single owner of the pixel-majority tie-break rule
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Majority vote kernel picks the clear majority", "[hierarchy][roi][majority]" )
+{
+    QHash<int, int> votes;
+    votes[1] = 5;
+    votes[2] = 2;
+    votes[3] = 9;
+    REQUIRE( majorityKeyWithTieBreak( votes ) == 3 );
+}
+
+TEST_CASE( "Majority vote kernel empty and single-key inputs", "[hierarchy][roi][majority]" )
+{
+    QHash<quint32, int> empty;
+    REQUIRE( majorityKeyWithTieBreak( empty ) == 0 );
+
+    QHash<quint32, int> single;
+    single[42] = 7;
+    REQUIRE( majorityKeyWithTieBreak( single ) == 42 );
+
+    // Parent-link shape: quint32 keys, tie → smaller coarse id.
+    QHash<quint32, int> parentShape;
+    parentShape[20] = 2;
+    parentShape[10] = 2;
+    parentShape[30] = 1;
+    REQUIRE( majorityKeyWithTieBreak( parentShape ) == 10 );
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0060 — RsRoiLabeler (canonical ROI-majority segment labeling)
+// ---------------------------------------------------------------------------
+
+/// Single-layer GPKG with one integer field and one axis-aligned square.
+/// Coordinates are map units of the 4x4 ref raster GT {100,1,0,200,0,-1}:
+/// pixel (col,row) center = (100 + col + 0.5, 200 - row - 0.5).
+static void writeTrainingSquare( const QString &path, const QString &fieldName,
+                                 int classId, double x0, double y0, double x1, double y1,
+                                 bool append = false )
+{
+    GDALAllRegister();
+    OGRRegisterAll();
+    GDALDriverH drv = GDALGetDriverByName( "GPKG" );
+    REQUIRE( drv != nullptr );
+    GDALDatasetH ds = append
+        ? GDALOpenEx( path.toUtf8().constData(), GDAL_OF_VECTOR | GDAL_OF_UPDATE,
+                      nullptr, nullptr, nullptr )
+        : GDALCreate( drv, path.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
+    REQUIRE( ds != nullptr );
+    OGRLayerH lyr = append
+        ? GDALDatasetGetLayer( ds, 0 )
+        : GDALDatasetCreateLayer( ds, "training", nullptr, wkbPolygon, nullptr );
+    REQUIRE( lyr != nullptr );
+    int fieldIdx = 0;
+    if ( !append )
     {
-        if ( cit.value() > bestCount
-             || ( cit.value() == bestCount && ( bestClass == 0 || cit.key() < bestClass ) ) )
-        {
-            bestCount = cit.value();
-            bestClass = cit.key();
-        }
+        OGRFieldDefnH fld = OGR_Fld_Create( fieldName.toUtf8().constData(), OFTInteger );
+        REQUIRE( OGR_L_CreateField( lyr, fld, true ) == OGRERR_NONE );
+        OGR_Fld_Destroy( fld );
     }
-    REQUIRE( bestClass == 5 );
-    REQUIRE( bestCount == 3 );
+    OGRGeometryH ring = OGR_G_CreateGeometry( wkbLinearRing );
+    OGR_G_AddPoint_2D( ring, x0, y0 );
+    OGR_G_AddPoint_2D( ring, x1, y0 );
+    OGR_G_AddPoint_2D( ring, x1, y1 );
+    OGR_G_AddPoint_2D( ring, x0, y1 );
+    OGR_G_AddPoint_2D( ring, x0, y0 );
+    OGRGeometryH poly = OGR_G_CreateGeometry( wkbPolygon );
+    REQUIRE( OGR_G_AddGeometryDirectly( poly, ring ) == OGRERR_NONE );
+    OGRFeatureH feat = OGR_F_Create( OGR_L_GetLayerDefn( lyr ) );
+    OGR_F_SetFieldInteger( feat, fieldIdx, classId );
+    REQUIRE( OGR_F_SetGeometryDirectly( feat, poly ) == OGRERR_NONE );
+    REQUIRE( OGR_L_CreateFeature( lyr, feat ) == OGRERR_NONE );
+    OGR_F_Destroy( feat );
+    GDALClose( ds );
+}
+
+TEST_CASE( "RsRoiLabeler labels segments by ROI pixel majority", "[hierarchy][roi][labeler]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString ref = writeTinyRefRaster( tmp.path() );
+    const QString vec = tmp.path() + QStringLiteral( "/train.gpkg" );
+
+    auto fine = makeFineMap(); // segs 1,2 top row; 3,4 bottom row
+    // Class 7 over the left column pair (segs 1 + 3), class 9 over the
+    // top-right 2x2 (seg 2); seg 4 stays unlabeled.
+    writeTrainingSquare( vec, QStringLiteral( "class_id" ), 7, 100.0, 196.1, 101.9, 199.9 );
+    writeTrainingSquare( vec, QStringLiteral( "class_id" ), 9, 102.0, 198.1, 103.9, 199.9, true );
+
+    QString err;
+    QMap<quint32, int> labels = RsRoiLabeler::labelByMajority(
+        fine, ref, vec, QStringLiteral( "class_id" ), 1, &err );
+    REQUIRE( err.isEmpty() );
+    REQUIRE( labels.value( 1 ) == 7 );
+    REQUIRE( labels.value( 2 ) == 9 );
+    REQUIRE( labels.value( 3 ) == 7 );
+    REQUIRE( !labels.contains( 4 ) );
+}
+
+TEST_CASE( "RsRoiLabeler tie breaks to the smaller class id", "[hierarchy][roi][labeler]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString ref = writeTinyRefRaster( tmp.path() );
+    const QString vec = tmp.path() + QStringLiteral( "/tie.gpkg" );
+
+    auto fine = makeFineMap();
+    // Two polygons covering exactly seg 1 (4 px) with different class ids.
+    writeTrainingSquare( vec, QStringLiteral( "class_id" ), 11, 100.0, 198.1, 101.9, 199.9 );
+    writeTrainingSquare( vec, QStringLiteral( "class_id" ), 13, 100.0, 198.1, 101.9, 199.9, true );
+
+    QString err;
+    QMap<quint32, int> labels = RsRoiLabeler::labelByMajority(
+        fine, ref, vec, QStringLiteral( "class_id" ), 4, &err );
+    REQUIRE( err.isEmpty() );
+    REQUIRE( labels.value( 1 ) == 11 );
+}
+
+TEST_CASE( "RsRoiLabeler applies minLabelPixels and classField fallback", "[hierarchy][roi][labeler]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString ref = writeTinyRefRaster( tmp.path() );
+    const QString vec = tmp.path() + QStringLiteral( "/fallback.gpkg" );
+
+    auto fine = makeFineMap();
+    // Field is "id" — requesting "class_id" must fall back (classField →
+    // "class" → "id"). Two pixels of seg 2 only (col 2, rows 0-1).
+    writeTrainingSquare( vec, QStringLiteral( "id" ), 17, 102.0, 198.1, 102.9, 199.9 );
+
+    QString err;
+    QMap<quint32, int> labels = RsRoiLabeler::labelByMajority(
+        fine, ref, vec, QStringLiteral( "class_id" ), 5, &err );
+    REQUIRE( err.isEmpty() );
+    // 2 ROI pixels < minLabelPixels 5 → no segment labeled.
+    REQUIRE( labels.isEmpty() );
+}
+
+TEST_CASE( "RsRoiLabeler fails closed on bad inputs and honors cancel", "[hierarchy][roi][labeler]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString ref = writeTinyRefRaster( tmp.path() );
+    const QString vec = tmp.path() + QStringLiteral( "/ok.gpkg" );
+    writeTrainingSquare( vec, QStringLiteral( "class_id" ), 1, 100.0, 198.1, 101.9, 199.9 );
+
+    auto fine = makeFineMap();
+
+    // Missing training file → empty + error.
+    QString err;
+    QMap<quint32, int> missing = RsRoiLabeler::labelByMajority(
+        fine, ref, tmp.path() + QStringLiteral( "/nope.gpkg" ),
+        QStringLiteral( "class_id" ), 1, &err );
+    REQUIRE( missing.isEmpty() );
+    REQUIRE( !err.isEmpty() );
+
+    // Missing reference raster → empty + error (fail closed, like toGeoTIFF).
+    err.clear();
+    QMap<quint32, int> noRef = RsRoiLabeler::labelByMajority(
+        fine, tmp.path() + QStringLiteral( "/nope.tif" ), vec,
+        QStringLiteral( "class_id" ), 1, &err );
+    REQUIRE( noRef.isEmpty() );
+    REQUIRE( !err.isEmpty() );
+
+    // Unknown class field with no fallback → empty + error.
+    err.clear();
+    QMap<quint32, int> badField = RsRoiLabeler::labelByMajority(
+        fine, ref, vec, QStringLiteral( "nope" ), 1, &err );
+    REQUIRE( badField.isEmpty() );
+    REQUIRE( !err.isEmpty() );
+
+    // Cancellation → empty + error, polled before any feature work.
+    err.clear();
+    bool cancel = true;
+    QMap<quint32, int> canceled = RsRoiLabeler::labelByMajority(
+        fine, ref, vec, QStringLiteral( "class_id" ), 1, &err,
+        [&cancel]() { return cancel; } );
+    REQUIRE( canceled.isEmpty() );
+    REQUIRE( err.contains( QStringLiteral( "cancel" ), Qt::CaseInsensitive ) );
 }
 
 #ifdef SICNU_HAS_OPENCV

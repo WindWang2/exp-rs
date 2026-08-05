@@ -6,8 +6,6 @@
 #include <qgsmaplayer.h>
 #include <qgsrectangle.h>
 
-#include <QJsonArray>
-#include <QJsonObject>
 #include <QStringList>
 
 namespace sicnu::agent
@@ -92,57 +90,6 @@ WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager, Ac
   }
 
   return snapshot;
-}
-
-QJsonObject WorkspaceSnapshot::toJson() const
-{
-  QJsonObject obj;
-  QJsonArray assetsArr;
-
-  for ( const auto &asset : assets )
-  {
-    QJsonObject assetObj;
-    assetObj[QStringLiteral( "id" )] = asset.id;
-    assetObj[QStringLiteral( "displayName" )] = asset.displayName;
-    assetObj[QStringLiteral( "path" )] = asset.path;
-    assetObj[QStringLiteral( "kind" )] = assetKindToString( asset.kind );
-
-    if ( asset.kind == data::AssetKind::Raster || asset.kind == data::AssetKind::VirtualRaster )
-    {
-      assetObj[QStringLiteral( "width" )] = asset.width;
-      assetObj[QStringLiteral( "height" )] = asset.height;
-      assetObj[QStringLiteral( "bands" )] = asset.bandCount;
-      if ( !asset.crsWkt.isEmpty() )
-        assetObj[QStringLiteral( "crsWkt" )] = asset.crsWkt;
-    }
-    else if ( asset.kind == data::AssetKind::Vector )
-    {
-      assetObj[QStringLiteral( "layerCount" )] = asset.layerCount;
-      if ( !asset.crsWkt.isEmpty() )
-        assetObj[QStringLiteral( "crsWkt" )] = asset.crsWkt;
-    }
-
-    assetsArr.append( assetObj );
-  }
-
-  obj[QStringLiteral( "assets" )] = assetsArr;
-
-  if ( !mapView.crsAuthId.isEmpty() || !mapView.extentStr.isEmpty() || !mapView.activeLayerName.isEmpty() )
-  {
-    QJsonObject mapObj;
-    if ( !mapView.crsAuthId.isEmpty() )
-      mapObj[QStringLiteral( "crs" )] = mapView.crsAuthId;
-    if ( !mapView.extentStr.isEmpty() )
-      mapObj[QStringLiteral( "extent" )] = mapView.extentStr;
-    if ( mapView.scale > 0.0 )
-      mapObj[QStringLiteral( "scale" )] = mapView.scale;
-    if ( !mapView.activeLayerName.isEmpty() )
-      mapObj[QStringLiteral( "selectedLayer" )] = mapView.activeLayerName;
-
-    obj[QStringLiteral( "mapView" )] = mapObj;
-  }
-
-  return obj;
 }
 
 QString WorkspaceSnapshot::toSystemPromptHeader() const

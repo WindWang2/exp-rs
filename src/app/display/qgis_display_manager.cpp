@@ -911,4 +911,104 @@ QgsMapLayer *QgisDisplayManager::mapLayer(DisplayLayerId layerId) const {
   return record ? record->mapLayer.data() : nullptr;
 }
 
+data::Result<void> QgisDisplayManager::setLayerVisible(DisplayLayerId layerId, bool visible) {
+  const Impl::LayerRecord *layerRecord = m_impl->findLayer(layerId);
+  if (!layerRecord) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.invalid_layer"),
+        QStringLiteral("No registered display layer matches the requested id")));
+  }
+  const Impl::ViewRecord *viewRecord = m_impl->findView(layerRecord->snapshot.viewId());
+  if (!viewRecord || !viewRecord->layerTree || !layerRecord->mapLayer) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.invalid_view"),
+        QStringLiteral("View or layer tree unavailable")));
+  }
+  QgsLayerTreeLayer *node = viewRecord->layerTree->findLayer(layerRecord->mapLayer->id());
+  if (node) {
+    node->setItemVisibilityChecked(visible);
+  }
+  return data::Result<void>::success();
+}
+
+bool QgisDisplayManager::isLayerVisible(DisplayLayerId layerId) const {
+  const Impl::LayerRecord *layerRecord = m_impl->findLayer(layerId);
+  if (!layerRecord) return false;
+  const Impl::ViewRecord *viewRecord = m_impl->findView(layerRecord->snapshot.viewId());
+  if (!viewRecord || !viewRecord->layerTree || !layerRecord->mapLayer) return false;
+  QgsLayerTreeLayer *node = viewRecord->layerTree->findLayer(layerRecord->mapLayer->id());
+  return node ? node->itemVisibilityChecked() : false;
+}
+
+data::Result<void> QgisDisplayManager::moveLayerTop(DisplayLayerId layerId) {
+  Impl::LayerRecord *layerRecord = m_impl->findLayer(layerId);
+  if (!layerRecord) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.invalid_layer"),
+        QStringLiteral("No registered display layer matches the requested id")));
+  }
+  Impl::ViewRecord *viewRecord = m_impl->findView(layerRecord->snapshot.viewId());
+  if (!viewRecord) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.invalid_view"),
+        QStringLiteral("View unavailable")));
+  }
+  viewRecord->layerIds.removeAll(layerId);
+  viewRecord->layerIds.prepend(layerId);
+  if (viewRecord->layerTree && layerRecord->mapLayer) {
+    QgsLayerTreeLayer *node = viewRecord->layerTree->findLayer(layerRecord->mapLayer->id());
+    if (node) {
+      QgsLayerTreeGroup *parentGroup = QgsLayerTree::toGroup(node->parent());
+      if (!parentGroup) parentGroup = viewRecord->layerTree.data();
+      if (parentGroup) {
+        int idx = parentGroup->children().indexOf(node);
+        if (idx > 0) {
+          QgsLayerTreeNode *cloned = node->clone();
+          parentGroup->insertChildNode(0, cloned);
+          parentGroup->removeChildren(idx + 1, 1);
+        }
+      }
+    }
+  }
+  if (viewRecord->bridge)
+    viewRecord->bridge->setCanvasLayers();
+  return data::Result<void>::success();
+}
+
+data::Result<void> QgisDisplayManager::moveLayerBottom(DisplayLayerId layerId) {
+  Impl::LayerRecord *layerRecord = m_impl->findLayer(layerId);
+  if (!layerRecord) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.invalid_layer"),
+        QStringLiteral("No registered display layer matches the requested id")));
+  }
+  Impl::ViewRecord *viewRecord = m_impl->findView(layerRecord->snapshot.viewId());
+  if (!viewRecord) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.invalid_view"),
+        QStringLiteral("View unavailable")));
+  }
+  viewRecord->layerIds.removeAll(layerId);
+  viewRecord->layerIds.append(layerId);
+  if (viewRecord->layerTree && layerRecord->mapLayer) {
+    QgsLayerTreeLayer *node = viewRecord->layerTree->findLayer(layerRecord->mapLayer->id());
+    if (node) {
+      QgsLayerTreeGroup *parentGroup = QgsLayerTree::toGroup(node->parent());
+      if (!parentGroup) parentGroup = viewRecord->layerTree.data();
+      if (parentGroup) {
+        int lastIdx = parentGroup->children().count() - 1;
+        int idx = parentGroup->children().indexOf(node);
+        if (idx >= 0 && idx < lastIdx) {
+          QgsLayerTreeNode *cloned = node->clone();
+          parentGroup->addChildNode(cloned);
+          parentGroup->removeChildren(idx, 1);
+        }
+      }
+    }
+  }
+  if (viewRecord->bridge)
+    viewRecord->bridge->setCanvasLayers();
+  return data::Result<void>::success();
+}
+
 } // namespace sicnu::display

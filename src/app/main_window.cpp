@@ -176,8 +176,7 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     applyProductShellLayout();
 
 #ifdef SICNU_EMBED_PYTHON
-    // Initialize Python API with map canvas and active view host
-    SicnuPythonApi::instance().initialize(m_mapCanvas);
+    // Initialize Python API with active view host (ADR 0043: no direct canvas).
     SicnuPythonApi::instance().setActiveViewHost(m_activeViewHost.get());
 #endif
 

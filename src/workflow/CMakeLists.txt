@@ -3,8 +3,6 @@ set(SICNU_WORKFLOW_SOURCES
   workflow_definition.cpp
   workflow_gate.cpp
   workflow_session.cpp
-  workflow_registry.cpp
-  workflow_runner.cpp
   workflow_runtime.cpp
   builtin_definitions.cpp
   placeholder_grammar.cpp

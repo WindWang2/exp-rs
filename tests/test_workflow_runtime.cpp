@@ -9,7 +9,6 @@
 #include "workflow/builtin_definitions.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_gate.h"
-#include "workflow/workflow_registry.h"
 #include "workflow/workflow_runtime.h"
 #include "workflow/workflow_session.h"
 #include "workflow/workflow_types.h"
@@ -120,13 +119,13 @@ TEST_CASE( "workflow types compile", "[workflow]" )
   REQUIRE( d.id == "tool.test" );
 }
 
-TEST_CASE( "Registry stores definitions", "[workflow]" )
+TEST_CASE( "Runtime stores definitions", "[workflow]" )
 {
-  WorkflowRegistry reg;
-  reg.registerDefinition( makeTwoStep() );
-  REQUIRE( reg.has( "tool.demo" ) );
-  REQUIRE_FALSE( reg.has( "missing" ) );
-  const auto *d = reg.find( "tool.demo" );
+  WorkflowRuntime rt( false );
+  rt.registerDefinition( makeTwoStep() );
+  REQUIRE( rt.hasDefinition( "tool.demo" ) );
+  REQUIRE_FALSE( rt.hasDefinition( "missing" ) );
+  const auto *d = rt.findDefinition( "tool.demo" );
   REQUIRE( d != nullptr );
   REQUIRE( d->steps.size() == 2 );
 }
@@ -218,24 +217,24 @@ TEST_CASE( "Gate empty list passes", "[workflow][gate]" )
 
 TEST_CASE( "Builtin workflows registered", "[workflow]" )
 {
-  WorkflowRegistry reg;
-  registerBuiltinWorkflows( reg );
+  WorkflowRuntime rt;
   // Atomic TaskPanel tools
-  REQUIRE( reg.has( "tool.rs.spectral_index" ) );
-  REQUIRE( reg.has( "tool.rs.band_math" ) );
-  REQUIRE( reg.has( "tool.rs.change_detection" ) );
-  REQUIRE( reg.has( "tool.rs.image_fusion" ) );
-  REQUIRE( reg.has( "tool.rs.mosaic" ) );
-  REQUIRE( reg.has( "tool.rs.terrain_analysis" ) );
-  REQUIRE( reg.has( "tool.rs.pca" ) );
-  REQUIRE( reg.has( "tool.rs.atmospheric_correction" ) );
+  REQUIRE( rt.hasDefinition( "tool.rs.spectral_index" ) );
+  REQUIRE( rt.hasDefinition( "tool.rs.band_math" ) );
+  REQUIRE( rt.hasDefinition( "tool.rs.change_detection" ) );
+  REQUIRE( rt.hasDefinition( "tool.rs.image_fusion" ) );
+  REQUIRE( rt.hasDefinition( "tool.rs.mosaic" ) );
+  REQUIRE( rt.hasDefinition( "tool.rs.terrain_analysis" ) );
+  REQUIRE( rt.hasDefinition( "tool.rs.pca" ) );
+  REQUIRE( rt.hasDefinition( "tool.rs.atmospheric_correction" ) );
   // Workspace labs
-  REQUIRE( reg.has( "lab.classify.supervised" ) );
-  REQUIRE( reg.has( "lab.georef.image_to_map" ) );
-  REQUIRE( reg.has( "lab.obia" ) );
-  REQUIRE( reg.ids().size() == 11 );
+  REQUIRE( rt.hasDefinition( "lab.classify.supervised" ) );
+  REQUIRE( rt.hasDefinition( "lab.georef.image_to_map" ) );
+  REQUIRE( rt.hasDefinition( "lab.obia" ) );
+  REQUIRE( rt.hasDefinition( "classification_postprocess_merge" ) );
+  REQUIRE( rt.registeredDefinitionIds().size() == 20 );
 
-  const auto *d = reg.find( "tool.rs.spectral_index" );
+  const auto *d = rt.findDefinition( "tool.rs.spectral_index" );
   REQUIRE( d );
   REQUIRE( d->host == HostKind::TaskPanel );
   REQUIRE( d->steps.size() == 1 );
@@ -247,9 +246,8 @@ TEST_CASE( "Builtin workflows registered", "[workflow]" )
 
 TEST_CASE( "Builtin lab.classify.supervised has 7 steps in order", "[workflow]" )
 {
-  WorkflowRegistry reg;
-  registerBuiltinWorkflows( reg );
-  const auto *d = reg.find( "lab.classify.supervised" );
+  WorkflowRuntime rt;
+  const auto *d = rt.findDefinition( "lab.classify.supervised" );
   REQUIRE( d );
   REQUIRE( d->host == HostKind::Workspace );
   REQUIRE( d->workspaceKind == "classify" );
@@ -290,7 +288,6 @@ TEST_CASE( "Builtin lab.classify.supervised has 7 steps in order", "[workflow]" 
   REQUIRE_FALSE( d->steps[4].gates.empty() );
   REQUIRE( d->steps[4].gates[0].require == "hasArtifact:classified_output" );
 
-  WorkflowRuntime rt( reg );
   const auto sid = rt.open( "lab.classify.supervised" );
   REQUIRE_FALSE( sid.empty() );
   REQUIRE( rt.state( sid ).currentStepId == "classes" );
@@ -300,9 +297,8 @@ TEST_CASE( "Builtin lab.classify.supervised has 7 steps in order", "[workflow]" 
 
 TEST_CASE( "Builtin lab.georef.image_to_map has 6 steps in order", "[workflow]" )
 {
-  WorkflowRegistry reg;
-  registerBuiltinWorkflows( reg );
-  const auto *d = reg.find( "lab.georef.image_to_map" );
+  WorkflowRuntime rt;
+  const auto *d = rt.findDefinition( "lab.georef.image_to_map" );
   REQUIRE( d );
   REQUIRE( d->host == HostKind::Workspace );
   REQUIRE( d->workspaceKind == "georef" );
@@ -341,7 +337,6 @@ TEST_CASE( "Builtin lab.georef.image_to_map has 6 steps in order", "[workflow]" 
   REQUIRE_FALSE( d->steps[5].gates.empty() );
   REQUIRE( d->steps[5].gates[0].require == "hasArtifact:output" );
 
-  WorkflowRuntime rt( reg );
   const auto sid = rt.open( "lab.georef.image_to_map" );
   REQUIRE_FALSE( sid.empty() );
   REQUIRE( rt.state( sid ).currentStepId == "open_image" );
@@ -359,9 +354,8 @@ TEST_CASE( "Builtin lab.georef.image_to_map has 6 steps in order", "[workflow]" 
 
 TEST_CASE( "Builtin lab.obia has 5 steps in order", "[workflow]" )
 {
-  WorkflowRegistry reg;
-  registerBuiltinWorkflows( reg );
-  const auto *d = reg.find( "lab.obia" );
+  WorkflowRuntime rt;
+  const auto *d = rt.findDefinition( "lab.obia" );
   REQUIRE( d );
   REQUIRE( d->host == HostKind::Workspace );
   REQUIRE( d->workspaceKind == "obia" );
@@ -403,7 +397,6 @@ TEST_CASE( "Builtin lab.obia has 5 steps in order", "[workflow]" )
   REQUIRE_FALSE( d->steps[4].gates.empty() );
   REQUIRE( d->steps[4].gates[0].require == "hasArtifact:classified_output" );
 
-  WorkflowRuntime rt( reg );
   const auto sid = rt.open( "lab.obia" );
   REQUIRE_FALSE( sid.empty() );
   REQUIRE( rt.state( sid ).currentStepId == "open_image" );
@@ -418,8 +411,7 @@ TEST_CASE( "Builtin lab.obia has 5 steps in order", "[workflow]" )
 
 TEST_CASE( "Runtime open returns empty for missing definition", "[workflow]" )
 {
-  WorkflowRegistry reg;
-  WorkflowRuntime rt( reg );
+  WorkflowRuntime rt( false );
   auto id = rt.open( "does.not.exist" );
   REQUIRE( id.empty() );
 }
@@ -428,12 +420,11 @@ TEST_CASE( "Runtime open and canRun respects step gates", "[workflow]" )
 {
   ensureTestAddRegistered();
 
-  WorkflowRegistry reg;
+  WorkflowRuntime rt( false );
   WorkflowDefinition d = makeTwoStep();
   d.steps[0].gates.push_back( {"paramNonEmpty:configure.a", "需要参数 a"} );
-  reg.registerDefinition( d );
+  rt.registerDefinition( d );
 
-  WorkflowRuntime rt( reg );
   auto id = rt.open( "tool.demo" );
   REQUIRE_FALSE( id.empty() );
 
@@ -452,7 +443,7 @@ TEST_CASE( "Runtime run operator writes artifact", "[workflow]" )
 {
   ensureTestAddRegistered();
 
-  WorkflowRegistry reg;
+  WorkflowRuntime rt( false );
   WorkflowDefinition d;
   d.id = "tool.add";
   d.title = "Add";
@@ -464,9 +455,8 @@ TEST_CASE( "Runtime run operator writes artifact", "[workflow]" )
   step.operatorId = "test:add";
   // no gates; TestAddOperator returns {"result": sum}
   d.steps = {step};
-  reg.registerDefinition( d );
+  rt.registerDefinition( d );
 
-  WorkflowRuntime rt( reg );
   auto id = rt.open( "tool.add" );
   REQUIRE_FALSE( id.empty() );
 
@@ -488,3 +478,89 @@ TEST_CASE( "Runtime run operator writes artifact", "[workflow]" )
   REQUIRE( snap.completedStepIds.size() == 1 );
   REQUIRE( snap.completedStepIds.front() == "run" );
 }
+
+TEST_CASE( "WorkflowSession resolveParams resolves placeholders using artifacts", "[workflow][placeholder]" )
+{
+  WorkflowDefinition d;
+  d.id = "tool.pipeline";
+  d.title = "Pipeline";
+  d.host = HostKind::TaskPanel;
+
+  StepDef step1;
+  step1.id = "step1";
+  step1.title = "Step 1";
+  step1.kind = StepKind::Operator;
+  step1.artifactOnSuccess = "raster_output";
+
+  StepDef step2;
+  step2.id = "step2";
+  step2.title = "Step 2";
+  step2.kind = StepKind::Operator;
+
+  d.steps = {step1, step2};
+
+  WorkflowSession sess( d, "sess-test" );
+  sess.setArtifact( "raster_output", "/path/to/extracted.tif" );
+
+  Json::Value rawParams;
+  rawParams["input"] = "$step1.output";
+  rawParams["mode"] = "fast";
+  sess.setParams( "step2", rawParams );
+
+  REQUIRE( sess.paramsFor( "step2" )["input"].asString() == "$step1.output" );
+
+  Json::Value resolved = sess.resolveParams( "step2" );
+  REQUIRE( resolved["input"].asString() == "/path/to/extracted.tif" );
+  REQUIRE( resolved["mode"].asString() == "fast" );
+}
+
+TEST_CASE( "WorkflowSession pipelineId binding stores pipeline reference in snapshot", "[workflow][pipeline_id]" )
+{
+  WorkflowDefinition d = makeTwoStep();
+  WorkflowSession session( d, "sess-pipe" );
+  REQUIRE( session.pipelineId() == -1 );
+  REQUIRE( session.snapshot().pipelineId == -1 );
+
+  session.setPipelineId( 42 );
+  REQUIRE( session.pipelineId() == 42 );
+  REQUIRE( session.snapshot().pipelineId == 42 );
+
+  SECTION( "snapshot enriches completedStepIds from pipeline resolver" )
+  {
+    // Without a resolver, no enrichment — snapshot only has local state
+    REQUIRE( session.snapshot().completedStepIds.empty() );
+
+    // Inject a mock resolver that reports "configure" as Completed
+    session.setPipelineStatusResolver( []( long pipelineId ) {
+      REQUIRE( pipelineId == 42 );
+      return std::unordered_map<std::string, PipelineStepStatus>{
+          { "configure", PipelineStepStatus::Completed },
+          { "review", PipelineStepStatus::Running },
+      };
+    } );
+
+    const auto snap = session.snapshot();
+    // "configure" should be enriched into completedStepIds by the resolver
+    REQUIRE( snap.completedStepIds.size() == 1 );
+    REQUIRE( snap.completedStepIds[0] == "configure" );
+    // "review" is still Running — should NOT appear in completedStepIds
+  }
+
+  SECTION( "resolver enrichment does not duplicate locally completed steps" )
+  {
+    session.markStepComplete( "configure" );
+    REQUIRE( session.snapshot().completedStepIds.size() == 1 );
+
+    // Resolver also reports "configure" as Completed — should NOT duplicate
+    session.setPipelineStatusResolver( []( long ) {
+      return std::unordered_map<std::string, PipelineStepStatus>{
+          { "configure", PipelineStepStatus::Completed },
+      };
+    } );
+
+    const auto snap = session.snapshot();
+    REQUIRE( snap.completedStepIds.size() == 1 );
+    REQUIRE( snap.completedStepIds[0] == "configure" );
+  }
+}
+

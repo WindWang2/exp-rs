@@ -9,10 +9,11 @@
 #include "python_ipc_server.h"
 #include "python_worker_process.h"
 #include "app_interface_bridge.h"
-#include "python_app_interface_proxy.h"
 #include "python_worker_process_pool.h"
 #include "plugin_host.h"
 #include "processing/framework/algorithm_engine.h"
+#include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/json_params_converter.h"
 
 #include <QEventLoop>
 #include <QTimer>
@@ -24,6 +25,7 @@
 
 #include <qgsapplication.h>
 #include <qgsproject.h>
+#include <qgsrasterlayer.h>
 #include <qgsmapcanvas.h>
 #include <qgslayertreeview.h>
 #include <qgsmessagebar.h>
@@ -247,7 +249,8 @@ TEST_CASE( "PythonAppInterfaceProxy registers UI action over IPC and routes clic
   REQUIRE( server.listen( socketName ) );
 
   QMenu parentMenu;
-  PythonAppInterfaceProxy uiProxy( &server, nullptr, &parentMenu );
+  AppInterfaceBridge bridge( nullptr, nullptr, &parentMenu );
+  bridge.bindIpcServer( &server );
 
   PythonWorkerProcess worker;
   QString scriptPath = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) );
@@ -276,12 +279,12 @@ TEST_CASE( "PythonAppInterfaceProxy registers UI action over IPC and routes clic
   loop.exec();
 
   CHECK( actionRegistered );
-  CHECK( uiProxy.registeredActionCount() == 1 );
+  CHECK( bridge.registeredActionCount() == 1 );
   CHECK( parentMenu.actions().size() == 1 );
 
   // Trigger C++ action click to verify RPC callback to Python
   bool callbackTriggered = false;
-  QObject::connect( &uiProxy, &PythonAppInterfaceProxy::actionTriggered, [&]( const QString &cbId ) {
+  QObject::connect( &bridge, &AppInterfaceBridge::actionTriggered, [&]( const QString &cbId ) {
     if ( cbId == QStringLiteral( "cb_ui_test_001" ) )
     {
       callbackTriggered = true;
@@ -415,13 +418,14 @@ TEST_CASE( "PythonAppInterfaceProxy handles catalog.get_active_layer, canvas.get
   ActiveViewHost activeViewHost( &canvas, nullptr, nullptr, nullptr, nullptr, sicnu::display::DisplayViewId(), nullptr );
   activeViewHost.setMessageBar( &messageBar );
 
-  PythonAppInterfaceProxy uiProxy( &server, nullptr, &parentMenu, &activeViewHost );
+  AppInterfaceBridge bridge( nullptr, &activeViewHost, &parentMenu );
+  bridge.bindIpcServer( &server );
 
   // Test canvas.get_state IPC message handling
   QJsonObject canvasMsg;
   canvasMsg[QStringLiteral( "method" )] = QStringLiteral( "canvas.get_state" );
   canvasMsg[QStringLiteral( "id" )] = 101;
-  uiProxy.handleIpcMessage( canvasMsg );
+  bridge.handleIpcMessage( canvasMsg );
 
   // Test ui.push_message_bar IPC message handling (string + int level passthrough)
   QJsonObject msgBarMsg;
@@ -432,7 +436,7 @@ TEST_CASE( "PythonAppInterfaceProxy handles catalog.get_active_layer, canvas.get
   msgParams[QStringLiteral( "text" )] = QStringLiteral( "Test Text" );
   msgParams[QStringLiteral( "level" )] = QStringLiteral( "warning" );
   msgBarMsg[QStringLiteral( "params" )] = msgParams;
-  uiProxy.handleIpcMessage( msgBarMsg );
+  bridge.handleIpcMessage( msgBarMsg );
 
   QJsonObject msgBarMsgInt;
   msgBarMsgInt[QStringLiteral( "method" )] = QStringLiteral( "ui.push_message_bar" );
@@ -442,13 +446,13 @@ TEST_CASE( "PythonAppInterfaceProxy handles catalog.get_active_layer, canvas.get
   msgParamsInt[QStringLiteral( "text" )] = QStringLiteral( "Critical Text" );
   msgParamsInt[QStringLiteral( "level" )] = static_cast<int>( Qgis::MessageLevel::Critical );
   msgBarMsgInt[QStringLiteral( "params" )] = msgParamsInt;
-  uiProxy.handleIpcMessage( msgBarMsgInt );
+  bridge.handleIpcMessage( msgBarMsgInt );
 
   // Test catalog.get_active_layer IPC message handling
   QJsonObject layerMsg;
   layerMsg[QStringLiteral( "method" )] = QStringLiteral( "catalog.get_active_layer" );
   layerMsg[QStringLiteral( "id" )] = 103;
-  uiProxy.handleIpcMessage( layerMsg );
+  bridge.handleIpcMessage( layerMsg );
 
   // Test processing.register_algorithm IPC message handling
   QJsonObject regAlgoMsg;
@@ -459,22 +463,21 @@ TEST_CASE( "PythonAppInterfaceProxy handles catalog.get_active_layer, canvas.get
   algoParams[QStringLiteral( "name" )] = QStringLiteral( "Test Python NDVI" );
   algoParams[QStringLiteral( "group" )] = QStringLiteral( "Python Plugins" );
   regAlgoMsg[QStringLiteral( "params" )] = algoParams;
-  uiProxy.handleIpcMessage( regAlgoMsg );
+  bridge.handleIpcMessage( regAlgoMsg );
 
-  auto foundAlgo = sicnu::AlgorithmEngine::instance().findAlgorithm( QStringLiteral( "py:test_ndvi" ) );
+  auto foundAlgo = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( "py:test_ndvi" );
   CHECK( foundAlgo != nullptr );
   if ( foundAlgo )
   {
-    CHECK( foundAlgo->descriptor().name == QStringLiteral( "Test Python NDVI" ) );
-    CHECK( foundAlgo->descriptor().resourceProfile == sicnu::ProviderResourceProfile::PythonWorkerProcess );
+    CHECK( foundAlgo->descriptor().displayName == "Test Python NDVI" );
   }
 
-  CHECK( uiProxy.registeredActionCount() == 0 );
+  CHECK( bridge.registeredActionCount() == 0 );
 }
 
 TEST_CASE( "AppInterfaceBridge consolidates QGIS query routing and JSON serialization", "[python][bridge]" )
 {
-  sicnu::python::isolated::AppInterfaceBridge bridge( nullptr );
+  sicnu::python::isolated::AppInterfaceBridge bridge;
 
   SECTION( "Null ActiveViewHost produces clean fallback summaries" )
   {
@@ -595,13 +598,14 @@ TEST_CASE( "AppInterfaceBridge headless asset seam via DataManager", "[python][b
   }
 }
 
-TEST_CASE( "PythonAppInterfaceProxy serves the asset IPC chain without any QWidget", "[python][isolated][api][headless]" )
+TEST_CASE( "AppInterfaceBridge serves the asset IPC chain without any QWidget", "[python][isolated][api][headless]" )
 {
   using namespace sicnu::python::isolated;
 
   PythonIpcServer server;
   sicnu::data::DataManager dataManager;
-  PythonAppInterfaceProxy proxy( &server, &dataManager );
+  AppInterfaceBridge bridge( &dataManager );
+  bridge.bindIpcServer( &server );
 
   const QString demPath = fixturePath( QStringLiteral( "samples/dem_sample.tif" ) );
 
@@ -612,17 +616,17 @@ TEST_CASE( "PythonAppInterfaceProxy serves the asset IPC chain without any QWidg
   QJsonObject addParams;
   addParams[QStringLiteral( "path" )] = demPath;
   addMsg[QStringLiteral( "params" )] = addParams;
-  proxy.handleIpcMessage( addMsg );
+  bridge.handleIpcMessage( addMsg );
 
-  const sicnu::data::AssetId addedId = proxy.bridge().activeAssetId();
+  const sicnu::data::AssetId addedId = bridge.activeAssetId();
   REQUIRE( !addedId.isNull() );
 
   // catalog.get_active_layer resolves the active asset from the catalog.
   QJsonObject getMsg;
   getMsg[QStringLiteral( "method" )] = QStringLiteral( "catalog.get_active_layer" );
   getMsg[QStringLiteral( "id" )] = 202;
-  proxy.handleIpcMessage( getMsg );
-  const auto summary = proxy.bridge().getActiveLayerSummary();
+  bridge.handleIpcMessage( getMsg );
+  const auto summary = bridge.getActiveLayerSummary();
   REQUIRE( summary.isValid );
   CHECK( summary.source == demPath );
 
@@ -633,15 +637,15 @@ TEST_CASE( "PythonAppInterfaceProxy serves the asset IPC chain without any QWidg
   QJsonObject setParams;
   setParams[QStringLiteral( "asset_id" )] = sicnu::data::AssetId::generate().toString();
   setMsg[QStringLiteral( "params" )] = setParams;
-  proxy.handleIpcMessage( setMsg );
-  CHECK( proxy.bridge().activeAssetId() == addedId );
+  bridge.handleIpcMessage( setMsg );
+  CHECK( bridge.activeAssetId() == addedId );
 
   // catalog.set_active_layer with the registered id succeeds.
   setParams[QStringLiteral( "asset_id" )] = addedId.toString();
   setMsg[QStringLiteral( "params" )] = setParams;
   setMsg[QStringLiteral( "id" )] = 204;
-  proxy.handleIpcMessage( setMsg );
-  CHECK( proxy.bridge().activeAssetId() == addedId );
+  bridge.handleIpcMessage( setMsg );
+  CHECK( bridge.activeAssetId() == addedId );
 
   // ui.add_plugin_menu with no menu host degrades without registering an action.
   QJsonObject menuMsg;
@@ -652,8 +656,8 @@ TEST_CASE( "PythonAppInterfaceProxy serves the asset IPC chain without any QWidg
   menuParams[QStringLiteral( "action_title" )] = QStringLiteral( "Headless Action" );
   menuParams[QStringLiteral( "callback_id" )] = QStringLiteral( "cb_headless_001" );
   menuMsg[QStringLiteral( "params" )] = menuParams;
-  proxy.handleIpcMessage( menuMsg );
-  CHECK( proxy.registeredActionCount() == 0 );
+  bridge.handleIpcMessage( menuMsg );
+  CHECK( bridge.registeredActionCount() == 0 );
 }
 
 TEST_CASE( "SicnuAppInterface addRasterLayer returns opened layer regardless of host active layer selection", "[python][iface][contract]" )
@@ -700,7 +704,8 @@ TEST_CASE( "Python algorithm executes end-to-end through the daemon executor reg
   QString socketName = QString( "sicnu_py_exec_%1" ).arg( QCoreApplication::applicationPid() );
   REQUIRE( server.listen( socketName ) );
 
-  PythonAppInterfaceProxy proxy( &server, nullptr );
+  AppInterfaceBridge bridge;
+  bridge.bindIpcServer( &server );
 
   PythonWorkerProcess worker;
   QString scriptPath = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) );
@@ -719,10 +724,12 @@ TEST_CASE( "Python algorithm executes end-to-end through the daemon executor reg
            == AwaitStatus::Ok );
   REQUIRE( !regIsError );
 
-  QString execError;
   QVariantMap execParams;
   execParams[QStringLiteral( "value" )] = 42;
-  CHECK( sicnu::AlgorithmEngine::instance().executeAlgorithm( QStringLiteral( "py:echo_test" ), execParams, nullptr, execError ) );
+  auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( "py:echo_test" );
+  REQUIRE( adapter != nullptr );
+  Json::Value res = adapter->execute( sicnu::processing::variantToJsonValue( execParams ), nullptr );
+  CHECK( !res.isMember( "error" ) );
 
   // An adapter registered over IPC with no daemon executor reports the daemon error.
   QJsonObject ghostMsg;
@@ -732,11 +739,11 @@ TEST_CASE( "Python algorithm executes end-to-end through the daemon executor reg
   ghostParams[QStringLiteral( "id" )] = QStringLiteral( "py:ghost" );
   ghostParams[QStringLiteral( "name" )] = QStringLiteral( "Ghost" );
   ghostMsg[QStringLiteral( "params" )] = ghostParams;
-  proxy.handleIpcMessage( ghostMsg );
+  bridge.handleIpcMessage( ghostMsg );
 
-  QString ghostError;
-  CHECK_FALSE( sicnu::AlgorithmEngine::instance().executeAlgorithm( QStringLiteral( "py:ghost" ), QVariantMap(), nullptr, ghostError ) );
-  CHECK( ghostError.contains( QStringLiteral( "Unknown algorithm" ) ) );
+  auto ghostAdapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( "py:ghost" );
+  REQUIRE( ghostAdapter != nullptr );
+  CHECK_THROWS_AS( ghostAdapter->execute( Json::Value( Json::objectValue ), nullptr ), std::runtime_error );
 
   worker.stopWorker();
   server.close();

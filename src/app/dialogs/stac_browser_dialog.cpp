@@ -3,7 +3,7 @@
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
 #include "main_window.h"
-#include "agent/stac_client.h"
+#include "stac_client.h"
 
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -162,32 +162,12 @@ void StacBrowserDialog::loadSelectedAsset()
     }
 
     const QVariantMap feature = m_featureData[row];
-    const QVariantMap assets = feature.value(QStringLiteral("assets")).toMap();
+    const QString vsicurl = StacClient::selectCogHref(QJsonObject::fromVariantMap(feature));
 
-    QString cogUrl;
-    for (auto it = assets.constBegin(); it != assets.constEnd(); ++it) {
-        const QVariantMap asset = it.value().toMap();
-        const QString href = asset.value(QStringLiteral("href")).toString();
-        if (href.endsWith(QStringLiteral(".tif"), Qt::CaseInsensitive) ||
-            asset.value(QStringLiteral("type")).toString().contains(QStringLiteral("image/tiff"))) {
-            cogUrl = href;
-            break;
-        }
-    }
-
-    if (cogUrl.isEmpty()) {
+    if (vsicurl.isEmpty()) {
         QMessageBox::warning(this, tr("Error"), tr("No COG asset found in selected item."));
         return;
     }
-
-    const QString hrefError = StacClient::validateAssetHref(cogUrl);
-    if (!hrefError.isEmpty()) {
-        QMessageBox::warning(this, tr("Error"),
-                             tr("Rejected STAC asset href: %1").arg(hrefError));
-        return;
-    }
-
-    const QString vsicurl = QStringLiteral( "/vsicurl/" ) + cogUrl;
 
     // Route through main shell Data/Display seam (ADR 0010 Wave B) — no raw addMapLayer.
     if ( auto *mw = qobject_cast<QgisDesktopWindow *>( parentWidget() ) )

@@ -1,8 +1,8 @@
-// rs_class_table_widget.cpp — Phase 10A Task 10.3.
 #include "rs_class_table_widget.h"
 
 #include "rs_roi_collection.h"
 
+#include <QColorDialog>
 #include <QHeaderView>
 #include <QList>
 #include <QTableWidget>
@@ -23,8 +23,8 @@ RsClassTableWidget::RsClassTableWidget( QWidget *parent )
   mTable->verticalHeader()->setVisible( false );
   mTable->verticalHeader()->setDefaultSectionSize( 26 );
   mTable->setSelectionBehavior( QAbstractItemView::SelectRows );
-  mTable->setSelectionMode( QAbstractItemView::SingleSelection );
-  mTable->setEditTriggers( QAbstractItemView::NoEditTriggers );
+  mTable->setSelectionMode( QAbstractItemView::ExtendedSelection );
+  mTable->setEditTriggers( QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed );
   mTable->horizontalHeader()->setStretchLastSection( false );
   mTable->setColumnWidth( 0, 24 );
   mTable->setColumnWidth( 2, 50 );
@@ -35,6 +35,10 @@ RsClassTableWidget::RsClassTableWidget( QWidget *parent )
 
   connect( mTable, &QTableWidget::itemSelectionChanged,
            this, &RsClassTableWidget::onSelectionChanged );
+  connect( mTable, &QTableWidget::cellDoubleClicked,
+           this, &RsClassTableWidget::onCellDoubleClicked );
+  connect( mTable, &QTableWidget::itemChanged,
+           this, &RsClassTableWidget::onItemChanged );
 }
 
 void RsClassTableWidget::setRoiCollection( RsRoiCollection *col )
@@ -52,9 +56,8 @@ void RsClassTableWidget::setRoiCollection( RsRoiCollection *col )
 
 void RsClassTableWidget::rebuild()
 {
-  // Preserve selection: rebuild used to clear the table and drop currentClassId
-  // to 0, which made every subsequent ROI sample look "invalid" (classId<=0).
-  const int keepId = currentClassId() > 0 ? currentClassId() : mStickyClassId;
+  const QList<int> keepIds = selectedClassIds();
+  const int keepId = !keepIds.isEmpty() ? keepIds.first() : ( currentClassId() > 0 ? currentClassId() : mStickyClassId );
 
   mTable->blockSignals( true );
   mTable->setRowCount( 0 );
@@ -68,7 +71,8 @@ void RsClassTableWidget::rebuild()
   QList<int> ids = defs.keys();
   std::sort( ids.begin(), ids.end() );
 
-  int restoreRow = -1;
+  QList<int> restoreRows;
+  int primaryRestoreRow = -1;
   for ( int id : ids )
   {
     const RsClassDef d = defs.value( id );
@@ -78,30 +82,52 @@ void RsClassTableWidget::rebuild()
     auto *colorItem = new QTableWidgetItem;
     colorItem->setBackground( d.color() );
     colorItem->setData( Qt::UserRole, d.id() );
+    colorItem->setFlags( Qt::ItemIsSelectable | Qt::ItemIsEnabled );
     mTable->setItem( row, 0, colorItem );
 
-    mTable->setItem( row, 1, new QTableWidgetItem( d.name() ) );
+    auto *nameItem = new QTableWidgetItem( d.name() );
+    nameItem->setFlags( Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsEditable );
+    mTable->setItem( row, 1, nameItem );
 
     const int roiN = mRois->roisForClass( id ).size();
     const quint64 pxN = mRois->pixelCountForClass( id );
 
     auto *roiCell = new QTableWidgetItem( QString::number( roiN ) );
     roiCell->setTextAlignment( Qt::AlignRight | Qt::AlignVCenter );
+    roiCell->setFlags( Qt::ItemIsSelectable | Qt::ItemIsEnabled );
     mTable->setItem( row, 2, roiCell );
 
     auto *pxCell = new QTableWidgetItem( QString::number( pxN ) );
     pxCell->setTextAlignment( Qt::AlignRight | Qt::AlignVCenter );
+    pxCell->setFlags( Qt::ItemIsSelectable | Qt::ItemIsEnabled );
     mTable->setItem( row, 3, pxCell );
 
-    if ( keepId > 0 && id == keepId )
-      restoreRow = row;
+    if ( keepIds.contains( id ) )
+    {
+      restoreRows.append( row );
+      if ( id == keepId )
+        primaryRestoreRow = row;
+    }
   }
 
-  if ( restoreRow < 0 && mTable->rowCount() > 0 )
-    restoreRow = 0;
+  if ( restoreRows.isEmpty() && mTable->rowCount() > 0 )
+  {
+    restoreRows.append( 0 );
+    primaryRestoreRow = 0;
+  }
 
-  if ( restoreRow >= 0 )
-    mTable->selectRow( restoreRow );
+  if ( mTable->selectionModel() )
+    mTable->selectionModel()->clearSelection();
+
+  for ( int row : restoreRows )
+  {
+    mTable->selectRow( row );
+  }
+
+  if ( primaryRestoreRow >= 0 && mTable->model() )
+  {
+    mTable->setCurrentIndex( mTable->model()->index( primaryRestoreRow, 0 ) );
+  }
 
   mTable->blockSignals( false );
 
@@ -160,11 +186,43 @@ void RsClassTableWidget::setCurrentClassId( int classId )
 
 int RsClassTableWidget::currentClassId() const
 {
+  if ( !mTable || mTable->rowCount() == 0 )
+    return 0;
+
   const auto rows = mTable->selectionModel()->selectedRows();
   if ( rows.isEmpty() )
     return mStickyClassId;
+
+  const QModelIndex curIdx = mTable->currentIndex();
+  if ( curIdx.isValid() && mTable->selectionModel()->isSelected( curIdx ) )
+  {
+    auto *it = mTable->item( curIdx.row(), 0 );
+    if ( it )
+      return it->data( Qt::UserRole ).toInt();
+  }
+
   auto *it = mTable->item( rows.first().row(), 0 );
   return it ? it->data( Qt::UserRole ).toInt() : mStickyClassId;
+}
+
+QList<int> RsClassTableWidget::selectedClassIds() const
+{
+  QList<int> result;
+  if ( !mTable || !mTable->selectionModel() )
+    return result;
+
+  const auto rows = mTable->selectionModel()->selectedRows();
+  for ( const QModelIndex &idx : rows )
+  {
+    auto *it = mTable->item( idx.row(), 0 );
+    if ( it )
+    {
+      const int id = it->data( Qt::UserRole ).toInt();
+      if ( id > 0 && !result.contains( id ) )
+        result.append( id );
+    }
+  }
+  return result;
 }
 
 void RsClassTableWidget::onSelectionChanged()
@@ -173,4 +231,64 @@ void RsClassTableWidget::onSelectionChanged()
   if ( id > 0 )
     mStickyClassId = id;
   emit currentClassChanged( id );
+}
+
+void RsClassTableWidget::onCellDoubleClicked( int row, int column )
+{
+  if ( row < 0 || row >= mTable->rowCount() )
+    return;
+
+  if ( column == 0 )
+  {
+    auto *colorItem = mTable->item( row, 0 );
+    auto *nameItem = mTable->item( row, 1 );
+    if ( !colorItem || !nameItem )
+      return;
+
+    const int classId = colorItem->data( Qt::UserRole ).toInt();
+    const QColor oldColor = colorItem->background().color();
+    const QColor newColor = QColorDialog::getColor( oldColor, this, tr( "选择类别颜色" ) );
+    if ( newColor.isValid() && newColor != oldColor )
+    {
+      mBlockItemChanged = true;
+      colorItem->setBackground( newColor );
+      mBlockItemChanged = false;
+
+      if ( mRois )
+      {
+        mRois->setClassDef( RsClassDef( classId, nameItem->text(), newColor ) );
+      }
+      emit classDefEdited( classId, nameItem->text(), newColor );
+    }
+  }
+}
+
+void RsClassTableWidget::onItemChanged( QTableWidgetItem *item )
+{
+  if ( mBlockItemChanged || !item || item->column() != 1 )
+    return;
+
+  const int row = item->row();
+  auto *colorItem = mTable->item( row, 0 );
+  if ( !colorItem )
+    return;
+
+  const int classId = colorItem->data( Qt::UserRole ).toInt();
+  const QColor color = colorItem->background().color();
+  const QString newName = item->text();
+
+  if ( mRois )
+  {
+    mRois->setClassDef( RsClassDef( classId, newName, color ) );
+  }
+  emit classDefEdited( classId, newName, color );
+}
+
+void RsClassTableWidget::mergeSelectedClasses( int targetClassId, const QString &targetName, const QColor &targetColor )
+{
+  const QList<int> sources = selectedClassIds();
+  if ( sources.isEmpty() )
+    return;
+
+  emit mergeClassesRequested( sources, targetClassId, targetName, targetColor );
 }

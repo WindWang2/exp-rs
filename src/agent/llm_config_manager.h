@@ -26,14 +26,37 @@ struct LlmProviderProfile
   }
 };
 
-class LlmConfigManager
+class LlmConfigManager : public QObject
 {
+    Q_OBJECT
   public:
+    explicit LlmConfigManager( QObject *parent = nullptr );
+
+    static LlmConfigManager &instance();
+
+    LlmProviderProfile getActiveProfile();
+    void updateActiveProfile( const LlmProviderProfile &profile );
+    QList<LlmProviderProfile> getPresetProfiles() const;
+    QList<LlmProviderProfile> getProfiles();
+    void updateProfiles( const QList<LlmProviderProfile> &profiles );
+
+    // Backwards-compatible static facade methods
     static LlmProviderProfile activeProfile();
     static void setActiveProfile( const LlmProviderProfile &profile );
     static QList<LlmProviderProfile> presetProfiles();
     static QList<LlmProviderProfile> loadProfiles();
     static void saveProfiles( const QList<LlmProviderProfile> &profiles );
+
+  signals:
+    void activeProfileChanged( const sicnu::agent::LlmProviderProfile &profile );
+    void profilesChanged();
+
+  private:
+    void ensureLoaded();
+
+    QList<LlmProviderProfile> m_cachedProfiles;
+    QString m_activeProfileId;
+    bool m_loaded = false;
 };
 
 } // namespace sicnu::agent

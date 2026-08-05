@@ -2,7 +2,6 @@
 # IPC server, app-interface proxy/bridge, and the plugin adapter/host.
 qt_add_library(sicnu_python_isolated STATIC
     app_interface_bridge.cpp
-    python_app_interface_proxy.cpp
     python_ipc_server.cpp
     python_plugin_adapter.cpp
     python_plugin_host.cpp
