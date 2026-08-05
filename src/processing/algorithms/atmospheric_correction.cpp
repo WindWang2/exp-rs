@@ -274,13 +274,13 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
     std::vector<float> output(pixelCount);
     bool success = false;
     switch (method) {
-    case 0:
+    case Method::DnToRadiance:
         success = dnToRadiance(dn.data(), output.data(), pixelCount, gain, bias);
         break;
-    case 1:
+    case Method::Dos1:
         success = dos1(dn.data(), output.data(), pixelCount, gain, bias);
         break;
-    case 2: {
+    case Method::Dos2: {
         const float transmittance = estimateTransmittance(airmass);
         success = dos2(dn.data(), output.data(), pixelCount, gain, bias, transmittance);
         break;
