@@ -1,25 +1,40 @@
-// qgslayoutdesignerdialog.h — Minimal layout designer implementation
+/***************************************************************************
+ * qgslayoutdesignerdialog.h  —  Layout designer (print composer)
+ ***************************************************************************/
 #pragma once
 
 #include <gui/layout/qgslayoutdesignerinterface.h>
 #include <QMainWindow>
+#include <QPointer>
 
 class QgsLayout;
 class QgsLayoutView;
+class QgsLayoutRuler;
 class QgsMessageBar;
 class QgsLayoutItem;
+class QgsLayoutItemMap;
 class QgsMasterLayoutInterface;
+class QgsMapCanvas;
+class QgsLayoutViewToolSelect;
+class QgsLayoutViewToolPan;
+class QgsLayoutViewToolZoom;
 
 /**
- * Minimal layout designer dialog implementing QgsLayoutDesignerInterface.
- * Provides basic layout editing with map, legend, scale bar, and export.
+ * Layout designer implementing QgsLayoutDesignerInterface.
+ *
+ * Provides a print-composer window with: map items linked to the current map
+ * canvas extent/layers, auto-linked legend / scale bar / north arrow, map grids
+ * with coordinate annotations, rulers, and interactive select/pan/zoom tools.
+ * Export to PDF / image is supported via QgsLayoutExporter.
  */
 class QgsLayoutDesignerDialog : public QgsLayoutDesignerInterface
 {
     Q_OBJECT
 
 public:
-    explicit QgsLayoutDesignerDialog(QgsMasterLayoutInterface *layout, QWidget *parent = nullptr);
+    explicit QgsLayoutDesignerDialog(QgsMasterLayoutInterface *layout,
+                                     QgsMapCanvas *canvas,
+                                     QWidget *parent = nullptr);
     ~QgsLayoutDesignerDialog() override;
 
     // QgsLayoutDesignerInterface interface
@@ -68,10 +83,13 @@ private slots:
     void onAddLegend();
     void onAddScaleBar();
     void onAddNorthArrow();
+    void onAddGrid();
     void onAddLabel();
     void onAddImage();
     void onExportToPdf();
     void onExportToImage();
+    void onDeleteSelectedItems();
+    void onZoomToPage();
 
 private:
     void setupUi();
@@ -83,6 +101,19 @@ private:
     QgsLayout *mLayout = nullptr;
     QgsLayoutView *mView = nullptr;
     QgsMessageBar *mMessageBar = nullptr;
+    QgsMapCanvas *mCanvas = nullptr;
+
+    // Track the most recently added map item for legend/scalebar/grid linkage.
+    QPointer<QgsLayoutItemMap> mMapItem;
+
+    // Rulers
+    QgsLayoutRuler *mHorizontalRuler = nullptr;
+    QgsLayoutRuler *mVerticalRuler = nullptr;
+
+    // Interaction tools
+    QgsLayoutViewToolSelect *mSelectTool = nullptr;
+    QgsLayoutViewToolPan *mPanTool = nullptr;
+    QgsLayoutViewToolZoom *mZoomTool = nullptr;
 
     // Menus
     QMenu *mLayoutMenu = nullptr;
