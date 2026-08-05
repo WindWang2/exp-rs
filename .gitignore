@@ -46,18 +46,19 @@ refs/
 boost_ref/
 .context/
 
-# OTB non-essential dirs (if tree present at root)
-otb_ref/CI/
-otb_ref/Docker/
-otb_ref/Documentation/
-otb_ref/Examples/
-otb_ref/Packaging/
-otb_ref/SuperBuild/
-otb_ref/Utilities/Doxygen/
-otb_ref/.gitlab/
-otb_ref/.gitlab-ci.yml
-otb_ref/.gitmodules
-otb_ref/sonar-project.properties
+# Upstream reference trees — large, locally rebuildable, never tracked.
+# (Replaces the former per-subdirectory otb_ref/ allowlist; the whole tree
+# is local-only now.)
+itk_ref/
+otb_ref/
+
+# Agent skills are installed tooling (see skills-lock.json for re-install),
+# not project source. Keep the project-level AGENTS.md config only.
+.agents/skills/
+.agents/vendor/
+
+# README showcase imagery (large GIFs/PNGs) — not needed for build/runtime.
+images/README-md/
 
 # Local optional dependency trees (GDAL/PROJ/GEOS/Boost unpacks — not source of truth)
 vendor/
