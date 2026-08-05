@@ -90,7 +90,7 @@ namespace AtmosphericCorrection
 
     /**
      * Apply atmospheric correction to one band of a GeoTIFF and write output.
-     * @param method 0=DnToRadiance, 1=Dos1, 2=Dos2 (see Method enum)
+     * @param method a Method enum value (DnToRadiance / Dos1 / Dos2)
      */
     bool processFile(const QString &sourcePath, const QString &outputPath,
                      int bandNum, int method, float gain, float bias,
@@ -99,7 +99,7 @@ namespace AtmosphericCorrection
     /**
      * Apply multi-band atmospheric correction to a GeoTIFF and write output.
      *
-     * Currently supports Method::Quac (3), which requires all bands in memory.
+     * Currently supports only Method::Quac, which requires all bands in memory.
      * The output is a Float32 multi-band GeoTIFF preserving geotransform and
      * projection. Band order follows the source raster.
      *

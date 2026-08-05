@@ -107,13 +107,13 @@ QVariantMap AtmosphericCorrectionAlgorithm::processAlgorithm( const QVariantMap 
 
     switch ( method )
     {
-        case 0: // DN to Radiance
+        case AtmosphericCorrection::DnToRadiance:
             ok = AtmosphericCorrection::dnToRadiance( dnData.data(), result.data(), totalPixels, gain, bias );
             break;
-        case 1: // DOS1
+        case AtmosphericCorrection::Dos1:
             ok = AtmosphericCorrection::dos1( dnData.data(), result.data(), totalPixels, gain, bias );
             break;
-        case 2: // DOS2
+        case AtmosphericCorrection::Dos2:
             if ( transmittance <= 0.0f || transmittance > 1.0f )
                 throw QgsProcessingException( QObject::tr( "Transmittance must be in range (0, 1]" ) );
             ok = AtmosphericCorrection::dos2( dnData.data(), result.data(), totalPixels, gain, bias, transmittance );
