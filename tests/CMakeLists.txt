@@ -1734,6 +1734,31 @@ if(TARGET qgis_app_classify)
   set_target_properties(test_class_table_widget PROPERTIES AUTOMOC ON)
   sicnu_discover_tests(test_class_table_widget)
 
+  # Global help/tooltip/confirmation sweep — catalog entries + dialog help buttons.
+  add_executable(test_global_help_tips test_global_help_tips.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp)
+  target_link_libraries(test_global_help_tips PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Test
+    qgis_core
+    qgis_analysis
+    qgis_app_classify
+  )
+  target_include_directories(test_global_help_tips PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app
+    ${CMAKE_SOURCE_DIR}/src/app/classification
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_global_help_tips PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_global_help_tips)
+
   # Phase 10A Task 10.4 — Pixel rasterizer (geometry -> pixel index set)
   add_executable(test_pixel_rasterizer test_pixel_rasterizer.cpp)
   target_link_libraries(test_pixel_rasterizer PRIVATE
@@ -1882,6 +1907,91 @@ if(TARGET qgis_app_classify)
     ${CMAKE_BINARY_DIR}
   )
   sicnu_discover_tests(test_classifier_kmeans)
+
+  # OBIA Classification Optimization — RandomForest backend test.
+  add_executable(test_classifier_random_forest test_classifier_random_forest.cpp)
+  target_link_libraries(test_classifier_random_forest PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_classifier_random_forest PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_classifier_random_forest)
+
+  # OBIA Classification Optimization — MLP classifier test.
+  add_executable(test_classifier_mlp test_classifier_mlp.cpp)
+  target_link_libraries(test_classifier_mlp PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_classifier_mlp PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_classifier_mlp)
+
+  # OBIA Classification Optimization — MinMax feature scaler test.
+  add_executable(test_feature_scaler_minmax test_feature_scaler_minmax.cpp)
+  target_link_libraries(test_feature_scaler_minmax PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_feature_scaler_minmax PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_feature_scaler_minmax)
+
+  # OBIA Classification Optimization — Hierarchy class consolidator test.
+  add_executable(test_hierarchy_class_consolidator test_hierarchy_class_consolidator.cpp)
+  target_link_libraries(test_hierarchy_class_consolidator PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_hierarchy_class_consolidator PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/segmentation
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_hierarchy_class_consolidator)
+
+  # OBIA Classification Optimization — Feature selection tree test.
+  add_executable(test_feature_selection test_feature_selection.cpp)
+  target_link_libraries(test_feature_selection PRIVATE
+    Catch2::Catch2WithMain
+    qgis_core
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_feature_selection PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/segmentation
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_feature_selection)
 
   # Phase 10A review patch — stratified train/test split helper test.
   add_executable(test_stratified_split test_stratified_split.cpp)
@@ -3154,6 +3264,7 @@ sicnu_discover_tests(test_data_project_roundtrip)
 add_executable(test_data_manager_panel
   test_data_manager_panel.cpp
   ${CMAKE_SOURCE_DIR}/src/app/panels/data_manager_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
 )
 target_link_libraries(test_data_manager_panel PRIVATE
   Catch2::Catch2WithMain
@@ -3167,6 +3278,7 @@ target_link_libraries(test_data_manager_panel PRIVATE
 )
 target_include_directories(test_data_manager_panel PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
 set_target_properties(test_data_manager_panel PROPERTIES AUTOMOC ON)

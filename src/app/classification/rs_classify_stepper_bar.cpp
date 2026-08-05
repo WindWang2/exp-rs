@@ -50,6 +50,7 @@ RsClassifyStepperBar::RsClassifyStepperBar( QWidget *parent )
     btn->setToolButtonStyle( Qt::ToolButtonTextOnly );
     mGroup->addButton( btn, i );
     mButtons[i] = btn;
+    btn->setToolTip( tr( "点击切换到步骤：%1" ).arg( QString::fromUtf8( kStepLabels[i] ) ) );
     row->addWidget( btn );
     rebuildStyle( i );
   }
@@ -58,6 +59,7 @@ RsClassifyStepperBar::RsClassifyStepperBar( QWidget *parent )
 
   mExpertCheck = new QCheckBox( tr( "专家模式" ), this );
   mExpertCheck->setObjectName( QStringLiteral( "rsClassifyExpertMode" ) );
+  mExpertCheck->setToolTip( tr( "勾选后解锁全部步骤（默认向导模式逐步引导）。" ) );
   row->addWidget( mExpertCheck );
 
   if ( !mButtons.isEmpty() )

@@ -25,6 +25,9 @@ class QGIS_ANALYSIS_EXPORT RsClassifierBackend
     /// Predict class IDs for each row of X. Returns CV_32S Nx1.
     virtual cv::Mat predict( const cv::Mat &X ) const = 0;
 
+    /// Predict class probabilities for each sample in X. Returns CV_32F NxK matrix (or empty if unsupported).
+    virtual cv::Mat predictProbabilities( const cv::Mat &X ) const { (void)X; return cv::Mat(); }
+
     /// Human-readable display name (English + parenthesised Chinese OK).
     virtual QString name() const = 0;
 

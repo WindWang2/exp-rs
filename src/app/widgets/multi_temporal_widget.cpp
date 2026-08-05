@@ -30,16 +30,24 @@ void MultiTemporalWidget::setupUi()
     auto *selLayout = new QHBoxLayout();
     selLayout->addWidget(new QLabel(tr("Date 1:")));
     m_layer1Combo = new QComboBox();
+    m_layer1Combo->setToolTip(tr("选择第一个时相（较早影像）。"));
+    m_layer1Combo->setStatusTip(tr("选择第一个时相"));
     selLayout->addWidget(m_layer1Combo);
     selLayout->addWidget(new QLabel(tr("Date 2:")));
     m_layer2Combo = new QComboBox();
+    m_layer2Combo->setToolTip(tr("选择第二个时相（较晚影像）。"));
+    m_layer2Combo->setStatusTip(tr("选择第二个时相"));
     selLayout->addWidget(m_layer2Combo);
     layout->addLayout(selLayout);
 
     // Analyze button
     auto *btnLayout = new QHBoxLayout();
-    auto *analyzeBtn = new QPushButton(tr("Analyze Change"));
-    auto *exportBtn = new QPushButton(tr("Export"));
+    auto *analyzeBtn = new QPushButton(tr("变化分析"));
+    analyzeBtn->setToolTip(tr("对比两个时相，计算各波段均值变化。"));
+    analyzeBtn->setStatusTip(tr("执行变化分析"));
+    auto *exportBtn = new QPushButton(tr("导出"));
+    exportBtn->setToolTip(tr("把变化统计表导出为文件。"));
+    exportBtn->setStatusTip(tr("导出变化统计"));
     btnLayout->addWidget(analyzeBtn);
     btnLayout->addWidget(exportBtn);
     btnLayout->addStretch();
@@ -54,6 +62,7 @@ void MultiTemporalWidget::setupUi()
     m_statsTable->setColumnCount(5);
     m_statsTable->setHorizontalHeaderLabels({tr("Band"), tr("Mean 1"), tr("Mean 2"), tr("Change"), tr("% Change")});
     m_statsTable->horizontalHeader()->setStretchLastSection(true);
+    m_statsTable->setToolTip(tr("各波段在两个时相的均值与变化量。"));
     layout->addWidget(m_statsTable);
 
     connect(analyzeBtn, &QPushButton::clicked, this, &MultiTemporalWidget::onAnalyze);

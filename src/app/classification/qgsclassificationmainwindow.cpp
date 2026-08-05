@@ -115,6 +115,7 @@
 #include <QVBoxLayout>
 #include <QVector>
 #include <QWidget>
+#include <QWhatsThis>
 
 #include <opencv2/ml.hpp>
 
@@ -501,7 +502,18 @@ void QgsClassificationMainWindow::setupMenus()
   procMenu->addAction( tr( "训练并分类…" ), this, &QgsClassificationMainWindow::applyClassification );
   procMenu->addAction( tr( "交叉验证" ), this, &QgsClassificationMainWindow::runCrossValidation );
 
-  menuBar()->addMenu( tr( "Help" ) );
+  auto *helpMenu = menuBar()->addMenu( tr( "帮助(&H)" ) );
+  helpMenu->addAction( tr( "帮助内容" ), this, [this]() {
+    SicnuDialogHelp::showToolHelp( this, QStringLiteral( "classification" ), windowTitle() );
+  } );
+  helpMenu->addAction( tr( "这是什么？(Shift+F1)" ), this, []() {
+    QWhatsThis::enterWhatsThisMode();
+  } );
+  helpMenu->addSeparator();
+  helpMenu->addAction( tr( "关于分类窗口…" ), this, [this]() {
+    QMessageBox::about( this, tr( "关于分类窗口" ),
+                        tr( "像元级监督分类窗口\n\n定义类别 -> 采集 ROI -> 训练 -> 预览/应用 -> 精度评价。" ) );
+  } );
 }
 
 void QgsClassificationMainWindow::setupToolbars()
@@ -1426,6 +1438,7 @@ void QgsClassificationMainWindow::populateStepPanels()
 
     auto *btnOpen = new QPushButton( tr( "打开源影像…" ), body );
     btnOpen->setObjectName( QStringLiteral( "classifyStep1OpenRaster" ) );
+    btnOpen->setToolTip( tr( "选择待分类的栅格影像作为源数据。" ) );
     connect( btnOpen, &QPushButton::clicked, this,
              static_cast<bool ( QgsClassificationMainWindow::* )()>(
                &QgsClassificationMainWindow::openSourceRaster ) );
@@ -1438,12 +1451,14 @@ void QgsClassificationMainWindow::populateStepPanels()
 
     auto *btnDefaults = new QPushButton( tr( "添加默认 6 类" ), body );
     btnDefaults->setObjectName( QStringLiteral( "classifyStep1DefaultClasses" ) );
+    btnDefaults->setToolTip( tr( "快速添加 6 个默认类别（水/植被/建筑/裸土/道路/阴影）。" ) );
     connect( btnDefaults, &QPushButton::clicked, this,
              &QgsClassificationMainWindow::ensureDefaultClasses );
     lay->addWidget( btnDefaults );
 
     auto *btnClasses = new QPushButton( tr( "打开类别管理" ), body );
     btnClasses->setObjectName( QStringLiteral( "classifyStep1OpenClassTable" ) );
+    btnClasses->setToolTip( tr( "打开类别表面板，编辑类别名称与颜色。" ) );
     connect( btnClasses, &QPushButton::clicked, this, [this]() {
       if ( !m_classListDock )
         return;
@@ -1475,9 +1490,11 @@ void QgsClassificationMainWindow::populateStepPanels()
     auto *roleRow = new QHBoxLayout;
     m_stepTrainRoleBtn = new QPushButton( tr( "训练样本" ), body );
     m_stepTrainRoleBtn->setObjectName( QStringLiteral( "classifyStep2TrainRole" ) );
+    m_stepTrainRoleBtn->setToolTip( tr( "切换到训练样本角色：新采集的 ROI 用于训练分类器。" ) );
     m_stepTrainRoleBtn->setCheckable( true );
     m_stepValidRoleBtn = new QPushButton( tr( "验证样本" ), body );
     m_stepValidRoleBtn->setObjectName( QStringLiteral( "classifyStep2ValidRole" ) );
+    m_stepValidRoleBtn->setToolTip( tr( "切换到验证样本角色：新采集的 ROI 用于精度验证。" ) );
     m_stepValidRoleBtn->setCheckable( true );
     auto *roleGroup = new QButtonGroup( body );
     roleGroup->setExclusive( true );
@@ -1502,10 +1519,12 @@ void QgsClassificationMainWindow::populateStepPanels()
     auto *roiRow = new QHBoxLayout;
     auto *btnExport = new QPushButton( tr( "导出 ROI…" ), body );
     btnExport->setObjectName( QStringLiteral( "classifyStep2ExportRois" ) );
+    btnExport->setToolTip( tr( "把当前 ROI 样本导出为 Shapefile。" ) );
     connect( btnExport, &QPushButton::clicked, this,
              &QgsClassificationMainWindow::exportRois );
     auto *btnLoad = new QPushButton( tr( "加载 ROI…" ), body );
     btnLoad->setObjectName( QStringLiteral( "classifyStep2LoadRois" ) );
+    btnLoad->setToolTip( tr( "从 Shapefile 加载 ROI（将替换当前样本）。" ) );
     connect( btnLoad, &QPushButton::clicked, this,
              &QgsClassificationMainWindow::loadRois );
     roiRow->addWidget( btnExport );
@@ -1535,6 +1554,7 @@ void QgsClassificationMainWindow::populateStepPanels()
 
     auto *btnSpectral = new QPushButton( tr( "重算光谱曲线" ), body );
     btnSpectral->setObjectName( QStringLiteral( "classifyStep3RecomputeSpectral" ) );
+    btnSpectral->setToolTip( tr( "根据当前样本重算各类别光谱均值曲线。" ) );
     connect( btnSpectral, &QPushButton::clicked, this, [this]() {
       recomputeSpectralCurves();
       if ( m_spectralDock )
@@ -1547,6 +1567,7 @@ void QgsClassificationMainWindow::populateStepPanels()
 
     auto *btnJm = new QPushButton( tr( "重算 JM 分离度" ), body );
     btnJm->setObjectName( QStringLiteral( "classifyStep3RecomputeJm" ) );
+    btnJm->setToolTip( tr( "计算各类别间的 Jeffries-Matusita 可分性矩阵。" ) );
     connect( btnJm, &QPushButton::clicked, this, [this]() {
       recomputeJmMatrix();
       if ( m_jmDock )
@@ -1559,6 +1580,7 @@ void QgsClassificationMainWindow::populateStepPanels()
 
     auto *btnRaiseSpectral = new QPushButton( tr( "打开光谱曲线面板" ), body );
     btnRaiseSpectral->setObjectName( QStringLiteral( "classifyStep3RaiseSpectral" ) );
+    btnRaiseSpectral->setToolTip( tr( "显示并置顶光谱曲线面板。" ) );
     connect( btnRaiseSpectral, &QPushButton::clicked, this, [this]() {
       if ( m_spectralDock )
       {
@@ -1570,6 +1592,7 @@ void QgsClassificationMainWindow::populateStepPanels()
 
     auto *btnRaiseJm = new QPushButton( tr( "打开 JM 面板" ), body );
     btnRaiseJm->setObjectName( QStringLiteral( "classifyStep3RaiseJm" ) );
+    btnRaiseJm->setToolTip( tr( "显示并置顶 JM 分离度矩阵面板。" ) );
     connect( btnRaiseJm, &QPushButton::clicked, this, [this]() {
       if ( m_jmDock )
       {
@@ -1581,6 +1604,7 @@ void QgsClassificationMainWindow::populateStepPanels()
 
     auto *btnReviewed = new QPushButton( tr( "标记已审阅" ), body );
     btnReviewed->setObjectName( QStringLiteral( "classifyStep3MarkReviewed" ) );
+    btnReviewed->setToolTip( tr( "确认已检查可分性，标记本步完成。" ) );
     connect( btnReviewed, &QPushButton::clicked, this, [this]() {
       if ( m_workflow )
         m_workflow->setEvaluateReviewed( true );
@@ -1615,18 +1639,21 @@ void QgsClassificationMainWindow::populateStepPanels()
 
     m_stepCvBtn = new QPushButton( tr( "交叉验证 (CV)" ), body );
     m_stepCvBtn->setObjectName( QStringLiteral( "classifyStep4Cv" ) );
+    m_stepCvBtn->setToolTip( tr( "对当前样本做 K 折交叉验证，评估泛化精度。" ) );
     connect( m_stepCvBtn, &QPushButton::clicked, this,
              &QgsClassificationMainWindow::runCrossValidation );
     lay->addWidget( m_stepCvBtn );
 
     m_stepPreviewBtn = new QPushButton( tr( "快速预览" ), body );
     m_stepPreviewBtn->setObjectName( QStringLiteral( "classifyStep4Preview" ) );
+    m_stepPreviewBtn->setToolTip( tr( "仅对当前视口做分类预览（不写出文件）。" ) );
     connect( m_stepPreviewBtn, &QPushButton::clicked, this,
              &QgsClassificationMainWindow::applyPreview );
     lay->addWidget( m_stepPreviewBtn );
 
     m_stepApplyBtn = new QPushButton( tr( "应用分类…" ), body );
     m_stepApplyBtn->setObjectName( QStringLiteral( "classifyStep4Apply" ) );
+    m_stepApplyBtn->setToolTip( tr( "对整幅影像应用分类并输出结果栅格。" ) );
     connect( m_stepApplyBtn, &QPushButton::clicked, this,
              &QgsClassificationMainWindow::applyClassification );
     lay->addWidget( m_stepApplyBtn );
@@ -3180,6 +3207,17 @@ void QgsClassificationMainWindow::loadRois()
     tr( "ESRI Shapefile (*.shp)" ) );
   if ( path.isEmpty() )
     return;
+
+  // Safety-first: warn that existing samples will be replaced before staging.
+  if ( m_rois && m_rois->size() > 0 )
+  {
+    const auto choice = QMessageBox::question(
+      this, tr( "加载 ROI" ),
+      tr( "加载新 ROI 将替换当前 %1 个训练样本，是否继续？" ).arg( m_rois->size() ),
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+    if ( choice != QMessageBox::Yes )
+      return;
+  }
 
   QgsCoordinateReferenceSystem crs;
   if ( m_sourceLayer )

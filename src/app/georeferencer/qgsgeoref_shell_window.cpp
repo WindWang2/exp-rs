@@ -133,6 +133,8 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   mGcpDock->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea );
   tipWidget( mGcpDock, SicnuDialogHelp::shortForTool(
                QStringLiteral( "georef_gcp_table" ), tr( "GCP 控制点表" ) ) );
+  mGcpDock->setWhatsThis( SicnuDialogHelp::htmlForTool(
+                            QStringLiteral( "georef_gcp_table" ), tr( "GCP 控制点表" ) ) );
   mGcpTable = new QgsGCPListWidget( mGcpDock );
   mGcpTable->setGcpsSource( &mGeorefSession );
   tipWidget( mGcpTable, SicnuDialogHelp::shortForTool(
@@ -160,6 +162,8 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   mTaskDock->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea );
   tipWidget( mTaskDock, SicnuDialogHelp::shortForTool(
                QStringLiteral( "georef_tasks" ), tr( "校正任务列表" ) ) );
+  mTaskDock->setWhatsThis( SicnuDialogHelp::htmlForTool(
+                             QStringLiteral( "georef_tasks" ), tr( "校正任务列表" ) ) );
   mTaskList = new RsGeorefTaskList( mTaskDock );
   mTaskList->setObjectName( QStringLiteral( "rsGeorefTaskList" ) );
   mTaskList->setWhatsThis( SicnuDialogHelp::htmlForTool(
@@ -185,6 +189,8 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   mParamDock->setAllowedAreas( Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea );
   tipWidget( mParamDock, SicnuDialogHelp::shortForTool(
                QStringLiteral( "georef_params" ), tr( "校正参数面板" ) ) );
+  mParamDock->setWhatsThis( SicnuDialogHelp::htmlForTool(
+                              QStringLiteral( "georef_params" ), tr( "校正参数面板" ) ) );
   mParamsPanel = new RsGeorefParamsPanel( mParamDock );
   mParamsPanel->setProfile( profile );
   if ( profile == RsGeorefParamsPanel::Profile::ImageToImage )

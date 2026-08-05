@@ -22,10 +22,17 @@ RsGeorefModeToggle::RsGeorefModeToggle( QWidget *parent )
     tr( "Image → Image" ),
     tr( "RPC 物理模型" )
   };
+  const QStringList tips = {
+    tr( "影像对地图配准：在影像上选点并输入地理坐标。" ),
+    tr( "影像对影像配准：在待校正影像与参考影像上选同名点。" ),
+    tr( "RPC 物理模型：使用有理多项式系数进行物理模型校正。" )
+  };
 
   for ( int i = 0; i < labels.size(); ++i )
   {
     auto *btn = new QPushButton( labels[i], this );
+    btn->setToolTip( tips[i] );
+    btn->setStatusTip( tips[i] );
     btn->setCheckable( true );
     btn->setObjectName( QStringLiteral( "rsModeBtn" ) );
     btn->setProperty( "modeIndex", i );

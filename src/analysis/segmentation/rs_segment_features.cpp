@@ -303,16 +303,17 @@ RsSegmentFeatures::extract( const QString &rasterPath,
 #ifdef SICNU_HAS_OPENCV
 cv::Mat RsSegmentFeatures::toFeatureMatrix(
     const QMap<quint32, SegmentStat> &stats,
-    QVector<quint32> &segmentIds )
+    QVector<quint32> &segmentIds,
+    const RsFeatureSelection &selection )
 {
     if ( stats.isEmpty() )
         return cv::Mat();
 
-    // Determine feature count from first entry
     auto first = stats.constBegin();
     const int nBands = first->mean.size();
-    // Features per segment: (mean + stddev + min + max + glcmContrast + glcmCorr + glcmEnergy + glcmHomogeneity) per band + 6 shape descriptors
-    const int nFeatures = nBands * 8 + 6;
+    const int nFeatures = selection.activeFeatureCount( nBands );
+    if ( nFeatures <= 0 )
+        return cv::Mat();
 
     const int nSegments = stats.size();
     cv::Mat X( nSegments, nFeatures, CV_32F );
@@ -326,28 +327,31 @@ cv::Mat RsSegmentFeatures::toFeatureMatrix(
         segmentIds.append( it.key() );
         const SegmentStat &s = it.value();
         int col = 0;
-        for ( int b = 0; b < nBands; ++b )
-            X.at<float>( row, col++ ) = static_cast<float>( s.mean[b] );
-        for ( int b = 0; b < nBands; ++b )
-            X.at<float>( row, col++ ) = static_cast<float>( s.stddev[b] );
-        for ( int b = 0; b < nBands; ++b )
-            X.at<float>( row, col++ ) = static_cast<float>( s.min[b] );
-        for ( int b = 0; b < nBands; ++b )
-            X.at<float>( row, col++ ) = static_cast<float>( s.max[b] );
-        for ( int b = 0; b < nBands; ++b )
-            X.at<float>( row, col++ ) = static_cast<float>( s.glcmContrast.value(b, 0.0) );
-        for ( int b = 0; b < nBands; ++b )
-            X.at<float>( row, col++ ) = static_cast<float>( s.glcmCorrelation.value(b, 0.0) );
-        for ( int b = 0; b < nBands; ++b )
-            X.at<float>( row, col++ ) = static_cast<float>( s.glcmEnergy.value(b, 0.0) );
-        for ( int b = 0; b < nBands; ++b )
-            X.at<float>( row, col++ ) = static_cast<float>( s.glcmHomogeneity.value(b, 0.0) );
-        X.at<float>( row, col++ ) = static_cast<float>( s.area );
-        X.at<float>( row, col++ ) = static_cast<float>( s.perimeter );
-        X.at<float>( row, col++ ) = static_cast<float>( s.shapeIndex );
-        X.at<float>( row, col++ ) = static_cast<float>( s.compactness );
-        X.at<float>( row, col++ ) = static_cast<float>( s.rectangularity );
-        X.at<float>( row, col++ ) = static_cast<float>( s.aspectRatio );
+
+        if ( selection.useMean )
+            for ( int b = 0; b < nBands; ++b ) X.at<float>( row, col++ ) = static_cast<float>( s.mean[b] );
+        if ( selection.useStdDev )
+            for ( int b = 0; b < nBands; ++b ) X.at<float>( row, col++ ) = static_cast<float>( s.stddev[b] );
+        if ( selection.useMin )
+            for ( int b = 0; b < nBands; ++b ) X.at<float>( row, col++ ) = static_cast<float>( s.min[b] );
+        if ( selection.useMax )
+            for ( int b = 0; b < nBands; ++b ) X.at<float>( row, col++ ) = static_cast<float>( s.max[b] );
+
+        if ( selection.useGlcmContrast )
+            for ( int b = 0; b < nBands; ++b ) X.at<float>( row, col++ ) = static_cast<float>( s.glcmContrast.value( b, 0.0 ) );
+        if ( selection.useGlcmCorrelation )
+            for ( int b = 0; b < nBands; ++b ) X.at<float>( row, col++ ) = static_cast<float>( s.glcmCorrelation.value( b, 0.0 ) );
+        if ( selection.useGlcmEnergy )
+            for ( int b = 0; b < nBands; ++b ) X.at<float>( row, col++ ) = static_cast<float>( s.glcmEnergy.value( b, 0.0 ) );
+        if ( selection.useGlcmHomogeneity )
+            for ( int b = 0; b < nBands; ++b ) X.at<float>( row, col++ ) = static_cast<float>( s.glcmHomogeneity.value( b, 0.0 ) );
+
+        if ( selection.useArea ) X.at<float>( row, col++ ) = static_cast<float>( s.area );
+        if ( selection.usePerimeter ) X.at<float>( row, col++ ) = static_cast<float>( s.perimeter );
+        if ( selection.useShapeIndex ) X.at<float>( row, col++ ) = static_cast<float>( s.shapeIndex );
+        if ( selection.useCompactness ) X.at<float>( row, col++ ) = static_cast<float>( s.compactness );
+        if ( selection.useRectangularity ) X.at<float>( row, col++ ) = static_cast<float>( s.rectangularity );
+        if ( selection.useAspectRatio ) X.at<float>( row, col++ ) = static_cast<float>( s.aspectRatio );
     }
 
     return X;

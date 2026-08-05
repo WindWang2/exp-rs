@@ -1,6 +1,8 @@
 // rs_merge_classes_dialog.cpp — target-class chooser for merging sub-classes.
 #include "rs_merge_classes_dialog.h"
 
+#include "dialogs/dialog_help_catalog.h"
+
 #include <QColorDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -54,6 +56,11 @@ RsMergeClassesDialog::RsMergeClassesDialog( QWidget *parent )
 
   auto *buttons = new QDialogButtonBox(
     QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this );
+  auto *helpBtn = buttons->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
+  helpBtn->setToolTip( tr( "打开本对话框的帮助说明。" ) );
+  connect( helpBtn, &QPushButton::clicked, this, [this]() {
+    SicnuDialogHelp::showToolHelp( this, QStringLiteral( "merge_classes" ), windowTitle() );
+  } );
   connect( buttons, &QDialogButtonBox::accepted, this, &QDialog::accept );
   connect( buttons, &QDialogButtonBox::rejected, this, &QDialog::reject );
   root->addWidget( buttons );

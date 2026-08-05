@@ -1,5 +1,6 @@
 // rs_post_process_dialog.cpp — one algorithm per dialog
 #include "rs_post_process_dialog.h"
+#include "dialogs/dialog_help_catalog.h"
 
 #include <QCheckBox>
 #include <QDialogButtonBox>
@@ -184,6 +185,11 @@ void RsPostProcessDialog::setupUi()
   auto *buttons = new QDialogButtonBox(
     QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this );
   buttons->button( QDialogButtonBox::Ok )->setText( tr( "运行" ) );
+  auto *helpBtn = buttons->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
+  helpBtn->setToolTip( tr( "打开本对话框的帮助说明。" ) );
+  connect( helpBtn, &QPushButton::clicked, this, [this]() {
+    SicnuDialogHelp::showToolHelp( this, QStringLiteral( "post_process" ), windowTitle() );
+  } );
   connect( buttons, &QDialogButtonBox::accepted, this, &QDialog::accept );
   connect( buttons, &QDialogButtonBox::rejected, this, &QDialog::reject );
   root->addWidget( buttons );

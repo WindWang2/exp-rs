@@ -54,6 +54,7 @@ void HistogramStretchWidget::setupUi()
     // Histogram display (instrument chart chrome via QSS #rsHistogramChart)
     m_histogram = new HistogramWidget( this );
     m_histogram->setObjectName( QStringLiteral( "rsHistogramChart" ) );
+    m_histogram->setToolTip( tr( "直方图：拖动控制点做分段线性拉伸；双击添加、右键删除控制点。" ) );
     connect( m_histogram, &HistogramWidget::cutoffsChanged,
              this, &HistogramStretchWidget::onHistogramCutoffsChanged );
     connect( m_histogram, &HistogramWidget::piecewisePointsChanged,
@@ -66,6 +67,7 @@ void HistogramStretchWidget::setupUi()
 
     // Channel Selector (Photoshop Style)
     m_channelCombo = new QComboBox( this );
+    m_channelCombo->setToolTip( tr( "选择直方图通道模式：RGB 综合、单通道或单波段灰度。" ) );
     m_channelCombo->addItem( tr( "RGB 综合通道 (Master RGB)" ), static_cast<int>( HistogramWidget::ChannelMode::MasterRGB ) );
     m_channelCombo->addItem( tr( "红通道 (Red)" ), static_cast<int>( HistogramWidget::ChannelMode::Red ) );
     m_channelCombo->addItem( tr( "绿通道 (Green)" ), static_cast<int>( HistogramWidget::ChannelMode::Green ) );
@@ -77,12 +79,14 @@ void HistogramStretchWidget::setupUi()
 
     // Band Selector
     m_bandCombo = new QComboBox( this );
+    m_bandCombo->setToolTip( tr( "选择单波段模式下的波段号。" ) );
     connect( m_bandCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
              this, &HistogramStretchWidget::onBandChanged );
     formLayout->addRow( tr( "单波段选择 (Band):" ), m_bandCombo );
 
     // Algorithm Selector
     m_algorithmCombo = new QComboBox( this );
+    m_algorithmCombo->setToolTip( tr( "拉伸算法：分段线性/PS 色阶/2% 剪裁/2σ/全阶线性/均衡化/无增强。" ) );
     m_algorithmCombo->addItem( tr( "分段线性拉伸 (Piecewise Linear)" ), static_cast<int>( StretchAlgorithm::PiecewiseLinear ) );
     m_algorithmCombo->addItem( tr( "Photoshop 色阶调整 (PS Levels)" ), static_cast<int>( StretchAlgorithm::PhotoshopLevels ) );
     m_algorithmCombo->addItem( tr( "2% 累计剪裁线性拉伸 (2% Percent Clip)" ), static_cast<int>( StretchAlgorithm::PercentClip ) );
@@ -102,6 +106,7 @@ void HistogramStretchWidget::setupUi()
     // Percent Slider
     auto *percentLayout = new QHBoxLayout();
     m_percentSlider = new QSlider( Qt::Horizontal, this );
+    m_percentSlider->setToolTip( tr( "剪裁比例：保留中间 N% 像素做线性拉伸（2% 剪裁算法用）。" ) );
     m_percentSlider->setRange( 1, 100 );
     m_percentSlider->setValue( 98 );
     connect( m_percentSlider, &QSlider::valueChanged,
@@ -117,12 +122,14 @@ void HistogramStretchWidget::setupUi()
     auto *levelsLayout = new QHBoxLayout();
 
     m_minSpin = new QDoubleSpinBox( this );
+    m_minSpin->setToolTip( tr( "阴影（最小值）：低于此值的像素映射为黑。" ) );
     m_minSpin->setDecimals( 2 );
     m_minSpin->setRange( -1e9, 1e9 );
     connect( m_minSpin, QOverload<double>::of( &QDoubleSpinBox::valueChanged ),
              this, &HistogramStretchWidget::onMinMaxChanged );
 
     m_gammaSpin = new QDoubleSpinBox( this );
+    m_gammaSpin->setToolTip( tr( "Gamma（中音）：1.0 为线性；<1 提亮，>1 压暗。" ) );
     m_gammaSpin->setDecimals( 2 );
     m_gammaSpin->setRange( 0.1, 10.0 );
     m_gammaSpin->setSingleStep( 0.05 );
@@ -131,6 +138,7 @@ void HistogramStretchWidget::setupUi()
              this, &HistogramStretchWidget::onGammaChanged );
 
     m_maxSpin = new QDoubleSpinBox( this );
+    m_maxSpin->setToolTip( tr( "高光（最大值）：高于此值的像素映射为白。" ) );
     m_maxSpin->setDecimals( 2 );
     m_maxSpin->setRange( -1e9, 1e9 );
     connect( m_maxSpin, QOverload<double>::of( &QDoubleSpinBox::valueChanged ),
@@ -149,11 +157,13 @@ void HistogramStretchWidget::setupUi()
     // Buttons
     auto *buttonLayout = new QHBoxLayout();
     m_applyButton = new QPushButton( tr( "应用到显示" ), this );
+    m_applyButton->setToolTip( tr( "把当前拉伸参数应用到地图显示。" ) );
     m_applyButton->setProperty( "primary", true );
     m_applyButton->setObjectName( QStringLiteral( "rsPrimaryButton" ) );
     connect( m_applyButton, &QPushButton::clicked, this, &HistogramStretchWidget::applyStretch );
 
     m_resetButton = new QPushButton( tr( "重置 (Reset)" ), this );
+    m_resetButton->setToolTip( tr( "重置拉伸参数为默认值。" ) );
     connect( m_resetButton, &QPushButton::clicked, this, &HistogramStretchWidget::resetStretch );
 
     buttonLayout->addWidget( m_applyButton );

@@ -30,6 +30,8 @@ RsClassTableWidget::RsClassTableWidget( QWidget *parent )
   mTable->setColumnWidth( 2, 50 );
   mTable->setColumnWidth( 3, 70 );
   mTable->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::Stretch );
+  mTable->setToolTip( tr( "类别表：双击编辑名称；列显示颜色、名称、ROI 数与像元数。" ) );
+  mTable->setStatusTip( tr( "类别定义表" ) );
 
   lay->addWidget( mTable );
 

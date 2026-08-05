@@ -14,6 +14,7 @@
 #include <QVBoxLayout>
 
 #include "data/data_manager.h"
+#include "dialog_help_catalog.h"
 
 using sicnu::ChildCandidate;
 using sicnu::CollectionImportService;
@@ -31,6 +32,8 @@ LandsatImportDialog::LandsatImportDialog( QWidget *parent )
   setObjectName( QStringLiteral( "landsatImportDialog" ) );
   setWindowTitle( tr( "导入 Landsat 产品" ) );
   setupUi();
+  setWhatsThis( SicnuDialogHelp::htmlForTool( QStringLiteral( "landsat_import" ), windowTitle() ) );
+  setToolTip( SicnuDialogHelp::shortForTool( QStringLiteral( "landsat_import" ), windowTitle() ) );
 }
 
 void LandsatImportDialog::setDataManager( DataManager *dataManager )
@@ -55,8 +58,11 @@ void LandsatImportDialog::setupUi()
   auto *pathRow = new QHBoxLayout;
   m_pathEdit = new QLineEdit( this );
   m_pathEdit->setPlaceholderText( tr( "Landsat 场景目录（含 *_MTL.txt）" ) );
+  SicnuDialogHelp::tip( m_pathEdit, tr( "Landsat 场景目录路径（解压后含 *_MTL.txt 的目录）。" ) );
   m_browseButton = new QPushButton( tr( "浏览…" ), this );
+  SicnuDialogHelp::tip( m_browseButton, tr( "浏览选择 Landsat 场景目录。" ) );
   m_probeButton = new QPushButton( tr( "探测" ), this );
+  SicnuDialogHelp::tip( m_probeButton, tr( "解析 MTL 文件，列出可导入的子项与波段。" ) );
   pathRow->addWidget( m_pathEdit, 1 );
   pathRow->addWidget( m_browseButton );
   pathRow->addWidget( m_probeButton );
@@ -69,6 +75,7 @@ void LandsatImportDialog::setupUi()
   m_previewTree->setHeaderLabels( { tr( "子项（网格组）" ), tr( "波段" ) } );
   m_previewTree->setRootIsDecorated( false );
   m_previewTree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
+  SicnuDialogHelp::tip( m_previewTree, tr( "预览探测到的子项（网格组）与波段；勾选需导入的波段。" ) );
   layout->addWidget( m_previewTree, 1 );
 
   // Status label.
@@ -76,13 +83,21 @@ void LandsatImportDialog::setupUi()
   m_statusLabel->setWordWrap( true );
   layout->addWidget( m_statusLabel );
 
-  // Import / Cancel buttons.
+  // Import / Cancel / Help buttons.
   auto *buttonRow = new QHBoxLayout;
+  auto *helpButton = new QPushButton( tr( "帮助" ), this );
+  SicnuDialogHelp::tip( helpButton, tr( "打开本对话框的帮助说明。" ) );
+  connect( helpButton, &QPushButton::clicked, this, [this]() {
+    SicnuDialogHelp::showToolHelp( this, QStringLiteral( "landsat_import" ), windowTitle() );
+  } );
+  buttonRow->addWidget( helpButton );
   buttonRow->addStretch( 1 );
   m_importButton = new QPushButton( tr( "导入" ), this );
   m_importButton->setDefault( true );
   m_importButton->setEnabled( false );
+  SicnuDialogHelp::tip( m_importButton, tr( "导入选中的波段到工程（探测成功后可用）。" ) );
   m_cancelButton = new QPushButton( tr( "取消" ), this );
+  SicnuDialogHelp::tip( m_cancelButton, tr( "关闭对话框，不执行导入。" ) );
   buttonRow->addWidget( m_importButton );
   buttonRow->addWidget( m_cancelButton );
   layout->addLayout( buttonRow );

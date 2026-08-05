@@ -545,7 +545,9 @@ QWidget *RibbonController::makeQuickAccessToolbar( QWidget *parent )
   auto *helpBtn = new QToolButton( qat );
   polishSmallButton( helpBtn );
   helpBtn->setText( tr( "?" ) );
-  helpBtn->setToolTip( tr( "帮助" ) );
+  helpBtn->setToolTip( tr( "帮助内容（打开帮助文档）" ) );
+  helpBtn->setStatusTip( tr( "打开帮助文档" ) );
+  helpBtn->setWhatsThis( tr( "帮助内容（打开帮助文档）。按 Shift+F1 后点击任意控件可查看该控件的说明。" ) );
   helpBtn->setToolButtonStyle( Qt::ToolButtonTextOnly );
   connect( helpBtn, &QToolButton::clicked, m_window, &QgisDesktopWindow::helpContents );
   lay->addWidget( helpBtn );
@@ -583,9 +585,14 @@ QWidget *RibbonController::createRibbonBar()
   auto *tabGroup = new QButtonGroup( bar );
   tabGroup->setExclusive( true );
 
-  auto addTab = [&]( const QString &title, QWidget *page ) -> QPushButton * {
+  auto addTab = [&]( const QString &title, QWidget *page, const QString &tip = QString() ) -> QPushButton * {
     auto *tabBtn = new QPushButton( title, tabRow );
     polishTabButton( tabBtn );
+    if ( !tip.isEmpty() )
+    {
+      tabBtn->setToolTip( tip );
+      tabBtn->setStatusTip( tip );
+    }
     const int index = stack->addWidget( page );
     tabGroup->addButton( tabBtn, index );
     tabLay->addWidget( tabBtn );
@@ -612,7 +619,7 @@ QWidget *RibbonController::createRibbonBar()
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::importLayer );
     if ( auto *btn = addToolButton( g2, tr( "示例" ), "r_ster", tr( "加载教学示例数据" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::loadSampleData );
-    addTab( tr( "工程" ), pageW );
+    addTab( tr( "工程" ), pageW, tr( "工程 - 工程文件操作（新建/打开/保存、导入、偏好）" ) );
   }
 
   // ── 编辑（通用：撤销 / 剪贴板 / 选择，非矢量数字化）──────────────────
@@ -650,7 +657,7 @@ QWidget *RibbonController::createRibbonBar()
     if ( auto *btn = addToolButton( sel, tr( "属性表" ), "t_ble", tr( "打开属性表" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openAttributeTable );
 
-    addTab( tr( "编辑" ), pageW );
+    addTab( tr( "编辑" ), pageW, tr( "编辑 - 要素编辑与数字化工具" ) );
   }
 
   // ── 矢量编辑（数字化 / 几何修改 — 与「编辑」剪贴板分离）────────────────
@@ -714,7 +721,7 @@ QWidget *RibbonController::createRibbonBar()
                                     tr( "删除部件" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::deletePart );
 
-    addTab( tr( "矢量编辑" ), pageW );
+    addTab( tr( "矢量编辑" ), pageW, tr( "矢量编辑 - 矢量数据处理与几何操作" ) );
   }
 
   // ── 地图（导航 + 查询 + 波段合成下拉 + 外观）────────────────────────────
@@ -764,7 +771,7 @@ QWidget *RibbonController::createRibbonBar()
     if ( auto *btn = addToolButton( look, tr( "图层属性" ), "dis_l_y", tr( "打开图层属性" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::layerProperties );
 
-    addTab( tr( "地图" ), pageW )->setChecked( true );
+    addTab( tr( "地图" ), pageW, tr( "地图 - 视图导航、图层管理与识别工具" ) )->setChecked( true );
   }
 
   // ── 数据 ───────────────────────────────────────────────────────────────
@@ -789,7 +796,7 @@ QWidget *RibbonController::createRibbonBar()
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openGeorefImageToImage );
     if ( auto *btn = addToolButton( reg, tr( "图上配准" ), "geocorrection", tr( "影像对地图" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openGeorefImageToMap );
-    addTab( tr( "数据" ), pageW );
+    addTab( tr( "数据" ), pageW, tr( "数据 - 数据资产目录与数据管理" ) );
   }
 
   // ── 预处理 ─────────────────────────────────────────────────────────────
@@ -811,7 +818,7 @@ QWidget *RibbonController::createRibbonBar()
       } );
     if ( auto *btn = addToolButton( prep, tr( "斑点滤波" ), "sar_process", tr( "SAR 斑点滤波" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openSpeckleFilterDialog );
-    addTab( tr( "预处理" ), pageW );
+    addTab( tr( "预处理" ), pageW, tr( "预处理 - 辐射/大气校正、配准、融合、裁剪" ) );
   }
 
   // ── 增强 ───────────────────────────────────────────────────────────────
@@ -859,7 +866,7 @@ QWidget *RibbonController::createRibbonBar()
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openSpatialFilterDialog );
     if ( auto *btn = addToolButton( tools, tr( "增强面板" ), "enh_nce", tr( "影像增强综合面板" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openImageEnhancementPanel );
-    addTab( tr( "增强" ), pageW );
+    addTab( tr( "增强" ), pageW, tr( "增强 - 影像增强、拉伸、滤波、波段运算" ) );
   }
 
   // ── 分析 ───────────────────────────────────────────────────────────────
@@ -890,7 +897,7 @@ QWidget *RibbonController::createRibbonBar()
       connect( btn, &QToolButton::clicked, this, [this]() {
         emit openWorkflowTool( QStringLiteral( "tool.rs.terrain_analysis" ) );
       } );
-    addTab( tr( "分析" ), pageW );
+    addTab( tr( "分析" ), pageW, tr( "分析 - 光谱指数、变化检测、地形、分类" ) );
   }
 
   // ── 分类 ───────────────────────────────────────────────────────────────
@@ -902,7 +909,7 @@ QWidget *RibbonController::createRibbonBar()
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openClassificationWindow );
     if ( auto *btn = addToolButton( cls, tr( "对象分类" ), "seg_ent_tion", tr( "面向对象 OBIA" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openObiaWindow );
-    addTab( tr( "分类" ), pageW );
+    addTab( tr( "分类" ), pageW, tr( "分类 - 监督/非监督分类与精度评价" ) );
   }
 
   // ── 制图 ───────────────────────────────────────────────────────────────
@@ -914,7 +921,7 @@ QWidget *RibbonController::createRibbonBar()
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::newLayout );
     if ( auto *btn = addToolButton( map, tr( "卷帘对比" ), "l_yer_st_ck", tr( "卷帘对比图层" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::toggleSwipeTool );
-    addTab( tr( "制图" ), pageW );
+    addTab( tr( "制图" ), pageW, tr( "制图 - 布局设计与制图输出" ) );
   }
 
   // ── 任务 ───────────────────────────────────────────────────────────────
@@ -938,7 +945,7 @@ QWidget *RibbonController::createRibbonBar()
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::showProcessingHistory );
     if ( auto *btn = addToolButton( jobs, tr( "工具箱" ), "model_builder", tr( "处理工具箱" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::showProcessingToolbox );
-    addTab( tr( "任务" ), pageW );
+    addTab( tr( "任务" ), pageW, tr( "任务 - 任务中心、处理历史与批量" ) );
   }
 
   // --- TAB: 流程 (Workflow Editor & Execution) ---
@@ -997,7 +1004,7 @@ QWidget *RibbonController::createRibbonBar()
       } );
     }
 
-    addTab( tr( "流程" ), pageW );
+    addTab( tr( "流程" ), pageW, tr( "流程 - 工作流编辑器与模型构建" ) );
   }
 
   tabLay->addStretch( 1 );

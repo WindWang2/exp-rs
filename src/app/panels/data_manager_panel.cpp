@@ -1,7 +1,9 @@
 #include "data_manager_panel.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QColor>
+#include <QGuiApplication>
 #include <QHeaderView>
 #include <QIcon>
 #include <QLabel>
@@ -23,6 +25,7 @@
 #include "data/collection_types.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
+#include "dialogs/dialog_help_catalog.h"
 
 namespace sicnu
 {
@@ -523,6 +526,18 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
 
   clearDetails( tr( "选择数据资产或集合以查看元信息。" ) );
   refresh();
+  applyHelpTips();
+}
+
+void DataManagerPanel::applyHelpTips()
+{
+  setWhatsThis(
+    SicnuDialogHelp::htmlForTool( QStringLiteral( "obia_data_manager" ), windowTitle() ) );
+  SicnuDialogHelp::tip( this, tr( "数据管理：工程数据资产与集合目录；右键可添加到显示、提升、卸载、查看属性。" ) );
+  SicnuDialogHelp::tip( m_tree, tr( "资产/集合树。左侧色条表示状态（绿=可用，红=不可用）。双击=添加到显示；右键更多操作。" ) );
+  SicnuDialogHelp::tip( m_detailView, tr( "选中资产的元信息检视器（路径、CRS、波段/图层结构等）。" ) );
+  SicnuDialogHelp::tip( m_detailTitle, tr( "当前检视项标题。" ) );
+  SicnuDialogHelp::tip( m_splitter, tr( "拖动分隔条调整目录树与检视器的高度。" ) );
 }
 
 int DataManagerPanel::rowCount() const
@@ -733,8 +748,23 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
 
   QMenu menu( this );
   const int n = ids.size();
+
   QAction *displayAction = menu.addAction(
     n == 1 ? tr( "添加到显示" ) : tr( "添加到显示（%1 项）" ).arg( n ) );
+  displayAction->setToolTip( tr( "把选中资产作为图层加载到当前视图。" ) );
+
+  // 查看属性：仅单选时提供（多选时下方检视器已汇总）。
+  QAction *inspectAction = nullptr;
+  if ( n == 1 && m_dataManager )
+  {
+    inspectAction = menu.addAction( tr( "查看属性" ) );
+    inspectAction->setToolTip( tr( "在下方检视器中刷新该资产的元信息。" ) );
+  }
+
+  // 复制源路径：单选/多选均可用。
+  QAction *copyPathAction = menu.addAction(
+    n == 1 ? tr( "复制源路径" ) : tr( "复制源路径（%1 项）" ).arg( n ) );
+  copyPathAction->setToolTip( tr( "把资产源路径（canonicalSource）复制到剪贴板。" ) );
 
   int promotable = 0;
   for ( const sicnu::data::AssetId &id : ids )
@@ -746,15 +776,48 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
     promotable <= 1 ? tr( "提升为工程持久…" )
                     : tr( "提升为工程持久（%1 项）…" ).arg( promotable ) );
   promoteAction->setEnabled( promotable > 0 );
+  promoteAction->setToolTip( tr( "把临时资产提升为工程持久（随工程保存）。" ) );
+
+  // 重定位缺失源：仅当单选且该资产 Missing/Unavailable。
+  QAction *relocateAction = nullptr;
+  if ( n == 1 && isRelocatable( ids.first() ) )
+  {
+    relocateAction = menu.addAction( tr( "重定位缺失源…" ) );
+    relocateAction->setToolTip( tr( "为缺失/不可用的资产指定新的源位置以重新解析。" ) );
+  }
+
+  menu.addSeparator();
 
   QAction *unloadAction = menu.addAction(
     n == 1 ? tr( "卸载…" ) : tr( "卸载（%1 项）…" ).arg( n ) );
+  unloadAction->setToolTip( tr( "从工程卸载选中资产（会弹出确认；若有引用将级联移除）。" ) );
 
   QAction *chosen = menu.exec( m_tree->viewport()->mapToGlobal( pos ) );
   if ( chosen == displayAction )
   {
     for ( const sicnu::data::AssetId &id : ids )
       emit displayRequested( id );
+  }
+  else if ( inspectAction && chosen == inspectAction )
+  {
+    const auto snapshot = m_dataManager ? m_dataManager->asset( ids.first() ) : std::nullopt;
+    if ( snapshot )
+      showAssetDetails( *snapshot );
+  }
+  else if ( chosen == copyPathAction )
+  {
+    QStringList paths;
+    if ( m_dataManager )
+    {
+      for ( const sicnu::data::AssetId &id : ids )
+      {
+        const auto snapshot = m_dataManager->asset( id );
+        if ( snapshot )
+          paths.append( snapshot->source().canonicalSource );
+      }
+    }
+    if ( QClipboard *cb = QGuiApplication::clipboard() )
+      cb->setText( paths.join( QLatin1Char( '\n' ) ) );
   }
   else if ( chosen == promoteAction )
   {
@@ -763,6 +826,10 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
       if ( isPromotable( id ) )
         emit promoteRequested( id );
     }
+  }
+  else if ( relocateAction && chosen == relocateAction )
+  {
+    emit relocateRequested( ids.first() );
   }
   else if ( chosen == unloadAction )
   {
@@ -1018,6 +1085,18 @@ bool DataManagerPanel::isPromotable( sicnu::data::AssetId id ) const
     return false;
   const auto snapshot = m_dataManager->asset( id );
   return snapshot && !isProjectPersistent( id );
+}
+
+bool DataManagerPanel::isRelocatable( sicnu::data::AssetId id ) const
+{
+  if ( !m_dataManager || id.isNull() )
+    return false;
+  const auto snapshot = m_dataManager->asset( id );
+  if ( !snapshot )
+    return false;
+  const auto state = snapshot->state();
+  return state == sicnu::data::AssetState::Missing
+         || state == sicnu::data::AssetState::UnavailableSource;
 }
 
 int DataManagerPanel::referenceCount( sicnu::data::AssetId id ) const

@@ -6,6 +6,7 @@
 #include "log_panel.h"
 #include "panels/data_manager_panel.h"
 #include "project_context.h"
+#include "data/data_asset.h"
 #include "data/data_manager.h"
 #include "processing/framework/json_params_converter.h"
 #include "processing/framework/task_center.h"
@@ -26,6 +27,7 @@
 #include <QVBoxLayout>
 #include <QMenu>
 #include <QMenuBar>
+#include <QFileDialog>
 #include <QMessageBox>
 #include <QSignalBlocker>
 #include <QTextBrowser>
@@ -456,6 +458,45 @@ void QgisDesktopWindow::setupDataManagerPanel()
             QMessageBox::warning(
                 this, tr( "提升为工程持久" ),
                 tr( "无法提升该临时数据资产。" ) );
+        }
+    } );
+
+    connect( m_dataManagerPanel, &sicnu::DataManagerPanel::relocateRequested,
+             this, [this]( sicnu::data::AssetId assetId ) {
+        if ( !m_projectContext )
+            return;
+        sicnu::data::DataManager &dataManager = m_projectContext->dataManager();
+        const auto snapshot = dataManager.asset( assetId );
+        if ( !snapshot )
+        {
+            QMessageBox::warning( this, tr( "重定位缺失源" ),
+                                  tr( "找不到该数据资产。" ) );
+            return;
+        }
+        const QString oldPath = snapshot->source().canonicalSource;
+        const QString newPath = QFileDialog::getOpenFileName(
+            this, tr( "重定位缺失源 — 选择新的源文件" ), oldPath,
+            tr( "所有支持的文件 (*.tif *.tiff *.vrt *.shp *.gpkg *.geojson);;" )
+              + tr( "栅格 (*.tif *.tiff *.vrt);;" )
+              + tr( "矢量 (*.shp *.gpkg *.geojson);;" )
+              + tr( "所有文件 (*)" ) );
+        if ( newPath.isEmpty() )
+            return;
+        sicnu::data::SourceDescriptor replacement = snapshot->source();
+        replacement.canonicalSource = newPath;
+        const auto result = dataManager.relocate(
+            sicnu::data::RelocateRequest{ assetId, replacement } );
+        if ( !result )
+        {
+            QString detail = tr( "无法重定位该数据资产。" );
+            if ( !result.diagnostics().isEmpty() )
+                detail = result.diagnostics().constFirst().message;
+            QMessageBox::warning( this, tr( "重定位缺失源" ), detail );
+        }
+        else if ( statusBar() )
+        {
+            statusBar()->showMessage(
+                tr( "已重定位资产 %1 → %2" ).arg( assetId.toString() ).arg( newPath ), 5000 );
         }
     } );
 

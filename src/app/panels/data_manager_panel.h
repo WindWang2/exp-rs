@@ -71,6 +71,8 @@ class DataManagerPanel : public QDockWidget
     /// Batch unload (multi-select). Shell should confirm once then unload each.
     void unloadRequestedMany( const QList<sicnu::data::AssetId> &ids );
     void promoteRequested( sicnu::data::AssetId id );
+    /// Re-resolve a Missing/Unavailable asset at a new source location.
+    void relocateRequested( sicnu::data::AssetId id );
 
   private slots:
     void onItemActivated( QTreeWidgetItem *item, int column );
@@ -83,12 +85,14 @@ class DataManagerPanel : public QDockWidget
     int referenceCount( sicnu::data::AssetId id ) const;
     bool isProjectPersistent( sicnu::data::AssetId id ) const;
     bool isPromotable( sicnu::data::AssetId id ) const;
+    bool isRelocatable( sicnu::data::AssetId id ) const;
 
     void addAssetRow( QTreeWidgetItem *parent, const sicnu::data::AssetSnapshot &snapshot );
     void showAssetDetails( const sicnu::data::AssetSnapshot &snapshot );
     void showCollectionDetails( const sicnu::data::CollectionSnapshot &collection );
     void showMultiSelectionDetails( const QList<sicnu::data::AssetId> &ids );
     void clearDetails( const QString &message = QString() );
+    void applyHelpTips();
 
     sicnu::data::DataManager *m_dataManager = nullptr; // not owned
     QTreeWidget *m_tree = nullptr;

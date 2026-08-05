@@ -39,10 +39,12 @@ void GuidedWorkflowWidget::setupUi()
 
     leftLayout->addWidget(new QLabel(tr("Select Workflow:"), this));
     m_workflowList = new QListWidget(this);
+    m_workflowList->setToolTip(tr("选择一个引导式工作流。" ));
     connect(m_workflowList, &QListWidget::currentRowChanged, this, &GuidedWorkflowWidget::onWorkflowSelected);
     leftLayout->addWidget(m_workflowList);
 
     m_startButton = new QPushButton(tr("Start Workflow"), this);
+    m_startButton->setToolTip(tr("开始所选工作流。" ));
     m_startButton->setEnabled(false);
     connect(m_startButton, &QPushButton::clicked, this, &GuidedWorkflowWidget::onStartWorkflow);
     leftLayout->addWidget(m_startButton);
@@ -64,17 +66,20 @@ void GuidedWorkflowWidget::setupUi()
     // Navigation buttons
     auto *navLayout = new QHBoxLayout();
     m_prevButton = new QPushButton(tr("<< Previous"), this);
+    m_prevButton->setToolTip(tr("返回上一个步骤。" ));
     m_prevButton->setEnabled(false);
     connect(m_prevButton, &QPushButton::clicked, this, &GuidedWorkflowWidget::onPreviousStep);
     navLayout->addWidget(m_prevButton);
 
     m_runButton = new QPushButton(tr("Run Step"), this);
+    m_runButton->setToolTip(tr("执行当前步骤的操作。" ));
     m_runButton->setEnabled(false);
     m_runButton->setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; }");
     connect(m_runButton, &QPushButton::clicked, this, &GuidedWorkflowWidget::onRunStepAction);
     navLayout->addWidget(m_runButton);
 
     m_nextButton = new QPushButton(tr("Next >>"), this);
+    m_nextButton->setToolTip(tr("完成当前步骤后进入下一步。" ));
     m_nextButton->setEnabled(false);
     connect(m_nextButton, &QPushButton::clicked, this, &GuidedWorkflowWidget::onNextStep);
     navLayout->addWidget(m_nextButton);

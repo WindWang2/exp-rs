@@ -53,18 +53,22 @@ class RsJobPanel : public QgsDockWidget
     void onFilterChanged();
     void onContextMenuRequested( const QPoint &pos );
     void onItemChanged( QTreeWidgetItem *item, int column );
+    void onItemDoubleClicked( QTreeWidgetItem *item, int column );
 
   private:
     void setupUi();
+    void applyHelpTips();
     void refreshAll();
     void upsertTaskRow( const sicnu::AlgorithmTaskInfo &info );
     void fillLogForTask( long taskId );
     void fillDetailsForTask( long taskId );
     void updateActionEnabled();
     long selectedTaskId() const;
+    bool confirmDangerous( const QString &title, const QString &body ) const;
     bool passesFilter( const QString &stateText ) const;
     static QString statusToString( sicnu::TaskStatus status );
     static QString formatProgress( double progress );
+    static QString formatEta( const sicnu::AlgorithmTaskInfo &info );
     static QString prettyJson( const std::string &jsonText );
     static QString prettyJsonValue( const Json::Value &v );
 

@@ -40,6 +40,7 @@ void RoiStatisticsWidget::setupUi()
 
     // Stats table
     m_statsTable = new QTableWidget;
+    m_statsTable->setToolTip(tr("ROI 区域内各波段的统计（最小/最大/均值/标准差/像元数）。"));
     m_statsTable->setColumnCount(6);
     m_statsTable->setHorizontalHeaderLabels({tr("Band"), tr("Min"), tr("Max"), tr("Mean"), tr("StdDev"), tr("Pixels")});
     m_statsTable->horizontalHeader()->setStretchLastSection(true);
@@ -48,7 +49,9 @@ void RoiStatisticsWidget::setupUi()
     // Buttons
     auto *btnLayout = new QHBoxLayout();
     m_refreshBtn = new QPushButton(tr("Refresh"));
+    m_refreshBtn->setToolTip(tr("重新计算当前 ROI 的统计。"));
     m_exportBtn = new QPushButton(tr("Export CSV"));
+    m_exportBtn->setToolTip(tr("把统计表导出为 CSV 文件。"));
     btnLayout->addStretch();
     btnLayout->addWidget(m_refreshBtn);
     btnLayout->addWidget(m_exportBtn);

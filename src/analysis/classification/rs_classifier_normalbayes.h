@@ -14,5 +14,7 @@ class QGIS_ANALYSIS_EXPORT RsClassifierNormalBayes : public RsClassifierCvBacken
   public:
     RsClassifierNormalBayes();
 
+    cv::Mat predictProbabilities( const cv::Mat &X ) const override;
+
     QString name() const override { return QStringLiteral( "NormalBayes (最大似然)" ); }
 };

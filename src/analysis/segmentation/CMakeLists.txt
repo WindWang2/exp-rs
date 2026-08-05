@@ -9,6 +9,7 @@ target_sources(qgis_analysis PRIVATE
     rs_hierarchy_features.cpp
     rs_class_raster.cpp
     rs_object_classify.cpp
+    rs_hierarchy_class_consolidator.cpp
     # ADR 0060 — canonical ROI-majority segment labeling (rs_majority_vote.h
     # is header-only and needs no source entry).
     rs_roi_labeler.cpp

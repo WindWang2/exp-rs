@@ -93,8 +93,10 @@ QWidget *RsClassifyStepHost::buildPanel( RsClassifyStep s )
   auto *nav = new QHBoxLayout;
   auto *prev = new QPushButton( tr( "上一步" ), panel );
   prev->setObjectName( QStringLiteral( "classifyStepPrev" ) );
+  prev->setToolTip( tr( "返回上一个步骤。" ) );
   auto *next = new QPushButton( tr( "下一步" ), panel );
   next->setObjectName( QStringLiteral( "classifyStepNext" ) );
+  next->setToolTip( tr( "完成当前步骤后进入下一步。" ) );
   nav->addWidget( prev );
   nav->addStretch( 1 );
   nav->addWidget( next );

@@ -16,6 +16,44 @@
 #include <opencv2/core.hpp>
 #endif
 
+struct QGIS_ANALYSIS_EXPORT RsFeatureSelection
+{
+  bool useMean = true;
+  bool useStdDev = true;
+  bool useMin = true;
+  bool useMax = true;
+  bool useGlcmContrast = true;
+  bool useGlcmCorrelation = true;
+  bool useGlcmEnergy = true;
+  bool useGlcmHomogeneity = true;
+  bool useArea = true;
+  bool usePerimeter = true;
+  bool useShapeIndex = true;
+  bool useCompactness = true;
+  bool useRectangularity = true;
+  bool useAspectRatio = true;
+
+  int activeFeatureCount( int bandCount ) const
+  {
+    int count = 0;
+    if ( useMean ) count += bandCount;
+    if ( useStdDev ) count += bandCount;
+    if ( useMin ) count += bandCount;
+    if ( useMax ) count += bandCount;
+    if ( useGlcmContrast ) count += bandCount;
+    if ( useGlcmCorrelation ) count += bandCount;
+    if ( useGlcmEnergy ) count += bandCount;
+    if ( useGlcmHomogeneity ) count += bandCount;
+    if ( useArea ) count++;
+    if ( usePerimeter ) count++;
+    if ( useShapeIndex ) count++;
+    if ( useCompactness ) count++;
+    if ( useRectangularity ) count++;
+    if ( useAspectRatio ) count++;
+    return count;
+  }
+};
+
 class QGIS_ANALYSIS_EXPORT RsSegmentFeatures
 {
   public:
@@ -49,7 +87,8 @@ class QGIS_ANALYSIS_EXPORT RsSegmentFeatures
     /// segmentIds: output — the segment ID for each row.
     static cv::Mat toFeatureMatrix(
         const QMap<quint32, SegmentStat> &stats,
-        QVector<quint32> &segmentIds );
+        QVector<quint32> &segmentIds,
+        const RsFeatureSelection &selection = RsFeatureSelection() );
 #endif
 
   private:

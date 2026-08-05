@@ -21,6 +21,8 @@ RsClassQuickList::RsClassQuickList( QWidget *parent )
   mList = new QListWidget( this );
   mList->setObjectName( QStringLiteral( "rsClassQuickList" ) );
   mList->setSelectionMode( QAbstractItemView::SingleSelection );
+  mList->setToolTip( tr( "类别快览：点击选中当前类别，用于采集 ROI 或赋标签。" ) );
+  mList->setStatusTip( tr( "选择当前类别" ) );
   lay->addWidget( mList );
 
   connect( mList, &QListWidget::itemSelectionChanged,

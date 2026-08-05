@@ -1,10 +1,13 @@
 #include "rs_template_match_dialog.h"
 
+#include "dialogs/dialog_help_catalog.h"
+
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QLabel>
+#include <QPushButton>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
@@ -67,6 +70,11 @@ RsTemplateMatchDialog::RsTemplateMatchDialog( QWidget *parent )
   root->addLayout( form );
 
   auto *buttons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this );
+  auto *helpBtn = buttons->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
+  helpBtn->setToolTip( tr( "打开本对话框的帮助说明。" ) );
+  connect( helpBtn, &QPushButton::clicked, this, [this]() {
+    SicnuDialogHelp::showToolHelp( this, QStringLiteral( "template_match" ), windowTitle() );
+  } );
   connect( buttons, &QDialogButtonBox::accepted, this, &QDialog::accept );
   connect( buttons, &QDialogButtonBox::rejected, this, &QDialog::reject );
   root->addWidget( buttons );

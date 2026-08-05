@@ -21,6 +21,7 @@
 #include <QHash>
 #include <QMap>
 #include <QTableWidget>
+#include <QTreeWidget>
 #include <QToolBar>
 
 #include <atomic>
@@ -102,9 +103,14 @@ class RsObiaMainWindow : public QMainWindow
     void onSegmentSelected( quint32 segmentId );
     void onSelectionCleared();
     void onAssignClass();
+    void onClassTableContextMenu( const QPoint &pos );
+    void onSegmentTableContextMenu( const QPoint &pos );
     void onObiaTaskUpdated( const sicnu::AlgorithmTaskInfo &info );
     void showAccuracyAssessment();
     void loadResultToMainMap();
+    void runHierarchyConsolidation();
+    void showClassifierConfigDialog();
+    void onUncertaintySegmentDoubleClicked( int row, int col );
 
   private:
     void setupUi();
@@ -112,6 +118,7 @@ class RsObiaMainWindow : public QMainWindow
     void setupDocks();
     void setupMapCanvas();
     void updateSegmentTable();
+    void rebuildClassTable();
     void updateStatusLabel();
     void applySegmentationResult( const RsSegmentMap &segMap,
                                   bool usedOtb,
@@ -121,6 +128,9 @@ class RsObiaMainWindow : public QMainWindow
                                QMap<quint32, RsSegmentFeatures::SegmentStat> stats );
     void setActiveLevelMap( int level );
     QVector<int> allBandIndices() const;
+    RsFeatureSelection featureSelection() const;
+    void populateUncertaintyTable( const QMap<quint32, double> &uncertainties,
+                                   const QMap<quint32, int> &classes );
     int currentClassifyLevel() const;
     void finishPendingUi();
     void loadClassifiedRaster( const QString &outputPath );
@@ -159,6 +169,11 @@ class RsObiaMainWindow : public QMainWindow
   private:
     QVector<ClassDef> mClassDefs;
     int mCurrentClassId = 1;
+    int mRfNumTrees = 100;
+    int mRfMaxDepth = 20;
+    int mRfMinSampleCount = 1;
+    int mMlpHiddenLayerSize = 16;
+    int mMlpMaxIter = 500;
 
     RsSegmentSelectTool *mSelectTool = nullptr;
 
@@ -167,6 +182,10 @@ class RsObiaMainWindow : public QMainWindow
     QTableWidget *mClassTable = nullptr;
     QDockWidget *mSegmentDock = nullptr;
     QTableWidget *mSegmentTable = nullptr;
+    QDockWidget *mUncertaintyDock = nullptr;
+    QTableWidget *mUncertaintyTable = nullptr;
+    QDockWidget *mFeatureDock = nullptr;
+    QTreeWidget *mFeatureTree = nullptr;
 
     QToolBar *mToolbar = nullptr;
 

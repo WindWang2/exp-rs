@@ -12,16 +12,21 @@
 
 #ifdef SICNU_HAS_OPENCV
 #include "rs_classifier_backend.h"
+#include "rs_feature_scaler.h"
 #include <opencv2/core.hpp>
 #endif
 
 struct QGIS_ANALYSIS_EXPORT RsObjectClassifyResult
 {
-    bool ok = false;
-    QString errorMessage;
-    QMap<quint32, int> segmentClasses;
-    int labeledCount = 0;
-    int predictedCount = 0;
+  bool ok = false;
+  QString errorMessage;
+  QMap<quint32, int> segmentClasses;
+  QMap<quint32, double> segmentUncertainties;
+#ifdef SICNU_HAS_OPENCV
+  RsFeatureScaler scaler;
+#endif
+  int labeledCount = 0;
+  int predictedCount = 0;
 };
 
 class QGIS_ANALYSIS_EXPORT RsObjectClassify
@@ -34,6 +39,8 @@ class QGIS_ANALYSIS_EXPORT RsObjectClassify
         const cv::Mat &X,
         const QVector<quint32> &segmentIds,
         const QMap<quint32, int> &trainingLabels,
-        RsClassifierBackend &backend );
+        RsClassifierBackend &backend,
+        bool enableScaling = true,
+        RsFeatureScaler::Method scalingMethod = RsFeatureScaler::Method::ZScore );
 #endif
 };

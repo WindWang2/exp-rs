@@ -2,6 +2,7 @@
 // Extracted from main_window.cpp for maintainability
 #include "main_window.h"
 
+#include "dialogs/dialog_help_catalog.h"
 #include "dialogs/extract_band_dialog.h"
 
 #include <QMenuBar>
@@ -21,6 +22,7 @@
 #include <QStyle>
 #include <QSignalBlocker>
 #include <QTimer>
+#include <QWhatsThis>
 
 #include <qgsmaplayer.h>
 #include <qgsmapcanvas.h>
@@ -566,6 +568,10 @@ void QgisDesktopWindow::setupMenu()
     tip( helpMenu->addAction( ic( "hel_" ), tr( "帮助内容" ),
                               this, &QgisDesktopWindow::helpContents, QKeySequence::HelpContents ),
          tr( "打开帮助文档。" ) );
+    tip( helpMenu->addAction( tr( "这是什么？(Shift+F1)" ), this, []() {
+             QWhatsThis::enterWhatsThisMode();
+         } ),
+         tr( "进入「这是什么」模式，点击任意控件查看说明。" ) );
     helpMenu->addSeparator();
     tip( helpMenu->addAction( ic( "s_tellite" ), tr( "加载示例数据" ),
                               this, &QgisDesktopWindow::loadSampleData ),
@@ -652,6 +658,8 @@ void QgisDesktopWindow::setupToolbars()
     auto *digitizeToolBar = m_digitizeToolBar;
     digitizeToolBar->setObjectName( QStringLiteral( "digitizeToolBar" ) );
     digitizeToolBar->setWindowTitle( tr( "数字化" ) );
+    digitizeToolBar->setWhatsThis( SicnuDialogHelp::htmlForTool(
+        QStringLiteral( "digitize_tools" ), tr( "数字化编辑工具" ) ) );
     polishBar( digitizeToolBar );
 
     if ( m_toggleEditingAction )
@@ -670,37 +678,37 @@ void QgisDesktopWindow::setupToolbars()
     auto makeEditAct = [this]( const char *icon, const QString &text, const QString &tipText,
                                void ( QgisDesktopWindow::*slot )() ) -> QAction * {
         auto *a = new QAction( QIcon( QStringLiteral( ":/icons/" ) + QLatin1String( icon ) ), text, this );
-        a->setToolTip( tipText );
+        tip( a, tipText ); // toolTip + statusTip + whatsThis
         a->setEnabled( false );
         connect( a, &QAction::triggered, this, slot );
         return a;
     };
     m_editingToolActions = {
-        makeEditAct( "mActionSelectRectangle", tr( "选择" ), tr( "选择要素" ),
+        makeEditAct( "mActionSelectRectangle", tr( "选择" ), tr( "选择要素（矩形框选）" ),
                      &QgisDesktopWindow::selectFeatures ),
-        makeEditAct( "mActionCapturePoint", tr( "添加要素" ), tr( "添加要素" ),
+        makeEditAct( "mActionCapturePoint", tr( "添加要素" ), tr( "绘制新要素" ),
                      &QgisDesktopWindow::addFeature ),
-        makeEditAct( "mActionVertexTool", tr( "节点" ), tr( "节点工具" ),
+        makeEditAct( "mActionVertexTool", tr( "节点" ), tr( "节点工具：拖动顶点编辑几何" ),
                      &QgisDesktopWindow::vertexTool ),
         makeEditAct( "mActionMoveFeature", tr( "移动" ), tr( "移动要素" ),
                      &QgisDesktopWindow::moveFeature ),
         makeEditAct( "mActionRotateFeature", tr( "旋转" ), tr( "旋转要素" ),
                      &QgisDesktopWindow::rotateFeature ),
-        makeEditAct( "mActionReshape", tr( "重塑" ), tr( "重塑几何" ),
+        makeEditAct( "mActionReshape", tr( "重塑" ), tr( "重塑几何：修改要素边界" ),
                      &QgisDesktopWindow::reshapeGeometry ),
         makeEditAct( "mActionSplitFeatures", tr( "分割" ), tr( "分割要素" ),
                      &QgisDesktopWindow::splitFeatures ),
-        makeEditAct( "mActionOffsetCurve", tr( "偏移" ), tr( "偏移线" ),
+        makeEditAct( "mActionOffsetCurve", tr( "偏移" ), tr( "偏移线（平行线）" ),
                      &QgisDesktopWindow::offsetCurve ),
-        makeEditAct( "mActionSimplify", tr( "简化" ), tr( "简化" ),
+        makeEditAct( "mActionSimplify", tr( "简化" ), tr( "简化几何：抽稀顶点" ),
                      &QgisDesktopWindow::simplifyFeature ),
         makeEditAct( "mActionReverseLine", tr( "反转" ), tr( "反转线方向" ),
                      &QgisDesktopWindow::reverseLine ),
-        makeEditAct( "mActionAddRing", tr( "添加环" ), tr( "添加环" ),
+        makeEditAct( "mActionAddRing", tr( "添加环" ), tr( "添加环（面内空洞）" ),
                      &QgisDesktopWindow::addRing ),
-        makeEditAct( "mActionFillRing", tr( "填充环" ), tr( "填充环" ),
+        makeEditAct( "mActionFillRing", tr( "填充环" ), tr( "填充环（在空洞内绘新面）" ),
                      &QgisDesktopWindow::fillRing ),
-        makeEditAct( "mActionDeletePart", tr( "删除部件" ), tr( "删除部件" ),
+        makeEditAct( "mActionDeletePart", tr( "删除部件" ), tr( "删除多部件之一" ),
                      &QgisDesktopWindow::deletePart ),
     };
     for ( QAction *a : m_editingToolActions )

@@ -58,6 +58,9 @@ class RsObiaTask : public QgsTask
         // Training: segmentId → classId (user-labeled segments)
         QMap<quint32, int> segmentLabels;
 
+        // Feature selection mask
+        RsFeatureSelection featureSelection;
+
         QHash<int, QColor> classColors;
         QString algoName;
     };
@@ -71,6 +74,8 @@ class RsObiaTask : public QgsTask
         int totalPixels = 0;
         int durationMs = 0;
         RsAccuracyAssessment::Result accuracy;
+        QMap<quint32, double> segmentUncertainties;
+        QMap<quint32, int> segmentClasses;
     };
 
     explicit RsObiaTask( Config cfg );

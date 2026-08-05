@@ -25,6 +25,8 @@ if(SICNU_HAS_OPENCV)
         rs_classifier_normalbayes.cpp
         rs_classifier_svm.cpp
         rs_classifier_kmeans.cpp
+        rs_classifier_random_forest.cpp
+        rs_classifier_mlp.cpp
         # ADR 0061 — single method-name → backend construction owner.
         rs_classifier_backend_factory.cpp
         # Phase 10A review patch — stratified train/test split helper.

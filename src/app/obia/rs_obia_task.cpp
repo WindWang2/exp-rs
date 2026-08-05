@@ -110,7 +110,7 @@ bool RsObiaTask::run()
 
     // Step 3: Build feature matrix (rows = segments)
     QVector<quint32> segmentIds;
-    cv::Mat allFeatures = RsSegmentFeatures::toFeatureMatrix( stats, segmentIds );
+    cv::Mat allFeatures = RsSegmentFeatures::toFeatureMatrix( stats, segmentIds, mCfg.featureSelection );
 
     if ( isCanceled() )
         return false;
@@ -132,6 +132,8 @@ bool RsObiaTask::run()
 
     mResult.labeledSegments = clsResult.labeledCount;
     const QMap<quint32, int> segmentClasses = clsResult.segmentClasses;
+    mResult.segmentClasses = segmentClasses;
+    mResult.segmentUncertainties = clsResult.segmentUncertainties;
 
     // Training-set accuracy (true labels vs predicted class of labeled segments).
     {

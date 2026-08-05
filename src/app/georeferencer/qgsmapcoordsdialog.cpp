@@ -49,6 +49,8 @@ QgsMapCoordsDialog::QgsMapCoordsDialog( QgsMapCanvas *qgisCanvas, QgsGeorefDataP
   setAttribute( Qt::WA_DeleteOnClose );
 
   mPointFromCanvasPushButton = new QPushButton( QgsApplication::getThemeIcon( "georeferencer/mPushButtonPencil.svg" ), tr( "从地图取点" ) );
+  mPointFromCanvasPushButton->setToolTip( tr( "点击后在主地图上点选一点，自动填入坐标。" ) );
+  mPointFromCanvasPushButton->setStatusTip( tr( "从地图画布取点" ) );
   mPointFromCanvasPushButton->setCheckable( true );
   buttonBox->addButton( mPointFromCanvasPushButton, QDialogButtonBox::ActionRole );
   mPointFromCanvasPushButton->setFocus();

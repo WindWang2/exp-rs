@@ -52,6 +52,11 @@ RsClassifierLoadDialog::RsClassifierLoadDialog( QWidget *parent )
   buttons->button( QDialogButtonBox::Ok )->setText( tr( "确定" ) );
   buttons->button( QDialogButtonBox::Cancel )->setText( tr( "取消" ) );
   SicnuUi::markPrimary( buttons->button( QDialogButtonBox::Ok ) );
+  auto *helpBtn = buttons->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
+  helpBtn->setToolTip( tr( "打开本对话框的帮助说明。" ) );
+  connect( helpBtn, &QPushButton::clicked, this, [this]() {
+    SicnuDialogHelp::showToolHelp( this, QStringLiteral( "classifier_load" ), windowTitle() );
+  } );
   layout->addWidget( buttons );
 
   connect( browse, &QPushButton::clicked,

@@ -408,6 +408,26 @@ void ActiveViewHost::removeSelectedDisplayLayers()
         return;
     }
 
+    // Safety-first: confirm before removing (legacy QGIS layers are removed from project).
+    QStringList names;
+    for ( QgsMapLayer *layer : selected )
+    {
+        if ( layer )
+            names.append( layer->name() );
+    }
+    QString detail = QObject::tr( "从显示移除选中的 %1 个图层？\n（数据资产保留在工程中，仅移除显示；"
+                                  "外部 QGIS 图层将从工程移除。）" ).arg( selected.size() );
+    if ( names.size() <= 5 )
+        detail += QStringLiteral( "\n\n" ) + names.join( QStringLiteral( "\n" ) );
+    else
+        detail += QStringLiteral( "\n\n" ) + names.mid( 0, 5 ).join( QStringLiteral( "\n" ) )
+                  + QObject::tr( "\n…及其余 %1 个" ).arg( names.size() - 5 );
+    const auto choice = QMessageBox::question(
+        m_parentWidget, QObject::tr( "移除图层" ), detail,
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+    if ( choice != QMessageBox::Yes )
+        return;
+
     for ( QgsMapLayer *layer : selected )
     {
         const std::optional<sicnu::display::DisplayLayerId> displayLayerId =
