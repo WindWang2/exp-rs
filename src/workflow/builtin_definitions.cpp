@@ -224,14 +224,8 @@ void registerClassificationPostprocessMerge( WorkflowRuntime &runtime )
 
 void registerBuiltinWorkflows( WorkflowRuntime &runtime )
 {
-  registerAtomicTool( runtime, "tool.rs.ndvi", "NDVI 植被指数",
-                      "rs:ndvi", "input", "请选择输入栅格" );
   registerAtomicTool( runtime, "tool.rs.supervised_classification", "监督分类",
                       "rs:supervised_classification", "image", "请选择输入栅格" );
-  registerAtomicTool( runtime, "tool.rs.pan_sharpening", "全色锐化",
-                      "rs:pan_sharpening", "pan", "请选择全色影像" );
-  registerAtomicTool( runtime, "tool.rs.pansharpen", "全色锐化",
-                      "rs:pansharpen", "pan", "请选择全色影像" );
   registerAtomicTool( runtime, "tool.rs.kmeans_classification", "K-Means K均值聚类",
                       "rs:kmeans_classification", "input", "请选择输入栅格" );
   registerAtomicTool( runtime, "tool.rs.obia_segment", "面向对象分割",

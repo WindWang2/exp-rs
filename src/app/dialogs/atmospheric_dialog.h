@@ -9,7 +9,7 @@ class QLabel;
 
 /**
  * Dialog for Atmospheric Correction operations.
- * Supports DN-to-Radiance conversion, DOS1, and DOS2 methods
+ * Supports DN-to-Radiance conversion, DOS1, DOS2, and QUAC methods
  * using the AtmosphericCorrection algorithm library.
  */
 class AtmosphericDialog : public RasterProcessingDialogBase
@@ -38,5 +38,8 @@ private:
     QDoubleSpinBox *m_biasSpin = nullptr;
     QDoubleSpinBox *m_airmassSpin = nullptr;
 
+    QLabel *m_bandLabel = nullptr;
+    QLabel *m_gainLabel = nullptr;
+    QLabel *m_biasLabel = nullptr;
     QLabel *m_airmassLabel = nullptr;
 };

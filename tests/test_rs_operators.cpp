@@ -101,6 +101,7 @@ TEST_CASE("Native RS operators are registered", "[operators][rs]") {
     CHECK(registry.hasOperator("rs:spectral_index"));
     CHECK(registry.hasOperator("rs:band_math"));
     CHECK(registry.hasOperator("rs:atmospheric_correction"));
+    CHECK(registry.hasOperator("rs:radiometric_calibration"));
     CHECK(registry.hasOperator("rs:change_detection"));
     CHECK(registry.hasOperator("rs:image_fusion"));
     CHECK(registry.hasOperator("rs:terrain_analysis"));

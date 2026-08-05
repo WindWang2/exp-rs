@@ -10,6 +10,7 @@ add_library(sicnu_processing SHARED
     algorithms/spectral_indices.cpp
     algorithms/band_math.cpp
     algorithms/atmospheric_correction.cpp
+    algorithms/radiometric_calibration.cpp
     algorithms/change_detection.cpp
     algorithms/math_utils.cpp
     algorithms/mosaic.cpp
@@ -157,6 +158,7 @@ target_include_directories(sicnu_processing PRIVATE
 target_link_libraries(sicnu_processing PUBLIC
     Qt6::Core
     Qt6::Gui
+    Qt6::Xml
     qgis_core
     GDAL::GDAL
 )

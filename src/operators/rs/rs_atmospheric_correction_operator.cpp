@@ -20,7 +20,7 @@ using namespace params;
 namespace {
 
 const std::vector<std::string> s_methods = {
-    "dn_to_radiance", "dos1", "dos2"
+    "dn_to_radiance", "dos1", "dos2", "quac"
 };
 
 } // anonymous namespace
@@ -84,15 +84,30 @@ Json::Value RsAtmosphericCorrectionOperator::run(const Json::Value& params,
     int methodCode = 1; // DOS1
     if (method == "dn_to_radiance") methodCode = 0;
     else if (method == "dos2") methodCode = 2;
+    else if (method == "quac") methodCode = 3;
 
     context.logInfo("Applying " + method + " to " + inputPath);
     context.reportProgress(0.2, "Running atmospheric correction");
 
     QString errorMessage;
-    if (!AtmosphericCorrection::processFile(QString::fromStdString(inputPath),
-                                            QString::fromStdString(outputPath),
-                                            band, methodCode, gain, bias, airmass,
-                                            &errorMessage)) {
+    bool ok = false;
+    if (methodCode == 3) {
+        // QUAC processes all bands jointly (image-statistics based).
+        ok = AtmosphericCorrection::processFileMultiBand(
+            QString::fromStdString(inputPath),
+            QString::fromStdString(outputPath),
+            methodCode, &errorMessage,
+            [&](double frac, const QString &msg) {
+                context.reportProgress(0.2 + 0.75 * frac, msg.toStdString());
+                context.throwIfCancelled();
+            });
+    } else {
+        ok = AtmosphericCorrection::processFile(QString::fromStdString(inputPath),
+                                                QString::fromStdString(outputPath),
+                                                band, methodCode, gain, bias, airmass,
+                                                &errorMessage);
+    }
+    if (!ok) {
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Atmospheric correction failed: " + errorMessage.toStdString());
     }

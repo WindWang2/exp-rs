@@ -50,6 +50,7 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_spectral_index_operator.cpp
     rs/rs_band_math_operator.cpp
     rs/rs_atmospheric_correction_operator.cpp
+    rs/rs_radiometric_calibration_operator.cpp
     rs/rs_change_detection_operator.cpp
     rs/rs_image_fusion_operator.cpp
     rs/rs_terrain_analysis_operator.cpp

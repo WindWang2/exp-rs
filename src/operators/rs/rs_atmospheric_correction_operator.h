@@ -14,12 +14,13 @@ namespace sicnu::operators::rs {
  *   - dn_to_radiance: L = gain * DN + bias
  *   - dos1: surface_radiance = radiance - min(radiance)
  *   - dos2: surface = (radiance - path_radiance) / transmittance
+ *   - quac:  Quick Atmospheric Correction (multi-band, image-statistics based)
  *
  * Parameters:
  *   input        (string, required) Input raster path
  *   output       (string, required) Output raster path
- *   band         (int, optional)    1-based band number (default: 1)
- *   method       (string, optional) One of: dn_to_radiance, dos1, dos2 (default: dos1)
+ *   band         (int, optional)    1-based band number (default: 1; ignored by QUAC)
+ *   method       (string, optional) One of: dn_to_radiance, dos1, dos2, quac (default: dos1)
  *   gain         (number, optional) Radiance gain (default: 1.0)
  *   bias         (number, optional) Radiance bias (default: 0.0)
  *   airmass      (number, optional) Relative airmass for DOS2 transmittance (default: 1.0)
@@ -35,7 +36,7 @@ public:
     std::string displayName() const override { return "Atmospheric Correction"; }
     std::string group() const override { return "radiometric"; }
     std::string description() const override {
-        return "Apply atmospheric correction (DOS1/DOS2/radiance) to optical imagery.";
+        return "Apply atmospheric correction (DOS1/DOS2/QUAC/radiance) to optical imagery.";
     }
 
     Json::Value schema() const override;

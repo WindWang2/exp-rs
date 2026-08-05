@@ -21,7 +21,8 @@ void AtmosphericCorrectionAlgorithm::initAlgorithm( const QVariantMap & )
     QStringList methodOptions;
     methodOptions << QStringLiteral( "DN to Radiance" )
                   << QStringLiteral( "DOS1 (Dark Object Subtraction)" )
-                  << QStringLiteral( "DOS2 (DOS + Transmittance)" );
+                  << QStringLiteral( "DOS2 (DOS + Transmittance)" )
+                  << QStringLiteral( "QUAC (Quick Atmospheric Correction)" );
 
     addParameter( new QgsProcessingParameterRasterLayer(
         QStringLiteral( "INPUT" ), QObject::tr( "Input raster (DN values)" ) ) );
@@ -60,6 +61,26 @@ QVariantMap AtmosphericCorrectionAlgorithm::processAlgorithm( const QVariantMap 
 
     if ( nCols <= 0 || nRows <= 0 )
         throw QgsProcessingException( QObject::tr( "Invalid raster dimensions" ) );
+
+    QString dest = parameterAsOutputLayer( parameters, QStringLiteral( "OUTPUT" ), context );
+
+    // QUAC (method 3) is multi-band: delegate to processFileMultiBand which owns
+    // its own GDAL I/O, bypassing the single-band QgsRasterBlock path below.
+    if ( method == 3 )
+    {
+        feedback->setProgressText( QObject::tr( "Running QUAC (multi-band)..." ) );
+        QString error;
+        if ( !AtmosphericCorrection::processFileMultiBand(
+                inputLayer->source(), dest, method, &error,
+                [feedback]( double frac, const QString & msg ) {
+                    feedback->setProgressText( msg );
+                    feedback->setProgress( static_cast<int>( frac * 100 ) );
+                } ) )
+            throw QgsProcessingException( error );
+
+        feedback->setProgress( 100 );
+        return QVariantMap{ { QStringLiteral( "OUTPUT" ), dest } };
+    }
 
     size_t totalPixels = static_cast<size_t>( nCols ) * static_cast<size_t>( nRows );
 
@@ -108,7 +129,6 @@ QVariantMap AtmosphericCorrectionAlgorithm::processAlgorithm( const QVariantMap 
 
     // Write output raster
     feedback->setProgressText( QObject::tr( "Writing output raster..." ) );
-    QString dest = parameterAsOutputLayer( parameters, QStringLiteral( "OUTPUT" ), context );
 
     QgsRasterFileWriter writer( dest );
     writer.setOutputFormat( QStringLiteral( "GTiff" ) );
@@ -136,7 +156,7 @@ QVariantMap AtmosphericCorrectionAlgorithm::processAlgorithm( const QVariantMap 
 
 QString AtmosphericCorrectionAlgorithm::shortHelpString() const
 {
-    return QObject::tr( "Performs DOS (Dark Object Subtraction) atmospheric correction on a raster layer using DOS1 or DOS2 methods to convert digital numbers to surface reflectance." );
+    return QObject::tr( "Performs atmospheric correction on a raster layer using DOS1, DOS2, or QUAC (Quick Atmospheric Correction) methods to convert digital numbers to surface reflectance." );
 }
 
 QVariantMap AtmosphericCorrectionAlgorithm::metadata() const

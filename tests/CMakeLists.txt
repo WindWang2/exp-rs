@@ -208,6 +208,25 @@ target_include_directories(test_atmospheric PRIVATE
 )
 sicnu_discover_tests(test_atmospheric)
 
+# Radiometric calibration tests
+add_executable(test_radiometric_calibration test_radiometric_calibration.cpp)
+target_link_libraries(test_radiometric_calibration PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Xml
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_radiometric_calibration PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_radiometric_calibration)
+
 # Band math tests
 add_executable(test_band_math test_band_math.cpp)
 target_link_libraries(test_band_math PRIVATE

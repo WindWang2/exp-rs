@@ -60,8 +60,9 @@ const QHash<QString, Entry> &catalog()
             "• DN to Radiance：L = gain×DN + bias，需传感器增益/偏置\n"
             "• DOS1：暗目标减法，估算路径辐射\n"
             "• DOS2：在 DOS1 上考虑透过率，需气团(Airmass)\n"
-            "【波段】处理的波段号。\n"
-            "【Gain / Bias】辐射定标系数（元数据或产品手册）。\n"
+            "• QUAC：基于图像统计的全波段快速大气校正，输出近似地表反射率[0,1]，无需外部参数\n"
+            "【波段】处理的波段号（QUAC 自动处理全部波段，此项忽略）。\n"
+            "【Gain / Bias】辐射定标系数（元数据或产品手册，QUAC 忽略）。\n"
             "【Airmass】仅 DOS2：气团，通常≥1。\n"
             "【输出】校正后栅格。" } },
         { QStringLiteral( "contrast_stretch" ),

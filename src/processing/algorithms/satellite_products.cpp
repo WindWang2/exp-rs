@@ -69,6 +69,8 @@ QString findMtdInDir(const QDir& dir)
     return {};
 }
 
+} // namespace
+
 QMap<QString, QString> parseMtlKeyValues(const QString& mtlPath, QString* error)
 {
     QMap<QString, QString> kv;
@@ -97,6 +99,8 @@ QMap<QString, QString> parseMtlKeyValues(const QString& mtlPath, QString* error)
     }
     return kv;
 }
+
+namespace {
 
 QString landsatBandNameFromKey(const QString& key)
 {

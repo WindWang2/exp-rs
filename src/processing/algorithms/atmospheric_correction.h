@@ -3,6 +3,7 @@
 
 #include <QString>
 #include <cstddef>
+#include <functional>
 
 /**
  * Atmospheric correction algorithms for optical remote sensing.
@@ -10,6 +11,8 @@
  * Dark Object Subtraction (DOS) methods:
  * - DOS1: subtract minimum radiance (atmospheric path radiance estimate)
  * - DOS2: DOS1 + transmittance correction
+ * - QUAC: Quick Atmospheric Correction (Bernstein 2008), image-statistics based,
+ *         multi-band, outputs approximate surface reflectance in [0, 1].
  *
  * Input: raw DN (digital number) pixel values.
  * Output: surface radiance or reflectance.
@@ -58,10 +61,41 @@ namespace AtmosphericCorrection
     float estimateTransmittance(float airmass);
 
     /**
+     * QUAC (Quick Atmospheric Correction) multi-band kernel.
+     *
+     * Image-statistics based method (Bernstein et al., 2008). For each band the
+     * dark-end (1st percentile) and bright-end (99th percentile) DN are used to
+     * estimate per-band gain; the result is scaled so the scene-average bright
+     * reference maps to ~0.5 reflectance and clipped to [0, 1].
+     *
+     * @param dnBands    array of @p bandCount input buffers (each @p pixels floats)
+     * @param outBands   array of @p bandCount output buffers (each @p pixels floats)
+     * @param bandCount  number of bands
+     * @param pixels     number of pixels per band
+     * @param errorMessage optional error sink
+     * @return true on success
+     */
+    bool quac(const float *const *dnBands, float *const *outBands,
+              int bandCount, size_t pixels, QString *errorMessage = nullptr);
+
+    /**
      * Apply atmospheric correction to one band of a GeoTIFF and write output.
      * @param method 0=DN to Radiance, 1=DOS1, 2=DOS2
      */
     bool processFile(const QString &sourcePath, const QString &outputPath,
                      int bandNum, int method, float gain, float bias,
                      float airmass = 1.0f, QString *errorMessage = nullptr);
+
+    /**
+     * Apply multi-band atmospheric correction to a GeoTIFF and write output.
+     *
+     * Currently supports method 3 (QUAC), which requires all bands in memory.
+     * The output is a Float32 multi-band GeoTIFF preserving geotransform and
+     * projection. Band order follows the source raster.
+     *
+     * @param method 3=QUAC
+     */
+    bool processFileMultiBand(const QString &sourcePath, const QString &outputPath,
+                              int method, QString *errorMessage = nullptr,
+                              const std::function<void(double, const QString &)> &progress = {});
 } // namespace AtmosphericCorrection
