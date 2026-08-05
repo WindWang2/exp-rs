@@ -64,7 +64,7 @@ void QgisDesktopWindow::newLayout()
     QgsProject::instance()->layoutManager()->addLayout( layout );
 
     // Create and show the layout designer
-    auto *designer = new QgsLayoutDesignerDialog( layout, this );
+    auto *designer = new QgsLayoutDesignerDialog( layout, m_mapCanvas, this );
     designer->window()->setAttribute( Qt::WA_DeleteOnClose );
     designer->window()->show();
 }
