@@ -38,8 +38,12 @@ public:
 
     RSOperatorContext(const RSOperatorContext&) = delete;
     RSOperatorContext& operator=(const RSOperatorContext&) = delete;
-    RSOperatorContext(RSOperatorContext&&) = default;
-    RSOperatorContext& operator=(RSOperatorContext&&) = default;
+    // Holding a std::mutex (m_callbackMutex) makes the move special members
+    // implicitly deleted; declare them delete explicitly so the build stays
+    // -Wdefaulted-function-deleted-clean. RSOperatorContext is always used in
+    // place (constructed once, passed by reference), so neither is needed.
+    RSOperatorContext(RSOperatorContext&&) = delete;
+    RSOperatorContext& operator=(RSOperatorContext&&) = delete;
 
     /**
      * Sets the progress callback. May be empty (no progress reporting).
