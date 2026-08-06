@@ -643,3 +643,194 @@ TEST_CASE( "SharedMemorySegment: large-matrix zero-copy round-trip throughput",
     std::cout << "[benchmark] shm zero-copy int32 2048x2048 (16 MiB): "
               << i32Throughput << " MiB/s round-trip" << std::endl;
 }
+
+// ---------------------------------------------------------------------------
+// ADR 0064 - production zero-copy delivery. A Python algorithm receives a
+// raster block as a numpy array via shared memory (the __shm_key__ /
+// __shm_array__ path), instead of opening a file path via GDAL itself.
+//
+// This test exercises the Python-side mount path directly: the C++ side
+// creates the segment and passes the native key (plus width/height/bands/
+// dtype) in the algorithm request params under __shm_key__. The daemon
+// mounts the payload as a numpy array and exposes it as __shm_array__ to the
+// plugin, which returns its sum + shape. We assert byte-exact correctness
+// against an independent C++ sum. (The C++ bridge's opt-in migration of a
+// file-path input into __shm_key__ is covered by E.2 / a follow-up test.)
+// ---------------------------------------------------------------------------
+TEST_CASE( "SharedMemorySegment: py: algorithm receives raster via __shm_key__ and returns byte-exact sum",
+           "[python][shm][exec]" )
+{
+  using namespace sicnu::jobs;
+
+  sicnu::data::DataManager dataManager;
+  PythonPluginHost host( 2 );
+
+  const QString pluginDir = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "plugins/sample_plugin" ) );
+  QString loadError;
+  PythonPluginAdapter *pluginAdapter = host.loadPlugin( pluginDir, &dataManager, nullptr, nullptr, &loadError );
+  REQUIRE( pluginAdapter != nullptr );
+
+  WorkerNode *node = pluginAdapter->workerNode();
+  REQUIRE( node != nullptr );
+  REQUIRE( node->server->hasClient() );
+
+  // Register py:shm_sum on the worker (its execute_fn sums __shm_array__).
+  QJsonObject regResult;
+  bool regIsError = false;
+  REQUIRE( node->server->sendRequestAndAwait( QStringLiteral( "processing.test_register_shm_algorithm" ),
+                                              QJsonObject(), regResult, regIsError, 10000 )
+           == AwaitStatus::Ok );
+  REQUIRE( !regIsError );
+
+  // Create a shared-memory segment with a known 64x64x1 float32 block.
+  constexpr int W = 64, H = 64, B = 1;
+  std::vector<float> data( W * H * B );
+  std::iota( data.begin(), data.end(), 0.0f );
+  double expectedSum = 0.0;
+  for ( float v : data ) expectedSum += v;
+
+  SharedMemorySegment seg;
+  REQUIRE( seg.create( W, H, B, SharedMemorySegment::DType::Float32 ) );
+  REQUIRE( seg.write( data.data(), data.size() * sizeof( float ) ) );
+
+  // Run py:shm_sum through JobEngine with __shm_key__ (the native key) +
+  // dimension/dtype metadata. The daemon mounts the array and the plugin
+  // returns {sum, shape}.
+  JobRequest req;
+  req.algorithmId = "py:shm_sum";
+  req.params["__shm_key__"] = std::string( seg.nativeKey().toUtf8().constData() );
+  req.params["width"] = W;
+  req.params["height"] = H;
+  req.params["bands"] = B;
+  req.params["dtype"] = static_cast<int>( SharedMemorySegment::DType::Float32 );
+  const std::string jobId = JobEngine::instance().submit( req );
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
+  std::optional<sicnu::jobs::JobRecord> snap;
+  for ( ;; )
+  {
+    QCoreApplication::processEvents();
+    snap = JobEngine::instance().snapshot( jobId );
+    if ( snap && ( snap->state == JobState::Succeeded || snap->state == JobState::Failed ) )
+      break;
+    if ( std::chrono::steady_clock::now() > deadline )
+    {
+      FAIL( "py:shm_sum job did not finish within 30 s" );
+      break;
+    }
+    QThread::msleep( 5 );
+  }
+  REQUIRE( snap.has_value() );
+  INFO( "job error: " << ( snap.has_value() ? snap->error : std::string{} ) );
+  REQUIRE( snap->state == JobState::Succeeded );
+
+  // The bridge closure returns the daemon's {"status":"ok","result":{...}};
+  // the plugin's payload is under result.sum / result.shape.
+  REQUIRE( snap->result.isMember( "result" ) );
+  const Json::Value pluginResult = snap->result["result"];
+  REQUIRE( pluginResult.isMember( "sum" ) );
+  REQUIRE( pluginResult["sum"].asDouble() == Approx( expectedSum ).epsilon( 1e-6 ) );
+  REQUIRE( pluginResult.isMember( "shape" ) );
+  REQUIRE( pluginResult["shape"].isArray() );
+  REQUIRE( pluginResult["shape"].size() == 3 );
+
+  // Reclaim the segment (detach unlinks the owner's backing objects).
+  seg.detach();
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0064 - C++ bridge opt-in migration. When the caller sets
+// `__shm_key__: true` (the opt-in flag) alongside a raster `input` path, the
+// AppInterfaceBridge reads the raster into a shared-memory segment and the
+// plugin receives it as __shm_array__ (no file open on the Python side).
+// Without the flag, the plugin gets the file path (fallback). This test
+// exercises both paths against a real committed raster (data/phr_xs.tif).
+// ---------------------------------------------------------------------------
+TEST_CASE( "AppInterfaceBridge migrates raster input to shm on opt-in (__shm_key__: true)",
+           "[python][shm][bridge]" )
+{
+  using namespace sicnu::jobs;
+
+  sicnu::data::DataManager dataManager;
+  PythonPluginHost host( 2 );
+
+  const QString pluginDir = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "plugins/sample_plugin" ) );
+  QString loadError;
+  PythonPluginAdapter *pluginAdapter = host.loadPlugin( pluginDir, &dataManager, nullptr, nullptr, &loadError );
+  REQUIRE( pluginAdapter != nullptr );
+
+  WorkerNode *node = pluginAdapter->workerNode();
+  REQUIRE( node != nullptr );
+  REQUIRE( node->server->hasClient() );
+
+  // Register py:shm_sum (returns {"via":"shm","shape":...,"sum":...} when it
+  // got a __shm_array__, or {"via":"path","input":...} when it got a path).
+  QJsonObject regResult;
+  bool regIsError = false;
+  REQUIRE( node->server->sendRequestAndAwait( QStringLiteral( "processing.test_register_shm_algorithm" ),
+                                              QJsonObject(), regResult, regIsError, 10000 )
+           == AwaitStatus::Ok );
+  REQUIRE( !regIsError );
+
+  const QString rasterPath = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "phr_xs.tif" ) );
+  REQUIRE( QFileInfo::exists( rasterPath ) );
+
+  auto runPy = []( const Json::Value &params ) -> std::optional<sicnu::jobs::JobRecord> {
+    JobRequest req;
+    req.algorithmId = "py:shm_sum";
+    req.params = params;
+    const std::string jobId = JobEngine::instance().submit( req );
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
+    for ( ;; )
+    {
+      QCoreApplication::processEvents();
+      auto snap = JobEngine::instance().snapshot( jobId );
+      if ( snap && ( snap->state == JobState::Succeeded || snap->state == JobState::Failed ) )
+        return snap;
+      if ( std::chrono::steady_clock::now() > deadline )
+        return snap;
+      QThread::msleep( 5 );
+    }
+  };
+
+  SECTION( "opt-in: plugin receives the raster as a zero-copy shm array" )
+  {
+    Json::Value params( Json::objectValue );
+    params["__shm_key__"] = true;            // opt-in flag
+    params["input"] = rasterPath.toStdString();
+
+    const auto snap = runPy( params );
+    REQUIRE( snap.has_value() );
+    INFO( "job error: " << ( snap.has_value() ? snap->error : std::string{} ) );
+    REQUIRE( snap->state == JobState::Succeeded );
+
+    REQUIRE( snap->result.isMember( "result" ) );
+    const Json::Value r = snap->result["result"];
+    REQUIRE( r["via"].asString() == "shm" );
+    REQUIRE( r.isMember( "shape" ) );
+    REQUIRE( r["shape"].isArray() );
+    REQUIRE( r["shape"].size() == 3 );
+    // phr_xs.tif is 250x250x4 (UInt16, read as float32 by the bridge).
+    REQUIRE( r["shape"][0].asInt() == 250 );
+    REQUIRE( r["shape"][1].asInt() == 250 );
+    REQUIRE( r["shape"][2].asInt() == 4 );
+    REQUIRE( r.isMember( "sum" ) );
+    REQUIRE( std::isfinite( r["sum"].asDouble() ) );
+  }
+
+  SECTION( "no opt-in: plugin falls back to the file path" )
+  {
+    Json::Value params( Json::objectValue );
+    params["input"] = rasterPath.toStdString(); // no __shm_key__ flag
+
+    const auto snap = runPy( params );
+    REQUIRE( snap.has_value() );
+    INFO( "job error: " << ( snap.has_value() ? snap->error : std::string{} ) );
+    REQUIRE( snap->state == JobState::Succeeded );
+
+    REQUIRE( snap->result.isMember( "result" ) );
+    const Json::Value r = snap->result["result"];
+    REQUIRE( r["via"].asString() == "path" );
+    REQUIRE( r["input"].asString() == rasterPath.toStdString() );
+  }
+}
