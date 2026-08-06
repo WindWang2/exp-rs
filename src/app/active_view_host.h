@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 
 #include <QObject>
@@ -141,6 +142,13 @@ class ActiveViewHost : public QObject
     void removeSelectedDisplayLayers();
     void removeSelectedLayers() { removeSelectedDisplayLayers(); }
     void refreshCanvasLayers();
+
+    /// Confirmation callback for destructive display-layer removal. Defaults
+    /// to a modal QMessageBox::question (Yes/No, default No). Tests inject a
+    /// non-interactive answer; production behavior is unchanged.
+    using ConfirmationFn = std::function<bool( const QString &detailText )>;
+    void setConfirmationFn( ConfirmationFn fn ) { m_confirmationFn = std::move( fn ); }
+
     void zoomToLayer( QgsMapLayer *layer = nullptr );
     void zoomToNativeResolution( QgsMapLayer *layer = nullptr );
 
@@ -164,6 +172,7 @@ class ActiveViewHost : public QObject
     sicnu::display::QgisDisplayManager *m_displayManager = nullptr;
     sicnu::display::DisplayViewId m_mainViewId;
     QWidget *m_parentWidget = nullptr;
+    ConfirmationFn m_confirmationFn; ///< set in the constructor; injectable via setConfirmationFn
 
     QgsLayerTreeModel *m_layerTreeModel = nullptr;
 

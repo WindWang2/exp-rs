@@ -47,6 +47,13 @@ ActiveViewHost::ActiveViewHost( QgsMapCanvas *canvas,
     , m_displayManager( displayManager )
     , m_mainViewId( mainViewId )
     , m_parentWidget( parentWidget )
+    , m_confirmationFn( [parentWidget]( const QString &detailText ) {
+        // Default: modal Yes/No confirmation, default No (safety-first).
+        // Tests inject a non-interactive answer via setConfirmationFn.
+        return QMessageBox::question( parentWidget, QObject::tr( "移除图层" ), detailText,
+                                      QMessageBox::Yes | QMessageBox::No, QMessageBox::No )
+               == QMessageBox::Yes;
+    } )
 {
     // The display manager owns the active view id; align it with the main view
     // so both sides start from the same state.
@@ -422,10 +429,7 @@ void ActiveViewHost::removeSelectedDisplayLayers()
     else
         detail += QStringLiteral( "\n\n" ) + names.mid( 0, 5 ).join( QStringLiteral( "\n" ) )
                   + QObject::tr( "\n…及其余 %1 个" ).arg( names.size() - 5 );
-    const auto choice = QMessageBox::question(
-        m_parentWidget, QObject::tr( "移除图层" ), detail,
-        QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
-    if ( choice != QMessageBox::Yes )
+    if ( !m_confirmationFn( detail ) )
         return;
 
     for ( QgsMapLayer *layer : selected )

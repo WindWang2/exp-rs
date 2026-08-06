@@ -149,6 +149,11 @@ TEST_CASE( "ActiveViewHost removes presentation without unloading its Data Asset
   treeView.setCurrentLayer( mapLayer );
   REQUIRE( host.selectedLayers().size() == 1 );
 
+  // The removal path confirms via a modal QMessageBox by default; inject an
+  // automatic Yes so the test is non-interactive (and never hangs on a live
+  // desktop or under offscreen runs).
+  host.setConfirmationFn( []( const QString & ) { return true; } );
+
   host.removeSelectedDisplayLayers();
 
   CHECK( context->dataManager().asset( assetId ).has_value() );

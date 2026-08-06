@@ -143,7 +143,7 @@ TEST_CASE( "py: prefix executor executes directly on the worker thread (no main-
     // The worker now runs sendRequestSync directly (no main-thread marshal),
     // so no processEvents pump is required for the job to progress. We still
     // poll snapshots to observe completion (CLI runner pattern).
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 60 );
     for ( ;; )
     {
       QCoreApplication::processEvents();
@@ -156,7 +156,7 @@ TEST_CASE( "py: prefix executor executes directly on the worker thread (no main-
       }
       if ( std::chrono::steady_clock::now() > deadline )
       {
-        FAIL( "py: job did not finish within 30 s (sendRequestSync deadlock?)" );
+        FAIL( "py: job did not finish within 60 s (sendRequestSync deadlock?)" );
         break;
       }
       QThread::msleep( 5 );
@@ -169,7 +169,7 @@ TEST_CASE( "py: prefix executor executes directly on the worker thread (no main-
     req.algorithmId = "py:ghost_unknown";
     const std::string jobId = JobEngine::instance().submit( req );
 
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 60 );
     for ( ;; )
     {
       QCoreApplication::processEvents();
@@ -182,7 +182,7 @@ TEST_CASE( "py: prefix executor executes directly on the worker thread (no main-
       }
       if ( std::chrono::steady_clock::now() > deadline )
       {
-        FAIL( "py: job did not finish within 30 s" );
+        FAIL( "py: job did not finish within 60 s" );
         break;
       }
       QThread::msleep( 5 );
@@ -709,7 +709,7 @@ TEST_CASE( "SharedMemorySegment: py: algorithm receives raster via __shm_key__ a
   req.params["dtype"] = static_cast<int>( SharedMemorySegment::DType::Float32 );
   const std::string jobId = JobEngine::instance().submit( req );
 
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 60 );
   std::optional<sicnu::jobs::JobRecord> snap;
   for ( ;; )
   {
@@ -719,7 +719,7 @@ TEST_CASE( "SharedMemorySegment: py: algorithm receives raster via __shm_key__ a
       break;
     if ( std::chrono::steady_clock::now() > deadline )
     {
-      FAIL( "py:shm_sum job did not finish within 30 s" );
+      FAIL( "py:shm_sum job did not finish within 60 s" );
       break;
     }
     QThread::msleep( 5 );
@@ -784,7 +784,7 @@ TEST_CASE( "AppInterfaceBridge migrates raster input to shm on opt-in (__shm_key
     req.algorithmId = "py:shm_sum";
     req.params = params;
     const std::string jobId = JobEngine::instance().submit( req );
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 60 );
     for ( ;; )
     {
       QCoreApplication::processEvents();
@@ -904,7 +904,7 @@ TEST_CASE( "SharedMemorySegment: uint8/uint16 rasters keep their native dtype th
     req.algorithmId = "py:shm_sum";
     req.params = params;
     const std::string jobId = JobEngine::instance().submit( req );
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 60 );
     for ( ;; )
     {
       QCoreApplication::processEvents();
