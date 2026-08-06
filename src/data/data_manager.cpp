@@ -275,7 +275,8 @@ RegisterResult DataManager::registerSource( const RegisterRequest &request )
                           request.persistence,
                           source.storageKind,
                           source.displayName,
-                          source.structure };
+                          source.structure,
+                          request.acquisitionTime };
   m_impl->records.push_back( Impl::AssetRecord{ sourceKey, std::move( snapshot ) } );
   m_impl->catalogGeneration++;
 

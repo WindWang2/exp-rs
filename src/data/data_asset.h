@@ -35,6 +35,10 @@ struct RegisterRequest
   /// declare `DeletableSource` on an asset whose file the Data Manager owns
   /// and may legitimately delete on reap.
   AssetCapabilities additionalCapabilities;
+  /// Optional acquisition time the registrar asserts (e.g. a STAC item
+  /// datetime an importer carries from its preview). Empty by default; when
+  /// engaged it lands on the resulting DataAsset's acquisition-time field.
+  std::optional<QDateTime> acquisitionTime;
 };
 
 struct RegisterResult

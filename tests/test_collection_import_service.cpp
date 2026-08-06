@@ -7,6 +7,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QCoreApplication>
+#include <QDate>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -454,6 +456,75 @@ TEST_CASE( "Commit registers one collection and one child asset per selection",
   REQUIRE( collection.has_value() );
   REQUIRE( collection->childAssetIds.size() == 2 );
   CHECK( collection->childAssetIds == result.childAssetIds );
+}
+
+// The product's acquisition date (e.g. a STAC item datetime carried through
+// the preview's metadata) lands on each committed child asset's acquisition
+// time. A preview without one leaves the children empty. Covers #138.
+TEST_CASE( "Commit lands the preview acquisition date on each child asset",
+           "[collection_import][commit]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  StubDiscoverer discoverer; // unused by commit
+  CollectionImportService service( &manager, &discoverer );
+
+  const QString pathA = stageRaster( dir, QStringLiteral( "a.tif" ) );
+  const QString pathB = stageRaster( dir, QStringLiteral( "b.tif" ) );
+  ImportPreview preview =
+    previewOver( { rasterChild( pathA, QStringLiteral( "10m" ) ),
+                   rasterChild( pathB, QStringLiteral( "20m" ) ) } );
+  preview.metadata.acquisitionDate = QStringLiteral( "2026-07-25" );
+
+  const CommitImportResult result =
+    service.commit( { preview, { 0, 1 }, PersistencePolicy::ProjectPersistent } );
+  REQUIRE( result.childAssetIds.size() == 2 );
+
+  // Each child inherits the parsed date; the date-only ISO string parses to
+  // midnight on that day.
+  const QDateTime expected( QDate( 2026, 7, 25 ), QTime( 0, 0, 0 ) );
+  for ( const AssetId &childId : result.childAssetIds )
+  {
+    const auto snapshot = manager.asset( childId );
+    REQUIRE( snapshot.has_value() );
+    REQUIRE( snapshot->acquisitionTime().has_value() );
+    CHECK( snapshot->acquisitionTime()->date() == expected.date() );
+  }
+
+  // A preview without an acquisition date leaves the children empty (the plain,
+  // non-STAC import shape): no default-epoch poisoning.
+  QTemporaryDir dir2;
+  DataManager manager2;
+  CollectionImportService service2( &manager2, &discoverer );
+  const QString pathC = stageRaster( dir2, QStringLiteral( "c.tif" ) );
+  const ImportPreview barePreview =
+    previewOver( { rasterChild( pathC, QStringLiteral( "10m" ) ) } );
+  const CommitImportResult bareResult =
+    service2.commit( { barePreview, { 0 }, PersistencePolicy::ProjectPersistent } );
+  REQUIRE( bareResult.childAssetIds.size() == 1 );
+  const auto bareSnapshot = manager2.asset( bareResult.childAssetIds.first() );
+  REQUIRE( bareSnapshot.has_value() );
+  CHECK_FALSE( bareSnapshot->acquisitionTime().has_value() );
+
+  // A present-but-non-ISO date (e.g. a MODIS DOY date like "2020-DOY314") does
+  // not parse: the children import with an empty acquisition time (no epoch
+  // poisoning) and the commit surfaces a Warning diagnostic.
+  QTemporaryDir dir3;
+  DataManager manager3;
+  CollectionImportService service3( &manager3, &discoverer );
+  const QString pathD = stageRaster( dir3, QStringLiteral( "d.tif" ) );
+  ImportPreview modisPreview =
+    previewOver( { rasterChild( pathD, QStringLiteral( "250m" ) ) } );
+  modisPreview.metadata.acquisitionDate = QStringLiteral( "2020-DOY314" );
+  const CommitImportResult modisResult =
+    service3.commit( { modisPreview, { 0 }, PersistencePolicy::ProjectPersistent } );
+  REQUIRE( modisResult.childAssetIds.size() == 1 );
+  const auto modisSnapshot = manager3.asset( modisResult.childAssetIds.first() );
+  REQUIRE( modisSnapshot.has_value() );
+  CHECK_FALSE( modisSnapshot->acquisitionTime().has_value() );
+  REQUIRE_FALSE( modisResult.diagnostics.isEmpty() );
+  CHECK( modisResult.diagnostics.last().code ==
+         QStringLiteral( "import.acquisition_date_unparseable" ) );
 }
 
 TEST_CASE( "A mid-commit child registration failure rolls back the whole import",
