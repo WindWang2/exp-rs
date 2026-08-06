@@ -285,6 +285,46 @@ def main():
                             "id": req_id,
                             "result": {"status": "algorithm_registered"}
                         }
+                    elif method == "shm.read":
+                        # ADR 0064: zero-copy shared memory read. The C++ side
+                        # creates a QSharedMemory segment, writes a Header
+                        # (32 bytes: uuid[16] + width/height/bands/dtype int32)
+                        # followed by the payload. We attach via
+                        # multiprocessing.shared_memory, skip the header, and
+                        # mount the payload as a numpy array (no copy).
+                        key = params.get("key")
+                        width = params.get("width")
+                        height = params.get("height")
+                        bands = params.get("bands")
+                        dtype_code = params.get("dtype")
+                        dtype_map = {0: np.float32, 1: np.uint8, 2: np.int32}
+                        np_dtype = dtype_map.get(dtype_code, np.float32)
+                        from multiprocessing import shared_memory
+                        try:
+                            shm = shared_memory.SharedMemory(name=key)
+                            try:
+                                # Header is 32 bytes: uuid[16] + 4*int32
+                                offset = 32
+                                arr = np.ndarray(
+                                    (height, width, bands),
+                                    dtype=np_dtype,
+                                    buffer=shm.buf,
+                                    offset=offset,
+                                )
+                                result = {
+                                    "status": "ok",
+                                    "checksum": float(arr.sum()),
+                                    "shape": list(arr.shape),
+                                }
+                            finally:
+                                shm.close()
+                        except FileNotFoundError:
+                            result = {"status": "error", "message": f"Shared memory segment not found: {key}"}
+                        resp = {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "result": result,
+                        }
                     elif method == "crash_test":
                         sys.stderr.write("WorkerDaemon simulating segfault crash!\n")
                         sys.stderr.flush()
