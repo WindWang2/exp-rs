@@ -183,6 +183,7 @@ endif()
 # and resolves symbols when final targets also link sicnu_task_center.
 add_library(sicnu_task_center STATIC
     framework/task_center.cpp
+    framework/resource_monitor.cpp
     framework/agent_workflow_executor.cpp
     # Task Center seam for OutputCommitter and ToolCallDispatcher default constructor
     # — kept out of sicnu_processing so that library does not need JobEngine / TaskCenter link deps.

@@ -16,6 +16,7 @@
 #include "qgstaskmanager.h"
 #include "algorithm_engine.h"
 #include "jobs/job_types.h"
+#include "resource_monitor.h"
 
 namespace sicnu::operators {
 class RSOperatorContext;
@@ -162,6 +163,13 @@ public:
     void setGlobalConcurrencyLimit( unsigned int maxConcurrent );
     unsigned int globalConcurrencyLimit() const;
 
+    /// Memory watermark (MB) above which new task launches are held until RSS
+    /// drops (ADR 0063). 0 disables the gate. Defaults to 75% of system RAM.
+    void setMemoryLimitMb( unsigned int mb );
+    unsigned int memoryLimitMb() const;
+    /// Inject a custom RSS sampler (MB) for tests; {} restores the default.
+    void setRssSampler( std::function<unsigned int()> sampler );
+
 signals:
     /// Lifecycle notifications are always emitted **outside** m_mutex so slots may
     /// safely re-enter TaskCenter (getTaskInfo, enqueue, cancel, …) without deadlock.
@@ -237,6 +245,7 @@ private:
     unsigned int m_globalConcurrencyLimit = 0; ///< 0 → hardware_concurrency()-1 (min 1)
     long m_nextTaskId = 1;
     long m_nextPipelineId = 1;
+    ResourceMonitor m_resourceMonitor;
 };
 
 } // namespace sicnu
