@@ -920,15 +920,20 @@ TEST_CASE( "SharedMemorySegment: uint8/uint16 rasters keep their native dtype th
   QTemporaryDir tmpDir;
   REQUIRE( tmpDir.isValid() );
 
-  // Two small rasters with known fill values: 16x16 uint8 (fill 200) and
-  // 16x16 uint16 (fill 60000). Expected sums are exact.
+  // Three small rasters with known fill values: 16x16 uint8 (fill 200),
+  // 16x16 uint16 (fill 60000), and 16x16 float64 (fill a value float32 cannot
+  // represent exactly: 1/3). Expected sums are exact in the source dtype.
   constexpr int W = 16, H = 16;
+  constexpr double F64_FILL = 1.0 / 3.0; // 0.333... - not exact in float32
   const QString u8Path = createSingleBandRaster( tmpDir.path(), QStringLiteral( "u8.tif" ),
                                                  W, H, GDT_Byte, 200.0 );
   const QString u16Path = createSingleBandRaster( tmpDir.path(), QStringLiteral( "u16.tif" ),
                                                   W, H, GDT_UInt16, 60000.0 );
+  const QString f64Path = createSingleBandRaster( tmpDir.path(), QStringLiteral( "f64.tif" ),
+                                                  W, H, GDT_Float64, F64_FILL );
   REQUIRE( QFileInfo::exists( u8Path ) );
   REQUIRE( QFileInfo::exists( u16Path ) );
+  REQUIRE( QFileInfo::exists( f64Path ) );
 
   SECTION( "uint8 raster arrives as uint8 array" )
   {
@@ -970,5 +975,29 @@ TEST_CASE( "SharedMemorySegment: uint8/uint16 rasters keep their native dtype th
     REQUIRE( r["shape"][1].asInt() == W );
     REQUIRE( r["shape"][2].asInt() == 1 );
     REQUIRE( r["sum"].asDouble() == Approx( 60000.0 * W * H ).epsilon( 1e-6 ) );
+  }
+
+  SECTION( "float64 raster arrives as float64 array (precision preserved)" )
+  {
+    Json::Value params( Json::objectValue );
+    params["__shm_key__"] = true;               // opt-in flag
+    params["input"] = f64Path.toStdString();
+
+    const auto snap = runPy( params );
+    REQUIRE( snap.has_value() );
+    INFO( "job error: " << ( snap.has_value() ? snap->error : std::string{} ) );
+    REQUIRE( snap->state == JobState::Succeeded );
+
+    REQUIRE( snap->result.isMember( "result" ) );
+    const Json::Value r = snap->result["result"];
+    REQUIRE( r["via"].asString() == "shm" );
+    REQUIRE( r["dtype"].asString() == "float64" ); // native dtype preserved
+    REQUIRE( r["shape"][0].asInt() == H );
+    REQUIRE( r["shape"][1].asInt() == W );
+    REQUIRE( r["shape"][2].asInt() == 1 );
+    // The sum of W*H copies of 1/3 in float64. A float32 conversion would
+    // introduce ~1e-8 relative error per element; require exact float64
+    // arithmetic (tight epsilon so the float32 path cannot satisfy it).
+    REQUIRE( r["sum"].asDouble() == Approx( F64_FILL * W * H ).epsilon( 1e-12 ) );
   }
 }

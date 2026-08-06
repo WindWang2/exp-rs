@@ -34,7 +34,7 @@ namespace sicnu::python::isolated {
 class SharedMemorySegment
 {
   public:
-    enum class DType : int32_t { Float32 = 0, UInt8 = 1, Int32 = 2, UInt16 = 3 };
+    enum class DType : int32_t { Float32 = 0, UInt8 = 1, Int32 = 2, UInt16 = 3, Float64 = 4 };
 
     /// Fixed-layout header prepended to the payload. Must stay 32 bytes so the
     /// Python side can skip it with a hardcoded offset.

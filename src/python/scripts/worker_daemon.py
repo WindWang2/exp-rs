@@ -30,7 +30,7 @@ def _mount_shm_array(key, width, height, bands, dtype_code):
     """
     from multiprocessing import shared_memory
     # Must stay in sync with SharedMemorySegment::DType (shared_memory_segment.h).
-    dtype_map = {0: np.float32, 1: np.uint8, 2: np.int32, 3: np.uint16}
+    dtype_map = {0: np.float32, 1: np.uint8, 2: np.int32, 3: np.uint16, 4: np.float64}
     np_dtype = dtype_map.get(dtype_code, np.float32)
     shm = shared_memory.SharedMemory(name=key)
     # Header is 32 bytes: uuid[16] + 4*int32. Payload follows.

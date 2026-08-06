@@ -69,8 +69,8 @@ std::unique_ptr<SharedMemorySegment> migrateRasterInputToShm( const Json::Value 
     return nullptr;
 
   // Map the band's native GDAL type to a segment dtype. Byte/UInt16/Int32/
-  // Float32 map 1:1 (preserving the source dtype, byte-exact); anything else
-  // keeps the float32 conversion path (readBandData below).
+  // Float32/Float64 map 1:1 (preserving the source dtype, byte-exact); any
+  // remaining type keeps the float32 conversion path (readBandData below).
   bool useNative = true;
   SharedMemorySegment::DType segDtype = SharedMemorySegment::DType::Float32;
   switch ( ds.bandDataType( 1 ) )
@@ -87,8 +87,11 @@ std::unique_ptr<SharedMemorySegment> migrateRasterInputToShm( const Json::Value 
     case GDT_Float32:
       segDtype = SharedMemorySegment::DType::Float32;
       break;
+    case GDT_Float64:
+      segDtype = SharedMemorySegment::DType::Float64;
+      break;
     default:
-      useNative = false; // Float64/Int16/etc. -> float32 conversion
+      useNative = false; // Int16/etc. -> float32 conversion
       break;
   }
 
