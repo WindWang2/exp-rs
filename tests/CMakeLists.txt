@@ -3,21 +3,25 @@ include(Catch)
 
 # Wrapper around catch_discover_tests that injects LSAN_OPTIONS when sanitizers
 # are enabled, suppressing known singleton leaks (QgsExpression functions,
-# QgsNumericFormatRegistry, Nvidia EGL driver).
+# QgsNumericFormatRegistry, Nvidia EGL driver). Callers may pass extra
+# test PROPERTIES (e.g. RUN_SERIAL TRUE) after the NAME.
 function(sicnu_discover_tests NAME)
+  set(_discovery_props "")
   if(ENABLE_SANITIZERS)
     # PRE_TEST mode runs test discovery at ctest time (not build time), so
     # ENVIRONMENT_MODIFICATION is applied to the discovery process.
     # This prevents ASAN leak reports from failing test discovery.
-    catch_discover_tests(${NAME}
-      DISCOVERY_MODE PRE_TEST
-      PROPERTIES ENVIRONMENT_MODIFICATION "LSAN_OPTIONS=set:detect_leaks=0")
-  else()
-    # PRE_TEST avoids race conditions in parallel builds where discovery
-    # tries to run the test executable before it is linked.
-    catch_discover_tests(${NAME}
-      DISCOVERY_MODE PRE_TEST)
+    list(APPEND _discovery_props "ENVIRONMENT_MODIFICATION" "LSAN_OPTIONS=set:detect_leaks=0")
   endif()
+  if(ARGN)
+    # ARGN is a flat list of key/value test properties (RUN_SERIAL TRUE, ...).
+    list(APPEND _discovery_props ${ARGN})
+  endif()
+  # PRE_TEST avoids race conditions in parallel builds where discovery
+  # tries to run the test executable before it is linked.
+  catch_discover_tests(${NAME}
+    DISCOVERY_MODE PRE_TEST
+    PROPERTIES ${_discovery_props})
 endfunction()
 
 # Helper function to add a test executable
@@ -3087,7 +3091,11 @@ target_compile_definitions(test_python_plugin_manager PRIVATE
   SICNU_EMBED_PYTHON=1
   TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
 )
-sicnu_discover_tests(test_python_plugin_manager)
+# RUN_SERIAL: each binary spawns its own embedded Python + worker_daemon.py
+# subprocesses; running several Python-initializing binaries concurrently
+# under `ctest -j4` races Python runtime startup and causes flaky IPC
+# timeouts. Serialize them so no two Python worker pools run at once.
+sicnu_discover_tests(test_python_plugin_manager RUN_SERIAL TRUE)
 
 qt_add_executable(test_plugin_host
   test_plugin_host.cpp
@@ -3164,7 +3172,7 @@ target_compile_definitions(test_python_plugin_host PRIVATE
   SICNU_EMBED_PYTHON=1
   TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
 )
-sicnu_discover_tests(test_python_plugin_host)
+sicnu_discover_tests(test_python_plugin_host RUN_SERIAL TRUE)
 
 qt_add_executable(test_python_processing_provider
   test_python_processing_provider.cpp
