@@ -12,29 +12,22 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QPointer>
 #include <QTextStream>
-#include <QThread>
 
 using namespace sicnu::python::isolated;
 
 namespace
 {
 
-/// Main-thread context for marshaled py: execution. Written by the most
-/// recently constructed PythonPluginHost (main thread, before any job runs);
-/// QPointer self-clears when the host dies. py: adapters and the IPC server
-/// are main-thread citizens (ticket 02), so worker-thread jobs must marshal.
-QPointer<QObject> g_pyMainContext;
-
+/// py: prefix executor body (ADR 0064). Runs directly on the JobEngine worker
+/// thread: adapter->execute() -> sendRequestSync uses waitForReadyRead (no
+/// QEventLoop), so the worker blocks on the socket while the main thread / GUI
+/// stays responsive. This replaces the former BlockingQueuedConnection marshal
+/// to the main thread, which froze the UI for up to 5 minutes per py: task.
 Json::Value runPythonPrefixJob( const sicnu::jobs::JobRequest &req,
                                 sicnu::operators::RSOperatorContext &operatorContext )
 {
   Q_UNUSED( operatorContext );
-  if ( g_pyMainContext.isNull() )
-  {
-    throw std::runtime_error( "No PythonPluginHost alive on the main thread for py: execution" );
-  }
 
   const std::string algoId = req.algorithmId;
   const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( algoId );
@@ -43,33 +36,7 @@ Json::Value runPythonPrefixJob( const sicnu::jobs::JobRequest &req,
     throw std::runtime_error( "Python algorithm not found in registry: " + algoId );
   }
 
-  Json::Value result;
-  std::string error;
-  auto execute = [&]() {
-    try
-    {
-      result = adapter->execute( req.params, nullptr );
-    }
-    catch ( const std::exception &e )
-    {
-      error = e.what();
-    }
-  };
-
-  if ( QThread::currentThread() == g_pyMainContext->thread() )
-  {
-    execute();
-  }
-  else if ( !QMetaObject::invokeMethod( g_pyMainContext, std::move( execute ), Qt::BlockingQueuedConnection ) )
-  {
-    throw std::runtime_error( "Failed to marshal py: execution to the main thread" );
-  }
-
-  if ( !error.empty() )
-  {
-    throw std::runtime_error( error );
-  }
-  return result;
+  return adapter->execute( req.params, nullptr );
 }
 
 } // namespace
@@ -78,7 +45,6 @@ PythonPluginHost::PythonPluginHost( int poolSize, QObject *parent )
   : QObject( parent )
   , m_poolSize( poolSize )
 {
-  g_pyMainContext = this;
   sicnu::jobs::JobEngine::instance().registerExecutor( "py:", &runPythonPrefixJob );
 }
 

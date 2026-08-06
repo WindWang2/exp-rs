@@ -91,7 +91,8 @@ TEST_CASE( "PythonWorkerProcessPool poolSize and poolHealth queries work correct
 #include <QThread>
 #include <chrono>
 
-TEST_CASE( "py: prefix executor executes from a worker thread marshaled to the main thread", "[python][host][exec]" )
+TEST_CASE( "py: prefix executor executes directly on the worker thread (no main-thread marshal)",
+           "[python][host][exec]" )
 {
   using namespace sicnu::jobs;
 
@@ -125,8 +126,9 @@ TEST_CASE( "py: prefix executor executes from a worker thread marshaled to the m
     req.params["value"] = 42;
     const std::string jobId = JobEngine::instance().submit( req );
 
-    // The main thread must pump events while jobs run — this is exactly the
-    // CLI runner pattern; without it the marshaled call deadlocks.
+    // The worker now runs sendRequestSync directly (no main-thread marshal),
+    // so no processEvents pump is required for the job to progress. We still
+    // poll snapshots to observe completion (CLI runner pattern).
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
     for ( ;; )
     {
@@ -140,7 +142,7 @@ TEST_CASE( "py: prefix executor executes from a worker thread marshaled to the m
       }
       if ( std::chrono::steady_clock::now() > deadline )
       {
-        FAIL( "py: job did not finish within 30 s (marshaling deadlock?)" );
+        FAIL( "py: job did not finish within 30 s (sendRequestSync deadlock?)" );
         break;
       }
       QThread::msleep( 5 );
