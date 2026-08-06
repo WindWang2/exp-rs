@@ -3480,6 +3480,11 @@ sicnu_discover_tests(test_collection_import_service)
 add_executable(test_landsat_import_dialog
   test_landsat_import_dialog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/landsat_import_dialog.cpp
+  # landsat_import_dialog.cpp calls SicnuDialogHelp::htmlForTool/shortForTool/tip,
+  # whose impls live in dialog_help_catalog.cpp. The other dialog tests
+  # (lines ~1739/2844/3267) already compile it; this target was missing it,
+  # which left test_landsat_import_dialog unlinked (_NOT_BUILT in ctest).
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
 )
 target_link_libraries(test_landsat_import_dialog PRIVATE
   Catch2::Catch2WithMain

@@ -176,14 +176,6 @@ Json::Value TaskCenter::variantMapToJsonParams( const QVariantMap &params )
     return root;
 }
 
-QVariantMap TaskCenter::jsonParamsToVariantMap( const Json::Value &params )
-{
-    // Shared converter — see json_params_converter.h. Kept as a static wrapper
-    // for existing callers; both TaskCenter and ToolCallDispatcher use the
-    // same conversion so typed handoff cannot drift apart.
-    return sicnu::processing::jsonParamsToVariantMap( params );
-}
-
 void TaskCenter::queueTaskAddedLocked( long taskId )
 {
     if ( m_tasks.contains( taskId ) )
@@ -401,7 +393,7 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
 {
     ensureJobListener();
 
-    QVariantMap params = jsonParamsToVariantMap( request.params );
+    QVariantMap params = sicnu::processing::jsonParamsToVariantMap( request.params );
 
     // Tracking-only enqueue; this path owns JobEngine submission itself.
     const long taskId = enqueueTask( QString::fromStdString( request.algorithmId ), params, autoLoad,
@@ -1091,7 +1083,7 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                 }
             }
 
-            QVariantMap params = jsonParamsToVariantMap( step->params );
+            QVariantMap params = sicnu::processing::jsonParamsToVariantMap( step->params );
 
             long taskId = m_nextTaskId++;
             AlgorithmTaskInfo info;

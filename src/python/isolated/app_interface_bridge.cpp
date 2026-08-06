@@ -4,11 +4,13 @@
 #include "data/data_asset.h"
 #include "data/data_manager.h"
 #include "python_ipc_server.h"
+#include "shared_memory_segment.h"
 #include "processing/framework/python_algorithm_adapter.h"
 #include "processing/framework/python_processing_provider_adapter.h"
 #include "processing/framework/algorithm_engine.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/json_params_converter.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <qgsmaplayer.h>
 
@@ -17,9 +19,81 @@
 
 #include <optional>
 #include <variant>
+#include <vector>
 
 namespace sicnu::python::isolated
 {
+namespace {
+
+/// ADR 0064 opt-in zero-copy delivery. When a caller sets
+/// `__shm_key__: true` on the request (the opt-in flag) alongside a raster
+/// file-path input, migrate that raster into a shared-memory segment so the
+/// Python worker receives it as a zero-copy numpy array (__shm_array__)
+/// instead of opening the file itself. Returns the segment (kept alive for
+/// the duration of the RPC) or nullptr if migration did not apply / failed
+/// (on failure the path is left untouched so the plugin falls back to GDAL).
+///
+/// Float32 rasters are migrated directly (GdalDatasetWrapper::readBandData
+/// reads as GDT_Float32). Non-float rasters fall back to the file-path path
+/// for now (a uint8 read path is a follow-up). The migrated metadata
+/// (`__shm_key__` + width/height/bands/dtype) overwrites the opt-in flag in
+/// \a params so the daemon mounts exactly one array.
+std::unique_ptr<SharedMemorySegment> migrateRasterInputToShm( const Json::Value &execParams,
+                                                               QVariantMap &params )
+{
+  // Opt-in flag must be explicitly true.
+  if ( !execParams.isMember( "__shm_key__" ) || !execParams["__shm_key__"].isBool()
+       || !execParams["__shm_key__"].asBool() )
+    return nullptr;
+
+  // The conventional raster input key is "input" (see operators/framework/rs_schema.h
+  // makeRasterParam("input", ...)). Only migrate when it is present and looks like a path.
+  if ( !execParams.isMember( "input" ) || !execParams["input"].isString() )
+    return nullptr;
+  const QString path = QString::fromStdString( execParams["input"].asString() );
+  if ( path.isEmpty() )
+    return nullptr;
+
+  GdalDatasetWrapper ds;
+  if ( !ds.open( path ) || !ds.isValid() )
+    return nullptr; // let the plugin surface the GDAL error itself
+
+  const int width = ds.width();
+  const int height = ds.height();
+  const int bands = ds.bandCount();
+  if ( width <= 0 || height <= 0 || bands <= 0 )
+    return nullptr;
+
+  auto seg = std::make_unique<SharedMemorySegment>();
+  if ( !seg->create( width, height, bands, SharedMemorySegment::DType::Float32 ) )
+    return nullptr;
+
+  // Interleaved-by-pixel layout: [H, W, bands] matches the Python mount
+  // np.ndarray((height, width, bands), ...). Read each band then scatter into
+  // the (y, x, b) layout the numpy view expects.
+  std::vector<float> bandPlane( static_cast<size_t>( width ) * height );
+  float *payload = static_cast<float *>( seg->payload() );
+  for ( int b = 0; b < bands; ++b )
+  {
+    if ( !ds.readBandData( b + 1, bandPlane.data(), width, height ) )
+      return nullptr; // fall back; the segment is reclaimed by unique_ptr
+    const float *src = bandPlane.data();
+    for ( int y = 0; y < height; ++y )
+      for ( int x = 0; x < width; ++x )
+        payload[( static_cast<size_t>( y ) * width + x ) * bands + b] = *src++;
+  }
+
+  // Replace the opt-in flag with the real key + metadata the daemon expects.
+  params.insert( QStringLiteral( "__shm_key__" ), seg->nativeKey() );
+  params.insert( QStringLiteral( "width" ), width );
+  params.insert( QStringLiteral( "height" ), height );
+  params.insert( QStringLiteral( "bands" ), bands );
+  params.insert( QStringLiteral( "dtype" ), static_cast<int>( SharedMemorySegment::DType::Float32 ) );
+  return seg;
+}
+
+} // namespace
+
 
 QJsonObject ActiveLayerSummary::toJsonObject() const
 {
@@ -137,12 +211,24 @@ void AppInterfaceBridge::setupDefaultAlgorithmHandler()
         }
         QJsonObject req;
         req[QStringLiteral( "id" )] = algoId;
-        req[QStringLiteral( "params" )] = QJsonObject::fromVariantMap( sicnu::processing::jsonParamsToVariantMap( execParams ) );
+        QVariantMap params = sicnu::processing::jsonParamsToVariantMap( execParams );
+
+        // ADR 0064 opt-in: if the caller asked for zero-copy delivery
+        // (__shm_key__: true) and supplied a raster "input" path, migrate the
+        // raster into a shared-memory segment now. The segment is held alive
+        // for the duration of the RPC below; RAII reclaims it (detach+unlink)
+        // on return or exception, so the /dev/shm backing objects never leak.
+        std::unique_ptr<SharedMemorySegment> shmSeg = migrateRasterInputToShm( execParams, params );
+
+        req[QStringLiteral( "params" )] = QJsonObject::fromVariantMap( params );
 
         QJsonObject execResult;
         bool execIsError = false;
         const AwaitStatus awaitStatus = m_ipcServer->sendRequestSync(
           QStringLiteral( "processing.execute_algorithm" ), req, execResult, execIsError, 300000 );
+        // Drop the mapping before returning; the daemon has already
+        // close()+unlink()ed on its side too (best-effort, idempotent).
+        shmSeg.reset();
         switch ( awaitStatus )
         {
           case AwaitStatus::NoClient:

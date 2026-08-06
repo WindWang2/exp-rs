@@ -242,7 +242,19 @@ TEST_CASE( "SegmentFeatures: toFeatureMatrix dimensions", "[segmentation]" )
     stats[2] = s2;
 
     QVector<quint32> segmentIds;
-    cv::Mat X = RsSegmentFeatures::toFeatureMatrix( stats, segmentIds );
+    // Use an explicit selection so the column layout is deterministic and the
+    // positional assertions below stay meaningful regardless of the default
+    // RsFeatureSelection (which now also enables GLCM + extra shape features).
+    RsFeatureSelection sel;
+    sel.useGlcmContrast = false;
+    sel.useGlcmCorrelation = false;
+    sel.useGlcmEnergy = false;
+    sel.useGlcmHomogeneity = false;
+    sel.useCompactness = false;
+    sel.useRectangularity = false;
+    sel.useAspectRatio = false;
+    // Leaves: mean, stddev, min, max (2 bands each) + area, perimeter, shapeIndex.
+    cv::Mat X = RsSegmentFeatures::toFeatureMatrix( stats, segmentIds, sel );
 
     REQUIRE( X.rows == 2 );
     // Features: 2 bands * 4 stats + 3 shape = 11

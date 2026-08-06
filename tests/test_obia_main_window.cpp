@@ -60,7 +60,10 @@ TEST_CASE( "ObiaMainWindow: toolbar segmentation and classifier widgets", "[obia
     REQUIRE( kernelSpin->value() == 5 );
     REQUIRE( binsSpin->value() == 32 );
     REQUIRE( minRegionSpin->value() == 100 );
-    REQUIRE( classifierCombo->count() == 3 );
+    // Classifier combo lists the available backends (NormalBayes, SVM,
+    // RandomForest, KMeans) - keep this in sync with the addItems() call in
+    // rs_obia_main_window.cpp.
+    REQUIRE( classifierCombo->count() == 4 );
 }
 
 TEST_CASE( "ObiaMainWindow: dock panels exist", "[obia][ui]" )

@@ -15,6 +15,28 @@ callbacks = {}
 loaded_plugins = {}
 algo_executors = {}
 
+
+def _mount_shm_array(key, width, height, bands, dtype_code):
+    """ADR 0064 - attach to a POSIX shared-memory segment created by the C++
+    side and mount its payload as a zero-copy numpy array (no copy).
+
+    Layout: a 32-byte header (uuid[16] + width/height/bands/dtype int32)
+    followed by the payload. Returns (shm, ndarray). The caller MUST
+    shm.close() (and best-effort shm.unlink()) in a finally once done with the
+    array - the buffer stays valid only while the mapping is open.
+
+    Shared by the `shm.read` checksum probe and the `processing.execute_algorithm`
+    `__shm_key__` delivery path so the mount logic has a single owner.
+    """
+    from multiprocessing import shared_memory
+    dtype_map = {0: np.float32, 1: np.uint8, 2: np.int32}
+    np_dtype = dtype_map.get(dtype_code, np.float32)
+    shm = shared_memory.SharedMemory(name=key)
+    # Header is 32 bytes: uuid[16] + 4*int32. Payload follows.
+    arr = np.ndarray((height, width, bands), dtype=np_dtype, buffer=shm.buf, offset=32)
+    return shm, arr
+
+
 class SicnuMapCanvasProxy:
     def __init__(self, socket_conn):
         self._s = socket_conn
@@ -258,12 +280,54 @@ def main():
                             }
                         else:
                             try:
-                                exec_result = algo_executors[algo_id](params.get("params", {}))
-                                resp = {
-                                    "jsonrpc": "2.0",
-                                    "id": req_id,
-                                    "result": {"status": "ok", "result": exec_result}
-                                }
+                                exec_params = params.get("params", {})
+                                # ADR 0064 zero-copy delivery: when the C++ side
+                                # has migrated a raster input into a shared-memory
+                                # segment, it sends __shm_key__ (+ width/height/
+                                # bands/dtype) instead of the file path. Mount the
+                                # payload as a numpy array (no copy) and expose it
+                                # to the plugin as params["__shm_array__"]. Plugins
+                                # that don't read __shm_array__ are unaffected.
+                                # Lifetime: close+best-effort unlink before reply,
+                                # consistent with the shm.read sync contract.
+                                shm_handle = None
+                                if isinstance(exec_params, dict) and exec_params.get("__shm_key__"):
+                                    try:
+                                        shm_handle, arr = _mount_shm_array(
+                                            exec_params["__shm_key__"],
+                                            exec_params.get("width"),
+                                            exec_params.get("height"),
+                                            exec_params.get("bands"),
+                                            exec_params.get("dtype"),
+                                        )
+                                        exec_params = dict(exec_params)
+                                        exec_params["__shm_array__"] = arr
+                                    except FileNotFoundError:
+                                        resp = {
+                                            "jsonrpc": "2.0",
+                                            "id": req_id,
+                                            "error": {
+                                                "code": -32603,
+                                                "message": f"Shared memory segment not found: {exec_params.get('__shm_key__')}"
+                                            }
+                                        }
+                                        shm_handle = None
+                                        exec_params = None
+                                if exec_params is not None:
+                                    try:
+                                        exec_result = algo_executors[algo_id](exec_params)
+                                    finally:
+                                        if shm_handle is not None:
+                                            shm_handle.close()
+                                            try:
+                                                shm_handle.unlink()
+                                            except FileNotFoundError:
+                                                pass
+                                    resp = {
+                                        "jsonrpc": "2.0",
+                                        "id": req_id,
+                                        "result": {"status": "ok", "result": exec_result}
+                                    }
                             except Exception as ex:
                                 resp = {
                                     "jsonrpc": "2.0",
@@ -285,6 +349,30 @@ def main():
                             "id": req_id,
                             "result": {"status": "algorithm_registered"}
                         }
+                    elif method == "processing.test_register_shm_algorithm":
+                        # ADR 0064 zero-copy delivery test fixture: registers an
+                        # algorithm that consumes the __shm_array__ delivered via
+                        # __shm_key__ and returns its sum + shape (byte-exact
+                        # zero-copy proof), or - when no array was delivered -
+                        # reports that it fell back to the file-path path.
+                        def _shm_sum_fn(p):
+                            arr = p.get("__shm_array__")
+                            if arr is not None:
+                                return {"via": "shm",
+                                        "sum": float(arr.sum()),
+                                        "shape": list(arr.shape)}
+                            return {"via": "path", "input": p.get("input")}
+                        iface_obj = SicnuPythonIface(s)
+                        iface_obj.registerProcessingAlgorithm(
+                            "py:shm_sum",
+                            "SHM Sum Test",
+                            execute_fn=_shm_sum_fn,
+                        )
+                        resp = {
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "result": {"status": "algorithm_registered"}
+                        }
                     elif method == "shm.read":
                         # ADR 0064: zero-copy shared memory read. The C++ side
                         # creates a QSharedMemory segment, writes a Header
@@ -292,25 +380,28 @@ def main():
                         # followed by the payload. We attach via
                         # multiprocessing.shared_memory, skip the header, and
                         # mount the payload as a numpy array (no copy).
+                        #
+                        # Synchronization: access to this segment is serialized
+                        # by the shm.read request/response boundary, and every
+                        # segment carries a unique key, so there is never
+                        # concurrent read/write on the same buffer. No lock is
+                        # needed — and adding one would force a copy here,
+                        # defeating the zero-copy mount.
+                        #
+                        # Lifetime (ADR 0064 leak fix): the POSIX shm object
+                        # persists until unlinked. The C++ creator unlinks it
+                        # on detach(); we also best-effort unlink here so the
+                        # object is reclaimed even if the C++ side exits
+                        # first. shm.unlink() is safe to call from the reader
+                        # once we have closed our local mapping.
                         key = params.get("key")
                         width = params.get("width")
                         height = params.get("height")
                         bands = params.get("bands")
                         dtype_code = params.get("dtype")
-                        dtype_map = {0: np.float32, 1: np.uint8, 2: np.int32}
-                        np_dtype = dtype_map.get(dtype_code, np.float32)
-                        from multiprocessing import shared_memory
                         try:
-                            shm = shared_memory.SharedMemory(name=key)
+                            shm, arr = _mount_shm_array(key, width, height, bands, dtype_code)
                             try:
-                                # Header is 32 bytes: uuid[16] + 4*int32
-                                offset = 32
-                                arr = np.ndarray(
-                                    (height, width, bands),
-                                    dtype=np_dtype,
-                                    buffer=shm.buf,
-                                    offset=offset,
-                                )
                                 result = {
                                     "status": "ok",
                                     "checksum": float(arr.sum()),
@@ -318,6 +409,14 @@ def main():
                                 }
                             finally:
                                 shm.close()
+                            # Best-effort reclaim: unlink the backing object
+                            # now that this reader is done with it. Either the
+                            # C++ owner or this reader unlinking is sufficient;
+                            # both calling is harmless (ENOENT is swallowed).
+                            try:
+                                shm.unlink()
+                            except FileNotFoundError:
+                                pass
                         except FileNotFoundError:
                             result = {"status": "error", "message": f"Shared memory segment not found: {key}"}
                         resp = {

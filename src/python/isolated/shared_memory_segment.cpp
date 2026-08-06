@@ -7,6 +7,19 @@
 
 #include <cstring>
 
+// POSIX shm lifetime management (ADR 0064 leak fix). QSharedMemory in
+// PosixRealtime mode backs each segment with TWO objects under /dev/shm:
+//   - sicnu_shm_<uuid>   : the shared memory object itself
+//   - sem.sicnu_shm_<uuid>: a POSIX semaphore Qt uses for internal locking
+// Neither is reclaimed until something unlinks it, so a process that creates
+// segments without unlinking leaks both. We reclaim them here.
+#if defined( Q_OS_LINUX ) || defined( Q_OS_MACOS )
+#include <fcntl.h>     // O_* constants (kept for completeness)
+#include <sys/mman.h>  // shm_unlink
+#include <semaphore.h> // sem_unlink
+#define SICNU_HAVE_POSIX_SHM 1
+#endif
+
 namespace sicnu::python::isolated {
 
 static constexpr size_t kHeaderSize = sizeof( SharedMemorySegment::Header );
@@ -57,8 +70,15 @@ bool SharedMemorySegment::create( int width, int height, int bands, DType dtype 
     m_shm.reset();
     m_key.clear();
     m_payloadSize = 0;
+    m_isOwner = false;
+    m_unlinked = false;
     return false;
   }
+
+  // We created the POSIX shm object + its semaphore: we own the duty to
+  // unlink them (see detach()/unlink()).
+  m_isOwner = true;
+  m_unlinked = false;
 
   // Write the header.
   Header hdr{};
@@ -87,8 +107,15 @@ bool SharedMemorySegment::attach( const QString &key )
   {
     m_shm.reset();
     m_key.clear();
+    m_isOwner = false;
+    m_unlinked = false;
     return false;
   }
+
+  // Attaching does not transfer ownership: the creator is still responsible
+  // for unlinking the backing objects.
+  m_isOwner = false;
+  m_unlinked = false;
 
   // Read the header to recover payload size.
   if ( static_cast<size_t>( m_shm->size() ) >= kHeaderSize )
@@ -103,11 +130,53 @@ bool SharedMemorySegment::attach( const QString &key )
 
 void SharedMemorySegment::detach()
 {
+  // Reclaim the POSIX backing objects before dropping the mapping. Only the
+  // creator unlinks; a segment we merely attached() must not unlink out from
+  // under the owner.
+  if ( m_isOwner && !m_unlinked )
+    unlink();
+
   if ( m_shm && m_shm->isAttached() )
     m_shm->detach();
   m_shm.reset();
   m_key.clear();
   m_payloadSize = 0;
+}
+
+bool SharedMemorySegment::unlink()
+{
+  if ( m_unlinked )
+    return true;
+  if ( !m_isOwner || m_key.isEmpty() )
+    return false;
+
+#ifdef SICNU_HAVE_POSIX_SHM
+  // POSIX shm/semaphore names begin with a single '/'. Qt's PosixRealtime
+  // backend derives both the shm object and the semaphore from the key; on
+  // Linux they surface in /dev/shm as "sicnu_shm_<uuid>" and
+  // "sem.sicnu_shm_<uuid>" respectively. We unlink both so neither leaks.
+  const QByteArray posixName = '/' + m_key.toUtf8();
+
+  // shm_unlink is idempotent enough: ENOENT (already gone) is not an error
+  // for us. Best-effort on the semaphore too.
+  const int shmRc = ::shm_unlink( posixName.constData() );
+  // sem_unlink name: Qt passes the key to sem_open; glibc prepends "sem.".
+  // The leading-slash form matches the POSIX convention Qt follows.
+  const int semRc = ::sem_unlink( posixName.constData() );
+  (void)semRc; // best-effort; ignore "no such semaphore"
+
+  m_unlinked = true;
+  return shmRc == 0;
+#else
+  // Windows / unsupported: nothing to unlink.
+  m_unlinked = true;
+  return false;
+#endif
+}
+
+bool SharedMemorySegment::isOwner() const
+{
+  return m_isOwner;
 }
 
 bool SharedMemorySegment::write( const void *data, size_t bytes )
