@@ -12,6 +12,26 @@
 #include <atomic>
 #include <thread>
 
+// JobEngine::waitUntilIdleForTests() returns once the engine's own m_running
+// counter hits zero, but the TaskCenter marks a task Completed/Failed via the
+// job-record listener, which a worker thread runs slightly AFTER it decremented
+// m_running. With multiple concurrent workers the two counters are updated by
+// different threads, so "engine idle" does NOT imply "every task's terminal
+// transition has landed in TaskCenter". Poll the task status (the established
+// pattern at lines ~106/~131) before asserting a terminal status.
+namespace {
+void waitForTerminalStatus( sicnu::TaskCenter &center, long taskId,
+                            int attempts = 200, int sleepMs = 5 )
+{
+    for ( int i = 0; i < attempts; ++i )
+    {
+        if ( sicnu::isTerminalStatus( center.getTaskInfo( taskId ).status ) )
+            return;
+        std::this_thread::sleep_for( std::chrono::milliseconds( sleepMs ) );
+    }
+}
+} // namespace
+
 TEST_CASE("TaskCenter - Enqueue, Info Query, and Lifecycle State Transitions", "[processing][task_center]") {
     auto& center = sicnu::TaskCenter::instance();
 
@@ -797,6 +817,11 @@ TEST_CASE( "TaskCenter - RSS watermark holds queued tasks then releases on compl
     REQUIRE( center.getTaskInfo( id3 ).status == sicnu::TaskStatus::Completed );
 
     engine.waitUntilIdleForTests();
+    // id1/id2 finished earlier, but under multi-worker concurrency their
+    // terminal transitions can lag the engine's m_running==0 observation
+    // (see waitForTerminalStatus). Poll before asserting.
+    waitForTerminalStatus( center, id1 );
+    waitForTerminalStatus( center, id2 );
     REQUIRE( center.getTaskInfo( id1 ).status == sicnu::TaskStatus::Completed );
     REQUIRE( center.getTaskInfo( id2 ).status == sicnu::TaskStatus::Completed );
 
@@ -855,6 +880,166 @@ TEST_CASE( "TaskCenter - memory limit 0 disables the RSS gate",
 
     releaseWorkers.store( true );
     engine.waitUntilIdleForTests();
+    // The engine is idle, but the per-task terminal transition can lag the
+    // m_running==0 observation when several workers finish near-simultaneously
+    // (see waitForTerminalStatus). Poll before asserting.
+    for ( long id : ids )
+        waitForTerminalStatus( center, id );
+    for ( long id : ids )
+        REQUIRE( center.getTaskInfo( id ).status == sicnu::TaskStatus::Completed );
+
+    center.resetResourceProfileLimits();
+    engine.clearExecutors();
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0063 stress — OBIA segmentation/classification-style high-concurrency
+// load with a simulated memory ramp. Models the real failure mode the RSS
+// watermark exists to prevent: many memory-heavy tasks launched at once push
+// the process toward OOM. The gate must hold launches while pressure is high
+// and reopen as each running task finishes and frees memory, with every task
+// eventually reaching Completed (no Failed, no deadlock, no over-launch).
+// ---------------------------------------------------------------------------
+TEST_CASE( "TaskCenter - OBIA-style batch holds under RSS pressure then drains to completion",
+           "[processing][task_center][stress]" )
+{
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+
+    auto &center = sicnu::TaskCenter::instance();
+    center.resetResourceProfileLimits();
+    center.setGlobalConcurrencyLimit( 4 ); // a few run concurrently; memory gate binds above that
+    center.setMemoryLimitMb( 100 );
+
+    // Simulated RSS: each running task bumps it toward the watermark; releasing
+    // the tasks (and dropping RSS) models memory being freed on completion.
+    std::atomic<unsigned int> fakeRss{ 40 };
+    std::atomic<int> runningTasks{ 0 };
+    center.setRssSampler( [&fakeRss]() { return fakeRss.load(); } );
+
+    std::atomic<bool> releaseWorkers{ false };
+    auto obiaExecutor = [&]( const sicnu::jobs::JobRequest &,
+                             sicnu::operators::RSOperatorContext & ) {
+        // Each "segmentation" task claims memory while running.
+        const int n = runningTasks.fetch_add( 1 ) + 1;
+        // Ramp RSS up as tasks pile in; once it crosses the watermark the gate
+        // closes and no further tasks launch until some finish and free memory.
+        fakeRss.store( static_cast<unsigned int>( 40 + n * 25 ) );
+        while ( !releaseWorkers.load() )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+        runningTasks.fetch_sub( 1 );
+        // Free memory as tasks complete.
+        fakeRss.store( static_cast<unsigned int>( 40 + runningTasks.load() * 25 ) );
+        Json::Value result( Json::objectValue );
+        result["output"] = "/tmp/obia_segment.tif";
+        return result;
+    };
+    engine.registerExecutor( "obia_inproc:segment", obiaExecutor );
+
+    // Enqueue a batch larger than the concurrency cap so several must queue.
+    constexpr int BATCH = 12;
+    QList<long> ids;
+    for ( int i = 0; i < BATCH; ++i )
+        ids.append( center.enqueueTask( QStringLiteral( "obia_inproc:segment" ), {}, false,
+                                        sicnu::TaskPriority::Normal, {}, true ) );
+
+    // Let the initial wave launch and push RSS up.
+    std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+
+    // While RSS is at/above the watermark, queued tasks must NOT be Running.
+    // At least one task should still be Queued (the batch exceeds the cap and
+    // the gate is closed under pressure).
+    int queued = 0, running = 0;
+    for ( long id : ids )
+    {
+        const auto s = center.getTaskInfo( id ).status;
+        if ( s == sicnu::TaskStatus::Queued ) ++queued;
+        else if ( s == sicnu::TaskStatus::Running ) ++running;
+    }
+    REQUIRE( running > 0 );           // the first wave launched
+    REQUIRE( queued > 0 );            // and the rest are held (no over-launch)
+    REQUIRE( running + queued == BATCH ); // none completed/failed yet
+
+    // Release the workers: each completion frees memory, re-opening the gate
+    // via processNextQueuedTasks, so the whole batch drains.
+    releaseWorkers.store( true );
+    engine.waitUntilIdleForTests();
+    for ( long id : ids )
+        waitForTerminalStatus( center, id, 400 );
+
+    int completed = 0, failed = 0;
+    for ( long id : ids )
+    {
+        const auto s = center.getTaskInfo( id ).status;
+        if ( s == sicnu::TaskStatus::Completed ) ++completed;
+        else if ( s == sicnu::TaskStatus::Failed ) ++failed;
+    }
+    REQUIRE( completed == BATCH );
+    REQUIRE( failed == 0 );
+
+    center.resetResourceProfileLimits();
+    engine.clearExecutors();
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0063 — under high-concurrency load the gate stays disabled when the
+// watermark is 0 (no throttling), mirroring the single-task case but with a
+// batch that exercises multi-worker completion ordering.
+// ---------------------------------------------------------------------------
+TEST_CASE( "TaskCenter - memory limit 0 keeps the gate open under batch load",
+           "[processing][task_center][stress]" )
+{
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+
+    auto &center = sicnu::TaskCenter::instance();
+    center.resetResourceProfileLimits();
+    center.setGlobalConcurrencyLimit( 8 );
+    center.setMemoryLimitMb( 0 ); // gate disabled
+
+    std::atomic<unsigned int> fakeRss{ 999999 }; // would block if the gate were on
+    center.setRssSampler( [&fakeRss]() { return fakeRss.load(); } );
+
+    std::atomic<bool> releaseWorkers{ false };
+    engine.registerExecutor( "batch_disabled:task",
+        [&releaseWorkers]( const sicnu::jobs::JobRequest &,
+                           sicnu::operators::RSOperatorContext & ) {
+            while ( !releaseWorkers.load() )
+                std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            Json::Value result( Json::objectValue );
+            result["output"] = "/tmp/batch_disabled.tif";
+            return result;
+        } );
+
+    constexpr int BATCH = 8;
+    QList<long> ids;
+    for ( int i = 0; i < BATCH; ++i )
+        ids.append( center.enqueueTask( QStringLiteral( "batch_disabled:task" ), {}, false,
+                                        sicnu::TaskPriority::Normal, {}, true ) );
+
+    // Despite a huge fake RSS, the disabled gate lets up to 8 run at once.
+    for ( int attempt = 0; attempt < 200; ++attempt )
+    {
+        int running = 0;
+        for ( long id : ids )
+            if ( center.getTaskInfo( id ).status == sicnu::TaskStatus::Running )
+                ++running;
+        if ( running >= BATCH )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+    int running = 0;
+    for ( long id : ids )
+        if ( center.getTaskInfo( id ).status == sicnu::TaskStatus::Running )
+            ++running;
+    CHECK( running == BATCH );
+
+    releaseWorkers.store( true );
+    engine.waitUntilIdleForTests();
+    for ( long id : ids )
+        waitForTerminalStatus( center, id, 400 );
     for ( long id : ids )
         REQUIRE( center.getTaskInfo( id ).status == sicnu::TaskStatus::Completed );
 
