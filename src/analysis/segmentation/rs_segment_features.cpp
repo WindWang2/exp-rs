@@ -9,6 +9,7 @@
 #include <cmath>
 #include <algorithm>
 #include <numeric>
+#include <vector>
 
 QMap<quint32, RsSegmentFeatures::SegmentStat>
 RsSegmentFeatures::extract( const QString &rasterPath,
@@ -68,8 +69,12 @@ RsSegmentFeatures::extract( const QString &rasterPath,
     }
     GDALClose( ds );
 
-    // Collect per-segment accumulators
-    // We use a temporary map to accumulate sums
+    // Collect per-segment accumulators.
+    // Labels from connectedComponents are contiguous starting at 1, so we can
+    // index by label directly with a vector (O(1) per pixel) instead of QMap
+    // (O(log N) red-black-tree lookup + node allocation per pixel). If the
+    // max label is pathologically large relative to the pixel count (sparse /
+    // corrupt labels), fall back to the map to avoid a huge allocation.
     struct Acc
     {
         QVector<double> sum;
@@ -79,8 +84,25 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         int count = 0;
     };
 
-    QMap<quint32, Acc> accMap;
     const auto labels = segMap.labels();
+
+    quint32 maxLabel = 0;
+    for ( int i = 0; i < nPixels; ++i )
+        maxLabel = std::max( maxLabel, labels[i] );
+
+    const bool useVector = maxLabel > 0
+                           && static_cast<size_t>( maxLabel ) <= nPixels * 10;
+    std::vector<Acc> accVec;
+    QMap<quint32, Acc> accMap; // fallback for sparse labels
+
+    if ( useVector )
+        accVec.resize( maxLabel + 1 );
+
+    auto accFor = [&]( quint32 segId ) -> Acc * {
+        if ( useVector )
+            return &accVec[segId];
+        return &accMap[segId];
+    };
 
     for ( int i = 0; i < nPixels; ++i )
     {
@@ -102,7 +124,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         if ( isPixelNodata )
             continue;
 
-        Acc &acc = accMap[segId];
+        Acc &acc = *accFor( segId );
         if ( acc.sum.isEmpty() )
         {
             acc.sum.resize( nBands, 0.0 );
@@ -122,7 +144,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         acc.count++;
     }
 
-    // Compute perimeter and bounding box per segment
+    // Compute perimeter and bounding box per segment (same vector-vs-map split).
     struct SegBBox
     {
         int minR = std::numeric_limits<int>::max();
@@ -130,8 +152,17 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         int minC = std::numeric_limits<int>::max();
         int maxC = std::numeric_limits<int>::lowest();
     };
+    std::vector<SegBBox> bboxVec;
     QMap<quint32, SegBBox> bboxMap;
+    std::vector<int> perimeterVec;
     QMap<quint32, int> perimeterMap;
+
+    if ( useVector )
+    {
+        bboxVec.resize( maxLabel + 1 );
+        perimeterVec.resize( maxLabel + 1, 0 );
+    }
+
     for ( int r = 0; r < h; ++r )
     {
         for ( int c = 0; c < w; ++c )
@@ -140,11 +171,22 @@ RsSegmentFeatures::extract( const QString &rasterPath,
             if ( segId == 0 )
                 continue;
 
-            SegBBox &box = bboxMap[segId];
-            box.minR = std::min( box.minR, r );
-            box.maxR = std::max( box.maxR, r );
-            box.minC = std::min( box.minC, c );
-            box.maxC = std::max( box.maxC, c );
+            if ( useVector )
+            {
+                SegBBox &box = bboxVec[segId];
+                box.minR = std::min( box.minR, r );
+                box.maxR = std::max( box.maxR, r );
+                box.minC = std::min( box.minC, c );
+                box.maxC = std::max( box.maxC, c );
+            }
+            else
+            {
+                SegBBox &box = bboxMap[segId];
+                box.minR = std::min( box.minR, r );
+                box.maxR = std::max( box.maxR, r );
+                box.minC = std::min( box.minC, c );
+                box.maxC = std::max( box.maxC, c );
+            }
 
             bool isBoundary = false;
             const int dr[] = { -1, 1, 0, 0 };
@@ -165,26 +207,27 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                 }
             }
             if ( isBoundary )
-                perimeterMap[segId]++;
+            {
+                if ( useVector )
+                    perimeterVec[segId]++;
+                else
+                    perimeterMap[segId]++;
+            }
         }
     }
 
-    // Build final stats
-    for ( auto it = accMap.constBegin(); it != accMap.constEnd(); ++it )
-    {
-        const quint32 segId = it.key();
-        const Acc &acc = it.value();
+    // Build final stats: iterate labels 1..maxLabel (vector) or QMap keys (map).
+    auto buildStat = [&]( quint32 segId, const Acc &acc, const SegBBox &box, int perimeter ) {
         if ( acc.count == 0 )
-            continue;
+            return;
 
         SegmentStat stat;
         stat.area = acc.count;
-        stat.perimeter = perimeterMap.value( segId, 0 );
+        stat.perimeter = perimeter;
         stat.shapeIndex = computeShapeIndex( stat.area, stat.perimeter );
 
         // Extended geometric shape descriptors
         stat.compactness = ( stat.area > 0 ) ? ( ( stat.perimeter * stat.perimeter ) / ( 4.0 * M_PI * stat.area ) ) : 0.0;
-        const SegBBox &box = bboxMap[segId];
         const double bboxW = std::max( 1, box.maxC - box.minC + 1 );
         const double bboxH = std::max( 1, box.maxR - box.minR + 1 );
         stat.rectangularity = stat.area / ( bboxW * bboxH );
@@ -294,6 +337,23 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         }
 
         result[segId] = stat;
+    };
+
+    if ( useVector )
+    {
+        for ( quint32 segId = 1; segId <= maxLabel; ++segId )
+        {
+            if ( accVec[segId].count > 0 )
+                buildStat( segId, accVec[segId], bboxVec[segId], perimeterVec[segId] );
+        }
+    }
+    else
+    {
+        for ( auto it = accMap.constBegin(); it != accMap.constEnd(); ++it )
+        {
+            const quint32 segId = it.key();
+            buildStat( segId, it.value(), bboxMap[segId], perimeterMap.value( segId, 0 ) );
+        }
     }
 
     SICNU_LOG_SUCCESS( SicnuLogTags::Segmentation, QString( "Feature extraction complete: %1 segment stats computed" ).arg( result.size() ) );
