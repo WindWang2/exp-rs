@@ -212,7 +212,6 @@ private:
     void processJobRecord( long taskId, const sicnu::jobs::JobRecord &record );
 public:
     static Json::Value variantMapToJsonParams(const QVariantMap& params);
-    static QVariantMap jsonParamsToVariantMap(const Json::Value& params);
 private:
     ProviderResourceProfile resolveResourceProfile( const QString &algorithmId ) const;
     unsigned int defaultLimitForProfile( ProviderResourceProfile profile ) const;
