@@ -292,6 +292,20 @@ def main():
                         # followed by the payload. We attach via
                         # multiprocessing.shared_memory, skip the header, and
                         # mount the payload as a numpy array (no copy).
+                        #
+                        # Synchronization: access to this segment is serialized
+                        # by the shm.read request/response boundary, and every
+                        # segment carries a unique key, so there is never
+                        # concurrent read/write on the same buffer. No lock is
+                        # needed — and adding one would force a copy here,
+                        # defeating the zero-copy mount.
+                        #
+                        # Lifetime (ADR 0064 leak fix): the POSIX shm object
+                        # persists until unlinked. The C++ creator unlinks it
+                        # on detach(); we also best-effort unlink here so the
+                        # object is reclaimed even if the C++ side exits
+                        # first. shm.unlink() is safe to call from the reader
+                        # once we have closed our local mapping.
                         key = params.get("key")
                         width = params.get("width")
                         height = params.get("height")
@@ -318,6 +332,14 @@ def main():
                                 }
                             finally:
                                 shm.close()
+                            # Best-effort reclaim: unlink the backing object
+                            # now that this reader is done with it. Either the
+                            # C++ owner or this reader unlinking is sufficient;
+                            # both calling is harmless (ENOENT is swallowed).
+                            try:
+                                shm.unlink()
+                            except FileNotFoundError:
+                                pass
                         except FileNotFoundError:
                             result = {"status": "error", "message": f"Shared memory segment not found: {key}"}
                         resp = {

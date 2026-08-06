@@ -54,18 +54,32 @@ work can wire it into the execution path.
   language shm; always use `setNativeKey(key, PosixRealtime)`. This is the
   single most important implementation detail - using the default produces
   `/tmp/`-based SystemV keys that Python cannot attach to.
-- Segment lifetime: C++ detaches on `SharedMemorySegment` destruction;
-  `QSharedMemory` on POSIX does not `shm_unlink` automatically, so `/dev/shm/`
-  entries persist until explicitly unlinked or the system reboots. For
-  short-lived segments (per-algorithm) this is acceptable; a future cleanup
-  pass or `shm_unlink` after the Python side detaches would close the leak.
+- **Synchronization model**: access to a single segment is serialized by the
+  `shm.read` request/response boundary — C++ writes, then sends the key in a
+  synchronous `shm.read` RPC, and the Python worker mounts the buffer during
+  that request and `shm.close()`s before replying. Because every `create()`
+  mints a unique key, concurrent reads always target *distinct* segments, so
+  there is never concurrent read/write on the same buffer. No in-segment lock
+  is needed, and adding one (e.g. a process-shared `pthread_rwlock` in a
+  payload prefix) would force Python to copy/retry, defeating the zero-copy
+  mount that is the point of this channel. A `[python][shm][concurrency]` test
+  (N workers, N segments) pins this invariant.
+- **Segment lifetime (leak closed)**: `QSharedMemory` in `PosixRealtime` mode
+  backs each segment with two `/dev/shm` objects — the shm object
+  (`sicnu_shm_<uuid>`) and an internal semaphore (`sem.sicnu_shm_<uuid>`) —
+  neither of which is reclaimed until something unlinks it. `SharedMemorySegment`
+  now tracks ownership (`isOwner()`): the creator reclaims both objects in
+  `detach()` via the new `unlink()` (`shm_unlink` + `sem_unlink`), and the
+  Python reader also best-effort `shm.unlink()`s on its side, so the backing
+  objects are reclaimed regardless of which side finishes first. A
+  `[python][shm][lifetime]` test asserts no `sicnu_shm_*` remains in `/dev/shm`
+  after a round-trip. (Previously the leak was accepted as "short-lived segments
+  are tolerable"; it is now closed, superseding the prior consequence note.)
 - Windows is out of scope (the project targets Linux); `PosixRealtime` is not
-  available there.
+  available there, and `unlink()` is a no-op.
 
 ## Future
 - Wire `__shm_key__` into the execution closure (`app_interface_bridge.cpp`) so
   Python algorithms receive raster blocks via shm instead of file paths.
 - Tile-by-tile streaming for rasters too large for a single segment.
 - Bidirectional shm (Python writes results back).
-- Explicit `shm_unlink` cleanup (either C++ side after Python confirms detach,
-  or a `shm.unlink` RPC method).

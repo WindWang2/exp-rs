@@ -15,7 +15,10 @@
 #include <QJsonObject>
 #include <QTimer>
 
+#include <chrono>
+#include <iostream>
 #include <numeric>
+#include <thread>
 #include <vector>
 
 using namespace sicnu::python::isolated;
@@ -371,4 +374,272 @@ TEST_CASE( "SharedMemorySegment: uint8 dtype round-trips correctly", "[python][s
   REQUIRE( status == AwaitStatus::Ok );
   REQUIRE_FALSE( isError );
   REQUIRE( result[QStringLiteral( "checksum" )].toDouble() == Approx( expectedSum ).margin( 1e-3 ) );
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0064 follow-up — lifetime correctness. A segment created and read once
+// must not leave a backing object behind in /dev/shm once the owning side has
+// finished. Before the unlink fix this leaks: each create() mints a new POSIX
+// shm object that nobody unlinks, so /dev/shm/sicnu_shm_* grows without bound.
+// ---------------------------------------------------------------------------
+TEST_CASE( "SharedMemorySegment: no /dev/shm leak after a read round-trip and detach",
+           "[python][shm][lifetime]" )
+{
+  // Snapshot any pre-existing sicnu_shm_* entries so the assertion is robust
+  // to other tests running concurrently in the same /dev/shm.
+  const auto baseline = QDir( QStringLiteral( "/dev/shm" ) )
+                          .entryList( QStringList() << QStringLiteral( "sicnu_shm_*" ) );
+
+  sicnu::data::DataManager dataManager;
+  PythonPluginHost host( 2 );
+
+  const QString pluginDir = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "plugins/sample_plugin" ) );
+  QString loadError;
+  PythonPluginAdapter *pluginAdapter = host.loadPlugin( pluginDir, &dataManager, nullptr, nullptr, &loadError );
+  REQUIRE( pluginAdapter != nullptr );
+
+  WorkerNode *node = pluginAdapter->workerNode();
+  REQUIRE( node != nullptr );
+  REQUIRE( node->server->hasClient() );
+
+  constexpr int W = 12, H = 12, B = 1;
+  std::vector<float> data( W * H * B );
+  std::iota( data.begin(), data.end(), 0.0f );
+  const double expectedSum = static_cast<double>( ( W * H - 1 ) * ( W * H ) / 2.0 );
+
+  SharedMemorySegment seg;
+  REQUIRE( seg.create( W, H, B, SharedMemorySegment::DType::Float32 ) );
+  REQUIRE( seg.write( data.data(), data.size() * sizeof( float ) ) );
+
+  QJsonObject params;
+  params[QStringLiteral( "key" )] = seg.nativeKey();
+  params[QStringLiteral( "width" )] = W;
+  params[QStringLiteral( "height" )] = H;
+  params[QStringLiteral( "bands" )] = B;
+  params[QStringLiteral( "dtype" )] = static_cast<int>( SharedMemorySegment::DType::Float32 );
+
+  QJsonObject result;
+  bool isError = false;
+  const AwaitStatus status = node->server->sendRequestSync(
+    QStringLiteral( "shm.read" ), params, result, isError, 10000 );
+  REQUIRE( status == AwaitStatus::Ok );
+  REQUIRE_FALSE( isError );
+  REQUIRE( result[QStringLiteral( "checksum" )].toDouble() == Approx( expectedSum ).margin( 1e-3 ) );
+
+  // The owning side is done with the segment; releasing it must reclaim the
+  // POSIX shm object (the leak this test guards against).
+  seg.detach();
+
+  // Give the kernel/Python side a brief moment to settle any close/unlink.
+  for ( int attempt = 0; attempt < 40; ++attempt )
+  {
+    const auto now = QDir( QStringLiteral( "/dev/shm" ) )
+                       .entryList( QStringList() << QStringLiteral( "sicnu_shm_*" ) );
+    // Subtract entries that existed before this test ran.
+    auto remaining = now;
+    for ( const QString &b : baseline )
+      remaining.removeAll( b );
+    if ( remaining.isEmpty() )
+      break;
+    QThread::msleep( 25 );
+  }
+
+  auto after = QDir( QStringLiteral( "/dev/shm" ) )
+                 .entryList( QStringList() << QStringLiteral( "sicnu_shm_*" ) );
+  for ( const QString &b : baseline )
+    after.removeAll( b );
+  REQUIRE( after.isEmpty() );
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0064 — concurrent isolation across the worker pool. The production model
+// is one dedicated worker (and IPC socket) per plugin, so true concurrency is
+// across distinct workers, not on one socket. We acquire N workers from the
+// pool and have N threads each create its own segment and read it through its
+// own worker's IPC server. Every checksum must match with no cross-segment
+// corruption — the invariant the unique-key + per-segment lifetime design
+// exists to provide.
+// ---------------------------------------------------------------------------
+TEST_CASE( "SharedMemorySegment: N distinct segments on N workers read concurrently all checksum correctly",
+           "[python][shm][concurrency]" )
+{
+  constexpr int N = 3;
+  sicnu::data::DataManager dataManager;
+  PythonPluginHost host( N + 1 ); // room for the plugin's worker + N-1 more
+
+  const QString pluginDir = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "plugins/sample_plugin" ) );
+  QString loadError;
+  PythonPluginAdapter *pluginAdapter = host.loadPlugin( pluginDir, &dataManager, nullptr, nullptr, &loadError );
+  REQUIRE( pluginAdapter != nullptr );
+
+  // Gather N workers, each with its own IPC server. The plugin already holds
+  // one; acquire the rest from the pool.
+  std::vector<WorkerNode *> nodes;
+  nodes.push_back( pluginAdapter->workerNode() );
+  for ( int i = 1; i < N; ++i )
+  {
+    WorkerNode *wn = host.pool()->acquireWorker();
+    REQUIRE( wn != nullptr );
+    nodes.push_back( wn );
+  }
+  for ( WorkerNode *wn : nodes )
+    REQUIRE( wn->server->hasClient() );
+
+  constexpr int W = 10, H = 10, B = 1;
+
+  struct Segment
+  {
+    SharedMemorySegment seg;
+    std::vector<float> data;
+    double expectedSum = 0.0;
+  };
+  std::vector<Segment> segments( N );
+  for ( int i = 0; i < N; ++i )
+  {
+    auto &s = segments[i];
+    s.data.resize( W * H * B );
+    // Distinct fill per segment so cross-contamination would change the sum.
+    std::iota( s.data.begin(), s.data.end(), static_cast<float>( i * 1000 ) );
+    s.expectedSum = 0.0;
+    for ( float v : s.data ) s.expectedSum += v;
+    REQUIRE( s.seg.create( W, H, B, SharedMemorySegment::DType::Float32 ) );
+    REQUIRE( s.seg.write( s.data.data(), s.data.size() * sizeof( float ) ) );
+  }
+
+  std::vector<double> checksums( N, -1.0 );
+  std::vector<AwaitStatus> statuses( N, AwaitStatus::Disconnected );
+  std::vector<std::thread> threads;
+  for ( int i = 0; i < N; ++i )
+  {
+    threads.emplace_back( [&, i]() {
+      QJsonObject params;
+      params[QStringLiteral( "key" )] = segments[i].seg.nativeKey();
+      params[QStringLiteral( "width" )] = W;
+      params[QStringLiteral( "height" )] = H;
+      params[QStringLiteral( "bands" )] = B;
+      params[QStringLiteral( "dtype" )] = static_cast<int>( SharedMemorySegment::DType::Float32 );
+      QJsonObject result;
+      bool isError = true;
+      statuses[i] = nodes[i]->server->sendRequestSync(
+        QStringLiteral( "shm.read" ), params, result, isError, 15000 );
+      if ( statuses[i] == AwaitStatus::Ok && !isError )
+        checksums[i] = result[QStringLiteral( "checksum" )].toDouble();
+    } );
+  }
+  for ( auto &t : threads ) t.join();
+
+  for ( int i = 0; i < N; ++i )
+  {
+    INFO( "segment " << i << " status=" << static_cast<int>( statuses[i] ) );
+    REQUIRE( statuses[i] == AwaitStatus::Ok );
+    REQUIRE( checksums[i] == Approx( segments[i].expectedSum ).margin( 1e-3 ) );
+  }
+
+  // Release the workers we acquired directly (the plugin owns the first).
+  for ( int i = 1; i < N; ++i )
+    host.pool()->releaseWorker( nodes[i] );
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0064 — zero-copy throughput proof. Round-trips a large raster block
+// (2048x2048 float32 ≈ 16 MiB, and an int32 variant) through the shared
+// memory channel and reports wall-clock throughput. Correctness is asserted
+// to the byte (Python's arr.sum() == independent C++ sum).
+//
+// What "copy overhead ≈ 0" means here, and how this test encodes it: the only
+// per-byte CPU copy on the data path is the single SharedMemorySegment::write()
+// memcpy into the segment (unavoidable — the source vector must land in shm).
+// Python mounts the payload with numpy.ndarray(..., buffer=shm.buf, offset=32)
+// with NO copy, and computes arr.sum() directly over the shared mapping. The
+// reported total round-trip time is therefore dominated by the IPC socket +
+// the Python sum, not by redundant buffer copies; throughput is printed so a
+// regression (e.g. an accidental copy landing on the path) shows up as a
+// large drop versus the baseline. This is a functional+timing assertion, not a
+// microbenchmark of memcpy itself.
+// ---------------------------------------------------------------------------
+TEST_CASE( "SharedMemorySegment: large-matrix zero-copy round-trip throughput",
+           "[python][shm][benchmark]" )
+{
+  sicnu::data::DataManager dataManager;
+  PythonPluginHost host( 2 );
+
+  const QString pluginDir = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "plugins/sample_plugin" ) );
+  QString loadError;
+  PythonPluginAdapter *pluginAdapter = host.loadPlugin( pluginDir, &dataManager, nullptr, nullptr, &loadError );
+  REQUIRE( pluginAdapter != nullptr );
+
+  WorkerNode *node = pluginAdapter->workerNode();
+  REQUIRE( node != nullptr );
+  REQUIRE( node->server->hasClient() );
+
+  auto roundTrip = [&]( int W, int H, int B, SharedMemorySegment::DType dtype, double &outThroughputMiBps )
+  {
+    const size_t elemSize = SharedMemorySegment::dtypeSize( dtype );
+    const size_t bytes = static_cast<size_t>( W ) * H * B * elemSize;
+
+    SharedMemorySegment seg;
+    REQUIRE( seg.create( W, H, B, dtype ) );
+
+    // Fill with a known pattern and compute the reference sum in C++.
+    double expectedSum = 0.0;
+    if ( dtype == SharedMemorySegment::DType::Float32 )
+    {
+      std::vector<float> data( W * H * B );
+      for ( size_t i = 0; i < data.size(); ++i )
+      {
+        data[i] = static_cast<float>( i % 1000 );
+        expectedSum += data[i];
+      }
+      REQUIRE( seg.write( data.data(), bytes ) );
+    }
+    else // Int32
+    {
+      std::vector<int32_t> data( W * H * B );
+      for ( size_t i = 0; i < data.size(); ++i )
+      {
+        data[i] = static_cast<int32_t>( i % 1000 );
+        expectedSum += data[i];
+      }
+      REQUIRE( seg.write( data.data(), bytes ) );
+    }
+
+    QJsonObject params;
+    params[QStringLiteral( "key" )] = seg.nativeKey();
+    params[QStringLiteral( "width" )] = W;
+    params[QStringLiteral( "height" )] = H;
+    params[QStringLiteral( "bands" )] = B;
+    params[QStringLiteral( "dtype" )] = static_cast<int>( dtype );
+
+    QJsonObject result;
+    bool isError = false;
+    const auto t0 = std::chrono::steady_clock::now();
+    const AwaitStatus status = node->server->sendRequestSync(
+      QStringLiteral( "shm.read" ), params, result, isError, 60000 );
+    const auto t1 = std::chrono::steady_clock::now();
+    REQUIRE( status == AwaitStatus::Ok );
+    REQUIRE_FALSE( isError );
+
+    // Zero-copy correctness: Python summed the shared buffer directly; it must
+    // match the C++ reference to the byte (margin covers float accumulation).
+    REQUIRE( result[QStringLiteral( "checksum" )].toDouble() == Approx( expectedSum ).epsilon( 1e-6 ) );
+
+    const double secs = std::chrono::duration<double>( t1 - t0 ).count();
+    const double mib = static_cast<double>( bytes ) / ( 1024.0 * 1024.0 );
+    outThroughputMiBps = secs > 0.0 ? mib / secs : 0.0;
+    seg.detach();
+  };
+
+  double f32Throughput = 0.0, i32Throughput = 0.0;
+  SECTION( "float32 2048x2048" ) { roundTrip( 2048, 2048, 1, SharedMemorySegment::DType::Float32, f32Throughput ); }
+  SECTION( "int32 2048x2048" ) { roundTrip( 2048, 2048, 1, SharedMemorySegment::DType::Int32, i32Throughput ); }
+
+  // Report (visible in the test's -s success output / CI logs). No hard
+  // threshold assertion: the value is host-dependent; the point is to surface
+  // a baseline and catch regressions. Correctness above is the real gate.
+  if ( f32Throughput > 0.0 )
+    std::cout << "[benchmark] shm zero-copy float32 2048x2048 (16 MiB): "
+              << f32Throughput << " MiB/s round-trip" << std::endl;
+  if ( i32Throughput > 0.0 )
+    std::cout << "[benchmark] shm zero-copy int32 2048x2048 (16 MiB): "
+              << i32Throughput << " MiB/s round-trip" << std::endl;
 }
