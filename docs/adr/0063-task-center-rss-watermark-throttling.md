@@ -48,19 +48,42 @@ stop launching new tasks until RSS falls.
 ## Consequences
 - Large-raster pipelines no longer march toward OOM unopposed: once RSS crosses 75%
   of system RAM, new tasks wait until in-flight ones release memory.
-- The gate is **conservative and coarse**: it does not know a given task's peak
-  memory, so a single huge task can still OOM on its own. Per-task declared-memory
-  budgets with soft scheduling is a possible future refinement, but RSS + watermark
-  was chosen as the pragmatic first step that catches the common multi-task OOM
-  without requiring every operator to declare its memory profile.
+- The gate responds to **current** RSS (see Amendment), so it reopens promptly
+  when a running task frees memory - not only when the all-time peak finally
+  recedes (which under a peak sampler it never would).
 - `break` (not `continue`) means a high-priority queued task will not preempt the
   gate even if a lower-priority one is ahead of it - fairness is secondary to not
   OOMing. Priority still orders launches once pressure clears.
-- Linux/macOS get real RSS; Windows returns 0 (gate disabled, falls back to the
-  existing count-based throttling). The project's target platform is Linux.
+- Linux/macOS get real current RSS; Windows returns 0 (gate disabled, falls back
+  to the existing count-based throttling). The project's target platform is Linux.
 - Tests inject a fake sampler to deterministically assert hold/release without
   allocating gigabytes; two new `test_task_center` cases cover the hold-then-release
-  flow and the disabled (limit 0) path.
+  flow and the disabled (limit 0) path, plus a `[rss]` case pinning the
+  current-not-peak semantics of the default sampler.
+
+## Amendment (VmRSS) - current RSS, not peak
+**Status:** Supersedes the sampler portion of the original Decision (item 1).
+
+The original `defaultRssMb()` used `getrusage(RUSAGE_SELF).ru_maxrss`, the
+**all-time peak** RSS. That value is monotonic - it never decreases while the
+process lives - so once the process had hit a memory spike the watermark gate
+stayed closed forever, even after the memory was freed. This defeated the
+"reopens when a running task finishes and frees memory" behavior the gate
+exists to provide.
+
+`defaultRssMb()` now reports **instantaneous current RSS**:
+- **Linux:** `/proc/self/status` field `VmRSS:` (kB -> MB).
+- **macOS:** `mach_task_basic_info.resident_size` (bytes -> MB).
+- **Other/Windows:** 0 (gate disabled, unchanged).
+
+This makes the gate reopen as soon as memory is actually freed. The
+injectable-`setRssSampler` test contract is unchanged (tests still drive a
+fake sampler), and the watermark math (`memoryPressureHigh()` = current >=
+limit, 0 disables) is unchanged. The original Decision item 1's "samples RSS
+via `getrusage(RUSAGE_SELF)`" wording is replaced by the current-RSS sources
+above. A `[rss]` test pins the behavior: allocate ~128 MiB, observe RSS rise,
+free it, assert RSS falls back below the high-water mark (impossible under a
+monotonic peak sampler).
 
 ## Future
 - GPU/VRAM monitoring (only if GPU compute is introduced).

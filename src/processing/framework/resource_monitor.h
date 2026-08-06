@@ -15,8 +15,10 @@ class ResourceMonitor
 {
   public:
     /// Returns current process RSS in MB (0 if unavailable). The default
-    /// implementation uses getrusage(RUSAGE_SELF) on Linux/macOS and returns 0
-    /// elsewhere. Inject a custom sampler for tests.
+    /// implementation reports INSTANTANEOUS current RSS (ADR-0063 amendment):
+    /// /proc/self/status VmRSS on Linux, mach_task_basic_info resident_size on
+    /// macOS, 0 elsewhere. This is current (not peak) so the watermark gate
+    /// reopens as soon as memory is freed. Inject a custom sampler for tests.
     using RssSampler = std::function<unsigned int()>;
 
     ResourceMonitor();

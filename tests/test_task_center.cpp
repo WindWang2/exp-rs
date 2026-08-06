@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "processing/framework/task_center.h"
+#include "processing/framework/resource_monitor.h"
 #include "processing/framework/algorithm_engine.h"
 #include "jobs/job_engine.h"
 #include "jobs/job_types.h"
@@ -11,6 +12,7 @@
 #include <chrono>
 #include <atomic>
 #include <thread>
+#include <vector>
 
 // JobEngine::waitUntilIdleForTests() returns once the engine's own m_running
 // counter hits zero, but the TaskCenter marks a task Completed/Failed via the
@@ -1045,4 +1047,59 @@ TEST_CASE( "TaskCenter - memory limit 0 keeps the gate open under batch load",
 
     center.resetResourceProfileLimits();
     engine.clearExecutors();
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0063 amendment (Loop F) - the default sampler must report INSTANTANEOUS
+// current RSS, not the all-time peak (getrusage ru_maxrss). The behavior
+// difference that matters: after a process allocates a large block and then
+// frees it, peak RSS stays at the high-water mark forever (so the watermark
+// gate would stay closed even after memory was freed), while current RSS
+// drops back down (so the gate reopens). This test pins that: allocate a
+// ~128 MiB block, touch it to force residency, observe the RSS rise, free it,
+// and assert the RSS subsequently falls back below the high-water mark. Under
+// ru_maxrss this cannot happen (peak is monotonic), so it would fail RED.
+// ---------------------------------------------------------------------------
+TEST_CASE( "ResourceMonitor default sampler reports current (not peak) RSS",
+           "[processing][task_center][rss]" )
+{
+    sicnu::ResourceMonitor monitor; // default sampler
+
+    const unsigned int baseline = monitor.currentRssMb();
+    // On platforms without a current-RSS source the sampler returns 0 and the
+    // gate is disabled; skip the residency assertions there (can't test).
+    if ( baseline == 0 )
+    {
+        WARN( "current RSS unavailable on this platform; skipping residency test" );
+        return;
+    }
+
+    // Allocate + touch a ~128 MiB block to force the pages resident.
+    constexpr size_t BLOCK = 128u * 1024u * 1024u; // 128 MiB
+    std::vector<unsigned char> block( BLOCK );
+    volatile unsigned char sink = 0;
+    for ( size_t i = 0; i < BLOCK; i += 4096 )
+        sink = block[i];
+    (void)sink;
+
+    const unsigned int highWater = monitor.currentRssMb();
+    // The allocation should have raised RSS measurably (allow slack for
+    // already-cached pages / allocator overhead).
+    REQUIRE( highWater >= baseline );
+
+    // Free the block and give the kernel a moment to reclaim the pages.
+    block.clear();
+    block.shrink_to_fit();
+    unsigned int after = highWater;
+    for ( int attempt = 0; attempt < 60; ++attempt )
+    {
+        after = monitor.currentRssMb();
+        if ( after < highWater )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+    }
+    // Current-RSS contract: RSS falls once the block is freed. Peak RSS
+    // (ru_maxrss) is monotonic and could never satisfy this.
+    INFO( "baseline=" << baseline << " highWater=" << highWater << " after=" << after );
+    REQUIRE( after < highWater );
 }
