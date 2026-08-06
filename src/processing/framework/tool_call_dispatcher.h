@@ -50,6 +50,26 @@ public:
   void setDataManager( sicnu::data::DataManager *dataManager );
   sicnu::data::DataManager *dataManager() const { return mDataManager; }
 
+  /// Handler for `canvas:` tool calls — immediate, in-process canvas actions
+  /// (e.g. draw_roi) that bypass the Task Center entirely. Unlike an algorithm
+  /// submission, a canvas action runs synchronously when dispatched and its
+  /// result is returned directly (no task id, no completion watcher). The
+  /// handler receives the action name (the part after `canvas:`) and the parsed
+  /// arguments, and returns a result payload (status "success"/"error" + fields)
+  /// that submit()/dispatchAndAwait() deliver as if a task had completed. When
+  /// unset, a `canvas:` call is rejected as unregistered. The agent surface
+  /// wires this with a canvas adapter (QgsRubberBand draw + geometry write-back).
+  using CanvasActionHandler = std::function<Json::Value( const std::string &action,
+                                                         const Json::Value &arguments )>;
+  void setCanvasActionHandler( CanvasActionHandler handler ) { mCanvasActionHandler = std::move( handler ); }
+  const CanvasActionHandler &canvasActionHandler() const { return mCanvasActionHandler; }
+
+  /// True when a tool name is a canvas action (the `canvas:` namespace). Shared
+  /// by classify()/rejectionReasonFor()/submit() so the namespace check has one
+  /// owner. `canvas:` is a sibling to `rs:` / provider algorithms, not a Task
+  /// Center algorithm: it routes to the CanvasActionHandler, never the sink.
+  static bool isCanvasAction( const std::string &name );
+
   /// Classifies an envelope without side effects:
   /// - PlanRequest when the arguments contain a top-level `steps` array;
   /// - ToolCall when the name resolves in AtomicAlgorithmRegistry (as-is, then
@@ -130,6 +150,7 @@ private:
   SubmissionSink mSink;
   CompletionWatcher mWatcher;
   OutputCommitterHandler mOutputCommitterHandler;
+  CanvasActionHandler mCanvasActionHandler;
   sicnu::data::DataManager *mDataManager = nullptr;
 };
 

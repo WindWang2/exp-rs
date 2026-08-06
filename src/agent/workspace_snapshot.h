@@ -38,6 +38,34 @@ struct MapViewSnapshot
     QString extentStr;
     double scale = 0.0;
     QString activeLayerName;
+    /// Active raster's band composition and display stretch, captured for the
+    /// active layer when it is a raster. Empty (renderer unset) for vector /
+    /// remote-map layers or when no layer is active — so the agent only sees
+    /// band context it can actually reason about. Read-only: the snapshot never
+    /// writes back to the canvas.
+    struct ActiveRasterDisplay
+    {
+        /// "SingleBandGray" (uses grayBand) or "MultiBandColor" (uses red/green/blueBand).
+        QString renderer;
+        int grayBand = 0;     ///< 1-based; 0 when unused.
+        int redBand = 0;      ///< 1-based; 0 when unused.
+        int greenBand = 0;    ///< 1-based; 0 when unused.
+        int blueBand = 0;     ///< 1-based; 0 when unused.
+        /// Real Data Range (ADR 0008) of the band the stretch is computed on —
+        /// the physical pixel bounds, not the 8-bit display range. Unset when
+        /// statistics are unavailable.
+        std::optional<double> dataMin;
+        std::optional<double> dataMax;
+        /// Display stretch window applied to that band, e.g. "StretchToMinimumMaximum".
+        /// Empty when no contrast enhancement is set.
+        QString stretchAlgorithm;
+        /// Display min/max currently mapped (the enhanced window). Unset when
+        /// the renderer carries no contrast enhancement.
+        std::optional<double> displayMin;
+        std::optional<double> displayMax;
+        bool valid = false;
+    };
+    ActiveRasterDisplay activeRaster;
 };
 
 struct WorkspaceSnapshot

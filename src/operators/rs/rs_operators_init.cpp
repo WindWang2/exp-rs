@@ -26,6 +26,7 @@
 #include "rs_segment_stats_operator.h"
 #include "rs_majority_filter_operator.h"
 #include "rs_recode_operator.h"
+#include "rs_inference_operator.h"
 #endif
 
 namespace sicnu::operators::rs {
@@ -53,6 +54,7 @@ REGISTER_RS_OPERATOR(RsObiaHierarchyOperator, "rs:obia_hierarchy")
 REGISTER_RS_OPERATOR(RsSegmentStatsOperator, "rs:segment_stats")
 REGISTER_RS_OPERATOR(RsMajorityFilterOperator, "rs:majority_filter")
 REGISTER_RS_OPERATOR(RsRecodeOperator, "rs:recode")
+REGISTER_RS_OPERATOR(RsInferenceOperator, "rs:infer")
 #endif
 
 struct AtomicRsOperatorProviderRegistration {

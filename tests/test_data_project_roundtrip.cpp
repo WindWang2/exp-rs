@@ -2,6 +2,7 @@
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <QDateTime>
 #include <QDomDocument>
 #include <QFile>
 #include <QFileInfo>
@@ -33,6 +34,7 @@
 
 using sicnu::data::AssetState;
 using sicnu::data::RelocateRequest;
+using sicnu::data::RestoreRequest;
 
 namespace {
 
@@ -987,5 +989,76 @@ TEST_CASE("A remote-map asset round-trips with its descriptor and identity",
         QStringLiteral("EPSG:4326"));
   CHECK(restored->source().dataOptions.value(QStringLiteral("format")) ==
         QStringLiteral("image/png"));
+}
+
+// A Data Asset's optional acquisition time round-trips through project
+// save/reopen: a populated value survives, and an absent one stays absent
+// (legacy compatibility). Covers #137.
+TEST_CASE("A Data Asset's acquisition time round-trips through the project",
+          "[project][data_roundtrip]") {
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+
+  QgsMapCanvas canvas;
+  const sicnu::display::DisplayViewSpec viewSpec{
+      &canvas, project->layerTreeRoot(), project->layerStore()};
+  auto createdContext = sicnu::app::ProjectContext::create(viewSpec);
+  REQUIRE(createdContext);
+  std::unique_ptr<sicnu::app::ProjectContext> context = createdContext.take();
+
+  // Two distinct sources (the Data Manager refuses two assets on one source):
+  // one with an acquisition time (restoreSource is the only seam that carries
+  // it), one without (fresh / legacy shape).
+  sicnu::data::SourceDescriptor timedSource;
+  timedSource.providerKey = QStringLiteral("gdal");
+  timedSource.canonicalSource =
+      fixturePath(QStringLiteral("samples/dem_sample.tif"));
+
+  sicnu::data::SourceDescriptor plainSource;
+  plainSource.providerKey = QStringLiteral("gdal");
+  plainSource.canonicalSource =
+      fixturePath(QStringLiteral("samples/acquisition_plain_sample.tif"));
+
+  const QDateTime acquired(QDate(2024, 7, 15), QTime(10, 30, 0), Qt::UTC);
+  const sicnu::data::AssetId timedId = sicnu::data::AssetId::generate();
+  REQUIRE(context->dataManager().restoreSource(RestoreRequest{
+      timedId, sicnu::data::AssetRevision::initial(), timedSource,
+      sicnu::data::PersistencePolicy::ProjectPersistent, acquired}));
+  REQUIRE(context->dataManager().asset(timedId)->acquisitionTime() == acquired);
+
+  const sicnu::data::AssetId plainId = sicnu::data::AssetId::generate();
+  REQUIRE(context->dataManager().restoreSource(RestoreRequest{
+      plainId, sicnu::data::AssetRevision::initial(), plainSource,
+      sicnu::data::PersistencePolicy::ProjectPersistent}));
+  REQUIRE_FALSE(context->dataManager().asset(plainId)->acquisitionTime());
+
+  sicnu::app::DataProjectSerializer serializer;
+  QTemporaryDir temporaryDirectory;
+  REQUIRE(temporaryDirectory.isValid());
+  const QString projectPath =
+      temporaryDirectory.filePath(QStringLiteral("acquisition-time.qgs"));
+  bool readSucceeded = false;
+  QObject signalReceiver;
+  QObject::connect(project, &QgsProject::writeProject, &signalReceiver,
+                   [&](QDomDocument &document) {
+                     REQUIRE(static_cast<bool>(serializer.write(document, *context)));
+                   });
+  QObject::connect(project, &QgsProject::readProject, &signalReceiver,
+                   [&](const QDomDocument &document) {
+                     readSucceeded =
+                         static_cast<bool>(serializer.read(document, *project, *context));
+                   });
+
+  REQUIRE(project->write(projectPath));
+  REQUIRE(context->clearProject(*project));
+  REQUIRE(project->read(projectPath));
+  REQUIRE(readSucceeded);
+
+  const auto timedAfter = context->dataManager().asset(timedId);
+  const auto plainAfter = context->dataManager().asset(plainId);
+  REQUIRE(timedAfter);
+  REQUIRE(plainAfter);
+  CHECK(timedAfter->acquisitionTime() == acquired);
+  CHECK_FALSE(plainAfter->acquisitionTime());
 }
 

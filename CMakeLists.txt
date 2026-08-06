@@ -84,9 +84,9 @@ endif()
 
 # OpenCV 5 renamed cmake components: features2d→features, calib3d→calib.
 # Version pin 4.5 is incompatible with OpenCV 5's package version check.
-find_package(OpenCV QUIET COMPONENTS core imgproc ml features calib)
+find_package(OpenCV QUIET COMPONENTS core imgproc ml features calib dnn)
 if(NOT OpenCV_FOUND)
-    find_package(OpenCV QUIET COMPONENTS core features2d imgproc calib3d ml)
+    find_package(OpenCV QUIET COMPONENTS core features2d imgproc calib3d ml dnn)
 endif()
 if(OpenCV_FOUND)
     message(STATUS "OpenCV ${OpenCV_VERSION} found — SIFT enabled")

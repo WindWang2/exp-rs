@@ -167,6 +167,11 @@ std::string ToolCallDispatcher::resolveAlgorithmId( const std::string &rawName )
   return rawName;
 }
 
+bool ToolCallDispatcher::isCanvasAction( const std::string &name )
+{
+  return name.size() > 7 && name.compare( 0, 7, "canvas:" ) == 0;
+}
+
 bool ToolCallDispatcher::isPlanRequest( const ParsedEnvelope &parsed )
 {
   return parsed.arguments.isObject()
@@ -190,6 +195,19 @@ QString ToolCallDispatcher::rejectionReasonFor( const ParsedEnvelope &parsed ) c
     return QStringLiteral(
       "Envelope contains a 'steps' array and must be routed through plan "
       "approval, not dispatched as a single tool call." );
+  }
+
+  // `canvas:` actions bypass the algorithm registry and Task Center entirely:
+  // they route to the CanvasActionHandler. The only validation here is that a
+  // handler is wired — parameter shape is the handler's responsibility (canvas
+  // actions are not self-describing algorithm descriptors).
+  if ( isCanvasAction( parsed.name ) )
+  {
+    if ( !mCanvasActionHandler )
+      return QString( QStringLiteral(
+        "Canvas action '%1' has no handler wired (setCanvasActionHandler)." ) )
+        .arg( QString::fromStdString( parsed.name ) );
+    return QString();
   }
 
   const std::string algorithmId = resolveAlgorithmId( parsed.name );
@@ -225,6 +243,12 @@ ToolCallClassification ToolCallDispatcher::classify( const Json::Value &envelope
   if ( isPlanRequest( parsed ) )
     return ToolCallClassification::PlanRequest;
 
+  // `canvas:` actions classify as ToolCall when a handler is wired, so the
+  // agent surface treats them as dispatchable like any rs: algorithm.
+  if ( isCanvasAction( parsed.name ) )
+    return mCanvasActionHandler ? ToolCallClassification::ToolCall
+                                : ToolCallClassification::Invalid;
+
   if ( AtomicAlgorithmRegistry::instance().findAdapter( resolveAlgorithmId( parsed.name ) ) )
     return ToolCallClassification::ToolCall;
 
@@ -247,6 +271,26 @@ bool ToolCallDispatcher::submit( const Json::Value &envelope, CompletionCallback
     if ( errorOut )
       *errorOut = reason;
     return false;
+  }
+
+  // `canvas:` actions run synchronously in-process via the handler — no task id,
+  // no Task Center submission, no completion watcher. The handler's result is
+  // delivered through the same CompletionCallback so dispatchAndAwait()'s await
+  // loop works uniformly. The caller (dispatchAndAwait) re-enters from the same
+  // thread, so onComplete fires inline.
+  if ( isCanvasAction( parsed.name ) && mCanvasActionHandler )
+  {
+    const std::string action = parsed.name.substr( 7 ); // strip "canvas:"
+    const Json::Value result = mCanvasActionHandler( action, parsed.arguments );
+    if ( onComplete )
+      onComplete( result );
+    // Canvas actions have no Task Center task, but the submit()/sink contract
+    // treats non-positive ids as failure. Report a reserved positive sentinel
+    // so callers that check `taskId > 0` read a canvas action as submitted
+    // rather than misreading it as a Task Center rejection.
+    if ( taskIdOut )
+      *taskIdOut = 9000001; // reserved: canvas actions (no real task)
+    return true;
   }
 
   const std::string algorithmId = resolveAlgorithmId( parsed.name );

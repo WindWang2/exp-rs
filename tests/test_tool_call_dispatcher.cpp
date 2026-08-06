@@ -780,5 +780,79 @@ TEST_CASE( "ToolCallDispatcher zero-argument default constructor delegates direc
   REQUIRE( taskIdOut > 0 );
 }
 
+// canvas: actions route to a CanvasActionHandler — the agent→canvas write-back
+// seam (ADR 0021 sibling). They classify as ToolCall when a handler is wired,
+// never reach the algorithm registry or the Task Center submission sink. Covers #140.
+TEST_CASE( "ToolCallDispatcher routes canvas: actions to the handler, not the sink",
+           "[processing][tool_call_dispatcher][canvas]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+  FakeDispatcherHarness harness;
+  Json::Value args( Json::objectValue );
+  args["geometry"] = "POLYGON((0 0,0 1,1 1,1 0,0 0))";
+  const Json::Value envelope = objectEnvelope( "canvas:draw_roi", "parameters", args );
+
+  SECTION( "without a handler, canvas: is Invalid / rejected" )
+  {
+    REQUIRE( harness.dispatcher.classify( envelope ) == ToolCallClassification::Invalid );
+    REQUIRE_FALSE( harness.dispatcher.rejectionReason( envelope ).isEmpty() );
+  }
+
+  SECTION( "with a handler, classify is ToolCall and submit invokes the handler, not the sink" )
+  {
+    int handlerCalls = 0;
+    std::string capturedAction;
+    harness.dispatcher.setCanvasActionHandler(
+      [&]( const std::string &action, const Json::Value &a ) {
+        ++handlerCalls;
+        capturedAction = action;
+        Json::Value res( Json::objectValue );
+        res["status"] = "success";
+        res["action"] = action;
+        res["echoGeom"] = a["geometry"];
+        return res;
+      } );
+
+    REQUIRE( harness.dispatcher.classify( envelope ) == ToolCallClassification::ToolCall );
+    REQUIRE( harness.dispatcher.rejectionReason( envelope ).isEmpty() );
+
+    long taskIdOut = 0;
+    Json::Value delivered;
+    QString error;
+    const bool submitted = harness.dispatcher.submit(
+      envelope, [&]( const Json::Value &payload ) { delivered = payload; }, &error, &taskIdOut );
+
+    REQUIRE( submitted );
+    REQUIRE( error.isEmpty() );
+    REQUIRE( handlerCalls == 1 );
+    REQUIRE( capturedAction == "draw_roi" );
+    // The handler fires synchronously inline, so the completion is delivered.
+    REQUIRE( delivered["status"].asString() == "success" );
+    REQUIRE( delivered["echoGeom"].asString() == "POLYGON((0 0,0 1,1 1,1 0,0 0))" );
+    // Critical: canvas: must NOT reach the Task Center submission sink.
+    CHECK( harness.sinkCalls == 0 );
+    // No real task id; the canvas path reports a reserved positive sentinel so
+    // callers that check `taskId > 0` read a canvas action as submitted, not a
+    // Task Center rejection.
+    CHECK( taskIdOut == 9000001 );
+  }
+
+  SECTION( "dispatchAndAwait returns the handler's result synchronously" )
+  {
+    harness.dispatcher.setCanvasActionHandler(
+      []( const std::string &action, const Json::Value & ) {
+        Json::Value res( Json::objectValue );
+        res["status"] = "success";
+        res["action"] = action;
+        return res;
+      } );
+
+    const Json::Value result = harness.dispatcher.dispatchAndAwait( envelope );
+    REQUIRE( result["status"].asString() == "success" );
+    REQUIRE( result["action"].asString() == "draw_roi" );
+    CHECK( harness.sinkCalls == 0 );
+  }
+}
+
 
 

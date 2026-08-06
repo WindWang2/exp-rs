@@ -206,6 +206,29 @@ CommitImportResult CollectionImportService::commit( const CommitImportRequest &r
     result.childAssetIds.clear();
   };
 
+  // Land the product's acquisition date on each child asset (e.g. a STAC item
+  // datetime carried through the preview's metadata). The field is an ISO-date
+  // string; parse it once. A missing value leaves an empty optional so the
+  // asset's acquisition time stays empty, matching a plain (non-STAC) import.
+  // A present-but-unparseable value (e.g. a non-ISO MODIS DOY date) is a
+  // degraded-metadata warning, not a failure: the children import with an empty
+  // acquisition time and the raw string still rides on the collection node.
+  std::optional<QDateTime> childAcquisitionTime;
+  if ( !preview.metadata.acquisitionDate.isEmpty() )
+  {
+    const QDateTime parsed = QDateTime::fromString( preview.metadata.acquisitionDate,
+                                                    Qt::ISODate );
+    if ( parsed.isValid() )
+      childAcquisitionTime = parsed;
+    else
+      result.diagnostics.append( Diagnostic{
+        QStringLiteral( "import.acquisition_date_unparseable" ),
+        QStringLiteral( "The product's acquisition date '%1' is not an ISO "
+                        "date and was not carried onto child assets" )
+          .arg( preview.metadata.acquisitionDate ),
+        DiagnosticSeverity::Warning } );
+  }
+
   for ( const int index : selection )
   {
     const ChildCandidate &child = preview.children[index];
@@ -222,6 +245,7 @@ CommitImportResult CollectionImportService::commit( const CommitImportRequest &r
     RegisterRequest registration;
     registration.source = source;
     registration.persistence = request.persistence;
+    registration.acquisitionTime = childAcquisitionTime;
 
     const RegisterResult registered = m_dataManager->registerSource( registration );
     if ( registered.assetId.isNull() )

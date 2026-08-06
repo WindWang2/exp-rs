@@ -134,6 +134,9 @@ DataProjectSerializer::write(QDomDocument &document,
     assetElement.setAttribute(QStringLiteral("id"), asset.id().toString());
     assetElement.setAttribute(QStringLiteral("revision"),
                               QString::number(asset.revision().value()));
+    if (const std::optional<QDateTime> &acqTime = asset.acquisitionTime())
+      assetElement.setAttribute(QStringLiteral("acquisitionTime"),
+                                acqTime->toString(Qt::ISODateWithMs));
 
     const data::SourceDescriptor &source = asset.source();
     QDomElement sourceElement =
@@ -314,10 +317,29 @@ data::Result<void> DataProjectSerializer::read(const QDomDocument &document,
                                     option.attribute(QStringLiteral("value")));
       }
 
+      // Restore the optional acquisition time when it was persisted. A missing
+      // attribute yields an empty optional (legacy projects, or assets whose
+      // source never carried one). A present-but-unparseable value is a corrupt
+      // project: surface a Warning and proceed with an empty optional rather
+      // than failing the whole read.
+      std::optional<QDateTime> acquisitionTime;
+      const QString acqText = asset.attribute(QStringLiteral("acquisitionTime"));
+      if (!acqText.isEmpty()) {
+        const QDateTime parsed = QDateTime::fromString(acqText, Qt::ISODateWithMs);
+        if (parsed.isValid())
+          acquisitionTime = parsed;
+        else
+          diagnostics.append(data::Diagnostic{
+              QStringLiteral("project.invalid_acquisition_time"),
+              QStringLiteral("A persisted acquisition time could not be parsed "
+                             "and was ignored"),
+              data::DiagnosticSeverity::Warning});
+      }
+
       const data::Result<data::AssetId> restored =
           context.dataManager().restoreSource(data::RestoreRequest{
               *assetId, data::AssetRevision::fromValue(revisionValue), source,
-              data::PersistencePolicy::ProjectPersistent});
+              data::PersistencePolicy::ProjectPersistent, acquisitionTime});
       diagnostics += restored.diagnostics();
       if (!restored)
         failed = true;

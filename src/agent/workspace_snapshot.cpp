@@ -3,8 +3,14 @@
 #include "data/data_asset.h"
 #include "data/data_manager.h"
 #include "active_view_host.h"
+#include <qgscontrastenhancement.h>
 #include <qgsmaplayer.h>
+#include <qgsrasterdataprovider.h>
+#include <qgsrasterlayer.h>
+#include <qgsrasterrenderer.h>
 #include <qgsrectangle.h>
+#include <qgssinglebandgrayrenderer.h>
+#include <qgsmultibandcolorrenderer.h>
 
 #include <QStringList>
 
@@ -32,6 +38,82 @@ QString assetKindToString( const std::optional<data::AssetKind> &kind )
       return QStringLiteral( "VirtualRaster" );
   }
   return QStringLiteral( "Unknown" );
+}
+
+/// Capture the active raster layer's band composition, Real Data Range, and
+/// display stretch. Returns an inactive ActiveRasterDisplay when the layer is
+/// not a raster (vector/remote-map) or has no renderer. Read-only: never writes
+/// back to the canvas. Uses only QGIS native renderer APIs (qgis_core/qgis_gui)
+/// so the agent library need not link the display library — the snapshot is a
+/// read-only observer of what the renderer already holds.
+MapViewSnapshot::ActiveRasterDisplay captureActiveRaster( QgsMapLayer *layer )
+{
+  MapViewSnapshot::ActiveRasterDisplay out;
+  auto *raster = qobject_cast<QgsRasterLayer *>( layer );
+  if ( !raster || !raster->isValid() )
+    return out;
+
+  QgsRasterRenderer *renderer = raster->renderer();
+  if ( !renderer )
+    return out;
+
+  const QgsContrastEnhancement *enhancement = nullptr;
+  if ( auto *gray = dynamic_cast<QgsSingleBandGrayRenderer *>( renderer ) )
+  {
+    out.renderer = QStringLiteral( "SingleBandGray" );
+    out.grayBand = gray->inputBand();
+    enhancement = gray->contrastEnhancement();
+  }
+  else if ( auto *rgb = dynamic_cast<QgsMultiBandColorRenderer *>( renderer ) )
+  {
+    out.renderer = QStringLiteral( "MultiBandColor" );
+    out.redBand = rgb->redBand();
+    out.greenBand = rgb->greenBand();
+    out.blueBand = rgb->blueBand();
+    enhancement = rgb->redContrastEnhancement();
+  }
+  else
+  {
+    return out; // Unsupported renderer — leave inactive.
+  }
+
+  // Real Data Range of the band the stretch resolves against: for gray it is
+  // the gray band; for RGB it is the red band (the stretch pipeline's
+  // reference). Request ONLY Min|Max (not the default All, which scans Mean /
+  // StdDev / SumOfSquares over the whole raster) so a snapshot capture never
+  // blocks the GUI thread on a large uncached raster (ADR 0008).
+  const int statsBand = out.grayBand > 0 ? out.grayBand : out.redBand;
+  if ( statsBand > 0 && raster->dataProvider() )
+  {
+    const auto requested =
+      Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max;
+    const QgsRasterBandStats stats =
+      raster->dataProvider()->bandStatistics( statsBand, requested );
+    if ( stats.statsGathered & Qgis::RasterBandStatistic::Min &&
+         stats.statsGathered & Qgis::RasterBandStatistic::Max )
+    {
+      out.dataMin = stats.minimumValue;
+      out.dataMax = stats.maximumValue;
+    }
+  }
+
+  // Stretch algorithm + display window from the renderer's contrast enhancement
+  // (the same object the display-stretch pipeline applies). For MultiBandColor
+  // the red channel's enhancement is the representative window.
+  if ( enhancement )
+  {
+    const auto algo = enhancement->contrastEnhancementAlgorithm();
+    if ( algo != QgsContrastEnhancement::NoEnhancement )
+    {
+      out.stretchAlgorithm =
+        QgsContrastEnhancement::contrastEnhancementAlgorithmString( algo );
+      out.displayMin = enhancement->minimumValue();
+      out.displayMax = enhancement->maximumValue();
+    }
+  }
+
+  out.valid = true;
+  return out;
 }
 
 } // namespace
@@ -87,6 +169,13 @@ WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager, Ac
     }
     snapshot.mapView.scale = viewHost->mapCanvasScale();
     snapshot.mapView.activeLayerName = viewHost->activeLayerName();
+    // Read the active layer through the inline mapCanvas() accessor (the
+    // ActiveViewHost::activeLayer() method is out-of-line in the display library
+    // which the agent lib does not link; mapCanvas()->currentLayer() is the
+    // primary path and is already what activeLayerName() reflects).
+    QgsMapLayer *activeLayer =
+      viewHost->mapCanvas() ? viewHost->mapCanvas()->currentLayer() : nullptr;
+    snapshot.mapView.activeRaster = captureActiveRaster( activeLayer );
   }
 
   return snapshot;
@@ -134,6 +223,42 @@ QString WorkspaceSnapshot::toSystemPromptHeader() const
       prompt += QString( "- Extent: %1\n" ).arg( mapView.extentStr );
     if ( !mapView.activeLayerName.isEmpty() )
       prompt += QString( "- Selected Layer: %1\n" ).arg( mapView.activeLayerName );
+    if ( mapView.activeRaster.valid )
+    {
+      prompt += QStringLiteral( "- Active Raster Display:\n" );
+      if ( mapView.activeRaster.renderer == QStringLiteral( "SingleBandGray" ) )
+      {
+        if ( mapView.activeRaster.grayBand > 0 )
+          prompt += QString( "  - Bands: gray=%1\n" ).arg( mapView.activeRaster.grayBand );
+      }
+      else if ( mapView.activeRaster.renderer == QStringLiteral( "MultiBandColor" ) )
+      {
+        // A default multiband renderer assigns -1 to channels that exceed the
+        // band count (e.g. the blue channel of a 2-band raster): treat any
+        // non-positive band as unset so the prompt never names a non-existent band.
+        QStringList channels;
+        if ( mapView.activeRaster.redBand > 0 )
+          channels << QStringLiteral( "R=%1" ).arg( mapView.activeRaster.redBand );
+        if ( mapView.activeRaster.greenBand > 0 )
+          channels << QStringLiteral( "G=%1" ).arg( mapView.activeRaster.greenBand );
+        if ( mapView.activeRaster.blueBand > 0 )
+          channels << QStringLiteral( "B=%1" ).arg( mapView.activeRaster.blueBand );
+        if ( !channels.isEmpty() )
+          prompt += QString( "  - Bands: %1\n" ).arg( channels.join( QStringLiteral( " " ) ) );
+      }
+      if ( mapView.activeRaster.dataMin && mapView.activeRaster.dataMax )
+        prompt += QString( "  - Real Data Range: [%1, %2]\n" )
+                    .arg( *mapView.activeRaster.dataMin )
+                    .arg( *mapView.activeRaster.dataMax );
+      if ( !mapView.activeRaster.stretchAlgorithm.isEmpty() &&
+           mapView.activeRaster.displayMin && mapView.activeRaster.displayMax )
+      {
+        prompt += QString( "  - Stretch: %1 [%2, %3]\n" )
+                    .arg( mapView.activeRaster.stretchAlgorithm )
+                    .arg( *mapView.activeRaster.displayMin )
+                    .arg( *mapView.activeRaster.displayMax );
+      }
+    }
   }
 
   return prompt;
