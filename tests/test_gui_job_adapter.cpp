@@ -58,8 +58,12 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
         payload["output"] = "/tmp/test_out.tif";
         TaskCenter::instance().markTaskCompleted(taskId, QVariantMap(), payload);
 
-        // Process pending Qt events to deliver QueuedConnection signal
-        for ( int i = 0; i < 50 && !successCalled; ++i )
+        // Process pending Qt events to deliver QueuedConnection signal.
+        // Under `ctest -j4` the queued signal can take >500 ms to land on a
+        // contended event loop (see 8eb781cb51, which added the original
+        // retry loop); allow up to ~2 s so the callback window is not the
+        // flaky part under parallel load.
+        for ( int i = 0; i < 200 && !successCalled; ++i )
         {
           QCoreApplication::processEvents();
           std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
@@ -87,7 +91,9 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
         REQUIRE(taskId > 0);
 
         handle.cancel();
-        for ( int i = 0; i < 50 && !failureCalled; ++i )
+        // Same queued-signal window as the success SECTION above: allow ~2 s
+        // so the callback is not the flaky part under `ctest -j4` load.
+        for ( int i = 0; i < 200 && !failureCalled; ++i )
         {
           QCoreApplication::processEvents();
           std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
