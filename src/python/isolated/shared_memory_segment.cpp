@@ -40,6 +40,7 @@ size_t SharedMemorySegment::dtypeSize( DType dtype )
     case DType::Float32: return 4;
     case DType::UInt8:   return 1;
     case DType::Int32:   return 4;
+    case DType::UInt16:  return 2;
   }
   return 0;
 }

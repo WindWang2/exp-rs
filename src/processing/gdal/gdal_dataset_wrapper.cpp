@@ -126,6 +126,35 @@ bool GdalDatasetWrapper::readBandData(int bandNum, float *buffer, int dstWidth, 
     return err == CE_None;
 }
 
+int GdalDatasetWrapper::bandDataType(int bandNum) const
+{
+    if (!m_dataset || bandNum < 1 || bandNum > bandCount())
+        return 0; // GDT_Unknown
+    GDALRasterBandH band = GDALGetRasterBand(static_cast<GDALDatasetH>(m_dataset), bandNum);
+    if (!band)
+        return 0;
+    return static_cast<int>(GDALGetRasterDataType(band));
+}
+
+bool GdalDatasetWrapper::readBandDataNative(int bandNum, void *buffer, int dstWidth, int dstHeight) const
+{
+    if (!m_dataset || bandNum < 1 || bandNum > bandCount() || !buffer)
+        return false;
+
+    GDALRasterBandH band = GDALGetRasterBand(static_cast<GDALDatasetH>(m_dataset), bandNum);
+    if (!band)
+        return false;
+
+    // Native type: no conversion, so the payload matches the on-disk dtype
+    // and the Python side can mount it as the same numpy dtype.
+    const GDALDataType eType = GDALGetRasterDataType(band);
+    CPLErr err = GDALRasterIO(band, GF_Read,
+                              0, 0, GDALGetRasterBandXSize(band), GDALGetRasterBandYSize(band),
+                              buffer, dstWidth, dstHeight, eType,
+                              0, 0);
+    return err == CE_None;
+}
+
 bool GdalDatasetWrapper::readPixel(int bandNum, int x, int y, float *value) const
 {
     if (!m_dataset || bandNum < 1 || bandNum > bandCount() || !value)

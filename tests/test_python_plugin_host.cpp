@@ -13,7 +13,11 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QJsonObject>
+#include <QTemporaryDir>
 #include <QTimer>
+
+#include <gdal.h>
+#include <cpl_conv.h>
 
 #include <chrono>
 #include <iostream>
@@ -832,5 +836,139 @@ TEST_CASE( "AppInterfaceBridge migrates raster input to shm on opt-in (__shm_key
     const Json::Value r = snap->result["result"];
     REQUIRE( r["via"].asString() == "path" );
     REQUIRE( r["input"].asString() == rasterPath.toStdString() );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0064 - native dtype preservation through the shm zero-copy path.
+// Loop E delivered every raster as float32 (GdalDatasetWrapper::readBandData
+// always reads GDT_Float32); integer rasters arrived converted, wasting 4x the
+// memory and losing the native type. This test pins that uint8/uint16 rasters
+// are delivered with their NATIVE dtype: the plugin receives __shm_array__
+// with dtype uint8 / uint16 (not float32), plus a byte-exact sum.
+// ---------------------------------------------------------------------------
+namespace
+{
+// Synthesise a small GeoTIFF (WxH, single band, given GDAL dtype) into
+// dir/name with the fill value in every pixel, so the test does not depend on
+// a committed sample raster. Returns the absolute path.
+QString createSingleBandRaster( const QString &dir, const QString &name,
+                                int width, int height, GDALDataType dtype,
+                                double fill )
+{
+  GDALAllRegister();
+  const QString path = dir + QLatin1Char( '/' ) + name;
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  REQUIRE( driver != nullptr );
+
+  GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), width, height, 1, dtype, nullptr );
+  REQUIRE( ds != nullptr );
+
+  GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+  // Write row by row into a native-type buffer so GDAL does not convert.
+  std::vector<double> row( static_cast<size_t>( width ), fill );
+  for ( int y = 0; y < height; ++y )
+    GDALRasterIO( band, GF_Write, 0, y, width, 1, row.data(), width, 1, GDT_Float64, 0, 0 );
+
+  GDALClose( ds );
+  return path;
+}
+} // namespace
+
+TEST_CASE( "SharedMemorySegment: uint8/uint16 rasters keep their native dtype through __shm_key__",
+           "[python][shm][dtype]" )
+{
+  using namespace sicnu::jobs;
+
+  sicnu::data::DataManager dataManager;
+  PythonPluginHost host( 2 );
+
+  const QString pluginDir = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "plugins/sample_plugin" ) );
+  QString loadError;
+  PythonPluginAdapter *pluginAdapter = host.loadPlugin( pluginDir, &dataManager, nullptr, nullptr, &loadError );
+  REQUIRE( pluginAdapter != nullptr );
+
+  WorkerNode *node = pluginAdapter->workerNode();
+  REQUIRE( node != nullptr );
+  REQUIRE( node->server->hasClient() );
+
+  QJsonObject regResult;
+  bool regIsError = false;
+  REQUIRE( node->server->sendRequestAndAwait( QStringLiteral( "processing.test_register_shm_algorithm" ),
+                                              QJsonObject(), regResult, regIsError, 10000 )
+           == AwaitStatus::Ok );
+  REQUIRE( !regIsError );
+
+  auto runPy = []( const Json::Value &params ) -> std::optional<sicnu::jobs::JobRecord> {
+    JobRequest req;
+    req.algorithmId = "py:shm_sum";
+    req.params = params;
+    const std::string jobId = JobEngine::instance().submit( req );
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
+    for ( ;; )
+    {
+      QCoreApplication::processEvents();
+      auto snap = JobEngine::instance().snapshot( jobId );
+      if ( snap && ( snap->state == JobState::Succeeded || snap->state == JobState::Failed ) )
+        return snap;
+      if ( std::chrono::steady_clock::now() > deadline )
+        return snap;
+      QThread::msleep( 5 );
+    }
+  };
+
+  QTemporaryDir tmpDir;
+  REQUIRE( tmpDir.isValid() );
+
+  // Two small rasters with known fill values: 16x16 uint8 (fill 200) and
+  // 16x16 uint16 (fill 60000). Expected sums are exact.
+  constexpr int W = 16, H = 16;
+  const QString u8Path = createSingleBandRaster( tmpDir.path(), QStringLiteral( "u8.tif" ),
+                                                 W, H, GDT_Byte, 200.0 );
+  const QString u16Path = createSingleBandRaster( tmpDir.path(), QStringLiteral( "u16.tif" ),
+                                                  W, H, GDT_UInt16, 60000.0 );
+  REQUIRE( QFileInfo::exists( u8Path ) );
+  REQUIRE( QFileInfo::exists( u16Path ) );
+
+  SECTION( "uint8 raster arrives as uint8 array" )
+  {
+    Json::Value params( Json::objectValue );
+    params["__shm_key__"] = true;               // opt-in flag
+    params["input"] = u8Path.toStdString();
+
+    const auto snap = runPy( params );
+    REQUIRE( snap.has_value() );
+    INFO( "job error: " << ( snap.has_value() ? snap->error : std::string{} ) );
+    REQUIRE( snap->state == JobState::Succeeded );
+
+    REQUIRE( snap->result.isMember( "result" ) );
+    const Json::Value r = snap->result["result"];
+    REQUIRE( r["via"].asString() == "shm" );
+    REQUIRE( r["dtype"].asString() == "uint8" ); // native dtype preserved
+    REQUIRE( r["shape"][0].asInt() == H );
+    REQUIRE( r["shape"][1].asInt() == W );
+    REQUIRE( r["shape"][2].asInt() == 1 );
+    REQUIRE( r["sum"].asDouble() == Approx( 200.0 * W * H ).epsilon( 1e-6 ) );
+  }
+
+  SECTION( "uint16 raster arrives as uint16 array" )
+  {
+    Json::Value params( Json::objectValue );
+    params["__shm_key__"] = true;               // opt-in flag
+    params["input"] = u16Path.toStdString();
+
+    const auto snap = runPy( params );
+    REQUIRE( snap.has_value() );
+    INFO( "job error: " << ( snap.has_value() ? snap->error : std::string{} ) );
+    REQUIRE( snap->state == JobState::Succeeded );
+
+    REQUIRE( snap->result.isMember( "result" ) );
+    const Json::Value r = snap->result["result"];
+    REQUIRE( r["via"].asString() == "shm" );
+    REQUIRE( r["dtype"].asString() == "uint16" ); // native dtype preserved
+    REQUIRE( r["shape"][0].asInt() == H );
+    REQUIRE( r["shape"][1].asInt() == W );
+    REQUIRE( r["shape"][2].asInt() == 1 );
+    REQUIRE( r["sum"].asDouble() == Approx( 60000.0 * W * H ).epsilon( 1e-6 ) );
   }
 }

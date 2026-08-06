@@ -12,11 +12,14 @@
 #include "processing/framework/json_params_converter.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <gdal.h>
+
 #include <qgsmaplayer.h>
 
 #include <QJsonArray>
 #include <QHash>
 
+#include <cstring>
 #include <optional>
 #include <variant>
 #include <vector>
@@ -33,11 +36,12 @@ namespace {
 /// the duration of the RPC) or nullptr if migration did not apply / failed
 /// (on failure the path is left untouched so the plugin falls back to GDAL).
 ///
-/// Float32 rasters are migrated directly (GdalDatasetWrapper::readBandData
-/// reads as GDT_Float32). Non-float rasters fall back to the file-path path
-/// for now (a uint8 read path is a follow-up). The migrated metadata
-/// (`__shm_key__` + width/height/bands/dtype) overwrites the opt-in flag in
-/// \a params so the daemon mounts exactly one array.
+/// The raster's NATIVE dtype is preserved for the common integer and float
+/// types (Byte->UInt8, UInt16->UInt16, Int32->Int32, Float32->Float32); any
+/// other type (Float64, Int16, ...) falls back to the float32 conversion
+/// path. The migrated metadata (`__shm_key__` + width/height/bands/dtype)
+/// overwrites the opt-in flag in \a params so the daemon mounts exactly one
+/// array.
 std::unique_ptr<SharedMemorySegment> migrateRasterInputToShm( const Json::Value &execParams,
                                                                QVariantMap &params )
 {
@@ -64,23 +68,69 @@ std::unique_ptr<SharedMemorySegment> migrateRasterInputToShm( const Json::Value 
   if ( width <= 0 || height <= 0 || bands <= 0 )
     return nullptr;
 
+  // Map the band's native GDAL type to a segment dtype. Byte/UInt16/Int32/
+  // Float32 map 1:1 (preserving the source dtype, byte-exact); anything else
+  // keeps the float32 conversion path (readBandData below).
+  bool useNative = true;
+  SharedMemorySegment::DType segDtype = SharedMemorySegment::DType::Float32;
+  switch ( ds.bandDataType( 1 ) )
+  {
+    case GDT_Byte:
+      segDtype = SharedMemorySegment::DType::UInt8;
+      break;
+    case GDT_UInt16:
+      segDtype = SharedMemorySegment::DType::UInt16;
+      break;
+    case GDT_Int32:
+      segDtype = SharedMemorySegment::DType::Int32;
+      break;
+    case GDT_Float32:
+      segDtype = SharedMemorySegment::DType::Float32;
+      break;
+    default:
+      useNative = false; // Float64/Int16/etc. -> float32 conversion
+      break;
+  }
+
   auto seg = std::make_unique<SharedMemorySegment>();
-  if ( !seg->create( width, height, bands, SharedMemorySegment::DType::Float32 ) )
+  if ( !seg->create( width, height, bands, segDtype ) )
     return nullptr;
 
   // Interleaved-by-pixel layout: [H, W, bands] matches the Python mount
   // np.ndarray((height, width, bands), ...). Read each band then scatter into
   // the (y, x, b) layout the numpy view expects.
-  std::vector<float> bandPlane( static_cast<size_t>( width ) * height );
-  float *payload = static_cast<float *>( seg->payload() );
-  for ( int b = 0; b < bands; ++b )
+  const size_t elemSize = SharedMemorySegment::dtypeSize( segDtype );
+  char *payload = static_cast<char *>( seg->payload() );
+  if ( useNative )
   {
-    if ( !ds.readBandData( b + 1, bandPlane.data(), width, height ) )
-      return nullptr; // fall back; the segment is reclaimed by unique_ptr
-    const float *src = bandPlane.data();
-    for ( int y = 0; y < height; ++y )
-      for ( int x = 0; x < width; ++x )
-        payload[( static_cast<size_t>( y ) * width + x ) * bands + b] = *src++;
+    std::vector<unsigned char> bandPlane( static_cast<size_t>( width ) * height * elemSize );
+    for ( int b = 0; b < bands; ++b )
+    {
+      if ( !ds.readBandDataNative( b + 1, bandPlane.data(), width, height ) )
+        return nullptr; // fall back; the segment is reclaimed by unique_ptr
+      const unsigned char *src = bandPlane.data();
+      for ( int y = 0; y < height; ++y )
+        for ( int x = 0; x < width; ++x )
+        {
+          std::memcpy( payload + ( ( static_cast<size_t>( y ) * width + x ) * bands + b ) * elemSize,
+                       src, elemSize );
+          src += elemSize;
+        }
+    }
+  }
+  else
+  {
+    std::vector<float> bandPlane( static_cast<size_t>( width ) * height );
+    float *floatPayload = reinterpret_cast<float *>( payload );
+    for ( int b = 0; b < bands; ++b )
+    {
+      if ( !ds.readBandData( b + 1, bandPlane.data(), width, height ) )
+        return nullptr; // fall back; the segment is reclaimed by unique_ptr
+      const float *src = bandPlane.data();
+      for ( int y = 0; y < height; ++y )
+        for ( int x = 0; x < width; ++x )
+          floatPayload[( static_cast<size_t>( y ) * width + x ) * bands + b] = *src++;
+    }
   }
 
   // Replace the opt-in flag with the real key + metadata the daemon expects.
@@ -88,7 +138,7 @@ std::unique_ptr<SharedMemorySegment> migrateRasterInputToShm( const Json::Value 
   params.insert( QStringLiteral( "width" ), width );
   params.insert( QStringLiteral( "height" ), height );
   params.insert( QStringLiteral( "bands" ), bands );
-  params.insert( QStringLiteral( "dtype" ), static_cast<int>( SharedMemorySegment::DType::Float32 ) );
+  params.insert( QStringLiteral( "dtype" ), static_cast<int>( segDtype ) );
   return seg;
 }
 

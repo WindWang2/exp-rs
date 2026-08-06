@@ -132,6 +132,27 @@ public:
     bool readPixel(int bandNum, int x, int y, float *value) const;
 
     /**
+     * Native GDAL data type of a band, returned as an int (GDALDataType)
+     * to avoid exposing gdal.h in this header. Use to choose a matching
+     * buffer type before readBandDataNative().
+     * @param bandNum 1-based band number
+     * @return GDALDataType value, or GDT_Unknown (0) on error
+     */
+    int bandDataType(int bandNum) const;
+
+    /**
+     * Read an entire band into a buffer using the band's NATIVE data type
+     * (no GDAL conversion). Use bandDataType() to size the buffer.
+     * @param bandNum 1-based band number
+     * @param buffer  pre-allocated buffer of size
+     *                dstWidth * dstHeight * GDALGetDataTypeSize(nativeType)/8
+     * @param dstWidth  destination width in pixels
+     * @param dstHeight destination height in pixels
+     * @return true on success
+     */
+    bool readBandDataNative(int bandNum, void *buffer, int dstWidth, int dstHeight) const;
+
+    /**
      * Get the no-data value for a band.
      * @param bandNum 1-based band number
      * @param hasNodata set to true if a no-data value is defined
