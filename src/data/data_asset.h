@@ -5,6 +5,7 @@
 #include <utility>
 #include <variant>
 
+#include <QDateTime>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -49,6 +50,10 @@ struct RestoreRequest
   AssetRevision revision = AssetRevision::initial();
   SourceDescriptor source;
   PersistencePolicy persistence = PersistencePolicy::ProjectPersistent;
+  /// Optional acquisition time restored from a persisted project. Empty for a
+  /// freshly registered asset (no source implies one) and for legacy restores
+  /// that pre-date this field; populated by the project serializer on reload.
+  std::optional<QDateTime> acquisitionTime;
 };
 
 /// Restore a Virtual Raster Asset from a persisted recipe. The recipe - not any
@@ -293,6 +298,17 @@ class AssetSnapshot
       return m_parentCollectionId;
     }
 
+    /// When this asset's source was acquired, if known. Empty for assets whose
+    /// source carries no acquisition time (the default); populated by restores
+    /// that persisted it (e.g. STAC item datetime in a later ticket). Returned
+    /// by value to match parentCollectionId(): AssetSnapshot is a value type and
+    /// QDateTime is implicitly shared, so the copy is a cheap refcount bump and
+    /// callers cannot dangle a reference into a temporary snapshot.
+    std::optional<QDateTime> acquisitionTime() const
+    {
+      return m_acquisitionTime;
+    }
+
   private:
     friend class DataManager;
 
@@ -305,7 +321,8 @@ class AssetSnapshot
                    PersistencePolicy persistence,
                    StorageKind storageKind,
                    QString displayName,
-                   AssetStructure structure )
+                   AssetStructure structure,
+                   std::optional<QDateTime> acquisitionTime = {} )
       : m_id( std::move( id ) )
       , m_revision( revision )
       , m_source( std::move( source ) )
@@ -316,6 +333,7 @@ class AssetSnapshot
       , m_storageKind( storageKind )
       , m_displayName( std::move( displayName ) )
       , m_structure( std::move( structure ) )
+      , m_acquisitionTime( std::move( acquisitionTime ) )
     {
     }
 
@@ -330,7 +348,8 @@ class AssetSnapshot
     QString m_displayName;
     AssetStructure m_structure;
     std::optional<CollectionId> m_parentCollectionId;
-};
+    std::optional<QDateTime> m_acquisitionTime;
+  };
 
 struct AssetQuery
 {

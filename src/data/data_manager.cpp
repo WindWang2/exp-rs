@@ -342,7 +342,8 @@ Result<AssetId> DataManager::restoreSource( const RestoreRequest &request )
                           request.persistence,
                           source.storageKind,
                           source.displayName,
-                          source.structure };
+                          source.structure,
+                          request.acquisitionTime };
   m_impl->records.push_back(
     Impl::AssetRecord{ sourceKey, std::move( snapshot ) } );
   m_impl->catalogGeneration++;
@@ -426,7 +427,8 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
                          current.persistence(),
                          replacement.storageKind,
                          replacement.displayName,
-                         replacement.structure };
+                         replacement.structure,
+                         current.acquisitionTime() };
   recordIt->sourceKey = newSourceKey;
   recordIt->snapshot = std::move( updated );
   m_impl->catalogGeneration++;
@@ -626,7 +628,8 @@ Result<void> DataManager::commitEdit( AssetId id )
                                       recordIt->snapshot.persistence(),
                                       recordIt->snapshot.storageKind(),
                                       recordIt->snapshot.displayName(),
-                                      recordIt->snapshot.structure() };
+                                      recordIt->snapshot.structure(),
+                                      recordIt->snapshot.acquisitionTime() };
 
   ( *leaseIt ).control->active = false;
   ( *leaseIt ).control->manager.clear();
@@ -1308,10 +1311,10 @@ Result<void> DataManager::promote( AssetId id )
     return Result<void>::success();
 
   // Rebuild the snapshot with the policy flipped; identity, revision, source,
-  // structure, capabilities, and provenance are all preserved. AssetSnapshot
-  // is immutable, so a fresh instance replaces the record (the same pattern
-  // commitEdit uses to advance a revision; provenance lives in a separate
-  // optional on the record and is untouched here).
+  // structure, capabilities, acquisition time, and provenance are all preserved.
+  // AssetSnapshot is immutable, so a fresh instance replaces the record (the
+  // same pattern commitEdit uses to advance a revision; provenance lives in a
+  // separate optional on the record and is untouched here).
   const AssetSnapshot &current = recordIt->snapshot;
   AssetSnapshot promoted{ current.id(),
                           current.revision(),
@@ -1322,7 +1325,8 @@ Result<void> DataManager::promote( AssetId id )
                           PersistencePolicy::ProjectPersistent,
                           current.storageKind(),
                           current.displayName(),
-                          current.structure() };
+                          current.structure(),
+                          current.acquisitionTime() };
   recordIt->snapshot = std::move( promoted );
   m_impl->catalogGeneration++;
 
