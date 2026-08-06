@@ -7,6 +7,8 @@
 #include "qgsprocessingfeedback.h"
 #include "qgsprocessingoutputs.h"
 #include "qgsprocessingparameters.h"
+#include "qgsexception.h"
+#include "qgsproject.h"
 #include "qgis.h"
 
 #include <memory>
@@ -192,24 +194,24 @@ AlgorithmDescriptor ProviderAlgorithmAdapter::descriptor() const
 Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, ProgressCallback progressCb )
 {
   if ( !mAlg )
-  {
-    Json::Value err( Json::objectValue );
-    err["error"] = "Null algorithm pointer";
-    return err;
-  }
+    throw std::runtime_error( "ProviderAlgorithmAdapter: null algorithm pointer" );
 
   // Create a fresh clone for this execution.
-  std::unique_ptr<QgsProcessingAlgorithm> clone( mAlg->create() );
-  if ( !clone )
+  std::unique_ptr<QgsProcessingAlgorithm> algorithm( mAlg->create() );
+  if ( !algorithm )
+    throw std::runtime_error( "ProviderAlgorithmAdapter: failed to clone algorithm " + mDesc.id );
+
+  // Context affinity = the calling thread → prepare / runPrepared / postProcess
+  // all share correct affinity (mirrors the processing: prefix executor). This
+  // is safe to call from a JobEngine worker thread.
+  QgsProcessingContext context;
+  if ( QgsProject *project = QgsProject::instance() )
   {
-    Json::Value err( Json::objectValue );
-    err["error"] = "Failed to clone algorithm";
-    return err;
+    context.setProject( project );
+    context.setTransformContext( project->transformContext() );
   }
 
-  QgsProcessingContext context;
   QgsProcessingFeedback feedback;
-
   if ( progressCb )
   {
     QObject::connect( &feedback, &QgsFeedback::progressChanged,
@@ -218,19 +220,57 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
                       } );
   }
 
-  const QVariantMap variantParams = jsonParamsToVariantMap( params );
+  const QVariantMap parameters = jsonParamsToVariantMap( params );
 
-  bool ok = false;
-  const QVariantMap results = clone->run( variantParams, context, &feedback, &ok );
-
-  Json::Value result( Json::objectValue );
-  if ( !ok )
+  // prepare() → runPrepared() → postProcess(true); on cancel/exception call
+  // postProcess(false) to give the algorithm a chance to clean up partial work.
+  try
   {
-    result["error"] = feedback.textLog().toStdString();
-    return result;
+    if ( !algorithm->prepare( parameters, context, &feedback ) )
+    {
+      const QString err = feedback.textLog();
+      throw std::runtime_error( err.isEmpty() ? "prepare() failed for " + mDesc.id
+                                              : err.toStdString() );
+    }
+  }
+  catch ( const QgsProcessingException &e )
+  {
+    throw std::runtime_error( e.what().toStdString() );
   }
 
-  // Convert QVariantMap results → Json::Value
+  if ( feedback.isCanceled() )
+    throw std::runtime_error( "Processing algorithm cancelled before run: " + mDesc.id );
+
+  QVariantMap runResults;
+  try
+  {
+    runResults = algorithm->runPrepared( parameters, context, &feedback );
+  }
+  catch ( const QgsProcessingException &e )
+  {
+    try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
+    throw std::runtime_error( e.what().toStdString() );
+  }
+
+  if ( feedback.isCanceled() )
+  {
+    try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
+    throw std::runtime_error( "Processing algorithm cancelled during run: " + mDesc.id );
+  }
+
+  QVariantMap results;
+  try
+  {
+    results = algorithm->postProcess( context, &feedback, true );
+  }
+  catch ( const QgsProcessingException &e )
+  {
+    throw std::runtime_error( e.what().toStdString() );
+  }
+  if ( results.isEmpty() )
+    results = runResults;
+
+  Json::Value result( Json::objectValue );
   for ( auto it = results.constBegin(); it != results.constEnd(); ++it )
   {
     result[it.key().toStdString()] = variantToJsonValue( it.value() );

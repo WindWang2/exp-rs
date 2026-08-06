@@ -100,6 +100,12 @@ void JobEngine::clearExecutors()
   m_prefixExecutors.clear();
 }
 
+void JobEngine::setFallbackExecutor( JobExecutor executor )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_fallbackExecutor = std::move( executor );
+}
+
 JobEngine::JobExecutor JobEngine::findPrefixExecutorLocked( const std::string &algorithmId ) const
 {
   for ( const auto &pair : m_prefixExecutors )
@@ -495,6 +501,7 @@ void JobEngine::runOperatorJob( const std::string &jobId )
   std::shared_ptr<std::atomic<bool>> cancelFlag;
   bool wasExclusive = false;
   JobExecutor executor;
+  JobExecutor fallback; // registry catch-all (ADR 0062)
 
   JobRecord startedCopy;
   {
@@ -525,31 +532,41 @@ void JobEngine::runOperatorJob( const std::string &jobId )
       executor = bit->second.executor;
     else
       executor = findPrefixExecutorLocked( request.algorithmId );
+    // Snapshot the catch-all so registry lookup happens off the engine lock.
+    fallback = m_fallbackExecutor;
   }
   notify( startedCopy );
 
-  // Resolve body: per-job / prefix executor, else RSOperator.
+  // Resolve body. Resolution order (ADR 0062):
+  //   per-job executor → prefix executor → RSOperator → fallback (registry).
   std::unique_ptr<sicnu::operators::RSOperator> op;
   if ( !executor )
   {
     op = sicnu::operators::RSOperatorRegistry::instance().create( request.algorithmId );
     if ( !op )
     {
-      JobRecord copy;
+      // Native RSOperator missed: try the registry fallback (e.g. provider
+      // algorithms gdal:/otb:/native: that live in AtomicAlgorithmRegistry).
+      if ( fallback )
+        executor = std::move( fallback );
+      else
       {
-        std::lock_guard<std::mutex> lock( m_mutex );
-        auto it = m_jobs.find( jobId );
-        if ( it == m_jobs.end() )
-          return;
-        JobRecord &rec = it->second;
-        rec.state = JobState::Failed;
-        rec.error = "Unknown algorithm: " + request.algorithmId;
-        appendLog( rec, JobLogLevel::Error, rec.error );
-        finishJobLocked( rec, wasExclusive );
-        copy = rec;
+        JobRecord copy;
+        {
+          std::lock_guard<std::mutex> lock( m_mutex );
+          auto it = m_jobs.find( jobId );
+          if ( it == m_jobs.end() )
+            return;
+          JobRecord &rec = it->second;
+          rec.state = JobState::Failed;
+          rec.error = "Unknown algorithm: " + request.algorithmId;
+          appendLog( rec, JobLogLevel::Error, rec.error );
+          finishJobLocked( rec, wasExclusive );
+          copy = rec;
+        }
+        notify( copy );
+        return;
       }
-      notify( copy );
-      return;
     }
   }
 

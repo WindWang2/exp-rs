@@ -141,7 +141,7 @@ void AppInterfaceBridge::setupDefaultAlgorithmHandler()
 
         QJsonObject execResult;
         bool execIsError = false;
-        const AwaitStatus awaitStatus = m_ipcServer->sendRequestAndAwait(
+        const AwaitStatus awaitStatus = m_ipcServer->sendRequestSync(
           QStringLiteral( "processing.execute_algorithm" ), req, execResult, execIsError, 300000 );
         switch ( awaitStatus )
         {

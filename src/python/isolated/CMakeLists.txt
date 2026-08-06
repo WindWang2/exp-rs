@@ -7,6 +7,7 @@ qt_add_library(sicnu_python_isolated STATIC
     python_plugin_host.cpp
     python_worker_process.cpp
     python_worker_process_pool.cpp
+    shared_memory_segment.cpp
     ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp
 )
 

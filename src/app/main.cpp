@@ -28,6 +28,9 @@
 #include <memory>
 
 #include "data/data_manager.h"
+#include "processing/framework/atomic_algorithm_adapter.h"
+#include "jobs/job_engine.h"
+#include "operators/framework/rs_operator_context.h"
 
 // QGIS C++ includes
 #include <qgsapplication.h>
@@ -131,6 +134,22 @@ int main(int argc, char *argv[])
     // Initialize AlgorithmEngine facade (registers providers and tool paths)
     sicnu::AlgorithmEngine::instance().initialize();
     qDebug() << "AlgorithmEngine initialized with" << sicnu::processing::AtomicAlgorithmRegistry::instance().adapterCount() << "algorithms";
+
+    // ADR 0062: bridge the unified registry to JobEngine. Provider algorithms
+    // (gdal:/otb:/native:) that the Agent already sees in the exported tool
+    // catalog become executable when submitted as jobs — the fallback fires
+    // after prefix executors and RSOperatorRegistry both miss an algorithm id.
+    sicnu::jobs::JobEngine::instance().setFallbackExecutor(
+        []( const sicnu::jobs::JobRequest &req, sicnu::operators::RSOperatorContext &ctx ) {
+            const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( req.algorithmId );
+            if ( !adapter )
+                throw std::runtime_error( "Unknown algorithm: " + req.algorithmId );
+            sicnu::processing::ProgressCallback progressBridge;
+            progressBridge = [&ctx]( int percent, const std::string &message ) {
+                ctx.reportProgress( percent / 100.0, message );
+            };
+            return adapter->execute( req.params, progressBridge );
+        } );
 
     if (mcpMode) {
         std::cerr << "Initializing MCP Mode..." << std::endl;

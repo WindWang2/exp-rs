@@ -28,6 +28,13 @@ namespace sicnu::jobs {
  * starts_with is used — prefer unique prefixes like "module:", "processing:").
  * Per-job path: submit(req, executor) runs a one-shot callable (e.g. GDAL lambda).
  *
+ * Resolution order in runOperatorJob (ADR 0062):
+ *   1. per-job executor (submit(req, executor, …))
+ *   2. longest-matching prefix executor (registerExecutor)
+ *   3. RSOperatorRegistry::create(algorithmId)   — native rs:/opencv: operators
+ *   4. fallback executor (setFallbackExecutor)   — e.g. AtomicAlgorithmRegistry,
+ *      so provider algorithms (gdal:/otb:/native:) become executable from jobs.
+ *
  * Exclusive policy ("drain then exclusive"):
  * - When an exclusive job is queued, no new non-exclusive jobs are started
  *   so in-flight work can finish (drain).
@@ -79,6 +86,15 @@ class JobEngine
 
     /** Remove all prefix executors (tests). */
     void clearExecutors();
+
+    /**
+     * Install a catch-all fallback executor, tried after the prefix executor and
+     * RSOperatorRegistry both miss (ADR 0062). Production wires this to
+     * AtomicAlgorithmRegistry::findAdapter so provider algorithms (gdal:/otb:/
+     * native:) that the Agent already sees in the exported tool catalog become
+     * executable when submitted as jobs. Pass an empty function to clear.
+     */
+    void setFallbackExecutor( JobExecutor executor );
 
     /**
      * Cancel a job. For a Queued job the record is cancelled synchronously.
@@ -156,6 +172,7 @@ class JobEngine
     std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> m_cancelFlags;
     std::unordered_map<std::string, JobBody> m_jobBodies; // per-job one-shot
     std::vector<std::pair<std::string, JobExecutor>> m_prefixExecutors;
+    JobExecutor m_fallbackExecutor; // catch-all, tried after RSOperatorRegistry
     std::vector<std::thread> m_workers;
     Listener m_listener;
     int m_maxWorkers = 3;

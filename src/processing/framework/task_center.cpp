@@ -109,6 +109,7 @@ void TaskCenter::resetResourceProfileLimits()
     QMutexLocker locker( &m_mutex );
     m_profileLimits.clear();
     m_globalConcurrencyLimit = 0;
+    m_resourceMonitor = ResourceMonitor{}; // restore default watermark + sampler (ADR 0063)
 }
 
 void TaskCenter::setGlobalConcurrencyLimit( unsigned int maxConcurrent )
@@ -123,6 +124,24 @@ unsigned int TaskCenter::globalConcurrencyLimit() const
     if ( m_globalConcurrencyLimit > 0 )
         return m_globalConcurrencyLimit;
     return defaultLimitForProfile( ProviderResourceProfile::InProcessThread );
+}
+
+void TaskCenter::setMemoryLimitMb( unsigned int mb )
+{
+    QMutexLocker locker( &m_mutex );
+    m_resourceMonitor.setMemoryLimitMb( mb );
+}
+
+unsigned int TaskCenter::memoryLimitMb() const
+{
+    QMutexLocker locker( &m_mutex );
+    return m_resourceMonitor.memoryLimitMb();
+}
+
+void TaskCenter::setRssSampler( std::function<unsigned int()> sampler )
+{
+    QMutexLocker locker( &m_mutex );
+    m_resourceMonitor.setRssSampler( std::move( sampler ) );
 }
 
 Json::Value TaskCenter::variantMapToJsonParams( const QVariantMap &params )
@@ -574,6 +593,14 @@ void TaskCenter::processNextQueuedTasks()
         const unsigned int profileMax = limitForProfileLocked( profile );
         if ( runningByProfile.value( profile, 0u ) >= profileMax )
             continue; // leave queued; another profile may still launch
+
+        // ADR 0063: hold all launches when the process RSS is at/above the
+        // watermark. Memory pressure is global, so break rather than continue
+        // - remaining eligible tasks cannot run either. Blocked tasks stay
+        // Queued and are re-evaluated when a running task finishes (each
+        // terminal transition re-enters processNextQueuedTasks).
+        if ( m_resourceMonitor.memoryPressureHigh() )
+            break;
 
         m_tasks[id].status = TaskStatus::Running;
         m_tasks[id].logBuffer.append(

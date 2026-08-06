@@ -47,24 +47,37 @@ cv::Mat RsFeatureScaler::transform( const cv::Mat &X ) const
   if ( in.type() != CV_32F )
     X.convertTo( in, CV_32F );
 
-  cv::Mat out = in.clone();
-  for ( int j = 0; j < out.cols; ++j )
+  // Pre-compute per-column offset and scale so the inner loop is branch-free.
+  // The original code iterated columns in the outer loop and rows in the inner
+  // loop via out.at<float>(i, j) - a strided access over a row-major Mat that
+  // thrashed the cache. Iterating rows in the outer loop with ptr<float>(i)
+  // gives contiguous access; pulling offset/scale into flat arrays removes the
+  // per-pixel method branch.
+  const int B = in.cols;
+  std::vector<float> offset( B ), scale( B );
+  for ( int j = 0; j < B; ++j )
   {
     if ( mMethod == Method::MinMax )
     {
       const float minV = static_cast<float>( mMin[j] );
       const float maxV = static_cast<float>( mMax[j] );
       const float range = ( ( maxV - minV ) < static_cast<float>( kMinStd ) ) ? 1.0f : ( maxV - minV );
-      for ( int i = 0; i < out.rows; ++i )
-        out.at<float>( i, j ) = ( out.at<float>( i, j ) - minV ) / range;
+      offset[j] = minV;
+      scale[j] = 1.0f / range;
     }
     else
     {
-      const float mean = static_cast<float>( mMean[j] );
-      const float stdv = static_cast<float>( mStd[j] );
-      for ( int i = 0; i < out.rows; ++i )
-        out.at<float>( i, j ) = ( out.at<float>( i, j ) - mean ) / stdv;
+      offset[j] = static_cast<float>( mMean[j] );
+      scale[j] = 1.0f / static_cast<float>( mStd[j] );
     }
+  }
+
+  cv::Mat out = in.clone();
+  for ( int i = 0; i < out.rows; ++i )
+  {
+    float *row = out.ptr<float>( i );
+    for ( int j = 0; j < B; ++j )
+      row[j] = ( row[j] - offset[j] ) * scale[j];
   }
   return out;
 }

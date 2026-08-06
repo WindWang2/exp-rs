@@ -7,6 +7,10 @@
 #include "analysis/segmentation/rs_segment_map.h"
 #include "analysis/segmentation/rs_segment_features.h"
 
+#include <gdal.h>
+#include <cpl_conv.h>
+#include <QTemporaryDir>
+
 using Catch::Approx;
 
 // ---------------------------------------------------------------------------
@@ -135,6 +139,80 @@ TEST_CASE( "SegmentFeatures: shape index computation", "[segmentation]" )
     // available. For now, just verify the map is valid.
     REQUIRE( segMap.segmentCount() == 1 );
     REQUIRE( segMap.pixelCoords( 1 ).size() == 4 );
+}
+
+// ---------------------------------------------------------------------------
+// RsSegmentFeatures::extract numerical correctness (vector-indexed path, ADR slice 5)
+// Creates a real GeoTIFF with known pixel values and verifies that extract()
+// computes correct mean, area, perimeter, and shape descriptors. This also
+// exercises the QMap->vector optimization with contiguous labels 1..N.
+// ---------------------------------------------------------------------------
+static bool g_gdalInit = ( GDALAllRegister(), true );
+
+TEST_CASE( "SegmentFeatures: extract computes correct stats from real raster", "[segmentation]" )
+{
+    // 4x4 raster, 1 band. Left half (cols 0-1) = segment 1, values 10.
+    // Right half (cols 2-3) = segment 2, values 20..25.
+    // Segment 2 is not uniform so we can check mean/stddev.
+    constexpr int W = 4, H = 4;
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+
+    const QString path = tempDir.filePath( "test_extract.tif" );
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+
+    QVector<float> pixels( W * H );
+    for ( int r = 0; r < H; ++r )
+    {
+        for ( int c = 0; c < W; ++c )
+            pixels[r * W + c] = ( c < W / 2 ) ? 10.0f : static_cast<float>( 20 + r );
+    }
+    GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+    GDALRasterIO( band, GF_Write, 0, 0, W, H, pixels.data(), W, H, GDT_Float32, 0, 0 );
+    GDALClose( ds );
+
+    // Segment map: left half = label 1, right half = label 2.
+    QVector<quint32> labels( W * H );
+    for ( int i = 0; i < W * H; ++i )
+        labels[i] = ( i % W < W / 2 ) ? 1u : 2u;
+    RsSegmentMap segMap( labels, W, H );
+
+    QVector<int> bandIndices = { 1 };
+    auto stats = RsSegmentFeatures::extract( path, segMap, bandIndices );
+
+    REQUIRE( stats.size() == 2 );
+    REQUIRE( stats.contains( 1 ) );
+    REQUIRE( stats.contains( 2 ) );
+
+    // Segment 1: 8 pixels, all value 10 -> mean=10, stddev=0, area=8.
+    const auto &s1 = stats[1];
+    REQUIRE( s1.area == 8 );
+    REQUIRE( s1.mean[0] == Approx( 10.0 ).margin( 1e-6 ) );
+    REQUIRE( s1.stddev[0] == Approx( 0.0 ).margin( 1e-6 ) );
+    REQUIRE( s1.min[0] == Approx( 10.0 ) );
+    REQUIRE( s1.max[0] == Approx( 10.0 ) );
+
+    // Segment 2: 8 pixels, values 20,21,22,23 (rows 0-3, cols 2-3 each).
+    // mean = (20+21+22+23)*2 / 8 = 86*2/8 = 21.5
+    const auto &s2 = stats[2];
+    REQUIRE( s2.area == 8 );
+    REQUIRE( s2.mean[0] == Approx( 21.5 ).margin( 1e-6 ) );
+    REQUIRE( s2.min[0] == Approx( 20.0 ) );
+    REQUIRE( s2.max[0] == Approx( 23.0 ) );
+
+    // Both segments are 2-wide x 4-tall rectangles (cols 0-1 / cols 2-3, all
+    // 4 rows). The perimeter counter tallies boundary pixels: every pixel on
+    // the outer edge of the segment (image edge or neighbor with a different
+    // label). For a 2-wide strip touching the image edge on one side and a
+    // different segment on the other, all 8 pixels are boundary pixels.
+    REQUIRE( s1.perimeter == 8 );
+    REQUIRE( s2.perimeter == 8 );
+
+    // Compactness = P^2 / (4*pi*A) = 64 / (4*pi*8) ~ 0.6366
+    REQUIRE( s1.compactness == Approx( 64.0 / ( 4.0 * M_PI * 8.0 ) ).margin( 1e-3 ) );
 }
 
 #ifdef SICNU_HAS_OPENCV

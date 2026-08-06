@@ -728,3 +728,136 @@ TEST_CASE( "TaskCenter - recursive DAG cancellation cascades to child and grandc
     CHECK( center.getTaskInfo( childId ).status == sicnu::TaskStatus::Canceled );
     CHECK( center.getTaskInfo( grandchildId ).status == sicnu::TaskStatus::Canceled );
 }
+
+// ---------------------------------------------------------------------------
+// ADR 0063 - RSS watermark throttling: hold launches on memory pressure,
+// then release when RSS drops (re-evaluated on task completion).
+// ---------------------------------------------------------------------------
+TEST_CASE( "TaskCenter - RSS watermark holds queued tasks then releases on completion",
+           "[processing][task_center][throttling]" )
+{
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+
+    auto &center = sicnu::TaskCenter::instance();
+    center.resetResourceProfileLimits();
+    center.setGlobalConcurrencyLimit( 8 ); // generous; memory gate is the binding constraint
+    center.setMemoryLimitMb( 100 );
+
+    std::atomic<unsigned int> fakeRss{ 50 }; // below the 100 MB watermark
+    center.setRssSampler( [&fakeRss]() { return fakeRss.load(); } );
+
+    std::atomic<bool> releaseWorkers{ false };
+    auto holdExecutor = [&releaseWorkers]( const sicnu::jobs::JobRequest &,
+                                           sicnu::operators::RSOperatorContext & ) {
+        while ( !releaseWorkers.load() )
+            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+        Json::Value result( Json::objectValue );
+        result["output"] = "/tmp/mem_throttle.tif";
+        return result;
+    };
+    engine.registerExecutor( "mem_inproc:task", holdExecutor );
+
+    // Launch two tasks under low RSS - both run immediately.
+    long id1 = center.enqueueTask( QStringLiteral( "mem_inproc:task" ), {}, false,
+                                   sicnu::TaskPriority::Normal, {}, true );
+    long id2 = center.enqueueTask( QStringLiteral( "mem_inproc:task" ), {}, false,
+                                   sicnu::TaskPriority::Normal, {}, true );
+    for ( int attempt = 0; attempt < 200; ++attempt )
+    {
+        if ( center.getTaskInfo( id1 ).status == sicnu::TaskStatus::Running
+             && center.getTaskInfo( id2 ).status == sicnu::TaskStatus::Running )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+    REQUIRE( center.getTaskInfo( id1 ).status == sicnu::TaskStatus::Running );
+    REQUIRE( center.getTaskInfo( id2 ).status == sicnu::TaskStatus::Running );
+
+    // Raise RSS to the watermark, then enqueue a third task - it must stay Queued.
+    fakeRss.store( 100 );
+    long id3 = center.enqueueTask( QStringLiteral( "mem_inproc:task" ), {}, false,
+                                   sicnu::TaskPriority::Normal, {}, true );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 30 ) ); // let any pending dispatch settle
+    REQUIRE( center.getTaskInfo( id3 ).status == sicnu::TaskStatus::Queued );
+
+    // Drop RSS below the watermark and release the workers. Their completions
+    // re-enter processNextQueuedTasks, which now sees low pressure and launches
+    // the third task, which then also runs to completion.
+    fakeRss.store( 50 );
+    releaseWorkers.store( true );
+
+    for ( int attempt = 0; attempt < 400; ++attempt )
+    {
+        if ( center.getTaskInfo( id3 ).status == sicnu::TaskStatus::Completed )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+    // id3 reached Completed, which means it was launched (gate reopened) and ran.
+    REQUIRE( center.getTaskInfo( id3 ).status == sicnu::TaskStatus::Completed );
+
+    engine.waitUntilIdleForTests();
+    REQUIRE( center.getTaskInfo( id1 ).status == sicnu::TaskStatus::Completed );
+    REQUIRE( center.getTaskInfo( id2 ).status == sicnu::TaskStatus::Completed );
+
+    center.resetResourceProfileLimits();
+    engine.clearExecutors();
+}
+
+TEST_CASE( "TaskCenter - memory limit 0 disables the RSS gate",
+           "[processing][task_center][throttling]" )
+{
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+
+    auto &center = sicnu::TaskCenter::instance();
+    center.resetResourceProfileLimits();
+    center.setGlobalConcurrencyLimit( 8 );
+    center.setMemoryLimitMb( 0 ); // disabled
+
+    std::atomic<unsigned int> fakeRss{ 999999 }; // would block if the gate were on
+    center.setRssSampler( [&fakeRss]() { return fakeRss.load(); } );
+
+    std::atomic<bool> releaseWorkers{ false };
+    engine.registerExecutor( "mem_disabled:task",
+        [&releaseWorkers]( const sicnu::jobs::JobRequest &,
+                           sicnu::operators::RSOperatorContext & ) {
+            while ( !releaseWorkers.load() )
+                std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            Json::Value result( Json::objectValue );
+            result["output"] = "/tmp/mem_disabled.tif";
+            return result;
+        } );
+
+    QList<long> ids;
+    for ( int i = 0; i < 3; ++i )
+        ids.append( center.enqueueTask( QStringLiteral( "mem_disabled:task" ), {}, false,
+                                        sicnu::TaskPriority::Normal, {}, true ) );
+
+    // Despite a huge fake RSS, all three should run (gate disabled).
+    for ( int attempt = 0; attempt < 200; ++attempt )
+    {
+        int running = 0;
+        for ( long id : ids )
+            if ( center.getTaskInfo( id ).status == sicnu::TaskStatus::Running )
+                ++running;
+        if ( running >= 3 )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+
+    int running = 0;
+    for ( long id : ids )
+        if ( center.getTaskInfo( id ).status == sicnu::TaskStatus::Running )
+            ++running;
+    CHECK( running == 3 );
+
+    releaseWorkers.store( true );
+    engine.waitUntilIdleForTests();
+    for ( long id : ids )
+        REQUIRE( center.getTaskInfo( id ).status == sicnu::TaskStatus::Completed );
+
+    center.resetResourceProfileLimits();
+    engine.clearExecutors();
+}
