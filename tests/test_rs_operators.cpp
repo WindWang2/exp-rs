@@ -114,6 +114,7 @@ TEST_CASE("Native RS operators are registered", "[operators][rs]") {
     CHECK(registry.hasOperator("rs:obia_classify"));
     CHECK(registry.hasOperator("rs:obia_hierarchy")); // ADR 0060: registration + smoke
     CHECK(registry.hasOperator("rs:segment_stats"));
+    CHECK(registry.hasOperator("rs:infer")); // Edge-AI tracer bullet (#141)
 #endif
 }
 
@@ -132,6 +133,61 @@ TEST_CASE("RS spectral index operator schema and metadata", "[operators][rs]") {
     CHECK(metadata.isObject());
     CHECK(metadata.isMember("tags"));
 }
+
+#ifdef SICNU_HAS_OPENCV
+// rs:infer tracer bullet (#141): run an identity ONNX model end-to-end through
+// the operator chain — raster in → cv::dnn load → forward → raster out — and
+// verify the output raster is written with the right dimensions and (for an
+// identity model) faithfully preserves the input band. The model lives under
+// tests/data so the slice proves the chain against a real, committed ONNX file.
+TEST_CASE("rs:infer runs an identity ONNX model end-to-end", "[operators][rs][infer]") {
+    auto op = RSOperatorRegistry::instance().create("rs:infer");
+    REQUIRE(op != nullptr);
+    CHECK(op->name() == "rs:infer");
+    CHECK(op->group() == "ml");
+
+    // Resolve the committed identity model relative to this test source file.
+    const QString modelPath = QFileInfo(__FILE__).absolutePath() +
+                              QStringLiteral("/data/test_infer_identity.onnx");
+    REQUIRE(QFile::exists(modelPath));
+
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString inputPath = dir.filePath(QStringLiteral("input.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("output.tif"));
+
+    // A 4x3 single-band raster with known values; identity must preserve them.
+    std::vector<std::vector<float>> bands = {
+        {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+    };
+    REQUIRE(writeTestRaster(inputPath, 4, 3, bands).empty());
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["model"] = modelPath.toStdString();
+    params["output"] = outputPath.toStdString();
+
+    RSOperatorContext context;
+    const Json::Value result = op->run(params, context);
+
+    REQUIRE(result.isObject());
+    CHECK(result["backend"].asString() == "opencv_dnn");
+    CHECK(result["width"].asInt() == 4);
+    CHECK(result["height"].asInt() == 3);
+    CHECK(QFile::exists(outputPath));
+
+    // Read the output back and confirm identity preserved the input band.
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(outputPath));
+    REQUIRE(outDs.bandCount() >= 1);
+    REQUIRE(outDs.width() == 4);
+    REQUIRE(outDs.height() == 3);
+    std::vector<float> outPixels(12);
+    REQUIRE(outDs.readBandData(1, outPixels.data(), 4, 3));
+    for (size_t i = 0; i < outPixels.size(); ++i)
+        CHECK(outPixels[i] == Catch::Approx(bands[0][i]).margin(1e-4));
+}
+#endif
 
 TEST_CASE("RS spectral index NDVI execution", "[operators][rs]") {
     QTemporaryDir tmp;
