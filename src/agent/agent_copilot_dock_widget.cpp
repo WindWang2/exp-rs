@@ -1,10 +1,17 @@
 // src/agent/agent_copilot_dock_widget.cpp
 #include "agent_copilot_dock_widget.h"
+#include "active_view_host.h"
 #include "llm_settings_dialog.h"
 #include "workspace_snapshot.h"
 
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/json_params_converter.h"
+
+#include <qgsgeometry.h>
+#include <qgsmapcanvas.h>
+#include <qgspointxy.h>
+#include <qgsrectangle.h>
+#include <qgsrubberband.h>
 
 #include <QFrame>
 #include <QHBoxLayout>
@@ -146,6 +153,101 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, ActiveV
   m_viewHost = viewHost;
   m_workflowExecutor.setDataManager( dataManager );
   m_toolCallDispatcher.setDataManager( dataManager );
+  // Wire the agent→canvas write-back seam (ADR 0021 sibling). canvas: actions
+  // (draw_roi) run synchronously in-process and never reach Task Center.
+  m_toolCallDispatcher.setCanvasActionHandler(
+    [this]( const std::string &action, const Json::Value &args ) {
+      return handleCanvasAction( action, args );
+    } );
+}
+
+Json::Value AgentCopilotDockWidget::handleCanvasAction( const std::string &action,
+                                                        const Json::Value &arguments )
+{
+  Json::Value result( Json::objectValue );
+  result["action"] = action;
+
+  if ( action != "draw_roi" )
+  {
+    result["status"] = "error";
+    result["errorMessage"] = "Unknown canvas action: " + action +
+                             " (only 'draw_roi' is supported)";
+    return result;
+  }
+
+  if ( !m_viewHost || !m_viewHost->mapCanvas() )
+  {
+    result["status"] = "error";
+    result["errorMessage"] = "No active map canvas to draw on";
+    return result;
+  }
+
+  QgsMapCanvas *canvas = m_viewHost->mapCanvas();
+  // Drawing a QgsRubberBand mutates the QGraphicsScene, which is not
+  // thread-safe — canvas actions must run on the canvas's (GUI) thread.
+  if ( QThread::currentThread() != canvas->thread() )
+  {
+    result["status"] = "error";
+    result["errorMessage"] = "canvas: actions must run on the GUI thread";
+    return result;
+  }
+
+  const QgsCoordinateReferenceSystem crs = canvas->mapSettings().destinationCrs();
+  if ( !crs.isValid() )
+  {
+    result["status"] = "error";
+    result["errorMessage"] = "Canvas has no valid CRS; cannot place a ROI";
+    return result;
+  }
+
+  // Parse the ROI geometry: prefer a WKT `geometry` string; fall back to a
+  // `bbox` object {xmin, ymin, xmax, ymax} of numeric values. CRS is the canvas
+  // CRS by default (the agent reads it from the workspace snapshot).
+  QgsGeometry geom;
+  const Json::Value &geometryArg = arguments["geometry"];
+  const Json::Value &bboxArg = arguments["bbox"];
+  if ( geometryArg.isString() && !geometryArg.asString().empty() )
+  {
+    geom = QgsGeometry::fromWkt(
+      QString::fromStdString( geometryArg.asString() ) );
+  }
+  else if ( bboxArg.isObject() && bboxArg["xmin"].isNumeric() &&
+            bboxArg["ymin"].isNumeric() && bboxArg["xmax"].isNumeric() &&
+            bboxArg["ymax"].isNumeric() )
+  {
+    const QgsRectangle rect( bboxArg["xmin"].asDouble(), bboxArg["ymin"].asDouble(),
+                             bboxArg["xmax"].asDouble(), bboxArg["ymax"].asDouble() );
+    geom = QgsGeometry::fromRect( rect );
+  }
+
+  if ( geom.isNull() || geom.isEmpty() )
+  {
+    result["status"] = "error";
+    result["errorMessage"] =
+      "ROI geometry is missing or invalid; provide 'geometry' (WKT) or "
+      "'bbox' {xmin,ymin,xmax,ymax} (numbers) in canvas CRS";
+    return result;
+  }
+
+  // Replace any previous band: QgsRubberBand is a QGraphicsItem owned by the
+  // canvas scene (not QObject-parented), so it persists until explicitly
+  // removed — deleting the old band before drawing a new one keeps one ROI on
+  // screen and stops the scene accumulating stale items.
+  delete m_canvasRoiBand;
+  m_canvasRoiBand = new QgsRubberBand( canvas, Qgis::GeometryType::Polygon );
+  m_canvasRoiBand->setColor( QColor( 255, 80, 0, 120 ) );
+  m_canvasRoiBand->setStrokeColor( QColor( 255, 80, 0 ) );
+  m_canvasRoiBand->setToGeometry( geom, crs );
+  m_canvasRoiBand->show();
+  canvas->refresh();
+
+  // Store the ROI (WKT, canvas CRS) for later tool calls to consume.
+  m_lastCanvasRoiWkt = geom.asWkt();
+
+  result["status"] = "success";
+  result["geometry"] = m_lastCanvasRoiWkt.toStdString();
+  result["crs"] = crs.authid().toStdString();
+  return result;
 }
 
 void AgentCopilotDockWidget::onProviderChanged( int index )

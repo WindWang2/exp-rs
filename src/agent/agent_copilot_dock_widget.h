@@ -27,6 +27,7 @@ class DataManager;
 }
 
 class ActiveViewHost;
+class QgsRubberBand;
 
 namespace sicnu::agent
 {
@@ -72,6 +73,12 @@ class AgentCopilotDockWidget : public QDockWidget
     /// Registers a completion callback for a tool-call task; invokes it
     /// immediately when the task is already terminal.
     void watchToolCallCompletion( long taskId, processing::ToolCallDispatcher::CompletionCallback onComplete );
+    /// Handles a `canvas:` action (draw_roi). Draws a QgsRubberBand on the
+    /// active canvas and stores the ROI geometry (in canvas CRS) for later tool
+    /// calls to consume. Returns a result payload (status + WKT). The agent→
+    /// canvas write-back seam (ADR 0021 sibling); never routed through Task
+    /// Center. Defined in the .cpp so the header stays free of QGIS canvas deps.
+    Json::Value handleCanvasAction( const std::string &action, const Json::Value &arguments );
 
     data::DataManager *m_dataManager = nullptr;
     ActiveViewHost *m_viewHost = nullptr;
@@ -79,6 +86,15 @@ class AgentCopilotDockWidget : public QDockWidget
 
     processing::ToolCallDispatcher m_toolCallDispatcher;
     QMap<long, processing::ToolCallDispatcher::CompletionCallback> m_pendingToolCallCompletions;
+    /// Last ROI drawn by a canvas:draw_roi action, in canvas CRS (WKT). Cleared
+    /// on a new draw; read by later tool calls that consume the ROI. Empty when
+    /// no ROI has been drawn (or the active view has no canvas).
+    QString m_lastCanvasRoiWkt;
+    /// The rubber band currently showing the agent-drawn ROI on the canvas.
+    /// QgsRubberBand is a QGraphicsItem owned by the canvas scene (NOT QObject-
+    /// parented to the canvas), so we delete the previous band before drawing a
+    /// new one — otherwise stale ROIs accumulate in the scene.
+    QgsRubberBand *m_canvasRoiBand = nullptr;
 
     LlmStreamingClient *m_client = nullptr;
     QJsonArray m_messageHistory;
