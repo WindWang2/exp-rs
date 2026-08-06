@@ -7,6 +7,8 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/framework/rs_schema.h"
+#include "processing/framework/atomic_algorithm_adapter.h"
+#include "processing/framework/atomic_algorithm_registry.h"
 
 #include <atomic>
 #include <chrono>
@@ -143,6 +145,7 @@ struct EngineGuard
     eng.waitUntilIdleForTests( 15000 );
     eng.setListener( nullptr );
     eng.clearExecutors();
+    eng.setFallbackExecutor( {} );
   }
 
   JobEngine &engine() { return JobEngine::instance(); }
@@ -570,4 +573,116 @@ TEST_CASE( "prune never touches queued or running records", "[job]" )
     REQUIRE( sq.has_value() );
     REQUIRE( sq->state == JobState::Succeeded );
   }
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0062 — registry fallback seam (provider algorithms become executable).
+// ---------------------------------------------------------------------------
+namespace {
+
+/// Minimal AtomicAlgorithmAdapter for exercising the fallback seam without a
+/// real QgsProcessingAlgorithm. Records the params it ran with and whether the
+/// progress callback fired.
+class StubNonRsAdapter : public sicnu::processing::AtomicAlgorithmAdapter
+{
+  public:
+    explicit StubNonRsAdapter( std::string id ) : mId( std::move( id ) ) {}
+
+    std::string algorithmId() const override { return mId; }
+    sicnu::processing::AlgorithmDescriptor descriptor() const override
+    {
+      sicnu::processing::AlgorithmDescriptor d;
+      d.id = mId;
+      d.displayName = mId;
+      return d;
+    }
+
+    Json::Value execute( const Json::Value &params,
+                         sicnu::processing::ProgressCallback progressCb = nullptr ) override
+    {
+      mLastParams = params;
+      if ( progressCb )
+      {
+        progressCb( 50, "halfway" );
+        progressCb( 100, "done" );
+      }
+      Json::Value r( Json::objectValue );
+      r["echo"] = params.get( "x", 0 ).asInt();
+      r["output"] = "/tmp/stub_adapter.out";
+      return r;
+    }
+
+    const Json::Value &lastParams() const { return mLastParams; }
+
+  private:
+    std::string mId;
+    Json::Value mLastParams;
+};
+
+/// Mirrors the production injection in main.cpp: resolve an algorithm id via
+/// the AtomicAlgorithmRegistry and bridge progress back to the job context.
+void installRegistryFallback()
+{
+  sicnu::jobs::JobEngine::instance().setFallbackExecutor(
+    []( const sicnu::jobs::JobRequest &req, sicnu::operators::RSOperatorContext &ctx ) {
+      const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( req.algorithmId );
+      if ( !adapter )
+        throw std::runtime_error( "Unknown algorithm: " + req.algorithmId );
+      sicnu::processing::ProgressCallback bridge = [&ctx]( int percent, const std::string &message ) {
+        ctx.reportProgress( percent / 100.0, message );
+      };
+      return adapter->execute( req.params, bridge );
+    } );
+}
+
+} // namespace
+
+TEST_CASE( "fallback executor runs registry adapter when RSOperator misses", "[job][fallback]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+
+  const std::string algoId = "test:stub_adapter_" + std::to_string( std::chrono::steady_clock::now().time_since_epoch().count() );
+  auto stub = std::make_shared<StubNonRsAdapter>( algoId );
+  sicnu::processing::AtomicAlgorithmRegistry::instance().registerAdapter( stub );
+  installRegistryFallback();
+
+  JobRequest req;
+  req.algorithmId = algoId;
+  req.params["x"] = 7;
+  req.title = "stub";
+  req.source = "test";
+
+  const auto id = eng.submit( req );
+  eng.waitUntilIdleForTests();
+
+  auto snap = eng.snapshot( id );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Succeeded );
+  REQUIRE( snap->result["echo"].asInt() == 7 );
+  REQUIRE( snap->result["output"].asString() == "/tmp/stub_adapter.out" );
+  // Progress bridge wired QgsFeedback % into the job record.
+  REQUIRE( snap->progress == 1.0 );
+
+  sicnu::processing::AtomicAlgorithmRegistry::instance().unregisterAdapter( algoId );
+}
+
+TEST_CASE( "unknown algorithm still fails when fallback also misses", "[job][fallback]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  installRegistryFallback();
+
+  JobRequest req;
+  req.algorithmId = "test:definitely_nonexistent_algorithm";
+  req.title = "miss";
+  req.source = "test";
+
+  const auto id = eng.submit( req );
+  eng.waitUntilIdleForTests();
+
+  auto snap = eng.snapshot( id );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Failed );
+  REQUIRE( snap->error.find( "Unknown algorithm" ) != std::string::npos );
 }
