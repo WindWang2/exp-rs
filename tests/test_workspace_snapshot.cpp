@@ -166,12 +166,41 @@ TEST_CASE( "WorkspaceSnapshot - Pure C++ Serialization & Prompt Formatting", "[a
     snapshot.mapView.scale = 50000.0;
     snapshot.mapView.activeLayerName = QStringLiteral( "landsat_sample" );
 
+    // Active raster display: a 4-band composite (NIR/R/G) over a Real Data
+    // Range with a min/max stretch window. Covers #139.
+    auto &raster = snapshot.mapView.activeRaster;
+    raster.valid = true;
+    raster.renderer = QStringLiteral( "MultiBandColor" );
+    raster.redBand = 3;
+    raster.greenBand = 2;
+    raster.blueBand = 1;
+    raster.dataMin = 1.0;
+    raster.dataMax = 65535.0;
+    raster.stretchAlgorithm = QStringLiteral( "StretchToMinimumMaximum" );
+    raster.displayMin = 50.0;
+    raster.displayMax = 4000.0;
+
     QString prompt = snapshot.toSystemPromptHeader();
     REQUIRE( prompt.contains( QStringLiteral( "landsat_sample.tif" ) ) );
     REQUIRE( prompt.contains( QStringLiteral( "1024x768, 4 bands" ) ) );
     REQUIRE( prompt.contains( QStringLiteral( "- CRS: EPSG:32648" ) ) );
     REQUIRE( prompt.contains( QStringLiteral( "- Extent: 100.0,20.0,105.0,25.0" ) ) );
     REQUIRE( prompt.contains( QStringLiteral( "Selected Layer: landsat_sample" ) ) );
+    REQUIRE( prompt.contains( QStringLiteral( "Active Raster Display" ) ) );
+    REQUIRE( prompt.contains( QStringLiteral( "Bands: R=3 G=2 B=1" ) ) );
+    REQUIRE( prompt.contains( QStringLiteral( "Real Data Range: [1, 65535]" ) ) );
+    REQUIRE( prompt.contains( QStringLiteral( "Stretch: StretchToMinimumMaximum [50, 4000]" ) ) );
+  }
+
+  SECTION( "Inactive activeRaster renders no display block" )
+  {
+    sicnu::agent::WorkspaceSnapshot snapshot;
+    snapshot.mapView.activeLayerName = QStringLiteral( "a_vector_layer" );
+    // activeRaster left default (valid == false).
+
+    const QString prompt = snapshot.toSystemPromptHeader();
+    REQUIRE( prompt.contains( QStringLiteral( "Selected Layer: a_vector_layer" ) ) );
+    CHECK_FALSE( prompt.contains( QStringLiteral( "Active Raster Display" ) ) );
   }
 
   SECTION( "WorkspaceSnapshot::capture with null pointers produces empty snapshot" )
@@ -180,6 +209,7 @@ TEST_CASE( "WorkspaceSnapshot - Pure C++ Serialization & Prompt Formatting", "[a
     REQUIRE( snapshot.assets.isEmpty() );
     REQUIRE( snapshot.mapView.crsAuthId.isEmpty() );
     REQUIRE( snapshot.mapView.activeLayerName.isEmpty() );
+    CHECK_FALSE( snapshot.mapView.activeRaster.valid );
   }
 }
 
