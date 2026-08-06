@@ -352,7 +352,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         for ( auto it = accMap.constBegin(); it != accMap.constEnd(); ++it )
         {
             const quint32 segId = it.key();
-            buildStat( segId, it.value(), bboxMap[segId], perimeterMap.value( segId, 0 ) );
+            buildStat( segId, it.value(), bboxMap.value( segId ), perimeterMap.value( segId, 0 ) );
         }
     }
 
