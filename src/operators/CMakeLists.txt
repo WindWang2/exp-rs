@@ -58,6 +58,7 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_atmospheric_correction_operator.cpp
     rs/rs_radiometric_calibration_operator.cpp
     rs/rs_change_detection_operator.cpp
+    rs/rs_post_classification_change_operator.cpp
     rs/rs_image_fusion_operator.cpp
     rs/rs_qa_mask_operator.cpp
     rs/rs_apply_mask_operator.cpp

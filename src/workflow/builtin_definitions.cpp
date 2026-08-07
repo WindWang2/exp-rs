@@ -315,6 +315,8 @@ void registerBuiltinWorkflows( WorkflowRuntime &runtime )
                       "rs:band_math", "input", "请选择输入栅格" );
   registerAtomicTool( runtime, "tool.rs.change_detection", "变化检测",
                       "rs:change_detection", "before", "请选择变化前影像" );
+  registerAtomicTool( runtime, "tool.rs.post_classification_change", "后分类比较",
+                      "rs:post_classification_change", "before", "请选择变化前分类影像" );
   registerAtomicTool( runtime, "tool.rs.image_fusion", "影像融合",
                       "rs:image_fusion", "pan", "请选择全色影像" );
   registerAtomicTool( runtime, "tool.rs.mosaic", "镶嵌",

@@ -108,6 +108,7 @@ TEST_CASE("Native RS operators are registered", "[operators][rs]") {
     CHECK(registry.hasOperator("rs:atmospheric_correction"));
     CHECK(registry.hasOperator("rs:radiometric_calibration"));
     CHECK(registry.hasOperator("rs:change_detection"));
+    CHECK(registry.hasOperator("rs:post_classification_change"));
     CHECK(registry.hasOperator("rs:qa_mask"));
     CHECK(registry.hasOperator("rs:apply_mask"));
     CHECK(registry.hasOperator("rs:image_fusion"));
@@ -1591,5 +1592,168 @@ TEST_CASE("RS apply_mask rejects incompatible grids and missing NoData", "[opera
         REQUIRE_THROWS_WITH(op->run(params, ctx),
                             Catch::Matchers::ContainsSubstring("NoData"));
         CHECK_FALSE(QFile::exists(outputPath));
+    }
+}
+
+TEST_CASE("RS post-classification change builds the transition matrix", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString beforePath = tmp.path() + "/before_class.tif";
+    const QString afterPath = tmp.path() + "/after_class.tif";
+    const QString outputPath = tmp.path() + "/change_map.tif";
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+    // before:      after:
+    //  0 0 1 1      0 0 1 1
+    //  0 0 1 1      0 0 2 2     (1 -> 2 change in the bottom-right 2x2 of the
+    //  2 2 2 2      2 2 2 2      top band; everything else stable)
+    //  2 2 2 2      2 2 2 2
+    const std::vector<int32_t> beforeClasses = {
+        0, 0, 1, 1,  0, 0, 1, 1,  2, 2, 2, 2,  2, 2, 2, 2};
+    const std::vector<int32_t> afterClasses = {
+        0, 0, 1, 1,  0, 0, 2, 2,  2, 2, 2, 2,  2, 2, 2, 2};
+    std::vector<std::vector<float>> beforeBands(
+        1, std::vector<float>(W * H, 0.0f));
+    std::vector<std::vector<float>> afterBands(
+        1, std::vector<float>(W * H, 0.0f));
+    for (int i = 0; i < W * H; ++i) {
+        beforeBands[0][i] = static_cast<float>(beforeClasses[i]);
+        afterBands[0][i] = static_cast<float>(afterClasses[i]);
+    }
+    std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+    QString err;
+    REQUIRE(writeGdalOutput(beforePath, W, H, beforeBands, gt, "EPSG:32648", &err));
+    REQUIRE(writeGdalOutput(afterPath, W, H, afterBands, gt, "EPSG:32648", &err));
+
+    auto op = RSOperatorRegistry::instance().create("rs:post_classification_change");
+    REQUIRE(op != nullptr);
+
+    Json::Value params(Json::objectValue);
+    params["before"] = beforePath.toStdString();
+    params["after"] = afterPath.toStdString();
+    params["output"] = outputPath.toStdString();
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    REQUIRE(QFile::exists(outputPath));
+
+    // Auto class_count = max observed (2) + 1 = 3.
+    CHECK(result["classCount"].asInt() == 3);
+    REQUIRE(result["transitionMatrix"].size() == 3);
+    REQUIRE(result["transitionMatrix"][0].size() == 3);
+    CHECK(result["transitionMatrix"][0][0].asUInt64() == 4); // 0 -> 0
+    CHECK(result["transitionMatrix"][1][1].asUInt64() == 2); // 1 -> 1
+    CHECK(result["transitionMatrix"][1][2].asUInt64() == 2); // 1 -> 2 (changed)
+    CHECK(result["transitionMatrix"][2][2].asUInt64() == 8); // 2 -> 2
+    CHECK(result["changedPixels"].asUInt64() == 2);
+    CHECK(result["unchangedPixels"].asUInt64() == 14);
+    CHECK(result["totalPixels"].asUInt64() == 16);
+    CHECK(result["changedPercent"].asDouble() == Catch::Approx(12.5));
+
+    // Change map encodes before * classCount + after; the changed pixel at
+    // (row 1, col 3) is 1 * 3 + 2 = 5; the stable 2->2 pixels are 2*3+2 = 8.
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    CHECK(out.bandDataType(1) == GDT_UInt16);
+    std::vector<float> px(W * H);
+    REQUIRE(out.readBandData(1, px.data(), W, H));
+    CHECK(px[1 * W + 3] == Catch::Approx(5.0f));
+    CHECK(px[2 * W + 0] == Catch::Approx(8.0f));
+    bool hasNoData = false;
+    out.bandNoDataValue(1, &hasNoData);
+    CHECK(hasNoData);
+}
+
+TEST_CASE("RS post-classification change validates inputs", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString beforePath = tmp.path() + "/before_class.tif";
+    const QString afterPath = tmp.path() + "/after_class.tif";
+    const QString outputPath = tmp.path() + "/change_map.tif";
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+    std::vector<std::vector<float>> beforeBands(1, std::vector<float>(W * H, 1.0f));
+    std::vector<std::vector<float>> afterBands(1, std::vector<float>(W * H, 2.0f));
+    std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+    QString err;
+    REQUIRE(writeGdalOutput(beforePath, W, H, beforeBands, gt, "EPSG:32648", &err));
+    REQUIRE(writeGdalOutput(afterPath, W, H, afterBands, gt, "EPSG:32648", &err));
+
+    auto op = RSOperatorRegistry::instance().create("rs:post_classification_change");
+    REQUIRE(op != nullptr);
+
+    SECTION("class_count too small for the observed classes is rejected") {
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = outputPath.toStdString();
+        params["class_count"] = 2; // observed class 2 needs class_count >= 3
+
+        RSOperatorContext ctx;
+        REQUIRE_THROWS_WITH(op->run(params, ctx),
+                            Catch::Matchers::ContainsSubstring("class_count"));
+        CHECK_FALSE(QFile::exists(outputPath));
+    }
+
+    SECTION("differing pixel grids are rejected with an actionable error") {
+        const QString before30 = tmp.path() + "/before30.tif";
+        std::array<double, 6> gt30 = {500000, 30, 0, 4500000, 0, -30};
+        std::array<double, 6> gt60 = {500000, 60, 0, 4500000, 0, -60};
+        REQUIRE(writeGdalOutput(before30, W, H, beforeBands, gt30, "EPSG:32648", &err));
+        REQUIRE(writeGdalOutput(afterPath, 2, 2, afterBands, gt60, "EPSG:32648", &err));
+
+        Json::Value params(Json::objectValue);
+        params["before"] = before30.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = outputPath.toStdString();
+
+        RSOperatorContext ctx;
+        REQUIRE_THROWS_WITH(op->run(params, ctx),
+                            Catch::Matchers::ContainsSubstring("pixel grids"));
+        CHECK_FALSE(QFile::exists(outputPath));
+    }
+
+    SECTION("NoData pixels are excluded from the matrix and the change map") {
+        // before: left half 1.0 (declared NoData), right half 0.0 (valid);
+        // after: 2.0 everywhere. Only the right half counts (0 -> 2).
+        std::vector<std::vector<float>> mixedBands(
+            1, std::vector<float>(W * H, 0.0f));
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < W / 2; ++x)
+                mixedBands[0][y * W + x] = 1.0f;
+        REQUIRE(writeGdalOutput(beforePath, W, H, mixedBands, gt, "EPSG:32648", &err));
+
+        GDALDatasetH inDs = GDALOpenEx(beforePath.toUtf8().constData(),
+                                       GDAL_OF_RASTER | GDAL_OF_UPDATE,
+                                       nullptr, nullptr, nullptr);
+        REQUIRE(inDs != nullptr);
+        GDALSetRasterNoDataValue(GDALGetRasterBand(inDs, 1), 1.0);
+        GDALClose(inDs);
+
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = outputPath.toStdString();
+
+        RSOperatorContext ctx;
+        Json::Value result = op->run(params, ctx);
+        REQUIRE(QFile::exists(outputPath));
+        CHECK(result["totalPixels"].asUInt64() == 8);
+        CHECK(result["transitionMatrix"][0][2].asUInt64() == 8);
+
+        GdalDatasetWrapper out;
+        REQUIRE(out.open(outputPath));
+        std::vector<float> px(W * H);
+        REQUIRE(out.readBandData(1, px.data(), W, H));
+        for (int y = 0; y < H; ++y) {
+            for (int x = 0; x < W; ++x) {
+                const float expected = x < W / 2 ? 65535.0f : 2.0f; // NoData / code 0*3+2
+                CHECK(px[y * W + x] == Catch::Approx(expected));
+            }
+        }
     }
 }

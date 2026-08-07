@@ -12,6 +12,7 @@
 #include "rs_atmospheric_correction_operator.h"
 #include "rs_radiometric_calibration_operator.h"
 #include "rs_change_detection_operator.h"
+#include "rs_post_classification_change_operator.h"
 #include "rs_qa_mask_operator.h"
 #include "rs_apply_mask_operator.h"
 #include "rs_image_fusion_operator.h"
@@ -51,6 +52,7 @@ REGISTER_RS_OPERATOR(RsEndmemberExtractionOperator, "rs:endmember_extraction")
 REGISTER_RS_OPERATOR(RsAtmosphericCorrectionOperator, "rs:atmospheric_correction")
 REGISTER_RS_OPERATOR(RsRadiometricCalibrationOperator, "rs:radiometric_calibration")
 REGISTER_RS_OPERATOR(RsChangeDetectionOperator, "rs:change_detection")
+REGISTER_RS_OPERATOR(RsPostClassificationChangeOperator, "rs:post_classification_change")
 REGISTER_RS_OPERATOR(RsQaMaskOperator, "rs:qa_mask")
 REGISTER_RS_OPERATOR(RsApplyMaskOperator, "rs:apply_mask")
 REGISTER_RS_OPERATOR(RsImageFusionOperator, "rs:image_fusion")

@@ -222,6 +222,7 @@ TEST_CASE( "Builtin workflows registered", "[workflow]" )
   REQUIRE( rt.hasDefinition( "tool.rs.spectral_index" ) );
   REQUIRE( rt.hasDefinition( "tool.rs.band_math" ) );
   REQUIRE( rt.hasDefinition( "tool.rs.change_detection" ) );
+  REQUIRE( rt.hasDefinition( "tool.rs.post_classification_change" ) );
   REQUIRE( rt.hasDefinition( "tool.rs.image_fusion" ) );
   REQUIRE( rt.hasDefinition( "tool.rs.mosaic" ) );
   REQUIRE( rt.hasDefinition( "tool.rs.terrain_analysis" ) );
@@ -236,12 +237,12 @@ TEST_CASE( "Builtin workflows registered", "[workflow]" )
   REQUIRE( rt.hasDefinition( "classification_postprocess_merge" ) );
   // Reusable preprocessing DAG (B8/E1).
   REQUIRE( rt.hasDefinition( "lab.preprocess.optical" ) );
-  // registerBuiltinWorkflows (builtin_definitions.cpp) registers 15 atomic
+  // registerBuiltinWorkflows (builtin_definitions.cpp) registers 16 atomic
   // tools + 5 compound workflows (preprocess_optical, classify_supervised,
-  // georef_image_to_map, obia, classification_postprocess_merge) = 20. The
+  // georef_image_to_map, obia, classification_postprocess_merge) = 21. The
   // individual hasDefinition assertions above cover the actual set; keep this
   // count in sync with registerBuiltinWorkflows.
-  REQUIRE( rt.registeredDefinitionIds().size() == 20 );
+  REQUIRE( rt.registeredDefinitionIds().size() == 21 );
 
   const auto *d = rt.findDefinition( "tool.rs.spectral_index" );
   REQUIRE( d );

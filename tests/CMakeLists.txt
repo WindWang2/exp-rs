@@ -821,6 +821,23 @@ target_include_directories(test_change_detection PRIVATE
 )
 sicnu_discover_tests(test_change_detection)
 
+# Post-classification transition matrix kernel tests
+add_executable(test_post_classification_kernel test_post_classification_kernel.cpp)
+target_link_libraries(test_post_classification_kernel PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_post_classification_kernel PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_post_classification_kernel)
+
 # Mosaic tests
 add_executable(test_mosaic test_mosaic.cpp)
 target_link_libraries(test_mosaic PRIVATE
