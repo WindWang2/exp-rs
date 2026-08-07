@@ -227,17 +227,20 @@ TEST_CASE( "Builtin workflows registered", "[workflow]" )
   REQUIRE( rt.hasDefinition( "tool.rs.terrain_analysis" ) );
   REQUIRE( rt.hasDefinition( "tool.rs.pca" ) );
   REQUIRE( rt.hasDefinition( "tool.rs.atmospheric_correction" ) );
+  REQUIRE( rt.hasDefinition( "tool.rs.qa_mask" ) );
   // Workspace labs
   REQUIRE( rt.hasDefinition( "lab.classify.supervised" ) );
   REQUIRE( rt.hasDefinition( "lab.georef.image_to_map" ) );
   REQUIRE( rt.hasDefinition( "lab.obia" ) );
   REQUIRE( rt.hasDefinition( "classification_postprocess_merge" ) );
-  // registerBuiltinWorkflows (builtin_definitions.cpp) registers 13 atomic
-  // tools + 4 compound workflows (classify_supervised, georef_image_to_map,
-  // obia, classification_postprocess_merge) = 17. The individual
-  // hasDefinition assertions above cover the actual set; keep this count in
-  // sync with registerBuiltinWorkflows.
-  REQUIRE( rt.registeredDefinitionIds().size() == 17 );
+  // Reusable preprocessing DAG (B8/E1).
+  REQUIRE( rt.hasDefinition( "lab.preprocess.optical" ) );
+  // registerBuiltinWorkflows (builtin_definitions.cpp) registers 14 atomic
+  // tools + 5 compound workflows (preprocess_optical, classify_supervised,
+  // georef_image_to_map, obia, classification_postprocess_merge) = 19. The
+  // individual hasDefinition assertions above cover the actual set; keep this
+  // count in sync with registerBuiltinWorkflows.
+  REQUIRE( rt.registeredDefinitionIds().size() == 19 );
 
   const auto *d = rt.findDefinition( "tool.rs.spectral_index" );
   REQUIRE( d );
@@ -569,3 +572,26 @@ TEST_CASE( "WorkflowSession pipelineId binding stores pipeline reference in snap
   }
 }
 
+
+TEST_CASE( "Preprocessing DAG chains operators with artifact flow", "[workflow][preprocess]" )
+{
+  WorkflowRuntime rt;
+  const auto *d = rt.findDefinition( "lab.preprocess.optical" );
+  REQUIRE( d != nullptr );
+  REQUIRE( d->steps.size() == 4 );
+
+  CHECK( d->steps[0].operatorId == "rs:radiometric_calibration" );
+  CHECK( d->steps[1].operatorId == "rs:qa_mask" );
+  CHECK( d->steps[2].operatorId == "rs:atmospheric_correction" );
+  CHECK( d->steps[3].operatorId == "rs:spectral_index" );
+
+  // Downstream steps consume upstream artifacts via placeholders (ADR 0016).
+  CHECK( d->steps[1].params["input"].asString() == "$calibration.calibrated" );
+  CHECK( d->steps[2].params["input"].asString() == "$calibration.calibrated" );
+  CHECK( d->steps[3].params["input"].asString() == "$atmospheric.corrected" );
+
+  // The NDVI step omits band numbers: resolved from product semantic band
+  // roles (ADR 0065) when the raster carries SICNU_BAND_ROLE metadata.
+  CHECK_FALSE( d->steps[3].params.isMember( "nir" ) );
+  CHECK( d->steps[3].params["index"].asString() == "NDVI" );
+}
