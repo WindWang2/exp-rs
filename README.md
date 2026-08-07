@@ -4,23 +4,33 @@ Professional remote sensing analysis platform built on the QGIS engine. Pure C++
 
 ## Features
 
-- **Spectral Analysis:** NDVI, EVI, SAVI, NDWI, NDBI, MNDWI indices
+- **Product Import:** Sentinel-2 / Landsat / MODIS product recognition with automatic sensor, band-role, wavelength, and calibration-metadata discovery (unified product importer)
+- **Semantic Band Roles:** NDVI and friends resolve NIR/Red/SWIR by role (`SICNU_BAND_ROLE` metadata) instead of hard-coded band numbers; roles exposed to the Agent/MCP workspace
+- **Radiometric Calibration:** DN → radiance / TOA reflectance / brightness temperature with automatic MTL/MTD metadata detection
+- **QA / Cloud Masking:** `rs:qa_mask` (Landsat QA_PIXEL, Sentinel-2 SCL, generic bitmask) and `rs:apply_mask` (analysis-ready output with masked pixels set to NoData; same-CRS grids auto-align)
+- **Atmospheric Correction:** DOS1, DOS2, QUAC with metadata-resolved coefficients
+- **Geometric Processing:** Orthorectification (RPC/GCP + DEM), georeferencing with SIFT matching, reprojection with reference-grid alignment (`gdal:reproject` + `reference`)
+- **Spectral Analysis:** NDVI, EVI, SAVI, NDWI, NDBI, MNDWI indices; spectral library matching (SAM angle + SID), spectrum export to library
 - **Band Math:** Custom expression evaluation across raster bands
-- **Atmospheric Correction:** DOS1 and DOS2 methods
-- **Change Detection:** Multi-temporal image comparison
+- **Change Detection:** Difference / ratio / normalized difference / CVA, Otsu / percentile / manual thresholds, morphological cleanup, area statistics, and post-classification comparison with a per-class transition matrix
 - **Mosaic:** Raster mosaic with nodata handling
 - **Image Enhancement:** Contrast stretch, spatial filtering, speckle filtering (SAR)
 - **Image Fusion:** Brovey, IHS, PCA pan-sharpening
 - **Terrain Analysis:** Slope, aspect, hillshade, roughness, TRI, TPI
-- **Classification:** NormalBayes, SVM, K-Means with cross-validation
+- **Classification:** NormalBayes, SVM, K-Means with cross-validation; held-out accuracy (kappa, confusion matrix), per-class metrics, class-imbalance warnings, model metadata sidecar
+- **Hyperspectral:** MNF, PCA, SAM/SID classification, spectral unmixing, endmember extraction (PPI), RX anomaly detection, spectral resampling, continuum removal
 - **OBIA:** Object-based image analysis with OTB MeanShift segmentation
-- **Georeferencer:** GCP-based georeferencing with RPC support and SIFT matching
-- **Processing Toolbox:** 70+ algorithms (GDAL, OTB, QGIS native)
+- **Processing Toolbox:** 70+ algorithms (GDAL, OTB, QGIS native) over one shared Processing Registry — the same operators power the GUI, TaskCenter DAGs, CLI, and Agent/MCP
+- **Provenance:** derived-asset lineage in the Data Manager; every derived raster records source, operator, parameters, and time
 - **Layer Properties:** Raster and vector layer dialogs with statistics
 - **Measurement Tools:** Geodesic distance and area measurement
 - **Identify Tool:** Click-to-query pixel/feature values
 - **CRS Presets:** 36 common coordinate reference systems
 - **Logging:** Unified logging with file output option
+
+## Remote-Sensing Workflows
+
+The desktop UI is task-centric: **导入产品 → 辐射定标 → QA 掩膜 → 大气校正 → 网格对齐/正射 → 应用掩膜 → 分析就绪 → 指数/分类/融合/变化检测 → 后分类比较 → 谱学分析 → 溯源**, with a reusable preprocessing DAG (`lab.preprocess.optical`: calibration → QA mask → atmospheric correction → apply mask → NDVI). The same operators run through the Processing Toolbox, TaskCenter workflows, the CLI, and the Agent/MCP interface.
 
 ## Prerequisites
 
@@ -73,7 +83,7 @@ make -j$(nproc)
 QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 ```
 
-**1,138 tests** covering core algorithms, GDAL utilities, dialog UI, OBIA pipeline, TaskCenter DAG execution, and processing framework.
+**1,386 tests** covering core algorithms, GDAL utilities, dialog UI, OBIA pipeline, TaskCenter DAG execution, and processing framework.
 Headless CLI binary built at `sicnu_geo_rs_cli` with `--list` operator discovery and `--schema` inspection.
 
 ### Toolbox coverage gate
