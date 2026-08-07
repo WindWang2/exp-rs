@@ -17,6 +17,7 @@
 #include "dialogs/apply_mask_dialog.h"
 #include "dialogs/spectral_library_dialog.h"
 #include "widgets/spectral_profile_widget.h"
+#include "map_tools/rs_roi_spectrum_tool.h"
 #include "dialogs/radiometric_calibration_dialog.h"
 #include "dialogs/orthorectification_dialog.h"
 #include "dialogs/contrast_stretch_dialog.h"
@@ -284,6 +285,36 @@ void QgisDesktopWindow::openSpectralLibraryDialog()
                         m_spectralProfile->bandLabels());
     }
     dlg.exec();
+}
+
+void QgisDesktopWindow::activateRoiSpectrumTool()
+{
+    QgsRasterLayer *rasterLayer = findActiveRaster(this);
+    if (!rasterLayer)
+    {
+        QMessageBox::information(this, tr("ROI 均值谱"),
+                                 tr("请先选择一个栅格图层。"));
+        return;
+    }
+    if (!m_mapCanvas || !m_identifyTool)
+        return;
+
+    // The tool computes the ROI mean spectrum and reports it into the Spectral
+    // Profile dock; afterwards the canvas returns to the identify tool.
+    m_roiSpectrumTool.reset(new RsRoiSpectrumTool(
+      m_mapCanvas, rasterLayer,
+      [this](const QVector<double> &values, const QVector<double> &wavelengths,
+             const QVector<QString> &labels, const QString &layerName)
+      {
+        if (m_spectralProfile)
+          m_spectralProfile->setSpectrum(values, wavelengths, labels, layerName);
+        if (m_mapCanvas && m_identifyTool)
+          m_mapCanvas->setMapTool(m_identifyTool);
+        // Safe asynchronous deletion: we are inside the tool's own callback.
+        m_roiSpectrumTool.release()->deleteLater();
+      }));
+
+    m_mapCanvas->setMapTool(m_roiSpectrumTool.get());
 }
 
 // ---------------------------------------------------------------------------

@@ -39,6 +39,7 @@ class LayerTreeMenuProvider;
 class QgsBrowserDockWidget;
 class QgsBrowserGuiModel;
 class SpectralProfileWidget;
+class RsRoiSpectrumTool;
 class QgsGeoreferencerMainWindow;
 class QgsGeorefImageToMapWindow;
 class QgsClassificationMainWindow;
@@ -200,6 +201,7 @@ public:
     void openBandMathDialog();
     void openSpectralIndexDialog();
     void openSpectralLibraryDialog();
+    void activateRoiSpectrumTool();
     void openAtmosphericCorrectionDialog();
     void openQaMaskDialog();
     void openApplyMaskDialog();
@@ -372,6 +374,7 @@ private:
     QgsMapToolZoom *m_zoomInTool = nullptr;
     QgsMapToolZoom *m_zoomOutTool = nullptr;
     CustomIdentifyTool *m_identifyTool = nullptr;
+    std::unique_ptr<RsRoiSpectrumTool> m_roiSpectrumTool;
     MeasureTool *m_measureDistanceTool = nullptr;
     MeasureTool *m_measureAreaTool = nullptr;
     SwipeMapTool *m_swipeTool = nullptr;

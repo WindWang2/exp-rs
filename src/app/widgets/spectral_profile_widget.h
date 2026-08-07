@@ -39,6 +39,17 @@ public:
     void setProfile( const QgsPointXY &point, QgsRasterLayer *layer );
 
     /**
+     * Display a precomputed spectrum (e.g. an ROI mean spectrum from the
+     * SpectralRoiProfile kernel) in the same chart as a point profile.
+     * Wavelengths/labels shorter than values are dropped; an empty values
+     * vector clears the widget.
+     */
+    void setSpectrum( const QVector<double> &values,
+                      const QVector<double> &wavelengths = {},
+                      const QVector<QString> &labels = {},
+                      const QString &layerName = QString() );
+
+    /**
      * Clear the profile data and reset the widget to its empty state.
      */
     void clear();

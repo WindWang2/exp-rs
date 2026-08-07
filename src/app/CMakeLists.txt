@@ -136,6 +136,7 @@ add_executable(sicnu_geo_rs
     dialogs/extract_band_dialog.cpp
     layout/qgslayoutdesignerdialog.cpp
     map_tools/measure_tool.cpp
+    map_tools/rs_roi_spectrum_tool.cpp
     widgets/histogram_widget.cpp
     widgets/histogram_stretch_widget.cpp
     widgets/band_composition_rail.cpp

@@ -463,6 +463,9 @@ void QgisDesktopWindow::setupMenu()
     tip( spectralMenu->addAction( ic( "su_ervised" ), tr( "光谱库匹配..." ),
                                   this, &QgisDesktopWindow::openSpectralLibraryDialog ),
          tr( "把光谱剖面面板采集的像元谱与光谱库匹配（SAM 角 + SID），并可将当前谱保存入库。" ) );
+    tip( spectralMenu->addAction( ic( "sel_tool" ), tr( "ROI 均值谱..." ),
+                                  this, &QgisDesktopWindow::activateRoiSpectrumTool ),
+         tr( "在地图上画多边形 ROI，把区域内像元的均值谱显示到光谱剖面面板，供库匹配使用。" ) );
     tip( analysisMenu->addAction( ic( "ch_nge_detect" ), tr( "变化检测..." ),
                                   this, &QgisDesktopWindow::openChangeDetectionDialog ),
          tr( "双时相：差值 / 归一化差值 / 变化掩膜。" ) );

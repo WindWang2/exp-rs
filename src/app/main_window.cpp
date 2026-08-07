@@ -3,6 +3,7 @@
 #include "active_view_host.h"
 #include "project_context.h"
 #include "map_tools/map_tool_manager.h"
+#include "map_tools/rs_roi_spectrum_tool.h"
 #include "app_paths.h"
 #include "qgis_app_facade.h"
 

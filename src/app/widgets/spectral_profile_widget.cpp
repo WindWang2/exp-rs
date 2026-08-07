@@ -63,6 +63,21 @@ void SpectralProfileWidget::setProfile( const QgsPointXY &point, QgsRasterLayer 
     update();
 }
 
+void SpectralProfileWidget::setSpectrum( const QVector<double> &values,
+                                         const QVector<double> &wavelengths,
+                                         const QVector<QString> &labels,
+                                         const QString &layerName )
+{
+    // Display a precomputed spectrum (e.g. an ROI mean spectrum from the
+    // SpectralRoiProfile kernel) in the same chart as a point profile.
+    m_values = values;
+    m_wavelengths = wavelengths.size() == values.size() ? wavelengths : QVector<double>();
+    m_bandLabels = labels.size() == values.size() ? labels : QVector<QString>();
+    m_layerName = layerName;
+    m_hasData = !values.isEmpty();
+    update();
+}
+
 void SpectralProfileWidget::clear()
 {
     m_values.clear();

@@ -1,5 +1,6 @@
 // tests/test_spectral_profile_widget.cpp — Test SpectralProfileWidget dangling pointer fix
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <QApplication>
@@ -251,4 +252,32 @@ TEST_CASE("SpectralProfileWidget exposes WAVELENGTH metadata wavelengths", "[wid
 
         delete layer;
     }
+}
+
+TEST_CASE("SpectralProfileWidget displays a precomputed spectrum (ROI mean)", "[widget][spectral]") {
+    QgisFixture fixture;
+
+    SpectralProfileWidget widget;
+    CHECK_FALSE(widget.hasData());
+
+    widget.setSpectrum({0.1, 0.2, 0.3}, {500.0, 600.0, 700.0}, {"B2", "B4", "B8"}, "roi_layer");
+
+    CHECK(widget.hasData());
+    REQUIRE(widget.values().size() == 3);
+    CHECK(widget.values()[0] == Catch::Approx(0.1));
+    CHECK(widget.values()[2] == Catch::Approx(0.3));
+    REQUIRE(widget.wavelengths().size() == 3);
+    CHECK(widget.wavelengths()[1] == Catch::Approx(600.0));
+    REQUIRE(widget.bandLabels().size() == 3);
+    CHECK(widget.bandLabels()[0] == QStringLiteral("B2"));
+
+    // Mismatched auxiliary vectors are dropped without crashing.
+    widget.setSpectrum({0.5, 0.6}, {1.0}, {});
+    CHECK(widget.hasData());
+    CHECK(widget.wavelengths().isEmpty());
+    CHECK(widget.bandLabels().isEmpty());
+
+    // An empty spectrum clears the widget.
+    widget.setSpectrum({});
+    CHECK_FALSE(widget.hasData());
 }
