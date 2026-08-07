@@ -2799,6 +2799,19 @@ if(TARGET sicnu_operators)
   endif()
   sicnu_discover_tests(test_endmember_extraction)
 
+  # Spectral library domain tests - JSON round-trip, malformed input.
+  add_executable(test_spectral_library test_spectral_library.cpp)
+  target_link_libraries(test_spectral_library PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_processing
+  )
+  target_include_directories(test_spectral_library PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_spectral_library)
+
   # OpenCV-backed operators (only when OpenCV operators were compiled in)
   if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
     add_executable(test_opencv_operators test_opencv_operators.cpp)

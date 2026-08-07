@@ -25,6 +25,7 @@ add_library(sicnu_processing SHARED
     algorithms/spectral_anomaly.cpp
     algorithms/spectral_resampling.cpp
     algorithms/endmember_extraction.cpp
+    algorithms/spectral_library.cpp
     algorithms/vector_optimizer.cpp
     algorithms/satellite_products.cpp
 
