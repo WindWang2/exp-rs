@@ -111,6 +111,7 @@ add_executable(sicnu_geo_rs
     dialogs/atmospheric_dialog.cpp
     dialogs/qa_mask_dialog.cpp
     dialogs/radiometric_calibration_dialog.cpp
+    dialogs/orthorectification_dialog.cpp
     dialogs/product_import_dialog.cpp
     dialogs/crs_preset_dialog.cpp
     dialogs/preferences_dialog.cpp

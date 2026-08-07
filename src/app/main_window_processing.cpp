@@ -15,6 +15,7 @@
 #include "dialogs/atmospheric_dialog.h"
 #include "dialogs/qa_mask_dialog.h"
 #include "dialogs/radiometric_calibration_dialog.h"
+#include "dialogs/orthorectification_dialog.h"
 #include "dialogs/contrast_stretch_dialog.h"
 #include "dialogs/spatial_filter_dialog.h"
 #include "dialogs/speckle_filter_dialog.h"
@@ -225,6 +226,21 @@ void QgisDesktopWindow::openRadiometricCalibrationDialog()
         return;
     }
     openRasterDialog<RadiometricCalibrationDialog>(this, tr("辐射定标"), rasterLayer);
+}
+
+// ---------------------------------------------------------------------------
+// Orthorectification dialog
+// ---------------------------------------------------------------------------
+
+void QgisDesktopWindow::openOrthorectificationDialog()
+{
+    QgsRasterLayer *rasterLayer = findAnyRaster(this);
+    if (!rasterLayer) {
+        QMessageBox::information(this, tr("正射纠正"),
+                                 tr("请先选择一个栅格图层。"));
+        return;
+    }
+    openRasterDialog<OrthorectificationDialog>(this, tr("正射纠正"), rasterLayer);
 }
 
 // ---------------------------------------------------------------------------

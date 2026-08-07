@@ -385,6 +385,10 @@ void QgisDesktopWindow::setupMenu()
          tr( "源影像 + 主工程地图取点；支持 RPC Physical。" ) );
     preprocessMenu->addSeparator();
 
+    tip( preprocessMenu->addAction( ic( "geocorrection" ), tr( "正射纠正 (RPC/GCP)..." ),
+                                    this, &QgisDesktopWindow::openOrthorectificationDialog ),
+         tr( "基于 RPC/GCP 与可选 DEM 对影像做地形纠正（gdal:orthorectification）。" ) );
+
     tip( preprocessMenu->addAction( ic( "at_os_corr" ), tr( "大气校正..." ),
                                     this, &QgisDesktopWindow::openAtmosphericCorrectionDialog ),
          tr( "大气校正：DN→辐射、DOS1/DOS2。" ) );
