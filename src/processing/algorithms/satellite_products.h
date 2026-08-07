@@ -11,6 +11,8 @@
 #include <array>
 #include <functional>
 
+#include "data/band_role.h"
+
 namespace SatelliteProducts {
 
 enum class ProductType {
@@ -24,6 +26,8 @@ struct BandFile {
     QString path;       ///< Absolute path to band raster (or GDAL subdataset)
     QString name;       ///< Logical name e.g. "B4", "B8A", "sur_refl_b01"
     int wavelengthNm = 0; ///< Approximate centre wavelength (0 if N/A)
+    int fwhmNm = 0;       ///< Approximate full-width at half-maximum (0 if N/A)
+    sicnu::data::BandRole role = sicnu::data::BandRole::Unknown; ///< Semantic band role
     int sourceBand = 1;   ///< 1-based band index inside @a path (for multi-band files)
 };
 
@@ -153,6 +157,20 @@ QString productTypeName(ProductType type);
 
 /** Default optical band set for Landsat OLI (excludes thermal/QA). */
 QStringList defaultLandsatOpticalBands();
+
+/**
+ * Semantic role of a Landsat band name (B1..B11, QA_*, ST_*, SR_*), given the
+ * MTL SPACECRAFT_ID (e.g. "LANDSAT_8"). OLI (Landsat 8/9) and legacy TM/ETM
+ * (Landsat 4-7) band assignments differ (B1: Coastal vs Blue; B6/B7: SWIR vs
+ * Thermal). An unknown spacecraft defaults to the OLI layout.
+ */
+sicnu::data::BandRole landsatBandRole(const QString& bandName, const QString& spacecraft);
+
+/** Semantic role of a Sentinel-2 band name (B1..B12, B8A, SCL, MSK_*, ...). */
+sicnu::data::BandRole sentinel2BandRole(const QString& bandName);
+
+/** Semantic role of a MODIS band name (sur_refl_b01..b07, ...). */
+sicnu::data::BandRole modisBandRole(const QString& bandName);
 
 /** Default 10 m Sentinel-2 bands: B2 B3 B4 B8. */
 QStringList defaultSentinel2Bands10m();

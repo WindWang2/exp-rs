@@ -21,6 +21,8 @@
 #include <cstring>
 #include <vector>
 
+using sicnu::data::BandRole;
+
 namespace SatelliteProducts {
 namespace {
 
@@ -160,6 +162,82 @@ bool bandIsQa(const QString& name)
     return u.contains(QStringLiteral("QA")) || u.contains(QStringLiteral("SCL"))
            || u.contains(QStringLiteral("AOT")) || u.contains(QStringLiteral("WVP"))
            || u.contains(QStringLiteral("TCI")) || u.contains(QStringLiteral("MSK"));
+}
+
+BandRole landsatOliRole(const QString& bandName)
+{
+    // OLI (Landsat 8/9): B1 Coastal, B2 Blue, B3 Green, B4 Red, B5 NIR,
+    // B6 SWIR1, B7 SWIR2, B8 Pan, B9 Cirrus, B10/B11 Thermal
+    static const QMap<QString, BandRole> roles{
+        {QStringLiteral("B1"), BandRole::Coastal},
+        {QStringLiteral("B2"), BandRole::Blue},
+        {QStringLiteral("B3"), BandRole::Green},
+        {QStringLiteral("B4"), BandRole::Red},
+        {QStringLiteral("B5"), BandRole::NIR},
+        {QStringLiteral("B6"), BandRole::SWIR1},
+        {QStringLiteral("B7"), BandRole::SWIR2},
+        {QStringLiteral("B8"), BandRole::Panchromatic},
+        {QStringLiteral("B9"), BandRole::Cirrus},
+        {QStringLiteral("B10"), BandRole::Thermal},
+        {QStringLiteral("B11"), BandRole::Thermal},
+    };
+    return roles.value(bandName.toUpper(), BandRole::Unknown);
+}
+
+BandRole legacyLandsatRole(const QString& bandName)
+{
+    // TM/ETM (Landsat 4-7): B1 Blue, B2 Green, B3 Red, B4 NIR, B5 SWIR1,
+    // B6 Thermal, B7 SWIR2, B8 Pan (ETM+)
+    static const QMap<QString, BandRole> roles{
+        {QStringLiteral("B1"), BandRole::Blue},
+        {QStringLiteral("B2"), BandRole::Green},
+        {QStringLiteral("B3"), BandRole::Red},
+        {QStringLiteral("B4"), BandRole::NIR},
+        {QStringLiteral("B5"), BandRole::SWIR1},
+        {QStringLiteral("B6"), BandRole::Thermal},
+        {QStringLiteral("B7"), BandRole::SWIR2},
+        {QStringLiteral("B8"), BandRole::Panchromatic},
+    };
+    return roles.value(bandName.toUpper(), BandRole::Unknown);
+}
+
+int landsatFwhmNm(const QString& bandName, bool oli)
+{
+    if (oli) {
+        // Approximate OLI band widths (nm)
+        static const QMap<QString, int> fwhm{
+            {QStringLiteral("B1"), 20},  {QStringLiteral("B2"), 65},
+            {QStringLiteral("B3"), 60},  {QStringLiteral("B4"), 30},
+            {QStringLiteral("B5"), 77},  {QStringLiteral("B6"), 90},
+            {QStringLiteral("B7"), 180}, {QStringLiteral("B8"), 172},
+            {QStringLiteral("B9"), 30},  {QStringLiteral("B10"), 570},
+            {QStringLiteral("B11"), 690},
+        };
+        return fwhm.value(bandName.toUpper(), 0);
+    }
+    // Approximate TM/ETM band widths (nm)
+    static const QMap<QString, int> fwhm{
+        {QStringLiteral("B1"), 70},  {QStringLiteral("B2"), 80},
+        {QStringLiteral("B3"), 60},  {QStringLiteral("B4"), 140},
+        {QStringLiteral("B5"), 200}, {QStringLiteral("B6"), 2100},
+        {QStringLiteral("B7"), 260}, {QStringLiteral("B8"), 310},
+    };
+    return fwhm.value(bandName.toUpper(), 0);
+}
+
+int sentinelFwhmNm(const QString& bandName)
+{
+    // Approximate MSI band widths (nm)
+    static const QMap<QString, int> fwhm{
+        {QStringLiteral("B1"), 21},  {QStringLiteral("B2"), 66},
+        {QStringLiteral("B3"), 36},  {QStringLiteral("B4"), 31},
+        {QStringLiteral("B5"), 15},  {QStringLiteral("B6"), 15},
+        {QStringLiteral("B7"), 20},  {QStringLiteral("B8"), 106},
+        {QStringLiteral("B8A"), 21}, {QStringLiteral("B9"), 20},
+        {QStringLiteral("B10"), 30}, {QStringLiteral("B11"), 91},
+        {QStringLiteral("B12"), 175},
+    };
+    return fwhm.value(bandName.toUpper(), 0);
 }
 
 const BandFile* findBand(const QVector<BandFile>& bands, const QString& want)
@@ -354,6 +432,62 @@ QVector<BandFile> selectBands(const ProductInfo& product, const QStringList& ban
 }
 
 } // namespace
+
+sicnu::data::BandRole landsatBandRole(const QString& bandName, const QString& spacecraft)
+{
+    QString core = bandName.toUpper();
+    if (core.contains(QStringLiteral("QA")))
+        return sicnu::data::BandRole::QA;
+    // Discovery strips SR_/ST_ prefixes; tolerate them defensively here.
+    if (core.startsWith(QStringLiteral("SR_")) || core.startsWith(QStringLiteral("ST_")))
+        core = core.mid(3);
+    const QString sc = spacecraft.toUpper();
+    const bool oli = sc.contains(QStringLiteral("LANDSAT_8"))
+                     || sc.contains(QStringLiteral("LANDSAT_9"));
+    return oli ? landsatOliRole(core) : legacyLandsatRole(core);
+}
+
+sicnu::data::BandRole sentinel2BandRole(const QString& bandName)
+{
+    const QString u = bandName.toUpper();
+    if (u == QStringLiteral("SCL"))
+        return sicnu::data::BandRole::SceneClassification;
+    if (u.contains(QStringLiteral("MSK")) || u.contains(QStringLiteral("AOT"))
+        || u.contains(QStringLiteral("WVP")) || u.contains(QStringLiteral("CLDPRB"))
+        || u.contains(QStringLiteral("TCI")))
+        return sicnu::data::BandRole::QA;
+    static const QMap<QString, BandRole> roles{
+        {QStringLiteral("B1"), BandRole::Coastal},
+        {QStringLiteral("B2"), BandRole::Blue},
+        {QStringLiteral("B3"), BandRole::Green},
+        {QStringLiteral("B4"), BandRole::Red},
+        {QStringLiteral("B5"), BandRole::RedEdge},
+        {QStringLiteral("B6"), BandRole::RedEdge},
+        {QStringLiteral("B7"), BandRole::RedEdge},
+        {QStringLiteral("B8"), BandRole::NIR},
+        {QStringLiteral("B8A"), BandRole::NarrowNIR},
+        {QStringLiteral("B9"), BandRole::Unknown}, // water vapour, no spectral role
+        {QStringLiteral("B10"), BandRole::Cirrus},
+        {QStringLiteral("B11"), BandRole::SWIR1},
+        {QStringLiteral("B12"), BandRole::SWIR2},
+    };
+    return roles.value(u, BandRole::Unknown);
+}
+
+sicnu::data::BandRole modisBandRole(const QString& bandName)
+{
+    static const QRegularExpression bRe(
+        QStringLiteral(R"(b0?([1-7])$)"), QRegularExpression::CaseInsensitiveOption);
+    const auto m = bRe.match(bandName.trimmed());
+    if (!m.hasMatch())
+        return sicnu::data::BandRole::Unknown;
+    static const BandRole roles[] = {
+        BandRole::Unknown, BandRole::Red, BandRole::NIR, BandRole::Blue,
+        BandRole::Green, BandRole::SWIR1, BandRole::SWIR2, BandRole::SWIR2,
+    };
+    const int idx = m.captured(1).toInt();
+    return (idx >= 1 && idx <= 7) ? roles[idx] : BandRole::Unknown;
+}
 
 QString productTypeName(ProductType type)
 {
@@ -692,6 +826,11 @@ bool discoverLandsat(const QString& path, ProductInfo* out, QString* errorMessag
         return a.first < b.first;
     });
 
+    // OLI vs legacy TM/ETM decide band roles/FWHM (B1: Coastal vs Blue, ...).
+    const QString spacecraftU = out->spacecraft.toUpper();
+    const bool oliLandsat = spacecraftU.contains(QStringLiteral("LANDSAT_8"))
+                            || spacecraftU.contains(QStringLiteral("LANDSAT_9"));
+
     for (const auto& p : ordered) {
         const QString bandPath = rootDir.absoluteFilePath(p.second);
         if (!QFileInfo::exists(bandPath))
@@ -700,6 +839,8 @@ bool discoverLandsat(const QString& path, ProductInfo* out, QString* errorMessag
         bf.path = bandPath;
         bf.name = p.first;
         bf.wavelengthNm = landsatWavelength(p.first);
+        bf.fwhmNm = landsatFwhmNm(p.first, oliLandsat);
+        bf.role = landsatBandRole(p.first, out->spacecraft);
         out->bands.append(bf);
     }
 
@@ -722,6 +863,8 @@ bool discoverLandsat(const QString& path, ProductInfo* out, QString* errorMessag
             if (bf.name.startsWith(QStringLiteral("SR_")))
                 bf.name = bf.name.mid(3);
             bf.wavelengthNm = landsatWavelength(bf.name);
+            bf.fwhmNm = landsatFwhmNm(bf.name, oliLandsat);
+            bf.role = landsatBandRole(bf.name, out->spacecraft);
             out->bands.append(bf);
         }
     }
@@ -857,6 +1000,8 @@ bool discoverSentinel2(const QString& path, ProductInfo* out,
         bf.path = filePath;
         bf.name = bname;
         bf.wavelengthNm = sentinelWavelength(bname);
+        bf.fwhmNm = sentinelFwhmNm(bname);
+        bf.role = sentinel2BandRole(bname);
         // Prefer first match; overwrite only if current empty
         if (!byName.contains(bname))
             byName.insert(bname, bf);
@@ -1029,6 +1174,7 @@ bool discoverModis(const QString& path, ProductInfo* out, QString* errorMessage)
             BandFile bf;
             bf.path = subPath;
             bf.name = shortName;
+            bf.role = modisBandRole(shortName);
             // Rough MODIS land wavelengths for sur_refl_b0N
             static const QRegularExpression bRe(
                 QStringLiteral(R"(b0?([1-7])$)"), QRegularExpression::CaseInsensitiveOption);
@@ -1052,6 +1198,7 @@ bool discoverModis(const QString& path, ProductInfo* out, QString* errorMessage)
             const char* desc = band ? GDALGetDescription(band) : nullptr;
             bf.name = (desc && desc[0]) ? QString::fromUtf8(desc)
                                         : QStringLiteral("Band%1").arg(b);
+            bf.role = modisBandRole(bf.name);
             out->bands.append(bf);
         }
     }
@@ -1247,6 +1394,16 @@ bool stackToGeoTiff(const ProductInfo& product,
             std::snprintf(meta, sizeof(meta), "%d", selected[i].wavelengthNm);
             GDALSetMetadataItem(dstBand, "WAVELENGTH", meta, nullptr);
             GDALSetMetadataItem(dstBand, "WAVELENGTH_UNITS", "nm", nullptr);
+        }
+        if (selected[i].fwhmNm > 0) {
+            char fwhmMeta[64];
+            std::snprintf(fwhmMeta, sizeof(fwhmMeta), "%d", selected[i].fwhmNm);
+            GDALSetMetadataItem(dstBand, "FWHM", fwhmMeta, nullptr);
+        }
+        if (selected[i].role != BandRole::Unknown) {
+            const QByteArray roleId =
+                sicnu::data::bandRoleToString(selected[i].role).toUtf8();
+            GDALSetMetadataItem(dstBand, "SICNU_BAND_ROLE", roleId.constData(), nullptr);
         }
     }
 

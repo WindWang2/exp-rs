@@ -31,6 +31,7 @@ struct ChildBandInfo
   QString sourcePath;      ///< band's file path or GDAL subdataset string
   int sourceBand = 1;      ///< 1-based band index inside @a sourcePath
   int wavelengthNm = 0;    ///< Approximate centre wavelength (0 if unknown)
+  sicnu::data::BandRole role = sicnu::data::BandRole::Unknown; ///< Semantic band role
 
   friend bool operator==( const ChildBandInfo &, const ChildBandInfo & ) = default;
 };

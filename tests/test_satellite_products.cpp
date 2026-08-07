@@ -160,6 +160,15 @@ TEST_CASE("Landsat MTL discovery", "[satellite][landsat]")
     }
     REQUIRE(hasRed);
     REQUIRE(hasNir);
+    // Semantic roles follow the OLI layout (SPACECRAFT_ID = LANDSAT_8).
+    for (const auto& b : info.bands) {
+        if (b.name == QStringLiteral("B2"))
+            CHECK(b.role == sicnu::data::BandRole::Blue);
+        if (b.name == QStringLiteral("B4"))
+            CHECK(b.role == sicnu::data::BandRole::Red);
+        if (b.name == QStringLiteral("B5"))
+            CHECK(b.role == sicnu::data::BandRole::NIR);
+    }
 }
 
 TEST_CASE("Sentinel-2 SAFE discovery", "[satellite][sentinel2]")
@@ -175,6 +184,15 @@ TEST_CASE("Sentinel-2 SAFE discovery", "[satellite][sentinel2]")
     REQUIRE(info.type == SatelliteProducts::ProductType::Sentinel2);
     REQUIRE(info.processingLevel == QStringLiteral("L2A"));
     REQUIRE(info.bands.size() >= 4);
+    // Semantic roles from the MSI layout.
+    for (const auto& b : info.bands) {
+        if (b.name == QStringLiteral("B2"))
+            CHECK(b.role == sicnu::data::BandRole::Blue);
+        if (b.name == QStringLiteral("B4"))
+            CHECK(b.role == sicnu::data::BandRole::Red);
+        if (b.name == QStringLiteral("B8"))
+            CHECK(b.role == sicnu::data::BandRole::NIR);
+    }
 }
 
 TEST_CASE("Landsat stack to GeoTIFF", "[satellite][landsat]")
@@ -291,6 +309,13 @@ TEST_CASE("MODIS GeoTIFF discovery and stack with sinusoidal georef", "[satellit
     REQUIRE(info.modisTileH == 27);
     REQUIRE(info.modisTileV == 6);
     REQUIRE(info.bands.size() >= 3);
+    // MODIS land band roles (sur_refl_b01 = Red, b02 = NIR).
+    for (const auto& b : info.bands) {
+        if (b.name == QStringLiteral("sur_refl_b01"))
+            CHECK(b.role == sicnu::data::BandRole::Red);
+        if (b.name == QStringLiteral("sur_refl_b02"))
+            CHECK(b.role == sicnu::data::BandRole::NIR);
+    }
     REQUIRE(info.acquisitionDate.contains(QStringLiteral("2020")));
 
     REQUIRE(SatelliteProducts::stackToGeoTiff(
@@ -384,4 +409,115 @@ TEST_CASE("rs:modis_import and rs:modis_georeference operators", "[operators][mo
     REQUIRE(gr["tileH"].asInt() == 27);
     REQUIRE(gr["tileV"].asInt() == 6);
     REQUIRE(QFileInfo::exists(geo));
+}
+
+TEST_CASE("Band role tables (Landsat OLI/legacy, Sentinel-2, MODIS)", "[satellite][roles]")
+{
+    // Landsat OLI (8/9): B1 Coastal, B2 Blue, B3 Green, B4 Red, B5 NIR,
+    // B6 SWIR1, B7 SWIR2, B8 Pan, B9 Cirrus, B10/B11 Thermal, QA bands.
+    CHECK(SatelliteProducts::landsatBandRole("B1", "LANDSAT_8")
+          == sicnu::data::BandRole::Coastal);
+    CHECK(SatelliteProducts::landsatBandRole("B2", "LANDSAT_8")
+          == sicnu::data::BandRole::Blue);
+    CHECK(SatelliteProducts::landsatBandRole("B3", "LANDSAT_8")
+          == sicnu::data::BandRole::Green);
+    CHECK(SatelliteProducts::landsatBandRole("B4", "LANDSAT_8")
+          == sicnu::data::BandRole::Red);
+    CHECK(SatelliteProducts::landsatBandRole("B5", "LANDSAT_8")
+          == sicnu::data::BandRole::NIR);
+    CHECK(SatelliteProducts::landsatBandRole("B6", "LANDSAT_9")
+          == sicnu::data::BandRole::SWIR1);
+    CHECK(SatelliteProducts::landsatBandRole("B7", "LANDSAT_9")
+          == sicnu::data::BandRole::SWIR2);
+    CHECK(SatelliteProducts::landsatBandRole("B8", "LANDSAT_8")
+          == sicnu::data::BandRole::Panchromatic);
+    CHECK(SatelliteProducts::landsatBandRole("B9", "LANDSAT_8")
+          == sicnu::data::BandRole::Cirrus);
+    CHECK(SatelliteProducts::landsatBandRole("B10", "LANDSAT_8")
+          == sicnu::data::BandRole::Thermal);
+    CHECK(SatelliteProducts::landsatBandRole("QA_PIXEL", "LANDSAT_8")
+          == sicnu::data::BandRole::QA);
+    // Legacy TM/ETM (4-7): B1 Blue, B6 Thermal, B7 SWIR2.
+    CHECK(SatelliteProducts::landsatBandRole("B1", "LANDSAT_5")
+          == sicnu::data::BandRole::Blue);
+    CHECK(SatelliteProducts::landsatBandRole("B4", "LANDSAT_7")
+          == sicnu::data::BandRole::NIR);
+    CHECK(SatelliteProducts::landsatBandRole("B6", "LANDSAT_7")
+          == sicnu::data::BandRole::Thermal);
+    CHECK(SatelliteProducts::landsatBandRole("B7", "LANDSAT_5")
+          == sicnu::data::BandRole::SWIR2);
+
+    // Sentinel-2 MSI.
+    CHECK(SatelliteProducts::sentinel2BandRole("B1") == sicnu::data::BandRole::Coastal);
+    CHECK(SatelliteProducts::sentinel2BandRole("B2") == sicnu::data::BandRole::Blue);
+    CHECK(SatelliteProducts::sentinel2BandRole("B3") == sicnu::data::BandRole::Green);
+    CHECK(SatelliteProducts::sentinel2BandRole("B4") == sicnu::data::BandRole::Red);
+    CHECK(SatelliteProducts::sentinel2BandRole("B5") == sicnu::data::BandRole::RedEdge);
+    CHECK(SatelliteProducts::sentinel2BandRole("B7") == sicnu::data::BandRole::RedEdge);
+    CHECK(SatelliteProducts::sentinel2BandRole("B8") == sicnu::data::BandRole::NIR);
+    CHECK(SatelliteProducts::sentinel2BandRole("B8A") == sicnu::data::BandRole::NarrowNIR);
+    CHECK(SatelliteProducts::sentinel2BandRole("B10") == sicnu::data::BandRole::Cirrus);
+    CHECK(SatelliteProducts::sentinel2BandRole("B11") == sicnu::data::BandRole::SWIR1);
+    CHECK(SatelliteProducts::sentinel2BandRole("B12") == sicnu::data::BandRole::SWIR2);
+    CHECK(SatelliteProducts::sentinel2BandRole("SCL")
+          == sicnu::data::BandRole::SceneClassification);
+    CHECK(SatelliteProducts::sentinel2BandRole("MSK_CLDPRB_20m")
+          == sicnu::data::BandRole::QA);
+    CHECK(SatelliteProducts::sentinel2BandRole("B9") == sicnu::data::BandRole::Unknown);
+
+    // MODIS land bands.
+    CHECK(SatelliteProducts::modisBandRole("sur_refl_b01") == sicnu::data::BandRole::Red);
+    CHECK(SatelliteProducts::modisBandRole("sur_refl_b02") == sicnu::data::BandRole::NIR);
+    CHECK(SatelliteProducts::modisBandRole("sur_refl_b03") == sicnu::data::BandRole::Blue);
+    CHECK(SatelliteProducts::modisBandRole("sur_refl_b04") == sicnu::data::BandRole::Green);
+    CHECK(SatelliteProducts::modisBandRole("sur_refl_b05") == sicnu::data::BandRole::SWIR1);
+    CHECK(SatelliteProducts::modisBandRole("sur_refl_b06") == sicnu::data::BandRole::SWIR2);
+    CHECK(SatelliteProducts::modisBandRole("something_else") == sicnu::data::BandRole::Unknown);
+
+    // Identifier round-trips are case-insensitive and stable.
+    CHECK(sicnu::data::bandRoleFromString(
+              sicnu::data::bandRoleToString(sicnu::data::BandRole::RedEdge))
+          == sicnu::data::BandRole::RedEdge);
+    CHECK(sicnu::data::bandRoleFromString("RED_EDGE") == sicnu::data::BandRole::RedEdge);
+    CHECK(sicnu::data::bandRoleFromString("nope") == sicnu::data::BandRole::Unknown);
+    CHECK(sicnu::data::bandRoleToString(sicnu::data::BandRole::NarrowNIR)
+          == QStringLiteral("narrow_nir"));
+}
+
+TEST_CASE("Landsat stack writes band role and FWHM metadata", "[satellite][landsat]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString mtl = writeFakeLandsatScene(QDir(tmp.path()));
+    const QString out = tmp.filePath(QStringLiteral("landsat_roles.tif"));
+
+    SatelliteProducts::ProductInfo info;
+    REQUIRE(SatelliteProducts::discoverLandsat(mtl, &info));
+    QString err;
+    REQUIRE(SatelliteProducts::stackToGeoTiff(
+        info, {QStringLiteral("B4"), QStringLiteral("B5")}, out, &err));
+
+    GDALDatasetH ds = GDALOpen(out.toUtf8().constData(), GA_ReadOnly);
+    REQUIRE(ds != nullptr);
+    GDALRasterBandH red = GDALGetRasterBand(ds, 1);
+    GDALRasterBandH nir = GDALGetRasterBand(ds, 2);
+    REQUIRE(red != nullptr);
+    REQUIRE(nir != nullptr);
+
+    const char* redRole = GDALGetMetadataItem(red, "SICNU_BAND_ROLE", nullptr);
+    const char* nirRole = GDALGetMetadataItem(nir, "SICNU_BAND_ROLE", nullptr);
+    REQUIRE(redRole != nullptr);
+    REQUIRE(nirRole != nullptr);
+    CHECK(QString::fromUtf8(redRole) == QStringLiteral("red"));
+    CHECK(QString::fromUtf8(nirRole) == QStringLiteral("nir"));
+
+    // OLI FWHM: B4 = 30 nm, B5 = 77 nm.
+    const char* redFwhm = GDALGetMetadataItem(red, "FWHM", nullptr);
+    const char* nirFwhm = GDALGetMetadataItem(nir, "FWHM", nullptr);
+    REQUIRE(redFwhm != nullptr);
+    REQUIRE(nirFwhm != nullptr);
+    CHECK(QString::fromUtf8(redFwhm) == QStringLiteral("30"));
+    CHECK(QString::fromUtf8(nirFwhm) == QStringLiteral("77"));
+    GDALClose(ds);
 }

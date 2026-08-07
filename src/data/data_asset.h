@@ -16,6 +16,7 @@
 class QJsonObject;
 
 #include "asset_types.h"
+#include "band_role.h"
 #include "collection_types.h"
 #include "data_result.h"
 #include "source_descriptor.h"
@@ -103,6 +104,9 @@ struct RasterBandStructure
   QString dataType;
   std::optional<double> noDataValue;
   QString colorInterpretation;
+  /// Semantic role assigned by product discovery (stacked products carry it in
+  /// the `SICNU_BAND_ROLE` band metadata). Unknown for plain rasters.
+  BandRole role = BandRole::Unknown;
 
   friend bool operator==( const RasterBandStructure &, const RasterBandStructure & ) = default;
 };

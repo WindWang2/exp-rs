@@ -303,6 +303,19 @@ QString GdalDatasetWrapper::bandDescription(int bandNum) const
     return (desc && desc[0]) ? QString::fromUtf8(desc) : QString();
 }
 
+QString GdalDatasetWrapper::bandMetadataItem(int bandNum, const char *item) const
+{
+    if (!m_dataset || !item || !item[0] || bandNum < 1 || bandNum > bandCount())
+        return {};
+
+    GDALRasterBandH band = GDALGetRasterBand(static_cast<GDALDatasetH>(m_dataset), bandNum);
+    if (!band)
+        return {};
+
+    const char *value = GDALGetMetadataItem(band, item, nullptr);
+    return (value && value[0]) ? QString::fromUtf8(value) : QString();
+}
+
 QString GdalDatasetWrapper::lastError() const
 {
     return m_lastError;

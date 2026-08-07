@@ -408,6 +408,19 @@ TEST_CASE( "Real SatelliteProducts discoverer is wired and maps a SAFE product t
     CHECK( child.gridLabel == QStringLiteral( "10m" ) );
     CHECK_FALSE( child.bands.isEmpty() );
   }
+  // Each 10 m child is a single band; the semantic role discovered for the band
+  // is carried into the preview.
+  for ( const ChildCandidate &child : preview.children )
+  {
+    REQUIRE( child.bands.size() == 1 );
+    const ChildBandInfo &band = child.bands.first();
+    if ( band.name == QStringLiteral( "B2" ) )
+      CHECK( band.role == sicnu::data::BandRole::Blue );
+    if ( band.name == QStringLiteral( "B4" ) )
+      CHECK( band.role == sicnu::data::BandRole::Red );
+    if ( band.name == QStringLiteral( "B8" ) )
+      CHECK( band.role == sicnu::data::BandRole::NIR );
+  }
   CHECK( preview.metadata.platform.contains( QStringLiteral( "Sentinel-2" ) ) );
   CHECK( preview.metadata.processingLevel == QStringLiteral( "L2A" ) );
   // The integration probe is still read-only.

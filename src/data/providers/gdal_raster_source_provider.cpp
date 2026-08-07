@@ -11,6 +11,7 @@
 #include <cpl_conv.h>
 #include <gdal.h>
 
+#include "data/band_role.h"
 #include "gdal_runtime.h"
 
 namespace sicnu::data::providers
@@ -214,6 +215,11 @@ Result<internal::ResolvedSource> GdalRasterSourceProvider::resolve(
       bandStructure.noDataValue = noData;
     bandStructure.colorInterpretation = QString::fromUtf8(
       GDALGetColorInterpretationName( GDALGetRasterColorInterpretation( band ) ) );
+    // Product-stacked rasters carry the semantic role as band metadata; plain
+    // rasters leave it Unknown.
+    const char *roleItem = GDALGetMetadataItem( band, "SICNU_BAND_ROLE", nullptr );
+    if ( roleItem && roleItem[0] )
+      bandStructure.role = bandRoleFromString( QString::fromUtf8( roleItem ) );
     structure.bands.append( std::move( bandStructure ) );
   }
   resolved.structure = std::move( structure );

@@ -374,3 +374,37 @@ TEST_CASE( "Providers resolve only structural metadata, not statistics",
     CHECK_FALSE( diagnostic.code.contains( QStringLiteral( "histogram" ) ) );
   }
 }
+
+TEST_CASE( "Raster structure surfaces semantic band roles from product metadata",
+           "[data_source_providers]" )
+{
+  // A stacked product raster carries SICNU_BAND_ROLE band metadata; the GDAL
+  // provider maps it onto RasterBandStructure::role.
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString path = dir.path() + QStringLiteral( "/role_stack.tif" );
+
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  REQUIRE( driver != nullptr );
+  GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), 2, 2, 2, GDT_Float32, nullptr );
+  REQUIRE( ds != nullptr );
+  for ( int b = 1; b <= 2; ++b )
+  {
+    GDALRasterBandH band = GDALGetRasterBand( ds, b );
+    REQUIRE( band != nullptr );
+    float val = 1.0f;
+    REQUIRE( GDALRasterIO( band, GF_Write, 0, 0, 1, 1, &val, 1, 1, GDT_Float32, 0, 0 ) == CE_None );
+  }
+  GDALSetMetadataItem( GDALGetRasterBand( ds, 1 ), "SICNU_BAND_ROLE", "red", nullptr );
+  GDALSetMetadataItem( GDALGetRasterBand( ds, 2 ), "SICNU_BAND_ROLE", "nir", nullptr );
+  GDALClose( ds );
+
+  const GdalRasterSourceProvider provider;
+  const auto resolved = provider.resolve( gdalDescriptor( path ) );
+  REQUIRE( resolved );
+  const auto *structure = std::get_if<RasterStructure>( &resolved.value().structure );
+  REQUIRE( structure != nullptr );
+  REQUIRE( structure->bands.size() == 2 );
+  CHECK( structure->bands[0].role == sicnu::data::BandRole::Red );
+  CHECK( structure->bands[1].role == sicnu::data::BandRole::NIR );
+}

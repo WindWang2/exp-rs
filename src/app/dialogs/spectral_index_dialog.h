@@ -55,6 +55,9 @@ private:
     /// Band count for the currently selected input (asset snapshot or layer).
     int inputBandCount() const;
 
+    /// Raster path of the currently selected input (asset source or layer).
+    QString inputRasterPath() const;
+
     sicnu::data::DataManager *m_dataManager = nullptr;
 
     QComboBox *m_inputAssetCombo = nullptr;

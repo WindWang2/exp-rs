@@ -17,12 +17,48 @@
 #include <QTemporaryFile>
 
 #include "data/asset_types.h"
+#include "data/band_role.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
 #include "data/processing_asset_resolver.h"
 #include "operators/framework/asset_index_pipeline.h"
 #include "processing/framework/output_committer.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+
+namespace
+{
+
+/// Map of band number -> semantic role read from a raster's SICNU_BAND_ROLE
+/// product metadata (written by product stacking). Empty for plain rasters.
+QMap<int, sicnu::data::BandRole> readBandRoles( const QString &rasterPath, int bandCount )
+{
+  QMap<int, sicnu::data::BandRole> roles;
+  GdalDatasetWrapper ds;
+  if ( bandCount <= 0 || !ds.open( rasterPath ) )
+    return roles;
+  const int count = qMin( bandCount, ds.bandCount() );
+  for ( int b = 1; b <= count; ++b )
+  {
+    const QString id = ds.bandMetadataItem( b, "SICNU_BAND_ROLE" );
+    if ( !id.isEmpty() )
+      roles.insert( b, sicnu::data::bandRoleFromString( id ) );
+  }
+  return roles;
+}
+
+/// 0-based combo index of the first band carrying @a role, or -1 when absent.
+int comboIndexForRole( const QMap<int, sicnu::data::BandRole> &roles,
+                       sicnu::data::BandRole role )
+{
+  for ( auto it = roles.constBegin(); it != roles.constEnd(); ++it )
+  {
+    if ( it.value() == role )
+      return it.key() - 1;
+  }
+  return -1;
+}
+
+} // namespace
 
 SpectralIndexDialog::SpectralIndexDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
@@ -120,7 +156,8 @@ void SpectralIndexDialog::setupUi()
 
   qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
   qobject_cast<QVBoxLayout *>( sec->layout() )->addWidget(  SicnuUi::makeHintLabel(
-    sec, tr( "默认按 Landsat/Sentinel 常见顺序预填，请按实际数据核对波段。" ) ) );
+    sec, tr( "已导入的产品按语义波段角色自动匹配；普通栅格按 Landsat/Sentinel 常见顺序预填，"
+             "请按实际数据核对波段。" ) ) );
   mainLayout->addWidget( sec );
 
   setupOutputRow( mainLayout );
@@ -186,6 +223,25 @@ int SpectralIndexDialog::inputBandCount() const
   return 0;
 }
 
+QString SpectralIndexDialog::inputRasterPath() const
+{
+  if ( m_dataManager && m_inputAssetCombo->isVisible() && m_inputAssetCombo->count() > 0 )
+  {
+    const QString idText = m_inputAssetCombo->currentData().toString();
+    const auto assetId = sicnu::data::AssetId::fromString( idText );
+    if ( assetId )
+    {
+      const auto snapshot = m_dataManager->asset( *assetId );
+      if ( snapshot )
+        return snapshot->source().canonicalSource;
+    }
+    return {};
+  }
+  if ( m_rasterLayer && m_rasterLayer->isValid() )
+    return m_rasterLayer->source();
+  return {};
+}
+
 void SpectralIndexDialog::populateBandCombos()
 {
   const int bandCount = inputBandCount();
@@ -198,9 +254,22 @@ void SpectralIndexDialog::populateBandCombos()
   m_blueCombo->clear();
   m_swirCombo->clear();
 
+  // Semantic roles of the input's bands (band number -> role), read from the
+  // SICNU_BAND_ROLE product metadata written by product stacking. Empty for
+  // plain rasters, which fall back to the legacy positional mapping.
+  const QMap<int, sicnu::data::BandRole> roleByBand =
+    readBandRoles( inputRasterPath(), bandCount );
+
   for ( int i = 1; i <= bandCount; ++i )
   {
     QString bandName = tr( "波段 %1" ).arg( i );
+    const auto roleIt = roleByBand.constFind( i );
+    if ( roleIt != roleByBand.constEnd() && *roleIt != sicnu::data::BandRole::Unknown )
+    {
+      const QString roleName = sicnu::data::bandRoleDisplayName( *roleIt );
+      if ( !roleName.isEmpty() )
+        bandName = tr( "波段 %1 (%2)" ).arg( i ).arg( roleName );
+    }
     m_nirCombo->addItem( bandName, i );
     m_redCombo->addItem( bandName, i );
     m_greenCombo->addItem( bandName, i );
@@ -208,16 +277,35 @@ void SpectralIndexDialog::populateBandCombos()
     m_swirCombo->addItem( bandName, i );
   }
 
-  // Default Landsat/Sentinel-style mapping
-  if ( bandCount >= 4 )
+  if ( roleByBand.isEmpty() )
   {
-    m_nirCombo->setCurrentIndex( 3 );
-    m_redCombo->setCurrentIndex( 2 );
-    m_greenCombo->setCurrentIndex( 1 );
-    m_blueCombo->setCurrentIndex( 0 );
+    // Default Landsat/Sentinel-style positional mapping
+    if ( bandCount >= 4 )
+    {
+      m_nirCombo->setCurrentIndex( 3 );
+      m_redCombo->setCurrentIndex( 2 );
+      m_greenCombo->setCurrentIndex( 1 );
+      m_blueCombo->setCurrentIndex( 0 );
+    }
+    if ( bandCount >= 5 )
+      m_swirCombo->setCurrentIndex( 4 );
+    return;
   }
-  if ( bandCount >= 5 )
-    m_swirCombo->setCurrentIndex( 4 );
+
+  auto selectRoleIn = [&]( QComboBox *combo, sicnu::data::BandRole role, int fallbackIndex ) {
+    const int index = comboIndexForRole( roleByBand, role );
+    combo->setCurrentIndex( index >= 0 ? index : fallbackIndex );
+  };
+
+  selectRoleIn( m_nirCombo, sicnu::data::BandRole::NIR, bandCount >= 4 ? 3 : 0 );
+  selectRoleIn( m_redCombo, sicnu::data::BandRole::Red, bandCount >= 4 ? 2 : 0 );
+  selectRoleIn( m_greenCombo, sicnu::data::BandRole::Green, bandCount >= 4 ? 1 : 0 );
+  selectRoleIn( m_blueCombo, sicnu::data::BandRole::Blue, bandCount >= 4 ? 0 : 0 );
+  // NDBI/MNDWI conventionally use SWIR1; fall back to SWIR2.
+  int swirIndex = comboIndexForRole( roleByBand, sicnu::data::BandRole::SWIR1 );
+  if ( swirIndex < 0 )
+    swirIndex = comboIndexForRole( roleByBand, sicnu::data::BandRole::SWIR2 );
+  m_swirCombo->setCurrentIndex( swirIndex >= 0 ? swirIndex : ( bandCount >= 5 ? 4 : 0 ) );
 }
 
 void SpectralIndexDialog::updateBandVisibility()

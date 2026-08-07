@@ -297,6 +297,81 @@ TEST_CASE("RS spectral index NDVI execution", "[operators][rs]") {
     CHECK(out[0] == Catch::Approx(1.0f / 3.0f).epsilon(0.001));
 }
 
+TEST_CASE("RS spectral index resolves bands from product roles", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/role_input.tif";
+
+    constexpr int W = 8;
+    constexpr int H = 8;
+    std::vector<std::vector<float>> bands(5);
+    for (auto &b : bands) b.assign(W * H, 0.0f);
+    for (size_t i = 0; i < W * H; ++i) {
+        bands[0][i] = 50.0f;  // Red  (role -> band 1)
+        bands[1][i] = 100.0f; // NIR  (role -> band 2)
+        bands[2][i] = 100.0f; // NIR  (second NIR role)
+        bands[4][i] = 150.0f; // SWIR1 (role -> band 5)
+    }
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    // Stamp semantic band roles like a stacked product output. Roles point at
+    // bands 1/2 for NIR/Red — deliberately NOT the positional defaults 4/3 —
+    // so a positional fallback would compute 0/0 instead of the expected 1/3.
+    {
+        GDALDatasetH ds = GDALOpen(inputPath.toUtf8().constData(), GA_Update);
+        REQUIRE(ds != nullptr);
+        GDALSetMetadataItem(GDALGetRasterBand(ds, 1), "SICNU_BAND_ROLE", "red", nullptr);
+        GDALSetMetadataItem(GDALGetRasterBand(ds, 2), "SICNU_BAND_ROLE", "nir", nullptr);
+        GDALSetMetadataItem(GDALGetRasterBand(ds, 3), "SICNU_BAND_ROLE", "nir", nullptr);
+        GDALSetMetadataItem(GDALGetRasterBand(ds, 5), "SICNU_BAND_ROLE", "swir1", nullptr);
+        GDALClose(ds);
+    }
+
+    auto op = RSOperatorRegistry::instance().create("rs:spectral_index");
+    REQUIRE(op != nullptr);
+
+    SECTION("NDVI resolves NIR/Red from roles when band params are omitted") {
+        const QString outputPath = tmp.path() + "/role_ndvi.tif";
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["output"] = outputPath.toStdString();
+        params["index"] = "NDVI";
+        // No nir/red params: resolved from the SICNU_BAND_ROLE metadata.
+
+        RSOperatorContext ctx;
+        Json::Value result = op->run(params, ctx);
+        CHECK(result["output"].asString() == outputPath.toStdString());
+        CHECK(QFile::exists(outputPath));
+
+        GdalDatasetWrapper ds;
+        REQUIRE(ds.open(outputPath));
+        std::vector<float> out(W * H);
+        REQUIRE(ds.readBandData(1, out.data(), W, H));
+        // NDVI = (band2 NIR 100 - band1 Red 50) / (100 + 50) = 1/3.
+        CHECK(out[0] == Catch::Approx(1.0f / 3.0f).epsilon(0.001));
+    }
+
+    SECTION("NDBI resolves SWIR1 role and explicit params still win") {
+        const QString outputPath = tmp.path() + "/role_ndbi.tif";
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["output"] = outputPath.toStdString();
+        params["index"] = "NDBI";
+
+        RSOperatorContext ctx;
+        Json::Value result = op->run(params, ctx);
+        CHECK(QFile::exists(outputPath));
+
+        GdalDatasetWrapper ds;
+        REQUIRE(ds.open(outputPath));
+        std::vector<float> out(W * H);
+        REQUIRE(ds.readBandData(1, out.data(), W, H));
+        // NDBI = (SWIR1 150 - NIR 100) / (150 + 100) = 0.2.
+        CHECK(out[0] == Catch::Approx(0.2f).epsilon(0.001));
+    }
+}
+
 TEST_CASE("RS band math operator execution", "[operators][rs]") {
     QTemporaryDir tmp;
     REQUIRE(tmp.isValid());

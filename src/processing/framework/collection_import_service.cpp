@@ -141,6 +141,7 @@ Result<ImportPreview> CollectionImportService::probe( const QString &source )
       info.sourcePath = band.path;
       info.sourceBand = band.sourceBand;
       info.wavelengthNm = band.wavelengthNm;
+      info.role = band.role;
       candidate.bands.append( info );
     }
     preview.children.append( candidate );

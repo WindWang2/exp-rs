@@ -3571,6 +3571,34 @@ target_include_directories(test_collection_import_service PRIVATE
 )
 sicnu_discover_tests(test_collection_import_service)
 
+# Satellite product discovery/import tests (Landsat / Sentinel-2 / MODIS) —
+# discovery, stacking, semantic band-role metadata, and the import operators.
+# This file was previously an orphan (registered in no target); registered here
+# so the discovery + stacking + role-metadata coverage actually runs.
+add_executable(test_satellite_products test_satellite_products.cpp)
+target_link_libraries(test_satellite_products PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_satellite_products PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_satellite_products PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_satellite_products PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_satellite_products PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_satellite_products PRIVATE jsoncpp)
+endif()
+sicnu_discover_tests(test_satellite_products)
+
 # Landsat import dialog tests - probe-preview-commit transaction (headless)
 add_executable(test_landsat_import_dialog
   test_landsat_import_dialog.cpp

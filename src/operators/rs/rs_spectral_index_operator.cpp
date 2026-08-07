@@ -3,6 +3,7 @@
  ***************************************************************************/
 #include "rs_spectral_index_operator.h"
 
+#include "data/band_role.h"
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -32,11 +33,11 @@ Json::Value RsSpectralIndexOperator::schema() const {
     props["input"] = makeRasterParam("input", "Input multi-band raster");
     props["output"] = makeOutputParam("output", "Output single-band index raster", "tif");
     props["index"] = makeEnumParam("index", "Spectral index to compute", s_indices, "NDVI");
-    props["nir"] = makeIntegerParam("nir", "1-based NIR band number", 4);
-    props["red"] = makeIntegerParam("red", "1-based Red band number", 3);
-    props["green"] = makeIntegerParam("green", "1-based Green band number", 2);
-    props["blue"] = makeIntegerParam("blue", "1-based Blue band number", 1);
-    props["swir"] = makeIntegerParam("swir", "1-based SWIR band number", 5);
+    props["nir"] = makeIntegerParam("nir", "1-based NIR band number (optional; when omitted, resolved from the input's product band roles)", 4);
+    props["red"] = makeIntegerParam("red", "1-based Red band number (optional; when omitted, resolved from the input's product band roles)", 3);
+    props["green"] = makeIntegerParam("green", "1-based Green band number (optional; when omitted, resolved from the input's product band roles)", 2);
+    props["blue"] = makeIntegerParam("blue", "1-based Blue band number (optional; when omitted, resolved from the input's product band roles)", 1);
+    props["swir"] = makeIntegerParam("swir", "1-based SWIR band number (optional; when omitted, resolved from the input's product band roles)", 5);
 
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeRasterParam("output", "Output raster path");
@@ -61,7 +62,9 @@ Json::Value RsSpectralIndexOperator::metadata() const {
     meta["purpose"] = "Derive vegetation, water, or built-up indices from multispectral imagery.";
     meta["prerequisites"].append("Input raster must have sufficient bands for the selected index.");
     meta["workflowHints"].append("Apply atmospheric correction before computing indices for best results.");
-    meta["limitations"].append("Band numbers are 1-based and must exist in the input raster.");
+    meta["limitations"].append("Band numbers are 1-based and must exist in the input raster. When a band "
+                               "parameter is omitted, it is resolved from the input's SICNU_BAND_ROLE "
+                               "product metadata (semantic band roles) instead of the positional default.");
     return meta;
 }
 
@@ -81,11 +84,19 @@ Json::Value RsSpectralIndexOperator::run(const Json::Value& params,
                               "Input raster not found: " + inputPath);
     }
 
-    const int nirBand = getInt(params, "nir", 4);
-    const int redBand = getInt(params, "red", 3);
-    const int greenBand = getInt(params, "green", 2);
-    const int blueBand = getInt(params, "blue", 1);
-    const int swirBand = getInt(params, "swir", 5);
+    // Explicit band parameters win; when omitted, bands are resolved from the
+    // input's semantic band roles (SICNU_BAND_ROLE product metadata).
+    const bool hasNir = params.isMember("nir");
+    const bool hasRed = params.isMember("red");
+    const bool hasGreen = params.isMember("green");
+    const bool hasBlue = params.isMember("blue");
+    const bool hasSwir = params.isMember("swir");
+
+    const int nirExplicit = getInt(params, "nir", 4);
+    const int redExplicit = getInt(params, "red", 3);
+    const int greenExplicit = getInt(params, "green", 2);
+    const int blueExplicit = getInt(params, "blue", 1);
+    const int swirExplicit = getInt(params, "swir", 5);
 
     ensureGdalInit();
 
@@ -98,6 +109,51 @@ Json::Value RsSpectralIndexOperator::run(const Json::Value& params,
     const int width = ds.width();
     const int height = ds.height();
     const int bandCount = ds.bandCount();
+
+    // 1-based band number carrying @a role, or 0 when the input has no such
+    // role (plain rasters without product metadata return 0).
+    auto bandWithRole = [&](sicnu::data::BandRole role) {
+        const QByteArray roleId = sicnu::data::bandRoleToString(role).toLatin1();
+        for (int b = 1; b <= bandCount; ++b) {
+            if (ds.bandMetadataItem(b, "SICNU_BAND_ROLE") == QLatin1String(roleId))
+                return b;
+        }
+        return 0;
+    };
+
+    int nirBand = nirExplicit;
+    int redBand = redExplicit;
+    int greenBand = greenExplicit;
+    int blueBand = blueExplicit;
+    int swirBand = swirExplicit;
+    if (!hasNir) {
+        nirBand = bandWithRole(sicnu::data::BandRole::NIR);
+        if (nirBand <= 0)
+            nirBand = 4;
+    }
+    if (!hasRed) {
+        redBand = bandWithRole(sicnu::data::BandRole::Red);
+        if (redBand <= 0)
+            redBand = 3;
+    }
+    if (!hasGreen) {
+        greenBand = bandWithRole(sicnu::data::BandRole::Green);
+        if (greenBand <= 0)
+            greenBand = 2;
+    }
+    if (!hasBlue) {
+        blueBand = bandWithRole(sicnu::data::BandRole::Blue);
+        if (blueBand <= 0)
+            blueBand = 1;
+    }
+    if (!hasSwir) {
+        // NDBI/MNDWI conventionally use SWIR1; fall back to SWIR2.
+        swirBand = bandWithRole(sicnu::data::BandRole::SWIR1);
+        if (swirBand <= 0)
+            swirBand = bandWithRole(sicnu::data::BandRole::SWIR2);
+        if (swirBand <= 0)
+            swirBand = 5;
+    }
 
     auto validateBand = [&](int bandNum, const std::string& label) {
         if (bandNum < 1 || bandNum > bandCount) {

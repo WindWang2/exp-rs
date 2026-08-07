@@ -217,6 +217,15 @@ public:
      */
     QString bandDescription(int bandNum) const;
 
+    /**
+     * Get a metadata item of a band (e.g. "WAVELENGTH", "FWHM",
+     * "SICNU_BAND_ROLE"). Returns an empty string if the item is absent, the
+     * band is invalid, or the dataset is not open.
+     * @param bandNum 1-based band number
+     * @param item    metadata item name
+     */
+    QString bandMetadataItem(int bandNum, const char *item) const;
+
     /// Get the last error message (empty if no error).
     QString lastError() const;
 
