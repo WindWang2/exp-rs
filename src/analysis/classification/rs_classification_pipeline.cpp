@@ -322,6 +322,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     result.featuresExtracted = ex.featuresRead;
     result.trainSamples = ex.X.rows;
     result.classCount = static_cast<int>( ex.classCounts.size() );
+    result.trainSamplesByClass = ex.classCounts;
 
     cv::Mat trainX = ex.X;
     cv::Mat trainY = ex.y;

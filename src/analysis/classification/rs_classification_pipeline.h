@@ -79,6 +79,9 @@ struct QGIS_ANALYSIS_EXPORT RsClassificationPipelineResult
     int trainSamples = 0;
     int classCount = 0;
     int featuresExtracted = 0;
+    /// Per-class training sample counts (classId -> samples), from the raw
+    /// extraction (before any holdout split). Empty in predict-only mode.
+    QHash<int, int> trainSamplesByClass;
     /// Confusion matrix + Kappa + per-class P/R/F1, populated when
     /// Config.testX / testY are non-empty. KMeans uses Hungarian-remapped
     /// cluster IDs so labels align with ROI class IDs.

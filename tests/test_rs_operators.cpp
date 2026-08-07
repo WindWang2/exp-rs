@@ -1082,6 +1082,59 @@ TEST_CASE("RS supervised classification testSplit returns accuracy", "[operators
     CHECK(result["confusionMatrix"].size() == 2);
     CHECK(result["confusionMatrix"][0].size() == 2);
     CHECK(QFile::exists(outputPath));
+
+    // Professional outputs: per-class validation metrics + sample counts.
+    REQUIRE(result.isMember("perClassMetrics"));
+    REQUIRE(result["perClassMetrics"].size() == 2);
+    CHECK(result["perClassMetrics"][0]["f1"].asDouble() == Catch::Approx(1.0));
+    REQUIRE(result.isMember("trainSamplesByClass"));
+    REQUIRE(result["trainSamplesByClass"].size() == 2);
+    CHECK(result["trainSamplesByClass"][0]["classId"].asInt() != result["trainSamplesByClass"][1]["classId"].asInt());
+    // Balanced fixture: no imbalance warnings.
+    CHECK_FALSE(result.isMember("imbalanceWarnings"));
+}
+
+TEST_CASE("RS supervised classification reports class-imbalance warnings", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString trainingPath = tmp.path() + "/imbalanced.gpkg";
+    const QString outputPath = tmp.path() + "/map.tif";
+
+    // Imbalanced but separable raster: the bottom row is dark (class 1), the
+    // other 15 rows are bright (class 2) -> 16 vs 240 training samples.
+    constexpr int W = 16;
+    constexpr int H = 16;
+    std::vector<std::vector<float>> bands(2, std::vector<float>(W * H, 100.0f));
+    for (int x = 0; x < W; ++x)
+    {
+        bands[0][(H - 1) * W + x] = 10.0f;
+        bands[1][(H - 1) * W + x] = 10.0f;
+    }
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    // Class 1 covers one raster row (16 px); class 2 covers the other 15 rows
+    // (240 px) -> a ~6.7% ratio that must trigger an imbalance warning.
+    writeTestVector(trainingPath, QStringLiteral("class_id"), 1, 0, -16, 16, -15);
+    writeTestVector(trainingPath, QStringLiteral("class_id"), 2, 0, -15, 16, 0, true);
+
+    auto op = RSOperatorRegistry::instance().create("rs:supervised_classification");
+    REQUIRE(op != nullptr);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["training"] = trainingPath.toStdString();
+    params["classField"] = "class_id";
+    params["testSplit"] = 0.3;
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    REQUIRE(result.isMember("trainSamplesByClass"));
+    REQUIRE(result.isMember("imbalanceWarnings"));
+    REQUIRE(result["imbalanceWarnings"].size() >= 1);
+    CHECK(result["imbalanceWarnings"][0].asString().find("Class 1") != std::string::npos);
+    CHECK(QFile::exists(outputPath));
 }
 
 TEST_CASE("RS supervised classification rejects out-of-range testSplit", "[operators][rs]") {

@@ -32,12 +32,14 @@
 
 #include <QString>
 #include <QVector>
+#include <QList>
 
 #include <gdal.h>
 #include <ogr_api.h>
 
 #include <opencv2/core.hpp>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -145,6 +147,12 @@ Json::Value RsSupervisedClassificationOperator::schema() const {
         "overallAccuracy", "Held-out overall accuracy (only when testSplit > 0)", 0.0);
     outputs["kappa"] = makeNumberParam(
         "kappa", "Held-out Cohen's kappa (only when testSplit > 0)", 0.0);
+    outputs["perClassMetrics"] = makeStringParam(
+        "perClassMetrics", "Per-class validation metrics (producer/user accuracy, F1)", "");
+    outputs["trainSamplesByClass"] = makeStringParam(
+        "trainSamplesByClass", "Per-class training sample counts", "");
+    outputs["imbalanceWarnings"] = makeStringParam(
+        "imbalanceWarnings", "Class-imbalance warnings (classes under 10% of the largest)", "");
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
     root["required"] = makeRequired({"input", "output"});
@@ -266,6 +274,45 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
     result["width"] = width;
     result["height"] = height;
     result["featuresExtracted"] = res.featuresExtracted;
+    if ( !res.trainSamplesByClass.isEmpty() )
+    {
+        // Per-class training sample counts + class-imbalance warnings
+        // (classes with < 10% of the largest class's samples).
+        Json::Value byClass(Json::arrayValue);
+        int maxSamples = 0;
+        for ( int count : res.trainSamplesByClass )
+            maxSamples = std::max( maxSamples, count );
+        QList<int> ids = res.trainSamplesByClass.keys();
+        std::sort( ids.begin(), ids.end() );
+        for ( int id : ids )
+        {
+            Json::Value entry(Json::objectValue);
+            entry["classId"] = id;
+            entry["samples"] = res.trainSamplesByClass.value( id );
+            byClass.append( entry );
+        }
+        result["trainSamplesByClass"] = byClass;
+        if ( res.trainSamplesByClass.size() > 1 && maxSamples >= 20 )
+        {
+            Json::Value warnings(Json::arrayValue);
+            for ( int id : ids )
+            {
+                const int count = res.trainSamplesByClass.value( id );
+                if ( count < 0.1 * maxSamples )
+                {
+                    warnings.append(
+                        ( "Class " + std::to_string( id ) + " has only " +
+                          std::to_string( count ) + " training samples vs " +
+                          std::to_string( maxSamples ) + " for the largest class (" +
+                          std::to_string( static_cast<int>( 100.0 * count / maxSamples ) ) +
+                          "%); accuracy for this class may be unreliable. Consider "
+                          "collecting more samples." ) );
+                }
+            }
+            if ( !warnings.empty() )
+                result["imbalanceWarnings"] = warnings;
+        }
+    }
     if (predictOnly)
         result["modelIn"] = modelIn;
     if (!modelOut.empty())
@@ -285,6 +332,18 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
         for (int id : res.accuracy.classIds)
             classes.append(id);
         result["confusionClasses"] = classes;
+        // Per-class validation metrics (producer's / user's accuracy, F1).
+        Json::Value perClass(Json::arrayValue);
+        for (int id : res.accuracy.classIds)
+        {
+            Json::Value entry(Json::objectValue);
+            entry["classId"] = id;
+            entry["producerAccuracy"] = res.accuracy.producerAcc.value( id, 0.0 );
+            entry["userAccuracy"] = res.accuracy.userAcc.value( id, 0.0 );
+            entry["f1"] = res.accuracy.f1.value( id, 0.0 );
+            perClass.append( entry );
+        }
+        result["perClassMetrics"] = perClass;
     }
     return result;
 }
