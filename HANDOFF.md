@@ -1,7 +1,7 @@
 # HANDOFF — Autonomous RS System Perfection (/goal) — Optical Platform Session
 
 **Date:** 2026-08-08
-**Mode:** FULL_AUTONOMOUS_LOOP — 35 committed vertical slices (ADR 0065–0097)
+**Mode:** FULL_AUTONOMOUS_LOOP — 37 committed vertical slices + F-hardening (ADR 0065–0098)
 **Scope:** Deepen `exp-rs` toward the general-purpose optical/multispectral/
 hyperspectral processing platform (mission: product import → calibration →
 QA masking → atmospheric correction → geometric/grid → analysis-ready →
@@ -48,15 +48,17 @@ analysis → accuracy → provenance, all through the Processing Registry).
 | 33 | Reusable align-and-compare change detection DAG (`lab.change.align_difference`: reproject-reference → difference) | `c19177769f` | 0095 |
 | 34 | Wavelength-aware library matching (`matchSpectrum` resamples onto the entry grid when band counts differ; dialog passes profile wavelengths) | `61926df67a` | 0096 |
 | 35 | ROI mean-spectrum tool (`RsRoiSpectrumTool` polygon → dock; `SpectralProfileWidget::setSpectrum`; completes spectral input side) | `19d6d4f594` | 0097 |
+| 36 | Test hardening: TaskCenter cancel-timing tests no longer flaky under -j8 load (10s poll budgets) | `82620d02e9` | — |
+| 37 | F review: shared `processing::gridFromDataset` — de-duplicated 4 identical grid builders | `553bb3d1fe` | 0098 |
 | + | Full-suite regression fix (GDAL driver registration in a provider test) | `bae3a3eae0` | — |
 
 ## 2. Verification
 
 - **Full clean rebuild: 0 errors** (all targets, incl. the whole test suite).
-- **ctest: 1393 tests, 100% passed after rerun** (2 pre-existing TaskCenter
-  cancel-timing tests are flaky under full `-j8` load and pass on rerun; they
-  are unrelated to the optical-platform slices). 6 pre-existing vector
-  fixtures remain SKIPPED (removed from VCS). Suite is green.
+- **ctest: 1393 tests, 100% passed** after hardening the two TaskCenter
+  cancel-timing tests that flaked under `-j8` load (they now poll with 10s
+  budgets and pass consistently). 6 pre-existing vector fixtures remain
+  SKIPPED (removed from VCS). Suite is green.
 - Every new slice shipped with its own Catch2 tests (kernel + operator /
   UI-seam level); the operator registry tests pin the expanded surface.
 - The orphaned `test_gdal_ortho_operators` file (registered in no target) was
