@@ -10,6 +10,7 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/change_detection.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_grid_compat.h"
 
 #include <QString>
 
@@ -45,24 +46,6 @@ ChangeDetection::MorphOp morphOpFromName(const std::string& name)
     if (name == "open") return ChangeDetection::MorphOp::Open;
     if (name == "close") return ChangeDetection::MorphOp::Close;
     return ChangeDetection::MorphOp::None;
-}
-
-/// Builds the grid description a raster must satisfy for pixel comparison.
-sicnu::data::RasterGrid gridFromDataset(const GdalDatasetWrapper& ds)
-{
-    sicnu::data::RasterGrid grid;
-    grid.crsWkt = ds.projection();
-    grid.hasGeoTransform = ds.hasGeoTransform();
-    grid.geoTransform = ds.geoTransform();
-    grid.width = ds.width();
-    grid.height = ds.height();
-    for (int b = 1; b <= ds.bandCount(); ++b) {
-        bool hasNoData = false;
-        const double noData = ds.bandNoDataValue(b, &hasNoData);
-        grid.bandNoData.append(hasNoData ? std::optional<double>(noData)
-                                         : std::nullopt);
-    }
-    return grid;
 }
 
 } // anonymous namespace
@@ -176,7 +159,8 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
     // comparable and pass as compatible; the dimension check below remains the
     // fallback for them.
     const sicnu::data::GridCompatReport gridReport =
-        sicnu::data::compareGrids(gridFromDataset(beforeDs), gridFromDataset(afterDs));
+        sicnu::data::compareGrids(sicnu::processing::gridFromDataset(beforeDs),
+                                  sicnu::processing::gridFromDataset(afterDs));
     for (const sicnu::data::GridCompatIssue& issue : gridReport.issues) {
         if (issue.blocking) {
             throw RSOperatorError(ErrorCode::InvalidInputData, issue.message.toStdString());

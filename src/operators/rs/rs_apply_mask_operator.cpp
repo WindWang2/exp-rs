@@ -9,6 +9,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_grid_compat.h"
 
 #include <QString>
 
@@ -30,25 +31,6 @@ namespace {
 /// Block height for the streaming apply pass. Bounds memory to
 /// O(width * blockRows * 2 floats) regardless of raster height.
 constexpr int kBlockRows = 256;
-
-/// Builds a RasterGrid for a dataset (pure, opens nothing).
-data::RasterGrid gridFromDataset(const GdalDatasetWrapper& ds)
-{
-    data::RasterGrid grid;
-    grid.crsWkt = ds.projection();
-    grid.hasGeoTransform = ds.hasGeoTransform();
-    grid.geoTransform = ds.geoTransform();
-    grid.width = ds.width();
-    grid.height = ds.height();
-    const int bandCount = ds.bandCount();
-    for (int b = 1; b <= bandCount; ++b) {
-        bool hasNoData = false;
-        const double noData = ds.bandNoDataValue(b, &hasNoData);
-        grid.bandNoData.append(hasNoData ? std::optional<double>(noData)
-                                         : std::nullopt);
-    }
-    return grid;
-}
 
 /// Maps an input-grid pixel (px, py) to a mask-grid pixel coordinate using the
 /// inverse of the mask's affine transform. Returns {-1, -1} when the mapping
@@ -208,8 +190,8 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
     // Grid compatibility (shared service, ADR-0065 / A4): same-CRS grid
     // differences can be auto-aligned with nearest-neighbor sampling; CRS
     // mismatches are never auto-corrected here.
-    const data::RasterGrid inputGrid = gridFromDataset(input);
-    const data::RasterGrid maskGrid = gridFromDataset(mask);
+    const data::RasterGrid inputGrid = sicnu::processing::gridFromDataset(input);
+    const data::RasterGrid maskGrid = sicnu::processing::gridFromDataset(mask);
     const data::GridCompatReport report = data::compareGrids(inputGrid, maskGrid);
 
     bool aligned = false;

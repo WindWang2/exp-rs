@@ -4,6 +4,7 @@
 #include "core/sicnu_logging.h"
 #include "data/raster_grid_compat.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_grid_compat.h"
 
 #include <cmath>
 #include <algorithm>
@@ -642,23 +643,9 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
     // resolutions are the point of the method (MS is resampled onto the pan
     // grid below). So resolution differences are allowed and logged; any other
     // blocking grid issue fails with an actionable message.
-    auto gridFromDataset = []( const GdalDatasetWrapper &ds ) {
-        sicnu::data::RasterGrid grid;
-        grid.crsWkt = ds.projection();
-        grid.hasGeoTransform = ds.hasGeoTransform();
-        grid.geoTransform = ds.geoTransform();
-        grid.width = ds.width();
-        grid.height = ds.height();
-        for ( int b = 1; b <= ds.bandCount(); ++b )
-        {
-            bool hasNoData = false;
-            const double noData = ds.bandNoDataValue( b, &hasNoData );
-            grid.bandNoData.append( hasNoData ? std::optional<double>( noData ) : std::nullopt );
-        }
-        return grid;
-    };
     const sicnu::data::GridCompatReport gridReport =
-        sicnu::data::compareGrids( gridFromDataset( panDataset ), gridFromDataset( msDataset ) );
+        sicnu::data::compareGrids( sicnu::processing::gridFromDataset( panDataset ),
+                                   sicnu::processing::gridFromDataset( msDataset ) );
     for ( const sicnu::data::GridCompatIssue &issue : gridReport.issues )
     {
         if ( issue.verdict == sicnu::data::GridCompatVerdict::PixelSizeMismatch )

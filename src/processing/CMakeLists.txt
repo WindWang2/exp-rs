@@ -4,6 +4,7 @@ add_library(sicnu_processing SHARED
     tools/cli_tool_discovery.cpp
 
     gdal/gdal_dataset_wrapper.cpp
+    gdal/gdal_grid_compat.cpp
     gdal/gdal_async_reader.cpp
     gdal/gdal_block_stream.cpp
     gdal/gdal_error_handler.cpp
@@ -15,6 +16,7 @@ add_library(sicnu_processing SHARED
     algorithms/radiometric_calibration.cpp
     algorithms/change_detection.cpp
     algorithms/post_classification.cpp
+    gdal/gdal_grid_compat.cpp
     algorithms/qa_mask.cpp
     algorithms/math_utils.cpp
     algorithms/mosaic.cpp
