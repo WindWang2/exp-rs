@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QTemporaryDir>
 #include <QFile>
+#include <QTextStream>
 
 #include <json/json.h>
 
@@ -230,6 +231,98 @@ TEST_CASE("RS radiometric calibration auto-detects a sibling MTL", "[operators][
     REQUIRE(ds.readBandData(1, out.data(), 2, 2));
     CHECK(out[0] == Catch::Approx(1.0f).epsilon(1e-3f)); // 0.01*100 via auto-detected MTL
     CHECK(out[3] == Catch::Approx(0.8f).epsilon(1e-3f)); // 0.01*80
+}
+
+TEST_CASE("RS atmospheric correction resolves gain/bias from sibling MTL", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    // Band 1 is described as B4; its radiance coefficients live in a sibling
+    // MTL. The operator must resolve them without explicit gain/bias params.
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString outputPath = tmp.path() + "/corrected.tif";
+    const QString mtlPath = tmp.path() + "/LC08_L1TP_MTL.txt";
+
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+    GDALDatasetH srcDs = createOutputTiff(inputPath, 2, 1, 1, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+    std::vector<float> dn = {100.0f, 200.0f};
+    REQUIRE(GDALRasterIO(GDALGetRasterBand(srcDs, 1), GF_Write, 0, 0, 2, 1,
+                         dn.data(), 2, 1, GDT_Float32, 0, 0) == CE_None);
+    GDALSetDescription(GDALGetRasterBand(srcDs, 1), "B4");
+    GDALClose(srcDs);
+
+    {
+        QFile mtl(mtlPath);
+        REQUIRE(mtl.open(QIODevice::WriteOnly | QIODevice::Text));
+        QTextStream ts(&mtl);
+        ts << "SPACECRAFT_ID = \"LANDSAT_8\"\n"
+           << "SUN_ELEVATION = 45.0\n"
+           << "RADIANCE_MULT_BAND_4 = 0.01\n"
+           << "RADIANCE_ADD_BAND_4 = 0.0\n";
+    }
+
+    auto op = RSOperatorRegistry::instance().create("rs:atmospheric_correction");
+    REQUIRE(op != nullptr);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["band"] = 1;
+    params["method"] = "dn_to_radiance";
+    // No gain/bias/metadata_path: resolved from the sibling MTL.
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+
+    CHECK(result["output"].asString() == outputPath.toStdString());
+    CHECK(result["method"].asString() == "dn_to_radiance");
+    CHECK(QFile::exists(outputPath));
+
+    GdalDatasetWrapper ds;
+    REQUIRE(ds.open(outputPath));
+    std::vector<float> out(2);
+    REQUIRE(ds.readBandData(1, out.data(), 2, 1));
+    CHECK(out[0] == Catch::Approx(1.0f).epsilon(1e-3f)); // 0.01*100
+    CHECK(out[1] == Catch::Approx(2.0f).epsilon(1e-3f)); // 0.01*200
+}
+
+TEST_CASE("RS atmospheric correction explicit gain/bias still win", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString outputPath = tmp.path() + "/corrected.tif";
+
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+    GDALDatasetH srcDs = createOutputTiff(inputPath, 2, 1, 1, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+    std::vector<float> dn = {100.0f, 200.0f};
+    REQUIRE(GDALRasterIO(GDALGetRasterBand(srcDs, 1), GF_Write, 0, 0, 2, 1,
+                         dn.data(), 2, 1, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(srcDs);
+
+    auto op = RSOperatorRegistry::instance().create("rs:atmospheric_correction");
+    REQUIRE(op != nullptr);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["band"] = 1;
+    params["method"] = "dn_to_radiance";
+    params["gain"] = 0.5;
+    params["bias"] = 1.0;
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    CHECK(QFile::exists(outputPath));
+
+    GdalDatasetWrapper ds;
+    REQUIRE(ds.open(outputPath));
+    std::vector<float> out(2);
+    REQUIRE(ds.readBandData(1, out.data(), 2, 1));
+    CHECK(out[0] == Catch::Approx(51.0f).epsilon(1e-3f)); // 0.5*100 + 1
+    CHECK(out[1] == Catch::Approx(101.0f).epsilon(1e-3f)); // 0.5*200 + 1
 }
 
 TEST_CASE("RS spectral index operator schema and metadata", "[operators][rs]") {

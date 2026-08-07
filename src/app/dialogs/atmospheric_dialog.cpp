@@ -12,6 +12,11 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QMessageBox>
+#include <QFileInfo>
+#include <QMap>
+
+#include "processing/algorithms/radiometric_calibration.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 AtmosphericDialog::AtmosphericDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
@@ -24,6 +29,7 @@ void AtmosphericDialog::setRasterLayer( QgsRasterLayer *layer )
 {
   RasterProcessingDialogBase::setRasterLayer( layer );
   populateBandCombo();
+  refreshMetadata();
 }
 
 void AtmosphericDialog::setupUi()
@@ -81,21 +87,105 @@ void AtmosphericDialog::setupUi()
   SicnuDialogHelp::tip( m_airmassSpin, tr( "气团（仅 DOS2），通常≥1。" ) );
   form->addRow( m_airmassLabel, m_airmassSpin );
 
+  m_metadataStatusLabel = new QLabel( sec );
+  m_metadataStatusLabel->setWordWrap( true );
+  m_metadataStatusLabel->setStyleSheet( QStringLiteral( "color: #666;" ) );
+  form->addRow( QString(), m_metadataStatusLabel );
+
   qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( form );
   mainLayout->addWidget( sec );
   setupOutputRow( mainLayout );
   setupButtonBar( mainLayout );
   mainLayout->addStretch( 1 );
+
+  // Manual coefficient edits override the auto-resolved values.
+  connect( m_gainSpin, QOverload<double>::of( &QDoubleSpinBox::valueChanged ),
+           this, &AtmosphericDialog::onCoefficientChanged );
+  connect( m_biasSpin, QOverload<double>::of( &QDoubleSpinBox::valueChanged ),
+           this, &AtmosphericDialog::onCoefficientChanged );
 }
 
 void AtmosphericDialog::populateBandCombo()
 {
+  m_bandCombo->blockSignals( true );
   m_bandCombo->clear();
+  if ( m_rasterLayer && m_rasterLayer->isValid() )
+  {
+    const int bandCount = m_rasterLayer->bandCount();
+    for ( int i = 1; i <= bandCount; ++i )
+      m_bandCombo->addItem( tr( "波段 %1" ).arg( i ), i );
+  }
+  m_bandCombo->blockSignals( false );
+  refreshMetadata();
+}
+
+void AtmosphericDialog::refreshMetadata()
+{
+  m_coefficientsModified = false;
+  m_resolvedMetadataPath.clear();
   if ( !m_rasterLayer || !m_rasterLayer->isValid() )
+  {
+    m_metadataStatusLabel->clear();
     return;
-  const int bandCount = m_rasterLayer->bandCount();
-  for ( int i = 1; i <= bandCount; ++i )
-    m_bandCombo->addItem( tr( "波段 %1" ).arg( i ), i );
+  }
+
+  const QString metadataPath =
+    RadiometricCalibration::autoDetectMetadataFile( m_rasterLayer->source() );
+  if ( metadataPath.isEmpty() )
+  {
+    m_metadataStatusLabel->setText(
+      tr( "未找到传感器元数据文件；请手动输入 gain/bias。" ) );
+    return;
+  }
+
+  const int band = m_bandCombo->currentData().toInt();
+  if ( band <= 0 )
+    return;
+
+  QMap<int, QString> bandNames;
+  GdalDatasetWrapper ds;
+  if ( ds.open( m_rasterLayer->source() ) )
+  {
+    const QString bandName = ds.bandDescription( band );
+    if ( !bandName.isEmpty() )
+      bandNames.insert( band, bandName );
+  }
+
+  RadiometricCalibration::CalibrationMetadata meta;
+  QString error;
+  if ( !RadiometricCalibration::loadMetadata( m_rasterLayer->source(), metadataPath,
+                                              bandNames, &meta, &error )
+       || !meta.bands.contains( band ) )
+  {
+    m_metadataStatusLabel->setText(
+      tr( "已探测到 %1，但波段 %2 无系数：%3" )
+        .arg( QFileInfo( metadataPath ).fileName() )
+        .arg( band )
+        .arg( error.isEmpty() ? tr( "请手动输入 gain/bias。" ) : error ) );
+    return;
+  }
+
+  const auto &c = meta.bands.value( band );
+  m_gainSpin->blockSignals( true );
+  m_biasSpin->blockSignals( true );
+  m_gainSpin->setValue( c.radianceGain );
+  m_biasSpin->setValue( c.radianceBias );
+  m_gainSpin->blockSignals( false );
+  m_biasSpin->blockSignals( false );
+
+  m_resolvedMetadataPath = metadataPath;
+  m_metadataStatusLabel->setText(
+    tr( "已从 %1 自动填充 gain/bias（可手动修改）。" )
+      .arg( QFileInfo( metadataPath ).fileName() ) );
+}
+
+void AtmosphericDialog::onCoefficientChanged()
+{
+  m_coefficientsModified = true;
+  if ( !m_resolvedMetadataPath.isEmpty() )
+    m_metadataStatusLabel->setText(
+      tr( "使用手动 gain/bias（元数据 %1 仍可用于其他波段）。" )
+        .arg( QFileInfo( m_resolvedMetadataPath ).fileName() ) );
 }
 
 void AtmosphericDialog::onMethodChanged( int index )
@@ -123,8 +213,16 @@ void AtmosphericDialog::onRun()
   params["output"] = outputPath().toStdString();
   params["band"] = bandNum;
   params["method"] = method.toStdString();
-  params["gain"] = m_gainSpin->value();
-  params["bias"] = m_biasSpin->value();
   params["airmass"] = m_airmassSpin->value();
+  if ( m_coefficientsModified )
+  {
+    // Explicit values win; the operator resolves from metadata otherwise.
+    params["gain"] = m_gainSpin->value();
+    params["bias"] = m_biasSpin->value();
+  }
+  else if ( !m_resolvedMetadataPath.isEmpty() )
+  {
+    params["metadata_path"] = m_resolvedMetadataPath.toStdString();
+  }
   runOperatorTask( QStringLiteral( "rs:atmospheric_correction" ), params );
 }

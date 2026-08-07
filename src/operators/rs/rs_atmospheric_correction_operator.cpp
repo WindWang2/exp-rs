@@ -8,8 +8,11 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/atmospheric_correction.h"
+#include "processing/algorithms/radiometric_calibration.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QString>
+#include <QMap>
 
 #include <vector>
 
@@ -32,8 +35,11 @@ Json::Value RsAtmosphericCorrectionOperator::schema() const {
     props["output"] = makeOutputParam("output", "Output corrected raster", "tif");
     props["band"] = makeIntegerParam("band", "1-based band number", 1);
     props["method"] = makeEnumParam("method", "Correction method", s_methods, "dos1");
-    props["gain"] = makeNumberParam("gain", "Radiance gain", 1.0);
-    props["bias"] = makeNumberParam("bias", "Radiance bias", 0.0);
+    props["metadata_path"] = makeStringParam("metadata_path",
+        "Path to Landsat *_MTL.txt or Sentinel-2 MTD_*.xml (optional; when omitted, "
+        "auto-detected next to the input; used to resolve radiance gain/bias)", "");
+    props["gain"] = makeNumberParam("gain", "Radiance gain (optional; when omitted, resolved from product metadata)", 1.0);
+    props["bias"] = makeNumberParam("bias", "Radiance bias (optional; when omitted, resolved from product metadata)", 0.0);
     props["airmass"] = makeNumberParam("airmass", "Relative airmass for DOS2", 1.0);
 
     Json::Value outputs(Json::objectValue);
@@ -56,7 +62,8 @@ Json::Value RsAtmosphericCorrectionOperator::metadata() const {
     meta["tags"].append("radiometric");
     meta["purpose"] = "Convert DN to radiance or surface reflectance before spectral analysis.";
     meta["workflowHints"].append("Apply before computing spectral indices.");
-    meta["limitations"].append("Gain/bias must be obtained from image metadata.");
+    meta["limitations"].append("Gain/bias are resolved from product metadata (MTL/MTD) when omitted; "
+                               "explicit values always win.");
     return meta;
 }
 
@@ -77,14 +84,51 @@ Json::Value RsAtmosphericCorrectionOperator::run(const Json::Value& params,
 
     const int band = getInt(params, "band", 1);
     const std::string method = getEnum(params, "method", s_methods, "dos1");
-    const float gain = static_cast<float>(getDouble(params, "gain", 1.0));
-    const float bias = static_cast<float>(getDouble(params, "bias", 0.0));
+    const bool hasGain = params.isMember("gain");
+    const bool hasBias = params.isMember("bias");
+    float gain = static_cast<float>(getDouble(params, "gain", 1.0));
+    float bias = static_cast<float>(getDouble(params, "bias", 0.0));
     const float airmass = static_cast<float>(getDouble(params, "airmass", 1.0));
 
     int methodCode = AtmosphericCorrection::Dos1;
     if (method == "dn_to_radiance") methodCode = AtmosphericCorrection::DnToRadiance;
     else if (method == "dos2") methodCode = AtmosphericCorrection::Dos2;
     else if (method == "quac") methodCode = AtmosphericCorrection::Quac;
+
+    // Resolve radiance gain/bias from product metadata (explicit MTL/MTD path
+    // or auto-detected sibling) when the caller did not supply them — the
+    // "sensor metadata populates parameters automatically" workflow.
+    if (methodCode != AtmosphericCorrection::Quac && (!hasGain || !hasBias)) {
+        QString metadataPath = QString::fromStdString(getString(params, "metadata_path", ""));
+        if (metadataPath.isEmpty())
+            metadataPath = RadiometricCalibration::autoDetectMetadataFile(
+                QString::fromStdString(inputPath));
+        if (!metadataPath.isEmpty()) {
+            GdalDatasetWrapper ds;
+            QMap<int, QString> bandNames;
+            if (ds.open(QString::fromStdString(inputPath))) {
+                const QString bandName = ds.bandDescription(band);
+                if (!bandName.isEmpty())
+                    bandNames.insert(band, bandName);
+            }
+            RadiometricCalibration::CalibrationMetadata meta;
+            QString metaError;
+            if (RadiometricCalibration::loadMetadata(QString::fromStdString(inputPath),
+                                                     metadataPath, bandNames, &meta,
+                                                     &metaError)
+                && meta.bands.contains(band)) {
+                const auto &c = meta.bands.value(band);
+                if (!hasGain) {
+                    gain = static_cast<float>(c.radianceGain);
+                    context.logInfo("Resolved radiance gain from " + metadataPath.toStdString());
+                }
+                if (!hasBias) {
+                    bias = static_cast<float>(c.radianceBias);
+                    context.logInfo("Resolved radiance bias from " + metadataPath.toStdString());
+                }
+            }
+        }
+    }
 
     context.logInfo("Applying " + method + " to " + inputPath);
     context.reportProgress(0.2, "Running atmospheric correction");
