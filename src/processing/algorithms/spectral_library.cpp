@@ -2,6 +2,7 @@
 #include "spectral_library.h"
 
 #include "spectral_classification.h"
+#include "spectral_resampling.h"
 
 #include <QFile>
 #include <QJsonArray>
@@ -203,6 +204,14 @@ std::vector<MatchScore> matchSpectrum( const std::vector<float> &spectrum,
                                        const Library &library,
                                        float nodata )
 {
+    return matchSpectrum( spectrum, {}, library, nodata );
+}
+
+std::vector<MatchScore> matchSpectrum( const std::vector<float> &spectrum,
+                                       const std::vector<float> &spectrumWavelengths,
+                                       const Library &library,
+                                       float nodata )
+{
     std::vector<MatchScore> scores;
     if ( spectrum.empty() )
         return scores;
@@ -211,20 +220,57 @@ std::vector<MatchScore> matchSpectrum( const std::vector<float> &spectrum,
     for ( int i = 0; i < library.entries.size(); ++i )
     {
         const Entry &entry = library.entries.at( i );
-        if ( static_cast<int>( entry.spectrum.size() ) != bands )
-            continue; // incompatible band count -> cannot compare
+        const std::vector<float> &entryRef = entry.spectrum;
+        // Test spectrum used for scoring: the original, or a wavelength-
+        // resampled copy when band counts differ and both sides carry grids.
+        const float *testPtr = spectrum.data();
+        int testBands = bands;
+        std::vector<float> resampledSpectrum;
+        bool resampled = false;
+        if ( static_cast<int>( entryRef.size() ) != bands )
+        {
+            if ( spectrumWavelengths.size() == spectrum.size()
+                 && entry.wavelengths.size() == entryRef.size() )
+            {
+                resampledSpectrum.resize( entryRef.size() );
+                if ( SpectralResampling::resampleSpectrum(
+                       spectrum.data(), spectrumWavelengths.data(), bands,
+                       entry.wavelengths.data(), static_cast<int>( entryRef.size() ),
+                       resampledSpectrum.data() ) )
+                {
+                    bool hasOutOfRange = false;
+                    for ( float v : resampledSpectrum )
+                    {
+                        if ( std::isnan( v ) )
+                        {
+                            hasOutOfRange = true;
+                            break;
+                        }
+                    }
+                    if ( !hasOutOfRange )
+                    {
+                        testPtr = resampledSpectrum.data();
+                        testBands = static_cast<int>( entryRef.size() );
+                        resampled = true;
+                    }
+                }
+            }
+            if ( !resampled )
+                continue; // cannot compare (band mismatch, no wavelengths)
+        }
 
         MatchScore score;
         score.entryIndex = i;
         score.name = entry.name;
         score.material = entry.material;
+        score.resampled = resampled;
         score.angleDegrees =
-            SpectralClassification::spectralAngle( spectrum.data(), entry.spectrum.data(),
-                                                   bands, nodata )
+            SpectralClassification::spectralAngle( testPtr, entryRef.data(),
+                                                   testBands, nodata )
             * ( 180.0 / std::acos( -1.0 ) );
         score.divergence =
-            SpectralClassification::spectralDivergence( spectrum.data(), entry.spectrum.data(),
-                                                        bands, nodata );
+            SpectralClassification::spectralDivergence( testPtr, entryRef.data(),
+                                                        testBands, nodata );
         scores.push_back( std::move( score ) );
     }
 

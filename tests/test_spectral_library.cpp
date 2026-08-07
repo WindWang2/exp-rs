@@ -179,3 +179,48 @@ TEST_CASE("matchSpectrum tolerates empty libraries and spectra", "[processing][s
     empty.entries.append( e );
     CHECK( SpectralLibrary::matchSpectrum( {}, empty ).empty() );
 }
+
+TEST_CASE("matchSpectrum resamples onto the library grid when wavelengths are available", "[processing][spectral_library]") {
+    // Test spectrum: linear ramp over 5 bands (value = wavelength / 1000).
+    const std::vector<float> spectrum = {0.4f, 0.5f, 0.6f, 0.7f, 0.8f};
+    const std::vector<float> spectrumWl = {400.0f, 500.0f, 600.0f, 700.0f, 800.0f};
+
+    SpectralLibrary::Library lib;
+
+    // 3-band entry on a coarser grid; the ramp interpolates exactly onto it.
+    SpectralLibrary::Entry coarse;
+    coarse.name = QStringLiteral("coarse_target");
+    coarse.wavelengths = {500.0f, 600.0f, 700.0f};
+    coarse.spectrum = {0.5f, 0.6f, 0.7f};
+
+    // Entry without wavelength metadata and a mismatched band count -> skipped.
+    SpectralLibrary::Entry noGrid;
+    noGrid.name = QStringLiteral("no_grid");
+    noGrid.spectrum = {0.5f, 0.6f, 0.7f};
+
+    lib.entries.append( coarse );
+    lib.entries.append( noGrid );
+
+    const auto scores = SpectralLibrary::matchSpectrum( spectrum, spectrumWl, lib );
+    REQUIRE( scores.size() == 1 );
+    CHECK( scores[0].name == QStringLiteral( "coarse_target" ) );
+    CHECK( scores[0].resampled == true );
+    CHECK( scores[0].angleDegrees == Catch::Approx( 0.0 ).margin( 1e-4 ) );
+    CHECK( scores[0].divergence == Catch::Approx( 0.0 ).margin( 1e-4 ) );
+}
+
+TEST_CASE("matchSpectrum keeps skipping band-mismatched entries without wavelengths", "[processing][spectral_library]") {
+    // Same fixture as the resampling test, but the test spectrum carries no
+    // wavelength grid: the mismatched entries must still be skipped.
+    const std::vector<float> spectrum = {0.4f, 0.5f, 0.6f, 0.7f, 0.8f};
+
+    SpectralLibrary::Library lib;
+    SpectralLibrary::Entry coarse;
+    coarse.name = QStringLiteral( "coarse_target" );
+    coarse.wavelengths = {500.0f, 600.0f, 700.0f};
+    coarse.spectrum = {0.5f, 0.6f, 0.7f};
+    lib.entries.append( coarse );
+
+    const auto scores = SpectralLibrary::matchSpectrum( spectrum, lib );
+    CHECK( scores.empty() );
+}

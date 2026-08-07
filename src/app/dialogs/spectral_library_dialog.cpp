@@ -181,7 +181,15 @@ void SpectralLibraryDialog::runMatch()
   for ( double v : m_values )
     spectrum.push_back( static_cast<float>( v ) );
 
-  const auto scores = SpectralLibrary::matchSpectrum( spectrum, m_library );
+  std::vector<float> wavelengths;
+  if ( m_wavelengths.size() == m_values.size() )
+  {
+    wavelengths.reserve( m_wavelengths.size() );
+    for ( double w : m_wavelengths )
+      wavelengths.push_back( static_cast<float>( w ) );
+  }
+
+  const auto scores = SpectralLibrary::matchSpectrum( spectrum, wavelengths, m_library );
   m_matchTable->setRowCount( static_cast<int>( scores.size() ) );
   m_tableRowCount = static_cast<int>( scores.size() );
   for ( int row = 0; row < m_tableRowCount; ++row )
@@ -208,7 +216,8 @@ void SpectralLibraryDialog::runMatch()
   const int comparable = m_tableRowCount;
   m_statusLabel->setText(
     tr( "匹配完成：%1 个可比条目（SAM 升序）。谱库共 %2 个条目。"
-        "未匹配项通常因波段数不一致。" )
+        "未匹配条目通常因波段数不一致且缺少波长栅格。"
+        "带波长栅格的条目已自动重采样后匹配。" )
       .arg( comparable )
       .arg( m_library.entries.size() ) );
 }

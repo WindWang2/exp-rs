@@ -70,6 +70,10 @@ namespace SpectralLibrary
         double angleDegrees = std::numeric_limits<double>::quiet_NaN();
         /// Spectral Information Divergence; NaN when undefined.
         double divergence = std::numeric_limits<double>::quiet_NaN();
+        /// True when the test spectrum was wavelength-resampled onto this
+        /// entry's grid before scoring (band counts differed but both sides
+        /// carried wavelength metadata).
+        bool resampled = false;
     };
 
     /**
@@ -80,6 +84,20 @@ namespace SpectralLibrary
      * spectral nodata sentinel passed to the kernels.
      */
     std::vector<MatchScore> matchSpectrum( const std::vector<float> &spectrum,
+                                           const Library &library,
+                                           float nodata = -9999.0f );
+
+    /**
+     * Wavelength-aware variant: when an entry's band count differs from the
+     * spectrum's, the spectrum is linearly resampled onto the entry's
+     * wavelength grid (SpectralResampling::resampleSpectrum) before scoring,
+     * provided BOTH sides carry wavelength metadata (strictly increasing,
+     * non-empty). Entries that still cannot be compared (no wavelengths, or a
+     * resample landing outside the source range) are skipped, as in the
+     * non-wavelength variant. Resampled matches are marked MatchScore::resampled.
+     */
+    std::vector<MatchScore> matchSpectrum( const std::vector<float> &spectrum,
+                                           const std::vector<float> &spectrumWavelengths,
                                            const Library &library,
                                            float nodata = -9999.0f );
 } // namespace SpectralLibrary
