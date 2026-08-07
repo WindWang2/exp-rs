@@ -85,3 +85,25 @@ TEST_CASE("ImageEnhancement processPcaFile writes component bands", "[pca][gdal]
     REQUIRE(outDs.open(outputPath));
     REQUIRE(outDs.bandCount() == 2);
 }
+
+TEST_CASE("PCA skips NaN pixels in the covariance", "[pca][c3]")
+{
+    // 2 bands, 4 pixels: one NaN pixel must not corrupt the covariance.
+    std::vector<std::vector<float>> input(2, std::vector<float>(4, 0.0f));
+    input[0] = {1.0f, 2.0f, 3.0f, std::numeric_limits<float>::quiet_NaN()};
+    input[1] = {4.0f, 5.0f, 6.0f, std::numeric_limits<float>::quiet_NaN()};
+
+    const ImageEnhancement::PcaResult result = ImageEnhancement::pca(input, 2);
+    REQUIRE(result.output.size() == 2);
+    // The NaN pixel is not projected; the valid pixels produce finite output.
+    CHECK(std::isfinite(result.output[0][0]));
+    CHECK(std::isfinite(result.output[1][1]));
+    // Explained variance is finite and sums to 1.
+    double total = 0.0;
+    for (float v : result.explainedVariance)
+    {
+        CHECK(std::isfinite(v));
+        total += v;
+    }
+    CHECK(total == Catch::Approx(1.0).margin(1e-5));
+}

@@ -2,6 +2,7 @@
 #include "image_fusion.h"
 #include "math_utils.h"
 #include "core/sicnu_logging.h"
+#include "data/raster_grid_compat.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <cmath>
@@ -634,6 +635,45 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
         if ( errorMessage )
             *errorMessage = msDataset.lastError();
         return false;
+    }
+
+    // Grid preflight (ADR 0066): pan-sharpening REQUIRES the two rasters to
+    // share a CRS, origin lattice, and overlapping extent, while differing
+    // resolutions are the point of the method (MS is resampled onto the pan
+    // grid below). So resolution differences are allowed and logged; any other
+    // blocking grid issue fails with an actionable message.
+    auto gridFromDataset = []( const GdalDatasetWrapper &ds ) {
+        sicnu::data::RasterGrid grid;
+        grid.crsWkt = ds.projection();
+        grid.hasGeoTransform = ds.hasGeoTransform();
+        grid.geoTransform = ds.geoTransform();
+        grid.width = ds.width();
+        grid.height = ds.height();
+        for ( int b = 1; b <= ds.bandCount(); ++b )
+        {
+            bool hasNoData = false;
+            const double noData = ds.bandNoDataValue( b, &hasNoData );
+            grid.bandNoData.append( hasNoData ? std::optional<double>( noData ) : std::nullopt );
+        }
+        return grid;
+    };
+    const sicnu::data::GridCompatReport gridReport =
+        sicnu::data::compareGrids( gridFromDataset( panDataset ), gridFromDataset( msDataset ) );
+    for ( const sicnu::data::GridCompatIssue &issue : gridReport.issues )
+    {
+        if ( issue.verdict == sicnu::data::GridCompatVerdict::PixelSizeMismatch )
+        {
+            // Resampling the MS raster onto the pan grid is the fusion design.
+            continue;
+        }
+        if ( issue.blocking )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral( "Pan and multispectral rasters are not "
+                                                "co-registered: %1" )
+                                    .arg( issue.message );
+            return false;
+        }
     }
 
     const int w = panDataset.width();

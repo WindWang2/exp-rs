@@ -912,10 +912,14 @@ void ImageEnhancement::computeCovarianceMatrix(const std::vector<std::vector<flo
     cov.assign(bands, std::vector<float>(bands, 0.0f));
     double divisor = (n > 1) ? static_cast<double>(n - 1) : 1.0;
 
+    // NaN (NoData) pixels are skipped so a single invalid pixel cannot corrupt
+    // the covariance of every band pair.
     for (int i = 0; i < bands; i++) {
         for (int j = i; j < bands; j++) {
             double sum = 0.0;
             for (size_t k = 0; k < n; k++) {
+                if (std::isnan(centered[i][k]) || std::isnan(centered[j][k]))
+                    continue;
                 sum += static_cast<double>(centered[i][k]) * centered[j][k];
             }
             cov[i][j] = static_cast<float>(sum / divisor);
@@ -1024,13 +1028,19 @@ ImageEnhancement::PcaResult ImageEnhancement::pca(
     if (numComponents <= 0)
         numComponents = bands;
 
-    // Step 1: Compute mean per band and center data
+    // Step 1: Compute mean per band and center data. NaN pixels are excluded
+    // from the mean so a single invalid pixel cannot corrupt the covariance.
     std::vector<float> means(bands, 0.0f);
     for (int b = 0; b < bands; b++) {
         double sum = 0.0;
-        for (size_t k = 0; k < n; k++)
+        size_t valid = 0;
+        for (size_t k = 0; k < n; k++) {
+            if (std::isnan(input[b][k]))
+                continue;
             sum += input[b][k];
-        means[b] = static_cast<float>(sum / n);
+            ++valid;
+        }
+        means[b] = valid > 0 ? static_cast<float>(sum / valid) : 0.0f;
     }
 
     std::vector<std::vector<float>> centered(bands, std::vector<float>(n));
