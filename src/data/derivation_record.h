@@ -62,4 +62,21 @@ struct DerivationRecord
   friend bool operator==( const DerivationRecord &, const DerivationRecord & ) = default;
 };
 
+/// Builds a DerivationRecord for a completed algorithm task: algorithm id,
+/// parameter snapshot, task reference, and completion timestamp. The output
+/// Asset ID is stamped by DataManager::attachDerivationRecord. Shared by the
+/// CLI pipeline runner and TaskCenter-backed committers so every produced
+/// asset records the same provenance shape.
+inline DerivationRecord makeTaskDerivation( const QString &algorithmId,
+                                            const QJsonObject &parameters,
+                                            const QString &taskReference )
+{
+  DerivationRecord record;
+  record.algorithmId = algorithmId;
+  record.parameters = parameters;
+  record.taskReference = taskReference;
+  record.completedAtUtc = QDateTime::currentDateTimeUtc();
+  return record;
+}
+
 } // namespace sicnu::data

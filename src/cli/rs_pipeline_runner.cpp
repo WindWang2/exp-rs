@@ -494,11 +494,10 @@ void RsPipelineRunner::registerStepOutputs( long pipelineId )
     }
 
     // Provenance is attached after successful registration (ADR 0023).
-    sicnu::data::DerivationRecord derivation;
-    derivation.algorithmId = task.algorithmId;
-    derivation.parameters = QJsonObject::fromVariantMap( task.parameterMap );
-    derivation.taskReference = QString::number( taskId );
-    derivation.completedAtUtc = QDateTime::currentDateTimeUtc();
+    const sicnu::data::DerivationRecord derivation =
+      sicnu::data::makeTaskDerivation( task.algorithmId,
+                                       QJsonObject::fromVariantMap( task.parameterMap ),
+                                       QString::number( taskId ) );
     m_dataManager->attachDerivationRecord( registered.assetId, derivation );
   }
 }

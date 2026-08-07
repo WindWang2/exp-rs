@@ -190,3 +190,20 @@ TEST_CASE( "Derivation record rejects an invalid output asset id",
   CHECK( restored.diagnostics().first().code
          == QStringLiteral( "derivation.invalid" ) );
 }
+
+TEST_CASE( "makeTaskDerivation builds the shared task provenance shape", "[data][derivation]" )
+{
+  const DerivationRecord record = makeTaskDerivation(
+    QStringLiteral( "rs:change_detection" ),
+    QJsonObject{ { QStringLiteral( "method" ), QStringLiteral( "cva" ) } },
+    QStringLiteral( "task-7" ) );
+
+  CHECK( record.algorithmId == QStringLiteral( "rs:change_detection" ) );
+  CHECK( record.parameters.value( QStringLiteral( "method" ) ).toString()
+         == QStringLiteral( "cva" ) );
+  CHECK( record.taskReference == QStringLiteral( "task-7" ) );
+  CHECK( record.completedAtUtc.isValid() );
+  CHECK( record.inputs.isEmpty() );
+  // The output asset id is stamped by attachDerivationRecord, not by the helper.
+  CHECK( record.outputAssetId.isNull() );
+}

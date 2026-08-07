@@ -519,6 +519,36 @@ std::optional<DerivationRecord> DataManager::provenance( AssetId id ) const
   return it->derivation;
 }
 
+QVector<AssetId> DataManager::derivedFrom( AssetId id ) const
+{
+  QVector<AssetId> result;
+  const auto it = m_impl->findRecord( id );
+  if ( it == m_impl->records.end() || !it->derivation )
+    return result;
+  for ( const DerivationInput &input : it->derivation->inputs )
+    result.append( input.assetId );
+  return result;
+}
+
+QVector<AssetId> DataManager::derivedOutputsOf( AssetId id ) const
+{
+  QVector<AssetId> result;
+  for ( const auto &record : m_impl->records )
+  {
+    if ( !record.derivation )
+      continue;
+    for ( const DerivationInput &input : record.derivation->inputs )
+    {
+      if ( input.assetId == id )
+      {
+        result.append( record.snapshot.id() );
+        break;
+      }
+    }
+  }
+  return result;
+}
+
 Result<void> DataManager::attachDerivationRecord( AssetId id,
                                                   const DerivationRecord &derivation )
 {

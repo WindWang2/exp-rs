@@ -86,6 +86,14 @@ class DataManager : public QObject
     /// assets carry a Derivation Record; directly-registered assets do not.
     std::optional<DerivationRecord> provenance( AssetId id ) const;
 
+    /// Input Asset IDs recorded in the asset's derivation record (the assets
+    /// this one was derived from). Empty when the asset has no derivation.
+    QVector<AssetId> derivedFrom( AssetId id ) const;
+
+    /// Assets whose derivation records list @p id as an input (the assets
+    /// derived from it). Empty when nothing was derived from it.
+    QVector<AssetId> derivedOutputsOf( AssetId id ) const;
+
     quint64 catalogGeneration() const;
 
     Result<AssetLease> acquire( const AssetRef &asset, const AssetUse &use );

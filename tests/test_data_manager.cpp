@@ -1009,3 +1009,61 @@ TEST_CASE( "DataManager reapTaskTemporaries sweeps idle TaskTemporary assets and
   CHECK( manager->asset( sessionId ).has_value() );
   CHECK( manager->asset( persistentId ).has_value() );
 }
+
+TEST_CASE( "Lineage queries trace derivation inputs and outputs", "[data_manager][provenance]" )
+{
+  const auto manager = makeDataManager();
+
+  RegisterRequest inputRequest;
+  inputRequest.source = memoryRaster( QStringLiteral( "scene-raw" ) );
+  const auto input = manager->registerSource( inputRequest );
+  REQUIRE_FALSE( input.assetId.isNull() );
+
+  RegisterRequest outputRequest;
+  outputRequest.source = memoryRaster( QStringLiteral( "ndvi-output" ) );
+  const auto output = manager->registerSource( outputRequest );
+  REQUIRE_FALSE( output.assetId.isNull() );
+
+  // No derivation attached yet: both directions are empty.
+  CHECK( manager->derivedFrom( output.assetId ).isEmpty() );
+  CHECK( manager->derivedOutputsOf( input.assetId ).isEmpty() );
+
+  sicnu::data::DerivationRecord record = sicnu::data::makeTaskDerivation(
+    QStringLiteral( "rs:spectral_index" ),
+    QJsonObject{ { QStringLiteral( "index" ), QStringLiteral( "NDVI" ) } },
+    QStringLiteral( "task-42" ) );
+  sicnu::data::DerivationInput derivedFrom;
+  derivedFrom.assetId = input.assetId;
+  derivedFrom.revision = AssetRevision::initial();
+  record.inputs = { derivedFrom };
+  REQUIRE( manager->attachDerivationRecord( output.assetId, record ) );
+
+  // attachDerivationRecord stamps the output asset id.
+  const auto provenance = manager->provenance( output.assetId );
+  REQUIRE( provenance.has_value() );
+  CHECK( provenance->outputAssetId == output.assetId );
+  CHECK( provenance->taskReference == QStringLiteral( "task-42" ) );
+
+  // Lineage both directions.
+  const QVector<AssetId> inputs = manager->derivedFrom( output.assetId );
+  REQUIRE( inputs.size() == 1 );
+  CHECK( inputs.first() == input.assetId );
+
+  const QVector<AssetId> outputs = manager->derivedOutputsOf( input.assetId );
+  REQUIRE( outputs.size() == 1 );
+  CHECK( outputs.first() == output.assetId );
+
+  // An unrelated asset has no lineage.
+  RegisterRequest unrelatedRequest;
+  unrelatedRequest.source = memoryRaster( QStringLiteral( "other" ) );
+  const auto unrelated = manager->registerSource( unrelatedRequest );
+  CHECK( manager->derivedFrom( unrelated.assetId ).isEmpty() );
+  CHECK( manager->derivedOutputsOf( unrelated.assetId ).isEmpty() );
+}
+
+TEST_CASE( "Lineage queries ignore unknown asset ids", "[data_manager][provenance]" )
+{
+  const auto manager = makeDataManager();
+  CHECK( manager->derivedFrom( AssetId::generate() ).isEmpty() );
+  CHECK( manager->derivedOutputsOf( AssetId::generate() ).isEmpty() );
+}
