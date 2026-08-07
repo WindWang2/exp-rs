@@ -291,6 +291,64 @@ TEST_CASE( "rs:sam_classify writes a single-band classified raster", "[sam][gdal
     REQUIRE( labels[1] == Approx( 1.0f ).margin( 0.5f ) );
 }
 
+TEST_CASE( "rs:sam_classify supports the SID metric", "[sid][gdal]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString inputPath = dir.filePath( QStringLiteral( "in.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "class.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    // 1x2 raster, 3 bands — positive reflectance-like spectra.
+    GDALDatasetH inDs = createOutputTiff( inputPath, 2, 1, 3, GDT_Float32, gt, QString() );
+    REQUIRE( inDs != nullptr );
+    std::vector<float> b1 = { 0.6f, 0.1f };
+    std::vector<float> b2 = { 0.2f, 0.4f };
+    std::vector<float> b3 = { 0.2f, 0.5f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 1 ), GF_Write, 0, 0, 2, 1,
+                           b1.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 2 ), GF_Write, 0, 0, 2, 1,
+                           b2.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( inDs, 3 ), GF_Write, 0, 0, 2, 1,
+                           b3.data(), 2, 1, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( inDs );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["metric"] = "sid";
+    Json::Value refs( Json::arrayValue );
+    Json::Value c0( Json::arrayValue );
+    c0.append( 0.6 );
+    c0.append( 0.2 );
+    c0.append( 0.2 );
+    Json::Value c1( Json::arrayValue );
+    c1.append( 0.1 );
+    c1.append( 0.4 );
+    c1.append( 0.5 );
+    refs.append( c0 );
+    refs.append( c1 );
+    params["refs"] = refs;
+
+    RsSamClassifyOperator op;
+    RSOperatorContext ctx;
+    Json::Value result = op.run( params, ctx );
+
+    REQUIRE( QFile::exists( outputPath ) );
+    REQUIRE( result["metric"].asString() == "sid" );
+    REQUIRE( result["classes"].asInt() == 2 );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    std::vector<float> labels( 2 );
+    REQUIRE( out.readBandData( 1, labels.data(), 2, 1 ) );
+    REQUIRE( labels[0] == Approx( 0.0f ).margin( 0.5f ) );
+    REQUIRE( labels[1] == Approx( 1.0f ).margin( 0.5f ) );
+}
+
 TEST_CASE( "rs:continuum_removal normalizes a multi-band raster", "[continuum][gdal]" )
 {
     ensureGdalInit();
@@ -333,3 +391,87 @@ TEST_CASE( "rs:continuum_removal normalizes a multi-band raster", "[continuum][g
     REQUIRE( centre[0] == Approx( 0.5f ).margin( 1e-4 ) );
 }
 
+
+// ===========================================================================
+// Spectral Information Divergence (SID)
+// ===========================================================================
+
+TEST_CASE( "spectralDivergence: identical spectra yield zero", "[sid]" )
+{
+    const float t[] = { 0.2f, 0.4f, 0.4f };
+    const float r[] = { 0.2f, 0.4f, 0.4f };
+    CHECK( SpectralClassification::spectralDivergence( t, r, 3, NODATA )
+           == Catch::Approx( 0.0 ).margin( 1e-9 ) );
+    // Scale-invariance: identical shape, different brightness.
+    const float bright[] = { 0.5f, 1.0f, 1.0f };
+    CHECK( SpectralClassification::spectralDivergence( t, bright, 3, NODATA )
+           == Catch::Approx( 0.0 ).margin( 1e-9 ) );
+}
+
+TEST_CASE( "spectralDivergence: known asymmetric divergence", "[sid]" )
+{
+    // p = (0.5, 0.5), q = (0.9, 0.1)
+    // SID = 0.5*ln(0.5/0.9) + 0.5*ln(0.5/0.1) + 0.9*ln(0.9/0.5) + 0.1*ln(0.1/0.5)
+    const float t[] = { 0.5f, 0.5f };
+    const float r[] = { 0.9f, 0.1f };
+    const double expected = 0.5 * std::log( 0.5 / 0.9 ) + 0.5 * std::log( 0.5 / 0.1 )
+                            + 0.9 * std::log( 0.9 / 0.5 ) + 0.1 * std::log( 0.1 / 0.5 );
+    CHECK( SpectralClassification::spectralDivergence( t, r, 2, NODATA )
+           == Catch::Approx( expected ).margin( 1e-9 ) );
+}
+
+TEST_CASE( "spectralDivergence: invalid spectra yield NaN", "[sid]" )
+{
+    SECTION( "Zero band contributes nothing (finite SID)" )
+    {
+        // A band present in only one spectrum is skipped by the KL sum; the
+        // remaining bands still produce a finite divergence.
+        const float t[] = { 0.0f, 0.5f };
+        const float r[] = { 0.5f, 0.5f };
+        CHECK( std::isfinite( SpectralClassification::spectralDivergence( t, r, 2, NODATA ) ) );
+    }
+    SECTION( "Negative band" )
+    {
+        const float t[] = { -0.1f, 0.5f };
+        const float r[] = { 0.5f, 0.5f };
+        CHECK( std::isnan( SpectralClassification::spectralDivergence( t, r, 2, NODATA ) ) );
+    }
+    SECTION( "Nodata band" )
+    {
+        const float t[] = { NODATA, 0.5f };
+        const float r[] = { 0.5f, 0.5f };
+        CHECK( std::isnan( SpectralClassification::spectralDivergence( t, r, 2, NODATA ) ) );
+    }
+    SECTION( "Zero-sum spectrum" )
+    {
+        const float t[] = { 0.0f, 0.0f };
+        const float r[] = { 0.5f, 0.5f };
+        CHECK( std::isnan( SpectralClassification::spectralDivergence( t, r, 2, NODATA ) ) );
+    }
+}
+
+TEST_CASE( "SID: classifies pixels to the nearest reference spectrum", "[sid]" )
+{
+    // Two references: vegetation-like (0.6, 0.2, 0.2) and water-like (0.1, 0.4, 0.5).
+    std::vector<float> refs = { 0.6f, 0.2f, 0.2f, 0.1f, 0.4f, 0.5f };
+    // Two pixels: pixel 0 close to vegetation, pixel 1 close to water.
+    std::vector<float> pixels = { 0.7f, 0.1f, 0.2f, 0.1f, 0.45f, 0.45f };
+
+    std::vector<int> labels( 2 );
+    std::vector<float> divergences( 2, 0.0f );
+    REQUIRE( SpectralClassification::sidClassify(
+        pixels.data(), 2, 3, refs.data(), 2, labels.data(), divergences.data(), NODATA ) );
+    CHECK( labels[0] == 0 );
+    CHECK( labels[1] == 1 );
+    CHECK( divergences[0] >= 0.0f );
+}
+
+TEST_CASE( "SID: nodata pixel labelled -1", "[sid]" )
+{
+    std::vector<float> refs = { 0.6f, 0.2f, 0.2f };
+    std::vector<float> pixels = { NODATA, 0.2f, 0.2f };
+    std::vector<int> labels( 1 );
+    REQUIRE( SpectralClassification::sidClassify(
+        pixels.data(), 1, 3, refs.data(), 1, labels.data(), nullptr, NODATA ) );
+    CHECK( labels[0] == -1 );
+}

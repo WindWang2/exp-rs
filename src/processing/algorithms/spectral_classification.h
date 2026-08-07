@@ -27,6 +27,20 @@ namespace SpectralClassification
     double spectralAngle( const float *t, const float *r, size_t bands, float nodata );
 
     /**
+     * Spectral Information Divergence (SID) between two equal-length spectra
+     * t (test) and r (reference).
+     *
+     * Both spectra are normalized to unit sum (probability vectors) and the
+     * symmetric Kullback-Leibler divergence is computed:
+     *   SID = sum_i p_i * ln(p_i / q_i) + sum_i q_i * ln(q_i / p_i)
+     *
+     * Returns NaN when either spectrum contains a nodata value, any non-zero
+     * band is non-positive (not reflectance-like), or a spectrum sums to
+     * zero. Identical spectra yield 0.
+     */
+    double spectralDivergence( const float *t, const float *r, size_t bands, float nodata );
+
+    /**
      * Spectral Angle Mapper (SAM) classification.
      *
      * @param pixels     pixel-major spectra: pixels[p * bands + b], p in [0, count)
@@ -45,6 +59,16 @@ namespace SpectralClassification
     bool samClassify( const float *pixels, size_t count, int bands,
                       const float *refs, int refCount,
                       int *labels, float *angles,
+                      float nodata );
+
+    /**
+     * Spectral Information Divergence classification: labels each pixel to
+     * the reference spectrum with the minimum SID. Signature mirrors
+     * samClassify(); `divergences` carries the best divergence per pixel.
+     */
+    bool sidClassify( const float *pixels, size_t count, int bands,
+                      const float *refs, int refCount,
+                      int *labels, float *divergences,
                       float nodata );
 
     /**

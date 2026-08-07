@@ -66,7 +66,9 @@ Json::Value RsSamClassifyOperator::schema() const {
     refsParam["items"]["items"]["type"] = "number";
     props["refs"] = refsParam;
     props["bands"] = makeIntegerParam( "bands", "1-based band subset (reserved; default all)", 0 );
-    props["angleOut"] = makeOutputParam( "angleOut", "Optional per-pixel minimum-angle raster", "tif" );
+    props["metric"] = makeEnumParam( "metric", "Spectral matching metric",
+                                     { "sam", "sid" }, "sam" );
+    props["angleOut"] = makeOutputParam( "angleOut", "Optional per-pixel minimum-angle/divergence raster", "tif" );
 
     Json::Value outputs( Json::objectValue );
     outputs["output"] = makeRasterParam( "output", "Classified raster path" );
@@ -86,9 +88,13 @@ Json::Value RsSamClassifyOperator::metadata() const {
     meta["tags"].append( "classification" );
     meta["tags"].append( "hyperspectral" );
     meta["tags"].append( "spectral-angle" );
-    meta["purpose"] = "Label each pixel to the reference spectrum with the smallest angular distance.";
+    meta["purpose"] = "Label each pixel to the reference spectrum with the smallest "
+                      "spectral distance (SAM angle or Spectral Information Divergence).";
     meta["prerequisites"].append( "Reference spectra must use the same band order and units as the input raster." );
-    meta["workflowHints"].append( "SAM is illumination-invariant and well-suited to hyperspectral mapping." );
+    meta["workflowHints"].append( "SAM is illumination-invariant and well-suited to hyperspectral mapping; "
+                                  "SID additionally captures spectral brightness differences." );
+    meta["limitations"].append( "SID requires non-negative reflectance-like spectra (a zero or negative "
+                                "band invalidates the pair)." );
     return meta;
 }
 
@@ -123,7 +129,10 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
     std::vector<float> refs = parseReferenceSpectra( params["refs"], nBands );
     const int refCount = static_cast<int>( refs.size() / static_cast<size_t>( nBands ) );
 
-    context.logInfo( "SAM classify: " + std::to_string( width ) + "x" +
+    const std::string metric = getEnum( params, "metric", { "sam", "sid" }, "sam" );
+
+    context.logInfo( std::string( metric == "sid" ? "SID" : "SAM" ) + " classify: " +
+                     std::to_string( width ) + "x" +
                      std::to_string( height ) + ", " + std::to_string( nBands ) +
                      " bands, " + std::to_string( refCount ) + " classes" );
     context.reportProgress( 0.15, "Reading bands" );
@@ -154,11 +163,16 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
 
     std::vector<int> labels( pixelCount );
     std::vector<float> angles( pixelCount, 0.0f );
-    if ( !SpectralClassification::samClassify( pixels.data(), pixelCount, nBands,
+    const bool ok = ( metric == "sid" )
+        ? SpectralClassification::sidClassify( pixels.data(), pixelCount, nBands,
                                                refs.data(), refCount,
-                                               labels.data(), angles.data(), nodata ) )
+                                               labels.data(), angles.data(), nodata )
+        : SpectralClassification::samClassify( pixels.data(), pixelCount, nBands,
+                                               refs.data(), refCount,
+                                               labels.data(), angles.data(), nodata );
+    if ( !ok )
         throw RSOperatorError( ErrorCode::ComputationError,
-                              "SAM classification kernel failed" );
+                              "Spectral classification kernel failed" );
 
     context.throwIfCancelled();
     context.reportProgress( 0.75, "Writing output" );
@@ -202,6 +216,7 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
     result["output"] = outputPath;
     result["bands"] = nBands;
     result["classes"] = refCount;
+    result["metric"] = metric;
     return result;
 }
 

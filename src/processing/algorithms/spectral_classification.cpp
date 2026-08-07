@@ -35,6 +35,86 @@ double spectralAngle( const float *t, const float *r, size_t bands, float nodata
     return std::acos( cosTheta );
 }
 
+double spectralDivergence( const float *t, const float *r, size_t bands, float nodata )
+{
+    if ( !t || !r || bands == 0 )
+        return std::numeric_limits<double>::quiet_NaN();
+
+    double sumT = 0.0, sumR = 0.0;
+    for ( size_t b = 0; b < bands; ++b )
+    {
+        if ( t[b] == nodata || r[b] == nodata ||
+             std::isnan( t[b] ) || std::isnan( r[b] ) )
+            return std::numeric_limits<double>::quiet_NaN();
+        if ( t[b] < 0.0f || r[b] < 0.0f )
+            return std::numeric_limits<double>::quiet_NaN(); // not reflectance-like
+        sumT += t[b];
+        sumR += r[b];
+    }
+    if ( sumT <= 0.0 || sumR <= 0.0 )
+        return std::numeric_limits<double>::quiet_NaN();
+
+    // Symmetric KL divergence over the normalized (probability) spectra.
+    double sid = 0.0;
+    for ( size_t b = 0; b < bands; ++b )
+    {
+        const double p = static_cast<double>( t[b] ) / sumT;
+        const double q = static_cast<double>( r[b] ) / sumR;
+        if ( p > 0.0 && q > 0.0 )
+            sid += p * std::log( p / q ) + q * std::log( q / p );
+    }
+    return sid;
+}
+
+bool sidClassify( const float *pixels, size_t count, int bands,
+                  const float *refs, int refCount,
+                  int *labels, float *divergences, float nodata )
+{
+    if ( !pixels || !refs || !labels || count == 0 || bands <= 0 || refCount <= 0 )
+        return false;
+
+    for ( size_t p = 0; p < count; ++p )
+    {
+        const float *t = pixels + p * static_cast<size_t>( bands );
+
+        bool pixelValid = true;
+        for ( int b = 0; b < bands; ++b )
+        {
+            if ( t[b] == nodata || std::isnan( t[b] ) )
+            {
+                pixelValid = false;
+                break;
+            }
+        }
+
+        int best = -1;
+        double bestDiv = std::numeric_limits<double>::infinity();
+        if ( pixelValid )
+        {
+            for ( int c = 0; c < refCount; ++c )
+            {
+                const float *r = refs + static_cast<size_t>( c ) * bands;
+                const double div = spectralDivergence( t, r, static_cast<size_t>( bands ), nodata );
+                // NaN divergence here is reference-side (the pixel is valid):
+                // the reference is degenerate. Skip it rather than discarding
+                // the pixel.
+                if ( std::isnan( div ) )
+                    continue;
+                if ( div < bestDiv )
+                {
+                    bestDiv = div;
+                    best = c;
+                }
+            }
+        }
+        labels[p] = best;
+        if ( divergences )
+            divergences[p] = std::isfinite( bestDiv ) ? static_cast<float>( bestDiv )
+                                                      : std::numeric_limits<float>::quiet_NaN();
+    }
+    return true;
+}
+
 bool samClassify( const float *pixels, size_t count, int bands,
                   const float *refs, int refCount,
                   int *labels, float *angles, float nodata )
