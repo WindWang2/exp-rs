@@ -316,6 +316,14 @@ void QgisDesktopWindow::setupMenu()
     tip( viewMenu->addAction( tr( "同步主视图图层到第二视图" ),
                               this, &QgisDesktopWindow::syncMainLayersToSecondaryView ),
          tr( "将主视图显示图层克隆到第二视图（独立渲染器）。" ) );
+    m_dualViewportSyncAction = viewMenu->addAction( tr( "双视口联动" ) );
+    m_dualViewportSyncAction->setCheckable( true );
+    m_dualViewportSyncAction->setChecked( true );
+    m_dualViewportSyncAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+L" ) ) );
+    tip( m_dualViewportSyncAction,
+         tr( "启用后，两个视口像素级同步平移/缩放（卷帘对比时各视口仍可独立显示图层）。" ) );
+    connect( m_dualViewportSyncAction, &QAction::toggled,
+             this, &QgisDesktopWindow::toggleDualViewportSync );
     viewMenu->addSeparator();
     tip( viewMenu->addAction( ic( "refresh_view" ), tr( "刷新" ),
                               this, &QgisDesktopWindow::refreshMap, QKeySequence( "F5" ) ),

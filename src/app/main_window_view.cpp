@@ -4,6 +4,7 @@
 #include "project_context.h"
 #include "shell/rs_session_map_workspace.h"
 #include "shell/secondary_map_view_widget.h"
+#include "shell/rs_dual_viewport_sync_controller.h"
 
 #include <QMessageBox>
 #include <QSignalBlocker>
@@ -262,7 +263,25 @@ void QgisDesktopWindow::openSecondaryMapView()
                  this, &QgisDesktopWindow::closeSecondaryMapView );
         connect( m_secondaryMapView, &SecondaryMapViewWidget::syncFromMainRequested,
                  this, &QgisDesktopWindow::syncMainLayersToSecondaryView );
+
+        // Wire pixel-level pan/zoom sync between the two canvases (Loop K4).
+        if ( !m_dualViewportSync )
+        {
+            m_dualViewportSync = new RsDualViewportSyncController(
+                m_mapCanvas, m_secondaryMapView->canvas(), this );
+            // Default the View-menu toggle to checked once sync is live.
+            if ( m_dualViewportSyncAction )
+            {
+                QSignalBlocker b( m_dualViewportSyncAction );
+                m_dualViewportSyncAction->setChecked( true );
+            }
+        }
     }
+
+    // Snap the secondary canvas to the primary's current viewport so the two
+    // views start pixel-aligned.
+    if ( m_dualViewportSync )
+        m_dualViewportSync->snapSecondaryToPrimary();
 
     if ( m_secondaryViewId.isNull() )
     {
@@ -310,6 +329,18 @@ void QgisDesktopWindow::closeSecondaryMapView()
         m_secondaryMapView->hide();
         m_secondaryMapView->setViewId( {} );
         m_secondaryMapView->setActiveHighlight( false );
+    }
+    // Tear down the dual-viewport sync controller — its secondary canvas is gone.
+    if ( m_dualViewportSync )
+    {
+        m_dualViewportSync->setEnabled( false );
+        delete m_dualViewportSync;
+        m_dualViewportSync = nullptr;
+        if ( m_dualViewportSyncAction )
+        {
+            QSignalBlocker b( m_dualViewportSyncAction );
+            m_dualViewportSyncAction->setChecked( false );
+        }
     }
     if ( m_secondaryViewAction )
     {
@@ -372,6 +403,26 @@ void QgisDesktopWindow::syncMainLayersToSecondaryView()
     }
     statusBar()->showMessage(
         tr( "已将 %1 个主视图图层克隆到第二视图" ).arg( cloned ), 4000 );
+}
+
+void QgisDesktopWindow::toggleDualViewportSync( bool on )
+{
+    if ( !m_dualViewportSync )
+    {
+        // No controller yet — keep the action unchecked until the secondary
+        // view is opened (which lazily creates the controller).
+        if ( m_dualViewportSyncAction )
+        {
+            QSignalBlocker b( m_dualViewportSyncAction );
+            m_dualViewportSyncAction->setChecked( false );
+        }
+        statusBar()->showMessage( tr( "请先打开第二视图以启用双视口联动" ), 3000 );
+        return;
+    }
+    m_dualViewportSync->setEnabled( on );
+    if ( on )
+        m_dualViewportSync->snapSecondaryToPrimary();
+    statusBar()->showMessage( on ? tr( "双视口联动已启用" ) : tr( "双视口联动已暂停" ), 2500 );
 }
 
 void QgisDesktopWindow::zoomFullExtent()

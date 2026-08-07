@@ -275,6 +275,7 @@ public:
     void activateMainMapView();
     void activateSecondaryMapView();
     void syncMainLayersToSecondaryView();
+    void toggleDualViewportSync( bool on );
 
     // Layer loading (public for template helper in main_window_processing.cpp)
     void loadRasterLayer(const QString &filePath);
@@ -354,6 +355,8 @@ private:
     sicnu::display::DisplayViewId m_georefI2IDstViewId;
     sicnu::display::DisplayViewId m_georefI2MSrcViewId;
     QAction *m_secondaryViewAction = nullptr;
+    QAction *m_dualViewportSyncAction = nullptr;
+    class RsDualViewportSyncController *m_dualViewportSync = nullptr;
     QgsProjectionSelectionWidget *m_crsSelector = nullptr;
     LayerTreeMenuProvider *m_layerTreeMenuProvider = nullptr;
     QgsProcessingToolboxTreeView *m_toolboxView = nullptr;
