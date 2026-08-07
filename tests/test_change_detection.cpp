@@ -108,3 +108,119 @@ TEST_CASE("ChangeDetection statistics returns zero on null/empty", "[processing]
     CHECK(stats.count == 0);
     CHECK(stats.mean == 0.0f);
 }
+
+// ---------------------------------------------------------------------------
+// Change Detection 2.0 kernels: ratio, CVA, thresholds, morphological cleanup
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ChangeDetection ratio divides after by before", "[processing][change_detection][c1]") {
+    const float before[] = {2.0f, 5.0f, 0.0f, -2.0f};
+    const float after[] = {6.0f, 5.0f, 10.0f, 4.0f};
+    float out[4] = {};
+    REQUIRE(ratio(before, after, out, 4));
+    CHECK(out[0] == Approx(3.0f));
+    CHECK(out[1] == Approx(1.0f));
+    CHECK(std::isnan(out[2])); // before == 0 -> NaN
+    CHECK(out[3] == Approx(-2.0f));
+}
+
+TEST_CASE("ChangeDetection cvaMagnitude sums squared band deltas", "[processing][change_detection][c1]") {
+    // 2 bands, 3 pixels. Deltas: b0 = [3, 4, 1], b1 = [4, 0, 0]
+    const float before0[] = {0, 0, 0};
+    const float after0[] = {3, 4, 1};
+    const float before1[] = {0, 0, 0};
+    const float after1[] = {4, 0, 0};
+    const float* beforeBands[] = {before0, before1};
+    const float* afterBands[] = {after0, after1};
+    float out[3] = {};
+    QString err;
+    REQUIRE(cvaMagnitude(beforeBands, afterBands, 2, 3, out, &err));
+    CHECK(out[0] == Approx(5.0f)); // sqrt(9+16)
+    CHECK(out[1] == Approx(4.0f)); // sqrt(16+0)
+    CHECK(out[2] == Approx(1.0f)); // sqrt(1+0)
+}
+
+TEST_CASE("ChangeDetection otsuThreshold separates a bimodal scene", "[processing][change_detection][c1]") {
+    // Two clusters with spread: ~50 values near 1, ~50 values near 10.
+    std::vector<float> values;
+    for (int i = 0; i < 50; ++i) {
+        values.push_back(0.5f + 0.01f * static_cast<float>(i));
+        values.push_back(9.5f + 0.01f * static_cast<float>(i));
+    }
+    float threshold = 0.0f;
+    REQUIRE(otsuThreshold(values.data(), values.size(), &threshold));
+    // Between two compact clusters the between-class variance is a plateau:
+    // any split strictly between the clusters is optimal. Assert the threshold
+    // separates the clusters (all lows at/below, all highs at/above).
+    for (int i = 0; i < 50; ++i) {
+        CHECK(values[2 * i] <= threshold);      // low cluster
+        CHECK(values[2 * i + 1] >= threshold);  // high cluster
+    }
+}
+
+TEST_CASE("ChangeDetection otsuThreshold handles single-level and invalid input", "[processing][change_detection][c1]") {
+    SECTION("All identical values -> that value") {
+        const float v[] = {3.0f, 3.0f, 3.0f};
+        float t = 0.0f;
+        REQUIRE(otsuThreshold(v, 3, &t));
+        CHECK(t == Approx(3.0f));
+    }
+    SECTION("All NaN -> false") {
+        const float v[] = {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::quiet_NaN()};
+        float t = 0.0f;
+        CHECK_FALSE(otsuThreshold(v, 2, &t));
+    }
+    SECTION("Null/empty -> false") {
+        float t = 0.0f;
+        CHECK_FALSE(otsuThreshold(nullptr, 5, &t));
+        CHECK_FALSE(otsuThreshold(nullptr, 0, &t));
+    }
+}
+
+TEST_CASE("ChangeDetection percentileThreshold uses nearest-rank", "[processing][change_detection][c1]") {
+    std::vector<float> values = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
+    float t = 0.0f;
+    REQUIRE(percentileThreshold(values.data(), values.size(), 90.0, &t));
+    CHECK(t == Approx(90.0f));
+    REQUIRE(percentileThreshold(values.data(), values.size(), 50.0, &t));
+    CHECK(t == Approx(50.0f));
+    // Out-of-range percentile clamps.
+    REQUIRE(percentileThreshold(values.data(), values.size(), 150.0, &t));
+    CHECK(t == Approx(100.0f));
+}
+
+TEST_CASE("ChangeDetection morphologicalCleanup removes isolated noise and fills holes", "[processing][change_detection][c1]") {
+    // 5x5 mask: a solid 3x3 block (rows 1-3, cols 1-3) survives open; isolated
+    // pixels are removed by the erosion pass.
+    std::vector<uint8_t> mask(25, 0);
+    for (int r = 1; r <= 3; ++r) {
+        for (int c = 1; c <= 3; ++c)
+            mask[static_cast<size_t>(r) * 5 + c] = 1;
+    }
+    mask[0] = 1;  // isolated corner pixel
+    mask[21] = 1; // isolated pixel (row 4, col 1)
+
+    morphologicalCleanup(mask.data(), 5, 5, 1, MorphOp::Open);
+    CHECK(mask[0] == 0);  // isolated noise removed
+    CHECK(mask[21] == 0); // isolated noise removed
+    for (int r = 1; r <= 3; ++r) {
+        for (int c = 1; c <= 3; ++c)
+            CHECK(mask[static_cast<size_t>(r) * 5 + c] == 1); // block survives
+    }
+
+    // Close fills a one-pixel hole (3x3 ring).
+    std::vector<uint8_t> ring(9, 0);
+    ring[0] = ring[1] = ring[2] = 1;
+    ring[3] = ring[5] = 1;
+    ring[6] = ring[7] = ring[8] = 1;
+    morphologicalCleanup(ring.data(), 3, 3, 1, MorphOp::Close);
+    CHECK(ring[4] == 1); // center hole filled
+}
+
+TEST_CASE("ChangeDetection morphologicalCleanup never touches NoData", "[processing][change_detection][c1]") {
+    std::vector<uint8_t> mask(9, 0);
+    mask[4] = 255; // NoData center
+    mask[0] = 1;
+    morphologicalCleanup(mask.data(), 3, 3, 1, MorphOp::Erode);
+    CHECK(mask[4] == 255);
+}

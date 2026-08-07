@@ -8,6 +8,9 @@
 #include <QFile>
 #include <QTextStream>
 
+#include <cmath>
+#include <vector>
+
 #include <json/json.h>
 
 #include <gdal_priv.h>
@@ -591,6 +594,138 @@ TEST_CASE("RS change detection validates the shared pixel grid", "[operators][rs
         CHECK(result["output"].asString() == outputPath.toStdString());
         CHECK(QFile::exists(outputPath));
     }
+}
+
+TEST_CASE("RS change detection ratio and CVA methods", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString beforePath = tmp.path() + "/before.tif";
+    const QString afterPath = tmp.path() + "/after.tif";
+    const QString outputPath = tmp.path() + "/out.tif";
+
+    constexpr int W = 4;
+    constexpr int H = 1;
+    // Two bands; band 1: before 100 -> after 200; band 2: before 0 -> after 5.
+    std::vector<std::vector<float>> beforeBands(2, std::vector<float>(W * H, 0.0f));
+    std::vector<std::vector<float>> afterBands(2, std::vector<float>(W * H, 0.0f));
+    for (int i = 0; i < W * H; ++i) {
+        beforeBands[0][i] = 100.0f;
+        afterBands[0][i] = 200.0f;
+        beforeBands[1][i] = 0.0f;
+        afterBands[1][i] = 5.0f;
+    }
+    std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+    QString err;
+    REQUIRE(writeGdalOutput(beforePath, W, H, beforeBands, gt, "EPSG:32648", &err));
+    REQUIRE(writeGdalOutput(afterPath, W, H, afterBands, gt, "EPSG:32648", &err));
+
+    auto op = RSOperatorRegistry::instance().create("rs:change_detection");
+    REQUIRE(op != nullptr);
+
+    SECTION("ratio outputs after/before") {
+        const QString out = tmp.path() + "/ratio.tif";
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = out.toStdString();
+        params["method"] = "ratio";
+        params["band"] = 1;
+
+        RSOperatorContext ctx;
+        Json::Value result = op->run(params, ctx);
+        CHECK(result["method"].asString() == "ratio");
+        CHECK(QFile::exists(out));
+
+        GdalDatasetWrapper ds;
+        REQUIRE(ds.open(out));
+        std::vector<float> values(W * H);
+        REQUIRE(ds.readBandData(1, values.data(), W, H));
+        for (float v : values)
+            CHECK(v == Catch::Approx(2.0f).epsilon(1e-3f));
+    }
+
+    SECTION("cva computes multi-band change magnitude") {
+        const QString out = tmp.path() + "/cva.tif";
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = out.toStdString();
+        params["method"] = "cva";
+
+        RSOperatorContext ctx;
+        Json::Value result = op->run(params, ctx);
+        CHECK(result["method"].asString() == "cva");
+        CHECK(QFile::exists(out));
+
+        GdalDatasetWrapper ds;
+        REQUIRE(ds.open(out));
+        std::vector<float> values(W * H);
+        REQUIRE(ds.readBandData(1, values.data(), W, H));
+        // magnitude = sqrt((200-100)^2 + (5-0)^2) = sqrt(10025)
+        const float expected = std::sqrt(10025.0f);
+        for (float v : values)
+            CHECK(v == Catch::Approx(expected).epsilon(1e-3f));
+    }
+}
+
+TEST_CASE("RS change detection mask path: Otsu threshold, cleanup, area", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString beforePath = tmp.path() + "/before.tif";
+    const QString afterPath = tmp.path() + "/after.tif";
+    const QString maskPath = tmp.path() + "/mask.tif";
+
+    // Bimodal differences: [100, 100, 10, 10] on band 1.
+    constexpr int W = 4;
+    constexpr int H = 1;
+    std::vector<std::vector<float>> beforeBands(1, std::vector<float>(W * H, 0.0f));
+    std::vector<std::vector<float>> afterBands(1, std::vector<float>(W * H, 0.0f));
+    beforeBands[0][0] = 100.0f; afterBands[0][0] = 200.0f; // diff 100
+    beforeBands[0][1] = 100.0f; afterBands[0][1] = 200.0f; // diff 100
+    beforeBands[0][2] = 50.0f;  afterBands[0][2] = 60.0f;  // diff 10
+    beforeBands[0][3] = 50.0f;  afterBands[0][3] = 60.0f;  // diff 10
+    std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+    QString err;
+    REQUIRE(writeGdalOutput(beforePath, W, H, beforeBands, gt, "EPSG:32648", &err));
+    REQUIRE(writeGdalOutput(afterPath, W, H, afterBands, gt, "EPSG:32648", &err));
+
+    auto op = RSOperatorRegistry::instance().create("rs:change_detection");
+    REQUIRE(op != nullptr);
+
+    Json::Value params(Json::objectValue);
+    params["before"] = beforePath.toStdString();
+    params["after"] = afterPath.toStdString();
+    params["output"] = maskPath.toStdString();
+    params["method"] = "difference";
+    params["makeMask"] = true;
+    params["thresholdMethod"] = "otsu";
+    params["cleanup"] = "open";
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+
+    // Otsu separates the 100-cluster from the 10-cluster (two-point data:
+    // any split between the clusters is optimal, so assert it lands above the
+    // low cluster and the mask picks the two high pixels).
+    CHECK(result["thresholdUsed"].asDouble() > 10.0);
+    CHECK(result["thresholdUsed"].asDouble() < 100.0);
+    CHECK(result["changedPixels"].asUInt64() == 2);
+    CHECK(result["totalPixels"].asUInt64() == 4);
+    CHECK(result["changedPercent"].asDouble() == Catch::Approx(50.0));
+    // 2 pixels x (30 m x 30 m) = 1800 m^2.
+    CHECK(result["changedArea"].asDouble() == Catch::Approx(1800.0));
+    CHECK(QFile::exists(maskPath));
+
+    GdalDatasetWrapper ds;
+    REQUIRE(ds.open(maskPath));
+    std::vector<float> mask(W * H);
+    REQUIRE(ds.readBandData(1, mask.data(), W, H));
+    CHECK(mask[0] == 1.0f);
+    CHECK(mask[1] == 1.0f);
+    CHECK(mask[2] == 0.0f);
+    CHECK(mask[3] == 0.0f);
 }
 
 TEST_CASE("RS band math operator execution", "[operators][rs]") {
