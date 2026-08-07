@@ -1,7 +1,7 @@
 # HANDOFF — Autonomous RS System Perfection (/goal) — Optical Platform Session
 
-**Date:** 2026-08-07
-**Mode:** FULL_AUTONOMOUS_LOOP — 23 committed vertical slices (ADR 0065–0086)
+**Date:** 2026-08-08
+**Mode:** FULL_AUTONOMOUS_LOOP — 29 committed vertical slices (ADR 0065–0092)
 **Scope:** Deepen `exp-rs` toward the general-purpose optical/multispectral/
 hyperspectral processing platform (mission: product import → calibration →
 QA masking → atmospheric correction → geometric/grid → analysis-ready →
@@ -36,16 +36,24 @@ analysis → accuracy → provenance, all through the Processing Registry).
 | 21 | ROI mean spectrum (`SpectralRoiProfile`) | `1bf432beba` | 0084 |
 | 22 | Fusion/PCA scalability review (fusion grid preflight, PCA/MNF NaN handling) | `7a822b2f40` | 0085 |
 | 23 | Provenance/lineage in the Data Manager panel | `68cf81116b` | 0086 |
+| 24 | Semantic band roles in the agent workspace snapshot (`bandRoles` in the system prompt) | `8d8025099b` | 0087 |
+| 25 | Apply a QA mask to a product (`rs:apply_mask`, block-streaming, mask-grid auto-align; dialog; DAG now chains `atmospheric → apply_mask → NDVI`) | `95604a0113` | 0088 |
+| 26 | Post-classification comparison (`rs:post_classification_change`: transition matrix, gains/losses, change-type map; `post_classification` kernel) | `4ea75735c7` | 0089 |
+| 27 | Semantic band roles in MCP `describe_dataset` (per-band `role`) | `36ecc88f81` | 0090 |
+| 28 | Grid harmonization: `gdal:reproject` `reference` alignment (auto CRS/pixel/extent from a reference raster) + recovered orphan `test_gdal_ortho_operators` target | `f7a34c4965` | 0091 |
+| 29 | Spectral library matching workbench (`SpectralLibrary::matchSpectrum` SAM/SID ranking; `SpectralLibraryDialog`; 光谱分析 menu) | `d8ef199bf5` | 0092 |
 | + | Full-suite regression fix (GDAL driver registration in a provider test) | `bae3a3eae0` | — |
 
 ## 2. Verification
 
 - **Full clean rebuild: 0 errors** (all targets, incl. the whole test suite).
-- **ctest: 1358 tests, 1357 passed, 1 failed → fixed** (provider test needed
-  `GDALAllRegister()` under fresh-process order). 6 pre-existing vector
-  fixtures remain SKIPPED (removed from VCS). Suite is green.
+- **ctest: 1386 tests, 100% passed, 0 failed** (final full-suite regression of
+  the session). 6 pre-existing vector fixtures remain SKIPPED (removed from
+  VCS). Suite is green.
 - Every new slice shipped with its own Catch2 tests (kernel + operator /
   UI-seam level); the operator registry tests pin the expanded surface.
+- The orphaned `test_gdal_ortho_operators` file (registered in no target) was
+  recovered as `test_gdal_ortho_operators` — 12 GDAL operator cases now run.
 
 ## 3. Product-Aware Pipeline (now reachable end-to-end in the desktop UI)
 
@@ -55,23 +63,29 @@ Import Sentinel-2 / Landsat (ProductImportDialog)
   → radiometric calibration (auto MTL/MTD detection)
   → QA / cloud / shadow / snow mask (rs:qa_mask)
   → atmospheric correction (metadata-resolved DOS1/DOS2, QUAC)
-  → orthorectification / grid compatibility preflight
-  → analysis-ready (reusable lab.preprocess.optical DAG)
+  → orthorectification / grid harmonization (gdal:reproject reference alignment)
+  → apply mask → analysis-ready (lab.preprocess.optical DAG, 5 steps)
   → NDVI / spectral indices (role-resolved) · change detection 2.0
+  → post-classification comparison (transition matrix, gains/losses)
   → classification (model metadata + compatibility) · fusion · PCA/MNF
-  → hyperspectral: library → resample → endmembers → unmix/SAM/SID → RX
+  → hyperspectral: profile → library match (SAM/SID) → resample →
+    endmembers → unmix/SAM/SID → RX
   → provenance (model + lineage queries + Data Manager UI)
+  → Agent/MCP: workspace snapshot + describe_dataset carry band roles
 ```
 
 ## 4. Known Follow-ups (roadmap `.planning/2026-08-07-rs-platform-goal.md`)
 
-- E3: semantic Agent/MCP product/band operations (roles instead of band numbers).
-- C5: task-centric UI consistency (shared band/role/CRS/resolution widgets).
-- D1: FWHM display/export surface; D10: spectral workbench UI assembly.
-- C1 follow-ups: MAD (OTB exists), post-classification comparison, dual-view
-  change workbench.
-- B5 follow-up: apply-mask-to-product operator; C2: probability/confidence
-  outputs, imbalance warnings.
+- E3: next agent/MCP semantic operations (e.g. role-resolved band selection
+  tool contract "calculate NDVI on asset X").
+- C5: task-centric UI consistency (shared band/role/CRS/resolution widgets);
+  Change Detection dual-view workbench (synchronized viewports + Swipe).
+- C1 follow-ups: MAD wrapper over `otb:multivariate_alteration_detector`;
+  change-detection DAG reuse.
+- C2: classification probability/confidence outputs, train/validation split,
+  per-class imbalance warnings.
+- D10: extend the spectral workbench (ROI mean spectrum, spectral resampling
+  into the library grid, continuum removal display).
 - F-phase: cross-platform build verification, final architecture/code review,
   README/CONTEXT sync.
 
