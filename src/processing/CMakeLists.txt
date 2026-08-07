@@ -22,6 +22,7 @@ add_library(sicnu_processing SHARED
     algorithms/terrain_analysis.cpp
     algorithms/image_fusion.cpp
     algorithms/spectral_unmixing.cpp
+    algorithms/spectral_anomaly.cpp
     algorithms/vector_optimizer.cpp
     algorithms/satellite_products.cpp
 

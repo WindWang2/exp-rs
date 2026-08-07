@@ -2718,6 +2718,33 @@ if(TARGET sicnu_operators)
   endif()
   sicnu_discover_tests(test_spectral_unmixing)
 
+  # RX anomaly detection tests - kernel (outlier flagging) + operator.
+  add_executable(test_spectral_anomaly test_spectral_anomaly.cpp)
+  target_link_libraries(test_spectral_anomaly PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    sicnu_processing
+    sicnu_operators
+    GDAL::GDAL
+  )
+  target_include_directories(test_spectral_anomaly PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  if(TARGET jsoncpp)
+    target_link_libraries(test_spectral_anomaly PRIVATE jsoncpp)
+  elseif(JSONCPP_LIBRARIES)
+    target_include_directories(test_spectral_anomaly PRIVATE ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(test_spectral_anomaly PRIVATE ${JSONCPP_LIBRARIES})
+  else()
+    target_link_libraries(test_spectral_anomaly PRIVATE jsoncpp)
+  endif()
+  sicnu_discover_tests(test_spectral_anomaly)
+
   # OpenCV-backed operators (only when OpenCV operators were compiled in)
   if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
     add_executable(test_opencv_operators test_opencv_operators.cpp)

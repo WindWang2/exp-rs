@@ -51,6 +51,7 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_band_math_operator.cpp
     rs/rs_sam_classify_operator.cpp
     rs/rs_spectral_unmixing_operator.cpp
+    rs/rs_rx_anomaly_operator.cpp
     rs/rs_continuum_removal_operator.cpp
     rs/rs_atmospheric_correction_operator.cpp
     rs/rs_radiometric_calibration_operator.cpp
