@@ -17,6 +17,9 @@ namespace sicnu::operators::gdal {
  *   - srcCrs           : override source CRS (optional)
  *   - resampling       : nearest|bilinear|cubic|cubicspline|lanczos (default: bilinear)
  *   - targetResolution : output pixel size in target CRS units (optional)
+ *   - reference        : reference raster whose grid (CRS, pixel size, extent)
+ *                        the output aligns to (optional; overrides dstCrs and
+ *                        targetResolution — grid harmonization)
  *   - nodata           : output no-data value (optional)
  */
 class GdalReprojectOperator : public RSOperator {

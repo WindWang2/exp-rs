@@ -2,6 +2,7 @@
  * test_gdal_ortho_operators.cpp  —  Tests for GDAL-based RSOperators
  ***************************************************************************/
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_context.h"
@@ -213,6 +214,7 @@ TEST_CASE("GdalReprojectOperator schema and metadata", "[gdal]") {
     REQUIRE(schema["properties"].isMember("input"));
     REQUIRE(schema["properties"].isMember("output"));
     REQUIRE(schema["properties"].isMember("dstCrs"));
+    REQUIRE(schema["properties"].isMember("reference"));
     REQUIRE(schema["properties"].isMember("resampling"));
 
     Json::Value meta = op->metadata();
@@ -261,6 +263,58 @@ TEST_CASE("GdalReprojectOperator reprojects georeferenced raster to EPSG:3857", 
     REQUIRE(ds.width() > 0);
     REQUIRE(ds.height() > 0);
     REQUIRE(!ds.projection().isEmpty());
+}
+
+TEST_CASE("GdalReprojectOperator aligns output to a reference raster grid", "[gdal]") {
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
+
+    QString input = createGeoreferencedRaster(tempDir.path(), "wgs84.tif", 32, 32);
+
+    // Reference: 30 m UTM grid, 4x4, origin (500000, 4500000).
+    QString reference = tempDir.path() + QDir::separator() + "ref.tif";
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    REQUIRE(driver != nullptr);
+    GDALDatasetH refDs = GDALCreate(driver, reference.toUtf8().constData(), 4, 4, 1, GDT_Byte, nullptr);
+    REQUIRE(refDs != nullptr);
+    double refGt[6] = {500000.0, 30.0, 0.0, 4500000.0, 0.0, -30.0};
+    REQUIRE(GDALSetGeoTransform(refDs, refGt) == CE_None);
+    OGRSpatialReferenceH srs = OSRNewSpatialReference(nullptr);
+    REQUIRE(OSRImportFromEPSG(srs, 32650) == OGRERR_NONE);
+    char* wkt = nullptr;
+    REQUIRE(OSRExportToWkt(srs, &wkt) == OGRERR_NONE);
+    REQUIRE(GDALSetProjection(refDs, wkt) == CE_None);
+    CPLFree(wkt);
+    OSRDestroySpatialReference(srs);
+    GDALClose(refDs);
+
+    QString output = tempDir.path() + QDir::separator() + "aligned.tif";
+
+    auto op = std::make_unique<GdalReprojectOperator>();
+    RSOperatorContext ctx;
+    Json::Value params(Json::objectValue);
+    params["input"] = input.toStdString();
+    params["reference"] = reference.toStdString();
+    params["output"] = output.toStdString();
+    params["resampling"] = "nearest";
+
+    Json::Value result = op->run(params, ctx);
+    REQUIRE(result["output"].asString() == output.toStdString());
+    CHECK(result["aligned"].asBool() == true);
+    CHECK(result["width"].asInt() == 4);
+    CHECK(result["height"].asInt() == 4);
+
+    // The output lands exactly on the reference grid: same dimensions,
+    // pixel size, origin, and CRS.
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(output));
+    CHECK(out.width() == 4);
+    CHECK(out.height() == 4);
+    const auto outGt = out.geoTransform();
+    for (int i = 0; i < 6; ++i)
+        CHECK(outGt[i] == Catch::Approx(refGt[i]).margin(1e-6));
+    CHECK(out.projection().contains(QStringLiteral("32650")));
 }
 
 TEST_CASE("GdalClipOperator schema and rejects missing clip source", "[gdal]") {
