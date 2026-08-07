@@ -157,6 +157,14 @@ std::array<double, 6> GdalDatasetWrapper::geoTransform() const
     return gt;
 }
 
+bool GdalDatasetWrapper::hasGeoTransform() const
+{
+    if (!m_dataset)
+        return false;
+    std::array<double, 6> gt = {};
+    return GDALGetGeoTransform(static_cast<GDALDatasetH>(m_dataset), gt.data()) == CE_None;
+}
+
 bool GdalDatasetWrapper::readBandData(int bandNum, float *buffer, int dstWidth, int dstHeight) const
 {
     if (!m_dataset || bandNum < 1 || bandNum > bandCount() || !buffer)

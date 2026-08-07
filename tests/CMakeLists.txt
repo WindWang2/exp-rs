@@ -3750,6 +3750,20 @@ target_include_directories(test_virtual_raster_preflight PRIVATE
 )
 sicnu_discover_tests(test_virtual_raster_preflight)
 
+# Shared raster-grid compatibility service tests (pure structure comparisons).
+qt_add_executable(test_raster_grid_compat
+  test_raster_grid_compat.cpp
+)
+target_link_libraries(test_raster_grid_compat PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_data
+)
+target_include_directories(test_raster_grid_compat PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_raster_grid_compat)
+
 # Virtual raster creation tests - provider + createVirtualRaster (#58)
 add_executable(test_virtual_raster_create
   test_virtual_raster_create.cpp

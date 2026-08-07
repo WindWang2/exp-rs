@@ -34,6 +34,8 @@ qt_add_library(sicnu_data STATIC
   providers/xyz_source_provider.h
   processing_asset_resolver.cpp
   processing_asset_resolver.h
+  raster_grid_compat.cpp
+  raster_grid_compat.h
   source_descriptor.cpp
   source_descriptor.h
   virtual_raster_preflight.cpp

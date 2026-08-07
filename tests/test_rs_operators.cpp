@@ -1,6 +1,7 @@
 // Native RS operator tests — verify schema, registration, and execution
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <QCoreApplication>
 #include <QTemporaryDir>
@@ -369,6 +370,80 @@ TEST_CASE("RS spectral index resolves bands from product roles", "[operators][rs
         REQUIRE(ds.readBandData(1, out.data(), W, H));
         // NDBI = (SWIR1 150 - NIR 100) / (150 + 100) = 0.2.
         CHECK(out[0] == Catch::Approx(0.2f).epsilon(0.001));
+    }
+}
+
+TEST_CASE("RS change detection validates the shared pixel grid", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString beforePath = tmp.path() + "/before.tif";
+    const QString afterPath = tmp.path() + "/after.tif";
+    const QString outputPath = tmp.path() + "/diff.tif";
+
+    constexpr int W = 8;
+    constexpr int H = 8;
+    std::vector<std::vector<float>> band(1, std::vector<float>(W * H, 50.0f));
+
+    auto op = RSOperatorRegistry::instance().create("rs:change_detection");
+    REQUIRE(op != nullptr);
+
+    SECTION("Differing pixel grids are rejected with an actionable error") {
+        // Before: 30 m grid; after: 60 m grid, same origin/CRS.
+        std::array<double, 6> gt30 = {500000, 30, 0, 4500000, 0, -30};
+        std::array<double, 6> gt60 = {500000, 60, 0, 4500000, 0, -60};
+        QString err;
+        REQUIRE(writeGdalOutput(beforePath, W, H, band, gt30, "EPSG:32648", &err));
+        REQUIRE(writeGdalOutput(afterPath, W, H, band, gt60, "EPSG:32648", &err));
+
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = outputPath.toStdString();
+        params["method"] = "difference";
+
+        RSOperatorContext ctx;
+        // The message names the pixel grids and the required action, and the
+        // run fails before any pixel work (no output file).
+        REQUIRE_THROWS_WITH(op->run(params, ctx),
+                            Catch::Matchers::ContainsSubstring("pixel grids"));
+        CHECK_FALSE(QFile::exists(outputPath));
+    }
+
+    SECTION("Sub-pixel origin offset is rejected") {
+        std::array<double, 6> gtA = {500000, 30, 0, 4500000, 0, -30};
+        std::array<double, 6> gtB = {500015, 30, 0, 4500000, 0, -30};
+        QString err;
+        REQUIRE(writeGdalOutput(beforePath, W, H, band, gtA, "EPSG:32648", &err));
+        REQUIRE(writeGdalOutput(afterPath, W, H, band, gtB, "EPSG:32648", &err));
+
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = outputPath.toStdString();
+        params["method"] = "difference";
+
+        RSOperatorContext ctx;
+        REQUIRE_THROWS_WITH(op->run(params, ctx),
+                            Catch::Matchers::ContainsSubstring("sub-pixel"));
+    }
+
+    SECTION("Identical grids still run") {
+        std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+        QString err;
+        REQUIRE(writeGdalOutput(beforePath, W, H, band, gt, "EPSG:32648", &err));
+        REQUIRE(writeGdalOutput(afterPath, W, H, band, gt, "EPSG:32648", &err));
+
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = outputPath.toStdString();
+        params["method"] = "difference";
+
+        RSOperatorContext ctx;
+        Json::Value result = op->run(params, ctx);
+        CHECK(result["output"].asString() == outputPath.toStdString());
+        CHECK(QFile::exists(outputPath));
     }
 }
 

@@ -3,6 +3,7 @@
  ***************************************************************************/
 #include "rs_change_detection_operator.h"
 
+#include "data/raster_grid_compat.h"
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -12,6 +13,7 @@
 
 #include <QString>
 
+#include <optional>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -23,6 +25,24 @@ namespace {
 const std::vector<std::string> s_methods = {
     "difference", "normalized_difference", "change_mask"
 };
+
+/// Builds the grid description a raster must satisfy for pixel comparison.
+sicnu::data::RasterGrid gridFromDataset(const GdalDatasetWrapper& ds)
+{
+    sicnu::data::RasterGrid grid;
+    grid.crsWkt = ds.projection();
+    grid.hasGeoTransform = ds.hasGeoTransform();
+    grid.geoTransform = ds.geoTransform();
+    grid.width = ds.width();
+    grid.height = ds.height();
+    for (int b = 1; b <= ds.bandCount(); ++b) {
+        bool hasNoData = false;
+        const double noData = ds.bandNoDataValue(b, &hasNoData);
+        grid.bandNoData.append(hasNoData ? std::optional<double>(noData)
+                                         : std::nullopt);
+    }
+    return grid;
+}
 
 } // anonymous namespace
 
@@ -107,6 +127,19 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
 
     const int width = beforeDs.width();
     const int height = beforeDs.height();
+
+    // Shared pixel-grid preflight (CRS, resolution, origin alignment, extent)
+    // before any pixel comparison. Two unreferenced rasters are not spatially
+    // comparable and pass as compatible; the dimension check below remains the
+    // fallback for them.
+    const sicnu::data::GridCompatReport gridReport =
+        sicnu::data::compareGrids(gridFromDataset(beforeDs), gridFromDataset(afterDs));
+    for (const sicnu::data::GridCompatIssue& issue : gridReport.issues) {
+        if (issue.blocking) {
+            throw RSOperatorError(ErrorCode::InvalidInputData, issue.message.toStdString());
+        }
+        context.logWarning(issue.message.toStdString());
+    }
 
     if (afterDs.width() != width || afterDs.height() != height) {
         throw RSOperatorError(ErrorCode::InvalidInputData,

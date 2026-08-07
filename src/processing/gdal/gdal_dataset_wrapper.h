@@ -128,6 +128,9 @@ public:
     /// Returns the 6-element affine geotransform [originX, pixelW, rotX, originY, rotY, pixelH].
     std::array<double, 6> geoTransform() const;
 
+    /// True when the dataset carries a real geotransform (GDAL reports one).
+    bool hasGeoTransform() const;
+
     // --- Band reading ---
 
     /**
