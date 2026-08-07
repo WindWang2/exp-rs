@@ -114,6 +114,12 @@ Json::Value RsSupervisedClassificationOperator::schema() const {
     props["modelIn"]["required"] = false;
     props["modelOut"] = makeStringParam("modelOut", "Optional path to save OpenCV model", "");
     props["modelOut"]["required"] = false;
+    props["probabilityOutput"] = makeStringParam(
+        "probabilityOutput",
+        "Optional per-pixel best-class probability raster (Float32, NoData -1). "
+        "Requires method=normal_bayes (SVM does not support probabilities)",
+        "");
+    props["probabilityOutput"]["required"] = false;
     props["maxSamplesPerClass"] = makeIntegerParam(
         "maxSamplesPerClass", "Cap training samples per class (0 = unlimited)", 5000);
     props["scale"] = makeBooleanParam(
@@ -153,6 +159,8 @@ Json::Value RsSupervisedClassificationOperator::schema() const {
         "trainSamplesByClass", "Per-class training sample counts", "");
     outputs["imbalanceWarnings"] = makeStringParam(
         "imbalanceWarnings", "Class-imbalance warnings (classes under 10% of the largest)", "");
+    outputs["meanConfidence"] = makeNumberParam(
+        "meanConfidence", "Mean best-class probability over valid pixels (probabilityOutput only)", 0.0);
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
     root["required"] = makeRequired({"input", "output"});
@@ -185,6 +193,7 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
     const std::string outputPath = requireString(params, "output");
     const std::string modelIn = getString(params, "modelIn", "");
     const std::string modelOut = getString(params, "modelOut", "");
+    const std::string probabilityOutput = getString(params, "probabilityOutput", "");
     const std::string trainingPath = getString(params, "training", "");
     const bool predictOnly = !modelIn.empty();
     const bool scale = getBool(params, "scale", true);
@@ -195,6 +204,11 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
     const std::string classField = getString(params, "classField", "class_id");
     const int maxPerClass = getInt(params, "maxSamplesPerClass", 5000);
     const std::string method = getEnum(params, "method", s_methods, "svm");
+    if (!probabilityOutput.empty() && method != "normal_bayes") {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "Probability outputs require method=normal_bayes; "
+                              "SVM does not support them");
+    }
 
     // Parameter completeness first (stable error codes for Agent/tests)
     if (!predictOnly && trainingPath.empty()) {
@@ -234,6 +248,7 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
     cfg.methodName = QString::fromStdString(method);
     cfg.fitScaler = scale;
     cfg.testSplit = testSplit;
+    cfg.probabilityOutput = QString::fromStdString( probabilityOutput );
 
     if (predictOnly) {
         cfg.modelLoadPath = QString::fromStdString(modelIn);
@@ -274,6 +289,10 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
     result["width"] = width;
     result["height"] = height;
     result["featuresExtracted"] = res.featuresExtracted;
+    if (!probabilityOutput.empty()) {
+        result["probabilityOutput"] = probabilityOutput;
+        result["meanConfidence"] = res.meanConfidence;
+    }
     if ( !res.trainSamplesByClass.isEmpty() )
     {
         // Per-class training sample counts + class-imbalance warnings

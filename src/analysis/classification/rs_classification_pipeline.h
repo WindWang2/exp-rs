@@ -82,6 +82,9 @@ struct QGIS_ANALYSIS_EXPORT RsClassificationPipelineResult
     /// Per-class training sample counts (classId -> samples), from the raw
     /// extraction (before any holdout split). Empty in predict-only mode.
     QHash<int, int> trainSamplesByClass;
+    /// Mean best-class probability over valid pixels when a probability
+    /// output was requested (0.0 when none written).
+    double meanConfidence = 0.0;
     /// Confusion matrix + Kappa + per-class P/R/F1, populated when
     /// Config.testX / testY are non-empty. KMeans uses Hungarian-remapped
     /// cluster IDs so labels align with ROI class IDs.
@@ -111,6 +114,11 @@ class QGIS_ANALYSIS_EXPORT RsClassificationPipeline
         int maxSamplesPerClass = 5000;
         bool fitScaler = false;
         double testSplit = 0.0;                         // 0-0.9 holdout fraction for accuracy
+
+        // Optional per-pixel best-class probability raster (Float32, NoData =
+        // -1 on ignored pixels). Requires a backend with supportsProbabilities()
+        // (NormalBayes / MLP); the mean confidence is reported in the result.
+        QString probabilityOutput;
 
         // Predict-only mode model loading path (model YAML + .meta.json sidecar)
         QString modelLoadPath;

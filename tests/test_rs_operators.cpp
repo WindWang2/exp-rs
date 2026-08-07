@@ -1215,6 +1215,71 @@ TEST_CASE("RS supervised classification scale model round-trip", "[operators][rs
     CHECK(a[W * H - 1] == Catch::Approx(2.0f));
 }
 
+TEST_CASE("RS supervised classification writes a probability output (normal_bayes)", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:supervised_classification");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString trainingPath = tmp.path() + "/training.gpkg";
+    const QString outputPath = tmp.path() + "/map.tif";
+    const QString probPath = tmp.path() + "/confidence.tif";
+    makeTwoClassFixture(inputPath, trainingPath);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["training"] = trainingPath.toStdString();
+    params["classField"] = "class_id";
+    params["method"] = "normal_bayes";
+    params["probabilityOutput"] = probPath.toStdString();
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    REQUIRE(QFile::exists(outputPath));
+    REQUIRE(QFile::exists(probPath));
+    CHECK(result["meanConfidence"].asDouble() > 0.5);
+    CHECK(result["meanConfidence"].asDouble() <= 1.0);
+
+    // The probability raster is Float32 with NoData -1; separable classes
+    // produce near-1 posteriors on the class map's valid pixels.
+    GdalDatasetWrapper prob;
+    REQUIRE(prob.open(probPath));
+    CHECK(prob.bandDataType(1) == GDT_Float32);
+    std::vector<float> px(16 * 16);
+    REQUIRE(prob.readBandData(1, px.data(), 16, 16));
+    bool hasNoData = false;
+    prob.bandNoDataValue(1, &hasNoData);
+    CHECK(hasNoData);
+    CHECK(px[0] > 0.9f);
+    CHECK(px[16 * 16 - 1] > 0.9f);
+}
+
+TEST_CASE("RS supervised classification rejects probability output for SVM", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:supervised_classification");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString trainingPath = tmp.path() + "/training.gpkg";
+    const QString outputPath = tmp.path() + "/map.tif";
+    makeTwoClassFixture(inputPath, trainingPath);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["training"] = trainingPath.toStdString();
+    params["method"] = "svm"; // default
+    params["probabilityOutput"] = (tmp.path() + "/confidence.tif").toStdString();
+
+    RSOperatorContext ctx;
+    REQUIRE_THROWS_WITH(op->run(params, ctx),
+                        Catch::Matchers::ContainsSubstring("normal_bayes"));
+    CHECK_FALSE(QFile::exists(tmp.path() + "/confidence.tif"));
+}
+
 TEST_CASE("RS supervised classification escalates dtype for large class ids", "[operators][rs]") {
     auto op = RSOperatorRegistry::instance().create("rs:supervised_classification");
     REQUIRE(op != nullptr);

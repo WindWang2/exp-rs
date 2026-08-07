@@ -651,6 +651,40 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   if ( config.ignoreOptions.writeOutputNodata )
     dstDs->GetRasterBand( 1 )->SetNoDataValue( unclassified );
 
+  // Optional per-pixel best-class probability raster (Float32, NoData -1).
+  GDALDataset *probDs = nullptr;
+  if ( !config.probabilityOutput.isEmpty() )
+  {
+    if ( !config.backend || !config.backend->supportsProbabilities() )
+    {
+      GDALClose( srcDs );
+      GDALClose( dstDs );
+      QFile::remove( config.outputRaster );
+      result.error = RsClassificationPipelineResult::Error::PredictionFailed;
+      result.errorMessage = QStringLiteral(
+        "The selected classifier does not support probability outputs "
+        "(use NormalBayes / MLP)" );
+      return result;
+    }
+    probDs = drv->Create(
+      config.probabilityOutput.toUtf8().constData(), outW, outH, 1,
+      GDT_Float32, papsz );
+    if ( !probDs )
+    {
+      GDALClose( srcDs );
+      GDALClose( dstDs );
+      QFile::remove( config.outputRaster );
+      result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
+      result.errorMessage = QStringLiteral( "Cannot create probability output: %1" )
+                              .arg( config.probabilityOutput );
+      return result;
+    }
+    probDs->SetGeoTransform( outGt );
+    if ( proj && *proj )
+      probDs->SetProjection( proj );
+    probDs->GetRasterBand( 1 )->SetNoDataValue( -1.0 );
+  }
+
   // Per-band source NoData (optional) + user ignore values → unclassified.
   // ADR 0061 — NoData discovery is owned by rsCollectBandNodata (shared with
   // training-data extraction).
@@ -661,12 +695,16 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
                        bandHasNodata, bandNodata );
 
   // Every failure past this point removes the partially-written output.
-  const auto failWithPartialOutput = [&result, &srcDs, &dstDs, &config](
+  const auto failWithPartialOutput = [&result, &srcDs, &dstDs, &probDs, &config](
     RsClassificationPipelineResult::Error error, const QString &message )
   {
     GDALClose( srcDs );
     GDALClose( dstDs );
+    if ( probDs )
+      GDALClose( probDs );
     QFile::remove( config.outputRaster );
+    if ( !config.probabilityOutput.isEmpty() )
+      QFile::remove( config.probabilityOutput );
     result.error = error;
     result.errorMessage = message;
     return result;
@@ -684,6 +722,11 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   // Int32 write buffer; GDAL converts to the band datatype on RasterIO.
   std::vector<int32_t> outBuf( static_cast<size_t>( kTileSize ) * kTileSize );
   std::vector<uint8_t> pixelNodata( static_cast<size_t>( kTileSize ) * kTileSize );
+  // Probability write buffer (Float32; -1 = ignored pixel) + confidence mean.
+  std::vector<float> probBuf( static_cast<size_t>( kTileSize ) * kTileSize, -1.0f );
+  double confidenceSum = 0.0;
+  uint64_t confidenceCount = 0;
+  const bool writeProb = !config.probabilityOutput.isEmpty();
 
   for ( int ty = y0; ty < y1; ty += kTileSize )
   {
@@ -763,6 +806,21 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
             .arg( pred.rows ).arg( npx ) );
       }
 
+      // Per-pixel best-class probability (confidence) when requested.
+      cv::Mat probs;
+      if ( writeProb )
+      {
+        probs = config.backend->predictProbabilities( X );
+        if ( probs.empty() || probs.rows < npx )
+        {
+          return failWithPartialOutput(
+            RsClassificationPipelineResult::Error::PredictionFailed,
+            QStringLiteral( "Classifier returned no probability output at tile (%1,%2)" )
+              .arg( tx ).arg( ty ) );
+        }
+        std::fill( probBuf.begin(), probBuf.begin() + npx, -1.0f );
+      }
+
       for ( int p = 0; p < npx; ++p )
       {
         if ( pixelNodata[static_cast<size_t>( p )] )
@@ -778,6 +836,15 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
         if ( v < 0 )
           v = unclassified;
         outBuf[static_cast<size_t>( p )] = static_cast<int32_t>( v );
+        if ( writeProb )
+        {
+          float best = 0.0f;
+          for ( int c = 0; c < probs.cols; ++c )
+            best = std::max( best, probs.at<float>( p, c ) );
+          probBuf[static_cast<size_t>( p )] = best;
+          confidenceSum += best;
+          ++confidenceCount;
+        }
       }
       // Destination offsets are relative to the crop window origin.
       // GDAL converts Int32 buffer to the band datatype (Byte / UInt16 / Int32).
@@ -786,6 +853,12 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
       dstDs->GetRasterBand( 1 )->RasterIO(
         GF_Write, dstX, dstY, tw, th, outBuf.data(),
         tw, th, GDT_Int32, 0, 0 );
+      if ( writeProb )
+      {
+        probDs->GetRasterBand( 1 )->RasterIO(
+          GF_Write, dstX, dstY, tw, th, probBuf.data(),
+          tw, th, GDT_Float32, 0, 0 );
+      }
 
       ++doneTiles;
       if ( !reportProgress( progress,
@@ -801,10 +874,13 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
 
   GDALClose( srcDs );
   GDALClose( dstDs );
+  if ( probDs )
+    GDALClose( probDs );
 
   result.totalPixels = outW * outH;
   result.durationMs = static_cast<int>( timer.elapsed() );
   result.ok = true;
+  result.meanConfidence = confidenceCount > 0 ? confidenceSum / confidenceCount : 0.0;
   reportProgress( progress, kProgressComplete, QStringLiteral( "Classification complete" ) );
   SICNU_LOG_SUCCESS( SicnuLogTags::Classification, QString( "Classification completed: %1 pixels, %2 ms" )
     .arg( result.totalPixels ).arg( result.durationMs ) );

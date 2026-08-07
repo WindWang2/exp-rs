@@ -20,6 +20,7 @@ class QGIS_ANALYSIS_EXPORT RsMlpBackend : public RsClassifierCvBackend<cv::ml::A
     bool fit( const cv::Mat &X, const cv::Mat &y ) override;
     cv::Mat predict( const cv::Mat &X ) const override;
     cv::Mat predictProbabilities( const cv::Mat &X ) const override;
+    bool supportsProbabilities() const override { return true; }
     QString name() const override { return QStringLiteral( "Neural Network (MLP)" ); }
 
   private:
