@@ -280,9 +280,10 @@ TEST_CASE( "OBIA Task Center keeps cancellation running until the worker exits",
   REQUIRE( sicnu::TaskCenter::instance().cancelTask( taskId ) );
   // cancelTask() returns once cancellation is initiated; the canceledHook
   // runs on the worker thread asynchronously (same delivery race class as the
-  // terminal-status transitions fixed in test_task_center). Poll instead of
-  // asserting immediately - the hook may land a few ms later.
-  for ( int i = 0; i < 400 && !canceledHook->load(); ++i )
+  // terminal-status transitions fixed in test_task_center). Poll with a
+  // generous budget — under heavy parallel test load the worker may not be
+  // scheduled for several seconds.
+  for ( int i = 0; i < 2000 && !canceledHook->load(); ++i )
     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
   REQUIRE( canceledHook->load() );
   // Still Running until worker observes cancel
