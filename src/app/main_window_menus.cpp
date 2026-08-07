@@ -499,6 +499,60 @@ void QgisDesktopWindow::setupMenu()
 #endif
 
     // ------------------------------------------------------------------
+    // 遥感 Remote Sensing — 任务导向入口（C5）：不暴露 provider 名称，
+    // 按领域工作流分组，复用与菜单栏各功能相同的对话框/运算符。
+    // ------------------------------------------------------------------
+    QMenu *rsMenu = makeMenu( appMenuBar()->addMenu( tr( "遥感(&S)" ) ) );
+
+    QMenu *rsProduct = makeMenu( rsMenu->addMenu( tr( "产品与预处理" ) ) );
+    setMenuIcon( rsProduct, ic( "extr_ct_b_nd" ) );
+    tip( rsProduct->addAction( ic( "i_ort" ), tr( "导入遥感产品..." ), this,
+                               [this]() { openProductImportDialog( QStringLiteral( "auto" ) ); } ),
+         tr( "Sentinel-2 / Landsat / MODIS 产品识别导入，自动解析波段角色与元数据。" ) );
+    tip( rsProduct->addAction( ic( "at_os_corr" ), tr( "辐射定标..." ),
+                               this, &QgisDesktopWindow::openRadiometricCalibrationDialog ),
+         tr( "DN→辐射亮度 / TOA 反射率 / 亮温（自动探测传感器元数据）。" ) );
+    tip( rsProduct->addAction( ic( "qa_mask" ), tr( "QA 掩膜（云/云影/雪）..." ),
+                               this, &QgisDesktopWindow::openQaMaskDialog ),
+         tr( "从 Landsat QA_PIXEL / Sentinel-2 SCL 生成云/云影/雪掩膜。" ) );
+    tip( rsProduct->addAction( ic( "qa_mask" ), tr( "应用掩膜..." ),
+                               this, &QgisDesktopWindow::openApplyMaskDialog ),
+         tr( "掩膜应用到产品：被遮挡像元置为 NoData，得到分析就绪影像。" ) );
+    tip( rsProduct->addAction( ic( "at_os_corr" ), tr( "大气校正..." ),
+                               this, &QgisDesktopWindow::openAtmosphericCorrectionDialog ),
+         tr( "DOS1 / DOS2 / QUAC，元数据自动填充参数。" ) );
+    tip( rsProduct->addAction( ic( "geocorrection" ), tr( "正射纠正 (RPC/GCP)..." ),
+                               this, &QgisDesktopWindow::openOrthorectificationDialog ),
+         tr( "基于 RPC/GCP 与可选 DEM 的地形纠正。" ) );
+
+    QMenu *rsAnalysis = makeMenu( rsMenu->addMenu( tr( "分析" ) ) );
+    setMenuIcon( rsAnalysis, ic( "veget_tion_index" ) );
+    tip( rsAnalysis->addAction( ic( "veget_tion_index" ), tr( "光谱指数..." ),
+                                this, &QgisDesktopWindow::openSpectralIndexDialog ),
+         tr( "NDVI / EVI / SAVI / NDWI / NDBI / MNDWI（按语义波段角色自动选带）。" ) );
+    QMenu *rsSpectral = makeMenu( rsAnalysis->addMenu( tr( "光谱分析" ) ) );
+    tip( rsSpectral->addAction( ic( "su_ervised" ), tr( "光谱库匹配..." ),
+                                this, &QgisDesktopWindow::openSpectralLibraryDialog ),
+         tr( "像元/ROI 谱与光谱库匹配（SAM + SID）。" ) );
+    tip( rsSpectral->addAction( ic( "sel_tool" ), tr( "ROI 均值谱..." ),
+                                this, &QgisDesktopWindow::activateRoiSpectrumTool ),
+         tr( "多边形 ROI 均值谱 → 光谱剖面面板。" ) );
+    tip( rsAnalysis->addAction( ic( "ch_nge_detect" ), tr( "变化检测..." ),
+                                this, &QgisDesktopWindow::openChangeDetectionDialog ),
+         tr( "差值 / 归一化差值 / 变化掩膜 / 后分类比较。" ) );
+    tip( rsAnalysis->addAction( ic( "p_nsh_r_en" ), tr( "影像融合..." ),
+                                this, &QgisDesktopWindow::openFusionDialog ),
+         tr( "全色锐化：Linear / Brovey / IHS / PCA 或 OTB/GDAL。" ) );
+    tip( rsAnalysis->addAction( ic( "dem" ), tr( "地形分析..." ),
+                                this, &QgisDesktopWindow::openTerrainDialog ),
+         tr( "DEM：坡度 / 坡向 / 山体阴影 / 粗糙度等。" ) );
+
+    rsMenu->addSeparator();
+    tip( rsMenu->addAction( ic( "workflow" ), tr( "预处理工作流 (DAG)..." ), this,
+                           [this]() { openWorkflowTool( QStringLiteral( "lab.preprocess.optical" ) ); } ),
+         tr( "可复用分析就绪流程：定标 → QA 掩膜 → 大气校正 → 应用掩膜 → NDVI。" ) );
+
+    // ------------------------------------------------------------------
     // 矢量 Vector — 按功能分组
     // ------------------------------------------------------------------
     QMenu *vectorMenu = makeMenu( appMenuBar()->addMenu( tr( "矢量(&T)" ) ) );
