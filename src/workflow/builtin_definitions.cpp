@@ -111,6 +111,46 @@ void registerPreprocessOptical( WorkflowRuntime &runtime )
   runtime.registerDefinition( std::move( d ) );
 }
 
+/// Reusable "自动对齐 + 变化检测" DAG: aligns the before-date raster onto the
+/// after-date raster's grid (gdal:reproject `reference`, ADR 0091 — grid
+/// harmonization) and then runs rs:change_detection difference between them.
+/// The user fills `align_before.input` / `align_before.reference` /
+/// `change.after` in the TaskPanel; the aligned before flows via the
+/// `$align_before.aligned` artifact placeholder.
+void registerChangeDetectionAlign( WorkflowRuntime &runtime )
+{
+  WorkflowDefinition d;
+  d.id = "lab.change.align_difference";
+  d.title = "变化检测（自动对齐）";
+  d.host = HostKind::TaskPanel;
+
+  StepDef alignBefore;
+  alignBefore.id = "align_before";
+  alignBefore.title = "对齐前时相";
+  alignBefore.kind = StepKind::Operator;
+  alignBefore.operatorId = "gdal:reproject";
+  alignBefore.artifactOnSuccess = "aligned";
+  alignBefore.uiMeta = { 0.0, 0.0 };
+  alignBefore.gates.push_back( { "paramNonEmpty:align_before.input", "请选择前时相影像" } );
+  alignBefore.params["resampling"] = "nearest";
+
+  StepDef change;
+  change.id = "change";
+  change.title = "差值检测";
+  change.kind = StepKind::Operator;
+  change.operatorId = "rs:change_detection";
+  change.artifactOnSuccess = "change_map";
+  change.uiMeta = { 300.0, 0.0 };
+  change.uiMeta.portAddToMap["change_map"] = true;
+  change.inputs.push_back( { "align_before", "aligned", "before" } );
+  change.gates.push_back( { "paramNonEmpty:change.after", "请选择后时相影像" } );
+  change.params["before"] = "$align_before.aligned";
+  change.params["method"] = "difference";
+
+  d.steps = { alignBefore, change };
+  runtime.registerDefinition( std::move( d ) );
+}
+
 void registerClassifySupervised( WorkflowRuntime &runtime )
 {
   WorkflowDefinition d;
@@ -333,6 +373,7 @@ void registerBuiltinWorkflows( WorkflowRuntime &runtime )
                       "rs:apply_mask", "input", "请选择输入栅格" );
 
   registerPreprocessOptical( runtime );
+  registerChangeDetectionAlign( runtime );
   registerClassifySupervised( runtime );
   registerGeorefImageToMap( runtime );
   registerObia( runtime );

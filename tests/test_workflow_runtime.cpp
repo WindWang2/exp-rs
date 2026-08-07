@@ -238,11 +238,12 @@ TEST_CASE( "Builtin workflows registered", "[workflow]" )
   // Reusable preprocessing DAG (B8/E1).
   REQUIRE( rt.hasDefinition( "lab.preprocess.optical" ) );
   // registerBuiltinWorkflows (builtin_definitions.cpp) registers 16 atomic
-  // tools + 5 compound workflows (preprocess_optical, classify_supervised,
-  // georef_image_to_map, obia, classification_postprocess_merge) = 21. The
-  // individual hasDefinition assertions above cover the actual set; keep this
-  // count in sync with registerBuiltinWorkflows.
-  REQUIRE( rt.registeredDefinitionIds().size() == 21 );
+  // tools + 6 compound workflows (preprocess_optical, change_detection_align,
+  // classify_supervised, georef_image_to_map, obia,
+  // classification_postprocess_merge) = 22. The individual hasDefinition
+  // assertions above cover the actual set; keep this count in sync with
+  // registerBuiltinWorkflows.
+  REQUIRE( rt.registeredDefinitionIds().size() == 22 );
 
   const auto *d = rt.findDefinition( "tool.rs.spectral_index" );
   REQUIRE( d );
@@ -601,4 +602,23 @@ TEST_CASE( "Preprocessing DAG chains operators with artifact flow", "[workflow][
   // roles (ADR 0065) when the raster carries SICNU_BAND_ROLE metadata.
   CHECK_FALSE( d->steps[4].params.isMember( "nir" ) );
   CHECK( d->steps[4].params["index"].asString() == "NDVI" );
+}
+
+TEST_CASE( "Change-detection DAG aligns before aligning grids then diffs", "[workflow][change_detection]" )
+{
+  WorkflowRuntime rt;
+  REQUIRE( rt.hasDefinition( "lab.change.align_difference" ) );
+  const auto *d = rt.findDefinition( "lab.change.align_difference" );
+  REQUIRE( d != nullptr );
+  REQUIRE( d->steps.size() == 2 );
+
+  CHECK( d->steps[0].operatorId == "gdal:reproject" );
+  CHECK( d->steps[0].artifactOnSuccess == "aligned" );
+  CHECK( d->steps[1].operatorId == "rs:change_detection" );
+  // The change step consumes the aligned before via the artifact placeholder
+  // and the user-supplied after raster directly.
+  CHECK( d->steps[1].params["before"].asString() == "$align_before.aligned" );
+  CHECK( d->steps[1].params["method"].asString() == "difference" );
+  REQUIRE( d->steps[1].gates.size() == 1 );
+  CHECK( d->steps[1].gates[0].require == "paramNonEmpty:change.after" );
 }
