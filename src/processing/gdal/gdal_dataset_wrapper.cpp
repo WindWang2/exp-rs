@@ -126,6 +126,31 @@ bool GdalDatasetWrapper::readBandData(int bandNum, float *buffer, int dstWidth, 
     return err == CE_None;
 }
 
+bool GdalDatasetWrapper::readBandWindow(int bandNum, int xOff, int yOff,
+                                        int srcWidth, int srcHeight, float *buffer) const
+{
+    if (!m_dataset || bandNum < 1 || bandNum > bandCount() || !buffer)
+        return false;
+    if (srcWidth <= 0 || srcHeight <= 0 || xOff < 0 || yOff < 0)
+        return false;
+
+    GDALRasterBandH band = GDALGetRasterBand(static_cast<GDALDatasetH>(m_dataset), bandNum);
+    if (!band)
+        return false;
+
+    // Clamp the window to the raster extent to be forgiving at edges.
+    const int bw = GDALGetRasterBandXSize(band);
+    const int bh = GDALGetRasterBandYSize(band);
+    if (xOff >= bw || yOff >= bh)
+        return false;
+
+    CPLErr err = GDALRasterIO(band, GF_Read,
+                              xOff, yOff, srcWidth, srcHeight,
+                              buffer, srcWidth, srcHeight, GDT_Float32,
+                              0, 0);
+    return err == CE_None;
+}
+
 int GdalDatasetWrapper::bandDataType(int bandNum) const
 {
     if (!m_dataset || bandNum < 1 || bandNum > bandCount())

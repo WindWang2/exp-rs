@@ -122,6 +122,21 @@ public:
     bool readBandData(int bandNum, float *buffer, int dstWidth, int dstHeight) const;
 
     /**
+     * Read a rectangular window of a band into a float buffer (out-of-core
+     * streaming support). The window is read at native resolution (no
+     * resampling): buffer must hold srcWidth*srcHeight floats.
+     * @param bandNum 1-based band number
+     * @param xOff    pixel column of the window's left edge (0-based)
+     * @param yOff    pixel row of the window's top edge (0-based)
+     * @param srcWidth  window width in source pixels
+     * @param srcHeight window height in source pixels
+     * @param buffer  pre-allocated float buffer of size srcWidth*srcHeight
+     * @return true on success
+     */
+    bool readBandWindow(int bandNum, int xOff, int yOff,
+                        int srcWidth, int srcHeight, float *buffer) const;
+
+    /**
      * Read a single pixel value.
      * @param bandNum 1-based band number
      * @param x pixel column (0-based)
