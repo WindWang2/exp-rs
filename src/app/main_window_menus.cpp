@@ -131,9 +131,16 @@ void QgisDesktopWindow::setupMenu()
     tip( projectMenu->addAction( ic( "i_ort" ), tr( "导入图层..." ),
                                  this, &QgisDesktopWindow::importLayer ),
          tr( "导入栅格或矢量图层到工程。" ) );
+    tip( projectMenu->addAction( ic( "i_ort" ), tr( "导入产品..." ),
+                                 this, [this]() { openProductImportDialog( QStringLiteral( "auto" ) ); } ),
+         tr( "按产品导入 Landsat / Sentinel-2 / MODIS 场景：预览波段/网格组并选择导入为数据集合。" ) );
+    // Per-family entries for the two modern optical product lines.
     tip( projectMenu->addAction( ic( "i_ort" ), tr( "导入 Landsat 产品..." ),
-                                 this, &QgisDesktopWindow::openLandsatImportDialog ),
-         tr( "按产品导入 Landsat 场景：预览波段/网格组并选择导入为数据集合。" ) );
+                                 this, [this]() { openProductImportDialog( QStringLiteral( "landsat" ) ); } ),
+         tr( "按产品导入 Landsat 场景（含 *_MTL.txt 的目录）。" ) );
+    tip( projectMenu->addAction( ic( "i_ort" ), tr( "导入 Sentinel-2 产品..." ),
+                                 this, [this]() { openProductImportDialog( QStringLiteral( "sentinel2" ) ); } ),
+         tr( "按产品导入 Sentinel-2 SAFE 产品（含 MTD_MSI*.xml 的 .SAFE 目录）。" ) );
     tip( projectMenu->addAction( ic( "cloud_sync" ), tr( "浏览 STAC 目录..." ),
                                  this, &QgisDesktopWindow::browseStacCatalog ),
          tr( "浏览 STAC 目录检索遥感数据。" ) );

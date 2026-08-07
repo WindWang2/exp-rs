@@ -5,7 +5,7 @@
 #include "active_view_host.h"
 #include "project_context.h"
 #include "dialogs/stac_browser_dialog.h"
-#include "dialogs/landsat_import_dialog.h"
+#include "dialogs/product_import_dialog.h"
 #include "panels/data_manager_panel.h"
 #include "operators/framework/rs_operation_logger.h"
 
@@ -190,17 +190,18 @@ void QgisDesktopWindow::browseStacCatalog()
     dlg.exec();
 }
 
-void QgisDesktopWindow::openLandsatImportDialog()
+void QgisDesktopWindow::openProductImportDialog(const QString &family)
 {
     if ( !m_projectContext )
     {
-        QMessageBox::information( this, tr( "导入 Landsat 产品" ),
+        QMessageBox::information( this, tr( "导入产品" ),
                                   tr( "工程数据上下文不可用。" ) );
         return;
     }
 
-    LandsatImportDialog dialog( this );
+    ProductImportDialog dialog( this );
     dialog.setDataManager( &m_projectContext->dataManager() );
+    dialog.setProductFamily( family );
     // The dialog runs the probe-preview-commit transaction itself; on accept
     // the collection + selected band children are registered and the Data
     // Manager panel refreshes via collectionAdded/assetAdded.

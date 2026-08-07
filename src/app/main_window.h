@@ -168,7 +168,7 @@ public:
     void saveProject();
     void saveProjectAs();
     void importLayer();
-    void openLandsatImportDialog();
+    void openProductImportDialog(const QString &family);
     void browseStacCatalog();
     void newLayout();
     void exportLabReport();

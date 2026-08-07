@@ -1,9 +1,10 @@
-// test_landsat_import_dialog.cpp - Landsat probe-preview-commit dialog logic
+// test_product_import_dialog.cpp - product probe-preview-commit dialog logic
 //
 // Drives the dialog's public probe/commitSelection logic headlessly (no
-// exec()), staging a synthetic Landsat scene and asserting the transaction:
-// probe is read-only, commit registers the collection with selected children,
-// and cancel registers nothing.
+// exec()), staging synthetic Landsat and Sentinel-2 products and asserting the
+// transaction: probe is read-only, commit registers the collection with
+// selected children, and cancel registers nothing. The dialog is
+// sensor-agnostic; the product family only shapes labels.
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
@@ -18,7 +19,7 @@
 
 #include <qgsapplication.h>
 
-#include "app/dialogs/landsat_import_dialog.h"
+#include "app/dialogs/product_import_dialog.h"
 #include "data/collection_types.h"
 #include "data/data_manager.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -35,7 +36,7 @@ void ensureQgisApplication()
   if ( QApplication::instance() )
     return;
   static int argc = 1;
-  static char applicationName[] = "test_landsat_import_dialog";
+  static char applicationName[] = "test_product_import_dialog";
   static char *argv[] = { applicationName, nullptr };
   static auto *application = new QgsApplication( argc, argv, true );
   ( void ) application;
@@ -83,17 +84,37 @@ QString writeFakeLandsatScene( const QDir &root )
   return scene;
 }
 
+/// Minimal synthetic Sentinel-2 L2A SAFE product. Returns the .SAFE path.
+QString writeFakeSentinel2Safe( const QDir &root )
+{
+  const QString safe = root.filePath( QStringLiteral(
+    "S2A_MSIL2A_20200615T000000_N9999_R000_T32TQQ_20200615T000000.SAFE" ) );
+  const QString img = safe + QStringLiteral( "/GRANULE/L2A_T32TQQ/IMG_DATA/R10m" );
+  QDir().mkpath( img );
+
+  QFile mtd( QDir( safe ).filePath( QStringLiteral( "MTD_MSIL2A.xml" ) ) );
+  REQUIRE( mtd.open( QIODevice::WriteOnly | QIODevice::Text ) );
+  mtd.write( "<n1:Level-2A_User_Product></n1:Level-2A_User_Product>\n" );
+  mtd.close();
+
+  writeTinyBand( img + QStringLiteral( "/T32TQQ_20200615T000000_B02_10m.tif" ), 50.f );
+  writeTinyBand( img + QStringLiteral( "/T32TQQ_20200615T000000_B03_10m.tif" ), 60.f );
+  writeTinyBand( img + QStringLiteral( "/T32TQQ_20200615T000000_B04_10m.tif" ), 40.f );
+  writeTinyBand( img + QStringLiteral( "/T32TQQ_20200615T000000_B08_10m.tif" ), 180.f );
+  return safe;
+}
+
 } // namespace
 
 TEST_CASE( "Probing a Landsat directory fills the preview and registers nothing",
-           "[landsat_import][probe]" )
+           "[product_import][probe]" )
 {
   ensureQgisApplication();
   QTemporaryDir dir;
   const QString scene = writeFakeLandsatScene( QDir( dir.path() ) );
 
   DataManager manager;
-  LandsatImportDialog dialog;
+  ProductImportDialog dialog;
   dialog.setDataManager( &manager );
   dialog.setSourcePath( scene );
 
@@ -106,14 +127,14 @@ TEST_CASE( "Probing a Landsat directory fills the preview and registers nothing"
 }
 
 TEST_CASE( "Importing selected bands registers a collection with the band children",
-           "[landsat_import][commit]" )
+           "[product_import][commit]" )
 {
   ensureQgisApplication();
   QTemporaryDir dir;
   const QString scene = writeFakeLandsatScene( QDir( dir.path() ) );
 
   DataManager manager;
-  LandsatImportDialog dialog;
+  ProductImportDialog dialog;
   dialog.setDataManager( &manager );
   dialog.setSourcePath( scene );
   REQUIRE( dialog.probe() );
@@ -140,15 +161,41 @@ TEST_CASE( "Importing selected bands registers a collection with the band childr
   }
 }
 
+TEST_CASE( "A Sentinel-2 SAFE product probes and commits through the same dialog",
+           "[product_import][probe][commit][sentinel2]" )
+{
+  ensureQgisApplication();
+  QTemporaryDir dir;
+  const QString safe = writeFakeSentinel2Safe( QDir( dir.path() ) );
+
+  DataManager manager;
+  ProductImportDialog dialog;
+  dialog.setDataManager( &manager );
+  dialog.setProductFamily( QStringLiteral( "sentinel2" ) );
+  dialog.setSourcePath( safe );
+
+  REQUIRE( dialog.probe() );
+  // The 10 m band files are distinct children (band-by-band selection);
+  // the product auto-detected regardless of the family label.
+  REQUIRE( dialog.previewCount() == 4 );
+
+  const CollectionId collectionId = dialog.commitSelection();
+  REQUIRE( !collectionId.isNull() );
+  CHECK( manager.collections().size() == 1 );
+  const auto collection = manager.collection( collectionId );
+  REQUIRE( collection.has_value() );
+  CHECK( collection->childAssetIds.size() == 4 );
+}
+
 TEST_CASE( "A subset selection imports only the checked band groups",
-           "[landsat_import][commit]" )
+           "[product_import][commit]" )
 {
   ensureQgisApplication();
   QTemporaryDir dir;
   const QString scene = writeFakeLandsatScene( QDir( dir.path() ) );
 
   DataManager manager;
-  LandsatImportDialog dialog;
+  ProductImportDialog dialog;
   dialog.setDataManager( &manager );
   dialog.setSourcePath( scene );
   REQUIRE( dialog.probe() );
@@ -169,14 +216,14 @@ TEST_CASE( "A subset selection imports only the checked band groups",
 }
 
 TEST_CASE( "Unchecking every band refuses the commit and registers nothing",
-           "[landsat_import][commit]" )
+           "[product_import][commit]" )
 {
   ensureQgisApplication();
   QTemporaryDir dir;
   const QString scene = writeFakeLandsatScene( QDir( dir.path() ) );
 
   DataManager manager;
-  LandsatImportDialog dialog;
+  ProductImportDialog dialog;
   dialog.setDataManager( &manager );
   dialog.setSourcePath( scene );
   REQUIRE( dialog.probe() );
@@ -192,7 +239,7 @@ TEST_CASE( "Unchecking every band refuses the commit and registers nothing",
 }
 
 TEST_CASE( "Cancelling after a probe registers nothing",
-           "[landsat_import][cancel]" )
+           "[product_import][cancel]" )
 {
   ensureQgisApplication();
   QTemporaryDir dir;
@@ -200,7 +247,7 @@ TEST_CASE( "Cancelling after a probe registers nothing",
 
   DataManager manager;
   {
-    LandsatImportDialog dialog;
+    ProductImportDialog dialog;
     dialog.setDataManager( &manager );
     dialog.setSourcePath( scene );
     REQUIRE( dialog.probe() );
@@ -214,13 +261,13 @@ TEST_CASE( "Cancelling after a probe registers nothing",
 }
 
 TEST_CASE( "Probing an invalid directory surfaces a diagnostic and registers nothing",
-           "[landsat_import][probe]" )
+           "[product_import][probe]" )
 {
   ensureQgisApplication();
   QTemporaryDir dir;
 
   DataManager manager;
-  LandsatImportDialog dialog;
+  ProductImportDialog dialog;
   dialog.setDataManager( &manager );
   dialog.setSourcePath( dir.filePath( QStringLiteral( "not-a-scene" ) ) );
 

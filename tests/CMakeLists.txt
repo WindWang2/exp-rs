@@ -3627,17 +3627,18 @@ else()
 endif()
 sicnu_discover_tests(test_satellite_products)
 
-# Landsat import dialog tests - probe-preview-commit transaction (headless)
-add_executable(test_landsat_import_dialog
-  test_landsat_import_dialog.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/dialogs/landsat_import_dialog.cpp
-  # landsat_import_dialog.cpp calls SicnuDialogHelp::htmlForTool/shortForTool/tip,
+# Product import dialog tests - probe-preview-commit transaction (headless;
+# Landsat + Sentinel-2 fixtures, sensor-agnostic dialog).
+add_executable(test_product_import_dialog
+  test_product_import_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/product_import_dialog.cpp
+  # product_import_dialog.cpp calls SicnuDialogHelp::htmlForTool/shortForTool/tip,
   # whose impls live in dialog_help_catalog.cpp. The other dialog tests
   # (lines ~1739/2844/3267) already compile it; this target was missing it,
-  # which left test_landsat_import_dialog unlinked (_NOT_BUILT in ctest).
+  # which left the dialog import test unlinked (_NOT_BUILT in ctest).
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
 )
-target_link_libraries(test_landsat_import_dialog PRIVATE
+target_link_libraries(test_product_import_dialog PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
@@ -3648,12 +3649,12 @@ target_link_libraries(test_landsat_import_dialog PRIVATE
   sicnu_processing
   sicnu_data
 )
-target_include_directories(test_landsat_import_dialog PRIVATE
+target_include_directories(test_product_import_dialog PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-set_target_properties(test_landsat_import_dialog PROPERTIES AUTOMOC ON)
-sicnu_discover_tests(test_landsat_import_dialog)
+set_target_properties(test_product_import_dialog PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_product_import_dialog)
 
 # Virtual raster recipe tests - recipe value type + JSON round-trip (#55)
 qt_add_executable(test_virtual_raster_recipe

@@ -110,6 +110,7 @@ add_executable(sicnu_geo_rs
     dialogs/spectral_index_dialog.cpp
     dialogs/atmospheric_dialog.cpp
     dialogs/qa_mask_dialog.cpp
+    dialogs/product_import_dialog.cpp
     dialogs/crs_preset_dialog.cpp
     dialogs/preferences_dialog.cpp
     dialogs/contrast_stretch_dialog.cpp
@@ -129,7 +130,6 @@ add_executable(sicnu_geo_rs
     dialogs/stac_browser_dialog.cpp
     dialogs/raster_processing_dialog_base.cpp
     dialogs/extract_band_dialog.cpp
-    dialogs/landsat_import_dialog.cpp
     layout/qgslayoutdesignerdialog.cpp
     map_tools/measure_tool.cpp
     widgets/histogram_widget.cpp

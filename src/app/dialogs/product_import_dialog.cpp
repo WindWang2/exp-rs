@@ -1,5 +1,5 @@
-// src/app/dialogs/landsat_import_dialog.cpp
-#include "landsat_import_dialog.h"
+// src/app/dialogs/product_import_dialog.cpp
+#include "product_import_dialog.h"
 
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -26,43 +26,71 @@ using sicnu::data::DataManager;
 using sicnu::data::PersistencePolicy;
 using sicnu::data::Result;
 
-LandsatImportDialog::LandsatImportDialog( QWidget *parent )
-  : QDialog( parent )
+namespace
 {
-  setObjectName( QStringLiteral( "landsatImportDialog" ) );
-  setWindowTitle( tr( "导入 Landsat 产品" ) );
-  setupUi();
-  setWhatsThis( SicnuDialogHelp::htmlForTool( QStringLiteral( "landsat_import" ), windowTitle() ) );
-  setToolTip( SicnuDialogHelp::shortForTool( QStringLiteral( "landsat_import" ), windowTitle() ) );
+
+/// Human-readable product family name for labels ("Landsat", "Sentinel-2",
+/// "MODIS", or "遥感产品" for auto).
+QString familyDisplayName( const QString &family )
+{
+  if ( family == QLatin1String( "landsat" ) )
+    return QStringLiteral( "Landsat" );
+  if ( family == QLatin1String( "sentinel2" ) )
+    return QStringLiteral( "Sentinel-2" );
+  if ( family == QLatin1String( "modis" ) )
+    return QStringLiteral( "MODIS" );
+  return QStringLiteral( "遥感产品" );
 }
 
-void LandsatImportDialog::setDataManager( DataManager *dataManager )
+} // namespace
+
+ProductImportDialog::ProductImportDialog( QWidget *parent )
+  : QDialog( parent )
+{
+  setObjectName( QStringLiteral( "productImportDialog" ) );
+  setWindowTitle( familyTitle() );
+  setupUi();
+  setWhatsThis( SicnuDialogHelp::htmlForTool( helpTool(), windowTitle() ) );
+  setToolTip( SicnuDialogHelp::shortForTool( helpTool(), windowTitle() ) );
+}
+
+void ProductImportDialog::setDataManager( DataManager *dataManager )
 {
   m_dataManager = dataManager;
   // Without a Data Manager there is no catalog to register into.
   m_importButton->setEnabled( m_dataManager != nullptr && previewCount() > 0 );
 }
 
-void LandsatImportDialog::setSourcePath( const QString &path, bool autoProbe )
+void ProductImportDialog::setProductFamily( const QString &family )
+{
+  m_productFamily = family;
+  setWindowTitle( familyTitle() );
+  const QString display = familyDisplayName( family );
+  m_pathEdit->setPlaceholderText( tr( "%1 产品目录（Landsat 含 *_MTL.txt；Sentinel-2 含 .SAFE）" ).arg( display ) );
+  SicnuDialogHelp::tip( m_pathEdit, tr( "%1 产品目录路径（自动识别产品类型）。" ).arg( display ) );
+  SicnuDialogHelp::tip( m_browseButton, tr( "浏览选择 %1 产品目录。" ).arg( display ) );
+  SicnuDialogHelp::tip( m_probeButton, tr( "解析产品元数据，列出可导入的子项与波段。" ) );
+  setWhatsThis( SicnuDialogHelp::htmlForTool( helpTool(), windowTitle() ) );
+  setToolTip( SicnuDialogHelp::shortForTool( helpTool(), windowTitle() ) );
+}
+
+void ProductImportDialog::setSourcePath( const QString &path, bool autoProbe )
 {
   m_pathEdit->setText( path );
   if ( autoProbe )
     probe();
 }
 
-void LandsatImportDialog::setupUi()
+void ProductImportDialog::setupUi()
 {
   auto *layout = new QVBoxLayout( this );
 
   // Source directory row.
   auto *pathRow = new QHBoxLayout;
   m_pathEdit = new QLineEdit( this );
-  m_pathEdit->setPlaceholderText( tr( "Landsat 场景目录（含 *_MTL.txt）" ) );
-  SicnuDialogHelp::tip( m_pathEdit, tr( "Landsat 场景目录路径（解压后含 *_MTL.txt 的目录）。" ) );
+  m_pathEdit->setPlaceholderText( tr( "产品目录（自动识别 Landsat / Sentinel-2 / MODIS）" ) );
   m_browseButton = new QPushButton( tr( "浏览…" ), this );
-  SicnuDialogHelp::tip( m_browseButton, tr( "浏览选择 Landsat 场景目录。" ) );
   m_probeButton = new QPushButton( tr( "探测" ), this );
-  SicnuDialogHelp::tip( m_probeButton, tr( "解析 MTL 文件，列出可导入的子项与波段。" ) );
   pathRow->addWidget( m_pathEdit, 1 );
   pathRow->addWidget( m_browseButton );
   pathRow->addWidget( m_probeButton );
@@ -70,7 +98,7 @@ void LandsatImportDialog::setupUi()
 
   // Preview tree: one row per child candidate (grid group), with its bands.
   m_previewTree = new QTreeWidget( this );
-  m_previewTree->setObjectName( QStringLiteral( "landsatPreviewTree" ) );
+  m_previewTree->setObjectName( QStringLiteral( "productPreviewTree" ) );
   m_previewTree->setColumnCount( 2 );
   m_previewTree->setHeaderLabels( { tr( "子项（网格组）" ), tr( "波段" ) } );
   m_previewTree->setRootIsDecorated( false );
@@ -86,9 +114,8 @@ void LandsatImportDialog::setupUi()
   // Import / Cancel / Help buttons.
   auto *buttonRow = new QHBoxLayout;
   auto *helpButton = new QPushButton( tr( "帮助" ), this );
-  SicnuDialogHelp::tip( helpButton, tr( "打开本对话框的帮助说明。" ) );
   connect( helpButton, &QPushButton::clicked, this, [this]() {
-    SicnuDialogHelp::showToolHelp( this, QStringLiteral( "landsat_import" ), windowTitle() );
+    SicnuDialogHelp::showToolHelp( this, helpTool(), windowTitle() );
   } );
   buttonRow->addWidget( helpButton );
   buttonRow->addStretch( 1 );
@@ -103,18 +130,19 @@ void LandsatImportDialog::setupUi()
   layout->addLayout( buttonRow );
 
   connect( m_browseButton, &QPushButton::clicked, this,
-           &LandsatImportDialog::onBrowse );
+           &ProductImportDialog::onBrowse );
   connect( m_probeButton, &QPushButton::clicked, this,
-           &LandsatImportDialog::onProbe );
+           &ProductImportDialog::onProbe );
   connect( m_importButton, &QPushButton::clicked, this,
-           &LandsatImportDialog::onImport );
+           &ProductImportDialog::onImport );
   connect( m_cancelButton, &QPushButton::clicked, this, &QDialog::reject );
 }
 
-void LandsatImportDialog::onBrowse()
+void ProductImportDialog::onBrowse()
 {
   const QString dir = QFileDialog::getExistingDirectory(
-    this, tr( "选择 Landsat 场景目录" ), m_pathEdit->text() );
+    this, tr( "选择%1产品目录" ).arg( familyDisplayName( m_productFamily ) ),
+    m_pathEdit->text() );
   if ( dir.isEmpty() )
     return;
   m_pathEdit->setText( dir );
@@ -122,12 +150,12 @@ void LandsatImportDialog::onBrowse()
   probe();
 }
 
-void LandsatImportDialog::onProbe()
+void ProductImportDialog::onProbe()
 {
   probe();
 }
 
-void LandsatImportDialog::onImport()
+void ProductImportDialog::onImport()
 {
   const CollectionId collectionId = commitSelection();
   if ( !collectionId.isNull() )
@@ -142,7 +170,7 @@ void LandsatImportDialog::onImport()
   }
 }
 
-bool LandsatImportDialog::probe()
+bool ProductImportDialog::probe()
 {
   m_lastError.clear();
   m_committedCollectionId = CollectionId();
@@ -158,7 +186,7 @@ bool LandsatImportDialog::probe()
   const QString source = m_pathEdit->text().trimmed();
   if ( source.isEmpty() )
   {
-    m_lastError = tr( "请先选择 Landsat 场景目录。" );
+    m_lastError = tr( "请先选择产品目录。" );
     m_statusLabel->setText( m_lastError );
     return false;
   }
@@ -184,7 +212,7 @@ bool LandsatImportDialog::probe()
   return true;
 }
 
-void LandsatImportDialog::populatePreview()
+void ProductImportDialog::populatePreview()
 {
   m_previewTree->clear();
   for ( const ChildCandidate &child : m_preview.children )
@@ -201,19 +229,19 @@ void LandsatImportDialog::populatePreview()
   m_importButton->setEnabled( m_dataManager != nullptr && previewCount() > 0 );
 }
 
-int LandsatImportDialog::previewCount() const
+int ProductImportDialog::previewCount() const
 {
   return m_previewTree->topLevelItemCount();
 }
 
-bool LandsatImportDialog::isChildChecked( int index ) const
+bool ProductImportDialog::isChildChecked( int index ) const
 {
   if ( index < 0 || index >= previewCount() )
     return false;
   return m_previewTree->topLevelItem( index )->checkState( 0 ) == Qt::Checked;
 }
 
-void LandsatImportDialog::setChildChecked( int index, bool checked )
+void ProductImportDialog::setChildChecked( int index, bool checked )
 {
   if ( index < 0 || index >= previewCount() )
     return;
@@ -221,7 +249,7 @@ void LandsatImportDialog::setChildChecked( int index, bool checked )
     0, checked ? Qt::Checked : Qt::Unchecked );
 }
 
-QVector<int> LandsatImportDialog::checkedChildIndices() const
+QVector<int> ProductImportDialog::checkedChildIndices() const
 {
   QVector<int> indices;
   for ( int i = 0; i < previewCount(); ++i )
@@ -232,7 +260,7 @@ QVector<int> LandsatImportDialog::checkedChildIndices() const
   return indices;
 }
 
-CollectionId LandsatImportDialog::commitSelection()
+CollectionId ProductImportDialog::commitSelection()
 {
   m_lastError.clear();
 
@@ -273,12 +301,28 @@ CollectionId LandsatImportDialog::commitSelection()
   return result.collectionId;
 }
 
-QString LandsatImportDialog::lastError() const
+QString ProductImportDialog::lastError() const
 {
   return m_lastError;
 }
 
-CollectionId LandsatImportDialog::committedCollectionId() const
+CollectionId ProductImportDialog::committedCollectionId() const
 {
   return m_committedCollectionId;
+}
+
+QString ProductImportDialog::helpTool() const
+{
+  if ( m_productFamily == QLatin1String( "landsat" ) )
+    return QStringLiteral( "landsat_import" );
+  if ( m_productFamily == QLatin1String( "sentinel2" ) )
+    return QStringLiteral( "sentinel2_import" );
+  if ( m_productFamily == QLatin1String( "modis" ) )
+    return QStringLiteral( "modis_import" );
+  return QStringLiteral( "product_import" );
+}
+
+QString ProductImportDialog::familyTitle() const
+{
+  return tr( "导入 %1" ).arg( familyDisplayName( m_productFamily ) );
 }

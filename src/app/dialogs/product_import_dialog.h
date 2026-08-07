@@ -1,4 +1,4 @@
-// src/app/dialogs/landsat_import_dialog.h
+// src/app/dialogs/product_import_dialog.h
 #pragma once
 
 #include <QDialog>
@@ -14,31 +14,38 @@ class QTreeWidget;
 class QTreeWidgetItem;
 
 /**
- * Landsat complex-product import dialog: the first UI caller of the
- * collection-import probe-preview-commit transaction (#51/#52).
+ * Complex-product import dialog: the UI caller of the collection-import
+ * probe-preview-commit transaction (#51/#52). Sensor-agnostic — the probe
+ * auto-detects Landsat / Sentinel-2 / MODIS from the selected path; the
+ * product family only shapes labels, help text, and window title.
  *
- * Flow: the user picks a Landsat scene directory, clicks Probe (or confirms the
- * path) to run the read-only probe, reviews the discovered child candidates
- * (bands / grid groups) in a checkable preview tree, and clicks Import to run
- * the atomic commit - registering a Data Collection grouping the selected band
- * children (no flattening to one stacked raster). Cancel registers nothing: the
- * probe is read-only, and commit only runs on Import.
+ * Flow: pick a product directory, click Probe (or confirm the path) to run
+ * the read-only probe, review the discovered child candidates (bands / grid
+ * groups) in a checkable preview tree, and click Import to run the atomic
+ * commit - registering a Data Collection grouping the selected band children.
+ * Cancel registers nothing: the probe is read-only, and commit only runs on
+ * Import.
  *
  * probe() and commitSelection() are public and callable without exec(), so the
  * dialog's transaction logic is testable headlessly. The widget itself is a
  * thin shell over CollectionImportService.
  */
-class LandsatImportDialog : public QDialog
+class ProductImportDialog : public QDialog
 {
     Q_OBJECT
 
   public:
-    explicit LandsatImportDialog( QWidget *parent = nullptr );
+    explicit ProductImportDialog( QWidget *parent = nullptr );
 
     /// Supplies the Data Manager so the import commits into the catalog.
     /// Required: without a Data Manager the Import button is disabled (there is
     /// no catalog to register into). Mirrors SpectralIndexDialog::setDataManager.
     void setDataManager( sicnu::data::DataManager *dataManager );
+
+    /// Selects the product family that shapes labels/help: "landsat",
+    /// "sentinel2", "modis", or "auto" (default; the probe auto-detects).
+    /// Must be called before the dialog is shown.
+    void setProductFamily( const QString &family );
 
     /// Sets the source directory path and (optionally) runs the probe.
     void setSourcePath( const QString &path, bool autoProbe = false );
@@ -81,8 +88,14 @@ class LandsatImportDialog : public QDialog
     /// The indices into `m_preview.children` that are currently checked.
     QVector<int> checkedChildIndices() const;
 
+    /// Help tool key for the current product family.
+    QString helpTool() const;
+    /// Window/title text for the current product family.
+    QString familyTitle() const;
+
     sicnu::data::DataManager *m_dataManager = nullptr; // not owned
     sicnu::ImportPreview m_preview;
+    QString m_productFamily = QStringLiteral( "auto" );
     QString m_lastError;
     sicnu::data::CollectionId m_committedCollectionId;
 
