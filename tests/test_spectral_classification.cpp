@@ -122,6 +122,40 @@ TEST_CASE( "SAM: rejects invalid arguments", "[sam]" )
                                                         labels.data(), nullptr, NODATA ) );
 }
 
+TEST_CASE( "SAM: degenerate reference is skipped, not fatal", "[sam]" )
+{
+    // A zero-norm reference (all zeros) yields a NaN angle. The pixel must
+    // still be classified to the nearest VALID reference — the degenerate
+    // reference is skipped, not treated as a reason to discard the pixel.
+    //   ref 0: valid, target-ish for pixel
+    //   ref 1: zero-norm (degenerate) → must be skipped
+    //   ref 2: valid, far from pixel
+    std::vector<float> refs = { 10.0f, 20.0f, 30.0f,   // ref 0
+                                0.0f, 0.0f, 0.0f,       // ref 1 (degenerate)
+                                30.0f, 20.0f, 10.0f };  // ref 2
+    std::vector<float> pixels = { 11.0f, 19.0f, 31.0f }; // close to ref 0
+    std::vector<int> labels( 1, -99 );
+    bool ok = SpectralClassification::samClassify( pixels.data(), 1, 3,
+                                                   refs.data(), 3,
+                                                   labels.data(), nullptr, NODATA );
+    REQUIRE( ok );
+    REQUIRE( labels[0] == 0 ); // classified to the nearest valid ref, not -1
+}
+
+TEST_CASE( "SAM: pixel with a nodata band stays unclassifiable", "[sam]" )
+{
+    // Even if some references are valid, a nodata band in the pixel itself
+    // makes the whole pixel unclassifiable (label -1).
+    std::vector<float> refs = { 10.0f, 20.0f, 30.0f };
+    std::vector<float> pixels = { 10.0f, NODATA, 30.0f }; // nodata band
+    std::vector<int> labels( 1, -99 );
+    bool ok = SpectralClassification::samClassify( pixels.data(), 1, 3,
+                                                   refs.data(), 1,
+                                                   labels.data(), nullptr, NODATA );
+    REQUIRE( ok );
+    REQUIRE( labels[0] == -1 );
+}
+
 // ===========================================================================
 // Continuum Removal
 // ===========================================================================

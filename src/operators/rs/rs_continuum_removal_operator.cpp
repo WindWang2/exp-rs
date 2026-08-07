@@ -78,6 +78,14 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
 
     const size_t pixelCount = static_cast<size_t>( width ) * height;
 
+    // Resolve the input nodata sentinel: prefer the raster-declared band-1
+    // nodata, falling back to -9999 when none is set. Continuum-removal output
+    // values are ratios in (0, 1], so the same sentinel is reused for output
+    // nodata (degenerate pixels) without collision.
+    bool hasNodata = false;
+    double srcNodata = ds.bandNoDataValue( 1, &hasNodata );
+    const float nodata = hasNodata ? static_cast<float>( srcNodata ) : -9999.0f;
+
     // Read every band into a band-major buffer, then process pixel-by-pixel.
     std::vector<std::vector<float>> bandsIn( bandCount );
     for ( int b = 0; b < bandCount; ++b )
@@ -90,7 +98,6 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
 
     context.reportProgress( 0.45, "Applying continuum removal" );
 
-    const float nodata = -9999.0f;
     std::vector<std::vector<float>> bandsOut( bandCount );
     for ( int b = 0; b < bandCount; ++b )
         bandsOut[b].resize( pixelCount );

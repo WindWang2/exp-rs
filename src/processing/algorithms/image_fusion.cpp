@@ -519,17 +519,22 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
     // Coefficient matrix: coef[k][j] = <input_k, gs_j> / <gs_j, gs_j>
     QVector<QVector<double>> coef( total, QVector<double>( total, 0.0 ) );
 
-    // Track per-component valid mask (a pixel contributes only if valid across
-    // synPan and the current band).
+    // Per-k validity mask, reused across the j-loop. A pixel contributes to
+    // band k only if synPan (gs[0]) and MS band k are both valid; neither
+    // changes during the j-loop, so the mask is computed once per k instead of
+    // 2k+1 times inside the inner loops.
+    std::vector<char> validMask( n, 0 );
+
     for ( int k = 1; k < total; ++k )
     {
         const int bandIdx = k - 1;
-        // working <- ms[bandIdx]
+        // working <- ms[bandIdx]; build the validity mask in the same pass.
         QVector<float> work( n );
         for ( int i = 0; i < n; ++i )
         {
-            bool valid = ( gs[0][i] != nodata && !std::isnan( gs[0][i] ) &&
-                           msBands[bandIdx][i] != nodata && !std::isnan( msBands[bandIdx][i] ) );
+            const bool valid = ( gs[0][i] != nodata && !std::isnan( gs[0][i] ) &&
+                                 msBands[bandIdx][i] != nodata && !std::isnan( msBands[bandIdx][i] ) );
+            validMask[i] = valid ? 1 : 0;
             work[i] = valid ? msBands[bandIdx][i] : 0.0f;
         }
 
@@ -539,9 +544,7 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
             double normSq = 0.0;
             for ( int i = 0; i < n; ++i )
             {
-                bool valid = ( gs[0][i] != nodata && !std::isnan( gs[0][i] ) &&
-                               msBands[bandIdx][i] != nodata && !std::isnan( msBands[bandIdx][i] ) );
-                if ( !valid )
+                if ( !validMask[i] )
                     continue;
                 dot += static_cast<double>( work[i] ) * gs[j][i];
                 normSq += static_cast<double>( gs[j][i] ) * gs[j][i];
@@ -550,9 +553,7 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
             coef[k][j] = c;
             for ( int i = 0; i < n; ++i )
             {
-                bool valid = ( gs[0][i] != nodata && !std::isnan( gs[0][i] ) &&
-                               msBands[bandIdx][i] != nodata && !std::isnan( msBands[bandIdx][i] ) );
-                if ( !valid )
+                if ( !validMask[i] )
                     continue;
                 work[i] = static_cast<float>( work[i] - c * gs[j][i] );
             }
@@ -560,11 +561,7 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
 
         // gs[k] <- work (with nodata preserved)
         for ( int i = 0; i < n; ++i )
-        {
-            bool valid = ( gs[0][i] != nodata && !std::isnan( gs[0][i] ) &&
-                           msBands[bandIdx][i] != nodata && !std::isnan( msBands[bandIdx][i] ) );
-            gs[k][i] = valid ? work[i] : nodata;
-        }
+            gs[k][i] = validMask[i] ? work[i] : nodata;
     }
 
     // -----------------------------------------------------------------------

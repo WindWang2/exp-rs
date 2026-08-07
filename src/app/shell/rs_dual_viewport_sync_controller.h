@@ -65,12 +65,13 @@ class RsDualViewportSyncController : public QObject
     bool mApplying = false;
     QTimer mThrottle;
 
-    enum Pending
+    enum class Pending : int
     {
         None,
         FromPrimary,
-        FromSecondary
-    } mPending = None;
+        FromSecondary,
+    };
+    Pending mPending = Pending::None;
 };
 
 #endif // RS_DUAL_VIEWPORT_SYNC_CONTROLLER_H

@@ -128,6 +128,14 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
                      " bands, " + std::to_string( refCount ) + " classes" );
     context.reportProgress( 0.15, "Reading bands" );
 
+    // Resolve the input nodata sentinel: prefer the raster-declared band-1
+    // nodata, falling back to the project convention (-9999) when none is set.
+    // Using the source nodata lets the kernel correctly detect nodata pixels
+    // for rasters whose nodata is 0/NaN/-32768 rather than -9999.
+    bool hasNodata = false;
+    double srcNodata = ds.bandNoDataValue( bands[0], &hasNodata );
+    const float nodata = hasNodata ? static_cast<float>( srcNodata ) : -9999.0f;
+
     // Read selected bands into a pixel-major buffer (pixel-major = contiguous
     // per pixel so the kernel can index [p*bands + b]).
     const size_t pixelCount = static_cast<size_t>( width ) * height;
@@ -144,7 +152,6 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
 
     context.reportProgress( 0.45, "Classifying" );
 
-    const float nodata = -9999.0f;
     std::vector<int> labels( pixelCount );
     std::vector<float> angles( pixelCount, 0.0f );
     if ( !SpectralClassification::samClassify( pixels.data(), pixelCount, nBands,
@@ -156,10 +163,13 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
     context.throwIfCancelled();
     context.reportProgress( 0.75, "Writing output" );
 
-    // Promote labels to float for writeGdalOutput; -1 → nodata.
+    // Output nodata is fixed (-9999) — distinct from the input-resolved nodata
+    // because the label values are class ids in [0, refCount) and never
+    // collide with -9999.
+    constexpr float outputNodata = -9999.0f;
     std::vector<float> labelBand( pixelCount );
     for ( size_t p = 0; p < pixelCount; ++p )
-        labelBand[p] = ( labels[p] < 0 ) ? nodata : static_cast<float>( labels[p] );
+        labelBand[p] = ( labels[p] < 0 ) ? outputNodata : static_cast<float>( labels[p] );
 
     QString errorMessage;
     if ( !writeGdalOutput( QString::fromStdString( outputPath ), width, height, { labelBand },
@@ -175,7 +185,7 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
         for ( size_t p = 0; p < pixelCount; ++p )
         {
             if ( !std::isfinite( angles[p] ) )
-                angleBand[p] = nodata;
+                angleBand[p] = outputNodata;
             else
                 angleBand[p] = angles[p];
         }

@@ -7,7 +7,14 @@
 //
 // Complements ChunkedProcessor (which parallel-processes an in-memory buffer):
 // use GdalBlockStream when the input is too large to read in one go, then hand
-// each tile to ChunkedProcessor or a kernel for the compute.
+// each tile to a kernel for the compute.
+//
+// Threading contract: forEach() is single-threaded and sequential (GDAL reads
+// are not concurrent-safe on one dataset). The callback receives a BORROWED
+// pixel buffer: it is valid only for the duration of the callback invocation
+// and is overwritten by the next tile's read. If the callback needs to defer
+// work (e.g. dispatch to a thread pool) it MUST copy the tile data out before
+// returning — retaining or concurrently reading the pointer is a data race.
 #pragma once
 
 #include <cstddef>
@@ -68,6 +75,10 @@ class GdalBlockStream
      * Stream every tile. For each tile the callback receives the tile geometry
      * and a float buffer of size tile.width*tile.height filled with the band's
      * pixel values for that window.
+     *
+     * Buffer layout: row-major with stride exactly tile.width (NOT the nominal
+     * tileWidth()). Index pixels as `pixels[y * tile.width + x]`. The buffer is
+     * reused across tiles — see the file-level threading/borrow contract.
      *
      * @param callback  called once per tile; return false to abort early
      * @return true if all tiles were visited, false if the callback aborted or

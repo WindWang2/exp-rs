@@ -19,21 +19,21 @@ RsDualViewportSyncController::RsDualViewportSyncController( QgsMapCanvas *primar
     mThrottle.setInterval( 16 ); // ~60 FPS coalesce
 
     connect( &mThrottle, &QTimer::timeout, this, [this]() {
-        if ( !mEnabled || mPending == None )
+        if ( !mEnabled || mPending == Pending::None )
         {
-            mPending = None;
+            mPending = Pending::None;
             return;
         }
         if ( !mPrimary || !mSecondary )
         {
-            mPending = None;
+            mPending = Pending::None;
             return;
         }
-        if ( mPending == FromPrimary )
+        if ( mPending == Pending::FromPrimary )
             applyFromPrimary();
         else
             applyFromSecondary();
-        mPending = None;
+        mPending = Pending::None;
     } );
 
     if ( mPrimary )
@@ -50,7 +50,7 @@ void RsDualViewportSyncController::setEnabled( bool on )
     if ( !on )
     {
         mThrottle.stop();
-        mPending = None;
+        mPending = Pending::None;
     }
 }
 
@@ -82,7 +82,7 @@ void RsDualViewportSyncController::onSecondaryExtentChanged()
 
 void RsDualViewportSyncController::schedule( bool fromPrimary )
 {
-    mPending = fromPrimary ? FromPrimary : FromSecondary;
+    mPending = fromPrimary ? Pending::FromPrimary : Pending::FromSecondary;
     mThrottle.start();
 }
 

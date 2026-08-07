@@ -45,23 +45,38 @@ bool samClassify( const float *pixels, size_t count, int bands,
     for ( size_t p = 0; p < count; ++p )
     {
         const float *t = pixels + p * static_cast<size_t>( bands );
-        int best = -1;
-        double bestAngle = std::numeric_limits<double>::infinity();
-        for ( int c = 0; c < refCount; ++c )
+
+        // Pixel-side nodata (any nodata/NaN band) makes the whole pixel
+        // unclassifiable regardless of the references. Determine this once,
+        // up front, so a single bad reference does not invalidate the pixel.
+        bool pixelValid = true;
+        for ( int b = 0; b < bands; ++b )
         {
-            const float *r = refs + static_cast<size_t>( c ) * bands;
-            double ang = spectralAngle( t, r, static_cast<size_t>( bands ), nodata );
-            if ( std::isnan( ang ) )
+            if ( t[b] == nodata || std::isnan( t[b] ) )
             {
-                // A nodata band in the pixel makes the whole pixel unclassifiable.
-                best = -1;
-                bestAngle = std::numeric_limits<double>::quiet_NaN();
+                pixelValid = false;
                 break;
             }
-            if ( ang < bestAngle )
+        }
+
+        int best = -1;
+        double bestAngle = std::numeric_limits<double>::infinity();
+        if ( pixelValid )
+        {
+            for ( int c = 0; c < refCount; ++c )
             {
-                bestAngle = ang;
-                best = c;
+                const float *r = refs + static_cast<size_t>( c ) * bands;
+                double ang = spectralAngle( t, r, static_cast<size_t>( bands ), nodata );
+                // A NaN angle here is reference-side (the pixel is known
+                // valid): the reference is degenerate (zero-norm or contains
+                // nodata). Skip it rather than discarding the pixel.
+                if ( std::isnan( ang ) )
+                    continue;
+                if ( ang < bestAngle )
+                {
+                    bestAngle = ang;
+                    best = c;
+                }
             }
         }
         labels[p] = best;
