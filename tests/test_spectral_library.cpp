@@ -1,5 +1,6 @@
 // test_spectral_library.cpp — spectral library domain round-trip
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <QFile>
 #include <QString>
@@ -135,4 +136,46 @@ TEST_CASE("Spectral library rejects malformed input", "[spectral_library]")
         QString err;
         CHECK_FALSE(Library::load(path, &out, &err));
     }
+}
+
+TEST_CASE("matchSpectrum ranks library entries by SAM angle", "[processing][spectral_library]") {
+    // Test spectrum: a straight ramp 0.1, 0.2, 0.3, 0.4.
+    const std::vector<float> spectrum = {0.1f, 0.2f, 0.3f, 0.4f};
+
+    SpectralLibrary::Library lib;
+    SpectralLibrary::Entry identical;
+    identical.name = QStringLiteral("target");
+    identical.material = QStringLiteral("vegetation");
+    identical.spectrum = spectrum; // same direction -> angle ~0
+
+    SpectralLibrary::Entry orthogonal;
+    orthogonal.name = QStringLiteral("different");
+    orthogonal.spectrum = {0.4f, 0.3f, 0.2f, 0.1f}; // reversed -> large angle
+
+    SpectralLibrary::Entry shorter;
+    shorter.name = QStringLiteral("short");
+    shorter.spectrum = {0.1f, 0.2f, 0.3f}; // band mismatch -> skipped
+
+    lib.entries.append( identical );
+    lib.entries.append( orthogonal );
+    lib.entries.append( shorter );
+
+    const auto scores = SpectralLibrary::matchSpectrum( spectrum, lib );
+    REQUIRE( scores.size() == 2 ); // the band-mismatched entry is skipped
+    CHECK( scores[0].name == QStringLiteral( "target" ) );
+    CHECK( scores[0].angleDegrees == Catch::Approx( 0.0 ).margin( 1e-4 ) );
+    CHECK( scores[0].divergence == Catch::Approx( 0.0 ).margin( 1e-4 ) );
+    CHECK( scores[1].name == QStringLiteral( "different" ) );
+    CHECK( scores[1].angleDegrees > 10.0 );
+}
+
+TEST_CASE("matchSpectrum tolerates empty libraries and spectra", "[processing][spectral_library]") {
+    SpectralLibrary::Library empty;
+    CHECK( SpectralLibrary::matchSpectrum( {0.1f, 0.2f}, empty ).empty() );
+
+    SpectralLibrary::Entry e;
+    e.name = QStringLiteral( "e" );
+    e.spectrum = {0.1f, 0.2f};
+    empty.entries.append( e );
+    CHECK( SpectralLibrary::matchSpectrum( {}, empty ).empty() );
 }

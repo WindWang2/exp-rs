@@ -199,6 +199,7 @@ public:
     void openImageEnhancementPanel();
     void openBandMathDialog();
     void openSpectralIndexDialog();
+    void openSpectralLibraryDialog();
     void openAtmosphericCorrectionDialog();
     void openQaMaskDialog();
     void openApplyMaskDialog();

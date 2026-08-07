@@ -3948,6 +3948,44 @@ endif()
 set_target_properties(test_apply_mask_dialog PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_apply_mask_dialog)
 
+# Spectral library matching dialog — SAM-ranked match table + save round trip
+add_executable(test_spectral_library_dialog
+  test_spectral_library_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/spectral_library_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+)
+target_link_libraries(test_spectral_library_dialog PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  sicnu_jobs
+  sicnu_operators
+  sicnu_task_center
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_data
+)
+target_include_directories(test_spectral_library_dialog PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_spectral_library_dialog PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_spectral_library_dialog PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_spectral_library_dialog PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_spectral_library_dialog PRIVATE jsoncpp)
+endif()
+set_target_properties(test_spectral_library_dialog PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_spectral_library_dialog)
+
 # Virtual raster recipe tests - recipe value type + JSON round-trip (#55)
 qt_add_executable(test_virtual_raster_recipe
   test_virtual_raster_recipe.cpp

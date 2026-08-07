@@ -108,6 +108,7 @@ add_executable(sicnu_geo_rs
     log_panel.cpp
     dialogs/band_math_dialog.cpp
     dialogs/spectral_index_dialog.cpp
+    dialogs/spectral_library_dialog.cpp
     dialogs/atmospheric_dialog.cpp
     dialogs/qa_mask_dialog.cpp
     dialogs/apply_mask_dialog.cpp

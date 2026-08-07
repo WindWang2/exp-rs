@@ -58,4 +58,28 @@ namespace SpectralLibrary
         /// Shared wavelength grid, or empty when absent / inconsistent.
         std::vector<float> wavelengths() const;
     };
+
+    /// Result of matching a test spectrum against one library entry.
+    struct MatchScore
+    {
+        int entryIndex = -1; ///< index into Library::entries
+        QString name;        ///< entry name
+        QString material;    ///< material / class label (may be empty)
+        /// SAM angle in degrees; NaN when the angle is undefined (zero-norm or
+        /// nodata-carrying spectrum).
+        double angleDegrees = std::numeric_limits<double>::quiet_NaN();
+        /// Spectral Information Divergence; NaN when undefined.
+        double divergence = std::numeric_limits<double>::quiet_NaN();
+    };
+
+    /**
+     * Match @p spectrum against every library entry using the SAM angle and
+     * SID kernels (spectral_classification.h), ranked by ascending SAM angle
+     * (undefined angles sort last). Entries whose band count differs from the
+     * spectrum are skipped — they cannot be compared. @p nodata is the
+     * spectral nodata sentinel passed to the kernels.
+     */
+    std::vector<MatchScore> matchSpectrum( const std::vector<float> &spectrum,
+                                           const Library &library,
+                                           float nodata = -9999.0f );
 } // namespace SpectralLibrary

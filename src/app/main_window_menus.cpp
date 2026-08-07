@@ -457,6 +457,12 @@ void QgisDesktopWindow::setupMenu()
     tip( analysisMenu->addAction( ic( "veget_tion_index" ), tr( "光谱指数..." ),
                                   this, &QgisDesktopWindow::openSpectralIndexDialog ),
          tr( "NDVI / EVI / SAVI / NDWI / NDBI / MNDWI。" ) );
+
+    QMenu *spectralMenu = makeMenu( analysisMenu->addMenu( tr( "光谱分析" ) ) );
+    setMenuIcon( spectralMenu, ic( "su_ervised" ) );
+    tip( spectralMenu->addAction( ic( "su_ervised" ), tr( "光谱库匹配..." ),
+                                  this, &QgisDesktopWindow::openSpectralLibraryDialog ),
+         tr( "把光谱剖面面板采集的像元谱与光谱库匹配（SAM 角 + SID），并可将当前谱保存入库。" ) );
     tip( analysisMenu->addAction( ic( "ch_nge_detect" ), tr( "变化检测..." ),
                                   this, &QgisDesktopWindow::openChangeDetectionDialog ),
          tr( "双时相：差值 / 归一化差值 / 变化掩膜。" ) );

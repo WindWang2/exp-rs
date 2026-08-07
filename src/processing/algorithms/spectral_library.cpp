@@ -1,9 +1,16 @@
 // src/processing/algorithms/spectral_library.cpp — spectral library domain
 #include "spectral_library.h"
 
+#include "spectral_classification.h"
+
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <utility>
 
 namespace SpectralLibrary
 {
@@ -185,6 +192,53 @@ std::vector<float> Library::wavelengths() const
             return {};
     }
     return result;
+}
+
+} // namespace SpectralLibrary
+
+namespace SpectralLibrary
+{
+
+std::vector<MatchScore> matchSpectrum( const std::vector<float> &spectrum,
+                                       const Library &library,
+                                       float nodata )
+{
+    std::vector<MatchScore> scores;
+    if ( spectrum.empty() )
+        return scores;
+
+    const int bands = static_cast<int>( spectrum.size() );
+    for ( int i = 0; i < library.entries.size(); ++i )
+    {
+        const Entry &entry = library.entries.at( i );
+        if ( static_cast<int>( entry.spectrum.size() ) != bands )
+            continue; // incompatible band count -> cannot compare
+
+        MatchScore score;
+        score.entryIndex = i;
+        score.name = entry.name;
+        score.material = entry.material;
+        score.angleDegrees =
+            SpectralClassification::spectralAngle( spectrum.data(), entry.spectrum.data(),
+                                                   bands, nodata )
+            * ( 180.0 / std::acos( -1.0 ) );
+        score.divergence =
+            SpectralClassification::spectralDivergence( spectrum.data(), entry.spectrum.data(),
+                                                        bands, nodata );
+        scores.push_back( std::move( score ) );
+    }
+
+    // Ascending SAM angle; undefined (NaN) angles sort last.
+    std::stable_sort( scores.begin(), scores.end(),
+                      []( const MatchScore &a, const MatchScore &b )
+    {
+        const auto key = []( double v )
+        {
+            return std::isnan( v ) ? std::numeric_limits<double>::infinity() : v;
+        };
+        return key( a.angleDegrees ) < key( b.angleDegrees );
+    } );
+    return scores;
 }
 
 } // namespace SpectralLibrary

@@ -15,6 +15,8 @@
 #include "dialogs/atmospheric_dialog.h"
 #include "dialogs/qa_mask_dialog.h"
 #include "dialogs/apply_mask_dialog.h"
+#include "dialogs/spectral_library_dialog.h"
+#include "widgets/spectral_profile_widget.h"
 #include "dialogs/radiometric_calibration_dialog.h"
 #include "dialogs/orthorectification_dialog.h"
 #include "dialogs/contrast_stretch_dialog.h"
@@ -269,6 +271,18 @@ void QgisDesktopWindow::openApplyMaskDialog()
     }
     ApplyMaskDialog dlg(this);
     dlg.setRasterLayer(rasterLayer);
+    dlg.exec();
+}
+
+void QgisDesktopWindow::openSpectralLibraryDialog()
+{
+    SpectralLibraryDialog dlg(this);
+    if (m_spectralProfile && m_spectralProfile->hasData())
+    {
+        dlg.setSpectrum(m_spectralProfile->values(),
+                        m_spectralProfile->wavelengths(),
+                        m_spectralProfile->bandLabels());
+    }
     dlg.exec();
 }
 
