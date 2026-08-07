@@ -8,6 +8,7 @@ add_library(sicnu_processing SHARED
     gdal/gdal_error_handler.cpp
 
     algorithms/spectral_indices.cpp
+    algorithms/spectral_classification.cpp
     algorithms/band_math.cpp
     algorithms/atmospheric_correction.cpp
     algorithms/radiometric_calibration.cpp

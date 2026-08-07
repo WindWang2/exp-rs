@@ -460,6 +460,164 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
     return result;
 }
 
+// ---------------------------------------------------------------------------
+// Gram-Schmidt fusion (simulated-pan variant)
+// ---------------------------------------------------------------------------
+
+QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
+    const QVector<const float *> &msBands, int nBands,
+    const float *panBand, int width, int height, float nodata )
+{
+    QVector<QVector<float>> result;
+    if ( nBands <= 0 || !panBand || width <= 0 || height <= 0 )
+        return result;
+
+    SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Gram-Schmidt fusion: %1 bands, %2x%3" )
+        .arg( nBands ).arg( width ).arg( height ) );
+
+    const int n = width * height;
+
+    // Validate band pointers.
+    for ( int b = 0; b < nBands; ++b )
+        if ( !msBands[b] )
+            return result;
+
+    // -----------------------------------------------------------------------
+    // Step 1: simulated low-res pan = mean of MS bands (valid pixels only).
+    // -----------------------------------------------------------------------
+    QVector<float> synPan( n, 0.0f );
+    for ( int i = 0; i < n; ++i )
+    {
+        bool valid = true;
+        double sum = 0.0;
+        for ( int b = 0; b < nBands; ++b )
+        {
+            if ( msBands[b][i] == nodata || std::isnan( msBands[b][i] ) )
+            { valid = false; break; }
+            sum += msBands[b][i];
+        }
+        synPan[i] = valid ? static_cast<float>( sum / nBands ) : nodata;
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 2: forward Gram-Schmidt orthogonalization on [synPan, MS_1..MS_n].
+    //
+    // Treat each band as a vector in pixel-space and orthonormalize with the
+    // modified Gram-Schmidt process. GS_0 = synPan; each subsequent GS_k is the
+    // residual of MS_k after removing its projection onto all prior GS_j.
+    // The coefficient c_{k,j} = <MS_k, GS_j> / <GS_j, GS_j> is stored for the
+    // inverse transform.
+    // -----------------------------------------------------------------------
+    const int total = nBands + 1;
+    QVector<QVector<float>> gs( total );
+    for ( int k = 0; k < total; ++k )
+        gs[k].resize( n );
+
+    // GS_0 <- synPan
+    std::memcpy( gs[0].data(), synPan.data(), static_cast<size_t>( n ) * sizeof( float ) );
+
+    // Coefficient matrix: coef[k][j] = <input_k, gs_j> / <gs_j, gs_j>
+    QVector<QVector<double>> coef( total, QVector<double>( total, 0.0 ) );
+
+    // Track per-component valid mask (a pixel contributes only if valid across
+    // synPan and the current band).
+    for ( int k = 1; k < total; ++k )
+    {
+        const int bandIdx = k - 1;
+        // working <- ms[bandIdx]
+        QVector<float> work( n );
+        for ( int i = 0; i < n; ++i )
+        {
+            bool valid = ( gs[0][i] != nodata && !std::isnan( gs[0][i] ) &&
+                           msBands[bandIdx][i] != nodata && !std::isnan( msBands[bandIdx][i] ) );
+            work[i] = valid ? msBands[bandIdx][i] : 0.0f;
+        }
+
+        for ( int j = 0; j < k; ++j )
+        {
+            double dot = 0.0;
+            double normSq = 0.0;
+            for ( int i = 0; i < n; ++i )
+            {
+                bool valid = ( gs[0][i] != nodata && !std::isnan( gs[0][i] ) &&
+                               msBands[bandIdx][i] != nodata && !std::isnan( msBands[bandIdx][i] ) );
+                if ( !valid )
+                    continue;
+                dot += static_cast<double>( work[i] ) * gs[j][i];
+                normSq += static_cast<double>( gs[j][i] ) * gs[j][i];
+            }
+            double c = ( normSq > 1e-20 ) ? ( dot / normSq ) : 0.0;
+            coef[k][j] = c;
+            for ( int i = 0; i < n; ++i )
+            {
+                bool valid = ( gs[0][i] != nodata && !std::isnan( gs[0][i] ) &&
+                               msBands[bandIdx][i] != nodata && !std::isnan( msBands[bandIdx][i] ) );
+                if ( !valid )
+                    continue;
+                work[i] = static_cast<float>( work[i] - c * gs[j][i] );
+            }
+        }
+
+        // gs[k] <- work (with nodata preserved)
+        for ( int i = 0; i < n; ++i )
+        {
+            bool valid = ( gs[0][i] != nodata && !std::isnan( gs[0][i] ) &&
+                           msBands[bandIdx][i] != nodata && !std::isnan( msBands[bandIdx][i] ) );
+            gs[k][i] = valid ? work[i] : nodata;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 3: histogram-match the high-res pan to GS_0 and substitute as GS_0'.
+    // -----------------------------------------------------------------------
+    QVector<float> panMatched( n );
+    std::memcpy( panMatched.data(), panBand, static_cast<size_t>( n ) * sizeof( float ) );
+    histogramMatch( panMatched.data(), n, gs[0].data(), n, nodata );
+
+    // -----------------------------------------------------------------------
+    // Step 4: inverse Gram-Schmidt.
+    //   MS_k = GS_k + sum_{j<k} coef[k][j] * GS_j,  with GS_0 replaced by pan'.
+    // -----------------------------------------------------------------------
+    result.resize( nBands );
+    for ( int b = 0; b < nBands; ++b )
+        result[b].resize( n );
+
+    for ( int i = 0; i < n; ++i )
+    {
+        // A pixel is only reconstructable if synPan and all MS bands were valid
+        // (gs components carry nodata otherwise) and pan is valid.
+        bool valid = ( panMatched[i] != nodata && !std::isnan( panMatched[i] ) );
+        if ( valid )
+        {
+            for ( int k = 0; k <= nBands; ++k )
+            {
+                if ( gs[k][i] == nodata || std::isnan( gs[k][i] ) )
+                { valid = false; break; }
+            }
+        }
+        if ( !valid )
+        {
+            for ( int b = 0; b < nBands; ++b )
+                result[b][i] = nodata;
+            continue;
+        }
+
+        // gs0Sub = panMatched
+        double gs0Sub = panMatched[i];
+        for ( int b = 0; b < nBands; ++b )
+        {
+            const int k = b + 1;
+            // MS_k = GS_k + sum_{j=0..k-1} coef[k][j] * GS'_j ; GS'_0 = panMatched
+            double val = gs[k][i] + coef[k][0] * gs0Sub;
+            for ( int j = 1; j < k; ++j )
+                val += coef[k][j] * gs[j][i];
+            result[b][i] = static_cast<float>( val );
+        }
+    }
+
+    return result;
+}
+
 bool ImageFusion::processNativeFusion( const QString &panPath, const QString &msPath,
                                        const QString &outputPath,
                                        const NativeFusionParams &params,
@@ -542,6 +700,10 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
     else if ( params.method == QStringLiteral( "pca" ) )
     {
         result = pcaFusion( msPtrs, nMsBands, panData.data(), w, h, nodata );
+    }
+    else if ( params.method == QStringLiteral( "gram_schmidt" ) )
+    {
+        result = gramSchmidtFusion( msPtrs, nMsBands, panData.data(), w, h, nodata );
     }
     else
     {

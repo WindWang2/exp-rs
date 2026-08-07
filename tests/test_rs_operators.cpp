@@ -107,6 +107,8 @@ TEST_CASE("Native RS operators are registered", "[operators][rs]") {
     CHECK(registry.hasOperator("rs:terrain_analysis"));
     CHECK(registry.hasOperator("rs:pca"));
     CHECK(registry.hasOperator("rs:mosaic"));
+    CHECK(registry.hasOperator("rs:sam_classify"));
+    CHECK(registry.hasOperator("rs:continuum_removal"));
 #ifdef SICNU_HAS_OPENCV
     CHECK(registry.hasOperator("rs:kmeans_classification"));
     CHECK(registry.hasOperator("rs:supervised_classification"));

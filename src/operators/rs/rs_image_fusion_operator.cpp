@@ -20,7 +20,7 @@ using namespace params;
 namespace {
 
 const std::vector<std::string> s_methods = {
-    "linear", "brovey", "pca", "ihs"
+    "linear", "brovey", "pca", "ihs", "gram_schmidt"
 };
 
 } // anonymous namespace
@@ -58,6 +58,7 @@ Json::Value RsImageFusionOperator::metadata() const {
     meta["purpose"] = "Combine spatial detail of panchromatic data with spectral richness of multispectral data.";
     meta["prerequisites"].append("Pan and MS rasters must be co-registered.");
     meta["workflowHints"].append("Use IHS for RGB composites; use PCA/Brovey for general multi-band fusion.");
+    meta["workflowHints"].append("Use Gram-Schmidt (gram_schmidt) for general multi-band sharpening with minimal spectral distortion.");
     meta["limitations"].append("IHS requires exactly 3 MS bands mapped to R/G/B.");
     return meta;
 }

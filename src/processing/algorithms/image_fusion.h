@@ -6,6 +6,7 @@
 //   - Brovey transform (ratio-based)
 //   - PCA fusion (principal component substitution)
 //   - IHS fusion (intensity-hue-saturation substitution)
+//   - Gram-Schmidt fusion (orthogonal-component substitution)
 //
 // All functions operate on float arrays with nodata support.
 #pragma once
@@ -56,6 +57,16 @@ class ImageFusion
         const float *msR, const float *msG, const float *msB,
         const float *panBand, int width, int height, float nodata );
 
+    /// Gram-Schmidt (GS) fusion — simulated-pan variant (Laurin et al. / ENVI):
+    ///   1. Build a synthetic low-resolution pan as the mean of the MS bands
+    ///   2. Gram-Schmidt orthogonalize [syn-pan, MS_1, ..., MS_n]
+    ///   3. Replace GS component 1 with the histogram-matched high-res pan
+    ///   4. Apply the inverse GS transform to recover the sharpened MS bands
+    /// Returns fused bands (same count as msBands).
+    static QVector<QVector<float>> gramSchmidtFusion(
+        const QVector<const float *> &msBands, int nBands,
+        const float *panBand, int width, int height, float nodata );
+
     struct NativeFusionParams {
         QString method;
         float panWeight = 0.5f;
@@ -67,7 +78,7 @@ class ImageFusion
 
     /**
      * Read pan/MS rasters, run a native fusion algorithm, write GeoTIFF output.
-     * Supported methods: linear, brovey, ihs, pca.
+     * Supported methods: linear, brovey, ihs, pca, gram_schmidt.
      */
     static bool processNativeFusion(const QString &panPath, const QString &msPath,
                                     const QString &outputPath,

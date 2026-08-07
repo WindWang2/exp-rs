@@ -267,6 +267,33 @@ target_include_directories(test_spectral_indices PRIVATE
 )
 sicnu_discover_tests(test_spectral_indices)
 
+# Spectral classification (SAM + Continuum Removal) kernel tests
+add_executable(test_spectral_classification test_spectral_classification.cpp)
+target_link_libraries(test_spectral_classification PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+  ${JSONCPP_LIBRARIES}
+)
+if(JSONCPP_CFLAGS_OTHER)
+  target_compile_options(test_spectral_classification PRIVATE ${JSONCPP_CFLAGS_OTHER})
+endif()
+target_include_directories(test_spectral_classification PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/operators
+  ${CMAKE_BINARY_DIR}
+)
+target_include_directories(test_spectral_classification PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_classification)
+
 # MathUtils tests
 add_executable(test_math_utils test_math_utils.cpp)
 target_link_libraries(test_math_utils PRIVATE

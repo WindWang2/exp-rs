@@ -169,6 +169,70 @@ TEST_CASE( "PCA Fusion: uniform input produces uniform output", "[fusion]" )
     }
 }
 
+// ===========================================================================
+// Gram-Schmidt (GS) Fusion
+// ===========================================================================
+
+TEST_CASE( "Gram-Schmidt: produces correct number of bands", "[fusion]" )
+{
+    const int W = 8, H = 8, N = W * H;
+    std::vector<float> r( N, 100.0f ), g( N, 100.0f ), b( N, 100.0f );
+    std::vector<float> pan( N, 150.0f );
+
+    QVector<const float *> msBands = { r.data(), g.data(), b.data() };
+    auto result = ImageFusion::gramSchmidtFusion( msBands, 3, pan.data(), W, H, NODATA );
+
+    REQUIRE( result.size() == 3 );
+    REQUIRE( result[0].size() == static_cast<size_t>( N ) );
+    REQUIRE( result[1].size() == static_cast<size_t>( N ) );
+    REQUIRE( result[2].size() == static_cast<size_t>( N ) );
+}
+
+TEST_CASE( "Gram-Schmidt: null input returns empty", "[fusion]" )
+{
+    auto result = ImageFusion::gramSchmidtFusion( {}, 0, nullptr, 0, 0, NODATA );
+    REQUIRE( result.isEmpty() );
+}
+
+TEST_CASE( "Gram-Schmidt: uniform MS with pan equal to simulated pan preserves values", "[fusion]" )
+{
+    // GS simulates a low-res pan as the mean of the MS bands. When the supplied
+    // high-res pan equals that simulated mean, GS component 1 is replaced by an
+    // identical (histogram-matched) value, so the inverse transform recovers
+    // the original MS values.
+    const int W = 8, H = 8, N = W * H;
+    std::vector<float> r( N, 100.0f ), g( N, 100.0f ), b( N, 100.0f );
+    std::vector<float> pan( N, 100.0f ); // == mean(r,g,b)
+
+    QVector<const float *> msBands = { r.data(), g.data(), b.data() };
+    auto result = ImageFusion::gramSchmidtFusion( msBands, 3, pan.data(), W, H, NODATA );
+
+    REQUIRE( result.size() == 3 );
+    for ( int i = 0; i < N; ++i )
+    {
+        REQUIRE( result[0][i] == Approx( 100.0f ).margin( 10.0f ) );
+        REQUIRE( result[1][i] == Approx( 100.0f ).margin( 10.0f ) );
+        REQUIRE( result[2][i] == Approx( 100.0f ).margin( 10.0f ) );
+    }
+}
+
+TEST_CASE( "Gram-Schmidt: nodata preserved", "[fusion]" )
+{
+    const int W = 4, H = 4, N = W * H;
+    std::vector<float> r( N, 100.0f ), g( N, 100.0f ), b( N, 100.0f );
+    std::vector<float> pan( N, 150.0f );
+    r[0] = NODATA;     // nodata in one MS band
+    pan[1] = NODATA;   // nodata in pan
+
+    QVector<const float *> msBands = { r.data(), g.data(), b.data() };
+    auto result = ImageFusion::gramSchmidtFusion( msBands, 3, pan.data(), W, H, NODATA );
+
+    REQUIRE( result.size() == 3 );
+    REQUIRE( result[0][0] == NODATA ); // MS nodata propagates
+    REQUIRE( result[0][1] == NODATA ); // pan nodata propagates
+    REQUIRE( result[0][2] != NODATA ); // valid pixel stays valid
+}
+
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include <QTemporaryDir>
 #include <QFile>
@@ -209,4 +273,49 @@ TEST_CASE( "ImageFusion processNativeFusion writes brovey output", "[fusion][gda
     REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
     REQUIRE( QFile::exists( outputPath ) );
     REQUIRE( error.isEmpty() );
+}
+
+TEST_CASE( "ImageFusion processNativeFusion writes gram-schmidt output", "[fusion][gdal]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "pan.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "fused_gs.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    GDALDatasetH panDs = createOutputTiff( panPath, 2, 2, 1, GDT_Float32, gt, QString() );
+    GDALDatasetH msDs = createOutputTiff( msPath, 2, 2, 3, GDT_Float32, gt, QString() );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+
+    std::vector<float> pan = { 10.f, 20.f, 30.f, 40.f };
+    std::vector<float> ms1 = { 4.f, 8.f, 12.f, 16.f };
+    std::vector<float> ms2 = { 2.f, 4.f, 6.f, 8.f };
+    std::vector<float> ms3 = { 6.f, 12.f, 18.f, 24.f };
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 2, 2,
+                           pan.data(), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 2,
+                           ms1.data(), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 2 ), GF_Write, 0, 0, 2, 2,
+                           ms2.data(), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 3 ), GF_Write, 0, 0, 2, 2,
+                           ms3.data(), 2, 2, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "gram_schmidt" );
+    QString error;
+    REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    REQUIRE( QFile::exists( outputPath ) );
+    REQUIRE( error.isEmpty() );
+
+    // Verify output has 3 bands (GS preserves band count)
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    REQUIRE( out.bandCount() == 3 );
 }
