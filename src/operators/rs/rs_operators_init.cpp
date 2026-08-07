@@ -4,6 +4,7 @@
 #include "rs_spectral_index_operator.h"
 #include "rs_band_math_operator.h"
 #include "rs_sam_classify_operator.h"
+#include "rs_spectral_unmixing_operator.h"
 #include "rs_continuum_removal_operator.h"
 #include "rs_atmospheric_correction_operator.h"
 #include "rs_radiometric_calibration_operator.h"
@@ -38,6 +39,7 @@ namespace sicnu::operators::rs {
 REGISTER_RS_OPERATOR(RsSpectralIndexOperator, "rs:spectral_index")
 REGISTER_RS_OPERATOR(RsBandMathOperator, "rs:band_math")
 REGISTER_RS_OPERATOR(RsSamClassifyOperator, "rs:sam_classify")
+REGISTER_RS_OPERATOR(RsSpectralUnmixingOperator, "rs:spectral_unmixing")
 REGISTER_RS_OPERATOR(RsContinuumRemovalOperator, "rs:continuum_removal")
 REGISTER_RS_OPERATOR(RsAtmosphericCorrectionOperator, "rs:atmospheric_correction")
 REGISTER_RS_OPERATOR(RsRadiometricCalibrationOperator, "rs:radiometric_calibration")

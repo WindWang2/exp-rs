@@ -21,6 +21,7 @@ add_library(sicnu_processing SHARED
     algorithms/chunked_processor.cpp
     algorithms/terrain_analysis.cpp
     algorithms/image_fusion.cpp
+    algorithms/spectral_unmixing.cpp
     algorithms/vector_optimizer.cpp
     algorithms/satellite_products.cpp
 
