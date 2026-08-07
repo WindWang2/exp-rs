@@ -1,7 +1,7 @@
 # HANDOFF — Autonomous RS System Perfection (/goal) — Optical Platform Session
 
 **Date:** 2026-08-08
-**Mode:** FULL_AUTONOMOUS_LOOP — 29 committed vertical slices (ADR 0065–0092)
+**Mode:** FULL_AUTONOMOUS_LOOP — 33 committed vertical slices (ADR 0065–0095)
 **Scope:** Deepen `exp-rs` toward the general-purpose optical/multispectral/
 hyperspectral processing platform (mission: product import → calibration →
 QA masking → atmospheric correction → geometric/grid → analysis-ready →
@@ -42,14 +42,18 @@ analysis → accuracy → provenance, all through the Processing Registry).
 | 27 | Semantic band roles in MCP `describe_dataset` (per-band `role`) | `36ecc88f81` | 0090 |
 | 28 | Grid harmonization: `gdal:reproject` `reference` alignment (auto CRS/pixel/extent from a reference raster) + recovered orphan `test_gdal_ortho_operators` target | `f7a34c4965` | 0091 |
 | 29 | Spectral library matching workbench (`SpectralLibrary::matchSpectrum` SAM/SID ranking; `SpectralLibraryDialog`; 光谱分析 menu) | `d8ef199bf5` | 0092 |
+| 30 | Per-class classification diagnostics (`trainSamplesByClass`, `perClassMetrics`, `imbalanceWarnings`) | `f6d8a9b06a` | 0093 |
+| 31 | README synced with the current optical-platform capability surface | `ab105da5ba` | — |
+| 32 | Classification probability/confidence outputs (`probabilityOutput` raster + `meanConfidence`; NormalBayes posterior normalization; SVM rejected) | `3a306b9d74` | 0094 |
+| 33 | Reusable align-and-compare change detection DAG (`lab.change.align_difference`: reproject-reference → difference) | `c19177769f` | 0095 |
 | + | Full-suite regression fix (GDAL driver registration in a provider test) | `bae3a3eae0` | — |
 
 ## 2. Verification
 
 - **Full clean rebuild: 0 errors** (all targets, incl. the whole test suite).
-- **ctest: 1386 tests, 100% passed, 0 failed** (final full-suite regression of
-  the session). 6 pre-existing vector fixtures remain SKIPPED (removed from
-  VCS). Suite is green.
+- **ctest: 1390 tests, 100% passed, 0 failed** (final full-suite regression).
+  6 pre-existing vector fixtures remain SKIPPED (removed from VCS). Suite is
+  green.
 - Every new slice shipped with its own Catch2 tests (kernel + operator /
   UI-seam level); the operator registry tests pin the expanded surface.
 - The orphaned `test_gdal_ortho_operators` file (registered in no target) was
@@ -76,18 +80,13 @@ Import Sentinel-2 / Landsat (ProductImportDialog)
 
 ## 4. Known Follow-ups (roadmap `.planning/2026-08-07-rs-platform-goal.md`)
 
-- E3: next agent/MCP semantic operations (e.g. role-resolved band selection
-  tool contract "calculate NDVI on asset X").
 - C5: task-centric UI consistency (shared band/role/CRS/resolution widgets);
   Change Detection dual-view workbench (synchronized viewports + Swipe).
-- C1 follow-ups: MAD wrapper over `otb:multivariate_alteration_detector`;
-  change-detection DAG reuse.
-- C2: classification probability/confidence outputs, train/validation split,
-  per-class imbalance warnings.
+- C1 follow-ups: MAD wrapper over `otb:multivariate_alteration_detector`.
 - D10: extend the spectral workbench (ROI mean spectrum, spectral resampling
   into the library grid, continuum removal display).
-- F-phase: cross-platform build verification, final architecture/code review,
-  README/CONTEXT sync.
+- F-phase: cross-platform build verification (Linux is green), final
+  architecture/code review, CONTEXT additions if new domain terms appear.
 
 ## 5. Exclusions Honored
 
