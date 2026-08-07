@@ -2812,6 +2812,20 @@ if(TARGET sicnu_operators)
   )
   sicnu_discover_tests(test_spectral_library)
 
+  # ROI mean spectrum tests - mean/stddev over a polygon, wavelengths, guards.
+  add_executable(test_spectral_roi test_spectral_roi.cpp)
+  target_link_libraries(test_spectral_roi PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_processing
+    GDAL::GDAL
+  )
+  target_include_directories(test_spectral_roi PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_spectral_roi)
+
   # OpenCV-backed operators (only when OpenCV operators were compiled in)
   if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
     add_executable(test_opencv_operators test_opencv_operators.cpp)
