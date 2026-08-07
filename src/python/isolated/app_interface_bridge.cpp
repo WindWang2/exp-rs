@@ -28,45 +28,56 @@ namespace sicnu::python::isolated
 {
 namespace {
 
+/// Per-segment height cap (ADR 0064 tile-by-tile delivery). A raster taller
+/// than this splits into row-chunk tiles — one shared-memory segment per tile —
+/// so a single giant segment never exceeds practical /dev/shm object sizes and
+/// the worker still sees the whole raster zero-copy (one array per tile).
+constexpr int kSegmentHeightCap = 1024;
+
 /// ADR 0064 opt-in zero-copy delivery. When a caller sets
 /// `__shm_key__: true` on the request (the opt-in flag) alongside a raster
-/// file-path input, migrate that raster into a shared-memory segment so the
-/// Python worker receives it as a zero-copy numpy array (__shm_array__)
-/// instead of opening the file itself. Returns the segment (kept alive for
-/// the duration of the RPC) or nullptr if migration did not apply / failed
-/// (on failure the path is left untouched so the plugin falls back to GDAL).
+/// file-path input, migrate that raster into shared-memory segment(s) so the
+/// Python worker receives it as zero-copy numpy arrays instead of opening the
+/// file itself. Returns the segments (kept alive for the duration of the RPC)
+/// or an empty vector if migration did not apply / failed (on failure the path
+/// is left untouched so the plugin falls back to GDAL).
+///
+/// Rasters not taller than kSegmentHeightCap migrate as ONE segment, delivered
+/// as `__shm_array__` (key + width/height/bands/dtype in \a params). Taller
+/// rasters split into ceil(height / kSegmentHeightCap) row-chunk tiles, each a
+/// segment of its own; \a params then carries a `__shm_tiles__` array (one
+/// entry per tile: key + tile width/height/bands/dtype + the tile's first row
+/// in the source raster) and the daemon mounts each tile as an array.
 ///
 /// The raster's NATIVE dtype is preserved for the common integer and float
 /// types (Byte->UInt8, UInt16->UInt16, Int32->Int32, Float32->Float32); any
 /// other type (Float64, Int16, ...) falls back to the float32 conversion
-/// path. The migrated metadata (`__shm_key__` + width/height/bands/dtype)
-/// overwrites the opt-in flag in \a params so the daemon mounts exactly one
-/// array.
-std::unique_ptr<SharedMemorySegment> migrateRasterInputToShm( const Json::Value &execParams,
-                                                               QVariantMap &params )
+/// path.
+std::vector<std::unique_ptr<SharedMemorySegment>> migrateRasterInputToShm(
+  const Json::Value &execParams, QVariantMap &params )
 {
   // Opt-in flag must be explicitly true.
   if ( !execParams.isMember( "__shm_key__" ) || !execParams["__shm_key__"].isBool()
        || !execParams["__shm_key__"].asBool() )
-    return nullptr;
+    return {};
 
   // The conventional raster input key is "input" (see operators/framework/rs_schema.h
   // makeRasterParam("input", ...)). Only migrate when it is present and looks like a path.
   if ( !execParams.isMember( "input" ) || !execParams["input"].isString() )
-    return nullptr;
+    return {};
   const QString path = QString::fromStdString( execParams["input"].asString() );
   if ( path.isEmpty() )
-    return nullptr;
+    return {};
 
   GdalDatasetWrapper ds;
   if ( !ds.open( path ) || !ds.isValid() )
-    return nullptr; // let the plugin surface the GDAL error itself
+    return {}; // let the plugin surface the GDAL error itself
 
   const int width = ds.width();
   const int height = ds.height();
   const int bands = ds.bandCount();
   if ( width <= 0 || height <= 0 || bands <= 0 )
-    return nullptr;
+    return {};
 
   // Map the band's native GDAL type to a segment dtype. Byte/UInt16/Int32/
   // Float32/Float64 map 1:1 (preserving the source dtype, byte-exact); any
@@ -95,54 +106,105 @@ std::unique_ptr<SharedMemorySegment> migrateRasterInputToShm( const Json::Value 
       break;
   }
 
-  auto seg = std::make_unique<SharedMemorySegment>();
-  if ( !seg->create( width, height, bands, segDtype ) )
-    return nullptr;
-
-  // Interleaved-by-pixel layout: [H, W, bands] matches the Python mount
-  // np.ndarray((height, width, bands), ...). Read each band then scatter into
-  // the (y, x, b) layout the numpy view expects.
   const size_t elemSize = SharedMemorySegment::dtypeSize( segDtype );
-  char *payload = static_cast<char *>( seg->payload() );
+
+  // Read each band ONCE into a full-height plane, then scatter rows into the
+  // per-tile segments (the wrapper has no window read, so tile splitting is a
+  // memory operation on the already-loaded plane). Interleaved-by-pixel layout
+  // [H, W, bands] matches the Python mount np.ndarray((height, width, bands)).
+  std::vector<std::vector<unsigned char>> nativePlanes;
+  std::vector<std::vector<float>> floatPlanes;
   if ( useNative )
   {
-    std::vector<unsigned char> bandPlane( static_cast<size_t>( width ) * height * elemSize );
+    nativePlanes.resize( bands, std::vector<unsigned char>(
+                                   static_cast<size_t>( width ) * height * elemSize ) );
     for ( int b = 0; b < bands; ++b )
-    {
-      if ( !ds.readBandDataNative( b + 1, bandPlane.data(), width, height ) )
-        return nullptr; // fall back; the segment is reclaimed by unique_ptr
-      const unsigned char *src = bandPlane.data();
-      for ( int y = 0; y < height; ++y )
-        for ( int x = 0; x < width; ++x )
-        {
-          std::memcpy( payload + ( ( static_cast<size_t>( y ) * width + x ) * bands + b ) * elemSize,
-                       src, elemSize );
-          src += elemSize;
-        }
-    }
+      if ( !ds.readBandDataNative( b + 1, nativePlanes[b].data(), width, height ) )
+        return {}; // fall back; no segments created yet
   }
   else
   {
-    std::vector<float> bandPlane( static_cast<size_t>( width ) * height );
-    float *floatPayload = reinterpret_cast<float *>( payload );
+    floatPlanes.resize( bands, std::vector<float>( static_cast<size_t>( width ) * height ) );
     for ( int b = 0; b < bands; ++b )
-    {
-      if ( !ds.readBandData( b + 1, bandPlane.data(), width, height ) )
-        return nullptr; // fall back; the segment is reclaimed by unique_ptr
-      const float *src = bandPlane.data();
-      for ( int y = 0; y < height; ++y )
-        for ( int x = 0; x < width; ++x )
-          floatPayload[( static_cast<size_t>( y ) * width + x ) * bands + b] = *src++;
-    }
+      if ( !ds.readBandData( b + 1, floatPlanes[b].data(), width, height ) )
+        return {}; // fall back; no segments created yet
   }
 
-  // Replace the opt-in flag with the real key + metadata the daemon expects.
-  params.insert( QStringLiteral( "__shm_key__" ), seg->nativeKey() );
-  params.insert( QStringLiteral( "width" ), width );
-  params.insert( QStringLiteral( "height" ), height );
-  params.insert( QStringLiteral( "bands" ), bands );
-  params.insert( QStringLiteral( "dtype" ), static_cast<int>( segDtype ) );
-  return seg;
+  // Split the raster into row-chunk tiles. A single segment when the raster
+  // fits under the cap; otherwise one segment per ceil(height/cap) tile.
+  std::vector<std::unique_ptr<SharedMemorySegment>> segments;
+  std::vector<QVariantMap> tileManifest;
+  const int tileHeight = height <= kSegmentHeightCap ? height : kSegmentHeightCap;
+  for ( int rowStart = 0; rowStart < height; rowStart += tileHeight )
+  {
+    const int tileRows = std::min( tileHeight, height - rowStart );
+    auto seg = std::make_unique<SharedMemorySegment>();
+    if ( !seg->create( width, tileRows, bands, segDtype ) )
+      return {}; // fall back; created segments are reclaimed by the vector
+
+    char *payload = static_cast<char *>( seg->payload() );
+    for ( int y = 0; y < tileRows; ++y )
+    {
+      const size_t srcRow = static_cast<size_t>( rowStart + y ) * width;
+      const size_t dstRow = static_cast<size_t>( y ) * width;
+      for ( int b = 0; b < bands; ++b )
+      {
+        if ( useNative )
+        {
+          const unsigned char *src = nativePlanes[b].data() + srcRow * elemSize;
+          for ( int x = 0; x < width; ++x )
+          {
+            std::memcpy( payload + ( ( dstRow + x ) * bands + b ) * elemSize, src, elemSize );
+            src += elemSize;
+          }
+        }
+        else
+        {
+          const float *src = floatPlanes[b].data() + srcRow;
+          float *floatPayload = reinterpret_cast<float *>( payload );
+          for ( int x = 0; x < width; ++x )
+            floatPayload[( dstRow + x ) * bands + b] = *src++;
+        }
+      }
+    }
+
+    if ( height > kSegmentHeightCap )
+    {
+      // Tile path: manifest entry per segment so the daemon can mount each tile.
+      QVariantMap tile;
+      tile.insert( QStringLiteral( "key" ), seg->nativeKey() );
+      tile.insert( QStringLiteral( "width" ), width );
+      tile.insert( QStringLiteral( "height" ), tileRows );
+      tile.insert( QStringLiteral( "bands" ), bands );
+      tile.insert( QStringLiteral( "dtype" ), static_cast<int>( segDtype ) );
+      tile.insert( QStringLiteral( "row" ), rowStart );
+      tileManifest.push_back( tile );
+    }
+
+    segments.push_back( std::move( seg ) );
+  }
+
+  // Replace the opt-in flag with the real keys + metadata the daemon expects.
+  if ( height > kSegmentHeightCap )
+  {
+    // Tile path: send the __shm_tiles__ manifest and DROP the __shm_key__ opt-in
+    // flag (still boolean true in params) — the daemon checks __shm_key__ BEFORE
+    // __shm_tiles__, so a leftover bool would be mounted as a bogus segment key.
+    QVariantList manifest;
+    for ( const QVariantMap &tile : tileManifest )
+      manifest.append( tile );
+    params.insert( QStringLiteral( "__shm_tiles__" ), manifest );
+    params.remove( QStringLiteral( "__shm_key__" ) );
+  }
+  else
+  {
+    params.insert( QStringLiteral( "__shm_key__" ), segments.front()->nativeKey() );
+    params.insert( QStringLiteral( "width" ), width );
+    params.insert( QStringLiteral( "height" ), height );
+    params.insert( QStringLiteral( "bands" ), bands );
+    params.insert( QStringLiteral( "dtype" ), static_cast<int>( segDtype ) );
+  }
+  return segments;
 }
 
 } // namespace
@@ -269,9 +331,12 @@ void AppInterfaceBridge::setupDefaultAlgorithmHandler()
         // ADR 0064 opt-in: if the caller asked for zero-copy delivery
         // (__shm_key__: true) and supplied a raster "input" path, migrate the
         // raster into a shared-memory segment now. The segment is held alive
-        // for the duration of the RPC below; RAII reclaims it (detach+unlink)
+        // for the duration of the RPC below; RAII reclaims them (detach+unlink)
         // on return or exception, so the /dev/shm backing objects never leak.
-        std::unique_ptr<SharedMemorySegment> shmSeg = migrateRasterInputToShm( execParams, params );
+        // One segment for a short raster, one per row-chunk tile for a tall one
+        // (ADR 0064 tile-by-tile delivery).
+        std::vector<std::unique_ptr<SharedMemorySegment>> shmSegs =
+          migrateRasterInputToShm( execParams, params );
 
         req[QStringLiteral( "params" )] = QJsonObject::fromVariantMap( params );
 
@@ -281,7 +346,7 @@ void AppInterfaceBridge::setupDefaultAlgorithmHandler()
           QStringLiteral( "processing.execute_algorithm" ), req, execResult, execIsError, 300000 );
         // Drop the mapping before returning; the daemon has already
         // close()+unlink()ed on its side too (best-effort, idempotent).
-        shmSeg.reset();
+        shmSegs.clear();
         switch ( awaitStatus )
         {
           case AwaitStatus::NoClient:

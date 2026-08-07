@@ -291,7 +291,7 @@ def main():
                                 # that don't read __shm_array__ are unaffected.
                                 # Lifetime: close+best-effort unlink before reply,
                                 # consistent with the shm.read sync contract.
-                                shm_handle = None
+                                shm_handles = []
                                 if isinstance(exec_params, dict) and exec_params.get("__shm_key__"):
                                     try:
                                         shm_handle, arr = _mount_shm_array(
@@ -301,6 +301,7 @@ def main():
                                             exec_params.get("bands"),
                                             exec_params.get("dtype"),
                                         )
+                                        shm_handles.append(shm_handle)
                                         exec_params = dict(exec_params)
                                         exec_params["__shm_array__"] = arr
                                     except FileNotFoundError:
@@ -312,13 +313,53 @@ def main():
                                                 "message": f"Shared memory segment not found: {exec_params.get('__shm_key__')}"
                                             }
                                         }
-                                        shm_handle = None
+                                        shm_handles = []
+                                        exec_params = None
+                                # ADR 0064 tile-by-tile delivery: when the C++
+                                # side split a tall raster into row-chunk tiles,
+                                # __shm_tiles__ is a manifest (list of per-tile
+                                # {key,width,height,bands,dtype,row} objects).
+                                # Mount every tile's segment and expose the list
+                                # of zero-copy arrays as __shm_tiles__, which is
+                                # what the plugin's __shm_tiles__ consumer expects.
+                                if isinstance(exec_params, dict) and exec_params.get("__shm_tiles__"):
+                                    manifest = exec_params["__shm_tiles__"]
+                                    try:
+                                        tiles = []
+                                        for tile in manifest:
+                                            shm_handle, arr = _mount_shm_array(
+                                                tile.get("key"),
+                                                tile.get("width"),
+                                                tile.get("height"),
+                                                tile.get("bands"),
+                                                tile.get("dtype"),
+                                            )
+                                            shm_handles.append(shm_handle)
+                                            tiles.append(arr)
+                                        exec_params = dict(exec_params)
+                                        exec_params["__shm_tiles__"] = tiles
+                                    except FileNotFoundError:
+                                        resp = {
+                                            "jsonrpc": "2.0",
+                                            "id": req_id,
+                                            "error": {
+                                                "code": -32603,
+                                                "message": f"Shared memory tile segment not found"
+                                            }
+                                        }
+                                        for h in shm_handles:
+                                            try:
+                                                h.close()
+                                                h.unlink()
+                                            except Exception:
+                                                pass
+                                        shm_handles = []
                                         exec_params = None
                                 if exec_params is not None:
                                     try:
                                         exec_result = algo_executors[algo_id](exec_params)
                                     finally:
-                                        if shm_handle is not None:
+                                        for shm_handle in shm_handles:
                                             shm_handle.close()
                                             try:
                                                 shm_handle.unlink()
@@ -359,6 +400,14 @@ def main():
                         # path.
                         def _shm_sum_fn(p):
                             arr = p.get("__shm_array__")
+                            tiles = p.get("__shm_tiles__")
+                            if tiles is not None:
+                                # Tile-by-tile zero-copy delivery: __shm_tiles__
+                                # is a list of per-tile numpy arrays.
+                                return {"via": "tiles",
+                                        "tile_count": len(tiles),
+                                        "sums": [float(t.sum()) for t in tiles],
+                                        "shapes": [list(t.shape) for t in tiles]}
                             if arr is not None:
                                 return {"via": "shm",
                                         "sum": float(arr.sum()),

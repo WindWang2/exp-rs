@@ -1001,3 +1001,128 @@ TEST_CASE( "SharedMemorySegment: uint8/uint16 rasters keep their native dtype th
     REQUIRE( r["sum"].asDouble() == Approx( F64_FILL * W * H ).epsilon( 1e-12 ) );
   }
 }
+
+// ---------------------------------------------------------------------------
+// ADR 0064 - tile-by-tile zero-copy delivery. A raster taller than the
+// per-segment height cap is split into row-chunk tiles; the C++ bridge sends
+// a __shm_tiles__ manifest (one segment per tile) and the daemon mounts each
+// tile as a numpy array, exposed to the plugin as __shm_tiles__. The plugin
+// must see the same pixel data as a single-array delivery: the sum of all
+// tile sums equals the full-raster sum, byte-exact. Small rasters must NOT
+// split (they keep the single __shm_key__ path) - pinned by the regression
+// SECTION below.
+// ---------------------------------------------------------------------------
+TEST_CASE( "SharedMemorySegment: tall rasters arrive as tiles with byte-exact total sum",
+           "[python][shm][tiles]" )
+{
+  using namespace sicnu::jobs;
+
+  sicnu::data::DataManager dataManager;
+  PythonPluginHost host( 2 );
+
+  const QString pluginDir = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "plugins/sample_plugin" ) );
+  QString loadError;
+  PythonPluginAdapter *pluginAdapter = host.loadPlugin( pluginDir, &dataManager, nullptr, nullptr, &loadError );
+  REQUIRE( pluginAdapter != nullptr );
+
+  WorkerNode *node = pluginAdapter->workerNode();
+  REQUIRE( node != nullptr );
+  REQUIRE( node->server->hasClient() );
+
+  QJsonObject regResult;
+  bool regIsError = false;
+  REQUIRE( node->server->sendRequestAndAwait( QStringLiteral( "processing.test_register_shm_algorithm" ),
+                                              QJsonObject(), regResult, regIsError, 10000 )
+           == AwaitStatus::Ok );
+  REQUIRE( !regIsError );
+
+  auto runPy = []( const Json::Value &params ) -> std::optional<sicnu::jobs::JobRecord> {
+    JobRequest req;
+    req.algorithmId = "py:shm_sum";
+    req.params = params;
+    const std::string jobId = JobEngine::instance().submit( req );
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 60 );
+    for ( ;; )
+    {
+      QCoreApplication::processEvents();
+      auto snap = JobEngine::instance().snapshot( jobId );
+      if ( snap && ( snap->state == JobState::Succeeded || snap->state == JobState::Failed ) )
+        return snap;
+      if ( std::chrono::steady_clock::now() > deadline )
+        return snap;
+      QThread::msleep( 5 );
+    }
+  };
+
+  QTemporaryDir tmpDir;
+  REQUIRE( tmpDir.isValid() );
+
+  // A tall raster: 64 wide x 3000 tall float32, fill 1.5. With a per-segment
+  // height cap of 1024 rows this must split into ceil(3000/1024) = 3 tiles.
+  constexpr int TW = 64, TH = 3000;
+  const double FILL = 1.5;
+  const QString tallPath = createSingleBandRaster( tmpDir.path(), QStringLiteral( "tall.tif" ),
+                                                   TW, TH, GDT_Float32, FILL );
+  REQUIRE( QFileInfo::exists( tallPath ) );
+
+  SECTION( "tall raster splits into tiles with byte-exact total sum" )
+  {
+    Json::Value params( Json::objectValue );
+    params["__shm_key__"] = true;                 // opt-in flag
+    params["input"] = tallPath.toStdString();
+
+    const auto snap = runPy( params );
+    REQUIRE( snap.has_value() );
+    INFO( "job error: " << ( snap.has_value() ? snap->error : std::string{} ) );
+    REQUIRE( snap->state == JobState::Succeeded );
+
+    REQUIRE( snap->result.isMember( "result" ) );
+    const Json::Value r = snap->result["result"];
+    REQUIRE( r["via"].asString() == "tiles" );    // tile path activated
+    REQUIRE( r["tile_count"].asInt() > 1 );       // actually split
+    REQUIRE( r.isMember( "sums" ) );
+    REQUIRE( r["sums"].isArray() );
+    REQUIRE( r["sums"].size() == static_cast<Json::Value::ArrayIndex>( r["tile_count"].asInt() ) );
+
+    // Sum of all tile sums == full-raster sum (fill * W * H), byte-exact.
+    double total = 0.0;
+    for ( const auto &s : r["sums"] )
+      total += s.asDouble();
+    REQUIRE( total == Approx( FILL * TW * TH ).epsilon( 1e-6 ) );
+
+    // Every tile has the full width and single band; heights partition TH.
+    int heightSum = 0;
+    for ( const auto &sh : r["shapes"] )
+    {
+      REQUIRE( sh.isArray() );
+      REQUIRE( sh.size() == 3 );
+      REQUIRE( sh[1].asInt() == TW );             // full width per tile
+      REQUIRE( sh[2].asInt() == 1 );              // single band
+      heightSum += sh[0].asInt();                 // tile heights partition TH
+    }
+    REQUIRE( heightSum == TH );
+  }
+
+  SECTION( "small raster keeps the single-array path (no tiles)" )
+  {
+    const QString smallPath = createSingleBandRaster( tmpDir.path(), QStringLiteral( "small.tif" ),
+                                                      16, 16, GDT_Float32, 2.0 );
+    REQUIRE( QFileInfo::exists( smallPath ) );
+
+    Json::Value params( Json::objectValue );
+    params["__shm_key__"] = true;
+    params["input"] = smallPath.toStdString();
+
+    const auto snap = runPy( params );
+    REQUIRE( snap.has_value() );
+    INFO( "job error: " << ( snap.has_value() ? snap->error : std::string{} ) );
+    REQUIRE( snap->state == JobState::Succeeded );
+
+    REQUIRE( snap->result.isMember( "result" ) );
+    const Json::Value r = snap->result["result"];
+    REQUIRE( r["via"].asString() == "shm" );      // single-array path
+    REQUIRE( r["shape"][0].asInt() == 16 );
+    REQUIRE( r["shape"][1].asInt() == 16 );
+    REQUIRE( r["sum"].asDouble() == Approx( 2.0 * 16 * 16 ).epsilon( 1e-6 ) );
+  }
+}
