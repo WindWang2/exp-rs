@@ -384,6 +384,7 @@ TEST_CASE( "Raster structure surfaces semantic band roles from product metadata"
   REQUIRE( dir.isValid() );
   const QString path = dir.path() + QStringLiteral( "/role_stack.tif" );
 
+  GDALAllRegister();
   GDALDriverH driver = GDALGetDriverByName( "GTiff" );
   REQUIRE( driver != nullptr );
   GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), 2, 2, 2, GDT_Float32, nullptr );
