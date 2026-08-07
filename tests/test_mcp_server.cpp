@@ -6,11 +6,14 @@
 
 #include <chrono>
 #include <thread>
+#include <array>
+#include <vector>
 
 #include "agent/mcp_server.h"
 #include "jobs/job_engine.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/task_center.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 #include "operators/framework/rs_operator_registry.h"
 #include <qgsapplication.h>
 #include <processing/qgsprocessingregistry.h>
@@ -19,6 +22,8 @@
 #include "processing/providers/qgis_algorithms/provider.h"
 #include "processing/providers/gdal_tools/provider.h"
 #include "processing/providers/otb_tools/provider.h"
+#include <QTemporaryDir>
+#include <gdal_priv.h>
 
 // Helper subclass of McpServer to expose handlers directly for unit testing
 class TestMcpServer : public McpServer
@@ -350,4 +355,38 @@ TEST_CASE("McpServer executes qgis processing algorithms to terminal state", "[a
     REQUIRE(status.value("execution_id").toString() == execId);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     sicnu::jobs::JobEngine::instance().shutdown();
+}
+
+TEST_CASE("McpServer describe_dataset exposes semantic band roles", "[agent][mcp][semantic]") {
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    // A stacked product-style raster: band 1 NIR, band 2 Red (SICNU_BAND_ROLE).
+    const QString path = dir.filePath(QStringLiteral("product.tif"));
+    std::vector<std::vector<float>> bands(2, std::vector<float>(4, 100.0f));
+    std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+    QString err;
+    REQUIRE(writeGdalOutput(path, 2, 2, bands, gt, "EPSG:32648", &err));
+
+    GDALDatasetH ds = GDALOpenEx(path.toUtf8().constData(),
+                                 GDAL_OF_RASTER | GDAL_OF_UPDATE, nullptr, nullptr, nullptr);
+    REQUIRE(ds != nullptr);
+    GDALSetMetadataItem(GDALGetRasterBand(ds, 1), "SICNU_BAND_ROLE", "nir", nullptr);
+    GDALSetMetadataItem(GDALGetRasterBand(ds, 2), "SICNU_BAND_ROLE", "red", nullptr);
+    GDALClose(ds);
+
+    QgsRasterLayer *layer = new QgsRasterLayer(path, QStringLiteral("product_semantic"));
+    REQUIRE(layer->isValid());
+    QgsProject::instance()->addMapLayer(layer);
+
+    TestMcpServer server;
+    QVariantMap result = server.testDescribeDataset(layer->id());
+    REQUIRE(result.contains(QStringLiteral("bands")));
+    const QVariantList bandList = result.value(QStringLiteral("bands")).toList();
+    REQUIRE(bandList.size() == 2);
+    CHECK(bandList[0].toMap().value(QStringLiteral("role")).toString() == QStringLiteral("nir"));
+    CHECK(bandList[1].toMap().value(QStringLiteral("role")).toString() == QStringLiteral("red"));
+    CHECK(bandList[0].toMap().value(QStringLiteral("index")).toInt() == 1);
+
+    QgsProject::instance()->removeMapLayer(layer);
 }

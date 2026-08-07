@@ -6,6 +6,7 @@
 #include "operators/framework/rs_operator.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/json_params_converter.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 #include "shell/processing_job_adapter.h"
 
 #include <iostream>
@@ -792,6 +793,12 @@ QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
             result[QStringLiteral("height")] = raster->height();
             result[QStringLiteral("band_count")] = provider->bandCount();
 
+            // Semantic band roles (SICNU_BAND_ROLE product metadata) so the
+            // agent can select bands by role ("nir", "red", "qa") instead of
+            // band numbers (ADR 0087). Empty when the raster carries none.
+            GdalDatasetWrapper ds;
+            const bool rolesAvailable = ds.open(raster->source());
+
             QVariantList bands;
             for (int i = 1; i <= provider->bandCount(); ++i)
             {
@@ -804,6 +811,8 @@ QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
                 {
                     bandMap[QStringLiteral("nodata_value")] = provider->sourceNoDataValue(i);
                 }
+                bandMap[QStringLiteral("role")] =
+                    rolesAvailable ? ds.bandMetadataItem(i, "SICNU_BAND_ROLE") : QString();
                 bands.append(bandMap);
             }
             result[QStringLiteral("bands")] = bands;
