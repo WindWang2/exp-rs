@@ -8,6 +8,7 @@
 #include "rs_rx_anomaly_operator.h"
 #include "rs_continuum_removal_operator.h"
 #include "rs_spectral_resample_operator.h"
+#include "rs_endmember_extraction_operator.h"
 #include "rs_atmospheric_correction_operator.h"
 #include "rs_radiometric_calibration_operator.h"
 #include "rs_change_detection_operator.h"
@@ -45,6 +46,7 @@ REGISTER_RS_OPERATOR(RsSpectralUnmixingOperator, "rs:spectral_unmixing")
 REGISTER_RS_OPERATOR(RsRxAnomalyOperator, "rs:rx_anomaly")
 REGISTER_RS_OPERATOR(RsContinuumRemovalOperator, "rs:continuum_removal")
 REGISTER_RS_OPERATOR(RsSpectralResampleOperator, "rs:spectral_resample")
+REGISTER_RS_OPERATOR(RsEndmemberExtractionOperator, "rs:endmember_extraction")
 REGISTER_RS_OPERATOR(RsAtmosphericCorrectionOperator, "rs:atmospheric_correction")
 REGISTER_RS_OPERATOR(RsRadiometricCalibrationOperator, "rs:radiometric_calibration")
 REGISTER_RS_OPERATOR(RsChangeDetectionOperator, "rs:change_detection")
