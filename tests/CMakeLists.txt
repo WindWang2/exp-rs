@@ -680,6 +680,7 @@ sicnu_discover_tests(test_progress_dialog)
 # Spectral profile widget tests
 add_executable(test_spectral_profile_widget test_spectral_profile_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/spectral_profile_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
 )
 target_link_libraries(test_spectral_profile_widget PRIVATE
   Catch2::Catch2WithMain
@@ -1304,6 +1305,26 @@ target_include_directories(test_dual_viewport_sync PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_dual_viewport_sync)
+
+# Swipe (curtain) comparison map tool tests
+add_executable(test_swipe_map_tool test_swipe_map_tool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/map_tools/swipe_map_tool.cpp
+)
+target_link_libraries(test_swipe_map_tool PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_swipe_map_tool PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_swipe_map_tool)
 
 # RMS scatter widget tests (Task 11.4.7)
 add_executable(test_rms_scatter test_rms_scatter.cpp)

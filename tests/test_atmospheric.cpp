@@ -106,6 +106,91 @@ TEST_CASE("DOS1 rejects zero count", "[atm][dos1]")
     REQUIRE_FALSE(AtmosphericCorrection::dos1(buf.data(), buf.data(), 0, 1.0f, 0.0f));
 }
 
+// --- Histogram-based dark object extraction (DOS1, Chavez 1996) ---
+
+TEST_CASE("findDarkObjectByHistogram ignores isolated noisy dark pixel", "[atm][dos1][histogram]")
+{
+    // Scene floor at 8.0 radiance; one single-pixel sensor-noise spike at 2.0.
+    std::vector<float> radiance(10000, 8.0f);
+    radiance[0] = 2.0f;
+    const float dark = AtmosphericCorrection::findDarkObjectByHistogram(radiance.data(), radiance.size());
+    // The 0.01% frequency floor must reject the spike and pick the scene floor.
+    REQUIRE_THAT(dark, Catch::Matchers::WithinAbs(8.0f, 0.1f));
+}
+
+TEST_CASE("findDarkObjectByHistogram picks lowest dense dark cluster", "[atm][dos1][histogram]")
+{
+    std::vector<float> radiance(10000, 12.0f);
+    radiance.insert(radiance.begin(), 500, 4.0f); // dark cluster at 4.0
+    const float dark = AtmosphericCorrection::findDarkObjectByHistogram(radiance.data(), radiance.size());
+    REQUIRE_THAT(dark, Catch::Matchers::WithinAbs(4.0f, 0.1f));
+}
+
+TEST_CASE("findDarkObjectByHistogram single-level scene returns that level", "[atm][dos1][histogram]")
+{
+    std::vector<float> radiance(100, 7.25f);
+    REQUIRE_THAT(AtmosphericCorrection::findDarkObjectByHistogram(radiance.data(), radiance.size()),
+                 Catch::Matchers::WithinAbs(7.25f, 1e-4f));
+}
+
+TEST_CASE("findDarkObjectByHistogram tiny scene falls back to global min", "[atm][dos1][histogram]")
+{
+    // Fewer pixels than the frequency floor: fall back to the scene minimum.
+    std::vector<float> radiance = {3.0f, 5.0f, 9.0f};
+    REQUIRE_THAT(AtmosphericCorrection::findDarkObjectByHistogram(radiance.data(), radiance.size()),
+                 Catch::Matchers::WithinAbs(3.0f, 1e-4f));
+}
+
+TEST_CASE("findDarkObjectByHistogram skips NaN and handles all-NaN", "[atm][dos1][histogram]")
+{
+    std::vector<float> radiance = {std::numeric_limits<float>::quiet_NaN(),
+                                   std::numeric_limits<float>::quiet_NaN()};
+    REQUIRE(AtmosphericCorrection::findDarkObjectByHistogram(radiance.data(), radiance.size()) == 0.0f);
+
+    std::vector<float> mixed = {std::numeric_limits<float>::quiet_NaN(), 2.0f, 2.0f, 2.0f, 2.0f};
+    REQUIRE_THAT(AtmosphericCorrection::findDarkObjectByHistogram(mixed.data(), mixed.size()),
+                 Catch::Matchers::WithinAbs(2.0f, 0.1f));
+}
+
+TEST_CASE("findDarkObjectByHistogram null or empty input returns zero", "[atm][dos1][histogram]")
+{
+    REQUIRE(AtmosphericCorrection::findDarkObjectByHistogram(nullptr, 10) == 0.0f);
+    std::vector<float> empty;
+    REQUIRE(AtmosphericCorrection::findDarkObjectByHistogram(empty.data(), 0) == 0.0f);
+}
+
+TEST_CASE("dos1Histogram equals dos1 on a clean scene", "[atm][dos1][histogram]")
+{
+    // Without outliers the histogram floor coincides with the global minimum.
+    std::vector<float> dn = {100.0f, 200.0f, 150.0f, 120.0f, 130.0f, 110.0f, 140.0f, 105.0f};
+    std::vector<float> plain(8), hist(8);
+    REQUIRE(AtmosphericCorrection::dos1(dn.data(), plain.data(), 8, 0.01f, 0.0f));
+    REQUIRE(AtmosphericCorrection::dos1Histogram(dn.data(), hist.data(), 8, 0.01f, 0.0f));
+    for (size_t i = 0; i < 8; ++i)
+        REQUIRE_THAT(hist[i], Catch::Matchers::WithinAbs(plain[i], 1e-4f));
+}
+
+TEST_CASE("dos1Histogram is robust against single noisy dark pixel", "[atm][dos1][histogram]")
+{
+    // 10000 pixels at DN 100 (radiance 1.0) plus one hot noise pixel at DN 20.
+    std::vector<float> dn(10000, 100.0f);
+    dn[0] = 20.0f;
+    std::vector<float> out(dn.size());
+    REQUIRE(AtmosphericCorrection::dos1Histogram(dn.data(), out.data(), dn.size(), 0.01f, 0.0f));
+    // Scene floor maps to ~0 instead of being dragged down by the noise pixel.
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(0.0f, 0.1f));
+    // The noise pixel itself drops below zero (below the dark object level).
+    REQUIRE(out[0] < -0.5f);
+}
+
+TEST_CASE("dos1Histogram rejects null pointers and zero count", "[atm][dos1][histogram]")
+{
+    std::vector<float> buf(3);
+    REQUIRE_FALSE(AtmosphericCorrection::dos1Histogram(nullptr, buf.data(), 3, 1.0f, 0.0f));
+    REQUIRE_FALSE(AtmosphericCorrection::dos1Histogram(buf.data(), nullptr, 3, 1.0f, 0.0f));
+    REQUIRE_FALSE(AtmosphericCorrection::dos1Histogram(buf.data(), buf.data(), 0, 1.0f, 0.0f));
+}
+
 // --- DOS2 ---
 
 TEST_CASE("DOS2 applies transmittance correction", "[atm][dos2]")
@@ -230,6 +315,19 @@ TEST_CASE("AtmosphericCorrection processFile applies DOS1", "[atm][gdal]")
     REQUIRE(ok);
     REQUIRE(QFile::exists(outputPath));
     REQUIRE(error.isEmpty());
+
+    // Radiance = 0.01*DN = {0.5, 1.0, 2.0, 0.8}. The 4-pixel scene is below
+    // the histogram frequency floor (0.01% of 4 → threshold 2), so the dark
+    // object falls back to the global minimum 0.5 and the scene maps to
+    // {0.0, 0.5, 1.5, 0.3}.
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    std::vector<float> result(4);
+    REQUIRE(out.readBandData(1, result.data(), 2, 2));
+    REQUIRE_THAT(result[0], Catch::Matchers::WithinAbs(0.0f, 1e-4f));
+    REQUIRE_THAT(result[1], Catch::Matchers::WithinAbs(0.5f, 1e-4f));
+    REQUIRE_THAT(result[2], Catch::Matchers::WithinAbs(1.5f, 1e-4f));
+    REQUIRE_THAT(result[3], Catch::Matchers::WithinAbs(0.3f, 1e-4f));
 }
 
 // --- QUAC (Quick Atmospheric Correction) ---

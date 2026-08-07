@@ -43,6 +43,15 @@ public:
      */
     void clear();
 
+    /// Whether a valid profile (>= 1 readable band) is currently displayed.
+    bool hasData() const { return m_hasData; }
+
+    /// Pixel value per band of the current profile (NaN for failed band reads).
+    QVector<double> values() const { return m_values; }
+
+    /// Per-band label ("B2", "Band 1", ...) used as the chart X axis.
+    QVector<QString> bandLabels() const { return m_bandLabels; }
+
     QSize minimumSizeHint() const override { return QSize( 320, 220 ); }
     QSize sizeHint() const override { return QSize( 500, 350 ); }
 

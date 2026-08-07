@@ -61,6 +61,9 @@ class PythonWorkerProcessPool : public QObject
   private:
     WorkerNode *createWorkerNode( int id );
     void handleWorkerCrash( WorkerNode *node );
+    /// Error-out every recovered request whose worker failed to restart, so
+    /// callers never wait forever on a dead worker.
+    void failPendingRequests( const std::vector<PythonIpcServer::PendingRequest> &pending );
 
     int m_poolSize = 2;
     int m_nextWorkerId = 1;

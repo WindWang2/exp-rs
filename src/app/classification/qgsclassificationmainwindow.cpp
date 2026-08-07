@@ -3081,7 +3081,7 @@ void QgsClassificationMainWindow::recomputeSpectralCurves()
         int row = static_cast<int>( i / W );
         int col = static_cast<int>( i % W );
         float val = 0.0f;
-        GDALRasterIO( band, GF_Read, col, row, 1, 1, &val, 1, 1, GDT_Float32, 0, 0 );
+        (void) GDALRasterIO( band, GF_Read, col, row, 1, 1, &val, 1, 1, GDT_Float32, 0, 0 );
         bandSums[classId][bi] += val;
         bandSumSq[classId][bi] += val * val;
       }

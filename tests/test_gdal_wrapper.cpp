@@ -45,7 +45,7 @@ const QString &sampleCropsPath()
       GDALRasterBandH band = GDALGetRasterBand( ds, b );
       std::vector<float> line( 512, static_cast<float>( b * 10 ) );
       for ( int row = 0; row < 512; ++row )
-        GDALRasterIO( band, GF_Write, 0, row, 512, 1, line.data(), 512, 1, GDT_Float32, 0, 0 );
+        (void) GDALRasterIO( band, GF_Write, 0, row, 512, 1, line.data(), 512, 1, GDT_Float32, 0, 0 );
     }
     GDALClose( ds );
     return p;
@@ -72,7 +72,7 @@ const QString &phrXsPath()
     {
       for ( int col = 0; col < 256; ++col )
         line[col] = static_cast<float>( row * 256 + col ); // non-zero
-      GDALRasterIO( band, GF_Write, 0, row, 256, 1, line.data(), 256, 1, GDT_Float32, 0, 0 );
+      (void) GDALRasterIO( band, GF_Write, 0, row, 256, 1, line.data(), 256, 1, GDT_Float32, 0, 0 );
     }
     GDALClose( ds );
     return p;
@@ -105,7 +105,7 @@ const QString &landsatPath()
     GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
     std::vector<float> line( 64, 1.0f );
     for ( int row = 0; row < 64; ++row )
-      GDALRasterIO( band, GF_Write, 0, row, 64, 1, line.data(), 64, 1, GDT_Float32, 0, 0 );
+      (void) GDALRasterIO( band, GF_Write, 0, row, 64, 1, line.data(), 64, 1, GDT_Float32, 0, 0 );
     GDALClose( ds );
     return p;
   }();

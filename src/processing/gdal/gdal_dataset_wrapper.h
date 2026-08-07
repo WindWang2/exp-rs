@@ -92,6 +92,25 @@ public:
     /// Open a raster file. Returns true on success.
     bool open(const QString &path);
 
+    /**
+     * Create a new single-dataset raster file (write access, e.g. a GeoTIFF)
+     * with the given dimensions and band count, then keep it open for windowed
+     * writes via writeBandWindow(). Use close() (or the destructor) to flush.
+     *
+     * @param path          Output file path
+     * @param width         Raster width in pixels
+     * @param height        Raster height in pixels
+     * @param bandCount     Number of output bands
+     * @param dtype         GDAL data type (e.g. GDT_Float32) as an int
+     * @param geoTransform  6-element affine geotransform
+     * @param projection    WKT projection string (may be empty)
+     * @param errorMessage  optional error sink
+     * @return true on success
+     */
+    bool create(const QString &path, int width, int height, int bandCount,
+                int dtype, const std::array<double, 6> &geoTransform,
+                const QString &projection, QString *errorMessage = nullptr);
+
     /// Close the dataset (also called by destructor).
     void close();
 
@@ -135,6 +154,22 @@ public:
      */
     bool readBandWindow(int bandNum, int xOff, int yOff,
                         int srcWidth, int srcHeight, float *buffer) const;
+
+    /**
+     * Write a rectangular window of a band from a float buffer (out-of-core
+     * streaming support). The window is written at native resolution: buffer
+     * must hold srcWidth*srcHeight floats. The window is clamped to the raster
+     * extent.
+     * @param bandNum 1-based band number
+     * @param xOff    pixel column of the window's left edge (0-based)
+     * @param yOff    pixel row of the window's top edge (0-based)
+     * @param srcWidth  window width in pixels
+     * @param srcHeight window height in pixels
+     * @param buffer  float buffer of size srcWidth*srcHeight
+     * @return true on success
+     */
+    bool writeBandWindow(int bandNum, int xOff, int yOff,
+                         int srcWidth, int srcHeight, const float *buffer) const;
 
     /**
      * Read a single pixel value.

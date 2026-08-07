@@ -61,7 +61,7 @@ QString syntheticSample( const QString &relative )
   GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
   std::vector<float> line( W, 1.0f );
   for ( int row = 0; row < H; ++row )
-    GDALRasterIO( band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
+    (void) GDALRasterIO( band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
   GDALClose( ds );
   cache.insert( relative, path );
   return path;

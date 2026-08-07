@@ -2,6 +2,7 @@
 #include "radiometric_calibration.h"
 #include "math_utils.h"
 #include "satellite_products.h"
+#include "processing/gdal/gdal_block_stream.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "core/sicnu_logging.h"
 
@@ -174,10 +175,10 @@ bool loadSentinel2Mtd(const QString &mtdPath, const QMap<int, QString> &bandName
         return false;
     }
     QDomDocument doc;
-    QString parseErr;
-    if (!doc.setContent(&f, &parseErr)) {
+    const QDomDocument::ParseResult parseResult = doc.setContent(&f);
+    if (!parseResult) {
         if (errorMessage)
-            *errorMessage = QStringLiteral("Failed to parse MTD XML: %1").arg(parseErr);
+            *errorMessage = QStringLiteral("Failed to parse MTD XML: %1").arg(parseResult.errorMessage);
         return false;
     }
 
@@ -422,7 +423,6 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
     const int width = srcDataset.width();
     const int height = srcDataset.height();
     const int bandCount = srcDataset.bandCount();
-    const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
 
     // Resolve the band set to process (1-based).
     QList<int> bands = bandIndices;
@@ -462,62 +462,70 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                        .arg(static_cast<int>(meta.sensor))
                        .arg(meta.sunElevationDeg));
 
-    std::vector<std::vector<float>> outBands;
-    outBands.reserve(bands.size());
-
-    for (int idx = 0; idx < bands.size(); ++idx) {
-        const int b = bands[idx];
+    // Validate every requested band up front so deterministic failures (bad
+    // band index, missing coefficients) never leave a partial output file.
+    for (int b : bands) {
         if (b < 1 || b > bandCount) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("Band %1 out of range (1..%2)").arg(b).arg(bandCount);
             return false;
         }
-        if (progress)
-            progress(static_cast<double>(idx) / bands.size(),
-                     QStringLiteral("Calibrating band %1").arg(b));
-
-        std::vector<float> dn(pixelCount);
-        if (!srcDataset.readBandData(b, dn.data(), width, height)) {
-            if (errorMessage)
-                *errorMessage = QStringLiteral("Failed to read band %1").arg(b);
-            return false;
-        }
-
-        std::vector<float> out(pixelCount);
-        auto cit = meta.bands.constFind(b);
-        if (cit == meta.bands.constEnd()) {
+        if (!meta.bands.contains(b)) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("No calibration coefficients for band %1").arg(b);
             return false;
         }
-        const BandCoefficients &c = cit.value();
-
-        bool ok = false;
-        switch (unit) {
-        case OutputUnit::Radiance:
-            ok = toRadiance(dn.data(), out.data(), pixelCount, c);
-            break;
-        case OutputUnit::ToaReflectance:
-            ok = toToaReflectance(dn.data(), out.data(), pixelCount, c, meta.sensor, meta.sunElevationDeg);
-            break;
-        case OutputUnit::BrightnessTemperature:
-            ok = toBrightnessTemperature(dn.data(), out.data(), pixelCount, c);
-            break;
-        }
-        if (!ok) {
-            if (errorMessage)
-                *errorMessage = QStringLiteral("Calibration failed for band %1 (missing coefficients?)").arg(b);
-            return false;
-        }
-        outBands.push_back(std::move(out));
     }
 
-    QString writeError;
-    if (!writeGdalOutput(outputPath, width, height, outBands,
-                         srcDataset.geoTransform(), srcDataset.projection(), &writeError)) {
-        if (errorMessage)
-            *errorMessage = writeError;
+    // Create the output raster up front so each band can be written tile by
+    // tile as it is produced. Memory stays O(tile) instead of O(width*height),
+    // so multi-GB rasters calibrate without OOM (out-of-core path).
+    GdalDatasetWrapper outDataset;
+    if (!outDataset.create(outputPath, width, height, bands.size(), GDT_Float32,
+                           srcDataset.geoTransform(), srcDataset.projection(), errorMessage))
         return false;
+
+    constexpr int kTile = 256; // nominal stream tile size (edge-clamped)
+    for (int idx = 0; idx < bands.size(); ++idx) {
+        const int b = bands[idx];
+        if (progress)
+            progress(static_cast<double>(idx) / bands.size(),
+                     QStringLiteral("Calibrating band %1").arg(b));
+
+        const BandCoefficients &c = meta.bands.value(b);
+
+        std::vector<float> out;
+        QString tileError;
+        const bool ok = GdalBlockStream(srcDataset, b, kTile, kTile).forEach(
+            [&](const GdalBlockStream::Tile &tile, const float *pixels) {
+                const size_t tileCount = static_cast<size_t>(tile.width) * tile.height;
+                out.resize(tileCount);
+                bool tOk = false;
+                switch (unit) {
+                case OutputUnit::Radiance:
+                    tOk = toRadiance(pixels, out.data(), tileCount, c);
+                    break;
+                case OutputUnit::ToaReflectance:
+                    tOk = toToaReflectance(pixels, out.data(), tileCount, c, meta.sensor, meta.sunElevationDeg);
+                    break;
+                case OutputUnit::BrightnessTemperature:
+                    tOk = toBrightnessTemperature(pixels, out.data(), tileCount, c);
+                    break;
+                }
+                if (!tOk) {
+                    tileError = QStringLiteral("Calibration failed for band %1 (missing coefficients?)").arg(b);
+                    return false;
+                }
+                return outDataset.writeBandWindow(idx + 1, tile.xOffset, tile.yOffset,
+                                                  tile.width, tile.height, out.data());
+            });
+        if (!ok) {
+            if (errorMessage)
+                *errorMessage = tileError.isEmpty()
+                                    ? QStringLiteral("Failed to stream band %1").arg(b)
+                                    : tileError;
+            return false;
+        }
     }
 
     if (progress)

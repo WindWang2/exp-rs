@@ -124,6 +124,7 @@ void PythonIpcServer::onReadyRead()
             it->second( res, isErr );
             m_callbacks.erase( it );
           }
+          dropInFlight( id );
         }
 
         emit messageReceived( msg );
@@ -132,7 +133,15 @@ void PythonIpcServer::onReadyRead()
 }
 
 void PythonIpcServer::sendRequest( const QString &method, const QJsonObject &params,
-                                   std::function<void( const QJsonObject &, bool )> callback )
+                                   std::function<void( const QJsonObject &, bool )> callback,
+                                   int retriesLeft )
+{
+  sendRequestInternal( method, params, std::move( callback ), retriesLeft, true );
+}
+
+void PythonIpcServer::sendRequestInternal( const QString &method, const QJsonObject &params,
+                                           std::function<void( const QJsonObject &, bool )> callback,
+                                           int retriesLeft, bool trackInFlight )
 {
   if ( !m_socket || m_socket->state() != QLocalSocket::ConnectedState )
     return;
@@ -145,6 +154,16 @@ void PythonIpcServer::sendRequest( const QString &method, const QJsonObject &par
   if ( callback )
   {
     m_callbacks[reqId] = callback;
+    if ( trackInFlight )
+    {
+      PendingRequest p;
+      p.id = reqId;
+      p.method = method;
+      p.params = params;
+      p.callback = callback;
+      p.retriesLeft = retriesLeft;
+      m_inFlight.push_back( std::move( p ) );
+    }
   }
 
   QJsonObject req;
@@ -157,6 +176,27 @@ void PythonIpcServer::sendRequest( const QString &method, const QJsonObject &par
   data.append( '\n' );
   m_socket->write( data );
   m_socket->flush();
+}
+
+void PythonIpcServer::dropInFlight( int id )
+{
+  for ( auto it = m_inFlight.begin(); it != m_inFlight.end(); ++it )
+  {
+    if ( it->id == id )
+    {
+      m_inFlight.erase( it );
+      return;
+    }
+  }
+}
+
+std::vector<PythonIpcServer::PendingRequest> PythonIpcServer::takeInFlightRequests()
+{
+  std::vector<PendingRequest> taken;
+  taken.swap( m_inFlight );
+  for ( const PendingRequest &p : taken )
+    m_callbacks.erase( p.id );
+  return taken;
 }
 
 AwaitStatus PythonIpcServer::sendRequestAndAwait( const QString &method, const QJsonObject &params,
@@ -182,12 +222,14 @@ AwaitStatus PythonIpcServer::sendRequestAndAwait( const QString &method, const Q
       loop.quit();
     } );
 
-  sendRequest( method, params, [&]( const QJsonObject &response, bool responseIsError ) {
+  // Blocking path: the callback captures stack locals, so it must NOT be
+  // tracked for crash re-dispatch (the pool only replays async requests).
+  sendRequestInternal( method, params, [&]( const QJsonObject &response, bool responseIsError ) {
     responded = true;
     result = response;
     isError = responseIsError;
     loop.quit();
-  } );
+  }, 1, false );
 
   connect( &timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit );
   timeoutTimer.start( timeoutMs );

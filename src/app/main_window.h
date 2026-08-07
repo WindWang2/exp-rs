@@ -110,7 +110,8 @@ class CustomIdentifyTool : public QgsMapToolIdentify
     void canvasReleaseEvent( QgsMapMouseEvent *e ) override
     {
         m_lastClickedPoint = toMapCoordinates( e->pos() );
-        QList<QgsMapToolIdentify::IdentifyResult> results = identify( e->x(), e->y(), TopDownStopAtFirst );
+        const QPoint pos = e->position().toPoint();
+        QList<QgsMapToolIdentify::IdentifyResult> results = identify( pos.x(), pos.y(), TopDownStopAtFirst );
         emit identifyCompleted( results );
     }
 

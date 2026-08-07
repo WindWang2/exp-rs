@@ -116,13 +116,13 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     QMenu *projectMenu = makeMenu( appMenuBar()->addMenu( tr( "工程(&P)" ) ) );
     tip( projectMenu->addAction( ic( "new_project" ), tr( "新建工程" ),
-                                 this, &QgisDesktopWindow::newProject, QKeySequence::New ),
+                                 QKeySequence::New, this, &QgisDesktopWindow::newProject ),
          tr( "创建空白工程，清除当前图层与视图状态。" ) );
     tip( projectMenu->addAction( ic( "o_en" ), tr( "打开工程..." ),
-                                 this, &QgisDesktopWindow::openProject, QKeySequence::Open ),
+                                 QKeySequence::Open, this, &QgisDesktopWindow::openProject ),
          tr( "打开已保存的工程文件。" ) );
     tip( projectMenu->addAction( ic( "s_ve" ), tr( "保存工程" ),
-                                 this, &QgisDesktopWindow::saveProject, QKeySequence::Save ),
+                                 QKeySequence::Save, this, &QgisDesktopWindow::saveProject ),
          tr( "保存当前工程到已有路径。" ) );
     tip( projectMenu->addAction( ic( "ex_ort" ), tr( "工程另存为..." ),
                                  this, &QgisDesktopWindow::saveProjectAs ),
@@ -146,7 +146,7 @@ void QgisDesktopWindow::setupMenu()
          tr( "导出课程/实验报告。" ) );
     projectMenu->addSeparator();
     tip( projectMenu->addAction( stdIc( QStyle::SP_DialogCloseButton ), tr( "退出" ),
-                                 this, &QMainWindow::close, QKeySequence::Quit ),
+                                 QKeySequence::Quit, this, &QMainWindow::close ),
          tr( "退出应用程序。" ) );
 
     // ------------------------------------------------------------------
@@ -166,30 +166,30 @@ void QgisDesktopWindow::setupMenu()
     tip( m_saveEditsAction, tr( "保存矢量编辑。" ) );
     editMenu->addSeparator();
     tip( editMenu->addAction( stdIc( QStyle::SP_ArrowBack ), tr( "撤销" ),
-                              this, &QgisDesktopWindow::undo, QKeySequence::Undo ),
+                              QKeySequence::Undo, this, &QgisDesktopWindow::undo ),
          tr( "撤销上一步编辑。" ) );
     tip( editMenu->addAction( stdIc( QStyle::SP_ArrowForward ), tr( "重做" ),
-                              this, &QgisDesktopWindow::redo, QKeySequence::Redo ),
+                              QKeySequence::Redo, this, &QgisDesktopWindow::redo ),
          tr( "重做已撤销的编辑。" ) );
     editMenu->addSeparator();
     tip( editMenu->addAction( ic( "cut_fill" ), tr( "剪切要素" ),
-                              this, &QgisDesktopWindow::cutFeatures, QKeySequence::Cut ),
+                              QKeySequence::Cut, this, &QgisDesktopWindow::cutFeatures ),
          tr( "剪切选中要素。" ) );
     tip( editMenu->addAction( ic( "l_yer_st_ck" ), tr( "复制要素" ),
-                              this, &QgisDesktopWindow::copyFeatures, QKeySequence::Copy ),
+                              QKeySequence::Copy, this, &QgisDesktopWindow::copyFeatures ),
          tr( "复制选中要素。" ) );
     tip( editMenu->addAction( ic( "i_ort" ), tr( "粘贴要素" ),
-                              this, &QgisDesktopWindow::pasteFeatures, QKeySequence::Paste ),
+                              QKeySequence::Paste, this, &QgisDesktopWindow::pasteFeatures ),
          tr( "粘贴要素。" ) );
     editMenu->addSeparator();
     tip( editMenu->addAction( ic( "select" ), tr( "全选" ),
-                              this, &QgisDesktopWindow::selectAll, QKeySequence( "Ctrl+A" ) ),
+                              QKeySequence( "Ctrl+A" ), this, &QgisDesktopWindow::selectAll ),
          tr( "选择当前图层全部要素。" ) );
     tip( editMenu->addAction( ic( "mActionSelectRectangle" ), tr( "选择要素" ),
                              this, &QgisDesktopWindow::selectFeatures ),
          tr( "矩形选择要素。" ) );
     tip( editMenu->addAction( ic( "mActionDeleteSelectedFeatures" ), tr( "删除选中" ),
-                             this, &QgisDesktopWindow::deleteSelectedFeatures, QKeySequence::Delete ),
+                             QKeySequence::Delete, this, &QgisDesktopWindow::deleteSelectedFeatures ),
          tr( "删除选中要素。" ) );
     editMenu->addSeparator();
     tip( editMenu->addAction( ic( "t_ble" ), tr( "打开属性表..." ),
@@ -200,10 +200,10 @@ void QgisDesktopWindow::setupMenu()
     QMenu *digitizeMenu = makeMenu( editMenu->addMenu( tr( "数字化" ) ) );
     setMenuIcon( digitizeMenu, ic( "mActionCapturePoint" ) );
     tip( digitizeMenu->addAction( ic( "mActionCapturePoint" ), tr( "添加要素" ),
-                                  this, &QgisDesktopWindow::addFeature, QKeySequence( "Ctrl+." ) ),
+                                  QKeySequence( "Ctrl+." ), this, &QgisDesktopWindow::addFeature ),
          tr( "数字化添加新要素。" ) );
     tip( digitizeMenu->addAction( ic( "mActionVertexTool" ), tr( "节点工具" ),
-                                  this, &QgisDesktopWindow::vertexTool, QKeySequence( "Ctrl+V" ) ),
+                                  QKeySequence( "Ctrl+V" ), this, &QgisDesktopWindow::vertexTool ),
          tr( "编辑节点。" ) );
     digitizeMenu->addSeparator();
     tip( digitizeMenu->addAction( ic( "mActionMoveFeature" ), tr( "移动要素" ),
@@ -266,37 +266,37 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     QMenu *viewMenu = makeMenu( appMenuBar()->addMenu( tr( "视图(&V)" ) ) );
     tip( viewMenu->addAction( ic( "zoo_in" ), tr( "放大" ),
-                              this, &QgisDesktopWindow::zoomIn, QKeySequence::ZoomIn ),
+                              QKeySequence::ZoomIn, this, &QgisDesktopWindow::zoomIn ),
          tr( "放大地图视图。" ) );
     tip( viewMenu->addAction( ic( "zoo_out" ), tr( "缩小" ),
-                              this, &QgisDesktopWindow::zoomOut, QKeySequence::ZoomOut ),
+                              QKeySequence::ZoomOut, this, &QgisDesktopWindow::zoomOut ),
          tr( "缩小地图视图。" ) );
     tip( viewMenu->addAction( ic( "full_extent" ), tr( "全图" ),
-                              this, &QgisDesktopWindow::zoomFullExtent, QKeySequence( "Ctrl+Shift+F" ) ),
+                              QKeySequence( "Ctrl+Shift+F" ), this, &QgisDesktopWindow::zoomFullExtent ),
          tr( "缩放到所有图层范围。" ) );
     tip( viewMenu->addAction( ic( "l_yer_m_n_ger" ), tr( "缩放到图层" ),
-                              this, &QgisDesktopWindow::zoomToLayer, QKeySequence( "Ctrl+L" ) ),
+                              QKeySequence( "Ctrl+L" ), this, &QgisDesktopWindow::zoomToLayer ),
          tr( "缩放到当前图层范围。" ) );
     viewMenu->addSeparator();
     tip( viewMenu->addAction( ic( "p_n" ), tr( "平移" ),
-                              this, &QgisDesktopWindow::panMap, QKeySequence( "Space" ) ),
+                              QKeySequence( "Space" ), this, &QgisDesktopWindow::panMap ),
          tr( "平移地图。" ) );
     tip( viewMenu->addAction( ic( "identify" ), tr( "识别" ),
-                              this, &QgisDesktopWindow::identifyFeatures, QKeySequence( "Ctrl+Shift+I" ) ),
+                              QKeySequence( "Ctrl+Shift+I" ), this, &QgisDesktopWindow::identifyFeatures ),
          tr( "点击地图查询要素/像元属性。" ) );
     viewMenu->addSeparator();
     tip( viewMenu->addAction( ic( "me_sure_dist" ), tr( "测距" ),
-                              this, &QgisDesktopWindow::measureDistance, QKeySequence( "Ctrl+Shift+D" ) ),
+                              QKeySequence( "Ctrl+Shift+D" ), this, &QgisDesktopWindow::measureDistance ),
          tr( "量测距离。" ) );
     tip( viewMenu->addAction( ic( "me_sure_are_" ), tr( "测面" ),
-                              this, &QgisDesktopWindow::measureArea, QKeySequence( "Ctrl+Shift+A" ) ),
+                              QKeySequence( "Ctrl+Shift+A" ), this, &QgisDesktopWindow::measureArea ),
          tr( "量测面积。" ) );
     viewMenu->addSeparator();
     tip( viewMenu->addAction( ic( "overl_y" ), tr( "图层对比..." ),
-                              this, &QgisDesktopWindow::openComparisonDialog, QKeySequence( "Ctrl+Shift+C" ) ),
+                              QKeySequence( "Ctrl+Shift+C" ), this, &QgisDesktopWindow::openComparisonDialog ),
          tr( "左右并排对比两个图层。" ) );
     tip( viewMenu->addAction( ic( "s_lit" ), tr( "卷帘对比" ),
-                              this, &QgisDesktopWindow::toggleSwipeTool, QKeySequence( "Ctrl+Shift+S" ) ),
+                              QKeySequence( "Ctrl+Shift+S" ), this, &QgisDesktopWindow::toggleSwipeTool ),
          tr( "在地图上拖动分割线对比上下图层。" ) );
     viewMenu->addSeparator();
     // Multi-view shell (Wave D): secondary Display View beside main canvas.
@@ -326,7 +326,7 @@ void QgisDesktopWindow::setupMenu()
              this, &QgisDesktopWindow::toggleDualViewportSync );
     viewMenu->addSeparator();
     tip( viewMenu->addAction( ic( "refresh_view" ), tr( "刷新" ),
-                              this, &QgisDesktopWindow::refreshMap, QKeySequence( "F5" ) ),
+                              QKeySequence( "F5" ), this, &QgisDesktopWindow::refreshMap ),
          tr( "刷新地图渲染。" ) );
 
     // ------------------------------------------------------------------
@@ -345,10 +345,10 @@ void QgisDesktopWindow::setupMenu()
          tr( "创建新的 Shapefile 矢量图层。" ) );
     layerMenu->addSeparator();
     tip( layerMenu->addAction( ic( "met_d_t_" ), tr( "图层属性..." ),
-                               this, &QgisDesktopWindow::layerProperties, QKeySequence( "Ctrl+I" ) ),
+                               QKeySequence( "Ctrl+I" ), this, &QgisDesktopWindow::layerProperties ),
          tr( "打开当前图层属性。" ) );
     tip( layerMenu->addAction( ic( "er_se" ), tr( "移除图层" ),
-                               this, &QgisDesktopWindow::removeLayer, QKeySequence( "Ctrl+Shift+Delete" ) ),
+                               QKeySequence( "Ctrl+Shift+Delete" ), this, &QgisDesktopWindow::removeLayer ),
          tr( "从工程中移除当前图层。" ) );
     layerMenu->addSeparator();
     tip( layerMenu->addAction( ic( "define_crs" ), tr( "设置工程 CRS..." ),
@@ -574,7 +574,7 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     QMenu *helpMenu = makeMenu( appMenuBar()->addMenu( tr( "帮助(&H)" ) ) );
     tip( helpMenu->addAction( ic( "hel_" ), tr( "帮助内容" ),
-                              this, &QgisDesktopWindow::helpContents, QKeySequence::HelpContents ),
+                              QKeySequence::HelpContents, this, &QgisDesktopWindow::helpContents ),
          tr( "打开帮助文档。" ) );
     tip( helpMenu->addAction( tr( "这是什么？(Shift+F1)" ), this, []() {
              QWhatsThis::enterWhatsThisMode();

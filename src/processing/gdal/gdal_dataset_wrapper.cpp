@@ -5,6 +5,7 @@
 #include <cpl_error.h>
 #include <cpl_string.h>
 #include <QFile>
+#include <algorithm>
 #include <mutex>
 
 // Ensure GDAL drivers are registered (once per process, thread-safe)
@@ -66,6 +67,52 @@ void GdalDatasetWrapper::close()
 bool GdalDatasetWrapper::isValid() const
 {
     return m_dataset != nullptr;
+}
+
+bool GdalDatasetWrapper::create(const QString &path, int width, int height, int bandCount,
+                                int dtype, const std::array<double, 6> &geoTransform,
+                                const QString &projection, QString *errorMessage)
+{
+    close();
+    m_lastError.clear();
+
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    if (!driver) {
+        m_lastError = QStringLiteral("GeoTIFF driver not available");
+        if (errorMessage) *errorMessage = m_lastError;
+        return false;
+    }
+
+    char **opts = nullptr;
+    opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
+    GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(),
+                                 width, height, bandCount,
+                                 static_cast<GDALDataType>(dtype), opts);
+    CSLDestroy(opts);
+    if (!ds) {
+        const char *msg = CPLGetLastErrorMsg();
+        m_lastError = msg ? QString::fromUtf8(msg)
+                          : QStringLiteral("Failed to create output file: %1").arg(path);
+        if (errorMessage) *errorMessage = m_lastError;
+        return false;
+    }
+
+    if (GDALSetGeoTransform(ds, geoTransform.data()) != CE_None) {
+        m_lastError = QStringLiteral("Failed to write geotransform");
+        if (errorMessage) *errorMessage = m_lastError;
+        GDALClose(ds);
+        return false;
+    }
+    if (!projection.isEmpty() && GDALSetProjection(ds, projection.toUtf8().constData()) != CE_None) {
+        m_lastError = QStringLiteral("Failed to write projection");
+        if (errorMessage) *errorMessage = m_lastError;
+        GDALClose(ds);
+        return false;
+    }
+
+    m_dataset = ds;
+    return true;
 }
 
 int GdalDatasetWrapper::width() const
@@ -147,6 +194,34 @@ bool GdalDatasetWrapper::readBandWindow(int bandNum, int xOff, int yOff,
     CPLErr err = GDALRasterIO(band, GF_Read,
                               xOff, yOff, srcWidth, srcHeight,
                               buffer, srcWidth, srcHeight, GDT_Float32,
+                              0, 0);
+    return err == CE_None;
+}
+
+bool GdalDatasetWrapper::writeBandWindow(int bandNum, int xOff, int yOff,
+                                         int srcWidth, int srcHeight,
+                                         const float *buffer) const
+{
+    if (!m_dataset || bandNum < 1 || bandNum > bandCount() || !buffer)
+        return false;
+    if (srcWidth <= 0 || srcHeight <= 0 || xOff < 0 || yOff < 0)
+        return false;
+
+    GDALRasterBandH band = GDALGetRasterBand(static_cast<GDALDatasetH>(m_dataset), bandNum);
+    if (!band)
+        return false;
+
+    // Clamp the window to the raster extent to be forgiving at edges.
+    const int bw = GDALGetRasterBandXSize(band);
+    const int bh = GDALGetRasterBandYSize(band);
+    if (xOff >= bw || yOff >= bh)
+        return false;
+    srcWidth = (std::min)(srcWidth, bw - xOff);
+    srcHeight = (std::min)(srcHeight, bh - yOff);
+
+    CPLErr err = GDALRasterIO(band, GF_Write,
+                              xOff, yOff, srcWidth, srcHeight,
+                              const_cast<float *>(buffer), srcWidth, srcHeight, GDT_Float32,
                               0, 0);
     return err == CE_None;
 }

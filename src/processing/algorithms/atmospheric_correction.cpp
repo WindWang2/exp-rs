@@ -1,8 +1,15 @@
 // src/processing/algorithms/atmospheric_correction.cpp — DOS atmospheric correction
 #include "atmospheric_correction.h"
 #include "math_utils.h"
+#include "processing/gdal/gdal_block_stream.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "core/sicnu_logging.h"
+
+#include <QDomDocument>
+#include <QDomElement>
+#include <QFile>
+
+#include <gdal.h>
 
 #include <algorithm>
 #include <cmath>
@@ -57,6 +64,130 @@ bool dos1(const float *dn, float *surface, size_t count, float gain, float bias)
     for (size_t i = 0; i < count; i++) {
         surface[i] = radiance[i] - minRadiance;
     }
+    return true;
+}
+
+namespace {
+
+/// Incremental dark-object statistics (Chavez 1996).
+///
+/// Streams tile-by-tile: accumulateRange() over the whole scene, then
+/// accumulateBins() (the binning needs the frozen min/max range), then ask for
+/// darkLevel(). Memory is O(bins) regardless of scene size, so out-of-core
+/// rasters can be corrected without loading the full band.
+/// Non-finite values (NaN and ±inf) are treated as invalid radiance.
+struct DarkObjectStats
+{
+    explicit DarkObjectStats( int bins = 1024 )
+      : m_nbins( std::max( 16, std::min( bins, 1 << 20 ) ) )
+    {
+    }
+
+    /// Pass 1: fold a buffer into the min/max/valid range.
+    void accumulateRange( const float *data, size_t count )
+    {
+        if ( !data )
+            return;
+        for ( size_t i = 0; i < count; ++i ) {
+            const float v = data[i];
+            if ( !std::isfinite( v ) )
+                continue;
+            m_minVal = std::min( m_minVal, v );
+            m_maxVal = std::max( m_maxVal, v );
+            ++m_valid;
+        }
+    }
+
+    /// Freeze the range and allocate bin counts. Returns false when there is
+    /// no bin-able range (all-invalid scene or single-level scene).
+    bool prepareBins()
+    {
+        if ( m_valid == 0 )
+            return false;
+        if ( m_maxVal == m_minVal ) {
+            m_singleLevel = true;
+            return false;
+        }
+        m_binWidth = ( m_maxVal - m_minVal ) / ( m_nbins - 1 );
+        m_counts.assign( static_cast<size_t>( m_nbins ), 0 );
+        return true;
+    }
+
+    /// Pass 2: fold a buffer into the bin counts (range must be frozen).
+    void accumulateBins( const float *data, size_t count )
+    {
+        if ( !data || m_counts.empty() )
+            return;
+        for ( size_t i = 0; i < count; ++i ) {
+            const float v = data[i];
+            if ( !std::isfinite( v ) )
+                continue;
+            size_t b = static_cast<size_t>( ( v - m_minVal ) / m_binWidth );
+            if ( b >= static_cast<size_t>( m_nbins ) )
+                b = static_cast<size_t>( m_nbins ) - 1; // maxVal lands in the last bin
+            ++m_counts[b];
+        }
+    }
+
+    /// Dark-object level: the lowest bin holding at least 0.01% of the valid
+    /// scene (min 2 pixels); sparser bins are sensor noise. Clamped to the
+    /// scene maximum so the level can never overshoot the brightest pixel.
+    /// Falls back to the global minimum for tiny scenes; 0.0 for empty input.
+    float darkLevel() const
+    {
+        if ( m_valid == 0 )
+            return 0.0f;
+        if ( m_singleLevel )
+            return m_minVal;
+        const size_t threshold = std::max<size_t>( 2, m_valid / 10000 );
+        for ( int b = 0; b < m_nbins; ++b ) {
+            if ( m_counts[static_cast<size_t>( b )] >= threshold )
+                return std::min( m_minVal + m_binWidth * ( static_cast<float>( b ) + 0.5f ), m_maxVal );
+        }
+        return m_minVal; // Tiny scene: fall back to the global minimum.
+    }
+
+    size_t validCount() const { return m_valid; }
+
+  private:
+    int m_nbins;
+    float m_minVal = std::numeric_limits<float>::max();
+    float m_maxVal = -std::numeric_limits<float>::max();
+    float m_binWidth = 1.0f;
+    size_t m_valid = 0;
+    bool m_singleLevel = false;
+    std::vector<size_t> m_counts;
+};
+
+} // namespace
+
+float findDarkObjectByHistogram(const float *radiance, size_t count, int bins)
+{
+    if (!radiance || count == 0)
+        return 0.0f;
+
+    DarkObjectStats stats(bins);
+    stats.accumulateRange(radiance, count);
+    if (!stats.prepareBins())
+        return stats.darkLevel(); // empty / single-level scene
+    stats.accumulateBins(radiance, count);
+    return stats.darkLevel();
+}
+
+bool dos1Histogram(const float *dn, float *surface, size_t count, float gain, float bias)
+{
+    if (!dn || !surface || count == 0) return false;
+
+    SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "DOS1 (histogram) atmospheric correction: %1 pixels, gain=%2, bias=%3" )
+        .arg( count ).arg( gain ).arg( bias ) );
+
+    std::vector<float> radiance(count);
+    if (!dnToRadiance(dn, radiance.data(), count, gain, bias))
+        return false;
+
+    const float darkLevel = findDarkObjectByHistogram(radiance.data(), count);
+    for (size_t i = 0; i < count; ++i)
+        surface[i] = radiance[i] - darkLevel;
     return true;
 }
 
@@ -262,47 +393,102 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
 
     const int width = srcDataset.width();
     const int height = srcDataset.height();
-    const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
 
-    std::vector<float> dn(pixelCount);
-    if (!srcDataset.readBandData(bandNum, dn.data(), width, height)) {
-        if (errorMessage)
-            *errorMessage = QStringLiteral("Failed to read band %1").arg(bandNum);
+    // Out-of-core path: create the output up front and stream the band
+    // tile-by-tile, so memory stays O(tile) instead of O(width*height).
+    // DOS1/DOS2 need full-scene dark-object statistics first, which costs two
+    // extra streaming passes over the band (range, then bin counts).
+    GdalDatasetWrapper outDataset;
+    if (!outDataset.create(outputPath, width, height, 1, GDT_Float32,
+                           srcDataset.geoTransform(), srcDataset.projection(), errorMessage))
         return false;
+
+    constexpr int kTile = 256; // nominal stream tile size (edge-clamped)
+    const bool needsDarkLevel = (method == Method::Dos1 || method == Method::Dos2);
+    const float transmittance = (method == Method::Dos2) ? estimateTransmittance(airmass) : 1.0f;
+
+    // Pass 1 (+2): full-scene dark-object statistics for DOS1/DOS2.
+    float darkLevel = 0.0f;
+    if (needsDarkLevel) {
+        DarkObjectStats stats;
+        std::vector<float> radiance;
+        QString statError;
+        const auto statsPass = [&](bool binning) -> bool {
+            return GdalBlockStream(srcDataset, bandNum, kTile, kTile).forEach(
+                [&](const GdalBlockStream::Tile &tile, const float *pixels) {
+                    const size_t n = static_cast<size_t>(tile.width) * tile.height;
+                    radiance.resize(n);
+                    if (!dnToRadiance(pixels, radiance.data(), n, gain, bias)) {
+                        statError = QStringLiteral("Radiance conversion failed (band %1)").arg(bandNum);
+                        return false;
+                    }
+                    if (binning)
+                        stats.accumulateBins(radiance.data(), n);
+                    else
+                        stats.accumulateRange(radiance.data(), n);
+                    return true;
+                });
+        };
+        if (!statsPass(false)) {
+            if (errorMessage)
+                *errorMessage = statError;
+            return false;
+        }
+        if (stats.prepareBins()) {
+            if (!statsPass(true)) {
+                if (errorMessage)
+                    *errorMessage = statError;
+                return false;
+            }
+        }
+        darkLevel = stats.darkLevel();
     }
 
-    std::vector<float> output(pixelCount);
-    bool success = false;
-    switch (method) {
-    case Method::DnToRadiance:
-        success = dnToRadiance(dn.data(), output.data(), pixelCount, gain, bias);
-        break;
-    case Method::Dos1:
-        success = dos1(dn.data(), output.data(), pixelCount, gain, bias);
-        break;
-    case Method::Dos2: {
-        const float transmittance = estimateTransmittance(airmass);
-        success = dos2(dn.data(), output.data(), pixelCount, gain, bias, transmittance);
-        break;
-    }
-    default:
+    // Pass 3: transform and write each tile.
+    std::vector<float> out;
+    QString tileError;
+    const bool ok = GdalBlockStream(srcDataset, bandNum, kTile, kTile).forEach(
+        [&](const GdalBlockStream::Tile &tile, const float *pixels) {
+            const size_t n = static_cast<size_t>(tile.width) * tile.height;
+            out.resize(n);
+            bool tOk = false;
+            switch (method) {
+            case Method::DnToRadiance:
+                tOk = dnToRadiance(pixels, out.data(), n, gain, bias);
+                break;
+            case Method::Dos1:
+                // surface = radiance - dark_level (histogram dark object).
+                for (size_t i = 0; i < n; ++i)
+                    out[i] = gain * pixels[i] + bias - darkLevel;
+                tOk = true;
+                break;
+            case Method::Dos2: {
+                // surface = (radiance - dark_level) / transmittance.
+                if (transmittance <= 0.0f) {
+                    tileError = QStringLiteral("Invalid atmospheric transmittance");
+                    return false;
+                }
+                for (size_t i = 0; i < n; ++i)
+                    out[i] = (gain * pixels[i] + bias - darkLevel) / transmittance;
+                tOk = true;
+                break;
+            }
+            default:
+                tileError = QStringLiteral("Unknown atmospheric correction method");
+                return false;
+            }
+            if (!tOk) {
+                tileError = QStringLiteral("Atmospheric correction failed (band %1)").arg(bandNum);
+                return false;
+            }
+            return outDataset.writeBandWindow(1, tile.xOffset, tile.yOffset,
+                                              tile.width, tile.height, out.data());
+        });
+    if (!ok) {
         if (errorMessage)
-            *errorMessage = QStringLiteral("Unknown atmospheric correction method");
-        return false;
-    }
-
-    if (!success) {
-        if (errorMessage)
-            *errorMessage = QStringLiteral("Atmospheric correction failed");
-        return false;
-    }
-
-    std::vector<std::vector<float>> outBands = {std::move(output)};
-    QString writeError;
-    if (!writeGdalOutput(outputPath, width, height, outBands,
-                         srcDataset.geoTransform(), srcDataset.projection(), &writeError)) {
-        if (errorMessage)
-            *errorMessage = writeError;
+            *errorMessage = tileError.isEmpty()
+                                ? QStringLiteral("Failed to stream band %1").arg(bandNum)
+                                : tileError;
         return false;
     }
 

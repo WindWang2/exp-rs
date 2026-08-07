@@ -69,7 +69,7 @@ static QString syntheticSample( const QString &relative )
   GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
   std::vector<float> line( W, 1.0f );
   for ( int row = 0; row < H; ++row )
-    GDALRasterIO( band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
+    (void) GDALRasterIO( band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
   GDALClose( ds );
   cache.insert( relative, path );
   return path;
@@ -405,6 +405,74 @@ TEST_CASE( "PythonWorkerProcessPool detects worker crash and auto-heals pre-warm
 
   CHECK( crashDetected );
   CHECK( autoHealed );
+  CHECK( pool.activeWorkerCount() == 2 );
+
+  pool.disconnect();
+  pool.shutdown();
+}
+
+TEST_CASE( "PythonWorkerProcessPool re-dispatches in-flight request after worker crash", "[python][isolated][fault][recovery]" )
+{
+  using namespace sicnu::python::isolated;
+
+  QString scriptPath = QDir( QString::fromUtf8( TEST_DATA_DIR ) ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) );
+
+  PythonWorkerProcessPool pool( 2 );
+  REQUIRE( pool.initialize( QString(), scriptPath ) );
+
+  QEventLoop loop;
+  QTimer::singleShot( 500, &loop, &QEventLoop::quit );
+  loop.exec();
+
+  WorkerNode *node = nullptr;
+  for ( int i = 0; i < 50; ++i )
+  {
+    node = pool.acquireWorker();
+    if ( node )
+      break;
+    QEventLoop waitLoop;
+    QTimer::singleShot( 100, &waitLoop, &QEventLoop::quit );
+    waitLoop.exec();
+  }
+  REQUIRE( node != nullptr );
+  REQUIRE( node->server != nullptr );
+  REQUIRE( node->server->hasClient() );
+
+  const int targetId = node->id;
+  bool crashDetected = false;
+  int restarts = 0;
+  QEventLoop faultLoop;
+
+  QObject::connect( &pool, &PythonWorkerProcessPool::workerCrashed, [&]( int id, const QString & ) {
+    if ( id == targetId )
+      crashDetected = true;
+  } );
+  QObject::connect( &pool, &PythonWorkerProcessPool::workerRestarted, [&]( int id ) {
+    if ( id == targetId )
+      ++restarts;
+  } );
+
+  // crash_test never answers: the request is still in flight when the worker
+  // dies, so the pool must re-dispatch it to the restarted worker. That second
+  // worker also crashes on crash_test, exhausting the retry budget, and the
+  // original callback finally receives an error response.
+  int callbackCalls = 0;
+  bool callbackIsError = false;
+  node->server->sendRequest( QStringLiteral( "crash_test" ), QJsonObject(),
+    [&]( const QJsonObject &, bool isError ) {
+      ++callbackCalls;
+      callbackIsError = isError;
+      faultLoop.quit();
+    } );
+
+  QTimer::singleShot( 15000, &faultLoop, &QEventLoop::quit );
+  faultLoop.exec();
+
+  CHECK( crashDetected );
+  CHECK( restarts == 2 ); // original crash + crash of the re-dispatched request
+  CHECK( callbackCalls == 1 );
+  CHECK( callbackIsError ); // retries exhausted -> terminal error, not a hang
+  CHECK( pool.poolHealth().totalRestarts == 2 );
   CHECK( pool.activeWorkerCount() == 2 );
 
   pool.disconnect();

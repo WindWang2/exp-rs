@@ -6,7 +6,7 @@
 class QWidget;
 
 /**
- * \brief Dirty flag + Classification/* QSettings for workflow continuity.
+ * \brief Dirty flag + Classification QSettings for workflow continuity.
  * Does not own ROIs, canvas, or classifier backends.
  */
 class RsClassifySessionState

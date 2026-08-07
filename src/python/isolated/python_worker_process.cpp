@@ -105,10 +105,12 @@ void PythonWorkerProcess::onProcessFinished( int exitCode, QProcess::ExitStatus 
 
 void PythonWorkerProcess::onProcessError( QProcess::ProcessError error )
 {
-  if ( error == QProcess::Crashed )
-  {
-    emit workerCrashed();
-  }
+  // A crash reports BOTH errorOccurred(Crashed) and finished(CrashExit).
+  // workerCrashed is emitted only from onProcessFinished so the pool's
+  // handleWorkerCrash runs exactly once per process death; re-emitting here
+  // would restart the replacement worker a second time and orphan any
+  // crash-recovery bookkeeping (ADR 0064 state recovery).
+  Q_UNUSED( error )
 }
 
 } // namespace sicnu::python::isolated

@@ -109,33 +109,53 @@ bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
     m_bridge = std::make_unique<AppInterfaceBridge>( m_dataManager, m_activeViewHost, m_pluginMenu );
     m_bridge->bindIpcServer( m_workerNode->server );
 
+    // A worker crash replaces the node's server; re-bind the bridge so the
+    // IPC channel stays alive after the pool's self-healing restart
+    // (ADR 0064). Plugin-side state is lost with the daemon and must be
+    // reloaded by the caller. The adapter is not a QObject, so the bridge is
+    // captured through a QPointer (no-op after unload) and the node id is
+    // matched; the connection is severed in unload().
+    m_restartRebindConnection = QObject::connect(
+        m_pool, &PythonWorkerProcessPool::workerRestarted, m_pool,
+        [node = m_workerNode, bridgePtr = QPointer<AppInterfaceBridge>( m_bridge.get() )]( int id ) {
+            if ( node && node->server && bridgePtr && node->id == id )
+                bridgePtr->bindIpcServer( node->server );
+        } );
+
     // Send RPC load_plugin request
     QJsonObject params;
     params[QStringLiteral( "plugin_dir" )] = m_pluginDir;
     params[QStringLiteral( "package_name" )] = m_packageName;
 
     QEventLoop loop;
-    bool success = false;
+    auto successState = std::make_shared<bool>( false );
+    QPointer<QEventLoop> loopPtr( &loop );
     QTimer timer;
     timer.setSingleShot( true );
     timer.setInterval( 5000 ); // 5 second timeout
 
-    m_workerNode->server->sendRequest( QStringLiteral( "load_plugin" ), params, [&]( const QJsonObject &response, bool isError ) {
+    // The callback outlives this frame when the pool replays it after a worker
+    // crash (ADR 0064 recovery), so it must not capture stack locals: the
+    // result lives on the heap and the loop is accessed through a QPointer.
+    m_workerNode->server->sendRequest( QStringLiteral( "load_plugin" ), params,
+      [successState, loopPtr]( const QJsonObject &response, bool isError ) {
         if ( !isError && response.contains( QStringLiteral( "status" ) ) && response[QStringLiteral( "status" )].toString() == QStringLiteral( "loaded" ) )
         {
-            success = true;
+            *successState = true;
         }
         else if ( isError )
         {
             qWarning() << "PythonPluginAdapter load_plugin error:" << response;
         }
-        loop.quit();
-    } );
+        if ( loopPtr )
+            loopPtr->quit();
+      } );
 
     QObject::connect( &timer, &QTimer::timeout, &loop, &QEventLoop::quit );
     timer.start();
     loop.exec();
 
+    const bool success = *successState;
     if ( !success )
     {
         qWarning() << "PythonPluginAdapter: Timed out or failed to load plugin:" << m_packageName;
@@ -160,18 +180,22 @@ void PythonPluginAdapter::unload()
     params[QStringLiteral( "package_name" )] = m_packageName;
 
     QEventLoop loop;
+    QPointer<QEventLoop> loopPtr( &loop );
     QTimer timer;
     timer.setSingleShot( true );
     timer.setInterval( 3000 );
 
-    m_workerNode->server->sendRequest( QStringLiteral( "unload_plugin" ), params, [&]( const QJsonObject &, bool ) {
-        loop.quit();
+    // Durable capture: may be replayed after a worker crash (ADR 0064).
+    m_workerNode->server->sendRequest( QStringLiteral( "unload_plugin" ), params, [loopPtr]( const QJsonObject &, bool ) {
+        if ( loopPtr )
+            loopPtr->quit();
     } );
 
     QObject::connect( &timer, &QTimer::timeout, &loop, &QEventLoop::quit );
     timer.start();
     loop.exec();
 
+    QObject::disconnect( m_restartRebindConnection );
     if ( m_bridge )
     {
         m_bridge.reset();

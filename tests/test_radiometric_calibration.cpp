@@ -485,3 +485,128 @@ TEST_CASE("processFile TOA reflectance via MTL", "[radcal][gdal]")
     REQUIRE_THAT(result[0], WithinAbs(0.2f, 0.001f));
     REQUIRE_THAT(result[1], WithinAbs(0.4f, 0.001f));
 }
+
+// ---------------------------------------------------------------------------
+// Out-of-core streaming (tile-by-tile) path
+// ---------------------------------------------------------------------------
+
+TEST_CASE("GdalDatasetWrapper writeBandWindow round-trip", "[radcal][gdal][stream]")
+{
+    ensureGdalInit();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("wins.tif"));
+
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+    GdalDatasetWrapper out;
+    REQUIRE(out.create(path, 300, 200, 1, GDT_Float32, gt, QString()));
+
+    // Two 256x200 windows: left 256 columns, right 44 columns.
+    std::vector<float> left(256 * 200, 1.5f);
+    std::vector<float> right(44 * 200, 2.5f);
+    REQUIRE(out.writeBandWindow(1, 0, 0, 256, 200, left.data()));
+    REQUIRE(out.writeBandWindow(1, 256, 0, 44, 200, right.data()));
+    out.close();
+
+    GdalDatasetWrapper in;
+    REQUIRE(in.open(path));
+    std::vector<float> row(300);
+    REQUIRE(in.readBandWindow(1, 0, 0, 300, 1, row.data()));
+    for (int x = 0; x < 300; ++x)
+        REQUIRE_THAT(row[static_cast<size_t>(x)], WithinAbs(x < 256 ? 1.5f : 2.5f, 1e-4f));
+}
+
+TEST_CASE("processFile streams a multi-tile raster to radiance", "[radcal][gdal][stream]")
+{
+    ensureGdalInit();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    const int W = 300, H = 200; // spans a 2x1 tile grid at 256px tiles
+    const QString sourcePath = dir.filePath(QStringLiteral("source.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("output.tif"));
+    const QString mtlPath = dir.filePath(QStringLiteral("LC08_MTL.txt"));
+
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+    GDALDatasetH srcDs = createOutputTiff(sourcePath, W, H, 1, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+    std::vector<float> band(static_cast<size_t>(W) * H);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x)
+            band[static_cast<size_t>(y) * W + x] = static_cast<float>((x + 3 * y) % 256);
+    REQUIRE(GDALRasterIO(GDALGetRasterBand(srcDs, 1), GF_Write, 0, 0, W, H,
+                         band.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+    GDALSetDescription(GDALGetRasterBand(srcDs, 1), "B4");
+    GDALClose(srcDs);
+
+    writeMtlFile(mtlPath, {
+        QStringLiteral("SPACECRAFT_ID = \"LANDSAT_8\""),
+        QStringLiteral("SUN_ELEVATION = 45.0"),
+        QStringLiteral("RADIANCE_MULT_BAND_4 = 0.01"),
+        QStringLiteral("RADIANCE_ADD_BAND_4 = 0.0"),
+    });
+
+    QString error;
+    REQUIRE(processFile(sourcePath, outputPath, mtlPath,
+                        static_cast<int>(OutputUnit::Radiance), {}, &error));
+    REQUIRE(error.isEmpty());
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    REQUIRE(out.width() == W);
+    REQUIRE(out.height() == H);
+    std::vector<float> result(static_cast<size_t>(W) * H);
+    REQUIRE(out.readBandData(1, result.data(), W, H));
+    for (size_t i = 0; i < band.size(); ++i)
+        REQUIRE_THAT(result[i], WithinAbs(0.01f * band[i], 1e-3f));
+}
+
+TEST_CASE("processFile streams a band subset", "[radcal][gdal][stream]")
+{
+    ensureGdalInit();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    const int W = 260, H = 260; // 2x2 tile grid
+    const QString sourcePath = dir.filePath(QStringLiteral("source.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("output.tif"));
+    const QString mtlPath = dir.filePath(QStringLiteral("LC08_MTL.txt"));
+
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+    GDALDatasetH srcDs = createOutputTiff(sourcePath, W, H, 3, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+    const char *names[3] = {"B2", "B3", "B4"};
+    for (int b = 0; b < 3; ++b) {
+        std::vector<float> band(static_cast<size_t>(W) * H, 100.0f * (b + 1));
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(srcDs, b + 1), GF_Write, 0, 0, W, H,
+                             band.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+        GDALSetDescription(GDALGetRasterBand(srcDs, b + 1), names[b]);
+    }
+    GDALClose(srcDs);
+
+    // Coefficients for B2 and B4 only; B3 deliberately absent.
+    writeMtlFile(mtlPath, {
+        QStringLiteral("SPACECRAFT_ID = \"LANDSAT_8\""),
+        QStringLiteral("SUN_ELEVATION = 45.0"),
+        QStringLiteral("RADIANCE_MULT_BAND_2 = 0.02"),
+        QStringLiteral("RADIANCE_ADD_BAND_2 = 0.1"),
+        QStringLiteral("RADIANCE_MULT_BAND_4 = 0.04"),
+        QStringLiteral("RADIANCE_ADD_BAND_4 = 0.0"),
+    });
+
+    QString error;
+    REQUIRE(processFile(sourcePath, outputPath, mtlPath,
+                        static_cast<int>(OutputUnit::Radiance), {1, 3}, &error));
+    REQUIRE(error.isEmpty());
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    REQUIRE(out.bandCount() == 2);
+    std::vector<float> b2(static_cast<size_t>(W) * H), b4(static_cast<size_t>(W) * H);
+    REQUIRE(out.readBandData(1, b2.data(), W, H));
+    REQUIRE(out.readBandData(2, b4.data(), W, H));
+    for (size_t i = 0; i < b2.size(); ++i) {
+        REQUIRE_THAT(b2[i], WithinAbs(0.02f * 100.0f + 0.1f, 1e-3f)); // B2: 2.1
+        REQUIRE_THAT(b4[i], WithinAbs(0.04f * 300.0f, 1e-3f));        // B4: 12.0
+    }
+}

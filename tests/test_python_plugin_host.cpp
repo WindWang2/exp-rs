@@ -868,7 +868,7 @@ QString createSingleBandRaster( const QString &dir, const QString &name,
   // Write row by row into a native-type buffer so GDAL does not convert.
   std::vector<double> row( static_cast<size_t>( width ), fill );
   for ( int y = 0; y < height; ++y )
-    GDALRasterIO( band, GF_Write, 0, y, width, 1, row.data(), width, 1, GDT_Float64, 0, 0 );
+    (void) GDALRasterIO( band, GF_Write, 0, y, width, 1, row.data(), width, 1, GDT_Float64, 0, 0 );
 
   GDALClose( ds );
   return path;

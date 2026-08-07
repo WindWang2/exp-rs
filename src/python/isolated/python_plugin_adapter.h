@@ -80,6 +80,8 @@ private:
     ActiveViewHost *m_activeViewHost = nullptr;
     sicnu::python::isolated::PythonWorkerProcessPool *m_pool = nullptr;
     sicnu::python::isolated::WorkerNode *m_workerNode = nullptr;
+    /// Bridge re-bind connection on worker restart (severed in unload()).
+    QMetaObject::Connection m_restartRebindConnection;
     std::unique_ptr<sicnu::python::isolated::AppInterfaceBridge> m_bridge;
     bool m_initialized = false;
 };

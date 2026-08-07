@@ -51,6 +51,41 @@ namespace AtmosphericCorrection
     bool dos1(const float *dn, float *surface, size_t count, float gain, float bias);
 
     /**
+     * Extract the dark-object radiance level from a scene histogram
+     * (Chavez, 1996, "Image-based atmospheric corrections — revisited and
+     * improved", PERS 62(9):1025-1036).
+     *
+     * The scene radiance is binned into a histogram (default 1024 bins) and
+     * the dark object is the lowest radiance whose bin holds at least
+     * max(2, valid/10000) pixels — 0.01% of the valid scene.  Isolated
+     * single-pixel sensor noise below the real scene floor is thereby
+     * rejected, which a plain global-minimum scan would absorb.
+     *
+     * @param radiance scene radiance values (NaN pixels are ignored)
+     * @param count    number of values
+     * @param bins     histogram bin count (clamped to [16, 2^20])
+     * @return dark-object radiance level; 0.0 for null/empty/all-NaN input;
+     *         falls back to the global minimum for tiny scenes
+     */
+    float findDarkObjectByHistogram(const float *radiance, size_t count, int bins = 1024);
+
+    /**
+     * DOS1 with histogram-based dark-object extraction.
+     *
+     * Identical to dos1() except the subtracted level comes from
+     * findDarkObjectByHistogram() instead of the global scene minimum, so a
+     * handful of outlying dark pixels cannot drag the whole scene's baseline.
+     * On outlier-free scenes the two produce identical output.
+     *
+     * @param dn     input DN values
+     * @param surface output surface radiance buffer
+     * @param count  number of pixels
+     * @param gain   radiance gain
+     * @param bias   radiance bias
+     */
+    bool dos1Histogram(const float *dn, float *surface, size_t count, float gain, float bias);
+
+    /**
      * DOS2: Dark Object Subtraction with transmittance correction.
      * surface = (radiance - path_radiance) / transmittance
      * @param dn           input DN values

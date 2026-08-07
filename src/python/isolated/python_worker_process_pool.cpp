@@ -3,8 +3,11 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
+#include <QTimer>
 #include <algorithm>
+#include <memory>
 #include <thread>
+#include <vector>
 
 namespace sicnu::python::isolated
 {
@@ -227,6 +230,13 @@ void PythonWorkerProcessPool::handleWorkerCrash( WorkerNode *node )
   qWarning() << "Worker process crashed in pool, id:" << id;
   emit workerCrashed( id, QStringLiteral( "Process exited unexpectedly / segfault" ) );
 
+  // State recovery: take ownership of any requests that were in flight when
+  // the worker died so they can be re-dispatched to the restarted worker
+  // (ADR 0064). Callbacks are moved out and will not fire on the old server.
+  std::vector<PythonIpcServer::PendingRequest> pending;
+  if ( node->server )
+    pending = node->server->takeInFlightRequests();
+
   if ( node->worker )
   {
     node->worker->stopWorker();
@@ -255,14 +265,80 @@ void PythonWorkerProcessPool::handleWorkerCrash( WorkerNode *node )
     connect( node->worker, &PythonWorkerProcess::workerCrashed, this, [this, node]() {
       handleWorkerCrash( node );
     } );
-    node->worker->startWorker( socketName, m_pythonPath, m_scriptPath );
+    const bool started = node->worker->startWorker( socketName, m_pythonPath, m_scriptPath );
     node->isRestarting = false;
+    if ( !started )
+    {
+      // The fresh worker never launched: answer any recovered requests with an
+      // error so their callers do not hang on a dead worker.
+      qWarning() << "Worker restart FAILED for id:" << id;
+      failPendingRequests( pending );
+      return;
+    }
     qInfo() << "Successfully auto-healed and restarted worker process id:" << id;
     emit workerRestarted( id );
+
+    if ( !pending.empty() )
+    {
+      // Shared ownership between the replay path and the watchdog timer.
+      auto sharedPending = std::make_shared<std::vector<PythonIpcServer::PendingRequest>>( std::move( pending ) );
+
+      // State recovery: replay lost requests once the fresh worker connects.
+      // Each replay consumes one retry; a request whose budget is exhausted is
+      // answered with an error so the caller never hangs on a dead worker.
+      const auto replay = [this, node, sharedPending]() {
+        for ( const PythonIpcServer::PendingRequest &req : *sharedPending )
+        {
+          if ( req.retriesLeft > 0 )
+          {
+            node->server->sendRequest( req.method, req.params, req.callback, req.retriesLeft - 1 );
+          }
+          else
+          {
+            QJsonObject err;
+            err[QStringLiteral( "message" )] = QStringLiteral( "Worker crashed; retries exhausted" );
+            req.callback( err, true );
+          }
+        }
+        sharedPending->clear();
+      };
+      if ( node->server->hasClient() )
+        replay();
+      else
+        connect( node->server, &PythonIpcServer::clientConnected, this, [replay]() { replay(); } );
+
+      // Watchdog: if the restarted worker never connects (dies during
+      // startup), fail the pending callbacks instead of leaking them.
+      auto *watchdog = new QTimer( this );
+      watchdog->setSingleShot( true );
+      connect( watchdog, &QTimer::timeout, this, [sharedPending]() {
+        if ( sharedPending->empty() )
+          return;
+        QJsonObject err;
+        err[QStringLiteral( "message" )] = QStringLiteral( "Worker restart timed out" );
+        for ( const PythonIpcServer::PendingRequest &req : *sharedPending )
+          req.callback( err, true );
+        sharedPending->clear();
+      } );
+      watchdog->start( 5000 );
+    }
   }
   else
   {
     node->isRestarting = false;
+    qWarning() << "Worker restart listen failed for id:" << id;
+    failPendingRequests( pending );
+  }
+}
+
+void PythonWorkerProcessPool::failPendingRequests(
+  const std::vector<PythonIpcServer::PendingRequest> &pending )
+{
+  for ( const PythonIpcServer::PendingRequest &req : pending )
+  {
+    QJsonObject err;
+    err[QStringLiteral( "message" )] = QStringLiteral( "Worker crashed; retries exhausted" );
+    req.callback( err, true );
   }
 }
 

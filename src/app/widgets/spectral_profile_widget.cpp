@@ -245,12 +245,17 @@ void SpectralProfileWidget::drawLine( QPainter &painter, const QRect &chartRect 
     if ( valueRange <= 0.0 )
         return;
 
-    // Calculate point positions
+    // Calculate point positions. Bands whose read failed carry NaN (and inf
+    // is not drawable either): they get no point and the polyline breaks
+    // across the gap (a NaN cast to int is undefined behavior and would paint
+    // a garbage segment).
     QVector<QPoint> points;
     points.reserve( bandCount );
 
     for ( int i = 0; i < bandCount; ++i )
     {
+        if ( !std::isfinite( m_values[i] ) )
+            continue;
         double xFrac = ( bandCount > 1 )
             ? static_cast<double>( i ) / ( bandCount - 1 )
             : 0.5;
@@ -262,29 +267,38 @@ void SpectralProfileWidget::drawLine( QPainter &painter, const QRect &chartRect 
         points.append( QPoint( px, py ) );
     }
 
+    if ( points.isEmpty() )
+        return;
+
     // Draw the connecting line
-    if ( bandCount > 1 )
+    if ( points.size() > 1 )
     {
         QPen linePen( QColor( 66, 133, 244 ), 2, Qt::SolidLine );
         painter.setPen( linePen );
-        for ( int i = 0; i < bandCount - 1; ++i )
+        for ( int i = 0; i < points.size() - 1; ++i )
         {
             painter.drawLine( points[i], points[i + 1] );
         }
     }
 
-    // Draw point markers and value labels
+    // Draw point markers and value labels (NaN bands have no point)
     painter.setFont( QFont( "sans-serif", 7 ) );
-    for ( int i = 0; i < bandCount; ++i )
+    for ( int i = 0; i < points.size(); ++i )
     {
         // Marker
         painter.setPen( QPen( QColor( 50, 110, 210 ), 1 ) );
         painter.setBrush( QColor( 66, 133, 244 ) );
         painter.drawEllipse( points[i], 4, 4 );
-
+    }
+    for ( int i = 0; i < bandCount; ++i )
+    {
         // Value label above the point
-        if ( !std::isnan( m_values[i] ) )
+        if ( std::isfinite( m_values[i] ) )
         {
+            const int px = chartRect.left() + static_cast<int>(
+                ( bandCount > 1 ? static_cast<double>( i ) / ( bandCount - 1 ) : 0.5 ) * chartRect.width() );
+            const int py = chartRect.bottom() - static_cast<int>(
+                ( ( m_values[i] - m_minValue ) / valueRange ) * chartRect.height() );
             painter.setPen( QColor( 60, 60, 60 ) );
             double v = m_values[i];
             QString valText;
@@ -296,10 +310,10 @@ void SpectralProfileWidget::drawLine( QPainter &painter, const QRect &chartRect 
                 valText = QString::number( v, 'g', 5 );
             QFontMetrics fm( painter.font() );
             int tw = fm.horizontalAdvance( valText );
-            int labelY = points[i].y() - 8;
+            int labelY = py - 8;
             if ( labelY < chartRect.top() + 4 )
-                labelY = points[i].y() + 14;
-            painter.drawText( points[i].x() - tw / 2, labelY, valText );
+                labelY = py + 14;
+            painter.drawText( px - tw / 2, labelY, valText );
         }
     }
 }
