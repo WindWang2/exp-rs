@@ -16,6 +16,7 @@
 #include <gdal_priv.h>
 #include <cpl_error.h>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -66,6 +67,7 @@ void SpectralProfileWidget::clear()
 {
     m_values.clear();
     m_bandLabels.clear();
+    m_wavelengths.clear();
     m_layerName.clear();
     m_hasData = false;
     m_rasterLayer = nullptr;
@@ -74,10 +76,36 @@ void SpectralProfileWidget::clear()
 
 // ── GDAL extraction ──────────────────────────────────────────────────────────
 
+double SpectralProfileWidget::xFractionForBand( int i, int bandCount ) const
+{
+    if ( bandCount > 1 && m_wavelengths.size() == static_cast<int>( bandCount ) )
+    {
+        double minWl = m_wavelengths[0];
+        double maxWl = m_wavelengths[0];
+        bool allValid = true;
+        for ( double w : m_wavelengths )
+        {
+            if ( w <= 0.0 || !std::isfinite( w ) )
+            {
+                allValid = false;
+                break;
+            }
+            minWl = std::min( minWl, w );
+            maxWl = std::max( maxWl, w );
+        }
+        if ( allValid && maxWl > minWl )
+            return ( m_wavelengths[i] - minWl ) / ( maxWl - minWl );
+    }
+    return bandCount > 1
+        ? static_cast<double>( i ) / ( bandCount - 1 )
+        : 0.5;
+}
+
 void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLayer *layer )
 {
     m_values.clear();
     m_bandLabels.clear();
+    m_wavelengths.clear();
     m_hasData = false;
     m_minValue = std::numeric_limits<double>::max();
     m_maxValue = std::numeric_limits<double>::lowest();
@@ -127,6 +155,7 @@ void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLa
 
     m_values.resize( bandCount );
     m_bandLabels.resize( bandCount );
+    m_wavelengths.resize( bandCount );
 
     for ( int i = 0; i < bandCount; ++i )
     {
@@ -154,6 +183,13 @@ void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLa
             m_bandLabels[i] = QString::fromUtf8( desc );
         else
             m_bandLabels[i] = QObject::tr( "Band %1" ).arg( i + 1 );
+
+        // Wavelength-aware X axis: read the band's WAVELENGTH metadata (nm)
+        // written by product stacking (ADR 0065); 0 when absent.
+        const char *wl = GDALGetMetadataItem( band, "WAVELENGTH", nullptr );
+        bool wlOk = false;
+        const double wlValue = wl ? QString::fromUtf8( wl ).toDouble( &wlOk ) : 0.0;
+        m_wavelengths[i] = ( wlOk && wlValue > 0.0 ) ? wlValue : 0.0;
     }
 
     bool anyValid = false;
@@ -256,9 +292,7 @@ void SpectralProfileWidget::drawLine( QPainter &painter, const QRect &chartRect 
     {
         if ( !std::isfinite( m_values[i] ) )
             continue;
-        double xFrac = ( bandCount > 1 )
-            ? static_cast<double>( i ) / ( bandCount - 1 )
-            : 0.5;
+        double xFrac = xFractionForBand( i, bandCount );
         double yFrac = ( m_values[i] - m_minValue ) / valueRange;
 
         int px = chartRect.left() + static_cast<int>( xFrac * chartRect.width() );
@@ -337,9 +371,7 @@ void SpectralProfileWidget::drawAxes( QPainter &painter, const QRect &chartRect 
 
         for ( int i = 0; i < bandCount; i += step )
         {
-            double xFrac = ( bandCount > 1 )
-                ? static_cast<double>( i ) / ( bandCount - 1 )
-                : 0.5;
+            double xFrac = xFractionForBand( i, bandCount );
             int x = chartRect.left() + static_cast<int>( xFrac * chartRect.width() );
 
             QString label = m_bandLabels[i];
@@ -364,10 +396,14 @@ void SpectralProfileWidget::drawAxes( QPainter &painter, const QRect &chartRect 
             painter.restore();
         }
 
-        // X axis title
+        // X axis title: wavelength-scaled when the bands carry WAVELENGTH
+        // metadata, else band-indexed.
         painter.setFont( QFont( "sans-serif", 9 ) );
         const QFontMetrics fmTitle( painter.font() );
-        QString xTitle = tr( "Band" );
+        const bool wavelengthAxis = ( m_wavelengths.size() == static_cast<int>( bandCount ) )
+                                    && std::none_of( m_wavelengths.begin(), m_wavelengths.end(),
+                                                     []( double w ) { return w <= 0.0; } );
+        QString xTitle = wavelengthAxis ? tr( "波长 Wavelength (nm)" ) : tr( "Band" );
         int xTitleX = chartRect.left() + ( chartRect.width() - fmTitle.horizontalAdvance( xTitle ) ) / 2;
         int xTitleY = chartRect.bottom() + 4 + ( bandCount > 6 ? 40 : fm.height() + 4 );
         painter.drawText( xTitleX, xTitleY, xTitle );

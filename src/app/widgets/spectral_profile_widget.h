@@ -52,6 +52,11 @@ public:
     /// Per-band label ("B2", "Band 1", ...) used as the chart X axis.
     QVector<QString> bandLabels() const { return m_bandLabels; }
 
+    /// Per-band center wavelength (nm) from the raster's WAVELENGTH band
+    /// metadata (0.0 for bands without one; empty when the raster has none).
+    /// When populated, the chart X axis is wavelength-scaled.
+    QVector<double> wavelengths() const { return m_wavelengths; }
+
     QSize minimumSizeHint() const override { return QSize( 320, 220 ); }
     QSize sizeHint() const override { return QSize( 500, 350 ); }
 
@@ -65,6 +70,11 @@ private:
     void drawLine( QPainter &painter, const QRect &chartRect );
     void closeDataset();
 
+    /// Fractional X position of band @p i across the chart width: scaled by
+    /// the wavelength grid when all bands carry WAVELENGTH metadata, else by
+    /// band index.
+    double xFractionForBand( int i, int bandCount ) const;
+
     QgsPointXY m_point;
     QgsRasterLayer *m_rasterLayer = nullptr;
 
@@ -75,6 +85,7 @@ private:
     // Per-band data
     QVector<double> m_values;          // pixel value per band
     QVector<QString> m_bandLabels;     // label per band (description or "Band N")
+    QVector<double> m_wavelengths;     // center wavelength (nm) per band, 0 when absent
     QString m_layerName;
     bool m_hasData = false;
 

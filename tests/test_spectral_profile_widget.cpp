@@ -37,7 +37,8 @@ struct QgisFixture {
 
 /// Create a 2-band 10x10 Float32 GeoTIFF with GT {0,1,0,0,0,-1} and band
 /// descriptions "B2"/"B4". Band 1 = 10*y + x, band 2 = 100 + 10*y + x.
-QString makeTwoBandRaster(const QString &path) {
+/// When @p withWavelengths, stamps WAVELENGTH band metadata (490 / 665 nm).
+QString makeTwoBandRaster(const QString &path, bool withWavelengths = false) {
     ensureGdalInit();
     std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
     GDALDatasetH ds = createOutputTiff(path, 10, 10, 2, GDT_Float32, gt, QString());
@@ -54,6 +55,9 @@ QString makeTwoBandRaster(const QString &path) {
             return QStringLiteral("GDALRasterIO failed");
         }
         GDALSetDescription(GDALGetRasterBand(ds, b + 1), b == 0 ? "B2" : "B4");
+        if (withWavelengths)
+            GDALSetMetadataItem(GDALGetRasterBand(ds, b + 1), "WAVELENGTH",
+                                b == 0 ? "490" : "665", nullptr);
     }
     GDALClose(ds);
     return {};
@@ -187,4 +191,64 @@ TEST_CASE("SpectralProfileWidget clears on layer removal", "[widget][spectral]")
     // clear state without crashing.
     REQUIRE_NOTHROW(widget.setProfile(point, nullptr));
     CHECK_FALSE(widget.hasData());
+}
+
+TEST_CASE("SpectralProfileWidget exposes WAVELENGTH metadata wavelengths", "[widget][spectral]") {
+    QgisFixture fixture;
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    SECTION("Raster with WAVELENGTH metadata") {
+        const QString path = dir.filePath(QStringLiteral("wl.tif"));
+        REQUIRE(makeTwoBandRaster(path, /*withWavelengths=*/true).isEmpty());
+
+        QgsRasterLayer *layer = new QgsRasterLayer(path, QStringLiteral("wl"), "gdal");
+        REQUIRE(layer->isValid());
+
+        SpectralProfileWidget widget;
+        widget.setProfile(QgsPointXY(3.5, -2.5), layer);
+
+        REQUIRE(widget.hasData());
+        REQUIRE(widget.wavelengths().size() == 2);
+        CHECK(widget.wavelengths()[0] == 490.0);
+        CHECK(widget.wavelengths()[1] == 665.0);
+
+        delete layer;
+    }
+
+    SECTION("Raster without WAVELENGTH metadata yields an empty grid") {
+        const QString path = dir.filePath(QStringLiteral("plain.tif"));
+        REQUIRE(makeTwoBandRaster(path).isEmpty());
+
+        QgsRasterLayer *layer = new QgsRasterLayer(path, QStringLiteral("plain"), "gdal");
+        REQUIRE(layer->isValid());
+
+        SpectralProfileWidget widget;
+        widget.setProfile(QgsPointXY(3.5, -2.5), layer);
+
+        REQUIRE(widget.hasData());
+        REQUIRE(widget.wavelengths().size() == 2);
+        CHECK(widget.wavelengths()[0] == 0.0);
+        CHECK(widget.wavelengths()[1] == 0.0);
+
+        delete layer;
+    }
+
+    SECTION("clear() resets the wavelength grid") {
+        const QString path = dir.filePath(QStringLiteral("wl2.tif"));
+        REQUIRE(makeTwoBandRaster(path, true).isEmpty());
+
+        QgsRasterLayer *layer = new QgsRasterLayer(path, QStringLiteral("wl2"), "gdal");
+        REQUIRE(layer->isValid());
+
+        SpectralProfileWidget widget;
+        widget.setProfile(QgsPointXY(3.5, -2.5), layer);
+        REQUIRE(widget.wavelengths().size() == 2);
+
+        widget.clear();
+        CHECK(widget.wavelengths().isEmpty());
+        CHECK_FALSE(widget.hasData());
+
+        delete layer;
+    }
 }
