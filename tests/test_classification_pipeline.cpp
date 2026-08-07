@@ -376,17 +376,22 @@ TEST_CASE(
   REQUIRE( QFile::exists( metaPath ) );
   REQUIRE( !QFile::exists( tmp.path() + "/model.scale.json" ) );
 
-  // Sidecar carries method + fitted scaler + class metadata + version.
+  // Sidecar carries method + fitted scaler + class metadata + feature schema
+  // + version.
   QString method;
   RsFeatureScaler loadedScaler;
   QHash<int, QColor> loadedColors;
+  QVector<int> loadedFeatures;
+  RsAccuracyAssessment::Result loadedAccuracy;
   REQUIRE( RsClassificationPipeline::loadModelSidecar(
-    modelPath, method, loadedScaler, loadedColors ) );
+    modelPath, method, loadedScaler, loadedColors, loadedFeatures, loadedAccuracy ) );
   REQUIRE( method == QStringLiteral( "NormalBayes" ) );
   REQUIRE( loadedScaler.isFitted() );
   REQUIRE( loadedScaler.bandCount() == 3 );
   REQUIRE( loadedColors.value( 1 ) == QColor( "#cc0000" ) );
   REQUIRE( loadedColors.value( 3 ) == QColor( "#0000cc" ) );
+  // Feature schema records the training band selection (1-based).
+  REQUIRE( loadedFeatures == QVector<int>( { 1, 2, 3 } ) );
 
   // Predict-only run: backend loaded from YAML, scaler from the sidecar,
   // no training data supplied.
@@ -549,3 +554,44 @@ TEST_CASE(
 }
 
 
+
+TEST_CASE(
+  "Classification pipeline: applying a model to a different band count fails with a typed error",
+  "[classify][pipeline][sidecar][compat]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  cv::Mat X, y;
+  makeTraining( X, y );
+
+  const QString modelPath = tmp.path() + "/model.yml";
+
+  RsClassificationPipeline::Config cfg = baseConfig( srcPath, tmp.path() + "/out.tif" );
+  cfg.backend.reset( new RsClassifierNormalBayes );
+  cfg.trainX = X;
+  cfg.trainY = y;
+  cfg.modelSavePath = modelPath;
+  const RsClassificationPipelineResult res1 = RsClassificationPipeline::run( std::move( cfg ) );
+  INFO( res1.errorMessage.toStdString() );
+  REQUIRE( res1.ok );
+
+  // Predict-only with a band selection that does NOT match the model's
+  // training schema (sidecar records features [1,2,3]).
+  auto loadedBackend = std::make_unique<RsClassifierNormalBayes>();
+  REQUIRE( loadedBackend->load( modelPath ) );
+
+  RsClassificationPipeline::Config cfg2 = baseConfig( srcPath, tmp.path() + "/out2.tif" );
+  cfg2.backend = std::move( loadedBackend );
+  cfg2.bandIndices = { 1, 2 };
+  cfg2.modelLoadPath = modelPath;
+
+  const RsClassificationPipelineResult res2 = RsClassificationPipeline::run( std::move( cfg2 ) );
+  CHECK_FALSE( res2.ok );
+  CHECK( res2.error == RsClassificationPipelineResult::Error::InvalidBand );
+  CHECK( res2.errorMessage.contains( QStringLiteral( "trained on 3 features" ) ) );
+  CHECK_FALSE( QFile::exists( tmp.path() + "/out2.tif" ) );
+}

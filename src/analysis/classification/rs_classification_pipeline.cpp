@@ -54,7 +54,9 @@ QString RsClassificationPipeline::sidecarPathForModel( const QString &modelPath 
 bool RsClassificationPipeline::saveModelSidecar( const QString &modelPath,
                                                  const QString &methodName,
                                                  const RsFeatureScaler &scaler,
-                                                 const QHash<int, QColor> &classColors )
+                                                 const QHash<int, QColor> &classColors,
+                                                 const QVector<int> &bandIndices,
+                                                 const RsAccuracyAssessment::Result &accuracy )
 {
   QJsonObject root;
   root.insert( QStringLiteral( "version" ), kSidecarVersion );
@@ -75,6 +77,33 @@ bool RsClassificationPipeline::saveModelSidecar( const QString &modelPath,
     }
     root.insert( QStringLiteral( "classes" ), classes );
   }
+  // Feature schema: the 1-based training bands. Used to validate the target
+  // raster's band count when the model is applied elsewhere.
+  if ( !bandIndices.isEmpty() )
+  {
+    QJsonArray features;
+    for ( int b : bandIndices )
+      features.append( b );
+    root.insert( QStringLiteral( "features" ), features );
+  }
+  // Holdout validation metrics (overall accuracy / kappa / per-class P-R-F1).
+  if ( !accuracy.classIds.isEmpty() )
+  {
+    QJsonObject validation;
+    validation.insert( QStringLiteral( "overallAccuracy" ), accuracy.overallAccuracy );
+    validation.insert( QStringLiteral( "kappa" ), accuracy.kappa );
+    QJsonObject perClass;
+    for ( int id : accuracy.classIds )
+    {
+      QJsonObject c;
+      c.insert( QStringLiteral( "producerAccuracy" ), accuracy.producerAcc.value( id, 0.0 ) );
+      c.insert( QStringLiteral( "userAccuracy" ), accuracy.userAcc.value( id, 0.0 ) );
+      c.insert( QStringLiteral( "f1" ), accuracy.f1.value( id, 0.0 ) );
+      perClass.insert( QString::number( id ), c );
+    }
+    validation.insert( QStringLiteral( "perClass" ), perClass );
+    root.insert( QStringLiteral( "validation" ), validation );
+  }
 
   QFile f( sidecarPathForModel( modelPath ) );
   if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
@@ -86,11 +115,15 @@ bool RsClassificationPipeline::saveModelSidecar( const QString &modelPath,
 bool RsClassificationPipeline::loadModelSidecar( const QString &modelPath,
                                                  QString &methodName,
                                                  RsFeatureScaler &scaler,
-                                                 QHash<int, QColor> &classColors )
+                                                 QHash<int, QColor> &classColors,
+                                                 QVector<int> &bandIndices,
+                                                 RsAccuracyAssessment::Result &accuracy )
 {
   methodName.clear();
   scaler = RsFeatureScaler();
   classColors.clear();
+  bandIndices.clear();
+  accuracy = RsAccuracyAssessment::Result();
 
   QFile f( sidecarPathForModel( modelPath ) );
   if ( !f.open( QIODevice::ReadOnly ) )
@@ -114,6 +147,30 @@ bool RsClassificationPipeline::loadModelSidecar( const QString &modelPath,
     const QColor color( c.value( QStringLiteral( "color" ) ).toString() );
     if ( color.isValid() )
       classColors.insert( c.value( QStringLiteral( "id" ) ).toInt(), color );
+  }
+
+  for ( const QJsonValue &v : root.value( QStringLiteral( "features" ) ).toArray() )
+  {
+    if ( v.isDouble() )
+      bandIndices.append( v.toInt() );
+  }
+
+  const QJsonObject validation = root.value( QStringLiteral( "validation" ) ).toObject();
+  if ( !validation.isEmpty() )
+  {
+    accuracy.overallAccuracy = validation.value( QStringLiteral( "overallAccuracy" ) ).toDouble();
+    accuracy.kappa = validation.value( QStringLiteral( "kappa" ) ).toDouble();
+    const QJsonObject perClass = validation.value( QStringLiteral( "perClass" ) ).toObject();
+    for ( auto it = perClass.constBegin(); it != perClass.constEnd(); ++it )
+    {
+      const int id = it.key().toInt();
+      const QJsonObject c = it.value().toObject();
+      accuracy.classIds.append( id );
+      accuracy.producerAcc.insert( id, c.value( QStringLiteral( "producerAccuracy" ) ).toDouble() );
+      accuracy.userAcc.insert( id, c.value( QStringLiteral( "userAccuracy" ) ).toDouble() );
+      accuracy.f1.insert( id, c.value( QStringLiteral( "f1" ) ).toDouble() );
+    }
+    std::sort( accuracy.classIds.begin(), accuracy.classIds.end() );
   }
   return true;
 }
@@ -139,7 +196,10 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     QString sidecarMethod;
     RsFeatureScaler sidecarScaler;
     QHash<int, QColor> sidecarColors;
-    if ( loadModelSidecar( config.modelLoadPath, sidecarMethod, sidecarScaler, sidecarColors ) )
+    QVector<int> sidecarFeatures;
+    RsAccuracyAssessment::Result sidecarAccuracy;
+    if ( loadModelSidecar( config.modelLoadPath, sidecarMethod, sidecarScaler,
+                           sidecarColors, sidecarFeatures, sidecarAccuracy ) )
     {
       if ( sidecarScaler.isFitted() )
         config.scaler = sidecarScaler;
@@ -147,6 +207,33 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
         config.classColors = sidecarColors;
       if ( config.methodName.isEmpty() )
         config.methodName = sidecarMethod;
+      if ( config.bandIndices.isEmpty() )
+        config.bandIndices = sidecarFeatures;
+    }
+
+    // Model compatibility check: the target raster's band selection must match
+    // the model's training feature schema (when the sidecar records one).
+    if ( !sidecarFeatures.isEmpty() && !config.bandIndices.isEmpty()
+         && sidecarFeatures.size() != config.bandIndices.size() )
+    {
+      QStringList modelBands;
+      for ( int b : sidecarFeatures )
+        modelBands.append( QString::number( b ) );
+      QStringList targetBands;
+      for ( int b : config.bandIndices )
+        targetBands.append( QString::number( b ) );
+
+      result.ok = false;
+      result.error = RsClassificationPipelineResult::Error::InvalidBand;
+      result.errorMessage = QStringLiteral(
+        "Model %1 was trained on %2 features (bands %3) but the target raster "
+        "provides %4 bands (%5). Select the same bands before applying the model." )
+        .arg( config.modelLoadPath )
+        .arg( sidecarFeatures.size() )
+        .arg( modelBands.join( QStringLiteral( "," ) ) )
+        .arg( config.bandIndices.size() )
+        .arg( targetBands.join( QStringLiteral( "," ) ) );
+      return result;
     }
 
     if ( !config.backend )
@@ -304,7 +391,8 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
                     QString( "Classifier model saved: %1" )
                       .arg( config.modelSavePath ) );
     if ( !saveModelSidecar( config.modelSavePath, config.methodName,
-                            config.scaler, config.classColors ) )
+                            config.scaler, config.classColors,
+                            config.bandIndices, result.accuracy ) )
     {
       QFile::remove( config.modelSavePath );
       result.error = RsClassificationPipelineResult::Error::SidecarSaveFailed;

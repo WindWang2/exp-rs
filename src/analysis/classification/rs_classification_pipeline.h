@@ -156,21 +156,28 @@ class QGIS_ANALYSIS_EXPORT RsClassificationPipeline
     static QString sidecarPathForModel( const QString &modelPath );
 
     /// Write the superset sidecar (method + fitted scaler + class metadata +
-    /// format version) next to \a modelPath. The scaler / classes sections
+    /// band feature schema + holdout validation metrics + format version) next
+    /// to \a modelPath. The scaler / classes / features / validation sections
     /// are emitted only when fitted / non-empty.
     static bool saveModelSidecar( const QString &modelPath,
                                   const QString &methodName,
                                   const RsFeatureScaler &scaler,
-                                  const QHash<int, QColor> &classColors );
+                                  const QHash<int, QColor> &classColors,
+                                  const QVector<int> &bandIndices = {},
+                                  const RsAccuracyAssessment::Result &accuracy = {} );
 
     /**
      * Read the superset sidecar for \a modelPath. Returns false when the
      * file is missing, malformed, or an unsupported version. On success
      * \a methodName and \a classColors reflect the stored metadata and
      * \a scaler is fitted only when the sidecar carries a scaler section.
+     * \a bandIndices and \a accuracy are populated when the sidecar carries
+     * a feature schema / validation section (older sidecars leave them empty).
      */
     static bool loadModelSidecar( const QString &modelPath,
                                   QString &methodName,
                                   RsFeatureScaler &scaler,
-                                  QHash<int, QColor> &classColors );
+                                  QHash<int, QColor> &classColors,
+                                  QVector<int> &bandIndices,
+                                  RsAccuracyAssessment::Result &accuracy );
 };

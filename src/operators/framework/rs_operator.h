@@ -28,8 +28,25 @@ enum class RSOperatorMemoryPolicy
 
 /// Stable lowercase identifier for a memory policy ("streaming",
 /// "multipass_streaming", "full_raster", "external_process",
-/// "unsupported_for_large_raster").
-const char *memoryPolicyName( RSOperatorMemoryPolicy policy );
+/// "unsupported_for_large_raster"). Header-inline so any library that consumes
+/// the operator metadata (e.g. sicnu_processing) needs no link dependency on
+/// the operators library.
+inline const char *memoryPolicyName( RSOperatorMemoryPolicy policy )
+{
+    switch ( policy ) {
+    case RSOperatorMemoryPolicy::Streaming:
+        return "streaming";
+    case RSOperatorMemoryPolicy::MultiPassStreaming:
+        return "multipass_streaming";
+    case RSOperatorMemoryPolicy::FullRaster:
+        return "full_raster";
+    case RSOperatorMemoryPolicy::ExternalProcess:
+        return "external_process";
+    case RSOperatorMemoryPolicy::UnsupportedForLargeRaster:
+        return "unsupported_for_large_raster";
+    }
+    return "full_raster";
+}
 
 /**
  * Abstract base class for all remote sensing operators.

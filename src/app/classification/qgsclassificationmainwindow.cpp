@@ -3305,8 +3305,11 @@ void QgsClassificationMainWindow::loadClassifierModel()
     QString sidecarMethod;
     RsFeatureScaler sidecarScaler;
     QHash<int, QColor> sidecarColors;
+    QVector<int> sidecarFeatures;
+    RsAccuracyAssessment::Result sidecarAccuracy;
     if ( !RsClassificationPipeline::loadModelSidecar(
-           dlg.modelPath(), sidecarMethod, sidecarScaler, sidecarColors ) )
+           dlg.modelPath(), sidecarMethod, sidecarScaler, sidecarColors,
+           sidecarFeatures, sidecarAccuracy ) )
     {
       m_loadedScaler = RsFeatureScaler();
       SICNU_LOG_WARN( SicnuLogTags::Classification,
