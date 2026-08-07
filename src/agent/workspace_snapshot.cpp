@@ -1,5 +1,6 @@
 // src/agent/workspace_snapshot.cpp
 #include "workspace_snapshot.h"
+#include "data/band_role.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
 #include "active_view_host.h"
@@ -141,6 +142,15 @@ WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager, Ac
         info.height = raster->height;
         info.bandCount = raster->bandCount;
         info.crsWkt = raster->crsWkt;
+        // Surface semantic band roles (stable ids, empty for roles unknown) so
+        // the agent can reason about "NIR" instead of a band number.
+        info.bandRoles.reserve( raster->bands.size() );
+        for ( const auto &band : raster->bands )
+        {
+          info.bandRoles.append( band.role == data::BandRole::Unknown
+                                   ? QString()
+                                   : data::bandRoleToString( band.role ) );
+        }
       }
       else if ( const auto *vector = std::get_if<data::VectorStructure>( &structure ) )
       {
@@ -200,6 +210,19 @@ QString WorkspaceSnapshot::toSystemPromptHeader() const
       if ( asset.bandCount > 0 )
       {
         prompt += QString( " %1x%2, %3 bands" ).arg( asset.width ).arg( asset.height ).arg( asset.bandCount );
+        if ( !asset.bandRoles.isEmpty() )
+        {
+          // Stable semantic roles (e.g. "nir, red, green, blue") so the agent
+          // can select bands by role; empty entries (roles unknown) render as
+          // "unknown" and keep the list aligned with band order.
+          QStringList roles = asset.bandRoles;
+          for ( QString &role : roles )
+          {
+            if ( role.isEmpty() )
+              role = QStringLiteral( "unknown" );
+          }
+          prompt += QString( " (roles: %1)" ).arg( roles.join( QStringLiteral( ", " ) ) );
+        }
       }
       else if ( asset.layerCount > 0 )
       {

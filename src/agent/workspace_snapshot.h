@@ -28,6 +28,11 @@ struct DataAssetInfo
     int width = 0;
     int height = 0;
     int bandCount = 0;
+    /// Semantic band roles (stable ids such as "nir", "red", "qa") for raster
+    /// assets, one entry per band in band order. Empty strings mark bands with
+    /// no known role; the list is empty entirely when the asset carries no
+    /// product semantics (plain rasters) or is not a raster.
+    QStringList bandRoles;
     int layerCount = 0;
     QString crsWkt;
 };

@@ -33,7 +33,9 @@ int main( int argc, char *argv[] )
 using sicnu::data::AssetCapability;
 using sicnu::data::AssetKind;
 using sicnu::data::AssetState;
+using sicnu::data::BandRole;
 using sicnu::data::DataManager;
+using sicnu::data::RasterBandStructure;
 using sicnu::data::RasterStructure;
 using sicnu::data::RegisterRequest;
 using sicnu::data::Result;
@@ -105,6 +107,49 @@ public:
                         AssetCapability::Relocatable,
                       StorageKind::Memory,
                       source.canonicalSource.isEmpty() ? QStringLiteral( "snapshot-vector" )
+                                                       : source.canonicalSource,
+                      QString(),
+                      QString(),
+                      structure } );
+  }
+};
+
+class SnapshotRoleRasterSourceProvider : public SourceProvider
+{
+public:
+  bool supports( const SourceDescriptor &source ) const override
+  {
+    return source.providerKey == QStringLiteral( "snapshot-role-test" );
+  }
+
+  Result<ResolvedSource> resolve( const SourceDescriptor &source ) const override
+  {
+    RasterStructure structure;
+    structure.driverName = QStringLiteral( "GTiff" );
+    structure.width = 64;
+    structure.height = 64;
+    structure.bandCount = 4;
+    structure.crsWkt = QStringLiteral( "EPSG:32648" );
+
+    // A stacked product-style structure carrying semantic roles on each band.
+    const auto addBand = [ &structure ]( BandRole role ) {
+      RasterBandStructure band;
+      band.number = structure.bands.size() + 1;
+      band.dataType = QStringLiteral( "UInt16" );
+      band.role = role;
+      structure.bands.append( band );
+    };
+    addBand( BandRole::NIR );
+    addBand( BandRole::Red );
+    addBand( BandRole::Green );
+    addBand( BandRole::Blue );
+
+    return Result<ResolvedSource>::success(
+      ResolvedSource{ AssetKind::Raster,
+                      AssetState::Ready,
+                      AssetCapability::Renderable | AssetCapability::ReadablePixels,
+                      StorageKind::Memory,
+                      source.canonicalSource.isEmpty() ? QStringLiteral( "role-raster" )
                                                        : source.canonicalSource,
                       QString(),
                       QString(),
@@ -203,6 +248,26 @@ TEST_CASE( "WorkspaceSnapshot - Pure C++ Serialization & Prompt Formatting", "[a
     CHECK_FALSE( prompt.contains( QStringLiteral( "Active Raster Display" ) ) );
   }
 
+  SECTION( "Asset with band roles renders them in the prompt" )
+  {
+    sicnu::agent::WorkspaceSnapshot snapshot;
+
+    sicnu::agent::DataAssetInfo asset;
+    asset.id = QStringLiteral( "asset-role" );
+    asset.displayName = QStringLiteral( "s2_sample.tif" );
+    asset.kind = AssetKind::Raster;
+    asset.width = 512;
+    asset.height = 512;
+    asset.bandCount = 3;
+    // Roles stay aligned with band order; unknown roles render as "unknown".
+    asset.bandRoles = { QStringLiteral( "nir" ), QString(), QStringLiteral( "red" ) };
+
+    snapshot.assets.append( asset );
+
+    const QString prompt = snapshot.toSystemPromptHeader();
+    REQUIRE( prompt.contains( QStringLiteral( "3 bands (roles: nir, unknown, red)" ) ) );
+  }
+
   SECTION( "WorkspaceSnapshot::capture with null pointers produces empty snapshot" )
   {
     sicnu::agent::WorkspaceSnapshot snapshot = sicnu::agent::WorkspaceSnapshot::capture( nullptr, nullptr );
@@ -267,6 +332,33 @@ TEST_CASE( "WorkspaceSnapshot::capture prompt includes raster and vector asset d
   REQUIRE( prompt.contains( QStringLiteral( "/tmp/boundaries.geojson" ) ) );
   REQUIRE( prompt.contains( QStringLiteral( "[Vector]" ) ) );
   REQUIRE( prompt.contains( QStringLiteral( "2 vector layers" ) ) );
+}
+
+TEST_CASE( "WorkspaceSnapshot::capture surfaces semantic band roles", "[agent][workspace_snapshot][capture]" )
+{
+  SourceProviderRegistry providers;
+  providers.add( std::make_unique<SnapshotRoleRasterSourceProvider>() );
+  std::unique_ptr<DataManager> manager = providers.createDataManager();
+  REQUIRE( manager );
+
+  RegisterRequest req;
+  req.source.providerKey = QStringLiteral( "snapshot-role-test" );
+  req.source.canonicalSource = QStringLiteral( "/tmp/s2_l2a_sample.tif" );
+  const auto res = manager->registerSource( req );
+  REQUIRE( !res.assetId.isNull() );
+
+  const auto snapshot = sicnu::agent::WorkspaceSnapshot::capture( manager.get(), nullptr );
+  REQUIRE( snapshot.assets.size() == 1 );
+
+  const auto &asset = snapshot.assets.first();
+  REQUIRE( asset.bandRoles.size() == 4 );
+  CHECK( asset.bandRoles.at( 0 ) == QStringLiteral( "nir" ) );
+  CHECK( asset.bandRoles.at( 1 ) == QStringLiteral( "red" ) );
+  CHECK( asset.bandRoles.at( 2 ) == QStringLiteral( "green" ) );
+  CHECK( asset.bandRoles.at( 3 ) == QStringLiteral( "blue" ) );
+
+  const QString prompt = snapshot.toSystemPromptHeader();
+  REQUIRE( prompt.contains( QStringLiteral( "4 bands (roles: nir, red, green, blue)" ) ) );
 }
 
 TEST_CASE( "WorkspaceSnapshot::capture reads map view facades from ActiveViewHost",
