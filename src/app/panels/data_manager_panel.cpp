@@ -14,6 +14,7 @@
 #include <QStyle>
 #include <QStyledItemDelegate>
 #include <QStyleOptionViewItem>
+#include <QJsonDocument>
 #include <QTextBrowser>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
@@ -923,10 +924,62 @@ void DataManagerPanel::showAssetDetails( const sicnu::data::AssetSnapshot &snaps
     source += row( tr( "数据选项" ), opts.join( QStringLiteral( "; " ) ) );
   }
 
+  // Provenance + lineage: what produced this asset (derivation record) and
+  // what it was derived from / what was derived from it (ADR 0065 lineage).
+  QString provenanceRows;
+  if ( m_dataManager )
+  {
+    const std::optional<sicnu::data::DerivationRecord> record =
+      m_dataManager->provenance( snapshot.id() );
+    if ( record )
+    {
+      provenanceRows += row( tr( "算法" ), record->algorithmId );
+      if ( !record->algorithmVersion.isEmpty() )
+        provenanceRows += row( tr( "算法版本" ), record->algorithmVersion );
+      if ( !record->parameters.isEmpty() )
+        provenanceRows += row( tr( "参数" ),
+                               QString::fromUtf8(
+                                 QJsonDocument( record->parameters ).toJson( QJsonDocument::Compact ) ) );
+      if ( !record->taskReference.isEmpty() )
+        provenanceRows += row( tr( "任务引用" ), record->taskReference );
+      if ( record->completedAtUtc.isValid() )
+        provenanceRows += row( tr( "完成时间" ), record->completedAtUtc.toString( Qt::ISODate ) );
+
+      const QVector<sicnu::data::AssetId> inputs = m_dataManager->derivedFrom( snapshot.id() );
+      if ( !inputs.isEmpty() )
+      {
+        QStringList names;
+        for ( const sicnu::data::AssetId &id : inputs )
+        {
+          const auto input = m_dataManager->asset( id );
+          names << ( input ? input->displayName() : id.toString() );
+        }
+        provenanceRows += row( tr( "源自" ), names.join( QStringLiteral( ", " ) ) );
+      }
+    }
+    else
+    {
+      provenanceRows += row( tr( "溯源" ), tr( "无派生记录（直接注册）" ) );
+    }
+
+    const QVector<sicnu::data::AssetId> outputs = m_dataManager->derivedOutputsOf( snapshot.id() );
+    if ( !outputs.isEmpty() )
+    {
+      QStringList names;
+      for ( const sicnu::data::AssetId &id : outputs )
+      {
+        const auto output = m_dataManager->asset( id );
+        names << ( output ? output->displayName() : id.toString() );
+      }
+      provenanceRows += row( tr( "派生产物" ), names.join( QStringLiteral( ", " ) ) );
+    }
+  }
+
   const QString body =
     QStringLiteral( "<h2>%1</h2>" ).arg( escapeHtml( snapshot.displayName() ) )
     + section( tr( "标识与状态" ), identity )
     + section( tr( "数据源" ), source )
+    + section( tr( "溯源与谱系" ), provenanceRows )
     + formatStructure( snapshot.structure() );
 
   m_detailView->setHtml( wrapHtml( body ) );

@@ -3,8 +3,12 @@
 #include <QApplication>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonObject>
 #include <QSignalSpy>
+#include <QTextBrowser>
 #include <QTemporaryDir>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
 
 #include <vector>
 
@@ -500,4 +504,61 @@ TEST_CASE( "Selecting an asset fills the metadata detail panel",
   CHECK( html.contains( QStringLiteral( "数据源" ) ) );
   CHECK( ( html.contains( QStringLiteral( "栅格结构" ) )
            || html.contains( QStringLiteral( "结构" ) ) ) );
+}
+
+TEST_CASE( "The detail view shows provenance and lineage", "[data_manager_panel][provenance]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+
+  const AssetId input =
+    registerRaster( dataManager, fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ) );
+  const AssetId output =
+    registerRaster( dataManager, fixturePath( QStringLiteral( "phr_xs.tif" ) ) );
+
+  // The output asset was produced from the input by an algorithm.
+  sicnu::data::DerivationRecord record = sicnu::data::makeTaskDerivation(
+    QStringLiteral( "rs:spectral_index" ),
+    QJsonObject{ { QStringLiteral( "index" ), QStringLiteral( "NDVI" ) } },
+    QStringLiteral( "task-9" ) );
+  sicnu::data::DerivationInput derivedFrom;
+  derivedFrom.assetId = input;
+  derivedFrom.revision = sicnu::data::AssetRevision::initial();
+  record.inputs = { derivedFrom };
+  REQUIRE( dataManager.attachDerivationRecord( output, record ) );
+
+  sicnu::DataManagerPanel panel( &dataManager );
+  auto *tree = panel.findChild<QTreeWidget *>( QStringLiteral( "dataManagerTree" ) );
+  REQUIRE( tree != nullptr );
+  auto *view = panel.findChild<QTextBrowser *>( QStringLiteral( "dataManagerDetailView" ) );
+  REQUIRE( view != nullptr );
+
+  // Rows store their AssetId in the name cell's data (kAssetIdRole).
+  QTreeWidgetItem *inputRow = nullptr;
+  QTreeWidgetItem *outputRow = nullptr;
+  for ( int i = 0; i < tree->topLevelItemCount(); ++i )
+  {
+    QTreeWidgetItem *item = tree->topLevelItem( i );
+    const auto id = sicnu::data::AssetId::fromString( item->data( 0, Qt::UserRole ).toString() );
+    if ( id && *id == input )
+      inputRow = item;
+    if ( id && *id == output )
+      outputRow = item;
+  }
+  REQUIRE( inputRow != nullptr );
+  REQUIRE( outputRow != nullptr );
+
+  // Output asset: shows the derivation record and its inputs.
+  tree->setCurrentItem( outputRow );
+  QString html = view->toHtml();
+  CHECK( html.contains( QStringLiteral( "溯源与谱系" ) ) );
+  CHECK( html.contains( QStringLiteral( "rs:spectral_index" ) ) );
+  CHECK( html.contains( QStringLiteral( "task-9" ) ) );
+  CHECK( html.contains( QStringLiteral( "源自" ) ) );
+
+  // Input asset: shows that it has no derivation record but produced outputs.
+  tree->setCurrentItem( inputRow );
+  html = view->toHtml();
+  CHECK( html.contains( QStringLiteral( "无派生记录" ) ) );
+  CHECK( html.contains( QStringLiteral( "派生产物" ) ) );
 }
