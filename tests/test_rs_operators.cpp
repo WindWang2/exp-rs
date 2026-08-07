@@ -179,6 +179,59 @@ TEST_CASE("RS radiometric calibration operator execution", "[operators][rs]") {
     CHECK(out[3] == Catch::Approx(0.8f).epsilon(1e-3f)); // 0.01*80
 }
 
+TEST_CASE("RS radiometric calibration auto-detects a sibling MTL", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    // The input raster and its MTL live in the same directory; the operator
+    // must resolve the metadata without an explicit metadata_path.
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString outputPath = tmp.path() + "/calibrated.tif";
+    const QString mtlPath = tmp.path() + "/LC08_L1TP_MTL.txt";
+
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+    GDALDatasetH srcDs = createOutputTiff(inputPath, 2, 2, 1, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+    std::vector<float> dn = {100.0f, 200.0f, 50.0f, 80.0f};
+    REQUIRE(GDALRasterIO(GDALGetRasterBand(srcDs, 1), GF_Write, 0, 0, 2, 2,
+                         dn.data(), 2, 2, GDT_Float32, 0, 0) == CE_None);
+    GDALSetDescription(GDALGetRasterBand(srcDs, 1), "B4");
+    GDALClose(srcDs);
+
+    {
+        QFile mtl(mtlPath);
+        REQUIRE(mtl.open(QIODevice::WriteOnly | QIODevice::Text));
+        QTextStream ts(&mtl);
+        ts << "SPACECRAFT_ID = \"LANDSAT_8\"\n"
+           << "SUN_ELEVATION = 45.0\n"
+           << "RADIANCE_MULT_BAND_4 = 0.01\n"
+           << "RADIANCE_ADD_BAND_4 = 0.0\n";
+    }
+
+    auto op = RSOperatorRegistry::instance().create("rs:radiometric_calibration");
+    REQUIRE(op != nullptr);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["unit"] = "radiance";
+    // No metadata_path: resolved from the sibling *_MTL.txt.
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+
+    CHECK(result["output"].asString() == outputPath.toStdString());
+    CHECK(result["unit"].asString() == "radiance");
+    CHECK(QFile::exists(outputPath));
+
+    GdalDatasetWrapper ds;
+    REQUIRE(ds.open(outputPath));
+    std::vector<float> out(4);
+    REQUIRE(ds.readBandData(1, out.data(), 2, 2));
+    CHECK(out[0] == Catch::Approx(1.0f).epsilon(1e-3f)); // 0.01*100 via auto-detected MTL
+    CHECK(out[3] == Catch::Approx(0.8f).epsilon(1e-3f)); // 0.01*80
+}
+
 TEST_CASE("RS spectral index operator schema and metadata", "[operators][rs]") {
     auto op = RSOperatorRegistry::instance().create("rs:spectral_index");
     REQUIRE(op != nullptr);

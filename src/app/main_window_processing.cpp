@@ -14,6 +14,7 @@
 #include "dialogs/spectral_index_dialog.h"
 #include "dialogs/atmospheric_dialog.h"
 #include "dialogs/qa_mask_dialog.h"
+#include "dialogs/radiometric_calibration_dialog.h"
 #include "dialogs/contrast_stretch_dialog.h"
 #include "dialogs/spatial_filter_dialog.h"
 #include "dialogs/speckle_filter_dialog.h"
@@ -209,6 +210,21 @@ void QgisDesktopWindow::openAtmosphericCorrectionDialog()
         return;
     }
     openRasterDialog<AtmosphericDialog>(this, tr("Atmospheric Correction"), rasterLayer);
+}
+
+// ---------------------------------------------------------------------------
+// Radiometric calibration dialog
+// ---------------------------------------------------------------------------
+
+void QgisDesktopWindow::openRadiometricCalibrationDialog()
+{
+    QgsRasterLayer *rasterLayer = findAnyRaster(this);
+    if (!rasterLayer) {
+        QMessageBox::information(this, tr("辐射定标"),
+                                 tr("请先选择一个栅格图层。"));
+        return;
+    }
+    openRasterDialog<RadiometricCalibrationDialog>(this, tr("辐射定标"), rasterLayer);
 }
 
 // ---------------------------------------------------------------------------

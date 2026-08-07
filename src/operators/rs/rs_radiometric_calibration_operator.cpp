@@ -85,8 +85,18 @@ Json::Value RsRadiometricCalibrationOperator::run(const Json::Value &params,
                               "Input raster not found: " + inputPath);
     }
 
-    const std::string metadataPath = getString(params, "metadata_path", "");
+    const std::string metadataPathParam = getString(params, "metadata_path", "");
     const std::string unit = getEnum(params, "unit", s_units, "radiance");
+
+    // Auto-detect the sensor metadata file (MTL/MTD) next to the input when the
+    // caller did not supply one — "metadata automatically detected" workflow.
+    QString metadataPath = QString::fromStdString(metadataPathParam);
+    if (metadataPath.isEmpty()) {
+        metadataPath = RadiometricCalibration::autoDetectMetadataFile(
+            QString::fromStdString(inputPath));
+        if (!metadataPath.isEmpty())
+            context.logInfo("Auto-detected calibration metadata: " + metadataPath.toStdString());
+    }
 
     int unitCode = 0; // Radiance
     if (unit == "toa_reflectance") unitCode = 1;
@@ -108,7 +118,7 @@ Json::Value RsRadiometricCalibrationOperator::run(const Json::Value &params,
     if (!RadiometricCalibration::processFile(
             QString::fromStdString(inputPath),
             QString::fromStdString(outputPath),
-            QString::fromStdString(metadataPath),
+            metadataPath,
             unitCode, bandIndices, &errorMessage,
             [&](double frac, const QString &msg) {
                 context.reportProgress(0.1 + 0.85 * frac, msg.toStdString());

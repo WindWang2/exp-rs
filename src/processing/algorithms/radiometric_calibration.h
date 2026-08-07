@@ -67,6 +67,15 @@ namespace RadiometricCalibration
     };
 
     /**
+     * Auto-detect the sensor metadata file for a raster: scans the raster's
+     * directory for a Landsat `*_MTL.txt` or Sentinel-2 `MTD_MSI*.xml`.
+     * Returns the path, or empty when none is found. When both families are
+     * present, prefers the one matching the raster's embedded SICNU_PRODUCT_TYPE
+     * metadata (fallback: Landsat MTL).
+     */
+    QString autoDetectMetadataFile(const QString &rasterPath);
+
+    /**
      * Load calibration coefficients from a sensor metadata file (MTL/MTD) or,
      * when @p metadataPath is empty, from GDAL metadata embedded in @p rasterPath.
      *

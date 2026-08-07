@@ -8,6 +8,7 @@
 
 #include <QDomDocument>
 #include <QDomElement>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
@@ -315,6 +316,38 @@ bool loadGdalMetadata(const QString &rasterPath, const QMap<int, QString> &bandN
 // ---------------------------------------------------------------------------
 // Public metadata loader
 // ---------------------------------------------------------------------------
+
+QString autoDetectMetadataFile(const QString &rasterPath)
+{
+    const QFileInfo fi(rasterPath);
+    const QDir dir = fi.absoluteDir();
+    const QStringList mtl = dir.entryList({QStringLiteral("*_MTL.txt")},
+                                          QDir::Files, QDir::Name);
+    const QStringList mtd = dir.entryList({QStringLiteral("MTD_MSI*.xml")},
+                                          QDir::Files, QDir::Name);
+
+    if (mtl.isEmpty() && mtd.isEmpty())
+        return {};
+    if (mtl.isEmpty())
+        return dir.absoluteFilePath(mtd.first());
+    if (mtd.isEmpty())
+        return dir.absoluteFilePath(mtl.first());
+
+    // Both families present: prefer the one matching the raster's embedded
+    // product type (Landsat MTL default on ambiguity).
+    QString productType;
+    ensureGdalInit();
+    GDALDatasetH ds = GDALOpen(rasterPath.toUtf8().constData(), GA_ReadOnly);
+    if (ds) {
+        const char *type = GDALGetMetadataItem(ds, "SICNU_PRODUCT_TYPE", nullptr);
+        if (type && type[0])
+            productType = QString::fromUtf8(type);
+        GDALClose(ds);
+    }
+    if (productType.contains(QStringLiteral("Sentinel"), Qt::CaseInsensitive))
+        return dir.absoluteFilePath(mtd.first());
+    return dir.absoluteFilePath(mtl.first());
+}
 
 bool loadMetadata(const QString &rasterPath, const QString &metadataPath,
                   const QMap<int, QString> &bandNames, CalibrationMetadata *out,

@@ -610,3 +610,67 @@ TEST_CASE("processFile streams a band subset", "[radcal][gdal][stream]")
         REQUIRE_THAT(b4[i], WithinAbs(0.04f * 300.0f, 1e-3f));        // B4: 12.0
     }
 }
+
+// ---------------------------------------------------------------------------
+// Metadata auto-detection (sibling MTL/MTD scan)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("autoDetectMetadataFile scans sibling MTL/MTD files", "[radcal][metadata]")
+{
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    SECTION("No metadata files next to the raster") {
+        CHECK(RadiometricCalibration::autoDetectMetadataFile(
+                  dir.filePath(QStringLiteral("scene.tif")))
+                  .isEmpty());
+    }
+
+    SECTION("A sibling Landsat MTL is detected") {
+        writeMtlFile(dir.filePath(QStringLiteral("LC08_L1TP_MTL.txt")), {});
+        const QString found = RadiometricCalibration::autoDetectMetadataFile(
+            dir.filePath(QStringLiteral("scene.tif")));
+        REQUIRE_FALSE(found.isEmpty());
+        CHECK(found.endsWith(QStringLiteral("LC08_L1TP_MTL.txt")));
+    }
+
+    SECTION("A sibling Sentinel-2 MTD is detected") {
+        QFile mtd(dir.filePath(QStringLiteral("MTD_MSIL2A.xml")));
+        REQUIRE(mtd.open(QIODevice::WriteOnly | QIODevice::Text));
+        mtd.write("<n1:Level-2A_User_Product></n1:Level-2A_User_Product>");
+        mtd.close();
+
+        const QString found = RadiometricCalibration::autoDetectMetadataFile(
+            dir.filePath(QStringLiteral("scene.tif")));
+        REQUIRE_FALSE(found.isEmpty());
+        CHECK(found.endsWith(QStringLiteral("MTD_MSIL2A.xml")));
+    }
+
+    SECTION("Both present: MTL wins by default, product type overrides") {
+        const QString mtlPath = dir.filePath(QStringLiteral("LC08_MTL.txt"));
+        writeMtlFile(mtlPath, {});
+        QFile mtd(dir.filePath(QStringLiteral("MTD_MSIL2A.xml")));
+        REQUIRE(mtd.open(QIODevice::WriteOnly | QIODevice::Text));
+        mtd.write("<n1:Level-2A_User_Product></n1:Level-2A_User_Product>");
+        mtd.close();
+
+        // Without embedded product type: MTL.
+        CHECK(RadiometricCalibration::autoDetectMetadataFile(
+                  dir.filePath(QStringLiteral("scene.tif")))
+                  .endsWith(QStringLiteral("LC08_MTL.txt")));
+
+        // With SICNU_PRODUCT_TYPE=Sentinel-2 (as written by stackToGeoTiff): MTD.
+        const QString stacked = dir.filePath(QStringLiteral("s2_stack.tif"));
+        std::vector<std::vector<float>> bands(1, std::vector<float>(4, 1.0f));
+        std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+        QString err;
+        REQUIRE(writeGdalOutput(stacked, 2, 2, bands, gt, QString(), &err));
+        GDALDatasetH ds = GDALOpen(stacked.toUtf8().constData(), GA_Update);
+        REQUIRE(ds != nullptr);
+        GDALSetMetadataItem(ds, "SICNU_PRODUCT_TYPE", "Sentinel-2", nullptr);
+        GDALClose(ds);
+
+        CHECK(RadiometricCalibration::autoDetectMetadataFile(stacked)
+                  .endsWith(QStringLiteral("MTD_MSIL2A.xml")));
+    }
+}

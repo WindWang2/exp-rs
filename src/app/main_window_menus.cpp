@@ -388,6 +388,9 @@ void QgisDesktopWindow::setupMenu()
     tip( preprocessMenu->addAction( ic( "at_os_corr" ), tr( "大气校正..." ),
                                     this, &QgisDesktopWindow::openAtmosphericCorrectionDialog ),
          tr( "大气校正：DN→辐射、DOS1/DOS2。" ) );
+    tip( preprocessMenu->addAction( ic( "qa_mask" ), tr( "辐射定标..." ),
+                                    this, &QgisDesktopWindow::openRadiometricCalibrationDialog ),
+         tr( "DN→辐射亮度 / TOA 反射率 / 亮温；传感器元数据自动探测。" ) );
     tip( preprocessMenu->addAction( ic( "qa_mask" ), tr( "QA 掩膜（云/云影/雪）..." ),
                                     this, &QgisDesktopWindow::openQaMaskDialog ),
          tr( "从 Landsat QA_PIXEL / Sentinel-2 SCL 生成云/云影/雪二值掩膜。" ) );
