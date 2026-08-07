@@ -117,6 +117,11 @@ public:
     /// True if a dataset is currently open.
     bool isValid() const;
 
+    /// Raw GDAL dataset handle (nullptr when closed). Read access for metadata
+    /// operations the wrapper does not wrap; do not close it — the wrapper owns
+    /// the dataset.
+    void *dataset() const;
+
     // --- Metadata ---
 
     int width() const;

@@ -14,6 +14,7 @@
 #include "dialogs/spectral_index_dialog.h"
 #include "dialogs/atmospheric_dialog.h"
 #include "dialogs/qa_mask_dialog.h"
+#include "dialogs/apply_mask_dialog.h"
 #include "dialogs/radiometric_calibration_dialog.h"
 #include "dialogs/orthorectification_dialog.h"
 #include "dialogs/contrast_stretch_dialog.h"
@@ -256,6 +257,19 @@ void QgisDesktopWindow::openQaMaskDialog()
         return;
     }
     openRasterDialog<QaMaskDialog>(this, tr("QA 掩膜"), rasterLayer);
+}
+
+void QgisDesktopWindow::openApplyMaskDialog()
+{
+    QgsRasterLayer *rasterLayer = findAnyRaster(this);
+    if (!rasterLayer) {
+        QMessageBox::information(this, tr("应用掩膜"),
+                                 tr("请先选择一个栅格图层。"));
+        return;
+    }
+    ApplyMaskDialog dlg(this);
+    dlg.setRasterLayer(rasterLayer);
+    dlg.exec();
 }
 
 // ---------------------------------------------------------------------------

@@ -38,10 +38,10 @@ void registerAtomicTool( WorkflowRuntime &runtime,
 
 /// Guided "光学产品预处理" workflow: a reusable analysis-ready DAG chaining
 /// the existing rs: operators — radiometric calibration -> QA mask (parallel)
-/// -> atmospheric correction -> NDVI — with `$stepId.artifact` parameter
-/// flow (ADR 0016/0031). The QA mask step is a side branch producing a mask
-/// artifact for later use; applying the mask to the corrected product is a
-/// follow-up once an apply-mask operator exists.
+/// -> atmospheric correction -> apply mask -> NDVI — with `$stepId.artifact`
+/// parameter flow (ADR 0016/0031). The QA mask step is a side branch whose
+/// mask artifact is applied to the corrected product (rs:apply_mask) so the
+/// final index computation sees analysis-ready, cloud-free pixels.
 void registerPreprocessOptical( WorkflowRuntime &runtime )
 {
   WorkflowDefinition d;
@@ -81,21 +81,33 @@ void registerPreprocessOptical( WorkflowRuntime &runtime )
   atmospheric.params["input"] = "$calibration.calibrated";
   atmospheric.params["method"] = "dos1";
 
+  StepDef applyMask;
+  applyMask.id = "apply_mask";
+  applyMask.title = "应用掩膜";
+  applyMask.kind = StepKind::Operator;
+  applyMask.operatorId = "rs:apply_mask";
+  applyMask.artifactOnSuccess = "analysis_ready";
+  applyMask.uiMeta = { 600.0, 200.0 };
+  applyMask.inputs.push_back( { "atmospheric", "corrected", "input" } );
+  applyMask.inputs.push_back( { "qa_mask", "mask", "mask" } );
+  applyMask.params["input"] = "$atmospheric.corrected";
+  applyMask.params["mask"] = "$qa_mask.mask";
+
   StepDef ndvi;
   ndvi.id = "ndvi";
   ndvi.title = "NDVI 植被指数";
   ndvi.kind = StepKind::Operator;
   ndvi.operatorId = "rs:spectral_index";
   ndvi.artifactOnSuccess = "ndvi";
-  ndvi.uiMeta = { 600.0, 0.0 };
+  ndvi.uiMeta = { 900.0, 0.0 };
   ndvi.uiMeta.portAddToMap["ndvi"] = true;
-  ndvi.inputs.push_back( { "atmospheric", "corrected", "input" } );
-  ndvi.params["input"] = "$atmospheric.corrected";
+  ndvi.inputs.push_back( { "apply_mask", "analysis_ready", "input" } );
+  ndvi.params["input"] = "$apply_mask.analysis_ready";
   ndvi.params["index"] = "NDVI";
   // Band params omitted: resolved from the product's semantic band roles
   // (ADR 0065) when the raster carries SICNU_BAND_ROLE metadata.
 
-  d.steps = { calibration, qaMask, atmospheric, ndvi };
+  d.steps = { calibration, qaMask, atmospheric, applyMask, ndvi };
   runtime.registerDefinition( std::move( d ) );
 }
 
@@ -315,6 +327,8 @@ void registerBuiltinWorkflows( WorkflowRuntime &runtime )
                       "rs:atmospheric_correction", "input", "请选择输入栅格" );
   registerAtomicTool( runtime, "tool.rs.qa_mask", "云/云影/雪掩膜",
                       "rs:qa_mask", "input", "请选择输入栅格" );
+  registerAtomicTool( runtime, "tool.rs.apply_mask", "应用掩膜",
+                      "rs:apply_mask", "input", "请选择输入栅格" );
 
   registerPreprocessOptical( runtime );
   registerClassifySupervised( runtime );

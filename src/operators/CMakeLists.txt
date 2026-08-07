@@ -60,6 +60,7 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_change_detection_operator.cpp
     rs/rs_image_fusion_operator.cpp
     rs/rs_qa_mask_operator.cpp
+    rs/rs_apply_mask_operator.cpp
     rs/rs_terrain_analysis_operator.cpp
     rs/rs_pca_operator.cpp
     rs/rs_mnf_operator.cpp

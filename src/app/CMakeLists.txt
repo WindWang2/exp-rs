@@ -110,6 +110,7 @@ add_executable(sicnu_geo_rs
     dialogs/spectral_index_dialog.cpp
     dialogs/atmospheric_dialog.cpp
     dialogs/qa_mask_dialog.cpp
+    dialogs/apply_mask_dialog.cpp
     dialogs/radiometric_calibration_dialog.cpp
     dialogs/orthorectification_dialog.cpp
     dialogs/product_import_dialog.cpp

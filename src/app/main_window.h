@@ -201,6 +201,7 @@ public:
     void openSpectralIndexDialog();
     void openAtmosphericCorrectionDialog();
     void openQaMaskDialog();
+    void openApplyMaskDialog();
     void openRadiometricCalibrationDialog();
     void openOrthorectificationDialog();
     void openMosaicDialog();

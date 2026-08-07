@@ -398,6 +398,9 @@ void QgisDesktopWindow::setupMenu()
     tip( preprocessMenu->addAction( ic( "qa_mask" ), tr( "QA 掩膜（云/云影/雪）..." ),
                                     this, &QgisDesktopWindow::openQaMaskDialog ),
          tr( "从 Landsat QA_PIXEL / Sentinel-2 SCL 生成云/云影/雪二值掩膜。" ) );
+    tip( preprocessMenu->addAction( ic( "qa_mask" ), tr( "应用掩膜..." ),
+                                    this, &QgisDesktopWindow::openApplyMaskDialog ),
+         tr( "把掩膜应用到产品：被遮挡像元置为 NoData，得到分析就绪影像。" ) );
     tip( preprocessMenu->addAction( ic( "mos_ic" ), tr( "镶嵌..." ),
                                     this, &QgisDesktopWindow::openMosaicDialog ),
          tr( "多景栅格镶嵌为连续影像。" ) );

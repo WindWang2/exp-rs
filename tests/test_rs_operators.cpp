@@ -108,6 +108,8 @@ TEST_CASE("Native RS operators are registered", "[operators][rs]") {
     CHECK(registry.hasOperator("rs:atmospheric_correction"));
     CHECK(registry.hasOperator("rs:radiometric_calibration"));
     CHECK(registry.hasOperator("rs:change_detection"));
+    CHECK(registry.hasOperator("rs:qa_mask"));
+    CHECK(registry.hasOperator("rs:apply_mask"));
     CHECK(registry.hasOperator("rs:image_fusion"));
     CHECK(registry.hasOperator("rs:terrain_analysis"));
     CHECK(registry.hasOperator("rs:pca"));
@@ -1399,3 +1401,195 @@ TEST_CASE("RS obia_classify escalates dtype for large class ids", "[operators][r
     CHECK(px.back() == Catch::Approx(300.0f));
 }
 #endif
+
+TEST_CASE("RS apply_mask sets masked pixels to NoData (same grid)", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/product.tif";
+    const QString maskPath = tmp.path() + "/mask.tif";
+    const QString outputPath = tmp.path() + "/masked.tif";
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+    std::vector<std::vector<float>> bands(2, std::vector<float>(W * H, 100.0f));
+    // Mask: a 2x2 cloud block in the top-left corner.
+    std::vector<std::vector<float>> mask(1, std::vector<float>(W * H, 0.0f));
+    for (int y = 0; y < 2; ++y)
+        for (int x = 0; x < 2; ++x)
+            mask[0][y * W + x] = 1.0f;
+
+    std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+    QString err;
+    REQUIRE(writeGdalOutput(inputPath, W, H, bands, gt, "EPSG:32648", &err));
+    REQUIRE(writeGdalOutput(maskPath, W, H, mask, gt, "EPSG:32648", &err));
+
+    // Mark band 1 as NIR with a wavelength so the test pins metadata pass-through.
+    GDALDatasetH inDs = GDALOpenEx(inputPath.toUtf8().constData(), GDAL_OF_RASTER | GDAL_OF_UPDATE,
+                                   nullptr, nullptr, nullptr);
+    REQUIRE(inDs != nullptr);
+    GDALSetMetadataItem(GDALGetRasterBand(inDs, 1), "SICNU_BAND_ROLE", "nir", nullptr);
+    GDALSetMetadataItem(GDALGetRasterBand(inDs, 1), "WAVELENGTH", "833", nullptr);
+    GDALClose(inDs);
+
+    auto op = RSOperatorRegistry::instance().create("rs:apply_mask");
+    REQUIRE(op != nullptr);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["mask"] = maskPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["no_data"] = -9999.0;
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    REQUIRE(QFile::exists(outputPath));
+
+    CHECK(result["maskedPixels"].asInt() == 4);
+    CHECK(result["totalPixels"].asInt() == 16);
+    CHECK(result["maskedPercent"].asDouble() == Catch::Approx(25.0));
+    CHECK(result["aligned"].asBool() == false);
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    REQUIRE(out.bandCount() == 2);
+    std::vector<float> b1(W * H), b2(W * H);
+    REQUIRE(out.readBandData(1, b1.data(), W, H));
+    REQUIRE(out.readBandData(2, b2.data(), W, H));
+    for (int i = 0; i < W * H; ++i) {
+        const bool inCloud = (i / W) < 2 && (i % W) < 2;
+        CHECK(b1[i] == Catch::Approx(inCloud ? -9999.0f : 100.0f));
+        CHECK(b2[i] == Catch::Approx(inCloud ? -9999.0f : 100.0f));
+    }
+    // Band semantics pass through to the masked product.
+    CHECK(out.bandMetadataItem(1, "SICNU_BAND_ROLE") == QStringLiteral("nir"));
+    CHECK(out.bandMetadataItem(1, "WAVELENGTH") == QStringLiteral("833"));
+    bool hasNoData = false;
+    CHECK(out.bandNoDataValue(1, &hasNoData) == Catch::Approx(-9999.0));
+    CHECK(hasNoData);
+}
+
+TEST_CASE("RS apply_mask auto-aligns a coarser mask onto the input grid", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/product.tif";
+    const QString maskPath = tmp.path() + "/mask60.tif";
+    const QString outputPath = tmp.path() + "/masked.tif";
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+    std::vector<std::vector<float>> bands(1, std::vector<float>(W * H, 200.0f));
+
+    // Input: 30 m grid; mask: 60 m grid covering the same footprint (2x2).
+    std::array<double, 6> gt30 = {500000, 30, 0, 4500000, 0, -30};
+    std::array<double, 6> gt60 = {500000, 60, 0, 4500000, 0, -60};
+    std::vector<std::vector<float>> mask(1, std::vector<float>(2 * 2, 0.0f));
+    mask[0][0] = 1.0f; // one 60 m cell -> four 30 m pixels
+
+    QString err;
+    REQUIRE(writeGdalOutput(inputPath, W, H, bands, gt30, "EPSG:32648", &err));
+    REQUIRE(writeGdalOutput(maskPath, 2, 2, mask, gt60, "EPSG:32648", &err));
+
+    auto op = RSOperatorRegistry::instance().create("rs:apply_mask");
+    REQUIRE(op != nullptr);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["mask"] = maskPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["no_data"] = -1.0f;
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    REQUIRE(QFile::exists(outputPath));
+    CHECK(result["maskedPixels"].asInt() == 4);
+    CHECK(result["aligned"].asBool() == true);
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    std::vector<float> px(W * H);
+    REQUIRE(out.readBandData(1, px.data(), W, H));
+    // The masked 60 m cell covers input pixels (0,0),(1,0),(0,1),(1,1).
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x)
+            CHECK(px[y * W + x] == Catch::Approx((x < 2 && y < 2) ? -1.0f : 200.0f));
+}
+
+TEST_CASE("RS apply_mask rejects incompatible grids and missing NoData", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+    std::vector<std::vector<float>> bands(1, std::vector<float>(W * H, 100.0f));
+    std::vector<std::vector<float>> mask(1, std::vector<float>(W * H, 0.0f));
+
+    auto op = RSOperatorRegistry::instance().create("rs:apply_mask");
+    REQUIRE(op != nullptr);
+
+    SECTION("CRS mismatch is never auto-corrected") {
+        const QString inputPath = tmp.path() + "/in4326.tif";
+        const QString maskPath = tmp.path() + "/mask32648.tif";
+        const QString outputPath = tmp.path() + "/out.tif";
+        std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+        QString err;
+        REQUIRE(writeGdalOutput(inputPath, W, H, bands, gt, "EPSG:4326", &err));
+        REQUIRE(writeGdalOutput(maskPath, W, H, mask, gt, "EPSG:32648", &err));
+
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["mask"] = maskPath.toStdString();
+        params["output"] = outputPath.toStdString();
+        params["no_data"] = -9999.0;
+        params["align_mask"] = true;
+
+        RSOperatorContext ctx;
+        REQUIRE_THROWS_WITH(op->run(params, ctx),
+                            Catch::Matchers::ContainsSubstring("coordinate reference systems"));
+        CHECK_FALSE(QFile::exists(outputPath));
+    }
+
+    SECTION("align_mask=false rejects a pixel-size mismatch") {
+        const QString inputPath = tmp.path() + "/in30.tif";
+        const QString maskPath = tmp.path() + "/mask60.tif";
+        const QString outputPath = tmp.path() + "/out.tif";
+        std::array<double, 6> gt30 = {500000, 30, 0, 4500000, 0, -30};
+        std::array<double, 6> gt60 = {500000, 60, 0, 4500000, 0, -60};
+        QString err;
+        REQUIRE(writeGdalOutput(inputPath, W, H, bands, gt30, "EPSG:32648", &err));
+        REQUIRE(writeGdalOutput(maskPath, 2, 2, mask, gt60, "EPSG:32648", &err));
+
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["mask"] = maskPath.toStdString();
+        params["output"] = outputPath.toStdString();
+        params["no_data"] = -9999.0;
+        params["align_mask"] = false;
+
+        RSOperatorContext ctx;
+        REQUIRE_THROWS_WITH(op->run(params, ctx),
+                            Catch::Matchers::ContainsSubstring("pixel grids"));
+        CHECK_FALSE(QFile::exists(outputPath));
+    }
+
+    SECTION("bands without NoData require the no_data parameter") {
+        const QString inputPath = tmp.path() + "/in.tif";
+        const QString maskPath = tmp.path() + "/mask.tif";
+        const QString outputPath = tmp.path() + "/out.tif";
+        std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+        QString err;
+        REQUIRE(writeGdalOutput(inputPath, W, H, bands, gt, "EPSG:4326", &err));
+        REQUIRE(writeGdalOutput(maskPath, W, H, mask, gt, "EPSG:4326", &err));
+
+        Json::Value params(Json::objectValue);
+        params["input"] = inputPath.toStdString();
+        params["mask"] = maskPath.toStdString();
+        params["output"] = outputPath.toStdString();
+
+        RSOperatorContext ctx;
+        REQUIRE_THROWS_WITH(op->run(params, ctx),
+                            Catch::Matchers::ContainsSubstring("NoData"));
+        CHECK_FALSE(QFile::exists(outputPath));
+    }
+}

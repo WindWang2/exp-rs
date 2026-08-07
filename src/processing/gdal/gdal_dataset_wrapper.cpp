@@ -69,6 +69,11 @@ bool GdalDatasetWrapper::isValid() const
     return m_dataset != nullptr;
 }
 
+void *GdalDatasetWrapper::dataset() const
+{
+    return m_dataset;
+}
+
 bool GdalDatasetWrapper::create(const QString &path, int width, int height, int bandCount,
                                 int dtype, const std::array<double, 6> &geoTransform,
                                 const QString &projection, QString *errorMessage)
