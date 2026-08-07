@@ -6,6 +6,23 @@
 
 namespace sicnu::operators {
 
+const char *memoryPolicyName( RSOperatorMemoryPolicy policy )
+{
+    switch ( policy ) {
+    case RSOperatorMemoryPolicy::Streaming:
+        return "streaming";
+    case RSOperatorMemoryPolicy::MultiPassStreaming:
+        return "multipass_streaming";
+    case RSOperatorMemoryPolicy::FullRaster:
+        return "full_raster";
+    case RSOperatorMemoryPolicy::ExternalProcess:
+        return "external_process";
+    case RSOperatorMemoryPolicy::UnsupportedForLargeRaster:
+        return "unsupported_for_large_raster";
+    }
+    return "full_raster";
+}
+
 std::string RSOperator::displayName() const {
     return name();
 }

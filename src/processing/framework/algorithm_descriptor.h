@@ -45,6 +45,9 @@ struct AgentMetadata
   std::vector<std::string> workflowHints;
   std::vector<std::string> limitations;
   std::string llmPromptHint;
+  /// Large-raster memory policy ("streaming", "multipass_streaming",
+  /// "full_raster", "external_process", "unsupported_for_large_raster").
+  std::string memoryPolicy;
 
   Json::Value toJson() const;
   static AgentMetadata fromJson( const Json::Value &val );

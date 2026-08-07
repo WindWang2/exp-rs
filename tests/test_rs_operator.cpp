@@ -301,3 +301,52 @@ TEST_CASE("Schema helpers produce expected shapes", "[rsoperator]") {
     REQUIRE_THAT(numParam["minimum"].asDouble(), Catch::Matchers::WithinAbs(0.0, 1e-9));
     REQUIRE_THAT(numParam["maximum"].asDouble(), Catch::Matchers::WithinAbs(1.0, 1e-9));
 }
+
+// ---------------------------------------------------------------------------
+// Large-raster memory policy (A6)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "memoryPolicyName maps every policy to a stable id", "[operators][framework][memory]" )
+{
+  CHECK( std::string( memoryPolicyName( RSOperatorMemoryPolicy::Streaming ) )
+         == "streaming" );
+  CHECK( std::string( memoryPolicyName( RSOperatorMemoryPolicy::MultiPassStreaming ) )
+         == "multipass_streaming" );
+  CHECK( std::string( memoryPolicyName( RSOperatorMemoryPolicy::FullRaster ) )
+         == "full_raster" );
+  CHECK( std::string( memoryPolicyName( RSOperatorMemoryPolicy::ExternalProcess ) )
+         == "external_process" );
+  CHECK( std::string( memoryPolicyName( RSOperatorMemoryPolicy::UnsupportedForLargeRaster ) )
+         == "unsupported_for_large_raster" );
+}
+
+TEST_CASE( "Every registered operator declares a valid memory policy", "[operators][framework][memory]" )
+{
+  auto &registry = RSOperatorRegistry::instance();
+  const auto names = registry.operatorNames();
+  REQUIRE_FALSE( names.empty() );
+
+  const auto validPolicy = []( const std::string &p ) {
+    return p == "streaming" || p == "multipass_streaming" || p == "full_raster"
+           || p == "external_process" || p == "unsupported_for_large_raster";
+  };
+
+  for ( const auto &name : names )
+  {
+    auto op = registry.create( name );
+    REQUIRE( op != nullptr );
+    CHECK( validPolicy( memoryPolicyName( op->memoryPolicy() ) ) );
+  }
+
+  // Spot checks: streaming / multi-pass / external-process / full-raster.
+  CHECK( registry.create( "rs:radiometric_calibration" )->memoryPolicy()
+         == RSOperatorMemoryPolicy::Streaming );
+  CHECK( registry.create( "rs:atmospheric_correction" )->memoryPolicy()
+         == RSOperatorMemoryPolicy::MultiPassStreaming );
+  CHECK( registry.create( "gdal:orthorectification" )->memoryPolicy()
+         == RSOperatorMemoryPolicy::Streaming );
+  CHECK( registry.create( "otb:meanshift_segmentation" )->memoryPolicy()
+         == RSOperatorMemoryPolicy::ExternalProcess );
+  CHECK( registry.create( "rs:spectral_index" )->memoryPolicy()
+         == RSOperatorMemoryPolicy::FullRaster );
+}

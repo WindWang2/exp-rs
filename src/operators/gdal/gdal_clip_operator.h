@@ -29,6 +29,11 @@ public:
     std::string description() const override {
         return "Clip a raster by vector cutline and/or rectangular extent using GDALWarp.";
     }
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        // In-process GDAL manages its own tiling (GDALWarp streams internally).
+        return RSOperatorMemoryPolicy::Streaming;
+    }
 
     Json::Value schema() const override;
     Json::Value metadata() const override;

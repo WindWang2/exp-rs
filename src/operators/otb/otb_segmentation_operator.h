@@ -30,6 +30,11 @@ public:
     std::string description() const override {
         return "Run OTB Segmentation (MeanShift, connected components, watershed, etc.).";
     }
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        // Delegates to an OTB CLI process that manages its own tiling.
+        return RSOperatorMemoryPolicy::ExternalProcess;
+    }
 
     Json::Value schema() const override;
     Json::Value metadata() const override;

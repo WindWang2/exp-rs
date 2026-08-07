@@ -27,6 +27,11 @@ public:
     std::string description() const override {
         return "Reproject a raster dataset to a target CRS using GDALWarp.";
     }
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        // In-process GDAL manages its own tiling (GDALWarp streams internally).
+        return RSOperatorMemoryPolicy::Streaming;
+    }
 
     Json::Value schema() const override;
     Json::Value metadata() const override;

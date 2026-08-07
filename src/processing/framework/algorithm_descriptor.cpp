@@ -125,6 +125,9 @@ Json::Value AgentMetadata::toJson() const
   if ( !llmPromptHint.empty() )
     root["llmPromptHint"] = llmPromptHint;
 
+  if ( !memoryPolicy.empty() )
+    root["memoryPolicy"] = memoryPolicy;
+
   return root;
 }
 
@@ -162,6 +165,9 @@ AgentMetadata AgentMetadata::fromJson( const Json::Value &val )
 
   if ( val.isMember( "llmPromptHint" ) && val["llmPromptHint"].isString() )
     meta.llmPromptHint = val["llmPromptHint"].asString();
+
+  if ( val.isMember( "memoryPolicy" ) && val["memoryPolicy"].isString() )
+    meta.memoryPolicy = val["memoryPolicy"].asString();
 
   return meta;
 }

@@ -22,6 +22,11 @@ public:
     std::string description() const override {
         return "Compute mean/std-dev statistics for input images using OTB.";
     }
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        // Delegates to an OTB CLI process that manages its own tiling.
+        return RSOperatorMemoryPolicy::ExternalProcess;
+    }
 
     Json::Value schema() const override;
     Json::Value metadata() const override;

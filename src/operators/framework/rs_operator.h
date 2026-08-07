@@ -14,6 +14,23 @@
 
 namespace sicnu::operators {
 
+/// Memory behavior of an operator when processing large rasters. Every
+/// operator declares one so large-image capability is explicit rather than
+/// implied by a few streaming kernels.
+enum class RSOperatorMemoryPolicy
+{
+  Streaming,                  ///< out-of-core tile/block streaming (O(tile) memory)
+  MultiPassStreaming,         ///< multiple streaming passes (O(tile) + O(histogram/global state))
+  FullRaster,                 ///< whole raster(s) in memory (O(width*height*bands))
+  ExternalProcess,            ///< delegates to an external process that manages its own tiling
+  UnsupportedForLargeRaster,  ///< documented as unsuitable for large rasters
+};
+
+/// Stable lowercase identifier for a memory policy ("streaming",
+/// "multipass_streaming", "full_raster", "external_process",
+/// "unsupported_for_large_raster").
+const char *memoryPolicyName( RSOperatorMemoryPolicy policy );
+
 /**
  * Abstract base class for all remote sensing operators.
  *
@@ -53,6 +70,15 @@ public:
      * Short human-readable description.
      */
     virtual std::string description() const;
+
+    /**
+     * Memory policy for large-raster processing. Defaults to FullRaster;
+     * streaming / external-process operators override it.
+     */
+    virtual RSOperatorMemoryPolicy memoryPolicy() const
+    {
+      return RSOperatorMemoryPolicy::FullRaster;
+    }
 
     /**
      * JSON Schema describing input parameters.

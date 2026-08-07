@@ -38,6 +38,12 @@ public:
     std::string description() const override {
         return "Apply atmospheric correction (DOS1/DOS2/QUAC/radiance) to optical imagery.";
     }
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        // DOS1/DOS2 stream in multiple passes (range -> histogram -> apply);
+        // QUAC is full-raster by design.
+        return RSOperatorMemoryPolicy::MultiPassStreaming;
+    }
 
     Json::Value schema() const override;
     Json::Value metadata() const override;

@@ -14,6 +14,8 @@ AlgorithmDescriptor AlgorithmDescriptorBuilder::buildFromRsOperator( const opera
   desc.description = op.description();
 
   Json::Value meta = op.metadata();
+  // Every operator declares a large-raster memory policy (default full_raster).
+  meta["memoryPolicy"] = memoryPolicyName( op.memoryPolicy() );
   desc.agentMetadata = AgentMetadata::fromJson( meta );
 
   Json::Value schema = op.schema();

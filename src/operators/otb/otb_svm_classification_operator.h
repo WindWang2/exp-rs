@@ -22,6 +22,11 @@ public:
     std::string description() const override {
         return "Train an OTB LibSVM classifier from raster and labelled vector data.";
     }
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        // Delegates to an OTB CLI process that manages its own tiling.
+        return RSOperatorMemoryPolicy::ExternalProcess;
+    }
 
     Json::Value schema() const override;
     Json::Value metadata() const override;

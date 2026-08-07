@@ -22,6 +22,10 @@ public:
         return "Convert DN to radiance, TOA reflectance, or brightness temperature "
                "from Landsat MTL / Sentinel-2 MTD / generic GDAL scale-offset metadata.";
     }
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        return RSOperatorMemoryPolicy::Streaming;
+    }
 
     Json::Value schema() const override;
     Json::Value metadata() const override;
