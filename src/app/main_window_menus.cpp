@@ -381,6 +381,9 @@ void QgisDesktopWindow::setupMenu()
     tip( preprocessMenu->addAction( ic( "at_os_corr" ), tr( "大气校正..." ),
                                     this, &QgisDesktopWindow::openAtmosphericCorrectionDialog ),
          tr( "大气校正：DN→辐射、DOS1/DOS2。" ) );
+    tip( preprocessMenu->addAction( ic( "qa_mask" ), tr( "QA 掩膜（云/云影/雪）..." ),
+                                    this, &QgisDesktopWindow::openQaMaskDialog ),
+         tr( "从 Landsat QA_PIXEL / Sentinel-2 SCL 生成云/云影/雪二值掩膜。" ) );
     tip( preprocessMenu->addAction( ic( "mos_ic" ), tr( "镶嵌..." ),
                                     this, &QgisDesktopWindow::openMosaicDialog ),
          tr( "多景栅格镶嵌为连续影像。" ) );

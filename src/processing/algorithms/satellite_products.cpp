@@ -959,9 +959,10 @@ bool discoverSentinel2(const QString& path, ProductInfo* out,
                 << QStringLiteral("*.tif") << QStringLiteral("*.TIF")
                 << QStringLiteral("*.tiff") << QStringLiteral("*.TIFF");
 
-    // Band id pattern: _B02_10m.jp2 or _B8A_20m.jp2 or _B02.jp2 (L1C)
+    // Band id pattern: _B02_10m.jp2 or _B8A_20m.jp2 or _B02.jp2 (L1C),
+    // plus the L2A auxiliary layers SCL and MSK_CLDPRB.
     static const QRegularExpression bandRe(
-        QStringLiteral(R"(_(B(?:0?[1-9]|1[0-2]|8A))(?:_(\d{2}m))?\.(?:jp2|tif|tiff)$)"),
+        QStringLiteral(R"(_(B(?:0?[1-9]|1[0-2]|8A)|SCL|MSK_CLDPRB)(?:_(\d{2}m))?\.(?:jp2|tif|tiff)$)"),
         QRegularExpression::CaseInsensitiveOption);
 
     QDirIterator it(rootDir.absolutePath(), nameFilters, QDir::Files, QDirIterator::Subdirectories);
@@ -972,6 +973,8 @@ bool discoverSentinel2(const QString& path, ProductInfo* out,
         const QString fileName = QFileInfo(filePath).fileName();
         const QString pathLower = filePath.toLower();
         // L2A: keep bands under the preferred R10m/R20m/R60m folder (or matching suffix).
+        // Auxiliary layers (SCL, MSK_CLDPRB) are resolution-independent and are
+        // always discovered regardless of the preferred optical resolution.
         if (out->processingLevel == QStringLiteral("L2A")) {
             const QString folderTag = QStringLiteral("/r") + res; // e.g. /r10m
             const bool inPreferredFolder = pathLower.contains(folderTag);
@@ -979,7 +982,10 @@ bool discoverSentinel2(const QString& path, ProductInfo* out,
             const bool inAnyResFolder = pathLower.contains(QStringLiteral("/r10m"))
                                         || pathLower.contains(QStringLiteral("/r20m"))
                                         || pathLower.contains(QStringLiteral("/r60m"));
-            if (inAnyResFolder && !inPreferredFolder && !nameHasRes)
+            const QString uName = fileName.toUpper();
+            const bool isAux = uName.contains(QStringLiteral("_SCL_"))
+                               || uName.contains(QStringLiteral("_MSK_CLDPRB_"));
+            if (inAnyResFolder && !inPreferredFolder && !nameHasRes && !isAux)
                 continue;
         }
 
@@ -993,7 +999,10 @@ bool discoverSentinel2(const QString& path, ProductInfo* out,
             bname = QStringLiteral("B") + bname.mid(2);
 
         const QString fileRes = m.captured(2).toLower();
-        if (!fileRes.isEmpty() && fileRes != res && out->processingLevel == QStringLiteral("L2A"))
+        const bool isAux = bname == QStringLiteral("SCL")
+                           || bname == QStringLiteral("MSK_CLDPRB");
+        if (!fileRes.isEmpty() && fileRes != res && out->processingLevel == QStringLiteral("L2A")
+            && !isAux)
             continue;
 
         BandFile bf;
@@ -1007,12 +1016,12 @@ bool discoverSentinel2(const QString& path, ProductInfo* out,
             byName.insert(bname, bf);
     }
 
-    // Order B1..B12, B8A after B8
+    // Order B1..B12, B8A after B8, then the L2A auxiliary layers.
     QStringList order = {QStringLiteral("B1"),  QStringLiteral("B2"),  QStringLiteral("B3"),
                          QStringLiteral("B4"),  QStringLiteral("B5"),  QStringLiteral("B6"),
                          QStringLiteral("B7"),  QStringLiteral("B8"),  QStringLiteral("B8A"),
                          QStringLiteral("B9"),  QStringLiteral("B10"), QStringLiteral("B11"),
-                         QStringLiteral("B12")};
+                         QStringLiteral("B12"), QStringLiteral("SCL"), QStringLiteral("MSK_CLDPRB")};
     for (const QString& n : order) {
         if (byName.contains(n))
             out->bands.append(byName.value(n));

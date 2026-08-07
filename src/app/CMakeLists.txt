@@ -109,6 +109,7 @@ add_executable(sicnu_geo_rs
     dialogs/band_math_dialog.cpp
     dialogs/spectral_index_dialog.cpp
     dialogs/atmospheric_dialog.cpp
+    dialogs/qa_mask_dialog.cpp
     dialogs/crs_preset_dialog.cpp
     dialogs/preferences_dialog.cpp
     dialogs/contrast_stretch_dialog.cpp

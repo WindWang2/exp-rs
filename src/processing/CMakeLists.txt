@@ -14,6 +14,7 @@ add_library(sicnu_processing SHARED
     algorithms/atmospheric_correction.cpp
     algorithms/radiometric_calibration.cpp
     algorithms/change_detection.cpp
+    algorithms/qa_mask.cpp
     algorithms/math_utils.cpp
     algorithms/mosaic.cpp
     algorithms/image_enhancement.cpp

@@ -13,6 +13,7 @@
 #include "dialogs/band_math_dialog.h"
 #include "dialogs/spectral_index_dialog.h"
 #include "dialogs/atmospheric_dialog.h"
+#include "dialogs/qa_mask_dialog.h"
 #include "dialogs/contrast_stretch_dialog.h"
 #include "dialogs/spatial_filter_dialog.h"
 #include "dialogs/speckle_filter_dialog.h"
@@ -208,6 +209,21 @@ void QgisDesktopWindow::openAtmosphericCorrectionDialog()
         return;
     }
     openRasterDialog<AtmosphericDialog>(this, tr("Atmospheric Correction"), rasterLayer);
+}
+
+// ---------------------------------------------------------------------------
+// QA Mask dialog
+// ---------------------------------------------------------------------------
+
+void QgisDesktopWindow::openQaMaskDialog()
+{
+    QgsRasterLayer *rasterLayer = findAnyRaster(this);
+    if (!rasterLayer) {
+        QMessageBox::information(this, tr("QA 掩膜"),
+                                 tr("请先选择一个栅格图层。"));
+        return;
+    }
+    openRasterDialog<QaMaskDialog>(this, tr("QA 掩膜"), rasterLayer);
 }
 
 // ---------------------------------------------------------------------------

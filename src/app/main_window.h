@@ -200,6 +200,7 @@ public:
     void openBandMathDialog();
     void openSpectralIndexDialog();
     void openAtmosphericCorrectionDialog();
+    void openQaMaskDialog();
     void openMosaicDialog();
     void openChangeDetectionDialog();
 

@@ -99,6 +99,11 @@ QString writeFakeSentinel2Safe(const QDir& root)
     writeTinyBand(img + QStringLiteral("/T32TQQ_20200615T000000_B03_10m.tif"), 60.f);
     writeTinyBand(img + QStringLiteral("/T32TQQ_20200615T000000_B04_10m.tif"), 40.f);
     writeTinyBand(img + QStringLiteral("/T32TQQ_20200615T000000_B08_10m.tif"), 180.f);
+    // L2A auxiliary layers live at their native resolution (SCL is 20 m) and
+    // are discovered regardless of the preferred optical resolution.
+    const QString img20 = safe + QStringLiteral("/GRANULE/L2A_T32TQQ/IMG_DATA/R20m");
+    QDir().mkpath(img20);
+    writeTinyBand(img20 + QStringLiteral("/T32TQQ_20200615T000000_SCL_20m.tif"), 4.f);
     return safe;
 }
 
@@ -193,6 +198,18 @@ TEST_CASE("Sentinel-2 SAFE discovery", "[satellite][sentinel2]")
         if (b.name == QStringLiteral("B8"))
             CHECK(b.role == sicnu::data::BandRole::NIR);
     }
+    // The L2A Scene Classification Layer is discovered regardless of the
+    // preferred optical resolution, with the SceneClassification role.
+    bool hasScl = false;
+    bool sclRole = false;
+    for (const auto& b : info.bands) {
+        if (b.name == QStringLiteral("SCL")) {
+            hasScl = true;
+            sclRole = b.role == sicnu::data::BandRole::SceneClassification;
+        }
+    }
+    REQUIRE(hasScl);
+    CHECK(sclRole);
 }
 
 TEST_CASE("Landsat stack to GeoTIFF", "[satellite][landsat]")
