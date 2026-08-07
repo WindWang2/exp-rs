@@ -1,185 +1,81 @@
-# HANDOFF — Autonomous RS System Perfection (/goal) — Final Session
+# HANDOFF — Autonomous RS System Perfection (/goal) — Optical Platform Session
 
 **Date:** 2026-08-07
-**Mode:** FULL_AUTONOMOUS_LOOP (Loops L1–L6 + qt-cpp-review + final gates)
-**Scope:** Close every remaining `/goal` gap from the K1–K5 baseline, harden crash
-recovery, verify the full exit criteria.
+**Mode:** FULL_AUTONOMOUS_LOOP — 23 committed vertical slices (ADR 0065–0086)
+**Scope:** Deepen `exp-rs` toward the general-purpose optical/multispectral/
+hyperspectral processing platform (mission: product import → calibration →
+QA masking → atmospheric correction → geometric/grid → analysis-ready →
+analysis → accuracy → provenance, all through the Processing Registry).
 
 ---
 
-## 1. Goal Status — 100% Complete
+## 1. Session Summary — 23 Slices, All Tested, All Committed
 
-| # | Goal item | Status | Where |
-|---|-----------|--------|-------|
-| 1.1 | Radiometric calibration operator (Landsat 8/9, Sentinel-2 DN→TOA), registered in AlgorithmEngine, async via TaskCenter | ✅ (prior + L5) | `RsRadiometricCalibrationOperator` (`rs:radiometric_calibration`) + **new operator-level run() test** |
-| 1.2 | DOS1 atmospheric correction with auto histogram-minimum extraction | ✅ (L2) | `AtmosphericCorrection::findDarkObjectByHistogram` + `dos1Histogram`; `rs:atmospheric_correction` DOS1/DOS2 now histogram-based |
-| 1.3 | Gram-Schmidt + Brovey pan-sharpening | ✅ (K1 + prior) | `ImageFusion::gramSchmidtFusion` / `brovey` via `rs:image_fusion` |
-| 1.4 | Spectral Angle Mapper (SAM) | ✅ (K2) | `rs:sam_classify` + `SpectralClassification::samClassify` |
-| 2.1 | Spectral profile dock (click → per-band values → curve chart) | ✅ (prior + L6) | `SpectralProfileWidget` + **real-raster extraction tests + accessors** |
-| 2.2 | Piecewise stretch editor with control-point handles → `DisplayStretchPipeline` | ✅ (prior) | `HistogramStretchWidget`/`HistogramWidget` (ADR 0008/0041) |
-| 3.1 | Linked 1×2 dual viewports with pixel-level pan/zoom sync | ✅ (K4) | `RsDualViewportSyncController` |
-| 3.2 | Swipe compare overlay (drag splitter, clipped layers) | ✅ (prior + **L1**) | `SwipeMapTool` — **test file was never registered in CTest; now registered & green** |
-| 4.1 | Out-of-core tile streaming, no OOM on 10 GB+ GeoTIFFs | ✅ (K5 + **L3**) | `GdalBlockStream` + **wired into `rs:radiometric_calibration` and `rs:atmospheric_correction` (O(tile) memory)** |
-| 4.2 | POSIX shared-memory zero-copy + worker crash auto-restart **+ state recovery** | ✅ (prior + **L4**) | ADR 0064 channel + `PythonWorkerProcessPool` **in-flight request re-dispatch with retry budget + watchdog** |
+| # | Slice | Commit | ADR |
+|---|-------|--------|-----|
+| 1 | Semantic band roles (`BandRole` + Landsat/S2/MODIS discovery roles, `SICNU_BAND_ROLE`/`FWHM` metadata, role-resolved spectral-index defaults, catalog + preview carry) | `0b5491f9b4` | 0065 |
+| 2 | Raster-grid compatibility service (`compareGrids`, wired into `rs:change_detection`) | `df75cd4d38` | 0066 |
+| 3 | QA / cloud / cloud-shadow / snow masking (`rs:qa_mask`, Landsat QA_PIXEL + S2 SCL + generic bitmask; S2 SCL/MSK discovery; dialog) | `5b09a35336` | 0067 |
+| 4 | Unified product import dialog (`ProductImportDialog`; Landsat + Sentinel-2 menu entries) | `cd1f524cf6` | 0068 |
+| 5 | Radiometric calibration workflow integration (`autoDetectMetadataFile`, dialog, metadata preview) | `87086b0ea8` | 0069 |
+| 6 | Atmospheric correction workflow integration (metadata-resolved gain/bias, auto-fill dialog) | `86d30f27d6` | 0070 |
+| 7 | Orthorectification dialog over `gdal:orthorectification` | `9cc7d957c7` | 0071 |
+| 8 | Change Detection 2.0 (ratio, CVA, Otsu/percentile thresholds, morphological cleanup, area stats) | `23cd2a2d01` | 0072 |
+| 9 | Provenance foundation (lineage queries `derivedFrom`/`derivedOutputsOf`, `makeTaskDerivation`) | `904d81c13f` | — |
+| 10 | Large-raster memory policy classification (`RSOperatorMemoryPolicy` per operator) | `84007512a6` | 0073 |
+| 11 | Classification model metadata + compatibility check (sidecar `features`/`validation`) | `040523590f` | 0074 |
+| 12 | MNF transform (`rs:mnf`) | `2ffa770ccb` | 0075 |
+| 13 | Spectral Information Divergence (`rs:sam_classify` metric=sam/sid) | `ecf5606322` | 0076 |
+| 14 | Linear spectral unmixing (`rs:spectral_unmixing`) | `0474c45b11` | 0077 |
+| 15 | RX anomaly detection (`rs:rx_anomaly`) | `bed6181ed8` | 0078 |
+| 16 | Spectral resampling (`rs:spectral_resample`, wavelength-aware) | `e3633031fd` | 0079 |
+| 17 | Endmember extraction by PPI (`rs:endmember_extraction`) | `00d4684b8b` | 0080 |
+| 18 | Spectral library domain (JSON import/export) | `5490db71b2` | 0081 |
+| 19 | Wavelength-aware spectral profile (widget x-axis) | `5cf8adb077` | 0082 |
+| 20 | Reusable preprocessing DAG (`lab.preprocess.optical` + `tool.rs.qa_mask`) | `2619d94ad3` | 0083 |
+| 21 | ROI mean spectrum (`SpectralRoiProfile`) | `1bf432beba` | 0084 |
+| 22 | Fusion/PCA scalability review (fusion grid preflight, PCA/MNF NaN handling) | `7a822b2f40` | 0085 |
+| 23 | Provenance/lineage in the Data Manager panel | `68cf81116b` | 0086 |
+| + | Full-suite regression fix (GDAL driver registration in a provider test) | `bae3a3eae0` | — |
 
-Exclusions honored: no SAR/LiDAR computation libraries or coupling introduced.
+## 2. Verification
 
----
+- **Full clean rebuild: 0 errors** (all targets, incl. the whole test suite).
+- **ctest: 1358 tests, 1357 passed, 1 failed → fixed** (provider test needed
+  `GDALAllRegister()` under fresh-process order). 6 pre-existing vector
+  fixtures remain SKIPPED (removed from VCS). Suite is green.
+- Every new slice shipped with its own Catch2 tests (kernel + operator /
+  UI-seam level); the operator registry tests pin the expanded surface.
 
-## 2. This Session's Work (Loops L1–L6)
+## 3. Product-Aware Pipeline (now reachable end-to-end in the desktop UI)
 
-### L1 — Swipe test quality gate
-`tests/test_swipe_map_tool.cpp` (5 cases, 19 assertions) existed but was **never
-registered** in `tests/CMakeLists.txt` — the swipe tool had zero CTest coverage.
-Registered with its own target; builds and passes.
+```
+Import Sentinel-2 / Landsat (ProductImportDialog)
+  → sensor + semantic band recognition (roles, WAVELENGTH/FWHM metadata)
+  → radiometric calibration (auto MTL/MTD detection)
+  → QA / cloud / shadow / snow mask (rs:qa_mask)
+  → atmospheric correction (metadata-resolved DOS1/DOS2, QUAC)
+  → orthorectification / grid compatibility preflight
+  → analysis-ready (reusable lab.preprocess.optical DAG)
+  → NDVI / spectral indices (role-resolved) · change detection 2.0
+  → classification (model metadata + compatibility) · fusion · PCA/MNF
+  → hyperspectral: library → resample → endmembers → unmix/SAM/SID → RX
+  → provenance (model + lineage queries + Data Manager UI)
+```
 
-### L2 — Histogram-based dark-object extraction (goal 1.2)
-`AtmosphericCorrection::findDarkObjectByHistogram(radiance, count, bins=1024)`:
-bins the scene, picks the lowest radiance whose bin holds ≥ max(2, valid/10000)
-pixels (0.01 % frequency floor) — isolated sensor-noise spikes below the real
-scene floor are rejected. Falls back to the global minimum for tiny scenes;
-single-level scenes return their own level; non-finite values are ignored.
-`dos1Histogram()` is the kernel variant; the production `processFile` DOS1 path
-now uses it. 9 new unit cases (24 assertions).
+## 4. Known Follow-ups (roadmap `.planning/2026-08-07-rs-platform-goal.md`)
 
-### L3 — Out-of-core streaming in radiometric calibration (goal 4.1)
-- `GdalDatasetWrapper::create()` — write-open a new LZW GeoTIFF with
-  geotransform/projection (mirrors `createOutputTiff`; honors `lastError()`).
-- `GdalDatasetWrapper::writeBandWindow()` — windowed GF_Write, edge-clamped.
-- `RadiometricCalibration::processFile` rewritten: validates all requested
-  bands **before** creating output, then streams each band 256×256 tiles via
-  `GdalBlockStream` → kernel → `writeBandWindow`. Memory O(tile) instead of
-  O(width×height); no per-tile allocations (buffer reused). 3 new streaming
-  tests (60k+ assertions) incl. edge-clamped multi-tile and band-subset runs.
+- E3: semantic Agent/MCP product/band operations (roles instead of band numbers).
+- C5: task-centric UI consistency (shared band/role/CRS/resolution widgets).
+- D1: FWHM display/export surface; D10: spectral workbench UI assembly.
+- C1 follow-ups: MAD (OTB exists), post-classification comparison, dual-view
+  change workbench.
+- B5 follow-up: apply-mask-to-product operator; C2: probability/confidence
+  outputs, imbalance warnings.
+- F-phase: cross-platform build verification, final architecture/code review,
+  README/CONTEXT sync.
 
-### L4 — Worker crash state recovery (goal 4.2)
-- `PythonIpcServer::PendingRequest` + `m_inFlight` tracking: every async
-  `sendRequest` (with callback) is recorded; `takeInFlightRequests()` moves out
-  request+callback+retry budget on crash. Blocking paths
-  (`sendRequestAndAwait`/`sendRequestSync`) stay untracked — their callbacks
-  capture stack locals and must not be replayed.
-- `PythonWorkerProcessPool::handleWorkerCrash` re-dispatches in-flight requests
-  to the restarted worker (deferred until `clientConnected`), each replay
-  consuming one retry; exhausted retries answer with an error. New test: an
-  in-flight `crash_test` request → double crash/restart cycle → terminal error,
-  never a hang.
+## 5. Exclusions Honored
 
-### L5 — Operator-level test (goal 1.1)
-New `RS radiometric calibration operator execution` case: full `run()` with MTL
-metadata through the registry; verifies result JSON, band count and exact
-radiance pixels.
-
-### L6 — Spectral profile widget real coverage (goal 2.1)
-Added `hasData()/values()/bandLabels()` accessors and rewrote the two vacuous
-memory-layer tests (the "memory" provider is vector-only → tests early-returned
-with zero assertions) to use a real 2-band GeoTIFF. 5 cases / 36 assertions
-cover extraction values, band labels, cache reuse, out-of-bounds and
-layer-removal.
-
----
-
-## 3. qt-cpp-review — Findings & Fixes (all applied)
-
-Phase 1 lint + 6 parallel deep-analysis agents ran on the session's diff.
-Fixable findings, all fixed and re-verified:
-
-| ID | Finding | Fix |
-|----|---------|-----|
-| A | One crash emitted `workerCrashed` **twice** (`errorOccurred(Crashed)` + `finished(CrashExit)`) → the pool killed the freshly restarted worker and orphaned replay bookkeeping | Coalesced: emit only from `onProcessFinished` |
-| B | Pending callbacks leaked if the restarted worker never connected / `listen` failed | 5 s watchdog timer fails them; `startWorker()` return checked; `failPendingRequests()` on both failure branches |
-| C | Replayed callbacks could fire after the caller's frame died (adapter `load_plugin`/`unload_plugin` captured stack locals) | Durable captures: `std::shared_ptr` result + `QPointer<QEventLoop>` |
-| D | `findDarkObjectByHistogram` treated ±inf as valid → UB `float→size_t` cast, inf bin width | Non-finite values skipped (`std::isfinite`) in range + bin passes (refactored into incremental `DarkObjectStats` accumulator) |
-| E | Dark level = bin center could overshoot `maxVal` → whole scene went negative | Clamped to scene max |
-| F | `GdalDatasetWrapper::create()` bypassed the `lastError()` contract | `m_lastError` set on every failure path (and `GDALSetProjection` failure now checked) |
-| G | Deterministic band errors left a partial output file (create happened before validation) | Upfront band-range + coefficient validation before `create()` |
-| H | `SpectralProfileWidget::drawLine` cast NaN y-coordinates to int (UB) | NaN/inf bands skipped — polyline breaks across the gap; markers/labels iterate the point set |
-| I | Two spectral-profile tests were vacuous (invalid memory layer) | Rewritten with real raster + assertions |
-| J | `processFile applies DOS1` test asserted nothing about output pixels | Reads output back, asserts {0.0, 0.5, 1.5, 0.3} |
-| K | Atmospheric `processFile` still whole-band (~12 B/px peak) | Streamed: DnToRadiance 1 pass; DOS1/DOS2 3 passes (range → bins → apply) via `DarkObjectStats`, O(tile) memory |
-| L | `AppInterfaceBridge` held a stale server pointer after restart | Re-bind on `workerRestarted` (adapter is not a QObject → `QPointer`-guarded bridge capture, node-id matched, connection severed in `unload()`) |
-
-Lint cleanups in touched files: parenthesized `(std::min)` in `writeBandWindow`,
-`QMenu::addAction` deprecated 5-arg reordered (27 sites, main_window_menus),
-`QDomDocument::setContent` → ParseResult overload, `(void)` on ignored
-`GDALRasterIO` returns (6 files), `x()/y()` → `position()` in main_window.h,
-`Classification/*` doc comment. **Zero warnings remain in any file this session
-touched.**
-
----
-
-## 4. Performance Data
-
-| Metric | Before | After |
-|--------|--------|-------|
-| Radiometric calibration peak memory (per band) | O(width×height) floats (e.g. 10k×10k band = 400 MB) | O(256×256) ≈ 256 KB + 1 reuse buffer |
-| Atmospheric DOS1/DOS2 peak memory | ~12 B/px (DN+output+radiance) | O(tile) + O(bins)=8 KB histogram |
-| 10 GB+ GeoTIFF processing | OOM risk | streamable, no full-band allocation |
-| Per-tile allocations in streaming path | — | zero (buffer capacity reused) |
-| Worker crash recovery | job silently lost | in-flight request re-dispatched (≤1 retry) or errored ≤5 s |
-| Shared-memory zero-copy round-trip (int32 2048²) | — | 1115.6 MiB/s (unchanged, regression-checked) |
-
----
-
-## 5. Verification
-
-- **Full clean rebuild** (2488 sources): **0 errors**; 0 warnings in any
-  session-touched file. Remaining ~10.8k warnings are the documented
-  pre-existing Qt-deprecation baseline in vendored QGIS core
-  (`qgsvariantutils.h`, `qgsfield.h`, `qgsvectordataprovider.h`,
-  `qgsrasterattributetable.h` — `QVariant::Type` family) plus the same
-  deprecation family spread through vendored `src/core|gui|app`.
-- **ctest: 1274/1274 = 100 % pass** (final gate, rc=0).
-- **Known pre-existing flaky tests** (both failed in the previous session's
-  Aug 6 run too — see `build/Testing/Temporary/LastTestsFailed.log`, and pass
-  in isolation): `#977 QgisDisplayManager active view and auto-display
-  tracking` (missing FastExitListener atexit guard), `#22 TaskCenter - Retry
-  preserves a submitted job's auto-load preference` (JobEngine singleton
-  teardown race under -j8 load). Not caused by this session; re-run green.
-- **No QML** exists in the project (Qt Widgets app), so the `qt-qml-test-run`
-  gate is N/A; ctest is the authoritative gate.
-- Out-of-scope check: no SAR/LiDAR code paths touched.
-
----
-
-## 6. Files Changed (this session)
-
-**Modified (23):**
-- `src/processing/algorithms/atmospheric_correction.{h,cpp}` — histogram dark
-  object, `DarkObjectStats`, streaming processFile
-- `src/processing/algorithms/radiometric_calibration.cpp` — streaming
-  processFile, upfront validation, ParseResult
-- `src/processing/gdal/gdal_dataset_wrapper.{h,cpp}` — `create`,
-  `writeBandWindow`, `lastError` contract
-- `src/python/isolated/python_ipc_server.{h,cpp}` — in-flight tracking,
-  `takeInFlightRequests`
-- `src/python/isolated/python_worker_process.{h,cpp}` — single crash signal
-- `src/python/isolated/python_worker_process_pool.{h,cpp}` — replay + watchdog
-  + `failPendingRequests`
-- `src/python/isolated/python_plugin_adapter.{h,cpp}` — durable callbacks,
-  bridge re-bind
-- `src/app/widgets/spectral_profile_widget.{h,cpp}` — accessors, NaN-safe chart
-- `src/app/main_window.h`, `src/app/main_window_menus.cpp` — deprecation fixes
-- `src/app/classification/rs_classify_session_state.h`,
-  `src/app/classification/qgsclassificationmainwindow.cpp` — warning fixes
-- `tests/CMakeLists.txt` — swipe target registered, wrapper source added
-- `tests/test_atmospheric.cpp`, `tests/test_radiometric_calibration.cpp`,
-  `tests/test_python_plugin_manager.cpp`, `tests/test_spectral_profile_widget.cpp`,
-  `tests/test_rs_operators.cpp`, `tests/test_gdal_wrapper.cpp`,
-  `tests/test_virtual_raster_preflight.cpp`,
-  `tests/test_collection_import_service.cpp`, `tests/test_python_plugin_host.cpp`
-
-**New tests:** +25 test cases / +19 900 assertions across the suites above
-(histogram DOS1: 9, streaming: 3 + operator run, recovery: 1, spectral
-profile: 3 real-raster cases).
-
-## 7. Deferred (documented, out of scope)
-
-- `sendRequestSync` main-thread/worker-thread socket race (Agent 6 D-009):
-  pre-existing, needs a targeted stress test before touching the sync path.
-- `create()` vs `createOutputTiff()` ~25-line duplication: cosmetic; note for
-  a future `TILED=YES`/`PREDICTOR` sweep (must land in both).
-- Whole-band QUAC remains in-memory by design (full-scene percentile stats).
-- At-least-once replay semantics: re-dispatched requests may re-execute if the
-  first response was lost mid-wire; callers needing exactly-once should carry
-  idempotency keys.
-- Two pre-existing flaky tests (#22, #977) — see §5.
+No LiDAR point-cloud subsystem; no SAR processing subsystem introduced.
+DL inference remains the optional modular `rs:infer` seam only.
