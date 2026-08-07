@@ -12,6 +12,7 @@
 #include "rs_image_fusion_operator.h"
 #include "rs_terrain_analysis_operator.h"
 #include "rs_pca_operator.h"
+#include "rs_mnf_operator.h"
 #include "rs_mosaic_operator.h"
 #include "rs_landsat_import_operator.h"
 #include "rs_sentinel2_import_operator.h"
@@ -45,6 +46,7 @@ REGISTER_RS_OPERATOR(RsQaMaskOperator, "rs:qa_mask")
 REGISTER_RS_OPERATOR(RsImageFusionOperator, "rs:image_fusion")
 REGISTER_RS_OPERATOR(RsTerrainAnalysisOperator, "rs:terrain_analysis")
 REGISTER_RS_OPERATOR(RsPcaOperator, "rs:pca")
+REGISTER_RS_OPERATOR(RsMnfOperator, "rs:mnf")
 REGISTER_RS_OPERATOR(RsMosaicOperator, "rs:mosaic")
 REGISTER_RS_OPERATOR(RsLandsatImportOperator, "rs:landsat_import")
 REGISTER_RS_OPERATOR(RsSentinel2ImportOperator, "rs:sentinel2_import")

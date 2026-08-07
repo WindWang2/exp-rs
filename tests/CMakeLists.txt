@@ -2664,6 +2664,33 @@ if(TARGET sicnu_operators)
   endif()
   sicnu_discover_tests(test_qa_mask)
 
+  # MNF transform tests - kernel (SNR ordering, signal recovery) + operator.
+  add_executable(test_mnf test_mnf.cpp)
+  target_link_libraries(test_mnf PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    sicnu_processing
+    sicnu_operators
+    GDAL::GDAL
+  )
+  target_include_directories(test_mnf PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  if(TARGET jsoncpp)
+    target_link_libraries(test_mnf PRIVATE jsoncpp)
+  elseif(JSONCPP_LIBRARIES)
+    target_include_directories(test_mnf PRIVATE ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(test_mnf PRIVATE ${JSONCPP_LIBRARIES})
+  else()
+    target_link_libraries(test_mnf PRIVATE jsoncpp)
+  endif()
+  sicnu_discover_tests(test_mnf)
+
   # OpenCV-backed operators (only when OpenCV operators were compiled in)
   if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
     add_executable(test_opencv_operators test_opencv_operators.cpp)

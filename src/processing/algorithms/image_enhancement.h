@@ -13,12 +13,29 @@ public:
         std::vector<std::vector<float>> eigenvectors;  // eigenvectors[component][band]
     };
 
+    /// Minimum Noise Fraction (MNF) decomposition: PCA of noise-whitened data.
+    /// Noise covariance is estimated from lagged (shift) differences. The
+    /// eigenvalues of the whitened covariance order components by
+    /// signal-to-noise ratio.
+    struct MnfResult {
+        std::vector<std::vector<float>> output;   // output[component][pixel]
+        std::vector<float> signalToNoise;         // whitened-covariance eigenvalue per component
+    };
+
     static PcaResult pca(const std::vector<std::vector<float>> &input, int numComponents);
+
+    static MnfResult mnf(const std::vector<std::vector<float>> &input, int numComponents);
 
     /**
      * Run PCA on a multi-band GeoTIFF and write component bands to output.
      */
     static bool processPcaFile(const QString &sourcePath, const QString &outputPath,
+                               int numComponents, QString *errorMessage = nullptr);
+
+    /**
+     * Run MNF on a multi-band GeoTIFF and write the top-SNR components.
+     */
+    static bool processMnfFile(const QString &sourcePath, const QString &outputPath,
                                int numComponents, QString *errorMessage = nullptr);
 
     static void linearStretch(const float *input, float *output, size_t count,

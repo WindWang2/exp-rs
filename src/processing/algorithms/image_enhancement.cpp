@@ -1095,6 +1095,97 @@ ImageEnhancement::PcaResult ImageEnhancement::pca(
     return result;
 }
 
+ImageEnhancement::MnfResult ImageEnhancement::mnf(
+    const std::vector<std::vector<float>> &input, int numComponents)
+{
+    const int bands = static_cast<int>(input.size());
+    if (bands == 0 || input[0].empty()) {
+        SICNU_LOG_ERROR( SicnuLogTags::Algorithms, "MNF: empty input data" );
+        return MnfResult{};
+    }
+    const size_t n = input[0].size();
+    if (n < 2) {
+        SICNU_LOG_ERROR( SicnuLogTags::Algorithms, "MNF: need at least 2 pixels" );
+        return MnfResult{};
+    }
+    if (numComponents <= 0 || numComponents > bands)
+        numComponents = bands;
+
+    // 1. Mean-center the data.
+    std::vector<float> means(bands, 0.0f);
+    for (int b = 0; b < bands; b++) {
+        double sum = 0.0;
+        for (size_t k = 0; k < n; k++)
+            sum += input[b][k];
+        means[b] = static_cast<float>(sum / n);
+    }
+    std::vector<std::vector<float>> centered(bands, std::vector<float>(n));
+    for (int b = 0; b < bands; b++)
+        for (size_t k = 0; k < n; k++)
+            centered[b][k] = input[b][k] - means[b];
+
+    // 2. Noise covariance estimated from lagged (shift) differences.
+    std::vector<std::vector<float>> noise(bands, std::vector<float>(n - 1));
+    for (int b = 0; b < bands; b++)
+        for (size_t k = 0; k + 1 < n; k++)
+            noise[b][k] = centered[b][k + 1] - centered[b][k];
+    std::vector<std::vector<float>> noiseCov;
+    computeCovarianceMatrix(noise, bands, n - 1, noiseCov);
+
+    // 3. Eigen-decompose the noise covariance.
+    std::vector<float> noiseEigen;
+    std::vector<std::vector<float>> noiseVectors; // noiseVectors[band][eigenvector]
+    jacobiEigen(noiseCov, bands, noiseEigen, noiseVectors);
+
+    // 4. Whitening transform: column k = noise eigenvector k / sqrt(eigenvalue k).
+    std::vector<std::vector<float>> whitening(bands, std::vector<float>(bands, 0.0f));
+    for (int b = 0; b < bands; b++)
+        for (int k = 0; k < bands; k++) {
+            const double dk = std::max(static_cast<double>(noiseEigen[k]), 1e-9);
+            whitening[b][k] = static_cast<float>(noiseVectors[b][k] / std::sqrt(dk));
+        }
+
+    // 5. Whiten the data: y[k] = sum_b W[b][k] * centered[b].
+    std::vector<std::vector<float>> whitened(bands, std::vector<float>(n, 0.0f));
+    for (int k = 0; k < bands; k++)
+        for (size_t p = 0; p < n; p++) {
+            double v = 0.0;
+            for (int b = 0; b < bands; b++)
+                v += whitening[b][k] * centered[b][p];
+            whitened[k][p] = static_cast<float>(v);
+        }
+
+    // 6. Covariance of the whitened data; eigen-decomposition orders the
+    //    components by signal-to-noise (eigenvalue of the whitened covariance).
+    std::vector<std::vector<float>> yCov;
+    computeCovarianceMatrix(whitened, bands, n, yCov);
+    std::vector<float> yEigen;
+    std::vector<std::vector<float>> yVectors; // yVectors[band][eigenvector]
+    jacobiEigen(yCov, bands, yEigen, yVectors);
+
+    std::vector<int> indices(bands);
+    for (int i = 0; i < bands; i++)
+        indices[i] = i;
+    std::sort(indices.begin(), indices.end(),
+              [&](int a, int b) { return yEigen[a] > yEigen[b]; });
+
+    // 7. MNF components: z_i = sum_k Ey[k][i] * y[k].
+    MnfResult result;
+    result.output.resize(numComponents, std::vector<float>(n));
+    result.signalToNoise.resize(numComponents);
+    for (int comp = 0; comp < numComponents; comp++) {
+        const int ei = indices[comp];
+        result.signalToNoise[comp] = yEigen[ei];
+        for (size_t p = 0; p < n; p++) {
+            double v = 0.0;
+            for (int k = 0; k < bands; k++)
+                v += yVectors[k][ei] * whitened[k][p];
+            result.output[comp][p] = static_cast<float>(v);
+        }
+    }
+    return result;
+}
+
 bool ImageEnhancement::processPcaFile(const QString &sourcePath, const QString &outputPath,
                                       int numComponents, QString *errorMessage)
 {
@@ -1129,6 +1220,54 @@ bool ImageEnhancement::processPcaFile(const QString &sourcePath, const QString &
 
     QString writeError;
     if (!writeGdalOutput(outputPath, width, height, pcaResult.output,
+                         srcDataset.geoTransform(), srcDataset.projection(), &writeError)) {
+        if (errorMessage)
+            *errorMessage = writeError;
+        return false;
+    }
+
+    return true;
+}
+
+bool ImageEnhancement::processMnfFile(const QString &sourcePath, const QString &outputPath,
+                                      int numComponents, QString *errorMessage)
+{
+    GdalDatasetWrapper srcDataset;
+    if (!srcDataset.open(sourcePath)) {
+        if (errorMessage)
+            *errorMessage = srcDataset.lastError();
+        return false;
+    }
+
+    const int width = srcDataset.width();
+    const int height = srcDataset.height();
+    const int bandCount = srcDataset.bandCount();
+    const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+
+    if (numComponents > bandCount) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Number of components exceeds band count");
+        return false;
+    }
+    if (bandCount < 2) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("MNF requires at least 2 bands");
+        return false;
+    }
+
+    std::vector<std::vector<float>> allBands(bandCount, std::vector<float>(pixelCount));
+    for (int b = 0; b < bandCount; ++b) {
+        if (!srcDataset.readBandData(b + 1, allBands[b].data(), width, height)) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Failed to read band %1").arg(b + 1);
+            return false;
+        }
+    }
+
+    const MnfResult mnfResult = mnf(allBands, numComponents);
+
+    QString writeError;
+    if (!writeGdalOutput(outputPath, width, height, mnfResult.output,
                          srcDataset.geoTransform(), srcDataset.projection(), &writeError)) {
         if (errorMessage)
             *errorMessage = writeError;

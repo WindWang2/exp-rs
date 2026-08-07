@@ -58,6 +58,7 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_qa_mask_operator.cpp
     rs/rs_terrain_analysis_operator.cpp
     rs/rs_pca_operator.cpp
+    rs/rs_mnf_operator.cpp
     rs/rs_mosaic_operator.cpp
     rs/rs_landsat_import_operator.cpp
     rs/rs_sentinel2_import_operator.cpp
