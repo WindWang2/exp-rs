@@ -139,6 +139,7 @@ The deep-analysis agents surfaced 5 actionable findings, **all fixed** before th
 1. `43595e139c` feat(rs): add Gram-Schmidt fusion, SAM classifier, continuum removal (Loops K1–K3)
 2. `196b478ac2` feat(shell): wire pixel-level dual-viewport pan/zoom sync (Loop K4)
 3. `0c69390301` feat(gdal): out-of-core block-streaming iterator for huge GeoTIFF (Loop K5)
+4. `a1c3c1f67d` fix(review): apply qt-cpp-review findings D1-D6 (silent-output + perf + style)
 
 ---
 
