@@ -1,0 +1,110 @@
+// src/data/execution_fingerprint.h
+//
+// ADR (perf/architecture goal 2026-08-08, Phase F) — revision-aware execution
+// cache vertical slice.
+//
+// Deterministic operators (spectral index, band math, …) produce identical
+// output for identical (algorithm + version, normalized parameters, input
+// AssetId + AssetRevision). An ExecutionFingerprint hashes exactly those inputs
+// so a cache can reuse a prior materialized result without re-running the
+// operator. Because AssetRevision changes whenever an input is re-derived, the
+// fingerprint is automatically revision-sensitive: a stale input yields a
+// different fingerprint → cache miss → re-run. The cache NEVER keys on a file
+// path (which can be reused across revisions); it keys on the immutable
+// identity + revision.
+//
+// This is the contract + lookup/store vertical slice, OFF by default; deterministic
+// operators opt in. Full producer wiring (intercepting runOperatorTask to consult
+// the cache before execution) is a tracked follow-up — the slice here proves the
+// contract with unit tests and gives producers a stable API to adopt.
+#pragma once
+
+#include "asset_types.h"
+#include "derivation_record.h"
+
+#include <QHash>
+#include <QJsonObject>
+#include <mutex>
+#include <QString>
+
+#include <optional>
+#include <string>
+
+namespace sicnu::data
+{
+
+/// A deterministic hash of an execution's identity: algorithm + version +
+/// normalized parameters + input asset identities/revisions. Two executions
+/// with the same fingerprint are guaranteed to produce identical output for a
+/// deterministic operator, so the output AssetId can be reused.
+///
+/// Stored as a 64-bit value (qHash64 of a canonical string form). Collisions are
+/// acceptable for a cache (worst case is a stale-but-same-revision reuse, which
+/// for a deterministic operator is still correct); revision sensitivity makes
+/// the common invalidation case (input changed) a guaranteed miss.
+struct ExecutionFingerprint
+{
+  /// The 64-bit fingerprint value. A default-constructed ExecutionFingerprint
+  /// (no inputs) hashes to a well-defined constant; an empty algorithm id yields
+  /// a different constant. Both are valid fingerprints.
+  quint64 value = 0;
+
+  bool operator==( const ExecutionFingerprint & ) const = default;
+};
+
+/// Build a fingerprint from the components. @a parameters is normalized (sorted
+/// by key) before hashing so parameter-map insertion order does not affect the
+/// fingerprint. Inputs are hashed as (assetId, revision) pairs in list order.
+ExecutionFingerprint makeExecutionFingerprint( const QString &algorithmId,
+                                               const QString &algorithmVersion,
+                                               const QJsonObject &parameters,
+                                               const QVector<DerivationInput> &inputs );
+
+/// Convenience: build a fingerprint directly from a DerivationRecord (carries
+/// algorithmId/version/parameters/inputs).
+inline ExecutionFingerprint fingerprintFromDerivation( const DerivationRecord &record )
+{
+  return makeExecutionFingerprint( record.algorithmId, record.algorithmVersion,
+                                   record.parameters, record.inputs );
+}
+
+/// A minimal in-memory revision-aware result cache: fingerprint → output AssetId.
+/// OFF by default (isEnabled() == false); call setEnabled(true) to activate.
+/// Producers that opt in consult lookup() before running; on a hit they reuse
+/// the stored output AssetId instead of re-executing. Thread-safe (recursive_mutex).
+///
+/// This is the vertical slice; persistence and producer wiring are follow-ups.
+class ExecutionResultCache
+{
+public:
+  static ExecutionResultCache &instance();
+
+  /// Enable/disable the cache. Disabled (the default): lookup() always returns
+  /// nullopt and store() is a no-op. Deterministic operators opt in here.
+  void setEnabled( bool on );
+  bool isEnabled() const;
+
+  /// Look up a prior result by fingerprint. Returns nullopt when disabled or
+  /// absent. The returned AssetId is the output asset of a prior identical run.
+  std::optional<AssetId> lookup( const ExecutionFingerprint &fp ) const;
+
+  /// Record a freshly-produced output for a fingerprint. No-op when disabled.
+  void store( const ExecutionFingerprint &fp, const AssetId &outputAssetId );
+
+  /// Remove one entry (e.g. when an output asset is deleted). No-op when absent.
+  void invalidate( const ExecutionFingerprint &fp );
+
+  /// Clear all entries (test isolation / cache reset).
+  void clear();
+
+  /// Number of cached entries (diagnostics / tests).
+  int size() const;
+
+private:
+  ExecutionResultCache() = default;
+  mutable std::recursive_mutex m_mutex;
+  QHash<quint64, AssetId> m_entries;
+  bool m_enabled = false;
+};
+
+} // namespace sicnu::data

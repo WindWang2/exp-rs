@@ -608,6 +608,10 @@ sicnu_add_test(test_perf_benchmarks)
 # TaskCenter integration of the RAM-budget launch gate.
 sicnu_add_test(test_task_resource_budget)
 
+# Revision-aware execution cache (Phase F): fingerprint determinism/sensitivity +
+# cache opt-in/lookup/store/invalidate/invalidation.
+sicnu_add_test(test_execution_fingerprint)
+
 # Colormap tests — verify color ramps loaded from style database
 # Custom main: needs QgsApplication with correct prefix path
 add_executable(test_colormap test_colormap.cpp)
