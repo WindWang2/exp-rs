@@ -581,6 +581,11 @@ target_include_directories(test_gdal_block_stream PRIVATE
 )
 sicnu_discover_tests(test_gdal_block_stream)
 
+# Performance benchmarks (Phase B of the perf/architecture goal). Runnable via
+# ctest (small sizes) or directly with SICNU_BENCH_LARGE=1 for nightly profiling.
+# Uses the standard sicnu_add_test link set (operators + task_center + resource_monitor).
+sicnu_add_test(test_perf_benchmarks)
+
 # Colormap tests — verify color ramps loaded from style database
 # Custom main: needs QgsApplication with correct prefix path
 add_executable(test_colormap test_colormap.cpp)
