@@ -10,7 +10,7 @@ Professional remote sensing analysis platform built on the QGIS engine. Pure C++
 - **QA / Cloud Masking:** `rs:qa_mask` (Landsat QA_PIXEL, Sentinel-2 SCL, generic bitmask) and `rs:apply_mask` (analysis-ready output with masked pixels set to NoData; same-CRS grids auto-align)
 - **Atmospheric Correction:** DOS1, DOS2, QUAC with metadata-resolved coefficients
 - **Geometric Processing:** Orthorectification (RPC/GCP + DEM), georeferencing with SIFT matching, reprojection with reference-grid alignment (`gdal:reproject` + `reference`)
-- **Spectral Analysis:** NDVI, EVI, SAVI, NDWI, NDBI, MNDWI indices; spectral library matching (SAM angle + SID), spectrum export to library
+- **Spectral Analysis:** NDVI, EVI, SAVI, NDWI, NDBI, MNDWI indices; spectral workbench — point/ROI mean spectra (wavelength-aware profile with FWHM), continuum-removal view, spectral library matching (SAM angle + SID with wavelength-aware resampling), spectrum export to library
 - **Band Math:** Custom expression evaluation across raster bands
 - **Change Detection:** Difference / ratio / normalized difference / CVA, Otsu / percentile / manual thresholds, morphological cleanup, area statistics, and post-classification comparison with a per-class transition matrix
 - **Mosaic:** Raster mosaic with nodata handling
@@ -83,7 +83,7 @@ make -j$(nproc)
 QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 ```
 
-**1,386 tests** covering core algorithms, GDAL utilities, dialog UI, OBIA pipeline, TaskCenter DAG execution, and processing framework.
+**1,401 tests** covering core algorithms, GDAL utilities, dialog UI, OBIA pipeline, TaskCenter DAG execution, and processing framework.
 Headless CLI binary built at `sicnu_geo_rs_cli` with `--list` operator discovery and `--schema` inspection.
 
 ### Toolbox coverage gate
