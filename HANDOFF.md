@@ -1,8 +1,8 @@
 # HANDOFF — Autonomous RS System Perfection (/goal) — Optical Platform Session
 
 **Date:** 2026-08-08
-**Mode:** FULL_AUTONOMOUS_LOOP — 48 committed vertical slices + F-hardening +
-review remediation (ADR 0065–0107)
+**Mode:** FULL_AUTONOMOUS_LOOP — 51 committed vertical slices + F-hardening +
+review remediation (ADR 0065–0109)
 **Scope:** Deepen `exp-rs` toward the general-purpose optical/multispectral/
 hyperspectral processing platform (mission: product import → calibration →
 QA masking → atmospheric correction → geometric/grid → analysis-ready →
@@ -10,7 +10,7 @@ analysis → accuracy → provenance, all through the Processing Registry).
 
 ---
 
-## 1. Session Summary — 23 Slices, All Tested, All Committed
+## 1. Session Summary — 51 Slices, All Tested, All Committed
 
 | # | Slice | Commit | ADR |
 |---|-------|--------|-----|
@@ -63,14 +63,18 @@ analysis → accuracy → provenance, all through the Processing Registry).
 | 47 | Test hardening: ToolCallDispatcher teardown race (SegFault) + GuiJobHandle timing | `303384c1e7` | — |
 | 48 | Task-centric 遥感 menu (C5 domain entry points + DAG shortcut) | `e251a974cf` | 0099 |
 | + | Full-suite regression fix (GDAL driver registration in a provider test) | `bae3a3eae0` | — |
+| 49 | `runOperatorTask` onResult hook — dialogs can surface operator result summaries | `039d47a088` | 0108 |
+| 50 | QA-mask + change-detection dialogs display run statistics (via onResult) | `c509eb5313` | — |
+| 51 | C5: shared `CrsSelector` (ortho dialog adopts; test unchanged) + cancel-hook poll budget hardening to 30s | `254f1fd508` | 0109 |
 
 ## 2. Verification
 
 - **Full clean rebuild: 0 errors** (all targets, incl. the whole test suite).
-- **ctest: 1400 tests, 100% passed** after hardening the two TaskCenter
+- **ctest: 1402 tests, 100% passed** after hardening the two TaskCenter
   cancel-timing tests, the ToolCallDispatcher detached-thread teardown race
-  (intermittent SegFault), and the GuiJobHandle callback windows that flaked
-  under `-j8` load (all now poll with generous budgets). 6 pre-existing
+  (intermittent SegFault), the GuiJobHandle callback windows that flaked
+  under `-j8` load (all now poll with generous budgets), and the
+  georef/OBIA cancel-hook budgets (raised to 30s). 6 pre-existing
   vector fixtures remain SKIPPED (removed from VCS). Suite is green.
 - Every new slice shipped with its own Catch2 tests (kernel + operator /
   UI-seam level); the operator registry tests pin the expanded surface.
@@ -98,8 +102,8 @@ Import Sentinel-2 / Landsat (ProductImportDialog)
 
 ## 4. Known Follow-ups (roadmap `.planning/2026-08-07-rs-platform-goal.md`)
 
-- C5: shared CRS/resolution widgets (band-role + raster-selection shared
-  widgets are done; CRS/resolution remain per-dialog).
+- C5: shared resolution widget (band-role, raster-selection and CRS shared
+  widgets are done; resolution remains per-dialog).
 - C1 follow-ups: MAD wrapper over `otb:multivariate_alteration_detector`;
   post-classification run summary display in the dialog.
 - D10: FWHM display/export in the spectral workbench.
