@@ -52,6 +52,10 @@ TaskCenter::TaskCenter()
 {
     qRegisterMetaType<AlgorithmTaskInfo>("sicnu::AlgorithmTaskInfo");
     resetResourceProfileLimits();
+    installDefaultEstimateResolver();
+    // Default the RAM budget to the RSS watermark so the new resource-aware gate
+    // is consistent with (not independent of) the existing memory-pressure gate.
+    m_resourceBudget.setBudgetMb( m_resourceMonitor.memoryLimitMb() );
 }
 
 ProviderResourceProfile TaskCenter::resolveResourceProfile( const QString &algorithmId ) const
@@ -110,6 +114,9 @@ void TaskCenter::resetResourceProfileLimits()
     m_profileLimits.clear();
     m_globalConcurrencyLimit = 0;
     m_resourceMonitor = ResourceMonitor{}; // restore default watermark + sampler (ADR 0063)
+    // Keep the resource-aware budget consistent with the restored watermark so a
+    // test reset returns to the default scheduling behavior (perf/architecture goal).
+    m_resourceBudget.setBudgetMb( m_resourceMonitor.memoryLimitMb() );
 }
 
 void TaskCenter::setGlobalConcurrencyLimit( unsigned int maxConcurrent )
@@ -142,6 +149,77 @@ void TaskCenter::setRssSampler( std::function<unsigned int()> sampler )
 {
     QMutexLocker locker( &m_mutex );
     m_resourceMonitor.setRssSampler( std::move( sampler ) );
+}
+
+void TaskCenter::installDefaultEstimateResolver()
+{
+    // Registry-backed resolver: read the operator's declared memoryPolicy +
+    // executionEstimate via the AtomicAlgorithmRegistry descriptor. This is the
+    // ONLY runtime consumer of those fields besides the agent tool catalog.
+    // Called from the constructor and re-installed if a test clears the resolver.
+    m_resourceBudget.setEstimateResolver(
+        []( const std::string &algorithmId ) -> TaskResourceEstimate {
+            TaskResourceEstimate est;
+            try
+            {
+                auto adapter =
+                    processing::AtomicAlgorithmRegistry::instance().findAdapter( algorithmId );
+                if ( !adapter )
+                    return est;
+                const auto desc = adapter->descriptor();
+                const std::string &policy = desc.agentMetadata.memoryPolicy;
+                if ( policy == "streaming" )
+                    est.memoryClass = TaskMemoryClass::Streaming;
+                else if ( policy == "multipass_streaming" )
+                    est.memoryClass = TaskMemoryClass::MultiPassStreaming;
+                else if ( policy == "external_process" )
+                    est.memoryClass = TaskMemoryClass::ExternalProcess;
+                else if ( policy == "unsupported_for_large_raster" )
+                    est.memoryClass = TaskMemoryClass::UnsupportedForLargeRaster;
+                else if ( policy == "full_raster" )
+                    est.memoryClass = TaskMemoryClass::FullRaster;
+                // else: leave Unknown → FullRaster fallback in resolve().
+
+                const Json::Value &exec = desc.agentMetadata.execution;
+                if ( exec.isObject() && exec.isMember( "estimatedRamBytes" ) )
+                {
+                    const Json::UInt64 bytes = exec["estimatedRamBytes"].asUInt64();
+                    est.ramMb = static_cast<unsigned int>( bytes / ( 1024ull * 1024ull ) );
+                }
+            }
+            catch ( ... )
+            {
+                // Resolver must never throw into the scheduler; fall back to Unknown.
+            }
+            return est;
+        } );
+}
+
+void TaskCenter::setResourceBudgetMb( unsigned int mb )
+{
+    QMutexLocker locker( &m_mutex );
+    m_resourceBudget.setBudgetMb( mb );
+}
+
+unsigned int TaskCenter::resourceBudgetMb() const
+{
+    QMutexLocker locker( &m_mutex );
+    return m_resourceBudget.budgetMb();
+}
+
+void TaskCenter::setEstimateResolver( TaskEstimateResolver resolver )
+{
+    QMutexLocker locker( &m_mutex );
+    if ( resolver )
+        m_resourceBudget.setEstimateResolver( std::move( resolver ) );
+    else
+        installDefaultEstimateResolver();
+}
+
+unsigned int TaskCenter::resolveEstimateMb( const std::string &algorithmId ) const
+{
+    QMutexLocker locker( &m_mutex );
+    return m_resourceBudget.resolve( algorithmId ).ramMb;
 }
 
 Json::Value TaskCenter::variantMapToJsonParams( const QVariantMap &params )
@@ -528,6 +606,7 @@ void TaskCenter::processNextQueuedTasks()
 
     QMap<ProviderResourceProfile, unsigned int> runningByProfile;
     unsigned int totalRunning = 0;
+    unsigned int runningTotalMb = 0; // RAM estimate sum of Running tasks (resource-aware gate)
 
     // Pending launches already have status Running; count only Running tasks once.
     for ( const auto &t : m_tasks )
@@ -536,6 +615,7 @@ void TaskCenter::processNextQueuedTasks()
             continue;
         runningByProfile[t.resourceProfile] = runningByProfile.value( t.resourceProfile, 0u ) + 1;
         ++totalRunning;
+        runningTotalMb += m_resourceBudget.resolve( t.algorithmId.toStdString() ).ramMb;
     }
 
     if ( totalRunning >= globalMax )
@@ -594,6 +674,20 @@ void TaskCenter::processNextQueuedTasks()
         if ( m_resourceMonitor.memoryPressureHigh() )
             break;
 
+        // Resource-aware gate (perf/architecture goal 2026-08-08): hold the
+        // launch when projected (running + candidate) RAM exceeds the budget,
+        // UNLESS nothing is running in this profile (never-starve: a wrong or
+        // missing estimate must not permanently block all work). A budget of 0
+        // disables this gate (legacy behavior). Like the RSS gate this only
+        // DELAYS — the task stays Queued and is re-evaluated on the next
+        // terminal transition. `continue` (not break): a later, lighter
+        // eligible task may still fit within the budget this pass.
+        const unsigned int candidateMb =
+            m_resourceBudget.resolve( m_tasks[id].algorithmId.toStdString() ).ramMb;
+        if ( !m_resourceBudget.canLaunch( runningTotalMb, candidateMb,
+                                          runningByProfile.value( profile, 0u ) ) )
+            continue;
+
         m_tasks[id].status = TaskStatus::Running;
         m_tasks[id].logBuffer.append(
           QString( QStringLiteral( "[%1] Dispatching to JobEngine (profile=%2)." ) )
@@ -624,6 +718,7 @@ void TaskCenter::processNextQueuedTasks()
         m_pendingLaunches.append( std::move( launch ) );
         runningByProfile[profile] = runningByProfile.value( profile, 0u ) + 1;
         ++totalRunning;
+        runningTotalMb += candidateMb;
     }
 }
 

@@ -586,6 +586,10 @@ sicnu_discover_tests(test_gdal_block_stream)
 # Uses the standard sicnu_add_test link set (operators + task_center + resource_monitor).
 sicnu_add_test(test_perf_benchmarks)
 
+# Resource-aware scheduler tests (Phase C): pure TaskResourceBudget unit tests +
+# TaskCenter integration of the RAM-budget launch gate.
+sicnu_add_test(test_task_resource_budget)
+
 # Colormap tests — verify color ramps loaded from style database
 # Custom main: needs QgsApplication with correct prefix path
 add_executable(test_colormap test_colormap.cpp)
