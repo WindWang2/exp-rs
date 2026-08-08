@@ -209,6 +209,7 @@ public:
     void openOrthorectificationDialog();
     void openMosaicDialog();
     void openChangeDetectionDialog();
+    void openPostClassificationDialog();
 
     // Enhancement dialogs (processing — write new raster)
     void openContrastStretchDialog();

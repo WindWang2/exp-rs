@@ -540,6 +540,9 @@ void QgisDesktopWindow::setupMenu()
     tip( rsAnalysis->addAction( ic( "ch_nge_detect" ), tr( "变化检测..." ),
                                 this, &QgisDesktopWindow::openChangeDetectionDialog ),
          tr( "差值 / 归一化差值 / 变化掩膜 / 后分类比较。" ) );
+    tip( rsAnalysis->addAction( ic( "accur_cy" ), tr( "后分类比较..." ),
+                                this, &QgisDesktopWindow::openPostClassificationDialog ),
+         tr( "两期分类对比：逐类转移矩阵、增益/损失、变化类型图。" ) );
     tip( rsAnalysis->addAction( ic( "p_nsh_r_en" ), tr( "影像融合..." ),
                                 this, &QgisDesktopWindow::openFusionDialog ),
          tr( "全色锐化：Linear / Brovey / IHS / PCA 或 OTB/GDAL。" ) );

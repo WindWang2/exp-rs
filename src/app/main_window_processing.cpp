@@ -16,6 +16,7 @@
 #include "dialogs/qa_mask_dialog.h"
 #include "dialogs/apply_mask_dialog.h"
 #include "dialogs/spectral_library_dialog.h"
+#include "dialogs/post_classification_dialog.h"
 #include "widgets/spectral_profile_widget.h"
 #include "map_tools/rs_roi_spectrum_tool.h"
 #include "dialogs/radiometric_calibration_dialog.h"
@@ -272,6 +273,20 @@ void QgisDesktopWindow::openApplyMaskDialog()
     }
     ApplyMaskDialog dlg(this);
     dlg.setRasterLayer(rasterLayer);
+    dlg.exec();
+}
+
+void QgisDesktopWindow::openPostClassificationDialog()
+{
+    QgsRasterLayer *rasterLayer = findAnyRaster(this);
+    if (!rasterLayer)
+    {
+        QMessageBox::information(this, tr("后分类比较"),
+                                 tr("请先选择一个栅格图层。"));
+        return;
+    }
+    PostClassificationDialog dlg(this);
+    dlg.populateLayers();
     dlg.exec();
 }
 
