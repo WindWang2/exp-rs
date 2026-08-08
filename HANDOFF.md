@@ -66,7 +66,7 @@ analysis → accuracy → provenance, all through the Processing Registry).
 | 49 | `runOperatorTask` onResult hook — dialogs can surface operator result summaries | `039d47a088` | 0108 |
 | 50 | QA-mask + change-detection dialogs display run statistics (via onResult) | `c509eb5313` | — |
 | 51 | C5: shared `CrsSelector` (ortho dialog adopts; test unchanged) + cancel-hook poll budget hardening to 30s | `254f1fd508` | 0109 |
-| 52 | Batch processing supports single-input RS operators (listed from `AtomicAlgorithmRegistry`, run via `runBatchItem` with declared defaults; multi-input/required-param operators excluded) | (pending) | 0110 |
+| 52 | Batch processing supports single-input RS operators (listed from `AtomicAlgorithmRegistry`, run via `runBatchItem` with declared defaults; multi-input/required-param operators excluded) | `6e6d206491` | 0110 |
 
 ## 2. Verification
 
