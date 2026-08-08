@@ -1,8 +1,8 @@
 # HANDOFF — Autonomous RS System Perfection (/goal) — Optical Platform Session
 
 **Date:** 2026-08-08
-**Mode:** FULL_AUTONOMOUS_LOOP — 54 committed vertical slices + F-hardening +
-review remediation (ADR 0065–0112)
+**Mode:** FULL_AUTONOMOUS_LOOP — 55 committed vertical slices + F-hardening +
+review remediation (ADR 0065–0113)
 **Scope:** Deepen `exp-rs` toward the general-purpose optical/multispectral/
 hyperspectral processing platform (mission: product import → calibration →
 QA masking → atmospheric correction → geometric/grid → analysis-ready →
@@ -10,7 +10,7 @@ analysis → accuracy → provenance, all through the Processing Registry).
 
 ---
 
-## 1. Session Summary — 54 Slices, All Tested, All Committed
+## 1. Session Summary — 55 Slices, All Tested, All Committed
 
 | # | Slice | Commit | ADR |
 |---|-------|--------|-----|
@@ -69,6 +69,7 @@ analysis → accuracy → provenance, all through the Processing Registry).
 | 52 | Batch processing supports single-input RS operators (listed from `AtomicAlgorithmRegistry`, run via `runBatchItem` with declared defaults; multi-input/required-param operators excluded) | `6e6d206491` | 0110 |
 | 53 | Dialog-level grid preflight — shared `rasterGridCompatibilityMessage` wired into change-detection / post-classification / fusion run paths (pixel-size exemption for fusion) | `fb2ea76051` | 0111 |
 | 54 | MCP `get_lineage` — agent-facing provenance queries (asset + deriving algorithm/parameters + derivedFrom/derivedOutputsOf via the Data Manager) | `0b0aca41c0` | 0112 |
+| 55 | Batch-processing RS parameter overrides — per-operator parameter form (typed editors from the schema, defaults prefilled) merged over declared defaults in `runBatchItem`; main input/output not overridable | `ca37754aaa` | 0113 |
 
 ## 2. Verification
 
