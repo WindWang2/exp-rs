@@ -6,6 +6,7 @@
 #include <json/json.h>
 
 class QComboBox;
+class QLabel;
 class QSpinBox;
 class RasterLayerCombo;
 
@@ -37,10 +38,13 @@ protected:
 private:
     void setupUi();
     void populateBandCombo( RasterLayerCombo *layerCombo, QComboBox *bandCombo );
+    /// Render the operator's transition-matrix / changed-percent result.
+    void showResultSummary( const Json::Value &result );
 
     RasterLayerCombo *m_beforeLayerCombo = nullptr;
     RasterLayerCombo *m_afterLayerCombo = nullptr;
     QComboBox *m_beforeBandCombo = nullptr;
     QComboBox *m_afterBandCombo = nullptr;
     QSpinBox *m_classCountSpin = nullptr;
+    QLabel *m_summaryLabel = nullptr;
 };

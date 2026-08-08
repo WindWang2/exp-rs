@@ -96,6 +96,15 @@ public:
      */
     void runOperatorTask(const QString &operatorId, const Json::Value &params);
 
+    /**
+     * Variant that also delivers the operator's JSON result (e.g. transition
+     * matrices, statistics) via @p onResult on the GUI thread, after the
+     * standard completion handling. Useful for dialogs that surface quality
+     * metrics (change percentages, per-class totals) next to the output.
+     */
+    void runOperatorTask(const QString &operatorId, const Json::Value &params,
+                         const std::function<void(const Json::Value &result)> &onResult);
+
 protected:
     // --- Virtual hooks for subclasses ---
 

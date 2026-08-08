@@ -2,6 +2,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "app/dialogs/raster_processing_dialog_base.h"
+#include "operators/framework/rs_operator.h"
+#include "operators/framework/rs_operator_registry.h"
 #include "processing/framework/task_center.h"
 
 #include <QApplication>
@@ -97,4 +99,52 @@ TEST_CASE("RasterProcessingDialogBase runGdalTask", "[dialog][base][async]")
         REQUIRE(dialog.runButton()->isEnabled());
         REQUIRE_FALSE(dialog.isRunning());
     }
+}
+
+namespace {
+
+/// Trivial operator returning a fixed result immediately, so the dialog base
+/// can be tested end-to-end through the TaskCenter path.
+class NoopResultOperator : public sicnu::operators::RSOperator
+{
+public:
+    std::string name() const override { return "rs:base_noop"; }
+    Json::Value run( const Json::Value &, sicnu::operators::RSOperatorContext & ) override
+    {
+        Json::Value result( Json::objectValue );
+        result["output"] = "/tmp/base_noop.tif";
+        result["stats"] = 42;
+        return result;
+    }
+};
+
+} // namespace
+
+TEST_CASE("RasterProcessingDialogBase runOperatorTask delivers the result JSON", "[dialog][base][async]")
+{
+    sicnu::operators::RSOperatorRegistry::instance().registerOperator(
+        "rs:base_noop", []() { return std::make_unique<NoopResultOperator>(); } );
+
+    TestRasterDialog dialog;
+
+    Json::Value params( Json::objectValue );
+    params["input"] = "/tmp/in.tif";
+
+    Json::Value received;
+    bool gotResult = false;
+    dialog.runOperatorTask( "rs:base_noop", params,
+                            [&]( const Json::Value &r ) { received = r; gotResult = true; } );
+
+    REQUIRE( dialog.isRunning() );
+
+    QEventLoop loop;
+    QTimer::singleShot( 5000, &loop, &QEventLoop::quit );
+    QObject::connect( &dialog, &QDialog::accepted, &loop, &QEventLoop::quit );
+    QObject::connect( &dialog, &QDialog::rejected, &loop, &QEventLoop::quit );
+    loop.exec();
+
+    REQUIRE( gotResult );
+    CHECK( received["output"].asString() == "/tmp/base_noop.tif" );
+    CHECK( received["stats"].asInt() == 42 );
+    REQUIRE_FALSE( dialog.isRunning() );
 }

@@ -9,6 +9,7 @@
 #include <QComboBox>
 #include <QFormLayout>
 #include <QFrame>
+#include <QLabel>
 #include <QMessageBox>
 #include <QSpinBox>
 #include <QVBoxLayout>
@@ -68,6 +69,12 @@ void PostClassificationDialog::setupUi()
   mainLayout->addWidget( inputSec );
 
   setupOutputRow( mainLayout );
+
+  m_summaryLabel = SicnuUi::makeHintLabel( this, tr( "运行后在此显示变化统计摘要。" ) );
+  m_summaryLabel->setObjectName( QStringLiteral( "postClassSummaryLabel" ) );
+  m_summaryLabel->setWordWrap( true );
+  mainLayout->addWidget( m_summaryLabel );
+
   setupButtonBar( mainLayout );
   mainLayout->addStretch( 1 );
 
@@ -147,5 +154,41 @@ void PostClassificationDialog::onRun()
   }
 
   setRasterLayer( before );
-  runOperatorTask( QStringLiteral( "rs:post_classification_change" ), buildParams() );
+  runOperatorTask( QStringLiteral( "rs:post_classification_change" ), buildParams(),
+                   [this]( const Json::Value &result ) { showResultSummary( result ); } );
+}
+
+void PostClassificationDialog::showResultSummary( const Json::Value &result )
+{
+  if ( !m_summaryLabel || !result.isObject() )
+    return;
+
+  QStringList lines;
+  if ( result.isMember( "changedPixels" ) )
+  {
+    lines << tr( "变化像元：%1 / %2（%3%）" )
+               .arg( result["changedPixels"].asUInt64() )
+               .arg( result["totalPixels"].asUInt64() )
+               .arg( result["changedPercent"].asDouble(), 0, 'f', 2 );
+  }
+  if ( result.isMember( "transitionMatrix" ) && result["transitionMatrix"].isArray()
+       && result["transitionMatrix"].size() > 0 )
+  {
+    lines << tr( "转移矩阵（行=前时相，列=后时相；仅列出非零项）：" );
+    const int n = static_cast<int>( result["transitionMatrix"].size() );
+    for ( int from = 0; from < n; ++from )
+    {
+      const Json::Value &row = result["transitionMatrix"][from];
+      for ( int to = 0; to < n; ++to )
+      {
+        if ( row[to].asUInt64() > 0 )
+          lines << QStringLiteral( "  %1→%2: %3" )
+                       .arg( from )
+                       .arg( to )
+                       .arg( row[to].asUInt64() );
+      }
+    }
+  }
+  m_summaryLabel->setText( lines.isEmpty() ? tr( "运行完成（无摘要数据）。" )
+                                           : lines.join( QLatin1Char( '\n' ) ) );
 }

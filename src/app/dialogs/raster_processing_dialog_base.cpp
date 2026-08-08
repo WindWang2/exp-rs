@@ -386,6 +386,13 @@ void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm 
 void RasterProcessingDialogBase::runOperatorTask( const QString &operatorId,
                                                   const Json::Value &params )
 {
+  runOperatorTask( operatorId, params, {} );
+}
+
+void RasterProcessingDialogBase::runOperatorTask( const QString &operatorId,
+                                                  const Json::Value &params,
+                                                  const std::function<void( const Json::Value & )> &onResult )
+{
   if ( isRunning() )
     return;
 
@@ -399,8 +406,10 @@ void RasterProcessingDialogBase::runOperatorTask( const QString &operatorId,
 
   m_jobHandle.submitJob(
     req,
-    [this]( const QString &outputPath, const Json::Value & ) {
+    [this, onResult]( const QString &outputPath, const Json::Value &resultJson ) {
       onCompleted( outputPath );
+      if ( onResult )
+        onResult( resultJson );
     },
     [this]( const QString &err, bool isCanceled ) {
       onFailed( isCanceled ? tr( "已取消" ) : err );
