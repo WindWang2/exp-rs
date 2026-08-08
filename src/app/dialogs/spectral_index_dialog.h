@@ -5,6 +5,7 @@
 
 namespace sicnu::data { class DataManager; }
 
+class BandRoleCombo;
 class QComboBox;
 class QCheckBox;
 class QLabel;
@@ -64,11 +65,11 @@ private:
     QLabel *m_inputAssetLabel = nullptr;
 
     QComboBox *m_indexCombo = nullptr;
-    QComboBox *m_nirCombo = nullptr;
-    QComboBox *m_redCombo = nullptr;
-    QComboBox *m_greenCombo = nullptr;
-    QComboBox *m_blueCombo = nullptr;
-    QComboBox *m_swirCombo = nullptr;
+    BandRoleCombo *m_nirCombo = nullptr;
+    BandRoleCombo *m_redCombo = nullptr;
+    BandRoleCombo *m_greenCombo = nullptr;
+    BandRoleCombo *m_blueCombo = nullptr;
+    BandRoleCombo *m_swirCombo = nullptr;
 
     QCheckBox *m_addToCanvasCheck = nullptr;
 

@@ -4051,6 +4051,47 @@ target_include_directories(test_band_role_combo PRIVATE
 )
 sicnu_discover_tests(test_band_role_combo)
 
+# Spectral index dialog — role-based band preselection via BandRoleCombo (C5)
+add_executable(test_spectral_index_dialog
+  test_spectral_index_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/spectral_index_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/band_role_combo.cpp
+)
+target_link_libraries(test_spectral_index_dialog PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  sicnu_jobs
+  sicnu_operators
+  sicnu_task_center
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_data
+)
+target_include_directories(test_spectral_index_dialog PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_spectral_index_dialog PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_spectral_index_dialog PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_spectral_index_dialog PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_spectral_index_dialog PRIVATE jsoncpp)
+endif()
+sicnu_discover_tests(test_spectral_index_dialog)
+
 # Virtual raster recipe tests - recipe value type + JSON round-trip (#55)
 qt_add_executable(test_virtual_raster_recipe
   test_virtual_raster_recipe.cpp
