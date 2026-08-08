@@ -404,6 +404,7 @@ target_link_libraries(test_mcp_server PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_task_center
+  sicnu_data
   GDAL::GDAL
 )
 if(TARGET sicnu_operators)

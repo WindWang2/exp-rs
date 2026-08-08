@@ -10,6 +10,12 @@
 #include <vector>
 
 #include "agent/mcp_server.h"
+#include "data/asset_types.h"
+#include "data/data_manager.h"
+#include "data/data_result.h"
+#include "data/derivation_record.h"
+#include "data/internal/source_provider.h"
+#include "data/internal/source_provider_registry.h"
 #include "jobs/job_engine.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/task_center.h"
@@ -47,6 +53,7 @@ public:
     }
     QVariantMap testGetExecutionStatus(const QString &id) { return handleGetExecutionStatus(id); }
     QVariantMap testCancelExecution(const QString &id) { return handleCancelExecution(id); }
+    QVariantMap testGetLineage(const QString &id) { return handleGetLineage(id); }
 };
 
 namespace {
@@ -389,4 +396,131 @@ TEST_CASE("McpServer describe_dataset exposes semantic band roles", "[agent][mcp
     CHECK(bandList[0].toMap().value(QStringLiteral("index")).toInt() == 1);
 
     QgsProject::instance()->removeMapLayer(layer);
+}
+
+namespace
+{
+
+/// Minimal in-memory raster source provider for DataManager lineage tests.
+class LineageMemoryProvider final : public sicnu::data::internal::SourceProvider
+{
+  public:
+    bool supports( const sicnu::data::SourceDescriptor &source ) const override
+    {
+      return source.providerKey == QStringLiteral( "memory-raster" );
+    }
+
+    sicnu::data::Result<sicnu::data::internal::ResolvedSource> resolve(
+      const sicnu::data::SourceDescriptor &source ) const override
+    {
+      return sicnu::data::Result<sicnu::data::internal::ResolvedSource>::success(
+        sicnu::data::internal::ResolvedSource{ sicnu::data::AssetKind::Raster,
+                                     sicnu::data::AssetState::Ready,
+                                     sicnu::data::AssetCapability::Renderable
+                                       | sicnu::data::AssetCapability::ReadablePixels,
+                                     sicnu::data::StorageKind::Memory,
+                                     source.canonicalSource } );
+    }
+};
+
+std::unique_ptr<sicnu::data::DataManager> makeLineageDataManager()
+{
+  sicnu::data::internal::SourceProviderRegistry providers;
+  providers.add( std::make_unique<LineageMemoryProvider>() );
+  return providers.createDataManager();
+}
+
+sicnu::data::SourceDescriptor memoryRasterSource( const QString &source )
+{
+  sicnu::data::SourceDescriptor descriptor;
+  descriptor.providerKey = QStringLiteral( "memory-raster" );
+  descriptor.canonicalSource = source;
+  return descriptor;
+}
+
+} // namespace
+
+TEST_CASE( "McpServer get_lineage exposes provenance and lineage", "[agent][mcp][provenance]" )
+{
+  using namespace sicnu::data;
+
+  const auto manager = makeLineageDataManager();
+  REQUIRE( manager );
+
+  TestMcpServer server;
+  server.setDataManager( manager.get() );
+
+  RegisterRequest inputRequest;
+  inputRequest.source = memoryRasterSource( QStringLiteral( "scene-raw" ) );
+  const auto input = manager->registerSource( inputRequest );
+  REQUIRE_FALSE( input.assetId.isNull() );
+
+  RegisterRequest outputRequest;
+  outputRequest.source = memoryRasterSource( QStringLiteral( "ndvi-output" ) );
+  const auto output = manager->registerSource( outputRequest );
+  REQUIRE_FALSE( output.assetId.isNull() );
+
+  DerivationRecord record = makeTaskDerivation(
+    QStringLiteral( "rs:spectral_index" ),
+    QJsonObject{ { QStringLiteral( "index" ), QStringLiteral( "NDVI" ) } },
+    QStringLiteral( "task-42" ) );
+  DerivationInput derivedFrom;
+  derivedFrom.assetId = input.assetId;
+  derivedFrom.revision = AssetRevision::initial();
+  record.inputs = { derivedFrom };
+  REQUIRE( manager->attachDerivationRecord( output.assetId, record ) );
+
+  SECTION( "Derived asset reports provenance and inputs" )
+  {
+    const QVariantMap out = server.testGetLineage( output.assetId.toString() );
+    CHECK( out.value( QStringLiteral( "id" ) ).toString() == output.assetId.toString() );
+    CHECK( out.value( QStringLiteral( "name" ) ).toString() == QStringLiteral( "ndvi-output" ) );
+
+    const QVariantMap prov = out.value( QStringLiteral( "provenance" ) ).toMap();
+    CHECK( prov.value( QStringLiteral( "algorithmId" ) ).toString()
+           == QStringLiteral( "rs:spectral_index" ) );
+    CHECK( prov.value( QStringLiteral( "taskReference" ) ).toString() == QStringLiteral( "task-42" ) );
+    CHECK( prov.value( QStringLiteral( "parameters" ) ).toMap()
+               .value( QStringLiteral( "index" ) ).toString()
+           == QStringLiteral( "NDVI" ) );
+
+    const QVariantList inputs = out.value( QStringLiteral( "derivedFrom" ) ).toList();
+    REQUIRE( inputs.size() == 1 );
+    CHECK( inputs.first().toMap().value( QStringLiteral( "id" ) ).toString()
+           == input.assetId.toString() );
+    CHECK( out.value( QStringLiteral( "derivedOutputsOf" ) ).toList().isEmpty() );
+  }
+
+  SECTION( "Input asset reports its derived outputs" )
+  {
+    const QVariantMap in = server.testGetLineage( input.assetId.toString() );
+    CHECK_FALSE( in.contains( QStringLiteral( "provenance" ) ) );
+    const QVariantList outputs = in.value( QStringLiteral( "derivedOutputsOf" ) ).toList();
+    REQUIRE( outputs.size() == 1 );
+    CHECK( outputs.first().toMap().value( QStringLiteral( "id" ) ).toString()
+           == output.assetId.toString() );
+  }
+
+  SECTION( "Invalid and unknown asset ids fail with actionable errors" )
+  {
+    try
+    {
+      server.testGetLineage( QStringLiteral( "not-an-asset-id" ) );
+      FAIL( "expected std::runtime_error for malformed id" );
+    }
+    catch ( const std::runtime_error &e )
+    {
+      CHECK( QString::fromStdString( e.what() ).contains( QStringLiteral( "Invalid asset id" ) ) );
+    }
+
+    try
+    {
+      server.testGetLineage( AssetId::generate().toString() );
+      FAIL( "expected std::runtime_error for unknown id" );
+    }
+    catch ( const std::runtime_error &e )
+    {
+      CHECK( QString::fromStdString( e.what() ).contains( QStringLiteral( "Asset not found" ) ) );
+    }
+  }
 }

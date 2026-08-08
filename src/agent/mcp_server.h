@@ -11,6 +11,12 @@
 #include "processing/framework/task_center.h"
 #include "processing/framework/tool_call_dispatcher.h"
 
+namespace sicnu::data
+{
+class DataManager;
+class AssetId;
+}
+
 class QgsProcessingAlgorithm;
 class QgsProcessingContext;
 class QgsProcessingFeedback;
@@ -53,8 +59,13 @@ public:
     void start(QCoreApplication *app);
 
     /// Injects DataManager asset authority so the dispatcher commits tool-call
-    /// outputs transactionally (TICKET-23). Call before start().
-    void setDataManager( sicnu::data::DataManager *dataManager ) { mDispatcher.setDataManager( dataManager ); }
+    /// outputs transactionally (TICKET-23) and provenance queries resolve.
+    /// Call before start().
+    void setDataManager( sicnu::data::DataManager *dataManager )
+    {
+      m_dataManager = dataManager;
+      mDispatcher.setDataManager( dataManager );
+    }
 
 private slots:
     void onLineRead(const QString &line);
@@ -74,6 +85,7 @@ protected:
     QVariantMap handleCancelExecution(const QString &executionId);
     QVariantMap handleListLayers();
     QVariantMap handleDescribeDataset(const QString &layerId);
+    QVariantMap handleGetLineage(const QString &assetId);
 
     // MCP Methods — RSOperator kernel (preferred Agent surface)
     QVariantMap handleListOperators();
@@ -96,6 +108,8 @@ private:
     /// TaskCenter sink for rs: operator calls (autoLoad=false; MCP has no canvas).
     sicnu::processing::ToolCallDispatcher mDispatcher;
     QCoreApplication *mApp = nullptr;
+    /// Data Manager asset authority for lineage/provenance queries.
+    sicnu::data::DataManager *m_dataManager = nullptr;
 };
 
 #endif // MCP_SERVER_H

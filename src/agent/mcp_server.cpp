@@ -2,6 +2,9 @@
 #include "core/sicnu_logging.h"
 #include "env_flag.h"
 
+#include "data/data_manager.h"
+#include "data/asset_types.h"
+#include "data/derivation_record.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/framework/rs_operator.h"
 #include "processing/framework/atomic_algorithm_registry.h"
@@ -210,6 +213,11 @@ const MetaToolDef kMetaTools[] = {
     { "describe_dataset",
       "Get detailed layer metadata, including spatial extent, coordinate reference system (CRS), and band/field details.",
       { { "layer_id", "string", "Name or ID of the layer to describe" } } },
+    { "get_lineage",
+      "Query a Data Manager asset's processing provenance and lineage: the "
+      "deriving algorithm + parameters when the asset was produced, its input "
+      "assets (derivedFrom), and any assets derived from it (derivedOutputsOf).",
+      { { "asset_id", "string", "Data Manager asset id (UUID) to query" } } },
 };
 
 QVariantMap metaToolInputSchema(const MetaToolDef &def)
@@ -413,6 +421,10 @@ void McpServer::handleRequest(const QVariantMap &request)
             else if (toolName == QStringLiteral("describe_dataset"))
             {
                 resultData = handleDescribeDataset(arguments.value(QStringLiteral("layer_id")).toString());
+            }
+            else if (toolName == QStringLiteral("get_lineage"))
+            {
+                resultData = handleGetLineage(arguments.value(QStringLiteral("asset_id")).toString());
             }
             else
             {
@@ -848,6 +860,65 @@ QVariantMap McpServer::handleDescribeDataset(const QString &layerId)
             result[QStringLiteral("fields")] = fields;
         }
     }
+
+    return result;
+}
+
+QVariantMap McpServer::handleGetLineage(const QString &assetIdText)
+{
+    if (!m_dataManager)
+    {
+        throw std::runtime_error("Data manager is not available");
+    }
+    const auto id = sicnu::data::AssetId::fromString(assetIdText);
+    if (!id)
+    {
+        throw std::runtime_error("Invalid asset id: " + assetIdText.toStdString());
+    }
+    const auto snapshot = m_dataManager->asset(*id);
+    if (!snapshot)
+    {
+        throw std::runtime_error("Asset not found: " + assetIdText.toStdString());
+    }
+
+    QVariantMap result;
+    result[QStringLiteral("id")] = snapshot->id().toString();
+    result[QStringLiteral("name")] = snapshot->displayName();
+    result[QStringLiteral("source")] = snapshot->source().canonicalSource;
+
+    // The deriving algorithm + parameters when this asset was produced.
+    if (const auto prov = m_dataManager->provenance(*id))
+    {
+        result[QStringLiteral("provenance")] = prov->toJson().toVariantMap();
+    }
+
+    // Input assets this one was derived from, with display names resolved.
+    QVariantList inputs;
+    for (const auto &inputId : m_dataManager->derivedFrom(*id))
+    {
+        QVariantMap entry;
+        entry[QStringLiteral("id")] = inputId.toString();
+        if (const auto inputSnapshot = m_dataManager->asset(inputId))
+        {
+            entry[QStringLiteral("name")] = inputSnapshot->displayName();
+        }
+        inputs.append(entry);
+    }
+    result[QStringLiteral("derivedFrom")] = inputs;
+
+    // Assets derived from this one.
+    QVariantList outputs;
+    for (const auto &outputId : m_dataManager->derivedOutputsOf(*id))
+    {
+        QVariantMap entry;
+        entry[QStringLiteral("id")] = outputId.toString();
+        if (const auto outputSnapshot = m_dataManager->asset(outputId))
+        {
+            entry[QStringLiteral("name")] = outputSnapshot->displayName();
+        }
+        outputs.append(entry);
+    }
+    result[QStringLiteral("derivedOutputsOf")] = outputs;
 
     return result;
 }
