@@ -26,6 +26,11 @@ public:
     void setLeftImage(const QPixmap &pixmap);
     void setRightImage(const QPixmap &pixmap);
 
+    /// True once a left image has been set (used by tests / UI enablement).
+    bool hasLeftImage() const { return !m_leftImage.isNull(); }
+    /// True once a right image has been set.
+    bool hasRightImage() const { return !m_rightImage.isNull(); }
+
     enum class ComparisonMode {
         SplitScreen,
         Flicker

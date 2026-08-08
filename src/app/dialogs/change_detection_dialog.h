@@ -26,6 +26,7 @@ protected:
 private slots:
     void updateBandSelectors();
     void onMethodChanged(int index);
+    void openComparisonPreview();
 
 private:
     void setupUi();

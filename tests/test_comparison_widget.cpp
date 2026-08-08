@@ -1,9 +1,19 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include "app/widgets/comparison_widget.h"
+#include "app/dialogs/comparison_dialog.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QApplication>
 #include <QPixmap>
+#include <QTemporaryDir>
+
+#include <array>
+#include <vector>
+
+#include <qgsapplication.h>
+#include <qgsproject.h>
+#include <qgsrasterlayer.h>
 
 // Helper to create a test QPixmap with a specific color
 static QPixmap createTestPixmap(int width, int height, const QColor &color)
@@ -117,4 +127,39 @@ TEST_CASE("ComparisonWidget same mode no signal", "[comparison]") {
     // Already in SplitScreen mode, setting again should not emit
     widget.setMode(ComparisonWidget::ComparisonMode::SplitScreen);
     REQUIRE_FALSE(signalEmitted);
+}
+
+TEST_CASE("ComparisonDialog renders real raster previews", "[comparison][dialog][render]") {
+    int argc = 0;
+    QApplication app(argc, nullptr);
+    QgsApplication::initQgis();
+
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString before = dir.filePath("before.tif");
+    const QString after = dir.filePath("after.tif");
+    std::vector<std::vector<float>> b(2, std::vector<float>(64, 10.0f));
+    std::vector<std::vector<float>> a(2, std::vector<float>(64, 200.0f));
+    std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+    QString err;
+    REQUIRE(writeGdalOutput(before, 8, 8, b, gt, "EPSG:4326", &err));
+    REQUIRE(writeGdalOutput(after, 8, 8, a, gt, "EPSG:4326", &err));
+
+    QgsRasterLayer beforeLayer(before, QStringLiteral("before"));
+    QgsRasterLayer afterLayer(after, QStringLiteral("after"));
+    REQUIRE(beforeLayer.isValid());
+    REQUIRE(afterLayer.isValid());
+
+    ComparisonDialog dialog;
+    auto *widget = dialog.findChild<ComparisonWidget *>();
+    REQUIRE(widget != nullptr);
+    CHECK_FALSE(widget->hasLeftImage());
+    CHECK_FALSE(widget->hasRightImage());
+
+    dialog.setLeftLayer(&beforeLayer);
+    dialog.setRightLayer(&afterLayer);
+    CHECK(widget->hasLeftImage());
+    CHECK(widget->hasRightImage());
+
+    QgsProject::instance()->clear();
 }

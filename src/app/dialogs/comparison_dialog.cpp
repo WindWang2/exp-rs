@@ -4,6 +4,8 @@
 #include "dialog_utils.h"
 #include "widgets/comparison_widget.h"
 
+#include <qgsmaprendererparalleljob.h>
+#include <qgsmapsettings.h>
 #include <qgsrasterlayer.h>
 #include <qgsproject.h>
 
@@ -131,24 +133,40 @@ void ComparisonDialog::loadLayerToWidget(QgsRasterLayer *layer, bool isLeft)
 {
     if (!layer || !layer->isValid()) return;
 
-    // Render the layer to a QPixmap
-    // Use a simple approach: render the layer's preview
-    QSize size(400, 400);
-    QPixmap pixmap(size);
-    pixmap.fill(Qt::darkGray);
+    // Render the layer to a QPixmap at preview resolution. QGIS renders at
+    // the output size, reading only the needed pixels — a lightweight preview
+    // (the DoD "preview without executing the full raster" seam).
+    const QSize size(400, 400);
+    QPixmap pixmap;
+    QgsMapSettings mapSettings;
+    mapSettings.setDestinationCrs(layer->crs());
+    mapSettings.setExtent(layer->extent());
+    mapSettings.setOutputSize(size);
+    mapSettings.setLayers({layer});
+    QgsMapRendererParallelJob job(mapSettings);
+    job.start();
+    job.waitForFinished();
+    const QImage image = job.renderedImage();
+    if (!image.isNull())
+        pixmap = QPixmap::fromImage(image);
 
-    // For now, create a simple colored pixmap based on layer properties
-    // In a real implementation, this would render the actual raster data
-    QPainter painter(&pixmap);
-    painter.setPen(Qt::white);
-    painter.setFont(QFont("Arial", 12));
-    painter.drawText(pixmap.rect(), Qt::AlignCenter,
-                     tr("%1\n%2 bands\n%3 x %4 pixels")
-                         .arg(layer->name())
-                         .arg(layer->bandCount())
-                         .arg(layer->width())
-                         .arg(layer->height()));
-    painter.end();
+    if (pixmap.isNull())
+    {
+        // Fallback placeholder when rendering is unavailable (e.g. unreadable
+        // provider): describe the layer instead of a blank pane.
+        pixmap = QPixmap(size);
+        pixmap.fill(Qt::darkGray);
+        QPainter painter(&pixmap);
+        painter.setPen(Qt::white);
+        painter.setFont(QFont("Arial", 12));
+        painter.drawText(pixmap.rect(), Qt::AlignCenter,
+                         tr("%1\n%2 bands\n%3 x %4 pixels")
+                             .arg(layer->name())
+                             .arg(layer->bandCount())
+                             .arg(layer->width())
+                             .arg(layer->height()));
+        painter.end();
+    }
 
     if (isLeft) {
         m_comparisonWidget->setLeftImage(pixmap);

@@ -701,6 +701,10 @@ sicnu_discover_tests(test_spectral_profile_widget)
 # Comparison widget tests
 add_executable(test_comparison_widget test_comparison_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/comparison_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/comparison_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
 )
 target_link_libraries(test_comparison_widget PRIVATE
   Catch2::Catch2WithMain
@@ -709,9 +713,12 @@ target_link_libraries(test_comparison_widget PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
+  sicnu_processing
+  GDAL::GDAL
 )
 target_include_directories(test_comparison_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_comparison_widget)

@@ -1,5 +1,6 @@
 // src/app/dialogs/change_detection_dialog.cpp
 #include "change_detection_dialog.h"
+#include "comparison_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
 
@@ -48,6 +49,18 @@ void ChangeDetectionDialog::setupUi()
   form->addRow( tr( "前期波段" ), m_beforeBandCombo );
   form->addRow( tr( "后期影像" ), m_afterLayerCombo );
   form->addRow( tr( "后期波段" ), m_afterBandCombo );
+
+  // Dual-view interpretation aid (DoD: synchronized viewports / swipe where
+  // they improve interpretation): open the comparison dialog prefilled with
+  // the selected before/after rasters.
+  auto *compareButton = new QPushButton( tr( "双视图对比..." ), inputSec );
+  compareButton->setObjectName( QStringLiteral( "changeCompareButton" ) );
+  SicnuDialogHelp::tip( compareButton, tr(
+    "打开并排对比视图（分割线/Swipe + 闪烁），目视检查配准与变化。" ) );
+  connect( compareButton, &QPushButton::clicked,
+           this, &ChangeDetectionDialog::openComparisonPreview );
+  qobject_cast<QVBoxLayout *>( inputSec->layout() )->addWidget( compareButton );
+
   qobject_cast<QVBoxLayout *>( inputSec->layout() )->addLayout( form );
   mainLayout->addWidget( inputSec );
 
@@ -131,6 +144,24 @@ void ChangeDetectionDialog::onMethodChanged( int index )
   const bool showTh = ( index == 2 );
   m_thresholdSpin->setVisible( showTh );
   m_thresholdLabel->setVisible( showTh );
+}
+
+void ChangeDetectionDialog::openComparisonPreview()
+{
+  auto *before = qobject_cast<QgsRasterLayer *>(
+    QgsProject::instance()->mapLayer( m_beforeLayerCombo->currentData().toString() ) );
+  auto *after = qobject_cast<QgsRasterLayer *>(
+    QgsProject::instance()->mapLayer( m_afterLayerCombo->currentData().toString() ) );
+  if ( !before || !before->isValid() || !after || !after->isValid() )
+  {
+    QMessageBox::warning( this, dialogTitle(), tr( "请先选择前后时相影像。" ) );
+    return;
+  }
+
+  ComparisonDialog dialog( this );
+  dialog.setLeftLayer( before );
+  dialog.setRightLayer( after );
+  dialog.exec();
 }
 
 bool ChangeDetectionDialog::validateInputs()
