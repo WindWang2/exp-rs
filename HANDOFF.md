@@ -75,6 +75,7 @@ analysis → accuracy → provenance, all through the Processing Registry).
 | 58 | Change-detection dialog aligned with the backend — ratio/CVA methods, makeMask toggle, threshold-strategy/cleanup/MMU section, `buildParams()` extracted | `854e0b6983` | 0116 |
 | 59 | Execution-resource estimates — `RSOperator::executionEstimate()` (tile/RAM/disk) merged into agent metadata (`execution` field); ~31 operators declare estimates (swarm, 5 groups) | `a1b5000e75` | 0117 |
 | 60 | Batch-processing QGIS algorithm parameters — `runBatchItem` overrides become `QVariantMap`; QGIS algorithms get parameter-widget wrappers in the shared overrides section (INPUT/OUTPUT pinned by the batch item) | `91c67b1964` | 0118 |
+| R2 | Review remediation round 2 (qt-cpp-review, 6 parallel agents, slices 52–60): context leak, initial-param section, loop-invariant overrides, LongLong dispatch, vector output ext, percentile p=0, statistical guard/degenerate fallback, legacy change_mask controls, MMU int guard, MCP commit thread routing, apply_mask radiometric-state passthrough | `176d9af621` | 0119 |
 
 ## 2. Verification
 
