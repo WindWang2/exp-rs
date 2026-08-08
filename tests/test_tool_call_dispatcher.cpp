@@ -778,6 +778,24 @@ TEST_CASE( "ToolCallDispatcher zero-argument default constructor delegates direc
   bool submitted = dispatcher.submit( envelope, []( const Json::Value & ) {}, &error, &taskIdOut );
   REQUIRE( submitted );
   REQUIRE( taskIdOut > 0 );
+
+  // The default-constructor watcher waits on a detached thread; under heavy
+  // parallel load the task can still be running when this test returns, and
+  // process static teardown would then tear down TaskCenter under the thread
+  // (segfault). Wait for a terminal state so the detached thread is done
+  // before main() returns.
+  const auto terminal = [taskIdOut]() {
+    for ( int i = 0; i < 2000; ++i )
+    {
+      const auto status = sicnu::TaskCenter::instance().getTaskInfo( taskIdOut ).status;
+      if ( status == sicnu::TaskStatus::Completed || status == sicnu::TaskStatus::Canceled
+           || status == sicnu::TaskStatus::Failed )
+        return true;
+      std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+    return false;
+  };
+  REQUIRE( terminal() );
 }
 
 // canvas: actions route to a CanvasActionHandler — the agent→canvas write-back
