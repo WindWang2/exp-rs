@@ -4,6 +4,7 @@
 #include "rs_apply_mask_operator.h"
 
 #include "data/raster_grid_compat.h"
+#include "processing/algorithms/satellite_products.h"
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -372,6 +373,15 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
             GDALSetMetadataItem(outBand, "FWHM", fwhm.toUtf8().constData(), nullptr);
     }
     GDALSetMetadataItem(out.dataset(), "SICNU_MASKED_BY", maskPath.c_str(), nullptr);
+    // The radiometric state is dataset-level product metadata; carry it over so
+    // the calibration → apply-mask → change-detection chain keeps its
+    // comparability check working (ADR 0114).
+    const QString radiometricState =
+        SatelliteProducts::readRadiometricState(QString::fromStdString(inputPath));
+    if (!radiometricState.isEmpty()) {
+        GDALSetMetadataItem(out.dataset(), SatelliteProducts::kRadiometricStateKey,
+                            radiometricState.toUtf8().constData(), nullptr);
+    }
     out.close();
     // Deferred flush/trailer errors only surface at close; a truncated output
     // must not be reported as success (ADR 0105 review remediation).

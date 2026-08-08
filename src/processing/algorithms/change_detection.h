@@ -10,7 +10,8 @@ namespace ChangeDetection
 {
 
 struct ChangeStats {
-    size_t count = 0;
+    size_t count = 0;        ///< total samples
+    size_t validCount = 0;   ///< finite (non-NaN) samples the mean/stddev use
     float mean = 0.0f;
     float min = 0.0f;
     float max = 0.0f;

@@ -170,6 +170,8 @@ BatchProcessingDialog::BatchProcessingDialog( QWidget *parent )
   setupUi();
 }
 
+BatchProcessingDialog::~BatchProcessingDialog() = default;
+
 void BatchProcessingDialog::setupUi()
 {
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
@@ -287,6 +289,10 @@ void BatchProcessingDialog::setupUi()
   connect( m_runButton, &QPushButton::clicked, this, &BatchProcessingDialog::onRun );
   btnLayout->addWidget( m_runButton );
   mainLayout->addLayout( btnLayout );
+
+  // The first addItem() fired currentIndexChanged before the widgets existed;
+  // rebuild the parameter section for the initially selected algorithm now.
+  updateAlgorithmParameters();
 }
 
 void BatchProcessingDialog::setAlgorithmId(const QString &algorithmId)
@@ -357,6 +363,27 @@ void BatchProcessingDialog::onRun()
     m_progressBar->setValue(0);
 
     const QString algorithmId = m_algorithmCombo->currentData().toString();
+    // The parameter form is frozen while the batch runs; collect once.
+    const QVariantMap overrides = collectParamOverrides();
+
+    // Output extension follows the algorithm's sink type: rasters → .tif,
+    // vector outputs → .gpkg (a fixed .tif would fail for vector algorithms).
+    QString outputExt = QStringLiteral( ".tif" );
+    if ( !algorithmId.startsWith( QStringLiteral( "rs:" ) ) )
+    {
+      const QgsProcessingAlgorithm *alg =
+        QgsApplication::processingRegistry()->algorithmById( algorithmId );
+      if ( alg )
+      {
+        if ( const QgsProcessingParameterDefinition *out =
+               alg->parameterDefinition( QStringLiteral( "OUTPUT" ) ) )
+        {
+          if ( out->type() == QStringLiteral( "vectorDestination" ) )
+            outputExt = QStringLiteral( ".gpkg" );
+        }
+      }
+    }
+
     int successCount = 0;
     int failCount = 0;
     QStringList errorMessages;
@@ -369,11 +396,11 @@ void BatchProcessingDialog::onRun()
 
         // Build output path
         QString baseName = QFileInfo(inputFile).completeBaseName();
-        QString outputPath = m_outputDir + QStringLiteral("/") + baseName + QStringLiteral("_processed.tif");
+        QString outputPath = m_outputDir + QStringLiteral("/") + baseName
+                             + QStringLiteral("_processed") + outputExt;
 
         try {
             QString itemError;
-            const QVariantMap overrides = collectParamOverrides();
             if (runBatchItem(algorithmId, inputFile, outputPath, &itemError, overrides)) {
                 successCount++;
             } else {
@@ -486,7 +513,7 @@ void BatchProcessingDialog::rebuildQgisParamForm(const QgsProcessingAlgorithm *a
     clearParamForm();
 
     if (!m_qgisContext)
-        m_qgisContext = new QgsProcessingContext();
+        m_qgisContext = std::make_unique<QgsProcessingContext>();
     QgsProject *project = QgsProject::instance();
     if (project)
     {
@@ -687,8 +714,10 @@ bool BatchProcessingDialog::runBatchItem(const QString &algorithmId,
                     params[key] = value.toBool();
                 else if (value.userType() == QMetaType::Double)
                     params[key] = value.toDouble();
+                else if (value.userType() == QMetaType::LongLong
+                         || value.userType() == QMetaType::ULongLong)
+                    params[key] = static_cast<Json::Int64>(value.toLongLong());
                 else if (value.userType() == QMetaType::Int
-                         || value.userType() == QMetaType::LongLong
                          || value.userType() == QMetaType::UInt)
                     params[key] = value.toInt();
                 else

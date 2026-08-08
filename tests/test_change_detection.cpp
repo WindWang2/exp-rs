@@ -268,3 +268,12 @@ TEST_CASE("ChangeDetection connectedComponentFilter enforces the MMU", "[process
         CHECK_FALSE(connectedComponentFilter(mask.data(), 0, 5, 1));
     }
 }
+
+TEST_CASE("ChangeDetection percentileThreshold p=0 returns the minimum", "[processing][change_detection]") {
+    std::vector<float> values = {10.0f, 5.0f, 20.0f, 3.0f};
+    float threshold = 0.0f;
+    REQUIRE(percentileThreshold(values.data(), values.size(), 0.0, &threshold));
+    CHECK(threshold == 3.0f); // nearest-rank p=0 is the minimum, not the max
+    REQUIRE(percentileThreshold(values.data(), values.size(), 100.0, &threshold));
+    CHECK(threshold == 20.0f);
+}

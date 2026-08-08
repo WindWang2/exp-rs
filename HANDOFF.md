@@ -1,8 +1,8 @@
 # HANDOFF — Autonomous RS System Perfection (/goal) — Optical Platform Session
 
 **Date:** 2026-08-08
-**Mode:** FULL_AUTONOMOUS_LOOP — 60 committed vertical slices + F-hardening +
-review remediation (ADR 0065–0118)
+**Mode:** FULL_AUTONOMOUS_LOOP — 60 committed vertical slices + 3 review
+remediation rounds (ADR 0065–0119)
 **Scope:** Deepen `exp-rs` toward the general-purpose optical/multispectral/
 hyperspectral processing platform (mission: product import → calibration →
 QA masking → atmospheric correction → geometric/grid → analysis-ready →

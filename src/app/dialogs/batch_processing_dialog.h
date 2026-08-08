@@ -7,6 +7,8 @@
 #include <QStringList>
 #include <QVariantMap>
 
+#include <memory>
+
 class QComboBox;
 class QDoubleSpinBox;
 class QFormLayout;
@@ -36,6 +38,7 @@ class BatchProcessingDialog : public QDialog
 
 public:
     explicit BatchProcessingDialog(QWidget *parent = nullptr);
+    ~BatchProcessingDialog() override;
 
     void setAlgorithmId(const QString &algorithmId);
 
@@ -95,7 +98,8 @@ private:
     QHash<QString, QWidget *> m_paramWidgets;
     /// QGIS parameter wrappers for the current provider algorithm.
     QVector<QgsAbstractProcessingParameterWidgetWrapper *> m_qgisWrappers;
-    QgsProcessingContext *m_qgisContext = nullptr;
+    /// Processing context backing the QGIS parameter widgets.
+    std::unique_ptr<QgsProcessingContext> m_qgisContext;
 
     QStringList m_inputFiles;
     QString m_outputDir;

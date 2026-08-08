@@ -243,9 +243,14 @@ void ChangeDetectionDialog::updateMaskParamVisibility()
   m_percentileSpin->setVisible( percentile );
   m_statisticalKSpin->setVisible( statistical );
 
-  // The legacy change_mask method only supports the manual threshold.
+  // The legacy change_mask method only supports the manual threshold; its
+  // backend path also ignores cleanup and the MMU, so those controls are
+  // disabled (not just the strategy combo).
   const bool legacy = ( method == QStringLiteral( "change_mask" ) );
   m_thresholdMethodCombo->setEnabled( !legacy );
+  m_cleanupCombo->setEnabled( !legacy );
+  m_cleanupIterSpin->setEnabled( !legacy );
+  m_minAreaSpin->setEnabled( !legacy );
   if ( legacy && strategy != QStringLiteral( "manual" ) )
     m_thresholdMethodCombo->setCurrentIndex(
       m_thresholdMethodCombo->findData( QStringLiteral( "manual" ) ) );

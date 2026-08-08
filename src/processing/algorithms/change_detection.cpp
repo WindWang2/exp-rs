@@ -73,6 +73,7 @@ ChangeStats statistics(const float *diff, size_t count)
     MathUtils::Stats mathStats = MathUtils::computeStats(diff, count);
 
     stats.count = mathStats.count;
+    stats.validCount = mathStats.validCount;
     stats.min = mathStats.min;
     stats.max = mathStats.max;
     stats.mean = mathStats.mean;
@@ -211,9 +212,13 @@ bool percentileThreshold(const float *values, size_t count, float percentile, fl
 
     const double p = std::clamp(static_cast<double>(percentile), 0.0, 100.0);
     std::sort(finite.begin(), finite.end());
-    const size_t rank = static_cast<size_t>(
-        std::ceil(p / 100.0 * static_cast<double>(finite.size()))) - 1;
-    *threshold = finite[std::min(rank, finite.size() - 1)];
+    // nearest-rank index; p == 0.0 must yield the minimum (index 0), not a
+    // size_t underflow that wraps to the maximum.
+    const size_t size = finite.size();
+    const size_t ceilRank = static_cast<size_t>(
+        std::ceil(p / 100.0 * static_cast<double>(size)));
+    const size_t rank = ceilRank > 0 ? std::min(ceilRank, size) - 1 : 0;
+    *threshold = finite[rank];
     return true;
 }
 
@@ -326,6 +331,10 @@ bool connectedComponentFilter(uint8_t *mask, int width, int height,
 
     const size_t count = static_cast<size_t>(width) * height;
     if (count == 0) return true;
+    // The union-find stores node ids as int; refuse pathological rasters
+    // instead of wrapping indices into out-of-bounds access.
+    if (count > static_cast<size_t>(std::numeric_limits<int>::max()))
+        return false;
 
     // Union-find over the 1-pixels with 8-neighbourhood connectivity.
     std::vector<int> parent(count, -1);

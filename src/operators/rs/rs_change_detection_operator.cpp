@@ -310,12 +310,18 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
             if (ChangeDetection::percentileThreshold(mag.data(), pixelCount, percentile, &pct))
                 thresholdUsed = pct;
         } else if (thresholdMethod == "statistical") {
-            // mean + k*stddev over the finite change magnitudes.
-            const ChangeDetection::ChangeStats stats =
-                ChangeDetection::statistics(mag.data(), pixelCount);
-            if (stats.count > 0) {
+            // mean + k*stddev over the finite change magnitudes (the outer
+            // statistics pass already computed them; no second scan).
+            if (stats.validCount >= 2 && stats.stddev > 0.0f) {
                 thresholdUsed = static_cast<float>(
                     stats.mean + statisticalK * stats.stddev);
+            } else {
+                // Degenerate input (all identical / all-NaN change values):
+                // a zero threshold would flag the whole raster as changed,
+                // so fall back to the manual threshold with a warning.
+                context.logWarning(
+                    "statistical threshold: not enough varying finite values; "
+                    "falling back to the manual threshold");
             }
         }
 

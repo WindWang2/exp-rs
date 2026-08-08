@@ -8,6 +8,9 @@
 
 #include <chrono>
 #include <functional>
+#include <memory>
+
+class QObject;
 
 namespace sicnu::data {
 class DataManager;
@@ -152,6 +155,13 @@ private:
   OutputCommitterHandler mOutputCommitterHandler;
   CanvasActionHandler mCanvasActionHandler;
   sicnu::data::DataManager *mDataManager = nullptr;
+  /// QObject owned by the dispatcher's construction thread (the Data Manager's
+  /// owning thread in production). The completion watcher routes payload
+  /// construction — which commits outputs through the Data Manager — back to
+  /// this object's thread via QueuedConnection, because the detached watcher
+  /// thread must not touch the catalog directly. A shared_ptr keeps the bridge
+  /// alive across a dispatcher destructed while a watcher is still running.
+  std::shared_ptr<QObject> m_commitBridge;
 };
 
 } // namespace sicnu::processing

@@ -2094,3 +2094,76 @@ TEST_CASE("RS change detection minimum mapping unit drops small components", "[o
     CHECK(mask[9] == 1.0f);              // block pixel (1,1)
     CHECK(mask[(H - 1) * W + (W - 1)] == 0.0f); // dot removed
 }
+
+TEST_CASE("RS change detection statistical threshold degrades on invariant input", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString beforePath = tmp.path() + "/before.tif";
+    const QString afterPath = tmp.path() + "/after.tif";
+    const QString outputPath = tmp.path() + "/diff.tif";
+
+    // before == after: the difference magnitude is identically zero, so a
+    // statistical threshold has stddev == 0 and must fall back to the manual
+    // threshold instead of flagging the whole raster as changed (0 >= 0).
+    constexpr int W = 8;
+    constexpr int H = 8;
+    std::vector<float> band(W * H, 100.0f);
+    std::array<double, 6> gt = {500000, 10, 0, 4500000, 0, -10};
+    QString err;
+    REQUIRE(writeGdalOutput(beforePath, W, H, {band}, gt, "EPSG:32648", &err));
+    REQUIRE(writeGdalOutput(afterPath, W, H, {band}, gt, "EPSG:32648", &err));
+
+    Json::Value params(Json::objectValue);
+    params["before"] = beforePath.toStdString();
+    params["after"] = afterPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["method"] = "difference";
+    params["makeMask"] = true;
+    params["thresholdMethod"] = "statistical";
+    params["threshold"] = 0.5; // fallback
+
+    RSOperatorContext ctx;
+    auto op = RSOperatorRegistry::instance().create("rs:change_detection");
+    REQUIRE(op != nullptr);
+    const Json::Value result = op->run(params, ctx);
+
+    // Not the whole raster flagged as changed.
+    CHECK(result["changedPixels"].asUInt64() == 0);
+    CHECK(QFile::exists(outputPath));
+}
+
+TEST_CASE("RS apply_mask carries the radiometric state through", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/product.tif";
+    const QString maskPath = tmp.path() + "/mask.tif";
+    const QString outputPath = tmp.path() + "/masked.tif";
+
+    std::vector<std::vector<float>> bands(2, std::vector<float>(4, 100.0f));
+    std::vector<std::vector<float>> maskBands(1, std::vector<float>(4, 0.0f));
+    std::array<double, 6> gt = {500000, 10, 0, 4500000, 0, -10};
+    QString err;
+    REQUIRE(writeGdalOutput(inputPath, 2, 2, bands, gt, "EPSG:32648", &err));
+    REQUIRE(writeGdalOutput(maskPath, 2, 2, maskBands, gt, "EPSG:32648", &err));
+    REQUIRE(SatelliteProducts::setRadiometricState(
+        inputPath, SatelliteProducts::kRadiometricStateToaReflectance));
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["mask"] = maskPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["no_data"] = -9999.0;
+
+    RSOperatorContext ctx;
+    auto op = RSOperatorRegistry::instance().create("rs:apply_mask");
+    REQUIRE(op != nullptr);
+    op->run(params, ctx);
+
+    CHECK(QFile::exists(outputPath));
+    // The dataset-level radiometric state survives the mask so downstream
+    // change detection keeps its comparability check (ADR 0114).
+    CHECK(SatelliteProducts::readRadiometricState(outputPath)
+          == QString::fromUtf8(SatelliteProducts::kRadiometricStateToaReflectance));
+}

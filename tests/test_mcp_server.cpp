@@ -18,6 +18,7 @@
 #include "data/internal/source_provider_registry.h"
 #include "jobs/job_engine.h"
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/output_committer.h"
 #include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "operators/framework/rs_operator_registry.h"
@@ -29,6 +30,8 @@
 #include "processing/providers/gdal_tools/provider.h"
 #include "processing/providers/otb_tools/provider.h"
 #include <QTemporaryDir>
+#include <QThread>
+#include <QTimer>
 #include <gdal_priv.h>
 
 // Helper subclass of McpServer to expose handlers directly for unit testing
@@ -407,18 +410,23 @@ class LineageMemoryProvider final : public sicnu::data::internal::SourceProvider
   public:
     bool supports( const sicnu::data::SourceDescriptor &source ) const override
     {
-      return source.providerKey == QStringLiteral( "memory-raster" );
+      return source.providerKey == QStringLiteral( "memory-raster" )
+             || source.providerKey == QStringLiteral( "gdal" );
     }
 
     sicnu::data::Result<sicnu::data::internal::ResolvedSource> resolve(
       const sicnu::data::SourceDescriptor &source ) const override
     {
+      const sicnu::data::StorageKind storage =
+        ( source.providerKey == QStringLiteral( "gdal" ) )
+          ? sicnu::data::StorageKind::File
+          : sicnu::data::StorageKind::Memory;
       return sicnu::data::Result<sicnu::data::internal::ResolvedSource>::success(
         sicnu::data::internal::ResolvedSource{ sicnu::data::AssetKind::Raster,
                                      sicnu::data::AssetState::Ready,
                                      sicnu::data::AssetCapability::Renderable
                                        | sicnu::data::AssetCapability::ReadablePixels,
-                                     sicnu::data::StorageKind::Memory,
+                                     storage,
                                      source.canonicalSource } );
     }
 };
@@ -523,4 +531,47 @@ TEST_CASE( "McpServer get_lineage exposes provenance and lineage", "[agent][mcp]
       CHECK( QString::fromStdString( e.what() ).contains( QStringLiteral( "Asset not found" ) ) );
     }
   }
+}
+
+
+
+TEST_CASE( "OutputCommitter registers a published output on the owning thread", "[agent][mcp][commit]" )
+{
+  const auto manager = makeLineageDataManager();
+  REQUIRE( manager );
+
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString output = dir.filePath( QStringLiteral( "scene.tif" ) );
+  std::vector<std::vector<float>> bands( 1, std::vector<float>( 4, 10.0f ) );
+  std::array<double, 6> gt = { 0, 1, 0, 0, 0, -1 };
+  QString err;
+  REQUIRE( writeGdalOutput( output, 2, 2, bands, gt, QStringLiteral( "EPSG:32648" ), &err ) );
+
+  sicnu::OutputCommitter committer( manager.get() );
+  sicnu::AlgorithmOutputRequest request;
+  request.kind = sicnu::data::AssetKind::Raster;
+  request.tempPath = output;
+  request.stablePath = output + QStringLiteral( ".stable.tif" );
+  request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
+  request.autoLoad = false;
+  request.derivation.algorithmId = QStringLiteral( "rs:test" );
+
+  const auto commitResult = committer.commit( request );
+  if ( !commitResult )
+  {
+    INFO( "commit failed: "
+          << ( commitResult.diagnostics().isEmpty()
+                 ? QStringLiteral( "no diagnostics" )
+                 : commitResult.diagnostics().first().message ).toStdString() );
+    FAIL( "commit should succeed" );
+  }
+
+  bool registered = false;
+  for ( const auto &snapshot : manager->assets() )
+  {
+    if ( snapshot.source().canonicalSource == output + QStringLiteral( ".stable.tif" ) )
+      registered = true;
+  }
+  CHECK( registered );
 }
