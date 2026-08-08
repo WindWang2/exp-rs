@@ -71,6 +71,9 @@ analysis → accuracy → provenance, all through the Processing Registry).
 | 54 | MCP `get_lineage` — agent-facing provenance queries (asset + deriving algorithm/parameters + derivedFrom/derivedOutputsOf via the Data Manager) | `0b0aca41c0` | 0112 |
 | 55 | Batch-processing RS parameter overrides — per-operator parameter form (typed editors from the schema, defaults prefilled) merged over declared defaults in `runBatchItem`; main input/output not overridable | `ca37754aaa` | 0113 |
 | 56 | Radiometric-state metadata (`SICNU_RADIOMETRIC_STATE`) written by calibration/atmospheric correction; change detection fails on differing declared states (comparable-radiometric-state check) | `10e44874d3` | 0114 |
+| 57 | Change detection statistical threshold (mean + k·stddev) + minimum mapping unit (`connectedComponentFilter`, union-find 8-conn, `minAreaPixels` + mask metadata) | `519e8b7872` | 0115 |
+| 58 | Change-detection dialog aligned with the backend — ratio/CVA methods, makeMask toggle, threshold-strategy/cleanup/MMU section, `buildParams()` extracted | `854e0b6983` | 0116 |
+| 59 | Execution-resource estimates — `RSOperator::executionEstimate()` (tile/RAM/disk) merged into agent metadata (`execution` field); ~31 operators declare estimates (swarm, 5 groups) | `a1b5000e75` | 0117 |
 
 ## 2. Verification
 
