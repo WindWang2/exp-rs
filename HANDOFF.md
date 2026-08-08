@@ -1,8 +1,8 @@
 # HANDOFF — Autonomous RS System Perfection (/goal) — Optical Platform Session
 
 **Date:** 2026-08-08
-**Mode:** FULL_AUTONOMOUS_LOOP — 59 committed vertical slices + F-hardening +
-review remediation (ADR 0065–0117)
+**Mode:** FULL_AUTONOMOUS_LOOP — 60 committed vertical slices + F-hardening +
+review remediation (ADR 0065–0118)
 **Scope:** Deepen `exp-rs` toward the general-purpose optical/multispectral/
 hyperspectral processing platform (mission: product import → calibration →
 QA masking → atmospheric correction → geometric/grid → analysis-ready →
@@ -10,7 +10,7 @@ analysis → accuracy → provenance, all through the Processing Registry).
 
 ---
 
-## 1. Session Summary — 59 Slices, All Tested, All Committed
+## 1. Session Summary — 60 Slices, All Tested, All Committed
 
 | # | Slice | Commit | ADR |
 |---|-------|--------|-----|
@@ -74,6 +74,7 @@ analysis → accuracy → provenance, all through the Processing Registry).
 | 57 | Change detection statistical threshold (mean + k·stddev) + minimum mapping unit (`connectedComponentFilter`, union-find 8-conn, `minAreaPixels` + mask metadata) | `519e8b7872` | 0115 |
 | 58 | Change-detection dialog aligned with the backend — ratio/CVA methods, makeMask toggle, threshold-strategy/cleanup/MMU section, `buildParams()` extracted | `854e0b6983` | 0116 |
 | 59 | Execution-resource estimates — `RSOperator::executionEstimate()` (tile/RAM/disk) merged into agent metadata (`execution` field); ~31 operators declare estimates (swarm, 5 groups) | `a1b5000e75` | 0117 |
+| 60 | Batch-processing QGIS algorithm parameters — `runBatchItem` overrides become `QVariantMap`; QGIS algorithms get parameter-widget wrappers in the shared overrides section (INPUT/OUTPUT pinned by the batch item) | `91c67b1964` | 0118 |
 
 ## 2. Verification
 
