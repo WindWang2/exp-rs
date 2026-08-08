@@ -1,6 +1,7 @@
 // roi_statistics_widget.h — ROI Statistics Analysis Widget
 #pragma once
 
+#include <QPointer>
 #include <QWidget>
 #include <QVector>
 
@@ -36,8 +37,11 @@ private:
     QPushButton *m_exportBtn = nullptr;
     QPushButton *m_refreshBtn = nullptr;
 
-    QgsRasterLayer *m_rasterLayer = nullptr;
-    QgsVectorLayer *m_roiLayer = nullptr;
+    // QPointer so the references null automatically when a layer is removed
+    // from the project (perf/architecture goal §13: layer-remove lifetime safety).
+    // computeStatistics null-checks before dereferencing.
+    QPointer<QgsRasterLayer> m_rasterLayer;
+    QPointer<QgsVectorLayer> m_roiLayer;
 
     struct BandStats {
         double min = 0.0;

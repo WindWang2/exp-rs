@@ -1,6 +1,7 @@
 // cross_section_widget.h — Cross-Section Profile Widget
 #pragma once
 
+#include <QPointer>
 #include <QWidget>
 #include <QVector>
 
@@ -37,7 +38,10 @@ private:
     void drawChart(QPainter &painter, const QRect &chartRect);
     void drawAxes(QPainter &painter, const QRect &chartRect);
 
-    QgsRasterLayer *m_rasterLayer = nullptr;
+    // QPointer so the reference nulls automatically when the layer is removed
+    // from the project (perf/architecture goal §13: project-close / layer-remove
+    // lifetime safety). The extractProfile/paint paths already null-check.
+    QPointer<QgsRasterLayer> m_rasterLayer;
     QVector<double> m_values;
     QVector<double> m_distances;
     QString m_layerName;
