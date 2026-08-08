@@ -12,7 +12,8 @@ namespace SpectralAnomaly
     /// Background statistics for the RX detector, computed in streaming passes.
     /// mean.size() == bands; covariance.size() == bands*bands (row-major). The
     /// covariance is the biased sample covariance (sum of centered outer
-    /// products / count) — bit-identical to rxDetector's two-pass computation.
+    /// products / count) — numerically equivalent to rxDetector's two-pass
+    /// computation (within floating-point rounding for multi-tile passes).
     /// Exposed so streaming operators can compute stats in tile passes and then
     /// score per-tile without materializing the whole raster (perf goal §2c).
     /// Note: the mean and covariance passes are SEPARATE accumulators (a mean
@@ -50,6 +51,12 @@ namespace SpectralAnomaly
     /// Equivalent to the per-pixel step of rxDetector. @a spectrum size == bands.
     float rxScore( const float *spectrum, const std::vector<double> &mean,
                    const std::vector<double> &inverseCov, int bands );
+
+    /// Per-pixel RX score reusing a caller-provided scratch buffer (size >= bands)
+    /// to avoid a per-pixel heap allocation in tight streaming loops (perf goal §2c).
+    float rxScore( const float *spectrum, const std::vector<double> &mean,
+                   const std::vector<double> &inverseCov, int bands,
+                   std::vector<double> *scratch );
 
     /**
      * Reed-Xiaoli (RX) detector: per-pixel Mahalanobis distance to the global

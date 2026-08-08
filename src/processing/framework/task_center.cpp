@@ -150,6 +150,9 @@ void TaskCenter::setMemoryLimitMb( unsigned int mb )
 {
     QMutexLocker locker( &m_mutex );
     m_resourceMonitor.setMemoryLimitMb( mb );
+    // Keep the resource-aware budget in sync with the watermark (the documented
+    // invariant — both gates must use the same cap, perf/architecture goal §7).
+    m_resourceBudget.setBudgetMb( mb );
 }
 
 unsigned int TaskCenter::memoryLimitMb() const

@@ -92,8 +92,9 @@ Json::Value RsRxAnomalyOperator::run(const Json::Value& params,
 
     // Three-pass streaming RX (perf goal §2c): the whole raster is never
     // resident. Pass 1 accumulates the mean, pass 2 the covariance, pass 3
-    // scores per-tile and streams output. Stats accumulation order matches the
-    // legacy full-raster rxDetector bit-for-bit.
+    // scores per-tile and streams output. The stats accumulate in the same
+    // per-pixel order as the legacy kernel, so results match within FP rounding
+    // (verified against the full-raster kernel with an Approx tolerance).
     constexpr int kTile = 256;
     GdalMultibandBlockStream stream( ds, bandCount, kTile, kTile );
     const int totalTiles = stream.tileCount();
@@ -145,13 +146,15 @@ Json::Value RsRxAnomalyOperator::run(const Json::Value& params,
     size_t scoredPixels = 0;
     tilesSeen = 0;
     std::vector<float> tileScores;
+    std::vector<double> rxScratch; // reused across pixels (no per-pixel alloc)
     if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
             const size_t tilePixels = static_cast<size_t>( tile.width ) * tile.height;
             tileScores.assign( tilePixels, 0.0f );
             for ( size_t p = 0; p < tilePixels; ++p )
             {
                 const float s = SpectralAnomaly::rxScore(
-                    bip + p * static_cast<size_t>( bandCount ), stats.mean, invCov, bandCount );
+                    bip + p * static_cast<size_t>( bandCount ), stats.mean, invCov, bandCount,
+                    &rxScratch );
                 tileScores[p] = s;
                 sumScores += s;
                 if ( s > maxScore )

@@ -88,7 +88,8 @@ void accumulateMean( const float *pixels, size_t count, int bands,
         stats->count = 0;
     }
     // Same accumulation order as rxDetector's mean loop (band-inner) so a
-    // multi-tile pass reproduces the full-raster mean bit-for-bit.
+    // multi-tile pass reproduces the full-raster mean (the sum is order-tolerant
+    // for this accumulator; values match within FP rounding).
     for ( size_t p = 0; p < count; ++p )
         for ( int b = 0; b < bands; ++b )
             stats->mean[b] += pixels[p * static_cast<size_t>( bands ) + b];
@@ -115,10 +116,12 @@ void accumulateCovariance( const float *pixels, size_t count, int bands,
         stats->count = 0;
     }
     // Centered outer product, accumulated in the same order as rxDetector's
-    // covariance loop (pixel-outer, band-inner full i,j) → bit-identical.
+    // covariance loop (pixel-outer, band-inner full i,j) → numerically
+    // equivalent. Scratch reused across pixels (perf goal §2c: no per-pixel
+    // heap allocation in the hot loop).
+    std::vector<double> d( bands );
     for ( size_t p = 0; p < count; ++p )
     {
-        std::vector<double> d( bands );
         for ( int b = 0; b < bands; ++b )
             d[b] = pixels[p * static_cast<size_t>( bands ) + b] - stats->mean[b];
         for ( int i = 0; i < bands; ++i )
@@ -152,6 +155,19 @@ float rxScore( const float *spectrum, const std::vector<double> &mean,
                const std::vector<double> &inverseCov, int bands )
 {
     std::vector<double> d( bands );
+    return rxScore( spectrum, mean, inverseCov, bands, &d );
+}
+
+float rxScore( const float *spectrum, const std::vector<double> &mean,
+               const std::vector<double> &inverseCov, int bands,
+               std::vector<double> *scratch )
+{
+    // Reuse the caller-provided scratch (resized once) to avoid a per-pixel heap
+    // allocation in tight streaming loops (perf goal §2c).
+    static thread_local std::vector<double> fallback;
+    std::vector<double> &d = scratch ? *scratch : fallback;
+    if ( d.size() < static_cast<size_t>( bands ) )
+        d.resize( bands );
     for ( int b = 0; b < bands; ++b )
         d[b] = static_cast<double>( spectrum[b] ) - mean[b];
 
