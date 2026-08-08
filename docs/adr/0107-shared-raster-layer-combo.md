@@ -21,7 +21,9 @@ still populated its own before/after layer combos with a copy of the
 
 ## Consequences
 
-- One canonical raster picker for future dialogs (comparison dialog adoption
-  is a follow-up); two dialogs lose their duplicated populate loops while
-  keeping identical behavior (their dialog tests stay green: 42/1 and the
-  widget test 13/1 pin listing, id resolution, and unknown-id no-op).
+- One canonical raster picker for all multi-raster dialogs: the comparison
+  dialog adoption completes the C5 consolidation (post-classification,
+  change-detection, and comparison dialogs all use `RasterLayerCombo`), and
+  three dialogs lose their duplicated populate loops while keeping identical
+  behavior (their dialog tests stay green: 42/1, 22/8, and the widget test
+  13/1 pin listing, id resolution, and unknown-id no-op).

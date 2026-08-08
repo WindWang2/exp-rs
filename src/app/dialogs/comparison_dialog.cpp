@@ -3,6 +3,7 @@
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
 #include "widgets/comparison_widget.h"
+#include "widgets/raster_layer_combo.h"
 
 #include <qgsmaprendererparalleljob.h>
 #include <qgsmapsettings.h>
@@ -37,12 +38,12 @@ void ComparisonDialog::setupUi()
   auto *layerLayout = new QHBoxLayout();
   layerLayout->setContentsMargins( 0, 0, 0, 0 );
   layerLayout->addWidget( new QLabel( tr( "左侧" ), bar ) );
-  m_leftLayerCombo = new QComboBox( bar );
+  m_leftLayerCombo = new RasterLayerCombo( bar );
   m_leftLayerCombo->setMinimumWidth( 200 );
   SicnuDialogHelp::tip( m_leftLayerCombo, tr( "左侧对比栅格。" ) );
   layerLayout->addWidget( m_leftLayerCombo, 1 );
   layerLayout->addWidget( new QLabel( tr( "右侧" ), bar ) );
-  m_rightLayerCombo = new QComboBox( bar );
+  m_rightLayerCombo = new RasterLayerCombo( bar );
   m_rightLayerCombo->setMinimumWidth( 200 );
   SicnuDialogHelp::tip( m_rightLayerCombo, tr( "右侧对比栅格。" ) );
   layerLayout->addWidget( m_rightLayerCombo, 1 );
@@ -57,15 +58,9 @@ void ComparisonDialog::setupUi()
   m_comparisonWidget = new ComparisonWidget( this );
   mainLayout->addWidget( m_comparisonWidget, 1 );
 
-  const auto layers = QgsProject::instance()->mapLayers().values();
-  for ( QgsMapLayer *layer : layers )
-  {
-    if ( layer->type() == Qgis::LayerType::Raster )
-    {
-      m_leftLayerCombo->addItem( layer->name(), layer->id() );
-      m_rightLayerCombo->addItem( layer->name(), layer->id() );
-    }
-  }
+  // Shared raster picker (C5, ADR 0107): list project rasters once.
+  m_leftLayerCombo->populate();
+  m_rightLayerCombo->populate();
   if ( m_rightLayerCombo->count() > 1 )
     m_rightLayerCombo->setCurrentIndex( 1 );
 
@@ -99,21 +94,13 @@ void ComparisonDialog::setRightLayer(QgsRasterLayer *layer)
 void ComparisonDialog::onBrowseLeft()
 {
     // Find and set left layer from combo
-    QString layerId = m_leftLayerCombo->currentData().toString();
-    QgsMapLayer *layer = QgsProject::instance()->mapLayer(layerId);
-    if (layer && layer->type() == Qgis::LayerType::Raster) {
-        setLeftLayer(qobject_cast<QgsRasterLayer*>(layer));
-    }
+    setLeftLayer( m_leftLayerCombo->currentRasterLayer() );
 }
 
 void ComparisonDialog::onBrowseRight()
 {
     // Find and set right layer from combo
-    QString layerId = m_rightLayerCombo->currentData().toString();
-    QgsMapLayer *layer = QgsProject::instance()->mapLayer(layerId);
-    if (layer && layer->type() == Qgis::LayerType::Raster) {
-        setRightLayer(qobject_cast<QgsRasterLayer*>(layer));
-    }
+    setRightLayer( m_rightLayerCombo->currentRasterLayer() );
 }
 
 void ComparisonDialog::onLoadLayers()

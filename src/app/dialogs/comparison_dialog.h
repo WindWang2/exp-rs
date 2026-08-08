@@ -6,6 +6,7 @@
 class ComparisonWidget;
 class QComboBox;
 class QPushButton;
+class RasterLayerCombo;
 class QgsRasterLayer;
 
 /**
@@ -31,8 +32,8 @@ private:
     void loadLayerToWidget(QgsRasterLayer *layer, bool isLeft);
 
     ComparisonWidget *m_comparisonWidget = nullptr;
-    QComboBox *m_leftLayerCombo = nullptr;
-    QComboBox *m_rightLayerCombo = nullptr;
+    RasterLayerCombo *m_leftLayerCombo = nullptr;
+    RasterLayerCombo *m_rightLayerCombo = nullptr;
     QPushButton *m_loadButton = nullptr;
 
     QgsRasterLayer *m_leftLayer = nullptr;

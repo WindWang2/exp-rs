@@ -704,6 +704,7 @@ add_executable(test_comparison_widget test_comparison_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/comparison_dialog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/raster_layer_combo.cpp
   ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
 )
 target_link_libraries(test_comparison_widget PRIVATE
