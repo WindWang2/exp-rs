@@ -9,9 +9,12 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/spectral_classification.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_multiband_block_stream.h"
 
 #include <QString>
 
+#include <cmath>
+#include <memory>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -100,13 +103,12 @@ Json::Value RsSamClassifyOperator::metadata() const {
 
 Json::Value RsSamClassifyOperator::executionEstimate() const
 {
-    // FullRaster (default policy): the pixel-major multi-band buffer, labels,
-    // per-pixel angles and up to two output bands are all resident for the
-    // whole raster.
+    // Streaming: one 256x256 BIP tile window + per-tile labels/angles/output
+    // buffers are resident. Independent of raster size.
     Json::Value est( Json::objectValue );
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 41943040; // ~10 x 1024x1024 Float32 buffers (40 MiB)
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = 1048576; // ~1 MiB (tile + a few per-tile buffers)
     return est;
 }
 
@@ -147,79 +149,84 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
                      std::to_string( width ) + "x" +
                      std::to_string( height ) + ", " + std::to_string( nBands ) +
                      " bands, " + std::to_string( refCount ) + " classes" );
-    context.reportProgress( 0.15, "Reading bands" );
 
     // Resolve the input nodata sentinel: prefer the raster-declared band-1
     // nodata, falling back to the project convention (-9999) when none is set.
-    // Using the source nodata lets the kernel correctly detect nodata pixels
-    // for rasters whose nodata is 0/NaN/-32768 rather than -9999.
     bool hasNodata = false;
     double srcNodata = ds.bandNoDataValue( bands[0], &hasNodata );
     const float nodata = hasNodata ? static_cast<float>( srcNodata ) : -9999.0f;
 
-    // Read selected bands into a pixel-major buffer (pixel-major = contiguous
-    // per pixel so the kernel can index [p*bands + b]).
-    const size_t pixelCount = static_cast<size_t>( width ) * height;
-    std::vector<float> pixels( pixelCount * static_cast<size_t>( nBands ), 0.0f );
-    for ( int bi = 0; bi < nBands; ++bi )
+    // Single-pass streaming (perf goal §2c): stream the selected bands tile-by-
+    // tile as a BIP window, classify per-tile (the kernel is per-pixel), and
+    // stream labels + optional angles out. The whole raster is never resident.
+    constexpr int kTile = 256;
+    GdalMultibandBlockStream stream( ds, bands, kTile, kTile );
+    const int totalTiles = stream.tileCount();
+    const double perTileProgress = totalTiles > 0 ? 1.0 / totalTiles : 0.0;
+
+    // Output nodata is fixed (-9999) — distinct from the input-resolved nodata
+    // (labels are class ids in [0, refCount) and never collide with -9999).
+    constexpr float outputNodata = -9999.0f;
+    GdalStreamingOutput labelOut( QString::fromStdString( outputPath ), width, height, 1,
+                                  GDT_Float32, ds.geoTransform(), ds.projection() );
+    if ( !labelOut.isOpen() )
+        throw RSOperatorError( ErrorCode::FileNotWritable,
+                              "Failed to create classified raster: " + outputPath );
+
+    const std::string anglePath = getString( params, "angleOut", "" );
+    std::unique_ptr<GdalStreamingOutput> angleOut;
+    if ( !anglePath.empty() )
     {
-        std::vector<float> bandData( pixelCount );
-        if ( !ds.readBandData( bands[bi], bandData.data(), width, height ) )
-            throw RSOperatorError( ErrorCode::GdalError,
-                                  "Failed to read band " + std::to_string( bands[bi] ) );
-        for ( size_t p = 0; p < pixelCount; ++p )
-            pixels[p * static_cast<size_t>( nBands ) + bi] = bandData[p];
+        angleOut = std::make_unique<GdalStreamingOutput>(
+            QString::fromStdString( anglePath ), width, height, 1, GDT_Float32,
+            ds.geoTransform(), ds.projection() );
+        if ( !angleOut->isOpen() )
+            throw RSOperatorError( ErrorCode::FileNotWritable,
+                                  "Failed to create angle raster: " + anglePath );
     }
 
-    context.reportProgress( 0.45, "Classifying" );
-
-    std::vector<int> labels( pixelCount );
-    std::vector<float> angles( pixelCount, 0.0f );
-    const bool ok = ( metric == "sid" )
-        ? SpectralClassification::sidClassify( pixels.data(), pixelCount, nBands,
-                                               refs.data(), refCount,
-                                               labels.data(), angles.data(), nodata )
-        : SpectralClassification::samClassify( pixels.data(), pixelCount, nBands,
-                                               refs.data(), refCount,
-                                               labels.data(), angles.data(), nodata );
-    if ( !ok )
+    int tilesSeen = 0;
+    std::vector<int> tileLabels;
+    std::vector<float> tileAngles;
+    std::vector<float> tileLabelBand;
+    std::vector<float> tileAngleBand;
+    if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
+            const size_t tilePixels = static_cast<size_t>( tile.width ) * tile.height;
+            tileLabels.assign( tilePixels, 0 );
+            tileAngles.assign( tilePixels, 0.0f );
+            const bool ok = ( metric == "sid" )
+                ? SpectralClassification::sidClassify( bip, tilePixels, nBands,
+                                                       refs.data(), refCount,
+                                                       tileLabels.data(), tileAngles.data(), nodata )
+                : SpectralClassification::samClassify( bip, tilePixels, nBands,
+                                                       refs.data(), refCount,
+                                                       tileLabels.data(), tileAngles.data(), nodata );
+            if ( !ok )
+                return false;
+            tileLabelBand.assign( tilePixels, outputNodata );
+            for ( size_t p = 0; p < tilePixels; ++p )
+                if ( tileLabels[p] >= 0 )
+                    tileLabelBand[p] = static_cast<float>( tileLabels[p] );
+            if ( !labelOut.writeTile( 1, tile, tileLabelBand.data() ) )
+                return false;
+            if ( angleOut )
+            {
+                tileAngleBand.assign( tilePixels, outputNodata );
+                for ( size_t p = 0; p < tilePixels; ++p )
+                    if ( std::isfinite( tileAngles[p] ) )
+                        tileAngleBand[p] = tileAngles[p];
+                if ( !angleOut->writeTile( 1, tile, tileAngleBand.data() ) )
+                    return false;
+            }
+            context.reportProgress( ( ++tilesSeen ) * perTileProgress, "Classifying" );
+            return true;
+        } ) )
         throw RSOperatorError( ErrorCode::ComputationError,
                               "Spectral classification kernel failed" );
 
-    context.throwIfCancelled();
-    context.reportProgress( 0.75, "Writing output" );
-
-    // Output nodata is fixed (-9999) — distinct from the input-resolved nodata
-    // because the label values are class ids in [0, refCount) and never
-    // collide with -9999.
-    constexpr float outputNodata = -9999.0f;
-    std::vector<float> labelBand( pixelCount );
-    for ( size_t p = 0; p < pixelCount; ++p )
-        labelBand[p] = ( labels[p] < 0 ) ? outputNodata : static_cast<float>( labels[p] );
-
-    QString errorMessage;
-    if ( !writeGdalOutput( QString::fromStdString( outputPath ), width, height, { labelBand },
-                           ds.geoTransform(), ds.projection(), &errorMessage ) )
-        throw RSOperatorError( ErrorCode::FileNotWritable,
-                              "Failed to write classified raster: " + errorMessage.toStdString() );
-
-    // Optional angle raster.
-    const std::string anglePath = getString( params, "angleOut", "" );
-    if ( !anglePath.empty() )
-    {
-        std::vector<float> angleBand( pixelCount );
-        for ( size_t p = 0; p < pixelCount; ++p )
-        {
-            if ( !std::isfinite( angles[p] ) )
-                angleBand[p] = outputNodata;
-            else
-                angleBand[p] = angles[p];
-        }
-        if ( !writeGdalOutput( QString::fromStdString( anglePath ), width, height, { angleBand },
-                               ds.geoTransform(), ds.projection(), &errorMessage ) )
-            throw RSOperatorError( ErrorCode::FileNotWritable,
-                                  "Failed to write angle raster: " + errorMessage.toStdString() );
-    }
+    labelOut.close();
+    if ( angleOut )
+        angleOut->close();
 
     ds.close();
     context.reportProgress( 1.0, "SAM classification complete" );

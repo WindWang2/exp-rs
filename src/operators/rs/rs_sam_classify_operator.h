@@ -35,6 +35,11 @@ public:
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        // Single-pass streaming: per-pixel kernel over a BIP tile window.
+        return RSOperatorMemoryPolicy::Streaming;
+    }
     Json::Value run(const Json::Value& params, RSOperatorContext& context) override;
 };
 

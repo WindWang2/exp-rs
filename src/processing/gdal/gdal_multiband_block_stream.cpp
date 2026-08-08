@@ -11,16 +11,33 @@
 GdalMultibandBlockStream::GdalMultibandBlockStream( const GdalDatasetWrapper &ds,
                                                     int bandCount,
                                                     int tileWidth, int tileHeight )
+  : GdalMultibandBlockStream( ds, std::vector<int>{}, tileWidth, tileHeight )
+{
+    // Delegating ctor builds geometry with an empty band list; fill 1..bandCount.
+    m_bandList.clear();
+    const int n = std::max( 1, bandCount );
+    m_bandList.reserve( n );
+    for ( int b = 1; b <= n; ++b )
+        m_bandList.push_back( b );
+}
+
+GdalMultibandBlockStream::GdalMultibandBlockStream( const GdalDatasetWrapper &ds,
+                                                    const std::vector<int> &bandList,
+                                                    int tileWidth, int tileHeight )
   : m_ds( ds )
-  , m_bandCount( std::max( 1, bandCount ) )
+  , m_bandList( bandList.empty() ? std::vector<int>{ 1 } : bandList )
   , m_tileWidth( std::max( 1, tileWidth ) )
   , m_tileHeight( std::max( 1, tileHeight ) )
   , m_rasterWidth( ds.width() )
   , m_rasterHeight( ds.height() )
 {
-    // Same row-major, edge-clamped grid as GdalBlockStream.
+    buildTiles();
+}
+
+void GdalMultibandBlockStream::buildTiles()
+{
     m_tiles.clear();
-    if ( m_rasterWidth <= 0 || m_rasterHeight <= 0 )
+    if ( m_rasterWidth <= 0 || m_rasterHeight <= 0 || m_bandList.empty() )
         return;
     const int cols = ( m_rasterWidth + m_tileWidth - 1 ) / m_tileWidth;
     const int rows = ( m_rasterHeight + m_tileHeight - 1 ) / m_tileHeight;
@@ -49,30 +66,31 @@ GdalMultibandBlockStream::GdalMultibandBlockStream( const GdalDatasetWrapper &ds
 
 bool GdalMultibandBlockStream::forEach( const TileCallback &callback ) const
 {
-    if ( m_tiles.empty() || m_bandCount <= 0 )
+    const int bandCount = static_cast<int>( m_bandList.size() );
+    if ( m_tiles.empty() || bandCount <= 0 )
         return false;
 
     const size_t tilePixels =
         static_cast<size_t>( m_tileWidth ) * static_cast<size_t>( m_tileHeight );
-    std::vector<float> bandTile( tilePixels );                 // per-band scratch
-    std::vector<float> bip( tilePixels * static_cast<size_t>( m_bandCount ) ); // BIP window
+    std::vector<float> bandTile( tilePixels );                       // per-band scratch
+    std::vector<float> bip( tilePixels * static_cast<size_t>( bandCount ) ); // BIP window
 
     for ( const Tile &tile : m_tiles )
     {
         const size_t thisTilePixels = static_cast<size_t>( tile.width ) * tile.height;
         // Read each band's window then scatter into the BIP layout.
         bool ok = true;
-        for ( int b = 1; b <= m_bandCount; ++b )
+        for ( int bi = 0; bi < bandCount; ++bi )
         {
-            if ( !m_ds.readBandWindow( b, tile.xOffset, tile.yOffset,
+            const int bandNum = m_bandList[bi];
+            if ( !m_ds.readBandWindow( bandNum, tile.xOffset, tile.yOffset,
                                        tile.width, tile.height, bandTile.data() ) )
             {
                 ok = false;
                 break;
             }
-            const size_t bandOff = static_cast<size_t>( b - 1 );
             for ( size_t p = 0; p < thisTilePixels; ++p )
-                bip[p * static_cast<size_t>( m_bandCount ) + bandOff] = bandTile[p];
+                bip[p * static_cast<size_t>( bandCount ) + bi] = bandTile[p];
         }
         if ( !ok )
             return false;

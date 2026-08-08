@@ -55,13 +55,23 @@ class GdalMultibandBlockStream
     GdalMultibandBlockStream( const GdalDatasetWrapper &ds, int bandCount,
                               int tileWidth = 256, int tileHeight = 256 );
 
+    /**
+     * Band-subset overload: interleave only the listed (1-based) band numbers.
+     * bandCount() == bandList.size(). Used by band-subset operators (SAM/SID
+     * classify, spectral index selection, …) that process a subset of bands.
+     * @a bandList must be non-empty, 1-based, within ds.bandCount().
+     */
+    GdalMultibandBlockStream( const GdalDatasetWrapper &ds,
+                              const std::vector<int> &bandList,
+                              int tileWidth = 256, int tileHeight = 256 );
+
     int tileCount() const { return static_cast<int>( m_tiles.size() ); }
     const Tile &tile( int i ) const { return m_tiles[i]; }
     int tileWidth() const { return m_tileWidth; }
     int tileHeight() const { return m_tileHeight; }
     int rasterWidth() const { return m_rasterWidth; }
     int rasterHeight() const { return m_rasterHeight; }
-    int bandCount() const { return m_bandCount; }
+    int bandCount() const { return static_cast<int>( m_bandList.size() ); }
 
     /**
      * Stream every tile. For each tile the callback receives the tile geometry
@@ -81,12 +91,14 @@ class GdalMultibandBlockStream
 
   private:
     const GdalDatasetWrapper &m_ds;
-    int m_bandCount;
+    std::vector<int> m_bandList; ///< 1-based band numbers to interleave
     int m_tileWidth;
     int m_tileHeight;
     int m_rasterWidth;
     int m_rasterHeight;
     std::vector<Tile> m_tiles;
+
+    void buildTiles();
 };
 
 /**
