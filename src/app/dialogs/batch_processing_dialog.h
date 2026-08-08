@@ -23,6 +23,21 @@ public:
 
     void setAlgorithmId(const QString &algorithmId);
 
+    /// Programmatic input-file injection (also used by tests).
+    void setInputFiles(const QStringList &files);
+
+    /// Programmatic output-directory injection (also used by tests).
+    void setOutputDir(const QString &dir);
+
+    /// Runs one batch item: executes \p algorithmId on \p inputFile writing
+    /// \p outputPath. Supports QGIS provider algorithms (INPUT/OUTPUT
+    /// parameters) and single-input RS operators (declared defaults).
+    /// Returns false and sets \p errorMessage on failure. No UI side effects.
+    bool runBatchItem(const QString &algorithmId,
+                      const QString &inputFile,
+                      const QString &outputPath,
+                      QString *errorMessage);
+
 private slots:
     void onAddFiles();
     void onRemoveSelected();

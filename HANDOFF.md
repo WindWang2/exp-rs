@@ -1,8 +1,8 @@
 # HANDOFF — Autonomous RS System Perfection (/goal) — Optical Platform Session
 
 **Date:** 2026-08-08
-**Mode:** FULL_AUTONOMOUS_LOOP — 51 committed vertical slices + F-hardening +
-review remediation (ADR 0065–0109)
+**Mode:** FULL_AUTONOMOUS_LOOP — 52 committed vertical slices + F-hardening +
+review remediation (ADR 0065–0110)
 **Scope:** Deepen `exp-rs` toward the general-purpose optical/multispectral/
 hyperspectral processing platform (mission: product import → calibration →
 QA masking → atmospheric correction → geometric/grid → analysis-ready →
@@ -10,7 +10,7 @@ analysis → accuracy → provenance, all through the Processing Registry).
 
 ---
 
-## 1. Session Summary — 51 Slices, All Tested, All Committed
+## 1. Session Summary — 52 Slices, All Tested, All Committed
 
 | # | Slice | Commit | ADR |
 |---|-------|--------|-----|
@@ -66,11 +66,12 @@ analysis → accuracy → provenance, all through the Processing Registry).
 | 49 | `runOperatorTask` onResult hook — dialogs can surface operator result summaries | `039d47a088` | 0108 |
 | 50 | QA-mask + change-detection dialogs display run statistics (via onResult) | `c509eb5313` | — |
 | 51 | C5: shared `CrsSelector` (ortho dialog adopts; test unchanged) + cancel-hook poll budget hardening to 30s | `254f1fd508` | 0109 |
+| 52 | Batch processing supports single-input RS operators (listed from `AtomicAlgorithmRegistry`, run via `runBatchItem` with declared defaults; multi-input/required-param operators excluded) | (pending) | 0110 |
 
 ## 2. Verification
 
 - **Full clean rebuild: 0 errors** (all targets, incl. the whole test suite).
-- **ctest: 1402 tests, 100% passed** after hardening the two TaskCenter
+- **ctest: 1404 tests, 100% passed** after hardening the two TaskCenter
   cancel-timing tests, the ToolCallDispatcher detached-thread teardown race
   (intermittent SegFault), the GuiJobHandle callback windows that flaked
   under `-j8` load (all now poll with generous budgets), and the
