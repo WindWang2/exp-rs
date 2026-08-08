@@ -9,10 +9,12 @@
 
 #include <QVBoxLayout>
 #include <QFormLayout>
+#include <QCheckBox>
 #include <QFrame>
 #include <QLabel>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QMessageBox>
 
 #include <qgsproject.h>
@@ -39,7 +41,9 @@ void ChangeDetectionDialog::setupUi()
   form->setVerticalSpacing( 8 );
 
   m_beforeLayerCombo = new RasterLayerCombo( inputSec );
+  m_beforeLayerCombo->setObjectName( QStringLiteral( "cdBeforeCombo" ) );
   m_afterLayerCombo = new RasterLayerCombo( inputSec );
+  m_afterLayerCombo->setObjectName( QStringLiteral( "cdAfterCombo" ) );
   m_beforeBandCombo = new QComboBox( inputSec );
   m_afterBandCombo = new QComboBox( inputSec );
   SicnuDialogHelp::tip( m_beforeLayerCombo, tr( "变化前（较早）影像。" ) );
@@ -67,28 +71,94 @@ void ChangeDetectionDialog::setupUi()
 
   QFrame *methodSec = SicnuUi::makeSection(
     this, tr( "检测方法" ),
-    tr( "差值 / 归一化差值 / 变化掩膜。" ) );
+    tr( "差值 / 归一化差值 / 比值 / CVA / 变化掩膜。" ) );
   auto *methodForm = new QFormLayout();
   methodForm->setContentsMargins( 0, 0, 0, 0 );
   methodForm->setHorizontalSpacing( 12 );
 
   m_methodCombo = new QComboBox( methodSec );
+  m_methodCombo->setObjectName( QStringLiteral( "cdMethodCombo" ) );
   m_methodCombo->addItem( tr( "差值 Difference" ), QStringLiteral( "difference" ) );
   m_methodCombo->addItem( tr( "归一化差值" ), QStringLiteral( "normalized_difference" ) );
-  m_methodCombo->addItem( tr( "变化掩膜" ), QStringLiteral( "change_mask" ) );
+  m_methodCombo->addItem( tr( "比值 Ratio" ), QStringLiteral( "ratio" ) );
+  m_methodCombo->addItem( tr( "变化向量分析 CVA" ), QStringLiteral( "cva" ) );
+  m_methodCombo->addItem( tr( "变化掩膜（手动阈值）" ), QStringLiteral( "change_mask" ) );
   SicnuDialogHelp::tip( m_methodCombo, tr(
-    "• 差值：后−前\n• 归一化差值：(后−前)/(后+前)\n• 掩膜：|差值|≥阈值" ) );
+    "• 差值：后−前\n• 归一化差值：(后−前)/(后+前)\n• 比值：后/前\n"
+    "• CVA：多波段变化向量幅值（用全部波段）\n• 掩膜：|差值|≥阈值" ) );
   methodForm->addRow( tr( "方法" ), m_methodCombo );
 
-  m_thresholdLabel = new QLabel( tr( "阈值" ), methodSec );
-  m_thresholdSpin = new QDoubleSpinBox( methodSec );
+  m_makeMaskCheck = new QCheckBox( tr( "同时输出变化掩膜" ), methodSec );
+  m_makeMaskCheck->setObjectName( QStringLiteral( "cdMakeMaskCheck" ) );
+  SicnuDialogHelp::tip( m_makeMaskCheck, tr(
+    "除方法栅格外，再输出 0/1 变化掩膜（可配阈值策略、形态学清理与最小制图单元）。" ) );
+  methodForm->addRow( QString(), m_makeMaskCheck );
+
+  // Mask parameter section: threshold strategy + cleanup + minimum mapping unit.
+  m_maskParamFrame = new QFrame( methodSec );
+  auto *maskForm = new QFormLayout();
+  maskForm->setContentsMargins( 0, 0, 0, 0 );
+  maskForm->setHorizontalSpacing( 12 );
+
+  m_thresholdMethodCombo = new QComboBox( m_maskParamFrame );
+  m_thresholdMethodCombo->setObjectName( QStringLiteral( "cdThresholdMethodCombo" ) );
+  m_thresholdMethodCombo->addItem( tr( "手动" ), QStringLiteral( "manual" ) );
+  m_thresholdMethodCombo->addItem( tr( "Otsu" ), QStringLiteral( "otsu" ) );
+  m_thresholdMethodCombo->addItem( tr( "百分位" ), QStringLiteral( "percentile" ) );
+  m_thresholdMethodCombo->addItem( tr( "统计（均值+kσ）" ), QStringLiteral( "statistical" ) );
+  SicnuDialogHelp::tip( m_thresholdMethodCombo, tr( "掩膜阈值策略。" ) );
+  maskForm->addRow( tr( "阈值策略" ), m_thresholdMethodCombo );
+
+  m_thresholdLabel = new QLabel( tr( "阈值" ), m_maskParamFrame );
+  m_thresholdSpin = new QDoubleSpinBox( m_maskParamFrame );
+  m_thresholdSpin->setObjectName( QStringLiteral( "cdThresholdSpin" ) );
   m_thresholdSpin->setRange( 0.0, 10000.0 );
   m_thresholdSpin->setDecimals( 2 );
   m_thresholdSpin->setValue( 10.0 );
-  m_thresholdSpin->setVisible( false );
-  m_thresholdLabel->setVisible( false );
-  SicnuDialogHelp::tip( m_thresholdSpin, tr( "变化掩膜阈值。" ) );
-  methodForm->addRow( m_thresholdLabel, m_thresholdSpin );
+  SicnuDialogHelp::tip( m_thresholdSpin, tr( "手动阈值。" ) );
+  maskForm->addRow( m_thresholdLabel, m_thresholdSpin );
+
+  m_percentileSpin = new QDoubleSpinBox( m_maskParamFrame );
+  m_percentileSpin->setObjectName( QStringLiteral( "cdPercentileSpin" ) );
+  m_percentileSpin->setRange( 0.0, 100.0 );
+  m_percentileSpin->setDecimals( 1 );
+  m_percentileSpin->setValue( 90.0 );
+  SicnuDialogHelp::tip( m_percentileSpin, tr( "百分位（0-100）。" ) );
+  maskForm->addRow( tr( "百分位" ), m_percentileSpin );
+
+  m_statisticalKSpin = new QDoubleSpinBox( m_maskParamFrame );
+  m_statisticalKSpin->setObjectName( QStringLiteral( "cdStatisticalKSpin" ) );
+  m_statisticalKSpin->setRange( 0.0, 10.0 );
+  m_statisticalKSpin->setDecimals( 2 );
+  m_statisticalKSpin->setValue( 2.0 );
+  SicnuDialogHelp::tip( m_statisticalKSpin, tr( "统计阈值 = 均值 + k×标准差。" ) );
+  maskForm->addRow( tr( "k（标准差倍数）" ), m_statisticalKSpin );
+
+  m_cleanupCombo = new QComboBox( m_maskParamFrame );
+  m_cleanupCombo->setObjectName( QStringLiteral( "cdCleanupCombo" ) );
+  m_cleanupCombo->addItem( tr( "无" ), QStringLiteral( "none" ) );
+  m_cleanupCombo->addItem( tr( "腐蚀" ), QStringLiteral( "erode" ) );
+  m_cleanupCombo->addItem( tr( "膨胀" ), QStringLiteral( "dilate" ) );
+  m_cleanupCombo->addItem( tr( "开运算" ), QStringLiteral( "open" ) );
+  m_cleanupCombo->addItem( tr( "闭运算" ), QStringLiteral( "close" ) );
+  SicnuDialogHelp::tip( m_cleanupCombo, tr( "掩膜形态学清理。" ) );
+  maskForm->addRow( tr( "形态学清理" ), m_cleanupCombo );
+
+  m_cleanupIterSpin = new QSpinBox( m_maskParamFrame );
+  m_cleanupIterSpin->setObjectName( QStringLiteral( "cdCleanupIterSpin" ) );
+  m_cleanupIterSpin->setRange( 1, 20 );
+  m_cleanupIterSpin->setValue( 1 );
+  maskForm->addRow( tr( "清理次数" ), m_cleanupIterSpin );
+
+  m_minAreaSpin = new QSpinBox( m_maskParamFrame );
+  m_minAreaSpin->setObjectName( QStringLiteral( "cdMinAreaSpin" ) );
+  m_minAreaSpin->setRange( 0, 100000000 );
+  m_minAreaSpin->setValue( 0 );
+  SicnuDialogHelp::tip( m_minAreaSpin, tr( "最小制图单元（像元）：移除小于该面积的连通域；0 = 关闭。" ) );
+  maskForm->addRow( tr( "最小制图单元（像元）" ), m_minAreaSpin );
+
+  m_maskParamFrame->setLayout( maskForm );
+  methodForm->addRow( m_maskParamFrame );
   qobject_cast<QVBoxLayout *>( methodSec->layout() )->addLayout( methodForm );
   mainLayout->addWidget( methodSec );
 
@@ -104,7 +174,12 @@ void ChangeDetectionDialog::setupUi()
            this, &ChangeDetectionDialog::updateBandSelectors );
   connect( m_methodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &ChangeDetectionDialog::onMethodChanged );
+  connect( m_makeMaskCheck, &QCheckBox::toggled,
+           this, &ChangeDetectionDialog::onMakeMaskToggled );
+  connect( m_thresholdMethodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+           this, &ChangeDetectionDialog::onThresholdMethodChanged );
 
+  updateMaskParamVisibility();
   populateLayers();
 }
 
@@ -132,9 +207,48 @@ void ChangeDetectionDialog::updateBandSelectors()
 
 void ChangeDetectionDialog::onMethodChanged( int index )
 {
-  const bool showTh = ( index == 2 );
-  m_thresholdSpin->setVisible( showTh );
-  m_thresholdLabel->setVisible( showTh );
+  Q_UNUSED( index );
+  updateMaskParamVisibility();
+}
+
+void ChangeDetectionDialog::onMakeMaskToggled()
+{
+  updateMaskParamVisibility();
+}
+
+void ChangeDetectionDialog::onThresholdMethodChanged( int index )
+{
+  Q_UNUSED( index );
+  updateMaskParamVisibility();
+}
+
+void ChangeDetectionDialog::updateMaskParamVisibility()
+{
+  if ( !m_maskParamFrame || !m_thresholdMethodCombo )
+    return;
+
+  const QString method = m_methodCombo->currentData().toString();
+  const bool maskRequested = m_makeMaskCheck->isChecked()
+                             || method == QStringLiteral( "change_mask" );
+  m_maskParamFrame->setVisible( maskRequested );
+  if ( !maskRequested )
+    return;
+
+  const QString strategy = m_thresholdMethodCombo->currentData().toString();
+  const bool manual = ( strategy == QStringLiteral( "manual" ) );
+  const bool percentile = ( strategy == QStringLiteral( "percentile" ) );
+  const bool statistical = ( strategy == QStringLiteral( "statistical" ) );
+  m_thresholdLabel->setVisible( manual );
+  m_thresholdSpin->setVisible( manual );
+  m_percentileSpin->setVisible( percentile );
+  m_statisticalKSpin->setVisible( statistical );
+
+  // The legacy change_mask method only supports the manual threshold.
+  const bool legacy = ( method == QStringLiteral( "change_mask" ) );
+  m_thresholdMethodCombo->setEnabled( !legacy );
+  if ( legacy && strategy != QStringLiteral( "manual" ) )
+    m_thresholdMethodCombo->setCurrentIndex(
+      m_thresholdMethodCombo->findData( QStringLiteral( "manual" ) ) );
 }
 
 void ChangeDetectionDialog::openComparisonPreview()
@@ -189,6 +303,51 @@ bool ChangeDetectionDialog::validateInputs()
   return true;
 }
 
+Json::Value ChangeDetectionDialog::buildParams() const
+{
+  auto *before = qobject_cast<QgsRasterLayer *>(
+    QgsProject::instance()->mapLayer( m_beforeLayerCombo->currentData().toString() ) );
+  auto *after = qobject_cast<QgsRasterLayer *>(
+    QgsProject::instance()->mapLayer( m_afterLayerCombo->currentData().toString() ) );
+
+  Json::Value params( Json::objectValue );
+  params["before"] = before ? before->source().toStdString() : std::string();
+  params["after"] = after ? after->source().toStdString() : std::string();
+  params["beforeBand"] = m_beforeBandCombo->currentData().toInt();
+  params["afterBand"] = m_afterBandCombo->currentData().toInt();
+  params["method"] = m_methodCombo->currentData().toString().toStdString();
+  params["output"] = outputPath().toStdString();
+
+  // Mask parameters surface when the user requests a mask output (the legacy
+  // change_mask method always writes one; for the other methods the checkbox
+  // opts in).
+  const bool maskRequested = m_makeMaskCheck->isChecked()
+                             || m_methodCombo->currentData().toString()
+                                  == QStringLiteral( "change_mask" );
+  if ( maskRequested )
+  {
+    params["makeMask"] = true;
+    params["threshold"] = m_thresholdSpin->value();
+    const QString strategy = m_thresholdMethodCombo->currentData().toString();
+    if ( strategy != QStringLiteral( "manual" ) )
+      params["thresholdMethod"] = strategy.toStdString();
+    if ( strategy == QStringLiteral( "percentile" ) )
+      params["percentile"] = m_percentileSpin->value();
+    if ( strategy == QStringLiteral( "statistical" ) )
+      params["statisticalK"] = m_statisticalKSpin->value();
+    if ( m_minAreaSpin->value() > 0 )
+      params["minAreaPixels"] = m_minAreaSpin->value();
+    const QString cleanup = m_cleanupCombo->currentData().toString();
+    if ( cleanup != QStringLiteral( "none" ) )
+    {
+      params["cleanup"] = cleanup.toStdString();
+      params["cleanupIterations"] = m_cleanupIterSpin->value();
+    }
+  }
+
+  return params;
+}
+
 void ChangeDetectionDialog::onRun()
 {
   if ( !validateInputs() )
@@ -210,14 +369,7 @@ void ChangeDetectionDialog::onRun()
   }
 
   setRasterLayer( before );
-  Json::Value params( Json::objectValue );
-  params["before"] = before->source().toStdString();
-  params["after"] = after->source().toStdString();
-  params["beforeBand"] = m_beforeBandCombo->currentData().toInt();
-  params["afterBand"] = m_afterBandCombo->currentData().toInt();
-  params["method"] = m_methodCombo->currentData().toString().toStdString();
-  params["threshold"] = m_thresholdSpin->value();
-  params["output"] = outputPath().toStdString();
+  const Json::Value params = buildParams();
   m_statusLabel->setText( tr( "运行中…" ) );
   runOperatorTask( QStringLiteral( "rs:change_detection" ), params,
                    [this]( const Json::Value &result ) {

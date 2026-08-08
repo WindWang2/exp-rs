@@ -3993,6 +3993,50 @@ endif()
 set_target_properties(test_grid_compat_dialog_utils PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_grid_compat_dialog_utils)
 
+# Change-detection dialog — method/mask parameter alignment with the backend
+add_executable(test_change_detection_dialog
+  test_change_detection_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/change_detection_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/comparison_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/comparison_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/raster_layer_combo.cpp
+)
+target_link_libraries(test_change_detection_dialog PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  sicnu_jobs
+  sicnu_operators
+  sicnu_task_center
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_data
+)
+target_include_directories(test_change_detection_dialog PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_change_detection_dialog PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_change_detection_dialog PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_change_detection_dialog PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_change_detection_dialog PRIVATE jsoncpp)
+endif()
+set_target_properties(test_change_detection_dialog PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_change_detection_dialog)
+
 # Apply-mask dialog — operator JSON assembly from widget state
 add_executable(test_apply_mask_dialog
   test_apply_mask_dialog.cpp
