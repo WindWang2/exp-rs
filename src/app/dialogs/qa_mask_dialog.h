@@ -37,4 +37,5 @@ private:
     BandRoleCombo *m_bandCombo = nullptr;
     QSpinBox *m_bitsSpin = nullptr;
     QLabel *m_bitsLabel = nullptr;
+    QLabel *m_summaryLabel = nullptr;
 };

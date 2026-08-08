@@ -95,6 +95,12 @@ void QaMaskDialog::setupUi()
   mainLayout->addWidget( sec );
 
   setupOutputRow( mainLayout );
+
+  m_summaryLabel = SicnuUi::makeHintLabel( this, tr( "运行后在此显示掩膜统计。" ) );
+  m_summaryLabel->setObjectName( QStringLiteral( "qaMaskSummaryLabel" ) );
+  m_summaryLabel->setWordWrap( true );
+  mainLayout->addWidget( m_summaryLabel );
+
   setupButtonBar( mainLayout );
   mainLayout->addStretch( 1 );
 
@@ -129,5 +135,13 @@ void QaMaskDialog::onRun()
   if ( json["source"].asString() == "generic_bitmask" )
     json["bits"] = m_bitsSpin->value();
 
-  runOperatorTask( QStringLiteral( "rs:qa_mask" ), json );
+  runOperatorTask( QStringLiteral( "rs:qa_mask" ), json,
+                   [this]( const Json::Value &result ) {
+                     if ( m_summaryLabel && result.isMember( "maskedPercent" ) )
+                       m_summaryLabel->setText(
+                         tr( "掩膜像元：%1 / %2（%3%）" )
+                           .arg( result["maskedPixels"].asUInt64() )
+                           .arg( result["totalPixels"].asUInt64() )
+                           .arg( result["maskedPercent"].asDouble(), 0, 'f', 2 ) );
+                   } );
 }

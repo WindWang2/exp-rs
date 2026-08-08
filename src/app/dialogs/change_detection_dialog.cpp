@@ -201,5 +201,21 @@ void ChangeDetectionDialog::onRun()
   params["threshold"] = m_thresholdSpin->value();
   params["output"] = outputPath().toStdString();
   m_statusLabel->setText( tr( "运行中…" ) );
-  runOperatorTask( QStringLiteral( "rs:change_detection" ), params );
+  runOperatorTask( QStringLiteral( "rs:change_detection" ), params,
+                   [this]( const Json::Value &result ) {
+                     if ( !m_statusLabel )
+                       return;
+                     if ( result.isMember( "mean" ) )
+                     {
+                       QString text = tr( "变化均值 %1，标准差 %2" )
+                                        .arg( result["mean"].asDouble(), 0, 'f', 4 )
+                                        .arg( result["stddev"].asDouble(), 0, 'f', 4 );
+                       if ( result.isMember( "changedPercent" ) )
+                         text += tr( "；变化像元 %1 / %2（%3%）" )
+                                   .arg( result["changedPixels"].asUInt64() )
+                                   .arg( result["totalPixels"].asUInt64() )
+                                   .arg( result["changedPercent"].asDouble(), 0, 'f', 2 );
+                       m_statusLabel->setText( text );
+                     }
+                   } );
 }
