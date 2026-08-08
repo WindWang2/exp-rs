@@ -1,6 +1,7 @@
 // src/app/widgets/spectral_profile_widget.cpp
 #include "spectral_profile_widget.h"
 #include "core/sicnu_logging.h"
+#include "processing/algorithms/spectral_classification.h"
 
 #include <raster/qgsrasterlayer.h>
 #include <raster/qgsrasterdataprovider.h>
@@ -73,9 +74,43 @@ void SpectralProfileWidget::setSpectrum( const QVector<double> &values,
     m_values = values;
     m_wavelengths = wavelengths.size() == values.size() ? wavelengths : QVector<double>();
     m_bandLabels = labels.size() == values.size() ? labels : QVector<QString>();
+    m_fwhm.fill( 0.0, values.size() ); // ROI spectra carry no FWHM source
     m_layerName = layerName;
     m_hasData = !values.isEmpty();
     update();
+}
+
+void SpectralProfileWidget::setContinuumRemovalEnabled( bool enabled )
+{
+    if ( m_continuumRemoval == enabled )
+        return;
+    m_continuumRemoval = enabled;
+    update();
+}
+
+QVector<double> SpectralProfileWidget::displayValues() const
+{
+    if ( !m_continuumRemoval || m_values.isEmpty() )
+        return m_values;
+
+    // Continuum removal kernel: reflectance / convex-hull continuum per band,
+    // in (0, 1]. NaN bands are mapped to the nodata sentinel for the kernel.
+    std::vector<float> raw;
+    raw.reserve( m_values.size() );
+    for ( double v : m_values )
+        raw.push_back( std::isnan( v ) ? -9999.0f : static_cast<float>( v ) );
+    std::vector<float> cr( raw.size() );
+    if ( !SpectralClassification::continuumRemoval( raw.data(), cr.data(),
+                                                    static_cast<int>( raw.size() ),
+                                                    -9999.0f ) )
+        return m_values;
+
+    QVector<double> out;
+    out.reserve( cr.size() );
+    for ( float v : cr )
+        out.append( std::isnan( v ) ? std::numeric_limits<double>::quiet_NaN()
+                                    : static_cast<double>( v ) );
+    return out;
 }
 
 void SpectralProfileWidget::clear()
@@ -83,6 +118,7 @@ void SpectralProfileWidget::clear()
     m_values.clear();
     m_bandLabels.clear();
     m_wavelengths.clear();
+    m_fwhm.clear();
     m_layerName.clear();
     m_hasData = false;
     m_rasterLayer = nullptr;
@@ -171,6 +207,7 @@ void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLa
     m_values.resize( bandCount );
     m_bandLabels.resize( bandCount );
     m_wavelengths.resize( bandCount );
+    m_fwhm.resize( bandCount );
 
     for ( int i = 0; i < bandCount; ++i )
     {
@@ -205,6 +242,12 @@ void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLa
         bool wlOk = false;
         const double wlValue = wl ? QString::fromUtf8( wl ).toDouble( &wlOk ) : 0.0;
         m_wavelengths[i] = ( wlOk && wlValue > 0.0 ) ? wlValue : 0.0;
+
+        // FWHM metadata (nm), 0 when absent (D1 surface for library matching).
+        const char *fwhm = GDALGetMetadataItem( band, "FWHM", nullptr );
+        bool fwhmOk = false;
+        const double fwhmValue = fwhm ? QString::fromUtf8( fwhm ).toDouble( &fwhmOk ) : 0.0;
+        m_fwhm[i] = ( fwhmOk && fwhmValue > 0.0 ) ? fwhmValue : 0.0;
     }
 
     bool anyValid = false;
@@ -288,11 +331,21 @@ void SpectralProfileWidget::drawChart( QPainter &painter, const QRect &chartRect
 
 void SpectralProfileWidget::drawLine( QPainter &painter, const QRect &chartRect )
 {
-    const int bandCount = m_values.size();
+    const QVector<double> values = displayValues();
+    const int bandCount = values.size();
     if ( bandCount < 1 )
         return;
 
-    const double valueRange = m_maxValue - m_minValue;
+    // Continuum-removed values lie in (0, 1]; raw values use the extracted
+    // data range.
+    double vMin = m_minValue;
+    double vMax = m_maxValue;
+    if ( m_continuumRemoval )
+    {
+        vMin = 0.0;
+        vMax = 1.0;
+    }
+    const double valueRange = vMax - vMin;
     if ( valueRange <= 0.0 )
         return;
 
@@ -305,10 +358,10 @@ void SpectralProfileWidget::drawLine( QPainter &painter, const QRect &chartRect 
 
     for ( int i = 0; i < bandCount; ++i )
     {
-        if ( !std::isfinite( m_values[i] ) )
+        if ( !std::isfinite( values[i] ) )
             continue;
         double xFrac = xFractionForBand( i, bandCount );
-        double yFrac = ( m_values[i] - m_minValue ) / valueRange;
+        double yFrac = ( values[i] - vMin ) / valueRange;
 
         int px = chartRect.left() + static_cast<int>( xFrac * chartRect.width() );
         int py = chartRect.bottom() - static_cast<int>( yFrac * chartRect.height() );
@@ -342,14 +395,14 @@ void SpectralProfileWidget::drawLine( QPainter &painter, const QRect &chartRect 
     for ( int i = 0; i < bandCount; ++i )
     {
         // Value label above the point
-        if ( std::isfinite( m_values[i] ) )
+        if ( std::isfinite( values[i] ) )
         {
             const int px = chartRect.left() + static_cast<int>(
                 ( bandCount > 1 ? static_cast<double>( i ) / ( bandCount - 1 ) : 0.5 ) * chartRect.width() );
             const int py = chartRect.bottom() - static_cast<int>(
-                ( ( m_values[i] - m_minValue ) / valueRange ) * chartRect.height() );
+                ( ( values[i] - vMin ) / valueRange ) * chartRect.height() );
             painter.setPen( QColor( 60, 60, 60 ) );
-            double v = m_values[i];
+            double v = values[i];
             QString valText;
             if ( std::abs( v ) < 1.0 && v != 0.0 )
                 valText = QString::number( v, 'g', 3 );

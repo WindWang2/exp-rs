@@ -68,6 +68,25 @@ public:
     /// When populated, the chart X axis is wavelength-scaled.
     QVector<double> wavelengths() const { return m_wavelengths; }
 
+    /// Per-band full-width-at-half-maximum (nm) from the raster's FWHM band
+    /// metadata (0.0 for bands without one; empty when the raster has none).
+    /// Useful for spectral-library matching and resampling (D1 surface).
+    QVector<double> fwhm() const { return m_fwhm; }
+
+    /**
+     * Toggle continuum-removal display: when enabled, the chart shows the
+     * continuum-removed spectrum (reflectance / convex-hull continuum, in
+     * (0, 1]) computed by the SpectralClassification kernel, so absorption
+     * features become comparable across brightnesses. Raw values are kept
+     * untouched in values(); displayValues() applies the transform.
+     */
+    void setContinuumRemovalEnabled( bool enabled );
+    bool continuumRemovalEnabled() const { return m_continuumRemoval; }
+
+    /// Values the chart currently draws: raw band values, or the
+    /// continuum-removed spectrum when the continuum-removal view is enabled.
+    QVector<double> displayValues() const;
+
     QSize minimumSizeHint() const override { return QSize( 320, 220 ); }
     QSize sizeHint() const override { return QSize( 500, 350 ); }
 
@@ -97,8 +116,10 @@ private:
     QVector<double> m_values;          // pixel value per band
     QVector<QString> m_bandLabels;     // label per band (description or "Band N")
     QVector<double> m_wavelengths;     // center wavelength (nm) per band, 0 when absent
+    QVector<double> m_fwhm;            // FWHM (nm) per band, 0 when absent
     QString m_layerName;
     bool m_hasData = false;
+    bool m_continuumRemoval = false;   // chart shows continuum-removed spectrum
 
     // Computed ranges
     double m_minValue = 0.0;

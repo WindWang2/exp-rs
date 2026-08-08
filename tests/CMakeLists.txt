@@ -689,6 +689,7 @@ target_link_libraries(test_spectral_profile_widget PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
+  sicnu_processing
   GDAL::GDAL
 )
 target_include_directories(test_spectral_profile_widget PRIVATE
