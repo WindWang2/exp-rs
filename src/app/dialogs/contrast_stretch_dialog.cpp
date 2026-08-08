@@ -116,16 +116,6 @@ void ContrastStretchDialog::onRun()
   double clipValue = m_clipSpin->value();
   double stddevValue = m_stddevSpin->value();
 
-  // Enqueue async TaskCenter task
-  QVariantMap params;
-  params.insert( QStringLiteral( "INPUT" ), sourcePath );
-  params.insert( QStringLiteral( "OUTPUT" ), outputPath() );
-  params.insert( QStringLiteral( "METHOD" ), methodIndex );
-  params.insert( QStringLiteral( "CLIP_PERCENT" ), clipValue );
-  params.insert( QStringLiteral( "STDDEV_FACTOR" ), stddevValue );
-
-  long centerTaskId = sicnu::TaskCenter::instance().enqueueTask( QStringLiteral( "gdal:contrast_stretch" ), params, true );
-
   QVector<QPointF> piecewisePoints = m_stretchWidget ? m_stretchWidget->piecewisePoints() : QVector<QPointF>();
   std::vector<std::pair<float, float>> stdPoints;
   for ( const auto &pt : piecewisePoints )
@@ -133,80 +123,71 @@ void ContrastStretchDialog::onRun()
     stdPoints.emplace_back( static_cast<float>( pt.x() ), static_cast<float>( pt.y() ) );
   }
 
-  runGdalTask( [sourcePath, outputPath = outputPath(), methodIndex, clipValue, stddevValue, stdPoints, centerTaskId]() -> QString {
-    try
+  // Single task per run: runGdalTask submits one callable:gdal_task to the
+  // JobEngine (the executed + tracked task). The previous code additionally
+  // enqueueTask()'d an orphan "gdal:contrast_stretch" tracking record that was
+  // never executed and manually driven from the lambda — two tasks for one user
+  // action (perf/architecture goal 2026-08-08: de-duplicate the execution seam).
+  // runGdalTask/GuiJobHandle now own the task-panel lifecycle (Running on
+  // dispatch, Completed/Failed on the lambda's return/throw).
+  runGdalTask( [sourcePath, outputPath = outputPath(), methodIndex, clipValue, stddevValue, stdPoints]() -> QString {
+    GdalDatasetWrapper srcDataset;
+    if ( !srcDataset.open( sourcePath ) )
+      return QStringLiteral( "\x01SICNU_ERR\x01Failed to open GDAL dataset" );
+
+    int width = srcDataset.width();
+    int height = srcDataset.height();
+    int bandCount = srcDataset.bandCount();
+    size_t pixelCount = static_cast<size_t>( width ) * static_cast<size_t>( height );
+
+    std::vector<std::vector<float>> allBands( bandCount, std::vector<float>( pixelCount ) );
+    for ( int b = 0; b < bandCount; ++b )
     {
-      sicnu::TaskCenter::instance().markTaskRunning( centerTaskId );
-      GdalDatasetWrapper srcDataset;
-      if ( !srcDataset.open( sourcePath ) )
+      if ( !srcDataset.readBandData( b + 1, allBands[b].data(), width, height ) )
+        return QStringLiteral( "\x01SICNU_ERR\x01Failed to read band %1" ).arg( b + 1 );
+    }
+
+    std::vector<std::vector<float>> outputBands( bandCount, std::vector<float>( pixelCount ) );
+
+    for ( int b = 0; b < bandCount; ++b )
+    {
+      switch ( methodIndex )
       {
-        sicnu::TaskCenter::instance().markTaskFailed( centerTaskId, QStringLiteral( "Failed to open GDAL dataset" ) );
-        return QString();
-      }
-
-      int width = srcDataset.width();
-      int height = srcDataset.height();
-      int bandCount = srcDataset.bandCount();
-      size_t pixelCount = static_cast<size_t>( width ) * static_cast<size_t>( height );
-
-      std::vector<std::vector<float>> allBands( bandCount, std::vector<float>( pixelCount ) );
-      for ( int b = 0; b < bandCount; ++b )
-      {
-        if ( !srcDataset.readBandData( b + 1, allBands[b].data(), width, height ) )
-          return QString();
-      }
-
-      std::vector<std::vector<float>> outputBands( bandCount, std::vector<float>( pixelCount ) );
-
-      for ( int b = 0; b < bandCount; ++b )
-      {
-        switch ( methodIndex )
+        case 0:
+          ImageEnhancement::piecewiseLinearStretch( allBands[b].data(), outputBands[b].data(),
+                                                    pixelCount, stdPoints );
+          break;
+        case 1:
+        case 2:
         {
-          case 0:
-            ImageEnhancement::piecewiseLinearStretch( allBands[b].data(), outputBands[b].data(),
-                                                      pixelCount, stdPoints );
-            break;
-          case 1:
-          case 2:
-          {
-            float minVal = *std::min_element( allBands[b].begin(), allBands[b].end() );
-            float maxVal = *std::max_element( allBands[b].begin(), allBands[b].end() );
-            ImageEnhancement::linearStretch( allBands[b].data(), outputBands[b].data(),
-                                             pixelCount, minVal, maxVal );
-            break;
-          }
-          case 3:
-            ImageEnhancement::percentClipStretch( allBands[b].data(), outputBands[b].data(),
-                                                  pixelCount, static_cast<float>( clipValue ) );
-            break;
-          case 4:
-            ImageEnhancement::stddevStretch( allBands[b].data(), outputBands[b].data(),
-                                             pixelCount, static_cast<float>( stddevValue ) );
-            break;
-          case 5:
-            ImageEnhancement::histogramEqualize( allBands[b].data(), outputBands[b].data(),
-                                                 pixelCount );
-            break;
+          float minVal = *std::min_element( allBands[b].begin(), allBands[b].end() );
+          float maxVal = *std::max_element( allBands[b].begin(), allBands[b].end() );
+          ImageEnhancement::linearStretch( allBands[b].data(), outputBands[b].data(),
+                                           pixelCount, minVal, maxVal );
+          break;
         }
+        case 3:
+          ImageEnhancement::percentClipStretch( allBands[b].data(), outputBands[b].data(),
+                                                pixelCount, static_cast<float>( clipValue ) );
+          break;
+        case 4:
+          ImageEnhancement::stddevStretch( allBands[b].data(), outputBands[b].data(),
+                                           pixelCount, static_cast<float>( stddevValue ) );
+          break;
+        case 5:
+          ImageEnhancement::histogramEqualize( allBands[b].data(), outputBands[b].data(),
+                                               pixelCount );
+          break;
       }
-
-      QString error;
-      if ( !writeGdalOutput( outputPath, width, height, outputBands,
-                             srcDataset.geoTransform(), srcDataset.projection(), &error ) )
-      {
-        sicnu::TaskCenter::instance().markTaskFailed( centerTaskId, error );
-        return QString();
-      }
-
-      QVariantMap res;
-      res.insert( QStringLiteral( "OUTPUT" ), outputPath );
-      sicnu::TaskCenter::instance().markTaskCompleted( centerTaskId, res );
-      return outputPath;
     }
-    catch ( const std::runtime_error &e )
+
+    QString error;
+    if ( !writeGdalOutput( outputPath, width, height, outputBands,
+                           srcDataset.geoTransform(), srcDataset.projection(), &error ) )
     {
-      sicnu::TaskCenter::instance().markTaskFailed( centerTaskId, QString::fromUtf8( e.what() ) );
-      return QString();
+      return QStringLiteral( "\x01SICNU_ERR\x01" ) + error;
     }
+
+    return outputPath;
   } );
 }

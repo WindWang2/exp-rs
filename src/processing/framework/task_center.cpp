@@ -23,10 +23,23 @@ static QString findOutputPathInParams( const QVariantMap &params )
              || it.key().contains( QStringLiteral( "RESULT" ), Qt::CaseInsensitive ) )
         {
             const QString path = it.value().toString();
-            if ( !path.isEmpty() && !path.startsWith( QLatin1Char( '$' ) ) )
+            if ( !path.isEmpty() && !path.startsWith( QLatin1Char( '$' ) )
+                 && !path.startsWith( QStringLiteral( "\x01SICNU_ERR\x01" ) ) )
                 return path;
         }
     }
+    return QString();
+}
+
+/// Shared "extract the output path from a Json result payload" helper. The
+/// convention is result["output"] = "<path>" (set by RSOperator::run and the
+/// QGIS/processing adapters). Returns empty when absent/non-string.
+/// (perf/architecture goal 2026-08-08: de-duplicate the 3 inline copies of this
+/// pattern across task_center.cpp.)
+static QString outputPathFromResult( const Json::Value &result )
+{
+    if ( result.isObject() && result.isMember( "output" ) && result["output"].isString() )
+        return QString::fromStdString( result["output"].asString() );
     return QString();
 }
 
@@ -335,12 +348,8 @@ void TaskCenter::applyPlaceholdersForTask( long taskId )
                 if ( isMatch )
                 {
                     QString pOut = m_tasks[parentId].outputLayerPath;
-                    if ( pOut.isEmpty()
-                         && m_tasks[parentId].resultPayload.isMember( "output" )
-                         && m_tasks[parentId].resultPayload["output"].isString() )
-                    {
-                        pOut = QString::fromStdString( m_tasks[parentId].resultPayload["output"].asString() );
-                    }
+                    if ( pOut.isEmpty() )
+                        pOut = outputPathFromResult( m_tasks[parentId].resultPayload );
                     return pOut.toStdString();
                 }
             }
@@ -842,12 +851,8 @@ void TaskCenter::markTaskCompleted( long taskId,
                 }
             }
         }
-        if ( m_tasks[taskId].outputLayerPath.isEmpty()
-             && resultPayload.isMember( "output" )
-             && resultPayload["output"].isString() )
-        {
-            m_tasks[taskId].outputLayerPath = QString::fromStdString( resultPayload["output"].asString() );
-        }
+        if ( m_tasks[taskId].outputLayerPath.isEmpty() )
+            m_tasks[taskId].outputLayerPath = outputPathFromResult( resultPayload );
 
         shouldAutoLoad = m_tasks[taskId].autoLoadLayer && !m_tasks[taskId].outputLayerPath.isEmpty();
         autoLoadPath = m_tasks[taskId].outputLayerPath;

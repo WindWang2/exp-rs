@@ -5,6 +5,7 @@
 #include "shell/processing_job_adapter.h"
 
 #include "jobs/job_types.h"
+#include "processing/framework/json_params_converter.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 
@@ -289,93 +290,37 @@ void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm 
 
   startRun();
 
-  // Worker-local context (copy thread-safe settings) so prepare / runPrepared /
-  // postProcess all run on the JobEngine worker — same pattern as the
-  // processing: prefix executor.
+  // Delegate to the shared "processing:" prefix executor (ProviderAlgorithmAdapter
+  // via AtomicAlgorithmRegistry) rather than re-implementing the
+  // prepare → runPrepared → postProcess lifecycle here. That lifecycle now has a
+  // single owner (perf/architecture goal 2026-08-08: de-duplicate the QGIS
+  // algorithm execution seam). Project affinity: the executor uses
+  // QgsProject::instance(); the @a context's project is expected to be that same
+  // instance for dialog-driven runs.
   const QString algId = algorithm->id();
   const QString displayName = algorithm->displayName();
-  std::shared_ptr<QgsProcessingAlgorithm> algClone( algorithm->create() );
-  if ( !algClone )
-  {
-    cleanupRunResources();
-    onFailed( tr( "Failed to create algorithm instance" ) );
-    return;
-  }
-
-  QgsProject *project = context.project();
 
   sicnu::jobs::JobRequest req;
   req.algorithmId = ProcessingJobAdapter::processingAlgorithmId( algId );
   req.title = displayName.toStdString();
   req.source = "dialog";
   req.clientTag = toolName().toStdString();
+  req.params = sicnu::processing::variantToJsonValue( QVariant::fromValue( parameters ) );
 
+  // No per-job executor: JobEngine resolves the registered "processing:" prefix
+  // executor → runProcessingPrefixJob → ProviderAlgorithmAdapter::execute.
   const QString fallbackOutput = outputPath();
   m_jobHandle.submitJob(
     req,
-    [algClone, parameters, project, fallbackOutput](
-      const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
-      ctx.logInfo( "Running dialog processing algorithm" );
-      QgsProcessingContext localCtx;
-      if ( project )
-      {
-        localCtx.setProject( project );
-        localCtx.setTransformContext( project->transformContext() );
-      }
-
-      QgsProcessingFeedback feedback;
-      try
-      {
-        if ( !algClone->prepare( parameters, localCtx, &feedback ) )
-        {
-          throw sicnu::operators::RSOperatorError(
-            sicnu::operators::ErrorCode::QgisProcessingError, "Algorithm prepare() returned false" );
-        }
-        QVariantMap runRes =
-          algClone->runPrepared( parameters, localCtx, &feedback );
-        if ( feedback.isCanceled() || ctx.isCancelled() )
-        {
-          algClone->postProcess( localCtx, &feedback, false );
-          throw sicnu::operators::RSOperatorError(
-            sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
-        }
-        QVariantMap results = algClone->postProcess( localCtx, &feedback, true );
-        if ( results.isEmpty() )
-          results = runRes;
-
-        Json::Value out = ProcessingJobAdapter::resultsToJson( results );
-        if ( !out.isMember( "output" ) && !fallbackOutput.isEmpty() )
-          out["output"] = fallbackOutput.toStdString();
-        if ( !out.isMember( "output" ) )
-        {
-          for ( auto it = results.constBegin(); it != results.constEnd(); ++it )
-          {
-            if ( it.value().userType() == QMetaType::QString
-                 && !it.value().toString().isEmpty() )
-            {
-              out["output"] = it.value().toString().toStdString();
-              break;
-            }
-          }
-        }
-        if ( !out.isMember( "output" ) )
-        {
-          throw sicnu::operators::RSOperatorError(
-            sicnu::operators::ErrorCode::ComputationError,
-            "Algorithm did not produce an output path" );
-        }
-        return out;
-      }
-      catch ( const QgsProcessingException &e )
-      {
-        throw sicnu::operators::RSOperatorError(
-          sicnu::operators::ErrorCode::QgisProcessingError, e.what().toStdString() );
-      }
-    },
-    /*cancelCallback=*/nullptr,
-    /*autoLoad=*/false,
-    [this]( const QString &outPath, const Json::Value & ) {
-      onCompleted( outPath );
+    [this, fallbackOutput]( const QString &outPath, const Json::Value &result ) {
+      // Honor the dialog's output-path contract: prefer the resolved path, then
+      // any "output" field the algorithm reported, then the dialog fallback.
+      QString resolved = outPath;
+      if ( resolved.isEmpty() && result.isMember( "output" ) && result["output"].isString() )
+        resolved = QString::fromStdString( result["output"].asString() );
+      if ( resolved.isEmpty() )
+        resolved = fallbackOutput;
+      onCompleted( resolved );
     },
     [this]( const QString &err, bool isCanceled ) {
       onFailed( isCanceled ? tr( "已取消" ) : err );
