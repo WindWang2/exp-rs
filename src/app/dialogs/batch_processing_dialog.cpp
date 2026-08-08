@@ -11,6 +11,11 @@
 #include <qgsapplication.h>
 #include <qgsprocessingregistry.h>
 #include <qgsprocessingalgorithm.h>
+#include <qgsproject.h>
+#include <gui/qgsgui.h>
+#include <gui/processing/qgsprocessingguiregistry.h>
+#include <gui/processing/qgsprocessingwidgetwrapper.h>
+#include <qgsprocessingcontext.h>
 
 #include <qgsmessagelog.h>
 #include <qgsprocessingcontext.h>
@@ -212,9 +217,9 @@ void BatchProcessingDialog::setupUi()
       QString::fromStdString( desc.id ) );
   }
 
-  // RS-operator parameter overrides (advanced): rebuilt on algorithm change.
-  m_paramFrame = SicnuUi::makeSection( this, tr( "RS 参数" ),
-                                       tr( "覆盖批量运行所用的算子默认参数。" ) );
+  // Operator parameter overrides (advanced): rebuilt on algorithm change.
+  m_paramFrame = SicnuUi::makeSection( this, tr( "参数覆盖" ),
+                                       tr( "覆盖批量运行所用的算法参数（输入与输出由文件列表决定）。" ) );
   m_paramForm = new QFormLayout();
   m_paramForm->setContentsMargins( 0, 0, 0, 0 );
   qobject_cast<QVBoxLayout *>( m_paramFrame->layout() )->addLayout( m_paramForm );
@@ -368,7 +373,7 @@ void BatchProcessingDialog::onRun()
 
         try {
             QString itemError;
-            const QJsonObject overrides = collectParamOverrides();
+            const QVariantMap overrides = collectParamOverrides();
             if (runBatchItem(algorithmId, inputFile, outputPath, &itemError, overrides)) {
                 successCount++;
             } else {
@@ -441,39 +446,92 @@ void BatchProcessingDialog::updateAlgorithmParameters()
         }
         return;
     }
-    // Non-RS algorithms use QGIS parameters; hide the RS section.
-    if (m_paramFrame)
-        m_paramFrame->setVisible(false);
-    m_paramWidgets.clear();
+    // QGIS provider algorithms get QGIS parameter-widget wrappers.
     const QgsProcessingAlgorithm *alg = QgsApplication::processingRegistry()->algorithmById(algorithmId);
     if (alg) {
+        rebuildQgisParamForm(alg);
         m_statusLabel->setText(tr("Selected: %1").arg(alg->displayName()));
     }
+}
+
+void BatchProcessingDialog::clearParamForm()
+{
+    if (!m_paramForm)
+        return;
+    while (m_paramForm->rowCount() > 0)
+    {
+        const QFormLayout::TakeRowResult result = m_paramForm->takeRow(0);
+        if (result.labelItem)
+        {
+            if (QWidget *w = result.labelItem->widget())
+                w->deleteLater();
+            delete result.labelItem;
+        }
+        if (result.fieldItem)
+        {
+            if (QWidget *w = result.fieldItem->widget())
+                w->deleteLater();
+            delete result.fieldItem;
+        }
+    }
+    m_paramWidgets.clear();
+    qDeleteAll(m_qgisWrappers);
+    m_qgisWrappers.clear();
+}
+
+void BatchProcessingDialog::rebuildQgisParamForm(const QgsProcessingAlgorithm *alg)
+{
+    if (!m_paramForm || !alg)
+        return;
+    clearParamForm();
+
+    if (!m_qgisContext)
+        m_qgisContext = new QgsProcessingContext();
+    QgsProject *project = QgsProject::instance();
+    if (project)
+    {
+        m_qgisContext->setProject(project);
+        m_qgisContext->setTransformContext(project->transformContext());
+    }
+
+    QgsProcessingParameterWidgetContext widgetContext;
+    widgetContext.setProject(project);
+
+    const auto paramDefs = alg->parameterDefinitions();
+    for (const QgsProcessingParameterDefinition *param : paramDefs)
+    {
+        if (!param)
+            continue;
+        const QString name = param->name();
+        if (name == QStringLiteral("INPUT") || name == QStringLiteral("INPUT_LAYER")
+            || name == QStringLiteral("OUTPUT") || name == QStringLiteral("OUTPUT_LAYER"))
+            continue; // decided by the batch item
+
+        QgsAbstractProcessingParameterWidgetWrapper *wrapper =
+            QgsGui::processingGuiRegistry()->createParameterWidgetWrapper(
+                param, Qgis::ProcessingMode::Standard);
+        if (!wrapper)
+            continue;
+        wrapper->setWidgetContext(widgetContext);
+        QWidget *widget = wrapper->createWrappedWidget(*m_qgisContext);
+        if (!widget)
+        {
+            delete wrapper;
+            continue;
+        }
+        widget->setObjectName(QStringLiteral("qgisParam_%1").arg(name));
+        m_paramForm->addRow(QStringLiteral("%1").arg(param->description()), widget);
+        m_qgisWrappers.append(wrapper);
+    }
+
+    m_paramFrame->setVisible(m_qgisWrappers.size() > 0);
 }
 
 void BatchProcessingDialog::rebuildParamForm(const AlgorithmDescriptor &desc)
 {
     if (!m_paramForm)
         return;
-
-    // Drop the previous form widgets.
-    while ( m_paramForm->rowCount() > 0 )
-    {
-        const QFormLayout::TakeRowResult result = m_paramForm->takeRow( 0 );
-        if ( result.labelItem )
-        {
-            if ( QWidget *w = result.labelItem->widget() )
-                w->deleteLater();
-            delete result.labelItem;
-        }
-        if ( result.fieldItem )
-        {
-            if ( QWidget *w = result.fieldItem->widget() )
-                w->deleteLater();
-            delete result.fieldItem;
-        }
-    }
-    m_paramWidgets.clear();
+    clearParamForm();
 
     const std::string mainInput = findMainInputName(desc);
     for (const auto &in : desc.inputs)
@@ -551,9 +609,22 @@ void BatchProcessingDialog::rebuildParamForm(const AlgorithmDescriptor &desc)
     m_paramFrame->setVisible(true);
 }
 
-QJsonObject BatchProcessingDialog::collectParamOverrides() const
+QVariantMap BatchProcessingDialog::collectParamOverrides() const
 {
-    QJsonObject overrides;
+    QVariantMap overrides;
+    if (!m_qgisWrappers.isEmpty())
+    {
+        // QGIS provider algorithm: values from the parameter-widget wrappers.
+        for (const QgsAbstractProcessingParameterWidgetWrapper *wrapper : m_qgisWrappers)
+        {
+            if (!wrapper || !wrapper->parameterDefinition())
+                continue;
+            const QString name = wrapper->parameterDefinition()->name();
+            overrides[name] = wrapper->parameterValue();
+        }
+        return overrides;
+    }
+
     for (auto it = m_paramWidgets.constBegin(); it != m_paramWidgets.constEnd(); ++it)
     {
         const QString &name = it.key();
@@ -586,7 +657,7 @@ bool BatchProcessingDialog::runBatchItem(const QString &algorithmId,
                                          const QString &inputFile,
                                          const QString &outputPath,
                                          QString *errorMessage,
-                                         const QJsonObject &paramOverrides)
+                                         const QVariantMap &paramOverrides)
 {
     if (algorithmId.startsWith(QStringLiteral("rs:"))) {
         const auto adapter = AtomicAlgorithmRegistry::instance().findAdapter(algorithmId.toStdString());
@@ -611,12 +682,16 @@ bool BatchProcessingDialog::runBatchItem(const QString &algorithmId,
                 const std::string key = it.key().toStdString();
                 if (key == mainInput || key == "output")
                     continue;
-                const QJsonValue &value = it.value();
-                if (value.isBool())
+                const QVariant &value = it.value();
+                if (value.userType() == QMetaType::Bool)
                     params[key] = value.toBool();
-                else if (value.isDouble())
+                else if (value.userType() == QMetaType::Double)
                     params[key] = value.toDouble();
-                else if (value.isString())
+                else if (value.userType() == QMetaType::Int
+                         || value.userType() == QMetaType::LongLong
+                         || value.userType() == QMetaType::UInt)
+                    params[key] = value.toInt();
+                else
                     params[key] = value.toString().toStdString();
             }
             const Json::Value result = adapter->execute(params);
@@ -650,6 +725,15 @@ bool BatchProcessingDialog::runBatchItem(const QString &algorithmId,
         params[QStringLiteral("OUTPUT")] = outputPath;
     } else if (alg->parameterDefinition(QStringLiteral("OUTPUT_LAYER"))) {
         params[QStringLiteral("OUTPUT_LAYER")] = outputPath;
+    }
+    // User overrides win over QGIS defaults; input/output stay fixed.
+    for (auto it = paramOverrides.constBegin(); it != paramOverrides.constEnd(); ++it)
+    {
+        const QString &key = it.key();
+        if (key == QStringLiteral("INPUT") || key == QStringLiteral("INPUT_LAYER")
+            || key == QStringLiteral("OUTPUT") || key == QStringLiteral("OUTPUT_LAYER"))
+            continue;
+        params[key] = it.value();
     }
 
     QgsProcessingContext context;

@@ -3,9 +3,9 @@
 
 #include <QDialog>
 #include <QHash>
-#include <QJsonObject>
 #include <QList>
 #include <QStringList>
+#include <QVariantMap>
 
 class QComboBox;
 class QDoubleSpinBox;
@@ -17,6 +17,10 @@ class QPushButton;
 class QLabel;
 class QProgressBar;
 class QSpinBox;
+
+class QgsAbstractProcessingParameterWidgetWrapper;
+class QgsProcessingAlgorithm;
+class QgsProcessingContext;
 
 namespace sicnu::processing
 {
@@ -51,11 +55,11 @@ public:
                       const QString &inputFile,
                       const QString &outputPath,
                       QString *errorMessage,
-                      const QJsonObject &paramOverrides = QJsonObject());
+                      const QVariantMap &paramOverrides = QVariantMap());
 
-    /// Collects current RS parameter-form values as an override object
-    /// (used by the run path and by tests to verify the form state).
-    QJsonObject collectParamOverrides() const;
+    /// Collects current parameter-form values as an override map (used by the
+    /// run path and by tests to verify the form state).
+    QVariantMap collectParamOverrides() const;
 
 private slots:
     void onAddFiles();
@@ -67,9 +71,14 @@ private slots:
 private:
     void setupUi();
     void updateAlgorithmParameters();
-    /// (Re)builds the parameter form for an RS operator; hides the section
-    /// for non-RS algorithms.
+    /// (Re)builds the parameter form for an RS operator.
     void rebuildParamForm(const sicnu::processing::AlgorithmDescriptor &desc);
+    /// (Re)builds the parameter form for a QGIS provider algorithm using the
+    /// QGIS parameter-widget registry (input/output params excluded — they are
+    /// decided by the batch item).
+    void rebuildQgisParamForm(const QgsProcessingAlgorithm *alg);
+    /// Drops every widget in the parameter form.
+    void clearParamForm();
 
     QComboBox *m_algorithmCombo = nullptr;
     QListWidget *m_fileList = nullptr;
@@ -78,11 +87,15 @@ private:
     QProgressBar *m_progressBar = nullptr;
     QPushButton *m_runButton = nullptr;
 
-    /// "RS 参数" section: hidden for QGIS algorithms, rebuilt per RS operator.
+    /// "参数覆盖" section: rebuilt per algorithm (RS operators get typed
+    /// editors, QGIS algorithms get QGIS parameter-widget wrappers).
     QFrame *m_paramFrame = nullptr;
     QFormLayout *m_paramForm = nullptr;
     /// Parameter-name → editor widget for the current RS operator.
     QHash<QString, QWidget *> m_paramWidgets;
+    /// QGIS parameter wrappers for the current provider algorithm.
+    QVector<QgsAbstractProcessingParameterWidgetWrapper *> m_qgisWrappers;
+    QgsProcessingContext *m_qgisContext = nullptr;
 
     QStringList m_inputFiles;
     QString m_outputDir;

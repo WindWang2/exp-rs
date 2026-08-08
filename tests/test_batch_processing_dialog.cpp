@@ -18,8 +18,10 @@
 #include <vector>
 
 #include <qgsapplication.h>
+#include <qgsprocessingregistry.h>
 
 #include "app/dialogs/batch_processing_dialog.h"
+#include "processing/providers/qgis_algorithms/provider.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 namespace
@@ -129,7 +131,7 @@ TEST_CASE( "Batch dialog RS parameter form exposes overridable defaults", "[batc
   REQUIRE( maskCombo != nullptr );
 
   // Defaults from the operator schema surface in the form.
-  QJsonObject defaults = dialog.collectParamOverrides();
+  QVariantMap defaults = dialog.collectParamOverrides();
   CHECK( defaults.value( QStringLiteral( "source" ) ).toString() == QStringLiteral( "auto" ) );
   CHECK( defaults.value( QStringLiteral( "mask" ) ).toString()
          == QStringLiteral( "cloud_and_shadow" ) );
@@ -138,7 +140,7 @@ TEST_CASE( "Batch dialog RS parameter form exposes overridable defaults", "[batc
   maskCombo->setCurrentIndex( maskCombo->findData( QStringLiteral( "cloud" ) ) );
   sourceCombo->setCurrentIndex(
     sourceCombo->findData( QStringLiteral( "generic_bitmask" ) ) );
-  const QJsonObject edited = dialog.collectParamOverrides();
+  const QVariantMap edited = dialog.collectParamOverrides();
   CHECK( edited.value( QStringLiteral( "source" ) ).toString()
          == QStringLiteral( "generic_bitmask" ) );
   CHECK( edited.value( QStringLiteral( "mask" ) ).toString() == QStringLiteral( "cloud" ) );
@@ -162,7 +164,7 @@ TEST_CASE( "Batch run applies parameter overrides but keeps input/output fixed",
 
   // Overrides reach the operator (generic_bitmask + bit flag 1 runs and
   // produces the mask); main input / output stay fixed by the batch item.
-  QJsonObject overrides;
+  QVariantMap overrides;
   overrides[QStringLiteral( "source" )] = QStringLiteral( "generic_bitmask" );
   overrides[QStringLiteral( "bits" )] = 1;
   overrides[QStringLiteral( "qa_band" )] = 1; // band 1 acts as the QA band
@@ -170,7 +172,7 @@ TEST_CASE( "Batch run applies parameter overrides but keeps input/output fixed",
   REQUIRE( QFile::exists( output ) );
 
   // An override that tries to hijack the main input is ignored.
-  QJsonObject hijack;
+  QVariantMap hijack;
   hijack[QStringLiteral( "input" )] = QStringLiteral( "/nonexistent.tif" );
   hijack[QStringLiteral( "source" )] = QStringLiteral( "generic_bitmask" );
   hijack[QStringLiteral( "bits" )] = 1;
@@ -178,4 +180,26 @@ TEST_CASE( "Batch run applies parameter overrides but keeps input/output fixed",
   const QString out2 = dir.filePath( QStringLiteral( "masked2.tif" ) );
   REQUIRE( dialog.runBatchItem( QStringLiteral( "rs:qa_mask" ), input, out2, &err, hijack ) );
   REQUIRE( QFile::exists( out2 ) );
+}
+
+TEST_CASE( "Batch dialog exposes QGIS algorithm parameters via wrappers", "[batch_processing_dialog]" )
+{
+  ensureQgisApplication();
+  if ( !QgsApplication::processingRegistry()->providerById( QStringLiteral( "qgis_algorithms" ) ) )
+    QgsApplication::processingRegistry()->addProvider( new QgisAlgorithmsProvider() );
+
+  BatchProcessingDialog dialog;
+  // reprojectlayer has a TARGET_CRS parameter beyond INPUT/OUTPUT.
+  dialog.setAlgorithmId( QStringLiteral( "qgis_algorithms:reprojectlayer" ) );
+
+  auto *crsWidget = dialog.findChild<QWidget *>( QStringLiteral( "qgisParam_TARGET_CRS" ) );
+  REQUIRE( crsWidget != nullptr );
+
+  // The wrapper collects its current value into the override map.
+  const QVariantMap overrides = dialog.collectParamOverrides();
+  CHECK( overrides.contains( QStringLiteral( "TARGET_CRS" ) ) );
+
+  // INPUT/OUTPUT are not offered (decided by the batch item).
+  CHECK_FALSE( overrides.contains( QStringLiteral( "INPUT" ) ) );
+  CHECK_FALSE( overrides.contains( QStringLiteral( "OUTPUT" ) ) );
 }
