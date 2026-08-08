@@ -60,9 +60,16 @@ void RsRoiSpectrumTool::canvasReleaseEvent( QgsMapMouseEvent *e )
 
 void RsRoiSpectrumTool::finishPolygon()
 {
-  if ( !m_rasterLayer || !m_rasterLayer->isValid() || m_polygon.size() < 3 )
+  if ( m_finished )
+    return;
+  m_finished = true;
+
+  if ( m_rasterLayer.isNull() || !m_rasterLayer->isValid()
+       || m_polygon.size() < 3 )
   {
-    deleteLater();
+    if ( m_onResult )
+      m_onResult( {}, {}, {},
+                  tr( "ROI 需要至少 3 个点且栅格图层有效。" ) );
     return;
   }
 
@@ -86,7 +93,9 @@ void RsRoiSpectrumTool::finishPolygon()
   if ( !SpectralRoiProfile::meanSpectrum( m_rasterLayer->source(), roi,
                                           &result, &errorMessage ) )
   {
-    deleteLater();
+    // Surface the kernel's actionable error instead of vanishing silently.
+    if ( m_onResult )
+      m_onResult( {}, {}, {}, errorMessage );
     return;
   }
 
@@ -116,6 +125,4 @@ void RsRoiSpectrumTool::finishPolygon()
 
   if ( m_onResult )
     m_onResult( values, wavelengths, labels, m_rasterLayer->name() );
-
-  deleteLater();
 }

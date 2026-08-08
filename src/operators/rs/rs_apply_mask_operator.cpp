@@ -85,10 +85,10 @@ bool maskWindowBounds(const std::array<double, 6>& inGt,
         const MaskCoord m = mapToMask(inGt, maskGt, maskWidth, maskHeight, c[0], c[1]);
         if (m.col < 0)
             continue;
-        minCol = std::min(minCol, m.col);
-        minRow = std::min(minRow, m.row);
-        maxCol = std::max(maxCol, m.col);
-        maxRow = std::max(maxRow, m.row);
+        minCol = (std::min)(minCol, m.col);
+        minRow = (std::min)(minRow, m.row);
+        maxCol = (std::max)(maxCol, m.col);
+        maxRow = (std::max)(maxRow, m.row);
     }
     if (maxCol < 0)
         return false;
@@ -179,11 +179,11 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
     const int height = input.height();
     const int bandCount = input.bandCount();
     if (bandCount < 1) {
-        throw RSOperatorError(ErrorCode::InvalidParameter,
+        throw RSOperatorError(ErrorCode::InvalidInputData,
                               "Input raster has no bands: " + inputPath);
     }
     if (mask.bandCount() < 1) {
-        throw RSOperatorError(ErrorCode::InvalidParameter,
+        throw RSOperatorError(ErrorCode::InvalidInputData,
                               "Mask raster has no bands: " + maskPath);
     }
 
@@ -200,11 +200,11 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
             const auto verdict = primary->verdict;
             if (verdict == data::GridCompatVerdict::CrsMismatch ||
                 verdict == data::GridCompatVerdict::MissingCrs) {
-                throw RSOperatorError(ErrorCode::InvalidParameter,
+                throw RSOperatorError(ErrorCode::InvalidInputData,
                                       "Cannot apply mask: " + primary->message.toStdString());
             }
             if (!alignMask) {
-                throw RSOperatorError(ErrorCode::InvalidParameter,
+                throw RSOperatorError(ErrorCode::InvalidInputData,
                                       "Cannot apply mask: " + primary->message.toStdString());
             }
             aligned = true;
@@ -215,7 +215,7 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
     if (!inputGrid.hasGeoTransform && !maskGrid.hasGeoTransform) {
         if (mask.width() != width || mask.height() != height) {
             throw RSOperatorError(
-                ErrorCode::InvalidParameter,
+                ErrorCode::InvalidInputData,
                 "Mask and input have different dimensions and neither is "
                 "georeferenced; cannot align the mask");
         }
@@ -233,7 +233,7 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
             outputNoData[b - 1] = noDataParam;
         } else {
             throw RSOperatorError(
-                ErrorCode::InvalidParameter,
+                ErrorCode::InvalidInputData,
                 "Input band " + std::to_string(b) + " defines no NoData value; "
                 "pass `no_data` to choose the value masked pixels receive");
         }
@@ -267,7 +267,7 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
     const size_t totalPixels = static_cast<size_t>(width) * height;
 
     for (int y0 = 0; y0 < height; y0 += kBlockRows) {
-        const int blockH = std::min(kBlockRows, height - y0);
+        const int blockH = (std::min)(kBlockRows, height - y0);
 
         // Read the mask region covering this block (resampled or same grid).
         long mCol0 = 0, mRow0 = 0, mCol1 = -1, mRow1 = -1;
@@ -362,6 +362,12 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
     }
     GDALSetMetadataItem(out.dataset(), "SICNU_MASKED_BY", maskPath.c_str(), nullptr);
     out.close();
+    // Deferred flush/trailer errors only surface at close; a truncated output
+    // must not be reported as success (ADR 0105 review remediation).
+    if (CPLGetLastErrorType() != CE_None) {
+        throw RSOperatorError(ErrorCode::GdalError,
+                              "Failed to finalize output raster: " + outputPath);
+    }
 
     context.reportProgress(1.0, "Mask applied");
 

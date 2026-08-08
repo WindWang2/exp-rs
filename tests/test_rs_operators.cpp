@@ -1835,6 +1835,24 @@ TEST_CASE("RS post-classification change validates inputs", "[operators][rs]") {
         CHECK_FALSE(QFile::exists(outputPath));
     }
 
+    SECTION("auto class_count over the UInt16 change-code limit is rejected") {
+        // A stray large band value (e.g. undeclared NoData) must not drive an
+        // unbounded matrix allocation or corrupt UInt16 codes (ADR 0105).
+        std::vector<std::vector<float>> big(1, std::vector<float>(W * H, 300.0f));
+        const QString bigPath = tmp.path() + "/big.tif";
+        REQUIRE(writeGdalOutput(bigPath, W, H, big, gt, "EPSG:32648", &err));
+
+        Json::Value params(Json::objectValue);
+        params["before"] = bigPath.toStdString();
+        params["after"] = bigPath.toStdString();
+        params["output"] = outputPath.toStdString();
+
+        RSOperatorContext ctx;
+        REQUIRE_THROWS_WITH(op->run(params, ctx),
+                            Catch::Matchers::ContainsSubstring("UInt16 change-code limit"));
+        CHECK_FALSE(QFile::exists(outputPath));
+    }
+
     SECTION("NoData pixels are excluded from the matrix and the change map") {
         // before: left half 1.0 (declared NoData), right half 0.0 (valid);
         // after: 2.0 everywhere. Only the right half counts (0 -> 2).

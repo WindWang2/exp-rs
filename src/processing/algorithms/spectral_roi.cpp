@@ -87,33 +87,50 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
         return true;
     }
 
-    // Accumulate per band: sum and sum of squares.
+    // Accumulate per band: sum and sum of squares. Point-in-polygon is
+    // evaluated once per pixel; per band the ROI window is read in ONE
+    // GDALRasterIO call (band-major), not 1x1 per pixel — O(bands) I/O calls
+    // instead of O(pixels x bands) (ADR 0105 review remediation).
     std::vector<double> sum( bandCount, 0.0 );
     std::vector<double> sumSq( bandCount, 0.0 );
     size_t pixels = 0;
 
-    std::vector<float> line( static_cast<size_t>( col1 - col0 ) );
+    const int windowW = col1 - col0;
+    const int windowH = row1 - row0;
+    std::vector<uint8_t> inside( static_cast<size_t>( windowW ) * windowH, 0 );
     for ( int row = row0; row < row1; ++row )
     {
         const double mapY = gt[3] + ( row + 0.5 ) * gt[5];
         for ( int col = col0; col < col1; ++col )
         {
             const double mapX = gt[0] + ( col + 0.5 ) * gt[1];
-            if ( !polygon.containsPoint( QPointF( mapX, mapY ), Qt::OddEvenFill ) )
-                continue;
-
-            for ( int b = 1; b <= bandCount; ++b )
+            if ( polygon.containsPoint( QPointF( mapX, mapY ), Qt::OddEvenFill ) )
             {
-                float value = 0.0f;
-                if ( GDALRasterIO( GDALGetRasterBand( ds, b ), GF_Read, col, row, 1, 1,
-                                   &value, 1, 1, GDT_Float32, 0, 0 ) != CE_None )
+                inside[static_cast<size_t>( row - row0 ) * windowW + ( col - col0 )] = 1;
+                ++pixels;
+            }
+        }
+    }
+
+    if ( pixels > 0 )
+    {
+        std::vector<float> window( static_cast<size_t>( windowW ) * windowH );
+        for ( int b = 1; b <= bandCount; ++b )
+        {
+            if ( GDALRasterIO( GDALGetRasterBand( ds, b ), GF_Read,
+                               col0, row0, windowW, windowH, window.data(),
+                               windowW, windowH, GDT_Float32, 0, 0 ) != CE_None )
+                continue;
+            for ( int i = 0; i < windowW * windowH; ++i )
+            {
+                if ( !inside[static_cast<size_t>( i )] )
                     continue;
+                const double value = window[static_cast<size_t>( i )];
                 if ( !std::isfinite( value ) )
                     continue;
                 sum[b - 1] += value;
-                sumSq[b - 1] += static_cast<double>( value ) * value;
+                sumSq[b - 1] += value * value;
             }
-            ++pixels;
         }
     }
 

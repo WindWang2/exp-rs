@@ -116,6 +116,10 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
     const int beforeBand = beforeBandParam > 0 ? beforeBandParam : defaultBand;
     const int afterBand = afterBandParam > 0 ? afterBandParam : defaultBand;
     const int classCountParam = getInt(params, "class_count", 0);
+    if (classCountParam < 0) {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "class_count must be >= 0 (0 = auto)");
+    }
     const std::vector<std::string> classLabels = getStringArray(params, "class_labels");
 
     ensureGdalInit();
@@ -173,10 +177,11 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
     int maxSeen = -1;
     std::vector<float> beforeBuf(static_cast<size_t>(width) * kBlockRows);
     std::vector<float> afterBuf(static_cast<size_t>(width) * kBlockRows);
+    std::vector<float> codes(static_cast<size_t>(width) * kBlockRows);
 
     const size_t pixelCount = static_cast<size_t>(width) * height;
     for (int y0 = 0; y0 < height; y0 += kBlockRows) {
-        const int blockH = std::min(kBlockRows, height - y0);
+        const int blockH = (std::min)(kBlockRows, height - y0);
         const size_t blockPixels = static_cast<size_t>(width) * blockH;
         if (!beforeDs.readBandWindow(beforeBand, 0, y0, width, blockH, beforeBuf.data())) {
             throw RSOperatorError(ErrorCode::GdalError,
@@ -202,7 +207,7 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
                     "Negative class value " + std::to_string(from) + "/" +
                         std::to_string(to) + " found; classifications must use classes >= 0");
             }
-            maxSeen = std::max(maxSeen, std::max(from, to));
+            maxSeen = (std::max)(maxSeen, (std::max)(from, to));
             ++transitions[(static_cast<uint64_t>(from) << 32) | static_cast<uint32_t>(to)];
         }
         context.throwIfCancelled();
@@ -216,6 +221,18 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
             ErrorCode::InvalidParameter,
             "Observed class " + std::to_string(maxSeen) + " but class_count is " +
                 std::to_string(classCountParam) + "; increase class_count or leave it 0 (auto)");
+    }
+    // The change-type code (from * classCount + to) must fit UInt16 and stay
+    // below the 65535 NoData sentinel: classCount is capped at 255 even in
+    // auto mode (a stray large band value must not OOM the matrix or corrupt
+    // the codes).
+    if (classCount > kMaxClassCount) {
+        throw RSOperatorError(
+            ErrorCode::InvalidInputData,
+            "Observed maximum class " + std::to_string(maxSeen) +
+                " exceeds the UInt16 change-code limit (" +
+                std::to_string(kMaxClassCount - 1) +
+                "); the input does not look like a thematic classification");
     }
     if (classCount < 1) {
         throw RSOperatorError(ErrorCode::InvalidInputData,
@@ -257,7 +274,7 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
                               "Failed to create output raster: " + errorMessage.toStdString());
     }
     for (int y0 = 0; y0 < height; y0 += kBlockRows) {
-        const int blockH = std::min(kBlockRows, height - y0);
+        const int blockH = (std::min)(kBlockRows, height - y0);
         const size_t blockPixels = static_cast<size_t>(width) * blockH;
         if (!beforeDs.readBandWindow(beforeBand, 0, y0, width, blockH, beforeBuf.data())) {
             throw RSOperatorError(ErrorCode::GdalError,
@@ -267,7 +284,8 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
             throw RSOperatorError(ErrorCode::GdalError,
                                   "Failed to re-read after band");
         }
-        std::vector<float> codes(blockPixels, static_cast<float>(kMaxUInt16Code));
+        std::fill(codes.begin(), codes.begin() + static_cast<ptrdiff_t>(blockPixels),
+                  static_cast<float>(kMaxUInt16Code));
         for (size_t i = 0; i < blockPixels; ++i) {
             const float bv = beforeBuf[i];
             const float av = afterBuf[i];
@@ -295,6 +313,11 @@ Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
     GDALSetMetadataItem(out.dataset(), "SICNU_CHANGE_CLASS_COUNT",
                         std::to_string(classCount).c_str(), nullptr);
     out.close();
+    // Deferred flush/trailer errors only surface at close (ADR 0105).
+    if (CPLGetLastErrorType() != CE_None) {
+        throw RSOperatorError(ErrorCode::GdalError,
+                              "Failed to finalize output raster: " + outputPath);
+    }
 
     context.reportProgress(1.0, "Post-classification comparison complete");
 

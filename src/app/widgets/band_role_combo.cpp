@@ -3,6 +3,7 @@
 
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <QDebug>
 #include <QString>
 
 BandRoleCombo::BandRoleCombo( QWidget *parent )
@@ -19,7 +20,16 @@ void BandRoleCombo::setRaster( const QString &source )
 
   GdalDatasetWrapper ds;
   if ( !ds.open( source ) )
+  {
+    // Do not silently degrade to "auto": surface the open failure in the log
+    // so a mis-typed path / unreadable provider is diagnosable (ADR 0105).
+    const QString lastError = ds.lastError();
+    if ( !lastError.isEmpty() )
+      qWarning() << "BandRoleCombo: cannot open raster for band roles:" << lastError;
+    else
+      qWarning() << "BandRoleCombo: cannot open raster:" << source;
     return;
+  }
 
   const int bandCount = ds.bandCount();
   if ( bandCount <= 0 )

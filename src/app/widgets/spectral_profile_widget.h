@@ -124,4 +124,14 @@ private:
     // Computed ranges
     double m_minValue = 0.0;
     double m_maxValue = 0.0;
+
+    // Continuum-removed display cache: recomputed only when the spectrum,
+    // wavelengths, or the CR toggle changes (not on every paint). Mutable so
+    // the const displayValues() accessor can memoize.
+    mutable QVector<double> m_displayCache;
+    mutable bool m_displayDirty = true;
+
+    /// Effective plot Y range: [0, 1] in continuum-removal mode, else the
+    /// raw value range. Both drawLine() and drawAxes() must agree on it.
+    void plotRange( double *vMin, double *vMax ) const;
 };
