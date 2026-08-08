@@ -1,7 +1,7 @@
 #include "cli_tool_discovery.h"
 #include "tool_path_manager.h"
 
-#include "app/app_paths.h"
+#include "framework/runtime_paths.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -141,7 +141,7 @@ bool isExcludedGdalTool( const QString &toolName )
 QSet<QString> customToolCommands()
 {
     QSet<QString> commands;
-    const QString shipped = AppPaths::resolveDataPath( QStringLiteral( "data/tools/custom" ) );
+    const QString shipped = sicnu::processing::resolveRuntimeDataPath( QStringLiteral( "data/tools/custom" ) );
     QDir dir( shipped );
     if ( !dir.exists() )
         return commands;
