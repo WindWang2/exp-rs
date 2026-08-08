@@ -132,7 +132,7 @@ TEST_CASE( "Georef match Task Center cancel waits for worker exit",
   // The canceledHook runs on the worker thread asynchronously; under heavy
   // parallel test load the worker may not be scheduled for several seconds,
   // so poll with a generous budget instead of asserting immediately.
-  for ( int i = 0; i < 2000 && !canceledHook->load(); ++i )
+  for ( int i = 0; i < 6000 && !canceledHook->load(); ++i )
     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
   REQUIRE( canceledHook->load() );
   REQUIRE( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status

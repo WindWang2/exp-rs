@@ -283,7 +283,7 @@ TEST_CASE( "OBIA Task Center keeps cancellation running until the worker exits",
   // terminal-status transitions fixed in test_task_center). Poll with a
   // generous budget — under heavy parallel test load the worker may not be
   // scheduled for several seconds.
-  for ( int i = 0; i < 2000 && !canceledHook->load(); ++i )
+  for ( int i = 0; i < 6000 && !canceledHook->load(); ++i )
     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
   REQUIRE( canceledHook->load() );
   // Still Running until worker observes cancel

@@ -2,6 +2,7 @@
 #include "orthorectification_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
+#include "widgets/crs_selector.h"
 
 #include <raster/qgsrasterlayer.h>
 
@@ -68,9 +69,11 @@ void OrthorectificationDialog::setupUi()
   form->setHorizontalSpacing( 12 );
   form->setVerticalSpacing( 8 );
 
-  m_targetCrsEdit = new QLineEdit( sec );
-  m_targetCrsEdit->setObjectName( QStringLiteral( "orthoTargetCrsEdit" ) );
-  m_targetCrsEdit->setText( QStringLiteral( "EPSG:4326" ) );
+  m_targetCrsEdit = new CrsSelector( sec );
+  // Keep the inner edit's stable object name so tests and UI lookups by name
+  // keep working; the browse button delegates to the QGIS projection dialog.
+  m_targetCrsEdit->lineEdit()->setObjectName( QStringLiteral( "orthoTargetCrsEdit" ) );
+  m_targetCrsEdit->setCrsString( QStringLiteral( "EPSG:4326" ) );
   SicnuDialogHelp::tip( m_targetCrsEdit, tr(
     "目标 CRS（如 EPSG:4326、EPSG:32650）。留空使用 RPC/GCP 自带 CRS。" ) );
   form->addRow( tr( "目标 CRS" ), m_targetCrsEdit );
@@ -175,7 +178,7 @@ Json::Value OrthorectificationDialog::buildParams() const
   params["output"] = outputPath().toStdString();
   params["resampling"] = m_resamplingCombo->currentData().toString().toStdString();
 
-  const QString dstCrs = m_targetCrsEdit->text().trimmed();
+  const QString dstCrs = m_targetCrsEdit->crsString();
   if ( !dstCrs.isEmpty() )
     params["dstCrs"] = dstCrs.toStdString();
 

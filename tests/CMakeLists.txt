@@ -3884,6 +3884,7 @@ add_executable(test_orthorectification_dialog
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
 )
 target_link_libraries(test_orthorectification_dialog PRIVATE
   Catch2::Catch2WithMain
@@ -4082,6 +4083,26 @@ target_include_directories(test_raster_layer_combo PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_raster_layer_combo)
+
+# Shared CRS input widget (C5)
+add_executable(test_crs_selector
+  test_crs_selector.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
+)
+target_link_libraries(test_crs_selector PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_crs_selector PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_crs_selector)
 
 # Spectral index dialog — role-based band preselection via BandRoleCombo (C5)
 add_executable(test_spectral_index_dialog

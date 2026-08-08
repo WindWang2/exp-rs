@@ -5,6 +5,7 @@
 
 #include <json/json.h>
 
+class CrsSelector;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -46,7 +47,7 @@ private:
     /// Refreshes the model-status label (RPC / GCP / none) for the input.
     void refreshModelStatus();
 
-    QLineEdit *m_targetCrsEdit = nullptr;
+    CrsSelector *m_targetCrsEdit = nullptr;
     QLineEdit *m_demEdit = nullptr;
     QPushButton *m_demBrowseButton = nullptr;
     QComboBox *m_resamplingCombo = nullptr;
