@@ -3955,6 +3955,43 @@ endif()
 set_target_properties(test_batch_processing_dialog PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_batch_processing_dialog)
 
+# Dialog grid-preflight helper — shared pre-run compatibility check
+add_executable(test_grid_compat_dialog_utils
+  test_grid_compat_dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+)
+target_link_libraries(test_grid_compat_dialog_utils PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  sicnu_jobs
+  sicnu_operators
+  sicnu_task_center
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_data
+)
+target_include_directories(test_grid_compat_dialog_utils PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_grid_compat_dialog_utils PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_grid_compat_dialog_utils PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_grid_compat_dialog_utils PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_grid_compat_dialog_utils PRIVATE jsoncpp)
+endif()
+set_target_properties(test_grid_compat_dialog_utils PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_grid_compat_dialog_utils)
+
 # Apply-mask dialog — operator JSON assembly from widget state
 add_executable(test_apply_mask_dialog
   test_apply_mask_dialog.cpp

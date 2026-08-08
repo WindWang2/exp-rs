@@ -176,6 +176,19 @@ void FusionDialog::onRun()
         return;
     }
 
+    // Grid preflight: pan-sharpening intentionally mixes resolutions (the MS
+    // raster is resampled onto the pan grid), so pixel-size differences are
+    // allowed; other blocking grid issues are rejected up front.
+    const QString gridMessage = rasterGridCompatibilityMessage(
+        panLayer->source(), msLayer->source(), /*allowPixelSizeMismatch=*/true );
+    if ( !gridMessage.isEmpty() )
+    {
+        QMessageBox::warning( this, tr( "Error" ),
+            tr( "Pan and multispectral rasters are not co-registered:\n%1" )
+                .arg( gridMessage ) );
+        return;
+    }
+
     QString outPath = outputPath();
     if ( outPath.isEmpty() )
     {

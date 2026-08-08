@@ -135,6 +135,24 @@ bool PostClassificationDialog::validateInputs()
     QMessageBox::warning( this, dialogTitle(), tr( "请选择前期与后期分类栅格。" ) );
     return false;
   }
+  auto *before = qobject_cast<QgsRasterLayer *>(
+    QgsProject::instance()->mapLayer( m_beforeLayerCombo->currentData().toString() ) );
+  auto *after = qobject_cast<QgsRasterLayer *>(
+    QgsProject::instance()->mapLayer( m_afterLayerCombo->currentData().toString() ) );
+  if ( !before || !before->isValid() || !after || !after->isValid() )
+  {
+    QMessageBox::warning( this, dialogTitle(), tr( "前期或后期分类栅格无效。" ) );
+    return false;
+  }
+  const QString gridMessage = rasterGridCompatibilityMessage(
+    before->source(), after->source() );
+  if ( !gridMessage.isEmpty() )
+  {
+    QMessageBox::warning( this, dialogTitle(),
+                          tr( "两张分类栅格的像元网格不兼容，无法比较：\n%1" )
+                            .arg( gridMessage ) );
+    return false;
+  }
   return true;
 }
 

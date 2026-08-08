@@ -21,6 +21,20 @@ class QDialog;
  */
 void populateRasterLayerCombo( QComboBox *combo, bool clearFirst = true );
 
+/**
+ * Preflights two raster files against the shared pixel-grid compatibility
+ * service (compareGrids). Returns an empty string when the pair can proceed
+ * (no blocking issue); otherwise a user-facing, actionable message describing
+ * the primary blocking incompatibility, with any non-blocking guidance (e.g.
+ * NoData mismatch) appended. A file that cannot be opened yields a generic
+ * message. \p allowPixelSizeMismatch ignores resolution differences — the
+ * fusion case, where the pan grid is deliberately finer than the MS grid.
+ * Dialogs call this before submitting multi-raster operators.
+ */
+QString rasterGridCompatibilityMessage( const QString &rasterA,
+                                        const QString &rasterB,
+                                        bool allowPixelSizeMismatch = false );
+
 namespace SicnuUi
 {
 

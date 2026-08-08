@@ -1,6 +1,10 @@
 // dialog_utils.cpp — Shared utilities for dialog UI chrome
 #include "dialog_utils.h"
 
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_grid_compat.h"
+#include "data/raster_grid_compat.h"
+
 #include <QComboBox>
 #include <QDialog>
 #include <QFont>
@@ -130,3 +134,40 @@ QHBoxLayout *makeActionRow( QWidget *parent )
 }
 
 } // namespace SicnuUi
+
+QString rasterGridCompatibilityMessage( const QString &rasterA,
+                                        const QString &rasterB,
+                                        bool allowPixelSizeMismatch )
+{
+  GdalDatasetWrapper a;
+  GdalDatasetWrapper b;
+  if ( !a.open( rasterA ) || !b.open( rasterB ) )
+    return QObject::tr( "无法打开影像，无法检查像元网格兼容性。" );
+
+  sicnu::data::GridCompatReport report =
+      sicnu::data::compareGrids( sicnu::processing::gridFromDataset( a ),
+                                 sicnu::processing::gridFromDataset( b ) );
+  if ( allowPixelSizeMismatch )
+  {
+    QVector<sicnu::data::GridCompatIssue> filtered;
+    for ( const auto &issue : report.issues )
+    {
+      if ( issue.verdict != sicnu::data::GridCompatVerdict::PixelSizeMismatch )
+        filtered.append( issue );
+    }
+    report.issues = filtered;
+  }
+  if ( report.compatible() )
+    return QString();
+
+  QString message;
+  const auto issues = report.issues;
+  for ( int i = 0; i < issues.size(); ++i )
+  {
+    if ( i == 0 )
+      message = issues[i].message;
+    else if ( issues[i].blocking || i == 1 )
+      message += QLatin1Char( '\n' ) + issues[i].message;
+  }
+  return message;
+}
