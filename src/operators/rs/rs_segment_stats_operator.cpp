@@ -63,6 +63,18 @@ Json::Value RsSegmentStatsOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsSegmentStatsOperator::executionEstimate() const {
+    // FullRaster (base policy): the label band and every selected spectral
+    // band are read into full float buffers, then per-segment sums are
+    // accumulated in a map. Typical 1024x1024 float32 with 4 bands:
+    // (1 label + 4 bands) x 4 MiB = 20 MiB, plus accumulation -> ~24 MiB.
+    Json::Value estimate(Json::objectValue);
+    estimate["tileWidth"] = 0;         // full-raster processing: tiling not applicable
+    estimate["tileHeight"] = 0;
+    estimate["estimatedRamBytes"] = 24 * 1024 * 1024; // ~24 MiB
+    return estimate;
+}
+
 Json::Value RsSegmentStatsOperator::run(const Json::Value& params, RSOperatorContext& context) {
     const std::string inputPath = requireString(params, "input");
     const std::string labelsPath = requireString(params, "labels");

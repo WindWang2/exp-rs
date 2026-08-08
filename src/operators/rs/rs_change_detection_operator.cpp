@@ -105,6 +105,18 @@ Json::Value RsChangeDetectionOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsChangeDetectionOperator::executionEstimate() const {
+    // FullRaster (base policy): whole bands of both rasters are read into
+    // memory. Typical input 1024x1024 float32; the CVA path holds
+    // 2*bandCount+1 full-raster float buffers (9 at 4 bands) plus uint8
+    // mask/cleanup buffers, i.e. ~10 x 4 MiB.
+    Json::Value estimate(Json::objectValue);
+    estimate["tileWidth"] = 0;         // full-raster processing: tiling not applicable
+    estimate["tileHeight"] = 0;
+    estimate["estimatedRamBytes"] = 10 * 1024 * 1024 * 4; // ~40 MiB
+    return estimate;
+}
+
 Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
                                            RSOperatorContext& context) {
     if (!params.isObject()) {

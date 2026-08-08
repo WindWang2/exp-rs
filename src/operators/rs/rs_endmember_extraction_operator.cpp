@@ -55,6 +55,19 @@ Json::Value RsEndmemberExtractionOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsEndmemberExtractionOperator::executionEstimate() const {
+    // FullRaster (default policy): the whole raster is resident. For a typical
+    // 1024x1024x4-band float32 input (16 MiB), peak RAM is the input pixel
+    // buffer (16 MiB) + per-pixel PPI extreme counts (4 MiB) + the pixel
+    // ordering vector for ranking (8 MiB); projection directions are
+    // bands-sized and negligible.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;          // full-raster: tiling not applicable
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 29360128; // ~28 MiB
+    return est;
+}
+
 Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
                                                RSOperatorContext& context) {
     const std::string inputPath = requireString(params, "input");

@@ -123,6 +123,18 @@ Json::Value RsObiaClassifyOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsObiaClassifyOperator::executionEstimate() const
+{
+    // FullRaster (default policy): input bands, the UInt32 segment label map,
+    // per-segment mean-feature statistics and the Int32 class map are resident,
+    // plus the segment-feature/classifier matrices (small for typical inputs).
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 67108864; // bands + labels + features + class map (64 MiB)
+    return est;
+}
+
 Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorContext& context) {
     const std::string inputPath = requireString(params, "input");
     const std::string trainingPath = requireString(params, "training");

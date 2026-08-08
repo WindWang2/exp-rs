@@ -115,6 +115,18 @@ Json::Value RsKmeansOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsKmeansOperator::executionEstimate() const
+{
+    // FullRaster (default policy): all selected bands, the pixel index and the
+    // Float32 training matrix are resident (prediction itself is tile-streamed
+    // by the pipeline at 256x256). Typical: 4 x 1024x1024 bands + index + trainX.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 33554432; // 16 MiB bands + 8 MiB index + trainX + fixed
+    return est;
+}
+
 Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& context) {
     const std::string inputPath = requireString(params, "input");
     const std::string outputPath = requireString(params, "output");

@@ -81,6 +81,17 @@ Json::Value RsMajorityFilterOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsMajorityFilterOperator::executionEstimate() const {
+    // FullRaster (base policy): the label raster is loaded into a CV_32S
+    // cv::Mat and the majority filter materializes a second full CV_32S
+    // output, i.e. 2 x 1024 x 1024 x 4 B for a typical 1024x1024 input.
+    Json::Value estimate(Json::objectValue);
+    estimate["tileWidth"] = 0;         // full-raster processing: tiling not applicable
+    estimate["tileHeight"] = 0;
+    estimate["estimatedRamBytes"] = 2 * 1024 * 1024 * 4; // ~8 MiB
+    return estimate;
+}
+
 Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorContext& context) {
     if (!params.isObject()) {
         throw RSOperatorError(ErrorCode::InvalidParameter,

@@ -68,6 +68,18 @@ Json::Value RsAtmosphericCorrectionOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsAtmosphericCorrectionOperator::executionEstimate() const {
+    // MultiPassStreaming: 256x256 stream tiles (kTile in
+    // AtmosphericCorrection::processFile); a source tile and one radiance/output
+    // tile buffer in flight plus a 1024-bin dark-object histogram (~8 KiB) ->
+    // ~0.5 MiB per pass. QUAC is full-raster by design and dominates when selected.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = 524288;
+    return est;
+}
+
 Json::Value RsAtmosphericCorrectionOperator::run(const Json::Value& params,
                                                  RSOperatorContext& context) {
     if (!params.isObject()) {

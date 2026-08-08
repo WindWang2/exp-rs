@@ -128,6 +128,9 @@ Json::Value AgentMetadata::toJson() const
   if ( !memoryPolicy.empty() )
     root["memoryPolicy"] = memoryPolicy;
 
+  if ( execution.isObject() && !execution.empty() )
+    root["execution"] = execution;
+
   return root;
 }
 
@@ -168,6 +171,9 @@ AgentMetadata AgentMetadata::fromJson( const Json::Value &val )
 
   if ( val.isMember( "memoryPolicy" ) && val["memoryPolicy"].isString() )
     meta.memoryPolicy = val["memoryPolicy"].asString();
+
+  if ( val.isMember( "execution" ) && val["execution"].isObject() )
+    meta.execution = val["execution"];
 
   return meta;
 }

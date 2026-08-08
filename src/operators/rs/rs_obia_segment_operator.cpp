@@ -60,6 +60,18 @@ Json::Value RsObiaSegmentOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsObiaSegmentOperator::executionEstimate() const
+{
+    // FullRaster (default policy): input bands plus the segmenter working set —
+    // per-band smoothed/quantized copies, the composite key grid and the UInt32
+    // label map are all resident simultaneously.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 67108864; // ~16 x 1024x1024 working buffers (64 MiB)
+    return est;
+}
+
 Json::Value RsObiaSegmentOperator::run(const Json::Value& params, RSOperatorContext& context) {
     const std::string inputPath = requireString(params, "input");
     const std::string outputPath = requireString(params, "output");

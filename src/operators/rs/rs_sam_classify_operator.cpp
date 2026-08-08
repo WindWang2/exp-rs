@@ -98,6 +98,18 @@ Json::Value RsSamClassifyOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsSamClassifyOperator::executionEstimate() const
+{
+    // FullRaster (default policy): the pixel-major multi-band buffer, labels,
+    // per-pixel angles and up to two output bands are all resident for the
+    // whole raster.
+    Json::Value est( Json::objectValue );
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 41943040; // ~10 x 1024x1024 Float32 buffers (40 MiB)
+    return est;
+}
+
 Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorContext &context ) {
     if ( !params.isObject() )
         throw RSOperatorError( ErrorCode::InvalidParameter,

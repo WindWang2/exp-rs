@@ -70,6 +70,18 @@ Json::Value RsRadiometricCalibrationOperator::metadata() const
     return meta;
 }
 
+Json::Value RsRadiometricCalibrationOperator::executionEstimate() const
+{
+    // Streaming: 256x256 stream tiles (kTile in
+    // RadiometricCalibration::processFile) with the source tile and one float
+    // output buffer in flight -> ~0.5 MiB.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = 524288;
+    return est;
+}
+
 Json::Value RsRadiometricCalibrationOperator::run(const Json::Value &params,
                                                   RSOperatorContext &context)
 {

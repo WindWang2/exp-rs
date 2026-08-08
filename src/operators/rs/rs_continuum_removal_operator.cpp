@@ -47,6 +47,17 @@ Json::Value RsContinuumRemovalOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsContinuumRemovalOperator::executionEstimate() const {
+    // FullRaster (base default): no preferred tile. All input bands plus all
+    // output bands are resident at once (band-major buffers); typical input
+    // 1024x1024x4 float32 (~4 MiB/band) -> 2 x 4 bands = ~32 MiB.
+    Json::Value est( Json::objectValue );
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 33554432;
+    return est;
+}
+
 Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperatorContext &context ) {
     if ( !params.isObject() )
         throw RSOperatorError( ErrorCode::InvalidParameter,

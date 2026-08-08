@@ -90,6 +90,18 @@ Json::Value RsPostClassificationChangeOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsPostClassificationChangeOperator::executionEstimate() const {
+    // MultiPassStreaming: two passes over full-width x kBlockRows (256) row
+    // blocks. Typical 1024-wide input holds 3 float block buffers
+    // (before/after/codes) plus the classCount x classCount transition
+    // matrix (<= 255^2 x 8 B), ~3.7 MiB -> 4 MiB.
+    Json::Value estimate(Json::objectValue);
+    estimate["tileWidth"] = 0;         // blocks span the full scanline width (auto)
+    estimate["tileHeight"] = 256;      // matches kBlockRows
+    estimate["estimatedRamBytes"] = 4 * 1024 * 1024; // ~4 MiB
+    return estimate;
+}
+
 Json::Value RsPostClassificationChangeOperator::run(const Json::Value& params,
                                                     RSOperatorContext& context) {
     if (!params.isObject()) {

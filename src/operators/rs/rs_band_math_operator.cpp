@@ -49,6 +49,17 @@ Json::Value RsBandMathOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsBandMathOperator::executionEstimate() const {
+    // FullRaster (base default): no preferred tile. BandMath::processFile loads
+    // every input band plus the output buffer; typical input 1024x1024x4 float32
+    // (~4 MiB/band) -> 4 input bands + 1 output = ~20 MiB.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 20971520;
+    return est;
+}
+
 Json::Value RsBandMathOperator::run(const Json::Value& params,
                                     RSOperatorContext& context) {
     if (!params.isObject()) {

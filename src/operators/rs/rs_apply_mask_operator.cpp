@@ -141,6 +141,17 @@ Json::Value RsApplyMaskOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsApplyMaskOperator::executionEstimate() const {
+    // Streaming: full-width x kBlockRows (256) strips. Peak per block is the
+    // float input buffer + float mask window + int32 mask offsets = 12
+    // bytes/pixel; typical 1024x1024 input -> 1024x256 block -> ~3 MiB.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 1024;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = 3145728;
+    return est;
+}
+
 Json::Value RsApplyMaskOperator::run(const Json::Value& params,
                                      RSOperatorContext& context) {
     if (!params.isObject()) {

@@ -39,6 +39,12 @@ Json::Value RSOperator::metadata() const {
     return meta;
 }
 
+Json::Value RSOperator::executionEstimate() const {
+    // Default: unknown/auto (no execution-resource declaration). Operators
+    // that can quantify their large-raster behavior override this.
+    return Json::Value(Json::objectValue);
+}
+
 Json::Value RSOperator::execute(const Json::Value& params, RSOperatorContext& context) {
     auto& logger = RSOperationLogger::instance();
     const size_t handle = logger.beginRun(name(), params);

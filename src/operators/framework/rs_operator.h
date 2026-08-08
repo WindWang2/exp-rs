@@ -109,6 +109,16 @@ public:
     virtual Json::Value metadata() const;
 
     /**
+     * Declared execution-resource estimate for a typical input: preferred
+     * tile size and estimated peak RAM / temporary disk in bytes. Keys:
+     * "tileWidth", "tileHeight", "estimatedRamBytes", "temporaryDiskBytes"
+     * (0 = unknown/auto). Surfaced through the agent metadata as
+     * "execution" by RsOperatorAdapter; overridden by operators that can
+     * quantify their large-raster behavior (ADR 0117).
+     */
+    virtual Json::Value executionEstimate() const;
+
+    /**
      * Executes the operator.
      *
      * @param params  Algorithm parameters as Json::Value object.

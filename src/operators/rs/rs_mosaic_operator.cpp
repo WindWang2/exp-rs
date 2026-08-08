@@ -72,6 +72,18 @@ Json::Value RsMosaicOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsMosaicOperator::executionEstimate() const
+{
+    // FullRaster (default policy): band 1 of every input is loaded fully in
+    // memory along with the output mosaic buffer (capped at 200M output pixels).
+    // Typical: 2 x 1024x1024 inputs + 1 output, all Float32.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 16777216; // 3 x 1024x1024 Float32 buffers
+    return est;
+}
+
 Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& context) {
     if (!params.isMember("inputs") || !params["inputs"].isArray() || params["inputs"].empty()) {
         throw RSOperatorError(ErrorCode::MissingRequiredParameter,

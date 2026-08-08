@@ -82,6 +82,17 @@ Json::Value RsModisImportOperator::metadata() const
     return meta;
 }
 
+Json::Value RsModisImportOperator::executionEstimate() const
+{
+    // FullRaster (default policy). Band stacking copies one full Float32 band at
+    // a time: peak RAM is a single 1024x1024 band buffer plus fixed overhead.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 12582912; // 1 x 1024x1024 Float32 band + 8 MiB fixed
+    return est;
+}
+
 Json::Value RsModisImportOperator::run(const Json::Value& p, RSOperatorContext& context)
 {
     const std::string inputPath = requireString(p, "input");

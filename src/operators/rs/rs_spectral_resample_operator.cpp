@@ -83,6 +83,18 @@ Json::Value RsSpectralResampleOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsSpectralResampleOperator::executionEstimate() const {
+    // FullRaster (base default): no preferred tile. Peak holds the pixel-major
+    // input buffer (all source bands), one transient band read buffer, and all
+    // output bands; typical 1024x1024 4->4 band float32 (~4 MiB/band):
+    // 16 (input) + 4 (read) + 16 (output) = ~36 MiB.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 37748736;
+    return est;
+}
+
 Json::Value RsSpectralResampleOperator::run(const Json::Value& params,
                                             RSOperatorContext& context) {
     const std::string inputPath = requireString(params, "input");

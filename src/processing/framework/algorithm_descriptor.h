@@ -48,6 +48,9 @@ struct AgentMetadata
   /// Large-raster memory policy ("streaming", "multipass_streaming",
   /// "full_raster", "external_process", "unsupported_for_large_raster").
   std::string memoryPolicy;
+  /// Declared execution-resource estimate: tileWidth/tileHeight/
+  /// estimatedRamBytes/temporaryDiskBytes (0 = unknown). Empty object = none.
+  Json::Value execution;
 
   Json::Value toJson() const;
   static AgentMetadata fromJson( const Json::Value &val );

@@ -173,6 +173,17 @@ Json::Value RsQaMaskOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsQaMaskOperator::executionEstimate() const {
+    // FullRaster (base default): no preferred tile. run() loads the whole QA
+    // band as float32 plus a UInt8 mask and a uint16 conversion buffer (7
+    // bytes/pixel in flight); typical 1024x1024 input -> ~7 MiB.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 7340032;
+    return est;
+}
+
 Json::Value RsQaMaskOperator::run(const Json::Value& params,
                                   RSOperatorContext& context) {
     if (!params.isObject()) {

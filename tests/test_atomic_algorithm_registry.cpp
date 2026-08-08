@@ -126,3 +126,45 @@ TEST_CASE( "AgentToolCallExporter exports OpenAI Tool Call JSON and Markdown Pro
 }
 
 
+
+TEST_CASE( "Operators expose execution estimates through agent metadata", "[processing][registry][large-raster]" )
+{
+  auto &registry = AtomicAlgorithmRegistry::instance();
+  registry.reset();
+  const auto descriptors = registry.listDescriptors();
+  REQUIRE_FALSE( descriptors.empty() );
+
+  bool foundRx = false;
+  bool foundApplyMask = false;
+  for ( const auto &d : descriptors )
+  {
+    if ( d.id == "rs:rx_anomaly" )
+    {
+      foundRx = true;
+      REQUIRE( d.agentMetadata.execution.isObject() );
+      // FullRaster operators declare a peak-RAM estimate and no tile.
+      CHECK( d.agentMetadata.execution["estimatedRamBytes"].asInt64() > 0 );
+      CHECK( d.agentMetadata.execution["tileWidth"].asInt64() == 0 );
+      CHECK( d.agentMetadata.memoryPolicy == "full_raster" );
+    }
+    if ( d.id == "rs:apply_mask" )
+    {
+      foundApplyMask = true;
+      REQUIRE( d.agentMetadata.execution.isObject() );
+      // Streaming operators declare a tile and a modest RAM estimate.
+      CHECK( d.agentMetadata.execution["tileHeight"].asInt64() > 0 );
+      CHECK( d.agentMetadata.execution["estimatedRamBytes"].asInt64() > 0 );
+      CHECK( d.agentMetadata.memoryPolicy == "streaming" );
+    }
+  }
+  REQUIRE( foundRx );
+  REQUIRE( foundApplyMask );
+
+  // Every registered rs: operator must declare a large-raster memory policy
+  // (the execution estimate itself may legitimately stay unknown).
+  for ( const auto &d : descriptors )
+  {
+    if ( d.id.rfind( "rs:", 0 ) == 0 )
+      CHECK_FALSE( d.agentMetadata.memoryPolicy.empty() );
+  }
+}

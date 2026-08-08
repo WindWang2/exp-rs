@@ -96,6 +96,20 @@ Json::Value RsObiaHierarchyOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsObiaHierarchyOperator::executionEstimate() const
+{
+    // FullRaster (default policy). Primary segmentation runs as external OTB
+    // CLIs (their RAM is managed outside this process); the in-process footprint
+    // is the label rasters, parent table and per-segment feature matrix. OTB
+    // writes its intermediate label rasters into a temporary directory.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 33554432; // 2 label rasters + feature matrix + fixed
+    est["temporaryDiskBytes"] = 8388608; // OTB temp label rasters (2 x 1024x1024 UInt32)
+    return est;
+}
+
 Json::Value RsObiaHierarchyOperator::run(const Json::Value& params, RSOperatorContext& context) {
     const std::string inputPath = requireString(params, "input");
     const std::string outputFine = requireString(params, "outputFine");

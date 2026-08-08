@@ -63,6 +63,18 @@ Json::Value RsImageFusionOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsImageFusionOperator::executionEstimate() const
+{
+    // FullRaster (default policy): the pan band, up to 4 MS bands and the fused
+    // output bands are all resident, plus small per-method auxiliary matrices
+    // (PCA covariance / Gram-Schmidt statistics).
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 50331648; // ~9 x 1024x1024 Float32 buffers + 12 MiB fixed
+    return est;
+}
+
 Json::Value RsImageFusionOperator::run(const Json::Value& params,
                                        RSOperatorContext& context) {
     if (!params.isObject()) {

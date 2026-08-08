@@ -53,6 +53,18 @@ Json::Value RsRxAnomalyOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsRxAnomalyOperator::executionEstimate() const {
+    // FullRaster (default policy): the whole raster is resident. For a typical
+    // 1024x1024x4-band float32 input (16 MiB) peak RAM is the input pixel
+    // buffer (16 MiB) + the per-pixel RX score buffer (4 MiB); the background
+    // covariance is bands x bands and negligible.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;          // full-raster: tiling not applicable
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 20971520; // ~20 MiB
+    return est;
+}
+
 Json::Value RsRxAnomalyOperator::run(const Json::Value& params,
                                      RSOperatorContext& context) {
     const std::string inputPath = requireString(params, "input");

@@ -68,6 +68,18 @@ Json::Value RsInferenceOperator::metadata() const
     return meta;
 }
 
+Json::Value RsInferenceOperator::executionEstimate() const
+{
+    // FullRaster (default policy): all input bands are held as CV_32F mats plus
+    // the merged NCHW blob, model output and per-channel output mats. Model
+    // weights are model-dependent and not included.
+    Json::Value est( Json::objectValue );
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 67108864; // 4-band input: bands + blob + output (64 MiB)
+    return est;
+}
+
 Json::Value RsInferenceOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
     if ( !params.isObject() )

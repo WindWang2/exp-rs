@@ -16,6 +16,11 @@ AlgorithmDescriptor AlgorithmDescriptorBuilder::buildFromRsOperator( const opera
   Json::Value meta = op.metadata();
   // Every operator declares a large-raster memory policy (default full_raster).
   meta["memoryPolicy"] = memoryPolicyName( op.memoryPolicy() );
+  // Declared execution-resource estimate (tile size / RAM / disk), when the
+  // operator quantifies its large-raster behavior (ADR 0117).
+  Json::Value estimate = op.executionEstimate();
+  if ( estimate.isObject() && !estimate.empty() )
+    meta["execution"] = std::move( estimate );
   desc.agentMetadata = AgentMetadata::fromJson( meta );
 
   Json::Value schema = op.schema();

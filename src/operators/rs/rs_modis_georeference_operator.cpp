@@ -71,6 +71,19 @@ Json::Value RsModisGeoreferenceOperator::metadata() const
     return meta;
 }
 
+Json::Value RsModisGeoreferenceOperator::executionEstimate() const
+{
+    // FullRaster (default policy). The warp runs in-process through GDAL
+    // (block-streamed); when the input needs sinusoidal assignment first, a
+    // temporary Float32 copy of the input is written next to the output.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 16777216; // ~2 warp tile buffers + 8 MiB fixed
+    est["temporaryDiskBytes"] = 4194304; // temp .sinu_tmp.tif (1024x1024 Float32)
+    return est;
+}
+
 Json::Value RsModisGeoreferenceOperator::run(const Json::Value& p, RSOperatorContext& context)
 {
     const std::string inputPath = requireString(p, "input");

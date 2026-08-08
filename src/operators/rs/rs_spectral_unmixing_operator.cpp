@@ -113,6 +113,18 @@ Json::Value RsSpectralUnmixingOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsSpectralUnmixingOperator::executionEstimate() const {
+    // FullRaster (default policy): the whole raster is resident. For a typical
+    // 1024x1024x4-band float32 input (16 MiB) with 4 endmembers, peak RAM is
+    // the input pixel buffer (16 MiB) + abundance buffer (16 MiB) + band-major
+    // write copy (16 MiB) + per-pixel reconstruction error (4 MiB).
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;          // full-raster: tiling not applicable
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 54525952; // ~52 MiB
+    return est;
+}
+
 Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
                                             RSOperatorContext& context) {
     const std::string inputPath = requireString(params, "input");

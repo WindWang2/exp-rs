@@ -46,6 +46,17 @@ Json::Value RsPcaOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsPcaOperator::executionEstimate() const {
+    // FullRaster (default policy): the whole raster is resident. For a typical
+    // 1024x1024x4-band float32 input (16 MiB) peak RAM is ~3x the raster:
+    // input bands + centered copy + output components buffer.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;          // full-raster: tiling not applicable
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 50331648; // ~48 MiB
+    return est;
+}
+
 Json::Value RsPcaOperator::run(const Json::Value& params, RSOperatorContext& context) {
     const std::string inputPath = requireString(params, "input");
     const std::string outputPath = requireString(params, "output");

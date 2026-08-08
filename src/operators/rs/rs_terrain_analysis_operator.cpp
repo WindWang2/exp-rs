@@ -62,6 +62,17 @@ Json::Value RsTerrainAnalysisOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsTerrainAnalysisOperator::executionEstimate() const
+{
+    // FullRaster (default policy): the whole DEM band plus one Float32 output
+    // band are resident; the 3x3-window kernels use no extra full-raster state.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 12582912; // 2 x 1024x1024 Float32 buffers + 4 MiB fixed
+    return est;
+}
+
 Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
                                            RSOperatorContext& context) {
     if (!params.isObject()) {

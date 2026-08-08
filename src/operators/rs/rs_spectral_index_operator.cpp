@@ -68,6 +68,17 @@ Json::Value RsSpectralIndexOperator::metadata() const {
     return meta;
 }
 
+Json::Value RsSpectralIndexOperator::executionEstimate() const {
+    // FullRaster (base default): no preferred tile; the whole input raster is
+    // resident. Typical input 1024x1024x4 float32 (~4 MiB/band); the worst-case
+    // index (EVI) keeps 3 input bands + 1 output buffer in flight at once.
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 16777216;
+    return est;
+}
+
 Json::Value RsSpectralIndexOperator::run(const Json::Value& params,
                                          RSOperatorContext& context) {
     if (!params.isObject()) {
