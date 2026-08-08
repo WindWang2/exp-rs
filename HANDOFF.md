@@ -1,8 +1,8 @@
 # HANDOFF — Autonomous RS System Perfection (/goal) — Optical Platform Session
 
 **Date:** 2026-08-08
-**Mode:** FULL_AUTONOMOUS_LOOP — 55 committed vertical slices + F-hardening +
-review remediation (ADR 0065–0113)
+**Mode:** FULL_AUTONOMOUS_LOOP — 56 committed vertical slices + F-hardening +
+review remediation (ADR 0065–0114)
 **Scope:** Deepen `exp-rs` toward the general-purpose optical/multispectral/
 hyperspectral processing platform (mission: product import → calibration →
 QA masking → atmospheric correction → geometric/grid → analysis-ready →
@@ -10,7 +10,7 @@ analysis → accuracy → provenance, all through the Processing Registry).
 
 ---
 
-## 1. Session Summary — 55 Slices, All Tested, All Committed
+## 1. Session Summary — 56 Slices, All Tested, All Committed
 
 | # | Slice | Commit | ADR |
 |---|-------|--------|-----|
@@ -70,6 +70,7 @@ analysis → accuracy → provenance, all through the Processing Registry).
 | 53 | Dialog-level grid preflight — shared `rasterGridCompatibilityMessage` wired into change-detection / post-classification / fusion run paths (pixel-size exemption for fusion) | `fb2ea76051` | 0111 |
 | 54 | MCP `get_lineage` — agent-facing provenance queries (asset + deriving algorithm/parameters + derivedFrom/derivedOutputsOf via the Data Manager) | `0b0aca41c0` | 0112 |
 | 55 | Batch-processing RS parameter overrides — per-operator parameter form (typed editors from the schema, defaults prefilled) merged over declared defaults in `runBatchItem`; main input/output not overridable | `ca37754aaa` | 0113 |
+| 56 | Radiometric-state metadata (`SICNU_RADIOMETRIC_STATE`) written by calibration/atmospheric correction; change detection fails on differing declared states (comparable-radiometric-state check) | `10e44874d3` | 0114 |
 
 ## 2. Verification
 
