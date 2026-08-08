@@ -243,11 +243,9 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
                     std::string(aligned ? "auto-aligned" : "aligned") + ")");
 
     // Streaming pass: block rows, full width. Memory is O(width * kBlockRows).
-    const size_t blockPixels = static_cast<size_t>(width) * kBlockRows;
-    std::vector<float> inputBuf(blockPixels);
+    const size_t maxBlockPixels = static_cast<size_t>(width) * kBlockRows;
+    std::vector<float> inputBuf(maxBlockPixels);
     std::vector<float> maskBuf;
-    const long maskW = mask.width();
-    const long maskH = mask.height();
 
     const std::array<double, 6> inGt = input.geoTransform();
     const std::array<double, 6> maskGt = mask.geoTransform();
@@ -266,11 +264,19 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
     size_t masked = 0;
     const size_t totalPixels = static_cast<size_t>(width) * height;
 
+    // Per-block mask offsets into maskBuf (flat index, -1 = outside the mask
+    // window / clear): computed ONCE per block and shared by every band, so
+    // the affine mapping and the same-grid indexing leave the per-pixel hot
+    // path (ADR 0105 review remediation).
+    std::vector<int32_t> maskOffsets(static_cast<size_t>(width) * kBlockRows, -1);
+
     for (int y0 = 0; y0 < height; y0 += kBlockRows) {
         const int blockH = (std::min)(kBlockRows, height - y0);
+        const size_t blockPixels = static_cast<size_t>(width) * blockH;
 
         // Read the mask region covering this block (resampled or same grid).
         long mCol0 = 0, mRow0 = 0, mCol1 = -1, mRow1 = -1;
+        bool haveMaskWindow = true;
         if (sameGrid) {
             mCol0 = 0;
             mRow0 = y0;
@@ -280,26 +286,37 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
             if (!maskWindowBounds(inGt, maskGt, mask.width(), mask.height(),
                                   0, y0, width, blockH,
                                   &mCol0, &mRow0, &mCol1, &mRow1)) {
-                // Block lies entirely outside the mask extent: keep all pixels.
-                for (int b = 1; b <= bandCount; ++b) {
-                    if (!input.readBandWindow(b, 0, y0, width, blockH, inputBuf.data()) ||
-                        !out.writeBandWindow(b, 0, y0, width, blockH, inputBuf.data())) {
-                        throw RSOperatorError(ErrorCode::GdalError,
-                                              "Failed to copy unmasked block");
-                    }
-                }
-                context.throwIfCancelled();
-                continue;
+                // Block lies entirely outside the mask extent: all pixels clear.
+                haveMaskWindow = false;
             }
         }
-        const long mWindowW = mCol1 - mCol0 + 1;
-        const long mWindowH = mRow1 - mRow0 + 1;
-        maskBuf.resize(static_cast<size_t>(mWindowW) * mWindowH);
-        if (!mask.readBandWindow(1, static_cast<int>(mCol0), static_cast<int>(mRow0),
-                                 static_cast<int>(mWindowW), static_cast<int>(mWindowH),
-                                 maskBuf.data())) {
-            throw RSOperatorError(ErrorCode::GdalError,
-                                  "Failed to read mask window");
+
+        std::fill(maskOffsets.begin(), maskOffsets.begin() + static_cast<ptrdiff_t>(blockPixels), -1);
+        if (haveMaskWindow) {
+            const long mWindowW = mCol1 - mCol0 + 1;
+            const long mWindowH = mRow1 - mRow0 + 1;
+            maskBuf.resize(static_cast<size_t>(mWindowW) * mWindowH);
+            if (!mask.readBandWindow(1, static_cast<int>(mCol0), static_cast<int>(mRow0),
+                                     static_cast<int>(mWindowW), static_cast<int>(mWindowH),
+                                     maskBuf.data())) {
+                throw RSOperatorError(ErrorCode::GdalError,
+                                      "Failed to read mask window");
+            }
+            for (int row = 0; row < blockH; ++row) {
+                for (int col = 0; col < width; ++col) {
+                    const size_t idx = static_cast<size_t>(row) * width + col;
+                    if (sameGrid) {
+                        maskOffsets[idx] = static_cast<int32_t>(
+                            (y0 + row - mRow0) * mWindowW + (col - mCol0));
+                    } else {
+                        const MaskCoord m = mapToMask(inGt, maskGt, mask.width(),
+                                                      mask.height(), col, y0 + row);
+                        maskOffsets[idx] = m.col < 0
+                            ? -1 // outside mask extent -> clear
+                            : static_cast<int32_t>((m.row - mRow0) * mWindowW + (m.col - mCol0));
+                    }
+                }
+            }
         }
 
         for (int b = 1; b <= bandCount; ++b) {
@@ -308,29 +325,12 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
                                       "Failed to read input band " + std::to_string(b));
             }
             const double noData = outputNoData[b - 1];
-            for (int row = 0; row < blockH; ++row) {
-                for (int col = 0; col < width; ++col) {
-                    bool isMasked;
-                    if (sameGrid) {
-                        const long mRow = y0 + row;
-                        isMasked = maskBuf[static_cast<size_t>(mRow - mRow0) * mWindowW +
-                                           (col - mCol0)] > 0.0f;
-                    } else {
-                        const MaskCoord m = mapToMask(inGt, maskGt, mask.width(),
-                                                      mask.height(), col, y0 + row);
-                        if (m.col < 0) {
-                            isMasked = false; // outside mask extent -> clear
-                        } else {
-                            isMasked = maskBuf[static_cast<size_t>(m.row - mRow0) * mWindowW +
-                                               (m.col - mCol0)] > 0.0f;
-                        }
-                    }
-                    if (isMasked) {
-                        inputBuf[static_cast<size_t>(row) * width + col] =
-                            static_cast<float>(noData);
-                        if (b == 1)
-                            ++masked;
-                    }
+            for (size_t i = 0; i < blockPixels; ++i) {
+                const int32_t off = maskOffsets[i];
+                if (off >= 0 && maskBuf[static_cast<size_t>(off)] > 0.0f) {
+                    inputBuf[i] = static_cast<float>(noData);
+                    if (b == 1)
+                        ++masked;
                 }
             }
             if (!out.writeBandWindow(b, 0, y0, width, blockH, inputBuf.data())) {
