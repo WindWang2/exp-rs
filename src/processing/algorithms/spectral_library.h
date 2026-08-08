@@ -1,6 +1,8 @@
 // src/processing/algorithms/spectral_library.h — spectral library domain
 #pragma once
 
+#include "spectral_classification.h"
+
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
@@ -85,7 +87,7 @@ namespace SpectralLibrary
      */
     std::vector<MatchScore> matchSpectrum( const std::vector<float> &spectrum,
                                            const Library &library,
-                                           float nodata = -9999.0f );
+                                           float nodata = SpectralClassification::kNoDataSentinel );
 
     /**
      * Wavelength-aware variant: when an entry's band count differs from the
@@ -99,5 +101,5 @@ namespace SpectralLibrary
     std::vector<MatchScore> matchSpectrum( const std::vector<float> &spectrum,
                                            const std::vector<float> &spectrumWavelengths,
                                            const Library &library,
-                                           float nodata = -9999.0f );
+                                           float nodata = SpectralClassification::kNoDataSentinel );
 } // namespace SpectralLibrary

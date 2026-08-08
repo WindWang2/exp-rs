@@ -17,6 +17,12 @@
 
 namespace SpectralClassification
 {
+    /// Default spectral nodata sentinel shared by the spectral kernels, the
+    /// spectral library default, and the profile widget's display path — a
+    /// single named constant so the convention cannot drift (must not collide
+    /// with valid reflectance values).
+    inline constexpr float kNoDataSentinel = -9999.0f;
+
     /**
      * Spectral Angle between two equal-length spectra t (test) and r (reference).
      *   theta = arccos( (t . r) / (||t|| * ||r||) )

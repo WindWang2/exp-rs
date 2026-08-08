@@ -1,7 +1,8 @@
 # HANDOFF — Autonomous RS System Perfection (/goal) — Optical Platform Session
 
 **Date:** 2026-08-08
-**Mode:** FULL_AUTONOMOUS_LOOP — 37 committed vertical slices + F-hardening (ADR 0065–0098)
+**Mode:** FULL_AUTONOMOUS_LOOP — 48 committed vertical slices + F-hardening +
+review remediation (ADR 0065–0107)
 **Scope:** Deepen `exp-rs` toward the general-purpose optical/multispectral/
 hyperspectral processing platform (mission: product import → calibration →
 QA masking → atmospheric correction → geometric/grid → analysis-ready →
@@ -50,15 +51,27 @@ analysis → accuracy → provenance, all through the Processing Registry).
 | 35 | ROI mean-spectrum tool (`RsRoiSpectrumTool` polygon → dock; `SpectralProfileWidget::setSpectrum`; completes spectral input side) | `19d6d4f594` | 0097 |
 | 36 | Test hardening: TaskCenter cancel-timing tests no longer flaky under -j8 load (10s poll budgets) | `82620d02e9` | — |
 | 37 | F review: shared `processing::gridFromDataset` — de-duplicated 4 identical grid builders | `553bb3d1fe` | 0098 |
+| 38 | Continuum-removal view + FWHM in the spectral profile widget | `50d873621e` | 0100 |
+| 39 | Post-classification comparison dialog (backend/UI alignment) | `b711be3832` | 0101 |
+| 40 | Shared `BandRoleCombo` (QA mask dialog adopts it) | `4b8ac7c06c` | 0102 |
+| 41 | Spectral index dialog adopts `BandRoleCombo` | `1fc608f689` | 0103 |
+| 42 | Real raster previews in `ComparisonDialog` + change-detection dual-view hook | `3e91d92313` | 0104 |
+| 43 | qt-cpp-review remediation (ROI tool lifetime, setSpectrum range, CR view, class cap, band-major ROI reads, flush errors, error taxonomy) | `790b916e94` | 0105 |
+| 44 | Apply-mask per-block mask-offset precompute | `b5f1a45c42` | 0106 |
+| 45 | Shared `RasterLayerCombo` (post-class + change-detection dialogs) | `dd4c3e6f97` | 0107 |
+| 46 | Comparison dialog adopts `RasterLayerCombo` (C5 raster-selection complete) | `c733d3bdea` | — |
+| 47 | Test hardening: ToolCallDispatcher teardown race (SegFault) + GuiJobHandle timing | `303384c1e7` | — |
+| 48 | Task-centric 遥感 menu (C5 domain entry points + DAG shortcut) | `e251a974cf` | 0099 |
 | + | Full-suite regression fix (GDAL driver registration in a provider test) | `bae3a3eae0` | — |
 
 ## 2. Verification
 
 - **Full clean rebuild: 0 errors** (all targets, incl. the whole test suite).
-- **ctest: 1393 tests, 100% passed** after hardening the two TaskCenter
-  cancel-timing tests that flaked under `-j8` load (they now poll with 10s
-  budgets and pass consistently). 6 pre-existing vector fixtures remain
-  SKIPPED (removed from VCS). Suite is green.
+- **ctest: 1400 tests, 100% passed** after hardening the two TaskCenter
+  cancel-timing tests, the ToolCallDispatcher detached-thread teardown race
+  (intermittent SegFault), and the GuiJobHandle callback windows that flaked
+  under `-j8` load (all now poll with generous budgets). 6 pre-existing
+  vector fixtures remain SKIPPED (removed from VCS). Suite is green.
 - Every new slice shipped with its own Catch2 tests (kernel + operator /
   UI-seam level); the operator registry tests pin the expanded surface.
 - The orphaned `test_gdal_ortho_operators` file (registered in no target) was
@@ -85,12 +98,13 @@ Import Sentinel-2 / Landsat (ProductImportDialog)
 
 ## 4. Known Follow-ups (roadmap `.planning/2026-08-07-rs-platform-goal.md`)
 
-- C5: task-centric UI consistency (shared band/role/CRS/resolution widgets);
-  Change Detection dual-view workbench (synchronized viewports + Swipe).
-- C1 follow-ups: MAD wrapper over `otb:multivariate_alteration_detector`.
-- D10: extend the spectral workbench (ROI mean spectrum → library grid
-  resampling → continuum removal display); F-phase: cross-platform build
-  verification (Linux is green), final architecture/code review.
+- C5: shared CRS/resolution widgets (band-role + raster-selection shared
+  widgets are done; CRS/resolution remain per-dialog).
+- C1 follow-ups: MAD wrapper over `otb:multivariate_alteration_detector`;
+  post-classification run summary display in the dialog.
+- D10: FWHM display/export in the spectral workbench.
+- F-phase: cross-platform build verification (Linux is green; the review
+  remediation fixed a Windows min/max macro hazard found by the Qt linter).
 
 ## 5. Exclusions Honored
 

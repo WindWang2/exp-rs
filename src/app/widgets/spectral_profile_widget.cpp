@@ -150,11 +150,12 @@ QVector<double> SpectralProfileWidget::displayValues() const
     std::vector<float> raw;
     raw.reserve( m_values.size() );
     for ( double v : m_values )
-        raw.push_back( std::isnan( v ) ? -9999.0f : static_cast<float>( v ) );
+        raw.push_back( std::isnan( v ) ? SpectralClassification::kNoDataSentinel
+                                : static_cast<float>( v ) );
     std::vector<float> cr( raw.size() );
     if ( !SpectralClassification::continuumRemoval( raw.data(), cr.data(),
                                                     static_cast<int>( raw.size() ),
-                                                    -9999.0f ) )
+                                                    SpectralClassification::kNoDataSentinel ) )
         return m_values;
 
     m_displayCache.clear();
