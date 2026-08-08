@@ -148,6 +148,7 @@ add_executable(sicnu_geo_rs
     display/piecewise_linear_enhancement.cpp
     display/qgs_display_stretch.cpp
     widgets/spectral_profile_widget.cpp
+    widgets/band_role_combo.cpp
     widgets/progress_dialog.cpp
     widgets/comparison_widget.cpp
     widgets/guided_workflow_widget.cpp

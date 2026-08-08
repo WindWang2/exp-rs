@@ -4028,6 +4028,29 @@ endif()
 set_target_properties(test_post_classification_dialog PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_post_classification_dialog)
 
+# Shared band-role selector widget (C5)
+add_executable(test_band_role_combo
+  test_band_role_combo.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/band_role_combo.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
+)
+target_link_libraries(test_band_role_combo PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_band_role_combo PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_band_role_combo)
+
 # Virtual raster recipe tests - recipe value type + JSON round-trip (#55)
 qt_add_executable(test_virtual_raster_recipe
   test_virtual_raster_recipe.cpp

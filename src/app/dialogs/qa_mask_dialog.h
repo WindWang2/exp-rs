@@ -3,6 +3,7 @@
 
 #include "raster_processing_dialog_base.h"
 
+class BandRoleCombo;
 class QComboBox;
 class QLabel;
 class QSpinBox;
@@ -10,7 +11,7 @@ class QSpinBox;
 /**
  * Dialog for deriving a cloud / cloud-shadow / snow mask from a product QA
  * band (Landsat QA_PIXEL, Sentinel-2 SCL, or a generic bitmask) via the
- * rs:qa_mask operator.
+ * rs:qa_mask operator. The QA-band picker is the shared BandRoleCombo (C5).
  */
 class QaMaskDialog : public RasterProcessingDialogBase
 {
@@ -30,11 +31,10 @@ private slots:
 
 private:
     void setupUi();
-    void populateBandCombo();
 
     QComboBox *m_sourceCombo = nullptr;
     QComboBox *m_maskCombo = nullptr;
-    QComboBox *m_bandCombo = nullptr;
+    BandRoleCombo *m_bandCombo = nullptr;
     QSpinBox *m_bitsSpin = nullptr;
     QLabel *m_bitsLabel = nullptr;
 };

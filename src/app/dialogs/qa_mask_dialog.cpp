@@ -2,6 +2,7 @@
 #include "qa_mask_dialog.h"
 #include "dialog_help_catalog.h"
 #include "dialog_utils.h"
+#include "widgets/band_role_combo.h"
 
 #include <raster/qgsrasterlayer.h>
 
@@ -12,23 +13,8 @@
 #include <QComboBox>
 #include <QSpinBox>
 
-#include "data/band_role.h"
-#include "processing/gdal/gdal_dataset_wrapper.h"
-
 namespace
 {
-
-/// 0-based combo index of the band carrying @a role in @a roleByBand, or -1.
-int comboIndexForRole( const QMap<int, sicnu::data::BandRole> &roles,
-                       sicnu::data::BandRole role )
-{
-  for ( auto it = roles.constBegin(); it != roles.constEnd(); ++it )
-  {
-    if ( it.value() == role )
-      return it.key();
-  }
-  return -1;
-}
 
 } // namespace
 
@@ -42,7 +28,14 @@ QaMaskDialog::QaMaskDialog( QWidget *parent )
 void QaMaskDialog::setRasterLayer( QgsRasterLayer *layer )
 {
   RasterProcessingDialogBase::setRasterLayer( layer );
-  populateBandCombo();
+  if ( layer && m_bandCombo )
+  {
+    m_bandCombo->setRaster( layer->source() );
+    // Preselect the semantic QA band (scene classification preferred).
+    m_bandCombo->selectBandByRole( sicnu::data::BandRole::SceneClassification );
+    if ( m_bandCombo->selectedBand() == 0 )
+      m_bandCombo->selectBandByRole( sicnu::data::BandRole::QA );
+  }
 }
 
 void QaMaskDialog::setupUi()
@@ -86,7 +79,7 @@ void QaMaskDialog::setupUi()
     "• Sentinel-2 SCL：云=类别 8/9/10，云影=3，雪=11，水体=6" ) );
   form->addRow( tr( "掩膜类别" ), m_maskCombo );
 
-  m_bandCombo = new QComboBox( sec );
+  m_bandCombo = new BandRoleCombo( sec );
   SicnuDialogHelp::tip( m_bandCombo, tr(
     "质量波段。默认按产品语义角色自动选择（SCL → 场景分类，QA → 质量）。" ) );
   form->addRow( tr( "质量波段" ), m_bandCombo );
@@ -106,54 +99,6 @@ void QaMaskDialog::setupUi()
   mainLayout->addStretch( 1 );
 
   onSourceChanged( 0 );
-}
-
-void QaMaskDialog::populateBandCombo()
-{
-  if ( !m_rasterLayer || !m_rasterLayer->isValid() )
-    return;
-
-  m_bandCombo->blockSignals( true );
-  m_bandCombo->clear();
-  m_bandCombo->addItem( tr( "自动（按产品语义角色）" ), 0 );
-
-  GdalDatasetWrapper ds;
-  const int bandCount = ds.open( m_rasterLayer->source() ) ? ds.bandCount() : 0;
-  if ( bandCount <= 0 )
-  {
-    m_bandCombo->blockSignals( false );
-    return;
-  }
-
-  int sceneClassIndex = -1;
-  int qaIndex = -1;
-  for ( int b = 1; b <= bandCount; ++b )
-  {
-    QString label = tr( "波段 %1" ).arg( b );
-    const QString roleId = ds.bandMetadataItem( b, "SICNU_BAND_ROLE" );
-    const sicnu::data::BandRole role = sicnu::data::bandRoleFromString( roleId );
-    if ( role != sicnu::data::BandRole::Unknown )
-    {
-      const QString roleName = sicnu::data::bandRoleDisplayName( role );
-      if ( !roleName.isEmpty() )
-        label = tr( "波段 %1 (%2)" ).arg( b ).arg( roleName );
-      if ( role == sicnu::data::BandRole::SceneClassification )
-        sceneClassIndex = b;
-      else if ( role == sicnu::data::BandRole::QA && qaIndex < 0 )
-        qaIndex = b;
-    }
-    m_bandCombo->addItem( label, b );
-  }
-  m_bandCombo->blockSignals( false );
-
-  // Preselect the semantic QA band (scene classification preferred).
-  const int preselect = sceneClassIndex > 0 ? sceneClassIndex : qaIndex;
-  if ( preselect > 0 )
-  {
-    const int index = m_bandCombo->findData( preselect );
-    if ( index >= 0 )
-      m_bandCombo->setCurrentIndex( index );
-  }
 }
 
 void QaMaskDialog::onSourceChanged( int /*index*/ )
