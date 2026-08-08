@@ -17,6 +17,8 @@
 #include <qgsprocessingfeedback.h>
 
 #include <QApplication>
+#include <QCheckBox>
+#include <QDoubleSpinBox>
 #include <QEventLoop>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -28,6 +30,7 @@
 #include <QPushButton>
 #include <QLineEdit>
 #include <QProgressBar>
+#include <QSpinBox>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QFileInfo>
@@ -209,6 +212,15 @@ void BatchProcessingDialog::setupUi()
       QString::fromStdString( desc.id ) );
   }
 
+  // RS-operator parameter overrides (advanced): rebuilt on algorithm change.
+  m_paramFrame = SicnuUi::makeSection( this, tr( "RS 参数" ),
+                                       tr( "覆盖批量运行所用的算子默认参数。" ) );
+  m_paramForm = new QFormLayout();
+  m_paramForm->setContentsMargins( 0, 0, 0, 0 );
+  qobject_cast<QVBoxLayout *>( m_paramFrame->layout() )->addLayout( m_paramForm );
+  m_paramFrame->setVisible( false );
+  mainLayout->addWidget( m_paramFrame );
+
   QFrame *fileSec = SicnuUi::makeSection( this, tr( "输入文件" ) );
   m_fileList = new QListWidget( fileSec );
   m_fileList->setObjectName( QStringLiteral( "batchFileList" ) );
@@ -356,7 +368,8 @@ void BatchProcessingDialog::onRun()
 
         try {
             QString itemError;
-            if (runBatchItem(algorithmId, inputFile, outputPath, &itemError)) {
+            const QJsonObject overrides = collectParamOverrides();
+            if (runBatchItem(algorithmId, inputFile, outputPath, &itemError, overrides)) {
                 successCount++;
             } else {
                 failCount++;
@@ -422,21 +435,158 @@ void BatchProcessingDialog::updateAlgorithmParameters()
     if (algorithmId.startsWith(QStringLiteral("rs:"))) {
         const auto adapter = AtomicAlgorithmRegistry::instance().findAdapter(algorithmId.toStdString());
         if (adapter) {
+            rebuildParamForm(adapter->descriptor());
             m_statusLabel->setText(tr("Selected: %1 (RS, 默认参数)").arg(
                 QString::fromStdString(adapter->descriptor().displayName)));
         }
         return;
     }
+    // Non-RS algorithms use QGIS parameters; hide the RS section.
+    if (m_paramFrame)
+        m_paramFrame->setVisible(false);
+    m_paramWidgets.clear();
     const QgsProcessingAlgorithm *alg = QgsApplication::processingRegistry()->algorithmById(algorithmId);
     if (alg) {
         m_statusLabel->setText(tr("Selected: %1").arg(alg->displayName()));
     }
 }
 
+void BatchProcessingDialog::rebuildParamForm(const AlgorithmDescriptor &desc)
+{
+    if (!m_paramForm)
+        return;
+
+    // Drop the previous form widgets.
+    while ( m_paramForm->rowCount() > 0 )
+    {
+        const QFormLayout::TakeRowResult result = m_paramForm->takeRow( 0 );
+        if ( result.labelItem )
+        {
+            if ( QWidget *w = result.labelItem->widget() )
+                w->deleteLater();
+            delete result.labelItem;
+        }
+        if ( result.fieldItem )
+        {
+            if ( QWidget *w = result.fieldItem->widget() )
+                w->deleteLater();
+            delete result.fieldItem;
+        }
+    }
+    m_paramWidgets.clear();
+
+    const std::string mainInput = findMainInputName(desc);
+    for (const auto &in : desc.inputs)
+    {
+        const QString name = QString::fromStdString(in.name);
+        if (name == QString::fromStdString(mainInput))
+            continue;
+        if (name.startsWith(QStringLiteral("output")))
+            continue; // derived from the output path
+
+        QWidget *editor = nullptr;
+        switch (in.type)
+        {
+            case DataType::Boolean:
+            {
+                auto *check = new QCheckBox(m_paramFrame);
+                check->setObjectName(QStringLiteral("rsParam_%1").arg(name));
+                check->setChecked(in.defaultValue == QStringLiteral("true"));
+                editor = check;
+                break;
+            }
+            case DataType::Enum:
+            {
+                auto *combo = new QComboBox(m_paramFrame);
+                combo->setObjectName(QStringLiteral("rsParam_%1").arg(name));
+                for (const auto &option : in.enumOptions)
+                    combo->addItem(QString::fromStdString(option), QString::fromStdString(option));
+                const int idx = combo->findData(QString::fromStdString(in.defaultValue));
+                if (idx >= 0)
+                    combo->setCurrentIndex(idx);
+                editor = combo;
+                break;
+            }
+            case DataType::Integer:
+            {
+                auto *spin = new QSpinBox(m_paramFrame);
+                spin->setObjectName(QStringLiteral("rsParam_%1").arg(name));
+                spin->setRange(-1000000000, 1000000000);
+                spin->setValue(in.defaultValue.empty()
+                                  ? 0
+                                  : static_cast<int>(QString::fromStdString(in.defaultValue).toDouble()));
+                editor = spin;
+                break;
+            }
+            case DataType::Numeric:
+            {
+                auto *spin = new QDoubleSpinBox(m_paramFrame);
+                spin->setObjectName(QStringLiteral("rsParam_%1").arg(name));
+                spin->setDecimals(6);
+                spin->setRange(-1e12, 1e12);
+                spin->setValue(in.defaultValue.empty()
+                                  ? 0.0
+                                  : QString::fromStdString(in.defaultValue).toDouble());
+                editor = spin;
+                break;
+            }
+            default:
+            {
+                auto *edit = new QLineEdit(m_paramFrame);
+                edit->setObjectName(QStringLiteral("rsParam_%1").arg(name));
+                edit->setText(QString::fromStdString(in.defaultValue));
+                editor = edit;
+                break;
+            }
+        }
+        if (!editor)
+            continue;
+
+        const QString displayName = QString::fromStdString(
+            in.displayName == in.name ? in.name : in.displayName);
+        m_paramForm->addRow(QStringLiteral("%1").arg(displayName), editor);
+        m_paramWidgets.insert(name, editor);
+    }
+
+    m_paramFrame->setVisible(true);
+}
+
+QJsonObject BatchProcessingDialog::collectParamOverrides() const
+{
+    QJsonObject overrides;
+    for (auto it = m_paramWidgets.constBegin(); it != m_paramWidgets.constEnd(); ++it)
+    {
+        const QString &name = it.key();
+        const QWidget *widget = it.value();
+        if (const auto *check = qobject_cast<const QCheckBox *>(widget))
+        {
+            overrides[name] = check->isChecked();
+        }
+        else if (const auto *combo = qobject_cast<const QComboBox *>(widget))
+        {
+            overrides[name] = combo->currentData().toString();
+        }
+        else if (const auto *spin = qobject_cast<const QDoubleSpinBox *>(widget))
+        {
+            overrides[name] = spin->value();
+        }
+        else if (const auto *spin = qobject_cast<const QSpinBox *>(widget))
+        {
+            overrides[name] = spin->value();
+        }
+        else if (const auto *edit = qobject_cast<const QLineEdit *>(widget))
+        {
+            overrides[name] = edit->text();
+        }
+    }
+    return overrides;
+}
+
 bool BatchProcessingDialog::runBatchItem(const QString &algorithmId,
                                          const QString &inputFile,
                                          const QString &outputPath,
-                                         QString *errorMessage)
+                                         QString *errorMessage,
+                                         const QJsonObject &paramOverrides)
 {
     if (algorithmId.startsWith(QStringLiteral("rs:"))) {
         const auto adapter = AtomicAlgorithmRegistry::instance().findAdapter(algorithmId.toStdString());
@@ -447,11 +597,27 @@ bool BatchProcessingDialog::runBatchItem(const QString &algorithmId,
         }
         try {
             QString paramError;
-            const Json::Value params = buildRsParams(adapter->descriptor(), inputFile, outputPath, &paramError);
+            Json::Value params = buildRsParams(adapter->descriptor(), inputFile, outputPath, &paramError);
             if (params.isNull()) {
                 if (errorMessage)
                     *errorMessage = paramError;
                 return false;
+            }
+            // User overrides win over defaults, except the main input and the
+            // output path, which always come from the batch item.
+            const std::string mainInput = findMainInputName(adapter->descriptor());
+            for (auto it = paramOverrides.constBegin(); it != paramOverrides.constEnd(); ++it)
+            {
+                const std::string key = it.key().toStdString();
+                if (key == mainInput || key == "output")
+                    continue;
+                const QJsonValue &value = it.value();
+                if (value.isBool())
+                    params[key] = value.toBool();
+                else if (value.isDouble())
+                    params[key] = value.toDouble();
+                else if (value.isString())
+                    params[key] = value.toString().toStdString();
             }
             const Json::Value result = adapter->execute(params);
             const bool ok = result.isObject() && result.isMember("output")
