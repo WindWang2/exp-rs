@@ -7,6 +7,7 @@ add_library(sicnu_processing SHARED
     gdal/gdal_grid_compat.cpp
     gdal/gdal_async_reader.cpp
     gdal/gdal_block_stream.cpp
+    gdal/gdal_multiband_block_stream.cpp
     gdal/gdal_error_handler.cpp
 
     algorithms/spectral_indices.cpp

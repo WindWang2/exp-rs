@@ -581,6 +581,24 @@ target_include_directories(test_gdal_block_stream PRIVATE
 )
 sicnu_discover_tests(test_gdal_block_stream)
 
+# Multi-band streaming primitives (Phase E1): BIP tile read + streaming output writer.
+add_executable(test_gdal_multiband_block_stream test_gdal_multiband_block_stream.cpp)
+target_link_libraries(test_gdal_multiband_block_stream PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_gdal_multiband_block_stream PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_gdal_multiband_block_stream)
+
 # Performance benchmarks (Phase B of the perf/architecture goal). Runnable via
 # ctest (small sizes) or directly with SICNU_BENCH_LARGE=1 for nightly profiling.
 # Uses the standard sicnu_add_test link set (operators + task_center + resource_monitor).
