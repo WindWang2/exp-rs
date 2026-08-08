@@ -68,5 +68,13 @@ enum class MorphOp {
 void morphologicalCleanup(uint8_t *mask, int width, int height, int iterations,
                           MorphOp op);
 
+/**
+ * Minimum mapping unit: removes every 8-connected component whose area is
+ * below @p minArea pixels (0/1 mask; 255 = NoData never modified). This is a
+ * no-op when @p minArea is 0. Returns false only on invalid arguments.
+ */
+bool connectedComponentFilter(uint8_t *mask, int width, int height,
+                              size_t minArea);
+
 }
 

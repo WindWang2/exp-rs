@@ -314,4 +314,77 @@ void morphologicalCleanup(uint8_t *mask, int width, int height, int iterations, 
     }
 }
 
+bool connectedComponentFilter(uint8_t *mask, int width, int height,
+                              size_t minArea)
+{
+    if (!mask || width <= 0 || height <= 0) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms,
+                        "connectedComponentFilter: invalid arguments");
+        return false;
+    }
+    if (minArea == 0) return true; // no-op
+
+    const size_t count = static_cast<size_t>(width) * height;
+    if (count == 0) return true;
+
+    // Union-find over the 1-pixels with 8-neighbourhood connectivity.
+    std::vector<int> parent(count, -1);
+    std::vector<size_t> area(count, 0);
+
+    for (size_t i = 0; i < count; ++i) {
+        if (mask[i] == 1) {
+            parent[i] = static_cast<int>(i);
+            area[i] = 1;
+        }
+    }
+
+    const auto find = [&parent](int x) {
+        int root = x;
+        while (parent[root] != root)
+            root = parent[root];
+        while (parent[x] != root) {
+            const int next = parent[x];
+            parent[x] = root;
+            x = next;
+        }
+        return root;
+    };
+    const auto unite = [&](int a, int b) {
+        int ra = find(a);
+        const int rb = find(b);
+        if (ra != rb) {
+            parent[rb] = ra;
+            area[ra] += area[rb];
+        }
+    };
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const size_t idx = static_cast<size_t>(y) * width + x;
+            if (mask[idx] != 1)
+                continue;
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    if (dy == 0 && dx == 0)
+                        continue;
+                    const int nx = x + dx;
+                    const int ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= width || ny >= height)
+                        continue;
+                    const size_t nidx = static_cast<size_t>(ny) * width + nx;
+                    if (mask[nidx] == 1)
+                        unite(static_cast<int>(idx), static_cast<int>(nidx));
+                }
+            }
+        }
+    }
+
+    // Drop components below the minimum mapping unit.
+    for (size_t i = 0; i < count; ++i) {
+        if (mask[i] == 1 && area[find(static_cast<int>(i))] < minArea)
+            mask[i] = 0;
+    }
+    return true;
+}
+
 }

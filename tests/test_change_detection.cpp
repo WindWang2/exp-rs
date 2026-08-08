@@ -224,3 +224,47 @@ TEST_CASE("ChangeDetection morphologicalCleanup never touches NoData", "[process
     morphologicalCleanup(mask.data(), 3, 3, 1, MorphOp::Erode);
     CHECK(mask[4] == 255);
 }
+
+TEST_CASE("ChangeDetection connectedComponentFilter enforces the MMU", "[processing][change_detection][c1]") {
+    // 5x5: 2x2 block (4 px, top-left), 1-px dot (bottom-right), NoData centre.
+    std::vector<uint8_t> mask(25, 0);
+    mask[1 * 5 + 1] = mask[1 * 5 + 2] = 1;
+    mask[2 * 5 + 1] = 1;
+    mask[2 * 5 + 2] = 255; // NoData centre
+    mask[4 * 5 + 4] = 1;   // isolated dot
+
+    SECTION("minArea 0 is a no-op") {
+        REQUIRE(connectedComponentFilter(mask.data(), 5, 5, 0));
+        CHECK(mask[1 * 5 + 1] == 1);
+        CHECK(mask[4 * 5 + 4] == 1);
+        CHECK(mask[2 * 5 + 2] == 255);
+    }
+
+    SECTION("Components below minArea are dropped, larger survive") {
+        REQUIRE(connectedComponentFilter(mask.data(), 5, 5, 4));
+        // 2x2 block has 3 mask pixels here (centre is NoData) -> also dropped at 4.
+        // Use a threshold of 3 so the block (3 px) survives and the dot (1 px) is dropped.
+        std::vector<uint8_t> m2(25, 0);
+        m2[1 * 5 + 1] = m2[1 * 5 + 2] = 1;
+        m2[2 * 5 + 1] = 1; // 3-px component
+        m2[4 * 5 + 4] = 1; // 1-px dot
+        m2[2 * 5 + 2] = 255;
+        REQUIRE(connectedComponentFilter(m2.data(), 5, 5, 3));
+        CHECK(m2[1 * 5 + 1] == 1);
+        CHECK(m2[2 * 5 + 1] == 1);
+        CHECK(m2[4 * 5 + 4] == 0); // dot removed
+        CHECK(m2[2 * 5 + 2] == 255); // NoData untouched
+    }
+
+    SECTION("All components below minArea vanish") {
+        REQUIRE(connectedComponentFilter(mask.data(), 5, 5, 10));
+        CHECK(mask[1 * 5 + 1] == 0);
+        CHECK(mask[4 * 5 + 4] == 0);
+        CHECK(mask[2 * 5 + 2] == 255);
+    }
+
+    SECTION("Invalid arguments fail") {
+        CHECK_FALSE(connectedComponentFilter(nullptr, 5, 5, 1));
+        CHECK_FALSE(connectedComponentFilter(mask.data(), 0, 5, 1));
+    }
+}

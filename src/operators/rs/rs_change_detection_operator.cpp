@@ -33,7 +33,7 @@ const std::vector<std::string> s_methods = {
 };
 
 const std::vector<std::string> s_threshold_methods = {
-    "manual", "otsu", "percentile"
+    "manual", "otsu", "percentile", "statistical"
 };
 
 const std::vector<std::string> s_cleanups = {
@@ -65,6 +65,8 @@ Json::Value RsChangeDetectionOperator::schema() const {
     props["makeMask"] = makeBooleanParam("makeMask", "Also write a binary change mask (UInt8 0/1)", false);
     props["thresholdMethod"] = makeEnumParam("thresholdMethod", "Mask threshold strategy", s_threshold_methods, "manual");
     props["percentile"] = makeNumberParam("percentile", "Percentile for thresholdMethod=percentile (0-100)", 90.0);
+    props["statisticalK"] = makeNumberParam("statisticalK", "Stddev multiplier for thresholdMethod=statistical (mean + k*stddev)", 2.0);
+    props["minAreaPixels"] = makeIntegerParam("minAreaPixels", "Minimum mapping unit: drop changed components smaller than this (pixels); 0 disables", 0);
     props["cleanup"] = makeEnumParam("cleanup", "Morphological mask cleanup", s_cleanups, "none");
     props["cleanupIterations"] = makeIntegerParam("cleanupIterations", "Cleanup iterations", 1);
 
@@ -135,6 +137,8 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
     const std::string thresholdMethod =
         getEnum(params, "thresholdMethod", s_threshold_methods, "manual");
     const double percentile = getDouble(params, "percentile", 90.0);
+    const double statisticalK = getDouble(params, "statisticalK", 2.0);
+    const int minAreaPixels = getInt(params, "minAreaPixels", 0);
     const std::string cleanup = getEnum(params, "cleanup", s_cleanups, "none");
     const int cleanupIterations = getInt(params, "cleanupIterations", 1);
 
@@ -293,6 +297,14 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
             float pct = threshold;
             if (ChangeDetection::percentileThreshold(mag.data(), pixelCount, percentile, &pct))
                 thresholdUsed = pct;
+        } else if (thresholdMethod == "statistical") {
+            // mean + k*stddev over the finite change magnitudes.
+            const ChangeDetection::ChangeStats stats =
+                ChangeDetection::statistics(mag.data(), pixelCount);
+            if (stats.count > 0) {
+                thresholdUsed = static_cast<float>(
+                    stats.mean + statisticalK * stats.stddev);
+            }
         }
 
         std::vector<uint8_t> mask(pixelCount);
@@ -302,6 +314,12 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
         }
         ChangeDetection::morphologicalCleanup(mask.data(), width, height,
                                               cleanupIterations, morphOpFromName(cleanup));
+        if (minAreaPixels > 0 &&
+            !ChangeDetection::connectedComponentFilter(mask.data(), width, height,
+                                                       static_cast<size_t>(minAreaPixels))) {
+            throw RSOperatorError(ErrorCode::ComputationError,
+                                  "Connected-component filter failed");
+        }
 
         context.reportProgress(0.8, "Writing change mask");
         QString errorMessage;
@@ -320,6 +338,10 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
         GDALSetMetadataItem(outDs, "SICNU_CHANGE_THRESHOLD",
                             QString::number(thresholdUsed, 'g', 10).toUtf8().constData(),
                             nullptr);
+        if (minAreaPixels > 0) {
+            GDALSetMetadataItem(outDs, "SICNU_CHANGE_MIN_AREA",
+                                QByteArray::number(minAreaPixels).constData(), nullptr);
+        }
         GDALClose(outDs);
         if (writeErr != CE_None) {
             throw RSOperatorError(ErrorCode::FileNotWritable,

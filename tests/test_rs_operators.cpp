@@ -2001,3 +2001,96 @@ TEST_CASE("RS change detection enforces comparable radiometric states",
         CHECK(QFile::exists(outputPath));
     }
 }
+
+TEST_CASE("RS change detection statistical threshold uses mean + k*stddev", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString beforePath = tmp.path() + "/before.tif";
+    const QString afterPath = tmp.path() + "/after.tif";
+    const QString outputPath = tmp.path() + "/diff.tif";
+
+    // 8x8: baseline difference 1 everywhere except four hot pixels (diff 40).
+    constexpr int W = 8;
+    constexpr int H = 8;
+    std::vector<float> before(W * H, 100.0f);
+    std::vector<float> after(W * H, 101.0f);
+    for (int i = 0; i < 4; ++i)
+        after[i] = 140.0f; // |diff| = 40
+    std::array<double, 6> gt = {500000, 10, 0, 4500000, 0, -10};
+    QString err;
+    REQUIRE(writeGdalOutput(beforePath, W, H, {before}, gt, "EPSG:32648", &err));
+    REQUIRE(writeGdalOutput(afterPath, W, H, {after}, gt, "EPSG:32648", &err));
+
+    Json::Value params(Json::objectValue);
+    params["before"] = beforePath.toStdString();
+    params["after"] = afterPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["method"] = "difference";
+    params["makeMask"] = true;
+    params["thresholdMethod"] = "statistical";
+    params["statisticalK"] = 2.0;
+
+    RSOperatorContext ctx;
+    auto op = RSOperatorRegistry::instance().create("rs:change_detection");
+    REQUIRE(op != nullptr);
+    const Json::Value result = op->run(params, ctx);
+
+    // mean = (60*1 + 4*40)/64 ~= 3.44, stddev ~= 9.4 => threshold ~= 22.
+    const double thresholdUsed = result["thresholdUsed"].asDouble();
+    CHECK(thresholdUsed > 10.0);
+    CHECK(thresholdUsed < 30.0);
+    // The four hot pixels are the only changes at that threshold.
+    CHECK(result["changedPixels"].asUInt64() == 4);
+}
+
+TEST_CASE("RS change detection minimum mapping unit drops small components", "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString beforePath = tmp.path() + "/before.tif";
+    const QString afterPath = tmp.path() + "/after.tif";
+    const QString outputPath = tmp.path() + "/diff.tif";
+
+    // 8x8: a 2x2 changed block (top-left) and one isolated hot pixel
+    // (bottom-right), everything else unchanged.
+    constexpr int W = 8;
+    constexpr int H = 8;
+    std::vector<float> before(W * H, 100.0f);
+    std::vector<float> after = before;
+    for (int y = 0; y < 2; ++y)
+        for (int x = 0; x < 2; ++x)
+            after[y * W + x] = 140.0f;
+    after[(H - 1) * W + (W - 1)] = 150.0f; // isolated dot
+    std::array<double, 6> gt = {500000, 10, 0, 4500000, 0, -10};
+    QString err;
+    REQUIRE(writeGdalOutput(beforePath, W, H, {before}, gt, "EPSG:32648", &err));
+    REQUIRE(writeGdalOutput(afterPath, W, H, {after}, gt, "EPSG:32648", &err));
+
+    Json::Value params(Json::objectValue);
+    params["before"] = beforePath.toStdString();
+    params["after"] = afterPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["method"] = "difference";
+    params["makeMask"] = true;
+    params["thresholdMethod"] = "manual";
+    params["threshold"] = 30.0;
+    params["minAreaPixels"] = 4; // 2x2 block (4 px) survives, dot (1 px) dropped
+
+    RSOperatorContext ctx;
+    auto op = RSOperatorRegistry::instance().create("rs:change_detection");
+    REQUIRE(op != nullptr);
+    const Json::Value result = op->run(params, ctx);
+
+    // Only the 2x2 block remains changed.
+    CHECK(result["changedPixels"].asUInt64() == 4);
+
+    // The mask metadata records the MMU.
+    GdalDatasetWrapper ds;
+    REQUIRE(ds.open(outputPath));
+    std::vector<float> mask(static_cast<size_t>(W) * H, 0.0f);
+    REQUIRE(ds.readBandData(1, mask.data(), W, H));
+    CHECK(mask[0] == 1.0f);              // block pixel (0,0)
+    CHECK(mask[9] == 1.0f);              // block pixel (1,1)
+    CHECK(mask[(H - 1) * W + (W - 1)] == 0.0f); // dot removed
+}
