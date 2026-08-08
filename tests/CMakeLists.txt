@@ -4003,6 +4003,7 @@ add_executable(test_post_classification_dialog
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/raster_layer_combo.cpp
 )
 target_link_libraries(test_post_classification_dialog PRIVATE
   Catch2::Catch2WithMain
@@ -4057,6 +4058,29 @@ target_include_directories(test_band_role_combo PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_band_role_combo)
+
+# Shared raster layer picker widget (C5)
+add_executable(test_raster_layer_combo
+  test_raster_layer_combo.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/raster_layer_combo.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
+)
+target_link_libraries(test_raster_layer_combo PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_raster_layer_combo PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_raster_layer_combo)
 
 # Spectral index dialog — role-based band preselection via BandRoleCombo (C5)
 add_executable(test_spectral_index_dialog

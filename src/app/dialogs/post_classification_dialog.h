@@ -7,6 +7,7 @@
 
 class QComboBox;
 class QSpinBox;
+class RasterLayerCombo;
 
 /**
  * Post-classification comparison workbench dialog: compares two thematic
@@ -35,10 +36,10 @@ protected:
 
 private:
     void setupUi();
-    void populateBandCombo( QComboBox *layerCombo, QComboBox *bandCombo );
+    void populateBandCombo( RasterLayerCombo *layerCombo, QComboBox *bandCombo );
 
-    QComboBox *m_beforeLayerCombo = nullptr;
-    QComboBox *m_afterLayerCombo = nullptr;
+    RasterLayerCombo *m_beforeLayerCombo = nullptr;
+    RasterLayerCombo *m_afterLayerCombo = nullptr;
     QComboBox *m_beforeBandCombo = nullptr;
     QComboBox *m_afterBandCombo = nullptr;
     QSpinBox *m_classCountSpin = nullptr;

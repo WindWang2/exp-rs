@@ -5,6 +5,7 @@
 
 class QComboBox;
 class QDoubleSpinBox;
+class RasterLayerCombo;
 class QLabel;
 
 
@@ -31,8 +32,8 @@ private slots:
 private:
     void setupUi();
 
-    QComboBox *m_beforeLayerCombo = nullptr;
-    QComboBox *m_afterLayerCombo = nullptr;
+    RasterLayerCombo *m_beforeLayerCombo = nullptr;
+    RasterLayerCombo *m_afterLayerCombo = nullptr;
     QComboBox *m_methodCombo = nullptr;
     QComboBox *m_beforeBandCombo = nullptr;
     QComboBox *m_afterBandCombo = nullptr;

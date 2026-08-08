@@ -1,6 +1,7 @@
 // src/app/dialogs/post_classification_dialog.cpp — Post-Classification Compare
 #include "post_classification_dialog.h"
 #include "dialog_help_catalog.h"
+#include "widgets/raster_layer_combo.h"
 #include "dialog_utils.h"
 
 #include <raster/qgsrasterlayer.h>
@@ -36,9 +37,9 @@ void PostClassificationDialog::setupUi()
   form->setHorizontalSpacing( 12 );
   form->setVerticalSpacing( 8 );
 
-  m_beforeLayerCombo = new QComboBox( inputSec );
+  m_beforeLayerCombo = new RasterLayerCombo( inputSec );
   m_beforeLayerCombo->setObjectName( QStringLiteral( "postClassBeforeCombo" ) );
-  m_afterLayerCombo = new QComboBox( inputSec );
+  m_afterLayerCombo = new RasterLayerCombo( inputSec );
   m_afterLayerCombo->setObjectName( QStringLiteral( "postClassAfterCombo" ) );
   m_beforeBandCombo = new QComboBox( inputSec );
   m_beforeBandCombo->setObjectName( QStringLiteral( "postClassBeforeBandCombo" ) );
@@ -78,11 +79,10 @@ void PostClassificationDialog::setupUi()
   populateLayers();
 }
 
-void PostClassificationDialog::populateBandCombo( QComboBox *layerCombo, QComboBox *bandCombo )
+void PostClassificationDialog::populateBandCombo( RasterLayerCombo *layerCombo, QComboBox *bandCombo )
 {
   bandCombo->clear();
-  const QString id = layerCombo->currentData().toString();
-  auto *rl = qobject_cast<QgsRasterLayer *>( QgsProject::instance()->mapLayer( id ) );
+  auto *rl = layerCombo->currentRasterLayer();
   if ( !rl )
     return;
   for ( int i = 1; i <= rl->bandCount(); ++i )
@@ -91,18 +91,8 @@ void PostClassificationDialog::populateBandCombo( QComboBox *layerCombo, QComboB
 
 void PostClassificationDialog::populateLayers()
 {
-  m_beforeLayerCombo->clear();
-  m_afterLayerCombo->clear();
-  const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
-  for ( auto it = layers.constBegin(); it != layers.constEnd(); ++it )
-  {
-    auto *rasterLayer = qobject_cast<QgsRasterLayer *>( it.value() );
-    if ( rasterLayer && rasterLayer->isValid() )
-    {
-      m_beforeLayerCombo->addItem( rasterLayer->name(), rasterLayer->id() );
-      m_afterLayerCombo->addItem( rasterLayer->name(), rasterLayer->id() );
-    }
-  }
+  m_beforeLayerCombo->populate();
+  m_afterLayerCombo->populate();
   populateBandCombo( m_beforeLayerCombo, m_beforeBandCombo );
   populateBandCombo( m_afterLayerCombo, m_afterBandCombo );
 }

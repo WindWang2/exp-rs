@@ -2,6 +2,7 @@
 #include "change_detection_dialog.h"
 #include "comparison_dialog.h"
 #include "dialog_help_catalog.h"
+#include "widgets/raster_layer_combo.h"
 #include "dialog_utils.h"
 
 #include <raster/qgsrasterlayer.h>
@@ -37,8 +38,8 @@ void ChangeDetectionDialog::setupUi()
   form->setHorizontalSpacing( 12 );
   form->setVerticalSpacing( 8 );
 
-  m_beforeLayerCombo = new QComboBox( inputSec );
-  m_afterLayerCombo = new QComboBox( inputSec );
+  m_beforeLayerCombo = new RasterLayerCombo( inputSec );
+  m_afterLayerCombo = new RasterLayerCombo( inputSec );
   m_beforeBandCombo = new QComboBox( inputSec );
   m_afterBandCombo = new QComboBox( inputSec );
   SicnuDialogHelp::tip( m_beforeLayerCombo, tr( "变化前（较早）影像。" ) );
@@ -109,18 +110,8 @@ void ChangeDetectionDialog::setupUi()
 
 void ChangeDetectionDialog::populateLayers()
 {
-  m_beforeLayerCombo->clear();
-  m_afterLayerCombo->clear();
-  const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
-  for ( auto it = layers.constBegin(); it != layers.constEnd(); ++it )
-  {
-    QgsRasterLayer *rasterLayer = qobject_cast<QgsRasterLayer *>( it.value() );
-    if ( rasterLayer && rasterLayer->isValid() )
-    {
-      m_beforeLayerCombo->addItem( rasterLayer->name(), rasterLayer->id() );
-      m_afterLayerCombo->addItem( rasterLayer->name(), rasterLayer->id() );
-    }
-  }
+  m_beforeLayerCombo->populate();
+  m_afterLayerCombo->populate();
   updateBandSelectors();
 }
 
