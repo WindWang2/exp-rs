@@ -129,3 +129,59 @@ TEST_CASE("rs:rx_anomaly writes a single-band score raster", "[operators][rs][rx
     CHECK(scores[8] == maxScore);
     CHECK(maxScore > 5.0f);
 }
+
+// Streaming-equivalence (Phase E2): the streaming rs:rx_anomaly operator must
+// produce bit-identical scores to the legacy full-raster rxDetector kernel on
+// the same input. Builds a multi-band raster, runs the operator (now streaming),
+// then runs the kernel on the same pixels gathered band-major, and asserts the
+// per-pixel scores match exactly.
+TEST_CASE("rs:rx_anomaly streaming output is bit-identical to the full-raster kernel",
+          "[operators][rs][rx][streaming]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString inputPath = tmp.path() + "/in.tif";
+    const QString outputPath = tmp.path() + "/out.tif";
+
+    constexpr int W = 10, H = 10, B = 4;
+    std::vector<std::vector<float>> bands( B, std::vector<float>( W * H ) );
+    // Deterministic content per (band, pixel); encode band*1000 + pixel.
+    for ( int b = 0; b < B; ++b )
+        for ( int p = 0; p < W * H; ++p )
+            bands[b][p] = static_cast<float>( b * 1000 + ( ( p * 1103515245u + 12345u ) % 1000u ) );
+
+    std::array<double, 6> gt = { 0, 1, 0, 0, 0, -1 };
+    QString err;
+    REQUIRE( writeGdalOutput( inputPath, W, H, bands, gt, QString(), &err ) );
+
+    // Reference: full-raster kernel on the band-major-interleaved pixels.
+    std::vector<float> refPixels( static_cast<size_t>( W ) * H * B );
+    for ( int p = 0; p < W * H; ++p )
+        for ( int b = 0; b < B; ++b )
+            refPixels[static_cast<size_t>( p ) * B + b] = bands[b][p];
+    std::vector<float> refScores;
+    REQUIRE( SpectralAnomaly::rxDetector( refPixels.data(), static_cast<size_t>( W ) * H, B,
+                                          &refScores, &err ) );
+
+    // Streaming operator.
+    auto op = RSOperatorRegistry::instance().create( "rs:rx_anomaly" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    RSOperatorContext ctx;
+    Json::Value result = op->run( params, ctx );
+    REQUIRE( result["output"].asString() == outputPath.toStdString() );
+
+    GdalDatasetWrapper ds;
+    REQUIRE( ds.open( outputPath ) );
+    std::vector<float> streamScores( static_cast<size_t>( W ) * H );
+    REQUIRE( ds.readBandData( 1, streamScores.data(), W, H ) );
+
+    // Bit-identical: the streaming stats accumulate in the same order as the
+    // full-raster kernel, so the per-pixel scores must match exactly.
+    REQUIRE( streamScores.size() == refScores.size() );
+    for ( size_t p = 0; p < refScores.size(); ++p )
+        CHECK( streamScores[p] == refScores[p] );
+}

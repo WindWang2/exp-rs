@@ -77,6 +77,95 @@ bool invertMatrix( const std::vector<double> &m, int n, std::vector<double> *inv
 
 } // namespace
 
+void accumulateMean( const float *pixels, size_t count, int bands,
+                     BackgroundStats *stats )
+{
+    if ( !pixels || !stats || count == 0 || bands <= 0 )
+        return;
+    if ( stats->mean.size() != static_cast<size_t>( bands ) )
+    {
+        stats->mean.assign( bands, 0.0 );
+        stats->count = 0;
+    }
+    // Same accumulation order as rxDetector's mean loop (band-inner) so a
+    // multi-tile pass reproduces the full-raster mean bit-for-bit.
+    for ( size_t p = 0; p < count; ++p )
+        for ( int b = 0; b < bands; ++b )
+            stats->mean[b] += pixels[p * static_cast<size_t>( bands ) + b];
+    stats->count += count;
+}
+
+void finalizeMean( BackgroundStats *stats )
+{
+    if ( !stats || stats->count == 0 )
+        return;
+    for ( double &v : stats->mean )
+        v /= static_cast<double>( stats->count );
+    stats->count = 0; // reset for the covariance pass
+}
+
+void accumulateCovariance( const float *pixels, size_t count, int bands,
+                           BackgroundStats *stats )
+{
+    if ( !pixels || !stats || count == 0 || bands <= 0 )
+        return;
+    if ( stats->covariance.size() != static_cast<size_t>( bands ) * bands )
+    {
+        stats->covariance.assign( static_cast<size_t>( bands ) * bands, 0.0 );
+        stats->count = 0;
+    }
+    // Centered outer product, accumulated in the same order as rxDetector's
+    // covariance loop (pixel-outer, band-inner full i,j) → bit-identical.
+    for ( size_t p = 0; p < count; ++p )
+    {
+        std::vector<double> d( bands );
+        for ( int b = 0; b < bands; ++b )
+            d[b] = pixels[p * static_cast<size_t>( bands ) + b] - stats->mean[b];
+        for ( int i = 0; i < bands; ++i )
+            for ( int j = 0; j < bands; ++j )
+                stats->covariance[static_cast<size_t>( i ) * bands + j] += d[i] * d[j];
+    }
+    stats->count += count;
+}
+
+void finalizeCovariance( BackgroundStats *stats )
+{
+    if ( !stats || stats->count == 0 )
+        return;
+    for ( double &v : stats->covariance )
+        v /= static_cast<double>( stats->count );
+}
+
+bool invertCovariance( const std::vector<double> &covariance, int bands,
+                       std::vector<double> *inverse )
+{
+    if ( bands <= 0 || static_cast<int>( covariance.size() ) != bands * bands )
+        return false;
+    constexpr double kRidge = 1e-9;
+    std::vector<double> covRidge = covariance;
+    for ( int i = 0; i < bands; ++i )
+        covRidge[static_cast<size_t>( i ) * bands + i] += kRidge;
+    return invertMatrix( covRidge, bands, inverse );
+}
+
+float rxScore( const float *spectrum, const std::vector<double> &mean,
+               const std::vector<double> &inverseCov, int bands )
+{
+    std::vector<double> d( bands );
+    for ( int b = 0; b < bands; ++b )
+        d[b] = static_cast<double>( spectrum[b] ) - mean[b];
+
+    double rx = 0.0;
+    for ( int i = 0; i < bands; ++i )
+    {
+        double row = 0.0;
+        for ( int j = 0; j < bands; ++j )
+            row += inverseCov[static_cast<size_t>( i ) * bands + j] * d[j];
+        rx += d[i] * row;
+    }
+    return static_cast<float>( std::max( 0.0, rx ) );
+}
+
 bool rxDetector( const float *pixels, size_t count, int bands,
                  std::vector<float> *rxValues, QString *errorMessage )
 {
@@ -87,38 +176,14 @@ bool rxDetector( const float *pixels, size_t count, int bands,
         return false;
     }
 
-    // Sample mean.
-    std::vector<double> mean( bands, 0.0 );
-    for ( size_t p = 0; p < count; ++p )
-        for ( int b = 0; b < bands; ++b )
-            mean[static_cast<size_t>( b )] += pixels[p * static_cast<size_t>( bands ) + b];
-    for ( int b = 0; b < bands; ++b )
-        mean[static_cast<size_t>( b )] /= static_cast<double>( count );
-
-    // Sample covariance (biased, /count).
-    std::vector<double> cov( static_cast<size_t>( bands ) * bands, 0.0 );
-    for ( size_t p = 0; p < count; ++p )
-    {
-        std::vector<double> d( bands );
-        for ( int b = 0; b < bands; ++b )
-            d[static_cast<size_t>( b )] =
-                pixels[p * static_cast<size_t>( bands ) + b] - mean[static_cast<size_t>( b )];
-        for ( int i = 0; i < bands; ++i )
-            for ( int j = 0; j < bands; ++j )
-                cov[static_cast<size_t>( i ) * bands + j] +=
-                    d[static_cast<size_t>( i )] * d[static_cast<size_t>( j )];
-    }
-    for ( double &v : cov )
-        v /= static_cast<double>( count );
-
-    // Ridge for robustness against (near-)singular background covariance.
-    constexpr double kRidge = 1e-9;
-    std::vector<double> covRidge = cov;
-    for ( int i = 0; i < bands; ++i )
-        covRidge[static_cast<size_t>( i ) * bands + i] += kRidge;
+    BackgroundStats stats;
+    accumulateMean( pixels, count, bands, &stats );
+    finalizeMean( &stats );
+    accumulateCovariance( pixels, count, bands, &stats );
+    finalizeCovariance( &stats );
 
     std::vector<double> invCov;
-    if ( !invertMatrix( covRidge, bands, &invCov ) )
+    if ( !invertCovariance( stats.covariance, bands, &invCov ) )
     {
         if ( errorMessage )
             *errorMessage = QStringLiteral( "Background covariance is singular" );
@@ -128,21 +193,8 @@ bool rxDetector( const float *pixels, size_t count, int bands,
     rxValues->resize( count );
     for ( size_t p = 0; p < count; ++p )
     {
-        std::vector<double> d( bands );
-        for ( int b = 0; b < bands; ++b )
-            d[static_cast<size_t>( b )] =
-                pixels[p * static_cast<size_t>( bands ) + b] - mean[static_cast<size_t>( b )];
-
-        double rx = 0.0;
-        for ( int i = 0; i < bands; ++i )
-        {
-            double row = 0.0;
-            for ( int j = 0; j < bands; ++j )
-                row += invCov[static_cast<size_t>( i ) * bands + j]
-                       * d[static_cast<size_t>( j )];
-            rx += d[static_cast<size_t>( i )] * row;
-        }
-        ( *rxValues )[p] = static_cast<float>( std::max( 0.0, rx ) );
+        ( *rxValues )[p] =
+            rxScore( pixels + p * static_cast<size_t>( bands ), stats.mean, invCov, bands );
     }
     return true;
 }
