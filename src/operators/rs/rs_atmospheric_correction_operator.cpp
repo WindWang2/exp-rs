@@ -9,6 +9,7 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/atmospheric_correction.h"
 #include "processing/algorithms/radiometric_calibration.h"
+#include "processing/algorithms/satellite_products.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QString>
@@ -158,6 +159,17 @@ Json::Value RsAtmosphericCorrectionOperator::run(const Json::Value& params,
 
     context.throwIfCancelled();
     context.reportProgress(1.0, "Atmospheric correction complete");
+
+    // Record the radiometric state so change detection can verify
+    // comparability (ADR 0114): DOS/QUAC output surface reflectance;
+    // dn_to_radiance output radiance.
+    const char *state = SatelliteProducts::kRadiometricStateSurfaceReflectance;
+    if ( method == "dn_to_radiance" )
+        state = SatelliteProducts::kRadiometricStateRadiance;
+    QString stateError;
+    if ( !SatelliteProducts::setRadiometricState(
+           QString::fromStdString( outputPath ), state, &stateError ) )
+        context.logWarning( stateError.toStdString() );
 
     Json::Value result(Json::objectValue);
     result["output"] = outputPath;

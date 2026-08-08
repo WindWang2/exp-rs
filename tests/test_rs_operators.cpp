@@ -13,6 +13,8 @@
 
 #include <json/json.h>
 
+#include "processing/algorithms/satellite_products.h"
+
 #include <gdal_priv.h>
 #include <ogr_api.h>
 
@@ -184,6 +186,10 @@ TEST_CASE("RS radiometric calibration operator execution", "[operators][rs]") {
     CHECK(out[1] == Catch::Approx(2.0f).epsilon(1e-3f)); // 0.01*200
     CHECK(out[2] == Catch::Approx(0.5f).epsilon(1e-3f)); // 0.01*50
     CHECK(out[3] == Catch::Approx(0.8f).epsilon(1e-3f)); // 0.01*80
+
+    // The calibrated output records its radiometric state (radiance).
+    CHECK(SatelliteProducts::readRadiometricState(outputPath)
+          == QString::fromUtf8(SatelliteProducts::kRadiometricStateRadiance));
 }
 
 TEST_CASE("RS radiometric calibration auto-detects a sibling MTL", "[operators][rs]") {
@@ -291,6 +297,10 @@ TEST_CASE("RS atmospheric correction resolves gain/bias from sibling MTL", "[ope
     REQUIRE(ds.readBandData(1, out.data(), 2, 1));
     CHECK(out[0] == Catch::Approx(1.0f).epsilon(1e-3f)); // 0.01*100
     CHECK(out[1] == Catch::Approx(2.0f).epsilon(1e-3f)); // 0.01*200
+
+    // dn_to_radiance records the radiance state.
+    CHECK(SatelliteProducts::readRadiometricState(outputPath)
+          == QString::fromUtf8(SatelliteProducts::kRadiometricStateRadiance));
 }
 
 TEST_CASE("RS atmospheric correction explicit gain/bias still win", "[operators][rs]") {
@@ -1891,5 +1901,103 @@ TEST_CASE("RS post-classification change validates inputs", "[operators][rs]") {
                 CHECK(px[y * W + x] == Catch::Approx(expected));
             }
         }
+    }
+}
+
+TEST_CASE("Radiometric state metadata round-trips and survives missing files",
+          "[operators][rs][provenance]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString path = tmp.path() + "/state.tif";
+
+    std::vector<std::vector<float>> band(1, std::vector<float>(4, 10.0f));
+    std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+    QString err;
+    REQUIRE(writeGdalOutput(path, 2, 2, band, gt, "EPSG:32648", &err));
+
+    // Absent before writing.
+    CHECK(SatelliteProducts::readRadiometricState(path).isEmpty());
+
+    REQUIRE(SatelliteProducts::setRadiometricState(
+        path, SatelliteProducts::kRadiometricStateToaReflectance));
+    CHECK(SatelliteProducts::readRadiometricState(path)
+          == QString::fromUtf8(SatelliteProducts::kRadiometricStateToaReflectance));
+
+    // Overwrite with a different state.
+    REQUIRE(SatelliteProducts::setRadiometricState(
+        path, SatelliteProducts::kRadiometricStateSurfaceReflectance));
+    CHECK(SatelliteProducts::readRadiometricState(path)
+          == QString::fromUtf8(SatelliteProducts::kRadiometricStateSurfaceReflectance));
+
+    // Missing file: read is empty, write fails with a message.
+    CHECK(SatelliteProducts::readRadiometricState(path + QStringLiteral( ".nope" )).isEmpty());
+    QString writeError;
+    CHECK_FALSE(SatelliteProducts::setRadiometricState(
+        path + QStringLiteral( ".nope" ), SatelliteProducts::kRadiometricStateRadiance,
+        &writeError));
+    CHECK_FALSE(writeError.isEmpty());
+}
+
+TEST_CASE("RS change detection enforces comparable radiometric states",
+          "[operators][rs]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString beforePath = tmp.path() + "/before.tif";
+    const QString afterPath = tmp.path() + "/after.tif";
+    const QString outputPath = tmp.path() + "/diff.tif";
+
+    constexpr int W = 8;
+    constexpr int H = 8;
+    std::vector<std::vector<float>> band(1, std::vector<float>(W * H, 50.0f));
+    std::array<double, 6> gt = {500000, 10, 0, 4500000, 0, -10};
+    QString err;
+    REQUIRE(writeGdalOutput(beforePath, W, H, band, gt, "EPSG:32648", &err));
+    REQUIRE(writeGdalOutput(afterPath, W, H, band, gt, "EPSG:32648", &err));
+
+    auto op = RSOperatorRegistry::instance().create("rs:change_detection");
+    REQUIRE(op != nullptr);
+
+    auto run = [&](const QString &before, const QString &after) {
+        Json::Value params(Json::objectValue);
+        params["before"] = before.toStdString();
+        params["after"] = after.toStdString();
+        params["output"] = outputPath.toStdString();
+        params["method"] = "difference";
+        RSOperatorContext ctx;
+        return op->run(params, ctx);
+    };
+
+    SECTION("Absent states pass (unknown radiometric state is unchecked)") {
+        REQUIRE_NOTHROW(run(beforePath, afterPath));
+        CHECK(QFile::exists(outputPath));
+        QFile::remove(outputPath);
+    }
+
+    SECTION("Identical states pass") {
+        REQUIRE(SatelliteProducts::setRadiometricState(
+            beforePath, SatelliteProducts::kRadiometricStateToaReflectance));
+        REQUIRE(SatelliteProducts::setRadiometricState(
+            afterPath, SatelliteProducts::kRadiometricStateToaReflectance));
+        REQUIRE_NOTHROW(run(beforePath, afterPath));
+        CHECK(QFile::exists(outputPath));
+    }
+
+    SECTION("Differing states fail with an actionable error") {
+        REQUIRE(SatelliteProducts::setRadiometricState(
+            beforePath, SatelliteProducts::kRadiometricStateToaReflectance));
+        REQUIRE(SatelliteProducts::setRadiometricState(
+            afterPath, SatelliteProducts::kRadiometricStateRadiance));
+        REQUIRE_THROWS_WITH(
+            run(beforePath, afterPath),
+            Catch::Matchers::ContainsSubstring("radiometric states"));
+        CHECK_FALSE(QFile::exists(outputPath));
+    }
+
+    SECTION("One-sided declaration passes (other side unknown)") {
+        REQUIRE(SatelliteProducts::setRadiometricState(
+            beforePath, SatelliteProducts::kRadiometricStateToaReflectance));
+        REQUIRE_NOTHROW(run(beforePath, afterPath));
+        CHECK(QFile::exists(outputPath));
     }
 }

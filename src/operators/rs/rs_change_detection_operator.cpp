@@ -9,6 +9,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/change_detection.h"
+#include "processing/algorithms/satellite_products.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_grid_compat.h"
 
@@ -153,6 +154,25 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
 
     const int width = beforeDs.width();
     const int height = beforeDs.height();
+
+    // Radiometric comparability (ADR 0114): differencing rasters in different
+    // physical states (e.g. TOA reflectance vs radiance) is meaningless. Both
+    // sides must declare the same state; absent declarations are skipped.
+    const QString beforeState =
+        SatelliteProducts::readRadiometricState( QString::fromStdString( beforePath ) );
+    const QString afterState =
+        SatelliteProducts::readRadiometricState( QString::fromStdString( afterPath ) );
+    if ( !beforeState.isEmpty() && !afterState.isEmpty() && beforeState != afterState )
+    {
+        throw RSOperatorError(
+            ErrorCode::InvalidInputData,
+            "Before and after rasters are in different radiometric states (" +
+            beforeState.toStdString() + " vs " + afterState.toStdString() +
+            "); calibrate or atmospherically correct both acquisitions to the "
+            "same state before comparing them");
+    }
+    if ( !beforeState.isEmpty() && !afterState.isEmpty() )
+        context.logInfo( "Radiometric state: " + beforeState.toStdString() );
 
     // Shared pixel-grid preflight (CRS, resolution, origin alignment, extent)
     // before any pixel comparison. Two unreferenced rasters are not spatially

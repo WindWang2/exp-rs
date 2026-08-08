@@ -181,4 +181,31 @@ QStringList defaultSentinel2Bands20m();
 /** Prefer surface reflectance subdatasets for common MODIS products. */
 QStringList defaultModisReflectanceBands();
 
+// ---------------------------------------------------------------------------
+// Radiometric state
+//
+// Dataset-level metadata recording the physical meaning of pixel values.
+// Written by radiometric calibration and atmospheric correction so that
+// downstream multi-date operators (change detection) can verify that two
+// acquisitions are radiometrically comparable before differencing them.
+// ---------------------------------------------------------------------------
+
+/// Metadata key: "SICNU_RADIOMETRIC_STATE".
+constexpr char kRadiometricStateKey[] = "SICNU_RADIOMETRIC_STATE";
+/// Value domain for kRadiometricStateKey.
+constexpr char kRadiometricStateRadiance[] = "radiance";
+constexpr char kRadiometricStateToaReflectance[] = "toa_reflectance";
+constexpr char kRadiometricStateSurfaceReflectance[] = "surface_reflectance";
+constexpr char kRadiometricStateBrightnessTemperature[] = "brightness_temperature";
+constexpr char kRadiometricStateDigitalNumber[] = "digital_number";
+
+/// Writes the radiometric-state dataset metadata to \p path. Returns false
+/// (with \p errorMessage set) when the file cannot be opened for update.
+bool setRadiometricState( const QString &path, const char *state,
+                          QString *errorMessage = nullptr );
+
+/// Reads the radiometric-state dataset metadata of \p path. Returns an empty
+/// string when the file is unreadable or the state is absent.
+QString readRadiometricState( const QString &path );
+
 } // namespace SatelliteProducts

@@ -7,6 +7,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/radiometric_calibration.h"
+#include "processing/algorithms/satellite_products.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QString>
@@ -130,6 +131,19 @@ Json::Value RsRadiometricCalibrationOperator::run(const Json::Value &params,
 
     context.throwIfCancelled();
     context.reportProgress(1.0, "Radiometric calibration complete");
+
+    // Record the radiometric state so downstream multi-date operators can
+    // verify comparability (ADR 0114). BT is a physical quantity like radiance
+    // and is recorded under its own state id.
+    const char *state = SatelliteProducts::kRadiometricStateRadiance;
+    if ( unit == "toa_reflectance" )
+        state = SatelliteProducts::kRadiometricStateToaReflectance;
+    else if ( unit == "brightness_temperature" )
+        state = SatelliteProducts::kRadiometricStateBrightnessTemperature;
+    QString stateError;
+    if ( !SatelliteProducts::setRadiometricState( QString::fromStdString( outputPath ),
+                                                  state, &stateError ) )
+        context.logWarning( stateError.toStdString() );
 
     // Report the actual number of processed bands (empty bandIndices = all bands).
     int processedBandCount = static_cast<int>(bandIndices.size());

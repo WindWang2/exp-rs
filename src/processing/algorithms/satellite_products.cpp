@@ -1444,4 +1444,38 @@ bool stackToGeoTiff(const ProductInfo& product,
     return true;
 }
 
+bool setRadiometricState( const QString &path, const char *state,
+                          QString *errorMessage )
+{
+    GDALDatasetH ds = GDALOpen( path.toUtf8().constData(), GA_Update );
+    if ( !ds )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "Cannot open '%1' to record the radiometric state" )
+                              .arg( path );
+        return false;
+    }
+    const int result = GDALSetMetadataItem( ds, kRadiometricStateKey, state, nullptr );
+    GDALClose( ds );
+    if ( result != CE_None )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "Failed to write the radiometric state to '%1'" )
+                              .arg( path );
+        return false;
+    }
+    return true;
+}
+
+QString readRadiometricState( const QString &path )
+{
+    GDALDatasetH ds = GDALOpen( path.toUtf8().constData(), GA_ReadOnly );
+    if ( !ds )
+        return QString();
+    const char *value = GDALGetMetadataItem( ds, kRadiometricStateKey, nullptr );
+    const QString state = value ? QString::fromUtf8( value ) : QString();
+    GDALClose( ds );
+    return state;
+}
+
 } // namespace SatelliteProducts
