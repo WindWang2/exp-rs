@@ -44,7 +44,7 @@ jobs:
       - name: Verify Installation Rule Execution
         run: |
           cmake --install build --prefix /tmp/sicnu_install_test
-          QT_QPA_PLATFORM=offscreen /tmp/sicnu_install_test/bin/sicnu_geo_rs_cli --help || true
+          QT_QPA_PLATFORM=offscreen /tmp/sicnu_install_test/bin/sicnu_geo_rs_cli --help
 
   # =========================================================================
   # Tier 2 — Full Linux Integration & Sanitizer Suite
