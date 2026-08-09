@@ -126,7 +126,7 @@ jobs:
       - name: Install macOS Dependencies via Homebrew
         run: |
           brew update
-          brew install qt@6 gdal proj geos libzip gsl bison flex pcre2 cmake
+          brew install qt@6 qca gdal proj geos libzip gsl bison flex pcre2 cmake
 
       - name: Configure CMake for macOS
         run: |
