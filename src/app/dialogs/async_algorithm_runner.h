@@ -38,4 +38,5 @@ signals:
 private:
     QgsProcessingAlgRunnerTask *m_task = nullptr;
     qint64 m_startTime = 0;
+    long m_centerTaskId = -1;
 };

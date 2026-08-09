@@ -21,6 +21,9 @@ AsyncAlgorithmRunner::~AsyncAlgorithmRunner()
 {
     // Cancel outstanding task so it does not call into a destroyed runner/dialog.
     if (m_task && isRunning()) {
+        if (m_centerTaskId > 0) {
+            sicnu::TaskCenter::instance().markTaskCanceled(m_centerTaskId);
+        }
         disconnect(m_task, nullptr, this, nullptr);
         m_task->cancel();
         m_task = nullptr;
@@ -40,7 +43,8 @@ void AsyncAlgorithmRunner::run(const QgsProcessingAlgorithm *algorithm,
     m_startTime = QDateTime::currentMSecsSinceEpoch();
 
     QString algoId = algorithm ? algorithm->id() : QStringLiteral("algorithm");
-    long centerTaskId = sicnu::TaskCenter::instance().enqueueTask(algoId, parameters, true);
+    m_centerTaskId = sicnu::TaskCenter::instance().enqueueTask(algoId, parameters, true);
+    long centerTaskId = m_centerTaskId;
 
     // Create feedback for progress tracking
     QgsProcessingFeedback *feedback = new QgsProcessingFeedback(this);

@@ -1,0 +1,123 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev-default",
+      "displayName": "Developer Default Debug",
+      "description": "Standard debug build with tests enabled",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-dev",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_TESTS": "ON",
+        "ENABLE_LOCAL_BUILD_SHORTCUTS": "ON"
+      }
+    },
+    {
+      "name": "ci-fast",
+      "displayName": "CI Fast Required Lane",
+      "description": "Fast release build for pull request verification",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-ci-fast",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ENABLE_TESTS": "ON",
+        "ENABLE_LOCAL_BUILD_SHORTCUTS": "ON"
+      }
+    },
+    {
+      "name": "ci-full",
+      "displayName": "CI Full Linux Integration Lane",
+      "description": "Full Linux integration build with OTB and Python worker support",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-ci-full",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ENABLE_TESTS": "ON",
+        "SICNU_BUILD_OTB": "ON",
+        "SICNU_EMBED_PYTHON": "ON"
+      }
+    },
+    {
+      "name": "sanitizer-debug",
+      "displayName": "Sanitizer Instrumented Build",
+      "description": "Debug build with ASan and UBSan enabled",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-sanitizer",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_TESTS": "ON",
+        "ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "release-package",
+      "displayName": "Release Package Build",
+      "description": "Optimized release build with LTO and installation support",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ENABLE_TESTS": "OFF",
+        "ENABLE_LTO": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "dev-default",
+      "configurePreset": "dev-default"
+    },
+    {
+      "name": "ci-fast",
+      "configurePreset": "ci-fast"
+    },
+    {
+      "name": "ci-full",
+      "configurePreset": "ci-full"
+    },
+    {
+      "name": "sanitizer-debug",
+      "configurePreset": "sanitizer-debug"
+    },
+    {
+      "name": "release-package",
+      "configurePreset": "release-package"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "dev-default",
+      "configurePreset": "dev-default",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ci-fast",
+      "configurePreset": "ci-fast",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ci-full",
+      "configurePreset": "ci-full",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "sanitizer-debug",
+      "configurePreset": "sanitizer-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

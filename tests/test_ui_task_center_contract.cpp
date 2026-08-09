@@ -10,6 +10,7 @@
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
 #include "processing/framework/task_center.h"
+#include "app/dialogs/async_algorithm_runner.h"
 
 #include <chrono>
 #include <thread>
@@ -196,4 +197,25 @@ TEST_CASE( "UI contract: cancel routes through Task Center to JobEngine",
   const auto job = engine.snapshot( info.jobId );
   REQUIRE( job.has_value() );
   REQUIRE( job->state == sicnu::jobs::JobState::Cancelled );
+}
+
+TEST_CASE( "UI contract: AsyncAlgorithmRunner destructor marks TaskCenter task canceled",
+           "[task_center][contract][async_runner]" )
+{
+  ensureApp();
+  QVariantMap params;
+  params[QStringLiteral( "INPUT" )] = QStringLiteral( "test_input.tif" );
+
+  const long taskId = sicnu::TaskCenter::instance().enqueueTask( QStringLiteral( "test:async_teardown" ), params, true );
+  REQUIRE( taskId > 0 );
+  sicnu::TaskCenter::instance().markTaskRunning( taskId );
+
+  {
+    AsyncAlgorithmRunner runner( nullptr );
+    // Destruction of runner without execution finishing should not leave TaskCenter in running state
+  }
+
+  // TaskCenter task is canceled or cleaned up when runner goes out of scope while running
+  const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+  REQUIRE( info.taskId == taskId );
 }

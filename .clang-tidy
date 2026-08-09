@@ -1,0 +1,18 @@
+Checks: >
+  -*,
+  bugprone-macro-parentheses,
+  bugprone-sizeof-expression,
+  bugprone-use-after-move,
+  bugprone-virtual-near-miss,
+  bugprone-dangling-handle,
+  bugprone-parent-virtual-call,
+  clang-analyzer-core.NullDereference,
+  clang-analyzer-core.CallAndMessage,
+  clang-analyzer-core.DivideZero,
+  clang-analyzer-unix.Malloc,
+  performance-unnecessary-copy-initialization,
+  performance-implicit-conversion-in-loop
+
+HeaderFilterRegex: 'src/.*'
+
+WarningsAsErrors: ''

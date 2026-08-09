@@ -1,0 +1,130 @@
+name: SICNU GEO RS - Autonomous Platform CI
+
+on:
+  push:
+    branches: [ master, main, 'agent/**' ]
+  pull_request:
+    branches: [ master, main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # =========================================================================
+  # Tier 1 — Fast Required Build & Contract Verification
+  # =========================================================================
+  tier1-fast-required:
+    name: Tier 1 - Fast Required (Linux GCC)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build \
+            qt6-base-dev qt6-base-dev-tools qt6-svg-dev qt6-multimedia-dev libqt6sql6-sqlite \
+            libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev \
+            bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev
+
+      - name: Configure CMake (ci-fast preset)
+        run: cmake --preset ci-fast
+
+      - name: Compile Core & Test Targets
+        run: cmake --build --preset ci-fast --parallel $(nproc)
+
+      - name: Execute Fast CTest Suite
+        run: ctest --preset ci-fast --output-on-failure
+
+      - name: Verify Installation Rule Execution
+        run: |
+          cmake --install build-ci-fast --prefix /tmp/sicnu_install_test
+          /tmp/sicnu_install_test/bin/sicnu_geo_rs_cli --help || exit 1
+
+  # =========================================================================
+  # Tier 2 — Full Linux Integration & Sanitizer Suite
+  # =========================================================================
+  tier2-full-integration:
+    name: Tier 2 - Full Integration & Sanitizers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Full Dependencies & OpenCV/Python
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build \
+            qt6-base-dev qt6-base-dev-tools qt6-svg-dev qt6-multimedia-dev \
+            libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev \
+            bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev \
+            libopencv-dev python3-dev python3-pip python3-numpy
+
+      - name: Configure CMake Sanitizer Preset (sanitizer-debug)
+        run: cmake --preset sanitizer-debug
+
+      - name: Build Sanitizer Test Targets
+        run: cmake --build --preset sanitizer-debug --parallel $(nproc)
+
+      - name: Execute Sanitizer CTest Suite (ASan + UBSan)
+        env:
+          LSAN_OPTIONS: "detect_leaks=0"
+          ASAN_OPTIONS: "halt_on_error=1:detect_leaks=0"
+        run: ctest --preset sanitizer-debug --output-on-failure
+
+  # =========================================================================
+  # Tier 3 — Cross-Platform Verification (Windows & macOS)
+  # =========================================================================
+  tier3-platform-windows:
+    name: Tier 3 - Windows MSVC Build Verification
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSVC & Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure CMake for Windows MSVC
+        run: |
+          cmake -B build-win -S . `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DENABLE_TESTS=OFF `
+            -DSICNU_VENDOR_GDAL=OFF
+
+      - name: Verify MSVC Compilation Guard & Headers
+        run: cmake --build build-win --config Release --parallel
+
+  tier3-platform-macos:
+    name: Tier 3 - macOS Clang Configure & Build Seam
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install macOS Dependencies via Homebrew
+        run: |
+          brew update
+          brew install qt@6 gdal proj geos libzip gsl bison flex pcre2 cmake
+
+      - name: Configure CMake for macOS
+        run: |
+          cmake -B build-mac -S . \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6);$(brew --prefix)" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_TESTS=OFF
+
+      - name: Verify macOS Build Seam
+        run: cmake --build build-mac --parallel

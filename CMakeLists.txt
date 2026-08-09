@@ -9,6 +9,15 @@ include(CheckFunctionExists)
 include(CreateQgsVersion)
 include(GenerateExportHeader)
 
+# Global cross-platform definitions
+add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+
+if(MSVC)
+    add_compile_options(/utf-8 /bigobj /W4 /wd4251 /wd4275 /wd4100 /wd4127 /wd4244 /wd4267)
+else()
+    add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+endif()
+
 set(COMPLETE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 option(ENABLE_LOCAL_BUILD_SHORTCUTS "Skip git version detection for faster local builds" ON)
 CREATE_QGSVERSION()
@@ -138,9 +147,9 @@ set(QGIS_LIBEXEC_SUBDIR "libexec")
 set(QGIS_LIB_SUBDIR "lib")
 set(QGIS_QML_SUBDIR "qml")
 set(QGIS_SERVER_MODULE_SUBDIR "server")
-set(QGIS_INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/include/qgis")
-set(QGIS_BIN_DIR "${CMAKE_INSTALL_PREFIX}/bin")
-set(QGIS_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
+set(QGIS_INCLUDE_DIR "include/qgis")
+set(QGIS_BIN_DIR "bin")
+set(QGIS_LIB_DIR "lib")
 set(QGISPOSTFIX "")
 set(LIBRARY_TYPE SHARED)
 

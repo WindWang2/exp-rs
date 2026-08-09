@@ -161,15 +161,16 @@ class SicnuPythonIface:
         self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
 
 def main():
+    import tempfile
     parser = argparse.ArgumentParser(description="SICNU GEO RS Python Worker Daemon")
     parser.add_argument("--socket", required=True, help="Socket name / path for IPC")
     args = parser.parse_args()
 
     socket_path = args.socket
-    if not socket_path.startswith("/") and sys.platform != "win32":
-        socket_path = f"/tmp/{socket_path}"
+    if not os.path.isabs(socket_path):
+        socket_path = os.path.join(tempfile.gettempdir(), socket_path)
 
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s = socket.socket(socket.AF_UNIX if hasattr(socket, "AF_UNIX") else socket.AF_INET, socket.SOCK_STREAM)
     try:
         s.connect(socket_path)
     except Exception as e:
