@@ -40,6 +40,16 @@ bool cvaMagnitude(const float *const *beforeBands, const float *const *afterBand
                   QString *errorMessage = nullptr);
 
 /**
+ * Multivariate Alteration Detection (MAD) change magnitude across @p bandCount bands.
+ * Performs canonical correlation analysis (CCA) between before and after image bands,
+ * returning Chi-Square change distance per pixel.
+ * @param beforeBands / afterBands arrays of @p bandCount buffers, each @p pixels floats
+ */
+bool madChange(const float *const *beforeBands, const float *const *afterBands,
+               int bandCount, size_t pixels, float *out,
+               QString *errorMessage = nullptr);
+
+/**
  * Otsu's between-class variance threshold over the finite values of @p values.
  * @return true and the threshold when at least two distinct values exist;
  *         false for null/empty/all-NaN input.

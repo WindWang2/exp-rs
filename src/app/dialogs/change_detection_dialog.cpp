@@ -82,10 +82,11 @@ void ChangeDetectionDialog::setupUi()
   m_methodCombo->addItem( tr( "归一化差值" ), QStringLiteral( "normalized_difference" ) );
   m_methodCombo->addItem( tr( "比值 Ratio" ), QStringLiteral( "ratio" ) );
   m_methodCombo->addItem( tr( "变化向量分析 CVA" ), QStringLiteral( "cva" ) );
+  m_methodCombo->addItem( tr( "多变量变化检测 MAD" ), QStringLiteral( "mad" ) );
   m_methodCombo->addItem( tr( "变化掩膜（手动阈值）" ), QStringLiteral( "change_mask" ) );
   SicnuDialogHelp::tip( m_methodCombo, tr(
     "• 差值：后−前\n• 归一化差值：(后−前)/(后+前)\n• 比值：后/前\n"
-    "• CVA：多波段变化向量幅值（用全部波段）\n• 掩膜：|差值|≥阈值" ) );
+    "• CVA：多波段变化向量幅值（用全部波段）\n• MAD：多变量变化检测（CCA 典型相关分析）\n• 掩膜：|差值|≥阈值" ) );
   methodForm->addRow( tr( "方法" ), m_methodCombo );
 
   m_makeMaskCheck = new QCheckBox( tr( "同时输出变化掩膜" ), methodSec );

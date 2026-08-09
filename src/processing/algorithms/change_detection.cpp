@@ -10,6 +10,8 @@
 #include <numeric>
 #include <vector>
 
+#include <opencv2/core.hpp>
+
 namespace ChangeDetection
 {
 
@@ -396,4 +398,151 @@ bool connectedComponentFilter(uint8_t *mask, int width, int height,
     return true;
 }
 
+bool madChange(const float *const *beforeBands, const float *const *afterBands,
+               int bandCount, size_t pixels, float *out,
+               QString *errorMessage)
+{
+    if (!beforeBands || !afterBands || !out || bandCount <= 0 || pixels == 0) {
+        if (errorMessage) *errorMessage = QStringLiteral("Invalid input pointers or zero dimensions for MAD change detection.");
+        return false;
+    }
+    for (int b = 0; b < bandCount; ++b) {
+        if (!beforeBands[b] || !afterBands[b]) {
+            if (errorMessage) *errorMessage = QStringLiteral("Null band pointer for band %1").arg(b + 1);
+            return false;
+        }
+    }
+
+    // Step 1: Collect valid finite pixels across all bands
+    std::vector<size_t> validIndices;
+    validIndices.reserve(pixels);
+    for (size_t i = 0; i < pixels; ++i) {
+        bool valid = true;
+        for (int b = 0; b < bandCount; ++b) {
+            if (!std::isfinite(beforeBands[b][i]) || !std::isfinite(afterBands[b][i])) {
+                valid = false;
+                break;
+            }
+        }
+        if (valid) {
+            validIndices.push_back(i);
+        }
+    }
+
+    const size_t N = validIndices.size();
+    if (N < static_cast<size_t>(bandCount + 2)) {
+        std::fill_n(out, pixels, std::numeric_limits<float>::quiet_NaN());
+        if (errorMessage) *errorMessage = QStringLiteral("Insufficient valid pixels for MAD calculation.");
+        return false;
+    }
+
+    // Step 2: Compute means for Before (X) and After (Y)
+    std::vector<double> meanX(bandCount, 0.0);
+    std::vector<double> meanY(bandCount, 0.0);
+    for (size_t idx : validIndices) {
+        for (int b = 0; b < bandCount; ++b) {
+            meanX[b] += beforeBands[b][idx];
+            meanY[b] += afterBands[b][idx];
+        }
+    }
+    for (int b = 0; b < bandCount; ++b) {
+        meanX[b] /= N;
+        meanY[b] /= N;
+    }
+
+    // Step 3: Build centered observation matrices X_mat and Y_mat using OpenCV
+    cv::Mat X_mat(static_cast<int>(N), bandCount, CV_64F);
+    cv::Mat Y_mat(static_cast<int>(N), bandCount, CV_64F);
+
+    for (size_t r = 0; r < N; ++r) {
+        size_t idx = validIndices[r];
+        double* rowX = X_mat.ptr<double>(static_cast<int>(r));
+        double* rowY = Y_mat.ptr<double>(static_cast<int>(r));
+        for (int b = 0; b < bandCount; ++b) {
+            rowX[b] = static_cast<double>(beforeBands[b][idx]) - meanX[b];
+            rowY[b] = static_cast<double>(afterBands[b][idx]) - meanY[b];
+        }
+    }
+
+    // Covariance matrices: S_XX = (X^T * X) / (N-1), S_YY = (Y^T * Y) / (N-1), S_XY = (X^T * Y) / (N-1)
+    double scale = 1.0 / static_cast<double>(N - 1);
+    cv::Mat S_XX = scale * (X_mat.t() * X_mat);
+    cv::Mat S_YY = scale * (Y_mat.t() * Y_mat);
+    cv::Mat S_XY = scale * (X_mat.t() * Y_mat);
+
+    // Add trace-scaled regularization to diagonal for numerical stability
+    // across both DN-valued (1e+3..1e+4) and reflectance-valued (0..1) imagery
+    const double epsXX = 1e-6 * cv::trace(S_XX)[0] / bandCount;
+    const double epsYY = 1e-6 * cv::trace(S_YY)[0] / bandCount;
+    for (int b = 0; b < bandCount; ++b) {
+        S_XX.at<double>(b, b) += std::max(epsXX, 1e-12);
+        S_YY.at<double>(b, b) += std::max(epsYY, 1e-12);
+    }
+
+    // Compute S_XX^(-1/2) and S_YY^(-1/2) using SVD
+    const auto computeSqrtInv = [](const cv::Mat& M) -> cv::Mat {
+        cv::Mat w, u, vt;
+        cv::SVD::compute(M, w, u, vt);
+        cv::Mat w_inv_sqrt = cv::Mat::zeros(M.rows, M.cols, CV_64F);
+        for (int i = 0; i < M.rows; ++i) {
+            double val = w.at<double>(i);
+            w_inv_sqrt.at<double>(i, i) = (val > 1e-12) ? (1.0 / std::sqrt(val)) : 0.0;
+        }
+        return u * w_inv_sqrt * vt;
+    };
+
+    cv::Mat S_XX_inv_sqrt = computeSqrtInv(S_XX);
+    cv::Mat S_YY_inv_sqrt = computeSqrtInv(S_YY);
+
+    // Transformed matrix H = S_XX^(-1/2) * S_XY * S_YY^(-1/2)
+    cv::Mat H = S_XX_inv_sqrt * S_XY * S_YY_inv_sqrt;
+
+    // SVD of H: H = U_h * D * V_h^T
+    cv::Mat D, U_h, V_h_t;
+    cv::SVD::compute(H, D, U_h, V_h_t);
+
+    // Canonical coefficients: A = S_XX^(-1/2) * U_h, B = S_YY^(-1/2) * V_h
+    cv::Mat A = S_XX_inv_sqrt * U_h;
+    cv::Mat B = S_YY_inv_sqrt * V_h_t.t();
+
+    // Ensure canonical variate pairs are positively correlated: A[:, k]^T * S_XY * B[:, k] > 0
+    for (int k = 0; k < bandCount; ++k) {
+        cv::Mat ak = A.col(k);
+        cv::Mat bk = B.col(k);
+        cv::Mat cov_k = ak.t() * S_XY * bk;
+        if (cov_k.at<double>(0, 0) < 0.0) {
+            B.col(k) *= -1.0;
+        }
+    }
+
+    // Canonical correlations lambda_i and MAD variate variances
+    std::vector<double> lambda(bandCount, 0.0);
+    std::vector<double> varMad(bandCount, 0.0);
+    for (int i = 0; i < bandCount; ++i) {
+        lambda[i] = std::clamp(D.at<double>(i), 0.0, 1.0);
+        varMad[i] = std::max(2.0 * (1.0 - lambda[i]), 1e-6);
+    }
+
+    // Step 4: Pre-compute all canonical variates via matrix multiplication: O(N × B)
+    // U_all = X_mat * A  (N × B),  V_all = Y_mat * B  (N × B)
+    cv::Mat U_all = X_mat * A;
+    cv::Mat V_all = Y_mat * B;
+
+    // Compute Chi-Square change magnitude Z for each pixel
+    std::fill_n(out, pixels, std::numeric_limits<float>::quiet_NaN());
+
+    for (size_t r = 0; r < N; ++r) {
+        const double* rowU = U_all.ptr<double>(static_cast<int>(r));
+        const double* rowV = V_all.ptr<double>(static_cast<int>(r));
+        double chiSquare = 0.0;
+        for (int k = 0; k < bandCount; ++k) {
+            const double m_k = rowU[k] - rowV[k]; // MAD variate
+            chiSquare += (m_k * m_k) / varMad[k];
+        }
+        out[validIndices[r]] = static_cast<float>(chiSquare);
+    }
+
+    return true;
 }
+
+} // namespace ChangeDetection

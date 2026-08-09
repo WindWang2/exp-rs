@@ -68,4 +68,19 @@ std::pair<int, int> runGdalWarpOnDataset(GDALDatasetH hSrcDS,
 void appendGeoTiffDefaults(std::vector<std::string>& options,
                            const std::string& resampling);
 
+/**
+ * Detect whether a GDAL dataset is categorical / discrete (e.g. land cover map,
+ * classification output, palette-indexed raster, or raster with RAT / category names).
+ */
+bool isCategoricalDataset(GDALDatasetH hDS);
+
+/**
+ * Validate and enforce resampling rules. If dataset is categorical and a continuous
+ * resampling method (bilinear, cubic, cubicspline, lanczos) was requested, override
+ * resampling to "nearest" and log a warning to context. Returns effective resampling.
+ */
+std::string enforceCategoricalResamplingRule(GDALDatasetH hDS,
+                                             const std::string& requestedResampling,
+                                             RSOperatorContext& context);
+
 } // namespace sicnu::operators::gdal::util

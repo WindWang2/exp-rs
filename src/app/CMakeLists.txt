@@ -150,6 +150,7 @@ add_executable(sicnu_geo_rs
     widgets/spectral_profile_widget.cpp
     widgets/band_role_combo.cpp
     widgets/raster_layer_combo.cpp
+    widgets/resolution_widget.cpp
     widgets/crs_selector.cpp
     widgets/progress_dialog.cpp
     widgets/comparison_widget.cpp

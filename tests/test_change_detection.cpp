@@ -277,3 +277,49 @@ TEST_CASE("ChangeDetection percentileThreshold p=0 returns the minimum", "[proce
     REQUIRE(percentileThreshold(values.data(), values.size(), 100.0, &threshold));
     CHECK(threshold == 20.0f);
 }
+
+TEST_CASE("ChangeDetection madChange computes Chi-Square distance for multi-band change", "[processing][change_detection][mad]") {
+    constexpr size_t N = 16;
+    constexpr int B = 2;
+
+    std::vector<std::vector<float>> beforeBands(B, std::vector<float>(N, 0.0f));
+    std::vector<std::vector<float>> afterBands(B, std::vector<float>(N, 0.0f));
+
+    for (size_t i = 0; i < N; ++i) {
+        // Linear variation for background to establish positive covariance
+        float base = static_cast<float>(i + 1);
+        beforeBands[0][i] = base * 10.0f;
+        beforeBands[1][i] = base * 20.0f;
+
+        if (i < 14) {
+            // Unchanged background (14 pixels)
+            afterBands[0][i] = base * 10.0f;
+            afterBands[1][i] = base * 20.0f;
+        } else {
+            // Localized change anomaly (2 pixels)
+            afterBands[0][i] = base * 10.0f + 200.0f;
+            afterBands[1][i] = base * 20.0f - 100.0f;
+        }
+    }
+
+    std::vector<const float*> bPtrs = {beforeBands[0].data(), beforeBands[1].data()};
+    std::vector<const float*> aPtrs = {afterBands[0].data(), afterBands[1].data()};
+    std::vector<float> mag(N, 0.0f);
+
+    QString err;
+    REQUIRE(madChange(bPtrs.data(), aPtrs.data(), B, N, mag.data(), &err));
+
+    // Verify changed pixels (index 14..15) have significantly higher magnitude than unchanged (0..13)
+    float maxUnchanged = 0.0f;
+    for (size_t i = 0; i < 14; ++i) {
+        if (mag[i] > maxUnchanged) maxUnchanged = mag[i];
+    }
+
+    float minChanged = 1e9f;
+    for (size_t i = 14; i < 16; ++i) {
+        if (mag[i] < minChanged) minChanged = mag[i];
+    }
+
+    CHECK(minChanged > maxUnchanged);
+}
+

@@ -29,7 +29,7 @@ using namespace params;
 namespace {
 
 const std::vector<std::string> s_methods = {
-    "difference", "normalized_difference", "ratio", "cva", "change_mask"
+    "difference", "normalized_difference", "ratio", "cva", "mad", "change_mask"
 };
 
 const std::vector<std::string> s_threshold_methods = {
@@ -209,10 +209,10 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
                               "Before and after rasters must have the same dimensions");
     }
 
-    if (method == "cva") {
+    if (method == "cva" || method == "mad") {
         if (beforeDs.bandCount() != afterDs.bandCount()) {
             throw RSOperatorError(ErrorCode::InvalidInputData,
-                                  "CVA requires the same band count on both rasters");
+                                  method + " requires the same band count on both rasters");
         }
     } else {
         if (beforeBand < 1 || beforeBand > beforeDs.bandCount()) {
@@ -233,8 +233,8 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
     std::string computeError;
     bool ok = false;
 
-    if (method == "cva") {
-        // Multi-band Change Vector Analysis magnitude.
+    if (method == "cva" || method == "mad") {
+        // Multi-band Change Vector Analysis or Multivariate Alteration Detection.
         const int bandCount = beforeDs.bandCount();
         std::vector<std::vector<float>> beforeBands(bandCount);
         std::vector<std::vector<float>> afterBands(bandCount);
@@ -251,10 +251,15 @@ Json::Value RsChangeDetectionOperator::run(const Json::Value& params,
             beforePtrs[b] = beforeBands[b].data();
             afterPtrs[b] = afterBands[b].data();
         }
-        QString cvaError;
-        ok = ChangeDetection::cvaMagnitude(beforePtrs.data(), afterPtrs.data(),
-                                           bandCount, pixelCount, mag.data(), &cvaError);
-        computeError = cvaError.toStdString();
+        QString calcError;
+        if (method == "cva") {
+            ok = ChangeDetection::cvaMagnitude(beforePtrs.data(), afterPtrs.data(),
+                                               bandCount, pixelCount, mag.data(), &calcError);
+        } else {
+            ok = ChangeDetection::madChange(beforePtrs.data(), afterPtrs.data(),
+                                            bandCount, pixelCount, mag.data(), &calcError);
+        }
+        computeError = calcError.toStdString();
     } else {
         std::vector<float> before(pixelCount), after(pixelCount);
         if (!beforeDs.readBandData(beforeBand, before.data(), width, height)) {
