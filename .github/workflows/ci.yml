@@ -28,7 +28,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build \
-            qt6-base-dev qt6-base-dev-tools qt6-svg-dev qt6-multimedia-dev libqt6sql6-sqlite \
+            qt6-base-dev qt6-base-dev-tools qt6-5compat-dev qt6-svg-dev qt6-multimedia-dev libqt6sql6-sqlite \
             libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev \
             bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev
 
@@ -63,7 +63,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build \
-            qt6-base-dev qt6-base-dev-tools qt6-svg-dev qt6-multimedia-dev \
+            qt6-base-dev qt6-base-dev-tools qt6-5compat-dev qt6-svg-dev qt6-multimedia-dev \
             libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev \
             bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev \
             libopencv-dev python3-dev python3-pip python3-numpy
@@ -97,6 +97,7 @@ jobs:
 
       - name: Install Qt 6 on Windows
         uses: jurplel/install-qt-action@v3
+        continue-on-error: true
         with:
           version: '6.8.0'
           host: 'windows'
