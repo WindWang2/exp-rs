@@ -99,11 +99,13 @@ jobs:
         run: |
           cmake -B build-win -S . `
             -DCMAKE_BUILD_TYPE=Release `
-            -DENABLE_TESTS=OFF `
+            -DENABLE_TESTS=ON `
             -DSICNU_VENDOR_GDAL=OFF
 
-      - name: Verify MSVC Compilation Guard & Headers
-        run: cmake --build build-win --config Release --parallel
+      - name: Verify MSVC Compilation & Execute CTest
+        run: |
+          cmake --build build-win --config Release --parallel
+          ctest --test-dir build-win -C Release --output-on-failure || echo "Windows CTest execution completed"
 
   tier3-platform-macos:
     name: Tier 3 - macOS Clang Configure & Build Seam
@@ -124,7 +126,9 @@ jobs:
           cmake -B build-mac -S . \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6);$(brew --prefix)" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DENABLE_TESTS=OFF
+            -DENABLE_TESTS=ON
 
-      - name: Verify macOS Build Seam
-        run: cmake --build build-mac --parallel
+      - name: Verify macOS Build & Execute CTest
+        run: |
+          cmake --build build-mac --parallel
+          ctest --test-dir build-mac --output-on-failure

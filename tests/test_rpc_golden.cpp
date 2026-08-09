@@ -121,13 +121,17 @@ TEST_CASE( "RPC golden: synthetic non-trivial warp matches captured SHA256",
     return;
   }
 
-  // SHA drift: report but don't fail.  The synthetic fixture is committed
-  // by file-hash only (no golden TIF), so a drift here usually means the
-  // helper, the GDAL build, or the warp parameters changed.  Maintainers
-  // should investigate and regenerate the SHA if the new output is the
-  // intended one.
+  // SHA drift: report warning, or fail if REQUIRE_STRICT_RPC_SHA is set.
   WARN( "SHA drift — output=" << outSha.toStdString()
         << " golden=" << goldSha.toStdString()
         << " (regenerate " << goldPath.toStdString() << " if intentional)" );
-  SUCCEED( "SHA drift accepted (synthetic fixture; regenerate sha256 if intentional)" );
+
+  if ( qEnvironmentVariableIsSet( "REQUIRE_STRICT_RPC_SHA" ) )
+  {
+    FAIL( "Strict SHA256 mismatch against golden reference: " + outSha.toStdString() );
+  }
+  else
+  {
+    SUCCEED( "SHA drift logged (set REQUIRE_STRICT_RPC_SHA=1 to enforce strict failure)" );
+  }
 }

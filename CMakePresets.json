@@ -10,7 +10,6 @@
       "name": "dev-default",
       "displayName": "Developer Default Debug",
       "description": "Standard debug build with tests enabled",
-      "generator": "Unix Makefiles",
       "binaryDir": "${sourceDir}/build-dev",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -22,7 +21,6 @@
       "name": "ci-fast",
       "displayName": "CI Fast Required Lane",
       "description": "Fast release build for pull request verification",
-      "generator": "Unix Makefiles",
       "binaryDir": "${sourceDir}/build-ci-fast",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
@@ -34,7 +32,6 @@
       "name": "ci-full",
       "displayName": "CI Full Linux Integration Lane",
       "description": "Full Linux integration build with OTB and Python worker support",
-      "generator": "Unix Makefiles",
       "binaryDir": "${sourceDir}/build-ci-full",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
@@ -47,7 +44,6 @@
       "name": "sanitizer-debug",
       "displayName": "Sanitizer Instrumented Build",
       "description": "Debug build with ASan and UBSan enabled",
-      "generator": "Unix Makefiles",
       "binaryDir": "${sourceDir}/build-sanitizer",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -59,7 +55,6 @@
       "name": "release-package",
       "displayName": "Release Package Build",
       "description": "Optimized release build with LTO and installation support",
-      "generator": "Unix Makefiles",
       "binaryDir": "${sourceDir}/build-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
