@@ -69,7 +69,7 @@ jobs:
             libopencv-dev python3-dev python3-pip python3-numpy
 
       - name: Configure CMake with Sanitizers
-        run: cmake -B build-sanitizer -S . -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON -DENABLE_UBSAN=ON
+        run: cmake -B build-sanitizer -S . -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON
 
       - name: Build Sanitizer Test Targets
         run: cmake --build build-sanitizer --parallel $(nproc)
@@ -78,7 +78,7 @@ jobs:
         env:
           LSAN_OPTIONS: "detect_leaks=0"
           ASAN_OPTIONS: "halt_on_error=1:detect_leaks=0"
-        run: ctest --test-dir build-sanitizer --output-on-failure || true
+        run: ctest --test-dir build-sanitizer --output-on-failure
 
   # =========================================================================
   # Tier 3 — Cross-Platform Verification (Windows & macOS)

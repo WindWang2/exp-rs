@@ -1,8 +1,5 @@
 #ifndef _WIN32
 #include <unistd.h>
-#else
-#include <io.h>
-#endif
 #include <cstdint>
 #include <string>
 
@@ -38,3 +35,4 @@ inline bool writeErrorMessage(int fd, int32_t msgId, const std::string& message)
 
 } // namespace os
 } // namespace untwine
+#endif // _WIN32

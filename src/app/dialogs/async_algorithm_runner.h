@@ -35,6 +35,14 @@ signals:
     void completed(const QVariantMap &results);
     void progressChanged(double progress);
 
+protected:
+    void setTaskForTesting(QgsProcessingAlgRunnerTask *task, long centerTaskId)
+    {
+        beginRun();
+        m_task = task;
+        m_centerTaskId = centerTaskId;
+    }
+
 private:
     QgsProcessingAlgRunnerTask *m_task = nullptr;
     qint64 m_startTime = 0;

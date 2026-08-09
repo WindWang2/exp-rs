@@ -11,6 +11,8 @@
 #include "operators/framework/rs_operator_context.h"
 #include "processing/framework/task_center.h"
 #include "app/dialogs/async_algorithm_runner.h"
+#include <processing/qgsprocessingalgrunnertask.h>
+#include <processing/qgsprocessingcontext.h>
 
 #include <chrono>
 #include <thread>
@@ -210,12 +212,27 @@ TEST_CASE( "UI contract: AsyncAlgorithmRunner destructor marks TaskCenter task c
   REQUIRE( taskId > 0 );
   sicnu::TaskCenter::instance().markTaskRunning( taskId );
 
+  QgsProcessingContext context;
+  auto *task = new QgsProcessingAlgRunnerTask( nullptr, params, context, nullptr );
+
+  class TestRunner : public AsyncAlgorithmRunner
   {
-    AsyncAlgorithmRunner runner( nullptr );
-    // Destruction of runner without execution finishing should not leave TaskCenter in running state
+  public:
+    TestRunner( QgsProcessingAlgRunnerTask *t, long centerId )
+      : AsyncAlgorithmRunner( nullptr )
+    {
+      setTaskForTesting( t, centerId );
+    }
+  };
+
+  {
+    TestRunner runner( task, taskId );
+    REQUIRE( runner.isRunning() );
+    // Destruction of runner while running should mark TaskCenter task canceled
   }
 
-  // TaskCenter task is canceled or cleaned up when runner goes out of scope while running
+  // TaskCenter task is canceled when runner goes out of scope while running
   const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
   REQUIRE( info.taskId == taskId );
+  REQUIRE( info.status == sicnu::TaskStatus::Canceled );
 }

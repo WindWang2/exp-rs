@@ -10,7 +10,9 @@ include(CreateQgsVersion)
 include(GenerateExportHeader)
 
 # Global cross-platform definitions
-add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+if(WIN32)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
 
 if(MSVC)
     add_compile_options(/utf-8 /bigobj /W4 /wd4251 /wd4275 /wd4100 /wd4127 /wd4244 /wd4267)

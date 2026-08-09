@@ -79,3 +79,4 @@ inline MapContext unmapFile(MapContext ctx)
 
 } // namespace os
 } // namespace untwine
+#endif // _WIN32
