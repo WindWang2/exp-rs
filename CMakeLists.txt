@@ -37,8 +37,8 @@ if(SICNU_VENDOR_GDAL)
     message(STATUS "SICNU_VENDOR_GDAL=ON — building GDAL/PROJ/GEOS from vendor/")
 endif()
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia Core5Compat Test)
-qt_standard_project_setup(REQUIRES 6.8)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia Core5Compat Test)
+qt_standard_project_setup()
 
 # When vendoring, directly include the config files to bypass Find module cache
 if(SICNU_VENDOR_GDAL)

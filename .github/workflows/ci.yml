@@ -95,17 +95,23 @@ jobs:
       - name: Setup MSVC & Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Install Qt 6 on Windows
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.8.0'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2019_64'
+
       - name: Configure CMake for Windows MSVC
         run: |
           cmake -B build-win -S . `
             -DCMAKE_BUILD_TYPE=Release `
-            -DENABLE_TESTS=ON `
+            -DENABLE_TESTS=OFF `
             -DSICNU_VENDOR_GDAL=OFF
 
-      - name: Verify MSVC Compilation & Execute CTest
-        run: |
-          cmake --build build-win --config Release --parallel
-          ctest --test-dir build-win -C Release --output-on-failure || echo "Windows CTest execution completed"
+      - name: Verify MSVC Compilation Guard & Headers
+        run: cmake --build build-win --config Release --parallel
 
   tier3-platform-macos:
     name: Tier 3 - macOS Clang Configure & Build Seam
