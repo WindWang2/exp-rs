@@ -39,7 +39,14 @@ if(SICNU_VENDOR_GDAL)
     message(STATUS "SICNU_VENDOR_GDAL=ON — building GDAL/PROJ/GEOS from vendor/")
 endif()
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia Core5Compat Test)
+# All Qt components required anywhere in the build are declared HERE, at the
+# top level: importing them in subdirectory scopes (e.g. src/gui) is unreliable
+# on some Qt 6.4 distro configs ("UiTools target mentioned as a dependency for
+# qgis_gui, but not declared" — the umbrella config short-circuits on a cached
+# Qt6_FOUND and the new component targets are never created).
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia
+                                       MultimediaWidgets Qml QuickWidgets SvgWidgets UiTools
+                                       Core5Compat Test)
 qt_standard_project_setup(REQUIRES 6.4)
 
 # When vendoring, directly include the config files to bypass Find module cache
