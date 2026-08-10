@@ -1,9 +1,11 @@
 
 #pragma once
 
+#ifndef _WIN32
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
+#endif
 
 namespace untwine
 {
@@ -77,3 +79,4 @@ inline MapContext unmapFile(MapContext ctx)
 
 } // namespace os
 } // namespace untwine
+#endif // _WIN32

@@ -4,6 +4,7 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
 #include <QTextStream>
 
 #include <cpl_conv.h>

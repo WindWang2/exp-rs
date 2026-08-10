@@ -161,13 +161,26 @@ class SicnuPythonIface:
         self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
 
 def main():
+    import tempfile
     parser = argparse.ArgumentParser(description="SICNU GEO RS Python Worker Daemon")
     parser.add_argument("--socket", required=True, help="Socket name / path for IPC")
     args = parser.parse_args()
 
     socket_path = args.socket
-    if not socket_path.startswith("/") and sys.platform != "win32":
-        socket_path = f"/tmp/{socket_path}"
+    if not os.path.isabs(socket_path):
+        socket_path = os.path.join(tempfile.gettempdir(), socket_path)
+
+    # The C++ side (python_ipc_server) speaks QLocalSocket: a unix socket on
+    # POSIX, a named pipe on Windows. Python can connect to the POSIX unix
+    # socket directly; the Windows named-pipe transport is not implemented
+    # here, so fail fast with a clear message instead of pretending an
+    # AF_INET fallback works (there is no TCP listener on the C++ side).
+    if not hasattr(socket, "AF_UNIX"):
+        sys.stderr.write(
+            "WorkerDaemon: AF_UNIX unavailable on this platform — the out-of-process "
+            "Python worker is not supported here\n"
+        )
+        sys.exit(1)
 
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:

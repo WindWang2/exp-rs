@@ -34,3 +34,9 @@ target_link_libraries(sicnu_python_isolated PUBLIC
 set_target_properties(sicnu_python_isolated PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
+
+# Install Python worker daemon and helper scripts for deployment/packaging
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/src/python/scripts
+    DESTINATION share/sicnu_geo_rs
+    FILES_MATCHING PATTERN "*.py"
+)

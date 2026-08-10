@@ -10,6 +10,9 @@
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_context.h"
 #include "processing/framework/task_center.h"
+#include "app/dialogs/async_algorithm_runner.h"
+#include "qgstaskmanager.h"
+#include <processing/qgsprocessingcontext.h>
 
 #include <chrono>
 #include <thread>
@@ -196,4 +199,51 @@ TEST_CASE( "UI contract: cancel routes through Task Center to JobEngine",
   const auto job = engine.snapshot( info.jobId );
   REQUIRE( job.has_value() );
   REQUIRE( job->state == sicnu::jobs::JobState::Cancelled );
+}
+
+TEST_CASE( "UI contract: AsyncAlgorithmRunner destructor marks TaskCenter task canceled",
+           "[task_center][contract][async_runner]" )
+{
+  ensureApp();
+  QVariantMap params;
+  params[QStringLiteral( "INPUT" )] = QStringLiteral( "test_input.tif" );
+
+  const long taskId = sicnu::TaskCenter::instance().enqueueTask( QStringLiteral( "test:async_teardown" ), params, true );
+  REQUIRE( taskId > 0 );
+  sicnu::TaskCenter::instance().markTaskRunning( taskId );
+
+  // Lightweight task: the runner only cancels/disconnects it, so a plain
+  // QgsTask subclass is sufficient — constructing a QgsProcessingAlgRunnerTask
+  // with a nullptr algorithm would crash in its initializer list.
+  class MinimalTask : public QgsTask
+  {
+  public:
+    MinimalTask()
+      : QgsTask( QStringLiteral( "test:async_teardown_task" ) )
+    {}
+  protected:
+    bool run() override { return true; }
+  };
+  auto *task = new MinimalTask();
+
+  class TestRunner : public AsyncAlgorithmRunner
+  {
+  public:
+    TestRunner( QgsTask *t, long centerId )
+      : AsyncAlgorithmRunner( nullptr )
+    {
+      setTaskForTesting( t, centerId );
+    }
+  };
+
+  {
+    TestRunner runner( task, taskId );
+    REQUIRE( runner.isRunning() );
+    // Destruction of runner while running should mark TaskCenter task canceled
+  }
+
+  // TaskCenter task is canceled when runner goes out of scope while running
+  const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+  REQUIRE( info.taskId == taskId );
+  REQUIRE( info.status == sicnu::TaskStatus::Canceled );
 }

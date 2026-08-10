@@ -1,0 +1,280 @@
+name: SICNU GEO RS - Autonomous Platform CI
+
+on:
+  push:
+    branches: [ master, main, 'agent/**' ]
+  pull_request:
+    branches: [ master, main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # =========================================================================
+  # Tier 1 — Fast Required Build & Contract Verification
+  # =========================================================================
+  tier1-fast-required:
+    name: Tier 1 - Fast Required (Linux GCC)
+    runs-on: ubuntu-latest
+    # Cold full-tree build on 4-core runners takes ~5-6 h; 6 h default times it
+    # out. ccache (below) makes later cycles fast, but the cap must fit the
+    # first build too.
+    timeout-minutes: 540
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ci-ccache-${{ runner.os }}
+          max-size: 4G
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build \
+            libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev libjsoncpp-dev \
+            libprotobuf-dev protobuf-compiler \
+            libqca-qt6-dev qtkeychain-qt6-dev \
+            bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev \
+            libopencv-dev \
+            libfontconfig1 libgl1 libegl1 libxkbcommon0 libdbus-1-3
+
+      # Qt 6.8 via aqtinstall: Ubuntu 24.04's distro Qt (6.4.2) is too old for
+      # this codebase (QtTypes and friends are 6.5+). Base package already
+      # includes qtsvg/qtdeclarative/qttools; add qt5compat + qtmultimedia.
+      - name: Install Qt 6.8
+        uses: jurplel/install-qt-action@v4
+        id: qt
+        with:
+          version: '6.8.0'
+          host: 'linux'
+          target: 'desktop'
+          arch: 'linux_gcc_64'
+          modules: 'qt5compat qtmultimedia'
+
+      - name: Configure CMake
+        # ENABLE_LTO=OFF: project default is ON for Release, but LTO links of
+        # the QGIS-scale libraries take 1-2 h per target on 4-core runners and
+        # risk OOM on the GCC link. CI's job is compile+link+test correctness,
+        # not link-time optimization; a fast reliable gate is the contract here.
+        # Ninja + ccache: faster scheduling and incremental rebuilds across
+        # pushes/PRs (each later PR in the integration sequence only recompiles
+        # its delta).
+        run: cmake -B build -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Compile Core & Test Targets
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Execute Fast CTest Suite
+        env:
+          QT_QPA_PLATFORM: offscreen
+          # Synthetic fixture is deterministic; Linux tiers share one GDAL build,
+          # so the golden SHA must match exactly. Drift is a real regression here.
+          REQUIRE_STRICT_RPC_SHA: '1'
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Verify Installation Rule Execution
+        run: |
+          cmake --install build --prefix /tmp/sicnu_install_test
+          QT_QPA_PLATFORM=offscreen /tmp/sicnu_install_test/bin/sicnu_geo_rs_cli --help
+
+  # =========================================================================
+  # Tier 2 — Full Linux Integration & Sanitizer Suite
+  # =========================================================================
+  tier2-full-integration:
+    name: Tier 2 - Full Integration & Sanitizers
+    runs-on: ubuntu-latest
+    timeout-minutes: 540
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ci-ccache-${{ runner.os }}
+          max-size: 4G
+
+      - name: Install Full Dependencies & OpenCV/Python
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build \
+            libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev libjsoncpp-dev \
+            libprotobuf-dev protobuf-compiler \
+            libqca-qt6-dev qtkeychain-qt6-dev \
+            bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev \
+            libopencv-dev python3-dev python3-pip python3-numpy \
+            libfontconfig1 libgl1 libegl1 libxkbcommon0 libdbus-1-3
+
+      - name: Install Qt 6.8
+        uses: jurplel/install-qt-action@v4
+        id: qt
+        with:
+          version: '6.8.0'
+          host: 'linux'
+          target: 'desktop'
+          arch: 'linux_gcc_64'
+          modules: 'qt5compat qtmultimedia'
+
+      - name: Configure CMake with Sanitizers
+        run: cmake -B build-sanitizer -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build Sanitizer Test Targets
+        run: cmake --build build-sanitizer --parallel $(nproc)
+
+      - name: Execute Sanitizer CTest Suite (ASan + UBSan)
+        env:
+          LSAN_OPTIONS: "detect_leaks=0"
+          ASAN_OPTIONS: "halt_on_error=1:detect_leaks=0"
+          QT_QPA_PLATFORM: offscreen
+          REQUIRE_STRICT_RPC_SHA: '1'
+        run: ctest --test-dir build-sanitizer --output-on-failure
+
+  # =========================================================================
+  # Tier 3 — Cross-Platform Verification (Windows & macOS)
+  # =========================================================================
+  tier3-platform-windows:
+    name: Tier 3 - Windows MSVC Build Verification
+    runs-on: windows-latest
+    timeout-minutes: 540
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSVC & Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt 6 on Windows
+        uses: jurplel/install-qt-action@v4
+        id: qt
+        with:
+          # Pin 6.8.0 (stable metadata for win64_msvc2022_64). qtsvg and
+          # qtdeclarative are BASE modules of the arch install (not add-on
+          # modules), so they must NOT be listed in -m — aqt errors with
+          # "packages not found" when they are.
+          version: '6.8.0'
+          host: 'windows'
+          target: 'desktop'
+          # Qt 6.8+ ships prebuilt binaries only for MSVC 2022
+          # (win64_msvc2019_64 was dropped); windows-latest provides MSVC 2022.
+          arch: 'win64_msvc2022_64'
+          modules: 'qt5compat qtmultimedia'
+
+      - name: Install GDAL/PROJ/GEOS/Protobuf via vcpkg (preinstalled)
+        # windows-latest ships a maintained vcpkg checkout at C:\vcpkg. Sync it
+        # to the pinned baseline first (libaec's gitlab.dkrz.de source 429s
+        # GitHub runners; newer vcpkg uses a GitHub mirror). Update C:\vcpkg is
+        # NOT done — we checkout the exact baseline commit.
+        shell: pwsh
+        run: |
+          git -C C:\vcpkg fetch origin
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          git -C C:\vcpkg checkout ea1a7396b05637a53bf23c078647ecc0edee4b80
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          C:\vcpkg\vcpkg install --triplet x64-windows
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Build qca + qtkeychain against installed Qt
+        # Auth is a hard compile dependency of qgis_core (QgsAuthCertUtils /
+        # QKeychain used unconditionally in core sources), so the Windows tier
+        # builds qca + qtkeychain from source against the aqt-installed Qt.
+        # Both are small CMake projects (~5 min total). qca's CMake requires
+        # pkg-config, installed via Chocolatey (lands on PATH for
+        # FindPkgConfig).
+        shell: pwsh
+        run: |
+          choco install -y --no-progress pkgconfiglite winflexbison
+          git clone --depth 1 --branch v2.3.10 https://github.com/KDE/qca.git C:\deps\qca-src
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake -S C:\deps\qca-src -B C:\deps\qca-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DBUILD_WITH_QT6=ON -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake --build C:\deps\qca-build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake --install C:\deps\qca-build --config Release --prefix C:\deps\qca-install
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          git clone --depth 1 --branch v0.14.0 https://github.com/frankosterfeld/qtkeychain.git C:\deps\kc-src
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake -S C:\deps\kc-src -B C:\deps\kc-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install" -DBUILD_WITH_QT6=ON -DBUILD_TEST_APPLICATION=OFF
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake --build C:\deps\kc-build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake --install C:\deps\kc-build --config Release --prefix C:\deps\kc-install
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Configure CMake for Windows MSVC
+        run: |
+          # winflexbison (via Chocolatey) provides win_bison.exe/win_flex.exe;
+          # src/core .yy/.ll grammars require bison >= 3.0.
+          $bisonDir = "C:\ProgramData\chocolatey\lib\winflexbison\tools"
+          $env:PATH = "$bisonDir;$env:PATH"
+          cmake -B build-win -S . `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DENABLE_LTO=OFF `
+            -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install;C:\deps\kc-install" `
+            -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DBISON_EXECUTABLE="$bisonDir\win_bison.exe" `
+            -DFLEX_EXECUTABLE="$bisonDir\win_flex.exe" `
+            -DENABLE_TESTS=OFF `
+            -DSICNU_VENDOR_GDAL=OFF
+
+      - name: Verify MSVC Compilation Guard & Headers
+        run: cmake --build build-win --config Release --parallel
+
+  tier3-platform-macos:
+    name: Tier 3 - macOS Clang Configure & Build Seam
+    runs-on: macos-latest
+    timeout-minutes: 540
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ci-ccache-${{ runner.os }}
+          max-size: 4G
+
+      - name: Install macOS Dependencies via Homebrew
+        run: |
+          brew update
+          brew install qt@6 qca qtkeychain gdal proj geos libzip gsl bison flex pcre2 cmake protobuf jsoncpp opencv
+
+      - name: Configure CMake for macOS
+        # Homebrew's bison (>= 3.8) and flex are keg-only; macOS ships bison 2.x
+        # which cannot parse %define api.pure / %locations in our .yy grammars.
+        # Prepend the keg-only bins so CMake's find_package(BISON) picks them up.
+        run: |
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+          export PATH="$(brew --prefix bison)/bin:$(brew --prefix flex)/bin:$PATH"
+          bison --version | head -1
+          cmake -B build-mac -S . \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6);$(brew --prefix)" \
+            -DBISON_EXECUTABLE="$(brew --prefix bison)/bin/bison" \
+            -DFLEX_EXECUTABLE="$(brew --prefix flex)/bin/flex" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_LTO=OFF \
+            -DENABLE_TESTS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Verify macOS Build & Execute CTest
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          cmake --build build-mac --parallel
+          ctest --test-dir build-mac --output-on-failure

@@ -21,6 +21,9 @@ AsyncAlgorithmRunner::~AsyncAlgorithmRunner()
 {
     // Cancel outstanding task so it does not call into a destroyed runner/dialog.
     if (m_task && isRunning()) {
+        if (m_centerTaskId > 0) {
+            sicnu::TaskCenter::instance().markTaskCanceled(m_centerTaskId);
+        }
         disconnect(m_task, nullptr, this, nullptr);
         m_task->cancel();
         m_task = nullptr;
@@ -40,7 +43,8 @@ void AsyncAlgorithmRunner::run(const QgsProcessingAlgorithm *algorithm,
     m_startTime = QDateTime::currentMSecsSinceEpoch();
 
     QString algoId = algorithm ? algorithm->id() : QStringLiteral("algorithm");
-    long centerTaskId = sicnu::TaskCenter::instance().enqueueTask(algoId, parameters, true);
+    m_centerTaskId = sicnu::TaskCenter::instance().enqueueTask(algoId, parameters, true);
+    long centerTaskId = m_centerTaskId;
 
     // Create feedback for progress tracking
     QgsProcessingFeedback *feedback = new QgsProcessingFeedback(this);
@@ -50,8 +54,11 @@ void AsyncAlgorithmRunner::run(const QgsProcessingAlgorithm *algorithm,
     sicnu::TaskCenter::instance().attachQgsTask(centerTaskId, m_task);
     sicnu::TaskCenter::instance().markTaskRunning(centerTaskId);
 
-    // Connect to executed signal (bool successful, QVariantMap results)
-    connect(m_task, &QgsProcessingAlgRunnerTask::executed, this,
+    // Connect to executed signal (bool successful, QVariantMap results).
+    // m_task is stored as the QgsTask base pointer (testing seam); the signal
+    // lives on the derived type, so the sender argument must be downcast.
+    connect(static_cast<QgsProcessingAlgRunnerTask *>(m_task),
+            &QgsProcessingAlgRunnerTask::executed, this,
             [this, feedback, centerTaskId](bool successful, const QVariantMap &results) {
         m_task = nullptr;
         endRun();

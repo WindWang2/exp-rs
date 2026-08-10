@@ -794,7 +794,11 @@ QString QgsStringUtils::truncateMiddleOfString( const QString &string, int maxLe
   if ( truncateFrom <= 0 )
     return QChar( 0x2026 );
 
-  return QStringView( string ).first( truncateFrom ) + QString( QChar( 0x2026 ) ) + QStringView( string ).sliced( truncateFrom + charactersToTruncate + 1 );
+  // Qt < 6.10 has no operator+(QStringView, QString): materialize the views
+  // as QString before concatenating (works on every supported Qt version).
+  const QString first = QStringView( string ).first( truncateFrom ).toString();
+  const QString last = QStringView( string ).sliced( truncateFrom + charactersToTruncate + 1 ).toString();
+  return first + QChar( 0x2026 ) + last;
 }
 
 bool QgsStringUtils::containsByWord( const QString &candidate, const QString &words, Qt::CaseSensitivity sensitivity )

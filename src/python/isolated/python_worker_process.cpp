@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QStandardPaths>
 #include <QDebug>
 
 namespace sicnu::python::isolated
@@ -33,19 +34,41 @@ bool PythonWorkerProcess::startWorker( const QString &socketName, const QString 
   QString pythonExec = pythonPath;
   if ( pythonExec.isEmpty() )
   {
-    pythonExec = QStringLiteral( "python3" );
+    // Search for available python executable (python3, python)
+    const QStringList execCandidates = { QStringLiteral( "python3" ), QStringLiteral( "python" ), QStringLiteral( "python.exe" ) };
+    for ( const QString &cand : execCandidates )
+    {
+      if ( !QStandardPaths::findExecutable( cand ).isEmpty() )
+      {
+        pythonExec = cand;
+        break;
+      }
+    }
+    if ( pythonExec.isEmpty() )
+      pythonExec = QStringLiteral( "python" );
   }
 
   QString workerScript = scriptPath;
   if ( workerScript.isEmpty() )
   {
     QString appDir = QCoreApplication::applicationDirPath();
-    QString srcScript = QDir( appDir ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) );
-    if ( QFileInfo::exists( srcScript ) )
+    const QStringList scriptCandidates = {
+      QDir( appDir ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) ),
+      QDir( appDir ).filePath( QStringLiteral( "../../src/python/scripts/worker_daemon.py" ) ),
+      QDir( appDir ).filePath( QStringLiteral( "../share/sicnu_geo_rs/scripts/worker_daemon.py" ) ),
+      QDir( appDir ).filePath( QStringLiteral( "share/sicnu_geo_rs/scripts/worker_daemon.py" ) ),
+      QDir( appDir ).filePath( QStringLiteral( "scripts/worker_daemon.py" ) ),
+      QDir::current().filePath( QStringLiteral( "src/python/scripts/worker_daemon.py" ) )
+    };
+    for ( const QString &cand : scriptCandidates )
     {
-      workerScript = QFileInfo( srcScript ).canonicalFilePath();
+      if ( QFileInfo::exists( cand ) )
+      {
+        workerScript = QFileInfo( cand ).canonicalFilePath();
+        break;
+      }
     }
-    else
+    if ( workerScript.isEmpty() )
     {
       workerScript = QDir( appDir ).filePath( QStringLiteral( "scripts/worker_daemon.py" ) );
     }

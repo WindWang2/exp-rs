@@ -109,10 +109,20 @@ target_include_directories(test_workspace_snapshot PRIVATE
 sicnu_discover_tests(test_workspace_snapshot)
 
 # #35 — UI callers must not bypass Task Center; task views are projections.
-add_executable(test_ui_task_center_contract test_ui_task_center_contract.cpp)
+add_executable(test_ui_task_center_contract
+  test_ui_task_center_contract.cpp
+  # AsyncAlgorithmRunner's implementation is compiled directly into the test
+  # (it is a deprecated legacy type not built into any library; same pattern as
+  # test_task_center_dock compiling its panel source). async_runner_base.cpp is
+  # the out-of-line TU that forces the base class's moc (signals) into the link.
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_algorithm_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_runner_base.cpp
+)
 target_link_libraries(test_ui_task_center_contract PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
+  Qt6::Widgets
+  qgis_core
   sicnu_jobs
   sicnu_task_center
 )

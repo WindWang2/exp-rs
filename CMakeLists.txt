@@ -9,6 +9,17 @@ include(CheckFunctionExists)
 include(CreateQgsVersion)
 include(GenerateExportHeader)
 
+# Global cross-platform definitions
+if(WIN32)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
+if(MSVC)
+    add_compile_options(/utf-8 /bigobj /W4 /wd4251 /wd4275 /wd4100 /wd4127 /wd4244 /wd4267)
+else()
+    add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+endif()
+
 set(COMPLETE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 option(ENABLE_LOCAL_BUILD_SHORTCUTS "Skip git version detection for faster local builds" ON)
 CREATE_QGSVERSION()
@@ -28,7 +39,17 @@ if(SICNU_VENDOR_GDAL)
     message(STATUS "SICNU_VENDOR_GDAL=ON — building GDAL/PROJ/GEOS from vendor/")
 endif()
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia Core5Compat Test)
+# All Qt components required anywhere in the build are declared HERE, at the
+# top level: importing them in subdirectory scopes (e.g. src/gui) is unreliable
+# on some Qt 6.4 distro configs ("UiTools target mentioned as a dependency for
+# qgis_gui, but not declared" — the umbrella config short-circuits on a cached
+# Qt6_FOUND and the new component targets are never created).
+# The minimum is 6.8: the code uses QtTypes (6.5+) and other post-6.4 APIs; CI
+# provides Qt 6.8 via aqtinstall on every platform (Ubuntu's distro Qt 6.4.2 is
+# too old for this codebase).
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia
+                                       MultimediaWidgets Qml QuickWidgets SvgWidgets UiTools
+                                       Core5Compat Test)
 qt_standard_project_setup(REQUIRES 6.8)
 
 # When vendoring, directly include the config files to bypass Find module cache
@@ -138,9 +159,9 @@ set(QGIS_LIBEXEC_SUBDIR "libexec")
 set(QGIS_LIB_SUBDIR "lib")
 set(QGIS_QML_SUBDIR "qml")
 set(QGIS_SERVER_MODULE_SUBDIR "server")
-set(QGIS_INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/include/qgis")
-set(QGIS_BIN_DIR "${CMAKE_INSTALL_PREFIX}/bin")
-set(QGIS_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
+set(QGIS_INCLUDE_DIR "include/qgis")
+set(QGIS_BIN_DIR "bin")
+set(QGIS_LIB_DIR "lib")
 set(QGISPOSTFIX "")
 set(LIBRARY_TYPE SHARED)
 
@@ -328,7 +349,11 @@ if(SICNU_BUILD_OTB)
     set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     set(ITK_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
-    add_subdirectory(itk_ref)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/itk_ref")
+        add_subdirectory(itk_ref)
+    else()
+        message(WARNING "SICNU_BUILD_OTB=ON but itk_ref/ is missing — skipping ITK (vendored OTB build will not work without it)")
+    endif()
 
     # Tell OTB where to find the built ITK
     set(ITK_DIR "${CMAKE_BINARY_DIR}/itk_ref" CACHE PATH "ITK build directory" FORCE)
@@ -458,7 +483,11 @@ if(SICNU_BUILD_OTB)
     # OTB CMAKE_SOURCE_DIR patches applied: GDAL init, GenerateExportHeaderCustom,
     # PreventInSourceBuilds, GetVersionFromGitTag, uninstall target all use OTB_SOURCE_DIR.
     # TinyXML init skips find_package when pre-set.
-    add_subdirectory(otb_ref)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/otb_ref")
+        add_subdirectory(otb_ref)
+    else()
+        message(WARNING "SICNU_BUILD_OTB=ON but otb_ref/ is missing — skipping OTB")
+    endif()
 
     set(SICNU_HAS_OTB TRUE)
 endif()
@@ -475,6 +504,36 @@ endif()
 # configure_file AFTER all HAVE_* variables are resolved
 configure_file(cmake_templates/qgsconfig.h.in ${CMAKE_BINARY_DIR}/qgsconfig.h)
 include_directories(${CMAKE_BINARY_DIR})
+
+# jsoncpp: normalize the CMake package across platforms. Upstream configs and
+# vcpkg export a `jsoncpp` target, but Ubuntu 24.04's libjsoncpp-dev exports
+# only `jsoncpp_lib`/`jsoncpp_static` (and no JSONCPP_* variables). Create a
+# canonical `jsoncpp` target plus JSONCPP_* variables so every consumer below
+# (processing, operators, workflow, jobs, cli, app, tests) links a real target
+# that carries the include dir (e.g. /usr/include/jsoncpp) instead of a bare
+# -ljsoncpp with no -I path.
+find_package(jsoncpp QUIET)
+if(NOT TARGET jsoncpp)
+  if(TARGET jsoncpp_lib)
+    add_library(jsoncpp INTERFACE IMPORTED)
+    set_target_properties(jsoncpp PROPERTIES INTERFACE_LINK_LIBRARIES jsoncpp_lib)
+    get_target_property(JSONCPP_INCLUDE_DIRS jsoncpp_lib INTERFACE_INCLUDE_DIRECTORIES)
+    set(JSONCPP_LIBRARIES jsoncpp_lib)
+  elseif(TARGET jsoncpp_static)
+    add_library(jsoncpp INTERFACE IMPORTED)
+    set_target_properties(jsoncpp PROPERTIES INTERFACE_LINK_LIBRARIES jsoncpp_static)
+    get_target_property(JSONCPP_INCLUDE_DIRS jsoncpp_static INTERFACE_INCLUDE_DIRECTORIES)
+    set(JSONCPP_LIBRARIES jsoncpp_static)
+  endif()
+endif()
+if(JSONCPP_INCLUDE_DIRS)
+  message(STATUS "jsoncpp include dir: ${JSONCPP_INCLUDE_DIRS}")
+  # jsoncpp headers are consumed transitively via public processing headers
+  # (e.g. algorithm_descriptor.h includes <json/json.h>), so every target that
+  # pulls those headers needs the include path — not just targets that link
+  # jsoncpp themselves (e.g. sicnu_python_isolated).
+  include_directories(SYSTEM ${JSONCPP_INCLUDE_DIRS})
+endif()
 
 add_subdirectory(src/core)
 add_subdirectory(src/data)

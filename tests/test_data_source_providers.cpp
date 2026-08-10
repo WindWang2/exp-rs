@@ -68,10 +68,46 @@ QString syntheticSample( const QString &relative )
   GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
   std::vector<float> line( W, 1.0f );
   for ( int row = 0; row < H; ++row )
-    GDALRasterIO( band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
+  {
+    CPLErr err = GDALRasterIO( band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
+    Q_UNUSED( err );
+  }
   GDALClose( ds );
   cache.insert( relative, path );
   return path;
+}
+
+QString syntheticEnviSample( const QString &relative )
+{
+  static QTemporaryDir dir;
+  static QString hdrPath;
+  static QString datPath;
+  if ( hdrPath.isEmpty() )
+  {
+    GDALAllRegister();
+    hdrPath = dir.path() + QStringLiteral( "/dem.hdr" );
+    datPath = dir.path() + QStringLiteral( "/dem.dat" );
+    GDALDriverH driver = GDALGetDriverByName( "ENVI" );
+    if ( driver )
+    {
+      constexpr int W = 16, H = 16;
+      GDALDatasetH ds = GDALCreate( driver, datPath.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr );
+      if ( ds )
+      {
+        double gt[6] = { 116.0, 0.001, 0.0, 40.0, 0.0, -0.001 };
+        GDALSetGeoTransform( ds, gt );
+        std::vector<float> line( W, 1.0f );
+        GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+        for ( int r = 0; r < H; ++r )
+        {
+          CPLErr err = GDALRasterIO( band, GF_Write, 0, r, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
+          Q_UNUSED( err );
+        }
+        GDALClose( ds );
+      }
+    }
+  }
+  return relative.endsWith( QLatin1String( ".hdr" ) ) ? hdrPath : datPath;
 }
 
 /// Resolve a fixture path relative to this source file (tests/ -> ../data).
@@ -85,6 +121,10 @@ QString fixturePath( const QString &relative )
        relative == QLatin1String( "phr_xs.tif" ) )
   {
     return syntheticSample( relative );
+  }
+  if ( relative.startsWith( QLatin1String( "dem." ) ) )
+  {
+    return syntheticEnviSample( relative );
   }
   const QString here = QFileInfo( __FILE__ ).absolutePath();
   return QFileInfo( here + QStringLiteral( "/../data/" ) + relative ).absoluteFilePath();

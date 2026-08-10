@@ -65,7 +65,11 @@ bool SharedMemorySegment::create( int width, int height, int bands, DType dtype 
             QUuid::createUuid().toString( QUuid::WithoutBraces ) );
 
   m_shm = std::make_unique<QSharedMemory>();
+#ifdef Q_OS_WIN
+  m_shm->setNativeKey( m_key, QNativeIpcKey::Type::Windows );
+#else
   m_shm->setNativeKey( m_key, QNativeIpcKey::Type::PosixRealtime );
+#endif
 
   if ( !m_shm->create( static_cast<int>( totalSize ) ) )
   {
@@ -103,7 +107,11 @@ bool SharedMemorySegment::attach( const QString &key )
 
   m_key = key;
   m_shm = std::make_unique<QSharedMemory>();
+#ifdef Q_OS_WIN
+  m_shm->setNativeKey( m_key, QNativeIpcKey::Type::Windows );
+#else
   m_shm->setNativeKey( m_key, QNativeIpcKey::Type::PosixRealtime );
+#endif
 
   if ( !m_shm->attach() )
   {

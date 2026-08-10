@@ -1,0 +1,60 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "sicnu-geo-rs",
+  "version-string": "1.0.0",
+  "builtin-baseline": "ea1a7396b05637a53bf23c078647ecc0edee4b80",
+  "dependencies": [
+    {
+      "name": "gdal",
+      "platform": "windows"
+    },
+    {
+      "name": "proj",
+      "platform": "windows"
+    },
+    {
+      "name": "geos",
+      "platform": "windows"
+    },
+    {
+      "name": "protobuf",
+      "platform": "windows"
+    },
+    {
+      "name": "libzip",
+      "platform": "windows"
+    },
+    {
+      "name": "expat",
+      "platform": "windows"
+    },
+    {
+      "name": "sqlite3",
+      "platform": "windows"
+    },
+    {
+      "name": "pcre2",
+      "platform": "windows"
+    },
+    {
+      "name": "gsl",
+      "platform": "windows"
+    },
+    {
+      "name": "curl",
+      "platform": "windows"
+    },
+    {
+      "name": "zstd",
+      "platform": "windows"
+    },
+    {
+      "name": "jsoncpp",
+      "platform": "windows"
+    },
+    {
+      "name": "opencv",
+      "platform": "windows"
+    }
+  ]
+}
