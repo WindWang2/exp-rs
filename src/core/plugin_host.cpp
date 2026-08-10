@@ -1,11 +1,16 @@
 // src/core/plugin_host.cpp
 #include "plugin_host.h"
 
+// PluginHost holds std::unique_ptr<PythonPluginHost> unconditionally, so its
+// complete type is required regardless of SICNU_EMBED_PYTHON (a unique_ptr to
+// an incomplete type cannot be destroyed). Only the pool-construction and the
+// other python support headers below are gated on SICNU_EMBED_PYTHON.
+#include "python/isolated/python_plugin_host.h"
+
 #if defined( SICNU_EMBED_PYTHON ) && SICNU_EMBED_PYTHON
 #include "python/isolated/python_plugin_adapter.h"
 #include "app/python/sicnu_app_interface.h"
 #include "app/project_context.h"
-#include "python/isolated/python_plugin_host.h"
 #endif
 
 #include <QDir>
