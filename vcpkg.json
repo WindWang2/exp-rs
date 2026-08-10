@@ -47,10 +47,6 @@
     {
       "name": "zstd",
       "platform": "windows"
-    },
-    {
-      "name": "winflexbison",
-      "platform": "windows"
     }
   ]
 }

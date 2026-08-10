@@ -163,7 +163,7 @@ jobs:
         # FindPkgConfig).
         shell: pwsh
         run: |
-          choco install -y --no-progress pkgconfiglite
+          choco install -y --no-progress pkgconfiglite winflexbison
           git clone --depth 1 --branch v2.3.10 https://github.com/KDE/qca.git C:\deps\qca-src
           if ($LASTEXITCODE -ne 0) { exit 1 }
           cmake -S C:\deps\qca-src -B C:\deps\qca-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DBUILD_WITH_QT6=ON -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF
@@ -183,15 +183,14 @@ jobs:
 
       - name: Configure CMake for Windows MSVC
         run: |
-          # winflexbison provides win_bison.exe/win_flex.exe; src/core .yy/.ll
-          # grammars require bison >= 3.0 (find_package(BISON) needs them on PATH).
-          $vcpkgRoot = "C:\vcpkg"
-          $bisonDir = "$vcpkgRoot\installed\x64-windows\tools\winflexbison"
+          # winflexbison (via Chocolatey) provides win_bison.exe/win_flex.exe;
+          # src/core .yy/.ll grammars require bison >= 3.0.
+          $bisonDir = "C:\ProgramData\chocolatey\lib\winflexbison\tools"
           $env:PATH = "$bisonDir;$env:PATH"
           cmake -B build-win -S . `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install;C:\deps\kc-install" `
-            -DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot\scripts\buildsystems\vcpkg.cmake `
+            -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DBISON_EXECUTABLE="$bisonDir\win_bison.exe" `
             -DFLEX_EXECUTABLE="$bisonDir\win_flex.exe" `
