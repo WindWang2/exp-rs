@@ -17,11 +17,21 @@ jobs:
   tier1-fast-required:
     name: Tier 1 - Fast Required (Linux GCC)
     runs-on: ubuntu-latest
+    # Cold full-tree build on 4-core runners takes ~5-6 h; 6 h default times it
+    # out. ccache (below) makes later cycles fast, but the cap must fit the
+    # first build too.
+    timeout-minutes: 540
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ci-ccache-${{ runner.os }}
+          max-size: 4G
 
       - name: Install System Dependencies
         run: |
@@ -52,7 +62,10 @@ jobs:
         # the QGIS-scale libraries take 1-2 h per target on 4-core runners and
         # risk OOM on the GCC link. CI's job is compile+link+test correctness,
         # not link-time optimization; a fast reliable gate is the contract here.
-        run: cmake -B build -S . -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}"
+        # Ninja + ccache: faster scheduling and incremental rebuilds across
+        # pushes/PRs (each later PR in the integration sequence only recompiles
+        # its delta).
+        run: cmake -B build -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Compile Core & Test Targets
         run: cmake --build build --parallel $(nproc)
@@ -76,11 +89,18 @@ jobs:
   tier2-full-integration:
     name: Tier 2 - Full Integration & Sanitizers
     runs-on: ubuntu-latest
+    timeout-minutes: 540
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ci-ccache-${{ runner.os }}
+          max-size: 4G
 
       - name: Install Full Dependencies & OpenCV/Python
         run: |
@@ -105,7 +125,7 @@ jobs:
           modules: 'qt5compat qtmultimedia'
 
       - name: Configure CMake with Sanitizers
-        run: cmake -B build-sanitizer -S . -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}"
+        run: cmake -B build-sanitizer -S . -G Ninja -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build Sanitizer Test Targets
         run: cmake --build build-sanitizer --parallel $(nproc)
@@ -124,6 +144,7 @@ jobs:
   tier3-platform-windows:
     name: Tier 3 - Windows MSVC Build Verification
     runs-on: windows-latest
+    timeout-minutes: 540
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -213,11 +234,18 @@ jobs:
   tier3-platform-macos:
     name: Tier 3 - macOS Clang Configure & Build Seam
     runs-on: macos-latest
+    timeout-minutes: 540
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ci-ccache-${{ runner.os }}
+          max-size: 4G
 
       - name: Install macOS Dependencies via Homebrew
         run: |
@@ -239,7 +267,9 @@ jobs:
             -DFLEX_EXECUTABLE="$(brew --prefix flex)/bin/flex" \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_LTO=OFF \
-            -DENABLE_TESTS=ON
+            -DENABLE_TESTS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Verify macOS Build & Execute CTest
         env:
