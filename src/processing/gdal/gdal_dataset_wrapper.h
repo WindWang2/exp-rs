@@ -151,7 +151,10 @@ public:
     /**
      * Read a rectangular window of a band into a float buffer (out-of-core
      * streaming support). The window is read at native resolution (no
-     * resampling): buffer must hold srcWidth*srcHeight floats.
+     * resampling): buffer must hold srcWidth*srcHeight floats. When the window
+     * extends past the raster edge, the out-of-raster region is padded with the
+     * band's NoData value (NaN when the band has no NoData) so consumers never
+     * see uninitialized data.
      * @param bandNum 1-based band number
      * @param xOff    pixel column of the window's left edge (0-based)
      * @param yOff    pixel row of the window's top edge (0-based)
@@ -162,6 +165,29 @@ public:
      */
     bool readBandWindow(int bandNum, int xOff, int yOff,
                         int srcWidth, int srcHeight, float *buffer) const;
+
+    /**
+     * Read a rectangular window of a band and resample it to a different grid
+     * (GDAL resampling: nearest/bilinear depending on the dataset's default),
+     * for heterogeneous-resolution fusion where the pan and multispectral
+     * rasters have different pixel sizes. buffer must hold bufWidth*bufHeight
+     * floats; (xOff, yOff, srcWidth, srcHeight) is the window in source pixels,
+     * and the full srcWidth*srcHeight window is resampled into the buffer.
+     * Out-of-raster regions (edge tiles) are padded with @a nodata.
+     * @param bandNum 1-based band number
+     * @param xOff    pixel column of the window's left edge (0-based)
+     * @param yOff    pixel row of the window's top edge (0-based)
+     * @param srcWidth  source window width in pixels
+     * @param srcHeight source window height in pixels
+     * @param buffer  pre-allocated float buffer of size bufWidth*bufHeight
+     * @param bufWidth  destination buffer width (pan-grid tile width)
+     * @param bufHeight destination buffer height (pan-grid tile height)
+     * @param nodata  padding value for out-of-raster regions
+     * @return true on success
+     */
+    bool readBandWindowScaled(int bandNum, int xOff, int yOff,
+                              int srcWidth, int srcHeight, float *buffer,
+                              int bufWidth, int bufHeight, float nodata) const;
 
     /**
      * Write a rectangular window of a band from a float buffer (out-of-core

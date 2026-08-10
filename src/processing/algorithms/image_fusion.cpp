@@ -543,16 +543,44 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
 
         for ( int j = 0; j < k; ++j )
         {
+            // Coefficient c_{k,j} = Cov(work, GS_j) / Var(GS_j), computed over
+            // the mean-centered vectors (standard Gram-Schmidt fusion). A
+            // through-origin dot product is dominated by the bands' mean
+            // offsets (DN imagery has large means), which leaves nearly all of
+            // band k's offset in the residual and degrades spectral fidelity
+            // after GS_0 is replaced by the high-res pan.
             double dot = 0.0;
             double normSq = 0.0;
+            double sumWork = 0.0, sumG = 0.0;
+            int64_t cnt = 0;
             for ( int i = 0; i < n; ++i )
             {
                 if ( !validMask[i] )
                     continue;
                 dot += static_cast<double>( work[i] ) * gs[j][i];
                 normSq += static_cast<double>( gs[j][i] ) * gs[j][i];
+                sumWork += static_cast<double>( work[i] );
+                sumG += static_cast<double>( gs[j][i] );
+                ++cnt;
             }
-            double c = ( normSq > 1e-20 ) ? ( dot / normSq ) : 0.0;
+            double c = 0.0;
+            if ( cnt > 1 )
+            {
+                const double invN = 1.0 / static_cast<double>( cnt );
+                const double workMean = sumWork * invN;
+                const double gMean = sumG * invN;
+                double cDot = 0.0, cNorm = 0.0;
+                for ( int i = 0; i < n; ++i )
+                {
+                    if ( !validMask[i] )
+                        continue;
+                    const double wc = static_cast<double>( work[i] ) - workMean;
+                    const double gc = static_cast<double>( gs[j][i] ) - gMean;
+                    cDot += wc * gc;
+                    cNorm += gc * gc;
+                }
+                c = ( cNorm > 1e-20 ) ? ( cDot / cNorm ) : 0.0;
+            }
             coef[k][j] = c;
             for ( int i = 0; i < n; ++i )
             {
@@ -736,6 +764,44 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
     std::vector<std::vector<float>> msBuf( nMsBands, std::vector<float>( maxTilePixels ) );
     std::vector<std::vector<float>> outBuf( nOutBands, std::vector<float>( maxTilePixels ) );
 
+    // Heterogeneous-resolution support: compareGrids allows PixelSizeMismatch
+    // (non-blocking), so the MS raster may have a different pixel size than the
+    // pan. The tile loops iterate the pan grid; each MS window is therefore
+    // mapped to the MS pixel grid and GDAL resamples on read. When the pixel
+    // sizes match, this is an identity mapping (native read).
+    const auto panGt = panDataset.geoTransform();
+    const auto msGt = msDataset.geoTransform();
+    const double panResX = std::abs( panGt[1] );
+    const double panResY = std::abs( panGt[5] );
+    const double msResX = std::abs( msGt[1] );
+    const double msResY = std::abs( msGt[5] );
+    const double scaleX = ( msResX > 1e-12 ) ? ( panResX / msResX ) : 1.0;
+    const double scaleY = ( msResY > 1e-12 ) ? ( panResY / msResY ) : 1.0;
+    const bool resampleMs = ( std::abs( scaleX - 1.0 ) > 1e-9 || std::abs( scaleY - 1.0 ) > 1e-9 );
+    if ( resampleMs )
+    {
+        SICNU_LOG_INFO( SicnuLogTags::Algorithms,
+                        QString( "Fusion: pan %.6g x %.6g vs MS %.6g x %.6g — MS tiles "
+                                 "will be resampled to the pan grid" )
+                            .arg( panResX ).arg( panResY ).arg( msResX ).arg( msResY ) );
+    }
+
+    // readMsWindow: read MS @band (1-based) for the pan-grid tile at (xOff,
+    // yOff, tw, th) into a tw*th buffer. When resolutions differ, the window
+    // is mapped to MS pixels (grids share the origin — compareGrids blocks
+    // origin mismatches) and GDAL resamples.
+    auto readMsWindow = [&]( int band, int xOff, int yOff, int tw, int th,
+                             float *buf ) -> bool {
+        if ( !resampleMs )
+            return msDataset.readBandWindow( band, xOff, yOff, tw, th, buf );
+        const int msXOff = static_cast<int>( std::floor( static_cast<double>( xOff ) * scaleX ) );
+        const int msYOff = static_cast<int>( std::floor( static_cast<double>( yOff ) * scaleY ) );
+        const int msW = static_cast<int>( std::ceil( static_cast<double>( xOff + tw ) * scaleX ) ) - msXOff;
+        const int msH = static_cast<int>( std::ceil( static_cast<double>( yOff + th ) * scaleY ) ) - msYOff;
+        return msDataset.readBandWindowScaled( band, msXOff, msYOff, msW, msH,
+                                               buf, tw, th, nodata );
+    };
+
     if ( params.method == QStringLiteral( "linear" ) )
     {
         QVector<float> weights = params.msWeights;
@@ -761,7 +827,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                     return false;
                 for ( int b = 0; b < nMsBands; ++b )
                 {
-                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                    if ( !readMsWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
                         return false;
                 }
 
@@ -810,7 +876,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
 
                 for ( int b = 0; b < nMsBands; ++b )
                 {
-                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                    if ( !readMsWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
                         return false;
                     const float *msData = msBuf[b].data();
                     for ( size_t i = 0; i < tileSize; ++i )
@@ -860,9 +926,9 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                 const size_t tileSize = static_cast<size_t>( tw ) * th;
 
                 if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) ||
-                     !msDataset.readBandWindow( params.redIdx + 1, xOff, yOff, tw, th, msBuf[0].data() ) ||
-                     !msDataset.readBandWindow( params.greenIdx + 1, xOff, yOff, tw, th, msBuf[1].data() ) ||
-                     !msDataset.readBandWindow( params.blueIdx + 1, xOff, yOff, tw, th, msBuf[2].data() ) )
+                     !readMsWindow( params.redIdx + 1, xOff, yOff, tw, th, msBuf[0].data() ) ||
+                     !readMsWindow( params.greenIdx + 1, xOff, yOff, tw, th, msBuf[1].data() ) ||
+                     !readMsWindow( params.blueIdx + 1, xOff, yOff, tw, th, msBuf[2].data() ) )
                     return false;
 
                 const float *msR = msBuf[0].data();
@@ -901,9 +967,9 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                 const size_t tileSize = static_cast<size_t>( tw ) * th;
 
                 if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) ||
-                     !msDataset.readBandWindow( params.redIdx + 1, xOff, yOff, tw, th, msBuf[0].data() ) ||
-                     !msDataset.readBandWindow( params.greenIdx + 1, xOff, yOff, tw, th, msBuf[1].data() ) ||
-                     !msDataset.readBandWindow( params.blueIdx + 1, xOff, yOff, tw, th, msBuf[2].data() ) )
+                     !readMsWindow( params.redIdx + 1, xOff, yOff, tw, th, msBuf[0].data() ) ||
+                     !readMsWindow( params.greenIdx + 1, xOff, yOff, tw, th, msBuf[1].data() ) ||
+                     !readMsWindow( params.blueIdx + 1, xOff, yOff, tw, th, msBuf[2].data() ) )
                     return false;
 
                 const float *msR = msBuf[0].data();
@@ -976,7 +1042,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                     return false;
                 for ( int b = 0; b < nMsBands; ++b )
                 {
-                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                    if ( !readMsWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
                         return false;
                 }
 
@@ -1027,7 +1093,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                     return false;
                 for ( int b = 0; b < nMsBands; ++b )
                 {
-                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                    if ( !readMsWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
                         return false;
                 }
 
@@ -1149,7 +1215,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                     return false;
                 for ( int b = 0; b < nMsBands; ++b )
                 {
-                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                    if ( !readMsWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
                         return false;
                 }
 
@@ -1229,7 +1295,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                     return false;
                 for ( int b = 0; b < nMsBands; ++b )
                 {
-                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                    if ( !readMsWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
                         return false;
                 }
 
@@ -1294,7 +1360,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                     return false;
                 for ( int b = 0; b < nMsBands; ++b )
                 {
-                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                    if ( !readMsWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
                         return false;
                 }
 

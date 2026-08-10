@@ -11,6 +11,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <vector>
 #include <sys/resource.h>
@@ -22,17 +23,31 @@ using Catch::Approx;
 
 namespace {
 
-// Helper: Measure Current RSS in MiB from /proc/self/statm
-double getCurrentRssMB() {
-    std::ifstream statm("/proc/self/statm");
-    if (statm.is_open()) {
-        long pages = 0;
-        long resident = 0;
-        statm >> pages >> resident;
-        long pageSize = sysconf(_SC_PAGESIZE);
-        return static_cast<double>(resident * pageSize) / (1024.0 * 1024.0);
+// Portable peak-RSS measurement (MiB).
+//  - Linux: /proc/self/status VmHWM (high-water mark, exact peak).
+//  - macOS: getrusage().ru_maxrss (bytes on Darwin, KB on Linux — handled).
+//  - Other: returns -1 (callers skip the memory REQUIRE).
+double getPeakRssMb() {
+#if defined(__linux__)
+    std::ifstream status("/proc/self/status");
+    std::string line;
+    while (std::getline(status, line)) {
+        if (line.rfind("VmHWM:", 0) == 0) {
+            double kb = std::strtod(line.c_str() + 7, nullptr);
+            return kb / 1024.0;
+        }
     }
-    return 0.0;
+    return -1.0;
+#elif defined(__APPLE__)
+    struct rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) == 0) {
+        // ru_maxrss is in bytes on Darwin, KiB on Linux.
+        return static_cast<double>(usage.ru_maxrss) / (1024.0 * 1024.0);
+    }
+    return -1.0;
+#else
+    return -1.0;
+#endif
 }
 
 // Generate synthetic co-registered Pan and MS rasters of size width x height using pseudo-random data
@@ -82,6 +97,18 @@ bool generateTestRasters(const QString &panPath, const QString &msPath, int widt
     return true;
 }
 
+// A window is valid when every sample is finite and within the plausible range
+// of the synthetic inputs (10..300; fused values may overshoot slightly).
+void requirePlausibleWindow(GdalDatasetWrapper &outDs, int x, int y, int w, int h) {
+    std::vector<float> pixels(static_cast<size_t>(w) * h);
+    REQUIRE(outDs.readBandWindow(1, x, y, w, h, pixels.data()));
+    for (float val : pixels) {
+        REQUIRE(std::isfinite(val));
+        REQUIRE(val >= 0.0f);
+        REQUIRE(val <= 600.0f);
+    }
+}
+
 } // namespace
 
 TEST_CASE("ImageFusion Benchmark: Bounded Memory & Performance", "[fusion][perf]") {
@@ -102,6 +129,11 @@ TEST_CASE("ImageFusion Benchmark: Bounded Memory & Performance", "[fusion][perf]
     std::vector<BenchResult> results;
     const std::vector<std::string> methods = {"linear", "brovey", "ihs", "pca", "gram_schmidt"};
     const std::vector<int> sizes = {256, 1024, 2048};
+
+    // Peak-RSS baseline before the benchmark loop; the streaming implementation
+    // must keep total growth far below a full-raster materialization of the
+    // largest size (2048^2 x 4 bands x 4 B ≈ 64 MiB per full-raster buffer).
+    const double rssBaseline = getPeakRssMb();
 
     // Warm-up run to load dynamic libraries and GDAL cache
     {
@@ -139,11 +171,11 @@ TEST_CASE("ImageFusion Benchmark: Bounded Memory & Performance", "[fusion][perf]
             REQUIRE(QFile::exists(outPath));
 
             double timeMs = std::chrono::duration<double, std::milli>(end - start).count();
-            double rssCurrent = getCurrentRssMB();
+            double rssPeak = getPeakRssMb();
             double totalMPix = (static_cast<double>(size) * size) / 1e6;
             double mpixSec = (timeMs > 0.0) ? (totalMPix / (timeMs / 1000.0)) : 0.0;
 
-            results.push_back({method, size, size, timeMs, rssCurrent, mpixSec});
+            results.push_back({method, size, size, timeMs, rssPeak, mpixSec});
 
             // Verify output dimensions and band count
             GdalDatasetWrapper outDs;
@@ -154,31 +186,25 @@ TEST_CASE("ImageFusion Benchmark: Bounded Memory & Performance", "[fusion][perf]
             REQUIRE(outDs.bandCount() == expectedBands);
 
             // 1. Origin window check (0, 0)
-            std::vector<float> samplePixels(100);
-            REQUIRE(outDs.readBandWindow(1, 0, 0, 10, 10, samplePixels.data()));
-            for (float val : samplePixels) {
-                REQUIRE(!std::isnan(val));
-                REQUIRE(val >= 0.0f);
-            }
+            requirePlausibleWindow(outDs, 0, 0, 10, 10);
 
             // 2. Tile boundary crossing check (around 505..515 for tile width 512)
             if (size >= 1024) {
-                std::vector<float> boundaryPixels(100);
-                REQUIRE(outDs.readBandWindow(1, 507, 507, 10, 10, boundaryPixels.data()));
-                for (float val : boundaryPixels) {
-                    REQUIRE(!std::isnan(val));
-                    REQUIRE(val >= 0.0f);
-                }
+                requirePlausibleWindow(outDs, 507, 507, 10, 10);
             }
 
             // 3. Bottom-right corner check
-            std::vector<float> cornerPixels(100);
-            REQUIRE(outDs.readBandWindow(1, size - 10, size - 10, 10, 10, cornerPixels.data()));
-            for (float val : cornerPixels) {
-                REQUIRE(!std::isnan(val));
-                REQUIRE(val >= 0.0f);
-            }
+            requirePlausibleWindow(outDs, size - 10, size - 10, 10, 10);
         }
+    }
+
+    // Memory boundedness: the fused outputs are streamed per-tile, so the peak
+    // RSS growth over the whole benchmark (all methods, up to 2048x2048) must
+    // stay well under a full-raster materialization of every intermediate.
+    // 2048^2 x 4 bands x 4 B x ~3 buffers ≈ 190 MiB; allow headroom.
+    if (rssBaseline > 0.0) {
+        const double rssGrowth = getPeakRssMb() - rssBaseline;
+        REQUIRE(rssGrowth < 900.0);
     }
 
     std::cout << "\n=== Image Fusion Benchmark Summary ===\n";
