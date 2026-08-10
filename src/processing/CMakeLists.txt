@@ -181,11 +181,11 @@ target_link_libraries(sicnu_processing PUBLIC
 target_link_libraries(sicnu_processing PRIVATE
     Sicnu::data
 )
-# jsoncpp: prefer the CMake package (provides the `jsoncpp` target + include
-# dirs; e.g. Ubuntu libjsoncpp-dev). Fall back to a plain link if only the
-# library is found; last-resort plain `jsoncpp` link keeps the local layout
-# working.
-find_package(jsoncpp QUIET)
+# jsoncpp: the canonical `jsoncpp` target (and JSONCPP_INCLUDE_DIRS/LIBRARIES)
+# is resolved once at the top level (see root CMakeLists.txt) — distro configs
+# export jsoncpp_lib/jsoncpp_static instead of `jsoncpp`, and re-running
+# find_package(jsoncpp) here would re-create those imported targets in a child
+# scope and error out ("another target with the same name already exists").
 if(TARGET jsoncpp)
   target_link_libraries(sicnu_processing PRIVATE jsoncpp)
 elseif(JSONCPP_LIBRARIES)
