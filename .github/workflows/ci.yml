@@ -146,11 +146,16 @@ jobs:
           modules: 'qt5compat qtmultimedia'
 
       - name: Install GDAL/PROJ/GEOS/Protobuf via vcpkg (preinstalled)
-        # windows-latest ships a maintained vcpkg checkout at C:\vcpkg; install
-        # the manifest deps (vcpkg.json, windows-only) there. Deterministic —
-        # no third-party action output dependencies.
+        # windows-latest ships a maintained vcpkg checkout at C:\vcpkg. Sync it
+        # to the pinned baseline first (libaec's gitlab.dkrz.de source 429s
+        # GitHub runners; newer vcpkg uses a GitHub mirror). Update C:\vcpkg is
+        # NOT done — we checkout the exact baseline commit.
         shell: pwsh
         run: |
+          git -C C:\vcpkg fetch origin
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          git -C C:\vcpkg checkout ea1a7396b05637a53bf23c078647ecc0edee4b80
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           C:\vcpkg\vcpkg install --triplet x64-windows
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
