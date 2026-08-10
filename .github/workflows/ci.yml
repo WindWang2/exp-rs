@@ -28,7 +28,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build \
-            libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev \
+            libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev libjsoncpp-dev \
             libprotobuf-dev protobuf-compiler \
             libqca-qt6-dev qtkeychain-qt6-dev \
             bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev \
@@ -83,7 +83,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build \
-            libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev \
+            libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev libjsoncpp-dev \
             libprotobuf-dev protobuf-compiler \
             libqca-qt6-dev qtkeychain-qt6-dev \
             bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev \
