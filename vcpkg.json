@@ -47,6 +47,10 @@
     {
       "name": "zstd",
       "platform": "windows"
+    },
+    {
+      "name": "jsoncpp",
+      "platform": "windows"
     }
   ]
 }

@@ -505,6 +505,31 @@ endif()
 configure_file(cmake_templates/qgsconfig.h.in ${CMAKE_BINARY_DIR}/qgsconfig.h)
 include_directories(${CMAKE_BINARY_DIR})
 
+# jsoncpp: normalize the CMake package across platforms. Upstream configs and
+# vcpkg export a `jsoncpp` target, but Ubuntu 24.04's libjsoncpp-dev exports
+# only `jsoncpp_lib`/`jsoncpp_static` (and no JSONCPP_* variables). Create a
+# canonical `jsoncpp` target plus JSONCPP_* variables so every consumer below
+# (processing, operators, workflow, jobs, cli, app, tests) links a real target
+# that carries the include dir (e.g. /usr/include/jsoncpp) instead of a bare
+# -ljsoncpp with no -I path.
+find_package(jsoncpp QUIET)
+if(NOT TARGET jsoncpp)
+  if(TARGET jsoncpp_lib)
+    add_library(jsoncpp INTERFACE IMPORTED)
+    set_target_properties(jsoncpp PROPERTIES INTERFACE_LINK_LIBRARIES jsoncpp_lib)
+    get_target_property(JSONCPP_INCLUDE_DIRS jsoncpp_lib INTERFACE_INCLUDE_DIRECTORIES)
+    set(JSONCPP_LIBRARIES jsoncpp_lib)
+  elseif(TARGET jsoncpp_static)
+    add_library(jsoncpp INTERFACE IMPORTED)
+    set_target_properties(jsoncpp PROPERTIES INTERFACE_LINK_LIBRARIES jsoncpp_static)
+    get_target_property(JSONCPP_INCLUDE_DIRS jsoncpp_static INTERFACE_INCLUDE_DIRECTORIES)
+    set(JSONCPP_LIBRARIES jsoncpp_static)
+  endif()
+endif()
+if(JSONCPP_INCLUDE_DIRS)
+  message(STATUS "jsoncpp include dir: ${JSONCPP_INCLUDE_DIRS}")
+endif()
+
 add_subdirectory(src/core)
 add_subdirectory(src/data)
 add_subdirectory(src/analysis)
