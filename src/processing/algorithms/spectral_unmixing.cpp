@@ -2,6 +2,7 @@
 #include "spectral_unmixing.h"
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace SpectralUnmixing
@@ -101,6 +102,20 @@ bool unmix( const float *pixels, size_t count, int bands,
     for ( size_t p = 0; p < count; ++p )
     {
         const float *x = pixels + p * static_cast<size_t>( bands );
+
+        bool hasNan = false;
+        for ( int b = 0; b < bands; ++b )
+        {
+            if ( std::isnan( x[b] ) ) { hasNan = true; break; }
+        }
+        if ( hasNan )
+        {
+            for ( int e = 0; e < nEndmembers; ++e )
+                result->abundances[p * static_cast<size_t>( nEndmembers ) + e] =
+                    std::numeric_limits<float>::quiet_NaN();
+            result->reconstructionError[p] = std::numeric_limits<float>::quiet_NaN();
+            continue;
+        }
 
         // Right-hand side: E^T x.
         std::vector<double> rhs( nEndmembers, 0.0 );

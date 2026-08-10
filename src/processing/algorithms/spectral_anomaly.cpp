@@ -7,14 +7,6 @@
 namespace SpectralAnomaly
 {
 
-/// Default NoData sentinel used across the processing stack (see
-/// GdalDatasetWrapper / image_fusion's default). Pixels at or near this value
-/// are treated as invalid by the streaming accumulators.
-constexpr float kNoDataSentinel = -9999.0f;
-
-namespace
-{
-
 /// Inverts an n x n symmetric positive-definite matrix (given in column-major
 /// row order) via Gauss-Jordan with partial pivoting and a ridge added by the
 /// caller. Returns false when singular.
@@ -80,10 +72,9 @@ bool invertMatrix( const std::vector<double> &m, int n, std::vector<double> *inv
     return true;
 }
 
-} // namespace
-
 void accumulateMean( const float *pixels, size_t count, int bands,
-                     BackgroundStats *stats, bool skipNonFinite )
+                     BackgroundStats *stats, bool skipNonFinite,
+                     const float *noDataBands )
 {
     if ( !pixels || !stats || count == 0 || bands <= 0 )
         return;
@@ -103,10 +94,10 @@ void accumulateMean( const float *pixels, size_t count, int bands,
             for ( int b = 0; b < bands; ++b )
             {
                 const float v = pixels[p * static_cast<size_t>( bands ) + b];
-                // Invalid: non-finite, or the -9999 NoData sentinel (the
-                // codebase-wide default NoData convention; matches the legacy
-                // rxDetector nodata filtering within tolerance).
-                if ( !std::isfinite( v ) || std::abs( v - kNoDataSentinel ) < 1e-3f )
+                // Invalid: non-finite, or equal (within tolerance) to the band's
+                // declared NoData value (@a noDataBands, when provided).
+                if ( !std::isfinite( v )
+                     || ( noDataBands && std::abs( v - noDataBands[b] ) < 1e-3f ) )
                 {
                     valid = false;
                     break;
@@ -131,7 +122,8 @@ void finalizeMean( BackgroundStats *stats )
 }
 
 void accumulateCovariance( const float *pixels, size_t count, int bands,
-                           BackgroundStats *stats, bool skipNonFinite )
+                           BackgroundStats *stats, bool skipNonFinite,
+                           const float *noDataBands )
 {
     if ( !pixels || !stats || count == 0 || bands <= 0 )
         return;
@@ -153,10 +145,10 @@ void accumulateCovariance( const float *pixels, size_t count, int bands,
             for ( int b = 0; b < bands; ++b )
             {
                 const float v = pixels[p * static_cast<size_t>( bands ) + b];
-                // Invalid: non-finite, or the -9999 NoData sentinel (the
-                // codebase-wide default NoData convention; matches the legacy
-                // rxDetector nodata filtering within tolerance).
-                if ( !std::isfinite( v ) || std::abs( v - kNoDataSentinel ) < 1e-3f )
+                // Invalid: non-finite, or equal (within tolerance) to the band's
+                // declared NoData value (@a noDataBands, when provided).
+                if ( !std::isfinite( v )
+                     || ( noDataBands && std::abs( v - noDataBands[b] ) < 1e-3f ) )
                 {
                     valid = false;
                     break;

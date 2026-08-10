@@ -219,6 +219,14 @@ public:
     double bandNoDataValue(int bandNum, bool *hasNodata = nullptr) const;
 
     /**
+     * Set the no-data value for a band.
+     * @param bandNum 1-based band number
+     * @param nodata  the no-data value to set
+     * @return true on success
+     */
+    bool setBandNoDataValue(int bandNum, double nodata) const;
+
+    /**
      * Get the GDAL description string for a band (e.g. "B4", "sur_refl_b01").
      * Returns an empty string if no description is set.
      * @param bandNum 1-based band number

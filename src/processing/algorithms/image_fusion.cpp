@@ -718,7 +718,12 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
         return false;
     }
 
-    const float nodata = -9999.0f;
+    bool hasPanNodata = false;
+    double panNodataVal = panDataset.bandNoDataValue( 1, &hasPanNodata );
+    const float nodata = hasPanNodata ? static_cast<float>( panNodataVal ) : -9999.0f;
+    for ( int b = 0; b < nOutBands; ++b )
+        outDataset.setBandNoDataValue( b + 1, nodata );
+
     const int tileW = std::max( 16, params.tileWidth <= 0 ? 512 : params.tileWidth );
     const int tileH = std::max( 16, params.tileHeight <= 0 ? 512 : params.tileHeight );
 
@@ -1064,6 +1069,11 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
             }
         }
 
+        const double covDivisor = static_cast<double>( validPixels > 1 ? validPixels - 1 : 1 );
+        for ( int b1 = 0; b1 < nMsBands; ++b1 )
+            for ( int b2 = 0; b2 < nMsBands; ++b2 )
+                cov[b1][b2] /= covDivisor;
+
         // Jacobi eigen decomposition for symmetric nMsBands x nMsBands matrix
         std::vector<double> eigVec( nMsBands * nMsBands, 0.0 );
         for ( int i = 0; i < nMsBands; ++i ) eigVec[i * nMsBands + i] = 1.0;
@@ -1125,53 +1135,14 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
             for ( int b = 0; b < nMsBands; ++b )
                 V[b][i] = eigVec[b * nMsBands + eigIdx[i]];
 
-        // PASS 2: Compute PC1 stats, histogram match Pan, and stream transformed output
-        StatsAccumulator statsPC1;
-        for ( int r = 0; r < rows; ++r )
-        {
-            const int yOff = r * tileH;
-            const int th = std::min( tileH, h - yOff );
-            for ( int c = 0; c < cols; ++c )
-            {
-                const int xOff = c * tileW;
-                const int tw = std::min( tileW, w - xOff );
-                const size_t tileSize = static_cast<size_t>( tw ) * th;
-
-                for ( int b = 0; b < nMsBands; ++b )
-                {
-                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
-                        return false;
-                }
-
-                for ( size_t i = 0; i < tileSize; ++i )
-                {
-                    bool validMs = true;
-                    for ( int b = 0; b < nMsBands; ++b )
-                    {
-                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
-                        {
-                            validMs = false;
-                            break;
-                        }
-                    }
-                    if ( !validMs )
-                        continue;
-
-                    double pc1 = 0.0;
-                    for ( int b = 0; b < nMsBands; ++b )
-                        pc1 += ( msBuf[b][i] - msMean[b] ) * V[b][0];
-                    statsPC1.add( pc1 );
-                }
-            }
-        }
-
-        double stdPC1 = statsPC1.stddev();
+        // PC1 mean is mathematically 0 and PC1 stddev is sqrt(lambda1)
+        double stdPC1 = std::sqrt( std::max( 0.0, eigVal[eigIdx[0] * nMsBands + eigIdx[0]] ) );
         double stdP = statsP.stddev();
         double scale = ( stdP > 1e-10 ) ? ( stdPC1 / stdP ) : 1.0;
-        double meanPC1 = statsPC1.mean();
+        double meanPC1 = 0.0;
         double meanP = statsP.mean();
 
-        // PASS 3: Stream write transformed PCA tiles
+        // PASS 2: Stream write transformed PCA tiles
         for ( int r = 0; r < rows; ++r )
         {
             const int yOff = r * tileH;
@@ -1247,8 +1218,11 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
     else if ( params.method == QStringLiteral( "gram_schmidt" ) )
     {
         // 2-PASS TILE STREAMING FOR GRAM-SCHMIDT FUSION
-        // PASS 1: Accumulate mean for synthetic Pan (mean across MS bands) and Pan stats
+        // PASS 1: Accumulate mean for synthetic Pan, Pan stats, and GS dot products
         StatsAccumulator statsSynPan, statsP;
+        std::vector<std::vector<double>> coef( nMsBands + 1, std::vector<double>( nMsBands + 1, 0.0 ) );
+        std::vector<double> normSq( nMsBands + 1, 0.0 );
+
         for ( int r = 0; r < rows; ++r )
         {
             const int yOff = r * tileH;
@@ -1289,53 +1263,6 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                     synVal /= nMsBands;
                     statsSynPan.add( synVal );
                     statsP.add( panBuf[i] );
-                }
-            }
-        }
-
-        double stdSyn = statsSynPan.stddev();
-        double stdP = statsP.stddev();
-        double scale = ( stdP > 1e-10 ) ? ( stdSyn / stdP ) : 1.0;
-        double meanSyn = statsSynPan.mean();
-        double meanP = statsP.mean();
-
-        // PASS 2: Compute GS Gram matrix & projection coefficients over streaming tiles
-        std::vector<std::vector<double>> coef( nMsBands + 1, std::vector<double>( nMsBands + 1, 0.0 ) );
-        std::vector<double> normSq( nMsBands + 1, 0.0 );
-
-        // Stream tiles to compute dot products for GS orthogonalization
-        for ( int r = 0; r < rows; ++r )
-        {
-            const int yOff = r * tileH;
-            const int th = std::min( tileH, h - yOff );
-            for ( int c = 0; c < cols; ++c )
-            {
-                const int xOff = c * tileW;
-                const int tw = std::min( tileW, w - xOff );
-                const size_t tileSize = static_cast<size_t>( tw ) * th;
-
-                for ( int b = 0; b < nMsBands; ++b )
-                {
-                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
-                        return false;
-                }
-
-                for ( size_t i = 0; i < tileSize; ++i )
-                {
-                    bool validMs = true;
-                    double synVal = 0.0;
-                    for ( int b = 0; b < nMsBands; ++b )
-                    {
-                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
-                        {
-                            validMs = false;
-                            break;
-                        }
-                        synVal += msBuf[b][i];
-                    }
-                    if ( !validMs )
-                        continue;
-                    synVal /= nMsBands;
 
                     // GS_0 = synVal
                     normSq[0] += synVal * synVal;
@@ -1354,7 +1281,13 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                 coef[b + 1][0] /= normSq[0];
         }
 
-        // PASS 3: Stream write transformed Gram-Schmidt tiles
+        double stdSyn = statsSynPan.stddev();
+        double stdP = statsP.stddev();
+        double scale = ( stdP > 1e-10 ) ? ( stdSyn / stdP ) : 1.0;
+        double meanSyn = statsSynPan.mean();
+        double meanP = statsP.mean();
+
+        // PASS 2: Stream write transformed Gram-Schmidt tiles
         for ( int r = 0; r < rows; ++r )
         {
             const int yOff = r * tileH;
@@ -1399,6 +1332,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                             outBuf[b][i] = nodata;
                         continue;
                     }
+                    synVal /= nMsBands;
 
                     float panMatched = static_cast<float>( ( panBuf[i] - meanP ) * scale + meanSyn );
                     double gs0Sub = panMatched;
@@ -1406,7 +1340,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                     for ( int b = 0; b < nMsBands; ++b )
                     {
                         const int k = b + 1;
-                        double val = msBuf[b][i] + coef[k][0] * ( gs0Sub - ( synVal / nMsBands ) );
+                        double val = msBuf[b][i] + coef[k][0] * ( gs0Sub - synVal );
                         outBuf[b][i] = static_cast<float>( val );
                     }
                 }

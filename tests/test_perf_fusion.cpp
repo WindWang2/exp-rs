@@ -95,6 +95,19 @@ TEST_CASE("ImageFusion Benchmark: Bounded Memory & Performance", "[fusion][perf]
     const std::vector<std::string> methods = {"linear", "brovey", "ihs", "pca", "gram_schmidt"};
     const std::vector<int> sizes = {256, 1024, 2048};
 
+    // Warm-up run to load dynamic libraries and GDAL cache
+    {
+        const QString warmPan = dir.filePath("warm_pan.tif");
+        const QString warmMs = dir.filePath("warm_ms.tif");
+        const QString warmOut = dir.filePath("warm_out.tif");
+        if (generateTestRasters(warmPan, warmMs, 128, 128, 4)) {
+            ImageFusion::NativeFusionParams warmParams;
+            warmParams.method = QStringLiteral("linear");
+            QString warmErr;
+            ImageFusion::processNativeFusion(warmPan, warmMs, warmOut, warmParams, &warmErr);
+        }
+    }
+
     for (const int size : sizes) {
         const QString panPath = dir.filePath(QString("pan_%1.tif").arg(size));
         const QString msPath = dir.filePath(QString("ms_%1.tif").arg(size));
@@ -132,6 +145,14 @@ TEST_CASE("ImageFusion Benchmark: Bounded Memory & Performance", "[fusion][perf]
             REQUIRE(outDs.height() == size);
             int expectedBands = (method == "ihs") ? 3 : 4;
             REQUIRE(outDs.bandCount() == expectedBands);
+
+            // Numerical correctness check: read a window and verify non-zero, non-NaN valid values
+            std::vector<float> samplePixels(100);
+            REQUIRE(outDs.readBandWindow(1, 0, 0, 10, 10, samplePixels.data()));
+            for (float val : samplePixels) {
+                REQUIRE(!std::isnan(val));
+                REQUIRE(val >= 0.0f);
+            }
         }
     }
 

@@ -303,6 +303,18 @@ double GdalDatasetWrapper::bandNoDataValue(int bandNum, bool *hasNodata) const
     return nodata;
 }
 
+bool GdalDatasetWrapper::setBandNoDataValue(int bandNum, double nodata) const
+{
+    if (!m_dataset || bandNum < 1 || bandNum > bandCount())
+        return false;
+
+    GDALRasterBandH band = GDALGetRasterBand(static_cast<GDALDatasetH>(m_dataset), bandNum);
+    if (!band)
+        return false;
+
+    return GDALSetRasterNoDataValue(band, nodata) == CE_None;
+}
+
 QString GdalDatasetWrapper::bandDescription(int bandNum) const
 {
     if (!m_dataset || bandNum < 1 || bandNum > bandCount())

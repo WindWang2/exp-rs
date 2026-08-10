@@ -158,6 +158,13 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
                     " endmembers over " + std::to_string(nBands) + " bands");
     context.reportProgress(0.1, "Initializing datasets");
 
+    std::vector<std::pair<bool, double>> bandNoData(nBands);
+    for (int bi = 0; bi < nBands; ++bi) {
+        bool hasNodata = false;
+        double nd = ds.bandNoDataValue(bands[bi], &hasNodata);
+        bandNoData[bi] = {hasNodata, nd};
+    }
+
     const int tileWidth = 512;
     const int tileHeight = 512;
 
@@ -167,6 +174,9 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to create output abundance dataset: " + outputPath);
 
+    for (int e = 0; e < nEndmembers; ++e)
+        outDataset.setBandNoDataValue(e + 1, std::numeric_limits<float>::quiet_NaN());
+
     const std::string errorPath = getString(params, "errorOut", "");
     GdalDatasetWrapper errorDataset;
     if (!errorPath.empty())
@@ -175,6 +185,7 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
                                  ds.geoTransform(), ds.projection()))
             throw RSOperatorError(ErrorCode::FileNotWritable,
                                   "Failed to create error output dataset: " + errorPath);
+        errorDataset.setBandNoDataValue(1, std::numeric_limits<float>::quiet_NaN());
     }
 
     std::vector<float> tilePixels(tileWidth * tileHeight * static_cast<size_t>(nBands));
@@ -200,8 +211,12 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
                     throw RSOperatorError(ErrorCode::GdalError,
                                           "Failed to read band window " + std::to_string(bands[bi]) +
                                           " at (" + std::to_string(x) + "," + std::to_string(y) + ")");
-                for (size_t p = 0; p < tileSize; ++p)
-                    tilePixels[p * static_cast<size_t>(nBands) + bi] = bandData[p];
+                for (size_t p = 0; p < tileSize; ++p) {
+                    float val = bandData[p];
+                    if (bandNoData[bi].first && static_cast<double>(val) == bandNoData[bi].second)
+                        val = std::numeric_limits<float>::quiet_NaN();
+                    tilePixels[p * static_cast<size_t>(nBands) + bi] = val;
+                }
             }
 
             SpectralUnmixing::UnmixResult unmixResult;
@@ -230,8 +245,10 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
             }
 
             for (double err : unmixResult.reconstructionError) {
-                totalErrorSum += err;
-                totalUnmixedPixels++;
+                if (!std::isnan(err)) {
+                    totalErrorSum += err;
+                    totalUnmixedPixels++;
+                }
             }
         }
         processedBlocksY++;

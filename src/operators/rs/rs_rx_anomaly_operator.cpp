@@ -111,13 +111,26 @@ Json::Value RsRxAnomalyOperator::run(const Json::Value& params,
 
     SpectralAnomaly::BackgroundStats stats;
 
-    // Pass 1: mean. Non-finite pixels (NaN/Inf — raster NoData) are skipped so
+    // Per-band NoData sentinels: the band's declared NoData when present, else
+    // the -9999 processing-stack convention. Pixels matching any band's NoData
+    // (or non-finite) are excluded from the statistics and scored as NaN.
+    std::vector<float> noDataPerBand( static_cast<size_t>( bandCount ), -9999.0f );
+    for ( int b = 0; b < bandCount; ++b )
+    {
+        bool hasNoData = false;
+        const double nd = ds.bandNoDataValue( b + 1, &hasNoData );
+        if ( hasNoData )
+            noDataPerBand[static_cast<size_t>( b )] = static_cast<float>( nd );
+    }
+
+    // Pass 1: mean. Invalid pixels (non-finite or band NoData) are skipped so
     // the statistics reflect valid pixels only.
     int tilesSeen = 0;
     if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
             context.throwIfCancelled();
             const size_t tilePixels = static_cast<size_t>( tile.width ) * tile.height;
-            SpectralAnomaly::accumulateMean( bip, tilePixels, bandCount, &stats, true );
+            SpectralAnomaly::accumulateMean( bip, tilePixels, bandCount, &stats, true,
+                                             noDataPerBand.data() );
             context.reportProgress( ( ++tilesSeen ) * perTileProgress * 0.33, "Background mean" );
             return true;
         } ) )
@@ -133,7 +146,8 @@ Json::Value RsRxAnomalyOperator::run(const Json::Value& params,
     if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
             context.throwIfCancelled();
             const size_t tilePixels = static_cast<size_t>( tile.width ) * tile.height;
-            SpectralAnomaly::accumulateCovariance( bip, tilePixels, bandCount, &stats, true );
+            SpectralAnomaly::accumulateCovariance( bip, tilePixels, bandCount, &stats, true,
+                                                   noDataPerBand.data() );
             context.reportProgress( 0.33 + ( ++tilesSeen ) * perTileProgress * 0.33,
                                     "Background covariance" );
             return true;
@@ -168,14 +182,15 @@ Json::Value RsRxAnomalyOperator::run(const Json::Value& params,
             tileScores.assign( tilePixels, 0.0f );
             for ( size_t p = 0; p < tilePixels; ++p )
             {
-                // Invalid pixels (any non-finite band) propagate to the output
-                // as NaN — the raster's NoData — and are excluded from the
-                // summary statistics.
+                // Invalid pixels (non-finite or matching a band's NoData)
+                // propagate to the output as NaN — the raster's NoData — and are
+                // excluded from the summary statistics.
                 const float *spectrum = bip + p * static_cast<size_t>( bandCount );
                 bool valid = true;
                 for ( int b = 0; b < bandCount; ++b )
                 {
-                    if ( !std::isfinite( spectrum[b] ) )
+                    if ( !std::isfinite( spectrum[b] )
+                         || std::abs( spectrum[b] - noDataPerBand[static_cast<size_t>( b )] ) < 1e-3f )
                     {
                         valid = false;
                         break;

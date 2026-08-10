@@ -4,6 +4,7 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "core/sicnu_logging.h"
 #include "framework/input_validator.h"
+#include <gdal.h>
 #include <cmath>
 #include <algorithm>
 #include <numeric>
@@ -182,6 +183,7 @@ void ImageEnhancement::piecewiseLinearStretch(const float *input, float *output,
 
 void ImageEnhancement::generateGaussianKernel(float *kernel, int size, float sigma)
 {
+    if (sigma <= 0.0f) sigma = 1e-6f;
     int half = size / 2;
     float sum = 0.0f;
     float twoSigmaSq = 2.0f * sigma * sigma;
@@ -203,6 +205,7 @@ void ImageEnhancement::generateGaussianKernel(float *kernel, int size, float sig
 // Generate 1D Gaussian kernel for separable convolution
 static void generateGaussianKernel1D(float *kernel, int size, float sigma)
 {
+    if (sigma <= 0.0f) sigma = 1e-6f;
     int half = size / 2;
     float sum = 0.0f;
     float twoSigmaSq = 2.0f * sigma * sigma;
@@ -1219,11 +1222,22 @@ bool ImageEnhancement::processPcaFile(const QString &sourcePath, const QString &
     const int tileWidth = 512;
     const int tileHeight = 512;
 
-    // Pass 1: Stream tiles to compute means & covariance matrix
-    std::vector<double> bandSums(bandCount, 0.0);
-    std::vector<std::vector<double>> covSum(bandCount, std::vector<double>(bandCount, 0.0));
-    uint64_t validPixelCount = 0;
+    std::vector<std::pair<bool, double>> bandNoData(bandCount);
+    for (int b = 0; b < bandCount; ++b) {
+        bool hasNodata = false;
+        double nd = srcDataset.bandNoDataValue(b + 1, &hasNodata);
+        bandNoData[b] = {hasNodata, nd};
+    }
 
+    auto isPixelValid = [&](int b, float val) {
+        if (std::isnan(val)) return false;
+        if (bandNoData[b].first && static_cast<double>(val) == bandNoData[b].second) return false;
+        return true;
+    };
+
+    // Pass 1: Stream tiles to compute band means
+    std::vector<double> bandSums(bandCount, 0.0);
+    uint64_t validPixelCount = 0;
     std::vector<std::vector<float>> tileBuffers(bandCount, std::vector<float>(tileWidth * tileHeight));
 
     for (int y = 0; y < height; y += tileHeight) {
@@ -1243,17 +1257,13 @@ bool ImageEnhancement::processPcaFile(const QString &sourcePath, const QString &
             for (int p = 0; p < tileSize; ++p) {
                 bool valid = true;
                 for (int b = 0; b < bandCount; ++b) {
-                    if (std::isnan(tileBuffers[b][p])) { valid = false; break; }
+                    if (!isPixelValid(b, tileBuffers[b][p])) { valid = false; break; }
                 }
                 if (!valid) continue;
 
                 validPixelCount++;
                 for (int b = 0; b < bandCount; ++b) {
-                    const double val = tileBuffers[b][p];
-                    bandSums[b] += val;
-                    for (int b2 = b; b2 < bandCount; ++b2) {
-                        covSum[b][b2] += val * static_cast<double>(tileBuffers[b2][p]);
-                    }
+                    bandSums[b] += tileBuffers[b][p];
                 }
             }
         }
@@ -1270,13 +1280,47 @@ bool ImageEnhancement::processPcaFile(const QString &sourcePath, const QString &
         means[b] = static_cast<float>(bandSums[b] / static_cast<double>(validPixelCount));
     }
 
+    // Pass 2: Stream tiles to compute centered covariance matrix
+    std::vector<std::vector<double>> covSum(bandCount, std::vector<double>(bandCount, 0.0));
+    for (int y = 0; y < height; y += tileHeight) {
+        const int bh = std::min(tileHeight, height - y);
+        for (int x = 0; x < width; x += tileWidth) {
+            const int bw = std::min(tileWidth, width - x);
+            const int tileSize = bw * bh;
+
+            for (int b = 0; b < bandCount; ++b) {
+                if (!srcDataset.readBandWindow(b + 1, x, y, bw, bh, tileBuffers[b].data())) {
+                    if (errorMessage)
+                        *errorMessage = QStringLiteral("Failed to read band window %1 at %2,%3").arg(b + 1).arg(x).arg(y);
+                    return false;
+                }
+            }
+
+            for (int p = 0; p < tileSize; ++p) {
+                bool valid = true;
+                for (int b = 0; b < bandCount; ++b) {
+                    if (!isPixelValid(b, tileBuffers[b][p])) { valid = false; break; }
+                }
+                if (!valid) continue;
+
+                for (int b = 0; b < bandCount; ++b) {
+                    const double diff1 = static_cast<double>(tileBuffers[b][p]) - means[b];
+                    for (int b2 = b; b2 < bandCount; ++b2) {
+                        const double diff2 = static_cast<double>(tileBuffers[b2][p]) - means[b2];
+                        covSum[b][b2] += diff1 * diff2;
+                    }
+                }
+            }
+        }
+    }
+
     std::vector<std::vector<float>> covMatrix(bandCount, std::vector<float>(bandCount, 0.0f));
     const double N = static_cast<double>(validPixelCount > 1 ? validPixelCount - 1 : 1);
     for (int b = 0; b < bandCount; ++b) {
         for (int b2 = b; b2 < bandCount; ++b2) {
-            const double cov = (covSum[b][b2] - (bandSums[b] * bandSums[b2]) / static_cast<double>(validPixelCount)) / N;
-            covMatrix[b][b2] = static_cast<float>(cov);
-            covMatrix[b2][b] = static_cast<float>(cov);
+            const float cov = static_cast<float>(covSum[b][b2] / N);
+            covMatrix[b][b2] = cov;
+            covMatrix[b2][b] = cov;
         }
     }
 
@@ -1290,14 +1334,17 @@ bool ImageEnhancement::processPcaFile(const QString &sourcePath, const QString &
         return eigenVals[a] > eigenVals[b];
     });
 
-    // Pass 2: Create output GeoTIFF & block-stream transformation
+    // Pass 3: Create output GeoTIFF & block-stream transformation
     GdalDatasetWrapper outDataset;
-    if (!outDataset.create(outputPath, width, height, numComponents, GDALDataType::GDT_Float32,
+    if (!outDataset.create(outputPath, width, height, numComponents, GDT_Float32,
                            srcDataset.geoTransform(), srcDataset.projection())) {
         if (errorMessage)
             *errorMessage = QStringLiteral("Failed to create output PCA dataset: ") + outDataset.lastError();
         return false;
     }
+
+    for (int comp = 0; comp < numComponents; ++comp)
+        outDataset.setBandNoDataValue(comp + 1, std::numeric_limits<float>::quiet_NaN());
 
     std::vector<float> outTileBuffer(tileWidth * tileHeight);
 
@@ -1320,7 +1367,7 @@ bool ImageEnhancement::processPcaFile(const QString &sourcePath, const QString &
                 for (int p = 0; p < tileSize; ++p) {
                     bool valid = true;
                     for (int b = 0; b < bandCount; ++b) {
-                        if (std::isnan(tileBuffers[b][p])) { valid = false; break; }
+                        if (!isPixelValid(b, tileBuffers[b][p])) { valid = false; break; }
                     }
                     if (!valid) {
                         outTileBuffer[p] = std::numeric_limits<float>::quiet_NaN();
@@ -1358,7 +1405,6 @@ bool ImageEnhancement::processMnfFile(const QString &sourcePath, const QString &
     const int width = srcDataset.width();
     const int height = srcDataset.height();
     const int bandCount = srcDataset.bandCount();
-    const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
 
     if (numComponents > bandCount) {
         if (errorMessage)
@@ -1371,23 +1417,247 @@ bool ImageEnhancement::processMnfFile(const QString &sourcePath, const QString &
         return false;
     }
 
-    std::vector<std::vector<float>> allBands(bandCount, std::vector<float>(pixelCount));
+    const int tileWidth = 512;
+    const int tileHeight = 512;
+
+    std::vector<std::pair<bool, double>> bandNoData(bandCount);
     for (int b = 0; b < bandCount; ++b) {
-        if (!srcDataset.readBandData(b + 1, allBands[b].data(), width, height)) {
-            if (errorMessage)
-                *errorMessage = QStringLiteral("Failed to read band %1").arg(b + 1);
-            return false;
+        bool hasNodata = false;
+        double nd = srcDataset.bandNoDataValue(b + 1, &hasNodata);
+        bandNoData[b] = {hasNodata, nd};
+    }
+
+    auto isPixelValid = [&](int b, float val) {
+        if (std::isnan(val)) return false;
+        if (bandNoData[b].first && static_cast<double>(val) == bandNoData[b].second) return false;
+        return true;
+    };
+
+    // Pass 1: Compute band means
+    std::vector<double> bandSums(bandCount, 0.0);
+    uint64_t validPixelCount = 0;
+    std::vector<std::vector<float>> tileBuffers(bandCount, std::vector<float>(tileWidth * tileHeight));
+
+    for (int y = 0; y < height; y += tileHeight) {
+        const int bh = std::min(tileHeight, height - y);
+        for (int x = 0; x < width; x += tileWidth) {
+            const int bw = std::min(tileWidth, width - x);
+            const int tileSize = bw * bh;
+
+            for (int b = 0; b < bandCount; ++b) {
+                if (!srcDataset.readBandWindow(b + 1, x, y, bw, bh, tileBuffers[b].data())) {
+                    if (errorMessage)
+                        *errorMessage = QStringLiteral("Failed to read band window %1 at %2,%3").arg(b + 1).arg(x).arg(y);
+                    return false;
+                }
+            }
+
+            for (int p = 0; p < tileSize; ++p) {
+                bool valid = true;
+                for (int b = 0; b < bandCount; ++b) {
+                    if (!isPixelValid(b, tileBuffers[b][p])) { valid = false; break; }
+                }
+                if (!valid) continue;
+
+                validPixelCount++;
+                for (int b = 0; b < bandCount; ++b) {
+                    bandSums[b] += tileBuffers[b][p];
+                }
+            }
         }
     }
 
-    const MnfResult mnfResult = mnf(allBands, numComponents);
-
-    QString writeError;
-    if (!writeGdalOutput(outputPath, width, height, mnfResult.output,
-                         srcDataset.geoTransform(), srcDataset.projection(), &writeError)) {
+    if (validPixelCount == 0) {
         if (errorMessage)
-            *errorMessage = writeError;
+            *errorMessage = QStringLiteral("No valid pixels found for MNF calculation");
         return false;
+    }
+
+    std::vector<float> means(bandCount, 0.0f);
+    for (int b = 0; b < bandCount; ++b) {
+        means[b] = static_cast<float>(bandSums[b] / static_cast<double>(validPixelCount));
+    }
+
+    // Pass 2: Compute global covariance & noise covariance (from horizontal shift differences)
+    std::vector<std::vector<double>> covSum(bandCount, std::vector<double>(bandCount, 0.0));
+    std::vector<std::vector<double>> noiseSum(bandCount, std::vector<double>(bandCount, 0.0));
+    uint64_t noiseCount = 0;
+
+    for (int y = 0; y < height; y += tileHeight) {
+        const int bh = std::min(tileHeight, height - y);
+        for (int x = 0; x < width; x += tileWidth) {
+            const int bw = std::min(tileWidth, width - x);
+
+            for (int b = 0; b < bandCount; ++b) {
+                if (!srcDataset.readBandWindow(b + 1, x, y, bw, bh, tileBuffers[b].data())) {
+                    if (errorMessage)
+                        *errorMessage = QStringLiteral("Failed to read band window %1 at %2,%3").arg(b + 1).arg(x).arg(y);
+                    return false;
+                }
+            }
+
+            for (int r = 0; r < bh; ++r) {
+                for (int c = 0; c < bw; ++c) {
+                    const int p = r * bw + c;
+                    bool valid = true;
+                    for (int b = 0; b < bandCount; ++b) {
+                        if (!isPixelValid(b, tileBuffers[b][p])) { valid = false; break; }
+                    }
+                    if (!valid) continue;
+
+                    for (int b = 0; b < bandCount; ++b) {
+                        const double diff1 = static_cast<double>(tileBuffers[b][p]) - means[b];
+                        for (int b2 = b; b2 < bandCount; ++b2) {
+                            const double diff2 = static_cast<double>(tileBuffers[b2][p]) - means[b2];
+                            covSum[b][b2] += diff1 * diff2;
+                        }
+                    }
+
+                    // Noise estimate from adjacent pixel difference
+                    if (c + 1 < bw) {
+                        const int pNext = r * bw + (c + 1);
+                        bool validNext = true;
+                        for (int b = 0; b < bandCount; ++b) {
+                            if (!isPixelValid(b, tileBuffers[b][pNext])) { validNext = false; break; }
+                        }
+                        if (validNext) {
+                            noiseCount++;
+                            for (int b = 0; b < bandCount; ++b) {
+                                const double n1 = static_cast<double>(tileBuffers[b][pNext]) - static_cast<double>(tileBuffers[b][p]);
+                                for (int b2 = b; b2 < bandCount; ++b2) {
+                                    const double n2 = static_cast<double>(tileBuffers[b2][pNext]) - static_cast<double>(tileBuffers[b2][p]);
+                                    noiseSum[b][b2] += n1 * n2;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    std::vector<std::vector<float>> covMatrix(bandCount, std::vector<float>(bandCount, 0.0f));
+    std::vector<std::vector<float>> noiseCov(bandCount, std::vector<float>(bandCount, 0.0f));
+    const double N = static_cast<double>(validPixelCount > 1 ? validPixelCount - 1 : 1);
+    const double Nnoise = static_cast<double>(noiseCount > 1 ? noiseCount - 1 : 1);
+
+    for (int b = 0; b < bandCount; ++b) {
+        for (int b2 = b; b2 < bandCount; ++b2) {
+            float c = static_cast<float>(covSum[b][b2] / N);
+            covMatrix[b][b2] = c;
+            covMatrix[b2][b] = c;
+
+            float nc = static_cast<float>(noiseSum[b][b2] / Nnoise);
+            noiseCov[b][b2] = nc;
+            noiseCov[b2][b] = nc;
+        }
+    }
+
+    // Step 1: Eigen-decompose noise covariance matrix
+    std::vector<float> noiseEigen;
+    std::vector<std::vector<float>> noiseVectors;
+    jacobiEigen(noiseCov, bandCount, noiseEigen, noiseVectors);
+
+    // Whitening matrix W: column k = noise vector k / sqrt(max(noiseEigen[k], 1e-9))
+    std::vector<std::vector<double>> W(bandCount, std::vector<double>(bandCount, 0.0));
+    for (int b = 0; b < bandCount; ++b) {
+        for (int k = 0; k < bandCount; ++k) {
+            const double dk = std::max(static_cast<double>(noiseEigen[k]), 1e-9);
+            W[b][k] = static_cast<double>(noiseVectors[b][k]) / std::sqrt(dk);
+        }
+    }
+
+    // Step 2: Compute whitened data covariance: C_Y = W^T * C_data * W
+    std::vector<std::vector<float>> yCov(bandCount, std::vector<float>(bandCount, 0.0f));
+    for (int i = 0; i < bandCount; ++i) {
+        for (int j = i; j < bandCount; ++j) {
+            double sum = 0.0;
+            for (int r = 0; r < bandCount; ++r) {
+                for (int c = 0; c < bandCount; ++c) {
+                    sum += W[r][i] * covMatrix[r][c] * W[c][j];
+                }
+            }
+            yCov[i][j] = static_cast<float>(sum);
+            yCov[j][i] = yCov[i][j];
+        }
+    }
+
+    // Step 3: Eigen-decompose whitened covariance matrix
+    std::vector<float> yEigen;
+    std::vector<std::vector<float>> yVectors;
+    jacobiEigen(yCov, bandCount, yEigen, yVectors);
+
+    std::vector<int> indices(bandCount);
+    for (int i = 0; i < bandCount; ++i) indices[i] = i;
+    std::sort(indices.begin(), indices.end(), [&](int a, int b) {
+        return yEigen[a] > yEigen[b];
+    });
+
+    // Step 4: Final MNF transformation matrix M = W * V_Y (top numComponents)
+    std::vector<std::vector<double>> Mtrans(numComponents, std::vector<double>(bandCount, 0.0));
+    for (int comp = 0; comp < numComponents; ++comp) {
+        const int ei = indices[comp];
+        for (int b = 0; b < bandCount; ++b) {
+            double sum = 0.0;
+            for (int k = 0; k < bandCount; ++k) {
+                sum += W[b][k] * yVectors[k][ei];
+            }
+            Mtrans[comp][b] = sum;
+        }
+    }
+
+    // Pass 3: Create output GeoTIFF & block-stream transformation
+    GdalDatasetWrapper outDataset;
+    if (!outDataset.create(outputPath, width, height, numComponents, GDT_Float32,
+                           srcDataset.geoTransform(), srcDataset.projection())) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Failed to create output MNF dataset: ") + outDataset.lastError();
+        return false;
+    }
+
+    for (int comp = 0; comp < numComponents; ++comp)
+        outDataset.setBandNoDataValue(comp + 1, std::numeric_limits<float>::quiet_NaN());
+
+    std::vector<float> outTileBuffer(tileWidth * tileHeight);
+
+    for (int y = 0; y < height; y += tileHeight) {
+        const int bh = std::min(tileHeight, height - y);
+        for (int x = 0; x < width; x += tileWidth) {
+            const int bw = std::min(tileWidth, width - x);
+            const int tileSize = bw * bh;
+
+            for (int b = 0; b < bandCount; ++b) {
+                if (!srcDataset.readBandWindow(b + 1, x, y, bw, bh, tileBuffers[b].data())) {
+                    if (errorMessage)
+                        *errorMessage = QStringLiteral("Failed to read band window %1 at %2,%3").arg(b + 1).arg(x).arg(y);
+                    return false;
+                }
+            }
+
+            for (int comp = 0; comp < numComponents; ++comp) {
+                for (int p = 0; p < tileSize; ++p) {
+                    bool valid = true;
+                    for (int b = 0; b < bandCount; ++b) {
+                        if (!isPixelValid(b, tileBuffers[b][p])) { valid = false; break; }
+                    }
+                    if (!valid) {
+                        outTileBuffer[p] = std::numeric_limits<float>::quiet_NaN();
+                        continue;
+                    }
+                    double val = 0.0;
+                    for (int b = 0; b < bandCount; ++b) {
+                        val += Mtrans[comp][b] * (static_cast<double>(tileBuffers[b][p]) - means[b]);
+                    }
+                    outTileBuffer[p] = static_cast<float>(val);
+                }
+
+                if (!outDataset.writeBandWindow(comp + 1, x, y, bw, bh, outTileBuffer.data())) {
+                    if (errorMessage)
+                        *errorMessage = QStringLiteral("Failed to write MNF component band window %1 at %2,%3").arg(comp + 1).arg(x).arg(y);
+                    return false;
+                }
+            }
+        }
     }
 
     return true;
