@@ -11,6 +11,8 @@ qt_add_library(sicnu_data STATIC
   data_result.h
   derivation_record.cpp
   derivation_record.h
+  execution_fingerprint.cpp
+  execution_fingerprint.h
   internal/source_provider.h
   internal/source_provider_registry.cpp
   internal/source_provider_registry.h

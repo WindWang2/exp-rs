@@ -1,6 +1,7 @@
 // src/processing/framework/atomic_algorithm_adapter.cpp
 #include "atomic_algorithm_adapter.h"
 #include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_error.h"
 #include <unordered_set>
 
 namespace sicnu::processing {
@@ -132,7 +133,8 @@ AlgorithmDescriptor RsOperatorAdapter::descriptor() const
   return mDesc;
 }
 
-Json::Value RsOperatorAdapter::execute( const Json::Value &params, ProgressCallback progressCb )
+Json::Value RsOperatorAdapter::execute( const Json::Value &params, ProgressCallback progressCb,
+                                        std::function<bool()> isCancelledFn )
 {
   if ( !mOp ) return Json::Value( Json::objectValue );
 
@@ -142,6 +144,11 @@ Json::Value RsOperatorAdapter::execute( const Json::Value &params, ProgressCallb
     ctx.setProgressCallback( [progressCb]( double progress, const std::string &message ) {
       progressCb( static_cast<int>( progress * 100.0 ), message );
     } );
+  }
+  if ( isCancelledFn && isCancelledFn() )
+  {
+    throw operators::RSOperatorError( operators::ErrorCode::Cancelled,
+                                      "Cancelled before run: " + mOp->name() );
   }
 
   return mOp->run( params, ctx );

@@ -21,7 +21,11 @@ public:
   virtual std::string algorithmId() const = 0;
   virtual AlgorithmDescriptor descriptor() const = 0;
 
-  virtual Json::Value execute( const Json::Value &params, ProgressCallback progressCb = nullptr ) = 0;
+  /// Execute the algorithm. @a progressCb receives progress updates;
+  /// @a isCancelledFn (optional) is polled around the lifecycle so an external
+  /// cancel request (e.g. JobEngine) is honored mid-execution.
+  virtual Json::Value execute( const Json::Value &params, ProgressCallback progressCb = nullptr,
+                               std::function<bool()> isCancelledFn = nullptr ) = 0;
 };
 
 using AtomicAlgorithmAdapterPtr = std::shared_ptr<AtomicAlgorithmAdapter>;
@@ -34,7 +38,8 @@ public:
 
   std::string algorithmId() const override;
   AlgorithmDescriptor descriptor() const override;
-  Json::Value execute( const Json::Value &params, ProgressCallback progressCb = nullptr ) override;
+  Json::Value execute( const Json::Value &params, ProgressCallback progressCb = nullptr,
+                       std::function<bool()> isCancelledFn = nullptr ) override;
 
 private:
   std::unique_ptr<operators::RSOperator> mOp;

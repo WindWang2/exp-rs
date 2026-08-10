@@ -7,6 +7,7 @@ add_library(sicnu_processing SHARED
     gdal/gdal_grid_compat.cpp
     gdal/gdal_async_reader.cpp
     gdal/gdal_block_stream.cpp
+    gdal/gdal_multiband_block_stream.cpp
     gdal/gdal_error_handler.cpp
 
     algorithms/spectral_indices.cpp
@@ -201,6 +202,7 @@ endif()
 add_library(sicnu_task_center STATIC
     framework/task_center.cpp
     framework/resource_monitor.cpp
+    framework/task_resource_budget.cpp
     framework/agent_workflow_executor.cpp
     # Task Center seam for OutputCommitter and ToolCallDispatcher default constructor
     # — kept out of sicnu_processing so that library does not need JobEngine / TaskCenter link deps.

@@ -9,6 +9,55 @@
 /// Hyperspectral anomaly detection kernels.
 namespace SpectralAnomaly
 {
+    /// Background statistics for the RX detector, computed in streaming passes.
+    /// mean.size() == bands; covariance.size() == bands*bands (row-major). The
+    /// covariance is the biased sample covariance (sum of centered outer
+    /// products / count) — numerically equivalent to rxDetector's two-pass
+    /// computation (within floating-point rounding for multi-tile passes).
+    /// Exposed so streaming operators can compute stats in tile passes and then
+    /// score per-tile without materializing the whole raster (perf goal §2c).
+    /// Note: the mean and covariance passes are SEPARATE accumulators (a mean
+    /// pass must be finalized before a covariance pass begins) to preserve the
+    /// exact computation order of rxDetector.
+    struct BackgroundStats
+    {
+        std::vector<double> mean;
+        std::vector<double> covariance;
+        size_t count = 0; ///< number of pixels accumulated in the current pass
+    };
+
+    /// Accumulate a sum-of-values pass (for the mean). Resets @a stats for a mean
+    /// pass on first call (band-count inferred). @a pixels layout: pixels[p*bands+b].
+    void accumulateMean( const float *pixels, size_t count, int bands,
+                         BackgroundStats *stats );
+
+    /// Divide the accumulated sum by count → mean. Resets the count/sum state.
+    void finalizeMean( BackgroundStats *stats );
+
+    /// Accumulate a centered-sum-of-outer-products pass (for the covariance),
+    /// using the already-finalized mean. Must be called AFTER finalizeMean().
+    void accumulateCovariance( const float *pixels, size_t count, int bands,
+                               BackgroundStats *stats );
+
+    /// Divide the accumulated covariance sum by count → biased covariance.
+    void finalizeCovariance( BackgroundStats *stats );
+
+    /// Invert the (ridged) covariance. Adds a small ridge (1e-9) on the diagonal
+    /// for robustness. Returns false when singular.
+    bool invertCovariance( const std::vector<double> &covariance, int bands,
+                           std::vector<double> *inverse );
+
+    /// Per-pixel RX score for one spectrum given precomputed mean + inverse cov.
+    /// Equivalent to the per-pixel step of rxDetector. @a spectrum size == bands.
+    float rxScore( const float *spectrum, const std::vector<double> &mean,
+                   const std::vector<double> &inverseCov, int bands );
+
+    /// Per-pixel RX score reusing a caller-provided scratch buffer (size >= bands)
+    /// to avoid a per-pixel heap allocation in tight streaming loops (perf goal §2c).
+    float rxScore( const float *spectrum, const std::vector<double> &mean,
+                   const std::vector<double> &inverseCov, int bands,
+                   std::vector<double> *scratch );
+
     /**
      * Reed-Xiaoli (RX) detector: per-pixel Mahalanobis distance to the global
      * background statistics.

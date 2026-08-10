@@ -12,7 +12,7 @@
 #include <QIcon>
 #include <QMessageBox>
 
-#include "app/app_paths.h"
+#include "framework/runtime_paths.h"
 
 GenericCliProvider::GenericCliProvider(const QString &configDir)
     : m_configDir(configDir)
@@ -37,7 +37,7 @@ void GenericCliProvider::loadAlgorithms()
 {
     loadToolsFromDirectory(m_configDir);
 
-    const QString shipped = AppPaths::resolveDataPath( "data/tools/custom" );
+    const QString shipped = sicnu::processing::resolveRuntimeDataPath( "data/tools/custom" );
     if ( QDir( shipped ).exists() )
         loadToolsFromDirectory( shipped );
 

@@ -17,6 +17,7 @@
 #include "algorithm_engine.h"
 #include "jobs/job_types.h"
 #include "resource_monitor.h"
+#include "task_resource_budget.h"
 
 namespace sicnu::operators {
 class RSOperatorContext;
@@ -170,6 +171,19 @@ public:
     /// Inject a custom RSS sampler (MB) for tests; {} restores the default.
     void setRssSampler( std::function<unsigned int()> sampler );
 
+    /// Resource-aware scheduling (perf/architecture goal 2026-08-08): the RAM
+    /// budget (MiB) gates launch so a FullRaster high-memory operator is not
+    /// started alongside others when the budget can't safely hold them. 0
+    /// disables the gate (legacy behavior). Defaults to the memory watermark.
+    void setResourceBudgetMb( unsigned int mb );
+    unsigned int resourceBudgetMb() const;
+    /// Inject a custom estimate resolver for tests; {} restores the
+    /// registry-backed default resolver.
+    void setEstimateResolver( TaskEstimateResolver resolver );
+    /// Resolve the RAM estimate (MiB) for an algorithm, applying the
+    /// conservative per-class fallback when the operator declares none.
+    unsigned int resolveEstimateMb( const std::string &algorithmId ) const;
+
 signals:
     /// Lifecycle notifications are always emitted **outside** m_mutex so slots may
     /// safely re-enter TaskCenter (getTaskInfo, enqueue, cancel, …) without deadlock.
@@ -245,6 +259,10 @@ private:
     long m_nextTaskId = 1;
     long m_nextPipelineId = 1;
     ResourceMonitor m_resourceMonitor;
+    TaskResourceBudget m_resourceBudget;
+    /// Installs the registry-backed estimate resolver (idempotent). Called once
+    /// from the constructor; re-installed if a test clears it via {}.
+    void installDefaultEstimateResolver();
 };
 
 } // namespace sicnu

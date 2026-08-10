@@ -142,10 +142,11 @@ TEST_CASE( "Operators expose execution estimates through agent metadata", "[proc
     {
       foundRx = true;
       REQUIRE( d.agentMetadata.execution.isObject() );
-      // FullRaster operators declare a peak-RAM estimate and no tile.
+      // Now MultiPassStreaming (three-pass: mean → covariance → per-tile score)
+      // after the streaming migration — declares a tile and a tile-sized RAM.
       CHECK( d.agentMetadata.execution["estimatedRamBytes"].asInt64() > 0 );
-      CHECK( d.agentMetadata.execution["tileWidth"].asInt64() == 0 );
-      CHECK( d.agentMetadata.memoryPolicy == "full_raster" );
+      CHECK( d.agentMetadata.execution["tileWidth"].asInt64() > 0 );
+      CHECK( d.agentMetadata.memoryPolicy == "multipass_streaming" );
     }
     if ( d.id == "rs:apply_mask" )
     {

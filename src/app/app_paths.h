@@ -1,5 +1,7 @@
 #pragma once
 
+#include "processing/framework/runtime_paths.h"
+
 #include <QString>
 #include <QDir>
 #include <QCoreApplication>
@@ -7,6 +9,12 @@
 /**
  * Utility class for resolving application paths dynamically.
  * Replaces all hardcoded paths with runtime-resolved equivalents.
+ *
+ * The project-root path resolution is owned by
+ * sicnu::processing::resolveRuntimeDataPath (a pure helper shared with the
+ * processing layer so it does not have to reach up into this app header — an
+ * inverted dependency, perf/architecture goal §3b). AppPaths keeps its
+ * app-facing facade and delegates.
  */
 class AppPaths
 {
@@ -22,19 +30,11 @@ public:
 
   /**
    * Resolves a data file path relative to the project root.
-   * Navigates up from the executable directory to find the project root.
+   * Delegates to the shared runtime path helper (single owner of the logic).
    */
   static QString resolveDataPath( const QString &relativePath )
   {
-    QDir dir( QCoreApplication::applicationDirPath() );
-    // From build-tests/tests/ -> build-tests/ -> project root
-    // From build/ -> project root
-    // From install/bin/ -> install/
-    while ( !dir.exists( "CMakeLists.txt" ) && !dir.exists( "data" ) && dir.cdUp() )
-    {
-      // keep going up
-    }
-    return dir.absoluteFilePath( relativePath );
+    return sicnu::processing::resolveRuntimeDataPath( relativePath );
   }
 
   /**

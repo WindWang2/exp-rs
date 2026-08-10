@@ -1,6 +1,7 @@
 // multi_temporal_widget.h — Multi-temporal Analysis Widget
 #pragma once
 
+#include <QPointer>
 #include <QWidget>
 #include <QVector>
 
@@ -32,8 +33,11 @@ private:
     void setupUi();
     void computeTemporalStats();
 
+    // QPointer so the layer reference nulls automatically when the layer is
+    // removed from the project (perf/architecture goal §13: layer-remove
+    // lifetime safety). computeTemporalStats skips nulled entries.
     struct TemporalEntry {
-        QgsRasterLayer *layer;
+        QPointer<QgsRasterLayer> layer;
         QString date;
     };
 
