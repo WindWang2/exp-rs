@@ -14,6 +14,7 @@
 #include "workflow/workflow_types.h"
 
 #include <QCoreApplication>
+#include <unordered_map>
 
 using namespace sicnu::workflow;
 using namespace sicnu::operators;
