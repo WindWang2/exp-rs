@@ -103,7 +103,7 @@ bool GdalDatasetWrapper::create(const QString &path, int width, int height, int 
         return false;
     }
 
-    if (GDALSetGeoTransform(ds, geoTransform.data()) != CE_None) {
+    if (GDALSetGeoTransform(ds, const_cast<double *>(geoTransform.data())) != CE_None) {
         m_lastError = QStringLiteral("Failed to write geotransform");
         if (errorMessage) *errorMessage = m_lastError;
         GDALClose(ds);
