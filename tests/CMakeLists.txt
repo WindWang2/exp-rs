@@ -85,6 +85,23 @@ target_include_directories(test_tool_call_dispatcher PRIVATE
 )
 sicnu_discover_tests(test_tool_call_dispatcher)
 
+# Performance & Benchmark test for Image Fusion (headless benchmark target)
+add_executable(test_perf_fusion test_perf_fusion.cpp)
+target_link_libraries(test_perf_fusion PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  Sicnu::data
+)
+target_include_directories(test_perf_fusion PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/core
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_perf_fusion)
+
+
 # WorkspaceSnapshot capture needs ActiveViewHost translation unit + display types.
 qt_add_executable(test_workspace_snapshot
   test_workspace_snapshot.cpp

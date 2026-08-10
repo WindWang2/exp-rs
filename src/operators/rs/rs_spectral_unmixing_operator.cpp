@@ -114,14 +114,11 @@ Json::Value RsSpectralUnmixingOperator::metadata() const {
 }
 
 Json::Value RsSpectralUnmixingOperator::executionEstimate() const {
-    // FullRaster (default policy): the whole raster is resident. For a typical
-    // 1024x1024x4-band float32 input (16 MiB) with 4 endmembers, peak RAM is
-    // the input pixel buffer (16 MiB) + abundance buffer (16 MiB) + band-major
-    // write copy (16 MiB) + per-pixel reconstruction error (4 MiB).
     Json::Value est(Json::objectValue);
-    est["tileWidth"] = 0;          // full-raster: tiling not applicable
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 54525952; // ~52 MiB
+    est["tileWidth"] = 512;
+    est["tileHeight"] = 512;
+    est["estimatedRamBytes"] = 12582912; // 12 MiB tile working set
+    est["temporaryDiskBytes"] = 0;
     return est;
 }
 
@@ -159,64 +156,94 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
 
     context.logInfo("Spectral unmixing: " + std::to_string(nEndmembers) +
                     " endmembers over " + std::to_string(nBands) + " bands");
-    context.reportProgress(0.15, "Reading bands");
+    context.reportProgress(0.1, "Initializing datasets");
 
-    const size_t pixelCount = static_cast<size_t>(width) * height;
-    std::vector<float> pixels(pixelCount * static_cast<size_t>(nBands), 0.0f);
-    for (int bi = 0; bi < nBands; ++bi)
-    {
-        std::vector<float> bandData(pixelCount);
-        if (!ds.readBandData(bands[bi], bandData.data(), width, height))
-            throw RSOperatorError(ErrorCode::GdalError,
-                                  "Failed to read band " + std::to_string(bands[bi]));
-        for (size_t p = 0; p < pixelCount; ++p)
-            pixels[p * static_cast<size_t>(nBands) + bi] = bandData[p];
-    }
+    const int tileWidth = 512;
+    const int tileHeight = 512;
 
-    context.reportProgress(0.45, "Unmixing");
-    context.throwIfCancelled();
-
-    SpectralUnmixing::UnmixResult unmixResult;
-    QString error;
-    if (!SpectralUnmixing::unmix(pixels.data(), pixelCount, nBands,
-                                 endmembers.data(), nEndmembers,
-                                 &unmixResult, &error))
-        throw RSOperatorError(ErrorCode::ComputationError,
-                              error.isEmpty() ? "Spectral unmixing failed" : error.toStdString());
-
-    context.reportProgress(0.75, "Writing abundance raster");
-
-    // One abundance band per endmember (pixel-major -> band-major).
-    std::vector<std::vector<float>> abundanceBands(
-        nEndmembers, std::vector<float>(pixelCount));
-    for (int e = 0; e < nEndmembers; ++e)
-        for (size_t p = 0; p < pixelCount; ++p)
-            abundanceBands[e][p] = unmixResult.abundances[p * static_cast<size_t>(nEndmembers) + e];
-
-    QString writeError;
-    if (!writeGdalOutput(QString::fromStdString(outputPath), width, height, abundanceBands,
-                         ds.geoTransform(), ds.projection(), &writeError))
+    GdalDatasetWrapper outDataset;
+    if (!outDataset.create(QString::fromStdString(outputPath), width, height, nEndmembers, GDT_Float32,
+                           ds.geoTransform(), ds.projection()))
         throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed to write abundance raster: " + writeError.toStdString());
+                              "Failed to create output abundance dataset: " + outputPath);
 
-    // Optional reconstruction-error band.
     const std::string errorPath = getString(params, "errorOut", "");
+    GdalDatasetWrapper errorDataset;
     if (!errorPath.empty())
     {
-        if (!writeGdalOutput(QString::fromStdString(errorPath), width, height,
-                             {unmixResult.reconstructionError},
-                             ds.geoTransform(), ds.projection(), &writeError))
+        if (!errorDataset.create(QString::fromStdString(errorPath), width, height, 1, GDT_Float32,
+                                 ds.geoTransform(), ds.projection()))
             throw RSOperatorError(ErrorCode::FileNotWritable,
-                                  "Failed to write error raster: " + writeError.toStdString());
+                                  "Failed to create error output dataset: " + errorPath);
     }
 
-    const double meanError = unmixResult.reconstructionError.empty()
-        ? 0.0
-        : std::accumulate(unmixResult.reconstructionError.begin(),
-                          unmixResult.reconstructionError.end(), 0.0)
-              / static_cast<double>(unmixResult.reconstructionError.size());
+    std::vector<float> tilePixels(tileWidth * tileHeight * static_cast<size_t>(nBands));
+    std::vector<float> bandData(tileWidth * tileHeight);
+    std::vector<float> abundanceBuffer(tileWidth * tileHeight);
+
+    double totalErrorSum = 0.0;
+    uint64_t totalUnmixedPixels = 0;
+
+    const int totalBlocksY = (height + tileHeight - 1) / tileHeight;
+    int processedBlocksY = 0;
+
+    for (int y = 0; y < height; y += tileHeight) {
+        context.throwIfCancelled();
+        const int bh = std::min(tileHeight, height - y);
+        for (int x = 0; x < width; x += tileWidth) {
+            const int bw = std::min(tileWidth, width - x);
+            const size_t tileSize = static_cast<size_t>(bw) * bh;
+
+            // Read band windows into tilePixels (pixel-major for unmix kernel)
+            for (int bi = 0; bi < nBands; ++bi) {
+                if (!ds.readBandWindow(bands[bi], x, y, bw, bh, bandData.data()))
+                    throw RSOperatorError(ErrorCode::GdalError,
+                                          "Failed to read band window " + std::to_string(bands[bi]) +
+                                          " at (" + std::to_string(x) + "," + std::to_string(y) + ")");
+                for (size_t p = 0; p < tileSize; ++p)
+                    tilePixels[p * static_cast<size_t>(nBands) + bi] = bandData[p];
+            }
+
+            SpectralUnmixing::UnmixResult unmixResult;
+            QString errorMsg;
+            if (!SpectralUnmixing::unmix(tilePixels.data(), tileSize, nBands,
+                                         endmembers.data(), nEndmembers,
+                                         &unmixResult, &errorMsg))
+                throw RSOperatorError(ErrorCode::ComputationError,
+                                      errorMsg.isEmpty() ? "Spectral unmixing failed" : errorMsg.toStdString());
+
+            // Write abundance bands
+            for (int e = 0; e < nEndmembers; ++e) {
+                for (size_t p = 0; p < tileSize; ++p)
+                    abundanceBuffer[p] = unmixResult.abundances[p * static_cast<size_t>(nEndmembers) + e];
+
+                if (!outDataset.writeBandWindow(e + 1, x, y, bw, bh, abundanceBuffer.data()))
+                    throw RSOperatorError(ErrorCode::FileNotWritable,
+                                          "Failed to write abundance band window " + std::to_string(e + 1));
+            }
+
+            // Write error band if requested
+            if (!errorPath.empty()) {
+                if (!errorDataset.writeBandWindow(1, x, y, bw, bh, unmixResult.reconstructionError.data()))
+                    throw RSOperatorError(ErrorCode::FileNotWritable,
+                                          "Failed to write reconstruction error band window");
+            }
+
+            for (double err : unmixResult.reconstructionError) {
+                totalErrorSum += err;
+                totalUnmixedPixels++;
+            }
+        }
+        processedBlocksY++;
+        context.reportProgress(0.1 + 0.85 * (static_cast<double>(processedBlocksY) / totalBlocksY), "Unmixing tile rows");
+    }
+
+    const double meanError = (totalUnmixedPixels > 0) ? (totalErrorSum / static_cast<double>(totalUnmixedPixels)) : 0.0;
 
     ds.close();
+    outDataset.close();
+    if (!errorPath.empty()) errorDataset.close();
+
     context.reportProgress(1.0, "Spectral unmixing complete");
 
     Json::Value result(Json::objectValue);

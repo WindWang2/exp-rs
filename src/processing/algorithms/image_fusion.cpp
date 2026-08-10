@@ -5,6 +5,7 @@
 #include "data/raster_grid_compat.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_grid_compat.h"
+#include <gdal.h>
 
 #include <cmath>
 #include <algorithm>
@@ -617,6 +618,34 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
     return result;
 }
 
+namespace {
+
+// Helper: accumulate statistics for single pass linear histogram match
+struct StatsAccumulator {
+    double sum = 0.0;
+    double sumSq = 0.0;
+    int64_t count = 0;
+
+    void add(double val) {
+        sum += val;
+        sumSq += val * val;
+        count++;
+    }
+
+    double mean() const {
+        return (count > 0) ? (sum / count) : 0.0;
+    }
+
+    double stddev() const {
+        if (count <= 1) return 0.0;
+        double m = mean();
+        double var = (sumSq - static_cast<double>(count) * m * m) / (count - 1);
+        return (var > 0.0) ? std::sqrt(var) : 0.0;
+    }
+};
+
+} // anonymous namespace
+
 bool ImageFusion::processNativeFusion( const QString &panPath, const QString &msPath,
                                        const QString &outputPath,
                                        const NativeFusionParams &params,
@@ -638,11 +667,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
         return false;
     }
 
-    // Grid preflight (ADR 0066): pan-sharpening REQUIRES the two rasters to
-    // share a CRS, origin lattice, and overlapping extent, while differing
-    // resolutions are the point of the method (MS is resampled onto the pan
-    // grid below). So resolution differences are allowed and logged; any other
-    // blocking grid issue fails with an actionable message.
+    // Grid preflight checks
     const sicnu::data::GridCompatReport gridReport =
         sicnu::data::compareGrids( sicnu::processing::gridFromDataset( panDataset ),
                                    sicnu::processing::gridFromDataset( msDataset ) );
@@ -650,14 +675,12 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
     {
         if ( issue.verdict == sicnu::data::GridCompatVerdict::PixelSizeMismatch )
         {
-            // Resampling the MS raster onto the pan grid is the fusion design.
             continue;
         }
         if ( issue.blocking )
         {
             if ( errorMessage )
-                *errorMessage = QStringLiteral( "Pan and multispectral rasters are not "
-                                                "co-registered: %1" )
+                *errorMessage = QStringLiteral( "Pan and multispectral rasters are not co-registered: %1" )
                                     .arg( issue.message );
             return false;
         }
@@ -673,44 +696,11 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
         return false;
     }
 
-    const size_t pixelCount = static_cast<size_t>( w ) * static_cast<size_t>( h );
-    std::vector<float> panData( pixelCount );
-    if ( !panDataset.readBandData( 1, panData.data(), w, h ) )
-    {
-        if ( errorMessage )
-            *errorMessage = QStringLiteral( "Failed to read panchromatic band" );
-        return false;
-    }
-
     const int nMsBands = std::min( msBands, 4 );
-    QVector<std::vector<float>> msData( nMsBands );
-    QVector<const float *> msPtrs( nMsBands );
-    for ( int b = 0; b < nMsBands; ++b )
+    int nOutBands = nMsBands;
+    if ( params.method == QStringLiteral( "ihs" ) )
     {
-        msData[b].resize( pixelCount );
-        if ( !msDataset.readBandData( b + 1, msData[b].data(), w, h ) )
-        {
-            if ( errorMessage )
-                *errorMessage = QStringLiteral( "Failed to read multispectral band %1" ).arg( b + 1 );
-            return false;
-        }
-        msPtrs[b] = msData[b].data();
-    }
-
-    const float nodata = -9999.0f;
-    QVector<QVector<float>> result;
-
-    if ( params.method == QStringLiteral( "linear" ) )
-    {
-        result = linearWeighted( msPtrs, nMsBands, panData.data(), w, h, nodata,
-                                 params.msWeights, params.panWeight );
-    }
-    else if ( params.method == QStringLiteral( "brovey" ) )
-    {
-        result = brovey( msPtrs, nMsBands, panData.data(), w, h, nodata );
-    }
-    else if ( params.method == QStringLiteral( "ihs" ) )
-    {
+        nOutBands = 3;
         if ( params.redIdx < 0 || params.greenIdx < 0 || params.blueIdx < 0 ||
              params.redIdx >= nMsBands || params.greenIdx >= nMsBands || params.blueIdx >= nMsBands )
         {
@@ -718,47 +708,300 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                 *errorMessage = QStringLiteral( "Invalid RGB band selection for IHS fusion" );
             return false;
         }
-        result = ihsFusion( msPtrs[params.redIdx], msPtrs[params.greenIdx], msPtrs[params.blueIdx],
-                            panData.data(), w, h, nodata );
+    }
+
+    // Create GeoTIFF output dataset for streaming writes
+    GdalDatasetWrapper outDataset;
+    if ( !outDataset.create( outputPath, w, h, nOutBands, GDT_Float32,
+                             panDataset.geoTransform(), panDataset.projection(), errorMessage ) )
+    {
+        return false;
+    }
+
+    const float nodata = -9999.0f;
+    const int tileW = std::max( 16, params.tileWidth <= 0 ? 512 : params.tileWidth );
+    const int tileH = std::max( 16, params.tileHeight <= 0 ? 512 : params.tileHeight );
+
+    const int cols = ( w + tileW - 1 ) / tileW;
+    const int rows = ( h + tileH - 1 ) / tileH;
+    const size_t maxTilePixels = static_cast<size_t>( tileW ) * tileH;
+
+    // Buffer allocations (reused across all tiles)
+    std::vector<float> panBuf( maxTilePixels );
+    std::vector<std::vector<float>> msBuf( nMsBands, std::vector<float>( maxTilePixels ) );
+    std::vector<std::vector<float>> outBuf( nOutBands, std::vector<float>( maxTilePixels ) );
+
+    if ( params.method == QStringLiteral( "linear" ) )
+    {
+        QVector<float> weights = params.msWeights;
+        if ( weights.isEmpty() )
+        {
+            weights.resize( nMsBands );
+            float defaultMsWeight = ( 1.0f - params.panWeight ) / nMsBands;
+            for ( int b = 0; b < nMsBands; ++b )
+                weights[b] = defaultMsWeight;
+        }
+
+        for ( int r = 0; r < rows; ++r )
+        {
+            const int yOff = r * tileH;
+            const int th = std::min( tileH, h - yOff );
+            for ( int c = 0; c < cols; ++c )
+            {
+                const int xOff = c * tileW;
+                const int tw = std::min( tileW, w - xOff );
+                const size_t tileSize = static_cast<size_t>( tw ) * th;
+
+                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
+                    return false;
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                        return false;
+                }
+
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    const float msW = std::clamp( weights[b], 0.0f, 1.0f );
+                    const float *msData = msBuf[b].data();
+                    float *outData = outBuf[b].data();
+
+                    for ( size_t i = 0; i < tileSize; ++i )
+                    {
+                        if ( msData[i] == nodata || panBuf[i] == nodata ||
+                             std::isnan( msData[i] ) || std::isnan( panBuf[i] ) )
+                        {
+                            outData[i] = nodata;
+                        }
+                        else
+                        {
+                            outData[i] = msW * msData[i] + params.panWeight * panBuf[i];
+                        }
+                    }
+                    if ( !outDataset.writeBandWindow( b + 1, xOff, yOff, tw, th, outData ) )
+                        return false;
+                }
+            }
+        }
+        return true;
+    }
+    else if ( params.method == QStringLiteral( "brovey" ) )
+    {
+        std::vector<float> msSum( maxTilePixels );
+
+        for ( int r = 0; r < rows; ++r )
+        {
+            const int yOff = r * tileH;
+            const int th = std::min( tileH, h - yOff );
+            for ( int c = 0; c < cols; ++c )
+            {
+                const int xOff = c * tileW;
+                const int tw = std::min( tileW, w - xOff );
+                const size_t tileSize = static_cast<size_t>( tw ) * th;
+
+                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
+                    return false;
+                std::fill_n( msSum.begin(), tileSize, 0.0f );
+
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                        return false;
+                    const float *msData = msBuf[b].data();
+                    for ( size_t i = 0; i < tileSize; ++i )
+                    {
+                        if ( msData[i] != nodata && !std::isnan( msData[i] ) )
+                            msSum[i] += msData[i];
+                    }
+                }
+
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    const float *msData = msBuf[b].data();
+                    float *outData = outBuf[b].data();
+
+                    for ( size_t i = 0; i < tileSize; ++i )
+                    {
+                        if ( msData[i] == nodata || std::isnan( msData[i] ) ||
+                             panBuf[i] == nodata || std::isnan( panBuf[i] ) ||
+                             msSum[i] < 1e-10f )
+                        {
+                            outData[i] = nodata;
+                        }
+                        else
+                        {
+                            outData[i] = ( msData[i] / msSum[i] ) * panBuf[i];
+                        }
+                    }
+                    if ( !outDataset.writeBandWindow( b + 1, xOff, yOff, tw, th, outData ) )
+                        return false;
+                }
+            }
+        }
+        return true;
+    }
+    else if ( params.method == QStringLiteral( "ihs" ) )
+    {
+        // PASS 1: Accumulate global statistics for Intensity and Pan
+        StatsAccumulator statsI, statsP;
+        for ( int r = 0; r < rows; ++r )
+        {
+            const int yOff = r * tileH;
+            const int th = std::min( tileH, h - yOff );
+            for ( int c = 0; c < cols; ++c )
+            {
+                const int xOff = c * tileW;
+                const int tw = std::min( tileW, w - xOff );
+                const size_t tileSize = static_cast<size_t>( tw ) * th;
+
+                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) ||
+                     !msDataset.readBandWindow( params.redIdx + 1, xOff, yOff, tw, th, msBuf[0].data() ) ||
+                     !msDataset.readBandWindow( params.greenIdx + 1, xOff, yOff, tw, th, msBuf[1].data() ) ||
+                     !msDataset.readBandWindow( params.blueIdx + 1, xOff, yOff, tw, th, msBuf[2].data() ) )
+                    return false;
+
+                const float *msR = msBuf[0].data();
+                const float *msG = msBuf[1].data();
+                const float *msB = msBuf[2].data();
+
+                for ( size_t i = 0; i < tileSize; ++i )
+                {
+                    if ( msR[i] != nodata && msG[i] != nodata && msB[i] != nodata &&
+                         panBuf[i] != nodata && !std::isnan( msR[i] ) &&
+                         !std::isnan( msG[i] ) && !std::isnan( msB[i] ) && !std::isnan( panBuf[i] ) )
+                    {
+                        float intensity = ( msR[i] + msG[i] + msB[i] ) / 3.0f;
+                        statsI.add( intensity );
+                        statsP.add( panBuf[i] );
+                    }
+                }
+            }
+        }
+
+        double stdI = statsI.stddev();
+        double stdP = statsP.stddev();
+        double scale = ( stdP > 1e-10 ) ? ( stdI / stdP ) : 1.0;
+        double meanI = statsI.mean();
+        double meanP = statsP.mean();
+
+        // PASS 2: Stream transform and write
+        for ( int r = 0; r < rows; ++r )
+        {
+            const int yOff = r * tileH;
+            const int th = std::min( tileH, h - yOff );
+            for ( int c = 0; c < cols; ++c )
+            {
+                const int xOff = c * tileW;
+                const int tw = std::min( tileW, w - xOff );
+                const size_t tileSize = static_cast<size_t>( tw ) * th;
+
+                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) ||
+                     !msDataset.readBandWindow( params.redIdx + 1, xOff, yOff, tw, th, msBuf[0].data() ) ||
+                     !msDataset.readBandWindow( params.greenIdx + 1, xOff, yOff, tw, th, msBuf[1].data() ) ||
+                     !msDataset.readBandWindow( params.blueIdx + 1, xOff, yOff, tw, th, msBuf[2].data() ) )
+                    return false;
+
+                const float *msR = msBuf[0].data();
+                const float *msG = msBuf[1].data();
+                const float *msB = msBuf[2].data();
+
+                for ( size_t i = 0; i < tileSize; ++i )
+                {
+                    if ( msR[i] == nodata || msG[i] == nodata || msB[i] == nodata ||
+                         panBuf[i] == nodata || std::isnan( msR[i] ) ||
+                         std::isnan( msG[i] ) || std::isnan( msB[i] ) || std::isnan( panBuf[i] ) )
+                    {
+                        outBuf[0][i] = nodata;
+                        outBuf[1][i] = nodata;
+                        outBuf[2][i] = nodata;
+                        continue;
+                    }
+
+                    float panMatched = static_cast<float>( ( panBuf[i] - meanP ) * scale + meanI );
+                    float red = msR[i], green = msG[i], blue = msB[i];
+                    float I = ( red + green + blue ) / 3.0f;
+
+                    if ( I < 1e-10f )
+                    {
+                        outBuf[0][i] = 0.0f;
+                        outBuf[1][i] = 0.0f;
+                        outBuf[2][i] = 0.0f;
+                        continue;
+                    }
+
+                    float m = std::min( { red, green, blue } );
+                    float sat = 1.0f - m / I;
+                    float c1 = red - 0.5f * ( green + blue );
+                    float c2 = ( green - blue ) * std::sqrt( 3.0f ) / 2.0f;
+                    float hue = std::atan2( c2, c1 );
+
+                    float newI = panMatched;
+                    float newC1 = newI * sat * std::cos( hue );
+                    float newC2 = newI * sat * std::sin( hue );
+
+                    float rOut = newI + newC1;
+                    float gOut = newI - 0.5f * newC1 - std::sqrt( 3.0f ) / 2.0f * newC2;
+                    float bOut = newI - 0.5f * newC1 + std::sqrt( 3.0f ) / 2.0f * newC2;
+
+                    outBuf[0][i] = std::max( 0.0f, rOut );
+                    outBuf[1][i] = std::max( 0.0f, gOut );
+                    outBuf[2][i] = std::max( 0.0f, bOut );
+                }
+
+                for ( int b = 0; b < 3; ++b )
+                {
+                    if ( !outDataset.writeBandWindow( b + 1, xOff, yOff, tw, th, outBuf[b].data() ) )
+                        return false;
+                }
+            }
+        }
+        return true;
     }
     else if ( params.method == QStringLiteral( "pca" ) )
     {
-        result = pcaFusion( msPtrs, nMsBands, panData.data(), w, h, nodata );
+        // Full in-memory fallback for small/reference compatibility; for processNativeFusion,
+        // read into memory and delegate to pcaFusion to match exact Jacobi decomposition behavior
+        QVector<std::vector<float>> msData( nMsBands );
+        QVector<const float *> msPtrs( nMsBands );
+        const size_t pixelCount = static_cast<size_t>( w ) * h;
+        std::vector<float> fullPan( pixelCount );
+        if ( !panDataset.readBandData( 1, fullPan.data(), w, h ) ) return false;
+        for ( int b = 0; b < nMsBands; ++b ) {
+            msData[b].resize( pixelCount );
+            if ( !msDataset.readBandData( b + 1, msData[b].data(), w, h ) ) return false;
+            msPtrs[b] = msData[b].data();
+        }
+        auto res = pcaFusion( msPtrs, nMsBands, fullPan.data(), w, h, nodata );
+        if ( res.isEmpty() ) return false;
+        for ( int b = 0; b < nMsBands; ++b ) {
+            if ( !outDataset.writeBandWindow( b + 1, 0, 0, w, h, res[b].constData() ) ) return false;
+        }
+        return true;
     }
     else if ( params.method == QStringLiteral( "gram_schmidt" ) )
     {
-        result = gramSchmidtFusion( msPtrs, nMsBands, panData.data(), w, h, nodata );
-    }
-    else
-    {
-        if ( errorMessage )
-            *errorMessage = QStringLiteral( "Unsupported native fusion method" );
-        return false;
-    }
-
-    if ( result.isEmpty() )
-    {
-        if ( errorMessage )
-            *errorMessage = QStringLiteral( "Fusion produced no output" );
-        return false;
-    }
-
-    std::vector<std::vector<float>> outBands;
-    outBands.reserve( result.size() );
-    for ( int b = 0; b < result.size(); ++b )
-    {
-        const QVector<float> &band = result[b];
-        outBands.emplace_back( band.constBegin(), band.constEnd() );
+        // Full in-memory fallback for small/reference compatibility; for processNativeFusion,
+        // read into memory and delegate to gramSchmidtFusion to match exact GS behavior
+        QVector<std::vector<float>> msData( nMsBands );
+        QVector<const float *> msPtrs( nMsBands );
+        const size_t pixelCount = static_cast<size_t>( w ) * h;
+        std::vector<float> fullPan( pixelCount );
+        if ( !panDataset.readBandData( 1, fullPan.data(), w, h ) ) return false;
+        for ( int b = 0; b < nMsBands; ++b ) {
+            msData[b].resize( pixelCount );
+            if ( !msDataset.readBandData( b + 1, msData[b].data(), w, h ) ) return false;
+            msPtrs[b] = msData[b].data();
+        }
+        auto res = gramSchmidtFusion( msPtrs, nMsBands, fullPan.data(), w, h, nodata );
+        if ( res.isEmpty() ) return false;
+        for ( int b = 0; b < nMsBands; ++b ) {
+            if ( !outDataset.writeBandWindow( b + 1, 0, 0, w, h, res[b].constData() ) ) return false;
+        }
+        return true;
     }
 
-    QString writeError;
-    if ( !writeGdalOutput( outputPath, w, h, outBands,
-                           panDataset.geoTransform(), panDataset.projection(), &writeError ) )
-    {
-        if ( errorMessage )
-            *errorMessage = writeError;
-        return false;
-    }
-
-    return true;
+    if ( errorMessage )
+        *errorMessage = QStringLiteral( "Unsupported native fusion method" );
+    return false;
 }
+

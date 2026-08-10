@@ -74,6 +74,8 @@ class ImageFusion
         int redIdx = 0;
         int greenIdx = 1;
         int blueIdx = 2;
+        int tileWidth = 512;
+        int tileHeight = 512;
     };
 
     /**

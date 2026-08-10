@@ -31,6 +31,10 @@ public:
         return "Reed-Xiaoli anomaly detection (Mahalanobis distance to scene background).";
     }
 
+    RSOperatorMemoryPolicy memoryPolicy() const override {
+        return RSOperatorMemoryPolicy::Streaming;
+    }
+
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;

@@ -37,6 +37,10 @@ public:
         return "Fuse panchromatic and multispectral imagery (pan-sharpening).";
     }
 
+    RSOperatorMemoryPolicy memoryPolicy() const override {
+        return RSOperatorMemoryPolicy::Streaming;
+    }
+
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;
