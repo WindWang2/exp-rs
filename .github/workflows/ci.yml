@@ -132,21 +132,25 @@ jobs:
         # Auth is a hard compile dependency of qgis_core (QgsAuthCertUtils /
         # QKeychain used unconditionally in core sources), so the Windows tier
         # builds qca + qtkeychain from source against the aqt-installed Qt.
-        # Both are small CMake projects (~5 min total). No plugins needed.
+        # Both are small CMake projects (~5 min total).
         shell: pwsh
         run: |
           git clone --depth 1 --branch v2.3.9 https://github.com/KDE/qca.git C:\deps\qca-src
-          cmake -S C:\deps\qca-src -B C:\deps\qca-build `
-            -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" `
-            -DBUILD_WITH_QT6=ON -DQCA_SUFFIX= -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF -DBUILD_PLUGINS=`
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake -S C:\deps\qca-src -B C:\deps\qca-build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DBUILD_WITH_QT6=ON -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           cmake --build C:\deps\qca-build --config Release --parallel
-          cmake --install C:\deps\qca-build --prefix C:\deps\qca-install
-          git clone --depth 1 --branch v0.14.3 https://github.com/frankosterfeld/qtkeychain.git C:\deps\kc-src
-          cmake -S C:\deps\kc-src -B C:\deps\kc-build `
-            -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install" `
-            -DBUILD_WITH_QT6=ON -DBUILD_TEST_APPLICATION=OFF`
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake --install C:\deps\qca-build --config Release --prefix C:\deps\qca-install
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          git clone --depth 1 --branch v0.14.0 https://github.com/frankosterfeld/qtkeychain.git C:\deps\kc-src
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake -S C:\deps\kc-src -B C:\deps\kc-build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install" -DBUILD_WITH_QT6=ON -DBUILD_TEST_APPLICATION=OFF
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           cmake --build C:\deps\kc-build --config Release --parallel
-          cmake --install C:\deps\kc-build --prefix C:\deps\kc-install
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake --install C:\deps\kc-build --config Release --prefix C:\deps\kc-install
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Configure CMake for Windows MSVC
         run: |
