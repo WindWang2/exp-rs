@@ -110,7 +110,10 @@ jobs:
         uses: jurplel/install-qt-action@v4
         id: qt
         with:
-          version: '6.8.*'
+          # Pin 6.8.0: the 6.8.* wildcard resolves to 6.8.3 whose online
+          # repository metadata is incomplete for some modules (qtsvg) on
+          # win64_msvc2022_64 with the current aqtinstall.
+          version: '6.8.0'
           host: 'windows'
           target: 'desktop'
           # Qt 6.8+ ships prebuilt binaries only for MSVC 2022

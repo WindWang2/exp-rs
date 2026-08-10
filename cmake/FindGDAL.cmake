@@ -196,10 +196,16 @@ if(NOT GDAL_FOUND)
   
         MESSAGE(STATUS "Found GDAL: ${GDAL_LIBRARY} (${GDAL_RELEASE_NAME})")
      ENDIF (NOT GDAL_FIND_QUIETLY)
-     add_library(GDAL::GDAL UNKNOWN IMPORTED)
-     target_link_libraries(GDAL::GDAL INTERFACE ${GDAL_LIBRARY})
-     target_include_directories(GDAL::GDAL INTERFACE ${GDAL_INCLUDE_DIR})
-     set_target_properties(GDAL::GDAL PROPERTIES IMPORTED_LOCATION ${GDAL_LIBRARY})
+     # Guard against re-creation: a config-mode find (line 16) or a prior
+     # find_package in a parent scope may already have defined GDAL::GDAL.
+     # Re-declaring it here (e.g. when src/analysis calls find_package(GDAL)
+     # again in its own directory scope) is a hard CMake error.
+     IF (NOT TARGET GDAL::GDAL)
+        add_library(GDAL::GDAL UNKNOWN IMPORTED)
+        target_link_libraries(GDAL::GDAL INTERFACE ${GDAL_LIBRARY})
+        target_include_directories(GDAL::GDAL INTERFACE ${GDAL_INCLUDE_DIR})
+        set_target_properties(GDAL::GDAL PROPERTIES IMPORTED_LOCATION ${GDAL_LIBRARY})
+     ENDIF (NOT TARGET GDAL::GDAL)
   ELSE (GDAL_FOUND)
   
      MESSAGE(GDAL_INCLUDE_DIR=${GDAL_INCLUDE_DIR})
