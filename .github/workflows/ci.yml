@@ -48,7 +48,11 @@ jobs:
           modules: 'qt5compat qtmultimedia'
 
       - name: Configure CMake
-        run: cmake -B build -S . -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}"
+        # ENABLE_LTO=OFF: project default is ON for Release, but LTO links of
+        # the QGIS-scale libraries take 1-2 h per target on 4-core runners and
+        # risk OOM on the GCC link. CI's job is compile+link+test correctness,
+        # not link-time optimization; a fast reliable gate is the contract here.
+        run: cmake -B build -S . -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=OFF -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}"
 
       - name: Compile Core & Test Targets
         run: cmake --build build --parallel $(nproc)
@@ -194,6 +198,7 @@ jobs:
           $env:PATH = "$bisonDir;$env:PATH"
           cmake -B build-win -S . `
             -DCMAKE_BUILD_TYPE=Release `
+            -DENABLE_LTO=OFF `
             -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install;C:\deps\kc-install" `
             -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
@@ -233,6 +238,7 @@ jobs:
             -DBISON_EXECUTABLE="$(brew --prefix bison)/bin/bison" \
             -DFLEX_EXECUTABLE="$(brew --prefix flex)/bin/flex" \
             -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_LTO=OFF \
             -DENABLE_TESTS=ON
 
       - name: Verify macOS Build & Execute CTest
