@@ -528,6 +528,11 @@ if(NOT TARGET jsoncpp)
 endif()
 if(JSONCPP_INCLUDE_DIRS)
   message(STATUS "jsoncpp include dir: ${JSONCPP_INCLUDE_DIRS}")
+  # jsoncpp headers are consumed transitively via public processing headers
+  # (e.g. algorithm_descriptor.h includes <json/json.h>), so every target that
+  # pulls those headers needs the include path — not just targets that link
+  # jsoncpp themselves (e.g. sicnu_python_isolated).
+  include_directories(SYSTEM ${JSONCPP_INCLUDE_DIRS})
 endif()
 
 add_subdirectory(src/core)
