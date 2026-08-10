@@ -145,30 +145,28 @@ jobs:
           arch: 'win64_msvc2022_64'
           modules: 'qt5compat qtmultimedia'
 
-      - name: Install GDAL/PROJ/GEOS/Protobuf via vcpkg
-        # No vcpkgGitCommitId: pinning an arbitrary commit makes run-vcpkg try
-        # to check it out in a shallow vcpkg clone ('unable to read tree').
-        # The action's default pinned vcpkg is used.
-        id: vcpkg
-        uses: lukka/run-vcpkg@v11
-
-      - name: Export VCPKG_ROOT for later steps
-        run: echo "VCPKG_ROOT=${{ steps.vcpkg.outputs.vcpkgRoot }}" >> $env:GITHUB_ENV
+      - name: Install GDAL/PROJ/GEOS/Protobuf via vcpkg (preinstalled)
+        # windows-latest ships a maintained vcpkg checkout at C:\vcpkg; install
+        # the manifest deps (vcpkg.json, windows-only) there. Deterministic —
+        # no third-party action output dependencies.
+        shell: pwsh
+        run: |
+          C:\vcpkg\vcpkg install --triplet x64-windows
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Build qca + qtkeychain against installed Qt
         # Auth is a hard compile dependency of qgis_core (QgsAuthCertUtils /
         # QKeychain used unconditionally in core sources), so the Windows tier
         # builds qca + qtkeychain from source against the aqt-installed Qt.
         # Both are small CMake projects (~5 min total). qca's CMake requires
-        # pkg-config, provided here by the vcpkg pkgconf port.
+        # pkg-config, installed via Chocolatey (lands on PATH for
+        # FindPkgConfig).
         shell: pwsh
         run: |
-          $pkgconfDir = "$env:VCPKG_ROOT\installed\x64-windows\tools\pkgconf"
-          $env:PATH = "$pkgconfDir;$env:PATH"
-          $env:PKG_CONFIG = "$pkgconfDir\pkgconf.exe"
+          choco install -y --no-progress pkgconfiglite
           git clone --depth 1 --branch v2.3.10 https://github.com/KDE/qca.git C:\deps\qca-src
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          cmake -S C:\deps\qca-src -B C:\deps\qca-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DPKG_CONFIG_EXECUTABLE="$pkgconfDir\pkgconf.exe" -DBUILD_WITH_QT6=ON -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF
+          cmake -S C:\deps\qca-src -B C:\deps\qca-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DBUILD_WITH_QT6=ON -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF
           if ($LASTEXITCODE -ne 0) { exit 1 }
           cmake --build C:\deps\qca-build --config Release --parallel
           if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -187,12 +185,13 @@ jobs:
         run: |
           # winflexbison provides win_bison.exe/win_flex.exe; src/core .yy/.ll
           # grammars require bison >= 3.0 (find_package(BISON) needs them on PATH).
-          $bisonDir = "$env:VCPKG_ROOT\installed\x64-windows\tools\winflexbison"
+          $vcpkgRoot = "C:\vcpkg"
+          $bisonDir = "$vcpkgRoot\installed\x64-windows\tools\winflexbison"
           $env:PATH = "$bisonDir;$env:PATH"
           cmake -B build-win -S . `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install;C:\deps\kc-install" `
-            -DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake `
+            -DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot\scripts\buildsystems\vcpkg.cmake `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DBISON_EXECUTABLE="$bisonDir\win_bison.exe" `
             -DFLEX_EXECUTABLE="$bisonDir\win_flex.exe" `
