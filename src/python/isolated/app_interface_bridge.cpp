@@ -319,7 +319,12 @@ void AppInterfaceBridge::setupDefaultAlgorithmHandler()
 
     auto adapter = std::make_shared<sicnu::processing::PythonAlgorithmAdapter>(
       algoDesc,
-      [this, algoId]( const Json::Value &execParams, sicnu::processing::ProgressCallback progress ) -> Json::Value {
+      [this, algoId]( const Json::Value &execParams, sicnu::processing::ProgressCallback progress,
+                      std::function<bool()> isCancelled ) -> Json::Value {
+        if ( isCancelled && isCancelled() )
+        {
+          throw std::runtime_error( "Python algorithm cancelled before execution" );
+        }
         if ( !m_ipcServer )
         {
           throw std::runtime_error( "IPC Server not available" );
