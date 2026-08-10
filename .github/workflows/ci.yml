@@ -128,24 +128,39 @@ jobs:
         # The action's default pinned vcpkg is used.
         uses: lukka/run-vcpkg@v11
 
+      - name: Build qca + qtkeychain against installed Qt
+        # Auth is a hard compile dependency of qgis_core (QgsAuthCertUtils /
+        # QKeychain used unconditionally in core sources), so the Windows tier
+        # builds qca + qtkeychain from source against the aqt-installed Qt.
+        # Both are small CMake projects (~5 min total). No plugins needed.
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch v2.3.9 https://github.com/KDE/qca.git C:\deps\qca-src
+          cmake -S C:\deps\qca-src -B C:\deps\qca-build `
+            -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" `
+            -DBUILD_WITH_QT6=ON -DQCA_SUFFIX= -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF -DBUILD_PLUGINS=`
+          cmake --build C:\deps\qca-build --config Release --parallel
+          cmake --install C:\deps\qca-build --prefix C:\deps\qca-install
+          git clone --depth 1 --branch v0.14.3 https://github.com/frankosterfeld/qtkeychain.git C:\deps\kc-src
+          cmake -S C:\deps\kc-src -B C:\deps\kc-build `
+            -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install" `
+            -DBUILD_WITH_QT6=ON -DBUILD_TEST_APPLICATION=OFF`
+          cmake --build C:\deps\kc-build --config Release --parallel
+          cmake --install C:\deps\kc-build --prefix C:\deps\kc-install
+
       - name: Configure CMake for Windows MSVC
         run: |
           # winflexbison provides win_bison.exe/win_flex.exe; src/core .yy/.ll
           # grammars require bison >= 3.0 (find_package(BISON) needs them on PATH).
           $bisonDir = "$env:VCPKG_ROOT\installed\x64-windows\tools\winflexbison"
           $env:PATH = "$bisonDir;$env:PATH"
-          # WITH_AUTH=OFF: QCA/qtkeychain are not provisioned on this
-          # build-verification tier (vcpkg would rebuild Qt6 from source to
-          # satisfy them). Auth stays ON on the Linux/macOS tiers, which have
-          # real qca + qtkeychain provisioning; the guard is compile-time.
           cmake -B build-win -S . `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" `
+            -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install;C:\deps\kc-install" `
             -DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DBISON_EXECUTABLE="$bisonDir\win_bison.exe" `
             -DFLEX_EXECUTABLE="$bisonDir\win_flex.exe" `
-            -DWITH_AUTH=OFF `
             -DENABLE_TESTS=OFF `
             -DSICNU_VENDOR_GDAL=OFF
 
