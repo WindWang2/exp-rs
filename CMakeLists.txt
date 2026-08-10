@@ -44,10 +44,13 @@ endif()
 # on some Qt 6.4 distro configs ("UiTools target mentioned as a dependency for
 # qgis_gui, but not declared" — the umbrella config short-circuits on a cached
 # Qt6_FOUND and the new component targets are never created).
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia
+# The minimum is 6.8: the code uses QtTypes (6.5+) and other post-6.4 APIs; CI
+# provides Qt 6.8 via aqtinstall on every platform (Ubuntu's distro Qt 6.4.2 is
+# too old for this codebase).
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia
                                        MultimediaWidgets Qml QuickWidgets SvgWidgets UiTools
                                        Core5Compat Test)
-qt_standard_project_setup(REQUIRES 6.4)
+qt_standard_project_setup(REQUIRES 6.8)
 
 # When vendoring, directly include the config files to bypass Find module cache
 if(SICNU_VENDOR_GDAL)

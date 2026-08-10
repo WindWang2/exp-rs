@@ -28,14 +28,27 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build \
-            qt6-base-dev qt6-base-dev-tools qt6-5compat-dev qt6-svg-dev qt6-multimedia-dev qt6-declarative-dev qt6-tools-dev libqt6sql6-sqlite \
             libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev \
             libprotobuf-dev protobuf-compiler \
             libqca-qt6-dev qtkeychain-qt6-dev \
-            bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev
+            bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev \
+            libfontconfig1 libgl1 libegl1 libxkbcommon0 libdbus-1-3
+
+      # Qt 6.8 via aqtinstall: Ubuntu 24.04's distro Qt (6.4.2) is too old for
+      # this codebase (QtTypes and friends are 6.5+). Base package already
+      # includes qtsvg/qtdeclarative/qttools; add qt5compat + qtmultimedia.
+      - name: Install Qt 6.8
+        uses: jurplel/install-qt-action@v4
+        id: qt
+        with:
+          version: '6.8.0'
+          host: 'linux'
+          target: 'desktop'
+          arch: 'linux_gcc_64'
+          modules: 'qt5compat qtmultimedia'
 
       - name: Configure CMake
-        run: cmake -B build -S . -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -S . -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}"
 
       - name: Compile Core & Test Targets
         run: cmake --build build --parallel $(nproc)
@@ -70,15 +83,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build \
-            qt6-base-dev qt6-base-dev-tools qt6-5compat-dev qt6-svg-dev qt6-multimedia-dev qt6-declarative-dev qt6-tools-dev \
             libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev \
             libprotobuf-dev protobuf-compiler \
             libqca-qt6-dev qtkeychain-qt6-dev \
             bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev \
-            libopencv-dev python3-dev python3-pip python3-numpy
+            libopencv-dev python3-dev python3-pip python3-numpy \
+            libfontconfig1 libgl1 libegl1 libxkbcommon0 libdbus-1-3
+
+      - name: Install Qt 6.8
+        uses: jurplel/install-qt-action@v4
+        id: qt
+        with:
+          version: '6.8.0'
+          host: 'linux'
+          target: 'desktop'
+          arch: 'linux_gcc_64'
+          modules: 'qt5compat qtmultimedia'
 
       - name: Configure CMake with Sanitizers
-        run: cmake -B build-sanitizer -S . -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON
+        run: cmake -B build-sanitizer -S . -DENABLE_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}"
 
       - name: Build Sanitizer Test Targets
         run: cmake --build build-sanitizer --parallel $(nproc)
