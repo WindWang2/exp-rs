@@ -10,6 +10,8 @@
 #include "processing/algorithms/spectral_unmixing.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <gdal.h>
+
 #include <QString>
 
 #include <numeric>
