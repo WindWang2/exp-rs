@@ -28,7 +28,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build \
-            qt6-base-dev qt6-base-dev-tools qt6-5compat-dev qt6-svg-dev qt6-multimedia-dev qt6-declarative-dev libqt6sql6-sqlite \
+            qt6-base-dev qt6-base-dev-tools qt6-5compat-dev qt6-svg-dev qt6-multimedia-dev qt6-declarative-dev qt6-tools-dev libqt6sql6-sqlite \
             libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev \
             libprotobuf-dev protobuf-compiler \
             libqca-qt6-dev qtkeychain-qt6-dev \
@@ -70,7 +70,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build \
-            qt6-base-dev qt6-base-dev-tools qt6-5compat-dev qt6-svg-dev qt6-multimedia-dev qt6-declarative-dev \
+            qt6-base-dev qt6-base-dev-tools qt6-5compat-dev qt6-svg-dev qt6-multimedia-dev qt6-declarative-dev qt6-tools-dev \
             libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev \
             libprotobuf-dev protobuf-compiler \
             libqca-qt6-dev qtkeychain-qt6-dev \
@@ -123,9 +123,10 @@ jobs:
           modules: 'qt5compat qtmultimedia'
 
       - name: Install GDAL/PROJ/GEOS/Protobuf via vcpkg
+        # No vcpkgGitCommitId: pinning an arbitrary commit makes run-vcpkg try
+        # to check it out in a shallow vcpkg clone ('unable to read tree').
+        # The action's default pinned vcpkg is used.
         uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: 'd45238c8c7696e4136292d7d7d4e2352c3893a4f'
 
       - name: Configure CMake for Windows MSVC
         run: |
