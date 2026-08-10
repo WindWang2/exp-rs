@@ -52,6 +52,10 @@
     {
       "name": "winflexbison",
       "platform": "windows"
+    },
+    {
+      "name": "pkgconf",
+      "platform": "windows"
     }
   ]
 }

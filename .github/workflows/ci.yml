@@ -155,9 +155,13 @@ jobs:
         # Auth is a hard compile dependency of qgis_core (QgsAuthCertUtils /
         # QKeychain used unconditionally in core sources), so the Windows tier
         # builds qca + qtkeychain from source against the aqt-installed Qt.
-        # Both are small CMake projects (~5 min total).
+        # Both are small CMake projects (~5 min total). qca's CMake requires
+        # pkg-config, provided here by the vcpkg pkgconf port.
         shell: pwsh
         run: |
+          $pkgconfDir = "$env:VCPKG_ROOT\installed\x64-windows\tools\pkgconf"
+          $env:PATH = "$pkgconfDir;$env:PATH"
+          $env:PKG_CONFIG_EXECUTABLE = "$pkgconfDir\pkgconf.exe"
           git clone --depth 1 --branch v2.3.9 https://github.com/KDE/qca.git C:\deps\qca-src
           if ($LASTEXITCODE -ne 0) { exit 1 }
           cmake -S C:\deps\qca-src -B C:\deps\qca-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DBUILD_WITH_QT6=ON -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF
