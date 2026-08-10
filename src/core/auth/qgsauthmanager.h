@@ -29,6 +29,7 @@
 #include <QSqlQuery>
 #include <QStringList>
 
+#ifdef HAVE_AUTH
 #ifndef QT_NO_SSL
 #include <QSslCertificate>
 #include <QSslKey>
@@ -36,10 +37,11 @@
 #include "qgsauthcertutils.h"
 #endif
 
+#include <qt6keychain/keychain.h>
+#endif
+
 #include "qgsauthconfig.h"
 #include "qgsauthmethod.h"
-
-#include <qt6keychain/keychain.h>
 
 #ifndef SIP_RUN
 #ifdef HAVE_AUTH
