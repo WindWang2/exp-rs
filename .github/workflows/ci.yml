@@ -160,7 +160,7 @@ jobs:
         run: |
           git clone --depth 1 --branch v2.3.9 https://github.com/KDE/qca.git C:\deps\qca-src
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          cmake -S C:\deps\qca-src -B C:\deps\qca-build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DBUILD_WITH_QT6=ON -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF
+          cmake -S C:\deps\qca-src -B C:\deps\qca-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DBUILD_WITH_QT6=ON -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF
           if ($LASTEXITCODE -ne 0) { exit 1 }
           cmake --build C:\deps\qca-build --config Release --parallel
           if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -168,7 +168,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           git clone --depth 1 --branch v0.14.0 https://github.com/frankosterfeld/qtkeychain.git C:\deps\kc-src
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          cmake -S C:\deps\kc-src -B C:\deps\kc-build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install" -DBUILD_WITH_QT6=ON -DBUILD_TEST_APPLICATION=OFF
+          cmake -S C:\deps\kc-src -B C:\deps\kc-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }};C:\deps\qca-install" -DBUILD_WITH_QT6=ON -DBUILD_TEST_APPLICATION=OFF
           if ($LASTEXITCODE -ne 0) { exit 1 }
           cmake --build C:\deps\kc-build --config Release --parallel
           if ($LASTEXITCODE -ne 0) { exit 1 }
