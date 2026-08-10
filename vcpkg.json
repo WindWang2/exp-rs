@@ -1,0 +1,56 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "sicnu-geo-rs",
+  "version-string": "1.0.0",
+  "comment": "Windows-only dependency manifest. Only activated when CMAKE_TOOLCHAIN_FILE points at vcpkg.cmake (Tier 3 Windows job). Linux/macOS jobs do not pass the vcpkg toolchain, so this manifest is inert there.",
+  "dependencies": [
+    {
+      "name": "gdal",
+      "platform": "windows"
+    },
+    {
+      "name": "proj",
+      "platform": "windows"
+    },
+    {
+      "name": "geos",
+      "platform": "windows"
+    },
+    {
+      "name": "protobuf",
+      "platform": "windows"
+    },
+    {
+      "name": "libzip",
+      "platform": "windows"
+    },
+    {
+      "name": "expat",
+      "platform": "windows"
+    },
+    {
+      "name": "sqlite3",
+      "platform": "windows"
+    },
+    {
+      "name": "pcre2",
+      "platform": "windows"
+    },
+    {
+      "name": "gsl",
+      "platform": "windows"
+    },
+    {
+      "name": "curl",
+      "platform": "windows"
+    },
+    {
+      "name": "zstd",
+      "platform": "windows"
+    },
+    {
+      "name": "winflexbison",
+      "platform": "windows"
+    }
+  ]
+}
