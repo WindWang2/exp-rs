@@ -34,11 +34,15 @@ int CPL_STDCALL gdalProgressCallback(double dfComplete, const char* pszMessage,
 bool isCategoricalDataset(GDALDatasetH hDS) {
     if (!hDS) return false;
 
+    // True-ish declarations. Values are lowercase-normalized so the match is
+    // case-insensitive. Per GDAL/QGIS convention, a layer is categorical when
+    // it is declared "thematic" (classified); "athematic" means continuous
+    // (non-classified) and must NOT be treated as categorical.
     const auto isTrueStr = [](const char* val) {
         if (!val) return false;
         std::string s(val);
         for (auto& c : s) c = static_cast<char>(std::tolower(c));
-        return s == "1" || s == "true" || s == "yes" || s == "athematic" || s == "categorical" || s == "classification";
+        return s == "1" || s == "true" || s == "yes" || s == "thematic" || s == "categorical" || s == "classification";
     };
 
     // Check dataset-level metadata item "CATEGORICAL", "CLASSIFICATION", "LAYER_TYPE"

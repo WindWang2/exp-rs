@@ -2195,7 +2195,9 @@ TEST_CASE("GDAL reproject enforces nearest resampling on categorical rasters", "
     GDALRasterBandH hBand = GDALGetRasterBand(hDS, 1);
     REQUIRE(hBand != nullptr);
     GDALSetMetadataItem(hBand, "CATEGORICAL", "1", nullptr);
-    GDALSetMetadataItem(hBand, "LAYER_TYPE", "athematic", nullptr);
+    // GDAL/QGIS convention: "thematic" declares a categorical (classified)
+    // layer; "athematic" would declare a continuous one.
+    GDALSetMetadataItem(hBand, "LAYER_TYPE", "thematic", nullptr);
     GDALFlushCache(hDS);
     GDALClose(hDS);
 
@@ -2243,5 +2245,30 @@ TEST_CASE("GDAL reproject enforces nearest resampling on categorical rasters", "
             CHECK((val == 10.0f || val == 50.0f));
         }
     }
+}
+
+TEST_CASE("GDAL athematic LAYER_TYPE is not treated as categorical", "[operators][gdal][categorical]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/continuous.tif";
+
+    // Continuous (non-classified) float raster with no palette / RAT /
+    // category names: LAYER_TYPE=athematic alone must NOT flag it categorical.
+    std::vector<std::vector<float>> bands(1, std::vector<float>(16, 1.5f));
+    std::array<double, 6> gt = {0, 10, 0, 0, 0, -10};
+    QString err;
+    REQUIRE(writeGdalOutput(inputPath, 4, 4, bands, gt, "EPSG:4326", &err));
+
+    GDALDatasetH hDS = GDALOpen(inputPath.toUtf8().constData(), GA_Update);
+    REQUIRE(hDS != nullptr);
+    GDALSetMetadataItem(hDS, "LAYER_TYPE", "athematic", nullptr);
+    GDALFlushCache(hDS);
+    GDALClose(hDS);
+
+    GDALDatasetH checkDS = GDALOpen(inputPath.toUtf8().constData(), GA_ReadOnly);
+    REQUIRE(checkDS != nullptr);
+    CHECK_FALSE(sicnu::operators::gdal::util::isCategoricalDataset(checkDS));
+    GDALClose(checkDS);
 }
 

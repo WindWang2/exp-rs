@@ -71,6 +71,11 @@ void appendGeoTiffDefaults(std::vector<std::string>& options,
 /**
  * Detect whether a GDAL dataset is categorical / discrete (e.g. land cover map,
  * classification output, palette-indexed raster, or raster with RAT / category names).
+ *
+ * Truthy metadata: CATEGORICAL / CLASSIFICATION / LAYER_TYPE values "1",
+ * "true", "yes", "thematic", "categorical", "classification" (case-insensitive).
+ * Per GDAL/QGIS convention LAYER_TYPE "athematic" means continuous
+ * (non-classified) and is NOT treated as categorical.
  */
 bool isCategoricalDataset(GDALDatasetH hDS);
 
