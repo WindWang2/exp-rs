@@ -217,7 +217,7 @@ jobs:
       - name: Install macOS Dependencies via Homebrew
         run: |
           brew update
-          brew install qt@6 qca qtkeychain gdal proj geos libzip gsl bison flex pcre2 cmake protobuf
+          brew install qt@6 qca qtkeychain gdal proj geos libzip gsl bison flex pcre2 cmake protobuf jsoncpp
 
       - name: Configure CMake for macOS
         # Homebrew's bison (>= 3.8) and flex are keg-only; macOS ships bison 2.x
