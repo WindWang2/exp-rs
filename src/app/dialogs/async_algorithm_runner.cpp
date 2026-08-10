@@ -54,8 +54,11 @@ void AsyncAlgorithmRunner::run(const QgsProcessingAlgorithm *algorithm,
     sicnu::TaskCenter::instance().attachQgsTask(centerTaskId, m_task);
     sicnu::TaskCenter::instance().markTaskRunning(centerTaskId);
 
-    // Connect to executed signal (bool successful, QVariantMap results)
-    connect(m_task, &QgsProcessingAlgRunnerTask::executed, this,
+    // Connect to executed signal (bool successful, QVariantMap results).
+    // m_task is stored as the QgsTask base pointer (testing seam); the signal
+    // lives on the derived type, so the sender argument must be downcast.
+    connect(static_cast<QgsProcessingAlgRunnerTask *>(m_task),
+            &QgsProcessingAlgRunnerTask::executed, this,
             [this, feedback, centerTaskId](bool successful, const QVariantMap &results) {
         m_task = nullptr;
         endRun();
