@@ -28,7 +28,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build \
-            qt6-base-dev qt6-base-dev-tools qt6-5compat-dev qt6-svg-dev qt6-multimedia-dev libqt6sql6-sqlite \
+            qt6-base-dev qt6-base-dev-tools qt6-5compat-dev qt6-svg-dev qt6-multimedia-dev qt6-declarative-dev libqt6sql6-sqlite \
             libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev \
             libprotobuf-dev protobuf-compiler \
             libqca-qt6-dev qtkeychain-qt6-dev \
@@ -70,7 +70,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build \
-            qt6-base-dev qt6-base-dev-tools qt6-5compat-dev qt6-svg-dev qt6-multimedia-dev \
+            qt6-base-dev qt6-base-dev-tools qt6-5compat-dev qt6-svg-dev qt6-multimedia-dev qt6-declarative-dev \
             libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev \
             libprotobuf-dev protobuf-compiler \
             libqca-qt6-dev qtkeychain-qt6-dev \
@@ -110,16 +110,17 @@ jobs:
         uses: jurplel/install-qt-action@v4
         id: qt
         with:
-          # Pin 6.8.0: the 6.8.* wildcard resolves to 6.8.3 whose online
-          # repository metadata is incomplete for some modules (qtsvg) on
-          # win64_msvc2022_64 with the current aqtinstall.
+          # Pin 6.8.0 (stable metadata for win64_msvc2022_64). qtsvg and
+          # qtdeclarative are BASE modules of the arch install (not add-on
+          # modules), so they must NOT be listed in -m — aqt errors with
+          # "packages not found" when they are.
           version: '6.8.0'
           host: 'windows'
           target: 'desktop'
           # Qt 6.8+ ships prebuilt binaries only for MSVC 2022
           # (win64_msvc2019_64 was dropped); windows-latest provides MSVC 2022.
           arch: 'win64_msvc2022_64'
-          modules: 'qt5compat qtsvg qtmultimedia'
+          modules: 'qt5compat qtmultimedia'
 
       - name: Install GDAL/PROJ/GEOS/Protobuf via vcpkg
         uses: lukka/run-vcpkg@v11
