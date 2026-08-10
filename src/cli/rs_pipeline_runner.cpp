@@ -255,10 +255,10 @@ bool RsPipelineRunner::ensurePythonPluginsLoaded()
     reportLog( "error", "Failed to create headless project context for Python plugins" );
     return false;
   }
-  m_projectContext = createdContext.take();
+  m_projectContext = std::shared_ptr<sicnu::app::ProjectContext>( createdContext.take() );
 
-  m_appInterface = std::make_unique<SicnuAppInterface>( nullptr, nullptr, m_projectContext.get() );
-  m_pluginHost = std::make_unique<PluginHost>( 2 );
+  m_appInterface = std::make_shared<SicnuAppInterface>( nullptr, nullptr, m_projectContext.get() );
+  m_pluginHost = std::make_shared<PluginHost>( 2 );
   m_pluginHost->setAppInterface( m_appInterface.get() );
 
   for ( const auto &dir : m_pythonPluginDirs )
