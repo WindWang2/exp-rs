@@ -3,7 +3,6 @@
   "name": "sicnu-geo-rs",
   "version-string": "1.0.0",
   "builtin-baseline": "86dc619bd8d9697405ae5c944b474117ea9457ce",
-  "comment": "Windows-only dependency manifest. Only activated when CMAKE_TOOLCHAIN_FILE points at vcpkg.cmake (Tier 3 Windows job). Linux/macOS jobs do not pass the vcpkg toolchain, so this manifest is inert there.",
   "dependencies": [
     {
       "name": "gdal",
