@@ -161,10 +161,10 @@ jobs:
         run: |
           $pkgconfDir = "$env:VCPKG_ROOT\installed\x64-windows\tools\pkgconf"
           $env:PATH = "$pkgconfDir;$env:PATH"
-          $env:PKG_CONFIG_EXECUTABLE = "$pkgconfDir\pkgconf.exe"
+          $env:PKG_CONFIG = "$pkgconfDir\pkgconf.exe"
           git clone --depth 1 --branch v2.3.9 https://github.com/KDE/qca.git C:\deps\qca-src
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          cmake -S C:\deps\qca-src -B C:\deps\qca-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DBUILD_WITH_QT6=ON -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF
+          cmake -S C:\deps\qca-src -B C:\deps\qca-build -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qt-path }}" -DPKG_CONFIG_EXECUTABLE="$pkgconfDir\pkgconf.exe" -DBUILD_WITH_QT6=ON -DBUILD_TESTS=OFF -DBUILD_TOOLS=OFF
           if ($LASTEXITCODE -ne 0) { exit 1 }
           cmake --build C:\deps\qca-build --config Release --parallel
           if ($LASTEXITCODE -ne 0) { exit 1 }
