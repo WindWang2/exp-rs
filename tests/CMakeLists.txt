@@ -4002,6 +4002,8 @@ add_executable(test_grid_compat_dialog_utils
   test_grid_compat_dialog_utils.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/resolution_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/raster_layer_combo.cpp
 )
 target_link_libraries(test_grid_compat_dialog_utils PRIVATE
   Catch2::Catch2WithMain
@@ -4560,5 +4562,39 @@ target_include_directories(test_workflow_pipeline_ui PRIVATE
   ${CMAKE_SOURCE_DIR}/src/workflow
 )
 sicnu_discover_tests(test_workflow_pipeline_ui)
+
+# Production Golden E2E Optical Remote Sensing Test
+add_executable(test_rs_golden_e2e test_rs_golden_e2e.cpp)
+target_link_libraries(test_rs_golden_e2e PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  sicnu_processing
+  sicnu_operators
+  sicnu_data
+  GDAL::GDAL
+)
+target_include_directories(test_rs_golden_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+if(OpenCV_FOUND)
+  target_include_directories(test_rs_golden_e2e PRIVATE ${OpenCV_INCLUDE_DIRS})
+  target_link_libraries(test_rs_golden_e2e PRIVATE ${OpenCV_LIBRARIES})
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_rs_golden_e2e PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_rs_golden_e2e PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_rs_golden_e2e PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_rs_golden_e2e PRIVATE jsoncpp)
+endif()
+set_target_properties(test_rs_golden_e2e PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_rs_golden_e2e)
 
 

@@ -21,6 +21,7 @@
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
+#include "operators/gdal/gdal_operator_utils.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include "analysis/segmentation/rs_otb_segmenter.h"
@@ -2167,3 +2168,107 @@ TEST_CASE("RS apply_mask carries the radiometric state through", "[operators][rs
     CHECK(SatelliteProducts::readRadiometricState(outputPath)
           == QString::fromUtf8(SatelliteProducts::kRadiometricStateToaReflectance));
 }
+
+TEST_CASE("GDAL reproject enforces nearest resampling on categorical rasters", "[operators][gdal][categorical]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/categorical.tif";
+    const QString outputPath = tmp.path() + "/reprojected.tif";
+
+    // 4x4 raster with discrete class IDs: 10 on left half, 50 on right half
+    std::vector<std::vector<float>> bands(1, std::vector<float>(16, 10.0f));
+    for (int y = 0; y < 4; ++y) {
+        for (int x = 2; x < 4; ++x) {
+            bands[0][y * 4 + x] = 50.0f;
+        }
+    }
+
+    std::array<double, 6> gt = {0, 10, 0, 0, 0, -10};
+    QString err;
+    REQUIRE(writeGdalOutput(inputPath, 4, 4, bands, gt, "EPSG:4326", &err));
+
+    // Set GCI_PaletteIndex color interpretation and CATEGORICAL metadata on band 1
+    GDALDatasetH hDS = GDALOpen(inputPath.toUtf8().constData(), GA_Update);
+    REQUIRE(hDS != nullptr);
+    GDALSetMetadataItem(hDS, "CATEGORICAL", "1", nullptr);
+    GDALRasterBandH hBand = GDALGetRasterBand(hDS, 1);
+    REQUIRE(hBand != nullptr);
+    GDALSetMetadataItem(hBand, "CATEGORICAL", "1", nullptr);
+    // GDAL/QGIS convention: "thematic" declares a categorical (classified)
+    // layer; "athematic" would declare a continuous one.
+    GDALSetMetadataItem(hBand, "LAYER_TYPE", "thematic", nullptr);
+    GDALFlushCache(hDS);
+    GDALClose(hDS);
+
+    // Verify read-only handle sees dataset as categorical
+    GDALDatasetH checkDS = GDALOpen(inputPath.toUtf8().constData(), GA_ReadOnly);
+    REQUIRE(checkDS != nullptr);
+    CHECK(sicnu::operators::gdal::util::isCategoricalDataset(checkDS));
+    GDALClose(checkDS);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["dstCrs"] = "EPSG:3857";
+    params["resampling"] = "bilinear"; // Request continuous bilinear resampling
+
+    RSOperatorContext ctx;
+    std::vector<std::string> warnings;
+    ctx.setLogCallback([&warnings](const std::string& msg, const std::string& level) {
+        if (level == "warning") {
+            warnings.push_back(msg);
+        }
+    });
+
+    auto op = RSOperatorRegistry::instance().create("gdal:reproject");
+    REQUIRE(op != nullptr);
+    op->run(params, ctx);
+
+    CHECK(QFile::exists(outputPath));
+    bool hasWarning = false;
+    for (const auto& w : warnings) {
+        if (w.find("Categorical raster detected") != std::string::npos) {
+            hasWarning = true;
+            break;
+        }
+    }
+    CHECK(hasWarning);
+
+    // Verify output raster contains only valid discrete class values (10 or 50) and no fractional interpolation
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(outputPath));
+    std::vector<float> outData(outDs.width() * outDs.height());
+    REQUIRE(outDs.readBandData(1, outData.data(), outDs.width(), outDs.height()));
+    for (float val : outData) {
+        if (val != 0.0f) { // Nodata or padding
+            CHECK((val == 10.0f || val == 50.0f));
+        }
+    }
+}
+
+TEST_CASE("GDAL athematic LAYER_TYPE is not treated as categorical", "[operators][gdal][categorical]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/continuous.tif";
+
+    // Continuous (non-classified) float raster with no palette / RAT /
+    // category names: LAYER_TYPE=athematic alone must NOT flag it categorical.
+    std::vector<std::vector<float>> bands(1, std::vector<float>(16, 1.5f));
+    std::array<double, 6> gt = {0, 10, 0, 0, 0, -10};
+    QString err;
+    REQUIRE(writeGdalOutput(inputPath, 4, 4, bands, gt, "EPSG:4326", &err));
+
+    GDALDatasetH hDS = GDALOpen(inputPath.toUtf8().constData(), GA_Update);
+    REQUIRE(hDS != nullptr);
+    GDALSetMetadataItem(hDS, "LAYER_TYPE", "athematic", nullptr);
+    GDALFlushCache(hDS);
+    GDALClose(hDS);
+
+    GDALDatasetH checkDS = GDALOpen(inputPath.toUtf8().constData(), GA_ReadOnly);
+    REQUIRE(checkDS != nullptr);
+    CHECK_FALSE(sicnu::operators::gdal::util::isCategoricalDataset(checkDS));
+    GDALClose(checkDS);
+}
+

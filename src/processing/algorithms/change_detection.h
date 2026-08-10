@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace ChangeDetection
 {
@@ -38,6 +39,109 @@ bool ratio(const float *before, const float *after, float *out, size_t count);
 bool cvaMagnitude(const float *const *beforeBands, const float *const *afterBands,
                   int bandCount, size_t pixels, float *out,
                   QString *errorMessage = nullptr);
+
+/**
+ * Multivariate Alteration Detection (MAD) change magnitude across @p bandCount bands.
+ * Performs canonical correlation analysis (CCA) between before and after image bands,
+ * returning Chi-Square change distance per pixel.
+ * @param beforeBands / afterBands arrays of @p bandCount buffers, each @p pixels floats
+ */
+bool madChange(const float *const *beforeBands, const float *const *afterBands,
+               int bandCount, size_t pixels, float *out,
+               QString *errorMessage = nullptr);
+
+// ---------------------------------------------------------------------------
+// Streaming MAD primitives (memory-bounded, multi-pass).
+//
+// MAD is decomposed into three streaming passes over band-interleaved-by-pixel
+// (BIP) tiles plus two finalize steps, so the working set is O(tilePixels *
+// bandCount + bandCount^2) instead of O(pixels * bandCount):
+//
+//   Pass 1  madAccumulateSums     per-band raw sums over valid pixels
+//           madFinalizeMeans      means (fails when validCount < bandCount+2)
+//   Pass 2  madAccumulateCentered centered cross-products S_XX / S_YY / S_XY
+//           madFinalize           regularization -> sqrt-inverse -> CCA/SVD
+//   Pass 3  madTransformTile      per-pixel chi-square change magnitude
+//
+// A pixel is valid iff ALL before/after bands are std::isfinite. Invalid
+// pixels are skipped by the accumulation passes and produce quiet_NaN in the
+// transformed output. The math is identical to madChange(), which is now a
+// thin wrapper feeding the full-scene band-major buffers to these primitives
+// as one giant tile.
+// ---------------------------------------------------------------------------
+
+/// Mutable accumulator for the streaming MAD pipeline.
+struct MadStreamingState
+{
+    int bandCount = 0;                 ///< bands; set by the first accumulate call
+    size_t validCount = 0;             ///< pixels finite in every before/after band
+    std::vector<double> sumX, sumY;    ///< [B] raw per-band sums (pass 1)
+    std::vector<double> meanX, meanY;  ///< [B]
+    std::vector<double> xx, yy, xy;    ///< [B*B] row-major centered products (pass 2)
+    std::vector<double> A, B;          ///< [B*B] row-major canonical coefficients
+    std::vector<double> varMad;        ///< [B] MAD variate variances (>= 1e-6)
+    bool meansReady = false;
+    bool covReady = false;
+    bool ready = false;
+};
+
+/**
+ * Pass 1: accumulate per-band raw sums over the valid pixels of one BIP tile
+ * (@p tilePixels pixels, @p bandCount floats per pixel).
+ */
+bool madAccumulateSums(const float *beforeBip, const float *afterBip,
+                       size_t tilePixels, int bandCount, MadStreamingState *s);
+
+/**
+ * Finalize the per-band means. Returns false (with @p errorMessage) when
+ * validCount < bandCount + 2, i.e. the covariance estimate is degenerate.
+ */
+bool madFinalizeMeans(MadStreamingState *s, QString *errorMessage = nullptr);
+
+/**
+ * Pass 2: accumulate centered cross-products against the finalized means
+ * (s.meanX/meanY) into s.xx / s.yy / s.xy. Centering against the final means
+ * avoids the cancellation-prone E[xy] - xbar*ybar form.
+ */
+bool madAccumulateCentered(const float *beforeBip, const float *afterBip,
+                           size_t tilePixels, int bandCount, MadStreamingState *s);
+
+/**
+ * Finalize covariances: divide by (N-1), trace-scaled diagonal regularization,
+ * SVD-based sqrt-inverse, canonical correlation analysis, sign convention and
+ * MAD variate variances. Scales with bandCount^2 only.
+ */
+bool madFinalize(MadStreamingState *s, QString *errorMessage = nullptr);
+
+/**
+ * Pass 3: per-pixel chi-square change magnitude
+ *   Z = sum_k (u_k - v_k)^2 / varMad_k,  u = A^T (x - xbar), v = B^T (y - ybar).
+ * @p out holds @p tilePixels floats; invalid pixels become quiet_NaN.
+ */
+void madTransformTile(const float *beforeBip, const float *afterBip,
+                      size_t tilePixels, int bandCount, const MadStreamingState &s,
+                      float *out);
+
+/**
+ * Otsu's between-class variance threshold over a precomputed histogram
+ * (streaming variant of otsuThreshold; same maximization and threshold
+ * placement: minVal + (bestBin + 0.5) * range / bins). Returns false when
+ * @p finiteCount is zero; returns @p minVal when all finite values coincide.
+ */
+bool otsuThresholdFromHistogram(double minVal, double maxVal,
+                                const std::vector<double> &hist,
+                                size_t finiteCount, float *threshold);
+
+/**
+ * Nearest-rank percentile (0..100) estimated from a precomputed histogram:
+ * returns the bin lower edge plus the fractional position of the rank within
+ * that bin. Streams over the same binning as the otsu histogram variant.
+ * Returns false when @p finiteCount is zero.
+ */
+bool percentileThresholdFromHistogram(double minVal, double maxVal,
+                                      const std::vector<double> &hist,
+                                      size_t finiteCount, double percentile,
+                                      float *threshold);
 
 /**
  * Otsu's between-class variance threshold over the finite values of @p values.

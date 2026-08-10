@@ -187,3 +187,20 @@ TEST_CASE("rs:spectral_resample accepts explicit source wavelengths", "[operator
     REQUIRE(ds.readBandData(1, b1.data(), 1, 1));
     CHECK(b1[0] == Approx(0.2f).margin(1e-3f));
 }
+
+TEST_CASE("SpectralResampling resampleSpectrumGaussian uses FWHM Gaussian weighting", "[resample][gaussian]")
+{
+    const float src[] = {0.0f, 0.0f, 1.0f, 0.0f, 0.0f};
+    const float srcWl[] = {400.0f, 450.0f, 500.0f, 550.0f, 600.0f};
+
+    const float dstWl[] = {500.0f, 525.0f};
+    const float dstFwhm[] = {50.0f, 50.0f};
+    float out[2] = {0.0f, 0.0f};
+
+    REQUIRE(SpectralResampling::resampleSpectrumGaussian(src, srcWl, 5, dstWl, dstFwhm, 2, out));
+
+    // Peak at 500nm should have highest weight
+    CHECK(out[0] > out[1]);
+    CHECK(out[0] > 0.5f);
+}
+

@@ -182,28 +182,57 @@ void PostClassificationDialog::showResultSummary( const Json::Value &result )
     return;
 
   QStringList lines;
+  const uint64_t total = result.isMember( "totalPixels" ) ? result["totalPixels"].asUInt64() : 0;
   if ( result.isMember( "changedPixels" ) )
   {
     lines << tr( "变化像元：%1 / %2（%3%）" )
                .arg( result["changedPixels"].asUInt64() )
-               .arg( result["totalPixels"].asUInt64() )
+               .arg( total )
                .arg( result["changedPercent"].asDouble(), 0, 'f', 2 );
   }
+
+  if ( result.isMember( "fromTotals" ) && result["fromTotals"].isArray() &&
+       result.isMember( "toTotals" ) && result["toTotals"].isArray() )
+  {
+    lines << tr( "类别像元计数与占比变化（前期 → 后期）：" );
+    const int n = static_cast<int>( result["fromTotals"].size() );
+    for ( int c = 0; c < n; ++c )
+    {
+      const uint64_t fCount = result["fromTotals"][c].asUInt64();
+      const uint64_t tCount = result["toTotals"][c].asUInt64();
+      const double fRatio = total > 0 ? ( 100.0 * static_cast<double>( fCount ) / total ) : 0.0;
+      const double tRatio = total > 0 ? ( 100.0 * static_cast<double>( tCount ) / total ) : 0.0;
+      const int64_t net = result.isMember( "netChange" ) && static_cast<int>( result["netChange"].size() ) > c
+                            ? result["netChange"][c].asInt64()
+                            : ( static_cast<int64_t>( tCount ) - static_cast<int64_t>( fCount ) );
+      lines << QStringLiteral( "  类别 %1: %2 (%3%) → %4 (%5%) [净变化: %6%7]" )
+                   .arg( c )
+                   .arg( fCount )
+                   .arg( fRatio, 0, 'f', 2 )
+                   .arg( tCount )
+                   .arg( tRatio, 0, 'f', 2 )
+                   .arg( net >= 0 ? "+" : "" )
+                   .arg( net );
+    }
+  }
+
   if ( result.isMember( "transitionMatrix" ) && result["transitionMatrix"].isArray()
        && result["transitionMatrix"].size() > 0 )
   {
-    lines << tr( "转移矩阵（行=前时相，列=后时相；仅列出非零项）：" );
+    lines << tr( "转移矩阵（行=前时相，列=后时相；仅列出非零转移）：" );
     const int n = static_cast<int>( result["transitionMatrix"].size() );
     for ( int from = 0; from < n; ++from )
     {
       const Json::Value &row = result["transitionMatrix"][from];
       for ( int to = 0; to < n; ++to )
       {
-        if ( row[to].asUInt64() > 0 )
-          lines << QStringLiteral( "  %1→%2: %3" )
+        if ( from != to && row[to].asUInt64() > 0 )
+        {
+          lines << QStringLiteral( "  类别 %1 → 类别 %2: %3 像元" )
                        .arg( from )
                        .arg( to )
                        .arg( row[to].asUInt64() );
+        }
       }
     }
   }

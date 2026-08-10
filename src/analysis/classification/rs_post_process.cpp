@@ -634,7 +634,7 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
   const CPLErr perr = GDALPolygonize(
     band,
     /*mask*/ nullptr,
-    layer,
+    OGRLayer::ToHandle( layer ),
     fieldIndex,
     /*options*/ nullptr,
     /*progress*/ nullptr,

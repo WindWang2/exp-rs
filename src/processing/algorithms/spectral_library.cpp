@@ -60,6 +60,10 @@ QJsonObject Library::toJson() const
     if ( !wl.empty() )
         root.insert( QStringLiteral( "wavelengths" ), toJsonArray( wl ) );
 
+    const std::vector<float> fw = fwhm();
+    if ( !fw.empty() )
+        root.insert( QStringLiteral( "fwhm" ), toJsonArray( fw ) );
+
     QJsonArray entryArray;
     for ( const Entry &entry : entries )
     {
@@ -132,6 +136,22 @@ bool Library::fromJson( const QJsonObject &json, Library *out, QString *errorMes
             entry.wavelengths = wl;
     }
 
+    // Optional shared FWHM grid.
+    std::vector<float> fw;
+    if ( json.contains( QStringLiteral( "fwhm" ) )
+         && readFloatArray( json.value( QStringLiteral( "fwhm" ) ), &fw ) )
+    {
+        if ( bandCount >= 0 && static_cast<int>( fw.size() ) != bandCount )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral( "Spectral library FWHM grid size "
+                                                "does not match the band count" );
+            return false;
+        }
+        for ( Entry &entry : library.entries )
+            entry.fwhm = fw;
+    }
+
     *out = std::move( library );
     return true;
 }
@@ -195,6 +215,20 @@ std::vector<float> Library::wavelengths() const
     return result;
 }
 
+std::vector<float> Library::fwhm() const
+{
+    std::vector<float> result;
+    if ( entries.isEmpty() )
+        return result;
+    result = entries.first().fwhm;
+    for ( const Entry &entry : entries )
+    {
+        if ( entry.fwhm != result )
+            return {};
+    }
+    return result;
+}
+
 } // namespace SpectralLibrary
 
 namespace SpectralLibrary
@@ -233,10 +267,17 @@ std::vector<MatchScore> matchSpectrum( const std::vector<float> &spectrum,
                  && entry.wavelengths.size() == entryRef.size() )
             {
                 resampledSpectrum.resize( entryRef.size() );
-                if ( SpectralResampling::resampleSpectrum(
-                       spectrum.data(), spectrumWavelengths.data(), bands,
-                       entry.wavelengths.data(), static_cast<int>( entryRef.size() ),
-                       resampledSpectrum.data() ) )
+                const bool okResampling = (!entry.fwhm.empty() && entry.fwhm.size() == entryRef.size())
+                    ? SpectralResampling::resampleSpectrumGaussian(
+                           spectrum.data(), spectrumWavelengths.data(), bands,
+                           entry.wavelengths.data(), entry.fwhm.data(), static_cast<int>( entryRef.size() ),
+                           resampledSpectrum.data() )
+                    : SpectralResampling::resampleSpectrum(
+                           spectrum.data(), spectrumWavelengths.data(), bands,
+                           entry.wavelengths.data(), static_cast<int>( entryRef.size() ),
+                           resampledSpectrum.data() );
+
+                if ( okResampling )
                 {
                     bool hasOutOfRange = false;
                     for ( float v : resampledSpectrum )

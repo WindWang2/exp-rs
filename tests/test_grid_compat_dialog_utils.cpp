@@ -109,3 +109,31 @@ TEST_CASE( "Grid preflight helper verdicts", "[grid_compat][dialog_utils]" )
     REQUIRE_FALSE( msg.isEmpty() );
   }
 }
+
+#include "app/widgets/resolution_widget.h"
+
+TEST_CASE( "ResolutionWidget mode selection and preflight validation", "[resolution_widget]" )
+{
+  ensureQgisApplication();
+  ResolutionWidget widget;
+
+  SECTION( "Fixed resolution mode validation" )
+  {
+    widget.setMode( ResolutionWidget::Mode::FixedResolution );
+    widget.setTargetResolution( 30.0 );
+    CHECK( widget.targetResolutionX() == 30.0 );
+    CHECK( widget.targetResolutionY() == 30.0 );
+    QString err;
+    CHECK( widget.isValid( &err ) );
+  }
+
+  SECTION( "Scale factor mode validation" )
+  {
+    widget.setMode( ResolutionWidget::Mode::ScaleFactor );
+    widget.setScaleFactor( 0.5 );
+    CHECK( widget.scaleFactor() == 0.5 );
+    QString err;
+    CHECK( widget.isValid( &err ) );
+  }
+}
+

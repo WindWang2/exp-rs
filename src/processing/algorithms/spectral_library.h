@@ -24,12 +24,14 @@ namespace SpectralLibrary
         QString source;               ///< provenance label (optional)
         std::vector<float> spectrum;  ///< band values (all entries in one library share a band count)
         std::vector<float> wavelengths; ///< band center wavelengths (nm), optional
+        std::vector<float> fwhm;      ///< band FWHM (nm), optional
 
         bool operator==( const Entry &other ) const
         {
             return name == other.name && material == other.material
                    && source == other.source && spectrum == other.spectrum
-                   && wavelengths == other.wavelengths;
+                   && wavelengths == other.wavelengths
+                   && fwhm == other.fwhm;
         }
     };
 
@@ -38,7 +40,7 @@ namespace SpectralLibrary
     {
         QVector<Entry> entries;
 
-        /// Serialize to a JSON object (band count / wavelengths stored once,
+        /// Serialize to a JSON object (band count / wavelengths / fwhm stored once,
         /// spectra as arrays).
         QJsonObject toJson() const;
 
@@ -59,6 +61,9 @@ namespace SpectralLibrary
 
         /// Shared wavelength grid, or empty when absent / inconsistent.
         std::vector<float> wavelengths() const;
+
+        /// Shared FWHM grid, or empty when absent / inconsistent.
+        std::vector<float> fwhm() const;
     };
 
     /// Result of matching a test spectrum against one library entry.

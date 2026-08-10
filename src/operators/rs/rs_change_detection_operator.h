@@ -38,6 +38,15 @@ public:
         return "Detect changes between two co-registered raster images.";
     }
 
+    // cva/mad (the large-raster multi-band path) stream over 256x256 tiles:
+    // MAD in three passes (covariance, centered products, transform) with an
+    // O(tilePixels*bands + bands^2) working set. Single-band methods below this
+    // still read whole bands, which is noted in executionEstimate().
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        return RSOperatorMemoryPolicy::MultiPassStreaming;
+    }
+
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;
