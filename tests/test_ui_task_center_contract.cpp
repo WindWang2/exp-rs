@@ -11,7 +11,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "processing/framework/task_center.h"
 #include "app/dialogs/async_algorithm_runner.h"
-#include <processing/qgsprocessingalgrunnertask.h>
+#include "qgstaskmanager.h"
 #include <processing/qgsprocessingcontext.h>
 
 #include <chrono>
@@ -212,13 +212,24 @@ TEST_CASE( "UI contract: AsyncAlgorithmRunner destructor marks TaskCenter task c
   REQUIRE( taskId > 0 );
   sicnu::TaskCenter::instance().markTaskRunning( taskId );
 
-  QgsProcessingContext context;
-  auto *task = new QgsProcessingAlgRunnerTask( nullptr, params, context, nullptr );
+  // Lightweight task: the runner only cancels/disconnects it, so a plain
+  // QgsTask subclass is sufficient — constructing a QgsProcessingAlgRunnerTask
+  // with a nullptr algorithm would crash in its initializer list.
+  class MinimalTask : public QgsTask
+  {
+  public:
+    MinimalTask()
+      : QgsTask( QStringLiteral( "test:async_teardown_task" ) )
+    {}
+  protected:
+    bool run() override { return true; }
+  };
+  auto *task = new MinimalTask();
 
   class TestRunner : public AsyncAlgorithmRunner
   {
   public:
-    TestRunner( QgsProcessingAlgRunnerTask *t, long centerId )
+    TestRunner( QgsTask *t, long centerId )
       : AsyncAlgorithmRunner( nullptr )
     {
       setTaskForTesting( t, centerId );

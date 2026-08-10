@@ -8,7 +8,7 @@
 class QgsProcessingAlgorithm;
 class QgsProcessingContext;
 class QgsProcessingFeedback;
-class QgsProcessingAlgRunnerTask;
+class QgsTask;
 
 /**
  * \deprecated Prefer SicnuAlgorithmDialog (toolbox) or
@@ -36,7 +36,7 @@ signals:
     void progressChanged(double progress);
 
 protected:
-    void setTaskForTesting(QgsProcessingAlgRunnerTask *task, long centerTaskId)
+    void setTaskForTesting(QgsTask *task, long centerTaskId)
     {
         beginRun();
         m_task = task;
@@ -44,7 +44,7 @@ protected:
     }
 
 private:
-    QgsProcessingAlgRunnerTask *m_task = nullptr;
+    QgsTask *m_task = nullptr;
     qint64 m_startTime = 0;
     long m_centerTaskId = -1;
 };

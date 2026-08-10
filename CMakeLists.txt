@@ -39,8 +39,8 @@ if(SICNU_VENDOR_GDAL)
     message(STATUS "SICNU_VENDOR_GDAL=ON — building GDAL/PROJ/GEOS from vendor/")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia Core5Compat Test)
-qt_standard_project_setup()
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg Xml Sql Multimedia Core5Compat Test)
+qt_standard_project_setup(REQUIRES 6.4)
 
 # When vendoring, directly include the config files to bypass Find module cache
 if(SICNU_VENDOR_GDAL)
@@ -339,7 +339,11 @@ if(SICNU_BUILD_OTB)
     set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     set(ITK_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
-    add_subdirectory(itk_ref)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/itk_ref")
+        add_subdirectory(itk_ref)
+    else()
+        message(WARNING "SICNU_BUILD_OTB=ON but itk_ref/ is missing — skipping ITK (vendored OTB build will not work without it)")
+    endif()
 
     # Tell OTB where to find the built ITK
     set(ITK_DIR "${CMAKE_BINARY_DIR}/itk_ref" CACHE PATH "ITK build directory" FORCE)
@@ -469,7 +473,11 @@ if(SICNU_BUILD_OTB)
     # OTB CMAKE_SOURCE_DIR patches applied: GDAL init, GenerateExportHeaderCustom,
     # PreventInSourceBuilds, GetVersionFromGitTag, uninstall target all use OTB_SOURCE_DIR.
     # TinyXML init skips find_package when pre-set.
-    add_subdirectory(otb_ref)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/otb_ref")
+        add_subdirectory(otb_ref)
+    else()
+        message(WARNING "SICNU_BUILD_OTB=ON but otb_ref/ is missing — skipping OTB")
+    endif()
 
     set(SICNU_HAS_OTB TRUE)
 endif()

@@ -31,6 +31,7 @@ jobs:
             qt6-base-dev qt6-base-dev-tools qt6-5compat-dev qt6-svg-dev qt6-multimedia-dev libqt6sql6-sqlite \
             libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev \
             libprotobuf-dev protobuf-compiler \
+            libqca-qt6-2-dev libqt6keychain-dev \
             bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev
 
       - name: Configure CMake
@@ -40,6 +41,11 @@ jobs:
         run: cmake --build build --parallel $(nproc)
 
       - name: Execute Fast CTest Suite
+        env:
+          QT_QPA_PLATFORM: offscreen
+          # Synthetic fixture is deterministic; Linux tiers share one GDAL build,
+          # so the golden SHA must match exactly. Drift is a real regression here.
+          REQUIRE_STRICT_RPC_SHA: '1'
         run: ctest --test-dir build --output-on-failure
 
       - name: Verify Installation Rule Execution
@@ -67,6 +73,7 @@ jobs:
             qt6-base-dev qt6-base-dev-tools qt6-5compat-dev qt6-svg-dev qt6-multimedia-dev \
             libgdal-dev libproj-dev libgeos-dev libexpat1-dev libzip-dev \
             libprotobuf-dev protobuf-compiler \
+            libqca-qt6-2-dev libqt6keychain-dev \
             bison flex libpcre2-dev libcurl4-openssl-dev libgsl-dev \
             libopencv-dev python3-dev python3-pip python3-numpy
 
@@ -80,6 +87,8 @@ jobs:
         env:
           LSAN_OPTIONS: "detect_leaks=0"
           ASAN_OPTIONS: "halt_on_error=1:detect_leaks=0"
+          QT_QPA_PLATFORM: offscreen
+          REQUIRE_STRICT_RPC_SHA: '1'
         run: ctest --test-dir build-sanitizer --output-on-failure
 
   # =========================================================================
@@ -143,7 +152,7 @@ jobs:
       - name: Install macOS Dependencies via Homebrew
         run: |
           brew update
-          brew install qt@6 qca gdal proj geos libzip gsl bison flex pcre2 cmake protobuf
+          brew install qt@6 qca qtkeychain gdal proj geos libzip gsl bison flex pcre2 cmake protobuf
 
       - name: Configure CMake for macOS
         # Homebrew's bison (>= 3.8) and flex are keg-only; macOS ships bison 2.x
@@ -162,6 +171,8 @@ jobs:
             -DENABLE_TESTS=ON
 
       - name: Verify macOS Build & Execute CTest
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: |
           cmake --build build-mac --parallel
           ctest --test-dir build-mac --output-on-failure

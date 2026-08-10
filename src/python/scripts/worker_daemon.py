@@ -170,7 +170,19 @@ def main():
     if not os.path.isabs(socket_path):
         socket_path = os.path.join(tempfile.gettempdir(), socket_path)
 
-    s = socket.socket(socket.AF_UNIX if hasattr(socket, "AF_UNIX") else socket.AF_INET, socket.SOCK_STREAM)
+    # The C++ side (python_ipc_server) speaks QLocalSocket: a unix socket on
+    # POSIX, a named pipe on Windows. Python can connect to the POSIX unix
+    # socket directly; the Windows named-pipe transport is not implemented
+    # here, so fail fast with a clear message instead of pretending an
+    # AF_INET fallback works (there is no TCP listener on the C++ side).
+    if not hasattr(socket, "AF_UNIX"):
+        sys.stderr.write(
+            "WorkerDaemon: AF_UNIX unavailable on this platform — the out-of-process "
+            "Python worker is not supported here\n"
+        )
+        sys.exit(1)
+
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         s.connect(socket_path)
     except Exception as e:

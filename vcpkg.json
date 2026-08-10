@@ -51,6 +51,14 @@
     {
       "name": "winflexbison",
       "platform": "windows"
+    },
+    {
+      "name": "qca",
+      "platform": "windows"
+    },
+    {
+      "name": "qtkeychain",
+      "platform": "windows"
     }
   ]
 }
