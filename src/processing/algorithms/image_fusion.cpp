@@ -959,43 +959,464 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
     }
     else if ( params.method == QStringLiteral( "pca" ) )
     {
-        // Full in-memory fallback for small/reference compatibility; for processNativeFusion,
-        // read into memory and delegate to pcaFusion to match exact Jacobi decomposition behavior
-        QVector<std::vector<float>> msData( nMsBands );
-        QVector<const float *> msPtrs( nMsBands );
-        const size_t pixelCount = static_cast<size_t>( w ) * h;
-        std::vector<float> fullPan( pixelCount );
-        if ( !panDataset.readBandData( 1, fullPan.data(), w, h ) ) return false;
-        for ( int b = 0; b < nMsBands; ++b ) {
-            msData[b].resize( pixelCount );
-            if ( !msDataset.readBandData( b + 1, msData[b].data(), w, h ) ) return false;
-            msPtrs[b] = msData[b].data();
+        // 2-PASS TILE STREAMING FOR PCA FUSION
+        // PASS 1: Accumulate online mean and covariance matrix for MS bands
+        std::vector<double> msMean( nMsBands, 0.0 );
+        StatsAccumulator statsP;
+        int64_t validPixels = 0;
+
+        for ( int r = 0; r < rows; ++r )
+        {
+            const int yOff = r * tileH;
+            const int th = std::min( tileH, h - yOff );
+            for ( int c = 0; c < cols; ++c )
+            {
+                const int xOff = c * tileW;
+                const int tw = std::min( tileW, w - xOff );
+                const size_t tileSize = static_cast<size_t>( tw ) * th;
+
+                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
+                    return false;
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                        return false;
+                }
+
+                for ( size_t i = 0; i < tileSize; ++i )
+                {
+                    if ( panBuf[i] == nodata || std::isnan( panBuf[i] ) )
+                        continue;
+
+                    bool validMs = true;
+                    for ( int b = 0; b < nMsBands; ++b )
+                    {
+                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
+                        {
+                            validMs = false;
+                            break;
+                        }
+                    }
+                    if ( !validMs )
+                        continue;
+
+                    statsP.add( panBuf[i] );
+                    for ( int b = 0; b < nMsBands; ++b )
+                        msMean[b] += msBuf[b][i];
+                    validPixels++;
+                }
+            }
         }
-        auto res = pcaFusion( msPtrs, nMsBands, fullPan.data(), w, h, nodata );
-        if ( res.isEmpty() ) return false;
-        for ( int b = 0; b < nMsBands; ++b ) {
-            if ( !outDataset.writeBandWindow( b + 1, 0, 0, w, h, res[b].constData() ) ) return false;
+
+        if ( validPixels == 0 )
+            return false;
+
+        for ( int b = 0; b < nMsBands; ++b )
+            msMean[b] /= static_cast<double>( validPixels );
+
+        // Covariance matrix computation
+        std::vector<std::vector<double>> cov( nMsBands, std::vector<double>( nMsBands, 0.0 ) );
+        for ( int r = 0; r < rows; ++r )
+        {
+            const int yOff = r * tileH;
+            const int th = std::min( tileH, h - yOff );
+            for ( int c = 0; c < cols; ++c )
+            {
+                const int xOff = c * tileW;
+                const int tw = std::min( tileW, w - xOff );
+                const size_t tileSize = static_cast<size_t>( tw ) * th;
+
+                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
+                    return false;
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                        return false;
+                }
+
+                for ( size_t i = 0; i < tileSize; ++i )
+                {
+                    if ( panBuf[i] == nodata || std::isnan( panBuf[i] ) )
+                        continue;
+
+                    bool validMs = true;
+                    for ( int b = 0; b < nMsBands; ++b )
+                    {
+                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
+                        {
+                            validMs = false;
+                            break;
+                        }
+                    }
+                    if ( !validMs )
+                        continue;
+
+                    for ( int b1 = 0; b1 < nMsBands; ++b1 )
+                    {
+                        double d1 = msBuf[b1][i] - msMean[b1];
+                        for ( int b2 = 0; b2 < nMsBands; ++b2 )
+                        {
+                            double d2 = msBuf[b2][i] - msMean[b2];
+                            cov[b1][b2] += d1 * d2;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Jacobi eigen decomposition for symmetric nMsBands x nMsBands matrix
+        std::vector<double> eigVec( nMsBands * nMsBands, 0.0 );
+        for ( int i = 0; i < nMsBands; ++i ) eigVec[i * nMsBands + i] = 1.0;
+        std::vector<double> eigVal( nMsBands * nMsBands, 0.0 );
+        for ( int b1 = 0; b1 < nMsBands; ++b1 )
+            for ( int b2 = 0; b2 < nMsBands; ++b2 )
+                eigVal[b1 * nMsBands + b2] = cov[b1][b2];
+
+        for ( int iter = 0; iter < 100; ++iter )
+        {
+            int p = 0, q = 1;
+            double maxVal = 0;
+            for ( int i = 0; i < nMsBands; ++i )
+            {
+                for ( int j = i + 1; j < nMsBands; ++j )
+                {
+                    double v = std::abs( eigVal[i * nMsBands + j] );
+                    if ( v > maxVal ) { maxVal = v; p = i; q = j; }
+                }
+            }
+            if ( maxVal < 1e-10 ) break;
+
+            double theta = 0.5 * std::atan2( 2.0 * eigVal[p * nMsBands + q],
+                                              eigVal[p * nMsBands + p] - eigVal[q * nMsBands + q] );
+            double c = std::cos( theta );
+            double s = std::sin( theta );
+
+            for ( int i = 0; i < nMsBands; ++i )
+            {
+                double vp = eigVal[i * nMsBands + p];
+                double vq = eigVal[i * nMsBands + q];
+                eigVal[i * nMsBands + p] = c * vp + s * vq;
+                eigVal[i * nMsBands + q] = -s * vp + c * vq;
+            }
+            for ( int i = 0; i < nMsBands; ++i )
+            {
+                double vp = eigVal[p * nMsBands + i];
+                double vq = eigVal[q * nMsBands + i];
+                eigVal[p * nMsBands + i] = c * vp + s * vq;
+                eigVal[q * nMsBands + i] = -s * vp + c * vq;
+            }
+            for ( int i = 0; i < nMsBands; ++i )
+            {
+                double vp = eigVec[i * nMsBands + p];
+                double vq = eigVec[i * nMsBands + q];
+                eigVec[i * nMsBands + p] = c * vp + s * vq;
+                eigVec[i * nMsBands + q] = -s * vp + c * vq;
+            }
+        }
+
+        std::vector<int> eigIdx( nMsBands );
+        for ( int i = 0; i < nMsBands; ++i ) eigIdx[i] = i;
+        std::sort( eigIdx.begin(), eigIdx.end(), [&]( int a, int b ) {
+            return eigVal[a * nMsBands + a] > eigVal[b * nMsBands + b];
+        } );
+
+        std::vector<std::vector<double>> V( nMsBands, std::vector<double>( nMsBands ) );
+        for ( int i = 0; i < nMsBands; ++i )
+            for ( int b = 0; b < nMsBands; ++b )
+                V[b][i] = eigVec[b * nMsBands + eigIdx[i]];
+
+        // PASS 2: Compute PC1 stats, histogram match Pan, and stream transformed output
+        StatsAccumulator statsPC1;
+        for ( int r = 0; r < rows; ++r )
+        {
+            const int yOff = r * tileH;
+            const int th = std::min( tileH, h - yOff );
+            for ( int c = 0; c < cols; ++c )
+            {
+                const int xOff = c * tileW;
+                const int tw = std::min( tileW, w - xOff );
+                const size_t tileSize = static_cast<size_t>( tw ) * th;
+
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                        return false;
+                }
+
+                for ( size_t i = 0; i < tileSize; ++i )
+                {
+                    bool validMs = true;
+                    for ( int b = 0; b < nMsBands; ++b )
+                    {
+                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
+                        {
+                            validMs = false;
+                            break;
+                        }
+                    }
+                    if ( !validMs )
+                        continue;
+
+                    double pc1 = 0.0;
+                    for ( int b = 0; b < nMsBands; ++b )
+                        pc1 += ( msBuf[b][i] - msMean[b] ) * V[b][0];
+                    statsPC1.add( pc1 );
+                }
+            }
+        }
+
+        double stdPC1 = statsPC1.stddev();
+        double stdP = statsP.stddev();
+        double scale = ( stdP > 1e-10 ) ? ( stdPC1 / stdP ) : 1.0;
+        double meanPC1 = statsPC1.mean();
+        double meanP = statsP.mean();
+
+        // PASS 3: Stream write transformed PCA tiles
+        for ( int r = 0; r < rows; ++r )
+        {
+            const int yOff = r * tileH;
+            const int th = std::min( tileH, h - yOff );
+            for ( int c = 0; c < cols; ++c )
+            {
+                const int xOff = c * tileW;
+                const int tw = std::min( tileW, w - xOff );
+                const size_t tileSize = static_cast<size_t>( tw ) * th;
+
+                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
+                    return false;
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                        return false;
+                }
+
+                for ( size_t i = 0; i < tileSize; ++i )
+                {
+                    if ( panBuf[i] == nodata || std::isnan( panBuf[i] ) )
+                    {
+                        for ( int b = 0; b < nMsBands; ++b )
+                            outBuf[b][i] = nodata;
+                        continue;
+                    }
+
+                    bool validMs = true;
+                    for ( int b = 0; b < nMsBands; ++b )
+                    {
+                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
+                        {
+                            validMs = false;
+                            break;
+                        }
+                    }
+                    if ( !validMs )
+                    {
+                        for ( int b = 0; b < nMsBands; ++b )
+                            outBuf[b][i] = nodata;
+                        continue;
+                    }
+
+                    std::vector<double> pc( nMsBands, 0.0 );
+                    for ( int k = 0; k < nMsBands; ++k )
+                    {
+                        for ( int b = 0; b < nMsBands; ++b )
+                            pc[k] += ( msBuf[b][i] - msMean[b] ) * V[b][k];
+                    }
+
+                    // Substitute PC1 with histogram-matched Pan
+                    pc[0] = ( panBuf[i] - meanP ) * scale + meanPC1;
+
+                    // Inverse PCA transform: MS = V * PC + msMean
+                    for ( int b = 0; b < nMsBands; ++b )
+                    {
+                        double val = msMean[b];
+                        for ( int k = 0; k < nMsBands; ++k )
+                            val += V[b][k] * pc[k];
+                        outBuf[b][i] = static_cast<float>( val );
+                    }
+                }
+
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    if ( !outDataset.writeBandWindow( b + 1, xOff, yOff, tw, th, outBuf[b].data() ) )
+                        return false;
+                }
+            }
         }
         return true;
     }
     else if ( params.method == QStringLiteral( "gram_schmidt" ) )
     {
-        // Full in-memory fallback for small/reference compatibility; for processNativeFusion,
-        // read into memory and delegate to gramSchmidtFusion to match exact GS behavior
-        QVector<std::vector<float>> msData( nMsBands );
-        QVector<const float *> msPtrs( nMsBands );
-        const size_t pixelCount = static_cast<size_t>( w ) * h;
-        std::vector<float> fullPan( pixelCount );
-        if ( !panDataset.readBandData( 1, fullPan.data(), w, h ) ) return false;
-        for ( int b = 0; b < nMsBands; ++b ) {
-            msData[b].resize( pixelCount );
-            if ( !msDataset.readBandData( b + 1, msData[b].data(), w, h ) ) return false;
-            msPtrs[b] = msData[b].data();
+        // 2-PASS TILE STREAMING FOR GRAM-SCHMIDT FUSION
+        // PASS 1: Accumulate mean for synthetic Pan (mean across MS bands) and Pan stats
+        StatsAccumulator statsSynPan, statsP;
+        for ( int r = 0; r < rows; ++r )
+        {
+            const int yOff = r * tileH;
+            const int th = std::min( tileH, h - yOff );
+            for ( int c = 0; c < cols; ++c )
+            {
+                const int xOff = c * tileW;
+                const int tw = std::min( tileW, w - xOff );
+                const size_t tileSize = static_cast<size_t>( tw ) * th;
+
+                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
+                    return false;
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                        return false;
+                }
+
+                for ( size_t i = 0; i < tileSize; ++i )
+                {
+                    if ( panBuf[i] == nodata || std::isnan( panBuf[i] ) )
+                        continue;
+
+                    bool validMs = true;
+                    double synVal = 0.0;
+                    for ( int b = 0; b < nMsBands; ++b )
+                    {
+                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
+                        {
+                            validMs = false;
+                            break;
+                        }
+                        synVal += msBuf[b][i];
+                    }
+                    if ( !validMs )
+                        continue;
+
+                    synVal /= nMsBands;
+                    statsSynPan.add( synVal );
+                    statsP.add( panBuf[i] );
+                }
+            }
         }
-        auto res = gramSchmidtFusion( msPtrs, nMsBands, fullPan.data(), w, h, nodata );
-        if ( res.isEmpty() ) return false;
-        for ( int b = 0; b < nMsBands; ++b ) {
-            if ( !outDataset.writeBandWindow( b + 1, 0, 0, w, h, res[b].constData() ) ) return false;
+
+        double stdSyn = statsSynPan.stddev();
+        double stdP = statsP.stddev();
+        double scale = ( stdP > 1e-10 ) ? ( stdSyn / stdP ) : 1.0;
+        double meanSyn = statsSynPan.mean();
+        double meanP = statsP.mean();
+
+        // PASS 2: Compute GS Gram matrix & projection coefficients over streaming tiles
+        std::vector<std::vector<double>> coef( nMsBands + 1, std::vector<double>( nMsBands + 1, 0.0 ) );
+        std::vector<double> normSq( nMsBands + 1, 0.0 );
+
+        // Stream tiles to compute dot products for GS orthogonalization
+        for ( int r = 0; r < rows; ++r )
+        {
+            const int yOff = r * tileH;
+            const int th = std::min( tileH, h - yOff );
+            for ( int c = 0; c < cols; ++c )
+            {
+                const int xOff = c * tileW;
+                const int tw = std::min( tileW, w - xOff );
+                const size_t tileSize = static_cast<size_t>( tw ) * th;
+
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                        return false;
+                }
+
+                for ( size_t i = 0; i < tileSize; ++i )
+                {
+                    bool validMs = true;
+                    double synVal = 0.0;
+                    for ( int b = 0; b < nMsBands; ++b )
+                    {
+                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
+                        {
+                            validMs = false;
+                            break;
+                        }
+                        synVal += msBuf[b][i];
+                    }
+                    if ( !validMs )
+                        continue;
+                    synVal /= nMsBands;
+
+                    // GS_0 = synVal
+                    normSq[0] += synVal * synVal;
+                    for ( int b = 0; b < nMsBands; ++b )
+                    {
+                        const int k = b + 1;
+                        coef[k][0] += msBuf[b][i] * synVal;
+                    }
+                }
+            }
+        }
+
+        if ( normSq[0] > 1e-10 )
+        {
+            for ( int b = 0; b < nMsBands; ++b )
+                coef[b + 1][0] /= normSq[0];
+        }
+
+        // PASS 3: Stream write transformed Gram-Schmidt tiles
+        for ( int r = 0; r < rows; ++r )
+        {
+            const int yOff = r * tileH;
+            const int th = std::min( tileH, h - yOff );
+            for ( int c = 0; c < cols; ++c )
+            {
+                const int xOff = c * tileW;
+                const int tw = std::min( tileW, w - xOff );
+                const size_t tileSize = static_cast<size_t>( tw ) * th;
+
+                if ( !panDataset.readBandWindow( 1, xOff, yOff, tw, th, panBuf.data() ) )
+                    return false;
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    if ( !msDataset.readBandWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                        return false;
+                }
+
+                for ( size_t i = 0; i < tileSize; ++i )
+                {
+                    if ( panBuf[i] == nodata || std::isnan( panBuf[i] ) )
+                    {
+                        for ( int b = 0; b < nMsBands; ++b )
+                            outBuf[b][i] = nodata;
+                        continue;
+                    }
+
+                    bool validMs = true;
+                    double synVal = 0.0;
+                    for ( int b = 0; b < nMsBands; ++b )
+                    {
+                        if ( msBuf[b][i] == nodata || std::isnan( msBuf[b][i] ) )
+                        {
+                            validMs = false;
+                            break;
+                        }
+                        synVal += msBuf[b][i];
+                    }
+                    if ( !validMs )
+                    {
+                        for ( int b = 0; b < nMsBands; ++b )
+                            outBuf[b][i] = nodata;
+                        continue;
+                    }
+
+                    float panMatched = static_cast<float>( ( panBuf[i] - meanP ) * scale + meanSyn );
+                    double gs0Sub = panMatched;
+
+                    for ( int b = 0; b < nMsBands; ++b )
+                    {
+                        const int k = b + 1;
+                        double val = msBuf[b][i] + coef[k][0] * ( gs0Sub - ( synVal / nMsBands ) );
+                        outBuf[b][i] = static_cast<float>( val );
+                    }
+                }
+
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    if ( !outDataset.writeBandWindow( b + 1, xOff, yOff, tw, th, outBuf[b].data() ) )
+                        return false;
+                }
+            }
         }
         return true;
     }

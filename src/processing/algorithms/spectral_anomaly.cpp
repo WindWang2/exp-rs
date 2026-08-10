@@ -7,6 +7,11 @@
 namespace SpectralAnomaly
 {
 
+/// Default NoData sentinel used across the processing stack (see
+/// GdalDatasetWrapper / image_fusion's default). Pixels at or near this value
+/// are treated as invalid by the streaming accumulators.
+constexpr float kNoDataSentinel = -9999.0f;
+
 namespace
 {
 
@@ -97,7 +102,11 @@ void accumulateMean( const float *pixels, size_t count, int bands,
             bool valid = true;
             for ( int b = 0; b < bands; ++b )
             {
-                if ( !std::isfinite( pixels[p * static_cast<size_t>( bands ) + b] ) )
+                const float v = pixels[p * static_cast<size_t>( bands ) + b];
+                // Invalid: non-finite, or the -9999 NoData sentinel (the
+                // codebase-wide default NoData convention; matches the legacy
+                // rxDetector nodata filtering within tolerance).
+                if ( !std::isfinite( v ) || std::abs( v - kNoDataSentinel ) < 1e-3f )
                 {
                     valid = false;
                     break;
@@ -143,7 +152,11 @@ void accumulateCovariance( const float *pixels, size_t count, int bands,
             bool valid = true;
             for ( int b = 0; b < bands; ++b )
             {
-                if ( !std::isfinite( pixels[p * static_cast<size_t>( bands ) + b] ) )
+                const float v = pixels[p * static_cast<size_t>( bands ) + b];
+                // Invalid: non-finite, or the -9999 NoData sentinel (the
+                // codebase-wide default NoData convention; matches the legacy
+                // rxDetector nodata filtering within tolerance).
+                if ( !std::isfinite( v ) || std::abs( v - kNoDataSentinel ) < 1e-3f )
                 {
                     valid = false;
                     break;
