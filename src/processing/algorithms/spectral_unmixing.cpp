@@ -99,6 +99,15 @@ bool unmix( const float *pixels, size_t count, int bands,
         }
     }
 
+    double gramTrace = 0.0;
+    for ( int e = 0; e < nEndmembers; ++e )
+        gramTrace += gram[static_cast<size_t>( e ) * nEndmembers + e];
+    const double kRidge = std::max( 1e-9, ( gramTrace / nEndmembers ) * 1e-7 );
+
+    std::vector<double> rhs( nEndmembers, 0.0 );
+    std::vector<double> system( static_cast<size_t>( nEndmembers ) * nEndmembers, 0.0 );
+    std::vector<double> abundance( nEndmembers, 0.0 );
+
     for ( size_t p = 0; p < count; ++p )
     {
         const float *x = pixels + p * static_cast<size_t>( bands );
@@ -118,7 +127,6 @@ bool unmix( const float *pixels, size_t count, int bands,
         }
 
         // Right-hand side: E^T x.
-        std::vector<double> rhs( nEndmembers, 0.0 );
         for ( int e = 0; e < nEndmembers; ++e )
         {
             double sum = 0.0;
@@ -130,12 +138,11 @@ bool unmix( const float *pixels, size_t count, int bands,
 
         // Solve (G + ridge I) a = rhs; the RHS vector holds the solution after
         // the in-place back substitution.
-        std::vector<double> system = gram;
-        constexpr double kRidge = 1e-9;
+        system = gram;
         for ( int e = 0; e < nEndmembers; ++e )
             system[static_cast<size_t>( e ) * nEndmembers + e] += kRidge;
 
-        std::vector<double> abundance = rhs;
+        abundance = rhs;
         if ( !solveLinearSystem( system, abundance, nEndmembers ) )
         {
             // Singular even with the ridge: leave abundances at zero and the

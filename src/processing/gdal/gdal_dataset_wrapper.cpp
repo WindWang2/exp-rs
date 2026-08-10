@@ -81,6 +81,12 @@ bool GdalDatasetWrapper::create(const QString &path, int width, int height, int 
     close();
     m_lastError.clear();
 
+    if (width <= 0 || height <= 0 || bandCount <= 0) {
+        m_lastError = QStringLiteral("Invalid raster dimensions or band count");
+        if (errorMessage) *errorMessage = m_lastError;
+        return false;
+    }
+
     ensureGdalInit();
     GDALDriverH driver = GDALGetDriverByName("GTiff");
     if (!driver) {
@@ -224,18 +230,23 @@ bool GdalDatasetWrapper::writeBandWindow(int bandNum, int xOff, int yOff,
     if (!band)
         return false;
 
-    // Clamp the window to the raster extent to be forgiving at edges.
+    // Clamp the window to the raster extent to be forgiving at edges. The
+    // buffer is laid out at the ORIGINAL (unclamped) window size, so the
+    // rasterio strides must be the original width — otherwise edge-clamped
+    // tiles corrupt the buffer stride (v2 review C1).
     const int bw = GDALGetRasterBandXSize(band);
     const int bh = GDALGetRasterBandYSize(band);
     if (xOff >= bw || yOff >= bh)
         return false;
-    srcWidth = (std::min)(srcWidth, bw - xOff);
-    srcHeight = (std::min)(srcHeight, bh - yOff);
+
+    const int originalWidth = srcWidth;
+    const int clampedWidth = (std::min)(srcWidth, bw - xOff);
+    const int clampedHeight = (std::min)(srcHeight, bh - yOff);
 
     CPLErr err = GDALRasterIO(band, GF_Write,
-                              xOff, yOff, srcWidth, srcHeight,
-                              const_cast<float *>(buffer), srcWidth, srcHeight, GDT_Float32,
-                              0, 0);
+                              xOff, yOff, clampedWidth, clampedHeight,
+                              const_cast<float *>(buffer), clampedWidth, clampedHeight, GDT_Float32,
+                              sizeof(float), static_cast<GSpacing>(originalWidth) * sizeof(float));
     return err == CE_None;
 }
 

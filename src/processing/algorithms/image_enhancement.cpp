@@ -913,18 +913,20 @@ void ImageEnhancement::computeCovarianceMatrix(const std::vector<std::vector<flo
                                                  std::vector<std::vector<float>> &cov)
 {
     cov.assign(bands, std::vector<float>(bands, 0.0f));
-    double divisor = (n > 1) ? static_cast<double>(n - 1) : 1.0;
 
     // NaN (NoData) pixels are skipped so a single invalid pixel cannot corrupt
-    // the covariance of every band pair.
+    // the covariance of every band pair. Dynamic valid count divisor per pair.
     for (int i = 0; i < bands; i++) {
         for (int j = i; j < bands; j++) {
             double sum = 0.0;
+            size_t validCount = 0;
             for (size_t k = 0; k < n; k++) {
                 if (std::isnan(centered[i][k]) || std::isnan(centered[j][k]))
                     continue;
                 sum += static_cast<double>(centered[i][k]) * centered[j][k];
+                validCount++;
             }
+            double divisor = (validCount > 1) ? static_cast<double>(validCount - 1) : 1.0;
             cov[i][j] = static_cast<float>(sum / divisor);
             cov[j][i] = cov[i][j];
         }
@@ -1144,6 +1146,9 @@ ImageEnhancement::MnfResult ImageEnhancement::mnf(
             noise[b][k] = centered[b][k + 1] - centered[b][k];
     std::vector<std::vector<float>> noiseCov;
     computeCovarianceMatrix(noise, bands, n - 1, noiseCov);
+    for (int b = 0; b < bands; b++)
+        for (int b2 = 0; b2 < bands; b2++)
+            noiseCov[b][b2] /= 2.0f;
 
     // 3. Eigen-decompose the noise covariance.
     std::vector<float> noiseEigen;
@@ -1547,7 +1552,7 @@ bool ImageEnhancement::processMnfFile(const QString &sourcePath, const QString &
             covMatrix[b][b2] = c;
             covMatrix[b2][b] = c;
 
-            float nc = static_cast<float>(noiseSum[b][b2] / Nnoise);
+            float nc = static_cast<float>(noiseSum[b][b2] / (2.0 * Nnoise));
             noiseCov[b][b2] = nc;
             noiseCov[b2][b] = nc;
         }
