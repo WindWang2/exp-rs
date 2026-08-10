@@ -227,7 +227,7 @@ static void separableConvolve(const float *input, float *output, int width, int 
 {
     int half = kernelSize / 2;
     // Temporary buffer for horizontal pass
-    std::vector<float> temp(width * height);
+    std::vector<float> temp(static_cast<size_t>(width) * height);
 
     // Horizontal pass: input -> temp (row-major, cache-friendly)
     // Process in chunks for better cache locality
@@ -235,13 +235,14 @@ static void separableConvolve(const float *input, float *output, int width, int 
     for (int yStart = 0; yStart < height; yStart += chunkHeight) {
         int yEnd = std::min(yStart + chunkHeight, height);
         for (int y = yStart; y < yEnd; y++) {
+            size_t rowOff = static_cast<size_t>(y) * width;
             for (int x = 0; x < width; x++) {
                 float sum = 0.0f;
                 for (int k = -half; k <= half; k++) {
                     int ix = std::clamp(x + k, 0, width - 1);
-                    sum += input[y * width + ix] * kernel1D[k + half];
+                    sum += input[rowOff + ix] * kernel1D[k + half];
                 }
-                temp[y * width + x] = sum;
+                temp[rowOff + x] = sum;
             }
         }
     }
@@ -252,13 +253,14 @@ static void separableConvolve(const float *input, float *output, int width, int 
     for (int xStart = 0; xStart < width; xStart += chunkWidth) {
         int xEnd = std::min(xStart + chunkWidth, width);
         for (int y = 0; y < height; y++) {
+            size_t rowOff = static_cast<size_t>(y) * width;
             for (int x = xStart; x < xEnd; x++) {
                 float sum = 0.0f;
                 for (int k = -half; k <= half; k++) {
                     int iy = std::clamp(y + k, 0, height - 1);
-                    sum += temp[iy * width + x] * kernel1D[k + half];
+                    sum += temp[static_cast<size_t>(iy) * width + x] * kernel1D[k + half];
                 }
-                output[y * width + x] = sum;
+                output[rowOff + x] = sum;
             }
         }
     }
@@ -1126,13 +1128,18 @@ ImageEnhancement::MnfResult ImageEnhancement::mnf(
     if (numComponents <= 0 || numComponents > bands)
         numComponents = bands;
 
-    // 1. Mean-center the data.
+    // 1. Mean-center the data (skipping NaNs).
     std::vector<float> means(bands, 0.0f);
     for (int b = 0; b < bands; b++) {
         double sum = 0.0;
-        for (size_t k = 0; k < n; k++)
-            sum += input[b][k];
-        means[b] = static_cast<float>(sum / n);
+        size_t validCount = 0;
+        for (size_t k = 0; k < n; k++) {
+            if (!std::isnan(input[b][k])) {
+                sum += input[b][k];
+                validCount++;
+            }
+        }
+        means[b] = (validCount > 0) ? static_cast<float>(sum / validCount) : 0.0f;
     }
     std::vector<std::vector<float>> centered(bands, std::vector<float>(n));
     for (int b = 0; b < bands; b++)

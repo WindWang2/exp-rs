@@ -63,7 +63,7 @@ QVector<QVector<float>> ImageFusion::linearWeighted(
     QVector<float> weights = msWeights;
     if ( weights.isEmpty() ) {
         weights.resize(nBands);
-        float defaultMsWeight = (1.0f - panWeight) / nBands;
+        float defaultMsWeight = 1.0f - panWeight;
         for (int b = 0; b < nBands; ++b)
             weights[b] = defaultMsWeight;
     }
@@ -110,7 +110,7 @@ QVector<QVector<float>> ImageFusion::brovey(
     SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Brovey fusion: %1 bands, %2x%3" )
         .arg( nBands ).arg( width ).arg( height ) );
 
-    const int n = width * height;
+    const size_t n = static_cast<size_t>(width) * height;
 
     // Compute sum of MS bands per pixel
     QVector<float> msSum( n, 0.0f );
@@ -118,7 +118,7 @@ QVector<QVector<float>> ImageFusion::brovey(
     {
         if ( !msBands[b] )
             return result;
-        for ( int i = 0; i < n; ++i )
+        for ( size_t i = 0; i < n; ++i )
         {
             if ( msBands[b][i] != nodata && !std::isnan( msBands[b][i] ) )
                 msSum[i] += msBands[b][i];
@@ -130,7 +130,7 @@ QVector<QVector<float>> ImageFusion::brovey(
     for ( int b = 0; b < nBands; ++b )
     {
         result[b].resize( n );
-        for ( int i = 0; i < n; ++i )
+        for ( size_t i = 0; i < n; ++i )
         {
             if ( msBands[b][i] == nodata || std::isnan( msBands[b][i] ) ||
                  panBand[i] == nodata || std::isnan( panBand[i] ) ||
@@ -163,7 +163,7 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
     SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "PCA fusion: %1 bands, %2x%3" )
         .arg( nBands ).arg( width ).arg( height ) );
 
-    const int n = width * height;
+    const size_t n = static_cast<size_t>(width) * height;
 
     // Step 1: Compute mean and covariance matrix
     QVector<double> means( nBands, 0.0 );
@@ -172,7 +172,7 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
     {
         if ( !msBands[b] )
             return result;
-        for ( int i = 0; i < n; ++i )
+        for ( size_t i = 0; i < n; ++i )
         {
             if ( msBands[b][i] != nodata && !std::isnan( msBands[b][i] ) )
             {
@@ -376,11 +376,11 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
 
     SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "IHS fusion: %1x%2" ).arg( width ).arg( height ) );
 
-    const int n = width * height;
+    const size_t n = static_cast<size_t>(width) * height;
 
     // Step 1: Histogram-match pan to intensity (mean of R, G, B)
     QVector<float> intensity( n );
-    for ( int i = 0; i < n; ++i )
+    for ( size_t i = 0; i < n; ++i )
     {
         if ( msR[i] == nodata || msG[i] == nodata || msB[i] == nodata )
             intensity[i] = nodata;
@@ -478,7 +478,7 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
     SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Gram-Schmidt fusion: %1 bands, %2x%3" )
         .arg( nBands ).arg( width ).arg( height ) );
 
-    const int n = width * height;
+    const size_t n = static_cast<size_t>(width) * height;
 
     // Validate band pointers.
     for ( int b = 0; b < nBands; ++b )
@@ -620,26 +620,26 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
 
 namespace {
 
-// Helper: accumulate statistics for single pass linear histogram match
+// Helper: accumulate statistics using Welford's algorithm for numerical stability
 struct StatsAccumulator {
-    double sum = 0.0;
-    double sumSq = 0.0;
     int64_t count = 0;
+    double mean_ = 0.0;
+    double m2 = 0.0;
 
     void add(double val) {
-        sum += val;
-        sumSq += val * val;
         count++;
+        double delta = val - mean_;
+        mean_ += delta / count;
+        m2 += delta * (val - mean_);
     }
 
     double mean() const {
-        return (count > 0) ? (sum / count) : 0.0;
+        return mean_;
     }
 
     double stddev() const {
         if (count <= 1) return 0.0;
-        double m = mean();
-        double var = (sumSq - static_cast<double>(count) * m * m) / (count - 1);
+        double var = m2 / (count - 1);
         return (var > 0.0) ? std::sqrt(var) : 0.0;
     }
 };
@@ -926,19 +926,11 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                     float red = msR[i], green = msG[i], blue = msB[i];
                     float I = ( red + green + blue ) / 3.0f;
 
-                    if ( I < 1e-10f )
-                    {
-                        outBuf[0][i] = 0.0f;
-                        outBuf[1][i] = 0.0f;
-                        outBuf[2][i] = 0.0f;
-                        continue;
-                    }
-
                     float m = std::min( { red, green, blue } );
-                    float sat = 1.0f - m / I;
+                    float sat = ( I < 1e-10f ) ? 0.0f : ( 1.0f - m / I );
                     float c1 = red - 0.5f * ( green + blue );
                     float c2 = ( green - blue ) * std::sqrt( 3.0f ) / 2.0f;
-                    float hue = std::atan2( c2, c1 );
+                    float hue = ( I < 1e-10f ) ? 0.0f : std::atan2( c2, c1 );
 
                     float newI = panMatched;
                     float newC1 = newI * sat * std::cos( hue );
