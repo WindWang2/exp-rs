@@ -59,7 +59,7 @@ TEST_CASE("AlgorithmEngine - PythonProcessingProviderAdapter resource profile an
     desc.group = "Python Test";
     desc.description = "Test algorithm for issue 108";
 
-    auto pyAlgo = std::make_shared<sicnu::processing::PythonAlgorithmAdapter>(desc, [](const Json::Value&, sicnu::processing::ProgressCallback) {
+    auto pyAlgo = std::make_shared<sicnu::processing::PythonAlgorithmAdapter>(desc, [](const Json::Value&, sicnu::processing::ProgressCallback, std::function<bool()>) {
         return Json::Value(Json::objectValue);
     });
 

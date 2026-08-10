@@ -10,11 +10,16 @@ PythonAlgorithmAdapter::PythonAlgorithmAdapter( AlgorithmDescriptor desc, Execut
 {
 }
 
-Json::Value PythonAlgorithmAdapter::execute( const Json::Value &params, ProgressCallback progressCb )
+Json::Value PythonAlgorithmAdapter::execute( const Json::Value &params, ProgressCallback progressCb,
+                                             std::function<bool()> isCancelledFn )
 {
   if ( mExecutor )
   {
-    return mExecutor( params, progressCb );
+    if ( isCancelledFn && isCancelledFn() )
+    {
+      throw std::runtime_error( "Cancelled before execution" );
+    }
+    return mExecutor( params, progressCb, std::move( isCancelledFn ) );
   }
   throw std::runtime_error( "No execution handler provided for Python algorithm" );
 }
