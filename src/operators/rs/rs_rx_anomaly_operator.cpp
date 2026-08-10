@@ -14,6 +14,7 @@
 #include <QString>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <numeric>
 #include <vector>
@@ -110,25 +111,43 @@ Json::Value RsRxAnomalyOperator::run(const Json::Value& params,
 
     SpectralAnomaly::BackgroundStats stats;
 
-    // Pass 1: mean.
+    // Per-band NoData sentinels: the band's declared NoData when present, else
+    // the -9999 processing-stack convention. Pixels matching any band's NoData
+    // (or non-finite) are excluded from the statistics and scored as NaN.
+    std::vector<float> noDataPerBand( static_cast<size_t>( bandCount ), -9999.0f );
+    for ( int b = 0; b < bandCount; ++b )
+    {
+        bool hasNoData = false;
+        const double nd = ds.bandNoDataValue( b + 1, &hasNoData );
+        if ( hasNoData )
+            noDataPerBand[static_cast<size_t>( b )] = static_cast<float>( nd );
+    }
+
+    // Pass 1: mean. Invalid pixels (non-finite or band NoData) are skipped so
+    // the statistics reflect valid pixels only.
     int tilesSeen = 0;
     if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
             context.throwIfCancelled();
             const size_t tilePixels = static_cast<size_t>( tile.width ) * tile.height;
-            SpectralAnomaly::accumulateMean( bip, tilePixels, bandCount, &stats );
+            SpectralAnomaly::accumulateMean( bip, tilePixels, bandCount, &stats, true,
+                                             noDataPerBand.data() );
             context.reportProgress( ( ++tilesSeen ) * perTileProgress * 0.33, "Background mean" );
             return true;
         } ) )
         throw RSOperatorError( ErrorCode::GdalError, "Failed to stream input tiles (mean pass)" );
+    if ( stats.count == 0 )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                              "No valid pixels found for RX anomaly detection" );
     SpectralAnomaly::finalizeMean( &stats );
     context.throwIfCancelled();
 
-    // Pass 2: covariance.
+    // Pass 2: covariance (same valid-pixel predicate).
     tilesSeen = 0;
     if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
             context.throwIfCancelled();
             const size_t tilePixels = static_cast<size_t>( tile.width ) * tile.height;
-            SpectralAnomaly::accumulateCovariance( bip, tilePixels, bandCount, &stats );
+            SpectralAnomaly::accumulateCovariance( bip, tilePixels, bandCount, &stats, true,
+                                                   noDataPerBand.data() );
             context.reportProgress( 0.33 + ( ++tilesSeen ) * perTileProgress * 0.33,
                                     "Background covariance" );
             return true;
@@ -163,15 +182,33 @@ Json::Value RsRxAnomalyOperator::run(const Json::Value& params,
             tileScores.assign( tilePixels, 0.0f );
             for ( size_t p = 0; p < tilePixels; ++p )
             {
+                // Invalid pixels (non-finite or matching a band's NoData)
+                // propagate to the output as NaN — the raster's NoData — and are
+                // excluded from the summary statistics.
+                const float *spectrum = bip + p * static_cast<size_t>( bandCount );
+                bool valid = true;
+                for ( int b = 0; b < bandCount; ++b )
+                {
+                    if ( !std::isfinite( spectrum[b] )
+                         || std::abs( spectrum[b] - noDataPerBand[static_cast<size_t>( b )] ) < 1e-3f )
+                    {
+                        valid = false;
+                        break;
+                    }
+                }
+                if ( !valid )
+                {
+                    tileScores[p] = std::numeric_limits<float>::quiet_NaN();
+                    continue;
+                }
                 const float s = SpectralAnomaly::rxScore(
-                    bip + p * static_cast<size_t>( bandCount ), stats.mean, invCov, bandCount,
-                    &rxScratch );
+                    spectrum, stats.mean, invCov, bandCount, &rxScratch );
                 tileScores[p] = s;
                 sumScores += s;
                 if ( s > maxScore )
                     maxScore = s;
+                ++scoredPixels;
             }
-            scoredPixels += tilePixels;
             if ( !out.writeTile( 1, tile, tileScores.data() ) )
                 return false;
             context.reportProgress( 0.66 + ( ++tilesSeen ) * perTileProgress * 0.34,

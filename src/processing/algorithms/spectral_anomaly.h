@@ -28,16 +28,25 @@ namespace SpectralAnomaly
 
     /// Accumulate a sum-of-values pass (for the mean). Resets @a stats for a mean
     /// pass on first call (band-count inferred). @a pixels layout: pixels[p*bands+b].
+    /// When @a skipNonFinite is set, pixels containing any invalid band value are
+    /// skipped and do not contribute to the count or the sums. A band value is
+    /// invalid when it is non-finite (NaN/Inf) or — when @a noDataBands is
+    /// provided — within tolerance of that band's declared NoData value, so the
+    /// mean reflects valid pixels only.
     void accumulateMean( const float *pixels, size_t count, int bands,
-                         BackgroundStats *stats );
+                         BackgroundStats *stats, bool skipNonFinite = false,
+                         const float *noDataBands = nullptr );
 
     /// Divide the accumulated sum by count → mean. Resets the count/sum state.
     void finalizeMean( BackgroundStats *stats );
 
     /// Accumulate a centered-sum-of-outer-products pass (for the covariance),
     /// using the already-finalized mean. Must be called AFTER finalizeMean().
+    /// When @a skipNonFinite is set, the same validity predicate as
+    /// accumulateMean() is applied so the covariance uses the same valid pixels.
     void accumulateCovariance( const float *pixels, size_t count, int bands,
-                               BackgroundStats *stats );
+                               BackgroundStats *stats, bool skipNonFinite = false,
+                               const float *noDataBands = nullptr );
 
     /// Divide the accumulated covariance sum by count → biased covariance.
     void finalizeCovariance( BackgroundStats *stats );
@@ -76,6 +85,11 @@ namespace SpectralAnomaly
      * @return true on success; false for invalid arguments (count == 0,
      *         bands <= 0, null pointers) or a singular covariance
      */
+    /**
+     * Inverts an n x n symmetric matrix m via Gauss-Jordan with partial pivoting.
+     */
+    bool invertMatrix( const std::vector<double> &m, int n, std::vector<double> *inverse );
+
     bool rxDetector( const float *pixels, size_t count, int bands,
                      std::vector<float> *rxValues, QString *errorMessage = nullptr );
 } // namespace SpectralAnomaly

@@ -6,6 +6,8 @@
 #include <cpl_string.h>
 #include <QFile>
 #include <algorithm>
+#include <cstring>
+#include <limits>
 #include <mutex>
 
 // Ensure GDAL drivers are registered (once per process, thread-safe)
@@ -81,6 +83,12 @@ bool GdalDatasetWrapper::create(const QString &path, int width, int height, int 
     close();
     m_lastError.clear();
 
+    if (width <= 0 || height <= 0 || bandCount <= 0) {
+        m_lastError = QStringLiteral("Invalid raster dimensions or band count");
+        if (errorMessage) *errorMessage = m_lastError;
+        return false;
+    }
+
     ensureGdalInit();
     GDALDriverH driver = GDALGetDriverByName("GTiff");
     if (!driver) {
@@ -103,7 +111,7 @@ bool GdalDatasetWrapper::create(const QString &path, int width, int height, int 
         return false;
     }
 
-    if (GDALSetGeoTransform(ds, const_cast<double *>(geoTransform.data())) != CE_None) {
+    if (GDALSetGeoTransform(ds, const_cast<double*>(geoTransform.data())) != CE_None) {
         m_lastError = QStringLiteral("Failed to write geotransform");
         if (errorMessage) *errorMessage = m_lastError;
         GDALClose(ds);
@@ -198,15 +206,59 @@ bool GdalDatasetWrapper::readBandWindow(int bandNum, int xOff, int yOff,
     if (!band)
         return false;
 
-    // Clamp the window to the raster extent to be forgiving at edges.
     const int bw = GDALGetRasterBandXSize(band);
     const int bh = GDALGetRasterBandYSize(band);
     if (xOff >= bw || yOff >= bh)
         return false;
 
+    // Pad out-of-raster regions with the band's NoData (NaN when unset) instead
+    // of leaving them uninitialized / zero-filled: zero is a real pixel value
+    // for DN imagery and silently corrupts downstream statistics.
+    bool hasNodata = false;
+    const double nd = bandNoDataValue( bandNum, &hasNodata );
+    const float pad = hasNodata ? static_cast<float>( nd )
+                                : std::numeric_limits<float>::quiet_NaN();
+    std::fill( buffer, buffer + static_cast<size_t>( srcWidth ) * srcHeight, pad );
+
+    const int clampedWidth = (std::min)(srcWidth, bw - xOff);
+    const int clampedHeight = (std::min)(srcHeight, bh - yOff);
+
+    CPLErr err = GDALRasterIO(band, GF_Read,
+                              xOff, yOff, clampedWidth, clampedHeight,
+                              buffer, clampedWidth, clampedHeight, GDT_Float32,
+                              sizeof(float), static_cast<GSpacing>(srcWidth) * sizeof(float));
+    return err == CE_None;
+}
+
+bool GdalDatasetWrapper::readBandWindowScaled(int bandNum, int xOff, int yOff,
+                                              int srcWidth, int srcHeight, float *buffer,
+                                              int bufWidth, int bufHeight, float nodata) const
+{
+    if (!m_dataset || bandNum < 1 || bandNum > bandCount() || !buffer)
+        return false;
+    if (srcWidth <= 0 || srcHeight <= 0 || bufWidth <= 0 || bufHeight <= 0)
+        return false;
+
+    GDALRasterBandH band = GDALGetRasterBand(static_cast<GDALDatasetH>(m_dataset), bandNum);
+    if (!band)
+        return false;
+
+    const int bw = GDALGetRasterBandXSize(band);
+    const int bh = GDALGetRasterBandYSize(band);
+
+    // Pre-fill so out-of-raster regions (edge tiles) read as NoData. GDAL
+    // resamples the source window into the buffer and handles a window that
+    // extends past the raster edge by only filling the valid intersection,
+    // leaving the rest of the buffer at its pre-filled value.
+    std::fill( buffer, buffer + static_cast<size_t>( bufWidth ) * bufHeight, nodata );
+
+    // Entirely outside the raster → all-NoData tile.
+    if ( xOff >= bw || yOff >= bh || xOff + srcWidth <= 0 || yOff + srcHeight <= 0 )
+        return true;
+
     CPLErr err = GDALRasterIO(band, GF_Read,
                               xOff, yOff, srcWidth, srcHeight,
-                              buffer, srcWidth, srcHeight, GDT_Float32,
+                              buffer, bufWidth, bufHeight, GDT_Float32,
                               0, 0);
     return err == CE_None;
 }
@@ -224,18 +276,19 @@ bool GdalDatasetWrapper::writeBandWindow(int bandNum, int xOff, int yOff,
     if (!band)
         return false;
 
-    // Clamp the window to the raster extent to be forgiving at edges.
     const int bw = GDALGetRasterBandXSize(band);
     const int bh = GDALGetRasterBandYSize(band);
     if (xOff >= bw || yOff >= bh)
         return false;
-    srcWidth = (std::min)(srcWidth, bw - xOff);
-    srcHeight = (std::min)(srcHeight, bh - yOff);
+
+    const int originalWidth = srcWidth;
+    const int clampedWidth = (std::min)(srcWidth, bw - xOff);
+    const int clampedHeight = (std::min)(srcHeight, bh - yOff);
 
     CPLErr err = GDALRasterIO(band, GF_Write,
-                              xOff, yOff, srcWidth, srcHeight,
-                              const_cast<float *>(buffer), srcWidth, srcHeight, GDT_Float32,
-                              0, 0);
+                              xOff, yOff, clampedWidth, clampedHeight,
+                              const_cast<float *>(buffer), clampedWidth, clampedHeight, GDT_Float32,
+                              sizeof(float), static_cast<GSpacing>(originalWidth) * sizeof(float));
     return err == CE_None;
 }
 
@@ -301,6 +354,18 @@ double GdalDatasetWrapper::bandNoDataValue(int bandNum, bool *hasNodata) const
     double nodata = GDALGetRasterNoDataValue(band, &hasNodataInt);
     if (hasNodata) *hasNodata = (hasNodataInt != 0);
     return nodata;
+}
+
+bool GdalDatasetWrapper::setBandNoDataValue(int bandNum, double nodata) const
+{
+    if (!m_dataset || bandNum < 1 || bandNum > bandCount())
+        return false;
+
+    GDALRasterBandH band = GDALGetRasterBand(static_cast<GDALDatasetH>(m_dataset), bandNum);
+    if (!band)
+        return false;
+
+    return GDALSetRasterNoDataValue(band, nodata) == CE_None;
 }
 
 QString GdalDatasetWrapper::bandDescription(int bandNum) const

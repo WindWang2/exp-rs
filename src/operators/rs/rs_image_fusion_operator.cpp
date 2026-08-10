@@ -65,13 +65,13 @@ Json::Value RsImageFusionOperator::metadata() const {
 
 Json::Value RsImageFusionOperator::executionEstimate() const
 {
-    // FullRaster (default policy): the pan band, up to 4 MS bands and the fused
-    // output bands are all resident, plus small per-method auxiliary matrices
-    // (PCA covariance / Gram-Schmidt statistics).
+    // Out-of-core tile streaming policy: tile working set memory footprint
+    // is O(tileWidth * tileHeight * bands) regardless of total image dimensions.
     Json::Value est(Json::objectValue);
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 50331648; // ~9 x 1024x1024 Float32 buffers + 12 MiB fixed
+    est["tileWidth"] = 512;
+    est["tileHeight"] = 512;
+    est["estimatedRamBytes"] = 12582912; // ~12 MiB tile working set
+    est["temporaryDiskBytes"] = 0;
     return est;
 }
 

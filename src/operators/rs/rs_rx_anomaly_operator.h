@@ -31,15 +31,15 @@ public:
         return "Reed-Xiaoli anomaly detection (Mahalanobis distance to scene background).";
     }
 
-    Json::Value schema() const override;
-    Json::Value metadata() const override;
-    Json::Value executionEstimate() const override;
-    RSOperatorMemoryPolicy memoryPolicy() const override
-    {
+    RSOperatorMemoryPolicy memoryPolicy() const override {
         // Two-pass streaming (stats + per-tile score) — O(tile + bands^2) memory,
         // not the O(width*height*bands) of the prior full-raster materialization.
         return RSOperatorMemoryPolicy::MultiPassStreaming;
     }
+
+    Json::Value schema() const override;
+    Json::Value metadata() const override;
+    Json::Value executionEstimate() const override;
     Json::Value run(const Json::Value& params, RSOperatorContext& context) override;
 };
 

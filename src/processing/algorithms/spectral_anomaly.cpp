@@ -7,9 +7,6 @@
 namespace SpectralAnomaly
 {
 
-namespace
-{
-
 /// Inverts an n x n symmetric positive-definite matrix (given in column-major
 /// row order) via Gauss-Jordan with partial pivoting and a ridge added by the
 /// caller. Returns false when singular.
@@ -75,10 +72,9 @@ bool invertMatrix( const std::vector<double> &m, int n, std::vector<double> *inv
     return true;
 }
 
-} // namespace
-
 void accumulateMean( const float *pixels, size_t count, int bands,
-                     BackgroundStats *stats )
+                     BackgroundStats *stats, bool skipNonFinite,
+                     const float *noDataBands )
 {
     if ( !pixels || !stats || count == 0 || bands <= 0 )
         return;
@@ -91,9 +87,29 @@ void accumulateMean( const float *pixels, size_t count, int bands,
     // multi-tile pass reproduces the full-raster mean (the sum is order-tolerant
     // for this accumulator; values match within FP rounding).
     for ( size_t p = 0; p < count; ++p )
+    {
+        if ( skipNonFinite )
+        {
+            bool valid = true;
+            for ( int b = 0; b < bands; ++b )
+            {
+                const float v = pixels[p * static_cast<size_t>( bands ) + b];
+                // Invalid: non-finite, or equal (within tolerance) to the band's
+                // declared NoData value (@a noDataBands, when provided).
+                if ( !std::isfinite( v )
+                     || ( noDataBands && std::abs( v - noDataBands[b] ) < 1e-3f ) )
+                {
+                    valid = false;
+                    break;
+                }
+            }
+            if ( !valid )
+                continue;
+        }
         for ( int b = 0; b < bands; ++b )
             stats->mean[b] += pixels[p * static_cast<size_t>( bands ) + b];
-    stats->count += count;
+        ++stats->count;
+    }
 }
 
 void finalizeMean( BackgroundStats *stats )
@@ -106,7 +122,8 @@ void finalizeMean( BackgroundStats *stats )
 }
 
 void accumulateCovariance( const float *pixels, size_t count, int bands,
-                           BackgroundStats *stats )
+                           BackgroundStats *stats, bool skipNonFinite,
+                           const float *noDataBands )
 {
     if ( !pixels || !stats || count == 0 || bands <= 0 )
         return;
@@ -122,13 +139,31 @@ void accumulateCovariance( const float *pixels, size_t count, int bands,
     std::vector<double> d( bands );
     for ( size_t p = 0; p < count; ++p )
     {
+        if ( skipNonFinite )
+        {
+            bool valid = true;
+            for ( int b = 0; b < bands; ++b )
+            {
+                const float v = pixels[p * static_cast<size_t>( bands ) + b];
+                // Invalid: non-finite, or equal (within tolerance) to the band's
+                // declared NoData value (@a noDataBands, when provided).
+                if ( !std::isfinite( v )
+                     || ( noDataBands && std::abs( v - noDataBands[b] ) < 1e-3f ) )
+                {
+                    valid = false;
+                    break;
+                }
+            }
+            if ( !valid )
+                continue;
+        }
         for ( int b = 0; b < bands; ++b )
             d[b] = pixels[p * static_cast<size_t>( bands ) + b] - stats->mean[b];
         for ( int i = 0; i < bands; ++i )
             for ( int j = 0; j < bands; ++j )
                 stats->covariance[static_cast<size_t>( i ) * bands + j] += d[i] * d[j];
+        ++stats->count;
     }
-    stats->count += count;
 }
 
 void finalizeCovariance( BackgroundStats *stats )
