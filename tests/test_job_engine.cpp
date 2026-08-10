@@ -598,7 +598,8 @@ class StubNonRsAdapter : public sicnu::processing::AtomicAlgorithmAdapter
     }
 
     Json::Value execute( const Json::Value &params,
-                         sicnu::processing::ProgressCallback progressCb = nullptr ) override
+                         sicnu::processing::ProgressCallback progressCb = nullptr,
+                         std::function<bool()> = nullptr ) override
     {
       mLastParams = params;
       if ( progressCb )

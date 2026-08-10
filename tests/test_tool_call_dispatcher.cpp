@@ -32,7 +32,8 @@ class StubAdapter : public AtomicAlgorithmAdapter
 
     std::string algorithmId() const override { return mId; }
     AlgorithmDescriptor descriptor() const override { return mDesc; }
-    Json::Value execute( const Json::Value &params, ProgressCallback ) override
+    Json::Value execute( const Json::Value &params, ProgressCallback,
+                         std::function<bool()> = nullptr ) override
     {
       Json::Value result( Json::objectValue );
       result["status"] = "ok";
