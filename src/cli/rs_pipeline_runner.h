@@ -126,9 +126,12 @@ private:
     // Headless plugin stack (ADR 0023, TICKET-14), created lazily on first use.
     // Declaration order is destruction-safety: the PluginHost tears down first,
     // then the interface, then the context that owns the DataManager plugins see.
-    std::unique_ptr<sicnu::app::ProjectContext> m_projectContext;
-    std::unique_ptr<SicnuAppInterface> m_appInterface;
-    std::unique_ptr<PluginHost> m_pluginHost;
+    // Members are shared_ptr (not unique_ptr) so the out-of-line destructor can
+    // compile even when SICNU_EMBED_PYTHON is off and these types are incomplete
+    // in this TU (shared_ptr does not require a complete type at destruction).
+    std::shared_ptr<sicnu::app::ProjectContext> m_projectContext;
+    std::shared_ptr<SicnuAppInterface> m_appInterface;
+    std::shared_ptr<PluginHost> m_pluginHost;
     std::vector<std::string> m_pythonPluginDirs;
 };
 
