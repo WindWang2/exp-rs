@@ -58,7 +58,11 @@ Json::Value runProcessingPrefixJob( const JobRequest &req, RSOperatorContext &ct
   sicnu::processing::ProgressCallback progressBridge = [&ctx]( int percent, const std::string &message ) {
     ctx.reportProgress( percent / 100.0, message );
   };
-  return adapter->execute( req.params, progressBridge );
+  // Bridge JobEngine cancellation (via ctx) into the provider lifecycle so a
+  // user-cancelled dialog job stops promptly and is reported Cancelled, not
+  // Failed or silently-completed (J4-1 regression fix).
+  return adapter->execute( req.params, progressBridge,
+                           [&ctx]() { return ctx.isCancelled(); } );
 }
 
 } // namespace

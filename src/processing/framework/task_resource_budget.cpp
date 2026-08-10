@@ -55,18 +55,19 @@ TaskResourceEstimate TaskResourceBudget::resolve( const std::string &algorithmId
 }
 
 bool TaskResourceBudget::canLaunch( unsigned int runningTotalMb,
-                                    unsigned int candidateEstimateMb,
-                                    unsigned int runningCountInProfile ) const
+                                    unsigned int candidateEstimateMb ) const
 {
     // A budget of 0 disables the gate (everything allowed) — preserves the
     // legacy behavior when no cap is configured.
     if ( m_budgetMb == 0 )
         return true;
 
-    // Never-starve: a profile with nothing running always proceeds, even if the
-    // candidate's estimate alone exceeds the cap. This prevents a wrong/missing
-    // estimate from permanently blocking all work in a profile (deadlock).
-    if ( runningCountInProfile == 0 )
+    // Never-starve (global): when NOTHING at all is running, always launch the
+    // first task even if its estimate alone exceeds the cap — a wrong or
+    // missing estimate must not permanently block all work (deadlock). The rule
+    // is keyed on the global running total (not a per-profile count) so that two
+    // profiles cannot each exceed the cap by one heavy task at the same time.
+    if ( runningTotalMb == 0 )
         return true;
 
     const unsigned int projected = runningTotalMb + candidateEstimateMb;

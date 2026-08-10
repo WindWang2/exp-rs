@@ -89,14 +89,14 @@ class TaskResourceBudget
     /// resolver returns ramMb == 0).
     TaskResourceEstimate resolve( const std::string &algorithmId ) const;
 
-    /// True iff a candidate with @a candidateEstimate can launch given the
-    /// current @a runningTotalMb and @a runningCountInProfile. Implements the
-    /// never-starve rule: if nothing is running in the profile, always allow
-    /// (returns true regardless of budget) so a wrong/missing estimate cannot
-    /// permanently block all work.
+    /// True iff a candidate with @a candidateEstimateMb can launch given the
+    /// current @a runningTotalMb. Implements the never-starve rule (global):
+    /// if nothing at all is running, always allow (returns true regardless of
+    /// budget) so a wrong/missing estimate cannot permanently block all work.
+    /// Once anything is running the budget cap applies strictly and globally
+    /// across all profiles.
     bool canLaunch( unsigned int runningTotalMb,
-                    unsigned int candidateEstimateMb,
-                    unsigned int runningCountInProfile ) const;
+                    unsigned int candidateEstimateMb ) const;
 
   private:
     unsigned int m_budgetMb = 0;

@@ -51,18 +51,21 @@ TEST_CASE( "TaskResourceBudget: budget 0 disables the gate", "[resource_budget]"
     sicnu::TaskResourceBudget budget;
     budget.setBudgetMb( 0 );
     // Any candidate, any running total → allowed.
-    CHECK( budget.canLaunch( 0, 99999, 5 ) );
-    CHECK( budget.canLaunch( 50000, 50000, 5 ) );
+    CHECK( budget.canLaunch( 0, 99999 ) );
+    CHECK( budget.canLaunch( 50000, 50000 ) );
 }
 
-TEST_CASE( "TaskResourceBudget: never-starve — empty profile always launches",
+TEST_CASE( "TaskResourceBudget: never-starve — idle system launches; cap is global once running",
            "[resource_budget]" )
 {
     sicnu::TaskResourceBudget budget;
     budget.setBudgetMb( 100 ); // tight budget
-    // runningCountInProfile == 0 → always allow, even if candidate alone > cap.
-    CHECK( budget.canLaunch( 0, 99999, 0 ) );
-    CHECK( budget.canLaunch( 50000, 99999, 0 ) );
+    // Nothing running at all → always allow, even if candidate alone > cap.
+    CHECK( budget.canLaunch( 0, 99999 ) );
+    // Once anything is running, the cap applies strictly GLOBALLY (across all
+    // profiles): a heavy task cannot be added alongside another profile's
+    // running task just because this profile is empty.
+    CHECK_FALSE( budget.canLaunch( 50000, 99999 ) );
 }
 
 TEST_CASE( "TaskResourceBudget: projected RAM within cap launches; over holds",
@@ -71,11 +74,11 @@ TEST_CASE( "TaskResourceBudget: projected RAM within cap launches; over holds",
     sicnu::TaskResourceBudget budget;
     budget.setBudgetMb( 1000 );
     // running 400 + candidate 500 = 900 ≤ 1000 → launch.
-    CHECK( budget.canLaunch( 400, 500, 1 ) );
+    CHECK( budget.canLaunch( 400, 500 ) );
     // running 600 + candidate 500 = 1100 > 1000 → hold.
-    CHECK_FALSE( budget.canLaunch( 600, 500, 1 ) );
+    CHECK_FALSE( budget.canLaunch( 600, 500 ) );
     // Exactly at the cap → launch (≤).
-    CHECK( budget.canLaunch( 500, 500, 1 ) );
+    CHECK( budget.canLaunch( 500, 500 ) );
 }
 
 TEST_CASE( "TaskResourceBudget: conservative per-class fallback when estimate missing",

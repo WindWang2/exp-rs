@@ -104,11 +104,19 @@ Json::Value RsSamClassifyOperator::metadata() const {
 Json::Value RsSamClassifyOperator::executionEstimate() const
 {
     // Streaming: one 256x256 BIP tile window + per-tile labels/angles/output
-    // buffers are resident. Independent of raster size.
+    // buffers. The tile window scales with the raster's band count
+    // (tilePixels*bands*sizeof(float) + output buffers), so the estimate is
+    // formula-based, not a fixed constant — see RxAnomalyOperator for the same
+    // rationale. Nominal 30 bands → ~7.9 MiB tile; RSS watermark backstops.
+    constexpr double kTileW = 256, kTileH = 256;
+    constexpr double kNominalBands = 30;
+    const double tileBytes = kTileW * kTileH * kNominalBands * sizeof( float );
+    const double outputBuffers = kTileW * kTileH * 2 * sizeof( float ); // labels + angles
     Json::Value est( Json::objectValue );
-    est["tileWidth"] = 256;
-    est["tileHeight"] = 256;
-    est["estimatedRamBytes"] = 1048576; // ~1 MiB (tile + a few per-tile buffers)
+    est["tileWidth"] = static_cast<Json::Int64>( kTileW );
+    est["tileHeight"] = static_cast<Json::Int64>( kTileH );
+    est["estimatedRamBytes"] =
+        static_cast<Json::UInt64>( tileBytes + outputBuffers ); // ~9.2 MiB @ 30 bands
     return est;
 }
 
@@ -191,6 +199,9 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
     std::vector<float> tileLabelBand;
     std::vector<float> tileAngleBand;
     if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
+            // Per-tile cancellation: a single-pass scan over a large raster must
+            // stay responsive to user cancel, not just between passes.
+            context.throwIfCancelled();
             const size_t tilePixels = static_cast<size_t>( tile.width ) * tile.height;
             tileLabels.assign( tilePixels, 0 );
             tileAngles.assign( tilePixels, 0.0f );

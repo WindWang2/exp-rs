@@ -56,14 +56,22 @@ Json::Value RsRxAnomalyOperator::metadata() const {
 }
 
 Json::Value RsRxAnomalyOperator::executionEstimate() const {
-    // MultiPassStreaming: a 256x256 tile is resident per pass (3 passes: mean,
-    // covariance, score) plus the bands*bands covariance (~negligible) and the
-    // bands*mean vector. Peak RAM is O(tile + bands^2), independent of raster
-    // size — a dramatic reduction from the prior full-raster materialization.
-    Json::Value est(Json::objectValue);
-    est["tileWidth"] = 256;
-    est["tileHeight"] = 256;
-    est["estimatedRamBytes"] = 1048576; // ~1 MiB (one tile + bands*bands state)
+    // MultiPassStreaming: a 256x256 BIP tile is resident per pass (3 passes:
+    // mean, covariance, score) plus the bands*bands covariance and bands*mean
+    // vector. Peak RAM is O(tilePixels*bands*sizeof(float) + bands^2), NOT a
+    // fixed constant — the tile window scales with the raster's band count
+    // (a 224-band hyperspectral tile is ~59 MiB vs ~1 MiB at 4 bands). The
+    // scheduler treats this as an estimate (RSS watermark is the backstop);
+    // the nominal 30 bands keeps the declared value honest for multispectral.
+    constexpr double kTileW = 256, kTileH = 256;
+    constexpr double kNominalBands = 30; // documented nominal; real cost is O(bands)
+    const double tileBytes = kTileW * kTileH * kNominalBands * sizeof( float );
+    const double stateBytes = kNominalBands * kNominalBands * sizeof( double ); // covariance
+    Json::Value est( Json::objectValue );
+    est["tileWidth"] = static_cast<Json::Int64>( kTileW );
+    est["tileHeight"] = static_cast<Json::Int64>( kTileH );
+    est["estimatedRamBytes"] =
+        static_cast<Json::UInt64>( tileBytes + stateBytes ); // ~7.9 MiB @ 30 bands
     return est;
 }
 
@@ -105,6 +113,7 @@ Json::Value RsRxAnomalyOperator::run(const Json::Value& params,
     // Pass 1: mean.
     int tilesSeen = 0;
     if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
+            context.throwIfCancelled();
             const size_t tilePixels = static_cast<size_t>( tile.width ) * tile.height;
             SpectralAnomaly::accumulateMean( bip, tilePixels, bandCount, &stats );
             context.reportProgress( ( ++tilesSeen ) * perTileProgress * 0.33, "Background mean" );
@@ -117,6 +126,7 @@ Json::Value RsRxAnomalyOperator::run(const Json::Value& params,
     // Pass 2: covariance.
     tilesSeen = 0;
     if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
+            context.throwIfCancelled();
             const size_t tilePixels = static_cast<size_t>( tile.width ) * tile.height;
             SpectralAnomaly::accumulateCovariance( bip, tilePixels, bandCount, &stats );
             context.reportProgress( 0.33 + ( ++tilesSeen ) * perTileProgress * 0.33,
@@ -148,6 +158,7 @@ Json::Value RsRxAnomalyOperator::run(const Json::Value& params,
     std::vector<float> tileScores;
     std::vector<double> rxScratch; // reused across pixels (no per-pixel alloc)
     if ( !stream.forEach( [&]( const GdalMultibandBlockStream::Tile &tile, const float *bip ) {
+            context.throwIfCancelled();
             const size_t tilePixels = static_cast<size_t>( tile.width ) * tile.height;
             tileScores.assign( tilePixels, 0.0f );
             for ( size_t p = 0; p < tilePixels; ++p )

@@ -688,7 +688,7 @@ void TaskCenter::processNextQueuedTasks()
 
         // Resource-aware gate (perf/architecture goal 2026-08-08): hold the
         // launch when projected (running + candidate) RAM exceeds the budget,
-        // UNLESS nothing is running in this profile (never-starve: a wrong or
+        // UNLESS nothing at all is running (global never-starve: a wrong or
         // missing estimate must not permanently block all work). A budget of 0
         // disables this gate (legacy behavior). Like the RSS gate this only
         // DELAYS — the task stays Queued and is re-evaluated on the next
@@ -696,8 +696,7 @@ void TaskCenter::processNextQueuedTasks()
         // eligible task may still fit within the budget this pass.
         const unsigned int candidateMb =
             m_resourceBudget.resolve( m_tasks[id].algorithmId.toStdString() ).ramMb;
-        if ( !m_resourceBudget.canLaunch( runningTotalMb, candidateMb,
-                                          runningByProfile.value( profile, 0u ) ) )
+        if ( !m_resourceBudget.canLaunch( runningTotalMb, candidateMb ) )
             continue;
 
         m_tasks[id].status = TaskStatus::Running;

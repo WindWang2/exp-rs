@@ -175,3 +175,45 @@ TEST_CASE( "ExecutionResultCache: revision change yields a miss (end-to-end inva
   cache.setEnabled( false );
   cache.clear();
 }
+
+TEST_CASE( "ExecutionResultCache: bounded — evicts least-recently-used beyond cap",
+           "[cache][fingerprint]" )
+{
+  auto &cache = ExecutionResultCache::instance();
+  cache.clear();
+  cache.setEnabled( true );
+  cache.setMaxEntries( 3 );
+
+  const AssetId inputAsset = AssetId::generate();
+  const QJsonObject params;
+  const auto fpFor = [&]( int i ) {
+    return makeExecutionFingerprint( "rs:bounded", "1.0", params,
+                                     { makeInput( inputAsset, AssetRevision::fromValue( i ) ) } );
+  };
+
+  // Fill the cache to capacity.
+  const auto fp1 = fpFor( 1 );
+  const auto fp2 = fpFor( 2 );
+  const auto fp3 = fpFor( 3 );
+  cache.store( fp1, AssetId::generate() );
+  cache.store( fp2, AssetId::generate() );
+  cache.store( fp3, AssetId::generate() );
+  REQUIRE( cache.size() == 3 );
+
+  // Touch fp1 (most recently used) and fp2; fp3 becomes least-recently-used.
+  REQUIRE( cache.lookup( fp1 ).has_value() );
+  REQUIRE( cache.lookup( fp2 ).has_value() );
+
+  // Inserting a 4th entry must evict the LRU entry (fp3), not grow the map.
+  const auto fp4 = fpFor( 4 );
+  cache.store( fp4, AssetId::generate() );
+  REQUIRE( cache.size() == 3 );
+  REQUIRE_FALSE( cache.lookup( fp3 ).has_value() );
+  REQUIRE( cache.lookup( fp1 ).has_value() );
+  REQUIRE( cache.lookup( fp2 ).has_value() );
+  REQUIRE( cache.lookup( fp4 ).has_value() );
+
+  cache.setEnabled( false );
+  cache.clear();
+  cache.setMaxEntries( 4096 );
+}

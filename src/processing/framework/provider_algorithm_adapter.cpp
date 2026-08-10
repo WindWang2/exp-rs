@@ -1,6 +1,7 @@
 // src/processing/framework/provider_algorithm_adapter.cpp
 #include "provider_algorithm_adapter.h"
 #include "json_params_converter.h"
+#include "operators/framework/rs_operator_error.h"
 
 #include "qgsprocessingalgorithm.h"
 #include "qgsprocessingcontext.h"
@@ -191,7 +192,8 @@ AlgorithmDescriptor ProviderAlgorithmAdapter::descriptor() const
   return mDesc;
 }
 
-Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, ProgressCallback progressCb )
+Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, ProgressCallback progressCb,
+                                               std::function<bool()> isCancelledFn )
 {
   if ( !mAlg )
     throw std::runtime_error( "ProviderAlgorithmAdapter: null algorithm pointer" );
@@ -222,6 +224,19 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
 
   const QVariantMap parameters = jsonParamsToVariantMap( params );
 
+  // External cancel bridge (e.g. JobEngine cancel flag): when the caller's
+  // cancel is requested, propagate it into the feedback the algorithm observes
+  // and abort promptly with a typed Cancelled error — a cancelled job must not
+  // keep running to completion and writing its output.
+  auto checkCancelled = [&]() {
+    if ( isCancelledFn && isCancelledFn() )
+    {
+      feedback.cancel();
+      throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
+                                               "Processing algorithm cancelled: " + mDesc.id );
+    }
+  };
+
   // prepare() → runPrepared() → postProcess(true); on cancel/exception call
   // postProcess(false) to give the algorithm a chance to clean up partial work.
   try
@@ -238,6 +253,7 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
     throw std::runtime_error( e.what().toStdString() );
   }
 
+  checkCancelled();
   if ( feedback.isCanceled() )
     throw std::runtime_error( "Processing algorithm cancelled before run: " + mDesc.id );
 
@@ -252,10 +268,12 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
     throw std::runtime_error( e.what().toStdString() );
   }
 
+  checkCancelled();
   if ( feedback.isCanceled() )
   {
     try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
-    throw std::runtime_error( "Processing algorithm cancelled during run: " + mDesc.id );
+    throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
+                                             "Processing algorithm cancelled during run: " + mDesc.id );
   }
 
   QVariantMap results;

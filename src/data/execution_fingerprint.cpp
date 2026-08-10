@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QHash>
+#include <algorithm>
 #include <mutex>
 
 namespace sicnu::data
@@ -13,8 +14,8 @@ namespace sicnu::data
 namespace
 {
 /// Canonical, order-independent string form of the fingerprint inputs, hashed
-/// with SHA-256 (then folded to 64 bits). Parameter keys are sorted so map
-/// insertion order does not change the fingerprint.
+/// with SHA-256. Parameter keys are sorted so map insertion order does not
+/// change the fingerprint.
 QByteArray canonicalForm( const QString &algorithmId,
                           const QString &algorithmVersion,
                           const QJsonObject &parameters,
@@ -52,21 +53,12 @@ QByteArray canonicalForm( const QString &algorithmId,
   return out;
 }
 
-quint64 hashCanonical( const QByteArray &canonical )
+/// Full 256-bit SHA-256 digest of the canonical form. The cache keys on the
+/// full digest, never a truncated fold: a truncated key would allow two
+/// different executions to collide and silently reuse the wrong output.
+QByteArray hashCanonical( const QByteArray &canonical )
 {
-  const QByteArray digest =
-    QCryptographicHash::hash( canonical, QCryptographicHash::Sha256 );
-  // Fold the 32-byte digest into a 64-bit value (deterministic, well-mixed).
-  Q_ASSERT( digest.size() >= 8 );
-  quint64 folded = 0;
-  for ( int i = 0; i + 7 < digest.size(); i += 8 )
-  {
-    quint64 chunk = 0;
-    for ( int j = 0; j < 8; ++j )
-      chunk = ( chunk << 8 ) | static_cast<quint64>( static_cast<unsigned char>( digest[i + j] ) );
-    folded ^= chunk;
-  }
-  return folded;
+  return QCryptographicHash::hash( canonical, QCryptographicHash::Sha256 );
 }
 } // namespace
 
@@ -97,15 +89,30 @@ bool ExecutionResultCache::isEnabled() const
   return m_enabled;
 }
 
+void ExecutionResultCache::setMaxEntries( size_t maxEntries )
+{
+  std::lock_guard<std::recursive_mutex> locker( m_mutex );
+  m_maxEntries = std::max<size_t>( 1, maxEntries );
+  evictIfNeededLocked();
+}
+
+size_t ExecutionResultCache::maxEntries() const
+{
+  std::lock_guard<std::recursive_mutex> locker( m_mutex );
+  return m_maxEntries;
+}
+
 std::optional<AssetId> ExecutionResultCache::lookup( const ExecutionFingerprint &fp ) const
 {
   std::lock_guard<std::recursive_mutex> locker( m_mutex );
   if ( !m_enabled )
     return std::nullopt;
-  auto it = m_entries.constFind( fp.value );
-  if ( it == m_entries.constEnd() )
+  auto it = m_entries.find( fp.digest );
+  if ( it == m_entries.end() )
     return std::nullopt;
-  return it.value();
+  // Touch LRU recency.
+  it->lastUsedTick = ++m_clock;
+  return it->asset;
 }
 
 void ExecutionResultCache::store( const ExecutionFingerprint &fp, const AssetId &outputAssetId )
@@ -113,13 +120,38 @@ void ExecutionResultCache::store( const ExecutionFingerprint &fp, const AssetId 
   std::lock_guard<std::recursive_mutex> locker( m_mutex );
   if ( !m_enabled )
     return;
-  m_entries.insert( fp.value, outputAssetId );
+  auto it = m_entries.find( fp.digest );
+  if ( it != m_entries.end() )
+  {
+    it->asset = outputAssetId;
+    it->lastUsedTick = ++m_clock;
+    return;
+  }
+  evictIfNeededLocked();
+  m_entries.insert( fp.digest, Entry{ outputAssetId, ++m_clock } );
+}
+
+void ExecutionResultCache::evictIfNeededLocked()
+{
+  // Evict least-recently-used entries until we fit under the cap. An LRU scan
+  // over the map is O(n) per store past capacity; with a bounded map and
+  // store-heavy workloads this is the simple, correct choice.
+  while ( static_cast<size_t>( m_entries.size() ) > m_maxEntries )
+  {
+    QHash<QByteArray, Entry>::iterator lruIt = m_entries.begin();
+    for ( QHash<QByteArray, Entry>::iterator it = m_entries.begin(); it != m_entries.end(); ++it )
+    {
+      if ( it->lastUsedTick < lruIt->lastUsedTick )
+        lruIt = it;
+    }
+    m_entries.erase( lruIt );
+  }
 }
 
 void ExecutionResultCache::invalidate( const ExecutionFingerprint &fp )
 {
   std::lock_guard<std::recursive_mutex> locker( m_mutex );
-  m_entries.remove( fp.value );
+  m_entries.remove( fp.digest );
 }
 
 void ExecutionResultCache::clear()

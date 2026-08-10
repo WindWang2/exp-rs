@@ -24,9 +24,8 @@
 
 #include <QHash>
 #include <QJsonObject>
+#include <cstddef>
 #include <mutex>
-#include <QString>
-
 #include <optional>
 #include <string>
 
@@ -38,16 +37,22 @@ namespace sicnu::data
 /// with the same fingerprint are guaranteed to produce identical output for a
 /// deterministic operator, so the output AssetId can be reused.
 ///
-/// Stored as a 64-bit value (qHash64 of a canonical string form). Collisions are
-/// acceptable for a cache (worst case is a stale-but-same-revision reuse, which
-/// for a deterministic operator is still correct); revision sensitivity makes
-/// the common invalidation case (input changed) a guaranteed miss.
+/// The fingerprint stores the FULL 256-bit SHA-256 digest of the canonical
+/// form (see makeExecutionFingerprint), NOT a truncated/folded key. A
+/// truncated key would make a collision between two *different* executions
+/// (e.g. different inputs/revisions) return another execution's output AssetId
+/// — a silent correctness failure that a truncated hash cannot detect. With the
+/// full digest, reuse happens only for byte-identical canonical inputs.
+/// Revision sensitivity makes the common invalidation case (input changed) a
+/// guaranteed miss.
 struct ExecutionFingerprint
 {
-  /// The 64-bit fingerprint value. A default-constructed ExecutionFingerprint
-  /// (no inputs) hashes to a well-defined constant; an empty algorithm id yields
-  /// a different constant. Both are valid fingerprints.
-  quint64 value = 0;
+  /// The full 256-bit SHA-256 digest of the canonical input form (32 bytes).
+  /// A default-constructed ExecutionFingerprint (empty digest) is a valid,
+  /// well-defined fingerprint distinct from any produced by hashing real
+  /// inputs (a 32-byte zero digest is never the SHA-256 of a real canonical
+  /// input).
+  QByteArray digest;
 
   bool operator==( const ExecutionFingerprint & ) const = default;
 };
@@ -73,6 +78,10 @@ inline ExecutionFingerprint fingerprintFromDerivation( const DerivationRecord &r
 /// Producers that opt in consult lookup() before running; on a hit they reuse
 /// the stored output AssetId instead of re-executing. Thread-safe (recursive_mutex).
 ///
+/// Bounded: the cache evicts least-recently-used entries once it exceeds
+/// maxEntries() (default 4096), so it cannot grow without bound. Keeping the
+/// map bounded also keeps any residual hashing risk negligible.
+///
 /// This is the vertical slice; persistence and producer wiring are follow-ups.
 class ExecutionResultCache
 {
@@ -84,11 +93,17 @@ public:
   void setEnabled( bool on );
   bool isEnabled() const;
 
+  /// Set the maximum number of cached entries. Entries beyond this are evicted
+  /// (least-recently-used first) on the next store(). Must be >= 1.
+  void setMaxEntries( size_t maxEntries );
+  size_t maxEntries() const;
+
   /// Look up a prior result by fingerprint. Returns nullopt when disabled or
   /// absent. The returned AssetId is the output asset of a prior identical run.
   std::optional<AssetId> lookup( const ExecutionFingerprint &fp ) const;
 
   /// Record a freshly-produced output for a fingerprint. No-op when disabled.
+  /// May evict the least-recently-used entry if at capacity.
   void store( const ExecutionFingerprint &fp, const AssetId &outputAssetId );
 
   /// Remove one entry (e.g. when an output asset is deleted). No-op when absent.
@@ -102,9 +117,19 @@ public:
 
 private:
   ExecutionResultCache() = default;
+  struct Entry
+  {
+    AssetId asset;
+    qint64 lastUsedTick = 0;
+  };
+  void evictIfNeededLocked();
+
   mutable std::recursive_mutex m_mutex;
-  QHash<quint64, AssetId> m_entries;
+  // mutable: lookup() is logically const but touches LRU recency bookkeeping.
+  mutable QHash<QByteArray, Entry> m_entries;
   bool m_enabled = false;
+  size_t m_maxEntries = 4096;
+  mutable qint64 m_clock = 0;
 };
 
 } // namespace sicnu::data
