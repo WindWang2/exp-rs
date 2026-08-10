@@ -139,7 +139,7 @@ QString writeByteGrid( const QString &path, const QString &crs )
   GDALDatasetH ds =
     GDALCreate( driver, path.toUtf8().constData(), 4, 4, 1, GDT_Byte, nullptr );
   REQUIRE( ds != nullptr );
-  const std::array<double, 6> gt = { 500000.0, 30.0, 0.0, 4500000.0, 0.0, -30.0 };
+  std::array<double, 6> gt = { 500000.0, 30.0, 0.0, 4500000.0, 0.0, -30.0 };
   GDALSetGeoTransform( ds, gt.data() );
   if ( !crs.isEmpty() )
   {
