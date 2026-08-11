@@ -148,7 +148,12 @@ int main(int argc, char *argv[])
             progressBridge = [&ctx]( int percent, const std::string &message ) {
                 ctx.reportProgress( percent / 100.0, message );
             };
-            return adapter->execute( req.params, progressBridge );
+            // Bridge JobEngine's cancellation flag (carried by ctx) into the
+            // adapter's cancel predicate so provider algorithms and RS
+            // operators observe an external TaskCenter/JobEngine cancel
+            // mid-run, not only before execution starts.
+            return adapter->execute( req.params, progressBridge,
+                                     [&ctx]() { return ctx.isCancelled(); } );
         } );
 
     if (mcpMode) {

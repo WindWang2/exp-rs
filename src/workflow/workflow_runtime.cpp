@@ -88,6 +88,7 @@ std::string WorkflowRuntime::open( const std::string &definitionId )
 
   const std::string sessionId = "wf-" + std::to_string( m_nextId++ );
   m_sessions[sessionId] = std::make_unique<WorkflowSession>( *def, sessionId );
+  m_cancelFlags[sessionId] = std::make_shared<std::atomic<bool>>( false );
   return sessionId;
 }
 
@@ -175,6 +176,15 @@ Json::Value WorkflowRuntime::runStep( const std::string &sessionId, const std::s
   }
 
   sicnu::operators::RSOperatorContext context;
+  // Wire the session's cooperative cancellation flag into the operator context
+  // so requestCancel() aborts a long-running operator step mid-run. The
+  // shared_ptr local keeps the flag alive for the whole step even if close()
+  // erases the session's map entry concurrently (no use-after-free).
+  const auto cancelFlagPtr = cancelFlag( sessionId );
+  if ( cancelFlagPtr )
+  {
+    context.setCancelFlag( cancelFlagPtr.get() );
+  }
   Json::Value result;
   try
   {
@@ -225,9 +235,26 @@ void WorkflowRuntime::setArtifact( const std::string &sessionId, const std::stri
   s->setArtifact( name, value );
 }
 
+void WorkflowRuntime::requestCancel( const std::string &sessionId )
+{
+  auto flag = cancelFlag( sessionId );
+  if ( flag )
+    flag->store( true, std::memory_order_release );
+}
+
 void WorkflowRuntime::close( const std::string &sessionId )
 {
   m_sessions.erase( sessionId );
+  m_cancelFlags.erase( sessionId );
+}
+
+std::shared_ptr<std::atomic<bool>> WorkflowRuntime::cancelFlag( const std::string &sessionId )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  const auto it = m_cancelFlags.find( sessionId );
+  if ( it == m_cancelFlags.end() )
+    return nullptr;
+  return it->second;
 }
 
 WorkflowSession *WorkflowRuntime::sessionMut( const std::string &sessionId )

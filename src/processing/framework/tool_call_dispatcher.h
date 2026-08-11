@@ -81,10 +81,17 @@ public:
   ToolCallClassification classify( const Json::Value &envelope ) const;
 
   /// Reports, without side effects, why an envelope would be rejected by
-  /// submit() (malformed / plan / unresolvable name / missing required
-  /// parameter). Empty when the envelope would be dispatched. The string
+  /// submit() (malformed / plan / unresolvable name / schema validation
+  /// failure). Empty when the envelope would be dispatched. The string
   /// matches what submit() reports via errorOut.
   QString rejectionReason( const Json::Value &envelope ) const;
+
+  /// Structured, side-effect-free validation of an envelope. Runs the same
+  /// path as rejectionReason() but returns machine-readable issues:
+  /// {valid, errors:[{code, parameter, expected, actual, message}], warnings:[...]}.
+  /// Shared by MCP/preflight so GUI, CLI, MCP and Agent surfaces validate
+  /// parameters through the single schema_validator implementation.
+  Json::Value validateCall( const Json::Value &envelope ) const;
 
   /// Extracts the arguments object from an envelope in any historical shape
   /// ({name, arguments} / {name, parameters} / {name, params}, or
