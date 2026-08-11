@@ -9,8 +9,6 @@
 #include "data/internal/source_provider.h"
 #include "data/internal/source_provider_registry.h"
 #include "data/source_descriptor.h"
-#include "active_view_host.h"
-#include "app/display/qgis_display_manager.h"
 
 #include <qgsapplication.h>
 #include <qgsmapcanvas.h>
@@ -361,17 +359,14 @@ TEST_CASE( "WorkspaceSnapshot::capture surfaces semantic band roles", "[agent][w
   REQUIRE( prompt.contains( QStringLiteral( "4 bands (roles: nir, red, green, blue)" ) ) );
 }
 
-TEST_CASE( "WorkspaceSnapshot::capture reads map view facades from ActiveViewHost",
+TEST_CASE( "WorkspaceSnapshot::capture reads map view facades from the canvas",
            "[agent][workspace_snapshot][capture]" )
 {
   QgsMapCanvas canvas;
   canvas.setDestinationCrs( QgsCoordinateReferenceSystem::fromEpsgId( 4326 ) );
   canvas.setExtent( QgsRectangle( 10.0, 20.0, 30.0, 40.0 ) );
 
-  ActiveViewHost host( &canvas, nullptr, nullptr, nullptr, nullptr,
-                       sicnu::display::DisplayViewId(), nullptr );
-
-  const auto snapshot = sicnu::agent::WorkspaceSnapshot::capture( nullptr, &host );
+  const auto snapshot = sicnu::agent::WorkspaceSnapshot::capture( nullptr, &canvas );
   REQUIRE( snapshot.assets.isEmpty() );
   CHECK( snapshot.mapView.crsAuthId.contains( QStringLiteral( "4326" ) ) );
   // Canvas may normalize extent; require a non-empty serialized extent when set.
