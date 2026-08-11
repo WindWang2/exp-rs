@@ -77,9 +77,13 @@ private:
     void sendNotification(const QString &method, const QVariantMap &params);
 
 protected:
-    // MCP Methods — QgsProcessing algorithms (legacy Agent surface)
+    // MCP Methods — canonical algorithm surface
     QVariantMap handleListAlgorithms();
+    QVariantMap handleSearchAlgorithms(const QString &query, const QString &group,
+                                       const QString &inputType, const QString &outputType,
+                                       bool largeRasterSafeOnly);
     QVariantMap handleGetAlgorithmSchema(const QString &algorithmId);
+    QVariantMap handlePreflightAlgorithm(const QString &algorithmId, const QVariantMap &parameters);
     QVariantMap handleExecuteAlgorithm(const QString &algorithmId, const QVariantMap &parameters);
     QVariantMap handleGetExecutionStatus(const QString &executionId);
     QVariantMap handleCancelExecution(const QString &executionId);
