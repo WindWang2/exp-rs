@@ -7,6 +7,8 @@
 #include <QTemporaryDir>
 #include <QFile>
 
+#include <qgsapplication.h>
+
 #include <json/json.h>
 
 #include <algorithm>
@@ -35,7 +37,13 @@ char *pipelineAppArgv[] = {pipelineAppArgv0, nullptr};
 QCoreApplication *ensurePipelineApp()
 {
     if (!QCoreApplication::instance())
-        return new QCoreApplication(pipelineAppArgc(), pipelineAppArgv);
+        new QCoreApplication(pipelineAppArgc(), pipelineAppArgv);
+    // Initialize the QGIS runtime profiler on the main thread. Pipeline
+    // execution logs through QgsMessageLog from the JobEngine worker thread;
+    // without a main-thread QgsApplication/profiler, QgsRuntimeProfiler's
+    // threadLocalInstance() leaves sMainProfiler null and the Debug-build
+    // Q_ASSERT aborts the process.
+    QgsApplication::profiler();
     return static_cast<QCoreApplication *>(QCoreApplication::instance());
 }
 } // namespace

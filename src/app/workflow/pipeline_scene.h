@@ -18,7 +18,7 @@ class PipelineScene : public QGraphicsScene
 
 public:
   explicit PipelineScene( QObject *parent = nullptr );
-  ~PipelineScene() override = default;
+  ~PipelineScene() override;
 
   PipelineNodeItem *addNode( const StepDef &stepDef );
   bool removeNode( const QString &stepId );

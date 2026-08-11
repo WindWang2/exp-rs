@@ -830,12 +830,15 @@ TEST_CASE( "QgisDisplayManager active view and auto-display tracking", "[display
   project->clear();
 
   DataManager dataManager;
+  // Declare the QGIS view objects before the display manager so the manager is
+  // destroyed before them (the manager's destructor touches live canvases via
+  // the layer-tree bridge).
+  QgsMapCanvas canvas;
   QgisDisplayManager displayManager( &dataManager );
 
   CHECK( displayManager.activeViewId().isNull() );
   CHECK_FALSE( displayManager.autoDisplayOnAssetAdded() );
 
-  QgsMapCanvas canvas;
   DisplayViewSpec spec{ &canvas, project->layerTreeRoot(), project->layerStore() };
 
   const auto viewResult = displayManager.createView( spec );

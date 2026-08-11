@@ -14,6 +14,22 @@ PipelineScene::PipelineScene( QObject *parent )
   setSceneRect( -2000, -2000, 4000, 4000 );
 }
 
+PipelineScene::~PipelineScene()
+{
+  // QGraphicsScene::clear() deletes items in insertion order; nodes (and their
+  // child ports) would be destroyed before connections, whose destructor
+  // unregisters itself from its (then-freed) ports. Tear connections down
+  // first so no port vector is touched after its owner is gone.
+  for ( PipelineConnectionItem *conn : mConnections )
+    delete conn;
+  mConnections.clear();
+  if ( mTempConnection )
+  {
+    delete mTempConnection;
+    mTempConnection = nullptr;
+  }
+}
+
 PipelineNodeItem *PipelineScene::addNode( const StepDef &stepDef )
 {
   if ( findNode( QString::fromStdString( stepDef.id ) ) )
