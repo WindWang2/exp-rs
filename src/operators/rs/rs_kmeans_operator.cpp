@@ -4,8 +4,9 @@
  * ADR 0019 slice S4 — thin JSON adapter over the analysis-layer
  * classification pipeline:
  *
- *   params → full-band read + deterministic std::mt19937(42) subsample
- *            (the shared rsShuffleAndKeep policy, unchanged — ADR 0061) →
+ *   params → band sampling (full read when the raster is small, deterministic
+ *            std::mt19937(42) reservoir sampling when maxSamples is set and
+ *            the raster is large — bounded memory O(maxSamples*nFeat)) →
  *            RsClassificationPipeline::run with an RsClassifierKMeans
  *            backend.
  *
@@ -32,6 +33,8 @@
 
 #include <opencv2/core.hpp>
 
+#include <algorithm>
+#include <limits>
 #include <random>
 #include <string>
 #include <vector>
@@ -163,30 +166,96 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
     context.reportProgress(0.05, "Reading bands");
     context.throwIfCancelled();
 
-    std::vector<std::vector<float>> bandData(static_cast<size_t>(nFeat));
-    for (int i = 0; i < nFeat; ++i) {
-        bandData[static_cast<size_t>(i)].resize(nPix);
-        if (!ds.readBandData(bands[static_cast<size_t>(i)],
-                             bandData[static_cast<size_t>(i)].data(),
-                             width, height)) {
-            throw RSOperatorError(ErrorCode::GdalError,
-                                  "Failed to read band " + std::to_string(bands[static_cast<size_t>(i)]));
-        }
-        context.reportProgress(0.05 + 0.25 * (i + 1) / nFeat, "Read band");
-        context.throwIfCancelled();
-    }
-
-    // Subsample for centroid fitting when raster is large (shared operator
-    // policy: deterministic std::mt19937(42) shuffle — rsShuffleAndKeep,
-    // ADR 0061; identical sequence to the former inline shuffle).
+    // Subsample for centroid fitting when the raster is large. Instead of
+    // materializing every band fully plus a full-size index array (8 B/px),
+    // a deterministic reservoir sample (std::mt19937(42), ADR 0061 policy)
+    // keeps only the sampled pixels' features in memory — O(maxSamples*nFeat)
+    // regardless of raster dimensions.
     std::vector<size_t> sampleIdx;
-    sampleIdx.reserve(nPix);
-    for (size_t i = 0; i < nPix; ++i)
-        sampleIdx.push_back(i);
+    std::vector<std::vector<float>> bandData;
+    const bool useReservoir = (maxSamples > 0 && static_cast<int>(nPix) > maxSamples);
 
-    if (maxSamples > 0 && static_cast<int>(nPix) > maxSamples) {
+    if (useReservoir)
+    {
+        const size_t k = static_cast<size_t>(maxSamples);
+        std::vector<std::vector<float>> reservoir(static_cast<size_t>(nFeat),
+                                                  std::vector<float>(k, 0.0f));
+        sampleIdx.resize(k);
         std::mt19937 rng(42);
-        rsShuffleAndKeep(rng, sampleIdx, static_cast<size_t>(maxSamples));
+        std::uniform_int_distribution<size_t> dist(0, std::numeric_limits<size_t>::max());
+
+        constexpr int kTile = 256;
+        std::vector<float> tileBuf(static_cast<size_t>(kTile) * kTile);
+        std::vector<float> bandScratch(static_cast<size_t>(kTile) * kTile);
+        size_t seen = 0;
+        for (int y = 0; y < height; y += kTile)
+        {
+            const int h = std::min(kTile, height - y);
+            for (int x = 0; x < width; x += kTile)
+            {
+                const int w = std::min(kTile, width - x);
+                const size_t n = static_cast<size_t>(w) * h;
+                context.throwIfCancelled();
+                for (int i = 0; i < nFeat; ++i)
+                {
+                    if (!ds.readBandWindow(bands[static_cast<size_t>(i)], x, y, w, h,
+                                           bandScratch.data()))
+                        throw RSOperatorError(ErrorCode::GdalError,
+                                              "Failed to read band " +
+                                                  std::to_string(bands[static_cast<size_t>(i)]));
+                    for (size_t p = 0; p < n; ++p)
+                        tileBuf[p * static_cast<size_t>(nFeat) + static_cast<size_t>(i)] =
+                            bandScratch[p];
+                }
+                for (size_t p = 0; p < n; ++p, ++seen)
+                {
+                    if (seen < k)
+                    {
+                        sampleIdx[seen] = seen;
+                        for (int i = 0; i < nFeat; ++i)
+                            reservoir[static_cast<size_t>(i)][seen] =
+                                tileBuf[p * static_cast<size_t>(nFeat) + static_cast<size_t>(i)];
+                    }
+                    else
+                    {
+                        // Reservoir replace: j = uniform(0, seen); if j < k replace.
+                        const size_t j = static_cast<size_t>(
+                            dist(rng) % (seen + 1));
+                        if (j < k)
+                        {
+                            sampleIdx[j] = seen;
+                            for (int i = 0; i < nFeat; ++i)
+                                reservoir[static_cast<size_t>(i)][j] =
+                                    tileBuf[p * static_cast<size_t>(nFeat) + static_cast<size_t>(i)];
+                        }
+                    }
+                }
+            }
+        }
+        bandData = std::move(reservoir);
+    }
+    else
+    {
+        std::vector<std::vector<float>> fullData(static_cast<size_t>(nFeat));
+        for (int i = 0; i < nFeat; ++i) {
+            fullData[static_cast<size_t>(i)].resize(nPix);
+            if (!ds.readBandData(bands[static_cast<size_t>(i)],
+                                 fullData[static_cast<size_t>(i)].data(),
+                                 width, height)) {
+                throw RSOperatorError(ErrorCode::GdalError,
+                                      "Failed to read band " + std::to_string(bands[static_cast<size_t>(i)]));
+            }
+            context.reportProgress(0.05 + 0.25 * (i + 1) / nFeat, "Read band");
+            context.throwIfCancelled();
+        }
+        bandData = std::move(fullData);
+        sampleIdx.reserve(nPix);
+        for (size_t i = 0; i < nPix; ++i)
+            sampleIdx.push_back(i);
+        if (maxSamples > 0 && static_cast<int>(nPix) > maxSamples) {
+            std::mt19937 rng(42);
+            rsShuffleAndKeep(rng, sampleIdx, static_cast<size_t>(maxSamples));
+        }
     }
 
     const int nSamples = static_cast<int>(sampleIdx.size());
@@ -200,7 +269,10 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
 
     cv::Mat trainX(nSamples, nFeat, CV_32F);
     for (int r = 0; r < nSamples; ++r) {
-        const size_t pix = sampleIdx[static_cast<size_t>(r)];
+        // Reservoir path: bandData is already the sample matrix (position r);
+        // full path: bandData is indexed by the original pixel index.
+        const size_t pix = useReservoir ? static_cast<size_t>(r)
+                                        : sampleIdx[static_cast<size_t>(r)];
         for (int c = 0; c < nFeat; ++c) {
             trainX.at<float>(r, c) = bandData[static_cast<size_t>(c)][pix];
         }

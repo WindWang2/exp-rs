@@ -32,6 +32,10 @@ public:
         return "Extract spectral endmembers by Pixel Purity Index.";
     }
 
+    // 3-pass tile streaming: O(tilePixels*bands + projections*bands +
+    // pixelCount*sizeof(int)) working set, no full-scene pixel buffer.
+    RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::MultiPassStreaming; }
+
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;
