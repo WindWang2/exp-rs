@@ -129,7 +129,10 @@ TEST_CASE("MCP Server tests", "[agent][mcp]") {
     SECTION("get_algorithm_schema returns valid schema") {
         QVariantMap schema = server.testGetAlgorithmSchema("qgis_algorithms:rs_band_math");
         REQUIRE_FALSE(schema.isEmpty());
-        CHECK(schema.value("title").toString() == "qgis_algorithms:rs_band_math");
+        // The canonical descriptor serves the algorithm under its registered
+        // id; the schema title is the human-readable display name.
+        CHECK(schema.value("algorithm_id").toString() == "qgis_algorithms:rs_band_math");
+        CHECK_FALSE(schema.value("title").toString().isEmpty());
         CHECK(schema.value("type").toString() == "object");
 
         QVariantMap properties = schema.value("properties").toMap();

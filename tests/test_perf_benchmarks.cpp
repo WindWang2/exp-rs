@@ -246,3 +246,124 @@ TEST_CASE( "Benchmark: band_math (full-raster baseline)", "[benchmark]" )
         REQUIRE( res.isMember( "output" ) );
     } );
 }
+
+// ---------------------------------------------------------------------------
+// Benchmarks for the atomic-architecture performance convergence round:
+// spectral resampling (LUT + tile streaming), spectral unmixing (precomputed
+// inverse), endmember PPI (3-pass streaming), change primitives (tile
+// streaming). Numbers are reported, not asserted.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Benchmark: spectral_resample (LUT + tile streaming)", "[benchmark]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const bool large = largeBench();
+    const int W = large ? 1024 : 256;
+    const int H = large ? 1024 : 256;
+    const int bands = large ? 32 : 8; // multi-band (spectrometer-like)
+    const QString inPath = dir.filePath( QStringLiteral( "in.tif" ) );
+    const QString outPath = dir.filePath( QStringLiteral( "out_resample.tif" ) );
+    buildSyntheticRaster( inPath, W, H, bands );
+
+    Json::Value wavelengths( Json::arrayValue );
+    for ( int b = 0; b < bands; ++b )
+        wavelengths.append( 400.0 + b * 20.0 );
+    Json::Value srcWl( Json::arrayValue );
+    for ( int b = 0; b < bands; ++b )
+        srcWl.append( 390.0 + b * 20.0 );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = inPath.toStdString();
+    params["output"] = outPath.toStdString();
+    params["wavelengths"] = wavelengths;
+    params["sourceWavelengths"] = srcWl;
+
+    sicnu::operators::RSOperatorContext ctx;
+    runBench( "spectral_resample", [&]() {
+        auto res = runOperator( "rs:spectral_resample", params, ctx );
+        REQUIRE( res.isObject() );
+        REQUIRE( res["bands"].asInt() == bands );
+    } );
+}
+
+TEST_CASE( "Benchmark: spectral_unmixing (precomputed inverse)", "[benchmark]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const bool large = largeBench();
+    const int W = large ? 1024 : 256;
+    const int H = large ? 1024 : 256;
+    const int bands = 4;
+    const QString inPath = dir.filePath( QStringLiteral( "in.tif" ) );
+    const QString outPath = dir.filePath( QStringLiteral( "out_unmix.tif" ) );
+    buildSyntheticRaster( inPath, W, H, bands );
+
+    Json::Value endmembers( Json::arrayValue );
+    Json::Value e1( Json::arrayValue ); e1.append( 0.9 ); e1.append( 0.2 ); e1.append( 0.1 ); e1.append( 0.05 );
+    Json::Value e2( Json::arrayValue ); e2.append( 0.1 ); e2.append( 0.8 ); e2.append( 0.3 ); e2.append( 0.1 );
+    Json::Value e3( Json::arrayValue ); e3.append( 0.05 ); e3.append( 0.2 ); e3.append( 0.7 ); e3.append( 0.3 );
+    endmembers.append( e1 ); endmembers.append( e2 ); endmembers.append( e3 );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = inPath.toStdString();
+    params["output"] = outPath.toStdString();
+    params["endmembers"] = endmembers;
+
+    sicnu::operators::RSOperatorContext ctx;
+    runBench( "spectral_unmixing", [&]() {
+        auto res = runOperator( "rs:spectral_unmixing", params, ctx );
+        REQUIRE( res.isObject() );
+        REQUIRE( res.isMember( "output" ) );
+    } );
+}
+
+TEST_CASE( "Benchmark: endmember_extraction PPI (3-pass streaming)", "[benchmark]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const bool large = largeBench();
+    const int W = large ? 1024 : 256;
+    const int H = large ? 1024 : 256;
+    const int bands = large ? 16 : 4;
+    const QString inPath = dir.filePath( QStringLiteral( "in.tif" ) );
+    buildSyntheticRaster( inPath, W, H, bands );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = inPath.toStdString();
+    params["nEndmembers"] = 3;
+    params["projections"] = large ? 500 : 100;
+
+    sicnu::operators::RSOperatorContext ctx;
+    runBench( "endmember_extraction", [&]() {
+        auto res = runOperator( "rs:endmember_extraction", params, ctx );
+        REQUIRE( res.isObject() );
+        REQUIRE( res["endmembers"].size() == 3 );
+    } );
+}
+
+TEST_CASE( "Benchmark: change_difference primitive (tile streaming)", "[benchmark]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const bool large = largeBench();
+    const int W = large ? 2048 : 512;
+    const int H = large ? 2048 : 512;
+    const QString beforePath = dir.filePath( QStringLiteral( "before.tif" ) );
+    const QString afterPath = dir.filePath( QStringLiteral( "after.tif" ) );
+    const QString outPath = dir.filePath( QStringLiteral( "out_diff.tif" ) );
+    buildSyntheticRaster( beforePath, W, H, 1 );
+    buildSyntheticRaster( afterPath, W, H, 1 );
+
+    Json::Value params( Json::objectValue );
+    params["before"] = beforePath.toStdString();
+    params["after"] = afterPath.toStdString();
+    params["output"] = outPath.toStdString();
+
+    sicnu::operators::RSOperatorContext ctx;
+    runBench( "change_difference", [&]() {
+        auto res = runOperator( "rs:change_difference", params, ctx );
+        REQUIRE( res.isObject() );
+        REQUIRE( res.isMember( "output" ) );
+    } );
+}
