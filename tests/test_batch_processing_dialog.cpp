@@ -21,6 +21,7 @@
 #include <qgsprocessingregistry.h>
 
 #include "app/dialogs/batch_processing_dialog.h"
+#include "operators/framework/rs_operator_registry.h"
 #include "processing/providers/qgis_algorithms/provider.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
@@ -29,6 +30,14 @@ namespace
 
 void ensureQgisApplication()
 {
+  // libsicnu_operators registers rs:* operators into AtomicAlgorithmRegistry
+  // via static initializers. Ubuntu's default --as-needed link drops a shared
+  // library the binary references no symbol from, so force a reference to keep
+  // it in DT_NEEDED (same pattern as test_atomic_algorithm_registry); without
+  // it the batch dialog's RS operator combo is empty and rs:* batch items fail
+  // with "RS operator not found".
+  ( void ) sicnu::operators::RSOperatorRegistry::instance().operatorNames();
+
   if ( QApplication::instance() )
     return;
   static int argc = 1;
