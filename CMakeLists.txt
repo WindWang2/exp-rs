@@ -209,7 +209,16 @@ if(ENABLE_SANITIZERS)
     else()
         # GCC/Clang: AddressSanitizer + UndefinedBehaviorSanitizer
         # Use -g1 (minimal debug info) to avoid GCC 16 ICE in dwarf2out.cc
-        add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g1)
+        # -fno-sanitize=vptr: the vptr (typeinfo) check emits an undefined
+        # reference to the typeinfo of every polymorphic static type at each
+        # virtual call site. Our layering builds sicnu_data/sicnu_jobs as STATIC
+        # libraries absorbed into several SHARED libraries (sicnu_processing,
+        # sicnu_operators, ...), so a lib that USES RSOperator (defined in
+        # libsicnu_operators) without linking it — e.g. atomic_algorithm_adapter
+        # and job_engine — gets an unresolvable _ZTI reference and every test
+        # binary aborts at load. vptr checks cannot function across this
+        # boundary; heap/UB coverage (ASan + remaining UBSan) is unchanged.
+        add_compile_options(-fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer -g1)
         # Link sanitizer runtime into executables only (not shared libraries)
         # to avoid ld.so conflicts with non-instrumented system libraries (Qt6, GDAL, etc.)
         # --allow-shlib-undefined: our qgis_gui stubs have unresolved typeinfo for
