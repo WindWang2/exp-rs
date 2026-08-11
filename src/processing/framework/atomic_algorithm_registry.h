@@ -21,6 +21,14 @@ public:
   void reset();
 
   /**
+   * Explicit initialization seam for the canonical Agent-facing catalog.
+   * Idempotent: re-applies the RS operator provider so the catalog is fully
+   * populated regardless of static-init ordering. Called from
+   * AlgorithmEngine::initialize() at app startup and by tests via reset().
+   */
+  void initialize();
+
+  /**
    * Registers an algorithm adapter. Overwrites if algorithmId already exists.
    */
   void registerAdapter( AtomicAlgorithmAdapterPtr adapter );

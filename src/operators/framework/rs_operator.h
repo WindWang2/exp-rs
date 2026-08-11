@@ -119,6 +119,20 @@ public:
     virtual Json::Value executionEstimate() const;
 
     /**
+     * Input-dependent resource estimate. Unlike executionEstimate(), which
+     * describes a typical input, this seam lets an operator quantify its
+     * working set from the actual parameters (raster dimensions, band count,
+     * datatype, tile size). Must be overflow-safe and must not understate the
+     * real working set. Defaults to executionEstimate() (static fallback).
+     *
+     * Recommended shape (same keys as executionEstimate()):
+     *   "tileWidth", "tileHeight", "estimatedRamBytes", "temporaryDiskBytes"
+     * with the estimate deriving from tileWidth*tileHeight*bands*bytesPerSample
+     * and bands^2 matrices, plus fixed overhead.
+     */
+    virtual Json::Value estimateExecution(const Json::Value& params) const;
+
+    /**
      * Executes the operator.
      *
      * @param params  Algorithm parameters as Json::Value object.

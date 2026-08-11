@@ -21,6 +21,17 @@ AtomicAlgorithmRegistry::AtomicAlgorithmRegistry()
   registerBuiltinRsOperators();
 }
 
+void AtomicAlgorithmRegistry::initialize()
+{
+  // Explicit initialization seam for the canonical Agent-facing catalog.
+  // Re-applies the RS operator provider (idempotent: registerAdapter overwrites
+  // by algorithm id) so the catalog is fully populated once the operator
+  // library has registered its provider — regardless of static-init ordering
+  // between this library and the operators library. Called from
+  // AlgorithmEngine::initialize() (app startup) and by tests via reset().
+  registerBuiltinRsOperators();
+}
+
 void AtomicAlgorithmRegistry::setRsOperatorProvider( std::function<void(AtomicAlgorithmRegistry&)> provider )
 {
   sRsOperatorProvider = std::move( provider );

@@ -1,7 +1,21 @@
 // src/processing/framework/algorithm_descriptor.cpp
 #include "algorithm_descriptor.h"
 
+#include <algorithm>
+#include <cctype>
+
 namespace sicnu::processing {
+
+namespace {
+
+std::string toLower( std::string s )
+{
+  std::transform( s.begin(), s.end(), s.begin(),
+                  []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+  return s;
+}
+
+} // namespace
 
 std::string dataTypeToString( DataType type )
 {
@@ -39,64 +53,124 @@ DataType dataTypeFromString( const std::string &typeStr )
   return DataType::Any;
 }
 
+DataType dataTypeFromFileFormat( const std::string &format )
+{
+  const std::string f = toLower( format );
+  if ( f == "tif" || f == "tiff" || f == "gtiff" || f == "img" || f == "vrt" )
+    return DataType::Raster;
+  if ( f == "csv" || f == "tsv" )
+    return DataType::Table;
+  if ( f == "shp" || f == "geojson" || f == "gpkg" || f == "kml" || f == "geojsonl" )
+    return DataType::Vector;
+  if ( f == "json" )
+    return DataType::Json;
+  if ( f == "xml" )
+    return DataType::Json;
+  return DataType::String;
+}
+
 Json::Value PortDescriptor::toJsonSchema() const
 {
   Json::Value root( Json::objectValue );
   root["description"] = description.empty() ? displayName : description;
 
-  switch ( type )
+  if ( isArray )
   {
-    case DataType::Numeric:
-      root["type"] = "number";
-      break;
-    case DataType::Integer:
-      root["type"] = "integer";
-      break;
-    case DataType::Boolean:
-      root["type"] = "boolean";
-      break;
-    case DataType::Enum:
-      root["type"] = "string";
-      if ( !enumOptions.empty() )
-      {
-        Json::Value arr( Json::arrayValue );
-        for ( const auto &opt : enumOptions )
-          arr.append( opt );
-        root["enum"] = arr;
-      }
-      break;
-    case DataType::Raster:
-      root["type"] = "string";
-      root["x-ui-type"] = "raster";
-      break;
-    case DataType::Vector:
-      root["type"] = "string";
-      root["x-ui-type"] = "vector";
-      break;
-    case DataType::Table:
-      root["type"] = "string";
-      root["x-ui-type"] = "table";
-      break;
-    case DataType::BoundingBox:
-      root["type"] = "array";
-      root["x-ui-type"] = "bbox";
-      break;
-    case DataType::Crs:
-      root["type"] = "string";
-      root["x-ui-type"] = "crs";
-      break;
-    case DataType::Json:
-      root["type"] = "object";
-      break;
-    case DataType::String:
-    case DataType::Any:
-    default:
-      root["type"] = "string";
-      break;
+    root["type"] = "array";
+    Json::Value items( Json::objectValue );
+    switch ( itemType )
+    {
+      case DataType::Integer:
+        items["type"] = "integer";
+        break;
+      case DataType::Numeric:
+        items["type"] = "number";
+        break;
+      case DataType::Boolean:
+        items["type"] = "boolean";
+        break;
+      case DataType::String:
+      case DataType::Enum:
+      default:
+        items["type"] = "string";
+        break;
+    }
+    if ( itemType == DataType::Enum && !enumOptions.empty() )
+    {
+      Json::Value arr( Json::arrayValue );
+      for ( const auto &opt : enumOptions )
+        arr.append( opt );
+      items["enum"] = arr;
+    }
+    root["items"] = items;
   }
+  else
+  {
+    switch ( type )
+    {
+      case DataType::Numeric:
+        root["type"] = "number";
+        break;
+      case DataType::Integer:
+        root["type"] = "integer";
+        break;
+      case DataType::Boolean:
+        root["type"] = "boolean";
+        break;
+      case DataType::Enum:
+        root["type"] = "string";
+        if ( !enumOptions.empty() )
+        {
+          Json::Value arr( Json::arrayValue );
+          for ( const auto &opt : enumOptions )
+            arr.append( opt );
+          root["enum"] = arr;
+        }
+        break;
+      case DataType::Raster:
+        root["type"] = "string";
+        root["x-ui-type"] = "raster";
+        break;
+      case DataType::Vector:
+        root["type"] = "string";
+        root["x-ui-type"] = "vector";
+        break;
+      case DataType::Table:
+        root["type"] = "string";
+        root["x-ui-type"] = "table";
+        break;
+      case DataType::BoundingBox:
+        root["type"] = "array";
+        root["x-ui-type"] = "bbox";
+        break;
+      case DataType::Crs:
+        root["type"] = "string";
+        root["x-ui-type"] = "crs";
+        break;
+      case DataType::Json:
+        root["type"] = "object";
+        break;
+      case DataType::String:
+      case DataType::Any:
+      default:
+        root["type"] = "string";
+        break;
+    }
+  }
+
+  if ( hasMinimum )
+    root["minimum"] = minimum;
+  if ( hasMaximum )
+    root["maximum"] = maximum;
 
   if ( !defaultValue.empty() )
     root["default"] = defaultValue;
+
+  if ( !fileFormat.empty() )
+    root["format"] = fileFormat;
+
+  if ( rsContract.isObject() && !rsContract.empty() )
+    root["x-rs-contract"] = rsContract;
 
   return root;
 }
@@ -130,6 +204,17 @@ Json::Value AgentMetadata::toJson() const
 
   if ( execution.isObject() && !execution.empty() )
     root["execution"] = execution;
+
+  root["deterministic"] = deterministic;
+  root["sideEffects"] = sideEffects;
+  root["idempotent"] = idempotent;
+  if ( !costClass.empty() )
+    root["costClass"] = costClass;
+  root["largeRasterSafe"] = largeRasterSafe;
+  root["supportsCancellation"] = supportsCancellation;
+  root["producesProvenance"] = producesProvenance;
+  if ( !facadeOf.empty() )
+    root["facadeOf"] = facadeOf;
 
   return root;
 }
@@ -174,6 +259,23 @@ AgentMetadata AgentMetadata::fromJson( const Json::Value &val )
 
   if ( val.isMember( "execution" ) && val["execution"].isObject() )
     meta.execution = val["execution"];
+
+  if ( val.isMember( "deterministic" ) && val["deterministic"].isBool() )
+    meta.deterministic = val["deterministic"].asBool();
+  if ( val.isMember( "sideEffects" ) && val["sideEffects"].isBool() )
+    meta.sideEffects = val["sideEffects"].asBool();
+  if ( val.isMember( "idempotent" ) && val["idempotent"].isBool() )
+    meta.idempotent = val["idempotent"].asBool();
+  if ( val.isMember( "costClass" ) && val["costClass"].isString() )
+    meta.costClass = val["costClass"].asString();
+  if ( val.isMember( "largeRasterSafe" ) && val["largeRasterSafe"].isBool() )
+    meta.largeRasterSafe = val["largeRasterSafe"].asBool();
+  if ( val.isMember( "supportsCancellation" ) && val["supportsCancellation"].isBool() )
+    meta.supportsCancellation = val["supportsCancellation"].asBool();
+  if ( val.isMember( "producesProvenance" ) && val["producesProvenance"].isBool() )
+    meta.producesProvenance = val["producesProvenance"].asBool();
+  if ( val.isMember( "facadeOf" ) && val["facadeOf"].isString() )
+    meta.facadeOf = val["facadeOf"].asString();
 
   return meta;
 }

@@ -45,6 +45,12 @@ Json::Value RSOperator::executionEstimate() const {
     return Json::Value(Json::objectValue);
 }
 
+Json::Value RSOperator::estimateExecution(const Json::Value& /*params*/) const {
+    // Dynamic estimate seam: default to the static typical-input estimate.
+    // Operators that can derive working set from parameters override this.
+    return executionEstimate();
+}
+
 Json::Value RSOperator::execute(const Json::Value& params, RSOperatorContext& context) {
     auto& logger = RSOperationLogger::instance();
     const size_t handle = logger.beginRun(name(), params);

@@ -28,6 +28,9 @@ public:
   AlgorithmDescriptor descriptor() const override;
   Json::Value execute( const Json::Value &params, ProgressCallback progressCb = nullptr,
                        std::function<bool()> isCancelledFn = nullptr ) override;
+  /// Provider algorithms have no parameter-derived estimate; falls back to the
+  /// descriptor-level execution metadata (static, typical input).
+  Json::Value estimateExecution( const Json::Value &params ) const override;
 
 private:
   /// The registry-owned algorithm pointer (non-owning, used for create()).
