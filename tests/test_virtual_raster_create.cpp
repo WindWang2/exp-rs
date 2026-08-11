@@ -375,8 +375,12 @@ TEST_CASE( "A chained virtual raster (virtual of virtual) registers and links",
   CHECK( manager.strongDependentsOf( inner.value() ) ==
          QVector<AssetId>{ outer.value() } );
 
-  const auto *raster =
-    std::get_if<RasterStructure>( &manager.asset( outer.value() )->structure() );
+  // Bind the snapshot to a named local: manager.asset() returns by value and
+  // taking a pointer into the temporary's structure() would dangle after the
+  // full expression.
+  const std::optional<AssetSnapshot> snapshot = manager.asset( outer.value() );
+  REQUIRE( snapshot.has_value() );
+  const auto *raster = std::get_if<RasterStructure>( &snapshot->structure() );
   REQUIRE( raster != nullptr );
   CHECK( raster->bandCount == 2 );
 }
@@ -399,8 +403,11 @@ TEST_CASE( "The VRT band data type follows the input band's native type",
     manager.createVirtualRaster( recipeFor( { BandRef{ byteAsset, 1 } } ) );
   REQUIRE( created );
 
-  const auto *raster =
-    std::get_if<RasterStructure>( &manager.asset( created.value() )->structure() );
+  // Bind the snapshot to a named local (manager.asset() returns by value; a
+  // pointer into the temporary's structure() would dangle after the expression).
+  const std::optional<AssetSnapshot> snapshot = manager.asset( created.value() );
+  REQUIRE( snapshot.has_value() );
+  const auto *raster = std::get_if<RasterStructure>( &snapshot->structure() );
   REQUIRE( raster != nullptr );
   REQUIRE( raster->bands.size() == 1 );
   CHECK( raster->bands.first().dataType == QStringLiteral( "Byte" ) );

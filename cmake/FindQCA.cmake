@@ -23,6 +23,15 @@ else(QCA_INCLUDE_DIR AND QCA_LIBRARY)
   set(QCA_LIBRARY_NAMES qca-${QT_VERSION_BASE_LOWER} qca2-${QT_VERSION_BASE_LOWER} qca)
   set(QCA_PATH_SUFFIXES ${QT_VERSION_BASE_LOWER}/QtCrypto Qca-${QT_VERSION_BASE_LOWER}/QtCrypto qt/Qca-${QT_VERSION_BASE_LOWER}/QtCrypto ${QT_VERSION_BASE_LOWER}/Qca-${QT_VERSION_BASE_LOWER}/QtCrypto QtCrypto)
 
+  # qca v2.3+ built with Qt6 installs into the Qt prefix as a Qt module
+  # (include/Qca-qt6/QtCrypto, lib/qca-qt6.*). Derive that prefix from
+  # Qt6_DIR when CMAKE_PREFIX_PATH does not carry it (e.g. CI setups that
+  # locate Qt via the Qt6_DIR environment variable).
+  set(_qca_qt6_prefix)
+  if(Qt6_DIR)
+    get_filename_component(_qca_qt6_prefix "${Qt6_DIR}/../../.." ABSOLUTE)
+  endif()
+
   find_library(QCA_LIBRARY
     NAMES ${QCA_LIBRARY_NAMES}
     PATHS
@@ -30,6 +39,7 @@ else(QCA_INCLUDE_DIR AND QCA_LIBRARY)
       $ENV{LIB}
       "$ENV{LIB_DIR}"
       $ENV{LIB_DIR}/lib
+      ${_qca_qt6_prefix}/lib
       /usr/local/lib
   )
 
@@ -39,12 +49,13 @@ else(QCA_INCLUDE_DIR AND QCA_LIBRARY)
   endif()
 
   find_path(QCA_INCLUDE_DIR
-    NAMES QtCrypto
+    NAMES qca.h QtCrypto
     PATHS
       "${_qca_fw}/Headers"
       ${LIB_DIR}/include
       "$ENV{LIB_DIR}/include"
       $ENV{INCLUDE}
+      ${_qca_qt6_prefix}/include
       /usr/local/include
       PATH_SUFFIXES ${QCA_PATH_SUFFIXES}
   )

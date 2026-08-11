@@ -486,7 +486,7 @@ QgisDisplayManager::addLayer(DisplayViewId viewId, data::AssetId assetId,
     viewRecord->layerTree->insertLayer(0, storedLayer);
   else
     viewRecord->layerTree->addLayer(storedLayer);
-  if (viewRecord->bridge)
+  if (viewRecord->bridge && !viewRecord->canvas.isNull())
     viewRecord->bridge->setCanvasLayers();
 
   auto layerRecord = std::make_unique<Impl::LayerRecord>(Impl::LayerRecord{
@@ -580,7 +580,7 @@ QgisDisplayManager::cloneLayer(DisplayLayerId sourceLayerId,
   clonedLayer.release();
 
   targetView->layerTree->insertLayer(0, storedLayer);
-  if (targetView->bridge)
+  if (targetView->bridge && !targetView->canvas.isNull())
     targetView->bridge->setCanvasLayers();
 
   auto record = std::make_unique<Impl::LayerRecord>(
@@ -679,7 +679,7 @@ QgisDisplayManager::adoptLayer(DisplayViewId viewId, data::AssetId assetId,
       acquired.take()});
   m_impl->layers.emplace(layerId.toString(), std::move(record));
   viewRecord->layerIds.append(layerId);
-  if (viewRecord->bridge)
+  if (viewRecord->bridge && !viewRecord->canvas.isNull())
     viewRecord->bridge->setCanvasLayers();
   return data::Result<DisplayLayerId>::success(layerId);
 }
@@ -797,7 +797,7 @@ data::Result<void> QgisDisplayManager::relocateLayer(DisplayLayerId layerId) {
   // Remove the stale layer from the store after the replacement is registered.
   if (viewRecord->layerStore->mapLayer(oldQgisLayerId))
     viewRecord->layerStore->removeMapLayer(oldQgisLayerId);
-  if (viewRecord->bridge)
+  if (viewRecord->bridge && !viewRecord->canvas.isNull())
     viewRecord->bridge->setCanvasLayers();
 
   // Update the record: same DisplayLayerId and asset, new QGIS layer and lease.
@@ -846,7 +846,7 @@ data::Result<void> QgisDisplayManager::removeLayer(DisplayLayerId layerId) {
         viewRecord->layerStore->mapLayer(qgisLayerId)) {
       viewRecord->layerStore->removeMapLayer(qgisLayerId);
     }
-    if (viewRecord->bridge)
+    if (viewRecord->bridge && !viewRecord->canvas.isNull())
       viewRecord->bridge->setCanvasLayers();
   }
 
@@ -970,7 +970,7 @@ data::Result<void> QgisDisplayManager::moveLayerTop(DisplayLayerId layerId) {
       }
     }
   }
-  if (viewRecord->bridge)
+  if (viewRecord->bridge && !viewRecord->canvas.isNull())
     viewRecord->bridge->setCanvasLayers();
   return data::Result<void>::success();
 }
@@ -1006,7 +1006,7 @@ data::Result<void> QgisDisplayManager::moveLayerBottom(DisplayLayerId layerId) {
       }
     }
   }
-  if (viewRecord->bridge)
+  if (viewRecord->bridge && !viewRecord->canvas.isNull())
     viewRecord->bridge->setCanvasLayers();
   return data::Result<void>::success();
 }
