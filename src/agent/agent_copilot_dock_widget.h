@@ -26,7 +26,7 @@ namespace sicnu::data
 class DataManager;
 }
 
-class ActiveViewHost;
+class QgsMapCanvas;
 class QgsRubberBand;
 
 namespace sicnu::agent
@@ -40,7 +40,7 @@ class AgentCopilotDockWidget : public QDockWidget
     explicit AgentCopilotDockWidget( QWidget *parent = nullptr );
     ~AgentCopilotDockWidget() override = default;
 
-    void setContext( data::DataManager *dataManager, ActiveViewHost *viewHost );
+    void setContext( data::DataManager *dataManager, QgsMapCanvas *canvas );
     void sendPrompt( const QString &promptText );
 
   signals:
@@ -81,7 +81,7 @@ class AgentCopilotDockWidget : public QDockWidget
     Json::Value handleCanvasAction( const std::string &action, const Json::Value &arguments );
 
     data::DataManager *m_dataManager = nullptr;
-    ActiveViewHost *m_viewHost = nullptr;
+    QgsMapCanvas *m_canvas = nullptr;
     processing::AgentWorkflowExecutor m_workflowExecutor;
 
     processing::ToolCallDispatcher m_toolCallDispatcher;

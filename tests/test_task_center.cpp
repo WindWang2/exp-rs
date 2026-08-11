@@ -766,6 +766,13 @@ TEST_CASE( "TaskCenter - RSS watermark holds queued tasks then releases on compl
     center.resetResourceProfileLimits();
     center.setGlobalConcurrencyLimit( 8 ); // generous; memory gate is the binding constraint
     center.setMemoryLimitMb( 100 );
+    // setMemoryLimitMb also arms the estimate-based budget at the same cap
+    // (deliberate sync so both gates share one cap). The in-process executor
+    // here has no registry adapter, so its estimate falls back to 1024 MiB and
+    // would block the second task. Disable the estimate gate so this test
+    // exercises only the RSS watermark; the estimate gate has its own coverage
+    // in test_task_resource_budget.cpp.
+    center.setResourceBudgetMb( 0 );
 
     std::atomic<unsigned int> fakeRss{ 50 }; // below the 100 MB watermark
     center.setRssSampler( [&fakeRss]() { return fakeRss.load(); } );
@@ -841,6 +848,10 @@ TEST_CASE( "TaskCenter - memory limit 0 disables the RSS gate",
     auto &center = sicnu::TaskCenter::instance();
     center.resetResourceProfileLimits();
     center.setGlobalConcurrencyLimit( 8 );
+    // Pin the per-profile cap so this test is machine-independent (the default
+    // InProcessThread cap is hardware_concurrency()-1, which is 3 on 4-core
+    // runners but 1 on 2-core machines).
+    center.setResourceProfileLimit( sicnu::ProviderResourceProfile::InProcessThread, 3 );
     center.setMemoryLimitMb( 0 ); // disabled
 
     std::atomic<unsigned int> fakeRss{ 999999 }; // would block if the gate were on
@@ -999,6 +1010,11 @@ TEST_CASE( "TaskCenter - memory limit 0 keeps the gate open under batch load",
     auto &center = sicnu::TaskCenter::instance();
     center.resetResourceProfileLimits();
     center.setGlobalConcurrencyLimit( 8 );
+    // resetResourceProfileLimits() clears per-profile caps, so the InProcessThread
+    // profile falls back to hardware_concurrency()-1 (3 on the 4-core CI runner).
+    // Raise it explicitly so the global limit is the binding constraint, making
+    // the assertion machine-independent.
+    center.setResourceProfileLimit( sicnu::ProviderResourceProfile::InProcessThread, 8 );
     center.setMemoryLimitMb( 0 ); // gate disabled
 
     std::atomic<unsigned int> fakeRss{ 999999 }; // would block if the gate were on

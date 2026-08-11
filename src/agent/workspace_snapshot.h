@@ -13,7 +13,7 @@ namespace sicnu::data
 class DataManager;
 }
 
-class ActiveViewHost;
+class QgsMapCanvas;
 
 namespace sicnu::agent
 {
@@ -78,7 +78,9 @@ struct WorkspaceSnapshot
     QList<DataAssetInfo> assets;
     MapViewSnapshot mapView;
 
-    static WorkspaceSnapshot capture( data::DataManager *dataManager, ActiveViewHost *viewHost = nullptr );
+    static WorkspaceSnapshot capture( data::DataManager *dataManager,
+                                      QgsMapCanvas *canvas = nullptr,
+                                      const QString &activeLayerName = {} );
 
     QString toSystemPromptHeader() const;
 };

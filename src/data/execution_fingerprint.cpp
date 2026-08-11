@@ -127,8 +127,12 @@ void ExecutionResultCache::store( const ExecutionFingerprint &fp, const AssetId 
     it->lastUsedTick = ++m_clock;
     return;
   }
-  evictIfNeededLocked();
+  // Insert first, then evict: evicting before the insert leaves the cache
+  // permanently at maxEntries + 1 once full (the loop never runs at exactly
+  // capacity). The fresh entry always carries the largest lastUsedTick, so the
+  // LRU scan cannot evict it.
   m_entries.insert( fp.digest, Entry{ outputAssetId, ++m_clock } );
+  evictIfNeededLocked();
 }
 
 void ExecutionResultCache::evictIfNeededLocked()

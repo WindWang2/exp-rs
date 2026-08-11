@@ -1,6 +1,5 @@
 // src/agent/agent_copilot_dock_widget.cpp
 #include "agent_copilot_dock_widget.h"
-#include "active_view_host.h"
 #include "llm_settings_dialog.h"
 #include "workspace_snapshot.h"
 
@@ -147,10 +146,10 @@ AgentCopilotDockWidget::AgentCopilotDockWidget( QWidget *parent )
            this, &AgentCopilotDockWidget::onTaskCenterTaskUpdated );
 }
 
-void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, ActiveViewHost *viewHost )
+void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapCanvas *canvas )
 {
   m_dataManager = dataManager;
-  m_viewHost = viewHost;
+  m_canvas = canvas;
   m_workflowExecutor.setDataManager( dataManager );
   m_toolCallDispatcher.setDataManager( dataManager );
   // Wire the agent→canvas write-back seam (ADR 0021 sibling). canvas: actions
@@ -175,14 +174,14 @@ Json::Value AgentCopilotDockWidget::handleCanvasAction( const std::string &actio
     return result;
   }
 
-  if ( !m_viewHost || !m_viewHost->mapCanvas() )
+  if ( !m_canvas )
   {
     result["status"] = "error";
     result["errorMessage"] = "No active map canvas to draw on";
     return result;
   }
 
-  QgsMapCanvas *canvas = m_viewHost->mapCanvas();
+  QgsMapCanvas *canvas = m_canvas;
   // Drawing a QgsRubberBand mutates the QGraphicsScene, which is not
   // thread-safe — canvas actions must run on the canvas's (GUI) thread.
   if ( QThread::currentThread() != canvas->thread() )
@@ -318,7 +317,12 @@ void AgentCopilotDockWidget::sendPrompt( const QString &promptText )
   appendUserMessageCard( promptText );
 
   // Build Workspace System Context
-  QString systemPrompt = WorkspaceSnapshot::capture( m_dataManager, m_viewHost ).toSystemPromptHeader();
+  QString systemPrompt = WorkspaceSnapshot::capture(
+                           m_dataManager, m_canvas,
+                           m_canvas && m_canvas->currentLayer()
+                             ? m_canvas->currentLayer()->name()
+                             : QString() )
+                           .toSystemPromptHeader();
 
   m_messageHistory = QJsonArray();
 

@@ -257,6 +257,10 @@ jobs:
         # Homebrew's bison (>= 3.8) and flex are keg-only; macOS ships bison 2.x
         # which cannot parse %define api.pure / %locations in our .yy grammars.
         # Prepend the keg-only bins so CMake's find_package(BISON) picks them up.
+        # ENABLE_TESTS=OFF keeps this tier a true cross-platform BUILD SEAM like
+        # the Windows tier: full test coverage already runs on Linux (Tier 1/2),
+        # and compiling the ~100 Catch2 test executables plus running all 1406
+        # tests pushes the macOS job past GitHub's 360-minute job cap.
         run: |
           echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
           echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
@@ -268,13 +272,10 @@ jobs:
             -DFLEX_EXECUTABLE="$(brew --prefix flex)/bin/flex" \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_LTO=OFF \
-            -DENABLE_TESTS=ON \
+            -DENABLE_TESTS=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
-      - name: Verify macOS Build & Execute CTest
-        env:
-          QT_QPA_PLATFORM: offscreen
+      - name: Verify macOS Build
         run: |
           cmake --build build-mac --parallel
-          ctest --test-dir build-mac --output-on-failure

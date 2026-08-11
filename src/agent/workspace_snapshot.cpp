@@ -3,8 +3,8 @@
 #include "data/band_role.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
-#include "active_view_host.h"
 #include <qgscontrastenhancement.h>
+#include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
 #include <qgsrasterdataprovider.h>
 #include <qgsrasterlayer.h>
@@ -119,7 +119,9 @@ MapViewSnapshot::ActiveRasterDisplay captureActiveRaster( QgsMapLayer *layer )
 
 } // namespace
 
-WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager, ActiveViewHost *viewHost )
+WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager,
+                                              QgsMapCanvas *canvas,
+                                              const QString &activeLayerName )
 {
   WorkspaceSnapshot snapshot;
 
@@ -165,10 +167,11 @@ WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager, Ac
     }
   }
 
-  if ( viewHost )
+  if ( canvas )
   {
-    snapshot.mapView.crsAuthId = viewHost->mapCanvasCrsAuthId();
-    QgsRectangle extent = viewHost->mapCanvasExtent();
+    snapshot.mapView.crsAuthId =
+      canvas->mapSettings().destinationCrs().authid();
+    QgsRectangle extent = canvas->extent();
     if ( !extent.isEmpty() && !extent.isNull() )
     {
       snapshot.mapView.extentStr = QString( "%1,%2,%3,%4" )
@@ -177,14 +180,12 @@ WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager, Ac
                                      .arg( extent.xMaximum() )
                                      .arg( extent.yMaximum() );
     }
-    snapshot.mapView.scale = viewHost->mapCanvasScale();
-    snapshot.mapView.activeLayerName = viewHost->activeLayerName();
-    // Read the active layer through the inline mapCanvas() accessor (the
-    // ActiveViewHost::activeLayer() method is out-of-line in the display library
-    // which the agent lib does not link; mapCanvas()->currentLayer() is the
-    // primary path and is already what activeLayerName() reflects).
-    QgsMapLayer *activeLayer =
-      viewHost->mapCanvas() ? viewHost->mapCanvas()->currentLayer() : nullptr;
+    snapshot.mapView.scale = canvas->scale();
+    snapshot.mapView.activeLayerName = activeLayerName;
+    // The agent consumes only QgsMapCanvas (a qgis_gui shared type it links);
+    // the canvas current-layer is the primary path ActiveViewHost::activeLayerName()
+    // mirrors, so no dependency on the app-executable ActiveViewHost class.
+    QgsMapLayer *activeLayer = canvas->currentLayer();
     snapshot.mapView.activeRaster = captureActiveRaster( activeLayer );
   }
 

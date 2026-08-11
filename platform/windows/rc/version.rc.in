@@ -1,0 +1,35 @@
+// version.rc.in — Win32 VERSIONINFO resource template
+//
+// Configured by win32_version_info() (cmake/CreateQgsVersion.cmake) with
+// @ONLY substitution for the WIN32_VI_* / CPACK_PACKAGE_VERSION_* variables.
+// File path must match cmake/CreateQgsVersion.cmake's configure_file input.
+
+#include <windows.h>
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION     @CPACK_PACKAGE_VERSION_MAJOR@,@CPACK_PACKAGE_VERSION_MINOR@,@CPACK_PACKAGE_VERSION_PATCH@,0
+ PRODUCTVERSION  @CPACK_PACKAGE_VERSION_MAJOR@,@CPACK_PACKAGE_VERSION_MINOR@,@CPACK_PACKAGE_VERSION_PATCH@,0
+ FILEFLAGSMASK   0x3fL
+ FILEFLAGS       0x0L
+ FILEOS          0x40004L
+ FILETYPE        0x1L
+ FILESUBTYPE     0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      "@WIN32_VI_COMPANY@"
+            VALUE "FileDescription",  "@WIN32_VI_DESC@"
+            VALUE "FileVersion",      "@COMPLETE_VERSION@"
+            VALUE "InternalName",     "@WIN32_VI_FILENAME@"
+            VALUE "OriginalFilename", "@WIN32_VI_FILENAME@.dll"
+            VALUE "ProductName",      "@WIN32_VI_PRODUCT@"
+            VALUE "ProductVersion",   "@COMPLETE_VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

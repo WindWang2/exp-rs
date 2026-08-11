@@ -553,7 +553,8 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     auto *agentCopilotDock = new sicnu::agent::AgentCopilotDockWidget( this );
     addDockWidget( Qt::RightDockWidgetArea, agentCopilotDock );
     if ( m_projectContext )
-        agentCopilotDock->setContext( &m_projectContext->dataManager(), m_activeViewHost.get() );
+        agentCopilotDock->setContext( &m_projectContext->dataManager(),
+                                      m_activeViewHost->mapCanvas() );
     agentCopilotDock->hide();
 
     // Committed tool-call outputs are loaded by QgisDisplayManager auto-display

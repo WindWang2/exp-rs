@@ -27,6 +27,8 @@ namespace {
 /// the holding temp dir) for the process lifetime, so tests do not depend on a
 /// committed sample raster under data/samples/. Distinct relative paths yield
 /// distinct files so the Data Manager does not dedup them by SourceKey.
+/// dem.hdr is synthesized as an ENVI pair (dem.dat + dem.hdr) so the GDAL
+/// provider's .hdr→.dat path-pair resolution runs against a real file.
 QString syntheticSample( const QString &relative )
 {
   static QTemporaryDir dir;
@@ -36,9 +38,13 @@ QString syntheticSample( const QString &relative )
     return it.value();
 
   GDALAllRegister();
+  const bool enviPair = relative == QLatin1String( "dem.hdr" );
+  // ENVI driver writes dem.dat + dem.hdr together; return the .hdr path so the
+  // data manager's path-pair rewrite (hdr → dat) is exercised end to end.
   const QString path = dir.path() + QLatin1Char( '/' ) +
-                       QString::number( cache.size() ) + QStringLiteral( ".tif" );
-  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+                       ( enviPair ? QStringLiteral( "dem.dat" )
+                                  : QString::number( cache.size() ) + QStringLiteral( ".tif" ) );
+  GDALDriverH driver = GDALGetDriverByName( enviPair ? "ENVI" : "GTiff" );
   REQUIRE( driver != nullptr );
   constexpr int W = 16, H = 16;
   GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr );
@@ -53,8 +59,8 @@ QString syntheticSample( const QString &relative )
   for ( int row = 0; row < H; ++row )
     GDALRasterIO( band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0 );
   GDALClose( ds );
-  cache.insert( relative, path );
-  return path;
+  cache.insert( relative, enviPair ? dir.path() + QStringLiteral( "/dem.hdr" ) : path );
+  return enviPair ? dir.path() + QStringLiteral( "/dem.hdr" ) : path;
 }
 
 /// Resolve a fixture path relative to this source file (tests/ -> ../data).
@@ -65,7 +71,8 @@ QString syntheticSample( const QString &relative )
 QString fixturePath( const QString &relative )
 {
   if ( relative.startsWith( QLatin1String( "samples/" ) ) ||
-       relative == QLatin1String( "phr_xs.tif" ) )
+       relative == QLatin1String( "phr_xs.tif" ) ||
+       relative == QLatin1String( "dem.hdr" ) )
   {
     return syntheticSample( relative );
   }

@@ -12,6 +12,7 @@
 #include <QMap>
 
 #include <vector>
+#include <cmath>
 #include <gdal.h>
 #include <cpl_conv.h>
 
@@ -28,10 +29,11 @@
 
 namespace {
 
-// Synthesise a small GeoTIFF per distinct sample `name` and cache it for the
-// process lifetime, so the test does not depend on committed sample rasters
-// under data/samples/. Returns a real on-disk path so QgsRasterLayer can open
-// it; multi-band variants are produced for the Landsat sample.
+// Synthesise a small GeoTIFF (or ENVI pair for CCD1.dat) per distinct sample
+// `name` and cache it for the process lifetime, so the test does not depend on
+// committed sample rasters under data/samples/. Returns a real on-disk path so
+// QgsRasterLayer can open it; multi-band variants are produced for the Landsat
+// sample and the 3-band CCD1 product.
 QString syntheticSample( const QString &name )
 {
     static QTemporaryDir dir;
@@ -41,13 +43,18 @@ QString syntheticSample( const QString &name )
         return it.value();
 
     GDALAllRegister();
+    // CCD1 is an ENVI product (.dat + .hdr pair); the GDAL ENVI driver writes
+    // the .hdr automatically when the dataset is created with a .dat name.
+    const bool ccd1 = name == QLatin1String( "CCD1.dat" );
     const QString path = dir.path() + QLatin1Char('/') +
-                         QString::number(cache.size()) + QStringLiteral(".tif");
-    GDALDriverH driver = GDALGetDriverByName("GTiff");
+                         ( ccd1 ? QStringLiteral( "CCD1.dat" )
+                                : QString::number( cache.size() ) + QStringLiteral( ".tif" ) );
+    GDALDriverH driver = GDALGetDriverByName( ccd1 ? "ENVI" : "GTiff" );
     REQUIRE(driver != nullptr);
     // landsat_sample.tif is multiband in production; mimic 7 bands so band-based
-    // tests exercise multiband paths. Others default to single band.
-    const int nBands = name.contains(QLatin1String("landsat")) ? 7 : 1;
+    // tests exercise multiband paths. CCD1 is a 3-band change-detection product.
+    // Others default to single band.
+    const int nBands = ccd1 ? 3 : ( name.contains(QLatin1String("landsat")) ? 7 : 1 );
     constexpr int W = 16, H = 16;
     GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(), W, H, nBands, GDT_Float32, nullptr);
     REQUIRE(ds != nullptr);
@@ -56,16 +63,35 @@ QString syntheticSample( const QString &name )
     GDALSetProjection(
         ds, "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],"
             "PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]");
-    // Per-band gradient over a 0..255 range so each band has real min/max and a
-    // midpoint near 128 (the stretch widget tests rely on a non-degenerate
-    // distribution). Bands are offset from each other so band-specific stats
-    // differ, mirroring real multispectral imagery.
     for (int b = 1; b <= nBands; ++b) {
         GDALRasterBandH band = GDALGetRasterBand(ds, b);
         std::vector<float> line(W);
         for (int row = 0; row < H; ++row) {
             for (int col = 0; col < W; ++col)
-                line[col] = static_cast<float>((row * W + col) % 256);
+            {
+                if ( ccd1 )
+                {
+                    // Right-skewed low-DN distribution (deterministic
+                    // exponential, mean 27) so the CCD1 stretch checks hold:
+                    // 2% cumulative-clip maximum ≈ 98th percentile ≈ 106 < 200,
+                    // two-sigma maximum = mean + 2σ = 81 ∈ (70, 90), and the
+                    // histogram is far from uniform so equalization differs
+                    // from the linear stretch.
+                    const double u =
+                        std::fmod( ( row * W + col ) * 0.6180339887498949 + b, 1.0 );
+                    const double v = -27.0 * std::log( 1.0 - u );
+                    line[col] = static_cast<float>( std::min( 255.0, v ) );
+                }
+                else
+                {
+                    // Per-band gradient over a 0..255 range so each band has
+                    // real min/max and a midpoint near 128 (the stretch widget
+                    // tests rely on a non-degenerate distribution). Bands are
+                    // offset from each other so band-specific stats differ,
+                    // mirroring real multispectral imagery.
+                    line[col] = static_cast<float>((row * W + col) % 256);
+                }
+            }
             GDALRasterIO(band, GF_Write, 0, row, W, 1, line.data(), W, 1, GDT_Float32, 0, 0);
         }
     }
@@ -77,10 +103,11 @@ QString syntheticSample( const QString &name )
 QString samplePath( const char *name )
 {
     const QString qname = QString::fromUtf8( name );
-    // Committed sample rasters (dem/landsat) are no longer in VCS — synthesise
-    // them. CCD1.dat remains an optional local-only fixture resolved by path.
+    // Committed sample rasters (dem/landsat/CCD1) are no longer in VCS —
+    // synthesise them all.
     if ( qname == QLatin1String( "dem_sample.tif" ) ||
-         qname == QLatin1String( "landsat_sample.tif" ) )
+         qname == QLatin1String( "landsat_sample.tif" ) ||
+         qname == QLatin1String( "CCD1.dat" ) )
     {
         return syntheticSample( qname );
     }
