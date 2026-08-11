@@ -1438,6 +1438,64 @@ bool stackToGeoTiff(const ProductInfo& product,
                             QByteArray::number(product.modisTileV).constData(), nullptr);
     }
 
+    // Radiometric state of the stacked product (P0): change detection and
+    // radiometric pipelines refuse to compare rasters in incompatible physical
+    // states. Recording the state at import time closes the gap where imported
+    // products silently bypassed that protection. Only written when confidently
+    // known from the product type/level; unknown products stay unlabelled.
+    const char *importedState = nullptr;
+    if ( product.type == ProductType::Landsat )
+    {
+        // stackToGeoTiff copies band pixels verbatim (no gain/bias applied):
+        // Collection 1/2 Level-1 (L1TP/L1GT/L1GS) products deliver DN; only
+        // Level-2 (surface reflectance) products are pre-calibrated.
+        importedState = product.processingLevel.startsWith( QLatin1String( "L2" ), Qt::CaseInsensitive )
+                            ? kRadiometricStateSurfaceReflectance
+                            : kRadiometricStateDigitalNumber;
+    }
+    else if ( product.type == ProductType::Sentinel2 )
+    {
+        importedState = ( product.processingLevel.compare( QLatin1String( "L2A" ), Qt::CaseInsensitive ) == 0 )
+                            ? kRadiometricStateSurfaceReflectance
+                            : kRadiometricStateToaReflectance;
+    }
+    else if ( product.type == ProductType::Modis )
+    {
+        const QString pid = product.productId;
+        if ( pid.contains( QLatin1String( "MOD11" ), Qt::CaseInsensitive )
+             || pid.contains( QLatin1String( "MYD11" ), Qt::CaseInsensitive ) )
+        {
+            importedState = kRadiometricStateBrightnessTemperature;
+        }
+        else if ( pid.contains( QLatin1String( "MOD09" ), Qt::CaseInsensitive )
+                  || pid.contains( QLatin1String( "MYD09" ), Qt::CaseInsensitive ) )
+        {
+            importedState = kRadiometricStateSurfaceReflectance;
+        }
+        else if ( pid.contains( QLatin1String( "MOD13" ), Qt::CaseInsensitive )
+                  || pid.contains( QLatin1String( "MYD13" ), Qt::CaseInsensitive ) )
+        {
+            // MOD13/MYD13 are vegetation-index products (NDVI/EVI values),
+            // not reflectance — mark them as non-reflectance data so they are
+            // never compared against reflectance states.
+            importedState = kRadiometricStateDigitalNumber;
+        }
+        else if ( pid.contains( QLatin1String( "MOD02" ), Qt::CaseInsensitive )
+                  || pid.contains( QLatin1String( "MYD02" ), Qt::CaseInsensitive ) )
+        {
+            // MOD02/MYD02 calibrated radiance products.
+            importedState = kRadiometricStateRadiance;
+        }
+        else
+        {
+            // Non-optical / uncertain MODIS products: leave unlabelled rather
+            // than assert a physical state we cannot verify.
+            importedState = nullptr;
+        }
+    }
+    if ( importedState )
+        GDALSetMetadataItem( outDs, kRadiometricStateKey, importedState, nullptr );
+
     GDALClose(outDs);
     if (progress)
         progress(1.0, QStringLiteral("Stack complete"));

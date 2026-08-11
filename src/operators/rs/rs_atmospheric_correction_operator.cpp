@@ -108,6 +108,43 @@ Json::Value RsAtmosphericCorrectionOperator::run(const Json::Value& params,
     else if (method == "dos2") methodCode = AtmosphericCorrection::Dos2;
     else if (method == "quac") methodCode = AtmosphericCorrection::Quac;
 
+    // P1: guard against double correction. The radiometric state recorded by
+    // importers/calibration operators (SICNU_RADIOMETRIC_STATE) tells us what
+    // the input already is; correcting an already-corrected raster is a silent
+    // science error, so reject it instead of compounding it.
+    {
+        const QString inputState = SatelliteProducts::readRadiometricState(
+            QString::fromStdString(inputPath));
+        if ( !inputState.isEmpty() )
+        {
+            const bool toSurface =
+                ( methodCode == AtmosphericCorrection::Dos1
+                  || methodCode == AtmosphericCorrection::Dos2
+                  || methodCode == AtmosphericCorrection::Quac );
+            if ( toSurface
+                 && inputState == QLatin1String( SatelliteProducts::kRadiometricStateSurfaceReflectance ) )
+            {
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "Input is already surface reflectance (" + inputState.toStdString()
+                    + "); atmospheric correction would double-correct it. "
+                    "Use a raw (DN) or TOA reflectance product as input." );
+            }
+            if ( methodCode == AtmosphericCorrection::DnToRadiance
+                 && ( inputState == QLatin1String( SatelliteProducts::kRadiometricStateRadiance )
+                      || inputState == QLatin1String( SatelliteProducts::kRadiometricStateSurfaceReflectance )
+                      || inputState == QLatin1String( SatelliteProducts::kRadiometricStateToaReflectance ) ) )
+            {
+                throw RSOperatorError(
+                    ErrorCode::InvalidInputData,
+                    "Input is already " + inputState.toStdString()
+                    + "; dn_to_radiance requires a raw digital-number product." );
+            }
+            if ( !inputState.isEmpty() )
+                context.logInfo( "Input radiometric state: " + inputState.toStdString() );
+        }
+    }
+
     // Resolve radiance gain/bias from product metadata (explicit MTL/MTD path
     // or auto-detected sibling) when the caller did not supply them — the
     // "sensor metadata populates parameters automatically" workflow.

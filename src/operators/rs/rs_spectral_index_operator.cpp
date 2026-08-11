@@ -137,33 +137,56 @@ Json::Value RsSpectralIndexOperator::run(const Json::Value& params,
     int greenBand = greenExplicit;
     int blueBand = blueExplicit;
     int swirBand = swirExplicit;
+    bool anyHardcodedFallback = false;
     if (!hasNir) {
         nirBand = bandWithRole(sicnu::data::BandRole::NIR);
-        if (nirBand <= 0)
+        if (nirBand <= 0) {
             nirBand = 4;
+            anyHardcodedFallback = true;
+        }
     }
     if (!hasRed) {
         redBand = bandWithRole(sicnu::data::BandRole::Red);
-        if (redBand <= 0)
+        if (redBand <= 0) {
             redBand = 3;
+            anyHardcodedFallback = true;
+        }
     }
     if (!hasGreen) {
         greenBand = bandWithRole(sicnu::data::BandRole::Green);
-        if (greenBand <= 0)
+        if (greenBand <= 0) {
             greenBand = 2;
+            anyHardcodedFallback = true;
+        }
     }
     if (!hasBlue) {
         blueBand = bandWithRole(sicnu::data::BandRole::Blue);
-        if (blueBand <= 0)
+        if (blueBand <= 0) {
             blueBand = 1;
+            anyHardcodedFallback = true;
+        }
     }
     if (!hasSwir) {
         // NDBI/MNDWI conventionally use SWIR1; fall back to SWIR2.
         swirBand = bandWithRole(sicnu::data::BandRole::SWIR1);
         if (swirBand <= 0)
             swirBand = bandWithRole(sicnu::data::BandRole::SWIR2);
-        if (swirBand <= 0)
+        if (swirBand <= 0) {
             swirBand = 5;
+            anyHardcodedFallback = true;
+        }
+    }
+
+    // P1: never silently assume a band ordering. When the input carries no
+    // SICNU_BAND_ROLE metadata and the caller did not pick bands explicitly,
+    // say so — the hardcoded fallback assumes the common multi-spectral band
+    // order (NIR=4, Red=3, Green=2, Blue=1, SWIR1=5).
+    if (anyHardcodedFallback) {
+        context.logWarning(
+            "No semantic band roles (SICNU_BAND_ROLE) on the input and no "
+            "explicit band parameters; assuming the conventional band order "
+            "(NIR=4, Red=3, Green=2, Blue=1, SWIR1=5). Verify with "
+            "describe_dataset or pass nir/red/green/blue/swir explicitly.");
     }
 
     auto validateBand = [&](int bandNum, const std::string& label) {
