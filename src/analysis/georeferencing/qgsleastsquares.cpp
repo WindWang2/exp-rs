@@ -130,8 +130,14 @@ void QgsLeastSquares::helmert( const QVector<QgsPointXY> &sourceCoordinates, con
   const gsl_vector_view b = gsl_vector_view_array( bData, 4 );
   gsl_vector *x = gsl_vector_alloc( 4 );
   gsl_permutation *p = gsl_permutation_alloc( 4 );
+  // GSL's default error handler prints and abort()s on a singular matrix,
+  // which would kill the whole process instead of surfacing the
+  // SingularException callers expect. Install the no-op handler around the
+  // decomposition so a singular normal matrix returns a non-zero status.
+  gsl_error_handler_t *const previousHandler = gsl_set_error_handler_off();
   int s;
   const int decompStatus = gsl_linalg_LU_decomp( &M.matrix, p, &s );
+  gsl_set_error_handler( previousHandler );
   if ( decompStatus != 0 )
   {
     gsl_permutation_free( p );
