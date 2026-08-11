@@ -7,6 +7,7 @@
 
 #include <json/json.h>
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -46,15 +47,24 @@ class WorkflowRuntime
     /// Record a pure session artifact (path/value) for soft GateDef hasArtifact:*.
     void setArtifact( const std::string &sessionId, const std::string &name, const std::string &value );
 
+    /// Request cooperative cancellation of a session's current operator step
+    /// (observed via RSOperatorContext::throwIfCancelled()). Safe from any
+    /// thread; cancellation is best-effort for operators that poll the flag.
+    void requestCancel( const std::string &sessionId );
+
     void close( const std::string &sessionId );
 
   private:
     WorkflowSession *sessionMut( const std::string &sessionId );
     const WorkflowSession *sessionConst( const std::string &sessionId ) const;
 
+    /// Per-session cooperative cancellation flag (created in open()).
+    std::shared_ptr<std::atomic<bool>> cancelFlag( const std::string &sessionId );
+
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, WorkflowDefinition> m_defs;
     std::unordered_map<std::string, std::unique_ptr<WorkflowSession>> m_sessions;
+    std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> m_cancelFlags;
     int m_nextId = 1;
 };
 

@@ -47,6 +47,11 @@ void AlgorithmEngine::initialize()
     if ( !otbPath.isEmpty() )
         ToolPathManager::instance().setOtbPath( otbPath );
 
+    // Canonical Agent-facing algorithm catalog: explicitly initialize the
+    // AtomicAlgorithmRegistry (idempotent) so every surface — GUI copilot,
+    // CLI, MCP, workflow — observes the same populated catalog.
+    sicnu::processing::AtomicAlgorithmRegistry::instance().initialize();
+
     // Deep AlgorithmProviderAdapter seam: each backend declares a resource profile.
     registerProvider( std::make_shared<QgsProcessingProviderAdapter>(
       QStringLiteral( "gdal_tools" ), QStringLiteral( "GDAL Tools" ),

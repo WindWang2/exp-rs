@@ -12,6 +12,10 @@
 
 #include <QString>
 
+#include <algorithm>
+#include <cmath>
+#include <random>
+#include <unordered_set>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -56,15 +60,15 @@ Json::Value RsEndmemberExtractionOperator::metadata() const {
 }
 
 Json::Value RsEndmemberExtractionOperator::executionEstimate() const {
-    // FullRaster (default policy): the whole raster is resident. For a typical
-    // 1024x1024x4-band float32 input (16 MiB), peak RAM is the input pixel
-    // buffer (16 MiB) + per-pixel PPI extreme counts (4 MiB) + the pixel
-    // ordering vector for ranking (8 MiB); projection directions are
-    // bands-sized and negligible.
+    // MultiPassStreaming: 256x256 tile buffers (all bands BIP), the projection
+    // directions (projections x bands) and per-pixel PPI counts (4 B/px) — no
+    // full-scene pixel buffer. For a 1024x1024x4 float32 input: 4 MiB tile
+    // buffers + 1000x4x8 B directions + 4 MiB counts ≈ 9 MiB regardless of
+    // band-materialized pixel buffer.
     Json::Value est(Json::objectValue);
-    est["tileWidth"] = 0;          // full-raster: tiling not applicable
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 29360128; // ~28 MiB
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = 9437184; // ~9 MiB nominal
     return est;
 }
 
@@ -100,28 +104,185 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
     if (static_cast<size_t>(nEndmembers) > pixelCount)
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "nEndmembers exceeds the pixel count");
+    if (projections < 16)
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "projections must be at least 16");
 
-    std::vector<float> pixels(pixelCount * static_cast<size_t>(bandCount), 0.0f);
-    context.reportProgress(0.15, "Reading bands");
-    for (int b = 1; b <= bandCount; ++b)
+    // --- Streaming Pixel Purity Index (3 passes, memory-bounded). ----------
+    // Reproduces EndmemberExtraction::pixelPurityIndex deterministically (same
+    // RNG sequence, same extreme semantics) but keeps only O(tilePixels*bands
+    // + projections*bands + pixelCount*sizeof(int)) in memory instead of a
+    // full pixelCount*bands float buffer.
+    constexpr int kTile = 256;
+    const size_t maxTilePixels = static_cast<size_t>(kTile) * kTile;
+    const size_t B = static_cast<size_t>(bandCount);
+    std::vector<float> tileBip(maxTilePixels * B, 0.0f);
+    std::vector<float> bandScratch(maxTilePixels);
+
+    size_t cursor = 0; // global pixel index across tiles
+    auto streamTiles = [&](const auto &fn) {
+        for (int y = 0; y < height; y += kTile)
+        {
+            const int h = std::min(kTile, height - y);
+            for (int x = 0; x < width; x += kTile)
+            {
+                const int w = std::min(kTile, width - x);
+                const size_t n = static_cast<size_t>(w) * h;
+                context.throwIfCancelled();
+                for (int b = 0; b < bandCount; ++b)
+                {
+                    if (!ds.readBandWindow(b + 1, x, y, w, h, bandScratch.data()))
+                        throw RSOperatorError(ErrorCode::GdalError,
+                                              "Failed to read tile at (" +
+                                                  std::to_string(x) + ", " + std::to_string(y) + ")");
+                    for (size_t p = 0; p < n; ++p)
+                        tileBip[p * B + static_cast<size_t>(b)] = bandScratch[p];
+                }
+                if (!fn(tileBip.data(), n, cursor))
+                    return false;
+                cursor += n;
+            }
+        }
+        return true;
+    };
+
+    context.reportProgress(0.1, "PPI pass 1/3: mean");
+    std::vector<double> mean(B, 0.0);
+    cursor = 0;
+    streamTiles([&](const float *tile, size_t n, size_t) {
+        for (size_t p = 0; p < n; ++p)
+            for (size_t b = 0; b < B; ++b)
+                mean[b] += tile[p * B + b];
+        return true;
+    });
+    for (size_t b = 0; b < B; ++b)
+        mean[b] /= static_cast<double>(pixelCount);
+
+    // Random projection directions — identical sequence to the full-scene
+    // kernel (mt19937(42), std::normal_distribution, per-projection normalize).
+    std::mt19937 rng(42);
+    std::normal_distribution<double> normal(0.0, 1.0);
+    std::vector<std::vector<double>> dirs(static_cast<size_t>(projections),
+                                          std::vector<double>(bandCount));
+    std::vector<bool> dirValid(static_cast<size_t>(projections), true);
+    for (int proj = 0; proj < projections; ++proj)
     {
-        std::vector<float> bandData(pixelCount);
-        if (!ds.readBandData(b, bandData.data(), width, height))
-            throw RSOperatorError(ErrorCode::GdalError,
-                                  "Failed to read band " + std::to_string(b));
-        for (size_t p = 0; p < pixelCount; ++p)
-            pixels[p * static_cast<size_t>(bandCount) + (b - 1)] = bandData[p];
+        double norm = 0.0;
+        for (int b = 0; b < bandCount; ++b)
+        {
+            dirs[static_cast<size_t>(proj)][static_cast<size_t>(b)] = normal(rng);
+            norm += dirs[static_cast<size_t>(proj)][static_cast<size_t>(b)]
+                    * dirs[static_cast<size_t>(proj)][static_cast<size_t>(b)];
+        }
+        norm = std::sqrt(norm);
+        if (norm < 1e-12)
+        {
+            dirValid[static_cast<size_t>(proj)] = false;
+            continue;
+        }
+        for (double &v : dirs[static_cast<size_t>(proj)])
+            v /= norm;
     }
 
-    context.reportProgress(0.45, "Running Pixel Purity Index");
-    context.throwIfCancelled();
+    context.reportProgress(0.45, "PPI pass 2/3: projection extremes");
+    std::vector<size_t> minP(static_cast<size_t>(projections), 0);
+    std::vector<size_t> maxP(static_cast<size_t>(projections), 0);
+    std::vector<double> minV(static_cast<size_t>(projections), 0.0);
+    std::vector<double> maxV(static_cast<size_t>(projections), 0.0);
+    bool firstPixel = true;
+    cursor = 0;
+    streamTiles([&](const float *tile, size_t n, size_t base) {
+        for (size_t p = 0; p < n; ++p)
+        {
+            const float *spectrum = tile + p * B;
+            for (int proj = 0; proj < projections; ++proj)
+            {
+                if (!dirValid[static_cast<size_t>(proj)])
+                    continue;
+                double v = 0.0;
+                for (int b = 0; b < bandCount; ++b)
+                    v += dirs[static_cast<size_t>(proj)][static_cast<size_t>(b)]
+                         * (static_cast<double>(spectrum[b]) - mean[static_cast<size_t>(b)]);
+                if (firstPixel)
+                {
+                    minV[static_cast<size_t>(proj)] = v;
+                    maxV[static_cast<size_t>(proj)] = v;
+                    minP[static_cast<size_t>(proj)] = 0;
+                    maxP[static_cast<size_t>(proj)] = 0;
+                }
+                else
+                {
+                    if (v < minV[static_cast<size_t>(proj)])
+                    {
+                        minV[static_cast<size_t>(proj)] = v;
+                        minP[static_cast<size_t>(proj)] = base + p;
+                    }
+                    if (v > maxV[static_cast<size_t>(proj)])
+                    {
+                        maxV[static_cast<size_t>(proj)] = v;
+                        maxP[static_cast<size_t>(proj)] = base + p;
+                    }
+                }
+            }
+            firstPixel = false;
+        }
+        return true;
+    });
 
+    // Tally the extreme hits (the PPI counts array — O(pixels) ints).
+    std::vector<int> counts(pixelCount, 0);
+    for (int proj = 0; proj < projections; ++proj)
+    {
+        if (!dirValid[static_cast<size_t>(proj)])
+            continue;
+        ++counts[static_cast<size_t>(minP[static_cast<size_t>(proj)])];
+        ++counts[static_cast<size_t>(maxP[static_cast<size_t>(proj)])];
+    }
+
+    // Rank by PPI count, tie-broken by index for determinism.
+    std::vector<size_t> order(pixelCount);
+    for (size_t i = 0; i < pixelCount; ++i)
+        order[i] = i;
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        if (counts[a] != counts[b])
+            return counts[a] > counts[b];
+        return a < b;
+    });
+
+    context.reportProgress(0.8, "PPI pass 3/3: extracting endmembers");
     EndmemberExtraction::EndmemberResult result;
-    QString error;
-    if (!EndmemberExtraction::pixelPurityIndex(pixels.data(), pixelCount, bandCount,
-                                               nEndmembers, projections, &result, &error))
-        throw RSOperatorError(ErrorCode::ComputationError,
-                              error.isEmpty() ? "Endmember extraction failed" : error.toStdString());
+    result.endmembers.resize(static_cast<size_t>(nEndmembers) * bandCount);
+    result.endmemberIndices.resize(nEndmembers);
+    result.ppiCounts = std::move(counts);
+    {
+        std::unordered_set<int> chosen;
+        for (int e = 0; e < nEndmembers; ++e)
+        {
+            result.endmemberIndices[static_cast<size_t>(e)] =
+                static_cast<int>(order[static_cast<size_t>(e)]);
+            chosen.insert(static_cast<int>(order[static_cast<size_t>(e)]));
+        }
+        cursor = 0;
+        streamTiles([&](const float *tile, size_t n, size_t base) {
+            for (size_t p = 0; p < n; ++p)
+            {
+                const int idx = static_cast<int>(base + p);
+                if (chosen.count(idx) == 0)
+                    continue;
+                const float *spectrum = tile + p * B;
+                for (int e = 0; e < nEndmembers; ++e)
+                {
+                    if (result.endmemberIndices[static_cast<size_t>(e)] == idx)
+                    {
+                        for (int b = 0; b < bandCount; ++b)
+                            result.endmembers[static_cast<size_t>(e) * bandCount + b] = spectrum[b];
+                        break;
+                    }
+                }
+            }
+            return true;
+        });
+    }
 
     ds.close();
     context.reportProgress(1.0, "Endmember extraction complete");
@@ -140,10 +301,10 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
     for (int index : result.endmemberIndices)
         indices.append(index);
     json["indices"] = indices;
-    Json::Value counts(Json::arrayValue);
+    Json::Value countsJson(Json::arrayValue);
     for (int c : result.ppiCounts)
-        counts.append(c);
-    json["ppiCounts"] = counts;
+        countsJson.append(c);
+    json["ppiCounts"] = countsJson;
     return json;
 }
 

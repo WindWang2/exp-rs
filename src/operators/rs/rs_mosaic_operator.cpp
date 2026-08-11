@@ -32,6 +32,8 @@ struct RasterTile {
     std::array<double, 6> geotransform{};
     QString projection;
     std::vector<float> data;
+    /// Band-1 NoData value (NaN when the band has none).
+    float nodata = std::numeric_limits<float>::quiet_NaN();
 };
 
 } // namespace
@@ -126,6 +128,14 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
             throw RSOperatorError(ErrorCode::InvalidInputData, "Invalid dimensions: " + path);
         }
 
+        // Propagate the input's real NoData value (if any) into the mosaic
+        // merge so numeric NoData pixels are NOT blended as valid data. NaN
+        // (no declared NoData) keeps the previous behavior.
+        bool hasNodata = false;
+        const double nd = ds.bandNoDataValue(1, &hasNodata);
+        tile.nodata = hasNodata ? static_cast<float>(nd)
+                                : std::numeric_limits<float>::quiet_NaN();
+
         const size_t n = static_cast<size_t>(tile.width) * static_cast<size_t>(tile.height);
         tile.data.resize(n);
         if (!ds.readBandData(1, tile.data.data(), tile.width, tile.height)) {
@@ -155,6 +165,28 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
     const double refPixelH = tiles[0].geotransform[5];
     if (std::abs(refPixelW) < 1e-15 || std::abs(refPixelH) < 1e-15) {
         throw RSOperatorError(ErrorCode::InvalidInputData, "Invalid pixel size on first input");
+    }
+
+    // Pixel-size consistency (P0): mosaicking rasters with different pixel
+    // sizes silently misaligns the union grid. Reject mismatched inputs with
+    // an actionable error instead of producing offset/dirty data.
+    const double kPixelTol = 1e-6; // relative tolerance
+    for (int i = 1; i < inputCount; ++i) {
+        const auto& gt = tiles[i].geotransform;
+        const double pw = std::abs(gt[1]);
+        const double ph = std::abs(gt[5]);
+        const bool sizeMismatch =
+            (std::abs(pw - std::abs(refPixelW)) > kPixelTol * std::abs(refPixelW))
+            || (std::abs(ph - std::abs(refPixelH)) > kPixelTol * std::abs(refPixelH));
+        if (sizeMismatch) {
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "Pixel size mismatch between " + tiles[0].path + " ("
+                    + std::to_string(std::abs(refPixelW)) + " x "
+                    + std::to_string(std::abs(refPixelH)) + ") and " + tiles[i].path + " ("
+                    + std::to_string(pw) + " x " + std::to_string(ph)
+                    + "); resample the inputs to a common resolution before mosaicking");
+        }
     }
 
     for (const auto& t : tiles) {
@@ -201,7 +233,7 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
             std::round((gt[0] - unionMinX) / std::abs(refPixelW)));
         sources[i].offsetY = static_cast<size_t>(
             std::round((unionMaxY - gt[3]) / std::abs(refPixelH)));
-        sources[i].nodata = std::numeric_limits<float>::quiet_NaN();
+        sources[i].nodata = tiles[i].nodata;
     }
 
     context.reportProgress(0.6, "Merging mosaic");

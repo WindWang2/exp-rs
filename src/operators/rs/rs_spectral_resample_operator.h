@@ -33,6 +33,11 @@ public:
         return "Resample spectra onto a target wavelength grid by linear interpolation.";
     }
 
+    // Tile-streaming: LUT precomputed once from the wavelength grids, then a
+    // single 256x256-tile pass reads source bands and writes target bands with
+    // O(tilePixels * (srcBands + dstBands)) working set.
+    RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::Streaming; }
+
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;

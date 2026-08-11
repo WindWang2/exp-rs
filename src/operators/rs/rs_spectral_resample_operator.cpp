@@ -12,6 +12,11 @@
 
 #include <QString>
 
+#include <gdal.h>
+
+#include <algorithm>
+#include <cstdio>
+#include <limits>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -84,14 +89,15 @@ Json::Value RsSpectralResampleOperator::metadata() const {
 }
 
 Json::Value RsSpectralResampleOperator::executionEstimate() const {
-    // FullRaster (base default): no preferred tile. Peak holds the pixel-major
-    // input buffer (all source bands), one transient band read buffer, and all
-    // output bands; typical 1024x1024 4->4 band float32 (~4 MiB/band):
-    // 16 (input) + 4 (read) + 16 (output) = ~36 MiB.
+    // Tile-streaming: single pass over 256x256 tiles holding all source bands
+    // BIP + all target bands per tile. O(tilePixels * (srcBands + dstBands)),
+    // independent of the raster dimensions. Nominal 224->224 bands:
     Json::Value est(Json::objectValue);
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 37748736;
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    // 2 x (256x256 x 224 bands x 4 B) tile buffers ≈ 117 MiB for a 224-band
+    // imaging spectrometer; scales with tilePixels*bands, not width*height*bands.
+    est["estimatedRamBytes"] = Json::Value::UInt64( 2ULL * 256ULL * 256ULL * 224ULL * 4ULL );
     return est;
 }
 
@@ -156,46 +162,141 @@ Json::Value RsSpectralResampleOperator::run(const Json::Value& params,
     context.logInfo("Spectral resampling: " + std::to_string(bandCount) +
                     " source bands -> " + std::to_string(targetWavelengths.size()) +
                     " target bands");
-    context.reportProgress(0.15, "Reading bands");
+    context.reportProgress(0.1, "Building resampling LUT");
 
-    const size_t pixelCount = static_cast<size_t>(width) * height;
-    std::vector<float> pixels(pixelCount * static_cast<size_t>(bandCount), 0.0f);
-    for (int b = 1; b <= bandCount; ++b)
+    // --- Precompute the interpolation LUT once (perf: the per-pixel bracket
+    // scan becomes a direct weighted dot product). -------------------------
+    // For each target band: (srcLo, frac) with srcLo = bracketing lower source
+    // index; outOfRange marks targets outside the source range (output NaN).
+    // Matches SpectralResampling::resampleSpectrum semantics exactly.
+    for (int i = 1; i < bandCount; ++i)
     {
-        std::vector<float> bandData(pixelCount);
-        if (!ds.readBandData(b, bandData.data(), width, height))
-            throw RSOperatorError(ErrorCode::GdalError,
-                                  "Failed to read band " + std::to_string(b));
-        for (size_t p = 0; p < pixelCount; ++p)
-            pixels[p * static_cast<size_t>(bandCount) + (b - 1)] = bandData[p];
+        if (sourceWavelengths[i] <= sourceWavelengths[i - 1])
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "sourceWavelengths must be strictly increasing");
     }
-
-    context.reportProgress(0.45, "Resampling");
-    context.throwIfCancelled();
-
     const int dstBands = static_cast<int>(targetWavelengths.size());
-    std::vector<std::vector<float>> outBands(dstBands, std::vector<float>(pixelCount));
-    std::vector<float> outSpectrum(dstBands);
-    for (size_t p = 0; p < pixelCount; ++p)
+    struct LutEntry { int srcLo = 0; float frac = 0.0f; bool outOfRange = true; };
+    std::vector<LutEntry> lut(static_cast<size_t>(dstBands));
+    for (int t = 0; t < dstBands; ++t)
     {
-        const float* spectrum = pixels.data() + p * static_cast<size_t>(bandCount);
-        if (!SpectralResampling::resampleSpectrum(
-                spectrum, sourceWavelengths.data(), bandCount,
-                targetWavelengths.data(), dstBands, outSpectrum.data()))
-            throw RSOperatorError(ErrorCode::ComputationError,
-                                  "Spectral resampling kernel failed");
-        for (int t = 0; t < dstBands; ++t)
-            outBands[t][p] = outSpectrum[t];
+        const float target = targetWavelengths[t];
+        LutEntry e;
+        e.outOfRange = (target < sourceWavelengths[0] || target > sourceWavelengths[bandCount - 1]);
+        if (!e.outOfRange)
+        {
+            int i = 1;
+            while (i < bandCount && sourceWavelengths[i] < target)
+                ++i;
+            if (i >= bandCount)
+            {
+                e.srcLo = bandCount - 1;
+                e.frac = 0.0f;
+            }
+            else
+            {
+                const float w0 = sourceWavelengths[i - 1];
+                const float w1 = sourceWavelengths[i];
+                e.srcLo = i - 1;
+                e.frac = (w1 == w0) ? 0.0f : (target - w0) / (w1 - w0);
+            }
+        }
+        lut[static_cast<size_t>(t)] = e;
     }
 
-    context.reportProgress(0.75, "Writing output");
+    // --- Single streaming pass over 256x256 tiles. -------------------------
+    constexpr int kTile = 256;
+    const size_t maxTilePixels = static_cast<size_t>(kTile) * kTile;
+    const size_t B = static_cast<size_t>(bandCount);
+    const size_t D = static_cast<size_t>(dstBands);
+    std::vector<float> tileBip(maxTilePixels * B, 0.0f);
+    std::vector<float> tileOut(maxTilePixels * D, 0.0f);
+    std::vector<float> bandScratch(maxTilePixels);
+    std::vector<float> bandTile(maxTilePixels);
 
-    QString writeError;
-    if (!writeGdalOutput(QString::fromStdString(outputPath), width, height, outBands,
-                         ds.geoTransform(), ds.projection(), &writeError))
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const size_t pixelCount = static_cast<size_t>(width) * height;
+
+    QString outErr;
+    GDALDatasetH outDs = createOutputTiff(QString::fromStdString(outputPath), width, height,
+                                          dstBands, static_cast<int>(GDT_Float32),
+                                          ds.geoTransform(), ds.projection(), &outErr);
+    if (!outDs)
         throw RSOperatorError(ErrorCode::FileNotWritable,
-                              "Failed to write resampled raster: " + writeError.toStdString());
+                              "Failed to create resampled raster: " + outErr.toStdString());
 
+    for (int y = 0; y < height; y += kTile)
+    {
+        const int h = std::min(kTile, height - y);
+        for (int x = 0; x < width; x += kTile)
+        {
+            const int w = std::min(kTile, width - x);
+            const size_t n = static_cast<size_t>(w) * h;
+            context.throwIfCancelled();
+            context.reportProgress(0.1 + 0.8 * (static_cast<double>(y) * width + x) / pixelCount,
+                                   "Resampling tiles");
+
+            // Read the tile's source bands into BIP layout.
+            for (int b = 0; b < bandCount; ++b)
+            {
+                if (!ds.readBandWindow(b + 1, x, y, w, h, bandScratch.data()))
+                {
+                    GDALClose(outDs);
+                    throw RSOperatorError(ErrorCode::GdalError,
+                                          "Failed to read input tile at (" +
+                                              std::to_string(x) + ", " + std::to_string(y) + ")");
+                }
+                for (size_t p = 0; p < n; ++p)
+                    tileBip[p * B + static_cast<size_t>(b)] = bandScratch[p];
+            }
+
+            // Apply the LUT: out_t = src_lo + frac * (src_hi - src_lo).
+            for (size_t p = 0; p < n; ++p)
+            {
+                const float* spectrum = tileBip.data() + p * B;
+                float* outSpectrum = tileOut.data() + p * D;
+                for (int t = 0; t < dstBands; ++t)
+                {
+                    const LutEntry& e = lut[static_cast<size_t>(t)];
+                    if (e.outOfRange)
+                    {
+                        outSpectrum[t] = nan;
+                        continue;
+                    }
+                    const float lo = spectrum[e.srcLo];
+                    const float hi = (e.srcLo + 1 < bandCount) ? spectrum[e.srcLo + 1] : lo;
+                    outSpectrum[t] = lo + e.frac * (hi - lo);
+                }
+            }
+
+            // Write each target band's tile (bandTile hoisted outside the loop).
+            for (int t = 0; t < dstBands; ++t)
+            {
+                for (size_t p = 0; p < n; ++p)
+                    bandTile[p] = tileOut[p * D + static_cast<size_t>(t)];
+                GDALRasterBandH outBand = GDALGetRasterBand(outDs, t + 1);
+                if (GDALRasterIO(outBand, GF_Write, x, y, w, h, bandTile.data(),
+                                 w, h, GDT_Float32, 0, 0) != CE_None)
+                {
+                    GDALClose(outDs);
+                    throw RSOperatorError(ErrorCode::FileNotWritable,
+                                          "Failed to write resampled tile at (" +
+                                              std::to_string(x) + ", " + std::to_string(y) + ")");
+                }
+            }
+        }
+    }
+
+    // Record target wavelengths on the output bands (spectral-library and
+    // cross-sensor workflows consume them downstream).
+    for (int t = 0; t < dstBands; ++t)
+    {
+        char meta[64];
+        std::snprintf(meta, sizeof(meta), "%g", static_cast<double>(targetWavelengths[t]));
+        GDALSetMetadataItem(GDALGetRasterBand(outDs, t + 1), "WAVELENGTH", meta, nullptr);
+        GDALSetMetadataItem(GDALGetRasterBand(outDs, t + 1), "WAVELENGTH_UNITS", "nm", nullptr);
+    }
+    GDALClose(outDs);
     ds.close();
     context.reportProgress(1.0, "Spectral resampling complete");
 

@@ -192,6 +192,13 @@ AlgorithmDescriptor ProviderAlgorithmAdapter::descriptor() const
   return mDesc;
 }
 
+Json::Value ProviderAlgorithmAdapter::estimateExecution( const Json::Value & /*params*/ ) const
+{
+  // No parameter-derived estimate for provider algorithms: expose the static
+  // typical-input estimate (empty object = unknown/auto).
+  return mDesc.agentMetadata.execution;
+}
+
 Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, ProgressCallback progressCb,
                                                std::function<bool()> isCancelledFn )
 {

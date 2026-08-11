@@ -3,6 +3,7 @@
 
 #include "atomic_algorithm_registry.h"
 #include "json_params_converter.h"
+#include "schema_validator.h"
 #include "task_center.h"
 
 #include "output_committer.h"
@@ -28,6 +29,23 @@ bool parseJsonString( const std::string &jsonStr, Json::Value &out )
   return reader->parse( jsonStr.c_str(), jsonStr.c_str() + jsonStr.size(), &out, &errs );
 }
 
+/// Maps an output file suffix to the asset kind the committer validates and
+/// registers. Kept in sync with the descriptor outputs: statistics-only and
+/// multi-output operators must not be committed as raster assets (their CSV /
+/// vector outputs open structurally as OGR datasets).
+sicnu::data::AssetKind assetKindForSuffix( const QString &suffix )
+{
+  const QString s = suffix.toLower();
+  if ( s == QStringLiteral( "shp" ) || s == QStringLiteral( "geojson" )
+       || s == QStringLiteral( "gpkg" ) || s == QStringLiteral( "kml" )
+       || s == QStringLiteral( "csv" ) || s == QStringLiteral( "tsv" )
+       || s == QStringLiteral( "json" ) || s == QStringLiteral( "xml" ) )
+  {
+    return sicnu::data::AssetKind::Vector;
+  }
+  return sicnu::data::AssetKind::Raster;
+}
+
 } // namespace
 
 ToolCallDispatcher::ToolCallDispatcher( SubmissionSink sink, CompletionWatcher watcher )
@@ -51,7 +69,7 @@ void ToolCallDispatcher::setDataManager( sicnu::data::DataManager *dataManager )
                                  + outInfo.completeBaseName() + QStringLiteral( "_committed." ) + suffix;
 
       sicnu::AlgorithmOutputRequest request;
-      request.kind = sicnu::data::AssetKind::Raster;
+      request.kind = assetKindForSuffix( suffix );
       request.tempPath = info.outputLayerPath;
       request.stablePath = stablePath;
       request.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
@@ -218,18 +236,91 @@ QString ToolCallDispatcher::rejectionReasonFor( const ParsedEnvelope &parsed ) c
       .arg( QString::fromStdString( parsed.name ) );
   }
 
-  // Legacy AgentWorkflowExecutor::executeToolCall contract: reject before any
-  // submission when a descriptor-required input is missing.
+  // Shared JSON-schema validation (type / enum / range / array / shape),
+  // single implementation for every agent-facing surface. Unknown parameters
+  // are reported as warnings (not hard errors) so legacy callers that pass
+  // extra fields keep working; required/type/enum/range violations reject.
   const AlgorithmDescriptor descriptor = adapter->descriptor();
-  for ( const auto &inputPort : descriptor.inputs )
+  const ParameterValidationResult validation =
+    validateParameters( parsed.arguments, descriptor, UnknownParameterPolicy::Warn );
+  if ( !validation.ok() )
   {
-    if ( inputPort.required && !parsed.arguments.isMember( inputPort.name ) )
-    {
-      return QString( QStringLiteral( "Missing required parameter: %1" ) )
-        .arg( QString::fromStdString( inputPort.name ) );
-    }
+    return QString::fromStdString( validation.errors.front().message );
   }
   return QString();
+}
+
+Json::Value ToolCallDispatcher::validateCall( const Json::Value &envelope ) const
+{
+  Json::Value result( Json::objectValue );
+
+  const ParsedEnvelope parsed = parseEnvelope( envelope );
+  if ( !parsed.valid )
+  {
+    result["valid"] = false;
+    Json::Value errs( Json::arrayValue );
+    Json::Value err( Json::objectValue );
+    err["code"] = "malformed_envelope";
+    err["parameter"] = "";
+    err["message"] = "Tool call envelope is malformed: expected {name, parameters}, "
+                     "{function:{name, arguments}}, {name, arguments} or {name, params}.";
+    errs.append( err );
+    result["errors"] = errs;
+    result["warnings"] = Json::Value( Json::arrayValue );
+    return result;
+  }
+
+  if ( isPlanRequest( parsed ) )
+  {
+    result["valid"] = false;
+    Json::Value errs( Json::arrayValue );
+    Json::Value err( Json::objectValue );
+    err["code"] = "plan_request";
+    err["parameter"] = "steps";
+    err["message"] = "Envelope contains a 'steps' array and must be routed through plan "
+                     "approval, not dispatched as a single tool call.";
+    errs.append( err );
+    result["errors"] = errs;
+    result["warnings"] = Json::Value( Json::arrayValue );
+    return result;
+  }
+
+  // canvas: actions bypass algorithm validation — parameter shape is the
+  // handler's responsibility.
+  if ( isCanvasAction( parsed.name ) )
+  {
+    result["valid"] = true;
+    result["errors"] = Json::Value( Json::arrayValue );
+    result["warnings"] = Json::Value( Json::arrayValue );
+    return result;
+  }
+
+  const std::string algorithmId = resolveAlgorithmId( parsed.name );
+  const auto adapter = AtomicAlgorithmRegistry::instance().findAdapter( algorithmId );
+  if ( !adapter )
+  {
+    result["valid"] = false;
+    Json::Value errs( Json::arrayValue );
+    Json::Value err( Json::objectValue );
+    err["code"] = "algorithm_not_registered";
+    err["parameter"] = "";
+    err["message"] = "Algorithm not registered: " + parsed.name;
+    errs.append( err );
+    result["errors"] = errs;
+    result["warnings"] = Json::Value( Json::arrayValue );
+    return result;
+  }
+
+  const ParameterValidationResult validation =
+    validateParameters( parsed.arguments, adapter->descriptor(), UnknownParameterPolicy::Warn );
+  result["valid"] = validation.ok();
+  Json::Value errs( Json::arrayValue );
+  for ( const auto &e : validation.errors ) errs.append( e.toJson() );
+  result["errors"] = errs;
+  Json::Value warns( Json::arrayValue );
+  for ( const auto &w : validation.warnings ) warns.append( w.toJson() );
+  result["warnings"] = warns;
+  return result;
 }
 
 ToolCallClassification ToolCallDispatcher::classify( const Json::Value &envelope ) const
@@ -370,31 +461,33 @@ Json::Value ToolCallDispatcher::buildTaskResultPayload( const sicnu::AlgorithmTa
   if ( info.status == sicnu::TaskStatus::Completed )
   {
     payload["status"] = "success";
-    if ( !info.outputLayerPath.isEmpty() && payload.isObject() && !payload.isMember( "output" ) )
+    if ( !info.outputLayerPath.isEmpty() && payload.isObject() && committerHandler )
     {
-      if ( committerHandler )
+      // Always commit the produced output when a committer is wired — rs:
+      // operators report their own "output" in the result payload, but the
+      // task's output layer still needs transactional promotion to a stable
+      // asset (asset_id / lineage). The committed stable path replaces any
+      // operator-reported path so the result and the asset agree.
+      std::string committedPath;
+      std::string commitError;
+      if ( committerHandler( info, committedPath, commitError ) )
       {
-        std::string committedPath;
-        std::string commitError;
-        if ( committerHandler( info, committedPath, commitError ) )
-        {
-          payload["output"] = committedPath;
-        }
-        else
-        {
-          const std::string message = commitError.empty() ? "OutputCommitter refused the tool-call output." : commitError;
-          payload["status"] = "error";
-          payload["commitError"] = message;
-          payload["errorMessage"] = message;
-          payload["output"] = info.outputLayerPath.toStdString();
-          qWarning() << "ToolCallDispatcher: output commit failed for task" << info.taskId
-                     << "-" << QString::fromStdString( message );
-        }
+        payload["output"] = committedPath;
       }
       else
       {
+        const std::string message = commitError.empty() ? "OutputCommitter refused the tool-call output." : commitError;
+        payload["status"] = "error";
+        payload["commitError"] = message;
+        payload["errorMessage"] = message;
         payload["output"] = info.outputLayerPath.toStdString();
+        qWarning() << "ToolCallDispatcher: output commit failed for task" << info.taskId
+                   << "-" << QString::fromStdString( message );
       }
+    }
+    else if ( !info.outputLayerPath.isEmpty() && payload.isObject() && !payload.isMember( "output" ) )
+    {
+      payload["output"] = info.outputLayerPath.toStdString();
     }
   }
   else

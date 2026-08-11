@@ -5,7 +5,6 @@ add_library(sicnu_processing SHARED
 
     gdal/gdal_dataset_wrapper.cpp
     gdal/gdal_grid_compat.cpp
-    gdal/gdal_async_reader.cpp
     gdal/gdal_block_stream.cpp
     gdal/gdal_multiband_block_stream.cpp
     gdal/gdal_error_handler.cpp
@@ -37,6 +36,8 @@ add_library(sicnu_processing SHARED
     framework/input_validator.cpp
     framework/algorithm_engine.cpp
     framework/algorithm_descriptor.cpp
+    framework/schema_validator.cpp
+    framework/algorithm_preflight.cpp
     framework/algorithm_provider_adapter.h
     framework/qgs_processing_provider_adapter.cpp
     framework/qgs_processing_provider_adapter.h

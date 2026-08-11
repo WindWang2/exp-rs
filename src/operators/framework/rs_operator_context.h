@@ -8,10 +8,15 @@
 
 #include <atomic>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <string>
 
 namespace sicnu::operators {
+
+/// Cooperative cancellation predicate: returns true when cancellation has been
+/// requested (thread-safe; invoked from the operator's thread).
+using CancelFn = std::function<bool()>;
 
 /**
  * Context object passed to every RSOperator::run() call.
@@ -79,6 +84,15 @@ public:
     void setCancelFlag(std::atomic<bool>* flag);
 
     /**
+     * Sets a cooperative cancellation callback (e.g. an external JobEngine /
+     * TaskCenter cancel predicate). Polled by isCancelled()/throwIfCancelled()
+     * from the operator's thread; mutually exclusive with a flag — the flag
+     * wins when both are set. The context does not own the callback; the
+     * caller must ensure it stays valid for the duration of run().
+     */
+    void setCancelCallback(CancelFn callback);
+
+    /**
      * Returns true if cancellation has been requested.
      */
     bool isCancelled() const;
@@ -108,6 +122,7 @@ private:
     ProgressFn m_progressCallback;
     LogFn m_logCallback;
     std::atomic<bool>* m_cancelFlag = nullptr;
+    CancelFn m_cancelCallback;
     std::filesystem::path m_workDir;
     mutable std::atomic<int> m_tempCounter{0};
     mutable double m_lastProgress = -1.0;

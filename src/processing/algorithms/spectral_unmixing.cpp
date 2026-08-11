@@ -11,19 +11,23 @@ namespace SpectralUnmixing
 namespace
 {
 
-/// Solve the n x n linear system A x = b by Gaussian elimination with partial
-/// pivoting (in-place: A and b are modified). A has a ridge already added by
-/// the caller. Returns false when the system is (still) singular.
-bool solveLinearSystem( std::vector<double> &a, std::vector<double> &b, int n )
+/// Inverts the n x n matrix @a m in place (Gauss-Jordan with partial pivoting).
+/// Returns false when the matrix is singular (threshold matches the solver).
+/// The per-pixel unmixing hot loop then solves via one matrix-vector product
+/// instead of a full elimination per pixel (O(E^3) once vs O(E^3) per pixel).
+bool invertMatrixInPlace( std::vector<double> &m, int n )
 {
+    std::vector<double> inv( static_cast<size_t>( n ) * n, 0.0 );
+    for ( int i = 0; i < n; ++i )
+        inv[static_cast<size_t>( i ) * n + i] = 1.0;
+
     for ( int col = 0; col < n; ++col )
     {
-        // Partial pivot.
         int pivot = col;
-        double best = std::abs( a[static_cast<size_t>( col ) * n + col] );
+        double best = std::abs( m[static_cast<size_t>( col ) * n + col] );
         for ( int r = col + 1; r < n; ++r )
         {
-            const double v = std::abs( a[static_cast<size_t>( r ) * n + col] );
+            const double v = std::abs( m[static_cast<size_t>( r ) * n + col] );
             if ( v > best )
             {
                 best = v;
@@ -35,36 +39,39 @@ bool solveLinearSystem( std::vector<double> &a, std::vector<double> &b, int n )
         if ( pivot != col )
         {
             for ( int c = 0; c < n; ++c )
-                std::swap( a[static_cast<size_t>( pivot ) * n + c],
-                           a[static_cast<size_t>( col ) * n + c ] );
-            std::swap( b[static_cast<size_t>( pivot )], b[static_cast<size_t>( col )] );
+            {
+                std::swap( m[static_cast<size_t>( pivot ) * n + c],
+                           m[static_cast<size_t>( col ) * n + c ] );
+                std::swap( inv[static_cast<size_t>( pivot ) * n + c],
+                           inv[static_cast<size_t>( col ) * n + c ] );
+            }
         }
 
-        // Eliminate below.
-        const double diag = a[static_cast<size_t>( col ) * n + col];
-        for ( int r = col + 1; r < n; ++r )
+        const double diag = m[static_cast<size_t>( col ) * n + col];
+        for ( int c = 0; c < n; ++c )
         {
-            const double factor = a[static_cast<size_t>( r ) * n + col] / diag;
+            m[static_cast<size_t>( col ) * n + c] /= diag;
+            inv[static_cast<size_t>( col ) * n + c] /= diag;
+        }
+
+        for ( int r = 0; r < n; ++r )
+        {
+            if ( r == col )
+                continue;
+            const double factor = m[static_cast<size_t>( r ) * n + col];
             if ( factor == 0.0 )
                 continue;
-            for ( int c = col; c < n; ++c )
-                a[static_cast<size_t>( r ) * n + c] -=
-                    factor * a[static_cast<size_t>( col ) * n + c];
-            b[static_cast<size_t>( r )] -= factor * b[static_cast<size_t>( col )];
+            for ( int c = 0; c < n; ++c )
+            {
+                m[static_cast<size_t>( r ) * n + c] -=
+                    factor * m[static_cast<size_t>( col ) * n + c];
+                inv[static_cast<size_t>( r ) * n + c] -=
+                    factor * inv[static_cast<size_t>( col ) * n + c];
+            }
         }
     }
 
-    // Back substitution.
-    for ( int r = n - 1; r >= 0; --r )
-    {
-        double sum = b[static_cast<size_t>( r )];
-        for ( int c = r + 1; c < n; ++c )
-            sum -= a[static_cast<size_t>( r ) * n + c] * b[static_cast<size_t>( c )];
-        const double diag = a[static_cast<size_t>( r ) * n + r];
-        if ( std::abs( diag ) < 1e-12 )
-            return false;
-        b[static_cast<size_t>( r )] = sum / diag;
-    }
+    m.swap( inv );
     return true;
 }
 
@@ -104,8 +111,15 @@ bool unmix( const float *pixels, size_t count, int bands,
         gramTrace += gram[static_cast<size_t>( e ) * nEndmembers + e];
     const double kRidge = std::max( 1e-9, ( gramTrace / nEndmembers ) * 1e-7 );
 
+    // Precompute (G + ridge I)^-1 once: the per-pixel hot loop then solves the
+    // normal equations with a single matrix-vector product (O(E^2) per pixel
+    // instead of a full Gaussian elimination, O(E^3) per pixel).
+    std::vector<double> invGram = gram;
+    for ( int e = 0; e < nEndmembers; ++e )
+        invGram[static_cast<size_t>( e ) * nEndmembers + e] += kRidge;
+    const bool invertible = invertMatrixInPlace( invGram, nEndmembers );
+
     std::vector<double> rhs( nEndmembers, 0.0 );
-    std::vector<double> system( static_cast<size_t>( nEndmembers ) * nEndmembers, 0.0 );
     std::vector<double> abundance( nEndmembers, 0.0 );
 
     for ( size_t p = 0; p < count; ++p )
@@ -136,14 +150,8 @@ bool unmix( const float *pixels, size_t count, int bands,
             rhs[static_cast<size_t>( e )] = sum;
         }
 
-        // Solve (G + ridge I) a = rhs; the RHS vector holds the solution after
-        // the in-place back substitution.
-        system = gram;
-        for ( int e = 0; e < nEndmembers; ++e )
-            system[static_cast<size_t>( e ) * nEndmembers + e] += kRidge;
-
-        abundance = rhs;
-        if ( !solveLinearSystem( system, abundance, nEndmembers ) )
+        // Solve (G + ridge I) a = rhs via a = (G + ridge I)^-1 rhs.
+        if ( !invertible )
         {
             // Singular even with the ridge: leave abundances at zero and the
             // reconstruction error as the pixel norm.
@@ -153,6 +161,14 @@ bool unmix( const float *pixels, size_t count, int bands,
             result->reconstructionError[p] =
                 static_cast<float>( std::sqrt( normSq / bands ) );
             continue;
+        }
+        for ( int e = 0; e < nEndmembers; ++e )
+        {
+            double sum = 0.0;
+            for ( int f = 0; f < nEndmembers; ++f )
+                sum += invGram[static_cast<size_t>( e ) * nEndmembers + f]
+                       * rhs[static_cast<size_t>( f )];
+            abundance[static_cast<size_t>( e )] = sum;
         }
 
         // Clip to [0, 1] and renormalize to unit sum (approximate sum-to-one).

@@ -24,6 +24,10 @@ enum class DataType {
 std::string dataTypeToString( DataType type );
 DataType dataTypeFromString( const std::string &typeStr );
 
+/// Maps a file extension (lower-case, no dot) to a data type, e.g. "tif" →
+/// Raster, "csv" → Table, "shp"/"geojson" → Vector, "json" → Json.
+DataType dataTypeFromFileFormat( const std::string &format );
+
 struct PortDescriptor
 {
   std::string name;
@@ -33,6 +37,25 @@ struct PortDescriptor
   bool required = true;
   std::string defaultValue;
   std::vector<std::string> enumOptions;
+
+  /// Numeric range constraints (present only when hasMinimum/hasMaximum).
+  bool hasMinimum = false;
+  double minimum = 0.0;
+  bool hasMaximum = false;
+  double maximum = 0.0;
+
+  /// True when the port accepts/emits an array of items (e.g. band list).
+  bool isArray = false;
+  DataType itemType = DataType::Any;
+
+  /// Concrete output file format for produced files ("tif", "csv", "shp",
+  /// "json", ...). Empty when the port is not a produced file.
+  std::string fileFormat;
+
+  /// Optional machine-readable remote-sensing data contract ("x-rs-contract"):
+  /// dataKind / bands / gridRelation / radiometricState / categorical / noData
+  /// / crs etc. Consumed by preflight and Agent planning (not free-form prose).
+  Json::Value rsContract;
 
   Json::Value toJsonSchema() const;
 };
@@ -51,6 +74,27 @@ struct AgentMetadata
   /// Declared execution-resource estimate: tileWidth/tileHeight/
   /// estimatedRamBytes/temporaryDiskBytes (0 = unknown). Empty object = none.
   Json::Value execution;
+
+  // --- Structured planning hints (AgentMetadata 2.0, consumed by preflight) --
+  /// Same inputs ⇒ same outputs (default true for deterministic kernels).
+  bool deterministic = true;
+  /// Modifies inputs or external state beyond producing outputs.
+  bool sideEffects = false;
+  /// Safe to re-run with identical parameters without changing the result.
+  bool idempotent = false;
+  /// Complexity class hint, e.g. "O(tile)", "O(histogram)", "O(width*height)",
+  /// "O(bands^3)". Informational.
+  std::string costClass;
+  /// Safe to run on large rasters (memory policy is streaming/multipass).
+  bool largeRasterSafe = false;
+  /// Cooperative cancellation honored during execution (preflight advisory).
+  bool supportsCancellation = false;
+  /// Execution produces provenance/lineage records for its outputs.
+  bool producesProvenance = false;
+  /// When non-empty, this operator is a compatibility facade/alias whose
+  /// underlying atomic primitives are named here (comma-separated). Agents use
+  /// it to prefer composable primitives over monolithic selectors.
+  std::string facadeOf;
 
   Json::Value toJson() const;
   static AgentMetadata fromJson( const Json::Value &val );

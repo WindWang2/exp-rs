@@ -9,6 +9,7 @@
 #include "operators/framework/rs_operator.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/json_params_converter.h"
+#include "processing/framework/algorithm_preflight.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "shell/processing_job_adapter.h"
 
@@ -182,27 +183,48 @@ struct MetaToolDef {
 
 const MetaToolDef kMetaTools[] = {
     { "list_algorithms",
-      "List all available remote sensing and GIS processing algorithms.",
+      "List all available remote sensing and GIS processing algorithms (canonical "
+      "catalog: rs: operators + provider algorithms). Compact discovery layer — "
+      "id, name, group, tags, outputs, memory policy. Use get_algorithm_schema "
+      "for the full parameter schema of a specific algorithm.",
       {} },
+    { "search_algorithms",
+      "Search/filter the canonical algorithm catalog by group, tag, purpose text, "
+      "input or output type, or large-raster safety. Returns the same compact "
+      "entries as list_algorithms.",
+      { { "query", "string", "Free-text filter matched against id, name, group and purpose (case-insensitive). Empty = no text filter." },
+        { "group", "string", "Exact group filter (e.g. 'spectral', 'change detection'). Optional." },
+        { "input_type", "string", "Input data type filter (Raster/Vector/Table/Numeric/Integer/String/Boolean/Json). Optional." },
+        { "output_type", "string", "Output data type filter (Raster/Vector/Table/Numeric/Integer/String/Boolean/Json). Optional." },
+        { "large_raster_safe", "boolean", "When true, only streaming/multipass operators. Optional." } } },
     { "get_algorithm_schema",
-      "Get the detailed input parameter JSON Schema for a specific algorithm.",
-      { { "algorithm_id", "string", "Unique ID of the algorithm, e.g., 'qgis:rs_band_math'" } } },
+      "Get the detailed input parameter JSON Schema, real output ports, and agent "
+      "metadata for a specific algorithm.",
+      { { "algorithm_id", "string", "Unique ID of the algorithm, e.g., 'rs:spectral_index'" } } },
+    { "preflight_algorithm",
+      "Validate parameters and dataset compatibility WITHOUT executing: schema "
+      "validation, raster dataset probes (size/bands/CRS/radiometric state), "
+      "same-grid/CRS/band/radiometric checks, and a dynamic resource (RAM) "
+      "estimate. Use before execute_algorithm to plan a run.",
+      { { "algorithm_id", "string", "ID of the algorithm to preflight" },
+        { "parameters", "object", "Planned parameter name-value pairs" } } },
     { "execute_algorithm",
       "Asynchronously run a processing algorithm with the specified parameters.",
       { { "algorithm_id", "string", "ID of the algorithm to execute" },
         { "parameters", "object", "Parameter name-value pairs for the algorithm" } } },
     { "get_execution_status",
-      "Get progress, execution status, and results of an ongoing or completed algorithm execution.",
+      "Get progress, execution status, results, and the committed asset id of an "
+      "ongoing or completed algorithm execution.",
       { { "execution_id", "string", "The execution ID returned by execute_algorithm" } } },
     { "cancel_execution",
       "Cancel an actively running algorithm execution.",
       { { "execution_id", "string", "The execution ID of the run to cancel" } } },
     { "list_operators",
-      "List all registered RSOperator algorithms (Agent-ready kernel: rs:/opencv:/gdal:/otb:).",
+      "List all registered RSOperator algorithms (legacy Agent surface: rs:/opencv:/gdal:/otb:).",
       {} },
     { "get_operator_schema",
       "Get JSON Schema and metadata for an RSOperator (e.g. 'rs:spectral_index').",
-      { { "operator_id", "string", "Operator id, e.g. 'gdal:reproject'" } } },
+      { { "operator_id", "string", "Operator id, e.g. 'rs:spectral_index'" } } },
     { "execute_operator",
       "Asynchronously run an RSOperator with JSON parameters. Returns execution_id.",
       { { "operator_id", "string", "Operator id to execute" },
@@ -241,12 +263,31 @@ QVariantMap metaToolInputSchema(const MetaToolDef &def)
 
 /// MCP response envelope for a TaskCenter task: mcpStatusForTask shape plus
 /// the execution/algorithm identity echoed from the caller's execution id.
-/// Shared by get_execution_status and cancel_execution's terminal fallback.
-QVariantMap executionStatusResponse(const QString &executionId, const sicnu::AlgorithmTaskInfo &info)
+/// When the DataManager is available and the task completed, resolves the
+/// committed asset id (via the derivation record's task reference) so agents
+/// can continue to get_lineage(asset_id) — the execute→status→lineage loop.
+QVariantMap executionStatusResponse( sicnu::data::DataManager *dataManager,
+                                     const QString &executionId,
+                                     const sicnu::AlgorithmTaskInfo &info )
 {
     QVariantMap result = mcpStatusForTask(info);
     result[QStringLiteral("execution_id")] = executionId;
     result[QStringLiteral("algorithm_id")] = info.algorithmId;
+    if ( dataManager && info.status == sicnu::TaskStatus::Completed )
+    {
+        const QString taskRef = QString::number( info.taskId );
+        const auto snapshots = dataManager->assets();
+        for ( const auto &snapshot : snapshots )
+        {
+            const auto prov = dataManager->provenance( snapshot.id() );
+            if ( prov && prov->taskReference == taskRef )
+            {
+                result[QStringLiteral("asset_id")] = snapshot.id().toString();
+                result[QStringLiteral("asset_name")] = snapshot.displayName();
+                break;
+            }
+        }
+    }
     return result;
 }
 
@@ -385,9 +426,23 @@ void McpServer::handleRequest(const QVariantMap &request)
             {
                 resultData = handleListAlgorithms();
             }
+            else if (toolName == QStringLiteral("search_algorithms"))
+            {
+                resultData = handleSearchAlgorithms(
+                    arguments.value(QStringLiteral("query")).toString(),
+                    arguments.value(QStringLiteral("group")).toString(),
+                    arguments.value(QStringLiteral("input_type")).toString(),
+                    arguments.value(QStringLiteral("output_type")).toString(),
+                    arguments.value(QStringLiteral("large_raster_safe")).toBool());
+            }
             else if (toolName == QStringLiteral("get_algorithm_schema"))
             {
                 resultData = handleGetAlgorithmSchema(arguments.value(QStringLiteral("algorithm_id")).toString());
+            }
+            else if (toolName == QStringLiteral("preflight_algorithm"))
+            {
+                resultData = handlePreflightAlgorithm(arguments.value(QStringLiteral("algorithm_id")).toString(),
+                                                      arguments.value(QStringLiteral("parameters")).toMap());
             }
             else if (toolName == QStringLiteral("execute_algorithm"))
             {
@@ -496,29 +551,175 @@ QVariantMap McpServer::handleListAlgorithms()
     QVariantMap result;
     QVariantList algList;
 
-    QList<const QgsProcessingAlgorithm *> algs = QgsApplication::processingRegistry()->algorithms();
-    for (const QgsProcessingAlgorithm *alg : algs)
+    // Canonical Agent-facing catalog: the AtomicAlgorithmRegistry descriptors
+    // (rs: operators with real input/output ports) plus provider algorithms
+    // (gdal:/otb:/native:/qgis:) — the same sources ToolCallDispatcher resolves
+    // at execution time, so list/get/execute all speak one catalog.
+    auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
+    const auto descriptors = registry.listDescriptors();
+    for (const auto &desc : descriptors)
     {
-        if (!alg)
-            continue;
-
         QVariantMap algMap;
-        algMap[QStringLiteral("id")] = alg->id();
-        algMap[QStringLiteral("displayName")] = alg->displayName();
-        algMap[QStringLiteral("group")] = alg->group();
-        algMap[QStringLiteral("tags")] = alg->tags();
+        algMap[QStringLiteral("id")] = QString::fromStdString(desc.id);
+        algMap[QStringLiteral("displayName")] = QString::fromStdString(desc.displayName);
+        algMap[QStringLiteral("group")] = QString::fromStdString(desc.group);
+        algMap[QStringLiteral("description")] = QString::fromStdString(desc.description);
+        algMap[QStringLiteral("source")] = QStringLiteral("rs");
 
-        QVariantMap meta = alg->metadata();
-        if (!meta.isEmpty())
+        QVariantList tags;
+        for (const auto &t : desc.agentMetadata.tags)
+            tags.append(QString::fromStdString(t));
+        algMap[QStringLiteral("tags")] = tags;
+        algMap[QStringLiteral("memoryPolicy")] = QString::fromStdString(desc.agentMetadata.memoryPolicy);
+        algMap[QStringLiteral("largeRasterSafe")] = desc.agentMetadata.largeRasterSafe;
+
+        QVariantList outList;
+        for (const auto &out : desc.outputs)
         {
-            algMap[QStringLiteral("metadata")] = meta;
+            QVariantMap outMap;
+            outMap[QStringLiteral("name")] = QString::fromStdString(out.name);
+            outMap[QStringLiteral("type")] = QString::fromUtf8(sicnu::processing::dataTypeToString(out.type).c_str());
+            outList.append(outMap);
         }
+        algMap[QStringLiteral("outputs")] = outList;
 
         algList.append(algMap);
     }
 
+    // Provider algorithms reachable through the same dispatcher (findAdapter
+    // fallback): enumerate the QGIS processing registry for discovery.
+    if (QgsApplication::processingRegistry())
+    {
+        const QList<const QgsProcessingAlgorithm *> algs = QgsApplication::processingRegistry()->algorithms();
+        for (const QgsProcessingAlgorithm *alg : algs)
+        {
+            if (!alg)
+                continue;
+            const QString id = alg->id();
+            // rs: operators win when ids collide.
+            bool already = false;
+            for (const auto &entry : algList)
+            {
+                if (entry.toMap().value(QStringLiteral("id")) == id) { already = true; break; }
+            }
+            if (already)
+                continue;
+
+            QVariantMap algMap;
+            algMap[QStringLiteral("id")] = id;
+            algMap[QStringLiteral("displayName")] = alg->displayName();
+            algMap[QStringLiteral("group")] = alg->group();
+            const QString help = alg->shortHelpString();
+            algMap[QStringLiteral("description")] = help.isEmpty() ? alg->shortDescription() : help;
+            algMap[QStringLiteral("source")] = QStringLiteral("provider");
+
+            QVariantList tags;
+            const QStringList algTags = alg->tags();
+            for (const QString &t : algTags)
+                tags.append(t);
+            algMap[QStringLiteral("tags")] = tags;
+            algMap[QStringLiteral("memoryPolicy")] = QStringLiteral("unknown");
+            algMap[QStringLiteral("largeRasterSafe")] = false;
+
+            // Preserve the provider's native metadata map (purpose, help, ...)
+            // for backward compatibility with MCP clients.
+            QVariantMap providerMeta = alg->metadata();
+            if (!providerMeta.isEmpty())
+                algMap[QStringLiteral("metadata")] = providerMeta;
+
+            QVariantList outList;
+            const auto outputs = alg->outputDefinitions();
+            for (const QgsProcessingOutputDefinition *out : outputs)
+            {
+                if (!out)
+                    continue;
+                QVariantMap outMap;
+                outMap[QStringLiteral("name")] = out->name();
+                outMap[QStringLiteral("type")] = out->type();
+                outList.append(outMap);
+            }
+            algMap[QStringLiteral("outputs")] = outList;
+
+            algList.append(algMap);
+        }
+    }
+
     result[QStringLiteral("algorithms")] = algList;
+    result[QStringLiteral("count")] = static_cast<int>(algList.size());
     return result;
+}
+
+QVariantMap McpServer::handleSearchAlgorithms(const QString &query, const QString &group,
+                                              const QString &inputType, const QString &outputType,
+                                              bool largeRasterSafeOnly)
+{
+    QVariantMap result = handleListAlgorithms();
+    const QVariantList all = result.value(QStringLiteral("algorithms")).toList();
+    QVariantList filtered;
+
+    const QString needle = query.trimmed().toLower();
+    for (const QVariant &entryVar : all)
+    {
+        const QVariantMap entry = entryVar.toMap();
+
+        if (!group.isEmpty() && entry.value(QStringLiteral("group")).toString() != group)
+            continue;
+        if (largeRasterSafeOnly && !entry.value(QStringLiteral("largeRasterSafe")).toBool())
+            continue;
+
+        if (!inputType.isEmpty())
+        {
+            // Resolve the algorithm's input types via the canonical descriptor.
+            const QString id = entry.value(QStringLiteral("id")).toString();
+            const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(id.toStdString());
+            bool matched = false;
+            if (adapter)
+            {
+                const auto &inputs = adapter->descriptor().inputs;
+                for (const auto &port : inputs)
+                {
+                    if (QString::fromUtf8(sicnu::processing::dataTypeToString(port.type).c_str()) == inputType)
+                    { matched = true; break; }
+                }
+            }
+            if (!matched)
+                continue;
+        }
+        if (!outputType.isEmpty())
+        {
+            const QString id = entry.value(QStringLiteral("id")).toString();
+            const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(id.toStdString());
+            bool matched = false;
+            if (adapter)
+            {
+                const auto &outputs = adapter->descriptor().outputs;
+                for (const auto &port : outputs)
+                {
+                    if (QString::fromUtf8(sicnu::processing::dataTypeToString(port.type).c_str()) == outputType)
+                    { matched = true; break; }
+                }
+            }
+            if (!matched)
+                continue;
+        }
+
+        if (!needle.isEmpty())
+        {
+            const QString haystack = (entry.value(QStringLiteral("id")).toString() + " "
+                                      + entry.value(QStringLiteral("displayName")).toString() + " "
+                                      + entry.value(QStringLiteral("group")).toString() + " "
+                                      + entry.value(QStringLiteral("description")).toString()).toLower();
+            if (!haystack.contains(needle))
+                continue;
+        }
+
+        filtered.append(entryVar);
+    }
+
+    QVariantMap out;
+    out[QStringLiteral("algorithms")] = filtered;
+    out[QStringLiteral("count")] = static_cast<int>(filtered.size());
+    return out;
 }
 
 QVariantMap McpServer::handleListOperators()
@@ -687,15 +888,27 @@ QVariantMap McpServer::handleExecuteOperator(const QString &operatorId, const QV
 
 QVariantMap McpServer::handleGetAlgorithmSchema(const QString &algorithmId)
 {
-    std::unique_ptr<QgsProcessingAlgorithm> alg(QgsApplication::processingRegistry()->createAlgorithmById(algorithmId));
-    if (!alg)
+    const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(algorithmId.toStdString());
+    if (!adapter)
     {
         QVariantMap err;
         err[QStringLiteral("error")] = QStringLiteral("Algorithm not found: ") + algorithmId;
         return err;
     }
 
-    return alg->toJsonSchema();
+    const auto desc = adapter->descriptor();
+    QVariantMap result = sicnu::processing::jsonObjectToVariantMap(desc.toInputSchema());
+    result[QStringLiteral("algorithm_id")] = algorithmId;
+    result[QStringLiteral("outputs")] = sicnu::processing::jsonObjectToVariantMap(desc.toOutputSchema());
+    result[QStringLiteral("metadata")] = sicnu::processing::jsonObjectToVariantMap(desc.agentMetadata.toJson());
+    return result;
+}
+
+QVariantMap McpServer::handlePreflightAlgorithm(const QString &algorithmId, const QVariantMap &parameters)
+{
+    const Json::Value paramsJson = sicnu::processing::variantToJsonValue(parameters);
+    const Json::Value preflight = sicnu::processing::preflightAlgorithm(algorithmId.toStdString(), paramsJson);
+    return sicnu::processing::jsonObjectToVariantMap(preflight);
 }
 
 QVariantMap McpServer::handleExecuteAlgorithm(const QString &algorithmId, const QVariantMap &parameters)
@@ -713,7 +926,7 @@ QVariantMap McpServer::handleGetExecutionStatus(const QString &executionId)
     if (info.taskId != taskId)
         throw std::runtime_error("Execution ID not found: " + executionId.toStdString());
 
-    return executionStatusResponse(executionId, info);
+    return executionStatusResponse(m_dataManager, executionId, info);
 }
 
 QVariantMap McpServer::handleCancelExecution(const QString &executionId)
@@ -729,7 +942,7 @@ QVariantMap McpServer::handleCancelExecution(const QString &executionId)
         if (info.taskId != taskId)
             throw std::runtime_error("Execution ID not found: " + executionId.toStdString());
 
-        return executionStatusResponse(executionId, info);
+        return executionStatusResponse(m_dataManager, executionId, info);
     }
 
     QVariantMap result;

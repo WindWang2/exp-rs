@@ -26,6 +26,12 @@ public:
   /// cancel request (e.g. JobEngine) is honored mid-execution.
   virtual Json::Value execute( const Json::Value &params, ProgressCallback progressCb = nullptr,
                                std::function<bool()> isCancelledFn = nullptr ) = 0;
+
+  /// Input-dependent resource estimate. Default: empty (unknown/auto).
+  /// ProviderAlgorithmAdapter returns the static descriptor estimate;
+  /// RsOperatorAdapter delegates to the operator's dynamic estimate (which
+  /// falls back to the static executionEstimate when not overridden).
+  virtual Json::Value estimateExecution( const Json::Value &params ) const;
 };
 
 using AtomicAlgorithmAdapterPtr = std::shared_ptr<AtomicAlgorithmAdapter>;
@@ -40,6 +46,7 @@ public:
   AlgorithmDescriptor descriptor() const override;
   Json::Value execute( const Json::Value &params, ProgressCallback progressCb = nullptr,
                        std::function<bool()> isCancelledFn = nullptr ) override;
+  Json::Value estimateExecution( const Json::Value &params ) const override;
 
 private:
   std::unique_ptr<operators::RSOperator> mOp;

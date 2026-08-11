@@ -103,8 +103,27 @@ void RSOperatorContext::setCancelFlag(std::atomic<bool>* flag) {
     m_cancelFlag = flag;
 }
 
+void RSOperatorContext::setCancelCallback(CancelFn callback) {
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
+    m_cancelCallback = std::move(callback);
+}
+
 bool RSOperatorContext::isCancelled() const {
-    return m_cancelFlag && m_cancelFlag->load(std::memory_order_acquire);
+    // The flag is the primary cancel source (cheap, no lock). The callback is
+    // consulted when no flag is wired, so an external predicate (JobEngine /
+    // TaskCenter / adapter isCancelledFn) is observed mid-run. The callback is
+    // copied under the mutex and invoked outside it: no data race with a
+    // concurrent setCancelCallback(), and a callback that re-enters
+    // setCancelCallback() cannot deadlock.
+    if (m_cancelFlag && m_cancelFlag->load(std::memory_order_acquire)) {
+        return true;
+    }
+    CancelFn cb;
+    {
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        cb = m_cancelCallback;
+    }
+    return cb ? cb() : false;
 }
 
 void RSOperatorContext::throwIfCancelled() const {
