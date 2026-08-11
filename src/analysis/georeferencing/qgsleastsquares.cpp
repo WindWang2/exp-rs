@@ -133,18 +133,21 @@ void QgsLeastSquares::helmert( const QVector<QgsPointXY> &sourceCoordinates, con
   // GSL's default error handler prints and abort()s on a singular matrix,
   // which would kill the whole process instead of surfacing the
   // SingularException callers expect. Install the no-op handler around the
-  // decomposition so a singular normal matrix returns a non-zero status.
+  // decomposition AND the solve: for numerically-singular input LU_decomp can
+  // return success (tiny non-zero pivots) and the singularity only surfaces in
+  // LU_solve, so both calls must run with the handler disabled.
   gsl_error_handler_t *const previousHandler = gsl_set_error_handler_off();
   int s;
   const int decompStatus = gsl_linalg_LU_decomp( &M.matrix, p, &s );
-  gsl_set_error_handler( previousHandler );
   if ( decompStatus != 0 )
   {
+    gsl_set_error_handler( previousHandler );
     gsl_permutation_free( p );
     gsl_vector_free( x );
     throw QgsLeastSquares::SingularException();
   }
   const int solveStatus = gsl_linalg_LU_solve( &M.matrix, p, &b.vector, x );
+  gsl_set_error_handler( previousHandler );
   gsl_permutation_free( p );
   if ( solveStatus != 0 )
   {
