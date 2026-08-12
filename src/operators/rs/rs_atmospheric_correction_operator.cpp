@@ -10,11 +10,14 @@
 #include "processing/algorithms/atmospheric_correction.h"
 #include "processing/algorithms/radiometric_calibration.h"
 #include "processing/algorithms/satellite_products.h"
+#include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QString>
 #include <QMap>
 
+#include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -72,12 +75,52 @@ Json::Value RsAtmosphericCorrectionOperator::executionEstimate() const {
     // MultiPassStreaming: 256x256 stream tiles (kTile in
     // AtmosphericCorrection::processFile); a source tile and one radiance/output
     // tile buffer in flight plus a 1024-bin dark-object histogram (~8 KiB) ->
-    // ~0.5 MiB per pass. QUAC is full-raster by design and dominates when selected.
+    // ~0.5 MiB per pass. QUAC is full-raster by design and dominates when
+    // selected (see estimateExecution for the QUAC-aware dynamic estimate).
     Json::Value est(Json::objectValue);
     est["tileWidth"] = 256;
     est["tileHeight"] = 256;
     est["estimatedRamBytes"] = 524288;
     return est;
+}
+
+Json::Value RsAtmosphericCorrectionOperator::estimateExecution(const Json::Value& params) const {
+    // QUAC is full-raster: the whole scene is resident (image-statistics based
+    // correction over all bands jointly). Estimate width*height*bands*4 bytes
+    // (input + output buffers) from the actual raster when available;
+    // DOS/DN-to-radiance paths stay tile-streaming (~0.5 MiB).
+    if (params.isObject() && params.isMember("method") && params["method"].isString()
+        && params["method"].asString() == "quac"
+        && params.isMember("input") && params["input"].isString())
+    {
+        GdalDatasetWrapper probe;
+        if (probe.open(QString::fromStdString(params["input"].asString()))
+            && probe.width() > 0 && probe.height() > 0 && probe.bandCount() > 0)
+        {
+            std::optional<std::uint64_t> pixels =
+                sicnu::processing::checkedMul(
+                    static_cast<std::uint64_t>(probe.width()),
+                    static_cast<std::uint64_t>(probe.height()));
+            if (pixels)
+            {
+                // Input + output Float32 buffers ≈ 2 x pixels x bands x 4 B.
+                std::optional<std::uint64_t> ram =
+                    sicnu::processing::checkedMulN(
+                        { *pixels, static_cast<std::uint64_t>(probe.bandCount()),
+                          static_cast<std::uint64_t>(sizeof(float)), 2ULL });
+                if (ram)
+                {
+                    Json::Value est(Json::objectValue);
+                    est["tileWidth"] = 0; // full-raster
+                    est["tileHeight"] = 0;
+                    est["estimatedRamBytes"] = Json::Value::UInt64(*ram);
+                    est["basis"] = "dynamic";
+                    return est;
+                }
+            }
+        }
+    }
+    return executionEstimate();
 }
 
 Json::Value RsAtmosphericCorrectionOperator::run(const Json::Value& params,

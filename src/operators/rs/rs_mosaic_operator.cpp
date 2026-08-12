@@ -8,6 +8,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/mosaic.h"
+#include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QString>
@@ -16,7 +17,9 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <limits>
+#include <optional>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -84,6 +87,90 @@ Json::Value RsMosaicOperator::executionEstimate() const
     est["tileHeight"] = 0;
     est["estimatedRamBytes"] = 16777216; // 3 x 1024x1024 Float32 buffers
     return est;
+}
+
+Json::Value RsMosaicOperator::estimateExecution(const Json::Value& params) const
+{
+    // FullRaster: estimate the actual working set from the inputs — every
+    // input band-1 buffer (width*height*4 B) plus the union-extent output
+    // buffer (capped at 200M pixels like run()). Overflow-safe.
+    if (!params.isObject() || !params.isMember("inputs") || !params["inputs"].isArray()
+        || params["inputs"].empty())
+        return executionEstimate();
+
+    ensureGdalInit();
+    constexpr std::uint64_t kMaxOutPixels = 200'000'000ULL;
+    std::optional<std::uint64_t> inputBytes{ 0 };
+    double unionMinX = std::numeric_limits<double>::max();
+    double unionMinY = std::numeric_limits<double>::max();
+    double unionMaxX = std::numeric_limits<double>::lowest();
+    double unionMaxY = std::numeric_limits<double>::lowest();
+    double refPixelW = 0.0;
+    double refPixelH = 0.0;
+    bool anyOpened = false;
+
+    for (const auto& item : params["inputs"])
+    {
+        if (!item.isString())
+            continue;
+        GdalDatasetWrapper ds;
+        if (!ds.open(QString::fromStdString(item.asString())))
+            continue;
+        anyOpened = true;
+        const auto gt = ds.geoTransform();
+        if (!anyOpened || refPixelW == 0.0)
+        {
+            refPixelW = std::abs(gt[1]);
+            refPixelH = std::abs(gt[5]);
+        }
+        const double tlX = gt[0];
+        const double tlY = gt[3];
+        const double brX = gt[0] + ds.width() * gt[1];
+        const double brY = gt[3] + ds.height() * gt[5];
+        unionMinX = std::min(unionMinX, std::min(tlX, brX));
+        unionMinY = std::min(unionMinY, std::min(tlY, brY));
+        unionMaxX = std::max(unionMaxX, std::max(tlX, brX));
+        unionMaxY = std::max(unionMaxY, std::max(tlY, brY));
+
+        std::optional<std::uint64_t> px =
+            sicnu::processing::checkedMul(static_cast<std::uint64_t>(ds.width()),
+                                          static_cast<std::uint64_t>(ds.height()));
+        std::optional<std::uint64_t> bytes =
+            px ? sicnu::processing::checkedMul(*px, static_cast<std::uint64_t>(sizeof(float))) : std::nullopt;
+        if (inputBytes && bytes && *inputBytes <= std::numeric_limits<std::uint64_t>::max() - *bytes)
+            *inputBytes += *bytes;
+    }
+
+    if (!anyOpened)
+        return executionEstimate();
+
+    std::optional<std::uint64_t> outPixels{ 0 };
+    if (refPixelW > 1e-15 && refPixelH > 1e-15
+        && unionMaxX > unionMinX && unionMaxY > unionMinY)
+    {
+        const auto ow = static_cast<std::uint64_t>(
+            std::round((unionMaxX - unionMinX) / refPixelW));
+        const auto oh = static_cast<std::uint64_t>(
+            std::round((unionMaxY - unionMinY) / refPixelH));
+        outPixels = sicnu::processing::checkedMul(ow, oh);
+    }
+    std::optional<std::uint64_t> outBytes =
+        outPixels ? sicnu::processing::checkedMul(
+                        std::min(*outPixels, kMaxOutPixels),
+                        static_cast<std::uint64_t>(sizeof(float)))
+                  : std::nullopt;
+
+    if (inputBytes && outBytes
+        && *inputBytes <= std::numeric_limits<std::uint64_t>::max() - *outBytes)
+    {
+        Json::Value est(Json::objectValue);
+        est["tileWidth"] = 0;
+        est["tileHeight"] = 0;
+        est["estimatedRamBytes"] = Json::Value::UInt64(*inputBytes + *outBytes);
+        est["basis"] = "dynamic";
+        return est;
+    }
+    return executionEstimate();
 }
 
 Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& context) {
