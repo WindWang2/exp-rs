@@ -48,6 +48,9 @@ public:
     Json::Value schema() const override;
     Json::Value metadata() const override;
     Json::Value executionEstimate() const override;
+    /// Input-dependent estimate: QUAC is full-raster (probes the input), the
+    /// DOS/DN paths are tile-streaming.
+    Json::Value estimateExecution(const Json::Value& params) const override;
     Json::Value run(const Json::Value& params, RSOperatorContext& context) override;
 };
 

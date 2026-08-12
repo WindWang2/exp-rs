@@ -12,8 +12,10 @@
 #include "processing/framework/algorithm_preflight.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "operators/rs/rs_atmospheric_correction_operator.h"
 #include "operators/rs/rs_change_detection_operator.h"
 #include "operators/rs/rs_change_primitives.h"
+#include "operators/rs/rs_mosaic_operator.h"
 
 using namespace sicnu::processing;
 using namespace sicnu::operators;
@@ -155,4 +157,59 @@ TEST_CASE( "preflightAdapter checks same-grid and radiometric contracts", "[proc
     matched["b"] = rasterC.toStdString();
     preflight = preflightAdapter( adapter, matched );
     REQUIRE( preflight["valid"].asBool() == true );
+}
+
+TEST_CASE( "Dynamic estimates reflect actual working sets (QUAC / mosaic)", "[processing][preflight][estimate]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    const QString rasterA = tmp.path() + "/a.tif";
+    const QString rasterB = tmp.path() + "/b.tif";
+    {
+        std::vector<float> band( 32 * 32, 100.0f );
+        std::array<double, 6> gt = { 500000, 30, 0, 4500000, 0, -30 };
+        QString err;
+        std::vector<std::vector<float>> bands = { band };
+        REQUIRE( writeGdalOutput( rasterA, 32, 32, bands, gt, "EPSG:32648", &err ) );
+        REQUIRE( writeGdalOutput( rasterB, 32, 32, bands, gt, "EPSG:32648", &err ) );
+    }
+
+    // QUAC is full-raster: the dynamic estimate scales with the scene, not the
+    // 0.5 MiB tile-streaming fallback.
+    {
+        RsAtmosphericCorrectionOperator op;
+        Json::Value params( Json::objectValue );
+        params["method"] = "quac";
+        params["input"] = rasterA.toStdString();
+        const Json::Value est = op.estimateExecution( params );
+        REQUIRE( est["basis"].asString() == "dynamic" );
+        // 32x32 x 1 band x 4 B x 2 buffers = 8192 B — small scene, but the
+        // point is the basis is dynamic (not the static 512 KiB).
+        REQUIRE( est["estimatedRamBytes"].asUInt64() > 0 );
+        REQUIRE( est["estimatedRamBytes"].asUInt64() != 524288 );
+
+        // DOS stays tile-streaming (static fallback — the preflight layer
+        // annotates basis="static" when consuming; the raw estimate carries
+        // the static tile figure).
+        Json::Value dosParams( Json::objectValue );
+        dosParams["method"] = "dos1";
+        dosParams["input"] = rasterA.toStdString();
+        const Json::Value dosEst = op.estimateExecution( dosParams );
+        REQUIRE( dosEst["estimatedRamBytes"].asUInt64() == 524288 );
+    }
+
+    // Mosaic: dynamic estimate includes input buffers + union output buffer.
+    {
+        RsMosaicOperator op;
+        Json::Value params( Json::objectValue );
+        Json::Value inputs( Json::arrayValue );
+        inputs.append( rasterA.toStdString() );
+        inputs.append( rasterB.toStdString() );
+        params["inputs"] = inputs;
+        const Json::Value est = op.estimateExecution( params );
+        REQUIRE( est["basis"].asString() == "dynamic" );
+        // 2 inputs x 32x32x4 B + 1 output 32x32x4 B = 12288 B.
+        REQUIRE( est["estimatedRamBytes"].asUInt64() == 12288 );
+    }
 }
