@@ -57,6 +57,14 @@ public:
     QVariantMap testGetExecutionStatus(const QString &id) { return handleGetExecutionStatus(id); }
     QVariantMap testCancelExecution(const QString &id) { return handleCancelExecution(id); }
     QVariantMap testGetLineage(const QString &id) { return handleGetLineage(id); }
+    QVariantMap testListTools(const QString &category = QString()) { return handleListTools(category); }
+    QVariantMap testSearchTools(const QString &query, const QString &group = QString(),
+                                const QString &tag = QString(), const QString &inputType = QString(),
+                                const QString &outputType = QString())
+    {
+        return handleSearchTools(query, group, tag, inputType, outputType);
+    }
+    QVariantMap testGetToolSchema(const QString &id) { return handleGetToolSchema(id); }
 };
 
 namespace {
@@ -198,6 +206,58 @@ TEST_CASE("MCP Server tests", "[agent][mcp]") {
     SECTION("get_operator_schema returns error for unknown operator") {
         QVariantMap schema = server.testGetOperatorSchema("no:such_operator");
         REQUIRE(schema.contains("error"));
+    }
+
+    SECTION("list_tools returns unified schema with category, name, description, schema") {
+        QVariantMap res = server.testListTools();
+        QVariantList tools = res.value("tools").toList();
+        REQUIRE_FALSE(tools.isEmpty());
+        REQUIRE(res.value("count").toInt() == tools.size());
+
+        bool foundProcessing = false;
+        bool foundInteraction = false;
+        bool foundData = false;
+
+        for (const QVariant &t : tools) {
+            QVariantMap tMap = t.toMap();
+            REQUIRE(tMap.contains("category"));
+            REQUIRE(tMap.contains("name"));
+            REQUIRE(tMap.contains("description"));
+            REQUIRE(tMap.contains("schema"));
+
+            const QString cat = tMap.value("category").toString();
+            if (cat == "Processing") foundProcessing = true;
+            if (cat == "Interaction") foundInteraction = true;
+            if (cat == "Data") foundData = true;
+        }
+
+        CHECK(foundProcessing);
+        CHECK(foundInteraction);
+        CHECK(foundData);
+    }
+
+    SECTION("search_tools searches unified catalog by query") {
+        QVariantMap res = server.testSearchTools("show raster");
+        QVariantList tools = res.value("tools").toList();
+        REQUIRE_FALSE(tools.isEmpty());
+
+        bool foundBandComposite = false;
+        for (const QVariant &t : tools) {
+            QVariantMap tMap = t.toMap();
+            if (tMap.value("name").toString() == "raster:set_band_composite") {
+                foundBandComposite = true;
+            }
+        }
+        CHECK(foundBandComposite);
+    }
+
+    SECTION("get_tool_schema returns schema for unified tools") {
+        QVariantMap schema = server.testGetToolSchema("canvas:draw_roi");
+        REQUIRE_FALSE(schema.contains("error"));
+        CHECK(schema.value("category").toString() == "Interaction");
+        CHECK(schema.value("name").toString() == "canvas:draw_roi");
+        QVariantMap propMap = schema.value("schema").toMap().value("properties").toMap();
+        REQUIRE(propMap.contains("bbox"));
     }
 }
 

@@ -6,6 +6,7 @@
 
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/json_params_converter.h"
+#include "agent/tool_catalog/agent_tool_catalog.h"
 
 #include <qgsgeometry.h>
 #include <qgsmapcanvas.h>
@@ -282,18 +283,9 @@ void AgentCopilotDockWidget::sendPrompt( const QString &promptText )
   m_isStreaming = true;
   m_sendBtn->setText( QStringLiteral( "停止 ⏹" ) );
 
-  // The caller owns execution policy, so tool selection lives here: export
-  // the algorithm catalog and hand the transport the exact schemas to put on
-  // the wire (ADR 0049). Conversion reuses the shared Json↔QVariant helper.
-  Json::Value cppTools = processing::AtomicAlgorithmRegistry::instance().exportOpenAiToolDefinitions();
-  const Json::Value interactionTools = InteractionToolRegistry::instance().exportOpenAiToolDefinitions();
-  if ( interactionTools.isArray() )
-  {
-    for ( const auto &tool : interactionTools )
-    {
-      cppTools.append( tool );
-    }
-  }
+  // the unified agent tool catalog (algorithms, canvas, data) and hand the transport
+  // the exact schemas to put on the wire (ADR 0049). Conversion reuses the shared Json↔QVariant helper.
+  const Json::Value cppTools = tool_catalog::AgentToolCatalog::instance().exportOpenAiToolDefinitions();
   const QJsonArray tools = QJsonArray::fromVariantList( processing::jsonValueToVariant( cppTools ).toList() );
 
   m_client->sendChatCompletion( m_messageHistory, tools );

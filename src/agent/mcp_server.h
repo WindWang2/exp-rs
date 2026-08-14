@@ -96,6 +96,13 @@ protected:
     QVariantMap handleGetOperatorSchema(const QString &operatorId);
     QVariantMap handleExecuteOperator(const QString &operatorId, const QVariantMap &parameters);
 
+    // MCP Methods — Unified Agent Tool Catalog (Algorithms + Interaction + Data)
+    QVariantMap handleListTools(const QString &category = QString());
+    QVariantMap handleSearchTools(const QString &query, const QString &group = QString(),
+                                  const QString &tag = QString(), const QString &inputType = QString(),
+                                  const QString &outputType = QString());
+    QVariantMap handleGetToolSchema(const QString &toolId);
+
     // MCP Methods — Agent Interaction Layer
     QVariantMap handleListInteractionTools();
     QVariantMap handleGetInteractionSchema(const QString &toolName);
