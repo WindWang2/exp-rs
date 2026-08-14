@@ -12,11 +12,9 @@
 #include "processing/framework/algorithm_preflight.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "shell/processing_job_adapter.h"
-<<<<<<< HEAD
 #include "interaction_tool_registry.h"
-=======
 #include "agent/tool_catalog/agent_tool_catalog.h"
->>>>>>> ecf145f1d7 (feat(agent): unify tool catalog architecture across processing, interaction, and data)
+#include "agent/tool_catalog/agent_tool.h"
 
 #include <iostream>
 #include <QJsonDocument>
