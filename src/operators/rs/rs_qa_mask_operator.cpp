@@ -23,13 +23,19 @@ using namespace params;
 
 namespace {
 
-const std::vector<std::string> s_sources = {
-    "auto", "landsat_qa_pixel", "sentinel2_scl", "generic_bitmask"
-};
+const std::vector<std::string>& qaSources() {
+    static const std::vector<std::string> s = {
+        "auto", "landsat_qa_pixel", "sentinel2_scl", "generic_bitmask"
+    };
+    return s;
+}
 
-const std::vector<std::string> s_masks = {
-    "cloud_and_shadow", "cloud", "cloud_shadow", "snow", "water", "all"
-};
+const std::vector<std::string>& qaMasks() {
+    static const std::vector<std::string> s = {
+        "cloud_and_shadow", "cloud", "cloud_shadow", "snow", "water", "all"
+    };
+    return s;
+}
 
 /// Resolves the QA band number: explicit `qa_band` wins; otherwise the first
 /// band whose semantic role is scene_classification or qa. Returns 0 when no
@@ -141,8 +147,8 @@ Json::Value RsQaMaskOperator::schema() const {
     props["input"] = makeRasterParam("input", "Raster containing the QA band");
     props["output"] = makeOutputParam("output", "Output mask raster (UInt8, 1 = masked)", "tif");
     props["qa_band"] = makeIntegerParam("qa_band", "1-based QA band (optional; when omitted, resolved from the input's product band roles)", 0);
-    props["source"] = makeEnumParam("source", "QA source interpretation", s_sources, "auto");
-    props["mask"] = makeEnumParam("mask", "Classes to mask out", s_masks, "cloud_and_shadow");
+    props["source"] = makeEnumParam("source", "QA source interpretation", qaSources(), "auto");
+    props["mask"] = makeEnumParam("mask", "Classes to mask out", qaMasks(), "cloud_and_shadow");
     props["bits"] = makeIntegerParam("bits", "Bit flags for generic_bitmask source", 0);
 
     Json::Value outputs(Json::objectValue);
@@ -201,8 +207,8 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
 
     const bool hasQaBand = params.isMember("qa_band");
     const int qaBandExplicit = getInt(params, "qa_band", 0);
-    const std::string sourceRequested = getEnum(params, "source", s_sources, "auto");
-    const std::string maskSelection = getEnum(params, "mask", s_masks, "cloud_and_shadow");
+    const std::string sourceRequested = getEnum(params, "source", qaSources(), "auto");
+    const std::string maskSelection = getEnum(params, "mask", qaMasks(), "cloud_and_shadow");
     const uint16_t genericBits = static_cast<uint16_t>(getInt(params, "bits", 0));
 
     ensureGdalInit();

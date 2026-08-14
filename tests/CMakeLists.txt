@@ -3409,7 +3409,6 @@ target_link_libraries(test_workflow_session_controller PRIVATE
   sicnu_workflow
   sicnu_task_center
   sicnu_core
-  sicnu_gui
   Sicnu::data
 )
 target_include_directories(test_workflow_session_controller PRIVATE

@@ -562,22 +562,6 @@ add_subdirectory(src/gui)
 add_subdirectory(src/processing)
 add_subdirectory(src/agent)
 
-# SICNU_GEO_RS: SICNU GUI library (main window framework)
-add_library(sicnu_gui SHARED
-  src/gui/main_window.cpp
-)
-target_include_directories(sicnu_gui PUBLIC
-  ${CMAKE_SOURCE_DIR}/src
-)
-target_link_libraries(sicnu_gui PUBLIC
-  Qt6::Core
-  Qt6::Gui
-  Qt6::Widgets
-  qgis_core
-  qgis_gui
-  sicnu_core
-)
-
 # SICNU_GEO_RS: extra include paths needed by unconditional core sources
 if(QCA_FOUND)
   target_include_directories(qgis_core SYSTEM PRIVATE ${QCA_INCLUDE_DIR} ${QCA_INCLUDE_DIR}/QtCrypto)
