@@ -7,6 +7,7 @@
 #define RS_DUAL_VIEWPORT_SYNC_CONTROLLER_H
 
 #include <QObject>
+#include <QPointer>
 #include <QTimer>
 
 class QgsMapCanvas;
@@ -23,22 +24,35 @@ class QgsMapCanvas;
  *
  * Design:
  *   - Listens to QgsMapCanvas::extentsChanged on both canvases.
- *   - 16ms throttle coalesces signal storms during interactive pan/zoom.
+ *   - 16ms throttle coalesces signal storms during interactive pan/zoom (~60 FPS rate-limit).
  *   - mApplying reentrancy guard breaks feedback loops.
  *   - setEnabled(bool) toggles sync at runtime (View-menu "Sync pan/zoom").
  *   - setScaleSync(bool) optionally disables the scale copy so users can
  *     zoom the two viewports independently while still sharing pan center.
+ *   - Uses QPointer to safely handle canvas destruction during pending timers.
+ *   - Non-intrusive statistics counters for deterministic verification.
  */
 class RsDualViewportSyncController : public QObject
 {
     Q_OBJECT
 
   public:
+    struct Stats
+    {
+        quint64 extentChangedEvents = 0;
+        quint64 appliedSyncCount = 0;
+        quint64 canvasRefreshRequests = 0;
+    };
+
     RsDualViewportSyncController( QgsMapCanvas *primary, QgsMapCanvas *secondary,
                                   QObject *parent = nullptr );
 
     bool isEnabled() const { return mEnabled; }
     bool scaleSyncEnabled() const { return mScaleSync; }
+
+    /// Testing instrumentation
+    Stats stats() const { return mStats; }
+    void resetStats() { mStats = Stats{}; }
 
   public slots:
     void setEnabled( bool on );
@@ -52,14 +66,15 @@ class RsDualViewportSyncController : public QObject
   private slots:
     void onPrimaryExtentChanged();
     void onSecondaryExtentChanged();
+    void onCanvasDestroyed( QObject *obj );
 
   private:
     void applyFromPrimary();
     void applyFromSecondary();
     void schedule( bool fromPrimary );
 
-    QgsMapCanvas *mPrimary = nullptr;
-    QgsMapCanvas *mSecondary = nullptr;
+    QPointer<QgsMapCanvas> mPrimary;
+    QPointer<QgsMapCanvas> mSecondary;
     bool mEnabled = true;
     bool mScaleSync = true;
     bool mApplying = false;
@@ -72,6 +87,8 @@ class RsDualViewportSyncController : public QObject
         FromSecondary,
     };
     Pending mPending = Pending::None;
+
+    Stats mStats;
 };
 
 #endif // RS_DUAL_VIEWPORT_SYNC_CONTROLLER_H

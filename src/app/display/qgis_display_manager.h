@@ -173,6 +173,29 @@ public:
   std::optional<DisplayViewSnapshot> view(DisplayViewId viewId) const;
   std::optional<DisplayLayerSnapshot> layer(DisplayLayerId layerId) const;
 
+  /// Scoped batch update RAII guard to coalesce canvas bridge syncs during multi-layer mutations.
+  class ScopedBatchUpdate {
+  public:
+    explicit ScopedBatchUpdate(QgisDisplayManager *manager, DisplayViewId viewId);
+    ~ScopedBatchUpdate();
+    ScopedBatchUpdate(const ScopedBatchUpdate &) = delete;
+    ScopedBatchUpdate &operator=(const ScopedBatchUpdate &) = delete;
+    ScopedBatchUpdate(ScopedBatchUpdate &&other) noexcept;
+    ScopedBatchUpdate &operator=(ScopedBatchUpdate &&other) noexcept;
+
+  private:
+    QgisDisplayManager *m_manager = nullptr;
+    DisplayViewId m_viewId;
+    bool m_active = false;
+  };
+
+  ScopedBatchUpdate createBatchUpdate(DisplayViewId viewId);
+  void beginBatchUpdate(DisplayViewId viewId);
+  void endBatchUpdate(DisplayViewId viewId);
+
+  /// Testing instrumentation: returns how many times bridge->setCanvasLayers() was executed for a view.
+  quint64 canvasLayerSyncCount(DisplayViewId viewId) const;
+
   /// Non-owning access to the authoritative runtime presentation object.
   QgsMapLayer *mapLayer(DisplayLayerId layerId) const;
 

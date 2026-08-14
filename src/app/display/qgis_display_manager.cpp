@@ -208,7 +208,23 @@ struct QgisDisplayManager::Impl {
     QPointer<QgsMapLayerStore> layerStore;
     QPointer<QgsLayerTreeMapCanvasBridge> bridge;
     QVector<DisplayLayerId> layerIds;
+    int batchUpdateDepth = 0;
+    bool batchPendingSync = false;
+    quint64 canvasLayerSyncCount = 0;
   };
+
+  static void syncViewCanvasLayers(ViewRecord *viewRecord) {
+    if (!viewRecord)
+      return;
+    if (viewRecord->batchUpdateDepth > 0) {
+      viewRecord->batchPendingSync = true;
+      return;
+    }
+    if (viewRecord->bridge && !viewRecord->canvas.isNull()) {
+      ++viewRecord->canvasLayerSyncCount;
+      viewRecord->bridge->setCanvasLayers();
+    }
+  }
 
   struct LayerRecord {
     DisplayLayerSnapshot snapshot;
@@ -486,8 +502,7 @@ QgisDisplayManager::addLayer(DisplayViewId viewId, data::AssetId assetId,
     viewRecord->layerTree->insertLayer(0, storedLayer);
   else
     viewRecord->layerTree->addLayer(storedLayer);
-  if (viewRecord->bridge && !viewRecord->canvas.isNull())
-    viewRecord->bridge->setCanvasLayers();
+  Impl::syncViewCanvasLayers(viewRecord);
 
   auto layerRecord = std::make_unique<Impl::LayerRecord>(Impl::LayerRecord{
       DisplayLayerSnapshot{layerId, viewId, assetId, storedLayer->id()},
@@ -580,8 +595,7 @@ QgisDisplayManager::cloneLayer(DisplayLayerId sourceLayerId,
   clonedLayer.release();
 
   targetView->layerTree->insertLayer(0, storedLayer);
-  if (targetView->bridge && !targetView->canvas.isNull())
-    targetView->bridge->setCanvasLayers();
+  Impl::syncViewCanvasLayers(targetView);
 
   auto record = std::make_unique<Impl::LayerRecord>(
       Impl::LayerRecord{DisplayLayerSnapshot{clonedId, targetViewId,
@@ -679,8 +693,7 @@ QgisDisplayManager::adoptLayer(DisplayViewId viewId, data::AssetId assetId,
       acquired.take()});
   m_impl->layers.emplace(layerId.toString(), std::move(record));
   viewRecord->layerIds.append(layerId);
-  if (viewRecord->bridge && !viewRecord->canvas.isNull())
-    viewRecord->bridge->setCanvasLayers();
+  Impl::syncViewCanvasLayers(viewRecord);
   return data::Result<DisplayLayerId>::success(layerId);
 }
 
@@ -797,8 +810,7 @@ data::Result<void> QgisDisplayManager::relocateLayer(DisplayLayerId layerId) {
   // Remove the stale layer from the store after the replacement is registered.
   if (viewRecord->layerStore->mapLayer(oldQgisLayerId))
     viewRecord->layerStore->removeMapLayer(oldQgisLayerId);
-  if (viewRecord->bridge && !viewRecord->canvas.isNull())
-    viewRecord->bridge->setCanvasLayers();
+  Impl::syncViewCanvasLayers(viewRecord);
 
   // Update the record: same DisplayLayerId and asset, new QGIS layer and lease.
   // The old lease is released by reassigning the move-only AssetLease.
@@ -846,8 +858,7 @@ data::Result<void> QgisDisplayManager::removeLayer(DisplayLayerId layerId) {
         viewRecord->layerStore->mapLayer(qgisLayerId)) {
       viewRecord->layerStore->removeMapLayer(qgisLayerId);
     }
-    if (viewRecord->bridge && !viewRecord->canvas.isNull())
-      viewRecord->bridge->setCanvasLayers();
+    Impl::syncViewCanvasLayers(viewRecord);
   }
 
   m_impl->layers.erase(layerIt);
@@ -879,10 +890,13 @@ data::Result<void> QgisDisplayManager::removeView(DisplayViewId viewId) {
 
   // Drop every Display Layer in this view via the established removeLayer path
   // (removes from the view's tree/store; erasing the LayerRecord releases each
-  // lease via ~AssetLease). Copy first — removeLayer mutates viewRecord->layerIds.
-  const QVector<DisplayLayerId> layersInView = viewIt->second->layerIds;
-  for (const DisplayLayerId layerId : layersInView)
-    (void)removeLayer(layerId);
+  // lease via ~AssetLease). Wrap in ScopedBatchUpdate so we don't trigger N redundant syncs.
+  {
+    ScopedBatchUpdate batch(this, viewId);
+    const QVector<DisplayLayerId> layersInView = viewIt->second->layerIds;
+    for (const DisplayLayerId layerId : layersInView)
+      (void)removeLayer(layerId);
+  }
 
   m_impl->views.erase(viewIt);
   m_impl->viewOrder.removeAll(viewId);
@@ -970,8 +984,7 @@ data::Result<void> QgisDisplayManager::moveLayerTop(DisplayLayerId layerId) {
       }
     }
   }
-  if (viewRecord->bridge && !viewRecord->canvas.isNull())
-    viewRecord->bridge->setCanvasLayers();
+  Impl::syncViewCanvasLayers(viewRecord);
   return data::Result<void>::success();
 }
 
@@ -996,7 +1009,7 @@ data::Result<void> QgisDisplayManager::moveLayerBottom(DisplayLayerId layerId) {
       QgsLayerTreeGroup *parentGroup = QgsLayerTree::toGroup(node->parent());
       if (!parentGroup) parentGroup = viewRecord->layerTree.data();
       if (parentGroup) {
-        int lastIdx = parentGroup->children().count() - 1;
+        int lastIdx = static_cast<int>(parentGroup->children().size()) - 1;
         int idx = parentGroup->children().indexOf(node);
         if (idx >= 0 && idx < lastIdx) {
           QgsLayerTreeNode *cloned = node->clone();
@@ -1006,9 +1019,69 @@ data::Result<void> QgisDisplayManager::moveLayerBottom(DisplayLayerId layerId) {
       }
     }
   }
-  if (viewRecord->bridge && !viewRecord->canvas.isNull())
-    viewRecord->bridge->setCanvasLayers();
+  Impl::syncViewCanvasLayers(viewRecord);
   return data::Result<void>::success();
+}
+
+QgisDisplayManager::ScopedBatchUpdate::ScopedBatchUpdate(QgisDisplayManager *manager, DisplayViewId viewId)
+    : m_manager(manager), m_viewId(viewId), m_active(manager != nullptr) {
+  if (m_active) {
+    m_manager->beginBatchUpdate(m_viewId);
+  }
+}
+
+QgisDisplayManager::ScopedBatchUpdate::~ScopedBatchUpdate() {
+  if (m_active && m_manager) {
+    m_manager->endBatchUpdate(m_viewId);
+  }
+}
+
+QgisDisplayManager::ScopedBatchUpdate::ScopedBatchUpdate(ScopedBatchUpdate &&other) noexcept
+    : m_manager(other.m_manager), m_viewId(other.m_viewId), m_active(other.m_active) {
+  other.m_active = false;
+  other.m_manager = nullptr;
+}
+
+QgisDisplayManager::ScopedBatchUpdate &
+QgisDisplayManager::ScopedBatchUpdate::operator=(ScopedBatchUpdate &&other) noexcept {
+  if (this != &other) {
+    if (m_active && m_manager) {
+      m_manager->endBatchUpdate(m_viewId);
+    }
+    m_manager = other.m_manager;
+    m_viewId = other.m_viewId;
+    m_active = other.m_active;
+    other.m_active = false;
+    other.m_manager = nullptr;
+  }
+  return *this;
+}
+
+QgisDisplayManager::ScopedBatchUpdate QgisDisplayManager::createBatchUpdate(DisplayViewId viewId) {
+  return ScopedBatchUpdate(this, viewId);
+}
+
+void QgisDisplayManager::beginBatchUpdate(DisplayViewId viewId) {
+  Impl::ViewRecord *viewRecord = m_impl->findView(viewId);
+  if (viewRecord) {
+    ++viewRecord->batchUpdateDepth;
+  }
+}
+
+void QgisDisplayManager::endBatchUpdate(DisplayViewId viewId) {
+  Impl::ViewRecord *viewRecord = m_impl->findView(viewId);
+  if (viewRecord && viewRecord->batchUpdateDepth > 0) {
+    --viewRecord->batchUpdateDepth;
+    if (viewRecord->batchUpdateDepth == 0 && viewRecord->batchPendingSync) {
+      viewRecord->batchPendingSync = false;
+      Impl::syncViewCanvasLayers(viewRecord);
+    }
+  }
+}
+
+quint64 QgisDisplayManager::canvasLayerSyncCount(DisplayViewId viewId) const {
+  const Impl::ViewRecord *viewRecord = m_impl->findView(viewId);
+  return viewRecord ? viewRecord->canvasLayerSyncCount : 0;
 }
 
 } // namespace sicnu::display
