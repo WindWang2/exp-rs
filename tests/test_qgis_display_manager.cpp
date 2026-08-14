@@ -887,3 +887,119 @@ TEST_CASE( "QgisDisplayManager auto-display emits autoDisplayFailed without an a
   CHECK( !args.at( 1 ).toString().isEmpty() );
 }
 
+TEST_CASE( "QgisDisplayManager: 9. layer add, remove, reorder, and visibility preserve semantics", "[display][qgis_display_manager][ordering]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgsMapCanvas canvas;
+  QgsLayerTree tree;
+  QgsMapLayerStore store;
+  QgisDisplayManager displayManager( &dataManager );
+  const DisplayViewId viewId = createView( displayManager, canvas, tree, store );
+
+  const sicnu::data::AssetId asset1 = registerRaster( dataManager );
+  const sicnu::data::AssetId asset2 = registerRaster( dataManager );
+  const sicnu::data::AssetId asset3 = registerRaster( dataManager );
+
+  const auto l1 = displayManager.addLayer( viewId, asset1, { QStringLiteral( "L1" ), false } );
+  const auto l2 = displayManager.addLayer( viewId, asset2, { QStringLiteral( "L2" ), false } );
+  const auto l3 = displayManager.addLayer( viewId, asset3, { QStringLiteral( "L3" ), false } );
+  REQUIRE( l1 );
+  REQUIRE( l2 );
+  REQUIRE( l3 );
+
+  // Order in tree is L1, L2, L3 (from top to bottom)
+  REQUIRE( canvas.layers().size() == 3 );
+  CHECK( canvas.layers().at( 0 ) == displayManager.mapLayer( l1.value() ) );
+  CHECK( canvas.layers().at( 1 ) == displayManager.mapLayer( l2.value() ) );
+  CHECK( canvas.layers().at( 2 ) == displayManager.mapLayer( l3.value() ) );
+
+  // Move L3 to top -> order is L3, L1, L2
+  REQUIRE( displayManager.moveLayerTop( l3.value() ) );
+  REQUIRE( canvas.layers().size() == 3 );
+  CHECK( canvas.layers().at( 0 ) == displayManager.mapLayer( l3.value() ) );
+  CHECK( canvas.layers().at( 1 ) == displayManager.mapLayer( l1.value() ) );
+  CHECK( canvas.layers().at( 2 ) == displayManager.mapLayer( l2.value() ) );
+
+  // Toggle visibility of L1 off -> canvas layers should only contain L3 and L2
+  REQUIRE( displayManager.setLayerVisible( l1.value(), false ) );
+  CHECK_FALSE( displayManager.isLayerVisible( l1.value() ) );
+  QCoreApplication::processEvents();
+  REQUIRE( canvas.layers().size() == 2 );
+  CHECK( canvas.layers().at( 0 ) == displayManager.mapLayer( l3.value() ) );
+  CHECK( canvas.layers().at( 1 ) == displayManager.mapLayer( l2.value() ) );
+
+  // Toggle visibility of L1 back on
+  REQUIRE( displayManager.setLayerVisible( l1.value(), true ) );
+  CHECK( displayManager.isLayerVisible( l1.value() ) );
+  QCoreApplication::processEvents();
+  REQUIRE( canvas.layers().size() == 3 );
+  CHECK( canvas.layers().at( 0 ) == displayManager.mapLayer( l3.value() ) );
+  CHECK( canvas.layers().at( 1 ) == displayManager.mapLayer( l1.value() ) );
+  CHECK( canvas.layers().at( 2 ) == displayManager.mapLayer( l2.value() ) );
+
+  // Move L3 to bottom -> order is L1, L2, L3
+  REQUIRE( displayManager.moveLayerBottom( l3.value() ) );
+  REQUIRE( canvas.layers().size() == 3 );
+  CHECK( canvas.layers().at( 0 ) == displayManager.mapLayer( l1.value() ) );
+  CHECK( canvas.layers().at( 1 ) == displayManager.mapLayer( l2.value() ) );
+  CHECK( canvas.layers().at( 2 ) == displayManager.mapLayer( l3.value() ) );
+
+  // Remove L2 -> order is L1, L3
+  REQUIRE( displayManager.removeLayer( l2.value() ) );
+  REQUIRE( canvas.layers().size() == 2 );
+  CHECK( canvas.layers().at( 0 ) == displayManager.mapLayer( l1.value() ) );
+  CHECK( canvas.layers().at( 1 ) == displayManager.mapLayer( l3.value() ) );
+}
+
+TEST_CASE( "QgisDisplayManager: 10. multi-layer batch update coalesces setCanvasLayers", "[display][qgis_display_manager][batch]" )
+{
+  ensureQgisApplication();
+  DataManager dataManager;
+  QgsMapCanvas canvas;
+  QgsLayerTree tree;
+  QgsMapLayerStore store;
+  QgisDisplayManager displayManager( &dataManager );
+  const DisplayViewId viewId = createView( displayManager, canvas, tree, store );
+
+  QVector<sicnu::data::AssetId> assetIds;
+  for ( int i = 0; i < 10; ++i )
+  {
+    assetIds.append( registerRaster( dataManager ) );
+  }
+
+  // Baseline sync count after view creation
+  const quint64 initialSyncCount = displayManager.canvasLayerSyncCount( viewId );
+
+  QVector<DisplayLayerId> addedLayerIds;
+  // Execute 10 layer additions inside ScopedBatchUpdate
+  {
+    auto batch = displayManager.createBatchUpdate( viewId );
+    for ( int i = 0; i < 10; ++i )
+    {
+      const auto res = displayManager.addLayer( viewId, assetIds[i], { QString( "Layer %1" ).arg( i ), false } );
+      REQUIRE( res );
+      addedLayerIds.append( res.value() );
+      // Inside the batch, canvasLayerSyncCount does not increment on every mutation
+      CHECK( displayManager.canvasLayerSyncCount( viewId ) == initialSyncCount );
+    }
+  }
+  // When batch exits scope, exactly ONE synchronization was executed
+  CHECK( displayManager.canvasLayerSyncCount( viewId ) == initialSyncCount + 1 );
+  REQUIRE( canvas.layers().size() == 10 );
+
+  // Now execute 5 layer removals inside ScopedBatchUpdate
+  const quint64 syncCountBeforeRemoval = displayManager.canvasLayerSyncCount( viewId );
+  {
+    auto batch = displayManager.createBatchUpdate( viewId );
+    for ( int i = 0; i < 5; ++i )
+    {
+      REQUIRE( displayManager.removeLayer( addedLayerIds[i] ) );
+      CHECK( displayManager.canvasLayerSyncCount( viewId ) == syncCountBeforeRemoval );
+    }
+  }
+  // When removal batch exits, exactly ONE additional synchronization was executed
+  CHECK( displayManager.canvasLayerSyncCount( viewId ) == syncCountBeforeRemoval + 1 );
+  REQUIRE( canvas.layers().size() == 5 );
+}
+
