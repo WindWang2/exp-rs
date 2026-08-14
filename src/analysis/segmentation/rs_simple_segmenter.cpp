@@ -52,18 +52,15 @@ RsSegmentMap RsSimpleSegmenter::segment( const float *data, int width, int heigh
     report( 0.3f );
 
     // 3. Quantize
-    QVector<int> quantized = quantize( smoothed.data(), n, params.quantizeBins, nodata );
+    const int bins = std::max( 2, params.quantizeBins );
+    QVector<int> quantized = quantize( smoothed.data(), n, bins, nodata );
     report( 0.5f );
 
-    // Find nodata bin value
-    int nodataBin = -1;
+    // Mask nodata pixels explicitly from original raw data
     for ( size_t i = 0; i < n; ++i )
     {
         if ( data[i] == nodata || std::isnan( data[i] ) )
-        {
-            nodataBin = quantized[i];
-            break;
-        }
+            quantized[i] = 0;
     }
 
     // Release smoothed float buffer early to minimize peak RSS
@@ -75,7 +72,7 @@ RsSegmentMap RsSimpleSegmenter::segment( const float *data, int width, int heigh
     report( 0.55f );
 
     // 4. Connected components
-    QVector<quint32> labels = connectedComponents( quantized, width, height, nodataBin, isCanceled );
+    QVector<quint32> labels = connectedComponents( quantized, width, height, 0, isCanceled );
     if ( labels.isEmpty() )
         return {}; // canceled during labeling
 
@@ -138,8 +135,8 @@ RsSegmentMap RsSimpleSegmenter::segmentMultiBand( const float *const *bandData,
         QVector<float> curBand( bandData[b], bandData[b] + n );
         gaussianSmooth( curBand, width, height, params.smoothKernel );
 
-        // 2. Quantize single smoothed band
-        QVector<int> curQuant = quantize( curBand.data(), n, params.quantizeBins, nodata );
+        // 2. Quantize single smoothed band with sanitized bins
+        QVector<int> curQuant = quantize( curBand.data(), n, bins, nodata );
 
         // curBand float buffer no longer needed for this band
         curBand.clear();
@@ -170,8 +167,13 @@ RsSegmentMap RsSimpleSegmenter::segmentMultiBand( const float *const *bandData,
                 }
                 else
                 {
-                    size_t hashKey = static_cast<size_t>( compositeQuantized[i] ) * static_cast<size_t>( bins ) + static_cast<size_t>( curQuant[i] );
-                    compositeQuantized[i] = static_cast<int>( hashKey & 0x7FFFFFFF );
+                    uint64_t h = static_cast<uint32_t>( compositeQuantized[i] );
+                    // 64-bit hash combiner (SplitMix / Boost hash_combine)
+                    h ^= static_cast<uint32_t>( curQuant[i] ) + 0x9e3779b97f4a7c15ULL + ( h << 6 ) + ( h >> 2 );
+                    int combined = static_cast<int>( h & 0x7FFFFFFF );
+                    if ( combined == 0 )
+                        combined = 1;
+                    compositeQuantized[i] = combined;
                 }
             }
         }
@@ -345,35 +347,24 @@ QVector<quint32> RsSimpleSegmenter::connectedComponents( const QVector<int> &qua
         {
             if ( cancelCheck() )
                 return {};
-            const int idx = r * w + c;
+            const size_t idx = static_cast<size_t>(r) * static_cast<size_t>(w) + static_cast<size_t>(c);
             if ( quantized[idx] == nodataBin || quantized[idx] == 0 )
                 continue;
             if ( labels[idx] != 0 )
                 continue;
 
-            // BFS flood fill. Cap segment size at 1e6 to avoid OOM on huge
-            // homogeneous regions; residual connected pixels get a NEW label
-            // rather than being left as 0 (outer scan may have already passed
-            // them, so relying on the outer loop alone would drop pixels).
+            // BFS flood fill with natural 8-connected wavefront
             const int targetBin = quantized[idx];
-            std::queue<int> q;
+            std::queue<size_t> q;
             q.push( idx );
             labels[idx] = nextLabel;
-            size_t segmentSize = 1;
-            const size_t maxSegmentSize = 1000000;
 
             while ( !q.empty() )
             {
-                if ( segmentSize >= maxSegmentSize )
-                {
-                    ++nextLabel;
-                    segmentSize = 0;
-                }
-
-                int cur = q.front();
+                size_t cur = q.front();
                 q.pop();
-                int cr = cur / w;
-                int cc = cur % w;
+                int cr = static_cast<int>( cur / static_cast<size_t>(w) );
+                int cc = static_cast<int>( cur % static_cast<size_t>(w) );
 
                 for ( int d = 0; d < 8; ++d )
                 {
@@ -381,14 +372,13 @@ QVector<quint32> RsSimpleSegmenter::connectedComponents( const QVector<int> &qua
                     int nc = cc + dc[d];
                     if ( nr < 0 || nr >= h || nc < 0 || nc >= w )
                         continue;
-                    int nidx = nr * w + nc;
+                    size_t nidx = static_cast<size_t>(nr) * static_cast<size_t>(w) + static_cast<size_t>(nc);
                     if ( labels[nidx] != 0 )
                         continue;
                     if ( quantized[nidx] != targetBin )
                         continue;
                     labels[nidx] = nextLabel;
                     q.push( nidx );
-                    segmentSize++;
                 }
                 if ( ( scanned & 0xFFFu ) == 0 && isCanceled && isCanceled() )
                     return {};
@@ -467,15 +457,15 @@ void RsSimpleSegmenter::mergeSmallRegions( QVector<quint32> &labels, int w, int 
         quint32 segId = labels[i];
         if ( segId == 0 || !isSmall[segId] )
             continue;
-        int r = static_cast<int>( i / w );
-        int c = static_cast<int>( i % w );
+        int r = static_cast<int>( i / static_cast<size_t>(w) );
+        int c = static_cast<int>( i % static_cast<size_t>(w) );
         for ( int d = 0; d < 4; ++d )
         {
             int nr = r + dr4[d];
             int nc = c + dc4[d];
             if ( nr < 0 || nr >= h || nc < 0 || nc >= w )
                 continue;
-            quint32 neighbor = labels[static_cast<size_t>(nr) * w + nc];
+            quint32 neighbor = labels[static_cast<size_t>(nr) * static_cast<size_t>(w) + static_cast<size_t>(nc)];
             if ( neighbor != 0 && neighbor != segId )
             {
                 auto &vec = smallAdjacency[segId];
