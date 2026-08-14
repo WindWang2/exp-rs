@@ -896,6 +896,8 @@ data::Result<void> QgisDisplayManager::removeView(DisplayViewId viewId) {
     const QVector<DisplayLayerId> layersInView = viewIt->second->layerIds;
     for (const DisplayLayerId layerId : layersInView)
       (void)removeLayer(layerId);
+    // Avoid redundant setCanvasLayers flush immediately before view erasing
+    viewIt->second->batchPendingSync = false;
   }
 
   m_impl->views.erase(viewIt);
@@ -926,6 +928,12 @@ QgsMapLayer *QgisDisplayManager::mapLayer(DisplayLayerId layerId) const {
 }
 
 data::Result<void> QgisDisplayManager::setLayerVisible(DisplayLayerId layerId, bool visible) {
+  if (QThread::currentThread() != thread()) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.wrong_thread"),
+        QStringLiteral(
+            "Display mutations must run on the manager's owning thread")));
+  }
   const Impl::LayerRecord *layerRecord = m_impl->findLayer(layerId);
   if (!layerRecord) {
     return data::Result<void>::failure(displayDiagnostic(
@@ -955,70 +963,86 @@ bool QgisDisplayManager::isLayerVisible(DisplayLayerId layerId) const {
 }
 
 data::Result<void> QgisDisplayManager::moveLayerTop(DisplayLayerId layerId) {
+  if (QThread::currentThread() != thread()) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.wrong_thread"),
+        QStringLiteral(
+            "Display mutations must run on the manager's owning thread")));
+  }
   Impl::LayerRecord *layerRecord = m_impl->findLayer(layerId);
-  if (!layerRecord) {
+  if (!layerRecord || !layerRecord->mapLayer) {
     return data::Result<void>::failure(displayDiagnostic(
         QStringLiteral("display.invalid_layer"),
         QStringLiteral("No registered display layer matches the requested id")));
   }
   Impl::ViewRecord *viewRecord = m_impl->findView(layerRecord->snapshot.viewId());
-  if (!viewRecord) {
+  if (!viewRecord || !viewRecord->layerTree) {
     return data::Result<void>::failure(displayDiagnostic(
         QStringLiteral("display.invalid_view"),
-        QStringLiteral("View unavailable")));
+        QStringLiteral("View or layer tree unavailable")));
+  }
+  QgsLayerTreeLayer *node = viewRecord->layerTree->findLayer(layerRecord->mapLayer->id());
+  if (!node) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.layer_not_found"),
+        QStringLiteral("Layer node not found in layer tree")));
+  }
+  QgsLayerTreeGroup *parentGroup = QgsLayerTree::toGroup(node->parent());
+  if (!parentGroup) parentGroup = viewRecord->layerTree.data();
+  if (parentGroup) {
+    const auto children = parentGroup->children();
+    int idx = children.indexOf(node);
+    if (idx > 0) {
+      QgsLayerTreeNode *cloned = node->clone();
+      parentGroup->insertChildNode(0, cloned);
+      parentGroup->removeChildren(idx + 1, 1);
+    }
   }
   viewRecord->layerIds.removeAll(layerId);
   viewRecord->layerIds.prepend(layerId);
-  if (viewRecord->layerTree && layerRecord->mapLayer) {
-    QgsLayerTreeLayer *node = viewRecord->layerTree->findLayer(layerRecord->mapLayer->id());
-    if (node) {
-      QgsLayerTreeGroup *parentGroup = QgsLayerTree::toGroup(node->parent());
-      if (!parentGroup) parentGroup = viewRecord->layerTree.data();
-      if (parentGroup) {
-        int idx = parentGroup->children().indexOf(node);
-        if (idx > 0) {
-          QgsLayerTreeNode *cloned = node->clone();
-          parentGroup->insertChildNode(0, cloned);
-          parentGroup->removeChildren(idx + 1, 1);
-        }
-      }
-    }
-  }
   Impl::syncViewCanvasLayers(viewRecord);
   return data::Result<void>::success();
 }
 
 data::Result<void> QgisDisplayManager::moveLayerBottom(DisplayLayerId layerId) {
+  if (QThread::currentThread() != thread()) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.wrong_thread"),
+        QStringLiteral(
+            "Display mutations must run on the manager's owning thread")));
+  }
   Impl::LayerRecord *layerRecord = m_impl->findLayer(layerId);
-  if (!layerRecord) {
+  if (!layerRecord || !layerRecord->mapLayer) {
     return data::Result<void>::failure(displayDiagnostic(
         QStringLiteral("display.invalid_layer"),
         QStringLiteral("No registered display layer matches the requested id")));
   }
   Impl::ViewRecord *viewRecord = m_impl->findView(layerRecord->snapshot.viewId());
-  if (!viewRecord) {
+  if (!viewRecord || !viewRecord->layerTree) {
     return data::Result<void>::failure(displayDiagnostic(
         QStringLiteral("display.invalid_view"),
-        QStringLiteral("View unavailable")));
+        QStringLiteral("View or layer tree unavailable")));
+  }
+  QgsLayerTreeLayer *node = viewRecord->layerTree->findLayer(layerRecord->mapLayer->id());
+  if (!node) {
+    return data::Result<void>::failure(displayDiagnostic(
+        QStringLiteral("display.layer_not_found"),
+        QStringLiteral("Layer node not found in layer tree")));
+  }
+  QgsLayerTreeGroup *parentGroup = QgsLayerTree::toGroup(node->parent());
+  if (!parentGroup) parentGroup = viewRecord->layerTree.data();
+  if (parentGroup) {
+    const auto children = parentGroup->children();
+    int lastIdx = static_cast<int>(children.size()) - 1;
+    int idx = children.indexOf(node);
+    if (idx >= 0 && idx < lastIdx) {
+      QgsLayerTreeNode *cloned = node->clone();
+      parentGroup->addChildNode(cloned);
+      parentGroup->removeChildren(idx, 1);
+    }
   }
   viewRecord->layerIds.removeAll(layerId);
   viewRecord->layerIds.append(layerId);
-  if (viewRecord->layerTree && layerRecord->mapLayer) {
-    QgsLayerTreeLayer *node = viewRecord->layerTree->findLayer(layerRecord->mapLayer->id());
-    if (node) {
-      QgsLayerTreeGroup *parentGroup = QgsLayerTree::toGroup(node->parent());
-      if (!parentGroup) parentGroup = viewRecord->layerTree.data();
-      if (parentGroup) {
-        int lastIdx = static_cast<int>(parentGroup->children().size()) - 1;
-        int idx = parentGroup->children().indexOf(node);
-        if (idx >= 0 && idx < lastIdx) {
-          QgsLayerTreeNode *cloned = node->clone();
-          parentGroup->addChildNode(cloned);
-          parentGroup->removeChildren(idx, 1);
-        }
-      }
-    }
-  }
   Impl::syncViewCanvasLayers(viewRecord);
   return data::Result<void>::success();
 }
@@ -1062,6 +1086,7 @@ QgisDisplayManager::ScopedBatchUpdate QgisDisplayManager::createBatchUpdate(Disp
 }
 
 void QgisDisplayManager::beginBatchUpdate(DisplayViewId viewId) {
+  if (QThread::currentThread() != thread()) return;
   Impl::ViewRecord *viewRecord = m_impl->findView(viewId);
   if (viewRecord) {
     ++viewRecord->batchUpdateDepth;
@@ -1069,6 +1094,7 @@ void QgisDisplayManager::beginBatchUpdate(DisplayViewId viewId) {
 }
 
 void QgisDisplayManager::endBatchUpdate(DisplayViewId viewId) {
+  if (QThread::currentThread() != thread()) return;
   Impl::ViewRecord *viewRecord = m_impl->findView(viewId);
   if (viewRecord && viewRecord->batchUpdateDepth > 0) {
     --viewRecord->batchUpdateDepth;

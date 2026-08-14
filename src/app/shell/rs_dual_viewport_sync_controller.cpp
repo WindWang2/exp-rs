@@ -9,6 +9,15 @@
 #include "qgsmapcanvas.h"
 #include "qgsrectangle.h"
 
+namespace
+{
+    using namespace std::chrono_literals;
+    constexpr auto kThrottleInterval = 16ms;      // ~60 FPS coalesce rate limit
+    constexpr double kRotationEpsilon = 1e-5;     // Rotation tolerance in degrees
+    constexpr double kScaleRelativeEpsilon = 1e-4;// Relative scale tolerance
+    constexpr double kCoordEpsilon = 1e-6;        // Coordinate comparison tolerance
+}
+
 RsDualViewportSyncController::RsDualViewportSyncController( QgsMapCanvas *primary,
                                                             QgsMapCanvas *secondary,
                                                             QObject *parent )
@@ -17,7 +26,7 @@ RsDualViewportSyncController::RsDualViewportSyncController( QgsMapCanvas *primar
   , mSecondary( secondary )
 {
     mThrottle.setSingleShot( true );
-    mThrottle.setInterval( 16 ); // ~60 FPS coalesce rate limit
+    mThrottle.setInterval( kThrottleInterval );
 
     connect( &mThrottle, &QTimer::timeout, this, [this]() {
         if ( !mEnabled || mPending == Pending::None )
@@ -88,17 +97,17 @@ void RsDualViewportSyncController::snapSecondaryToPrimary()
 
 void RsDualViewportSyncController::onPrimaryExtentChanged()
 {
-    ++mStats.extentChangedEvents;
     if ( !mEnabled || mApplying || !mPrimary || !mSecondary )
         return;
+    ++mStats.extentChangedEvents;
     schedule( /*fromPrimary=*/true );
 }
 
 void RsDualViewportSyncController::onSecondaryExtentChanged()
 {
-    ++mStats.extentChangedEvents;
     if ( !mEnabled || mApplying || !mPrimary || !mSecondary )
         return;
+    ++mStats.extentChangedEvents;
     schedule( /*fromPrimary=*/false );
 }
 
@@ -113,104 +122,105 @@ void RsDualViewportSyncController::schedule( bool fromPrimary )
     }
 }
 
-void RsDualViewportSyncController::applyFromPrimary()
+void RsDualViewportSyncController::applySync( QgsMapCanvas *source, QgsMapCanvas *target )
 {
-    if ( !mPrimary || !mSecondary || mApplying )
+    if ( !source || !target || mApplying )
         return;
 
     mApplying = true;
     ++mStats.appliedSyncCount;
     bool targetModified = false;
 
-    // 1. Rotation sync (if scaleSync/rotation enabled and rotation differs)
+    // 1. Rotation sync (if scale/rotation sync enabled and rotation differs)
     if ( mScaleSync )
     {
-        const double primaryRot = mPrimary->rotation();
-        if ( !qgsDoubleNear( mSecondary->rotation(), primaryRot, 1e-5 ) )
+        const double sourceRot = source->rotation();
+        if ( !qgsDoubleNear( target->rotation(), sourceRot, kRotationEpsilon ) )
         {
-            mSecondary->setRotation( primaryRot );
+            target->setRotation( sourceRot );
             targetModified = true;
         }
     }
 
-    // 2. Extent sync (if extent differs)
-    const QgsRectangle primaryExtent = mPrimary->extent();
-    if ( mSecondary->extent() != primaryExtent )
+    // Guard against canvas destruction during synchronous signal dispatch
+    if ( !mPrimary || !mSecondary )
     {
-        mSecondary->setExtent( primaryExtent );
-        targetModified = true;
+        mApplying = false;
+        return;
     }
 
-    // 3. Scale sync (if scale sync enabled and scale differs beyond floating point precision)
+    // 2. Extent & Scale sync
     if ( mScaleSync )
     {
-        const double primaryScale = mPrimary->scale();
-        const double secondaryScale = mSecondary->scale();
-        if ( primaryScale > 0.0 && !qgsDoubleNear( secondaryScale, primaryScale, 1e-4 * primaryScale ) )
+        // Full extent sync
+        const QgsRectangle sourceExtent = source->extent();
+        if ( target->extent() != sourceExtent )
         {
-            mSecondary->zoomScale( primaryScale );
+            target->setExtent( sourceExtent );
+            targetModified = true;
+        }
+
+        // Guard against canvas destruction during setExtent signal cascade
+        if ( !mPrimary || !mSecondary )
+        {
+            mApplying = false;
+            return;
+        }
+
+        // Scale sync
+        const double sourceScale = source->scale();
+        const double targetScale = target->scale();
+        if ( sourceScale > 0.0 && !qgsDoubleNear( targetScale, sourceScale, kScaleRelativeEpsilon * sourceScale ) )
+        {
+            target->zoomScale( sourceScale );
+            targetModified = true;
+        }
+    }
+    else
+    {
+        // Pan-center only sync: preserve target canvas's independent zoom scale / dimensions
+        const QgsPointXY sourceCenter = source->extent().center();
+        const QgsRectangle currentTargetExtent = target->extent();
+        const QgsPointXY currentTargetCenter = currentTargetExtent.center();
+        const double dx = sourceCenter.x() - currentTargetCenter.x();
+        const double dy = sourceCenter.y() - currentTargetCenter.y();
+        if ( !qgsDoubleNear( dx, 0.0, kCoordEpsilon ) ||
+             !qgsDoubleNear( dy, 0.0, kCoordEpsilon ) )
+        {
+            const QgsRectangle shiftedExtent(
+                currentTargetExtent.xMinimum() + dx,
+                currentTargetExtent.yMinimum() + dy,
+                currentTargetExtent.xMaximum() + dx,
+                currentTargetExtent.yMaximum() + dy
+            );
+            target->setExtent( shiftedExtent, true );
             targetModified = true;
         }
     }
 
-    // Refresh ONLY the secondary (target) canvas if modified.
-    // NEVER refresh the primary (source) canvas.
+    // Guard against canvas destruction before refresh
+    if ( !mPrimary || !mSecondary )
+    {
+        mApplying = false;
+        return;
+    }
+
+    // Refresh ONLY the target canvas if modified. NEVER refresh the source canvas.
     if ( targetModified )
     {
         ++mStats.canvasRefreshRequests;
-        mSecondary->refresh();
+        target->refresh();
     }
 
     mApplying = false;
 }
 
+void RsDualViewportSyncController::applyFromPrimary()
+{
+    applySync( mPrimary.data(), mSecondary.data() );
+}
+
 void RsDualViewportSyncController::applyFromSecondary()
 {
-    if ( !mPrimary || !mSecondary || mApplying )
-        return;
-
-    mApplying = true;
-    ++mStats.appliedSyncCount;
-    bool targetModified = false;
-
-    // 1. Rotation sync (if scaleSync/rotation enabled and rotation differs)
-    if ( mScaleSync )
-    {
-        const double secondaryRot = mSecondary->rotation();
-        if ( !qgsDoubleNear( mPrimary->rotation(), secondaryRot, 1e-5 ) )
-        {
-            mPrimary->setRotation( secondaryRot );
-            targetModified = true;
-        }
-    }
-
-    // 2. Extent sync (if extent differs)
-    const QgsRectangle secondaryExtent = mSecondary->extent();
-    if ( mPrimary->extent() != secondaryExtent )
-    {
-        mPrimary->setExtent( secondaryExtent );
-        targetModified = true;
-    }
-
-    // 3. Scale sync (if scale sync enabled and scale differs beyond floating point precision)
-    if ( mScaleSync )
-    {
-        const double secondaryScale = mSecondary->scale();
-        const double primaryScale = mPrimary->scale();
-        if ( secondaryScale > 0.0 && !qgsDoubleNear( primaryScale, secondaryScale, 1e-4 * secondaryScale ) )
-        {
-            mPrimary->zoomScale( secondaryScale );
-            targetModified = true;
-        }
-    }
-
-    // Refresh ONLY the primary (target) canvas if modified.
-    // NEVER refresh the secondary (source) canvas.
-    if ( targetModified )
-    {
-        ++mStats.canvasRefreshRequests;
-        mPrimary->refresh();
-    }
-
-    mApplying = false;
+    applySync( mSecondary.data(), mPrimary.data() );
 }

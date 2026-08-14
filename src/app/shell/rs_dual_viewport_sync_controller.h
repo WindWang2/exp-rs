@@ -69,6 +69,7 @@ class RsDualViewportSyncController : public QObject
     void onCanvasDestroyed( QObject *obj );
 
   private:
+    void applySync( QgsMapCanvas *source, QgsMapCanvas *target );
     void applyFromPrimary();
     void applyFromSecondary();
     void schedule( bool fromPrimary );

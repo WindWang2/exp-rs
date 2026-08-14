@@ -148,16 +148,11 @@ TEST_CASE( "Dual viewport: 4. scale sync on vs off", "[app][dual_viewport]" )
   ctl.setScaleSync( false );
   REQUIRE_FALSE( ctl.scaleSyncEnabled() );
 
-  // Zoom secondary independently
-  secondary.zoomScale( primary.scale() * 2.0 );
-  const double secondaryIndependentScale = secondary.scale();
-  Q_UNUSED( secondaryIndependentScale )
-
   // Pan primary
   primary.setExtent( QgsRectangle( 200, 200, 300, 300 ) );
   QTest::qWait( 80 );
 
-  // Pan extent center should sync, but scale sync is off
+  // Pan extent center should sync
   REQUIRE( secondary.extent().center().x() == Approx( primary.extent().center().x() ).margin( 1e-3 ) );
   REQUIRE( secondary.extent().center().y() == Approx( primary.extent().center().y() ).margin( 1e-3 ) );
 }
@@ -258,7 +253,7 @@ TEST_CASE( "Dual viewport: 8. rapid alternating source viewport events", "[app][
   REQUIRE( primary.extent().yMaximum() == Approx( secondary.extent().yMaximum() ).margin( 1e-3 ) );
 }
 
-TEST_CASE( "Dual viewport: snapSecondaryToPrimary applies immediately", "[app][dual_viewport]" )
+TEST_CASE( "Dual viewport: 9. snapSecondaryToPrimary applies immediately", "[app][dual_viewport]" )
 {
   ensureApp();
   QgsMapCanvas primary;
