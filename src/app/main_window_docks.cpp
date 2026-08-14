@@ -625,11 +625,11 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
 
     auto *chrome = new QWidget;
     chrome->setObjectName( QStringLiteral( "rsTopChrome" ) );
-    chrome->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+    chrome->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
     // Base: QAT(28) + tabs(30) + content(96) = 154 (band rail removed from product chrome).
     // + optional toolbar strip (0–2 × 32) under the ribbon.
     constexpr int kRibbonOnlyH = 154;
-    chrome->setFixedHeight( kRibbonOnlyH );
+    chrome->setMinimumHeight( kRibbonOnlyH );
 
     auto *chromeLay = new QVBoxLayout( chrome );
     chromeLay->setContentsMargins( 0, 0, 0, 0 );
@@ -716,7 +716,7 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     ribbonDock->setAllowedAreas( Qt::TopDockWidgetArea );
     ribbonDock->setTitleBarWidget( new QWidget( ribbonDock ) ); // no title chrome
     ribbonDock->setWidget( chrome );
-    ribbonDock->setFixedHeight( kRibbonOnlyH );
+    ribbonDock->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
     ribbonDock->setMinimumHeight( kRibbonOnlyH );
     ribbonDock->setMaximumHeight( kRibbonOnlyH + 64 ); // + 2×32 toolbar rows
     addDockWidget( Qt::TopDockWidgetArea, ribbonDock );

@@ -254,9 +254,9 @@ QMenu *QgisDesktopWindow::createPopupMenu()
     auto makeSectionTitle = [menu]( const QString &title ) {
         auto *titleAction = new QWidgetAction( menu );
         auto *label = new QLabel( QStringLiteral( "<b>%1</b>" ).arg( title ) );
+        label->setObjectName( QStringLiteral( "rsMenuSectionTitle" ) );
         label->setMargin( 4 );
         label->setAlignment( Qt::AlignHCenter );
-        label->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
         titleAction->setDefaultWidget( label );
         menu->addAction( titleAction );
     };

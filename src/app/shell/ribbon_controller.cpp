@@ -46,14 +46,15 @@ void polishLargeButton( QToolButton *btn )
     return;
   btn->setObjectName( QStringLiteral( "rsRibbonLargeBtn" ) );
   btn->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
-  btn->setIconSize( QSize( 28, 28 ) );
+  const QFontMetrics fm = btn->fontMetrics();
+  const int iconSize = qMax( 24, qMin( 32, fm.height() * 2 ) );
+  btn->setIconSize( QSize( iconSize, iconSize ) );
   btn->setAutoRaise( true );
-  // Icon 28 + label + padding — 64 avoids Chinese text under-icon clipping
-  btn->setFixedHeight( 64 );
-  btn->setMinimumWidth( 56 );
-  btn->setMaximumWidth( 88 );
+  const int desiredH = iconSize + ( fm.lineSpacing() * 2 ) + 10;
+  btn->setMinimumHeight( desiredH );
+  btn->setMinimumWidth( qMax( 56, fm.horizontalAdvance( QStringLiteral( "四个汉字" ) ) + 12 ) );
+  btn->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Preferred );
   btn->setFocusPolicy( Qt::StrongFocus );
-  btn->setSizePolicy( QSizePolicy::Fixed, QSizePolicy::Fixed );
   btn->setCursor( Qt::PointingHandCursor );
 }
 
@@ -63,9 +64,13 @@ void polishSmallButton( QToolButton *btn )
     return;
   btn->setObjectName( QStringLiteral( "rsRibbonQatBtn" ) );
   btn->setToolButtonStyle( Qt::ToolButtonIconOnly );
-  btn->setIconSize( QSize( 16, 16 ) );
+  const QFontMetrics fm = btn->fontMetrics();
+  const int iconSize = qMax( 16, fm.height() );
+  btn->setIconSize( QSize( iconSize, iconSize ) );
   btn->setAutoRaise( true );
-  btn->setFixedSize( 28, 24 );
+  const int btnW = qMax( 28, iconSize + 12 );
+  const int btnH = qMax( 24, iconSize + 8 );
+  btn->setMinimumSize( btnW, btnH );
   btn->setFocusPolicy( Qt::StrongFocus );
   btn->setCursor( Qt::PointingHandCursor );
 }
@@ -78,8 +83,9 @@ void polishTabButton( QPushButton *btn )
   btn->setFlat( true );
   btn->setFocusPolicy( Qt::StrongFocus );
   btn->setCursor( Qt::PointingHandCursor );
-  btn->setFixedHeight( 28 );
-  btn->setMinimumWidth( 56 );
+  const QFontMetrics fm = btn->fontMetrics();
+  btn->setMinimumHeight( qMax( 28, fm.height() + 10 ) );
+  btn->setMinimumWidth( qMax( 56, fm.horizontalAdvance( btn->text().isEmpty() ? QStringLiteral( "四个汉字" ) : btn->text() ) + 20 ) );
   btn->setObjectName( QStringLiteral( "rsRibbonTabButton" ) );
 }
 
@@ -131,8 +137,14 @@ QWidget *RibbonController::makeTabPage()
   scroll->setFrameShape( QFrame::NoFrame );
   scroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
   scroll->setVerticalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
-  // Large tools 64 + group title ~16 + margins ≈ 88; keep room for scrollbar
-  scroll->setFixedHeight( 96 );
+  
+  const QFontMetrics fm = scroll->fontMetrics();
+  const int iconSize = qMax( 24, qMin( 32, fm.height() * 2 ) );
+  const int desiredH = iconSize + ( fm.lineSpacing() * 2 ) + 10;
+  const int titleH = qMax( 16, fm.height() + 4 );
+  const int pageH = desiredH + titleH + 12 + 4;
+  scroll->setMinimumHeight( pageH );
+  scroll->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
 
   auto *page = new QWidget;
   page->setObjectName( QStringLiteral( "rsRibbonPage" ) );
@@ -180,7 +192,7 @@ RibbonController::GroupHost RibbonController::addGroup( QHBoxLayout *pageLayout,
   auto *titleLbl = new QLabel( title, group );
   titleLbl->setObjectName( QStringLiteral( "rsRibbonGroupTitle" ) );
   titleLbl->setAlignment( Qt::AlignHCenter | Qt::AlignVCenter );
-  titleLbl->setFixedHeight( 16 );
+  titleLbl->setFixedHeight( qMax( 16, titleLbl->fontMetrics().height() + 4 ) );
   vl->addWidget( titleLbl );
 
   pageLayout->insertWidget( pageLayout->count() - 1, group );
@@ -199,7 +211,8 @@ void RibbonController::addGroupSeparator( QHBoxLayout *pageLayout )
   line->setFrameShape( QFrame::VLine );
   line->setFrameShadow( QFrame::Plain );
   line->setFixedWidth( 1 );
-  line->setFixedHeight( 72 );
+  line->setMinimumHeight( 64 );
+  line->setSizePolicy( QSizePolicy::Fixed, QSizePolicy::Preferred );
   pageLayout->insertWidget( pageLayout->count() - 1, line );
 }
 
@@ -241,7 +254,8 @@ QSlider *RibbonController::addSlider( GroupHost &group,
 
   auto *box = new QWidget( group.widget );
   box->setObjectName( QStringLiteral( "rsRibbonSliderBox" ) );
-  box->setFixedHeight( 64 );
+  box->setMinimumHeight( 64 );
+  box->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Preferred );
   box->setMinimumWidth( 128 );
   box->setMaximumWidth( 168 );
   auto *vl = new QVBoxLayout( box );
@@ -265,7 +279,7 @@ QSlider *RibbonController::addSlider( GroupHost &group,
   slider->setObjectName( QStringLiteral( "rsRibbonSlider" ) );
   slider->setRange( minVal, maxVal );
   slider->setValue( value );
-  slider->setFixedHeight( 18 );
+  slider->setMinimumHeight( 18 );
   slider->setFocusPolicy( Qt::StrongFocus );
   if ( !tooltip.isEmpty() )
     slider->setToolTip( tooltip );
@@ -293,7 +307,8 @@ QComboBox *RibbonController::addComboBox( GroupHost &group,
 
   auto *box = new QWidget( group.widget );
   box->setObjectName( QStringLiteral( "rsRibbonComboBox" ) );
-  box->setFixedHeight( 64 );
+  box->setMinimumHeight( 64 );
+  box->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Preferred );
   box->setMinimumWidth( minWidth );
   box->setMaximumWidth( qMax( minWidth + 40, 140 ) );
   auto *vl = new QVBoxLayout( box );
@@ -307,7 +322,7 @@ QComboBox *RibbonController::addComboBox( GroupHost &group,
 
   auto *combo = new QComboBox( box );
   combo->setObjectName( QStringLiteral( "rsRibbonCombo" ) );
-  combo->setFixedHeight( 26 );
+  combo->setMinimumHeight( 24 );
   combo->setSizeAdjustPolicy( QComboBox::AdjustToMinimumContentsLengthWithIcon );
   combo->setMinimumContentsLength( 4 );
   combo->setFocusPolicy( Qt::StrongFocus );
@@ -559,9 +574,9 @@ QWidget *RibbonController::createRibbonBar()
 {
   auto *bar = new QWidget;
   bar->setObjectName( QStringLiteral( "rsRibbonBar" ) );
-  bar->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
-  // QAT 28 + tabs 30 + content 96 = 154 (band rail is outside this bar)
-  bar->setFixedHeight( 154 );
+  bar->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
+  // QAT 28 + tabs 30 + content 96 = 154 (minimum layout height)
+  bar->setMinimumHeight( 154 );
 
   auto *root = new QVBoxLayout( bar );
   root->setContentsMargins( 0, 0, 0, 0 );
@@ -573,14 +588,15 @@ QWidget *RibbonController::createRibbonBar()
   // ── 2. Tab strip ───────────────────────────────────────────────────────
   auto *tabRow = new QWidget( bar );
   tabRow->setObjectName( QStringLiteral( "rsRibbonTabRow" ) );
-  tabRow->setFixedHeight( 30 );
+  tabRow->setMinimumHeight( 30 );
   auto *tabLay = new QHBoxLayout( tabRow );
   tabLay->setContentsMargins( 8, 0, 8, 0 );
   tabLay->setSpacing( 0 );
 
   auto *stack = new QStackedWidget( bar );
   stack->setObjectName( QStringLiteral( "rsRibbonStack" ) );
-  stack->setFixedHeight( 96 );
+  stack->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
+  stack->setMinimumHeight( 96 );
 
   auto *tabGroup = new QButtonGroup( bar );
   tabGroup->setExclusive( true );
