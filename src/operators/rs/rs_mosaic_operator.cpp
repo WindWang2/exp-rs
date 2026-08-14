@@ -208,10 +208,10 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
     }
 
     // Union extent
-    double unionMinX = std::numeric_limits<double>::max();
-    double unionMinY = std::numeric_limits<double>::max();
-    double unionMaxX = std::numeric_limits<double>::lowest();
-    double unionMaxY = std::numeric_limits<double>::lowest();
+    double unionMinX = (std::numeric_limits<double>::max)();
+    double unionMinY = (std::numeric_limits<double>::max)();
+    double unionMaxX = (std::numeric_limits<double>::lowest)();
+    double unionMaxY = (std::numeric_limits<double>::lowest)();
 
     const double refPixelW = metaList[0].geotransform[1];
     const double refPixelH = metaList[0].geotransform[5];
@@ -258,17 +258,17 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
         const double tlY = gt[3];
         const double brX = gt[0] + t.width * gt[1];
         const double brY = gt[3] + t.height * gt[5];
-        unionMinX = std::min(unionMinX, std::min(tlX, brX));
-        unionMinY = std::min(unionMinY, std::min(tlY, brY));
-        unionMaxX = std::max(unionMaxX, std::max(tlX, brX));
-        unionMaxY = std::max(unionMaxY, std::max(tlY, brY));
+        unionMinX = (std::min)(unionMinX, (std::min)(tlX, brX));
+        unionMinY = (std::min)(unionMinY, (std::min)(tlY, brY));
+        unionMaxX = (std::max)(unionMaxX, (std::max)(tlX, brX));
+        unionMaxY = (std::max)(unionMaxY, (std::max)(tlY, brY));
     }
 
     const int64_t outWidth64 = static_cast<int64_t>(std::round((unionMaxX - unionMinX) / std::abs(refPixelW)));
     const int64_t outHeight64 = static_cast<int64_t>(std::round((unionMaxY - unionMinY) / std::abs(refPixelH)));
     if (outWidth64 <= 0 || outHeight64 <= 0
-        || outWidth64 > std::numeric_limits<int>::max()
-        || outHeight64 > std::numeric_limits<int>::max()) {
+        || outWidth64 > (std::numeric_limits<int>::max)()
+        || outHeight64 > (std::numeric_limits<int>::max)()) {
         throw RSOperatorError(ErrorCode::InvalidInputData, "Computed mosaic dimensions are invalid");
     }
 
@@ -339,9 +339,9 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
     uint64_t processedTiles = 0;
 
     for (int y = 0; y < outHeight; y += kTileSize) {
-        const int h = std::min(kTileSize, outHeight - y);
+        const int h = (std::min)(kTileSize, outHeight - y);
         for (int x = 0; x < outWidth; x += kTileSize) {
-            const int w = std::min(kTileSize, outWidth - x);
+            const int w = (std::min)(kTileSize, outWidth - x);
             const size_t currentTilePixels = static_cast<size_t>(w) * h;
 
             // Initialize current output window with NaN (unfilled / nodata)
@@ -351,10 +351,10 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
             for (int i = 0; i < inputCount; ++i) {
                 const auto& meta = metaList[static_cast<size_t>(i)];
 
-                const int64_t interMinX = std::max<int64_t>(x, meta.offsetX);
-                const int64_t interMaxX = std::min<int64_t>(x + w, meta.offsetX + meta.width);
-                const int64_t interMinY = std::max<int64_t>(y, meta.offsetY);
-                const int64_t interMaxY = std::min<int64_t>(y + h, meta.offsetY + meta.height);
+                const int64_t interMinX = (std::max)(static_cast<int64_t>(x), meta.offsetX);
+                const int64_t interMaxX = (std::min)(static_cast<int64_t>(x + w), meta.offsetX + meta.width);
+                const int64_t interMinY = (std::max)(static_cast<int64_t>(y), meta.offsetY);
+                const int64_t interMaxY = (std::min)(static_cast<int64_t>(y + h), meta.offsetY + meta.height);
 
                 if (interMinX >= interMaxX || interMinY >= interMaxY) {
                     continue;
