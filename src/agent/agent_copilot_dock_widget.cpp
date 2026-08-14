@@ -1,5 +1,6 @@
 // src/agent/agent_copilot_dock_widget.cpp
 #include "agent_copilot_dock_widget.h"
+#include "interaction_tool_registry.h"
 #include "llm_settings_dialog.h"
 #include "workspace_snapshot.h"
 
@@ -152,8 +153,15 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapC
   m_canvas = canvas;
   m_workflowExecutor.setDataManager( dataManager );
   m_toolCallDispatcher.setDataManager( dataManager );
-  // Wire the agent→canvas write-back seam (ADR 0021 sibling). canvas: actions
-  // (draw_roi) run synchronously in-process and never reach Task Center.
+
+  m_viewControlService.setDataManager( dataManager );
+  m_viewControlService.setMapCanvas( canvas );
+  InteractionToolRegistry::instance().registerBuiltinTools( &m_viewControlService );
+
+  m_toolCallDispatcher.setInteractionActionHandler(
+    []( const std::string &name, const Json::Value &args ) {
+      return InteractionToolRegistry::instance().execute( name, args );
+    } );
   m_toolCallDispatcher.setCanvasActionHandler(
     [this]( const std::string &action, const Json::Value &args ) {
       return handleCanvasAction( action, args );
@@ -163,89 +171,19 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapC
 Json::Value AgentCopilotDockWidget::handleCanvasAction( const std::string &action,
                                                         const Json::Value &arguments )
 {
+  if ( action == "draw_roi" )
+  {
+    return m_viewControlService.setRoi( arguments );
+  }
+  else if ( action == "clear_roi" )
+  {
+    return m_viewControlService.clearRoi( arguments );
+  }
+
   Json::Value result( Json::objectValue );
   result["action"] = action;
-
-  if ( action != "draw_roi" )
-  {
-    result["status"] = "error";
-    result["errorMessage"] = "Unknown canvas action: " + action +
-                             " (only 'draw_roi' is supported)";
-    return result;
-  }
-
-  if ( !m_canvas )
-  {
-    result["status"] = "error";
-    result["errorMessage"] = "No active map canvas to draw on";
-    return result;
-  }
-
-  QgsMapCanvas *canvas = m_canvas;
-  // Drawing a QgsRubberBand mutates the QGraphicsScene, which is not
-  // thread-safe — canvas actions must run on the canvas's (GUI) thread.
-  if ( QThread::currentThread() != canvas->thread() )
-  {
-    result["status"] = "error";
-    result["errorMessage"] = "canvas: actions must run on the GUI thread";
-    return result;
-  }
-
-  const QgsCoordinateReferenceSystem crs = canvas->mapSettings().destinationCrs();
-  if ( !crs.isValid() )
-  {
-    result["status"] = "error";
-    result["errorMessage"] = "Canvas has no valid CRS; cannot place a ROI";
-    return result;
-  }
-
-  // Parse the ROI geometry: prefer a WKT `geometry` string; fall back to a
-  // `bbox` object {xmin, ymin, xmax, ymax} of numeric values. CRS is the canvas
-  // CRS by default (the agent reads it from the workspace snapshot).
-  QgsGeometry geom;
-  const Json::Value &geometryArg = arguments["geometry"];
-  const Json::Value &bboxArg = arguments["bbox"];
-  if ( geometryArg.isString() && !geometryArg.asString().empty() )
-  {
-    geom = QgsGeometry::fromWkt(
-      QString::fromStdString( geometryArg.asString() ) );
-  }
-  else if ( bboxArg.isObject() && bboxArg["xmin"].isNumeric() &&
-            bboxArg["ymin"].isNumeric() && bboxArg["xmax"].isNumeric() &&
-            bboxArg["ymax"].isNumeric() )
-  {
-    const QgsRectangle rect( bboxArg["xmin"].asDouble(), bboxArg["ymin"].asDouble(),
-                             bboxArg["xmax"].asDouble(), bboxArg["ymax"].asDouble() );
-    geom = QgsGeometry::fromRect( rect );
-  }
-
-  if ( geom.isNull() || geom.isEmpty() )
-  {
-    result["status"] = "error";
-    result["errorMessage"] =
-      "ROI geometry is missing or invalid; provide 'geometry' (WKT) or "
-      "'bbox' {xmin,ymin,xmax,ymax} (numbers) in canvas CRS";
-    return result;
-  }
-
-  // Replace any previous band: QgsRubberBand is a QGraphicsItem owned by the
-  // canvas scene (not QObject-parented), so it persists until explicitly
-  // removed — deleting the old band before drawing a new one keeps one ROI on
-  // screen and stops the scene accumulating stale items.
-  delete m_canvasRoiBand;
-  m_canvasRoiBand = new QgsRubberBand( canvas, Qgis::GeometryType::Polygon );
-  m_canvasRoiBand->setColor( QColor( 255, 80, 0, 120 ) );
-  m_canvasRoiBand->setStrokeColor( QColor( 255, 80, 0 ) );
-  m_canvasRoiBand->setToGeometry( geom, crs );
-  m_canvasRoiBand->show();
-  canvas->refresh();
-
-  // Store the ROI (WKT, canvas CRS) for later tool calls to consume.
-  m_lastCanvasRoiWkt = geom.asWkt();
-
-  result["status"] = "success";
-  result["geometry"] = m_lastCanvasRoiWkt.toStdString();
-  result["crs"] = crs.authid().toStdString();
+  result["status"] = "error";
+  result["errorMessage"] = "Unknown canvas action: " + action;
   return result;
 }
 

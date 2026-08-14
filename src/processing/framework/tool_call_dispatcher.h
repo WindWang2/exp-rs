@@ -67,6 +67,16 @@ public:
   void setCanvasActionHandler( CanvasActionHandler handler ) { mCanvasActionHandler = std::move( handler ); }
   const CanvasActionHandler &canvasActionHandler() const { return mCanvasActionHandler; }
 
+  /// Handler for interaction tool calls (view:, roi:, canvas:, layer: namespaces).
+  /// Receives the tool name and arguments and returns a structured Json result.
+  using InteractionActionHandler = std::function<Json::Value( const std::string &toolName,
+                                                              const Json::Value &arguments )>;
+  void setInteractionActionHandler( InteractionActionHandler handler ) { mInteractionActionHandler = std::move( handler ); }
+  const InteractionActionHandler &interactionActionHandler() const { return mInteractionActionHandler; }
+
+  /// True when a tool name belongs to an interactive namespace (view:, roi:, canvas:, layer:).
+  static bool isInteractionAction( const std::string &name );
+
   /// True when a tool name is a canvas action (the `canvas:` namespace). Shared
   /// by classify()/rejectionReasonFor()/submit() so the namespace check has one
   /// owner. `canvas:` is a sibling to `rs:` / provider algorithms, not a Task
@@ -161,6 +171,7 @@ private:
   CompletionWatcher mWatcher;
   OutputCommitterHandler mOutputCommitterHandler;
   CanvasActionHandler mCanvasActionHandler;
+  InteractionActionHandler mInteractionActionHandler;
   sicnu::data::DataManager *mDataManager = nullptr;
   /// QObject owned by the dispatcher's construction thread (the Data Manager's
   /// owning thread in production). The completion watcher routes payload

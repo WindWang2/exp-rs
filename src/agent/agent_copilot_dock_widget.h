@@ -18,6 +18,7 @@
 #include "processing/framework/tool_call_dispatcher.h"
 #include "llm_config_manager.h"
 #include "llm_streaming_client.h"
+#include "view_control_service.h"
 
 #include <QMap>
 
@@ -42,6 +43,9 @@ class AgentCopilotDockWidget : public QDockWidget
 
     void setContext( data::DataManager *dataManager, QgsMapCanvas *canvas );
     void sendPrompt( const QString &promptText );
+
+    ViewControlService *viewControlService() { return &m_viewControlService; }
+    const ViewControlService *viewControlService() const { return &m_viewControlService; }
 
   signals:
     void viewPlanInCanvasRequested( const QJsonObject &planJson );
@@ -82,19 +86,11 @@ class AgentCopilotDockWidget : public QDockWidget
 
     data::DataManager *m_dataManager = nullptr;
     QgsMapCanvas *m_canvas = nullptr;
+    ViewControlService m_viewControlService;
     processing::AgentWorkflowExecutor m_workflowExecutor;
 
     processing::ToolCallDispatcher m_toolCallDispatcher;
     QMap<long, processing::ToolCallDispatcher::CompletionCallback> m_pendingToolCallCompletions;
-    /// Last ROI drawn by a canvas:draw_roi action, in canvas CRS (WKT). Cleared
-    /// on a new draw; read by later tool calls that consume the ROI. Empty when
-    /// no ROI has been drawn (or the active view has no canvas).
-    QString m_lastCanvasRoiWkt;
-    /// The rubber band currently showing the agent-drawn ROI on the canvas.
-    /// QgsRubberBand is a QGraphicsItem owned by the canvas scene (NOT QObject-
-    /// parented to the canvas), so we delete the previous band before drawing a
-    /// new one — otherwise stale ROIs accumulate in the scene.
-    QgsRubberBand *m_canvasRoiBand = nullptr;
 
     LlmStreamingClient *m_client = nullptr;
     QJsonArray m_messageHistory;

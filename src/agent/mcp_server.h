@@ -96,6 +96,10 @@ protected:
     QVariantMap handleGetOperatorSchema(const QString &operatorId);
     QVariantMap handleExecuteOperator(const QString &operatorId, const QVariantMap &parameters);
 
+    // MCP Methods — Agent Interaction Layer
+    QVariantMap handleListInteractionTools();
+    QVariantMap handleGetInteractionSchema(const QString &toolName);
+
 private:
     /// Unified tool execution helper routing calls through ToolCallDispatcher
     QVariantMap dispatchToolCall(const QString &toolId, const QVariantMap &parameters, bool isOperatorCall);
