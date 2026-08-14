@@ -121,9 +121,11 @@ MapViewSnapshot::ActiveRasterDisplay captureActiveRaster( QgsMapLayer *layer )
 
 WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager,
                                               QgsMapCanvas *canvas,
-                                              const QString &activeLayerName )
+                                              const QString &activeLayerName,
+                                              quint64 displayRevision )
 {
   WorkspaceSnapshot snapshot;
+  snapshot.displayRevision = displayRevision;
 
   if ( dataManager )
   {
@@ -181,12 +183,16 @@ WorkspaceSnapshot WorkspaceSnapshot::capture( data::DataManager *dataManager,
                                      .arg( extent.yMaximum() );
     }
     snapshot.mapView.scale = canvas->scale();
-    snapshot.mapView.activeLayerName = activeLayerName;
     // The agent consumes only QgsMapCanvas (a qgis_gui shared type it links);
     // the canvas current-layer is the primary path ActiveViewHost::activeLayerName()
     // mirrors, so no dependency on the app-executable ActiveViewHost class.
     QgsMapLayer *activeLayer = canvas->currentLayer();
     snapshot.mapView.activeRaster = captureActiveRaster( activeLayer );
+  }
+
+  if ( !activeLayerName.isEmpty() )
+  {
+    snapshot.mapView.activeLayerName = activeLayerName;
   }
 
   return snapshot;
@@ -238,7 +244,7 @@ QString WorkspaceSnapshot::toSystemPromptHeader() const
     }
   }
 
-  if ( !mapView.crsAuthId.isEmpty() || !mapView.extentStr.isEmpty() || !mapView.activeLayerName.isEmpty() )
+  if ( !mapView.crsAuthId.isEmpty() || !mapView.extentStr.isEmpty() || !mapView.activeLayerName.isEmpty() || displayRevision > 0 )
   {
     prompt += QStringLiteral( "Map View State:\n" );
     if ( !mapView.crsAuthId.isEmpty() )
@@ -247,6 +253,8 @@ QString WorkspaceSnapshot::toSystemPromptHeader() const
       prompt += QString( "- Extent: %1\n" ).arg( mapView.extentStr );
     if ( !mapView.activeLayerName.isEmpty() )
       prompt += QString( "- Selected Layer: %1\n" ).arg( mapView.activeLayerName );
+    if ( displayRevision > 0 )
+      prompt += QString( "- Display Revision: %1\n" ).arg( displayRevision );
     if ( mapView.activeRaster.valid )
     {
       prompt += QStringLiteral( "- Active Raster Display:\n" );

@@ -83,6 +83,7 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("roi:"),    // agent interaction roi tools
         QStringLiteral("canvas:"), // agent interaction canvas tools
         QStringLiteral("layer:"),  // agent interaction layer tools
+        QStringLiteral("raster:"), // agent raster display tools
     };
     for (const QString &prefix : kAllowed) {
         if (checkId.startsWith(prefix))
@@ -509,7 +510,8 @@ void McpServer::handleRequest(const QVariantMap &request)
             else if (toolName.startsWith(QStringLiteral("view:")) ||
                      toolName.startsWith(QStringLiteral("roi:")) ||
                      toolName.startsWith(QStringLiteral("canvas:")) ||
-                     toolName.startsWith(QStringLiteral("layer:")))
+                     toolName.startsWith(QStringLiteral("layer:")) ||
+                     toolName.startsWith(QStringLiteral("raster:")))
             {
                 resultData = dispatchToolCall(toolName, arguments, false);
             }

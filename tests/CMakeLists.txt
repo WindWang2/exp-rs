@@ -89,6 +89,29 @@ target_include_directories(test_interaction_tools PRIVATE
 )
 sicnu_discover_tests(test_interaction_tools)
 
+add_executable(test_raster_display_tools test_raster_display_tools.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_raster_display_tools PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_agent
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_raster_display_tools PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_raster_display_tools)
+
 # ToolCallDispatcher (ADR 0021) — headless; fake sink/watcher, real registry.
 # Deliberately avoids the full sicnu_add_test link set: the dispatcher module
 # is GUI-free (QtCore + jsoncpp only).

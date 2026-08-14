@@ -200,6 +200,8 @@ bool ToolCallDispatcher::isInteractionAction( const std::string &name )
     return true;
   if ( name.size() > 6 && name.compare( 0, 6, "layer:" ) == 0 )
     return true;
+  if ( name.size() > 7 && name.compare( 0, 7, "raster:" ) == 0 )
+    return true;
   return false;
 }
 

@@ -10,6 +10,16 @@ qt_add_library(sicnu_qgis_display STATIC
     display/remote_map_capabilities_parser.h
     display/qgis_display_manager.cpp
     display/qgis_display_manager.h
+    display/display_stretch.h
+    display/display_stretch_ports.h
+    display/display_stretch_types.cpp
+    display/display_stretch_types.h
+    display/display_stretch_resolve.cpp
+    display/display_stretch_apply.cpp
+    display/piecewise_linear_enhancement.cpp
+    display/piecewise_linear_enhancement.h
+    display/qgs_display_stretch.cpp
+    display/qgs_display_stretch.h
     project_context.cpp
     project_context.h
 )
@@ -142,11 +152,6 @@ add_executable(sicnu_geo_rs
     widgets/histogram_stretch_widget.cpp
     widgets/band_composition_rail.cpp
     widgets/rs_toolbar_flow_host.cpp
-    display/display_stretch_types.cpp
-    display/display_stretch_resolve.cpp
-    display/display_stretch_apply.cpp
-    display/piecewise_linear_enhancement.cpp
-    display/qgs_display_stretch.cpp
     widgets/spectral_profile_widget.cpp
     widgets/band_role_combo.cpp
     widgets/raster_layer_combo.cpp

@@ -4,6 +4,8 @@ add_library(sicnu_agent SHARED
   workspace_snapshot.h
   view_control_service.cpp
   view_control_service.h
+  raster_display_service.cpp
+  raster_display_service.h
   interaction_tool_registry.cpp
   interaction_tool_registry.h
   agent_copilot_dock_widget.cpp
@@ -31,4 +33,8 @@ target_link_libraries(sicnu_agent PUBLIC
 target_include_directories(sicnu_agent PUBLIC
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
+)
+
+set_target_properties(sicnu_agent PROPERTIES
+  AUTOMOC ON
 )
