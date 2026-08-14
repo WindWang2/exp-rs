@@ -1235,6 +1235,83 @@ TEST_CASE("RS mosaic operator cancellation cleans up incomplete output", "[opera
     CHECK_FALSE(QFile::exists(outPath));
 }
 
+TEST_CASE("RS mosaic operator rejects rotated and sheared rasters", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:mosaic");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString pRot = tmp.path() + "/rotated.tif";
+    const QString outPath = tmp.path() + "/out_rot.tif";
+
+    std::vector<std::vector<float>> b(1);
+    b[0].assign(16, 1.0f);
+    // gt with non-zero rotation terms: gt[2]=0.1, gt[4]=0.1
+    std::array<double, 6> gtRot = {0.0, 1.0, 0.1, 4.0, 0.1, -1.0};
+    QString err;
+    REQUIRE(writeGdalOutput(pRot, 4, 4, b, gtRot, "EPSG:4326", &err));
+
+    Json::Value params(Json::objectValue);
+    params["inputs"] = Json::Value(Json::arrayValue);
+    params["inputs"].append(pRot.toStdString());
+    params["output"] = outPath.toStdString();
+
+    RSOperatorContext ctx;
+    try {
+        op->run(params, ctx);
+        FAIL("Expected rotated raster error");
+    } catch (const RSOperatorError &e) {
+        CHECK(e.code() == ErrorCode::InvalidInputData);
+    }
+}
+
+TEST_CASE("RS mosaic operator handles bottom-up rasters (positive pixel height)", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:mosaic");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    // Tile A: bottom-up origin (0, 0), pixelH = +1.0
+    const QString pA = tmp.path() + "/bu_a.tif";
+    std::vector<std::vector<float>> bA(1);
+    bA[0].assign(16, 10.0f);
+    std::array<double, 6> gtA = {0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+    QString err;
+    REQUIRE(writeGdalOutput(pA, 4, 4, bA, gtA, "EPSG:4326", &err));
+
+    // Tile B: bottom-up origin (2, 2), pixelH = +1.0 (2x2 overlap with Tile A)
+    const QString pB = tmp.path() + "/bu_b.tif";
+    std::vector<std::vector<float>> bB(1);
+    bB[0].assign(16, 20.0f);
+    std::array<double, 6> gtB = {2.0, 1.0, 0.0, 2.0, 0.0, 1.0};
+    REQUIRE(writeGdalOutput(pB, 4, 4, bB, gtB, "EPSG:4326", &err));
+
+    const QString outPath = tmp.path() + "/out_bu.tif";
+    Json::Value params(Json::objectValue);
+    params["inputs"] = Json::Value(Json::arrayValue);
+    params["inputs"].append(pA.toStdString());
+    params["inputs"].append(pB.toStdString());
+    params["output"] = outPath.toStdString();
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+
+    CHECK(result["width"].asInt() == 6);
+    CHECK(result["height"].asInt() == 6);
+
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(outPath));
+    CHECK(outDs.width() == 6);
+    CHECK(outDs.height() == 6);
+    const auto outGt = outDs.geoTransform();
+    CHECK(outGt[0] == Catch::Approx(0.0));
+    CHECK(outGt[3] == Catch::Approx(0.0));
+    CHECK(outGt[5] == Catch::Approx(1.0));
+}
+
+
 
 
 

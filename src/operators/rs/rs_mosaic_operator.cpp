@@ -219,6 +219,17 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
         throw RSOperatorError(ErrorCode::InvalidInputData, "Invalid pixel size on first input");
     }
 
+    // Check for rotated/sheared rasters (gt[2] != 0 or gt[4] != 0)
+    for (int i = 0; i < inputCount; ++i) {
+        const auto& gt = metaList[static_cast<size_t>(i)].geotransform;
+        if (std::abs(gt[2]) > 1e-12 || std::abs(gt[4]) > 1e-12) {
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "Rotated or sheared raster is not supported in mosaic: "
+                    + metaList[static_cast<size_t>(i)].path + "; orthorectify before mosaicking");
+        }
+    }
+
     // Pixel-size consistency (P0): mosaicking rasters with different pixel
     // sizes silently misaligns the union grid. Reject mismatched inputs with
     // an actionable error instead of producing offset/dirty data.
