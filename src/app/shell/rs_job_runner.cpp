@@ -40,20 +40,16 @@ QString watchTask( long taskId,
                            : static_cast<QObject *>(
                                const_cast<sicnu::TaskCenter *>( &sicnu::TaskCenter::instance() ) );
   auto *holder = new QObject( lifetime );
-  auto *conn = new QMetaObject::Connection;
 
-  *conn = QObject::connect(
+  QObject::connect(
     &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, holder,
-    [taskId, onFinished, conn, holder]( const sicnu::AlgorithmTaskInfo &info ) {
+    [taskId, onFinished, holder]( const sicnu::AlgorithmTaskInfo &info ) {
       if ( info.taskId != taskId )
         return;
       if ( info.status != TaskStatus::Completed
            && info.status != TaskStatus::Failed
            && info.status != TaskStatus::Canceled )
         return;
-
-      QObject::disconnect( *conn );
-      delete conn;
 
       RsJobFinish fin;
       fin.taskId = taskId;
