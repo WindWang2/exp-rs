@@ -12,7 +12,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <future>
 #include <memory>
+#include <mutex>
 #include <thread>
 
 using namespace sicnu::jobs;
@@ -686,4 +689,694 @@ TEST_CASE( "unknown algorithm still fails when fallback also misses", "[job][fal
   REQUIRE( snap.has_value() );
   REQUIRE( snap->state == JobState::Failed );
   REQUIRE( snap->error.find( "Unknown algorithm" ) != std::string::npos );
+}
+
+// ---------------------------------------------------------------------------
+// Concurrency, Cancellation & Shutdown Lifecycle Hardening Test Suite
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "queued job cancelled before worker pickup", "[job][concurrency]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  std::promise<void> startA, startB;
+  std::promise<void> unblock;
+  auto sharedUnblock = unblock.get_future().share();
+
+  auto blocker = [sharedUnblock]( std::promise<void> &started ) {
+    return [sharedUnblock, &started]( const JobRequest &, RSOperatorContext & ) {
+      started.set_value();
+      sharedUnblock.wait();
+      Json::Value r( Json::objectValue );
+      r["ok"] = true;
+      return r;
+    };
+  };
+
+  JobRequest reqBlock;
+  reqBlock.algorithmId = "callable:block";
+  const auto idA = eng.submit( reqBlock, blocker( startA ) );
+  const auto idB = eng.submit( reqBlock, blocker( startB ) );
+
+  startA.get_future().wait();
+  startB.get_future().wait();
+
+  // Workers saturated (m_running == 2). Submit a queued job.
+  std::atomic<bool> queuedExecuted{false};
+  JobRequest reqQueued;
+  reqQueued.algorithmId = "callable:queued";
+  const auto idQueued = eng.submit(
+    reqQueued,
+    [&queuedExecuted]( const JobRequest &, RSOperatorContext & ) {
+      queuedExecuted.store( true );
+      Json::Value r( Json::objectValue );
+      return r;
+    } );
+
+  // Cancel it while still queued
+  auto snapQueuedBefore = eng.snapshot( idQueued );
+  REQUIRE( snapQueuedBefore.has_value() );
+  REQUIRE( snapQueuedBefore->state == JobState::Queued );
+
+  REQUIRE( eng.cancel( idQueued ) );
+
+  auto snapQueuedAfter = eng.snapshot( idQueued );
+  REQUIRE( snapQueuedAfter.has_value() );
+  REQUIRE( snapQueuedAfter->state == JobState::Cancelled );
+
+  // Unblock workers and let engine idle
+  unblock.set_value();
+  eng.waitUntilIdleForTests();
+
+  REQUIRE_FALSE( queuedExecuted.load() );
+  auto snapFinal = eng.snapshot( idQueued );
+  REQUIRE( snapFinal.has_value() );
+  REQUIRE( snapFinal->state == JobState::Cancelled );
+}
+
+TEST_CASE( "repeated cancel on running and completed jobs", "[job][concurrency]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  std::atomic<int> cancelHookCount{0};
+  std::promise<void> started;
+  std::promise<void> proceed;
+  auto sharedProceed = proceed.get_future().share();
+
+  JobRequest req;
+  req.algorithmId = "callable:repeat_cancel";
+  const auto id = eng.submit(
+    req,
+    [&started, sharedProceed]( const JobRequest &, RSOperatorContext &ctx ) {
+      started.set_value();
+      sharedProceed.wait();
+      ctx.throwIfCancelled();
+      Json::Value r( Json::objectValue );
+      return r;
+    },
+    [&cancelHookCount]() { cancelHookCount.fetch_add( 1 ); } );
+
+  started.get_future().wait();
+
+  // Cancel running job 3 times in a row
+  REQUIRE( eng.cancel( id ) );
+  REQUIRE( eng.cancel( id ) );
+  REQUIRE( eng.cancel( id ) );
+
+  // Cancel hook must be consumed and fire exactly ONCE
+  REQUIRE( cancelHookCount.load() == 1 );
+
+  proceed.set_value();
+  eng.waitUntilIdleForTests();
+
+  auto snap = eng.snapshot( id );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Cancelled );
+
+  // Cancelling a completed (terminal) job must return false
+  REQUIRE_FALSE( eng.cancel( id ) );
+  REQUIRE( cancelHookCount.load() == 1 );
+}
+
+TEST_CASE( "cancel hook reentrancy does not deadlock", "[job][concurrency]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  std::promise<void> started;
+  std::promise<void> proceed;
+  auto sharedProceed = proceed.get_future().share();
+
+  std::atomic<bool> hookCompleted{false};
+  std::string id;
+
+  JobRequest req;
+  req.algorithmId = "callable:reentrant_hook";
+  id = eng.submit(
+    req,
+    [&started, sharedProceed]( const JobRequest &, RSOperatorContext &ctx ) {
+      started.set_value();
+      sharedProceed.wait();
+      ctx.throwIfCancelled();
+      Json::Value r( Json::objectValue );
+      return r;
+    },
+    [&eng, &id, &hookCompleted]() {
+      // Re-enter JobEngine from cancel hook
+      auto snap = eng.snapshot( id );
+      auto all = eng.list();
+      eng.cancel( "non-existent-job" );
+      hookCompleted.store( true );
+    } );
+
+  started.get_future().wait();
+
+  REQUIRE( eng.cancel( id ) );
+  REQUIRE( hookCompleted.load() );
+
+  proceed.set_value();
+  eng.waitUntilIdleForTests();
+
+  auto snap = eng.snapshot( id );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Cancelled );
+}
+
+TEST_CASE( "racing completion vs cancel terminates cleanly", "[job][concurrency]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 4 );
+
+  for ( int round = 0; round < 20; ++round )
+  {
+    std::atomic<bool> startRace{false};
+    JobRequest req;
+    req.algorithmId = "callable:race";
+    const auto id = eng.submit(
+      req,
+      [&startRace]( const JobRequest &, RSOperatorContext & ) {
+        while ( !startRace.load() )
+          std::this_thread::yield();
+        Json::Value r( Json::objectValue );
+        r["done"] = true;
+        return r;
+      } );
+
+    std::thread cancelThread( [&eng, id, &startRace]() {
+      startRace.store( true );
+      eng.cancel( id );
+    } );
+
+    cancelThread.join();
+    eng.waitUntilIdleForTests();
+
+    auto snap = eng.snapshot( id );
+    REQUIRE( snap.has_value() );
+    REQUIRE( ( snap->state == JobState::Succeeded || snap->state == JobState::Cancelled ) );
+  }
+}
+
+TEST_CASE( "executor throws exception during cancellation marks Cancelled", "[job][concurrency]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  std::promise<void> started;
+  std::promise<void> proceed;
+  auto sharedProceed = proceed.get_future().share();
+
+  JobRequest req;
+  req.algorithmId = "callable:throw_on_cancel";
+  const auto id = eng.submit(
+    req,
+    [&started, sharedProceed]( const JobRequest &, RSOperatorContext &ctx ) {
+      started.set_value();
+      sharedProceed.wait();
+      if ( ctx.isCancelled() )
+        throw std::runtime_error( "Task aborted due to cancellation" );
+      Json::Value r( Json::objectValue );
+      return r;
+    } );
+
+  started.get_future().wait();
+  REQUIRE( eng.cancel( id ) );
+  proceed.set_value();
+
+  eng.waitUntilIdleForTests();
+
+  auto snap = eng.snapshot( id );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Cancelled );
+}
+
+TEST_CASE( "executor throws non-std exception handled safely", "[job][concurrency]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  JobRequest req;
+  req.algorithmId = "callable:throw_int";
+  const auto id = eng.submit(
+    req,
+    []( const JobRequest &, RSOperatorContext & ) -> Json::Value {
+      throw 42; // Non-std exception
+    } );
+
+  eng.waitUntilIdleForTests();
+
+  auto snap = eng.snapshot( id );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Failed );
+  REQUIRE_FALSE( snap->error.empty() );
+
+  // Engine continues working properly for subsequent jobs
+  JobRequest req2;
+  req2.algorithmId = "callable:after_int";
+  const auto id2 = eng.submit(
+    req2,
+    []( const JobRequest &, RSOperatorContext & ) {
+      Json::Value r( Json::objectValue );
+      r["ok"] = true;
+      return r;
+    } );
+
+  eng.waitUntilIdleForTests();
+  auto snap2 = eng.snapshot( id2 );
+  REQUIRE( snap2.has_value() );
+  REQUIRE( snap2->state == JobState::Succeeded );
+}
+
+TEST_CASE( "cancel hook throwing exception does not crash engine", "[job][concurrency]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  std::promise<void> started;
+  std::promise<void> proceed;
+  auto sharedProceed = proceed.get_future().share();
+
+  JobRequest req;
+  req.algorithmId = "callable:bad_hook";
+  const auto id = eng.submit(
+    req,
+    [&started, sharedProceed]( const JobRequest &, RSOperatorContext &ctx ) {
+      started.set_value();
+      sharedProceed.wait();
+      ctx.throwIfCancelled();
+      Json::Value r( Json::objectValue );
+      return r;
+    },
+    []() {
+      throw std::runtime_error( "Evil cancel hook" );
+    } );
+
+  started.get_future().wait();
+  REQUIRE_NOTHROW( eng.cancel( id ) );
+  proceed.set_value();
+
+  eng.waitUntilIdleForTests();
+  auto snap = eng.snapshot( id );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Cancelled );
+}
+
+TEST_CASE( "listener throwing exception does not cause double finish", "[job][concurrency]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  eng.setListener( []( const JobRecord & ) {
+    throw std::runtime_error( "Failing listener" );
+  } );
+
+  JobRequest req;
+  req.algorithmId = "callable:listener_throw";
+  const auto id = eng.submit(
+    req,
+    []( const JobRequest &, RSOperatorContext & ) {
+      Json::Value r( Json::objectValue );
+      r["ok"] = true;
+      return r;
+    } );
+
+  eng.waitUntilIdleForTests();
+
+  auto snap = eng.snapshot( id );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Succeeded );
+}
+
+TEST_CASE( "listener reentrancy does not deadlock", "[job][concurrency]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  std::atomic<int> notifications{0};
+  eng.setListener( [&eng, &notifications]( const JobRecord &rec ) {
+    notifications.fetch_add( 1 );
+    auto snap = eng.snapshot( rec.id );
+    auto list = eng.list();
+  } );
+
+  JobRequest req;
+  req.algorithmId = "callable:listener_reentrant";
+  const auto id = eng.submit(
+    req,
+    []( const JobRequest &, RSOperatorContext &ctx ) {
+      ctx.reportProgress( 0.5, "midway" );
+      Json::Value r( Json::objectValue );
+      r["ok"] = true;
+      return r;
+    } );
+
+  eng.waitUntilIdleForTests();
+
+  auto snap = eng.snapshot( id );
+  REQUIRE( snap.has_value() );
+  REQUIRE( snap->state == JobState::Succeeded );
+  REQUIRE( notifications.load() >= 3 ); // Queued, Started, Progress, Succeeded
+}
+
+TEST_CASE( "shutdown cancels unpicked queued jobs cleanly", "[job][lifecycle]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  std::promise<void> startA, startB;
+  std::promise<void> proceed;
+  auto sharedProceed = proceed.get_future().share();
+
+  auto blocker = [sharedProceed]( std::promise<void> &started ) {
+    return [sharedProceed, &started]( const JobRequest &, RSOperatorContext & ) {
+      started.set_value();
+      sharedProceed.wait();
+      Json::Value r( Json::objectValue );
+      return r;
+    };
+  };
+
+  JobRequest reqBlock;
+  reqBlock.algorithmId = "callable:block";
+  const auto idA = eng.submit( reqBlock, blocker( startA ) );
+  const auto idB = eng.submit( reqBlock, blocker( startB ) );
+
+  startA.get_future().wait();
+  startB.get_future().wait();
+
+  // Submit queued jobs
+  std::vector<std::string> queuedIds;
+  for ( int i = 0; i < 3; ++i )
+  {
+    JobRequest q;
+    q.algorithmId = "callable:queued";
+    queuedIds.push_back( eng.submit( q, []( const JobRequest &, RSOperatorContext & ) {
+      return Json::Value( Json::objectValue );
+    } ) );
+  }
+
+  // Call shutdown while blockers are still held — this guarantees the
+  // queue is drained (queued→Cancelled) before any worker can pick them.
+  // Release blockers from a background thread so running jobs finish and
+  // the join inside shutdown() can complete.
+  std::thread releaser( [&proceed]() {
+    std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+    proceed.set_value();
+  } );
+  eng.shutdown();
+  releaser.join();
+
+  for ( const auto &qid : queuedIds )
+  {
+    auto snap = eng.snapshot( qid );
+    REQUIRE( snap.has_value() );
+    REQUIRE( snap->state == JobState::Cancelled );
+  }
+}
+
+TEST_CASE( "restart engine after shutdownForTests works seamlessly", "[job][lifecycle]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+
+  for ( int cycle = 0; cycle < 3; ++cycle )
+  {
+    eng.shutdownForTests();
+    eng.setMaxWorkers( 2 );
+
+    JobRequest req;
+    req.algorithmId = "callable:cycle";
+    req.params["c"] = cycle;
+    const auto id = eng.submit(
+      req,
+      []( const JobRequest &r, RSOperatorContext & ) {
+        Json::Value res( Json::objectValue );
+        res["c"] = r.params["c"];
+        return res;
+      } );
+
+    eng.waitUntilIdleForTests();
+
+    auto snap = eng.snapshot( id );
+    REQUIRE( snap.has_value() );
+    REQUIRE( snap->state == JobState::Succeeded );
+    REQUIRE( snap->result["c"].asInt() == cycle );
+  }
+}
+
+TEST_CASE( "exclusive job drains running work and runs alone", "[job][concurrency]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 3 );
+
+  std::atomic<int> concurrentRunning{0};
+  std::atomic<int> exclusivePeakConcurrent{0};
+  std::atomic<bool> exclusiveRanAlone{true};
+
+  std::promise<void> normal1Started;
+  std::promise<void> normal1Proceed;
+  auto sharedNormal1Proceed = normal1Proceed.get_future().share();
+
+  JobRequest normal1;
+  normal1.algorithmId = "callable:normal1";
+  normal1.exclusive = false;
+  const auto id1 = eng.submit(
+    normal1,
+    [&normal1Started, sharedNormal1Proceed, &concurrentRunning]( const JobRequest &, RSOperatorContext & ) {
+      concurrentRunning.fetch_add( 1 );
+      normal1Started.set_value();
+      sharedNormal1Proceed.wait();
+      concurrentRunning.fetch_sub( 1 );
+      return Json::Value( Json::objectValue );
+    } );
+
+  normal1Started.get_future().wait();
+
+  // Normal 1 is running. Submit exclusive job and normal 2.
+  JobRequest exclusiveReq;
+  exclusiveReq.algorithmId = "callable:exclusive";
+  exclusiveReq.exclusive = true;
+  const auto idEx = eng.submit(
+    exclusiveReq,
+    [&concurrentRunning, &exclusivePeakConcurrent, &exclusiveRanAlone]( const JobRequest &, RSOperatorContext & ) {
+      const int cur = concurrentRunning.fetch_add( 1 ) + 1;
+      if ( cur > 1 )
+        exclusiveRanAlone.store( false );
+      int peak = exclusivePeakConcurrent.load();
+      while ( cur > peak && !exclusivePeakConcurrent.compare_exchange_weak( peak, cur ) ) {}
+      std::this_thread::sleep_for( std::chrono::milliseconds( 30 ) );
+      concurrentRunning.fetch_sub( 1 );
+      return Json::Value( Json::objectValue );
+    } );
+
+  JobRequest normal2;
+  normal2.algorithmId = "callable:normal2";
+  normal2.exclusive = false;
+  const auto id2 = eng.submit(
+    normal2,
+    [&concurrentRunning]( const JobRequest &, RSOperatorContext & ) {
+      concurrentRunning.fetch_add( 1 );
+      std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+      concurrentRunning.fetch_sub( 1 );
+      return Json::Value( Json::objectValue );
+    } );
+
+  // Normal 1 finishes, allowing exclusive to pick up, then normal 2
+  normal1Proceed.set_value();
+  eng.waitUntilIdleForTests();
+
+  auto s1 = eng.snapshot( id1 );
+  auto sEx = eng.snapshot( idEx );
+  auto s2 = eng.snapshot( id2 );
+
+  REQUIRE( s1.has_value() );
+  REQUIRE( s1->state == JobState::Succeeded );
+  REQUIRE( sEx.has_value() );
+  REQUIRE( sEx->state == JobState::Succeeded );
+  REQUIRE( s2.has_value() );
+  REQUIRE( s2->state == JobState::Succeeded );
+
+  REQUIRE( exclusiveRanAlone.load() );
+  REQUIRE( exclusivePeakConcurrent.load() == 1 );
+}
+
+TEST_CASE( "exclusive job cancelled while queued unblocks subsequent jobs", "[job][concurrency]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  std::promise<void> startA;
+  std::promise<void> proceed;
+  auto sharedProceed = proceed.get_future().share();
+
+  JobRequest reqBlock;
+  reqBlock.algorithmId = "callable:block";
+  const auto idBlock = eng.submit(
+    reqBlock,
+    [&startA, sharedProceed]( const JobRequest &, RSOperatorContext & ) {
+      startA.set_value();
+      sharedProceed.wait();
+      return Json::Value( Json::objectValue );
+    } );
+
+  startA.get_future().wait();
+
+  // Exclusive job queued
+  JobRequest reqEx;
+  reqEx.algorithmId = "callable:ex";
+  reqEx.exclusive = true;
+  const auto idEx = eng.submit( reqEx, []( const JobRequest &, RSOperatorContext & ) {
+    return Json::Value( Json::objectValue );
+  } );
+
+  // Normal job queued behind exclusive job
+  std::atomic<bool> normalRan{false};
+  JobRequest reqNormal;
+  reqNormal.algorithmId = "callable:normal";
+  const auto idNormal = eng.submit( reqNormal, [&normalRan]( const JobRequest &, RSOperatorContext & ) {
+    normalRan.store( true );
+    return Json::Value( Json::objectValue );
+  } );
+
+  // Cancel the queued exclusive job
+  REQUIRE( eng.cancel( idEx ) );
+  auto snapEx = eng.snapshot( idEx );
+  REQUIRE( snapEx.has_value() );
+  REQUIRE( snapEx->state == JobState::Cancelled );
+
+  // Normal job behind it must not be stalled!
+  proceed.set_value();
+  eng.waitUntilIdleForTests();
+
+  REQUIRE( normalRan.load() );
+  auto snapNormal = eng.snapshot( idNormal );
+  REQUIRE( snapNormal.has_value() );
+  REQUIRE( snapNormal->state == JobState::Succeeded );
+}
+
+TEST_CASE( "rapid concurrent submit and cancel stress loop", "[job][stress]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 4 );
+
+  constexpr int threadCount = 4;
+  constexpr int iterationsPerThread = 25;
+  std::vector<std::thread> threads;
+  std::vector<std::string> allIds;
+  std::mutex idMutex;
+
+  for ( int t = 0; t < threadCount; ++t )
+  {
+    threads.emplace_back( [&eng, &allIds, &idMutex, t]() {
+      for ( int i = 0; i < iterationsPerThread; ++i )
+      {
+        JobRequest req;
+        req.algorithmId = "callable:stress";
+        req.exclusive = ( ( t + i ) % 5 == 0 );
+
+        auto id = eng.submit(
+          req,
+          []( const JobRequest &, RSOperatorContext &ctx ) {
+            for ( int step = 0; step < 10; ++step )
+            {
+              ctx.throwIfCancelled();
+              std::this_thread::sleep_for( std::chrono::microseconds( 100 ) );
+            }
+            return Json::Value( Json::objectValue );
+          } );
+
+        {
+          std::lock_guard<std::mutex> lk( idMutex );
+          allIds.push_back( id );
+        }
+
+        if ( i % 2 == 0 )
+          eng.cancel( id );
+      }
+    } );
+  }
+
+  for ( auto &t : threads )
+    t.join();
+
+  eng.waitUntilIdleForTests( 20000 );
+
+  for ( const auto &id : allIds )
+  {
+    auto snap = eng.snapshot( id );
+    REQUIRE( snap.has_value() );
+    REQUIRE( ( snap->state == JobState::Succeeded || snap->state == JobState::Cancelled ) );
+  }
+}
+
+TEST_CASE( "dynamic maxWorkers adjustment under load", "[job][concurrency]" )
+{
+  EngineGuard guard;
+  auto &eng = guard.engine();
+  eng.shutdownForTests();
+  eng.setMaxWorkers( 2 );
+
+  std::atomic<bool> release{false};
+  std::vector<std::string> ids;
+
+  for ( int i = 0; i < 8; ++i )
+  {
+    JobRequest req;
+    req.algorithmId = "callable:dyn_workers";
+    ids.push_back( eng.submit(
+      req,
+      [&release]( const JobRequest &, RSOperatorContext &ctx ) {
+        while ( !release.load() )
+        {
+          ctx.throwIfCancelled();
+          std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+        }
+        return Json::Value( Json::objectValue );
+      } ) );
+  }
+
+  // Adjust workers while jobs are queued and running
+  eng.setMaxWorkers( 4 );
+  REQUIRE( eng.maxWorkers() == 4 );
+
+  eng.setMaxWorkers( 2 );
+  REQUIRE( eng.maxWorkers() == 2 );
+
+  release.store( true );
+  eng.waitUntilIdleForTests();
+
+  for ( const auto &id : ids )
+  {
+    auto snap = eng.snapshot( id );
+    REQUIRE( snap.has_value() );
+    REQUIRE( snap->state == JobState::Succeeded );
+  }
 }

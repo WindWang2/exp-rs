@@ -44,19 +44,42 @@ JobEngine::~JobEngine()
 
 void JobEngine::shutdown()
 {
+  std::vector<std::thread> toJoin;
+  std::vector<JobRecord> cancelledRecords;
   {
     std::lock_guard<std::mutex> lock( m_mutex );
     if ( m_stop.load() )
       return;
     m_stop.store( true );
+    toJoin.swap( m_workers );
+
+    while ( !m_queue.empty() )
+    {
+      const std::string qId = m_queue.front();
+      m_queue.pop_front();
+      auto it = m_jobs.find( qId );
+      if ( it != m_jobs.end() && it->second.state == JobState::Queued )
+      {
+        it->second.state = JobState::Cancelled;
+        it->second.finishedAtMs = nowUnixMs();
+        it->second.statusMessage = "Cancelled due to shutdown";
+        appendLog( it->second, JobLogLevel::Info, "Cancelled due to shutdown" );
+        m_jobBodies.erase( qId );
+        m_cancelFlags.erase( qId );
+        cancelledRecords.push_back( it->second );
+      }
+    }
   }
   m_cv.notify_all();
-  for ( auto &t : m_workers )
+
+  for ( const auto &rec : cancelledRecords )
+    notify( rec );
+
+  for ( auto &t : toJoin )
   {
     if ( t.joinable() )
       t.join();
   }
-  m_workers.clear();
 }
 
 void JobEngine::setMaxWorkers( int n )
@@ -187,6 +210,7 @@ bool JobEngine::cancel( const std::string &jobId )
         rec.statusMessage = "Cancelled";
         appendLog( rec, JobLogLevel::Info, "Cancelled while queued" );
         m_jobBodies.erase( jobId );
+        m_cancelFlags.erase( jobId );
         copy = rec;
         changed = true;
         break;
@@ -207,7 +231,10 @@ bool JobEngine::cancel( const std::string &jobId )
         }
         auto bit = m_jobBodies.find( jobId );
         if ( bit != m_jobBodies.end() && bit->second.onCancel )
-          cancelHook = bit->second.onCancel;
+        {
+          cancelHook = std::move( bit->second.onCancel );
+          bit->second.onCancel = nullptr;
+        }
         cancelRunning = true;
         // Terminal state set when operator observes cancel / exits
         break;
@@ -357,6 +384,8 @@ void JobEngine::shutdownForTests()
     m_cancelFlags.clear();
     m_jobBodies.clear();
     m_prefixExecutors.clear();
+    m_fallbackExecutor = nullptr;
+    m_maxWorkers = 3;
     m_running = 0;
     m_exclusiveRunning = false;
     m_listener = nullptr;
@@ -412,7 +441,7 @@ std::optional<std::string> JobEngine::tryPickJobLocked()
   for ( const auto &id : m_queue )
   {
     auto it = m_jobs.find( id );
-    if ( it != m_jobs.end() && it->second.request.exclusive )
+    if ( it != m_jobs.end() && it->second.state == JobState::Queued && it->second.request.exclusive )
     {
       exclusiveQueued = true;
       break;
@@ -481,7 +510,16 @@ void JobEngine::notify( const JobRecord &rec )
     listener = m_listener;
   }
   if ( listener )
-    listener( rec );
+  {
+    try
+    {
+      listener( rec );
+    }
+    catch ( ... )
+    {
+      // Listeners must never throw into JobEngine
+    }
+  }
 }
 
 void JobEngine::finishJobLocked( JobRecord &rec, bool wasExclusive )
@@ -610,7 +648,7 @@ void JobEngine::runOperatorJob( const std::string &jobId )
         return;
       JobRecord &rec = it->second;
       rec.result = std::move( result );
-      if ( cancelFlag->load() )
+      if ( cancelFlag && cancelFlag->load() )
       {
         rec.state = JobState::Cancelled;
         rec.statusMessage = "Cancelled";
@@ -638,7 +676,7 @@ void JobEngine::runOperatorJob( const std::string &jobId )
         return;
       JobRecord &rec = it->second;
       const bool cancelled = ( e.code() == sicnu::operators::ErrorCode::Cancelled )
-                             || cancelFlag->load();
+                             || ( cancelFlag && cancelFlag->load() );
       if ( cancelled )
       {
         rec.state = JobState::Cancelled;
@@ -667,10 +705,50 @@ void JobEngine::runOperatorJob( const std::string &jobId )
       if ( it == m_jobs.end() )
         return;
       JobRecord &rec = it->second;
-      rec.state = JobState::Failed;
-      rec.statusMessage = "Failed";
-      rec.error = e.what();
-      appendLog( rec, JobLogLevel::Error, e.what() );
+      const bool cancelled = ( cancelFlag && cancelFlag->load() );
+      if ( cancelled )
+      {
+        rec.state = JobState::Cancelled;
+        rec.statusMessage = "Cancelled";
+        rec.error = e.what();
+        appendLog( rec, JobLogLevel::Info, "Cancelled: " + std::string( e.what() ) );
+      }
+      else
+      {
+        rec.state = JobState::Failed;
+        rec.statusMessage = "Failed";
+        rec.error = e.what();
+        appendLog( rec, JobLogLevel::Error, e.what() );
+      }
+      finishJobLocked( rec, wasExclusive );
+      copy = rec;
+    }
+    notify( copy );
+  };
+
+  auto finishUnknownException = [&]() {
+    JobRecord copy;
+    {
+      std::lock_guard<std::mutex> lock( m_mutex );
+      auto it = m_jobs.find( jobId );
+      if ( it == m_jobs.end() )
+        return;
+      JobRecord &rec = it->second;
+      const bool cancelled = ( cancelFlag && cancelFlag->load() );
+      if ( cancelled )
+      {
+        rec.state = JobState::Cancelled;
+        rec.statusMessage = "Cancelled";
+        rec.error = "Unknown exception occurred during cancellation";
+        appendLog( rec, JobLogLevel::Info, rec.error );
+      }
+      else
+      {
+        rec.state = JobState::Failed;
+        rec.statusMessage = "Failed";
+        rec.error = "Unknown non-std exception";
+        appendLog( rec, JobLogLevel::Error, rec.error );
+      }
       finishJobLocked( rec, wasExclusive );
       copy = rec;
     }
@@ -693,6 +771,10 @@ void JobEngine::runOperatorJob( const std::string &jobId )
   catch ( const std::exception &e )
   {
     finishStdException( e );
+  }
+  catch ( ... )
+  {
+    finishUnknownException();
   }
 }
 
