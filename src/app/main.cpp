@@ -9,6 +9,7 @@
  */
 
 #include <QApplication>
+#include <QGuiApplication>
 #include <QTimer>
 #include <QDir>
 #include <QFileInfo>
@@ -94,6 +95,9 @@ int main(int argc, char *argv[])
             break;
         }
     }
+
+    // Pass through fractional DPI scale factors without rounding jumps
+    QGuiApplication::setHighDpiScaleFactorRoundingPolicy( Qt::HighDpiScaleFactorRoundingPolicy::PassThrough );
 
     // Create QGIS application (inherits QApplication, handles all Qt + QGIS init)
     // Heap-allocated to avoid destructor crash during DSO cleanup

@@ -158,6 +158,22 @@ target_compile_definitions(test_ui_task_center_contract PRIVATE
 )
 sicnu_discover_tests(test_ui_task_center_contract)
 
+add_executable(test_theme_selector_parity
+  test_theme_selector_parity.cpp
+)
+target_link_libraries(test_theme_selector_parity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_theme_selector_parity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_theme_selector_parity PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_theme_selector_parity)
+
 add_executable(test_task_center_dock
     test_task_center_dock.cpp
     ${CMAKE_SOURCE_DIR}/src/app/panels/task_center_dock.cpp

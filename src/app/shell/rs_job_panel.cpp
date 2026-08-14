@@ -12,11 +12,13 @@
 #include <QComboBox>
 #include <QDateTime>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPalette>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSplitter>
@@ -104,18 +106,40 @@ bool isActiveStatus( sicnu::TaskStatus status )
          || status == sicnu::TaskStatus::Paused;
 }
 
-QColor statusColor( sicnu::TaskStatus status )
+static bool isDarkTheme( const QWidget *w )
 {
-  switch ( status )
+  if ( w )
+    return w->palette().color( QPalette::Window ).lightness() < 128;
+  return qApp ? qApp->palette().color( QPalette::Window ).lightness() < 128 : false;
+}
+
+QColor statusColor( sicnu::TaskStatus status, bool isDark )
+{
+  if ( isDark )
   {
-    case sicnu::TaskStatus::Running: return QColor( 0x0969da );   // blue
-    case sicnu::TaskStatus::Completed: return QColor( 0x1a7f37 ); // green
-    case sicnu::TaskStatus::Failed: return QColor( 0xcf222e );    // red
-    case sicnu::TaskStatus::Queued:
-    case sicnu::TaskStatus::Paused:
-    case sicnu::TaskStatus::Canceled: return QColor( 0x656d76 );  // gray
+    switch ( status )
+    {
+      case sicnu::TaskStatus::Running:   return QColor( 0x4d, 0xa3, 0xe0 ); // blue
+      case sicnu::TaskStatus::Completed: return QColor( 0x3d, 0xcf, 0x6a ); // green
+      case sicnu::TaskStatus::Failed:    return QColor( 0xf0, 0x71, 0x67 ); // red
+      case sicnu::TaskStatus::Paused:    return QColor( 0xe0, 0xa8, 0x2e ); // amber
+      case sicnu::TaskStatus::Queued:
+      case sicnu::TaskStatus::Canceled:  return QColor( 0xa8, 0xb0, 0xbc ); // gray
+    }
   }
-  return QColor( 0x656d76 );
+  else
+  {
+    switch ( status )
+    {
+      case sicnu::TaskStatus::Running:   return QColor( 0x09, 0x69, 0xda ); // blue
+      case sicnu::TaskStatus::Completed: return QColor( 0x1a, 0x7f, 0x37 ); // green
+      case sicnu::TaskStatus::Failed:    return QColor( 0xcf, 0x22, 0x2e ); // red
+      case sicnu::TaskStatus::Paused:    return QColor( 0x8c, 0x5b, 0x00 ); // amber
+      case sicnu::TaskStatus::Queued:
+      case sicnu::TaskStatus::Canceled:  return QColor( 0x5a, 0x65, 0x73 ); // gray
+    }
+  }
+  return isDark ? QColor( 0xa8, 0xb0, 0xbc ) : QColor( 0x5a, 0x65, 0x73 );
 }
 
 QString taskTitle( const sicnu::AlgorithmTaskInfo &info )
@@ -157,7 +181,6 @@ void RsJobPanel::setupUi()
     mainWidget );
   m_hintLabel->setObjectName( QStringLiteral( "rsJobPanelHint" ) );
   m_hintLabel->setWordWrap( true );
-  m_hintLabel->setStyleSheet( QStringLiteral( "color: #656d76; font-size: 11px;" ) );
   mainLayout->addWidget( m_hintLabel );
 
   auto *toolbar = new QWidget( mainWidget );
@@ -166,6 +189,7 @@ void RsJobPanel::setupUi()
   toolbarLayout->setSpacing( 4 );
 
   m_filterCombo = new QComboBox( toolbar );
+  m_filterCombo->setObjectName( QStringLiteral( "rsJobFilterCombo" ) );
   m_filterCombo->addItem( tr( "全部" ), QStringLiteral( "all" ) );
   m_filterCombo->addItem( tr( "运行中" ), QStringLiteral( "active" ) );
   m_filterCombo->addItem( tr( "失败" ), QStringLiteral( "failed" ) );
@@ -174,16 +198,22 @@ void RsJobPanel::setupUi()
   toolbarLayout->addStretch();
 
   m_cancelBtn = new QPushButton( tr( "停止" ), toolbar );
+  m_cancelBtn->setObjectName( QStringLiteral( "rsJobCancelBtn" ) );
+  m_cancelBtn->setProperty( "danger", true );
   m_cancelBtn->setToolTip( tr( "取消排队或运行中的任务" ) );
   m_cancelBtn->setEnabled( false );
   toolbarLayout->addWidget( m_cancelBtn );
 
   m_loadBtn = new QPushButton( tr( "加载到主图" ), toolbar );
+  m_loadBtn->setObjectName( QStringLiteral( "rsJobLoadBtn" ) );
+  m_loadBtn->setProperty( "primary", true );
   m_loadBtn->setToolTip( tr( "将选中任务的输出路径加载到主程序图层" ) );
   m_loadBtn->setEnabled( false );
   toolbarLayout->addWidget( m_loadBtn );
 
   m_clearFinishedBtn = new QPushButton( tr( "清空已完成" ), toolbar );
+  m_clearFinishedBtn->setObjectName( QStringLiteral( "rsJobClearBtn" ) );
+  m_clearFinishedBtn->setProperty( "ghost", true );
   toolbarLayout->addWidget( m_clearFinishedBtn );
 
   mainLayout->addWidget( toolbar );
@@ -191,6 +221,7 @@ void RsJobPanel::setupUi()
   auto *splitter = new QSplitter( Qt::Horizontal, mainWidget );
 
   m_jobTree = new QTreeWidget( splitter );
+  m_jobTree->setObjectName( QStringLiteral( "rsJobTree" ) );
   m_jobTree->setColumnCount( 5 );
   m_jobTree->setHeaderLabels( { tr( "标题" ), tr( "状态" ), tr( "进度" ), tr( "加载" ), tr( "预计剩余" ) } );
   m_jobTree->setRootIsDecorated( false );
@@ -200,21 +231,31 @@ void RsJobPanel::setupUi()
   m_jobTree->setAlternatingRowColors( true );
   m_jobTree->header()->setStretchLastSection( false );
   m_jobTree->header()->setSectionResizeMode( ColTitle, QHeaderView::Stretch );
-  m_jobTree->header()->setSectionResizeMode( ColState, QHeaderView::ResizeToContents );
-  m_jobTree->header()->setSectionResizeMode( ColProgress, QHeaderView::ResizeToContents );
-  m_jobTree->header()->setSectionResizeMode( ColLoad, QHeaderView::ResizeToContents );
-  m_jobTree->header()->setSectionResizeMode( ColEta, QHeaderView::ResizeToContents );
+  m_jobTree->header()->setSectionResizeMode( ColState, QHeaderView::Interactive );
+  m_jobTree->header()->setSectionResizeMode( ColProgress, QHeaderView::Interactive );
+  m_jobTree->header()->setSectionResizeMode( ColLoad, QHeaderView::Interactive );
+  m_jobTree->header()->setSectionResizeMode( ColEta, QHeaderView::Interactive );
+  const QFontMetrics fm = m_jobTree->fontMetrics();
+  m_jobTree->setColumnWidth( ColState, qMax( 76, fm.horizontalAdvance( tr( "状态" ) ) + 36 ) );
+  m_jobTree->setColumnWidth( ColProgress, qMax( 84, fm.horizontalAdvance( QStringLiteral( "100.0%" ) ) + 36 ) );
+  m_jobTree->setColumnWidth( ColLoad, qMax( 52, fm.horizontalAdvance( tr( "加载" ) ) + 24 ) );
+  m_jobTree->setColumnWidth( ColEta, qMax( 80, fm.horizontalAdvance( QStringLiteral( "99h 59m 59s" ) ) + 24 ) );
   m_jobTree->headerItem()->setToolTip( ColEta, tr( "基于已用时间与当前进度的估算；进度为 0 或暂停时不可用" ) );
   m_jobTree->headerItem()->setToolTip( ColLoad, tr( "勾选：任务成功后自动将输出加载到主程序" ) );
   splitter->addWidget( m_jobTree );
 
   m_detailTabs = new QTabWidget( splitter );
+  m_detailTabs->setObjectName( QStringLiteral( "rsJobDetailTabs" ) );
   m_detailView = new QPlainTextEdit( m_detailTabs );
+  m_detailView->setObjectName( QStringLiteral( "rsJobDetailView" ) );
+  m_detailView->setFont( QFontDatabase::systemFont( QFontDatabase::FixedFont ) );
   m_detailView->setReadOnly( true );
   m_detailView->setPlaceholderText( tr( "选择任务查看方法、参数、输入输出…" ) );
   m_detailTabs->addTab( m_detailView, tr( "详情" ) );
 
   m_logView = new QPlainTextEdit( m_detailTabs );
+  m_logView->setObjectName( QStringLiteral( "rsJobLogView" ) );
+  m_logView->setFont( QFontDatabase::systemFont( QFontDatabase::FixedFont ) );
   m_logView->setReadOnly( true );
   m_logView->setPlaceholderText( tr( "选择任务以查看日志…" ) );
   m_logView->setMaximumBlockCount( 20000 );
@@ -384,6 +425,7 @@ void RsJobPanel::refreshAll()
   } );
 
   QTreeWidgetItem *selectItem = nullptr;
+  const bool dark = isDarkTheme( this );
   for ( const sicnu::AlgorithmTaskInfo &info : tasks )
   {
     const QString state = statusToString( info.status );
@@ -393,7 +435,7 @@ void RsJobPanel::refreshAll()
     auto *item = new QTreeWidgetItem( m_jobTree );
     item->setText( ColTitle, taskTitle( info ) );
     item->setText( ColState, state );
-    item->setForeground( ColState, statusColor( info.status ) );
+    item->setForeground( ColState, statusColor( info.status, dark ) );
     item->setText( ColProgress, formatProgress( info.progressPercentage ) );
     item->setText( ColEta, formatEta( info ) );
     item->setData( ColTitle, RoleTaskId, static_cast<qlonglong>( info.taskId ) );
@@ -463,9 +505,10 @@ void RsJobPanel::upsertTaskRow( const sicnu::AlgorithmTaskInfo &info )
     found->setCheckState( ColLoad, loadToMainPreference( taskId ) ? Qt::Checked : Qt::Unchecked );
   }
 
+  const bool dark = isDarkTheme( this );
   found->setText( ColTitle, taskTitle( info ) );
   found->setText( ColState, state );
-  found->setForeground( ColState, statusColor( info.status ) );
+  found->setForeground( ColState, statusColor( info.status, dark ) );
   found->setText( ColProgress, formatProgress( info.progressPercentage ) );
   found->setText( ColEta, formatEta( info ) );
   found->setData( ColTitle, RoleTaskId, static_cast<qlonglong>( taskId ) );
