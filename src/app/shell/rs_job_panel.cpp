@@ -235,10 +235,11 @@ void RsJobPanel::setupUi()
   m_jobTree->header()->setSectionResizeMode( ColProgress, QHeaderView::Interactive );
   m_jobTree->header()->setSectionResizeMode( ColLoad, QHeaderView::Interactive );
   m_jobTree->header()->setSectionResizeMode( ColEta, QHeaderView::Interactive );
-  m_jobTree->setColumnWidth( ColState, 76 );
-  m_jobTree->setColumnWidth( ColProgress, 84 );
-  m_jobTree->setColumnWidth( ColLoad, 52 );
-  m_jobTree->setColumnWidth( ColEta, 80 );
+  const QFontMetrics fm = m_jobTree->fontMetrics();
+  m_jobTree->setColumnWidth( ColState, qMax( 76, fm.horizontalAdvance( tr( "状态" ) ) + 36 ) );
+  m_jobTree->setColumnWidth( ColProgress, qMax( 84, fm.horizontalAdvance( QStringLiteral( "100.0%" ) ) + 36 ) );
+  m_jobTree->setColumnWidth( ColLoad, qMax( 52, fm.horizontalAdvance( tr( "加载" ) ) + 24 ) );
+  m_jobTree->setColumnWidth( ColEta, qMax( 80, fm.horizontalAdvance( QStringLiteral( "99h 59m 59s" ) ) + 24 ) );
   m_jobTree->headerItem()->setToolTip( ColEta, tr( "基于已用时间与当前进度的估算；进度为 0 或暂停时不可用" ) );
   m_jobTree->headerItem()->setToolTip( ColLoad, tr( "勾选：任务成功后自动将输出加载到主程序" ) );
   splitter->addWidget( m_jobTree );
@@ -504,9 +505,10 @@ void RsJobPanel::upsertTaskRow( const sicnu::AlgorithmTaskInfo &info )
     found->setCheckState( ColLoad, loadToMainPreference( taskId ) ? Qt::Checked : Qt::Unchecked );
   }
 
+  const bool dark = isDarkTheme( this );
   found->setText( ColTitle, taskTitle( info ) );
   found->setText( ColState, state );
-  found->setForeground( ColState, statusColor( info.status, isDarkTheme( this ) ) );
+  found->setForeground( ColState, statusColor( info.status, dark ) );
   found->setText( ColProgress, formatProgress( info.progressPercentage ) );
   found->setText( ColEta, formatEta( info ) );
   found->setData( ColTitle, RoleTaskId, static_cast<qlonglong>( taskId ) );

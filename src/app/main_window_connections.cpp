@@ -254,19 +254,16 @@ void QgisDesktopWindow::refreshStatusTaskSummary()
     {
         m_readyLabel->setText( tr( "运行 %1 · 排队 %2" ).arg( running ).arg( queued ) );
         m_readyLabel->setObjectName( QStringLiteral( "rsReadyBusy" ) );
-        m_readyLabel->setStyleSheet( QString() );
     }
     else if ( qgisActive > 0 )
     {
         m_readyLabel->setText( tr( "Processing (%1)..." ).arg( qgisActive ) );
         m_readyLabel->setObjectName( QStringLiteral( "rsReadyBusy" ) );
-        m_readyLabel->setStyleSheet( QString() );
     }
     else
     {
         m_readyLabel->setText( tr( "Ready" ) );
         m_readyLabel->setObjectName( QStringLiteral( "rsReadyLabel" ) );
-        m_readyLabel->setStyleSheet( QString() );
     }
     if ( m_readyLabel->objectName() != prevName )
     {

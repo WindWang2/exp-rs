@@ -35,6 +35,26 @@
 
 namespace {
 
+struct RibbonMetrics
+{
+  int iconSize = 28;
+  int largeBtnHeight = 64;
+  int largeBtnMinWidth = 56;
+  int titleHeight = 16;
+  int pageHeight = 96;
+};
+
+RibbonMetrics computeRibbonMetrics( const QFontMetrics &fm )
+{
+  RibbonMetrics m;
+  m.iconSize = qMax( 24, qMin( 32, fm.height() * 2 ) );
+  m.largeBtnHeight = m.iconSize + ( fm.lineSpacing() * 2 ) + 10;
+  m.largeBtnMinWidth = qMax( 56, fm.horizontalAdvance( QStringLiteral( "四个汉字" ) ) + 12 );
+  m.titleHeight = qMax( 16, fm.height() + 4 );
+  m.pageHeight = m.largeBtnHeight + m.titleHeight + 12 + 4;
+  return m;
+}
+
 QIcon ribbonIcon( const char *alias )
 {
   return QIcon( QStringLiteral( ":/icons/" ) + QLatin1String( alias ) );
@@ -46,13 +66,11 @@ void polishLargeButton( QToolButton *btn )
     return;
   btn->setObjectName( QStringLiteral( "rsRibbonLargeBtn" ) );
   btn->setToolButtonStyle( Qt::ToolButtonTextUnderIcon );
-  const QFontMetrics fm = btn->fontMetrics();
-  const int iconSize = qMax( 24, qMin( 32, fm.height() * 2 ) );
-  btn->setIconSize( QSize( iconSize, iconSize ) );
+  const RibbonMetrics rm = computeRibbonMetrics( btn->fontMetrics() );
+  btn->setIconSize( QSize( rm.iconSize, rm.iconSize ) );
   btn->setAutoRaise( true );
-  const int desiredH = iconSize + ( fm.lineSpacing() * 2 ) + 10;
-  btn->setMinimumHeight( desiredH );
-  btn->setMinimumWidth( qMax( 56, fm.horizontalAdvance( QStringLiteral( "四个汉字" ) ) + 12 ) );
+  btn->setMinimumHeight( rm.largeBtnHeight );
+  btn->setMinimumWidth( rm.largeBtnMinWidth );
   btn->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Preferred );
   btn->setFocusPolicy( Qt::StrongFocus );
   btn->setCursor( Qt::PointingHandCursor );
@@ -85,7 +103,8 @@ void polishTabButton( QPushButton *btn )
   btn->setCursor( Qt::PointingHandCursor );
   const QFontMetrics fm = btn->fontMetrics();
   btn->setMinimumHeight( qMax( 28, fm.height() + 10 ) );
-  btn->setMinimumWidth( qMax( 56, fm.horizontalAdvance( btn->text().isEmpty() ? QStringLiteral( "四个汉字" ) : btn->text() ) + 20 ) );
+  const int textW = btn->text().isEmpty() ? fm.horizontalAdvance( QStringLiteral( "标签" ) ) : fm.horizontalAdvance( btn->text() );
+  btn->setMinimumWidth( qMax( 56, textW + 20 ) );
   btn->setObjectName( QStringLiteral( "rsRibbonTabButton" ) );
 }
 
@@ -138,12 +157,8 @@ QWidget *RibbonController::makeTabPage()
   scroll->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
   scroll->setVerticalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
   
-  const QFontMetrics fm = scroll->fontMetrics();
-  const int iconSize = qMax( 24, qMin( 32, fm.height() * 2 ) );
-  const int desiredH = iconSize + ( fm.lineSpacing() * 2 ) + 10;
-  const int titleH = qMax( 16, fm.height() + 4 );
-  const int pageH = desiredH + titleH + 12 + 4;
-  scroll->setMinimumHeight( pageH );
+  const RibbonMetrics rm = computeRibbonMetrics( scroll->fontMetrics() );
+  scroll->setMinimumHeight( rm.pageHeight );
   scroll->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
 
   auto *page = new QWidget;
