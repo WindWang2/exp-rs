@@ -12,6 +12,7 @@
 #include "processing/framework/algorithm_preflight.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "shell/processing_job_adapter.h"
+#include "interaction_tool_registry.h"
 
 #include <iostream>
 #include <QJsonDocument>
@@ -78,6 +79,10 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("qgis:"),
         QStringLiteral("qgis_algorithms:"),
         QStringLiteral("opencv:"), // operator surface uses opencv: filters
+        QStringLiteral("view:"),   // agent interaction view tools
+        QStringLiteral("roi:"),    // agent interaction roi tools
+        QStringLiteral("canvas:"), // agent interaction canvas tools
+        QStringLiteral("layer:"),  // agent interaction layer tools
     };
     for (const QString &prefix : kAllowed) {
         if (checkId.startsWith(prefix))
@@ -240,6 +245,12 @@ const MetaToolDef kMetaTools[] = {
       "deriving algorithm + parameters when the asset was produced, its input "
       "assets (derivedFrom), and any assets derived from it (derivedOutputsOf).",
       { { "asset_id", "string", "Data Manager asset id (UUID) to query" } } },
+    { "list_interaction_tools",
+      "List all interactive GIS tools (view controls, layer navigation, canvas ROI).",
+      {} },
+    { "get_interaction_schema",
+      "Get JSON Schema and parameters for an interaction tool (e.g. 'view:set_extent', 'roi:set').",
+      { { "tool_name", "string", "Interaction tool name (e.g. 'view:get_state', 'view:set_extent', 'roi:set')" } } },
 };
 
 QVariantMap metaToolInputSchema(const MetaToolDef &def)
@@ -347,6 +358,9 @@ McpServer::McpServer(QObject *parent)
     : QObject(parent)
 {
     ProcessingJobAdapter::registerProcessingJobExecutor();
+    mDispatcher.setInteractionActionHandler([](const std::string &name, const Json::Value &args) {
+        return sicnu::agent::InteractionToolRegistry::instance().execute(name, args);
+    });
 }
 
 McpServer::~McpServer()
@@ -480,6 +494,24 @@ void McpServer::handleRequest(const QVariantMap &request)
             else if (toolName == QStringLiteral("get_lineage"))
             {
                 resultData = handleGetLineage(arguments.value(QStringLiteral("asset_id")).toString());
+            }
+            else if (toolName == QStringLiteral("list_interaction_tools"))
+            {
+                resultData = handleListInteractionTools();
+            }
+            else if (toolName == QStringLiteral("get_interaction_schema"))
+            {
+                const QString targetTool = arguments.value(QStringLiteral("tool_name")).toString().isEmpty()
+                    ? arguments.value(QStringLiteral("tool_id")).toString()
+                    : arguments.value(QStringLiteral("tool_name")).toString();
+                resultData = handleGetInteractionSchema(targetTool);
+            }
+            else if (toolName.startsWith(QStringLiteral("view:")) ||
+                     toolName.startsWith(QStringLiteral("roi:")) ||
+                     toolName.startsWith(QStringLiteral("canvas:")) ||
+                     toolName.startsWith(QStringLiteral("layer:")))
+            {
+                resultData = dispatchToolCall(toolName, arguments, false);
             }
             else
             {
@@ -860,6 +892,11 @@ QVariantMap McpServer::dispatchToolCall(const QString &toolId, const QVariantMap
         throw std::runtime_error(reason.toStdString());
     }
 
+    if (sicnu::processing::ToolCallDispatcher::isInteractionAction(toolId.toStdString())) {
+        const Json::Value resVal = mDispatcher.dispatchAndAwait(envelope);
+        return sicnu::processing::jsonObjectToVariantMap(resVal);
+    }
+
     long taskId = -1;
     QString submitError;
     if (!mDispatcher.submit(envelope, {}, &submitError, &taskId) || taskId <= 0) {
@@ -1133,5 +1170,40 @@ QVariantMap McpServer::handleGetLineage(const QString &assetIdText)
     }
     result[QStringLiteral("derivedOutputsOf")] = outputs;
 
+    return result;
+}
+
+QVariantMap McpServer::handleListInteractionTools()
+{
+    QVariantMap result;
+    QVariantList tools;
+    const auto toolList = sicnu::agent::InteractionToolRegistry::instance().listTools();
+    for (const auto &def : toolList)
+    {
+        QVariantMap tool;
+        tool[QStringLiteral("name")] = QString::fromStdString(def.name);
+        tool[QStringLiteral("displayName")] = QString::fromStdString(def.displayName);
+        tool[QStringLiteral("category")] = QString::fromStdString(def.category);
+        tool[QStringLiteral("description")] = QString::fromStdString(def.description);
+        tool[QStringLiteral("inputSchema")] = sicnu::processing::jsonObjectToVariantMap(def.inputSchema);
+        tools.append(tool);
+    }
+    result[QStringLiteral("tools")] = tools;
+    return result;
+}
+
+QVariantMap McpServer::handleGetInteractionSchema(const QString &toolName)
+{
+    const auto toolOpt = sicnu::agent::InteractionToolRegistry::instance().findTool(toolName.toStdString());
+    if (!toolOpt.has_value())
+    {
+        throw std::runtime_error("Interaction tool not found: " + toolName.toStdString());
+    }
+    QVariantMap result;
+    result[QStringLiteral("name")] = QString::fromStdString(toolOpt->name);
+    result[QStringLiteral("displayName")] = QString::fromStdString(toolOpt->displayName);
+    result[QStringLiteral("category")] = QString::fromStdString(toolOpt->category);
+    result[QStringLiteral("description")] = QString::fromStdString(toolOpt->description);
+    result[QStringLiteral("inputSchema")] = sicnu::processing::jsonObjectToVariantMap(toolOpt->inputSchema);
     return result;
 }

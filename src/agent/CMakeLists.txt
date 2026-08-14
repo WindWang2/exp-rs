@@ -2,6 +2,10 @@
 add_library(sicnu_agent SHARED
   workspace_snapshot.cpp
   workspace_snapshot.h
+  view_control_service.cpp
+  view_control_service.h
+  interaction_tool_registry.cpp
+  interaction_tool_registry.h
   agent_copilot_dock_widget.cpp
   agent_copilot_dock_widget.h
   llm_config_manager.cpp
@@ -19,6 +23,7 @@ target_link_libraries(sicnu_agent PUBLIC
   qgis_core
   qgis_gui
   sicnu_data
+  sicnu_qgis_display
   sicnu_processing
   sicnu_task_center
 )
