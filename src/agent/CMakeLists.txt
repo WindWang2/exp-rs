@@ -16,6 +16,17 @@ add_library(sicnu_agent SHARED
   llm_settings_dialog.h
   llm_streaming_client.cpp
   llm_streaming_client.h
+  tool_catalog/agent_tool.cpp
+  tool_catalog/agent_tool.h
+  tool_catalog/tool_provider.h
+  tool_catalog/algorithm_tool_provider.cpp
+  tool_catalog/algorithm_tool_provider.h
+  tool_catalog/interaction_tool_provider.cpp
+  tool_catalog/interaction_tool_provider.h
+  tool_catalog/data_tool_provider.cpp
+  tool_catalog/data_tool_provider.h
+  tool_catalog/agent_tool_catalog.cpp
+  tool_catalog/agent_tool_catalog.h
 )
 
 target_link_libraries(sicnu_agent PUBLIC

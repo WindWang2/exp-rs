@@ -54,6 +54,7 @@
 #include "app/main_window.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "agent/mcp_server.h"
+#include "agent/tool_catalog/agent_tool_catalog.h"
 #include "processing/framework/algorithm_engine.h"
 
 // Processing providers
@@ -159,6 +160,28 @@ int main(int argc, char *argv[])
             return adapter->execute( req.params, progressBridge,
                                      [&ctx]() { return ctx.isCancelled(); } );
         } );
+
+    // Handle CLI tool queries (--export-tools / --list-tools)
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--export-tools") == 0 || strcmp(argv[i], "--export-openai-tools") == 0) {
+            const auto tools = sicnu::agent::tool_catalog::AgentToolCatalog::instance().exportOpenAiToolDefinitions();
+            Json::StreamWriterBuilder builder;
+            builder["indentation"] = "  ";
+            std::cout << Json::writeString(builder, tools) << std::endl;
+            delete app;
+            return 0;
+        }
+        if (strcmp(argv[i], "--list-tools") == 0) {
+            const auto tools = sicnu::agent::tool_catalog::AgentToolCatalog::instance().listTools();
+            for (const auto &t : tools) {
+                std::cout << "[" << sicnu::agent::tool_catalog::toolCategoryToString(t.category) << "] "
+                          << t.name << " - " << t.displayName << "\n  "
+                          << t.description << std::endl;
+            }
+            delete app;
+            return 0;
+        }
+    }
 
     if (mcpMode) {
         std::cerr << "Initializing MCP Mode..." << std::endl;

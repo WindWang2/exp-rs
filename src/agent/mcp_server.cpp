@@ -12,7 +12,11 @@
 #include "processing/framework/algorithm_preflight.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "shell/processing_job_adapter.h"
+<<<<<<< HEAD
 #include "interaction_tool_registry.h"
+=======
+#include "agent/tool_catalog/agent_tool_catalog.h"
+>>>>>>> ecf145f1d7 (feat(agent): unify tool catalog architecture across processing, interaction, and data)
 
 #include <iostream>
 #include <QJsonDocument>
@@ -252,6 +256,20 @@ const MetaToolDef kMetaTools[] = {
     { "get_interaction_schema",
       "Get JSON Schema and parameters for an interaction tool (e.g. 'view:set_extent', 'roi:set').",
       { { "tool_name", "string", "Interaction tool name (e.g. 'view:get_state', 'view:set_extent', 'roi:set')" } } },
+    { "list_tools",
+      "List all unified agent tools (Processing algorithms, Interaction/Canvas tools, Data tools). "
+      "Returns category, name, description, and JSON schema.",
+      { { "category", "string", "Optional category filter: 'Processing', 'Interaction', 'Data', 'Custom'." } } },
+    { "search_tools",
+      "Search unified agent tools by free text (e.g. 'show raster', 'roi', 'spectral'), group, tag, or input/output type.",
+      { { "query", "string", "Free-text filter matched against name, group, purpose, tags, and description." },
+        { "group", "string", "Exact or substring group filter. Optional." },
+        { "tag", "string", "Tag filter. Optional." },
+        { "input_type", "string", "Input data type filter. Optional." },
+        { "output_type", "string", "Output data type filter. Optional." } } },
+    { "get_tool_schema",
+      "Get parameter JSON Schema and metadata for any registered tool in the unified Agent Tool Catalog.",
+      { { "tool_id", "string", "Unique ID of the tool, e.g. 'rs:spectral_index', 'canvas:draw_roi', 'data:list_layers'" } } },
 };
 
 QVariantMap metaToolInputSchema(const MetaToolDef &def)
@@ -506,6 +524,23 @@ void McpServer::handleRequest(const QVariantMap &request)
                     ? arguments.value(QStringLiteral("tool_id")).toString()
                     : arguments.value(QStringLiteral("tool_name")).toString();
                 resultData = handleGetInteractionSchema(targetTool);
+            }
+            else if (toolName == QStringLiteral("list_tools"))
+            {
+                resultData = handleListTools(arguments.value(QStringLiteral("category")).toString());
+            }
+            else if (toolName == QStringLiteral("search_tools"))
+            {
+                resultData = handleSearchTools(
+                    arguments.value(QStringLiteral("query")).toString(),
+                    arguments.value(QStringLiteral("group")).toString(),
+                    arguments.value(QStringLiteral("tag")).toString(),
+                    arguments.value(QStringLiteral("input_type")).toString(),
+                    arguments.value(QStringLiteral("output_type")).toString());
+            }
+            else if (toolName == QStringLiteral("get_tool_schema"))
+            {
+                resultData = handleGetToolSchema(arguments.value(QStringLiteral("tool_id")).toString());
             }
             else if (toolName.startsWith(QStringLiteral("view:")) ||
                      toolName.startsWith(QStringLiteral("roi:")) ||
@@ -1207,5 +1242,82 @@ QVariantMap McpServer::handleGetInteractionSchema(const QString &toolName)
     result[QStringLiteral("category")] = QString::fromStdString(toolOpt->category);
     result[QStringLiteral("description")] = QString::fromStdString(toolOpt->description);
     result[QStringLiteral("inputSchema")] = sicnu::processing::jsonObjectToVariantMap(toolOpt->inputSchema);
+    return result;
+}
+
+QVariantMap McpServer::handleListTools(const QString &category)
+{
+    using namespace sicnu::agent::tool_catalog;
+    std::optional<ToolCategory> catFilter = std::nullopt;
+    if (!category.isEmpty()) {
+        catFilter = toolCategoryFromString(category.toStdString());
+    }
+
+    const auto tools = AgentToolCatalog::instance().listTools(catFilter);
+    QVariantList toolList;
+    toolList.reserve(static_cast<int>(tools.size()));
+
+    for (const auto &t : tools) {
+        QVariantMap toolMap;
+        toolMap[QStringLiteral("category")] = QString::fromStdString(toolCategoryToString(t.category));
+        toolMap[QStringLiteral("name")] = QString::fromStdString(t.name);
+        toolMap[QStringLiteral("description")] = QString::fromStdString(t.description.empty() ? t.displayName : t.description);
+        toolMap[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(t.inputSchema);
+        toolList.append(toolMap);
+    }
+
+    QVariantMap result;
+    result[QStringLiteral("tools")] = toolList;
+    result[QStringLiteral("count")] = toolList.size();
+    return result;
+}
+
+QVariantMap McpServer::handleSearchTools(const QString &query, const QString &group,
+                                        const QString &tag, const QString &inputType,
+                                        const QString &outputType)
+{
+    using namespace sicnu::agent::tool_catalog;
+    SearchQuery sq;
+    sq.text = query.toStdString();
+    sq.group = group.toStdString();
+    sq.tag = tag.toStdString();
+    sq.inputType = inputType.toStdString();
+    sq.outputType = outputType.toStdString();
+
+    const auto tools = AgentToolCatalog::instance().searchTools(sq);
+    QVariantList toolList;
+    toolList.reserve(static_cast<int>(tools.size()));
+
+    for (const auto &t : tools) {
+        QVariantMap toolMap;
+        toolMap[QStringLiteral("category")] = QString::fromStdString(toolCategoryToString(t.category));
+        toolMap[QStringLiteral("name")] = QString::fromStdString(t.name);
+        toolMap[QStringLiteral("description")] = QString::fromStdString(t.description.empty() ? t.displayName : t.description);
+        toolMap[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(t.inputSchema);
+        toolList.append(toolMap);
+    }
+
+    QVariantMap result;
+    result[QStringLiteral("tools")] = toolList;
+    result[QStringLiteral("count")] = toolList.size();
+    return result;
+}
+
+QVariantMap McpServer::handleGetToolSchema(const QString &toolId)
+{
+    using namespace sicnu::agent::tool_catalog;
+    auto tool = AgentToolCatalog::instance().findTool(toolId.toStdString());
+    if (!tool) {
+        QVariantMap errorMap;
+        errorMap[QStringLiteral("error")] = QStringLiteral("Unknown tool: %1").arg(toolId);
+        return errorMap;
+    }
+
+    QVariantMap result;
+    result[QStringLiteral("category")] = QString::fromStdString(toolCategoryToString(tool->category));
+    result[QStringLiteral("name")] = QString::fromStdString(tool->name);
+    result[QStringLiteral("displayName")] = QString::fromStdString(tool->displayName);
+    result[QStringLiteral("description")] = QString::fromStdString(tool->description);
+    result[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(tool->inputSchema);
     return result;
 }

@@ -526,6 +526,30 @@ target_include_directories(test_mcp_server PRIVATE
 )
 sicnu_discover_tests(test_mcp_server)
 
+# Agent Tool Catalog tests
+add_executable(test_agent_tool_catalog test_agent_tool_catalog.cpp)
+target_link_libraries(test_agent_tool_catalog PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  sicnu_agent
+  sicnu_processing
+  sicnu_operators
+  sicnu_data
+  sicnu_task_center
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_agent_tool_catalog PRIVATE jsoncpp)
+endif()
+target_include_directories(test_agent_tool_catalog PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_agent_tool_catalog)
+
 # GDAL error handler tests
 add_executable(test_gdal_errors test_gdal_errors.cpp)
 target_link_libraries(test_gdal_errors PRIVATE
