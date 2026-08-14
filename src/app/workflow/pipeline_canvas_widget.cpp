@@ -16,7 +16,7 @@ PipelineCanvasWidget::PipelineCanvasWidget( QWidget *parent )
   setScene( mScene );
   setRenderHint( QPainter::Antialiasing, true );
   setRenderHint( QPainter::SmoothPixmapTransform, true );
-  setViewportUpdateMode( QGraphicsView::FullViewportUpdate );
+  setViewportUpdateMode( QGraphicsView::SmartViewportUpdate );
 
   setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
   setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
@@ -80,6 +80,63 @@ void PipelineCanvasWidget::zoomToFit()
     fitInView( bounds, Qt::KeepAspectRatio );
     mZoomFactor = transform().m11();
   }
+}
+
+void PipelineCanvasWidget::deleteSelected()
+{
+  auto selected = mScene->selectedItems();
+  std::vector<PipelineConnectionItem *> connsToDelete;
+  std::vector<PipelineNodeItem *> nodesToDelete;
+
+  for ( auto *item : selected )
+  {
+    if ( auto *conn = dynamic_cast<PipelineConnectionItem *>( item ) )
+    {
+      connsToDelete.push_back( conn );
+    }
+    else if ( auto *node = dynamic_cast<PipelineNodeItem *>( item ) )
+    {
+      nodesToDelete.push_back( node );
+    }
+  }
+
+  for ( auto *conn : connsToDelete )
+  {
+    mScene->removeConnection( conn );
+  }
+
+  for ( auto *node : nodesToDelete )
+  {
+    mScene->removeNode( node->stepId() );
+  }
+}
+
+void PipelineCanvasWidget::keyPressEvent( QKeyEvent *event )
+{
+  if ( event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace )
+  {
+    deleteSelected();
+    event->accept();
+    return;
+  }
+  if ( ( event->modifiers() & Qt::ControlModifier ) && event->key() == Qt::Key_A )
+  {
+    for ( auto *item : mScene->items() )
+    {
+      item->setSelected( true );
+    }
+    event->accept();
+    return;
+  }
+  if ( event->key() == Qt::Key_Escape )
+  {
+    mScene->cancelTempConnection();
+    mScene->clearSelection();
+    event->accept();
+    return;
+  }
+
+  QGraphicsView::keyPressEvent( event );
 }
 
 void PipelineCanvasWidget::wheelEvent( QWheelEvent *event )
@@ -148,6 +205,8 @@ void PipelineCanvasWidget::contextMenuEvent( QContextMenuEvent *event )
     node = dynamic_cast<PipelineNodeItem *>( item->parentItem() );
   }
 
+  PipelineConnectionItem *conn = dynamic_cast<PipelineConnectionItem *>( item );
+
   QMenu menu( this );
   if ( node )
   {
@@ -169,6 +228,15 @@ void PipelineCanvasWidget::contextMenuEvent( QContextMenuEvent *event )
     else if ( selectedAct == deleteNodeAct )
     {
       mScene->removeNode( stepId );
+    }
+  }
+  else if ( conn )
+  {
+    QAction *deleteConnAct = menu.addAction( tr( "🗑️ 删除连线 / Delete Connection" ) );
+    QAction *selectedAct = menu.exec( event->globalPos() );
+    if ( selectedAct == deleteConnAct )
+    {
+      mScene->removeConnection( conn );
     }
   }
   else

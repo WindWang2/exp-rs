@@ -92,14 +92,26 @@ void PipelineConnectionItem::rebuildPath( const QPointF &startPos, const QPointF
   QPointF c2( endPos.x() - dx, endPos.y() );
 
   p.cubicTo( c1, c2, endPos );
+  mShapeDirty = true;
   setPath( p );
+}
+
+QRectF PipelineConnectionItem::boundingRect() const
+{
+  // Pad bounding rect by 3.5px to cover maximum selection pen stroke (3.5px) + antialiasing
+  return path().boundingRect().adjusted( -3.5, -3.5, 3.5, 3.5 );
 }
 
 QPainterPath PipelineConnectionItem::shape() const
 {
-  QPainterPathStroker stroker;
-  stroker.setWidth( 10.0 ); // Easier mouse selection target area
-  return stroker.createStroke( path() );
+  if ( mShapeDirty )
+  {
+    QPainterPathStroker stroker;
+    stroker.setWidth( 12.0 ); // Easy hit detection target
+    mCachedShape = stroker.createStroke( path() );
+    mShapeDirty = false;
+  }
+  return mCachedShape;
 }
 
 void PipelineConnectionItem::paint( QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget )

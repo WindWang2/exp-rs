@@ -43,7 +43,11 @@ public:
   void removeConnection( PipelineConnectionItem *conn );
   const std::vector<PipelineConnectionItem *> &connections() const { return mConnections; }
 
+  enum { Type = UserType + 102 };
+  int type() const override { return Type; }
+
   QRectF boundingRect() const override;
+  QPainterPath shape() const override;
   void paint( QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget ) override;
 
 signals:
@@ -56,6 +60,8 @@ protected:
 private:
   QString mPortName;
   QString mPortType;
+  QString mDisplayLabel;
+  QColor mPortColor;
   PortDirection mDirection;
   bool mAddToMap = false;
   PipelineNodeItem *mNodeItem = nullptr;
@@ -63,7 +69,7 @@ private:
 
   static constexpr qreal PIN_RADIUS = 6.0;
   static constexpr qreal PORT_HEIGHT = 24.0;
-  static constexpr qreal PORT_WIDTH = 140.0;
+  static constexpr qreal PORT_WIDTH = 135.0;
 };
 
 } // namespace sicnu::workflow::gui

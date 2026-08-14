@@ -48,12 +48,15 @@ std::vector<cv::Mat> readRasterBandsToMats(const std::string& inputPath,
         return {};
     }
 
+    const int w = ds.width();
+    const int h = ds.height();
     std::vector<cv::Mat> result;
     result.reserve(ds.bandCount());
 
     for (int b = 1; b <= ds.bandCount(); ++b) {
-        cv::Mat bandMat = readRasterBandToMat(inputPath, b, errorMessage);
-        if (bandMat.empty()) {
+        cv::Mat bandMat(h, w, CV_32FC1);
+        if (!ds.readBandData(b, bandMat.ptr<float>(), w, h)) {
+            if (errorMessage) *errorMessage = "Failed to read raster band " + std::to_string(b);
             return {};
         }
         result.push_back(std::move(bandMat));
@@ -122,14 +125,30 @@ bool writeMatsToRaster(const std::string& outputPath,
         return false;
     }
 
+    const int w = mats[0].cols;
+    const int h = mats[0].rows;
+    if (w <= 0 || h <= 0) {
+        if (errorMessage) *errorMessage = "Invalid raster dimensions in input matrix";
+        return false;
+    }
+
+    for (size_t i = 0; i < mats.size(); ++i) {
+        if (mats[i].empty() || mats[i].cols != w || mats[i].rows != h) {
+            if (errorMessage) {
+                *errorMessage = "Band " + std::to_string(i + 1) + " dimension mismatch: expected " +
+                                std::to_string(w) + "x" + std::to_string(h) + ", got " +
+                                std::to_string(mats[i].cols) + "x" + std::to_string(mats[i].rows);
+            }
+            return false;
+        }
+    }
+
     GdalDatasetWrapper src;
     if (!src.open(QString::fromStdString(sourcePath))) {
         if (errorMessage) *errorMessage = src.lastError().toStdString();
         return false;
     }
 
-    const int w = mats[0].cols;
-    const int h = mats[0].rows;
     const int bandCount = static_cast<int>(mats.size());
     const std::array<double, 6> geo = src.geoTransform();
     const QString projection = src.projection();
@@ -145,9 +164,10 @@ bool writeMatsToRaster(const std::string& outputPath,
 
     for (int i = 0; i < bandCount; ++i) {
         GDALRasterBandH band = GDALGetRasterBand(outDs, i + 1);
+        cv::Mat bandMat = mats[i].isContinuous() ? mats[i] : mats[i].clone();
         CPLErr err = GDALRasterIO(band, GF_Write,
                                   0, 0, w, h,
-                                  const_cast<float*>(mats[i].ptr<float>()),
+                                  const_cast<float*>(bandMat.ptr<float>()),
                                   w, h, GDT_Float32, 0, 0);
         if (err != CE_None) {
             if (errorMessage) *errorMessage = CPLGetLastErrorMsg();

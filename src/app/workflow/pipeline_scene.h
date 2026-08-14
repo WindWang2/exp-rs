@@ -3,6 +3,7 @@
 
 #include <QGraphicsScene>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 
 #include "pipeline_node_item.h"
@@ -29,10 +30,15 @@ public:
                                           const QString &toStepId,
                                           const QString &toPort );
   bool removeConnection( PipelineConnectionItem *conn );
+  void cancelTempConnection();
 
   void clearWorkflow();
   void loadWorkflowDefinition( const WorkflowDefinition &def );
   WorkflowDefinition exportWorkflowDefinition( const WorkflowDefinition &baseDef ) const;
+
+  bool isBulkUpdating() const { return mBulkUpdating; }
+  const std::unordered_map<std::string, PipelineNodeItem *> &nodes() const { return mNodes; }
+  const std::unordered_set<PipelineConnectionItem *> &connections() const { return mConnections; }
 
 signals:
   void workflowChanged();
@@ -52,9 +58,12 @@ private slots:
   void onNodePositionChanged( PipelineNodeItem *node, const QPointF &newPos );
 
 private:
-  std::unordered_map<std::string, PipelineNodeItem *> mNodes;
-  std::vector<PipelineConnectionItem *> mConnections;
+  void notifyWorkflowChanged();
 
+  std::unordered_map<std::string, PipelineNodeItem *> mNodes;
+  std::unordered_set<PipelineConnectionItem *> mConnections;
+
+  bool mBulkUpdating = false;
   PipelinePortItem *mDragSourcePort = nullptr;
   PipelineConnectionItem *mTempConnection = nullptr;
 };

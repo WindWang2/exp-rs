@@ -1,8 +1,8 @@
-// src/app/workflow/preset_catalog_widget.h
 #pragma once
 
 #include <QWidget>
 #include <QListWidget>
+#include <QLineEdit>
 #include <QLabel>
 #include <QVBoxLayout>
 #include <QPushButton>
@@ -30,6 +30,7 @@ public:
   ~PresetCatalogWidget() override = default;
 
   static std::vector<PresetItemInfo> builtinPresets();
+  int visiblePresetCount() const;
 
 signals:
   void presetSelected( const sicnu::workflow::WorkflowDefinition &def );
@@ -38,10 +39,12 @@ private slots:
   void onItemDoubleClicked( QListWidgetItem *item );
   void onItemSelectionChanged();
   void onLoadButtonClicked();
+  void onSearchTextChanged( const QString &text );
 
 private:
-  void populatePresets();
+  void populatePresets( const QString &filter = QString() );
 
+  QLineEdit *mSearchEdit = nullptr;
   QListWidget *mListWidget = nullptr;
   QLabel *mDescLabel = nullptr;
   QPushButton *mLoadBtn = nullptr;

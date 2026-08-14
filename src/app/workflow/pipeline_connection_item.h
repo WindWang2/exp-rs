@@ -24,7 +24,11 @@ public:
   void setTempEndPoint( const QPointF &scenePos );
   void updatePosition();
 
+  enum { Type = UserType + 103 };
+  int type() const override { return Type; }
+
   void paint( QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget ) override;
+  QRectF boundingRect() const override;
   QPainterPath shape() const override;
 
 private:
@@ -32,6 +36,9 @@ private:
   PipelinePortItem *mTargetPort = nullptr;
   QPointF mTempEndPoint;
   bool mIsTemp = false;
+
+  mutable QPainterPath mCachedShape;
+  mutable bool mShapeDirty = true;
 
   void rebuildPath( const QPointF &startPos, const QPointF &endPos );
 };

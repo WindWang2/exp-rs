@@ -38,7 +38,9 @@ RsObiaSegmentationResult runOtb(
     return result;
 }
 
-RsObiaSegmentationResult runSimple( const RsObiaSegmentationConfig &cfg )
+RsObiaSegmentationResult runSimple(
+    const RsObiaSegmentationConfig &cfg,
+    const std::function<bool()> &isCanceled = nullptr )
 {
     RsObiaSegmentationResult result;
 
@@ -63,6 +65,11 @@ RsObiaSegmentationResult runSimple( const RsObiaSegmentationConfig &cfg )
     QVector<QVector<float>> bandData( nBands );
     for ( int b = 0; b < nBands; ++b )
     {
+        if ( isCanceled && isCanceled() )
+        {
+            GDALClose( ds );
+            return result;
+        }
         bandData[b].resize( w * h );
         GDALRasterBandH band = GDALGetRasterBand( ds, cfg.bandIndices[b] );
         if ( !band )
@@ -97,7 +104,7 @@ RsObiaSegmentationResult runSimple( const RsObiaSegmentationConfig &cfg )
     params.quantizeBins = cfg.quantizeBins;
     params.minRegionSize = cfg.minRegionSize;
 
-    result.segMap = RsSimpleSegmenter::segmentMultiBand( bandPtrs.constData(), nBands, w, h, nodata, params );
+    result.segMap = RsSimpleSegmenter::segmentMultiBand( bandPtrs.constData(), nBands, w, h, nodata, params, isCanceled );
     if ( result.segMap.isEmpty() )
     {
         result.errorMessage = QObject::tr( "Segmentation produced empty result" );
@@ -138,5 +145,5 @@ RsObiaSegmentationResult RsObiaSegmentation::run(
                             .arg( otbResult.errorMessage ) );
     }
 
-    return runSimple( cfg );
+    return runSimple( cfg, isCanceled );
 }

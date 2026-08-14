@@ -167,6 +167,20 @@ public:
                         int srcWidth, int srcHeight, float *buffer) const;
 
     /**
+     * Read a rectangular window across multiple bands directly into a pixel-interleaved
+     * (BIP) float buffer using GDALDatasetRasterIO in a single dataset-level call.
+     * @param bands     1-based list of band numbers to read
+     * @param xOff      pixel column of the window's left edge (0-based)
+     * @param yOff      pixel row of the window's top edge (0-based)
+     * @param srcWidth  window width in pixels
+     * @param srcHeight window height in pixels
+     * @param bipBuffer pre-allocated float buffer of size srcWidth * srcHeight * bands.size()
+     * @return true on success
+     */
+    bool readWindowBip(const std::vector<int> &bands, int xOff, int yOff,
+                       int srcWidth, int srcHeight, float *bipBuffer) const;
+
+    /**
      * Read a rectangular window of a band and resample it to a different grid
      * (GDAL resampling: nearest/bilinear depending on the dataset's default),
      * for heterogeneous-resolution fusion where the pan and multispectral

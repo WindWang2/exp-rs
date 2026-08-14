@@ -112,6 +112,7 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
         }
     }
 
+    std::vector<size_t> validCount( bandCount, 0 );
     if ( pixels > 0 )
     {
         std::vector<float> window( static_cast<size_t>( windowW ) * windowH );
@@ -130,6 +131,7 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
                     continue;
                 sum[b - 1] += value;
                 sumSq[b - 1] += value * value;
+                ++validCount[b - 1];
             }
         }
     }
@@ -154,7 +156,10 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
     {
         for ( int b = 0; b < bandCount; ++b )
         {
-            const double n = static_cast<double>( pixels );
+            const size_t vc = validCount[b];
+            if ( vc == 0 )
+                continue;
+            const double n = static_cast<double>( vc );
             result->mean[b] = static_cast<float>( sum[b] / n );
             const double variance = std::max( 0.0, sumSq[b] / n - ( sum[b] / n ) * ( sum[b] / n ) );
             result->stddev[b] = static_cast<float>( std::sqrt( variance ) );

@@ -71,6 +71,8 @@ public:
     // SAR speckle filters
     static void leeFilter(const float *input, float *output, int width, int height,
                           int kernelSize = 5, float noiseVariance = 1.0f);
+    static void enhancedLeeFilter(const float *input, float *output, int width, int height,
+                                  int kernelSize = 5, float noiseVariance = 1.0f, float damping = 1.0f);
     static void frostFilter(const float *input, float *output, int width, int height,
                             int kernelSize = 5, float damping = 2.0f);
     static void kuanFilter(const float *input, float *output, int width, int height,
@@ -82,14 +84,14 @@ public:
     static void convolve(const float *input, float *output, int width, int height,
                          const float *kernel, int kernelSize);
 
-private:
-    static void generateGaussianKernel(float *kernel, int size, float sigma);
-
-    // PCA helpers
+    // PCA / Matrix math utilities
     static void computeCovarianceMatrix(const std::vector<std::vector<float>> &centered,
                                          int bands, size_t n,
                                          std::vector<std::vector<float>> &cov);
     static void jacobiEigen(std::vector<std::vector<float>> &A, int n,
                             std::vector<float> &eigenvalues,
                             std::vector<std::vector<float>> &eigenvectors);
+
+private:
+    static void generateGaussianKernel(float *kernel, int size, float sigma);
 };

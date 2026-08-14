@@ -422,6 +422,162 @@ TEST_CASE( "Classification postprocessing visual DAG recipe and operators", "[wo
   CHECK( recodeOp->name() == "rs:recode" );
 }
 
+TEST_CASE( "PipelineScene prevents duplicate edges and self-loops", "[workflow][graph]" )
+{
+  ensureApp();
 
+  PipelineScene scene;
 
+  StepDef stepA;
+  stepA.id = "step_1";
+  stepA.title = "Source";
+  stepA.artifactOnSuccess = "out";
 
+  StepDef stepB;
+  stepB.id = "step_2";
+  stepB.title = "Target";
+
+  scene.addNode( stepA );
+  scene.addNode( stepB );
+
+  // Self loop should return nullptr
+  auto *selfConn = scene.addConnection( "step_1", "out", "step_1", "input" );
+  REQUIRE( selfConn == nullptr );
+
+  // First valid connection
+  auto *conn1 = scene.addConnection( "step_1", "out", "step_2", "input" );
+  REQUIRE( conn1 != nullptr );
+  REQUIRE( scene.connections().size() == 1 );
+
+  // Duplicate connection should return existing without creating second item
+  auto *conn2 = scene.addConnection( "step_1", "out", "step_2", "input" );
+  REQUIRE( conn2 == conn1 );
+  REQUIRE( scene.connections().size() == 1 );
+}
+
+TEST_CASE( "PipelineScene batches signals during loadWorkflowDefinition", "[workflow][signals]" )
+{
+  ensureApp();
+
+  PipelineScene scene;
+
+  WorkflowDefinition wf;
+  wf.id = "batch_test";
+  wf.title = "Batch Signal Test";
+
+  for ( int i = 1; i <= 5; ++i )
+  {
+    StepDef s;
+    s.id = "step_" + std::to_string( i );
+    s.title = "Step " + std::to_string( i );
+    s.artifactOnSuccess = "out";
+    if ( i > 1 )
+    {
+      StepConnection inConn;
+      inConn.fromStepId = "step_" + std::to_string( i - 1 );
+      inConn.fromPort = "out";
+      inConn.toPort = "input";
+      s.inputs.push_back( inConn );
+    }
+    wf.steps.push_back( s );
+  }
+
+  int workflowChangedCount = 0;
+  QObject::connect( &scene, &PipelineScene::workflowChanged, [&]() {
+    workflowChangedCount++;
+  } );
+
+  // Loading a 5-step DAG should emit exactly 1 workflowChanged signal (not 1 + 5 + 4 = 10)
+  scene.loadWorkflowDefinition( wf );
+  REQUIRE( workflowChangedCount == 1 );
+  REQUIRE( scene.nodes().size() == 5 );
+  REQUIRE( scene.connections().size() == 4 );
+
+  // Export roundtrip check (O(V+E) traversal)
+  WorkflowDefinition exported = scene.exportWorkflowDefinition( wf );
+  REQUIRE( exported.steps.size() == 5 );
+  REQUIRE( exported.steps[4].inputs.size() == 1 );
+  REQUIRE( exported.steps[4].inputs[0].fromStepId == "step_4" );
+}
+
+TEST_CASE( "PipelineCanvasWidget deleteSelected removes selected items", "[workflow][canvas][delete]" )
+{
+  ensureApp();
+
+  PipelineCanvasWidget canvas;
+  auto *scene = canvas.pipelineScene();
+
+  StepDef s1;
+  s1.id = "n1";
+  s1.artifactOnSuccess = "out";
+  StepDef s2;
+  s2.id = "n2";
+
+  scene->addNode( s1 );
+  scene->addNode( s2 );
+  auto *conn = scene->addConnection( "n1", "out", "n2", "input" );
+
+  REQUIRE( scene->nodes().size() == 2 );
+  REQUIRE( scene->connections().size() == 1 );
+
+  // Select connection only and delete
+  conn->setSelected( true );
+  canvas.deleteSelected();
+  REQUIRE( scene->connections().empty() );
+  REQUIRE( scene->nodes().size() == 2 );
+
+  // Re-add connection, select node n1 and delete
+  scene->addConnection( "n1", "out", "n2", "input" );
+  auto *node1 = scene->findNode( "n1" );
+  REQUIRE( node1 != nullptr );
+  node1->setSelected( true );
+  canvas.deleteSelected();
+
+  // Removing n1 should also clean up its incident connections in O(d)
+  REQUIRE( scene->findNode( "n1" ) == nullptr );
+  REQUIRE( scene->connections().empty() );
+  REQUIRE( scene->nodes().size() == 1 );
+}
+
+TEST_CASE( "PresetCatalogWidget search filters presets by keyword", "[workflow][presets][filter]" )
+{
+  ensureApp();
+
+  PresetCatalogWidget catalog;
+  REQUIRE( catalog.visiblePresetCount() >= 4 );
+
+  // Filter by "NDVI"
+  catalog.findChild<QLineEdit *>()->setText( "NDVI" );
+  REQUIRE( catalog.visiblePresetCount() == 1 );
+
+  // Filter by non-existent query
+  catalog.findChild<QLineEdit *>()->setText( "NonExistentPreset12345" );
+  REQUIRE( catalog.visiblePresetCount() == 0 );
+
+  // Clear query resets full list
+  catalog.findChild<QLineEdit *>()->clear();
+  REQUIRE( catalog.visiblePresetCount() >= 4 );
+}
+
+TEST_CASE( "PipelineNodeItem bounding rect padding and port shape precision", "[workflow][geometry]" )
+{
+  ensureApp();
+
+  StepDef s;
+  s.id = "geom_step";
+  s.title = "Geometry Step";
+
+  PipelineNodeItem node( s );
+  auto *inPort = node.addInputPort( "in_raster", "Raster" );
+  auto *outPort = node.addOutputPort( "out_raster", "Raster" );
+
+  // Verify node bounding rect contains margin for 2.0px stroke
+  QRectF bRect = node.boundingRect();
+  REQUIRE( bRect.left() <= -1.5 );
+  REQUIRE( bRect.top() <= -1.5 );
+
+  // Port item shape should be precise (circular pin region, not entire node width)
+  QPainterPath inShape = inPort->shape();
+  REQUIRE( !inShape.isEmpty() );
+  REQUIRE( inShape.boundingRect().width() < 30.0 );
+}

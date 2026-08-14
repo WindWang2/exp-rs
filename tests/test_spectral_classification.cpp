@@ -475,3 +475,25 @@ TEST_CASE( "SID: nodata pixel labelled -1", "[sid]" )
         pixels.data(), 1, 3, refs.data(), 1, labels.data(), nullptr, NODATA ) );
     CHECK( labels[0] == -1 );
 }
+
+TEST_CASE( "SAM: numerical boundary clamping on collinear spectra", "[sam][numerical]" )
+{
+    // Test exact collinear spectra where dot / (normT * normR) could slightly overshoot 1.0 due to FP rounding
+    std::vector<float> refs = { 1.234567f, 2.345678f, 3.456789f, 4.567890f };
+    std::vector<float> pixels = { 1.234567f, 2.345678f, 3.456789f, 4.567890f };
+    std::vector<int> labels( 1 );
+    std::vector<float> angles( 1 );
+
+    REQUIRE( SpectralClassification::samClassify(
+        pixels.data(), 1, 4, refs.data(), 1, labels.data(), angles.data(), NODATA ) );
+    CHECK( labels[0] == 0 );
+    CHECK( std::isfinite( angles[0] ) );
+    CHECK( angles[0] == Approx( 0.0f ).margin( 1e-6f ) );
+
+    // Test zero-norm pixel
+    std::vector<float> zeroPixel = { 0.0f, 0.0f, 0.0f, 0.0f };
+    REQUIRE( SpectralClassification::samClassify(
+        zeroPixel.data(), 1, 4, refs.data(), 1, labels.data(), angles.data(), NODATA ) );
+    CHECK( labels[0] == -1 );
+    CHECK( std::isnan( angles[0] ) );
+}

@@ -161,3 +161,58 @@ TEST_CASE( "GdalBlockStream: tile covers whole raster when tile >= size", "[bloc
     REQUIRE( t.width == 4 );
     REQUIRE( t.height == 4 );
 }
+
+TEST_CASE( "GdalBlockStream: halo buffering and border replication", "[block_stream][halo]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString path = dir.filePath( QStringLiteral( "r.tif" ) );
+    const int W = 6, H = 6;
+    buildIndexRaster( path, W, H ); // values: y * 6 + x
+
+    GdalDatasetWrapper ds;
+    REQUIRE( ds.open( path ) );
+
+    const int halo = 2;
+    GdalBlockStream stream( ds, 1, 3, 3, halo );
+    REQUIRE( stream.halo() == 2 );
+    REQUIRE( stream.tileCount() == 4 ); // 6x6 with 3x3 tiles -> 2x2 = 4 tiles
+
+    int visited = 0;
+    bool ok = stream.forEach( [&]( const GdalBlockStream::Tile &tile, const float *pixels ) {
+        REQUIRE( tile.halo == 2 );
+        REQUIRE( tile.bufferWidth == tile.width + 2 * halo );
+        REQUIRE( tile.bufferHeight == tile.height + 2 * halo );
+
+        const int bufW = tile.bufferWidth;
+
+        // Verify inner valid tile content
+        for ( int y = 0; y < tile.height; ++y )
+        {
+            for ( int x = 0; x < tile.width; ++x )
+            {
+                const int gx = tile.xOffset + x;
+                const int gy = tile.yOffset + y;
+                const size_t bufIdx = static_cast<size_t>( y + halo ) * bufW + ( x + halo );
+                REQUIRE( pixels[bufIdx] == Approx( static_cast<float>( gy * W + gx ) ).margin( 1e-4 ) );
+            }
+        }
+
+        // For top-left tile (index 0 at 0,0): verify top-left halo is replicate-clamped from (0,0) = 0.0
+        if ( tile.index == 0 )
+        {
+            // Top-left corner halo [0,0]
+            REQUIRE( pixels[0] == Approx( 0.0f ).margin( 1e-4 ) );
+            // Top halo at x = halo
+            REQUIRE( pixels[halo] == Approx( 0.0f ).margin( 1e-4 ) );
+            // Left halo at y = halo, x = 0
+            REQUIRE( pixels[halo * bufW] == Approx( 0.0f ).margin( 1e-4 ) );
+        }
+
+        ++visited;
+        return true;
+    } );
+
+    REQUIRE( ok );
+    REQUIRE( visited == 4 );
+}

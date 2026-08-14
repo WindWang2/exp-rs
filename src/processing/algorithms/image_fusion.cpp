@@ -250,34 +250,46 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
             break;
 
         // Compute rotation angle
-        double theta = 0.5 * std::atan2( 2.0 * eigVal[p * nBands + q],
-                                          eigVal[p * nBands + p] - eigVal[q * nBands + q] );
+        double app = eigVal[p * nBands + p];
+        double aqq = eigVal[q * nBands + q];
+        double apq = eigVal[p * nBands + q];
+
+        double theta;
+        if ( std::abs( app - aqq ) < 1e-15 )
+            theta = M_PI / 4.0;
+        else
+            theta = 0.5 * std::atan2( 2.0 * apq, aqq - app );
+
         double c = std::cos( theta );
         double s = std::sin( theta );
 
-        // Apply Givens rotation
-        for ( int i = 0; i < nBands; ++i )
+        double newApp = c * c * app + s * s * aqq - 2.0 * s * c * apq;
+        double newAqq = s * s * app + c * c * aqq + 2.0 * s * c * apq;
+
+        for ( int r = 0; r < nBands; ++r )
         {
-            double vp = eigVal[i * nBands + p];
-            double vq = eigVal[i * nBands + q];
-            eigVal[i * nBands + p] = c * vp + s * vq;
-            eigVal[i * nBands + q] = -s * vp + c * vq;
-        }
-        for ( int i = 0; i < nBands; ++i )
-        {
-            double vp = eigVal[p * nBands + i];
-            double vq = eigVal[q * nBands + i];
-            eigVal[p * nBands + i] = c * vp + s * vq;
-            eigVal[q * nBands + i] = -s * vp + c * vq;
+            if ( r == p || r == q )
+                continue;
+            double arp = eigVal[r * nBands + p];
+            double arq = eigVal[r * nBands + q];
+            eigVal[r * nBands + p] = c * arp - s * arq;
+            eigVal[p * nBands + r] = eigVal[r * nBands + p];
+            eigVal[r * nBands + q] = s * arp + c * arq;
+            eigVal[q * nBands + r] = eigVal[r * nBands + q];
         }
 
+        eigVal[p * nBands + p] = newApp;
+        eigVal[q * nBands + q] = newAqq;
+        eigVal[p * nBands + q] = 0.0;
+        eigVal[q * nBands + p] = 0.0;
+
         // Update eigenvectors
-        for ( int i = 0; i < nBands; ++i )
+        for ( int r = 0; r < nBands; ++r )
         {
-            double vp = eigVec[i * nBands + p];
-            double vq = eigVec[i * nBands + q];
-            eigVec[i * nBands + p] = c * vp + s * vq;
-            eigVec[i * nBands + q] = -s * vp + c * vq;
+            double erp = eigVec[r * nBands + p];
+            double erq = eigVec[r * nBands + q];
+            eigVec[r * nBands + p] = c * erp - s * erq;
+            eigVec[r * nBands + q] = s * erp + c * erq;
         }
     }
 

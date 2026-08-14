@@ -62,3 +62,100 @@ TEST_CASE("Gaussian filter smooths noise", "[spatial]") {
     REQUIRE(output[12] < 200.0f);
     REQUIRE(output[12] > 50.0f);
 }
+
+TEST_CASE("Generic convolution with custom kernel", "[spatial][convolve]") {
+    const int W = 5, H = 5;
+    std::vector<float> input(W * H, 10.0f);
+    std::vector<float> output(W * H, 0.0f);
+
+    // 3x3 identity kernel
+    const float identity[9] = {
+        0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f
+    };
+    ImageEnhancement::convolve(input.data(), output.data(), W, H, identity, 3);
+    for (int i = 0; i < W * H; ++i) {
+        REQUIRE(output[i] == Approx(10.0f));
+    }
+
+    // 3x3 box blur kernel
+    const float box[9] = {
+        1.0f/9.0f, 1.0f/9.0f, 1.0f/9.0f,
+        1.0f/9.0f, 1.0f/9.0f, 1.0f/9.0f,
+        1.0f/9.0f, 1.0f/9.0f, 1.0f/9.0f
+    };
+    std::vector<float> meanOut(W * H, 0.0f);
+    ImageEnhancement::convolve(input.data(), output.data(), W, H, box, 3);
+    ImageEnhancement::meanFilter(input.data(), meanOut.data(), W, H, 3);
+    for (int i = 0; i < W * H; ++i) {
+        REQUIRE(output[i] == Approx(meanOut[i]).margin(1e-4f));
+    }
+}
+
+TEST_CASE("Sobel single-pass filter matches 2D convolution magnitude", "[spatial][sobel]") {
+    const int W = 8, H = 8;
+    std::vector<float> input(W * H);
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            input[y * W + x] = static_cast<float>(y * 10 + x * 2);
+        }
+    }
+    std::vector<float> fastSobel(W * H, 0.0f);
+    ImageEnhancement::sobelFilter(input.data(), fastSobel.data(), W, H);
+
+    // Reference 2D convolution
+    const float sobelX[9] = { -1, 0, 1, -2, 0, 2, -1, 0, 1 };
+    const float sobelY[9] = { -1, -2, -1, 0, 0, 0, 1, 2, 1 };
+    std::vector<float> gx(W * H), gy(W * H);
+    ImageEnhancement::convolve(input.data(), gx.data(), W, H, sobelX, 3);
+    ImageEnhancement::convolve(input.data(), gy.data(), W, H, sobelY, 3);
+
+    for (int i = 0; i < W * H; ++i) {
+        float refMag = std::sqrt(gx[i] * gx[i] + gy[i] * gy[i]);
+        REQUIRE(fastSobel[i] == Approx(refMag).margin(1e-4f));
+    }
+}
+
+TEST_CASE("Laplacian single-pass filter matches 2D convolution stencil", "[spatial][laplacian]") {
+    const int W = 7, H = 9;
+    std::vector<float> input(W * H);
+    for (int i = 0; i < W * H; ++i) {
+        input[i] = static_cast<float>((i * 37) % 100);
+    }
+    std::vector<float> fastLaplacian(W * H, 0.0f);
+    std::vector<float> refLaplacian(W * H, 0.0f);
+
+    ImageEnhancement::laplacianFilter(input.data(), fastLaplacian.data(), W, H);
+
+    const float lapKernel[9] = { 0, 1, 0, 1, -4, 1, 0, 1, 0 };
+    ImageEnhancement::convolve(input.data(), refLaplacian.data(), W, H, lapKernel, 3);
+
+    for (int i = 0; i < W * H; ++i) {
+        REQUIRE(fastLaplacian[i] == Approx(refLaplacian[i]).margin(1e-4f));
+    }
+}
+
+TEST_CASE("Spatial filters on larger kernels 5x5 and 7x7", "[spatial][kernels]") {
+    const int W = 16, H = 16;
+    std::vector<float> input(W * H, 42.0f);
+    std::vector<float> outMean5(W * H, 0.0f), outMean7(W * H, 0.0f);
+    std::vector<float> outGauss5(W * H, 0.0f), outGauss7(W * H, 0.0f);
+    std::vector<float> outMed5(W * H, 0.0f), outMed7(W * H, 0.0f);
+
+    ImageEnhancement::meanFilter(input.data(), outMean5.data(), W, H, 5);
+    ImageEnhancement::meanFilter(input.data(), outMean7.data(), W, H, 7);
+    ImageEnhancement::gaussianFilter(input.data(), outGauss5.data(), W, H, 5, 1.5f);
+    ImageEnhancement::gaussianFilter(input.data(), outGauss7.data(), W, H, 7, 2.0f);
+    ImageEnhancement::medianFilter(input.data(), outMed5.data(), W, H, 5);
+    ImageEnhancement::medianFilter(input.data(), outMed7.data(), W, H, 7);
+
+    for (int i = 0; i < W * H; ++i) {
+        REQUIRE(outMean5[i] == Approx(42.0f).margin(1e-4f));
+        REQUIRE(outMean7[i] == Approx(42.0f).margin(1e-4f));
+        REQUIRE(outGauss5[i] == Approx(42.0f).margin(1e-4f));
+        REQUIRE(outGauss7[i] == Approx(42.0f).margin(1e-4f));
+        REQUIRE(outMed5[i] == Approx(42.0f).margin(1e-4f));
+        REQUIRE(outMed7[i] == Approx(42.0f).margin(1e-4f));
+    }
+}

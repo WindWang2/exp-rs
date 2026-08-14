@@ -19,6 +19,8 @@ PipelinePortItem::PipelinePortItem( const QString &portName,
   : QGraphicsObject( parent )
   , mPortName( portName )
   , mPortType( portType )
+  , mDisplayLabel( QStringLiteral( "%1 (%2)" ).arg( portName, portType ) )
+  , mPortColor( portTypeColor( portType ) )
   , mDirection( direction )
   , mNodeItem( parentNode )
 {
@@ -89,6 +91,21 @@ QRectF PipelinePortItem::boundingRect() const
   return QRectF( 0, 0, PORT_WIDTH, PORT_HEIGHT );
 }
 
+QPainterPath PipelinePortItem::shape() const
+{
+  QPainterPath p;
+  qreal pinX = isInput() ? PIN_RADIUS : PORT_WIDTH - PIN_RADIUS;
+  qreal pinY = PORT_HEIGHT * 0.5;
+  p.addEllipse( QPointF( pinX, pinY ), PIN_RADIUS + 4.0, PIN_RADIUS + 4.0 );
+
+  if ( isOutput() )
+  {
+    QRectF eyeRect( 2, ( PORT_HEIGHT - 16 ) * 0.5, 18, 16 );
+    p.addRect( eyeRect );
+  }
+  return p;
+}
+
 void PipelinePortItem::paint( QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget )
 {
   Q_UNUSED( option )
@@ -96,32 +113,29 @@ void PipelinePortItem::paint( QPainter *painter, const QStyleOptionGraphicsItem 
 
   painter->setRenderHint( QPainter::Antialiasing, true );
 
-  QColor accent = portTypeColor( mPortType );
   qreal pinX = isInput() ? PIN_RADIUS : PORT_WIDTH - PIN_RADIUS;
   qreal pinY = PORT_HEIGHT * 0.5;
   QPointF pinCenter( pinX, pinY );
 
   // Pin Circle
-  painter->setPen( QPen( accent.lighter( 120 ), 1.5 ) );
-  painter->setBrush( accent );
+  painter->setPen( QPen( mPortColor.lighter( 120 ), 1.5 ) );
+  painter->setBrush( mPortColor );
   painter->drawEllipse( pinCenter, PIN_RADIUS - 1.0, PIN_RADIUS - 1.0 );
 
   // Label text
-  painter->setFont( QFont( "Inter", 9 ) );
+  painter->setFont( QFont( QStringLiteral( "IBM Plex Sans" ), 9 ) );
   painter->setPen( QColor( "#e2e8f0" ) );
 
-  QString displayLabel = QString( "%1 (%2)" ).arg( mPortName, mPortType );
   QRectF textRect;
-
   if ( isInput() )
   {
     textRect = QRectF( PIN_RADIUS * 2 + 4, 0, PORT_WIDTH - PIN_RADIUS * 2 - 8, PORT_HEIGHT );
-    painter->drawText( textRect, Qt::AlignLeft | Qt::AlignVCenter, displayLabel );
+    painter->drawText( textRect, Qt::AlignLeft | Qt::AlignVCenter, mDisplayLabel );
   }
   else
   {
     textRect = QRectF( 24, 0, PORT_WIDTH - PIN_RADIUS * 2 - 28, PORT_HEIGHT );
-    painter->drawText( textRect, Qt::AlignRight | Qt::AlignVCenter, displayLabel );
+    painter->drawText( textRect, Qt::AlignRight | Qt::AlignVCenter, mDisplayLabel );
 
     // 👁️ Add to map toggle icon button for output ports
     QRectF eyeRect( 2, ( PORT_HEIGHT - 16 ) * 0.5, 18, 16 );
@@ -131,7 +145,7 @@ void PipelinePortItem::paint( QPainter *painter, const QStyleOptionGraphicsItem 
       painter->setBrush( QColor( "#0284c7" ).lighter( 130 ) );
       painter->drawRoundedRect( eyeRect, 3, 3 );
       painter->setPen( Qt::white );
-      painter->setFont( QFont( "Inter", 8, QFont::Bold ) );
+      painter->setFont( QFont( QStringLiteral( "IBM Plex Sans" ), 8, QFont::Bold ) );
       painter->drawText( eyeRect, Qt::AlignCenter, "👁" );
     }
     else
@@ -140,7 +154,7 @@ void PipelinePortItem::paint( QPainter *painter, const QStyleOptionGraphicsItem 
       painter->setBrush( QColor( "#1e293b" ) );
       painter->drawRoundedRect( eyeRect, 3, 3 );
       painter->setPen( QColor( "#64748b" ) );
-      painter->setFont( QFont( "Inter", 8 ) );
+      painter->setFont( QFont( QStringLiteral( "IBM Plex Sans" ), 8 ) );
       painter->drawText( eyeRect, Qt::AlignCenter, "👁" );
     }
   }

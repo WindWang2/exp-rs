@@ -277,6 +277,77 @@ TEST_CASE("Speckle filters with kernel size 7", "[speckle]") {
     ImageEnhancement::leeFilter(input.data(), output.data(), 15, 15, 7, 1.0f);
     REQUIRE(output[112] == Approx(75.0f).margin(0.1f));
 
+    ImageEnhancement::enhancedLeeFilter(input.data(), output.data(), 15, 15, 7, 1.0f, 1.0f);
+    REQUIRE(output[112] == Approx(75.0f).margin(0.1f));
+
     ImageEnhancement::frostFilter(input.data(), output.data(), 15, 15, 7, 2.0f);
     REQUIRE(output[112] == Approx(75.0f).margin(0.5f));
+}
+
+TEST_CASE("Enhanced Lee filter: uniform region, point target, and texture", "[speckle][enhanced_lee]") {
+    const int W = 10, H = 10;
+    std::vector<float> input(W * H, 100.0f);
+    std::vector<float> output(W * H, 0.0f);
+
+    // 1. Uniform region: should preserve mean
+    ImageEnhancement::enhancedLeeFilter(input.data(), output.data(), W, H, 5, 1.0f, 1.0f);
+    REQUIRE(output[55] == Approx(100.0f).margin(0.1f));
+
+    // 2. Point target (isolated extreme spike): should be preserved without blurring
+    input[55] = 5000.0f;
+    ImageEnhancement::enhancedLeeFilter(input.data(), output.data(), W, H, 5, 0.1f, 1.0f);
+    // Local Cl >> Cmax -> point target preserved
+    REQUIRE(output[55] == Approx(5000.0f).margin(1.0f));
+
+    // 3. Step edge (heterogeneous region): weighted transition
+    std::vector<float> edge(W * H);
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            edge[y * W + x] = (x < 5) ? 20.0f : 200.0f;
+        }
+    }
+    std::vector<float> edgeOut(W * H, 0.0f);
+    ImageEnhancement::enhancedLeeFilter(edge.data(), edgeOut.data(), W, H, 5, 0.5f, 1.0f);
+    REQUIRE(edgeOut[50] < 50.0f);   // Left side
+    REQUIRE(edgeOut[59] > 150.0f);  // Right side
+    REQUIRE(std::isfinite(edgeOut[55]));
+}
+
+TEST_CASE("Speckle filters: NaN preservation and mask handling", "[speckle][nodata]") {
+    const int W = 8, H = 8;
+    std::vector<float> input(W * H, 80.0f);
+    // Inject NaNs at center and corner
+    input[0] = std::numeric_limits<float>::quiet_NaN();
+    input[3 * W + 3] = std::numeric_limits<float>::quiet_NaN();
+
+    std::vector<float> outLee(W * H, 0.0f);
+    std::vector<float> outEnhancedLee(W * H, 0.0f);
+    std::vector<float> outFrost(W * H, 0.0f);
+    std::vector<float> outKuan(W * H, 0.0f);
+    std::vector<float> outGamma(W * H, 0.0f);
+
+    ImageEnhancement::leeFilter(input.data(), outLee.data(), W, H, 3, 1.0f);
+    ImageEnhancement::enhancedLeeFilter(input.data(), outEnhancedLee.data(), W, H, 3, 1.0f, 1.0f);
+    ImageEnhancement::frostFilter(input.data(), outFrost.data(), W, H, 3, 2.0f);
+    ImageEnhancement::kuanFilter(input.data(), outKuan.data(), W, H, 3, 1.0f);
+    ImageEnhancement::gammaMapFilter(input.data(), outGamma.data(), W, H, 3, 1.0f);
+
+    // Assert center and corner NaNs are strictly preserved
+    REQUIRE(std::isnan(outLee[0]));
+    REQUIRE(std::isnan(outLee[3 * W + 3]));
+    REQUIRE(std::isnan(outEnhancedLee[0]));
+    REQUIRE(std::isnan(outEnhancedLee[3 * W + 3]));
+    REQUIRE(std::isnan(outFrost[0]));
+    REQUIRE(std::isnan(outFrost[3 * W + 3]));
+    REQUIRE(std::isnan(outKuan[0]));
+    REQUIRE(std::isnan(outKuan[3 * W + 3]));
+    REQUIRE(std::isnan(outGamma[0]));
+    REQUIRE(std::isnan(outGamma[3 * W + 3]));
+
+    // Assert adjacent valid pixels are finite and computed
+    REQUIRE(std::isfinite(outLee[3 * W + 4]));
+    REQUIRE(std::isfinite(outEnhancedLee[3 * W + 4]));
+    REQUIRE(std::isfinite(outFrost[3 * W + 4]));
+    REQUIRE(std::isfinite(outKuan[3 * W + 4]));
+    REQUIRE(std::isfinite(outGamma[3 * W + 4]));
 }

@@ -17,6 +17,7 @@
 // returning — retaining or concurrently reading the pointer is a data race.
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <functional>
 #include <vector>
@@ -44,6 +45,9 @@ class GdalBlockStream
         int yOffset;       ///< pixel row of the tile's top edge (0-based)
         int width;         ///< tile width in pixels (<= tileWidth, edge-clamped)
         int height;        ///< tile height in pixels (<= tileHeight, edge-clamped)
+        int halo;          ///< halo / margin radius in pixels (0 if no halo)
+        int bufferWidth;   ///< width of the pixels buffer (width + 2*halo)
+        int bufferHeight;  ///< height of the pixels buffer (height + 2*halo)
         int index;         ///< 0-based tile index in row-major visit order
         int totalTiles;    ///< total tile count
     };
@@ -53,19 +57,26 @@ class GdalBlockStream
      * @param bandNum    1-based band number
      * @param tileWidth  nominal tile width in pixels (default 256)
      * @param tileHeight nominal tile height in pixels (default 256)
+     * @param halo       halo/padding radius in pixels (default 0)
      */
     GdalBlockStream( const GdalDatasetWrapper &ds, int bandNum,
-                     int tileWidth = 256, int tileHeight = 256 );
+                     int tileWidth = 256, int tileHeight = 256,
+                     int halo = 0 );
 
     /// Total number of tiles the iterator will visit.
     int tileCount() const { return static_cast<int>( m_tiles.size() ); }
 
     /// The (edge-clamped) tile geometry for index i.
-    const Tile &tile( int i ) const { return m_tiles[i]; }
+    const Tile &tile( int i ) const
+    {
+        assert( i >= 0 && i < static_cast<int>( m_tiles.size() ) );
+        return m_tiles[i];
+    }
 
     /// Nominal tile width/height (before edge clamping).
     int tileWidth() const { return m_tileWidth; }
     int tileHeight() const { return m_tileHeight; }
+    int halo() const { return m_halo; }
 
     /// Raster width/height the iterator was constructed from.
     int rasterWidth() const { return m_rasterWidth; }
@@ -73,12 +84,14 @@ class GdalBlockStream
 
     /**
      * Stream every tile. For each tile the callback receives the tile geometry
-     * and a float buffer of size tile.width*tile.height filled with the band's
-     * pixel values for that window.
+     * and a float buffer of size tile.bufferWidth*tile.bufferHeight filled with the
+     * band's pixel values for that window (including halo margin when halo > 0).
      *
-     * Buffer layout: row-major with stride exactly tile.width (NOT the nominal
-     * tileWidth()). Index pixels as `pixels[y * tile.width + x]`. The buffer is
-     * reused across tiles — see the file-level threading/borrow contract.
+     * Buffer layout: row-major with stride exactly tile.bufferWidth.
+     * When halo == 0: index pixels as `pixels[y * tile.width + x]`.
+     * When halo > 0: index pixels as `pixels[(y + tile.halo) * tile.bufferWidth + (x + tile.halo)]`.
+     *
+     * The buffer is reused across tiles — see the file-level threading/borrow contract.
      *
      * @param callback  called once per tile; return false to abort early
      * @return true if all tiles were visited, false if the callback aborted or
@@ -92,6 +105,7 @@ class GdalBlockStream
     int m_bandNum;
     int m_tileWidth;
     int m_tileHeight;
+    int m_halo;
     int m_rasterWidth;
     int m_rasterHeight;
     std::vector<Tile> m_tiles;

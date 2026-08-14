@@ -132,10 +132,7 @@ void accumulateCovariance( const float *pixels, size_t count, int bands,
         stats->covariance.assign( static_cast<size_t>( bands ) * bands, 0.0 );
         stats->count = 0;
     }
-    // Centered outer product, accumulated in the same order as rxDetector's
-    // covariance loop (pixel-outer, band-inner full i,j) → numerically
-    // equivalent. Scratch reused across pixels (perf goal §2c: no per-pixel
-    // heap allocation in the hot loop).
+    // Upper-triangle centered outer product.
     std::vector<double> d( bands );
     for ( size_t p = 0; p < count; ++p )
     {
@@ -160,8 +157,12 @@ void accumulateCovariance( const float *pixels, size_t count, int bands,
         for ( int b = 0; b < bands; ++b )
             d[b] = pixels[p * static_cast<size_t>( bands ) + b] - stats->mean[b];
         for ( int i = 0; i < bands; ++i )
-            for ( int j = 0; j < bands; ++j )
-                stats->covariance[static_cast<size_t>( i ) * bands + j] += d[i] * d[j];
+        {
+            const double di = d[i];
+            const size_t rowOffset = static_cast<size_t>( i ) * bands;
+            for ( int j = i; j < bands; ++j )
+                stats->covariance[rowOffset + j] += di * d[j];
+        }
         ++stats->count;
     }
 }
@@ -170,8 +171,17 @@ void finalizeCovariance( BackgroundStats *stats )
 {
     if ( !stats || stats->count == 0 )
         return;
-    for ( double &v : stats->covariance )
-        v /= static_cast<double>( stats->count );
+    const int bands = static_cast<int>( stats->mean.size() );
+    const double invCount = 1.0 / static_cast<double>( stats->count );
+    for ( int i = 0; i < bands; ++i )
+    {
+        for ( int j = i; j < bands; ++j )
+        {
+            const double v = stats->covariance[static_cast<size_t>( i ) * bands + j] * invCount;
+            stats->covariance[static_cast<size_t>( i ) * bands + j] = v;
+            stats->covariance[static_cast<size_t>( j ) * bands + i] = v;
+        }
+    }
 }
 
 bool invertCovariance( const std::vector<double> &covariance, int bands,
@@ -179,7 +189,10 @@ bool invertCovariance( const std::vector<double> &covariance, int bands,
 {
     if ( bands <= 0 || static_cast<int>( covariance.size() ) != bands * bands )
         return false;
-    constexpr double kRidge = 1e-9;
+    double trace = 0.0;
+    for ( int i = 0; i < bands; ++i )
+        trace += covariance[static_cast<size_t>( i ) * bands + i];
+    const double kRidge = std::max( 1e-9, ( trace / bands ) * 1e-7 );
     std::vector<double> covRidge = covariance;
     for ( int i = 0; i < bands; ++i )
         covRidge[static_cast<size_t>( i ) * bands + i] += kRidge;
@@ -189,8 +202,8 @@ bool invertCovariance( const std::vector<double> &covariance, int bands,
 float rxScore( const float *spectrum, const std::vector<double> &mean,
                const std::vector<double> &inverseCov, int bands )
 {
-    std::vector<double> d( bands );
-    return rxScore( spectrum, mean, inverseCov, bands, &d );
+    static thread_local std::vector<double> threadScratch;
+    return rxScore( spectrum, mean, inverseCov, bands, &threadScratch );
 }
 
 float rxScore( const float *spectrum, const std::vector<double> &mean,
@@ -204,16 +217,23 @@ float rxScore( const float *spectrum, const std::vector<double> &mean,
     if ( d.size() < static_cast<size_t>( bands ) )
         d.resize( bands );
     for ( int b = 0; b < bands; ++b )
+    {
+        if ( !std::isfinite( spectrum[b] ) )
+            return std::numeric_limits<float>::quiet_NaN();
         d[b] = static_cast<double>( spectrum[b] ) - mean[b];
+    }
 
     double rx = 0.0;
     for ( int i = 0; i < bands; ++i )
     {
         double row = 0.0;
+        const size_t rowOffset = static_cast<size_t>( i ) * bands;
         for ( int j = 0; j < bands; ++j )
-            row += inverseCov[static_cast<size_t>( i ) * bands + j] * d[j];
+            row += inverseCov[rowOffset + j] * d[j];
         rx += d[i] * row;
     }
+    if ( !std::isfinite( rx ) )
+        return std::numeric_limits<float>::quiet_NaN();
     return static_cast<float>( std::max( 0.0, rx ) );
 }
 
@@ -242,10 +262,11 @@ bool rxDetector( const float *pixels, size_t count, int bands,
     }
 
     rxValues->resize( count );
+    std::vector<double> scratch( bands );
     for ( size_t p = 0; p < count; ++p )
     {
         ( *rxValues )[p] =
-            rxScore( pixels + p * static_cast<size_t>( bands ), stats.mean, invCov, bands );
+            rxScore( pixels + p * static_cast<size_t>( bands ), stats.mean, invCov, bands, &scratch );
     }
     return true;
 }

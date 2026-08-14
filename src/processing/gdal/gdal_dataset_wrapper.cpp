@@ -99,6 +99,11 @@ bool GdalDatasetWrapper::create(const QString &path, int width, int height, int 
 
     char **opts = nullptr;
     opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
+    if (width >= 256 && height >= 256) {
+        opts = CSLSetNameValue(opts, "TILED", "YES");
+        opts = CSLSetNameValue(opts, "BLOCKXSIZE", "256");
+        opts = CSLSetNameValue(opts, "BLOCKYSIZE", "256");
+    }
     GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(),
                                  width, height, bandCount,
                                  static_cast<GDALDataType>(dtype), opts);
@@ -227,6 +232,46 @@ bool GdalDatasetWrapper::readBandWindow(int bandNum, int xOff, int yOff,
                               xOff, yOff, clampedWidth, clampedHeight,
                               buffer, clampedWidth, clampedHeight, GDT_Float32,
                               sizeof(float), static_cast<GSpacing>(srcWidth) * sizeof(float));
+    return err == CE_None;
+}
+
+bool GdalDatasetWrapper::readWindowBip(const std::vector<int> &bands, int xOff, int yOff,
+                                       int srcWidth, int srcHeight, float *bipBuffer) const
+{
+    if (!m_dataset || bands.empty() || !bipBuffer)
+        return false;
+    if (srcWidth <= 0 || srcHeight <= 0 || xOff < 0 || yOff < 0)
+        return false;
+
+    const int totalBands = bandCount();
+    for (int b : bands) {
+        if (b < 1 || b > totalBands)
+            return false;
+    }
+
+    const int bw = width();
+    const int bh = height();
+    if (xOff >= bw || yOff >= bh)
+        return false;
+
+    const int nBands = static_cast<int>(bands.size());
+    const size_t totalFloats = static_cast<size_t>(srcWidth) * srcHeight * nBands;
+
+    std::fill(bipBuffer, bipBuffer + totalFloats, std::numeric_limits<float>::quiet_NaN());
+
+    const int clampedWidth = (std::min)(srcWidth, bw - xOff);
+    const int clampedHeight = (std::min)(srcHeight, bh - yOff);
+
+    CPLErr err = GDALDatasetRasterIO(
+        static_cast<GDALDatasetH>(m_dataset), GF_Read,
+        xOff, yOff, clampedWidth, clampedHeight,
+        bipBuffer, clampedWidth, clampedHeight, GDT_Float32,
+        nBands, const_cast<int *>(bands.data()),
+        /* nPixelSpace */ sizeof(float) * nBands,
+        /* nLineSpace  */ static_cast<GSpacing>(srcWidth) * sizeof(float) * nBands,
+        /* nBandSpace  */ sizeof(float)
+    );
+
     return err == CE_None;
 }
 
@@ -418,6 +463,11 @@ GDALDatasetH createOutputTiff(const QString &path,
 
     char **opts = nullptr;
     opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
+    if (width >= 256 && height >= 256) {
+        opts = CSLSetNameValue(opts, "TILED", "YES");
+        opts = CSLSetNameValue(opts, "BLOCKXSIZE", "256");
+        opts = CSLSetNameValue(opts, "BLOCKYSIZE", "256");
+    }
 
     GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(),
                                   width, height, bandCount, static_cast<GDALDataType>(dtype), opts);
