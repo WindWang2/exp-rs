@@ -107,8 +107,18 @@ TEST_CASE("Native RS operators are registered", "[operators][rs]") {
     auto& registry = RSOperatorRegistry::instance();
 
     CHECK(registry.hasOperator("rs:spectral_index"));
+    CHECK(registry.hasOperator("rs:ndvi"));
+    CHECK(registry.hasOperator("rs:evi"));
+    CHECK(registry.hasOperator("rs:ndwi"));
+    CHECK(registry.hasOperator("rs:savi"));
+    CHECK(registry.hasOperator("rs:ndbi"));
+    CHECK(registry.hasOperator("rs:mndwi"));
     CHECK(registry.hasOperator("rs:band_math"));
     CHECK(registry.hasOperator("rs:atmospheric_correction"));
+    CHECK(registry.hasOperator("rs:dn_to_radiance"));
+    CHECK(registry.hasOperator("rs:atmospheric_dos1"));
+    CHECK(registry.hasOperator("rs:atmospheric_dos2"));
+    CHECK(registry.hasOperator("rs:atmospheric_quac"));
     CHECK(registry.hasOperator("rs:radiometric_calibration"));
     CHECK(registry.hasOperator("rs:change_detection"));
     CHECK(registry.hasOperator("rs:post_classification_change"));
@@ -460,6 +470,225 @@ TEST_CASE("RS spectral index NDVI execution", "[operators][rs]") {
     // NDVI = (100 - 50) / (100 + 50) = 0.333...
     CHECK(out[0] == Catch::Approx(1.0f / 3.0f).epsilon(0.001));
 }
+
+TEST_CASE("Atomic spectral index operators execution and equivalence", "[operators][rs][spectral]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString ndviDirectPath = tmp.path() + "/ndvi_direct.tif";
+    const QString ndviFacadePath = tmp.path() + "/ndvi_facade.tif";
+    const QString eviPath = tmp.path() + "/evi.tif";
+    const QString ndwiPath = tmp.path() + "/ndwi.tif";
+    const QString saviPath = tmp.path() + "/savi.tif";
+    const QString ndbiPath = tmp.path() + "/ndbi.tif";
+    const QString mndwiPath = tmp.path() + "/mndwi.tif";
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+    std::vector<std::vector<float>> bands(6);
+    for (auto &b : bands) b.assign(W * H, 0.0f);
+
+    // Band 1: Blue, Band 2: Green, Band 3: Red, Band 4: NIR, Band 5: SWIR1, Band 6: SWIR2
+    for (size_t i = 0; i < W * H; ++i) {
+        bands[0][i] = 10.0f;  // Blue
+        bands[1][i] = 20.0f;  // Green
+        bands[2][i] = 30.0f;  // Red
+        bands[3][i] = 100.0f; // NIR
+        bands[4][i] = 60.0f;  // SWIR1
+        bands[5][i] = 50.0f;  // SWIR2
+    }
+
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    // 1. NDVI Atomic vs Facade Equivalence
+    auto ndviOp = RSOperatorRegistry::instance().create("rs:ndvi");
+    REQUIRE(ndviOp != nullptr);
+    auto facadeOp = RSOperatorRegistry::instance().create("rs:spectral_index");
+    REQUIRE(facadeOp != nullptr);
+
+    Json::Value ndviParams(Json::objectValue);
+    ndviParams["input"] = inputPath.toStdString();
+    ndviParams["output"] = ndviDirectPath.toStdString();
+    ndviParams["nir"] = 4;
+    ndviParams["red"] = 3;
+
+    RSOperatorContext ctx;
+    Json::Value ndviRes = ndviOp->run(ndviParams, ctx);
+    CHECK(ndviRes["index"].asString() == "NDVI");
+    CHECK(QFile::exists(ndviDirectPath));
+
+    Json::Value facadeParams(Json::objectValue);
+    facadeParams["input"] = inputPath.toStdString();
+    facadeParams["output"] = ndviFacadePath.toStdString();
+    facadeParams["index"] = "NDVI";
+    facadeParams["nir"] = 4;
+    facadeParams["red"] = 3;
+
+    Json::Value facadeRes = facadeOp->run(facadeParams, ctx);
+    CHECK(QFile::exists(ndviFacadePath));
+
+    GdalDatasetWrapper dsDirect, dsFacade;
+    REQUIRE(dsDirect.open(ndviDirectPath));
+    REQUIRE(dsFacade.open(ndviFacadePath));
+    std::vector<float> directPixels(W * H), facadePixels(W * H);
+    REQUIRE(dsDirect.readBandData(1, directPixels.data(), W, H));
+    REQUIRE(dsFacade.readBandData(1, facadePixels.data(), W, H));
+
+    const float expectedNdvi = (100.0f - 30.0f) / (100.0f + 30.0f); // 70 / 130 ≈ 0.53846
+    for (size_t i = 0; i < W * H; ++i) {
+        CHECK(directPixels[i] == Catch::Approx(expectedNdvi).epsilon(1e-4f));
+        CHECK(directPixels[i] == Catch::Approx(facadePixels[i]).margin(1e-6f));
+    }
+
+    // 2. EVI Atomic Operator
+    auto eviOp = RSOperatorRegistry::instance().create("rs:evi");
+    REQUIRE(eviOp != nullptr);
+    Json::Value eviParams(Json::objectValue);
+    eviParams["input"] = inputPath.toStdString();
+    eviParams["output"] = eviPath.toStdString();
+    eviParams["nir"] = 4;
+    eviParams["red"] = 3;
+    eviParams["blue"] = 1;
+    Json::Value eviRes = eviOp->run(eviParams, ctx);
+    CHECK(eviRes["index"].asString() == "EVI");
+    CHECK(QFile::exists(eviPath));
+
+    // 3. NDWI Atomic Operator
+    auto ndwiOp = RSOperatorRegistry::instance().create("rs:ndwi");
+    REQUIRE(ndwiOp != nullptr);
+    Json::Value ndwiParams(Json::objectValue);
+    ndwiParams["input"] = inputPath.toStdString();
+    ndwiParams["output"] = ndwiPath.toStdString();
+    ndwiParams["green"] = 2;
+    ndwiParams["nir"] = 4;
+    Json::Value ndwiRes = ndwiOp->run(ndwiParams, ctx);
+    CHECK(ndwiRes["index"].asString() == "NDWI");
+    CHECK(QFile::exists(ndwiPath));
+
+    // 4. SAVI Atomic Operator
+    auto saviOp = RSOperatorRegistry::instance().create("rs:savi");
+    REQUIRE(saviOp != nullptr);
+    Json::Value saviParams(Json::objectValue);
+    saviParams["input"] = inputPath.toStdString();
+    saviParams["output"] = saviPath.toStdString();
+    saviParams["nir"] = 4;
+    saviParams["red"] = 3;
+    Json::Value saviRes = saviOp->run(saviParams, ctx);
+    CHECK(saviRes["index"].asString() == "SAVI");
+    CHECK(QFile::exists(saviPath));
+
+    // 5. NDBI Atomic Operator
+    auto ndbiOp = RSOperatorRegistry::instance().create("rs:ndbi");
+    REQUIRE(ndbiOp != nullptr);
+    Json::Value ndbiParams(Json::objectValue);
+    ndbiParams["input"] = inputPath.toStdString();
+    ndbiParams["output"] = ndbiPath.toStdString();
+    ndbiParams["swir"] = 5;
+    ndbiParams["nir"] = 4;
+    Json::Value ndbiRes = ndbiOp->run(ndbiParams, ctx);
+    CHECK(ndbiRes["index"].asString() == "NDBI");
+    CHECK(QFile::exists(ndbiPath));
+
+    // 6. MNDWI Atomic Operator
+    auto mndwiOp = RSOperatorRegistry::instance().create("rs:mndwi");
+    REQUIRE(mndwiOp != nullptr);
+    Json::Value mndwiParams(Json::objectValue);
+    mndwiParams["input"] = inputPath.toStdString();
+    mndwiParams["output"] = mndwiPath.toStdString();
+    mndwiParams["green"] = 2;
+    mndwiParams["swir"] = 5;
+    Json::Value mndwiRes = mndwiOp->run(mndwiParams, ctx);
+    CHECK(mndwiRes["index"].asString() == "MNDWI");
+    CHECK(QFile::exists(mndwiPath));
+}
+
+TEST_CASE("Atomic atmospheric correction operators execution and equivalence", "[operators][rs][atmospheric]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/atmos_input.tif";
+    const QString dos1DirectPath = tmp.path() + "/dos1_direct.tif";
+    const QString dos1FacadePath = tmp.path() + "/dos1_facade.tif";
+    const QString dos2Path = tmp.path() + "/dos2.tif";
+    const QString dnRadPath = tmp.path() + "/dn_rad.tif";
+
+    constexpr int W = 8;
+    constexpr int H = 8;
+    std::vector<std::vector<float>> bands(2);
+    bands[0].resize(W * H);
+    bands[1].resize(W * H);
+    for (size_t i = 0; i < W * H; ++i) {
+        bands[0][i] = 100.0f + static_cast<float>(i);
+        bands[1][i] = 200.0f + static_cast<float>(i);
+    }
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    // 1. dn_to_radiance atomic operator
+    auto dnRadOp = RSOperatorRegistry::instance().create("rs:dn_to_radiance");
+    REQUIRE(dnRadOp != nullptr);
+    Json::Value dnParams(Json::objectValue);
+    dnParams["input"] = inputPath.toStdString();
+    dnParams["output"] = dnRadPath.toStdString();
+    dnParams["band"] = 1;
+    dnParams["gain"] = 0.5;
+    dnParams["bias"] = 2.0;
+
+    RSOperatorContext ctx;
+    Json::Value dnRes = dnRadOp->run(dnParams, ctx);
+    CHECK(dnRes["method"].asString() == "dn_to_radiance");
+    CHECK(QFile::exists(dnRadPath));
+    CHECK(SatelliteProducts::readRadiometricState(dnRadPath) == QString::fromUtf8(SatelliteProducts::kRadiometricStateRadiance));
+
+    // 2. DOS1 atomic vs facade equivalence
+    auto dos1Op = RSOperatorRegistry::instance().create("rs:atmospheric_dos1");
+    REQUIRE(dos1Op != nullptr);
+    auto atmosFacadeOp = RSOperatorRegistry::instance().create("rs:atmospheric_correction");
+    REQUIRE(atmosFacadeOp != nullptr);
+
+    Json::Value dos1DirectParams(Json::objectValue);
+    dos1DirectParams["input"] = inputPath.toStdString();
+    dos1DirectParams["output"] = dos1DirectPath.toStdString();
+    dos1DirectParams["band"] = 1;
+    dos1DirectParams["gain"] = 1.0;
+    dos1DirectParams["bias"] = 0.0;
+    dos1Op->run(dos1DirectParams, ctx);
+
+    Json::Value dos1FacadeParams(Json::objectValue);
+    dos1FacadeParams["input"] = inputPath.toStdString();
+    dos1FacadeParams["output"] = dos1FacadePath.toStdString();
+    dos1FacadeParams["method"] = "dos1";
+    dos1FacadeParams["band"] = 1;
+    dos1FacadeParams["gain"] = 1.0;
+    dos1FacadeParams["bias"] = 0.0;
+    atmosFacadeOp->run(dos1FacadeParams, ctx);
+
+    GdalDatasetWrapper dsDos1Direct, dsDos1Facade;
+    REQUIRE(dsDos1Direct.open(dos1DirectPath));
+    REQUIRE(dsDos1Facade.open(dos1FacadePath));
+    std::vector<float> directDos1(W * H), facadeDos1(W * H);
+    REQUIRE(dsDos1Direct.readBandData(1, directDos1.data(), W, H));
+    REQUIRE(dsDos1Facade.readBandData(1, facadeDos1.data(), W, H));
+    for (size_t i = 0; i < W * H; ++i) {
+        CHECK(directDos1[i] == Catch::Approx(facadeDos1[i]).margin(1e-6f));
+    }
+    CHECK(SatelliteProducts::readRadiometricState(dos1DirectPath) == QString::fromUtf8(SatelliteProducts::kRadiometricStateSurfaceReflectance));
+
+    // 3. DOS2 atomic operator
+    auto dos2Op = RSOperatorRegistry::instance().create("rs:atmospheric_dos2");
+    REQUIRE(dos2Op != nullptr);
+    Json::Value dos2Params(Json::objectValue);
+    dos2Params["input"] = inputPath.toStdString();
+    dos2Params["output"] = dos2Path.toStdString();
+    dos2Params["band"] = 1;
+    dos2Params["gain"] = 1.0;
+    dos2Params["bias"] = 0.0;
+    dos2Params["airmass"] = 1.2;
+    dos2Op->run(dos2Params, ctx);
+    CHECK(QFile::exists(dos2Path));
+    CHECK(SatelliteProducts::readRadiometricState(dos2Path) == QString::fromUtf8(SatelliteProducts::kRadiometricStateSurfaceReflectance));
+}
+
 
 TEST_CASE("RS spectral index resolves bands from product roles", "[operators][rs]") {
     QTemporaryDir tmp;

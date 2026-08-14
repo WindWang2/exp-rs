@@ -54,4 +54,15 @@ public:
     Json::Value run(const Json::Value& params, RSOperatorContext& context) override;
 };
 
+namespace atmospheric_detail {
+Json::Value runAtmosphericCorrectionCore(
+    const std::string &defaultMethod,
+    const Json::Value &params,
+    RSOperatorContext &context );
+
+Json::Value estimateAtmosphericCorrectionRam(
+    const std::string &method,
+    const Json::Value &params );
+}
+
 } // namespace sicnu::operators::rs

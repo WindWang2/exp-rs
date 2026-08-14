@@ -49,4 +49,11 @@ public:
     Json::Value run(const Json::Value& params, RSOperatorContext& context) override;
 };
 
+namespace spectral_index_detail {
+Json::Value runSpectralIndexCore(
+    const std::string &defaultIndex,
+    const Json::Value &params,
+    RSOperatorContext &context );
+}
+
 } // namespace sicnu::operators::rs
