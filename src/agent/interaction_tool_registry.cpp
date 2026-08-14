@@ -1,6 +1,7 @@
 // src/agent/interaction_tool_registry.cpp
 #include "interaction_tool_registry.h"
 #include "view_control_service.h"
+#include "raster_display_service.h"
 
 #include <sstream>
 
@@ -155,6 +156,126 @@ Json::Value createRoiSetSchema()
   return schema;
 }
 
+Json::Value createRasterGetDisplaySchema()
+{
+  Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
+  Json::Value props( Json::objectValue );
+
+  Json::Value layerProp( Json::objectValue );
+  layerProp["type"] = "string";
+  layerProp["description"] = "Optional raster layer ID, layer display name, or asset ID. When omitted, the active raster layer is queried.";
+  props["layer"] = layerProp;
+
+  schema["properties"] = props;
+  return schema;
+}
+
+Json::Value createRasterSetBandCompositeSchema()
+{
+  Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
+  Json::Value props( Json::objectValue );
+
+  Json::Value layerProp( Json::objectValue );
+  layerProp["type"] = "string";
+  layerProp["description"] = "Optional raster layer ID, layer display name, or asset ID. When omitted, the active raster layer is used.";
+  props["layer"] = layerProp;
+
+  Json::Value redProp( Json::objectValue );
+  redProp["description"] = "Red channel band role (e.g. 'red', 'nir', 'swir1', 'swir2') or 1-based band number.";
+  props["red"] = redProp;
+
+  Json::Value greenProp( Json::objectValue );
+  greenProp["description"] = "Green channel band role (e.g. 'green', 'red') or 1-based band number.";
+  props["green"] = greenProp;
+
+  Json::Value blueProp( Json::objectValue );
+  blueProp["description"] = "Blue channel band role (e.g. 'blue', 'green') or 1-based band number.";
+  props["blue"] = blueProp;
+
+  Json::Value grayProp( Json::objectValue );
+  grayProp["description"] = "Optional single channel band role or 1-based band number for grayscale rendering.";
+  props["gray"] = grayProp;
+
+  Json::Value opacityProp( Json::objectValue );
+  opacityProp["type"] = "number";
+  opacityProp["description"] = "Optional layer opacity value between 0.0 (transparent) and 1.0 (opaque).";
+  props["opacity"] = opacityProp;
+
+  schema["properties"] = props;
+  return schema;
+}
+
+Json::Value createRasterSetStretchSchema()
+{
+  Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
+  Json::Value props( Json::objectValue );
+
+  Json::Value layerProp( Json::objectValue );
+  layerProp["type"] = "string";
+  layerProp["description"] = "Optional raster layer ID, layer display name, or asset ID. When omitted, the active raster layer is used.";
+  props["layer"] = layerProp;
+
+  Json::Value methodProp( Json::objectValue );
+  methodProp["type"] = "string";
+  methodProp["description"] = "Display stretch method: 'minimum_maximum', 'percent_clip', 'stddev', or 'none'.";
+  Json::Value enumVals( Json::arrayValue );
+  enumVals.append( "minimum_maximum" );
+  enumVals.append( "percent_clip" );
+  enumVals.append( "stddev" );
+  enumVals.append( "none" );
+  methodProp["enum"] = enumVals;
+  props["method"] = methodProp;
+
+  Json::Value lowerProp( Json::objectValue );
+  lowerProp["type"] = "number";
+  lowerProp["description"] = "Lower clip percentile for percent_clip (e.g. 2 for 2%).";
+  props["lower"] = lowerProp;
+
+  Json::Value upperProp( Json::objectValue );
+  upperProp["type"] = "number";
+  upperProp["description"] = "Upper clip percentile for percent_clip (e.g. 98 for 98%).";
+  props["upper"] = upperProp;
+
+  Json::Value factorProp( Json::objectValue );
+  factorProp["type"] = "number";
+  factorProp["description"] = "Standard deviation multiplier factor for stddev (e.g. 2.0).";
+  props["factor"] = factorProp;
+
+  Json::Value minProp( Json::objectValue );
+  minProp["type"] = "number";
+  minProp["description"] = "Explicit minimum display value for minimum_maximum.";
+  props["min"] = minProp;
+
+  Json::Value maxProp( Json::objectValue );
+  maxProp["type"] = "number";
+  maxProp["description"] = "Explicit maximum display value for minimum_maximum.";
+  props["max"] = maxProp;
+
+  schema["properties"] = props;
+  Json::Value req( Json::arrayValue );
+  req.append( "method" );
+  schema["required"] = req;
+  return schema;
+}
+
+Json::Value createRasterResetDisplaySchema()
+{
+  Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
+  Json::Value props( Json::objectValue );
+
+  Json::Value layerProp( Json::objectValue );
+  layerProp["type"] = "string";
+  layerProp["description"] = "Optional raster layer ID, layer display name, or asset ID. When omitted, the active raster layer is reset.";
+  props["layer"] = layerProp;
+
+  schema["properties"] = props;
+  return schema;
+}
+
 } // namespace
 
 InteractionToolRegistry::InteractionToolRegistry()
@@ -251,10 +372,10 @@ Json::Value InteractionToolRegistry::execute( const std::string &name, const Jso
   return toolOpt->handler( parameters );
 }
 
-void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service )
+void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service, RasterDisplayService *rasterService )
 {
-  if ( !service )
-    return;
+  if ( service )
+  {
 
   // 1. view:get_state
   {
@@ -378,6 +499,74 @@ void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service 
     def.inputSchema = createRoiSetSchema();
     def.handler = [service]( const Json::Value &params ) {
       return service->setRoi( params );
+    };
+    registerTool( std::move( def ) );
+  }
+  }
+
+  if ( rasterService )
+  {
+    registerRasterTools( rasterService );
+  }
+}
+
+void InteractionToolRegistry::registerRasterTools( RasterDisplayService *service )
+{
+  if ( !service )
+    return;
+
+  // 1. raster:get_display
+  {
+    InteractionToolDefinition def;
+    def.name = "raster:get_display";
+    def.displayName = "Get Raster Display Properties";
+    def.category = "raster";
+    def.description = "Get the current raster layer display configuration including renderer type, band composition, stretch algorithm/range, and opacity.";
+    def.inputSchema = createRasterGetDisplaySchema();
+    def.handler = [service]( const Json::Value &params ) {
+      return service->getDisplay( params );
+    };
+    registerTool( std::move( def ) );
+  }
+
+  // 2. raster:set_band_composite
+  {
+    InteractionToolDefinition def;
+    def.name = "raster:set_band_composite";
+    def.displayName = "Set Raster Band Composite";
+    def.category = "raster";
+    def.description = "Set RGB band composition for a raster layer using semantic band roles (e.g. 'red', 'green', 'blue', 'nir', 'swir1', 'swir2') or 1-based band numbers.";
+    def.inputSchema = createRasterSetBandCompositeSchema();
+    def.handler = [service]( const Json::Value &params ) {
+      return service->setBandComposite( params );
+    };
+    registerTool( std::move( def ) );
+  }
+
+  // 3. raster:set_stretch
+  {
+    InteractionToolDefinition def;
+    def.name = "raster:set_stretch";
+    def.displayName = "Set Raster Display Stretch";
+    def.category = "raster";
+    def.description = "Adjust the display contrast stretch of a raster layer. Supports 'minimum_maximum', 'percent_clip' (with lower/upper percentiles), and 'stddev' (with factor/k).";
+    def.inputSchema = createRasterSetStretchSchema();
+    def.handler = [service]( const Json::Value &params ) {
+      return service->setStretch( params );
+    };
+    registerTool( std::move( def ) );
+  }
+
+  // 4. raster:reset_display
+  {
+    InteractionToolDefinition def;
+    def.name = "raster:reset_display";
+    def.displayName = "Reset Raster Display";
+    def.category = "raster";
+    def.description = "Reset a raster layer's display presentation to its default renderer, standard RGB/grayscale bands, default stretch, and full opacity.";
+    def.inputSchema = createRasterResetDisplaySchema();
+    def.handler = [service]( const Json::Value &params ) {
+      return service->resetDisplay( params );
     };
     registerTool( std::move( def ) );
   }

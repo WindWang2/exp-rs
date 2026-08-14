@@ -156,7 +156,9 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapC
 
   m_viewControlService.setDataManager( dataManager );
   m_viewControlService.setMapCanvas( canvas );
-  InteractionToolRegistry::instance().registerBuiltinTools( &m_viewControlService );
+  m_rasterDisplayService.setDataManager( dataManager );
+  m_rasterDisplayService.setMapCanvas( canvas );
+  InteractionToolRegistry::instance().registerBuiltinTools( &m_viewControlService, &m_rasterDisplayService );
 
   m_toolCallDispatcher.setInteractionActionHandler(
     []( const std::string &name, const Json::Value &args ) {
@@ -259,7 +261,8 @@ void AgentCopilotDockWidget::sendPrompt( const QString &promptText )
                            m_dataManager, m_canvas,
                            m_canvas && m_canvas->currentLayer()
                              ? m_canvas->currentLayer()->name()
-                             : QString() )
+                             : QString(),
+                           m_rasterDisplayService.displayRevision() )
                            .toSystemPromptHeader();
 
   m_messageHistory = QJsonArray();
@@ -282,7 +285,15 @@ void AgentCopilotDockWidget::sendPrompt( const QString &promptText )
   // The caller owns execution policy, so tool selection lives here: export
   // the algorithm catalog and hand the transport the exact schemas to put on
   // the wire (ADR 0049). Conversion reuses the shared Json↔QVariant helper.
-  const Json::Value cppTools = processing::AtomicAlgorithmRegistry::instance().exportOpenAiToolDefinitions();
+  Json::Value cppTools = processing::AtomicAlgorithmRegistry::instance().exportOpenAiToolDefinitions();
+  const Json::Value interactionTools = InteractionToolRegistry::instance().exportOpenAiToolDefinitions();
+  if ( interactionTools.isArray() )
+  {
+    for ( const auto &tool : interactionTools )
+    {
+      cppTools.append( tool );
+    }
+  }
   const QJsonArray tools = QJsonArray::fromVariantList( processing::jsonValueToVariant( cppTools ).toList() );
 
   m_client->sendChatCompletion( m_messageHistory, tools );

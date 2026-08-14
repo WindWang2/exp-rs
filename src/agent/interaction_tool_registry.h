@@ -12,6 +12,7 @@
 namespace sicnu::agent {
 
 class ViewControlService;
+class RasterDisplayService;
 
 /**
  * @brief Definition of an interaction tool (view controls, layer management, canvas ROI).
@@ -90,8 +91,20 @@ public:
    * - roi:set
    * - roi:clear
    * - canvas:draw_roi (backward compatibility alias)
+   * - raster tools (when rasterService is non-null)
    */
-  void registerBuiltinTools( ViewControlService *service );
+  void registerBuiltinTools( ViewControlService *service, RasterDisplayService *rasterService = nullptr );
+
+  /**
+   * @brief Registers raster display and visualization tools wired to the provided RasterDisplayService.
+   *
+   * Registers:
+   * - raster:get_display
+   * - raster:set_band_composite
+   * - raster:set_stretch
+   * - raster:reset_display
+   */
+  void registerRasterTools( RasterDisplayService *service );
 
   /**
    * @brief Exports registered interaction tools into OpenAI / Qwen Tool Call Function format JSON array.

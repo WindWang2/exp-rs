@@ -19,6 +19,8 @@
 #include "llm_config_manager.h"
 #include "llm_streaming_client.h"
 #include "view_control_service.h"
+#include "raster_display_service.h"
+#include "view_control_service.h"
 
 #include <QMap>
 
@@ -46,6 +48,8 @@ class AgentCopilotDockWidget : public QDockWidget
 
     ViewControlService *viewControlService() { return &m_viewControlService; }
     const ViewControlService *viewControlService() const { return &m_viewControlService; }
+    RasterDisplayService *rasterDisplayService() { return &m_rasterDisplayService; }
+    const RasterDisplayService *rasterDisplayService() const { return &m_rasterDisplayService; }
 
   signals:
     void viewPlanInCanvasRequested( const QJsonObject &planJson );
@@ -87,6 +91,7 @@ class AgentCopilotDockWidget : public QDockWidget
     data::DataManager *m_dataManager = nullptr;
     QgsMapCanvas *m_canvas = nullptr;
     ViewControlService m_viewControlService;
+    RasterDisplayService m_rasterDisplayService;
     processing::AgentWorkflowExecutor m_workflowExecutor;
 
     processing::ToolCallDispatcher m_toolCallDispatcher;

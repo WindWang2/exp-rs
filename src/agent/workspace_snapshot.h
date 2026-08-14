@@ -68,6 +68,7 @@ struct MapViewSnapshot
         /// the renderer carries no contrast enhancement.
         std::optional<double> displayMin;
         std::optional<double> displayMax;
+        quint64 displayRevision = 0;
         bool valid = false;
     };
     ActiveRasterDisplay activeRaster;
@@ -75,12 +76,14 @@ struct MapViewSnapshot
 
 struct WorkspaceSnapshot
 {
+    quint64 displayRevision = 0;
     QList<DataAssetInfo> assets;
     MapViewSnapshot mapView;
 
     static WorkspaceSnapshot capture( data::DataManager *dataManager,
                                       QgsMapCanvas *canvas = nullptr,
-                                      const QString &activeLayerName = {} );
+                                      const QString &activeLayerName = {},
+                                      quint64 displayRevision = 0 );
 
     QString toSystemPromptHeader() const;
 };
