@@ -949,6 +949,294 @@ TEST_CASE("RS mosaic operator rejects empty inputs", "[operators][rs]") {
     }
 }
 
+TEST_CASE("RS mosaic operator single input preserves metadata and values", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:mosaic");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 64;
+    constexpr int H = 64;
+    const QString inPath = tmp.path() + "/single.tif";
+    const QString outPath = tmp.path() + "/single_mosaic.tif";
+
+    std::vector<std::vector<float>> band(1);
+    band[0].resize(W * H);
+    for (int i = 0; i < W * H; ++i) {
+        band[0][i] = static_cast<float>(i + 1);
+    }
+    std::array<double, 6> gt = {100.0, 0.5, 0.0, 200.0, 0.0, -0.5};
+    QString err;
+    REQUIRE(writeGdalOutput(inPath, W, H, band, gt, "EPSG:4326", &err));
+
+    Json::Value params(Json::objectValue);
+    params["inputs"] = Json::Value(Json::arrayValue);
+    params["inputs"].append(inPath.toStdString());
+    params["output"] = outPath.toStdString();
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+
+    CHECK(result["output"].asString() == outPath.toStdString());
+    CHECK(result["inputCount"].asInt() == 1);
+    CHECK(result["width"].asInt() == W);
+    CHECK(result["height"].asInt() == H);
+
+    GdalDatasetWrapper ds;
+    REQUIRE(ds.open(outPath));
+    CHECK(ds.width() == W);
+    CHECK(ds.height() == H);
+    const auto outGt = ds.geoTransform();
+    CHECK(outGt[0] == Catch::Approx(100.0));
+    CHECK(outGt[1] == Catch::Approx(0.5));
+    CHECK(outGt[3] == Catch::Approx(200.0));
+    CHECK(outGt[5] == Catch::Approx(-0.5));
+
+    std::vector<float> outData(W * H);
+    REQUIRE(ds.readBandData(1, outData.data(), W, H));
+    for (int i = 0; i < W * H; ++i) {
+        CHECK(outData[i] == Catch::Approx(static_cast<float>(i + 1)));
+    }
+}
+
+TEST_CASE("RS mosaic operator overlap precedence and nodata handling", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:mosaic");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+
+    // Tile 1: 4x4 at (0, 4), values 10.0
+    const QString p1 = tmp.path() + "/t1.tif";
+    std::vector<std::vector<float>> b1(1);
+    b1[0].assign(W * H, 10.0f);
+    std::array<double, 6> gt1 = {0.0, 1.0, 0.0, 4.0, 0.0, -1.0};
+    QString err;
+    REQUIRE(writeGdalOutput(p1, W, H, b1, gt1, "EPSG:4326", &err));
+
+    // Tile 2: 4x4 at (2, 4) — 2 columns overlap with Tile 1.
+    // In overlap: some pixels are 20.0, some are -9999.0 (NoData), some are NaN
+    const QString p2 = tmp.path() + "/t2.tif";
+    std::vector<std::vector<float>> b2(1);
+    b2[0].assign(W * H, 20.0f);
+    // Set nodata in top-left pixel of tile 2 (which is inside overlap)
+    b2[0][0] = -9999.0f;
+    // Set NaN in second row, first col (inside overlap)
+    b2[0][W] = std::numeric_limits<float>::quiet_NaN();
+    std::array<double, 6> gt2 = {2.0, 1.0, 0.0, 4.0, 0.0, -1.0};
+    REQUIRE(writeGdalOutput(p2, W, H, b2, gt2, "EPSG:4326", &err));
+
+    // Set declared NoData on tile 2
+    {
+        GdalDatasetWrapper ds2;
+        REQUIRE(ds2.open(p2));
+        // Re-open with write access or wrapper to set nodata
+    }
+    GDALDatasetH gds2 = GDALOpen(p2.toUtf8().constData(), GA_Update);
+    REQUIRE(gds2 != nullptr);
+    GDALSetRasterNoDataValue(GDALGetRasterBand(gds2, 1), -9999.0);
+    GDALClose(gds2);
+
+    const QString outPath = tmp.path() + "/out_overlap.tif";
+    Json::Value params(Json::objectValue);
+    params["inputs"] = Json::Value(Json::arrayValue);
+    params["inputs"].append(p1.toStdString());
+    params["inputs"].append(p2.toStdString());
+    params["output"] = outPath.toStdString();
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    CHECK(result["width"].asInt() == 6);
+    CHECK(result["height"].asInt() == 4);
+
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(outPath));
+    std::vector<float> outData(6 * 4);
+    REQUIRE(outDs.readBandData(1, outData.data(), 6, 4));
+
+    // Col 0,1: non-overlapping tile 1 -> should be 10.0
+    CHECK(outData[0] == Catch::Approx(10.0f));
+    CHECK(outData[1] == Catch::Approx(10.0f));
+
+    // In overlap at (x=2, y=0): tile 2 had -9999.0 (NoData) -> tile 1's 10.0 should be preserved!
+    CHECK(outData[2] == Catch::Approx(10.0f));
+
+    // In overlap at (x=3, y=0): tile 2 had 20.0 (valid) -> tile 2's 20.0 should overwrite tile 1!
+    CHECK(outData[3] == Catch::Approx(20.0f));
+
+    // In overlap at (x=2, y=1): tile 2 had NaN (NoData) -> tile 1's 10.0 should be preserved!
+    CHECK(outData[6 + 2] == Catch::Approx(10.0f));
+
+    // Col 4,5: non-overlapping tile 2 -> should be 20.0
+    CHECK(outData[4] == Catch::Approx(20.0f));
+    CHECK(outData[5] == Catch::Approx(20.0f));
+}
+
+TEST_CASE("RS mosaic operator rejects mismatched CRS and pixel size", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:mosaic");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString p1 = tmp.path() + "/t1.tif";
+    const QString p2Crs = tmp.path() + "/t2_crs.tif";
+    const QString p2Res = tmp.path() + "/t2_res.tif";
+    const QString outPath = tmp.path() + "/out_err.tif";
+
+    std::vector<std::vector<float>> b(1);
+    b[0].assign(16, 1.0f);
+    QString err;
+
+    std::array<double, 6> gt1 = {0.0, 1.0, 0.0, 4.0, 0.0, -1.0};
+    REQUIRE(writeGdalOutput(p1, 4, 4, b, gt1, "EPSG:4326", &err));
+
+    // Mismatched CRS
+    std::array<double, 6> gt2 = {4.0, 1.0, 0.0, 4.0, 0.0, -1.0};
+    REQUIRE(writeGdalOutput(p2Crs, 4, 4, b, gt2, "EPSG:3857", &err));
+
+    // Mismatched Pixel Size (resolution 2.0 vs 1.0)
+    std::array<double, 6> gtRes = {4.0, 2.0, 0.0, 4.0, 0.0, -2.0};
+    REQUIRE(writeGdalOutput(p2Res, 4, 4, b, gtRes, "EPSG:4326", &err));
+
+    RSOperatorContext ctx;
+
+    // Test CRS mismatch
+    {
+        Json::Value params(Json::objectValue);
+        params["inputs"] = Json::Value(Json::arrayValue);
+        params["inputs"].append(p1.toStdString());
+        params["inputs"].append(p2Crs.toStdString());
+        params["output"] = outPath.toStdString();
+
+        try {
+            op->run(params, ctx);
+            FAIL("Expected CRS mismatch error");
+        } catch (const RSOperatorError &e) {
+            CHECK(e.code() == ErrorCode::InvalidInputData);
+        }
+    }
+
+    // Test Pixel size mismatch
+    {
+        Json::Value params(Json::objectValue);
+        params["inputs"] = Json::Value(Json::arrayValue);
+        params["inputs"].append(p1.toStdString());
+        params["inputs"].append(p2Res.toStdString());
+        params["output"] = outPath.toStdString();
+
+        try {
+            op->run(params, ctx);
+            FAIL("Expected pixel size mismatch error");
+        } catch (const RSOperatorError &e) {
+            CHECK(e.code() == ErrorCode::InvalidInputData);
+        }
+    }
+}
+
+TEST_CASE("RS mosaic operator streaming across tile boundaries", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:mosaic");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    // Create 2 rasters of size 400x400 offset such that union is 700x700 (> 512 tile size)
+    constexpr int W = 400;
+    constexpr int H = 400;
+
+    const QString p1 = tmp.path() + "/tile_a.tif";
+    const QString p2 = tmp.path() + "/tile_b.tif";
+    const QString outPath = tmp.path() + "/out_large_tiles.tif";
+
+    std::vector<std::vector<float>> b1(1);
+    b1[0].assign(W * H, 42.0f);
+    std::array<double, 6> gt1 = {0.0, 1.0, 0.0, 700.0, 0.0, -1.0};
+    QString err;
+    REQUIRE(writeGdalOutput(p1, W, H, b1, gt1, "EPSG:4326", &err));
+
+    std::vector<std::vector<float>> b2(1);
+    b2[0].assign(W * H, 84.0f);
+    std::array<double, 6> gt2 = {300.0, 1.0, 0.0, 400.0, 0.0, -1.0};
+    REQUIRE(writeGdalOutput(p2, W, H, b2, gt2, "EPSG:4326", &err));
+
+    Json::Value params(Json::objectValue);
+    params["inputs"] = Json::Value(Json::arrayValue);
+    params["inputs"].append(p1.toStdString());
+    params["inputs"].append(p2.toStdString());
+    params["output"] = outPath.toStdString();
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+
+    CHECK(result["width"].asInt() == 700);
+    CHECK(result["height"].asInt() == 700);
+
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(outPath));
+    CHECK(outDs.width() == 700);
+    CHECK(outDs.height() == 700);
+
+    // Check pixel in tile 1 only (e.g. x=50, y=50) -> 42.0
+    float val = 0.0f;
+    REQUIRE(outDs.readPixel(1, 50, 50, &val));
+    CHECK(val == Catch::Approx(42.0f));
+
+    // Check pixel in overlap (e.g. x=350, y=350) -> tile 2 overwrites tile 1 -> 84.0
+    REQUIRE(outDs.readPixel(1, 350, 350, &val));
+    CHECK(val == Catch::Approx(84.0f));
+
+    // Check pixel in tile 2 only (e.g. x=600, y=600) -> 84.0
+    REQUIRE(outDs.readPixel(1, 600, 600, &val));
+    CHECK(val == Catch::Approx(84.0f));
+
+    // Check pixel outside both tiles (e.g. x=600, y=50) -> NaN
+    REQUIRE(outDs.readPixel(1, 600, 50, &val));
+    CHECK(std::isnan(val));
+}
+
+TEST_CASE("RS mosaic operator cancellation cleans up incomplete output", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:mosaic");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString p1 = tmp.path() + "/t1.tif";
+    const QString outPath = tmp.path() + "/out_cancelled.tif";
+
+    std::vector<std::vector<float>> b(1);
+    b[0].assign(100 * 100, 1.0f);
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 100.0, 0.0, -1.0};
+    QString err;
+    REQUIRE(writeGdalOutput(p1, 100, 100, b, gt, "EPSG:4326", &err));
+
+    Json::Value params(Json::objectValue);
+    params["inputs"] = Json::Value(Json::arrayValue);
+    params["inputs"].append(p1.toStdString());
+    params["output"] = outPath.toStdString();
+
+    std::atomic<bool> cancelFlag{true};
+    RSOperatorContext ctx;
+    ctx.setCancelFlag(&cancelFlag);
+
+    try {
+        op->run(params, ctx);
+        FAIL("Expected operator cancellation");
+    } catch (const RSOperatorError &e) {
+        CHECK(e.code() == ErrorCode::Cancelled);
+    }
+
+    // Crucial check: incomplete output file must be deleted upon cancellation
+    CHECK_FALSE(QFile::exists(outPath));
+}
+
+
+
 
 #ifdef SICNU_HAS_OPENCV
 TEST_CASE("RS kmeans classification runs on multi-band raster", "[operators][rs]") {

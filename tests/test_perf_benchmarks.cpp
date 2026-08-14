@@ -68,6 +68,23 @@ void buildSyntheticRaster( const QString &path, int width, int height, int bands
     GDALClose( ds );
 }
 
+void buildSyntheticTile( const QString &path, double originX, double originY, int width, int height, uint32_t seed = 0x12345678u )
+{
+    ensureGdalInit();
+    std::array<double, 6> gt = { originX, 1.0, 0.0, originY, 0.0, -1.0 };
+    GDALDatasetH ds = createOutputTiff( path, width, height, 1, GDT_Float32, gt, QStringLiteral( "EPSG:4326" ) );
+    REQUIRE( ds != nullptr );
+
+    const size_t pixelCount = static_cast<size_t>( width ) * height;
+    std::vector<float> band( pixelCount );
+    uint32_t state = seed;
+    for ( size_t i = 0; i < pixelCount; ++i )
+        band[i] = lcgFloat( state );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, 0, width, height,
+                           band.data(), width, height, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( ds );
+}
+
 bool largeBench()
 {
     const char *env = std::getenv( "SICNU_BENCH_LARGE" );
@@ -367,3 +384,112 @@ TEST_CASE( "Benchmark: change_difference primitive (tile streaming)", "[benchmar
         REQUIRE( res.isMember( "output" ) );
     } );
 }
+
+TEST_CASE( "Benchmark: mosaic small (2 x moderate rasters)", "[benchmark]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const bool large = largeBench();
+    const int W = large ? 2048 : 1024;
+    const int H = large ? 2048 : 1024;
+    const QString p1 = dir.filePath( QStringLiteral( "tile1.tif" ) );
+    const QString p2 = dir.filePath( QStringLiteral( "tile2.tif" ) );
+    const QString outPath = dir.filePath( QStringLiteral( "out_mosaic_small.tif" ) );
+
+    // 2 rasters with 25% overlap in X
+    buildSyntheticTile( p1, 0.0, static_cast<double>( H ), W, H, 0x11111111u );
+    buildSyntheticTile( p2, static_cast<double>( W * 3 / 4 ), static_cast<double>( H ), W, H, 0x22222222u );
+
+    Json::Value params( Json::objectValue );
+    Json::Value inputs( Json::arrayValue );
+    inputs.append( p1.toStdString() );
+    inputs.append( p2.toStdString() );
+    params["inputs"] = inputs;
+    params["output"] = outPath.toStdString();
+
+    sicnu::operators::RSOperatorContext ctx;
+    runBench( "mosaic(small 2x)", [&]() {
+        auto res = runOperator( "rs:mosaic", params, ctx );
+        REQUIRE( res.isObject() );
+        REQUIRE( res.isMember( "output" ) );
+    } );
+}
+
+TEST_CASE( "Benchmark: mosaic medium (4 x larger rasters)", "[benchmark]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const bool large = largeBench();
+    const int W = large ? 2048 : 1024;
+    const int H = large ? 2048 : 1024;
+    const QString p1 = dir.filePath( QStringLiteral( "tile_tl.tif" ) );
+    const QString p2 = dir.filePath( QStringLiteral( "tile_tr.tif" ) );
+    const QString p3 = dir.filePath( QStringLiteral( "tile_bl.tif" ) );
+    const QString p4 = dir.filePath( QStringLiteral( "tile_br.tif" ) );
+    const QString outPath = dir.filePath( QStringLiteral( "out_mosaic_med.tif" ) );
+
+    // 2x2 grid with 10% overlap
+    const double stepX = static_cast<double>( W * 9 / 10 );
+    const double stepY = static_cast<double>( H * 9 / 10 );
+
+    buildSyntheticTile( p1, 0.0, stepY + H, W, H, 0x1000u );
+    buildSyntheticTile( p2, stepX, stepY + H, W, H, 0x2000u );
+    buildSyntheticTile( p3, 0.0, static_cast<double>( H ), W, H, 0x3000u );
+    buildSyntheticTile( p4, stepX, static_cast<double>( H ), W, H, 0x4000u );
+
+    Json::Value params( Json::objectValue );
+    Json::Value inputs( Json::arrayValue );
+    inputs.append( p1.toStdString() );
+    inputs.append( p2.toStdString() );
+    inputs.append( p3.toStdString() );
+    inputs.append( p4.toStdString() );
+    params["inputs"] = inputs;
+    params["output"] = outPath.toStdString();
+
+    sicnu::operators::RSOperatorContext ctx;
+    runBench( "mosaic(medium 4x)", [&]() {
+        auto res = runOperator( "rs:mosaic", params, ctx );
+        REQUIRE( res.isObject() );
+        REQUIRE( res.isMember( "output" ) );
+    } );
+}
+
+TEST_CASE( "Benchmark: mosaic stress (large synthetic rasters)", "[benchmark]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const bool large = largeBench();
+    const int W = large ? 4000 : 2048;
+    const int H = large ? 4000 : 2048;
+    const QString p1 = dir.filePath( QStringLiteral( "stress_tl.tif" ) );
+    const QString p2 = dir.filePath( QStringLiteral( "stress_tr.tif" ) );
+    const QString p3 = dir.filePath( QStringLiteral( "stress_bl.tif" ) );
+    const QString p4 = dir.filePath( QStringLiteral( "stress_br.tif" ) );
+    const QString outPath = dir.filePath( QStringLiteral( "out_mosaic_stress.tif" ) );
+
+    // 2x2 grid forming large union raster (e.g. ~4000x4000 = 16M pixels, or ~7600x7600 = ~58M pixels in large mode)
+    const double stepX = static_cast<double>( W * 95 / 100 );
+    const double stepY = static_cast<double>( H * 95 / 100 );
+
+    buildSyntheticTile( p1, 0.0, stepY + H, W, H, 0xA000u );
+    buildSyntheticTile( p2, stepX, stepY + H, W, H, 0xB000u );
+    buildSyntheticTile( p3, 0.0, static_cast<double>( H ), W, H, 0xC000u );
+    buildSyntheticTile( p4, stepX, static_cast<double>( H ), W, H, 0xD000u );
+
+    Json::Value params( Json::objectValue );
+    Json::Value inputs( Json::arrayValue );
+    inputs.append( p1.toStdString() );
+    inputs.append( p2.toStdString() );
+    inputs.append( p3.toStdString() );
+    inputs.append( p4.toStdString() );
+    params["inputs"] = inputs;
+    params["output"] = outPath.toStdString();
+
+    sicnu::operators::RSOperatorContext ctx;
+    runBench( "mosaic(stress)", [&]() {
+        auto res = runOperator( "rs:mosaic", params, ctx );
+        REQUIRE( res.isObject() );
+        REQUIRE( res.isMember( "output" ) );
+    } );
+}
+

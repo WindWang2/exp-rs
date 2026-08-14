@@ -199,7 +199,7 @@ TEST_CASE( "Dynamic estimates reflect actual working sets (QUAC / mosaic)", "[pr
         REQUIRE( dosEst["estimatedRamBytes"].asUInt64() == 524288 );
     }
 
-    // Mosaic: dynamic estimate includes input buffers + union output buffer.
+    // Mosaic: streaming tile working set estimate (bounded, O(tile))
     {
         RsMosaicOperator op;
         Json::Value params( Json::objectValue );
@@ -209,7 +209,9 @@ TEST_CASE( "Dynamic estimates reflect actual working sets (QUAC / mosaic)", "[pr
         params["inputs"] = inputs;
         const Json::Value est = op.estimateExecution( params );
         REQUIRE( est["basis"].asString() == "dynamic" );
-        // 2 inputs x 32x32x4 B + 1 output 32x32x4 B = 12288 B.
-        REQUIRE( est["estimatedRamBytes"].asUInt64() == 12288 );
+        REQUIRE( est["tileWidth"].asInt() == 512 );
+        REQUIRE( est["tileHeight"].asInt() == 512 );
+        REQUIRE( est["estimatedRamBytes"].asUInt64() == 4194304 );
     }
 }
+

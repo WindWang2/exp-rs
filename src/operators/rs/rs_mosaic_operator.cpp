@@ -1,25 +1,25 @@
-/***************************************************************************
- * rs_mosaic_operator.cpp  —  Multi-raster mosaic RSOperator
- ***************************************************************************/
 #include "rs_mosaic_operator.h"
 
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
-#include "processing/algorithms/mosaic.h"
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <QFile>
 #include <QString>
 
 #include <gdal.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -28,15 +28,34 @@ using namespace params;
 
 namespace {
 
-struct RasterTile {
+constexpr int kTileSize = 512;
+
+struct RasterTileMeta {
     std::string path;
     int width = 0;
     int height = 0;
     std::array<double, 6> geotransform{};
     QString projection;
-    std::vector<float> data;
-    /// Band-1 NoData value (NaN when the band has none).
     float nodata = std::numeric_limits<float>::quiet_NaN();
+    int64_t offsetX = 0;
+    int64_t offsetY = 0;
+};
+
+struct OutputFileCleaner {
+    GdalDatasetWrapper *ds = nullptr;
+    QString path;
+    bool committed = false;
+    OutputFileCleaner() = default;
+    OutputFileCleaner(const OutputFileCleaner&) = delete;
+    OutputFileCleaner& operator=(const OutputFileCleaner&) = delete;
+    ~OutputFileCleaner() {
+        if (!committed && !path.isEmpty()) {
+            if (ds) {
+                ds->close();
+            }
+            QFile::remove(path);
+        }
+    }
 };
 
 } // namespace
@@ -79,34 +98,26 @@ Json::Value RsMosaicOperator::metadata() const {
 
 Json::Value RsMosaicOperator::executionEstimate() const
 {
-    // FullRaster (default policy): band 1 of every input is loaded fully in
-    // memory along with the output mosaic buffer (capped at 200M output pixels).
-    // Typical: 2 x 1024x1024 inputs + 1 output, all Float32.
+    // Window/tile streaming: working set is bounded by the tile buffers (512x512 floats)
+    // independent of the total union mosaic size.
+    // 1 output tile buffer (512x512 Float32 = 1MB) + 1 input scratch tile buffer (1MB)
+    // + bounded GDAL working set (~2MB). Total ~4MB.
     Json::Value est(Json::objectValue);
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 16777216; // 3 x 1024x1024 Float32 buffers
+    est["tileWidth"] = kTileSize;
+    est["tileHeight"] = kTileSize;
+    est["estimatedRamBytes"] = 4194304;
     return est;
 }
 
 Json::Value RsMosaicOperator::estimateExecution(const Json::Value& params) const
 {
-    // FullRaster: estimate the actual working set from the inputs — every
-    // input band-1 buffer (width*height*4 B) plus the union-extent output
-    // buffer (capped at 200M pixels like run()). Overflow-safe.
+    // Input-dependent estimate: probes inputs to confirm readiness, returning
+    // the bounded tile working set.
     if (!params.isObject() || !params.isMember("inputs") || !params["inputs"].isArray()
         || params["inputs"].empty())
         return executionEstimate();
 
     ensureGdalInit();
-    constexpr std::uint64_t kMaxOutPixels = 200'000'000ULL;
-    std::optional<std::uint64_t> inputBytes{ 0 };
-    double unionMinX = std::numeric_limits<double>::max();
-    double unionMinY = std::numeric_limits<double>::max();
-    double unionMaxX = std::numeric_limits<double>::lowest();
-    double unionMaxY = std::numeric_limits<double>::lowest();
-    double refPixelW = 0.0;
-    double refPixelH = 0.0;
     bool anyOpened = false;
 
     for (const auto& item : params["inputs"])
@@ -114,63 +125,22 @@ Json::Value RsMosaicOperator::estimateExecution(const Json::Value& params) const
         if (!item.isString())
             continue;
         GdalDatasetWrapper ds;
-        if (!ds.open(QString::fromStdString(item.asString())))
-            continue;
-        anyOpened = true;
-        const auto gt = ds.geoTransform();
-        if (!anyOpened || refPixelW == 0.0)
+        if (ds.open(QString::fromStdString(item.asString())))
         {
-            refPixelW = std::abs(gt[1]);
-            refPixelH = std::abs(gt[5]);
+            anyOpened = true;
+            break;
         }
-        const double tlX = gt[0];
-        const double tlY = gt[3];
-        const double brX = gt[0] + ds.width() * gt[1];
-        const double brY = gt[3] + ds.height() * gt[5];
-        unionMinX = std::min(unionMinX, std::min(tlX, brX));
-        unionMinY = std::min(unionMinY, std::min(tlY, brY));
-        unionMaxX = std::max(unionMaxX, std::max(tlX, brX));
-        unionMaxY = std::max(unionMaxY, std::max(tlY, brY));
-
-        std::optional<std::uint64_t> px =
-            sicnu::processing::checkedMul(static_cast<std::uint64_t>(ds.width()),
-                                          static_cast<std::uint64_t>(ds.height()));
-        std::optional<std::uint64_t> bytes =
-            px ? sicnu::processing::checkedMul(*px, static_cast<std::uint64_t>(sizeof(float))) : std::nullopt;
-        if (inputBytes && bytes && *inputBytes <= std::numeric_limits<std::uint64_t>::max() - *bytes)
-            *inputBytes += *bytes;
     }
 
     if (!anyOpened)
         return executionEstimate();
 
-    std::optional<std::uint64_t> outPixels{ 0 };
-    if (refPixelW > 1e-15 && refPixelH > 1e-15
-        && unionMaxX > unionMinX && unionMaxY > unionMinY)
-    {
-        const auto ow = static_cast<std::uint64_t>(
-            std::round((unionMaxX - unionMinX) / refPixelW));
-        const auto oh = static_cast<std::uint64_t>(
-            std::round((unionMaxY - unionMinY) / refPixelH));
-        outPixels = sicnu::processing::checkedMul(ow, oh);
-    }
-    std::optional<std::uint64_t> outBytes =
-        outPixels ? sicnu::processing::checkedMul(
-                        std::min(*outPixels, kMaxOutPixels),
-                        static_cast<std::uint64_t>(sizeof(float)))
-                  : std::nullopt;
-
-    if (inputBytes && outBytes
-        && *inputBytes <= std::numeric_limits<std::uint64_t>::max() - *outBytes)
-    {
-        Json::Value est(Json::objectValue);
-        est["tileWidth"] = 0;
-        est["tileHeight"] = 0;
-        est["estimatedRamBytes"] = Json::Value::UInt64(*inputBytes + *outBytes);
-        est["basis"] = "dynamic";
-        return est;
-    }
-    return executionEstimate();
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = kTileSize;
+    est["tileHeight"] = kTileSize;
+    est["estimatedRamBytes"] = 4194304;
+    est["basis"] = "dynamic";
+    return est;
 }
 
 Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& context) {
@@ -184,10 +154,11 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
     const int inputCount = static_cast<int>(inputsJson.size());
 
     ensureGdalInit();
-    context.reportProgress(0.0, "Loading " + std::to_string(inputCount) + " inputs");
+    context.reportProgress(0.0, "Inspecting " + std::to_string(inputCount) + " inputs");
 
-    std::vector<RasterTile> tiles;
-    tiles.reserve(static_cast<size_t>(inputCount));
+    std::vector<RasterTileMeta> metaList;
+    metaList.reserve(static_cast<size_t>(inputCount));
+    std::vector<GdalDatasetWrapper> inputDatasets(static_cast<size_t>(inputCount));
 
     for (int i = 0; i < inputCount; ++i) {
         if (!inputsJson[i].isString()) {
@@ -199,19 +170,19 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
             throw RSOperatorError(ErrorCode::FileNotFound, "Input not found: " + path);
         }
 
-        GdalDatasetWrapper ds;
-        if (!ds.open(QString::fromStdString(path))) {
+        if (!inputDatasets[static_cast<size_t>(i)].open(QString::fromStdString(path))) {
             throw RSOperatorError(ErrorCode::GdalError, "Failed to open: " + path);
         }
+        const auto& ds = inputDatasets[static_cast<size_t>(i)];
 
-        RasterTile tile;
-        tile.path = path;
-        tile.width = ds.width();
-        tile.height = ds.height();
-        tile.geotransform = ds.geoTransform();
-        tile.projection = ds.projection();
+        RasterTileMeta meta;
+        meta.path = path;
+        meta.width = ds.width();
+        meta.height = ds.height();
+        meta.geotransform = ds.geoTransform();
+        meta.projection = ds.projection();
 
-        if (tile.width <= 0 || tile.height <= 0) {
+        if (meta.width <= 0 || meta.height <= 0) {
             throw RSOperatorError(ErrorCode::InvalidInputData, "Invalid dimensions: " + path);
         }
 
@@ -220,25 +191,19 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
         // (no declared NoData) keeps the previous behavior.
         bool hasNodata = false;
         const double nd = ds.bandNoDataValue(1, &hasNodata);
-        tile.nodata = hasNodata ? static_cast<float>(nd)
+        meta.nodata = hasNodata ? static_cast<float>(nd)
                                 : std::numeric_limits<float>::quiet_NaN();
 
-        const size_t n = static_cast<size_t>(tile.width) * static_cast<size_t>(tile.height);
-        tile.data.resize(n);
-        if (!ds.readBandData(1, tile.data.data(), tile.width, tile.height)) {
-            throw RSOperatorError(ErrorCode::GdalError, "Failed to read band 1: " + path);
-        }
-
-        tiles.push_back(std::move(tile));
-        context.reportProgress(0.3 * (i + 1) / inputCount, "Loaded " + path);
+        metaList.push_back(std::move(meta));
+        context.reportProgress(0.05 * (i + 1) / inputCount, "Inspected " + path);
         context.throwIfCancelled();
     }
 
     // CRS consistency
     for (int i = 1; i < inputCount; ++i) {
-        if (tiles[i].projection != tiles[0].projection) {
+        if (metaList[static_cast<size_t>(i)].projection != metaList[0].projection) {
             throw RSOperatorError(ErrorCode::InvalidInputData,
-                                  "CRS mismatch between " + tiles[0].path + " and " + tiles[i].path);
+                                  "CRS mismatch between " + metaList[0].path + " and " + metaList[static_cast<size_t>(i)].path);
         }
     }
 
@@ -248,8 +213,8 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
     double unionMaxX = std::numeric_limits<double>::lowest();
     double unionMaxY = std::numeric_limits<double>::lowest();
 
-    const double refPixelW = tiles[0].geotransform[1];
-    const double refPixelH = tiles[0].geotransform[5];
+    const double refPixelW = metaList[0].geotransform[1];
+    const double refPixelH = metaList[0].geotransform[5];
     if (std::abs(refPixelW) < 1e-15 || std::abs(refPixelH) < 1e-15) {
         throw RSOperatorError(ErrorCode::InvalidInputData, "Invalid pixel size on first input");
     }
@@ -259,7 +224,7 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
     // an actionable error instead of producing offset/dirty data.
     const double kPixelTol = 1e-6; // relative tolerance
     for (int i = 1; i < inputCount; ++i) {
-        const auto& gt = tiles[i].geotransform;
+        const auto& gt = metaList[static_cast<size_t>(i)].geotransform;
         const double pw = std::abs(gt[1]);
         const double ph = std::abs(gt[5]);
         const bool sizeMismatch =
@@ -268,15 +233,15 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
         if (sizeMismatch) {
             throw RSOperatorError(
                 ErrorCode::InvalidInputData,
-                "Pixel size mismatch between " + tiles[0].path + " ("
+                "Pixel size mismatch between " + metaList[0].path + " ("
                     + std::to_string(std::abs(refPixelW)) + " x "
-                    + std::to_string(std::abs(refPixelH)) + ") and " + tiles[i].path + " ("
+                    + std::to_string(std::abs(refPixelH)) + ") and " + metaList[static_cast<size_t>(i)].path + " ("
                     + std::to_string(pw) + " x " + std::to_string(ph)
                     + "); resample the inputs to a common resolution before mosaicking");
         }
     }
 
-    for (const auto& t : tiles) {
+    for (const auto& t : metaList) {
         const auto& gt = t.geotransform;
         const double tlX = gt[0];
         const double tlY = gt[3];
@@ -288,15 +253,22 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
         unionMaxY = std::max(unionMaxY, std::max(tlY, brY));
     }
 
-    const int outWidth = static_cast<int>(std::round((unionMaxX - unionMinX) / std::abs(refPixelW)));
-    const int outHeight = static_cast<int>(std::round((unionMaxY - unionMinY) / std::abs(refPixelH)));
-    if (outWidth <= 0 || outHeight <= 0) {
+    const int64_t outWidth64 = static_cast<int64_t>(std::round((unionMaxX - unionMinX) / std::abs(refPixelW)));
+    const int64_t outHeight64 = static_cast<int64_t>(std::round((unionMaxY - unionMinY) / std::abs(refPixelH)));
+    if (outWidth64 <= 0 || outHeight64 <= 0
+        || outWidth64 > std::numeric_limits<int>::max()
+        || outHeight64 > std::numeric_limits<int>::max()) {
         throw RSOperatorError(ErrorCode::InvalidInputData, "Computed mosaic dimensions are invalid");
     }
 
-    // Cap memory for accidental huge extents
-    const size_t outPixels = static_cast<size_t>(outWidth) * static_cast<size_t>(outHeight);
-    if (outPixels > 200'000'000ULL) {
+    const int outWidth = static_cast<int>(outWidth64);
+    const int outHeight = static_cast<int>(outHeight64);
+
+    // Cap memory / dimensions for accidental huge extents
+    std::optional<std::uint64_t> outPixels =
+        sicnu::processing::checkedMul(static_cast<std::uint64_t>(outWidth),
+                                      static_cast<std::uint64_t>(outHeight));
+    if (!outPixels || *outPixels > 200'000'000ULL) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "Mosaic output too large (" + std::to_string(outWidth) + "x" +
                                   std::to_string(outHeight) + ")");
@@ -305,44 +277,123 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
     std::array<double, 6> outGT{};
     outGT[0] = unionMinX;
     outGT[1] = refPixelW;
-    outGT[2] = tiles[0].geotransform[2];
-    outGT[3] = unionMaxY;
-    outGT[4] = tiles[0].geotransform[4];
+    outGT[2] = metaList[0].geotransform[2];
+    outGT[3] = (refPixelH < 0) ? unionMaxY : unionMinY;
+    outGT[4] = metaList[0].geotransform[4];
     outGT[5] = refPixelH;
 
-    std::vector<Mosaic::MosaicSource> sources(static_cast<size_t>(inputCount));
     for (int i = 0; i < inputCount; ++i) {
-        const auto& gt = tiles[i].geotransform;
-        sources[i].data = tiles[i].data.data();
-        sources[i].width = static_cast<size_t>(tiles[i].width);
-        sources[i].height = static_cast<size_t>(tiles[i].height);
-        sources[i].offsetX = static_cast<size_t>(
+        const auto& gt = metaList[static_cast<size_t>(i)].geotransform;
+        metaList[static_cast<size_t>(i)].offsetX = static_cast<int64_t>(
             std::round((gt[0] - unionMinX) / std::abs(refPixelW)));
-        sources[i].offsetY = static_cast<size_t>(
-            std::round((unionMaxY - gt[3]) / std::abs(refPixelH)));
-        sources[i].nodata = tiles[i].nodata;
+        metaList[static_cast<size_t>(i)].offsetY = static_cast<int64_t>(
+            (refPixelH < 0)
+                ? std::round((unionMaxY - gt[3]) / std::abs(refPixelH))
+                : std::round((gt[3] - unionMinY) / std::abs(refPixelH)));
     }
 
-    context.reportProgress(0.6, "Merging mosaic");
+    context.reportProgress(0.08, "Creating mosaic output dataset");
     context.throwIfCancelled();
 
-    std::vector<float> outBuf(outPixels, std::numeric_limits<float>::quiet_NaN());
-    if (!Mosaic::merge(sources.data(), sources.size(), outBuf.data(),
-                       static_cast<size_t>(outWidth), static_cast<size_t>(outHeight))) {
-        throw RSOperatorError(ErrorCode::ComputationError, "Mosaic::merge failed");
+    GdalDatasetWrapper outDs;
+    QString outErr;
+    OutputFileCleaner cleaner;
+    cleaner.ds = &outDs;
+    cleaner.path = QString::fromStdString(outputPath);
+
+    if (!outDs.create(cleaner.path, outWidth, outHeight, 1,
+                      static_cast<int>(GDT_Float32), outGT, metaList[0].projection, &outErr)) {
+        throw RSOperatorError(ErrorCode::FileNotWritable,
+                              "Failed to create mosaic output: " + outErr.toStdString());
     }
 
-    context.reportProgress(0.85, "Writing output");
-
-    QString error;
-    std::vector<std::vector<float>> bands(1);
-    bands[0] = std::move(outBuf);
-    if (!writeGdalOutput(QString::fromStdString(outputPath), outWidth, outHeight,
-                         bands, outGT, tiles[0].projection, &error)) {
-        throw RSOperatorError(ErrorCode::GdalError,
-                              error.isEmpty() ? "Failed to write mosaic output" : error.toStdString());
+    for (const auto& meta : metaList) {
+        if (!std::isnan(meta.nodata)) {
+            outDs.setBandNoDataValue(1, meta.nodata);
+            break;
+        }
     }
 
+    // Window streaming mosaic execution:
+    // Process the output grid in kTileSize x kTileSize windows.
+    // For each window, read intersecting sub-windows from inputs in index order
+    // (later inputs overwrite earlier ones for non-nodata pixels), then write
+    // the window directly to the output GeoTIFF.
+    std::vector<float> tileOut(static_cast<size_t>(kTileSize) * kTileSize);
+    std::vector<float> tileIn(static_cast<size_t>(kTileSize) * kTileSize);
+
+    const int nx = (outWidth + kTileSize - 1) / kTileSize;
+    const int ny = (outHeight + kTileSize - 1) / kTileSize;
+    const uint64_t totalTiles = static_cast<uint64_t>(nx) * ny;
+    uint64_t processedTiles = 0;
+
+    for (int y = 0; y < outHeight; y += kTileSize) {
+        const int h = std::min(kTileSize, outHeight - y);
+        for (int x = 0; x < outWidth; x += kTileSize) {
+            const int w = std::min(kTileSize, outWidth - x);
+            const size_t currentTilePixels = static_cast<size_t>(w) * h;
+
+            // Initialize current output window with NaN (unfilled / nodata)
+            std::fill(tileOut.begin(), tileOut.begin() + currentTilePixels,
+                      std::numeric_limits<float>::quiet_NaN());
+
+            for (int i = 0; i < inputCount; ++i) {
+                const auto& meta = metaList[static_cast<size_t>(i)];
+
+                const int64_t interMinX = std::max<int64_t>(x, meta.offsetX);
+                const int64_t interMaxX = std::min<int64_t>(x + w, meta.offsetX + meta.width);
+                const int64_t interMinY = std::max<int64_t>(y, meta.offsetY);
+                const int64_t interMaxY = std::min<int64_t>(y + h, meta.offsetY + meta.height);
+
+                if (interMinX >= interMaxX || interMinY >= interMaxY) {
+                    continue;
+                }
+
+                const int iw = static_cast<int>(interMaxX - interMinX);
+                const int ih = static_cast<int>(interMaxY - interMinY);
+                const int srcX = static_cast<int>(interMinX - meta.offsetX);
+                const int srcY = static_cast<int>(interMinY - meta.offsetY);
+                const int dstRelX = static_cast<int>(interMinX - x);
+                const int dstRelY = static_cast<int>(interMinY - y);
+
+                if (!inputDatasets[static_cast<size_t>(i)].readBandWindow(
+                        1, srcX, srcY, iw, ih, tileIn.data())) {
+                    throw RSOperatorError(
+                        ErrorCode::GdalError,
+                        "Failed to read window from " + meta.path + " at ("
+                            + std::to_string(srcX) + ", " + std::to_string(srcY) + ")");
+                }
+
+                const float nodata = meta.nodata;
+                for (int r = 0; r < ih; ++r) {
+                    const size_t outRowOffset = static_cast<size_t>(dstRelY + r) * w + dstRelX;
+                    const size_t inRowOffset = static_cast<size_t>(r) * iw;
+                    for (int c = 0; c < iw; ++c) {
+                        const float val = tileIn[inRowOffset + c];
+                        const bool valid = !std::isnan(val) && (std::isnan(nodata) || val != nodata);
+                        if (valid) {
+                            tileOut[outRowOffset + c] = val;
+                        }
+                    }
+                }
+            }
+
+            if (!outDs.writeBandWindow(1, x, y, w, h, tileOut.data())) {
+                throw RSOperatorError(ErrorCode::GdalError,
+                                      "Failed to write mosaic window at ("
+                                          + std::to_string(x) + ", " + std::to_string(y) + ")");
+            }
+
+            processedTiles++;
+            context.throwIfCancelled();
+            context.reportProgress(0.08 + 0.90 * (static_cast<double>(processedTiles) / totalTiles),
+                                   "Mosaicking tiles (" + std::to_string(processedTiles) + "/"
+                                       + std::to_string(totalTiles) + ")");
+        }
+    }
+
+    outDs.close();
+    cleaner.committed = true;
     context.reportProgress(1.0, "Mosaic complete");
 
     Json::Value result(Json::objectValue);
