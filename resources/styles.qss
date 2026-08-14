@@ -1286,7 +1286,6 @@ QTreeView::item:selected, QTreeWidget::item:selected, QListView::item:selected {
 }
 #rsRibbonQatBtn:disabled {
     color: #8A93A0;
-    opacity: 0.55;
 }
 #rsRibbonQatSep {
     background: #C5CDD6;
@@ -1364,7 +1363,6 @@ QPushButton#rsRibbonTabButton:disabled {
     color: #8A93A0;
     background: transparent;
     border-color: transparent;
-    opacity: 0.55;
 }
 /* Status bar session meta */
 #rsStatusMetaLabel, #rsLayerStatusLabel {

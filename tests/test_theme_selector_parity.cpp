@@ -83,6 +83,8 @@ TEST_CASE( "Theme: Light and Dark stylesheets exist and have selector parity", "
   // 2. Syntax validation
   REQUIRE_FALSE( lightQss.contains( QStringLiteral( "border-bottom-color: none" ), Qt::CaseInsensitive ) );
   REQUIRE_FALSE( darkQss.contains( QStringLiteral( "border-bottom-color: none" ), Qt::CaseInsensitive ) );
+  REQUIRE_FALSE( lightQss.contains( QRegularExpression( QStringLiteral( "\\bopacity\\s*:" ) ) ) );
+  REQUIRE_FALSE( darkQss.contains( QRegularExpression( QStringLiteral( "\\bopacity\\s*:" ) ) ) );
 
   // 3. Color leak check
   REQUIRE_FALSE( darkQss.contains( QStringLiteral( "#f6f8fa" ), Qt::CaseInsensitive ) );

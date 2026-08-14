@@ -25,6 +25,8 @@ def check_invalid_values(qss_text: str, filename: str) -> list[str]:
     for idx, line in enumerate(qss_text.splitlines(), start=1):
         if re.search(r'border-bottom-color\s*:\s*none', line, re.IGNORECASE):
             errors.append(f"{filename}:{idx} - Invalid CSS: 'border-bottom-color: none'")
+        if re.search(r'^\s*opacity\s*:', line, re.IGNORECASE):
+            errors.append(f"{filename}:{idx} - Unsupported Qt CSS property: 'opacity'")
         if filename.endswith("styles-dark.qss") and "#f6f8fa" in line:
             errors.append(f"{filename}:{idx} - Light theme color '#f6f8fa' leaked into dark theme!")
     return errors
