@@ -65,6 +65,7 @@ Json::Value RsSpectralIndexOperator::metadata() const {
     meta["limitations"].append("Band numbers are 1-based and must exist in the input raster. When a band "
                                "parameter is omitted, it is resolved from the input's SICNU_BAND_ROLE "
                                "product metadata (semantic band roles) instead of the positional default.");
+    meta["facadeOf"] = "rs:ndvi,rs:evi,rs:ndwi,rs:savi,rs:ndbi,rs:mndwi";
     return meta;
 }
 
@@ -79,8 +80,11 @@ Json::Value RsSpectralIndexOperator::executionEstimate() const {
     return est;
 }
 
-Json::Value RsSpectralIndexOperator::run(const Json::Value& params,
-                                         RSOperatorContext& context) {
+namespace spectral_index_detail {
+
+Json::Value runSpectralIndexCore(const std::string& defaultIndex,
+                                 const Json::Value& params,
+                                 RSOperatorContext& context) {
     if (!params.isObject()) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "Operator parameters must be a JSON object");
@@ -88,7 +92,9 @@ Json::Value RsSpectralIndexOperator::run(const Json::Value& params,
 
     const std::string inputPath = requireString(params, "input");
     const std::string outputPath = requireString(params, "output");
-    const std::string indexName = getEnum(params, "index", s_indices, "NDVI");
+    const std::string indexName = params.isMember("index")
+                                      ? getEnum(params, "index", s_indices, defaultIndex)
+                                      : defaultIndex;
 
     if (!fileExists(inputPath)) {
         throw RSOperatorError(ErrorCode::FileNotFound,
@@ -284,6 +290,13 @@ Json::Value RsSpectralIndexOperator::run(const Json::Value& params,
     result["width"] = width;
     result["height"] = height;
     return result;
+}
+
+} // namespace spectral_index_detail
+
+Json::Value RsSpectralIndexOperator::run(const Json::Value& params,
+                                         RSOperatorContext& context) {
+    return spectral_index_detail::runSpectralIndexCore("NDVI", params, context);
 }
 
 } // namespace sicnu::operators::rs

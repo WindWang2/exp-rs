@@ -2,6 +2,7 @@
  * rs_operators_init.cpp  —  Static registration of native RS operators
  ***************************************************************************/
 #include "rs_spectral_index_operator.h"
+#include "rs_spectral_index_aliases.h"
 #include "rs_band_math_operator.h"
 #include "rs_sam_classify_operator.h"
 #include "rs_spectral_unmixing_operator.h"
@@ -10,6 +11,7 @@
 #include "rs_spectral_resample_operator.h"
 #include "rs_endmember_extraction_operator.h"
 #include "rs_atmospheric_correction_operator.h"
+#include "rs_atmospheric_aliases.h"
 #include "rs_radiometric_calibration_operator.h"
 #include "rs_change_detection_operator.h"
 #include "rs_change_primitives.h"
@@ -45,6 +47,12 @@
 namespace sicnu::operators::rs {
 
 REGISTER_RS_OPERATOR(RsSpectralIndexOperator, "rs:spectral_index")
+REGISTER_RS_OPERATOR(RsNdviOperator, "rs:ndvi")
+REGISTER_RS_OPERATOR(RsEviOperator, "rs:evi")
+REGISTER_RS_OPERATOR(RsNdwiOperator, "rs:ndwi")
+REGISTER_RS_OPERATOR(RsSaviOperator, "rs:savi")
+REGISTER_RS_OPERATOR(RsNdbiOperator, "rs:ndbi")
+REGISTER_RS_OPERATOR(RsMndwiOperator, "rs:mndwi")
 REGISTER_RS_OPERATOR(RsBandMathOperator, "rs:band_math")
 REGISTER_RS_OPERATOR(RsSamClassifyOperator, "rs:sam_classify")
 REGISTER_RS_OPERATOR(RsSpectralUnmixingOperator, "rs:spectral_unmixing")
@@ -53,6 +61,10 @@ REGISTER_RS_OPERATOR(RsContinuumRemovalOperator, "rs:continuum_removal")
 REGISTER_RS_OPERATOR(RsSpectralResampleOperator, "rs:spectral_resample")
 REGISTER_RS_OPERATOR(RsEndmemberExtractionOperator, "rs:endmember_extraction")
 REGISTER_RS_OPERATOR(RsAtmosphericCorrectionOperator, "rs:atmospheric_correction")
+REGISTER_RS_OPERATOR(RsDnToRadianceOperator, "rs:dn_to_radiance")
+REGISTER_RS_OPERATOR(RsAtmosphericDos1Operator, "rs:atmospheric_dos1")
+REGISTER_RS_OPERATOR(RsAtmosphericDos2Operator, "rs:atmospheric_dos2")
+REGISTER_RS_OPERATOR(RsAtmosphericQuacOperator, "rs:atmospheric_quac")
 REGISTER_RS_OPERATOR(RsRadiometricCalibrationOperator, "rs:radiometric_calibration")
 REGISTER_RS_OPERATOR(RsChangeDetectionOperator, "rs:change_detection")
 REGISTER_RS_OPERATOR(RsChangeDifferenceOperator, "rs:change_difference")

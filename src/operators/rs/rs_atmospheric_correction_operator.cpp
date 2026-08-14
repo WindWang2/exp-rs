@@ -68,6 +68,7 @@ Json::Value RsAtmosphericCorrectionOperator::metadata() const {
     meta["workflowHints"].append("Apply before computing spectral indices.");
     meta["limitations"].append("Gain/bias are resolved from product metadata (MTL/MTD) when omitted; "
                                "explicit values always win.");
+    meta["facadeOf"] = "rs:dn_to_radiance,rs:atmospheric_dos1,rs:atmospheric_dos2,rs:atmospheric_quac";
     return meta;
 }
 
@@ -84,13 +85,10 @@ Json::Value RsAtmosphericCorrectionOperator::executionEstimate() const {
     return est;
 }
 
-Json::Value RsAtmosphericCorrectionOperator::estimateExecution(const Json::Value& params) const {
-    // QUAC is full-raster: the whole scene is resident (image-statistics based
-    // correction over all bands jointly). Estimate width*height*bands*4 bytes
-    // (input + output buffers) from the actual raster when available;
-    // DOS/DN-to-radiance paths stay tile-streaming (~0.5 MiB).
-    if (params.isObject() && params.isMember("method") && params["method"].isString()
-        && params["method"].asString() == "quac"
+namespace atmospheric_detail {
+
+Json::Value estimateAtmosphericCorrectionRam(const std::string& method, const Json::Value& params) {
+    if (method == "quac" && params.isObject()
         && params.isMember("input") && params["input"].isString())
     {
         GdalDatasetWrapper probe;
@@ -120,11 +118,16 @@ Json::Value RsAtmosphericCorrectionOperator::estimateExecution(const Json::Value
             }
         }
     }
-    return executionEstimate();
+    Json::Value est(Json::objectValue);
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = 524288;
+    return est;
 }
 
-Json::Value RsAtmosphericCorrectionOperator::run(const Json::Value& params,
-                                                 RSOperatorContext& context) {
+Json::Value runAtmosphericCorrectionCore(const std::string& defaultMethod,
+                                         const Json::Value& params,
+                                         RSOperatorContext& context) {
     if (!params.isObject()) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "Operator parameters must be a JSON object");
@@ -139,7 +142,9 @@ Json::Value RsAtmosphericCorrectionOperator::run(const Json::Value& params,
     }
 
     const int band = getInt(params, "band", 1);
-    const std::string method = getEnum(params, "method", s_methods, "dos1");
+    const std::string method = params.isMember("method")
+                                   ? getEnum(params, "method", s_methods, defaultMethod)
+                                   : defaultMethod;
     const bool hasGain = params.isMember("gain");
     const bool hasBias = params.isMember("bias");
     float gain = static_cast<float>(getDouble(params, "gain", 1.0));
@@ -268,6 +273,20 @@ Json::Value RsAtmosphericCorrectionOperator::run(const Json::Value& params,
     result["method"] = method;
     result["band"] = band;
     return result;
+}
+
+} // namespace atmospheric_detail
+
+Json::Value RsAtmosphericCorrectionOperator::estimateExecution(const Json::Value& params) const {
+    std::string method = "dos1";
+    if (params.isObject() && params.isMember("method") && params["method"].isString())
+        method = params["method"].asString();
+    return atmospheric_detail::estimateAtmosphericCorrectionRam(method, params);
+}
+
+Json::Value RsAtmosphericCorrectionOperator::run(const Json::Value& params,
+                                                 RSOperatorContext& context) {
+    return atmospheric_detail::runAtmosphericCorrectionCore("dos1", params, context);
 }
 
 } // namespace sicnu::operators::rs
