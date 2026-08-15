@@ -167,6 +167,28 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
     context.throwIfCancelled();
 
     // Subsample for centroid fitting when the raster is large. Instead of
+    std::vector<bool> bandHasNoData(static_cast<size_t>(nFeat), false);
+    std::vector<float> bandNoData(static_cast<size_t>(nFeat), 0.0f);
+    for (int i = 0; i < nFeat; ++i) {
+        bool hasNd = false;
+        const double nd = ds.bandNoDataValue(bands[static_cast<size_t>(i)], &hasNd);
+        if (hasNd && !std::isnan(nd)) {
+            bandHasNoData[static_cast<size_t>(i)] = true;
+            bandNoData[static_cast<size_t>(i)] = static_cast<float>(nd);
+        }
+    }
+
+    auto isPixelValid = [&](const float* feat) -> bool {
+        for (int i = 0; i < nFeat; ++i) {
+            const float val = feat[i];
+            if (!std::isfinite(val))
+                return false;
+            if (bandHasNoData[static_cast<size_t>(i)] && val == bandNoData[static_cast<size_t>(i)])
+                return false;
+        }
+        return true;
+    };
+
     // materializing every band fully plus a full-size index array (8 B/px),
     // a deterministic reservoir sample (std::mt19937(42), ADR 0061 policy)
     // keeps only the sampled pixels' features in memory — O(maxSamples*nFeat)
@@ -177,15 +199,14 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
 
     if (useReservoir)
     {
-        const size_t k = static_cast<size_t>(maxSamples);
+        const size_t maxS = static_cast<size_t>(maxSamples);
         std::vector<std::vector<float>> reservoir(static_cast<size_t>(nFeat),
-                                                  std::vector<float>(k, 0.0f));
-        sampleIdx.resize(k);
+                                                  std::vector<float>(maxS, 0.0f));
+        sampleIdx.resize(maxS);
         std::mt19937 rng(42);
-        std::uniform_int_distribution<size_t> dist(0, std::numeric_limits<size_t>::max());
 
         constexpr int kTile = 256;
-        std::vector<float> tileBuf(static_cast<size_t>(kTile) * kTile);
+        std::vector<float> tileBuf(static_cast<size_t>(kTile) * kTile * static_cast<size_t>(nFeat));
         std::vector<float> bandScratch(static_cast<size_t>(kTile) * kTile);
         size_t seen = 0;
         for (int y = 0; y < height; y += kTile)
@@ -207,30 +228,37 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
                         tileBuf[p * static_cast<size_t>(nFeat) + static_cast<size_t>(i)] =
                             bandScratch[p];
                 }
-                for (size_t p = 0; p < n; ++p, ++seen)
+                for (size_t p = 0; p < n; ++p)
                 {
-                    if (seen < k)
+                    const float* feat = &tileBuf[p * static_cast<size_t>(nFeat)];
+                    if (!isPixelValid(feat))
+                        continue;
+
+                    if (seen < maxS)
                     {
                         sampleIdx[seen] = seen;
                         for (int i = 0; i < nFeat; ++i)
-                            reservoir[static_cast<size_t>(i)][seen] =
-                                tileBuf[p * static_cast<size_t>(nFeat) + static_cast<size_t>(i)];
+                            reservoir[static_cast<size_t>(i)][seen] = feat[i];
                     }
                     else
                     {
-                        // Reservoir replace: j = uniform(0, seen); if j < k replace.
-                        const size_t j = static_cast<size_t>(
-                            dist(rng) % (seen + 1));
-                        if (j < k)
+                        // Reservoir replace: j = uniform(0, seen); if j < maxS replace.
+                        const size_t j = static_cast<size_t>(rng() % (seen + 1));
+                        if (j < maxS)
                         {
                             sampleIdx[j] = seen;
                             for (int i = 0; i < nFeat; ++i)
-                                reservoir[static_cast<size_t>(i)][j] =
-                                    tileBuf[p * static_cast<size_t>(nFeat) + static_cast<size_t>(i)];
+                                reservoir[static_cast<size_t>(i)][j] = feat[i];
                         }
                     }
+                    ++seen;
                 }
             }
+        }
+        if (seen < maxS) {
+            sampleIdx.resize(seen);
+            for (int i = 0; i < nFeat; ++i)
+                reservoir[static_cast<size_t>(i)].resize(seen);
         }
         bandData = std::move(reservoir);
     }
@@ -249,10 +277,14 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
             context.throwIfCancelled();
         }
         bandData = std::move(fullData);
-        sampleIdx.reserve(nPix);
-        for (size_t i = 0; i < nPix; ++i)
-            sampleIdx.push_back(i);
-        if (maxSamples > 0 && static_cast<int>(nPix) > maxSamples) {
+        std::vector<float> pixelFeat(static_cast<size_t>(nFeat));
+        for (size_t i = 0; i < nPix; ++i) {
+            for (int f = 0; f < nFeat; ++f)
+                pixelFeat[static_cast<size_t>(f)] = bandData[static_cast<size_t>(f)][i];
+            if (isPixelValid(pixelFeat.data()))
+                sampleIdx.push_back(i);
+        }
+        if (maxSamples > 0 && static_cast<int>(sampleIdx.size()) > maxSamples) {
             std::mt19937 rng(42);
             rsShuffleAndKeep(rng, sampleIdx, static_cast<size_t>(maxSamples));
         }

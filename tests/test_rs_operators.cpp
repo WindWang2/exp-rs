@@ -2866,3 +2866,179 @@ TEST_CASE("GDAL athematic LAYER_TYPE is not treated as categorical", "[operators
     GDALClose(checkDS);
 }
 
+TEST_CASE("RS apply_mask handles mask contained strictly inside input block", "[operators][rs][mask]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/product_large.tif";
+    const QString maskPath = tmp.path() + "/mask_small.tif";
+    const QString outputPath = tmp.path() + "/masked_out.tif";
+
+    // 10x10 input raster with origin (0, 0), pixel size (1, -1)
+    constexpr int W = 10, H = 10;
+    std::vector<std::vector<float>> bands(1, std::vector<float>(W * H, 50.0f));
+    std::array<double, 6> inGt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+
+    // 2x2 mask located at pixel offset (4, 4) in the center of the 10x10 input
+    // Origin is (4, -4), size 2x2.
+    std::vector<std::vector<float>> mask(1, std::vector<float>(4, 1.0f));
+    std::array<double, 6> maskGt = {4.0, 1.0, 0.0, -4.0, 0.0, -1.0};
+
+    QString err;
+    REQUIRE(writeGdalOutput(inputPath, W, H, bands, inGt, "EPSG:32648", &err));
+    REQUIRE(writeGdalOutput(maskPath, 2, 2, mask, maskGt, "EPSG:32648", &err));
+
+    auto op = RSOperatorRegistry::instance().create("rs:apply_mask");
+    REQUIRE(op != nullptr);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["mask"] = maskPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["no_data"] = -9999.0f;
+    params["align_mask"] = true;
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    REQUIRE(QFile::exists(outputPath));
+    CHECK(result["maskedPixels"].asInt() == 4);
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    std::vector<float> px(W * H);
+    REQUIRE(out.readBandData(1, px.data(), W, H));
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            const bool inMask = (x >= 4 && x < 6 && y >= 4 && y < 6);
+            CHECK(px[y * W + x] == Catch::Approx(inMask ? -9999.0f : 50.0f));
+        }
+    }
+}
+
+TEST_CASE("RS mosaic operator initializes unfilled gap pixels with declared NoData value", "[operators][rs][mosaic][nodata]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    // Tile 1: (0, 0) to (2, 2), values 10.0, NoData = -9999.0
+    const QString p1 = tmp.path() + "/t1.tif";
+    std::vector<std::vector<float>> b1(1, std::vector<float>(4, 10.0f));
+    std::array<double, 6> gt1 = {0.0, 1.0, 0.0, 4.0, 0.0, -1.0};
+    QString err;
+    REQUIRE(writeGdalOutput(p1, 2, 2, b1, gt1, "EPSG:4326", &err));
+
+    GDALDatasetH ds1 = GDALOpen(p1.toUtf8().constData(), GA_Update);
+    REQUIRE(ds1 != nullptr);
+    GDALSetRasterNoDataValue(GDALGetRasterBand(ds1, 1), -9999.0);
+    GDALClose(ds1);
+
+    // Tile 2: (2, 2) to (4, 4), values 20.0, NoData = -9999.0
+    const QString p2 = tmp.path() + "/t2.tif";
+    std::vector<std::vector<float>> b2(1, std::vector<float>(4, 20.0f));
+    std::array<double, 6> gt2 = {2.0, 1.0, 0.0, 2.0, 0.0, -1.0};
+    REQUIRE(writeGdalOutput(p2, 2, 2, b2, gt2, "EPSG:4326", &err));
+
+    GDALDatasetH ds2 = GDALOpen(p2.toUtf8().constData(), GA_Update);
+    REQUIRE(ds2 != nullptr);
+    GDALSetRasterNoDataValue(GDALGetRasterBand(ds2, 1), -9999.0);
+    GDALClose(ds2);
+
+    const QString outPath = tmp.path() + "/mosaic_nodata.tif";
+    auto op = RSOperatorRegistry::instance().create("rs:mosaic");
+    REQUIRE(op != nullptr);
+
+    Json::Value params(Json::objectValue);
+    params["inputs"] = Json::Value(Json::arrayValue);
+    params["inputs"].append(p1.toStdString());
+    params["inputs"].append(p2.toStdString());
+    params["output"] = outPath.toStdString();
+
+    RSOperatorContext ctx;
+    op->run(params, ctx);
+    REQUIRE(QFile::exists(outPath));
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outPath));
+    bool hasNoData = false;
+    CHECK(out.bandNoDataValue(1, &hasNoData) == Catch::Approx(-9999.0));
+    CHECK(hasNoData);
+
+    const int W = out.width();
+    const int H = out.height();
+    std::vector<float> res(static_cast<size_t>(W) * H);
+    REQUIRE(out.readBandData(1, res.data(), W, H));
+
+    // Gap pixels (e.g. top-right and bottom-left quadrants) must contain -9999.0, not NaN!
+    for (float v : res) {
+        if (v != 10.0f && v != 20.0f) {
+            CHECK(v == Catch::Approx(-9999.0f));
+            CHECK_FALSE(std::isnan(v));
+        }
+    }
+}
+
+TEST_CASE("RS kmeans operator ignores NoData and NaN pixels during clustering", "[operators][rs][kmeans][nodata]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString inputPath = tmp.path() + "/kmeans_input.tif";
+    const QString outputPath = tmp.path() + "/kmeans_output.tif";
+
+    constexpr int W = 16, H = 16;
+    std::vector<std::vector<float>> bands(2);
+    bands[0].resize(W * H);
+    bands[1].resize(W * H);
+
+    // Left half: cluster 1 (~10), Right half: cluster 2 (~100), Margins: NoData (-9999)
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            const int idx = y * W + x;
+            if (y == 0 || y == H - 1) {
+                bands[0][idx] = -9999.0f;
+                bands[1][idx] = -9999.0f;
+            } else if (x < W / 2) {
+                bands[0][idx] = 10.0f;
+                bands[1][idx] = 15.0f;
+            } else {
+                bands[0][idx] = 100.0f;
+                bands[1][idx] = 105.0f;
+            }
+        }
+    }
+
+    std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+    QString err;
+    REQUIRE(writeGdalOutput(inputPath, W, H, bands, gt, "EPSG:4326", &err));
+
+    GDALDatasetH ds = GDALOpen(inputPath.toUtf8().constData(), GA_Update);
+    REQUIRE(ds != nullptr);
+    GDALSetRasterNoDataValue(GDALGetRasterBand(ds, 1), -9999.0);
+    GDALSetRasterNoDataValue(GDALGetRasterBand(ds, 2), -9999.0);
+    GDALClose(ds);
+
+    auto op = RSOperatorRegistry::instance().create("rs:kmeans_classification");
+    REQUIRE(op != nullptr);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["k"] = 2;
+    params["max_samples"] = 50;
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    REQUIRE(QFile::exists(outputPath));
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    std::vector<float> labels(W * H);
+    REQUIRE(out.readBandData(1, labels.data(), W, H));
+
+    // Valid pixels in center rows should be clustered into classes 1 and 2
+    for (int y = 1; y < H - 1; ++y) {
+        for (int x = 0; x < W; ++x) {
+            const float lbl = labels[y * W + x];
+            CHECK((lbl == 1.0f || lbl == 2.0f));
+        }
+    }
+}
+

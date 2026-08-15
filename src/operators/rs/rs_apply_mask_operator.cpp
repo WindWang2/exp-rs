@@ -33,71 +33,65 @@ namespace {
 /// O(width * blockRows * 2 floats) regardless of raster height.
 constexpr int kBlockRows = 256;
 
-/// Maps an input-grid pixel (px, py) to a mask-grid pixel coordinate using the
-/// inverse of the mask's affine transform. Returns {-1, -1} when the mapping
-/// places the pixel outside the mask raster.
-struct MaskCoord { long col = -1; long row = -1; };
-
-MaskCoord mapToMask(const std::array<double, 6>& inGt,
-                    const std::array<double, 6>& maskGt,
-                    int maskWidth, int maskHeight,
-                    int px, int py)
+/// Maps an input continuous pixel coordinate (x, y) to mask continuous pixel coordinate.
+bool mapToMaskContinuous(const std::array<double, 6>& inGt,
+                         const std::array<double, 6>& maskGt,
+                         double px, double py,
+                         double* mCol, double* mRow)
 {
-    // Input pixel center in geo coordinates.
-    const double x = px + 0.5, y = py + 0.5;
-    const double geoX = inGt[0] + x * inGt[1] + y * inGt[2];
-    const double geoY = inGt[3] + x * inGt[4] + y * inGt[5];
+    const double geoX = inGt[0] + px * inGt[1] + py * inGt[2];
+    const double geoY = inGt[3] + px * inGt[4] + py * inGt[5];
 
-    // Inverse of the mask's 2x2 linear part.
     const double a = maskGt[1], b = maskGt[2];
     const double d = maskGt[4], e = maskGt[5];
     const double det = a * e - b * d;
     if (std::abs(det) < 1e-12)
-        return {};
+        return false;
 
     const double dx = geoX - maskGt[0];
     const double dy = geoY - maskGt[3];
-    const double mCol = (dx * e - dy * b) / det;
-    const double mRow = (dy * a - dx * d) / det;
-
-    const long col = static_cast<long>(std::floor(mCol));
-    const long row = static_cast<long>(std::floor(mRow));
-    if (col < 0 || row < 0 || col >= maskWidth || row >= maskHeight)
-        return {};
-    return {col, row};
+    *mCol = (dx * e - dy * b) / det;
+    *mRow = (dy * a - dx * d) / det;
+    return true;
 }
 
-/// Maps the corners of an input block to the mask grid and returns the bounding
-/// box (clamped to the mask raster) to read, plus the max row so the caller can
-/// size the mask buffer. Returns false when no part of the block intersects the
-/// mask raster.
+/// Computes the bounding box in the mask grid that intersects the input block.
+/// Returns false when the block does not intersect the mask raster at all.
 bool maskWindowBounds(const std::array<double, 6>& inGt,
                       const std::array<double, 6>& maskGt,
                       int maskWidth, int maskHeight,
                       int x0, int y0, int w, int h,
                       long* col0, long* row0, long* col1, long* row1)
 {
-    long minCol = maskWidth, minRow = maskHeight, maxCol = -1, maxRow = -1;
-    const int corners[4][2] = {{x0, y0},
-                               {x0 + w - 1, y0},
-                               {x0, y0 + h - 1},
-                               {x0 + w - 1, y0 + h - 1}};
+    double minCol = (std::numeric_limits<double>::max)();
+    double minRow = (std::numeric_limits<double>::max)();
+    double maxCol = -(std::numeric_limits<double>::max)();
+    double maxRow = -(std::numeric_limits<double>::max)();
+
+    const double corners[4][2] = {{static_cast<double>(x0), static_cast<double>(y0)},
+                                  {static_cast<double>(x0 + w), static_cast<double>(y0)},
+                                  {static_cast<double>(x0), static_cast<double>(y0 + h)},
+                                  {static_cast<double>(x0 + w), static_cast<double>(y0 + h)}};
     for (const auto& c : corners) {
-        const MaskCoord m = mapToMask(inGt, maskGt, maskWidth, maskHeight, c[0], c[1]);
-        if (m.col < 0)
-            continue;
-        minCol = (std::min)(minCol, m.col);
-        minRow = (std::min)(minRow, m.row);
-        maxCol = (std::max)(maxCol, m.col);
-        maxRow = (std::max)(maxRow, m.row);
+        double mc = 0.0, mr = 0.0;
+        if (!mapToMaskContinuous(inGt, maskGt, c[0], c[1], &mc, &mr))
+            return false;
+        minCol = (std::min)(minCol, mc);
+        minRow = (std::min)(minRow, mr);
+        maxCol = (std::max)(maxCol, mc);
+        maxRow = (std::max)(maxRow, mr);
     }
-    if (maxCol < 0)
+
+    if (maxCol < 0.0 || minCol >= static_cast<double>(maskWidth) ||
+        maxRow < 0.0 || minRow >= static_cast<double>(maskHeight)) {
         return false;
-    *col0 = minCol;
-    *row0 = minRow;
-    *col1 = maxCol;
-    *row1 = maxRow;
-    return true;
+    }
+
+    *col0 = std::clamp(static_cast<long>(std::floor(minCol)), 0L, static_cast<long>(maskWidth - 1));
+    *col1 = std::clamp(static_cast<long>(std::floor(maxCol)), 0L, static_cast<long>(maskWidth - 1));
+    *row0 = std::clamp(static_cast<long>(std::floor(minRow)), 0L, static_cast<long>(maskHeight - 1));
+    *row1 = std::clamp(static_cast<long>(std::floor(maxRow)), 0L, static_cast<long>(maskHeight - 1));
+    return *col0 <= *col1 && *row0 <= *row1;
 }
 
 } // anonymous namespace
@@ -314,18 +308,34 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
                 throw RSOperatorError(ErrorCode::GdalError,
                                       "Failed to read mask window");
             }
+            const double a = maskGt[1], b = maskGt[2];
+            const double d = maskGt[4], e = maskGt[5];
+            const double det = a * e - b * d;
+            const double c_const = ((inGt[0] + 0.5 * inGt[1] + 0.5 * inGt[2] - maskGt[0]) * e - (inGt[3] + 0.5 * inGt[4] + 0.5 * inGt[5] - maskGt[3]) * b) / det;
+            const double c_x = (inGt[1] * e - inGt[4] * b) / det;
+            const double c_y = (inGt[2] * e - inGt[5] * b) / det;
+            const double r_const = ((inGt[3] + 0.5 * inGt[4] + 0.5 * inGt[5] - maskGt[3]) * a - (inGt[0] + 0.5 * inGt[1] + 0.5 * inGt[2] - maskGt[0]) * d) / det;
+            const double r_x = (inGt[4] * a - inGt[1] * d) / det;
+            const double r_y = (inGt[5] * a - inGt[2] * d) / det;
+
             for (int row = 0; row < blockH; ++row) {
+                const int curY = y0 + row;
                 for (int col = 0; col < width; ++col) {
                     const size_t idx = static_cast<size_t>(row) * width + col;
                     if (sameGrid) {
                         maskOffsets[idx] = static_cast<int32_t>(
-                            (y0 + row - mRow0) * mWindowW + (col - mCol0));
+                            (curY - mRow0) * mWindowW + (col - mCol0));
                     } else {
-                        const MaskCoord m = mapToMask(inGt, maskGt, mask.width(),
-                                                      mask.height(), col, y0 + row);
-                        maskOffsets[idx] = m.col < 0
-                            ? -1 // outside mask extent -> clear
-                            : static_cast<int32_t>((m.row - mRow0) * mWindowW + (m.col - mCol0));
+                        const double mCol = c_const + col * c_x + curY * c_y;
+                        const double mRow = r_const + col * r_x + curY * r_y;
+                        const long mc = static_cast<long>(std::floor(mCol));
+                        const long mr = static_cast<long>(std::floor(mRow));
+                        if (mc >= mCol0 && mc <= mCol1 && mr >= mRow0 && mr <= mRow1) {
+                            maskOffsets[idx] = static_cast<int32_t>(
+                                (mr - mRow0) * mWindowW + (mc - mCol0));
+                        } else {
+                            maskOffsets[idx] = -1;
+                        }
                     }
                 }
             }
