@@ -32,14 +32,18 @@
 #ifndef QT_NO_SSL
 #include <QSslCertificate>
 #include <QSslKey>
+#ifdef HAVE_AUTH
 #include <QtCrypto>
+#endif
 #include "qgsauthcertutils.h"
 #endif
 
 #include "qgsauthconfig.h"
 #include "qgsauthmethod.h"
 
+#ifdef HAVE_AUTH
 #include <qt6keychain/keychain.h>
+#endif
 
 #ifndef SIP_RUN
 #ifdef HAVE_AUTH

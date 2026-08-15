@@ -5,6 +5,7 @@
 #include <thread>
 #include <algorithm>
 #include <chrono>
+#include <QDir>
 #include <QFile>
 #include <QSet>
 #include "framework/json_params_converter.h"
@@ -990,6 +991,7 @@ bool TaskCenter::cancelTask( long taskId )
                 if ( !info.outputLayerPath.isEmpty() && QFile::exists( info.outputLayerPath ) )
                 {
                     if ( info.outputLayerPath.startsWith( QStringLiteral( "/tmp/" ) )
+                         || info.outputLayerPath.startsWith( QDir::tempPath() )
                          || info.outputLayerPath.contains( QStringLiteral( ".scratch" ) ) )
                     {
                         QFile::remove( info.outputLayerPath );

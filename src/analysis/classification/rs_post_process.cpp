@@ -10,6 +10,7 @@
 
 #include <QByteArray>
 #include <QColor>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -482,26 +483,12 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
   for ( const QString &opt : creationOptions )
     papsz = CSLAddString( papsz, opt.toUtf8().constData() );
 
-  // Remove existing file so Create succeeds.
-  GDALDriver *existing = GetGDALDriverManager()->GetDriverByName(
-    driverName.toUtf8().constData() );
-  if ( QFileInfo::exists( path ) )
-  {
-    GDALDataset *old = static_cast<GDALDataset *>(
-      GDALOpen( path.toUtf8().constData(), GA_ReadOnly ) );
-    if ( old )
-    {
-      GDALClose( old );
-      if ( existing )
-        existing->Delete( path.toUtf8().constData() );
-    }
-  }
-
-  GDALDataset *ds = drv->Create( path.toUtf8().constData(), lab.cols, lab.rows, 1, gdt, papsz );
+  const QString tempPath = path + QStringLiteral( ".tmp.%1.tif" ).arg( QCoreApplication::applicationPid() );
+  GDALDataset *ds = drv->Create( tempPath.toUtf8().constData(), lab.cols, lab.rows, 1, gdt, papsz );
   CSLDestroy( papsz );
   if ( !ds )
   {
-    setErr( err, QStringLiteral( "Cannot create output: %1" ).arg( path ) );
+    setErr( err, QStringLiteral( "Cannot create temporary output: %1" ).arg( tempPath ) );
     return false;
   }
 
@@ -536,6 +523,7 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
   if ( rio != CE_None )
   {
     GDALClose( ds );
+    drv->Delete( tempPath.toUtf8().constData() );
     setErr( err, QStringLiteral( "Failed to write label band: %1" ).arg( path ) );
     return false;
   }
@@ -561,6 +549,29 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
     ds->GetRasterBand( 1 )->SetNoDataValue( nodataValue );
 
   GDALClose( ds );
+
+  // Atomically replace destination file
+  if ( QFileInfo::exists( path ) )
+  {
+    GDALDriver *existing = GetGDALDriverManager()->GetDriverByName(
+      driverName.toUtf8().constData() );
+    if ( existing )
+      existing->Delete( path.toUtf8().constData() );
+    else
+      QFile::remove( path );
+  }
+
+  if ( !QFile::rename( tempPath, path ) )
+  {
+    // Fallback if cross-device rename fails
+    if ( QFile::copy( tempPath, path ) )
+    {
+      QFile::remove( tempPath );
+      return true;
+    }
+    setErr( err, QStringLiteral( "Failed to commit output to %1" ).arg( path ) );
+    return false;
+  }
   return true;
 }
 
@@ -602,26 +613,12 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
     return false;
   }
 
-  // Remove existing output if present.
-  {
-    GDALDataset *old = static_cast<GDALDataset *>(
-      GDALOpenEx( vectorPath.toUtf8().constData(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr ) );
-    if ( old )
-    {
-      GDALClose( old );
-      drv->Delete( vectorPath.toUtf8().constData() );
-    }
-    else if ( QFileInfo::exists( vectorPath ) )
-    {
-      drv->Delete( vectorPath.toUtf8().constData() );
-    }
-  }
-
-  GDALDataset *dst = drv->Create( vectorPath.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
+  const QString tempVectorPath = vectorPath + QStringLiteral( ".tmp.%1." ).arg( QCoreApplication::applicationPid() ) + ext;
+  GDALDataset *dst = drv->Create( tempVectorPath.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
   if ( !dst )
   {
     GDALClose( src );
-    setErr( err, QStringLiteral( "Cannot create vector: %1" ).arg( vectorPath ) );
+    setErr( err, QStringLiteral( "Cannot create temporary vector: %1" ).arg( tempVectorPath ) );
     return false;
   }
 
@@ -639,8 +636,9 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
   if ( !layer )
   {
     GDALClose( dst );
+    drv->Delete( tempVectorPath.toUtf8().constData() );
     GDALClose( src );
-    setErr( err, QStringLiteral( "Cannot create layer in %1" ).arg( vectorPath ) );
+    setErr( err, QStringLiteral( "Cannot create layer in %1" ).arg( tempVectorPath ) );
     return false;
   }
 
@@ -648,6 +646,7 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
   if ( layer->CreateField( &field ) != OGRERR_NONE )
   {
     GDALClose( dst );
+    drv->Delete( tempVectorPath.toUtf8().constData() );
     GDALClose( src );
     setErr( err, QStringLiteral( "Cannot create class field" ) );
     return false;
@@ -668,7 +667,35 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
 
   if ( perr != CE_None )
   {
+    drv->Delete( tempVectorPath.toUtf8().constData() );
     setErr( err, QStringLiteral( "GDALPolygonize failed for %1" ).arg( labelRasterPath ) );
+    return false;
+  }
+
+  // Atomically replace existing destination
+  if ( QFileInfo::exists( vectorPath ) )
+  {
+    GDALDataset *old = static_cast<GDALDataset *>(
+      GDALOpenEx( vectorPath.toUtf8().constData(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr ) );
+    if ( old )
+    {
+      GDALClose( old );
+      drv->Delete( vectorPath.toUtf8().constData() );
+    }
+    else
+    {
+      drv->Delete( vectorPath.toUtf8().constData() );
+    }
+  }
+
+  if ( !QFile::rename( tempVectorPath, vectorPath ) )
+  {
+    if ( QFile::copy( tempVectorPath, vectorPath ) )
+    {
+      QFile::remove( tempVectorPath );
+      return true;
+    }
+    setErr( err, QStringLiteral( "Failed to commit vector output to %1" ).arg( vectorPath ) );
     return false;
   }
   return true;

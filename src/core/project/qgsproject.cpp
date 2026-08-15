@@ -3612,15 +3612,6 @@ bool QgsProject::writeProjectFile( const QString &filename )
     utime( backupFile.fileName().toUtf8().constData(), &tb );
   }
 
-  if ( !projectFile.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-  {
-    projectFile.close(); // even though we got an error, let's make
-    // sure it's closed anyway
-
-    setError( tr( "Unable to save to file %1" ).arg( projectFile.fileName() ) );
-    return false;
-  }
-
   QTemporaryFile tempFile;
   bool ok = tempFile.open();
   if ( ok )
@@ -3628,21 +3619,33 @@ bool QgsProject::writeProjectFile( const QString &filename )
     QTextStream projectFileStream( &tempFile );
     doc->save( projectFileStream, 2 ); // save as utf-8
     ok &= projectFileStream.pos() > -1;
-
     ok &= tempFile.seek( 0 );
-
-    QByteArray ba;
-    while ( ok && !tempFile.atEnd() )
-    {
-      ba = tempFile.read( 10240 );
-      ok &= projectFile.write( ba ) == ba.size();
-    }
-
-    ok &= projectFile.error() == QFile::NoError;
-
-    projectFile.close();
   }
 
+  if ( !ok )
+  {
+    tempFile.close();
+    setError( tr( "Unable to serialize project document to temporary file" ) );
+    return false;
+  }
+
+  if ( !projectFile.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+  {
+    projectFile.close();
+    tempFile.close();
+    setError( tr( "Unable to save to file %1" ).arg( projectFile.fileName() ) );
+    return false;
+  }
+
+  QByteArray ba;
+  while ( ok && !tempFile.atEnd() )
+  {
+    ba = tempFile.read( 10240 );
+    ok &= projectFile.write( ba ) == ba.size();
+  }
+
+  ok &= projectFile.error() == QFile::NoError;
+  projectFile.close();
   tempFile.close();
 
   if ( !ok )
