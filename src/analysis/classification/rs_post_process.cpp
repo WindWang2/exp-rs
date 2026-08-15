@@ -172,13 +172,28 @@ int modeOfWindow( const cv::Mat &labels, int r, int c, int k )
     }
   }
 
-  int bestVal = pixelAt( labels, r, c );
-  int bestCnt = -1;
+  const int centerVal = pixelAt( labels, r, c );
+  int centerCnt = 0;
   for ( int i = 0; i < numEntries; ++i )
   {
-    if ( freq[i].count > bestCnt || ( freq[i].count == bestCnt && freq[i].val < bestVal ) )
+    if ( freq[i].val == centerVal )
+    {
+      centerCnt = freq[i].count;
+      break;
+    }
+  }
+
+  int bestVal = centerVal;
+  int bestCnt = centerCnt;
+  for ( int i = 0; i < numEntries; ++i )
+  {
+    if ( freq[i].count > bestCnt )
     {
       bestCnt = freq[i].count;
+      bestVal = freq[i].val;
+    }
+    else if ( freq[i].count == bestCnt && bestVal != centerVal && freq[i].val < bestVal )
+    {
       bestVal = freq[i].val;
     }
   }

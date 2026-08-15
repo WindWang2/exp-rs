@@ -215,6 +215,42 @@ TEST_CASE( "SegmentFeatures: extract computes correct stats from real raster", "
     REQUIRE( s1.compactness == Approx( 64.0 / ( 4.0 * M_PI * 8.0 ) ).margin( 1e-3 ) );
 }
 
+TEST_CASE( "SegmentFeatures: handles NaN pixels safely in GLCM and moments", "[segmentation]" )
+{
+    constexpr int W = 4, H = 4;
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+
+    const QString path = tempDir.filePath( "test_nan_extract.tif" );
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
+    GDALDatasetH ds = GDALCreate( driver, path.toUtf8().constData(), W, H, 1, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+
+    QVector<float> pixels( W * H, 10.0f );
+    pixels[0] = std::numeric_limits<float>::quiet_NaN();
+    pixels[5] = std::numeric_limits<float>::quiet_NaN();
+
+    GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+    GDALRasterIO( band, GF_Write, 0, 0, W, H, pixels.data(), W, H, GDT_Float32, 0, 0 );
+    GDALClose( ds );
+
+    QVector<quint32> labels( W * H, 1u );
+    RsSegmentMap segMap( labels, W, H );
+
+    QVector<int> bandIndices = { 1 };
+    auto stats = RsSegmentFeatures::extract( path, segMap, bandIndices );
+
+    REQUIRE( stats.size() == 1 );
+    REQUIRE( stats.contains( 1 ) );
+    const auto &s = stats[1];
+    REQUIRE( s.area == 14 );
+    CHECK( std::isfinite( s.mean[0] ) );
+    CHECK( s.mean[0] == Approx( 10.0 ).margin( 1e-6 ) );
+    CHECK( std::isfinite( s.glcmContrast[0] ) );
+    CHECK( std::isfinite( s.glcmHomogeneity[0] ) );
+}
+
 #ifdef SICNU_HAS_OPENCV
 TEST_CASE( "SegmentFeatures: toFeatureMatrix dimensions", "[segmentation]" )
 {
