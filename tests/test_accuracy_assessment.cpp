@@ -41,8 +41,8 @@ TEST_CASE( "Accuracy: known confusion → expected Kappa", "[classify][acc]" )
   // 5 of 6 correct.
   REQUIRE( r.overallAccuracy == Approx( 5.0 / 6.0 ).margin( 1e-6 ) );
 
-  // Kappa for this confusion matrix is around 0.74; allow a generous margin.
-  REQUIRE( r.kappa == Approx( 0.75 ).margin( 0.05 ) );
+  // Kappa for this confusion matrix is analytically 0.75 exactly.
+  REQUIRE( r.kappa == Approx( 0.75 ).margin( 1e-6 ) );
 
   // Producer/User accuracy (rows=true, cols=pred):
   // class 1: true count 2, one predicted as 1 → producer = 1/2 = 0.5

@@ -398,7 +398,7 @@ TEST_CASE( "pruneCompleted keeps the newest terminal records", "[job]" )
   auto &eng = guard.engine();
   // Isolate from records left by earlier cases (singleton engine).
   eng.shutdownForTests();
-  eng.setMaxWorkers( 2 );
+  eng.setMaxWorkers( 1 );
 
   // Staggered sleeps make the finish order == submission order with distinct
   // finishedAtMs, so "oldest" (by finishedAtMs) is unambiguous.

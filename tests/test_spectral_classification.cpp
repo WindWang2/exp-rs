@@ -91,8 +91,8 @@ TEST_CASE( "SAM: classifies pixels to nearest reference spectrum", "[sam]" )
     REQUIRE( ok );
     REQUIRE( labels[0] == 0 );
     REQUIRE( labels[1] == 1 );
-    REQUIRE( angles[0] == Approx( 0.0 ).margin( 0.05 ) );
-    REQUIRE( angles[1] == Approx( 0.0 ).margin( 0.05 ) );
+    REQUIRE( angles[0] == Approx( 0.043384 ).margin( 1e-4 ) );
+    REQUIRE( angles[1] == Approx( 0.044640 ).margin( 1e-4 ) );
 }
 
 TEST_CASE( "SAM: nodata pixel labelled -1", "[sam]" )
@@ -287,8 +287,8 @@ TEST_CASE( "rs:sam_classify writes a single-band classified raster", "[sam][gdal
     REQUIRE( out.bandCount() == 1 );
     std::vector<float> labels( 2 );
     REQUIRE( out.readBandData( 1, labels.data(), 2, 1 ) );
-    REQUIRE( labels[0] == Approx( 0.0f ).margin( 0.5f ) );
-    REQUIRE( labels[1] == Approx( 1.0f ).margin( 0.5f ) );
+    REQUIRE( labels[0] == 0.0f );
+    REQUIRE( labels[1] == 1.0f );
 }
 
 TEST_CASE( "rs:sam_classify supports the SID metric", "[sid][gdal]" )
@@ -345,8 +345,8 @@ TEST_CASE( "rs:sam_classify supports the SID metric", "[sid][gdal]" )
     REQUIRE( out.open( outputPath ) );
     std::vector<float> labels( 2 );
     REQUIRE( out.readBandData( 1, labels.data(), 2, 1 ) );
-    REQUIRE( labels[0] == Approx( 0.0f ).margin( 0.5f ) );
-    REQUIRE( labels[1] == Approx( 1.0f ).margin( 0.5f ) );
+    REQUIRE( labels[0] == 0.0f );
+    REQUIRE( labels[1] == 1.0f );
 }
 
 TEST_CASE( "rs:continuum_removal normalizes a multi-band raster", "[continuum][gdal]" )

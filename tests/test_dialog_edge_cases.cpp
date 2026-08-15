@@ -1,289 +1,165 @@
-// test_dialog_edge_cases.cpp — Edge case tests for dialog data structures
+// test_dialog_edge_cases.cpp — Real edge case tests for processing dialog validators and parameter models
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
-#include <QVariantMap>
 #include <QString>
-#include <QStringList>
-#include <QFileInfo>
-#include <QDir>
+#include <QTemporaryDir>
+#include <QFile>
 
-// ---- Band Math Dialog Edge Cases ----
+#include "processing/framework/input_validator.h"
+#include "processing/algorithms/band_math.h"
 
-TEST_CASE("Band Math expression validation", "[dialog][band_math]")
+// ---- InputValidator Edge Cases ----
+
+TEST_CASE("InputValidator raster dimensions validation", "[dialog][validator]")
 {
-    SECTION("Empty expression is invalid")
+    QString error;
+    SECTION("Valid positive dimensions")
     {
-        QString expr;
-        REQUIRE(expr.isEmpty());
+        REQUIRE(InputValidator::validateRasterDimensions(100, 100, error));
+        REQUIRE(error.isEmpty());
     }
 
-    SECTION("Expression with division by zero potential")
+    SECTION("Zero width is invalid")
     {
-        QString expr = "b1 / 0";
-        REQUIRE(expr.contains("/ 0"));
+        REQUIRE_FALSE(InputValidator::validateRasterDimensions(0, 100, error));
+        REQUIRE_FALSE(error.isEmpty());
     }
 
-    SECTION("Expression with parentheses balance")
+    SECTION("Negative height is invalid")
     {
-        QString expr = "(b1 - b2) / (b1 + b2)";
-        int openParens = expr.count('(');
-        int closeParens = expr.count(')');
-        REQUIRE(openParens == closeParens);
-    }
-
-    SECTION("Expression with unbalanced parentheses")
-    {
-        QString expr = "(b1 - b2 / (b1 + b2)";
-        int openParens = expr.count('(');
-        int closeParens = expr.count(')');
-        REQUIRE(openParens != closeParens);
+        REQUIRE_FALSE(InputValidator::validateRasterDimensions(100, -5, error));
+        REQUIRE_FALSE(error.isEmpty());
     }
 }
 
-// ---- Spectral Index Dialog Edge Cases ----
-
-TEST_CASE("Spectral Index parameter validation", "[dialog][spectral_index]")
+TEST_CASE("InputValidator band index validation", "[dialog][validator]")
 {
-    SECTION("NDVI index type")
+    QString error;
+    SECTION("1-based band index within max bands is valid")
     {
-        int indexType = 0; // NDVI
-        REQUIRE(indexType == 0);
+        REQUIRE(InputValidator::validateBandIndex(1, 4, error));
+        REQUIRE(InputValidator::validateBandIndex(4, 4, error));
+        REQUIRE(error.isEmpty());
     }
 
-    SECTION("Invalid band index")
+    SECTION("0 is invalid (1-based bands)")
     {
-        int bandIndex = 0; // 0-based, should be 1-based
-        REQUIRE(bandIndex < 1);
+        REQUIRE_FALSE(InputValidator::validateBandIndex(0, 4, error));
+        REQUIRE_FALSE(error.isEmpty());
     }
 
-    SECTION("Valid band index")
+    SECTION("Band exceeding max bands is invalid")
     {
-        int bandIndex = 4; // NIR band
-        REQUIRE(bandIndex >= 1);
+        REQUIRE_FALSE(InputValidator::validateBandIndex(5, 4, error));
+        REQUIRE_FALSE(error.isEmpty());
     }
 }
 
-// ---- Atmospheric Correction Edge Cases ----
-
-TEST_CASE("Atmospheric correction parameter validation", "[dialog][atmospheric]")
+TEST_CASE("InputValidator numeric range validation", "[dialog][validator]")
 {
-    SECTION("DOS1 method")
+    QString error;
+    SECTION("Value in range is valid")
     {
-        int method = 0;
-        REQUIRE(method == 0);
+        REQUIRE(InputValidator::validateNumericRange(0.5, 0.0, 1.0, error));
+        REQUIRE(error.isEmpty());
     }
 
-    SECTION("DOS2 method")
+    SECTION("Value below min is invalid")
     {
-        int method = 1;
-        REQUIRE(method == 1);
+        REQUIRE_FALSE(InputValidator::validateNumericRange(-0.1, 0.0, 1.0, error));
+        REQUIRE_FALSE(error.isEmpty());
     }
 
-    SECTION("Gain must be positive")
+    SECTION("Value above max is invalid")
     {
-        double gain = 1.0;
-        REQUIRE(gain > 0);
+        REQUIRE_FALSE(InputValidator::validateNumericRange(1.1, 0.0, 1.0, error));
+        REQUIRE_FALSE(error.isEmpty());
     }
 
-    SECTION("Negative gain is invalid")
+    SECTION("NaN value is invalid")
     {
-        double gain = -1.0;
-        REQUIRE(gain < 0);
+        double nanVal = std::numeric_limits<double>::quiet_NaN();
+        REQUIRE_FALSE(InputValidator::validateNumericRange(nanVal, 0.0, 1.0, error));
+        REQUIRE_FALSE(error.isEmpty());
     }
 }
 
-// ---- Terrain Dialog Edge Cases ----
-
-TEST_CASE("Terrain analysis parameter validation", "[dialog][terrain]")
+TEST_CASE("InputValidator kernel size validation", "[dialog][validator]")
 {
-    SECTION("Valid cell size")
+    QString error;
+    SECTION("Odd positive kernel size is valid")
     {
-        float cellSize = 30.0f;
-        REQUIRE(cellSize > 0);
-    }
-
-    SECTION("Zero cell size is invalid")
-    {
-        float cellSize = 0.0f;
-        REQUIRE_FALSE(cellSize > 0);
-    }
-
-    SECTION("Sun azimuth range")
-    {
-        float azimuth = 315.0f;
-        REQUIRE(azimuth >= 0);
-        REQUIRE(azimuth <= 360);
-    }
-
-    SECTION("Sun elevation range")
-    {
-        float elevation = 45.0f;
-        REQUIRE(elevation >= 0);
-        REQUIRE(elevation <= 90);
-    }
-}
-
-// ---- Batch Processing Edge Cases ----
-
-TEST_CASE("Batch processing state management", "[dialog][batch]")
-{
-    SECTION("Empty file list")
-    {
-        QStringList files;
-        REQUIRE(files.isEmpty());
-    }
-
-    SECTION("Progress calculation")
-    {
-        int current = 5;
-        int total = 10;
-        double progress = static_cast<double>(current) / total * 100;
-        REQUIRE(progress == Catch::Approx(50.0));
-    }
-
-    SECTION("Success/failure counting")
-    {
-        int success = 8;
-        int fail = 2;
-        int total = success + fail;
-        REQUIRE(total == 10);
-    }
-}
-
-// ---- Comparison Dialog Edge Cases ----
-
-TEST_CASE("Comparison dialog parameters", "[dialog][comparison]")
-{
-    SECTION("Split position range")
-    {
-        int splitPos = 50;
-        REQUIRE(splitPos >= 0);
-        REQUIRE(splitPos <= 100);
-    }
-
-    SECTION("Flicker interval range")
-    {
-        int interval = 500;
-        REQUIRE(interval >= 100);
-        REQUIRE(interval <= 5000);
-    }
-}
-
-// ---- PCA Dialog Edge Cases ----
-
-TEST_CASE("PCA parameter validation", "[dialog][pca]")
-{
-    SECTION("Valid component count")
-    {
-        int components = 3;
-        REQUIRE(components >= 1);
-    }
-
-    SECTION("Component count exceeds band count")
-    {
-        int components = 10;
-        int bandCount = 4;
-        REQUIRE(components > bandCount);
-    }
-}
-
-// ---- Fusion Dialog Edge Cases ----
-
-TEST_CASE("Fusion method selection", "[dialog][fusion]")
-{
-    SECTION("Brovey method")
-    {
-        int method = 0;
-        REQUIRE(method == 0);
-    }
-
-    SECTION("PCA method")
-    {
-        int method = 1;
-        REQUIRE(method == 1);
-    }
-
-    SECTION("IHS method")
-    {
-        int method = 2;
-        REQUIRE(method == 2);
-    }
-}
-
-// ---- Contrast Stretch Edge Cases ----
-
-TEST_CASE("Contrast stretch parameter validation", "[dialog][contrast]")
-{
-    SECTION("Linear stretch")
-    {
-        int method = 0;
-        REQUIRE(method == 0);
-    }
-
-    SECTION("Percentage clip range")
-    {
-        double clipPercent = 2.0;
-        REQUIRE(clipPercent > 0);
-        REQUIRE(clipPercent < 50);
-    }
-
-    SECTION("Standard deviation multiplier")
-    {
-        double stdDevMult = 2.0;
-        REQUIRE(stdDevMult > 0);
-    }
-}
-
-// ---- Spatial Filter Edge Cases ----
-
-TEST_CASE("Spatial filter kernel validation", "[dialog][spatial]")
-{
-    SECTION("Valid kernel size")
-    {
-        int kernelSize = 5;
-        REQUIRE(kernelSize > 0);
-        REQUIRE(kernelSize % 2 == 1);
+        REQUIRE(InputValidator::validateKernelSize(3, error));
+        REQUIRE(InputValidator::validateKernelSize(5, error));
+        REQUIRE(InputValidator::validateKernelSize(7, error));
+        REQUIRE(error.isEmpty());
     }
 
     SECTION("Even kernel size is invalid")
     {
-        int kernelSize = 4;
-        REQUIRE(kernelSize % 2 == 0);
+        REQUIRE_FALSE(InputValidator::validateKernelSize(2, error));
+        REQUIRE_FALSE(InputValidator::validateKernelSize(4, error));
+        REQUIRE_FALSE(error.isEmpty());
     }
 
-    SECTION("Filter type selection")
+    SECTION("Zero or negative kernel size is invalid")
     {
-        QStringList filters = {"Mean", "Gaussian", "Median", "Sobel", "Laplacian"};
-        REQUIRE(filters.size() == 5);
+        REQUIRE_FALSE(InputValidator::validateKernelSize(0, error));
+        REQUIRE_FALSE(InputValidator::validateKernelSize(-3, error));
+        REQUIRE_FALSE(error.isEmpty());
     }
 }
 
-// ---- Speckle Filter Edge Cases ----
-
-TEST_CASE("Speckle filter parameter validation", "[dialog][speckle]")
+TEST_CASE("InputValidator output path validation", "[dialog][validator]")
 {
-    SECTION("Lee filter")
+    QString error;
+    SECTION("Empty output path is invalid")
     {
-        int filterType = 0;
-        REQUIRE(filterType == 0);
+        REQUIRE_FALSE(InputValidator::validateOutputPath(QString(), error));
+        REQUIRE_FALSE(error.isEmpty());
     }
 
-    SECTION("Frost filter")
+    SECTION("Valid writable path passes")
     {
-        int filterType = 1;
-        REQUIRE(filterType == 1);
+        QTemporaryDir dir;
+        REQUIRE(dir.isValid());
+        QString outPath = dir.filePath("test_out.tif");
+        REQUIRE(InputValidator::validateOutputPath(outPath, error));
+        REQUIRE(error.isEmpty());
+    }
+}
+
+// ---- Band Math Expression Edge Cases ----
+
+TEST_CASE("Band Math expression execution edge cases", "[dialog][band_math]")
+{
+    BandMath::BandData bands;
+    bands[1] = {10.0f, 20.0f, 30.0f, 0.0f};
+    bands[2] = {5.0f,  10.0f, 0.0f,  0.0f};
+    std::vector<float> output(4, 0.0f);
+
+    SECTION("Empty expression returns false")
+    {
+        REQUIRE_FALSE(BandMath::evaluate(QString(), bands, output.data(), 4));
     }
 
-    SECTION("Noise variance must be non-negative")
+    SECTION("NDVI normalized difference calculation")
     {
-        float noiseVar = 0.1f;
-        REQUIRE(noiseVar >= 0);
+        // (b1 - b2) / (b1 + b2)
+        // [0]: (10-5)/(10+5) = 5/15 = 0.33333
+        // [1]: (20-10)/(20+10) = 10/30 = 0.33333
+        // [2]: (30-0)/(30+0) = 1.0
+        // [3]: 0 / 0 -> NaN
+        REQUIRE(BandMath::evaluate("(b1 - b2) / (b1 + b2)", bands, output.data(), 4));
+        REQUIRE(output[0] == Catch::Approx(0.333333f).margin(1e-4f));
+        REQUIRE(output[1] == Catch::Approx(0.333333f).margin(1e-4f));
+        REQUIRE(output[2] == Catch::Approx(1.0f).margin(1e-4f));
+        REQUIRE(std::isnan(output[3]));
     }
 
-    SECTION("Negative noise variance is invalid")
+    SECTION("Missing referenced band returns false")
     {
-        float noiseVar = -0.1f;
-        REQUIRE_FALSE(noiseVar >= 0);
+        REQUIRE_FALSE(BandMath::evaluate("b3 * 2", bands, output.data(), 4));
     }
 }

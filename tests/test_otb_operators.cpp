@@ -111,10 +111,10 @@ QString createTestVector(const QString& dir, const QString& name) {
 
     QString path = dir + QDir::separator() + name;
 
-    GDALDriverH driver = OGRGetDriverByName("ESRI Shapefile");
+    GDALDriverH driver = GDALGetDriverByName("ESRI Shapefile");
     REQUIRE(driver != nullptr);
 
-    GDALDatasetH ds = OGR_Dr_CreateDataSource(driver, path.toUtf8().constData(), nullptr);
+    GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr);
     REQUIRE(ds != nullptr);
 
     // Same WGS84 as createTestRaster so OTB sampling can reproject/match extents.

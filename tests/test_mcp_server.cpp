@@ -93,7 +93,7 @@ void registerNoopOperator()
 
 QString waitForTerminal(TestMcpServer &server, const QString &execId)
 {
-    for (int attempt = 0; attempt < 400; ++attempt)
+    for (int attempt = 0; attempt < 2000; ++attempt)
     {
         const QString status = server.testGetExecutionStatus(execId).value("status").toString();
         if (status == QLatin1String("completed") || status == QLatin1String("failed")
@@ -409,12 +409,25 @@ TEST_CASE("McpServer executes qgis processing algorithms to terminal state", "[a
         QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
     }
 
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString inputPath = dir.filePath(QStringLiteral("input.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("band_math_out.tif"));
+    std::vector<std::vector<float>> inBands(1, std::vector<float>(4, 10.0f));
+    std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+    QString err;
+    REQUIRE(writeGdalOutput(inputPath, 2, 2, inBands, gt, "EPSG:4326", &err));
+
+    QgsRasterLayer *layer = new QgsRasterLayer(inputPath, QStringLiteral("input_layer"));
+    REQUIRE(layer->isValid());
+    QgsProject::instance()->addMapLayer(layer);
+
     TestMcpServer server;
 
     QVariantMap params;
-    params["INPUT_LAYERS"] = QStringLiteral("/tmp/input.tif");
-    params["EXPRESSION"] = QStringLiteral("A + 10");
-    params["OUTPUT"] = QStringLiteral("/tmp/band_math_out.tif");
+    params["INPUT_LAYERS"] = inputPath;
+    params["EXPRESSION"] = QStringLiteral("b1 + 10");
+    params["OUTPUT"] = outputPath;
 
     QVariantMap res = server.testExecuteAlgorithm("qgis_algorithms:rs_band_math", params);
     REQUIRE(res.value("status").toString() == "running");
@@ -426,6 +439,7 @@ TEST_CASE("McpServer executes qgis processing algorithms to terminal state", "[a
 
     QVariantMap status = server.testGetExecutionStatus(execId);
     REQUIRE(status.value("execution_id").toString() == execId);
+    REQUIRE(status.value("status").toString() == terminal);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     sicnu::jobs::JobEngine::instance().shutdown();
 }

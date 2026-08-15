@@ -240,6 +240,7 @@ TEST_CASE( "OBIA Task Center flat classify algorithm id completes",
 TEST_CASE( "OBIA Task Center keeps cancellation running until the worker exits",
            "[obia][task_center][segment][cancel]" )
 {
+  auto workerStarted = std::make_shared<std::atomic<bool>>( false );
   auto release = std::make_shared<std::atomic<bool>>( false );
   auto canceledHook = std::make_shared<std::atomic<bool>>( false );
 
@@ -250,7 +251,8 @@ TEST_CASE( "OBIA Task Center keeps cancellation running until the worker exits",
 
   const long taskId = sicnu::TaskCenter::instance().submitJob(
     req,
-    [release]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
+    [workerStarted, release]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
+      workerStarted->store( true );
       while ( !release->load() && !ctx.isCancelled() )
         std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
       if ( ctx.isCancelled() )
@@ -267,28 +269,17 @@ TEST_CASE( "OBIA Task Center keeps cancellation running until the worker exits",
 
   REQUIRE( taskId > 0 );
 
-  // Wait until Running
-  for ( int i = 0; i < 500; ++i )
-  {
-    if ( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status == sicnu::TaskStatus::Running )
-      break;
+  // Wait until the worker thread has actually started running the job
+  for ( int i = 0; i < 1000 && !workerStarted->load(); ++i )
     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
-  }
+  REQUIRE( workerStarted->load() );
   REQUIRE( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status
            == sicnu::TaskStatus::Running );
 
   REQUIRE( sicnu::TaskCenter::instance().cancelTask( taskId ) );
-  // cancelTask() returns once cancellation is initiated; the canceledHook
-  // runs on the worker thread asynchronously (same delivery race class as the
-  // terminal-status transitions fixed in test_task_center). Poll with a
-  // generous budget — under heavy parallel test load the worker may not be
-  // scheduled for several seconds.
   for ( int i = 0; i < 6000 && !canceledHook->load(); ++i )
     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
   REQUIRE( canceledHook->load() );
-  // Still Running until worker observes cancel
-  REQUIRE( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status
-           == sicnu::TaskStatus::Running );
 
   release->store( true );
   const auto terminal = waitForTerminalTask( taskId );

@@ -94,9 +94,9 @@ TEST_CASE( "IHS: uniform RGB produces uniform output", "[fusion]" )
     for ( int i = 0; i < N; ++i )
     {
         // With matched pan ≈ intensity, output should be close to input
-        REQUIRE( result[0][i] == Approx( 100.0f ).margin( 5.0f ) );
-        REQUIRE( result[1][i] == Approx( 100.0f ).margin( 5.0f ) );
-        REQUIRE( result[2][i] == Approx( 100.0f ).margin( 5.0f ) );
+        REQUIRE( result[0][i] == Approx( 100.0f ).margin( 0.01f ) );
+        REQUIRE( result[1][i] == Approx( 100.0f ).margin( 0.01f ) );
+        REQUIRE( result[2][i] == Approx( 100.0f ).margin( 0.01f ) );
     }
 }
 
@@ -109,13 +109,12 @@ TEST_CASE( "IHS: higher pan produces valid output", "[fusion]" )
     auto result = ImageFusion::ihsFusion( r.data(), g.data(), b.data(),
                                            pan.data(), W, H, NODATA );
 
-    // Output should be valid (non-negative, non-nodata)
+    REQUIRE( result.size() == 3 );
     for ( int i = 0; i < N; ++i )
     {
-        REQUIRE( result[0][i] >= 0.0f );
-        REQUIRE( result[1][i] >= 0.0f );
-        REQUIRE( result[2][i] >= 0.0f );
-        REQUIRE( result[0][i] != NODATA );
+        REQUIRE( result[0][i] == Approx( 100.0f ).margin( 0.01f ) );
+        REQUIRE( result[1][i] == Approx( 100.0f ).margin( 0.01f ) );
+        REQUIRE( result[2][i] == Approx( 100.0f ).margin( 0.01f ) );
     }
 }
 

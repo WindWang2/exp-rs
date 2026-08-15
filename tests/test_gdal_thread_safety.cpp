@@ -11,22 +11,24 @@
 #include <gdal.h>
 #include <cpl_conv.h>
 
-// A small valid GeoTIFF synthesised at runtime so the suite does not depend on
-// a committed sample raster under data/.
-static QString validRasterPath()
+static QString createSyntheticRaster(const QString &filename)
 {
   static QTemporaryDir dir;
-  static const QString path = []() {
-    GDALAllRegister();
-    const QString p = dir.path() + QStringLiteral( "/sample.tif" );
+  GDALAllRegister();
+  const QString p = dir.path() + QStringLiteral( "/" ) + filename;
+  if (!QFile::exists(p)) {
     GDALDriverH driver = GDALGetDriverByName( "GTiff" );
     REQUIRE( driver != nullptr );
     GDALDatasetH ds = GDALCreate( driver, p.toUtf8().constData(), 8, 8, 1, GDT_Float32, nullptr );
     REQUIRE( ds != nullptr );
     GDALClose( ds );
-    return p;
-  }();
-  return path;
+  }
+  return p;
+}
+
+static QString validRasterPath()
+{
+  return createSyntheticRaster(QStringLiteral("sample.tif"));
 }
 
 TEST_CASE("GdalDatasetWrapper concurrent open does not crash", "[gdal][thread]")
@@ -55,15 +57,15 @@ TEST_CASE("GdalDatasetWrapper concurrent open does not crash", "[gdal][thread]")
     for (auto &t : threads)
         t.join();
 
-    // All threads should succeed (or all fail if file missing)
-    // The important thing is no crash from concurrent GDALAllRegister()
-    CHECK(successCount.load() + failCount.load() == threadCount);
+    // All threads must succeed opening the valid raster
+    CHECK(failCount.load() == 0);
+    CHECK(successCount.load() == threadCount);
 }
 
 TEST_CASE("GdalDatasetWrapper concurrent open different files", "[gdal][thread]")
 {
-    QString path1 = validRasterPath();
-    QString path2 = validRasterPath(); // same synthetic file is fine — concurrency, not distinctness
+    QString path1 = createSyntheticRaster(QStringLiteral("sample1.tif"));
+    QString path2 = createSyntheticRaster(QStringLiteral("sample2.tif"));
 
     std::atomic<int> successCount(0);
     std::atomic<int> failCount(0);
@@ -82,6 +84,7 @@ TEST_CASE("GdalDatasetWrapper concurrent open different files", "[gdal][thread]"
     for (auto &t : threads)
         t.join();
 
-    // Both threads should complete without crashing
-    CHECK(successCount.load() + failCount.load() == 2);
+    // Both threads must successfully open their distinct files
+    CHECK(failCount.load() == 0);
+    CHECK(successCount.load() == 2);
 }

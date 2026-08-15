@@ -4,13 +4,30 @@ import os
 import sys
 import unittest
 
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+
+import ctypes
+for lib in ("libxml2.so.2", "libxml2.so", "libspatialite.so", "libgdal.so"):
+    try:
+        ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
+    except OSError:
+        pass
 
 # The C++ extension module is staged next to the test runner under ../lib.
 script_dir = os.path.dirname(os.path.abspath(__file__))
-module_dir = os.path.abspath(os.path.join(script_dir, "..", "lib"))
-if module_dir not in sys.path:
-    sys.path.insert(0, module_dir)
+candidates = [
+    os.path.abspath(os.path.join(script_dir, "..", "lib")),
+    os.path.abspath(os.path.join(script_dir, "..", "build-dev", "lib")),
+    os.path.abspath(os.path.join(script_dir, "..", "build-dev", "src", "operators")),
+    os.path.abspath(os.path.join(script_dir, "..", "src", "operators")),
+]
+for module_dir in candidates:
+    if os.path.exists(module_dir) and module_dir not in sys.path:
+        sys.path.insert(0, module_dir)
 
 import sicnu_operators as so
 
@@ -32,6 +49,7 @@ class TestOperatorRegistry(unittest.TestCase):
         self.assertEqual(meta["group"], "opencv-filter")
 
 
+@unittest.skipUnless(HAS_NUMPY, "numpy not available")
 class TestMatNdarrayRoundtrip(unittest.TestCase):
     def test_ndarray_to_cv_mat_and_back_is_zero_copy(self):
         arr = np.arange(16, dtype=np.uint8).reshape(4, 4)
@@ -74,6 +92,7 @@ class TestMatNdarrayRoundtrip(unittest.TestCase):
         self.assertEqual(out.shape, (16, 16))
 
 
+@unittest.skipUnless(HAS_NUMPY, "numpy not available")
 class TestRunOperator(unittest.TestCase):
     def test_run_opencv_gaussian_blur(self):
         import tempfile

@@ -62,4 +62,32 @@ TEST_CASE( "KMeans: 3 Gaussians, centres within tolerance of true means",
     REQUIRE( v >= 1 );
     REQUIRE( v <= 3 );
   }
+
+  // Verify cluster separation: samples belonging to each true cluster should overwhelmingly
+  // share the same predicted label, and the 3 clusters must have distinct labels.
+  int majorityLabels[3] = { 0, 0, 0 };
+  for ( int c = 0; c < 3; ++c )
+  {
+    int counts[4] = { 0, 0, 0, 0 };
+    for ( int i = 0; i < 300; ++i )
+    {
+      const int v = pred.at<int>( c * 300 + i, 0 );
+      counts[v]++;
+    }
+    int bestCount = 0;
+    int bestLabel = 1;
+    for ( int k = 1; k <= 3; ++k )
+    {
+      if ( counts[k] > bestCount )
+      {
+        bestCount = counts[k];
+        bestLabel = k;
+      }
+    }
+    REQUIRE( bestCount >= 270 ); // >=90% purity on 7.5-sigma separated clusters
+    majorityLabels[c] = bestLabel;
+  }
+  REQUIRE( majorityLabels[0] != majorityLabels[1] );
+  REQUIRE( majorityLabels[1] != majorityLabels[2] );
+  REQUIRE( majorityLabels[0] != majorityLabels[2] );
 }

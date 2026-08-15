@@ -3315,6 +3315,7 @@ target_link_libraries(test_dialog_edge_cases PRIVATE
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  sicnu_processing
 )
 target_include_directories(test_dialog_edge_cases PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -4713,5 +4714,134 @@ else()
 endif()
 set_target_properties(test_rs_golden_e2e PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_rs_golden_e2e)
+
+# Histogram Equalize Edge Cases (Image Enhancement)
+add_executable(test_histogram_equalize_edge_cases test_histogram_equalize_edge_cases.cpp)
+target_link_libraries(test_histogram_equalize_edge_cases PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_histogram_equalize_edge_cases PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_histogram_equalize_edge_cases)
+
+# Async Algorithm Runner
+add_executable(test_async_algorithm_runner
+  test_async_algorithm_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_algorithm_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_runner_base.cpp
+)
+target_link_libraries(test_async_algorithm_runner PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+)
+target_include_directories(test_async_algorithm_runner PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_async_algorithm_runner PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_async_algorithm_runner)
+
+# RSOperators and OTB Tests
+if(TARGET sicnu_operators)
+  add_executable(test_operation_logger test_operation_logger.cpp)
+  target_link_libraries(test_operation_logger PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_operators
+  )
+  target_include_directories(test_operation_logger PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  if(TARGET jsoncpp)
+    target_link_libraries(test_operation_logger PRIVATE jsoncpp)
+  elseif(JSONCPP_LIBRARIES)
+    target_include_directories(test_operation_logger PRIVATE ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(test_operation_logger PRIVATE ${JSONCPP_LIBRARIES})
+  else()
+    target_link_libraries(test_operation_logger PRIVATE jsoncpp)
+  endif()
+  sicnu_discover_tests(test_operation_logger)
+
+  add_executable(test_otb_operators test_otb_operators.cpp)
+  target_link_libraries(test_otb_operators PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_processing
+    sicnu_operators
+    GDAL::GDAL
+  )
+  target_include_directories(test_otb_operators PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  if(TARGET jsoncpp)
+    target_link_libraries(test_otb_operators PRIVATE jsoncpp)
+  elseif(JSONCPP_LIBRARIES)
+    target_include_directories(test_otb_operators PRIVATE ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(test_otb_operators PRIVATE ${JSONCPP_LIBRARIES})
+  else()
+    target_link_libraries(test_otb_operators PRIVATE jsoncpp)
+  endif()
+  sicnu_discover_tests(test_otb_operators)
+endif()
+
+# Python Script Editor Test
+if(SICNU_EMBED_PYTHON)
+  add_executable(test_python_script_editor
+    test_python_script_editor.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/python_script_editor.cpp
+    ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
+  )
+  target_link_libraries(test_python_script_editor PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Test
+    sicnu_python_isolated
+    Python::Python
+    CURL::libcurl
+    ${PCRE2_16}
+    ${PCRE2_8}
+  )
+  target_include_directories(test_python_script_editor PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app
+    ${CMAKE_SOURCE_DIR}/src/python
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(test_python_script_editor PRIVATE
+    SICNU_EMBED_PYTHON=1
+  )
+  set_target_properties(test_python_script_editor PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_python_script_editor)
+endif()
+
+# Pybind11 Python Bindings CTest Registration
+if(SICNU_BUILD_PYTHON_BINDINGS)
+  find_package(Python COMPONENTS Interpreter QUIET)
+  if(Python_Interpreter_FOUND)
+    add_test(NAME test_python_bindings
+      COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_python_bindings.py
+    )
+    set_tests_properties(test_python_bindings PROPERTIES
+      ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/lib:${CMAKE_BINARY_DIR}/src/operators"
+    )
+  endif()
+endif()
 
 

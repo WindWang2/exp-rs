@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include "qgsconfig.h"
 #include "qgsleastsquares.h"
 #include "qgspointxy.h"
 
@@ -62,6 +63,7 @@ QgsPointXY applyHomography( const QgsPointXY &p, const double H[9] )
 
 } // namespace
 
+#ifdef HAVE_GSL
 TEST_CASE("LeastSquares helmert: recovers known rotation+uniform-scale+translation", "[georef][leastsquares]") {
     // Ground truth: scale s=2, rotation 30° (=pi/6 rad), translation (-100, +50).
     // a = s*cos(30°) = sqrt(3) ~ 1.7320508, b = s*sin(30°) = 1 exactly.
@@ -144,3 +146,4 @@ TEST_CASE("LeastSquares projective: degenerate input handling", "[georef][leasts
     REQUIRE_THROWS_AS( QgsLeastSquares::projective( srcIdent, dstIdent, H ),
                        QgsLeastSquares::SingularException );
 }
+#endif
