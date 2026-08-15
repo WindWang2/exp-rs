@@ -496,8 +496,12 @@ TEST_CASE( "PipelineScene batches signals during loadWorkflowDefinition", "[work
   // Export roundtrip check (O(V+E) traversal)
   WorkflowDefinition exported = scene.exportWorkflowDefinition( wf );
   REQUIRE( exported.steps.size() == 5 );
-  REQUIRE( exported.steps[4].inputs.size() == 1 );
-  REQUIRE( exported.steps[4].inputs[0].fromStepId == "step_4" );
+  auto it5 = std::find_if( exported.steps.begin(), exported.steps.end(), []( const StepDef &s ) {
+    return s.id == "step_5";
+  } );
+  REQUIRE( it5 != exported.steps.end() );
+  REQUIRE( it5->inputs.size() == 1 );
+  REQUIRE( it5->inputs[0].fromStepId == "step_4" );
 }
 
 TEST_CASE( "PipelineCanvasWidget deleteSelected removes selected items", "[workflow][canvas][delete]" )
@@ -569,7 +573,7 @@ TEST_CASE( "PipelineNodeItem bounding rect padding and port shape precision", "[
 
   PipelineNodeItem node( s );
   auto *inPort = node.addInputPort( "in_raster", "Raster" );
-  auto *outPort = node.addOutputPort( "out_raster", "Raster" );
+  node.addOutputPort( "out_raster", "Raster" );
 
   // Verify node bounding rect contains margin for 2.0px stroke
   QRectF bRect = node.boundingRect();
