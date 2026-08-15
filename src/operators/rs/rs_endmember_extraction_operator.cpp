@@ -118,9 +118,12 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
     const size_t B = static_cast<size_t>(bandCount);
     std::vector<float> tileBip(maxTilePixels * B, 0.0f);
     std::vector<float> bandScratch(maxTilePixels);
+    std::vector<int> bandList(bandCount);
+    for (int b = 0; b < bandCount; ++b)
+        bandList[b] = b + 1;
 
-    size_t cursor = 0; // global pixel index across tiles
     auto streamTiles = [&](const auto &fn) {
+        size_t cursor = 0;
         for (int y = 0; y < height; y += kTile)
         {
             const int h = std::min(kTile, height - y);
@@ -129,14 +132,17 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
                 const int w = std::min(kTile, width - x);
                 const size_t n = static_cast<size_t>(w) * h;
                 context.throwIfCancelled();
-                for (int b = 0; b < bandCount; ++b)
+                if (!ds.readWindowBip(bandList, x, y, w, h, tileBip.data()))
                 {
-                    if (!ds.readBandWindow(b + 1, x, y, w, h, bandScratch.data()))
-                        throw RSOperatorError(ErrorCode::GdalError,
-                                              "Failed to read tile at (" +
-                                                  std::to_string(x) + ", " + std::to_string(y) + ")");
-                    for (size_t p = 0; p < n; ++p)
-                        tileBip[p * B + static_cast<size_t>(b)] = bandScratch[p];
+                    for (int b = 0; b < bandCount; ++b)
+                    {
+                        if (!ds.readBandWindow(b + 1, x, y, w, h, bandScratch.data()))
+                            throw RSOperatorError(ErrorCode::GdalError,
+                                                  "Failed to read tile at (" +
+                                                      std::to_string(x) + ", " + std::to_string(y) + ")");
+                        for (size_t p = 0; p < n; ++p)
+                            tileBip[p * B + static_cast<size_t>(b)] = bandScratch[p];
+                    }
                 }
                 if (!fn(tileBip.data(), n, cursor))
                     return false;
@@ -146,17 +152,50 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
         return true;
     };
 
+    std::vector<float> noDataValues(bandCount, std::numeric_limits<float>::quiet_NaN());
+    std::vector<bool> hasNoData(bandCount, false);
+    for (int b = 0; b < bandCount; ++b)
+    {
+        bool hasNd = false;
+        const double nd = ds.bandNoDataValue(b + 1, &hasNd);
+        if (hasNd)
+        {
+            hasNoData[b] = true;
+            noDataValues[b] = static_cast<float>(nd);
+        }
+    }
+
+    auto isPixelValid = [&](const float *spec) {
+        for (int b = 0; b < bandCount; ++b)
+        {
+            const float v = spec[b];
+            if (!std::isfinite(v))
+                return false;
+            if (hasNoData[b] && std::abs(v - noDataValues[b]) < 1e-3f)
+                return false;
+        }
+        return true;
+    };
+
     context.reportProgress(0.1, "PPI pass 1/3: mean");
     std::vector<double> mean(B, 0.0);
-    cursor = 0;
+    uint64_t validPixelCount = 0;
     streamTiles([&](const float *tile, size_t n, size_t) {
         for (size_t p = 0; p < n; ++p)
+        {
+            const float *spec = tile + p * B;
+            if (!isPixelValid(spec))
+                continue;
             for (size_t b = 0; b < B; ++b)
-                mean[b] += tile[p * B + b];
+                mean[b] += spec[b];
+            ++validPixelCount;
+        }
         return true;
     });
+    if (validPixelCount == 0)
+        throw RSOperatorError(ErrorCode::InvalidInputData, "No valid pixels found in raster");
     for (size_t b = 0; b < B; ++b)
-        mean[b] /= static_cast<double>(pixelCount);
+        mean[b] /= static_cast<double>(validPixelCount);
 
     // Random projection directions — identical sequence to the full-scene
     // kernel (mt19937(42), std::normal_distribution, per-projection normalize).
@@ -190,41 +229,56 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
     std::vector<double> minV(static_cast<size_t>(projections), 0.0);
     std::vector<double> maxV(static_cast<size_t>(projections), 0.0);
     bool firstPixel = true;
-    cursor = 0;
+    std::vector<double> centered( static_cast<size_t>( bandCount ) );
     streamTiles([&](const float *tile, size_t n, size_t base) {
         for (size_t p = 0; p < n; ++p)
         {
             const float *spectrum = tile + p * B;
-            for (int proj = 0; proj < projections; ++proj)
+            if (!isPixelValid(spectrum))
+                continue;
+            for (int b = 0; b < bandCount; ++b)
+                centered[static_cast<size_t>(b)] = static_cast<double>(spectrum[b]) - mean[static_cast<size_t>(b)];
+
+            const size_t globalPixel = base + p;
+            if (firstPixel)
             {
-                if (!dirValid[static_cast<size_t>(proj)])
-                    continue;
-                double v = 0.0;
-                for (int b = 0; b < bandCount; ++b)
-                    v += dirs[static_cast<size_t>(proj)][static_cast<size_t>(b)]
-                         * (static_cast<double>(spectrum[b]) - mean[static_cast<size_t>(b)]);
-                if (firstPixel)
+                for (int proj = 0; proj < projections; ++proj)
                 {
+                    if (!dirValid[static_cast<size_t>(proj)])
+                        continue;
+                    const double *dir = dirs[static_cast<size_t>(proj)].data();
+                    double v = 0.0;
+                    for (int b = 0; b < bandCount; ++b)
+                        v += dir[b] * centered[static_cast<size_t>(b)];
                     minV[static_cast<size_t>(proj)] = v;
                     maxV[static_cast<size_t>(proj)] = v;
-                    minP[static_cast<size_t>(proj)] = 0;
-                    maxP[static_cast<size_t>(proj)] = 0;
+                    minP[static_cast<size_t>(proj)] = globalPixel;
+                    maxP[static_cast<size_t>(proj)] = globalPixel;
                 }
-                else
+                firstPixel = false;
+            }
+            else
+            {
+                for (int proj = 0; proj < projections; ++proj)
                 {
+                    if (!dirValid[static_cast<size_t>(proj)])
+                        continue;
+                    const double *dir = dirs[static_cast<size_t>(proj)].data();
+                    double v = 0.0;
+                    for (int b = 0; b < bandCount; ++b)
+                        v += dir[b] * centered[static_cast<size_t>(b)];
                     if (v < minV[static_cast<size_t>(proj)])
                     {
                         minV[static_cast<size_t>(proj)] = v;
-                        minP[static_cast<size_t>(proj)] = base + p;
+                        minP[static_cast<size_t>(proj)] = globalPixel;
                     }
                     if (v > maxV[static_cast<size_t>(proj)])
                     {
                         maxV[static_cast<size_t>(proj)] = v;
-                        maxP[static_cast<size_t>(proj)] = base + p;
+                        maxP[static_cast<size_t>(proj)] = globalPixel;
                     }
                 }
             }
-            firstPixel = false;
         }
         return true;
     });
@@ -262,7 +316,6 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
                 static_cast<int>(order[static_cast<size_t>(e)]);
             chosen.insert(static_cast<int>(order[static_cast<size_t>(e)]));
         }
-        cursor = 0;
         streamTiles([&](const float *tile, size_t n, size_t base) {
             for (size_t p = 0; p < n; ++p)
             {

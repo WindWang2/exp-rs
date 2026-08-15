@@ -134,29 +134,52 @@ int modeOfWindow( const cv::Mat &labels, int r, int c, int k )
   const int H = labels.rows;
   const int W = labels.cols;
   const int half = k / 2;
-  std::unordered_map<int, int> freq;
-  freq.reserve( static_cast<size_t>( k * k ) );
 
   const int r0 = std::max( 0, r - half );
   const int r1 = std::min( H - 1, r + half );
   const int c0 = std::max( 0, c - half );
   const int c1 = std::min( W - 1, c + half );
 
+  // Stack-allocated frequency table to eliminate heap allocations per pixel
+  struct FreqEntry
+  {
+    int val;
+    int count;
+  };
+  std::array<FreqEntry, 64> freq;
+  int numEntries = 0;
+
   for ( int rr = r0; rr <= r1; ++rr )
   {
     const int *row = labels.ptr<int>( rr );
     for ( int cc = c0; cc <= c1; ++cc )
-      ++freq[row[cc]];
+    {
+      const int v = row[cc];
+      bool found = false;
+      for ( int i = 0; i < numEntries; ++i )
+      {
+        if ( freq[i].val == v )
+        {
+          ++freq[i].count;
+          found = true;
+          break;
+        }
+      }
+      if ( !found && numEntries < 64 )
+      {
+        freq[numEntries++] = { v, 1 };
+      }
+    }
   }
 
   int bestVal = pixelAt( labels, r, c );
   int bestCnt = -1;
-  for ( const auto &kv : freq )
+  for ( int i = 0; i < numEntries; ++i )
   {
-    if ( kv.second > bestCnt || ( kv.second == bestCnt && kv.first < bestVal ) )
+    if ( freq[i].count > bestCnt || ( freq[i].count == bestCnt && freq[i].val < bestVal ) )
     {
-      bestCnt = kv.second;
-      bestVal = kv.first;
+      bestCnt = freq[i].count;
+      bestVal = freq[i].val;
     }
   }
   return bestVal;

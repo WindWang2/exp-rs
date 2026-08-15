@@ -29,6 +29,7 @@ public slots:
   void zoomOut();
   void zoomToFit();
   void resetZoom();
+  void deleteSelected();
 
 signals:
   void workflowChanged();
@@ -38,6 +39,7 @@ signals:
 
 protected:
   void wheelEvent( QWheelEvent *event ) override;
+  void keyPressEvent( QKeyEvent *event ) override;
   void mousePressEvent( QMouseEvent *event ) override;
   void mouseMoveEvent( QMouseEvent *event ) override;
   void mouseReleaseEvent( QMouseEvent *event ) override;

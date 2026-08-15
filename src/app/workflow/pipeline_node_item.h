@@ -49,6 +49,9 @@ public:
 
   void layoutPorts();
 
+  enum { Type = UserType + 101 };
+  int type() const override { return Type; }
+
   QRectF boundingRect() const override;
   void paint( QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget ) override;
 
@@ -71,7 +74,8 @@ private:
   std::vector<PipelinePortItem *> mInputPorts;
   std::vector<PipelinePortItem *> mOutputPorts;
 
-  qreal mWidth = 220.0;
+  QRectF mBoundingRect;
+  qreal mWidth = 240.0;
   qreal mHeaderHeight = 36.0;
 
   static QColor statusColor( NodeStatus status );

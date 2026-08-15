@@ -210,3 +210,52 @@ TEST_CASE("rs:rx_anomaly streaming matches the full-raster kernel",
         runCase( 300, 300, 4, false );
     }
 }
+
+TEST_CASE( "RX detector numerical edge cases: NaN propagation and dynamic range", "[rx][numerical]" )
+{
+    // Test 1: NaN / Inf pixel returns NaN in rxScore, not masked to 0.0
+    {
+        std::vector<double> mean = { 10.0, 20.0, 30.0 };
+        std::vector<double> invCov = {
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0
+        };
+
+        const float nanPixel[3] = { 10.0f, std::numeric_limits<float>::quiet_NaN(), 30.0f };
+        const float infPixel[3] = { 10.0f, std::numeric_limits<float>::infinity(), 30.0f };
+        const float validPixel[3] = { 11.0f, 22.0f, 33.0f };
+
+        CHECK( std::isnan( SpectralAnomaly::rxScore( nanPixel, mean, invCov, 3 ) ) );
+        CHECK( std::isnan( SpectralAnomaly::rxScore( infPixel, mean, invCov, 3 ) ) );
+
+        const float score = SpectralAnomaly::rxScore( validPixel, mean, invCov, 3 );
+        CHECK( std::isfinite( score ) );
+        CHECK( score > 0.0f );
+    }
+
+    // Test 2: Large dynamic range (e.g. 16-bit DN values ~1e4 with variance ~1e7)
+    {
+        const int bands = 4;
+        std::vector<double> largeCov( bands * bands, 0.0 );
+        for ( int i = 0; i < bands; ++i )
+        {
+            for ( int j = 0; j < bands; ++j )
+            {
+                // High correlation covariance matrix ~1e7 scale
+                largeCov[i * bands + j] = ( i == j ) ? 1.0e7 : 0.99e7;
+            }
+        }
+
+        std::vector<double> invCov;
+        const bool invertible = SpectralAnomaly::invertCovariance( largeCov, bands, &invCov );
+        REQUIRE( invertible );
+        REQUIRE( invCov.size() == static_cast<size_t>( bands * bands ) );
+
+        // Inverse must be finite and positive definite
+        for ( double v : invCov )
+            CHECK( std::isfinite( v ) );
+        for ( int i = 0; i < bands; ++i )
+            CHECK( invCov[i * bands + i] > 0.0 );
+    }
+}

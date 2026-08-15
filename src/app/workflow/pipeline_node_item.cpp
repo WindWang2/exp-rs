@@ -22,6 +22,7 @@ PipelineNodeItem::PipelineNodeItem( const StepDef &stepDef, QGraphicsItem *paren
             QGraphicsItem::ItemSendsGeometryChanges );
 
   setPos( stepDef.uiMeta.x, stepDef.uiMeta.y );
+  layoutPorts();
 }
 
 QColor PipelineNodeItem::statusColor( NodeStatus status )
@@ -128,6 +129,14 @@ void PipelineNodeItem::layoutPorts()
 {
   prepareGeometryChange();
 
+  qreal inHeight = mInputPorts.size() * 28.0;
+  qreal outHeight = mOutputPorts.size() * 28.0;
+  qreal bodyHeight = std::max( { 40.0, inHeight, outHeight } );
+  qreal totalHeight = mHeaderHeight + bodyHeight + 12.0;
+
+  // Margin of 2.0px ensures 2px selection border is completely contained
+  mBoundingRect = QRectF( -2.0, -2.0, mWidth + 4.0, totalHeight + 4.0 );
+
   qreal portHeight = 24.0;
   qreal currentY = mHeaderHeight + 6.0;
 
@@ -149,10 +158,7 @@ void PipelineNodeItem::layoutPorts()
 
 QRectF PipelineNodeItem::boundingRect() const
 {
-  qreal inHeight = mInputPorts.size() * 28.0;
-  qreal outHeight = mOutputPorts.size() * 28.0;
-  qreal bodyHeight = std::max( { 40.0, inHeight, outHeight } );
-  return QRectF( 0, 0, mWidth, mHeaderHeight + bodyHeight + 12.0 );
+  return mBoundingRect.isEmpty() ? QRectF( -2.0, -2.0, mWidth + 4.0, mHeaderHeight + 56.0 ) : mBoundingRect;
 }
 
 void PipelineNodeItem::paint( QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget )
@@ -162,7 +168,8 @@ void PipelineNodeItem::paint( QPainter *painter, const QStyleOptionGraphicsItem 
 
   painter->setRenderHint( QPainter::Antialiasing, true );
 
-  QRectF cardRect = boundingRect();
+  qreal totalHeight = mBoundingRect.height() - 4.0;
+  QRectF cardRect( 0, 0, mWidth, totalHeight );
   qreal radius = 8.0;
 
   // Background card gradient
@@ -205,7 +212,7 @@ void PipelineNodeItem::paint( QPainter *painter, const QStyleOptionGraphicsItem 
   painter->drawLine( QPointF( 0, mHeaderHeight ), QPointF( mWidth, mHeaderHeight ) );
 
   // Node Title text
-  painter->setFont( QFont( "Inter", 10, QFont::Bold ) );
+  painter->setFont( QFont( QStringLiteral( "IBM Plex Sans" ), 10, QFont::Bold ) );
   painter->setPen( QColor( "#f8fafc" ) );
   painter->drawText( QRectF( 10, 0, mWidth - 85, mHeaderHeight ), Qt::AlignLeft | Qt::AlignVCenter, mTitle );
 
@@ -218,7 +225,7 @@ void PipelineNodeItem::paint( QPainter *painter, const QStyleOptionGraphicsItem 
   painter->setBrush( sColor );
   painter->drawRoundedRect( badgeRect, 4, 4 );
 
-  painter->setFont( QFont( "Inter", 7, QFont::Bold ) );
+  painter->setFont( QFont( QStringLiteral( "IBM Plex Sans" ), 8, QFont::Bold ) );
   painter->setPen( Qt::white );
   painter->drawText( badgeRect, Qt::AlignCenter, sTxt );
 }

@@ -1,10 +1,10 @@
 // rs_simple_segmenter.cpp — Phase 10B Task 10B.3
 #include "rs_simple_segmenter.h"
-#include "../../processing/algorithms/math_utils.h"
 #include "sicnu_logging.h"
 
 #include <cmath>
 #include <algorithm>
+#include <limits>
 #include <numeric>
 #include <queue>
 #include <unordered_map>
@@ -45,39 +45,44 @@ RsSegmentMap RsSimpleSegmenter::segment( const float *data, int width, int heigh
     // 1. Copy data for in-place smoothing
     QVector<float> smoothed( data, data + n );
 
-    // 2. Gaussian smoothing
+    // 2. Gaussian smoothing (line-buffered in-place, memory footprint < 200 KB)
     gaussianSmooth( smoothed, width, height, params.smoothKernel );
     if ( canceled() )
         return {};
     report( 0.3f );
 
     // 3. Quantize
-    QVector<int> quantized = quantize( smoothed.data(), n, params.quantizeBins, nodata );
+    const int bins = std::max( 2, params.quantizeBins );
+    QVector<int> quantized = quantize( smoothed.data(), n, bins, nodata );
     report( 0.5f );
 
-    // Find nodata bin value
-    int nodataBin = -1;
+    // Mask nodata pixels explicitly from original raw data
     for ( size_t i = 0; i < n; ++i )
     {
         if ( data[i] == nodata || std::isnan( data[i] ) )
-        {
-            nodataBin = quantized[i];
-            break;
-        }
+            quantized[i] = 0;
     }
+
+    // Release smoothed float buffer early to minimize peak RSS
+    smoothed.clear();
+    smoothed.squeeze();
 
     if ( canceled() )
         return {};
     report( 0.55f );
 
     // 4. Connected components
-    QVector<quint32> labels = connectedComponents( quantized, width, height, nodataBin, isCanceled );
+    QVector<quint32> labels = connectedComponents( quantized, width, height, 0, isCanceled );
     if ( labels.isEmpty() )
         return {}; // canceled during labeling
 
+    // Release quantized buffer early
+    quantized.clear();
+    quantized.squeeze();
+
     report( 0.8f );
 
-    // 5. Merge small regions
+    // 5. Merge small regions (flat Union-Find)
     mergeSmallRegions( labels, width, height, params.minRegionSize, isCanceled );
     if ( canceled() )
         return {};
@@ -117,58 +122,65 @@ RsSegmentMap RsSimpleSegmenter::segmentMultiBand( const float *const *bandData,
         return {};
     report( 0.0f );
 
-    // Multi-band processing: smooth each band individually, then quantize multi-spectral vectors
-    QVector<QVector<float>> smoothedBands( nBands );
+    const int bins = std::max( 2, params.quantizeBins );
+    QVector<int> compositeQuantized( n, 0 );
+
+    // Sequential band processing: smooth & quantize 1 band at a time to minimize RSS
     for ( int b = 0; b < nBands; ++b )
     {
         if ( canceled() )
             return {};
-        smoothedBands[b] = QVector<float>( bandData[b], bandData[b] + n );
-        gaussianSmooth( smoothedBands[b], width, height, params.smoothKernel );
-    }
 
-    if ( canceled() )
-        return {};
-    report( 0.4f );
+        // 1. Copy single band for in-place smoothing
+        QVector<float> curBand( bandData[b], bandData[b] + n );
+        gaussianSmooth( curBand, width, height, params.smoothKernel );
 
-    // Quantize each band and combine into composite multi-band region keys
-    QVector<QVector<int>> quantizedBands( nBands );
-    for ( int b = 0; b < nBands; ++b )
-    {
-        quantizedBands[b] = quantize( smoothedBands[b].data(), n, params.quantizeBins, nodata );
-    }
+        // 2. Quantize single smoothed band with sanitized bins
+        QVector<int> curQuant = quantize( curBand.data(), n, bins, nodata );
 
-    QVector<int> compositeQuantized( n );
-    const int bins = std::max( 2, params.quantizeBins );
-    for ( size_t i = 0; i < n; ++i )
-    {
-        if ( ( i & 0xFFFu ) == 0 && canceled() )
-            return {};
+        // curBand float buffer no longer needed for this band
+        curBand.clear();
+        curBand.squeeze();
 
-        bool isNodata = false;
-        for ( int b = 0; b < nBands; ++b )
+        // 3. Accumulate into compositeQuantized on-the-fly
+        if ( b == 0 )
         {
-            if ( bandData[b][i] == nodata || std::isnan( bandData[b][i] ) || quantizedBands[b][i] == 0 )
+            for ( size_t i = 0; i < n; ++i )
             {
-                isNodata = true;
-                break;
+                if ( bandData[0][i] == nodata || std::isnan( bandData[0][i] ) || curQuant[i] == 0 )
+                {
+                    compositeQuantized[i] = 0; // nodata bin
+                }
+                else
+                {
+                    compositeQuantized[i] = curQuant[i];
+                }
             }
-        }
-
-        if ( isNodata )
-        {
-            compositeQuantized[i] = 0; // nodata bin
         }
         else
         {
-            // Hash multi-band quantized tuple into a unique composite integer key
-            size_t hashKey = 0;
-            for ( int b = 0; b < nBands; ++b )
+            for ( size_t i = 0; i < n; ++i )
             {
-                hashKey = hashKey * static_cast<size_t>( bins ) + static_cast<size_t>( quantizedBands[b][i] );
+                if ( compositeQuantized[i] == 0 || bandData[b][i] == nodata || std::isnan( bandData[b][i] ) || curQuant[i] == 0 )
+                {
+                    compositeQuantized[i] = 0; // nodata in any band
+                }
+                else
+                {
+                    uint64_t h = static_cast<uint32_t>( compositeQuantized[i] );
+                    // 64-bit hash combiner (SplitMix / Boost hash_combine)
+                    h ^= static_cast<uint32_t>( curQuant[i] ) + 0x9e3779b97f4a7c15ULL + ( h << 6 ) + ( h >> 2 );
+                    int combined = static_cast<int>( h & 0x7FFFFFFF );
+                    if ( combined == 0 )
+                        combined = 1;
+                    compositeQuantized[i] = combined;
+                }
             }
-            compositeQuantized[i] = static_cast<int>( hashKey & 0x7FFFFFFF );
         }
+
+        if ( canceled() )
+            return {};
+        report( 0.1f + 0.5f * ( static_cast<float>(b + 1) / static_cast<float>(nBands) ) );
     }
 
     if ( canceled() )
@@ -180,9 +192,13 @@ RsSegmentMap RsSimpleSegmenter::segmentMultiBand( const float *const *bandData,
     if ( labels.isEmpty() )
         return {};
 
+    // Release compositeQuantized early
+    compositeQuantized.clear();
+    compositeQuantized.squeeze();
+
     report( 0.8f );
 
-    // Merge small regions
+    // Merge small regions (flat Union-Find)
     mergeSmallRegions( labels, width, height, params.minRegionSize, isCanceled );
     if ( canceled() )
         return {};
@@ -201,7 +217,7 @@ RsSegmentMap RsSimpleSegmenter::segmentMultiBand( const float *const *bandData,
 
 void RsSimpleSegmenter::gaussianSmooth( QVector<float> &data, int w, int h, int kernelSize )
 {
-    if ( kernelSize < 3 )
+    if ( kernelSize < 3 || w <= 0 || h <= 0 )
         return;
     if ( kernelSize % 2 == 0 )
         kernelSize++;
@@ -221,44 +237,66 @@ void RsSimpleSegmenter::gaussianSmooth( QVector<float> &data, int w, int h, int 
     for ( float &k : kernel )
         k /= sum;
 
-    // Horizontal pass
-    QVector<float> tmp( w * h );
-    for ( int r = 0; r < h; ++r )
-    {
-        for ( int c = 0; c < w; ++c )
-        {
-            float val = 0;
-            for ( int k = 0; k < kernelSize; ++k )
-            {
-                int cc = std::clamp( c + k - half, 0, w - 1 );
-                val += data[r * w + cc] * kernel[k];
-            }
-            tmp[r * w + c] = val;
-        }
-    }
+    // Line-buffered separable convolution:
+    // Uses a circular ring buffer of `kernelSize` rows (size = kernelSize * w * 4 bytes).
+    // Eliminates the full W*H temp buffer and keeps lines in L1/L2 cache.
+    std::vector<float> ringBuf( static_cast<size_t>(kernelSize) * static_cast<size_t>(w) );
 
-    // Vertical pass
-    for ( int r = 0; r < h; ++r )
+    for ( int r = 0; r < h + half; ++r )
     {
-        for ( int c = 0; c < w; ++c )
+        if ( r < h )
         {
-            float val = 0;
-            for ( int k = 0; k < kernelSize; ++k )
+            // Horizontal 1D pass for row r
+            const float *srcRow = &data[static_cast<size_t>(r) * w];
+            float *ringRow = &ringBuf[static_cast<size_t>(r % kernelSize) * w];
+            for ( int c = 0; c < w; ++c )
             {
-                int rr = std::clamp( r + k - half, 0, h - 1 );
-                val += tmp[rr * w + c] * kernel[k];
+                float val = 0.0f;
+                for ( int k = 0; k < kernelSize; ++k )
+                {
+                    int cc = std::clamp( c + k - half, 0, w - 1 );
+                    val += srcRow[cc] * kernel[k];
+                }
+                ringRow[c] = val;
             }
-            data[r * w + c] = val;
+        }
+
+        // Vertical pass for output row y = r - half
+        if ( r >= half )
+        {
+            const int y = r - half;
+            float *outRow = &data[static_cast<size_t>(y) * w];
+            for ( int c = 0; c < w; ++c )
+            {
+                float val = 0.0f;
+                for ( int k = 0; k < kernelSize; ++k )
+                {
+                    int srcR = std::clamp( y + k - half, 0, h - 1 );
+                    const float *ringRow = &ringBuf[static_cast<size_t>(srcR % kernelSize) * w];
+                    val += ringRow[c] * kernel[k];
+                }
+                outRow[c] = val;
+            }
         }
     }
 }
 
 QVector<int> RsSimpleSegmenter::quantize( const float *data, size_t n, int bins, float nodata )
 {
-    // Find min/max excluding nodata using shared utility
-    MathUtils::Stats stats = MathUtils::computeStatsWithNodata(data, n, nodata);
-    float vmin = stats.min;
-    float vmax = stats.max;
+    // Find min/max excluding nodata and NaN
+    float vmin = std::numeric_limits<float>::infinity();
+    float vmax = -std::numeric_limits<float>::infinity();
+    for ( size_t i = 0; i < n; ++i )
+    {
+        float v = data[i];
+        if ( v != nodata && !std::isnan( v ) )
+        {
+            if ( v < vmin )
+                vmin = v;
+            if ( v > vmax )
+                vmax = v;
+        }
+    }
 
     if ( vmin >= vmax )
     {
@@ -309,35 +347,24 @@ QVector<quint32> RsSimpleSegmenter::connectedComponents( const QVector<int> &qua
         {
             if ( cancelCheck() )
                 return {};
-            const int idx = r * w + c;
+            const size_t idx = static_cast<size_t>(r) * static_cast<size_t>(w) + static_cast<size_t>(c);
             if ( quantized[idx] == nodataBin || quantized[idx] == 0 )
                 continue;
             if ( labels[idx] != 0 )
                 continue;
 
-            // BFS flood fill. Cap segment size at 1e6 to avoid OOM on huge
-            // homogeneous regions; residual connected pixels get a NEW label
-            // rather than being left as 0 (outer scan may have already passed
-            // them, so relying on the outer loop alone would drop pixels).
+            // BFS flood fill with natural 8-connected wavefront
             const int targetBin = quantized[idx];
-            std::queue<int> q;
+            std::queue<size_t> q;
             q.push( idx );
             labels[idx] = nextLabel;
-            size_t segmentSize = 1;
-            const size_t maxSegmentSize = 1000000;
 
             while ( !q.empty() )
             {
-                if ( segmentSize >= maxSegmentSize )
-                {
-                    ++nextLabel;
-                    segmentSize = 0;
-                }
-
-                int cur = q.front();
+                size_t cur = q.front();
                 q.pop();
-                int cr = cur / w;
-                int cc = cur % w;
+                int cr = static_cast<int>( cur / static_cast<size_t>(w) );
+                int cc = static_cast<int>( cur % static_cast<size_t>(w) );
 
                 for ( int d = 0; d < 8; ++d )
                 {
@@ -345,14 +372,13 @@ QVector<quint32> RsSimpleSegmenter::connectedComponents( const QVector<int> &qua
                     int nc = cc + dc[d];
                     if ( nr < 0 || nr >= h || nc < 0 || nc >= w )
                         continue;
-                    int nidx = nr * w + nc;
+                    size_t nidx = static_cast<size_t>(nr) * static_cast<size_t>(w) + static_cast<size_t>(nc);
                     if ( labels[nidx] != 0 )
                         continue;
                     if ( quantized[nidx] != targetBin )
                         continue;
                     labels[nidx] = nextLabel;
                     q.push( nidx );
-                    segmentSize++;
                 }
                 if ( ( scanned & 0xFFFu ) == 0 && isCanceled && isCanceled() )
                     return {};
@@ -369,123 +395,157 @@ void RsSimpleSegmenter::mergeSmallRegions( QVector<quint32> &labels, int w, int 
                                             int minSize,
                                             const std::function<bool()> &isCanceled )
 {
-    // Count region sizes
-    std::unordered_map<quint32, int> sizeMap;
-    for ( quint32 l : labels )
+    const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h);
+    if ( n == 0 || minSize <= 1 )
+        return;
+
+    // Find max label
+    quint32 maxLabel = 0;
+    for ( size_t i = 0; i < n; ++i )
     {
-        if ( l != 0 )
-            sizeMap[l]++;
+        if ( labels[i] > maxLabel )
+            maxLabel = labels[i];
+    }
+
+    if ( maxLabel == 0 )
+        return;
+
+    // Count region sizes using flat array
+    std::vector<int> sizeVec( maxLabel + 1, 0 );
+    for ( size_t i = 0; i < n; ++i )
+    {
+        if ( labels[i] != 0 )
+            sizeVec[labels[i]]++;
     }
 
     // Find small regions
-    std::unordered_set<quint32> smallRegions;
-    for ( auto &[id, sz] : sizeMap )
+    std::vector<uint8_t> isSmall( maxLabel + 1, 0 );
+    size_t smallCount = 0;
+    for ( quint32 id = 1; id <= maxLabel; ++id )
     {
-        if ( sz < minSize )
-            smallRegions.insert( id );
+        if ( sizeVec[id] > 0 && sizeVec[id] < minSize )
+        {
+            isSmall[id] = 1;
+            ++smallCount;
+        }
     }
 
-    if ( smallRegions.empty() )
+    if ( smallCount == 0 )
         return;
 
     SICNU_LOG_DEBUG( SicnuLogTags::Segmentation, QString( "Merging %1 small regions (minSize=%2)" )
-        .arg( smallRegions.size() ).arg( minSize ) );
+        .arg( smallCount ).arg( minSize ) );
 
-    // HIGH #7 fix: Build adjacency in one image scan, then apply merges in one pass.
-    // O(W*H + K*B) where B = boundary pixels per small region.
+    // 4-connected boundary offsets
     const int dr4[] = { -1, 1, 0, 0 };
     const int dc4[] = { 0, 0, -1, 1 };
 
-    // Pass 1: For each small region pixel, count its non-small neighbors
-    // regionId -> { neighborId -> boundaryCount }
-    std::unordered_map<quint32, std::unordered_map<quint32, int>> adjacency;
-    for ( size_t i = 0; i < static_cast<size_t>(w) * static_cast<size_t>(h); ++i )
+    // Pass 1: For each small region pixel, count its non-small / different neighbors.
+    // Each small region (< minSize pixels) touches few distinct neighbors. A compact
+    // pair vector per small region avoids nested hash-map heap churn.
+    struct NeighborCount
+    {
+        quint32 neighbor = 0;
+        int count = 0;
+    };
+    std::unordered_map<quint32, std::vector<NeighborCount>> smallAdjacency;
+
+    for ( size_t i = 0; i < n; ++i )
     {
         if ( ( i & 0xFFFFu ) == 0 && isCanceled && isCanceled() )
             return;
         quint32 segId = labels[i];
-        if ( segId == 0 || smallRegions.find( segId ) == smallRegions.end() )
+        if ( segId == 0 || !isSmall[segId] )
             continue;
-        int r = i / w;
-        int c = i % w;
+        int r = static_cast<int>( i / static_cast<size_t>(w) );
+        int c = static_cast<int>( i % static_cast<size_t>(w) );
         for ( int d = 0; d < 4; ++d )
         {
             int nr = r + dr4[d];
             int nc = c + dc4[d];
             if ( nr < 0 || nr >= h || nc < 0 || nc >= w )
                 continue;
-            quint32 neighbor = labels[nr * w + nc];
+            quint32 neighbor = labels[static_cast<size_t>(nr) * static_cast<size_t>(w) + static_cast<size_t>(nc)];
             if ( neighbor != 0 && neighbor != segId )
-                adjacency[segId][neighbor]++;
+            {
+                auto &vec = smallAdjacency[segId];
+                bool found = false;
+                for ( auto &entry : vec )
+                {
+                    if ( entry.neighbor == neighbor )
+                    {
+                        entry.count++;
+                        found = true;
+                        break;
+                    }
+                }
+                if ( !found )
+                {
+                    vec.push_back( { neighbor, 1 } );
+                }
+            }
         }
     }
 
     if ( isCanceled && isCanceled() )
         return;
 
-    // Build merge map from adjacency (small → preferred neighbor).
-    // Neighbor may itself be small, so chains must be resolved (multi-hop).
+    // Build merge map from adjacency (small -> preferred neighbor)
     std::unordered_map<quint32, quint32> mergeMap;
-    for ( auto &[segId, neighbors] : adjacency )
+    for ( const auto &[segId, neighbors] : smallAdjacency )
     {
         quint32 bestNeighbor = 0;
         int bestCount = 0;
-        for ( auto &[nid, cnt] : neighbors )
+        for ( const auto &entry : neighbors )
         {
-            if ( cnt > bestCount )
+            if ( entry.count > bestCount )
             {
-                bestCount = cnt;
-                bestNeighbor = nid;
+                bestCount = entry.count;
+                bestNeighbor = entry.neighbor;
             }
         }
         if ( bestNeighbor != 0 )
             mergeMap[segId] = bestNeighbor;
     }
 
-    // Union-find style multi-hop resolution with path compression.
-    // Follow mergeMap[A]→B→C… until a root that is not in mergeMap (or cycle).
-    auto resolve = [&mergeMap]( quint32 id ) -> quint32 {
-        auto it = mergeMap.find( id );
-        if ( it == mergeMap.end() )
-            return id;
+    // Flat Union-Find with path compression
+    std::vector<quint32> parent( maxLabel + 1 );
+    std::iota( parent.begin(), parent.end(), 0 );
 
-        std::vector<quint32> path;
+    auto findRoot = [&parent]( quint32 id ) -> quint32 {
+        quint32 root = id;
+        while ( root <= parent.size() - 1 && parent[root] != root )
+            root = parent[root];
+        // Path compression
         quint32 cur = id;
-        const size_t guard = mergeMap.size() + 1;
-        while ( path.size() < guard )
+        while ( cur <= parent.size() - 1 && parent[cur] != root )
         {
-            auto j = mergeMap.find( cur );
-            if ( j == mergeMap.end() )
-                break;
-            path.push_back( cur );
-            cur = j->second;
-            // Cycle: stop at current and break the cycle by pointing to self's next.
-            bool cycle = false;
-            for ( quint32 p : path )
-            {
-                if ( p == cur )
-                {
-                    cycle = true;
-                    break;
-                }
-            }
-            if ( cycle )
-                break;
+            quint32 nxt = parent[cur];
+            parent[cur] = root;
+            cur = nxt;
         }
-        for ( quint32 p : path )
-            mergeMap[p] = cur;
-        return cur;
+        return root;
     };
 
+    for ( const auto &[segId, target] : mergeMap )
+    {
+        quint32 r1 = findRoot( segId );
+        quint32 r2 = findRoot( target );
+        if ( r1 != r2 )
+        {
+            parent[r1] = r2;
+        }
+    }
+
     // Apply fully-resolved merges in a single pass over the full image
-    for ( size_t i = 0; i < static_cast<size_t>(w) * static_cast<size_t>(h); ++i )
+    for ( size_t i = 0; i < n; ++i )
     {
         if ( ( i & 0xFFFFu ) == 0 && isCanceled && isCanceled() )
             return;
         const quint32 lab = labels[i];
         if ( lab == 0 )
             continue;
-        const quint32 root = resolve( lab );
+        const quint32 root = findRoot( lab );
         if ( root != lab )
             labels[i] = root;
     }

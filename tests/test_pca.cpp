@@ -107,3 +107,83 @@ TEST_CASE("PCA skips NaN pixels in the covariance", "[pca][c3]")
     }
     CHECK(total == Catch::Approx(1.0).margin(1e-5));
 }
+
+TEST_CASE("Jacobi eigensolver analytical precision and orthogonality", "[pca][jacobi][numerical]")
+{
+    // Test 1: 2x2 symmetric matrix: A = [[2, 1], [1, 1]]
+    // Exact eigenvalues: (3 + sqrt(5))/2 ≈ 2.61803399, (3 - sqrt(5))/2 ≈ 0.38196601
+    {
+        std::vector<std::vector<float>> A = { { 2.0f, 1.0f }, { 1.0f, 1.0f } };
+        std::vector<float> eigVals;
+        std::vector<std::vector<float>> eigVecs;
+        ImageEnhancement::jacobiEigen( A, 2, eigVals, eigVecs );
+
+        std::vector<float> sortedEig = eigVals;
+        std::sort( sortedEig.rbegin(), sortedEig.rend() );
+        CHECK( sortedEig[0] == Catch::Approx( 2.618034f ).margin( 1e-4f ) );
+        CHECK( sortedEig[1] == Catch::Approx( 0.381966f ).margin( 1e-4f ) );
+
+        // Verify orthogonality: V^T * V = I
+        for ( int i = 0; i < 2; ++i )
+        {
+            for ( int j = 0; j < 2; ++j )
+            {
+                float dot = 0.0f;
+                for ( int r = 0; r < 2; ++r )
+                    dot += eigVecs[r][i] * eigVecs[r][j];
+                const float expected = ( i == j ) ? 1.0f : 0.0f;
+                CHECK( dot == Catch::Approx( expected ).margin( 1e-5f ) );
+            }
+        }
+    }
+
+    // Test 2: 3x3 tridiagonal Toeplitz symmetric matrix:
+    // A = [[2, -1, 0], [-1, 2, -1], [0, -1, 2]]
+    // Exact eigenvalues: 2 + sqrt(2) ≈ 3.41421356, 2.0, 2 - sqrt(2) ≈ 0.58578644
+    {
+        std::vector<std::vector<float>> A = {
+            {  2.0f, -1.0f,  0.0f },
+            { -1.0f,  2.0f, -1.0f },
+            {  0.0f, -1.0f,  2.0f }
+        };
+        const std::vector<std::vector<float>> origA = A;
+        std::vector<float> eigVals;
+        std::vector<std::vector<float>> eigVecs;
+        ImageEnhancement::jacobiEigen( A, 3, eigVals, eigVecs );
+
+        std::vector<float> sortedEig = eigVals;
+        std::sort( sortedEig.rbegin(), sortedEig.rend() );
+        CHECK( sortedEig[0] == Catch::Approx( 3.414214f ).margin( 1e-4f ) );
+        CHECK( sortedEig[1] == Catch::Approx( 2.000000f ).margin( 1e-4f ) );
+        CHECK( sortedEig[2] == Catch::Approx( 0.585786f ).margin( 1e-4f ) );
+
+        // Verify eigenvector orthonormality: V^T * V = I
+        for ( int i = 0; i < 3; ++i )
+        {
+            for ( int j = 0; j < 3; ++j )
+            {
+                float dot = 0.0f;
+                for ( int r = 0; r < 3; ++r )
+                    dot += eigVecs[r][i] * eigVecs[r][j];
+                const float expected = ( i == j ) ? 1.0f : 0.0f;
+                CHECK( dot == Catch::Approx( expected ).margin( 1e-5f ) );
+            }
+        }
+
+        // Verify diagonalization: V^T * origA * V = diag(eigVals)
+        for ( int i = 0; i < 3; ++i )
+        {
+            for ( int j = 0; j < 3; ++j )
+            {
+                float vAv = 0.0f;
+                for ( int r = 0; r < 3; ++r )
+                {
+                    for ( int c = 0; c < 3; ++c )
+                        vAv += eigVecs[r][i] * origA[r][c] * eigVecs[c][j];
+                }
+                const float expected = ( i == j ) ? eigVals[i] : 0.0f;
+                CHECK( vAv == Catch::Approx( expected ).margin( 1e-4f ) );
+            }
+        }
+    }
+}

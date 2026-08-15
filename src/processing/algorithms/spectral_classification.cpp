@@ -73,33 +73,88 @@ bool sidClassify( const float *pixels, size_t count, int bands,
     if ( !pixels || !refs || !labels || count == 0 || bands <= 0 || refCount <= 0 )
         return false;
 
+    // Precompute reference probabilities and log probabilities.
+    std::vector<bool> refValid( refCount, false );
+    std::vector<double> refProb( static_cast<size_t>( refCount ) * bands, 0.0 );
+    std::vector<double> refLogProb( static_cast<size_t>( refCount ) * bands, 0.0 );
+
+    for ( int c = 0; c < refCount; ++c )
+    {
+        const float *r = refs + static_cast<size_t>( c ) * bands;
+        double sumR = 0.0;
+        bool valid = true;
+        for ( int b = 0; b < bands; ++b )
+        {
+            if ( r[b] == nodata || std::isnan( r[b] ) || r[b] < 0.0f )
+            {
+                valid = false;
+                break;
+            }
+            sumR += static_cast<double>( r[b] );
+        }
+        if ( !valid || sumR <= 0.0 )
+            continue;
+
+        refValid[c] = true;
+        for ( int b = 0; b < bands; ++b )
+        {
+            const double q = static_cast<double>( r[b] ) / sumR;
+            refProb[static_cast<size_t>( c ) * bands + b] = q;
+            refLogProb[static_cast<size_t>( c ) * bands + b] = ( q > 0.0 ) ? std::log( q ) : 0.0;
+        }
+    }
+
+    std::vector<double> pProb( bands );
+    std::vector<double> pLog( bands );
+
     for ( size_t p = 0; p < count; ++p )
     {
         const float *t = pixels + p * static_cast<size_t>( bands );
 
         bool pixelValid = true;
+        double sumT = 0.0;
         for ( int b = 0; b < bands; ++b )
         {
-            if ( t[b] == nodata || std::isnan( t[b] ) )
+            if ( t[b] == nodata || std::isnan( t[b] ) || t[b] < 0.0f )
             {
                 pixelValid = false;
                 break;
             }
+            sumT += static_cast<double>( t[b] );
         }
+        if ( sumT <= 0.0 )
+            pixelValid = false;
 
         int best = -1;
         double bestDiv = std::numeric_limits<double>::infinity();
         if ( pixelValid )
         {
+            const double invSumT = 1.0 / sumT;
+            for ( int b = 0; b < bands; ++b )
+            {
+                const double pb = static_cast<double>( t[b] ) * invSumT;
+                pProb[b] = pb;
+                pLog[b] = ( pb > 0.0 ) ? std::log( pb ) : 0.0;
+            }
+
             for ( int c = 0; c < refCount; ++c )
             {
-                const float *r = refs + static_cast<size_t>( c ) * bands;
-                const double div = spectralDivergence( t, r, static_cast<size_t>( bands ), nodata );
-                // NaN divergence here is reference-side (the pixel is valid):
-                // the reference is degenerate. Skip it rather than discarding
-                // the pixel.
-                if ( std::isnan( div ) )
+                if ( !refValid[c] )
                     continue;
+                const double *q = &refProb[static_cast<size_t>( c ) * bands];
+                const double *logQ = &refLogProb[static_cast<size_t>( c ) * bands];
+
+                double div = 0.0;
+                for ( int b = 0; b < bands; ++b )
+                {
+                    const double pb = pProb[b];
+                    const double qb = q[b];
+                    if ( pb > 0.0 && qb > 0.0 )
+                    {
+                        const double diffLog = pLog[b] - logQ[b];
+                        div += ( pb - qb ) * diffLog;
+                    }
+                }
                 if ( div < bestDiv )
                 {
                     bestDiv = div;
@@ -122,14 +177,38 @@ bool samClassify( const float *pixels, size_t count, int bands,
     if ( !pixels || !refs || !labels || count == 0 || bands <= 0 || refCount <= 0 )
         return false;
 
+    // Precompute reference norms and validate reference spectra once.
+    std::vector<double> invNormR( refCount, 0.0 );
+    std::vector<bool> refValid( refCount, false );
+
+    for ( int c = 0; c < refCount; ++c )
+    {
+        const float *r = refs + static_cast<size_t>( c ) * bands;
+        double normR = 0.0;
+        bool valid = true;
+        for ( int b = 0; b < bands; ++b )
+        {
+            if ( r[b] == nodata || std::isnan( r[b] ) )
+            {
+                valid = false;
+                break;
+            }
+            const double rv = static_cast<double>( r[b] );
+            normR += rv * rv;
+        }
+        if ( valid && normR > 0.0 )
+        {
+            refValid[c] = true;
+            invNormR[c] = 1.0 / std::sqrt( normR );
+        }
+    }
+
     for ( size_t p = 0; p < count; ++p )
     {
         const float *t = pixels + p * static_cast<size_t>( bands );
 
-        // Pixel-side nodata (any nodata/NaN band) makes the whole pixel
-        // unclassifiable regardless of the references. Determine this once,
-        // up front, so a single bad reference does not invalidate the pixel.
         bool pixelValid = true;
+        double normT = 0.0;
         for ( int b = 0; b < bands; ++b )
         {
             if ( t[b] == nodata || std::isnan( t[b] ) )
@@ -137,32 +216,49 @@ bool samClassify( const float *pixels, size_t count, int bands,
                 pixelValid = false;
                 break;
             }
+            const double tv = static_cast<double>( t[b] );
+            normT += tv * tv;
         }
+        if ( normT <= 0.0 )
+            pixelValid = false;
 
         int best = -1;
-        double bestAngle = std::numeric_limits<double>::infinity();
+        double bestCos = -2.0; // Cosine similarity in [-1, 1]; higher is smaller angle
         if ( pixelValid )
         {
+            const double invNormT = 1.0 / std::sqrt( normT );
             for ( int c = 0; c < refCount; ++c )
             {
-                const float *r = refs + static_cast<size_t>( c ) * bands;
-                double ang = spectralAngle( t, r, static_cast<size_t>( bands ), nodata );
-                // A NaN angle here is reference-side (the pixel is known
-                // valid): the reference is degenerate (zero-norm or contains
-                // nodata). Skip it rather than discarding the pixel.
-                if ( std::isnan( ang ) )
+                if ( !refValid[c] )
                     continue;
-                if ( ang < bestAngle )
+
+                const float *r = refs + static_cast<size_t>( c ) * bands;
+                double dot = 0.0;
+                for ( int b = 0; b < bands; ++b )
+                    dot += static_cast<double>( t[b] ) * static_cast<double>( r[b] );
+
+                const double cosTheta = ( dot * invNormR[c] ) * invNormT;
+                if ( cosTheta > bestCos )
                 {
-                    bestAngle = ang;
+                    bestCos = cosTheta;
                     best = c;
                 }
             }
         }
+
         labels[p] = best;
         if ( angles )
-            angles[p] = std::isfinite( bestAngle ) ? static_cast<float>( bestAngle )
-                                                   : std::numeric_limits<float>::quiet_NaN();
+        {
+            if ( best >= 0 )
+            {
+                const double clampedCos = std::clamp( bestCos, -1.0, 1.0 );
+                angles[p] = static_cast<float>( std::acos( clampedCos ) );
+            }
+            else
+            {
+                angles[p] = std::numeric_limits<float>::quiet_NaN();
+            }
+        }
     }
     return true;
 }

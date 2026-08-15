@@ -20,6 +20,7 @@
 
 #include "processing/algorithms/spectral_anomaly.h"
 #include "processing/algorithms/change_detection.h"
+#include "processing/algorithms/image_enhancement.h"
 #include "processing/framework/resource_monitor.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "operators/framework/rs_operator_context.h"
@@ -123,6 +124,11 @@ struct PeakRssTracker
         if ( worker.joinable() )
             worker.join();
         return peakMb.load();
+    }
+
+    ~PeakRssTracker()
+    {
+        stop();
     }
 };
 
@@ -490,6 +496,52 @@ TEST_CASE( "Benchmark: mosaic stress (large synthetic rasters)", "[benchmark]" )
         auto res = runOperator( "rs:mosaic", params, ctx );
         REQUIRE( res.isObject() );
         REQUIRE( res.isMember( "output" ) );
+    } );
+}
+
+TEST_CASE( "Benchmark: spatial filters (Gaussian & fast Sobel)", "[benchmark][spatial]" )
+{
+    const bool large = largeBench();
+    const int W = large ? 2048 : 1024;
+    const int H = large ? 2048 : 1024;
+    std::vector<float> input( static_cast<size_t>( W ) * H );
+    std::vector<float> output( static_cast<size_t>( W ) * H );
+
+    uint32_t state = 0x54321u;
+    for ( size_t i = 0; i < input.size(); ++i )
+        input[i] = lcgFloat( state );
+
+    runBench( "spatial_gaussian_7x7", [&]() {
+        ImageEnhancement::gaussianFilter( input.data(), output.data(), W, H, 7, 2.0f );
+        REQUIRE( std::isfinite( output[0] ) );
+    } );
+
+    runBench( "spatial_sobel_single_pass", [&]() {
+        ImageEnhancement::sobelFilter( input.data(), output.data(), W, H );
+        REQUIRE( std::isfinite( output[0] ) );
+    } );
+}
+
+TEST_CASE( "Benchmark: SAR speckle filters (Lee & Enhanced Lee)", "[benchmark][speckle]" )
+{
+    const bool large = largeBench();
+    const int W = large ? 2048 : 1024;
+    const int H = large ? 2048 : 1024;
+    std::vector<float> input( static_cast<size_t>( W ) * H );
+    std::vector<float> output( static_cast<size_t>( W ) * H );
+
+    uint32_t state = 0x98765u;
+    for ( size_t i = 0; i < input.size(); ++i )
+        input[i] = lcgFloat( state );
+
+    runBench( "speckle_lee_5x5", [&]() {
+        ImageEnhancement::leeFilter( input.data(), output.data(), W, H, 5, 1.0f );
+        REQUIRE( std::isfinite( output[0] ) );
+    } );
+
+    runBench( "speckle_enhanced_lee_5x5", [&]() {
+        ImageEnhancement::enhancedLeeFilter( input.data(), output.data(), W, H, 5, 1.0f, 1.0f );
+        REQUIRE( std::isfinite( output[0] ) );
     } );
 }
 

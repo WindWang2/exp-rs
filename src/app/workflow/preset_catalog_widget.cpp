@@ -19,6 +19,11 @@ PresetCatalogWidget::PresetCatalogWidget( QWidget *parent )
   header->setStyleSheet( QStringLiteral( "font-weight: bold; font-size: 13px; color: #38bdf8;" ) );
   layout->addWidget( header );
 
+  mSearchEdit = new QLineEdit( this );
+  mSearchEdit->setPlaceholderText( tr( "🔍 搜索流程模板..." ) );
+  mSearchEdit->setClearButtonEnabled( true );
+  layout->addWidget( mSearchEdit );
+
   mListWidget = new QListWidget( this );
   mListWidget->setSelectionMode( QAbstractItemView::SingleSelection );
   mListWidget->setStyleSheet( QStringLiteral(
@@ -28,7 +33,7 @@ PresetCatalogWidget::PresetCatalogWidget( QWidget *parent )
   ) );
   layout->addWidget( mListWidget, 1 );
 
-  mDescLabel = new QLabel( tr( "请选择左侧流程模板查看说明" ), this );
+  mDescLabel = new QLabel( tr( "请选择上方流程模板查看说明" ), this );
   mDescLabel->setWordWrap( true );
   mDescLabel->setStyleSheet( QStringLiteral( "color: #94a3b8; font-size: 11px; padding: 4px; background: #0f172a; border-radius: 4px;" ) );
   mDescLabel->setMinimumHeight( 60 );
@@ -43,10 +48,12 @@ PresetCatalogWidget::PresetCatalogWidget( QWidget *parent )
   ) );
   layout->addWidget( mLoadBtn );
 
+  connect( mSearchEdit, &QLineEdit::textChanged, this, &PresetCatalogWidget::onSearchTextChanged );
   connect( mListWidget, &QListWidget::itemDoubleClicked, this, &PresetCatalogWidget::onItemDoubleClicked );
   connect( mListWidget, &QListWidget::itemSelectionChanged, this, &PresetCatalogWidget::onItemSelectionChanged );
   connect( mLoadBtn, &QPushButton::clicked, this, &PresetCatalogWidget::onLoadButtonClicked );
 
+  mPresets = builtinPresets();
   populatePresets();
 }
 
@@ -318,16 +325,41 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
   return presets;
 }
 
-void PresetCatalogWidget::populatePresets()
+void PresetCatalogWidget::populatePresets( const QString &filter )
 {
-  mPresets = builtinPresets();
   mListWidget->clear();
 
+  QString cleanFilter = filter.trimmed();
   for ( const auto &preset : mPresets )
   {
+    if ( !cleanFilter.isEmpty() )
+    {
+      bool match = preset.title.contains( cleanFilter, Qt::CaseInsensitive ) ||
+                   preset.category.contains( cleanFilter, Qt::CaseInsensitive ) ||
+                   preset.description.contains( cleanFilter, Qt::CaseInsensitive );
+      if ( !match )
+        continue;
+    }
+
     auto *item = new QListWidgetItem( QStringLiteral( "📌 %1 (%2)" ).arg( preset.title, preset.category ), mListWidget );
     item->setData( Qt::UserRole, preset.id );
   }
+
+  if ( mListWidget->count() == 0 )
+  {
+    mDescLabel->setText( tr( "无匹配的预设流程模板" ) );
+    mLoadBtn->setEnabled( false );
+  }
+}
+
+int PresetCatalogWidget::visiblePresetCount() const
+{
+  return mListWidget ? mListWidget->count() : 0;
+}
+
+void PresetCatalogWidget::onSearchTextChanged( const QString &text )
+{
+  populatePresets( text );
 }
 
 void PresetCatalogWidget::onItemSelectionChanged()
@@ -335,7 +367,7 @@ void PresetCatalogWidget::onItemSelectionChanged()
   auto *item = mListWidget->currentItem();
   if ( !item )
   {
-    mDescLabel->setText( tr( "请选择左侧流程模板查看说明" ) );
+    mDescLabel->setText( tr( "请选择上方流程模板查看说明" ) );
     mLoadBtn->setEnabled( false );
     return;
   }

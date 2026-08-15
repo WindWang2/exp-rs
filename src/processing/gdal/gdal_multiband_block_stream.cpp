@@ -72,25 +72,33 @@ bool GdalMultibandBlockStream::forEach( const TileCallback &callback ) const
 
     const size_t tilePixels =
         static_cast<size_t>( m_tileWidth ) * static_cast<size_t>( m_tileHeight );
-    std::vector<float> bandTile( tilePixels );                       // per-band scratch
     std::vector<float> bip( tilePixels * static_cast<size_t>( bandCount ) ); // BIP window
+    std::vector<float> bandTile;                                             // fallback scratch
 
     for ( const Tile &tile : m_tiles )
     {
         const size_t thisTilePixels = static_cast<size_t>( tile.width ) * tile.height;
-        // Read each band's window then scatter into the BIP layout.
-        bool ok = true;
-        for ( int bi = 0; bi < bandCount; ++bi )
+        // Fast path: single dataset-level RasterIO directly into BIP memory layout.
+        bool ok = m_ds.readWindowBip( m_bandList, tile.xOffset, tile.yOffset,
+                                      tile.width, tile.height, bip.data() );
+        if ( !ok )
         {
-            const int bandNum = m_bandList[bi];
-            if ( !m_ds.readBandWindow( bandNum, tile.xOffset, tile.yOffset,
-                                       tile.width, tile.height, bandTile.data() ) )
+            // Fallback path: read band-by-band and scatter into BIP layout.
+            if ( bandTile.size() < tilePixels )
+                bandTile.resize( tilePixels );
+            ok = true;
+            for ( int bi = 0; bi < bandCount; ++bi )
             {
-                ok = false;
-                break;
+                const int bandNum = m_bandList[bi];
+                if ( !m_ds.readBandWindow( bandNum, tile.xOffset, tile.yOffset,
+                                           tile.width, tile.height, bandTile.data() ) )
+                {
+                    ok = false;
+                    break;
+                }
+                for ( size_t p = 0; p < thisTilePixels; ++p )
+                    bip[p * static_cast<size_t>( bandCount ) + bi] = bandTile[p];
             }
-            for ( size_t p = 0; p < thisTilePixels; ++p )
-                bip[p * static_cast<size_t>( bandCount ) + bi] = bandTile[p];
         }
         if ( !ok )
             return false;

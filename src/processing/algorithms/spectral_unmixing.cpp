@@ -121,6 +121,7 @@ bool unmix( const float *pixels, size_t count, int bands,
 
     std::vector<double> rhs( nEndmembers, 0.0 );
     std::vector<double> abundance( nEndmembers, 0.0 );
+    std::vector<double> est( bands, 0.0 );
 
     for ( size_t p = 0; p < count; ++p )
     {
@@ -143,10 +144,10 @@ bool unmix( const float *pixels, size_t count, int bands,
         // Right-hand side: E^T x.
         for ( int e = 0; e < nEndmembers; ++e )
         {
+            const float *emRow = &endmembers[static_cast<size_t>( e ) * bands];
             double sum = 0.0;
             for ( int b = 0; b < bands; ++b )
-                sum += static_cast<double>( endmembers[static_cast<size_t>( e ) * bands + b] )
-                       * x[b];
+                sum += static_cast<double>( emRow[b] ) * x[b];
             rhs[static_cast<size_t>( e )] = sum;
         }
 
@@ -190,14 +191,21 @@ bool unmix( const float *pixels, size_t count, int bands,
                 static_cast<float>( abundance[static_cast<size_t>( e )] );
 
         // Reconstruction error: RMSE of x - E a over the bands.
+        std::fill( est.begin(), est.end(), 0.0 );
+        for ( int e = 0; e < nEndmembers; ++e )
+        {
+            const double ae = abundance[static_cast<size_t>( e )];
+            if ( ae == 0.0 )
+                continue;
+            const float *emRow = &endmembers[static_cast<size_t>( e ) * bands];
+            for ( int b = 0; b < bands; ++b )
+                est[static_cast<size_t>( b )] += ae * static_cast<double>( emRow[b] );
+        }
+
         double errorSq = 0.0;
         for ( int b = 0; b < bands; ++b )
         {
-            double est = 0.0;
-            for ( int e = 0; e < nEndmembers; ++e )
-                est += abundance[static_cast<size_t>( e )]
-                       * endmembers[static_cast<size_t>( e ) * bands + b];
-            const double diff = static_cast<double>( x[b] ) - est;
+            const double diff = static_cast<double>( x[b] ) - est[static_cast<size_t>( b )];
             errorSq += diff * diff;
         }
         result->reconstructionError[p] =

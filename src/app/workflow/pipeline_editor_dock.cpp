@@ -23,9 +23,6 @@ PipelineEditorDock::PipelineEditorDock( QWidget *parent )
   layout->setContentsMargins( 0, 0, 0, 0 );
   layout->setSpacing( 0 );
 
-  createToolBar();
-  layout->addWidget( mToolBar );
-
   mSplitter = new QSplitter( Qt::Horizontal, mainWidget );
   mCanvasWidget = new PipelineCanvasWidget( mSplitter );
   mPresetWidget = new PresetCatalogWidget( mSplitter );
@@ -35,6 +32,8 @@ PipelineEditorDock::PipelineEditorDock( QWidget *parent )
   mSplitter->setStretchFactor( 0, 4 );
   mSplitter->setStretchFactor( 1, 1 );
 
+  createToolBar();
+  layout->addWidget( mToolBar );
   layout->addWidget( mSplitter, 1 );
   setWidget( mainWidget );
 
@@ -51,7 +50,7 @@ void PipelineEditorDock::createToolBar()
     "QToolButton:hover { background-color: #334155; }"
   ) );
 
-  auto *newAct = mToolBar->addAction( tr( "➕ 新建流程" ) );
+  auto *newAct = mToolBar->addAction( tr( "➕ 新建" ) );
   connect( newAct, &QAction::triggered, this, &PipelineEditorDock::onNewClicked );
 
   auto *openAct = mToolBar->addAction( tr( "📂 打开" ) );
@@ -70,6 +69,17 @@ void PipelineEditorDock::createToolBar()
 
   mToolBar->addSeparator();
 
+  auto *zoomFitAct = mToolBar->addAction( tr( "🔍 适应窗口" ) );
+  connect( zoomFitAct, &QAction::triggered, mCanvasWidget, &PipelineCanvasWidget::zoomToFit );
+
+  auto *zoomResetAct = mToolBar->addAction( tr( "🔄 100%" ) );
+  connect( zoomResetAct, &QAction::triggered, mCanvasWidget, &PipelineCanvasWidget::resetZoom );
+
+  auto *deleteAct = mToolBar->addAction( tr( "🗑️ 删除选中" ) );
+  connect( deleteAct, &QAction::triggered, mCanvasWidget, &PipelineCanvasWidget::deleteSelected );
+
+  mToolBar->addSeparator();
+
   auto *presetAct = mToolBar->addAction( tr( "📌 预设模板" ) );
   connect( presetAct, &QAction::triggered, this, &PipelineEditorDock::onTogglePresetCatalog );
 }
@@ -78,6 +88,16 @@ void PipelineEditorDock::onNewClicked()
 {
   if ( mCanvasWidget && mCanvasWidget->pipelineScene() )
   {
+    if ( !mCanvasWidget->pipelineScene()->nodes().empty() )
+    {
+      auto reply = QMessageBox::question( this,
+                                          tr( "新建流程确认" ),
+                                          tr( "新建流程将清空当前画布。是否继续？" ),
+                                          QMessageBox::Yes | QMessageBox::No,
+                                          QMessageBox::No );
+      if ( reply != QMessageBox::Yes )
+        return;
+    }
     mCanvasWidget->pipelineScene()->clearWorkflow();
   }
   emit newWorkflowRequested();
@@ -165,8 +185,18 @@ void PipelineEditorDock::onTogglePresetCatalog()
 
 void PipelineEditorDock::onPresetSelected( const sicnu::workflow::WorkflowDefinition &def )
 {
-  if ( mCanvasWidget )
+  if ( mCanvasWidget && mCanvasWidget->pipelineScene() )
   {
+    if ( !mCanvasWidget->pipelineScene()->nodes().empty() )
+    {
+      auto reply = QMessageBox::question( this,
+                                          tr( "加载模板确认" ),
+                                          tr( "加载预设模板将替换当前画布中的流程。是否继续？" ),
+                                          QMessageBox::Yes | QMessageBox::No,
+                                          QMessageBox::No );
+      if ( reply != QMessageBox::Yes )
+        return;
+    }
     mCanvasWidget->loadWorkflowDefinition( def );
   }
 }

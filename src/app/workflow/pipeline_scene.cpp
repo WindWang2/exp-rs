@@ -1,10 +1,11 @@
-// src/app/workflow/pipeline_scene.cpp
 #include "pipeline_scene.h"
 #include "workflow_definition.h"
 
 #include <QGraphicsSceneMouseEvent>
 #include <QPainter>
+#include <QVarLengthArray>
 #include <cmath>
+#include <algorithm>
 
 namespace sicnu::workflow::gui {
 
@@ -27,6 +28,25 @@ PipelineScene::~PipelineScene()
   {
     delete mTempConnection;
     mTempConnection = nullptr;
+  }
+}
+
+void PipelineScene::notifyWorkflowChanged()
+{
+  if ( !mBulkUpdating )
+  {
+    emit workflowChanged();
+  }
+}
+
+void PipelineScene::cancelTempConnection()
+{
+  if ( mTempConnection )
+  {
+    removeItem( mTempConnection );
+    delete mTempConnection;
+    mTempConnection = nullptr;
+    mDragSourcePort = nullptr;
   }
 }
 
@@ -74,7 +94,7 @@ PipelineNodeItem *PipelineScene::addNode( const StepDef &stepDef )
     connect( inPort, &PipelinePortItem::connectionDragStarted, this, &PipelineScene::onPortDragStarted );
   }
 
-  emit workflowChanged();
+  notifyWorkflowChanged();
   return node;
 }
 
@@ -92,16 +112,35 @@ bool PipelineScene::removeNode( const QString &stepId )
   if ( !node )
     return false;
 
-  // Delete all connections attached to this node
+  // Delete only connections incident to this node directly from its ports (O(deg(v)))
   std::vector<PipelineConnectionItem *> toDelete;
-  for ( auto *conn : mConnections )
+  for ( auto *inPort : node->inputPorts() )
   {
-    if ( ( conn->sourcePort() && conn->sourcePort()->nodeItem() == node ) ||
-         ( conn->targetPort() && conn->targetPort()->nodeItem() == node ) )
+    if ( inPort )
     {
-      toDelete.push_back( conn );
+      for ( auto *conn : inPort->connections() )
+      {
+        if ( conn )
+          toDelete.push_back( conn );
+      }
     }
   }
+  for ( auto *outPort : node->outputPorts() )
+  {
+    if ( outPort )
+    {
+      for ( auto *conn : outPort->connections() )
+      {
+        if ( conn )
+          toDelete.push_back( conn );
+      }
+    }
+  }
+
+  // Deduplicate in case of multi-referenced edges
+  std::sort( toDelete.begin(), toDelete.end() );
+  toDelete.erase( std::unique( toDelete.begin(), toDelete.end() ), toDelete.end() );
+
   for ( auto *conn : toDelete )
   {
     removeConnection( conn );
@@ -111,7 +150,7 @@ bool PipelineScene::removeNode( const QString &stepId )
   removeItem( node );
   delete node;
 
-  emit workflowChanged();
+  notifyWorkflowChanged();
   return true;
 }
 
@@ -120,6 +159,9 @@ PipelineConnectionItem *PipelineScene::addConnection( const QString &fromStepId,
                                                         const QString &toStepId,
                                                         const QString &toPort )
 {
+  if ( fromStepId == toStepId )
+    return nullptr;
+
   auto *srcNode = findNode( fromStepId );
   auto *dstNode = findNode( toStepId );
   if ( !srcNode || !dstNode )
@@ -136,18 +178,30 @@ PipelineConnectionItem *PipelineScene::addConnection( const QString &fromStepId,
   if ( !srcPort || !dstPort )
     return nullptr;
 
+  // Prevent duplicate connections between the same pair of ports
+  for ( auto *existing : dstPort->connections() )
+  {
+    if ( existing && existing->sourcePort() == srcPort )
+    {
+      return existing;
+    }
+  }
+
   auto *conn = new PipelineConnectionItem( srcPort, dstPort );
   addItem( conn );
-  mConnections.push_back( conn );
+  mConnections.insert( conn );
 
   emit connectionCreated( fromStepId, srcPort->portName(), toStepId, dstPort->portName() );
-  emit workflowChanged();
+  notifyWorkflowChanged();
   return conn;
 }
 
 bool PipelineScene::removeConnection( PipelineConnectionItem *conn )
 {
-  auto it = std::find( mConnections.begin(), mConnections.end(), conn );
+  if ( !conn )
+    return false;
+
+  auto it = mConnections.find( conn );
   if ( it == mConnections.end() )
     return false;
 
@@ -161,7 +215,7 @@ bool PipelineScene::removeConnection( PipelineConnectionItem *conn )
   delete conn;
 
   emit connectionRemoved( fromStep, fromPort, toStep, toPort );
-  emit workflowChanged();
+  notifyWorkflowChanged();
   return true;
 }
 
@@ -181,11 +235,12 @@ void PipelineScene::clearWorkflow()
   }
   mNodes.clear();
 
-  emit workflowChanged();
+  notifyWorkflowChanged();
 }
 
 void PipelineScene::loadWorkflowDefinition( const WorkflowDefinition &def )
 {
+  mBulkUpdating = true;
   clearWorkflow();
 
   for ( const auto &stepDef : def.steps )
@@ -217,6 +272,9 @@ void PipelineScene::loadWorkflowDefinition( const WorkflowDefinition &def )
       }
     }
   }
+
+  mBulkUpdating = false;
+  emit workflowChanged();
 }
 
 WorkflowDefinition PipelineScene::exportWorkflowDefinition( const WorkflowDefinition &baseDef ) const
@@ -248,16 +306,21 @@ WorkflowDefinition PipelineScene::exportWorkflowDefinition( const WorkflowDefini
       step.artifactOnSuccess = node->outputPorts().front()->portName().toStdString();
     }
 
-    // Collect incoming connections
-    for ( const auto *conn : mConnections )
+    // Collect incoming connections directly from node input ports in O(V + E)
+    for ( const auto *inPort : node->inputPorts() )
     {
-      if ( conn->targetPort() && conn->targetPort()->nodeItem() == node && conn->sourcePort() )
+      if ( !inPort )
+        continue;
+      for ( const auto *conn : inPort->connections() )
       {
-        StepConnection inConn;
-        inConn.fromStepId = conn->sourcePort()->nodeItem()->stepId().toStdString();
-        inConn.fromPort = conn->sourcePort()->portName().toStdString();
-        inConn.toPort = conn->targetPort()->portName().toStdString();
-        step.inputs.push_back( inConn );
+        if ( conn && conn->sourcePort() && conn->sourcePort()->nodeItem() )
+        {
+          StepConnection inConn;
+          inConn.fromStepId = conn->sourcePort()->nodeItem()->stepId().toStdString();
+          inConn.fromPort = conn->sourcePort()->portName().toStdString();
+          inConn.toPort = inPort->portName().toStdString();
+          step.inputs.push_back( inConn );
+        }
       }
     }
 
@@ -309,16 +372,26 @@ void PipelineScene::mouseReleaseEvent( QGraphicsSceneMouseEvent *event )
       std::string srcType = mDragSourcePort->portType().toStdString();
       std::string dstType = targetPort->portType().toStdString();
 
-      if ( validatePortConnection( srcType, dstType ) )
+      bool alreadyConnected = false;
+      for ( auto *existing : targetPort->connections() )
+      {
+        if ( existing && existing->sourcePort() == mDragSourcePort )
+        {
+          alreadyConnected = true;
+          break;
+        }
+      }
+
+      if ( !alreadyConnected && validatePortConnection( srcType, dstType ) )
       {
         mTempConnection->setTargetPort( targetPort );
-        mConnections.push_back( mTempConnection );
+        mConnections.insert( mTempConnection );
 
         emit connectionCreated( mDragSourcePort->nodeItem()->stepId(),
                                 mDragSourcePort->portName(),
                                 targetPort->nodeItem()->stepId(),
                                 targetPort->portName() );
-        emit workflowChanged();
+        notifyWorkflowChanged();
 
         mTempConnection = nullptr;
         mDragSourcePort = nullptr;
@@ -328,10 +401,7 @@ void PipelineScene::mouseReleaseEvent( QGraphicsSceneMouseEvent *event )
     }
 
     // Invalid connection or dropped in empty space -> cancel temp connection
-    removeItem( mTempConnection );
-    delete mTempConnection;
-    mTempConnection = nullptr;
-    mDragSourcePort = nullptr;
+    cancelTempConnection();
     event->accept();
     return;
   }
@@ -340,27 +410,57 @@ void PipelineScene::mouseReleaseEvent( QGraphicsSceneMouseEvent *event )
 
 void PipelineScene::drawBackground( QPainter *painter, const QRectF &rect )
 {
-  painter->fillRect( rect, QColor( "#0f172a" ) ); // Deep navy background
+  static const QColor bgColor( "#0f172a" ); // Deep slate background
+  static const QPen minorPen( QColor( 255, 255, 255, 12 ), 1.0 );
+  static const QPen majorPen( QColor( 255, 255, 255, 28 ), 1.0 );
 
-  qreal gridStep = 25.0;
-  qreal left = std::floor( rect.left() / gridStep ) * gridStep;
-  qreal top = std::floor( rect.top() / gridStep ) * gridStep;
+  painter->fillRect( rect, bgColor );
 
-  QPen minorPen( QColor( 255, 255, 255, 12 ), 1.0 );
-  QPen majorPen( QColor( 255, 255, 255, 28 ), 1.0 );
+  constexpr qreal gridStep = 25.0;
+  const qreal left = std::floor( rect.left() / gridStep ) * gridStep;
+  const qreal top = std::floor( rect.top() / gridStep ) * gridStep;
+
+  QVarLengthArray<QLineF, 128> minorLines;
+  QVarLengthArray<QLineF, 32> majorLines;
 
   for ( qreal x = left; x < rect.right(); x += gridStep )
   {
     int ix = static_cast<int>( std::round( x ) );
-    painter->setPen( ( ix % 100 == 0 ) ? majorPen : minorPen );
-    painter->drawLine( QPointF( x, rect.top() ), QPointF( x, rect.bottom() ) );
+    QLineF line( x, rect.top(), x, rect.bottom() );
+    if ( ix % 100 == 0 )
+      majorLines.append( line );
+    else
+      minorLines.append( line );
   }
 
   for ( qreal y = top; y < rect.bottom(); y += gridStep )
   {
     int iy = static_cast<int>( std::round( y ) );
-    painter->setPen( ( iy % 100 == 0 ) ? majorPen : minorPen );
-    painter->drawLine( QPointF( rect.left(), y ), QPointF( rect.right(), y ) );
+    QLineF line( rect.left(), y, rect.right(), y );
+    if ( iy % 100 == 0 )
+      majorLines.append( line );
+    else
+      minorLines.append( line );
+  }
+
+  if ( !minorLines.isEmpty() )
+  {
+    painter->setPen( minorPen );
+    painter->drawLines( minorLines.data(), minorLines.size() );
+  }
+  if ( !majorLines.isEmpty() )
+  {
+    painter->setPen( majorPen );
+    painter->drawLines( majorLines.data(), majorLines.size() );
+  }
+
+  // Draw empty state watermark placeholder when scene has 0 nodes
+  if ( mNodes.empty() )
+  {
+    painter->setPen( QColor( 148, 163, 184, 110 ) );
+    painter->setFont( QFont( QStringLiteral( "IBM Plex Sans" ), 12, QFont::DemiBold ) );
+    QRectF hintRect( -250, -50, 500, 100 );
+    painter->drawText( hintRect, Qt::AlignCenter, tr( "工作流画布为空\n从右侧选择预设模板或使用工具栏构建流程" ) );
   }
 }
 

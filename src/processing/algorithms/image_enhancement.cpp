@@ -390,28 +390,66 @@ void ImageEnhancement::sobelFilter(const float *input, float *output, int width,
         SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("sobelFilter: invalid dimensions %1x%2").arg(width).arg(height));
         return;
     }
-    // Sobel X kernel
-    const float sobelX[9] = {
-        -1.0f, 0.0f, 1.0f,
-        -2.0f, 0.0f, 2.0f,
-        -1.0f, 0.0f, 1.0f
-    };
 
-    // Sobel Y kernel
-    const float sobelY[9] = {
-        -1.0f, -2.0f, -1.0f,
-         0.0f,  0.0f,  0.0f,
-         1.0f,  2.0f,  1.0f
-    };
+    const int chunkHeight = 256;
+    for (int yStart = 0; yStart < height; yStart += chunkHeight) {
+        int yEnd = std::min(yStart + chunkHeight, height);
+        for (int y = yStart; y < yEnd; y++) {
+            const size_t rowOff = static_cast<size_t>(y) * width;
+            if (y > 0 && y < height - 1 && width >= 3) {
+                const float *rowPrev = input + static_cast<size_t>(y - 1) * width;
+                const float *rowCurr = input + rowOff;
+                const float *rowNext = input + static_cast<size_t>(y + 1) * width;
 
-    std::vector<float> gx(width * height);
-    std::vector<float> gy(width * height);
+                // Left border x = 0 (replicate padding x-1 -> 0)
+                {
+                    float p00 = rowPrev[0], p01 = rowPrev[0], p02 = rowPrev[1];
+                    float p10 = rowCurr[0],                   p12 = rowCurr[1];
+                    float p20 = rowNext[0], p21 = rowNext[0], p22 = rowNext[1];
+                    float gx = (p02 + 2.0f * p12 + p22) - (p00 + 2.0f * p10 + p20);
+                    float gy = (p20 + 2.0f * p21 + p22) - (p00 + 2.0f * p01 + p02);
+                    output[rowOff] = std::sqrt(gx * gx + gy * gy);
+                }
 
-    convolve(input, gx.data(), width, height, sobelX, 3);
-    convolve(input, gy.data(), width, height, sobelY, 3);
+                // Interior 1 <= x < width - 1
+                for (int x = 1; x < width - 1; x++) {
+                    float p00 = rowPrev[x - 1], p01 = rowPrev[x], p02 = rowPrev[x + 1];
+                    float p10 = rowCurr[x - 1],                    p12 = rowCurr[x + 1];
+                    float p20 = rowNext[x - 1], p21 = rowNext[x], p22 = rowNext[x + 1];
+                    float gx = (p02 + 2.0f * p12 + p22) - (p00 + 2.0f * p10 + p20);
+                    float gy = (p20 + 2.0f * p21 + p22) - (p00 + 2.0f * p01 + p02);
+                    output[rowOff + x] = std::sqrt(gx * gx + gy * gy);
+                }
 
-    for (int i = 0; i < width * height; i++) {
-        output[i] = std::sqrt(gx[i] * gx[i] + gy[i] * gy[i]);
+                // Right border x = width - 1 (replicate padding x+1 -> width-1)
+                {
+                    int x = width - 1;
+                    float p00 = rowPrev[x - 1], p01 = rowPrev[x], p02 = rowPrev[x];
+                    float p10 = rowCurr[x - 1],                   p12 = rowCurr[x];
+                    float p20 = rowNext[x - 1], p21 = rowNext[x], p22 = rowNext[x];
+                    float gx = (p02 + 2.0f * p12 + p22) - (p00 + 2.0f * p10 + p20);
+                    float gy = (p20 + 2.0f * p21 + p22) - (p00 + 2.0f * p01 + p02);
+                    output[rowOff + x] = std::sqrt(gx * gx + gy * gy);
+                }
+            } else {
+                for (int x = 0; x < width; x++) {
+                    float gx = 0.0f, gy = 0.0f;
+                    for (int ky = -1; ky <= 1; ky++) {
+                        int iy = std::clamp(y + ky, 0, height - 1);
+                        const size_t rOff = static_cast<size_t>(iy) * width;
+                        for (int kx = -1; kx <= 1; kx++) {
+                            int ix = std::clamp(x + kx, 0, width - 1);
+                            float p = input[rOff + ix];
+                            if (kx == -1) gx -= (ky == 0 ? 2.0f : 1.0f) * p;
+                            else if (kx == 1) gx += (ky == 0 ? 2.0f : 1.0f) * p;
+                            if (ky == -1) gy -= (kx == 0 ? 2.0f : 1.0f) * p;
+                            else if (ky == 1) gy += (kx == 0 ? 2.0f : 1.0f) * p;
+                        }
+                    }
+                    output[rowOff + x] = std::sqrt(gx * gx + gy * gy);
+                }
+            }
+        }
     }
 }
 
@@ -425,13 +463,44 @@ void ImageEnhancement::laplacianFilter(const float *input, float *output, int wi
         SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("laplacianFilter: invalid dimensions %1x%2").arg(width).arg(height));
         return;
     }
-    const float laplacian[9] = {
-        0.0f,  1.0f, 0.0f,
-        1.0f, -4.0f, 1.0f,
-        0.0f,  1.0f, 0.0f
-    };
 
-    convolve(input, output, width, height, laplacian, 3);
+    const int chunkHeight = 256;
+    for (int yStart = 0; yStart < height; yStart += chunkHeight) {
+        int yEnd = std::min(yStart + chunkHeight, height);
+        for (int y = yStart; y < yEnd; y++) {
+            const size_t rowOff = static_cast<size_t>(y) * width;
+            if (y > 0 && y < height - 1 && width >= 3) {
+                const float *rowPrev = input + static_cast<size_t>(y - 1) * width;
+                const float *rowCurr = input + rowOff;
+                const float *rowNext = input + static_cast<size_t>(y + 1) * width;
+
+                // Left border
+                output[rowOff] = rowPrev[0] + rowCurr[0] + rowCurr[1] + rowNext[0] - 4.0f * rowCurr[0];
+
+                // Interior
+                for (int x = 1; x < width - 1; x++) {
+                    output[rowOff + x] = rowPrev[x] + rowCurr[x - 1] + rowCurr[x + 1] + rowNext[x] - 4.0f * rowCurr[x];
+                }
+
+                // Right border
+                int x = width - 1;
+                output[rowOff + x] = rowPrev[x] + rowCurr[x - 1] + rowCurr[x] + rowNext[x] - 4.0f * rowCurr[x];
+            } else {
+                for (int x = 0; x < width; x++) {
+                    int ym = std::clamp(y - 1, 0, height - 1);
+                    int yp = std::clamp(y + 1, 0, height - 1);
+                    int xm = std::clamp(x - 1, 0, width - 1);
+                    int xp = std::clamp(x + 1, 0, width - 1);
+                    float val = input[static_cast<size_t>(ym) * width + x]
+                              + input[static_cast<size_t>(y) * width + xm]
+                              + input[static_cast<size_t>(y) * width + xp]
+                              + input[static_cast<size_t>(yp) * width + x]
+                              - 4.0f * input[rowOff + x];
+                    output[rowOff + x] = val;
+                }
+            }
+        }
+    }
 }
 
 // ---- SAR Speckle Filters ----
@@ -586,6 +655,81 @@ void ImageEnhancement::leeFilter(const float *input, float *output,
                 } else {
                     float weight = localVar / (localVar + noiseVariance);
                     output[y * width + x] = mean + weight * (pixel - mean);
+                }
+            }
+        }
+        return true;
+    });
+}
+
+void ImageEnhancement::enhancedLeeFilter(const float *input, float *output,
+                                          int width, int height,
+                                          int kernelSize, float noiseVariance, float damping)
+{
+    if (!input || !output) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "enhancedLeeFilter: null pointer argument");
+        return;
+    }
+    if (noiseVariance < 0.0f) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "enhancedLeeFilter: noiseVariance must be >= 0");
+        return;
+    }
+    if (damping < 0.0f) {
+        damping = 1.0f;
+    }
+    if (width <= 0 || height <= 0) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, QString("enhancedLeeFilter: invalid dimensions %1x%2").arg(width).arg(height));
+        return;
+    }
+    QString error;
+    if (!InputValidator::validateKernelSize(kernelSize, error)) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, error);
+        return;
+    }
+    SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Enhanced Lee speckle filter: %1x%2, kernel=%3, noiseVar=%4, damping=%5" )
+        .arg( width ).arg( height ).arg( kernelSize ).arg( noiseVariance ).arg( damping ) );
+
+    // Build integral image for O(1) local statistics
+    IntegralImage integral(input, width, height);
+
+    const int half = kernelSize / 2;
+    const float cu = std::sqrt(noiseVariance);
+    const float cmax = std::sqrt(1.0f + 2.0f * noiseVariance);
+
+    // Use ChunkedProcessor for parallel processing
+    ChunkedProcessor processor(width, height, half);
+    processor.process([&](const ChunkedProcessor::Chunk &chunk) -> bool {
+        for (int y = chunk.startRow; y < chunk.endRow; y++) {
+            for (int x = 0; x < width; x++) {
+                float pixel = input[y * width + x];
+
+                // Preserve NaN center pixels
+                if (std::isnan(pixel)) {
+                    output[y * width + x] = pixel;
+                    continue;
+                }
+
+                float mean, localVar;
+                localStats(integral, width, height, x, y, kernelSize, mean, localVar);
+
+                if (localVar <= 0.0f || mean <= 0.0f) {
+                    output[y * width + x] = mean;
+                    continue;
+                }
+
+                float cl = std::sqrt(localVar) / mean;
+
+                if (cl <= cu) {
+                    // Homogeneous region -> mean
+                    output[y * width + x] = mean;
+                } else if (cl >= cmax) {
+                    // Point target / strong edge -> keep pixel
+                    output[y * width + x] = pixel;
+                } else {
+                    // Heterogeneous region -> adaptive exponential weighting
+                    float denom = cmax - cl;
+                    float weight = (denom > 1e-6f) ? std::exp(-damping * (cl - cu) / denom) : 0.0f;
+                    output[y * width + x] = mean * weight + pixel * (1.0f - weight);
                 }
             }
         }
@@ -809,15 +953,17 @@ void ImageEnhancement::gammaMapFilter(const float *input, float *output,
                 } else {
                     // Heterogeneous region — preserve structure
                     float alpha = (1.0f + cuSq) / (clSq - cuSq);
-                    // Ensure alpha is positive
-                    if (alpha < 0.0f) alpha = 0.0f;
-
-                // MAP estimate
-                float a = alpha;
-                float b = (alpha - 1.0f) * mean; // simplified from (alpha - L - 1)
-                float discriminant = b * b + 4.0f * a * pixel;
-                if (discriminant < 0.0f) discriminant = 0.0f;
-                output[y * width + x] = (b + std::sqrt(discriminant)) / (2.0f * a);
+                    if (alpha <= 1e-6f) {
+                        // Extreme variance / point target -> preserve original pixel
+                        output[y * width + x] = pixel;
+                    } else {
+                        // MAP estimate
+                        float a = alpha;
+                        float b = (alpha - 1.0f) * mean;
+                        float discriminant = b * b + 4.0f * a * pixel;
+                        if (discriminant < 0.0f) discriminant = 0.0f;
+                        output[y * width + x] = (b + std::sqrt(discriminant)) / (2.0f * a);
+                    }
                 }
             }
         }
@@ -915,22 +1061,40 @@ void ImageEnhancement::computeCovarianceMatrix(const std::vector<std::vector<flo
                                                  std::vector<std::vector<float>> &cov)
 {
     cov.assign(bands, std::vector<float>(bands, 0.0f));
+    if (bands <= 0 || n == 0)
+        return;
 
-    // NaN (NoData) pixels are skipped so a single invalid pixel cannot corrupt
-    // the covariance of every band pair. Dynamic valid count divisor per pair.
-    for (int i = 0; i < bands; i++) {
-        for (int j = i; j < bands; j++) {
-            double sum = 0.0;
-            size_t validCount = 0;
-            for (size_t k = 0; k < n; k++) {
-                if (std::isnan(centered[i][k]) || std::isnan(centered[j][k]))
+    // Cache-friendly pixel-outer accumulation: loads each pixel's spectrum once.
+    std::vector<std::vector<double>> sum(bands, std::vector<double>(bands, 0.0));
+    std::vector<std::vector<size_t>> validCount(bands, std::vector<size_t>(bands, 0));
+    std::vector<float> pVal(bands);
+
+    for (size_t k = 0; k < n; ++k) {
+        for (int b = 0; b < bands; ++b)
+            pVal[b] = centered[b][k];
+
+        for (int i = 0; i < bands; ++i) {
+            const float vi = pVal[i];
+            if (std::isnan(vi))
+                continue;
+            const double dvi = static_cast<double>(vi);
+            for (int j = i; j < bands; ++j) {
+                const float vj = pVal[j];
+                if (std::isnan(vj))
                     continue;
-                sum += static_cast<double>(centered[i][k]) * centered[j][k];
-                validCount++;
+                sum[i][j] += dvi * static_cast<double>(vj);
+                validCount[i][j]++;
             }
-            double divisor = (validCount > 1) ? static_cast<double>(validCount - 1) : 1.0;
-            cov[i][j] = static_cast<float>(sum / divisor);
-            cov[j][i] = cov[i][j];
+        }
+    }
+
+    for (int i = 0; i < bands; ++i) {
+        for (int j = i; j < bands; ++j) {
+            const size_t vc = validCount[i][j];
+            const double divisor = (vc > 1) ? static_cast<double>(vc - 1) : 1.0;
+            const float val = static_cast<float>(sum[i][j] / divisor);
+            cov[i][j] = val;
+            cov[j][i] = val;
         }
     }
 }
@@ -973,7 +1137,7 @@ void ImageEnhancement::jacobiEigen(std::vector<std::vector<float>> &A, int n,
         if (std::abs(app - aqq) < 1e-15f) {
             theta = static_cast<float>(M_PI / 4.0);
         } else {
-            theta = 0.5f * std::atan2(2.0f * apq, app - aqq);
+            theta = 0.5f * std::atan2(2.0f * apq, aqq - app);
         }
 
         float c = std::cos(theta);
@@ -1580,15 +1744,23 @@ bool ImageEnhancement::processMnfFile(const QString &sourcePath, const QString &
     }
 
     // Step 2: Compute whitened data covariance: C_Y = W^T * C_data * W
+    // 2-stage O(B^3) matrix multiplication: T = C_data * W, then C_Y = W^T * T
+    std::vector<std::vector<double>> T(bandCount, std::vector<double>(bandCount, 0.0));
+    for (int r = 0; r < bandCount; ++r) {
+        for (int c = 0; c < bandCount; ++c) {
+            double sum = 0.0;
+            for (int k = 0; k < bandCount; ++k)
+                sum += static_cast<double>(covMatrix[r][k]) * W[k][c];
+            T[r][c] = sum;
+        }
+    }
+
     std::vector<std::vector<float>> yCov(bandCount, std::vector<float>(bandCount, 0.0f));
     for (int i = 0; i < bandCount; ++i) {
         for (int j = i; j < bandCount; ++j) {
             double sum = 0.0;
-            for (int r = 0; r < bandCount; ++r) {
-                for (int c = 0; c < bandCount; ++c) {
-                    sum += W[r][i] * covMatrix[r][c] * W[c][j];
-                }
-            }
+            for (int r = 0; r < bandCount; ++r)
+                sum += W[r][i] * T[r][j];
             yCov[i][j] = static_cast<float>(sum);
             yCov[j][i] = yCov[i][j];
         }
