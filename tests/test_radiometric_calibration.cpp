@@ -147,6 +147,38 @@ TEST_CASE("toBrightnessTemperature rejects zero K1/K2", "[radcal]")
     REQUIRE_FALSE(toBrightnessTemperature(dn.data(), out.data(), 1, c));
 }
 
+TEST_CASE("Radiometric calibration preserves NoData and NaN pixels", "[radcal][nodata]")
+{
+    BandCoefficients c;
+    c.radianceGain = 0.05;
+    c.radianceBias = 1.0;
+    c.reflMult = 0.00002;
+    c.reflAdd = -0.1;
+    c.scale = 10000.0;
+    c.offset = 0.0;
+    c.k1 = 607.76;
+    c.k2 = 1260.56;
+
+    const float nd = -9999.0f;
+    std::vector<float> dn = {100.0f, nd, std::numeric_limits<float>::quiet_NaN()};
+    std::vector<float> rad(3), refl(3), temp(3);
+
+    REQUIRE(toRadiance(dn.data(), rad.data(), 3, c, true, nd));
+    REQUIRE_THAT(rad[0], WithinAbs(6.0f, 0.001f)); // 0.05*100 + 1.0
+    REQUIRE(rad[1] == nd);
+    REQUIRE(std::isnan(rad[2]));
+
+    REQUIRE(toToaReflectance(dn.data(), refl.data(), 3, c, SensorType::Generic, 45.0, true, nd));
+    REQUIRE_THAT(refl[0], WithinAbs(0.01f, 0.001f)); // 100 / 10000
+    REQUIRE(refl[1] == nd);
+    REQUIRE(std::isnan(refl[2]));
+
+    REQUIRE(toBrightnessTemperature(dn.data(), temp.data(), 3, c, true, nd));
+    REQUIRE(temp[0] > 0.0f);
+    REQUIRE(temp[1] == nd);
+    REQUIRE(std::isnan(temp[2]));
+}
+
 // ---------------------------------------------------------------------------
 // Metadata: Landsat MTL parsing
 // ---------------------------------------------------------------------------

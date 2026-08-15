@@ -95,7 +95,8 @@ namespace RadiometricCalibration
      * Convert DN to radiance: L = radianceGain * DN + radianceBias.
      */
     bool toRadiance(const float *dn, float *radiance, size_t count,
-                    const BandCoefficients &c);
+                    const BandCoefficients &c,
+                    bool hasNoData = false, double noDataValue = 0.0);
 
     /**
      * Convert DN to TOA reflectance.
@@ -106,7 +107,8 @@ namespace RadiometricCalibration
      */
     bool toToaReflectance(const float *dn, float *reflectance, size_t count,
                           const BandCoefficients &c, SensorType sensor,
-                          double sunElevationDeg);
+                          double sunElevationDeg,
+                          bool hasNoData = false, double noDataValue = 0.0);
 
     /**
      * Convert DN to brightness temperature (Kelvin).
@@ -114,7 +116,8 @@ namespace RadiometricCalibration
      * Requires k1 > 0 and k2 > 0.
      */
     bool toBrightnessTemperature(const float *dn, float *temperature, size_t count,
-                                 const BandCoefficients &c);
+                                 const BandCoefficients &c,
+                                 bool hasNoData = false, double noDataValue = 0.0);
 
     /**
      * Apply radiometric calibration to one or more bands of a GeoTIFF and write

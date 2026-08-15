@@ -374,18 +374,33 @@ bool loadMetadata(const QString &rasterPath, const QString &metadataPath,
 // Calibration kernels
 // ---------------------------------------------------------------------------
 
-bool toRadiance(const float *dn, float *radiance, size_t count, const BandCoefficients &c)
+bool toRadiance(const float *dn, float *radiance, size_t count, const BandCoefficients &c,
+                bool hasNoData, double noDataValue)
 {
-    return MathUtils::linearScale(dn, radiance, count,
-                                  static_cast<float>(c.radianceGain),
-                                  static_cast<float>(c.radianceBias));
+    if (!dn || !radiance || count == 0) return false;
+    const float gain = static_cast<float>(c.radianceGain);
+    const float bias = static_cast<float>(c.radianceBias);
+    const float nd = static_cast<float>(noDataValue);
+    for (size_t i = 0; i < count; ++i) {
+        const float val = dn[i];
+        if (std::isnan(val)) {
+            radiance[i] = std::numeric_limits<float>::quiet_NaN();
+        } else if (hasNoData && val == nd) {
+            radiance[i] = nd;
+        } else {
+            radiance[i] = gain * val + bias;
+        }
+    }
+    return true;
 }
 
 bool toToaReflectance(const float *dn, float *reflectance, size_t count,
                       const BandCoefficients &c, SensorType sensor,
-                      double sunElevationDeg)
+                      double sunElevationDeg,
+                      bool hasNoData, double noDataValue)
 {
     if (!dn || !reflectance || count == 0) return false;
+    const float nd = static_cast<float>(noDataValue);
 
     if (sensor == SensorType::Landsat) {
         // Landsat: rho = (reflMult*DN + reflAdd) / sin(sunEl)
@@ -397,21 +412,38 @@ bool toToaReflectance(const float *dn, float *reflectance, size_t count,
         const float mult = static_cast<float>(c.reflMult);
         const float add = static_cast<float>(c.reflAdd);
         const float invSin = static_cast<float>(1.0 / sinEl);
-        for (size_t i = 0; i < count; i++)
-            reflectance[i] = (mult * dn[i] + add) * invSin;
+        for (size_t i = 0; i < count; i++) {
+            const float val = dn[i];
+            if (std::isnan(val)) {
+                reflectance[i] = std::numeric_limits<float>::quiet_NaN();
+            } else if (hasNoData && val == nd) {
+                reflectance[i] = nd;
+            } else {
+                reflectance[i] = (mult * val + add) * invSin;
+            }
+        }
     } else {
         // Sentinel-2 / generic: rho = (DN + offset) / scale
         if (c.scale == 0.0) return false;
         const float offset = static_cast<float>(c.offset);
         const float invScale = static_cast<float>(1.0 / c.scale);
-        for (size_t i = 0; i < count; i++)
-            reflectance[i] = (dn[i] + offset) * invScale;
+        for (size_t i = 0; i < count; i++) {
+            const float val = dn[i];
+            if (std::isnan(val)) {
+                reflectance[i] = std::numeric_limits<float>::quiet_NaN();
+            } else if (hasNoData && val == nd) {
+                reflectance[i] = nd;
+            } else {
+                reflectance[i] = (val + offset) * invScale;
+            }
+        }
     }
     return true;
 }
 
 bool toBrightnessTemperature(const float *dn, float *temperature, size_t count,
-                             const BandCoefficients &c)
+                             const BandCoefficients &c,
+                             bool hasNoData, double noDataValue)
 {
     if (!dn || !temperature || count == 0) return false;
     if (c.k1 <= 0.0 || c.k2 <= 0.0) return false;
@@ -419,8 +451,18 @@ bool toBrightnessTemperature(const float *dn, float *temperature, size_t count,
     const float bias = static_cast<float>(c.radianceBias);
     const float k1 = static_cast<float>(c.k1);
     const float k2 = static_cast<float>(c.k2);
+    const float nd = static_cast<float>(noDataValue);
     for (size_t i = 0; i < count; i++) {
-        const float l = gain * dn[i] + bias;
+        const float val = dn[i];
+        if (std::isnan(val)) {
+            temperature[i] = std::numeric_limits<float>::quiet_NaN();
+            continue;
+        }
+        if (hasNoData && val == nd) {
+            temperature[i] = nd;
+            continue;
+        }
+        const float l = gain * val + bias;
         if (l <= 0.0f) {
             temperature[i] = 0.0f;
             continue;
@@ -527,6 +569,12 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
 
         const BandCoefficients &c = meta.bands.value(b);
 
+        bool hasNoData = false;
+        const double noDataVal = srcDataset.bandNoDataValue(b, &hasNoData);
+        if (hasNoData) {
+            outDataset.setBandNoDataValue(idx + 1, noDataVal);
+        }
+
         std::vector<float> out;
         QString tileError;
         const bool ok = GdalBlockStream(srcDataset, b, kTile, kTile).forEach(
@@ -536,13 +584,13 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                 bool tOk = false;
                 switch (unit) {
                 case OutputUnit::Radiance:
-                    tOk = toRadiance(pixels, out.data(), tileCount, c);
+                    tOk = toRadiance(pixels, out.data(), tileCount, c, hasNoData, noDataVal);
                     break;
                 case OutputUnit::ToaReflectance:
-                    tOk = toToaReflectance(pixels, out.data(), tileCount, c, meta.sensor, meta.sunElevationDeg);
+                    tOk = toToaReflectance(pixels, out.data(), tileCount, c, meta.sensor, meta.sunElevationDeg, hasNoData, noDataVal);
                     break;
                 case OutputUnit::BrightnessTemperature:
-                    tOk = toBrightnessTemperature(pixels, out.data(), tileCount, c);
+                    tOk = toBrightnessTemperature(pixels, out.data(), tileCount, c, hasNoData, noDataVal);
                     break;
                 }
                 if (!tOk) {

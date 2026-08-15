@@ -1,5 +1,6 @@
 // tests/test_atmospheric.cpp — TDD Red phase for DOS atmospheric correction
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "processing/algorithms/atmospheric_correction.h"
@@ -468,5 +469,55 @@ TEST_CASE("processFileMultiBand applies QUAC", "[atm][quac][gdal]")
             REQUIRE(result[i] >= 0.0f);
             REQUIRE(result[i] <= 1.0f);
         }
+    }
+}
+
+TEST_CASE("DOS1 processFile preserves NoData and excludes NoData from dark object stats", "[atm][dos1][nodata]")
+{
+    ensureGdalInit();
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    const QString sourcePath = dir.filePath(QStringLiteral("src_nodata.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("out_nodata.tif"));
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+
+    const int W = 4, H = 4;
+    GDALDatasetH srcDs = createOutputTiff(sourcePath, W, H, 1, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+    GDALRasterBandH rb = GDALGetRasterBand(srcDs, 1);
+    GDALSetRasterNoDataValue(rb, -9999.0);
+
+    // Valid pixels: 100..115; NoData pixels at corners: -9999.0
+    std::vector<float> data(W * H);
+    for (int i = 0; i < W * H; ++i)
+        data[i] = 100.0f + static_cast<float>(i);
+    data[0] = -9999.0f;
+    data[15] = -9999.0f;
+
+    REQUIRE(GDALRasterIO(rb, GF_Write, 0, 0, W, H, data.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(srcDs);
+
+    QString error;
+    const bool ok = AtmosphericCorrection::processFile(sourcePath, outputPath, 1,
+                                                      AtmosphericCorrection::Method::Dos1,
+                                                      0.01f, 0.0f, 1.0f, &error);
+    REQUIRE(ok);
+    REQUIRE(error.isEmpty());
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    bool hasNoData = false;
+    CHECK(out.bandNoDataValue(1, &hasNoData) == Catch::Approx(-9999.0));
+    CHECK(hasNoData);
+
+    std::vector<float> res(W * H);
+    REQUIRE(out.readBandData(1, res.data(), W, H));
+    // NoData pixels must stay -9999
+    CHECK(res[0] == Catch::Approx(-9999.0f));
+    CHECK(res[15] == Catch::Approx(-9999.0f));
+    // Dark object should be lowest valid pixel (101.0 -> radiance 1.01), so valid pixels are >= 0
+    for (int i = 1; i < 15; ++i) {
+        CHECK(res[i] >= 0.0f);
     }
 }

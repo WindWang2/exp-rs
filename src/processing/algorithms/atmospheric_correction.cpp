@@ -78,8 +78,10 @@ namespace {
 /// Non-finite values (NaN and ±inf) are treated as invalid radiance.
 struct DarkObjectStats
 {
-    explicit DarkObjectStats( int bins = 1024 )
-      : m_nbins( std::max( 16, std::min( bins, 1 << 20 ) ) )
+    explicit DarkObjectStats( int bins = 1024, bool hasNoData = false, double noDataValue = 0.0 )
+      : m_nbins( std::max( 16, std::min( bins, 1 << 20 ) ) ),
+        m_hasNoData( hasNoData ),
+        m_noDataValue( static_cast<float>( noDataValue ) )
     {
     }
 
@@ -90,7 +92,7 @@ struct DarkObjectStats
             return;
         for ( size_t i = 0; i < count; ++i ) {
             const float v = data[i];
-            if ( !std::isfinite( v ) )
+            if ( !std::isfinite( v ) || ( m_hasNoData && v == m_noDataValue ) )
                 continue;
             m_minVal = std::min( m_minVal, v );
             m_maxVal = std::max( m_maxVal, v );
@@ -120,7 +122,7 @@ struct DarkObjectStats
             return;
         for ( size_t i = 0; i < count; ++i ) {
             const float v = data[i];
-            if ( !std::isfinite( v ) )
+            if ( !std::isfinite( v ) || ( m_hasNoData && v == m_noDataValue ) )
                 continue;
             size_t b = static_cast<size_t>( ( v - m_minVal ) / m_binWidth );
             if ( b >= static_cast<size_t>( m_nbins ) )
@@ -151,6 +153,8 @@ struct DarkObjectStats
 
   private:
     int m_nbins;
+    bool m_hasNoData = false;
+    float m_noDataValue = 0.0f;
     float m_minVal = std::numeric_limits<float>::max();
     float m_maxVal = -std::numeric_limits<float>::max();
     float m_binWidth = 1.0f;
@@ -403,6 +407,13 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                            srcDataset.geoTransform(), srcDataset.projection(), errorMessage))
         return false;
 
+    bool hasNoData = false;
+    const double noDataVal = srcDataset.bandNoDataValue(bandNum, &hasNoData);
+    if (hasNoData) {
+        outDataset.setBandNoDataValue(1, noDataVal);
+    }
+    const float ndVal = static_cast<float>(noDataVal);
+
     constexpr int kTile = 256; // nominal stream tile size (edge-clamped)
     const bool needsDarkLevel = (method == Method::Dos1 || method == Method::Dos2);
     const float transmittance = (method == Method::Dos2) ? estimateTransmittance(airmass) : 1.0f;
@@ -410,7 +421,7 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
     // Pass 1 (+2): full-scene dark-object statistics for DOS1/DOS2.
     float darkLevel = 0.0f;
     if (needsDarkLevel) {
-        DarkObjectStats stats;
+        DarkObjectStats stats(1024, hasNoData, noDataVal);
         std::vector<float> radiance;
         QString statError;
         const auto statsPass = [&](bool binning) -> bool {
@@ -418,9 +429,12 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                 [&](const GdalBlockStream::Tile &tile, const float *pixels) {
                     const size_t n = static_cast<size_t>(tile.width) * tile.height;
                     radiance.resize(n);
-                    if (!dnToRadiance(pixels, radiance.data(), n, gain, bias)) {
-                        statError = QStringLiteral("Radiance conversion failed (band %1)").arg(bandNum);
-                        return false;
+                    for (size_t i = 0; i < n; ++i) {
+                        const float val = pixels[i];
+                        if (std::isnan(val) || (hasNoData && val == ndVal))
+                            radiance[i] = std::numeric_limits<float>::quiet_NaN();
+                        else
+                            radiance[i] = gain * val + bias;
                     }
                     if (binning)
                         stats.accumulateBins(radiance.data(), n);
@@ -451,35 +465,30 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
         [&](const GdalBlockStream::Tile &tile, const float *pixels) {
             const size_t n = static_cast<size_t>(tile.width) * tile.height;
             out.resize(n);
-            bool tOk = false;
-            switch (method) {
-            case Method::DnToRadiance:
-                tOk = dnToRadiance(pixels, out.data(), n, gain, bias);
-                break;
-            case Method::Dos1:
-                // surface = radiance - dark_level (histogram dark object).
-                for (size_t i = 0; i < n; ++i)
-                    out[i] = gain * pixels[i] + bias - darkLevel;
-                tOk = true;
-                break;
-            case Method::Dos2: {
-                // surface = (radiance - dark_level) / transmittance.
-                if (transmittance <= 0.0f) {
-                    tileError = QStringLiteral("Invalid atmospheric transmittance");
+            if (method == Method::Dos2 && transmittance <= 0.0f) {
+                tileError = QStringLiteral("Invalid atmospheric transmittance");
+                return false;
+            }
+            for (size_t i = 0; i < n; ++i) {
+                const float val = pixels[i];
+                if (std::isnan(val) || (hasNoData && val == ndVal)) {
+                    out[i] = hasNoData ? ndVal : std::numeric_limits<float>::quiet_NaN();
+                    continue;
+                }
+                switch (method) {
+                case Method::DnToRadiance:
+                    out[i] = gain * val + bias;
+                    break;
+                case Method::Dos1:
+                    out[i] = gain * val + bias - darkLevel;
+                    break;
+                case Method::Dos2:
+                    out[i] = (gain * val + bias - darkLevel) / transmittance;
+                    break;
+                default:
+                    tileError = QStringLiteral("Unknown atmospheric correction method");
                     return false;
                 }
-                for (size_t i = 0; i < n; ++i)
-                    out[i] = (gain * pixels[i] + bias - darkLevel) / transmittance;
-                tOk = true;
-                break;
-            }
-            default:
-                tileError = QStringLiteral("Unknown atmospheric correction method");
-                return false;
-            }
-            if (!tOk) {
-                tileError = QStringLiteral("Atmospheric correction failed (band %1)").arg(bandNum);
-                return false;
             }
             return outDataset.writeBandWindow(1, tile.xOffset, tile.yOffset,
                                               tile.width, tile.height, out.data());
