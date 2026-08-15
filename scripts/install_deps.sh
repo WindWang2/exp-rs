@@ -42,7 +42,7 @@ install_arch() {
         qt6-base qt6-svg qt6-tools qt6-multimedia qt6-5compat
         sqlite zlib libzip zstd
         protobuf curl expat pcre2
-        qca-qt6
+        qca-qt6 gsl jsoncpp
         cmake make gcc
         bison flex
         python
@@ -68,7 +68,7 @@ install_ubuntu() {
         libsqlite3-dev zlib1g-dev libzip-dev libzstd-dev
         libprotobuf-dev protobuf-compiler
         libcurl4-openssl-dev libexpat1-dev libpcre2-dev
-        libqca-qt6-qt6-dev
+        libqca-qt6-qt6-dev libgsl-dev libjsoncpp-dev
         cmake make g++
         bison flex
         python3-dev
@@ -89,7 +89,7 @@ install_fedora() {
         qt6-qtmultimedia-devel qt6-qt5compat-devel
         sqlite-devel zlib-devel libzip-devel libzstd-devel
         protobuf-devel curl-devel expat-devel pcre2-devel
-        qca-qt6-devel
+        qca-qt6-devel gsl-devel jsoncpp-devel
         cmake make gcc-c++
         bison flex
         python3-devel
@@ -109,6 +109,7 @@ install_macos() {
         qt6
         sqlite3 zlib libzip zstd
         protobuf curl expat pcre2
+        gsl jsoncpp
         cmake bison flex
         python3
         opencv
