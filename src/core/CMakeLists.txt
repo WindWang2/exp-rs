@@ -2759,7 +2759,7 @@ target_link_libraries(qgis_core
   GEOS::geos_c
   GDAL::GDAL
   EXPAT::EXPAT
-  SQLite::SQLite3
+  SQLite3::SQLite3
   ${LIBZIP_LIBRARY}
   $<TARGET_NAME_IF_EXISTS:protobuf::libprotobuf-lite>
   ${ZLIB_LIBRARIES}
@@ -2804,6 +2804,9 @@ endif()
 
 if (WITH_SPATIALITE)
   target_link_libraries(qgis_core spatialite::spatialite)
+  if (TARGET LibXml2::LibXml2)
+    target_link_libraries(qgis_core LibXml2::LibXml2)
+  endif()
 endif()
 
 target_link_libraries(qgis_core Qt6::Core5Compat)
@@ -2941,3 +2944,9 @@ if(SICNU_EMBED_PYTHON)
     Sicnu::qgis_display
   )
 endif()
+
+install(TARGETS sicnu_core
+  RUNTIME DESTINATION ${QGIS_BIN_DIR}
+  LIBRARY DESTINATION ${QGIS_LIB_DIR}
+  ARCHIVE DESTINATION ${QGIS_LIB_DIR}
+)

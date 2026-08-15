@@ -15,5 +15,7 @@ target_link_libraries(layer_tree_plugin PRIVATE
 )
 
 install(TARGETS layer_tree_plugin
+    RUNTIME DESTINATION ${QGIS_BIN_DIR}
     LIBRARY DESTINATION ${QGIS_PLUGIN_SUBDIR}
+    ARCHIVE DESTINATION ${QGIS_LIB_DIR}
 )

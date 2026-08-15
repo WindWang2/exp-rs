@@ -300,6 +300,10 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     ${PCRE2_8}
 )
 
+if (TARGET LibXml2::LibXml2)
+    target_link_libraries(sicnu_geo_rs PRIVATE LibXml2::LibXml2)
+endif()
+
 if(SICNU_EMBED_PYTHON)
     target_sources(sicnu_geo_rs PRIVATE
         ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_console.cpp
@@ -365,6 +369,12 @@ elseif(EXISTS ${CMAKE_SOURCE_DIR}/qgis_ref/resources)
             PATTERN "*.db" EXCLUDE)
 endif()
 
+# Install runtime data assets (schemas, pipelines, tools, processing metadata, sample plugins)
+if(EXISTS ${CMAKE_SOURCE_DIR}/data)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/data
+            DESTINATION share/sicnu_geo_rs)
+endif()
+
 # Install desktop file (only if packaging files exist)
 if(EXISTS ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.desktop)
     install(FILES ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.desktop
@@ -375,4 +385,10 @@ endif()
 if(EXISTS ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.svg)
     install(FILES ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.svg
             DESTINATION share/icons/hicolor/scalable/apps)
+endif()
+
+# Install AppStream AppData metadata
+if(EXISTS ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.appdata.xml)
+    install(FILES ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.appdata.xml
+            DESTINATION share/metainfo)
 endif()

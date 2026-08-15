@@ -16,7 +16,6 @@ add_library(sicnu_processing SHARED
     algorithms/radiometric_calibration.cpp
     algorithms/change_detection.cpp
     algorithms/post_classification.cpp
-    gdal/gdal_grid_compat.cpp
     algorithms/qa_mask.cpp
     algorithms/math_utils.cpp
     algorithms/mosaic.cpp
@@ -231,5 +230,7 @@ set_target_properties(sicnu_task_center PROPERTIES
 )
 
 install(TARGETS sicnu_processing
-    LIBRARY DESTINATION ${QGIS_LIB_SUBDIR}
+    RUNTIME DESTINATION ${QGIS_BIN_DIR}
+    LIBRARY DESTINATION ${QGIS_LIB_DIR}
+    ARCHIVE DESTINATION ${QGIS_LIB_DIR}
 )

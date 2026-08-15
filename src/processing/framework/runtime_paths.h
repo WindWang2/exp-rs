@@ -19,7 +19,20 @@ namespace sicnu::processing {
 /// marker is found, returns the relativePath resolved against the topmost dir.
 inline QString resolveRuntimeDataPath( const QString &relativePath )
 {
-    QDir dir( QCoreApplication::applicationDirPath() );
+    const QString appDir = QCoreApplication::applicationDirPath();
+
+    // 1. Check standard installed prefix layout: <appDir>/../share/sicnu_geo_rs/<relativePath>
+    const QString installedUp = QDir( appDir ).filePath( QStringLiteral( "../share/sicnu_geo_rs/" ) + relativePath );
+    if ( QFileInfo::exists( installedUp ) )
+        return QDir::cleanPath( installedUp );
+
+    // 2. Check direct relative share layout: <appDir>/share/sicnu_geo_rs/<relativePath>
+    const QString installedDirect = QDir( appDir ).filePath( QStringLiteral( "share/sicnu_geo_rs/" ) + relativePath );
+    if ( QFileInfo::exists( installedDirect ) )
+        return QDir::cleanPath( installedDirect );
+
+    // 3. Fall back to walking up for source/build tree markers (CMakeLists.txt or data/)
+    QDir dir( appDir );
     while ( !dir.exists( QStringLiteral( "CMakeLists.txt" ) )
             && !dir.exists( QStringLiteral( "data" ) )
             && dir.cdUp() )

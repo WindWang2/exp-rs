@@ -25,7 +25,10 @@ public:
    */
   static QString prefixPath()
   {
-    return QCoreApplication::applicationDirPath();
+    QDir dir( QCoreApplication::applicationDirPath() );
+    if ( dir.dirName() == QLatin1String( "bin" ) )
+      dir.cdUp();
+    return dir.absolutePath();
   }
 
   /**

@@ -147,7 +147,9 @@ set_target_properties(sicnu_operators PROPERTIES
 )
 
 install(TARGETS sicnu_operators
-    LIBRARY DESTINATION ${QGIS_LIB_SUBDIR}
+    RUNTIME DESTINATION ${QGIS_BIN_DIR}
+    LIBRARY DESTINATION ${QGIS_LIB_DIR}
+    ARCHIVE DESTINATION ${QGIS_LIB_DIR}
 )
 
 # ---------------------------------------------------------------------------
@@ -184,6 +186,7 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
         set_target_properties(_sicnu_operators PROPERTIES
             CXX_STANDARD 20
             CXX_STANDARD_REQUIRED ON
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
         )
         install(TARGETS _sicnu_operators
             LIBRARY DESTINATION ${QGIS_LIB_SUBDIR}

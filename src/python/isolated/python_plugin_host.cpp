@@ -66,9 +66,13 @@ bool PythonPluginHost::ensurePool( QString *errorOut )
 
   // Resolve worker_daemon.py from common layouts: installed app, source tree
   // relative to the binary, and cwd when developing from the repo root.
+  const QString appDir = QCoreApplication::applicationDirPath();
   const QStringList candidates = {
-    QDir( QCoreApplication::applicationDirPath() ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) ),
-    QDir( QCoreApplication::applicationDirPath() ).filePath( QStringLiteral( "../../src/python/scripts/worker_daemon.py" ) ),
+    QDir( appDir ).filePath( QStringLiteral( "../share/sicnu_geo_rs/scripts/worker_daemon.py" ) ),
+    QDir( appDir ).filePath( QStringLiteral( "share/sicnu_geo_rs/scripts/worker_daemon.py" ) ),
+    QDir( appDir ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) ),
+    QDir( appDir ).filePath( QStringLiteral( "../../src/python/scripts/worker_daemon.py" ) ),
+    QDir( appDir ).filePath( QStringLiteral( "scripts/worker_daemon.py" ) ),
     QDir::current().filePath( QStringLiteral( "src/python/scripts/worker_daemon.py" ) ),
     QDir::current().filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) ),
   };
