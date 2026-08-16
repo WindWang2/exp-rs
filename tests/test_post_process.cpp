@@ -206,3 +206,54 @@ TEST_CASE( "RsMajorityFilterOperator and RsRecodeOperator end-to-end execution",
   CHECK( recodedLabels.at<int>( 0, 0 ) == 10 );
   CHECK( recodedLabels.at<int>( 2, 2 ) == 10 );
 }
+
+TEST_CASE( "PostProcess: failed save does not destroy the previous output (#285)",
+           "[classify][post]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  GDALAllRegister();
+
+  const QString path = tmp.path() + "/out.tif";
+  cv::Mat labels( 4, 4, CV_32S );
+  labels.setTo( 0 );
+  labels.at<int>( 0, 0 ) = 1;
+  labels.at<int>( 3, 3 ) = 2;
+  double gt[6] = { 0, 1, 0, 4, 0, -1 };
+
+  // 1. A valid first output exists.
+  REQUIRE( RsPostProcess::saveLabelRaster( path, labels, gt, QString(),
+                                           QVector<QRgb>(), QStringList(),
+                                           std::numeric_limits<double>::quiet_NaN(), nullptr ) );
+
+  // 2. A failing re-run (unwritable directory) must leave it intact.
+  const QString unwritable = tmp.path() + "/no_such_dir/out.tif";
+  QString err;
+  REQUIRE_FALSE( RsPostProcess::saveLabelRaster( unwritable, labels, gt, QString(),
+                                                 QVector<QRgb>(), QStringList(),
+                                                 std::numeric_limits<double>::quiet_NaN(), &err ) );
+  REQUIRE_FALSE( err.isEmpty() );
+
+  // 3. The original file still reads back with the same values.
+  GDALDatasetH ds = GDALOpenEx( path.toUtf8().constData(), GDAL_OF_RASTER,
+                                nullptr, nullptr, nullptr );
+  REQUIRE( ds != nullptr );
+  int vals[16] = { 0 };
+  GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
+  REQUIRE( GDALRasterIO( band, GF_Read, 0, 0, 4, 4, vals, 4, 4, GDT_Int32, 0, 0 ) == CE_None );
+  GDALClose( ds );
+  REQUIRE( vals[0] == 1 );
+  REQUIRE( vals[15] == 2 );
+
+  // 4. A successful overwrite replaces the file (and leaves no .tmp~ behind).
+  labels.at<int>( 3, 3 ) = 9;
+  REQUIRE( RsPostProcess::saveLabelRaster( path, labels, gt, QString(),
+                                           QVector<QRgb>(), QStringList(),
+                                           std::numeric_limits<double>::quiet_NaN(), nullptr ) );
+  REQUIRE_FALSE( QFileInfo::exists( path + QLatin1String( ".tmp~" ) ) );
+  ds = GDALOpenEx( path.toUtf8().constData(), GDAL_OF_RASTER, nullptr, nullptr, nullptr );
+  REQUIRE( ds != nullptr );
+  REQUIRE( GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Read, 0, 0, 4, 4, vals, 4, 4, GDT_Int32, 0, 0 ) == CE_None );
+  GDALClose( ds );
+  REQUIRE( vals[15] == 9 );
+}

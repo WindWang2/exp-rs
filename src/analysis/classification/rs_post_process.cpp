@@ -504,22 +504,12 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
   for ( const QString &opt : creationOptions )
     papsz = CSLAddString( papsz, opt.toUtf8().constData() );
 
-  // Remove existing file so Create succeeds.
-  GDALDriver *existing = GetGDALDriverManager()->GetDriverByName(
-    driverName.toUtf8().constData() );
-  if ( QFileInfo::exists( path ) )
-  {
-    GDALDataset *old = static_cast<GDALDataset *>(
-      GDALOpen( path.toUtf8().constData(), GA_ReadOnly ) );
-    if ( old )
-    {
-      GDALClose( old );
-      if ( existing )
-        existing->Delete( path.toUtf8().constData() );
-    }
-  }
-
-  GDALDataset *ds = drv->Create( path.toUtf8().constData(), lab.cols, lab.rows, 1, gdt, papsz );
+  // Write to a sibling temp file first and rename over the target on success,
+  // so a failed run (disk full, permissions, bad creation options) never
+  // destroys the previous output (#285). GDAL closes the dataset before the
+  // rename, so the target is only replaced by a fully written file.
+  const QString tmpPath = path + QLatin1String( ".tmp~" );
+  GDALDataset *ds = drv->Create( tmpPath.toUtf8().constData(), lab.cols, lab.rows, 1, gdt, papsz );
   CSLDestroy( papsz );
   if ( !ds )
   {
@@ -558,6 +548,7 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
   if ( rio != CE_None )
   {
     GDALClose( ds );
+    QFile::remove( tmpPath );
     setErr( err, QStringLiteral( "Failed to write label band: %1" ).arg( path ) );
     return false;
   }
@@ -583,7 +574,17 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
     ds->GetRasterBand( 1 )->SetNoDataValue( nodataValue );
 
   GDALClose( ds );
-  return true;
+
+  // Rename the fully written temp file over the target. GTiff/HFA/GPKG all
+  // support GDALDriver::Rename (POSIX rename when driverCreateCopyFileSet is
+  // unset); fall back to a best-effort move and report only if that fails.
+  // The previous output survives any failure before this point (#285).
+  if ( drv->Rename( path.toUtf8().constData(), tmpPath.toUtf8().constData() ) == CE_None )
+    return true;
+  if ( QFile::remove( path ) && QFile::rename( tmpPath, path ) )
+    return true;
+  setErr( err, QStringLiteral( "Failed to move output into place: %1" ).arg( path ) );
+  return false;
 }
 
 bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &vectorPath,
@@ -624,22 +625,10 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
     return false;
   }
 
-  // Remove existing output if present.
-  {
-    GDALDataset *old = static_cast<GDALDataset *>(
-      GDALOpenEx( vectorPath.toUtf8().constData(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr ) );
-    if ( old )
-    {
-      GDALClose( old );
-      drv->Delete( vectorPath.toUtf8().constData() );
-    }
-    else if ( QFileInfo::exists( vectorPath ) )
-    {
-      drv->Delete( vectorPath.toUtf8().constData() );
-    }
-  }
-
-  GDALDataset *dst = drv->Create( vectorPath.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
+  // Write to a sibling temp dataset first and rename over the target on
+  // success, so a failed polygonize never destroys the previous output (#285).
+  const QString tmpPath = vectorPath + QLatin1String( ".tmp~" );
+  GDALDataset *dst = drv->Create( tmpPath.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
   if ( !dst )
   {
     GDALClose( src );
@@ -662,6 +651,7 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
   {
     GDALClose( dst );
     GDALClose( src );
+    QFile::remove( tmpPath );
     setErr( err, QStringLiteral( "Cannot create layer in %1" ).arg( vectorPath ) );
     return false;
   }
@@ -671,6 +661,7 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
   {
     GDALClose( dst );
     GDALClose( src );
+    QFile::remove( tmpPath );
     setErr( err, QStringLiteral( "Cannot create class field" ) );
     return false;
   }
@@ -690,7 +681,16 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
 
   if ( perr != CE_None )
   {
+    QFile::remove( tmpPath );
     setErr( err, QStringLiteral( "GDALPolygonize failed for %1" ).arg( labelRasterPath ) );
+    return false;
+  }
+
+  // Rename over the target only after the dataset is fully written (#285).
+  if ( drv->Rename( vectorPath.toUtf8().constData(), tmpPath.toUtf8().constData() ) != CE_None )
+  {
+    QFile::remove( tmpPath );
+    setErr( err, QStringLiteral( "Failed to move vector output into place: %1" ).arg( vectorPath ) );
     return false;
   }
   return true;
