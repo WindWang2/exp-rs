@@ -293,8 +293,14 @@ int QgsGeorefTransform::enabledGcpCount( const QVector<QgsGcpPoint> &gcps )
 }
 
 void QgsGeorefTransform::collectEnabledGcps( const QVector<QgsGcpPoint> &gcps,
-                                             QVector<QgsPointXY> &src, QVector<QgsPointXY> &dst )
+                                             QVector<QgsPointXY> &src,
+                                             QVector<QgsPointXY> &dst,
+                                             const QgsCoordinateReferenceSystem &targetCrs,
+                                             const QgsCoordinateTransformContext &context,
+                                             bool *ok )
 {
+  if ( ok )
+    *ok = true;
   src.clear();
   dst.clear();
   for ( const auto &g : gcps )
@@ -302,7 +308,21 @@ void QgsGeorefTransform::collectEnabledGcps( const QVector<QgsGcpPoint> &gcps,
     if ( !g.isEnabled() )
       continue;
     src.append( g.sourcePoint() );
-    dst.append( g.destinationPoint() );
+    if ( targetCrs.isValid() && g.destinationPointCrs().isValid() && g.destinationPointCrs() != targetCrs )
+    {
+      bool ptOk = true;
+      QgsPointXY pt = g.transformedDestinationPoint( targetCrs, context, &ptOk );
+      if ( !ptOk )
+      {
+        if ( ok )
+          *ok = false;
+      }
+      dst.append( pt );
+    }
+    else
+    {
+      dst.append( g.destinationPoint() );
+    }
   }
 }
 
@@ -334,9 +354,27 @@ RsGeorefFitResult QgsGeorefTransform::fit( const QVector<QgsGcpPoint> &gcps,
     return fit;
   }
 
+  QgsCoordinateReferenceSystem targetCrs;
+  for ( const auto &g : gcps )
+  {
+    if ( g.isEnabled() && g.destinationPointCrs().isValid() )
+    {
+      targetCrs = g.destinationPointCrs();
+      break;
+    }
+  }
+
+  bool collectOk = true;
   QVector<QgsPointXY> src;
   QVector<QgsPointXY> dst;
-  collectEnabledGcps( gcps, src, dst );
+  collectEnabledGcps( gcps, src, dst, targetCrs, QgsCoordinateTransformContext(), &collectOk );
+
+  if ( !collectOk )
+  {
+    fit.ready = false;
+    fit.errorMessage = QStringLiteral( "Failed to reproject one or more GCPs to common CRS" );
+    return fit;
+  }
 
   // Match the shell: always invert Y for GCP parameter estimation.
   std::unique_ptr<QgsGeorefTransform> transform;

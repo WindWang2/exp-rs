@@ -58,11 +58,11 @@ class QGIS_ANALYSIS_EXPORT QgsRpcGcpTransformer : public QgsGcpTransformerInterf
      * too).
      *
      * \a demPath is also written into the existing \c mDem member so that
-     * downstream code reading \ref demPath continues to work.  When
+     * downstream code reading \ref demPath continues to work. When
      * \a zOffset is non-zero, the next call to \ref updateParametersFromGcps
-     * pushes `RPC_HEIGHT=<zOffset>` into GDAL's `papszOptions` (placed
-     * before any `RPC_DEM` so the DEM raster still wins when both are
-     * present, per the GDAL convention).
+     * pushes `RPC_HEIGHT=<zOffset>` into GDAL's `papszOptions` (used as constant
+     * elevation if no DEM is given, or added on top of the DEM-sampled elevation
+     * if a DEM raster is present, per GDAL GDALRPCGetHeightAtLongLat convention).
      *
      * \a useGcpRefinement is stored for the Task 11.5.5 linear-bias step.
      *

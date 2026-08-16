@@ -5,6 +5,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "qgsgeoreftransform.h"
+#include "qgslogger.h"
 #include "rs_warp_task.h"
 
 #include <QByteArray>
@@ -308,18 +309,31 @@ std::optional<RsGeorefWarpSnapshot> RsGeoreferencingSession::createWarpSnapshot(
 std::unique_ptr<QgsGeorefTransform> RsGeoreferencingSession::transformFromSnapshot(
   const RsGeorefWarpSnapshot &snap )
 {
-  auto transform = std::make_unique<QgsGeorefTransform>( snap.method );
-  if ( !snap.sourcePath.isEmpty() )
-    transform->loadRaster( snap.sourcePath );
+  try
+  {
+    auto transform = std::make_unique<QgsGeorefTransform>( snap.method );
+    if ( !snap.sourcePath.isEmpty() )
+      transform->loadRaster( snap.sourcePath );
 
-  QVector<QgsPointXY> src;
-  QVector<QgsPointXY> dst;
-  QgsGeorefTransform::collectEnabledGcps( snap.gcps, src, dst );
+    QVector<QgsPointXY> src;
+    QVector<QgsPointXY> dst;
+    QgsGeorefTransform::collectEnabledGcps( snap.gcps, src, dst, snap.destCrs );
 
-  constexpr bool kInvertYAxis = true;
-  if ( !transform->updateParametersFromGcps( src, dst, kInvertYAxis ) )
+    constexpr bool kInvertYAxis = true;
+    if ( !transform->updateParametersFromGcps( src, dst, kInvertYAxis ) )
+      return nullptr;
+    return transform;
+  }
+  catch ( const std::exception &e )
+  {
+    QgsDebugError( QStringLiteral( "transformFromSnapshot failed with exception: %1" ).arg( QString::fromUtf8( e.what() ) ) );
     return nullptr;
-  return transform;
+  }
+  catch ( ... )
+  {
+    QgsDebugError( QStringLiteral( "transformFromSnapshot failed with unknown exception" ) );
+    return nullptr;
+  }
 }
 
 long RsGeoreferencingSession::startWarpTask( const RsGeorefWarpSnapshot &snap )
@@ -327,7 +341,16 @@ long RsGeoreferencingSession::startWarpTask( const RsGeorefWarpSnapshot &snap )
   if ( mPendingWarpTaskId >= 0 )
     return -1;
 
-  auto transform = transformFromSnapshot( snap );
+  std::unique_ptr<QgsGeorefTransform> transform;
+  try
+  {
+    transform = transformFromSnapshot( snap );
+  }
+  catch ( const std::exception &e )
+  {
+    QgsDebugError( QStringLiteral( "startWarpTask failed: %1" ).arg( QString::fromUtf8( e.what() ) ) );
+    return -1;
+  }
   if ( !transform )
     return -1;
 

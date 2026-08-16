@@ -23,6 +23,7 @@
 #include "qgsgcppoint.h"
 #include "qgsgcptransformer.h"
 #include "qgsrasterchangecoords.h"
+#include "qgscoordinatetransformcontext.h"
 
 #include <QPointF>
 #include <QString>
@@ -203,10 +204,14 @@ class  QgsGeorefTransform : public QgsGcpTransformerInterface
 
     /**
      * Collects enabled GCPs from \a gcps into parallel source/destination
-     * coordinate vectors (shared helper for parameter estimation).
+     * coordinate vectors. If \a targetCrs is valid, reprojects destination
+     * points from their respective destinationPointCrs() to \a targetCrs.
      */
     static void collectEnabledGcps( const QVector<QgsGcpPoint> &gcps,
-                                    QVector<QgsPointXY> &src, QVector<QgsPointXY> &dst );
+                                    QVector<QgsPointXY> &src, QVector<QgsPointXY> &dst,
+                                    const QgsCoordinateReferenceSystem &targetCrs = QgsCoordinateReferenceSystem(),
+                                    const QgsCoordinateTransformContext &context = QgsCoordinateTransformContext(),
+                                    bool *ok = nullptr );
 
     /**
      * Minimum GCP count for \a method without constructing a full transform
