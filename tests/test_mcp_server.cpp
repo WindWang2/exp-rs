@@ -40,6 +40,27 @@ class TestMcpServer : public McpServer
 public:
     TestMcpServer() : McpServer() {}
 
+    QVariant lastResponseId;
+    QVariantMap lastResponseResult;
+    QVariant lastErrorId;
+    int lastErrorCode = 0;
+    QString lastErrorMessage;
+
+    void testHandleRequest(const QVariantMap &req) { handleRequest(req); }
+
+    void sendResponse(const QVariant &id, const QVariantMap &result) override
+    {
+        lastResponseId = id;
+        lastResponseResult = result;
+    }
+
+    void sendError(const QVariant &id, int code, const QString &message) override
+    {
+        lastErrorId = id;
+        lastErrorCode = code;
+        lastErrorMessage = message;
+    }
+
     QVariantMap testListAlgorithms() { return handleListAlgorithms(); }
     QVariantMap testGetAlgorithmSchema(const QString &id) { return handleGetAlgorithmSchema(id); }
     QVariantMap testListLayers() { return handleListLayers(); }
@@ -637,4 +658,63 @@ TEST_CASE( "OutputCommitter registers a published output on the owning thread", 
       registered = true;
   }
   CHECK( registered );
+}
+
+TEST_CASE( "MCP Server protocol lifecycle handshake and meta handlers", "[agent][mcp][lifecycle]" )
+{
+  TestMcpServer server;
+
+  // 1. initialize request
+  QVariantMap initReq;
+  initReq[QStringLiteral( "id" )] = 1;
+  initReq[QStringLiteral( "method" )] = QStringLiteral( "initialize" );
+  QVariantMap initParams;
+  initParams[QStringLiteral( "protocolVersion" )] = QStringLiteral( "2024-11-05" );
+  initReq[QStringLiteral( "params" )] = initParams;
+
+  server.testHandleRequest( initReq );
+  CHECK( server.lastResponseId.toInt() == 1 );
+  CHECK( server.lastResponseResult.contains( QStringLiteral( "protocolVersion" ) ) );
+  CHECK( server.lastResponseResult.contains( QStringLiteral( "capabilities" ) ) );
+  CHECK( server.lastResponseResult.contains( QStringLiteral( "serverInfo" ) ) );
+  const QVariantMap serverInfo = server.lastResponseResult.value( QStringLiteral( "serverInfo" ) ).toMap();
+  CHECK( serverInfo.value( QStringLiteral( "name" ) ).toString() == QStringLiteral( "exp-rs-mcp" ) );
+
+  // 2. notifications/initialized notification (no error, no response required)
+  server.lastErrorId = QVariant();
+  QVariantMap notifReq;
+  notifReq[QStringLiteral( "method" )] = QStringLiteral( "notifications/initialized" );
+  server.testHandleRequest( notifReq );
+  CHECK_FALSE( server.lastErrorId.isValid() );
+
+  // 3. ping request
+  QVariantMap pingReq;
+  pingReq[QStringLiteral( "id" )] = 2;
+  pingReq[QStringLiteral( "method" )] = QStringLiteral( "ping" );
+  server.testHandleRequest( pingReq );
+  CHECK( server.lastResponseId.toInt() == 2 );
+
+  // 4. tools/list request
+  QVariantMap toolsListReq;
+  toolsListReq[QStringLiteral( "id" )] = 3;
+  toolsListReq[QStringLiteral( "method" )] = QStringLiteral( "tools/list" );
+  server.testHandleRequest( toolsListReq );
+  CHECK( server.lastResponseId.toInt() == 3 );
+  CHECK( server.lastResponseResult.contains( QStringLiteral( "tools" ) ) );
+  CHECK_FALSE( server.lastResponseResult.value( QStringLiteral( "tools" ) ).toList().isEmpty() );
+
+  // 5. resources/list and prompts/list
+  QVariantMap resReq;
+  resReq[QStringLiteral( "id" )] = 4;
+  resReq[QStringLiteral( "method" )] = QStringLiteral( "resources/list" );
+  server.testHandleRequest( resReq );
+  CHECK( server.lastResponseId.toInt() == 4 );
+
+  // 6. Unknown method returns -32601
+  QVariantMap unknownReq;
+  unknownReq[QStringLiteral( "id" )] = 5;
+  unknownReq[QStringLiteral( "method" )] = QStringLiteral( "custom/unknown_method" );
+  server.testHandleRequest( unknownReq );
+  CHECK( server.lastErrorId.toInt() == 5 );
+  CHECK( server.lastErrorCode == -32601 );
 }

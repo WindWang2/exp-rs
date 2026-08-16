@@ -70,13 +70,12 @@ public:
 private slots:
     void onLineRead(const QString &line);
 
-private:
-    void handleRequest(const QVariantMap &request);
-    void sendResponse(const QVariant &id, const QVariantMap &result);
-    void sendError(const QVariant &id, int code, const QString &message);
-    void sendNotification(const QString &method, const QVariantMap &params);
-
 protected:
+    void handleRequest(const QVariantMap &request);
+    virtual void sendResponse(const QVariant &id, const QVariantMap &result);
+    virtual void sendError(const QVariant &id, int code, const QString &message);
+    virtual void sendNotification(const QString &method, const QVariantMap &params);
+
     // MCP Methods — canonical algorithm surface
     QVariantMap handleListAlgorithms();
     QVariantMap handleSearchAlgorithms(const QString &query, const QString &group,

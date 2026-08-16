@@ -426,7 +426,50 @@ void McpServer::handleRequest(const QVariantMap &request)
 
     SICNU_LOG_INFO(SicnuLogTags::MCP, QString("MCP request: %1 (id=%2)").arg(method).arg(id.toString()));
 
-    if (method == QStringLiteral("tools/list"))
+    if (method == QStringLiteral("initialize"))
+    {
+        QVariantMap result;
+        QString protocolVersion = params.value(QStringLiteral("protocolVersion")).toString();
+        if (protocolVersion.isEmpty())
+            protocolVersion = QStringLiteral("2024-11-05");
+        result[QStringLiteral("protocolVersion")] = protocolVersion;
+
+        QVariantMap capabilities;
+        QVariantMap toolsCap;
+        toolsCap[QStringLiteral("listChanged")] = false;
+        capabilities[QStringLiteral("tools")] = toolsCap;
+        result[QStringLiteral("capabilities")] = capabilities;
+
+        QVariantMap serverInfo;
+        serverInfo[QStringLiteral("name")] = QStringLiteral("exp-rs-mcp");
+        serverInfo[QStringLiteral("version")] = QStringLiteral("1.0.0");
+        result[QStringLiteral("serverInfo")] = serverInfo;
+
+        sendResponse(id, result);
+    }
+    else if (method == QStringLiteral("notifications/initialized"))
+    {
+        SICNU_LOG_INFO(SicnuLogTags::MCP, QStringLiteral("MCP client initialized notification received"));
+        return;
+    }
+    else if (method == QStringLiteral("ping"))
+    {
+        QVariantMap result;
+        sendResponse(id, result);
+    }
+    else if (method == QStringLiteral("resources/list"))
+    {
+        QVariantMap result;
+        result[QStringLiteral("resources")] = QVariantList();
+        sendResponse(id, result);
+    }
+    else if (method == QStringLiteral("prompts/list"))
+    {
+        QVariantMap result;
+        result[QStringLiteral("prompts")] = QVariantList();
+        sendResponse(id, result);
+    }
+    else if (method == QStringLiteral("tools/list"))
     {
         QVariantMap result;
         QVariantList tools;
@@ -826,7 +869,9 @@ QVariantMap McpServer::handleGetOperatorSchema(const QString &operatorId)
 {
     auto op = sicnu::operators::RSOperatorRegistry::instance().create(operatorId.toStdString());
     if (!op) {
-        throw std::runtime_error(QStringLiteral("Operator not found: %1").arg(operatorId).toStdString());
+        QVariantMap err;
+        err[QStringLiteral("error")] = QStringLiteral("Operator not found: ") + operatorId;
+        return err;
     }
 
     QVariantMap result = sicnu::processing::jsonObjectToVariantMap(op->schema());
@@ -929,6 +974,12 @@ QVariantMap McpServer::dispatchToolCall(const QString &toolId, const QVariantMap
 
     if (sicnu::processing::ToolCallDispatcher::isInteractionAction(toolId.toStdString())) {
         const Json::Value resVal = mDispatcher.dispatchAndAwait(envelope);
+        if (resVal.isObject() && resVal.isMember("status") && resVal["status"].asString() == "error") {
+            const std::string errMsg = resVal.isMember("errorMessage")
+                ? resVal["errorMessage"].asString()
+                : "Interaction tool execution failed";
+            throw std::runtime_error(errMsg);
+        }
         return sicnu::processing::jsonObjectToVariantMap(resVal);
     }
 
