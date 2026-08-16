@@ -326,7 +326,7 @@ void SpectralIndexDialog::runFromAsset()
     return;
   }
 
-  const QString inputPath = snapshot->uri().isEmpty() ? snapshot->source().canonicalSource : snapshot->uri();
+  const QString inputPath = snapshot->source().canonicalSource;
   if ( inputPath.isEmpty() )
   {
     QMessageBox::warning( this, dialogTitle(), tr( "所选资产无有效数据路径。" ) );

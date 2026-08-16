@@ -264,6 +264,32 @@ void ImageEnhancementPanel::onMethodChanged(int index)
     m_stackedWidget->setCurrentIndex(index);
 }
 
+void ImageEnhancementPanel::setRasterLayer(QgsRasterLayer *layer)
+{
+    RasterProcessingDialogBase::setRasterLayer(layer);
+    populateBandCombos();
+}
+
+void ImageEnhancementPanel::populateBandCombos()
+{
+    if (!m_band1Combo || !m_band2Combo)
+        return;
+    m_band1Combo->clear();
+    m_band2Combo->clear();
+    if (!m_rasterLayer || !m_rasterLayer->isValid())
+        return;
+    int bands = m_rasterLayer->bandCount();
+    for (int i = 1; i <= bands; ++i) {
+        QString name = tr("Band %1").arg(i);
+        m_band1Combo->addItem(name, i);
+        m_band2Combo->addItem(name, i);
+    }
+    if (bands >= 2) {
+        m_band1Combo->setCurrentIndex(0);
+        m_band2Combo->setCurrentIndex(1);
+    }
+}
+
 void ImageEnhancementPanel::onRun()
 {
     if (!validateInputs()) return;
@@ -296,6 +322,13 @@ void ImageEnhancementPanel::onRun()
     int speckleKernel = m_speckleKernelCombo->currentData().toInt();
     double noiseVar = m_noiseVarSpin->value();
     double damping = m_dampingSpin->value();
+
+    if (method == 2) {
+        if (band1 < 1 || band2 < 1 || (ratioType == 0 && band1 == band2)) {
+            QMessageBox::warning(this, dialogTitle(), tr("Please select valid distinct bands."));
+            return;
+        }
+    }
 
     runGdalTask([sourcePath, outPath, method, stretchType, clipPercent, stddevMult,
                     filterType, kernelSize, sigma, customKernelStr, ratioType, band1, band2,

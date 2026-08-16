@@ -47,7 +47,7 @@ ChatRequestPayload LlmStreamingClient::buildChatRequest( const LlmProviderProfil
   }
 
   payload.request.setUrl( QUrl( endpointUrl ) );
-  payload.request.setTransferTimeout( 10000 );
+  payload.request.setTransferTimeout( 120000 );
   payload.request.setHeader( QNetworkRequest::ContentTypeHeader, QStringLiteral( "application/json" ) );
 
   if ( !profile.apiKey.isEmpty() )
@@ -77,9 +77,7 @@ void LlmStreamingClient::sendChatCompletion( const QJsonArray &messages, const Q
 {
   cancel();
   m_buffer.clear();
-  m_toolCallId.clear();
-  m_toolFunctionName.clear();
-  m_toolArgumentsBuffer.clear();
+  m_toolCalls.clear();
 
   const ChatRequestPayload payload = buildChatRequest( m_profile, messages, tools );
 
@@ -187,9 +185,12 @@ void LlmStreamingClient::parseSseLine( const QString &line )
     for ( const auto &tcVal : toolCalls )
     {
       QJsonObject tcObj = tcVal.toObject();
+      int index = tcObj.contains( QStringLiteral( "index" ) ) ? tcObj[QStringLiteral( "index" )].toInt( 0 ) : 0;
+      auto &accu = m_toolCalls[index];
+
       if ( tcObj.contains( QStringLiteral( "id" ) ) && !tcObj[QStringLiteral( "id" )].toString().isEmpty() )
       {
-        m_toolCallId = tcObj[QStringLiteral( "id" )].toString();
+        accu.id = tcObj[QStringLiteral( "id" )].toString();
       }
 
       if ( tcObj.contains( QStringLiteral( "function" ) ) )
@@ -197,11 +198,11 @@ void LlmStreamingClient::parseSseLine( const QString &line )
         QJsonObject funcObj = tcObj[QStringLiteral( "function" )].toObject();
         if ( funcObj.contains( QStringLiteral( "name" ) ) && !funcObj[QStringLiteral( "name" )].toString().isEmpty() )
         {
-          m_toolFunctionName = funcObj[QStringLiteral( "name" )].toString();
+          accu.name = funcObj[QStringLiteral( "name" )].toString();
         }
         if ( funcObj.contains( QStringLiteral( "arguments" ) ) && funcObj[QStringLiteral( "arguments" )].isString() )
         {
-          m_toolArgumentsBuffer += funcObj[QStringLiteral( "arguments" )].toString();
+          accu.arguments += funcObj[QStringLiteral( "arguments" )].toString();
         }
       }
     }
@@ -210,57 +211,62 @@ void LlmStreamingClient::parseSseLine( const QString &line )
 
 void LlmStreamingClient::emitParsedToolCallOnce()
 {
-  if ( m_toolFunctionName.isEmpty() )
+  if ( m_toolCalls.empty() )
     return;
 
-  QJsonObject funcObj;
-  funcObj[QStringLiteral( "name" )] = m_toolFunctionName;
+  for ( const auto &pair : m_toolCalls )
+  {
+    const ToolCallAccumulator &accu = pair.second;
+    if ( accu.name.isEmpty() )
+      continue;
 
-  QJsonDocument argsDoc = QJsonDocument::fromJson( m_toolArgumentsBuffer.toUtf8() );
-  if ( argsDoc.isObject() )
-  {
-    funcObj[QStringLiteral( "arguments" )] = argsDoc.object();
-  }
-  else
-  {
-    QString rawArgs = m_toolArgumentsBuffer.trimmed();
-    if ( rawArgs.startsWith( '"' ) && rawArgs.endsWith( '"' ) && rawArgs.size() > 2 )
+    QJsonObject funcObj;
+    funcObj[QStringLiteral( "name" )] = accu.name;
+
+    QJsonDocument argsDoc = QJsonDocument::fromJson( accu.arguments.toUtf8() );
+    if ( argsDoc.isObject() )
     {
-      const QJsonDocument arrDoc = QJsonDocument::fromJson( QString( "[%1]" ).arg( rawArgs ).toUtf8() );
-      if ( arrDoc.isArray() && !arrDoc.array().isEmpty() && arrDoc.array()[0].isString() )
+      funcObj[QStringLiteral( "arguments" )] = argsDoc.object();
+    }
+    else
+    {
+      QString rawArgs = accu.arguments.trimmed();
+      if ( rawArgs.startsWith( '"' ) && rawArgs.endsWith( '"' ) && rawArgs.size() > 2 )
       {
-        const QString unescapedStr = arrDoc.array()[0].toString();
-        const QJsonDocument nestedDoc = QJsonDocument::fromJson( unescapedStr.toUtf8() );
-        if ( nestedDoc.isObject() )
+        const QJsonDocument arrDoc = QJsonDocument::fromJson( QString( "[%1]" ).arg( rawArgs ).toUtf8() );
+        if ( arrDoc.isArray() && !arrDoc.array().isEmpty() && arrDoc.array()[0].isString() )
         {
-          funcObj[QStringLiteral( "arguments" )] = nestedDoc.object();
+          const QString unescapedStr = arrDoc.array()[0].toString();
+          const QJsonDocument nestedDoc = QJsonDocument::fromJson( unescapedStr.toUtf8() );
+          if ( nestedDoc.isObject() )
+          {
+            funcObj[QStringLiteral( "arguments" )] = nestedDoc.object();
+          }
+          else
+          {
+            funcObj[QStringLiteral( "arguments" )] = accu.arguments;
+          }
         }
         else
         {
-          funcObj[QStringLiteral( "arguments" )] = m_toolArgumentsBuffer;
+          funcObj[QStringLiteral( "arguments" )] = accu.arguments;
         }
       }
       else
       {
-        funcObj[QStringLiteral( "arguments" )] = m_toolArgumentsBuffer;
+        funcObj[QStringLiteral( "arguments" )] = accu.arguments;
       }
     }
-    else
-    {
-      funcObj[QStringLiteral( "arguments" )] = m_toolArgumentsBuffer;
-    }
+
+    QJsonObject toolCallObj;
+    toolCallObj[QStringLiteral( "id" )] = accu.id;
+    toolCallObj[QStringLiteral( "type" )] = QStringLiteral( "function" );
+    toolCallObj[QStringLiteral( "function" )] = funcObj;
+
+    emit toolCallParsed( toolCallObj );
   }
 
-  QJsonObject toolCallObj;
-  toolCallObj[QStringLiteral( "id" )] = m_toolCallId;
-  toolCallObj[QStringLiteral( "type" )] = QStringLiteral( "function" );
-  toolCallObj[QStringLiteral( "function" )] = funcObj;
-
-  emit toolCallParsed( toolCallObj );
-
-  m_toolFunctionName.clear();
-  m_toolArgumentsBuffer.clear();
-  m_toolCallId.clear();
+  m_toolCalls.clear();
 }
 
 void LlmStreamingClient::onReplyFinished()

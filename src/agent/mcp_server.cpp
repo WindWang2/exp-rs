@@ -86,6 +86,7 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("canvas:"), // agent interaction canvas tools
         QStringLiteral("layer:"),  // agent interaction layer tools
         QStringLiteral("raster:"), // agent raster display tools
+        QStringLiteral("data:"),   // data manager tools
     };
     for (const QString &prefix : kAllowed) {
         if (checkId.startsWith(prefix))
@@ -543,15 +544,15 @@ void McpServer::handleRequest(const QVariantMap &request)
             {
                 resultData = handleCancelExecution(arguments.value(QStringLiteral("execution_id")).toString());
             }
-            else if (toolName == QStringLiteral("list_layers"))
+            else if (toolName == QStringLiteral("list_layers") || toolName == QStringLiteral("data:list_layers"))
             {
                 resultData = handleListLayers();
             }
-            else if (toolName == QStringLiteral("describe_dataset"))
+            else if (toolName == QStringLiteral("describe_dataset") || toolName == QStringLiteral("data:describe_dataset"))
             {
                 resultData = handleDescribeDataset(arguments.value(QStringLiteral("layer_id")).toString());
             }
-            else if (toolName == QStringLiteral("get_lineage"))
+            else if (toolName == QStringLiteral("get_lineage") || toolName == QStringLiteral("data:get_lineage"))
             {
                 resultData = handleGetLineage(arguments.value(QStringLiteral("asset_id")).toString());
             }

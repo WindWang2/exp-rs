@@ -101,6 +101,9 @@ private:
     /// Processing context backing the QGIS parameter widgets.
     std::unique_ptr<QgsProcessingContext> m_qgisContext;
 
+    bool m_isRunning = false;
+    bool m_canceled = false;
+
     QStringList m_inputFiles;
     QString m_outputDir;
 };

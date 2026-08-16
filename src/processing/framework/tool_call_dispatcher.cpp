@@ -179,7 +179,7 @@ std::string ToolCallDispatcher::resolveAlgorithmId( const std::string &rawName )
     // OpenAI tool names forbid ':'. Only the first underscore is rewritten.
     std::string altId = rawName;
     altId[underscorePos] = ':';
-    if ( registry.findAdapter( altId ) )
+    if ( registry.findAdapter( altId ) || isInteractionAction( altId ) )
       return altId;
   }
   return rawName;
@@ -187,20 +187,28 @@ std::string ToolCallDispatcher::resolveAlgorithmId( const std::string &rawName )
 
 bool ToolCallDispatcher::isCanvasAction( const std::string &name )
 {
-  return name.size() > 7 && name.compare( 0, 7, "canvas:" ) == 0;
+  return ( name.size() > 7 && name.compare( 0, 7, "canvas:" ) == 0 ) ||
+         ( name.size() > 7 && name.compare( 0, 7, "canvas_" ) == 0 );
 }
 
 bool ToolCallDispatcher::isInteractionAction( const std::string &name )
 {
   if ( isCanvasAction( name ) )
     return true;
-  if ( name.size() > 5 && name.compare( 0, 5, "view:" ) == 0 )
+  if ( ( name.size() > 5 && name.compare( 0, 5, "view:" ) == 0 ) ||
+       ( name.size() > 5 && name.compare( 0, 5, "view_" ) == 0 ) )
     return true;
-  if ( name.size() > 4 && name.compare( 0, 4, "roi:" ) == 0 )
+  if ( ( name.size() > 4 && name.compare( 0, 4, "roi:" ) == 0 ) ||
+       ( name.size() > 4 && name.compare( 0, 4, "roi_" ) == 0 ) )
     return true;
-  if ( name.size() > 6 && name.compare( 0, 6, "layer:" ) == 0 )
+  if ( ( name.size() > 6 && name.compare( 0, 6, "layer:" ) == 0 ) ||
+       ( name.size() > 6 && name.compare( 0, 6, "layer_" ) == 0 ) )
     return true;
-  if ( name.size() > 7 && name.compare( 0, 7, "raster:" ) == 0 )
+  if ( ( name.size() > 7 && name.compare( 0, 7, "raster:" ) == 0 ) ||
+       ( name.size() > 7 && name.compare( 0, 7, "raster_" ) == 0 ) )
+    return true;
+  if ( ( name.size() > 5 && name.compare( 0, 5, "data:" ) == 0 ) ||
+       ( name.size() > 5 && name.compare( 0, 5, "data_" ) == 0 ) )
     return true;
   return false;
 }

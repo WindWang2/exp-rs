@@ -23,6 +23,7 @@ class ImageEnhancementPanel : public RasterProcessingDialogBase
 
 public:
     explicit ImageEnhancementPanel(QWidget *parent = nullptr);
+    void setRasterLayer(QgsRasterLayer *layer) override;
 
 protected:
     QString toolName() const override { return QStringLiteral("image_enhancement"); }
@@ -36,6 +37,7 @@ private slots:
 
 private:
     void setupUi();
+    void populateBandCombos();
     void setupStretchOptions(QVBoxLayout *layout);
     void setupFilterOptions(QVBoxLayout *layout);
     void setupBandRatioOptions(QVBoxLayout *layout);

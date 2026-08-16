@@ -82,14 +82,19 @@ class LlmStreamingClient : public QObject
     /// reply-finished path never double-emit).
     void emitParsedToolCallOnce();
 
+    struct ToolCallAccumulator
+    {
+      QString id;
+      QString name;
+      QString arguments;
+    };
+
     QNetworkAccessManager *m_networkManager = nullptr;
     QNetworkReply *m_currentReply = nullptr;
     LlmProviderProfile m_profile;
     QByteArray m_buffer;
 
-    QString m_toolCallId;
-    QString m_toolFunctionName;
-    QString m_toolArgumentsBuffer;
+    std::map<int, ToolCallAccumulator> m_toolCalls;
 };
 
 } // namespace sicnu::agent

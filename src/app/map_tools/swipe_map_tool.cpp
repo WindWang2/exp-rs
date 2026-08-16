@@ -30,10 +30,18 @@ class SwipeCanvasItem : public QgsMapCanvasItem
         setZValue( 1000 ); // Draw on top of map content
     }
 
-    void setSnapshot( const QImage &image ) { m_snapshot = image; update(); }
+    QRectF boundingRect() const override
+    {
+        if ( !mMapCanvas )
+            return QRectF();
+        return QRectF( QPointF( 0, 0 ), mMapCanvas->size() );
+    }
+
+    void setSnapshot( const QImage &image ) { prepareGeometryChange(); m_snapshot = image; update(); }
     void setSwipePosition( double fraction ) { m_position = fraction; update(); }
     void setDirection( SwipeMapTool::Direction direction ) { m_direction = direction; update(); }
     void setInverted( bool inverted ) { m_inverted = inverted; update(); }
+    bool inverted() const { return m_inverted; }
 
   protected:
     void paint( QPainter *painter ) override
@@ -146,19 +154,19 @@ void SwipeMapTool::setDirection( Direction direction )
 
 void SwipeMapTool::canvasMoveEvent( QgsMapMouseEvent *e )
 {
-    if ( !m_mouseFollow || !mCanvas )
+    if ( !mCanvas )
         return;
-
-    if ( m_direction == Direction::Vertical )
-        setSwipePosition( static_cast<double>( e->pos().x() ) / mCanvas->width() );
-    else
-        setSwipePosition( static_cast<double>( e->pos().y() ) / mCanvas->height() );
+    const QPoint pos = e->pos();
+    const QSize size = mCanvas->size();
+    if ( m_direction == Direction::Vertical && size.width() > 0 )
+        setSwipePosition( static_cast<double>( pos.x() ) / size.width() );
+    else if ( m_direction == Direction::Horizontal && size.height() > 0 )
+        setSwipePosition( static_cast<double>( pos.y() ) / size.height() );
 }
 
 void SwipeMapTool::canvasPressEvent( QgsMapMouseEvent *e )
 {
-    if ( e->button() == Qt::LeftButton )
-        m_mouseFollow = false;
+    canvasMoveEvent( e );
 }
 
 void SwipeMapTool::canvasReleaseEvent( QgsMapMouseEvent *e )
@@ -169,10 +177,19 @@ void SwipeMapTool::canvasReleaseEvent( QgsMapMouseEvent *e )
 
 void SwipeMapTool::keyPressEvent( QKeyEvent *e )
 {
-    if ( e->key() == Qt::Key_Escape )
+    if ( e->key() == Qt::Key_Space )
     {
-        m_mouseFollow = true;
-        setSwipePosition( 0.5 );
+        // Toggle direction
+        setDirection( m_direction == Direction::Vertical ? Direction::Horizontal : Direction::Vertical );
+    }
+    else if ( e->key() == Qt::Key_I )
+    {
+        if ( m_swipeItem )
+        {
+            auto *item = static_cast<SwipeCanvasItem *>( m_swipeItem );
+            // Invert which side shows the compare layer
+            item->setInverted( !item->inverted() ); // Note: assuming accessor or logic adjustment
+        }
     }
     else if ( e->key() == Qt::Key_V )
     {
@@ -194,12 +211,33 @@ void SwipeMapTool::activate()
     }
     m_swipeItem->setVisible( true );
     m_snapshotDirty = true;
+    if ( mCanvas )
+    {
+        connect( mCanvas, &QgsMapCanvas::extentsChanged, this, [this]() {
+            m_snapshotDirty = true;
+            updateSwipeItem();
+        } );
+        connect( mCanvas, &QgsMapCanvas::destinationCrsChanged, this, [this]() {
+            m_snapshotDirty = true;
+            updateSwipeItem();
+        } );
+        connect( mCanvas, &QgsMapCanvas::rotationChanged, this, [this]() {
+            m_snapshotDirty = true;
+            updateSwipeItem();
+        } );
+    }
     updateSwipeItem();
 }
 
 void SwipeMapTool::deactivate()
 {
     cancelRenderJob();
+    if ( mCanvas )
+    {
+        disconnect( mCanvas, &QgsMapCanvas::extentsChanged, this, nullptr );
+        disconnect( mCanvas, &QgsMapCanvas::destinationCrsChanged, this, nullptr );
+        disconnect( mCanvas, &QgsMapCanvas::rotationChanged, this, nullptr );
+    }
     if ( m_swipeItem )
         m_swipeItem->setVisible( false );
     QgsMapTool::deactivate();
