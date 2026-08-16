@@ -254,6 +254,9 @@ void BatchProcessingDialog::setupUi()
   m_outputDirEdit = new QLineEdit( outSec );
   m_outputDirEdit->setObjectName( QStringLiteral( "batchOutputDirEdit" ) );
   SicnuDialogHelp::tip( m_outputDirEdit, tr( "所有结果写入此目录。" ) );
+  connect( m_outputDirEdit, &QLineEdit::textChanged, this, [this]( const QString &text ) {
+    m_outputDir = text.trimmed();
+  } );
   auto *browseBtn = new QPushButton( tr( "浏览…" ), outSec );
   SicnuUi::markSecondary( browseBtn );
   connect( browseBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onBrowseOutputDir );
@@ -348,6 +351,10 @@ void BatchProcessingDialog::onRun()
         QMessageBox::warning(this, tr("Batch Processing"),
                              tr("Please add input files."));
         return;
+    }
+
+    if (m_outputDir.isEmpty() && m_outputDirEdit) {
+        m_outputDir = m_outputDirEdit->text().trimmed();
     }
 
     if (m_outputDir.isEmpty()) {

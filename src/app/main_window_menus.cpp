@@ -210,7 +210,7 @@ void QgisDesktopWindow::setupMenu()
                                   QKeySequence( "Ctrl+." ), this, &QgisDesktopWindow::addFeature ),
          tr( "数字化添加新要素。" ) );
     tip( digitizeMenu->addAction( ic( "mActionVertexTool" ), tr( "节点工具" ),
-                                  QKeySequence( "Ctrl+V" ), this, &QgisDesktopWindow::vertexTool ),
+                                  QKeySequence( "Ctrl+Shift+V" ), this, &QgisDesktopWindow::vertexTool ),
          tr( "编辑节点。" ) );
     digitizeMenu->addSeparator();
     tip( digitizeMenu->addAction( ic( "mActionMoveFeature" ), tr( "移动要素" ),

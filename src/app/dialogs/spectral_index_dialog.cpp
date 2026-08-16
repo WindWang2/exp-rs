@@ -326,55 +326,27 @@ void SpectralIndexDialog::runFromAsset()
     return;
   }
 
+  const QString inputPath = snapshot->uri().isEmpty() ? snapshot->source().canonicalSource : snapshot->uri();
+  if ( inputPath.isEmpty() )
+  {
+    QMessageBox::warning( this, dialogTitle(), tr( "所选资产无有效数据路径。" ) );
+    return;
+  }
+
   const sicnu::operators::SpectralIndexParams params = buildSpectralIndexParams(
     m_indexCombo, m_nirCombo, m_redCombo, m_greenCombo, m_blueCombo, m_swirCombo );
 
-  // The operator writes to a temporary file; the committer publishes it to the
-  // user's chosen stable path.
-  const QString stablePath = outputPath();
-  QTemporaryFile tempFile( QStringLiteral( "spectral_index_XXXXXX.tif" ) );
-  tempFile.setAutoRemove( false );
-  if ( !tempFile.open() )
-  {
-    handleFailed( tr( "无法创建临时输出文件。" ) );
-    return;
-  }
-  const QString tempPath = tempFile.fileName();
-  tempFile.close();
-  QFile::remove( tempPath ); // the operator writes a fresh GeoTIFF
+  Json::Value json( Json::objectValue );
+  json["input"] = inputPath.toStdString();
+  json["output"] = outputPath().toStdString();
+  json["index"] = params.index.toStdString();
+  json["nir"] = params.nir;
+  json["red"] = params.red;
+  json["green"] = params.green;
+  json["blue"] = params.blue;
+  json["swir"] = params.swir;
 
-  sicnu::operators::StableOutputSpec output;
-  output.tempPath = tempPath;
-  output.stablePath = stablePath;
-  // Display is the user's opt-in decision; when checked, the committer emits
-  // displayRequested and the dialog loads the result on success.
-  output.autoLoad = m_addToCanvasCheck->isChecked();
-
-  startRun();
-
-  sicnu::data::ProcessingAssetResolver resolver( m_dataManager );
-  sicnu::OutputCommitter committer( m_dataManager );
-
-  // The committer's displayRequested is the opt-in display seam. On fire,
-  // surface the stable path so the host (openRasterDialog) loads it.
-  connect( &committer, &sicnu::OutputCommitter::displayRequested, this,
-           [this]( sicnu::data::AssetId ) { m_outputEdit->setText( outputPath() ); } );
-
-  const auto result = sicnu::operators::runSpectralIndexFromAsset(
-    sicnu::data::AssetRef{ *assetId, snapshot->revision() }, params, output,
-    resolver, committer );
-
-  if ( !result )
-  {
-    const QString message =
-      result.diagnostics().isEmpty()
-        ? tr( "光谱指数计算失败。" )
-        : result.diagnostics().first().message;
-    handleFailed( message );
-    return;
-  }
-
-  handleCompleted( stablePath );
+  runOperatorTask( QStringLiteral( "rs:spectral_index" ), json );
 }
 
 void SpectralIndexDialog::runFromLayer()
