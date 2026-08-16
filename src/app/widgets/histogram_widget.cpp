@@ -50,11 +50,15 @@ void HistogramWidget::closeDataset()
         m_cachedDataset = nullptr;
         m_cachedSource.clear();
     }
+    m_bandCache.clear();
 }
 
 void HistogramWidget::setRasterLayer( QgsRasterLayer *layer )
 {
+    if ( m_rasterLayer.data() == layer )
+        return;
     m_rasterLayer = layer;
+    m_bandCache.clear();
     if ( m_rasterLayer )
     {
         if ( m_rasterLayer->bandCount() >= 3 )
@@ -168,6 +172,12 @@ const HistogramWidget::BandData &HistogramWidget::activeBandData() const
 
 void HistogramWidget::computeSingleBandHistogram( int bandNum, BandData &data )
 {
+    if ( m_bandCache.contains( bandNum ) && m_bandCache[bandNum].valid )
+    {
+        data = m_bandCache[bandNum];
+        return;
+    }
+
     data.valid = false;
     if ( !m_rasterLayer )
         return;
@@ -210,7 +220,7 @@ void HistogramWidget::computeSingleBandHistogram( int bandNum, BandData &data )
     data.maxVal = dfMax;
 
     double dfMean = 0.0, dfStdDev = 0.0;
-    if ( GDALGetRasterStatistics( hBand, FALSE, TRUE, &dfMin, &dfMax, &dfMean, &dfStdDev ) == CE_None )
+    if ( GDALGetRasterStatistics( hBand, TRUE, TRUE, &dfMin, &dfMax, &dfMean, &dfStdDev ) == CE_None )
     {
         data.mean = dfMean;
         data.stddev = dfStdDev;
@@ -233,6 +243,7 @@ void HistogramWidget::computeSingleBandHistogram( int bandNum, BandData &data )
                 data.maxFreq = data.histogram[i];
         }
         data.valid = true;
+        m_bandCache[bandNum] = data;
     }
 }
 

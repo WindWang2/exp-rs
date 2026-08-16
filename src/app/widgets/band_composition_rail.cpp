@@ -163,7 +163,7 @@ void BandCompositionRail::updateRangeLabel()
                 band,
                 Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max,
                 QgsRectangle(),
-                0 );
+                250000 );
             if ( std::isfinite( stats.minimumValue ) && std::isfinite( stats.maximumValue ) )
             {
                 rangeText = tr( "量程 [%1 ~ %2]" )
@@ -177,7 +177,7 @@ void BandCompositionRail::updateRangeLabel()
 
 void BandCompositionRail::refresh()
 {
-    if ( m_refreshing )
+    if ( m_refreshing || !isVisible() )
         return;
     m_refreshing = true;
     rebuildChips();

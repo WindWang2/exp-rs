@@ -52,8 +52,11 @@ void RsRoiSpectrumTool::canvasMoveEvent( QgsMapMouseEvent *e )
 void RsRoiSpectrumTool::canvasReleaseEvent( QgsMapMouseEvent *e )
 {
   Q_UNUSED( e )
-  // Polygon is accumulated on press events; a release with >= 3 vertices
-  // (double-click / right-click handled in press) closes it.
+}
+
+void RsRoiSpectrumTool::canvasDoubleClickEvent( QgsMapMouseEvent *e )
+{
+  Q_UNUSED( e )
   if ( m_polygon.size() >= 3 )
     finishPolygon();
 }

@@ -129,6 +129,7 @@ private:
 
     GDALDatasetH m_cachedDataset = nullptr;
     QString m_cachedSource;
+    QMap<int, BandData> m_bandCache;
 
     BandData m_singleBandData;
     BandData m_redData;

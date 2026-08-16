@@ -42,6 +42,7 @@ class RsRoiSpectrumTool : public QgsMapTool
     void canvasPressEvent( QgsMapMouseEvent *e ) override;
     void canvasMoveEvent( QgsMapMouseEvent *e ) override;
     void canvasReleaseEvent( QgsMapMouseEvent *e ) override;
+    void canvasDoubleClickEvent( QgsMapMouseEvent *e ) override;
 
   private:
     void finishPolygon();
