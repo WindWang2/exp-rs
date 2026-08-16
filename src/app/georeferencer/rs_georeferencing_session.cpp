@@ -391,7 +391,6 @@ long RsGeoreferencingSession::startWarpTask( const RsGeorefWarpSnapshot &snap )
     Json::Value result( Json::objectValue );
     result["output"] = request.params.get( "output", "" ).asString();
     result["durationMs"] = static_cast<Json::Int64>( task->result().durationMs );
-    result["outputBytes"] = static_cast<Json::Int64>( task->result().outputBytes );
     return result;
   };
 
@@ -400,6 +399,15 @@ long RsGeoreferencingSession::startWarpTask( const RsGeorefWarpSnapshot &snap )
   const long taskId = mCustomExecutor.submit
     ? mCustomExecutor.submit( req, jobExec, cancelHook )
     : sicnu::TaskCenter::instance().submitJob( req, jobExec, cancelHook );
+
+  if ( taskId < 0 )
+  {
+    delete task;
+    mPendingWarpTask = nullptr;
+    mPendingSnap = RsGeorefWarpSnapshot();
+    mPendingWarpTaskId = -1;
+    return -1;
+  }
 
   mPendingWarpTaskId = taskId;
   return taskId;

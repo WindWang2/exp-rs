@@ -23,7 +23,7 @@ void QwtPlotRenderer::renderPlot(QwtPlot *plot, QPainter *painter, const QRectF 
 
     // Find data bounds
     double xMin = 1e30, xMax = -1e30;
-    double yMin = 0, yMax = 1e30;
+    double yMin = 0, yMax = -1e30;
 
     // Look for histogram items
     const auto children = plot->findChildren<QwtPlotHistogram *>();

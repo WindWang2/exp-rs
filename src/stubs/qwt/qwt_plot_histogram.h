@@ -8,8 +8,8 @@
 class QwtIntervalSample {
 public:
     QwtIntervalSample() = default;
-    QwtIntervalSample(double v, double l, double u) : value(v), m_mn(l), m_mx(u) {}
-    QwtIntervalSample(double v, QPair<double,double> p) : value(v), m_mn(p.first), m_mx(p.second) {}
+    QwtIntervalSample(double v, double l, double u) : value(v), interval{l, u} {}
+    QwtIntervalSample(double v, QPair<double,double> p) : value(v), interval{p.first, p.second} {}
 
     double value = 0;
 
@@ -20,9 +20,6 @@ public:
     };
 
     Interval interval;
-
-private:
-    double m_mn = 0, m_mx = 0;
 };
 
 class QWT_EXPORT QwtPlotHistogram : public QwtPlotItem {
