@@ -1,5 +1,7 @@
 #include "rs_jm_separability.h"
 
+#include "sicnu_logging.h"
+
 #include <QList>
 #include <QVector>
 
@@ -64,6 +66,24 @@ double RsJmSeparability::pairJm( const cv::Mat &xA, const cv::Mat &xB )
     return 0.0;
 
   const int d = xA.cols;
+
+  // #287 - per-class sample count below the band count makes both class
+  // covariances rank-deficient: the determinant-based term underflows into
+  // the 1e-300 floor and JM spuriously saturates to 2.0 (hyperspectral
+  // imagery with small ROIs). Report the pair as non-computable (-1.0,
+  // rendered as "n/a" by the JM matrix) instead of a confident 2.0.
+  if ( xA.rows <= d || xB.rows <= d )
+  {
+    SICNU_LOG_WARN( SicnuLogTags::Classification,
+                    QString( "JM separability skipped: samples (%1, %2) not "
+                             "greater than band count %3; covariance is "
+                             "rank-deficient" )
+                      .arg( xA.rows )
+                      .arg( xB.rows )
+                      .arg( d ) );
+    return -1.0;
+  }
+
   const double eps = 1e-6;
 
   // calcCovarMatrix with COVAR_ROWS treats each row as a sample; the mu

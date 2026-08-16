@@ -57,15 +57,17 @@ TEST_CASE( "JM: moderate overlap yields between 0.8 and 1.9", "[classify][jm]" )
   REQUIRE( jm < 1.9 );
 }
 
-TEST_CASE( "JM: degenerate covariance with epsilon ridge stays in range", "[classify][jm]" )
+TEST_CASE( "JM: samples-per-class below band count is reported as n/a (#287)", "[classify][jm]" )
 {
+  // 2 samples in 3 bands: both class covariances are rank-deficient and the
+  // determinant-based term would underflow into the 1e-300 floor, spuriously
+  // saturating JM to 2.0. The pair now returns -1.0 (rendered as "n/a" by
+  // the JM matrix) instead of a confident value.
   cv::Mat a( 2, 3, CV_32F );
   a.setTo( 50.0 );
   cv::Mat b( 2, 3, CV_32F );
   b.setTo( 60.0 );
-  double jm = RsJmSeparability::pairJm( a, b );
-  REQUIRE( jm >= 0.0 );
-  REQUIRE( jm <= 2.0 );
+  REQUIRE( RsJmSeparability::pairJm( a, b ) == -1.0 );
 }
 
 namespace
@@ -204,4 +206,26 @@ TEST_CASE( "JM: NoData pixels are filtered before separability (ADR 0055)",
   REQUIRE( resRaw.ok );
   const QHash<QPair<int, int>, double> jmRaw = RsJmSeparability::computeAll( resRaw.X, resRaw.y );
   REQUIRE( jmRaw.value( qMakePair( 1, 2 ) ) > 1.5 );
+}
+
+TEST_CASE( "JM: samples-per-class below band count returns -1.0 instead of saturating to 2.0",
+           "[classify][jm]" )
+{
+  // #287 - hyperspectral regime: 12 samples in 200 bands makes both class
+  // covariances rank-deficient; the old det-floor arithmetic drove JM to 2.0
+  // ("perfectly separable") for overlapping distributions.
+  cv::Mat a( 12, 200, CV_32F );
+  cv::Mat b( 12, 200, CV_32F );
+  cv::randu( a, cv::Scalar( 0.0 ), cv::Scalar( 1.0 ) );
+  cv::randu( b, cv::Scalar( 0.0 ), cv::Scalar( 1.0 ) );
+  REQUIRE( RsJmSeparability::pairJm( a, b ) == -1.0 );
+
+  // Well-sampled case must be unchanged: 300 samples in 3 bands.
+  cv::Mat a2( 300, 3, CV_32F );
+  cv::Mat b2( 300, 3, CV_32F );
+  cv::randu( a2, cv::Scalar( 0.0 ), cv::Scalar( 1.0 ) );
+  cv::randu( b2, cv::Scalar( 0.0 ), cv::Scalar( 1.0 ) );
+  const double jm = RsJmSeparability::pairJm( a2, b2 );
+  REQUIRE( jm >= 0.0 );
+  REQUIRE( jm <= 2.0 );
 }
