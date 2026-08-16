@@ -65,13 +65,14 @@ QVariantMap RasterStatisticsAlgorithm::processAlgorithm( const QVariantMap &para
     {
         output = parameterAsFileOutput( parameters, QStringLiteral( "OUTPUT" ), context );
         QFile file( output );
-        if ( file.open( QIODevice::WriteOnly | QIODevice::Text ) )
+        if ( !file.open( QIODevice::WriteOnly | QIODevice::Text ) )
         {
-            QTextStream ts( &file );
-            for ( const QString &line : lines )
-                ts << line << "\n";
-            file.close();
+            throw QgsProcessingException( QObject::tr( "Cannot write output file: %1" ).arg( output ) );
         }
+        QTextStream ts( &file );
+        for ( const QString &line : lines )
+            ts << line << "\n";
+        file.close();
         results[QStringLiteral( "OUTPUT" )] = output;
     }
 

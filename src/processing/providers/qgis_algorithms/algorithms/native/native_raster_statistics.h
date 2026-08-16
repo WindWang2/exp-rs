@@ -67,12 +67,13 @@ protected:
         {
             QString dest = parameterAsFileOutput( parameters, QStringLiteral( "OUTPUT_HTML" ), context );
             QFile file( dest );
-            if ( file.open( QIODevice::WriteOnly | QIODevice::Text ) )
+            if ( !file.open( QIODevice::WriteOnly | QIODevice::Text ) )
             {
-                QTextStream ts( &file );
-                ts << html;
-                file.close();
+                throw QgsProcessingException( QObject::tr( "Cannot write output file: %1" ).arg( dest ) );
             }
+            QTextStream ts( &file );
+            ts << html;
+            file.close();
             results[QStringLiteral( "OUTPUT_HTML" )] = dest;
         }
 

@@ -230,9 +230,9 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
         }
     }
 
-    // Pixel-size consistency (P0): mosaicking rasters with different pixel
-    // sizes silently misaligns the union grid. Reject mismatched inputs with
-    // an actionable error instead of producing offset/dirty data.
+    // Pixel-size consistency and Y-axis orientation (P0/P3): mosaicking rasters
+    // with different pixel sizes or opposite Y-directions silently misaligns or
+    // mirrors data. Reject mismatched inputs with an actionable error.
     const double kPixelTol = 1e-6; // relative tolerance
     for (int i = 1; i < inputCount; ++i) {
         const auto& gt = metaList[static_cast<size_t>(i)].geotransform;
@@ -249,6 +249,14 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
                     + std::to_string(std::abs(refPixelH)) + ") and " + metaList[static_cast<size_t>(i)].path + " ("
                     + std::to_string(pw) + " x " + std::to_string(ph)
                     + "); resample the inputs to a common resolution before mosaicking");
+        }
+
+        const bool yDirMismatch = (gt[5] * refPixelH <= 0.0);
+        if (yDirMismatch) {
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "Raster Y-axis orientation mismatch between " + metaList[0].path + " and "
+                    + metaList[static_cast<size_t>(i)].path + "; resample/reproject to a common orientation before mosaicking");
         }
     }
 

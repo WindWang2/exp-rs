@@ -17,19 +17,6 @@
 
 namespace sicnu::operators::gdal {
 
-namespace {
-
-/// Doubles formatted with enough significant digits for grid geometry
-/// (std::to_string's 6 decimals lose precision at large map coordinates).
-std::string fmtDouble(double value)
-{
-    char buffer[64];
-    std::snprintf(buffer, sizeof(buffer), "%.17g", value);
-    return buffer;
-}
-
-} // anonymous namespace
-
 Json::Value GdalReprojectOperator::schema() const {
     using namespace schema;
     using namespace util;

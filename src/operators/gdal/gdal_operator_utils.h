@@ -33,6 +33,16 @@ using params::getStringArray;
 const std::vector<std::string>& resamplingNames();
 
 /**
+ * Double formatted with full 17-digit precision for geospatial coordinates.
+ */
+inline std::string fmtDouble(double value)
+{
+    char buffer[64];
+    std::snprintf(buffer, sizeof(buffer), "%.17g", value);
+    return buffer;
+}
+
+/**
  * GDALWarp progress adapter → RSOperatorContext.
  * Returns FALSE if cancelled (cooperative cancel).
  */
