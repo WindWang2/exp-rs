@@ -37,7 +37,7 @@ void PythonScriptRunner::runScript(const QString &script)
 
 PythonScriptEditor::PythonScriptEditor(QWidget *parent)
     : QWidget(parent)
-    , m_runner(new PythonScriptRunner(this))
+    , m_runner(new PythonScriptRunner())
     , m_runnerThread(new QThread(this))
 {
     setupUi();
@@ -55,8 +55,21 @@ PythonScriptEditor::PythonScriptEditor(QWidget *parent)
 PythonScriptEditor::~PythonScriptEditor()
 {
     if (m_runnerThread) {
+        m_runnerThread->requestInterruption();
         m_runnerThread->quit();
-        m_runnerThread->wait(2000);
+        if (!m_runnerThread->wait(1000)) {
+            // Decouple to avoid QThread destructor fatal when a long-running script is still executing
+            m_runnerThread->setParent(nullptr);
+            QObject::connect(m_runnerThread, &QThread::finished, m_runnerThread, &QObject::deleteLater);
+            if (m_runner) {
+                QObject::connect(m_runnerThread, &QThread::finished, m_runner, &QObject::deleteLater);
+                m_runner = nullptr;
+            }
+            m_runnerThread = nullptr;
+        } else {
+            delete m_runner;
+            m_runner = nullptr;
+        }
     }
 }
 

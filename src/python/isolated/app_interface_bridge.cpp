@@ -18,6 +18,7 @@
 
 #include <QJsonArray>
 #include <QHash>
+#include <QPointer>
 
 #include <cstring>
 #include <optional>
@@ -317,18 +318,20 @@ void AppInterfaceBridge::setupDefaultAlgorithmHandler()
     algoDesc.group = group.isEmpty() ? "Python Plugins" : group.toStdString();
     algoDesc.description = desc.toStdString();
 
+    QPointer<AppInterfaceBridge> weakBridge( this );
     auto adapter = std::make_shared<sicnu::processing::PythonAlgorithmAdapter>(
       algoDesc,
-      [this, algoId]( const Json::Value &execParams, sicnu::processing::ProgressCallback progress,
-                      std::function<bool()> isCancelled ) -> Json::Value {
+      [weakBridge, algoId]( const Json::Value &execParams, sicnu::processing::ProgressCallback progress,
+                            std::function<bool()> isCancelled ) -> Json::Value {
         if ( isCancelled && isCancelled() )
         {
           throw std::runtime_error( "Python algorithm cancelled before execution" );
         }
-        if ( !m_ipcServer )
+        if ( !weakBridge || !weakBridge->ipcServer() )
         {
           throw std::runtime_error( "IPC Server not available" );
         }
+        auto *ipc = weakBridge->ipcServer();
         QJsonObject req;
         req[QStringLiteral( "id" )] = algoId;
         QVariantMap params = sicnu::processing::jsonParamsToVariantMap( execParams );
@@ -347,7 +350,7 @@ void AppInterfaceBridge::setupDefaultAlgorithmHandler()
 
         QJsonObject execResult;
         bool execIsError = false;
-        const AwaitStatus awaitStatus = m_ipcServer->sendRequestSync(
+        const AwaitStatus awaitStatus = ipc->sendRequestSync(
           QStringLiteral( "processing.execute_algorithm" ), req, execResult, execIsError, 300000 );
         // Drop the mapping before returning; the daemon has already
         // close()+unlink()ed on its side too (best-effort, idempotent).

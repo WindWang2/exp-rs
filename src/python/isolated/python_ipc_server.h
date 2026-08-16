@@ -102,9 +102,9 @@ class PythonIpcServer : public QObject
     void onSocketDisconnected();
 
   private:
-    void sendRequestInternal( const QString &method, const QJsonObject &params,
-                              std::function<void( const QJsonObject &result, bool isError )> callback,
-                              int retriesLeft, bool trackInFlight );
+    int sendRequestInternal( const QString &method, const QJsonObject &params,
+                             std::function<void( const QJsonObject &result, bool isError )> callback,
+                             int retriesLeft, bool trackInFlight );
     void dropInFlight( int id );
 
     QLocalServer *m_server = nullptr;

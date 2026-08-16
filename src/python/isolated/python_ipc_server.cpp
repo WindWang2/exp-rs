@@ -139,12 +139,12 @@ void PythonIpcServer::sendRequest( const QString &method, const QJsonObject &par
   sendRequestInternal( method, params, std::move( callback ), retriesLeft, true );
 }
 
-void PythonIpcServer::sendRequestInternal( const QString &method, const QJsonObject &params,
-                                           std::function<void( const QJsonObject &, bool )> callback,
-                                           int retriesLeft, bool trackInFlight )
+int PythonIpcServer::sendRequestInternal( const QString &method, const QJsonObject &params,
+                                          std::function<void( const QJsonObject &, bool )> callback,
+                                          int retriesLeft, bool trackInFlight )
 {
   if ( !m_socket || m_socket->state() != QLocalSocket::ConnectedState )
-    return;
+    return -1;
 
   int reqId;
   {
@@ -176,6 +176,7 @@ void PythonIpcServer::sendRequestInternal( const QString &method, const QJsonObj
   data.append( '\n' );
   m_socket->write( data );
   m_socket->flush();
+  return reqId;
 }
 
 void PythonIpcServer::dropInFlight( int id )
@@ -213,7 +214,6 @@ AwaitStatus PythonIpcServer::sendRequestAndAwait( const QString &method, const Q
   QTimer timeoutTimer;
   timeoutTimer.setSingleShot( true );
 
-  bool responded = false;
   bool disconnected = false;
 
   QMetaObject::Connection disconnectConn =
@@ -222,29 +222,54 @@ AwaitStatus PythonIpcServer::sendRequestAndAwait( const QString &method, const Q
       loop.quit();
     } );
 
-  // Blocking path: the callback captures stack locals, so it must NOT be
-  // tracked for crash re-dispatch (the pool only replays async requests).
-  sendRequestInternal( method, params, [&]( const QJsonObject &response, bool responseIsError ) {
-    responded = true;
-    result = response;
-    isError = responseIsError;
-    loop.quit();
+  struct AwaitContext
+  {
+    bool responded = false;
+    QJsonObject result;
+    bool isError = false;
+    QPointer<QEventLoop> loop;
+  };
+  auto ctx = std::make_shared<AwaitContext>();
+  ctx->loop = &loop;
+
+  // Blocking path: the callback captures shared context rather than stack locals,
+  // and is explicitly erased if timeout/disconnect fires before response.
+  const int reqId = sendRequestInternal( method, params, [ctx]( const QJsonObject &response, bool responseIsError ) {
+    ctx->responded = true;
+    ctx->result = response;
+    ctx->isError = responseIsError;
+    if ( ctx->loop )
+      ctx->loop->quit();
   }, 1, false );
+
+  if ( reqId < 0 )
+  {
+    disconnect( disconnectConn );
+    return AwaitStatus::NoClient;
+  }
 
   connect( &timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit );
   timeoutTimer.start( timeoutMs );
   loop.exec();
 
   disconnect( disconnectConn );
+  ctx->loop = nullptr; // decouple loop before stack frame exits
 
-  if ( disconnected && !responded )
+  if ( !ctx->responded )
+  {
+    m_callbacks.erase( reqId );
+  }
+
+  if ( disconnected && !ctx->responded )
   {
     return AwaitStatus::Disconnected;
   }
-  if ( !responded )
+  if ( !ctx->responded )
   {
     return AwaitStatus::Timeout;
   }
+  result = ctx->result;
+  isError = ctx->isError;
   return AwaitStatus::Ok;
 }
 
