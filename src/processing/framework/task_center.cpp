@@ -49,22 +49,19 @@ TaskCenter& TaskCenter::instance()
     return s_instance;
 }
 
-TaskCenter::~TaskCenter()
+void TaskCenter::shutdown()
 {
-    // Set shutdown flag and wake any parked watcher threads so they exit
-    // before the condition variable and mutex are destroyed.
     m_isShuttingDown.store( true );
     {
         QMutexLocker locker( &m_mutex );
         m_waitCondition.wakeAll();
     }
-
-    // ADR 0051: the JobEngine listener fires on worker threads and a job may
-    // still be in flight when the singleton is destroyed at process exit
-    // (tests may end without waiting for every submitted job). Join the
-    // engine's workers so no notification can touch this instance once its
-    // members start being destroyed.
     sicnu::jobs::JobEngine::instance().shutdown();
+}
+
+TaskCenter::~TaskCenter()
+{
+    shutdown();
 }
 
 TaskCenter::TaskCenter()

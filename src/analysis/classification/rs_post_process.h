@@ -34,7 +34,8 @@ class QGIS_ANALYSIS_EXPORT RsPostProcess
      * replaced with the majority label among border neighbors, or 0 if none.
      */
     static bool sieve( const cv::Mat &src, cv::Mat &dst, int threshold, int connectedness,
-                       QString *err = nullptr );
+                       QString *err = nullptr,
+                       const std::function<bool()> &isCanceled = nullptr );
 
     /**
      * Sliding-window mode filter. \a kernelOdd must be odd and ≥ 3 (3/5/7).

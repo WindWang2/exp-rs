@@ -27,8 +27,6 @@ namespace
 Json::Value runPythonPrefixJob( const sicnu::jobs::JobRequest &req,
                                 sicnu::operators::RSOperatorContext &operatorContext )
 {
-  Q_UNUSED( operatorContext );
-
   const std::string algoId = req.algorithmId;
   const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( algoId );
   if ( !adapter )
@@ -36,7 +34,13 @@ Json::Value runPythonPrefixJob( const sicnu::jobs::JobRequest &req,
     throw std::runtime_error( "Python algorithm not found in registry: " + algoId );
   }
 
-  return adapter->execute( req.params, nullptr );
+  auto progressBridge = [&operatorContext]( int progress, const std::string &message ) {
+    operatorContext.reportProgress( static_cast<double>( progress ) / 100.0, message );
+  };
+  auto isCancelledBridge = [&operatorContext]() -> bool {
+    return operatorContext.isCancelled();
+  };
+  return adapter->execute( req.params, progressBridge, isCancelledBridge );
 }
 
 } // namespace

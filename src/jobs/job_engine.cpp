@@ -48,10 +48,28 @@ void JobEngine::shutdown()
   std::vector<JobRecord> cancelledRecords;
   {
     std::lock_guard<std::mutex> lock( m_mutex );
-    if ( m_stop.load() )
+    if ( m_shuttingDown )
       return;
+    m_shuttingDown = true;
     m_stop.store( true );
+    m_generation++;
     toJoin.swap( m_workers );
+
+    // Arm cancel flags of running jobs and invoke any cancel hooks
+    for ( auto &kv : m_cancelFlags )
+    {
+      if ( kv.second )
+        kv.second->store( true, std::memory_order_release );
+    }
+    for ( auto &kv : m_jobBodies )
+    {
+      if ( kv.second.onCancel )
+      {
+        try {
+          kv.second.onCancel();
+        } catch ( ... ) {}
+      }
+    }
 
     while ( !m_queue.empty() )
     {
@@ -79,6 +97,11 @@ void JobEngine::shutdown()
   {
     if ( t.joinable() )
       t.join();
+  }
+
+  {
+    std::lock_guard<std::mutex> lock( m_mutex );
+    m_shuttingDown = false;
   }
 }
 
@@ -150,6 +173,21 @@ std::string JobEngine::submit( JobRequest req, JobExecutor executor, CancelHook 
   JobRecord copy;
   {
     std::lock_guard<std::mutex> lock( m_mutex );
+    if ( m_shuttingDown )
+    {
+      id = "job-" + std::to_string( m_nextId.fetch_add( 1 ) );
+      JobRecord rec;
+      rec.id = id;
+      rec.request = std::move( req );
+      rec.state = JobState::Cancelled;
+      rec.createdAtMs = nowUnixMs();
+      rec.finishedAtMs = rec.createdAtMs;
+      rec.statusMessage = "Cancelled: JobEngine is shutting down";
+      m_jobs.emplace( id, rec );
+      copy = rec;
+      return id;
+    }
+
     if ( m_stop.load() )
     {
       // After shutdownForTests, allow reuse
@@ -396,13 +434,16 @@ void JobEngine::shutdownForTests()
 
 void JobEngine::ensureWorkersLocked()
 {
+  if ( m_shuttingDown )
+    return;
+  const uint64_t gen = m_generation;
   while ( static_cast<int>( m_workers.size() ) < m_maxWorkers )
   {
-    m_workers.emplace_back( [this] { workerLoop(); } );
+    m_workers.emplace_back( [this, gen] { workerLoop( gen ); } );
   }
 }
 
-void JobEngine::workerLoop()
+void JobEngine::workerLoop( uint64_t gen )
 {
   while ( true )
   {
@@ -411,7 +452,7 @@ void JobEngine::workerLoop()
       std::unique_lock<std::mutex> lock( m_mutex );
       for ( ;; )
       {
-        if ( m_stop.load() )
+        if ( m_shuttingDown || gen != m_generation || m_stop.load() )
           return;
         auto picked = tryPickJobLocked();
         if ( picked.has_value() )
@@ -420,7 +461,7 @@ void JobEngine::workerLoop()
           break;
         }
         m_cv.wait( lock );
-        if ( m_stop.load() )
+        if ( m_shuttingDown || gen != m_generation || m_stop.load() )
           return;
       }
     }

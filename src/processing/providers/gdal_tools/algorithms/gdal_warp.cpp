@@ -29,7 +29,7 @@ QStringList GdalWarpAlgorithm::buildArgs(const QVariantMap &parameters,
     if (parameters.contains("EXTENT") && !parameters.value("EXTENT").toString().isEmpty()) {
         QStringList extent = parameters.value("EXTENT").toString().split(",");
         if (extent.size() == 4) {
-            args << "-te" << extent[0] << extent[1] << extent[2] << extent[3];
+            args << "-te" << extent[0].trimmed() << extent[2].trimmed() << extent[1].trimmed() << extent[3].trimmed();
         }
     }
 

@@ -221,11 +221,18 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
   }
 
   QgsProcessingFeedback feedback;
-  if ( progressCb )
+  if ( progressCb || isCancelledFn )
   {
     QObject::connect( &feedback, &QgsFeedback::progressChanged,
-                      [progressCb]( double progress ) {
-                        progressCb( static_cast<int>( progress ), "Processing..." );
+                      [&feedback, isCancelledFn, progressCb]( double progress ) {
+                        if ( isCancelledFn && isCancelledFn() )
+                        {
+                          feedback.cancel();
+                        }
+                        if ( progressCb )
+                        {
+                          progressCb( static_cast<int>( progress ), "Processing..." );
+                        }
                       } );
   }
 
@@ -264,6 +271,23 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
   if ( feedback.isCanceled() )
     throw std::runtime_error( "Processing algorithm cancelled before run: " + mDesc.id );
 
+  std::atomic<bool> runDone{false};
+  std::thread watcher;
+  if ( isCancelledFn )
+  {
+    watcher = std::thread( [&runDone, isCancelledFn, &feedback]() {
+      while ( !runDone.load( std::memory_order_relaxed ) )
+      {
+        if ( isCancelledFn() )
+        {
+          feedback.cancel();
+          break;
+        }
+        std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+      }
+    } );
+  }
+
   QVariantMap runResults;
   try
   {
@@ -271,9 +295,16 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
   }
   catch ( const QgsProcessingException &e )
   {
+    runDone.store( true, std::memory_order_relaxed );
+    if ( watcher.joinable() )
+      watcher.join();
     try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
     throw std::runtime_error( e.what().toStdString() );
   }
+
+  runDone.store( true, std::memory_order_relaxed );
+  if ( watcher.joinable() )
+    watcher.join();
 
   checkCancelled();
   if ( feedback.isCanceled() )

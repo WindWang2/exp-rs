@@ -154,21 +154,51 @@ QString buildVirtualRasterXml( const VirtualRasterRecipe &recipe,
       }
     }
 
+    std::optional<double> inputNoData;
+    for ( const RasterBandStructure &band : raster->bands )
+    {
+      if ( band.number == bandRef.bandNumber && band.noDataValue.has_value() )
+      {
+        inputNoData = band.noDataValue;
+        break;
+      }
+    }
+
     out << QStringLiteral(
              "  <VRTRasterBand dataType=\"%1\" band=\"%2\">\n" )
              .arg( escapeXml( bandDataType ) )
              .arg( i + 1 );
     if ( recipe.noDataPolicy == NoDataPolicy::FillValue )
+    {
       out << QStringLiteral( "    <NoDataValue>%1</NoDataValue>\n" )
                .arg( recipe.noDataFillValue );
+    }
+    else if ( inputNoData.has_value() )
+    {
+      out << QStringLiteral( "    <NoDataValue>%1</NoDataValue>\n" )
+               .arg( *inputNoData );
+    }
+
+    const bool useComplex = ( recipe.noDataPolicy == NoDataPolicy::FillValue ) || inputNoData.has_value();
+    const QString sourceType = useComplex ? QStringLiteral( "ComplexSource" ) : QStringLiteral( "SimpleSource" );
+
     out << QStringLiteral(
-             "    <SimpleSource resampling=\"%1\">\n" )
+             "    <%1 resampling=\"%2\">\n" )
+             .arg( sourceType )
              .arg( resamplingName( recipe.resampling ) );
     out << QStringLiteral(
              "      <SourceFilename relativeToVRT=\"0\">%1</SourceFilename>\n" )
              .arg( escapeXml( snapshot.source().canonicalSource ) );
     out << QStringLiteral( "      <SourceBand>%1</SourceBand>\n" )
              .arg( bandRef.bandNumber );
+    if ( recipe.noDataPolicy == NoDataPolicy::FillValue )
+    {
+      out << QStringLiteral( "      <NODATA>%1</NODATA>\n" ).arg( recipe.noDataFillValue );
+    }
+    else if ( inputNoData.has_value() )
+    {
+      out << QStringLiteral( "      <NODATA>%1</NODATA>\n" ).arg( *inputNoData );
+    }
 
     if ( raster->hasGeoTransform && raster->extent.valid )
     {
@@ -209,7 +239,7 @@ QString buildVirtualRasterXml( const VirtualRasterRecipe &recipe,
       }
     }
 
-    out << QStringLiteral( "    </SimpleSource>\n" );
+    out << QStringLiteral( "    </%1>\n" ).arg( sourceType );
     out << QStringLiteral( "  </VRTRasterBand>\n" );
   }
 

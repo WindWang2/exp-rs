@@ -19,7 +19,7 @@ QStringList OtbBandMathAlgorithm::buildArgs(const QVariantMap &parameters,
     Q_UNUSED(feedback);
 
     QStringList args;
-    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
+    args << "-il" << rasterLayerSource(parameters.value("INPUT"));
     args << "-exp" << parameters.value("EXPRESSION").toString();
     args << "-out" << parameters.value("OUTPUT").toString();
 

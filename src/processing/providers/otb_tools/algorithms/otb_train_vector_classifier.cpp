@@ -21,10 +21,16 @@ QStringList OtbTrainVectorClassifierAlgorithm::buildArgs(const QVariantMap &para
     Q_UNUSED(feedback);
 
     QStringList args;
-    args << "-in" << vectorLayerSource(parameters.value("INPUT"));
-    args << "-features" << parameters.value("FEATURES").toString();
-    args << "-label" << parameters.value("LABEL_FIELD").toString();
-    args << "-out" << parameters.value("OUTPUT").toString();
+    args << "-io.vd" << vectorLayerSource(parameters.value("INPUT"));
+    const QString featStr = parameters.value("FEATURES").toString();
+    if (!featStr.isEmpty()) {
+        args << "-feat";
+        for (const QString &f : featStr.split(',', Qt::SkipEmptyParts)) {
+            args << f.trimmed();
+        }
+    }
+    args << "-cfield" << parameters.value("LABEL_FIELD").toString();
+    args << "-io.out" << parameters.value("OUTPUT").toString();
 
     return args;
 }

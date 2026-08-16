@@ -68,35 +68,53 @@ MaskCoord mapToMask(const std::array<double, 6>& inGt,
 }
 
 /// Maps the corners of an input block to the mask grid and returns the bounding
-/// box (clamped to the mask raster) to read, plus the max row so the caller can
-/// size the mask buffer. Returns false when no part of the block intersects the
-/// mask raster.
+/// box (clamped to the mask raster) to read. Returns false when no part of the
+/// block intersects the mask raster.
 bool maskWindowBounds(const std::array<double, 6>& inGt,
                       const std::array<double, 6>& maskGt,
                       int maskWidth, int maskHeight,
                       int x0, int y0, int w, int h,
                       long* col0, long* row0, long* col1, long* row1)
 {
-    long minCol = maskWidth, minRow = maskHeight, maxCol = -1, maxRow = -1;
-    const int corners[4][2] = {{x0, y0},
-                               {x0 + w - 1, y0},
-                               {x0, y0 + h - 1},
-                               {x0 + w - 1, y0 + h - 1}};
-    for (const auto& c : corners) {
-        const MaskCoord m = mapToMask(inGt, maskGt, maskWidth, maskHeight, c[0], c[1]);
-        if (m.col < 0)
-            continue;
-        minCol = (std::min)(minCol, m.col);
-        minRow = (std::min)(minRow, m.row);
-        maxCol = (std::max)(maxCol, m.col);
-        maxRow = (std::max)(maxRow, m.row);
-    }
-    if (maxCol < 0)
+    const double a = maskGt[1], b = maskGt[2];
+    const double d = maskGt[4], e = maskGt[5];
+    const double det = a * e - b * d;
+    if (std::abs(det) < 1e-12)
         return false;
-    *col0 = minCol;
-    *row0 = minRow;
-    *col1 = maxCol;
-    *row1 = maxRow;
+
+    double minMCol = 1e18, minMRow = 1e18, maxMCol = -1e18, maxMRow = -1e18;
+    const int corners[4][2] = {{x0, y0},
+                               {x0 + w, y0},
+                               {x0, y0 + h},
+                               {x0 + w, y0 + h}};
+    for (const auto& c : corners) {
+        const double x = inGt[0] + c[0] * inGt[1] + c[1] * inGt[2];
+        const double y = inGt[3] + c[0] * inGt[4] + c[1] * inGt[5];
+        const double dx = x - maskGt[0];
+        const double dy = y - maskGt[3];
+        const double mc = (dx * e - dy * b) / det;
+        const double mr = (dy * a - dx * d) / det;
+        minMCol = (std::min)(minMCol, mc);
+        minMRow = (std::min)(minMRow, mr);
+        maxMCol = (std::max)(maxMCol, mc);
+        maxMRow = (std::max)(maxMRow, mr);
+    }
+
+    if (maxMCol < 0.0 || minMCol >= maskWidth || maxMRow < 0.0 || minMRow >= maskHeight)
+        return false;
+
+    const long c0 = std::clamp(static_cast<long>(std::floor(minMCol)), 0L, static_cast<long>(maskWidth - 1));
+    const long r0 = std::clamp(static_cast<long>(std::floor(minMRow)), 0L, static_cast<long>(maskHeight - 1));
+    const long c1 = std::clamp(static_cast<long>(std::ceil(maxMCol)), 0L, static_cast<long>(maskWidth - 1));
+    const long r1 = std::clamp(static_cast<long>(std::ceil(maxMRow)), 0L, static_cast<long>(maskHeight - 1));
+
+    if (c0 > c1 || r0 > r1)
+        return false;
+
+    *col0 = c0;
+    *row0 = r0;
+    *col1 = c1;
+    *row1 = r1;
     return true;
 }
 
@@ -323,9 +341,12 @@ Json::Value RsApplyMaskOperator::run(const Json::Value& params,
                     } else {
                         const MaskCoord m = mapToMask(inGt, maskGt, mask.width(),
                                                       mask.height(), col, y0 + row);
-                        maskOffsets[idx] = m.col < 0
-                            ? -1 // outside mask extent -> clear
-                            : static_cast<int32_t>((m.row - mRow0) * mWindowW + (m.col - mCol0));
+                        if (m.col >= mCol0 && m.col <= mCol1 && m.row >= mRow0 && m.row <= mRow1) {
+                            const int32_t off = static_cast<int32_t>((m.row - mRow0) * mWindowW + (m.col - mCol0));
+                            maskOffsets[idx] = (off >= 0 && static_cast<size_t>(off) < maskBuf.size()) ? off : -1;
+                        } else {
+                            maskOffsets[idx] = -1;
+                        }
                     }
                 }
             }
