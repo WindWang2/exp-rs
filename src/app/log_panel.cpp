@@ -188,7 +188,36 @@ void LogPanel::logMessage(const QString &message, const QString &tag, Qgis::Mess
                                   "<span style='color:%5'>%6</span>")
                        .arg(timestamp, color.name(), prefix, tag, color.name(), message.toHtmlEscaped());
 
+    if (!isVisible()) {
+        if (m_pendingHtml.size() >= 1000)
+            m_pendingHtml.removeFirst();
+        m_pendingHtml.append(html);
+        return;
+    }
+
     mTextEdit->append(html);
+
+    if (mAutoScroll) {
+        QScrollBar *scrollBar = mTextEdit->verticalScrollBar();
+        scrollBar->setValue(scrollBar->maximum());
+    }
+}
+
+void LogPanel::showEvent(QShowEvent *event)
+{
+    QgsDockWidget::showEvent(event);
+    flushPendingMessages();
+}
+
+void LogPanel::flushPendingMessages()
+{
+    if (m_pendingHtml.isEmpty())
+        return;
+
+    for (const QString &html : m_pendingHtml) {
+        mTextEdit->append(html);
+    }
+    m_pendingHtml.clear();
 
     if (mAutoScroll) {
         QScrollBar *scrollBar = mTextEdit->verticalScrollBar();

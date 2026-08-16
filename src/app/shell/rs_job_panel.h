@@ -60,6 +60,7 @@ class RsJobPanel : public QgsDockWidget
     void applyHelpTips();
     void refreshAll();
     void upsertTaskRow( const sicnu::AlgorithmTaskInfo &info );
+    QTreeWidgetItem *findTaskItem( long taskId ) const;
     void fillLogForTask( long taskId );
     void fillDetailsForTask( long taskId );
     void updateActionEnabled();

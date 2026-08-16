@@ -1110,4 +1110,9 @@ quint64 QgisDisplayManager::canvasLayerSyncCount(DisplayViewId viewId) const {
   return viewRecord ? viewRecord->canvasLayerSyncCount : 0;
 }
 
+QgsMapCanvas *QgisDisplayManager::mapCanvas(DisplayViewId viewId) const {
+  const Impl::ViewRecord *viewRecord = m_impl->findView(viewId);
+  return viewRecord ? viewRecord->canvas.data() : nullptr;
+}
+
 } // namespace sicnu::display

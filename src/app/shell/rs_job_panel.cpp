@@ -465,22 +465,24 @@ void RsJobPanel::refreshAll()
   updateActionEnabled();
 }
 
+QTreeWidgetItem *RsJobPanel::findTaskItem( long taskId ) const
+{
+  for ( int i = 0; i < m_jobTree->topLevelItemCount(); ++i )
+  {
+    QTreeWidgetItem *item = m_jobTree->topLevelItem( i );
+    if ( item && item->data( ColTitle, RoleTaskId ).toLongLong() == taskId )
+      return item;
+  }
+  return nullptr;
+}
+
 void RsJobPanel::upsertTaskRow( const sicnu::AlgorithmTaskInfo &info )
 {
   const QString state = statusToString( info.status );
   const bool show = passesFilter( state );
   const long taskId = info.taskId;
 
-  QTreeWidgetItem *found = nullptr;
-  for ( int i = 0; i < m_jobTree->topLevelItemCount(); ++i )
-  {
-    QTreeWidgetItem *item = m_jobTree->topLevelItem( i );
-    if ( item->data( ColTitle, RoleTaskId ).toLongLong() == taskId )
-    {
-      found = item;
-      break;
-    }
-  }
+  QTreeWidgetItem *found = findTaskItem( taskId );
 
   if ( !show )
   {
@@ -1031,10 +1033,11 @@ void RsJobPanel::onContextMenuRequested( const QPoint &pos )
   autoLoad->setCheckable( true );
   autoLoad->setToolTip( tr( "勾选后任务成功时自动把输出加载到主程序。" ) );
   autoLoad->setChecked( loadToMainPreference( taskId ) );
-  connect( autoLoad, &QAction::toggled, this, [this, taskId, item]( bool on ) {
+  connect( autoLoad, &QAction::toggled, this, [this, taskId]( bool on ) {
     setLoadToMainPreference( taskId, on );
     m_blockItemChanged = true;
-    item->setCheckState( ColLoad, on ? Qt::Checked : Qt::Unchecked );
+    if ( auto *targetItem = findTaskItem( taskId ) )
+      targetItem->setCheckState( ColLoad, on ? Qt::Checked : Qt::Unchecked );
     m_blockItemChanged = false;
     if ( taskId == m_selectedId )
       fillDetailsForTask( taskId );
@@ -1070,8 +1073,9 @@ void RsJobPanel::onContextMenuRequested( const QPoint &pos )
   copyDetailAct->setToolTip( tr( "把详情页全文复制到剪贴板。" ) );
 
   menu.addSeparator();
-  QAction *removeAct = menu.addAction( tr( "从列表移除" ), this, [this, item, taskId]() {
-    delete item;
+  QAction *removeAct = menu.addAction( tr( "从列表移除" ), this, [this, taskId]() {
+    if ( auto *targetItem = findTaskItem( taskId ) )
+      delete targetItem;
     m_loadToMain.remove( taskId );
     if ( m_selectedId == taskId )
     {

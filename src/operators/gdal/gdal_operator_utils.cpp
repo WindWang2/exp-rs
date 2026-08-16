@@ -7,6 +7,8 @@
 
 #include <cpl_string.h>
 #include <gdal_rat.h>
+#include <QFile>
+#include <QString>
 
 namespace sicnu::operators::gdal::util {
 
@@ -155,22 +157,35 @@ std::pair<int, int> runGdalWarpOnDataset(GDALDatasetH hSrcDS,
     context.logInfo(logLabel + " → " + outputPath);
 
     int bUsageError = FALSE;
-    GDALDatasetH hDstDS = GDALWarp(outputPath.c_str(), nullptr, 1, &hSrcDS,
-                                   psOptions, &bUsageError);
+    GDALDatasetH hDstDS = nullptr;
+    try {
+        hDstDS = GDALWarp(outputPath.c_str(), nullptr, 1, &hSrcDS, psOptions, &bUsageError);
+        GDALWarpAppOptionsFree(psOptions);
 
-    GDALWarpAppOptionsFree(psOptions);
+        if (context.isCancelled()) {
+            if (hDstDS) GDALClose(hDstDS);
+            QFile::remove(QString::fromStdString(outputPath));
+            throw RSOperatorError(ErrorCode::Cancelled, logLabel + " cancelled");
+        }
 
-    if (!hDstDS || bUsageError) {
-        throw RSOperatorError(ErrorCode::GdalError,
-                              logLabel + " failed for output: " + outputPath);
+        if (!hDstDS || bUsageError) {
+            if (hDstDS) GDALClose(hDstDS);
+            QFile::remove(QString::fromStdString(outputPath));
+            throw RSOperatorError(ErrorCode::GdalError,
+                                  logLabel + " failed for output: " + outputPath);
+        }
+
+        const int outputWidth = GDALGetRasterXSize(hDstDS);
+        const int outputHeight = GDALGetRasterYSize(hDstDS);
+        GDALClose(hDstDS);
+
+        context.reportProgress(1.0, logLabel + " complete");
+        return {outputWidth, outputHeight};
+    } catch (...) {
+        if (hDstDS) GDALClose(hDstDS);
+        QFile::remove(QString::fromStdString(outputPath));
+        throw;
     }
-
-    const int outputWidth = GDALGetRasterXSize(hDstDS);
-    const int outputHeight = GDALGetRasterYSize(hDstDS);
-    GDALClose(hDstDS);
-
-    context.reportProgress(1.0, logLabel + " complete");
-    return {outputWidth, outputHeight};
 }
 
 std::pair<int, int> runGdalWarp(const std::string& inputPath,

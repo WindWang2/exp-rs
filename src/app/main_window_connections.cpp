@@ -178,14 +178,7 @@ void QgisDesktopWindow::updateScale()
 
 void QgisDesktopWindow::updateExtents()
 {
-    QgsRectangle ext = m_mapCanvas->extent();
-    statusBar()->showMessage(
-        QString("Extent: %1,%2 - %3,%4")
-            .arg(ext.xMinimum(), 0, 'f', 1)
-            .arg(ext.yMinimum(), 0, 'f', 1)
-            .arg(ext.xMaximum(), 0, 'f', 1)
-            .arg(ext.yMaximum(), 0, 'f', 1),
-        5000);
+    // Permanent coordinate/scale widgets reflect canvas view without stomping transient statusBar messages.
 }
 
 void QgisDesktopWindow::updateCrsDisplay()

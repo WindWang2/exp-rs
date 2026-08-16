@@ -199,6 +199,9 @@ public:
   /// Non-owning access to the authoritative runtime presentation object.
   QgsMapLayer *mapLayer(DisplayLayerId layerId) const;
 
+  /// Non-owning access to the view's map canvas.
+  QgsMapCanvas *mapCanvas(DisplayViewId viewId) const;
+
 Q_SIGNALS:
   /// Fired when activeViewId changes.
   void activeViewChanged(DisplayViewId viewId);

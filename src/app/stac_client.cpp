@@ -177,7 +177,7 @@ void StacClient::search(const QString &endpoint, const QString &collection,
     request.setTransferTimeout(10000);
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                         QNetworkRequest::UserVerifiedRedirectPolicy);
+                         QNetworkRequest::NoLessSafeRedirectPolicy);
 
     QNetworkReply *reply = mManager.get(request);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {

@@ -93,43 +93,53 @@ bool ActiveViewHost::setActiveViewId( sicnu::display::DisplayViewId viewId )
 
 void ActiveViewHost::setExtent( const QgsRectangle &extent )
 {
-  if ( m_mapCanvas )
+  QgsMapCanvas *canvas = m_displayManager ? m_displayManager->mapCanvas( activeViewId() ) : nullptr;
+  if ( !canvas ) canvas = m_mapCanvas;
+  if ( canvas )
   {
-    m_mapCanvas->setExtent( extent );
-    m_mapCanvas->refresh();
+    canvas->setExtent( extent );
+    canvas->refresh();
   }
 }
 
 void ActiveViewHost::setCenter( const QgsPointXY &center )
 {
-  if ( m_mapCanvas )
+  QgsMapCanvas *canvas = m_displayManager ? m_displayManager->mapCanvas( activeViewId() ) : nullptr;
+  if ( !canvas ) canvas = m_mapCanvas;
+  if ( canvas )
   {
-    m_mapCanvas->setCenter( center );
-    m_mapCanvas->refresh();
+    canvas->setCenter( center );
+    canvas->refresh();
   }
 }
 
 void ActiveViewHost::setScale( double scale )
 {
-  if ( m_mapCanvas )
+  QgsMapCanvas *canvas = m_displayManager ? m_displayManager->mapCanvas( activeViewId() ) : nullptr;
+  if ( !canvas ) canvas = m_mapCanvas;
+  if ( canvas )
   {
-    m_mapCanvas->zoomScale( scale );
+    canvas->zoomScale( scale );
   }
 }
 
 void ActiveViewHost::zoomToFullExtent()
 {
-  if ( m_mapCanvas )
+  QgsMapCanvas *canvas = m_displayManager ? m_displayManager->mapCanvas( activeViewId() ) : nullptr;
+  if ( !canvas ) canvas = m_mapCanvas;
+  if ( canvas )
   {
-    m_mapCanvas->zoomToFullExtent();
+    canvas->zoomToFullExtent();
   }
 }
 
 void ActiveViewHost::refreshCanvas()
 {
-  if ( m_mapCanvas )
+  QgsMapCanvas *canvas = m_displayManager ? m_displayManager->mapCanvas( activeViewId() ) : nullptr;
+  if ( !canvas ) canvas = m_mapCanvas;
+  if ( canvas )
   {
-    m_mapCanvas->refresh();
+    canvas->refresh();
   }
 }
 
@@ -224,7 +234,11 @@ ActiveViewHost::displayAsset( sicnu::data::AssetId assetId )
                         DiagnosticSeverity::Error } );
     }
 
-    const bool hadVisibleLayers = !m_mapCanvas->layers().isEmpty();
+    QgsMapCanvas *targetCanvas = m_displayManager->mapCanvas( activeViewId() );
+    if ( !targetCanvas )
+        targetCanvas = m_mapCanvas;
+
+    const bool hadVisibleLayers = !targetCanvas->layers().isEmpty();
     const Result<DisplayLayerId> displayed =
         m_displayManager->addLayer( activeViewId(), assetId );
     if ( !displayed )
@@ -245,7 +259,7 @@ ActiveViewHost::displayAsset( sicnu::data::AssetId assetId )
     placeInTreeGroup( layer, asset->kind() );
     refreshCanvasLayers();
     if ( !hadVisibleLayers )
-        m_mapCanvas->setExtent( layer->extent() );
+        targetCanvas->setExtent( layer->extent() );
 
     return Result<DisplayLayerId>::success( displayed.value() );
 }
@@ -267,7 +281,11 @@ ActiveViewHost::openSource( sicnu::data::SourceDescriptor source )
                         DiagnosticSeverity::Error } );
     }
 
-    const bool hadVisibleLayers = !m_mapCanvas->layers().isEmpty();
+    QgsMapCanvas *targetCanvas = m_displayManager->mapCanvas( activeViewId() );
+    if ( !targetCanvas )
+        targetCanvas = m_mapCanvas;
+
+    const bool hadVisibleLayers = !targetCanvas->layers().isEmpty();
     const sicnu::data::RegisterResult registered =
         m_dataManager->registerSource(
             sicnu::data::RegisterRequest{ std::move( source ) } );
@@ -301,7 +319,7 @@ ActiveViewHost::openSource( sicnu::data::SourceDescriptor source )
     placeInTreeGroup( layer, asset->kind() );
     refreshCanvasLayers();
     if ( !hadVisibleLayers )
-        m_mapCanvas->setExtent( layer->extent() );
+        targetCanvas->setExtent( layer->extent() );
 
     if ( auto *win = qobject_cast<QMainWindow *>( m_parentWidget ) )
     {
