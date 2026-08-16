@@ -4,6 +4,7 @@
 #include "ribbon_controller.h"
 
 #include "main_window.h"
+#include "workflow/pipeline_editor_dock.h"
 
 #include <QAbstractButton>
 #include <QButtonGroup>
@@ -1021,17 +1022,21 @@ QWidget *RibbonController::createRibbonBar()
     if ( auto *btn = addToolButton( execGrp, tr( "运行全流程" ), "task_run", tr( "按 DAG 拓扑顺序顺序执行全流程" ) ) )
     {
       connect( btn, &QToolButton::clicked, m_window, [this]() {
-        if ( auto *dock = m_window->findChild<QDockWidget *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
+        if ( auto *dock = m_window->findChild<sicnu::workflow::gui::PipelineEditorDock *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
         {
           dock->show();
           dock->raise();
+          emit dock->runFullWorkflowRequested();
         }
       } );
     }
     if ( auto *btn = addToolButton( execGrp, tr( "停止运行" ), "task_cancel", tr( "停止当前正在运行的工作流" ) ) )
     {
       connect( btn, &QToolButton::clicked, m_window, [this]() {
-        // Stop action
+        if ( auto *dock = m_window->findChild<sicnu::workflow::gui::PipelineEditorDock *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
+        {
+          emit dock->stopWorkflowRequested();
+        }
       } );
     }
 
