@@ -68,12 +68,30 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
     std::map<QgsFeatureId, QgsFeature> targetFeatures;
     QgsFeatureIterator targetIt = targetSource->getFeatures();
     QgsFeature targetFeat;
+    const bool needsTransform = targetSource->sourceCrs().isValid() && source->sourceCrs().isValid() &&
+                                targetSource->sourceCrs() != source->sourceCrs();
+    QgsCoordinateTransform ct;
+    if ( needsTransform )
+    {
+        ct = QgsCoordinateTransform( targetSource->sourceCrs(), source->sourceCrs(), context.transformContext() );
+    }
+
     while ( targetIt.nextFeature( targetFeat ) )
     {
         if ( feedback->isCanceled() )
             break;
         if ( targetFeat.hasGeometry() )
         {
+            if ( needsTransform )
+            {
+                try
+                {
+                    QgsGeometry g = targetFeat.geometry();
+                    g.transform( ct );
+                    targetFeat.setGeometry( g );
+                }
+                catch ( const QgsCsException & ) {}
+            }
             targetIndex.addFeature( targetFeat );
             targetFeatures[targetFeat.id()] = targetFeat;
         }

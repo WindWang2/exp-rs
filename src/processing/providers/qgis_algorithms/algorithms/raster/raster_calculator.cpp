@@ -63,6 +63,16 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
     if ( nCols <= 0 || nRows <= 0 )
         throw QgsProcessingException( QObject::tr( "Invalid raster dimensions" ) );
 
+    for ( QgsRasterLayer *rl : rasterLayers )
+    {
+        if ( rl->crs() != crs )
+        {
+            throw QgsProcessingException(
+                QObject::tr( "CRS mismatch: layer '%1' has CRS '%2', but reference layer has '%3'" )
+                    .arg( rl->name(), rl->crs().authid(), crs.authid() ) );
+        }
+    }
+
     feedback->setProgress( 10 );
 
     // Read all input bands into BandMath::BandData
@@ -86,9 +96,10 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
             bandVec.resize( totalPixels );
             for ( size_t i = 0; i < totalPixels; ++i )
             {
-                int row = static_cast<int>( i / nCols );
-                int col = static_cast<int>( i % nCols );
-                bandVec[i] = static_cast<float>( block->value( row, col ) );
+                if ( block->isNoData( i ) )
+                    bandVec[i] = std::numeric_limits<float>::quiet_NaN();
+                else
+                    bandVec[i] = static_cast<float>( block->value( i ) );
             }
             bandIndex++;
         }

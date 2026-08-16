@@ -57,7 +57,8 @@ QVariantMap resolveDestinationParameters( const QgsProcessingAlgorithm *algorith
         const QString type = param->type();
         if ( type != QgsProcessingParameterRasterDestination::typeName()
              && type != QgsProcessingParameterVectorDestination::typeName()
-             && type != QgsProcessingParameterFeatureSink::typeName() )
+             && type != QgsProcessingParameterFeatureSink::typeName()
+             && type != QgsProcessingParameterFileDestination::typeName() )
             continue;
 
         resolved.insert(
@@ -113,7 +114,8 @@ QVariantMap OtbToolWrapper::processAlgorithm(const QVariantMap &parameters,
         const QString type = param->type();
         if ( type == QgsProcessingParameterRasterDestination::typeName()
              || type == QgsProcessingParameterVectorDestination::typeName()
-             || type == QgsProcessingParameterFeatureSink::typeName() )
+             || type == QgsProcessingParameterFeatureSink::typeName()
+             || type == QgsProcessingParameterFileDestination::typeName() )
         {
             const QString outPath = resolvedParameters.value( param->name() ).toString();
             if ( !outPath.isEmpty() && !QFileInfo::exists( outPath ) )

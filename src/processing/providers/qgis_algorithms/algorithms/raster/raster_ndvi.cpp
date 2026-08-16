@@ -49,6 +49,13 @@ QVariantMap RasterNdviAlgorithm::processAlgorithm( const QVariantMap &parameters
     int nRows = redLayer->height();
     QgsCoordinateReferenceSystem crs = redLayer->crs();
 
+    if ( redLayer->crs() != nirLayer->crs() )
+    {
+        throw QgsProcessingException(
+            QObject::tr( "CRS mismatch: red layer has CRS '%1', but NIR layer has '%2'" )
+                .arg( redLayer->crs().authid(), nirLayer->crs().authid() ) );
+    }
+
     feedback->setProgress( 10 );
 
     // Read red band (band 1)
@@ -71,49 +78,34 @@ QVariantMap RasterNdviAlgorithm::processAlgorithm( const QVariantMap &parameters
     std::vector<float> nirData( pixelCount );
     std::vector<float> ndviData( pixelCount );
 
+    const float outNodata = std::numeric_limits<float>::quiet_NaN();
+
     for ( qgssize i = 0; i < pixelCount; i++ )
     {
-        redData[i] = static_cast<float>( redBlock->value( i ) );
-        nirData[i] = static_cast<float>( nirBlock->value( i ) );
+        if ( redBlock->isNoData( i ) || nirBlock->isNoData( i ) )
+        {
+            redData[i] = outNodata;
+            nirData[i] = outNodata;
+        }
+        else
+        {
+            redData[i] = static_cast<float>( redBlock->value( i ) );
+            nirData[i] = static_cast<float>( nirBlock->value( i ) );
+        }
     }
 
     // Compute NDVI using SpectralIndices
     SpectralIndices::ndvi( nirData.data(), redData.data(), ndviData.data(), pixelCount );
 
-    feedback->setProgress( 70 );
-
-    // Create output raster
-    QgsRasterFileWriter writer( dest );
-    writer.setOutputFormat( QStringLiteral( "GTiff" ) );
-
-    std::unique_ptr<QgsRasterPipe> pipe( new QgsRasterPipe() );
-
-    // Create a provider clone for the output
-    std::unique_ptr<QgsRasterDataProvider> provider( redProvider->clone() );
-    if ( !provider )
-        throw QgsProcessingException( QObject::tr( "Could not clone raster provider" ) );
-
-    if ( !pipe->set( provider.release() ) )
-        throw QgsProcessingException( QObject::tr( "Could not create raster pipe" ) );
-
-    // Write NDVI data to the output block
-    std::unique_ptr<QgsRasterBlock> outBlock( new QgsRasterBlock( Qgis::DataType::Float32, nCols, nRows ) );
-    if ( !outBlock || !outBlock->isValid() )
-        throw QgsProcessingException( QObject::tr( "Could not create output block" ) );
-
-    double noDataValue = redBlock->noDataValue();
-    outBlock->setNoDataValue( noDataValue );
-
     for ( qgssize i = 0; i < pixelCount; i++ )
     {
         if ( redBlock->isNoData( i ) || nirBlock->isNoData( i ) )
-            outBlock->setIsNoData( i );
-        else
-            outBlock->setValue( i, static_cast<double>( ndviData[i] ) );
+            ndviData[i] = outNodata;
     }
 
+    feedback->setProgress( 70 );
+
     // Write the block to the output file
-    // Create a simple writer that writes the computed block
     GDALDriverH driver = GDALGetDriverByName( "GTiff" );
     if ( !driver )
         throw QgsProcessingException( QObject::tr( "GTiff driver not available" ) );
@@ -130,7 +122,7 @@ QVariantMap RasterNdviAlgorithm::processAlgorithm( const QVariantMap &parameters
 
     // Write NDVI data
     GDALRasterBandH band = GDALGetRasterBand( dataset, 1 );
-    GDALSetRasterNoDataValue( band, noDataValue );
+    GDALSetRasterNoDataValue( band, outNodata );
 
     std::vector<float> rowData( nCols );
     for ( int row = 0; row < nRows; row++ )

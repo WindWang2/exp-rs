@@ -12,6 +12,36 @@
 namespace sicnu::operators::opencv {
 
 using namespace schema;
+namespace {
+
+void applyNormalizedFilter(cv::Mat& srcDst, const std::function<void(const cv::Mat&, cv::Mat&)>& filterFn) {
+    cv::Mat mask;
+    cv::compare(srcDst, srcDst, mask, cv::CMP_EQ); // 255 for non-NaN, 0 for NaN
+    const int nonZero = cv::countNonZero(mask);
+    if (nonZero == mask.rows * mask.cols) {
+        cv::Mat out;
+        filterFn(srcDst, out);
+        out.copyTo(srcDst);
+        return;
+    }
+    if (nonZero == 0) {
+        srcDst.setTo(std::numeric_limits<float>::quiet_NaN());
+        return;
+    }
+
+    cv::Mat cleanSrc = srcDst.clone();
+    cleanSrc.setTo(0.0f, ~mask);
+    cv::Mat maskF, filteredData, filteredMask;
+    mask.convertTo(maskF, CV_32F, 1.0 / 255.0);
+    filterFn(cleanSrc, filteredData);
+    filterFn(maskF, filteredMask);
+    cv::Mat validMask = (filteredMask > 1e-4f);
+    cv::divide(filteredData, filteredMask, filteredData);
+    filteredData.setTo(std::numeric_limits<float>::quiet_NaN(), ~validMask);
+    filteredData.copyTo(srcDst);
+}
+
+} // namespace
 
 // ---------- Gaussian Blur ----------
 
@@ -44,7 +74,9 @@ void OpenCvGaussianBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value&
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "kernelSize must be a positive odd integer");
     }
-    cv::GaussianBlur(srcDst, srcDst, cv::Size(kernelSize, kernelSize), sigma);
+    applyNormalizedFilter(srcDst, [&](const cv::Mat& in, cv::Mat& out) {
+        cv::GaussianBlur(in, out, cv::Size(kernelSize, kernelSize), sigma);
+    });
 }
 
 // ---------- Mean (box) Blur ----------
@@ -76,7 +108,9 @@ void OpenCvMeanBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value& par
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "kernelSize must be a positive odd integer");
     }
-    cv::blur(srcDst, srcDst, cv::Size(kernelSize, kernelSize));
+    applyNormalizedFilter(srcDst, [&](const cv::Mat& in, cv::Mat& out) {
+        cv::blur(in, out, cv::Size(kernelSize, kernelSize));
+    });
 }
 
 // ---------- Median Blur ----------
@@ -106,7 +140,16 @@ void OpenCvMedianBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value& p
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "kernelSize must be a positive odd integer");
     }
-    cv::medianBlur(srcDst, srcDst, kernelSize);
+    cv::Mat mask;
+    cv::compare(srcDst, srcDst, mask, cv::CMP_EQ);
+    if (cv::countNonZero(mask) < mask.rows * mask.cols) {
+        cv::Mat clean = srcDst.clone();
+        clean.setTo(0.0f, ~mask);
+        cv::medianBlur(clean, srcDst, kernelSize);
+        srcDst.setTo(std::numeric_limits<float>::quiet_NaN(), ~mask);
+    } else {
+        cv::medianBlur(srcDst, srcDst, kernelSize);
+    }
 }
 
 // ---------- Sobel ----------
@@ -120,22 +163,22 @@ Json::Value OpenCvSobelOperator::metadata() const {
     meta["tags"].append("opencv");
     meta["tags"].append("edge");
     meta["tags"].append("sobel");
-    meta["purpose"] = "Compute Sobel gradients";
+    meta["purpose"] = "Compute image gradients using the Sobel operator";
     return meta;
 }
 
 Json::Value OpenCvSobelOperator::operatorSchemaProperties() const {
     Json::Value props(Json::objectValue);
-    props["dx"] = makeIntegerParam("dx", "Derivative order in x", 1);
-    props["dy"] = makeIntegerParam("dy", "Derivative order in y", 0);
     props["kernelSize"] = makeIntegerParam("kernelSize", "Sobel kernel size (1, 3, 5, or 7)", 3);
+    props["dx"] = makeIntegerParam("dx", "Order of derivative in X direction", 1);
+    props["dy"] = makeIntegerParam("dy", "Order of derivative in Y direction", 0);
     return props;
 }
 
 void OpenCvSobelOperator::applyFilter(cv::Mat& srcDst, const Json::Value& params) const {
+    const int kernelSize = getInt(params, "kernelSize", 3);
     const int dx = getInt(params, "dx", 1);
     const int dy = getInt(params, "dy", 0);
-    const int kernelSize = getInt(params, "kernelSize", 3);
     if (kernelSize != 1 && kernelSize != 3 && kernelSize != 5 && kernelSize != 7) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "Sobel kernelSize must be 1, 3, 5, or 7");
@@ -145,9 +188,20 @@ void OpenCvSobelOperator::applyFilter(cv::Mat& srcDst, const Json::Value& params
                               "Sobel requires dx + dy > 0 and non-negative orders");
     }
 
-    cv::Mat grad;
-    cv::Sobel(srcDst, grad, CV_32F, dx, dy, kernelSize);
-    grad.copyTo(srcDst);
+    cv::Mat mask;
+    cv::compare(srcDst, srcDst, mask, cv::CMP_EQ);
+    if (cv::countNonZero(mask) < mask.rows * mask.cols) {
+        cv::Mat clean = srcDst.clone();
+        clean.setTo(0.0f, ~mask);
+        cv::Mat grad;
+        cv::Sobel(clean, grad, CV_32F, dx, dy, kernelSize);
+        grad.setTo(std::numeric_limits<float>::quiet_NaN(), ~mask);
+        grad.copyTo(srcDst);
+    } else {
+        cv::Mat grad;
+        cv::Sobel(srcDst, grad, CV_32F, dx, dy, kernelSize);
+        grad.copyTo(srcDst);
+    }
 }
 
 // ---------- Laplacian ----------
@@ -177,9 +231,20 @@ void OpenCvLaplacianOperator::applyFilter(cv::Mat& srcDst, const Json::Value& pa
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "kernelSize must be a positive odd integer");
     }
-    cv::Mat lap;
-    cv::Laplacian(srcDst, lap, CV_32F, kernelSize);
-    lap.copyTo(srcDst);
+    cv::Mat mask;
+    cv::compare(srcDst, srcDst, mask, cv::CMP_EQ);
+    if (cv::countNonZero(mask) < mask.rows * mask.cols) {
+        cv::Mat clean = srcDst.clone();
+        clean.setTo(0.0f, ~mask);
+        cv::Mat lap;
+        cv::Laplacian(clean, lap, CV_32F, kernelSize);
+        lap.setTo(std::numeric_limits<float>::quiet_NaN(), ~mask);
+        lap.copyTo(srcDst);
+    } else {
+        cv::Mat lap;
+        cv::Laplacian(srcDst, lap, CV_32F, kernelSize);
+        lap.copyTo(srcDst);
+    }
 }
 
 // ---------- Canny ----------

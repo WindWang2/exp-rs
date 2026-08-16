@@ -54,7 +54,8 @@ QVariantMap resolveDestinationParameters( const QgsProcessingAlgorithm *algorith
         const QString type = param->type();
         if ( type != QgsProcessingParameterRasterDestination::typeName()
              && type != QgsProcessingParameterVectorDestination::typeName()
-             && type != QgsProcessingParameterFeatureSink::typeName() )
+             && type != QgsProcessingParameterFeatureSink::typeName()
+             && type != QgsProcessingParameterFileDestination::typeName() )
             continue;
 
         resolved.insert(
@@ -90,7 +91,8 @@ QVariantMap GdalToolWrapper::processAlgorithm(const QVariantMap &parameters,
     }
 
     SICNU_LOG_INFO( SicnuLogTags::GDAL, QString( "Executing GDAL tool: %1" ).arg( toolName() ) );
-    if (!runExternalTool(program, args, feedback)) {
+    QByteArray capturedStdout;
+    if (!runExternalTool(program, args, feedback, &capturedStdout)) {
         const QString err = QObject::tr("GDAL tool '%1' failed").arg(toolName());
         SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
         throw QgsProcessingException(err);
@@ -106,9 +108,24 @@ QVariantMap GdalToolWrapper::processAlgorithm(const QVariantMap &parameters,
         const QString type = param->type();
         if ( type == QgsProcessingParameterRasterDestination::typeName()
              || type == QgsProcessingParameterVectorDestination::typeName()
-             || type == QgsProcessingParameterFeatureSink::typeName() )
+             || type == QgsProcessingParameterFeatureSink::typeName()
+             || type == QgsProcessingParameterFileDestination::typeName() )
         {
             const QString outPath = resolvedParameters.value( param->name() ).toString();
+            if ( !outPath.isEmpty() && !QFileInfo::exists( outPath ) )
+            {
+                if ( type == QgsProcessingParameterFileDestination::typeName() && !capturedStdout.isEmpty() )
+                {
+                    QFile file( outPath );
+                    if ( file.open( QIODevice::WriteOnly | QIODevice::Text ) )
+                    {
+                        QTextStream stream( &file );
+                        stream << QString::fromUtf8( capturedStdout );
+                        file.close();
+                    }
+                }
+            }
+
             if ( !outPath.isEmpty() && !QFileInfo::exists( outPath ) )
             {
                 const QString err = QObject::tr(
@@ -152,7 +169,8 @@ QString GdalToolWrapper::commandLinePreview( const QVariantMap &parameters,
 }
 
 bool GdalToolWrapper::runExternalTool(const QString &program, const QStringList &args,
-                                       QgsProcessingFeedback *feedback)
+                                       QgsProcessingFeedback *feedback,
+                                       QByteArray *capturedStdout)
 {
     QString cmdLine = joinCommandLine( program, args );
     if (feedback) feedback->pushInfo(QObject::tr("Running: %1").arg(cmdLine));
@@ -178,16 +196,23 @@ bool GdalToolWrapper::runExternalTool(const QString &program, const QStringList 
         proc.waitForReadyRead(100);
         QByteArray output = proc.readAllStandardOutput();
         if (!output.isEmpty()) {
+            if (capturedStdout)
+                capturedStdout->append(output);
             QString msg = QString::fromUtf8(output);
             if (feedback) feedback->pushInfo(msg);
             SICNU_LOG_INFO( SicnuLogTags::GDAL, msg );
         }
     }
 
+    QByteArray remaining = proc.readAllStandardOutput();
+    if (!remaining.isEmpty() && capturedStdout) {
+        capturedStdout->append(remaining);
+    }
+
     if (proc.exitCode() != 0) {
         QString err = QObject::tr("Tool failed with exit code %1: %2")
             .arg(proc.exitCode())
-            .arg(QString::fromUtf8(proc.readAllStandardOutput()));
+            .arg(QString::fromUtf8(remaining));
         if (feedback) feedback->reportError(err);
         SICNU_LOG_WARN( SicnuLogTags::GDAL, err );
         return false;

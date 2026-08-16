@@ -69,12 +69,30 @@ QVariantMap VectorNearestNeighborAlgorithm::processAlgorithm( const QVariantMap 
     std::map<QgsFeatureId, QgsGeometry> refGeometries;
     QgsFeatureIterator refIt = refSource->getFeatures();
     QgsFeature refFeat;
+    const bool needsTransform = refSource->sourceCrs().isValid() && source->sourceCrs().isValid() &&
+                                refSource->sourceCrs() != source->sourceCrs();
+    QgsCoordinateTransform ct;
+    if ( needsTransform )
+    {
+        ct = QgsCoordinateTransform( refSource->sourceCrs(), source->sourceCrs(), context.transformContext() );
+    }
+
     while ( refIt.nextFeature( refFeat ) )
     {
         if ( feedback->isCanceled() )
             break;
         if ( refFeat.hasGeometry() )
         {
+            if ( needsTransform )
+            {
+                try
+                {
+                    QgsGeometry g = refFeat.geometry();
+                    g.transform( ct );
+                    refFeat.setGeometry( g );
+                }
+                catch ( const QgsCsException & ) {}
+            }
             refIndex.addFeature( refFeat );
             refGeometries[refFeat.id()] = refFeat.geometry();
         }

@@ -49,7 +49,7 @@ protected:
         if ( !layer || !layer->dataProvider() )
             throw QgsProcessingException( invalidRasterError( parameters, QStringLiteral( "INPUT" ) ) );
 
-        QgsRectangle extent = parameterAsExtent( parameters, QStringLiteral( "EXTENT" ), context );
+        QgsRectangle extent = parameterAsExtent( parameters, QStringLiteral( "EXTENT" ), context, layer->crs() );
         QString dest = parameterAsOutputLayer( parameters, QStringLiteral( "OUTPUT" ), context );
 
         feedback->setProgressText( QObject::tr( "Clipping raster..." ) );

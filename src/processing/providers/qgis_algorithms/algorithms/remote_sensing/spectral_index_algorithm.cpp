@@ -58,9 +58,10 @@ static std::vector<float> readBandData( QgsRasterDataProvider *provider, int ban
     std::vector<float> data( totalPixels );
     for ( size_t i = 0; i < totalPixels; ++i )
     {
-        int row = i / nCols;
-        int col = i % nCols;
-        data[i] = static_cast<float>( block->value( row, col ) );
+        if ( block->isNoData( i ) )
+            data[i] = std::numeric_limits<float>::quiet_NaN();
+        else
+            data[i] = static_cast<float>( block->value( i ) );
     }
     return data;
 }
@@ -123,6 +124,16 @@ QVariantMap SpectralIndexAlgorithm::processAlgorithm( const QVariantMap &paramet
     int nCols = refLayer->width();
     int nRows = refLayer->height();
     QgsCoordinateReferenceSystem crs = refLayer->crs();
+
+    for ( QgsRasterLayer *l : { nirLayer, redLayer, greenLayer, blueLayer, swirLayer } )
+    {
+        if ( l && l->crs() != crs )
+        {
+            throw QgsProcessingException(
+                QObject::tr( "CRS mismatch: layer '%1' has CRS '%2', but reference layer has '%3'" )
+                    .arg( l->name(), l->crs().authid(), crs.authid() ) );
+        }
+    }
 
     if ( nCols <= 0 || nRows <= 0 )
         throw QgsProcessingException( QObject::tr( "Invalid raster dimensions" ) );
@@ -215,12 +226,21 @@ QVariantMap SpectralIndexAlgorithm::processAlgorithm( const QVariantMap &paramet
     if ( !outProvider )
         throw QgsProcessingException( QObject::tr( "Could not create output raster" ) );
 
+    const double outNodata = std::numeric_limits<double>::quiet_NaN();
+    outProvider->setNoDataValue( 1, outNodata );
+
     QgsRasterBlock outBlock( Qgis::DataType::Float32, nCols, nRows );
+    outBlock.setNoDataValue( outNodata );
     for ( int row = 0; row < nRows; ++row )
     {
         for ( int col = 0; col < nCols; ++col )
         {
-            outBlock.setValue( row, col, static_cast<double>( result[static_cast<size_t>( row ) * nCols + col] ) );
+            size_t idx = static_cast<size_t>( row ) * nCols + col;
+            float val = result[idx];
+            if ( std::isnan( val ) )
+                outBlock.setIsNoData( row, col );
+            else
+                outBlock.setValue( row, col, static_cast<double>( val ) );
         }
     }
 

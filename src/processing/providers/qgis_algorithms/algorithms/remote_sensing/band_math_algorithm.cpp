@@ -60,6 +60,22 @@ QVariantMap BandMathAlgorithm::processAlgorithm( const QVariantMap &parameters,
 
     feedback->setProgressText( QObject::tr( "Reading input bands..." ) );
 
+    // Count total bands for accurate monotonic progress
+    int totalBands = 0;
+    for ( QgsRasterLayer *rl : rasterLayers )
+    {
+        if ( rl->crs() != crs )
+        {
+            throw QgsProcessingException(
+                QObject::tr( "CRS mismatch: layer '%1' has CRS '%2', but reference layer has '%3'" )
+                    .arg( rl->name(), rl->crs().authid(), crs.authid() ) );
+        }
+        if ( rl->dataProvider() )
+            totalBands += rl->dataProvider()->bandCount();
+    }
+    if ( totalBands <= 0 )
+        totalBands = 1;
+
     // Read all bands from all layers into BandData map (b1, b2, ...)
     BandMath::BandData bandData;
     size_t totalPixels = static_cast<size_t>( nCols ) * static_cast<size_t>( nRows );
@@ -81,13 +97,14 @@ QVariantMap BandMathAlgorithm::processAlgorithm( const QVariantMap &parameters,
             bandVec.resize( totalPixels );
             for ( size_t i = 0; i < totalPixels; ++i )
             {
-                int row = i / nCols;
-                int col = i % nCols;
-                bandVec[i] = static_cast<float>( block->value( row, col ) );
+                if ( block->isNoData( i ) )
+                    bandVec[i] = std::numeric_limits<float>::quiet_NaN();
+                else
+                    bandVec[i] = static_cast<float>( block->value( i ) );
             }
 
+            feedback->setProgress( 40.0 * bandIndex / totalBands );
             bandIndex++;
-            feedback->setProgress( 40.0 * ( bandIndex - 1 ) / rasterLayers.size() );
         }
     }
 
@@ -112,12 +129,21 @@ QVariantMap BandMathAlgorithm::processAlgorithm( const QVariantMap &parameters,
     if ( !outProvider )
         throw QgsProcessingException( QObject::tr( "Could not create output raster" ) );
 
+    const double outNodata = std::numeric_limits<double>::quiet_NaN();
+    outProvider->setNoDataValue( 1, outNodata );
+
     QgsRasterBlock outBlock( Qgis::DataType::Float32, nCols, nRows );
+    outBlock.setNoDataValue( outNodata );
     for ( int row = 0; row < nRows; ++row )
     {
         for ( int col = 0; col < nCols; ++col )
         {
-            outBlock.setValue( row, col, static_cast<double>( result[static_cast<size_t>( row ) * nCols + col] ) );
+            size_t idx = static_cast<size_t>( row ) * nCols + col;
+            float val = result[idx];
+            if ( std::isnan( val ) )
+                outBlock.setIsNoData( row, col );
+            else
+                outBlock.setValue( row, col, static_cast<double>( val ) );
         }
     }
 

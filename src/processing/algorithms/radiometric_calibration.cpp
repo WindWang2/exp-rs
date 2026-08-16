@@ -521,11 +521,13 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
     constexpr int kTile = 256; // nominal stream tile size (edge-clamped)
     for (int idx = 0; idx < bands.size(); ++idx) {
         const int b = bands[idx];
+        outDataset.setBandNoDataValue(idx + 1, std::numeric_limits<double>::quiet_NaN());
         if (progress)
             progress(static_cast<double>(idx) / bands.size(),
                      QStringLiteral("Calibrating band %1").arg(b));
 
         const BandCoefficients &c = meta.bands.value(b);
+        const double bandNoData = srcDataset.bandNoDataValue(b);
 
         std::vector<float> out;
         QString tileError;
@@ -548,6 +550,12 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                 if (!tOk) {
                     tileError = QStringLiteral("Calibration failed for band %1 (missing coefficients?)").arg(b);
                     return false;
+                }
+                for (size_t i = 0; i < tileCount; ++i) {
+                    float v = pixels[i];
+                    if (!std::isfinite(v) || (!std::isnan(bandNoData) && std::abs(v - bandNoData) < 1e-4f)) {
+                        out[i] = std::numeric_limits<float>::quiet_NaN();
+                    }
                 }
                 return outDataset.writeBandWindow(idx + 1, tile.xOffset, tile.yOffset,
                                                   tile.width, tile.height, out.data());

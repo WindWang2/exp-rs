@@ -244,11 +244,17 @@ static void separableConvolve(const float *input, float *output, int width, int 
             size_t rowOff = static_cast<size_t>(y) * width;
             for (int x = 0; x < width; x++) {
                 float sum = 0.0f;
+                float wSum = 0.0f;
                 for (int k = -half; k <= half; k++) {
                     int ix = std::clamp(x + k, 0, width - 1);
-                    sum += input[rowOff + ix] * kernel1D[k + half];
+                    float val = input[rowOff + ix];
+                    if (std::isfinite(val)) {
+                        float w = kernel1D[k + half];
+                        sum += val * w;
+                        wSum += w;
+                    }
                 }
-                temp[rowOff + x] = sum;
+                temp[rowOff + x] = (wSum > 1e-6f) ? (sum / wSum) : std::numeric_limits<float>::quiet_NaN();
             }
         }
     }
@@ -262,11 +268,17 @@ static void separableConvolve(const float *input, float *output, int width, int 
             size_t rowOff = static_cast<size_t>(y) * width;
             for (int x = xStart; x < xEnd; x++) {
                 float sum = 0.0f;
+                float wSum = 0.0f;
                 for (int k = -half; k <= half; k++) {
                     int iy = std::clamp(y + k, 0, height - 1);
-                    sum += temp[static_cast<size_t>(iy) * width + x] * kernel1D[k + half];
+                    float val = temp[static_cast<size_t>(iy) * width + x];
+                    if (std::isfinite(val)) {
+                        float w = kernel1D[k + half];
+                        sum += val * w;
+                        wSum += w;
+                    }
                 }
-                output[rowOff + x] = sum;
+                output[rowOff + x] = (wSum > 1e-6f) ? (sum / wSum) : std::numeric_limits<float>::quiet_NaN();
             }
         }
     }
@@ -285,6 +297,7 @@ void ImageEnhancement::convolve(const float *input, float *output, int width, in
         for (int y = yStart; y < yEnd; y++) {
             for (int x = 0; x < width; x++) {
                 float sum = 0.0f;
+                float wSum = 0.0f;
 
                 for (int ky = -half; ky <= half; ky++) {
                     for (int kx = -half; kx <= half; kx++) {
@@ -293,12 +306,15 @@ void ImageEnhancement::convolve(const float *input, float *output, int width, in
                         int iy = std::clamp(y + ky, 0, height - 1);
 
                         float pixel = input[iy * width + ix];
-                        float kVal = kernel[(ky + half) * kernelSize + (kx + half)];
-                        sum += pixel * kVal;
+                        if (std::isfinite(pixel)) {
+                            float kVal = kernel[(ky + half) * kernelSize + (kx + half)];
+                            sum += pixel * kVal;
+                            wSum += kVal;
+                        }
                     }
                 }
 
-            output[y * width + x] = sum;
+                output[y * width + x] = (std::abs(wSum) > 1e-6f) ? (sum / wSum) : std::numeric_limits<float>::quiet_NaN();
             }
         }
     }
@@ -365,23 +381,29 @@ void ImageEnhancement::medianFilter(const float *input, float *output, int width
 
     int half = kernelSize / 2;
     const int kSize = kernelSize * kernelSize;
-    std::vector<float> neighborhood(kSize);
+    std::vector<float> validNeighbors;
+    validNeighbors.reserve(kSize);
 
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
-            int idx = 0;
+            validNeighbors.clear();
             for (int ky = -half; ky <= half; ky++) {
                 for (int kx = -half; kx <= half; kx++) {
                     int ix = std::clamp(x + kx, 0, width - 1);
                     int iy = std::clamp(y + ky, 0, height - 1);
-                    neighborhood[idx++] = input[iy * width + ix];
+                    float v = input[iy * width + ix];
+                    if (std::isfinite(v))
+                        validNeighbors.push_back(v);
                 }
             }
 
-            // Find median using nth_element
-            int mid = kSize / 2;
-            std::nth_element(neighborhood.begin(), neighborhood.begin() + mid, neighborhood.begin() + kSize);
-            output[y * width + x] = neighborhood[mid];
+            if (validNeighbors.empty()) {
+                output[y * width + x] = std::numeric_limits<float>::quiet_NaN();
+            } else {
+                size_t mid = validNeighbors.size() / 2;
+                std::nth_element(validNeighbors.begin(), validNeighbors.begin() + mid, validNeighbors.end());
+                output[y * width + x] = validNeighbors[mid];
+            }
         }
     }
 }
