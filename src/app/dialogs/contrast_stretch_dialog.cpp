@@ -158,7 +158,6 @@ void ContrastStretchDialog::onRun()
                                                     pixelCount, stdPoints );
           break;
         case 1:
-        case 2:
         {
           float minVal = *std::min_element( allBands[b].begin(), allBands[b].end() );
           float maxVal = *std::max_element( allBands[b].begin(), allBands[b].end() );
@@ -166,15 +165,15 @@ void ContrastStretchDialog::onRun()
                                            pixelCount, minVal, maxVal );
           break;
         }
-        case 3:
+        case 2:
           ImageEnhancement::percentClipStretch( allBands[b].data(), outputBands[b].data(),
                                                 pixelCount, static_cast<float>( clipValue ) );
           break;
-        case 4:
+        case 3:
           ImageEnhancement::stddevStretch( allBands[b].data(), outputBands[b].data(),
                                            pixelCount, static_cast<float>( stddevValue ) );
           break;
-        case 5:
+        case 4:
           ImageEnhancement::histogramEqualize( allBands[b].data(), outputBands[b].data(),
                                                pixelCount );
           break;

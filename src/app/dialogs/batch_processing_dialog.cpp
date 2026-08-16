@@ -347,6 +347,13 @@ void BatchProcessingDialog::onBrowseOutputDir()
 
 void BatchProcessingDialog::onRun()
 {
+    if (m_isRunning) {
+        m_canceled = true;
+        m_runButton->setEnabled(false);
+        m_statusLabel->setText(tr("Canceling..."));
+        return;
+    }
+
     if (m_inputFiles.isEmpty()) {
         QMessageBox::warning(this, tr("Batch Processing"),
                              tr("Please add input files."));
@@ -363,8 +370,11 @@ void BatchProcessingDialog::onRun()
         return;
     }
 
-    // Disable UI during batch
-    m_runButton->setEnabled(false);
+    // Toggle button to Cancel during batch
+    m_isRunning = true;
+    m_canceled = false;
+    m_runButton->setText(tr("Cancel"));
+    m_runButton->setEnabled(true);
     m_progressBar->setVisible(true);
     m_progressBar->setRange(0, m_inputFiles.size());
     m_progressBar->setValue(0);
@@ -396,10 +406,19 @@ void BatchProcessingDialog::onRun()
     QStringList errorMessages;
 
     for (int i = 0; i < m_inputFiles.size(); ++i) {
+        if (m_canceled) {
+            errorMessages.append(tr("Batch canceled by user"));
+            break;
+        }
+
         const QString &inputFile = m_inputFiles[i];
         m_statusLabel->setText(tr("Processing %1...").arg(QFileInfo(inputFile).fileName()));
-        // Keep UI responsive without re-entering user-input handlers (nested dialogs/clicks).
-        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        QApplication::processEvents();
+
+        if (m_canceled) {
+            errorMessages.append(tr("Batch canceled by user"));
+            break;
+        }
 
         // Build output path
         QString baseName = QFileInfo(inputFile).completeBaseName();
@@ -434,9 +453,17 @@ void BatchProcessingDialog::onRun()
         m_progressBar->setValue(i + 1);
     }
 
-    m_statusLabel->setText(tr("Batch complete: %1 succeeded, %2 failed")
-                               .arg(successCount).arg(failCount));
+    m_isRunning = false;
+    m_runButton->setText(tr("Run Batch"));
     m_runButton->setEnabled(true);
+
+    if (m_canceled) {
+        m_statusLabel->setText(tr("Batch canceled: %1 succeeded, %2 failed")
+                                   .arg(successCount).arg(failCount));
+    } else {
+        m_statusLabel->setText(tr("Batch complete: %1 succeeded, %2 failed")
+                                   .arg(successCount).arg(failCount));
+    }
 
     if (failCount > 0) {
         QString details = tr("Batch complete with errors:\n%1 succeeded, %2 failed")

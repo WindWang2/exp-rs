@@ -75,15 +75,21 @@ void RsSegmentSelectTool::highlightSegment( quint32 segmentId )
     }
     mRubberBand->reset( Qgis::GeometryType::Point );
 
-    // Add each pixel center as a point marker
+    // Add each pixel center as a point marker with doUpdate = false except last
     auto coords = mSegMap.pixelCoords( segmentId );
     if ( coords.isEmpty() )
         return;
 
-    for ( const QPoint &pt : coords )
+    constexpr int kMaxPoints = 5000;
+    const int total = coords.size();
+    const int step = std::max( 1, total / kMaxPoints );
+
+    for ( int i = 0; i < total; i += step )
     {
+        const QPoint &pt = coords[i];
         double mapX = mGeoTransform[0] + ( pt.x() + 0.5 ) * mGeoTransform[1];
         double mapY = mGeoTransform[3] + ( pt.y() + 0.5 ) * mGeoTransform[5];
-        mRubberBand->addPoint( QgsPointXY( mapX, mapY ) );
+        const bool isLast = ( i + step >= total );
+        mRubberBand->addPoint( QgsPointXY( mapX, mapY ), isLast );
     }
 }

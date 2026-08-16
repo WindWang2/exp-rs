@@ -447,6 +447,20 @@ void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service,
     registerTool( std::move( def ) );
   }
 
+  // 5b. canvas:zoom_to_extent
+  {
+    InteractionToolDefinition def;
+    def.name = "canvas:zoom_to_extent";
+    def.displayName = "Zoom to Extent";
+    def.category = "canvas";
+    def.description = "Zoom the map canvas to a specific spatial extent [xmin, ymin, xmax, ymax].";
+    def.inputSchema = createSetExtentSchema();
+    def.handler = [service]( const Json::Value &params ) {
+      return service->setExtent( params );
+    };
+    registerTool( std::move( def ) );
+  }
+
   // 6. view:set_scale
   {
     InteractionToolDefinition def;

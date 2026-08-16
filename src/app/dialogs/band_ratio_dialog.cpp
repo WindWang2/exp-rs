@@ -13,6 +13,7 @@
 #include <QFrame>
 #include <QLabel>
 #include <QComboBox>
+#include <QMessageBox>
 
 #include <gdal.h>
 #include <cpl_error.h>
@@ -78,6 +79,12 @@ void BandRatioDialog::setupUi()
   onModeChanged( 0 );
 }
 
+void BandRatioDialog::setRasterLayer( QgsRasterLayer *layer )
+{
+  RasterProcessingDialogBase::setRasterLayer( layer );
+  populateBandCombos();
+}
+
 void BandRatioDialog::populateBandCombos()
 {
   if ( !m_rasterLayer || !m_rasterLayer->isValid() )
@@ -127,6 +134,9 @@ void BandRatioDialog::onModeChanged( int index )
 
 void BandRatioDialog::onRun()
 {
+  if ( !m_rasterLayer )
+    return;
+
   QString sourcePath = m_rasterLayer->source();
   int modeIndex = m_modeCombo->currentIndex();
   int band1Num = m_band1Combo->currentData().toInt();
@@ -134,6 +144,23 @@ void BandRatioDialog::onRun()
   int redNum = m_redCombo->currentData().toInt();
   int greenNum = m_greenCombo->currentData().toInt();
   int blueNum = m_blueCombo->currentData().toInt();
+
+  if ( modeIndex == 0 )
+  {
+    if ( band1Num < 1 || band2Num < 1 || band1Num == band2Num )
+    {
+      QMessageBox::warning( this, dialogTitle(), tr( "Please select valid distinct bands for ratio." ) );
+      return;
+    }
+  }
+  else
+  {
+    if ( redNum < 1 || greenNum < 1 || blueNum < 1 )
+    {
+      QMessageBox::warning( this, dialogTitle(), tr( "Please select valid RGB bands for IHS transform." ) );
+      return;
+    }
+  }
 
   runGdalTask( [sourcePath, outputPath = outputPath(), modeIndex, band1Num, band2Num,
                 redNum, greenNum, blueNum]() -> QString {

@@ -433,8 +433,9 @@ Json::Value RasterDisplayService::setBandComposite( const Json::Value &params )
     }
 
     // Check if RGB composition or SingleBandGray composition is requested
-    const bool hasRgb = params.isMember( "red" ) || params.isMember( "green" ) || params.isMember( "blue" );
-    const bool hasGray = params.isMember( "gray" ) || params.isMember( "band" );
+    const bool hasRgb = params.isMember( "red" ) || params.isMember( "green" ) || params.isMember( "blue" ) ||
+                        params.isMember( "red_band" ) || params.isMember( "green_band" ) || params.isMember( "blue_band" );
+    const bool hasGray = params.isMember( "gray" ) || params.isMember( "band" ) || params.isMember( "gray_band" );
 
     if ( !hasRgb && !hasGray )
     {
@@ -443,34 +444,34 @@ Json::Value RasterDisplayService::setBandComposite( const Json::Value &params )
       return result;
     }
 
+    QgsRasterRenderer* renderer = nullptr;
+
     if ( hasRgb )
     {
       // Default missing channels if at least one is provided
-      const Json::Value redVal = params.isMember( "red" ) ? params["red"] : Json::Value( 1 );
-      const Json::Value greenVal = params.isMember( "green" ) ? params["green"] : ( layer->bandCount() >= 2 ? Json::Value( 2 ) : redVal );
-      const Json::Value blueVal = params.isMember( "blue" ) ? params["blue"] : ( layer->bandCount() >= 3 ? Json::Value( 3 ) : greenVal );
+      const Json::Value redVal = params.isMember( "red" ) ? params["red"] : ( params.isMember( "red_band" ) ? params["red_band"] : Json::Value( 1 ) );
+      const Json::Value greenVal = params.isMember( "green" ) ? params["green"] : ( params.isMember( "green_band" ) ? params["green_band"] : ( layer->bandCount() >= 2 ? Json::Value( 2 ) : redVal ) );
+      const Json::Value blueVal = params.isMember( "blue" ) ? params["blue"] : ( params.isMember( "blue_band" ) ? params["blue_band"] : ( layer->bandCount() >= 3 ? Json::Value( 3 ) : greenVal ) );
 
       const auto redRes = resolveBand( layer, redVal );
       if ( !redRes.second.isEmpty() )
       {
         result["status"] = "error";
-        result["errorMessage"] = redRes.second.toStdString();
+        result["errorMessage"] = "Invalid red band: " + redRes.second.toStdString();
         return result;
       }
-
       const auto greenRes = resolveBand( layer, greenVal );
       if ( !greenRes.second.isEmpty() )
       {
         result["status"] = "error";
-        result["errorMessage"] = greenRes.second.toStdString();
+        result["errorMessage"] = "Invalid green band: " + greenRes.second.toStdString();
         return result;
       }
-
       const auto blueRes = resolveBand( layer, blueVal );
       if ( !blueRes.second.isEmpty() )
       {
         result["status"] = "error";
-        result["errorMessage"] = blueRes.second.toStdString();
+        result["errorMessage"] = "Invalid blue band: " + blueRes.second.toStdString();
         return result;
       }
 
@@ -478,77 +479,66 @@ Json::Value RasterDisplayService::setBandComposite( const Json::Value &params )
       const int greenBand = greenRes.first;
       const int blueBand = blueRes.first;
 
-      auto renderer = std::make_unique<QgsMultiBandColorRenderer>(
+      auto r = std::make_unique<QgsMultiBandColorRenderer>(
         layer->dataProvider(), redBand, greenBand, blueBand );
 
-      renderer->setRedContrastEnhancement( createBandEnhancement( layer->dataProvider(), redBand ).release() );
-      renderer->setGreenContrastEnhancement( createBandEnhancement( layer->dataProvider(), greenBand ).release() );
-      renderer->setBlueContrastEnhancement( createBandEnhancement( layer->dataProvider(), blueBand ).release() );
+      r->setRedContrastEnhancement( createBandEnhancement( layer->dataProvider(), redBand ).release() );
+      r->setGreenContrastEnhancement( createBandEnhancement( layer->dataProvider(), greenBand ).release() );
+      r->setBlueContrastEnhancement( createBandEnhancement( layer->dataProvider(), blueBand ).release() );
+      renderer = r.release();
 
-      layer->setRenderer( renderer.release() );
-
-      if ( params.isMember( "opacity" ) && params["opacity"].isNumeric() )
-      {
-        layer->setOpacity( std::clamp( params["opacity"].asDouble(), 0.0, 1.0 ) );
-      }
-
-      layer->triggerRepaint();
-      if ( m_canvas )
-        m_canvas->refresh();
-
-      incrementRevision();
-
-      result["status"] = "success";
-      result["layer"] = layer->name().toStdString();
       result["renderer"] = "MultiBandColor";
       Json::Value bandsObj( Json::objectValue );
       bandsObj["red"] = redBand;
       bandsObj["green"] = greenBand;
       bandsObj["blue"] = blueBand;
       result["bands"] = bandsObj;
-      result["opacity"] = layer->opacity();
-      result["displayRevision"] = static_cast<Json::UInt64>( m_displayRevision );
-      return result;
+      result["red_band"] = redBand;
+      result["green_band"] = greenBand;
+      result["blue_band"] = blueBand;
     }
     else
     {
-      const Json::Value grayVal = params.isMember( "gray" ) ? params["gray"] : params["band"];
+      const Json::Value grayVal = params.isMember( "gray" ) ? params["gray"] : ( params.isMember( "gray_band" ) ? params["gray_band"] : params["band"] );
       const auto grayRes = resolveBand( layer, grayVal );
       if ( !grayRes.second.isEmpty() )
       {
         result["status"] = "error";
-        result["errorMessage"] = grayRes.second.toStdString();
+        result["errorMessage"] = "Invalid gray band: " + grayRes.second.toStdString();
         return result;
       }
 
       const int grayBand = grayRes.first;
-      auto renderer = std::make_unique<QgsSingleBandGrayRenderer>(
+      auto r = std::make_unique<QgsSingleBandGrayRenderer>(
         layer->dataProvider(), grayBand );
-      renderer->setContrastEnhancement( createBandEnhancement( layer->dataProvider(), grayBand ).release() );
+      r->setContrastEnhancement( createBandEnhancement( layer->dataProvider(), grayBand ).release() );
+      renderer = r.release();
 
-      layer->setRenderer( renderer.release() );
-
-      if ( params.isMember( "opacity" ) && params["opacity"].isNumeric() )
-      {
-        layer->setOpacity( std::clamp( params["opacity"].asDouble(), 0.0, 1.0 ) );
-      }
-
-      layer->triggerRepaint();
-      if ( m_canvas )
-        m_canvas->refresh();
-
-      incrementRevision();
-
-      result["status"] = "success";
-      result["layer"] = layer->name().toStdString();
       result["renderer"] = "SingleBandGray";
       Json::Value bandsObj( Json::objectValue );
       bandsObj["gray"] = grayBand;
       result["bands"] = bandsObj;
-      result["opacity"] = layer->opacity();
-      result["displayRevision"] = static_cast<Json::UInt64>( m_displayRevision );
-      return result;
+      result["gray_band"] = grayBand;
     }
+
+    layer->setRenderer( renderer );
+
+    if ( params.isMember( "opacity" ) && params["opacity"].isNumeric() )
+    {
+      layer->setOpacity( std::clamp( params["opacity"].asDouble(), 0.0, 1.0 ) );
+    }
+
+    layer->triggerRepaint();
+    if ( m_canvas )
+      m_canvas->refresh();
+
+    incrementRevision();
+
+    result["status"] = "success";
+    result["layer"] = layer->name().toStdString();
+    result["opacity"] = layer->opacity();
+    result["displayRevision"] = static_cast<Json::UInt64>( m_displayRevision );
+    return result;
   } );
 }
 
@@ -588,21 +578,45 @@ Json::Value RasterDisplayService::setStretch( const Json::Value &params )
       return result;
     }
 
-    std::string method = "minimum_maximum";
+    std::string method = "";
     if ( params.isMember( "method" ) && params["method"].isString() )
       method = params["method"].asString();
     else if ( params.isMember( "type" ) && params["type"].isString() )
       method = params["type"].asString();
+    else if ( params.isMember( "stretch_type" ) && params["stretch_type"].isString() )
+      method = params["stretch_type"].asString();
+    else
+      method = "minimum_maximum";
+
+    if ( method == "std_dev_2" )
+      method = "stddev";
+    else if ( method == "percentile_2_98" )
+      method = "percent_clip";
 
     rs::display::StretchSpec spec = rs::display::StretchSpec::realDataRange();
 
     if ( method == "minimum_maximum" || method == "min_max" || method == "minmax" || method == "linear" )
     {
+      double minVal = 0.0, maxVal = 0.0;
+      bool hasMinMax = false;
       if ( params.isMember( "min" ) && params.isMember( "max" ) &&
            params["min"].isNumeric() && params["max"].isNumeric() )
       {
-        spec = rs::display::StretchSpec::linearMinMax(
-          params["min"].asDouble(), params["max"].asDouble() );
+        minVal = params["min"].asDouble();
+        maxVal = params["max"].asDouble();
+        hasMinMax = true;
+      }
+      else if ( params.isMember( "min_val" ) && params.isMember( "max_val" ) &&
+                params["min_val"].isNumeric() && params["max_val"].isNumeric() )
+      {
+        minVal = params["min_val"].asDouble();
+        maxVal = params["max_val"].asDouble();
+        hasMinMax = true;
+      }
+
+      if ( hasMinMax )
+      {
+        spec = rs::display::StretchSpec::linearMinMax( minVal, maxVal );
       }
       else
       {

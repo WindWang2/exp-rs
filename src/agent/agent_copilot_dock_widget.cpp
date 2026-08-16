@@ -226,6 +226,14 @@ void AgentCopilotDockWidget::onSettingsClicked()
 
 void AgentCopilotDockWidget::onClearClicked()
 {
+  if ( m_isStreaming )
+  {
+    m_client->cancel();
+    onLlmFinished();
+  }
+
+  m_currentReasoningLabel = nullptr;
+  m_currentContentLabel = nullptr;
   m_messageHistory = QJsonArray();
   QLayoutItem *child;
   while ( ( child = m_chatLayout->takeAt( 0 ) ) != nullptr )
@@ -332,14 +340,20 @@ void AgentCopilotDockWidget::appendAssistantMessageCard()
 void AgentCopilotDockWidget::onReasoningTokenReceived( const QString &text )
 {
   m_accumulatedReasoning += text;
-  m_currentReasoningLabel->setVisible( true );
-  m_currentReasoningLabel->setText( QString( "🧠 思考过程:\n%1" ).arg( m_accumulatedReasoning.toHtmlEscaped() ) );
+  if ( m_currentReasoningLabel )
+  {
+    m_currentReasoningLabel->setVisible( true );
+    m_currentReasoningLabel->setText( QString( "🧠 思考过程:\n%1" ).arg( m_accumulatedReasoning.toHtmlEscaped() ) );
+  }
 }
 
 void AgentCopilotDockWidget::onContentTokenReceived( const QString &text )
 {
   m_accumulatedContent += text;
-  m_currentContentLabel->setText( m_accumulatedContent );
+  if ( m_currentContentLabel )
+  {
+    m_currentContentLabel->setText( m_accumulatedContent );
+  }
 }
 
 void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )

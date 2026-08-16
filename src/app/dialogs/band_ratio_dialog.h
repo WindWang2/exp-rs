@@ -17,6 +17,7 @@ class BandRatioDialog : public RasterProcessingDialogBase
 
 public:
     explicit BandRatioDialog(QWidget *parent = nullptr);
+    void setRasterLayer(QgsRasterLayer *layer) override;
 
 protected:
     QString toolName() const override { return QStringLiteral("band_ratio"); }

@@ -297,7 +297,7 @@ void ImageEnhancement::convolve(const float *input, float *output, int width, in
         for (int y = yStart; y < yEnd; y++) {
             for (int x = 0; x < width; x++) {
                 float sum = 0.0f;
-                float wSum = 0.0f;
+                bool hasFinite = false;
 
                 for (int ky = -half; ky <= half; ky++) {
                     for (int kx = -half; kx <= half; kx++) {
@@ -309,12 +309,12 @@ void ImageEnhancement::convolve(const float *input, float *output, int width, in
                         if (std::isfinite(pixel)) {
                             float kVal = kernel[(ky + half) * kernelSize + (kx + half)];
                             sum += pixel * kVal;
-                            wSum += kVal;
+                            hasFinite = true;
                         }
                     }
                 }
 
-                output[y * width + x] = (std::abs(wSum) > 1e-6f) ? (sum / wSum) : std::numeric_limits<float>::quiet_NaN();
+                output[y * width + x] = hasFinite ? sum : std::numeric_limits<float>::quiet_NaN();
             }
         }
     }
