@@ -78,6 +78,7 @@ public:
   Json::Value exportOpenAiToolDefinitions( const std::vector<AgentTool> &tools = {} ) const;
   Json::Value exportMcpTools( const std::vector<AgentTool> &tools = {} ) const;
   std::string exportSystemPromptCatalog( const std::vector<AgentTool> &tools = {} ) const;
+  void invalidateCache();
 
 private:
   AgentToolCatalog();
@@ -89,6 +90,10 @@ private:
   mutable std::mutex mMutex;
   std::vector<ToolProviderPtr> mProviders;
   std::unordered_map<std::string, AgentTool> mCustomTools;
+  mutable bool mCacheValid = false;
+  mutable std::vector<AgentTool> mCachedTools;
+  mutable Json::Value mCachedOpenAiDefs;
+  mutable Json::Value mCachedMcpTools;
 };
 
 } // namespace sicnu::agent::tool_catalog

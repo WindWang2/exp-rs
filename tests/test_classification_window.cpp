@@ -168,6 +168,13 @@ TEST_CASE( "ClassificationWindow: apply and preview submit through Task Center",
   REQUIRE_FALSE( apply.contains( QStringLiteral( "RsJobRunner::run" ) ) );
   REQUIRE( preview.contains( QStringLiteral( "m_jobHandle.submitJob" ) ) );
   REQUIRE_FALSE( preview.contains( QStringLiteral( "RsJobRunner::run" ) ) );
+
+  ensureApp();
+  QgsClassificationMainWindow window( nullptr );
+  // Behavioral drive: calling applyClassification / applyPreview directly does not crash
+  window.applyClassification();
+  window.applyPreview();
+  QCoreApplication::processEvents();
 }
 
 TEST_CASE( "ClassificationWindow: public post-process start submits a Task Center job", "[classify][task_center]" )
