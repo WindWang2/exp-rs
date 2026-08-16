@@ -2,6 +2,7 @@
 #include "chunked_processor.h"
 
 #include <algorithm>
+#include <atomic>
 #include <QtConcurrent>
 #include <QVector>
 #include <qgsfeedback.h>
@@ -53,7 +54,7 @@ bool ChunkedProcessor::process(const ChunkCallback &callback, QgsFeedback *feedb
     for (int i = 0; i < m_chunks.size(); ++i)
         indices[i] = i;
 
-    int completedChunks = 0;
+    std::atomic<int> completedChunks{0};
     const int totalChunks = m_chunks.size();
 
     QtConcurrent::blockingMap(indices, [&](int idx) {
@@ -67,7 +68,8 @@ bool ChunkedProcessor::process(const ChunkCallback &callback, QgsFeedback *feedb
 
         // Update progress
         if (feedback) {
-            int progress = static_cast<int>((++completedChunks * 100) / totalChunks);
+            int currentCompleted = ++completedChunks;
+            int progress = static_cast<int>((currentCompleted * 100) / totalChunks);
             feedback->setProgress(progress);
         }
     });

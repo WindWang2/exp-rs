@@ -32,8 +32,8 @@ public:
     }
     RSOperatorMemoryPolicy memoryPolicy() const override
     {
-        // In-process GDAL manages its own tiling (GDALWarp streams internally).
-        return RSOperatorMemoryPolicy::Streaming;
+        // GDALPolygonize retains polygons in memory until close; O(raster) memory.
+        return RSOperatorMemoryPolicy::FullRaster;
     }
 
     Json::Value schema() const override;

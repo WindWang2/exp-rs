@@ -6,7 +6,7 @@
       "required": [
         "gdal_tools:gdal_translate",
         "gdal_tools:gdalwarp",
-        "gdal_tools:gdal_info",
+        "gdal_tools:gdalinfo",
         "gdal_tools:gdal_merge",
         "gdal_tools:gdalbuildvrt",
         "gdal_tools:gdal_retile",
@@ -18,7 +18,7 @@
     "gdal_raster_analysis": {
       "target_pct": 80,
       "required": [
-        "gdal_tools:gdal_dem",
+        "gdal_tools:gdaldem",
         "gdal_tools:gdal_calc",
         "gdal_tools:gdal_contour",
         "gdal_tools:gdal_proximity",
