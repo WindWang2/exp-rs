@@ -402,3 +402,51 @@ TEST_CASE(
   REQUIRE( !res.ok );
   REQUIRE( res.error == RsTrainingDataResult::Error::Cancelled );
 }
+
+TEST_CASE(
+  "Training extraction: uncapped sample order is deterministic (sorted by class then pixel)",
+  "[classification][training-data]" )
+{
+  // #284 - the no-cap path must not emit samples in QHash iteration order
+  // (per-process random seed): row order feeds the seeded train/test shuffle,
+  // so unordered output makes GUI runs non-reproducible. The contract is
+  // ascending (classId, pixelIdx) regardless of hash layout.
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  GDALAllRegister();
+
+  const QString raster = tmp.path() + "/src.tif";
+  createRaster( raster, 16, 16, 1,
+                []( int, int r, int c ) { return static_cast<float>( r * 16 + c ); } );
+
+  // Two classes with scattered (non-sorted) precomputed indices; geometry
+  // empty so collectPixels relies purely on the index sets.
+  const QVector<quint64> class2 = { 200, 5, 255, 17, 130 };
+  const QVector<quint64> class1 = { 99, 3, 64, 40 };
+  const QVector<RsTrainingGeometry> geoms = {
+    roi( 2, QgsGeometry(), class2 ),
+    roi( 1, QgsGeometry(), class1 ),
+  };
+
+  RsTrainingDataExtraction::Options options; // maxSamplesPerClass == 0
+  const RsTrainingDataResult res = RsTrainingDataExtraction::extract(
+    raster, { 1 }, geoms, options );
+  REQUIRE( res.ok );
+  REQUIRE( res.X.rows == 9 );
+
+  int prevClass = -1;
+  int prevPixel = -1;
+  for ( int s = 0; s < res.X.rows; ++s )
+  {
+    const int cls = res.y.at<int>( s, 0 );
+    const int pix = static_cast<int>( res.X.at<float>( s, 0 ) );
+    REQUIRE( ( cls > prevClass || ( cls == prevClass && pix > prevPixel ) ) );
+    prevClass = cls;
+    prevPixel = pix;
+  }
+  // First 4 rows are class 1, last 5 are class 2.
+  REQUIRE( res.y.at<int>( 0, 0 ) == 1 );
+  REQUIRE( static_cast<int>( res.X.at<float>( 0, 0 ) ) == 3 );
+  REQUIRE( res.y.at<int>( 4, 0 ) == 2 );
+  REQUIRE( static_cast<int>( res.X.at<float>( 4, 0 ) ) == 5 );
+}

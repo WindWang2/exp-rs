@@ -74,8 +74,10 @@ void buildMatrices( GDALDataset *ds,
 
   // Flatten to (classId, pixelIdx). With a per-class cap, bucket pixels by
   // class (ascending pixel order for determinism) and subsample each bucket
-  // with the shared mt19937(42) sequence; otherwise keep the hash iteration
-  // order (matches the historical classification-window behavior).
+  // with the shared mt19937(seed) sequence; otherwise keep all pixels in
+  // sorted (classId, pixelIdx) order so the row order - and therefore any
+  // downstream seeded shuffle - is reproducible across runs (QHash iteration
+  // order is per-process random).
   QVector<QPair<int, quint64>> samples;
   if ( options.maxSamplesPerClass > 0 )
   {
@@ -83,7 +85,7 @@ void buildMatrices( GDALDataset *ds,
     for ( auto it = pixelClass.constBegin(); it != pixelClass.constEnd(); ++it )
       byClass[it.value()].push_back( it.key() );
 
-    // ADR 0061 — shared deterministic subsampling policy (mt19937(seed) +
+    // ADR 0061 - shared deterministic subsampling policy (mt19937(seed) +
     // shuffle, keep the first maxSamplesPerClass of each sorted bucket).
     std::mt19937 rng( options.seed );
     for ( auto &kv : byClass )
@@ -100,6 +102,7 @@ void buildMatrices( GDALDataset *ds,
     samples.reserve( pixelClass.size() );
     for ( auto it = pixelClass.constBegin(); it != pixelClass.constEnd(); ++it )
       samples.push_back( qMakePair( it.value(), it.key() ) );
+    std::sort( samples.begin(), samples.end() );
   }
 
   if ( samples.isEmpty() )
