@@ -462,16 +462,36 @@ void RibbonController::applyRenderModeFromCombo()
     if ( r < 1 ) r = 1;
     if ( g < 1 ) g = qMin( 2, n );
     if ( b < 1 ) b = qMin( 3, n );
-    auto *renderer = new QgsMultiBandColorRenderer( layer->dataProvider(), r, g, b );
-    layer->setRenderer( renderer );
+
+    if ( auto *existingRgb = dynamic_cast<QgsMultiBandColorRenderer *>( layer->renderer() ) )
+    {
+      existingRgb->setRedBand( r );
+      existingRgb->setGreenBand( g );
+      existingRgb->setBlueBand( b );
+    }
+    else
+    {
+      auto *renderer = new QgsMultiBandColorRenderer( layer->dataProvider(), r, g, b );
+      layer->setRenderer( renderer );
+      layer->setDefaultContrastEnhancement();
+    }
   }
   else
   {
     int gray = m_grayBandCombo ? m_grayBandCombo->currentData().toInt() : 1;
     if ( gray < 1 ) gray = 1;
     if ( gray > n ) gray = n;
-    auto *renderer = new QgsSingleBandGrayRenderer( layer->dataProvider(), gray );
-    layer->setRenderer( renderer );
+
+    if ( auto *existingGray = dynamic_cast<QgsSingleBandGrayRenderer *>( layer->renderer() ) )
+    {
+      existingGray->setGrayBand( gray );
+    }
+    else
+    {
+      auto *renderer = new QgsSingleBandGrayRenderer( layer->dataProvider(), gray );
+      layer->setRenderer( renderer );
+      layer->setDefaultContrastEnhancement();
+    }
   }
   layer->triggerRepaint();
   syncBandCombos();
@@ -498,13 +518,33 @@ void RibbonController::applyBandCompositionFromCombos()
     r = qBound( 1, r, n );
     g = qBound( 1, g, n );
     b = qBound( 1, b, n );
-    layer->setRenderer( new QgsMultiBandColorRenderer( layer->dataProvider(), r, g, b ) );
+
+    if ( auto *existingRgb = dynamic_cast<QgsMultiBandColorRenderer *>( layer->renderer() ) )
+    {
+      existingRgb->setRedBand( r );
+      existingRgb->setGreenBand( g );
+      existingRgb->setBlueBand( b );
+    }
+    else
+    {
+      layer->setRenderer( new QgsMultiBandColorRenderer( layer->dataProvider(), r, g, b ) );
+      layer->setDefaultContrastEnhancement();
+    }
   }
   else
   {
     int gray = m_grayBandCombo ? m_grayBandCombo->currentData().toInt() : 1;
     gray = qBound( 1, gray, n );
-    layer->setRenderer( new QgsSingleBandGrayRenderer( layer->dataProvider(), gray ) );
+
+    if ( auto *existingGray = dynamic_cast<QgsSingleBandGrayRenderer *>( layer->renderer() ) )
+    {
+      existingGray->setGrayBand( gray );
+    }
+    else
+    {
+      layer->setRenderer( new QgsSingleBandGrayRenderer( layer->dataProvider(), gray ) );
+      layer->setDefaultContrastEnhancement();
+    }
   }
   layer->triggerRepaint();
 }
