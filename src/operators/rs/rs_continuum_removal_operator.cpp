@@ -10,8 +10,11 @@
 #include "processing/algorithms/spectral_classification.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <gdal.h>
+
 #include <QString>
 
+#include <cstring>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -48,13 +51,10 @@ Json::Value RsContinuumRemovalOperator::metadata() const {
 }
 
 Json::Value RsContinuumRemovalOperator::executionEstimate() const {
-    // FullRaster (base default): no preferred tile. All input bands plus all
-    // output bands are resident at once (band-major buffers); typical input
-    // 1024x1024x4 float32 (~4 MiB/band) -> 2 x 4 bands = ~32 MiB.
     Json::Value est( Json::objectValue );
-    est["tileWidth"] = 0;
-    est["tileHeight"] = 0;
-    est["estimatedRamBytes"] = 33554432;
+    est["tileWidth"] = 256;
+    est["tileHeight"] = 256;
+    est["estimatedRamBytes"] = 67108864; // ~64 MiB tile working set
     return est;
 }
 
@@ -85,7 +85,6 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
 
     context.logInfo( "Continuum removal: " + std::to_string( width ) + "x" +
                      std::to_string( height ) + ", " + std::to_string( bandCount ) + " bands" );
-    context.reportProgress( 0.15, "Reading bands" );
 
     const size_t pixelCount = static_cast<size_t>( width ) * height;
 
@@ -97,52 +96,96 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
     double srcNodata = ds.bandNoDataValue( 1, &hasNodata );
     const float nodata = hasNodata ? static_cast<float>( srcNodata ) : -9999.0f;
 
-    // Read every band into a band-major buffer, then process pixel-by-pixel.
-    std::vector<std::vector<float>> bandsIn( bandCount );
-    for ( int b = 0; b < bandCount; ++b )
+    // Stream over 256x256 BIP tiles
+    constexpr int kTile = 256;
+    const size_t maxTilePixels = static_cast<size_t>( kTile ) * kTile;
+    const size_t B = static_cast<size_t>( bandCount );
+    std::vector<float> tileBip( maxTilePixels * B, 0.0f );
+    std::vector<float> tileOut( maxTilePixels * B, 0.0f );
+    std::vector<float> bandScratch( maxTilePixels );
+    std::vector<float> bandTile( maxTilePixels );
+
+    QString outErr;
+    GDALDatasetH outDs = createOutputTiff( QString::fromStdString( outputPath ), width, height,
+                                          bandCount, static_cast<int>( GDT_Float32 ),
+                                          ds.geoTransform(), ds.projection(), &outErr );
+    if ( !outDs )
+        throw RSOperatorError( ErrorCode::FileNotWritable,
+                              "Failed to create output raster: " + outErr.toStdString() );
+
+    for ( int b = 1; b <= bandCount; ++b )
     {
-        bandsIn[b].resize( pixelCount );
-        if ( !ds.readBandData( b + 1, bandsIn[b].data(), width, height ) )
-            throw RSOperatorError( ErrorCode::GdalError,
-                                  "Failed to read band " + std::to_string( b + 1 ) );
+        GDALRasterBandH hOutBand = GDALGetRasterBand( outDs, b );
+        if ( hOutBand )
+            GDALSetRasterNoDataValue( hOutBand, nodata );
     }
-
-    context.reportProgress( 0.45, "Applying continuum removal" );
-
-    std::vector<std::vector<float>> bandsOut( bandCount );
-    for ( int b = 0; b < bandCount; ++b )
-        bandsOut[b].resize( pixelCount );
 
     std::vector<float> spectrum( bandCount );
     std::vector<float> removed( bandCount );
-    for ( size_t p = 0; p < pixelCount; ++p )
-    {
-        for ( int b = 0; b < bandCount; ++b )
-            spectrum[b] = bandsIn[b][p];
 
-        if ( SpectralClassification::continuumRemoval( spectrum.data(), removed.data(),
-                                                        bandCount, nodata ) )
+    for ( int y = 0; y < height; y += kTile )
+    {
+        const int h = std::min( kTile, height - y );
+        for ( int x = 0; x < width; x += kTile )
         {
+            const int w = std::min( kTile, width - x );
+            const size_t n = static_cast<size_t>( w ) * h;
+            context.throwIfCancelled();
+            context.reportProgress( 0.1 + 0.8 * ( static_cast<double>( y ) * width + x ) / pixelCount,
+                                   "Applying continuum removal" );
+
+            // Read the tile's source bands into BIP layout.
             for ( int b = 0; b < bandCount; ++b )
-                bandsOut[b][p] = removed[b];
-        }
-        else
-        {
-            // Whole-pixel nodata / degenerate — fill band stack with nodata.
+            {
+                if ( !ds.readBandWindow( b + 1, x, y, w, h, bandScratch.data() ) )
+                {
+                    GDALClose( outDs );
+                    throw RSOperatorError( ErrorCode::GdalError,
+                                          "Failed to read input tile at (" +
+                                              std::to_string( x ) + ", " + std::to_string( y ) + ")" );
+                }
+                for ( size_t p = 0; p < n; ++p )
+                    tileBip[p * B + static_cast<size_t>( b )] = bandScratch[p];
+            }
+
+            // Apply continuum removal to each pixel's spectrum.
+            for ( size_t p = 0; p < n; ++p )
+            {
+                const float *specIn = tileBip.data() + p * B;
+                float *specOut = tileOut.data() + p * B;
+                std::memcpy( spectrum.data(), specIn, sizeof( float ) * bandCount );
+
+                if ( SpectralClassification::continuumRemoval( spectrum.data(), removed.data(),
+                                                                bandCount, nodata ) )
+                {
+                    std::memcpy( specOut, removed.data(), sizeof( float ) * bandCount );
+                }
+                else
+                {
+                    for ( int b = 0; b < bandCount; ++b )
+                        specOut[b] = nodata;
+                }
+            }
+
+            // Write each target band's tile.
             for ( int b = 0; b < bandCount; ++b )
-                bandsOut[b][p] = nodata;
+            {
+                for ( size_t p = 0; p < n; ++p )
+                    bandTile[p] = tileOut[p * B + static_cast<size_t>( b )];
+                GDALRasterBandH outBand = GDALGetRasterBand( outDs, b + 1 );
+                if ( GDALRasterIO( outBand, GF_Write, x, y, w, h, bandTile.data(),
+                                 w, h, GDT_Float32, 0, 0 ) != CE_None )
+                {
+                    GDALClose( outDs );
+                    throw RSOperatorError( ErrorCode::FileNotWritable,
+                                          "Failed to write tile at (" +
+                                              std::to_string( x ) + ", " + std::to_string( y ) + ")" );
+                }
+            }
         }
     }
 
-    context.throwIfCancelled();
-    context.reportProgress( 0.75, "Writing output" );
-
-    QString errorMessage;
-    if ( !writeGdalOutput( QString::fromStdString( outputPath ), width, height, bandsOut,
-                           ds.geoTransform(), ds.projection(), &errorMessage ) )
-        throw RSOperatorError( ErrorCode::FileNotWritable,
-                              "Failed to write output raster: " + errorMessage.toStdString() );
-
+    GDALClose( outDs );
     ds.close();
     context.reportProgress( 1.0, "Continuum removal complete" );
 

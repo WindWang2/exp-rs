@@ -1,12 +1,10 @@
 #include "task_center.h"
 
-#include <QMutexLocker>
-#include <qgsapplication.h>
-#include <thread>
-#include <algorithm>
-#include <chrono>
+#include <QCoreApplication>
 #include <QFile>
+#include <QMutexLocker>
 #include <QSet>
+#include <QTimer>
 #include "framework/json_params_converter.h"
 #include "atomic_algorithm_registry.h"
 #include "jobs/job_engine.h"
@@ -692,7 +690,20 @@ void TaskCenter::processNextQueuedTasks()
         // Queued and are re-evaluated when a running task finishes (each
         // terminal transition re-enters processNextQueuedTasks).
         if ( m_resourceMonitor.memoryPressureHigh() )
+        {
+            if ( totalRunning == 0 && QCoreApplication::instance() )
+            {
+                QTimer::singleShot( 250, [this]() {
+                    {
+                        QMutexLocker locker( &m_mutex );
+                        processNextQueuedTasks();
+                    }
+                    flushPendingLaunches();
+                    flushPendingSignals();
+                } );
+            }
             break;
+        }
 
         // Resource-aware gate (perf/architecture goal 2026-08-08): hold the
         // launch when projected (running + candidate) RAM exceeds the budget,
@@ -1238,6 +1249,15 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
             pipeInfo.stepStatuses[stepId] = TaskStatus::Queued;
 
             queueTaskAddedLocked( taskId );
+        }
+
+        if ( pipeInfo.stepToTaskId.isEmpty() )
+        {
+            pipeInfo.isCompleted = true;
+            pipeInfo.isFailed = false;
+            m_pipelines[pipelineId] = pipeInfo;
+            m_waitCondition.wakeAll();
+            return pipelineId;
         }
 
         m_pipelines[pipelineId] = pipeInfo;
