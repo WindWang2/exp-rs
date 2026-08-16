@@ -294,3 +294,48 @@ TEST_CASE( "Projective invertYAxis: upstream raster-y set matches QGIS reference
     REQUIRE( x == Approx( 2352.0 ).margin( 1.0 ) );
     REQUIRE( y == Approx( -1126.0 ).margin( 1.0 ) );
 }
+
+TEST_CASE( "GCP transformer: returns false / nullptr on singular GCP inputs without throwing", "[georef][transformer][error]" ) {
+    const QVector<QgsPointXY> collinearSrc = { {0, 0}, {10, 0}, {20, 0}, {30, 0} };
+    const QVector<QgsPointXY> collinearDst = { {100, 200}, {110, 200}, {120, 200}, {130, 200} };
+
+    // Linear
+    QgsLinearGeorefTransform linear;
+    CHECK_FALSE( linear.updateParametersFromGcps( collinearSrc, collinearDst ) );
+    CHECK( QgsGcpTransformerInterface::createFromParameters( TM::Linear, collinearSrc, collinearDst ) == nullptr );
+
+    // Helmert
+    const QVector<QgsPointXY> identicalSrc = { {5, 5}, {5, 5}, {5, 5}, {5, 5} };
+    QgsHelmertGeorefTransform helmert;
+    CHECK_FALSE( helmert.updateParametersFromGcps( identicalSrc, collinearDst ) );
+    CHECK( QgsGcpTransformerInterface::createFromParameters( TM::Helmert, identicalSrc, collinearDst ) == nullptr );
+
+    // Projective
+    QgsProjectiveGeorefTransform proj;
+    CHECK_FALSE( proj.updateParametersFromGcps( collinearSrc, collinearDst ) );
+    CHECK( QgsGcpTransformerInterface::createFromParameters( TM::Projective, collinearSrc, collinearDst ) == nullptr );
+}
+
+#include "qgsgcppoint.h"
+#include "qgscoordinatereferencesystem.h"
+#include "qgscoordinatetransformcontext.h"
+
+TEST_CASE( "GcpPoint: transformedDestinationPoint surfaces ok status", "[georef][gcp]" ) {
+    QgsCoordinateReferenceSystem wgs84( "EPSG:4326" );
+    QgsCoordinateReferenceSystem utm( "EPSG:32633" );
+    QgsCoordinateTransformContext ctx;
+
+    QgsGcpPoint pt( QgsPointXY( 10, 20 ), QgsPointXY( 12.0, 55.0 ), wgs84 );
+    bool ok = false;
+    QgsPointXY dst = pt.transformedDestinationPoint( utm, ctx, &ok );
+    CHECK( ok );
+    CHECK( dst.x() > 100000.0 );
+    CHECK( dst.y() > 1000000.0 );
+
+    // Invalid target CRS returns original point and sets ok = true (noop)
+    QgsCoordinateReferenceSystem invalidCrs;
+    QgsPointXY noop = pt.transformedDestinationPoint( invalidCrs, ctx, &ok );
+    CHECK( ok );
+    CHECK( noop.x() == 12.0 );
+    CHECK( noop.y() == 55.0 );
+}

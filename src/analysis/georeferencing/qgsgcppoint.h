@@ -98,8 +98,9 @@ class QGIS_ANALYSIS_EXPORT QgsGcpPoint
 
     /**
      * Returns the destinationPoint() transformed to the given target CRS.
+     * If \a ok is specified, it will be set to TRUE on successful transform or FALSE on error.
      */
-    QgsPointXY transformedDestinationPoint( const QgsCoordinateReferenceSystem &targetCrs, const QgsCoordinateTransformContext &context ) const;
+    QgsPointXY transformedDestinationPoint( const QgsCoordinateReferenceSystem &targetCrs, const QgsCoordinateTransformContext &context, bool *ok = nullptr ) const;
 
     /**
      * Returns TRUE if the point is currently enabled.

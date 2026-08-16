@@ -147,7 +147,14 @@ bool QgsLinearGeorefTransform::updateParametersFromGcps( const QVector<QgsPointX
     return false;
 
   mParameters.invertYAxis = invertYAxis;
-  QgsLeastSquares::linear( sourceCoordinates, destinationCoordinates, mParameters.origin, mParameters.scaleX, mParameters.scaleY );
+  try
+  {
+    QgsLeastSquares::linear( sourceCoordinates, destinationCoordinates, mParameters.origin, mParameters.scaleX, mParameters.scaleY );
+  }
+  catch ( const std::exception & )
+  {
+    return false;
+  }
   return true;
 }
 
@@ -220,7 +227,14 @@ bool QgsHelmertGeorefTransform::updateParametersFromGcps( const QVector<QgsPoint
     return false;
 
   mHelmertParameters.invertYAxis = invertYAxis;
-  QgsLeastSquares::helmert( sourceCoordinates, destinationCoordinates, mHelmertParameters.origin, mHelmertParameters.scale, mHelmertParameters.angle );
+  try
+  {
+    QgsLeastSquares::helmert( sourceCoordinates, destinationCoordinates, mHelmertParameters.origin, mHelmertParameters.scale, mHelmertParameters.angle );
+  }
+  catch ( const std::exception & )
+  {
+    return false;
+  }
   return true;
 }
 
@@ -468,21 +482,28 @@ bool QgsProjectiveGeorefTransform::updateParametersFromGcps( const QVector<QgsPo
   if ( destinationCoordinates.size() < minimumGcpCount() )
     return false;
 
-  if ( invertYAxis )
+  try
   {
-    // HACK: flip y coordinates, because georeferencer and gdal use different conventions
-    QVector<QgsPointXY> flippedPixelCoords;
-    flippedPixelCoords.reserve( sourceCoordinates.size() );
-    for ( const QgsPointXY &coord : sourceCoordinates )
+    if ( invertYAxis )
     {
-      flippedPixelCoords << QgsPointXY( coord.x(), -coord.y() );
-    }
+      // HACK: flip y coordinates, because georeferencer and gdal use different conventions
+      QVector<QgsPointXY> flippedPixelCoords;
+      flippedPixelCoords.reserve( sourceCoordinates.size() );
+      for ( const QgsPointXY &coord : sourceCoordinates )
+      {
+        flippedPixelCoords << QgsPointXY( coord.x(), -coord.y() );
+      }
 
-    QgsLeastSquares::projective( flippedPixelCoords, destinationCoordinates, mParameters.H );
+      QgsLeastSquares::projective( flippedPixelCoords, destinationCoordinates, mParameters.H );
+    }
+    else
+    {
+      QgsLeastSquares::projective( sourceCoordinates, destinationCoordinates, mParameters.H );
+    }
   }
-  else
+  catch ( const std::exception & )
   {
-    QgsLeastSquares::projective( sourceCoordinates, destinationCoordinates, mParameters.H );
+    return false;
   }
 
   // Invert the homography matrix using adjoint matrix
@@ -503,18 +524,23 @@ bool QgsProjectiveGeorefTransform::updateParametersFromGcps( const QVector<QgsPo
 
   const double det = H[0] * adjoint[0] + H[3] * adjoint[1] + H[6] * adjoint[2];
 
-  if ( std::fabs( det ) < 1024.0 * std::numeric_limits<double>::epsilon() )
+  if ( !std::isfinite( det ) || det == 0.0 )
   {
     mParameters.hasInverse = false;
   }
   else
   {
-    mParameters.hasInverse = true;
     const double oo_det = 1.0 / det;
+    bool allFinite = true;
     for ( int i = 0; i < 9; i++ )
     {
       mParameters.Hinv[i] = adjoint[i] * oo_det;
+      if ( !std::isfinite( mParameters.Hinv[i] ) )
+      {
+        allFinite = false;
+      }
     }
+    mParameters.hasInverse = allFinite;
   }
   return true;
 }

@@ -40,8 +40,16 @@ void QgsGcpPoint::setDestinationPointCrs( const QgsCoordinateReferenceSystem &cr
   mDestinationCrs = crs;
 }
 
-QgsPointXY QgsGcpPoint::transformedDestinationPoint( const QgsCoordinateReferenceSystem &targetCrs, const QgsCoordinateTransformContext &context ) const
+QgsPointXY QgsGcpPoint::transformedDestinationPoint( const QgsCoordinateReferenceSystem &targetCrs, const QgsCoordinateTransformContext &context, bool *ok ) const
 {
+  if ( ok )
+    *ok = true;
+
+  if ( !mDestinationCrs.isValid() || !targetCrs.isValid() || mDestinationCrs == targetCrs )
+  {
+    return mDestinationPoint;
+  }
+
   const QgsCoordinateTransform transform( mDestinationCrs, targetCrs, context );
   try
   {
@@ -49,6 +57,8 @@ QgsPointXY QgsGcpPoint::transformedDestinationPoint( const QgsCoordinateReferenc
   }
   catch ( QgsCsException & )
   {
+    if ( ok )
+      *ok = false;
     QgsDebugError( u"Error transforming destination point"_s );
     return mDestinationPoint;
   }
