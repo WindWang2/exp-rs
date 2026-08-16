@@ -143,4 +143,32 @@ TEST_CASE("LeastSquares projective: degenerate input handling", "[georef][leasts
     const QVector<QgsPointXY> dstIdent = { {1, 1}, {2, 2}, {3, 3}, {4, 4} };
     REQUIRE_THROWS_AS( QgsLeastSquares::projective( srcIdent, dstIdent, H ),
                        QgsLeastSquares::SingularException );
+
+    // 4 Collinear points -> rank-deficient system matrix
+    const QVector<QgsPointXY> srcCollinear = { {0, 0}, {10, 0}, {20, 0}, {30, 0} };
+    const QVector<QgsPointXY> dstCollinear = { {100, 200}, {110, 200}, {120, 200}, {130, 200} };
+    REQUIRE_THROWS_AS( QgsLeastSquares::projective( srcCollinear, dstCollinear, H ),
+                       QgsLeastSquares::SingularException );
+}
+
+TEST_CASE("LeastSquares helmert: UTM-scale coordinates maintain precision", "[georef][leastsquares]") {
+    // Large UTM-like coordinates: X ~ 500,000, Y ~ 4,000,000
+    const double s = 1.0;
+    const double x0 = 500000.0;
+    const double y0 = 4000000.0;
+
+    const QVector<QgsPointXY> src = { {0, 0}, {1000, 0}, {0, 1000}, {1000, 1000} };
+    QVector<QgsPointXY> dst;
+    for ( const QgsPointXY &p : src )
+        dst << applyHelmert( p, s, 0.0, x0, y0 );
+
+    QgsPointXY origin;
+    double pixelSize = 0.0;
+    double rotation = 0.0;
+    QgsLeastSquares::helmert( src, dst, origin, pixelSize, rotation );
+
+    REQUIRE( origin.x() == Approx( x0 ).margin( 1e-6 ) );
+    REQUIRE( origin.y() == Approx( y0 ).margin( 1e-6 ) );
+    REQUIRE( pixelSize == Approx( 1.0 ).margin( 1e-8 ) );
+    REQUIRE( rotation == Approx( 0.0 ).margin( 1e-9 ) );
 }

@@ -37,34 +37,52 @@ void QgsLeastSquares::linear( const QVector<QgsPointXY> &sourceCoordinates, cons
     throw std::domain_error( QObject::tr( "Fit to a linear transform requires at least 2 points." ).toLocal8Bit().constData() );
   }
 
-  double sumPx( 0 ), sumPy( 0 ), sumPx2( 0 ), sumPy2( 0 ), sumPxMx( 0 ), sumPyMy( 0 ), sumMx( 0 ), sumMy( 0 );
+  double meanSrcX = 0.0, meanSrcY = 0.0;
+  double meanDstX = 0.0, meanDstY = 0.0;
   for ( int i = 0; i < n; ++i )
   {
-    sumPx += sourceCoordinates.at( i ).x();
-    sumPy += sourceCoordinates.at( i ).y();
-    sumPx2 += std::pow( sourceCoordinates.at( i ).x(), 2 );
-    sumPy2 += std::pow( sourceCoordinates.at( i ).y(), 2 );
-    sumPxMx += sourceCoordinates.at( i ).x() * destinationCoordinates.at( i ).x();
-    sumPyMy += sourceCoordinates.at( i ).y() * destinationCoordinates.at( i ).y();
-    sumMx += destinationCoordinates.at( i ).x();
-    sumMy += destinationCoordinates.at( i ).y();
+    meanSrcX += sourceCoordinates.at( i ).x();
+    meanSrcY += sourceCoordinates.at( i ).y();
+    meanDstX += destinationCoordinates.at( i ).x();
+    meanDstY += destinationCoordinates.at( i ).y();
   }
+  meanSrcX /= n;
+  meanSrcY /= n;
+  meanDstX /= n;
+  meanDstY /= n;
 
-  const double deltaX = n * sumPx2 - std::pow( sumPx, 2 );
-  const double deltaY = n * sumPy2 - std::pow( sumPy, 2 );
+  double sumNormX = 0.0, sumCrossX = 0.0;
+  double sumNormY = 0.0, sumCrossY = 0.0;
+  for ( int i = 0; i < n; ++i )
+  {
+    const double dx = sourceCoordinates.at( i ).x() - meanSrcX;
+    const double dy = sourceCoordinates.at( i ).y() - meanSrcY;
+    const double dX = destinationCoordinates.at( i ).x() - meanDstX;
+    const double dY = destinationCoordinates.at( i ).y() - meanDstY;
+
+    sumNormX += dx * dx;
+    sumCrossX += dx * dX;
+    sumNormY += dy * dy;
+    sumCrossY += dy * dY;
+  }
 
   // SICNU_GEO_RS: detect singular systems (collinear / duplicate source points)
   // and report them via QgsLeastSquares::SingularException so callers can
   // surface a meaningful error instead of producing NaN/Inf parameters.
-  if ( deltaX == 0.0 || deltaY == 0.0 )
+  if ( sumNormX < 1e-12 || sumNormY < 1e-12 )
   {
     throw QgsLeastSquares::SingularException();
   }
 
-  const double aX = ( sumPx2 * sumMx - sumPx * sumPxMx ) / deltaX;
-  const double aY = ( sumPy2 * sumMy - sumPy * sumPyMy ) / deltaY;
-  const double bX = ( n * sumPxMx - sumPx * sumMx ) / deltaX;
-  const double bY = ( n * sumPyMy - sumPy * sumMy ) / deltaY;
+  const double bX = sumCrossX / sumNormX;
+  const double bY = sumCrossY / sumNormY;
+  const double aX = meanDstX - bX * meanSrcX;
+  const double aY = meanDstY - bY * meanSrcY;
+
+  if ( !std::isfinite( aX ) || !std::isfinite( aY ) || !std::isfinite( bX ) || !std::isfinite( bY ) )
+  {
+    throw QgsLeastSquares::SingularException();
+  }
 
   origin.setX( aX );
   origin.setY( aY );
@@ -78,88 +96,51 @@ void QgsLeastSquares::linear( const QVector<QgsPointXY> &sourceCoordinates, cons
 
 void QgsLeastSquares::helmert( const QVector<QgsPointXY> &sourceCoordinates, const QVector<QgsPointXY> &destinationCoordinates, QgsPointXY &origin, double &pixelSize, double &rotation )
 {
-#ifndef HAVE_GSL
-  ( void ) sourceCoordinates;
-  ( void ) destinationCoordinates;
-  ( void ) origin;
-  ( void ) pixelSize;
-  ( void ) rotation;
-  throw QgsNotSupportedException( QObject::tr( "Calculating a helmert transformation requires a QGIS build based GSL" ) );
-#else
   const int n = destinationCoordinates.size();
   if ( n < 2 )
   {
     throw std::domain_error( QObject::tr( "Fit to a Helmert transform requires at least 2 points." ).toLocal8Bit().constData() );
   }
 
-  double A = 0;
-  double B = 0;
-  double C = 0;
-  double D = 0;
-  double E = 0;
-  double F = 0;
-  double G = 0;
-  double H = 0;
-  double I = 0;
-  double J = 0;
+  double meanSrcX = 0.0, meanSrcY = 0.0;
+  double meanDstX = 0.0, meanDstY = 0.0;
   for ( int i = 0; i < n; ++i )
   {
-    A += sourceCoordinates.at( i ).x();
-    B += sourceCoordinates.at( i ).y();
-    C += destinationCoordinates.at( i ).x();
-    D += destinationCoordinates.at( i ).y();
-    E += destinationCoordinates.at( i ).x() * sourceCoordinates.at( i ).x();
-    F += destinationCoordinates.at( i ).y() * sourceCoordinates.at( i ).y();
-    G += std::pow( sourceCoordinates.at( i ).x(), 2 );
-    H += std::pow( sourceCoordinates.at( i ).y(), 2 );
-    I += destinationCoordinates.at( i ).x() * sourceCoordinates.at( i ).y();
-    J += sourceCoordinates.at( i ).x() * destinationCoordinates.at( i ).y();
+    meanSrcX += sourceCoordinates.at( i ).x();
+    meanSrcY += sourceCoordinates.at( i ).y();
+    meanDstX += destinationCoordinates.at( i ).x();
+    meanDstY += destinationCoordinates.at( i ).y();
+  }
+  meanSrcX /= n;
+  meanSrcY /= n;
+  meanDstX /= n;
+  meanDstY /= n;
+
+  double sumCross = 0.0;
+  double sumRot = 0.0;
+  double sumNormSq = 0.0;
+
+  for ( int i = 0; i < n; ++i )
+  {
+    const double dx = sourceCoordinates.at( i ).x() - meanSrcX;
+    const double dy = sourceCoordinates.at( i ).y() - meanSrcY;
+    const double dX = destinationCoordinates.at( i ).x() - meanDstX;
+    const double dY = destinationCoordinates.at( i ).y() - meanDstY;
+
+    sumCross += dx * dX + dy * dY;
+    sumRot += dx * dY - dy * dX;
+    sumNormSq += dx * dx + dy * dy;
   }
 
-  /* The least squares fit for the parameters { a, b, x0, y0 } is the solution
-     to the matrix equation Mx = b, where M and b is given below. I *think*
-     that this is correct but I derived it myself late at night. Look at
-     helmert.jpg if you suspect bugs. */
-
-  double MData[] = { A, -B, ( double ) n, 0., B, A, 0., ( double ) n, G + H, 0., A, B, 0., G + H, -B, A };
-
-  double bData[] = { C, D, E + F, J - I };
-
-  // we want to solve the equation M*x = b, where x = [a b x0 y0]
-  gsl_matrix_view M = gsl_matrix_view_array( MData, 4, 4 );
-  const gsl_vector_view b = gsl_vector_view_array( bData, 4 );
-  gsl_vector *x = gsl_vector_alloc( 4 );
-  gsl_permutation *p = gsl_permutation_alloc( 4 );
-  // GSL's default error handler prints and abort()s on a singular matrix,
-  // which would kill the whole process instead of surfacing the
-  // SingularException callers expect. Install the no-op handler around the
-  // decomposition AND the solve: for numerically-singular input LU_decomp can
-  // return success (tiny non-zero pivots) and the singularity only surfaces in
-  // LU_solve, so both calls must run with the handler disabled.
-  gsl_error_handler_t *const previousHandler = gsl_set_error_handler_off();
-  int s;
-  const int decompStatus = gsl_linalg_LU_decomp( &M.matrix, p, &s );
-  if ( decompStatus != 0 )
+  if ( sumNormSq < 1e-12 )
   {
-    gsl_set_error_handler( previousHandler );
-    gsl_permutation_free( p );
-    gsl_vector_free( x );
-    throw QgsLeastSquares::SingularException();
-  }
-  const int solveStatus = gsl_linalg_LU_solve( &M.matrix, p, &b.vector, x );
-  gsl_set_error_handler( previousHandler );
-  gsl_permutation_free( p );
-  if ( solveStatus != 0 )
-  {
-    gsl_vector_free( x );
     throw QgsLeastSquares::SingularException();
   }
 
-  const double a = gsl_vector_get( x, 0 );
-  const double bParam = gsl_vector_get( x, 1 );
-  const double x0 = gsl_vector_get( x, 2 );
-  const double y0 = gsl_vector_get( x, 3 );
-  gsl_vector_free( x );
+  const double a = sumCross / sumNormSq;
+  const double bParam = sumRot / sumNormSq;
+  const double x0 = meanDstX - ( a * meanSrcX - bParam * meanSrcY );
+  const double y0 = meanDstY - ( bParam * meanSrcX + a * meanSrcY );
 
   if ( !std::isfinite( a ) || !std::isfinite( bParam ) || !std::isfinite( x0 ) || !std::isfinite( y0 ) )
   {
@@ -168,9 +149,8 @@ void QgsLeastSquares::helmert( const QVector<QgsPointXY> &sourceCoordinates, con
 
   origin.setX( x0 );
   origin.setY( y0 );
-  pixelSize = std::sqrt( std::pow( a, 2 ) + std::pow( bParam, 2 ) );
+  pixelSize = std::hypot( a, bParam );
   rotation = std::atan2( bParam, a );
-#endif
 }
 
 #if 0
@@ -374,6 +354,21 @@ void QgsLeastSquares::projective( const QVector<QgsPointXY> &sourceCoordinates, 
   // V = n x n
   // U = m x n (thin SVD)  U D V^T
   gsl_linalg_SV_decomp( S, V, singular_values, work );
+
+  // Check for rank deficiency: in normalized coordinates, a non-degenerate 4+ point
+  // system has rank 8 (nullity 1). If the second smallest singular value (index 7)
+  // is zero / near-zero relative to the largest, the points are collinear or degenerate.
+  const double s0 = gsl_vector_get( singular_values, 0 );
+  const double s_penultimate = gsl_vector_get( singular_values, n - 2 );
+
+  if ( !std::isfinite( s0 ) || s0 <= 1e-12 || !std::isfinite( s_penultimate ) || s_penultimate < 1e-6 * s0 )
+  {
+    gsl_matrix_free( S );
+    gsl_matrix_free( V );
+    gsl_vector_free( singular_values );
+    gsl_vector_free( work );
+    throw QgsLeastSquares::SingularException();
+  }
 
   // Columns of V store the right singular vectors of S
   for ( unsigned int i = 0; i < n; i++ )
