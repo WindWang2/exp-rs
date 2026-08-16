@@ -624,10 +624,16 @@ QVariantMap McpServer::handleListAlgorithms()
     // at execution time, so list/get/execute all speak one catalog.
     auto &registry = sicnu::processing::AtomicAlgorithmRegistry::instance();
     const auto descriptors = registry.listDescriptors();
+    QSet<QString> seenIds;
+    seenIds.reserve(descriptors.size() + 200);
+
     for (const auto &desc : descriptors)
     {
+        const QString id = QString::fromStdString(desc.id);
+        seenIds.insert(id);
+
         QVariantMap algMap;
-        algMap[QStringLiteral("id")] = QString::fromStdString(desc.id);
+        algMap[QStringLiteral("id")] = id;
         algMap[QStringLiteral("displayName")] = QString::fromStdString(desc.displayName);
         algMap[QStringLiteral("group")] = QString::fromStdString(desc.group);
         algMap[QStringLiteral("description")] = QString::fromStdString(desc.description);
@@ -664,13 +670,9 @@ QVariantMap McpServer::handleListAlgorithms()
                 continue;
             const QString id = alg->id();
             // rs: operators win when ids collide.
-            bool already = false;
-            for (const auto &entry : algList)
-            {
-                if (entry.toMap().value(QStringLiteral("id")) == id) { already = true; break; }
-            }
-            if (already)
+            if (seenIds.contains(id))
                 continue;
+            seenIds.insert(id);
 
             QVariantMap algMap;
             algMap[QStringLiteral("id")] = id;

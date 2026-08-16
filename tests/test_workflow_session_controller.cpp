@@ -24,4 +24,34 @@ TEST_CASE( "WorkflowSessionController cancelActiveRun resets state cleanly when 
   CHECK_FALSE( controller.isRunInFlight() );
   CHECK( controller.activePipelineId() == -1 );
   CHECK( controller.pendingTaskId() == -1 );
+
+  // Idempotent second cancel
+  controller.cancelActiveRun();
+  CHECK_FALSE( controller.isRunInFlight() );
+  CHECK( controller.activePipelineId() == -1 );
+  CHECK( controller.pendingTaskId() == -1 );
+}
+
+TEST_CASE( "WorkflowSessionController cancelActiveRun cancels in-flight pipeline run", "[workflow][shell][controller]" )
+{
+  WorkflowSessionController controller;
+  controller.registerBuiltins();
+
+  const QString sessionId = controller.openTool( QStringLiteral( "wf:vegetation_indices" ) );
+  if ( !sessionId.isEmpty() )
+  {
+    controller.runFullWorkflow();
+    if ( controller.isRunInFlight() )
+    {
+      CHECK( ( controller.activePipelineId() >= 0 || controller.pendingTaskId() >= 0 ) );
+      controller.cancelActiveRun();
+      CHECK_FALSE( controller.isRunInFlight() );
+      CHECK( controller.activePipelineId() == -1 );
+      CHECK( controller.pendingTaskId() == -1 );
+
+      // Safe idempotent cancel
+      controller.cancelActiveRun();
+      CHECK_FALSE( controller.isRunInFlight() );
+    }
+  }
 }

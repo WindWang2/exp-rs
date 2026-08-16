@@ -27,5 +27,31 @@ TEST_CASE("TaskCenterDock - UI Workspace Creation and Task Signal Updates", "[ap
     long taskId = sicnu::TaskCenter::instance().enqueueTask(QStringLiteral("dock_test_algo"), params, true);
 
     REQUIRE(taskId > 0);
-    REQUIRE(sicnu::TaskCenter::instance().getTaskInfo(taskId).algorithmId == QStringLiteral("dock_test_algo"));
+    const auto info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
+    REQUIRE(info.algorithmId == QStringLiteral("dock_test_algo"));
+
+    // Deliver taskAdded signal
+    dock.onTaskAdded(info);
+    QCoreApplication::processEvents();
+
+    // Deliver taskUpdated (Running, progress = 0.5)
+    sicnu::AlgorithmTaskInfo runningInfo = info;
+    runningInfo.status = sicnu::TaskStatus::Running;
+    runningInfo.progressPercentage = 50.0;
+    dock.onTaskUpdated(runningInfo);
+    dock.onTaskLogAdded(taskId, QStringLiteral("Processing tile 1/2..."));
+    QCoreApplication::processEvents();
+
+    // Deliver taskUpdated (Completed, progress = 1.0)
+    sicnu::AlgorithmTaskInfo completedInfo = runningInfo;
+    completedInfo.status = sicnu::TaskStatus::Completed;
+    completedInfo.progressPercentage = 100.0;
+    completedInfo.outputLayerPath = QStringLiteral("/test/out.tif");
+    dock.onTaskUpdated(completedInfo);
+    dock.onTaskLogAdded(taskId, QStringLiteral("Task completed successfully."));
+    QCoreApplication::processEvents();
+
+    // Refresh and verify no crash
+    dock.refreshTaskList();
+    QCoreApplication::processEvents();
 }

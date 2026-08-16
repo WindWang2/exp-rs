@@ -1464,6 +1464,45 @@ TEST_CASE("RS mosaic operator cancellation cleans up incomplete output", "[opera
     CHECK_FALSE(QFile::exists(outPath));
 }
 
+TEST_CASE("RS change detection operator cancellation cleans up incomplete output", "[operators][rs][change_detection]") {
+    auto op = RSOperatorRegistry::instance().create("rs:change_detection");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const QString p1 = tmp.path() + "/t1.tif";
+    const QString p2 = tmp.path() + "/t2.tif";
+    const QString outPath = tmp.path() + "/change_cancelled.tif";
+
+    std::vector<std::vector<float>> b1(1), b2(1);
+    b1[0].assign(64 * 64, 10.0f);
+    b2[0].assign(64 * 64, 20.0f);
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 64.0, 0.0, -1.0};
+    QString err;
+    REQUIRE(writeGdalOutput(p1, 64, 64, b1, gt, "EPSG:4326", &err));
+    REQUIRE(writeGdalOutput(p2, 64, 64, b2, gt, "EPSG:4326", &err));
+
+    Json::Value params(Json::objectValue);
+    params["before"] = p1.toStdString();
+    params["after"] = p2.toStdString();
+    params["method"] = "difference";
+    params["output"] = outPath.toStdString();
+
+    std::atomic<bool> cancelFlag{true};
+    RSOperatorContext ctx;
+    ctx.setCancelFlag(&cancelFlag);
+
+    try {
+        op->run(params, ctx);
+        FAIL("Expected operator cancellation");
+    } catch (const RSOperatorError &e) {
+        CHECK(e.code() == ErrorCode::Cancelled);
+    }
+
+    CHECK_FALSE(QFile::exists(outPath));
+}
+
 TEST_CASE("RS mosaic operator rejects rotated and sheared rasters", "[operators][rs]") {
     auto op = RSOperatorRegistry::instance().create("rs:mosaic");
     REQUIRE(op != nullptr);

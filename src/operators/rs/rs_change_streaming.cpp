@@ -25,6 +25,26 @@ namespace {
 constexpr int kTileDim = 256;
 constexpr int kMaskHistogramBins = 65536;
 
+struct DatasetFileGuard
+{
+    GDALDatasetH ds = nullptr;
+    std::string path;
+    bool committed = false;
+
+    ~DatasetFileGuard()
+    {
+        if ( ds )
+        {
+            GDALClose( ds );
+            ds = nullptr;
+        }
+        if ( !committed && !path.empty() )
+        {
+            QFile::remove( QString::fromStdString( path ) );
+        }
+    }
+};
+
 ChangeDetection::MorphOp morphOpFromName( const std::string &name )
 {
     if ( name == "erode" ) return ChangeDetection::MorphOp::Erode;
@@ -225,6 +245,7 @@ MaskDerivation writeMaskFromMagnitude( const std::string &magPath, const GdalDat
         throw RSOperatorError( ErrorCode::FileNotWritable,
                                "Failed to create change mask: " + maskErr.toStdString() );
     }
+    DatasetFileGuard maskGuard{ maskDs, opts.outputPath, false };
     GDALRasterBandH maskBand = GDALGetRasterBand( maskDs, 1 );
     const CPLErr writeErr = GDALRasterIO( maskBand, GF_Write, 0, 0, width, height,
                                           mask.data(), width, height, GDT_Byte, 0, 0 );
@@ -237,11 +258,13 @@ MaskDerivation writeMaskFromMagnitude( const std::string &magPath, const GdalDat
                              QByteArray::number( opts.minAreaPixels ).constData(), nullptr );
     }
     GDALClose( maskDs );
+    maskGuard.ds = nullptr;
     if ( writeErr != CE_None )
     {
         throw RSOperatorError( ErrorCode::FileNotWritable,
                                "Failed to write change mask: " + opts.outputPath );
     }
+    maskGuard.committed = true;
 
     // Changed-pixel statistics from the in-memory mask (255 = NoData).
     MaskDerivation derived;
@@ -356,6 +379,7 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
                                "Failed to create change magnitude raster: " +
                                    outErr.toStdString() );
     }
+    DatasetFileGuard magGuard{ outDs, magPath, false };
     GDALRasterBandH outBand = GDALGetRasterBand( outDs, 1 );
 
     StreamingMagnitudeStats magStats;
@@ -373,7 +397,6 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
             if ( !readTileBip( beforeDs, afterDs, bandCount, opts.beforeBand, opts.afterBand,
                                x, y, w, h, beforeBip, afterBip, bandScratch ) )
             {
-                GDALClose( outDs );
                 throw RSOperatorError( ErrorCode::GdalError,
                                        "Failed to read input tile at (" +
                                            std::to_string( x ) + ", " + std::to_string( y ) + ")" );
@@ -444,7 +467,6 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
             if ( GDALRasterIO( outBand, GF_Write, x, y, w, h, tileOut.data(),
                                w, h, GDT_Float32, 0, 0 ) != CE_None )
             {
-                GDALClose( outDs );
                 throw RSOperatorError( ErrorCode::FileNotWritable,
                                        "Failed to write change magnitude tile at (" +
                                            std::to_string( x ) + ", " + std::to_string( y ) + ")" );
@@ -454,6 +476,8 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
         }
     }
     GDALClose( outDs );
+    magGuard.ds = nullptr;
+    magGuard.committed = true;
 
     // --- Non-mask path: the magnitude raster is the output. ----------------
     if ( !opts.makeMask )
@@ -469,9 +493,17 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
 
     // --- Mask path: threshold from the streaming stats, then the mask. -----
     context.reportProgress( 0.8, "Computing change threshold" );
-    const MaskDerivation derived =
-        writeMaskFromMagnitude( magPath, beforeDs, width, height, opts, magStats, context );
-    QFile::remove( QString::fromStdString( magPath ) );
+    MaskDerivation derived;
+    try
+    {
+        derived = writeMaskFromMagnitude( magPath, beforeDs, width, height, opts, magStats, context );
+        QFile::remove( QString::fromStdString( magPath ) );
+    }
+    catch ( ... )
+    {
+        QFile::remove( QString::fromStdString( magPath ) );
+        throw;
+    }
 
     Json::Value result( Json::objectValue );
     result["output"] = opts.outputPath;
