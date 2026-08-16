@@ -12,14 +12,16 @@ namespace sicnu::workflow {
 struct PlaceholderRef
 {
   std::string rawRef;           // e.g. "$step1.output" or "${step1.output}"
-  std::string stepId;           // e.g. "step1", or empty if task id ref
+  std::string stepId;           // e.g. "step1", or empty if task id / env var ref
   long parentTaskId = -1;       // e.g. 12 if ${task.12.output}, else -1
   bool isParentKeyword = false; // true if ${task.parent.output}
+  bool isEnvVar = false;        // true if ${ENV_VAR} or ${env.VAR}
+  std::string envVarName;       // name of the environment variable e.g. "WORK"
   std::string portName = "output"; // e.g. "output" or custom port name
 
   bool isValid() const
   {
-    return !stepId.empty() || parentTaskId >= 0 || isParentKeyword;
+    return !stepId.empty() || parentTaskId >= 0 || isParentKeyword || isEnvVar;
   }
 };
 
