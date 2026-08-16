@@ -83,9 +83,9 @@ void buildMatrices( GDALDataset *ds,
     for ( auto it = pixelClass.constBegin(); it != pixelClass.constEnd(); ++it )
       byClass[it.value()].push_back( it.key() );
 
-    // ADR 0061 — shared deterministic subsampling policy (mt19937(42) +
+    // ADR 0061 — shared deterministic subsampling policy (mt19937(seed) +
     // shuffle, keep the first maxSamplesPerClass of each sorted bucket).
-    std::mt19937 rng( 42u );
+    std::mt19937 rng( options.seed );
     for ( auto &kv : byClass )
     {
       std::vector<quint64> &px = kv.second;
@@ -248,7 +248,7 @@ GDALDataset *openRaster( const QString &rasterPath,
 } // namespace
 
 RsTrainingDataExtraction::Options::Options()
-  : maxSamplesPerClass( 0 ), minSamples( 0 )
+  : maxSamplesPerClass( 0 ), minSamples( 0 ), seed( 42u )
 {
 }
 

@@ -92,6 +92,8 @@ class QGIS_ANALYSIS_EXPORT RsTrainingDataExtraction
         int maxSamplesPerClass;
         /// Fail with Error::InsufficientSamples when fewer samples survive.
         int minSamples;
+        /// Deterministic pseudo-random seed for per-class subsampling.
+        unsigned int seed = 42u;
     };
 
     /// In-memory geometry path (classification window ROIs).

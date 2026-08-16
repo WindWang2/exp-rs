@@ -1861,6 +1861,34 @@ TEST_CASE("RS supervised classification writes a probability output (normal_baye
     CHECK(px[16 * 16 - 1] > 0.9f);
 }
 
+TEST_CASE("RS supervised classification writes a probability output (rf)", "[operators][rs]") {
+    auto op = RSOperatorRegistry::instance().create("rs:supervised_classification");
+    REQUIRE(op != nullptr);
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString inputPath = tmp.path() + "/input.tif";
+    const QString trainingPath = tmp.path() + "/training.gpkg";
+    const QString outputPath = tmp.path() + "/map.tif";
+    const QString probPath = tmp.path() + "/confidence.tif";
+    makeTwoClassFixture(inputPath, trainingPath);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["training"] = trainingPath.toStdString();
+    params["classField"] = "class_id";
+    params["method"] = "rf";
+    params["probabilityOutput"] = probPath.toStdString();
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run(params, ctx);
+    REQUIRE(QFile::exists(outputPath));
+    REQUIRE(QFile::exists(probPath));
+    CHECK(result["meanConfidence"].asDouble() > 0.5);
+    CHECK(result["meanConfidence"].asDouble() <= 1.0);
+}
+
 TEST_CASE("RS supervised classification rejects probability output for SVM", "[operators][rs]") {
     auto op = RSOperatorRegistry::instance().create("rs:supervised_classification");
     REQUIRE(op != nullptr);

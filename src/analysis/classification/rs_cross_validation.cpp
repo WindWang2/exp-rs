@@ -9,29 +9,33 @@
 #include <cmath>
 #include <random>
 
-RsCrossValidation::Result
-RsCrossValidation::kFold( const cv::Mat &X, const cv::Mat &y,
-                          std::function<std::unique_ptr<RsClassifierBackend>()> factory,
-                          int k,
-                          bool scaleFeatures,
-                          std::function<bool()> isCanceled )
+RsCrossValidation::Result RsCrossValidation::kFold(
+  const cv::Mat &X,
+  const cv::Mat &y,
+  std::function<std::unique_ptr<RsClassifierBackend>()> factory,
+  int k,
+  bool scaleFeatures,
+  std::function<bool()> isCanceled,
+  unsigned int seed )
 {
   Result r;
-  if ( X.empty() || y.empty() || X.rows != y.rows )
+  if ( X.empty() || y.empty() )
   {
-    SICNU_LOG_ERROR( SicnuLogTags::Classification, "Cross-validation: empty or mismatched X/y" );
-    r.errorMessage = QStringLiteral( "Empty or mismatched X/y" );
+    r.errorMessage = QStringLiteral( "Empty training matrix" );
+    return r;
+  }
+  if ( X.rows != y.rows || X.rows < 2 )
+  {
+    r.errorMessage = QStringLiteral( "Insufficient samples for CV" );
     return r;
   }
   if ( k < 2 )
   {
-    SICNU_LOG_ERROR( SicnuLogTags::Classification, QString( "Cross-validation: k must be >= 2 (got %1)" ).arg( k ) );
-    r.errorMessage = QStringLiteral( "k must be >= 2" );
+    r.errorMessage = QStringLiteral( "Fold count k must be >= 2" );
     return r;
   }
   if ( !factory )
   {
-    SICNU_LOG_ERROR( SicnuLogTags::Classification, "Cross-validation: no backend factory provided" );
     r.errorMessage = QStringLiteral( "No backend factory" );
     return r;
   }
@@ -45,7 +49,7 @@ RsCrossValidation::kFold( const cv::Mat &X, const cv::Mat &y,
     byClass[y.at<int>( i, 0 )].append( i );
 
   // Shuffle each bucket with a deterministic seed.
-  std::mt19937 rng( 42 );
+  std::mt19937 rng( seed );
   for ( auto it = byClass.begin(); it != byClass.end(); ++it )
   {
     std::shuffle( it.value().begin(), it.value().end(), rng );

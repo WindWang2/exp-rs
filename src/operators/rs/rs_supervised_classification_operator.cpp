@@ -49,7 +49,7 @@ using namespace params;
 
 namespace {
 
-const std::vector<std::string> s_methods = {"svm", "normal_bayes"};
+const std::vector<std::string> s_methods = {"svm", "normal_bayes", "rf", "mlp"};
 
 /// Map a failed pipeline run back onto the operator's stable error codes.
 [[noreturn]] void throwPipelineError(const RsClassificationPipelineResult& res,
@@ -117,11 +117,13 @@ Json::Value RsSupervisedClassificationOperator::schema() const {
     props["probabilityOutput"] = makeStringParam(
         "probabilityOutput",
         "Optional per-pixel best-class probability raster (Float32, NoData -1). "
-        "Requires method=normal_bayes (SVM does not support probabilities)",
+        "Requires a classifier supporting probabilities (normal_bayes, rf, mlp)",
         "");
     props["probabilityOutput"]["required"] = false;
     props["maxSamplesPerClass"] = makeIntegerParam(
         "maxSamplesPerClass", "Cap training samples per class (0 = unlimited)", 5000);
+    props["seed"] = makeIntegerParam(
+        "seed", "Deterministic pseudo-random seed for data splitting and sampling (default 42)", 42);
     props["scale"] = makeBooleanParam(
         "scale",
         "Fit a feature scaler (standardization) on the training split and embed it in the "
@@ -204,9 +206,10 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
     const std::string classField = getString(params, "classField", "class_id");
     const int maxPerClass = getInt(params, "maxSamplesPerClass", 5000);
     const std::string method = getEnum(params, "method", s_methods, "svm");
-    if (!probabilityOutput.empty() && method != "normal_bayes") {
+    const unsigned int seed = static_cast<unsigned int>(getInt(params, "seed", 42));
+    if (!probabilityOutput.empty() && method != "normal_bayes" && method != "rf" && method != "mlp") {
         throw RSOperatorError(ErrorCode::InvalidParameter,
-                              "Probability outputs require method=normal_bayes; "
+                              "Probability outputs require a classifier that supports probabilities (normal_bayes, rf, mlp); "
                               "SVM does not support them");
     }
 
@@ -248,6 +251,7 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
     cfg.methodName = QString::fromStdString(method);
     cfg.fitScaler = scale;
     cfg.testSplit = testSplit;
+    cfg.seed = seed;
     cfg.probabilityOutput = QString::fromStdString( probabilityOutput );
 
     if (predictOnly) {

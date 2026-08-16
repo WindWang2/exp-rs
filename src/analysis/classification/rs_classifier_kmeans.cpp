@@ -88,17 +88,27 @@ cv::Mat RsClassifierKMeans::predict( const cv::Mat &X ) const
     if ( data.type() != CV_32F )
       data.convertTo( data, CV_32F );
 
-    for ( int i = 0; i < data.rows; ++i )
+    const int nRows = data.rows;
+    const int nCols = data.cols;
+    const int nCenters = m_centers.rows;
+
+    for ( int i = 0; i < nRows; ++i )
     {
-      const cv::Mat sample = data.row( i );
-      double best = std::numeric_limits<double>::max();
+      const float *x = data.ptr<float>( i );
+      float bestDistSq = std::numeric_limits<float>::max();
       int bestK = 0;
-      for ( int k = 0; k < m_centers.rows; ++k )
+      for ( int k = 0; k < nCenters; ++k )
       {
-        const double d = cv::norm( sample, m_centers.row( k ) );
-        if ( d < best )
+        const float *c = m_centers.ptr<float>( k );
+        float distSq = 0.0f;
+        for ( int j = 0; j < nCols; ++j )
         {
-          best = d;
+          const float diff = x[j] - c[j];
+          distSq += diff * diff;
+        }
+        if ( distSq < bestDistSq )
+        {
+          bestDistSq = distSq;
           bestK = k;
         }
       }

@@ -18,6 +18,7 @@ class QGIS_ANALYSIS_EXPORT RsRandomForestBackend : public RsClassifierCvBackend<
 
     bool fit( const cv::Mat &X, const cv::Mat &y ) override;
     cv::Mat predictProbabilities( const cv::Mat &X ) const override;
+    bool supportsProbabilities() const override { return true; }
     QString name() const override { return QStringLiteral( "RandomForest (随机森林)" ); }
 
   private:
