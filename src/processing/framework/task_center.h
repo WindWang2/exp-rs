@@ -144,6 +144,7 @@ public:
     AlgorithmTaskInfo getTaskInfo(long taskId) const;
     PipelineExecutionInfo getPipelineInfo(long pipelineId) const;
     void clearCompletedTasks();
+    void shutdown();
 
     /// Wait for task to reach a terminal status or timeout.
     AlgorithmTaskInfo waitForTask( long taskId,

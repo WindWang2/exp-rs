@@ -53,29 +53,64 @@ protected:
         if ( !overlay )
             throw QgsProcessingException( invalidSourceError( parameters, QStringLiteral( "OVERLAY" ) ) );
 
+        QgsFields outFields = source->fields();
+        const QgsFields overlayFields = overlay->fields();
+        QVector<int> overlayFieldMap;
+        for ( int i = 0; i < overlayFields.count(); ++i )
+        {
+            const QgsField f = overlayFields.at( i );
+            QString name = f.name();
+            if ( outFields.lookupField( name ) >= 0 )
+                name = QStringLiteral( "overlay_" ) + name;
+            outFields.append( QgsField( name, f.type(), f.typeName(), f.length(), f.precision() ) );
+            overlayFieldMap.append( outFields.count() - 1 );
+        }
+
         QString dest;
         std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, QStringLiteral( "OUTPUT" ), context, dest,
-            source->fields(), Qgis::WkbType::Unknown, source->sourceCrs() ) );
+            outFields, Qgis::WkbType::Unknown, source->sourceCrs() ) );
         if ( !sink )
             throw QgsProcessingException( invalidSinkError( parameters, QStringLiteral( "OUTPUT" ) ) );
 
-        QgsGeometry overlayCombined;
+        // Collect overlay features
+        QVector<QgsFeature> overlayFeatures;
         QgsFeatureIterator overlayIt = overlay->getFeatures();
         QgsFeature overlayFeat;
+        QgsGeometry inputCombined;
         while ( overlayIt.nextFeature( overlayFeat ) )
         {
-            if ( overlayFeat.hasGeometry() )
-            {
-                if ( overlayCombined.isNull() )
-                    overlayCombined = overlayFeat.geometry();
-                else
-                    overlayCombined = overlayCombined.combine( overlayFeat.geometry() );
-            }
+            overlayFeatures.append( overlayFeat );
         }
+
+        auto makeIntersectionFeature = [&]( const QgsFeature &inFeat, const QgsFeature &ovFeat, const QgsGeometry &geom ) {
+            QgsFeature outFeat( outFields );
+            outFeat.setGeometry( geom );
+            for ( int i = 0; i < source->fields().count(); ++i )
+                outFeat.setAttribute( i, inFeat.attribute( i ) );
+            for ( int i = 0; i < overlayFields.count(); ++i )
+                outFeat.setAttribute( overlayFieldMap[i], ovFeat.attribute( i ) );
+            return outFeat;
+        };
+
+        auto makeInputRemainderFeature = [&]( const QgsFeature &inFeat, const QgsGeometry &geom ) {
+            QgsFeature outFeat( outFields );
+            outFeat.setGeometry( geom );
+            for ( int i = 0; i < source->fields().count(); ++i )
+                outFeat.setAttribute( i, inFeat.attribute( i ) );
+            return outFeat;
+        };
+
+        auto makeOverlayRemainderFeature = [&]( const QgsFeature &ovFeat, const QgsGeometry &geom ) {
+            QgsFeature outFeat( outFields );
+            outFeat.setGeometry( geom );
+            for ( int i = 0; i < overlayFields.count(); ++i )
+                outFeat.setAttribute( overlayFieldMap[i], ovFeat.attribute( i ) );
+            return outFeat;
+        };
 
         QgsFeatureIterator it = source->getFeatures();
         QgsFeature feat;
-        long long total = source->featureCount();
+        long long total = source->featureCount() + overlayFeatures.size();
         long long current = 0;
 
         while ( it.nextFeature( feat ) )
@@ -84,12 +119,73 @@ protected:
             current++;
             if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
 
-            if ( feat.hasGeometry() )
+            if ( !feat.hasGeometry() || feat.geometry().isEmpty() )
             {
-                QgsFeature outputFeat = feat;
-                if ( !overlayCombined.isNull() )
-                    outputFeat.setGeometry( feat.geometry().combine( overlayCombined ) );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                QgsFeature outFeat( outFields );
+                for ( int i = 0; i < source->fields().count(); ++i )
+                    outFeat.setAttribute( i, feat.attribute( i ) );
+                sink->addFeature( outFeat, QgsFeatureSink::FastInsert );
+                continue;
+            }
+
+            QgsGeometry inputGeom = feat.geometry();
+            QgsGeometry inputRemainder = inputGeom;
+
+            if ( inputCombined.isNull() )
+                inputCombined = inputGeom;
+            else
+                inputCombined = inputCombined.combine( inputGeom );
+
+            for ( const QgsFeature &ovFeat : overlayFeatures )
+            {
+                if ( !ovFeat.hasGeometry() || ovFeat.geometry().isEmpty() )
+                    continue;
+
+                if ( inputGeom.intersects( ovFeat.geometry() ) )
+                {
+                    QgsGeometry inter = inputGeom.intersection( ovFeat.geometry() );
+                    if ( !inter.isEmpty() )
+                    {
+                        QgsFeature outF = makeIntersectionFeature( feat, ovFeat, inter );
+                        sink->addFeature( outF, QgsFeatureSink::FastInsert );
+                        inputRemainder = inputRemainder.difference( inter );
+                    }
+                }
+            }
+
+            if ( !inputRemainder.isEmpty() )
+            {
+                QgsFeature outF = makeInputRemainderFeature( feat, inputRemainder );
+                sink->addFeature( outF, QgsFeatureSink::FastInsert );
+            }
+        }
+
+        // Add residual overlay geometries
+        for ( const QgsFeature &ovFeat : overlayFeatures )
+        {
+            if ( feedback->isCanceled() ) break;
+            current++;
+            if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
+
+            if ( !ovFeat.hasGeometry() || ovFeat.geometry().isEmpty() )
+            {
+                QgsFeature outFeat( outFields );
+                for ( int i = 0; i < overlayFields.count(); ++i )
+                    outFeat.setAttribute( overlayFieldMap[i], ovFeat.attribute( i ) );
+                sink->addFeature( outFeat, QgsFeatureSink::FastInsert );
+                continue;
+            }
+
+            QgsGeometry ovRemainder = ovFeat.geometry();
+            if ( !inputCombined.isNull() )
+            {
+                ovRemainder = ovRemainder.difference( inputCombined );
+            }
+
+            if ( !ovRemainder.isEmpty() )
+            {
+                QgsFeature outF = makeOverlayRemainderFeature( ovFeat, ovRemainder );
+                sink->addFeature( outF, QgsFeatureSink::FastInsert );
             }
         }
 

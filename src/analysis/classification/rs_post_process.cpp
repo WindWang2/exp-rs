@@ -77,7 +77,7 @@ int pixelAt( const cv::Mat &m, int r, int c )
 
 // Majority among values that border the component (outside pixels).
 int borderNeighborMajority( const cv::Mat &labels, const cv::Mat &cc, int compId,
-                            int connectedness )
+                            const cv::Mat &stats, int connectedness )
 {
   static constexpr int dr8[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
   static constexpr int dc8[8] = { -1, 0, 1, -1, 1, -1, 0, 1 };
@@ -90,13 +90,19 @@ int borderNeighborMajority( const cv::Mat &labels, const cv::Mat &cc, int compId
 
   const int H = labels.rows;
   const int W = labels.cols;
+
+  const int top = stats.at<int>( compId, cv::CC_STAT_TOP );
+  const int left = stats.at<int>( compId, cv::CC_STAT_LEFT );
+  const int height = stats.at<int>( compId, cv::CC_STAT_HEIGHT );
+  const int width = stats.at<int>( compId, cv::CC_STAT_WIDTH );
+
   std::unordered_map<int, int> freq;
   freq.reserve( 16 );
 
-  for ( int r = 0; r < H; ++r )
+  for ( int r = top; r < top + height; ++r )
   {
     const int *ccRow = cc.ptr<int>( r );
-    for ( int c = 0; c < W; ++c )
+    for ( int c = left; c < left + width; ++c )
     {
       if ( ccRow[c] != compId )
         continue;
@@ -188,7 +194,8 @@ int modeOfWindow( const cv::Mat &labels, int r, int c, int k )
 } // namespace
 
 bool RsPostProcess::sieve( const cv::Mat &src, cv::Mat &dst, int threshold,
-                           int connectedness, QString *err )
+                           int connectedness, QString *err,
+                           const std::function<bool()> &isCanceled )
 {
   cv::Mat labels;
   if ( !toLabels32S( src, labels, err ) )
@@ -230,6 +237,12 @@ bool RsPostProcess::sieve( const cv::Mat &src, cv::Mat &dst, int threshold,
 
   for ( int classId : classIds )
   {
+    if ( isCanceled && isCanceled() )
+    {
+      setErr( err, QStringLiteral( "Cancelled" ) );
+      return false;
+    }
+
     cv::Mat mask;
     cv::compare( orig, classId, mask, cv::CMP_EQ ); // CV_8U 0/255
 
@@ -239,15 +252,24 @@ bool RsPostProcess::sieve( const cv::Mat &src, cv::Mat &dst, int threshold,
     // Component 0 is background (not this class).
     for ( int comp = 1; comp < nComp; ++comp )
     {
+      if ( isCanceled && ( comp % 32 == 0 ) && isCanceled() )
+      {
+        setErr( err, QStringLiteral( "Cancelled" ) );
+        return false;
+      }
       const int area = stats.at<int>( comp, cv::CC_STAT_AREA );
       if ( area >= threshold )
         continue;
-      const int replacement = borderNeighborMajority( orig, cc, comp, connectedness );
-      for ( int r = 0; r < out.rows; ++r )
+      const int replacement = borderNeighborMajority( orig, cc, comp, stats, connectedness );
+      const int top = stats.at<int>( comp, cv::CC_STAT_TOP );
+      const int left = stats.at<int>( comp, cv::CC_STAT_LEFT );
+      const int height = stats.at<int>( comp, cv::CC_STAT_HEIGHT );
+      const int width = stats.at<int>( comp, cv::CC_STAT_WIDTH );
+      for ( int r = top; r < top + height; ++r )
       {
         const int *ccRow = cc.ptr<int>( r );
         int *outRow = out.ptr<int>( r );
-        for ( int c = 0; c < out.cols; ++c )
+        for ( int c = left; c < left + width; ++c )
         {
           if ( ccRow[c] == comp )
             outRow[c] = replacement;

@@ -24,7 +24,10 @@ QStringList GdalTranslateAlgorithm::buildArgs(const QVariantMap &parameters,
     Q_UNUSED(feedback);
 
     QStringList args;
-    args << "-of" << parameters.value("FORMAT").toString();
+    QStringList formats = { "GTiff", "HFA", "ENVI", "AAIGrid", "PNG", "JPEG", "NetCDF" };
+    int formatIdx = parameters.value("FORMAT").toInt();
+    QString formatStr = (formatIdx >= 0 && formatIdx < formats.size()) ? formats[formatIdx] : QStringLiteral("GTiff");
+    args << "-of" << formatStr;
 
     if (parameters.contains("EXTRA") && !parameters.value("EXTRA").toString().isEmpty()) {
         args << QProcess::splitCommand(parameters.value("EXTRA").toString());

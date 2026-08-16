@@ -150,7 +150,7 @@ class JobEngine
     JobEngine( const JobEngine & ) = delete;
     JobEngine &operator=( const JobEngine & ) = delete;
 
-    void workerLoop();
+    void workerLoop( uint64_t gen );
     void ensureWorkersLocked(); // requires m_mutex
     std::optional<std::string> tryPickJobLocked(); // requires m_mutex
     void appendLog( JobRecord &rec, JobLogLevel level, const std::string &text );
@@ -178,6 +178,8 @@ class JobEngine
     int m_maxWorkers = 3;
     int m_running = 0;
     bool m_exclusiveRunning = false;
+    bool m_shuttingDown = false;
+    uint64_t m_generation = 0;
     std::atomic<bool> m_stop{false};
     std::atomic<uint64_t> m_nextId{1};
 };

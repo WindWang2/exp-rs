@@ -20,9 +20,9 @@ QStringList OtbOrthoRectificationAlgorithm::buildArgs(const QVariantMap &paramet
     Q_UNUSED(feedback);
 
     QStringList args;
-    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
-    args << "-elev" << QString::number(parameters.value("ELEVATION").toDouble());
-    args << "-out" << parameters.value("OUTPUT").toString();
+    args << "-io.in" << rasterLayerSource(parameters.value("INPUT"));
+    args << "-elev.default" << QString::number(parameters.value("ELEVATION").toDouble());
+    args << "-io.out" << parameters.value("OUTPUT").toString();
 
     return args;
 }

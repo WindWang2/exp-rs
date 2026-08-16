@@ -13,6 +13,7 @@
 #include <qgsrasterprojector.h>
 #include <qgsrectangle.h>
 #include <qgscoordinatereferencesystem.h>
+#include <gdal.h>
 
 void RasterMergeBandsAlgorithm::initAlgorithm( const QVariantMap & )
 {
@@ -80,23 +81,58 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
         }
     }
 
-    // Write multi-band output using QgsRasterFileWriter
-    QgsRasterFileWriter writer( dest );
-    writer.setOutputFormat( QStringLiteral( "GTiff" ) );
+    // Write multi-band output using GDAL
+    GDALDriverH hDriver = GDALGetDriverByName( "GTiff" );
+    if ( !hDriver )
+        throw QgsProcessingException( QObject::tr( "GTiff driver not available" ) );
 
-    auto pipe = std::make_unique<QgsRasterPipe>();
-    if ( !pipe->set( refLayer->dataProvider()->clone() ) )
-        throw QgsProcessingException( QObject::tr( "Could not create raster pipe" ) );
+    GDALDataType gdalType = GDT_Float32;
+    if ( !blocks.empty() )
+    {
+        const Qgis::DataType dt = blocks[0]->dataType();
+        if ( dt == Qgis::DataType::Byte || dt == Qgis::DataType::UInt16 || dt == Qgis::DataType::Int16 || dt == Qgis::DataType::UInt32 || dt == Qgis::DataType::Int32 || dt == Qgis::DataType::Float32 || dt == Qgis::DataType::Float64 )
+        {
+            gdalType = ( dt == Qgis::DataType::Byte ) ? GDT_Byte :
+                       ( dt == Qgis::DataType::UInt16 ) ? GDT_UInt16 :
+                       ( dt == Qgis::DataType::Int16 ) ? GDT_Int16 :
+                       ( dt == Qgis::DataType::UInt32 ) ? GDT_UInt32 :
+                       ( dt == Qgis::DataType::Int32 ) ? GDT_Int32 :
+                       ( dt == Qgis::DataType::Float64 ) ? GDT_Float64 : GDT_Float32;
+        }
+    }
 
-    QgsRasterProjector *projector = new QgsRasterProjector();
-    projector->setCrs( crs, crs );
-    pipe->insert( 2, projector );
+    GDALDatasetH hOutDs = GDALCreate( hDriver, dest.toUtf8().constData(), nCols, nRows, totalBands, gdalType, nullptr );
+    if ( !hOutDs )
+        throw QgsProcessingException( QObject::tr( "Could not create output file %1" ).arg( dest ) );
 
-    Qgis::RasterFileWriterResult err = writer.writeRaster( pipe.get(), nCols, nRows, extent, crs, context.transformContext() );
-    pipe.reset();
+    double geoTransform[6] = { extent.xMinimum(), extent.width() / nCols, 0,
+                               extent.yMaximum(), 0, -extent.height() / nRows };
+    GDALSetGeoTransform( hOutDs, geoTransform );
+    if ( crs.isValid() )
+    {
+        QByteArray wkt = crs.toWkt( Qgis::CrsWktVariant::Wkt1Gdal ).toUtf8();
+        GDALSetProjection( hOutDs, wkt.constData() );
+    }
 
-    if ( err != Qgis::RasterFileWriterResult::Success )
-        throw QgsProcessingException( QObject::tr( "Error writing merged raster" ) );
+    for ( int b = 0; b < totalBands; ++b )
+    {
+        GDALRasterBandH hBand = GDALGetRasterBand( hOutDs, b + 1 );
+        if ( blocks[b]->hasNoDataValue() )
+        {
+            GDALSetRasterNoDataValue( hBand, blocks[b]->noDataValue() );
+        }
+        const void *data = blocks[b]->bits();
+        CPLErr cplErr = GDALRasterIO( hBand, GF_Write, 0, 0, nCols, nRows,
+                                     const_cast<void *>( data ), nCols, nRows,
+                                     gdalType, 0, 0 );
+        if ( cplErr != CE_None )
+        {
+            GDALClose( hOutDs );
+            throw QgsProcessingException( QObject::tr( "Error writing band %1" ).arg( b + 1 ) );
+        }
+        feedback->setProgress( 50.0 + 50.0 * ( b + 1 ) / totalBands );
+    }
+    GDALClose( hOutDs );
 
     feedback->setProgress( 100 );
 

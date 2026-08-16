@@ -22,13 +22,35 @@ bool pixelPurityIndex( const float *pixels, size_t count, int bands,
         return false;
     }
 
+    auto isValidPixel = [&]( size_t p ) {
+        for ( int b = 0; b < bands; ++b )
+        {
+            const float v = pixels[p * static_cast<size_t>( bands ) + b];
+            if ( !std::isfinite( v ) )
+                return false;
+        }
+        return true;
+    };
+
     // Mean-center the data (PPI operates on centered extremes).
     std::vector<double> mean( bands, 0.0 );
+    size_t validCount = 0;
     for ( size_t p = 0; p < count; ++p )
+    {
+        if ( !isValidPixel( p ) )
+            continue;
         for ( int b = 0; b < bands; ++b )
             mean[static_cast<size_t>( b )] += pixels[p * static_cast<size_t>( bands ) + b];
+        ++validCount;
+    }
+    if ( validCount == 0 )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "No valid pixels found for PPI" );
+        return false;
+    }
     for ( int b = 0; b < bands; ++b )
-        mean[static_cast<size_t>( b )] /= static_cast<double>( count );
+        mean[static_cast<size_t>( b )] /= static_cast<double>( validCount );
 
     // Reproducible randomness: fixed seed.
     std::mt19937 rng( 42 );
@@ -54,25 +76,32 @@ bool pixelPurityIndex( const float *pixels, size_t count, int bands,
         // Track the min and max projection extremes.
         size_t minP = 0, maxP = 0;
         double minV = 0.0, maxV = 0.0;
+        bool foundValid = false;
         for ( size_t p = 0; p < count; ++p )
         {
+            if ( !isValidPixel( p ) )
+                continue;
             double v = 0.0;
             for ( int b = 0; b < bands; ++b )
                 v += direction[static_cast<size_t>( b )]
                      * ( pixels[p * static_cast<size_t>( bands ) + b] - mean[static_cast<size_t>( b )] );
-            if ( p == 0 || v < minV )
+            if ( !foundValid || v < minV )
             {
                 minV = v;
                 minP = p;
             }
-            if ( p == 0 || v > maxV )
+            if ( !foundValid || v > maxV )
             {
                 maxV = v;
                 maxP = p;
             }
+            foundValid = true;
         }
-        ++extremeCounts[minP];
-        ++extremeCounts[maxP];
+        if ( foundValid )
+        {
+            ++extremeCounts[minP];
+            ++extremeCounts[maxP];
+        }
     }
 
     // Rank pixels by PPI count, tie-broken by index for determinism.

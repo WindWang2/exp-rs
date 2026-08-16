@@ -82,7 +82,7 @@ QStringList GdalGridAlgorithm::buildArgs(const QVariantMap &parameters,
     if (parameters.contains("PIXEL_SIZE") && !parameters.value("PIXEL_SIZE").toString().isEmpty()) {
         double pixelSize = parameters.value("PIXEL_SIZE").toDouble();
         if (pixelSize > 0) {
-            args << "-outsize" << QString::number(pixelSize) << QString::number(pixelSize);
+            args << "-tr" << QString::number(pixelSize) << QString::number(pixelSize);
         }
     }
 

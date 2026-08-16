@@ -19,8 +19,8 @@ QStringList OtbSuperimposeAlgorithm::buildArgs(const QVariantMap &parameters,
     Q_UNUSED(feedback);
 
     QStringList args;
-    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
-    args << "-ref" << rasterLayerSource(parameters.value("REFERENCE"));
+    args << "-inm" << rasterLayerSource(parameters.value("INPUT"));
+    args << "-inr" << rasterLayerSource(parameters.value("REFERENCE"));
     args << "-out" << parameters.value("OUTPUT").toString();
 
     return args;

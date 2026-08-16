@@ -261,7 +261,7 @@ void GdalToolWrapper::addOutputVectorLayerParameter(const QString &name, const Q
 
 void GdalToolWrapper::addExtentParameter(const QString &name)
 {
-    addParameter(new QgsProcessingParameterExtent(name, QObject::tr("Extent")));
+    addParameter(new QgsProcessingParameterExtent(name, QObject::tr("Extent"), QVariant(), true));
 }
 
 void GdalToolWrapper::addCrsParameter(const QString &name, const QString &description)

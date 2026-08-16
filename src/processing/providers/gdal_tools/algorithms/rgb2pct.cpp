@@ -39,11 +39,10 @@ QStringList Rgb2PctAlgorithm::buildArgs(const QVariantMap &parameters,
     Q_UNUSED(feedback);
 
     QStringList args;
-
-    const QString format = parameters.value("FORMAT").toString();
-    if (!format.isEmpty()) {
-        args << "-of" << format;
-    }
+    QStringList formats = { "GTiff", "HFA", "ENVI", "PNG" };
+    int formatIdx = parameters.value("FORMAT").toInt();
+    QString format = (formatIdx >= 0 && formatIdx < formats.size()) ? formats[formatIdx] : QStringLiteral("GTiff");
+    args << "-of" << format;
 
     args << "-n" << QString::number(parameters.value("COLORS", 256).toInt());
 

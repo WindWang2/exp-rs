@@ -1,6 +1,6 @@
-// src/processing/providers/gdal_tools/algorithms/gdal_rasterize.cpp
 #include "gdal_rasterize.h"
 
+#include <gdal.h>
 #include <processing/qgsprocessingparameters.h>
 #include <qgsvectorlayer.h>
 
@@ -53,7 +53,26 @@ QStringList GdalRasterizeAlgorithm::buildArgs(const QVariantMap &parameters,
 
     // Template raster
     if (parameters.contains("RASTER_TEMPLATE") && !parameters.value("RASTER_TEMPLATE").toString().isEmpty()) {
-        args << "-at" << "-ts" << rasterLayerSource(parameters.value("RASTER_TEMPLATE"));
+        QString tmplSource = rasterLayerSource(parameters.value("RASTER_TEMPLATE"));
+        GDALDatasetH hTmpl = GDALOpen(tmplSource.toUtf8().constData(), GA_ReadOnly);
+        if (hTmpl) {
+            int tw = GDALGetRasterXSize(hTmpl);
+            int th = GDALGetRasterYSize(hTmpl);
+            double gt[6];
+            if (GDALGetGeoTransform(hTmpl, gt) == CE_None) {
+                double minX = gt[0];
+                double maxY = gt[3];
+                double maxX = gt[0] + tw * gt[1];
+                double minY = gt[3] + th * gt[5];
+                if (minY > maxY) std::swap(minY, maxY);
+                args << "-te" << QString::number(minX, 'f', 10)
+                     << QString::number(minY, 'f', 10)
+                     << QString::number(maxX, 'f', 10)
+                     << QString::number(maxY, 'f', 10);
+            }
+            args << "-ts" << QString::number(tw) << QString::number(th);
+            GDALClose(hTmpl);
+        }
     } else {
         // Use extent and size
         if (parameters.contains("EXTENT") && !parameters.value("EXTENT").toString().isEmpty()) {

@@ -30,6 +30,7 @@
 
 #include "data/data_manager.h"
 #include "processing/framework/atomic_algorithm_adapter.h"
+#include "processing/framework/task_center.h"
 #include "jobs/job_engine.h"
 #include "operators/framework/rs_operator_context.h"
 
@@ -506,6 +507,8 @@ int main(int argc, char *argv[])
     // QgisPython::instance().finalize();
 
     window.reset();
+    sicnu::TaskCenter::instance().shutdown();
+    sicnu::jobs::JobEngine::instance().shutdown();
     delete logFile;
     delete app;
     return result;

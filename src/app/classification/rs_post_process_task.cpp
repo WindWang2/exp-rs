@@ -165,7 +165,8 @@ bool RsPostProcessTask::run()
   {
     cv::Mat out;
     if ( !RsPostProcess::sieve( labels, out, mCfg.sieveThreshold,
-                                mCfg.connectedness, &err ) )
+                                mCfg.connectedness, &err,
+                                [this]() { return mFb.isCanceled(); } ) )
     {
       mResult.errorMessage = err.isEmpty()
                                ? QStringLiteral( "Sieve failed" )

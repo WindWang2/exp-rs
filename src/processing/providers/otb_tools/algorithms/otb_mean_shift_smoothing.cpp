@@ -23,9 +23,9 @@ QStringList OtbMeanShiftSmoothingAlgorithm::buildArgs(const QVariantMap &paramet
 
     QStringList args;
     args << "-in" << rasterLayerSource(parameters.value("INPUT"));
-    args << "-spatialradius" << QString::number(parameters.value("SPATIAL_RADIUS").toInt());
-    args << "-rangeradius" << QString::number(parameters.value("RANGE_RADIUS").toDouble());
-    args << "-out" << parameters.value("OUTPUT").toString();
+    args << "-spatialr" << QString::number(parameters.value("SPATIAL_RADIUS").toInt());
+    args << "-ranger" << QString::number(parameters.value("RANGE_RADIUS").toDouble());
+    args << "-fout" << parameters.value("OUTPUT").toString();
 
     return args;
 }
