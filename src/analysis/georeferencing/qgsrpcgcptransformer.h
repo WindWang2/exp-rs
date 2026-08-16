@@ -18,6 +18,7 @@
 #include <gdal_alg.h>
 
 #include "qgis_analysis_export.h"
+#include "qgscoordinatereferencesystem.h"
 #include "qgsgcptransformer.h"
 
 #include <QString>
@@ -70,6 +71,11 @@ class QGIS_ANALYSIS_EXPORT QgsRpcGcpTransformer : public QgsGcpTransformerInterf
      */
     bool setRpcOptions( const QString &sourceRasterPath, const QString &demPath, double zOffset, bool useGcpRefinement = false ) override;
 
+    /// Destination CRS of the GCP vectors, used to convert panel-CRS residuals
+    /// into the RPC model's WGS84 lon/lat space before applying the refinement
+    /// bias (#286). No-op for other transformer types.
+    void setDestinationCrs( const QgsCoordinateReferenceSystem &crs ) override { mDestinationCrs = crs; }
+
     double zOffset() const { return mZOffset; }
     bool useGcpRefinement() const { return mUseGcpRefinement; }
 
@@ -96,6 +102,10 @@ class QGIS_ANALYSIS_EXPORT QgsRpcGcpTransformer : public QgsGcpTransformerInterf
     QString mDemPath;
     double mZOffset = 0.0;
     bool mUseGcpRefinement = false;
+    QgsCoordinateReferenceSystem mDestinationCrs;
+    /// Post-translation bias (degrees) applied on top of the RPC output.
+    double mRefinementLonBias = 0.0;
+    double mRefinementLatBias = 0.0;
     void *mTransformArg = nullptr;
 };
 

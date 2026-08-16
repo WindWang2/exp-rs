@@ -30,13 +30,17 @@ namespace {
 std::unique_ptr<QgsGeorefTransform> makeConfiguredTransform(
   QgsGcpTransformerInterface::TransformMethod method,
   const QString &sourceRasterPath, const QString &demPath,
-  double demZOffset, bool rpcRefinement )
+  double demZOffset, bool rpcRefinement,
+  const QgsCoordinateReferenceSystem &targetCrs = QgsCoordinateReferenceSystem() )
 {
   auto transform = std::make_unique<QgsGeorefTransform>( method );
   if ( !sourceRasterPath.isEmpty() )
     transform->loadRaster( sourceRasterPath );
   if ( QgsGcpTransformerInterface *impl = transform->gcpTransformer() )
+  {
     impl->setRpcOptions( sourceRasterPath, demPath, demZOffset, rpcRefinement );
+    impl->setDestinationCrs( targetCrs );
+  }
   return transform;
 }
 
@@ -387,7 +391,7 @@ RsGeorefFitResult QgsGeorefTransform::fit( const QVector<QgsGcpPoint> &gcps,
     // GCP-bias refinement for the before/after diagnostic, then fit the live
     // transform with refinement enabled.
     {
-      auto beforeXf = makeConfiguredTransform( method, sourceRasterPath, demPath, demZOffset, /*rpcRefinement=*/false );
+      auto beforeXf = makeConfiguredTransform( method, sourceRasterPath, demPath, demZOffset, /*rpcRefinement=*/false, targetCrs );
       try
       {
         if ( beforeXf && beforeXf->updateParametersFromGcps( src, dst, invertYAxis ) )
@@ -395,7 +399,7 @@ RsGeorefFitResult QgsGeorefTransform::fit( const QVector<QgsGcpPoint> &gcps,
       }
       catch ( ... ) {}
     }
-    transform = makeConfiguredTransform( method, sourceRasterPath, demPath, demZOffset, /*rpcRefinement=*/true );
+    transform = makeConfiguredTransform( method, sourceRasterPath, demPath, demZOffset, /*rpcRefinement=*/true, targetCrs );
     try
     {
       fitOk = transform && transform->updateParametersFromGcps( src, dst, invertYAxis );
@@ -407,7 +411,7 @@ RsGeorefFitResult QgsGeorefTransform::fit( const QVector<QgsGcpPoint> &gcps,
   }
   else
   {
-    transform = makeConfiguredTransform( method, sourceRasterPath, demPath, demZOffset, /*rpcRefinement=*/false );
+    transform = makeConfiguredTransform( method, sourceRasterPath, demPath, demZOffset, /*rpcRefinement=*/false, targetCrs );
     try
     {
       fitOk = transform && transform->updateParametersFromGcps( src, dst, invertYAxis );

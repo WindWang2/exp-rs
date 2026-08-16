@@ -22,6 +22,7 @@
 #include "qgis_analysis_export.h"
 #include "qgis_sip.h"
 #include "qgspointxy.h"
+#include "qgscoordinatereferencesystem.h"
 
 #include <QObject>
 
@@ -134,6 +135,14 @@ class QGIS_ANALYSIS_EXPORT QgsGcpTransformerInterface
      * \since SICNU GEO RS Phase 11.6 (ADR 0057)
      */
     virtual bool setRpcOptions( const QString &sourceRasterPath, const QString &demPath, double zOffset, bool useGcpRefinement = false ) { Q_UNUSED( sourceRasterPath ) Q_UNUSED( demPath ) Q_UNUSED( zOffset ) Q_UNUSED( useGcpRefinement ) return false; }
+
+    /**
+     * Destination CRS of the GCP vectors for transformers whose model space
+     * differs from it (e.g. RPC's WGS84 lon/lat). Default no-op.
+     *
+     * \since SICNU GEO RS Phase 11.6
+     */
+    virtual void setDestinationCrs( const QgsCoordinateReferenceSystem & ) {}
 
     /**
      * Returns the DEM path configured for RPC-based methods, or an empty

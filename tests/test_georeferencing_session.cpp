@@ -343,11 +343,13 @@ TEST_CASE( "GeoreferencingSession: engine seam QgsGeorefTransform::fit (ADR 0057
     const QString rpcPath = makeSyntheticRpcRaster( tmp.path() );
     REQUIRE_FALSE( rpcPath.isEmpty() );
 
+    // Synthetic RPC maps (16,16)->(115.9995, 38.9995), (32,32)->(116,39),
+    // (48,48)->(116.0005, 39.0005); bias all GCPs by (+0.01, +0.005).
     const auto fit = QgsGeorefTransform::fit(
       gcpSet( { { 16, 16 }, { 32, 32 }, { 48, 48 } },
-              { { 116.0 - 0.016 + 0.01, 39.0 - 0.016 + 0.005 },
+              { { 116.0 - 0.0005 + 0.01, 39.0 - 0.0005 + 0.005 },
                 { 116.0 + 0.01, 39.0 + 0.005 },
-                { 116.0 + 0.016 + 0.01, 39.0 + 0.016 + 0.005 } } ),
+                { 116.0 + 0.0005 + 0.01, 39.0 + 0.0005 + 0.005 } } ),
       TM::RpcPhysical, rpcPath, QString(), 0.0 );
     REQUIRE( fit.ready );
     REQUIRE( fit.minimumGcpCount == 0 );
@@ -693,9 +695,9 @@ TEST_CASE( "GeoreferencingSession: RPC refinement + DEM injection branch",
   // all GCPs biased by (+0.01°, +0.005°) so refinement has something to fix.
   session.setGcps( gcpSet(
     { { 16, 16 }, { 32, 32 }, { 48, 48 } },
-    { { 116.0 - 0.016 + 0.01, 39.0 - 0.016 + 0.005 },
+    { { 116.0 - 0.0005 + 0.01, 39.0 - 0.0005 + 0.005 },
       { 116.0 + 0.01, 39.0 + 0.005 },
-      { 116.0 + 0.016 + 0.01, 39.0 + 0.016 + 0.005 } } ) );
+      { 116.0 + 0.0005 + 0.01, 39.0 + 0.0005 + 0.005 } } ) );
 
   const auto fit = session.refit();
   REQUIRE( fit.ready );
