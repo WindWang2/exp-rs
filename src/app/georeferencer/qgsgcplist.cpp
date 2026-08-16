@@ -19,7 +19,10 @@
 #include <QStringList>
 #include <QTextStream>
 
-bool rsSaveGcpPointsFile( const QString &filePath, const QVector<QgsGcpPoint> &points )
+#include <cmath>
+
+bool rsSaveGcpPointsFile( const QString &filePath, const QVector<QgsGcpPoint> &points,
+                          const double *sourceGeoTransform )
 {
   QFile pointFile( filePath );
   if ( !pointFile.open( QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text ) )
@@ -30,12 +33,27 @@ bool rsSaveGcpPointsFile( const QString &filePath, const QVector<QgsGcpPoint> &p
   out << "mapX,mapY,pixelX,pixelY,enable,dX,dY,residual,pointType,crs\n";
   for ( const QgsGcpPoint &p : points )
   {
+    double srcX = p.sourcePoint().x();
+    double srcY = p.sourcePoint().y();
+    if ( sourceGeoTransform )
+    {
+      const double *gt = sourceGeoTransform;
+      const double det = gt[1] * gt[5] - gt[2] * gt[4];
+      if ( std::abs( det ) > 1e-15 )
+      {
+        const double dx = srcX - gt[0];
+        const double dy = srcY - gt[3];
+        srcX = ( gt[5] * dx - gt[2] * dy ) / det;
+        srcY = ( gt[1] * dy - gt[4] * dx ) / det;
+      }
+    }
+
     // Residuals live in RsGeorefFitResult (ADR 0056); dX,dY,residual are
     // format-compat zeros (the loader never reads them).
     out << QString::number( p.destinationPoint().x(), 'f', 8 ) << ","
         << QString::number( p.destinationPoint().y(), 'f', 8 ) << ","
-        << QString::number( p.sourcePoint().x(), 'f', 6 ) << ","
-        << QString::number( -p.sourcePoint().y(), 'f', 6 ) << ","
+        << QString::number( srcX, 'f', 6 ) << ","
+        << QString::number( -srcY, 'f', 6 ) << ","
         << ( p.isEnabled() ? 1 : 0 ) << ",0,0,0,"
         << p.pointType() << ","
         << p.destinationPointCrs().authid() << "\n";
@@ -44,7 +62,8 @@ bool rsSaveGcpPointsFile( const QString &filePath, const QVector<QgsGcpPoint> &p
 }
 
 bool rsLoadGcpPointsFile( const QString &filePath, const QgsCoordinateReferenceSystem &destCrs,
-                          QVector<QgsGcpPoint> &pointsOut )
+                          QVector<QgsGcpPoint> &pointsOut,
+                          const double *sourceGeoTransform )
 {
   QFile pointFile( filePath );
   if ( !pointFile.open( QIODevice::ReadOnly | QIODevice::Text ) )
@@ -87,7 +106,16 @@ bool rsLoadGcpPointsFile( const QString &filePath, const QgsCoordinateReferenceS
         pointCrs = fileCrs;
     }
 
-    QgsGcpPoint p( QgsPointXY( px, py ), QgsPointXY( mx, my ), pointCrs, enabled );
+    double srcX = px;
+    double srcY = py;
+    if ( sourceGeoTransform )
+    {
+      const double *gt = sourceGeoTransform;
+      srcX = gt[0] + px * gt[1] + py * gt[2];
+      srcY = gt[3] + px * gt[4] + py * gt[5];
+    }
+
+    QgsGcpPoint p( QgsPointXY( srcX, srcY ), QgsPointXY( mx, my ), pointCrs, enabled );
     p.setPointType( type );
     pointsOut.append( p );
   }

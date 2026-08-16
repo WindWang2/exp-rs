@@ -33,6 +33,10 @@ struct QGIS_ANALYSIS_EXPORT RsClassificationProjectData
     // Optional accuracy snapshot (-1 = unset).
     double overallAccuracy = -1.0;
     double kappa = -1.0;
+
+    // Optional raster integrity metadata (0 = unset).
+    qint64 sourceRasterSizeBytes = 0;
+    qint64 sourceRasterMtime = 0;
 };
 
 /**

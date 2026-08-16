@@ -41,6 +41,10 @@ bool RsClassificationProject::save( const QString &path,
     root.insert( QStringLiteral( "overallAccuracy" ), data.overallAccuracy );
   if ( data.kappa >= 0.0 )
     root.insert( QStringLiteral( "kappa" ), data.kappa );
+  if ( data.sourceRasterSizeBytes > 0 )
+    root.insert( QStringLiteral( "sourceRasterSizeBytes" ), data.sourceRasterSizeBytes );
+  if ( data.sourceRasterMtime > 0 )
+    root.insert( QStringLiteral( "sourceRasterMtime" ), data.sourceRasterMtime );
 
   QFile f( path );
   if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
@@ -94,6 +98,13 @@ bool RsClassificationProject::load( const QString &path,
       root.value( QStringLiteral( "overallAccuracy" ) ).toDouble( -1.0 );
   if ( root.contains( QStringLiteral( "kappa" ) ) )
     data.kappa = root.value( QStringLiteral( "kappa" ) ).toDouble( -1.0 );
+
+  if ( root.contains( QStringLiteral( "sourceRasterSizeBytes" ) ) )
+    data.sourceRasterSizeBytes =
+      root.value( QStringLiteral( "sourceRasterSizeBytes" ) ).toInteger( 0 );
+  if ( root.contains( QStringLiteral( "sourceRasterMtime" ) ) )
+    data.sourceRasterMtime =
+      root.value( QStringLiteral( "sourceRasterMtime" ) ).toInteger( 0 );
 
   return true;
 }

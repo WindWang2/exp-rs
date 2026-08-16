@@ -43,6 +43,8 @@ TEST_CASE( "ClassificationProject: full field round-trip", "[classify][project]"
   in.accuracySource = QStringLiteral( "holdout" );
   in.overallAccuracy = 0.912;
   in.kappa = 0.875;
+  in.sourceRasterSizeBytes = 1048576;
+  in.sourceRasterMtime = 1715000000000;
 
   REQUIRE( RsClassificationProject::save( path, in ) );
   REQUIRE( QFile::exists( path ) );
@@ -61,6 +63,8 @@ TEST_CASE( "ClassificationProject: full field round-trip", "[classify][project]"
   REQUIRE( out.accuracySource == QStringLiteral( "holdout" ) );
   REQUIRE( out.overallAccuracy == Approx( 0.912 ) );
   REQUIRE( out.kappa == Approx( 0.875 ) );
+  REQUIRE( out.sourceRasterSizeBytes == 1048576 );
+  REQUIRE( out.sourceRasterMtime == 1715000000000 );
 }
 
 TEST_CASE( "ClassificationProject: missing keys keep defaults", "[classify][project]" )
