@@ -1071,6 +1071,23 @@ target_include_directories(test_image_enhancement PRIVATE
 )
 sicnu_discover_tests(test_image_enhancement)
 
+# Histogram equalize edge case tests
+add_executable(test_histogram_equalize_edge_cases test_histogram_equalize_edge_cases.cpp)
+target_link_libraries(test_histogram_equalize_edge_cases PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_histogram_equalize_edge_cases PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_histogram_equalize_edge_cases)
+
 # Terrain analysis tests (Phase 11.2)
 add_executable(test_terrain test_terrain.cpp)
 target_link_libraries(test_terrain PRIVATE
@@ -2814,6 +2831,60 @@ if(TARGET sicnu_operators)
   endif()
   sicnu_discover_tests(test_rs_operators)
 
+  # OTB operator tests
+  add_executable(test_otb_operators test_otb_operators.cpp)
+  target_link_libraries(test_otb_operators PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    sicnu_processing
+    sicnu_operators
+    GDAL::GDAL
+  )
+  target_include_directories(test_otb_operators PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  if(TARGET jsoncpp)
+    target_link_libraries(test_otb_operators PRIVATE jsoncpp)
+  elseif(JSONCPP_LIBRARIES)
+    target_include_directories(test_otb_operators PRIVATE ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(test_otb_operators PRIVATE ${JSONCPP_LIBRARIES})
+  else()
+    target_link_libraries(test_otb_operators PRIVATE jsoncpp)
+  endif()
+  sicnu_discover_tests(test_otb_operators)
+
+  # RS Operation Logger tests
+  add_executable(test_operation_logger test_operation_logger.cpp)
+  target_link_libraries(test_operation_logger PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    sicnu_processing
+    sicnu_operators
+    GDAL::GDAL
+  )
+  target_include_directories(test_operation_logger PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  if(TARGET jsoncpp)
+    target_link_libraries(test_operation_logger PRIVATE jsoncpp)
+  elseif(JSONCPP_LIBRARIES)
+    target_include_directories(test_operation_logger PRIVATE ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(test_operation_logger PRIVATE ${JSONCPP_LIBRARIES})
+  else()
+    target_link_libraries(test_operation_logger PRIVATE jsoncpp)
+  endif()
+  sicnu_discover_tests(test_operation_logger)
+
   # GDAL operator tests (orthorectification / reproject / clip / polygonize).
   # ADR 0091 — previously an orphan file registered in no target; the reproject
   # `reference` grid-alignment path and the ortho/GCP contracts need coverage.
@@ -3698,6 +3769,40 @@ target_compile_definitions(test_python_processing_provider PRIVATE
   TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
 )
 sicnu_discover_tests(test_python_processing_provider)
+
+qt_add_executable(test_python_script_editor
+  test_python_script_editor.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/python_script_editor.cpp
+  ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/python/qgis_python.cpp
+  ${CMAKE_SOURCE_DIR}/src/python/sicnu_python_api.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp
+)
+target_link_libraries(test_python_script_editor PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+  Python::Python
+  CURL::libcurl
+  ${PCRE2_16}
+  ${PCRE2_8}
+  xml2
+)
+target_include_directories(test_python_script_editor PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/python
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_python_script_editor PRIVATE
+  SICNU_EMBED_PYTHON=1
+  TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
+)
+sicnu_discover_tests(test_python_script_editor RUN_SERIAL TRUE)
 
 sicnu_add_test(test_llm_streaming_client)
 target_link_libraries(test_llm_streaming_client PRIVATE
