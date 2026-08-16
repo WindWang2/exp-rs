@@ -166,6 +166,32 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
     context.reportProgress(0.05, "Reading bands");
     context.throwIfCancelled();
 
+    // Collect per-band NoData values to filter invalid/sentinel pixels during training
+    std::vector<float> noDataPerBand( static_cast<size_t>( nFeat ), -9999.0f );
+    std::vector<bool> hasNoDataPerBand( static_cast<size_t>( nFeat ), false );
+    for ( size_t i = 0; i < static_cast<size_t>( nFeat ); ++i )
+    {
+        bool hasNd = false;
+        double ndVal = ds.bandNoDataValue( bands[i], &hasNd );
+        if ( hasNd && std::isfinite( ndVal ) )
+        {
+            noDataPerBand[i] = static_cast<float>( ndVal );
+            hasNoDataPerBand[i] = true;
+        }
+    }
+
+    auto isPixelValid = [&]( const float *pixelFeatures ) -> bool {
+        for ( size_t i = 0; i < static_cast<size_t>( nFeat ); ++i )
+        {
+            const float v = pixelFeatures[i];
+            if ( !std::isfinite( v ) )
+                return false;
+            if ( hasNoDataPerBand[i] && std::abs( v - noDataPerBand[i] ) < 1e-4f )
+                return false;
+        }
+        return true;
+    };
+
     // Subsample for centroid fitting when the raster is large. Instead of
     // materializing every band fully plus a full-size index array (8 B/px),
     // a deterministic reservoir sample (std::mt19937(42), ADR 0061 policy)
@@ -173,7 +199,7 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
     // regardless of raster dimensions.
     std::vector<size_t> sampleIdx;
     std::vector<std::vector<float>> bandData;
-    const bool useReservoir = (maxSamples > 0 && static_cast<int>(nPix) > maxSamples);
+    const bool useReservoir = (maxSamples > 0 && nPix > static_cast<size_t>(maxSamples));
 
     if (useReservoir)
     {
@@ -185,7 +211,7 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
         std::uniform_int_distribution<size_t> dist(0, std::numeric_limits<size_t>::max());
 
         constexpr int kTile = 256;
-        std::vector<float> tileBuf(static_cast<size_t>(kTile) * kTile);
+        std::vector<float> tileBuf(static_cast<size_t>(kTile) * kTile * static_cast<size_t>(nFeat));
         std::vector<float> bandScratch(static_cast<size_t>(kTile) * kTile);
         size_t seen = 0;
         for (int y = 0; y < height; y += kTile)
@@ -207,14 +233,17 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
                         tileBuf[p * static_cast<size_t>(nFeat) + static_cast<size_t>(i)] =
                             bandScratch[p];
                 }
-                for (size_t p = 0; p < n; ++p, ++seen)
+                for (size_t p = 0; p < n; ++p)
                 {
+                    const float *pFeat = tileBuf.data() + p * static_cast<size_t>(nFeat);
+                    if (!isPixelValid(pFeat))
+                        continue;
+
                     if (seen < k)
                     {
                         sampleIdx[seen] = seen;
                         for (int i = 0; i < nFeat; ++i)
-                            reservoir[static_cast<size_t>(i)][seen] =
-                                tileBuf[p * static_cast<size_t>(nFeat) + static_cast<size_t>(i)];
+                            reservoir[static_cast<size_t>(i)][seen] = pFeat[i];
                     }
                     else
                     {
@@ -225,12 +254,18 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
                         {
                             sampleIdx[j] = seen;
                             for (int i = 0; i < nFeat; ++i)
-                                reservoir[static_cast<size_t>(i)][j] =
-                                    tileBuf[p * static_cast<size_t>(nFeat) + static_cast<size_t>(i)];
+                                reservoir[static_cast<size_t>(i)][j] = pFeat[i];
                         }
                     }
+                    ++seen;
                 }
             }
+        }
+        if (seen < k)
+        {
+            sampleIdx.resize(seen);
+            for (int i = 0; i < nFeat; ++i)
+                reservoir[static_cast<size_t>(i)].resize(seen);
         }
         bandData = std::move(reservoir);
     }
@@ -250,11 +285,12 @@ Json::Value RsKmeansOperator::run(const Json::Value& params, RSOperatorContext& 
         }
         bandData = std::move(fullData);
         sampleIdx.reserve(nPix);
-        for (size_t i = 0; i < nPix; ++i)
-            sampleIdx.push_back(i);
-        if (maxSamples > 0 && static_cast<int>(nPix) > maxSamples) {
-            std::mt19937 rng(42);
-            rsShuffleAndKeep(rng, sampleIdx, static_cast<size_t>(maxSamples));
+        std::vector<float> pFeat(static_cast<size_t>(nFeat));
+        for (size_t i = 0; i < nPix; ++i) {
+            for (int c = 0; c < nFeat; ++c)
+                pFeat[static_cast<size_t>(c)] = bandData[static_cast<size_t>(c)][i];
+            if (isPixelValid(pFeat.data()))
+                sampleIdx.push_back(i);
         }
     }
 

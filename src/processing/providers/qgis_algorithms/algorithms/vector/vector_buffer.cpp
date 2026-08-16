@@ -69,8 +69,14 @@ QVariantMap VectorBufferAlgorithm::processAlgorithm( const QVariantMap &paramete
 
         if ( feat.hasGeometry() )
         {
+            Qgis::EndCapStyle endCap = Qgis::EndCapStyle::Round;
+            if ( capStyle == 1 )
+                endCap = Qgis::EndCapStyle::Flat;
+            else if ( capStyle == 2 )
+                endCap = Qgis::EndCapStyle::Square;
+
             QgsFeature outputFeat = feat;
-            outputFeat.setGeometry( feat.geometry().buffer( distance, segments ) );
+            outputFeat.setGeometry( feat.geometry().buffer( distance, segments, endCap, Qgis::JoinStyle::Round, 2.0 ) );
             sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
         }
     }

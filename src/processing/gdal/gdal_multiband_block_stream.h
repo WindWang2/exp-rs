@@ -130,6 +130,12 @@ class GdalStreamingOutput
     /// floats for band @a band (1-based). Returns false on write failure.
     bool writeTile( int band, const GdalBlockStream::Tile &tile, const float *pixels );
 
+    /// Set the NoData value for a specific band (1-based).
+    bool setBandNoDataValue( int band, double nodata );
+
+    /// Set the NoData value for all output bands.
+    bool setNoDataValue( double nodata );
+
     /// Flush and release the dataset. Idempotent.
     void close();
 

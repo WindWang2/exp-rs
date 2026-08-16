@@ -138,6 +138,30 @@ bool GdalStreamingOutput::writeTile( int band, const GdalBlockStream::Tile &tile
                          GDT_Float32, 0, 0 ) == CE_None;
 }
 
+bool GdalStreamingOutput::setBandNoDataValue( int band, double nodata )
+{
+    if ( !m_ds )
+        return false;
+    GDALRasterBandH b = GDALGetRasterBand( m_ds, band );
+    if ( !b )
+        return false;
+    return GDALSetRasterNoDataValue( b, nodata ) == CE_None;
+}
+
+bool GdalStreamingOutput::setNoDataValue( double nodata )
+{
+    if ( !m_ds )
+        return false;
+    int count = GDALGetRasterCount( m_ds );
+    bool ok = true;
+    for ( int i = 1; i <= count; ++i )
+    {
+        if ( !setBandNoDataValue( i, nodata ) )
+            ok = false;
+    }
+    return ok;
+}
+
 void GdalStreamingOutput::close()
 {
     if ( m_ds )
