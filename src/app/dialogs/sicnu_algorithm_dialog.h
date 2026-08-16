@@ -82,6 +82,6 @@ class SicnuAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
     QGroupBox *mCommandGroup = nullptr;
     QPlainTextEdit *mCommandPreview = nullptr;
 
-    sicnu::app::GuiJobHandle mJobHandle{ this };
     std::shared_ptr<SicnuProcessingRunState> mRunState;
+    sicnu::app::GuiJobHandle mJobHandle{ this };
 };

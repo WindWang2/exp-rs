@@ -2,6 +2,7 @@
 #include "tool_call_dispatcher.h"
 #include "task_center.h"
 
+#include <QCoreApplication>
 #include <QObject>
 
 #include <thread>
@@ -22,16 +23,20 @@ ToolCallDispatcher::ToolCallDispatcher()
         // Payload construction commits outputs through the Data Manager, which
         // enforces owning-thread access. Route it back to the construction
         // thread (the Data Manager's thread in production); the detached
-        // watcher thread must never touch the catalog directly. Blocking so
-        // the payload (with the commit verdict) is complete before the
-        // callback fires; the caller (MCP) never blocks the main thread on
-        // the watcher, and dispatchAndAwait — the only path that would
-        // deadlock here — has no callers.
-        QMetaObject::invokeMethod( bridge.get(), [info, cb = std::move( cb ), committerHandler = std::move( committerHandler )]() mutable {
+        // watcher thread must never touch the catalog directly.
+        if ( bridge && QCoreApplication::instance() )
+        {
+          QMetaObject::invokeMethod( bridge.get(), [info, cb = std::move( cb ), committerHandler = std::move( committerHandler )]() mutable {
+            const Json::Value payload = buildTaskResultPayload( info, committerHandler );
+            if ( cb )
+              cb( payload );
+          }, Qt::QueuedConnection );
+        }
+        else if ( cb )
+        {
           const Json::Value payload = buildTaskResultPayload( info, committerHandler );
-          if ( cb )
-            cb( payload );
-        }, Qt::BlockingQueuedConnection );
+          cb( payload );
+        }
       } ).detach();
     } )
 {

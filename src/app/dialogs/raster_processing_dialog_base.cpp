@@ -276,7 +276,15 @@ void RasterProcessingDialogBase::runGdalTask( const std::function<QString()> &ta
       onCompleted( outPath );
     },
     [this]( const QString &err, bool isCanceled ) {
-      onFailed( isCanceled ? tr( "已取消" ) : err );
+      if ( isCanceled )
+      {
+        cleanupRunResources();
+        finishRun();
+      }
+      else
+      {
+        onFailed( err );
+      }
     }
   );
 }
@@ -323,7 +331,15 @@ void RasterProcessingDialogBase::runAlgorithmTask( const QgsProcessingAlgorithm 
       onCompleted( resolved );
     },
     [this]( const QString &err, bool isCanceled ) {
-      onFailed( isCanceled ? tr( "已取消" ) : err );
+      if ( isCanceled )
+      {
+        cleanupRunResources();
+        finishRun();
+      }
+      else
+      {
+        onFailed( err );
+      }
     }
   );
 }
@@ -357,7 +373,15 @@ void RasterProcessingDialogBase::runOperatorTask( const QString &operatorId,
         onResult( resultJson );
     },
     [this]( const QString &err, bool isCanceled ) {
-      onFailed( isCanceled ? tr( "已取消" ) : err );
+      if ( isCanceled )
+      {
+        cleanupRunResources();
+        finishRun();
+      }
+      else
+      {
+        onFailed( err );
+      }
     }
   );
 }

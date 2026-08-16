@@ -245,6 +245,7 @@ private:
 
     mutable QMutex m_mutex;
     mutable QWaitCondition m_waitCondition;
+    std::atomic<bool> m_isShuttingDown{false};
     QMap<long, AlgorithmTaskInfo> m_tasks;
     QMap<long, PipelineExecutionInfo> m_pipelines;
     QList<PendingLaunch> m_pendingLaunches;
