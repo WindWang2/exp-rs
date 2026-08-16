@@ -70,18 +70,22 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
 
     const QString program = ToolPathManager::instance().gdalToolPath(toolName());
     if (program.isEmpty()) {
-        SICNU_LOG_ERROR(SicnuLogTags::GDAL,
-                        QString("GDAL tool '%1' not found — ensure GDAL tools are installed").arg(toolName()));
+        const QString err = QObject::tr("GDAL tool '%1' not found. Ensure GDAL tools are installed.").arg(toolName());
+        SICNU_LOG_ERROR(SicnuLogTags::GDAL, err);
         if (feedback) {
-            feedback->reportError(QObject::tr("GDAL tool '%1' not found. Ensure GDAL tools are installed.")
-                                      .arg(toolName()));
+            feedback->reportError(err);
         }
-        return {};
+        throw QgsProcessingException(err);
     }
 
     const QStringList args = buildArgs(parameters, context, feedback);
     if (args.isEmpty()) {
-        return {};
+        const QString err = QObject::tr("Failed to build arguments for GDAL tool '%1'.").arg(toolName());
+        SICNU_LOG_ERROR(SicnuLogTags::GDAL, err);
+        if (feedback) {
+            feedback->reportError(err);
+        }
+        throw QgsProcessingException(err);
     }
 
     const QString cmdLine = program + " " + args.join(" ");
@@ -100,7 +104,7 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
             feedback->reportError(err);
         }
         SICNU_LOG_ERROR(SicnuLogTags::GDAL, err);
-        return {};
+        throw QgsProcessingException(err);
     }
 
     QString stdinLine = QString::number(parameters.value("X").toDouble(), 'g', 15) + " "
@@ -137,7 +141,7 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
             feedback->reportError(err);
         }
         SICNU_LOG_WARN(SicnuLogTags::GDAL, err);
-        return {};
+        throw QgsProcessingException(err);
     }
 
     const QString outputPath = parameters.value("OUTPUT").toString();
@@ -149,7 +153,7 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
                 feedback->reportError(err);
             }
             SICNU_LOG_ERROR(SicnuLogTags::GDAL, err);
-            return {};
+            throw QgsProcessingException(err);
         }
         QTextStream stream(&file);
         stream << QString::fromUtf8(stdoutData);

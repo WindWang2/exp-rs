@@ -11,6 +11,7 @@ void GdalManageAlgorithm::initAlgorithm(const QVariantMap &configuration)
     QStringList actions;
     actions << "info" << "copy" << "rename" << "delete";
     addParameter(new QgsProcessingParameterEnum("ACTION", "Action to perform", actions, false, 0));
+    addParameter(new QgsProcessingParameterString("NEWNAME", "New dataset name / destination path (for copy/rename)", QString(), false, true));
 }
 
 QStringList GdalManageAlgorithm::buildArgs(const QVariantMap &parameters,
@@ -29,6 +30,14 @@ QStringList GdalManageAlgorithm::buildArgs(const QVariantMap &parameters,
     args << action;
 
     args << rasterLayerSource(parameters.value("INPUT"));
+
+    if (action == "copy" || action == "rename") {
+        QString newName = parameters.value("NEWNAME").toString();
+        if (newName.isEmpty()) {
+            throw QgsProcessingException("Action '" + action + "' requires NEWNAME to be specified.");
+        }
+        args << newName;
+    }
 
     return args;
 }

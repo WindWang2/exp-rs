@@ -58,11 +58,20 @@ Result<internal::ResolvedSource> assembleRemoteMapResolved(
   // so a service-discovered range (WMTS tile matrix) survives even if the
   // caller set only one bound (a partial zMin-without-zMax must not clobber the
   // probe's zMax to 0).
-  bool ok = false;
   if ( source.dataOptions.contains( QStringLiteral( "zMin" ) ) )
-    structure.zMin = source.dataOptions.value( QStringLiteral( "zMin" ) ).toInt( &ok );
+  {
+    bool ok = false;
+    const int val = source.dataOptions.value( QStringLiteral( "zMin" ) ).toInt( &ok );
+    if ( ok )
+      structure.zMin = val;
+  }
   if ( source.dataOptions.contains( QStringLiteral( "zMax" ) ) )
-    structure.zMax = source.dataOptions.value( QStringLiteral( "zMax" ) ).toInt( &ok );
+  {
+    bool ok = false;
+    const int val = source.dataOptions.value( QStringLiteral( "zMax" ) ).toInt( &ok );
+    if ( ok )
+      structure.zMax = val;
+  }
   resolved.structure = structure;
 
   return Result<internal::ResolvedSource>::success( std::move( resolved ) );

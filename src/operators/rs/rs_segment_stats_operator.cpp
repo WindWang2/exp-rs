@@ -124,6 +124,14 @@ Json::Value RsSegmentStatsOperator::run(const Json::Value& params, RSOperatorCon
         context.throwIfCancelled();
     }
 
+    std::vector<bool> hasNoData(static_cast<size_t>(nFeat), false);
+    std::vector<double> bandNoData(static_cast<size_t>(nFeat), 0.0);
+    for (int i = 0; i < nFeat; ++i) {
+        bool hasNd = false;
+        bandNoData[static_cast<size_t>(i)] = img.bandNoDataValue(bands[static_cast<size_t>(i)], &hasNd);
+        hasNoData[static_cast<size_t>(i)] = hasNd;
+    }
+
     context.reportProgress(0.5, "Accumulating per-segment statistics");
     struct Acc {
         std::vector<double> sum;
@@ -134,6 +142,18 @@ Json::Value RsSegmentStatsOperator::run(const Json::Value& params, RSOperatorCon
         const int sid = static_cast<int>(std::lround(labelF[i]));
         if (sid <= 0)
             continue;
+
+        bool hasInvalid = false;
+        for (int f = 0; f < nFeat; ++f) {
+            const float v = bandData[static_cast<size_t>(f)][i];
+            if (std::isnan(v) || std::isinf(v) || (hasNoData[static_cast<size_t>(f)] && v == static_cast<float>(bandNoData[static_cast<size_t>(f)]))) {
+                hasInvalid = true;
+                break;
+            }
+        }
+        if (hasInvalid)
+            continue;
+
         auto& a = acc[sid];
         if (a.sum.empty())
             a.sum.assign(static_cast<size_t>(nFeat), 0.0);
@@ -143,7 +163,7 @@ Json::Value RsSegmentStatsOperator::run(const Json::Value& params, RSOperatorCon
     }
 
     if (acc.empty())
-        throw RSOperatorError(ErrorCode::InvalidInputData, "No positive label IDs found");
+        throw RSOperatorError(ErrorCode::InvalidInputData, "No positive label IDs with valid pixels found");
 
     context.reportProgress(0.85, "Writing CSV");
     QFile out(QString::fromStdString(outputPath));

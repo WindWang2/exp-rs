@@ -52,7 +52,7 @@ install_arch() {
     else
         info "跳过系统 GDAL/PROJ/GEOS（使用 vendor 模式）"
     fi
-    pkgs+=(opencv boost boost-libs libsvm muparser)
+    pkgs+=(opencv boost boost-libs libsvm muparser gsl)
     info "boost = headers; boost-libs = runtime (OTB 需要头文件与库版本一致)"
     info "若无 sudo: ./scripts/fetch_boost_headers.sh 可拉取匹配头文件到 vendor/boost_sys/"
     info "OTB 可选: yay -S muparserx  (BandMathX / RadiometricIndices 应用)"
@@ -73,6 +73,7 @@ install_ubuntu() {
         bison flex
         python3-dev
         libopencv-dev
+        libgsl-dev
     )
     if [ "$VENDORED" = false ]; then
         pkgs+=(libgdal-dev libproj-dev libgeos-dev)
@@ -94,6 +95,7 @@ install_fedora() {
         bison flex
         python3-devel
         opencv-devel
+        gsl-devel
     )
     if [ "$VENDORED" = false ]; then
         pkgs+=(gdal-devel proj-devel geos-devel)
@@ -112,6 +114,7 @@ install_macos() {
         cmake bison flex
         python3
         opencv
+        gsl
     )
     if [ "$VENDORED" = false ]; then
         pkgs+=(gdal proj geos)

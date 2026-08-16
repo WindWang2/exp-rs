@@ -143,15 +143,15 @@ Json::Value GdalClipOperator::run(const Json::Value& params,
 
     if (hasExtent) {
         options.emplace_back("-te");
-        options.emplace_back(std::to_string(xmin));
-        options.emplace_back(std::to_string(ymin));
-        options.emplace_back(std::to_string(xmax));
-        options.emplace_back(std::to_string(ymax));
+        options.emplace_back(util::fmtDouble(xmin));
+        options.emplace_back(util::fmtDouble(ymin));
+        options.emplace_back(util::fmtDouble(xmax));
+        options.emplace_back(util::fmtDouble(ymax));
     }
 
     if (hasNodata) {
         options.emplace_back("-dstnodata");
-        options.emplace_back(std::to_string(nodata));
+        options.emplace_back(util::fmtDouble(nodata));
     }
 
     auto [width, height] = runGdalWarp(inputPath, outputPath, options, context,

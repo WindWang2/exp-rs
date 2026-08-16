@@ -2,42 +2,106 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://sicnu-geo-rs/schemas/pipeline_schema.json",
   "title": "SICNU GEO RS Pipeline",
-  "description": "JSON definition of a headless processing pipeline.",
+  "description": "JSON definition of a processing pipeline or workflow.",
   "type": "object",
-  "required": ["steps"],
   "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique pipeline identifier."
+    },
     "name": {
       "type": "string",
       "description": "Human-readable pipeline name."
+    },
+    "title": {
+      "type": "string",
+      "description": "Pipeline display title."
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed workflow description."
     },
     "version": {
       "type": "string",
       "description": "Pipeline format version.",
       "default": "1.0"
     },
+    "host": {
+      "type": "integer",
+      "description": "Host kind (0 = Local, 1 = Daemon, 2 = Cluster)."
+    },
+    "workspaceKind": {
+      "type": "string",
+      "description": "Workspace execution mode."
+    },
     "steps": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["operator"],
         "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique step identifier within the pipeline."
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable step title."
+          },
+          "kind": {
+            "type": "integer",
+            "description": "Step kind (0 = Operator, 1 = Pipeline, 2 = Script)."
+          },
           "operator": {
             "type": "string",
             "description": "Registered RSOperator identifier, e.g. rs:spectral_index."
           },
+          "operatorId": {
+            "type": "string",
+            "description": "Alias for operator identifier."
+          },
+          "name": {
+            "type": "string",
+            "description": "Alias for operator identifier."
+          },
           "params": {
             "type": "object",
-            "description": "Operator-specific parameters. Refer to operator schema."
+            "description": "Operator-specific parameters."
           },
-          "id": {
+          "arguments": {
+            "type": "object",
+            "description": "Alias for params."
+          },
+          "artifactOnSuccess": {
             "type": "string",
-            "description": "Optional step identifier for referencing outputs."
+            "description": "Optional artifact filename on success."
+          },
+          "meta": {
+            "type": "object",
+            "description": "UI layout and visualization metadata."
+          },
+          "gates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "require": { "type": "string" },
+                "hint": { "type": "string" }
+              }
+            }
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fromStepId": { "type": "string" },
+                "fromPort": { "type": "string" },
+                "toPort": { "type": "string" }
+              }
+            }
           }
-        },
-        "additionalProperties": false
+        }
       }
     }
-  },
-  "additionalProperties": false
+  }
 }
