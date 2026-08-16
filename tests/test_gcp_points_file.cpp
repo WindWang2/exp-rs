@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include "qgsgcplist.h"
 #include "qgsgcppoint.h"
@@ -90,4 +91,41 @@ TEST_CASE( "GCP .points v1: legacy file without header reads with empty type", "
   REQUIRE( loaded.size() == 1 );
   REQUIRE( loaded.at( 0 ).pointType().isEmpty() );
   REQUIRE( loaded.at( 0 ).isEnabled() );
+}
+
+TEST_CASE( "GCP .points v2: georeferenced raster converts source map to pixel coords", "[georef][points][geotransform]" )
+{
+  QgsCoordinateReferenceSystem crs( QStringLiteral( "EPSG:32650" ) );
+  // Raster geotransform: origin (1000, 2000), 10m pixels north-up: gt = [1000, 10, 0, 2000, 0, -10]
+  const double gt[6] = { 1000.0, 10.0, 0.0, 2000.0, 0.0, -10.0 };
+
+  // A point at pixel (5, 8) in map space is (1000 + 5*10, 2000 - 8*10) = (1050, 1920)
+  QVector<QgsGcpPoint> points;
+  points.append( QgsGcpPoint( QgsPointXY( 1050.0, 1920.0 ), QgsPointXY( 400000, 4280000 ), crs, true ) );
+
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString path = tmp.path() + "/georef.points";
+  REQUIRE( rsSaveGcpPointsFile( path, points, gt ) );
+
+  // Check file content: pixelX and pixelY columns should store (5, 8)
+  QFile f( path );
+  REQUIRE( f.open( QIODevice::ReadOnly | QIODevice::Text ) );
+  QTextStream in( &f );
+  in.readLine(); // # QGEOS .points v2
+  in.readLine(); // header
+  const QString dataLine = in.readLine();
+  f.close();
+
+  const QStringList parts = dataLine.split( ',' );
+  REQUIRE( parts.size() >= 4 );
+  REQUIRE( parts[2].toDouble() == Catch::Approx( 5.0 ).margin( 1e-4 ) );
+  REQUIRE( parts[3].toDouble() == Catch::Approx( -8.0 ).margin( 1e-4 ) );
+
+  // Round-trip load with the same gt restores the map coordinate (1050, 1920)
+  QVector<QgsGcpPoint> loaded;
+  REQUIRE( rsLoadGcpPointsFile( path, crs, loaded, gt ) );
+  REQUIRE( loaded.size() == 1 );
+  REQUIRE( loaded.at( 0 ).sourcePoint().x() == Catch::Approx( 1050.0 ).margin( 1e-4 ) );
+  REQUIRE( loaded.at( 0 ).sourcePoint().y() == Catch::Approx( 1920.0 ).margin( 1e-4 ) );
 }

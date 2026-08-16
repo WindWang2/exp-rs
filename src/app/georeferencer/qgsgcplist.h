@@ -43,15 +43,18 @@
  */
 
 /// Writes \a points to \a filePath in SICNU .points v2 format.
-bool rsSaveGcpPointsFile( const QString &filePath, const QVector<QgsGcpPoint> &points );
+bool rsSaveGcpPointsFile( const QString &filePath, const QVector<QgsGcpPoint> &points,
+                          const double *sourceGeoTransform = nullptr );
 
 /**
  * Reads a .points file written by rsSaveGcpPointsFile() OR a legacy v1 file
- * (no marker, 8 columns). On v1, pointType is set to empty string.
- * Each loaded point uses the CRS stored in its row (v2 10th column) when
- * present and valid, else falls back to \a destCrs.
+ * (tab- or comma-separated with the 8 standard columns).
+ *
+ * If the file contains the v2 header and a 10th `crs` column, that CRS takes
+ * precedence; otherwise @a destCrs is used for all loaded points.
  */
 bool rsLoadGcpPointsFile( const QString &filePath, const QgsCoordinateReferenceSystem &destCrs,
-                          QVector<QgsGcpPoint> &pointsOut );
+                          QVector<QgsGcpPoint> &pointsOut,
+                          const double *sourceGeoTransform = nullptr );
 
 #endif

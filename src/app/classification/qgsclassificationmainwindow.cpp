@@ -3533,6 +3533,12 @@ bool QgsClassificationMainWindow::saveClassificationProject( QString path )
     data.evaluateReviewed = m_workflow->evaluateReviewed();
   }
   data.sourceRasterPath = m_sourceRasterPath;
+  if ( !m_sourceRasterPath.isEmpty() && QFileInfo::exists( m_sourceRasterPath ) )
+  {
+    const QFileInfo fi( m_sourceRasterPath );
+    data.sourceRasterSizeBytes = fi.size();
+    data.sourceRasterMtime = fi.lastModified().toMSecsSinceEpoch();
+  }
   data.roisPath = mSession.lastRoisPath();
   data.classifiedRasterPath = m_lastClassifyPath;
   data.postProcessRasterPath = m_lastPostRasterPath;
@@ -3595,6 +3601,25 @@ bool QgsClassificationMainWindow::loadProjectFromFile( QString path )
   if ( !data.postProcessVectorPath.isEmpty() )
     m_lastPostVectorPath = data.postProcessVectorPath;
   m_accuracySource = data.accuracySource;
+
+  // Validate source raster presence and integrity
+  if ( !data.sourceRasterPath.isEmpty() )
+  {
+    if ( !QFileInfo::exists( data.sourceRasterPath ) )
+    {
+      SICNU_LOG_WARN( SicnuLogTags::Classification,
+                      QString( "Source raster '%1' recorded in project does not exist." ).arg( data.sourceRasterPath ) );
+    }
+    else if ( data.sourceRasterMtime > 0 )
+    {
+      const QFileInfo fi( data.sourceRasterPath );
+      if ( fi.lastModified().toMSecsSinceEpoch() != data.sourceRasterMtime || ( data.sourceRasterSizeBytes > 0 && fi.size() != data.sourceRasterSizeBytes ) )
+      {
+        SICNU_LOG_WARN( SicnuLogTags::Classification,
+                        QString( "Source raster '%1' was modified or replaced since project was saved; ROI training samples will be re-derived from the current raster." ).arg( data.sourceRasterPath ) );
+      }
+    }
+  }
 
   // Optionally restore source raster and ROIs when paths are present.
   if ( !data.sourceRasterPath.isEmpty()
