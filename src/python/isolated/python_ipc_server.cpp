@@ -4,7 +4,10 @@
 #include <QDebug>
 #include <QEventLoop>
 #include <QJsonArray>
+#include <QPointer>
+#include <QThread>
 #include <QTimer>
+#include <QWaitCondition>
 
 #include <chrono>
 #include <memory>
@@ -278,133 +281,48 @@ AwaitStatus PythonIpcServer::sendRequestSync( const QString &method, const QJson
 {
   result = QJsonObject();
   isError = false;
-  if ( !m_socket || m_socket->state() != QLocalSocket::ConnectedState )
+  if ( !hasClient() )
   {
     return AwaitStatus::NoClient;
   }
 
-  int reqId;
+  if ( QThread::currentThread() == thread() )
   {
-    QMutexLocker lock( &m_requestIdMutex );
-    reqId = m_nextRequestId++;
+    return sendRequestAndAwait( method, params, result, isError, timeoutMs );
   }
 
-  QJsonObject req;
-  req[QStringLiteral( "jsonrpc" )] = QStringLiteral( "2.0" );
-  req[QStringLiteral( "method" )] = method;
-  req[QStringLiteral( "params" )] = params;
-  req[QStringLiteral( "id" )] = reqId;
+  // Worker thread: invoke sendRequestAndAwait on server's home thread
+  AwaitStatus status = AwaitStatus::NoClient;
+  QMutex mutex;
+  QWaitCondition waitCond;
+  bool done = false;
 
-  QByteArray data = QJsonDocument( req ).toJson( QJsonDocument::Compact );
-  data.append( '\n' );
-
-  // Temporarily disconnect readyRead so this thread exclusively owns the socket
-  // during the synchronous wait - the main thread's onReadyRead must not race.
-  const bool wasConnected = disconnect( m_socket, &QLocalSocket::readyRead, this, &PythonIpcServer::onReadyRead );
-
-  m_socket->write( data );
-  m_socket->flush();
-
-  QByteArray syncBuffer;
-  // Carry over any bytes already buffered by a prior onReadyRead that we did
-  // not get to process (edge: response arrived between send and disconnect).
-  {
-    syncBuffer = m_buffer;
-    m_buffer.clear();
-  }
-
-  bool responded = false;
-  bool disconnected = false;
-  QList<QJsonObject> pendingIncoming; // non-response frames to re-emit later
-
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds( timeoutMs );
-
-  while ( !responded && !disconnected )
-  {
-    // Parse whatever we have accumulated so far.
-    while ( true )
+  QPointer<PythonIpcServer> weakServer( this );
+  QMetaObject::invokeMethod( this, [weakServer, method, params, &result, &isError, timeoutMs, &status, &done, &mutex, &waitCond]() {
+    if ( weakServer )
     {
-      int newlineIdx = syncBuffer.indexOf( '\n' );
-      if ( newlineIdx == -1 )
-        break;
+      status = weakServer->sendRequestAndAwait( method, params, result, isError, timeoutMs );
+    }
+    else
+    {
+      status = AwaitStatus::Disconnected;
+    }
+    QMutexLocker lock( &mutex );
+    done = true;
+    waitCond.wakeAll();
+  }, Qt::QueuedConnection );
 
-      QByteArray line = syncBuffer.left( newlineIdx ).trimmed();
-      syncBuffer.remove( 0, newlineIdx + 1 );
-
-      if ( line.isEmpty() )
-        continue;
-
-      QJsonDocument doc = QJsonDocument::fromJson( line );
-      if ( !doc.isObject() )
-        continue;
-
-      QJsonObject msg = doc.object();
-      // Is this the response to our request?
-      if ( msg.contains( QStringLiteral( "id" ) )
-           && msg.value( QStringLiteral( "id" ) ).toInt() == reqId
-           && ( msg.contains( QStringLiteral( "result" ) ) || msg.contains( QStringLiteral( "error" ) ) ) )
+  {
+    QMutexLocker lock( &mutex );
+    while ( !done )
+    {
+      if ( !waitCond.wait( &mutex, timeoutMs + 1000 ) )
       {
-        isError = msg.contains( QStringLiteral( "error" ) );
-        result = isError ? msg[QStringLiteral( "error" )].toObject()
-                         : msg[QStringLiteral( "result" )].toObject();
-        responded = true;
-        break;
+        return AwaitStatus::Timeout;
       }
-      // Otherwise it is an incoming JSON-RPC request/notification from Python
-      // (e.g. iface.get_active_layer). Queue it for re-emission after the call.
-      pendingIncoming.append( msg );
     }
-
-    if ( responded )
-      break;
-
-    if ( m_socket->state() != QLocalSocket::ConnectedState )
-    {
-      disconnected = true;
-      break;
-    }
-
-    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-                             deadline - std::chrono::steady_clock::now() ).count();
-    if ( remaining <= 0 )
-      break;
-
-    if ( !m_socket->waitForReadyRead( static_cast<int>( remaining ) ) )
-    {
-      if ( m_socket->state() != QLocalSocket::ConnectedState )
-        disconnected = true;
-      break;
-    }
-
-    syncBuffer.append( m_socket->readAll() );
   }
-
-  // Return any unparsed bytes to m_buffer for the restored onReadyRead.
-  if ( !syncBuffer.isEmpty() )
-    m_buffer.prepend( syncBuffer );
-
-  if ( wasConnected )
-  {
-    connect( m_socket, &QLocalSocket::readyRead, this, &PythonIpcServer::onReadyRead );
-  }
-
-  // Re-emit incoming JSON-RPC requests that arrived during the sync wait, on
-  // the server's home thread, so AppInterfaceBridge::handleIpcMessage sees them.
-  if ( !pendingIncoming.isEmpty() )
-  {
-    // capture via shared_ptr to survive the deferred lambda safely
-    auto messages = std::make_shared<QList<QJsonObject>>( std::move( pendingIncoming ) );
-    QMetaObject::invokeMethod( this, [this, messages]() {
-      for ( const QJsonObject &msg : *messages )
-        emit messageReceived( msg );
-    }, Qt::QueuedConnection );
-  }
-
-  if ( disconnected && !responded )
-    return AwaitStatus::Disconnected;
-  if ( !responded )
-    return AwaitStatus::Timeout;
-  return AwaitStatus::Ok;
+  return status;
 }
 
 void PythonIpcServer::sendResponse( int id, const QJsonObject &result )

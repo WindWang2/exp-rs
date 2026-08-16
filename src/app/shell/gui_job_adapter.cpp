@@ -13,7 +13,15 @@ GuiJobHandle::GuiJobHandle( QObject *parent, sicnu::TaskCenter *taskCenter )
 
 GuiJobHandle::~GuiJobHandle()
 {
-  cancel();
+  if ( m_taskId >= 0 )
+  {
+    long idToCancel = m_taskId;
+    m_taskId = -1;
+    m_onSuccess = nullptr;
+    m_onFailure = nullptr;
+    m_onProgress = nullptr;
+    m_taskCenter->cancelTask( idToCancel );
+  }
 }
 
 long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
