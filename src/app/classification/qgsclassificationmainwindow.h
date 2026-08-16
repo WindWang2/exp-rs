@@ -277,6 +277,7 @@ class QgsClassificationMainWindow : public QMainWindow
     QgsRasterLayer *m_previewLayer = nullptr;
 
     QTimer *m_jmRecomputeTimer = nullptr;
+    QTimer *m_spectralCurveTimer = nullptr;
 
     std::unique_ptr<RsClassifierBackend> m_loadedBackend;
     RsFeatureScaler m_loadedScaler;

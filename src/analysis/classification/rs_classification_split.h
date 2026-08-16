@@ -41,5 +41,6 @@ class QGIS_ANALYSIS_EXPORT RsClassificationSplit
     static RsTrainTestSplit stratifiedSplit( const cv::Mat &X,
                                              const cv::Mat &y,
                                              double ratio = 0.7,
-                                             unsigned int seed = 42u );
+                                             unsigned int seed = 42u,
+                                             const std::vector<int> &groupIds = {} );
 };
