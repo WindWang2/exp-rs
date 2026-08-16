@@ -62,14 +62,31 @@ protected:
         QgsGeometry clipGeom;
         QgsFeatureIterator overlayIt = overlay->getFeatures();
         QgsFeature overlayFeat;
+        const bool needsTransform = overlay->sourceCrs().isValid() && source->sourceCrs().isValid() &&
+                                    overlay->sourceCrs() != source->sourceCrs();
+        QgsCoordinateTransform ct;
+        if ( needsTransform )
+        {
+            ct = QgsCoordinateTransform( overlay->sourceCrs(), source->sourceCrs(), context.transformContext() );
+        }
+
         while ( overlayIt.nextFeature( overlayFeat ) )
         {
             if ( overlayFeat.hasGeometry() )
             {
+                QgsGeometry g = overlayFeat.geometry();
+                if ( needsTransform )
+                {
+                    try
+                    {
+                        g.transform( ct );
+                    }
+                    catch ( const QgsCsException & ) {}
+                }
                 if ( clipGeom.isNull() )
-                    clipGeom = overlayFeat.geometry();
+                    clipGeom = g;
                 else
-                    clipGeom = clipGeom.combine( overlayFeat.geometry() );
+                    clipGeom = clipGeom.combine( g );
             }
         }
 

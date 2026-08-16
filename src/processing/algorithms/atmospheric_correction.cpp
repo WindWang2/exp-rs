@@ -403,6 +403,9 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                            srcDataset.geoTransform(), srcDataset.projection(), errorMessage))
         return false;
 
+    const double bandNoData = srcDataset.bandNoDataValue(bandNum);
+    outDataset.setBandNoDataValue(1, std::numeric_limits<double>::quiet_NaN());
+
     constexpr int kTile = 256; // nominal stream tile size (edge-clamped)
     const bool needsDarkLevel = (method == Method::Dos1 || method == Method::Dos2);
     const float transmittance = (method == Method::Dos2) ? estimateTransmittance(airmass) : 1.0f;
@@ -418,9 +421,12 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                 [&](const GdalBlockStream::Tile &tile, const float *pixels) {
                     const size_t n = static_cast<size_t>(tile.width) * tile.height;
                     radiance.resize(n);
-                    if (!dnToRadiance(pixels, radiance.data(), n, gain, bias)) {
-                        statError = QStringLiteral("Radiance conversion failed (band %1)").arg(bandNum);
-                        return false;
+                    for (size_t i = 0; i < n; ++i) {
+                        float v = pixels[i];
+                        if (!std::isfinite(v) || (!std::isnan(bandNoData) && std::abs(v - bandNoData) < 1e-4f))
+                            radiance[i] = std::numeric_limits<float>::quiet_NaN();
+                        else
+                            radiance[i] = gain * v + bias;
                     }
                     if (binning)
                         stats.accumulateBins(radiance.data(), n);
@@ -451,35 +457,27 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
         [&](const GdalBlockStream::Tile &tile, const float *pixels) {
             const size_t n = static_cast<size_t>(tile.width) * tile.height;
             out.resize(n);
-            bool tOk = false;
-            switch (method) {
-            case Method::DnToRadiance:
-                tOk = dnToRadiance(pixels, out.data(), n, gain, bias);
-                break;
-            case Method::Dos1:
-                // surface = radiance - dark_level (histogram dark object).
-                for (size_t i = 0; i < n; ++i)
-                    out[i] = gain * pixels[i] + bias - darkLevel;
-                tOk = true;
-                break;
-            case Method::Dos2: {
-                // surface = (radiance - dark_level) / transmittance.
-                if (transmittance <= 0.0f) {
-                    tileError = QStringLiteral("Invalid atmospheric transmittance");
-                    return false;
+            for (size_t i = 0; i < n; ++i) {
+                float v = pixels[i];
+                if (!std::isfinite(v) || (!std::isnan(bandNoData) && std::abs(v - bandNoData) < 1e-4f)) {
+                    out[i] = std::numeric_limits<float>::quiet_NaN();
+                } else {
+                    switch (method) {
+                    case Method::DnToRadiance:
+                        out[i] = gain * v + bias;
+                        break;
+                    case Method::Dos1:
+                        out[i] = gain * v + bias - darkLevel;
+                        break;
+                    case Method::Dos2:
+                        out[i] = (transmittance > 0.0f) ? ((gain * v + bias - darkLevel) / transmittance)
+                                                        : std::numeric_limits<float>::quiet_NaN();
+                        break;
+                    default:
+                        out[i] = std::numeric_limits<float>::quiet_NaN();
+                        break;
+                    }
                 }
-                for (size_t i = 0; i < n; ++i)
-                    out[i] = (gain * pixels[i] + bias - darkLevel) / transmittance;
-                tOk = true;
-                break;
-            }
-            default:
-                tileError = QStringLiteral("Unknown atmospheric correction method");
-                return false;
-            }
-            if (!tOk) {
-                tileError = QStringLiteral("Atmospheric correction failed (band %1)").arg(bandNum);
-                return false;
             }
             return outDataset.writeBandWindow(1, tile.xOffset, tile.yOffset,
                                               tile.width, tile.height, out.data());

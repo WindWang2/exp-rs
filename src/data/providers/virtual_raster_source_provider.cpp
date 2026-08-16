@@ -180,20 +180,32 @@ QString buildVirtualRasterXml( const VirtualRasterRecipe &recipe,
       const double oMaxY = std::min( extent.maximumY, raster->extent.maximumY );
       if ( oMaxX > oMinX && oMaxY > oMinY )
       {
-        const double inResX = std::abs( raster->geoTransform[1] );
-        const double inResY = std::abs( raster->geoTransform[5] );
-        out << QStringLiteral(
-                 "      <SrcRect xOff=\"%1\" yOff=\"%2\" xSize=\"%3\" ySize=\"%4\"/>\n" )
-                 .arg( ( oMinX - raster->geoTransform[0] ) / inResX )
-                 .arg( ( raster->geoTransform[3] - oMaxY ) / inResY )
-                 .arg( ( oMaxX - oMinX ) / inResX )
-                 .arg( ( oMaxY - oMinY ) / inResY );
-        out << QStringLiteral(
-                 "      <DstRect xOff=\"%1\" yOff=\"%2\" xSize=\"%3\" ySize=\"%4\"/>\n" )
-                 .arg( ( oMinX - extent.minimumX ) / resX )
-                 .arg( ( extent.maximumY - oMaxY ) / resY )
-                 .arg( ( oMaxX - oMinX ) / resX )
-                 .arg( ( oMaxY - oMinY ) / resY );
+        double invGT[6];
+        double gt[6] = { raster->geoTransform[0], raster->geoTransform[1], raster->geoTransform[2],
+                         raster->geoTransform[3], raster->geoTransform[4], raster->geoTransform[5] };
+        if ( GDALInvGeoTransform( gt, invGT ) )
+        {
+          double srcX0, srcY0, srcX1, srcY1;
+          GDALApplyGeoTransform( invGT, oMinX, oMaxY, &srcX0, &srcY0 );
+          GDALApplyGeoTransform( invGT, oMaxX, oMinY, &srcX1, &srcY1 );
+          const double srcXMin = std::min( srcX0, srcX1 );
+          const double srcYMin = std::min( srcY0, srcY1 );
+          const double srcXMax = std::max( srcX0, srcX1 );
+          const double srcYMax = std::max( srcY0, srcY1 );
+
+          out << QStringLiteral(
+                   "      <SrcRect xOff=\"%1\" yOff=\"%2\" xSize=\"%3\" ySize=\"%4\"/>\n" )
+                   .arg( srcXMin )
+                   .arg( srcYMin )
+                   .arg( srcXMax - srcXMin )
+                   .arg( srcYMax - srcYMin );
+          out << QStringLiteral(
+                   "      <DstRect xOff=\"%1\" yOff=\"%2\" xSize=\"%3\" ySize=\"%4\"/>\n" )
+                   .arg( ( oMinX - extent.minimumX ) / resX )
+                   .arg( ( extent.maximumY - oMaxY ) / resY )
+                   .arg( ( oMaxX - oMinX ) / resX )
+                   .arg( ( oMaxY - oMinY ) / resY );
+        }
       }
     }
 

@@ -59,6 +59,15 @@ std::vector<cv::Mat> readRasterBandsToMats(const std::string& inputPath,
             if (errorMessage) *errorMessage = "Failed to read raster band " + std::to_string(b);
             return {};
         }
+        const double nodata = ds.bandNoDataValue(b);
+        if (!std::isnan(nodata)) {
+            float *ptr = bandMat.ptr<float>();
+            const size_t n = static_cast<size_t>(w) * h;
+            for (size_t i = 0; i < n; ++i) {
+                if (std::abs(ptr[i] - nodata) < 1e-4f)
+                    ptr[i] = std::numeric_limits<float>::quiet_NaN();
+            }
+        }
         result.push_back(std::move(bandMat));
     }
 
@@ -101,9 +110,23 @@ bool writeMatToRaster(const std::string& outputPath,
         return false;
     }
 
+    const double srcNodata = src.bandNoDataValue(1);
+    const double outNodata = !std::isnan(srcNodata) ? srcNodata : std::numeric_limits<double>::quiet_NaN();
+    GDALSetRasterNoDataValue(band, outNodata);
+
+    cv::Mat bandMat = mat.isContinuous() ? mat : mat.clone();
+    if (!std::isnan(srcNodata)) {
+        float *ptr = bandMat.ptr<float>();
+        const size_t n = static_cast<size_t>(w) * h;
+        for (size_t k = 0; k < n; ++k) {
+            if (std::isnan(ptr[k]))
+                ptr[k] = static_cast<float>(srcNodata);
+        }
+    }
+
     CPLErr err = GDALRasterIO(band, GF_Write,
                               0, 0, w, h,
-                              const_cast<float*>(mat.ptr<float>()),
+                              const_cast<float*>(bandMat.ptr<float>()),
                               w, h, GDT_Float32, 0, 0);
 
     GDALClose(outDs);
@@ -164,7 +187,20 @@ bool writeMatsToRaster(const std::string& outputPath,
 
     for (int i = 0; i < bandCount; ++i) {
         GDALRasterBandH band = GDALGetRasterBand(outDs, i + 1);
+        const double srcNodata = src.bandNoDataValue(i + 1);
+        const double outNodata = !std::isnan(srcNodata) ? srcNodata : std::numeric_limits<double>::quiet_NaN();
+        GDALSetRasterNoDataValue(band, outNodata);
+
         cv::Mat bandMat = mats[i].isContinuous() ? mats[i] : mats[i].clone();
+        if (!std::isnan(srcNodata)) {
+            float *ptr = bandMat.ptr<float>();
+            const size_t n = static_cast<size_t>(w) * h;
+            for (size_t k = 0; k < n; ++k) {
+                if (std::isnan(ptr[k]))
+                    ptr[k] = static_cast<float>(srcNodata);
+            }
+        }
+
         CPLErr err = GDALRasterIO(band, GF_Write,
                                   0, 0, w, h,
                                   const_cast<float*>(bandMat.ptr<float>()),

@@ -46,7 +46,8 @@ public:
 protected:
     // Helper to run an external tool
     bool runExternalTool(const QString &program, const QStringList &args,
-                         QgsProcessingFeedback *feedback);
+                         QgsProcessingFeedback *feedback,
+                         QByteArray *capturedStdout = nullptr);
 
     // Null-safe layer source extraction helpers
     static QString rasterLayerSource(const QVariant &var);

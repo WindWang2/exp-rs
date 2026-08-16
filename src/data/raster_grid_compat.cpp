@@ -148,21 +148,26 @@ GridCompatReport compareGrids( const RasterGrid &a, const RasterGrid &b )
     return report;
 
   // --- Pixel grid: rotation or differing pixel sizes need resampling.
+  const bool axisOrientationMismatch = ( a.geoTransform[1] * b.geoTransform[1] <= 0.0 ) ||
+                                       ( a.geoTransform[5] * b.geoTransform[5] <= 0.0 );
   const bool rotated = a.geoTransform[2] != 0.0 || a.geoTransform[4] != 0.0 ||
                        b.geoTransform[2] != 0.0 || b.geoTransform[4] != 0.0;
-  if ( rotated || !sameScalar( a.pixelSizeX(), b.pixelSizeX() ) ||
+  if ( axisOrientationMismatch || rotated || !sameScalar( a.pixelSizeX(), b.pixelSizeX() ) ||
        !sameScalar( a.pixelSizeY(), b.pixelSizeY() ) )
   {
     report.issues.append( {
       GridCompatVerdict::PixelSizeMismatch,
       QStringLiteral( "grid.pixel_size_mismatch" ),
-      QStringLiteral( "The rasters use different pixel grids (%1 x %2 vs %3 x "
-                      "%4); resample the second raster to the first's grid "
-                      "before comparing pixels." )
-        .arg( a.pixelSizeX(), 0, 'g', 6 )
-        .arg( a.pixelSizeY(), 0, 'g', 6 )
-        .arg( b.pixelSizeX(), 0, 'g', 6 )
-        .arg( b.pixelSizeY(), 0, 'g', 6 ),
+      axisOrientationMismatch
+        ? QStringLiteral( "The rasters have opposite axis orientation (north-up vs south-up or mirrored); "
+                          "rectify the second raster before comparing pixels." )
+        : QStringLiteral( "The rasters use different pixel grids (%1 x %2 vs %3 x "
+                          "%4); resample the second raster to the first's grid "
+                          "before comparing pixels." )
+            .arg( a.pixelSizeX(), 0, 'g', 6 )
+            .arg( a.pixelSizeY(), 0, 'g', 6 )
+            .arg( b.pixelSizeX(), 0, 'g', 6 )
+            .arg( b.pixelSizeY(), 0, 'g', 6 ),
       true } );
     return report;
   }
