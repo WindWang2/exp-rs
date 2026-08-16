@@ -262,11 +262,20 @@ QgsClassificationMainWindow::QgsClassificationMainWindow( QgisInterface *iface, 
   connect( m_jmRecomputeTimer, &QTimer::timeout,
            this, &QgsClassificationMainWindow::recomputeJmMatrix );
 
+  m_spectralCurveTimer = new QTimer( this );
+  m_spectralCurveTimer->setSingleShot( true );
+  m_spectralCurveTimer->setInterval( 300 );
+  connect( m_spectralCurveTimer, &QTimer::timeout,
+           this, &QgsClassificationMainWindow::recomputeSpectralCurves );
+
   // Phase 10A review patch — feed dead controls.
   if ( m_rois )
   {
     connect( m_rois, &RsRoiCollection::changed,
-             this, &QgsClassificationMainWindow::recomputeSpectralCurves );
+             this, [this]() {
+               if ( m_spectralCurveTimer )
+                 m_spectralCurveTimer->start();
+             } );
     connect( m_rois, &RsRoiCollection::changed,
              this, [this]() {
                if ( m_jmRecomputeTimer )
@@ -3067,26 +3076,43 @@ void QgsClassificationMainWindow::recomputeSpectralCurves()
     classPixelCount[it.key()] = 0;
   }
 
+  // Group sample pixels by row so each unique row is read once per band (scanline)
+  QHash<int, QVector<QPair<int, int>>> pixelsByRow;
+  for ( auto it = idxByClass.constBegin(); it != idxByClass.constEnd(); ++it )
+  {
+    const int classId = it.key();
+    const QVector<quint64> &px = it.value();
+    classPixelCount[classId] = px.size();
+    for ( quint64 i : px )
+    {
+      const int row = static_cast<int>( i / static_cast<quint64>( W ) );
+      const int col = static_cast<int>( i % static_cast<quint64>( W ) );
+      pixelsByRow[row].push_back( qMakePair( classId, col ) );
+    }
+  }
+
+  std::vector<float> rowBuf( static_cast<size_t>( W ) );
   for ( int bi = 0; bi < bands.size(); ++bi )
   {
     GDALRasterBandH band = ds->GetRasterBand( bands[bi] );
     if ( !band ) continue;
 
-    for ( auto it = idxByClass.constBegin(); it != idxByClass.constEnd(); ++it )
+    for ( auto it = pixelsByRow.constBegin(); it != pixelsByRow.constEnd(); ++it )
     {
-      int classId = it.key();
-      const QVector<quint64> &px = it.value();
-      for ( quint64 i : px )
+      const int row = it.key();
+      const CPLErr err = GDALRasterIO( band, GF_Read, 0, row, W, 1, rowBuf.data(), W, 1, GDT_Float32, 0, 0 );
+      if ( err != CE_None )
+        continue;
+
+      const auto &pxList = it.value();
+      for ( const auto &pair : pxList )
       {
-        int row = static_cast<int>( i / W );
-        int col = static_cast<int>( i % W );
-        float val = 0.0f;
-        (void) GDALRasterIO( band, GF_Read, col, row, 1, 1, &val, 1, 1, GDT_Float32, 0, 0 );
+        const int classId = pair.first;
+        const int col = pair.second;
+        const float val = rowBuf[static_cast<size_t>( col )];
         bandSums[classId][bi] += val;
-        bandSumSq[classId][bi] += val * val;
+        bandSumSq[classId][bi] += static_cast<double>( val ) * val;
       }
-      if ( bi == 0 )
-        classPixelCount[classId] = px.size();
     }
   }
   GDALClose( ds );

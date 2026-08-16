@@ -10,6 +10,7 @@
 #include <opencv2/core.hpp>
 
 #include <map>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -138,3 +139,44 @@ TEST_CASE( "stratifiedSplit: seed parameter controls determinism and variation",
   cv::absdiff( split1.trainX, split2.trainX, diff );
   REQUIRE( cv::countNonZero( diff ) == 0 );
 }
+
+TEST_CASE( "stratifiedSplit: group-level split assigns whole groups/ROIs to train or test",
+           "[classify][split]" )
+{
+  cv::Mat X, y;
+  // 4 groups of 10 samples for class 1, 4 groups of 10 samples for class 2
+  makeSyntheticDataset( { { 1, 40 }, { 2, 40 } }, X, y );
+  std::vector<int> groupIds( 80 );
+  for ( int i = 0; i < 40; ++i )
+  {
+    groupIds[i] = i / 10;       // Class 1: groups 0, 1, 2, 3
+    X.at<float>( i, 1 ) = static_cast<float>( groupIds[i] );
+  }
+  for ( int i = 40; i < 80; ++i )
+  {
+    groupIds[i] = 4 + ( ( i - 40 ) / 10 ); // Class 2: groups 4, 5, 6, 7
+    X.at<float>( i, 1 ) = static_cast<float>( groupIds[i] );
+  }
+
+  const auto split = RsClassificationSplit::stratifiedSplit( X, y, 0.75, 42u, groupIds );
+
+  REQUIRE( split.trainX.rows + split.testX.rows == 80 );
+  // 3 groups train (30 samples) and 1 group test (10 samples) per class
+  REQUIRE( split.trainX.rows == 60 );
+  REQUIRE( split.testX.rows == 20 );
+
+  // Verify that any group in train is NEVER in test (no spatial leakage)
+  std::set<int> trainGroups;
+  for ( int r = 0; r < split.trainX.rows; ++r )
+    trainGroups.insert( static_cast<int>( split.trainX.at<float>( r, 1 ) ) );
+
+  std::set<int> testGroups;
+  for ( int r = 0; r < split.testX.rows; ++r )
+    testGroups.insert( static_cast<int>( split.testX.at<float>( r, 1 ) ) );
+
+  for ( int g : testGroups )
+  {
+    REQUIRE( trainGroups.find( g ) == trainGroups.end() );
+  }
+}
+
