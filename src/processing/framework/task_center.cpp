@@ -1251,7 +1251,15 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
         if ( pipeInfo.stepToTaskId.isEmpty() )
         {
             pipeInfo.isCompleted = true;
-            pipeInfo.isFailed = false;
+            if ( def.steps.empty() )
+            {
+                pipeInfo.isFailed = false;
+            }
+            else
+            {
+                pipeInfo.isFailed = true;
+                pipeInfo.errorMessage = QStringLiteral( "Pipeline contains no dispatchable operator steps" );
+            }
             m_pipelines[pipelineId] = pipeInfo;
             m_waitCondition.wakeAll();
             return pipelineId;

@@ -57,20 +57,35 @@ TEST_CASE("Placeholder Grammar - Parsing all supported syntax variants", "[workf
         CHECK(refs[0].stepId == "step1");
         CHECK(refs[1].stepId == "step2");
     }
+
+    SECTION("Environment variable ${LANDSAT_MTL_OR_SCENE_DIR} and ${WORK} form") {
+        auto refs = parsePlaceholders("${LANDSAT_MTL_OR_SCENE_DIR}/scene and ${WORK}/out.tif");
+        REQUIRE(refs.size() == 2);
+        CHECK(refs[0].isEnvVar == true);
+        CHECK(refs[0].envVarName == "LANDSAT_MTL_OR_SCENE_DIR");
+        CHECK(refs[0].stepId.empty());
+        CHECK(refs[0].isValid());
+
+        CHECK(refs[1].isEnvVar == true);
+        CHECK(refs[1].envVarName == "WORK");
+        CHECK(refs[1].stepId.empty());
+        CHECK(refs[1].isValid());
+    }
 }
 
 TEST_CASE("Placeholder Grammar - Substitution and edge inference", "[workflow][grammar]") {
-    SECTION("substitutePlaceholders replaces resolved tokens") {
-        std::string input = "Process ${step1.output} with ${task.5.output}";
+    SECTION("substitutePlaceholders replaces resolved tokens and environment variables") {
+        setenv("TEST_EXP_RS_WORK", "/tmp/exp_rs_workspace", 1);
+        std::string input = "Process ${step1.output} with ${task.5.output} in ${TEST_EXP_RS_WORK}";
         std::string resolved = substitutePlaceholders(input, [](const PlaceholderRef &ref) {
             if (ref.stepId == "step1") return std::string("/tmp/step1_out.tif");
             if (ref.parentTaskId == 5) return std::string("/tmp/task5_out.tif");
             return ref.rawRef;
         });
-        CHECK(resolved == "Process /tmp/step1_out.tif with /tmp/task5_out.tif");
+        CHECK(resolved == "Process /tmp/step1_out.tif with /tmp/task5_out.tif in /tmp/exp_rs_workspace");
     }
 
-    SECTION("inferStepConnections builds DAG connections for braced and unbraced forms") {
+    SECTION("inferStepConnections builds DAG connections for step references but ignores environment variables") {
         auto conns1 = inferStepConnections("INPUT_LAYERS", "${step_alpha.output}");
         REQUIRE(conns1.size() == 1);
         CHECK(conns1[0].fromStepId == "step_alpha");
@@ -82,5 +97,8 @@ TEST_CASE("Placeholder Grammar - Substitution and edge inference", "[workflow][g
         CHECK(conns2[0].fromStepId == "step_beta");
         CHECK(conns2[0].fromPort == "custom");
         CHECK(conns2[0].toPort == "RASTER");
+
+        auto connsEnv = inferStepConnections("input", "${LANDSAT_MTL_OR_SCENE_DIR}");
+        CHECK(connsEnv.empty());
     }
 }

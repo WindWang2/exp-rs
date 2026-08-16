@@ -18,6 +18,13 @@ PlaceholderRef parseSingleBracedRef( const std::string &raw, const std::string &
   PlaceholderRef ref;
   ref.rawRef = raw;
 
+  if ( content.rfind( "env.", 0 ) == 0 )
+  {
+    ref.isEnvVar = true;
+    ref.envVarName = content.substr( 4 );
+    return ref;
+  }
+
   if ( content.rfind( "task.", 0 ) == 0 ) // starts with task.
   {
     std::string rest = content.substr( 5 );
@@ -52,10 +59,36 @@ PlaceholderRef parseSingleBracedRef( const std::string &raw, const std::string &
   else
   {
     auto dotPos = content.find( '.' );
-    ref.stepId = ( dotPos != std::string::npos ) ? content.substr( 0, dotPos ) : content;
-    ref.portName = ( dotPos != std::string::npos ) ? content.substr( dotPos + 1 ) : "output";
-    if ( ref.portName.empty() )
-      ref.portName = "output";
+    if ( dotPos != std::string::npos )
+    {
+      ref.stepId = content.substr( 0, dotPos );
+      ref.portName = content.substr( dotPos + 1 );
+      if ( ref.portName.empty() )
+        ref.portName = "output";
+    }
+    else
+    {
+      // No dot: check if uppercase environment variable (e.g. ${WORK}, ${LANDSAT_MTL_OR_SCENE_DIR})
+      bool allUpperOrUnderscore = !content.empty();
+      for ( char c : content )
+      {
+        if ( !std::isupper( static_cast<unsigned char>( c ) ) && !std::isdigit( static_cast<unsigned char>( c ) ) && c != '_' )
+        {
+          allUpperOrUnderscore = false;
+          break;
+        }
+      }
+      if ( allUpperOrUnderscore )
+      {
+        ref.isEnvVar = true;
+        ref.envVarName = content;
+      }
+      else
+      {
+        ref.stepId = content;
+        ref.portName = "output";
+      }
+    }
   }
   return ref;
 }
@@ -153,6 +186,14 @@ std::string substitutePlaceholders( const std::string &text,
   for ( const auto &ref : refs )
   {
     std::string replacement = resolver( ref );
+    if ( ( replacement.empty() || replacement == ref.rawRef ) && ref.isEnvVar )
+    {
+      const char *val = std::getenv( ref.envVarName.c_str() );
+      if ( val )
+      {
+        replacement = std::string( val );
+      }
+    }
     if ( !replacement.empty() && replacement != ref.rawRef )
     {
       size_t pos = 0;
@@ -172,7 +213,7 @@ std::vector<StepConnection> inferStepConnections( const std::string &paramKey, c
   auto refs = parsePlaceholders( paramValue );
   for ( const auto &ref : refs )
   {
-    if ( !ref.stepId.empty() )
+    if ( !ref.isEnvVar && !ref.stepId.empty() )
     {
       StepConnection conn;
       conn.fromStepId = ref.stepId;

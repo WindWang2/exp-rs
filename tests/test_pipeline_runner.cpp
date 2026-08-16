@@ -16,11 +16,16 @@
 #include <string>
 #include <vector>
 
+#include <chrono>
+
+#include "app/app_paths.h"
 #include "cli/rs_pipeline_runner.h"
 #include "data/data_manager.h"
 #include "jobs/job_engine.h"
 #include "operators/framework/rs_operator_context.h"
+#include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "workflow/workflow_definition.h"
 
 using namespace sicnu::cli;
 
@@ -379,3 +384,71 @@ TEST_CASE( "Mixed Python/C++ pipeline end-to-end", "[cli][pipeline_runner][pytho
     CHECK( assets[0].source().canonicalSource == outputPath );
 #endif
 }
+
+TEST_CASE( "All shipped sample pipelines validate against schema and runner parser", "[cli][pipeline][samples]" )
+{
+    ensurePipelineApp();
+    const QString pipelinesDir = AppPaths::resolveDataPath( QStringLiteral( "data/pipelines" ) );
+    QDir dir( pipelinesDir );
+    REQUIRE( dir.exists() );
+
+    const QStringList pipelineFiles = dir.entryList( QStringList{ QStringLiteral( "*.json" ) }, QDir::Files );
+    REQUIRE( pipelineFiles.size() >= 3 );
+
+    for ( const QString &filename : pipelineFiles )
+    {
+        const QString filePath = dir.filePath( filename );
+        INFO( "Validating sample pipeline file: " << filePath.toStdString() );
+
+        QFile file( filePath );
+        REQUIRE( file.open( QIODevice::ReadOnly | QIODevice::Text ) );
+        const QByteArray content = file.readAll();
+        file.close();
+
+        Json::CharReaderBuilder builder;
+        Json::Value root;
+        std::string errs;
+        std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+        const bool parseOk = reader->parse( content.constData(), content.constData() + content.size(), &root, &errs );
+        REQUIRE( parseOk );
+
+        std::string validationError;
+        CHECK( RsPipelineRunner::validatePipelineJson( root, &validationError ) == true );
+    }
+}
+
+TEST_CASE( "Degenerate and empty pipelines complete immediately in TaskCenter without stall", "[processing][task_center][pipeline]" )
+{
+    ensurePipelineApp();
+    auto &tc = sicnu::TaskCenter::instance();
+
+    SECTION( "Completely empty steps definition completes immediately" )
+    {
+        sicnu::workflow::WorkflowDefinition emptyDef;
+        emptyDef.id = "empty_pipeline";
+        long pipeId = tc.submitPipeline( emptyDef );
+        REQUIRE( pipeId > 0 );
+
+        auto info = tc.waitForPipeline( pipeId, std::chrono::milliseconds( 500 ) );
+        CHECK( info.isCompleted );
+        CHECK_FALSE( info.isFailed );
+    }
+
+    SECTION( "Pipeline with 0 dispatchable operator steps fails immediately without 30m stall" )
+    {
+        sicnu::workflow::WorkflowDefinition noOpDef;
+        noOpDef.id = "no_operator_pipeline";
+        sicnu::workflow::StepDef step;
+        step.id = "review_step";
+        step.kind = sicnu::workflow::StepKind::Review;
+        noOpDef.steps.push_back( step );
+
+        long pipeId = tc.submitPipeline( noOpDef );
+        REQUIRE( pipeId > 0 );
+
+        auto info = tc.waitForPipeline( pipeId, std::chrono::milliseconds( 500 ) );
+        CHECK( info.isCompleted );
+        CHECK( info.isFailed );
+    }
+}
+
