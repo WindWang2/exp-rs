@@ -89,8 +89,6 @@ Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
                               "Input DEM not found: " + inputPath);
     }
 
-    const float cellSize = static_cast<float>(getDouble(params, "cellSize", 30.0));
-    const float nodata = static_cast<float>(getDouble(params, "nodata", -9999.0));
     const float sunAzimuth = static_cast<float>(getDouble(params, "sunAzimuth", 315.0));
     const float sunElevation = static_cast<float>(getDouble(params, "sunElevation", 45.0));
 
@@ -102,10 +100,31 @@ Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
                               "Failed to open input DEM: " + inputPath);
     }
 
+    float cellSize = 30.0f;
+    if (params.isMember("cellSize") && params["cellSize"].isNumeric()) {
+        cellSize = static_cast<float>(params["cellSize"].asDouble());
+    } else {
+        const std::array<double, 6> gt = ds.geoTransform();
+        if (std::abs(gt[1]) > 1e-7) {
+            cellSize = static_cast<float>(std::abs(gt[1]));
+        }
+    }
+
+    float nodata = -9999.0f;
+    if (params.isMember("nodata") && params["nodata"].isNumeric()) {
+        nodata = static_cast<float>(params["nodata"].asDouble());
+    } else {
+        bool hasNodata = false;
+        double dsNodata = ds.bandNoDataValue(1, &hasNodata);
+        if (hasNodata && std::isfinite(dsNodata)) {
+            nodata = static_cast<float>(dsNodata);
+        }
+    }
+
     const int width = ds.width();
     const int height = ds.height();
 
-    context.logInfo("Computing " + product + " from " + inputPath);
+    context.logInfo("Computing " + product + " from " + inputPath + " (cellSize=" + std::to_string(cellSize) + ")");
     context.reportProgress(0.2, "Reading DEM");
 
     std::vector<float> dem;
