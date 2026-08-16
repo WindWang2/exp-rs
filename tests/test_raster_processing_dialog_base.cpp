@@ -7,10 +7,14 @@
 #include "processing/framework/task_center.h"
 
 #include <QApplication>
-#include <QVBoxLayout>
-#include <QPushButton>
 #include <QEventLoop>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QTimer>
+#include <QVBoxLayout>
+
+#include <chrono>
+#include <thread>
 
 namespace {
 
@@ -127,6 +131,17 @@ TEST_CASE("RasterProcessingDialogBase runOperatorTask delivers the result JSON",
 
     TestRasterDialog dialog;
 
+    QTimer modalTimer;
+    QObject::connect(&modalTimer, &QTimer::timeout, []() {
+        const auto topWidgets = QApplication::topLevelWidgets();
+        for (QWidget *w : topWidgets) {
+            if (auto *box = qobject_cast<QMessageBox *>(w)) {
+                box->accept();
+            }
+        }
+    });
+    modalTimer.start(10);
+
     Json::Value params( Json::objectValue );
     params["input"] = "/tmp/in.tif";
 
@@ -136,15 +151,80 @@ TEST_CASE("RasterProcessingDialogBase runOperatorTask delivers the result JSON",
                             [&]( const Json::Value &r ) { received = r; gotResult = true; } );
 
     REQUIRE( dialog.isRunning() );
+    REQUIRE( dialog.pendingTaskId() > 0 );
 
-    QEventLoop loop;
-    QTimer::singleShot( 5000, &loop, &QEventLoop::quit );
-    QObject::connect( &dialog, &QDialog::accepted, &loop, &QEventLoop::quit );
-    QObject::connect( &dialog, &QDialog::rejected, &loop, &QEventLoop::quit );
-    loop.exec();
+    for (int i = 0; i < 200 && dialog.isRunning(); ++i) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    for (int i = 0; i < 10; ++i) {
+        QCoreApplication::processEvents();
+    }
+    modalTimer.stop();
 
     REQUIRE( gotResult );
     CHECK( received["output"].asString() == "/tmp/base_noop.tif" );
     CHECK( received["stats"].asInt() == 42 );
     REQUIRE_FALSE( dialog.isRunning() );
+}
+
+TEST_CASE("RasterProcessingDialogBase failure path re-enables button and keeps dialog open", "[dialog][base][async]")
+{
+    TestRasterDialog dialog;
+
+    QTimer modalTimer;
+    QObject::connect(&modalTimer, &QTimer::timeout, []() {
+        const auto topWidgets = QApplication::topLevelWidgets();
+        for (QWidget *w : topWidgets) {
+            if (auto *box = qobject_cast<QMessageBox *>(w)) {
+                box->accept();
+            }
+        }
+    });
+    modalTimer.start(10);
+
+    bool accepted = false;
+    QObject::connect(&dialog, &QDialog::accepted, [&]() { accepted = true; });
+
+    dialog.runGdalTask([]() -> QString {
+        return RasterProcessingDialogBase::gdalErrorMarker() + QStringLiteral("Mock computation error");
+    });
+
+    REQUIRE(dialog.isRunning());
+
+    // Wait until task finishes and dialog is no longer running
+    for (int i = 0; i < 200 && dialog.isRunning(); ++i) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    // Flush event loop to ensure message boxes are completely closed
+    for (int i = 0; i < 10; ++i) {
+        QCoreApplication::processEvents();
+    }
+    modalTimer.stop();
+
+    REQUIRE_FALSE(dialog.isRunning());
+    REQUIRE(dialog.runButton()->isEnabled());
+    REQUIRE_FALSE(accepted);
+}
+
+TEST_CASE("RasterProcessingDialogBase reject is guarded while running", "[dialog][base]")
+{
+    TestRasterDialog dialog;
+    dialog.show();
+    dialog.startRun();
+    REQUIRE(dialog.isRunning());
+    REQUIRE(dialog.isVisible());
+
+    // Calling reject while running must be a no-op (dialog remains visible and running)
+    dialog.reject();
+    CHECK(dialog.isRunning());
+    CHECK(dialog.isVisible());
+
+    dialog.finishRun();
+    REQUIRE_FALSE(dialog.isRunning());
+
+    // Calling reject when idle closes the dialog
+    dialog.reject();
+    CHECK_FALSE(dialog.isVisible());
 }

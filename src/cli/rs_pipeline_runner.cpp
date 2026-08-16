@@ -32,11 +32,43 @@
 #include <QTextStream>
 
 #include <chrono>
+#include <cstdlib>
+#include <regex>
 #include <sstream>
+#include <unordered_set>
 
 namespace sicnu::cli {
 
 namespace {
+
+std::string expandEnvironmentPlaceholders( const std::string &input,
+                                           const std::unordered_set<std::string> &knownStepIds )
+{
+  std::regex envRegex( R"(\$\{([A-Za-z0-9_]+)\})" );
+  std::smatch match;
+  std::string::const_iterator searchStart( input.cbegin() );
+  std::string out;
+  while ( std::regex_search( searchStart, input.cend(), match, envRegex ) )
+  {
+    out.append( searchStart, match[0].first );
+    std::string varName = match[1].str();
+    if ( knownStepIds.find( varName ) == knownStepIds.end() )
+    {
+      const char *envVal = std::getenv( varName.c_str() );
+      if ( envVal )
+        out.append( envVal );
+      else
+        out.append( match[0].str() );
+    }
+    else
+    {
+      out.append( match[0].str() );
+    }
+    searchStart = match[0].second;
+  }
+  out.append( searchStart, input.cend() );
+  return out;
+}
 
 constexpr int kMaxPipelineSteps = 100;
 constexpr auto kPipelinePollInterval = std::chrono::milliseconds( 10 );
@@ -134,6 +166,16 @@ bool cliJsonToWorkflowDefinition( const Json::Value &pipelineJson,
                 : "unnamed";
 
   const Json::Value steps = pipelineJson["steps"];
+  std::unordered_set<std::string> allStepIds;
+  for ( Json::ArrayIndex i = 0; i < steps.size(); ++i )
+  {
+    const Json::Value step = steps[i];
+    if ( step.isMember( "id" ) && step["id"].isString() && !step["id"].asString().empty() )
+      allStepIds.insert( step["id"].asString() );
+    else
+      allStepIds.insert( "step_" + std::to_string( i ) );
+  }
+
   std::string prevStepId;
   for ( Json::ArrayIndex i = 0; i < steps.size(); ++i )
   {
@@ -169,10 +211,16 @@ bool cliJsonToWorkflowDefinition( const Json::Value &pipelineJson,
       {
         if ( !stepDef.params[key].isString() )
           continue;
-        const std::string strVal = stepDef.params[key].asString();
+        std::string strVal = stepDef.params[key].asString();
+        strVal = expandEnvironmentPlaceholders( strVal, allStepIds );
+        stepDef.params[key] = strVal;
+
         auto inferredConns = sicnu::workflow::inferStepConnections( key, strVal );
         for ( const auto &conn : inferredConns )
         {
+          if ( allStepIds.find( conn.fromStepId ) == allStepIds.end() )
+            continue; // Not a declared step ID in this pipeline, do not add phantom DAG edge
+
           bool hasEdge = false;
           for ( const auto &c : stepDef.inputs )
           {

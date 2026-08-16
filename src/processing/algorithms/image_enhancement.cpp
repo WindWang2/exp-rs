@@ -90,6 +90,12 @@ void ImageEnhancement::histogramEqualize(const float *input, float *output, size
     if (bins < 1) bins = 256; // Validate bins parameter
     SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Histogram equalization: %1 pixels, %2 bins" ).arg( count ).arg( bins ) );
     MathUtils::Stats stats = MathUtils::computeStatsWithNodata(input, count, nodata);
+    if (stats.validCount == 0) {
+        for (size_t i = 0; i < count; i++)
+            output[i] = nodata;
+        return;
+    }
+
     float min = stats.min;
     float max = stats.max;
 

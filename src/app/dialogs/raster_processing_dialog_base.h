@@ -59,6 +59,11 @@ public:
     bool isRunning() const { return m_running || m_jobHandle.isRunning(); }
 
     /**
+     * String marker prefix for structured error returns from runGdalTask.
+     */
+    static QString gdalErrorMarker() { return QStringLiteral( "\x01SICNU_ERR\x01" ); }
+
+    /**
      * Disable Run and mark dialog as busy. Called automatically by runGdalTask().
      */
     void startRun();
