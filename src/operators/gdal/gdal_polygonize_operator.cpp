@@ -105,21 +105,23 @@ Json::Value GdalPolygonizeOperator::run(const Json::Value& params,
 
     context.reportProgress(0.1, "Creating output vector");
 
-    // Remove existing output if shapefile
-    {
-        QFileInfo fi(QString::fromStdString(outputPath));
-        if (fi.exists()) {
-            // Best-effort remove for overwrite
-            QFile::remove(QString::fromStdString(outputPath));
-            if (fi.suffix().toLower() == QLatin1String("shp")) {
-                const QString base = fi.path() + QLatin1Char('/') + fi.completeBaseName();
-                QFile::remove(base + QStringLiteral(".dbf"));
-                QFile::remove(base + QStringLiteral(".shx"));
-                QFile::remove(base + QStringLiteral(".prj"));
-                QFile::remove(base + QStringLiteral(".cpg"));
-            }
+    const QString qOutputPath = QString::fromStdString(outputPath);
+    const QFileInfo outFi(qOutputPath);
+    const bool isOverwrite = outFi.exists();
+    const QString suffix = outFi.suffix().isEmpty() ? QStringLiteral("shp") : outFi.suffix();
+    const std::string workPath = isOverwrite ? context.tempPath("." + suffix.toStdString()) : outputPath;
+
+    auto removeVectorFiles = [](const QString &mainPath) {
+        QFileInfo fi(mainPath);
+        QFile::remove(mainPath);
+        if (fi.suffix().toLower() == QLatin1String("shp")) {
+            const QString base = fi.path() + QLatin1Char('/') + fi.completeBaseName();
+            QFile::remove(base + QStringLiteral(".dbf"));
+            QFile::remove(base + QStringLiteral(".shx"));
+            QFile::remove(base + QStringLiteral(".prj"));
+            QFile::remove(base + QStringLiteral(".cpg"));
         }
-    }
+    };
 
     const std::string driverName = vectorDriverName(outputPath);
     GDALDriverH drv = GDALGetDriverByName(driverName.c_str());
@@ -128,10 +130,10 @@ Json::Value GdalPolygonizeOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::GdalError, "Vector driver not available: " + driverName);
     }
 
-    GDALDatasetH dstDs = GDALCreate(drv, outputPath.c_str(), 0, 0, 0, GDT_Unknown, nullptr);
+    GDALDatasetH dstDs = GDALCreate(drv, workPath.c_str(), 0, 0, 0, GDT_Unknown, nullptr);
     if (!dstDs) {
         GDALClose(srcDs);
-        throw RSOperatorError(ErrorCode::GdalError, "Failed to create vector: " + outputPath);
+        throw RSOperatorError(ErrorCode::GdalError, "Failed to create vector: " + workPath);
     }
 
     // Copy SRS from raster
@@ -151,6 +153,7 @@ Json::Value GdalPolygonizeOperator::run(const Json::Value& params,
     if (!layer) {
         GDALClose(dstDs);
         GDALClose(srcDs);
+        if (workPath != outputPath) removeVectorFiles(QString::fromStdString(workPath));
         throw RSOperatorError(ErrorCode::GdalError, "Failed to create layer");
     }
 
@@ -159,6 +162,7 @@ Json::Value GdalPolygonizeOperator::run(const Json::Value& params,
         OGR_Fld_Destroy(field);
         GDALClose(dstDs);
         GDALClose(srcDs);
+        if (workPath != outputPath) removeVectorFiles(QString::fromStdString(workPath));
         throw RSOperatorError(ErrorCode::GdalError, "Failed to create attribute field");
     }
     OGR_Fld_Destroy(field);
@@ -168,7 +172,15 @@ Json::Value GdalPolygonizeOperator::run(const Json::Value& params,
         papszOptions = CSLSetNameValue(papszOptions, "8CONNECTED", "8");
 
     context.reportProgress(0.3, "Running GDALPolygonize");
-    context.throwIfCancelled();
+    try {
+        context.throwIfCancelled();
+    } catch (...) {
+        CSLDestroy(papszOptions);
+        GDALClose(dstDs);
+        GDALClose(srcDs);
+        if (workPath != outputPath) removeVectorFiles(QString::fromStdString(workPath));
+        throw;
+    }
 
     const int fieldIndex = 0;
     const CPLErr err = GDALPolygonize(srcBand, nullptr, layer, fieldIndex, papszOptions,
@@ -180,8 +192,26 @@ Json::Value GdalPolygonizeOperator::run(const Json::Value& params,
     GDALClose(dstDs);
     GDALClose(srcDs);
 
+    if (context.isCancelled()) {
+        if (workPath != outputPath) removeVectorFiles(QString::fromStdString(workPath));
+        throw RSOperatorError(ErrorCode::Cancelled, "GDALPolygonize cancelled");
+    }
+
     if (err != CE_None) {
+        if (workPath != outputPath) removeVectorFiles(QString::fromStdString(workPath));
         throw RSOperatorError(ErrorCode::GdalError, "GDALPolygonize failed for: " + inputPath);
+    }
+
+    if (workPath != outputPath) {
+        removeVectorFiles(qOutputPath);
+        QFile::rename(QString::fromStdString(workPath), qOutputPath);
+        if (outFi.suffix().toLower() == QLatin1String("shp")) {
+            const QString workBase = QFileInfo(QString::fromStdString(workPath)).path() + QLatin1Char('/') + QFileInfo(QString::fromStdString(workPath)).completeBaseName();
+            const QString outBase = outFi.path() + QLatin1Char('/') + outFi.completeBaseName();
+            for (const char *extStr : {".dbf", ".shx", ".prj", ".cpg"}) {
+                QFile::rename(workBase + QString::fromLatin1(extStr), outBase + QString::fromLatin1(extStr));
+            }
+        }
     }
 
     context.reportProgress(1.0, "Polygonize complete");

@@ -84,6 +84,16 @@ public:
     size_t recordCount() const;
 
     /**
+     * \brief Maximum number of records retained in memory.
+     */
+    size_t maxRecords() const;
+
+    /**
+     * \brief Set the maximum number of records to retain in memory (oldest evicted).
+     */
+    void setMaxRecords(size_t max);
+
+    /**
      * \brief Get a copy of all records.
      */
     std::vector<OperationRecord> records() const;
@@ -97,7 +107,13 @@ private:
     static std::string nowIso8601();
 
     mutable std::mutex m_mutex;
-    std::vector<OperationRecord> m_records;
+    size_t m_maxRecords = 5000;
+    size_t m_nextHandle = 0;
+    struct Entry {
+        size_t handle;
+        OperationRecord record;
+    };
+    std::vector<Entry> m_entries;
 };
 
 } // namespace sicnu::operators

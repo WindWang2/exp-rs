@@ -17,6 +17,20 @@ RSOperationLogger& RSOperationLogger::instance() {
     return s_instance;
 }
 
+size_t RSOperationLogger::maxRecords() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_maxRecords;
+}
+
+void RSOperationLogger::setMaxRecords(size_t max) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_maxRecords = max;
+    if (m_maxRecords > 0 && m_entries.size() > m_maxRecords) {
+        const size_t excess = m_entries.size() - m_maxRecords;
+        m_entries.erase(m_entries.begin(), m_entries.begin() + excess);
+    }
+}
+
 size_t RSOperationLogger::beginRun(const std::string& operatorName, const Json::Value& params) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
@@ -25,42 +39,49 @@ size_t RSOperationLogger::beginRun(const std::string& operatorName, const Json::
     record.parameters = params;
     record.startTimeIso = nowIso8601();
 
-    m_records.push_back(record);
-    return m_records.size() - 1;
+    const size_t handle = m_nextHandle++;
+    if (m_maxRecords > 0 && m_entries.size() >= m_maxRecords) {
+        m_entries.erase(m_entries.begin());
+    }
+    m_entries.push_back(Entry{handle, std::move(record)});
+    return handle;
 }
 
 void RSOperationLogger::finishRun(size_t handle, const Json::Value& result, double durationMs) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (handle >= m_records.size())
-        return;
-
-    auto& record = m_records[handle];
-    record.result = result;
-    record.success = true;
-    record.endTimeIso = nowIso8601();
-    record.durationMs = durationMs;
+    for (auto it = m_entries.rbegin(); it != m_entries.rend(); ++it) {
+        if (it->handle == handle) {
+            it->record.result = result;
+            it->record.success = true;
+            it->record.endTimeIso = nowIso8601();
+            it->record.durationMs = durationMs;
+            return;
+        }
+    }
 }
 
 void RSOperationLogger::failRun(size_t handle, int errorCode, const std::string& errorMessage, double durationMs) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (handle >= m_records.size())
-        return;
-
-    auto& record = m_records[handle];
-    record.success = false;
-    record.errorCode = errorCode;
-    record.errorMessage = errorMessage;
-    record.endTimeIso = nowIso8601();
-    record.durationMs = durationMs;
+    for (auto it = m_entries.rbegin(); it != m_entries.rend(); ++it) {
+        if (it->handle == handle) {
+            it->record.success = false;
+            it->record.errorCode = errorCode;
+            it->record.errorMessage = errorMessage;
+            it->record.endTimeIso = nowIso8601();
+            it->record.durationMs = durationMs;
+            return;
+        }
+    }
 }
 
 Json::Value RSOperationLogger::toJson() const {
     std::lock_guard<std::mutex> lock(m_mutex);
 
     Json::Value root(Json::arrayValue);
-    for (const auto& r : m_records) {
+    for (const auto& e : m_entries) {
+        const auto& r = e.record;
         Json::Value entry(Json::objectValue);
         entry["operator"] = r.operatorName;
         entry["parameters"] = r.parameters;
@@ -86,7 +107,8 @@ std::string RSOperationLogger::toCsv() const {
     writerBuilder["indentation"] = "";
     const auto writer = std::unique_ptr<Json::StreamWriter>(writerBuilder.newStreamWriter());
 
-    for (const auto& r : m_records) {
+    for (const auto& e : m_entries) {
+        const auto& r = e.record;
         std::string paramsStr;
         {
             std::ostringstream paramsOss;
@@ -147,17 +169,23 @@ bool RSOperationLogger::exportToFile(const std::string& filePath, std::string* e
 
 void RSOperationLogger::clear() {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_records.clear();
+    m_entries.clear();
+    m_nextHandle = 0;
 }
 
 size_t RSOperationLogger::recordCount() const {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return m_records.size();
+    return m_entries.size();
 }
 
 std::vector<OperationRecord> RSOperationLogger::records() const {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return m_records;
+    std::vector<OperationRecord> recs;
+    recs.reserve(m_entries.size());
+    for (const auto& e : m_entries) {
+        recs.push_back(e.record);
+    }
+    return recs;
 }
 
 std::string RSOperationLogger::nowIso8601() {

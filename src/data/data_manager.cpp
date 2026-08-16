@@ -439,6 +439,7 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
   // canonical source. The artifact path is unchanged; each dependent's
   // structure is unchanged (relocation validated it), but its file content
   // changed - report the change so displays reload.
+  QVector<Diagnostic> relocateDiagnostics = resolved.diagnostics();
   for ( const AssetId &dependentId : strongDependentsOf( request.id ) )
   {
     const auto dependentIt = m_impl->findRecord( dependentId );
@@ -473,11 +474,20 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
       vrtFile.close();
       emit assetChanged( dependentId );
     }
+    else
+    {
+      relocateDiagnostics.append( Diagnostic{
+        QStringLiteral( "relocate.dependent_vrt_write_failed" ),
+        QStringLiteral( "Failed to rewrite dependent virtual raster VRT: %1" )
+          .arg( dependentIt->snapshot.source().canonicalSource ),
+        DiagnosticSeverity::Warning
+      } );
+    }
   }
 
   emit assetChanged( request.id );
   return Result<RelocateResult>::success(
-    RelocateResult{ request.id, newRevision, resolved.diagnostics() } );
+    RelocateResult{ request.id, newRevision, std::move( relocateDiagnostics ) } );
 }
 
 std::optional<AssetSnapshot> DataManager::asset( AssetId id ) const

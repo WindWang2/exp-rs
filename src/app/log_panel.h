@@ -35,9 +35,13 @@ public:
 public slots:
     void logMessage(const QString &message, const QString &tag, Qgis::MessageLevel level);
 
+protected:
+    void showEvent(QShowEvent *event) override;
+
 private:
     void setupUi();
     bool shouldShowMessage(const QString &message, const QString &tag, Qgis::MessageLevel level) const;
+    void flushPendingMessages();
 
     QTextEdit *mTextEdit = nullptr;
     QComboBox *m_levelFilter = nullptr;
@@ -50,4 +54,5 @@ private:
     std::atomic<int> mMessageCount{0};
     QString mLastMessage; // Only accessed from GUI thread via Qt::AutoConnection
     bool mAutoScroll = true;
+    QVector<QString> m_pendingHtml;
 };
