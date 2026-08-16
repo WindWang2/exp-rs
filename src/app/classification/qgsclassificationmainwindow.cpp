@@ -735,6 +735,13 @@ void QgsClassificationMainWindow::setupSampleVectorEditing()
   m_toolMagicWand->setSourceData( m_sourceRasterPath );
   connect( m_toolMagicWand, &RsRoiToolBase::roiDrawn,
            this, &QgsClassificationMainWindow::onMagicWandRoi );
+  connect( m_toolMagicWand, &RsRoiToolMagicWand::regionClipped, this, [this]()
+  {
+    if ( statusBar() )
+      statusBar()->showMessage(
+        tr( "魔棒选区触及 513×513 搜索窗口边界，已被截断；更大的区域请改用矩形 ROI 工具" ),
+        5000 );
+  } );
 
   auto *group = new QActionGroup( this );
   group->setExclusive( true );
