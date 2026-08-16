@@ -66,9 +66,13 @@ bool PythonPluginHost::ensurePool( QString *errorOut )
 
   // Resolve worker_daemon.py from common layouts: installed app, source tree
   // relative to the binary, and cwd when developing from the repo root.
+  const QString appDir = QCoreApplication::applicationDirPath();
   const QStringList candidates = {
-    QDir( QCoreApplication::applicationDirPath() ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) ),
-    QDir( QCoreApplication::applicationDirPath() ).filePath( QStringLiteral( "../../src/python/scripts/worker_daemon.py" ) ),
+    QDir( appDir ).filePath( QStringLiteral( "../share/sicnu_geo_rs/scripts/worker_daemon.py" ) ),
+    QDir( appDir ).filePath( QStringLiteral( "share/sicnu_geo_rs/scripts/worker_daemon.py" ) ),
+    QDir( appDir ).filePath( QStringLiteral( "scripts/worker_daemon.py" ) ),
+    QDir( appDir ).filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) ),
+    QDir( appDir ).filePath( QStringLiteral( "../../src/python/scripts/worker_daemon.py" ) ),
     QDir::current().filePath( QStringLiteral( "src/python/scripts/worker_daemon.py" ) ),
     QDir::current().filePath( QStringLiteral( "../src/python/scripts/worker_daemon.py" ) ),
   };
@@ -83,7 +87,7 @@ bool PythonPluginHost::ensurePool( QString *errorOut )
   }
   if ( scriptPath.isEmpty() )
   {
-    if ( errorOut ) *errorOut = QStringLiteral( "worker_daemon.py not found; Python plugins cannot load" );
+    if ( errorOut ) *errorOut = QStringLiteral( "worker_daemon.py not found in any standard location: %1; Python plugins cannot load" ).arg( candidates.join( QStringLiteral( ", " ) ) );
     return false;
   }
 
