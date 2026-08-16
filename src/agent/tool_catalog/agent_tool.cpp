@@ -20,16 +20,23 @@ std::string toolCategoryToString( ToolCategory category )
   return "Processing";
 }
 
-ToolCategory toolCategoryFromString( const std::string &catStr )
+std::optional<ToolCategory> tryParseToolCategory( const std::string &catStr )
 {
   std::string lower = catStr;
   std::transform( lower.begin(), lower.end(), lower.begin(),
                   []( unsigned char c ) { return std::tolower( c ); } );
 
+  if ( lower == "processing" ) return ToolCategory::Processing;
   if ( lower == "interaction" ) return ToolCategory::Interaction;
   if ( lower == "data" ) return ToolCategory::Data;
-  if ( lower == "custom" ) return ToolCategory::Custom;
-  return ToolCategory::Processing;
+  if ( lower == "custom" || lower == "custom_tools" ) return ToolCategory::Custom;
+  return std::nullopt;
+}
+
+ToolCategory toolCategoryFromString( const std::string &catStr )
+{
+  auto cat = tryParseToolCategory( catStr );
+  return cat.value_or( ToolCategory::Processing );
 }
 
 Json::Value AgentTool::toOpenAiToolDefinition() const

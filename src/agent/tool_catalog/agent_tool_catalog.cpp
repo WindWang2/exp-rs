@@ -312,8 +312,8 @@ std::vector<AgentTool> AgentToolCatalog::searchTools( const SearchQuery &query )
 
   for ( const auto &tool : allTools )
   {
-    // Filter by group (exact case-insensitive match)
-    if ( !query.group.empty() && toLower( tool.group ) != toLower( query.group ) )
+    // Filter by group (substring case-insensitive match)
+    if ( !query.group.empty() && !containsIgnoreCase( tool.group, query.group ) )
       continue;
 
     // Filter by tag

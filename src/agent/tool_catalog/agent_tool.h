@@ -2,6 +2,7 @@
 #pragma once
 
 #include <json/json.h>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -21,6 +22,7 @@ enum class ToolCategory {
 
 std::string toolCategoryToString( ToolCategory category );
 ToolCategory toolCategoryFromString( const std::string &catStr );
+std::optional<ToolCategory> tryParseToolCategory( const std::string &catStr );
 
 /**
  * Unified Agent Tool Descriptor.

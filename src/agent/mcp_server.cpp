@@ -824,9 +824,7 @@ QVariantMap McpServer::handleGetOperatorSchema(const QString &operatorId)
 {
     auto op = sicnu::operators::RSOperatorRegistry::instance().create(operatorId.toStdString());
     if (!op) {
-        QVariantMap err;
-        err[QStringLiteral("error")] = QStringLiteral("Operator not found: ") + operatorId;
-        return err;
+        throw std::runtime_error(QStringLiteral("Operator not found: %1").arg(operatorId).toStdString());
     }
 
     QVariantMap result = sicnu::processing::jsonObjectToVariantMap(op->schema());
@@ -963,9 +961,7 @@ QVariantMap McpServer::handleGetAlgorithmSchema(const QString &algorithmId)
     const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(algorithmId.toStdString());
     if (!adapter)
     {
-        QVariantMap err;
-        err[QStringLiteral("error")] = QStringLiteral("Algorithm not found: ") + algorithmId;
-        return err;
+        throw std::runtime_error(QStringLiteral("Algorithm not found: %1").arg(algorithmId).toStdString());
     }
 
     const auto desc = adapter->descriptor();
@@ -1248,7 +1244,10 @@ QVariantMap McpServer::handleListTools(const QString &category)
     using namespace sicnu::agent::tool_catalog;
     std::optional<ToolCategory> catFilter = std::nullopt;
     if (!category.isEmpty()) {
-        catFilter = toolCategoryFromString(category.toStdString());
+        catFilter = tryParseToolCategory(category.toStdString());
+        if (!catFilter.has_value()) {
+            throw std::runtime_error(QStringLiteral("Unknown category: %1").arg(category).toStdString());
+        }
     }
 
     const auto tools = AgentToolCatalog::instance().listTools(catFilter);
@@ -1306,9 +1305,7 @@ QVariantMap McpServer::handleGetToolSchema(const QString &toolId)
     using namespace sicnu::agent::tool_catalog;
     auto tool = AgentToolCatalog::instance().findTool(toolId.toStdString());
     if (!tool) {
-        QVariantMap errorMap;
-        errorMap[QStringLiteral("error")] = QStringLiteral("Unknown tool: %1").arg(toolId);
-        return errorMap;
+        throw std::runtime_error(QStringLiteral("Unknown tool: %1").arg(toolId).toStdString());
     }
 
     QVariantMap result;
