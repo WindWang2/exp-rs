@@ -53,10 +53,10 @@ TEST_CASE( "ImageWarper: unwritable output path returns GdalError", "[georef][wa
   REQUIRE_FALSE( result.errorMessage.isEmpty() );
 }
 
-TEST_CASE( "Transform fit: collinear GCPs throws SingularException", "[georef][transformer][error]" )
+TEST_CASE( "Transform fit: collinear GCPs throws SingularException in solver and returns false in transformer", "[georef][transformer][error]" )
 {
   // QgsLeastSquares::linear() (used by TM::Linear) throws
-  // SingularException when deltaX == 0 || deltaY == 0 (per Task 1 lesson).
+  // SingularException when deltaX == 0 || deltaY == 0.
   // All-x-equal GCPs force deltaX = n*sumPx^2 - (sumPx)^2 = 0.
   std::unique_ptr<QgsGcpTransformerInterface> t(
     QgsGcpTransformerInterface::create( TM::Linear ) );
@@ -68,7 +68,12 @@ TEST_CASE( "Transform fit: collinear GCPs throws SingularException", "[georef][t
   QVector<QgsPointXY> d = {
     { 0, 0 }, { 0, 2 }, { 0, 4 }, { 0, 6 }
   };
+
+  QgsPointXY origin;
+  double scaleX = 0.0, scaleY = 0.0;
   REQUIRE_THROWS_AS(
-    t->updateParametersFromGcps( s, d, false ),
+    QgsLeastSquares::linear( s, d, origin, scaleX, scaleY ),
     QgsLeastSquares::SingularException );
+
+  CHECK_FALSE( t->updateParametersFromGcps( s, d, false ) );
 }

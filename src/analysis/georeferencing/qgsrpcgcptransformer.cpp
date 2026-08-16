@@ -102,10 +102,9 @@ bool QgsRpcGcpTransformer::updateParametersFromGcps( const QVector<QgsPointXY> &
   }
 
   char **opts = nullptr;
-  // RPC_HEIGHT is the constant-elevation fallback used when no DEM raster is
-  // available; GDAL will let RPC_DEM take precedence when both are set, but
-  // we still want the height term passed through so callers can dial it in
-  // without supplying a DEM.  Push it BEFORE the RPC_DEM entries.
+  // RPC_HEIGHT provides a constant elevation term when no DEM is supplied,
+  // or adds a vertical datum/height offset on top of the DEM-sampled elevation
+  // if a DEM raster is present (per GDAL GDALRPCGetHeightAtLongLat convention).
   if ( mZOffset != 0.0 )
   {
     const QByteArray h = QString::number( mZOffset, 'f', 4 ).toUtf8();
