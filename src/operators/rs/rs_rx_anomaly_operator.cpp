@@ -169,6 +169,7 @@ Json::Value RsRxAnomalyOperator::run(const Json::Value& params,
     if ( !out.isOpen() )
         throw RSOperatorError( ErrorCode::FileNotWritable,
                               "Failed to create RX output raster: " + outputPath );
+    out.setNoDataValue( std::numeric_limits<float>::quiet_NaN() );
 
     double sumScores = 0.0;
     double maxScore = 0.0;

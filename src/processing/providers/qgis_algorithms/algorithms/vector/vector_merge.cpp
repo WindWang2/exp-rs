@@ -24,22 +24,21 @@ void VectorMergeAlgorithm::initAlgorithm( const QVariantMap & )
 
 QVariantMap VectorMergeAlgorithm::processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback )
 {
-    QVariant layersVar = parameters.value( INPUT_LAYERS );
-    if ( !layersVar.isValid() )
-        throw QgsProcessingException( invalidSourceError( parameters, INPUT_LAYERS ) );
+    QList<QgsMapLayer *> mapLayers = parameterAsLayerList( parameters, INPUT_LAYERS, context );
+    if ( mapLayers.isEmpty() )
+    {
+        if ( QgsVectorLayer *singleVl = parameterAsVectorLayer( parameters, INPUT_LAYERS, context ) )
+            mapLayers.append( singleVl );
+    }
 
-    QVariantList layerList = layersVar.toList();
-    if ( layerList.isEmpty() )
-        throw QgsProcessingException( QObject::tr( "No input layers provided" ) );
-
-    // Extract QgsVectorLayer pointers from the variant list
+    // Extract valid QgsVectorLayer pointers
     QList<QgsVectorLayer *> layers;
-    for ( const QVariant &layerVar : layerList )
+    for ( QgsMapLayer *layer : mapLayers )
     {
         if ( feedback->isCanceled() )
             break;
 
-        QgsVectorLayer *vl = qobject_cast<QgsVectorLayer *>( qvariant_cast<QgsMapLayer *>( layerVar ) );
+        QgsVectorLayer *vl = qobject_cast<QgsVectorLayer *>( layer );
         if ( vl && vl->isValid() && vl->geometryType() != Qgis::GeometryType::Null )
             layers.append( vl );
     }
@@ -68,6 +67,7 @@ QVariantMap VectorMergeAlgorithm::processAlgorithm( const QVariantMap &parameter
 
         QgsFeatureIterator it = vl->getFeatures();
         QgsFeature feat;
+        const QgsFields inFields = vl->fields();
         while ( it.nextFeature( feat ) )
         {
             if ( feedback->isCanceled() )
@@ -77,7 +77,16 @@ QVariantMap VectorMergeAlgorithm::processAlgorithm( const QVariantMap &parameter
             if ( totalFeatures > 0 )
                 feedback->setProgress( 100.0 * current / totalFeatures );
 
-            sink->addFeature( feat, QgsFeatureSink::FastInsert );
+            QgsFeature outFeat( outputFields );
+            outFeat.setGeometry( feat.geometry() );
+            const QgsAttributes inAttrs = feat.attributes();
+            for ( int i = 0; i < inFields.count() && i < inAttrs.count(); ++i )
+            {
+                int outIdx = outputFields.indexOf( inFields.at( i ).name() );
+                if ( outIdx >= 0 )
+                    outFeat.setAttribute( outIdx, inAttrs.at( i ) );
+            }
+            sink->addFeature( outFeat, QgsFeatureSink::FastInsert );
         }
     }
 

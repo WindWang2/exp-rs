@@ -14,6 +14,7 @@
 #include <qgswkbtypes.h>
 #include <qgscoordinatetransform.h>
 #include <qgscoordinatereferencesystem.h>
+#include <qgsexception.h>
 
 class QgsReprojectLayerAlgorithm : public QgsProcessingAlgorithm
 {
@@ -74,7 +75,16 @@ protected:
             {
                 QgsFeature outputFeat = feat;
                 QgsGeometry geom = feat.geometry();
-                geom.transform( transform );
+                try
+                {
+                    geom.transform( transform );
+                }
+                catch ( const QgsCsException &e )
+                {
+                    if ( feedback )
+                        feedback->reportError( QObject::tr( "Could not transform geometry with id %1: %2" ).arg( feat.id() ).arg( e.what() ) );
+                    continue;
+                }
                 outputFeat.setGeometry( geom );
                 sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
             }

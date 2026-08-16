@@ -180,6 +180,7 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
     if ( !labelOut.isOpen() )
         throw RSOperatorError( ErrorCode::FileNotWritable,
                               "Failed to create classified raster: " + outputPath );
+    labelOut.setNoDataValue( outputNodata );
 
     const std::string anglePath = getString( params, "angleOut", "" );
     std::unique_ptr<GdalStreamingOutput> angleOut;
@@ -191,6 +192,7 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
         if ( !angleOut->isOpen() )
             throw RSOperatorError( ErrorCode::FileNotWritable,
                                   "Failed to create angle raster: " + anglePath );
+        angleOut->setNoDataValue( outputNodata );
     }
 
     int tilesSeen = 0;

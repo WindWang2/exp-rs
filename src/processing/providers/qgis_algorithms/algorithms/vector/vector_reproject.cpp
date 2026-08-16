@@ -12,6 +12,7 @@
 #include <qgsprocessingfeedback.h>
 #include <qgscoordinatetransform.h>
 #include <qgscoordinatereferencesystem.h>
+#include <qgsexception.h>
 #include <qgswkbtypes.h>
 
 const QString VectorReprojectAlgorithm::INPUT = QStringLiteral( "INPUT" );
@@ -60,7 +61,16 @@ QVariantMap VectorReprojectAlgorithm::processAlgorithm( const QVariantMap &param
         {
             QgsFeature outputFeat = feat;
             QgsGeometry geom = feat.geometry();
-            geom.transform( transform );
+            try
+            {
+                geom.transform( transform );
+            }
+            catch ( const QgsCsException &e )
+            {
+                if ( feedback )
+                    feedback->reportError( QObject::tr( "Could not transform geometry with id %1: %2" ).arg( feat.id() ).arg( e.what() ) );
+                continue;
+            }
             outputFeat.setGeometry( geom );
             sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
         }

@@ -326,12 +326,14 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
                               "Failed to create mosaic output: " + outErr.toStdString());
     }
 
+    float outNodata = std::numeric_limits<float>::quiet_NaN();
     for (const auto& meta : metaList) {
         if (!std::isnan(meta.nodata)) {
-            outDs.setBandNoDataValue(1, meta.nodata);
+            outNodata = static_cast<float>(meta.nodata);
             break;
         }
     }
+    outDs.setBandNoDataValue(1, outNodata);
 
     // Window streaming mosaic execution:
     // Process the output grid in kTileSize x kTileSize windows.
@@ -352,9 +354,8 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
             const int w = (std::min)(kTileSize, outWidth - x);
             const size_t currentTilePixels = static_cast<size_t>(w) * h;
 
-            // Initialize current output window with NaN (unfilled / nodata)
-            std::fill(tileOut.begin(), tileOut.begin() + currentTilePixels,
-                      std::numeric_limits<float>::quiet_NaN());
+            // Initialize current output window with outNodata (unfilled / nodata)
+            std::fill(tileOut.begin(), tileOut.begin() + currentTilePixels, outNodata);
 
             for (int i = 0; i < inputCount; ++i) {
                 const auto& meta = metaList[static_cast<size_t>(i)];
