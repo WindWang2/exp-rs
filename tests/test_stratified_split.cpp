@@ -119,3 +119,22 @@ TEST_CASE( "stratifiedSplit: tiny class (5 samples) all goes to train",
   REQUIRE( testCounts[3] > 0 );
   REQUIRE( trainCounts[3] + testCounts[3] == 30 );
 }
+
+TEST_CASE( "stratifiedSplit: seed parameter controls determinism and variation",
+           "[classify][split]" )
+{
+  cv::Mat X, y;
+  makeSyntheticDataset( { { 1, 50 }, { 2, 50 } }, X, y );
+
+  const auto split1 = RsClassificationSplit::stratifiedSplit( X, y, 0.7, 42u );
+  const auto split2 = RsClassificationSplit::stratifiedSplit( X, y, 0.7, 42u );
+  const auto split3 = RsClassificationSplit::stratifiedSplit( X, y, 0.7, 999u );
+
+  REQUIRE( split1.trainX.rows == split2.trainX.rows );
+  REQUIRE( split1.trainX.rows == split3.trainX.rows );
+
+  // Identical seed produces identical train split rows
+  cv::Mat diff;
+  cv::absdiff( split1.trainX, split2.trainX, diff );
+  REQUIRE( cv::countNonZero( diff ) == 0 );
+}

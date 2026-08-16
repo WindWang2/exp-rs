@@ -44,5 +44,6 @@ class QGIS_ANALYSIS_EXPORT RsCrossValidation
                          std::function<std::unique_ptr<RsClassifierBackend>()> factory,
                          int k = 5,
                          bool scaleFeatures = true,
-                         std::function<bool()> isCanceled = nullptr );
+                         std::function<bool()> isCanceled = nullptr,
+                         unsigned int seed = 42u );
 };

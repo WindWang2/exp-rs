@@ -14,7 +14,8 @@
 
 RsTrainTestSplit RsClassificationSplit::stratifiedSplit( const cv::Mat &X,
                                                          const cv::Mat &y,
-                                                         double ratio )
+                                                         double ratio,
+                                                         unsigned int seed )
 {
   RsTrainTestSplit out;
   if ( X.empty() || y.empty() )
@@ -37,7 +38,7 @@ RsTrainTestSplit RsClassificationSplit::stratifiedSplit( const cv::Mat &X,
   }
 
   // Deterministic shuffle for reproducibility (tests + reruns).
-  std::mt19937 rng( 42u );
+  std::mt19937 rng( seed );
 
   std::vector<int> trainIdx;
   std::vector<int> testIdx;

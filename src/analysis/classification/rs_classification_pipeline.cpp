@@ -265,6 +265,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   {
     RsTrainingDataExtraction::Options exOptions;
     exOptions.maxSamplesPerClass = config.maxSamplesPerClass;
+    exOptions.seed = config.seed;
     const RsTrainingDataResult ex = RsTrainingDataExtraction::extractFromVector(
       config.sourceRaster,
       config.bandIndices,
@@ -328,7 +329,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     cv::Mat trainY = ex.y;
     if ( config.testSplit > 0.0 )
     {
-      const RsTrainTestSplit split = RsClassificationSplit::stratifiedSplit( ex.X, ex.y, 1.0 - config.testSplit );
+      const RsTrainTestSplit split = RsClassificationSplit::stratifiedSplit( ex.X, ex.y, 1.0 - config.testSplit, config.seed );
       trainX = split.trainX;
       trainY = split.trainY;
       config.testX = split.testX;
@@ -757,78 +758,108 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
           X.at<float>( p, bi ) = v;
         }
       }
-      // Mark ignore / edge pixels after all bands are filled.
-      std::vector<float> feat( static_cast<size_t>( B ) );
+      // Mark ignore / edge pixels and gather valid pixel indices
+      std::vector<int> validIndices;
+      validIndices.reserve( static_cast<size_t>( npx ) );
       for ( int p = 0; p < npx; ++p )
       {
-        for ( int bi = 0; bi < B; ++bi )
-          feat[static_cast<size_t>( bi )] = X.at<float>( p, bi );
-        if ( config.ignoreOptions.isIgnorePixel( feat.data(), B, bandHasNodata, bandNodata ) )
-          pixelNodata[static_cast<size_t>( p )] = 1;
-      }
-
-      if ( config.scaler.isFitted() )
-      {
-        X = config.scaler.transform( X );
-        if ( X.empty() )
+        const float *featPtr = X.ptr<float>( p );
+        if ( config.ignoreOptions.isIgnorePixel( featPtr, B, bandHasNodata, bandNodata ) )
         {
-          return failWithPartialOutput(
-            RsClassificationPipelineResult::Error::ScalingFailed,
-            QStringLiteral( "Feature scaling failed at tile (%1,%2)" ).arg( tx ).arg( ty ) );
+          pixelNodata[static_cast<size_t>( p )] = 1;
+        }
+        else
+        {
+          validIndices.push_back( p );
         }
       }
 
       cv::Mat pred;
-      try
-      {
-        pred = config.backend->predict( X );
-      }
-      catch ( const cv::Exception &ex )
-      {
-        return failWithPartialOutput(
-          RsClassificationPipelineResult::Error::PredictionFailed,
-          QStringLiteral( "Classifier prediction threw OpenCV exception: %1" )
-            .arg( QString::fromStdString( ex.what() ) ) );
-      }
-      catch ( ... )
-      {
-        return failWithPartialOutput(
-          RsClassificationPipelineResult::Error::PredictionFailed,
-          QStringLiteral( "Classifier prediction threw unknown exception" ) );
-      }
-
-      // Verify prediction output size matches tile pixel count
-      if ( pred.rows < npx )
-      {
-        return failWithPartialOutput(
-          RsClassificationPipelineResult::Error::PredictionSizeMismatch,
-          QStringLiteral( "Classifier returned fewer predictions (%1) than expected (%2)" )
-            .arg( pred.rows ).arg( npx ) );
-      }
-
-      // Per-pixel best-class probability (confidence) when requested.
       cv::Mat probs;
-      if ( writeProb )
+      if ( !validIndices.empty() )
       {
-        probs = config.backend->predictProbabilities( X );
-        if ( probs.empty() || probs.rows < npx )
+        cv::Mat Xc;
+        if ( validIndices.size() == static_cast<size_t>( npx ) )
+        {
+          Xc = X;
+        }
+        else
+        {
+          Xc.create( static_cast<int>( validIndices.size() ), B, CV_32F );
+          for ( size_t i = 0; i < validIndices.size(); ++i )
+          {
+            const float *src = X.ptr<float>( validIndices[i] );
+            float *dst = Xc.ptr<float>( static_cast<int>( i ) );
+            std::memcpy( dst, src, static_cast<size_t>( B ) * sizeof( float ) );
+          }
+        }
+
+        if ( config.scaler.isFitted() )
+        {
+          Xc = config.scaler.transform( Xc );
+          if ( Xc.empty() )
+          {
+            return failWithPartialOutput(
+              RsClassificationPipelineResult::Error::ScalingFailed,
+              QStringLiteral( "Feature scaling failed at tile (%1,%2)" ).arg( tx ).arg( ty ) );
+          }
+        }
+
+        try
+        {
+          pred = config.backend->predict( Xc );
+        }
+        catch ( const cv::Exception &ex )
         {
           return failWithPartialOutput(
             RsClassificationPipelineResult::Error::PredictionFailed,
-            QStringLiteral( "Classifier returned no probability output at tile (%1,%2)" )
-              .arg( tx ).arg( ty ) );
+            QStringLiteral( "Classifier prediction threw OpenCV exception: %1" )
+              .arg( QString::fromStdString( ex.what() ) ) );
         }
+        catch ( ... )
+        {
+          return failWithPartialOutput(
+            RsClassificationPipelineResult::Error::PredictionFailed,
+            QStringLiteral( "Classifier prediction threw unknown exception" ) );
+        }
+
+        // Verify prediction output size matches valid pixel count
+        if ( pred.rows < static_cast<int>( validIndices.size() ) )
+        {
+          return failWithPartialOutput(
+            RsClassificationPipelineResult::Error::PredictionSizeMismatch,
+            QStringLiteral( "Classifier returned fewer predictions (%1) than expected (%2)" )
+              .arg( pred.rows ).arg( validIndices.size() ) );
+        }
+
+        // Per-pixel best-class probability (confidence) when requested.
+        if ( writeProb )
+        {
+          probs = config.backend->predictProbabilities( Xc );
+          if ( probs.empty() || probs.rows < static_cast<int>( validIndices.size() ) )
+          {
+            return failWithPartialOutput(
+              RsClassificationPipelineResult::Error::PredictionFailed,
+              QStringLiteral( "Classifier returned no probability output at tile (%1,%2)" )
+                .arg( tx ).arg( ty ) );
+          }
+        }
+      }
+
+      if ( writeProb )
+      {
         std::fill( probBuf.begin(), probBuf.begin() + npx, -1.0f );
       }
 
       for ( int p = 0; p < npx; ++p )
       {
-        if ( pixelNodata[static_cast<size_t>( p )] )
-        {
-          outBuf[static_cast<size_t>( p )] = static_cast<int32_t>( unclassified );
-          continue;
-        }
-        int v = pred.at<int>( p, 0 );
+        outBuf[static_cast<size_t>( p )] = static_cast<int32_t>( unclassified );
+      }
+
+      for ( size_t i = 0; i < validIndices.size(); ++i )
+      {
+        const int p = validIndices[i];
+        int v = pred.at<int>( static_cast<int>( i ), 0 );
         if ( config.backend->needsLabelRemap() )
         {
           v = kmeansRemap.value( v, v );
@@ -840,7 +871,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
         {
           float best = 0.0f;
           for ( int c = 0; c < probs.cols; ++c )
-            best = std::max( best, probs.at<float>( p, c ) );
+            best = std::max( best, probs.at<float>( static_cast<int>( i ), c ) );
           probBuf[static_cast<size_t>( p )] = best;
           confidenceSum += best;
           ++confidenceCount;

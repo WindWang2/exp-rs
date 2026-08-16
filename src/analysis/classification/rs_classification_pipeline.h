@@ -69,6 +69,7 @@ struct QGIS_ANALYSIS_EXPORT RsClassificationPipelineResult
       NoValidPixels,
       InsufficientSamples,
       ModelOpenFailed,
+      ModelSidecarMissing,
     };
 
     bool ok = false;
@@ -155,6 +156,9 @@ class QGIS_ANALYSIS_EXPORT RsClassificationPipeline
 
         /// Edge / background handling: source NoData + optional ignore values.
         RsPixelIgnoreOptions ignoreOptions;
+
+        /// Deterministic pseudo-random seed for data splitting and subsampling.
+        unsigned int seed = 42u;
     };
 
     /// Run the full pipeline synchronously on the caller's thread.

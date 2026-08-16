@@ -50,6 +50,7 @@ TEST_CASE( "RandomForest: Factory creation by name",
 {
   auto rf = RsClassifierBackendFactory::create( "RandomForest" );
   REQUIRE( rf != nullptr );
+  REQUIRE( rf->supportsProbabilities() );
 }
 
 // Regression guard for the synthetic-probability bug where
