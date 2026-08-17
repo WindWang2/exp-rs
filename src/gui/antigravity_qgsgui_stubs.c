@@ -187,10 +187,6 @@ void _ZN27QgsAttributesFormProperties13updatedFieldsEv(void) {}
 // QgsCodeEditor::QgsCodeEditor(QWidget*, QString const&, bool, bool, QFlags<QgsCodeEditor::Flag>, QgsCodeEditor::Mode)
 // — proper C++ constructor provided in antigravity_codeeditor_stubs.cpp
 
-// QgsCodeEditor::getMonospaceFont()
-void _ZN13QgsCodeEditor16getMonospaceFontEv(void) __attribute__((weak, visibility("default")));
-void _ZN13QgsCodeEditor16getMonospaceFontEv(void) {}
-
 // QgsCodeEditor::insertText(QString const&)
 void _ZN13QgsCodeEditor10insertTextERK7QString(void) __attribute__((weak, visibility("default")));
 void _ZN13QgsCodeEditor10insertTextERK7QString(void) {}

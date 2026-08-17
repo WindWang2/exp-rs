@@ -37,6 +37,13 @@ QgsCodeEditor::QgsCodeEditor( QWidget *parent, const QString &title, bool foldin
   Q_UNUSED( folding )
 }
 
+QFont QgsCodeEditor::getMonospaceFont()
+{
+  QFont font( QStringLiteral( "monospace" ) );
+  font.setStyleHint( QFont::Monospace );
+  return font;
+}
+
 QgsCodeEditorSQL::QgsCodeEditorSQL( QWidget *parent )
   : QgsCodeEditor( parent )
 {

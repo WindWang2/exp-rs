@@ -65,6 +65,16 @@ class GUI_EXPORT QgsVectorLayerProperties : public QgsLayerPropertiesDialog, pri
 
     bool eventFilter( QObject *obj, QEvent *ev ) override;
 
+    /**
+     * Returns whether the statistics page has been populated.
+     */
+    bool isStatisticsFilled() const { return mStatisticsFilled; }
+
+    /**
+     * Returns the statistics page widget.
+     */
+    QWidget *statisticsPage() const { return mOptsPage_Statistics; }
+
   protected slots:
     void optionsStackedWidget_CurrentChanged( int index ) final;
     void syncToLayer() final;
@@ -218,6 +228,12 @@ class GUI_EXPORT QgsVectorLayerProperties : public QgsLayerPropertiesDialog, pri
     void initMapTipPreview();
 
     QgsWebView *mMapTipPreview = nullptr;
+
+    QWidget *mOptsPage_Statistics = nullptr;
+    QGroupBox *mGeomStatsGroup = nullptr;
+    QGroupBox *mAttrStatsGroup = nullptr;
+    bool mStatisticsFilled = false;
+    void populateStatistics();
 
   private slots:
     void openPanel( QgsPanelWidget *panel );
