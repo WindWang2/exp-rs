@@ -2,7 +2,14 @@
 #include "interaction_tool_registry.h"
 #include "view_control_service.h"
 #include "raster_display_service.h"
+#include "data/data_manager.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/framework/json_params_converter.h"
 
+#include <qgsproject.h>
+#include <qgsrasterlayer.h>
+#include <qgsvectorlayer.h>
+#include <qgsrasterdataprovider.h>
 #include <sstream>
 
 namespace sicnu::agent {
@@ -372,7 +379,7 @@ Json::Value InteractionToolRegistry::execute( const std::string &name, const Jso
   return toolOpt->handler( parameters );
 }
 
-void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service, RasterDisplayService *rasterService )
+void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service, RasterDisplayService *rasterService, sicnu::data::DataManager *dataManager )
 {
   if ( service )
   {
@@ -521,6 +528,256 @@ void InteractionToolRegistry::registerBuiltinTools( ViewControlService *service,
   if ( rasterService )
   {
     registerRasterTools( rasterService );
+  }
+
+  registerDataTools( dataManager );
+}
+
+void InteractionToolRegistry::registerDataTools( sicnu::data::DataManager *dataManager )
+{
+  // 1. data:list_layers
+  {
+    InteractionToolDefinition def;
+    def.name = "data:list_layers";
+    def.displayName = "List Loaded Map Layers";
+    def.category = "data";
+    def.description = "List all raster and vector layers currently loaded in the project and map canvas with layer IDs, names, types, and CRS.";
+    def.inputSchema = createEmptyObjectSchema();
+    def.handler = []( const Json::Value & ) {
+      Json::Value result( Json::objectValue );
+      Json::Value layers( Json::arrayValue );
+      if ( QgsProject::instance() )
+      {
+        QMap<QString, QgsMapLayer *> mapLayers = QgsProject::instance()->mapLayers();
+        for ( auto it = mapLayers.begin(); it != mapLayers.end(); ++it )
+        {
+          QgsMapLayer *layer = it.value();
+          if ( !layer ) continue;
+          Json::Value l( Json::objectValue );
+          l["id"] = layer->id().toStdString();
+          l["name"] = layer->name().toStdString();
+          l["type"] = (layer->type() == Qgis::LayerType::Raster) ? "raster" : "vector";
+          l["source"] = layer->source().toStdString();
+          l["crs"] = layer->crs().authid().toStdString();
+          layers.append( l );
+        }
+      }
+      result["layers"] = layers;
+      result["status"] = "success";
+      return result;
+    };
+    registerTool( std::move( def ) );
+  }
+
+  // 2. data:describe_dataset
+  {
+    InteractionToolDefinition def;
+    def.name = "data:describe_dataset";
+    def.displayName = "Describe Dataset Metadata";
+    def.category = "data";
+    def.description = "Get detailed dataset metadata for a layer or file: dimensions, bounding box, CRS, resolution, data types, and band/attribute information.";
+    Json::Value schema( Json::objectValue );
+    schema["type"] = "object";
+    Json::Value props( Json::objectValue );
+    Json::Value layerId( Json::objectValue );
+    layerId["type"] = "string";
+    layerId["description"] = "Layer ID, layer name, or file path to describe";
+    props["layer_id"] = layerId;
+    schema["properties"] = props;
+    Json::Value req( Json::arrayValue );
+    req.append( "layer_id" );
+    schema["required"] = req;
+    def.inputSchema = schema;
+
+    def.handler = []( const Json::Value &params ) {
+      std::string targetId;
+      if ( params.isMember( "layer_id" ) && params["layer_id"].isString() )
+        targetId = params["layer_id"].asString();
+      else if ( params.isMember( "layer" ) && params["layer"].isString() )
+        targetId = params["layer"].asString();
+      else if ( params.isMember( "dataset" ) && params["dataset"].isString() )
+        targetId = params["dataset"].asString();
+
+      QString qTarget = QString::fromStdString( targetId );
+      QgsMapLayer *layer = nullptr;
+      if ( QgsProject::instance() )
+      {
+        layer = QgsProject::instance()->mapLayer( qTarget );
+        if ( !layer )
+        {
+          QList<QgsMapLayer *> layers = QgsProject::instance()->mapLayersByName( qTarget );
+          if ( !layers.isEmpty() )
+            layer = layers.first();
+        }
+      }
+
+      if ( !layer )
+      {
+        Json::Value err( Json::objectValue );
+        err["status"] = "error";
+        err["errorMessage"] = "Layer not found: " + targetId;
+        return err;
+      }
+
+      Json::Value result( Json::objectValue );
+      result["id"] = layer->id().toStdString();
+      result["name"] = layer->name().toStdString();
+      result["type"] = (layer->type() == Qgis::LayerType::Raster) ? "raster" : "vector";
+      result["crs"] = layer->crs().authid().toStdString();
+
+      QgsRectangle extent = layer->extent();
+      Json::Value ext( Json::objectValue );
+      ext["xmin"] = extent.xMinimum();
+      ext["ymin"] = extent.yMinimum();
+      ext["xmax"] = extent.xMaximum();
+      ext["ymax"] = extent.yMaximum();
+      result["extent"] = ext;
+
+      if ( layer->type() == Qgis::LayerType::Raster )
+      {
+        QgsRasterLayer *raster = qobject_cast<QgsRasterLayer *>( layer );
+        if ( raster && raster->dataProvider() )
+        {
+          QgsRasterDataProvider *provider = raster->dataProvider();
+          result["width"] = raster->width();
+          result["height"] = raster->height();
+          result["band_count"] = provider->bandCount();
+
+          GdalDatasetWrapper ds;
+          const bool rolesAvailable = ds.open( raster->source() );
+
+          Json::Value bands( Json::arrayValue );
+          for ( int i = 1; i <= provider->bandCount(); ++i )
+          {
+            Json::Value b( Json::objectValue );
+            b["index"] = i;
+            b["color_interpretation"] = provider->colorInterpretationName( i ).toStdString();
+            b["has_nodata"] = provider->sourceHasNoDataValue( i );
+            if ( provider->sourceHasNoDataValue( i ) )
+              b["nodata_value"] = provider->sourceNoDataValue( i );
+            if ( rolesAvailable )
+              b["role"] = ds.bandMetadataItem( i, "SICNU_BAND_ROLE" ).toStdString();
+            bands.append( b );
+          }
+          result["bands"] = bands;
+        }
+      }
+      else if ( layer->type() == Qgis::LayerType::Vector )
+      {
+        QgsVectorLayer *vector = qobject_cast<QgsVectorLayer *>( layer );
+        if ( vector )
+        {
+          result["feature_count"] = static_cast<Json::Int64>( vector->featureCount() );
+          QString geomType = QStringLiteral( "Unknown" );
+          switch ( vector->geometryType() )
+          {
+            case Qgis::GeometryType::Point: geomType = QStringLiteral( "Point" ); break;
+            case Qgis::GeometryType::Line: geomType = QStringLiteral( "Line" ); break;
+            case Qgis::GeometryType::Polygon: geomType = QStringLiteral( "Polygon" ); break;
+            case Qgis::GeometryType::Null: geomType = QStringLiteral( "Null" ); break;
+            default: break;
+          }
+          result["geometry_type"] = geomType.toStdString();
+
+          Json::Value fields( Json::arrayValue );
+          QgsFields layerFields = vector->fields();
+          for ( int i = 0; i < layerFields.count(); ++i )
+          {
+            Json::Value f( Json::objectValue );
+            f["name"] = layerFields.at( i ).name().toStdString();
+            f["type"] = layerFields.at( i ).typeName().toStdString();
+            fields.append( f );
+          }
+          result["fields"] = fields;
+        }
+      }
+      result["status"] = "success";
+      return result;
+    };
+    registerTool( std::move( def ) );
+  }
+
+  // 3. data:get_lineage
+  {
+    InteractionToolDefinition def;
+    def.name = "data:get_lineage";
+    def.displayName = "Get Asset Lineage and Provenance";
+    def.category = "data";
+    def.description = "Query the processing provenance and derivation history for a DataManager asset: source inputs, algorithm, parameters, task reference, and downstream outputs.";
+    Json::Value schema( Json::objectValue );
+    schema["type"] = "object";
+    Json::Value props( Json::objectValue );
+    Json::Value assetId( Json::objectValue );
+    assetId["type"] = "string";
+    assetId["description"] = "UUID string of the DataManager asset";
+    props["asset_id"] = assetId;
+    schema["properties"] = props;
+    Json::Value req( Json::arrayValue );
+    req.append( "asset_id" );
+    schema["required"] = req;
+    def.inputSchema = schema;
+
+    def.handler = [dataManager]( const Json::Value &params ) {
+      if ( !dataManager )
+      {
+        Json::Value err( Json::objectValue );
+        err["status"] = "error";
+        err["errorMessage"] = "Data manager is not available";
+        return err;
+      }
+      std::string assetIdText = params.isMember( "asset_id" ) ? params["asset_id"].asString() : "";
+      const auto id = sicnu::data::AssetId::fromString( QString::fromStdString( assetIdText ) );
+      if ( !id )
+      {
+        Json::Value err( Json::objectValue );
+        err["status"] = "error";
+        err["errorMessage"] = "Invalid asset id: " + assetIdText;
+        return err;
+      }
+      const auto snapshot = dataManager->asset( *id );
+      if ( !snapshot )
+      {
+        Json::Value err( Json::objectValue );
+        err["status"] = "error";
+        err["errorMessage"] = "Asset not found: " + assetIdText;
+        return err;
+      }
+
+      Json::Value result( Json::objectValue );
+      result["id"] = snapshot->id().toString().toStdString();
+      result["name"] = snapshot->displayName().toStdString();
+      result["source"] = snapshot->source().canonicalSource.toStdString();
+
+      if ( const auto prov = dataManager->provenance( *id ) )
+      {
+        result["provenance"] = sicnu::processing::variantToJsonValue( prov->toJson().toVariantMap() );
+      }
+
+      Json::Value inputs( Json::arrayValue );
+      for ( const auto &inputId : dataManager->derivedFrom( *id ) )
+      {
+        Json::Value entry( Json::objectValue );
+        entry["id"] = inputId.toString().toStdString();
+        if ( const auto inputSnapshot = dataManager->asset( inputId ) )
+          entry["name"] = inputSnapshot->displayName().toStdString();
+        inputs.append( entry );
+      }
+      result["derivedFrom"] = inputs;
+
+      Json::Value outputs( Json::arrayValue );
+      for ( const auto &outputId : dataManager->derivedOutputsOf( *id ) )
+      {
+        Json::Value entry( Json::objectValue );
+        entry["id"] = outputId.toString().toStdString();
+        if ( const auto outputSnapshot = dataManager->asset( outputId ) )
+          entry["name"] = outputSnapshot->displayName().toStdString();
+        outputs.append( entry );
+      }
+      result["derivedOutputsOf"] = outputs;
+      result["status"] = "success";
+      return result;
+    };
+    registerTool( std::move( def ) );
   }
 }
 

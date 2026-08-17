@@ -2,6 +2,9 @@
 
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/framework/algorithm_engine.h"
+#include "processing/framework/atomic_algorithm_registry.h"
+#include "jobs/job_engine.h"
 #include "python/isolated/python_plugin_host.h"
 #include "data/data_manager.h"
 
@@ -54,6 +57,24 @@ int main(int argc, char *argv[])
     parser.process(app);
 
     ensureGdalInit();
+
+    // Initialize AlgorithmEngine facade (registers providers and tool paths)
+    sicnu::AlgorithmEngine::instance().initialize();
+
+    // ADR 0062: bridge the unified registry to JobEngine so provider algorithms (gdal:/otb:/qgis:)
+    // become executable when submitted as jobs.
+    sicnu::jobs::JobEngine::instance().setFallbackExecutor(
+        []( const sicnu::jobs::JobRequest &req, sicnu::operators::RSOperatorContext &ctx ) {
+            const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( req.algorithmId );
+            if ( !adapter )
+                throw std::runtime_error( "Unknown algorithm: " + req.algorithmId );
+            sicnu::processing::ProgressCallback progressBridge;
+            progressBridge = [&ctx]( int percent, const std::string &message ) {
+                ctx.reportProgress( percent / 100.0, message );
+            };
+            return adapter->execute( req.params, progressBridge,
+                                     [&ctx]() { return ctx.isCancelled(); } );
+        } );
 
     // List operators
     if (parser.isSet(listOption)) {

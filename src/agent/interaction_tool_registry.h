@@ -9,6 +9,10 @@
 #include <unordered_map>
 #include <vector>
 
+namespace sicnu::data {
+class DataManager;
+}
+
 namespace sicnu::agent {
 
 class ViewControlService;
@@ -92,8 +96,14 @@ public:
    * - roi:clear
    * - canvas:draw_roi (backward compatibility alias)
    * - raster tools (when rasterService is non-null)
+   * - data tools (data:list_layers, data:describe_dataset, data:get_lineage)
    */
-  void registerBuiltinTools( ViewControlService *service, RasterDisplayService *rasterService = nullptr );
+  void registerBuiltinTools( ViewControlService *service, RasterDisplayService *rasterService = nullptr, sicnu::data::DataManager *dataManager = nullptr );
+
+  /**
+   * @brief Registers data and catalog interaction tools (data:list_layers, data:describe_dataset, data:get_lineage).
+   */
+  void registerDataTools( sicnu::data::DataManager *dataManager = nullptr );
 
   /**
    * @brief Registers raster display and visualization tools wired to the provided RasterDisplayService.
