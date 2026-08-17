@@ -84,4 +84,23 @@ TEST_CASE("QGIS algorithms have proper metadata", "[processing][qgis][metadata]"
             CHECK_FALSE(alg->group().isEmpty());
         }
     }
+
+    SECTION("ExtractByAttribute algorithm defines OPERATOR and parameter definitions") {
+        const auto *alg = provider.algorithm( "extractbyattribute" );
+        REQUIRE( alg != nullptr );
+        REQUIRE( alg->parameterDefinition( "INPUT" ) != nullptr );
+        REQUIRE( alg->parameterDefinition( "FIELD" ) != nullptr );
+        REQUIRE( alg->parameterDefinition( "OPERATOR" ) != nullptr );
+        REQUIRE( alg->parameterDefinition( "VALUE" ) != nullptr );
+        REQUIRE( alg->parameterDefinition( "OUTPUT" ) != nullptr );
+    }
+
+    SECTION("VectorDistanceMatrix algorithm defines parameters") {
+        const auto *alg = provider.algorithm( "vector_distance_matrix" );
+        REQUIRE( alg != nullptr );
+        REQUIRE( alg->parameterDefinition( "INPUT" ) != nullptr );
+        REQUIRE( alg->parameterDefinition( "TARGET_LAYER" ) != nullptr );
+        REQUIRE( alg->parameterDefinition( "OUTPUT_TYPE" ) != nullptr );
+    }
 }
+

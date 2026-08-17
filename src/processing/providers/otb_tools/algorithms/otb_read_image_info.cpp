@@ -4,6 +4,7 @@
 
 #include <processing/qgsprocessingparameters.h>
 #include <qgsrasterlayer.h>
+#include <QDir>
 #include <QProcess>
 
 void OtbReadImageInfoAlgorithm::initAlgorithm(const QVariantMap &configuration)
@@ -32,26 +33,44 @@ QVariantMap OtbReadImageInfoAlgorithm::processAlgorithm(const QVariantMap &param
 {
     QString program = ToolPathManager::instance().otbToolPath(applicationName());
     if (program.isEmpty()) {
-        feedback->reportError(QObject::tr("OTB application '%1' not found. Ensure OTB is installed.").arg(applicationName()));
+        if (feedback)
+            feedback->reportError(QObject::tr("OTB application '%1' not found. Ensure OTB is installed.").arg(applicationName()));
         return {};
     }
 
     QStringList args = buildArgs(parameters, context, feedback);
     if (args.isEmpty()) return {};
 
-    feedback->pushInfo(QObject::tr("Running: %1 %2").arg(program, args.join(" ")));
+    if (feedback)
+        feedback->pushInfo(QObject::tr("Running: %1 %2").arg(program, args.join(" ")));
 
     QProcess proc;
     proc.setProcessChannelMode(QProcess::MergedChannels);
+
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    if ( const QString bundleDir = ToolPathManager::instance().otbBundleDir(); !bundleDir.isEmpty() )
+    {
+        const QString appPath = QDir( bundleDir ).filePath( QStringLiteral( "lib/otb/applications" ) );
+        const QString binPath = QDir( bundleDir ).filePath( QStringLiteral( "bin" ) );
+        env.insert( QStringLiteral( "OTB_APPLICATION_PATH" ), appPath );
+        const QString path = env.value( QStringLiteral( "PATH" ) );
+        const QString listSep = QString( QDir::listSeparator() );
+        env.insert( QStringLiteral( "PATH" ), binPath + ( path.isEmpty() ? QString() : listSep + path ) );
+        env.insert( QStringLiteral( "LC_NUMERIC" ), QStringLiteral( "C" ) );
+    }
+    proc.setProcessEnvironment( env );
+
     proc.start(program, args);
 
     if (!proc.waitForStarted(5000)) {
-        feedback->reportError(QObject::tr("Failed to start OTB application: %1").arg(proc.errorString()));
+        if (feedback)
+            feedback->reportError(QObject::tr("Failed to start OTB application: %1").arg(proc.errorString()));
         return {};
     }
 
+    QByteArray allOutput;
     while (proc.state() == QProcess::Running) {
-        if (feedback->isCanceled()) {
+        if (feedback && feedback->isCanceled()) {
             proc.kill();
             feedback->reportError(QObject::tr("OTB application canceled by user."));
             return {};
@@ -59,14 +78,24 @@ QVariantMap OtbReadImageInfoAlgorithm::processAlgorithm(const QVariantMap &param
         proc.waitForReadyRead(100);
         QByteArray output = proc.readAllStandardOutput();
         if (!output.isEmpty()) {
-            feedback->pushInfo(QString::fromUtf8(output));
+            allOutput.append(output);
+            if (feedback)
+                feedback->pushInfo(QString::fromUtf8(output));
         }
+    }
+    QByteArray finalOutput = proc.readAllStandardOutput();
+    if (!finalOutput.isEmpty()) {
+        allOutput.append(finalOutput);
+        if (feedback)
+            feedback->pushInfo(QString::fromUtf8(finalOutput));
     }
 
     if (proc.exitCode() != 0) {
-        feedback->reportError(QObject::tr("OTB application failed with exit code %1: %2")
-            .arg(proc.exitCode())
-            .arg(QString::fromUtf8(proc.readAllStandardError())));
+        if (feedback) {
+            feedback->reportError(QObject::tr("OTB application failed with exit code %1: %2")
+                .arg(proc.exitCode())
+                .arg(QString::fromUtf8(allOutput).trimmed()));
+        }
         return {};
     }
 

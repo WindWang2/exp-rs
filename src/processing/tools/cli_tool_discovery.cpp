@@ -328,28 +328,12 @@ QJsonObject makeOtbDiscoveredConfig( const QString &applicationName )
 
     QJsonArray parameters;
     parameters.append( QJsonObject{
-        { QStringLiteral( "name" ), QStringLiteral( "INPUT" ) },
-        { QStringLiteral( "type" ), QStringLiteral( "raster" ) },
-        { QStringLiteral( "description" ), QObject::tr( "Input raster (-in)" ) },
-    } );
-    parameters.append( QJsonObject{
-        { QStringLiteral( "name" ), QStringLiteral( "OUTPUT" ) },
-        { QStringLiteral( "type" ), QStringLiteral( "output_raster" ) },
-        { QStringLiteral( "description" ), QObject::tr( "Output raster (-out)" ) },
-    } );
-    parameters.append( QJsonObject{
         { QStringLiteral( "name" ), QStringLiteral( "EXTRA" ) },
         { QStringLiteral( "type" ), QStringLiteral( "string" ) },
-        { QStringLiteral( "description" ), QObject::tr( "Additional OTB parameters (see application -help)" ) },
+        { QStringLiteral( "description" ), QObject::tr( "OTB application parameters (see application -help)" ) },
     } );
     config.insert( QStringLiteral( "parameters" ), parameters );
-
-    QJsonArray args;
-    args.append( QStringLiteral( "-in" ) );
-    args.append( QStringLiteral( "{INPUT}" ) );
-    args.append( QStringLiteral( "-out" ) );
-    args.append( QStringLiteral( "{OUTPUT}" ) );
-    config.insert( QStringLiteral( "args" ), args );
+    config.insert( QStringLiteral( "args" ), QJsonArray{} );
 
     return config;
 }

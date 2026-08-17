@@ -118,7 +118,19 @@ QVariantMap OtbToolWrapper::processAlgorithm(const QVariantMap &parameters,
              || type == QgsProcessingParameterFileDestination::typeName() )
         {
             const QString outPath = resolvedParameters.value( param->name() ).toString();
-            if ( !outPath.isEmpty() && !QFileInfo::exists( outPath ) )
+            QString actualPath = outPath;
+            if ( !outPath.isEmpty() && !QFileInfo::exists( actualPath ) )
+            {
+                for ( const QString &ext : { QStringLiteral( ".tif" ), QStringLiteral( ".shp" ), QStringLiteral( ".xml" ), QStringLiteral( ".txt" ) } )
+                {
+                    if ( QFileInfo::exists( outPath + ext ) )
+                    {
+                        actualPath = outPath + ext;
+                        break;
+                    }
+                }
+            }
+            if ( !outPath.isEmpty() && !QFileInfo::exists( actualPath ) )
             {
                 const QString err = QObject::tr(
                                       "Tool reported success but output file is missing: %1" )
@@ -128,7 +140,7 @@ QVariantMap OtbToolWrapper::processAlgorithm(const QVariantMap &parameters,
                 SICNU_LOG_ERROR( SicnuLogTags::OTB, err );
                 throw QgsProcessingException(err);
             }
-            results.insert( param->name(), outPath );
+            results.insert( param->name(), actualPath );
         }
     }
     return results;
@@ -176,7 +188,8 @@ bool OtbToolWrapper::runOtbApplication(const QString &program, const QStringList
         const QString binPath = QDir( bundleDir ).filePath( QStringLiteral( "bin" ) );
         env.insert( QStringLiteral( "OTB_APPLICATION_PATH" ), appPath );
         const QString path = env.value( QStringLiteral( "PATH" ) );
-        env.insert( QStringLiteral( "PATH" ), binPath + ( path.isEmpty() ? QString() : QStringLiteral( ":" ) + path ) );
+        const QString listSep = QString( QDir::listSeparator() );
+        env.insert( QStringLiteral( "PATH" ), binPath + ( path.isEmpty() ? QString() : listSep + path ) );
         env.insert( QStringLiteral( "LC_NUMERIC" ), QStringLiteral( "C" ) );
     }
     proc.setProcessEnvironment( env );
