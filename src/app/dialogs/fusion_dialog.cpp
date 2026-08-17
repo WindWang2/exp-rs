@@ -165,6 +165,31 @@ FusionDialog::FusionDialog( QWidget *parent )
     emit mMsCombo->currentIndexChanged( 0 );
 }
 
+bool FusionDialog::validateInputs()
+{
+  auto *panLayer = mPanCombo ? mPanCombo->currentData().value<QgsRasterLayer *>() : nullptr;
+  auto *msLayer = mMsCombo ? mMsCombo->currentData().value<QgsRasterLayer *>() : nullptr;
+
+  if ( !panLayer || !panLayer->isValid() || !msLayer || !msLayer->isValid() )
+  {
+    QMessageBox::warning( this, dialogTitle(), tr( "请选择有效的全色和多光谱栅格图层。" ) );
+    return false;
+  }
+
+  setRasterLayer( msLayer );
+
+  QString outPath = outputPath();
+  if ( outPath.isEmpty() )
+  {
+    outPath = QFileInfo( msLayer->source() ).path() + QLatin1Char( '/' )
+              + QFileInfo( msLayer->source() ).completeBaseName() + QStringLiteral( "_fused.tif" );
+    if ( m_outputEdit )
+      m_outputEdit->setText( outPath );
+  }
+
+  return true;
+}
+
 void FusionDialog::onRun()
 {
     auto *panLayer = mPanCombo->currentData().value<QgsRasterLayer *>();

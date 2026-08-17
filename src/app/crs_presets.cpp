@@ -43,17 +43,17 @@ namespace
       { QStringLiteral( "Beijing 1954 / GK Zone 23" ), 21423, QStringLiteral( "Beijing 1954 Gauss-Kruger zone 23" ), QStringLiteral( "China" ) },
 
       // -- China: Xian 1980 / Gauss-Kruger zones 13-23 --
-      { QStringLiteral( "Xian 1980 / GK Zone 13" ), 2326, QStringLiteral( "Xian 1980 Gauss-Kruger zone 13" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "Xian 1980 / GK Zone 14" ), 2327, QStringLiteral( "Xian 1980 Gauss-Kruger zone 14" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "Xian 1980 / GK Zone 15" ), 2328, QStringLiteral( "Xian 1980 Gauss-Kruger zone 15" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "Xian 1980 / GK Zone 16" ), 2329, QStringLiteral( "Xian 1980 Gauss-Kruger zone 16" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "Xian 1980 / GK Zone 17" ), 2330, QStringLiteral( "Xian 1980 Gauss-Kruger zone 17" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "Xian 1980 / GK Zone 18" ), 2331, QStringLiteral( "Xian 1980 Gauss-Kruger zone 18" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "Xian 1980 / GK Zone 19" ), 2332, QStringLiteral( "Xian 1980 Gauss-Kruger zone 19" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "Xian 1980 / GK Zone 20" ), 2333, QStringLiteral( "Xian 1980 Gauss-Kruger zone 20" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "Xian 1980 / GK Zone 21" ), 2334, QStringLiteral( "Xian 1980 Gauss-Kruger zone 21" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "Xian 1980 / GK Zone 22" ), 2335, QStringLiteral( "Xian 1980 Gauss-Kruger zone 22" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "Xian 1980 / GK Zone 23" ), 2336, QStringLiteral( "Xian 1980 Gauss-Kruger zone 23" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "Xian 1980 / GK Zone 13" ), 2327, QStringLiteral( "Xian 1980 Gauss-Kruger zone 13" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "Xian 1980 / GK Zone 14" ), 2328, QStringLiteral( "Xian 1980 Gauss-Kruger zone 14" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "Xian 1980 / GK Zone 15" ), 2329, QStringLiteral( "Xian 1980 Gauss-Kruger zone 15" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "Xian 1980 / GK Zone 16" ), 2330, QStringLiteral( "Xian 1980 Gauss-Kruger zone 16" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "Xian 1980 / GK Zone 17" ), 2331, QStringLiteral( "Xian 1980 Gauss-Kruger zone 17" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "Xian 1980 / GK Zone 18" ), 2332, QStringLiteral( "Xian 1980 Gauss-Kruger zone 18" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "Xian 1980 / GK Zone 19" ), 2333, QStringLiteral( "Xian 1980 Gauss-Kruger zone 19" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "Xian 1980 / GK Zone 20" ), 2334, QStringLiteral( "Xian 1980 Gauss-Kruger zone 20" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "Xian 1980 / GK Zone 21" ), 2335, QStringLiteral( "Xian 1980 Gauss-Kruger zone 21" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "Xian 1980 / GK Zone 22" ), 2336, QStringLiteral( "Xian 1980 Gauss-Kruger zone 22" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "Xian 1980 / GK Zone 23" ), 2337, QStringLiteral( "Xian 1980 Gauss-Kruger zone 23" ), QStringLiteral( "China" ) },
 
       // -- Regional --
       { QStringLiteral( "NAD83" ),    4269, QStringLiteral( "North American Datum 1983" ),                QStringLiteral( "Regional" ) },

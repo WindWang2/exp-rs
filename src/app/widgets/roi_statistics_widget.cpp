@@ -123,24 +123,42 @@ void RoiStatisticsWidget::computeStatistics()
     QgsRectangle bbox = roiGeom.isNull() ? m_rasterLayer->extent() : roiGeom.boundingBox();
 
     // Read raster data
+    GDALDatasetH ds = GDALOpen(m_rasterLayer->source().toUtf8().constData(), GA_ReadOnly);
+    if (!ds) return;
+
+    double gt[6];
+    if (GDALGetGeoTransform(ds, gt) != CE_None) {
+        gt[0] = 0; gt[1] = 1; gt[2] = 0;
+        gt[3] = 0; gt[4] = 0; gt[5] = 1;
+    }
+
+    double pxMin = (bbox.xMinimum() - gt[0]) / gt[1];
+    double pxMax = (bbox.xMaximum() - gt[0]) / gt[1];
+    double pyMin = (bbox.yMaximum() - gt[3]) / gt[5];
+    double pyMax = (bbox.yMinimum() - gt[3]) / gt[5];
+
+    if (pxMin > pxMax) std::swap(pxMin, pxMax);
+    if (pyMin > pyMax) std::swap(pyMin, pyMax);
+
+    int rWidth = GDALGetRasterXSize(ds);
+    int rHeight = GDALGetRasterYSize(ds);
+
+    int xOff = std::clamp(static_cast<int>(std::floor(pxMin)), 0, rWidth);
+    int yOff = std::clamp(static_cast<int>(std::floor(pyMin)), 0, rHeight);
+    int xSize = std::clamp(static_cast<int>(std::ceil(pxMax)) - xOff, 0, rWidth - xOff);
+    int ySize = std::clamp(static_cast<int>(std::ceil(pyMax)) - yOff, 0, rHeight - yOff);
+
+    if (xSize <= 0 || ySize <= 0) {
+        GDALClose(ds);
+        return;
+    }
+
     for (int b = 0; b < bandCount; ++b) {
-        GDALDatasetH ds = GDALOpen(m_rasterLayer->source().toUtf8().constData(), GA_ReadOnly);
-        if (!ds) continue;
-
         GDALRasterBandH band = GDALGetRasterBand(ds, b + 1);
-        if (!band) { GDALClose(ds); continue; }
-
-        // Read the region of interest
-        int xOff = std::max(0, static_cast<int>(bbox.xMinimum()));
-        int yOff = std::max(0, static_cast<int>(bbox.yMinimum()));
-        int xSize = std::min(m_rasterLayer->width() - xOff, static_cast<int>(bbox.width()) + 1);
-        int ySize = std::min(m_rasterLayer->height() - yOff, static_cast<int>(bbox.height()) + 1);
-
-        if (xSize <= 0 || ySize <= 0) { GDALClose(ds); continue; }
+        if (!band) continue;
 
         std::vector<float> buf(xSize * ySize);
         GDALRasterIO(band, GF_Read, xOff, yOff, xSize, ySize, buf.data(), xSize, ySize, GDT_Float32, 0, 0);
-        GDALClose(ds);
 
         // Compute statistics using shared utility
         MathUtils::Stats s = MathUtils::computeStats(buf.data(), buf.size());
@@ -150,6 +168,7 @@ void RoiStatisticsWidget::computeStatistics()
         m_stats[b].min = s.min;
         m_stats[b].max = s.max;
     }
+    GDALClose(ds);
 
     m_summaryLabel->setText(tr("Statistics computed for %1 bands, %2 pixels")
                                 .arg(bandCount).arg(m_stats[0].pixelCount));

@@ -301,15 +301,31 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
                                            .arg( int( r.inlierRatio * 100 ) );
                      if ( QMessageBox::question( this, tr( "SIFT 匹配结果" ), msg ) != QMessageBox::Yes )
                        return;
-                     QVector<QgsGcpPoint> pairs;
-                     pairs.reserve( r.inliers.size() );
-                     const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
-                     for ( const auto &m : r.inliers )
-                     {
-                       pairs.append( QgsGcpPoint( m.srcPx, m.dstWorld, destCrs, true ) );
-                     }
-                     // Accepted matches go straight into the session (sole GCP owner).
-                     georefSession().appendGcps( pairs );
+                      QVector<QgsGcpPoint> pairs;
+                      pairs.reserve( r.inliers.size() );
+                      const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
+                      auto srcPxToMap = [this]( const QgsPointXY &px ) -> QgsPointXY {
+                        if ( mSrcRaster && mSrcRaster->isValid() )
+                        {
+                          const auto extent = mSrcRaster->extent();
+                          const int w = mSrcRaster->width();
+                          const int h = mSrcRaster->height();
+                          if ( w > 0 && h > 0 && extent.width() > 0 && extent.height() > 0 )
+                          {
+                            const double resX = extent.width() / w;
+                            const double resY = extent.height() / h;
+                            return QgsPointXY( extent.xMinimum() + px.x() * resX,
+                                               extent.yMaximum() - px.y() * resY );
+                          }
+                        }
+                        return QgsPointXY( px.x(), -px.y() );
+                      };
+                      for ( const auto &m : r.inliers )
+                      {
+                        pairs.append( QgsGcpPoint( srcPxToMap( m.srcPx ), m.dstWorld, destCrs, true ) );
+                      }
+                      // Accepted matches go straight into the session (sole GCP owner).
+                      georefSession().appendGcps( pairs );
                      QJsonObject o {
                        { QStringLiteral( "event" ),        QStringLiteral( "sift_match" ) },
                        { QStringLiteral( "matches" ),      r.totalMatches },
@@ -360,7 +376,33 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
     for ( const QgsGcpPoint &g : georefSession().gcps() )
     {
       if ( g.isEnabled() )
-        seeds.append( g.sourcePoint() );
+      {
+        const QgsPointXY srcPt = g.sourcePoint();
+        QgsPointXY srcPx = srcPt;
+        if ( mSrcRaster && mSrcRaster->isValid() )
+        {
+          const auto extent = mSrcRaster->extent();
+          const int w = mSrcRaster->width();
+          const int h = mSrcRaster->height();
+          if ( w > 0 && h > 0 && extent.width() > 0 && extent.height() > 0 )
+          {
+            const double resX = extent.width() / w;
+            const double resY = extent.height() / h;
+            const double col = ( srcPt.x() - extent.xMinimum() ) / resX;
+            const double row = ( extent.yMaximum() - srcPt.y() ) / resY;
+            srcPx = QgsPointXY( col, row );
+          }
+          else
+          {
+            srcPx = QgsPointXY( srcPt.x(), -srcPt.y() );
+          }
+        }
+        else
+        {
+          srcPx = QgsPointXY( srcPt.x(), -srcPt.y() );
+        }
+        seeds.append( srcPx );
+      }
     }
     if ( seeds.isEmpty() )
     {
@@ -455,9 +497,25 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
                      QVector<QgsGcpPoint> pairs;
                      pairs.reserve( r.matches.size() );
                      const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
+                     auto srcPxToMap = [this]( const QgsPointXY &px ) -> QgsPointXY {
+                       if ( mSrcRaster && mSrcRaster->isValid() )
+                       {
+                         const auto extent = mSrcRaster->extent();
+                         const int w = mSrcRaster->width();
+                         const int h = mSrcRaster->height();
+                         if ( w > 0 && h > 0 && extent.width() > 0 && extent.height() > 0 )
+                         {
+                           const double resX = extent.width() / w;
+                           const double resY = extent.height() / h;
+                           return QgsPointXY( extent.xMinimum() + px.x() * resX,
+                                              extent.yMaximum() - px.y() * resY );
+                         }
+                       }
+                       return QgsPointXY( px.x(), -px.y() );
+                     };
                      for ( const auto &m : r.matches )
                      {
-                       pairs.append( QgsGcpPoint( m.srcPx, m.dstWorld, destCrs, true ) );
+                       pairs.append( QgsGcpPoint( srcPxToMap( m.srcPx ), m.dstWorld, destCrs, true ) );
                      }
                      // Accepted matches go straight into the session (sole GCP owner).
                      georefSession().appendGcps( pairs );

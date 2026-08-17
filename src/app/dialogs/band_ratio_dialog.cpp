@@ -175,6 +175,9 @@ void BandRatioDialog::onRun()
       size_t pixelCount = static_cast<size_t>( width ) * static_cast<size_t>( height );
       int outBandCount = ( modeIndex == 0 ) ? 1 : 3;
 
+      if ( pixelCount > 500000000ULL || ( static_cast<uint64_t>( outBandCount + 3 ) * pixelCount * sizeof( float ) ) > 2000000000ULL )
+        return QString();
+
       auto readBand = [&]( int bandNum ) -> std::vector<float> {
         std::vector<float> buffer( pixelCount );
         if ( !srcDataset.readBandData( bandNum, buffer.data(), width, height ) )

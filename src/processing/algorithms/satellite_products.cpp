@@ -1386,6 +1386,9 @@ bool stackToGeoTiff(const ProductInfo& product,
             return false;
         }
 
+        int hasNoData = 0;
+        double ndVal = GDALGetRasterNoDataValue(srcBand, &hasNoData);
+
         GDALRasterBandH dstBand = GDALGetRasterBand(outDs, i + 1);
         cerr = GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
                             buffer.data(), width, height, GDT_Float32, 0, 0);
@@ -1395,6 +1398,10 @@ bool stackToGeoTiff(const ProductInfo& product,
             if (errorMessage)
                 *errorMessage = QStringLiteral("Failed to write band %1").arg(selected[i].name);
             return false;
+        }
+
+        if (hasNoData) {
+            GDALSetRasterNoDataValue(dstBand, ndVal);
         }
 
         GDALSetDescription(dstBand, selected[i].name.toUtf8().constData());
@@ -1457,7 +1464,7 @@ bool stackToGeoTiff(const ProductInfo& product,
     {
         importedState = ( product.processingLevel.compare( QLatin1String( "L2A" ), Qt::CaseInsensitive ) == 0 )
                             ? kRadiometricStateSurfaceReflectance
-                            : kRadiometricStateToaReflectance;
+                            : kRadiometricStateDigitalNumber;
     }
     else if ( product.type == ProductType::Modis )
     {
@@ -1470,7 +1477,7 @@ bool stackToGeoTiff(const ProductInfo& product,
         else if ( pid.contains( QLatin1String( "MOD09" ), Qt::CaseInsensitive )
                   || pid.contains( QLatin1String( "MYD09" ), Qt::CaseInsensitive ) )
         {
-            importedState = kRadiometricStateSurfaceReflectance;
+            importedState = kRadiometricStateDigitalNumber;
         }
         else if ( pid.contains( QLatin1String( "MOD13" ), Qt::CaseInsensitive )
                   || pid.contains( QLatin1String( "MYD13" ), Qt::CaseInsensitive ) )

@@ -70,6 +70,8 @@ class SicnuAlgorithmDialog : public QgsProcessingAlgorithmDialogBase
     /** Stay alive while a Task Center job is in flight (no mAlgorithmTask). */
     bool isFinalized() override;
 
+    void closeEvent( QCloseEvent *event ) override;
+
   private:
     QgsProcessingContext mContext;
     QgsProcessingParametersWidget *mParamWidget = nullptr;

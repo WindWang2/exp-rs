@@ -1385,8 +1385,14 @@ void QgsGeorefShellWindow::onSessionFitChanged( const RsGeorefFitResult &fit )
   {
     if ( fit.ready && fit.rms > 0.0 )
       mRmsLabel->setText( tr( "RMS: %1 px" ).arg( QString::number( fit.rms, 'f', 3 ) ) );
+    else if ( !fit.errorMessage.isEmpty() )
+      mRmsLabel->setText( tr( "Fit error: %1" ).arg( fit.errorMessage ) );
     else
       mRmsLabel->setText( tr( "RMS: —" ) );
+  }
+  if ( !fit.ready && !fit.errorMessage.isEmpty() && statusBar() )
+  {
+    statusBar()->showMessage( fit.errorMessage, 5000 );
   }
   updateApplyEnabled();
 }

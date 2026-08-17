@@ -48,11 +48,13 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
     const float invCs2 = 1.0f / cs2;
     const float inv8cs = 1.0f / ( 8.0f * cellSize );
 
+    auto isInvalid = [nodata]( float v ) { return v == nodata || std::isnan( v ); };
+
     // Border pixels: use getCell with bounds checking
     auto processBorder = [&]( int r, int c ) {
         const int idx = r * width + c;
         const float z = dem[idx];
-        if ( z == nodata || std::isnan( z ) ) { out[idx] = nodata; return; }
+        if ( isInvalid( z ) ) { out[idx] = nodata; return; }
 
         const float a = getCell( dem, width, height, r - 1, c - 1, nodata );
         const float b = getCell( dem, width, height, r - 1, c, nodata );
@@ -63,12 +65,12 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
         const float h = getCell( dem, width, height, r + 1, c, nodata );
         const float i = getCell( dem, width, height, r + 1, c + 1, nodata );
 
-        bool hasNodata = ( a == nodata || b == nodata || c2 == nodata ||
-                           d == nodata || f == nodata || g == nodata || h == nodata || i == nodata );
+        bool hasNodata = ( isInvalid( a ) || isInvalid( b ) || isInvalid( c2 ) ||
+                           isInvalid( d ) || isInvalid( f ) || isInvalid( g ) || isInvalid( h ) || isInvalid( i ) );
         float dzdx, dzdy;
         if ( hasNodata ) {
-            dzdx = ( ( f != nodata ? f : z ) - ( d != nodata ? d : z ) ) * invCs2;
-            dzdy = ( ( h != nodata ? h : z ) - ( b != nodata ? b : z ) ) * invCs2;
+            dzdx = ( ( !isInvalid( f ) ? f : z ) - ( !isInvalid( d ) ? d : z ) ) * invCs2;
+            dzdy = ( ( !isInvalid( h ) ? h : z ) - ( !isInvalid( b ) ? b : z ) ) * invCs2;
         } else {
             dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8cs;
             dzdy = ( ( g + 2.0f * h + i ) - ( a + 2.0f * b + c2 ) ) * inv8cs;
@@ -80,7 +82,7 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
     auto processInterior = [&]( int r, int c ) {
         const int idx = r * width + c;
         const float z = dem[idx];
-        if ( z == nodata || std::isnan( z ) ) { out[idx] = nodata; return; }
+        if ( isInvalid( z ) ) { out[idx] = nodata; return; }
 
         const float a = dem[( r - 1 ) * width + ( c - 1 )];
         const float b = dem[( r - 1 ) * width + c];
@@ -91,12 +93,12 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
         const float h = dem[( r + 1 ) * width + c];
         const float i = dem[( r + 1 ) * width + ( c + 1 )];
 
-        bool hasNodata = ( a == nodata || b == nodata || c2 == nodata ||
-                           d == nodata || f == nodata || g == nodata || h == nodata || i == nodata );
+        bool hasNodata = ( isInvalid( a ) || isInvalid( b ) || isInvalid( c2 ) ||
+                           isInvalid( d ) || isInvalid( f ) || isInvalid( g ) || isInvalid( h ) || isInvalid( i ) );
         float dzdx, dzdy;
         if ( hasNodata ) {
-            dzdx = ( ( f != nodata ? f : z ) - ( d != nodata ? d : z ) ) * invCs2;
-            dzdy = ( ( h != nodata ? h : z ) - ( b != nodata ? b : z ) ) * invCs2;
+            dzdx = ( ( !isInvalid( f ) ? f : z ) - ( !isInvalid( d ) ? d : z ) ) * invCs2;
+            dzdy = ( ( !isInvalid( h ) ? h : z ) - ( !isInvalid( b ) ? b : z ) ) * invCs2;
         } else {
             dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8cs;
             dzdy = ( ( g + 2.0f * h + i ) - ( a + 2.0f * b + c2 ) ) * inv8cs;
@@ -147,10 +149,12 @@ bool TerrainAnalysis::aspect( const float *dem, float *out, int width, int heigh
     const float inv8cs = 1.0f / ( 8.0f * cellSize );
     const float toDeg = 180.0f / static_cast<float>( M_PI );
 
+    auto isInvalid = [nodata]( float v ) { return v == nodata || std::isnan( v ); };
+
     auto computeAspect = [&]( int r, int c, bool useBounds ) {
         const int idx = r * width + c;
         const float z = dem[idx];
-        if ( z == nodata || std::isnan( z ) ) { out[idx] = nodata; return; }
+        if ( isInvalid( z ) ) { out[idx] = nodata; return; }
 
         float a, b, c2, d, f, g, h, i;
         if ( useBounds ) {
@@ -173,19 +177,19 @@ bool TerrainAnalysis::aspect( const float *dem, float *out, int width, int heigh
             i = dem[( r + 1 ) * width + ( c + 1 )];
         }
 
-        bool hasNodata = ( a == nodata || b == nodata || c2 == nodata ||
-                           d == nodata || f == nodata || g == nodata || h == nodata || i == nodata );
+        bool hasNodata = ( isInvalid( a ) || isInvalid( b ) || isInvalid( c2 ) ||
+                           isInvalid( d ) || isInvalid( f ) || isInvalid( g ) || isInvalid( h ) || isInvalid( i ) );
         float dzdx, dzdy;
         if ( hasNodata ) {
-            dzdx = ( ( f != nodata ? f : z ) - ( d != nodata ? d : z ) ) * invCs2;
-            dzdy = ( ( h != nodata ? h : z ) - ( b != nodata ? b : z ) ) * invCs2;
+            dzdx = ( ( !isInvalid( f ) ? f : z ) - ( !isInvalid( d ) ? d : z ) ) * invCs2;
+            dzdy = ( ( !isInvalid( h ) ? h : z ) - ( !isInvalid( b ) ? b : z ) ) * invCs2;
         } else {
             dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8cs;
             dzdy = ( ( g + 2.0f * h + i ) - ( a + 2.0f * b + c2 ) ) * inv8cs;
         }
 
         if ( std::abs( dzdx ) < 1e-10f && std::abs( dzdy ) < 1e-10f ) { out[idx] = -1.0f; return; }
-        float angle = std::atan2( -dzdy, dzdx ) * toDeg;
+        float angle = std::atan2( -dzdx, dzdy ) * toDeg;
         if ( angle < 0 ) angle += 360.0f;
         out[idx] = angle;
     };
@@ -273,7 +277,8 @@ bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int he
 
         const float slopeRad = std::atan( std::sqrt( dzdx * dzdx + dzdy * dzdy ) );
         float aspectRad = ( std::abs( dzdx ) < 1e-10f && std::abs( dzdy ) < 1e-10f )
-                          ? 0.0f : std::atan2( -dzdy, dzdx );
+                          ? 0.0f : std::atan2( -dzdx, dzdy );
+        if ( aspectRad < 0.0f ) aspectRad += static_cast<float>( 2.0 * M_PI );
         const float hs = cosZen * std::cos( slopeRad )
                          + sinZen * std::sin( slopeRad ) * std::cos( azRad - aspectRad );
         out[idx] = std::clamp( hs, 0.0f, 1.0f );

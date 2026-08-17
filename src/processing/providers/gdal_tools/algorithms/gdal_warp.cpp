@@ -21,6 +21,7 @@ QStringList GdalWarpAlgorithm::buildArgs(const QVariantMap &parameters,
     Q_UNUSED(feedback);
 
     QStringList args;
+    args << QStringLiteral( "-overwrite" );
 
     if (parameters.contains("TARGET_CRS") && !parameters.value("TARGET_CRS").toString().isEmpty()) {
         args << "-t_srs" << parameters.value("TARGET_CRS").toString();

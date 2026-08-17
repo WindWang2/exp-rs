@@ -145,9 +145,16 @@ add_executable(sicnu_geo_rs
     dialogs/stac_browser_dialog.cpp
     dialogs/raster_processing_dialog_base.cpp
     dialogs/extract_band_dialog.cpp
+    dialogs/async_runner_base.cpp
+    dialogs/async_algorithm_runner.cpp
+    dialogs/async_gdal_runner.cpp
     layout/qgslayoutdesignerdialog.cpp
     map_tools/measure_tool.cpp
     map_tools/rs_roi_spectrum_tool.cpp
+    widgets/annotation_widget.cpp
+    widgets/cross_section_widget.cpp
+    widgets/multi_temporal_widget.cpp
+    widgets/roi_statistics_widget.cpp
     widgets/histogram_widget.cpp
     widgets/histogram_stretch_widget.cpp
     widgets/band_composition_rail.cpp
@@ -375,4 +382,10 @@ endif()
 if(EXISTS ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.svg)
     install(FILES ${CMAKE_SOURCE_DIR}/packaging/sicnu_geo_rs.svg
             DESTINATION share/icons/hicolor/scalable/apps)
+endif()
+
+# Install data directory
+if(EXISTS ${CMAKE_SOURCE_DIR}/data)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/data
+            DESTINATION share/sicnu_geo_rs)
 endif()

@@ -103,6 +103,32 @@ void TerrainDialog::setupUi()
     mLayerCombo->setCurrentIndex( 0 );
 }
 
+bool TerrainDialog::validateInputs()
+{
+  auto *rl = mLayerCombo ? mLayerCombo->currentData().value<QgsRasterLayer *>() : nullptr;
+  if ( !rl || !rl->isValid() )
+  {
+    QMessageBox::warning( this, dialogTitle(), tr( "请选择有效的 DEM 图层。" ) );
+    return false;
+  }
+
+  setRasterLayer( rl );
+
+  QString outPath = outputPath();
+  if ( outPath.isEmpty() )
+  {
+    const QString inputPath = rl->source();
+    const QString analysisType = mAnalysisCombo ? mAnalysisCombo->currentData().toString() : QStringLiteral( "slope" );
+    outPath = QFileInfo( inputPath ).path() + QLatin1Char( '/' )
+              + QFileInfo( inputPath ).completeBaseName()
+              + QLatin1Char( '_' ) + analysisType + QStringLiteral( ".tif" );
+    if ( m_outputEdit )
+      m_outputEdit->setText( outPath );
+  }
+
+  return true;
+}
+
 void TerrainDialog::onRun()
 {
   auto *rl = mLayerCombo->currentData().value<QgsRasterLayer *>();

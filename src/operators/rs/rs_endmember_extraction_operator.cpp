@@ -354,10 +354,18 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
     for (int index : result.endmemberIndices)
         indices.append(index);
     json["indices"] = indices;
-    Json::Value countsJson(Json::arrayValue);
-    for (int c : result.ppiCounts)
-        countsJson.append(c);
-    json["ppiCounts"] = countsJson;
+    constexpr size_t kMaxPpiCountsInJson = 65536;
+    if (result.ppiCounts.size() <= kMaxPpiCountsInJson)
+    {
+        Json::Value countsJson(Json::arrayValue);
+        for (int c : result.ppiCounts)
+            countsJson.append(c);
+        json["ppiCounts"] = countsJson;
+    }
+    else
+    {
+        json["ppiCountsTruncated"] = true;
+    }
     return json;
 }
 

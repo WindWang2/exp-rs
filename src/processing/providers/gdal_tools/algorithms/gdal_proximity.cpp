@@ -41,7 +41,7 @@ QStringList GdalProximityAlgorithm::buildArgs(const QVariantMap &parameters,
     }
 
     if (parameters.contains("TARGET_VALUE") && !parameters.value("TARGET_VALUE").toString().isEmpty()) {
-        args << "-targetvalue" << parameters.value("TARGET_VALUE").toString();
+        args << "-values" << parameters.value("TARGET_VALUE").toString();
     }
 
     if (parameters.contains("EXTRA") && !parameters.value("EXTRA").toString().isEmpty()) {

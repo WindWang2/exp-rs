@@ -24,17 +24,15 @@ bool SicnuPythonRunner::evalCommand( QString command, QString &result )
   return QgisPython::instance().evalString( command, result, error );
 }
 
+#include <QJsonArray>
+#include <QJsonDocument>
+
 bool SicnuPythonRunner::setArgvCommand( const QStringList &arguments, const QString &messageOnError )
 {
   Q_UNUSED( messageOnError );
-  QString cmd = QStringLiteral( "import sys\nsys.argv = [" );
-  for ( int i = 0; i < arguments.size(); ++i )
-  {
-    if ( i > 0 )
-      cmd += QStringLiteral( ", " );
-    cmd += QStringLiteral( "'%1'" ).arg( arguments.at( i ) );
-  }
-  cmd += QStringLiteral( "]" );
+  const QJsonArray arr = QJsonArray::fromStringList( arguments );
+  const QString jsonStr = QString::fromUtf8( QJsonDocument( arr ).toJson( QJsonDocument::Compact ) );
+  QString cmd = QStringLiteral( "import sys\nsys.argv = " ) + jsonStr;
   QString error;
   return QgisPython::instance().runString( cmd, error );
 }

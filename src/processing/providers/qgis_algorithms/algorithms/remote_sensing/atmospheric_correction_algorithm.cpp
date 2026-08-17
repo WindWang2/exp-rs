@@ -93,9 +93,16 @@ QVariantMap AtmosphericCorrectionAlgorithm::processAlgorithm( const QVariantMap 
     std::vector<float> dnData( totalPixels );
     for ( size_t i = 0; i < totalPixels; ++i )
     {
-        int row = i / nCols;
-        int col = i % nCols;
-        dnData[i] = static_cast<float>( inBlock->value( row, col ) );
+        int row = static_cast<int>( i / nCols );
+        int col = static_cast<int>( i % nCols );
+        if ( inBlock->isNoData( row, col ) )
+        {
+            dnData[i] = std::numeric_limits<float>::quiet_NaN();
+        }
+        else
+        {
+            dnData[i] = static_cast<float>( inBlock->value( row, col ) );
+        }
     }
 
     feedback->setProgress( 30 );
@@ -137,7 +144,9 @@ QVariantMap AtmosphericCorrectionAlgorithm::processAlgorithm( const QVariantMap 
     if ( !outProvider )
         throw QgsProcessingException( QObject::tr( "Could not create output raster" ) );
 
+    outProvider->setNoDataValue( 1, std::numeric_limits<double>::quiet_NaN() );
     QgsRasterBlock outBlock( Qgis::DataType::Float32, nCols, nRows );
+    outBlock.setNoDataValue( std::numeric_limits<double>::quiet_NaN() );
     for ( int row = 0; row < nRows; ++row )
     {
         for ( int col = 0; col < nCols; ++col )

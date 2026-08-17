@@ -247,6 +247,10 @@ MaskDerivation writeMaskFromMagnitude( const std::string &magPath, const GdalDat
     }
     DatasetFileGuard maskGuard{ maskDs, opts.outputPath, false };
     GDALRasterBandH maskBand = GDALGetRasterBand( maskDs, 1 );
+    if ( maskBand )
+    {
+        GDALSetRasterNoDataValue( maskBand, 255.0 );
+    }
     const CPLErr writeErr = GDALRasterIO( maskBand, GF_Write, 0, 0, width, height,
                                           mask.data(), width, height, GDT_Byte, 0, 0 );
     GDALSetMetadataItem( maskDs, "SICNU_CHANGE_METHOD", opts.methodLabel.c_str(), nullptr );

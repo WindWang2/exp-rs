@@ -85,28 +85,45 @@ bool absolutePathOutsideWorkspace( const std::string &pathValue,
   if ( path.startsWith( QLatin1Char( '~' ) ) )
     path = QDir::homePath() + path.mid( 1 );
 
-  const QFileInfo fi( path );
-  if ( !fi.isAbsolute() )
-    return false;
-
   QString workspaceCanon = QDir( workspaceRoot ).canonicalPath();
   if ( workspaceCanon.isEmpty() )
     workspaceCanon = QFileInfo( workspaceRoot ).absoluteFilePath();
   if ( workspaceCanon.isEmpty() )
     return false;
 
+  const QFileInfo fi( path );
   QString resolved;
-  if ( fi.exists() )
+  if ( fi.isAbsolute() )
   {
-    resolved = fi.canonicalFilePath();
+    if ( fi.exists() )
+    {
+      resolved = fi.canonicalFilePath();
+    }
+    else
+    {
+      QDir parent = fi.dir();
+      QString parentCanon = parent.canonicalPath();
+      if ( parentCanon.isEmpty() )
+        parentCanon = parent.absolutePath();
+      resolved = QDir( parentCanon ).filePath( fi.fileName() );
+    }
   }
   else
   {
-    QDir parent = fi.dir();
-    QString parentCanon = parent.canonicalPath();
-    if ( parentCanon.isEmpty() )
-      parentCanon = parent.absolutePath();
-    resolved = QDir( parentCanon ).filePath( fi.fileName() );
+    const QString joined = QDir( workspaceCanon ).filePath( path );
+    const QFileInfo fiJoined( joined );
+    if ( fiJoined.exists() )
+    {
+      resolved = fiJoined.canonicalFilePath();
+    }
+    else
+    {
+      QDir parent = fiJoined.dir();
+      QString parentCanon = parent.canonicalPath();
+      if ( parentCanon.isEmpty() )
+        parentCanon = parent.absolutePath();
+      resolved = QDir( parentCanon ).filePath( fiJoined.fileName() );
+    }
   }
 
   const QString normResolved = QDir::cleanPath( resolved );
@@ -235,6 +252,19 @@ bool cliJsonToWorkflowDefinition( const Json::Value &pipelineJson,
             stepDef.inputs.push_back( conn );
           }
         }
+      }
+    }
+
+    const QString workspace = QProcessEnvironment::systemEnvironment().value(
+      QStringLiteral( "SICNU_PIPELINE_WORKSPACE" ) );
+    if ( !workspace.isEmpty() && stepDef.params.isObject() )
+    {
+      std::string detail;
+      if ( jsonValueOutsideWorkspace( stepDef.params, workspace, &detail ) )
+      {
+        if ( errorMessage )
+          *errorMessage = "Step " + stepDef.id + ": " + detail;
+        return false;
       }
     }
 

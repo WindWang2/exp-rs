@@ -288,6 +288,18 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
     } );
   }
 
+  struct WatcherJoiner
+  {
+    std::atomic<bool> &done;
+    std::thread &t;
+    ~WatcherJoiner()
+    {
+      done.store( true, std::memory_order_relaxed );
+      if ( t.joinable() )
+        t.join();
+    }
+  } watcherJoiner{ runDone, watcher };
+
   QVariantMap runResults;
   try
   {
@@ -295,16 +307,9 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
   }
   catch ( const QgsProcessingException &e )
   {
-    runDone.store( true, std::memory_order_relaxed );
-    if ( watcher.joinable() )
-      watcher.join();
     try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
     throw std::runtime_error( e.what().toStdString() );
   }
-
-  runDone.store( true, std::memory_order_relaxed );
-  if ( watcher.joinable() )
-    watcher.join();
 
   checkCancelled();
   if ( feedback.isCanceled() )

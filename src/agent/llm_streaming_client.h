@@ -95,6 +95,7 @@ class LlmStreamingClient : public QObject
     QByteArray m_buffer;
 
     std::map<int, ToolCallAccumulator> m_toolCalls;
+    bool m_finishedEmitted = false;
 };
 
 } // namespace sicnu::agent

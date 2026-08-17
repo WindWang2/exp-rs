@@ -65,12 +65,14 @@ GeoInfo extractGeoInfo(GDALDatasetH ds);
  * @param errorMessage  If non-null, receives error description on failure
  * @return true on success
  */
+#include <optional>
+
 bool writeGdalOutput(const QString &outputPath, int width, int height,
                      const std::vector<std::vector<float>> &bands,
                      const std::array<double, 6> &geoTransform,
                      const QString &projection,
                      QString *errorMessage = nullptr,
-                     double nodataValue = std::numeric_limits<double>::quiet_NaN());
+                     std::optional<double> nodata = std::nullopt);
 
 /**
  * RAII wrapper around GDAL C API for raster dataset access.

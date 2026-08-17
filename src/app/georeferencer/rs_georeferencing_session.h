@@ -49,6 +49,8 @@ struct RsGeorefWarpSnapshot
   QgsImageWarper::ResamplingMethod resampling =
     QgsImageWarper::ResamplingMethod::NearestNeighbour;
   QgsCoordinateReferenceSystem destCrs;
+  QString demPath;
+  double demZOffset = 0.0;
   double pixelSize = 0.0;
   double rmsAtCapture = -1.0;
 };

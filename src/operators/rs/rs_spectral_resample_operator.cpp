@@ -225,6 +225,13 @@ Json::Value RsSpectralResampleOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to create resampled raster: " + outErr.toStdString());
 
+    for (int t = 0; t < dstBands; ++t)
+    {
+        GDALRasterBandH b = GDALGetRasterBand(outDs, t + 1);
+        if (b)
+            GDALSetRasterNoDataValue(b, std::numeric_limits<double>::quiet_NaN());
+    }
+
     for (int y = 0; y < height; y += kTile)
     {
         const int h = std::min(kTile, height - y);

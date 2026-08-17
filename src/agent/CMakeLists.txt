@@ -49,3 +49,8 @@ target_include_directories(sicnu_agent PUBLIC
 set_target_properties(sicnu_agent PROPERTIES
   AUTOMOC ON
 )
+
+install(TARGETS sicnu_agent
+  RUNTIME DESTINATION ${QGIS_BIN_DIR}
+  LIBRARY DESTINATION ${QGIS_LIB_DIR}
+  ARCHIVE DESTINATION ${QGIS_LIB_DIR})

@@ -376,6 +376,7 @@ bool loadMetadata(const QString &rasterPath, const QString &metadataPath,
 
 bool toRadiance(const float *dn, float *radiance, size_t count, const BandCoefficients &c)
 {
+    if (!dn || !radiance || count == 0) return false;
     return MathUtils::linearScale(dn, radiance, count,
                                   static_cast<float>(c.radianceGain),
                                   static_cast<float>(c.radianceBias));
@@ -540,8 +541,8 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                      QStringLiteral("Calibrating band %1").arg(b));
 
         const BandCoefficients &c = meta.bands.value(b);
-        bool hasBandNoData = false;
-        const double bandNoData = srcDataset.bandNoDataValue(b, &hasBandNoData);
+        bool hasSrcNoData = false;
+        const double bandNoData = srcDataset.bandNoDataValue(b, &hasSrcNoData);
 
         std::vector<float> out;
         QString tileError;
@@ -567,7 +568,7 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                 }
                 for (size_t i = 0; i < tileCount; ++i) {
                     float v = pixels[i];
-                    if (!std::isfinite(v) || (hasBandNoData && !std::isnan(bandNoData) && std::abs(v - bandNoData) < 1e-4f)) {
+                    if (!std::isfinite(v) || (hasSrcNoData && (!std::isnan(bandNoData) ? std::abs(v - bandNoData) < 1e-4f : std::isnan(v)))) {
                         out[i] = std::numeric_limits<float>::quiet_NaN();
                     }
                 }

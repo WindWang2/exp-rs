@@ -291,38 +291,46 @@ AwaitStatus PythonIpcServer::sendRequestSync( const QString &method, const QJson
     return sendRequestAndAwait( method, params, result, isError, timeoutMs );
   }
 
-  // Worker thread: invoke sendRequestAndAwait on server's home thread
-  AwaitStatus status = AwaitStatus::NoClient;
-  QMutex mutex;
-  QWaitCondition waitCond;
-  bool done = false;
+  // Worker thread: invoke sendRequestAndAwait on server's home thread via shared context
+  struct SyncContext
+  {
+    QMutex mutex;
+    QWaitCondition waitCond;
+    bool done = false;
+    AwaitStatus status = AwaitStatus::NoClient;
+    QJsonObject result;
+    bool isError = false;
+  };
+  auto ctx = std::make_shared<SyncContext>();
 
   QPointer<PythonIpcServer> weakServer( this );
-  QMetaObject::invokeMethod( this, [weakServer, method, params, &result, &isError, timeoutMs, &status, &done, &mutex, &waitCond]() {
+  QMetaObject::invokeMethod( this, [weakServer, method, params, timeoutMs, ctx]() {
     if ( weakServer )
     {
-      status = weakServer->sendRequestAndAwait( method, params, result, isError, timeoutMs );
+      ctx->status = weakServer->sendRequestAndAwait( method, params, ctx->result, ctx->isError, timeoutMs );
     }
     else
     {
-      status = AwaitStatus::Disconnected;
+      ctx->status = AwaitStatus::Disconnected;
     }
-    QMutexLocker lock( &mutex );
-    done = true;
-    waitCond.wakeAll();
+    QMutexLocker lock( &ctx->mutex );
+    ctx->done = true;
+    ctx->waitCond.wakeAll();
   }, Qt::QueuedConnection );
 
   {
-    QMutexLocker lock( &mutex );
-    while ( !done )
+    QMutexLocker lock( &ctx->mutex );
+    while ( !ctx->done )
     {
-      if ( !waitCond.wait( &mutex, timeoutMs + 1000 ) )
+      if ( !ctx->waitCond.wait( &ctx->mutex, timeoutMs + 1000 ) )
       {
         return AwaitStatus::Timeout;
       }
     }
   }
-  return status;
+  result = ctx->result;
+  isError = ctx->isError;
+  return ctx->status;
 }
 
 void PythonIpcServer::sendResponse( int id, const QJsonObject &result )

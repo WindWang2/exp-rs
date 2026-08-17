@@ -47,7 +47,7 @@ bool ChunkedProcessor::process(const ChunkCallback &callback, QgsFeedback *feedb
     }
 
     // Multiple chunks: process in parallel
-    QVector<bool> results(m_chunks.size());
+    std::vector<uint8_t> results(m_chunks.size(), 0);
 
     // Use QtConcurrent::map for parallel execution
     QVector<int> indices(m_chunks.size());
@@ -60,11 +60,11 @@ bool ChunkedProcessor::process(const ChunkCallback &callback, QgsFeedback *feedb
     QtConcurrent::blockingMap(indices, [&](int idx) {
         // Check for cancellation
         if (feedback && feedback->isCanceled()) {
-            results[idx] = false;
+            results[idx] = 0;
             return;
         }
 
-        results[idx] = callback(m_chunks[idx]);
+        results[idx] = callback(m_chunks[idx]) ? 1 : 0;
 
         // Update progress
         if (feedback) {
@@ -75,7 +75,7 @@ bool ChunkedProcessor::process(const ChunkCallback &callback, QgsFeedback *feedb
     });
 
     // Check all results
-    for (bool r : results) {
+    for (uint8_t r : results) {
         if (!r) return false;
     }
     return true;

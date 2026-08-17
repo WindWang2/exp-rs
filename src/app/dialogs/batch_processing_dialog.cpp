@@ -236,14 +236,14 @@ void BatchProcessingDialog::setupUi()
   SicnuDialogHelp::tip( m_fileList, tr( "待处理文件列表。" ) );
   qobject_cast<QVBoxLayout *>( fileSec->layout() )->addWidget(  m_fileList );
   auto *fileButtonLayout = new QHBoxLayout();
-  auto *addFilesBtn = new QPushButton( tr( "添加文件…" ), fileSec );
-  SicnuUi::markSecondary( addFilesBtn );
-  connect( addFilesBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onAddFiles );
-  fileButtonLayout->addWidget( addFilesBtn );
-  auto *removeBtn = new QPushButton( tr( "移除选中" ), fileSec );
-  SicnuUi::markSecondary( removeBtn );
-  connect( removeBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onRemoveSelected );
-  fileButtonLayout->addWidget( removeBtn );
+  m_addFilesBtn = new QPushButton( tr( "添加文件…" ), fileSec );
+  SicnuUi::markSecondary( m_addFilesBtn );
+  connect( m_addFilesBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onAddFiles );
+  fileButtonLayout->addWidget( m_addFilesBtn );
+  m_removeBtn = new QPushButton( tr( "移除选中" ), fileSec );
+  SicnuUi::markSecondary( m_removeBtn );
+  connect( m_removeBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onRemoveSelected );
+  fileButtonLayout->addWidget( m_removeBtn );
   fileButtonLayout->addStretch();
   qobject_cast<QVBoxLayout *>( fileSec->layout() )->addLayout( fileButtonLayout );
   mainLayout->addWidget( fileSec );
@@ -257,12 +257,12 @@ void BatchProcessingDialog::setupUi()
   connect( m_outputDirEdit, &QLineEdit::textChanged, this, [this]( const QString &text ) {
     m_outputDir = text.trimmed();
   } );
-  auto *browseBtn = new QPushButton( tr( "浏览…" ), outSec );
-  SicnuUi::markSecondary( browseBtn );
-  connect( browseBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onBrowseOutputDir );
+  m_browseBtn = new QPushButton( tr( "浏览…" ), outSec );
+  SicnuUi::markSecondary( m_browseBtn );
+  connect( m_browseBtn, &QPushButton::clicked, this, &BatchProcessingDialog::onBrowseOutputDir );
   auto *outRow = new QHBoxLayout();
   outRow->addWidget( m_outputDirEdit, 1 );
-  outRow->addWidget( browseBtn );
+  outRow->addWidget( m_browseBtn );
   outForm->addRow( tr( "输出目录" ), outRow );
   qobject_cast<QVBoxLayout *>( outSec->layout() )->addLayout( outForm );
   mainLayout->addWidget( outSec );
@@ -370,13 +370,20 @@ void BatchProcessingDialog::onRun()
         return;
     }
 
-    // Toggle button to Cancel during batch
+    // Toggle button to Cancel during batch; lock configuration controls against concurrent mutation
     m_isRunning = true;
     m_canceled = false;
     m_runButton->setText(tr("Cancel"));
     m_runButton->setEnabled(true);
+    if (m_addFilesBtn) m_addFilesBtn->setEnabled(false);
+    if (m_removeBtn) m_removeBtn->setEnabled(false);
+    if (m_browseBtn) m_browseBtn->setEnabled(false);
+    if (m_algorithmCombo) m_algorithmCombo->setEnabled(false);
+    if (m_paramFrame) m_paramFrame->setEnabled(false);
+
+    const QStringList filesToProcess = m_inputFiles;
     m_progressBar->setVisible(true);
-    m_progressBar->setRange(0, m_inputFiles.size());
+    m_progressBar->setRange(0, filesToProcess.size());
     m_progressBar->setValue(0);
 
     const QString algorithmId = m_algorithmCombo->currentData().toString();
@@ -405,13 +412,13 @@ void BatchProcessingDialog::onRun()
     int failCount = 0;
     QStringList errorMessages;
 
-    for (int i = 0; i < m_inputFiles.size(); ++i) {
+    for (int i = 0; i < filesToProcess.size(); ++i) {
         if (m_canceled) {
             errorMessages.append(tr("Batch canceled by user"));
             break;
         }
 
-        const QString &inputFile = m_inputFiles[i];
+        const QString inputFile = filesToProcess[i];
         m_statusLabel->setText(tr("Processing %1...").arg(QFileInfo(inputFile).fileName()));
         QApplication::processEvents();
 
@@ -456,6 +463,11 @@ void BatchProcessingDialog::onRun()
     m_isRunning = false;
     m_runButton->setText(tr("Run Batch"));
     m_runButton->setEnabled(true);
+    if (m_addFilesBtn) m_addFilesBtn->setEnabled(true);
+    if (m_removeBtn) m_removeBtn->setEnabled(true);
+    if (m_browseBtn) m_browseBtn->setEnabled(true);
+    if (m_algorithmCombo) m_algorithmCombo->setEnabled(true);
+    if (m_paramFrame) m_paramFrame->setEnabled(true);
 
     if (m_canceled) {
         m_statusLabel->setText(tr("Batch canceled: %1 succeeded, %2 failed")

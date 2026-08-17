@@ -12,7 +12,7 @@
 #include <QPalette>
 #include <QKeySequence>
 
-#include "src/python/qgis_python.h"
+#include "python/qgis_python.h"
 
 PythonConsoleWidget::PythonConsoleWidget(QWidget *parent)
     : QWidget(parent)
@@ -67,15 +67,12 @@ void PythonConsoleWidget::executeCommand()
     if (!QgisPython::instance().isInitialized())
         QgisPython::instance().initialize();
 
-    QString output, error;
-    bool success = QgisPython::instance().runString(code, output, error);
+    QString error;
+    bool success = QgisPython::instance().runString(code, error);
 
-    if (!output.isEmpty())
-        appendOutput(output);
     if (!error.isEmpty())
         appendOutput(error, true);
-
-    if (!success && error.isEmpty())
+    else if (!success)
         appendOutput(tr("Execution failed"), true);
 }
 
