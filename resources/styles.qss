@@ -1321,6 +1321,25 @@ QPushButton#rsRibbonTabButton:checked {
 QPushButton#rsRibbonTabButton:disabled {
     color: #8A93A0;
 }
+#rsRibbonCollapseBtn {
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: transparent;
+    color: #5A6573;
+    padding: 2px 4px;
+    margin: 2px 6px;
+}
+#rsRibbonCollapseBtn:hover {
+    background: rgba(11, 110, 79, 0.10);
+    border: 1px solid rgba(11, 110, 79, 0.25);
+    color: #1C2430;
+}
+#rsRibbonCollapseBtn:focus {
+    border: 1px solid #0B6E4F;
+}
+#rsRibbonCollapseBtn:disabled {
+    color: #8A93A0;
+}
 #rsRibbonStack, #rsRibbonPageScroll, #rsRibbonPage {
     background: #FAFBFC;
     border: none;

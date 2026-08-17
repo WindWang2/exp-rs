@@ -96,6 +96,7 @@ TEST_CASE( "Theme: Light and Dark stylesheets exist and have selector parity", "
     QStringLiteral( "#rsRibbonQatBtn" ),
     QStringLiteral( "#rsRibbonTabRow" ),
     QStringLiteral( "QPushButton#rsRibbonTabButton" ),
+    QStringLiteral( "#rsRibbonCollapseBtn" ),
     QStringLiteral( "#rsRibbonLargeBtn" ),
     QStringLiteral( "#rsRibbonGroup" ),
     QStringLiteral( "#rsRibbonGroupTitle" ),

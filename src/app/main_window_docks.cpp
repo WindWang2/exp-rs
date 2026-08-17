@@ -622,6 +622,8 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     m_ribbonBar = m_ribbonController->createRibbonBar();
     connect( m_ribbonController, &RibbonController::openWorkflowTool,
              this, &QgisDesktopWindow::openWorkflowTool );
+    connect( m_ribbonController, &RibbonController::ribbonCollapsedChanged,
+             this, &QgisDesktopWindow::layoutToolbarsUnderRibbon );
 
     auto *chrome = new QWidget;
     chrome->setObjectName( QStringLiteral( "rsTopChrome" ) );
@@ -659,7 +661,7 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
             return;
         // Only adjust chrome height when user drags/resizes inside the flow host.
         const int stripH = m_toolbarFlowHost ? m_toolbarFlowHost->usedHeight() : 0;
-        constexpr int kBaseChrome = 154;
+        const int kBaseChrome = ( m_ribbonController && m_ribbonController->isRibbonCollapsed() ) ? 58 : 154;
         constexpr int kRowH = 32;
         m_toolbarStrip->setFixedHeight( stripH );
         m_toolbarStrip->setMinimumHeight( stripH );
@@ -806,7 +808,7 @@ void QgisDesktopWindow::layoutToolbarsUnderRibbon()
         m_toolbarFlowHost->setProductToolbars( ordered );
     m_toolbarFlowHost->applyVisibility( wantByBar );
 
-    constexpr int kBaseChrome = 154;
+    const int kBaseChrome = ( m_ribbonController && m_ribbonController->isRibbonCollapsed() ) ? 58 : 154;
     constexpr int kRowH = 32;
     const int stripH = m_toolbarFlowHost->usedHeight();
 

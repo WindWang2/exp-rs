@@ -35,12 +35,23 @@ class RibbonController : public QObject
     /** Full-width ribbon widget (objectName rsRibbonBar). */
     QWidget *createRibbonBar();
 
+    /** Whether the ribbon page content stack is currently collapsed. */
+    bool isRibbonCollapsed() const { return m_ribbonCollapsed; }
+
   public slots:
     /** Refresh band-composition combos when the active raster changes. */
     void syncBandCombos();
 
+    /** Set or toggle ribbon collapsed state. */
+    void setRibbonCollapsed( bool collapsed );
+    void toggleRibbonCollapse() { setRibbonCollapsed( !m_ribbonCollapsed ); }
+
   signals:
     void openWorkflowTool( const QString &definitionId );
+    void ribbonCollapsedChanged( bool collapsed );
+
+  protected:
+    bool eventFilter( QObject *watched, QEvent *event ) override;
 
   private:
     struct GroupHost
@@ -91,4 +102,10 @@ class RibbonController : public QObject
     QComboBox *m_blueBandCombo = nullptr;
     QComboBox *m_grayBandCombo = nullptr;
     bool m_bandComboUpdating = false;
+
+    // Ribbon 收起/展开状态
+    QWidget *m_ribbonBar = nullptr;
+    QWidget *m_stack = nullptr;
+    QToolButton *m_collapseBtn = nullptr;
+    bool m_ribbonCollapsed = false;
 };

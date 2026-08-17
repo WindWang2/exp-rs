@@ -10,9 +10,11 @@
 #include <QButtonGroup>
 #include <QComboBox>
 #include <QDockWidget>
+#include <QEvent>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QKeySequence>
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
@@ -660,6 +662,7 @@ QWidget *RibbonController::createRibbonBar()
   auto addTab = [&]( const QString &title, QWidget *page, const QString &tip = QString() ) -> QPushButton * {
     auto *tabBtn = new QPushButton( title, tabRow );
     polishTabButton( tabBtn );
+    tabBtn->installEventFilter( this );
     if ( !tip.isEmpty() )
     {
       tabBtn->setToolTip( tip );
@@ -668,8 +671,10 @@ QWidget *RibbonController::createRibbonBar()
     const int index = stack->addWidget( page );
     tabGroup->addButton( tabBtn, index );
     tabLay->addWidget( tabBtn );
-    connect( tabBtn, &QPushButton::clicked, stack, [stack, index]() {
+    connect( tabBtn, &QPushButton::clicked, this, [this, stack, index]() {
       stack->setCurrentIndex( index );
+      if ( m_ribbonCollapsed )
+        setRibbonCollapsed( false );
     } );
     return tabBtn;
   };
@@ -1084,6 +1089,25 @@ QWidget *RibbonController::createRibbonBar()
   }
 
   tabLay->addStretch( 1 );
+
+  auto *collapseBtn = new QToolButton( tabRow );
+  collapseBtn->setObjectName( QStringLiteral( "rsRibbonCollapseBtn" ) );
+  collapseBtn->setArrowType( Qt::UpArrow );
+  collapseBtn->setAutoRaise( true );
+  collapseBtn->setCursor( Qt::PointingHandCursor );
+  collapseBtn->setFocusPolicy( Qt::StrongFocus );
+  collapseBtn->setToolTip( tr( "收起功能区 (Ctrl+F1)" ) );
+  collapseBtn->setShortcut( QKeySequence( Qt::CTRL | Qt::Key_F1 ) );
+  collapseBtn->setFixedSize( 28, 24 );
+  tabLay->addWidget( collapseBtn );
+
+  m_ribbonBar = bar;
+  m_stack = stack;
+  m_collapseBtn = collapseBtn;
+  m_ribbonCollapsed = false;
+
+  connect( collapseBtn, &QToolButton::clicked, this, &RibbonController::toggleRibbonCollapse );
+
   root->addWidget( tabRow );
   root->addWidget( stack );
 
@@ -1113,4 +1137,39 @@ QWidget *RibbonController::createRibbonBar()
   }
 
   return bar;
+}
+
+void RibbonController::setRibbonCollapsed( bool collapsed )
+{
+  if ( m_ribbonCollapsed == collapsed )
+    return;
+  m_ribbonCollapsed = collapsed;
+  if ( m_stack )
+    m_stack->setVisible( !collapsed );
+  if ( m_ribbonBar )
+  {
+    const int h = collapsed ? 58 : 154;
+    m_ribbonBar->setMinimumHeight( h );
+    m_ribbonBar->setFixedHeight( h );
+    m_ribbonBar->updateGeometry();
+  }
+  if ( m_collapseBtn )
+  {
+    m_collapseBtn->setArrowType( collapsed ? Qt::DownArrow : Qt::UpArrow );
+    m_collapseBtn->setToolTip( collapsed ? tr( "展开功能区 (Ctrl+F1)" ) : tr( "收起功能区 (Ctrl+F1)" ) );
+  }
+  emit ribbonCollapsedChanged( collapsed );
+}
+
+bool RibbonController::eventFilter( QObject *watched, QEvent *event )
+{
+  if ( event && event->type() == QEvent::MouseButtonDblClick )
+  {
+    if ( qobject_cast<QPushButton *>( watched ) )
+    {
+      toggleRibbonCollapse();
+      return true;
+    }
+  }
+  return QObject::eventFilter( watched, event );
 }
