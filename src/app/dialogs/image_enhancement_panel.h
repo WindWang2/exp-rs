@@ -78,7 +78,4 @@ private:
 
     // Status
     QLabel *m_statusLabel = nullptr;
-    QPushButton *m_runButton = nullptr;
-
-
 };

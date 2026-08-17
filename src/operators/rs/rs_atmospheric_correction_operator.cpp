@@ -201,6 +201,7 @@ Json::Value runAtmosphericCorrectionCore(const std::string& defaultMethod,
         if (metadataPath.isEmpty())
             metadataPath = RadiometricCalibration::autoDetectMetadataFile(
                 QString::fromStdString(inputPath));
+        bool resolved = false;
         if (!metadataPath.isEmpty()) {
             GdalDatasetWrapper ds;
             QMap<int, QString> bandNames;
@@ -224,7 +225,13 @@ Json::Value runAtmosphericCorrectionCore(const std::string& defaultMethod,
                     bias = static_cast<float>(c.radianceBias);
                     context.logInfo("Resolved radiance bias from " + metadataPath.toStdString());
                 }
+                resolved = true;
             }
+        }
+        if (!resolved && (!hasGain || !hasBias)) {
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                "Radiance gain and bias must be specified or resolved from metadata (MTL/MTD)");
         }
     }
 

@@ -521,7 +521,7 @@ void AgentCopilotDockWidget::onErrorOccurred( const QString &errorMsg )
 {
   if ( m_currentContentLabel )
   {
-    m_currentContentLabel->setText( QString( "<font color='red'>错误: %1</font>" ).arg( errorMsg ) );
+    m_currentContentLabel->setText( QString( "<font color='red'>错误: %1</font>" ).arg( errorMsg.toHtmlEscaped() ) );
   }
   onLlmFinished();
 }

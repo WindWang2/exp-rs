@@ -301,6 +301,8 @@ std::optional<RsGeorefWarpSnapshot> RsGeoreferencingSession::createWarpSnapshot(
   snap.method = mMethod;
   snap.resampling = resampling;
   snap.destCrs = destCrs;
+  snap.demPath = mDemPath;
+  snap.demZOffset = mDemZOffset;
   snap.pixelSize = pixelSize;
   snap.rmsAtCapture = mLastFit.rms;
   return snap;
@@ -315,9 +317,19 @@ std::unique_ptr<QgsGeorefTransform> RsGeoreferencingSession::transformFromSnapsh
     if ( !snap.sourcePath.isEmpty() )
       transform->loadRaster( snap.sourcePath );
 
+    if ( QgsGcpTransformerInterface *impl = transform->gcpTransformer() )
+    {
+      const bool rpcRefinement = ( snap.method == QgsGcpTransformerInterface::TransformMethod::RpcPhysical );
+      impl->setRpcOptions( snap.sourcePath, snap.demPath, snap.demZOffset, rpcRefinement );
+      impl->setDestinationCrs( snap.destCrs );
+    }
+
     QVector<QgsPointXY> src;
     QVector<QgsPointXY> dst;
-    QgsGeorefTransform::collectEnabledGcps( snap.gcps, src, dst, snap.destCrs );
+    bool collectOk = true;
+    QgsGeorefTransform::collectEnabledGcps( snap.gcps, src, dst, snap.destCrs, QgsCoordinateTransformContext(), &collectOk );
+    if ( !collectOk )
+      return nullptr;
 
     constexpr bool kInvertYAxis = true;
     if ( !transform->updateParametersFromGcps( src, dst, kInvertYAxis ) )

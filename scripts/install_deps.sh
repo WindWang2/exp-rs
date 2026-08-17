@@ -39,8 +39,8 @@ detect_distro() {
 install_arch() {
     info "Arch Linux 检测到，安装依赖..."
     local pkgs=(
-        qt6-base qt6-svg qt6-tools qt6-multimedia qt6-5compat
-        sqlite zlib libzip zstd
+        qt6-base qt6-svg qt6-tools qt6-multimedia qt6-5compat qt6-declarative
+        sqlite zlib libzip zstd jsoncpp
         protobuf curl expat pcre2
         qca-qt6
         cmake make gcc
@@ -64,8 +64,8 @@ install_ubuntu() {
     apt-get update
     local pkgs=(
         qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-multimedia-dev
-        libqt6core5compat6-dev libqt6test6
-        libsqlite3-dev zlib1g-dev libzip-dev libzstd-dev
+        qt6-declarative-dev libqt6core5compat6-dev libqt6test6
+        libsqlite3-dev zlib1g-dev libzip-dev libzstd-dev libjsoncpp-dev
         libprotobuf-dev protobuf-compiler
         libcurl4-openssl-dev libexpat1-dev libpcre2-dev
         libqca-qt6-qt6-dev
@@ -87,8 +87,8 @@ install_fedora() {
     info "Fedora/RHEL 检测到，安装依赖..."
     local pkgs=(
         qt6-qtbase-devel qt6-qtsvg-devel qt6-qttools-devel
-        qt6-qtmultimedia-devel qt6-qt5compat-devel
-        sqlite-devel zlib-devel libzip-devel libzstd-devel
+        qt6-qtmultimedia-devel qt6-qtdeclarative-devel qt6-qt5compat-devel
+        sqlite-devel zlib-devel libzip-devel libzstd-devel jsoncpp-devel
         protobuf-devel curl-devel expat-devel pcre2-devel
         qca-qt6-devel
         cmake make gcc-c++
@@ -109,7 +109,7 @@ install_macos() {
     info "macOS (Homebrew) 检测到，安装依赖..."
     local pkgs=(
         qt6
-        sqlite3 zlib libzip zstd
+        sqlite3 zlib libzip zstd jsoncpp
         protobuf curl expat pcre2
         cmake bison flex
         python3

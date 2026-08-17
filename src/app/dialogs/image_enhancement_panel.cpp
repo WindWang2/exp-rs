@@ -328,6 +328,10 @@ void ImageEnhancementPanel::onRun()
             QMessageBox::warning(this, dialogTitle(), tr("Please select valid distinct bands."));
             return;
         }
+        if (ratioType == 1 && m_band1Combo->count() < 3) {
+            QMessageBox::warning(this, dialogTitle(), tr("IHS transform requires an image with at least 3 bands."));
+            return;
+        }
     }
 
     runGdalTask([sourcePath, outPath, method, stretchType, clipPercent, stddevMult,
@@ -409,6 +413,7 @@ void ImageEnhancementPanel::onRun()
                 int b1 = std::min(band1, bands);
                 int b2 = std::min(band2, bands);
                 ImageEnhancement::bandRatio(inputBands[b1-1].data(), inputBands[b2-1].data(), outputBands[0].data(), pixelCount);
+                outputBands.resize(1);
                 bands = 1;
             } else if (ratioType == 1 && bands >= 3) {
                 // IHS

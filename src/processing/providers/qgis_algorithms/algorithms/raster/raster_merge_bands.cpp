@@ -51,6 +51,16 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
     int nCols = refLayer->width();
     int nRows = refLayer->height();
 
+    for ( QgsRasterLayer *rl : rasterLayers )
+    {
+        if ( rl->width() != nCols || rl->height() != nRows )
+        {
+            throw QgsProcessingException(
+                QObject::tr( "Raster layer %1 dimensions (%2x%3) do not match reference (%4x%5)" )
+                    .arg( rl->name() ).arg( rl->width() ).arg( rl->height() ).arg( nCols ).arg( nRows ) );
+        }
+    }
+
     // Calculate total band count across all input layers
     int totalBands = 0;
     for ( QgsRasterLayer *rl : rasterLayers )
@@ -65,11 +75,14 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
 
     for ( QgsRasterLayer *rl : rasterLayers )
     {
+        if ( feedback->isCanceled() )
+            return QVariantMap();
+
         QgsRasterDataProvider *provider = rl->dataProvider();
         for ( int band = 1; band <= provider->bandCount(); ++band )
         {
             if ( feedback->isCanceled() )
-                break;
+                return QVariantMap();
 
             std::unique_ptr<QgsRasterBlock> block( provider->block( band, extent, nCols, nRows ) );
             if ( !block || !block->isValid() )
@@ -80,6 +93,9 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
             feedback->setProgress( 50.0 * currentBand / totalBands );
         }
     }
+
+    if ( feedback->isCanceled() || static_cast<int>( blocks.size() ) < totalBands )
+        return QVariantMap();
 
     // Write multi-band output using GDAL
     GDALDriverH hDriver = GDALGetDriverByName( "GTiff" );
@@ -116,6 +132,11 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
 
     for ( int b = 0; b < totalBands; ++b )
     {
+        if ( feedback->isCanceled() )
+        {
+            GDALClose( hOutDs );
+            return QVariantMap();
+        }
         GDALRasterBandH hBand = GDALGetRasterBand( hOutDs, b + 1 );
         if ( blocks[b]->hasNoDataValue() )
         {

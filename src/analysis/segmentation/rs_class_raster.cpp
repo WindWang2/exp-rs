@@ -75,6 +75,38 @@ RsClassRasterResult RsClassRaster::paint(
     const bool useUInt16 = maxClassId > 255;
     const GDALDataType outType = useUInt16 ? GDT_UInt16 : GDT_Byte;
 
+    // Copy georeferencing from reference when available; fail on grid size mismatch before creating output.
+    double geoTransform[6];
+    bool hasGeoTransform = false;
+    QString projStr;
+    if ( !referenceRasterPath.isEmpty() )
+    {
+        GDALDatasetH srcDs = GDALOpen( referenceRasterPath.toUtf8().constData(), GA_ReadOnly );
+        if ( srcDs )
+        {
+            const int refW = GDALGetRasterXSize( srcDs );
+            const int refH = GDALGetRasterYSize( srcDs );
+            if ( refW != w || refH != h )
+            {
+                result.errorMessage = QStringLiteral(
+                                         "paint: reference raster size %1x%2 != segment map %3x%4" )
+                                       .arg( refW )
+                                       .arg( refH )
+                                       .arg( w )
+                                       .arg( h );
+                GDALClose( srcDs );
+                return result;
+            }
+
+            if ( GDALGetGeoTransform( srcDs, geoTransform ) == CE_None )
+                hasGeoTransform = true;
+            const char *proj = GDALGetProjectionRef( srcDs );
+            if ( proj && proj[0] )
+                projStr = QString::fromUtf8( proj );
+            GDALClose( srcDs );
+        }
+    }
+
     GDALDriverH driver = GDALGetDriverByName( "GTiff" );
     if ( !driver )
     {
@@ -82,9 +114,11 @@ RsClassRasterResult RsClassRaster::paint(
         return result;
     }
 
+    const QString tempPath = outputPath + QStringLiteral( ".tmp~%1" ).arg( reinterpret_cast<quintptr>( &segMap ) );
+
     char **papszOptions = nullptr;
     papszOptions = CSLSetNameValue( papszOptions, "COMPRESS", "LZW" );
-    GDALDatasetH dstDs = GDALCreate( driver, outputPath.toUtf8().constData(),
+    GDALDatasetH dstDs = GDALCreate( driver, tempPath.toUtf8().constData(),
                                      w, h, 1, outType, papszOptions );
     CSLDestroy( papszOptions );
 
@@ -94,34 +128,10 @@ RsClassRasterResult RsClassRaster::paint(
         return result;
     }
 
-    // Copy georeferencing from reference when available; fail on grid size mismatch.
-    GDALDatasetH srcDs = GDALOpen( referenceRasterPath.toUtf8().constData(), GA_ReadOnly );
-    if ( srcDs )
-    {
-        const int refW = GDALGetRasterXSize( srcDs );
-        const int refH = GDALGetRasterYSize( srcDs );
-        if ( refW != w || refH != h )
-        {
-            result.errorMessage = QStringLiteral(
-                                     "paint: reference raster size %1x%2 != segment map %3x%4" )
-                                   .arg( refW )
-                                   .arg( refH )
-                                   .arg( w )
-                                   .arg( h );
-            GDALClose( srcDs );
-            GDALClose( dstDs );
-            removeIncompleteOutput( outputPath );
-            return result;
-        }
-
-        double geoTransform[6];
-        if ( GDALGetGeoTransform( srcDs, geoTransform ) == CE_None )
-            GDALSetGeoTransform( dstDs, geoTransform );
-        const char *proj = GDALGetProjectionRef( srcDs );
-        if ( proj && proj[0] )
-            GDALSetProjection( dstDs, proj );
-        GDALClose( srcDs );
-    }
+    if ( hasGeoTransform )
+        GDALSetGeoTransform( dstDs, geoTransform );
+    if ( !projStr.isEmpty() )
+        GDALSetProjection( dstDs, projStr.toUtf8().constData() );
 
     GDALRasterBandH outBand = GDALGetRasterBand( dstDs, 1 );
     // 0 = NoData / unclassified (class ids are ≥ 1).
@@ -148,8 +158,8 @@ RsClassRasterResult RsClassRaster::paint(
         GDALDestroyColorTable( ct );
     }
 
-    const auto &labels = segMap.labels();
-    int totalPixels = 0;
+    const quint32 *labels = segMap.labelsData();
+    quint64 totalPixels = 0;
 
     if ( useUInt16 )
     {
@@ -180,7 +190,7 @@ RsClassRasterResult RsClassRaster::paint(
             {
                 result.errorMessage = QStringLiteral( "RasterIO write failed at row %1" ).arg( r );
                 GDALClose( dstDs );
-                removeIncompleteOutput( outputPath );
+                removeIncompleteOutput( tempPath );
                 return result;
             }
         }
@@ -214,13 +224,21 @@ RsClassRasterResult RsClassRaster::paint(
             {
                 result.errorMessage = QStringLiteral( "RasterIO write failed at row %1" ).arg( r );
                 GDALClose( dstDs );
-                removeIncompleteOutput( outputPath );
+                removeIncompleteOutput( tempPath );
                 return result;
             }
         }
     }
 
     GDALClose( dstDs );
+
+    QFile::remove( outputPath );
+    if ( !QFile::rename( tempPath, outputPath ) )
+    {
+        removeIncompleteOutput( tempPath );
+        result.errorMessage = QStringLiteral( "Cannot finalize output: %1" ).arg( outputPath );
+        return result;
+    }
 
     result.ok = true;
     result.totalPixels = totalPixels;

@@ -20,6 +20,7 @@ public:
 protected:
     QString toolName() const override { return QStringLiteral("fusion"); }
     QString dialogTitle() const override { return tr("Image Fusion"); }
+    bool validateInputs() override;
     void onRun() override;
 
 private slots:

@@ -116,6 +116,7 @@ class QGIS_ANALYSIS_EXPORT RsClassificationPipeline
         int maxSamplesPerClass = 5000;
         bool fitScaler = false;
         double testSplit = 0.0;                         // 0-0.9 holdout fraction for accuracy
+        std::vector<int> groupIds;                      // optional per-sample group IDs for holdout split
 
         // Optional per-pixel best-class probability raster (Float32, NoData =
         // -1 on ignored pixels). Requires a backend with supportsProbabilities()

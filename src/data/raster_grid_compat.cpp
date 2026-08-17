@@ -1,7 +1,7 @@
 // src/data/raster_grid_compat.cpp — shared raster-grid compatibility service
 #include "raster_grid_compat.h"
 
-#include <ogr_spatialref.h>
+#include <ogr_srs_api.h>
 
 #include <algorithm>
 #include <cmath>
@@ -145,16 +145,33 @@ GridCompatReport compareGrids( const RasterGrid &a, const RasterGrid &b )
       true } );
     return report;
   }
-  if ( aHasCrs && bHasCrs && !isSameCrs( a.crsWkt, b.crsWkt ) )
+  if ( aHasCrs && bHasCrs )
   {
-    report.issues.append( {
-      GridCompatVerdict::CrsMismatch,
-      QStringLiteral( "grid.crs_mismatch" ),
-      QStringLiteral( "The rasters use different coordinate reference systems; "
-                      "reproject the second raster to the first's CRS before "
-                      "comparing pixels." ),
-      true } );
-    return report;
+    bool crsMismatch = false;
+    OGRSpatialReferenceH srsA = OSRNewSpatialReference( a.crsWkt.toUtf8().constData() );
+    OGRSpatialReferenceH srsB = OSRNewSpatialReference( b.crsWkt.toUtf8().constData() );
+    if ( srsA && srsB )
+    {
+      crsMismatch = ( OSRIsSame( srsA, srsB ) == 0 );
+    }
+    else
+    {
+      crsMismatch = ( a.crsWkt.trimmed() != b.crsWkt.trimmed() );
+    }
+    if ( srsA ) OSRDestroySpatialReference( srsA );
+    if ( srsB ) OSRDestroySpatialReference( srsB );
+
+    if ( crsMismatch )
+    {
+      report.issues.append( {
+        GridCompatVerdict::CrsMismatch,
+        QStringLiteral( "grid.crs_mismatch" ),
+        QStringLiteral( "The rasters use different coordinate reference systems; "
+                        "reproject the second raster to the first's CRS before "
+                        "comparing pixels." ),
+        true } );
+      return report;
+    }
   }
 
   // Both unreferenced: not spatially comparable. The caller falls back to

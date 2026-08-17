@@ -59,15 +59,11 @@ QStringList GdalGridAlgorithm::buildArgs(const QVariantMap &parameters,
         algoArg = QString("invdist:power=%1:smoothing=%2").arg(power).arg(smooth);
     } else if (algorithm == "average") {
         algoArg = QString("average:smoothing=%1").arg(smooth);
-    } else {
-        algoArg = algorithm;
-    }
-    args << "-a" << algoArg;
-
     if (parameters.contains("NODATA") && !parameters.value("NODATA").toString().isEmpty()) {
         double nodata = parameters.value("NODATA").toDouble();
-        args << "-a_nodata" << QString::number(nodata);
+        algoArg += QString(":nodata=%1").arg(nodata);
     }
+    args << "-a" << algoArg;
 
     if (parameters.contains("EXTENT") && !parameters.value("EXTENT").toString().isEmpty()) {
         // Parse extent string: "xmin,xmax,ymin,ymax"

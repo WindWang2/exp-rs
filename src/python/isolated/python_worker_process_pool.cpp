@@ -250,6 +250,15 @@ void PythonWorkerProcessPool::handleWorkerCrash( WorkerNode *node )
     node->server = nullptr;
   }
 
+  constexpr int kMaxWorkerRestarts = 5;
+  if ( node->restartCount >= kMaxWorkerRestarts )
+  {
+    qWarning() << "Worker process id:" << id << "exceeded max crash restarts (" << kMaxWorkerRestarts << "); giving up";
+    node->isRestarting = false;
+    failPendingRequests( pending );
+    return;
+  }
+
   // Self-healing auto-restart with unique socket name
   node->restartCount++;
   QString socketName = QString( "sicnu_pool_%1_%2_%3" )

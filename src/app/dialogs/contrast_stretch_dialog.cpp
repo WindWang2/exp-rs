@@ -140,6 +140,9 @@ void ContrastStretchDialog::onRun()
     int bandCount = srcDataset.bandCount();
     size_t pixelCount = static_cast<size_t>( width ) * static_cast<size_t>( height );
 
+    if ( pixelCount > 500000000ULL || ( static_cast<uint64_t>( bandCount ) * pixelCount * sizeof( float ) ) > 2000000000ULL )
+      return QStringLiteral( "\x01SICNU_ERR\x01Image is too large for in-memory processing (>2GB memory requirement)" );
+
     std::vector<std::vector<float>> allBands( bandCount, std::vector<float>( pixelCount ) );
     for ( int b = 0; b < bandCount; ++b )
     {

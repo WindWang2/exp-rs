@@ -91,6 +91,38 @@ void ExtractBandDialog::onLayerChanged()
   populateBandCombo();
 }
 
+bool ExtractBandDialog::validateInputs()
+{
+  auto *rl = m_layerCombo ? m_layerCombo->currentData().value<QgsRasterLayer *>() : nullptr;
+  if ( !rl || !rl->isValid() )
+  {
+    QMessageBox::warning( this, dialogTitle(), tr( "请选择有效的栅格图层。" ) );
+    return false;
+  }
+
+  int bandIndex = m_bandCombo ? m_bandCombo->currentData().toInt() : 0;
+  if ( bandIndex < 1 )
+  {
+    QMessageBox::warning( this, dialogTitle(), tr( "请选择要提取的波段。" ) );
+    return false;
+  }
+
+  setRasterLayer( rl );
+
+  QString outPath = outputPath();
+  if ( outPath.isEmpty() )
+  {
+    QString inputPath = rl->source();
+    outPath = QFileInfo( inputPath ).path() + QLatin1Char( '/' )
+              + QFileInfo( inputPath ).completeBaseName()
+              + tr( "_band%1.tif" ).arg( bandIndex );
+    if ( m_outputEdit )
+      m_outputEdit->setText( outPath );
+  }
+
+  return true;
+}
+
 void ExtractBandDialog::onRun()
 {
   auto *rl = m_layerCombo->currentData().value<QgsRasterLayer *>();

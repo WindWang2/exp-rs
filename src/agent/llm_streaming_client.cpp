@@ -78,6 +78,7 @@ void LlmStreamingClient::sendChatCompletion( const QJsonArray &messages, const Q
   cancel();
   m_buffer.clear();
   m_toolCalls.clear();
+  m_finishedEmitted = false;
 
   const ChatRequestPayload payload = buildChatRequest( m_profile, messages, tools );
 
@@ -143,7 +144,11 @@ void LlmStreamingClient::parseSseLine( const QString &line )
     // clears the accumulation, so the onReplyFinished fallback stays silent.
     emitParsedToolCallOnce();
 
-    emit finished();
+    if ( !m_finishedEmitted )
+    {
+      m_finishedEmitted = true;
+      emit finished();
+    }
     return;
   }
 
@@ -285,7 +290,11 @@ void LlmStreamingClient::onReplyFinished()
     // [DONE] path already emitted it — a parsed tool call is emitted exactly once.
     emitParsedToolCallOnce();
 
-    emit finished();
+    if ( !m_finishedEmitted )
+    {
+      m_finishedEmitted = true;
+      emit finished();
+    }
   }
 }
 

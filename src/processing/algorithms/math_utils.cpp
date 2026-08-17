@@ -156,7 +156,9 @@ Stats computeStatsFromAccumulators(const AccumulatorStats &acc)
     // Population stddev (N denominator)
     if (acc.count > 1) {
         double variance = acc.sumSq / acc.count - stats.mean * stats.mean;
-        stats.stddev = static_cast<float>(std::sqrt(std::max(0.0, variance)));
+        if (!std::isfinite(variance) || variance < 0.0)
+            variance = 0.0;
+        stats.stddev = static_cast<float>(std::sqrt(variance));
     } else {
         stats.stddev = 0.0f;
     }
@@ -179,7 +181,7 @@ bool normalizedDifference(const float *a, const float *b, float *out, size_t cou
 bool linearScale(const float *in, float *out, size_t count, float gain, float bias)
 {
     if (!in || !out || count == 0) return false;
-    if (std::isnan(gain) || std::isnan(bias)) return false;
+    if (!std::isfinite(gain) || !std::isfinite(bias)) return false;
     for (size_t i = 0; i < count; ++i)
         out[i] = gain * in[i] + bias;
     return true;

@@ -270,7 +270,11 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                     if ( labels[r * w + c] != segId )
                         continue;
 
-                    const int level1 = std::clamp( static_cast<int>( ( bandData[b][r * w + c] - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 );
+                    const float val1 = bandData[b][r * w + c];
+                    if ( std::isnan( val1 ) )
+                        continue;
+
+                    const size_t level1 = static_cast<size_t>( std::clamp( static_cast<int>( ( val1 - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 ) );
 
                     const int drs[] = { 0, 1 };
                     const int dcs[] = { 1, 0 };
@@ -280,7 +284,10 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                         const int nc = c + dcs[d];
                         if ( nr <= box.maxR && nc <= box.maxC && labels[nr * w + nc] == segId )
                         {
-                            const int level2 = std::clamp( static_cast<int>( ( bandData[b][nr * w + nc] - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 );
+                            const float val2 = bandData[b][nr * w + nc];
+                            if ( std::isnan( val2 ) )
+                                continue;
+                            const size_t level2 = static_cast<size_t>( std::clamp( static_cast<int>( ( val2 - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 ) );
                             glcm[level1][level2] += 1.0;
                             glcm[level2][level1] += 1.0;
                             pairCount += 2;

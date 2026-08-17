@@ -291,20 +291,53 @@ bool GdalDatasetWrapper::readBandWindowScaled(int bandNum, int xOff, int yOff,
     const int bw = GDALGetRasterBandXSize(band);
     const int bh = GDALGetRasterBandYSize(band);
 
-    // Pre-fill so out-of-raster regions (edge tiles) read as NoData. GDAL
-    // resamples the source window into the buffer and handles a window that
-    // extends past the raster edge by only filling the valid intersection,
-    // leaving the rest of the buffer at its pre-filled value.
+    // Pre-fill so out-of-raster regions (edge tiles) read as NoData.
     std::fill( buffer, buffer + static_cast<size_t>( bufWidth ) * bufHeight, nodata );
 
-    // Entirely outside the raster → all-NoData tile.
-    if ( xOff >= bw || yOff >= bh || xOff + srcWidth <= 0 || yOff + srcHeight <= 0 )
+    const int srcX0 = std::max( 0, xOff );
+    const int srcX1 = std::min( bw, xOff + srcWidth );
+    const int srcY0 = std::max( 0, yOff );
+    const int srcY1 = std::min( bh, yOff + srcHeight );
+
+    if ( srcX1 <= srcX0 || srcY1 <= srcY0 )
         return true;
 
-    CPLErr err = GDALRasterIO(band, GF_Read,
-                              xOff, yOff, srcWidth, srcHeight,
-                              buffer, bufWidth, bufHeight, GDT_Float32,
-                              0, 0);
+    const int validSrcW = srcX1 - srcX0;
+    const int validSrcH = srcY1 - srcY0;
+
+    if ( srcX0 == xOff && srcY0 == yOff && validSrcW == srcWidth && validSrcH == srcHeight )
+    {
+        CPLErr err = GDALRasterIO( band, GF_Read,
+                                  xOff, yOff, srcWidth, srcHeight,
+                                  buffer, bufWidth, bufHeight, GDT_Float32,
+                                  0, 0 );
+        return err == CE_None;
+    }
+
+    const double scaleX = static_cast<double>( bufWidth ) / srcWidth;
+    const double scaleY = static_cast<double>( bufHeight ) / srcHeight;
+
+    int dstX0 = static_cast<int>( std::round( ( srcX0 - xOff ) * scaleX ) );
+    int dstY0 = static_cast<int>( std::round( ( srcY0 - yOff ) * scaleY ) );
+    int dstX1 = static_cast<int>( std::round( ( srcX1 - xOff ) * scaleX ) );
+    int dstY1 = static_cast<int>( std::round( ( srcY1 - yOff ) * scaleY ) );
+
+    dstX0 = std::clamp( dstX0, 0, bufWidth );
+    dstX1 = std::clamp( dstX1, dstX0, bufWidth );
+    dstY0 = std::clamp( dstY0, 0, bufHeight );
+    dstY1 = std::clamp( dstY1, dstY0, bufHeight );
+
+    const int validBufW = dstX1 - dstX0;
+    const int validBufH = dstY1 - dstY0;
+
+    if ( validBufW <= 0 || validBufH <= 0 )
+        return true;
+
+    float *dstPtr = buffer + static_cast<size_t>( dstY0 ) * bufWidth + dstX0;
+    CPLErr err = GDALRasterIO( band, GF_Read,
+                              srcX0, srcY0, validSrcW, validSrcH,
+                              dstPtr, validBufW, validBufH, GDT_Float32,
+                              sizeof( float ), static_cast<GSpacing>( sizeof( float ) * bufWidth ) );
     return err == CE_None;
 }
 
@@ -509,7 +542,7 @@ bool writeGdalOutput(const QString &outputPath, int width, int height,
                      const std::array<double, 6> &geoTransform,
                      const QString &projection,
                      QString *errorMessage,
-                     double nodataValue)
+                     std::optional<double> nodata)
 {
     if (bands.empty()) {
         if (errorMessage) *errorMessage = QStringLiteral("No band data to write");
@@ -529,8 +562,8 @@ bool writeGdalOutput(const QString &outputPath, int width, int height,
             GDALClose(ds);
             return false;
         }
-        if (std::isnan(nodataValue) || std::isfinite(nodataValue)) {
-            GDALSetRasterNoDataValue(dstBand, nodataValue);
+        if (nodata.has_value()) {
+            GDALSetRasterNoDataValue(dstBand, *nodata);
         }
         CPLErr err = GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
                                    const_cast<float *>(bands[b].data()),

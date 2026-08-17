@@ -343,6 +343,10 @@ SicnuAlgorithmDialog::SicnuAlgorithmDialog( QWidget *parent )
 
 SicnuAlgorithmDialog::~SicnuAlgorithmDialog()
 {
+  if ( mJobHandle.isRunning() )
+  {
+    mJobHandle.cancel();
+  }
   // Wrappers may have been parented to widgets in the form layout.
   // Only delete those that are still orphan (no parent).
   for ( auto *wrapper : mWrappers )
@@ -614,6 +618,15 @@ bool SicnuAlgorithmDialog::isFinalized()
   if ( mJobHandle.isRunning() )
     return false;
   return QgsProcessingAlgorithmDialogBase::isFinalized();
+}
+
+void SicnuAlgorithmDialog::closeEvent( QCloseEvent *event )
+{
+  if ( mJobHandle.isRunning() )
+  {
+    mJobHandle.cancel();
+  }
+  QgsProcessingAlgorithmDialogBase::closeEvent( event );
 }
 
 void SicnuAlgorithmDialog::runAlgorithm()

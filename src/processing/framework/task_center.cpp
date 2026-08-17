@@ -690,7 +690,7 @@ void TaskCenter::processNextQueuedTasks()
         {
             if ( totalRunning == 0 && QCoreApplication::instance() )
             {
-                QTimer::singleShot( 250, [this]() {
+                QTimer::singleShot( 250, QCoreApplication::instance(), [this]() {
                     {
                         QMutexLocker locker( &m_mutex );
                         processNextQueuedTasks();

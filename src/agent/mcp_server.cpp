@@ -107,14 +107,10 @@ bool absolutePathOutsideWorkspace(const QString &pathValue, const QString &works
     if (pathValue.isEmpty())
         return false;
 
-    // Only enforce on absolute paths / home-expanded paths
     QString path = pathValue;
     if (path.startsWith(QLatin1Char('~'))) {
         path = QDir::homePath() + path.mid(1);
     }
-    const QFileInfo fi(path);
-    if (!fi.isAbsolute())
-        return false;
 
     QString workspaceCanon = QDir(workspaceRoot).canonicalPath();
     if (workspaceCanon.isEmpty())
@@ -122,16 +118,31 @@ bool absolutePathOutsideWorkspace(const QString &pathValue, const QString &works
     if (workspaceCanon.isEmpty())
         return false;
 
+    const QFileInfo fi(path);
     QString resolved;
-    if (fi.exists()) {
-        resolved = fi.canonicalFilePath();
+    if (fi.isAbsolute()) {
+        if (fi.exists()) {
+            resolved = fi.canonicalFilePath();
+        } else {
+            // Non-existent output path: resolve parent dir + filename
+            QDir parent = fi.dir();
+            QString parentCanon = parent.canonicalPath();
+            if (parentCanon.isEmpty())
+                parentCanon = parent.absolutePath();
+            resolved = QDir(parentCanon).filePath(fi.fileName());
+        }
     } else {
-        // Non-existent output path: resolve parent dir + filename
-        QDir parent = fi.dir();
-        QString parentCanon = parent.canonicalPath();
-        if (parentCanon.isEmpty())
-            parentCanon = parent.absolutePath();
-        resolved = QDir(parentCanon).filePath(fi.fileName());
+        const QString joined = QDir(workspaceCanon).filePath(path);
+        const QFileInfo fiJoined(joined);
+        if (fiJoined.exists()) {
+            resolved = fiJoined.canonicalFilePath();
+        } else {
+            QDir parent = fiJoined.dir();
+            QString parentCanon = parent.canonicalPath();
+            if (parentCanon.isEmpty())
+                parentCanon = parent.absolutePath();
+            resolved = QDir(parentCanon).filePath(fiJoined.fileName());
+        }
     }
 
     const QString normResolved = QDir::cleanPath(resolved);
@@ -386,7 +397,12 @@ McpServer::~McpServer()
     if (mReader)
     {
         mReader->requestStop();
-        mReader->wait(3000);
+        mReader->quit();
+        if (!mReader->wait(1000) && mReader->isRunning())
+        {
+            mReader->terminate();
+            mReader->wait(1000);
+        }
     }
 }
 
@@ -396,6 +412,8 @@ void McpServer::start(QCoreApplication *app)
     mApp = app;
     mReader = new StdinReader(this);
     connect(mReader, &StdinReader::lineRead, this, &McpServer::onLineRead);
+    if (mApp)
+        connect(mReader, &QThread::finished, mApp, &QCoreApplication::quit);
     mReader->start();
     SICNU_LOG_SUCCESS(SicnuLogTags::MCP, "MCP Server started on stdio");
 }
@@ -621,6 +639,9 @@ void McpServer::handleRequest(const QVariantMap &request)
 
 void McpServer::sendResponse(const QVariant &id, const QVariantMap &result)
 {
+    if (id.isNull() || !id.isValid())
+        return;
+
     QVariantMap response;
     response[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
     response[QStringLiteral("id")] = id;
@@ -632,6 +653,9 @@ void McpServer::sendResponse(const QVariant &id, const QVariantMap &result)
 
 void McpServer::sendError(const QVariant &id, int code, const QString &message)
 {
+    if (id.isNull() || !id.isValid())
+        return;
+
     QVariantMap response;
     response[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
     response[QStringLiteral("id")] = id;

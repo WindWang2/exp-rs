@@ -484,6 +484,7 @@ void RsObiaMainWindow::loadRaster()
     mSegStats.clear();
     mSegmentLabels.clear();
     mHierarchy.clear();
+    mHierarchyStats.clear();
     mHasHierarchy = false;
     mActiveLevel = 0;
     mClassifyLevel = 0;
@@ -964,7 +965,15 @@ void RsObiaMainWindow::setActiveLevelMap( int level )
 
     mActiveLevel = level;
     mSegMap = mHierarchy.level( level );
-    mSegStats = RsSegmentFeatures::extract( mRasterPath, mSegMap, allBandIndices() );
+    if ( mHierarchyStats.contains( level ) )
+    {
+        mSegStats = mHierarchyStats.value( level );
+    }
+    else
+    {
+        mSegStats = RsSegmentFeatures::extract( mRasterPath, mSegMap, allBandIndices() );
+        mHierarchyStats[level] = mSegStats;
+    }
 
     // Labels are stored for classify level; when viewing another level, table class col may be empty.
     if ( mSelectTool )
@@ -979,6 +988,8 @@ void RsObiaMainWindow::applyHierarchyResult( RsObjectHierarchy hierarchy,
                                              QMap<quint32, RsSegmentFeatures::SegmentStat> stats )
 {
     mHierarchy = std::move( hierarchy );
+    mHierarchyStats.clear();
+    mHierarchyStats[activeLevel] = stats;
     mHasHierarchy = true;
     mActiveLevel = activeLevel;
     mClassifyLevel = 0;

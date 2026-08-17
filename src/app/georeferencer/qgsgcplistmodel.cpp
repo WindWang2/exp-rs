@@ -117,7 +117,17 @@ QgsPointXY QgsGCPListModel::rowSourcePoint( int row ) const
 
 QgsPointXY QgsGCPListModel::rowDestinationPoint( int row ) const
 {
-  return ( mSession && row >= 0 && row < mSession->gcps().size() ) ? mSession->gcps().at( row ).destinationPoint() : QgsPointXY();
+  if ( !mSession || row < 0 || row >= mSession->gcps().size() )
+    return QgsPointXY();
+  const QgsGcpPoint &gcp = mSession->gcps().at( row );
+  if ( mTargetCrs.isValid() )
+  {
+    bool ok = false;
+    const QgsPointXY pt = gcp.transformedDestinationPoint( mTargetCrs, mTransformContext, &ok );
+    if ( ok )
+      return pt;
+  }
+  return gcp.destinationPoint();
 }
 
 QString QgsGCPListModel::rowPointType( int row ) const

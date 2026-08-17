@@ -89,6 +89,9 @@ private:
     QLabel *m_statusLabel = nullptr;
     QProgressBar *m_progressBar = nullptr;
     QPushButton *m_runButton = nullptr;
+    QPushButton *m_addFilesBtn = nullptr;
+    QPushButton *m_removeBtn = nullptr;
+    QPushButton *m_browseBtn = nullptr;
 
     /// "参数覆盖" section: rebuilt per algorithm (RS operators get typed
     /// editors, QGIS algorithms get QGIS parameter-widget wrappers).

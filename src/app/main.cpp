@@ -193,6 +193,7 @@ int main(int argc, char *argv[])
         server.setDataManager( mcpDataManager.get() );
         server.start(app);
         int result = app->exec();
+        sicnu::TaskCenter::instance().shutdown();
         delete app;
         return result;
     }

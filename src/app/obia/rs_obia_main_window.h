@@ -147,6 +147,7 @@ class RsObiaMainWindow : public QMainWindow
     QMap<quint32, RsSegmentFeatures::SegmentStat> mSegStats;
     QMap<quint32, int> mSegmentLabels; // segmentId → classId (classify level)
     RsObjectHierarchy mHierarchy;
+    QMap<int, QMap<quint32, RsSegmentFeatures::SegmentStat>> mHierarchyStats;
     int mActiveLevel = 0;
     int mClassifyLevel = 0; // default finest
     bool mHasHierarchy = false;

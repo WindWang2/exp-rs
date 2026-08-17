@@ -161,13 +161,13 @@ Json::Value GdalReprojectOperator::run(const Json::Value& params,
         options.emplace_back(fmtDouble(alignExtent[3]));
     } else if (targetResolution > 0.0) {
         options.emplace_back("-tr");
-        options.emplace_back(std::to_string(targetResolution));
-        options.emplace_back(std::to_string(targetResolution));
+        options.emplace_back(fmtDouble(targetResolution));
+        options.emplace_back(fmtDouble(targetResolution));
     }
 
     if (hasNodata) {
         options.emplace_back("-dstnodata");
-        options.emplace_back(std::to_string(nodata));
+        options.emplace_back(fmtDouble(nodata));
     }
 
     auto [width, height] = runGdalWarp(inputPath, outputPath, options, context,

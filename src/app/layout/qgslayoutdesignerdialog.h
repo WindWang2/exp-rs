@@ -41,7 +41,7 @@ public:
     // QgsLayoutDesignerInterface interface
     QgsLayout *layout() override;
     QgsMasterLayoutInterface *masterLayout() override;
-    QWidget *window() override { return mWindow; }
+    QWidget *window() override { return mWindow.data(); }
     QgsLayoutView *view() override;
     QgsMessageBar *messageBar() override;
     void selectItems(const QList<QgsLayoutItem *> &items) override;
@@ -97,7 +97,7 @@ private:
     void setupMenus();
     void setupToolbars();
 
-    QMainWindow *mWindow = nullptr;
+    QPointer<QMainWindow> mWindow;
     QgsMasterLayoutInterface *mMasterLayout = nullptr;
     QgsLayout *mLayout = nullptr;
     QgsLayoutView *mView = nullptr;

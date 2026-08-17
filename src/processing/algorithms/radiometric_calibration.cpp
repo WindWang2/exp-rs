@@ -376,6 +376,8 @@ bool loadMetadata(const QString &rasterPath, const QString &metadataPath,
 
 bool toRadiance(const float *dn, float *radiance, size_t count, const BandCoefficients &c)
 {
+    if (!dn || !radiance || count == 0) return false;
+    if (c.radianceGain == 1.0 && c.radianceBias == 0.0) return false;
     return MathUtils::linearScale(dn, radiance, count,
                                   static_cast<float>(c.radianceGain),
                                   static_cast<float>(c.radianceBias));

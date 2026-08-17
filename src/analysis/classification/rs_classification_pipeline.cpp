@@ -335,7 +335,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     cv::Mat trainY = ex.y;
     if ( config.testSplit > 0.0 )
     {
-      const RsTrainTestSplit split = RsClassificationSplit::stratifiedSplit( ex.X, ex.y, 1.0 - config.testSplit, config.seed );
+      const RsTrainTestSplit split = RsClassificationSplit::stratifiedSplit( ex.X, ex.y, 1.0 - config.testSplit, config.seed, config.groupIds );
       trainX = split.trainX;
       trainY = split.trainY;
       config.testX = split.testX;
@@ -605,18 +605,21 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     result.errorMessage = QStringLiteral( "GTiff driver unavailable" );
     return result;
   }
+  const QString tempOutputPath = config.outputRaster + QStringLiteral( ".tmp~%1" ).arg( reinterpret_cast<quintptr>( &config ) );
+  const QString tempProbPath = config.probabilityOutput.isEmpty() ? QString() : config.probabilityOutput + QStringLiteral( ".tmp~%1" ).arg( reinterpret_cast<quintptr>( &config ) );
+
   char **papsz = nullptr;
   for ( const QString &o : config.creationOptions )
     papsz = CSLAddString( papsz, o.toUtf8().constData() );
   GDALDataset *dstDs = drv->Create(
-    config.outputRaster.toUtf8().constData(), outW, outH, 1, outType, papsz );
+    tempOutputPath.toUtf8().constData(), outW, outH, 1, outType, papsz );
   if ( !dstDs && papsz )
   {
     CSLDestroy( papsz );
     papsz = nullptr;
     qWarning() << "RsClassificationPipeline: Create with options failed; retrying without options";
     dstDs = drv->Create(
-      config.outputRaster.toUtf8().constData(), outW, outH, 1, outType, nullptr );
+      tempOutputPath.toUtf8().constData(), outW, outH, 1, outType, nullptr );
   }
   else
   {
@@ -672,7 +675,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     {
       GDALClose( srcDs );
       GDALClose( dstDs );
-      QFile::remove( config.outputRaster );
+      QFile::remove( tempOutputPath );
       result.error = RsClassificationPipelineResult::Error::PredictionFailed;
       result.errorMessage = QStringLiteral(
         "The selected classifier does not support probability outputs "
@@ -680,13 +683,13 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
       return result;
     }
     probDs = drv->Create(
-      config.probabilityOutput.toUtf8().constData(), outW, outH, 1,
+      tempProbPath.toUtf8().constData(), outW, outH, 1,
       GDT_Float32, papsz );
     if ( !probDs )
     {
       GDALClose( srcDs );
       GDALClose( dstDs );
-      QFile::remove( config.outputRaster );
+      QFile::remove( tempOutputPath );
       result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
       result.errorMessage = QStringLiteral( "Cannot create probability output: %1" )
                               .arg( config.probabilityOutput );
@@ -707,17 +710,17 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   rsCollectBandNodata( srcDs, config.bandIndices, config.ignoreOptions,
                        bandHasNodata, bandNodata );
 
-  // Every failure past this point removes the partially-written output.
-  const auto failWithPartialOutput = [&result, &srcDs, &dstDs, &probDs, &config](
+  // Every failure past this point removes the partially-written temporary output.
+  const auto failWithPartialOutput = [&result, &srcDs, &dstDs, &probDs, &tempOutputPath, &tempProbPath](
     RsClassificationPipelineResult::Error error, const QString &message )
   {
     GDALClose( srcDs );
     GDALClose( dstDs );
     if ( probDs )
       GDALClose( probDs );
-    QFile::remove( config.outputRaster );
-    if ( !config.probabilityOutput.isEmpty() )
-      QFile::remove( config.probabilityOutput );
+    QFile::remove( tempOutputPath );
+    if ( !tempProbPath.isEmpty() )
+      QFile::remove( tempProbPath );
     result.error = error;
     result.errorMessage = message;
     return result;
@@ -942,6 +945,22 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     return failWithPartialOutput(
       RsClassificationPipelineResult::Error::GdalWriteFailed,
       QStringLiteral( "Failed to flush destination dataset cache to disk" ) );
+  }
+
+  QFile::remove( config.outputRaster );
+  if ( !QFile::rename( tempOutputPath, config.outputRaster ) )
+  {
+    QFile::remove( tempOutputPath );
+    if ( !tempProbPath.isEmpty() )
+      QFile::remove( tempProbPath );
+    result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
+    result.errorMessage = QStringLiteral( "Failed to finalize output raster: %1" ).arg( config.outputRaster );
+    return result;
+  }
+  if ( !config.probabilityOutput.isEmpty() )
+  {
+    QFile::remove( config.probabilityOutput );
+    QFile::rename( tempProbPath, config.probabilityOutput );
   }
 
   result.totalPixels = outW * outH;
