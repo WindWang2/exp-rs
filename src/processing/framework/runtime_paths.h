@@ -9,23 +9,77 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QString>
+#include <QStringList>
 
 namespace sicnu::processing {
 
-/// Resolve a path relative to the project/install root by walking up from the
-/// executable directory until a project marker (CMakeLists.txt or data/) is
-/// found. Returns the absolute path (the marker dir + @a relativePath); if no
-/// marker is found, returns the relativePath resolved against the topmost dir.
+/// Resolve a path relative to the project/install root.
+/// Supports in-tree builds, out-of-tree builds, test runners, installed packages,
+/// and explicit SICNU_DATA_DIR environment overrides.
 inline QString resolveRuntimeDataPath( const QString &relativePath )
 {
+    // 1. Explicit environment override
+    const QString envDataDir = qEnvironmentVariable( "SICNU_DATA_DIR" );
+    if ( !envDataDir.isEmpty() )
+    {
+        const QString cand = QDir( envDataDir ).filePath( relativePath );
+        if ( QFile::exists( cand ) || QDir( cand ).exists() )
+            return cand;
+    }
+
+    // 2. Walk up from applicationDirPath() looking for a project root marker (data/ or CMakeLists.txt)
     QDir dir( QCoreApplication::applicationDirPath() );
-    while ( !dir.exists( QStringLiteral( "CMakeLists.txt" ) )
-            && !dir.exists( QStringLiteral( "data" ) )
+    while ( !dir.exists( QStringLiteral( "data" ) )
+            && !dir.exists( QStringLiteral( "CMakeLists.txt" ) )
             && dir.cdUp() )
     {
-        // keep going up
     }
+    if ( dir.exists( QStringLiteral( "data" ) ) || dir.exists( QStringLiteral( "CMakeLists.txt" ) ) )
+    {
+        const QString cand = dir.filePath( relativePath );
+        if ( QFile::exists( cand ) || QDir( cand ).exists() )
+            return cand;
+    }
+
+    // 3. Walk up from current working directory
+    QDir curDir = QDir::current();
+    while ( !curDir.exists( QStringLiteral( "data" ) )
+            && !curDir.exists( QStringLiteral( "CMakeLists.txt" ) )
+            && curDir.cdUp() )
+    {
+    }
+    if ( curDir.exists( QStringLiteral( "data" ) ) || curDir.exists( QStringLiteral( "CMakeLists.txt" ) ) )
+    {
+        const QString cand = curDir.filePath( relativePath );
+        if ( QFile::exists( cand ) || QDir( cand ).exists() )
+            return cand;
+    }
+
+    // 4. Standard install layouts relative to app dir
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList installCandidates = {
+        QDir( appDir ).filePath( relativePath ),
+        QDir( appDir ).filePath( QStringLiteral( "../" ) + relativePath ),
+        QDir( appDir ).filePath( QStringLiteral( "../share/sicnu_geo_rs/" ) + relativePath ),
+        QDir( appDir ).filePath( QStringLiteral( "share/sicnu_geo_rs/" ) + relativePath ),
+        QDir( appDir ).filePath( QStringLiteral( "../share/" ) + relativePath )
+    };
+    for ( const QString &cand : installCandidates )
+    {
+        if ( QFile::exists( cand ) || QDir( cand ).exists() )
+            return cand;
+    }
+
+#ifdef SICNU_SOURCE_DIR
+    // 5. Compiled source directory (for out-of-tree builds / tests)
+    const QString srcCand = QDir( QStringLiteral( SICNU_SOURCE_DIR ) ).filePath( relativePath );
+    if ( QFile::exists( srcCand ) || QDir( srcCand ).exists() )
+        return srcCand;
+#endif
+
+    // Fallback: return resolved path against the marker dir if found, else original walk
     return dir.absoluteFilePath( relativePath );
 }
 
