@@ -431,3 +431,39 @@ TEST_CASE( "ImageFusion allows differing resolutions (pan-sharpening design)", "
     CHECK( out.width() == 4 );
     CHECK( out.height() == 4 );
 }
+
+TEST_CASE( "ImageFusion rejects mirrored or south-up rasters (#332)", "[fusion][gdal]" )
+{
+    ensureGdalInit();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "pan.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms_southup.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "fused.tif" ) );
+
+    // Pan is north-up (-1.0 pixelH), MS is south-up (+1.0 pixelH)
+    std::array<double, 6> panGt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+    std::array<double, 6> msGt = { 0.0, 1.0, 0.0, 0.0, 0.0, 1.0 };
+    GDALDatasetH panDs = createOutputTiff( panPath, 4, 4, 1, GDT_Float32, panGt,
+                                           QStringLiteral( "EPSG:32648" ) );
+    GDALDatasetH msDs = createOutputTiff( msPath, 4, 4, 1, GDT_Float32, msGt,
+                                          QStringLiteral( "EPSG:32648" ) );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+    std::vector<float> pan( 16, 10.0f );
+    std::vector<float> ms( 16, 5.0f );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 4, 4,
+                           pan.data(), 4, 4, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 4, 4,
+                           ms.data(), 4, 4, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "brovey" );
+    QString error;
+    CHECK_FALSE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    CHECK( error.contains( QStringLiteral( "opposite axis orientation" ) ) );
+    CHECK_FALSE( QFile::exists( outputPath ) );
+}
