@@ -350,6 +350,8 @@ SicnuAlgorithmDialog::~SicnuAlgorithmDialog()
     if ( wrapper && !wrapper->parent() )
       delete wrapper;
   }
+  delete mFeedback;
+  mFeedback = nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -639,6 +641,7 @@ void SicnuAlgorithmDialog::runAlgorithm()
     return;
   }
 
+  delete mFeedback;
   mFeedback = createFeedback();
   QgsProcessingFeedback *feedback = mFeedback;
 
@@ -704,6 +707,7 @@ void SicnuAlgorithmDialog::runAlgorithm()
   {
     feedback->reportError( tr( "Failed to create algorithm instance." ) );
     resetGui();
+    delete mFeedback;
     mFeedback = nullptr;
     return;
   }
@@ -714,6 +718,7 @@ void SicnuAlgorithmDialog::runAlgorithm()
     {
       feedback->reportError( tr( "Algorithm prepare() failed." ) );
       resetGui();
+      delete mFeedback;
       mFeedback = nullptr;
       mRunState.reset();
       return;
@@ -723,6 +728,7 @@ void SicnuAlgorithmDialog::runAlgorithm()
   {
     feedback->reportError( e.what() );
     resetGui();
+    delete mFeedback;
     mFeedback = nullptr;
     mRunState.reset();
     return;
@@ -806,6 +812,21 @@ void SicnuAlgorithmDialog::runAlgorithm()
     [this]( const QString &err, bool ) {
       bool successful = false;
       QVariantMap results = mRunState ? mRunState->results : QVariantMap();
+      if ( mRunState && mRunState->algorithm && mRunState->workerStarted )
+      {
+        try
+        {
+          const QVariantMap pp = mRunState->algorithm->postProcess(
+            mContext, mFeedback, successful );
+          if ( !pp.isEmpty() )
+            results = pp;
+        }
+        catch ( const QgsProcessingException &e )
+        {
+          if ( mFeedback )
+            mFeedback->reportError( e.what() );
+        }
+      }
       if ( mFeedback && !err.isEmpty() && mFeedback->textLog().isEmpty() )
       {
         mFeedback->reportError( err );
@@ -845,6 +866,7 @@ void SicnuAlgorithmDialog::algExecuted( bool successful, const QVariantMap &resu
   QgsProcessingAlgorithmDialogBase::algExecuted( successful, results );
 
   resetGui();
+  delete mFeedback;
   mFeedback = nullptr;
 }
 
