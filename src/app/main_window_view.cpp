@@ -13,6 +13,7 @@
 
 #include <qgsmapcanvas.h>
 #include <qgsmaplayer.h>
+#include <qgscoordinatetransform.h>
 #include <georeferencer/qgsgeoreferencermainwindow.h>
 #include <georeferencer/qgsgeoref_image_to_map_window.h>
 #include <georeferencer/qgsgeoref_shell_window.h>
@@ -435,7 +436,21 @@ void QgisDesktopWindow::zoomToLayer()
 {
     QList<QgsMapLayer*> selected = selectedLayers();
     if (!selected.isEmpty()) {
-        m_mapCanvas->setExtent(selected.first()->extent());
+        QgsMapLayer *target = selected.first();
+        QgsRectangle extent = target->extent();
+        const QgsCoordinateReferenceSystem canvasCrs = m_mapCanvas->mapSettings().destinationCrs();
+        if ( target->crs().isValid() && canvasCrs.isValid() && target->crs() != canvasCrs )
+        {
+            try
+            {
+                const QgsCoordinateTransform ct( target->crs(), canvasCrs, QgsProject::instance() );
+                extent = ct.transformBoundingBox( extent );
+            }
+            catch ( ... )
+            {
+            }
+        }
+        m_mapCanvas->setExtent(extent);
         m_mapCanvas->refresh();
         statusBar()->showMessage("Zoomed to layer", 2000);
     }
