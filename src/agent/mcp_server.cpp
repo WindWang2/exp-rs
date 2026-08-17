@@ -870,9 +870,7 @@ QVariantMap McpServer::handleGetOperatorSchema(const QString &operatorId)
 {
     auto op = sicnu::operators::RSOperatorRegistry::instance().create(operatorId.toStdString());
     if (!op) {
-        QVariantMap err;
-        err[QStringLiteral("error")] = QStringLiteral("Operator not found: ") + operatorId;
-        return err;
+        throw std::runtime_error(QStringLiteral("Operator not found: %1").arg(operatorId).toStdString());
     }
 
     QVariantMap result = sicnu::processing::jsonObjectToVariantMap(op->schema());
