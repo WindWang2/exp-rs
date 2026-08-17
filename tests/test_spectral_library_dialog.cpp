@@ -103,4 +103,36 @@ TEST_CASE( "SpectralLibraryDialog matches the profile against the library", "[sp
     REQUIRE( reloaded.entries.last().spectrum.size() == 4 );
     CHECK( reloaded.entries.last().spectrum[3] == Catch::Approx( 0.4f ) );
   }
+
+  SECTION( "switching library path reloads the new library on match (#340)" )
+  {
+    QString loadError;
+    REQUIRE( dialog.loadAndMatch( libraryPath, &loadError ) );
+    CHECK( dialog.matchRowCount() == 2 );
+
+    // Create a second library with a different single entry
+    SpectralLibrary::Library lib2;
+    SpectralLibrary::Entry mineral;
+    mineral.name = QStringLiteral( "mineral" );
+    mineral.spectrum = { 0.1f, 0.2f, 0.3f, 0.4f };
+    lib2.entries.append( mineral );
+
+    const QString lib2Path = dir.filePath( QStringLiteral( "lib2.json" ) );
+    REQUIRE( lib2.save( lib2Path, &loadError ) );
+
+    auto *pathEdit = dialog.findChild<QLineEdit *>( QStringLiteral( "spectralLibPathEdit" ) );
+    REQUIRE( pathEdit != nullptr );
+    auto *matchBtn = dialog.findChild<QPushButton *>( QStringLiteral( "spectralMatchBtn" ) );
+    REQUIRE( matchBtn != nullptr );
+
+    // Change path in edit box and click match
+    pathEdit->setText( lib2Path );
+    matchBtn->click();
+
+    CHECK( dialog.matchRowCount() == 1 );
+    auto *table = dialog.findChild<QTableWidget *>( QStringLiteral( "spectralMatchTable" ) );
+    REQUIRE( table != nullptr );
+    REQUIRE( table->rowCount() == 1 );
+    CHECK( table->item( 0, 1 )->text() == QStringLiteral( "mineral" ) );
+  }
 }

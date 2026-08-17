@@ -41,12 +41,14 @@ public:
     /// Number of rows currently in the results table (0 when not matched).
     int matchRowCount() const { return m_tableRowCount; }
 
+public slots:
+    void runMatch();
+
 protected:
     void showEvent( QShowEvent *event ) override;
 
 private slots:
     void browseLibrary();
-    void runMatch();
     void saveCurrentToLibrary();
 
 private:
@@ -64,6 +66,7 @@ private:
     QVector<double> m_wavelengths;
     QVector<QString> m_labels;
     SpectralLibrary::Library m_library;
+    QString m_loadedPath;
     bool m_libraryLoaded = false;
     int m_tableRowCount = 0;
 };
