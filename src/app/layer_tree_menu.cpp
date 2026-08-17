@@ -13,6 +13,7 @@
 #include <qgsvectorlayer.h>
 
 #include <QPointer>
+#include <QFileDialog>
 
 LayerTreeMenuProvider::LayerTreeMenuProvider(QgsLayerTreeView *view, ActiveViewHost *activeViewHost)
     : mView(view), m_activeViewHost(activeViewHost) {}
@@ -24,14 +25,30 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
     QgsLayerTreeNode *node = index.isValid() ? mView->index2node(index) : nullptr;
     QPointer<ActiveViewHost> hostPtr(m_activeViewHost);
 
+    auto addRasterAction = [hostPtr]() {
+        if (hostPtr) {
+            const QString file = QFileDialog::getOpenFileName(
+                nullptr, QObject::tr("Add Raster Layer"), QString(),
+                QObject::tr("Raster Formats (*.tif *.tiff *.img *.dat *.pix *.vrt *.nc *.hdf *.h5 *.png *.jpg *.jpeg);;All Files (*.*)") );
+            if (!file.isEmpty())
+                hostPtr->openRasterPath(file);
+        }
+    };
+
+    auto addVectorAction = [hostPtr]() {
+        if (hostPtr) {
+            const QString file = QFileDialog::getOpenFileName(
+                nullptr, QObject::tr("Add Vector Layer"), QString(),
+                QObject::tr("Vector Formats (*.shp *.gpkg *.geojson *.kml *.tab *.mif);;All Files (*.*)") );
+            if (!file.isEmpty())
+                hostPtr->openVectorPath(file);
+        }
+    };
+
     if (!node) {
         if (m_activeViewHost) {
-            menu->addAction(QObject::tr("Add Raster Layer..."), menu, [hostPtr]() {
-                if (hostPtr) hostPtr->openRasterPath(QString());
-            });
-            menu->addAction(QObject::tr("Add Vector Layer..."), menu, [hostPtr]() {
-                if (hostPtr) hostPtr->openVectorPath(QString());
-            });
+            menu->addAction(QObject::tr("Add Raster Layer..."), menu, addRasterAction);
+            menu->addAction(QObject::tr("Add Vector Layer..."), menu, addVectorAction);
         }
         menu->addSeparator();
         if (mView) {
@@ -91,12 +108,8 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
 
     menu->addSeparator();
     if (m_activeViewHost) {
-        menu->addAction(QObject::tr("Add Raster Layer..."), menu, [hostPtr]() {
-            if (hostPtr) hostPtr->openRasterPath(QString());
-        });
-        menu->addAction(QObject::tr("Add Vector Layer..."), menu, [hostPtr]() {
-            if (hostPtr) hostPtr->openVectorPath(QString());
-        });
+        menu->addAction(QObject::tr("Add Raster Layer..."), menu, addRasterAction);
+        menu->addAction(QObject::tr("Add Vector Layer..."), menu, addVectorAction);
     }
 
     return menu;

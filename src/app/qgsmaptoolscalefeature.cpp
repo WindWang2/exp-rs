@@ -308,7 +308,7 @@ void QgsMapToolScaleFeature::cancel()
   deleteScalingWidget();
   deleteRubberband();
   QgsVectorLayer *vlayer = currentVectorLayer();
-  if ( vlayer->selectedFeatureCount() == 0 || mAutoSetAnchorPoint )
+  if ( !vlayer || vlayer->selectedFeatureCount() == 0 || mAutoSetAnchorPoint )
   {
     mAnchorPoint.reset();
   }

@@ -286,7 +286,7 @@ void QgisDesktopWindow::setupMenu()
          tr( "缩放到当前图层范围。" ) );
     viewMenu->addSeparator();
     tip( viewMenu->addAction( ic( "p_n" ), tr( "平移" ),
-                              QKeySequence( "Space" ), this, &QgisDesktopWindow::panMap ),
+                              QKeySequence( "H" ), this, &QgisDesktopWindow::panMap ),
          tr( "平移地图。" ) );
     tip( viewMenu->addAction( ic( "identify" ), tr( "识别" ),
                               QKeySequence( "Ctrl+Shift+I" ), this, &QgisDesktopWindow::identifyFeatures ),

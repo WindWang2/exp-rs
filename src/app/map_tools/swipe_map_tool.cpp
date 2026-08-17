@@ -154,7 +154,7 @@ void SwipeMapTool::setDirection( Direction direction )
 
 void SwipeMapTool::canvasMoveEvent( QgsMapMouseEvent *e )
 {
-    if ( !mCanvas )
+    if ( !mCanvas || !m_mouseFollow )
         return;
     const QPoint pos = e->pos();
     const QSize size = mCanvas->size();
@@ -166,18 +166,18 @@ void SwipeMapTool::canvasMoveEvent( QgsMapMouseEvent *e )
 
 void SwipeMapTool::canvasPressEvent( QgsMapMouseEvent *e )
 {
+    m_mouseFollow = true;
     canvasMoveEvent( e );
 }
 
 void SwipeMapTool::canvasReleaseEvent( QgsMapMouseEvent *e )
 {
-    if ( e->button() == Qt::LeftButton )
-        m_mouseFollow = true;
+    Q_UNUSED( e );
 }
 
 void SwipeMapTool::keyPressEvent( QKeyEvent *e )
 {
-    if ( e->key() == Qt::Key_Space )
+    if ( e->key() == Qt::Key_Space || e->key() == Qt::Key_D )
     {
         // Toggle direction
         setDirection( m_direction == Direction::Vertical ? Direction::Horizontal : Direction::Vertical );

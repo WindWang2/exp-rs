@@ -368,6 +368,19 @@ SchemaFormBuilder::buildField( const QString &name, const Json::Value &prop )
               combo->setCurrentIndex( t );
           }
         }
+        else if ( prop["default"].isNumeric() )
+        {
+          const double d = prop["default"].asDouble();
+          const int idx = combo->findData( d );
+          if ( idx >= 0 )
+            combo->setCurrentIndex( idx );
+          else
+          {
+            const int t = combo->findText( QString::number( d ) );
+            if ( t >= 0 )
+              combo->setCurrentIndex( t );
+          }
+        }
       }
       if ( !tip.isEmpty() )
         combo->setToolTip( tip );

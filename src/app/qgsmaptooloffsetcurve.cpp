@@ -110,7 +110,7 @@ void QgsMapToolOffsetCurve::canvasReleaseEvent( QgsMapMouseEvent *e )
         createUserInputWidget();
 
         const bool hasZ = QgsWkbTypes::hasZ( mSourceLayer->wkbType() );
-        const bool hasM = QgsWkbTypes::hasZ( mSourceLayer->wkbType() );
+        const bool hasM = QgsWkbTypes::hasM( mSourceLayer->wkbType() );
         if ( hasZ || hasM )
         {
           emit
@@ -737,7 +737,7 @@ QgsOffsetUserWidget::QgsOffsetUserWidget( QWidget *parent )
   mShowAdvancedButton->setChecked( showAdvanced );
   mAdvancedConfigWidget->setVisible( showAdvanced );
   connect( mShowAdvancedButton, &QToolButton::clicked, mAdvancedConfigWidget, &QWidget::setVisible );
-  connect( mShowAdvancedButton, &QToolButton::clicked, this, []( const bool clicked ) { QgsSettingsRegistryCore::settingsDigitizingConvertToCurveDistanceTolerance->setValue( clicked ); } );
+  connect( mShowAdvancedButton, &QToolButton::clicked, this, []( const bool clicked ) { QgsSettingsRegistryCore::settingsDigitizingOffsetShowAdvanced->setValue( clicked ); } );
 
   // config focus
   setFocusProxy( mOffsetSpinBox );
