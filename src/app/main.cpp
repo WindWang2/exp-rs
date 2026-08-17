@@ -404,11 +404,11 @@ int main(int argc, char *argv[])
                           << ")\n";
                 ok = false;
             }
-            // Ribbon 154 + one toolbar row 32 => expect ~186
-            if ( ribbonDock && ribbonDock->height() < 180 )
+            // Ribbon 126 + one toolbar row 32 => expect ~158
+            if ( ribbonDock && ribbonDock->height() < 150 )
             {
                 std::cerr << "[DEBUG-tb] FAIL: rsRibbonDock height too small for toolbar row"
-                          << " (height=" << ribbonDock->height() << ", expect>=186)\n";
+                          << " (height=" << ribbonDock->height() << ", expect>=158)\n";
                 ok = false;
             }
             // Band composition rail must stay out of product chrome.

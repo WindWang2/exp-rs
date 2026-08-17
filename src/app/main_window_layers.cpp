@@ -282,14 +282,14 @@ QgsLayerTreeGroup *QgisDesktopWindow::findOrCreateGroup(const QString &name)
 }
 
 // ── Layer Loading (delegated to ActiveViewHost / active Display View) ─────
-void QgisDesktopWindow::loadRasterLayer(const QString &filePath)
+bool QgisDesktopWindow::loadRasterLayer(const QString &filePath)
 {
-    m_activeViewHost->openRasterPath(filePath);
+    return m_activeViewHost && static_cast<bool>(m_activeViewHost->openRasterPath(filePath));
 }
 
-void QgisDesktopWindow::loadVectorLayer(const QString &filePath)
+bool QgisDesktopWindow::loadVectorLayer(const QString &filePath)
 {
-    m_activeViewHost->openVectorPath(filePath);
+    return m_activeViewHost && static_cast<bool>(m_activeViewHost->openVectorPath(filePath));
 }
 
 void QgisDesktopWindow::showLayerProperties(QgsMapLayer *layer)

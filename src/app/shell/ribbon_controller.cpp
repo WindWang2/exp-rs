@@ -577,79 +577,56 @@ void RibbonController::wireBandComboSignals()
   }
 }
 
-QWidget *RibbonController::makeQuickAccessToolbar( QWidget *parent )
-{
-  auto *qat = new QWidget( parent );
-  qat->setObjectName( QStringLiteral( "rsRibbonQat" ) );
-  qat->setFixedHeight( 28 );
-  auto *lay = new QHBoxLayout( qat );
-  lay->setContentsMargins( 8, 2, 8, 2 );
-  lay->setSpacing( 2 );
-
-  auto addQat = [&]( const char *icon, const QString &tip, auto slot ) {
-    auto *btn = new QToolButton( qat );
-    polishSmallButton( btn );
-    btn->setIcon( ribbonIcon( icon ) );
-    btn->setToolTip( tip );
-    connect( btn, &QToolButton::clicked, m_window, slot );
-    lay->addWidget( btn );
-    return btn;
-  };
-
-  addQat( "new_project", tr( "新建工程" ), &QgisDesktopWindow::newProject );
-  addQat( "o_en", tr( "打开工程" ), &QgisDesktopWindow::openProject );
-  addQat( "s_ve", tr( "保存工程" ), &QgisDesktopWindow::saveProject );
-
-  auto *sep = new QFrame( qat );
-  sep->setObjectName( QStringLiteral( "rsRibbonQatSep" ) );
-  sep->setFrameShape( QFrame::VLine );
-  sep->setFixedWidth( 1 );
-  sep->setFixedHeight( 16 );
-  lay->addWidget( sep );
-
-  addQat( "hel_", tr( "偏好设置" ), &QgisDesktopWindow::options );
-
-  lay->addStretch( 1 );
-
-  auto *brand = new QLabel( tr( "SICNU GEO RS" ), qat );
-  brand->setObjectName( QStringLiteral( "rsRibbonQatBrand" ) );
-  lay->addWidget( brand );
-
-  auto *helpBtn = new QToolButton( qat );
-  polishSmallButton( helpBtn );
-  helpBtn->setText( tr( "?" ) );
-  helpBtn->setToolTip( tr( "帮助内容（打开帮助文档）" ) );
-  helpBtn->setStatusTip( tr( "打开帮助文档" ) );
-  helpBtn->setWhatsThis( tr( "帮助内容（打开帮助文档）。按 Shift+F1 后点击任意控件可查看该控件的说明。" ) );
-  helpBtn->setToolButtonStyle( Qt::ToolButtonTextOnly );
-  connect( helpBtn, &QToolButton::clicked, m_window, &QgisDesktopWindow::helpContents );
-  lay->addWidget( helpBtn );
-
-  return qat;
-}
-
 QWidget *RibbonController::createRibbonBar()
 {
   auto *bar = new QWidget;
   bar->setObjectName( QStringLiteral( "rsRibbonBar" ) );
   bar->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
-  // QAT 28 + tabs 30 + content 96 = 154 (minimum layout height)
-  bar->setMinimumHeight( 154 );
+  // tabs 30 + content 96 = 126 (minimum layout height; QAT inlined into tab row)
+  bar->setMinimumHeight( 126 );
 
   auto *root = new QVBoxLayout( bar );
   root->setContentsMargins( 0, 0, 0, 0 );
   root->setSpacing( 0 );
 
-  // ── 1. Quick Access Toolbar (ArcGIS Pro QAT) ───────────────────────────
-  root->addWidget( makeQuickAccessToolbar( bar ) );
-
-  // ── 2. Tab strip ───────────────────────────────────────────────────────
+  // ── 1. Tab strip (QAT buttons inlined at left) ─────────────────────────
   auto *tabRow = new QWidget( bar );
   tabRow->setObjectName( QStringLiteral( "rsRibbonTabRow" ) );
   tabRow->setMinimumHeight( 30 );
   auto *tabLay = new QHBoxLayout( tabRow );
-  tabLay->setContentsMargins( 8, 0, 8, 0 );
-  tabLay->setSpacing( 0 );
+  tabLay->setContentsMargins( 6, 0, 6, 0 );
+  tabLay->setSpacing( 2 );
+
+  // Quick Access buttons (新建, 打开, 保存, 偏好设置) on the left
+  auto addQatBtn = [&]( const char *icon, const QString &tip, auto slot ) {
+    auto *btn = new QToolButton( tabRow );
+    polishSmallButton( btn );
+    btn->setIcon( ribbonIcon( icon ) );
+    btn->setToolTip( tip );
+    connect( btn, &QToolButton::clicked, m_window, slot );
+    tabLay->addWidget( btn );
+    return btn;
+  };
+
+  addQatBtn( "new_project", tr( "新建工程" ), &QgisDesktopWindow::newProject );
+  addQatBtn( "o_en", tr( "打开工程" ), &QgisDesktopWindow::openProject );
+  addQatBtn( "s_ve", tr( "保存工程" ), &QgisDesktopWindow::saveProject );
+
+  auto *sep = new QFrame( tabRow );
+  sep->setObjectName( QStringLiteral( "rsRibbonQatSep" ) );
+  sep->setFrameShape( QFrame::VLine );
+  sep->setFixedWidth( 1 );
+  sep->setFixedHeight( 16 );
+  tabLay->addWidget( sep );
+
+  addQatBtn( "hel_", tr( "偏好设置" ), &QgisDesktopWindow::options );
+
+  auto *qatTabSep = new QFrame( tabRow );
+  qatTabSep->setObjectName( QStringLiteral( "rsRibbonQatSep" ) );
+  qatTabSep->setFrameShape( QFrame::VLine );
+  qatTabSep->setFixedWidth( 1 );
+  qatTabSep->setFixedHeight( 18 );
+  tabLay->addWidget( qatTabSep );
 
   auto *stack = new QStackedWidget( bar );
   stack->setObjectName( QStringLiteral( "rsRibbonStack" ) );
@@ -1090,6 +1067,20 @@ QWidget *RibbonController::createRibbonBar()
 
   tabLay->addStretch( 1 );
 
+  auto *brand = new QLabel( tr( "SICNU GEO RS" ), tabRow );
+  brand->setObjectName( QStringLiteral( "rsRibbonQatBrand" ) );
+  tabLay->addWidget( brand );
+
+  auto *helpBtn = new QToolButton( tabRow );
+  polishSmallButton( helpBtn );
+  helpBtn->setText( tr( "?" ) );
+  helpBtn->setToolTip( tr( "帮助内容（打开帮助文档）" ) );
+  helpBtn->setStatusTip( tr( "打开帮助文档" ) );
+  helpBtn->setWhatsThis( tr( "帮助内容（打开帮助文档）。按 Shift+F1 后点击任意控件可查看该控件的说明。" ) );
+  helpBtn->setToolButtonStyle( Qt::ToolButtonTextOnly );
+  connect( helpBtn, &QToolButton::clicked, m_window, &QgisDesktopWindow::helpContents );
+  tabLay->addWidget( helpBtn );
+
   auto *collapseBtn = new QToolButton( tabRow );
   collapseBtn->setObjectName( QStringLiteral( "rsRibbonCollapseBtn" ) );
   collapseBtn->setArrowType( Qt::UpArrow );
@@ -1148,7 +1139,7 @@ void RibbonController::setRibbonCollapsed( bool collapsed )
     m_stack->setVisible( !collapsed );
   if ( m_ribbonBar )
   {
-    const int h = collapsed ? 58 : 154;
+    const int h = collapsed ? 30 : 126;
     m_ribbonBar->setMinimumHeight( h );
     m_ribbonBar->setFixedHeight( h );
     m_ribbonBar->updateGeometry();

@@ -1,6 +1,7 @@
 // src/data/raster_grid_compat.cpp — shared raster-grid compatibility service
 #include "raster_grid_compat.h"
 
+#include <ogr_spatialref.h>
 #include <ogr_srs_api.h>
 
 #include <algorithm>

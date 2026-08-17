@@ -83,7 +83,6 @@ class RibbonController : public QObject
                             const QString &tooltip = QString(),
                             int minWidth = 88 );
     void addGroupSeparator( QHBoxLayout *pageLayout );
-    QWidget *makeQuickAccessToolbar( QWidget *parent );
     QgsRasterLayer *currentRasterLayer() const;
 
     void fillBandItems( QComboBox *combo, int bandCount, int selectedBand );

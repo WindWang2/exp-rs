@@ -18,6 +18,8 @@
 #include "data/band_role.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include "operators/framework/asset_index_pipeline.h"
 
 namespace
 {

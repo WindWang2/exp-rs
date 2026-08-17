@@ -287,8 +287,8 @@ public:
     void toggleDualViewportSync( bool on );
 
     // Layer loading (public for template helper in main_window_processing.cpp)
-    void loadRasterLayer(const QString &filePath);
-    void loadVectorLayer(const QString &filePath);
+    bool loadRasterLayer(const QString &filePath);
+    bool loadVectorLayer(const QString &filePath);
 
     /** Place product toolbars under the ribbon (max two rows). */
     void layoutToolbarsUnderRibbon();

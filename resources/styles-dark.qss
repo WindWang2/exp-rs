@@ -1221,7 +1221,7 @@ QTreeView::item:selected, QTreeWidget::item:selected, QListView::item:selected {
     background: #1E2229;
     border: none;
     border-bottom: 1px solid #343B46;
-    min-height: 154px;
+    min-height: 126px;
 }
 #rsRibbonQat {
     background: #1A1D23;

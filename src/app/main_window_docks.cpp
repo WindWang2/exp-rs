@@ -628,9 +628,9 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     auto *chrome = new QWidget;
     chrome->setObjectName( QStringLiteral( "rsTopChrome" ) );
     chrome->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
-    // Base: QAT(28) + tabs(30) + content(96) = 154 (band rail removed from product chrome).
+    // Base: tabs(30) + content(96) = 126 (QAT inlined into tab row).
     // + optional toolbar strip (0–2 × 32) under the ribbon.
-    constexpr int kRibbonOnlyH = 154;
+    constexpr int kRibbonOnlyH = 126;
     chrome->setMinimumHeight( kRibbonOnlyH );
 
     auto *chromeLay = new QVBoxLayout( chrome );
@@ -661,7 +661,7 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
             return;
         // Only adjust chrome height when user drags/resizes inside the flow host.
         const int stripH = m_toolbarFlowHost ? m_toolbarFlowHost->usedHeight() : 0;
-        const int kBaseChrome = ( m_ribbonController && m_ribbonController->isRibbonCollapsed() ) ? 58 : 154;
+        const int kBaseChrome = ( m_ribbonController && m_ribbonController->isRibbonCollapsed() ) ? 30 : 126;
         constexpr int kRowH = 32;
         m_toolbarStrip->setFixedHeight( stripH );
         m_toolbarStrip->setMinimumHeight( stripH );
@@ -808,7 +808,7 @@ void QgisDesktopWindow::layoutToolbarsUnderRibbon()
         m_toolbarFlowHost->setProductToolbars( ordered );
     m_toolbarFlowHost->applyVisibility( wantByBar );
 
-    const int kBaseChrome = ( m_ribbonController && m_ribbonController->isRibbonCollapsed() ) ? 58 : 154;
+    const int kBaseChrome = ( m_ribbonController && m_ribbonController->isRibbonCollapsed() ) ? 30 : 126;
     constexpr int kRowH = 32;
     const int stripH = m_toolbarFlowHost->usedHeight();
 
