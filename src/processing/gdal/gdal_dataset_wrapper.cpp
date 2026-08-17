@@ -508,7 +508,8 @@ bool writeGdalOutput(const QString &outputPath, int width, int height,
                      const std::vector<std::vector<float>> &bands,
                      const std::array<double, 6> &geoTransform,
                      const QString &projection,
-                     QString *errorMessage)
+                     QString *errorMessage,
+                     double nodataValue)
 {
     if (bands.empty()) {
         if (errorMessage) *errorMessage = QStringLiteral("No band data to write");
@@ -527,6 +528,9 @@ bool writeGdalOutput(const QString &outputPath, int width, int height,
             if (errorMessage) *errorMessage = QStringLiteral("Failed to get output band %1").arg(b + 1);
             GDALClose(ds);
             return false;
+        }
+        if (std::isnan(nodataValue) || std::isfinite(nodataValue)) {
+            GDALSetRasterNoDataValue(dstBand, nodataValue);
         }
         CPLErr err = GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,
                                    const_cast<float *>(bands[b].data()),

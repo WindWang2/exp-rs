@@ -275,3 +275,71 @@ TEST_CASE( "A failed run registers nothing and discards the temporary output",
   CHECK_FALSE( QFile::exists( dir.filePath( QStringLiteral( "scratch.tif" ) ) ) );
   CHECK_FALSE( QFile::exists( dir.filePath( QStringLiteral( "ndvi_stable.tif" ) ) ) );
 }
+
+TEST_CASE( "Spectral index pipeline masks input NoData to NaN and declares output NoData (#298)",
+           "[spectral_index_asset_pipeline]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  ProcessingAssetResolver resolver( &manager );
+  OutputCommitter committer( &manager );
+
+  // Create an input raster with NoData = -9999
+  const QString inPath = dir.filePath( QStringLiteral( "nodata_sample.tif" ) );
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  REQUIRE( driver != nullptr );
+  constexpr int W = 4, H = 4;
+  GDALDatasetH ds = GDALCreate( driver, inPath.toUtf8().constData(), W, H, 5, GDT_Float32, nullptr );
+  REQUIRE( ds != nullptr );
+  for ( int b = 1; b <= 5; ++b )
+  {
+    GDALRasterBandH gdalBand = GDALGetRasterBand( ds, b );
+    GDALSetRasterNoDataValue( gdalBand, -9999.0 );
+    std::vector<float> data( W * H, 100.0f );
+    // Set first pixel to NoData
+    data[0] = -9999.0f;
+    GDALRasterIO( gdalBand, GF_Write, 0, 0, W, H, data.data(), W, H, GDT_Float32, 0, 0 );
+  }
+  GDALClose( ds );
+
+  SourceDescriptor source;
+  source.providerKey = QStringLiteral( "gdal" );
+  source.canonicalSource = inPath;
+  RegisterRequest request;
+  request.source = source;
+  const RegisterResult regRes = manager.registerSource( request );
+  REQUIRE( !regRes.assetId.isNull() );
+
+  SpectralIndexParams params;
+  params.index = QStringLiteral( "NDVI" );
+  params.nir = 4;
+  params.red = 3;
+
+  const auto snapshot = manager.asset( regRes.assetId );
+  REQUIRE( snapshot.has_value() );
+
+  const auto result = runSpectralIndexFromAsset(
+    AssetRef{ regRes.assetId, snapshot->revision() }, params,
+    makeOutput( dir, QStringLiteral( "ndvi_nodata_out.tif" ), /*autoLoad=*/false ),
+    resolver, committer );
+
+  REQUIRE( result );
+
+  // Check output raster NoData declaration and pixel values
+  const QString outPath = dir.filePath( QStringLiteral( "ndvi_nodata_out.tif" ) );
+  GDALDatasetH outDs = GDALOpen( outPath.toUtf8().constData(), GA_ReadOnly );
+  REQUIRE( outDs != nullptr );
+  GDALRasterBandH outBand = GDALGetRasterBand( outDs, 1 );
+  REQUIRE( outBand != nullptr );
+  int hasNodata = 0;
+  double outNodata = GDALGetRasterNoDataValue( outBand, &hasNodata );
+  CHECK( hasNodata );
+  CHECK( ( std::isnan( outNodata ) || outNodata == -9999.0 ) );
+
+  std::vector<float> outPixels( W * H );
+  GDALRasterIO( outBand, GF_Read, 0, 0, W, H, outPixels.data(), W, H, GDT_Float32, 0, 0 );
+  CHECK( std::isnan( outPixels[0] ) ); // Pixel with NoData in inputs evaluated to NaN
+  CHECK( std::isfinite( outPixels[1] ) ); // Normal pixel evaluated to finite NDVI
+
+  GDALClose( outDs );
+}

@@ -628,6 +628,15 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                 *errorMessage = QStringLiteral("Failed to read band %1").arg(i);
             return false;
         }
+        bool hasNodata = false;
+        double nodataVal = srcDataset.bandNoDataValue(i, &hasNodata);
+        if (hasNodata && std::isfinite(nodataVal)) {
+            for (float &val : buffer) {
+                if (std::abs(static_cast<double>(val) - nodataVal) < 1e-6 || std::isnan(val)) {
+                    val = std::numeric_limits<float>::quiet_NaN();
+                }
+            }
+        }
         bands[i] = std::move(buffer);
     }
 
