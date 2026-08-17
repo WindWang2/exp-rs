@@ -632,6 +632,7 @@ target_link_libraries(test_gdal_null_band PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
+  sicnu_processing
   GDAL::GDAL
 )
 target_include_directories(test_gdal_null_band PRIVATE

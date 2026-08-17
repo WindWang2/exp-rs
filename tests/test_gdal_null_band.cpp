@@ -75,6 +75,8 @@ TEST_CASE("Valid band handle works correctly", "[gdal][nullband]")
     GDALClose(ds);
 }
 
+#include "processing/gdal/gdal_dataset_wrapper.h"
+
 TEST_CASE("Null band guard prevents write to invalid band", "[gdal][nullband]")
 {
     ensureGdalRegistered();
@@ -101,4 +103,18 @@ TEST_CASE("Null band guard prevents write to invalid band", "[gdal][nullband]")
     REQUIRE_FALSE(wroteOk);
 
     GDALClose(ds);
+}
+
+TEST_CASE("GdalDatasetWrapper handles out-of-bounds bands safely", "[gdal][nullband]")
+{
+    GdalDatasetWrapper wrapper;
+    // Closed wrapper operations return false safely
+    std::vector<float> buf(16, 0.0f);
+    REQUIRE_FALSE(wrapper.readBandData(1, buf.data(), 4, 4));
+    REQUIRE_FALSE(wrapper.readBandWindow(1, 0, 0, 4, 4, buf.data()));
+    REQUIRE_FALSE(wrapper.writeBandWindow(1, 0, 0, 4, 4, buf.data()));
+
+    bool hasNodata = true;
+    double nd = wrapper.bandNoDataValue(1, &hasNodata);
+    REQUIRE_FALSE(hasNodata);
 }

@@ -244,15 +244,20 @@ TEST_CASE("GdalDatasetWrapper readBandData rejects invalid band", "[gdal][wrappe
 
 TEST_CASE("GdalDatasetWrapper reads band no-data value", "[gdal][wrapper]")
 {
+    QTemporaryDir tmp;
+    const QString path = tmp.path() + QStringLiteral("/nodata_test.tif");
+    std::vector<std::vector<float>> bands = { { 1.0f, 2.0f, -9999.0f, 4.0f } };
+    std::array<double, 6> gt = { 0, 1, 0, 0, 0, 1 };
+    QString err;
+    REQUIRE(writeGdalOutput(path, 2, 2, bands, gt, QString(), &err, -9999.0));
+
     GdalDatasetWrapper ds;
-    ds.open(testDataPath());
+    REQUIRE(ds.open(path));
 
     bool hasNodata = false;
     double nodata = ds.bandNoDataValue(1, &hasNodata);
-    // sample_crops.tif may or may not have nodata set; just verify the API works
-    (void)nodata;
-    (void)hasNodata;
-    REQUIRE(true); // API doesn't crash
+    REQUIRE(hasNodata);
+    REQUIRE_THAT(nodata, Catch::Matchers::WithinAbs(-9999.0, 1e-4));
 }
 
 TEST_CASE("GdalDatasetWrapper reads single pixel value", "[gdal][wrapper]")

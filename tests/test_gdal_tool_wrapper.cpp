@@ -1,9 +1,16 @@
 // tests/test_gdal_tool_wrapper.cpp — Test GDAL tool wrapper error handling
 #include <catch2/catch_test_macros.hpp>
 
+#include "processing/providers/generic_cli/generic_cli_algorithm.h"
+#include <processing/qgsprocessingcontext.h>
+#include <processing/qgsprocessingfeedback.h>
+#include "qgsexception.h"
+
 #include <QProcess>
 #include <QTemporaryDir>
 #include <QFileInfo>
+#include <QJsonObject>
+#include <QJsonArray>
 
 // Test that MergedChannels mode captures stderr in readAllStandardOutput
 TEST_CASE("QProcess MergedChannels captures stderr", "[gdal][tool][error]") {
@@ -42,45 +49,56 @@ TEST_CASE("QProcess SeparateChannels keeps stderr separate", "[gdal][tool][error
     CHECK(stderrOutput.contains("error message"));
 }
 
-// Test that the fix captures error messages correctly
-TEST_CASE("Tool wrapper error message capture", "[gdal][tool][error]") {
-    // This test verifies the fix: when MergedChannels is used,
-    // error messages should be read from readAllStandardOutput()
-    QProcess proc;
-    proc.setProcessChannelMode(QProcess::MergedChannels);
-    proc.start("bash", {"-c", "echo 'tool failed' >&2; exit 1"});
+TEST_CASE("GenericCliAlgorithm initializes parameters and preview", "[gdal][tool][error]") {
+    QJsonObject config;
+    config["id"] = "test_custom_gdal";
+    config["name"] = "Custom GDAL Tool";
+    config["command"] = "gdalinfo";
+    QJsonArray params;
+    QJsonObject p1;
+    p1["name"] = "INPUT";
+    p1["type"] = "raster";
+    params.append(p1);
+    config["parameters"] = params;
+    config["args"] = QJsonArray{"-stats", "{INPUT}"};
 
-    REQUIRE(proc.waitForStarted(5000));
-    proc.waitForFinished(5000);
+    GenericCliAlgorithm alg(config, "gdal");
+    REQUIRE(alg.name() == "test_custom_gdal");
+    REQUIRE(alg.displayName() == "Custom GDAL Tool");
 
-    // Simulate the fix: read from readAllStandardOutput() instead of readAllStandardError()
-    QString errorMessage;
-    if (proc.exitCode() != 0) {
-        // FIX: Use readAllStandardOutput() because MergedChannels merges stderr into stdout
-        errorMessage = QString::fromUtf8(proc.readAllStandardOutput());
-    }
-
-    CHECK(errorMessage.contains("tool failed"));
-    CHECK_FALSE(errorMessage.isEmpty());
+    QgsProcessingContext context;
+    QVariantMap inputParams;
+    inputParams["INPUT"] = "/tmp/fake_input.tif";
+    QString preview = alg.commandLinePreview(inputParams, context);
+    CHECK(preview.contains("gdalinfo"));
+    CHECK(preview.contains("-stats"));
+    CHECK(preview.contains("/tmp/fake_input.tif"));
 }
 
-// Test that the bug exists: readAllStandardError() returns empty with MergedChannels
-TEST_CASE("Bug: readAllStandardError returns empty with MergedChannels", "[gdal][tool][error]") {
-    QProcess proc;
-    proc.setProcessChannelMode(QProcess::MergedChannels);
-    proc.start("bash", {"-c", "echo 'error info' >&2; exit 1"});
+TEST_CASE("GenericCliAlgorithm catches exit failures with QgsProcessingException", "[gdal][tool][error]") {
+    QJsonObject config;
+    config["id"] = "test_failing_cli";
+    config["name"] = "Failing Tool";
+    config["command"] = "bash";
+    config["args"] = QJsonArray{"-c", "echo 'critical gdal failure' >&2; exit 3"};
 
-    REQUIRE(proc.waitForStarted(5000));
-    proc.waitForFinished(5000);
+    GenericCliAlgorithm alg(config, "gdal");
+    QgsProcessingContext context;
+    QgsProcessingFeedback feedback;
+    QVariantMap params;
+    bool ok = true;
+    bool threw = false;
+    QString caughtMessage;
+    try {
+        alg.run(params, context, &feedback, &ok, {}, false);
+    } catch (const QgsProcessingException &e) {
+        threw = true;
+        caughtMessage = e.what();
+    } catch (const std::exception &e) {
+        threw = true;
+        caughtMessage = QString::fromUtf8(e.what());
+    }
 
-    // BUG: This is what the current code does - it reads from readAllStandardError()
-    // which returns empty because MergedChannels merges stderr into stdout
-    QString buggyErrorMessage = QString::fromUtf8(proc.readAllStandardError());
-
-    // This should be empty (the bug)
-    CHECK(buggyErrorMessage.isEmpty());
-
-    // The correct approach is to read from readAllStandardOutput()
-    QString correctErrorMessage = QString::fromUtf8(proc.readAllStandardOutput());
-    CHECK(correctErrorMessage.contains("error info"));
+    CHECK(threw);
+    CHECK(caughtMessage.contains("3"));
 }
