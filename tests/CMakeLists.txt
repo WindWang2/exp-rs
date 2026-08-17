@@ -1544,6 +1544,29 @@ target_include_directories(test_measure_tool PRIVATE
 )
 sicnu_discover_tests(test_measure_tool)
 
+# ROI spectrum tool tests (#322)
+add_executable(test_roi_spectrum_tool test_roi_spectrum_tool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/map_tools/rs_roi_spectrum_tool.cpp
+)
+target_link_libraries(test_roi_spectrum_tool PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  sicnu_processing
+  qgis_core
+  qgis_gui
+  GDAL::GDAL
+)
+target_include_directories(test_roi_spectrum_tool PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_roi_spectrum_tool)
+
 # RMS scatter widget tests (Task 11.4.7)
 add_executable(test_rms_scatter test_rms_scatter.cpp)
 target_link_libraries(test_rms_scatter PRIVATE
