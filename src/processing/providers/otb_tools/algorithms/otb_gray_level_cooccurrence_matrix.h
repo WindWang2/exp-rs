@@ -13,7 +13,7 @@ public:
     QString group() const override { return "Feature"; }
     QString groupId() const override { return "feature"; }
     QStringList tags() const override { return { QObject::tr( "glcm" ), QObject::tr( "texture" ), QObject::tr( "co-occurrence" ), QObject::tr( "feature" ), QObject::tr( "otb" ) }; }
-    QString applicationName() const override { return "GrayLevelCooccurrenceMatrix"; }
+    QString applicationName() const override { return "HaralickTextureExtraction"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbGrayLevelCooccurrenceMatrixAlgorithm(); }
 

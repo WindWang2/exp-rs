@@ -18,7 +18,28 @@ QStringList OtbConcatenateImagesAlgorithm::buildArgs(const QVariantMap &paramete
     Q_UNUSED(feedback);
 
     QStringList args;
-    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
+    args << "-il";
+    QVariant inputVar = parameters.value("INPUT");
+    if (inputVar.userType() == QMetaType::QVariantList) {
+        const QVariantList list = inputVar.toList();
+        for (const QVariant &v : list) {
+            args << rasterLayerSource(v);
+        }
+    } else if (inputVar.userType() == QMetaType::QStringList) {
+        const QStringList list = inputVar.toStringList();
+        for (const QString &s : list) {
+            args << rasterLayerSource(s);
+        }
+    } else {
+        QString str = inputVar.toString();
+        if (str.contains(";")) {
+            for (const QString &s : str.split(";", Qt::SkipEmptyParts)) {
+                args << rasterLayerSource(s.trimmed());
+            }
+        } else {
+            args << rasterLayerSource(inputVar);
+        }
+    }
     args << "-out" << parameters.value("OUTPUT").toString();
 
     return args;

@@ -13,7 +13,7 @@ public:
     QString group() const override { return "Utilities"; }
     QString groupId() const override { return "utilities"; }
     QStringList tags() const override { return { QObject::tr( "pixel" ), QObject::tr( "info" ), QObject::tr( "value" ), QObject::tr( "utilities" ), QObject::tr( "otb" ) }; }
-    QString applicationName() const override { return "PixelInfo"; }
+    QString applicationName() const override { return "PixelValue"; }
     QString shortHelpString() const override
     {
         return QObject::tr( "Returns the spectral values of a raster pixel at the given image coordinates." );

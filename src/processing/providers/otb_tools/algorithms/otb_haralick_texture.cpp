@@ -21,7 +21,10 @@ QStringList OtbHaralickTextureAlgorithm::buildArgs(const QVariantMap &parameters
 
     QStringList args;
     args << "-in" << rasterLayerSource(parameters.value("INPUT"));
-    args << "-parameters.radius" << QString::number(parameters.value("RADIUS").toInt());
+    int radius = parameters.value("RADIUS", 3).toInt();
+    args << "-parameters.xrad" << QString::number(radius);
+    args << "-parameters.yrad" << QString::number(radius);
+    args << "-channel" << QString::number(parameters.value("CHANNEL", 1).toInt());
     args << "-out" << parameters.value("OUTPUT").toString();
 
     return args;

@@ -13,7 +13,7 @@ public:
     QString group() const override { return "Feature"; }
     QString groupId() const override { return "feature"; }
     QStringList tags() const override { return { QObject::tr( "feature" ), QObject::tr( "extraction" ), QObject::tr( "texture" ), QObject::tr( "otb" ) }; }
-    QString applicationName() const override { return "FeatureExtraction"; }
+    QString applicationName() const override { return "HaralickTextureExtraction"; }
 
     QgsProcessingAlgorithm *createInstance() const override { return new OtbFeatureExtractionAlgorithm(); }
 

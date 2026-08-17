@@ -26,8 +26,8 @@ QStringList OtbPixelInfoAlgorithm::buildArgs(const QVariantMap &parameters,
 
     QStringList args;
     args << "-in" << rasterLayerSource(parameters.value("INPUT"));
-    args << "-coord" << QString::number(parameters.value("X").toInt())
-         << QString::number(parameters.value("Y").toInt());
+    args << "-coordx" << QString::number(parameters.value("X").toInt());
+    args << "-coordy" << QString::number(parameters.value("Y").toInt());
 
     return args;
 }

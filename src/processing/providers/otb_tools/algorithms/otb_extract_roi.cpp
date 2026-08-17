@@ -21,14 +21,31 @@ QStringList OtbExtractRoiAlgorithm::buildArgs(const QVariantMap &parameters,
     QStringList args;
     args << "-in" << rasterLayerSource(parameters.value("INPUT"));
 
-    if (parameters.contains("EXTENT") && !parameters.value("EXTENT").toString().isEmpty()) {
-        QStringList extent = parameters.value("EXTENT").toString().split(",");
-        if (extent.size() == 4) {
+    if (parameters.contains("EXTENT") && !parameters.value("EXTENT").isNull()) {
+        QVariant val = parameters.value("EXTENT");
+        QgsRectangle rect;
+        if (val.canConvert<QgsRectangle>()) {
+            rect = val.value<QgsRectangle>();
+        } else {
+            QString str = val.toString();
+            QStringList extent = str.split(",");
+            if (extent.size() == 4) {
+                // QGIS extent string order: xmin, xmax, ymin, ymax
+                double xmin = extent[0].toDouble();
+                double xmax = extent[1].toDouble();
+                double ymin = extent[2].toDouble();
+                double ymax = extent[3].toDouble();
+                rect = QgsRectangle(xmin, ymin, xmax, ymax);
+            }
+        }
+
+        if (!rect.isNull() && !rect.isEmpty()) {
             args << "-mode" << "extent"
-                 << "-mode.extent.ulx" << extent[0]
-                 << "-mode.extent.uly" << extent[3]
-                 << "-mode.extent.lrx" << extent[2]
-                 << "-mode.extent.lry" << extent[1];
+                 << "-mode.extent.unit" << "phy"
+                 << "-mode.extent.ulx" << QString::number(rect.xMinimum(), 'f', 6)
+                 << "-mode.extent.uly" << QString::number(rect.yMaximum(), 'f', 6)
+                 << "-mode.extent.lrx" << QString::number(rect.xMaximum(), 'f', 6)
+                 << "-mode.extent.lry" << QString::number(rect.yMinimum(), 'f', 6);
         }
     }
 
