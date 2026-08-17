@@ -70,6 +70,23 @@ TEST_CASE("Lee filter reduces noise", "[speckle]") {
     REQUIRE(outputDev < inputDev);
 }
 
+TEST_CASE("Lee filter reduces noise on high-magnitude SAR data (#330)", "[speckle]") {
+    // SAR amplitude data with mean ~1000 and speckle noise
+    const int W = 10, H = 10;
+    std::vector<float> input(W * H, 1000.0f);
+    std::vector<float> noisy(W * H);
+    for (int i = 0; i < W * H; ++i) {
+        float noise = (i % 2 == 0) ? 0.3f : -0.2f;
+        noisy[i] = input[i] * (1.0f + noise);
+    }
+    std::vector<float> output(W * H, 0.0f);
+    // Relative noiseVariance = 0.1 (Cu^2 ~ 0.1)
+    ImageEnhancement::leeFilter(noisy.data(), output.data(), W, H, 5, 0.1f);
+    float inputDev = std::abs(noisy[55] - 1000.0f);
+    float outputDev = std::abs(output[55] - 1000.0f);
+    REQUIRE(outputDev < inputDev * 0.7f);
+}
+
 TEST_CASE("Lee filter preserves edges", "[speckle]") {
     // Step edge: left half = 10, right half = 200
     std::vector<float> input(100);
