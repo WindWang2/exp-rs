@@ -356,6 +356,8 @@ TEST_CASE( "GeoreferencingSession: engine seam QgsGeorefTransform::fit (ADR 0057
     REQUIRE( fit.refinementRmsBefore >= 0.0 );
     REQUIRE( fit.rms >= 0.0 );
     REQUIRE( fit.rms < fit.refinementRmsBefore );
+    REQUIRE( fit.rms < 0.1 );
+    REQUIRE( std::abs( fit.residuals[1].y() ) < 0.1 );
   }
 }
 

@@ -30,6 +30,8 @@ void QgsRasterChangeCoords::loadRaster( const QString &fileRaster )
   if ( GDALGetProjectionRef( hDS.get() ) && GDALGetGeoTransform( hDS.get(), adfGeoTransform ) == CE_None )
   {
     mHasExistingGeoreference = true;
+    for ( int i = 0; i < 6; ++i )
+      mGeoTransform[i] = adfGeoTransform[i];
     mUL_X = adfGeoTransform[0];
     mUL_Y = adfGeoTransform[3];
     mResX = adfGeoTransform[1];

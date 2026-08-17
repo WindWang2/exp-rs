@@ -28,6 +28,14 @@ class  QgsRasterChangeCoords
     QgsRasterChangeCoords() = default;
     void loadRaster( const QString &fileRaster );
     bool hasExistingGeoreference() const { return mHasExistingGeoreference; }
+    bool getGeoTransform( double *gt ) const
+    {
+      if ( !mHasExistingGeoreference || !gt )
+        return false;
+      for ( int i = 0; i < 6; ++i )
+        gt[i] = mGeoTransform[i];
+      return true;
+    }
     QVector<QgsPointXY> getPixelCoords( const QVector<QgsPointXY> &mapCoords ) const;
 
     /**
@@ -40,6 +48,7 @@ class  QgsRasterChangeCoords
 
   private:
     bool mHasExistingGeoreference = false;
+    double mGeoTransform[6] = {0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
     double mUL_X = 0.;
     double mUL_Y = 0.;
     double mResX = 1.;

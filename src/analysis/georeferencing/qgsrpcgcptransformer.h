@@ -86,6 +86,8 @@ class QGIS_ANALYSIS_EXPORT QgsRpcGcpTransformer : public QgsGcpTransformerInterf
                                    const QVector<QgsPointXY> &destination,
                                    bool invertYAxis = false ) override;
 
+    bool transform( double &x, double &y, bool inverseTransform = false ) const override;
+
     int minimumGcpCount() const override { return 0; }
 
     GDALTransformerFunc GDALTransformer() const override;

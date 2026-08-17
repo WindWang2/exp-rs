@@ -100,7 +100,7 @@ class QGIS_ANALYSIS_EXPORT QgsGcpTransformerInterface
      *
      * \returns TRUE if transformation was successful.
      */
-    bool transform( double &x, double &y, bool inverseTransform = false ) const;
+    virtual bool transform( double &x, double &y, bool inverseTransform = false ) const;
 
     /**
      * Returns a translated string representing the specified transform \a method.
