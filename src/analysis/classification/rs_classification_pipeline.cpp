@@ -198,18 +198,24 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     QHash<int, QColor> sidecarColors;
     QVector<int> sidecarFeatures;
     RsAccuracyAssessment::Result sidecarAccuracy;
-    if ( loadModelSidecar( config.modelLoadPath, sidecarMethod, sidecarScaler,
-                           sidecarColors, sidecarFeatures, sidecarAccuracy ) )
+    if ( !loadModelSidecar( config.modelLoadPath, sidecarMethod, sidecarScaler,
+                            sidecarColors, sidecarFeatures, sidecarAccuracy ) )
     {
-      if ( sidecarScaler.isFitted() )
-        config.scaler = sidecarScaler;
-      if ( config.classColors.isEmpty() )
-        config.classColors = sidecarColors;
-      if ( config.methodName.isEmpty() )
-        config.methodName = sidecarMethod;
-      if ( config.bandIndices.isEmpty() )
-        config.bandIndices = sidecarFeatures;
+      result.ok = false;
+      result.error = RsClassificationPipelineResult::Error::ModelSidecarMissing;
+      result.errorMessage = QStringLiteral( "Failed to load model sidecar for %1 (missing or invalid metadata)" )
+                              .arg( config.modelLoadPath );
+      return result;
     }
+
+    if ( sidecarScaler.isFitted() )
+      config.scaler = sidecarScaler;
+    if ( config.classColors.isEmpty() )
+      config.classColors = sidecarColors;
+    if ( config.methodName.isEmpty() )
+      config.methodName = sidecarMethod;
+    if ( config.bandIndices.isEmpty() )
+      config.bandIndices = sidecarFeatures;
 
     // Model compatibility check: the target raster's band selection must match
     // the model's training feature schema (when the sidecar records one).

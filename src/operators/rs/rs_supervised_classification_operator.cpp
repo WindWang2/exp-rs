@@ -92,6 +92,7 @@ const std::vector<std::string> s_methods = {"svm", "normal_bayes", "rf", "mlp"};
         case E::InsufficientSamples:
             throw RSOperatorError(ErrorCode::InvalidInputData, "Insufficient training samples");
         case E::ModelOpenFailed:
+        case E::ModelSidecarMissing:
             throw RSOperatorError(ErrorCode::FileNotReadable, msg);
         default:
             throw RSOperatorError(ErrorCode::ComputationError, msg);
