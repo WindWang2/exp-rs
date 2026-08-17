@@ -220,7 +220,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     // Model compatibility check: the target raster's band selection must match
     // the model's training feature schema (when the sidecar records one).
     if ( !sidecarFeatures.isEmpty() && !config.bandIndices.isEmpty()
-         && sidecarFeatures.size() != config.bandIndices.size() )
+         && sidecarFeatures != config.bandIndices )
     {
       QStringList modelBands;
       for ( int b : sidecarFeatures )
@@ -385,44 +385,6 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   // if the model wrote successfully but the sidecar did not, remove the
   // orphan model so callers never load a model without its matching
   // .meta.json.
-  if ( !config.modelSavePath.isEmpty() )
-  {
-    if ( !config.backend->save( config.modelSavePath ) )
-    {
-      result.error = RsClassificationPipelineResult::Error::ModelSaveFailed;
-      result.errorMessage = QStringLiteral( "Failed to save classifier model: %1" )
-                              .arg( config.modelSavePath );
-      SICNU_LOG_ERROR( SicnuLogTags::Classification, result.errorMessage );
-      return result;
-    }
-    SICNU_LOG_INFO( SicnuLogTags::Classification,
-                    QString( "Classifier model saved: %1" )
-                      .arg( config.modelSavePath ) );
-    if ( !saveModelSidecar( config.modelSavePath, config.methodName,
-                            config.scaler, config.classColors,
-                            config.bandIndices, result.accuracy ) )
-    {
-      QFile::remove( config.modelSavePath );
-      result.error = RsClassificationPipelineResult::Error::SidecarSaveFailed;
-      result.errorMessage =
-        QStringLiteral( "Failed to save model sidecar: %1 (model file removed)" )
-          .arg( sidecarPathForModel( config.modelSavePath ) );
-      SICNU_LOG_ERROR( SicnuLogTags::Classification, result.errorMessage );
-      return result;
-    }
-    SICNU_LOG_INFO( SicnuLogTags::Classification,
-                    QString( "Model sidecar saved: %1" )
-                      .arg( sidecarPathForModel( config.modelSavePath ) ) );
-  }
-
-  if ( !reportProgress( progress, kProgressAfterTrain,
-                        QStringLiteral( "Training finished" ) ) )
-  {
-    result.error = RsClassificationPipelineResult::Error::Cancelled;
-    result.errorMessage = QStringLiteral( "Cancelled" );
-    return result;
-  }
-
   // Hungarian remapping table for backends whose predicted labels are not in
   // the training-label space (K-Means cluster ids 1..K). Built only when the
   // backend declares needsLabelRemap() and training data is available —
@@ -514,6 +476,50 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     {
       qWarning() << "Accuracy assessment failed:" << e.what();
     }
+  }
+
+  // Optional model persistence — write OpenCV YAML + the superset sidecar
+  // (method + scaler + class metadata + validation metrics) next to it so the
+  // model-load path can restore both. Hard-fail when modelSavePath is set and
+  // either half fails; if the model wrote successfully but the sidecar did not,
+  // remove the orphan model so callers never load a model without its matching
+  // .meta.json.
+  if ( !config.modelSavePath.isEmpty() )
+  {
+    if ( !config.backend->save( config.modelSavePath ) )
+    {
+      result.error = RsClassificationPipelineResult::Error::ModelSaveFailed;
+      result.errorMessage = QStringLiteral( "Failed to save classifier model: %1" )
+                              .arg( config.modelSavePath );
+      SICNU_LOG_ERROR( SicnuLogTags::Classification, result.errorMessage );
+      return result;
+    }
+    SICNU_LOG_INFO( SicnuLogTags::Classification,
+                    QString( "Classifier model saved: %1" )
+                      .arg( config.modelSavePath ) );
+    if ( !saveModelSidecar( config.modelSavePath, config.methodName,
+                            config.scaler, config.classColors,
+                            config.bandIndices, result.accuracy ) )
+    {
+      QFile::remove( config.modelSavePath );
+      result.error = RsClassificationPipelineResult::Error::SidecarSaveFailed;
+      result.errorMessage =
+        QStringLiteral( "Failed to save model sidecar: %1 (model file removed)" )
+          .arg( sidecarPathForModel( config.modelSavePath ) );
+      SICNU_LOG_ERROR( SicnuLogTags::Classification, result.errorMessage );
+      return result;
+    }
+    SICNU_LOG_INFO( SicnuLogTags::Classification,
+                    QString( "Model sidecar saved: %1" )
+                      .arg( sidecarPathForModel( config.modelSavePath ) ) );
+  }
+
+  if ( !reportProgress( progress, kProgressAfterTrain,
+                        QStringLiteral( "Training finished" ) ) )
+  {
+    result.error = RsClassificationPipelineResult::Error::Cancelled;
+    result.errorMessage = QStringLiteral( "Cancelled" );
+    return result;
   }
 
   // 2. Open source raster
@@ -887,14 +893,28 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
       // GDAL converts Int32 buffer to the band datatype (Byte / UInt16 / Int32).
       const int dstX = tx - x0;
       const int dstY = ty - y0;
-      dstDs->GetRasterBand( 1 )->RasterIO(
+      const CPLErr wErr = dstDs->GetRasterBand( 1 )->RasterIO(
         GF_Write, dstX, dstY, tw, th, outBuf.data(),
         tw, th, GDT_Int32, 0, 0 );
+      if ( wErr != CE_None )
+      {
+        return failWithPartialOutput(
+          RsClassificationPipelineResult::Error::GdalWriteFailed,
+          QStringLiteral( "Failed to write label tile to destination dataset at (%1,%2)" )
+            .arg( dstX ).arg( dstY ) );
+      }
       if ( writeProb )
       {
-        probDs->GetRasterBand( 1 )->RasterIO(
+        const CPLErr pwErr = probDs->GetRasterBand( 1 )->RasterIO(
           GF_Write, dstX, dstY, tw, th, probBuf.data(),
           tw, th, GDT_Float32, 0, 0 );
+        if ( pwErr != CE_None )
+        {
+          return failWithPartialOutput(
+            RsClassificationPipelineResult::Error::GdalWriteFailed,
+            QStringLiteral( "Failed to write probability tile to destination dataset at (%1,%2)" )
+              .arg( dstX ).arg( dstY ) );
+        }
       }
 
       ++doneTiles;
@@ -909,10 +929,20 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     }
   }
 
+  const CPLErr flushDst = dstDs->FlushCache( true );
+  const CPLErr flushProb = probDs ? probDs->FlushCache( true ) : CE_None;
+
   GDALClose( srcDs );
   GDALClose( dstDs );
   if ( probDs )
     GDALClose( probDs );
+
+  if ( flushDst != CE_None || flushProb != CE_None )
+  {
+    return failWithPartialOutput(
+      RsClassificationPipelineResult::Error::GdalWriteFailed,
+      QStringLiteral( "Failed to flush destination dataset cache to disk" ) );
+  }
 
   result.totalPixels = outW * outH;
   result.durationMs = static_cast<int>( timer.elapsed() );

@@ -2212,6 +2212,7 @@ bool QgsClassificationMainWindow::buildTrainingData( const QVector<int> &bands,
   RsTrainingDataExtraction::Options options;
   options.ignore = currentIgnoreOptions();
   options.minSamples = 10;
+  options.maxSamplesPerClass = 5000;
 
   const RsTrainingDataResult res = RsTrainingDataExtraction::extract(
     m_sourceRasterPath, bands, geometries, options );

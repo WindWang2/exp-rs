@@ -396,14 +396,22 @@ bool RsPostProcess::recode( const cv::Mat &src, cv::Mat &dst, const QMap<int, in
   return true;
 }
 
-bool RsPostProcess::loadLabelRaster( const QString &path, cv::Mat &labels, double gt[6],
-                                     QString &wkt, QString *err )
+bool RsPostProcess::loadLabelRaster( const QString &path, cv::Mat &labels,
+                                     double gt[6], QString &wkt, QString *err )
+{
+  return loadLabelRaster( path, labels, gt, wkt, nullptr, err );
+}
+
+bool RsPostProcess::loadLabelRaster( const QString &path, cv::Mat &labels,
+                                     double gt[6], QString &wkt,
+                                     double *nodataValue, QString *err )
 {
   if ( path.isEmpty() )
   {
-    setErr( err, QStringLiteral( "Empty path" ) );
+    setErr( err, QStringLiteral( "Empty label raster path" ) );
     return false;
   }
+
   GDALAllRegister();
   GDALDataset *ds = static_cast<GDALDataset *>(
     GDALOpen( path.toUtf8().constData(), GA_ReadOnly ) );
@@ -440,6 +448,13 @@ bool RsPostProcess::loadLabelRaster( const QString &path, cv::Mat &labels, doubl
   }
   const char *proj = ds->GetProjectionRef();
   wkt = proj ? QString::fromUtf8( proj ) : QString();
+
+  if ( nodataValue )
+  {
+    int hasNodata = 0;
+    const double nd = ds->GetRasterBand( 1 )->GetNoDataValue( &hasNodata );
+    *nodataValue = hasNodata ? nd : std::numeric_limits<double>::quiet_NaN();
+  }
 
   labels.create( H, W, CV_32S );
   const CPLErr rio = ds->GetRasterBand( 1 )->RasterIO(

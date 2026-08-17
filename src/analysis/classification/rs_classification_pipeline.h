@@ -59,6 +59,7 @@ struct QGIS_ANALYSIS_EXPORT RsClassificationPipelineResult
       InvalidBand,
       OutputDriverUnavailable,
       OutputCreateFailed,
+      GdalWriteFailed,
       RasterReadFailed,
       ScalingFailed,
       PredictionFailed,

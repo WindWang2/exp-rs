@@ -130,7 +130,8 @@ bool RsPostProcessTask::run()
   double gt[6] = { 0, 1, 0, 0, 0, -1 };
   QString wkt;
   QString err;
-  if ( !RsPostProcess::loadLabelRaster( mCfg.inputPath, labels, gt, wkt, &err ) )
+  double inputNodata = 0.0;
+  if ( !RsPostProcess::loadLabelRaster( mCfg.inputPath, labels, gt, wkt, &inputNodata, &err ) )
   {
     mResult.errorMessage = err;
     return false;
@@ -237,10 +238,10 @@ bool RsPostProcessTask::run()
 
   // --- Save raster ---------------------------------------------------------
   mFb.setProgress( 85.0 );
-  // NaN → no GDAL NoData marker (caller preserves the source's semantics).
+  const double outNodata = std::isnan( inputNodata ) ? 0.0 : inputNodata;
   if ( !RsPostProcess::saveLabelRaster( mCfg.outputRasterPath, labels, gt, wkt,
                                         colorTable, mCfg.creationOptions,
-                                        std::numeric_limits<double>::quiet_NaN(), &err ) )
+                                        outNodata, &err ) )
   {
     mResult.errorMessage = err.isEmpty()
                              ? QStringLiteral( "Failed to save output raster" )
