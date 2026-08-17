@@ -39,6 +39,10 @@ class MeasureTool : public QgsMapTool
     void activate() override;
     void deactivate() override;
 
+    void updateDistanceArea();
+    const QgsDistanceArea &distanceArea() const { return mDistanceArea; }
+    const QVector<QgsPointXY> &points() const { return mPoints; }
+
   signals:
     void measurementComplete( double value, const QString &unit );
 
