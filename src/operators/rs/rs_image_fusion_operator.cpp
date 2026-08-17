@@ -8,6 +8,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/image_fusion.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QString>
 
@@ -132,6 +133,13 @@ Json::Value RsImageFusionOperator::run(const Json::Value& params,
     Json::Value result(Json::objectValue);
     result["output"] = outputPath;
     result["method"] = method;
+
+    GdalDatasetWrapper outDs;
+    if (outDs.open(QString::fromStdString(outputPath))) {
+        result["bands"] = outDs.bandCount();
+    } else {
+        result["bands"] = 0;
+    }
     return result;
 }
 

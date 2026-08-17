@@ -515,6 +515,12 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                 *errorMessage = QStringLiteral("No calibration coefficients for band %1").arg(b);
             return false;
         }
+        const BandCoefficients &c = meta.bands.value(b);
+        if (unit == OutputUnit::BrightnessTemperature && (c.k1 <= 0.0 || c.k2 <= 0.0)) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Band %1 lacks thermal K1/K2 constants for brightness temperature conversion").arg(b);
+            return false;
+        }
     }
 
     // Create the output raster up front so each band can be written tile by
@@ -569,6 +575,8 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                                                   tile.width, tile.height, out.data());
             });
         if (!ok) {
+            outDataset.close();
+            QFile::remove(outputPath);
             if (errorMessage)
                 *errorMessage = tileError.isEmpty()
                                     ? QStringLiteral("Failed to stream band %1").arg(b)

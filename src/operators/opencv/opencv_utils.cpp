@@ -37,6 +37,16 @@ cv::Mat readRasterBandToMat(const std::string& inputPath,
         return {};
     }
 
+    const double nodata = ds.bandNoDataValue(band);
+    if (!std::isnan(nodata)) {
+        float *ptr = mat.ptr<float>();
+        const size_t n = static_cast<size_t>(w) * h;
+        for (size_t i = 0; i < n; ++i) {
+            if (std::abs(ptr[i] - nodata) < 1e-4f)
+                ptr[i] = std::numeric_limits<float>::quiet_NaN();
+        }
+    }
+
     return mat;
 }
 

@@ -235,32 +235,48 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
 
     context.reportProgress(0.35, "Extracting segment mean features (" + std::to_string(nSeg) + ")");
 
-    // Per-segment mean features + pixel counts
+    // Per-segment mean features + pixel counts (valid pixels only per band)
+    std::vector<bool> bandHasNodata(static_cast<size_t>(nFeat), false);
+    std::vector<float> bandNodataVal(static_cast<size_t>(nFeat), 0.0f);
+    for (int f = 0; f < nFeat; ++f) {
+        bool hasNd = false;
+        double ndVal = ds.bandNoDataValue(bands[static_cast<size_t>(f)], &hasNd);
+        bandHasNodata[static_cast<size_t>(f)] = hasNd;
+        bandNodataVal[static_cast<size_t>(f)] = hasNd ? static_cast<float>(ndVal) : 0.0f;
+    }
+
     std::vector<std::vector<double>> sum(static_cast<size_t>(nSeg + 1),
                                          std::vector<double>(static_cast<size_t>(nFeat), 0.0));
-    std::vector<int> counts(static_cast<size_t>(nSeg + 1), 0);
+    std::vector<std::vector<int>> validCounts(static_cast<size_t>(nSeg + 1),
+                                              std::vector<int>(static_cast<size_t>(nFeat), 0));
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             const size_t pix = static_cast<size_t>(y) * width + x;
             const quint32 sid = segLabels[pix];
             if (sid == 0)
                 continue;
-            for (int f = 0; f < nFeat; ++f)
-                sum[static_cast<size_t>(sid)][static_cast<size_t>(f)] +=
-                    bandData[static_cast<size_t>(f)][pix];
-            counts[static_cast<size_t>(sid)]++;
+            for (int f = 0; f < nFeat; ++f) {
+                const float val = bandData[static_cast<size_t>(f)][pix];
+                if (!std::isfinite(val))
+                    continue;
+                if (bandHasNodata[static_cast<size_t>(f)] && val == bandNodataVal[static_cast<size_t>(f)])
+                    continue;
+                sum[static_cast<size_t>(sid)][static_cast<size_t>(f)] += val;
+                validCounts[static_cast<size_t>(sid)][static_cast<size_t>(f)]++;
+            }
         }
     }
 
     std::vector<std::vector<float>> feats(static_cast<size_t>(nSeg + 1),
                                           std::vector<float>(static_cast<size_t>(nFeat), 0.0f));
     for (int s = 1; s <= nSeg; ++s) {
-        if (counts[static_cast<size_t>(s)] <= 0)
-            continue;
-        const double inv = 1.0 / counts[static_cast<size_t>(s)];
-        for (int f = 0; f < nFeat; ++f)
-            feats[static_cast<size_t>(s)][static_cast<size_t>(f)] =
-                static_cast<float>(sum[static_cast<size_t>(s)][static_cast<size_t>(f)] * inv);
+        for (int f = 0; f < nFeat; ++f) {
+            const int cnt = validCounts[static_cast<size_t>(s)][static_cast<size_t>(f)];
+            if (cnt > 0) {
+                feats[static_cast<size_t>(s)][static_cast<size_t>(f)] =
+                    static_cast<float>(sum[static_cast<size_t>(s)][static_cast<size_t>(f)] / cnt);
+            }
+        }
     }
 
     // --- Label segments by ROI majority (analysis canonical, ADR 0060) ---

@@ -8,6 +8,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/band_math.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QString>
 
@@ -100,6 +101,15 @@ Json::Value RsBandMathOperator::run(const Json::Value& params,
     Json::Value result(Json::objectValue);
     result["output"] = outputPath;
     result["expression"] = expression;
+
+    GdalDatasetWrapper ds;
+    if (ds.open(QString::fromStdString(inputPath))) {
+        result["width"] = ds.width();
+        result["height"] = ds.height();
+    } else {
+        result["width"] = 0;
+        result["height"] = 0;
+    }
     return result;
 }
 

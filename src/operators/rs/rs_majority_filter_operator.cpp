@@ -112,7 +112,8 @@ Json::Value RsMajorityFilterOperator::run(const Json::Value& params, RSOperatorC
 
     int kernel = getInt(params, "kernel", 3);
     if (kernel < 3 || kernel % 2 == 0) {
-        kernel = 3;
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "kernel must be an odd integer >= 3 (e.g. 3, 5, 7)");
     }
 
     context.logInfo("Running 3x3 majority filter on " + inputPath);

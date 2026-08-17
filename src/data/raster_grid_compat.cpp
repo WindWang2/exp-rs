@@ -1,6 +1,8 @@
 // src/data/raster_grid_compat.cpp — shared raster-grid compatibility service
 #include "raster_grid_compat.h"
 
+#include <ogr_spatialref.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -9,6 +11,19 @@ namespace sicnu::data
 
 namespace
 {
+
+bool isSameCrs( const QString &wktA, const QString &wktB )
+{
+  if ( wktA.trimmed() == wktB.trimmed() )
+    return true;
+  OGRSpatialReference srsA, srsB;
+  if ( srsA.importFromWkt( wktA.toUtf8().constData() ) == OGRERR_NONE &&
+       srsB.importFromWkt( wktB.toUtf8().constData() ) == OGRERR_NONE )
+  {
+    return srsA.IsSame( &srsB ) != 0;
+  }
+  return false;
+}
 
 /// Relative tolerance for grid (pixel size / extent) comparison, mirroring
 /// virtual_raster_preflight's kGridTolerance.
@@ -130,7 +145,7 @@ GridCompatReport compareGrids( const RasterGrid &a, const RasterGrid &b )
       true } );
     return report;
   }
-  if ( aHasCrs && bHasCrs && a.crsWkt != b.crsWkt )
+  if ( aHasCrs && bHasCrs && !isSameCrs( a.crsWkt, b.crsWkt ) )
   {
     report.issues.append( {
       GridCompatVerdict::CrsMismatch,
