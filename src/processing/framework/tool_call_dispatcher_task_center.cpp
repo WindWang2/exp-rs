@@ -34,7 +34,7 @@ ToolCallDispatcher::ToolCallDispatcher()
         }
         else if ( cb )
         {
-          const Json::Value payload = buildTaskResultPayload( info, committerHandler );
+          const Json::Value payload = buildTaskResultPayload( info, nullptr );
           cb( payload );
         }
       } ).detach();

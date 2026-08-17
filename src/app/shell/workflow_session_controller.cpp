@@ -283,6 +283,17 @@ void WorkflowSessionController::onRunClicked()
   m_panel->setRunning( true );
   emit stepStatusChanged( m_activeStepId, "running" );
   emit statusMessage( tr( "正在运行…" ) );
+
+  if ( taskId >= 0 )
+  {
+    const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+    if ( info.status == sicnu::TaskStatus::Completed
+         || info.status == sicnu::TaskStatus::Failed
+         || info.status == sicnu::TaskStatus::Canceled )
+    {
+      onTaskUpdated( info );
+    }
+  }
 }
 
 void WorkflowSessionController::runFullWorkflow()
