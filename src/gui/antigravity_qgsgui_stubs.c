@@ -9,46 +9,6 @@ void _ZThn40_NK25QgsAttributesFormBaseView23createExpressionContextEv(void) {}
 void _ZThn40_NK27QgsAttributesFormProperties23createExpressionContextEv(void) __attribute__((weak, visibility("default")));
 void _ZThn40_NK27QgsAttributesFormProperties23createExpressionContextEv(void) {}
 
-// non-virtual thunk to QgsCurveEditorWidget::~QgsCurveEditorWidget()
-void _ZThn16_N20QgsCurveEditorWidgetD0Ev(void) __attribute__((weak, visibility("default")));
-void _ZThn16_N20QgsCurveEditorWidgetD0Ev(void) {}
-
-// non-virtual thunk to QgsCurveEditorWidget::~QgsCurveEditorWidget()
-void _ZThn16_N20QgsCurveEditorWidgetD1Ev(void) __attribute__((weak, visibility("default")));
-void _ZThn16_N20QgsCurveEditorWidgetD1Ev(void) {}
-
-// non-virtual thunk to QgsExpressionBuilderWidget::~QgsExpressionBuilderWidget()
-void _ZThn16_N26QgsExpressionBuilderWidgetD0Ev(void) __attribute__((weak, visibility("default")));
-void _ZThn16_N26QgsExpressionBuilderWidgetD0Ev(void) {}
-
-// non-virtual thunk to QgsExpressionBuilderWidget::~QgsExpressionBuilderWidget()
-void _ZThn16_N26QgsExpressionBuilderWidgetD1Ev(void) __attribute__((weak, visibility("default")));
-void _ZThn16_N26QgsExpressionBuilderWidgetD1Ev(void) {}
-
-// non-virtual thunk to QgsExpressionLineEdit::~QgsExpressionLineEdit()
-void _ZThn16_N21QgsExpressionLineEditD0Ev(void) __attribute__((weak, visibility("default")));
-void _ZThn16_N21QgsExpressionLineEditD0Ev(void) {}
-
-// non-virtual thunk to QgsExpressionLineEdit::~QgsExpressionLineEdit()
-void _ZThn16_N21QgsExpressionLineEditD1Ev(void) __attribute__((weak, visibility("default")));
-void _ZThn16_N21QgsExpressionLineEditD1Ev(void) {}
-
-// non-virtual thunk to QgsGradientColorRampDialog::~QgsGradientColorRampDialog()
-void _ZThn16_N26QgsGradientColorRampDialogD0Ev(void) __attribute__((weak, visibility("default")));
-void _ZThn16_N26QgsGradientColorRampDialogD0Ev(void) {}
-
-// non-virtual thunk to QgsGradientColorRampDialog::~QgsGradientColorRampDialog()
-void _ZThn16_N26QgsGradientColorRampDialogD1Ev(void) __attribute__((weak, visibility("default")));
-void _ZThn16_N26QgsGradientColorRampDialogD1Ev(void) {}
-
-// non-virtual thunk to QgsHistogramWidget::~QgsHistogramWidget()
-void _ZThn16_N18QgsHistogramWidgetD0Ev(void) __attribute__((weak, visibility("default")));
-void _ZThn16_N18QgsHistogramWidgetD0Ev(void) {}
-
-// non-virtual thunk to QgsHistogramWidget::~QgsHistogramWidget()
-void _ZThn16_N18QgsHistogramWidgetD1Ev(void) __attribute__((weak, visibility("default")));
-void _ZThn16_N18QgsHistogramWidgetD1Ev(void) {}
-
 // non-virtual thunk to QgsQueryResultPanelWidget::~QgsQueryResultPanelWidget()
 void _ZThn16_N25QgsQueryResultPanelWidgetD0Ev(void) __attribute__((weak, visibility("default")));
 void _ZThn16_N25QgsQueryResultPanelWidgetD0Ev(void) {}
@@ -271,54 +231,6 @@ void _ZN19QgsCodeEditorPythonC1EP7QWidgetRK5QListI7QStringEN13QgsCodeEditor4Mode
 // QgsCodeEditorSQL::setFields(QgsFields const&)
 void _ZN16QgsCodeEditorSQL9setFieldsERK9QgsFields(void) __attribute__((weak, visibility("default")));
 void _ZN16QgsCodeEditorSQL9setFieldsERK9QgsFields(void) {}
-
-// QgsCurveEditorPlotEventFilter::eventFilter(QObject*, QEvent*)
-void _ZN29QgsCurveEditorPlotEventFilter11eventFilterEP7QObjectP6QEvent(void) __attribute__((weak, visibility("default")));
-void _ZN29QgsCurveEditorPlotEventFilter11eventFilterEP7QObjectP6QEvent(void) {}
-
-// QgsCurveEditorWidget::QgsCurveEditorWidget(QWidget*, QgsCurveTransform const&)
-void _ZN20QgsCurveEditorWidgetC1EP7QWidgetRK17QgsCurveTransform(void) __attribute__((weak, visibility("default")));
-void _ZN20QgsCurveEditorWidgetC1EP7QWidgetRK17QgsCurveTransform(void) {}
-
-// QgsCurveEditorWidget::keyPressEvent(QKeyEvent*)
-void _ZN20QgsCurveEditorWidget13keyPressEventEP9QKeyEvent(void) __attribute__((weak, visibility("default")));
-void _ZN20QgsCurveEditorWidget13keyPressEventEP9QKeyEvent(void) {}
-
-// QgsCurveEditorWidget::plotMouseMove(QPointF)
-void _ZN20QgsCurveEditorWidget13plotMouseMoveE7QPointF(void) __attribute__((weak, visibility("default")));
-void _ZN20QgsCurveEditorWidget13plotMouseMoveE7QPointF(void) {}
-
-// QgsCurveEditorWidget::plotMousePress(QPointF)
-void _ZN20QgsCurveEditorWidget14plotMousePressE7QPointF(void) __attribute__((weak, visibility("default")));
-void _ZN20QgsCurveEditorWidget14plotMousePressE7QPointF(void) {}
-
-// QgsCurveEditorWidget::plotMouseRelease(QPointF)
-void _ZN20QgsCurveEditorWidget16plotMouseReleaseE7QPointF(void) __attribute__((weak, visibility("default")));
-void _ZN20QgsCurveEditorWidget16plotMouseReleaseE7QPointF(void) {}
-
-// QgsCurveEditorWidget::setCurve(QgsCurveTransform const&)
-void _ZN20QgsCurveEditorWidget8setCurveERK17QgsCurveTransform(void) __attribute__((weak, visibility("default")));
-void _ZN20QgsCurveEditorWidget8setCurveERK17QgsCurveTransform(void) {}
-
-// QgsCurveEditorWidget::setHistogramSource(QgsVectorLayer const*, QString const&)
-void _ZN20QgsCurveEditorWidget18setHistogramSourceEPK14QgsVectorLayerRK7QString(void) __attribute__((weak, visibility("default")));
-void _ZN20QgsCurveEditorWidget18setHistogramSourceEPK14QgsVectorLayerRK7QString(void) {}
-
-// QgsCurveEditorWidget::setMaxHistogramValueRange(double)
-void _ZN20QgsCurveEditorWidget25setMaxHistogramValueRangeEd(void) __attribute__((weak, visibility("default")));
-void _ZN20QgsCurveEditorWidget25setMaxHistogramValueRangeEd(void) {}
-
-// QgsCurveEditorWidget::setMinHistogramValueRange(double)
-void _ZN20QgsCurveEditorWidget25setMinHistogramValueRangeEd(void) __attribute__((weak, visibility("default")));
-void _ZN20QgsCurveEditorWidget25setMinHistogramValueRangeEd(void) {}
-
-// QgsCurveEditorWidget::~QgsCurveEditorWidget()
-void _ZN20QgsCurveEditorWidgetD0Ev(void) __attribute__((weak, visibility("default")));
-void _ZN20QgsCurveEditorWidgetD0Ev(void) {}
-
-// QgsCurveEditorWidget::~QgsCurveEditorWidget()
-void _ZN20QgsCurveEditorWidgetD1Ev(void) __attribute__((weak, visibility("default")));
-void _ZN20QgsCurveEditorWidgetD1Ev(void) {}
 
 // QgsDatabaseQueryHistoryProvider::QgsDatabaseQueryHistoryProvider()
 void _ZN31QgsDatabaseQueryHistoryProviderC1Ev(void) __attribute__((weak, visibility("default")));

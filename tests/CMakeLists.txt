@@ -43,6 +43,7 @@ function(sicnu_add_test NAME)
   )
   target_include_directories(${NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/stubs
     ${CMAKE_BINARY_DIR}
   )
   sicnu_discover_tests(${NAME})
@@ -65,6 +66,7 @@ sicnu_add_test(test_atomic_registry_contract)
 sicnu_add_test(test_catalog_size)
 sicnu_add_test(test_provider_algorithm_adapter)
 sicnu_add_test(test_agent_workflow_executor)
+sicnu_add_test(test_codeeditor_stubs)
 
 add_executable(test_interaction_tools test_interaction_tools.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
 target_link_libraries(test_interaction_tools PRIVATE
