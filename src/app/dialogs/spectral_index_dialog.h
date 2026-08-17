@@ -16,11 +16,7 @@ class QgsRasterLayer;
  * Supports NDVI, EVI, SAVI, NDWI, NDBI, MNDWI via the rs:spectral_index operator.
  *
  * When a Data Manager is supplied (setDataManager), the input is picked as a
- * Data Asset: the run resolves the AssetRef through the Processing Asset
- * Resolver (Task lease for the run, stale revision rejected) and commits the
- * output transactionally through the OutputCommitter — registered as a Data
- * Asset with a Derivation Record, displayed only if the user opted in. Without
- * a Data Manager the dialog falls back to the legacy raw-layer operator path.
+ * Data Asset. Without a Data Manager the dialog falls back to the raw-layer operator path.
  */
 class SpectralIndexDialog : public RasterProcessingDialogBase
 {
@@ -31,9 +27,8 @@ public:
 
     void setRasterLayer(QgsRasterLayer *layer) override;
 
-    /// Supplies the Data Manager so the input can be picked as a Data Asset
-    /// and the output committed transactionally. Optional: when null, the
-    /// dialog uses the legacy raw-layer operator path.
+    /// Supplies the Data Manager so the input can be picked as a Data Asset.
+    /// Optional: when null, the dialog uses the raw-layer operator path.
     void setDataManager(sicnu::data::DataManager *dataManager);
 
 protected:
@@ -70,8 +65,6 @@ private:
     BandRoleCombo *m_greenCombo = nullptr;
     BandRoleCombo *m_blueCombo = nullptr;
     BandRoleCombo *m_swirCombo = nullptr;
-
-    QCheckBox *m_addToCanvasCheck = nullptr;
 
     QLabel *m_nirLabel = nullptr;
     QLabel *m_redLabel = nullptr;

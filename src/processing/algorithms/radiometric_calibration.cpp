@@ -399,13 +399,20 @@ bool toToaReflectance(const float *dn, float *reflectance, size_t count,
         const float invSin = static_cast<float>(1.0 / sinEl);
         for (size_t i = 0; i < count; i++)
             reflectance[i] = (mult * dn[i] + add) * invSin;
-    } else {
-        // Sentinel-2 / generic: rho = (DN + offset) / scale
+    } else if (sensor == SensorType::Sentinel2) {
+        // Sentinel-2 MTD: rho = (DN + offset) / scale
         if (c.scale == 0.0) return false;
         const float offset = static_cast<float>(c.offset);
         const float invScale = static_cast<float>(1.0 / c.scale);
         for (size_t i = 0; i < count; i++)
             reflectance[i] = (dn[i] + offset) * invScale;
+    } else {
+        // Generic / GDAL: phys = DN * scale + offset
+        if (c.scale == 0.0 && c.offset == 0.0) return false;
+        const float scale = static_cast<float>(c.scale);
+        const float offset = static_cast<float>(c.offset);
+        for (size_t i = 0; i < count; i++)
+            reflectance[i] = dn[i] * scale + offset;
     }
     return true;
 }
@@ -508,6 +515,12 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                 *errorMessage = QStringLiteral("No calibration coefficients for band %1").arg(b);
             return false;
         }
+        const BandCoefficients &c = meta.bands.value(b);
+        if (unit == OutputUnit::BrightnessTemperature && (c.k1 <= 0.0 || c.k2 <= 0.0)) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Band %1 lacks thermal K1/K2 constants for brightness temperature conversion").arg(b);
+            return false;
+        }
     }
 
     // Create the output raster up front so each band can be written tile by
@@ -527,7 +540,8 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                      QStringLiteral("Calibrating band %1").arg(b));
 
         const BandCoefficients &c = meta.bands.value(b);
-        const double bandNoData = srcDataset.bandNoDataValue(b);
+        bool hasBandNoData = false;
+        const double bandNoData = srcDataset.bandNoDataValue(b, &hasBandNoData);
 
         std::vector<float> out;
         QString tileError;
@@ -553,7 +567,7 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                 }
                 for (size_t i = 0; i < tileCount; ++i) {
                     float v = pixels[i];
-                    if (!std::isfinite(v) || (!std::isnan(bandNoData) && std::abs(v - bandNoData) < 1e-4f)) {
+                    if (!std::isfinite(v) || (hasBandNoData && !std::isnan(bandNoData) && std::abs(v - bandNoData) < 1e-4f)) {
                         out[i] = std::numeric_limits<float>::quiet_NaN();
                     }
                 }
@@ -561,6 +575,8 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                                                   tile.width, tile.height, out.data());
             });
         if (!ok) {
+            outDataset.close();
+            QFile::remove(outputPath);
             if (errorMessage)
                 *errorMessage = tileError.isEmpty()
                                     ? QStringLiteral("Failed to stream band %1").arg(b)

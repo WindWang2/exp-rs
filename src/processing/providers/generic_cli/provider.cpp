@@ -10,7 +10,7 @@
 #include <QJsonArray>
 #include <QStandardPaths>
 #include <QIcon>
-#include <QMessageBox>
+#include <qgsmessagelog.h>
 
 #include "framework/runtime_paths.h"
 
@@ -67,16 +67,18 @@ void GenericCliProvider::loadToolsFromDirectory(const QString &dir)
         QJsonParseError error;
         QJsonDocument doc = QJsonDocument::fromJson(data, &error);
         if (error.error != QJsonParseError::NoError) {
-            QMessageBox::warning(nullptr, QObject::tr("Tool Configuration Error"),
-                                 QObject::tr("Failed to parse %1: %2").arg(fileInfo.fileName(), error.errorString()));
+            QgsMessageLog::logMessage(
+                QObject::tr("Failed to parse tool %1: %2").arg(fileInfo.fileName(), error.errorString()),
+                QStringLiteral("generic_cli"), Qgis::MessageLevel::Warning);
             continue;
         }
 
         QJsonObject config = doc.object();
         QString toolId = config.value("id").toString();
         if (toolId.isEmpty()) {
-            QMessageBox::warning(nullptr, QObject::tr("Tool Configuration Error"),
-                                 QObject::tr("Tool in %1 has no 'id' field").arg(fileInfo.fileName()));
+            QgsMessageLog::logMessage(
+                QObject::tr("Tool in %1 has no 'id' field").arg(fileInfo.fileName()),
+                QStringLiteral("generic_cli"), Qgis::MessageLevel::Warning);
             continue;
         }
 

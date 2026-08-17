@@ -4,7 +4,18 @@
 #include "processing/providers/gdal_tools/algorithms/pct2rgb.h"
 #include "processing/providers/gdal_tools/algorithms/rgb2pct.h"
 #include "processing/providers/gdal_tools/algorithms/gdal2xyz.h"
+#include "processing/providers/gdal_tools/algorithms/gdal_retile.h"
 #include <processing/qgsprocessingcontext.h>
+#include <processing/qgsprocessingparameters.h>
+
+class TestableGdalRetile : public GdalRetileAlgorithm {
+public:
+    TestableGdalRetile() { initAlgorithm(); }
+    QStringList testBuildArgs(const QVariantMap &p) {
+        QgsProcessingContext ctx;
+        return buildArgs(p, ctx, nullptr);
+    }
+};
 
 class TestableGdalEdit : public GdalEditAlgorithm {
 public:
@@ -90,5 +101,22 @@ TEST_CASE("GDAL wrapper buildArgs", "[gdal][processing]") {
         CHECK(args.contains("/data/dem.xyz"));
         CHECK(args.contains("-csv"));
         CHECK(args.contains("-skipnodata"));
+    }
+
+    SECTION("gdal_retile: folder destination parameter and args (#334)") {
+        TestableGdalRetile algo;
+        const auto *param = algo.parameterDefinition("OUTPUT_DIR");
+        REQUIRE(param != nullptr);
+        CHECK(param->type() == QgsProcessingParameterFolderDestination::typeName());
+
+        QVariantMap p;
+        p["INPUT"] = "/data/raster.tif";
+        p["TILE_SIZE"] = "512x512";
+        p["OUTPUT_DIR"] = "/data/tiles";
+        QStringList args = algo.testBuildArgs(p);
+        CHECK(args.contains("-targetDir"));
+        CHECK(args.contains("/data/tiles"));
+        CHECK(args.contains("-ps"));
+        CHECK(args.contains("512"));
     }
 }

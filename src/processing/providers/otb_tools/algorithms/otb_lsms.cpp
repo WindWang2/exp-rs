@@ -23,8 +23,9 @@ QStringList OtbLsmsAlgorithm::buildArgs(const QVariantMap &parameters,
 
     QStringList args;
     args << "-in" << rasterLayerSource(parameters.value("INPUT"));
-    args << "-spatialradius" << QString::number(parameters.value("SPATIAL_RADIUS").toInt());
-    args << "-rangeradius" << QString::number(parameters.value("RANGE_RADIUS").toDouble());
+    args << "-spatialr" << QString::number(parameters.value("SPATIAL_RADIUS").toInt());
+    args << "-ranger" << QString::number(parameters.value("RANGE_RADIUS").toDouble(), 'f', 2);
+    args << "-minsize" << QString::number(parameters.value("MIN_REGION_SIZE", 100).toInt());
     args << "-out" << parameters.value("OUTPUT").toString();
 
     return args;

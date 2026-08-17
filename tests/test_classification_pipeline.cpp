@@ -595,3 +595,42 @@ TEST_CASE(
   CHECK( res2.errorMessage.contains( QStringLiteral( "trained on 3 features" ) ) );
   CHECK_FALSE( QFile::exists( tmp.path() + "/out2.tif" ) );
 }
+
+TEST_CASE(
+  "Classification pipeline: predict-only mode fails when sidecar is missing",
+  "[classify][pipeline][sidecar]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  cv::Mat X, y;
+  makeTraining( X, y );
+
+  const QString modelPath = tmp.path() + "/model.yml";
+
+  RsClassificationPipeline::Config cfg1 = baseConfig( srcPath, tmp.path() + "/out1.tif" );
+  cfg1.backend.reset( new RsClassifierNormalBayes );
+  cfg1.trainX = X;
+  cfg1.trainY = y;
+  cfg1.modelSavePath = modelPath;
+  const RsClassificationPipelineResult res1 = RsClassificationPipeline::run( std::move( cfg1 ) );
+  REQUIRE( res1.ok );
+
+  // Delete the generated sidecar
+  const QString sidecarPath = RsClassificationPipeline::sidecarPathForModel( modelPath );
+  REQUIRE( QFile::exists( sidecarPath ) );
+  REQUIRE( QFile::remove( sidecarPath ) );
+
+  // Predict-only mode with missing sidecar must fail with ModelSidecarMissing
+  RsClassificationPipeline::Config cfg2 = baseConfig( srcPath, tmp.path() + "/out2.tif" );
+  cfg2.modelLoadPath = modelPath;
+
+  const RsClassificationPipelineResult res2 = RsClassificationPipeline::run( std::move( cfg2 ) );
+  CHECK_FALSE( res2.ok );
+  CHECK( res2.error == RsClassificationPipelineResult::Error::ModelSidecarMissing );
+  CHECK_FALSE( QFile::exists( tmp.path() + "/out2.tif" ) );
+}
+

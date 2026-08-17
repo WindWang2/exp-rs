@@ -818,7 +818,7 @@ void TaskCenter::updateTaskProgress( long taskId, double progress )
 {
     {
         QMutexLocker locker( &m_mutex );
-        if ( !m_tasks.contains( taskId ) || m_tasks[taskId].status == TaskStatus::Canceled )
+        if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
             return;
         m_tasks[taskId].progressPercentage = progress;
         m_tasks[taskId].status = TaskStatus::Running;
@@ -844,7 +844,7 @@ void TaskCenter::markTaskRunning( long taskId )
 {
     {
         QMutexLocker locker( &m_mutex );
-        if ( !m_tasks.contains( taskId ) || m_tasks[taskId].status == TaskStatus::Canceled )
+        if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
             return;
         m_tasks[taskId].status = TaskStatus::Running;
         updatePipelineForTaskLocked( taskId );

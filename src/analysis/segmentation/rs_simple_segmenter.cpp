@@ -46,7 +46,7 @@ RsSegmentMap RsSimpleSegmenter::segment( const float *data, int width, int heigh
     QVector<float> smoothed( data, data + n );
 
     // 2. Gaussian smoothing (line-buffered in-place, memory footprint < 200 KB)
-    gaussianSmooth( smoothed, width, height, params.smoothKernel );
+    gaussianSmooth( smoothed, width, height, params.smoothKernel, nodata );
     if ( canceled() )
         return {};
     report( 0.3f );
@@ -133,7 +133,7 @@ RsSegmentMap RsSimpleSegmenter::segmentMultiBand( const float *const *bandData,
 
         // 1. Copy single band for in-place smoothing
         QVector<float> curBand( bandData[b], bandData[b] + n );
-        gaussianSmooth( curBand, width, height, params.smoothKernel );
+        gaussianSmooth( curBand, width, height, params.smoothKernel, nodata );
 
         // 2. Quantize single smoothed band with sanitized bins
         QVector<int> curQuant = quantize( curBand.data(), n, bins, nodata );
@@ -215,7 +215,7 @@ RsSegmentMap RsSimpleSegmenter::segmentMultiBand( const float *const *bandData,
 // Private helpers
 // ---------------------------------------------------------------------------
 
-void RsSimpleSegmenter::gaussianSmooth( QVector<float> &data, int w, int h, int kernelSize )
+void RsSimpleSegmenter::gaussianSmooth( QVector<float> &data, int w, int h, int kernelSize, float nodata )
 {
     if ( kernelSize < 3 || w <= 0 || h <= 0 )
         return;
@@ -237,6 +237,10 @@ void RsSimpleSegmenter::gaussianSmooth( QVector<float> &data, int w, int h, int 
     for ( float &k : kernel )
         k /= sum;
 
+    auto isNoData = [nodata]( float v ) {
+        return v == nodata || std::isnan( v );
+    };
+
     // Line-buffered separable convolution:
     // Uses a circular ring buffer of `kernelSize` rows (size = kernelSize * w * 4 bytes).
     // Eliminates the full W*H temp buffer and keeps lines in L1/L2 cache.
@@ -251,13 +255,24 @@ void RsSimpleSegmenter::gaussianSmooth( QVector<float> &data, int w, int h, int 
             float *ringRow = &ringBuf[static_cast<size_t>(r % kernelSize) * w];
             for ( int c = 0; c < w; ++c )
             {
+                if ( isNoData( srcRow[c] ) )
+                {
+                    ringRow[c] = srcRow[c];
+                    continue;
+                }
                 float val = 0.0f;
+                float weightSum = 0.0f;
                 for ( int k = 0; k < kernelSize; ++k )
                 {
                     int cc = std::clamp( c + k - half, 0, w - 1 );
-                    val += srcRow[cc] * kernel[k];
+                    float sv = srcRow[cc];
+                    if ( !isNoData( sv ) )
+                    {
+                        val += sv * kernel[k];
+                        weightSum += kernel[k];
+                    }
                 }
-                ringRow[c] = val;
+                ringRow[c] = ( weightSum > 0.0f ) ? ( val / weightSum ) : nodata;
             }
         }
 
@@ -268,14 +283,23 @@ void RsSimpleSegmenter::gaussianSmooth( QVector<float> &data, int w, int h, int 
             float *outRow = &data[static_cast<size_t>(y) * w];
             for ( int c = 0; c < w; ++c )
             {
+                if ( isNoData( outRow[c] ) )
+                    continue;
+
                 float val = 0.0f;
+                float weightSum = 0.0f;
                 for ( int k = 0; k < kernelSize; ++k )
                 {
                     int srcR = std::clamp( y + k - half, 0, h - 1 );
                     const float *ringRow = &ringBuf[static_cast<size_t>(srcR % kernelSize) * w];
-                    val += ringRow[c] * kernel[k];
+                    float rv = ringRow[c];
+                    if ( !isNoData( rv ) )
+                    {
+                        val += rv * kernel[k];
+                        weightSum += kernel[k];
+                    }
                 }
-                outRow[c] = val;
+                outRow[c] = ( weightSum > 0.0f ) ? ( val / weightSum ) : nodata;
             }
         }
     }

@@ -179,6 +179,10 @@ Json::Value RsRecodeOperator::run(const Json::Value& params, RSOperatorContext& 
     }
 
     QMap<int, int> recodeMap = parseRecodeMap(params);
+    if (recodeMap.isEmpty()) {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "recode_map must contain at least one valid {from_class: to_class} mapping");
+    }
 
     context.logInfo("Running class recode on " + inputPath);
     context.reportProgress(0.1, "Loading classification label raster");
@@ -196,13 +200,9 @@ Json::Value RsRecodeOperator::run(const Json::Value& params, RSOperatorContext& 
     context.reportProgress(0.3, "Recoding class labels");
 
     cv::Mat outLabels;
-    if (!recodeMap.isEmpty()) {
-        if (!RsPostProcess::recode(labels, outLabels, recodeMap, &err)) {
-            throw RSOperatorError(ErrorCode::ComputationError,
-                                  "Recode failed: " + err.toStdString());
-        }
-    } else {
-        outLabels = labels;
+    if (!RsPostProcess::recode(labels, outLabels, recodeMap, &err)) {
+        throw RSOperatorError(ErrorCode::ComputationError,
+                              "Recode failed: " + err.toStdString());
     }
 
     context.throwIfCancelled();

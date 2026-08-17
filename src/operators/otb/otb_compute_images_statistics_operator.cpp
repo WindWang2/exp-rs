@@ -32,7 +32,7 @@ Json::Value OtbComputeImagesStatisticsOperator::schema() const {
     inputsParam["required"] = false;
     props["inputs"] = inputsParam;
 
-    props["ram"] = makeBooleanParam("ram", "Enable RAM estimation mode", false);
+    props["ram"] = makeIntegerParam("ram", "Available RAM in MB for processing (default 256)", 256);
     props["output"] = makeOutputParam("output", "Output statistics XML file", "xml");
 
     Json::Value outputs(Json::objectValue);
@@ -78,7 +78,7 @@ QStringList OtbComputeImagesStatisticsOperator::buildOtbArgs(const Json::Value& 
         }
     }
 
-    const bool ram = getBool(params, "ram", false);
+    const int ram = getInt(params, "ram", 256);
     const std::string outputPath = requireString(params, "output");
 
     QStringList args;
@@ -86,8 +86,8 @@ QStringList OtbComputeImagesStatisticsOperator::buildOtbArgs(const Json::Value& 
         args << "-il" << QString::fromStdString(path);
     }
 
-    if (ram) {
-        args << "-ram" << QStringLiteral("256");
+    if (ram > 0) {
+        args << "-ram" << QString::number(ram);
     }
 
     args << "-out" << QString::fromStdString(outputPath);

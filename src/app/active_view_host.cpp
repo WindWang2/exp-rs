@@ -12,6 +12,7 @@
 #include <layertree/qgslayertreeviewdefaultactions.h>
 #include <qgsmapoverviewcanvas.h>
 #include <qgsproject.h>
+#include <qgscoordinatetransform.h>
 #include <qgsmaplayer.h>
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
@@ -27,6 +28,28 @@
 
 #include "data/data_manager.h"
 #include "data/source_descriptor.h"
+
+namespace {
+void setCanvasExtentReprojected( QgsMapCanvas *canvas, QgsMapLayer *layer )
+{
+    if ( !canvas || !layer )
+        return;
+    QgsRectangle extent = layer->extent();
+    const QgsCoordinateReferenceSystem canvasCrs = canvas->mapSettings().destinationCrs();
+    if ( layer->crs().isValid() && canvasCrs.isValid() && layer->crs() != canvasCrs )
+    {
+        try
+        {
+            const QgsCoordinateTransform ct( layer->crs(), canvasCrs, QgsProject::instance() );
+            extent = ct.transformBoundingBox( extent );
+        }
+        catch ( ... )
+        {
+        }
+    }
+    canvas->setExtent( extent );
+}
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Construction / destruction
@@ -259,7 +282,7 @@ ActiveViewHost::displayAsset( sicnu::data::AssetId assetId )
     placeInTreeGroup( layer, asset->kind() );
     refreshCanvasLayers();
     if ( !hadVisibleLayers )
-        targetCanvas->setExtent( layer->extent() );
+        setCanvasExtentReprojected( targetCanvas, layer );
 
     return Result<DisplayLayerId>::success( displayed.value() );
 }
@@ -319,7 +342,7 @@ ActiveViewHost::openSource( sicnu::data::SourceDescriptor source )
     placeInTreeGroup( layer, asset->kind() );
     refreshCanvasLayers();
     if ( !hadVisibleLayers )
-        targetCanvas->setExtent( layer->extent() );
+        setCanvasExtentReprojected( targetCanvas, layer );
 
     if ( auto *win = qobject_cast<QMainWindow *>( m_parentWidget ) )
     {
@@ -483,7 +506,7 @@ void ActiveViewHost::zoomToLayer( QgsMapLayer *layer )
     if ( !target )
         return;
 
-    m_mapCanvas->setExtent( target->extent() );
+    setCanvasExtentReprojected( m_mapCanvas, target );
     m_mapCanvas->refresh();
 }
 

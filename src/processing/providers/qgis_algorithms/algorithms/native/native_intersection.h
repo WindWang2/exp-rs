@@ -53,27 +53,55 @@ protected:
         if ( !overlay )
             throw QgsProcessingException( invalidSourceError( parameters, QStringLiteral( "OVERLAY" ) ) );
 
+        QgsFields outFields = source->fields();
+        const QgsFields overlayFields = overlay->fields();
+        QVector<int> overlayFieldMap;
+        for ( int i = 0; i < overlayFields.count(); ++i )
+        {
+            const QgsField f = overlayFields.at( i );
+            QString name = f.name();
+            if ( outFields.lookupField( name ) >= 0 )
+                name = QStringLiteral( "overlay_" ) + name;
+            outFields.append( QgsField( name, f.type(), f.typeName(), f.length(), f.precision() ) );
+            overlayFieldMap.append( outFields.count() - 1 );
+        }
+
         QString dest;
         std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, QStringLiteral( "OUTPUT" ), context, dest,
-            source->fields(), Qgis::WkbType::Unknown, source->sourceCrs() ) );
+            outFields, source->wkbType(), source->sourceCrs() ) );
         if ( !sink )
             throw QgsProcessingException( invalidSinkError( parameters, QStringLiteral( "OUTPUT" ) ) );
 
-        QgsGeometry overlayCombined;
+        QVector<QgsFeature> overlayFeatures;
         QgsFeatureIterator overlayIt = overlay->getFeatures();
         QgsFeature overlayFeat;
+        const bool needsTransform = overlay->sourceCrs().isValid() && source->sourceCrs().isValid() &&
+                                    overlay->sourceCrs() != source->sourceCrs();
+        QgsCoordinateTransform ct;
+        if ( needsTransform )
+        {
+            ct = QgsCoordinateTransform( overlay->sourceCrs(), source->sourceCrs(), context.transformContext() );
+        }
+
         while ( overlayIt.nextFeature( overlayFeat ) )
         {
             if ( overlayFeat.hasGeometry() )
             {
-                if ( overlayCombined.isNull() )
-                    overlayCombined = overlayFeat.geometry();
-                else
-                    overlayCombined = overlayCombined.combine( overlayFeat.geometry() );
+                if ( needsTransform )
+                {
+                    try
+                    {
+                        QgsGeometry g = overlayFeat.geometry();
+                        g.transform( ct );
+                        overlayFeat.setGeometry( g );
+                    }
+                    catch ( const QgsCsException & ) {}
+                }
+                overlayFeatures.append( overlayFeat );
             }
         }
 
-        if ( overlayCombined.isNull() )
+        if ( overlayFeatures.isEmpty() )
             return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
 
         QgsFeatureIterator it = source->getFeatures();
@@ -83,17 +111,26 @@ protected:
 
         while ( it.nextFeature( feat ) )
         {
-            if ( feedback->isCanceled() ) break;
+            if ( feedback && feedback->isCanceled() ) break;
             current++;
-            if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
+            if ( total > 0 && feedback ) feedback->setProgress( 100.0 * current / total );
 
-            if ( feat.hasGeometry() )
+            if ( !feat.hasGeometry() )
+                continue;
+
+            for ( const QgsFeature &ovFeat : overlayFeatures )
             {
-                QgsGeometry result = feat.geometry().intersection( overlayCombined );
+                if ( !feat.geometry().intersects( ovFeat.geometry() ) )
+                    continue;
+                QgsGeometry result = feat.geometry().intersection( ovFeat.geometry() );
                 if ( !result.isEmpty() )
                 {
-                    QgsFeature outputFeat = feat;
+                    QgsFeature outputFeat( outFields );
                     outputFeat.setGeometry( result );
+                    for ( int i = 0; i < source->fields().count(); ++i )
+                        outputFeat.setAttribute( i, feat.attribute( i ) );
+                    for ( int i = 0; i < overlayFields.count(); ++i )
+                        outputFeat.setAttribute( overlayFieldMap[i], ovFeat.attribute( i ) );
                     sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
                 }
             }

@@ -47,7 +47,7 @@ QStringList OtbComputeImagesStatisticsAlgorithm::buildArgs(const QVariantMap &pa
 
     QString statsPath = parameters.value("STATS").toString();
     if (!statsPath.isEmpty()) {
-        args << "-out" << statsPath;
+        args << "-out.xml" << statsPath;
     }
 
     return args;

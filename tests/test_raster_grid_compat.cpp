@@ -111,14 +111,32 @@ TEST_CASE( "Differing pixel sizes need resampling", "[grid_compat]" )
   CHECK( primary->message.contains( QStringLiteral( "resample" ) ) );
 }
 
-TEST_CASE( "A rotated grid is a pixel-grid mismatch", "[grid_compat]" )
+TEST_CASE( "A rotated grid is a rotation mismatch", "[grid_compat]" )
 {
   RasterGrid b = makeGrid();
   b.geoTransform[2] = 0.001;
 
   const GridCompatReport report = sicnu::data::compareGrids( makeGrid(), b );
   CHECK_FALSE( report.compatible() );
-  REQUIRE( firstIssue( report, GridCompatVerdict::PixelSizeMismatch ) != nullptr );
+  const auto primary = report.primaryBlocking();
+  REQUIRE( primary.has_value() );
+  CHECK( primary->verdict == GridCompatVerdict::RotationMismatch );
+  CHECK( primary->code == QStringLiteral( "grid.rotation_mismatch" ) );
+  CHECK( primary->message.contains( QStringLiteral( "rotation" ) ) );
+}
+
+TEST_CASE( "A mirrored or south-up grid is an axis orientation mismatch (#332)", "[grid_compat]" )
+{
+  RasterGrid b = makeGrid();
+  b.geoTransform[5] = -b.geoTransform[5]; // flip Y direction to south-up
+
+  const GridCompatReport report = sicnu::data::compareGrids( makeGrid(), b );
+  CHECK_FALSE( report.compatible() );
+  const auto primary = report.primaryBlocking();
+  REQUIRE( primary.has_value() );
+  CHECK( primary->verdict == GridCompatVerdict::AxisOrientationMismatch );
+  CHECK( primary->code == QStringLiteral( "grid.axis_orientation_mismatch" ) );
+  CHECK( primary->message.contains( QStringLiteral( "opposite axis orientation" ) ) );
 }
 
 TEST_CASE( "A sub-pixel origin offset is a misalignment", "[grid_compat]" )

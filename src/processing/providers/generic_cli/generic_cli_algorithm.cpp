@@ -359,10 +359,11 @@ QVariantMap GenericCliAlgorithm::processAlgorithm(const QVariantMap &parameters,
             const QString binPath = QDir( bundleDir ).filePath( QStringLiteral( "bin" ) );
             const QString libPath = QDir( bundleDir ).filePath( QStringLiteral( "lib" ) );
             const QString path = env.value( QStringLiteral( "PATH" ) );
-            env.insert( QStringLiteral( "PATH" ), binPath + ( path.isEmpty() ? QString() : QStringLiteral( ":" ) + path ) );
+            const QString listSep = QString( QDir::listSeparator() );
+            env.insert( QStringLiteral( "PATH" ), binPath + ( path.isEmpty() ? QString() : listSep + path ) );
             const QString ldPath = env.value( QStringLiteral( "LD_LIBRARY_PATH" ) );
             env.insert( QStringLiteral( "LD_LIBRARY_PATH" ),
-                        libPath + ( ldPath.isEmpty() ? QString() : QStringLiteral( ":" ) + ldPath ) );
+                        libPath + ( ldPath.isEmpty() ? QString() : listSep + ldPath ) );
             env.insert( QStringLiteral( "LC_NUMERIC" ), QStringLiteral( "C" ) );
         }
         proc.setProcessEnvironment( env );
@@ -416,7 +417,20 @@ QVariantMap GenericCliAlgorithm::processAlgorithm(const QVariantMap &parameters,
         if ( outPath.isEmpty() )
             continue;
 
-        if ( !QFileInfo::exists( outPath ) )
+        QString actualPath = outPath;
+        if ( !QFileInfo::exists( actualPath ) )
+        {
+            for ( const QString &ext : { QStringLiteral( ".tif" ), QStringLiteral( ".shp" ), QStringLiteral( ".xml" ), QStringLiteral( ".txt" ) } )
+            {
+                if ( QFileInfo::exists( outPath + ext ) )
+                {
+                    actualPath = outPath + ext;
+                    break;
+                }
+            }
+        }
+
+        if ( !QFileInfo::exists( actualPath ) )
         {
             const QString err = QObject::tr(
                                   "Tool reported success but output file is missing: %1" )
@@ -427,7 +441,7 @@ QVariantMap GenericCliAlgorithm::processAlgorithm(const QVariantMap &parameters,
             throw QgsProcessingException(err);
         }
 
-        results[name] = outPath;
+        results[name] = actualPath;
     }
 
     return results;

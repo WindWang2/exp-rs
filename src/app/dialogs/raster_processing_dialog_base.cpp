@@ -368,9 +368,9 @@ void RasterProcessingDialogBase::runOperatorTask( const QString &operatorId,
   m_jobHandle.submitJob(
     req,
     [this, onResult]( const QString &outputPath, const Json::Value &resultJson ) {
-      onCompleted( outputPath );
       if ( onResult )
         onResult( resultJson );
+      onCompleted( outputPath );
     },
     [this]( const QString &err, bool isCanceled ) {
       if ( isCanceled )

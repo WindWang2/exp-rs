@@ -40,7 +40,8 @@ std::unique_ptr<QgsContrastEnhancement> createBandEnhancement( QgsRasterDataProv
     QgsContrastEnhancement::StretchToMinimumMaximum, true );
 
   const QgsRasterBandStats stats = provider->bandStatistics(
-    band, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max );
+    band, Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max,
+    QgsRectangle(), 250000 );
 
   double minVal = 0.0;
   double maxVal = 255.0;

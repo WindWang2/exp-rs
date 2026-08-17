@@ -72,18 +72,22 @@ public:
     };
 
     // Text/edit
-    virtual void setText(const QString &) {}
-    virtual QString text() const { return {}; }
-    virtual QString text(int) const { return {}; }
-    virtual bool isModified() const { return false; }
-    virtual void setModified(bool) {}
-    virtual void append(const QString &) {}
-    virtual int length() const { return 0; }
-    virtual int lines() const { return 0; }
-    virtual int lineLength(int) const { return 0; }
-    virtual void insertAt(const QString &, int, int) {}
+    virtual void setText(const QString &text) { m_text = text; emit textChanged(); }
+    virtual QString text() const { return m_text; }
+    virtual QString text(int line) const {
+        QStringList lines = m_text.split(QLatin1Char('\n'));
+        if (line >= 0 && line < lines.size()) return lines[line];
+        return {};
+    }
+    virtual bool isModified() const { return m_modified; }
+    virtual void setModified(bool m) { m_modified = m; emit modificationChanged(m); }
+    virtual void append(const QString &s) { m_text += s; emit textChanged(); }
+    virtual int length() const { return m_text.length(); }
+    virtual int lines() const { return m_text.isEmpty() ? 0 : m_text.count(QLatin1Char('\n')) + 1; }
+    virtual int lineLength(int line) const { return text(line).length(); }
+    virtual void insertAt(const QString &s, int, int) { m_text += s; emit textChanged(); }
     virtual void remove(int, int) {}
-    virtual void replaceSelectedText(const QString &) {}
+    virtual void replaceSelectedText(const QString &s) { m_text = s; emit textChanged(); }
     virtual bool hasSelectedText() const { return false; }
     virtual QString selectedText() const { return {}; }
 
@@ -209,7 +213,7 @@ public:
     virtual void copy() {}
     virtual void cut() {}
     virtual void paste() {}
-    virtual void clear() {}
+    virtual void clear() { m_text.clear(); emit textChanged(); }
     virtual void zoomIn(int = 1) {}
     virtual void zoomOut(int = 1) {}
     virtual void zoomTo(int) {}
@@ -263,4 +267,8 @@ Q_SIGNALS:
     void marginRightClicked(int, int, Qt::KeyboardModifiers);
     void userListActivated(int, const QString &);
     void macroRecordChanged(unsigned int, int, const char *);
+
+private:
+    QString m_text;
+    bool m_modified = false;
 };

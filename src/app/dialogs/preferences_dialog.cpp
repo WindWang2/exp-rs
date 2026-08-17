@@ -165,7 +165,10 @@ void PreferencesDialog::setTheme(const QString &theme)
 
 QString PreferencesDialog::defaultCrs() const
 {
-    return m_crsCombo->currentData().toString();
+    const QString data = m_crsCombo->currentData().toString();
+    if ( !data.isEmpty() )
+        return data;
+    return m_crsCombo->currentText().trimmed();
 }
 
 void PreferencesDialog::setDefaultCrs(const QString &crs)

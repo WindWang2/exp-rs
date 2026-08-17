@@ -68,6 +68,8 @@ class QGIS_ANALYSIS_EXPORT RsPostProcess
      */
     static bool loadLabelRaster( const QString &path, cv::Mat &labels, double gt[6],
                                  QString &wkt, QString *err = nullptr );
+    static bool loadLabelRaster( const QString &path, cv::Mat &labels, double gt[6],
+                                 QString &wkt, double *nodataValue, QString *err = nullptr );
 
     /**
      * Save a single-band label raster (CV_32S or CV_8U) as GeoTIFF (or driver

@@ -159,7 +159,7 @@ void AgentCopilotDockWidget::setContext( data::DataManager *dataManager, QgsMapC
   m_viewControlService.setMapCanvas( canvas );
   m_rasterDisplayService.setDataManager( dataManager );
   m_rasterDisplayService.setMapCanvas( canvas );
-  InteractionToolRegistry::instance().registerBuiltinTools( &m_viewControlService, &m_rasterDisplayService );
+  InteractionToolRegistry::instance().registerBuiltinTools( &m_viewControlService, &m_rasterDisplayService, dataManager );
 
   m_toolCallDispatcher.setInteractionActionHandler(
     []( const std::string &name, const Json::Value &args ) {
@@ -388,7 +388,13 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
   // further consumer since the toolExecutionFinished signal was removed as
   // dead (ADR 0047).
   QString error;
-  const bool ok = m_toolCallDispatcher.submit( cppEnvelope, []( const Json::Value &/*resultPayload*/ ) {}, &error );
+  const bool ok = m_toolCallDispatcher.submit( cppEnvelope, [this]( const Json::Value &resultPayload ) {
+    if ( resultPayload.isObject() && resultPayload.isMember( "status" ) && resultPayload["status"].asString() == "error" )
+    {
+      const std::string msg = resultPayload.isMember( "errorMessage" ) ? resultPayload["errorMessage"].asString() : "Tool execution failed";
+      appendErrorMessage( QString::fromStdString( msg ) );
+    }
+  }, &error );
 
   if ( !ok )
   {

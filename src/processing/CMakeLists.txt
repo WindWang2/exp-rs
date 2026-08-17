@@ -202,6 +202,10 @@ if(OpenCV_FOUND)
   target_link_libraries(sicnu_processing PRIVATE ${OpenCV_LIBRARIES})
 endif()
 
+target_compile_definitions(sicnu_processing PUBLIC
+    SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
 # Task Center (#26–#29): separate static lib so JobEngine can be linked without
 # a processing↔jobs↔operators cycle. OutputCommitter keeps only a TaskCenter*
 # and resolves symbols when final targets also link sicnu_task_center.

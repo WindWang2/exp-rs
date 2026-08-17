@@ -95,6 +95,41 @@ TEST_CASE( "SimpleSegmenter: nodata handling", "[segmentation][simple]" )
     REQUIRE( segMap.labelAt( 1, 1 ) != 0 );
 }
 
+TEST_CASE( "SimpleSegmenter: nodata boundary does not bleed into valid dynamic range (#336)", "[segmentation][simple]" )
+{
+    // 20x20 scene with two distinct valid regions (value 10 and value 200)
+    // plus a border of -9999.0f nodata pixels.
+    const int w = 20, h = 20;
+    QVector<float> data( w * h, -9999.0f );
+    for ( int r = 2; r < 18; ++r )
+    {
+        for ( int c = 2; c < 18; ++c )
+        {
+            data[r * w + c] = ( c < 10 ) ? 10.0f : 200.0f;
+        }
+    }
+
+    RsSimpleSegmenter::Params params;
+    params.smoothKernel = 5;
+    params.quantizeBins = 16;
+    params.minRegionSize = 20;
+
+    auto segMap = RsSimpleSegmenter::segment( data.data(), w, h, -9999.0f, params );
+
+    REQUIRE( !segMap.isEmpty() );
+    // Nodata border pixels must be labeled 0
+    REQUIRE( segMap.labelAt( 0, 0 ) == 0 );
+    REQUIRE( segMap.labelAt( 19, 19 ) == 0 );
+
+    // Valid interior must resolve two distinct segments
+    quint32 leftLabel = segMap.labelAt( 5, 5 );
+    quint32 rightLabel = segMap.labelAt( 5, 15 );
+    REQUIRE( leftLabel != 0 );
+    REQUIRE( rightLabel != 0 );
+    REQUIRE( leftLabel != rightLabel );
+    REQUIRE( segMap.segmentCount() == 2 );
+}
+
 TEST_CASE( "SimpleSegmenter: multi-band segmentation", "[segmentation][simple]" )
 {
     const int w = 6, h = 6, nBands = 3;

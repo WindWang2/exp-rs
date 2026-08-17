@@ -61,58 +61,50 @@ QStringList OtbSegmentationAlgorithm::buildArgs(const QVariantMap &parameters,
     // Input raster
     args << "-in" << rasterLayerSource(parameters.value("INPUT"));
 
-    // Mode selection
-    QStringList modes = {"meanshift", "watershed", "mprofiles", "cc", "lsms"};
-    QString selectedMode = modes.value(parameters.value("MODE").toInt(), "meanshift");
-    args << "-mode" << selectedMode;
+    // Filter selection (meanshift, watershed, mprofiles, cc)
+    QStringList filters = {"meanshift", "watershed", "mprofiles", "cc", "meanshift"};
+    int modeIdx = parameters.value("MODE").toInt();
+    QString selectedFilter = (modeIdx >= 0 && modeIdx < filters.size()) ? filters[modeIdx] : "meanshift";
+    args << "-filter" << selectedFilter;
 
-    // Mode-specific parameters
-    if (selectedMode == "meanshift")
+    // Filter-specific parameters
+    if (selectedFilter == "meanshift")
     {
-        // ISSUE 6 fix: MeanShift uses spatialr/ranger/minsize/maxiter only
-        // No threshold parameter for meanshift mode
-        args << "-mode.meanshift.spatialr"
+        args << "-filter.meanshift.spatialr"
              << QString::number(parameters.value("SPATIAL_RADIUS").toInt());
-        args << "-mode.meanshift.ranger"
+        args << "-filter.meanshift.ranger"
              << QString::number(parameters.value("RANGE_RADIUS").toDouble(), 'f', 2);
-        args << "-mode.meanshift.minsize"
+        args << "-filter.meanshift.minsize"
              << QString::number(parameters.value("MIN_REGION_SIZE").toInt());
-        args << "-mode.meanshift.maxiter"
+        args << "-filter.meanshift.maxiter"
              << QString::number(parameters.value("MAX_ITERATION").toInt());
     }
-    else if (selectedMode == "lsms")
+    else if (selectedFilter == "watershed")
     {
-        // LSMS also uses spatialr/ranger/minsize/maxiter
-        args << "-mode.lsms.spatialr"
-             << QString::number(parameters.value("SPATIAL_RADIUS").toInt());
-        args << "-mode.lsms.ranger"
-             << QString::number(parameters.value("RANGE_RADIUS").toDouble(), 'f', 2);
-        args << "-mode.lsms.minsize"
-             << QString::number(parameters.value("MIN_REGION_SIZE").toInt());
-        args << "-mode.lsms.maxiter"
-             << QString::number(parameters.value("MAX_ITERATION").toInt());
+        args << "-filter.watershed.threshold"
+             << QString::number(parameters.value("THRESHOLD").toDouble(), 'f', 4);
     }
     else
     {
-        // For watershed/mprofiles/cc — threshold is valid
-        args << "-mode." + selectedMode + ".threshold"
+        args << "-filter." + selectedFilter + ".threshold"
              << QString::number(parameters.value("THRESHOLD").toDouble(), 'f', 4);
     }
 
-    // Output vector
+    // Output mode & path
     QString vectorOutput = parameters.value("OUTPUT").toString();
-
-    // ISSUE 5 fix: OTB Segmentation -out format for raster+vector is:
-    //   -out vector.shp label_image.tif uint32
-    // When OUTPUT_RASTER is specified, include both in -out
     QString labelOutput = parameters.value("OUTPUT_RASTER").toString();
-    if (!labelOutput.isEmpty())
+
+    if (!vectorOutput.isEmpty())
     {
-        args << "-out" << vectorOutput << labelOutput << "uint32";
+        args << "-mode" << "vector" << "-mode.vector.out" << vectorOutput;
+        if (!labelOutput.isEmpty())
+        {
+            args << "-mode.raster.out" << labelOutput;
+        }
     }
-    else
+    else if (!labelOutput.isEmpty())
     {
-        args << "-out" << vectorOutput;
+        args << "-mode" << "raster" << "-mode.raster.out" << labelOutput;
     }
 
     return args;

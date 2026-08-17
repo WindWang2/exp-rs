@@ -462,6 +462,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
 
       if ( anyFailed )
       {
+        sicnu::TaskCenter::instance().cancelPipeline( pipelineId );
         if ( result.errorMessage.empty() )
           result.errorMessage = pipeInfo.errorMessage.isEmpty()
                                   ? "Pipeline failed"
@@ -481,6 +482,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
 
     if ( std::chrono::steady_clock::now() > deadline )
     {
+      sicnu::TaskCenter::instance().cancelPipeline( pipelineId );
       result.errorMessage = "Pipeline timed out waiting for TaskCenter";
       reportLog( "error", result.errorMessage );
       return result;

@@ -55,7 +55,8 @@ QVariantMap resolveDestinationParameters( const QgsProcessingAlgorithm *algorith
         if ( type != QgsProcessingParameterRasterDestination::typeName()
              && type != QgsProcessingParameterVectorDestination::typeName()
              && type != QgsProcessingParameterFeatureSink::typeName()
-             && type != QgsProcessingParameterFileDestination::typeName() )
+             && type != QgsProcessingParameterFileDestination::typeName()
+             && type != QgsProcessingParameterFolderDestination::typeName() )
             continue;
 
         resolved.insert(
@@ -109,7 +110,8 @@ QVariantMap GdalToolWrapper::processAlgorithm(const QVariantMap &parameters,
         if ( type == QgsProcessingParameterRasterDestination::typeName()
              || type == QgsProcessingParameterVectorDestination::typeName()
              || type == QgsProcessingParameterFeatureSink::typeName()
-             || type == QgsProcessingParameterFileDestination::typeName() )
+             || type == QgsProcessingParameterFileDestination::typeName()
+             || type == QgsProcessingParameterFolderDestination::typeName() )
         {
             const QString outPath = resolvedParameters.value( param->name() ).toString();
             if ( !outPath.isEmpty() && !QFileInfo::exists( outPath ) )

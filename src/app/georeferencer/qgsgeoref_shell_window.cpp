@@ -91,6 +91,20 @@ namespace
 #include "rs_georef_task_list.h"
 #include "rs_warp_task.h"
 
+namespace
+{
+const double *sourceGeoTransformForPath( const QString &path, double *gtStorage )
+{
+  if ( path.isEmpty() || !gtStorage )
+    return nullptr;
+  QgsRasterChangeCoords coords;
+  coords.loadRaster( path );
+  if ( coords.getGeoTransform( gtStorage ) )
+    return gtStorage;
+  return nullptr;
+}
+}
+
 QgsGeorefShellWindow::QgsGeorefShellWindow( QgisInterface *iface, QWidget *parent )
   : QMainWindow( parent )
   , mIface( iface )
@@ -2027,7 +2041,9 @@ void QgsGeorefShellWindow::closeEvent( QCloseEvent *e )
         if ( QFileInfo( path ).suffix().isEmpty() )
           path += QStringLiteral( ".points" );
       }
-      if ( !rsSaveGcpPointsFile( path, mGeorefSession.gcps() ) )
+      double srcGt[6];
+      const double *gtPtr = sourceGeoTransformForPath( mSourceRasterPath, srcGt );
+      if ( !rsSaveGcpPointsFile( path, mGeorefSession.gcps(), gtPtr ) )
       {
         QMessageBox::warning( this, tr( "Save GCPs" ), tr( "保存失败，窗口未关闭。" ) );
         e->ignore();
@@ -2051,7 +2067,9 @@ void QgsGeorefShellWindow::loadPoints()
   const QgsCoordinateReferenceSystem destCrs =
     mParamsPanel ? mParamsPanel->destCrs() : QgsCoordinateReferenceSystem();
   QVector<QgsGcpPoint> loaded;
-  if ( !rsLoadGcpPointsFile( path, destCrs, loaded ) )
+  double srcGt[6];
+  const double *gtPtr = sourceGeoTransformForPath( mSourceRasterPath, srcGt );
+  if ( !rsLoadGcpPointsFile( path, destCrs, loaded, gtPtr ) )
   {
     QMessageBox::warning( this, tr( "Load GCPs" ), tr( "Failed to load GCP points from %1" ).arg( path ) );
     return;
@@ -2080,7 +2098,9 @@ void QgsGeorefShellWindow::savePoints()
     finalPath += QStringLiteral( ".points" );
   // Session GCPs are already QgsGcpPoint values carrying their destination
   // CRS (ADR 0056); the codec serializes it back into the file.
-  if ( !rsSaveGcpPointsFile( finalPath, mGeorefSession.gcps() ) )
+  double srcGt[6];
+  const double *gtPtr = sourceGeoTransformForPath( mSourceRasterPath, srcGt );
+  if ( !rsSaveGcpPointsFile( finalPath, mGeorefSession.gcps(), gtPtr ) )
     QMessageBox::warning( this, tr( "Save GCPs" ), tr( "Failed to save GCP points to %1" ).arg( finalPath ) );
   else
   {

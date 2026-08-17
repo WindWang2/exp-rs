@@ -204,7 +204,10 @@ Json::Value GdalPolygonizeOperator::run(const Json::Value& params,
 
     if (workPath != outputPath) {
         removeVectorFiles(qOutputPath);
-        QFile::rename(QString::fromStdString(workPath), qOutputPath);
+        if (!QFile::rename(QString::fromStdString(workPath), qOutputPath)) {
+            removeVectorFiles(QString::fromStdString(workPath));
+            throw RSOperatorError(ErrorCode::GdalError, "Failed to publish polygonize output to: " + outputPath);
+        }
         if (outFi.suffix().toLower() == QLatin1String("shp")) {
             const QString workBase = QFileInfo(QString::fromStdString(workPath)).path() + QLatin1Char('/') + QFileInfo(QString::fromStdString(workPath)).completeBaseName();
             const QString outBase = outFi.path() + QLatin1Char('/') + outFi.completeBaseName();

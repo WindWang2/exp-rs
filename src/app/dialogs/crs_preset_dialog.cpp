@@ -282,4 +282,17 @@ void CrsPresetDialog::filterTree( const QString &text )
         if ( visibleChildCount > 0 )
             categoryItem->setExpanded( true );
     }
+
+    QTreeWidgetItem *current = m_treeWidget->currentItem();
+    if ( current && ( current->isHidden() || ( current->parent() && current->parent()->isHidden() ) ) )
+    {
+        m_treeWidget->setCurrentItem( nullptr );
+        m_selectedEpsg = -1;
+        m_okButton->setEnabled( false );
+        m_nameLabel->setText( tr( "N/A" ) );
+        m_epsgLabel->setText( tr( "N/A" ) );
+        m_categoryLabel->clear();
+        m_descriptionLabel->clear();
+        m_wktLabel->setText( tr( "N/A" ) );
+    }
 }

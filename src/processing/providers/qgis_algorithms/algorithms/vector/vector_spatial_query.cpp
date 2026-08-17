@@ -53,16 +53,38 @@ QVariantMap VectorSpatialQueryAlgorithm::processAlgorithm( const QVariantMap &pa
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
 
-    // Build spatial index on intersect layer
+    // Build spatial index and geometry map on intersect layer
     QgsSpatialIndex spatialIndex;
+    std::map<QgsFeatureId, QgsGeometry> intersectGeometries;
     QgsFeatureIterator intersectIt = intersectSource->getFeatures();
     QgsFeature intersectFeat;
+    const bool needsTransform = intersectSource->sourceCrs().isValid() && source->sourceCrs().isValid() &&
+                                intersectSource->sourceCrs() != source->sourceCrs();
+    QgsCoordinateTransform ct;
+    if ( needsTransform )
+    {
+        ct = QgsCoordinateTransform( intersectSource->sourceCrs(), source->sourceCrs(), context.transformContext() );
+    }
+
     while ( intersectIt.nextFeature( intersectFeat ) )
     {
         if ( feedback->isCanceled() )
             break;
         if ( intersectFeat.hasGeometry() )
+        {
+            QgsGeometry g = intersectFeat.geometry();
+            if ( needsTransform )
+            {
+                try
+                {
+                    g.transform( ct );
+                    intersectFeat.setGeometry( g );
+                }
+                catch ( const QgsCsException & ) {}
+            }
             spatialIndex.addFeature( intersectFeat );
+            intersectGeometries[intersectFeat.id()] = g;
+        }
     }
 
     // Query input features against the spatial index
@@ -89,34 +111,35 @@ QVariantMap VectorSpatialQueryAlgorithm::processAlgorithm( const QVariantMap &pa
         bool match = false;
         for ( QgsFeatureId fid : intersectIds )
         {
-            QgsFeature interFeat;
-            // Fetch the feature from the intersect source
-            QgsFeatureIterator interIt = intersectSource->getFeatures( QgsFeatureRequest( fid ) );
-            if ( !interIt.nextFeature( interFeat ) || !interFeat.hasGeometry() )
+            auto geomIt = intersectGeometries.find( fid );
+            if ( geomIt == intersectGeometries.end() || geomIt->second.isNull() )
                 continue;
+            const QgsGeometry &interGeom = geomIt->second;
 
             switch ( predicateIdx )
             {
                 case 0: // intersects
-                    match = feat.geometry().intersects( interFeat.geometry() );
+                    match = feat.geometry().intersects( interGeom );
                     break;
                 case 1: // contains
-                    match = feat.geometry().contains( interFeat.geometry() );
+                    match = feat.geometry().contains( interGeom );
                     break;
                 case 2: // within
-                    match = feat.geometry().within( interFeat.geometry() );
+                    match = feat.geometry().within( interGeom );
                     break;
                 case 3: // crosses
-                    match = feat.geometry().crosses( interFeat.geometry() );
+                    match = feat.geometry().crosses( interGeom );
                     break;
                 case 4: // touches
-                    match = feat.geometry().touches( interFeat.geometry() );
+                    match = feat.geometry().touches( interGeom );
                     break;
                 case 5: // overlaps
-                    match = feat.geometry().overlaps( interFeat.geometry() );
+                    match = feat.geometry().overlaps( interGeom );
+                    break;
+                case 6: // equals
+                    match = feat.geometry().equals( interGeom );
                     break;
             }
-
             if ( match )
                 break;
         }

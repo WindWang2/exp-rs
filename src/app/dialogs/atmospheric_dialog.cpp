@@ -58,6 +58,8 @@ void AtmosphericDialog::setupUi()
 
   m_bandCombo = new QComboBox( sec );
   SicnuDialogHelp::tip( m_bandCombo, tr( "要校正的波段号。" ) );
+  connect( m_bandCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+           this, &AtmosphericDialog::refreshMetadata );
   form->addRow( tr( "波段" ), m_bandCombo );
   m_bandLabel = qobject_cast<QLabel *>( form->labelForField( m_bandCombo ) );
 

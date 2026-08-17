@@ -26,7 +26,11 @@ QStringList OtbBinaryMorphologicalAlgorithm::buildArgs(const QVariantMap &parame
 
     QStringList args;
     args << "-in" << rasterLayerSource(parameters.value("INPUT"));
-    args << "-struct" << QString::number(parameters.value("RADIUS").toInt());
+    int radius = parameters.value("RADIUS", 3).toInt();
+    args << "-structype" << "ball"
+         << "-structype.ball.xradius" << QString::number(radius)
+         << "-structype.ball.yradius" << QString::number(radius);
+    args << "-channel" << QString::number(parameters.value("CHANNEL", 1).toInt());
 
     QStringList operators = {"dilate", "erode", "opening", "closing"};
     QString selectedOp = operators.value(parameters.value("OPERATOR").toInt(), "dilate");

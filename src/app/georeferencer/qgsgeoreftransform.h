@@ -184,6 +184,14 @@ class  QgsGeorefTransform : public QgsGcpTransformerInterface
 
     //! \brief Returns origin, scale and rotation for linear and helmert transform, fails otherwise.
     bool getOriginScaleRotation( QgsPointXY &origin, double &scaleX, double &scaleY, double &rotation ) const;
+    void setDestinationCrs( const QgsCoordinateReferenceSystem &crs ) override
+    {
+      mDestinationCrs = crs;
+      if ( mGeorefTransformImplementation )
+        mGeorefTransformImplementation->setDestinationCrs( crs );
+    }
+
+    QgsCoordinateReferenceSystem destinationCrs() const { return mDestinationCrs; }
 
     /**
      * \brief Returns a pointer to the underlying QgsGcpTransformerInterface implementation
@@ -254,6 +262,7 @@ class  QgsGeorefTransform : public QgsGcpTransformerInterface
     TransformMethod mTransformParametrisation = TransformMethod::InvalidTransform;
     bool mParametersInitialized = false;
     QgsRasterChangeCoords mRasterChangeCoords;
+    QgsCoordinateReferenceSystem mDestinationCrs;
 
     friend class TestQgsGeoreferencer;
 };

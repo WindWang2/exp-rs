@@ -14,17 +14,10 @@
 #include <QLabel>
 #include <QComboBox>
 #include <QMessageBox>
-#include <QTemporaryDir>
-#include <QTemporaryFile>
-
 #include "data/asset_types.h"
 #include "data/band_role.h"
 #include "data/data_asset.h"
 #include "data/data_manager.h"
-#include "data/processing_asset_resolver.h"
-#include "operators/framework/asset_index_pipeline.h"
-#include "processing/framework/output_committer.h"
-#include "processing/gdal/gdal_dataset_wrapper.h"
 
 namespace
 {
@@ -137,10 +130,6 @@ void SpectralIndexDialog::setupUi()
   mainLayout->addWidget( sec );
 
   setupOutputRow( mainLayout );
-
-  m_addToCanvasCheck = new QCheckBox( tr( "完成后将结果加入画布（可选）" ), this );
-  mainLayout->addWidget( m_addToCanvasCheck );
-
   setupButtonBar( mainLayout );
   mainLayout->addStretch( 1 );
 

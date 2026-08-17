@@ -19,8 +19,8 @@ QStringList OtbBundleToPerfectSensorAlgorithm::buildArgs(const QVariantMap &para
     Q_UNUSED(feedback);
 
     QStringList args;
-    args << "-in" << rasterLayerSource(parameters.value("INPUT"));
-    args << "-pan" << rasterLayerSource(parameters.value("PANCHROMATIC"));
+    args << "-inxs" << rasterLayerSource(parameters.value("INPUT"));
+    args << "-inp" << rasterLayerSource(parameters.value("PANCHROMATIC"));
     args << "-out" << parameters.value("OUTPUT").toString();
 
     return args;

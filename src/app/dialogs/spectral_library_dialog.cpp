@@ -48,6 +48,10 @@ void SpectralLibraryDialog::setupUi()
   SicnuDialogHelp::tip( m_libraryPathEdit, tr(
     "光谱库文件（SpectralLibrary JSON）：命名光谱 + 可选波长栅格。"
     "也可在下方把当前谱保存进库。" ) );
+  connect( m_libraryPathEdit, &QLineEdit::textChanged, this, [this]( const QString &text ) {
+    m_libraryLoaded = ( !m_loadedPath.isEmpty() && text.trimmed() == m_loadedPath );
+    m_saveButton->setEnabled( !m_values.isEmpty() && m_libraryLoaded );
+  } );
 
   auto *browseButton = new QPushButton( tr( "浏览…" ), inputSec );
   browseButton->setObjectName( QStringLiteral( "spectralLibBrowseBtn" ) );
@@ -62,8 +66,8 @@ void SpectralLibraryDialog::setupUi()
   mainLayout->addWidget( inputSec );
 
   m_matchButton = new QPushButton( tr( "匹配" ), this );
-  m_matchButton->setObjectName( QStringLiteral( "spectralMatchBtn" ) );
   SicnuUi::markPrimary( m_matchButton );
+  m_matchButton->setObjectName( QStringLiteral( "spectralMatchBtn" ) );
   connect( m_matchButton, &QPushButton::clicked, this, &SpectralLibraryDialog::runMatch );
 
   m_saveButton = new QPushButton( tr( "保存当前谱到库" ), this );
@@ -143,6 +147,7 @@ bool SpectralLibraryDialog::loadAndMatch( const QString &path, QString *errorMes
     return false;
   m_library = library;
   m_libraryLoaded = true;
+  m_loadedPath = path;
   m_libraryPathEdit->setText( path );
   m_libraryPathEdit->setProperty( "loadedPath", path );
   m_saveButton->setEnabled( !m_values.isEmpty() );
@@ -157,21 +162,24 @@ void SpectralLibraryDialog::runMatch()
     m_statusLabel->setText( tr( "请先在图上采集光谱剖面。" ) );
     return;
   }
-  if ( !m_libraryLoaded )
+  const QString path = m_libraryPathEdit->text().trimmed();
+  if ( path.isEmpty() )
   {
-    const QString path = m_libraryPathEdit->text();
-    if ( path.isEmpty() )
-    {
-      m_statusLabel->setText( tr( "请选择光谱库文件。" ) );
-      return;
-    }
+    m_statusLabel->setText( tr( "请选择光谱库文件。" ) );
+    return;
+  }
+  if ( !m_libraryLoaded || m_loadedPath != path )
+  {
     QString errorMessage;
-    if ( !SpectralLibrary::Library::load( path, &m_library, &errorMessage ) )
+    SpectralLibrary::Library library;
+    if ( !SpectralLibrary::Library::load( path, &library, &errorMessage ) )
     {
       m_statusLabel->setText( tr( "加载失败：%1" ).arg( errorMessage ) );
       return;
     }
+    m_library = library;
     m_libraryLoaded = true;
+    m_loadedPath = path;
     m_libraryPathEdit->setProperty( "loadedPath", path );
     m_saveButton->setEnabled( !m_values.isEmpty() );
   }
@@ -224,8 +232,29 @@ void SpectralLibraryDialog::runMatch()
 
 void SpectralLibraryDialog::saveCurrentToLibrary()
 {
-  if ( m_values.isEmpty() || !m_libraryLoaded )
+  if ( m_values.isEmpty() )
     return;
+
+  const QString path = m_libraryPathEdit->text().trimmed();
+  if ( path.isEmpty() )
+  {
+    m_statusLabel->setText( tr( "请选择光谱库文件。" ) );
+    return;
+  }
+  if ( !m_libraryLoaded || m_loadedPath != path )
+  {
+    QString errorMessage;
+    SpectralLibrary::Library library;
+    if ( !SpectralLibrary::Library::load( path, &library, &errorMessage ) )
+    {
+      m_statusLabel->setText( tr( "加载失败：%1" ).arg( errorMessage ) );
+      return;
+    }
+    m_library = library;
+    m_libraryLoaded = true;
+    m_loadedPath = path;
+    m_libraryPathEdit->setProperty( "loadedPath", path );
+  }
 
   SpectralLibrary::Entry entry;
   entry.name = QStringLiteral( "profile_%1" ).arg( m_library.entries.size() + 1 );
@@ -242,7 +271,6 @@ void SpectralLibraryDialog::saveCurrentToLibrary()
   }
 
   m_library.entries.append( entry );
-  const QString path = m_libraryPathEdit->text();
   QString errorMessage;
   if ( !m_library.save( path, &errorMessage ) )
   {

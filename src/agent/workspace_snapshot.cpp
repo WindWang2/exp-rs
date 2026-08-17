@@ -89,7 +89,7 @@ MapViewSnapshot::ActiveRasterDisplay captureActiveRaster( QgsMapLayer *layer )
     const auto requested =
       Qgis::RasterBandStatistic::Min | Qgis::RasterBandStatistic::Max;
     const QgsRasterBandStats stats =
-      raster->dataProvider()->bandStatistics( statsBand, requested );
+      raster->dataProvider()->bandStatistics( statsBand, requested, QgsRectangle(), 250000 );
     if ( stats.statsGathered & Qgis::RasterBandStatistic::Min &&
          stats.statsGathered & Qgis::RasterBandStatistic::Max )
     {

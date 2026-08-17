@@ -616,6 +616,16 @@ long RsObiaMainWindow::startSegmentationTask( const RsObiaSegmentationConfig &se
         canceled->store( true );
         sicnu::TaskCenter::instance().cancelTask( taskId );
     } );
+    if ( taskId >= 0 )
+    {
+        const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+        if ( info.status == sicnu::TaskStatus::Completed
+             || info.status == sicnu::TaskStatus::Failed
+             || info.status == sicnu::TaskStatus::Canceled )
+        {
+            onObiaTaskUpdated( info );
+        }
+    }
     return taskId;
 }
 
@@ -1149,6 +1159,16 @@ long RsObiaMainWindow::startHierarchyTask( int spatialRadius, double rangeRadius
         canceled->store( true );
         sicnu::TaskCenter::instance().cancelTask( taskId );
     } );
+    if ( taskId >= 0 )
+    {
+        const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+        if ( info.status == sicnu::TaskStatus::Completed
+             || info.status == sicnu::TaskStatus::Failed
+             || info.status == sicnu::TaskStatus::Canceled )
+        {
+            onObiaTaskUpdated( info );
+        }
+    }
     return taskId;
 }
 
@@ -1383,6 +1403,16 @@ long RsObiaMainWindow::startHierarchyClassifyTask(
         canceled->store( true );
         sicnu::TaskCenter::instance().cancelTask( taskId );
     } );
+    if ( taskId >= 0 )
+    {
+        const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+        if ( info.status == sicnu::TaskStatus::Completed
+             || info.status == sicnu::TaskStatus::Failed
+             || info.status == sicnu::TaskStatus::Canceled )
+        {
+            onObiaTaskUpdated( info );
+        }
+    }
     return taskId;
 }
 
@@ -1436,6 +1466,16 @@ long RsObiaMainWindow::startFlatClassifyTask( RsObiaTask *task, const QString &o
         /*autoLoad=*/false );
 
     m_pendingTaskId = taskId;
+    if ( taskId >= 0 )
+    {
+        const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
+        if ( info.status == sicnu::TaskStatus::Completed
+             || info.status == sicnu::TaskStatus::Failed
+             || info.status == sicnu::TaskStatus::Canceled )
+        {
+            onObiaTaskUpdated( info );
+        }
+    }
     return taskId;
 }
 

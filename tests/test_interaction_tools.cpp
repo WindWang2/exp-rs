@@ -23,6 +23,7 @@
 #include <qgsmapcanvas.h>
 #include <qgsproject.h>
 #include <qgsrectangle.h>
+#include <qgsvectorlayer.h>
 
 using namespace sicnu::agent;
 using namespace sicnu::processing;
@@ -520,5 +521,65 @@ TEST_CASE( "MCP Server interaction tool discovery and schemas", "[agent][interac
   SECTION( "MCP get_interaction_schema throws for unknown tool" )
   {
     REQUIRE_THROWS( mcpServer.testGetInteractionSchema( "unknown:tool_name" ) );
+  }
+}
+
+TEST_CASE( "InteractionToolRegistry data tools execution (#312)", "[agent][interaction][data]" )
+{
+  TestAppFixture fixture;
+  auto &registry = InteractionToolRegistry::instance();
+  registry.reset();
+
+  ViewControlService service;
+  registry.registerBuiltinTools( &service );
+
+  SECTION( "data tools are registered and underscore normalized" )
+  {
+    REQUIRE( registry.hasTool( "data:list_layers" ) );
+    REQUIRE( registry.hasTool( "data:describe_dataset" ) );
+    REQUIRE( registry.hasTool( "data:get_lineage" ) );
+
+    auto listLayersOpt = registry.findTool( "data_list_layers" );
+    REQUIRE( listLayersOpt.has_value() );
+    REQUIRE( listLayersOpt->name == "data:list_layers" );
+    REQUIRE( listLayersOpt->category == "data" );
+
+    auto describeOpt = registry.findTool( "data_describe_dataset" );
+    REQUIRE( describeOpt.has_value() );
+    REQUIRE( describeOpt->name == "data:describe_dataset" );
+
+    auto lineageOpt = registry.findTool( "data_get_lineage" );
+    REQUIRE( lineageOpt.has_value() );
+    REQUIRE( lineageOpt->name == "data:get_lineage" );
+  }
+
+  SECTION( "data:list_layers and data:describe_dataset execute successfully" )
+  {
+    // Create a temporary memory layer in project
+    auto *layer = new QgsVectorLayer( "Point?crs=EPSG:4326&field=name:string", "test_data_layer", "memory" );
+    QgsProject::instance()->addMapLayer( layer );
+
+    // Test execute data:list_layers (and data_list_layers)
+    Json::Value listRes = registry.execute( "data_list_layers", Json::Value( Json::objectValue ) );
+    REQUIRE( listRes.isMember( "status" ) );
+    REQUIRE( listRes["status"].asString() == "success" );
+    REQUIRE( listRes.isMember( "layers" ) );
+    REQUIRE( listRes["layers"].isArray() );
+    REQUIRE( listRes["layers"].size() >= 1 );
+
+    // Test execute data:describe_dataset
+    Json::Value descParams( Json::objectValue );
+    descParams["layer_id"] = "test_data_layer";
+    Json::Value descRes = registry.execute( "data:describe_dataset", descParams );
+    REQUIRE( descRes.isMember( "status" ) );
+    REQUIRE( descRes["status"].asString() == "success" );
+    REQUIRE( descRes.isMember( "name" ) );
+    REQUIRE( descRes["name"].asString() == "test_data_layer" );
+    REQUIRE( descRes.isMember( "crs" ) );
+    REQUIRE( descRes["crs"].asString() == "EPSG:4326" );
+    REQUIRE( descRes.isMember( "geometry_type" ) );
+    REQUIRE( descRes["geometry_type"].asString() == "Point" );
+
+    QgsProject::instance()->removeMapLayer( layer->id() );
   }
 }

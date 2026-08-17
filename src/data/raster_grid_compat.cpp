@@ -1,6 +1,8 @@
 // src/data/raster_grid_compat.cpp — shared raster-grid compatibility service
 #include "raster_grid_compat.h"
 
+#include <ogr_spatialref.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -9,6 +11,19 @@ namespace sicnu::data
 
 namespace
 {
+
+bool isSameCrs( const QString &wktA, const QString &wktB )
+{
+  if ( wktA.trimmed() == wktB.trimmed() )
+    return true;
+  OGRSpatialReference srsA, srsB;
+  if ( srsA.importFromWkt( wktA.toUtf8().constData() ) == OGRERR_NONE &&
+       srsB.importFromWkt( wktB.toUtf8().constData() ) == OGRERR_NONE )
+  {
+    return srsA.IsSame( &srsB ) != 0;
+  }
+  return false;
+}
 
 /// Relative tolerance for grid (pixel size / extent) comparison, mirroring
 /// virtual_raster_preflight's kGridTolerance.
@@ -130,7 +145,7 @@ GridCompatReport compareGrids( const RasterGrid &a, const RasterGrid &b )
       true } );
     return report;
   }
-  if ( aHasCrs && bHasCrs && a.crsWkt != b.crsWkt )
+  if ( aHasCrs && bHasCrs && !isSameCrs( a.crsWkt, b.crsWkt ) )
   {
     report.issues.append( {
       GridCompatVerdict::CrsMismatch,
@@ -147,27 +162,46 @@ GridCompatReport compareGrids( const RasterGrid &a, const RasterGrid &b )
   if ( !a.hasGeoTransform || !b.hasGeoTransform )
     return report;
 
-  // --- Pixel grid: rotation or differing pixel sizes need resampling.
+  // --- Pixel grid: orientation, rotation, or differing pixel sizes.
   const bool axisOrientationMismatch = ( a.geoTransform[1] * b.geoTransform[1] <= 0.0 ) ||
                                        ( a.geoTransform[5] * b.geoTransform[5] <= 0.0 );
+  if ( axisOrientationMismatch )
+  {
+    report.issues.append( {
+      GridCompatVerdict::AxisOrientationMismatch,
+      QStringLiteral( "grid.axis_orientation_mismatch" ),
+      QStringLiteral( "The rasters have opposite axis orientation (north-up vs south-up or mirrored); "
+                      "rectify the second raster before comparing pixels." ),
+      true } );
+    return report;
+  }
+
   const bool rotated = a.geoTransform[2] != 0.0 || a.geoTransform[4] != 0.0 ||
                        b.geoTransform[2] != 0.0 || b.geoTransform[4] != 0.0;
-  if ( axisOrientationMismatch || rotated || !sameScalar( a.pixelSizeX(), b.pixelSizeX() ) ||
+  if ( rotated )
+  {
+    report.issues.append( {
+      GridCompatVerdict::RotationMismatch,
+      QStringLiteral( "grid.rotation_mismatch" ),
+      QStringLiteral( "The rasters carry rotation terms; rectify/orthorectify "
+                      "before comparing pixels." ),
+      true } );
+    return report;
+  }
+
+  if ( !sameScalar( a.pixelSizeX(), b.pixelSizeX() ) ||
        !sameScalar( a.pixelSizeY(), b.pixelSizeY() ) )
   {
     report.issues.append( {
       GridCompatVerdict::PixelSizeMismatch,
       QStringLiteral( "grid.pixel_size_mismatch" ),
-      axisOrientationMismatch
-        ? QStringLiteral( "The rasters have opposite axis orientation (north-up vs south-up or mirrored); "
-                          "rectify the second raster before comparing pixels." )
-        : QStringLiteral( "The rasters use different pixel grids (%1 x %2 vs %3 x "
-                          "%4); resample the second raster to the first's grid "
-                          "before comparing pixels." )
-            .arg( a.pixelSizeX(), 0, 'g', 6 )
-            .arg( a.pixelSizeY(), 0, 'g', 6 )
-            .arg( b.pixelSizeX(), 0, 'g', 6 )
-            .arg( b.pixelSizeY(), 0, 'g', 6 ),
+      QStringLiteral( "The rasters use different pixel grids (%1 x %2 vs %3 x "
+                      "%4); resample the second raster to the first's grid "
+                      "before comparing pixels." )
+          .arg( a.pixelSizeX(), 0, 'g', 6 )
+          .arg( a.pixelSizeY(), 0, 'g', 6 )
+          .arg( b.pixelSizeX(), 0, 'g', 6 )
+          .arg( b.pixelSizeY(), 0, 'g', 6 ),
       true } );
     return report;
   }

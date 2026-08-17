@@ -48,23 +48,46 @@ TEST_CASE("GdalSafeCall failure path", "[gdal][robustness]")
 
 TEST_CASE("GdalSafeCall with GDAL operations", "[gdal][robustness]")
 {
-    SECTION("Open non-existent file returns nullptr")
+    SECTION("gdalSafeOpen non-existent file returns nullptr")
     {
-        GDALDatasetH ds = GDALOpen("/nonexistent/file.tif", GA_ReadOnly);
+        GDALDatasetH ds = gdalSafeOpen("/nonexistent/file.tif", GA_ReadOnly);
         REQUIRE(ds == nullptr);
     }
 
-    SECTION("Safe open with error handling")
+    SECTION("gdalSafeClose safely handles nullptr and valid handles")
     {
-        bool threw = false;
-        try {
-            GDALDatasetH ds = GDALOpen("/nonexistent/file.tif", GA_ReadOnly);
-            if (!ds) {
-                throw std::runtime_error("Failed to open raster");
-            }
-        } catch (const std::runtime_error &e) {
-            threw = true;
+        GDALDatasetH nullDs = nullptr;
+        gdalSafeClose(nullDs);
+        REQUIRE(nullDs == nullptr);
+
+        GDALAllRegister();
+        GDALDriverH memDriver = GDALGetDriverByName("MEM");
+        if (memDriver) {
+            GDALDatasetH validDs = GDALCreate(memDriver, "", 2, 2, 1, GDT_Byte, nullptr);
+            REQUIRE(validDs != nullptr);
+            gdalSafeClose(validDs);
+            REQUIRE(validDs == nullptr);
         }
-        REQUIRE(threw);
+    }
+
+    SECTION("GdalDatasetGuard manages dataset lifecycle via RAII")
+    {
+        GDALAllRegister();
+        GDALDriverH memDriver = GDALGetDriverByName("MEM");
+        if (memDriver) {
+            GDALDatasetH ds = GDALCreate(memDriver, "", 2, 2, 1, GDT_Byte, nullptr);
+            {
+                GdalDatasetGuard guard(ds);
+                REQUIRE(guard.get() == ds);
+                REQUIRE(static_cast<bool>(guard));
+            } // Destructor closes ds
+
+            // Move semantics
+            GDALDatasetH ds2 = GDALCreate(memDriver, "", 2, 2, 1, GDT_Byte, nullptr);
+            GdalDatasetGuard guard1(ds2);
+            GdalDatasetGuard guard2(std::move(guard1));
+            REQUIRE(guard1.get() == nullptr);
+            REQUIRE(guard2.get() == ds2);
+        }
     }
 }

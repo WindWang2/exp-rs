@@ -95,7 +95,7 @@ TEST_CASE("toToaReflectance Landsat rejects missing reflMult/reflAdd", "[radcal]
 // Kernel: toToaReflectance (Sentinel-2 / generic scale-offset)
 // ---------------------------------------------------------------------------
 
-TEST_CASE("toToaReflectance generic scale-offset formula", "[radcal]")
+TEST_CASE("toToaReflectance Sentinel-2 scale-offset formula", "[radcal]")
 {
     // rho = (DN + offset) / scale
     std::vector<float> dn = {1000.0f, 5000.0f};
@@ -103,18 +103,18 @@ TEST_CASE("toToaReflectance generic scale-offset formula", "[radcal]")
     BandCoefficients c;
     c.scale = 10000.0;
     c.offset = 0.0;
-    REQUIRE(toToaReflectance(dn.data(), out.data(), 2, c, SensorType::Generic, 90.0));
+    REQUIRE(toToaReflectance(dn.data(), out.data(), 2, c, SensorType::Sentinel2, 90.0));
     REQUIRE_THAT(out[0], WithinAbs(0.1f, 0.001f));   // 1000/10000
     REQUIRE_THAT(out[1], WithinAbs(0.5f, 0.001f));   // 5000/10000
 }
 
-TEST_CASE("toToaReflectance generic rejects zero scale", "[radcal]")
+TEST_CASE("toToaReflectance Sentinel-2 rejects zero scale", "[radcal]")
 {
     std::vector<float> dn = {100.0f};
     std::vector<float> out(1);
     BandCoefficients c;
     c.scale = 0.0;
-    REQUIRE_FALSE(toToaReflectance(dn.data(), out.data(), 1, c, SensorType::Generic, 90.0));
+    REQUIRE_FALSE(toToaReflectance(dn.data(), out.data(), 1, c, SensorType::Sentinel2, 90.0));
 }
 
 // ---------------------------------------------------------------------------
@@ -674,3 +674,20 @@ TEST_CASE("autoDetectMetadataFile scans sibling MTL/MTD files", "[radcal][metada
                   .endsWith(QStringLiteral("MTD_MSIL2A.xml")));
     }
 }
+
+TEST_CASE("toToaReflectance generic GDAL scale/offset computes DN*scale + offset", "[radcal][toa][generic]")
+{
+    using namespace RadiometricCalibration;
+    const std::vector<float> dn = {0.0f, 1000.0f, 5000.0f};
+    std::vector<float> refl(dn.size());
+
+    BandCoefficients c;
+    c.scale = 0.0001; // MODIS-style scale factor
+    c.offset = -0.05;
+
+    REQUIRE(toToaReflectance(dn.data(), refl.data(), dn.size(), c, SensorType::Generic, 90.0));
+    CHECK_THAT(refl[0], Catch::Matchers::WithinAbs(-0.05f, 1e-5f));
+    CHECK_THAT(refl[1], Catch::Matchers::WithinAbs(0.05f, 1e-5f));
+    CHECK_THAT(refl[2], Catch::Matchers::WithinAbs(0.45f, 1e-5f));
+}
+

@@ -15,6 +15,8 @@
  ***************************************************************************/
 
 #include "qgsgeoreftransform.h"
+#include "qgscoordinatetransform.h"
+#include "qgsexception.h"
 
 #include <cassert>
 #include <cmath>
@@ -36,10 +38,10 @@ std::unique_ptr<QgsGeorefTransform> makeConfiguredTransform(
   auto transform = std::make_unique<QgsGeorefTransform>( method );
   if ( !sourceRasterPath.isEmpty() )
     transform->loadRaster( sourceRasterPath );
+  transform->setDestinationCrs( targetCrs );
   if ( QgsGcpTransformerInterface *impl = transform->gcpTransformer() )
   {
     impl->setRpcOptions( sourceRasterPath, demPath, demZOffset, rpcRefinement );
-    impl->setDestinationCrs( targetCrs );
   }
   return transform;
 }
@@ -215,6 +217,26 @@ void *QgsGeorefTransform::GDALTransformerArgs() const
 
 bool QgsGeorefTransform::transformRasterToWorld( const QgsPointXY &raster, QgsPointXY &world )
 {
+  if ( mTransformParametrisation == TransformMethod::RpcPhysical )
+  {
+    if ( !transformPrivate( raster, world, false ) )
+      return false;
+    const QgsCoordinateReferenceSystem wgs84( QStringLiteral( "EPSG:4326" ) );
+    if ( mDestinationCrs.isValid() && mDestinationCrs != wgs84 )
+    {
+      try
+      {
+        const QgsCoordinateTransform xform( wgs84, mDestinationCrs, QgsCoordinateTransformContext() );
+        world = xform.transform( world );
+      }
+      catch ( QgsCsException & )
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+
   // flip y coordinate due to different CS orientation
   const QgsPointXY raster_flipped( raster.x(), -raster.y() );
   return transformPrivate( raster_flipped, world, false );
@@ -222,6 +244,25 @@ bool QgsGeorefTransform::transformRasterToWorld( const QgsPointXY &raster, QgsPo
 
 bool QgsGeorefTransform::transformWorldToRaster( const QgsPointXY &world, QgsPointXY &raster )
 {
+  if ( mTransformParametrisation == TransformMethod::RpcPhysical )
+  {
+    QgsPointXY w = world;
+    const QgsCoordinateReferenceSystem wgs84( QStringLiteral( "EPSG:4326" ) );
+    if ( mDestinationCrs.isValid() && mDestinationCrs != wgs84 )
+    {
+      try
+      {
+        const QgsCoordinateTransform xform( mDestinationCrs, wgs84, QgsCoordinateTransformContext() );
+        w = xform.transform( w );
+      }
+      catch ( QgsCsException & )
+      {
+        return false;
+      }
+    }
+    return transformPrivate( w, raster, true );
+  }
+
   const bool success = transformPrivate( world, raster, true );
   // flip y coordinate due to different CS orientation
   raster.setY( -raster.y() );

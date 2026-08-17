@@ -11,7 +11,20 @@
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
 
+#include <QtConcurrent/QtConcurrent>
+#include <QFutureWatcher>
 #include <cmath>
+
+namespace {
+struct SpectrumTaskResult {
+  bool success = false;
+  QString errorMessage;
+  QVector<double> values;
+  QVector<double> wavelengths;
+  QVector<QString> labels;
+  QString layerName;
+};
+} // namespace
 
 RsRoiSpectrumTool::RsRoiSpectrumTool( QgsMapCanvas *canvas, QgsRasterLayer *rasterLayer,
                                       ResultCallback onResult )
@@ -91,41 +104,58 @@ void RsRoiSpectrumTool::finishPolygon()
     roi = transformed;
   }
 
-  SpectralRoiProfile::RoiProfileResult result;
-  QString errorMessage;
-  if ( !SpectralRoiProfile::meanSpectrum( m_rasterLayer->source(), roi,
-                                          &result, &errorMessage ) )
-  {
-    // Surface the kernel's actionable error instead of vanishing silently.
-    if ( m_onResult )
-      m_onResult( {}, {}, {}, errorMessage );
-    return;
-  }
+  const QString rasterSource = m_rasterLayer->source();
+  const QString rasterName = m_rasterLayer->name();
+  auto onResult = m_onResult;
 
-  QVector<double> values;
-  values.reserve( result.mean.size() );
-  for ( float v : result.mean )
-    values.append( v );
+  auto *watcher = new QFutureWatcher<SpectrumTaskResult>();
+  QObject::connect( watcher, &QFutureWatcher<SpectrumTaskResult>::finished, [watcher, onResult]() {
+    SpectrumTaskResult res = watcher->result();
+    watcher->deleteLater();
+    if ( onResult )
+    {
+      if ( res.success )
+        onResult( res.values, res.wavelengths, res.labels, res.layerName );
+      else
+        onResult( {}, {}, {}, res.errorMessage );
+    }
+  } );
 
-  QVector<double> wavelengths;
-  wavelengths.reserve( result.wavelengths.size() );
-  for ( float w : result.wavelengths )
-    wavelengths.append( w );
+  watcher->setFuture( QtConcurrent::run( [rasterSource, rasterName, roi]() -> SpectrumTaskResult {
+    SpectrumTaskResult res;
+    res.layerName = rasterName;
 
-  // Per-band labels: band description when present, else "波段 N".
-  QVector<QString> labels;
-  GdalDatasetWrapper ds;
-  const bool hasDs = ds.open( m_rasterLayer->source() );
-  for ( int b = 1; b <= values.size(); ++b )
-  {
-    QString label;
-    if ( hasDs )
-      label = ds.bandDescription( b );
-    if ( label.isEmpty() )
-      label = tr( "波段 %1" ).arg( b );
-    labels.append( label );
-  }
+    SpectralRoiProfile::RoiProfileResult profileResult;
+    QString errorMessage;
+    if ( !SpectralRoiProfile::meanSpectrum( rasterSource, roi, &profileResult, &errorMessage ) )
+    {
+      res.success = false;
+      res.errorMessage = errorMessage;
+      return res;
+    }
 
-  if ( m_onResult )
-    m_onResult( values, wavelengths, labels, m_rasterLayer->name() );
+    res.values.reserve( profileResult.mean.size() );
+    for ( float v : profileResult.mean )
+      res.values.append( v );
+
+    res.wavelengths.reserve( profileResult.wavelengths.size() );
+    for ( float w : profileResult.wavelengths )
+      res.wavelengths.append( w );
+
+    // Per-band labels: band description when present, else "波段 N".
+    GdalDatasetWrapper ds;
+    const bool hasDs = ds.open( rasterSource );
+    for ( int b = 1; b <= res.values.size(); ++b )
+    {
+      QString label;
+      if ( hasDs )
+        label = ds.bandDescription( b );
+      if ( label.isEmpty() )
+        label = QObject::tr( "波段 %1" ).arg( b );
+      res.labels.append( label );
+    }
+
+    res.success = true;
+    return res;
+  } ) );
 }

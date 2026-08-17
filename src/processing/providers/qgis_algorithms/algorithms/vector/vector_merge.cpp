@@ -60,10 +60,19 @@ QVariantMap VectorMergeAlgorithm::processAlgorithm( const QVariantMap &parameter
         totalFeatures += vl->featureCount();
 
     long long current = 0;
+    const QgsCoordinateReferenceSystem targetCrs = layers.first()->crs();
     for ( QgsVectorLayer *vl : layers )
     {
         if ( feedback->isCanceled() )
             break;
+
+        const bool needsTransform = vl->crs().isValid() && targetCrs.isValid() &&
+                                    vl->crs() != targetCrs;
+        QgsCoordinateTransform ct;
+        if ( needsTransform )
+        {
+            ct = QgsCoordinateTransform( vl->crs(), targetCrs, context.transformContext() );
+        }
 
         QgsFeatureIterator it = vl->getFeatures();
         QgsFeature feat;
@@ -78,7 +87,16 @@ QVariantMap VectorMergeAlgorithm::processAlgorithm( const QVariantMap &parameter
                 feedback->setProgress( 100.0 * current / totalFeatures );
 
             QgsFeature outFeat( outputFields );
-            outFeat.setGeometry( feat.geometry() );
+            QgsGeometry g = feat.geometry();
+            if ( needsTransform && feat.hasGeometry() )
+            {
+                try
+                {
+                    g.transform( ct );
+                }
+                catch ( const QgsCsException & ) {}
+            }
+            outFeat.setGeometry( g );
             const QgsAttributes inAttrs = feat.attributes();
             for ( int i = 0; i < inFields.count() && i < inAttrs.count(); ++i )
             {

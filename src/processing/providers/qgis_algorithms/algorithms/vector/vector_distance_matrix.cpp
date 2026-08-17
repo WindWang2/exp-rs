@@ -97,15 +97,29 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
         }
     }
 
-    // Linear output: always produces linear format (input_id, target_id, distance, rank)
+    // Format fields: Linear (input_id, target_id, distance, [rank]) or Standard N x M (input_id, target1, target2, ...)
     QgsFields outputFields;
-    outputFields.append( QgsField( QStringLiteral( "InputID" ), QMetaType::Type::QString ) );
-    outputFields.append( QgsField( QStringLiteral( "TargetID" ), QMetaType::Type::QString ) );
-    outputFields.append( QgsField( QStringLiteral( "Distance" ), QMetaType::Type::Double ) );
-
-    if ( !nearestOnly && outputType == 0 )
+    std::vector<QString> targetIds;
+    if ( !nearestOnly && outputType == 1 )
     {
-        outputFields.append( QgsField( QStringLiteral( "Rank" ), QMetaType::Type::Int ) );
+        outputFields.append( QgsField( QStringLiteral( "InputID" ), QMetaType::Type::QString ) );
+        for ( const auto &pair : targetFeatures )
+        {
+            const QString tid = pair.second.attribute( targetFieldName ).toString();
+            targetIds.push_back( tid );
+            outputFields.append( QgsField( tid, QMetaType::Type::Double ) );
+        }
+    }
+    else
+    {
+        outputFields.append( QgsField( QStringLiteral( "InputID" ), QMetaType::Type::QString ) );
+        outputFields.append( QgsField( QStringLiteral( "TargetID" ), QMetaType::Type::QString ) );
+        outputFields.append( QgsField( QStringLiteral( "Distance" ), QMetaType::Type::Double ) );
+
+        if ( !nearestOnly && outputType == 0 )
+        {
+            outputFields.append( QgsField( QStringLiteral( "Rank" ), QMetaType::Type::Int ) );
+        }
     }
 
     QString dest;
@@ -154,9 +168,26 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
                 sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
             }
         }
+        else if ( outputType == 1 )
+        {
+            // Standard N x M matrix: one row per input feature with columns for every target feature
+            QgsFeature outputFeat;
+            outputFeat.setFields( outputFields );
+            outputFeat.setAttribute( QStringLiteral( "InputID" ), inputId );
+            for ( const auto &pair : targetFeatures )
+            {
+                const QString tid = pair.second.attribute( targetFieldName ).toString();
+                QgsPointXY targetPoint = pair.second.geometry().centroid().asPoint();
+                double dx = sourcePoint.x() - targetPoint.x();
+                double dy = sourcePoint.y() - targetPoint.y();
+                double dist = std::sqrt( dx * dx + dy * dy );
+                outputFeat.setAttribute( tid, dist );
+            }
+            sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+        }
         else
         {
-            // Compute distances to all target features
+            // Linear N * K format
             struct DistEntry
             {
                 QString targetId;

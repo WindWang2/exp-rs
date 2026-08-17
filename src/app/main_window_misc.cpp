@@ -189,9 +189,12 @@ void QgisDesktopWindow::loadSampleData()
     QFileInfoList files = dir.entryInfoList(filters, QDir::Files);
 
     int loaded = 0;
+    int failed = 0;
     for (const QFileInfo &file : files) {
-        loadRasterLayer(file.absoluteFilePath());
-        loaded++;
+        if (loadRasterLayer(file.absoluteFilePath()))
+            loaded++;
+        else
+            failed++;
     }
 
     // Load shapefiles
@@ -199,11 +202,16 @@ void QgisDesktopWindow::loadSampleData()
     filters << "*.shp";
     files = dir.entryInfoList(filters, QDir::Files);
     for (const QFileInfo &file : files) {
-        loadVectorLayer(file.absoluteFilePath());
-        loaded++;
+        if (loadVectorLayer(file.absoluteFilePath()))
+            loaded++;
+        else
+            failed++;
     }
 
-    statusBar()->showMessage(tr("Loaded %1 sample datasets").arg(loaded), 5000);
+    if ( failed > 0 )
+        statusBar()->showMessage(tr("已加载 %1 个示例数据集（失败 %2 个）").arg(loaded).arg(failed), 5000);
+    else
+        statusBar()->showMessage(tr("已加载 %1 个示例数据集").arg(loaded), 5000);
 }
 
 void QgisDesktopWindow::showGuidedWorkflows()

@@ -20,7 +20,32 @@ QStringList OtbRadiometricIndicesAlgorithm::buildArgs(const QVariantMap &paramet
 
     QStringList args;
     args << "-in" << rasterLayerSource(parameters.value("INPUT"));
-    args << "-list" << parameters.value("LIST").toString();
+
+    QString list = parameters.value("LIST", "NDVI").toString().trimmed();
+    if (!list.isEmpty()) {
+        if (!list.contains(":")) {
+            // Default to Vegetation category for common indices
+            if (list.compare("NDWI", Qt::CaseInsensitive) == 0 ||
+                list.compare("NDTI", Qt::CaseInsensitive) == 0) {
+                list = "Water:" + list.toUpper();
+            } else {
+                list = "Vegetation:" + list.toUpper();
+            }
+        }
+        args << "-list" << list;
+    }
+
+    int blue = parameters.value("BLUE_CHANNEL", 1).toInt();
+    int green = parameters.value("GREEN_CHANNEL", 2).toInt();
+    int red = parameters.value("RED_CHANNEL", 3).toInt();
+    int nir = parameters.value("NIR_CHANNEL", 4).toInt();
+    int mir = parameters.value("MIR_CHANNEL", 5).toInt();
+    args << "-channels.blue" << QString::number(blue)
+         << "-channels.green" << QString::number(green)
+         << "-channels.red" << QString::number(red)
+         << "-channels.nir" << QString::number(nir)
+         << "-channels.mir" << QString::number(mir);
+
     args << "-out" << parameters.value("OUTPUT").toString();
 
     return args;

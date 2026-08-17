@@ -46,6 +46,7 @@ void JobEngine::shutdown()
 {
   std::vector<std::thread> toJoin;
   std::vector<JobRecord> cancelledRecords;
+  std::vector<std::function<void()>> cancelHooks;
   {
     std::lock_guard<std::mutex> lock( m_mutex );
     if ( m_shuttingDown )
@@ -55,7 +56,7 @@ void JobEngine::shutdown()
     m_generation++;
     toJoin.swap( m_workers );
 
-    // Arm cancel flags of running jobs and invoke any cancel hooks
+    // Arm cancel flags of running jobs and collect cancel hooks
     for ( auto &kv : m_cancelFlags )
     {
       if ( kv.second )
@@ -65,9 +66,8 @@ void JobEngine::shutdown()
     {
       if ( kv.second.onCancel )
       {
-        try {
-          kv.second.onCancel();
-        } catch ( ... ) {}
+        cancelHooks.push_back( std::move( kv.second.onCancel ) );
+        kv.second.onCancel = nullptr;
       }
     }
 
@@ -89,6 +89,15 @@ void JobEngine::shutdown()
     }
   }
   m_cv.notify_all();
+
+  // Invoked WITHOUT m_mutex held so cancel hooks can re-enter JobEngine without deadlocking
+  for ( auto &hook : cancelHooks )
+  {
+    if ( hook )
+    {
+      try { hook(); } catch ( ... ) {}
+    }
+  }
 
   for ( const auto &rec : cancelledRecords )
     notify( rec );
@@ -185,34 +194,35 @@ std::string JobEngine::submit( JobRequest req, JobExecutor executor, CancelHook 
       rec.statusMessage = "Cancelled: JobEngine is shutting down";
       m_jobs.emplace( id, rec );
       copy = rec;
-      return id;
     }
-
-    if ( m_stop.load() )
+    else
     {
-      // After shutdownForTests, allow reuse
-      m_stop.store( false );
+      if ( m_stop.load() )
+      {
+        // After shutdownForTests, allow reuse
+        m_stop.store( false );
+      }
+
+      id = "job-" + std::to_string( m_nextId.fetch_add( 1 ) );
+
+      JobRecord rec;
+      rec.id = id;
+      rec.request = std::move( req );
+      rec.state = JobState::Queued;
+      rec.createdAtMs = nowUnixMs();
+
+      m_jobs.emplace( id, rec );
+      if ( executor )
+      {
+        JobBody body;
+        body.executor = std::move( executor );
+        body.onCancel = std::move( onCancel );
+        m_jobBodies.emplace( id, std::move( body ) );
+      }
+      m_queue.push_back( id );
+      ensureWorkersLocked();
+      copy = m_jobs.at( id );
     }
-
-    id = "job-" + std::to_string( m_nextId.fetch_add( 1 ) );
-
-    JobRecord rec;
-    rec.id = id;
-    rec.request = std::move( req );
-    rec.state = JobState::Queued;
-    rec.createdAtMs = nowUnixMs();
-
-    m_jobs.emplace( id, rec );
-    if ( executor )
-    {
-      JobBody body;
-      body.executor = std::move( executor );
-      body.onCancel = std::move( onCancel );
-      m_jobBodies.emplace( id, std::move( body ) );
-    }
-    m_queue.push_back( id );
-    ensureWorkersLocked();
-    copy = m_jobs.at( id );
   }
   m_cv.notify_all();
   notify( copy );

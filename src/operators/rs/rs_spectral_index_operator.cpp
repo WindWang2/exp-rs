@@ -213,6 +213,15 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             throw RSOperatorError(ErrorCode::GdalError,
                                   "Failed to read band " + std::to_string(bandNum));
         }
+        bool hasNodata = false;
+        double nodataVal = ds.bandNoDataValue(bandNum, &hasNodata);
+        if (hasNodata && std::isfinite(nodataVal)) {
+            for (float &val : buffer) {
+                if (std::abs(static_cast<double>(val) - nodataVal) < 1e-6 || std::isnan(val)) {
+                    val = std::numeric_limits<float>::quiet_NaN();
+                }
+            }
+        }
     };
 
     context.reportProgress(0.1, "Reading input bands");

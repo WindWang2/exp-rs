@@ -11,6 +11,7 @@
 #include <QString>
 
 #include <gdal.h>
+#include <ogr_spatialref.h>
 
 #include <algorithm>
 #include <array>
@@ -27,6 +28,19 @@ namespace sicnu::operators::rs {
 using namespace params;
 
 namespace {
+
+bool isSameCrs( const QString &wktA, const QString &wktB )
+{
+    if ( wktA.trimmed() == wktB.trimmed() )
+        return true;
+    OGRSpatialReference srsA, srsB;
+    if ( srsA.importFromWkt( wktA.toUtf8().constData() ) == OGRERR_NONE &&
+         srsB.importFromWkt( wktB.toUtf8().constData() ) == OGRERR_NONE )
+    {
+        return srsA.IsSame( &srsB ) != 0;
+    }
+    return false;
+}
 
 constexpr int kTileSize = 512;
 
@@ -201,7 +215,7 @@ Json::Value RsMosaicOperator::run(const Json::Value& params, RSOperatorContext& 
 
     // CRS consistency
     for (int i = 1; i < inputCount; ++i) {
-        if (metaList[static_cast<size_t>(i)].projection != metaList[0].projection) {
+        if (!isSameCrs(metaList[static_cast<size_t>(i)].projection, metaList[0].projection)) {
             throw RSOperatorError(ErrorCode::InvalidInputData,
                                   "CRS mismatch between " + metaList[0].path + " and " + metaList[static_cast<size_t>(i)].path);
         }

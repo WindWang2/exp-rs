@@ -56,12 +56,14 @@ TEST_CASE("STAC URL construction", "[agent][stac]")
             QStringLiteral("sentinel-2"),
             QStringLiteral("2023-01-01/2023-12-31"),
             QStringList{QStringLiteral("-180"), QStringLiteral("-90"),
-                        QStringLiteral("180"), QStringLiteral("90")});
+                        QStringLiteral("180"), QStringLiteral("90")},
+            50);
 
         REQUIRE(url.toString().contains(QStringLiteral("/search")));
         REQUIRE(url.toString().contains(QStringLiteral("collections=sentinel-2")));
         REQUIRE(url.toString().contains(QStringLiteral("datetime=")));
         REQUIRE(url.toString().contains(QStringLiteral("bbox=")));
+        REQUIRE(url.toString().contains(QStringLiteral("limit=50")));
     }
 
     SECTION("URL policy blocks private hosts by default")

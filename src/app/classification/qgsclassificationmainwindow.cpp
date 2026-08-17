@@ -2212,6 +2212,7 @@ bool QgsClassificationMainWindow::buildTrainingData( const QVector<int> &bands,
   RsTrainingDataExtraction::Options options;
   options.ignore = currentIgnoreOptions();
   options.minSamples = 10;
+  options.maxSamplesPerClass = 5000;
 
   const RsTrainingDataResult res = RsTrainingDataExtraction::extract(
     m_sourceRasterPath, bands, geometries, options );
@@ -2372,11 +2373,12 @@ void QgsClassificationMainWindow::applyClassification()
   req.params["output"] = outForLog.toStdString();
 
   auto cfgPtr = std::make_shared<RsClassificationPipeline::Config>( std::move( cfg ) );
+  auto accuracyPtr = std::make_shared<RsAccuracyAssessment::Result>();
 
   m_jobHandle.submitJob(
     req,
-    [cfgPtr]( const sicnu::jobs::JobRequest &request,
-              sicnu::operators::RSOperatorContext &ctx ) {
+    [cfgPtr, accuracyPtr]( const sicnu::jobs::JobRequest &request,
+                           sicnu::operators::RSOperatorContext &ctx ) {
       ctx.logInfo( "Running supervised classification apply" );
       ctx.reportProgress( 0.0, "Classifying" );
 
@@ -2398,6 +2400,7 @@ void QgsClassificationMainWindow::applyClassification()
           sicnu::operators::ErrorCode::ComputationError,
           res.errorMessage.toStdString() );
       }
+      *accuracyPtr = res.accuracy;
       Json::Value result( Json::objectValue );
       result["output"] = request.params.get( "output", "" ).asString();
       result["totalPixels"] = res.totalPixels;
@@ -2411,13 +2414,27 @@ void QgsClassificationMainWindow::applyClassification()
     },
     /*cancelCallback=*/nullptr,
     /*autoLoad=*/false,
-    [this, outForLog, algoForLog]( const QString &, const Json::Value &payload ) {
+    [this, outForLog, algoForLog, accuracyPtr]( const QString &, const Json::Value &payload ) {
       setClassifyBusy( false );
       m_lastClassifyPath = outForLog;
       writeClassMetadataSidecar( outForLog );
 
       if ( m_workflow )
         m_workflow->setHasFullClassifyResult( true );
+
+      if ( m_accuracyPanel && !accuracyPtr->classIds.isEmpty() )
+      {
+        QHash<int, QString> names;
+        if ( m_rois )
+        {
+          const auto defs = m_rois->classDefs();
+          for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
+            names[it.key()] = it.value().name();
+        }
+        m_accuracyPanel->setResult( *accuracyPtr, names );
+        if ( m_workflow )
+          m_workflow->setHasAccuracyMetrics( true );
+      }
 
       auto *classLayer = new QgsRasterLayer(
         outForLog,
@@ -3355,6 +3372,19 @@ void QgsClassificationMainWindow::loadClassifierModel()
     else
     {
       m_loadedScaler = sidecarScaler;
+      if ( m_accuracyPanel && !sidecarAccuracy.classIds.isEmpty() )
+      {
+        QHash<int, QString> names;
+        if ( m_rois )
+        {
+          const auto defs = m_rois->classDefs();
+          for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
+            names[it.key()] = it.value().name();
+        }
+        m_accuracyPanel->setResult( sidecarAccuracy, names );
+        if ( m_workflow )
+          m_workflow->setHasAccuracyMetrics( true );
+      }
       SICNU_LOG_INFO( SicnuLogTags::Classification,
                       QString( "Loaded model sidecar: %1 (method=%2)" )
                         .arg( metaPath, sidecarMethod ) );
@@ -3718,6 +3748,29 @@ bool QgsClassificationMainWindow::loadProjectFromFile( QString path )
     if ( step >= static_cast<int>( RsClassifyStep::Count ) )
       step = static_cast<int>( RsClassifyStep::Count ) - 1;
     m_workflow->setCurrentStep( static_cast<RsClassifyStep>( step ) );
+
+    if ( data.overallAccuracy >= 0.0 && m_accuracyPanel )
+    {
+      RsAccuracyAssessment::Result res;
+      res.overallAccuracy = data.overallAccuracy;
+      res.kappa = data.kappa;
+      if ( m_rois )
+      {
+        const auto defs = m_rois->classDefs();
+        for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
+          res.classIds.append( it.key() );
+        std::sort( res.classIds.begin(), res.classIds.end() );
+        QHash<int, QString> names;
+        for ( auto it = defs.constBegin(); it != defs.constEnd(); ++it )
+          names[it.key()] = it.value().name();
+        m_accuracyPanel->setResult( res, names );
+      }
+      else
+      {
+        m_accuracyPanel->setResult( res, {} );
+      }
+      m_workflow->setHasAccuracyMetrics( true );
+    }
   }
   if ( m_workflowBridge && !m_sourceRasterPath.isEmpty() )
     m_workflowBridge->setSourceRasterArtifact( m_sourceRasterPath.toStdString() );

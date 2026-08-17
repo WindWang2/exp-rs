@@ -678,10 +678,12 @@ void ImageEnhancement::leeFilter(const float *input, float *output,
                 float mean, localVar;
                 localStats(integral, width, height, x, y, kernelSize, mean, localVar);
 
-                if (localVar <= 0.0f) {
+                if (localVar <= 0.0f || mean <= 0.0f) {
                     output[y * width + x] = mean;
                 } else {
-                    float weight = localVar / (localVar + noiseVariance);
+                    float cuSq = noiseVariance;
+                    float clSq = localVar / (mean * mean);
+                    float weight = (clSq <= cuSq) ? 0.0f : (1.0f - cuSq / clSq) / (1.0f + cuSq);
                     output[y * width + x] = mean + weight * (pixel - mean);
                 }
             }

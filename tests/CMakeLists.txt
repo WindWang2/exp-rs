@@ -43,6 +43,7 @@ function(sicnu_add_test NAME)
   )
   target_include_directories(${NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/stubs
     ${CMAKE_BINARY_DIR}
   )
   sicnu_discover_tests(${NAME})
@@ -65,6 +66,8 @@ sicnu_add_test(test_atomic_registry_contract)
 sicnu_add_test(test_catalog_size)
 sicnu_add_test(test_provider_algorithm_adapter)
 sicnu_add_test(test_agent_workflow_executor)
+sicnu_add_test(test_codeeditor_stubs)
+sicnu_add_test(test_vector_overlay_crs_transform)
 
 add_executable(test_interaction_tools test_interaction_tools.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
 target_link_libraries(test_interaction_tools PRIVATE
@@ -629,6 +632,7 @@ target_link_libraries(test_gdal_null_band PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
+  sicnu_processing
   GDAL::GDAL
 )
 target_include_directories(test_gdal_null_band PRIVATE
@@ -1520,6 +1524,67 @@ target_include_directories(test_swipe_map_tool PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_swipe_map_tool)
+
+# Measure map tool tests (#318)
+add_executable(test_measure_tool test_measure_tool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/map_tools/measure_tool.cpp
+)
+target_link_libraries(test_measure_tool PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_measure_tool PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_measure_tool)
+
+# ROI spectrum tool tests (#322)
+add_executable(test_roi_spectrum_tool test_roi_spectrum_tool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/map_tools/rs_roi_spectrum_tool.cpp
+)
+target_link_libraries(test_roi_spectrum_tool PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  sicnu_processing
+  qgis_core
+  qgis_gui
+  GDAL::GDAL
+)
+target_include_directories(test_roi_spectrum_tool PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_roi_spectrum_tool)
+
+# Vector layer properties lazy statistics tests (#324)
+add_executable(test_vector_layer_properties_lazy test_vector_layer_properties_lazy.cpp)
+target_link_libraries(test_vector_layer_properties_lazy PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_vector_layer_properties_lazy PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/gui
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_vector_layer_properties_lazy)
 
 # RMS scatter widget tests (Task 11.4.7)
 add_executable(test_rms_scatter test_rms_scatter.cpp)
@@ -2431,6 +2496,33 @@ if(TARGET qgis_app_classify)
     ${CMAKE_BINARY_DIR}
   )
   sicnu_discover_tests(test_accuracy_assessment)
+
+  # Classification accuracy panel wiring tests (#326)
+  add_executable(test_accuracy_panel_wiring test_accuracy_panel_wiring.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/classification/rs_accuracy_panel.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/classification/rs_classify_workflow_controller.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  )
+  target_link_libraries(test_accuracy_panel_wiring PRIVATE
+    Catch2::Catch2
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_accuracy_panel_wiring PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app
+    ${CMAKE_SOURCE_DIR}/src/app/classification
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_accuracy_panel_wiring)
 
   # Classification workflow — post-process pure operators (sieve/majority/clump/recode).
   add_executable(test_post_process test_post_process.cpp)

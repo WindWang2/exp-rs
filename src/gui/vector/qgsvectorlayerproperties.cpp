@@ -450,69 +450,32 @@ QgsVectorLayerProperties::QgsVectorLayerProperties( QgsMapCanvas *canvas, QgsMes
   mOptsPage_Legend->setProperty( "helpPage", u"working_with_vector/vector_properties.html#legend-properties"_s );
   mOptsPage_Server->setProperty( "helpPage", u"working_with_vector/vector_properties.html#qgis-server-properties"_s );
 
-  // Add Statistics tab
-  QWidget *statsPage = new QWidget();
-  QVBoxLayout *statsLayout = new QVBoxLayout( statsPage );
+  // Add Statistics tab (lazy-populated on tab switch)
+  mOptsPage_Statistics = new QWidget();
+  QVBoxLayout *statsLayout = new QVBoxLayout( mOptsPage_Statistics );
 
-  // General info group
-  QGroupBox *generalGroup = new QGroupBox( tr( "General Information" ), statsPage );
+  // General info group (fast metadata)
+  QGroupBox *generalGroup = new QGroupBox( tr( "General Information" ), mOptsPage_Statistics );
   QFormLayout *generalLayout = new QFormLayout( generalGroup );
   generalLayout->addRow( tr( "Feature Count:" ), new QLabel( QString::number( mLayer->featureCount() ), generalGroup ) );
   generalLayout->addRow( tr( "Geometry Type:" ), new QLabel( QgsWkbTypes::displayString( mLayer->wkbType() ), generalGroup ) );
   generalLayout->addRow( tr( "CRS:" ), new QLabel( mLayer->crs().authid() + " — " + mLayer->crs().description(), generalGroup ) );
-  const bool hasSpatialIndex = mLayer->dataProvider()->capabilities() & Qgis::VectorProviderCapability::CreateSpatialIndex;
+  const bool hasSpatialIndex = mLayer->dataProvider() && ( mLayer->dataProvider()->capabilities() & Qgis::VectorProviderCapability::CreateSpatialIndex );
   generalLayout->addRow( tr( "Spatial Index:" ), new QLabel( hasSpatialIndex ? tr( "Supported" ) : tr( "Not Supported" ), generalGroup ) );
+  QgsRectangle ext = mLayer->extent();
+  generalLayout->addRow( tr( "Extent:" ), new QLabel( ext.toString( 4 ), generalGroup ) );
   statsLayout->addWidget( generalGroup );
 
-  // Geometry statistics group
-  QGroupBox *geomGroup = new QGroupBox( tr( "Geometry Statistics" ), statsPage );
-  QFormLayout *geomLayout = new QFormLayout( geomGroup );
-  QgsRectangle ext = mLayer->extent();
-  geomLayout->addRow( tr( "Extent:" ), new QLabel( ext.toString( 4 ), geomGroup ) );
-  if ( mLayer->geometryType() == Qgis::GeometryType::Polygon || mLayer->geometryType() == Qgis::GeometryType::Line )
-  {
-    double totalLength = 0;
-    double totalArea = 0;
-    QgsFeatureIterator it = mLayer->getFeatures();
-    QgsFeature f;
-    while ( it.nextFeature( f ) )
-    {
-      if ( f.hasGeometry() )
-      {
-        totalLength += f.geometry().length();
-        totalArea += f.geometry().area();
-      }
-    }
-    if ( mLayer->geometryType() == Qgis::GeometryType::Line )
-      geomLayout->addRow( tr( "Total Length:" ), new QLabel( QString::number( totalLength, 'f', 2 ), geomGroup ) );
-    else
-      geomLayout->addRow( tr( "Total Area:" ), new QLabel( QString::number( totalArea, 'f', 2 ), geomGroup ) );
-  }
-  statsLayout->addWidget( geomGroup );
+  // Geometry statistics group (deferred)
+  mGeomStatsGroup = new QGroupBox( tr( "Geometry Statistics" ), mOptsPage_Statistics );
+  statsLayout->addWidget( mGeomStatsGroup );
 
-  // Attribute statistics group
-  QGroupBox *attrGroup = new QGroupBox( tr( "Attribute Statistics" ), statsPage );
-  QVBoxLayout *attrLayout = new QVBoxLayout( attrGroup );
-  const QgsFields fields = mLayer->fields();
-  for ( int i = 0; i < fields.count(); ++i )
-  {
-    const QgsField &field = fields.at( i );
-    if ( field.isNumeric() )
-    {
-      const QVariant minVal = mLayer->dataProvider()->minimumValue( i );
-      const QVariant maxVal = mLayer->dataProvider()->maximumValue( i );
-      QFormLayout *fieldLayout = new QFormLayout();
-      fieldLayout->addRow( tr( "Min:" ), new QLabel( minVal.toString(), attrGroup ) );
-      fieldLayout->addRow( tr( "Max:" ), new QLabel( maxVal.toString(), attrGroup ) );
-      QGroupBox *fieldGroup = new QGroupBox( field.name() + " (" + field.typeName() + ")", attrGroup );
-      fieldGroup->setLayout( fieldLayout );
-      attrLayout->addWidget( fieldGroup );
-    }
-  }
-  statsLayout->addWidget( attrGroup );
+  // Attribute statistics group (deferred)
+  mAttrStatsGroup = new QGroupBox( tr( "Attribute Statistics" ), mOptsPage_Statistics );
+  statsLayout->addWidget( mAttrStatsGroup );
   statsLayout->addStretch();
 
-  addPage( tr( "Statistics" ), tr( "Layer Statistics" ), QgsApplication::getThemeIcon( "/mActionSum.svg" ), statsPage );
+  addPage( tr( "Statistics" ), tr( "Layer Statistics" ), QgsApplication::getThemeIcon( "/mActionSum.svg" ), mOptsPage_Statistics );
 
   optionsStackedWidget_CurrentChanged( mOptStackedWidget->currentIndex() );
 
@@ -1664,12 +1627,23 @@ void QgsVectorLayerProperties::optionsStackedWidget_CurrentChanged( int index )
 {
   QgsLayerPropertiesDialog::optionsStackedWidget_CurrentChanged( index );
 
-  if ( index == mOptStackedWidget->indexOf( mOptsPage_Information ) && !mMetadataFilled )
+  QWidget *currentPage = mOptStackedWidget->widget( index );
+  if ( currentPage )
+  {
+    if ( auto *sa = qobject_cast<QScrollArea *>( currentPage ) )
+      currentPage = sa->widget();
+  }
+
+  if ( ( currentPage == mOptsPage_Information || index == mOptStackedWidget->indexOf( mOptsPage_Information ) ) && !mMetadataFilled )
   {
     // set the metadata contents (which can be expensive)
     teMetadataViewer->clear();
     teMetadataViewer->setHtml( htmlMetadata() );
     mMetadataFilled = true;
+  }
+  else if ( currentPage == mOptsPage_Statistics && !mStatisticsFilled )
+  {
+    populateStatistics();
   }
   else if ( index == mOptStackedWidget->indexOf( mOptsPage_SourceFields ) || index == mOptStackedWidget->indexOf( mOptsPage_Joins ) )
   {
@@ -1686,6 +1660,65 @@ void QgsVectorLayerProperties::optionsStackedWidget_CurrentChanged( int index )
   }
 
   resizeAlltabs( index );
+}
+
+void QgsVectorLayerProperties::populateStatistics()
+{
+  if ( mStatisticsFilled || !mLayer )
+    return;
+
+  mStatisticsFilled = true;
+
+  // Populate geometry statistics
+  if ( mGeomStatsGroup )
+  {
+    QFormLayout *geomLayout = new QFormLayout( mGeomStatsGroup );
+    if ( mLayer->geometryType() == Qgis::GeometryType::Polygon || mLayer->geometryType() == Qgis::GeometryType::Line )
+    {
+      double totalLength = 0;
+      double totalArea = 0;
+      QgsFeatureIterator it = mLayer->getFeatures();
+      QgsFeature f;
+      while ( it.nextFeature( f ) )
+      {
+        if ( f.hasGeometry() )
+        {
+          totalLength += f.geometry().length();
+          totalArea += f.geometry().area();
+        }
+      }
+      if ( mLayer->geometryType() == Qgis::GeometryType::Line )
+        geomLayout->addRow( tr( "Total Length:" ), new QLabel( QString::number( totalLength, 'f', 2 ), mGeomStatsGroup ) );
+      else
+        geomLayout->addRow( tr( "Total Area:" ), new QLabel( QString::number( totalArea, 'f', 2 ), mGeomStatsGroup ) );
+    }
+    else
+    {
+      geomLayout->addRow( tr( "Geometry metrics:" ), new QLabel( tr( "N/A for point layers" ), mGeomStatsGroup ) );
+    }
+  }
+
+  // Populate attribute statistics
+  if ( mAttrStatsGroup && mLayer->dataProvider() )
+  {
+    QVBoxLayout *attrLayout = new QVBoxLayout( mAttrStatsGroup );
+    const QgsFields fields = mLayer->fields();
+    for ( int i = 0; i < fields.count(); ++i )
+    {
+      const QgsField &field = fields.at( i );
+      if ( field.isNumeric() )
+      {
+        const QVariant minVal = mLayer->dataProvider()->minimumValue( i );
+        const QVariant maxVal = mLayer->dataProvider()->maximumValue( i );
+        QFormLayout *fieldLayout = new QFormLayout();
+        fieldLayout->addRow( tr( "Min:" ), new QLabel( minVal.toString(), mAttrStatsGroup ) );
+        fieldLayout->addRow( tr( "Max:" ), new QLabel( maxVal.toString(), mAttrStatsGroup ) );
+        QGroupBox *fieldGroup = new QGroupBox( field.name() + " (" + field.typeName() + ")", mAttrStatsGroup );
+        fieldGroup->setLayout( fieldLayout );
+        attrLayout->addWidget( fieldGroup );
+      }
+    }
+  }
 }
 
 void QgsVectorLayerProperties::mSimplifyDrawingGroupBox_toggled( bool checked )

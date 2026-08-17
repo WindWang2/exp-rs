@@ -43,6 +43,16 @@ long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
     m_onFailure = nullptr;
     m_onProgress = nullptr;
   }
+  else
+  {
+    const auto info = m_taskCenter->getTaskInfo( m_taskId );
+    if ( info.status == sicnu::TaskStatus::Completed
+         || info.status == sicnu::TaskStatus::Failed
+         || info.status == sicnu::TaskStatus::Canceled )
+    {
+      onTaskUpdated( info );
+    }
+  }
   return m_taskId;
 }
 
@@ -68,6 +78,16 @@ long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
     m_onFailure = nullptr;
     m_onProgress = nullptr;
   }
+  else
+  {
+    const auto info = m_taskCenter->getTaskInfo( m_taskId );
+    if ( info.status == sicnu::TaskStatus::Completed
+         || info.status == sicnu::TaskStatus::Failed
+         || info.status == sicnu::TaskStatus::Canceled )
+    {
+      onTaskUpdated( info );
+    }
+  }
   return m_taskId;
 }
 
@@ -91,6 +111,16 @@ long GuiJobHandle::submitTask( const QString &algorithmId,
     m_onSuccess = nullptr;
     m_onFailure = nullptr;
     m_onProgress = nullptr;
+  }
+  else
+  {
+    const auto info = m_taskCenter->getTaskInfo( m_taskId );
+    if ( info.status == sicnu::TaskStatus::Completed
+         || info.status == sicnu::TaskStatus::Failed
+         || info.status == sicnu::TaskStatus::Canceled )
+    {
+      onTaskUpdated( info );
+    }
   }
   return m_taskId;
 }

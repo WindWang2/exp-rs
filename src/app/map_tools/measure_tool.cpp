@@ -28,9 +28,40 @@ MeasureTool::MeasureTool( QgsMapCanvas *canvas, MeasureMode mode, QObject *paren
     mRubberBand->show();
 
     // Configure distance area for geodesic calculations
+    updateDistanceArea();
+
+    if ( canvas )
+    {
+        connect( canvas, &QgsMapCanvas::destinationCrsChanged, this, &MeasureTool::updateDistanceArea );
+    }
+    if ( QgsProject *project = QgsProject::instance() )
+    {
+        connect( project, &QgsProject::crsChanged, this, &MeasureTool::updateDistanceArea );
+        connect( project, &QgsProject::ellipsoidChanged, this, &MeasureTool::updateDistanceArea );
+    }
+}
+
+void MeasureTool::updateDistanceArea()
+{
     QgsProject *project = QgsProject::instance();
-    mDistanceArea.setSourceCrs( project->crs(), project->transformContext() );
-    mDistanceArea.setEllipsoid( project->ellipsoid() );
+    QgsCoordinateReferenceSystem crs;
+    if ( canvas() && canvas()->mapSettings().destinationCrs().isValid() )
+    {
+        crs = canvas()->mapSettings().destinationCrs();
+    }
+    else if ( project && project->crs().isValid() )
+    {
+        crs = project->crs();
+    }
+
+    if ( crs.isValid() )
+    {
+        mDistanceArea.setSourceCrs( crs, project ? project->transformContext() : QgsCoordinateTransformContext() );
+    }
+    if ( project )
+    {
+        mDistanceArea.setEllipsoid( project->ellipsoid() );
+    }
 }
 
 MeasureTool::~MeasureTool()
@@ -101,6 +132,7 @@ void MeasureTool::keyPressEvent( QKeyEvent *e )
 
 void MeasureTool::activate()
 {
+    updateDistanceArea();
     QgsMapTool::activate();
     reset();
 }
@@ -118,6 +150,8 @@ void MeasureTool::finishMeasurement()
         reset();
         return;
     }
+
+    updateDistanceArea();
 
     SICNU_LOG_INFO( SicnuLogTags::MapTools, QString( "Finishing measurement: %1 points, mode=%2" )
         .arg( mPoints.size() ).arg( mMode == Distance ? "Distance" : "Area" ) );

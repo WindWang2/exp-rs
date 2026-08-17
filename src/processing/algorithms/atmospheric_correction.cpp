@@ -403,7 +403,8 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                            srcDataset.geoTransform(), srcDataset.projection(), errorMessage))
         return false;
 
-    const double bandNoData = srcDataset.bandNoDataValue(bandNum);
+    bool hasBandNoData = false;
+    const double bandNoData = srcDataset.bandNoDataValue(bandNum, &hasBandNoData);
     outDataset.setBandNoDataValue(1, std::numeric_limits<double>::quiet_NaN());
 
     constexpr int kTile = 256; // nominal stream tile size (edge-clamped)
@@ -423,7 +424,7 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                     radiance.resize(n);
                     for (size_t i = 0; i < n; ++i) {
                         float v = pixels[i];
-                        if (!std::isfinite(v) || (!std::isnan(bandNoData) && std::abs(v - bandNoData) < 1e-4f))
+                        if (!std::isfinite(v) || (hasBandNoData && !std::isnan(bandNoData) && std::abs(v - bandNoData) < 1e-4f))
                             radiance[i] = std::numeric_limits<float>::quiet_NaN();
                         else
                             radiance[i] = gain * v + bias;
@@ -459,7 +460,7 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
             out.resize(n);
             for (size_t i = 0; i < n; ++i) {
                 float v = pixels[i];
-                if (!std::isfinite(v) || (!std::isnan(bandNoData) && std::abs(v - bandNoData) < 1e-4f)) {
+                if (!std::isfinite(v) || (hasBandNoData && !std::isnan(bandNoData) && std::abs(v - bandNoData) < 1e-4f)) {
                     out[i] = std::numeric_limits<float>::quiet_NaN();
                 } else {
                     switch (method) {

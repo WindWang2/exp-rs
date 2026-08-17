@@ -404,10 +404,6 @@ void QgisDesktopWindow::onLayerTreeClicked(const QModelIndex &index)
                 m_bandRail->setRasterLayer( nullptr );
         }
         syncStatusBarLayer( layer );
-    } else {
-        m_mapCanvas->setCurrentLayer(nullptr);
-        updateEditingUI(nullptr);
-        syncStatusBarLayer( nullptr );
     }
 }
 

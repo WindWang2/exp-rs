@@ -429,7 +429,8 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
                          replacement.storageKind,
                          replacement.displayName,
                          replacement.structure,
-                         current.acquisitionTime() };
+                         current.acquisitionTime(),
+                         current.parentCollectionId() };
   recordIt->sourceKey = newSourceKey;
   recordIt->snapshot = std::move( updated );
   m_impl->catalogGeneration++;
@@ -670,7 +671,8 @@ Result<void> DataManager::commitEdit( AssetId id )
                                       recordIt->snapshot.storageKind(),
                                       recordIt->snapshot.displayName(),
                                       recordIt->snapshot.structure(),
-                                      recordIt->snapshot.acquisitionTime() };
+                                      recordIt->snapshot.acquisitionTime(),
+                                      recordIt->snapshot.parentCollectionId() };
 
   ( *leaseIt ).control->active = false;
   ( *leaseIt ).control->manager.clear();
@@ -1367,7 +1369,8 @@ Result<void> DataManager::promote( AssetId id )
                           current.storageKind(),
                           current.displayName(),
                           current.structure(),
-                          current.acquisitionTime() };
+                          current.acquisitionTime(),
+                          current.parentCollectionId() };
   recordIt->snapshot = std::move( promoted );
   m_impl->catalogGeneration++;
 

@@ -47,8 +47,8 @@ class QGIS_ANALYSIS_EXPORT RsSimpleSegmenter
                                           const std::function<void(float)> &onProgress = {} );
 
   private:
-    /// Gaussian smoothing (separable, in-place).
-    static void gaussianSmooth( QVector<float> &data, int w, int h, int kernelSize );
+    /// Gaussian smoothing (separable, in-place, nodata-aware normalized convolution).
+    static void gaussianSmooth( QVector<float> &data, int w, int h, int kernelSize, float nodata );
 
     /// Quantize float data to integer bins.
     static QVector<int> quantize( const float *data, size_t n, int bins, float nodata );

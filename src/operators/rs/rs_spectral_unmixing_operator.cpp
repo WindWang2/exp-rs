@@ -58,18 +58,7 @@ std::vector<float> parseEndmembers(const Json::Value& endmembers, int bandCount)
 /// Parses the 1-based band subset; empty = all bands.
 std::vector<int> parseBands(const Json::Value& params, int bandCount)
 {
-    std::vector<int> bands;
-    if (params.isMember("bands") && params["bands"].isArray() && !params["bands"].empty())
-    {
-        for (Json::ArrayIndex i = 0; i < params["bands"].size(); ++i)
-            bands.push_back(params["bands"][i].asInt());
-    }
-    else
-    {
-        for (int b = 1; b <= bandCount; ++b)
-            bands.push_back(b);
-    }
-    return bands;
+    return params::parseBands(params, bandCount);
 }
 
 } // anonymous namespace

@@ -141,7 +141,8 @@ QString StacClient::selectCogHref(const QJsonObject &stacItemFeature)
 }
 
 QUrl StacClient::buildSearchUrl(const QString &endpoint, const QString &collection,
-                                const QString &datetime, const QStringList &bbox)
+                                const QString &datetime, const QStringList &bbox,
+                                int limit)
 {
     QUrl url(endpoint + QStringLiteral("/search"));
     QUrlQuery query;
@@ -151,12 +152,15 @@ QUrl StacClient::buildSearchUrl(const QString &endpoint, const QString &collecti
         query.addQueryItem(QStringLiteral("datetime"), datetime);
     if (!bbox.isEmpty())
         query.addQueryItem(QStringLiteral("bbox"), bbox.join(QStringLiteral(",")));
+    if (limit > 0)
+        query.addQueryItem(QStringLiteral("limit"), QString::number(limit));
     url.setQuery(query);
     return url;
 }
 
 void StacClient::search(const QString &endpoint, const QString &collection,
-                        const QString &datetime, const QStringList &bbox)
+                        const QString &datetime, const QStringList &bbox,
+                        int limit)
 {
     QUrl endpointUrl(endpoint);
     // Allow endpoint without path scheme form "https://host/stac"
@@ -171,7 +175,7 @@ void StacClient::search(const QString &endpoint, const QString &collection,
         return;
     }
 
-    const QUrl url = buildSearchUrl(endpoint, collection, datetime, bbox);
+    const QUrl url = buildSearchUrl(endpoint, collection, datetime, bbox, limit);
 
     QNetworkRequest request(url);
     request.setTransferTimeout(10000);

@@ -69,7 +69,8 @@ bool writeGdalOutput(const QString &outputPath, int width, int height,
                      const std::vector<std::vector<float>> &bands,
                      const std::array<double, 6> &geoTransform,
                      const QString &projection,
-                     QString *errorMessage = nullptr);
+                     QString *errorMessage = nullptr,
+                     double nodataValue = std::numeric_limits<double>::quiet_NaN());
 
 /**
  * RAII wrapper around GDAL C API for raster dataset access.

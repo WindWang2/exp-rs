@@ -106,16 +106,16 @@ struct UnaryNegNode : Node
 // --- Function call support ---
 
 /// Evaluate a named function with the given evaluated argument values.
-static float callFunction(const std::string &name, const std::vector<float> &args)
+static float callFunction(const std::string &name, const float *args, size_t argCount)
 {
     // Zero-argument functions.
-    if (args.empty()) {
+    if (argCount == 0) {
         if (name == "pi") return static_cast<float>(M_PI);
         return NaN;
     }
 
     // Single-argument functions.
-    if (args.size() == 1) {
+    if (argCount == 1) {
         const float a = args[0];
         if (name == "sin")   return std::sin(a);
         if (name == "cos")   return std::cos(a);
@@ -133,7 +133,7 @@ static float callFunction(const std::string &name, const std::vector<float> &arg
     }
 
     // Two-argument functions.
-    if (args.size() == 2) {
+    if (argCount == 2) {
         const float a = args[0], b = args[1];
         if (name == "pow")   return std::pow(a, b);
         if (name == "min")   return std::min(a, b);
@@ -170,11 +170,20 @@ struct FunctionCallNode : Node
 
     float eval(const BandData &bands, size_t pixel) const override
     {
+        if (args.empty()) {
+            return callFunction(name, nullptr, 0);
+        } else if (args.size() == 1) {
+            float v0 = args[0]->eval(bands, pixel);
+            return callFunction(name, &v0, 1);
+        } else if (args.size() == 2) {
+            float v[2] = { args[0]->eval(bands, pixel), args[1]->eval(bands, pixel) };
+            return callFunction(name, v, 2);
+        }
         std::vector<float> vals;
         vals.reserve(args.size());
         for (const auto &arg : args)
             vals.push_back(arg->eval(bands, pixel));
-        return callFunction(name, vals);
+        return callFunction(name, vals.data(), vals.size());
     }
     void collectRefs(std::vector<int> &refs) const override
     {
@@ -620,22 +629,51 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
     const int bandCount = srcDataset.bandCount();
     const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
 
+    Parser parser(expression);
+    auto ast = parser.parse();
+    if (!ast || parser.hasError()) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Failed to parse expression");
+        return false;
+    }
+
+    std::vector<int> requiredBands;
+    ast->collectRefs(requiredBands);
+    std::sort(requiredBands.begin(), requiredBands.end());
+    requiredBands.erase(std::unique(requiredBands.begin(), requiredBands.end()), requiredBands.end());
+
     BandData bands;
-    for (int i = 1; i <= bandCount; ++i) {
-        std::vector<float> buffer(pixelCount);
-        if (!srcDataset.readBandData(i, buffer.data(), width, height)) {
+    for (int b : requiredBands) {
+        if (b < 1 || b > bandCount) {
             if (errorMessage)
-                *errorMessage = QStringLiteral("Failed to read band %1").arg(i);
+                *errorMessage = QStringLiteral("Band index %1 out of range (1..%2)").arg(b).arg(bandCount);
             return false;
         }
-        bands[i] = std::move(buffer);
+        std::vector<float> buffer(pixelCount);
+        if (!srcDataset.readBandData(b, buffer.data(), width, height)) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Failed to read band %1").arg(b);
+            return false;
+        }
+        bool hasNodata = false;
+        double nodataVal = srcDataset.bandNoDataValue(b, &hasNodata);
+        if (hasNodata && std::isfinite(nodataVal)) {
+            for (float &val : buffer) {
+                if (std::abs(static_cast<double>(val) - nodataVal) < 1e-6 || std::isnan(val)) {
+                    val = std::numeric_limits<float>::quiet_NaN();
+                }
+            }
+        }
+        bands[b] = std::move(buffer);
     }
 
     std::vector<float> output(pixelCount);
-    if (!evaluate(expression, bands, output.data(), pixelCount)) {
-        if (errorMessage)
-            *errorMessage = QStringLiteral("Failed to evaluate expression");
-        return false;
+    ast->resolve(bands);
+    SICNU_LOG_INFO(SicnuLogTags::Algorithms, QString("BandMath: evaluating '%1' on %2 pixels, %3 bands")
+                   .arg(expression).arg(pixelCount).arg(bands.size()));
+
+    for (size_t i = 0; i < pixelCount; i++) {
+        output[i] = ast->eval(bands, i);
     }
 
     std::vector<std::vector<float>> outBands = {std::move(output)};

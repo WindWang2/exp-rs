@@ -315,3 +315,15 @@ void *QgsRpcGcpTransformer::GDALTransformerArgs() const
 {
   return mTransformArg;
 }
+
+bool QgsRpcGcpTransformer::transform( double &x, double &y, bool inverseTransform ) const
+{
+  if ( !mTransformArg )
+    return false;
+
+  double z = 0.0;
+  int success = 0;
+  return rpcTransformWithBias( mTransformArg, inverseTransform ? 1 : 0, 1, &x, &y, &z, &success ) && success;
+}
+
+

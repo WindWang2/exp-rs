@@ -19,7 +19,8 @@ public:
     explicit StacClient(QObject *parent = nullptr) : QObject(parent) {}
 
     static QUrl buildSearchUrl(const QString &endpoint, const QString &collection,
-                               const QString &datetime, const QStringList &bbox);
+                               const QString &datetime, const QStringList &bbox,
+                               int limit = 50);
 
     /**
      * \brief Validate a STAC endpoint or asset URL for SSRF safety.
@@ -46,7 +47,8 @@ public:
     static QString selectCogHref(const QJsonObject &stacItemFeature);
 
     void search(const QString &endpoint, const QString &collection,
-                const QString &datetime, const QStringList &bbox);
+                const QString &datetime, const QStringList &bbox,
+                int limit = 50);
 
 private:
     QNetworkAccessManager mManager;

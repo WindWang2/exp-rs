@@ -28,13 +28,8 @@ QStringList OtbMultiResolutionPyramidAlgorithm::buildArgs(const QVariantMap &par
 
     QStringList args;
     args << "-in" << rasterLayerSource(parameters.value("INPUT"));
-
-    args << "-levels" << QString::number(parameters.value("LEVELS").toInt());
-
-    QStringList methods = {"nearest", "gaussian", "mean"};
-    QString selectedMethod = methods.value(parameters.value("METHOD").toInt(), "nearest");
-    args << "-method" << selectedMethod;
-
+    args << "-level" << QString::number(parameters.value("LEVELS", 5).toInt());
+    args << "-sfactor" << QString::number(parameters.value("SFACTOR", 2).toInt());
     args << "-out" << parameters.value("OUTPUT").toString();
 
     return args;

@@ -62,6 +62,7 @@ TEST_CASE("GdalDatasetWrapper concurrent open does not crash", "[gdal][thread]")
 
 TEST_CASE("GdalDatasetWrapper concurrent open and read on distinct files", "[gdal][thread]")
 {
+    GDALAllRegister();
     QTemporaryDir dir;
     REQUIRE(dir.isValid());
 

@@ -38,7 +38,9 @@ enum class GridCompatVerdict
   Compatible = 0,
   MissingCrs,           ///< exactly one raster has no CRS
   CrsMismatch,          ///< CRSs differ
-  PixelSizeMismatch,    ///< pixel sizes (or rotation) differ
+  AxisOrientationMismatch, ///< opposite axis orientation (north-up vs south-up or mirrored)
+  RotationMismatch,     ///< raster carries rotation terms
+  PixelSizeMismatch,    ///< pixel sizes differ
   OriginMisalignment,   ///< same pixel size, sub-pixel origin offset
   ExtentMismatch,       ///< same lattice, differing extents
   NoDataMismatch,       ///< per-band NoData values differ (warning-grade)

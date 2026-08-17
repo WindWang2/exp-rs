@@ -6,6 +6,7 @@
 
 #include <gdal_priv.h>
 #include <ogr_api.h>
+#include <ogr_spatialref.h>
 
 #include <algorithm>
 #include <map>
@@ -352,6 +353,28 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
     return out;
   }
 
+  OGRSpatialReferenceH vecSrs = OGR_L_GetSpatialRef( layer );
+  OGRCoordinateTransformationH coordTrans = nullptr;
+
+  GDALDatasetH rasDs = GDALOpen( rasterPath.toUtf8().constData(), GA_ReadOnly );
+  if ( rasDs )
+  {
+    const char *rasWkt = GDALGetProjectionRef( rasDs );
+    if ( rasWkt && std::strlen( rasWkt ) > 0 && vecSrs )
+    {
+      OGRSpatialReferenceH rasSrs = OSRNewSpatialReference( nullptr );
+      if ( OSRImportFromWkt( rasSrs, const_cast<char **>( &rasWkt ) ) == OGRERR_NONE )
+      {
+        if ( !OSRIsSame( vecSrs, rasSrs ) )
+        {
+          coordTrans = OCTNewCoordinateTransformation( vecSrs, rasSrs );
+        }
+      }
+      OSRDestroySpatialReference( rasSrs );
+    }
+    GDALClose( rasDs );
+  }
+
   QVector<RsTrainingGeometry> geometries;
   OGR_L_ResetReading( layer );
   OGRFeatureH feat = nullptr;
@@ -377,9 +400,20 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
     OGRGeometryH geom = OGR_F_GetGeometryRef( feat );
     if ( geom )
     {
-      const int wkbSize = OGR_G_WkbSize( geom );
+      OGRGeometryH geomToUse = geom;
+      OGRGeometryH clonedGeom = nullptr;
+      if ( coordTrans )
+      {
+        clonedGeom = OGR_G_Clone( geom );
+        if ( OGR_G_Transform( clonedGeom, coordTrans ) == OGRERR_NONE )
+        {
+          geomToUse = clonedGeom;
+        }
+      }
+
+      const int wkbSize = OGR_G_WkbSize( geomToUse );
       QByteArray wkb( wkbSize, 0 );
-      if ( OGR_G_ExportToWkb( geom, wkbNDR,
+      if ( OGR_G_ExportToWkb( geomToUse, wkbNDR,
                               reinterpret_cast<unsigned char *>( wkb.data() ) ) == OGRERR_NONE )
       {
         RsTrainingGeometry tg;
@@ -387,10 +421,14 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
         tg.geometry.fromWkb( wkb );
         geometries.push_back( tg );
       }
+      if ( clonedGeom )
+        OGR_G_DestroyGeometry( clonedGeom );
     }
     OGR_F_Destroy( feat );
   }
   GDALClose( vecDs );
+  if ( coordTrans )
+    OCTDestroyCoordinateTransformation( coordTrans );
 
   if ( cancelled )
   {

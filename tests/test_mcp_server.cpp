@@ -224,9 +224,8 @@ TEST_CASE("MCP Server tests", "[agent][mcp]") {
         REQUIRE(properties.contains("index"));
     }
 
-    SECTION("get_operator_schema returns error for unknown operator") {
-        QVariantMap schema = server.testGetOperatorSchema("no:such_operator");
-        REQUIRE(schema.contains("error"));
+    SECTION("get_operator_schema throws error for unknown operator (#342)") {
+        REQUIRE_THROWS_AS(server.testGetOperatorSchema("no:such_operator"), std::runtime_error);
     }
 
     SECTION("list_tools returns unified schema with category, name, description, schema") {
