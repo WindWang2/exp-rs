@@ -2496,6 +2496,33 @@ if(TARGET qgis_app_classify)
   )
   sicnu_discover_tests(test_accuracy_assessment)
 
+  # Classification accuracy panel wiring tests (#326)
+  add_executable(test_accuracy_panel_wiring test_accuracy_panel_wiring.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/classification/rs_accuracy_panel.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/classification/rs_classify_workflow_controller.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  )
+  target_link_libraries(test_accuracy_panel_wiring PRIVATE
+    Catch2::Catch2
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    qgis_analysis
+    ${OpenCV_LIBS}
+  )
+  target_include_directories(test_accuracy_panel_wiring PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app
+    ${CMAKE_SOURCE_DIR}/src/app/classification
+    ${CMAKE_SOURCE_DIR}/src/analysis
+    ${CMAKE_SOURCE_DIR}/src/analysis/classification
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_accuracy_panel_wiring)
+
   # Classification workflow — post-process pure operators (sieve/majority/clump/recode).
   add_executable(test_post_process test_post_process.cpp)
   target_link_libraries(test_post_process PRIVATE
