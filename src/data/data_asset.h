@@ -330,7 +330,8 @@ class AssetSnapshot
                    StorageKind storageKind,
                    QString displayName,
                    AssetStructure structure,
-                   std::optional<QDateTime> acquisitionTime = {} )
+                   std::optional<QDateTime> acquisitionTime = {},
+                   std::optional<CollectionId> parentCollectionId = {} )
       : m_id( std::move( id ) )
       , m_revision( revision )
       , m_source( std::move( source ) )
@@ -341,6 +342,7 @@ class AssetSnapshot
       , m_storageKind( storageKind )
       , m_displayName( std::move( displayName ) )
       , m_structure( std::move( structure ) )
+      , m_parentCollectionId( std::move( parentCollectionId ) )
       , m_acquisitionTime( std::move( acquisitionTime ) )
     {
     }

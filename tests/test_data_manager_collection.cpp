@@ -340,3 +340,48 @@ TEST_CASE( "An independently unloaded child is pruned from its collection's list
   REQUIRE( collection.has_value() );
   CHECK( collection->childAssetIds.isEmpty() );
 }
+
+TEST_CASE( "Asset mutations preserve parentCollectionId (relocate, promote, commitEdit)",
+           "[data_manager][collection][mutation]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+
+  const QString path1 = dir.filePath( QStringLiteral( "child1.tif" ) );
+  const QString path2 = dir.filePath( QStringLiteral( "child2.tif" ) );
+  REQUIRE( QFile::copy( fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ), path1 ) );
+  REQUIRE( QFile::copy( fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ), path2 ) );
+
+  SourceDescriptor source;
+  source.providerKey = QStringLiteral( "gdal" );
+  source.canonicalSource = path1;
+  RegisterRequest regRequest;
+  regRequest.source = source;
+  regRequest.persistence = PersistencePolicy::SessionTemporary;
+  const RegisterResult regResult = manager.registerSource( regRequest );
+  REQUIRE( !regResult.assetId.isNull() );
+  const AssetId child = regResult.assetId;
+
+  const CollectionId collectionId =
+    manager.createCollection( { QStringLiteral( "scene" ), ProductMetadata() } ).collectionId;
+  REQUIRE( manager.addChildToCollection( collectionId, child ) );
+  REQUIRE( manager.asset( child )->parentCollectionId() == collectionId );
+
+  // 1. promote preserves parentCollectionId
+  REQUIRE( manager.promote( child ) );
+  CHECK( manager.asset( child )->parentCollectionId() == collectionId );
+
+  // 2. edit lease + commitEdit preserves parentCollectionId
+  AssetLease editLease = manager.acquire( AssetRef{ child }, AssetUse{ LeaseKind::Edit } ).take();
+  REQUIRE( manager.commitEdit( child ) );
+  CHECK( manager.asset( child )->parentCollectionId() == collectionId );
+
+  // 3. relocate preserves parentCollectionId
+  SourceDescriptor repSource;
+  repSource.providerKey = QStringLiteral( "gdal" );
+  repSource.canonicalSource = path2;
+  const auto relocateResult = manager.relocate( { child, repSource } );
+  REQUIRE( relocateResult );
+  CHECK( manager.asset( child )->parentCollectionId() == collectionId );
+}
+
