@@ -39,7 +39,7 @@ QVariantMap VectorSymmetricalDifferenceAlgorithm::processAlgorithm( const QVaria
 
     QString dest;
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
-        source->fields(), Qgis::WkbType::Unknown, source->sourceCrs() ) );
+        source->fields(), source->wkbType(), source->sourceCrs() ) );
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
 
@@ -47,16 +47,33 @@ QVariantMap VectorSymmetricalDifferenceAlgorithm::processAlgorithm( const QVaria
     QgsGeometry overlayCombined;
     QgsFeatureIterator overlayIt = overlaySource->getFeatures();
     QgsFeature overlayFeat;
+    const bool needsTransform = overlaySource->sourceCrs().isValid() && source->sourceCrs().isValid() &&
+                                overlaySource->sourceCrs() != source->sourceCrs();
+    QgsCoordinateTransform ct;
+    if ( needsTransform )
+    {
+        ct = QgsCoordinateTransform( overlaySource->sourceCrs(), source->sourceCrs(), context.transformContext() );
+    }
+
     while ( overlayIt.nextFeature( overlayFeat ) )
     {
         if ( feedback->isCanceled() )
             break;
         if ( overlayFeat.hasGeometry() )
         {
+            QgsGeometry g = overlayFeat.geometry();
+            if ( needsTransform )
+            {
+                try
+                {
+                    g.transform( ct );
+                }
+                catch ( const QgsCsException & ) {}
+            }
             if ( overlayCombined.isNull() )
-                overlayCombined = overlayFeat.geometry();
+                overlayCombined = g;
             else
-                overlayCombined = overlayCombined.combine( overlayFeat.geometry() );
+                overlayCombined = overlayCombined.combine( g );
         }
     }
 

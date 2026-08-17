@@ -67,6 +67,7 @@ sicnu_add_test(test_catalog_size)
 sicnu_add_test(test_provider_algorithm_adapter)
 sicnu_add_test(test_agent_workflow_executor)
 sicnu_add_test(test_codeeditor_stubs)
+sicnu_add_test(test_vector_overlay_crs_transform)
 
 add_executable(test_interaction_tools test_interaction_tools.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
 target_link_libraries(test_interaction_tools PRIVATE

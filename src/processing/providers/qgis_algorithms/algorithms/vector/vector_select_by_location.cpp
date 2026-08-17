@@ -64,14 +64,32 @@ QVariantMap VectorSelectByLocationAlgorithm::processAlgorithm( const QVariantMap
     std::map<QgsFeatureId, QgsGeometry> intersectGeometries;
     QgsFeatureIterator intersectIt = intersectSource->getFeatures();
     QgsFeature intersectFeat;
+    const bool needsTransform = intersectSource->sourceCrs().isValid() && source->sourceCrs().isValid() &&
+                                intersectSource->sourceCrs() != source->sourceCrs();
+    QgsCoordinateTransform ct;
+    if ( needsTransform )
+    {
+        ct = QgsCoordinateTransform( intersectSource->sourceCrs(), source->sourceCrs(), context.transformContext() );
+    }
+
     while ( intersectIt.nextFeature( intersectFeat ) )
     {
         if ( feedback->isCanceled() )
             break;
         if ( intersectFeat.hasGeometry() )
         {
+            QgsGeometry g = intersectFeat.geometry();
+            if ( needsTransform )
+            {
+                try
+                {
+                    g.transform( ct );
+                    intersectFeat.setGeometry( g );
+                }
+                catch ( const QgsCsException & ) {}
+            }
             spatialIndex.addFeature( intersectFeat );
-            intersectGeometries[intersectFeat.id()] = intersectFeat.geometry();
+            intersectGeometries[intersectFeat.id()] = g;
         }
     }
 

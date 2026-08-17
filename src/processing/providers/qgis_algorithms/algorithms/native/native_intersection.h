@@ -55,21 +55,38 @@ protected:
 
         QString dest;
         std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, QStringLiteral( "OUTPUT" ), context, dest,
-            source->fields(), Qgis::WkbType::Unknown, source->sourceCrs() ) );
+            source->fields(), source->wkbType(), source->sourceCrs() ) );
         if ( !sink )
             throw QgsProcessingException( invalidSinkError( parameters, QStringLiteral( "OUTPUT" ) ) );
 
         QgsGeometry overlayCombined;
         QgsFeatureIterator overlayIt = overlay->getFeatures();
         QgsFeature overlayFeat;
+        const bool needsTransform = overlay->sourceCrs().isValid() && source->sourceCrs().isValid() &&
+                                    overlay->sourceCrs() != source->sourceCrs();
+        QgsCoordinateTransform ct;
+        if ( needsTransform )
+        {
+            ct = QgsCoordinateTransform( overlay->sourceCrs(), source->sourceCrs(), context.transformContext() );
+        }
+
         while ( overlayIt.nextFeature( overlayFeat ) )
         {
             if ( overlayFeat.hasGeometry() )
             {
+                QgsGeometry g = overlayFeat.geometry();
+                if ( needsTransform )
+                {
+                    try
+                    {
+                        g.transform( ct );
+                    }
+                    catch ( const QgsCsException & ) {}
+                }
                 if ( overlayCombined.isNull() )
-                    overlayCombined = overlayFeat.geometry();
+                    overlayCombined = g;
                 else
-                    overlayCombined = overlayCombined.combine( overlayFeat.geometry() );
+                    overlayCombined = overlayCombined.combine( g );
             }
         }
 
