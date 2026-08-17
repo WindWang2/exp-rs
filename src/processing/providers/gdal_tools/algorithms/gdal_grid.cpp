@@ -59,6 +59,9 @@ QStringList GdalGridAlgorithm::buildArgs(const QVariantMap &parameters,
         algoArg = QString("invdist:power=%1:smoothing=%2").arg(power).arg(smooth);
     } else if (algorithm == "average") {
         algoArg = QString("average:smoothing=%1").arg(smooth);
+    } else {
+        algoArg = algorithm;
+    }
     if (parameters.contains("NODATA") && !parameters.value("NODATA").toString().isEmpty()) {
         double nodata = parameters.value("NODATA").toDouble();
         algoArg += QString(":nodata=%1").arg(nodata);

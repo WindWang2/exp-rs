@@ -841,12 +841,10 @@ set(QGIS_GUI_SRCS
   qgswidgetstatehelper_p.cpp
   qgssourceselectprovider.cpp
   qgssourceselectproviderregistry.cpp
-  python_console_widget.cpp
 )
 
 set(QGIS_GUI_HDRS
   qgisinterface.h
-  python_console_widget.h
 
   qgs3dsymbolwidget.h
   qgsabstractdatasourcewidget.h

@@ -91,7 +91,7 @@ TEST_CASE( "Aspect: flat DEM yields -1 (undefined)", "[terrain]" )
         REQUIRE( out[i] == Approx( -1.0f ) );
 }
 
-TEST_CASE( "Aspect: east-increasing DEM yields north-facing (0°)", "[terrain]" )
+TEST_CASE( "Aspect: east-increasing DEM yields west-facing (270°)", "[terrain]" )
 {
     const int W = 10, H = 10;
     auto dem = tiltedDem( W, H, 100.0f, 10.0f );
@@ -99,17 +99,16 @@ TEST_CASE( "Aspect: east-increasing DEM yields north-facing (0°)", "[terrain]" 
 
     REQUIRE( TerrainAnalysis::aspect( dem.data(), out.data(), W, H, 1.0f, NODATA ) );
 
-    // Elevation increases to the right (east). In DEM coordinates (y=south),
-    // atan2(-0, +) = 0° which represents north-facing in the Horn convention.
+    // Elevation increases to the right (east), so slope faces west (downhill compass azimuth = 270°).
     float centerAspect = out[5 * W + 5];
-    REQUIRE( centerAspect >= 0.0f );
-    REQUIRE( centerAspect < 10.0f );
+    REQUIRE( centerAspect > 260.0f );
+    REQUIRE( centerAspect < 280.0f );
 }
 
-TEST_CASE( "Aspect: south-increasing DEM yields ~0° or ~360°", "[terrain]" )
+TEST_CASE( "Aspect: south-increasing DEM yields north-facing (~0° or ~360°)", "[terrain]" )
 {
     const int W = 10, H = 10;
-    // Elevation increases from top to bottom (south in image coords)
+    // Elevation increases from top to bottom (south in image coords), so slope faces north (0°/360°).
     std::vector<float> dem( W * H );
     for ( int r = 0; r < H; ++r )
         for ( int c = 0; c < W; ++c )
@@ -118,12 +117,8 @@ TEST_CASE( "Aspect: south-increasing DEM yields ~0° or ~360°", "[terrain]" )
     std::vector<float> out( W * H );
     REQUIRE( TerrainAnalysis::aspect( dem.data(), out.data(), W, H, 1.0f, NODATA ) );
 
-    // In DEM coordinates, increasing row = increasing y (south).
-    // dy = positive, dx = 0 → atan2(-positive, 0) = -90° → +360° = 270°
-    // This represents a west-facing slope in the Horn convention.
     float centerAspect = out[5 * W + 5];
-    REQUIRE( centerAspect > 260.0f );
-    REQUIRE( centerAspect < 280.0f );
+    REQUIRE( ( ( centerAspect >= 0.0f && centerAspect < 10.0f ) || centerAspect > 350.0f ) );
 }
 
 // ===========================================================================

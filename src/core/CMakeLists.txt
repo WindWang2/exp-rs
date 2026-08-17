@@ -424,7 +424,6 @@ set(QGIS_CORE_SRCS
   qgsabstractcontentcache.cpp
   qgsabstractgeopdfexporter.cpp
   qgsapplication.cpp
-  ${CMAKE_SOURCE_DIR}/src/runtime/antigravity_init.cpp
   qgsapplicationthemeregistry.cpp
   qgsaggregatecalculator.cpp
   qgsanimatedicon.cpp

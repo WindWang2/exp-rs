@@ -353,6 +353,7 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
     Json::Value indices(Json::arrayValue);
     for (int index : result.endmemberIndices)
         indices.append(index);
+    json["indices"] = indices;
     constexpr size_t kMaxPpiCountsInJson = 65536;
     if (result.ppiCounts.size() <= kMaxPpiCountsInJson)
     {

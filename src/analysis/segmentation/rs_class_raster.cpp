@@ -158,7 +158,7 @@ RsClassRasterResult RsClassRaster::paint(
         GDALDestroyColorTable( ct );
     }
 
-    const quint32 *labels = segMap.labelsData();
+    const quint32 *labels = segMap.labels().constData();
     quint64 totalPixels = 0;
 
     if ( useUInt16 )

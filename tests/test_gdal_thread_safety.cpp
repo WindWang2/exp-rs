@@ -65,6 +65,7 @@ TEST_CASE("GdalDatasetWrapper concurrent open and read on distinct files", "[gda
     GDALAllRegister();
     QTemporaryDir dir;
     REQUIRE(dir.isValid());
+    GDALAllRegister();
 
     const int fileCount = 4;
     std::vector<QString> paths;

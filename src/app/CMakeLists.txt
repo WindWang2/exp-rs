@@ -145,6 +145,8 @@ add_executable(sicnu_geo_rs
     dialogs/stac_browser_dialog.cpp
     dialogs/raster_processing_dialog_base.cpp
     dialogs/extract_band_dialog.cpp
+    dialogs/async_runner_base.cpp
+    dialogs/async_algorithm_runner.cpp
     dialogs/async_gdal_runner.cpp
     layout/qgslayoutdesignerdialog.cpp
     map_tools/measure_tool.cpp
@@ -166,7 +168,6 @@ add_executable(sicnu_geo_rs
     widgets/comparison_widget.cpp
     widgets/guided_workflow_widget.cpp
     panels/data_manager_panel.cpp
-    panels/mosaic_panel.cpp
     panels/task_center_dock.cpp
 
     # QgisApp facade

@@ -111,7 +111,7 @@ QString createTestVector(const QString& dir, const QString& name) {
 
     QString path = dir + QDir::separator() + name;
 
-    GDALDriverH driver = OGRGetDriverByName("ESRI Shapefile");
+    OGRSFDriverH driver = OGRGetDriverByName("ESRI Shapefile");
     REQUIRE(driver != nullptr);
 
     GDALDatasetH ds = OGR_Dr_CreateDataSource(driver, path.toUtf8().constData(), nullptr);

@@ -1388,9 +1388,6 @@ bool stackToGeoTiff(const ProductInfo& product,
 
         int hasNoData = 0;
         double ndVal = GDALGetRasterNoDataValue(srcBand, &hasNoData);
-        if (hasNoData) {
-            GDALSetRasterNoDataValue(dstBand, ndVal);
-        }
 
         GDALRasterBandH dstBand = GDALGetRasterBand(outDs, i + 1);
         cerr = GDALRasterIO(dstBand, GF_Write, 0, 0, width, height,

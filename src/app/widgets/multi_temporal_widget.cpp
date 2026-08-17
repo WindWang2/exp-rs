@@ -110,8 +110,8 @@ void MultiTemporalWidget::onAnalyze()
         return;
     }
 
-    auto *layer1 = m_entries[idx1].layer;
-    auto *layer2 = m_entries[idx2].layer;
+    auto *layer1 = m_entries[idx1].layer.data();
+    auto *layer2 = m_entries[idx2].layer.data();
 
     if (!layer1 || !layer2) return;
 
@@ -124,8 +124,8 @@ void MultiTemporalWidget::computeTemporalStats()
     int idx1 = m_layer1Combo->currentData().toInt();
     int idx2 = m_layer2Combo->currentData().toInt();
 
-    auto *layer1 = m_entries[idx1].layer;
-    auto *layer2 = m_entries[idx2].layer;
+    auto *layer1 = m_entries[idx1].layer.data();
+    auto *layer2 = m_entries[idx2].layer.data();
 
     int bandCount = std::min(layer1->bandCount(), layer2->bandCount());
     m_statsTable->setRowCount(bandCount);
