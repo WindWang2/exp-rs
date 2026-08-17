@@ -1119,3 +1119,41 @@ TEST_CASE( "ResourceMonitor default sampler reports current (not peak) RSS",
     INFO( "baseline=" << baseline << " highWater=" << highWater << " after=" << after );
     REQUIRE( after < highWater );
 }
+
+TEST_CASE("TaskCenter - Progress and markRunning never regress terminal states", "[processing][task_center][terminal]") {
+    auto& center = sicnu::TaskCenter::instance();
+
+    // 1. Completed task
+    long completedId = center.enqueueTask(QStringLiteral("test_terminal_completed"), {}, true);
+    REQUIRE(completedId > 0);
+    center.markTaskCompleted(completedId);
+    REQUIRE(center.getTaskInfo(completedId).status == sicnu::TaskStatus::Completed);
+
+    center.updateTaskProgress(completedId, 0.5);
+    REQUIRE(center.getTaskInfo(completedId).status == sicnu::TaskStatus::Completed);
+    center.markTaskRunning(completedId);
+    REQUIRE(center.getTaskInfo(completedId).status == sicnu::TaskStatus::Completed);
+
+    // 2. Failed task
+    long failedId = center.enqueueTask(QStringLiteral("test_terminal_failed"), {}, true);
+    REQUIRE(failedId > 0);
+    center.markTaskFailed(failedId, QStringLiteral("error"));
+    REQUIRE(center.getTaskInfo(failedId).status == sicnu::TaskStatus::Failed);
+
+    center.updateTaskProgress(failedId, 0.5);
+    REQUIRE(center.getTaskInfo(failedId).status == sicnu::TaskStatus::Failed);
+    center.markTaskRunning(failedId);
+    REQUIRE(center.getTaskInfo(failedId).status == sicnu::TaskStatus::Failed);
+
+    // 3. Canceled task
+    long canceledId = center.enqueueTask(QStringLiteral("test_terminal_canceled"), {}, true);
+    REQUIRE(canceledId > 0);
+    center.markTaskCanceled(canceledId, QStringLiteral("canceled"));
+    REQUIRE(center.getTaskInfo(canceledId).status == sicnu::TaskStatus::Canceled);
+
+    center.updateTaskProgress(canceledId, 0.5);
+    REQUIRE(center.getTaskInfo(canceledId).status == sicnu::TaskStatus::Canceled);
+    center.markTaskRunning(canceledId);
+    REQUIRE(center.getTaskInfo(canceledId).status == sicnu::TaskStatus::Canceled);
+}
+
