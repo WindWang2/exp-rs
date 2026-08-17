@@ -1023,7 +1023,7 @@ QWidget *RibbonController::createRibbonBar()
   // --- TAB: 流程 (Workflow Editor & Execution) ---
   {
     QWidget *pageW = makeTabPage();
-    auto *pLayout = qobject_cast<QHBoxLayout *>( pageW->layout() );
+    QHBoxLayout *pLayout = pageLayoutOf( pageW );
 
     GroupHost editGrp = addGroup( pLayout, tr( "流程编辑" ) );
     if ( auto *btn = addToolButton( editGrp, tr( "新建流程" ), "file_new", tr( "新建空白工作流画布" ) ) )
