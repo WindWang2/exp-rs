@@ -1,5 +1,6 @@
 // image_fusion.cpp — Phase 11.1
 #include "image_fusion.h"
+#include "image_enhancement.h"
 #include "math_utils.h"
 #include "core/sicnu_logging.h"
 #include "data/raster_grid_compat.h"
@@ -404,10 +405,7 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
     std::memcpy( panMatched.data(), panBand, n * sizeof( float ) );
     histogramMatch( panMatched.data(), n, intensity.data(), n, nodata );
 
-    // Step 2: RGB → IHS (using the simplified cylindrical model)
-    // I = (R + G + B) / 3
-    // S = 1 - min(R,G,B) / I  (when I > 0)
-    // H = computed from chromaticity
+    // Step 2: RGB → IHS
     QVector<float> H( n ), S( n );
     for ( int i = 0; i < n; ++i )
     {
@@ -419,22 +417,10 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
         }
 
         float r = msR[i], g = msG[i], b = msB[i];
-        float I = ( r + g + b ) / 3.0f;
-
-        if ( I < 1e-10f )
-        {
-            H[i] = 0;
-            S[i] = 0;
-            continue;
-        }
-
-        float m = std::min( { r, g, b } );
-        S[i] = 1.0f - m / I;
-
-        // Hue from chromaticity
-        float c1 = r - 0.5f * ( g + b );
-        float c2 = ( g - b ) * std::sqrt( 3.0f ) / 2.0f;
-        H[i] = std::atan2( c2, c1 );
+        float ii, hh, ss;
+        ImageEnhancement::rgbToIhs( r, g, b, ii, hh, ss );
+        H[i] = hh;
+        S[i] = ss;
     }
 
     // Step 3: Replace I with matched pan, IHS → RGB
@@ -453,23 +439,16 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
             continue;
         }
 
-        float I = panMatched[i];
-        float sat = S[i];
+        float newI = panMatched[i];
         float hue = H[i];
-
-        // IHS → RGB (inverse of the above)
-        float M = I * ( 1.0f - sat );
-        float c1 = I * sat * std::cos( hue );
-        float c2 = I * sat * std::sin( hue );
-
-        float r = I + c1;
-        float g = I - 0.5f * c1 - std::sqrt( 3.0f ) / 2.0f * c2;
-        float b = I - 0.5f * c1 + std::sqrt( 3.0f ) / 2.0f * c2;
+        float sat = S[i];
+        float rOut = 0.0f, gOut = 0.0f, bOut = 0.0f;
+        ImageEnhancement::ihsToRgb( newI, hue, sat, rOut, gOut, bOut );
 
         // Clamp to non-negative
-        result[0][i] = std::max( 0.0f, r );
-        result[1][i] = std::max( 0.0f, g );
-        result[2][i] = std::max( 0.0f, b );
+        result[0][i] = std::max( 0.0f, rOut );
+        result[1][i] = std::max( 0.0f, gOut );
+        result[2][i] = std::max( 0.0f, bOut );
     }
 
     return result;
@@ -1002,21 +981,12 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
 
                     float panMatched = static_cast<float>( ( panBuf[i] - meanP ) * scale + meanI );
                     float red = msR[i], green = msG[i], blue = msB[i];
-                    float I = ( red + green + blue ) / 3.0f;
-
-                    float m = std::min( { red, green, blue } );
-                    float sat = ( I < 1e-10f ) ? 0.0f : ( 1.0f - m / I );
-                    float c1 = red - 0.5f * ( green + blue );
-                    float c2 = ( green - blue ) * std::sqrt( 3.0f ) / 2.0f;
-                    float hue = ( I < 1e-10f ) ? 0.0f : std::atan2( c2, c1 );
+                    float oldI, hue, sat;
+                    ImageEnhancement::rgbToIhs( red, green, blue, oldI, hue, sat );
 
                     float newI = panMatched;
-                    float newC1 = newI * sat * std::cos( hue );
-                    float newC2 = newI * sat * std::sin( hue );
-
-                    float rOut = newI + newC1;
-                    float gOut = newI - 0.5f * newC1 - std::sqrt( 3.0f ) / 2.0f * newC2;
-                    float bOut = newI - 0.5f * newC1 + std::sqrt( 3.0f ) / 2.0f * newC2;
+                    float rOut = 0.0f, gOut = 0.0f, bOut = 0.0f;
+                    ImageEnhancement::ihsToRgb( newI, hue, sat, rOut, gOut, bOut );
 
                     outBuf[0][i] = std::max( 0.0f, rOut );
                     outBuf[1][i] = std::max( 0.0f, gOut );

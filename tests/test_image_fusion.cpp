@@ -119,6 +119,42 @@ TEST_CASE( "IHS: higher pan produces valid output", "[fusion]" )
     }
 }
 
+TEST_CASE( "IHS: chromatic RGB reproduces input when pan matches intensity (#328)", "[fusion]" )
+{
+    const int W = 4, H = 4, N = W * H;
+    std::vector<float> r( N, 100.0f ), g( N, 50.0f ), b( N, 0.0f );
+    std::vector<float> pan( N, 50.0f ); // (100 + 50 + 0) / 3 = 50.0f
+
+    auto result = ImageFusion::ihsFusion( r.data(), g.data(), b.data(),
+                                           pan.data(), W, H, NODATA );
+
+    REQUIRE( result.size() == 3 );
+    for ( int i = 0; i < N; ++i )
+    {
+        REQUIRE( result[0][i] == Approx( 100.0f ).margin( 0.01f ) );
+        REQUIRE( result[1][i] == Approx( 50.0f ).margin( 0.01f ) );
+        REQUIRE( result[2][i] == Approx( 0.0f ).margin( 0.01f ) );
+    }
+}
+
+TEST_CASE( "IHS: pure green and pure red do not swap channels (#328)", "[fusion]" )
+{
+    const int W = 2, H = 2, N = W * H;
+    std::vector<float> r( N, 0.0f ), g( N, 120.0f ), b( N, 0.0f );
+    std::vector<float> pan( N, 40.0f ); // I = 40.0f
+
+    auto result = ImageFusion::ihsFusion( r.data(), g.data(), b.data(),
+                                           pan.data(), W, H, NODATA );
+
+    REQUIRE( result.size() == 3 );
+    for ( int i = 0; i < N; ++i )
+    {
+        REQUIRE( result[0][i] == Approx( 0.0f ).margin( 0.01f ) );
+        REQUIRE( result[1][i] == Approx( 120.0f ).margin( 0.01f ) );
+        REQUIRE( result[2][i] == Approx( 0.0f ).margin( 0.01f ) );
+    }
+}
+
 TEST_CASE( "IHS: null input returns empty", "[fusion]" )
 {
     auto result = ImageFusion::ihsFusion( nullptr, nullptr, nullptr,
