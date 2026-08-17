@@ -5,6 +5,7 @@
 #include "processing/framework/algorithm_engine.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "jobs/job_engine.h"
+#include "processing/framework/task_center.h"
 #include "python/isolated/python_plugin_host.h"
 #include "data/data_manager.h"
 
@@ -12,14 +13,34 @@
 #include <QCommandLineParser>
 #include <QDebug>
 
+#include <csignal>
 #include <iostream>
 #include <memory>
 
 using namespace sicnu::cli;
 namespace operators = sicnu::operators;
 
+namespace {
+void handleSignal( int )
+{
+    sicnu::TaskCenter::instance().shutdown();
+    sicnu::jobs::JobEngine::instance().shutdown();
+}
+
+struct ShutdownGuard {
+    ~ShutdownGuard() {
+        sicnu::TaskCenter::instance().shutdown();
+        sicnu::jobs::JobEngine::instance().shutdown();
+    }
+};
+}
+
 int main(int argc, char *argv[])
 {
+    std::signal( SIGINT, handleSignal );
+    std::signal( SIGTERM, handleSignal );
+    ShutdownGuard shutdownGuard;
+
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName("sicnu_geo_rs_cli");
     QCoreApplication::setApplicationVersion("0.9.2-dev");
