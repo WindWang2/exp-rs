@@ -4935,4 +4935,429 @@ endif()
 set_target_properties(test_rs_golden_e2e PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_rs_golden_e2e)
 
+# ---------------------------------------------------------------------------
+# Wave regression tests — newly landed, registered here
+# ---------------------------------------------------------------------------
+
+add_executable(test_g02_gdal_regression test_g02_gdal_regression.cpp)
+target_link_libraries(test_g02_gdal_regression PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_g02_gdal_regression PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_g02_gdal_regression)
+
+add_executable(test_image_enhancement_panel_band_ratio test_image_enhancement_panel_band_ratio.cpp)
+target_link_libraries(test_image_enhancement_panel_band_ratio PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_image_enhancement_panel_band_ratio PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_image_enhancement_panel_band_ratio)
+
+add_executable(test_image_enhancement_panel_ihs test_image_enhancement_panel_ihs.cpp)
+target_link_libraries(test_image_enhancement_panel_ihs PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_image_enhancement_panel_ihs PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_image_enhancement_panel_ihs)
+
+add_executable(test_w1_regression test_w1_regression.cpp
+  ${CMAKE_SOURCE_DIR}/src/agent/mcp_server.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/cli/rs_pipeline_runner.cpp
+)
+target_link_libraries(test_w1_regression PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_agent
+  sicnu_processing
+  sicnu_data
+  Sicnu::data
+  sicnu_task_center
+  sicnu_workflow
+  sicnu_operators
+  sicnu_jobs
+  GDAL::GDAL
+)
+if(TARGET Sicnu::qgis_display)
+  target_link_libraries(test_w1_regression PRIVATE Sicnu::qgis_display)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_w1_regression PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_w1_regression PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_w1_regression PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_w1_regression PRIVATE jsoncpp)
+endif()
+target_include_directories(test_w1_regression PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_w1_regression PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_w1_regression)
+
+add_executable(test_w3_provider_misc_regression test_w3_provider_misc_regression.cpp)
+target_link_libraries(test_w3_provider_misc_regression PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_w3_provider_misc_regression PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_w3_provider_misc_regression PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_w3_provider_misc_regression PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_w3_provider_misc_regression PRIVATE jsoncpp)
+endif()
+target_include_directories(test_w3_provider_misc_regression PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_w3_provider_misc_regression)
+
+add_executable(test_w4_group_split test_w4_group_split.cpp)
+target_link_libraries(test_w4_group_split PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  qgis_analysis
+  sicnu_processing
+  GDAL::GDAL
+)
+if(SICNU_HAS_OPENCV)
+  target_link_libraries(test_w4_group_split PRIVATE ${OpenCV_LIBS})
+  target_include_directories(test_w4_group_split PRIVATE ${OpenCV_INCLUDE_DIRS})
+  target_compile_definitions(test_w4_group_split PRIVATE SICNU_HAS_OPENCV=1)
+endif()
+target_include_directories(test_w4_group_split PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_w4_group_split)
+
+add_executable(test_w4_kmeans_obia test_w4_kmeans_obia.cpp)
+target_link_libraries(test_w4_kmeans_obia PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  qgis_analysis
+)
+if(SICNU_HAS_OPENCV)
+  target_link_libraries(test_w4_kmeans_obia PRIVATE ${OpenCV_LIBS})
+  target_include_directories(test_w4_kmeans_obia PRIVATE ${OpenCV_INCLUDE_DIRS})
+  target_compile_definitions(test_w4_kmeans_obia PRIVATE SICNU_HAS_OPENCV=1)
+endif()
+target_include_directories(test_w4_kmeans_obia PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_SOURCE_DIR}/src/analysis/segmentation
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_w4_kmeans_obia)
+
+add_executable(test_w4_mlp_rf_persist test_w4_mlp_rf_persist.cpp)
+target_link_libraries(test_w4_mlp_rf_persist PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  qgis_analysis
+)
+if(SICNU_HAS_OPENCV)
+  target_link_libraries(test_w4_mlp_rf_persist PRIVATE ${OpenCV_LIBS})
+  target_include_directories(test_w4_mlp_rf_persist PRIVATE ${OpenCV_INCLUDE_DIRS})
+  target_compile_definitions(test_w4_mlp_rf_persist PRIVATE SICNU_HAS_OPENCV=1)
+endif()
+target_include_directories(test_w4_mlp_rf_persist PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_w4_mlp_rf_persist)
+
+add_executable(test_w4_polygonize_atomic test_w4_polygonize_atomic.cpp)
+target_link_libraries(test_w4_polygonize_atomic PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+)
+target_include_directories(test_w4_polygonize_atomic PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/segmentation
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_w4_polygonize_atomic)
+
+add_executable(test_w5a_radiometric_regression test_w5a_radiometric_regression.cpp)
+target_link_libraries(test_w5a_radiometric_regression PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_w5a_radiometric_regression PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_w5a_radiometric_regression)
+
+add_executable(test_w5b_numerics test_w5b_numerics.cpp)
+target_link_libraries(test_w5b_numerics PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_w5b_numerics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_w5b_numerics)
+
+add_executable(test_w6_georef_regressions test_w6_georef_regressions.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/crs_presets.cpp
+)
+target_link_libraries(test_w6_georef_regressions PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+  GDAL::GDAL
+)
+target_include_directories(test_w6_georef_regressions PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/georeferencing
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_w6_georef_regressions PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_w6_georef_regressions)
+
+add_executable(test_w8_obia_regression test_w8_obia_regression.cpp)
+target_link_libraries(test_w8_obia_regression PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_analysis
+  qgis_app_georef
+  GDAL::GDAL
+)
+if(SICNU_HAS_OPENCV)
+  target_link_libraries(test_w8_obia_regression PRIVATE ${OpenCV_LIBS})
+  target_include_directories(test_w8_obia_regression PRIVATE ${OpenCV_INCLUDE_DIRS})
+endif()
+target_include_directories(test_w8_obia_regression PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/segmentation
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_w8_obia_regression)
+
+add_executable(test_w9_regressions test_w9_regressions.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/batch_processing_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/layout/qgslayoutdesignerdialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+)
+target_link_libraries(test_w9_regressions PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  qgis_app_georef
+  sicnu_processing
+  sicnu_operators
+  sicnu_data
+  sicnu_jobs
+  sicnu_task_center
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_w9_regressions PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_w9_regressions PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_w9_regressions PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_w9_regressions PRIVATE jsoncpp)
+endif()
+target_include_directories(test_w9_regressions PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_w9_regressions PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_w9_regressions)
+
+add_executable(test_w10_ui_misc_regression test_w10_ui_misc_regression.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/post_classification_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/qa_mask_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/change_detection_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/comparison_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/comparison_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/raster_layer_combo.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/band_role_combo.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/preferences_dialog.cpp
+)
+target_link_libraries(test_w10_ui_misc_regression PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  qgis_app_georef
+  sicnu_processing
+  sicnu_operators
+  sicnu_data
+  sicnu_jobs
+  sicnu_task_center
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_w10_ui_misc_regression PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_w10_ui_misc_regression PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_w10_ui_misc_regression PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_w10_ui_misc_regression PRIVATE jsoncpp)
+endif()
+target_include_directories(test_w10_ui_misc_regression PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_w10_ui_misc_regression PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_w10_ui_misc_regression)
+
+add_executable(test_w11_build_parity test_w11_build_parity.cpp)
+target_link_libraries(test_w11_build_parity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_w11_build_parity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_w11_build_parity PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_w11_build_parity)
+
+add_executable(test_w12_regressions test_w12_regressions.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/stac_client.cpp
+)
+target_link_libraries(test_w12_regressions PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Network
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_w12_regressions PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_w12_regressions PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_w12_regressions PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_w12_regressions PRIVATE jsoncpp)
+endif()
+target_include_directories(test_w12_regressions PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_w12_regressions PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_w12_regressions)
+
 
