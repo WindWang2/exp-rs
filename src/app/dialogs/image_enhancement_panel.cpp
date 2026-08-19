@@ -4,7 +4,6 @@
 #include "dialog_utils.h"
 #include "async_gdal_runner.h"
 #include "processing/algorithms/image_enhancement.h"
-#include "processing/algorithms/image_fusion.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_safe_call.h"
 
@@ -197,14 +196,29 @@ void ImageEnhancementPanel::setupBandRatioOptions(QVBoxLayout *layout)
 
     m_band1Combo = new QComboBox();
     m_band2Combo = new QComboBox();
-    SicnuDialogHelp::tip( m_band1Combo, tr( "比值分子或 IHS 相关波段 1。" ) );
-    SicnuDialogHelp::tip( m_band2Combo, tr( "比值分母或 IHS 相关波段 2。" ) );
-    m_band1Label = new QLabel(tr("Band 1:"));
-    m_band2Label = new QLabel(tr("Band 2:"));
+    m_band3Combo = new QComboBox();
+    SicnuDialogHelp::tip( m_band1Combo, tr( "比值分子或 IHS 红色波段。" ) );
+    SicnuDialogHelp::tip( m_band2Combo, tr( "比值分母或 IHS 绿色波段。" ) );
+    SicnuDialogHelp::tip( m_band3Combo, tr( "IHS 蓝色波段。" ) );
+    m_band1Label = new QLabel(tr("Band 1 / R:"));
+    m_band2Label = new QLabel(tr("Band 2 / G:"));
+    m_band3Label = new QLabel(tr("Band 3 / B:"));
     formLayout->addRow(m_band1Label, m_band1Combo);
     formLayout->addRow(m_band2Label, m_band2Combo);
+    formLayout->addRow(m_band3Label, m_band3Combo);
 
     layout->addLayout(formLayout);
+
+    auto updateBandVisibility = [this]() {
+        bool isIhs = ( m_ratioTypeCombo->currentIndex() == 1 );
+        m_band1Label->setText( isIhs ? tr( "Red (R):" ) : tr( "Band 1:" ) );
+        m_band2Label->setText( isIhs ? tr( "Green (G):" ) : tr( "Band 2:" ) );
+        m_band3Label->setVisible( isIhs );
+        m_band3Combo->setVisible( isIhs );
+    };
+    connect( m_ratioTypeCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+             this, [updateBandVisibility]( int ) { updateBandVisibility(); } );
+    updateBandVisibility();
 
     // Populate bands when raster layer changes
     connect(this, &QDialog::finished, this, [this]() {
@@ -272,10 +286,11 @@ void ImageEnhancementPanel::setRasterLayer(QgsRasterLayer *layer)
 
 void ImageEnhancementPanel::populateBandCombos()
 {
-    if (!m_band1Combo || !m_band2Combo)
+    if (!m_band1Combo || !m_band2Combo || !m_band3Combo)
         return;
     m_band1Combo->clear();
     m_band2Combo->clear();
+    m_band3Combo->clear();
     if (!m_rasterLayer || !m_rasterLayer->isValid())
         return;
     int bands = m_rasterLayer->bandCount();
@@ -283,10 +298,14 @@ void ImageEnhancementPanel::populateBandCombos()
         QString name = tr("Band %1").arg(i);
         m_band1Combo->addItem(name, i);
         m_band2Combo->addItem(name, i);
+        m_band3Combo->addItem(name, i);
     }
     if (bands >= 2) {
         m_band1Combo->setCurrentIndex(0);
         m_band2Combo->setCurrentIndex(1);
+    }
+    if (bands >= 3) {
+        m_band3Combo->setCurrentIndex(2);
     }
 }
 
@@ -318,24 +337,36 @@ void ImageEnhancementPanel::onRun()
     int ratioType = m_ratioTypeCombo->currentIndex();
     int band1 = m_band1Combo->currentData().toInt();
     int band2 = m_band2Combo->currentData().toInt();
+    int band3 = m_band3Combo ? m_band3Combo->currentData().toInt() : 0;
     int speckleType = m_speckleTypeCombo->currentIndex();
     int speckleKernel = m_speckleKernelCombo->currentData().toInt();
     double noiseVar = m_noiseVarSpin->value();
     double damping = m_dampingSpin->value();
 
     if (method == 2) {
-        if (band1 < 1 || band2 < 1 || (ratioType == 0 && band1 == band2)) {
-            QMessageBox::warning(this, dialogTitle(), tr("Please select valid distinct bands."));
-            return;
-        }
-        if (ratioType == 1 && m_band1Combo->count() < 3) {
-            QMessageBox::warning(this, dialogTitle(), tr("IHS transform requires an image with at least 3 bands."));
-            return;
+        if (ratioType == 0) {
+            if (band1 < 1 || band2 < 1 || band1 == band2) {
+                QMessageBox::warning(this, dialogTitle(), tr("Please select valid distinct bands."));
+                return;
+            }
+        } else {
+            if (band1 < 1 || band2 < 1 || band3 < 1) {
+                QMessageBox::warning(this, dialogTitle(), tr("Please select valid RGB bands for IHS transform."));
+                return;
+            }
+            if (band1 == band2 || band1 == band3 || band2 == band3) {
+                QMessageBox::warning(this, dialogTitle(), tr("Please select distinct bands for IHS transform."));
+                return;
+            }
+            if (m_band1Combo->count() < 3) {
+                QMessageBox::warning(this, dialogTitle(), tr("IHS transform requires an image with at least 3 bands."));
+                return;
+            }
         }
     }
 
     runGdalTask([sourcePath, outPath, method, stretchType, clipPercent, stddevMult,
-                    filterType, kernelSize, sigma, customKernelStr, ratioType, band1, band2,
+                    filterType, kernelSize, sigma, customKernelStr, ratioType, band1, band2, band3,
                     speckleType, speckleKernel, noiseVar, damping]() -> QString {
     try {
         // Open source
@@ -416,19 +447,37 @@ void ImageEnhancementPanel::onRun()
                 outputBands.resize(1);
                 bands = 1;
             } else if (ratioType == 1 && bands >= 3) {
-                // IHS
-                int r = std::min(band1, bands) - 1;
-                int g = std::min(band2, bands) - 1;
-                int b = (r == 0) ? ((g == 1) ? 2 : 1) : 0;
-                auto ihsResult = ImageFusion::ihsFusion(inputBands[r].data(), inputBands[g].data(), inputBands[b].data(),
-                                                        inputBands[r].data(), w, h, std::numeric_limits<float>::quiet_NaN());
-                // Convert QVector<QVector<float>> to std::vector<std::vector<float>>
-                outputBands.resize(ihsResult.size());
-                for (int i = 0; i < ihsResult.size(); ++i) {
-                    outputBands[i].resize(ihsResult[i].size());
-                    std::copy(ihsResult[i].begin(), ihsResult[i].end(), outputBands[i].begin());
+                // IHS decomposition — true I/H/S components (panel-side fix for #380)
+                // Mirrors BandRatioDialog which uses ImageEnhancement::rgbToIhs per pixel.
+                int rIdx = std::min(band1, bands) - 1;
+                int gIdx = std::min(band2, bands) - 1;
+                int bIdx = std::min(band3, bands) - 1;
+                outputBands.resize(3);
+                for (int i = 0; i < 3; ++i) outputBands[i].resize(pixelCount);
+                for (size_t i = 0; i < pixelCount; ++i) {
+                    float rv = inputBands[rIdx][i];
+                    float gv = inputBands[gIdx][i];
+                    float bv = inputBands[bIdx][i];
+                    // Mask invalid / NoData pixels: NaN or sentinel -9999
+                    if (std::isnan(rv) || std::isnan(gv) || std::isnan(bv) ||
+                        rv == -9999.f || gv == -9999.f || bv == -9999.f) {
+                        outputBands[0][i] = std::numeric_limits<float>::quiet_NaN();
+                        outputBands[1][i] = std::numeric_limits<float>::quiet_NaN();
+                        outputBands[2][i] = std::numeric_limits<float>::quiet_NaN();
+                        continue;
+                    }
+                    float ii, h, s;
+                    ImageEnhancement::rgbToIhs(rv, gv, bv, ii, h, s);
+                    outputBands[0][i] = ii;
+                    outputBands[1][i] = h;
+                    outputBands[2][i] = s;
                 }
-                bands = static_cast<int>(ihsResult.size());
+                bands = 3;
+            } else {
+                GDALClose(srcDs);
+                return RasterProcessingDialogBase::gdalErrorMarker() +
+                       ( ratioType == 0 ? QStringLiteral( "Band ratio requires at least 2 bands" )
+                                        : QStringLiteral( "IHS transform requires at least 3 bands" ) );
             }
         } else if (method == 3) {
             // Speckle filter
@@ -451,24 +500,10 @@ void ImageEnhancementPanel::onRun()
             return QString();
 
         return outPath;
-    } catch (const std::runtime_error &) {
+    } catch (const std::exception &) {
         return QString();
     }
     });
-}
-
-void ImageEnhancementPanel::onCompleted(const QString &outputPath)
-{
-    m_runButton->setEnabled(true);
-    m_statusLabel->setText(tr("Completed!"));
-    handleCompleted(outputPath);
-}
-
-void ImageEnhancementPanel::onFailed(const QString &errorMessage)
-{
-    m_runButton->setEnabled(true);
-    m_statusLabel->setText(tr("Failed!"));
-    handleFailed(errorMessage);
 }
 
 

@@ -139,11 +139,14 @@ void QgisDesktopWindow::openProcessingAlgorithm(const QString &algorithmId)
 
 void QgisDesktopWindow::openImageEnhancementPanel()
 {
-    ImageEnhancementPanel dialog(this);
-    QgsRasterLayer *rasterLayer = qobject_cast<QgsRasterLayer*>(activeLayer());
-    if (rasterLayer) {
-        dialog.setRasterLayer(rasterLayer);
+    QgsRasterLayer *rasterLayer = findAnyRaster(this);
+    if (!rasterLayer) {
+        QMessageBox::information(this, tr("Image Enhancement"),
+                                 tr("Please select a raster layer first."));
+        return;
     }
+    ImageEnhancementPanel dialog(this);
+    dialog.setRasterLayer(rasterLayer);
     dialog.exec();
 }
 

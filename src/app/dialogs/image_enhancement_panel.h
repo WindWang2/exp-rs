@@ -32,8 +32,6 @@ protected:
 
 private slots:
     void onMethodChanged(int index);
-    void onCompleted(const QString &outputPath);
-    void onFailed(const QString &errorMessage);
 
 private:
     void setupUi();
@@ -65,8 +63,10 @@ private:
     QComboBox *m_ratioTypeCombo = nullptr;
     QComboBox *m_band1Combo = nullptr;
     QComboBox *m_band2Combo = nullptr;
+    QComboBox *m_band3Combo = nullptr;
     QLabel *m_band1Label = nullptr;
     QLabel *m_band2Label = nullptr;
+    QLabel *m_band3Label = nullptr;
 
     // Speckle options
     QComboBox *m_speckleTypeCombo = nullptr;
