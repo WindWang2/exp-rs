@@ -104,22 +104,26 @@ bool pixelPurityIndex( const float *pixels, size_t count, int bands,
         }
     }
 
-    // Rank pixels by PPI count, tie-broken by index for determinism.
-    std::vector<size_t> order( count );
+    // Rank valid pixels only by PPI count, tie-broken by index for determinism.
+    // Invalid pixels (extremeCounts=0 but non-finite) are excluded from tail selection.
+    std::vector<size_t> validOrder;
+    validOrder.reserve( validCount );
     for ( size_t i = 0; i < count; ++i )
-        order[i] = i;
-    std::sort( order.begin(), order.end(), [&]( size_t a, size_t b ) {
+        if ( isValidPixel( i ) )
+            validOrder.push_back( i );
+    std::sort( validOrder.begin(), validOrder.end(), [&]( size_t a, size_t b ) {
         if ( extremeCounts[a] != extremeCounts[b] )
             return extremeCounts[a] > extremeCounts[b];
         return a < b;
     } );
 
-    result->endmembers.resize( static_cast<size_t>( nEndmembers ) * bands );
-    result->endmemberIndices.resize( nEndmembers );
+    const int take = std::min( nEndmembers, static_cast<int>( validOrder.size() ) );
+    result->endmembers.resize( static_cast<size_t>( take ) * bands );
+    result->endmemberIndices.resize( take );
     result->ppiCounts = std::move( extremeCounts );
-    for ( int e = 0; e < nEndmembers; ++e )
+    for ( int e = 0; e < take; ++e )
     {
-        const size_t pixel = order[static_cast<size_t>( e )];
+        const size_t pixel = validOrder[static_cast<size_t>( e )];
         result->endmemberIndices[static_cast<size_t>( e )] = static_cast<int>( pixel );
         for ( int b = 0; b < bands; ++b )
             result->endmembers[static_cast<size_t>( e ) * bands + b] =

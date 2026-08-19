@@ -283,6 +283,11 @@ static double crossTurn( double ox, double oy, double ax, double ay, double bx, 
 
 bool continuumRemoval( const float *spectrum, float *out, int bands, float nodata )
 {
+    return continuumRemoval( spectrum, nullptr, out, bands, nodata );
+}
+
+bool continuumRemoval( const float *spectrum, const float *wavelengths, float *out, int bands, float nodata )
+{
     if ( !spectrum || !out || bands <= 0 )
         return false;
 
@@ -301,6 +306,10 @@ bool continuumRemoval( const float *spectrum, float *out, int bands, float nodat
         return true;
     }
 
+    auto xOf = [&]( int idx ) -> double {
+        return wavelengths ? static_cast<double>( wavelengths[idx] ) : static_cast<double>( idx );
+    };
+
     // Upper convex hull (indices into spectrum). Andrew's monotone chain:
     // walk left→right; for the UPPER hull we keep vertices where the turn is a
     // right turn (clockwise), popping vertices that make a left turn.
@@ -308,7 +317,7 @@ bool continuumRemoval( const float *spectrum, float *out, int bands, float nodat
     hull.reserve( static_cast<size_t>( bands ) );
     for ( int i = 0; i < bands; ++i )
     {
-        double ix = static_cast<double>( i );
+        double ix = xOf( i );
         double iy = static_cast<double>( spectrum[i] );
         while ( hull.size() >= 2 )
         {
@@ -316,8 +325,8 @@ bool continuumRemoval( const float *spectrum, float *out, int bands, float nodat
             int b = hull[hull.size() - 1];
             // For upper hull we remove b while a->b->i is NOT a right turn,
             // i.e. while crossTurn(a,b,i) >= 0 (collinear or left turn).
-            if ( crossTurn( static_cast<double>( a ), spectrum[a],
-                            static_cast<double>( b ), spectrum[b],
+            if ( crossTurn( xOf( a ), spectrum[a],
+                            xOf( b ), spectrum[b],
                             ix, iy ) >= 0.0 )
             {
                 hull.pop_back();
@@ -349,7 +358,9 @@ bool continuumRemoval( const float *spectrum, float *out, int bands, float nodat
             int x0 = hull[seg], x1 = hull[seg + 1];
             double y0 = static_cast<double>( spectrum[x0] );
             double y1 = static_cast<double>( spectrum[x1] );
-            double t = ( static_cast<double>( i ) - x0 ) / ( x1 - x0 );
+            double wx0 = xOf( x0 ), wx1 = xOf( x1 ), wxi = xOf( i );
+            double denom = wx1 - wx0;
+            double t = ( std::abs( denom ) > 1e-12 ) ? ( ( wxi - wx0 ) / denom ) : 0.0;
             continuum = y0 + t * ( y1 - y0 );
         }
 

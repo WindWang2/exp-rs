@@ -238,10 +238,11 @@ bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int he
     const float invCs2 = 1.0f / ( 2.0f * cellSize );
     const float inv8cs = 1.0f / ( 8.0f * cellSize );
 
+    auto isInvalid = [nodata]( float v ) { return v == nodata || std::isnan( v ); };
     auto computeHillshade = [&]( int r, int c, bool useBounds ) {
         const int idx = r * width + c;
         const float z = dem[idx];
-        if ( z == nodata || std::isnan( z ) ) { out[idx] = nodata; return; }
+        if ( isInvalid( z ) ) { out[idx] = nodata; return; }
 
         float a, b, c2, d, f, g, h, i;
         if ( useBounds ) {
@@ -264,12 +265,12 @@ bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int he
             i = dem[( r + 1 ) * width + ( c + 1 )];
         }
 
-        bool hasNodata = ( a == nodata || b == nodata || c2 == nodata ||
-                           d == nodata || f == nodata || g == nodata || h == nodata || i == nodata );
+        bool hasNodata = ( isInvalid( a ) || isInvalid( b ) || isInvalid( c2 ) ||
+                           isInvalid( d ) || isInvalid( f ) || isInvalid( g ) || isInvalid( h ) || isInvalid( i ) );
         float dzdx, dzdy;
         if ( hasNodata ) {
-            dzdx = ( ( f != nodata ? f : z ) - ( d != nodata ? d : z ) ) * invCs2;
-            dzdy = ( ( h != nodata ? h : z ) - ( b != nodata ? b : z ) ) * invCs2;
+            dzdx = ( ( !isInvalid( f ) ? f : z ) - ( !isInvalid( d ) ? d : z ) ) * invCs2;
+            dzdy = ( ( !isInvalid( h ) ? h : z ) - ( !isInvalid( b ) ? b : z ) ) * invCs2;
         } else {
             dzdx = ( ( c2 + 2.0f * f + i ) - ( a + 2.0f * d + g ) ) * inv8cs;
             dzdy = ( ( g + 2.0f * h + i ) - ( a + 2.0f * b + c2 ) ) * inv8cs;

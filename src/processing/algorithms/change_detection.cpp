@@ -210,7 +210,7 @@ bool otsuThresholdFromHistogram(double minVal, double maxVal,
         }
     }
 
-    *threshold = static_cast<float>(minVal + (bestBin + 0.5) * range / bins);
+    *threshold = static_cast<float>(minVal + (bestBin + 0.5) * range / (bins - 1));
     return true;
 }
 

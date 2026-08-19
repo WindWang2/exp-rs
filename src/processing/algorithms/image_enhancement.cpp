@@ -130,6 +130,12 @@ void ImageEnhancement::histogramEqualize(const float *input, float *output, size
     for (int i = 1; i < bins; i++)
         cdf[i] = cdf[i - 1] + static_cast<float>(hist[i]) / validCount;
 
+    // Standard equalization remaps via (cdf - cdf_min)/(1 - cdf_min) so darkest populated value maps to 0
+    float cdf_min = 0.0f;
+    for (int i = 0; i < bins; ++i) {
+        if (hist[i] > 0) { cdf_min = cdf[i]; break; }
+    }
+    const float denom = 1.0f - cdf_min;
     for (size_t i = 0; i < count; i++) {
         if (input[i] == nodata || std::isnan(input[i])) {
             output[i] = nodata;
@@ -138,7 +144,11 @@ void ImageEnhancement::histogramEqualize(const float *input, float *output, size
         int bin = static_cast<int>((input[i] - min) / binWidth);
         if (bin >= bins) bin = bins - 1;
         if (bin < 0) bin = 0;
-        output[i] = cdf[bin] * 255.0f;
+        if (denom < 1e-6f) {
+            output[i] = 128.0f;
+        } else {
+            output[i] = (cdf[bin] - cdf_min) / denom * 255.0f;
+        }
     }
 }
 
@@ -243,6 +253,11 @@ static void separableConvolve(const float *input, float *output, int width, int 
         for (int y = yStart; y < yEnd; y++) {
             size_t rowOff = static_cast<size_t>(y) * width;
             for (int x = 0; x < width; x++) {
+                // NoData in -> NoData out (preserve mask)
+                if (!std::isfinite(input[rowOff + x])) {
+                    temp[rowOff + x] = std::numeric_limits<float>::quiet_NaN();
+                    continue;
+                }
                 float sum = 0.0f;
                 float wSum = 0.0f;
                 for (int k = -half; k <= half; k++) {
@@ -267,6 +282,10 @@ static void separableConvolve(const float *input, float *output, int width, int 
         for (int y = 0; y < height; y++) {
             size_t rowOff = static_cast<size_t>(y) * width;
             for (int x = xStart; x < xEnd; x++) {
+                if (!std::isfinite(input[rowOff + x])) {
+                    output[rowOff + x] = std::numeric_limits<float>::quiet_NaN();
+                    continue;
+                }
                 float sum = 0.0f;
                 float wSum = 0.0f;
                 for (int k = -half; k <= half; k++) {
@@ -296,8 +315,12 @@ void ImageEnhancement::convolve(const float *input, float *output, int width, in
 
         for (int y = yStart; y < yEnd; y++) {
             for (int x = 0; x < width; x++) {
+                if (!std::isfinite(input[y * width + x])) {
+                    output[y * width + x] = std::numeric_limits<float>::quiet_NaN();
+                    continue;
+                }
                 float sum = 0.0f;
-                bool hasFinite = false;
+                float wSum = 0.0f;
 
                 for (int ky = -half; ky <= half; ky++) {
                     for (int kx = -half; kx <= half; kx++) {
@@ -309,12 +332,12 @@ void ImageEnhancement::convolve(const float *input, float *output, int width, in
                         if (std::isfinite(pixel)) {
                             float kVal = kernel[(ky + half) * kernelSize + (kx + half)];
                             sum += pixel * kVal;
-                            hasFinite = true;
+                            wSum += kVal;
                         }
                     }
                 }
 
-                output[y * width + x] = hasFinite ? sum : std::numeric_limits<float>::quiet_NaN();
+                output[y * width + x] = (wSum > 1e-6f) ? (sum / wSum) : std::numeric_limits<float>::quiet_NaN();
             }
         }
     }
@@ -386,6 +409,10 @@ void ImageEnhancement::medianFilter(const float *input, float *output, int width
 
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
+            if (!std::isfinite(input[y * width + x])) {
+                output[y * width + x] = std::numeric_limits<float>::quiet_NaN();
+                continue;
+            }
             validNeighbors.clear();
             for (int ky = -half; ky <= half; ky++) {
                 for (int kx = -half; kx <= half; kx++) {

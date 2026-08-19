@@ -715,7 +715,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
         return false;
     }
 
-    const int nMsBands = std::min( msBands, 4 );
+    const int nMsBands = msBands;
     int nOutBands = nMsBands;
     if ( params.method == QStringLiteral( "ihs" ) )
     {
@@ -799,7 +799,7 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
         if ( weights.isEmpty() )
         {
             weights.resize( nMsBands );
-            float defaultMsWeight = ( 1.0f - params.panWeight ) / nMsBands;
+            float defaultMsWeight = 1.0f - params.panWeight;
             for ( int b = 0; b < nMsBands; ++b )
                 weights[b] = defaultMsWeight;
         }
@@ -1258,10 +1258,14 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
     else if ( params.method == QStringLiteral( "gram_schmidt" ) )
     {
         // 2-PASS TILE STREAMING FOR GRAM-SCHMIDT FUSION
-        // PASS 1: Accumulate mean for synthetic Pan, Pan stats, and GS dot products
+        // PASS 1: Accumulate centered covariance for GS coefficient (matches in-memory gramSchmidtFusion)
         StatsAccumulator statsSynPan, statsP;
         std::vector<std::vector<double>> coef( nMsBands + 1, std::vector<double>( nMsBands + 1, 0.0 ) );
-        std::vector<double> normSq( nMsBands + 1, 0.0 );
+        std::vector<double> sumMs( nMsBands, 0.0 );
+        double sumSyn = 0.0;
+        double sumSynSq = 0.0;
+        std::vector<double> sumMsSyn( nMsBands, 0.0 );
+        int64_t gsValidCount = 0;
 
         for ( int r = 0; r < rows; ++r )
         {
@@ -1304,21 +1308,29 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
                     statsSynPan.add( synVal );
                     statsP.add( panBuf[i] );
 
-                    // GS_0 = synVal
-                    normSq[0] += synVal * synVal;
+                    sumSyn += synVal;
+                    sumSynSq += synVal * synVal;
                     for ( int b = 0; b < nMsBands; ++b )
                     {
-                        const int k = b + 1;
-                        coef[k][0] += msBuf[b][i] * synVal;
+                        sumMs[b] += msBuf[b][i];
+                        sumMsSyn[b] += msBuf[b][i] * synVal;
                     }
+                    ++gsValidCount;
                 }
             }
         }
 
-        if ( normSq[0] > 1e-10 )
+        if ( gsValidCount > 1 )
         {
+            const double invN = 1.0 / static_cast<double>( gsValidCount );
+            const double meanSynPass = sumSyn * invN;
+            const double varSyn = sumSynSq * invN - meanSynPass * meanSynPass;
             for ( int b = 0; b < nMsBands; ++b )
-                coef[b + 1][0] /= normSq[0];
+            {
+                const double meanMs = sumMs[b] * invN;
+                const double cov = sumMsSyn[b] * invN - meanMs * meanSynPass;
+                coef[b + 1][0] = ( std::abs( varSyn ) > 1e-20 ) ? ( cov / varSyn ) : 0.0;
+            }
         }
 
         double stdSyn = statsSynPan.stddev();

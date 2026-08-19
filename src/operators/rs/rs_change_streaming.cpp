@@ -68,16 +68,45 @@ bool readTileBip( const GdalDatasetWrapper &beforeDs, const GdalDatasetWrapper &
                   std::vector<float> &bandScratch )
 {
     const size_t tilePixels = static_cast<size_t>( w ) * h;
+    const float nan = std::numeric_limits<float>::quiet_NaN();
     for ( int b = 0; b < bandCount; ++b )
     {
         const int bb = ( bandCount == 1 ) ? beforeBand : ( b + 1 );
         const int ab = ( bandCount == 1 ) ? afterBand : ( b + 1 );
         if ( !beforeDs.readBandWindow( bb, xOff, yOff, w, h, bandScratch.data() ) )
             return false;
+        {
+            bool hasNd = false;
+            double nd = beforeDs.bandNoDataValue( bb, &hasNd );
+            if ( hasNd && std::isfinite( nd ) ) {
+                for ( size_t p = 0; p < tilePixels; ++p ) {
+                    float v = bandScratch[p];
+                    if ( std::isnan( v ) || std::abs( static_cast<double>( v ) - nd ) < 1e-6 )
+                        bandScratch[p] = nan;
+                }
+            } else if ( hasNd && !std::isfinite( nd ) ) {
+                for ( size_t p = 0; p < tilePixels; ++p )
+                    if ( std::isnan( bandScratch[p] ) ) bandScratch[p] = nan;
+            }
+        }
         for ( size_t p = 0; p < tilePixels; ++p )
             beforeBip[p * static_cast<size_t>( bandCount ) + static_cast<size_t>( b )] = bandScratch[p];
         if ( !afterDs.readBandWindow( ab, xOff, yOff, w, h, bandScratch.data() ) )
             return false;
+        {
+            bool hasNd = false;
+            double nd = afterDs.bandNoDataValue( ab, &hasNd );
+            if ( hasNd && std::isfinite( nd ) ) {
+                for ( size_t p = 0; p < tilePixels; ++p ) {
+                    float v = bandScratch[p];
+                    if ( std::isnan( v ) || std::abs( static_cast<double>( v ) - nd ) < 1e-6 )
+                        bandScratch[p] = nan;
+                }
+            } else if ( hasNd && !std::isfinite( nd ) ) {
+                for ( size_t p = 0; p < tilePixels; ++p )
+                    if ( std::isnan( bandScratch[p] ) ) bandScratch[p] = nan;
+            }
+        }
         for ( size_t p = 0; p < tilePixels; ++p )
             afterBip[p * static_cast<size_t>( bandCount ) + static_cast<size_t>( b )] = bandScratch[p];
     }
@@ -385,6 +414,8 @@ Json::Value runChangeStreaming( const GdalDatasetWrapper &beforeDs,
     }
     DatasetFileGuard magGuard{ outDs, magPath, false };
     GDALRasterBandH outBand = GDALGetRasterBand( outDs, 1 );
+    if ( outBand )
+        GDALSetRasterNoDataValue( outBand, std::numeric_limits<double>::quiet_NaN() );
 
     StreamingMagnitudeStats magStats;
     context.reportProgress( ( metric == ChangeMetric::Mad ) ? 0.7 : 0.5,
@@ -586,6 +617,17 @@ MaskDerivation thresholdRasterToMask( const std::string &inputPath,
                 throw RSOperatorError( ErrorCode::GdalError,
                                        "Failed to read input tile at (" +
                                            std::to_string( x ) + ", " + std::to_string( y ) + ")" );
+            }
+            {
+                bool hasNd = false;
+                double nd = inputDs.bandNoDataValue( 1, &hasNd );
+                if ( hasNd && std::isfinite( nd ) ) {
+                    for ( size_t p = 0; p < n; ++p ) {
+                        float v = tileBuf[p];
+                        if ( std::isnan( v ) || std::abs( static_cast<double>( v ) - nd ) < 1e-6 )
+                            tileBuf[p] = std::numeric_limits<float>::quiet_NaN();
+                    }
+                }
             }
             for ( size_t p = 0; p < n; ++p )
                 magStats.add( tileBuf[p] );

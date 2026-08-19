@@ -13,6 +13,8 @@
 
 #include <QString>
 
+#include <cmath>
+#include <limits>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -284,7 +286,8 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
     std::vector<std::vector<float>> bands = {std::move(out)};
     QString errorMessage;
     if (!writeGdalOutput(QString::fromStdString(outputPath), width, height, bands,
-                         ds.geoTransform(), ds.projection(), &errorMessage)) {
+                         ds.geoTransform(), ds.projection(), &errorMessage,
+                         std::numeric_limits<double>::quiet_NaN())) {
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to write output raster: " + errorMessage.toStdString());
     }

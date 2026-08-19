@@ -26,11 +26,11 @@ Stats computeStats(const float *data, size_t count)
 
     stats.count = count;
 
-    // Find first non-NaN value for initialization
+    // Find first finite value for initialization (excludes inf/NaN)
     bool foundValid = false;
     size_t firstValid = 0;
     for (size_t i = 0; i < count; ++i) {
-        if (!std::isnan(data[i])) {
+        if (std::isfinite(data[i])) {
             firstValid = i;
             foundValid = true;
             break;
@@ -52,7 +52,7 @@ Stats computeStats(const float *data, size_t count)
     double sum = 0.0;
     size_t validCount = 0;
     for (size_t i = 0; i < count; ++i) {
-        if (std::isnan(data[i])) continue;
+        if (!std::isfinite(data[i])) continue;
         validCount++;
         sum += data[i];
         if (data[i] < stats.min) stats.min = data[i];
@@ -66,7 +66,7 @@ Stats computeStats(const float *data, size_t count)
     if (validCount > 1) {
         double sumSq = 0.0;
         for (size_t i = 0; i < count; ++i) {
-            if (std::isnan(data[i])) continue;
+            if (!std::isfinite(data[i])) continue;
             double diff = data[i] - stats.mean;
             sumSq += diff * diff;
         }
@@ -85,11 +85,11 @@ Stats computeStatsWithNodata(const float *data, size_t count, float nodata)
 
     stats.count = count;
 
-    // Find first valid value for initialization
+    // Find first valid value for initialization (finite and not nodata)
     bool foundValid = false;
     size_t firstValid = 0;
     for (size_t i = 0; i < count; ++i) {
-        if (!std::isnan(data[i]) && data[i] != nodata) {
+        if (std::isfinite(data[i]) && data[i] != nodata) {
             firstValid = i;
             foundValid = true;
             break;
@@ -111,7 +111,7 @@ Stats computeStatsWithNodata(const float *data, size_t count, float nodata)
     double sum = 0.0;
     size_t validCount = 0;
     for (size_t i = 0; i < count; ++i) {
-        if (std::isnan(data[i]) || data[i] == nodata) continue;
+        if (!std::isfinite(data[i]) || data[i] == nodata) continue;
         validCount++;
         sum += data[i];
         if (data[i] < stats.min) stats.min = data[i];
@@ -125,7 +125,7 @@ Stats computeStatsWithNodata(const float *data, size_t count, float nodata)
     if (validCount > 1) {
         double sumSq = 0.0;
         for (size_t i = 0; i < count; ++i) {
-            if (std::isnan(data[i]) || data[i] == nodata) continue;
+            if (!std::isfinite(data[i]) || data[i] == nodata) continue;
             double diff = data[i] - stats.mean;
             sumSq += diff * diff;
         }

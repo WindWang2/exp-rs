@@ -122,6 +122,22 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
 
     std::vector<float> spectrum( bandCount );
     std::vector<float> removed( bandCount );
+    // Wavelengths from band WAVELENGTH metadata (fallback to indices when absent)
+    std::vector<float> wavelengths( bandCount, 0.0f );
+    bool hasWavelengths = false;
+    for ( int b = 1; b <= bandCount; ++b )
+    {
+        QString wlStr = ds.bandMetadataItem( b, "WAVELENGTH" );
+        bool ok = false;
+        double v = wlStr.isEmpty() ? 0.0 : wlStr.toDouble( &ok );
+        if ( ok && v > 0.0 ) {
+            wavelengths[b - 1] = static_cast<float>( v );
+            hasWavelengths = true;
+        } else {
+            wavelengths[b - 1] = static_cast<float>( b );
+        }
+    }
+    const float *wlPtr = hasWavelengths ? wavelengths.data() : nullptr;
 
     for ( int y = 0; y < height; y += kTile )
     {
@@ -155,7 +171,7 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
                 float *specOut = tileOut.data() + p * B;
                 std::memcpy( spectrum.data(), specIn, sizeof( float ) * bandCount );
 
-                if ( SpectralClassification::continuumRemoval( spectrum.data(), removed.data(),
+                if ( SpectralClassification::continuumRemoval( spectrum.data(), wlPtr, removed.data(),
                                                                 bandCount, nodata ) )
                 {
                     std::memcpy( specOut, removed.data(), sizeof( float ) * bandCount );

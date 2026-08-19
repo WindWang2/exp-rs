@@ -112,6 +112,16 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
         }
     }
 
+    // Per-band NoData values
+    std::vector<double> bandNodata( bandCount, 0.0 );
+    std::vector<char> bandHasNodata( bandCount, 0 );
+    for ( int b = 1; b <= bandCount; ++b )
+    {
+        int hasNd = 0;
+        double nd = GDALGetRasterNoDataValue( GDALGetRasterBand( ds, b ), &hasNd );
+        bandHasNodata[b - 1] = ( hasNd != 0 );
+        bandNodata[b - 1] = nd;
+    }
     std::vector<size_t> validCount( bandCount, 0 );
     if ( pixels > 0 )
     {
@@ -122,12 +132,16 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
                                col0, row0, windowW, windowH, window.data(),
                                windowW, windowH, GDT_Float32, 0, 0 ) != CE_None )
                 continue;
+            const bool hasNd = bandHasNodata[b - 1];
+            const double nd = bandNodata[b - 1];
             for ( int i = 0; i < windowW * windowH; ++i )
             {
                 if ( !inside[static_cast<size_t>( i )] )
                     continue;
                 const double value = window[static_cast<size_t>( i )];
                 if ( !std::isfinite( value ) )
+                    continue;
+                if ( hasNd && value == nd )
                     continue;
                 sum[b - 1] += value;
                 sumSq[b - 1] += value * value;

@@ -94,4 +94,5 @@ namespace SpectralClassification
      * @return true on success, false on invalid arguments or all-nodata input
      */
     bool continuumRemoval( const float *spectrum, float *out, int bands, float nodata );
+    bool continuumRemoval( const float *spectrum, const float *wavelengths, float *out, int bands, float nodata );
 }
