@@ -75,11 +75,54 @@ cv::Mat readBandWindow( GDALDataset *ds, int x0, int y0, int w, int h )
   if ( x0 < 0 || y0 < 0 || x0 + w > W || y0 + h > H )
     return {};
 
-  cv::Mat out( h, w, CV_8UC1 );
-  const CPLErr err = ds->GetRasterBand( 1 )->RasterIO(
-    GF_Read, x0, y0, w, h, out.data, w, h, GDT_Byte, 0, 0 );
+  GDALRasterBand *band = ds->GetRasterBand( 1 );
+  const GDALDataType dt = band ? band->GetRasterDataType() : GDT_Byte;
+  if ( dt == GDT_Byte )
+  {
+    cv::Mat out( h, w, CV_8UC1 );
+    const CPLErr err = band->RasterIO( GF_Read, x0, y0, w, h, out.data, w, h, GDT_Byte, 0, 0 );
+    if ( err != CE_None )
+      return {};
+    return out;
+  }
+  cv::Mat f( h, w, CV_32FC1 );
+  CPLErr err = band->RasterIO( GF_Read, x0, y0, w, h, f.data, w, h, GDT_Float32, 0, 0 );
   if ( err != CE_None )
     return {};
+  const int N = w * h;
+  float *ptr = reinterpret_cast<float *>( f.data );
+  // Fast percentile stretch per window (subsample if large)
+  std::vector<float> sample;
+  sample.reserve( std::min( N, 20000 ) );
+  const int step = std::max( 1, N / 20000 );
+  for ( int i = 0; i < N; i += step )
+  {
+    const float v = ptr[i];
+    if ( std::isfinite( v ) )
+      sample.push_back( v );
+  }
+  if ( sample.empty() )
+    return cv::Mat( h, w, CV_8UC1, cv::Scalar( 0 ) );
+  std::sort( sample.begin(), sample.end() );
+  double p2 = sample[sample.size() * 2 / 100];
+  double p98 = sample[std::min( sample.size() * 98 / 100, sample.size() - 1 )];
+  if ( p98 <= p2 )
+  {
+    p2 = sample.front();
+    p98 = sample.back();
+  }
+  if ( p98 <= p2 ) p98 = p2 + 1.0;
+  cv::Mat out( h, w, CV_8UC1 );
+  const double scale = 255.0 / ( p98 - p2 );
+  for ( int i = 0; i < N; ++i )
+  {
+    float v = ptr[i];
+    if ( !std::isfinite( v ) ) v = static_cast<float>( p2 );
+    double nv = ( v - p2 ) * scale;
+    if ( nv < 0 ) nv = 0;
+    if ( nv > 255 ) nv = 255;
+    out.data[i] = static_cast<uchar>( std::lround( nv ) );
+  }
   return out;
 }
 #endif

@@ -106,7 +106,8 @@ class QgsImageWarper
       const QgsCoordinateReferenceSystem &crs,
       QgsFeedback *feedback,
       double destResX = 0.0,
-      double destResY = 0.0
+      double destResY = 0.0,
+      int backgroundValue = 0
     );
 
     /**
@@ -131,7 +132,8 @@ class QgsImageWarper
       const QgsCoordinateReferenceSystem &crs,
       const QSize &outputSize = QSize(),
       double destResX = 0.0,
-      double destResY = 0.0
+      double destResY = 0.0,
+      int backgroundValue = 0
     );
 
   private:
@@ -170,7 +172,8 @@ class QgsImageWarper
       double *adfGeoTransform,
       bool useZeroAsTrans,
       const QStringList &options,
-      const QgsCoordinateReferenceSystem &crs
+      const QgsCoordinateReferenceSystem &crs,
+      int backgroundValue = 0
     );
 
     //! \brief GDAL progress callback, used to forward progress to the feedback object and honour cancel.

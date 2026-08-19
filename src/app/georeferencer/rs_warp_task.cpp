@@ -10,7 +10,8 @@ RsWarpTask::RsWarpTask( const QString &in,
                         const QgsGeorefTransform *transform,
                         QgsImageWarper::ResamplingMethod r,
                         const QgsCoordinateReferenceSystem &destCrs,
-                        double pixelSize )
+                        double pixelSize,
+                        int backgroundValue )
   : QgsTask( tr( "Warping %1" ).arg( QFileInfo( in ).fileName() ),
              QgsTask::CanCancel )
   , mIn( in )
@@ -18,6 +19,7 @@ RsWarpTask::RsWarpTask( const QString &in,
   , mResamp( r )
   , mDestCrs( destCrs )
   , mPixelSize( pixelSize )
+  , mBackground( backgroundValue )
 {
   if ( transform )
   {
@@ -41,7 +43,8 @@ bool RsWarpTask::run()
     /*zeroIsTransparent=*/false,
     mDestCrs,
     QSize(),
-    mPixelSize, mPixelSize );
+    mPixelSize, mPixelSize,
+    mBackground );
   const bool ok = mResult.status == QgsImageWarper::WarpStatus::Ok;
   if ( ok )
   {

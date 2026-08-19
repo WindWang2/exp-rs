@@ -1450,13 +1450,14 @@ void QgsGeorefShellWindow::applyTransform()
   const auto destCrs = mParamsPanel->destCrs();
   const double pixelSize = mParamsPanel->outputPixelSize();
 
-  const auto snapOpt = mGeorefSession.createWarpSnapshot(
+  auto snapOpt = mGeorefSession.createWarpSnapshot(
     outputPath, resampling, destCrs, pixelSize );
   if ( !snapOpt.has_value() )
   {
     statusBar()->showMessage( tr( "无法创建校正快照" ), 3000 );
     return;
   }
+  snapOpt->backgroundValue = mParamsPanel ? mParamsPanel->backgroundValue() : 0;
 
   QString methodLabel;
   {
@@ -1724,10 +1725,30 @@ void QgsGeorefShellWindow::commitGcpPair( const QgsPointXY &sourceMap, const Qgs
   }
 
   // Session GCPs are QgsGcpPoint values; capture the destination CRS at add
-  // time so .points saves round-trip it (ADR 0056).
+  // time so .points saves round-trip it (ADR 0056). The dst coordinate from
+  // onDestPointPicked is in the REF raster's layer CRS — transform to the
+  // panel's target CRS so label and coordinate are consistent (GEOREF-9).
   const QgsCoordinateReferenceSystem destCrs =
     mParamsPanel ? mParamsPanel->destCrs() : QgsCoordinateReferenceSystem();
-  mGeorefSession.addGcp( QgsGcpPoint( src, dst, destCrs, true ) );
+  QgsPointXY dstForStore = dst;
+  if ( mDstRaster && mDstRaster->crs().isValid() && destCrs.isValid()
+       && mDstRaster->crs() != destCrs )
+  {
+    try
+    {
+      const QgsCoordinateTransformContext ctx =
+        QgsProject::instance() ? QgsProject::instance()->transformContext()
+                               : QgsCoordinateTransformContext();
+      QgsCoordinateTransform ct( mDstRaster->crs(), destCrs, ctx );
+      dstForStore = ct.transform( dst );
+    }
+    catch ( ... )
+    {
+      // Keep original dst — fit path will report via collectOk; do not silently
+      // store a mismatched CRS label.
+    }
+  }
+  mGeorefSession.addGcp( QgsGcpPoint( src, dstForStore, destCrs, true ) );
   rearmAddPointTools();
   if ( statusBar() )
     statusBar()->showMessage(

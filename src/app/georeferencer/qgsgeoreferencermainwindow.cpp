@@ -34,6 +34,7 @@
 #include "processing/framework/task_center.h"
 
 #include "qgsfeedback.h"
+#include "qgsrasterchangecoords.h"
 
 QgsGeoreferencerMainWindow::QgsGeoreferencerMainWindow( QgisInterface *iface, QWidget *parent )
   : QgsGeorefShellWindow( iface, parent )
@@ -305,6 +306,13 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
                       pairs.reserve( r.inliers.size() );
                       const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
                       auto srcPxToMap = [this]( const QgsPointXY &px ) -> QgsPointXY {
+                        if ( !mSourceRasterPath.isEmpty() )
+                        {
+                          QgsRasterChangeCoords coords;
+                          coords.loadRaster( mSourceRasterPath );
+                          if ( coords.hasExistingGeoreference() )
+                            return coords.toXY( px );
+                        }
                         if ( mSrcRaster && mSrcRaster->isValid() )
                         {
                           const auto extent = mSrcRaster->extent();
@@ -373,13 +381,23 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
       return;
     }
     // Enabled source points of the session's GCP list are the match seeds.
+    // Convert session map coords -> pixel col/row via full geotransform (GEOREF-3).
+    QgsRasterChangeCoords seedCoords;
+    bool seedHasGeo = false;
+    if ( !mSourceRasterPath.isEmpty() )
+    {
+      seedCoords.loadRaster( mSourceRasterPath );
+      seedHasGeo = seedCoords.hasExistingGeoreference();
+    }
     for ( const QgsGcpPoint &g : georefSession().gcps() )
     {
       if ( g.isEnabled() )
       {
         const QgsPointXY srcPt = g.sourcePoint();
-        QgsPointXY srcPx = srcPt;
-        if ( mSrcRaster && mSrcRaster->isValid() )
+        QgsPointXY srcPx;
+        if ( seedHasGeo )
+          srcPx = seedCoords.toColumnLine( srcPt );
+        else if ( mSrcRaster && mSrcRaster->isValid() )
         {
           const auto extent = mSrcRaster->extent();
           const int w = mSrcRaster->width();
@@ -498,6 +516,13 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
                      pairs.reserve( r.matches.size() );
                      const QgsCoordinateReferenceSystem destCrs = mParamsPanel->destCrs();
                      auto srcPxToMap = [this]( const QgsPointXY &px ) -> QgsPointXY {
+                       if ( !mSourceRasterPath.isEmpty() )
+                       {
+                         QgsRasterChangeCoords coords;
+                         coords.loadRaster( mSourceRasterPath );
+                         if ( coords.hasExistingGeoreference() )
+                           return coords.toXY( px );
+                       }
                        if ( mSrcRaster && mSrcRaster->isValid() )
                        {
                          const auto extent = mSrcRaster->extent();

@@ -50,13 +50,67 @@ cv::Mat readGdalGray( const QString &path, int maxSide, double &scaleOut, double
   const int dstW = std::max( 1, int( std::round( W * scaleOut ) ) );
   const int dstH = std::max( 1, int( std::round( H * scaleOut ) ) );
 
-  cv::Mat fullGray( H, W, CV_8UC1 );
-  CPLErr err = ds->GetRasterBand( 1 )->RasterIO(
-    GF_Read, 0, 0, W, H,
-    fullGray.data, W, H, GDT_Byte, 0, 0 );
-  GDALClose( ds );
-  if ( err != CE_None )
-    return {};
+  GDALRasterBand *band = ds->GetRasterBand( 1 );
+  const GDALDataType dt = band ? band->GetRasterDataType() : GDT_Byte;
+  cv::Mat fullGray;
+  if ( dt == GDT_Byte )
+  {
+    fullGray.create( H, W, CV_8UC1 );
+    CPLErr err = band->RasterIO( GF_Read, 0, 0, W, H,
+                                 fullGray.data, W, H, GDT_Byte, 0, 0 );
+    GDALClose( ds );
+    if ( err != CE_None )
+      return {};
+  }
+  else
+  {
+    cv::Mat fullFloat( H, W, CV_32FC1 );
+    CPLErr err = band->RasterIO( GF_Read, 0, 0, W, H,
+                                 fullFloat.data, W, H, GDT_Float32, 0, 0 );
+    GDALClose( ds );
+    if ( err != CE_None )
+      return {};
+    // Percentile stretch [p2, p98] -> [0,255] to handle UInt16 1000..8500 without clamping.
+    const int N = H * W;
+    const float *ptr = reinterpret_cast<float *>( fullFloat.data );
+    std::vector<float> sample;
+    sample.reserve( std::min( N, 100000 ) );
+    // Subsample for speed if large
+    const int step = std::max( 1, N / 100000 );
+    for ( int i = 0; i < N; i += step )
+    {
+      const float v = ptr[i];
+      if ( std::isfinite( v ) )
+        sample.push_back( v );
+    }
+    if ( sample.empty() )
+      return cv::Mat( H, W, CV_8UC1, cv::Scalar( 0 ) );
+    std::sort( sample.begin(), sample.end() );
+    const size_t p2Idx = sample.size() * 2 / 100;
+    const size_t p98Idx = sample.size() * 98 / 100;
+    double p2 = sample[p2Idx];
+    double p98 = sample[std::min( p98Idx, sample.size() - 1 )];
+    if ( p98 <= p2 )
+    {
+      p2 = sample.front();
+      p98 = sample.back();
+    }
+    if ( p98 <= p2 )
+    {
+      p98 = p2 + 1.0;
+    }
+    fullGray.create( H, W, CV_8UC1 );
+    const double scale = 255.0 / ( p98 - p2 );
+    for ( int i = 0; i < N; ++i )
+    {
+      float v = ptr[i];
+      if ( !std::isfinite( v ) ) v = static_cast<float>( p2 );
+      double nv = ( v - p2 ) * scale;
+      if ( nv < 0 ) nv = 0;
+      if ( nv > 255 ) nv = 255;
+      fullGray.data[i] = static_cast<uchar>( std::lround( nv ) );
+    }
+  }
 
   if ( dstW == W && dstH == H )
     return fullGray;

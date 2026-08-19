@@ -74,9 +74,19 @@ QgsPointXY QgsRasterChangeCoords::toColumnLine( const QgsPointXY &pntMap ) const
   if ( !mHasExistingGeoreference )
     return QgsPointXY( pntMap.x(), pntMap.y() );
 
-  const double col = ( pntMap.x() - mUL_X ) / mResX;
-  const double line = ( mUL_Y - pntMap.y() ) / mResY;
-  return QgsPointXY( col, line );
+  const double det = mGeoTransform[1] * mGeoTransform[5] - mGeoTransform[2] * mGeoTransform[4];
+  if ( std::abs( det ) < 1e-18 )
+  {
+    // Fallback to axis-aligned approximation for degenerate geotransforms.
+    const double col = ( pntMap.x() - mUL_X ) / mResX;
+    const double line = ( mUL_Y - pntMap.y() ) / mResY;
+    return QgsPointXY( col, line );
+  }
+  const double dx = pntMap.x() - mGeoTransform[0];
+  const double dy = pntMap.y() - mGeoTransform[3];
+  const double col = ( mGeoTransform[5] * dx - mGeoTransform[2] * dy ) / det;
+  const double row = ( -mGeoTransform[4] * dx + mGeoTransform[1] * dy ) / det;
+  return QgsPointXY( col, row );
 }
 
 QgsPointXY QgsRasterChangeCoords::toXY( const QgsPointXY &pntPixel ) const
@@ -84,7 +94,7 @@ QgsPointXY QgsRasterChangeCoords::toXY( const QgsPointXY &pntPixel ) const
   if ( !mHasExistingGeoreference )
     return QgsPointXY( pntPixel.x(), pntPixel.y() );
 
-  const double x = mUL_X + ( pntPixel.x() * mResX );
-  const double y = mUL_Y + ( pntPixel.y() * -mResY );
+  const double x = mGeoTransform[0] + mGeoTransform[1] * pntPixel.x() + mGeoTransform[2] * pntPixel.y();
+  const double y = mGeoTransform[3] + mGeoTransform[4] * pntPixel.x() + mGeoTransform[5] * pntPixel.y();
   return QgsPointXY( x, y );
 }

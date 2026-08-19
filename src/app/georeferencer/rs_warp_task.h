@@ -28,8 +28,11 @@ class RsWarpTask : public QgsTask
                 const QgsGeorefTransform *transform,
                 QgsImageWarper::ResamplingMethod r,
                 const QgsCoordinateReferenceSystem &destCrs,
-                double pixelSize );
+                double pixelSize,
+                int backgroundValue = 0 );
     ~RsWarpTask() override;
+
+    int backgroundValue() const { return mBackground; }
 
     bool run() override;
     void cancel() override;
@@ -43,6 +46,7 @@ class RsWarpTask : public QgsTask
     QgsImageWarper::ResamplingMethod mResamp;
     QgsCoordinateReferenceSystem mDestCrs;
     double mPixelSize = 0.0;
+    int mBackground = 0;
     QgsFeedback mFb;
     QgsImageWarper::WarpResult mResult;
 };

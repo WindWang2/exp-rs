@@ -73,6 +73,10 @@ class RsGeorefParamsPanel : public QWidget
     double demZOffset() const;
     void setDemZOffset( double z );
 
+    /// 背景值 fill value for warp hole areas (U5 wiring).
+    int backgroundValue() const;
+    void setBackgroundValue( int v );
+
     /**
      * Task 11.5.5 — display the before/after RMS comparison produced by the
      * RPC linear-bias GCP refinement step.  Values are in destination-CRS
@@ -105,6 +109,7 @@ class RsGeorefParamsPanel : public QWidget
     void destCrsChanged();
     /// Task 11.5.4 — emitted when the DEM Z-offset spin box value changes.
     void demZOffsetChanged();
+    void backgroundValueChanged( int v );
 
   private slots:
     void onBrowseOutput();

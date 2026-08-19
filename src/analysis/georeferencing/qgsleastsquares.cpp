@@ -69,9 +69,17 @@ void QgsLeastSquares::linear( const QVector<QgsPointXY> &sourceCoordinates, cons
   // SICNU_GEO_RS: detect singular systems (collinear / duplicate source points)
   // and report them via QgsLeastSquares::SingularException so callers can
   // surface a meaningful error instead of producing NaN/Inf parameters.
+  // Absolute guard for duplicate points plus relative guard for near-collinear
+  // layouts (e.g. 0.01 px jitter on horizontal line gives sumNormY ~3e-8).
   if ( sumNormX < 1e-12 || sumNormY < 1e-12 )
   {
     throw QgsLeastSquares::SingularException();
+  }
+  {
+    const double varSum = sumNormX + sumNormY;
+    const double varMin = std::min( sumNormX, sumNormY );
+    if ( varSum > 0 && varMin < 1e-8 * varSum )
+      throw QgsLeastSquares::SingularException();
   }
 
   const double bX = sumCrossX / sumNormX;

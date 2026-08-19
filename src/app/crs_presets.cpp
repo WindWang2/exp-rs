@@ -19,15 +19,15 @@ namespace
       { QStringLiteral( "UTM Zone 51N" ), 32651, QStringLiteral( "Universal Transverse Mercator Zone 51 North" ), QStringLiteral( "UTM" ) },
 
       // -- China: CGCS2000 / 3-degree Gauss-Kruger zones 25-33 --
-      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 25" ), 4547, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 25" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 26" ), 4548, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 26" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 27" ), 4549, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 27" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 28" ), 4550, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 28" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 29" ), 4551, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 29" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 30" ), 4552, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 30" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 31" ), 4553, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 31" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 32" ), 4554, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 32" ), QStringLiteral( "China" ) },
-      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 33" ), 4555, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 33" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 25" ), 4513, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 25" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 26" ), 4514, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 26" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 27" ), 4515, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 27" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 28" ), 4516, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 28" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 29" ), 4517, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 29" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 30" ), 4518, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 30" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 31" ), 4519, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 31" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 32" ), 4520, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 32" ), QStringLiteral( "China" ) },
+      { QStringLiteral( "CGCS2000 / 3-degree GK Zone 33" ), 4521, QStringLiteral( "China Geodetic Coordinate System 2000, 3-degree GK zone 33" ), QStringLiteral( "China" ) },
 
       // -- China: Beijing 1954 / Gauss-Kruger zones 13-23 --
       { QStringLiteral( "Beijing 1954 / GK Zone 13" ), 21413, QStringLiteral( "Beijing 1954 Gauss-Kruger zone 13" ), QStringLiteral( "China" ) },

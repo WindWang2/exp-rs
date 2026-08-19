@@ -53,6 +53,7 @@ struct RsGeorefWarpSnapshot
   double demZOffset = 0.0;
   double pixelSize = 0.0;
   double rmsAtCapture = -1.0;
+  int backgroundValue = 0;
 };
 
 /**

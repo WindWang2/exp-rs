@@ -82,7 +82,8 @@ bool QgsImageWarper::createDestinationDataset(
   double *adfGeoTransform,
   bool useZeroAsTrans,
   const QStringList &options,
-  const QgsCoordinateReferenceSystem &crs
+  const QgsCoordinateReferenceSystem &crs,
+  int backgroundValue
 )
 {
   // create the output file
@@ -155,6 +156,20 @@ bool QgsImageWarper::createDestinationDataset(
     {
       GDALSetRasterNoDataValue( hDstBand, 0 );
     }
+    else
+    {
+      GDALSetRasterNoDataValue( hDstBand, static_cast<double>( backgroundValue ) );
+    }
+  }
+
+  // Pre-fill destination with background value so warp holes show the requested fill.
+  if ( backgroundValue != 0 )
+  {
+    for ( int i = 0; i < GDALGetRasterCount( hSrcDS ); ++i )
+    {
+      GDALRasterBandH hDstBand = GDALGetRasterBand( hDstDS.get(), i + 1 );
+      GDALFillRaster( hDstBand, static_cast<double>( backgroundValue ), 0.0 );
+    }
   }
 
   return true;
@@ -170,7 +185,8 @@ QgsImageWarper::Result QgsImageWarper::warpFile(
   const QgsCoordinateReferenceSystem &crs,
   QgsFeedback *feedback,
   double destResX,
-  double destResY
+  double destResY,
+  int backgroundValue
 )
 {
   if ( !georefTransform.parametersInitialized() )
@@ -225,7 +241,7 @@ QgsImageWarper::Result QgsImageWarper::warpFile(
     adfGeoTransform[5] = destResY;
   }
 
-  if ( !createDestinationDataset( output, hSrcDS.get(), hDstDS, destPixels, destLines, adfGeoTransform, useZeroAsTrans, options, crs ) )
+  if ( !createDestinationDataset( output, hSrcDS.get(), hDstDS, destPixels, destLines, adfGeoTransform, useZeroAsTrans, options, crs, backgroundValue ) )
   {
     return QgsImageWarper::Result::DestinationCreationError;
   }
@@ -270,7 +286,8 @@ QgsImageWarper::WarpResult QgsImageWarper::warpFile(
   const QgsCoordinateReferenceSystem &crs,
   const QSize &outputSize,
   double destResX,
-  double destResY
+  double destResY,
+  int backgroundValue
 )
 {
   Q_UNUSED( zeroIsTransparent );
@@ -310,6 +327,23 @@ QgsImageWarper::WarpResult QgsImageWarper::warpFile(
   }
   GDALClose( probe );
 
+  // RPC warp stamping guard (#363): GDAL RPC transformer outputs WGS84 lon/lat
+  // but createDestinationDataset stamps the panel destCrs. If destination is
+  // projected (e.g. EPSG:32650) the grid remains in degrees while labeled as
+  // meters — silent Earth-scale misplacement. Force/correct to EPSG:4326 for
+  // RPC and warn, until a composite WGS84→destCrs warp chain exists.
+  QgsCoordinateReferenceSystem effectiveCrs = crs;
+  if ( georefTransform->method() == QgsGcpTransformerInterface::TransformMethod::RpcPhysical
+       && crs.isValid() && crs.authid() != QStringLiteral( "EPSG:4326" ) )
+  {
+    QgsMessageLog::logMessage(
+      QObject::tr( "RPC warp destination CRS %1 is not EPSG:4326; output grid is in WGS84 degrees — forcing output CRS to EPSG:4326 to avoid mislabeling. Reproject afterwards if a projected CRS is required." )
+        .arg( crs.authid() ),
+      QStringLiteral( "Georeferencer" ),
+      Qgis::MessageLevel::Warning );
+    effectiveCrs = QgsCoordinateReferenceSystem( QStringLiteral( "EPSG:4326" ) );
+  }
+
   // Task 11.4.8 — RPC mode: if the inner transformer carries a DEM, warn when
   // its CRS does not match the target CRS (results may shift several pixels).
   // The DEM query flows through the interface (ADR 0057) — no downcast.
@@ -325,25 +359,31 @@ QgsImageWarper::WarpResult QgsImageWarper::warpFile(
         demCrs = QgsCoordinateReferenceSystem::fromWkt( QString::fromUtf8( proj ) );
       GDALClose( demDs );
 
-      if ( demCrs.isValid() && crs.isValid() && demCrs != crs )
+      if ( demCrs.isValid() && effectiveCrs.isValid() && demCrs != effectiveCrs )
       {
         QgsMessageLog::logMessage(
           QObject::tr( "DEM CRS (%1) differs from target CRS (%2); RPC results may shift" )
-            .arg( demCrs.authid(), crs.authid() ),
+            .arg( demCrs.authid(), effectiveCrs.authid() ),
           QStringLiteral( "Georeferencer" ),
           Qgis::MessageLevel::Warning );
       }
     }
   }
 
+  // Atomic write: warp to temp file, rename on success; never delete existing output.
+  const QString tmpOutput = output + QStringLiteral( ".tmp~" );
+  if ( !output.isEmpty() && tmpOutput != output )
+    QFile::remove( tmpOutput );
+
   Result legacy = warpFile(
-    input, output, *georefTransform, resampling, useZeroAsTrans,
-    QStringList(), crs, mFeedback, destResX, destResY
+    input, tmpOutput.isEmpty() ? output : tmpOutput, *georefTransform, resampling, useZeroAsTrans,
+    QStringList(), effectiveCrs, mFeedback, destResX, destResY, backgroundValue
   );
 
   if ( mFeedback && mFeedback->isCanceled() )
   {
-    QFile::remove( output );
+    if ( !tmpOutput.isEmpty() )
+      QFile::remove( tmpOutput );
     result.status = WarpStatus::Cancelled;
     result.durationMs = static_cast<int>( timer.elapsed() );
     return result;
@@ -356,7 +396,8 @@ QgsImageWarper::WarpResult QgsImageWarper::warpFile(
       break;
     case Result::Canceled:
       result.status = WarpStatus::Cancelled;
-      QFile::remove( output );
+      if ( !tmpOutput.isEmpty() )
+        QFile::remove( tmpOutput );
       result.durationMs = static_cast<int>( timer.elapsed() );
       return result;
     case Result::InvalidParameters:
@@ -383,7 +424,8 @@ QgsImageWarper::WarpResult QgsImageWarper::warpFile(
         result.status = WarpStatus::GdalError;
       }
       result.errorMessage = m;
-      QFile::remove( output );
+      if ( !tmpOutput.isEmpty() )
+        QFile::remove( tmpOutput );
       result.durationMs = static_cast<int>( timer.elapsed() );
       return result;
     }
@@ -391,10 +433,29 @@ QgsImageWarper::WarpResult QgsImageWarper::warpFile(
 
   if ( result.status == WarpStatus::Ok )
   {
+    // Rename temp to final output atomically.
+    if ( !tmpOutput.isEmpty() && tmpOutput != output )
+    {
+      if ( QFile::exists( output ) )
+        QFile::remove( output );
+      if ( !QFile::rename( tmpOutput, output ) )
+      {
+        result.status = WarpStatus::GdalError;
+        result.errorMessage = QStringLiteral( "Failed to rename temp output to final path" );
+        QFile::remove( tmpOutput );
+        result.durationMs = static_cast<int>( timer.elapsed() );
+        return result;
+      }
+    }
     QFileInfo fi( output );
     result.outputBytes = fi.size();
     SICNU_LOG_SUCCESS( SicnuLogTags::Georeferencing, QString( "Warp completed: %1 (%2 bytes, %3 ms)" )
       .arg( output ).arg( result.outputBytes ).arg( result.durationMs ) );
+  }
+  else
+  {
+    if ( !tmpOutput.isEmpty() )
+      QFile::remove( tmpOutput );
   }
   result.durationMs = static_cast<int>( timer.elapsed() );
   return result;

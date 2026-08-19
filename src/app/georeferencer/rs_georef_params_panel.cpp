@@ -244,6 +244,8 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     setHelp( mBackground, tr(
       "背景/填充值：扭曲后无源数据覆盖的像元写入此值。\n"
       "常用 0；若 0 是有效 DN，可改为如 65535 并在结果中设 NoData。" ) );
+    connect( mBackground, QOverload<int>::of( &QSpinBox::valueChanged ),
+             this, [this]( int v ) { emit backgroundValueChanged( v ); } );
     form->addRow( formLabel( tr( "背景值" ), tr( "空洞填充像元值。" ), sec ), mBackground );
 
     sec->layout()->addItem( form );
@@ -566,6 +568,17 @@ void RsGeorefParamsPanel::setDemZOffset( double z )
     mDemZOffset->setValue( z );
 }
 
+int RsGeorefParamsPanel::backgroundValue() const
+{
+  return mBackground ? mBackground->value() : 0;
+}
+
+void RsGeorefParamsPanel::setBackgroundValue( int v )
+{
+  if ( mBackground )
+    mBackground->setValue( v );
+}
+
 void RsGeorefParamsPanel::setProfile( Profile p )
 {
   mProfile = p;
@@ -620,6 +633,24 @@ void RsGeorefParamsPanel::setRpcMode( bool on )
   // DEM section only — method combo is controlled by setProfile().
   if ( mDemSection )
     mDemSection->setVisible( on );
+  // RPC warp (#363): GDAL RPC transformer outputs WGS84 degrees but the warp
+  // path stamped the panel destCrs directly — force to EPSG:4326 and disable
+  // picker while in RPC mode to avoid silent Earth-scale misplacement.
+  if ( mCrsWidget )
+  {
+    mCrsWidget->setEnabled( !on );
+    if ( on )
+    {
+      const QgsCoordinateReferenceSystem wgs84( QStringLiteral( "EPSG:4326" ) );
+      if ( mCrsWidget->crs() != wgs84 )
+        setDestCrs( wgs84 );
+      mCrsWidget->setToolTip( tr( "RPC 模式下目标 CRS 固定为 EPSG:4326（WGS84 经纬度，RPC 输出空间）；如需投影请在校正后另行重投影" ) );
+    }
+    else
+    {
+      mCrsWidget->setToolTip( tr( "目标 CRS：校正结果与拟合所用目标坐标系。\n常见：WGS 84 / UTM zone xxN、CGCS2000 高斯投影等。\nI2I 加载参考影像后会尽量自动设为参考 CRS。" ) );
+    }
+  }
 }
 
 void RsGeorefParamsPanel::setRmsValues( int /*total*/, int /*enabled*/,

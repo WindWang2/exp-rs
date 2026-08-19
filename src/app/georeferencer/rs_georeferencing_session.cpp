@@ -368,7 +368,7 @@ long RsGeoreferencingSession::startWarpTask( const RsGeorefWarpSnapshot &snap )
 
   // RsWarpTask copies the transform.
   auto *task = new RsWarpTask( snap.sourcePath, snap.outputPath, transform.get(),
-                               snap.resampling, snap.destCrs, snap.pixelSize );
+                               snap.resampling, snap.destCrs, snap.pixelSize, snap.backgroundValue );
 
   sicnu::jobs::JobRequest req;
   req.algorithmId = "module:georef:warp";
