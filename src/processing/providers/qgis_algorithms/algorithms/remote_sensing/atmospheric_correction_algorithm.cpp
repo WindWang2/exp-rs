@@ -2,6 +2,7 @@
 #include "atmospheric_correction_algorithm.h"
 
 #include "../../../../algorithms/atmospheric_correction.h"
+#include "../../../../algorithms/radiometric_calibration.h"
 
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
@@ -36,7 +37,8 @@ void AtmosphericCorrectionAlgorithm::initAlgorithm( const QVariantMap & )
         Qgis::ProcessingNumberParameterType::Double, 0.0 ) );
     addParameter( new QgsProcessingParameterNumber(
         QStringLiteral( "TRANSMITTANCE" ), QObject::tr( "Atmospheric transmittance (DOS2 only)" ),
-        Qgis::ProcessingNumberParameterType::Double, 0.8, false, 0.0, 1.0 ) );
+        Qgis::ProcessingNumberParameterType::Double,
+        static_cast<double>(AtmosphericCorrection::estimateTransmittance(1.0f)), false, 0.0, 1.0 ) );
     addParameter( new QgsProcessingParameterRasterDestination(
         QStringLiteral( "OUTPUT" ), QObject::tr( "Corrected raster" ) ) );
 }
@@ -82,85 +84,59 @@ QVariantMap AtmosphericCorrectionAlgorithm::processAlgorithm( const QVariantMap 
         return QVariantMap{ { QStringLiteral( "OUTPUT" ), dest } };
     }
 
-    size_t totalPixels = static_cast<size_t>( nCols ) * static_cast<size_t>( nRows );
-
-    // Read input DN band
-    feedback->setProgressText( QObject::tr( "Reading input raster..." ) );
-    std::unique_ptr<QgsRasterBlock> inBlock( provider->block( 1, extent, nCols, nRows ) );
-    if ( !inBlock || !inBlock->isValid() )
-        throw QgsProcessingException( QObject::tr( "Could not read input raster band" ) );
-
-    std::vector<float> dnData( totalPixels );
-    for ( size_t i = 0; i < totalPixels; ++i )
+    // For DOS/DN-to-radiance: resolve gain/bias from metadata when the caller
+    // left the defaults (1/0) — mirrors RsAtmosphericCorrectionOperator which
+    // throws if unresolved. This closes the silent identity-fallback gap (#301/#367).
     {
-        int row = static_cast<int>( i / nCols );
-        int col = static_cast<int>( i % nCols );
-        if ( inBlock->isNoData( row, col ) )
-        {
-            dnData[i] = std::numeric_limits<float>::quiet_NaN();
-        }
-        else
-        {
-            dnData[i] = static_cast<float>( inBlock->value( row, col ) );
-        }
-    }
-
-    feedback->setProgress( 30 );
-
-    // Apply atmospheric correction
-    feedback->setProgressText( QObject::tr( "Applying atmospheric correction..." ) );
-    std::vector<float> result( totalPixels );
-    bool ok = false;
-
-    switch ( method )
-    {
-        case AtmosphericCorrection::DnToRadiance:
-            ok = AtmosphericCorrection::dnToRadiance( dnData.data(), result.data(), totalPixels, gain, bias );
-            break;
-        case AtmosphericCorrection::Dos1:
-            ok = AtmosphericCorrection::dos1( dnData.data(), result.data(), totalPixels, gain, bias );
-            break;
-        case AtmosphericCorrection::Dos2:
-            if ( transmittance <= 0.0f || transmittance > 1.0f )
-                throw QgsProcessingException( QObject::tr( "Transmittance must be in range (0, 1]" ) );
-            ok = AtmosphericCorrection::dos2( dnData.data(), result.data(), totalPixels, gain, bias, transmittance );
-            break;
-        default:
-            throw QgsProcessingException( QObject::tr( "Unknown correction method" ) );
-    }
-
-    if ( !ok )
-        throw QgsProcessingException( QObject::tr( "Atmospheric correction failed" ) );
-
-    feedback->setProgress( 70 );
-
-    // Write output raster
-    feedback->setProgressText( QObject::tr( "Writing output raster..." ) );
-
-    QgsRasterFileWriter writer( dest );
-    writer.setOutputFormat( QStringLiteral( "GTiff" ) );
-    std::unique_ptr<QgsRasterDataProvider> outProvider(
-        writer.createOneBandRaster( Qgis::DataType::Float32, nCols, nRows, extent, crs ) );
-    if ( !outProvider )
-        throw QgsProcessingException( QObject::tr( "Could not create output raster" ) );
-
-    outProvider->setNoDataValue( 1, std::numeric_limits<double>::quiet_NaN() );
-    QgsRasterBlock outBlock( Qgis::DataType::Float32, nCols, nRows );
-    outBlock.setNoDataValue( std::numeric_limits<double>::quiet_NaN() );
-    for ( int row = 0; row < nRows; ++row )
-    {
-        for ( int col = 0; col < nCols; ++col )
-        {
-            outBlock.setValue( row, col, static_cast<double>( result[static_cast<size_t>( row ) * nCols + col] ) );
+        const bool isDefaultGainBias = (gain == 1.0f && bias == 0.0f);
+        if (isDefaultGainBias) {
+            const QString metaPath = RadiometricCalibration::autoDetectMetadataFile(inputLayer->source());
+            if (!metaPath.isEmpty()) {
+                RadiometricCalibration::CalibrationMetadata meta;
+                QString metaErr;
+                QMap<int, QString> bandNames;
+                bandNames.insert(1, QStringLiteral("B1"));
+                if (RadiometricCalibration::loadMetadata(inputLayer->source(), metaPath, bandNames, &meta, &metaErr)
+                    && meta.bands.contains(1)) {
+                    const auto &c = meta.bands.value(1);
+                    if (c.hasRadiance) {
+                        gain = static_cast<float>(c.radianceGain);
+                        bias = static_cast<float>(c.radianceBias);
+                    }
+                }
+            }
+            if (gain == 1.0f && bias == 0.0f) {
+                // No metadata resolved and caller left defaults -> fail closed like the operator.
+                throw QgsProcessingException(
+                    QObject::tr("Radiance gain/bias unresolved: provide GAIN/BIAS or place MTL/MTD next to input"));
+            }
         }
     }
 
-    if ( !outProvider->writeBlock( &outBlock, 1 ) )
-        throw QgsProcessingException( QObject::tr( "Error writing output raster" ) );
-
-    feedback->setProgress( 100 );
-
-    return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
+    // Delegate to the streaming processFile which uses the histogram-based
+    // dark-object estimator (Chavez 1996) — same kernel as the rs: operator.
+    // This eliminates the previous divergence where the provider used the naive
+    // global-min dos1/dos2 kernels.
+    {
+        float airmass = 1.0f;
+        if (method == AtmosphericCorrection::Dos2) {
+            if (transmittance <= 0.0f || transmittance > 1.0f)
+                throw QgsProcessingException(QObject::tr("Transmittance must be in range (0, 1]"));
+            // Invert estimateTransmittance to recover airmass: airmass = -ln(T)/0.1
+            airmass = static_cast<float>(-std::log(static_cast<double>(transmittance)) / 0.1);
+            if (!std::isfinite(airmass) || airmass <= 0.0f)
+                airmass = 1.0f;
+        }
+        feedback->setProgressText(QObject::tr("Running atmospheric correction (streaming)..."));
+        QString error;
+        bool ok = AtmosphericCorrection::processFile(
+            inputLayer->source(), dest, 1, method, gain, bias, airmass, &error);
+        if (!ok)
+            throw QgsProcessingException(
+                error.isEmpty() ? QObject::tr("Atmospheric correction failed") : error);
+        feedback->setProgress(100);
+        return QVariantMap{{QStringLiteral("OUTPUT"), dest}};
+    }
 }
 
 QString AtmosphericCorrectionAlgorithm::shortHelpString() const

@@ -228,10 +228,22 @@ float estimateTransmittance(float airmass)
 namespace {
 
 /// Compute the p-th percentile (0..100) of valid (non-NaN) values in @p data.
-/// Uses std::nth_element; @p scratch is reused to avoid mutating the input.
-float percentile(std::vector<float> scratch, float pct)
+/// @p scratch is an out-of-place buffer reused by the caller to avoid extra copies.
+float percentileFromScratch(std::vector<float> &scratch, float pct, size_t validCount)
 {
-    // Partition out NaN values so they do not skew the rank.
+    // scratch[0..validCount) already contains only valid values (NaN partitioned out).
+    if (validCount == 0)
+        return 0.0f;
+    if (validCount == 1)
+        return scratch[0];
+    const size_t rank = static_cast<size_t>(pct / 100.0f * (validCount - 1));
+    std::nth_element(scratch.begin(), scratch.begin() + rank, scratch.begin() + validCount);
+    return scratch[rank];
+}
+
+float percentile(const std::vector<float> &data, float pct)
+{
+    std::vector<float> scratch = data;
     auto end = std::partition(scratch.begin(), scratch.end(),
                               [](float v) { return !std::isnan(v); });
     const size_t n = static_cast<size_t>(std::distance(scratch.begin(), end));
@@ -277,8 +289,27 @@ bool quac(const float *const *dnBands, float *const *outBands,
                 *errorMessage = QStringLiteral("QUAC: band %1 has no valid pixels").arg(b + 1);
             return false;
         }
-        dark[b] = percentile(valid, 1.0f);
-        bright[b] = percentile(valid, 99.0f);
+        // Single-copy optimization: partition once and derive both percentiles from the same scratch buffer.
+        // Avoids the ~2.4 GB transient (2 full-band copies per band on large scenes).
+        std::vector<float> scratch = valid;
+        auto validEnd = std::partition(scratch.begin(), scratch.end(),
+                                       [](float v) { return !std::isnan(v); });
+        const size_t nValid = static_cast<size_t>(std::distance(scratch.begin(), validEnd));
+        // Use nth_element twice on the same partitioned range (single allocation/copy).
+        const size_t rankDark = static_cast<size_t>(1.0f / 100.0f * (nValid - 1));
+        const size_t rankBright = static_cast<size_t>(99.0f / 100.0f * (nValid - 1));
+        if (nValid == 0) {
+            dark[b] = 0.0f;
+            bright[b] = 0.0f;
+        } else if (nValid == 1) {
+            dark[b] = scratch[0];
+            bright[b] = scratch[0];
+        } else {
+            std::nth_element(scratch.begin(), scratch.begin() + rankDark, validEnd);
+            dark[b] = scratch[rankDark];
+            std::nth_element(scratch.begin(), scratch.begin() + rankBright, validEnd);
+            bright[b] = scratch[rankBright];
+        }
     }
 
     // Scene-average bright reference (QUAC assumes ~average surface reflectance ~0.5).

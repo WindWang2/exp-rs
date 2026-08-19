@@ -51,6 +51,8 @@ namespace RadiometricCalibration
         double k2 = 0.0;            ///< Thermal calibration constant K2 (K)
         double scale = 1.0;         ///< Generic scale_factor / quantification value
         double offset = 0.0;        ///< Generic add_offset
+        bool hasRadiance = false;   ///< true when RADIANCE_MULT/ADD was present in metadata
+        bool hasReflectance = false;///< true when REFLECTANCE_MULT/ADD was present
     };
 
     /**

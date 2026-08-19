@@ -83,26 +83,44 @@ bool loadLandsatMtl(const QString &mtlPath, const QMap<int, QString> &bandNames,
         auto it = rasterToLandsatBand.constFind(rasterBand);
         return it != rasterToLandsatBand.constEnd() ? it.value() : rasterBand;
     };
+    // Keep original band token (e.g. ST_B10, SR_B4) for C2 key lookup alongside numeric fallback.
+    QMap<int, QString> rasterToRawToken;
+    for (auto it = bandNames.constBegin(); it != bandNames.constEnd(); ++it)
+        rasterToRawToken.insert(it.key(), it.value().toUpper());
+
+    // Helper: try a list of candidate suffixes for a given MTL prefix and return the first match.
+    auto tryCandidates = [&](const QString &prefix, const QStringList &candidates,
+                             double *outVal, bool *ok) -> bool {
+        for (const QString &cand : candidates) {
+            bool tOk = false;
+            const double v = toDouble(kv.value(prefix + cand), &tOk);
+            if (tOk) {
+                *outVal = v;
+                *ok = true;
+                return true;
+            }
+        }
+        return false;
+    };
 
     bool any = false;
     for (auto it = bandNames.constBegin(); it != bandNames.constEnd(); ++it) {
         const int rasterBand = it.key();
         const int lb = landsatBandFor(rasterBand);
+        const QString raw = rasterToRawToken.value(rasterBand);
+        // Candidate suffixes: raw token first (ST_B10), then numeric (10), then plain numeric fallback.
+        QStringList candNumeric;
+        if (!raw.isEmpty())
+            candNumeric.append(raw);
+        candNumeric.append(QString::number(lb));
         BandCoefficients c;  // defaults: gain=1, bias=0, reflMult=1, reflAdd=0, scale=1
         bool gOk = false, bOk = false, rmOk = false, raOk = false, k1Ok = false, k2Ok = false;
         double v;
-        v = toDouble(kv.value(QStringLiteral("RADIANCE_MULT_BAND_%1").arg(lb)), &gOk);
+        // Radiance
+        tryCandidates(QStringLiteral("RADIANCE_MULT_BAND_"), candNumeric, &v, &gOk);
         if (gOk) c.radianceGain = v;
-        v = toDouble(kv.value(QStringLiteral("RADIANCE_ADD_BAND_%1").arg(lb)), &bOk);
+        tryCandidates(QStringLiteral("RADIANCE_ADD_BAND_"), candNumeric, &v, &bOk);
         if (bOk) c.radianceBias = v;
-        v = toDouble(kv.value(QStringLiteral("REFLECTANCE_MULT_BAND_%1").arg(lb)), &rmOk);
-        if (rmOk) c.reflMult = v;
-        v = toDouble(kv.value(QStringLiteral("REFLECTANCE_ADD_BAND_%1").arg(lb)), &raOk);
-        if (raOk) c.reflAdd = v;
-        v = toDouble(kv.value(QStringLiteral("K1_CONSTANT_BAND_%1").arg(lb)), &k1Ok);
-        if (k1Ok) c.k1 = v;
-        v = toDouble(kv.value(QStringLiteral("K2_CONSTANT_BAND_%1").arg(lb)), &k2Ok);
-        if (k2Ok) c.k2 = v;
         if (!gOk && !bOk) {
             // Collection 1 stores rescaling as RADIANCE_MULT / RADIANCE_ADD (no band suffix).
             v = toDouble(kv.value(QStringLiteral("RADIANCE_MULT")), &gOk);
@@ -110,6 +128,22 @@ bool loadLandsatMtl(const QString &mtlPath, const QMap<int, QString> &bandNames,
             v = toDouble(kv.value(QStringLiteral("RADIANCE_ADD")), &bOk);
             if (bOk) c.radianceBias = v;
         }
+        if (gOk) c.hasRadiance = true;
+        if (gOk && bOk) c.hasRadiance = true;
+        // For single-coefficient presence we treat that as having radiance intent only when at least one was found.
+        // The flag is per-band to gate toRadiance validation.
+        if (gOk || bOk) c.hasRadiance = true;
+        // Reflectance
+        tryCandidates(QStringLiteral("REFLECTANCE_MULT_BAND_"), candNumeric, &v, &rmOk);
+        if (rmOk) c.reflMult = v;
+        tryCandidates(QStringLiteral("REFLECTANCE_ADD_BAND_"), candNumeric, &v, &raOk);
+        if (raOk) c.reflAdd = v;
+        if (rmOk || raOk) c.hasReflectance = true;
+        // Thermal constants
+        tryCandidates(QStringLiteral("K1_CONSTANT_BAND_"), candNumeric, &v, &k1Ok);
+        if (k1Ok) c.k1 = v;
+        tryCandidates(QStringLiteral("K2_CONSTANT_BAND_"), candNumeric, &v, &k2Ok);
+        if (k2Ok) c.k2 = v;
         if (gOk || bOk || rmOk || raOk || k1Ok || k2Ok) {
             out->bands.insert(rasterBand, c);
             any = true;
@@ -149,12 +183,38 @@ QMap<QString, double> parseQuantificationList(const QDomElement &root,
     const QDomNodeList lists = root.elementsByTagName(listTag);
     for (int i = 0; i < lists.size(); ++i) {
         const QDomElement listEl = lists.item(i).toElement();
-        const QDomNodeList values = listEl.elementsByTagName(toValuesTag);
-        for (int j = 0; j < values.size(); ++j) {
-            const QDomElement lv = values.item(j).toElement();
-            const QDomNodeList items = lv.elementsByTagName(valueTag);
+        // Collect value elements: first try the documented intermediate container,
+        // then fall back to direct descendants of listEl (handles real ESA variations
+        // like BOA_ADD_OFFSET_LIST vs BOA_LIST_TO_VALUES).
+        auto collectFrom = [&](const QDomNodeList &items) {
             for (int k = 0; k < items.size(); ++k) {
                 const QDomElement it = items.item(k).toElement();
+                const QString id = it.attribute(QStringLiteral("band_id"));
+                bool ok = false;
+                const double v = it.text().trimmed().toDouble(&ok);
+                if (ok && !id.isEmpty())
+                    result.insert(id, v);
+            }
+        };
+        const QDomNodeList values = listEl.elementsByTagName(toValuesTag);
+        if (!values.isEmpty()) {
+            for (int j = 0; j < values.size(); ++j) {
+                const QDomElement lv = values.item(j).toElement();
+                collectFrom(lv.elementsByTagName(valueTag));
+            }
+        }
+        // Fallback / supplement: valueTag directly under listEl (covers alternate structures).
+        collectFrom(listEl.elementsByTagName(valueTag));
+        // Also try generic "*_LIST_VALUE" pattern fallback for robustness
+        if (result.isEmpty()) {
+            // Search any element with band_id under listEl irrespective of tag name suffix
+            const QDomNodeList all = listEl.elementsByTagName(QStringLiteral("*"));
+            for (int k = 0; k < all.size(); ++k) {
+                const QDomElement it = all.item(k).toElement();
+                if (!it.hasAttribute(QStringLiteral("band_id")))
+                    continue;
+                if (!it.tagName().endsWith(QStringLiteral("LIST_VALUE"), Qt::CaseInsensitive))
+                    continue;
                 const QString id = it.attribute(QStringLiteral("band_id"));
                 bool ok = false;
                 const double v = it.text().trimmed().toDouble(&ok);
@@ -213,20 +273,54 @@ bool loadSentinel2Mtd(const QString &mtdPath, const QMap<int, QString> &bandName
                                 .firstChildElement(QStringLiteral("Product_Image_Characteristics"))
                                 .firstChildElement(QStringLiteral("Radiometric_Info"));
 
-    // L2A: BOA_ADD_OFFSET list + BOA_QUANTIFICATION_VALUE scalar.
-    // L1C: RADIO_ADD_OFFSET list + RADIO_QUANTIFICATION_VALUE scalar.
-    // The inner list/value tags also differ by prefix (BOA_LIST_* vs RADIO_LIST_*).
-    const bool l2a = out->processingLevel == QStringLiteral("L2A");
-    const QString prefix = l2a ? QStringLiteral("BOA") : QStringLiteral("RADIO");
-    const QString offsetListTag = prefix + QStringLiteral("_ADD_OFFSET");
-    const QString quantScalarTag = prefix + QStringLiteral("_QUANTIFICATION_VALUE");
-    const QString toValuesTag = prefix + QStringLiteral("_LIST_TO_VALUES");
-    const QString valueTag = prefix + QStringLiteral("_LIST_VALUE");
-
-    const QMap<QString, double> offsets = parseQuantificationList(rad, offsetListTag,
-                                                                  toValuesTag, valueTag);
+    // Real ESA tags: L1C uses QUANTIFICATION_VALUE, L2A uses BOA_QUANTIFICATION_VALUE
+    // (with fallback to plain QUANTIFICATION_VALUE for old PB). Offsets: RADIO_ADD_OFFSET / BOA_ADD_OFFSET.
+    // Keep backward compat with fictional RADIO_QUANTIFICATION_VALUE used in older tests.
     bool qOk = false;
-    const double quant = toDouble(mtdValue(rad, quantScalarTag), &qOk);
+    double quant = 0.0;
+    // Try BOA_QUANTIFICATION_VALUE first for L2A, then plain QUANTIFICATION_VALUE, then legacy RADIO_ prefix.
+    const QStringList quantCandidates = {
+        QStringLiteral("BOA_QUANTIFICATION_VALUE"),
+        QStringLiteral("QUANTIFICATION_VALUE"),
+        QStringLiteral("RADIO_QUANTIFICATION_VALUE")
+    };
+    for (const QString &tag : quantCandidates) {
+        const QString txt = mtdValue(rad, tag);
+        if (!txt.isEmpty()) {
+            bool ok = false;
+            const double v = toDouble(txt, &ok);
+            if (ok && v > 0.0) {
+                quant = v;
+                qOk = true;
+                break;
+            }
+        }
+    }
+
+    // Offsets: try both BOA and RADIO lists, merging results. Handles real products and legacy fixtures.
+    QMap<QString, double> offsets;
+    const struct { QString listTag; QString toValuesTag; QString valueTag; } offsetVariants[] = {
+        {QStringLiteral("BOA_ADD_OFFSET"), QStringLiteral("BOA_LIST_TO_VALUES"), QStringLiteral("BOA_LIST_VALUE")},
+        {QStringLiteral("RADIO_ADD_OFFSET"), QStringLiteral("RADIO_LIST_TO_VALUES"), QStringLiteral("RADIO_LIST_VALUE")},
+        // Alternate container naming seen in some PB versions:
+        {QStringLiteral("BOA_ADD_OFFSET"), QStringLiteral("BOA_ADD_OFFSET_LIST"), QStringLiteral("BOA_LIST_VALUE")},
+        {QStringLiteral("BOA_ADD_OFFSET"), QStringLiteral("BOA_LIST_TO_VALUES"), QStringLiteral("BOA_ADD_OFFSET")},
+    };
+    for (auto &var : offsetVariants) {
+        auto m = parseQuantificationList(rad, var.listTag, var.toValuesTag, var.valueTag);
+        for (auto it = m.constBegin(); it != m.constEnd(); ++it)
+            if (!offsets.contains(it.key()))
+                offsets.insert(it.key(), it.value());
+    }
+    // Final generic fallback: any LIST_VALUE under any ADD_OFFSET element
+    if (offsets.isEmpty()) {
+        auto m1 = parseQuantificationList(rad, QStringLiteral("BOA_ADD_OFFSET"),
+                                          QStringLiteral("BOA_LIST_TO_VALUES"), QStringLiteral("BOA_LIST_VALUE"));
+        for (auto it = m1.constBegin(); it != m1.constEnd(); ++it) offsets.insert(it.key(), it.value());
+        auto m2 = parseQuantificationList(rad, QStringLiteral("RADIO_ADD_OFFSET"),
+                                          QStringLiteral("RADIO_LIST_TO_VALUES"), QStringLiteral("RADIO_LIST_VALUE"));
+        for (auto it = m2.constBegin(); it != m2.constEnd(); ++it) offsets.insert(it.key(), it.value());
+    }
 
     // Map S2 band names (B2, B8A, ...) to a 0-based band_id used in the XML.
     // The XML band_id ordering follows the spectral band sequence (B1=0, B2=1, ...).
@@ -377,6 +471,8 @@ bool loadMetadata(const QString &rasterPath, const QString &metadataPath,
 bool toRadiance(const float *dn, float *radiance, size_t count, const BandCoefficients &c)
 {
     if (!dn || !radiance || count == 0) return false;
+    if (!c.hasRadiance)
+        return false;
     return MathUtils::linearScale(dn, radiance, count,
                                   static_cast<float>(c.radianceGain),
                                   static_cast<float>(c.radianceBias));
@@ -520,6 +616,16 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
         if (unit == OutputUnit::BrightnessTemperature && (c.k1 <= 0.0 || c.k2 <= 0.0)) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("Band %1 lacks thermal K1/K2 constants for brightness temperature conversion").arg(b);
+            return false;
+        }
+        if (unit == OutputUnit::Radiance && !c.hasRadiance) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Band %1 has no radiance coefficients (RADIANCE_MULT/ADD missing)").arg(b);
+            return false;
+        }
+        if (unit == OutputUnit::ToaReflectance && meta.sensor == SensorType::Landsat && !c.hasReflectance) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Band %1 has no reflectance coefficients (REFLECTANCE_MULT/ADD missing)").arg(b);
             return false;
         }
     }
