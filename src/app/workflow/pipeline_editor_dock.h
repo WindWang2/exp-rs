@@ -28,10 +28,14 @@ signals:
   void runFullWorkflowRequested();
   void stopWorkflowRequested();
 
-private slots:
+public slots:
   void onNewClicked();
   void onOpenClicked();
   void onSaveClicked();
+public:
+  // Convenience for ribbon / programmatic open — delegates to onOpenClicked's file-dialog flow.
+  void openPipelineDialog() { onOpenClicked(); }
+private slots:
   void onRunFullClicked();
   void onStopClicked();
   void onTogglePresetCatalog();

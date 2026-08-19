@@ -331,11 +331,17 @@ void SpectralIndexDialog::runFromAsset()
   json["input"] = inputPath.toStdString();
   json["output"] = outputPath().toStdString();
   json["index"] = params.index.toStdString();
-  json["nir"] = params.nir;
-  json["red"] = params.red;
-  json["green"] = params.green;
-  json["blue"] = params.blue;
-  json["swir"] = params.swir;
+  // Omit auto (0) so operator resolves via SICNU_BAND_ROLE metadata.
+  if ( params.nir > 0 )
+    json["nir"] = params.nir;
+  if ( params.red > 0 )
+    json["red"] = params.red;
+  if ( params.green > 0 )
+    json["green"] = params.green;
+  if ( params.blue > 0 )
+    json["blue"] = params.blue;
+  if ( params.swir > 0 )
+    json["swir"] = params.swir;
 
   runOperatorTask( QStringLiteral( "rs:spectral_index" ), json );
 }
@@ -349,11 +355,16 @@ void SpectralIndexDialog::runFromLayer()
   json["input"] = m_rasterLayer->source().toStdString();
   json["output"] = outputPath().toStdString();
   json["index"] = params.index.toStdString();
-  json["nir"] = params.nir;
-  json["red"] = params.red;
-  json["green"] = params.green;
-  json["blue"] = params.blue;
-  json["swir"] = params.swir;
+  if ( params.nir > 0 )
+    json["nir"] = params.nir;
+  if ( params.red > 0 )
+    json["red"] = params.red;
+  if ( params.green > 0 )
+    json["green"] = params.green;
+  if ( params.blue > 0 )
+    json["blue"] = params.blue;
+  if ( params.swir > 0 )
+    json["swir"] = params.swir;
 
   runOperatorTask( QStringLiteral( "rs:spectral_index" ), json );
 }

@@ -1021,10 +1021,16 @@ QWidget *RibbonController::createRibbonBar()
     if ( auto *btn = addToolButton( editGrp, tr( "打开流程" ), "file_open", tr( "打开工作流 JSON 定义" ) ) )
     {
       connect( btn, &QToolButton::clicked, m_window, [this]() {
-        if ( auto *dock = m_window->findChild<QDockWidget *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
+        if ( auto *dock = m_window->findChild<sicnu::workflow::gui::PipelineEditorDock *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
         {
           dock->show();
           dock->raise();
+          dock->onOpenClicked();
+        }
+        else if ( auto *generic = m_window->findChild<QDockWidget *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
+        {
+          generic->show();
+          generic->raise();
         }
       } );
     }

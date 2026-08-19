@@ -34,7 +34,8 @@ public:
      * Extract the pixel values across all bands at the given map
      * coordinate from \a layer and update the display.
      *
-     * The point must be in the same CRS as the raster layer.
+     * The point is expected in the project/map CRS and is transformed to
+     * the layer CRS when they differ.
      */
     void setProfile( const QgsPointXY &point, QgsRasterLayer *layer );
 

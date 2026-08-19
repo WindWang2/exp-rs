@@ -14,6 +14,7 @@
 #include <QLineEdit>
 #include <QMetaType>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QVBoxLayout>
@@ -207,6 +208,14 @@ SchemaFormBuilder::FieldKind
 SchemaFormBuilder::classifyKind( const QString &name, const Json::Value &prop )
 {
   const QString widget = memberString( prop, "x-ui-widget" ).toLower();
+  if ( widget == QLatin1String( "array" ) )
+    return FieldKind::Array;
+  // JSON Schema type:"array" must be handled before string fallback.
+  {
+    const QString typeEarly = memberString( prop, "type" ).toLower();
+    if ( typeEarly == QLatin1String( "array" ) )
+      return FieldKind::Array;
+  }
   if ( widget == QLatin1String( "layer-raster" ) )
     return FieldKind::RasterCombo;
   if ( widget == QLatin1String( "enum" ) )
@@ -287,6 +296,7 @@ SchemaFormBuilder::buildField( const QString &name, const Json::Value &prop )
   field.name = name;
   field.kind = classifyKind( name, prop );
   field.group = classifyGroup( name, prop );
+  field.prop = prop;
 
   // Advanced may still reclassify group if x-ui-advanced set (already in classifyGroup).
   const QString tip = memberString( prop, "description" );
@@ -434,6 +444,35 @@ SchemaFormBuilder::buildField( const QString &name, const Json::Value &prop )
         check->setToolTip( tip );
       field.check = check;
       field.widget = check;
+      break;
+    }
+    case FieldKind::Array:
+    {
+      auto *edit = new QLineEdit( this );
+      edit->setPlaceholderText( tr( "多个值用逗号/分号/换行分隔" ) );
+      QString arrayTip = tip;
+      if ( !arrayTip.isEmpty() )
+        arrayTip += QStringLiteral( "\n" );
+      arrayTip += tr( "数组参数：多个值用逗号、分号或换行分隔" );
+      edit->setToolTip( arrayTip );
+      if ( prop.isMember( "default" ) && prop["default"].isArray() )
+      {
+        QStringList parts;
+        for ( const Json::Value &v : prop["default"] )
+        {
+          if ( v.isString() )
+            parts << QString::fromStdString( v.asString() );
+          else if ( v.isNumeric() )
+            parts << QString::number( v.asDouble(), 'g', 16 );
+        }
+        edit->setText( parts.join( QStringLiteral( ", " ) ) );
+      }
+      else if ( prop.isMember( "default" ) && prop["default"].isString() )
+      {
+        edit->setText( QString::fromStdString( prop["default"].asString() ) );
+      }
+      field.lineEdit = edit;
+      field.widget = edit;
       break;
     }
     case FieldKind::String:
@@ -688,6 +727,7 @@ QString SchemaFormBuilder::readFieldValue( const Field &field ) const
         return field.combo->currentText();
       }
       break;
+    case FieldKind::Array:
     case FieldKind::OutputPath:
     case FieldKind::String:
       if ( field.lineEdit )
@@ -753,6 +793,33 @@ void SchemaFormBuilder::writeFieldValue( Field &field, const Json::Value &value 
         }
       }
       break;
+    case FieldKind::Array:
+      if ( field.lineEdit )
+      {
+        if ( value.isArray() )
+        {
+          QStringList parts;
+          for ( const Json::Value &v : value )
+          {
+            if ( v.isString() )
+              parts << QString::fromStdString( v.asString() );
+            else if ( v.isNumeric() )
+              parts << QString::number( v.asDouble(), 'g', 16 );
+            else if ( v.isBool() )
+              parts << ( v.asBool() ? QStringLiteral( "true" ) : QStringLiteral( "false" ) );
+          }
+          field.lineEdit->setText( parts.join( QStringLiteral( ", " ) ) );
+        }
+        else if ( value.isString() )
+        {
+          field.lineEdit->setText( QString::fromStdString( value.asString() ) );
+        }
+        else if ( value.isNumeric() )
+        {
+          field.lineEdit->setText( QString::number( value.asDouble(), 'g', 16 ) );
+        }
+      }
+      break;
     case FieldKind::OutputPath:
     case FieldKind::String:
       if ( field.lineEdit && value.isString() )
@@ -812,6 +879,50 @@ Json::Value SchemaFormBuilder::values() const
                          : field.combo->currentText().toStdString();
         }
         break;
+      case FieldKind::Array:
+      {
+        const QString raw = readFieldValue( field );
+        // Determine item type: numeric if schema items.type is number/integer.
+        bool numericItems = false;
+        if ( field.prop.isObject() && field.prop.isMember( "items" ) && field.prop["items"].isObject() )
+        {
+          const QString itemType = memberString( field.prop["items"], "type" ).toLower();
+          if ( itemType == QLatin1String( "number" ) || itemType == QLatin1String( "integer" ) )
+            numericItems = true;
+        }
+        Json::Value arr( Json::arrayValue );
+        const QStringList tokens = raw.split( QRegularExpression( QStringLiteral( "[,;\\n]+" ) ), Qt::SkipEmptyParts );
+        for ( QString tok : tokens )
+        {
+          tok = tok.trimmed();
+          if ( tok.isEmpty() )
+            continue;
+          if ( numericItems )
+          {
+            bool ok = false;
+            double d = tok.toDouble( &ok );
+            if ( ok )
+            {
+              // Preserve integer when possible.
+              if ( tok.contains( QLatin1Char( '.' ) ) || tok.contains( QLatin1Char( 'e' ), Qt::CaseInsensitive ) )
+                arr.append( d );
+              else
+              {
+                bool intOk = false;
+                long long iv = tok.toLongLong( &intOk );
+                if ( intOk )
+                  arr.append( Json::Value::Int64( iv ) );
+                else
+                  arr.append( d );
+              }
+              continue;
+            }
+          }
+          arr.append( tok.toStdString() );
+        }
+        out[key] = arr;
+        break;
+      }
       case FieldKind::RasterCombo:
       case FieldKind::OutputPath:
       case FieldKind::String:

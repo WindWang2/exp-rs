@@ -5,6 +5,7 @@
 
 #include <raster/qgsrasterlayer.h>
 #include <raster/qgsrasterdataprovider.h>
+#include <qgscoordinatetransform.h>
 #include <qgsproject.h>
 
 #include <QPainter>
@@ -243,13 +244,28 @@ void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLa
     if ( bandCount < 1 )
         return;
 
-    // Convert map coordinate (layer CRS) to pixel coordinate
+    // Convert map coordinate (project/map CRS) to layer CRS, then to pixel.
     double adfGeoTransform[6];
     if ( GDALGetGeoTransform( dataset, adfGeoTransform ) != CE_None )
         return;
 
-    double x = point.x();
-    double y = point.y();
+    QgsPointXY srcPt = point;
+    const QgsCoordinateReferenceSystem srcCrs = QgsProject::instance() ? QgsProject::instance()->crs() : QgsCoordinateReferenceSystem();
+    const QgsCoordinateReferenceSystem dstCrs = layer->crs();
+    if ( srcCrs.isValid() && dstCrs.isValid() && srcCrs != dstCrs )
+    {
+      try
+      {
+        QgsCoordinateTransform ct( srcCrs, dstCrs, QgsProject::instance() );
+        srcPt = ct.transform( point );
+      }
+      catch ( ... )
+      {
+        // Keep original point on transform failure.
+      }
+    }
+    double x = srcPt.x();
+    double y = srcPt.y();
     double col = ( x - adfGeoTransform[0] ) / adfGeoTransform[1];
     double row = ( y - adfGeoTransform[3] ) / adfGeoTransform[5];
 

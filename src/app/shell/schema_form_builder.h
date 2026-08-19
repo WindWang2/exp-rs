@@ -50,6 +50,7 @@ class SchemaFormBuilder : public QWidget
       Integer,
       Boolean,
       String,
+      Array,
     };
 
     enum class FieldGroup
@@ -71,6 +72,7 @@ class SchemaFormBuilder : public QWidget
       class QDoubleSpinBox *doubleSpin = nullptr;
       class QSpinBox *spin = nullptr;
       class QCheckBox *check = nullptr;
+      Json::Value prop; // original schema property for array item typing
     };
 
     void clearFields();

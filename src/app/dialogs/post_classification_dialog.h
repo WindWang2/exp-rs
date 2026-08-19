@@ -33,6 +33,7 @@ protected:
     QString toolName() const override { return QStringLiteral("post_classification_change"); }
     QString dialogTitle() const override { return tr("后分类比较"); }
     bool validateInputs() override;
+    bool shouldAutoAcceptOnSuccess() const override { return false; }
     void onRun() override;
 
 private:

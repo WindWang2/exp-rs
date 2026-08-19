@@ -31,6 +31,7 @@ protected:
     QString toolName() const override { return QStringLiteral("change_detection"); }
     QString dialogTitle() const override { return tr("Change Detection"); }
     bool validateInputs() override;
+    bool shouldAutoAcceptOnSuccess() const override { return false; }
     void onRun() override;
 
 private slots:
