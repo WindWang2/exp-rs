@@ -121,6 +121,22 @@ bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
             if ( node && node->server && bridgePtr && node->id == id )
                 bridgePtr->bindIpcServer( node->server );
         } );
+    // DATAPY-3: if the worker dies while this plugin owns the node, the pool
+    // keeps isBusy=true (reserved). Listen for workerCrashed to avoid re-using
+    // a stale server pointer; the next RPC will fail and trigger re-acquire via
+    // the normal error path. This prevents crossed IPC where a second plugin
+    // binds to the same server.
+    QObject::connect( m_pool, &PythonWorkerProcessPool::workerCrashed, m_pool,
+                      [this]( int id ) {
+                          if ( m_workerNode && m_workerNode->id == id )
+                          {
+                              // Bridge stays bound to the old server until
+                              // workerRestarted re-binds; no extra action needed
+                              // beyond keeping isBusy reserved (pool side).
+                              qWarning() << "PythonPluginAdapter: worker crashed for plugin"
+                                         << m_packageName << "node" << id;
+                          }
+                      } );
 
     // Send RPC load_plugin request
     QJsonObject params;

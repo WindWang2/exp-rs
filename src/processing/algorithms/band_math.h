@@ -56,4 +56,8 @@ namespace BandMath
      */
     bool processFile(const QString &sourcePath, const QString &outputPath,
                      const QString &expression, QString *errorMessage = nullptr);
+
+    /// Return sorted unique band numbers referenced by @a expression (e.g. "b1+b3" -> {1,3}).
+    /// Returns empty vector on parse error.
+    std::vector<int> referencedBands(const QString &expression);
 }

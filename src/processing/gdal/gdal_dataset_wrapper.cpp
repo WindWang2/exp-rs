@@ -5,6 +5,7 @@
 #include <cpl_error.h>
 #include <cpl_string.h>
 #include <QFile>
+#include <QDebug>
 #include <algorithm>
 #include <cstring>
 #include <limits>
@@ -61,7 +62,13 @@ bool GdalDatasetWrapper::open(const QString &path)
 void GdalDatasetWrapper::close()
 {
     if (m_dataset) {
+        CPLErrorReset();
         GDALClose(static_cast<GDALDatasetH>(m_dataset));
+        if ( CPLGetLastErrorType() == CE_Failure )
+        {
+            qWarning() << "GdalDatasetWrapper::close flush error:" << CPLGetLastErrorMsg();
+            CPLErrorReset();
+        }
         m_dataset = nullptr;
     }
 }
@@ -307,10 +314,13 @@ bool GdalDatasetWrapper::readBandWindowScaled(int bandNum, int xOff, int yOff,
 
     if ( srcX0 == xOff && srcY0 == yOff && validSrcW == srcWidth && validSrcH == srcHeight )
     {
-        CPLErr err = GDALRasterIO( band, GF_Read,
-                                  xOff, yOff, srcWidth, srcHeight,
-                                  buffer, bufWidth, bufHeight, GDT_Float32,
-                                  0, 0 );
+        GDALRasterIOExtraArg extra;
+        INIT_RASTERIO_EXTRA_ARG( extra );
+        extra.eResampleAlg = GRIORA_Bilinear;
+        CPLErr err = GDALRasterIOEx( band, GF_Read,
+                                     xOff, yOff, srcWidth, srcHeight,
+                                     buffer, bufWidth, bufHeight, GDT_Float32,
+                                     0, 0, &extra );
         return err == CE_None;
     }
 
@@ -334,10 +344,13 @@ bool GdalDatasetWrapper::readBandWindowScaled(int bandNum, int xOff, int yOff,
         return true;
 
     float *dstPtr = buffer + static_cast<size_t>( dstY0 ) * bufWidth + dstX0;
-    CPLErr err = GDALRasterIO( band, GF_Read,
-                              srcX0, srcY0, validSrcW, validSrcH,
-                              dstPtr, validBufW, validBufH, GDT_Float32,
-                              sizeof( float ), static_cast<GSpacing>( sizeof( float ) * bufWidth ) );
+    GDALRasterIOExtraArg extra2;
+    INIT_RASTERIO_EXTRA_ARG( extra2 );
+    extra2.eResampleAlg = GRIORA_Bilinear;
+    CPLErr err = GDALRasterIOEx( band, GF_Read,
+                                 srcX0, srcY0, validSrcW, validSrcH,
+                                 dstPtr, validBufW, validBufH, GDT_Float32,
+                                 sizeof( float ), static_cast<GSpacing>( sizeof( float ) * bufWidth ), &extra2 );
     return err == CE_None;
 }
 
@@ -396,6 +409,35 @@ bool GdalDatasetWrapper::readBandDataNative(int bandNum, void *buffer, int dstWi
                               0, 0, GDALGetRasterBandXSize(band), GDALGetRasterBandYSize(band),
                               buffer, dstWidth, dstHeight, eType,
                               0, 0);
+    return err == CE_None;
+}
+
+bool GdalDatasetWrapper::readBandWindowNative(int bandNum, int xOff, int yOff,
+                                              int srcWidth, int srcHeight, void *buffer) const
+{
+    if (!m_dataset || bandNum < 1 || bandNum > bandCount() || !buffer)
+        return false;
+    if (srcWidth <= 0 || srcHeight <= 0 || xOff < 0 || yOff < 0)
+        return false;
+    GDALRasterBandH band = GDALGetRasterBand(static_cast<GDALDatasetH>(m_dataset), bandNum);
+    if (!band)
+        return false;
+    const GDALDataType eType = GDALGetRasterDataType(band);
+    const int bw = GDALGetRasterBandXSize(band);
+    const int bh = GDALGetRasterBandYSize(band);
+    if (xOff >= bw || yOff >= bh)
+        return false;
+    const int clampedW = std::min(srcWidth, bw - xOff);
+    const int clampedH = std::min(srcHeight, bh - yOff);
+    const size_t elemSize = static_cast<size_t>(GDALGetDataTypeSizeBytes(eType));
+    if (elemSize == 0)
+        return false;
+    // Pad out-of-raster with zeros (native type) — caller will handle nodata
+    std::memset(buffer, 0, static_cast<size_t>(srcWidth) * srcHeight * elemSize);
+    CPLErr err = GDALRasterIO(band, GF_Read,
+                              xOff, yOff, clampedW, clampedH,
+                              buffer, clampedW, clampedH, eType,
+                              elemSize, static_cast<GSpacing>(srcWidth) * elemSize);
     return err == CE_None;
 }
 
@@ -579,6 +621,24 @@ bool writeGdalOutput(const QString &outputPath, int width, int height,
         }
     }
 
+    CPLErrorReset();
+    if ( GDALFlushCache(ds) != CE_None || CPLGetLastErrorType() == CE_Failure )
+    {
+        const char *msg = CPLGetLastErrorMsg();
+        if (errorMessage) *errorMessage = msg ? QString::fromUtf8(msg) : QStringLiteral("Flush failed");
+        GDALClose(ds);
+        if ( CPLGetLastErrorType() == CE_Failure )
+            CPLErrorReset();
+        return false;
+    }
+    CPLErrorReset();
     GDALClose(ds);
+    if ( CPLGetLastErrorType() == CE_Failure )
+    {
+        const char *msg = CPLGetLastErrorMsg();
+        if (errorMessage) *errorMessage = msg ? QString::fromUtf8(msg) : QStringLiteral("Close failed");
+        CPLErrorReset();
+        return false;
+    }
     return true;
 }

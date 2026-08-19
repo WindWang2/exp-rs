@@ -28,4 +28,5 @@ public:
 
 private:
     QgsLayerTreeModel *m_model = nullptr;
+    class QgsLayerTreeView *m_layerTreeView = nullptr;
 };

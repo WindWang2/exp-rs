@@ -210,6 +210,7 @@ struct ComparisonNode : Node
     {
         float l = left->eval(bands, pixel);
         float r = right->eval(bands, pixel);
+        if (!std::isfinite(l) || !std::isfinite(r)) return NaN;
         bool result = false;
         if      (op == "<")  result = l < r;
         else if (op == ">")  result = l > r;
@@ -239,10 +240,9 @@ struct LogicalNode : Node
     float eval(const BandData &bands, size_t pixel) const override
     {
         float l = left->eval(bands, pixel);
-        // Short-circuit evaluation for efficiency.
-        if (isAnd && l == 0.0f) return 0.0f;
-        if (!isAnd && l != 0.0f) return 1.0f;
+        if (!std::isfinite(l)) return NaN;
         float r = right->eval(bands, pixel);
+        if (!std::isfinite(r)) return NaN;
         bool result = isAnd ? (l != 0.0f && r != 0.0f) : (l != 0.0f || r != 0.0f);
         return result ? 1.0f : 0.0f;
     }
@@ -265,6 +265,7 @@ struct ConditionalNode : Node
     float eval(const BandData &bands, size_t pixel) const override
     {
         float cond = condition->eval(bands, pixel);
+        if (!std::isfinite(cond)) return NaN;
         return (cond != 0.0f) ? trueExpr->eval(bands, pixel) : falseExpr->eval(bands, pixel);
     }
     void collectRefs(std::vector<int> &refs) const override {
@@ -614,6 +615,19 @@ bool evaluate(const QString &expression, const BandData &bands, float *out, size
     return true;
 }
 
+std::vector<int> referencedBands(const QString &expression)
+{
+    Parser parser(expression);
+    auto ast = parser.parse();
+    if (!ast || parser.hasError())
+        return {};
+    std::vector<int> refs;
+    ast->collectRefs(refs);
+    std::sort(refs.begin(), refs.end());
+    refs.erase(std::unique(refs.begin(), refs.end()), refs.end());
+    return refs;
+}
+
 bool processFile(const QString &sourcePath, const QString &outputPath,
                  const QString &expression, QString *errorMessage)
 {
@@ -679,7 +693,8 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
     std::vector<std::vector<float>> outBands = {std::move(output)};
     QString writeError;
     if (!writeGdalOutput(outputPath, width, height, outBands,
-                         srcDataset.geoTransform(), srcDataset.projection(), &writeError)) {
+                         srcDataset.geoTransform(), srcDataset.projection(), &writeError,
+                         std::numeric_limits<double>::quiet_NaN())) {
         if (errorMessage)
             *errorMessage = writeError;
         return false;

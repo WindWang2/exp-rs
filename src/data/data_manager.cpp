@@ -1207,7 +1207,12 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
 
   if ( confirmedPlan.cascade() )
   {
-    for ( const LeaseImpact &impact : liveLeaseImpacts )
+    // DATAPY-7: re-validate leaseImpacts after emit — a slot may have re-entered
+    // and acquired a new lease which is not in liveLeaseImpacts (captured before
+    // emit). Revoking the fresh list prevents a dangling LeaseRecord on an erased
+    // asset.
+    const QVector<LeaseImpact> freshImpacts = m_impl->leaseImpacts( confirmedPlan.assetId() );
+    for ( const LeaseImpact &impact : freshImpacts )
       revokeLease( impact.lease );
   }
 

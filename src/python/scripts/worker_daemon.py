@@ -38,27 +38,62 @@ def _mount_shm_array(key, width, height, bands, dtype_code):
     return shm, arr
 
 
+_pending_proxy_buf = ""
+_pending_proxy_lines = []  # type: list[str]
+
 class SicnuMapCanvasProxy:
     def __init__(self, socket_conn):
         self._s = socket_conn
 
     def _get_state(self):
+        import collections
+        global _pending_proxy_buf, _pending_proxy_lines
+        req_id = 8001
+        # Use a unique id per call to correlate correctly (DATAPY-11).
+        # For simplicity keep 8001 but match on id to avoid stealing host requests.
         req_msg = {
             "jsonrpc": "2.0",
             "method": "canvas.get_state",
             "params": {},
-            "id": 8001
+            "id": req_id
         }
         self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
-        buf = ""
+        buf = _pending_proxy_buf
         while True:
+            # Drain any queued non-matching lines from previous proxy calls first
+            if _pending_proxy_lines:
+                line = _pending_proxy_lines.pop(0)
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if obj.get("id") == req_id:
+                    return obj.get("result", {})
+                else:
+                    # Not our response — keep for main dispatch loop (re-queue)
+                    _pending_proxy_lines.append(line)
+                    continue
             data = self._s.recv(4096)
             if not data:
                 break
             buf += data.decode("utf-8")
-            if "\n" in buf:
-                line, _ = buf.split("\n", 1)
-                return json.loads(line).get("result", {})
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                # DATAPY-11: correlate on id; host→daemon requests have "method"
+                # and must not be consumed as proxy response.
+                if obj.get("id") == req_id and ("result" in obj or "error" in obj):
+                    _pending_proxy_buf = buf
+                    return obj.get("result", {})
+                # Non-matching line: buffer for main loop to dispatch
+                _pending_proxy_lines.append(line)
+        _pending_proxy_buf = buf
         return {}
 
     def extent(self):
@@ -111,22 +146,46 @@ class SicnuPythonIface:
         self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
 
     def activeLayer(self):
+        global _pending_proxy_buf, _pending_proxy_lines
+        req_id = 8003
         req_msg = {
             "jsonrpc": "2.0",
             "method": "catalog.get_active_layer",
             "params": {},
-            "id": 8003
+            "id": req_id
         }
         self._s.sendall((json.dumps(req_msg) + "\n").encode("utf-8"))
-        buf = ""
+        buf = _pending_proxy_buf
         while True:
+            if _pending_proxy_lines:
+                line = _pending_proxy_lines.pop(0)
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if obj.get("id") == req_id:
+                    return obj.get("result", {})
+                else:
+                    _pending_proxy_lines.append(line)
+                    continue
             data = self._s.recv(4096)
             if not data:
                 break
             buf += data.decode("utf-8")
-            if "\n" in buf:
-                line, _ = buf.split("\n", 1)
-                return json.loads(line).get("result", {})
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if obj.get("id") == req_id and ("result" in obj or "error" in obj):
+                    _pending_proxy_buf = buf
+                    return obj.get("result", {})
+                _pending_proxy_lines.append(line)
+        _pending_proxy_buf = buf
         return None
 
     def mapCanvas(self):
@@ -190,8 +249,46 @@ def main():
         sys.exit(1)
 
     buffer = ""
+    # DATAPY-11: drain lines that proxy _get_state buffered as non-matching
+    # responses so they are dispatched instead of lost.
     while True:
         try:
+            # First drain any pending lines queued by proxy blocking calls
+            while _pending_proxy_lines:
+                line = _pending_proxy_lines.pop(0)
+                line = line.strip()
+                if not line:
+                    continue
+                msg_id = None
+                try:
+                    msg = json.loads(line)
+                    msg_id = msg.get("id")
+                    if "method" not in msg and ("result" in msg or "error" in msg):
+                        continue
+                    req_id = msg.get("id")
+                    method = msg.get("method")
+                    params = msg.get("params", {})
+                    # Re-dispatch this queued line through the same handler
+                    # (fall through to method handling below by reusing line)
+                    # To avoid duplicating handler, push back and process as normal:
+                    # Instead, handle it inline: re-enter processing by not skipping
+                    # and letting the outer logic handle it. Simplest: treat as if
+                    # it arrived now — we will process it in the same while iteration
+                    # by handling msg directly here. Duplicate handler would be large,
+                    # so instead re-insert into buffer front and break to process.
+                    buffer = line + "\n" + buffer
+                    break
+                except Exception as ex:
+                    sys.stderr.write(f"WorkerDaemon queued line error: {ex}\n")
+                    err_resp = {
+                        "jsonrpc": "2.0",
+                        "id": msg_id,
+                        "error": {"code": -32700, "message": str(ex)}
+                    }
+                    s.sendall((json.dumps(err_resp) + "\n").encode("utf-8"))
+                    continue
+            if _pending_proxy_lines and buffer.startswith(tuple(_pending_proxy_lines)):
+                pass  # already queued
             data = s.recv(4096)
             if not data:
                 break
@@ -202,8 +299,10 @@ def main():
                 if not line:
                     continue
 
+                msg_id = None
                 try:
                     msg = json.loads(line)
+                    msg_id = msg.get("id")
                     if "method" not in msg and ("result" in msg or "error" in msg):
                         continue
 
@@ -508,8 +607,8 @@ def main():
                     sys.stderr.write(f"WorkerDaemon processing error: {ex}\n")
                     err_resp = {
                         "jsonrpc": "2.0",
-                        "id": msg.get("id"),
-                        "error": {"message": str(ex)}
+                        "id": msg_id,
+                        "error": {"code": -32700, "message": str(ex)}
                     }
                     s.sendall((json.dumps(err_resp) + "\n").encode("utf-8"))
         except Exception as e:

@@ -17,6 +17,7 @@
 #include <fcntl.h>     // O_* constants (kept for completeness)
 #include <sys/mman.h>  // shm_unlink
 #include <semaphore.h> // sem_unlink
+#include <sys/stat.h>  // chmod
 #define SICNU_HAVE_POSIX_SHM 1
 #endif
 
@@ -80,6 +81,18 @@ bool SharedMemorySegment::create( int width, int height, int bands, DType dtype 
     m_unlinked = false;
     return false;
   }
+
+#if defined( Q_OS_LINUX )
+  // DATAPY-9: QSharedMemory PosixRealtime creates /dev/shm object with 0644.
+  // Restrict to owner-only 0600 so raster payload is not world-readable.
+  {
+    const QByteArray posixName = ( '/' + m_key ).toUtf8();
+    const QByteArray shmPath = QByteArray( "/dev/shm" ) + posixName;
+    ::chmod( shmPath.constData(), 0600 );
+    const QByteArray semPath = QByteArray( "/dev/shm/sem." ) + m_key.toUtf8();
+    ::chmod( semPath.constData(), 0600 );
+  }
+#endif
 
   // We created the POSIX shm object + its semaphore: we own the duty to
   // unlink them (see detach()/unlink()).

@@ -3,6 +3,7 @@
 #include "gdal_multiband_block_stream.h"
 #include "gdal_dataset_wrapper.h"
 
+#include <QDebug>
 #include <algorithm>
 
 // ---------------------------------------------------------------------------
@@ -166,8 +167,46 @@ void GdalStreamingOutput::close()
 {
     if ( m_ds )
     {
-        GDALFlushCache( m_ds );
+        CPLErrorReset();
+        if ( GDALFlushCache( m_ds ) != CE_None || CPLGetLastErrorType() == CE_Failure )
+        {
+            qWarning() << "GdalStreamingOutput::close flush error:" << CPLGetLastErrorMsg();
+            CPLErrorReset();
+        }
+        CPLErrorReset();
         GDALClose( m_ds );
+        if ( CPLGetLastErrorType() == CE_Failure )
+        {
+            qWarning() << "GdalStreamingOutput::close close error:" << CPLGetLastErrorMsg();
+            CPLErrorReset();
+        }
         m_ds = nullptr;
     }
+}
+bool GdalStreamingOutput::closeWithError(QString *errorMessage)
+{
+    if ( !m_ds )
+        return true;
+    CPLErrorReset();
+    if ( GDALFlushCache( m_ds ) != CE_None || CPLGetLastErrorType() == CE_Failure )
+    {
+        const char *msg = CPLGetLastErrorMsg();
+        if ( errorMessage ) *errorMessage = msg ? QString::fromUtf8(msg) : QStringLiteral("Flush failed");
+        CPLErrorReset();
+        GDALClose( m_ds );
+        m_ds = nullptr;
+        return false;
+    }
+    CPLErrorReset();
+    GDALClose( m_ds );
+    if ( CPLGetLastErrorType() == CE_Failure )
+    {
+        const char *msg = CPLGetLastErrorMsg();
+        if ( errorMessage ) *errorMessage = msg ? QString::fromUtf8(msg) : QStringLiteral("Close failed");
+        CPLErrorReset();
+        m_ds = nullptr;
+        return false;
+    }
+    m_ds = nullptr;
+    return true;
 }

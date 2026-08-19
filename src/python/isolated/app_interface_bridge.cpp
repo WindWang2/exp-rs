@@ -109,62 +109,51 @@ std::vector<std::unique_ptr<SharedMemorySegment>> migrateRasterInputToShm(
 
   const size_t elemSize = SharedMemorySegment::dtypeSize( segDtype );
 
-  // Read each band ONCE into a full-height plane, then scatter rows into the
-  // per-tile segments (the wrapper has no window read, so tile splitting is a
-  // memory operation on the already-loaded plane). Interleaved-by-pixel layout
-  // [H, W, bands] matches the Python mount np.ndarray((height, width, bands)).
-  std::vector<std::vector<unsigned char>> nativePlanes;
-  std::vector<std::vector<float>> floatPlanes;
-  if ( useNative )
-  {
-    nativePlanes.resize( bands, std::vector<unsigned char>(
-                                   static_cast<size_t>( width ) * height * elemSize ) );
-    for ( int b = 0; b < bands; ++b )
-      if ( !ds.readBandDataNative( b + 1, nativePlanes[b].data(), width, height ) )
-        return {}; // fall back; no segments created yet
-  }
-  else
-  {
-    floatPlanes.resize( bands, std::vector<float>( static_cast<size_t>( width ) * height ) );
-    for ( int b = 0; b < bands; ++b )
-      if ( !ds.readBandData( b + 1, floatPlanes[b].data(), width, height ) )
-        return {}; // fall back; no segments created yet
-  }
-
-  // Split the raster into row-chunk tiles. A single segment when the raster
-  // fits under the cap; otherwise one segment per ceil(height/cap) tile.
+  // DATAPY-10: windowed tiled reads straight into payload to avoid full-plane
+  // materialization (previously ~2x scene in host RAM + /dev/shm).
   std::vector<std::unique_ptr<SharedMemorySegment>> segments;
   std::vector<QVariantMap> tileManifest;
   const int tileHeight = height <= kSegmentHeightCap ? height : kSegmentHeightCap;
+  // Reusable per-band tile window buffer (avoids per-tile allocation churn)
+  std::vector<unsigned char> nativeTileBuf;
+  std::vector<float> floatTileBuf;
   for ( int rowStart = 0; rowStart < height; rowStart += tileHeight )
   {
     const int tileRows = std::min( tileHeight, height - rowStart );
     auto seg = std::make_unique<SharedMemorySegment>();
     if ( !seg->create( width, tileRows, bands, segDtype ) )
-      return {}; // fall back; created segments are reclaimed by the vector
+      return {};
 
     char *payload = static_cast<char *>( seg->payload() );
-    for ( int y = 0; y < tileRows; ++y )
+    // Pre-read each band's window for this tile, then interleave per row.
+    for ( int b = 0; b < bands; ++b )
     {
-      const size_t srcRow = static_cast<size_t>( rowStart + y ) * width;
-      const size_t dstRow = static_cast<size_t>( y ) * width;
-      for ( int b = 0; b < bands; ++b )
+      if ( useNative )
       {
-        if ( useNative )
+        nativeTileBuf.resize( static_cast<size_t>( width ) * tileRows * elemSize );
+        if ( !ds.readBandWindowNative( b + 1, 0, rowStart, width, tileRows, nativeTileBuf.data() ) )
+          return {};
+        for ( int y = 0; y < tileRows; ++y )
         {
-          const unsigned char *src = nativePlanes[b].data() + srcRow * elemSize;
+          const unsigned char *srcRow = nativeTileBuf.data() + static_cast<size_t>( y ) * width * elemSize;
           for ( int x = 0; x < width; ++x )
           {
-            std::memcpy( payload + ( ( dstRow + x ) * bands + b ) * elemSize, src, elemSize );
-            src += elemSize;
+            std::memcpy( payload + ( ( static_cast<size_t>( y ) * width + x ) * bands + b ) * elemSize,
+                         srcRow + static_cast<size_t>( x ) * elemSize, elemSize );
           }
         }
-        else
+      }
+      else
+      {
+        floatTileBuf.resize( static_cast<size_t>( width ) * tileRows );
+        if ( !ds.readBandWindow( b + 1, 0, rowStart, width, tileRows, floatTileBuf.data() ) )
+          return {};
+        float *floatPayload = reinterpret_cast<float *>( payload );
+        for ( int y = 0; y < tileRows; ++y )
         {
-          const float *src = floatPlanes[b].data() + srcRow;
-          float *floatPayload = reinterpret_cast<float *>( payload );
+          const float *srcRow = floatTileBuf.data() + static_cast<size_t>( y ) * width;
           for ( int x = 0; x < width; ++x )
-            floatPayload[( dstRow + x ) * bands + b] = *src++;
+            floatPayload[( static_cast<size_t>( y ) * width + x ) * bands + b] = srcRow[x];
         }
       }
     }

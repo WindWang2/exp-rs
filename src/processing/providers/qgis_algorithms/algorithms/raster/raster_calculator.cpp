@@ -75,7 +75,23 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
 
     feedback->setProgress( 10 );
 
-    // Read all input bands into BandMath::BandData
+    // 384: only materialize bands referenced by the expression (e.g. "b1+b2" on a
+    // 13-band stack reads 2 bands, not 13). Falls back to all bands on parse error.
+    std::vector<int> required = BandMath::referencedBands( expression );
+    std::sort( required.begin(), required.end() );
+    required.erase( std::unique( required.begin(), required.end() ), required.end() );
+    const bool filterBands = !required.empty();
+
+    // Validate referenced band numbers against total band count early
+    int totalBandCount = 0;
+    for ( QgsRasterLayer *rl : rasterLayers ) totalBandCount += rl->dataProvider()->bandCount();
+    if ( filterBands )
+    {
+        for ( int b : required )
+            if ( b < 1 || b > totalBandCount )
+                throw QgsProcessingException( QObject::tr( "Expression references band b%1 but only %2 bands are available" ).arg( b ).arg( totalBandCount ) );
+    }
+
     BandMath::BandData bandData;
     size_t totalPixels = static_cast<size_t>( nCols ) * static_cast<size_t>( nRows );
     int bandIndex = 1;
@@ -85,6 +101,11 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
         QgsRasterDataProvider *provider = rl->dataProvider();
         for ( int band = 1; band <= provider->bandCount(); ++band )
         {
+            const int globalIdx = bandIndex;
+            bandIndex++;
+            if ( filterBands && std::find( required.begin(), required.end(), globalIdx ) == required.end() )
+                continue;
+
             if ( feedback->isCanceled() )
                 return {};
 
@@ -92,7 +113,7 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
             if ( !block || !block->isValid() )
                 throw QgsProcessingException( QObject::tr( "Could not read band %1 from %2" ).arg( band ).arg( rl->name() ) );
 
-            std::vector<float> &bandVec = bandData[bandIndex];
+            std::vector<float> &bandVec = bandData[globalIdx];
             bandVec.resize( totalPixels );
             for ( size_t i = 0; i < totalPixels; ++i )
             {
@@ -101,7 +122,6 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
                 else
                     bandVec[i] = static_cast<float>( block->value( i ) );
             }
-            bandIndex++;
         }
     }
 

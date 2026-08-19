@@ -158,6 +158,8 @@ void PluginHost::unloadAll()
 {
     for (auto it = m_plugins.begin(); it != m_plugins.end(); ++it) {
         if (it.value().loaded) {
+            // DATAPY-12: plugin unload detaches view model/actions before the
+            // library is unmapped, so the menu does not hold dangling vtables.
             it.value().instance->unload();
             if (it.value().loader) {
                 it.value().loader->unload();

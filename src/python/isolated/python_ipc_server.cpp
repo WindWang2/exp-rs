@@ -66,12 +66,25 @@ QString PythonIpcServer::serverName() const
 
 void PythonIpcServer::onNewConnection()
 {
+  if ( m_socket && m_socket->state() == QLocalSocket::ConnectedState )
+  {
+    // DATAPY-8: fail-closed — reject second connection while a worker is
+    // attached. Otherwise a same-user impostor kills the daemon (DoS) and
+    // gains the data./canvas./ui. RPC surface.
+    QLocalSocket *pending = m_server->nextPendingConnection();
+    if ( pending )
+    {
+      pending->close();
+      pending->deleteLater();
+    }
+    return;
+  }
   if ( m_socket )
   {
-    // Close existing socket if new connection arrives
     m_socket->disconnect();
     m_socket->close();
     m_socket->deleteLater();
+    m_socket = nullptr;
   }
 
   m_socket = m_server->nextPendingConnection();

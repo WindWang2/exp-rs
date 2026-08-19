@@ -136,8 +136,10 @@ class GdalStreamingOutput
     /// Set the NoData value for all output bands.
     bool setNoDataValue( double nodata );
 
-    /// Flush and release the dataset. Idempotent.
+    /// Flush and release the dataset. Idempotent. Logs errors; use closeWithError
+    /// when the caller must surface ENOSPC/flush failures.
     void close();
+    bool closeWithError(QString *errorMessage = nullptr);
 
   private:
     GDALDatasetH m_ds = nullptr;

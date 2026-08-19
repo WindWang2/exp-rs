@@ -254,6 +254,15 @@ public:
     bool readBandDataNative(int bandNum, void *buffer, int dstWidth, int dstHeight) const;
 
     /**
+     * Windowed native-type read (DATAPY-10): read a rectangular window of a band
+     * using the band's native GDAL type, straight into @a buffer (size
+     * srcWidth*srcHeight*elemSize). Used for zero-copy SHM tiled delivery to
+     * avoid full-plane materialization.
+     */
+    bool readBandWindowNative(int bandNum, int xOff, int yOff,
+                              int srcWidth, int srcHeight, void *buffer) const;
+
+    /**
      * Get the no-data value for a band.
      * @param bandNum 1-based band number
      * @param hasNodata set to true if a no-data value is defined

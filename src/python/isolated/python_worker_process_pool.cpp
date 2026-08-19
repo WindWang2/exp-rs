@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
+#include <QThread>
 #include <QTimer>
 #include <algorithm>
 #include <memory>
@@ -260,14 +261,23 @@ void PythonWorkerProcessPool::handleWorkerCrash( WorkerNode *node )
   }
 
   // Self-healing auto-restart with unique socket name
+  // DATAPY-3: keep node reserved for its owner — do not unconditionally clear
+  // isBusy; the owning PythonPluginAdapter still holds m_workerNode and re-binds
+  // its bridge on workerRestarted. Clearing it would let a second plugin bind
+  // a second bridge to the same server (crossed IPC).
+  const bool wasBusy = node->isBusy;
   node->restartCount++;
+  // DATAPY-4: exponential backoff before restart to avoid tight crash loop
+  const int backoffMs = std::min( 500 * ( 1 << std::min( node->restartCount, 5 ) ), 10000 );
+  if ( backoffMs > 0 )
+    QThread::msleep( static_cast<unsigned long>( backoffMs ) );
   QString socketName = QString( "sicnu_pool_%1_%2_%3" )
                          .arg( QCoreApplication::applicationPid() )
                          .arg( id )
                          .arg( node->restartCount );
   node->server = new PythonIpcServer();
   node->worker = new PythonWorkerProcess();
-  node->isBusy = false;
+  node->isBusy = wasBusy;
 
   if ( node->server->listen( socketName ) )
   {

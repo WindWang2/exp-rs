@@ -61,6 +61,7 @@ bool LayerTreePlugin::initialize(SicnuAppInterface *iface)
     layerTree->setLayerTreeModel(m_model);
     layerTree->setModel(m_model);
     layerTree->expandAll();
+    m_layerTreeView = layerTree;
 
     qDebug() << "LayerTreePlugin initialized";
     return true;
@@ -68,6 +69,19 @@ bool LayerTreePlugin::initialize(SicnuAppInterface *iface)
 
 void LayerTreePlugin::unload()
 {
+    // DATAPY-12: detach view model before library unload to avoid dangling
+    // view holding a model whose vtable is in the unmapped .so.
+    if ( m_layerTreeView )
+    {
+        m_layerTreeView->setModel( nullptr );
+        m_layerTreeView->setLayerTreeModel( nullptr );
+        m_layerTreeView = nullptr;
+    }
+    if ( m_model )
+    {
+        delete m_model;
+        m_model = nullptr;
+    }
     qDebug() << "LayerTreePlugin unloaded";
 }
 
@@ -79,19 +93,7 @@ QWidget *LayerTreePlugin::createWidget(QWidget *parent)
 
 QList<QAction*> LayerTreePlugin::menuActions()
 {
-    QList<QAction*> actions;
-
-    QAction *addRaster = new QAction(tr("Add Raster Layer..."), this);
-    connect(addRaster, &QAction::triggered, this, [this]() {
-        // This will be handled by the main window
-    });
-    actions.append(addRaster);
-
-    QAction *addVector = new QAction(tr("Add Vector Layer..."), this);
-    connect(addVector, &QAction::triggered, this, [this]() {
-        // This will be handled by the main window
-    });
-    actions.append(addVector);
-
-    return actions;
+    // DATAPY-12: previously returned dead actions with empty lambdas (same
+    // class as #215). Return empty list — main window owns these entries.
+    return {};
 }

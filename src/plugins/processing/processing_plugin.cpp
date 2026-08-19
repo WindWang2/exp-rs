@@ -51,13 +51,6 @@ QWidget *ProcessingPlugin::createWidget(QWidget *parent)
 
 QList<QAction*> ProcessingPlugin::menuActions()
 {
-    QList<QAction*> actions;
-
-    QAction *toolbox = new QAction(tr("Processing Toolbox"), this);
-    connect(toolbox, &QAction::triggered, this, [this]() {
-        // Show processing toolbox dock
-    });
-    actions.append(toolbox);
-
-    return actions;
+    // DATAPY-12: previously dead action with empty lambda.
+    return {};
 }

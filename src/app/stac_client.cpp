@@ -184,8 +184,20 @@ void StacClient::search(const QString &endpoint, const QString &collection,
                          QNetworkRequest::NoLessSafeRedirectPolicy);
 
     QNetworkReply *reply = mManager.get(request);
+    connect(reply, &QNetworkReply::redirected, this, [reply](const QUrl &url){
+        // 392: re-validate every redirect target against the same SSRF policy
+        const QString err = StacClient::validateUrlPolicy(url, true);
+        if (!err.isEmpty()) {
+            reply->abort();
+        }
+    });
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
+        // 392 belt-and-suspenders: final URL after redirects must still pass policy
+        if (!validateUrlPolicy(reply->url(), true).isEmpty()) {
+            emit searchCompleted(QVariantList(), validateUrlPolicy(reply->url(), true));
+            return;
+        }
         if (reply->error() != QNetworkReply::NoError)
         {
             emit searchCompleted(QVariantList(), reply->errorString());

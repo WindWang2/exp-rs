@@ -11,7 +11,11 @@ namespace sicnu::operators::rs {
  * rs:mosaic — mosaic multiple co-registered single-band rasters into one.
  *
  * Inputs must share CRS and roughly compatible pixel size. Band 1 of each
- * input is read as float and merged via Mosaic::merge (first-valid wins).
+ * input is read as float and merged via streaming window merge (first-valid
+ * wins, with CRS/pixel-size/rotation guards and sentinel gap-fill). The
+ * standalone Mosaic::merge kernel in processing/algorithms/mosaic.cpp is a
+ * legacy in-memory reference used by the panel path; the production rs:mosaic
+ * operator implements its own tiled window loop.
  *
  * Parameters:
  *   inputs  (array of string, required) Input raster paths
