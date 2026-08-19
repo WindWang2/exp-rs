@@ -40,19 +40,40 @@ AgentTool makeDrawRoiTool()
   bbox["required"] = bboxReq;
   props["bbox"] = bbox;
 
-  schema["properties"] = props;
-  Json::Value req( Json::arrayValue );
-  req.append( "bbox" );
-  schema["required"] = req;
+  Json::Value geomProp( Json::objectValue );
+  geomProp["type"] = "string";
+  geomProp["description"] = "WKT polygon or geometry string defining the ROI (alternative to bbox)";
+  props["geometry"] = geomProp;
 
+  Json::Value crsProp( Json::objectValue );
+  crsProp["type"] = "string";
+  crsProp["description"] = "CRS auth ID (e.g. EPSG:4326), when omitted canvas CRS is assumed";
+  props["crs"] = crsProp;
+
+  schema["properties"] = props;
+  // Single-owner: registry owns ROI schema (bbox/geometry/crs), none required — align with createRoiSetSchema.
   tool.inputSchema = schema;
 
   sicnu::processing::PortDescriptor bboxPort;
   bboxPort.name = "bbox";
   bboxPort.displayName = "Bounding Box";
   bboxPort.type = sicnu::processing::DataType::BoundingBox;
-  bboxPort.required = true;
+  bboxPort.required = false;
   tool.inputs.push_back( bboxPort );
+
+  sicnu::processing::PortDescriptor geomPortIn;
+  geomPortIn.name = "geometry";
+  geomPortIn.displayName = "Geometry WKT";
+  geomPortIn.type = sicnu::processing::DataType::String;
+  geomPortIn.required = false;
+  tool.inputs.push_back( geomPortIn );
+
+  sicnu::processing::PortDescriptor crsPort;
+  crsPort.name = "crs";
+  crsPort.displayName = "CRS";
+  crsPort.type = sicnu::processing::DataType::String;
+  crsPort.required = false;
+  tool.inputs.push_back( crsPort );
 
   sicnu::processing::PortDescriptor geomPort;
   geomPort.name = "geometry";
@@ -73,7 +94,7 @@ AgentTool makeSetBandCompositeTool()
   tool.displayName = "Set Raster Band Composite";
   tool.category = ToolCategory::Interaction;
   tool.group = "display";
-  tool.description = "Set raster RGB band composite rendering mode and channel assignment (e.g. true-color RGB or false-color NIR-R-G) to show raster on map canvas.";
+  tool.description = "Set raster RGB band composite rendering mode and channel assignment (e.g. true-color RGB or false-color NIR-R-G) to show raster on map canvas. Supports semantic band roles ('red','nir',etc) or 1-based band numbers; also gray and opacity.";
   tool.tags = { "raster", "band", "composite", "rgb", "display", "show raster", "visualization", "render" };
 
   Json::Value schema( Json::objectValue );
@@ -81,64 +102,60 @@ AgentTool makeSetBandCompositeTool()
 
   Json::Value props( Json::objectValue );
 
+  Json::Value layerProp( Json::objectValue );
+  layerProp["type"] = "string";
+  layerProp["description"] = "Optional raster layer ID, name or asset ID; when omitted active raster is used";
+  props["layer"] = layerProp;
+
+  // Backward compat aliases
   Json::Value layerId( Json::objectValue );
   layerId["type"] = "string";
-  layerId["description"] = "Layer ID or layer name of the raster on map canvas";
+  layerId["description"] = "Layer ID or layer name (alias for layer)";
   props["layer_id"] = layerId;
 
   Json::Value rBand( Json::objectValue );
-  rBand["type"] = "integer";
-  rBand["description"] = "1-based band index for Red channel";
+  rBand["description"] = "Red channel band role (e.g. 'red','nir') or 1-based band number";
+  props["red"] = rBand;
   props["red_band"] = rBand;
 
   Json::Value gBand( Json::objectValue );
-  gBand["type"] = "integer";
-  gBand["description"] = "1-based band index for Green channel";
+  gBand["description"] = "Green channel band role or 1-based band number";
+  props["green"] = gBand;
   props["green_band"] = gBand;
 
   Json::Value bBand( Json::objectValue );
-  bBand["type"] = "integer";
-  bBand["description"] = "1-based band index for Blue channel";
+  bBand["description"] = "Blue channel band role or 1-based band number";
+  props["blue"] = bBand;
   props["blue_band"] = bBand;
 
+  Json::Value grayProp( Json::objectValue );
+  grayProp["description"] = "Single channel band role or 1-based band number for grayscale rendering (optional)";
+  props["gray"] = grayProp;
+
+  Json::Value opacityProp( Json::objectValue );
+  opacityProp["type"] = "number";
+  opacityProp["description"] = "Opacity 0.0-1.0 (optional)";
+  props["opacity"] = opacityProp;
+
   schema["properties"] = props;
-
-  Json::Value req( Json::arrayValue );
-  req.append( "layer_id" );
-  req.append( "red_band" );
-  req.append( "green_band" );
-  req.append( "blue_band" );
-  schema["required"] = req;
-
+  // No required — layer and channels are optional per registry (active layer fallback).
   tool.inputSchema = schema;
 
   sicnu::processing::PortDescriptor pLayer;
-  pLayer.name = "layer_id";
-  pLayer.displayName = "Layer ID";
+  pLayer.name = "layer";
+  pLayer.displayName = "Layer";
   pLayer.type = sicnu::processing::DataType::Raster;
-  pLayer.required = true;
+  pLayer.required = false;
   tool.inputs.push_back( pLayer );
 
-  sicnu::processing::PortDescriptor pR;
-  pR.name = "red_band";
-  pR.displayName = "Red Band";
-  pR.type = sicnu::processing::DataType::Integer;
-  pR.required = true;
-  tool.inputs.push_back( pR );
-
-  sicnu::processing::PortDescriptor pG;
-  pG.name = "green_band";
-  pG.displayName = "Green Band";
-  pG.type = sicnu::processing::DataType::Integer;
-  pG.required = true;
-  tool.inputs.push_back( pG );
-
-  sicnu::processing::PortDescriptor pB;
-  pB.name = "blue_band";
-  pB.displayName = "Blue Band";
-  pB.type = sicnu::processing::DataType::Integer;
-  pB.required = true;
-  tool.inputs.push_back( pB );
+  for (auto name : {"red","green","blue","gray"}) {
+    sicnu::processing::PortDescriptor p;
+    p.name = name;
+    p.displayName = name;
+    p.type = sicnu::processing::DataType::String;
+    p.required = false;
+    tool.inputs.push_back(p);
+  }
 
   sicnu::processing::PortDescriptor pOut;
   pOut.name = "success";
@@ -159,7 +176,7 @@ AgentTool makeSetStretchTool()
   tool.displayName = "Set Raster Display Stretch";
   tool.category = ToolCategory::Interaction;
   tool.group = "display";
-  tool.description = "Configure contrast enhancement and histogram stretch (min-max, 2% cumulative cut, standard deviation) to show raster with clear contrast on map canvas.";
+  tool.description = "Configure contrast enhancement and histogram stretch (min-max, 2% cumulative cut, standard deviation) to show raster with clear contrast on map canvas. Supports method/min/max/lower/upper/factor.";
   tool.tags = { "raster", "stretch", "contrast", "display", "show raster", "visualization", "histogram", "enhancement" };
 
   Json::Value schema( Json::objectValue );
@@ -167,55 +184,53 @@ AgentTool makeSetStretchTool()
 
   Json::Value props( Json::objectValue );
 
+  Json::Value layerProp( Json::objectValue );
+  layerProp["type"] = "string";
+  layerProp["description"] = "Optional raster layer ID, name or asset ID; when omitted active raster is used";
+  props["layer"] = layerProp;
   Json::Value layerId( Json::objectValue );
   layerId["type"] = "string";
-  layerId["description"] = "Layer ID or layer name of the raster on map canvas";
+  layerId["description"] = "Layer ID alias for layer";
   props["layer_id"] = layerId;
 
-  Json::Value stretchType( Json::objectValue );
-  stretchType["type"] = "string";
-  stretchType["description"] = "Stretch algorithm: 'min_max', 'percentile_2_98', 'std_dev_2', 'none'";
+  Json::Value methodProp( Json::objectValue );
+  methodProp["type"] = "string";
+  methodProp["description"] = "Stretch method: 'minimum_maximum','percent_clip','stddev','none' (also accepts legacy min_max/percentile_2_98/std_dev_2)";
   Json::Value enumOpts( Json::arrayValue );
+  enumOpts.append( "minimum_maximum" );
+  enumOpts.append( "percent_clip" );
+  enumOpts.append( "stddev" );
+  enumOpts.append( "none" );
   enumOpts.append( "min_max" );
   enumOpts.append( "percentile_2_98" );
   enumOpts.append( "std_dev_2" );
-  enumOpts.append( "none" );
-  stretchType["enum"] = enumOpts;
-  props["stretch_type"] = stretchType;
+  methodProp["enum"] = enumOpts;
+  props["method"] = methodProp;
+  props["stretch_type"] = methodProp;
 
-  Json::Value minVal( Json::objectValue );
-  minVal["type"] = "number";
-  minVal["description"] = "Manual minimum display value (optional)";
-  props["min_val"] = minVal;
-
-  Json::Value maxVal( Json::objectValue );
-  maxVal["type"] = "number";
-  maxVal["description"] = "Manual maximum display value (optional)";
-  props["max_val"] = maxVal;
+  for (auto name : {"lower","upper","factor","min","max","min_val","max_val"}) {
+    Json::Value v( Json::objectValue );
+    v["type"] = "number";
+    v["description"] = std::string(name) + " (optional)";
+    props[name] = v;
+  }
 
   schema["properties"] = props;
-
   Json::Value req( Json::arrayValue );
-  req.append( "layer_id" );
-  req.append( "stretch_type" );
+  req.append( "method" );
   schema["required"] = req;
 
   tool.inputSchema = schema;
 
-  sicnu::processing::PortDescriptor pLayer;
-  pLayer.name = "layer_id";
-  pLayer.displayName = "Layer ID";
-  pLayer.type = sicnu::processing::DataType::Raster;
-  pLayer.required = true;
-  tool.inputs.push_back( pLayer );
-
-  sicnu::processing::PortDescriptor pType;
-  pType.name = "stretch_type";
-  pType.displayName = "Stretch Type";
-  pType.type = sicnu::processing::DataType::Enum;
-  pType.required = true;
-  pType.enumOptions = { "min_max", "percentile_2_98", "std_dev_2", "none" };
-  tool.inputs.push_back( pType );
+  for (auto name : {"layer","method","lower","upper","factor","min","max"}) {
+    sicnu::processing::PortDescriptor p;
+    p.name = name;
+    p.displayName = name;
+    p.type = (std::string(name)=="layer"||std::string(name)=="method")? sicnu::processing::DataType::String : sicnu::processing::DataType::Integer;
+    p.required = (std::string(name)=="method");
+    if (std::string(name)=="method") p.enumOptions = { "minimum_maximum","percent_clip","stddev","none","min_max","percentile_2_98","std_dev_2" };
+    tool.inputs.push_back(p);
+  }
 
   sicnu::processing::PortDescriptor pOut;
   pOut.name = "success";

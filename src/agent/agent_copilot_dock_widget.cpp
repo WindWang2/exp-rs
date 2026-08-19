@@ -352,7 +352,7 @@ void AgentCopilotDockWidget::onContentTokenReceived( const QString &text )
   m_accumulatedContent += text;
   if ( m_currentContentLabel )
   {
-    m_currentContentLabel->setText( m_accumulatedContent );
+    m_currentContentLabel->setText( m_accumulatedContent.toHtmlEscaped() );
   }
 }
 
@@ -384,21 +384,32 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
 
   // Single tool call: submit asynchronously; the completion payload arrives
   // via the watcher (never blocks the GUI thread). Outputs are committed and
-  // layers auto-displayed by the dispatcher; the completion payload has no
-  // further consumer since the toolExecutionFinished signal was removed as
-  // dead (ADR 0047).
+  // layers auto-displayed by the dispatcher.
   QString error;
-  const bool ok = m_toolCallDispatcher.submit( cppEnvelope, [this]( const Json::Value &resultPayload ) {
-    if ( resultPayload.isObject() && resultPayload.isMember( "status" ) && resultPayload["status"].asString() == "error" )
-    {
-      const std::string msg = resultPayload.isMember( "errorMessage" ) ? resultPayload["errorMessage"].asString() : "Tool execution failed";
-      appendErrorMessage( QString::fromStdString( msg ) );
-    }
-  }, &error );
+  long taskId = -1;
+  const bool ok = m_toolCallDispatcher.submit( cppEnvelope, {}, &error, &taskId );
 
   if ( !ok )
   {
     handleToolCallRejection( error );
+    return;
+  }
+  // For interaction actions the dispatcher completed synchronously (sentinel
+  // task id 9000001). No watcher needed — result already delivered via the
+  // InteractionActionHandler inline.
+  if (taskId == 9000001)
+  {
+    return;
+  }
+  if (taskId > 0)
+  {
+    watchToolCallCompletion(taskId, [this]( const Json::Value &resultPayload ) {
+      if ( resultPayload.isObject() && resultPayload.isMember( "status" ) && resultPayload["status"].asString() == "error" )
+      {
+        const std::string msg = resultPayload.isMember( "errorMessage" ) ? resultPayload["errorMessage"].asString() : "Tool execution failed";
+        appendErrorMessage( QString::fromStdString( msg ) );
+      }
+    });
   }
 }
 
@@ -456,7 +467,7 @@ void AgentCopilotDockWidget::appendToolCallCard( const QJsonObject &toolCallJson
   QJsonObject funcObj = toolCallJson[QStringLiteral( "function" )].toObject();
   QString algName = funcObj[QStringLiteral( "name" )].toString();
 
-  auto *title = new QLabel( QString( "⚡ 准备执行工具: <b>%1</b>" ).arg( algName ), card );
+  auto *title = new QLabel( QString( "⚡ 准备执行工具: <b>%1</b>" ).arg( algName.toHtmlEscaped() ), card );
   title->setStyleSheet( QStringLiteral( "color: #38bdf8;" ) );
   layout->addWidget( title );
 

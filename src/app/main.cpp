@@ -55,6 +55,7 @@
 #include "app/main_window.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "agent/mcp_server.h"
+#include "agent/interaction_tool_registry.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "processing/framework/algorithm_engine.h"
 
@@ -189,11 +190,16 @@ int main(int argc, char *argv[])
         // Bare DataManager gives the MCP tool-call dispatcher its asset
         // authority headlessly (same idiom as RsPipelineRunner, TICKET-23).
         auto mcpDataManager = std::make_unique<sicnu::data::DataManager>();
+        // Headless data tools (data:list_layers etc.) work without GUI;
+        // GUI-only view/roi/canvas/raster tools stay unregistered headlessly
+        // and are filtered from tools/list (see McpServer::handleListTools).
+        sicnu::agent::InteractionToolRegistry::instance().registerDataTools( mcpDataManager.get() );
         McpServer server;
         server.setDataManager( mcpDataManager.get() );
         server.start(app);
         int result = app->exec();
         sicnu::TaskCenter::instance().shutdown();
+        sicnu::jobs::JobEngine::instance().shutdown();
         delete app;
         return result;
     }

@@ -60,6 +60,8 @@ class LlmStreamingClient : public QObject
      */
     void parseSseLine( const QString &line );
 
+    QString finishReason() const { return m_lastFinishReason; }
+
   signals:
     void reasoningTokenReceived( const QString &reasoningText );
     void contentTokenReceived( const QString &textDelta );
@@ -96,6 +98,7 @@ class LlmStreamingClient : public QObject
 
     std::map<int, ToolCallAccumulator> m_toolCalls;
     bool m_finishedEmitted = false;
+    QString m_lastFinishReason;
 };
 
 } // namespace sicnu::agent

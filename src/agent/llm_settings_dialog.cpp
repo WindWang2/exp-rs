@@ -124,6 +124,12 @@ void LlmSettingsDialog::onTestConnectionClicked()
       m_statusLabel->setText( QString( "连接失败: %1" ).arg( err ) );
       m_statusLabel->setStyleSheet( QStringLiteral( "color: red;" ) );
     } );
+    connect( m_testClient, &LlmStreamingClient::finished, this, [this]() {
+      if (m_statusLabel->text().contains(QStringLiteral("正在测试"))) {
+        m_statusLabel->setText( QStringLiteral( "连接成功，但无内容返回" ) );
+        m_statusLabel->setStyleSheet( QStringLiteral( "color: orange;" ) );
+      }
+    } );
   }
 
   LlmProviderProfile prof = selectedProfile();

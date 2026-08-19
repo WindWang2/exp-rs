@@ -33,11 +33,17 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <csignal>
 #include <regex>
 #include <sstream>
 #include <unordered_set>
 
+#include "jobs/job_engine.h"
+
 namespace sicnu::cli {
+
+extern volatile sig_atomic_t g_cliInterrupted;
+bool cliIsInterrupted();
 
 namespace {
 
@@ -397,6 +403,16 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
   const auto deadline = std::chrono::steady_clock::now() + kPipelineTimeout;
   for ( ;; )
   {
+    if ( g_cliInterrupted || cliIsInterrupted() )
+    {
+        sicnu::TaskCenter::instance().cancelPipeline( pipelineId );
+        sicnu::TaskCenter::instance().shutdown();
+        sicnu::jobs::JobEngine::instance().shutdown();
+        result.errorMessage = "Pipeline interrupted by signal";
+        reportLog( "error", result.errorMessage );
+        result.success = false;
+        return result;
+    }
     // Wait for completion, waking every poll interval to emit progress.
     const auto pipeInfo = sicnu::TaskCenter::instance().waitForPipeline( pipelineId, kPipelinePollInterval );
 
@@ -639,9 +655,6 @@ bool RsPipelineRunner::validatePipelineJson( const Json::Value &pipelineJson,
     return false;
   }
 
-  const QString workspace = QProcessEnvironment::systemEnvironment().value(
-    QStringLiteral( "SICNU_PIPELINE_WORKSPACE" ) );
-
   for ( Json::ArrayIndex i = 0; i < steps.size(); ++i )
   {
     const Json::Value step = steps[i];
@@ -663,17 +676,10 @@ bool RsPipelineRunner::validatePipelineJson( const Json::Value &pipelineJson,
         *errorMessage = "Step " + std::to_string( i ) + " 'params' is not an object";
       return false;
     }
-
-    if ( !workspace.isEmpty() && step.isMember( "params" ) )
-    {
-      std::string detail;
-      if ( jsonValueOutsideWorkspace( step["params"], workspace, &detail ) )
-      {
-        if ( errorMessage )
-          *errorMessage = "Step " + std::to_string( i ) + ": " + detail;
-        return false;
-      }
-    }
+    // Workspace path containment is enforced post-expansion in
+    // cliJsonToWorkflowDefinition (after ${VAR} expansion and CWD
+    // resolution) — pre-expansion checks here would be bypassable
+    // (issue #313) and are intentionally omitted.
   }
   return true;
 }

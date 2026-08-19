@@ -1,5 +1,6 @@
 // src/agent/llm_config_manager.cpp
 #include "llm_config_manager.h"
+#include <QFile>
 
 namespace sicnu::agent
 {
@@ -194,6 +195,13 @@ void LlmConfigManager::updateProfiles( const QList<LlmProviderProfile> &profiles
   }
   settings.endArray();
   settings.endGroup();
+  settings.sync();
+  // Restrict permissions on the ini file that stores plaintext API keys
+  // (best-effort hardening; future migration to OS keyring tracked separately).
+  if (!settings.fileName().isEmpty())
+  {
+    QFile::setPermissions(settings.fileName(), QFile::ReadOwner | QFile::WriteOwner);
+  }
 
   emit profilesChanged();
 }

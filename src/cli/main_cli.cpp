@@ -17,14 +17,25 @@
 #include <iostream>
 #include <memory>
 
+#include <qgsapplication.h>
+#include "app/app_paths.h"
+
 using namespace sicnu::cli;
 namespace operators = sicnu::operators;
+
+namespace sicnu::cli {
+volatile sig_atomic_t g_cliInterrupted = 0;
+
+bool cliIsInterrupted()
+{
+    return g_cliInterrupted != 0;
+}
+} // namespace sicnu::cli
 
 namespace {
 void handleSignal( int )
 {
-    sicnu::TaskCenter::instance().shutdown();
-    sicnu::jobs::JobEngine::instance().shutdown();
+    sicnu::cli::g_cliInterrupted = 1;
 }
 
 struct ShutdownGuard {
@@ -41,8 +52,8 @@ int main(int argc, char *argv[])
     std::signal( SIGTERM, handleSignal );
     ShutdownGuard shutdownGuard;
 
-    QCoreApplication app(argc, argv);
-    QCoreApplication::setApplicationName("sicnu_geo_rs_cli");
+    QgsApplication app(argc, argv, false);
+    app.setApplicationName("sicnu_geo_rs_cli");
     QCoreApplication::setApplicationVersion("0.9.2-dev");
 
     QCommandLineParser parser;
@@ -78,6 +89,12 @@ int main(int argc, char *argv[])
     parser.process(app);
 
     ensureGdalInit();
+
+    // Bootstrap QgsApplication on main thread before JobEngine workers can log
+    // (issue #365: first QgsMessageLog from worker lazily constructs
+    // QgsApplication::members() off main thread → Q_ASSERT → SIGABRT).
+    QgsApplication::setPrefixPath(AppPaths::prefixPath(), true);
+    QgsApplication::initQgis();
 
     // Initialize AlgorithmEngine facade (registers providers and tool paths)
     sicnu::AlgorithmEngine::instance().initialize();

@@ -193,6 +193,7 @@ struct MetaToolSchemaInput {
     const char *name;
     const char *type;
     const char *description;
+    bool required;
 };
 
 struct MetaToolDef {
@@ -212,74 +213,74 @@ const MetaToolDef kMetaTools[] = {
       "Search/filter the canonical algorithm catalog by group, tag, purpose text, "
       "input or output type, or large-raster safety. Returns the same compact "
       "entries as list_algorithms.",
-      { { "query", "string", "Free-text filter matched against id, name, group and purpose (case-insensitive). Empty = no text filter." },
-        { "group", "string", "Exact group filter (e.g. 'spectral', 'change detection'). Optional." },
-        { "input_type", "string", "Input data type filter (Raster/Vector/Table/Numeric/Integer/String/Boolean/Json). Optional." },
-        { "output_type", "string", "Output data type filter (Raster/Vector/Table/Numeric/Integer/String/Boolean/Json). Optional." },
-        { "large_raster_safe", "boolean", "When true, only streaming/multipass operators. Optional." } } },
+      { { "query", "string", "Free-text filter matched against id, name, group and purpose (case-insensitive). Empty = no text filter.", false },
+        { "group", "string", "Exact group filter (e.g. 'spectral', 'change detection'). Optional.", false },
+        { "input_type", "string", "Input data type filter (Raster/Vector/Table/Numeric/Integer/String/Boolean/Json). Optional.", false },
+        { "output_type", "string", "Output data type filter (Raster/Vector/Table/Numeric/Integer/String/Boolean/Json). Optional.", false },
+        { "large_raster_safe", "boolean", "When true, only streaming/multipass operators. Optional.", false } } },
     { "get_algorithm_schema",
       "Get the detailed input parameter JSON Schema, real output ports, and agent "
       "metadata for a specific algorithm.",
-      { { "algorithm_id", "string", "Unique ID of the algorithm, e.g., 'rs:spectral_index'" } } },
+      { { "algorithm_id", "string", "Unique ID of the algorithm, e.g., 'rs:spectral_index'", true } } },
     { "preflight_algorithm",
       "Validate parameters and dataset compatibility WITHOUT executing: schema "
       "validation, raster dataset probes (size/bands/CRS/radiometric state), "
       "same-grid/CRS/band/radiometric checks, and a dynamic resource (RAM) "
       "estimate. Use before execute_algorithm to plan a run.",
-      { { "algorithm_id", "string", "ID of the algorithm to preflight" },
-        { "parameters", "object", "Planned parameter name-value pairs" } } },
+      { { "algorithm_id", "string", "ID of the algorithm to preflight", true },
+        { "parameters", "object", "Planned parameter name-value pairs", false } } },
     { "execute_algorithm",
       "Asynchronously run a processing algorithm with the specified parameters.",
-      { { "algorithm_id", "string", "ID of the algorithm to execute" },
-        { "parameters", "object", "Parameter name-value pairs for the algorithm" } } },
+      { { "algorithm_id", "string", "ID of the algorithm to execute", true },
+        { "parameters", "object", "Parameter name-value pairs for the algorithm", false } } },
     { "get_execution_status",
       "Get progress, execution status, results, and the committed asset id of an "
       "ongoing or completed algorithm execution.",
-      { { "execution_id", "string", "The execution ID returned by execute_algorithm" } } },
+      { { "execution_id", "string", "The execution ID returned by execute_algorithm", true } } },
     { "cancel_execution",
       "Cancel an actively running algorithm execution.",
-      { { "execution_id", "string", "The execution ID of the run to cancel" } } },
+      { { "execution_id", "string", "The execution ID of the run to cancel", true } } },
     { "list_operators",
       "List all registered RSOperator algorithms (legacy Agent surface: rs:/opencv:/gdal:/otb:).",
       {} },
     { "get_operator_schema",
       "Get JSON Schema and metadata for an RSOperator (e.g. 'rs:spectral_index').",
-      { { "operator_id", "string", "Operator id, e.g. 'rs:spectral_index'" } } },
+      { { "operator_id", "string", "Operator id, e.g. 'rs:spectral_index'", true } } },
     { "execute_operator",
       "Asynchronously run an RSOperator with JSON parameters. Returns execution_id.",
-      { { "operator_id", "string", "Operator id to execute" },
-        { "parameters", "object", "JSON parameter object" } } },
+      { { "operator_id", "string", "Operator id to execute", true },
+        { "parameters", "object", "JSON parameter object", false } } },
     { "list_layers",
       "List all raster and vector layers loaded in the current QGIS project.",
       {} },
     { "describe_dataset",
       "Get detailed layer metadata, including spatial extent, coordinate reference system (CRS), and band/field details.",
-      { { "layer_id", "string", "Name or ID of the layer to describe" } } },
+      { { "layer_id", "string", "Name or ID of the layer to describe", true } } },
     { "get_lineage",
       "Query a Data Manager asset's processing provenance and lineage: the "
       "deriving algorithm + parameters when the asset was produced, its input "
       "assets (derivedFrom), and any assets derived from it (derivedOutputsOf).",
-      { { "asset_id", "string", "Data Manager asset id (UUID) to query" } } },
+      { { "asset_id", "string", "Data Manager asset id (UUID) to query", true } } },
     { "list_interaction_tools",
       "List all interactive GIS tools (view controls, layer navigation, canvas ROI).",
       {} },
     { "get_interaction_schema",
       "Get JSON Schema and parameters for an interaction tool (e.g. 'view:set_extent', 'roi:set').",
-      { { "tool_name", "string", "Interaction tool name (e.g. 'view:get_state', 'view:set_extent', 'roi:set')" } } },
+      { { "tool_name", "string", "Interaction tool name (e.g. 'view:get_state', 'view:set_extent', 'roi:set')", true } } },
     { "list_tools",
       "List all unified agent tools (Processing algorithms, Interaction/Canvas tools, Data tools). "
       "Returns category, name, description, and JSON schema.",
-      { { "category", "string", "Optional category filter: 'Processing', 'Interaction', 'Data', 'Custom'." } } },
+      { { "category", "string", "Optional category filter: 'Processing', 'Interaction', 'Data', 'Custom'.", false } } },
     { "search_tools",
       "Search unified agent tools by free text (e.g. 'show raster', 'roi', 'spectral'), group, tag, or input/output type.",
-      { { "query", "string", "Free-text filter matched against name, group, purpose, tags, and description." },
-        { "group", "string", "Exact or substring group filter. Optional." },
-        { "tag", "string", "Tag filter. Optional." },
-        { "input_type", "string", "Input data type filter. Optional." },
-        { "output_type", "string", "Output data type filter. Optional." } } },
+      { { "query", "string", "Free-text filter matched against name, group, purpose, tags, and description.", false },
+        { "group", "string", "Exact or substring group filter. Optional.", false },
+        { "tag", "string", "Tag filter. Optional.", false },
+        { "input_type", "string", "Input data type filter. Optional.", false },
+        { "output_type", "string", "Output data type filter. Optional.", false } } },
     { "get_tool_schema",
       "Get parameter JSON Schema and metadata for any registered tool in the unified Agent Tool Catalog.",
-      { { "tool_id", "string", "Unique ID of the tool, e.g. 'rs:spectral_index', 'canvas:draw_roi', 'data:list_layers'" } } },
+      { { "tool_id", "string", "Unique ID of the tool, e.g. 'rs:spectral_index', 'canvas:draw_roi', 'data:list_layers'", true } } },
 };
 
 QVariantMap metaToolInputSchema(const MetaToolDef &def)
@@ -293,7 +294,8 @@ QVariantMap metaToolInputSchema(const MetaToolDef &def)
         prop[QStringLiteral("type")] = QString::fromUtf8(input.type);
         prop[QStringLiteral("description")] = QString::fromUtf8(input.description);
         properties[QString::fromUtf8(input.name)] = prop;
-        required.append(QString::fromUtf8(input.name));
+        if (input.required)
+            required.append(QString::fromUtf8(input.name));
     }
     schema[QStringLiteral("properties")] = properties;
     if (!required.isEmpty())
@@ -371,9 +373,16 @@ void StdinReader::requestStop()
 
 void StdinReader::run()
 {
+    constexpr size_t kMaxMcpLine = 4 * 1024 * 1024;
     std::string stdLine;
     while (!m_stopRequested && std::getline(std::cin, stdLine))
     {
+        if (stdLine.size() > kMaxMcpLine)
+        {
+            // Oversized line: report parse error without allocating huge QString
+            emit lineRead(QStringLiteral("__MCP_LINE_TOO_LONG__"));
+            continue;
+        }
         QString line = QString::fromStdString(stdLine).trimmed();
         if (!line.isEmpty())
         {
@@ -420,6 +429,11 @@ void McpServer::start(QCoreApplication *app)
 
 void McpServer::onLineRead(const QString &line)
 {
+    if (line == QStringLiteral("__MCP_LINE_TOO_LONG__"))
+    {
+        sendError(QVariant(), -32700, QStringLiteral("Parse error: line too long (exceeds 4 MiB)"));
+        return;
+    }
     QJsonParseError error;
     QJsonDocument doc = QJsonDocument::fromJson(line.toUtf8(), &error);
     if (error.error != QJsonParseError::NoError)
@@ -440,6 +454,7 @@ void McpServer::onLineRead(const QString &line)
 void McpServer::handleRequest(const QVariantMap &request)
 {
     QVariant id = request.value(QStringLiteral("id"));
+    const bool isNotification = !request.contains(QStringLiteral("id"));
     QString method = request.value(QStringLiteral("method")).toString();
     QVariantMap params = request.value(QStringLiteral("params")).toMap();
 
@@ -448,10 +463,9 @@ void McpServer::handleRequest(const QVariantMap &request)
     if (method == QStringLiteral("initialize"))
     {
         QVariantMap result;
-        QString protocolVersion = params.value(QStringLiteral("protocolVersion")).toString();
-        if (protocolVersion.isEmpty())
-            protocolVersion = QStringLiteral("2024-11-05");
-        result[QStringLiteral("protocolVersion")] = protocolVersion;
+        // MCP spec: server responds with latest version it supports, not echo.
+        static const QString kSupportedVersion = QStringLiteral("2024-11-05");
+        result[QStringLiteral("protocolVersion")] = kSupportedVersion;
 
         QVariantMap capabilities;
         QVariantMap toolsCap;
@@ -610,8 +624,14 @@ void McpServer::handleRequest(const QVariantMap &request)
             {
                 resultData = dispatchToolCall(toolName, arguments, false);
             }
+            else if (isToolIdAllowed(toolName))
+            {
+                resultData = dispatchToolCall(toolName, arguments, false);
+            }
             else
             {
+                if (isNotification)
+                    return;
                 sendError(id, -32601, QStringLiteral("Method not found: ") + toolName);
                 return;
             }
@@ -624,15 +644,19 @@ void McpServer::handleRequest(const QVariantMap &request)
         }
         catch (const std::exception &e)
         {
-            sendError(id, -32000, QString::fromUtf8(e.what()));
+            if (!isNotification)
+                sendError(id, -32000, QString::fromUtf8(e.what()));
         }
         catch (...)
         {
-            sendError(id, -32000, QStringLiteral("Unknown error during tool execution"));
+            if (!isNotification)
+                sendError(id, -32000, QStringLiteral("Unknown error during tool execution"));
         }
     }
     else
     {
+        if (isNotification)
+            return;
         sendError(id, -32601, QStringLiteral("Method not found: ") + method);
     }
 }
@@ -653,8 +677,22 @@ void McpServer::sendResponse(const QVariant &id, const QVariantMap &result)
 
 void McpServer::sendError(const QVariant &id, int code, const QString &message)
 {
-    if (id.isNull() || !id.isValid())
+    if ((id.isNull() || !id.isValid()) && code != -32700 && code != -32600)
         return;
+
+    if (id.isNull() || !id.isValid())
+    {
+        QJsonObject resp;
+        resp[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
+        resp[QStringLiteral("id")] = QJsonValue(QJsonValue::Null);
+        QJsonObject err;
+        err[QStringLiteral("code")] = code;
+        err[QStringLiteral("message")] = message;
+        resp[QStringLiteral("error")] = err;
+        QJsonDocument doc(resp);
+        std::cout << doc.toJson(QJsonDocument::Compact).constData() << std::endl;
+        return;
+    }
 
     QVariantMap response;
     response[QStringLiteral("jsonrpc")] = QStringLiteral("2.0");
@@ -1330,7 +1368,21 @@ QVariantMap McpServer::handleListTools(const QString &category)
     QVariantList toolList;
     toolList.reserve(static_cast<int>(tools.size()));
 
+    const bool headlessNoGui = sicnu::agent::InteractionToolRegistry::instance().toolCount() == 0
+        || sicnu::agent::InteractionToolRegistry::instance().findTool("view:get_state") == std::nullopt;
     for (const auto &t : tools) {
+        // In headless MCP (no GUI registry), hide GUI-only interaction tools
+        // that would always fail with -32000.
+        if (headlessNoGui && t.category == ToolCategory::Interaction) {
+            const QString qname = QString::fromStdString(t.name);
+            if (qname.startsWith(QStringLiteral("view:")) || qname.startsWith(QStringLiteral("roi:")) ||
+                qname.startsWith(QStringLiteral("canvas:")) || qname.startsWith(QStringLiteral("layer:")) ||
+                qname.startsWith(QStringLiteral("raster:"))) {
+                // Only hide if not actually registered headlessly
+                if (!sicnu::agent::InteractionToolRegistry::instance().hasTool(t.name))
+                    continue;
+            }
+        }
         QVariantMap toolMap;
         toolMap[QStringLiteral("category")] = QString::fromStdString(toolCategoryToString(t.category));
         toolMap[QStringLiteral("name")] = QString::fromStdString(t.name);
@@ -1361,7 +1413,18 @@ QVariantMap McpServer::handleSearchTools(const QString &query, const QString &gr
     QVariantList toolList;
     toolList.reserve(static_cast<int>(tools.size()));
 
+    const bool headlessNoGui2 = sicnu::agent::InteractionToolRegistry::instance().toolCount() == 0
+        || sicnu::agent::InteractionToolRegistry::instance().findTool("view:get_state") == std::nullopt;
     for (const auto &t : tools) {
+        if (headlessNoGui2 && t.category == ToolCategory::Interaction) {
+            const QString qname = QString::fromStdString(t.name);
+            if (qname.startsWith(QStringLiteral("view:")) || qname.startsWith(QStringLiteral("roi:")) ||
+                qname.startsWith(QStringLiteral("canvas:")) || qname.startsWith(QStringLiteral("layer:")) ||
+                qname.startsWith(QStringLiteral("raster:"))) {
+                if (!sicnu::agent::InteractionToolRegistry::instance().hasTool(t.name))
+                    continue;
+            }
+        }
         QVariantMap toolMap;
         toolMap[QStringLiteral("category")] = QString::fromStdString(toolCategoryToString(t.category));
         toolMap[QStringLiteral("name")] = QString::fromStdString(t.name);

@@ -79,6 +79,7 @@ void LlmStreamingClient::sendChatCompletion( const QJsonArray &messages, const Q
   m_buffer.clear();
   m_toolCalls.clear();
   m_finishedEmitted = false;
+  m_lastFinishReason.clear();
 
   const ChatRequestPayload payload = buildChatRequest( m_profile, messages, tools );
 
@@ -165,6 +166,10 @@ void LlmStreamingClient::parseSseLine( const QString &line )
     return;
 
   QJsonObject choice0 = choices[0].toObject();
+  if (choice0.contains(QStringLiteral("finish_reason")) && choice0[QStringLiteral("finish_reason")].isString())
+  {
+    m_lastFinishReason = choice0[QStringLiteral("finish_reason")].toString();
+  }
   QJsonObject delta = choice0[QStringLiteral( "delta" )].toObject();
 
   // 1. DeepSeek-R1 reasoning content (<think>)
@@ -276,25 +281,31 @@ void LlmStreamingClient::emitParsedToolCallOnce()
 
 void LlmStreamingClient::onReplyFinished()
 {
-  if ( m_currentReply && m_currentReply->error() == QNetworkReply::NoError )
+  if (!m_currentReply)
+    return;
+  if ( !m_buffer.isEmpty() )
   {
-    if ( !m_buffer.isEmpty() )
-    {
-      QString line = QString::fromUtf8( m_buffer ).trimmed();
-      if ( !line.isEmpty() )
-        parseSseLine( line );
-      m_buffer.clear();
-    }
+    QString line = QString::fromUtf8( m_buffer ).trimmed();
+    if ( !line.isEmpty() )
+      parseSseLine( line );
+    m_buffer.clear();
+  }
 
-    // If no [DONE] token finalized the tool call, emit it now. No-op when the
-    // [DONE] path already emitted it — a parsed tool call is emitted exactly once.
-    emitParsedToolCallOnce();
+  // If no [DONE] token finalized the tool call, emit it now. No-op when the
+  // [DONE] path already emitted it — a parsed tool call is emitted exactly once.
+  emitParsedToolCallOnce();
 
-    if ( !m_finishedEmitted )
+  if (m_currentReply->error() != QNetworkReply::NoError && m_currentReply->error() != QNetworkReply::OperationCanceledError)
+  {
+    if (!m_finishedEmitted)
     {
-      m_finishedEmitted = true;
-      emit finished();
+      emit errorOccurred(m_currentReply->errorString());
     }
+  }
+  if ( !m_finishedEmitted )
+  {
+    m_finishedEmitted = true;
+    emit finished();
   }
 }
 
@@ -303,6 +314,11 @@ void LlmStreamingClient::onReplyError( QNetworkReply::NetworkError code )
   if ( code != QNetworkReply::OperationCanceledError && m_currentReply )
   {
     emit errorOccurred( m_currentReply->errorString() );
+    if (!m_finishedEmitted)
+    {
+      m_finishedEmitted = true;
+      emit finished();
+    }
   }
 }
 
