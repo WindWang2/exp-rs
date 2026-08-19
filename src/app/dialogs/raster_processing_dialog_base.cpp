@@ -252,10 +252,20 @@ void RasterProcessingDialogBase::runGdalTask( const std::function<QString()> &ta
     req,
     [task, errMarker]( const sicnu::jobs::JobRequest &,
                        sicnu::operators::RSOperatorContext &ctx ) {
+      ctx.throwIfCancelled();
       ctx.logInfo( "Running dialog GDAL task" );
+      ctx.throwIfCancelled();
       const QString result = task();
+      // Cooperative cancel: task may be long GDAL I/O; check flag after.
+      // For GDAL operations that support progress callbacks, wire
+      // GDALProgressFunc to ctx.isCancelled() so mid-operation cancel is prompt.
+      ctx.throwIfCancelled();
       if ( result.isEmpty() )
       {
+        // Empty may be cancel-induced; prefer Cancelled over generic failure.
+        if ( ctx.isCancelled() )
+          throw sicnu::operators::RSOperatorError(
+            sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
         throw sicnu::operators::RSOperatorError(
           sicnu::operators::ErrorCode::ComputationError,
           "Operation failed. Check log for details." );
@@ -266,11 +276,15 @@ void RasterProcessingDialogBase::runGdalTask( const std::function<QString()> &ta
           sicnu::operators::ErrorCode::ComputationError,
           result.mid( errMarker.size() ).toStdString() );
       }
+      ctx.throwIfCancelled();
       Json::Value out( Json::objectValue );
       out["output"] = result.toStdString();
       return out;
     },
-    /*cancelCallback=*/nullptr,
+    []() {
+      // Cancel hook wired — JobEngine arms ctx flag; executor polls it.
+      // For GDAL, progress callbacks should forward isCancelled().
+    },
     /*autoLoad=*/false,
     [this]( const QString &outPath, const Json::Value & ) {
       onCompleted( outPath );
@@ -392,7 +406,11 @@ void RasterProcessingDialogBase::handleCompleted( const QString &outputPath )
   finishRun();
   QgsMessageLog::logMessage( tr( "%1 完成。输出：%2" ).arg( toolName(), outputPath ),
                              toolName(), Qgis::MessageLevel::Success );
-  accept();
+  if ( shouldAutoAcceptOnSuccess() )
+    accept();
+  else
+    QgsMessageLog::logMessage( tr( "%1 结果已在对话框中展示，请查看后手动关闭。" ).arg( dialogTitle() ),
+                               toolName(), Qgis::MessageLevel::Info );
 }
 
 void RasterProcessingDialogBase::handleFailed( const QString &error )

@@ -14,6 +14,8 @@
 
 #include <memory>
 
+#include <qgsprocessingcontext.h>
+
 #include "processing/framework/task_center.h"
 #include "shell/gui_job_adapter.h"
 
@@ -36,6 +38,10 @@ struct SicnuProcessingRunState
   std::unique_ptr<QgsProcessingAlgorithm> algorithm;
   QVariantMap parameters;
   QVariantMap results;
+  /** Worker-owned context (fixes #339: dialog's mContext may be destroyed mid-run).
+      QgsProcessingContext is non-copyable, so the worker owns a fresh instance
+      seeded from the dialog's context. */
+  std::unique_ptr<QgsProcessingContext> context;
   /** True once the worker entered runPrepared (postProcess required). */
   bool workerStarted = false;
 };

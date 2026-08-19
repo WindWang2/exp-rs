@@ -32,6 +32,7 @@
 #include <QFormLayout>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QScrollArea>
 #include <QSizePolicy>
 #include <QGroupBox>
@@ -624,7 +625,14 @@ void SicnuAlgorithmDialog::closeEvent( QCloseEvent *event )
 {
   if ( mJobHandle.isRunning() )
   {
+    // #339: prevent WA_DeleteOnClose from destroying mContext/feedback while
+    // the worker still dereferences them. Cancel and ignore the close;
+    // the user can close again after the job finishes/cancels.
     mJobHandle.cancel();
+    if ( mFeedback )
+      mFeedback->pushInfo( tr( "Cancel requested — please wait for the task to finish." ) );
+    event->ignore();
+    return;
   }
   QgsProcessingAlgorithmDialogBase::closeEvent( event );
 }
@@ -747,6 +755,9 @@ void SicnuAlgorithmDialog::runAlgorithm()
     return;
   }
 
+  // #339: worker owns its own context so dialog's mContext can be destroyed safely.
+  state->context = std::make_unique<QgsProcessingContext>();
+  state->context->setProject( mContext.project() );
   mRunState = state;
 
   sicnu::jobs::JobRequest req;
@@ -755,15 +766,14 @@ void SicnuAlgorithmDialog::runAlgorithm()
   req.source = "toolbox";
 
   const bool autoLoad = !mLoadResultsCheck || mLoadResultsCheck->isChecked();
-  QgsProcessingContext *contextPtr = &mContext;
-  QgsProcessingFeedback *feedbackPtr = feedback;
+  QPointer<QgsProcessingFeedback> feedbackGuard(feedback);
 
   const long taskId = mJobHandle.submitJob(
     req,
-    [state, contextPtr, feedbackPtr]( const sicnu::jobs::JobRequest &,
-                                      sicnu::operators::RSOperatorContext &ctx ) {
+    [state, feedbackGuard]( const sicnu::jobs::JobRequest &,
+                            sicnu::operators::RSOperatorContext &ctx ) mutable {
       ctx.logInfo( "Running QgsProcessingAlgorithm (runPrepared)" );
-      if ( feedbackPtr && feedbackPtr->isCanceled() )
+      if ( feedbackGuard && feedbackGuard->isCanceled() )
       {
         throw sicnu::operators::RSOperatorError(
           sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
@@ -774,8 +784,10 @@ void SicnuAlgorithmDialog::runAlgorithm()
 
       try
       {
+        // QPointer auto-nulls if dialog destroyed; pass raw pointer safely.
+        QgsProcessingFeedback *fb = feedbackGuard.data();
         state->results = state->algorithm->runPrepared(
-          state->parameters, *contextPtr, feedbackPtr );
+          state->parameters, *state->context, fb );
       }
       catch ( const QgsProcessingException &e )
       {
@@ -783,7 +795,7 @@ void SicnuAlgorithmDialog::runAlgorithm()
           sicnu::operators::ErrorCode::QgisProcessingError, e.what().toStdString() );
       }
 
-      if ( ( feedbackPtr && feedbackPtr->isCanceled() ) || ctx.isCancelled() )
+      if ( ( feedbackGuard && feedbackGuard->isCanceled() ) || ctx.isCancelled() )
       {
         throw sicnu::operators::RSOperatorError(
           sicnu::operators::ErrorCode::Cancelled, "Cancelled" );
@@ -791,9 +803,9 @@ void SicnuAlgorithmDialog::runAlgorithm()
 
       return ProcessingJobAdapter::resultsToJson( state->results );
     },
-    [feedbackPtr]() {
-      if ( feedbackPtr )
-        feedbackPtr->cancel();
+    [feedbackGuard]() mutable {
+      if ( feedbackGuard )
+        feedbackGuard->cancel();
     },
     autoLoad,
     [this]( const QString &, const Json::Value & ) {
@@ -849,9 +861,9 @@ void SicnuAlgorithmDialog::runAlgorithm()
     }
   );
 
-  if ( feedbackPtr && taskId > 0 )
+  if ( feedback && taskId > 0 )
   {
-    connect( feedbackPtr, &QgsFeedback::progressChanged, this, [taskId]( double progress ) {
+    connect( feedback, &QgsFeedback::progressChanged, this, [taskId]( double progress ) {
       sicnu::TaskCenter::instance().updateTaskProgress( taskId, progress / 100.0 );
     } );
   }

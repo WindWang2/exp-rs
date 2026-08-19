@@ -36,6 +36,7 @@
 #include <QLineEdit>
 #include <QProgressBar>
 #include <QSpinBox>
+#include <QDir>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QFileInfo>
@@ -370,6 +371,16 @@ void BatchProcessingDialog::onRun()
         return;
     }
 
+    // DLGB-11: ensure output directory exists (typed path may be new).
+    {
+        QDir outDir(m_outputDir);
+        if (!outDir.exists() && !outDir.mkpath(QStringLiteral("."))) {
+            QMessageBox::warning(this, tr("Batch Processing"),
+                                 tr("Failed to create output directory:\n%1").arg(m_outputDir));
+            return;
+        }
+    }
+
     // Toggle button to Cancel during batch; lock configuration controls against concurrent mutation
     m_isRunning = true;
     m_canceled = false;
@@ -420,17 +431,27 @@ void BatchProcessingDialog::onRun()
 
         const QString inputFile = filesToProcess[i];
         m_statusLabel->setText(tr("Processing %1...").arg(QFileInfo(inputFile).fileName()));
-        QApplication::processEvents();
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
         if (m_canceled) {
             errorMessages.append(tr("Batch canceled by user"));
             break;
         }
 
-        // Build output path
+        // Build output path — DLGB-11 collision policy: same basename from
+        // different folders gets a numeric suffix (_1, _2, ...) before the extension.
         QString baseName = QFileInfo(inputFile).completeBaseName();
-        QString outputPath = m_outputDir + QStringLiteral("/") + baseName
-                             + QStringLiteral("_processed") + outputExt;
+        QString nameWithoutExt = baseName + QStringLiteral("_processed");
+        QString outputPath = m_outputDir + QStringLiteral("/") + nameWithoutExt + outputExt;
+        if (QFileInfo::exists(outputPath)) {
+            int suffix = 1;
+            QString candidate;
+            do {
+                candidate = m_outputDir + QStringLiteral("/") + nameWithoutExt
+                            + QStringLiteral("_%1").arg(suffix++) + outputExt;
+            } while (QFileInfo::exists(candidate) && suffix < 10000);
+            outputPath = candidate;
+        }
 
         try {
             QString itemError;
@@ -811,15 +832,25 @@ bool BatchProcessingDialog::runBatchItem(const QString &algorithmId,
         params[key] = it.value();
     }
 
+    std::unique_ptr<QgsProcessingAlgorithm> algClone(alg->create());
+    if (!algClone) {
+        if (errorMessage)
+            *errorMessage = tr("Failed to create algorithm instance: %1").arg(algorithmId);
+        return false;
+    }
     QgsProcessingContext context;
+    if (QgsProject *project = QgsProject::instance()) {
+        context.setProject(project);
+        context.setTransformContext(project->transformContext());
+    }
     QString checkError;
-    if (!alg->checkParameterValues(params, context, &checkError)) {
+    if (!algClone->checkParameterValues(params, context, &checkError)) {
         if (errorMessage)
             *errorMessage = checkError;
         return false;
     }
     QgsProcessingFeedback feedback;
-    const QVariantMap results = alg->run(params, context, &feedback);
+    const QVariantMap results = algClone->run(params, context, &feedback);
     if (results.isEmpty()) {
         if (errorMessage)
             *errorMessage = feedback.textLog().isEmpty()

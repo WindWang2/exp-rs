@@ -130,6 +130,13 @@ protected:
     virtual bool validateInputs();
 
     /**
+     * Whether the dialog should auto-accept (close) after a successful run.
+     * Dialogs that surface result summaries (transition matrices, statistics)
+     * should return false so the user can read the metrics before dismissing.
+     */
+    virtual bool shouldAutoAcceptOnSuccess() const { return true; }
+
+    /**
      * Execute the processing. Called when Run is clicked and inputs are valid.
      */
     virtual void onRun() = 0;
