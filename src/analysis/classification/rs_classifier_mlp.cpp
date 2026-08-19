@@ -1,6 +1,9 @@
 // rs_classifier_mlp.cpp — OBIA Artificial Neural Network (ANN_MLP) classifier backend.
 #include "rs_classifier_mlp.h"
 #include <QDebug>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <algorithm>
 #include <vector>
 
@@ -181,4 +184,101 @@ cv::Mat RsMlpBackend::predictProbabilities( const cv::Mat &X ) const
     probs = cv::Mat();
   }
   return probs;
+}
+
+bool RsMlpBackend::predictWithProbabilities( const cv::Mat &X, cv::Mat &outLabels,
+                                             cv::Mat &outProbs ) const
+{
+  outLabels.release();
+  outProbs.release();
+  if ( X.empty() || !m_clf || !m_clf->isTrained() || mClassLabels.empty() )
+    return false;
+  try
+  {
+    cv::Mat raw;
+    m_clf->predict( X, raw );
+    if ( raw.empty() || raw.rows != X.rows )
+      return false;
+    const int n = raw.rows;
+    const int k = raw.cols;
+    outLabels.create( n, 1, CV_32S );
+    outProbs.create( n, k, CV_32F );
+    for ( int i = 0; i < n; ++i )
+    {
+      // argmax + softmax from same raw row
+      float maxVal = raw.at<float>( i, 0 );
+      for ( int c = 1; c < k; ++c )
+        maxVal = std::max( maxVal, raw.at<float>( i, c ) );
+      if ( !std::isfinite( maxVal ) )
+        maxVal = 0.0f;
+      float sumExp = 0.0f;
+      for ( int c = 0; c < k; ++c )
+      {
+        float v = raw.at<float>( i, c );
+        float diff = std::isfinite( v ) ? ( v - maxVal ) : -20.0f;
+        diff = std::clamp( diff, -20.0f, 0.0f );
+        float e = std::exp( diff );
+        outProbs.at<float>( i, c ) = e;
+        sumExp += e;
+      }
+      if ( sumExp > 1e-6f )
+        for ( int c = 0; c < k; ++c )
+          outProbs.at<float>( i, c ) /= sumExp;
+      else
+        for ( int c = 0; c < k; ++c )
+          outProbs.at<float>( i, c ) = 1.0f / k;
+      int bestCol = 0;
+      float bestVal = raw.at<float>( i, 0 );
+      for ( int c = 1; c < k; ++c )
+        if ( raw.at<float>( i, c ) > bestVal )
+        {
+          bestVal = raw.at<float>( i, c );
+          bestCol = c;
+        }
+      outLabels.at<int>( i, 0 ) = mClassLabels.at<int>( bestCol, 0 );
+    }
+    return true;
+  }
+  catch ( const cv::Exception &e )
+  {
+    qWarning() << "RsMlpBackend::predictWithProbabilities — error:" << e.what();
+    outLabels.release();
+    outProbs.release();
+    return false;
+  }
+}
+
+bool RsMlpBackend::save( const QString &path ) const
+{
+  if ( !RsClassifierCvBackend<cv::ml::ANN_MLP>::save( path ) )
+    return false;
+  if ( mClassLabels.empty() )
+    return true;
+  QFile f( path + QStringLiteral( ".labels.json" ) );
+  if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+    return true;
+  QJsonArray arr;
+  for ( int i = 0; i < mClassLabels.rows; ++i )
+    arr.append( mClassLabels.at<int>( i, 0 ) );
+  f.write( QJsonDocument( arr ).toJson( QJsonDocument::Compact ) );
+  return true;
+}
+
+bool RsMlpBackend::load( const QString &path )
+{
+  if ( !RsClassifierCvBackend<cv::ml::ANN_MLP>::load( path ) )
+    return false;
+  QFile f( path + QStringLiteral( ".labels.json" ) );
+  if ( !f.open( QIODevice::ReadOnly ) )
+    return true;
+  const QJsonDocument doc = QJsonDocument::fromJson( f.readAll() );
+  if ( !doc.isArray() )
+    return true;
+  const QJsonArray arr = doc.array();
+  if ( arr.isEmpty() )
+    return true;
+  mClassLabels.create( static_cast<int>( arr.size() ), 1, CV_32S );
+  for ( int i = 0; i < arr.size(); ++i )
+    mClassLabels.at<int>( i, 0 ) = arr[i].toInt();
+  return true;
 }

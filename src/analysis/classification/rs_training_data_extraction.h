@@ -69,6 +69,7 @@ struct QGIS_ANALYSIS_EXPORT RsTrainingDataResult
     cv::Mat X;                 ///< CV_32F NxB (rows = samples, cols = bands).
     cv::Mat y;                 ///< CV_32S Nx1, aligned with X.
     QHash<int, int> classCounts; ///< classId → kept sample count.
+    std::vector<int> sampleGroupIds; ///< per-sample ROI/group id, size == X.rows when populated
     int featuresRead = 0;      ///< OGR features visited (vector path only).
 };
 

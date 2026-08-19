@@ -1,6 +1,9 @@
 // rs_classifier_random_forest.cpp — OBIA Random Forest classifier backend.
 #include "rs_classifier_random_forest.h"
 #include <QDebug>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <algorithm>
 #include <vector>
 
@@ -89,4 +92,97 @@ cv::Mat RsRandomForestBackend::predictProbabilities( const cv::Mat &X ) const
     probs = cv::Mat();
   }
   return probs;
+}
+
+bool RsRandomForestBackend::predictWithProbabilities( const cv::Mat &X, cv::Mat &outLabels,
+                                                      cv::Mat &outProbs ) const
+{
+  outLabels.release();
+  outProbs.release();
+  if ( X.empty() || !m_clf || !m_clf->isTrained() )
+    return false;
+  try
+  {
+    cv::Mat votes;
+    m_clf->getVotes( X, votes, 0 );
+    if ( votes.empty() || votes.rows < 2 || votes.cols < 1 )
+      return false;
+    const int nClasses = votes.cols;
+    if ( mClassLabels.total() != static_cast<size_t>( nClasses ) )
+      return false;
+    const int nSamples = votes.rows - 1;
+    outLabels.create( nSamples, 1, CV_32S );
+    outProbs.create( nSamples, nClasses, CV_32F );
+    for ( int i = 0; i < nSamples; ++i )
+    {
+      double totalVotes = 0.0;
+      int bestCol = 0;
+      int bestVotes = votes.at<int>( i + 1, 0 );
+      for ( int c = 0; c < nClasses; ++c )
+      {
+        const int v = votes.at<int>( i + 1, c );
+        totalVotes += v;
+        if ( v > bestVotes )
+        {
+          bestVotes = v;
+          bestCol = c;
+        }
+      }
+      outLabels.at<int>( i, 0 ) = mClassLabels.at<int>( bestCol, 0 );
+      if ( totalVotes <= 0.0 )
+      {
+        for ( int c = 0; c < nClasses; ++c )
+          outProbs.at<float>( i, c ) = 0.0f;
+      }
+      else
+      {
+        for ( int c = 0; c < nClasses; ++c )
+          outProbs.at<float>( i, c ) = static_cast<float>( votes.at<int>( i + 1, c ) / totalVotes );
+      }
+    }
+    return true;
+  }
+  catch ( const cv::Exception &e )
+  {
+    qWarning() << "RsRandomForestBackend::predictWithProbabilities — error:" << e.what();
+    outLabels.release();
+    outProbs.release();
+    return false;
+  }
+}
+
+bool RsRandomForestBackend::save( const QString &path ) const
+{
+  if ( !RsClassifierCvBackend<cv::ml::RTrees>::save( path ) )
+    return false;
+  // Persist label map alongside the OpenCV model (companion JSON).
+  if ( mClassLabels.empty() )
+    return true;
+  QFile f( path + QStringLiteral( ".labels.json" ) );
+  if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+    return true; // model saved; labels sidecar is best-effort
+  QJsonArray arr;
+  for ( int i = 0; i < mClassLabels.rows; ++i )
+    arr.append( mClassLabels.at<int>( i, 0 ) );
+  f.write( QJsonDocument( arr ).toJson( QJsonDocument::Compact ) );
+  return true;
+}
+
+bool RsRandomForestBackend::load( const QString &path )
+{
+  if ( !RsClassifierCvBackend<cv::ml::RTrees>::load( path ) )
+    return false;
+  QFile f( path + QStringLiteral( ".labels.json" ) );
+  if ( !f.open( QIODevice::ReadOnly ) )
+    return true; // no sidecar yet (older models)
+  const QJsonDocument doc = QJsonDocument::fromJson( f.readAll() );
+  if ( !doc.isArray() )
+    return true;
+  const QJsonArray arr = doc.array();
+  if ( arr.isEmpty() )
+    return true;
+  mClassLabels.create( static_cast<int>( arr.size() ), 1, CV_32S );
+  for ( int i = 0; i < arr.size(); ++i )
+    mClassLabels.at<int>( i, 0 ) = arr[i].toInt();
+  return true;
 }

@@ -28,6 +28,16 @@ class QGIS_ANALYSIS_EXPORT RsClassifierBackend
     /// Predict class probabilities for each sample in X. Returns CV_32F NxK matrix (or empty if unsupported).
     virtual cv::Mat predictProbabilities( const cv::Mat &X ) const { (void)X; return cv::Mat(); }
 
+    /// Combined predict + probabilities in one model execution. Default
+    /// returns false (not implemented) so callers fall back to two calls.
+    /// When implemented, \a outLabels is CV_32S Nx1 and \a outProbs is
+    /// CV_32F NxK.
+    virtual bool predictWithProbabilities( const cv::Mat & /*X*/, cv::Mat & /*outLabels*/,
+                                           cv::Mat & /*outProbs*/ ) const
+    {
+        return false;
+    }
+
     /// True when predictProbabilities() is implemented for this backend
     /// (NormalBayes, MLP). SVM does not support probability outputs.
     virtual bool supportsProbabilities() const { return false; }

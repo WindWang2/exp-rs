@@ -2191,7 +2191,8 @@ bool QgsClassificationMainWindow::openSourceRaster( const QString &path )
 
 bool QgsClassificationMainWindow::buildTrainingData( const QVector<int> &bands,
                                                      cv::Mat &X,
-                                                     cv::Mat &y ) const
+                                                     cv::Mat &y,
+                                                     std::vector<int> *groupIds ) const
 {
   if ( !m_rois || bands.isEmpty() || m_sourceRasterPath.isEmpty() )
     return false;
@@ -2220,6 +2221,8 @@ bool QgsClassificationMainWindow::buildTrainingData( const QVector<int> &bands,
     return false;
   X = res.X;
   y = res.y;
+  if ( groupIds )
+    *groupIds = res.sampleGroupIds;
   return true;
 }
 
@@ -2294,7 +2297,13 @@ void QgsClassificationMainWindow::applyClassification()
     // testX/testY left empty so the pipeline run() skips accuracy.
     cfg.methodName = QStringLiteral( "Loaded (%1)" ).arg( m_loadedBackend->name() );
     cfg.backend = std::move( m_loadedBackend );
-    // Apply sidecar scaler so tile features match training feature space.
+    // Let pipeline own sidecar validation (band/ scaler checks) even when
+    // backend is pre-loaded — setting modelLoadPath triggers the hardened
+    // branch at pipeline:194 which validates the sidecar before prediction.
+    cfg.modelLoadPath = m_loadedModelPath;
+    m_loadedModelPath.clear();
+    // Apply sidecar scaler so tile features match training feature space
+    // (pipeline will overwrite with sidecar scaler if validation succeeds).
     cfg.scaler = m_loadedScaler;
     m_loadedScaler = RsFeatureScaler();
     if ( statusBar() )
@@ -2303,7 +2312,8 @@ void QgsClassificationMainWindow::applyClassification()
   else
   {
     cv::Mat X, y;
-    if ( !buildTrainingData( bands, X, y ) || X.rows < 10 )
+    std::vector<int> groupIds;
+    if ( !buildTrainingData( bands, X, y, &groupIds ) || X.rows < 10 )
     {
       statusBar()->showMessage(
         tr( "训练样本不足（< 10 像元）— 请先勾画 ROI 或加载已保存样本" ), 6000 );
@@ -2311,7 +2321,7 @@ void QgsClassificationMainWindow::applyClassification()
     }
 
     const auto split = RsClassificationSplit::stratifiedSplit(
-      X, y, m_classifierBar->trainRatio() );
+      X, y, m_classifierBar->trainRatio(), 42u, groupIds );
     if ( !fitScalerOntoConfig( split, cfg ) )
     {
       statusBar()->showMessage( tr( "特征标准化失败" ), 5000 );
@@ -2524,7 +2534,8 @@ void QgsClassificationMainWindow::applyPreview()
   }
 
   cv::Mat X, y;
-  if ( !buildTrainingData( bands, X, y ) || X.rows < 10 )
+  std::vector<int> previewGroupIds;
+  if ( !buildTrainingData( bands, X, y, &previewGroupIds ) || X.rows < 10 )
   {
     if ( statusBar() )
       statusBar()->showMessage(
@@ -2555,7 +2566,7 @@ void QgsClassificationMainWindow::applyPreview()
   cfg.cropToWindow = true;
   cfg.window = win;
   const auto split = RsClassificationSplit::stratifiedSplit(
-    X, y, m_classifierBar->trainRatio() );
+    X, y, m_classifierBar->trainRatio(), 42u, previewGroupIds );
   if ( !fitScalerOntoConfig( split, cfg ) )
   {
     if ( statusBar() )
@@ -3343,6 +3354,7 @@ void QgsClassificationMainWindow::loadClassifierModel()
     return;
   }
   m_loadedBackend = std::move( backend );
+  m_loadedModelPath = dlg.modelPath();
 
   // ADR 0019 S2 — superset sidecar: <model-stem>.meta.json next to the
   // YAML/XML model (method + fitted scaler + class metadata). Replaces the
@@ -3361,13 +3373,20 @@ void QgsClassificationMainWindow::loadClassifierModel()
            dlg.modelPath(), sidecarMethod, sidecarScaler, sidecarColors,
            sidecarFeatures, sidecarAccuracy ) )
     {
+      // Corrupt sidecar is a hard error — refuse to predict silently
+      // without scaling/band validation (regression of #292 hardening).
+      m_loadedBackend.reset();
+      m_loadedModelPath.clear();
       m_loadedScaler = RsFeatureScaler();
-      SICNU_LOG_WARN( SicnuLogTags::Classification,
-                      QString( "meta.json present but failed to load: %1 — predicting without scaling" )
-                        .arg( metaPath ) );
+      SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                       QString( "meta.json present but failed to load: %1 — refusing loaded model" )
+                         .arg( metaPath ) );
+      QMessageBox::critical(
+        this, tr( "Load failed" ),
+        tr( "模型侧车文件损坏或不兼容：%1\n已拒绝加载，请用匹配的模型与 meta.json 重试。" ).arg( metaPath ) );
       if ( statusBar() )
-        statusBar()->showMessage(
-          tr( "警告：meta.json 损坏，将不缩放特征" ), 6000 );
+        statusBar()->showMessage( tr( "模型加载失败：meta.json 损坏" ), 6000 );
+      return;
     }
     else
     {

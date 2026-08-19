@@ -335,7 +335,8 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     cv::Mat trainY = ex.y;
     if ( config.testSplit > 0.0 )
     {
-      const RsTrainTestSplit split = RsClassificationSplit::stratifiedSplit( ex.X, ex.y, 1.0 - config.testSplit, config.seed, config.groupIds );
+      const std::vector<int> &gids = config.groupIds.empty() ? ex.sampleGroupIds : config.groupIds;
+      const RsTrainTestSplit split = RsClassificationSplit::stratifiedSplit( ex.X, ex.y, 1.0 - config.testSplit, config.seed, gids );
       trainX = split.trainX;
       trainY = split.trainY;
       config.testX = split.testX;
@@ -822,7 +823,18 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
 
         try
         {
-          pred = config.backend->predict( Xc );
+          if ( writeProb )
+          {
+            if ( !config.backend->predictWithProbabilities( Xc, pred, probs ) )
+            {
+              pred = config.backend->predict( Xc );
+              probs = config.backend->predictProbabilities( Xc );
+            }
+          }
+          else
+          {
+            pred = config.backend->predict( Xc );
+          }
         }
         catch ( const cv::Exception &ex )
         {
@@ -850,7 +862,6 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
         // Per-pixel best-class probability (confidence) when requested.
         if ( writeProb )
         {
-          probs = config.backend->predictProbabilities( Xc );
           if ( probs.empty() || probs.rows < static_cast<int>( validIndices.size() ) )
           {
             return failWithPartialOutput(

@@ -136,7 +136,8 @@ class QgsClassificationMainWindow : public QMainWindow
     void setClassifyBusy( bool busy );
     bool buildTrainingData( const QVector<int> &bands,
                             cv::Mat &X,
-                            cv::Mat &y ) const;
+                            cv::Mat &y,
+                            std::vector<int> *groupIds = nullptr ) const;
     RsPixelIgnoreOptions currentIgnoreOptions() const;
     /// Open one post-process algorithm dialog (Sieve / Majority / …).
     void openPostProcessDialog( int algorithm /* RsPostProcessDialog::Algorithm */ );
@@ -281,6 +282,7 @@ class QgsClassificationMainWindow : public QMainWindow
 
     std::unique_ptr<RsClassifierBackend> m_loadedBackend;
     RsFeatureScaler m_loadedScaler;
+    QString m_loadedModelPath;
 
     RsClassifySessionState mSession;
     bool mSuppressDirty = false;

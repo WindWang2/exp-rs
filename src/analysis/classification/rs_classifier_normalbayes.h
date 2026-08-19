@@ -15,6 +15,8 @@ class QGIS_ANALYSIS_EXPORT RsClassifierNormalBayes : public RsClassifierCvBacken
     RsClassifierNormalBayes();
 
     cv::Mat predictProbabilities( const cv::Mat &X ) const override;
+    bool predictWithProbabilities( const cv::Mat &X, cv::Mat &outLabels,
+                                   cv::Mat &outProbs ) const override;
 
     bool supportsProbabilities() const override { return true; }
 

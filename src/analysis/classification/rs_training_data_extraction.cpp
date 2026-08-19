@@ -31,6 +31,7 @@ bool reportProgress( const RsTrainingDataExtraction::Progress &progress,
 bool collectPixels( const QVector<RsTrainingGeometry> &geometries,
                     const double gt[6], int W, int H,
                     QHash<quint64, int> &pixelClass,
+                    QHash<quint64, int> &pixelGroup,
                     const RsTrainingDataExtraction::Progress &progress )
 {
   const quint64 nPix = static_cast<quint64>( W ) * static_cast<quint64>( H );
@@ -53,7 +54,10 @@ bool collectPixels( const QVector<RsTrainingGeometry> &geometries,
     for ( quint64 p : idx )
     {
       if ( p < nPix )
+      {
         pixelClass.insert( p, tg.classId );
+        pixelGroup.insert( p, i );
+      }
     }
   }
   return true;
@@ -66,6 +70,7 @@ bool collectPixels( const QVector<RsTrainingGeometry> &geometries,
 void buildMatrices( GDALDataset *ds,
                     const QVector<int> &bands,
                     const QHash<quint64, int> &pixelClass,
+                    const QHash<quint64, int> &pixelGroup,
                     const RsTrainingDataExtraction::Options &options,
                     const RsTrainingDataExtraction::Progress &progress,
                     RsTrainingDataResult &out )
@@ -73,37 +78,69 @@ void buildMatrices( GDALDataset *ds,
   const int W = ds->GetRasterXSize();
   const int B = bands.size();
 
-  // Flatten to (classId, pixelIdx). With a per-class cap, bucket pixels by
-  // class (ascending pixel order for determinism) and subsample each bucket
-  // with the shared mt19937(seed) sequence; otherwise keep all pixels in
-  // sorted (classId, pixelIdx) order so the row order - and therefore any
-  // downstream seeded shuffle - is reproducible across runs (QHash iteration
-  // order is per-process random).
+  // Flatten to (classId, pixelIdx) + parallel group ids. With a per-class
+  // cap, bucket pixels by class (ascending pixel order for determinism) and
+  // subsample each bucket with the shared mt19937(seed) sequence; otherwise
+  // keep all pixels in sorted (classId, pixelIdx) order so the row order
+  // is reproducible (QHash iteration is per-process random).
   QVector<QPair<int, quint64>> samples;
+  std::vector<int> sampleGroups;
+  sampleGroups.reserve( pixelClass.size() );
   if ( options.maxSamplesPerClass > 0 )
   {
-    std::map<int, std::vector<quint64>> byClass;
+    std::map<int, std::vector<std::pair<quint64, int>>> byClass;
     for ( auto it = pixelClass.constBegin(); it != pixelClass.constEnd(); ++it )
-      byClass[it.value()].push_back( it.key() );
+    {
+      const quint64 p = it.key();
+      const int grp = pixelGroup.value( p, -1 );
+      byClass[it.value()].emplace_back( p, grp );
+    }
 
-    // ADR 0061 - shared deterministic subsampling policy (mt19937(seed) +
-    // shuffle, keep the first maxSamplesPerClass of each sorted bucket).
     std::mt19937 rng( options.seed );
     for ( auto &kv : byClass )
     {
-      std::vector<quint64> &px = kv.second;
-      std::sort( px.begin(), px.end() );
-      rsShuffleAndKeep( rng, px, static_cast<size_t>( options.maxSamplesPerClass ) );
-      for ( quint64 p : px )
-        samples.push_back( qMakePair( kv.first, p ) );
+      auto &vec = kv.second;
+      std::sort( vec.begin(), vec.end(),
+                 []( const auto &a, const auto &b ) { return a.first < b.first; } );
+      // Shuffle the pair vector, then truncate
+      std::shuffle( vec.begin(), vec.end(), rng );
+      if ( vec.size() > static_cast<size_t>( options.maxSamplesPerClass ) )
+        vec.resize( static_cast<size_t>( options.maxSamplesPerClass ) );
+      std::sort( vec.begin(), vec.end(),
+                 []( const auto &a, const auto &b ) { return a.first < b.first; } );
+      for ( auto &pr : vec )
+      {
+        samples.push_back( qMakePair( kv.first, pr.first ) );
+        sampleGroups.push_back( pr.second );
+      }
     }
   }
   else
   {
     samples.reserve( pixelClass.size() );
+    sampleGroups.reserve( pixelClass.size() );
     for ( auto it = pixelClass.constBegin(); it != pixelClass.constEnd(); ++it )
+    {
       samples.push_back( qMakePair( it.value(), it.key() ) );
-    std::sort( samples.begin(), samples.end() );
+      sampleGroups.push_back( pixelGroup.value( it.key(), -1 ) );
+    }
+    // Sort samples + groups together by (classId, pixelIdx)
+    QVector<int> order( samples.size() );
+    for ( int i = 0; i < order.size(); ++i )
+      order[i] = i;
+    std::sort( order.begin(), order.end(),
+               [&]( int a, int b ) { return samples[a] < samples[b]; } );
+    QVector<QPair<int, quint64>> sortedSamples;
+    std::vector<int> sortedGroups;
+    sortedSamples.reserve( samples.size() );
+    sortedGroups.reserve( sampleGroups.size() );
+    for ( int idx : order )
+    {
+      sortedSamples.push_back( samples[idx] );
+      sortedGroups.push_back( sampleGroups[static_cast<size_t>( idx )] );
+    }
+    samples = sortedSamples;
+    sampleGroups = sortedGroups;
   }
 
   if ( samples.isEmpty() )
@@ -201,17 +238,27 @@ void buildMatrices( GDALDataset *ds,
     return;
   }
 
+  // Build per-sample group id vector before filtering
+  std::vector<int> allGroupIds = sampleGroups;
   if ( keepRows.size() != samples.size() )
   {
     cv::Mat X2( keepRows.size(), B, CV_32F );
     cv::Mat y2( keepRows.size(), 1, CV_32S );
+    std::vector<int> keptGroups;
+    keptGroups.reserve( keepRows.size() );
     for ( int i = 0; i < keepRows.size(); ++i )
     {
       out.X.row( keepRows[i] ).copyTo( X2.row( i ) );
       y2.at<int>( i, 0 ) = out.y.at<int>( keepRows[i], 0 );
+      keptGroups.push_back( allGroupIds[static_cast<size_t>( keepRows[i] )] );
     }
     out.X = X2;
     out.y = y2;
+    out.sampleGroupIds = std::move( keptGroups );
+  }
+  else
+  {
+    out.sampleGroupIds = std::move( allGroupIds );
   }
 
   for ( int s = 0; s < out.y.rows; ++s )
@@ -281,7 +328,8 @@ RsTrainingDataResult RsTrainingDataExtraction::extract(
   ds->GetGeoTransform( gt );
 
   QHash<quint64, int> pixelClass;
-  if ( !collectPixels( geometries, gt, W, H, pixelClass, progress ) )
+  QHash<quint64, int> pixelGroup;
+  if ( !collectPixels( geometries, gt, W, H, pixelClass, pixelGroup, progress ) )
   {
     out.error = RsTrainingDataResult::Error::Cancelled;
     out.errorMessage = QStringLiteral( "Cancelled" );
@@ -289,7 +337,7 @@ RsTrainingDataResult RsTrainingDataExtraction::extract(
     return out;
   }
 
-  buildMatrices( ds, bands, pixelClass, options, progress, out );
+  buildMatrices( ds, bands, pixelClass, pixelGroup, options, progress, out );
   GDALClose( ds );
   return out;
 }
@@ -447,7 +495,8 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
   ds->GetGeoTransform( gt );
 
   QHash<quint64, int> pixelClass;
-  if ( !collectPixels( geometries, gt, W, H, pixelClass, progress ) )
+  QHash<quint64, int> pixelGroup;
+  if ( !collectPixels( geometries, gt, W, H, pixelClass, pixelGroup, progress ) )
   {
     out.error = RsTrainingDataResult::Error::Cancelled;
     out.errorMessage = QStringLiteral( "Cancelled" );
@@ -455,7 +504,7 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
     return out;
   }
 
-  buildMatrices( ds, bands, pixelClass, options, progress, out );
+  buildMatrices( ds, bands, pixelClass, pixelGroup, options, progress, out );
   GDALClose( ds );
   return out;
 }

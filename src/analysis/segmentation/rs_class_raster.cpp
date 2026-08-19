@@ -10,6 +10,7 @@
 #include <ogr_srs_api.h>
 
 #include <QFile>
+#include <QFileInfo>
 
 #include <algorithm>
 
@@ -22,6 +23,81 @@ void removeIncompleteOutput( const QString &path )
         return;
     if ( QFile::exists( path ) )
         QFile::remove( path );
+}
+
+void removeShapefileWithSidecars( const QString &shpPath )
+{
+    if ( shpPath.isEmpty() )
+        return;
+    // Main .shp file
+    removeIncompleteOutput( shpPath );
+    // ESRI shapefile sidecars: same basename, different extensions.
+    const QFileInfo fi( shpPath );
+    const QString dir = fi.absolutePath();
+    const QString base = fi.completeBaseName();
+    // completeBaseName for "foo.shp" is "foo"; for "foo.shp.tmp~123" is "foo.shp"
+    // Handle both cases by trying the raw path with sidecar suffix and the
+    // canonical base+ext variant.
+    const QStringList exts{ QStringLiteral( ".dbf" ), QStringLiteral( ".shx" ),
+                            QStringLiteral( ".prj" ), QStringLiteral( ".cpg" ),
+                            QStringLiteral( ".qpj" ) };
+    for ( const QString &ext : exts )
+    {
+        // Candidate 1: direct suffix append (covers ".shp.tmp~123" temp datasets)
+        QFile::remove( shpPath + ext );
+        // Candidate 2: dir/base + ext (covers normal "foo.shp" -> "foo.dbf")
+        QFile::remove( dir + QLatin1Char( '/' ) + base + ext );
+        // Candidate 3: strip one extension if tempPath contains ".shp."
+        // e.g. "foo.shp.tmp~123" -> "foo.tmp~123.dbf" is not needed — the
+        // shapefile driver consistently creates sidecars as "<dataset>.dbf",
+        // but be defensive.
+    }
+}
+
+bool renameShapefileWithSidecars( const QString &tmpPath, const QString &finalPath )
+{
+    // Rename main dataset
+    if ( !QFile::rename( tmpPath, finalPath ) )
+        return false;
+    const QFileInfo tmpFi( tmpPath );
+    const QFileInfo finalFi( finalPath );
+    const QStringList exts{ QStringLiteral( ".dbf" ), QStringLiteral( ".shx" ),
+                            QStringLiteral( ".prj" ), QStringLiteral( ".cpg" ),
+                            QStringLiteral( ".qpj" ) };
+    for ( const QString &ext : exts )
+    {
+        const QString tmpSide = tmpPath + ext;
+        if ( !QFile::exists( tmpSide ) )
+            continue;
+        const QString finalSide = finalPath + ext;
+        // Also try dir/base variant for final path consistency
+        QFile::remove( finalSide );
+        // If final side exists via dir/base naming, remove it too
+        const QString finalAlt = finalFi.absolutePath() + QLatin1Char( '/' )
+                                 + finalFi.completeBaseName() + ext;
+        if ( finalAlt != finalSide )
+            QFile::remove( finalAlt );
+        if ( !QFile::rename( tmpSide, finalSide ) )
+        {
+            // Rollback already-renamed main file is caller responsibility
+            return false;
+        }
+    }
+    // Clean up any stray dir/base sidecars left from normal naming
+    for ( const QString &ext : exts )
+    {
+        const QString tmpAlt = tmpFi.absolutePath() + QLatin1Char( '/' )
+                               + tmpFi.completeBaseName() + ext;
+        if ( QFile::exists( tmpAlt ) )
+        {
+            const QString finalSide = finalPath + ext;
+            if ( !QFile::exists( finalSide ) )
+                QFile::rename( tmpAlt, finalSide );
+            else
+                QFile::remove( tmpAlt );
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -168,7 +244,8 @@ RsClassRasterResult RsClassRaster::paint(
         {
             for ( int c = 0; c < w; ++c )
             {
-                const quint32 segId = labels[r * w + c];
+                const size_t idx = static_cast<size_t>(r) * static_cast<size_t>(w) + static_cast<size_t>(c);
+                const quint32 segId = labels[idx];
                 if ( segId == 0 )
                 {
                     rowBuf[c] = 0;
@@ -202,7 +279,8 @@ RsClassRasterResult RsClassRaster::paint(
         {
             for ( int c = 0; c < w; ++c )
             {
-                const quint32 segId = labels[r * w + c];
+                const size_t idx = static_cast<size_t>(r) * static_cast<size_t>(w) + static_cast<size_t>(c);
+                const quint32 segId = labels[idx];
                 if ( segId == 0 )
                 {
                     rowBuf[c] = 0;
@@ -280,10 +358,70 @@ RsClassRasterResult RsClassRaster::polygonize(
         return result;
     }
 
-    GDALDatasetH vecDs = GDALCreate( drv, outputVectorPath.toUtf8().constData(),
+    // Build mask in MEM before touching the filesystem output — MEM failures
+    // must not destroy a previous polygonize result (atomic write contract).
+    const int w = GDALGetRasterXSize( rasterDs );
+    const int h = GDALGetRasterYSize( rasterDs );
+    GDALDriverH memDrv = GDALGetDriverByName( "MEM" );
+    if ( !memDrv )
+    {
+        GDALClose( rasterDs );
+        result.errorMessage = QStringLiteral( "polygonize: MEM driver unavailable for mask band" );
+        return result;
+    }
+
+    GDALDatasetH maskDs = GDALCreate( memDrv, "", w, h, 1, GDT_Byte, nullptr );
+    if ( !maskDs )
+    {
+        GDALClose( rasterDs );
+        result.errorMessage = QStringLiteral( "polygonize: cannot create mask dataset" );
+        return result;
+    }
+
+    GDALRasterBandH maskBand = GDALGetRasterBand( maskDs, 1 );
+    if ( !maskBand )
+    {
+        GDALClose( maskDs );
+        GDALClose( rasterDs );
+        result.errorMessage = QStringLiteral( "polygonize: cannot get mask band" );
+        return result;
+    }
+
+    QVector<float> classRow( w );
+    QVector<quint8> maskRow( w );
+    for ( int r = 0; r < h; ++r )
+    {
+        // Float read works for Byte and UInt16 class rasters.
+        if ( GDALRasterIO( band, GF_Read, 0, r, w, 1,
+                           classRow.data(), w, 1, GDT_Float32, 0, 0 ) != CE_None )
+        {
+            GDALClose( maskDs );
+            GDALClose( rasterDs );
+            result.errorMessage = QStringLiteral( "polygonize: failed reading class raster row %1" )
+                                    .arg( r );
+            return result;
+        }
+        for ( int c = 0; c < w; ++c )
+            maskRow[c] = classRow[c] > 0.0f ? 255 : 0;
+        if ( GDALRasterIO( maskBand, GF_Write, 0, r, w, 1,
+                           maskRow.data(), w, 1, GDT_Byte, 0, 0 ) != CE_None )
+        {
+            GDALClose( maskDs );
+            GDALClose( rasterDs );
+            result.errorMessage = QStringLiteral( "polygonize: failed writing mask row %1" ).arg( r );
+            return result;
+        }
+    }
+
+    const QString tempVectorPath = outputVectorPath
+                                   + QStringLiteral( ".tmp~%1" )
+                                         .arg( reinterpret_cast<quintptr>( &outputVectorPath ) );
+
+    GDALDatasetH vecDs = GDALCreate( drv, tempVectorPath.toUtf8().constData(),
                                      0, 0, 0, GDT_Unknown, nullptr );
     if ( !vecDs )
     {
+        GDALClose( maskDs );
         GDALClose( rasterDs );
         result.errorMessage = QStringLiteral( "polygonize: cannot create %1" ).arg( outputVectorPath );
         return result;
@@ -308,7 +446,9 @@ RsClassRasterResult RsClassRaster::polygonize(
     if ( !layer )
     {
         GDALClose( vecDs );
+        GDALClose( maskDs );
         GDALClose( rasterDs );
+        removeShapefileWithSidecars( tempVectorPath );
         result.errorMessage = QStringLiteral( "polygonize: CreateLayer failed" );
         return result;
     }
@@ -316,71 +456,6 @@ RsClassRasterResult RsClassRaster::polygonize(
     OGRFieldDefnH field = OGR_Fld_Create( fieldName.toUtf8().constData(), OFTInteger );
     OGR_L_CreateField( layer, field, TRUE );
     OGR_Fld_Destroy( field );
-
-    // Mask out NoData/background (value 0) so unclassified regions are not polygonized.
-    // Fail closed if the mask cannot be built — never polygonize unmasked.
-    const int w = GDALGetRasterXSize( rasterDs );
-    const int h = GDALGetRasterYSize( rasterDs );
-    GDALDriverH memDrv = GDALGetDriverByName( "MEM" );
-    if ( !memDrv )
-    {
-        GDALClose( vecDs );
-        GDALClose( rasterDs );
-        removeIncompleteOutput( outputVectorPath );
-        result.errorMessage = QStringLiteral( "polygonize: MEM driver unavailable for mask band" );
-        return result;
-    }
-
-    GDALDatasetH maskDs = GDALCreate( memDrv, "", w, h, 1, GDT_Byte, nullptr );
-    if ( !maskDs )
-    {
-        GDALClose( vecDs );
-        GDALClose( rasterDs );
-        removeIncompleteOutput( outputVectorPath );
-        result.errorMessage = QStringLiteral( "polygonize: cannot create mask dataset" );
-        return result;
-    }
-
-    GDALRasterBandH maskBand = GDALGetRasterBand( maskDs, 1 );
-    if ( !maskBand )
-    {
-        GDALClose( maskDs );
-        GDALClose( vecDs );
-        GDALClose( rasterDs );
-        removeIncompleteOutput( outputVectorPath );
-        result.errorMessage = QStringLiteral( "polygonize: cannot get mask band" );
-        return result;
-    }
-
-    QVector<float> classRow( w );
-    QVector<quint8> maskRow( w );
-    for ( int r = 0; r < h; ++r )
-    {
-        // Float read works for Byte and UInt16 class rasters.
-        if ( GDALRasterIO( band, GF_Read, 0, r, w, 1,
-                           classRow.data(), w, 1, GDT_Float32, 0, 0 ) != CE_None )
-        {
-            GDALClose( maskDs );
-            GDALClose( vecDs );
-            GDALClose( rasterDs );
-            removeIncompleteOutput( outputVectorPath );
-            result.errorMessage = QStringLiteral( "polygonize: failed reading class raster row %1" )
-                                    .arg( r );
-            return result;
-        }
-        for ( int c = 0; c < w; ++c )
-            maskRow[c] = classRow[c] > 0.0f ? 255 : 0;
-        if ( GDALRasterIO( maskBand, GF_Write, 0, r, w, 1,
-                           maskRow.data(), w, 1, GDT_Byte, 0, 0 ) != CE_None )
-        {
-            GDALClose( maskDs );
-            GDALClose( vecDs );
-            GDALClose( rasterDs );
-            removeIncompleteOutput( outputVectorPath );
-            result.errorMessage = QStringLiteral( "polygonize: failed writing mask row %1" ).arg( r );
-            return result;
-        }
-    }
 
     const int fieldIndex = 0;
     const CPLErr err = GDALPolygonize( band, maskBand, layer, fieldIndex, nullptr, nullptr, nullptr );
@@ -391,8 +466,20 @@ RsClassRasterResult RsClassRaster::polygonize(
 
     if ( err != CE_None )
     {
-        removeIncompleteOutput( outputVectorPath );
+        removeShapefileWithSidecars( tempVectorPath );
         result.errorMessage = QStringLiteral( "GDALPolygonize failed" );
+        return result;
+    }
+
+    // Atomically publish temp dataset over the final path (preserves previous
+    // result on failure, cleans orphan sidecars).
+    removeShapefileWithSidecars( outputVectorPath );
+    if ( !renameShapefileWithSidecars( tempVectorPath, outputVectorPath ) )
+    {
+        // Fallback: at least try to remove incomplete temp sidecars
+        removeShapefileWithSidecars( tempVectorPath );
+        result.errorMessage = QStringLiteral( "polygonize: failed to finalize output %1" )
+                                .arg( outputVectorPath );
         return result;
     }
 
