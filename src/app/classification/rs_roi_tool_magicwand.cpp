@@ -144,15 +144,19 @@ void RsRoiToolMagicWand::canvasReleaseEvent( QgsMapMouseEvent *e )
   const int winW = colEnd - colStart + 1;
   const int winH = rowEnd - rowStart + 1;
 
-  cv::Mat img( winH, winW, CV_32FC( B ) );
+  // O3: cap band reads to avoid 421 MB transient at 400 bands — read single band when hyperspectral
+  const int readB = ( B > 8 ? 1 : B );
+  cv::Mat img( winH, winW, CV_32FC( readB ) );
   std::vector<float> band( static_cast<size_t>( winW ) * static_cast<size_t>( winH ) );
-  for ( int b = 0; b < B; ++b )
+  for ( int b = 0; b < readB; ++b )
   {
-    if ( ds->GetRasterBand( b + 1 )->RasterIO(
+    // When hyperspectral, flood-fill uses band 1 only (intensity); otherwise all bands spectral.
+    const int gdalBand = ( readB == 1 ? 1 : b + 1 );
+    if ( ds->GetRasterBand( gdalBand )->RasterIO(
            GF_Read, colStart, rowStart, winW, winH, band.data(), winW, winH, GDT_Float32, 0, 0 )
          != CE_None )
     {
-      qWarning() << "RsRoiToolMagicWand: failed to read band" << (b + 1);
+      qWarning() << "RsRoiToolMagicWand: failed to read band" << gdalBand;
       GDALClose( ds );
       return;
     }
@@ -160,7 +164,7 @@ void RsRoiToolMagicWand::canvasReleaseEvent( QgsMapMouseEvent *e )
     {
       float *rowPtr = reinterpret_cast<float *>( img.ptr( r ) );
       for ( int c = 0; c < winW; ++c )
-        rowPtr[c * B + b] = band[static_cast<size_t>( r ) * winW + c];
+        rowPtr[c * readB + b] = band[static_cast<size_t>( r ) * winW + c];
     }
   }
   GDALClose( ds );

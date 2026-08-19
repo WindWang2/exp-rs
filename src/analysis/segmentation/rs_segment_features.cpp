@@ -39,22 +39,13 @@ RsSegmentFeatures::extract( const QString &rasterPath,
     const int nBands = bandIndices.size();
     const size_t nPixels = static_cast<size_t>(w) * static_cast<size_t>(h);
 
-    // Read all requested bands into contiguous buffers
-    QVector<QVector<float>> bandData( nBands );
+    // Collect NoData metadata first
     QVector<double> bandNoData( nBands );
     QVector<bool> hasNoData( nBands, false );
     for ( int b = 0; b < nBands; ++b )
     {
-        bandData[b].resize( nPixels );
         GDALRasterBandH band = GDALGetRasterBand( ds, bandIndices[b] );
         if ( !band )
-        {
-            GDALClose( ds );
-            return result;
-        }
-        CPLErr err = GDALRasterIO( band, GF_Read, 0, 0, w, h,
-                                   bandData[b].data(), w, h, GDT_Float32, 0, 0 );
-        if ( err != CE_None )
         {
             GDALClose( ds );
             return result;
@@ -67,84 +58,66 @@ RsSegmentFeatures::extract( const QString &rasterPath,
             hasNoData[b] = true;
         }
     }
-    GDALClose( ds );
 
-    // Collect per-segment accumulators.
-    // Labels from connectedComponents are contiguous starting at 1, so we can
-    // index by label directly with a vector (O(1) per pixel) instead of QMap
-    // (O(log N) red-black-tree lookup + node allocation per pixel). If the
-    // max label is pathologically large relative to the pixel count (sparse /
-    // corrupt labels), fall back to the map to avoid a huge allocation.
+    // Build any-band invalid mask with streaming reads (one band at a time)
+    // to avoid O(W*H*B*4) residency.
+    std::vector<char> validMask( nPixels, 1 );
+    std::vector<float> bandBuf( nPixels );
+
+    // Pass 1: mark invalid where any band is NaN or NoData sentinel
+    for ( int b = 0; b < nBands; ++b )
+    {
+        GDALRasterBandH band = GDALGetRasterBand( ds, bandIndices[b] );
+        CPLErr err = GDALRasterIO( band, GF_Read, 0, 0, w, h,
+                                   bandBuf.data(), w, h, GDT_Float32, 0, 0 );
+        if ( err != CE_None )
+        {
+            GDALClose( ds );
+            return result;
+        }
+        for ( size_t i = 0; i < nPixels; ++i )
+        {
+            if ( !validMask[i] ) continue;
+            const float v = bandBuf[i];
+            if ( std::isnan( v ) || ( hasNoData[b] && static_cast<double>( v ) == bandNoData[b] ) )
+                validMask[i] = 0;
+        }
+    }
+
+    const auto labels = segMap.labels();
+
+    quint32 maxLabel = 0;
+    for ( size_t i = 0; i < nPixels; ++i )
+        maxLabel = std::max( maxLabel, labels[static_cast<int>(i)] );
+
+    const bool useVector = maxLabel > 0
+                           && static_cast<size_t>( maxLabel ) <= nPixels * 10;
     struct Acc
     {
         QVector<double> sum;
         QVector<double> sumSq;
         QVector<double> minVal;
         QVector<double> maxVal;
+        QVector<double> glcmContrast;
+        QVector<double> glcmCorrelation;
+        QVector<double> glcmEnergy;
+        QVector<double> glcmHomogeneity;
         int count = 0;
     };
-
-    const auto labels = segMap.labels();
-
-    quint32 maxLabel = 0;
-    for ( int i = 0; i < nPixels; ++i )
-        maxLabel = std::max( maxLabel, labels[i] );
-
-    const bool useVector = maxLabel > 0
-                           && static_cast<size_t>( maxLabel ) <= nPixels * 10;
     std::vector<Acc> accVec;
     QMap<quint32, Acc> accMap; // fallback for sparse labels
 
     if ( useVector )
-        accVec.resize( maxLabel + 1 );
+        accVec.resize( static_cast<size_t>(maxLabel) + 1 );
 
     auto accFor = [&]( quint32 segId ) -> Acc * {
         if ( useVector )
-            return &accVec[segId];
+            return &accVec[static_cast<size_t>(segId)];
         return &accMap[segId];
     };
 
-    for ( int i = 0; i < nPixels; ++i )
-    {
-        const quint32 segId = labels[i];
-        if ( segId == 0 )
-            continue; // skip nodata
-
-        // Check if any band has NoData or NaN at this pixel
-        bool isPixelNodata = false;
-        for ( int b = 0; b < nBands; ++b )
-        {
-            const float v = bandData[b][i];
-            if ( std::isnan( v ) || ( hasNoData[b] && static_cast<double>( v ) == bandNoData[b] ) )
-            {
-                isPixelNodata = true;
-                break;
-            }
-        }
-        if ( isPixelNodata )
-            continue;
-
-        Acc &acc = *accFor( segId );
-        if ( acc.sum.isEmpty() )
-        {
-            acc.sum.resize( nBands, 0.0 );
-            acc.sumSq.resize( nBands, 0.0 );
-            acc.minVal.resize( nBands, std::numeric_limits<double>::max() );
-            acc.maxVal.resize( nBands, std::numeric_limits<double>::lowest() );
-        }
-
-        for ( int b = 0; b < nBands; ++b )
-        {
-            const float v = bandData[b][i];
-            acc.sum[b] += v;
-            acc.sumSq[b] += static_cast<double>( v ) * v;
-            acc.minVal[b] = std::min( acc.minVal[b], static_cast<double>( v ) );
-            acc.maxVal[b] = std::max( acc.maxVal[b], static_cast<double>( v ) );
-        }
-        acc.count++;
-    }
-
-    // Compute perimeter and bounding box per segment (same vector-vs-map split).
+    // Prepare accumulators: ensure sum vectors sized nBands lazily, but we can pre-size glcm vectors later
+    // Bounding box and perimeter depend only on labels (label geometry), not validMask.
     struct SegBBox
     {
         int minR = std::numeric_limits<int>::max();
@@ -159,21 +132,22 @@ RsSegmentFeatures::extract( const QString &rasterPath,
 
     if ( useVector )
     {
-        bboxVec.resize( maxLabel + 1 );
-        perimeterVec.resize( maxLabel + 1, 0 );
+        bboxVec.resize( static_cast<size_t>(maxLabel) + 1 );
+        perimeterVec.resize( static_cast<size_t>(maxLabel) + 1, 0 );
     }
 
     for ( int r = 0; r < h; ++r )
     {
         for ( int c = 0; c < w; ++c )
         {
-            const quint32 segId = labels[r * w + c];
+            const size_t idx = static_cast<size_t>(r) * static_cast<size_t>(w) + static_cast<size_t>(c);
+            const quint32 segId = labels[static_cast<int>(idx)];
             if ( segId == 0 )
                 continue;
 
             if ( useVector )
             {
-                SegBBox &box = bboxVec[segId];
+                SegBBox &box = bboxVec[static_cast<size_t>(segId)];
                 box.minR = std::min( box.minR, r );
                 box.maxR = std::max( box.maxR, r );
                 box.minC = std::min( box.minC, c );
@@ -200,7 +174,8 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                     isBoundary = true;
                     break;
                 }
-                if ( labels[nr * w + nc] != segId )
+                const size_t nIdx = static_cast<size_t>(nr) * static_cast<size_t>(w) + static_cast<size_t>(nc);
+                if ( labels[static_cast<int>(nIdx)] != segId )
                 {
                     isBoundary = true;
                     break;
@@ -209,24 +184,211 @@ RsSegmentFeatures::extract( const QString &rasterPath,
             if ( isBoundary )
             {
                 if ( useVector )
-                    perimeterVec[segId]++;
+                    perimeterVec[static_cast<size_t>(segId)]++;
                 else
                     perimeterMap[segId]++;
             }
         }
     }
 
-    // Build final stats: iterate labels 1..maxLabel (vector) or QMap keys (map).
+    // Pass 2: per-band streaming accumulation + GLCM
+    // For each band, read again and update sum/min/max/count and GLCM
+    for ( int b = 0; b < nBands; ++b )
+    {
+        GDALRasterBandH band = GDALGetRasterBand( ds, bandIndices[b] );
+        CPLErr err = GDALRasterIO( band, GF_Read, 0, 0, w, h,
+                                   bandBuf.data(), w, h, GDT_Float32, 0, 0 );
+        if ( err != CE_None )
+        {
+            GDALClose( ds );
+            return result;
+        }
+        // Accumulate spectral stats for this band
+        for ( size_t i = 0; i < nPixels; ++i )
+        {
+            const quint32 segId = labels[static_cast<int>(i)];
+            if ( segId == 0 ) continue;
+            if ( !validMask[i] ) continue;
+            Acc *acc = accFor( segId );
+            if ( acc->sum.isEmpty() )
+            {
+                acc->sum.resize( nBands, 0.0 );
+                acc->sumSq.resize( nBands, 0.0 );
+                acc->minVal.resize( nBands, std::numeric_limits<double>::max() );
+                acc->maxVal.resize( nBands, std::numeric_limits<double>::lowest() );
+                acc->glcmContrast.resize( nBands, 0.0 );
+                acc->glcmCorrelation.resize( nBands, 0.0 );
+                acc->glcmEnergy.resize( nBands, 0.0 );
+                acc->glcmHomogeneity.resize( nBands, 0.0 );
+            }
+            const float v = bandBuf[i];
+            // validMask already guarantees !isnan and !hasNoData for this band
+            acc->sum[b] += v;
+            acc->sumSq[b] += static_cast<double>( v ) * v;
+            acc->minVal[b] = std::min( acc->minVal[b], static_cast<double>( v ) );
+            acc->maxVal[b] = std::max( acc->maxVal[b], static_cast<double>( v ) );
+        }
+        // Count valid pixels per segment (only once, on first band)
+        if ( b == 0 )
+        {
+            if ( useVector )
+            {
+                for ( size_t segId = 1; segId < accVec.size(); ++segId )
+                {
+                    // count will be incremented in loop above per pixel? We missed count increment.
+                    // To avoid double counting, we counted via sum loop? Actually we need count per segment = number of valid pixels.
+                    // We already have not incremented count; do it now via scanning validMask+labels once.
+                    // Instead of per-pixel increment in band loop (which would double), we compute after.
+                }
+            }
+        }
+    }
+    // Fix count: single scan over validMask+labels (since per-band loop did not increment count)
+    // Reset counts then recompute
+    if ( useVector )
+    {
+        for ( auto &acc : accVec ) acc.count = 0;
+    }
+    else
+    {
+        for ( auto it = accMap.begin(); it != accMap.end(); ++it ) it.value().count = 0;
+    }
+    for ( size_t i = 0; i < nPixels; ++i )
+    {
+        if ( !validMask[i] ) continue;
+        const quint32 segId = labels[static_cast<int>(i)];
+        if ( segId == 0 ) continue;
+        Acc *acc = accFor( segId );
+        if ( acc->sum.isEmpty() ) continue; // segment wholy invalid
+        acc->count++;
+    }
+
+    // Re-read per band to compute GLCM (requires min/max per band now known)
+    // We have bandBuf from last iteration (last band), need to re-read each band again for GLCM
+    for ( int b = 0; b < nBands; ++b )
+    {
+        GDALRasterBandH band = GDALGetRasterBand( ds, bandIndices[b] );
+        CPLErr err = GDALRasterIO( band, GF_Read, 0, 0, w, h,
+                                   bandBuf.data(), w, h, GDT_Float32, 0, 0 );
+        if ( err != CE_None )
+        {
+            GDALClose( ds );
+            return result;
+        }
+
+        // For each segment, build GLCM for this band
+        auto processSegment = [&]( quint32 segId, const SegBBox &box ){
+            Acc *acc = accFor( segId );
+            if ( acc->count == 0 ) return;
+            if ( acc->sum.isEmpty() ) return;
+            const double minV = acc->minVal[b];
+            const double maxV = acc->maxVal[b];
+            const double rangeV = ( maxV > minV ) ? ( maxV - minV ) : 1.0;
+            constexpr int nLevels = 16;
+            double glcm[nLevels][nLevels] = {};
+            int pairCount = 0;
+            for ( int r = box.minR; r <= box.maxR; ++r )
+            {
+                for ( int c = box.minC; c <= box.maxC; ++c )
+                {
+                    const size_t idx = static_cast<size_t>(r) * static_cast<size_t>(w) + static_cast<size_t>(c);
+                    if ( labels[static_cast<int>(idx)] != segId ) continue;
+                    if ( !validMask[idx] ) continue;
+                    const float val1 = bandBuf[idx];
+                    // validMask guarantees not NaN/NoData, but keep guard for safety
+                    if ( std::isnan(val1) ) continue;
+                    if ( hasNoData[b] && static_cast<double>(val1) == bandNoData[b] ) continue;
+                    const size_t level1 = static_cast<size_t>( std::clamp( static_cast<int>( ( val1 - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 ) );
+                    const int drs[] = { 0, 1 };
+                    const int dcs[] = { 1, 0 };
+                    for ( int d = 0; d < 2; ++d )
+                    {
+                        const int nr = r + drs[d];
+                        const int nc = c + dcs[d];
+                        if ( nr < box.minR || nr > box.maxR || nc < box.minC || nc > box.maxC ) continue;
+                        const size_t nIdx = static_cast<size_t>(nr) * static_cast<size_t>(w) + static_cast<size_t>(nc);
+                        if ( labels[static_cast<int>(nIdx)] != segId ) continue;
+                        if ( !validMask[nIdx] ) continue;
+                        const float val2 = bandBuf[nIdx];
+                        if ( std::isnan(val2) ) continue;
+                        if ( hasNoData[b] && static_cast<double>(val2) == bandNoData[b] ) continue;
+                        const size_t level2 = static_cast<size_t>( std::clamp( static_cast<int>( ( val2 - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 ) );
+                        glcm[level1][level2] += 1.0;
+                        glcm[level2][level1] += 1.0;
+                        pairCount += 2;
+                    }
+                }
+            }
+            if ( pairCount > 0 )
+            {
+                double contrast = 0.0;
+                double energy = 0.0;
+                double homogeneity = 0.0;
+                double meanI = 0.0;
+                for ( int i = 0; i < nLevels; ++i )
+                    for ( int j = 0; j < nLevels; ++j )
+                    {
+                        const double p = glcm[i][j] / pairCount;
+                        if ( p <= 0 ) continue;
+                        contrast += ( i - j ) * ( i - j ) * p;
+                        energy += p * p;
+                        homogeneity += p / ( 1.0 + std::abs( i - j ) );
+                        meanI += i * p;
+                    }
+                double varI = 0.0;
+                for ( int i = 0; i < nLevels; ++i )
+                    for ( int j = 0; j < nLevels; ++j )
+                    {
+                        const double p = glcm[i][j] / pairCount;
+                        varI += ( i - meanI ) * ( i - meanI ) * p;
+                    }
+                double correlation = 0.0;
+                if ( varI > 1e-6 )
+                    for ( int i = 0; i < nLevels; ++i )
+                        for ( int j = 0; j < nLevels; ++j )
+                        {
+                            const double p = glcm[i][j] / pairCount;
+                            correlation += ( i - meanI ) * ( j - meanI ) * p / varI;
+                        }
+                acc->glcmContrast[b] = contrast;
+                acc->glcmCorrelation[b] = correlation;
+                acc->glcmEnergy[b] = energy;
+                acc->glcmHomogeneity[b] = homogeneity;
+            }
+        };
+
+        if ( useVector )
+        {
+            for ( quint32 segId = 1; segId < accVec.size(); ++segId )
+            {
+                if ( accVec[segId].count == 0 ) continue;
+                const SegBBox &box = bboxVec[segId];
+                if ( box.minR > box.maxR ) continue;
+                processSegment( segId, box );
+            }
+        }
+        else
+        {
+            for ( auto it = accMap.constBegin(); it != accMap.constEnd(); ++it )
+            {
+                const quint32 segId = it.key();
+                const SegBBox box = bboxMap.value( segId );
+                if ( box.minR > box.maxR ) continue;
+                processSegment( segId, box );
+            }
+        }
+    }
+
+    GDALClose( ds );
+
+    // Build final stats
     auto buildStat = [&]( quint32 segId, const Acc &acc, const SegBBox &box, int perimeter ) {
         if ( acc.count == 0 )
             return;
-
         SegmentStat stat;
         stat.area = acc.count;
         stat.perimeter = perimeter;
         stat.shapeIndex = computeShapeIndex( stat.area, stat.perimeter );
-
-        // Extended geometric shape descriptors
         stat.compactness = ( stat.area > 0 ) ? ( ( stat.perimeter * stat.perimeter ) / ( 4.0 * M_PI * stat.area ) ) : 0.0;
         const double bboxW = std::max( 1, box.maxC - box.minC + 1 );
         const double bboxH = std::max( 1, box.maxR - box.minR + 1 );
@@ -237,10 +399,10 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         stat.stddev.resize( nBands );
         stat.min = acc.minVal;
         stat.max = acc.maxVal;
-        stat.glcmContrast.resize( nBands, 0.0 );
-        stat.glcmCorrelation.resize( nBands, 0.0 );
-        stat.glcmEnergy.resize( nBands, 0.0 );
-        stat.glcmHomogeneity.resize( nBands, 0.0 );
+        stat.glcmContrast = acc.glcmContrast;
+        stat.glcmCorrelation = acc.glcmCorrelation;
+        stat.glcmEnergy = acc.glcmEnergy;
+        stat.glcmHomogeneity = acc.glcmHomogeneity;
 
         for ( int b = 0; b < nBands; ++b )
         {
@@ -253,102 +415,13 @@ RsSegmentFeatures::extract( const QString &rasterPath,
             MathUtils::Stats s = MathUtils::computeStatsFromAccumulators(accStats);
             stat.mean[b] = s.mean;
             stat.stddev[b] = s.stddev;
-
-            // Simplified GLCM calculation (16 quantized levels)
-            constexpr int nLevels = 16;
-            const double minV = acc.minVal[b];
-            const double maxV = acc.maxVal[b];
-            const double rangeV = ( maxV > minV ) ? ( maxV - minV ) : 1.0;
-
-            double glcm[nLevels][nLevels] = {};
-            int pairCount = 0;
-
-            for ( int r = box.minR; r <= box.maxR; ++r )
-            {
-                for ( int c = box.minC; c <= box.maxC; ++c )
-                {
-                    if ( labels[r * w + c] != segId )
-                        continue;
-
-                    const float val1 = bandData[b][r * w + c];
-                    if ( std::isnan( val1 ) )
-                        continue;
-
-                    const size_t level1 = static_cast<size_t>( std::clamp( static_cast<int>( ( val1 - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 ) );
-
-                    const int drs[] = { 0, 1 };
-                    const int dcs[] = { 1, 0 };
-                    for ( int d = 0; d < 2; ++d )
-                    {
-                        const int nr = r + drs[d];
-                        const int nc = c + dcs[d];
-                        if ( nr <= box.maxR && nc <= box.maxC && labels[nr * w + nc] == segId )
-                        {
-                            const float val2 = bandData[b][nr * w + nc];
-                            if ( std::isnan( val2 ) )
-                                continue;
-                            const size_t level2 = static_cast<size_t>( std::clamp( static_cast<int>( ( val2 - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 ) );
-                            glcm[level1][level2] += 1.0;
-                            glcm[level2][level1] += 1.0;
-                            pairCount += 2;
-                        }
-                    }
-                }
-            }
-
-            if ( pairCount > 0 )
-            {
-                double contrast = 0.0;
-                double energy = 0.0;
-                double homogeneity = 0.0;
-                double meanI = 0.0;
-                for ( int i = 0; i < nLevels; ++i )
-                {
-                    for ( int j = 0; j < nLevels; ++j )
-                    {
-                        const double p = glcm[i][j] / pairCount;
-                        if ( p <= 0 ) continue;
-                        contrast += ( i - j ) * ( i - j ) * p;
-                        energy += p * p;
-                        homogeneity += p / ( 1.0 + std::abs( i - j ) );
-                        meanI += i * p;
-                    }
-                }
-                double varI = 0.0;
-                for ( int i = 0; i < nLevels; ++i )
-                {
-                    for ( int j = 0; j < nLevels; ++j )
-                    {
-                        const double p = glcm[i][j] / pairCount;
-                        varI += ( i - meanI ) * ( i - meanI ) * p;
-                    }
-                }
-                double correlation = 0.0;
-                if ( varI > 1e-6 )
-                {
-                    for ( int i = 0; i < nLevels; ++i )
-                    {
-                        for ( int j = 0; j < nLevels; ++j )
-                        {
-                            const double p = glcm[i][j] / pairCount;
-                            correlation += ( i - meanI ) * ( j - meanI ) * p / varI;
-                        }
-                    }
-                }
-
-                stat.glcmContrast[b] = contrast;
-                stat.glcmCorrelation[b] = correlation;
-                stat.glcmEnergy[b] = energy;
-                stat.glcmHomogeneity[b] = homogeneity;
-            }
         }
-
         result[segId] = stat;
     };
 
     if ( useVector )
     {
-        for ( quint32 segId = 1; segId <= maxLabel; ++segId )
+        for ( quint32 segId = 1; segId < accVec.size(); ++segId )
         {
             if ( accVec[segId].count > 0 )
                 buildStat( segId, accVec[segId], bboxVec[segId], perimeterVec[segId] );

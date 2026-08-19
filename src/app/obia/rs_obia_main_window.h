@@ -69,6 +69,7 @@ class RsObiaMainWindow : public QMainWindow
       Hierarchy,
       HierarchyClassify,
       FlatClassify,
+      LevelFeatures,
     };
 
     bool isBusy() const { return m_pendingTaskId >= 0; }
@@ -118,6 +119,7 @@ class RsObiaMainWindow : public QMainWindow
     void setupDocks();
     void setupMapCanvas();
     void updateSegmentTable();
+    void updateSegmentTableRow( quint32 segId );
     void rebuildClassTable();
     void updateStatusLabel();
     void applySegmentationResult( const RsSegmentMap &segMap,
@@ -127,6 +129,8 @@ class RsObiaMainWindow : public QMainWindow
                                int activeLevel,
                                QMap<quint32, RsSegmentFeatures::SegmentStat> stats );
     void setActiveLevelMap( int level );
+    long startLevelFeaturesTask( int level );
+    void applyLevelFeaturesResult( int level, QMap<quint32, RsSegmentFeatures::SegmentStat> stats );
     QVector<int> allBandIndices() const;
     RsFeatureSelection featureSelection() const;
     void populateUncertaintyTable( const QMap<quint32, double> &uncertainties,
@@ -215,6 +219,13 @@ class RsObiaMainWindow : public QMainWindow
         int clsLevel = 0;
         RsAccuracyAssessment::Result accuracy;
     };
+    struct PendingLevelWork
+    {
+        int level = 0;
+        QMap<quint32, RsSegmentFeatures::SegmentStat> stats;
+        bool ok = false;
+        QString error;
+    };
 
     PendingOp m_pendingOp = PendingOp::None;
     long m_pendingTaskId = -1;
@@ -224,6 +235,7 @@ class RsObiaMainWindow : public QMainWindow
     std::shared_ptr<PendingSegWork> m_pendingSegWork;
     std::shared_ptr<PendingHierWork> m_pendingHierWork;
     std::shared_ptr<PendingHierClsWork> m_pendingHierClsWork;
+    std::shared_ptr<PendingLevelWork> m_pendingLevelWork;
     RsObiaTask *m_pendingFlatTask = nullptr; // deleteLater after terminal
     QString m_pendingFlatOutputPath;
 };

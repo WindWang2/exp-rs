@@ -66,7 +66,9 @@ class QGIS_ANALYSIS_EXPORT RsSegmentMap
     mutable bool mSizeCacheBuilt = false;
     /// Per-segment coords, filled lazily only when pixelCoords() is called.
     mutable QMap<quint32, QVector<QPoint>> mCoordsCache;
+    mutable bool mCoordsIndexBuilt = false;
 
     void ensureSizeCache() const;
+    void ensureCoordsIndex() const;
     QVector<QPoint> buildCoordsForSegment( quint32 segmentId ) const;
 };

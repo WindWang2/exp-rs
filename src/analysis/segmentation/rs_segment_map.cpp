@@ -51,28 +51,58 @@ RsSegmentMap RsSegmentMap::fromGeoTIFF( const QString &path )
         return {};
     }
 
-    // ISSUE 4 fix: Read as Float32 and convert, handling all numeric raster types
-    QVector<float> floatBuf( static_cast<size_t>(w) * static_cast<size_t>(h) );
-    CPLErr err = GDALRasterIO( band, GF_Read, 0, 0, w, h,
-                               floatBuf.data(), w, h, GDT_Float32, 0, 0 );
-    GDALClose( ds );
-
-    if ( err != CE_None )
-    {
-        SICNU_LOG_ERROR( SicnuLogTags::Segmentation, "GDALRasterIO failed for segment map" );
-        return {};
-    }
-
-    // Convert float to uint32, clamping negative values to 0
     const size_t nPx = static_cast<size_t>(w) * static_cast<size_t>(h);
+    GDALDataType dtype = GDALGetRasterDataType( band );
     QVector<quint32> labels( nPx );
-    for ( size_t i = 0; i < nPx; ++i )
+    if ( dtype == GDT_UInt32 )
     {
-        float v = floatBuf[i];
-        if ( std::isnan( v ) || v < 0 )
-            labels[i] = 0;
-        else
-            labels[i] = static_cast<quint32>( v + 0.5f ); // round to nearest
+        CPLErr err = GDALRasterIO( band, GF_Read, 0, 0, w, h,
+                                   labels.data(), w, h, GDT_UInt32, 0, 0 );
+        GDALClose( ds );
+        if ( err != CE_None )
+        {
+            SICNU_LOG_ERROR( SicnuLogTags::Segmentation, "GDALRasterIO UInt32 failed for segment map" );
+            return {};
+        }
+    }
+    else if ( dtype == GDT_Int32 || dtype == GDT_Int16 || dtype == GDT_UInt16 || dtype == GDT_Byte )
+    {
+        // Direct integer read then cast, no float precision loss
+        QVector<qint32> tmp( nPx );
+        CPLErr err = GDALRasterIO( band, GF_Read, 0, 0, w, h,
+                                   tmp.data(), w, h, GDT_Int32, 0, 0 );
+        GDALClose( ds );
+        if ( err != CE_None )
+        {
+            SICNU_LOG_ERROR( SicnuLogTags::Segmentation, "GDALRasterIO Int32 failed for segment map" );
+            return {};
+        }
+        for ( size_t i = 0; i < nPx; ++i )
+        {
+            qint32 v = tmp[i];
+            labels[i] = ( v <= 0 ) ? 0u : static_cast<quint32>( v );
+        }
+    }
+    else
+    {
+        // Fallback: float path (legacy Float32 label rasters) — clamping and rounding
+        QVector<float> floatBuf( nPx );
+        CPLErr err = GDALRasterIO( band, GF_Read, 0, 0, w, h,
+                                   floatBuf.data(), w, h, GDT_Float32, 0, 0 );
+        GDALClose( ds );
+        if ( err != CE_None )
+        {
+            SICNU_LOG_ERROR( SicnuLogTags::Segmentation, "GDALRasterIO failed for segment map" );
+            return {};
+        }
+        for ( size_t i = 0; i < nPx; ++i )
+        {
+            float v = floatBuf[i];
+            if ( std::isnan( v ) || v < 0 )
+                labels[i] = 0;
+            else
+                labels[i] = static_cast<quint32>( v + 0.5f );
+        }
     }
 
     SICNU_LOG_SUCCESS( SicnuLogTags::Segmentation, QString( "Loaded segment map: %1x%2" ).arg( w ).arg( h ) );
@@ -157,9 +187,9 @@ bool RsSegmentMap::toGeoTIFF( const QString &path, const QString &refPath, QStri
     QVector<quint32> rowBuf( mWidth );
     for ( int r = 0; r < mHeight; ++r )
     {
-        const int rowBase = r * mWidth;
+        const size_t rowBase = static_cast<size_t>(r) * static_cast<size_t>(mWidth);
         for ( int c = 0; c < mWidth; ++c )
-            rowBuf[c] = labels[rowBase + c];
+            rowBuf[c] = labels[static_cast<int>(rowBase + static_cast<size_t>(c))];
         if ( GDALRasterIO( outBand, GF_Write, 0, r, mWidth, 1,
                            rowBuf.data(), mWidth, 1, GDT_UInt32, 0, 0 ) != CE_None )
         {
@@ -185,7 +215,8 @@ quint32 RsSegmentMap::labelAt( int row, int col ) const
 {
     if ( row < 0 || row >= mHeight || col < 0 || col >= mWidth )
         return 0;
-    return mLabels[row * mWidth + col];
+    const size_t idx = static_cast<size_t>(row) * static_cast<size_t>(mWidth) + static_cast<size_t>(col);
+    return mLabels[static_cast<int>( idx )];
 }
 
 QSet<quint32> RsSegmentMap::uniqueLabels() const
@@ -232,14 +263,46 @@ QVector<QPoint> RsSegmentMap::buildCoordsForSegment( quint32 segmentId ) const
 
     for ( int r = 0; r < mHeight; ++r )
     {
-        const int rowBase = r * mWidth;
+        const size_t rowBase = static_cast<size_t>(r) * static_cast<size_t>(mWidth);
         for ( int c = 0; c < mWidth; ++c )
         {
-            if ( mLabels[rowBase + c] == segmentId )
+            if ( mLabels[static_cast<int>(rowBase + static_cast<size_t>(c))] == segmentId )
                 coords.append( QPoint( c, r ) );
         }
     }
     return coords;
+}
+
+void RsSegmentMap::ensureCoordsIndex() const
+{
+    if ( mCoordsIndexBuilt )
+        return;
+    if ( mLabels.isEmpty() )
+    {
+        mCoordsIndexBuilt = true;
+        return;
+    }
+    ensureSizeCache();
+    // Reserve per segment to avoid realloc churn
+    for ( auto it = mSizeCache.constBegin(); it != mSizeCache.constEnd(); ++it )
+    {
+        QVector<QPoint> v;
+        v.reserve( it.value() );
+        mCoordsCache.insert( it.key(), v );
+    }
+    for ( int r = 0; r < mHeight; ++r )
+    {
+        const size_t rowBase = static_cast<size_t>(r) * static_cast<size_t>(mWidth);
+        for ( int c = 0; c < mWidth; ++c )
+        {
+            const quint32 sid = mLabels[static_cast<int>(rowBase + static_cast<size_t>(c))];
+            if ( sid == 0 ) continue;
+            auto it = mCoordsCache.find( sid );
+            if ( it != mCoordsCache.end() )
+                it.value().append( QPoint( c, r ) );
+        }
+    }
+    mCoordsIndexBuilt = true;
 }
 
 QVector<QPoint> RsSegmentMap::pixelCoords( quint32 segmentId ) const
@@ -250,6 +313,16 @@ QVector<QPoint> RsSegmentMap::pixelCoords( quint32 segmentId ) const
     auto it = mCoordsCache.constFind( segmentId );
     if ( it != mCoordsCache.constEnd() )
         return it.value();
+
+    if ( mCoordsCache.size() > 8 )
+    {
+        // Many segments -> build full inverted index once instead of scanning W*H per segment
+        ensureCoordsIndex();
+        auto it2 = mCoordsCache.constFind( segmentId );
+        if ( it2 != mCoordsCache.constEnd() )
+            return it2.value();
+        return {};
+    }
 
     QVector<QPoint> coords = buildCoordsForSegment( segmentId );
     mCoordsCache.insert( segmentId, coords );
