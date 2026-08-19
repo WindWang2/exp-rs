@@ -13,7 +13,7 @@ void OtbSegmentationAlgorithm::initAlgorithm(const QVariantMap &configuration)
     addParameter(new QgsProcessingParameterRasterLayer("INPUT", QObject::tr("Input raster")));
 
     QStringList modes;
-    modes << "meanshift" << "watershed" << "mprofiles" << "cc" << "lsms";
+    modes << "meanshift" << "watershed" << "mprofiles" << "cc";
     addParameter(new QgsProcessingParameterEnum("MODE", QObject::tr("Segmentation mode"), modes, false, 0));
 
     // MeanShift parameters (Phase 10B.2)
@@ -33,11 +33,29 @@ void OtbSegmentationAlgorithm::initAlgorithm(const QVariantMap &configuration)
         "MAX_ITERATION", QObject::tr("Maximum iterations"),
         Qgis::ProcessingNumberParameterType::Integer, 100, false, 1, 10000));
 
-    // ISSUE 6 fix: threshold is only valid for watershed/mprofiles/cc modes,
-    // not for meanshift/lsms. Kept for other modes.
+    // Watershed threshold (only valid for watershed)
     addParameter(new QgsProcessingParameterNumber(
-        "THRESHOLD", QObject::tr("Segmentation threshold (watershed/mprofiles/cc)"),
-        Qgis::ProcessingNumberParameterType::Double, 0.1, false, 0.001, 10.0));
+        "THRESHOLD", QObject::tr("Segmentation threshold (watershed)"),
+        Qgis::ProcessingNumberParameterType::Double, 0.01, false, 0.001, 10.0));
+
+    // Connected components expression (only valid for cc)
+    addParameter(new QgsProcessingParameterString(
+        "CC_EXPR", QObject::tr("Connected components expression (cc)"),
+        "(p1b1 > 0)", false, false));
+
+    // Morphological profiles parameters (only valid for mprofiles)
+    addParameter(new QgsProcessingParameterNumber(
+        "MPROFILES_SIZE", QObject::tr("Profile size (mprofiles)"),
+        Qgis::ProcessingNumberParameterType::Integer, 5, false, 1, 100));
+    addParameter(new QgsProcessingParameterNumber(
+        "MPROFILES_START", QObject::tr("Start radius (mprofiles)"),
+        Qgis::ProcessingNumberParameterType::Integer, 1, false, 1, 100));
+    addParameter(new QgsProcessingParameterNumber(
+        "MPROFILES_STEP", QObject::tr("Step (mprofiles)"),
+        Qgis::ProcessingNumberParameterType::Integer, 1, false, 1, 100));
+    addParameter(new QgsProcessingParameterNumber(
+        "MPROFILES_SIGMA", QObject::tr("Sigma (mprofiles)"),
+        Qgis::ProcessingNumberParameterType::Double, 1.0, false, 0.1, 100.0));
 
     // Output: vector polygons (existing)
     addParameter(new QgsProcessingParameterVectorDestination("OUTPUT", QObject::tr("Output vector (polygons)")));
@@ -62,7 +80,7 @@ QStringList OtbSegmentationAlgorithm::buildArgs(const QVariantMap &parameters,
     args << "-in" << rasterLayerSource(parameters.value("INPUT"));
 
     // Filter selection (meanshift, watershed, mprofiles, cc)
-    QStringList filters = {"meanshift", "watershed", "mprofiles", "cc", "meanshift"};
+    QStringList filters = {"meanshift", "watershed", "mprofiles", "cc"};
     int modeIdx = parameters.value("MODE").toInt();
     QString selectedFilter = (modeIdx >= 0 && modeIdx < filters.size()) ? filters[modeIdx] : "meanshift";
     args << "-filter" << selectedFilter;
@@ -84,10 +102,21 @@ QStringList OtbSegmentationAlgorithm::buildArgs(const QVariantMap &parameters,
         args << "-filter.watershed.threshold"
              << QString::number(parameters.value("THRESHOLD").toDouble(), 'f', 4);
     }
-    else
+    else if (selectedFilter == "cc")
     {
-        args << "-filter." + selectedFilter + ".threshold"
-             << QString::number(parameters.value("THRESHOLD").toDouble(), 'f', 4);
+        const QString expr = parameters.value("CC_EXPR", "(p1b1 > 0)").toString();
+        args << "-filter.cc.expr" << expr;
+    }
+    else if (selectedFilter == "mprofiles")
+    {
+        args << "-filter.mprofiles.size"
+             << QString::number(parameters.value("MPROFILES_SIZE", 5).toInt());
+        args << "-filter.mprofiles.start"
+             << QString::number(parameters.value("MPROFILES_START", 1).toInt());
+        args << "-filter.mprofiles.step"
+             << QString::number(parameters.value("MPROFILES_STEP", 1).toInt());
+        args << "-filter.mprofiles.sigma"
+             << QString::number(parameters.value("MPROFILES_SIGMA", 1.0).toDouble(), 'f', 4);
     }
 
     // Output mode & path

@@ -164,7 +164,45 @@ Json::Value PortDescriptor::toJsonSchema() const
     root["maximum"] = maximum;
 
   if ( !defaultValue.empty() )
-    root["default"] = defaultValue;
+  {
+    // S1: emit typed defaults so integer/number schemas round-trip through validator.
+    if ( type == DataType::Integer )
+    {
+      try
+      {
+        std::size_t pos = 0;
+        long long iv = std::stoll( defaultValue, &pos );
+        if ( pos == defaultValue.size() )
+          root["default"] = Json::Value( static_cast<Json::Int64>( iv ) );
+        else
+          root["default"] = defaultValue;
+      }
+      catch ( ... ) { root["default"] = defaultValue; }
+    }
+    else if ( type == DataType::Numeric )
+    {
+      try
+      {
+        std::size_t pos = 0;
+        double dv = std::stod( defaultValue, &pos );
+        if ( pos == defaultValue.size() )
+          root["default"] = dv;
+        else
+          root["default"] = defaultValue;
+      }
+      catch ( ... ) { root["default"] = defaultValue; }
+    }
+    else if ( type == DataType::Boolean )
+    {
+      if ( defaultValue == "true" || defaultValue == "1" ) root["default"] = true;
+      else if ( defaultValue == "false" || defaultValue == "0" ) root["default"] = false;
+      else root["default"] = defaultValue;
+    }
+    else
+    {
+      root["default"] = defaultValue;
+    }
+  }
 
   if ( !fileFormat.empty() )
     root["format"] = fileFormat;

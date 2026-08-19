@@ -46,15 +46,37 @@ Json::Value OtbSegmentationOperator::schema() const {
     props["maxIterations"] = makeIntegerParam("maxIterations",
                                               "MeanShift maximum iterations", 100);
     setRange(props["maxIterations"], 1, 10000);
+    // threshold is shared: meanshift convergence (default 0.1) and watershed (default 0.01)
+    // Keep 0.01 as advertised default so watershed validation matches code fallback 0.01;
+    // meanshift callers may override to 0.1 explicitly.
     props["threshold"] = makeNumberParam("threshold",
-                                         "MeanShift mode convergence threshold", 0.1);
+                                         "MeanShift/watershed threshold", 0.01);
     setRange(props["threshold"], 0.0001, 1.0);
+    props["threshold"]["required"] = false;
 
     // Connected components parameter
     props["ccExpression"] = makeStringParam("ccExpression",
                                             "Connected-components condition expression",
                                             "(p1b1 > 0)");
     props["ccExpression"]["required"] = false;
+
+    // Morphological profiles parameters (mprofiles) — previously read but undeclared (S2)
+    props["profileSize"] = makeIntegerParam("profileSize",
+                                            "Morphological profile size", 5);
+    setRange(props["profileSize"], 1, 100);
+    props["profileSize"]["required"] = false;
+    props["startRadius"] = makeIntegerParam("startRadius",
+                                            "Morphological start radius", 1);
+    setRange(props["startRadius"], 1, 100);
+    props["startRadius"]["required"] = false;
+    props["radiusStep"] = makeIntegerParam("radiusStep",
+                                           "Morphological radius step", 1);
+    setRange(props["radiusStep"], 1, 100);
+    props["radiusStep"]["required"] = false;
+    props["sigma"] = makeNumberParam("sigma",
+                                     "Morphological sigma", 1.0);
+    setRange(props["sigma"], 0.1, 100.0);
+    props["sigma"]["required"] = false;
 
     // Output
     props["output"] = makeOutputParam("output",

@@ -236,7 +236,79 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
                       } );
   }
 
-  const QVariantMap parameters = jsonParamsToVariantMap( params );
+  QVariantMap parameters = jsonParamsToVariantMap( params );
+  // 364: Convert string enum values (as exported by toJsonSchema) to the
+  // integer indexes that QgsProcessingParameterEnum consumers expect.
+  for ( const auto &port : mDesc.inputs )
+  {
+    if ( port.type != DataType::Enum )
+      continue;
+    const QString key = QString::fromStdString( port.name );
+    auto it = parameters.find( key );
+    if ( it == parameters.end() )
+      continue;
+    // Only convert QString values; integer values already valid (and now accepted by validator).
+    if ( it.value().typeId() == QMetaType::QString )
+    {
+      const QString s = it.value().toString();
+      // Try exact match first (case-sensitive as exported).
+      int idx = -1;
+      for ( int i = 0; i < static_cast<int>( port.enumOptions.size() ); ++i )
+      {
+        if ( QString::fromStdString( port.enumOptions[i] ) == s )
+        {
+          idx = i;
+          break;
+        }
+      }
+      if ( idx >= 0 )
+      {
+        it.value() = idx;
+      }
+      else
+      {
+        // Also accept numeric-string fallback ("0","1",...) for robustness.
+        bool ok = false;
+        const int numericIdx = s.toInt( &ok );
+        if ( ok && numericIdx >= 0 && numericIdx < static_cast<int>( port.enumOptions.size() ) )
+          it.value() = numericIdx;
+        else
+          throw std::runtime_error( "Unknown enum value '" + s.toStdString() + "' for parameter " + port.name );
+      }
+    }
+    else if ( port.isArray && it.value().typeId() == QMetaType::QStringList )
+    {
+      QStringList list = it.value().toStringList();
+      QVariantList converted;
+      converted.reserve( list.size() );
+      for ( const QString &elem : list )
+      {
+        int idx = -1;
+        for ( int i = 0; i < static_cast<int>( port.enumOptions.size() ); ++i )
+          if ( QString::fromStdString( port.enumOptions[i] ) == elem ) { idx = i; break; }
+        if ( idx >= 0 ) converted.append( idx );
+        else throw std::runtime_error( "Unknown enum value '" + elem.toStdString() + "' for parameter " + port.name );
+      }
+      it.value() = converted;
+    }
+    else if ( port.isArray && it.value().typeId() == QMetaType::QVariantList )
+    {
+      QVariantList list = it.value().toList();
+      for ( int i = 0; i < list.size(); ++i )
+      {
+        if ( list[i].typeId() == QMetaType::QString )
+        {
+          const QString s = list[i].toString();
+          int idx = -1;
+          for ( int j = 0; j < static_cast<int>( port.enumOptions.size() ); ++j )
+            if ( QString::fromStdString( port.enumOptions[j] ) == s ) { idx = j; break; }
+          if ( idx >= 0 ) list[i] = idx;
+          else throw std::runtime_error( "Unknown enum value '" + s.toStdString() + "' for parameter " + port.name );
+        }
+      }
+      it.value() = list;
+    }
+  }
 
   // External cancel bridge (e.g. JobEngine cancel flag): when the caller's
   // cancel is requested, propagate it into the feedback the algorithm observes

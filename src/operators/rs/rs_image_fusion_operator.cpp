@@ -37,6 +37,17 @@ Json::Value RsImageFusionOperator::schema() const {
     props["redIdx"] = makeIntegerParam("redIdx", "0-based MS band index for IHS R", 0);
     props["greenIdx"] = makeIntegerParam("greenIdx", "0-based MS band index for IHS G", 1);
     props["blueIdx"] = makeIntegerParam("blueIdx", "0-based MS band index for IHS B", 2);
+    // msWeights: optional per-band weights for linear fusion (S2 — previously read but undeclared)
+    {
+        Json::Value w(Json::objectValue);
+        w["type"] = "array";
+        Json::Value items(Json::objectValue);
+        items["type"] = "number";
+        w["items"] = items;
+        w["description"] = "Per-band weights for linear fusion (array of numbers)";
+        w["required"] = false;
+        props["msWeights"] = w;
+    }
 
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeRasterParam("output", "Output raster path");

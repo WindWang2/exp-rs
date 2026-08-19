@@ -123,10 +123,16 @@ bool validateValue( const PortDescriptor &port, const Json::Value &value,
           itemOk = item.isBool();
           break;
         case DataType::Enum:
-          itemOk = item.isString()
-                   && std::find( port.enumOptions.begin(), port.enumOptions.end(),
-                                 item.asString() ) != port.enumOptions.end();
+        {
+          if ( item.isString() )
+            itemOk = std::find( port.enumOptions.begin(), port.enumOptions.end(),
+                                item.asString() ) != port.enumOptions.end();
+          else if ( item.isNumeric() && isIntegralValue( item ) )
+            itemOk = item.asInt64() >= 0 && static_cast<std::size_t>( item.asInt64() ) < port.enumOptions.size();
+          else
+            itemOk = false;
           break;
+        }
         case DataType::String:
         case DataType::Any:
         default:
@@ -187,9 +193,21 @@ bool validateValue( const PortDescriptor &port, const Json::Value &value,
       }
       break;
     case DataType::Enum:
-      valid = value.isString()
-              && std::find( port.enumOptions.begin(), port.enumOptions.end(),
-                            value.asString() ) != port.enumOptions.end();
+    {
+      if ( value.isString() )
+      {
+        valid = std::find( port.enumOptions.begin(), port.enumOptions.end(),
+                           value.asString() ) != port.enumOptions.end();
+      }
+      else if ( value.isNumeric() && isIntegralValue( value ) )
+      {
+        const long long idx = value.asInt64();
+        valid = idx >= 0 && static_cast<std::size_t>( idx ) < port.enumOptions.size();
+      }
+      else
+      {
+        valid = false;
+      }
       if ( !valid )
       {
         std::string expected = "one of: ";
@@ -198,10 +216,13 @@ bool validateValue( const PortDescriptor &port, const Json::Value &value,
           if ( i > 0 ) expected += ", ";
           expected += port.enumOptions[i];
         }
+        // Also document numeric-index form for clients that send integer enums.
+        expected += " (or integer 0.." + std::to_string( port.enumOptions.size() ? port.enumOptions.size() - 1 : 0 ) + ")";
         addIssue( errors, "enum_mismatch", path, expected, value,
                   "Parameter '" + path + "' is not one of the allowed values." );
       }
       break;
+    }
     case DataType::BoundingBox:
       valid = value.isArray() && value.size() >= 4;
       if ( !valid )

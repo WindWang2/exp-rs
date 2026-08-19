@@ -2,6 +2,7 @@
 #include "atomic_algorithm_adapter.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
+#include <cmath>
 #include <unordered_set>
 
 namespace sicnu::processing {
@@ -124,7 +125,17 @@ PortDescriptor buildOutputPort( const std::string &key, const Json::Value &oObj 
   if ( oObj.isMember( "default" ) )
   {
     if ( oObj["default"].isString() ) port.defaultValue = oObj["default"].asString();
-    else if ( oObj["default"].isNumeric() ) port.defaultValue = std::to_string( oObj["default"].asDouble() );
+    else if ( oObj["default"].isInt64() || oObj["default"].isUInt64() || oObj["default"].isInt() || oObj["default"].isUInt() )
+      port.defaultValue = std::to_string( oObj["default"].asInt64() );
+    else if ( oObj["default"].isNumeric() )
+    {
+      // Trim trailing zeros to avoid "3.000000" for integer-valued doubles.
+      double d = oObj["default"].asDouble();
+      if ( std::floor( d ) == d )
+        port.defaultValue = std::to_string( static_cast<long long>( d ) );
+      else
+        port.defaultValue = std::to_string( d );
+    }
     else if ( oObj["default"].isBool() ) port.defaultValue = oObj["default"].asBool() ? "true" : "false";
   }
 
@@ -229,7 +240,16 @@ AlgorithmDescriptor AlgorithmDescriptorBuilder::buildFromRsOperator( const opera
       if ( pObj.isMember( "default" ) )
       {
         if ( pObj["default"].isString() ) pDesc.defaultValue = pObj["default"].asString();
-        else if ( pObj["default"].isNumeric() ) pDesc.defaultValue = std::to_string( pObj["default"].asDouble() );
+        else if ( pObj["default"].isInt64() || pObj["default"].isUInt64() || pObj["default"].isInt() || pObj["default"].isUInt() )
+          pDesc.defaultValue = std::to_string( pObj["default"].asInt64() );
+        else if ( pObj["default"].isNumeric() )
+        {
+          double d = pObj["default"].asDouble();
+          if ( std::floor( d ) == d )
+            pDesc.defaultValue = std::to_string( static_cast<long long>( d ) );
+          else
+            pDesc.defaultValue = std::to_string( d );
+        }
         else if ( pObj["default"].isBool() ) pDesc.defaultValue = pObj["default"].asBool() ? "true" : "false";
       }
 

@@ -88,10 +88,15 @@ TEST_CASE( "OTB Segmentation: parameter definitions", "[otb][segmentation]" )
     REQUIRE( paramNames.contains("MIN_REGION_SIZE") );
     REQUIRE( paramNames.contains("MAX_ITERATION") );
     REQUIRE( paramNames.contains("THRESHOLD") );
+    REQUIRE( paramNames.contains("CC_EXPR") );
+    REQUIRE( paramNames.contains("MPROFILES_SIZE") );
+    REQUIRE( paramNames.contains("MPROFILES_START") );
+    REQUIRE( paramNames.contains("MPROFILES_STEP") );
+    REQUIRE( paramNames.contains("MPROFILES_SIGMA") );
     REQUIRE( paramNames.contains("OUTPUT_RASTER") );
 
-    // Verify total parameter count (INPUT + MODE + 5 params + OUTPUT + OUTPUT_RASTER = 9)
-    REQUIRE( params.size() == 9 );
+    // 377 fix: INPUT + MODE + 5 meanshift/watershed + 1 cc + 4 mprofiles + 2 outputs = 14
+    REQUIRE( params.size() == 14 );
 }
 
 TEST_CASE( "OTB Segmentation: default values", "[otb][segmentation]" )
@@ -109,7 +114,8 @@ TEST_CASE( "OTB Segmentation: default values", "[otb][segmentation]" )
     REQUIRE( defaults["RANGE_RADIUS"].toDouble() == Catch::Approx(15.0) );
     REQUIRE( defaults["MIN_REGION_SIZE"].toInt() == 100 );
     REQUIRE( defaults["MAX_ITERATION"].toInt() == 100 );
-    REQUIRE( defaults["THRESHOLD"].toDouble() == Catch::Approx(0.1) );
+    // Watershed threshold default aligned with the operator and OTB (#398 S2)
+    REQUIRE( defaults["THRESHOLD"].toDouble() == Catch::Approx(0.01) );
 }
 
 TEST_CASE( "OTB Segmentation: buildArgs MeanShift with label raster", "[otb][segmentation]" )

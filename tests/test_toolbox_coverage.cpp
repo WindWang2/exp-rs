@@ -39,7 +39,7 @@ TEST_CASE( "Toolbox manifest category coverage", "[processing][coverage]" )
     {
         const QString catName = it.key();
         const QJsonObject cat = it.value().toObject();
-        const int targetPct = cat.value( "target_pct" ).toInt( 80 );
+        const int targetPct = cat.value( "target_pct" ).toInt( 100 );
         const QJsonArray required = cat.value( "required" ).toArray();
 
         int found = 0;
@@ -51,7 +51,36 @@ TEST_CASE( "Toolbox manifest category coverage", "[processing][coverage]" )
 
         const int pct = required.isEmpty() ? 100 : ( found * 100 / required.size() );
         INFO( catName.toStdString() << " coverage: " << found << "/" << required.size() );
+        // S3: tighten to 100% — any single missing tool fails the gate.
         CHECK( pct >= targetPct );
+        CHECK( found == required.size() );
+        CHECK( pct == 100 );
+    }
+}
+
+TEST_CASE( "Toolbox manifest entries are all registered (bidirectional)", "[processing][coverage][manifest]" )
+{
+    ensureProvidersRegistered();
+    const QJsonObject manifest = loadManifest();
+    auto *registry = QgsApplication::processingRegistry();
+
+    // Collect every id the manifest claims must exist.
+    QSet<QString> manifestIds;
+    const QJsonObject categories = manifest.value( "categories" ).toObject();
+    for ( auto it = categories.begin(); it != categories.end(); ++it )
+    {
+        const QJsonArray required = it.value().toObject().value( "required" ).toArray();
+        for ( const QJsonValue &v : required )
+            manifestIds.insert( v.toString() );
+    }
+    const QJsonArray handcrafted = manifest.value( "handcrafted_required" ).toArray();
+    for ( const QJsonValue &v : handcrafted )
+        manifestIds.insert( v.toString() );
+
+    for ( const QString &id : manifestIds )
+    {
+        INFO( "Manifest id not registered: " << id.toStdString() );
+        CHECK( registry->algorithmById( id ) != nullptr );
     }
 }
 

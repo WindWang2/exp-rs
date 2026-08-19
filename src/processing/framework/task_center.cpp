@@ -15,14 +15,40 @@ namespace sicnu {
 
 static QString findOutputPathInParams( const QVariantMap &params )
 {
+    // Prefer exact "output"/"OUTPUT" keys before alphabetical scan so modelOut
+    // does not shadow the raster output (issue 376).
+    auto pathIfValid = []( const QVariant &v ) -> QString {
+        const QString p = v.toString();
+        if ( !p.isEmpty() && !p.startsWith( QLatin1Char( '$' ) )
+             && !p.startsWith( QStringLiteral( "\x01SICNU_ERR\x01" ) ) )
+            return p;
+        return QString();
+    };
+    for ( const QString &exact : { QStringLiteral( "output" ), QStringLiteral( "OUTPUT" ) } )
+    {
+        auto it = params.find( exact );
+        if ( it != params.end() )
+        {
+            const QString p = pathIfValid( it.value() );
+            if ( !p.isEmpty() ) return p;
+        }
+        // case-insensitive fallback for exact name
+        for ( auto it2 = params.begin(); it2 != params.end(); ++it2 )
+        {
+            if ( it2.key().compare( exact, Qt::CaseInsensitive ) == 0 )
+            {
+                const QString p = pathIfValid( it2.value() );
+                if ( !p.isEmpty() ) return p;
+            }
+        }
+    }
     for ( auto it = params.begin(); it != params.end(); ++it )
     {
         if ( it.key().contains( QStringLiteral( "OUTPUT" ), Qt::CaseInsensitive )
              || it.key().contains( QStringLiteral( "RESULT" ), Qt::CaseInsensitive ) )
         {
-            const QString path = it.value().toString();
-            if ( !path.isEmpty() && !path.startsWith( QLatin1Char( '$' ) )
-                 && !path.startsWith( QStringLiteral( "\x01SICNU_ERR\x01" ) ) )
+            const QString path = pathIfValid( it.value() );
+            if ( !path.isEmpty() )
                 return path;
         }
     }
@@ -353,9 +379,31 @@ void TaskCenter::applyPlaceholdersForTask( long taskId )
 
                 if ( isMatch )
                 {
+                    // Port-aware: try resultPayload[portName] first (376).
+                    const Json::Value &payload = m_tasks[parentId].resultPayload;
+                    if ( payload.isObject() && payload.isMember( ref.portName ) && payload[ref.portName].isString() )
+                    {
+                        const std::string s = payload[ref.portName].asString();
+                        if ( !s.empty() ) return s;
+                    }
+                    // Also check case where portName is the generic "output" but payload uses another key;
+                    // fallback to outputLayerPath / outputPathFromResult for single-output steps.
                     QString pOut = m_tasks[parentId].outputLayerPath;
                     if ( pOut.isEmpty() )
-                        pOut = outputPathFromResult( m_tasks[parentId].resultPayload );
+                        pOut = outputPathFromResult( payload );
+                    // If still empty and portName != "output", try payload[portName] via variant map results stored earlier.
+                    if ( pOut.isEmpty() && payload.isObject() )
+                    {
+                        for ( const auto &name : payload.getMemberNames() )
+                        {
+                            if ( QString::fromStdString( name ).compare( QString::fromStdString( ref.portName ), Qt::CaseInsensitive ) == 0
+                                 && payload[name].isString() )
+                            {
+                                const std::string s = payload[name].asString();
+                                if ( !s.empty() ) return s;
+                            }
+                        }
+                    }
                     return pOut.toStdString();
                 }
             }
@@ -873,12 +921,23 @@ void TaskCenter::markTaskCompleted( long taskId,
 
         if ( m_tasks[taskId].outputLayerPath.isEmpty() && !results.isEmpty() )
         {
-            for ( auto it = results.begin(); it != results.end(); ++it )
+            // Prefer "output" key to avoid alphabetical bias (e.g. modelOut before output).
+            auto outIt = results.find( QStringLiteral( "output" ) );
+            if ( outIt != results.end() && outIt.value().canConvert<QString>() )
             {
-                if ( it.value().canConvert<QString>() )
+                const QString p = outIt.value().toString();
+                if ( !p.isEmpty() ) m_tasks[taskId].outputLayerPath = p;
+            }
+            else
+            {
+                // Fallback: first stringifiable result (preserves legacy single-output behavior).
+                for ( auto it = results.begin(); it != results.end(); ++it )
                 {
-                    m_tasks[taskId].outputLayerPath = it.value().toString();
-                    break;
+                    if ( it.value().canConvert<QString>() )
+                    {
+                        const QString p = it.value().toString();
+                        if ( !p.isEmpty() ) { m_tasks[taskId].outputLayerPath = p; break; }
+                    }
                 }
             }
         }

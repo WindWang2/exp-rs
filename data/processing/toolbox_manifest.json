@@ -2,7 +2,7 @@
   "version": 1,
   "categories": {
     "gdal_raster_basic": {
-      "target_pct": 80,
+      "target_pct": 100,
       "required": [
         "gdal_tools:gdal_translate",
         "gdal_tools:gdalwarp",
@@ -16,7 +16,7 @@
       ]
     },
     "gdal_raster_analysis": {
-      "target_pct": 80,
+      "target_pct": 100,
       "required": [
         "gdal_tools:gdaldem",
         "gdal_tools:gdal_calc",
@@ -31,7 +31,7 @@
       ]
     },
     "gdal_vector": {
-      "target_pct": 80,
+      "target_pct": 100,
       "required": [
         "gdal_tools:ogr2ogr",
         "gdal_tools:ogrinfo",
@@ -39,7 +39,7 @@
       ]
     },
     "otb_rs": {
-      "target_pct": 80,
+      "target_pct": 100,
       "required": [
         "otb_tools:otb_band_math",
         "otb_tools:otb_segmentation",
@@ -54,7 +54,7 @@
       ]
     },
     "otb_preprocess": {
-      "target_pct": 80,
+      "target_pct": 100,
       "required": [
         "otb_tools:otb_ortho_rectification",
         "otb_tools:otb_bundle_to_perfect_sensor",
