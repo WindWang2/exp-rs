@@ -60,6 +60,10 @@ QStringList GdalEditAlgorithm::buildArgs(const QVariantMap &parameters,
 
     const bool hasXRes = parameters.contains("X_RES") && !parameters.value("X_RES").isNull();
     const bool hasYRes = parameters.contains("Y_RES") && !parameters.value("Y_RES").isNull();
+    if (hasXRes != hasYRes) {
+        throw QgsProcessingException(
+            QObject::tr("Both X_RES and Y_RES must be specified together for -tr"));
+    }
     if (hasXRes && hasYRes) {
         args << "-tr"
              << QString::number(parameters.value("X_RES").toDouble(), 'g', 15)

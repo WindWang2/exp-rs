@@ -3,6 +3,7 @@
 #include <gdal.h>
 #include <processing/qgsprocessingparameters.h>
 #include <qgsvectorlayer.h>
+#include <algorithm>
 
 void GdalRasterizeAlgorithm::initAlgorithm(const QVariantMap &configuration)
 {
@@ -60,21 +61,29 @@ QStringList GdalRasterizeAlgorithm::buildArgs(const QVariantMap &parameters,
             int th = GDALGetRasterYSize(hTmpl);
             double gt[6];
             if (GDALGetGeoTransform(hTmpl, gt) == CE_None) {
-                double minX = gt[0];
-                double maxY = gt[3];
-                double maxX = gt[0] + tw * gt[1];
-                double minY = gt[3] + th * gt[5];
-                if (minY > maxY) std::swap(minY, maxY);
-                args << "-te" << QString::number(minX, 'f', 10)
-                     << QString::number(minY, 'f', 10)
-                     << QString::number(maxX, 'f', 10)
-                     << QString::number(maxY, 'f', 10);
+                // Rotation-aware bounding box: transform the 4 corners
+                double x0 = gt[0];
+                double y0 = gt[3];
+                double x1 = gt[0] + tw * gt[1];
+                double y1 = gt[3] + tw * gt[4];
+                double x2 = gt[0] + tw * gt[1] + th * gt[2];
+                double y2 = gt[3] + tw * gt[4] + th * gt[5];
+                double x3 = gt[0] + th * gt[2];
+                double y3 = gt[3] + th * gt[5];
+                double minX = std::min({x0, x1, x2, x3});
+                double maxX = std::max({x0, x1, x2, x3});
+                double minY = std::min({y0, y1, y2, y3});
+                double maxY = std::max({y0, y1, y2, y3});
+                args << "-te" << QString::number(minX, 'g', 15)
+                     << QString::number(minY, 'g', 15)
+                     << QString::number(maxX, 'g', 15)
+                     << QString::number(maxY, 'g', 15);
             }
             args << "-ts" << QString::number(tw) << QString::number(th);
             GDALClose(hTmpl);
         }
     } else {
-        // Use extent and size
+        // Use extent and size — extent string is "xmin,xmax,ymin,ymax", -te expects xmin ymin xmax ymax
         if (parameters.contains("EXTENT") && !parameters.value("EXTENT").toString().isEmpty()) {
             QString extentStr = parameters.value("EXTENT").toString();
             QStringList parts = extentStr.split(",");

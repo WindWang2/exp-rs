@@ -21,22 +21,43 @@ QString ToolPathManager::gdalToolPath(const QString &toolName) const
     QString customPath = m_customGdalPath;
     locker.unlock();
 
+    auto fallbackName = [](const QString &name) -> QString {
+        if (name.endsWith(QStringLiteral(".py")))
+            return name.chopped(3);
+        return name + QStringLiteral(".py");
+    };
+
     // 1. Custom path
     if (!customPath.isEmpty()) {
         QString p = QDir(customPath).filePath(toolName);
+        if (QFileInfo::exists(p)) return p;
+        QString alt = fallbackName(toolName);
+        p = QDir(customPath).filePath(alt);
         if (QFileInfo::exists(p)) return p;
     }
 
     // 2. App directory
     QString appPath = findInAppDir("tools/gdal", toolName);
     if (!appPath.isEmpty()) return appPath;
+    {
+        QString alt = fallbackName(toolName);
+        QString altPath = findInAppDir("tools/gdal", alt);
+        if (!altPath.isEmpty()) return altPath;
+    }
 
     // 3. Environment variable
     QString envPath = findInEnv("SICNU_GDAL_PATH", toolName);
     if (!envPath.isEmpty()) return envPath;
+    {
+        QString alt = fallbackName(toolName);
+        QString altEnvPath = findInEnv("SICNU_GDAL_PATH", alt);
+        if (!altEnvPath.isEmpty()) return altEnvPath;
+    }
 
     // 4. System PATH
-    return findInSystemPath(toolName);
+    QString sysPath = findInSystemPath(toolName);
+    if (!sysPath.isEmpty()) return sysPath;
+    return findInSystemPath(fallbackName(toolName));
 }
 
 bool ToolPathManager::isGdalAvailable() const

@@ -56,18 +56,21 @@ QStringList GdalGridAlgorithm::buildArgs(const QVariantMap &parameters,
 
     QString algoArg;
     if (algorithm == "invdist") {
-        algoArg = QString("invdist:power=%1:smoothing=%2").arg(power).arg(smooth);
+        algoArg = QString("invdist:power=%1:smoothing=%2")
+                      .arg(QString::number(power, 'g', 15))
+                      .arg(QString::number(smooth, 'g', 15));
     } else if (algorithm == "average") {
-        algoArg = QString("average:smoothing=%1").arg(smooth);
+        algoArg = QStringLiteral("average");
     } else {
         algoArg = algorithm;
     }
     if (parameters.contains("NODATA") && !parameters.value("NODATA").toString().isEmpty()) {
         double nodata = parameters.value("NODATA").toDouble();
-        algoArg += QString(":nodata=%1").arg(nodata);
+        algoArg += QString(":nodata=%1").arg(QString::number(nodata, 'g', 15));
     }
     args << "-a" << algoArg;
 
+    bool extentProvided = false;
     if (parameters.contains("EXTENT") && !parameters.value("EXTENT").toString().isEmpty()) {
         // Parse extent string: "xmin,xmax,ymin,ymax"
         QString extentStr = parameters.value("EXTENT").toString();
@@ -75,13 +78,18 @@ QStringList GdalGridAlgorithm::buildArgs(const QVariantMap &parameters,
         if (parts.size() == 4) {
             args << "-txe" << parts[0].trimmed() << parts[1].trimmed();
             args << "-tye" << parts[2].trimmed() << parts[3].trimmed();
+            extentProvided = true;
         }
     }
 
     if (parameters.contains("PIXEL_SIZE") && !parameters.value("PIXEL_SIZE").toString().isEmpty()) {
         double pixelSize = parameters.value("PIXEL_SIZE").toDouble();
         if (pixelSize > 0) {
-            args << "-tr" << QString::number(pixelSize) << QString::number(pixelSize);
+            if (!extentProvided) {
+                throw QgsProcessingException(
+                    QObject::tr("PIXEL_SIZE requires EXTENT to be specified (-tr needs -txe/-tye)"));
+            }
+            args << "-tr" << QString::number(pixelSize, 'g', 15) << QString::number(pixelSize, 'g', 15);
         }
     }
 

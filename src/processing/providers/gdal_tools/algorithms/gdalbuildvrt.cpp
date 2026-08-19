@@ -6,9 +6,11 @@
 
 void GdalBuildVrtAlgorithm::initAlgorithm(const QVariantMap &configuration)
 {
+    Q_UNUSED(configuration);
     addParameter(new QgsProcessingParameterMultipleLayers("INPUT", "Input raster layers",
                                                            Qgis::ProcessingSourceType::Raster));
-    addOutputRasterLayerParameter("OUTPUT", "Output VRT file");
+    addParameter(new QgsProcessingParameterFileDestination(
+        "OUTPUT", QObject::tr("Output VRT file"), QObject::tr("VRT files (*.vrt *.VRT)")));
 }
 
 QStringList GdalBuildVrtAlgorithm::buildArgs(const QVariantMap &parameters,

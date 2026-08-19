@@ -5,7 +5,9 @@
 #include "core/sicnu_logging.h"
 #include <processing/qgsprocessingparameters.h>
 #include <qgsrasterlayer.h>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QProcess>
 #include <QTextStream>
 
@@ -66,7 +68,23 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
                                                      QgsProcessingContext &context,
                                                      QgsProcessingFeedback *feedback)
 {
-    Q_UNUSED(context);
+    // Resolve FileDestination like GdalToolWrapper does (creates parent dirs)
+    QVariantMap resolvedParams = parameters;
+    for (const QgsProcessingParameterDefinition *param : parameterDefinitions()) {
+        if (!param || !resolvedParams.contains(param->name()))
+            continue;
+        const QString type = param->type();
+        if (type == QgsProcessingParameterFileDestination::typeName()
+            || type == QgsProcessingParameterRasterDestination::typeName()
+            || type == QgsProcessingParameterVectorDestination::typeName()
+            || type == QgsProcessingParameterFeatureSink::typeName()
+            || type == QgsProcessingParameterFolderDestination::typeName()) {
+            resolvedParams.insert(
+                param->name(),
+                QgsProcessingParameters::parameterAsOutputLayer(param, resolvedParams.value(param->name()), context, true));
+        }
+    }
+    const QVariantMap &effectiveParams = resolvedParams;
 
     const QString program = ToolPathManager::instance().gdalToolPath(toolName());
     if (program.isEmpty()) {
@@ -78,7 +96,7 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
         throw QgsProcessingException(err);
     }
 
-    const QStringList args = buildArgs(parameters, context, feedback);
+    const QStringList args = buildArgs(effectiveParams, context, feedback);
     if (args.isEmpty()) {
         const QString err = QObject::tr("Failed to build arguments for GDAL tool '%1'.").arg(toolName());
         SICNU_LOG_ERROR(SicnuLogTags::GDAL, err);
@@ -107,10 +125,10 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
         throw QgsProcessingException(err);
     }
 
-    QString stdinLine = QString::number(parameters.value("X").toDouble(), 'g', 15) + " "
-                        + QString::number(parameters.value("Y").toDouble(), 'g', 15);
-    if (parameters.contains("Z") && !parameters.value("Z").isNull()) {
-        stdinLine += " " + QString::number(parameters.value("Z").toDouble(), 'g', 15);
+    QString stdinLine = QString::number(effectiveParams.value("X").toDouble(), 'g', 15) + " "
+                        + QString::number(effectiveParams.value("Y").toDouble(), 'g', 15);
+    if (effectiveParams.contains("Z") && !effectiveParams.value("Z").isNull()) {
+        stdinLine += " " + QString::number(effectiveParams.value("Z").toDouble(), 'g', 15);
     }
     stdinLine += "\n";
     proc.write(stdinLine.toUtf8());
@@ -144,8 +162,11 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
         throw QgsProcessingException(err);
     }
 
-    const QString outputPath = parameters.value("OUTPUT").toString();
+    const QString outputPath = effectiveParams.value("OUTPUT").toString();
     if (!outputPath.isEmpty()) {
+        // Ensure parent directory exists (parameterAsOutputLayer already does, but guard anyway)
+        QFileInfo fi(outputPath);
+        QDir().mkpath(fi.absolutePath());
         QFile file(outputPath);
         if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
             const QString err = QObject::tr("Failed to write output file: %1").arg(outputPath);

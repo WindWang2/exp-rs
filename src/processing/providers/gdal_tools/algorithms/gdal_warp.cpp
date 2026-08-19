@@ -28,6 +28,7 @@ QStringList GdalWarpAlgorithm::buildArgs(const QVariantMap &parameters,
     }
 
     if (parameters.contains("EXTENT") && !parameters.value("EXTENT").toString().isEmpty()) {
+        // QgsProcessingParameterExtent string is "xmin,xmax,ymin,ymax" — -te expects xmin ymin xmax ymax
         QStringList extent = parameters.value("EXTENT").toString().split(",");
         if (extent.size() == 4) {
             args << "-te" << extent[0].trimmed() << extent[2].trimmed() << extent[1].trimmed() << extent[3].trimmed();
