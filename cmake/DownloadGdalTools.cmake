@@ -1,4 +1,6 @@
-# cmake/DownloadGdalTools.cmake
+# cmake/DownloadGdalTools.cmake — LEGACY: not wired into the main build (BUILD-12).
+# Retained for reference only. To enable, add `include(DownloadGdalTools)`
+# behind an explicit option (e.g. `option(ENABLE_DOWNLOAD_GDAL_TOOLS OFF)`).
 include(FetchContent)
 
 set(GDAL_TOOLS_VERSION "3.8.0" CACHE STRING "GDAL tools version")

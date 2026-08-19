@@ -56,17 +56,28 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg
                                        Core5Compat Test)
 qt_standard_project_setup(REQUIRES 6.8)
 
-# When vendoring, directly include the config files to bypass Find module cache
+# When vendoring, directly include the config files to bypass Find module cache.
+# On a fresh configure vendor_prefix is empty (ExternalProject builds at build time),
+# so guard the includes and fall back to system libs with a warning.
 if(SICNU_VENDOR_GDAL)
-    include("${SICNU_VENDOR_PREFIX}/lib/cmake/gdal/GDALConfig.cmake")
-    include("${SICNU_VENDOR_PREFIX}/lib/cmake/proj/proj-config.cmake")
-    include("${SICNU_VENDOR_PREFIX}/lib/cmake/GEOS/geos-config.cmake")
-    set(GDAL_FOUND TRUE)
-    set(PROJ_FOUND TRUE)
-    set(GEOS_FOUND TRUE)
-    message(STATUS "Found vendored GDAL ${GDAL_VERSION}")
-    message(STATUS "Found vendored PROJ")
-    message(STATUS "Found vendored GEOS")
+    if(EXISTS "${SICNU_VENDOR_PREFIX}/lib/cmake/gdal/GDALConfig.cmake"
+       AND EXISTS "${SICNU_VENDOR_PREFIX}/lib/cmake/proj/proj-config.cmake"
+       AND EXISTS "${SICNU_VENDOR_PREFIX}/lib/cmake/GEOS/geos-config.cmake")
+        include("${SICNU_VENDOR_PREFIX}/lib/cmake/gdal/GDALConfig.cmake")
+        include("${SICNU_VENDOR_PREFIX}/lib/cmake/proj/proj-config.cmake")
+        include("${SICNU_VENDOR_PREFIX}/lib/cmake/GEOS/geos-config.cmake")
+        set(GDAL_FOUND TRUE)
+        set(PROJ_FOUND TRUE)
+        set(GEOS_FOUND TRUE)
+        message(STATUS "Found vendored GDAL ${GDAL_VERSION}")
+        message(STATUS "Found vendored PROJ")
+        message(STATUS "Found vendored GEOS")
+    else()
+        message(WARNING "SICNU_VENDOR_GDAL=ON but vendor_prefix not yet built (${SICNU_VENDOR_PREFIX} missing) — using system GDAL/PROJ/GEOS for this configure; run `cmake --build . --target vendor_gdal` then re-configure")
+        find_package(GDAL REQUIRED)
+        find_package(PROJ REQUIRED)
+        find_package(GEOS REQUIRED)
+    endif()
 else()
     find_package(GDAL REQUIRED)
     find_package(PROJ REQUIRED)
@@ -167,6 +178,14 @@ set(QGIS_SERVER_MODULE_SUBDIR "server")
 set(QGIS_INCLUDE_DIR "include/qgis")
 set(QGIS_BIN_DIR "bin")
 set(QGIS_LIB_DIR "lib")
+# Vendored subset: upstream QGIS defines QGIS_OUTPUT_DIRECTORY; we define it centrally
+# so src/plugins and external/qspatialite map output to ${CMAKE_BINARY_DIR}/${QGIS_PLUGIN_SUBDIR}.
+if(NOT DEFINED QGIS_OUTPUT_DIRECTORY OR QGIS_OUTPUT_DIRECTORY STREQUAL "")
+  set(QGIS_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}" CACHE PATH "Output directory for QGIS-style plugins (vendored subset)")
+endif()
+if(QGIS_OUTPUT_DIRECTORY STREQUAL "")
+  message(FATAL_ERROR "QGIS_OUTPUT_DIRECTORY must be non-empty")
+endif()
 set(QGISPOSTFIX "")
 set(LIBRARY_TYPE SHARED)
 
@@ -260,6 +279,9 @@ endif()
 option(SICNU_BUILD_OTB "Build vendored OTB + ITK algorithm libraries" OFF)
 if(SICNU_BUILD_OTB)
     message(STATUS "SICNU_BUILD_OTB=ON — configuring vendored ITK + OTB")
+    # Track whether vendored sources are actually present; SICNU_HAS_OTB must reflect reality
+    # (otherwise tests/CMakeLists links non-existent OTBCommon target).
+    set(_sicnu_otb_ok TRUE)
     # Force -fPIC for all OTB/ITK libraries (needed for shared module applications)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE)
 
@@ -362,10 +384,14 @@ if(SICNU_BUILD_OTB)
     set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     set(ITK_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/itk_ref")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/itk_ref/CMakeLists.txt")
         add_subdirectory(itk_ref)
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/itk_ref")
+        message(WARNING "SICNU_BUILD_OTB=ON but itk_ref/CMakeLists.txt is missing — skipping ITK")
+        set(_sicnu_otb_ok FALSE)
     else()
         message(WARNING "SICNU_BUILD_OTB=ON but itk_ref/ is missing — skipping ITK (vendored OTB build will not work without it)")
+        set(_sicnu_otb_ok FALSE)
     endif()
 
     # Tell OTB where to find the built ITK
@@ -496,13 +522,22 @@ if(SICNU_BUILD_OTB)
     # OTB CMAKE_SOURCE_DIR patches applied: GDAL init, GenerateExportHeaderCustom,
     # PreventInSourceBuilds, GetVersionFromGitTag, uninstall target all use OTB_SOURCE_DIR.
     # TinyXML init skips find_package when pre-set.
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/otb_ref")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/otb_ref/CMakeLists.txt")
         add_subdirectory(otb_ref)
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/otb_ref")
+        message(WARNING "SICNU_BUILD_OTB=ON but otb_ref/CMakeLists.txt is missing — skipping OTB")
+        set(_sicnu_otb_ok FALSE)
     else()
         message(WARNING "SICNU_BUILD_OTB=ON but otb_ref/ is missing — skipping OTB")
+        set(_sicnu_otb_ok FALSE)
     endif()
 
-    set(SICNU_HAS_OTB TRUE)
+    if(_sicnu_otb_ok)
+        set(SICNU_HAS_OTB TRUE)
+    else()
+        set(SICNU_HAS_OTB FALSE)
+        message(WARNING "SICNU_HAS_OTB stays FALSE — OTB smoke test will be skipped")
+    endif()
 endif()
 
 # GSL: required for Helmert/projective least-squares in the georeferencer

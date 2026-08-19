@@ -1,3 +1,4 @@
+# LEGACY (BUILD-12): not wired; Windows CI uses preinstalled vcpkg directly.
 if(NOT WITH_VCPKG)
   return()
 endif()

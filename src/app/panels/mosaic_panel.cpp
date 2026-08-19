@@ -146,7 +146,7 @@ void MosaicPanel::runMosaic()
         return;
     }
 
-    if ( m_pendingTaskId >= 0 )
+    if ( m_jobHandle.isRunning() )
         return;
 
     // Capture input paths for async execution
@@ -263,7 +263,7 @@ void MosaicPanel::runMosaic()
 
             std::array<double, 6> outGT = { unionMinX, refPixelW, 0.0, unionMaxY, 0.0, -refPixelH };
 
-            std::vector<Mosaic::SourceImage> sources( static_cast<size_t>( inputCount ) );
+            std::vector<Mosaic::MosaicSource> sources( static_cast<size_t>( inputCount ) );
             for ( int i = 0; i < inputCount; ++i ) {
                 const auto &gt = inputs[static_cast<size_t>( i )].geotransform;
                 size_t offX = static_cast<size_t>(

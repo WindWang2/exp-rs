@@ -1,4 +1,6 @@
 # Vendored LibSVM for OTB Learning (TrainImagesClassifier, etc.)
+# NOTE (BUILD-12): not added via add_subdirectory() in the main build; vendor mode expects
+# system libsvm. To use, add `add_subdirectory(cmake/LibSVM)` behind an option.
 cmake_minimum_required(VERSION 3.13)
 project(libsvm_vendored LANGUAGES CXX)
 

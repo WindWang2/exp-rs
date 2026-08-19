@@ -54,7 +54,7 @@ sudo ./scripts/install_deps.sh
 | 依赖 | 说明 |
 |------|------|
 | CMake 3.20+ | 构建系统 |
-| Qt 6.2+ | GUI 框架 (Core, Gui, Widgets, Svg, Tools, Multimedia) |
+| Qt 6.8+ | GUI 框架 (Core, Gui, Widgets, Svg, Tools, Multimedia, Qml, QuickWidgets, 5Compat) |
 | GDAL 3.4+ | 地理空间 I/O |
 | PROJ 8+ | 坐标转换 |
 | GEOS 3.10+ | 几何运算 |

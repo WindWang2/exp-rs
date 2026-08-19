@@ -104,9 +104,12 @@ TEST_CASE( "OTB PixelInfo: buildArgs", "[otb][processing]" )
 
     REQUIRE( args.indexOf( "-in" ) >= 0 );
     REQUIRE( args[args.indexOf( "-in" ) + 1] == "/data/image.tif" );
-    REQUIRE( args.indexOf( "-coord" ) >= 0 );
-    REQUIRE( args[args.indexOf( "-coord" ) + 1] == "42" );
-    REQUIRE( args[args.indexOf( "-coord" ) + 2] == "17" );
+    REQUIRE( args.indexOf( "-coordx" ) >= 0 );
+    REQUIRE( args[args.indexOf( "-coordx" ) + 1] == "42" );
+    REQUIRE( args.indexOf( "-coordy" ) >= 0 );
+    REQUIRE( args[args.indexOf( "-coordy" ) + 1] == "17" );
+    // Negative: the old combined "-coord" token must not exist as a standalone arg
+    REQUIRE( args.indexOf( "-coord" ) < 0 );
 }
 
 TEST_CASE( "OTB StereoRectification: metadata", "[otb][processing]" )

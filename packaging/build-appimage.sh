@@ -68,11 +68,26 @@ if [ -n "$GDAL_SOURCE" ] && [ -d "$GDAL_SOURCE/bin" ]; then
 fi
 
 LINUXDEPLOY="$BUILD_DIR/linuxdeploy-x86_64.AppImage"
+LINUXDEPLOY_QT="$BUILD_DIR/linuxdeploy-plugin-qt-x86_64.AppImage"
 if [ ! -f "$LINUXDEPLOY" ]; then
     echo "Downloading linuxdeploy..."
     curl -L -o "$LINUXDEPLOY" \
         https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
     chmod +x "$LINUXDEPLOY"
+fi
+if [ ! -f "$LINUXDEPLOY_QT" ]; then
+    echo "Downloading linuxdeploy-plugin-qt..."
+    curl -L -o "$LINUXDEPLOY_QT" \
+        https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+    chmod +x "$LINUXDEPLOY_QT"
+fi
+
+# Bundle PROJ data (proj.db) for offline CRS transforms
+mkdir -p "$APPDIR/usr/share/proj"
+if [ -f "/usr/share/proj/proj.db" ]; then
+    cp "/usr/share/proj/proj.db" "$APPDIR/usr/share/proj/" 2>/dev/null || true
+elif [ -f "/usr/share/proj/proj.db" ]; then
+    cp "/usr/share/proj/proj.db" "$APPDIR/usr/share/proj/" 2>/dev/null || true
 fi
 
 cd "$BUILD_DIR"
@@ -80,6 +95,7 @@ cd "$BUILD_DIR"
     --appdir "$APPDIR" \
     --desktop-file "$PROJECT_DIR/packaging/sicnu_geo_rs.desktop" \
     --icon-file "$PROJECT_DIR/packaging/sicnu_geo_rs.svg" \
+    --plugin qt \
     --output appimage
 
 echo "=== AppImage created in $BUILD_DIR ==="

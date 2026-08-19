@@ -1,4 +1,6 @@
 # Vendored MuParserX for OTB FeaturesExtraction (BandMath, Smoothing, etc.)
+# NOTE (BUILD-12): not added via add_subdirectory() in the main build. To use, add
+# `add_subdirectory(cmake/MuParserX)` behind an option.
 cmake_minimum_required(VERSION 3.13)
 project(muparserx_vendored LANGUAGES CXX)
 

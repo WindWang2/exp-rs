@@ -1,4 +1,6 @@
-# cmake/DownloadOtbTools.cmake
+# cmake/DownloadOtbTools.cmake — LEGACY: not wired into the main build (BUILD-12).
+# Retained for reference only. To enable, add `include(DownloadOtbTools)`
+# behind an explicit option.
 include(FetchContent)
 
 set(OTB_VERSION "9.1.0" CACHE STRING "OTB tools version")

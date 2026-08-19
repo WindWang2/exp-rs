@@ -1,4 +1,5 @@
-// src/gui/python_console_widget.h
+// src/gui/python_console_widget.h — LEGACY (VPATCH-7): not compiled, synchronous console.
+// Live console is src/python/sicnu_python_console.cpp. Retained for reference only.
 #pragma once
 
 #include <QWidget>

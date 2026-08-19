@@ -68,7 +68,7 @@ install_ubuntu() {
         libsqlite3-dev zlib1g-dev libzip-dev libzstd-dev libjsoncpp-dev
         libprotobuf-dev protobuf-compiler
         libcurl4-openssl-dev libexpat1-dev libpcre2-dev
-        libqca-qt6-qt6-dev
+        libqca-qt6-dev qtkeychain-qt6-dev
         cmake make g++
         bison flex
         python3-dev
@@ -111,6 +111,7 @@ install_macos() {
         qt6
         sqlite3 zlib libzip zstd jsoncpp
         protobuf curl expat pcre2
+        qca qtkeychain
         cmake bison flex
         python3
         opencv

@@ -1,3 +1,5 @@
+# LEGACY (BUILD-12): Windows CI uses the preinstalled C:\vcpkg toolchain directly;
+# this file is not included by the main build. Retained for reference.
 set(NUGET_SOURCE "https://nuget.pkg.github.com/qgis/index.json" CACHE STRING "Nuget source")
 set(NUGET_USERNAME "qgis" CACHE STRING "Nuget user")
 

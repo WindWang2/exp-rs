@@ -1,4 +1,4 @@
-// src/gui/python_console_widget.cpp
+// src/gui/python_console_widget.cpp — LEGACY (VPATCH-7): not compiled.
 #include "python_console_widget.h"
 
 #include <QVBoxLayout>

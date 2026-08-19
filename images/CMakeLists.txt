@@ -1,3 +1,5 @@
+# LEGACY (BUILD-12): not added via add_subdirectory() in the main build; references
+# undefined WITH_DESKTOP/QGIS_DATA_DIR. Retained for reference only.
 ########################################################
 # Files
 

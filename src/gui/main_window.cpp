@@ -1,4 +1,4 @@
-// src/gui/main_window.cpp
+// src/gui/main_window.cpp — LEGACY (VPATCH-7): not compiled, see header note.
 #include "main_window.h"
 
 #include <QVBoxLayout>

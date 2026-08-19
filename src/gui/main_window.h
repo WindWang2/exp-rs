@@ -1,3 +1,6 @@
+// LEGACY (VPATCH-7): SicnuMainWindow is not compiled by any target at HEAD.
+// Retained for reference only; live shell is src/app/main_window.cpp.
+// Do not re-wire without fixing double-add layer and missing layerTree bugs.
 #pragma once
 
 #include <QMainWindow>

@@ -4,6 +4,7 @@
 #include <QWidget>
 
 #include "processing/framework/task_center.h"
+#include "shell/gui_job_adapter.h"
 
 class QListWidget;
 class QLineEdit;

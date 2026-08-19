@@ -169,6 +169,7 @@ add_executable(sicnu_geo_rs
     widgets/guided_workflow_widget.cpp
     panels/data_manager_panel.cpp
     panels/task_center_dock.cpp
+    panels/mosaic_panel.cpp
 
     # QgisApp facade
     qgis_app_facade.cpp
