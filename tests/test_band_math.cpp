@@ -271,6 +271,91 @@ TEST_CASE("BandMath evaluates two-arg functions pow/min/max", "[bandmath][func]"
     REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.5f, 0.001f)); // max(0.5, 0.1)
 }
 
+TEST_CASE("BandMath evaluates std::min and std::max with mixed integer and float operands (#434)", "[bandmath][func][434]")
+{
+    auto bands = makeTwoBandData(); // b1 = [0.5, 0.8, 0.0, 0.3], b2 = [0.1, 0.2, 0.0, 0.3]
+    std::vector<float> out(4);
+
+    // std::min and std::max between bands
+    REQUIRE(BandMath::evaluate("std::min(b1, b2)", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.1f, 0.001f));
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(0.2f, 0.001f));
+
+    REQUIRE(BandMath::evaluate("std::max(b1, b2)", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.5f, 0.001f));
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(0.8f, 0.001f));
+
+    // Mixed integer literal operand with float band
+    REQUIRE(BandMath::evaluate("std::min(b1, 0)", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(0.0f, 0.001f));
+
+    REQUIRE(BandMath::evaluate("std::max(b1, 1)", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(1.0f, 0.001f));
+
+    REQUIRE(BandMath::evaluate("min(b1, 10)", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.5f, 0.001f));
+
+    REQUIRE(BandMath::evaluate("max(100, b1)", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(100.0f, 0.001f));
+
+    // Nested clamping expression
+    REQUIRE(BandMath::evaluate("std::min(std::max(b1, 0.2), 0.6)", bands, out.data(), 4));
+    // b1 = [0.5, 0.8, 0.0, 0.3] -> clamp [0.2, 0.6] -> [0.5, 0.6, 0.2, 0.3]
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.5f, 0.001f));
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(0.6f, 0.001f));
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(0.2f, 0.001f));
+    REQUIRE_THAT(out[3], Catch::Matchers::WithinAbs(0.3f, 0.001f));
+
+    // referencedBands extracts bands correctly from std::min / std::max expressions
+    auto refs = BandMath::referencedBands("std::min(b1, 10) + std::max(b2, 0)");
+    REQUIRE(refs.size() == 2);
+    CHECK(refs[0] == 1);
+    CHECK(refs[1] == 2);
+}
+
+TEST_CASE("BandMath min/max/pow/atan2 propagate NaN symmetrically regardless of argument order (#434)", "[bandmath][func][434]")
+{
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    BandMath::BandData bands;
+    bands[1] = {0.5f, nan, nan}; // b1 NaN at pixels 1, 2
+    bands[2] = {nan, 0.2f, nan}; // b2 NaN at pixels 0, 2
+
+    std::vector<float> out(3);
+    REQUIRE(BandMath::evaluate("min(b1, b2)", bands, out.data(), 3));
+    for (float v : out)
+        CHECK(std::isnan(v));
+
+    // Argument order must not change the result (NaN commutativity)
+    std::vector<float> outSwapped(3);
+    REQUIRE(BandMath::evaluate("min(b2, b1)", bands, outSwapped.data(), 3));
+    for (float v : outSwapped)
+        CHECK(std::isnan(v));
+
+    std::vector<float> outMax(3);
+    REQUIRE(BandMath::evaluate("max(b1, b2)", bands, outMax.data(), 3));
+    for (float v : outMax)
+        CHECK(std::isnan(v));
+
+    // Clamping a NoData pixel against a literal must not leak a valid-looking
+    // value: min(NaN, 10) is NaN, not 10.
+    std::vector<float> outClamp(3);
+    REQUIRE(BandMath::evaluate("min(b1, 10)", bands, outClamp.data(), 3));
+    REQUIRE_THAT(outClamp[0], Catch::Matchers::WithinAbs(0.5f, 0.001f));
+    CHECK(std::isnan(outClamp[1]));
+    CHECK(std::isnan(outClamp[2]));
+
+    // pow/atan2 with a NaN operand propagate NaN
+    std::vector<float> outPow(3);
+    REQUIRE(BandMath::evaluate("pow(b1, 2)", bands, outPow.data(), 3));
+    CHECK(std::isnan(outPow[1]));
+    std::vector<float> outAtan(3);
+    REQUIRE(BandMath::evaluate("atan2(b1, b2)", bands, outAtan.data(), 3));
+    for (float v : outAtan)
+        CHECK(std::isnan(v));
+}
+
 TEST_CASE("BandMath evaluates pi() constant", "[bandmath][func]")
 {
     BandMath::BandData bands;
@@ -432,4 +517,42 @@ TEST_CASE("BandMath processFile writes evaluated raster", "[bandmath][gdal]")
     std::vector<float> out(4);
     REQUIRE(outDs.readBandData(1, out.data(), 2, 2));
     REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.666666f, 0.01f));
+}
+
+TEST_CASE("BandMath processFile masks large-magnitude float NoData sentinel (#434)", "[bandmath][gdal][434]")
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    const QString sourcePath = dir.filePath(QStringLiteral("source_bignd.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("output_bignd.tif"));
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+
+    GDALDatasetH srcDs = createOutputTiff(sourcePath, 2, 2, 1, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+
+    // GDAL's default float NoData sentinel (~ -FLT_MAX): a fixed 1e-6 absolute
+    // tolerance is far below one ULP at this magnitude and would never match.
+    const float sentinel = -3.4028235e+38f;
+    const std::vector<float> band1 = {0.5f, sentinel, sentinel, 0.8f};
+    GDALRasterBandH b1 = GDALGetRasterBand(srcDs, 1);
+    REQUIRE(GDALRasterIO(b1, GF_Write, 0, 0, 2, 2, const_cast<float *>(band1.data()),
+                          2, 2, GDT_Float32, 0, 0) == CE_None);
+    GDALSetRasterNoDataValue(b1, static_cast<double>(sentinel));
+    GDALClose(srcDs);
+
+    QString error;
+    REQUIRE(BandMath::processFile(sourcePath, outputPath, QStringLiteral("b1 * 2 + 1"), &error));
+
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(outputPath));
+    std::vector<float> out(4);
+    REQUIRE(outDs.readBandData(1, out.data(), 2, 2));
+    // Sentinel pixels must be masked to NaN before evaluation (not 2*-3.4e38+1)
+    CHECK(std::isnan(out[1]));
+    CHECK(std::isnan(out[2]));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(out[3], Catch::Matchers::WithinAbs(2.6f, 0.001f));
 }

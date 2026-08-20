@@ -98,3 +98,21 @@ TEST_CASE( "Load invalid path returns false", "[classify][persist]" )
   REQUIRE_FALSE( clf.load( QStringLiteral( "/does/not/exist.yml" ) ) );
   REQUIRE_FALSE( clf.isFitted() );
 }
+
+class NullClfBackend : public RsClassifierCvBackend<cv::ml::SVM>
+{
+  public:
+    NullClfBackend() { m_clf = nullptr; }
+    QString name() const override { return QStringLiteral( "NullClf" ); }
+};
+
+TEST_CASE( "ClassifierCvBackend: nullptr m_clf is guarded safely (#437)", "[classify][backend]" )
+{
+  NullClfBackend backend;
+  REQUIRE_FALSE( backend.isFitted() );
+  cv::Mat X = cv::Mat::ones( 10, 2, CV_32F );
+  cv::Mat y = cv::Mat::ones( 10, 1, CV_32S );
+  REQUIRE_FALSE( backend.fit( X, y ) );
+  REQUIRE( backend.predict( X ).empty() );
+  REQUIRE_FALSE( backend.save( QStringLiteral( "/tmp/dummy.yml" ) ) );
+}

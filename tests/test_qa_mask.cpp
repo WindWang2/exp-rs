@@ -95,6 +95,11 @@ TEST_CASE("QA mask kernels", "[qa]")
         CHECK(mask[5] == 0); // snow not selected
         CHECK(mask[6] == 0); // vegetation
         CHECK(mask[7] == 0); // out-of-range class guarded
+
+        // Null pointer safety checks
+        QaMask::sclMask(nullptr, mask, 8, classes);
+        QaMask::sclMask(scl, nullptr, 8, classes);
+        QaMask::sclMask(scl, mask, 8, nullptr);
     }
     SECTION("Generic bitmask") {
         const uint16_t values[] = {0, 1, 2, 3, 4};

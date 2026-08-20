@@ -78,3 +78,34 @@ TEST_CASE( "stratifiedSplit with groupIds keeps ROI groups intact (325)", "[w4][
     CHECK(s.trainX.rows==4);
     CHECK(s.testX.rows==4);
 }
+
+TEST_CASE( "stratifiedSplit single-group class falls back to pixel split", "[w4][325][split]" )
+{
+    // Regression: a class with a single ROI group used to dump ALL its samples
+    // into train, leaving the held-out set empty and silently dropping every
+    // accuracy metric (operator testSplit contract). With one ROI there is no
+    // cross-ROI leakage, so the class falls back to a pixel-level split.
+    cv::Mat X(40,1,CV_32F), y(40,1,CV_32S);
+    std::vector<int> g(40);
+    for(int i=0;i<40;++i){
+        X.at<float>(i,0)=float(i);
+        y.at<int>(i,0)= (i<20?1:2);
+        g[i] = (i<20?0:1); // one group per class
+    }
+    auto s = RsClassificationSplit::stratifiedSplit(X,y,0.7,42u,g);
+    REQUIRE(s.trainX.rows + s.testX.rows == 40);
+    CHECK(s.trainX.rows == 28); // round(20*0.7)=14 train per class
+    CHECK(s.testX.rows == 12);  // 6 held-out per class
+    // Both classes remain represented in the held-out set.
+    std::set<int> testClasses;
+    for(int i=0;i<s.testY.rows;++i) testClasses.insert(s.testY.at<int>(i,0));
+    CHECK(testClasses.size()==2);
+
+    // A single TINY group (below the min-split threshold) still goes fully to train.
+    cv::Mat Xs(5,1,CV_32F), ys(5,1,CV_32S);
+    std::vector<int> gs(5, 0);
+    for(int i=0;i<5;++i){ Xs.at<float>(i,0)=float(i); ys.at<int>(i,0)=7; }
+    auto s2 = RsClassificationSplit::stratifiedSplit(Xs,ys,0.7,42u,gs);
+    CHECK(s2.trainX.rows == 5);
+    CHECK(s2.testX.rows == 0);
+}

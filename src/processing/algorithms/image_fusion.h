@@ -89,6 +89,6 @@ class ImageFusion
 
   private:
     /// Histogram-match src to ref (match mean and stddev).
-    static void histogramMatch( float *data, int n,
-                                const float *ref, int refN, float nodata );
+    static void histogramMatch( float *data, size_t n,
+                                const float *ref, size_t refN, float nodata );
 };

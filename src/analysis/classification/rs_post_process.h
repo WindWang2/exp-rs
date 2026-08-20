@@ -31,7 +31,7 @@ class QGIS_ANALYSIS_EXPORT RsPostProcess
     /**
      * Remove connected components whose area (pixel count) is strictly less
      * than \a threshold. \a connectedness is 4 or 8. Small components are
-     * replaced with the majority label among border neighbors, or 0 if none.
+     * replaced with the majority label among border neighbors, or original class if none.
      */
     static bool sieve( const cv::Mat &src, cv::Mat &dst, int threshold, int connectedness,
                        QString *err = nullptr,

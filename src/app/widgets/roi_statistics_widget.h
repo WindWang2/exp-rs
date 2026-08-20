@@ -28,6 +28,17 @@ public:
     /** Compute statistics for the current ROI. */
     void computeStatistics();
 
+    struct BandStats {
+        double min = 0.0;
+        double max = 0.0;
+        double mean = 0.0;
+        double stddev = 0.0;
+        int pixelCount = 0;
+    };
+
+    /** Return the computed statistics for each band. */
+    QVector<BandStats> statistics() const { return m_stats; }
+
 private:
     void setupUi();
     void updateTable();
@@ -42,14 +53,6 @@ private:
     // computeStatistics null-checks before dereferencing.
     QPointer<QgsRasterLayer> m_rasterLayer;
     QPointer<QgsVectorLayer> m_roiLayer;
-
-    struct BandStats {
-        double min = 0.0;
-        double max = 0.0;
-        double mean = 0.0;
-        double stddev = 0.0;
-        int pixelCount = 0;
-    };
 
     QVector<BandStats> m_stats;
 };

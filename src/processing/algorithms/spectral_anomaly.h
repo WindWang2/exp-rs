@@ -31,11 +31,12 @@ namespace SpectralAnomaly
     /// When @a skipNonFinite is set, pixels containing any invalid band value are
     /// skipped and do not contribute to the count or the sums. A band value is
     /// invalid when it is non-finite (NaN/Inf) or — when @a noDataBands is
-    /// provided — within tolerance of that band's declared NoData value, so the
-    /// mean reflects valid pixels only.
+    /// provided and that band has declared NoData (@a hasNoDataBands) — within
+    /// tolerance of that band's declared NoData value, so the mean reflects valid pixels only.
     void accumulateMean( const float *pixels, size_t count, int bands,
                          BackgroundStats *stats, bool skipNonFinite = false,
-                         const float *noDataBands = nullptr );
+                         const float *noDataBands = nullptr,
+                         const uint8_t *hasNoDataBands = nullptr );
 
     /// Divide the accumulated sum by count → mean. Resets the count/sum state.
     void finalizeMean( BackgroundStats *stats );
@@ -46,7 +47,8 @@ namespace SpectralAnomaly
     /// accumulateMean() is applied so the covariance uses the same valid pixels.
     void accumulateCovariance( const float *pixels, size_t count, int bands,
                                BackgroundStats *stats, bool skipNonFinite = false,
-                               const float *noDataBands = nullptr );
+                               const float *noDataBands = nullptr,
+                               const uint8_t *hasNoDataBands = nullptr );
 
     /// Divide the accumulated covariance sum by count → biased covariance.
     void finalizeCovariance( BackgroundStats *stats );

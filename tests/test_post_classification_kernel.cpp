@@ -78,3 +78,20 @@ TEST_CASE("TransitionMatrix marginals derive per-class totals", "[processing][po
     CHECK(toTotals[2] == 1);
     CHECK(toTotals[3] == 2);
 }
+
+TEST_CASE("TransitionMatrix marginals handles classCount <= 0 safely", "[processing][post_classification]") {
+    std::vector<uint64_t> matrix = {1, 2, 3, 4};
+    std::vector<uint64_t> fromTotals = {10}, toTotals = {20};
+
+    SECTION("classCount = 0") {
+        marginals(matrix, 0, fromTotals, toTotals);
+        CHECK(fromTotals.empty());
+        CHECK(toTotals.empty());
+    }
+
+    SECTION("classCount < 0") {
+        marginals(matrix, -1, fromTotals, toTotals);
+        CHECK(fromTotals.empty());
+        CHECK(toTotals.empty());
+    }
+}
