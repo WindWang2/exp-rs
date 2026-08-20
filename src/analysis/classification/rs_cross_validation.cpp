@@ -201,7 +201,7 @@ RsCrossValidation::Result RsCrossValidation::kFold(
     {
       int pVal = pred.at<int>( i, 0 );
       if ( backend->needsLabelRemap() )
-        pVal = clusterRemap.value( pVal, pVal );
+        pVal = clusterRemap.isEmpty() ? pVal : clusterRemap.value( pVal, 0 );
       if ( pVal == testY.at<int>( i, 0 ) )
         ++correct;
     }

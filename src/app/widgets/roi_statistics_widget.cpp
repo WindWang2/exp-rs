@@ -132,13 +132,27 @@ void RoiStatisticsWidget::computeStatistics()
         gt[3] = 0; gt[4] = 0; gt[5] = 1;
     }
 
-    double pxMin = (bbox.xMinimum() - gt[0]) / gt[1];
-    double pxMax = (bbox.xMaximum() - gt[0]) / gt[1];
-    double pyMin = (bbox.yMaximum() - gt[3]) / gt[5];
-    double pyMax = (bbox.yMinimum() - gt[3]) / gt[5];
+    double invGt[6];
+    if ( !GDALInvGeoTransform( gt, invGt ) ) {
+        invGt[0] = 0; invGt[1] = 1; invGt[2] = 0;
+        invGt[3] = 0; invGt[4] = 0; invGt[5] = 1;
+    }
 
-    if (pxMin > pxMax) std::swap(pxMin, pxMax);
-    if (pyMin > pyMax) std::swap(pyMin, pyMax);
+    const double xs[4] = { bbox.xMinimum(), bbox.xMaximum(), bbox.xMinimum(), bbox.xMaximum() };
+    const double ys[4] = { bbox.yMinimum(), bbox.yMinimum(), bbox.yMaximum(), bbox.yMaximum() };
+    double pxMin = std::numeric_limits<double>::infinity();
+    double pxMax = -std::numeric_limits<double>::infinity();
+    double pyMin = std::numeric_limits<double>::infinity();
+    double pyMax = -std::numeric_limits<double>::infinity();
+
+    for ( int i = 0; i < 4; ++i ) {
+        const double px = invGt[0] + xs[i] * invGt[1] + ys[i] * invGt[2];
+        const double py = invGt[3] + xs[i] * invGt[4] + ys[i] * invGt[5];
+        pxMin = std::min( pxMin, px );
+        pxMax = std::max( pxMax, px );
+        pyMin = std::min( pyMin, py );
+        pyMax = std::max( pyMax, py );
+    }
 
     int rWidth = GDALGetRasterXSize(ds);
     int rHeight = GDALGetRasterYSize(ds);

@@ -2278,6 +2278,10 @@ bool QgsClassificationMainWindow::openSourceRaster( const QString &path )
     delete m_previewLayer;
     m_previewLayer = nullptr;
   }
+  // Reset pre-loaded model backend, scaler, and path to prevent stale model reuse on new raster (#428)
+  m_loadedBackend.reset();
+  m_loadedScaler = RsFeatureScaler();
+  m_loadedModelPath.clear();
   // Clear result paths so post-processing doesn't operate on old outputs
   m_lastClassifyPath.clear();
   m_lastPostRasterPath.clear();

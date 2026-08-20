@@ -26,11 +26,11 @@ int CPL_STDCALL gdalProgressCallback(double dfComplete, const char* pszMessage,
 
     try {
         context->throwIfCancelled();
+        context->reportProgress(dfComplete, pszMessage ? pszMessage : "");
+        return TRUE;
     } catch (...) {
         return FALSE;
     }
-    context->reportProgress(dfComplete, pszMessage ? pszMessage : "");
-    return TRUE;
 }
 
 bool isCategoricalDataset(GDALDatasetH hDS) {

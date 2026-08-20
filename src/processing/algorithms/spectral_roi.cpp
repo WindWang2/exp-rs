@@ -67,16 +67,39 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
         return false;
     }
 
-    // Bounding box of the polygon in map coordinates -> pixel column/row range.
+    std::array<double, 6> invGt{};
+    if ( !GDALInvGeoTransform( gt.data(), invGt.data() ) )
+    {
+        GDALClose( ds );
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "Invertible geotransform required" );
+        return false;
+    }
+
+    // Bounding box of the polygon in map coordinates -> pixel column/row range via all 4 corners.
     QRectF bounds = polygon.boundingRect();
-    const double minCol = std::floor( ( bounds.left() - gt[0] ) / gt[1] );
-    const double maxCol = std::ceil( ( bounds.right() - gt[0] ) / gt[1] );
-    const double minRow = std::floor( ( bounds.bottom() - gt[3] ) / gt[5] ); // gt[5] < 0
-    const double maxRow = std::ceil( ( bounds.top() - gt[3] ) / gt[5] );
-    const int col0 = std::max( 0, static_cast<int>( minCol ) );
-    const int col1 = std::min( width, static_cast<int>( maxCol ) + 1 );
-    const int row0 = std::max( 0, static_cast<int>( minRow ) );
-    const int row1 = std::min( height, static_cast<int>( maxRow ) + 1 );
+    const double xs[4] = { bounds.left(), bounds.right(), bounds.left(), bounds.right() };
+    const double ys[4] = { bounds.top(), bounds.top(), bounds.bottom(), bounds.bottom() };
+
+    double minCol = std::numeric_limits<double>::infinity();
+    double maxCol = -std::numeric_limits<double>::infinity();
+    double minRow = std::numeric_limits<double>::infinity();
+    double maxRow = -std::numeric_limits<double>::infinity();
+
+    for ( int i = 0; i < 4; ++i )
+    {
+        const double px = invGt[0] + xs[i] * invGt[1] + ys[i] * invGt[2];
+        const double py = invGt[3] + xs[i] * invGt[4] + ys[i] * invGt[5];
+        minCol = std::min( minCol, px );
+        maxCol = std::max( maxCol, px );
+        minRow = std::min( minRow, py );
+        maxRow = std::max( maxRow, py );
+    }
+
+    const int col0 = std::max( 0, static_cast<int>( std::floor( minCol ) ) );
+    const int col1 = std::min( width, static_cast<int>( std::ceil( maxCol ) ) + 1 );
+    const int row0 = std::max( 0, static_cast<int>( std::floor( minRow ) ) );
+    const int row1 = std::min( height, static_cast<int>( std::ceil( maxRow ) ) + 1 );
 
     // No overlap between the polygon's pixel-space box and the raster.
     if ( col0 >= col1 || row0 >= row1 )
@@ -100,10 +123,12 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
     std::vector<uint8_t> inside( static_cast<size_t>( windowW ) * windowH, 0 );
     for ( int row = row0; row < row1; ++row )
     {
-        const double mapY = gt[3] + ( row + 0.5 ) * gt[5];
+        const double rCenter = row + 0.5;
         for ( int col = col0; col < col1; ++col )
         {
-            const double mapX = gt[0] + ( col + 0.5 ) * gt[1];
+            const double cCenter = col + 0.5;
+            const double mapX = gt[0] + cCenter * gt[1] + rCenter * gt[2];
+            const double mapY = gt[3] + cCenter * gt[4] + rCenter * gt[5];
             if ( polygon.containsPoint( QPointF( mapX, mapY ), Qt::OddEvenFill ) )
             {
                 inside[static_cast<size_t>( row - row0 ) * windowW + ( col - col0 )] = 1;

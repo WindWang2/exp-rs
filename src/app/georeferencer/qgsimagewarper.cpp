@@ -554,16 +554,23 @@ int QgsImageWarper::GeoToPixelTransform( void *pTransformerArg, int bDstToSrc, i
 
 int CPL_STDCALL QgsImageWarper::updateWarpProgress( double dfComplete, const char *pszMessage, void *pProgressArg )
 {
-  Q_UNUSED( pszMessage )
-  QgsFeedback *feedback = static_cast<QgsFeedback *>( pProgressArg );
-  if ( !feedback )
+  try
+  {
+    Q_UNUSED( pszMessage )
+    QgsFeedback *feedback = static_cast<QgsFeedback *>( pProgressArg );
+    if ( !feedback )
+      return TRUE;
+    feedback->setProgress( std::min( 100.0, dfComplete * 100.0 ) );
+    if ( feedback->isCanceled() )
+    {
+      return FALSE;
+    }
     return TRUE;
-  feedback->setProgress( std::min( 100.0, dfComplete * 100.0 ) );
-  if ( feedback->isCanceled() )
+  }
+  catch ( ... )
   {
     return FALSE;
   }
-  return TRUE;
 }
 
 GDALResampleAlg QgsImageWarper::toGDALResampleAlg( const QgsImageWarper::ResamplingMethod method ) const

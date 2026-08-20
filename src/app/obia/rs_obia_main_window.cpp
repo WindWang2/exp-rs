@@ -1706,23 +1706,37 @@ void RsObiaMainWindow::importRoiLabels()
             continue;
         }
 
-        if ( std::abs( gt[1] ) < 1e-12 || std::abs( gt[5] ) < 1e-12 )
+        double invGt[6];
+        if ( !GDALInvGeoTransform( gt, invGt ) )
         {
             OGR_F_Destroy( feat );
             continue;
         }
 
-        // Envelope → pixel range; normalize for north-up or south-up geotransforms.
+        // Envelope → pixel range across all 4 corners of the polygon envelope.
         OGREnvelope env;
         OGR_G_GetEnvelope( geom, &env );
-        int cA = static_cast<int>( std::floor( ( env.MinX - gt[0] ) / gt[1] ) );
-        int cB = static_cast<int>( std::ceil( ( env.MaxX - gt[0] ) / gt[1] ) );
-        int rA = static_cast<int>( std::floor( ( env.MinY - gt[3] ) / gt[5] ) );
-        int rB = static_cast<int>( std::ceil( ( env.MaxY - gt[3] ) / gt[5] ) );
-        const int c0 = (std::max)( 0, (std::min)( cA, cB ) );
-        const int c1 = (std::min)( w - 1, (std::max)( cA, cB ) );
-        const int r0 = (std::max)( 0, (std::min)( rA, rB ) );
-        const int r1 = (std::min)( h - 1, (std::max)( rA, rB ) );
+        const double xs[4] = { env.MinX, env.MaxX, env.MinX, env.MaxX };
+        const double ys[4] = { env.MinY, env.MinY, env.MaxY, env.MaxY };
+        double minCol = std::numeric_limits<double>::infinity();
+        double maxCol = -std::numeric_limits<double>::infinity();
+        double minRow = std::numeric_limits<double>::infinity();
+        double maxRow = -std::numeric_limits<double>::infinity();
+
+        for ( int i = 0; i < 4; ++i )
+        {
+            const double px = invGt[0] + xs[i] * invGt[1] + ys[i] * invGt[2];
+            const double py = invGt[3] + xs[i] * invGt[4] + ys[i] * invGt[5];
+            minCol = std::min( minCol, px );
+            maxCol = std::max( maxCol, px );
+            minRow = std::min( minRow, py );
+            maxRow = std::max( maxRow, py );
+        }
+
+        const int c0 = (std::max)( 0, static_cast<int>( std::floor( minCol ) ) );
+        const int c1 = (std::min)( w - 1, static_cast<int>( std::ceil( maxCol ) ) );
+        const int r0 = (std::max)( 0, static_cast<int>( std::floor( minRow ) ) );
+        const int r1 = (std::min)( h - 1, static_cast<int>( std::ceil( maxRow ) ) );
         if ( c0 > c1 || r0 > r1 )
         {
             OGR_F_Destroy( feat );

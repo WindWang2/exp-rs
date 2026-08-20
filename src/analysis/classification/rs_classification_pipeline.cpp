@@ -219,26 +219,34 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     QVector<int> sidecarFeatures;
     RsAccuracyAssessment::Result sidecarAccuracy;
     QHash<int, int> sidecarRemap;
-    if ( !loadModelSidecar( config.modelLoadPath, sidecarMethod, sidecarScaler,
-                            sidecarColors, sidecarFeatures, sidecarAccuracy, sidecarRemap ) )
+    const QString sidecarPath = sidecarPathForModel( config.modelLoadPath );
+    const bool sidecarExists = !config.modelLoadPath.isEmpty() && QFile::exists( sidecarPath );
+
+    if ( sidecarExists )
     {
-      // When the caller already provides a pre-loaded backend (e.g. GUI
-      // loaded the model file directly), a missing sidecar is non-fatal —
-      // proceed without sidecar metadata (no feature scaling, etc.) (#403).
-      if ( config.backend )
-      {
-        SICNU_LOG_WARN( SicnuLogTags::Classification,
-                        QStringLiteral( "Model sidecar missing for %1 — proceeding without metadata (no feature scaling)" )
-                          .arg( config.modelLoadPath ) );
-      }
-      else
+      if ( !loadModelSidecar( config.modelLoadPath, sidecarMethod, sidecarScaler,
+                              sidecarColors, sidecarFeatures, sidecarAccuracy, sidecarRemap ) )
       {
         result.ok = false;
         result.error = RsClassificationPipelineResult::Error::ModelSidecarMissing;
-        result.errorMessage = QStringLiteral( "Failed to load model sidecar for %1 (missing or invalid metadata)" )
+        result.errorMessage = QStringLiteral( "Failed to load model sidecar for %1 (corrupted or invalid JSON)" )
                                 .arg( config.modelLoadPath );
         return result;
       }
+    }
+    else if ( !config.backend )
+    {
+      result.ok = false;
+      result.error = RsClassificationPipelineResult::Error::ModelSidecarMissing;
+      result.errorMessage = QStringLiteral( "Model sidecar (.meta.json) missing for: %1" )
+                              .arg( config.modelLoadPath );
+      return result;
+    }
+    else
+    {
+      SICNU_LOG_WARN( SicnuLogTags::Classification,
+                      QStringLiteral( "Model sidecar missing for %1 — proceeding without metadata (no feature scaling)" )
+                        .arg( config.modelLoadPath ) );
     }
 
     if ( sidecarScaler.isFitted() )
@@ -497,7 +505,9 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
         for ( int i = 0; i < config.testY.rows; ++i )
         {
           yt.append( config.testY.at<int>( i, 0 ) );
-          yp.append( kmeansRemap.value( pred.at<int>( i, 0 ), pred.at<int>( i, 0 ) ) );
+          const int rawPred = pred.at<int>( i, 0 );
+          const int mappedPred = kmeansRemap.isEmpty() ? rawPred : kmeansRemap.value( rawPred, 0 );
+          yp.append( mappedPred );
         }
       }
       else
@@ -947,7 +957,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
         int v = pred.at<int>( static_cast<int>( i ), 0 );
         if ( config.backend->needsLabelRemap() )
         {
-          v = kmeansRemap.value( v, v );
+          v = kmeansRemap.isEmpty() ? v : kmeansRemap.value( v, unclassified );
         }
         if ( v < 0 )
           v = unclassified;

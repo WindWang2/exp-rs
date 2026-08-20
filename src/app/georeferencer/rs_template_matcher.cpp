@@ -3,12 +3,16 @@
 #include "core/sicnu_logging.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include "qgscoordinatereferencesystem.h"
+#include "qgscoordinatetransform.h"
+#include "qgscoordinatetransformcontext.h"
 #include "qgsfeedback.h"
 
 #include <QFileInfo>
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <vector>
 
 #include <gdal_priv.h>
@@ -131,7 +135,7 @@ cv::Mat readBandWindow( GDALDataset *ds, int x0, int y0, int w, int h )
 
 RsTemplateMatcher::Result RsTemplateMatcher::run( const QString &srcRaster,
                                                     const QString &refRaster,
-                                                    const QgsCoordinateReferenceSystem &/*refCrs*/,
+                                                    const QgsCoordinateReferenceSystem &refCrsIn,
                                                     const Params &paramsIn,
                                                     const QVector<QgsPointXY> &seedSrcPixels )
 {
@@ -162,6 +166,7 @@ RsTemplateMatcher::Result RsTemplateMatcher::run( const QString &srcRaster,
   }
 
 #ifndef SICNU_HAS_OPENCV
+  Q_UNUSED( refCrsIn );
   Q_UNUSED( seedSrcPixels );
   r.errorMessage = QStringLiteral( "OpenCV not available at build time" );
   return r;
@@ -179,6 +184,32 @@ RsTemplateMatcher::Result RsTemplateMatcher::run( const QString &srcRaster,
       GDALClose( refDs );
     r.errorMessage = QStringLiteral( "Failed to open SRC or REF raster" );
     return r;
+  }
+
+  QgsCoordinateReferenceSystem srcCrs;
+  const char *srcProj = srcDs->GetProjectionRef();
+  if ( srcProj && srcProj[0] != '\0' )
+    srcCrs = QgsCoordinateReferenceSystem::fromWkt( QString::fromUtf8( srcProj ) );
+
+  QgsCoordinateReferenceSystem effectiveRefCrs = refCrsIn;
+  if ( !effectiveRefCrs.isValid() )
+  {
+    const char *refProj = refDs->GetProjectionRef();
+    if ( refProj && refProj[0] != '\0' )
+      effectiveRefCrs = QgsCoordinateReferenceSystem::fromWkt( QString::fromUtf8( refProj ) );
+  }
+
+  std::unique_ptr<QgsCoordinateTransform> srcToRefTransform;
+  if ( srcCrs.isValid() && effectiveRefCrs.isValid() && srcCrs != effectiveRefCrs )
+  {
+    try
+    {
+      srcToRefTransform = std::make_unique<QgsCoordinateTransform>( srcCrs, effectiveRefCrs, QgsCoordinateTransformContext() );
+    }
+    catch ( ... )
+    {
+      srcToRefTransform.reset();
+    }
   }
 
   double srcGt[6] = { 0, 1, 0, 0, 0, 1 };
@@ -266,6 +297,19 @@ RsTemplateMatcher::Result RsTemplateMatcher::run( const QString &srcRaster,
 
     double wx = 0, wy = 0;
     pixelToWorld( srcGt, sx, sy, wx, wy );
+    if ( srcToRefTransform )
+    {
+      try
+      {
+        const QgsPointXY refPt = srcToRefTransform->transform( QgsPointXY( wx, wy ) );
+        wx = refPt.x();
+        wy = refPt.y();
+      }
+      catch ( ... )
+      {
+        continue;
+      }
+    }
     double predCol = 0, predRow = 0;
     if ( !worldToPixel( refGt, wx, wy, predCol, predRow ) )
       continue;

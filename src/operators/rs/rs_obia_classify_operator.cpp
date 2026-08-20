@@ -270,13 +270,19 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
 
     std::vector<std::vector<float>> feats(static_cast<size_t>(nSeg + 1),
                                           std::vector<float>(static_cast<size_t>(nFeat), 0.0f));
+    std::vector<bool> segHasValid(static_cast<size_t>(nSeg + 1), false);
     for (int s = 1; s <= nSeg; ++s) {
+        int totalValid = 0;
         for (int f = 0; f < nFeat; ++f) {
             const int cnt = validCounts[static_cast<size_t>(s)][static_cast<size_t>(f)];
+            totalValid += cnt;
             if (cnt > 0) {
                 feats[static_cast<size_t>(s)][static_cast<size_t>(f)] =
                     static_cast<float>(sum[static_cast<size_t>(s)][static_cast<size_t>(f)] / cnt);
             }
+        }
+        if (totalValid > 0) {
+            segHasValid[static_cast<size_t>(s)] = true;
         }
     }
 
@@ -295,7 +301,7 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
     int labeledSegments = 0;
     std::set<int> uniqueClasses;
     for (auto it = segLabelMap.constBegin(); it != segLabelMap.constEnd(); ++it) {
-        if (it.key() == 0 || it.key() > static_cast<quint32>(nSeg) || it.value() <= 0)
+        if (it.key() == 0 || it.key() > static_cast<quint32>(nSeg) || it.value() <= 0 || !segHasValid[static_cast<size_t>(it.key())])
             continue;
         segLabel[static_cast<size_t>(it.key())] = it.value();
         uniqueClasses.insert(it.value());
@@ -349,6 +355,10 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
 
     std::vector<int32_t> classOfSeg(static_cast<size_t>(nSeg + 1), 0);
     for (int s = 1; s <= nSeg; ++s) {
+        if (!segHasValid[static_cast<size_t>(s)]) {
+            classOfSeg[static_cast<size_t>(s)] = 0;
+            continue;
+        }
         // Backend predictions are integral class ids already; negative is
         // defensive only (SVM/Bayes predict within the trained label set).
         classOfSeg[static_cast<size_t>(s)] = (std::max)(0, pred.at<int>(s - 1, 0));
