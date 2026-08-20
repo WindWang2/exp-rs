@@ -18,8 +18,26 @@
 
 #include <gdal.h>
 #include <ogr_api.h>
+#include <ogr_spatialref.h>
 
 #include <cmath>
+#include <cstring>
+
+namespace
+{
+struct CoordTransGuard
+{
+    OGRCoordinateTransformationH handle = nullptr;
+    ~CoordTransGuard()
+    {
+        if ( handle )
+            OCTDestroyCoordinateTransformation( handle );
+    }
+    CoordTransGuard() = default;
+    CoordTransGuard( const CoordTransGuard & ) = delete;
+    CoordTransGuard &operator=( const CoordTransGuard & ) = delete;
+};
+} // namespace
 
 QMap<quint32, int> RsRoiLabeler::labelByMajority( const RsSegmentMap &segMap,
                                                   const QString &rasterPath,
@@ -78,7 +96,33 @@ QMap<quint32, int> RsRoiLabeler::labelByMajority( const RsSegmentMap &segMap,
                          .arg( rasterPath ) );
     }
     const bool gtOk = GDALGetGeoTransform( rds, gt ) == CE_None;
+
+    OGRSpatialReferenceH vecSrs = OGR_L_GetSpatialRef( layer );
+    CoordTransGuard coordTrans;
+    const char *rasWkt = GDALGetProjectionRef( rds );
+    if ( rasWkt && std::strlen( rasWkt ) > 0 && vecSrs )
+    {
+        // Clone the layer's SRS (it is borrowed) and pin both CRSs to
+        // traditional GIS axis order (long/lat, x/y) so transformed
+        // coordinates land in the same order the GeoTransform assumes.
+        OGRSpatialReferenceH vecSrsClone = OSRClone( vecSrs );
+        OGRSpatialReferenceH rasSrs = OSRNewSpatialReference( nullptr );
+        if ( vecSrsClone && rasSrs
+             && OSRImportFromWkt( rasSrs, const_cast<char **>( &rasWkt ) ) == OGRERR_NONE )
+        {
+            OSRSetAxisMappingStrategy( vecSrsClone, OAMS_TRADITIONAL_GIS_ORDER );
+            OSRSetAxisMappingStrategy( rasSrs, OAMS_TRADITIONAL_GIS_ORDER );
+            if ( !OSRIsSame( vecSrsClone, rasSrs ) )
+            {
+                coordTrans.handle = OCTNewCoordinateTransformation( vecSrsClone, rasSrs );
+            }
+        }
+        if ( vecSrsClone )
+            OSRDestroySpatialReference( vecSrsClone );
+        OSRDestroySpatialReference( rasSrs );
+    }
     GDALClose( rds );
+
     if ( !gtOk || std::abs( gt[1] ) < 1e-12 || std::abs( gt[5] ) < 1e-12 )
     {
         GDALClose( vecDs );
@@ -110,7 +154,21 @@ QMap<quint32, int> RsRoiLabeler::labelByMajority( const RsSegmentMap &segMap,
             OGR_F_Destroy( feat );
             continue;
         }
-        const QgsGeometry qg = QgsOgrUtils::ogrGeometryToQgsGeometry( geom );
+
+        OGRGeometryH geomToUse = geom;
+        OGRGeometryH clonedGeom = nullptr;
+        if ( coordTrans.handle )
+        {
+            clonedGeom = OGR_G_Clone( geom );
+            if ( OGR_G_Transform( clonedGeom, coordTrans.handle ) == OGRERR_NONE )
+            {
+                geomToUse = clonedGeom;
+            }
+        }
+
+        const QgsGeometry qg = QgsOgrUtils::ogrGeometryToQgsGeometry( geomToUse );
+        if ( clonedGeom )
+            OGR_G_DestroyGeometry( clonedGeom );
         OGR_F_Destroy( feat );
         if ( qg.isNull() || qg.isEmpty() )
             continue;

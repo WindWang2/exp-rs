@@ -691,3 +691,156 @@ TEST_CASE("toToaReflectance generic GDAL scale/offset computes DN*scale + offset
     CHECK_THAT(refl[2], Catch::Matchers::WithinAbs(0.45f, 1e-5f));
 }
 
+TEST_CASE("Calibration kernels reject non-finite or near-zero coefficients", "[radcal][validation]")
+{
+    using namespace RadiometricCalibration;
+    std::vector<float> dn = {100.0f, 200.0f};
+    std::vector<float> out(2);
+
+    SECTION("toRadiance rejects non-finite gain and bias") {
+        BandCoefficients c;
+        c.hasRadiance = true;
+        c.radianceGain = std::numeric_limits<double>::quiet_NaN();
+        c.radianceBias = 0.0;
+        CHECK_FALSE(toRadiance(dn.data(), out.data(), 2, c));
+
+        c.radianceGain = std::numeric_limits<double>::infinity();
+        CHECK_FALSE(toRadiance(dn.data(), out.data(), 2, c));
+
+        c.radianceGain = 0.01;
+        c.radianceBias = std::numeric_limits<double>::quiet_NaN();
+        CHECK_FALSE(toRadiance(dn.data(), out.data(), 2, c));
+    }
+
+    SECTION("toToaReflectance Landsat rejects non-finite coefficients") {
+        BandCoefficients c;
+        c.reflMult = std::numeric_limits<double>::quiet_NaN();
+        c.reflAdd = 0.0;
+        CHECK_FALSE(toToaReflectance(dn.data(), out.data(), 2, c, SensorType::Landsat, 45.0));
+
+        c.reflMult = 0.00002;
+        c.reflAdd = std::numeric_limits<double>::quiet_NaN();
+        CHECK_FALSE(toToaReflectance(dn.data(), out.data(), 2, c, SensorType::Landsat, 45.0));
+
+        c.reflAdd = -0.1;
+        CHECK_FALSE(toToaReflectance(dn.data(), out.data(), 2, c, SensorType::Landsat, std::numeric_limits<double>::quiet_NaN()));
+    }
+
+    SECTION("toToaReflectance Sentinel-2 rejects zero or near-zero or non-finite scale") {
+        BandCoefficients c;
+        c.scale = 0.0;
+        c.offset = 0.0;
+        CHECK_FALSE(toToaReflectance(dn.data(), out.data(), 2, c, SensorType::Sentinel2, 90.0));
+
+        c.scale = 1e-15; // below 1e-12 threshold
+        CHECK_FALSE(toToaReflectance(dn.data(), out.data(), 2, c, SensorType::Sentinel2, 90.0));
+
+        c.scale = std::numeric_limits<double>::quiet_NaN();
+        CHECK_FALSE(toToaReflectance(dn.data(), out.data(), 2, c, SensorType::Sentinel2, 90.0));
+
+        c.scale = 10000.0;
+        c.offset = std::numeric_limits<double>::quiet_NaN();
+        CHECK_FALSE(toToaReflectance(dn.data(), out.data(), 2, c, SensorType::Sentinel2, 90.0));
+    }
+
+    SECTION("toBrightnessTemperature rejects non-finite coefficients") {
+        BandCoefficients c;
+        c.k1 = 774.8853;
+        c.k2 = 1321.0789;
+        c.radianceGain = std::numeric_limits<double>::quiet_NaN();
+        c.radianceBias = 0.1;
+        CHECK_FALSE(toBrightnessTemperature(dn.data(), out.data(), 2, c));
+
+        c.radianceGain = 0.0003342;
+        c.k1 = std::numeric_limits<double>::quiet_NaN();
+        CHECK_FALSE(toBrightnessTemperature(dn.data(), out.data(), 2, c));
+
+        c.k1 = 774.8853;
+        c.k2 = std::numeric_limits<double>::infinity();
+        CHECK_FALSE(toBrightnessTemperature(dn.data(), out.data(), 2, c));
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// #435: empty bandNames must auto-discover bands from the metadata itself
+// ---------------------------------------------------------------------------
+
+TEST_CASE("loadMetadata with empty bandNames auto-discovers Landsat MTL bands (#435)", "[radcal][mtl][435]")
+{
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString mtlPath = dir.filePath(QStringLiteral("LC08_MTL.txt"));
+    writeMtlFile(mtlPath, {
+        QStringLiteral("SPACECRAFT_ID = \"LANDSAT_8\""),
+        QStringLiteral("SUN_ELEVATION = 45.0"),
+        QStringLiteral("RADIANCE_MULT_BAND_4 = 0.0123"),
+        QStringLiteral("RADIANCE_ADD_BAND_4 = -0.123"),
+        QStringLiteral("REFLECTANCE_MULT_BAND_4 = 0.00002"),
+        QStringLiteral("REFLECTANCE_ADD_BAND_4 = -0.1"),
+        QStringLiteral("K1_CONSTANT_BAND_ST_B10 = 607.76"),
+        QStringLiteral("K2_CONSTANT_BAND_ST_B10 = 1260.56"),
+    });
+
+    // Documented contract: empty map -> coefficients keyed by band number.
+    QMap<int, QString> bandNames;
+    CalibrationMetadata meta;
+    QString err;
+    const bool loaded = loadMetadata(QString(), mtlPath, bandNames, &meta, &err);
+    INFO("loadMetadata error: " << err.toStdString());
+    REQUIRE(loaded);
+
+    // Numeric band key (4) discovered from RADIANCE_*_BAND_4
+    REQUIRE(meta.bands.contains(4));
+    REQUIRE_THAT(meta.bands.value(4).radianceGain, WithinAbs(0.0123, 0.0001));
+    REQUIRE_THAT(meta.bands.value(4).radianceBias, WithinAbs(-0.123, 0.001));
+    REQUIRE_THAT(meta.bands.value(4).reflMult, WithinAbs(0.00002, 0.000001));
+
+    // Collection-2 ST_B10 token discovered via K1/K2 keys, keyed by band 10
+    REQUIRE(meta.bands.contains(10));
+    REQUIRE_THAT(meta.bands.value(10).k1, WithinAbs(607.76, 0.01));
+    REQUIRE_THAT(meta.bands.value(10).k2, WithinAbs(1260.56, 0.01));
+}
+
+TEST_CASE("loadMetadata with empty bandNames auto-discovers Sentinel-2 MTD bands (#435)", "[radcal][mtd][435]")
+{
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString mtdPath = dir.filePath(QStringLiteral("MTD_MSIL2A.xml"));
+    {
+        QFile f(mtdPath);
+        REQUIRE(f.open(QIODevice::WriteOnly | QIODevice::Text));
+        QTextStream s(&f);
+        s << QStringLiteral(
+        "<n1:Level-2A_User_Product xmlns:n1=\"https://das.gsfc.nasa.gov\">\n"
+        "  <General_Info>\n"
+        "    <Product_Image_Characteristics>\n"
+        "      <Radiometric_Info>\n"
+        "        <BOA_ADD_OFFSET>\n"
+        "          <BOA_LIST_TO_VALUES>\n"
+        "            <BOA_LIST_VALUE band_id=\"1\">-1000</BOA_LIST_VALUE>\n"
+        "          </BOA_LIST_TO_VALUES>\n"
+        "        </BOA_ADD_OFFSET>\n"
+        "        <BOA_QUANTIFICATION_VALUE>10000</BOA_QUANTIFICATION_VALUE>\n"
+        "      </Radiometric_Info>\n"
+        "    </Product_Image_Characteristics>\n"
+        "  </General_Info>\n"
+        "</n1:Level-2A_User_Product>\n");
+        s.flush();
+        f.close();
+    }
+
+    QMap<int, QString> bandNames;
+    CalibrationMetadata meta;
+    QString err;
+    const bool loaded = loadMetadata(QString(), mtdPath, bandNames, &meta, &err);
+    INFO("loadMetadata error: " << err.toStdString());
+    REQUIRE(loaded);
+
+    // band_id 1 (B2) -> 1-based band number 2 with offset + quantification scale
+    REQUIRE(meta.bands.contains(2));
+    REQUIRE_THAT(meta.bands.value(2).offset, WithinAbs(-1000.0, 0.1));
+    REQUIRE_THAT(meta.bands.value(2).scale, WithinAbs(10000.0, 0.1));
+    // Bands without an offset entry are not fabricated
+    CHECK_FALSE(meta.bands.contains(1));
+}

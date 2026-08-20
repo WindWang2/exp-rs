@@ -22,11 +22,11 @@ Json::Value RsBandMathOperator::schema() const {
     props["input"] = makeRasterParam("input", "Input multi-band raster");
     props["output"] = makeOutputParam("output", "Output single-band raster", "tif");
     props["expression"] = makeStringParam("expression",
-                                          "Band math expression (e.g. (b1-b2)/(b1+b2))",
+                                          "Band math expression (e.g. (b1-b2)/(b1+b2), min(b1, 10), std::max(b1, b2))",
                                           "");
 
     Json::Value outputs(Json::objectValue);
-    outputs["output"] = makeRasterParam("output", "Output raster path");
+    outputs["output"] = makeOutputParam("output", "Output raster path");
     outputs["expression"] = makeStringParam("expression", "Evaluated expression", "");
     outputs["width"] = makeIntegerParam("width", "Output width", 0);
     outputs["height"] = makeIntegerParam("height", "Output height", 0);
@@ -45,7 +45,7 @@ Json::Value RsBandMathOperator::metadata() const {
     meta["tags"].append("spectral");
     meta["tags"].append("calculator");
     meta["purpose"] = "Apply custom per-pixel arithmetic across raster bands.";
-    meta["workflowHints"].append("Use NDVI-like formulas for vegetation or water indices.");
+    meta["workflowHints"].append("Use NDVI-like formulas for vegetation or water indices; supports min/max and std::min/std::max with mixed numeric types.");
     meta["limitations"].append("Expression uses 1-based band references (b1, b2, ...).");
     return meta;
 }

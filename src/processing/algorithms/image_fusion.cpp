@@ -17,10 +17,10 @@
 // Histogram matching (linear: match mean and stddev)
 // ---------------------------------------------------------------------------
 
-void ImageFusion::histogramMatch( float *data, int n,
-                                  const float *ref, int refN, float nodata )
+void ImageFusion::histogramMatch( float *data, size_t n,
+                                  const float *ref, size_t refN, float nodata )
 {
-    if ( n <= 0 || refN <= 0 )
+    if ( n == 0 || refN == 0 )
         return;
 
     // Compute stats for source and reference using shared utility
@@ -38,7 +38,7 @@ void ImageFusion::histogramMatch( float *data, int n,
     // Linear transform: matched = (data - meanS) * (stdR / stdS) + meanR
     // Guard against near-zero stddev (near-constant data with float jitter)
     double scale = ( stdS > 1e-10 ) ? ( stdR / stdS ) : 1.0;
-    for ( int i = 0; i < n; ++i )
+    for ( size_t i = 0; i < n; ++i )
     {
         if ( data[i] == nodata || std::isnan( data[i] ) )
             continue;
@@ -164,11 +164,11 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
     SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "PCA fusion: %1 bands, %2x%3" )
         .arg( nBands ).arg( width ).arg( height ) );
 
-    const size_t n = static_cast<size_t>(width) * height;
+    const size_t n = static_cast<size_t>(width) * static_cast<size_t>(height);
 
     // Step 1: Compute mean and covariance matrix
     QVector<double> means( nBands, 0.0 );
-    QVector<int> counts( nBands, 0 );
+    QVector<uint64_t> counts( nBands, 0 );
     for ( int b = 0; b < nBands; ++b )
     {
         if ( !msBands[b] )
@@ -182,13 +182,13 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
             }
         }
         if ( counts[b] > 0 )
-            means[b] /= counts[b];
+            means[b] /= static_cast<double>( counts[b] );
     }
 
     // Covariance matrix (symmetric)
     QVector<double> cov( nBands * nBands, 0.0 );
-    int actualValidPixels = 0;
-    for ( int i = 0; i < n; ++i )
+    uint64_t actualValidPixels = 0;
+    for ( size_t i = 0; i < n; ++i )
     {
         bool valid = true;
         for ( int b = 0; b < nBands; ++b )
@@ -217,7 +217,7 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
     if ( actualValidPixels <= 1 )
         return result;
     for ( int i = 0; i < nBands * nBands; ++i )
-        cov[i] /= ( actualValidPixels - 1 );
+        cov[i] /= static_cast<double>( actualValidPixels - 1 );
     // Fill symmetric
     for ( int b1 = 0; b1 < nBands; ++b1 )
         for ( int b2 = 0; b2 < b1; ++b2 )
@@ -313,7 +313,7 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
     for ( int b = 0; b < nBands; ++b )
         pc[b].resize( n );
 
-    for ( int i = 0; i < n; ++i )
+    for ( size_t i = 0; i < n; ++i )
     {
         // Skip nodata pixels
         bool valid = true;
@@ -345,7 +345,7 @@ QVector<QVector<float>> ImageFusion::pcaFusion(
         result[b].resize( n );
 
     // Use panMatched for PC1, original PCs for the rest
-    for ( int i = 0; i < n; ++i )
+    for ( size_t i = 0; i < n; ++i )
     {
         // Skip nodata pixels
         if ( panMatched[i] == nodata || std::isnan( panMatched[i] ) ) {
@@ -389,7 +389,7 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
 
     SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "IHS fusion: %1x%2" ).arg( width ).arg( height ) );
 
-    const size_t n = static_cast<size_t>(width) * height;
+    const size_t n = static_cast<size_t>(width) * static_cast<size_t>(height);
 
     // Step 1: Histogram-match pan to intensity (mean of R, G, B)
     QVector<float> intensity( n );
@@ -407,7 +407,7 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
 
     // Step 2: RGB → IHS
     QVector<float> H( n ), S( n );
-    for ( int i = 0; i < n; ++i )
+    for ( size_t i = 0; i < n; ++i )
     {
         if ( msR[i] == nodata || msG[i] == nodata || msB[i] == nodata )
         {
@@ -428,7 +428,7 @@ QVector<QVector<float>> ImageFusion::ihsFusion(
     for ( int b = 0; b < 3; ++b )
         result[b].resize( n );
 
-    for ( int i = 0; i < n; ++i )
+    for ( size_t i = 0; i < n; ++i )
     {
         if ( H[i] == nodata || S[i] == nodata ||
              panMatched[i] == nodata || std::isnan( panMatched[i] ) )
@@ -469,7 +469,7 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
     SICNU_LOG_INFO( SicnuLogTags::Algorithms, QString( "Gram-Schmidt fusion: %1 bands, %2x%3" )
         .arg( nBands ).arg( width ).arg( height ) );
 
-    const size_t n = static_cast<size_t>(width) * height;
+    const size_t n = static_cast<size_t>(width) * static_cast<size_t>(height);
 
     // Validate band pointers.
     for ( int b = 0; b < nBands; ++b )
@@ -480,7 +480,7 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
     // Step 1: simulated low-res pan = mean of MS bands (valid pixels only).
     // -----------------------------------------------------------------------
     QVector<float> synPan( n, 0.0f );
-    for ( int i = 0; i < n; ++i )
+    for ( size_t i = 0; i < n; ++i )
     {
         bool valid = true;
         double sum = 0.0;
@@ -524,7 +524,7 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
         const int bandIdx = k - 1;
         // working <- ms[bandIdx]; build the validity mask in the same pass.
         QVector<float> work( n );
-        for ( int i = 0; i < n; ++i )
+        for ( size_t i = 0; i < n; ++i )
         {
             const bool valid = ( gs[0][i] != nodata && !std::isnan( gs[0][i] ) &&
                                  msBands[bandIdx][i] != nodata && !std::isnan( msBands[bandIdx][i] ) );
@@ -544,7 +544,7 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
             double normSq = 0.0;
             double sumWork = 0.0, sumG = 0.0;
             int64_t cnt = 0;
-            for ( int i = 0; i < n; ++i )
+            for ( size_t i = 0; i < n; ++i )
             {
                 if ( !validMask[i] )
                     continue;
@@ -561,7 +561,7 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
                 const double workMean = sumWork * invN;
                 const double gMean = sumG * invN;
                 double cDot = 0.0, cNorm = 0.0;
-                for ( int i = 0; i < n; ++i )
+                for ( size_t i = 0; i < n; ++i )
                 {
                     if ( !validMask[i] )
                         continue;
@@ -573,7 +573,7 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
                 c = ( cNorm > 1e-20 ) ? ( cDot / cNorm ) : 0.0;
             }
             coef[k][j] = c;
-            for ( int i = 0; i < n; ++i )
+            for ( size_t i = 0; i < n; ++i )
             {
                 if ( !validMask[i] )
                     continue;
@@ -582,7 +582,7 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
         }
 
         // gs[k] <- work (with nodata preserved)
-        for ( int i = 0; i < n; ++i )
+        for ( size_t i = 0; i < n; ++i )
             gs[k][i] = validMask[i] ? work[i] : nodata;
     }
 
@@ -601,7 +601,7 @@ QVector<QVector<float>> ImageFusion::gramSchmidtFusion(
     for ( int b = 0; b < nBands; ++b )
         result[b].resize( n );
 
-    for ( int i = 0; i < n; ++i )
+    for ( size_t i = 0; i < n; ++i )
     {
         // A pixel is only reconstructable if synPan and all MS bands were valid
         // (gs components carry nodata otherwise) and pan is valid.

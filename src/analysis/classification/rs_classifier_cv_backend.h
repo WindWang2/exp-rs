@@ -39,7 +39,7 @@ class RsClassifierCvBackend : public RsClassifierBackend
 template <typename T>
 bool RsClassifierCvBackend<T>::fit( const cv::Mat &X, const cv::Mat &y )
 {
-  if ( X.empty() || y.empty() || X.rows != y.rows )
+  if ( X.empty() || y.empty() || X.rows != y.rows || !m_clf )
     return false;
   try
   {
@@ -61,7 +61,7 @@ template <typename T>
 cv::Mat RsClassifierCvBackend<T>::predict( const cv::Mat &X ) const
 {
   cv::Mat out;
-  if ( X.empty() || !m_clf->isTrained() )
+  if ( X.empty() || !m_clf || !m_clf->isTrained() )
     return out;
   try
   {
@@ -84,6 +84,8 @@ cv::Mat RsClassifierCvBackend<T>::predict( const cv::Mat &X ) const
 template <typename T>
 bool RsClassifierCvBackend<T>::save( const QString &path ) const
 {
+  if ( !m_clf || !m_clf->isTrained() )
+    return false;
   try
   {
     // cv::Algorithm::save() is non-const but logically const for our

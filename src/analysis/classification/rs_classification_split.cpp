@@ -64,12 +64,35 @@ RsTrainTestSplit RsClassificationSplit::stratifiedSplit( const cv::Mat &X,
 
       if ( totalGroups < 2 )
       {
-        // Only 1 group: put all samples of this class into train.
+        // A single group cannot be split at group level without leaving the
+        // held-out set empty, which would silently drop every accuracy
+        // metric. Fall back to a pixel-level split for this class: with one
+        // ROI there is no cross-ROI leakage to guard against (#325's goal).
+        std::vector<int> bucket;
+        size_t nSamples = 0;
         for ( const auto &grpPair : cg.second )
-        {
+          nSamples += grpPair.second.size();
+        bucket.reserve( nSamples );
+        for ( const auto &grpPair : cg.second )
           for ( int r : grpPair.second )
-            trainIdx.push_back( r );
+            bucket.push_back( r );
+        std::shuffle( bucket.begin(), bucket.end(), rng );
+        const int total = static_cast<int>( bucket.size() );
+        if ( total < kMinForSplit )
+        {
+          for ( int i : bucket )
+            trainIdx.push_back( i );
+          continue;
         }
+        int nTrain = static_cast<int>( std::round( total * ratio ) );
+        if ( nTrain < 1 )
+          nTrain = 1;
+        if ( nTrain >= total )
+          nTrain = total - 1;
+        for ( int i = 0; i < nTrain; ++i )
+          trainIdx.push_back( bucket[i] );
+        for ( int i = nTrain; i < total; ++i )
+          testIdx.push_back( bucket[i] );
         continue;
       }
 

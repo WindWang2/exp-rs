@@ -29,6 +29,11 @@ void marginals(const std::vector<uint64_t> &matrix, int classCount,
                std::vector<uint64_t> &fromTotals,
                std::vector<uint64_t> &toTotals)
 {
+    if (classCount <= 0) {
+        fromTotals.clear();
+        toTotals.clear();
+        return;
+    }
     fromTotals.assign(static_cast<size_t>(classCount), 0);
     toTotals.assign(static_cast<size_t>(classCount), 0);
     if (matrix.size() != static_cast<size_t>(classCount) * classCount)

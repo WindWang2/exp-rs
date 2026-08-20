@@ -108,37 +108,47 @@ struct UnaryNegNode : Node
 /// Evaluate a named function with the given evaluated argument values.
 static float callFunction(const std::string &name, const float *args, size_t argCount)
 {
+    std::string cleanName = name;
+    if (cleanName.rfind("std::", 0) == 0) {
+        cleanName = cleanName.substr(5);
+    }
+
     // Zero-argument functions.
     if (argCount == 0) {
-        if (name == "pi") return static_cast<float>(M_PI);
+        if (cleanName == "pi") return static_cast<float>(M_PI);
         return NaN;
     }
 
     // Single-argument functions.
     if (argCount == 1) {
         const float a = args[0];
-        if (name == "sin")   return std::sin(a);
-        if (name == "cos")   return std::cos(a);
-        if (name == "tan")   return std::tan(a);
-        if (name == "exp")   return std::exp(a);
-        if (name == "ln")    return std::log(a);
-        if (name == "log")   return std::log(a);
-        if (name == "log10") return std::log10(a);
-        if (name == "sqrt")  return std::sqrt(a);
-        if (name == "abs")   return std::fabs(a);
-        if (name == "asin")  return std::asin(a);
-        if (name == "acos")  return std::acos(a);
-        if (name == "atan")  return std::atan(a);
+        if (cleanName == "sin")   return std::sin(a);
+        if (cleanName == "cos")   return std::cos(a);
+        if (cleanName == "tan")   return std::tan(a);
+        if (cleanName == "exp")   return std::exp(a);
+        if (cleanName == "ln")    return std::log(a);
+        if (cleanName == "log")   return std::log(a);
+        if (cleanName == "log10") return std::log10(a);
+        if (cleanName == "sqrt")  return std::sqrt(a);
+        if (cleanName == "abs")   return std::fabs(a);
+        if (cleanName == "asin")  return std::asin(a);
+        if (cleanName == "acos")  return std::acos(a);
+        if (cleanName == "atan")  return std::atan(a);
         return NaN;
     }
 
     // Two-argument functions.
     if (argCount == 2) {
         const float a = args[0], b = args[1];
-        if (name == "pow")   return std::pow(a, b);
-        if (name == "min")   return std::min(a, b);
-        if (name == "max")   return std::max(a, b);
-        if (name == "atan2") return std::atan2(a, b);
+        // NoData (NaN/Inf) must propagate regardless of argument position:
+        // std::min/std::max are comparison-based and asymmetric under NaN, so
+        // min(b1, b2) could differ from min(b2, b1) at NoData pixels.
+        if (!std::isfinite(a) || !std::isfinite(b))
+            return NaN;
+        if (cleanName == "pow")   return std::pow(a, b);
+        if (cleanName == "min")   return std::min(a, b);
+        if (cleanName == "max")   return std::max(a, b);
+        if (cleanName == "atan2") return std::atan2(a, b);
         return NaN;
     }
 
@@ -154,10 +164,16 @@ static int expectedArgCount(const std::string &name)
         {"exp", 1}, {"ln", 1}, {"log", 1}, {"log10", 1},
         {"sqrt", 1}, {"abs", 1},
         {"asin", 1}, {"acos", 1}, {"atan", 1},
-        {"pow", 2}, {"min", 2}, {"max", 2}, {"atan2", 2},
+        {"pow", 2}, {"min", 2}, {"max", 2},
+        {"std::min", 2}, {"std::max", 2}, {"atan2", 2},
     };
     auto it = table.find(name);
-    return it != table.end() ? it->second : -1;
+    if (it != table.end()) return it->second;
+    if (name.rfind("std::", 0) == 0) {
+        auto it2 = table.find(name.substr(5));
+        if (it2 != table.end()) return it2->second;
+    }
+    return -1;
 }
 
 struct FunctionCallNode : Node
@@ -511,7 +527,7 @@ private:
     std::unique_ptr<Node> parseFunctionCall()
     {
         size_t start = m_pos;
-        while (m_pos < m_expr.size() && (std::isalnum(m_expr[m_pos]) || m_expr[m_pos] == '_'))
+        while (m_pos < m_expr.size() && (std::isalnum(m_expr[m_pos]) || m_expr[m_pos] == '_' || m_expr[m_pos] == ':'))
             m_pos++;
         std::string name = m_expr.substr(start, m_pos - start);
 
@@ -672,8 +688,13 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
         bool hasNodata = false;
         double nodataVal = srcDataset.bandNoDataValue(b, &hasNodata);
         if (hasNodata && std::isfinite(nodataVal)) {
+            // Compare in float space: the pixels are float, so casting the
+            // declared NoData to float matches exactly regardless of magnitude.
+            // A fixed absolute tolerance (e.g. 1e-6) is far below one ULP for
+            // large sentinels like -3.4e38 and would never match them.
+            const float nodataF = static_cast<float>(nodataVal);
             for (float &val : buffer) {
-                if (std::abs(static_cast<double>(val) - nodataVal) < 1e-6 || std::isnan(val)) {
+                if (val == nodataF || std::isnan(val)) {
                     val = std::numeric_limits<float>::quiet_NaN();
                 }
             }

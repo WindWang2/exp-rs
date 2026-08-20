@@ -21,6 +21,8 @@
 #include <gdal.h>
 #include <gdal_priv.h>
 #include <ogr_api.h>
+#include <ogr_spatialref.h>
+#include <cpl_conv.h>
 
 using Catch::Approx;
 
@@ -767,12 +769,37 @@ TEST_CASE( "Majority vote kernel empty and single-key inputs", "[hierarchy][roi]
 // ADR 0060 — RsRoiLabeler (canonical ROI-majority segment labeling)
 // ---------------------------------------------------------------------------
 
+static QString writeTinyRefRasterWithSrs( const QString &dir, int epsg )
+{
+    const QString path = dir + QStringLiteral( "/ref_proj.tif" );
+    GDALAllRegister();
+    GDALDriverH drv = GDALGetDriverByName( "GTiff" );
+    GDALDatasetH ds = GDALCreate( drv, path.toUtf8().constData(), 4, 4, 1, GDT_Byte, nullptr );
+    REQUIRE( ds );
+    // In UTM 33N (EPSG:32633), (500000, 0) is lon 15.0, lat 0.0
+    double gt[6] = { 500000.0, 10.0, 0.0, 100.0, 0.0, -10.0 };
+    GDALSetGeoTransform( ds, gt );
+    OGRSpatialReferenceH srs = OSRNewSpatialReference( nullptr );
+    OSRImportFromEPSG( srs, epsg );
+    OSRSetAxisMappingStrategy( srs, OAMS_TRADITIONAL_GIS_ORDER );
+    char *wkt = nullptr;
+    OSRExportToWkt( srs, &wkt );
+    GDALSetProjection( ds, wkt );
+    CPLFree( wkt );
+    OSRDestroySpatialReference( srs );
+    QVector<quint8> buf( 16, 42 );
+    GDALRasterIO( GDALGetRasterBand( ds, 1 ), GF_Write, 0, 0, 4, 4,
+                  buf.data(), 4, 4, GDT_Byte, 0, 0 );
+    GDALClose( ds );
+    return path;
+}
+
 /// Single-layer GPKG with one integer field and one axis-aligned square.
 /// Coordinates are map units of the 4x4 ref raster GT {100,1,0,200,0,-1}:
 /// pixel (col,row) center = (100 + col + 0.5, 200 - row - 0.5).
 static void writeTrainingSquare( const QString &path, const QString &fieldName,
                                  int classId, double x0, double y0, double x1, double y1,
-                                 bool append = false )
+                                 bool append = false, int epsg = 0 )
 {
     GDALAllRegister();
     OGRRegisterAll();
@@ -783,9 +810,18 @@ static void writeTrainingSquare( const QString &path, const QString &fieldName,
                       nullptr, nullptr, nullptr )
         : GDALCreate( drv, path.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
     REQUIRE( ds != nullptr );
+    OGRSpatialReferenceH srs = nullptr;
+    if ( !append && epsg > 0 )
+    {
+        srs = OSRNewSpatialReference( nullptr );
+        OSRImportFromEPSG( srs, epsg );
+        OSRSetAxisMappingStrategy( srs, OAMS_TRADITIONAL_GIS_ORDER );
+    }
     OGRLayerH lyr = append
         ? GDALDatasetGetLayer( ds, 0 )
-        : GDALDatasetCreateLayer( ds, "training", nullptr, wkbPolygon, nullptr );
+        : GDALDatasetCreateLayer( ds, "training", srs, wkbPolygon, nullptr );
+    if ( srs )
+        OSRDestroySpatialReference( srs );
     REQUIRE( lyr != nullptr );
     int fieldIdx = 0;
     if ( !append )
@@ -913,6 +949,34 @@ TEST_CASE( "RsRoiLabeler fails closed on bad inputs and honors cancel", "[hierar
         [&cancel]() { return cancel; } );
     REQUIRE( canceled.isEmpty() );
     REQUIRE( err.contains( QStringLiteral( "cancel" ), Qt::CaseInsensitive ) );
+}
+
+TEST_CASE( "RsRoiLabeler transforms geometries across differing CRS (#433)", "[hierarchy][roi][labeler]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    // Reference raster in UTM Zone 33N (EPSG:32633), origin at (500000, 100), 10m pixels
+    // Covers X: [500000..500040], Y: [60..100]
+    // Fine seg 1 is top-left 2x2: X in [500000..500020], Y in [80..100], center (500010, 90)
+    const QString ref = writeTinyRefRasterWithSrs( tmp.path(), 32633 );
+    const QString vec = tmp.path() + QStringLiteral( "/train_wgs84.gpkg" );
+
+    // Training polygon in WGS 84 (EPSG:4326), coordinates in lon/lat
+    // (lon 15.00001, lat 0.00075) -> UTM ~ (500001.1, 82.9)
+    // (lon 15.00015, lat 0.00088) -> UTM ~ (500016.7, 97.3)
+    // which falls inside seg 1
+    writeTrainingSquare( vec, QStringLiteral( "class_id" ), 42,
+                        15.00001, 0.00075, 15.00015, 0.00088, false, 4326 );
+
+    auto fine = makeFineMap();
+    QString err;
+    QMap<quint32, int> labels = RsRoiLabeler::labelByMajority(
+        fine, ref, vec, QStringLiteral( "class_id" ), 1, &err );
+    REQUIRE( err.isEmpty() );
+    REQUIRE( labels.value( 1 ) == 42 );
+    REQUIRE( !labels.contains( 2 ) );
+    REQUIRE( !labels.contains( 3 ) );
+    REQUIRE( !labels.contains( 4 ) );
 }
 
 #ifdef SICNU_HAS_OPENCV

@@ -15,7 +15,7 @@ void landsatQaMask(const uint16_t *qa, uint8_t *mask, size_t count, uint32_t fla
 
 void sclMask(const uint8_t *scl, uint8_t *mask, size_t count, const bool classes[16])
 {
-    if (!scl || !mask)
+    if (!scl || !mask || !classes)
         return;
     for (size_t i = 0; i < count; ++i) {
         const uint8_t cls = scl[i];

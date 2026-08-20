@@ -167,15 +167,49 @@ void RoiStatisticsWidget::computeStatistics()
         return;
     }
 
+    // Rasterize / test point-in-polygon mask if ROI geometry is present
+    const bool hasRoi = !roiGeom.isNull();
+    std::vector<uint8_t> inside(static_cast<size_t>(xSize) * ySize, 1);
+    if (hasRoi) {
+        for (int y = 0; y < ySize; ++y) {
+            const int py = yOff + y;
+            const double rCenter = py + 0.5;
+            for (int x = 0; x < xSize; ++x) {
+                const int px = xOff + x;
+                const double cCenter = px + 0.5;
+                const double mapX = gt[0] + cCenter * gt[1] + rCenter * gt[2];
+                const double mapY = gt[3] + cCenter * gt[4] + rCenter * gt[5];
+                inside[static_cast<size_t>(y) * xSize + x] = roiGeom.contains(mapX, mapY) ? 1 : 0;
+            }
+        }
+    }
+
     for (int b = 0; b < bandCount; ++b) {
         GDALRasterBandH band = GDALGetRasterBand(ds, b + 1);
         if (!band) continue;
 
-        std::vector<float> buf(xSize * ySize);
+        std::vector<float> buf(static_cast<size_t>(xSize) * ySize);
         GDALRasterIO(band, GF_Read, xOff, yOff, xSize, ySize, buf.data(), xSize, ySize, GDT_Float32, 0, 0);
 
+        int hasNoData = 0;
+        double noDataVal = GDALGetRasterNoDataValue(band, &hasNoData);
+
+        std::vector<float> roiPixels;
+        roiPixels.reserve(buf.size());
+        for (size_t i = 0; i < buf.size(); ++i) {
+            if (inside[i]) {
+                roiPixels.push_back(buf[i]);
+            }
+        }
+
         // Compute statistics using shared utility
-        MathUtils::Stats s = MathUtils::computeStats(buf.data(), buf.size());
+        MathUtils::Stats s;
+        if (hasNoData && std::isfinite(noDataVal)) {
+            s = MathUtils::computeStatsWithNodata(roiPixels.data(), roiPixels.size(), static_cast<float>(noDataVal));
+        } else {
+            s = MathUtils::computeStats(roiPixels.data(), roiPixels.size());
+        }
+
         m_stats[b].pixelCount = static_cast<int>(s.validCount);
         m_stats[b].mean = s.mean;
         m_stats[b].stddev = s.stddev;
@@ -184,12 +218,13 @@ void RoiStatisticsWidget::computeStatistics()
     }
     GDALClose(ds);
 
+    const int displayPixels = m_stats.isEmpty() ? 0 : m_stats[0].pixelCount;
     m_summaryLabel->setText(tr("Statistics computed for %1 bands, %2 pixels")
-                                .arg(bandCount).arg(m_stats[0].pixelCount));
+                                .arg(bandCount).arg(displayPixels));
     updateTable();
 
     SICNU_LOG_INFO(SicnuLogTags::Widgets,
-                   QString("ROI statistics computed: %1 bands, %2 pixels").arg(bandCount).arg(m_stats[0].pixelCount));
+                   QString("ROI statistics computed: %1 bands, %2 pixels").arg(bandCount).arg(displayPixels));
 }
 
 void RoiStatisticsWidget::updateTable()

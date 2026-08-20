@@ -259,3 +259,78 @@ TEST_CASE( "RX detector numerical edge cases: NaN propagation and dynamic range"
             CHECK( invCov[i * bands + i] > 0.0 );
     }
 }
+
+TEST_CASE( "RX detector per-band NoData tracking does not fabricate -9999 sentinel (#438)", "[rx][nodata][438]" )
+{
+    // Test accumulateMean / accumulateCovariance with per-band NoData flags
+    const int bands = 2;
+    float pixels[4] = {
+        -9999.0f, 10.0f,  // pixel 0: band 0 has -9999.0f, band 1 has 10.0f
+        5.0f,     20.0f   // pixel 1: band 0 has 5.0f, band 1 has 20.0f
+    };
+    float noDataBands[2] = { -9999.0f, -9999.0f };
+
+    // Case A: hasNoDataBands is all 0 (no NoData metadata declared)
+    {
+        uint8_t hasNoDataBands[2] = { 0, 0 };
+        SpectralAnomaly::BackgroundStats stats;
+        SpectralAnomaly::accumulateMean( pixels, 2, bands, &stats, true, noDataBands, hasNoDataBands );
+        // Both pixels should be accumulated because no band has declared NoData
+        CHECK( stats.count == 2 );
+        SpectralAnomaly::finalizeMean( &stats );
+        CHECK( stats.mean[0] == Approx( ( -9999.0 + 5.0 ) / 2.0 ) );
+        CHECK( stats.mean[1] == Approx( ( 10.0 + 20.0 ) / 2.0 ) );
+    }
+
+    // Case B: hasNoDataBands has band 0 declared with NoData = -9999
+    {
+        uint8_t hasNoDataBands[2] = { 1, 0 };
+        SpectralAnomaly::BackgroundStats stats;
+        SpectralAnomaly::accumulateMean( pixels, 2, bands, &stats, true, noDataBands, hasNoDataBands );
+        // Only pixel 1 should be accumulated; pixel 0 is skipped because band 0 declared -9999
+        CHECK( stats.count == 1 );
+        SpectralAnomaly::finalizeMean( &stats );
+        CHECK( stats.mean[0] == Approx( 5.0 ) );
+        CHECK( stats.mean[1] == Approx( 20.0 ) );
+    }
+}
+
+TEST_CASE( "rs:rx_anomaly operator preserves valid -9999 pixel when no NoData metadata declared (#438)", "[operators][rs][rx][nodata][438]" )
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString inputPath = tmp.path() + "/no_nodata.tif";
+    const QString outputPath = tmp.path() + "/rx_out.tif";
+
+    constexpr int W = 4;
+    constexpr int H = 4;
+    constexpr int B = 2;
+    std::vector<std::vector<float>> bands( B, std::vector<float>( W * H, 10.0f ) );
+    // Set one pixel to -9999.0f as a valid numeric value in a dataset with no NoData declared
+    bands[0][0] = -9999.0f;
+    bands[1][0] = -9999.0f;
+
+    std::array<double, 6> gt = { 0, 1, 0, 0, 0, -1 };
+    QString err;
+    REQUIRE( writeGdalOutput( inputPath, W, H, bands, gt, QString(), &err ) );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:rx_anomaly" );
+    REQUIRE( op != nullptr );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+
+    RSOperatorContext ctx;
+    Json::Value result = op->run( params, ctx );
+    REQUIRE( result["output"].asString() == outputPath.toStdString() );
+
+    GdalDatasetWrapper ds;
+    REQUIRE( ds.open( outputPath ) );
+    std::vector<float> scores( W * H );
+    REQUIRE( ds.readBandData( 1, scores.data(), W, H ) );
+
+    // Pixel 0 (-9999.0f) should NOT be NaN because it was not declared as NoData
+    CHECK( std::isfinite( scores[0] ) );
+}

@@ -19,7 +19,7 @@
  *   - Parentheses: (expr)
  *   - Functions:
  *       Single-arg: sin, cos, tan, exp, ln(log), log10, sqrt, abs, asin, acos, atan
- *       Two-arg:    pow(base, exp), min(a, b), max(a, b), atan2(y, x)
+ *       Two-arg:    pow(base, exp), min(a, b), max(a, b), std::min(a, b), std::max(a, b), atan2(y, x)
  *       Zero-arg:   pi()
  *
  * Operator precedence (low → high):

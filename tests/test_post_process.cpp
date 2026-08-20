@@ -43,6 +43,19 @@ TEST_CASE( "PostProcess: sieve removes small component", "[classify][post]" )
   REQUIRE( dst.at<int>( 0, 0 ) != 2 ); // replaced
 }
 
+TEST_CASE( "PostProcess: sieve preserves isolated component when no border neighbors (#430)", "[classify][post]" )
+{
+  // Small 2x2 image where all pixels belong to class 5, area 4 < threshold 10.
+  // With no border neighbors of other classes (freq is empty), sieve preserves original class 5.
+  cv::Mat src( 2, 2, CV_32S, cv::Scalar( 5 ) );
+  cv::Mat dst;
+  REQUIRE( RsPostProcess::sieve( src, dst, 10, 8, nullptr ) );
+  REQUIRE( dst.at<int>( 0, 0 ) == 5 );
+  REQUIRE( dst.at<int>( 0, 1 ) == 5 );
+  REQUIRE( dst.at<int>( 1, 0 ) == 5 );
+  REQUIRE( dst.at<int>( 1, 1 ) == 5 );
+}
+
 namespace
 {
 

@@ -77,7 +77,7 @@ int pixelAt( const cv::Mat &m, int r, int c )
 
 // Majority among values that border the component (outside pixels).
 int borderNeighborMajority( const cv::Mat &labels, const cv::Mat &cc, int compId,
-                            const cv::Mat &stats, int connectedness )
+                            const cv::Mat &stats, int connectedness, int fallbackVal = 0 )
 {
   static constexpr int dr8[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
   static constexpr int dc8[8] = { -1, 0, 1, -1, 1, -1, 0, 1 };
@@ -120,7 +120,7 @@ int borderNeighborMajority( const cv::Mat &labels, const cv::Mat &cc, int compId
   }
 
   if ( freq.empty() )
-    return 0;
+    return fallbackVal;
 
   int bestVal = 0;
   int bestCnt = -1;
@@ -260,7 +260,7 @@ bool RsPostProcess::sieve( const cv::Mat &src, cv::Mat &dst, int threshold,
       const int area = stats.at<int>( comp, cv::CC_STAT_AREA );
       if ( area >= threshold )
         continue;
-      const int replacement = borderNeighborMajority( orig, cc, comp, stats, connectedness );
+      const int replacement = borderNeighborMajority( orig, cc, comp, stats, connectedness, classId );
       const int top = stats.at<int>( comp, cv::CC_STAT_TOP );
       const int left = stats.at<int>( comp, cv::CC_STAT_LEFT );
       const int height = stats.at<int>( comp, cv::CC_STAT_HEIGHT );

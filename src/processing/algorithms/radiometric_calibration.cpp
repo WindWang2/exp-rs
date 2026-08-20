@@ -72,8 +72,32 @@ bool loadLandsatMtl(const QString &mtlPath, const QMap<int, QString> &bandNames,
 
     // Map raster band index (1-based) -> Landsat band number.
     // Prefer the band-name mapping; fall back to identity (band i == MTL band i).
+    // When bandNames is empty, auto-discover the band set from the MTL keys
+    // themselves so callers relying on the documented "keyed by band number"
+    // contract still get coefficients (see loadMetadata() doc).
+    QMap<int, QString> effective = bandNames;
+    if (effective.isEmpty()) {
+        const QStringList coeffPrefixes = {
+            QStringLiteral("RADIANCE_MULT_BAND_"), QStringLiteral("RADIANCE_ADD_BAND_"),
+            QStringLiteral("REFLECTANCE_MULT_BAND_"), QStringLiteral("REFLECTANCE_ADD_BAND_"),
+            QStringLiteral("K1_CONSTANT_BAND_"), QStringLiteral("K2_CONSTANT_BAND_")
+        };
+        for (auto kit = kv.constBegin(); kit != kv.constEnd(); ++kit) {
+            for (const QString &prefix : coeffPrefixes) {
+                if (!kit.key().startsWith(prefix))
+                    continue;
+                // Keep the raw token (e.g. "4" or "ST_B10") so Collection-2
+                // prefixed keys match via the first candidate, with the plain
+                // numeric key still covered by the numeric fallback.
+                const QString token = kit.key().mid(prefix.size());
+                const int n = bandNumberFromName(token);
+                if (n > 0 && !effective.contains(n))
+                    effective.insert(n, token);
+            }
+        }
+    }
     QMap<int, int> rasterToLandsatBand;
-    for (auto it = bandNames.constBegin(); it != bandNames.constEnd(); ++it) {
+    for (auto it = effective.constBegin(); it != effective.constEnd(); ++it) {
         const int n = bandNumberFromName(it.value());
         if (n > 0)
             rasterToLandsatBand.insert(it.key(), n);
@@ -85,7 +109,7 @@ bool loadLandsatMtl(const QString &mtlPath, const QMap<int, QString> &bandNames,
     };
     // Keep original band token (e.g. ST_B10, SR_B4) for C2 key lookup alongside numeric fallback.
     QMap<int, QString> rasterToRawToken;
-    for (auto it = bandNames.constBegin(); it != bandNames.constEnd(); ++it)
+    for (auto it = effective.constBegin(); it != effective.constEnd(); ++it)
         rasterToRawToken.insert(it.key(), it.value().toUpper());
 
     // Helper: try a list of candidate suffixes for a given MTL prefix and return the first match.
@@ -104,7 +128,7 @@ bool loadLandsatMtl(const QString &mtlPath, const QMap<int, QString> &bandNames,
     };
 
     bool any = false;
-    for (auto it = bandNames.constBegin(); it != bandNames.constEnd(); ++it) {
+    for (auto it = effective.constBegin(); it != effective.constEnd(); ++it) {
         const int rasterBand = it.key();
         const int lb = landsatBandFor(rasterBand);
         const QString raw = rasterToRawToken.value(rasterBand);
@@ -334,8 +358,26 @@ bool loadSentinel2Mtd(const QString &mtdPath, const QMap<int, QString> &bandName
         return s2Order.indexOf(name);
     };
 
+    // When bandNames is empty, auto-discover the band set from the metadata
+    // itself: bands with an add-offset entry, or — when only a global
+    // quantification value exists — the full spectral band sequence. Keys are
+    // the 1-based band number (band_id + 1), per the loadMetadata() contract.
+    QMap<int, QString> effective = bandNames;
+    if (effective.isEmpty()) {
+        for (auto it = offsets.constBegin(); it != offsets.constEnd(); ++it) {
+            bool idOk = false;
+            const int id = it.key().toInt(&idOk);
+            if (idOk && id >= 0 && id < s2Order.size())
+                effective.insert(id + 1, s2Order.at(id));
+        }
+        if (effective.isEmpty() && qOk && quant > 0.0) {
+            for (int i = 0; i < s2Order.size(); ++i)
+                effective.insert(i + 1, s2Order.at(i));
+        }
+    }
+
     bool any = false;
-    for (auto it = bandNames.constBegin(); it != bandNames.constEnd(); ++it) {
+    for (auto it = effective.constBegin(); it != effective.constEnd(); ++it) {
         BandCoefficients c;
         const int id = bandIdFor(it.value().toUpper());
         if (id >= 0 && offsets.contains(QString::number(id)))
@@ -471,7 +513,13 @@ bool loadMetadata(const QString &rasterPath, const QString &metadataPath,
 bool toRadiance(const float *dn, float *radiance, size_t count, const BandCoefficients &c)
 {
     if (!dn || !radiance || count == 0) return false;
-    if (!c.hasRadiance)
+    if (!std::isfinite(c.radianceGain) || !std::isfinite(c.radianceBias))
+        return false;
+    // Fail closed on the identity defaults (gain=1, bias=0) unless real
+    // coefficients were loaded (#301): stamping DN through an identity
+    // transform is not a radiance conversion. Explicitly configured
+    // non-identity coefficients remain accepted.
+    if (!c.hasRadiance && c.radianceGain == 1.0 && c.radianceBias == 0.0)
         return false;
     return MathUtils::linearScale(dn, radiance, count,
                                   static_cast<float>(c.radianceGain),
@@ -487,10 +535,14 @@ bool toToaReflectance(const float *dn, float *reflectance, size_t count,
     if (sensor == SensorType::Landsat) {
         // Landsat: rho = (reflMult*DN + reflAdd) / sin(sunEl)
         // Requires REFLECTANCE_MULT/ADD from MTL and a valid sun elevation.
+        if (!std::isfinite(c.reflMult) || !std::isfinite(c.reflAdd))
+            return false;
         if (c.reflMult == 1.0 && c.reflAdd == 0.0)
             return false;  // no reflectance coefficients loaded
+        if (!std::isfinite(sunElevationDeg))
+            return false;
         const double sinEl = std::sin(sunElevationDeg * M_PI / 180.0);
-        if (sinEl <= 0.0) return false;
+        if (sinEl <= 0.0 || !std::isfinite(sinEl)) return false;
         const float mult = static_cast<float>(c.reflMult);
         const float add = static_cast<float>(c.reflAdd);
         const float invSin = static_cast<float>(1.0 / sinEl);
@@ -498,13 +550,17 @@ bool toToaReflectance(const float *dn, float *reflectance, size_t count,
             reflectance[i] = (mult * dn[i] + add) * invSin;
     } else if (sensor == SensorType::Sentinel2) {
         // Sentinel-2 MTD: rho = (DN + offset) / scale
-        if (c.scale == 0.0) return false;
+        if (!std::isfinite(c.scale) || !std::isfinite(c.offset))
+            return false;
+        if (std::abs(c.scale) <= 1e-12) return false;
         const float offset = static_cast<float>(c.offset);
         const float invScale = static_cast<float>(1.0 / c.scale);
         for (size_t i = 0; i < count; i++)
             reflectance[i] = (dn[i] + offset) * invScale;
     } else {
         // Generic / GDAL: phys = DN * scale + offset
+        if (!std::isfinite(c.scale) || !std::isfinite(c.offset))
+            return false;
         if (c.scale == 0.0 && c.offset == 0.0) return false;
         const float scale = static_cast<float>(c.scale);
         const float offset = static_cast<float>(c.offset);
@@ -518,6 +574,9 @@ bool toBrightnessTemperature(const float *dn, float *temperature, size_t count,
                              const BandCoefficients &c)
 {
     if (!dn || !temperature || count == 0) return false;
+    if (!std::isfinite(c.k1) || !std::isfinite(c.k2) ||
+        !std::isfinite(c.radianceGain) || !std::isfinite(c.radianceBias))
+        return false;
     if (c.k1 <= 0.0 || c.k2 <= 0.0) return false;
     const float gain = static_cast<float>(c.radianceGain);
     const float bias = static_cast<float>(c.radianceBias);
@@ -525,7 +584,7 @@ bool toBrightnessTemperature(const float *dn, float *temperature, size_t count,
     const float k2 = static_cast<float>(c.k2);
     for (size_t i = 0; i < count; i++) {
         const float l = gain * dn[i] + bias;
-        if (l <= 0.0f) {
+        if (l <= 0.0f || !std::isfinite(l)) {
             temperature[i] = 0.0f;
             continue;
         }
@@ -613,20 +672,38 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
             return false;
         }
         const BandCoefficients &c = meta.bands.value(b);
-        if (unit == OutputUnit::BrightnessTemperature && (c.k1 <= 0.0 || c.k2 <= 0.0)) {
+        if (unit == OutputUnit::BrightnessTemperature &&
+            (!std::isfinite(c.k1) || !std::isfinite(c.k2) || c.k1 <= 0.0 || c.k2 <= 0.0 ||
+             !std::isfinite(c.radianceGain) || !std::isfinite(c.radianceBias))) {
             if (errorMessage)
-                *errorMessage = QStringLiteral("Band %1 lacks thermal K1/K2 constants for brightness temperature conversion").arg(b);
+                *errorMessage = QStringLiteral("Band %1 lacks valid thermal K1/K2/radiance constants for brightness temperature conversion").arg(b);
             return false;
         }
-        if (unit == OutputUnit::Radiance && !c.hasRadiance) {
+        if (unit == OutputUnit::Radiance &&
+            (!c.hasRadiance || !std::isfinite(c.radianceGain) || !std::isfinite(c.radianceBias))) {
             if (errorMessage)
-                *errorMessage = QStringLiteral("Band %1 has no radiance coefficients (RADIANCE_MULT/ADD missing)").arg(b);
+                *errorMessage = QStringLiteral("Band %1 has no valid radiance coefficients (RADIANCE_MULT/ADD missing or non-finite)").arg(b);
             return false;
         }
-        if (unit == OutputUnit::ToaReflectance && meta.sensor == SensorType::Landsat && !c.hasReflectance) {
-            if (errorMessage)
-                *errorMessage = QStringLiteral("Band %1 has no reflectance coefficients (REFLECTANCE_MULT/ADD missing)").arg(b);
-            return false;
+        if (unit == OutputUnit::ToaReflectance) {
+            if (meta.sensor == SensorType::Landsat &&
+                (!c.hasReflectance || !std::isfinite(c.reflMult) || !std::isfinite(c.reflAdd))) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("Band %1 has no valid reflectance coefficients (REFLECTANCE_MULT/ADD missing or non-finite)").arg(b);
+                return false;
+            }
+            if (meta.sensor == SensorType::Sentinel2 &&
+                (!std::isfinite(c.scale) || !std::isfinite(c.offset) || std::abs(c.scale) <= 1e-12)) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("Band %1 has invalid Sentinel-2 scale/offset (scale must be non-zero and finite)").arg(b);
+                return false;
+            }
+            if (meta.sensor == SensorType::Generic &&
+                (!std::isfinite(c.scale) || !std::isfinite(c.offset) || (c.scale == 0.0 && c.offset == 0.0))) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("Band %1 has invalid generic scale/offset").arg(b);
+                return false;
+            }
         }
     }
 
