@@ -596,7 +596,7 @@ bool RsPostProcess::saveLabelRaster( const QString &path, const cv::Mat &labels,
   // The previous output survives any failure before this point (#285).
   if ( drv->Rename( path.toUtf8().constData(), tmpPath.toUtf8().constData() ) == CE_None )
     return true;
-  if ( QFile::remove( path ) && QFile::rename( tmpPath, path ) )
+  if ( ( !QFile::exists( path ) || QFile::remove( path ) ) && QFile::rename( tmpPath, path ) )
     return true;
   setErr( err, QStringLiteral( "Failed to move output into place: %1" ).arg( path ) );
   return false;
@@ -642,7 +642,11 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
 
   // Write to a sibling temp dataset first and rename over the target on
   // success, so a failed polygonize never destroys the previous output (#285).
-  const QString tmpPath = vectorPath + QLatin1String( ".tmp~" );
+  // Preserve extension (e.g. .tmp~.shp / .tmp~.gpkg) so OGR drivers treat
+  // the path as a standard dataset file rather than creating a directory (#404).
+  const QFileInfo fi( vectorPath );
+  const QString tmpPath = fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName()
+                          + QStringLiteral( ".tmp~." ) + fi.suffix();
   GDALDataset *dst = drv->Create( tmpPath.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
   if ( !dst )
   {
@@ -702,13 +706,38 @@ bool RsPostProcess::polygonize( const QString &labelRasterPath, const QString &v
   }
 
   // Rename over the target only after the dataset is fully written (#285).
-  if ( drv->Rename( vectorPath.toUtf8().constData(), tmpPath.toUtf8().constData() ) != CE_None )
+  // When the destination already exists, OGR Rename returns CE_Failure;
+  // fall back to removing the existing dataset first (#404).
+  if ( drv->Rename( vectorPath.toUtf8().constData(), tmpPath.toUtf8().constData() ) == CE_None )
+    return true;
+  // Best-effort cleanup of destination layer files
+  drv->Delete( vectorPath.toUtf8().constData() );
+  // Retry OGR Rename now that destination is cleared (#418)
+  if ( drv->Rename( vectorPath.toUtf8().constData(), tmpPath.toUtf8().constData() ) == CE_None )
+    return true;
+
+  // Move temp dataset files into destination (handling multi-file OGR bundles like .shx, .dbf, .prj) (#418)
+  const QString tmpBase = fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName() + QStringLiteral( ".tmp~" );
+  const QString dstBase = fi.absolutePath() + QLatin1Char( '/' ) + fi.completeBaseName();
+  static const char *const kExts[] = { ".shp", ".shx", ".dbf", ".prj", ".cpg", ".qpj", ".fix", ".qix", ".sbn", ".sbx", "" };
+  bool movedAny = false;
+  for ( const char *ext : kExts )
   {
-    QFile::remove( tmpPath );
-    setErr( err, QStringLiteral( "Failed to move vector output into place: %1" ).arg( vectorPath ) );
-    return false;
+    const QString tFile = ( *ext == '\0' ) ? tmpPath : ( tmpBase + QLatin1String( ext ) );
+    const QString dFile = ( *ext == '\0' ) ? vectorPath : ( dstBase + QLatin1String( ext ) );
+    if ( QFile::exists( tFile ) )
+    {
+      QFile::remove( dFile );
+      if ( QFile::rename( tFile, dFile ) )
+        movedAny = true;
+    }
   }
-  return true;
+  if ( movedAny && QFile::exists( vectorPath ) )
+    return true;
+
+  drv->Delete( tmpPath.toUtf8().constData() );
+  setErr( err, QStringLiteral( "Failed to move vector output into place: %1" ).arg( vectorPath ) );
+  return false;
 }
 
 bool RsPostProcess::saveClassMetaData( const QString &rasterPath, const QHash<int, RsClassDef> &defs, QString *err )
@@ -798,7 +827,7 @@ bool RsPostProcess::loadClassMetaData( const QString &rasterPath, QHash<int, RsC
     const int id = obj[QStringLiteral( "id" )].toInt();
     const QString name = obj[QStringLiteral( "name" )].toString();
     const QColor color( obj[QStringLiteral( "color" )].toString( QStringLiteral( "#808080" ) ) );
-    if ( id > 0 )
+    if ( id >= 0 )
     {
       outDefs.insert( id, RsClassDef( id, name, color ) );
     }

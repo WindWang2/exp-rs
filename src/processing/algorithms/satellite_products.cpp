@@ -384,8 +384,13 @@ bool warpToCrs(const QString& inputPath, const QString& outputPath, const QStrin
             opts,
             [](double complete, const char* msg, void* p) -> int {
                 auto* b = static_cast<ProgressBridge*>(p);
-                if (b && b->fn)
-                    b->fn(complete, msg ? QString::fromUtf8(msg) : QString());
+                if (b && b->fn) {
+                    try {
+                        b->fn(complete, msg ? QString::fromUtf8(msg) : QString());
+                    } catch (...) {
+                        return FALSE; // Cleanly tell GDAL to abort warp without leaking exception
+                    }
+                }
                 return TRUE;
             },
             &bridge);

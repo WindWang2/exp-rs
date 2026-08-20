@@ -31,7 +31,7 @@
 #include <QString>
 #include <QValidator>
 
-#include "moc_qgsmapcoordsdialog.cpp"
+#include "dialogs/dialog_help_catalog.h"
 
 using namespace Qt::StringLiterals;
 
@@ -55,16 +55,25 @@ QgsMapCoordsDialog::QgsMapCoordsDialog( QgsMapCanvas *qgisCanvas, QgsGeorefDataP
   buttonBox->addButton( mPointFromCanvasPushButton, QDialogButtonBox::ActionRole );
   mPointFromCanvasPushButton->setFocus();
 
+  auto *helpBtn = buttonBox->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
+  SicnuDialogHelp::tip( helpBtn, tr( "打开 GCP 目标坐标输入帮助说明。" ) );
+  connect( helpBtn, &QPushButton::clicked, this, [this]() {
+    SicnuDialogHelp::showToolHelp( this, QStringLiteral( "map_coords" ), windowTitle() );
+  } );
+
   // User can input either DD or DMS coords (from QGIS mapcanvas we take DD coords)
   QgsDMSAndDDValidator *validator = new QgsDMSAndDDValidator( this );
   leXCoord->setValidator( validator );
   leYCoord->setValidator( validator );
+  SicnuDialogHelp::tip( leXCoord, tr( "目标 X 坐标（经度或投影东坐标，支持十进制度或度分秒 DMS）" ) );
+  SicnuDialogHelp::tip( leYCoord, tr( "目标 Y 坐标（纬度或投影北坐标，支持十进制度或度分秒 DMS）" ) );
 
   mToolEmitPoint = new QgsGeorefMapToolEmitPoint( qgisCanvas );
   mToolEmitPoint->setButton( mPointFromCanvasPushButton );
 
   const QgsSettings settings;
   mMinimizeWindowCheckBox->setChecked( settings.value( u"/Plugin-GeoReferencer/Config/Minimize"_s, u"1"_s ).toBool() );
+  SicnuDialogHelp::tip( mMinimizeWindowCheckBox, tr( "点击「从地图取点」时自动最小化配准窗口，便于在主画布上选点" ) );
 
   connect( mPointFromCanvasPushButton, &QAbstractButton::clicked, this, &QgsMapCoordsDialog::setToolEmitPoint );
 
@@ -75,6 +84,9 @@ QgsMapCoordsDialog::QgsMapCoordsDialog( QgsMapCanvas *qgisCanvas, QgsGeorefDataP
   connect( leYCoord, &QLineEdit::textChanged, this, &QgsMapCoordsDialog::updateOK );
 
   mProjectionSelector->setCrs( mRasterCrs );
+  SicnuDialogHelp::tip( mProjectionSelector, tr( "指定 GCP 点的目标坐标参考系 (CRS)" ) );
+
+  SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "map_coords" ) );
 
   updateOK();
 }

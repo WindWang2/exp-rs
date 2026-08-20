@@ -382,6 +382,7 @@ RsGeorefFitResult QgsGeorefTransform::fit( const QVector<QgsGcpPoint> &gcps,
                                            const QString &sourceRasterPath,
                                            const QString &demPath,
                                            double demZOffset,
+                                           const QgsCoordinateReferenceSystem &targetCrsOverride,
                                            bool invertYAxis )
 {
   RsGeorefFitResult fit;
@@ -400,12 +401,19 @@ RsGeorefFitResult QgsGeorefTransform::fit( const QVector<QgsGcpPoint> &gcps,
   }
 
   QgsCoordinateReferenceSystem targetCrs;
-  for ( const auto &g : gcps )
+  if ( targetCrsOverride.isValid() )
   {
-    if ( g.isEnabled() && g.destinationPointCrs().isValid() )
+    targetCrs = targetCrsOverride;
+  }
+  else
+  {
+    for ( const auto &g : gcps )
     {
-      targetCrs = g.destinationPointCrs();
-      break;
+      if ( g.isEnabled() && g.destinationPointCrs().isValid() )
+      {
+        targetCrs = g.destinationPointCrs();
+        break;
+      }
     }
   }
 

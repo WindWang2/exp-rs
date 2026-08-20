@@ -74,6 +74,7 @@ void ApplyMaskDialog::setupUi()
   m_noDataSpin->setDecimals( 2 );
   m_noDataSpin->setValue( -9999.0 );
   m_noDataSpin->setEnabled( false );
+  SicnuDialogHelp::tip( m_noDataSpin, tr( "被掩膜遮挡像元的 NoData 替换填充值" ) );
   optForm->addRow( QString(), m_noDataSpin );
 
   m_alignMaskCheck = new QCheckBox( tr( "自动对齐掩膜网格（最近邻，仅限相同 CRS）" ), optSec );

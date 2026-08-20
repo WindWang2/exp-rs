@@ -203,12 +203,22 @@ void RsRoiToolMagicWand::canvasReleaseEvent( QgsMapMouseEvent *e )
       if ( c < cMin ) cMin = c;
       if ( c > cMax ) cMax = c;
     }
-    const double x0 = gt[0] + gt[1] * double( cMin ) + gt[2] * double( rMin );
-    const double y0 = gt[3] + gt[4] * double( cMin ) + gt[5] * double( rMin );
-    const double x1 = gt[0] + gt[1] * double( cMax + 1 ) + gt[2] * double( rMax + 1 );
-    const double y1 = gt[3] + gt[4] * double( cMax + 1 ) + gt[5] * double( rMax + 1 );
-    geom = QgsGeometry::fromRect( QgsRectangle( std::min( x0, x1 ), std::min( y0, y1 ),
-                                                std::max( x0, x1 ), std::max( y0, y1 ) ) );
+    const double cx[4] = {
+      gt[0] + gt[1] * double( cMin ) + gt[2] * double( rMin ),
+      gt[0] + gt[1] * double( cMax + 1 ) + gt[2] * double( rMin ),
+      gt[0] + gt[1] * double( cMin ) + gt[2] * double( rMax + 1 ),
+      gt[0] + gt[1] * double( cMax + 1 ) + gt[2] * double( rMax + 1 )
+    };
+    const double cy[4] = {
+      gt[3] + gt[4] * double( cMin ) + gt[5] * double( rMin ),
+      gt[3] + gt[4] * double( cMax + 1 ) + gt[5] * double( rMin ),
+      gt[3] + gt[4] * double( cMin ) + gt[5] * double( rMax + 1 ),
+      gt[3] + gt[4] * double( cMax + 1 ) + gt[5] * double( rMax + 1 )
+    };
+    geom = QgsGeometry::fromRect( QgsRectangle( *std::min_element( cx, cx + 4 ),
+                                                *std::min_element( cy, cy + 4 ),
+                                                *std::max_element( cx, cx + 4 ),
+                                                *std::max_element( cy, cy + 4 ) ) );
   }
 
   // #288 - surface a silent truncation: a fill that reaches the search-window

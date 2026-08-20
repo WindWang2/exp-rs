@@ -136,6 +136,46 @@ const QHash<QString, Entry> &catalog()
             "示例：(b1-b2)/(b1+b2) 为 NDVI 类运算；b1*0.0001 缩放。\n"
             "支持 + − * / 与括号。\n"
             "【输出】单波段计算结果。" } },
+        { QStringLiteral( "apply_mask" ),
+          { "应用掩膜：用二值/QA 掩膜将遮挡像元设为 NoData",
+            "【输入图层 Input Layer】待处理的多波段产品栅格。\n"
+            "【掩膜图层 Mask Layer】二值或质检掩膜栅格（1/非 0 为遮挡/无效，0 为清晰有效）。\n"
+            "【自动对齐网格】若掩膜与输入栅格分辨率或范围不完全一致，自动采用最邻近重采样对齐。\n"
+            "【输出 NoData】指定遮挡像元的替换值（默认元数据 NoData 或自定义如 -9999）。\n"
+            "【输出 Output】掩膜处理后的多波段 GeoTIFF。" } },
+        { QStringLiteral( "radiometric_calibration" ),
+          { "辐射定标：DN 转换为辐射亮度 / TOA 反射率 / 亮温",
+            "【物理量 Unit】\n"
+            "• Radiance（辐射亮度）：W/(m²·sr·µm)，由增益与偏置计算\n"
+            "• TOA Reflectance（大气表观反射率）：无量纲反射率 [0, 1]，结合太阳高度角与日地距离校正\n"
+            "• Brightness Temperature（亮温）：热红外波段开尔文温度 (K)\n"
+            "【波段】可勾选「处理所有波段」或选择特定波段。\n"
+            "【元数据文件】自动探测或手动指定 Landsat MTL 文本或 Sentinel-2 MTD XML，提取定标增益/偏置与太阳仰角。\n"
+            "【输出】定标后的浮点 GeoTIFF。" } },
+        { QStringLiteral( "qa_mask" ),
+          { "生成 QA 掩膜：提取云、云阴影、雪或水体",
+            "【质量源 Source】\n"
+            "• Auto：根据传感器元数据自动识别 QA 波段\n"
+            "• Landsat QA_PIXEL：解析 Landsat 8/9 质量评估位掩膜\n"
+            "• Sentinel-2 SCL：解析场景分类图（Scene Classification Layer）\n"
+            "• Generic Bitmask：通用整数位掩膜按位与提取\n"
+            "【掩膜类别 Category】云与云阴影、纯云、云阴影、冰雪、水体或全部无效像元。\n"
+            "【位掩膜值】仅通用位掩膜模式：指定参与判定的整数值。\n"
+            "【输出】单波段二值掩膜 GeoTIFF（1=遮挡/无效，0=有效清晰）。" } },
+        { QStringLiteral( "post_classification_change" ),
+          { "分类后变化检测：双时相分类图对比与转移矩阵",
+            "【前/后期图层】同一区域两个时相的单波段分类栅格（像元值为整数类别 ID）。\n"
+            "【类别数 Num Classes】用于生成转移矩阵的类别数量（0 为自动探测最大类别号）。\n"
+            "【转移矩阵 Transition Matrix】行表示前期类别，列表示后期类别，统计地类流向与面积转移。\n"
+            "【输出】变化类型分布图 GeoTIFF（像元值编码为 前期ID×基数 + 后期ID）及详细统计报告。" } },
+        { QStringLiteral( "orthorectification" ),
+          { "正射校正：基于 RPC/GCP 与 DEM 进行几何正射校正",
+            "【几何模型】自动探测输入栅格携带的有理多项式系数 (RPC) 或地面控制点 (GCPs)。\n"
+            "【目标坐标系 Target CRS】正射校正输出的投影坐标系（建议米制投影如 UTM）。\n"
+            "【DEM 地形校正】指定高程栅格以消除地形起伏引起的几何畸变；未提供时可指定参考高程。\n"
+            "【重采样 Resampling】Bilinear（双线性，平滑连续）/ Nearest（保像元值）/ Cubic / Lanczos。\n"
+            "【像元大小 Cell Size】目标分辨率（地图单位），0 为按传感器分辨率自动推算。\n"
+            "【输出】正射校正后的 GeoTIFF。" } },
 
         // ========== Standalone dialogs ==========
         { QStringLiteral( "batch_processing" ),
@@ -332,6 +372,42 @@ const QHash<QString, Entry> &catalog()
         { QStringLiteral( "swipe" ),
           { "卷帘对比工具",
             "在地图上拖动分割线对比上下图层，检查配准或变化。" } },
+        { QStringLiteral( "sentinel2_import" ),
+          { "导入 Sentinel-2 产品：探测与导入 L1C / L2A SAFE 目录",
+            "【产品目录】解压后的 Sentinel-2 .SAFE 文件夹或包含 MTD_MSIL*.xml 的目录。\n"
+            "【探测 Probe】解析元数据 XML，识别 10m/20m/60m 分辨率网格组与 SCL 质检波段。\n"
+            "【波段选择】在候选树中勾选需要导入的多光谱波段或衍生指数。\n"
+            "【导入】自动将选中波段加载到数据管理器并注册为数据集集合。" } },
+        { QStringLiteral( "modis_import" ),
+          { "导入 MODIS 产品：探测与导入 HDF / GeoTIFF 瓦片",
+            "【产品路径】MODIS HDF4 科学数据集文件（如 MOD09GA、MOD13Q1）或解压瓦片目录。\n"
+            "【瓦片坐标 Tile】自动识别或指定 hXXvYY 正弦投影（Sinusoidal）网格编号。\n"
+            "【探测】解析内部子数据集（Subdatasets）波段列表与比例因子 (Scale Factor)。\n"
+            "【导入】将选中的地表反射率/植被指数波段导入工程。" } },
+        { QStringLiteral( "product_import" ),
+          { "卫星产品导入：探测 Landsat / Sentinel-2 / MODIS 数据包",
+            "【产品目录】选择包含传感器标准元数据的产品文件夹。\n"
+            "【探测 Probe】读取元数据，分析网格分辨率、波段名称与波长范围。\n"
+            "【预览树】按分辨率与用途分组展示波段，勾选后导入工程。" } },
+        { QStringLiteral( "spectral_library" ),
+          { "光谱库匹配与管理：SAM / SID 光谱角匹配",
+            "【光谱库文件】选择 USGS / ASTER 格式或本工程导出的 JSON 光谱特征库。\n"
+            "【匹配算法 Algorithm】\n"
+            "• SAM (Spectral Angle Mapper)：计算高维空间光谱角夹角，越小越相似\n"
+            "• SID (Spectral Information Divergence)：光谱信息散度\n"
+            "【匹配 Match】对当前画布采集的像元光谱曲线与库内标准地物进行相似度排序。\n"
+            "【导出/追加 Save】将当前像元光谱曲线以自定义名称和类别保存至光谱库。" } },
+        { QStringLiteral( "mosaic_panel" ),
+          { "影像镶嵌面板：多景栅格无缝拼接与重叠区融合",
+            "【文件列表】添加参与镶嵌的栅格数据，支持上下调整优先级。\n"
+            "【融合策略 Blend Mode】Last（覆盖）、First、Average（平均值）、Max/Min。\n"
+            "【色彩平衡 Color Balance】自动匹配相邻景的直方图，消除接缝反差。\n"
+            "【羽化 Feathering】重叠区边缘平滑过渡。" } },
+        { QStringLiteral( "task_center" ),
+          { "任务中心：异步任务进度监控与结果管理",
+            "【任务列表】展示当前后台运行及排队的算法任务状态、实时进度条与耗时。\n"
+            "【操作】右键可暂停、恢复、取消或重试任务；查看实时日志输出。\n"
+            "【自动加载】勾选后任务执行成功自动将产物加载到地图图层中。" } },
         { QStringLiteral( "layout" ),
           { "打印布局 / 出图",
             "设计图框、图例、比例尺与导出地图产品。" } },

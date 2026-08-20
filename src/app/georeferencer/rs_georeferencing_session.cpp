@@ -171,6 +171,15 @@ void RsGeoreferencingSession::setDemZOffset( double z )
   markDirty();
 }
 
+void RsGeoreferencingSession::setDestinationCrs( const QgsCoordinateReferenceSystem &crs )
+{
+  if ( mDestCrs == crs )
+    return;
+  mDestCrs = crs;
+  markDirty();
+  refit();
+}
+
 void RsGeoreferencingSession::setGcps( const QVector<QgsGcpPoint> &gcps )
 {
   mGcps = gcps;
@@ -274,7 +283,9 @@ RsGeorefFitResult RsGeoreferencingSession::refit()
   // All fit orchestration lives in QgsGeorefTransform::fit (ADR 0057):
   // enabled-GCP collection, min-count gating, the RPC before/after
   // double-fit, per-point source-pixel residuals, and RMS.
-  mLastFit = QgsGeorefTransform::fit( mGcps, mMethod, mSourcePath, mDemPath, mDemZOffset );
+  // Pass the session's destination CRS so residuals are computed in the
+  // same coordinate space as the actual warp transformation (#408).
+  mLastFit = QgsGeorefTransform::fit( mGcps, mMethod, mSourcePath, mDemPath, mDemZOffset, mDestCrs );
   emit fitChanged( mLastFit );
   return mLastFit;
 }

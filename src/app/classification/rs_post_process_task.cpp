@@ -238,7 +238,7 @@ bool RsPostProcessTask::run()
 
   // --- Save raster ---------------------------------------------------------
   mFb.setProgress( 85.0 );
-  const double outNodata = std::isnan( inputNodata ) ? 0.0 : inputNodata;
+  const double outNodata = inputNodata;
   if ( !RsPostProcess::saveLabelRaster( mCfg.outputRasterPath, labels, gt, wkt,
                                         colorTable, mCfg.creationOptions,
                                         outNodata, &err ) )

@@ -29,7 +29,9 @@ RsClassifierLoadDialog::RsClassifierLoadDialog( QWidget *parent )
 
   QFrame *sec = SicnuUi::makeSection( this, tr( "模型" ) );
   mRbBayes = new QRadioButton( tr( "NormalBayes（最大似然）" ), sec );
+  SicnuDialogHelp::tip( mRbBayes, tr( "正态贝叶斯分类器：假定各类样本服从多元正态分布的最大似然模型" ) );
   mRbSvm = new QRadioButton( tr( "SVM（RBF 核）" ), sec );
+  SicnuDialogHelp::tip( mRbSvm, tr( "支持向量机分类器：采用径向基核函数 (RBF) 处理非线性可分地物" ) );
   mRbBayes->setChecked( true );
   auto *grp = new QButtonGroup( this );
   grp->addButton( mRbBayes );
@@ -40,12 +42,16 @@ RsClassifierLoadDialog::RsClassifierLoadDialog( QWidget *parent )
   auto *pathRow = new QHBoxLayout;
   mPathEdit = new QLineEdit( sec );
   mPathEdit->setPlaceholderText( tr( "模型文件路径 (.yml)" ) );
+  SicnuDialogHelp::tip( mPathEdit, tr( "已保存的 OpenCV 训练模型参数文件路径 (*.yml)" ) );
   auto *browse = new QPushButton( tr( "浏览…" ), sec );
   SicnuUi::markSecondary( browse );
+  SicnuDialogHelp::tip( browse, tr( "浏览并选择分类器模型文件" ) );
   pathRow->addWidget( mPathEdit, 1 );
   pathRow->addWidget( browse );
   qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( pathRow );
   layout->addWidget( sec );
+
+  SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "classifier_load" ) );
 
   auto *buttons = new QDialogButtonBox(
     QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this );

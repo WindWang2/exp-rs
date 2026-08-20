@@ -28,6 +28,7 @@
 #include "rs_classify_session_state.h"
 #include "rs_classify_step_host.h"
 #include "rs_classify_stepper_bar.h"
+#include "rs_classify_flowchart_widget.h"
 #include "rs_classify_workflow_bridge.h"
 #include "rs_classify_workflow_controller.h"
 #include "rs_cross_validation.h"
@@ -1383,10 +1384,79 @@ void QgsClassificationMainWindow::setupWorkflowUi()
   m_workflowDock->setObjectName( QStringLiteral( "ClassifyWorkflowDock" ) );
   m_workflowDock->setWidget( m_stepHost );
   addDockWidget( Qt::RightDockWidgetArea, m_workflowDock );
-  // Prefer the step host as the primary right-side panel.
+
+  // Dedicated interactive flowchart panel
+  m_flowchartWidget = new RsClassifyFlowchartWidget( this );
+  m_flowchartWidget->bindController( m_workflow );
+  m_flowchartDock = new QDockWidget( tr( "分类流程图" ), this );
+  m_flowchartDock->setObjectName( QStringLiteral( "ClassifyFlowchartDock" ) );
+  m_flowchartDock->setWidget( m_flowchartWidget );
+  addDockWidget( Qt::RightDockWidgetArea, m_flowchartDock );
+
+  // Prefer the step host as the primary right-side panel, tabify with flowchart and class list.
   if ( m_classListDock )
     tabifyDockWidget( m_classListDock, m_workflowDock );
+  tabifyDockWidget( m_workflowDock, m_flowchartDock );
   m_workflowDock->raise();
+
+  // Flowchart interactive signals
+  connect( m_flowchartWidget, &RsClassifyFlowchartWidget::stepClicked, this,
+           [this]( RsClassifyFlowchartWidget::FlowStep s ) {
+             if ( !m_workflow )
+               return;
+             if ( s == RsClassifyFlowchartWidget::FlowStep::SourceRaster )
+             {
+               openSourceRaster();
+             }
+             else
+             {
+               const int stepIdx = static_cast<int>( s ) - 1;
+               if ( stepIdx >= 0 && stepIdx < static_cast<int>( RsClassifyStep::Count ) )
+                 m_workflow->setCurrentStep( static_cast<RsClassifyStep>( stepIdx ) );
+             }
+           } );
+  connect( m_flowchartWidget, &RsClassifyFlowchartWidget::openSourceRequested, this,
+           static_cast<bool ( QgsClassificationMainWindow::* )()>( &QgsClassificationMainWindow::openSourceRaster ) );
+  connect( m_flowchartWidget, &RsClassifyFlowchartWidget::manageClassesRequested, this, [this]() {
+    if ( m_classListDock )
+    {
+      m_classListDock->show();
+      m_classListDock->raise();
+    }
+  } );
+  connect( m_flowchartWidget, &RsClassifyFlowchartWidget::collectSamplesRequested, this, [this]() {
+    if ( m_classQuickListDock )
+    {
+      m_classQuickListDock->show();
+      m_classQuickListDock->raise();
+    }
+  } );
+  connect( m_flowchartWidget, &RsClassifyFlowchartWidget::evaluateRequested, this, [this]() {
+    if ( m_jmDock )
+    {
+      m_jmDock->show();
+      m_jmDock->raise();
+    }
+    if ( m_spectralDock )
+    {
+      m_spectralDock->show();
+      m_spectralDock->raise();
+    }
+  } );
+  connect( m_flowchartWidget, &RsClassifyFlowchartWidget::classifyRequested, this,
+           &QgsClassificationMainWindow::applyClassification );
+  connect( m_flowchartWidget, &RsClassifyFlowchartWidget::accuracyRequested, this, [this]() {
+    if ( m_workflow )
+      m_workflow->setCurrentStep( RsClassifyStep::Accuracy );
+  } );
+  connect( m_flowchartWidget, &RsClassifyFlowchartWidget::postProcessRequested, this, [this]() {
+    if ( m_workflow )
+      m_workflow->setCurrentStep( RsClassifyStep::PostProcess );
+  } );
+  connect( m_flowchartWidget, &RsClassifyFlowchartWidget::exportRequested, this, [this]() {
+    if ( m_workflow )
+      m_workflow->setCurrentStep( RsClassifyStep::Export );
+  } );
 
   connect( m_stepper, &RsClassifyStepperBar::stepClicked, this,
            [this]( RsClassifyStep s ) {
@@ -1919,6 +1989,12 @@ void QgsClassificationMainWindow::syncWorkflowFromRois()
   }
   m_workflow->setTrainingClassCountWithPixels( classesWithPixels.size() );
   m_workflow->setTrainingPixelCount( trainPixels );
+
+  if ( m_flowchartWidget )
+  {
+    m_flowchartWidget->setClassCountInfo( m_rois->classDefs().size() );
+    m_flowchartWidget->setSampleInfo( m_rois->size(), trainPixels );
+  }
 }
 
 void QgsClassificationMainWindow::refreshWorkflowUi()
@@ -2145,6 +2221,28 @@ bool QgsClassificationMainWindow::openSourceRaster( const QString &path )
     // Source under samples: insert at bottom of stack (not top)
     addSessionLayer( layer, /*insertOnTop=*/false );
     ensureSampleLayer();
+    // Clear stale vector ROI features from the previous image before updating
+    // the CRS. setCrs() only mutates the layer CRS tag without reprojecting
+    // feature geometries, so leftover polygons from a different CRS/extent
+    // would be re-rasterized against the new raster's GeoTransform and produce
+    // out-of-bounds pixel indices or wrong ground samples (#407).
+    if ( m_sampleLayer && m_sampleLayer->featureCount() > 0 )
+    {
+      const bool wasEditable = m_sampleLayer->isEditable();
+      if ( !wasEditable )
+        m_sampleLayer->startEditing();
+      QgsFeatureIds allIds;
+      QgsFeatureIterator clearIt = m_sampleLayer->getFeatures( QgsFeatureRequest().setNoAttributes() );
+      QgsFeature clearF;
+      while ( clearIt.nextFeature( clearF ) )
+        allIds.insert( clearF.id() );
+      if ( !allIds.isEmpty() )
+        m_sampleLayer->deleteFeatures( allIds );
+      if ( !wasEditable )
+        m_sampleLayer->commitChanges();
+    }
+    if ( m_rois )
+      m_rois->clear();
     if ( m_sampleLayer && layer->crs().isValid() )
       m_sampleLayer->setCrs( layer->crs() );
     applySampleLayerRenderer();
@@ -2171,10 +2269,44 @@ bool QgsClassificationMainWindow::openSourceRaster( const QString &path )
     m_toolMagicWand->setSourceData( m_sourceRasterPath );
   if ( m_classifierBar )
     m_classifierBar->setSourceBands( m_sourceBandCount );
+
+  // --- Invalidate downstream classification state from previous image (#406) ---
+  // Remove stale preview layer
+  if ( m_previewLayer )
+  {
+    removeSessionLayer( m_previewLayer );
+    delete m_previewLayer;
+    m_previewLayer = nullptr;
+  }
+  // Clear result paths so post-processing doesn't operate on old outputs
+  m_lastClassifyPath.clear();
+  m_lastPostRasterPath.clear();
+  m_lastPostVectorPath.clear();
+  m_lastMergeOutputPath.clear();
+  // Clear accuracy metrics
+  if ( m_accuracyPanel )
+    m_accuracyPanel->clear();
+  m_accuracySource.clear();
+  // Reset workflow step completion flags
   if ( m_workflow )
+  {
     m_workflow->setHasSourceRaster( true );
+    m_workflow->setHasFullClassifyResult( false );
+    m_workflow->setHasAccuracyMetrics( false );
+    m_workflow->setHasPostProcessResult( false );
+    m_workflow->setPostProcessSkipped( false );
+    m_workflow->setHasExportedOrLoadedToMain( false );
+    m_workflow->setEvaluateReviewed( false );
+  }
   if ( m_workflowBridge )
     m_workflowBridge->setSourceRasterArtifact( path.toStdString() );
+
+  if ( m_flowchartWidget )
+  {
+    m_flowchartWidget->setSourceRasterInfo(
+      QFileInfo( path ).fileName(), m_sourceWidth, m_sourceHeight, m_sourceBandCount,
+      m_sourceLayer ? m_sourceLayer->crs().userFriendlyIdentifier() : QString() );
+  }
 
   SICNU_LOG_INFO( SicnuLogTags::Classification, QString( "Source raster loaded: %1 (%2x%3, %4 bands)" )
     .arg( QFileInfo( path ).fileName() ).arg( m_sourceWidth ).arg( m_sourceHeight ).arg( m_sourceBandCount ) );

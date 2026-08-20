@@ -27,12 +27,24 @@ QSet<quint64> RsPixelRasterizer::rasterize( const QgsGeometry &geom,
 
   // Clip geometry to the raster footprint in map space, then rasterize only
   // the bounding-box window so we never allocate a full W×H mask.
-  const double x0 = gt[0];
-  const double y0 = gt[3];
-  const double x1 = gt[0] + gt[1] * W + gt[2] * H;
-  const double y1 = gt[3] + gt[4] * W + gt[5] * H;
-  const QgsRectangle rasterExtent( std::min( x0, x1 ), std::min( y0, y1 ),
-                                   std::max( x0, x1 ), std::max( y0, y1 ) );
+  // Calculate map-space footprint over all 4 corners to support rotated/sheared GT (#417).
+  const double cx[4] = {
+    gt[0],
+    gt[0] + gt[1] * W,
+    gt[0] + gt[2] * H,
+    gt[0] + gt[1] * W + gt[2] * H
+  };
+  const double cy[4] = {
+    gt[3],
+    gt[3] + gt[4] * W,
+    gt[3] + gt[5] * H,
+    gt[3] + gt[4] * W + gt[5] * H
+  };
+  const QgsRectangle rasterExtent(
+    *std::min_element( cx, cx + 4 ),
+    *std::min_element( cy, cy + 4 ),
+    *std::max_element( cx, cx + 4 ),
+    *std::max_element( cy, cy + 4 ) );
 
   QgsGeometry clipped = geom;
   if ( !rasterExtent.isEmpty() )

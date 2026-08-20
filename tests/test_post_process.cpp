@@ -257,3 +257,36 @@ TEST_CASE( "PostProcess: failed save does not destroy the previous output (#285)
   GDALClose( ds );
   REQUIRE( vals[15] == 9 );
 }
+
+TEST_CASE( "PostProcess: polygonize successfully overwrites existing destination (#404)",
+           "[classify][post]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  GDALAllRegister();
+
+  const QString rasterPath = tmp.path() + "/label.tif";
+  const QString shpPath = tmp.path() + "/poly.shp";
+
+  cv::Mat labels( 4, 4, CV_32S );
+  labels.setTo( 1 );
+  labels.at<int>( 0, 0 ) = 2;
+  double gt[6] = { 0, 1, 0, 4, 0, -1 };
+  REQUIRE( RsPostProcess::saveLabelRaster( rasterPath, labels, gt, QString(),
+                                           QVector<QRgb>(), QStringList(),
+                                           std::numeric_limits<double>::quiet_NaN(), nullptr ) );
+
+  // 1. Initial polygonization to shpPath
+  QString err;
+  REQUIRE( RsPostProcess::polygonize( rasterPath, shpPath, QStringLiteral( "DN" ), &err ) );
+  REQUIRE( QFile::exists( shpPath ) );
+  REQUIRE_FALSE( QFile::exists( tmp.path() + QStringLiteral( "/poly.tmp~.shp" ) ) );
+  REQUIRE_FALSE( QFile::exists( shpPath + QLatin1String( ".tmp~" ) ) );
+
+  // 2. Second polygonization overwriting existing shpPath
+  REQUIRE( RsPostProcess::polygonize( rasterPath, shpPath, QStringLiteral( "DN" ), &err ) );
+  REQUIRE( QFile::exists( shpPath ) );
+  REQUIRE_FALSE( QFile::exists( tmp.path() + QStringLiteral( "/poly.tmp~.shp" ) ) );
+  REQUIRE_FALSE( QFile::exists( shpPath + QLatin1String( ".tmp~" ) ) );
+}
+

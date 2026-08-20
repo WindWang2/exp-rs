@@ -45,6 +45,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <set>
 #include <vector>
 
 namespace sicnu::operators::rs {
@@ -292,10 +293,12 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
 
     std::vector<int> segLabel(static_cast<size_t>(nSeg + 1), 0);
     int labeledSegments = 0;
+    std::set<int> uniqueClasses;
     for (auto it = segLabelMap.constBegin(); it != segLabelMap.constEnd(); ++it) {
-        if (it.key() > static_cast<quint32>(nSeg))
+        if (it.key() == 0 || it.key() > static_cast<quint32>(nSeg) || it.value() <= 0)
             continue;
         segLabel[static_cast<size_t>(it.key())] = it.value();
+        uniqueClasses.insert(it.value());
         ++labeledSegments;
     }
 
@@ -303,6 +306,11 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
         throw RSOperatorError(ErrorCode::InvalidInputData,
                               "Fewer than 2 segments labeled by training polygons "
                               "(check CRS overlap / minLabelPixels)");
+
+    if (uniqueClasses.size() < 2)
+        throw RSOperatorError(ErrorCode::InvalidInputData,
+                              "Training polygons must contain at least 2 distinct classes "
+                              "(found " + std::to_string(uniqueClasses.size()) + ")");
 
     // Build training matrix
     cv::Mat trainX(labeledSegments, nFeat, CV_32F);

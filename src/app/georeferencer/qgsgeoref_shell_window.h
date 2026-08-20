@@ -31,6 +31,7 @@ class QgsGeorefToolDeletePoint;
 class QgsGCPListWidget;
 class QgsGeorefDataPoint;
 class RsWarpTask;
+class RsGeorefFlowchartWidget;
 
 /**
  * Shared Image Registration shell: GCP list, fit/warp, map tools, docks,
@@ -300,6 +301,8 @@ class QgsGeorefShellWindow : public QMainWindow
     QDockWidget *mParamDock = nullptr;
     RsGeorefTaskList *mTaskList = nullptr;
     QDockWidget *mTaskDock = nullptr;
+    RsGeorefFlowchartWidget *mFlowchartWidget = nullptr;
+    QDockWidget *mFlowchartDock = nullptr;
     QString mSourceRasterPath;
     /// Deep Georeferencing Session: GCP list + fit + warp snapshots + Task Center.
     RsGeoreferencingSession mGeorefSession;

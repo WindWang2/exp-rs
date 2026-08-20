@@ -106,6 +106,7 @@ void RsPostProcessDialog::setupUi()
     edit->setPlaceholderText( placeholder );
     *editOut = edit;
     auto *btn = new QPushButton( tr( "浏览…" ), this );
+    SicnuDialogHelp::tip( btn, save ? tr( "选择输出文件保存路径" ) : tr( "选择输入文件路径" ) );
     connect( btn, &QPushButton::clicked, this, [this, edit, save, filter, placeholder]() {
       const QString p = save
                           ? QFileDialog::getSaveFileName( this, placeholder, edit->text(), filter )
@@ -118,19 +119,21 @@ void RsPostProcessDialog::setupUi()
     return row;
   };
 
-  form->addRow( tr( "输入栅格" ),
-                makeBrowse( &m_inputEdit, QStringLiteral( "ppInput" ),
+  auto *inRow = makeBrowse( &m_inputEdit, QStringLiteral( "ppInput" ),
                             tr( "分类/标签栅格" ), false,
-                            tr( "GeoTIFF (*.tif *.tiff);;All files (*)" ) ) );
+                            tr( "GeoTIFF (*.tif *.tiff);;All files (*)" ) );
+  SicnuDialogHelp::tip( m_inputEdit, tr( "待进行后处理的输入分类或标签栅格文件" ) );
+  form->addRow( tr( "输入栅格" ), inRow );
 
   const bool isVectorOut = ( m_algo == Algorithm::Polygonize );
-  form->addRow( isVectorOut ? tr( "输出矢量" ) : tr( "输出栅格" ),
-                makeBrowse( &m_outputEdit, QStringLiteral( "ppOutput" ),
-                            isVectorOut ? tr( "输出 .gpkg / .shp" ) : tr( "输出 GeoTIFF" ),
-                            true,
-                            isVectorOut
-                              ? tr( "GeoPackage (*.gpkg);;ESRI Shapefile (*.shp)" )
-                              : tr( "GeoTIFF (*.tif)" ) ) );
+  auto *outRow = makeBrowse( &m_outputEdit, QStringLiteral( "ppOutput" ),
+                             isVectorOut ? tr( "输出 .gpkg / .shp" ) : tr( "输出 GeoTIFF" ),
+                             true,
+                             isVectorOut
+                               ? tr( "GeoPackage (*.gpkg);;ESRI Shapefile (*.shp)" )
+                               : tr( "GeoTIFF (*.tif)" ) );
+  SicnuDialogHelp::tip( m_outputEdit, isVectorOut ? tr( "矢量化输出文件路径 (*.gpkg 或 *.shp)" ) : tr( "后处理结果栅格输出路径 (*.tif)" ) );
+  form->addRow( isVectorOut ? tr( "输出矢量" ) : tr( "输出栅格" ), outRow );
 
   // Algorithm-specific parameters
   switch ( m_algo )
@@ -139,11 +142,13 @@ void RsPostProcessDialog::setupUi()
       m_sieveSpin = new QSpinBox( this );
       m_sieveSpin->setRange( 1, 1000000 );
       m_sieveSpin->setValue( 10 );
+      SicnuDialogHelp::tip( m_sieveSpin, tr( "面积阈值（像元数）：小于该像元数的碎小连通斑块将被滤除并由邻域填充" ) );
       form->addRow( tr( "面积阈值（像元）" ), m_sieveSpin );
       m_connectSpin = new QSpinBox( this );
       m_connectSpin->setRange( 4, 8 );
       m_connectSpin->setSingleStep( 4 );
       m_connectSpin->setValue( 8 );
+      SicnuDialogHelp::tip( m_connectSpin, tr( "像素连通性：4 连通（上下左右）或 8 连通（含对角线）" ) );
       form->addRow( tr( "连通性 (4/8)" ), m_connectSpin );
       break;
     case Algorithm::Majority:
@@ -151,6 +156,7 @@ void RsPostProcessDialog::setupUi()
       m_majoritySpin->setRange( 3, 7 );
       m_majoritySpin->setSingleStep( 2 );
       m_majoritySpin->setValue( 3 );
+      SicnuDialogHelp::tip( m_majoritySpin, tr( "众数滤波窗口边长（奇数 3/5/7），越大平滑强度越高" ) );
       form->addRow( tr( "核大小（奇数）" ), m_majoritySpin );
       break;
     case Algorithm::Clump:
@@ -158,6 +164,7 @@ void RsPostProcessDialog::setupUi()
       m_connectSpin->setRange( 4, 8 );
       m_connectSpin->setSingleStep( 4 );
       m_connectSpin->setValue( 8 );
+      SicnuDialogHelp::tip( m_connectSpin, tr( "连通域判定方式：4 连通或 8 连通" ) );
       form->addRow( tr( "连通性 (4/8)" ), m_connectSpin );
       break;
     case Algorithm::Recode:
@@ -166,6 +173,7 @@ void RsPostProcessDialog::setupUi()
       m_recodeTable->horizontalHeader()->setStretchLastSection( true );
       m_recodeTable->verticalHeader()->setVisible( false );
       m_recodeTable->setMinimumHeight( 140 );
+      SicnuDialogHelp::tip( m_recodeTable, tr( "旧类别 ID 到新类别 ID 的映射对照表" ) );
       form->addRow( tr( "重编码表" ), m_recodeTable );
       break;
     case Algorithm::Polygonize:
@@ -173,6 +181,8 @@ void RsPostProcessDialog::setupUi()
   }
 
   root->addLayout( form );
+
+  SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "post_process" ) );
 
   m_loadToLayersCb = new QCheckBox(
     tr( "完成后加载结果到分类窗口图层管理" ), this );

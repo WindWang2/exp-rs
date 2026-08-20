@@ -181,7 +181,8 @@ class QGIS_ANALYSIS_EXPORT RsClassificationPipeline
                                   const RsFeatureScaler &scaler,
                                   const QHash<int, QColor> &classColors,
                                   const QVector<int> &bandIndices = {},
-                                  const RsAccuracyAssessment::Result &accuracy = {} );
+                                  const RsAccuracyAssessment::Result &accuracy = {},
+                                  const QHash<int, int> &kmeansRemap = {} );
 
     /**
      * Read the superset sidecar for \a modelPath. Returns false when the
@@ -196,5 +197,17 @@ class QGIS_ANALYSIS_EXPORT RsClassificationPipeline
                                   RsFeatureScaler &scaler,
                                   QHash<int, QColor> &classColors,
                                   QVector<int> &bandIndices,
-                                  RsAccuracyAssessment::Result &accuracy );
+                                  RsAccuracyAssessment::Result &accuracy,
+                                  QHash<int, int> &kmeansRemap );
+
+    static bool loadModelSidecar( const QString &modelPath,
+                                  QString &methodName,
+                                  RsFeatureScaler &scaler,
+                                  QHash<int, QColor> &classColors,
+                                  QVector<int> &bandIndices,
+                                  RsAccuracyAssessment::Result &accuracy )
+    {
+      QHash<int, int> dummy;
+      return loadModelSidecar( modelPath, methodName, scaler, classColors, bandIndices, accuracy, dummy );
+    }
 };

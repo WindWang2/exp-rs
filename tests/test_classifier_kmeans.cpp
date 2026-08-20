@@ -63,3 +63,29 @@ TEST_CASE( "KMeans: 3 Gaussians, centres within tolerance of true means",
     REQUIRE( v <= 3 );
   }
 }
+
+TEST_CASE( "KMeans: predict returns empty matrix on feature dimension mismatch (#405)",
+           "[classify][backend]" )
+{
+  cv::Mat trainX = ( cv::Mat_<float>( 6, 2 ) <<
+    1.0f, 1.0f,
+    1.1f, 0.9f,
+    5.0f, 5.0f,
+    5.1f, 4.9f,
+    9.0f, 9.0f,
+    8.9f, 9.1f );
+
+  RsClassifierKMeans clf( 3 );
+  REQUIRE( clf.fit( trainX, cv::Mat() ) );
+
+  // Feature dimension mismatch: input has 4 columns while model expects 2
+  cv::Mat mismatchColsX( 10, 4, CV_32F, cv::Scalar( 1.0f ) );
+  cv::Mat predMismatch = clf.predict( mismatchColsX );
+  REQUIRE( predMismatch.empty() );
+
+  // Feature dimension mismatch: input has 1 column while model expects 2
+  cv::Mat mismatchFewColsX( 10, 1, CV_32F, cv::Scalar( 1.0f ) );
+  cv::Mat predFew = clf.predict( mismatchFewColsX );
+  REQUIRE( predFew.empty() );
+}
+

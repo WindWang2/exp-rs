@@ -1,4 +1,5 @@
 #include "qgsgeoref_shell_window.h"
+#include "rs_georef_flowchart_widget.h"
 #include <QMainWindow>
 
 #include "shell/rs_session_map_workspace.h"
@@ -211,7 +212,61 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
     mParamsPanel->setRpcMode( false );
   mParamDock->setWidget( mParamsPanel );
   addDockWidget( Qt::RightDockWidgetArea, mParamDock );
-  resizeDocks( { mParamDock }, { 340 }, Qt::Horizontal );
+
+  // Interactive Flowchart panel
+  mFlowchartWidget = new RsGeorefFlowchartWidget( this );
+  mFlowchartWidget->bindSession( &mGeorefSession );
+  mFlowchartDock = new QDockWidget( tr( "校正流程图" ), this );
+  mFlowchartDock->setObjectName( QStringLiteral( "rsGeorefFlowchartDock" ) );
+  mFlowchartDock->setAllowedAreas( Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea );
+  mFlowchartDock->setWidget( mFlowchartWidget );
+  addDockWidget( Qt::RightDockWidgetArea, mFlowchartDock );
+  tabifyDockWidget( mParamDock, mFlowchartDock );
+
+  resizeDocks( { mParamDock, mFlowchartDock }, { 340, 340 }, Qt::Horizontal );
+
+  // Flowchart interactive signals
+  connect( mFlowchartWidget, &RsGeorefFlowchartWidget::openSourceRequested, this,
+           &QgsGeorefShellWindow::openSourceFromProjectLayer );
+  connect( mFlowchartWidget, &RsGeorefFlowchartWidget::collectGcpsRequested, this, [this]() {
+    if ( mAddPointAction )
+      mAddPointAction->trigger();
+    if ( mGcpDock )
+    {
+      mGcpDock->show();
+      mGcpDock->raise();
+    }
+  } );
+  connect( mFlowchartWidget, &RsGeorefFlowchartWidget::selectModelRequested, this, [this]() {
+    if ( mParamDock )
+    {
+      mParamDock->show();
+      mParamDock->raise();
+    }
+  } );
+  connect( mFlowchartWidget, &RsGeorefFlowchartWidget::checkResidualsRequested, this, [this]() {
+    if ( mGcpDock )
+    {
+      mGcpDock->show();
+      mGcpDock->raise();
+    }
+  } );
+  connect( mFlowchartWidget, &RsGeorefFlowchartWidget::configWarpRequested, this, [this]() {
+    if ( mParamDock )
+    {
+      mParamDock->show();
+      mParamDock->raise();
+    }
+  } );
+  connect( mFlowchartWidget, &RsGeorefFlowchartWidget::executeWarpRequested, this,
+           &QgsGeorefShellWindow::applyTransform );
+  connect( mFlowchartWidget, &RsGeorefFlowchartWidget::loadResultRequested, this, [this]() {
+    if ( mTaskDock )
+    {
+      mTaskDock->show();
+      mTaskDock->raise();
+    }
+  } );
 
   connect( &mGeorefSession, &RsGeoreferencingSession::gcpsChanged,
            this, &QgsGeorefShellWindow::onPointsChanged );
@@ -1103,6 +1158,12 @@ void QgsGeorefShellWindow::zoomDestOut()
 void QgsGeorefShellWindow::onTransformMethodChanged()
 {
   onTransformMethodChangedExtra();
+  if ( mFlowchartWidget && mParamsPanel )
+  {
+    mFlowchartWidget->setModelInfo(
+      QgsGcpTransformerInterface::methodToString( mParamsPanel->transformMethod() ),
+      QgsGeorefTransform::minimumGcpCountFor( mParamsPanel->transformMethod() ) );
+  }
   refreshFit();
 }
 
@@ -1110,6 +1171,12 @@ void QgsGeorefShellWindow::onPointsChanged()
 {
   // Session is the sole owner of the GCP list — reconcile view rows/markers.
   const QVector<QgsGcpPoint> &gcps = mGeorefSession.gcps();
+
+  if ( mFlowchartWidget )
+  {
+    const int enabled = QgsGeorefTransform::enabledGcpCount( gcps );
+    mFlowchartWidget->setGcpInfo( gcps.size(), enabled );
+  }
 
   if ( mSaveGcpAction )
     mSaveGcpAction->setEnabled( hasSourceReady() && !gcps.isEmpty() );
@@ -1394,6 +1461,14 @@ void QgsGeorefShellWindow::onSessionFitChanged( const RsGeorefFitResult &fit )
   {
     statusBar()->showMessage( fit.errorMessage, 5000 );
   }
+
+  if ( mFlowchartWidget )
+  {
+    mFlowchartWidget->setResidualInfo( fit.rms, fit.ready, fit.errorMessage );
+    mFlowchartWidget->setGcpInfo( gcps.size(), fit.enabledGcpCount );
+    mFlowchartWidget->refreshState();
+  }
+
   updateApplyEnabled();
 }
 
@@ -1932,6 +2007,10 @@ bool QgsGeorefShellWindow::loadSourceRaster( const QString &path, const QString 
   updateSourceLayerCaption();
   updateGcpTableRasterPaths();
   updateToolAvailability();
+  if ( mFlowchartWidget && layer )
+  {
+    mFlowchartWidget->setSourceRasterInfo( path, layer->width(), layer->height(), layer->bandCount() );
+  }
   refreshFit();
   mGeorefSession.saveWorkflow( captureWorkflowSnapshot() );
   if ( statusBar() )

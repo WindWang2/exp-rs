@@ -120,7 +120,7 @@ Json::Value RsModisGeoreferenceOperator::run(const Json::Value& p, RSOperatorCon
     QString err;
     const bool ok = SatelliteProducts::georeferenceModis(
         QString::fromStdString(inputPath), QString::fromStdString(outputPath),
-        QString::fromStdString(dstCrs), tileH, tileV, QString::fromStdString(resampling),
+        QString::fromStdString(dstCrs), resolvedH, resolvedV, QString::fromStdString(resampling),
         &err,
         [&](double frac, const QString& msg) {
             context.reportProgress(frac, msg.toStdString());

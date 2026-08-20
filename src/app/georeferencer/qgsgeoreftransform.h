@@ -237,6 +237,9 @@ class  QgsGeorefTransform : public QgsGcpTransformerInterface
      * (QgsRasterChangeCoords) and, for RPC methods, the transformer itself
      * (coefficients come from the raster metadata). \a demPath and
      * \a demZOffset configure the RPC DEM/height terms.
+     * \a targetCrs overrides the CRS used for residual computation; when
+     * invalid the first enabled GCP's destinationPointCrs() is used as
+     * fallback.
      *
      * Returns a single RsGeorefFitResult; residuals align with \a gcps
      * ordering (disabled points carry rsGeorefInvalidResidual()).
@@ -246,6 +249,7 @@ class  QgsGeorefTransform : public QgsGcpTransformerInterface
                                   const QString &sourceRasterPath,
                                   const QString &demPath,
                                   double demZOffset,
+                                  const QgsCoordinateReferenceSystem &targetCrs = QgsCoordinateReferenceSystem(),
                                   bool invertYAxis = true );
 
   private:

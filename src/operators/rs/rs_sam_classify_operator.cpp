@@ -159,10 +159,10 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
                      " bands, " + std::to_string( refCount ) + " classes" );
 
     // Resolve the input nodata sentinel: prefer the raster-declared band-1
-    // nodata, falling back to the project convention (-9999) when none is set.
+    // nodata, falling back to NaN (matching only NaN pixels) when none is set (#420).
     bool hasNodata = false;
     double srcNodata = ds.bandNoDataValue( bands[0], &hasNodata );
-    const float nodata = hasNodata ? static_cast<float>( srcNodata ) : -9999.0f;
+    const float nodata = hasNodata ? static_cast<float>( srcNodata ) : std::numeric_limits<float>::quiet_NaN();
 
     // Single-pass streaming (perf goal §2c): stream the selected bands tile-by-
     // tile as a BIP window, classify per-tile (the kernel is per-pixel), and

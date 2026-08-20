@@ -55,6 +55,7 @@ void SpectralLibraryDialog::setupUi()
 
   auto *browseButton = new QPushButton( tr( "浏览…" ), inputSec );
   browseButton->setObjectName( QStringLiteral( "spectralLibBrowseBtn" ) );
+  SicnuDialogHelp::tip( browseButton, tr( "浏览并选择光谱库 JSON 文件" ) );
   connect( browseButton, &QPushButton::clicked, this, &SpectralLibraryDialog::browseLibrary );
 
   auto *pathRow = new QHBoxLayout();
@@ -68,10 +69,12 @@ void SpectralLibraryDialog::setupUi()
   m_matchButton = new QPushButton( tr( "匹配" ), this );
   SicnuUi::markPrimary( m_matchButton );
   m_matchButton->setObjectName( QStringLiteral( "spectralMatchBtn" ) );
+  SicnuDialogHelp::tip( m_matchButton, tr( "运行 SAM / SID 光谱匹配算法，对光谱库中条目按相似度排序" ) );
   connect( m_matchButton, &QPushButton::clicked, this, &SpectralLibraryDialog::runMatch );
 
   m_saveButton = new QPushButton( tr( "保存当前谱到库" ), this );
   m_saveButton->setObjectName( QStringLiteral( "spectralSaveBtn" ) );
+  SicnuDialogHelp::tip( m_saveButton, tr( "将当前采集的像元光谱曲线追加或保存到已加载的光谱库中" ) );
   connect( m_saveButton, &QPushButton::clicked, this, &SpectralLibraryDialog::saveCurrentToLibrary );
 
   auto *buttonRow = new QHBoxLayout();
@@ -82,6 +85,7 @@ void SpectralLibraryDialog::setupUi()
 
   m_matchTable = new QTableWidget( this );
   m_matchTable->setObjectName( QStringLiteral( "spectralMatchTable" ) );
+  SicnuDialogHelp::tip( m_matchTable, tr( "匹配结果列表：显示 SAM 夹角（越小越相似）与 SID 散度" ) );
   m_matchTable->setColumnCount( 5 );
   m_matchTable->setHorizontalHeaderLabels(
     { tr( "排名" ), tr( "名称" ), tr( "物质/类别" ), tr( "SAM (°)" ), tr( "SID" ) } );
@@ -96,12 +100,23 @@ void SpectralLibraryDialog::setupUi()
   m_statusLabel = SicnuUi::makeHintLabel( this, tr( "就绪" ) );
   mainLayout->addWidget( m_statusLabel );
 
+  auto *helpButton = new QPushButton( tr( "帮助" ), this );
+  SicnuDialogHelp::tip( helpButton, tr( "打开光谱库匹配帮助说明。" ) );
+  connect( helpButton, &QPushButton::clicked, this, [this]() {
+    SicnuDialogHelp::showToolHelp( this, QStringLiteral( "spectral_library" ), windowTitle() );
+  } );
+
   auto *closeButton = new QPushButton( tr( "关闭" ), this );
+  SicnuDialogHelp::tip( closeButton, tr( "关闭对话框" ) );
   connect( closeButton, &QPushButton::clicked, this, &QDialog::accept );
+
   auto *closeRow = new QHBoxLayout();
+  closeRow->addWidget( helpButton );
   closeRow->addStretch( 1 );
   closeRow->addWidget( closeButton );
   mainLayout->addLayout( closeRow );
+
+  SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "spectral_library" ) );
 }
 
 void SpectralLibraryDialog::setSpectrum( const QVector<double> &values,

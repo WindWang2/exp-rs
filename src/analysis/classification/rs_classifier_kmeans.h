@@ -18,6 +18,8 @@ class QGIS_ANALYSIS_EXPORT RsClassifierKMeans : public RsClassifierBackend
     bool fit( const cv::Mat &X, const cv::Mat &y ) override; // y ignored for training
     cv::Mat predict( const cv::Mat &X ) const override;
     QString name() const override { return QStringLiteral( "K-Means" ); }
+    bool save( const QString &path ) const override;
+    bool load( const QString &path ) override;
     bool isFitted() const override { return !m_centers.empty(); }
     /// Cluster ids are arbitrary 1..K, so when the backend was trained with
     /// real class labels the pipeline must align them via the Hungarian

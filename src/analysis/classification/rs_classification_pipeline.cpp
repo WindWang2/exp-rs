@@ -56,7 +56,8 @@ bool RsClassificationPipeline::saveModelSidecar( const QString &modelPath,
                                                  const RsFeatureScaler &scaler,
                                                  const QHash<int, QColor> &classColors,
                                                  const QVector<int> &bandIndices,
-                                                 const RsAccuracyAssessment::Result &accuracy )
+                                                 const RsAccuracyAssessment::Result &accuracy,
+                                                 const QHash<int, int> &kmeansRemap )
 {
   QJsonObject root;
   root.insert( QStringLiteral( "version" ), kSidecarVersion );
@@ -105,6 +106,16 @@ bool RsClassificationPipeline::saveModelSidecar( const QString &modelPath,
     root.insert( QStringLiteral( "validation" ), validation );
   }
 
+  // Cluster-to-class remap table for backends that need label remapping
+  // (KMeans). Persisted so predict-only mode produces correct class IDs (#410).
+  if ( !kmeansRemap.isEmpty() )
+  {
+    QJsonObject remapObj;
+    for ( auto it = kmeansRemap.constBegin(); it != kmeansRemap.constEnd(); ++it )
+      remapObj.insert( QString::number( it.key() ), it.value() );
+    root.insert( QStringLiteral( "clusterRemap" ), remapObj );
+  }
+
   QFile f( sidecarPathForModel( modelPath ) );
   if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
     return false;
@@ -117,13 +128,15 @@ bool RsClassificationPipeline::loadModelSidecar( const QString &modelPath,
                                                  RsFeatureScaler &scaler,
                                                  QHash<int, QColor> &classColors,
                                                  QVector<int> &bandIndices,
-                                                 RsAccuracyAssessment::Result &accuracy )
+                                                 RsAccuracyAssessment::Result &accuracy,
+                                                 QHash<int, int> &kmeansRemap )
 {
   methodName.clear();
   scaler = RsFeatureScaler();
   classColors.clear();
   bandIndices.clear();
   accuracy = RsAccuracyAssessment::Result();
+  kmeansRemap.clear();
 
   QFile f( sidecarPathForModel( modelPath ) );
   if ( !f.open( QIODevice::ReadOnly ) )
@@ -172,6 +185,11 @@ bool RsClassificationPipeline::loadModelSidecar( const QString &modelPath,
     }
     std::sort( accuracy.classIds.begin(), accuracy.classIds.end() );
   }
+
+  const QJsonObject remapObj = root.value( QStringLiteral( "clusterRemap" ) ).toObject();
+  for ( auto it = remapObj.constBegin(); it != remapObj.constEnd(); ++it )
+    kmeansRemap.insert( it.key().toInt(), it.value().toInt() );
+
   return true;
 }
 
@@ -190,6 +208,8 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   QElapsedTimer timer;
   timer.start();
 
+  QHash<int, int> kmeansRemap;
+
   // Predict-only mode: auto-load model and sidecar when modelLoadPath is specified
   if ( config.trainX.empty() && !config.modelLoadPath.isEmpty() )
   {
@@ -198,24 +218,39 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     QHash<int, QColor> sidecarColors;
     QVector<int> sidecarFeatures;
     RsAccuracyAssessment::Result sidecarAccuracy;
+    QHash<int, int> sidecarRemap;
     if ( !loadModelSidecar( config.modelLoadPath, sidecarMethod, sidecarScaler,
-                            sidecarColors, sidecarFeatures, sidecarAccuracy ) )
+                            sidecarColors, sidecarFeatures, sidecarAccuracy, sidecarRemap ) )
     {
-      result.ok = false;
-      result.error = RsClassificationPipelineResult::Error::ModelSidecarMissing;
-      result.errorMessage = QStringLiteral( "Failed to load model sidecar for %1 (missing or invalid metadata)" )
-                              .arg( config.modelLoadPath );
-      return result;
+      // When the caller already provides a pre-loaded backend (e.g. GUI
+      // loaded the model file directly), a missing sidecar is non-fatal —
+      // proceed without sidecar metadata (no feature scaling, etc.) (#403).
+      if ( config.backend )
+      {
+        SICNU_LOG_WARN( SicnuLogTags::Classification,
+                        QStringLiteral( "Model sidecar missing for %1 — proceeding without metadata (no feature scaling)" )
+                          .arg( config.modelLoadPath ) );
+      }
+      else
+      {
+        result.ok = false;
+        result.error = RsClassificationPipelineResult::Error::ModelSidecarMissing;
+        result.errorMessage = QStringLiteral( "Failed to load model sidecar for %1 (missing or invalid metadata)" )
+                                .arg( config.modelLoadPath );
+        return result;
+      }
     }
 
     if ( sidecarScaler.isFitted() )
       config.scaler = sidecarScaler;
     if ( config.classColors.isEmpty() )
       config.classColors = sidecarColors;
-    if ( config.methodName.isEmpty() )
+    if ( !sidecarMethod.isEmpty() )
       config.methodName = sidecarMethod;
     if ( config.bandIndices.isEmpty() )
       config.bandIndices = sidecarFeatures;
+    if ( kmeansRemap.isEmpty() )
+      kmeansRemap = sidecarRemap;
 
     // Model compatibility check: the target raster's band selection must match
     // the model's training feature schema (when the sidecar records one).
@@ -248,14 +283,14 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
       // method-name → backend mapping; preserves the historical "bayes"
       // sidecar sniff).
       config.backend = RsClassifierBackendFactory::create( config.methodName );
-    }
 
-    if ( !config.backend->load( config.modelLoadPath ) )
-    {
-      result.ok = false;
-      result.error = RsClassificationPipelineResult::Error::ModelOpenFailed;
-      result.errorMessage = QStringLiteral( "Failed to load model from %1" ).arg( config.modelLoadPath );
-      return result;
+      if ( !config.backend->load( config.modelLoadPath ) )
+      {
+        result.ok = false;
+        result.error = RsClassificationPipelineResult::Error::ModelOpenFailed;
+        result.errorMessage = QStringLiteral( "Failed to load model from %1" ).arg( config.modelLoadPath );
+        return result;
+      }
     }
   }
 
@@ -390,7 +425,6 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   // the training-label space (K-Means cluster ids 1..K). Built only when the
   // backend declares needsLabelRemap() and training data is available —
   // ADR 0061, the former methodName == "KMeans" branch is gone.
-  QHash<int, int> kmeansRemap;
   if ( config.backend->needsLabelRemap() && !config.trainX.empty() && !config.trainY.empty() )
   {
     try
@@ -398,9 +432,17 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
       const cv::Mat trainPred = config.backend->predict( config.trainX );
       QSet<int> trueSet, clusterSet;
       for ( int i = 0; i < config.trainY.rows; ++i )
-        trueSet.insert( config.trainY.at<int>( i, 0 ) );
+      {
+        const int yVal = config.trainY.at<int>( i, 0 );
+        if ( yVal > 0 )
+          trueSet.insert( yVal );
+      }
       for ( int i = 0; i < trainPred.rows; ++i )
-        clusterSet.insert( trainPred.at<int>( i, 0 ) );
+      {
+        const int cVal = trainPred.at<int>( i, 0 );
+        if ( cVal > 0 )
+          clusterSet.insert( cVal );
+      }
 
       if ( !trueSet.isEmpty() )
       {
@@ -500,7 +542,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
                       .arg( config.modelSavePath ) );
     if ( !saveModelSidecar( config.modelSavePath, config.methodName,
                             config.scaler, config.classColors,
-                            config.bandIndices, result.accuracy ) )
+                            config.bandIndices, result.accuracy, kmeansRemap ) )
     {
       QFile::remove( config.modelSavePath );
       result.error = RsClassificationPipelineResult::Error::SidecarSaveFailed;
@@ -616,19 +658,13 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     tempOutputPath.toUtf8().constData(), outW, outH, 1, outType, papsz );
   if ( !dstDs && papsz )
   {
-    CSLDestroy( papsz );
-    papsz = nullptr;
     qWarning() << "RsClassificationPipeline: Create with options failed; retrying without options";
     dstDs = drv->Create(
       tempOutputPath.toUtf8().constData(), outW, outH, 1, outType, nullptr );
   }
-  else
-  {
-    CSLDestroy( papsz );
-    papsz = nullptr;
-  }
   if ( !dstDs )
   {
+    CSLDestroy( papsz );
     GDALClose( srcDs );
     result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
     result.errorMessage = QStringLiteral( "Cannot create output: %1" )
@@ -640,10 +676,12 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     dstDs->SetProjection( proj );
 
   // ColorTable is palette-index based and only meaningful for Byte output.
-  // Index 0 is reserved for unclassified / NoData (transparent).
+  // Index 0 is reserved for unclassified / NoData (transparent) unless
+  // class 0 is an explicitly defined training class (#409).
   if ( outType == GDT_Byte )
   {
     GDALColorTable ct( GPI_RGB );
+    if ( !config.classColors.contains( 0 ) )
     {
       GDALColorEntry bg;
       bg.c1 = 0;
@@ -665,7 +703,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     dstDs->GetRasterBand( 1 )->SetColorInterpretation( GCI_PaletteIndex );
   }
   const int unclassified = config.ignoreOptions.unclassifiedValue;
-  if ( config.ignoreOptions.writeOutputNodata )
+  if ( config.ignoreOptions.writeOutputNodata && !config.classColors.contains( unclassified ) )
     dstDs->GetRasterBand( 1 )->SetNoDataValue( unclassified );
 
   // Optional per-pixel best-class probability raster (Float32, NoData -1).
@@ -674,6 +712,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   {
     if ( !config.backend || !config.backend->supportsProbabilities() )
     {
+      CSLDestroy( papsz );
       GDALClose( srcDs );
       GDALClose( dstDs );
       QFile::remove( tempOutputPath );
@@ -686,8 +725,15 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     probDs = drv->Create(
       tempProbPath.toUtf8().constData(), outW, outH, 1,
       GDT_Float32, papsz );
+    if ( !probDs && papsz )
+    {
+      probDs = drv->Create(
+        tempProbPath.toUtf8().constData(), outW, outH, 1,
+        GDT_Float32, nullptr );
+    }
     if ( !probDs )
     {
+      CSLDestroy( papsz );
       GDALClose( srcDs );
       GDALClose( dstDs );
       QFile::remove( tempOutputPath );
@@ -701,6 +747,8 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
       probDs->SetProjection( proj );
     probDs->GetRasterBand( 1 )->SetNoDataValue( -1.0 );
   }
+  CSLDestroy( papsz );
+  papsz = nullptr;
 
   // Per-band source NoData (optional) + user ignore values → unclassified.
   // ADR 0061 — NoData discovery is owned by rsCollectBandNodata (shared with
@@ -715,10 +763,21 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   const auto failWithPartialOutput = [&result, &srcDs, &dstDs, &probDs, &tempOutputPath, &tempProbPath](
     RsClassificationPipelineResult::Error error, const QString &message )
   {
-    GDALClose( srcDs );
-    GDALClose( dstDs );
+    if ( srcDs )
+    {
+      GDALClose( srcDs );
+      srcDs = nullptr;
+    }
+    if ( dstDs )
+    {
+      GDALClose( dstDs );
+      dstDs = nullptr;
+    }
     if ( probDs )
+    {
       GDALClose( probDs );
+      probDs = nullptr;
+    }
     QFile::remove( tempOutputPath );
     if ( !tempProbPath.isEmpty() )
       QFile::remove( tempProbPath );
@@ -947,9 +1006,14 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   const CPLErr flushProb = probDs ? probDs->FlushCache( true ) : CE_None;
 
   GDALClose( srcDs );
+  srcDs = nullptr;
   GDALClose( dstDs );
+  dstDs = nullptr;
   if ( probDs )
+  {
     GDALClose( probDs );
+    probDs = nullptr;
+  }
 
   if ( flushDst != CE_None || flushProb != CE_None )
   {

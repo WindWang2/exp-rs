@@ -16,8 +16,10 @@
 #include <vector>
 
 #include "rs_classification_pipeline.h"
+#include "rs_classification_utils.h"
 #include "rs_classifier_kmeans.h"
 #include "rs_classifier_normalbayes.h"
+#include "rs_cross_validation.h"
 
 namespace
 {
@@ -383,8 +385,9 @@ TEST_CASE(
   QHash<int, QColor> loadedColors;
   QVector<int> loadedFeatures;
   RsAccuracyAssessment::Result loadedAccuracy;
+  QHash<int, int> loadedRemap;
   REQUIRE( RsClassificationPipeline::loadModelSidecar(
-    modelPath, method, loadedScaler, loadedColors, loadedFeatures, loadedAccuracy ) );
+    modelPath, method, loadedScaler, loadedColors, loadedFeatures, loadedAccuracy, loadedRemap ) );
   REQUIRE( method == QStringLiteral( "NormalBayes" ) );
   REQUIRE( loadedScaler.isFitted() );
   REQUIRE( loadedScaler.bandCount() == 3 );
@@ -634,3 +637,228 @@ TEST_CASE(
   CHECK_FALSE( QFile::exists( tmp.path() + "/out2.tif" ) );
 }
 
+TEST_CASE(
+  "Classification pipeline: predict-only mode succeeds when pre-loaded backend is provided without sidecar (#403)",
+  "[classify][pipeline][sidecar]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  cv::Mat X, y;
+  makeTraining( X, y );
+
+  const QString modelPath = tmp.path() + "/model.yml";
+
+  RsClassificationPipeline::Config cfg1 = baseConfig( srcPath, tmp.path() + "/out1.tif" );
+  cfg1.backend.reset( new RsClassifierNormalBayes );
+  cfg1.trainX = X;
+  cfg1.trainY = y;
+  cfg1.modelSavePath = modelPath;
+  const RsClassificationPipelineResult res1 = RsClassificationPipeline::run( std::move( cfg1 ) );
+  REQUIRE( res1.ok );
+
+  // Delete the generated sidecar
+  const QString sidecarPath = RsClassificationPipeline::sidecarPathForModel( modelPath );
+  REQUIRE( QFile::exists( sidecarPath ) );
+  REQUIRE( QFile::remove( sidecarPath ) );
+
+  // Pre-load the backend directly (as done by QgsClassificationMainWindow::loadClassifierModel)
+  auto loadedBackend = std::make_unique<RsClassifierNormalBayes>();
+  REQUIRE( loadedBackend->load( modelPath ) );
+
+  // Predict-only mode with pre-loaded backend should succeed despite missing sidecar
+  RsClassificationPipeline::Config cfg2 = baseConfig( srcPath, tmp.path() + "/out2.tif" );
+  cfg2.backend = std::move( loadedBackend );
+  cfg2.modelLoadPath = modelPath;
+
+  const RsClassificationPipelineResult res2 = RsClassificationPipeline::run( std::move( cfg2 ) );
+  INFO( res2.errorMessage.toStdString() );
+  CHECK( res2.ok );
+  CHECK( res2.error == RsClassificationPipelineResult::Error::None );
+  CHECK( QFile::exists( tmp.path() + "/out2.tif" ) );
+}
+
+TEST_CASE(
+  "Classification pipeline: KMeans model sidecar persists and restores clusterRemap for predict-only mode (#410)",
+  "[classify][pipeline][kmeans][sidecar]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  cv::Mat X, y;
+  // Train with user class IDs 10, 20, 30
+  makeTraining( X, y, { 10, 20, 30 } );
+
+  const QString modelPath = tmp.path() + "/kmeans_model.xml";
+
+  RsClassificationPipeline::Config cfg1 = baseConfig( srcPath, tmp.path() + "/out1.tif" );
+  cfg1.backend.reset( new RsClassifierKMeans( 3 ) );
+  cfg1.methodName = QStringLiteral( "KMeans" );
+  cfg1.trainX = X;
+  cfg1.trainY = y;
+  cfg1.classColors.clear();
+  cfg1.classColors[10] = QColor( "#ff0000" );
+  cfg1.classColors[20] = QColor( "#00ff00" );
+  cfg1.classColors[30] = QColor( "#0000ff" );
+  cfg1.modelSavePath = modelPath;
+  const RsClassificationPipelineResult res1 = RsClassificationPipeline::run( std::move( cfg1 ) );
+  REQUIRE( res1.ok );
+
+  // Verify sidecar exists and has clusterRemap
+  const QString sidecarPath = RsClassificationPipeline::sidecarPathForModel( modelPath );
+  REQUIRE( QFile::exists( sidecarPath ) );
+
+  // Now run predict-only using the saved model without providing training data
+  RsClassificationPipeline::Config cfg2 = baseConfig( srcPath, tmp.path() + "/out2.tif" );
+  cfg2.modelLoadPath = modelPath;
+  const RsClassificationPipelineResult res2 = RsClassificationPipeline::run( std::move( cfg2 ) );
+  INFO( res2.errorMessage.toStdString() );
+  REQUIRE( res2.ok );
+
+  GDALDataset *ds = static_cast<GDALDataset *>(
+    GDALOpen( ( tmp.path() + "/out2.tif" ).toUtf8().constData(), GA_ReadOnly ) );
+  REQUIRE( ds != nullptr );
+  // Sample pixels from the three regions should be in {10, 20, 30}, not raw cluster IDs {1, 2, 3}
+  const int p0 = readPixel( ds, 2, 2 );
+  const int p1 = readPixel( ds, 20, 2 );
+  const int p2 = readPixel( ds, 16, 20 );
+  GDALClose( ds );
+
+  CHECK( ( p0 == 10 || p0 == 20 || p0 == 30 ) );
+  CHECK( ( p1 == 10 || p1 == 20 || p1 == 30 ) );
+  CHECK( ( p2 == 10 || p2 == 20 || p2 == 30 ) );
+}
+
+TEST_CASE(
+  "Classification pipeline: Class 0 is not marked as NoData in output GeoTIFF (#409)",
+  "[classify][pipeline][nodata]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  cv::Mat X, y;
+  // Train with class 0 included
+  makeTraining( X, y, { 0, 1, 2 } );
+
+  RsClassificationPipeline::Config cfg = baseConfig( srcPath, tmp.path() + "/out_cls0.tif" );
+  cfg.backend.reset( new RsClassifierNormalBayes );
+  cfg.trainX = X;
+  cfg.trainY = y;
+  cfg.classColors.clear();
+  cfg.classColors[0] = QColor( "#ff0000" );
+  cfg.classColors[1] = QColor( "#00ff00" );
+  cfg.classColors[2] = QColor( "#0000ff" );
+  cfg.ignoreOptions.writeOutputNodata = true;
+  cfg.ignoreOptions.unclassifiedValue = 0;
+
+  const RsClassificationPipelineResult res = RsClassificationPipeline::run( std::move( cfg ) );
+  REQUIRE( res.ok );
+
+  GDALDataset *ds = static_cast<GDALDataset *>(
+    GDALOpen( ( tmp.path() + "/out_cls0.tif" ).toUtf8().constData(), GA_ReadOnly ) );
+  REQUIRE( ds != nullptr );
+  int hasNoData = 0;
+  ds->GetRasterBand( 1 )->GetNoDataValue( &hasNoData );
+  // Since class 0 is a valid user class, NoData=0 should NOT be set
+  CHECK( hasNoData == 0 );
+  GDALClose( ds );
+}
+
+TEST_CASE(
+  "Classification pipeline: unsupervised KMeans with dummy zero labels preserves all 1..k clusters without mapping cluster 1 to 0 (#411)",
+  "[classify][pipeline][kmeans][unsupervised]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  cv::Mat X, y;
+  // Train samples extracted from three distinct regions, but with dummy 0 labels (unsupervised KMeans operator)
+  makeTraining( X, y, { 0, 0, 0 } );
+
+  const QString outPath = tmp.path() + "/out_kmeans_unsupervised.tif";
+  RsClassificationPipeline::Config cfg = baseConfig( srcPath, outPath );
+  cfg.backend.reset( new RsClassifierKMeans( 3 ) );
+  cfg.methodName = QStringLiteral( "kmeans" );
+  cfg.trainX = X;
+  cfg.trainY = y; // all zeros
+  cfg.classColors.clear();
+  for ( int id = 1; id <= 3; ++id )
+    cfg.classColors[id] = rsSynthesizedClassColor( id );
+
+  const RsClassificationPipelineResult res = RsClassificationPipeline::run( std::move( cfg ) );
+  INFO( res.errorMessage.toStdString() );
+  REQUIRE( res.ok );
+
+  GDALDataset *ds = static_cast<GDALDataset *>(
+    GDALOpen( outPath.toUtf8().constData(), GA_ReadOnly ) );
+  REQUIRE( ds != nullptr );
+
+  // Check that all 3 cluster IDs (1, 2, 3) are present in the output, and none were wiped to 0
+  QSet<int> observedClasses;
+  for ( int r = 0; r < 32; ++r )
+  {
+    for ( int c = 0; c < 32; ++c )
+    {
+      observedClasses.insert( readPixel( ds, c, r ) );
+    }
+  }
+  GDALClose( ds );
+
+  // Output must contain clusters 1, 2, 3 and NOT have cluster 1 mapped to 0
+  CHECK( observedClasses.contains( 1 ) );
+  CHECK( observedClasses.contains( 2 ) );
+  CHECK( observedClasses.contains( 3 ) );
+  CHECK_FALSE( observedClasses.contains( 0 ) );
+}
+
+TEST_CASE(
+  "Cross-validation: kFold supports small sample count per class and KMeans cluster remap (#413)",
+  "[classify][cv][kmeans]" )
+{
+  cv::Mat X( 9, 3, CV_32F );
+  cv::Mat y( 9, 1, CV_32S );
+
+  // 3 samples per class for 3 classes (total 9 samples), testing 5-fold CV
+  for ( int i = 0; i < 3; ++i )
+  {
+    // Class 10 (distinct region 0)
+    X.at<float>( i, 0 ) = 200.0f; X.at<float>( i, 1 ) = 20.0f; X.at<float>( i, 2 ) = 20.0f;
+    y.at<int>( i, 0 ) = 10;
+    // Class 20 (distinct region 1)
+    X.at<float>( i + 3, 0 ) = 20.0f; X.at<float>( i + 3, 1 ) = 200.0f; X.at<float>( i + 3, 2 ) = 20.0f;
+    y.at<int>( i + 3, 0 ) = 20;
+    // Class 30 (distinct region 2)
+    X.at<float>( i + 6, 0 ) = 20.0f; X.at<float>( i + 6, 1 ) = 20.0f; X.at<float>( i + 6, 2 ) = 200.0f;
+    y.at<int>( i + 6, 0 ) = 30;
+  }
+
+  // 1. NormalBayes with small samples (< k=5) succeeds without "All folds failed"
+  auto nbFactory = []() -> std::unique_ptr<RsClassifierBackend> {
+    return std::make_unique<RsClassifierNormalBayes>();
+  };
+  const RsCrossValidation::Result resNb = RsCrossValidation::kFold( X, y, nbFactory, 5, false );
+  REQUIRE( resNb.errorMessage.isEmpty() );
+  CHECK( resNb.foldAccuracies.size() > 0 );
+  CHECK( resNb.meanAccuracy > 0.8 );
+
+  // 2. KMeans with Hungarian remap evaluates meaningful accuracy instead of 0%
+  auto kmFactory = []() -> std::unique_ptr<RsClassifierBackend> {
+    return std::make_unique<RsClassifierKMeans>( 3 );
+  };
+  const RsCrossValidation::Result resKm = RsCrossValidation::kFold( X, y, kmFactory, 3, false );
+  REQUIRE( resKm.errorMessage.isEmpty() );
+  CHECK( resKm.foldAccuracies.size() > 0 );
+  CHECK( resKm.meanAccuracy > 0.8 );
+}

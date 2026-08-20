@@ -59,10 +59,12 @@ void RadiometricCalibrationDialog::setupUi()
 
   m_allBandsCheck = new QCheckBox( tr( "处理全部波段" ), sec );
   m_allBandsCheck->setChecked( true );
+  SicnuDialogHelp::tip( m_allBandsCheck, tr( "勾选时自动对输入影像的所有有效波段执行定标；取消勾选可指定单个波段" ) );
   connect( m_allBandsCheck, &QCheckBox::toggled, this, &RadiometricCalibrationDialog::onAllBandsToggled );
   form->addRow( QString(), m_allBandsCheck );
 
   m_bandCombo = new QComboBox( sec );
+  SicnuDialogHelp::tip( m_bandCombo, tr( "选择待定标的单一目标波段号" ) );
   form->addRow( tr( "波段" ), m_bandCombo );
   m_bandLabel = qobject_cast<QLabel *>( form->labelForField( m_bandCombo ) );
 
@@ -71,6 +73,7 @@ void RadiometricCalibrationDialog::setupUi()
   m_metadataEdit->setPlaceholderText( tr( "自动探测（输入栅格旁 *_MTL.txt / MTD_MSI*.xml）" ) );
   SicnuDialogHelp::tip( m_metadataEdit, tr( "Landsat *_MTL.txt 或 Sentinel-2 MTD_MSI*.xml 路径；留空则自动探测。" ) );
   m_metadataBrowseButton = new QPushButton( tr( "浏览…" ), sec );
+  SicnuDialogHelp::tip( m_metadataBrowseButton, tr( "浏览并指定传感器元数据文件" ) );
   connect( m_metadataBrowseButton, &QPushButton::clicked, this,
            &RadiometricCalibrationDialog::onBrowseMetadata );
   metadataRow->addWidget( m_metadataEdit, 1 );

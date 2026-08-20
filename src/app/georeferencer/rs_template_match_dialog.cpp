@@ -25,6 +25,7 @@ RsTemplateMatchDialog::RsTemplateMatchDialog( QWidget *parent )
                        int( RsTemplateMatcher::SeedMode::Grid ) );
   m_seedMode->addItem( tr( "现有 GCP 作为种子（精化）" ),
                        int( RsTemplateMatcher::SeedMode::ExistingSeeds ) );
+  m_seedMode->setToolTip( tr( "种子生成模式：规则网格在整景均匀分布，或基于现有 GCP 坐标做局部微调精化" ) );
   form->addRow( tr( "种子模式" ), m_seedMode );
 
   m_templateSize = new QSpinBox( this );
@@ -52,12 +53,16 @@ RsTemplateMatchDialog::RsTemplateMatchDialog( QWidget *parent )
   m_gridRows = new QSpinBox( this );
   m_gridRows->setRange( 2, 20 );
   m_gridRows->setValue( 5 );
+  m_gridRows->setToolTip( tr( "规则网格行数（沿垂直方向采样的种子点数量）" ) );
   form->addRow( tr( "网格行数" ), m_gridRows );
 
   m_gridCols = new QSpinBox( this );
   m_gridCols->setRange( 2, 20 );
   m_gridCols->setValue( 5 );
+  m_gridCols->setToolTip( tr( "规则网格列数（沿水平方向采样的种子点数量）" ) );
   form->addRow( tr( "网格列数" ), m_gridCols );
+
+  SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "template_match" ) );
 
   auto *hint = new QLabel(
     tr( "适用于源影像已有近似坐标的情况：用 GeoTransform 预测参考影像搜索区，"

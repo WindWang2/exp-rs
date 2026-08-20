@@ -82,7 +82,9 @@ void OrthorectificationDialog::setupUi()
   m_demEdit = new QLineEdit( sec );
   m_demEdit->setObjectName( QStringLiteral( "orthoDemEdit" ) );
   m_demEdit->setPlaceholderText( tr( "DEM 栅格（可选，用于地形纠正）" ) );
+  SicnuDialogHelp::tip( m_demEdit, tr( "指定用于地形校正的高程栅格路径（DEM/DSM）" ) );
   m_demBrowseButton = new QPushButton( tr( "浏览…" ), sec );
+  SicnuDialogHelp::tip( m_demBrowseButton, tr( "浏览并选择 DEM 高程栅格文件" ) );
   connect( m_demBrowseButton, &QPushButton::clicked, this,
            &OrthorectificationDialog::onBrowseDem );
   demRow->addWidget( m_demEdit, 1 );
@@ -96,6 +98,7 @@ void OrthorectificationDialog::setupUi()
   m_resamplingCombo->addItem( tr( "三次卷积" ), QStringLiteral( "cubic" ) );
   m_resamplingCombo->addItem( tr( "三次样条" ), QStringLiteral( "cubicspline" ) );
   m_resamplingCombo->addItem( tr( "Lanczos" ), QStringLiteral( "lanczos" ) );
+  SicnuDialogHelp::tip( m_resamplingCombo, tr( "栅格重采样插值算法：连续影像建议双线性或三次卷积，分类/离散栅格建议最邻近" ) );
   form->addRow( tr( "重采样" ), m_resamplingCombo );
 
   m_resolutionSpin = new QDoubleSpinBox( sec );
@@ -119,12 +122,14 @@ void OrthorectificationDialog::setupUi()
   m_nodataCheck = new QCheckBox( tr( "设置输出 NoData" ), sec );
   m_nodataCheck->setObjectName( QStringLiteral( "orthoNodataCheck" ) );
   m_nodataCheck->setChecked( false );
+  SicnuDialogHelp::tip( m_nodataCheck, tr( "是否为输出正射影像指定自定义的无效像元值 (NoData)" ) );
   m_nodataSpin = new QDoubleSpinBox( sec );
   m_nodataSpin->setObjectName( QStringLiteral( "orthoNodataSpin" ) );
   m_nodataSpin->setRange( -1e9, 1e9 );
   m_nodataSpin->setDecimals( 6 );
   m_nodataSpin->setValue( 0.0 );
   m_nodataSpin->setEnabled( false );
+  SicnuDialogHelp::tip( m_nodataSpin, tr( "输出正射影像中无效/未覆盖区域的填充像元值" ) );
   connect( m_nodataCheck, &QCheckBox::toggled, m_nodataSpin, &QDoubleSpinBox::setEnabled );
   auto *nodataRow = new QHBoxLayout;
   nodataRow->addWidget( m_nodataCheck );

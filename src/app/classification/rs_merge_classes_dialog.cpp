@@ -43,16 +43,21 @@ RsMergeClassesDialog::RsMergeClassesDialog( QWidget *parent )
   form->setSpacing( 8 );
 
   m_targetIdLabel = new QLabel( this );
+  SicnuDialogHelp::tip( m_targetIdLabel, tr( "合并后新类别的 ID（固定取所选源类别的最小 ID）" ) );
   form->addRow( tr( "目标 ID:" ), m_targetIdLabel );
 
   m_nameEdit = new QLineEdit( this );
+  SicnuDialogHelp::tip( m_nameEdit, tr( "合并后新类别的显示名称" ) );
   form->addRow( tr( "目标名称:" ), m_nameEdit );
 
   m_colorBtn = new QPushButton( this );
+  SicnuDialogHelp::tip( m_colorBtn, tr( "点击选择合并后新类别在地图与分类表中的显示颜色" ) );
   connect( m_colorBtn, &QPushButton::clicked, this, &RsMergeClassesDialog::pickColor );
   form->addRow( tr( "目标颜色:" ), m_colorBtn );
 
   root->addLayout( form );
+
+  SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "merge_classes" ) );
 
   auto *buttons = new QDialogButtonBox(
     QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this );

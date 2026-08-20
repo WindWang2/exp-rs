@@ -1,9 +1,11 @@
 // rs_cross_validation.cpp — Phase 10A.1.2 implementation.
 #include "rs_cross_validation.h"
 #include "rs_feature_scaler.h"
+#include "rs_hungarian_assignment.h"
 #include "sicnu_logging.h"
 
 #include <QHash>
+#include <QSet>
 
 #include <algorithm>
 #include <cmath>
@@ -56,26 +58,13 @@ RsCrossValidation::Result RsCrossValidation::kFold(
   }
 
   // Round-robin assign indices to folds (stratified).
+  // Distribute all samples so that even classes with < k samples are tested across folds.
   QVector<QVector<int>> foldTest( k );
   for ( auto it = byClass.constBegin(); it != byClass.constEnd(); ++it )
   {
     const QVector<int> &bucket = it.value();
-    if ( bucket.size() < k )
-    {
-      // Class doesn't have enough samples to spread across folds —
-      // keep all in train (foldTest empty for this class).
-      continue;
-    }
     for ( int i = 0; i < bucket.size(); ++i )
       foldTest[i % k].append( bucket[i] );
-  }
-
-  // Build the "train always" set: classes with < k samples.
-  QVector<int> trainAlways;
-  for ( auto it = byClass.constBegin(); it != byClass.constEnd(); ++it )
-  {
-    if ( it.value().size() < k )
-      trainAlways += it.value();
   }
 
   QVector<double> accs;
@@ -99,7 +88,6 @@ RsCrossValidation::Result RsCrossValidation::kFold(
         continue;
       trainIdx += foldTest[fj];
     }
-    trainIdx += trainAlways;
 
     if ( trainIdx.isEmpty() || testIdx.isEmpty() )
     {
@@ -143,6 +131,59 @@ RsCrossValidation::Result RsCrossValidation::kFold(
     if ( !backend->fit( trainX, trainY ) )
       continue;
 
+    // For clustering backends (e.g. KMeans), remap cluster IDs to true class IDs via Hungarian assignment
+    QHash<int, int> clusterRemap;
+    if ( backend->needsLabelRemap() )
+    {
+      try
+      {
+        cv::Mat trainPred = backend->predict( trainX );
+        QSet<int> trueSet, clusterSet;
+        for ( int i = 0; i < trainY.rows; ++i )
+        {
+          const int yVal = trainY.at<int>( i, 0 );
+          if ( yVal > 0 )
+            trueSet.insert( yVal );
+        }
+        for ( int i = 0; i < trainPred.rows; ++i )
+        {
+          const int cVal = trainPred.at<int>( i, 0 );
+          if ( cVal > 0 )
+            clusterSet.insert( cVal );
+        }
+
+        if ( !trueSet.isEmpty() && !clusterSet.isEmpty() )
+        {
+          QList<int> tList( trueSet.begin(), trueSet.end() );
+          QList<int> cList( clusterSet.begin(), clusterSet.end() );
+          std::sort( tList.begin(), tList.end() );
+          std::sort( cList.begin(), cList.end() );
+          const int N = tList.size();
+          const int M = cList.size();
+          cv::Mat cost = cv::Mat::zeros( N, M, CV_64F );
+          for ( int i = 0; i < trainY.rows; ++i )
+          {
+            const int ti = tList.indexOf( trainY.at<int>( i, 0 ) );
+            const int ci = cList.indexOf( trainPred.at<int>( i, 0 ) );
+            if ( ti >= 0 && ci >= 0 )
+              cost.at<double>( ti, ci ) -= 1.0;
+          }
+
+          const QVector<int> assign = RsHungarianAssignment::solve( cost );
+          for ( int i = 0; i < N && i < assign.size(); ++i )
+          {
+            const int clusterIdx = assign[i];
+            if ( clusterIdx >= 0 && clusterIdx < M )
+              clusterRemap[cList[clusterIdx]] = tList[i];
+          }
+        }
+      }
+      catch ( ... )
+      {
+        // Fallback to raw prediction if Hungarian remap fails
+      }
+    }
+
     cv::Mat pred;
     try
     {
@@ -157,8 +198,13 @@ RsCrossValidation::Result RsCrossValidation::kFold(
 
     int correct = 0;
     for ( int i = 0; i < pred.rows; ++i )
-      if ( pred.at<int>( i, 0 ) == testY.at<int>( i, 0 ) )
+    {
+      int pVal = pred.at<int>( i, 0 );
+      if ( backend->needsLabelRemap() )
+        pVal = clusterRemap.value( pVal, pVal );
+      if ( pVal == testY.at<int>( i, 0 ) )
         ++correct;
+    }
     accs.append( double( correct ) / pred.rows );
   }
 

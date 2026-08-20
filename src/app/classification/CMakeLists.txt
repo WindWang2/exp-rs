@@ -39,8 +39,9 @@ qt_add_library(qgis_app_classify STATIC
     rs_classify_workflow_controller.cpp
     # Runtime session bridge (lab.classify.supervised).
     rs_classify_workflow_bridge.cpp
-    # Classification workflow — stepper bar + step host skeleton.
+    # Classification workflow — stepper bar + step host skeleton + flowchart panel.
     rs_classify_stepper_bar.cpp
+    rs_classify_flowchart_widget.cpp
     ../dialogs/dialog_help_catalog.cpp
     ../dialogs/dialog_utils.cpp
     rs_classify_step_host.cpp

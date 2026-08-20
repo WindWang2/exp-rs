@@ -70,6 +70,38 @@ bool QgsImageWarper::openSrcDSAndGetWarpOpt(
   psWarpOptions->pfnTransformer = pfnTransform;
   psWarpOptions->eResampleAlg = toGDALResampleAlg( resampling );
 
+  // Check source bands for NoData values and configure GDALWarpOptions
+  if ( psWarpOptions->nBandCount > 0 )
+  {
+    bool hasAnyNoData = false;
+    std::vector<double> srcNoData( static_cast<size_t>( psWarpOptions->nBandCount ) );
+    for ( int i = 0; i < psWarpOptions->nBandCount; ++i )
+    {
+      int success = 0;
+      GDALRasterBandH hBand = GDALGetRasterBand( hSrcDS.get(), i + 1 );
+      const double nd = GDALGetRasterNoDataValue( hBand, &success );
+      if ( success )
+      {
+        hasAnyNoData = true;
+        srcNoData[static_cast<size_t>( i )] = nd;
+      }
+      else
+      {
+        srcNoData[static_cast<size_t>( i )] = -9999.0;
+      }
+    }
+    if ( hasAnyNoData )
+    {
+      psWarpOptions->padfSrcNoDataReal = ( double * ) CPLMalloc( sizeof( double ) * psWarpOptions->nBandCount );
+      psWarpOptions->padfDstNoDataReal = ( double * ) CPLMalloc( sizeof( double ) * psWarpOptions->nBandCount );
+      for ( int i = 0; i < psWarpOptions->nBandCount; ++i )
+      {
+        psWarpOptions->padfSrcNoDataReal[i] = srcNoData[static_cast<size_t>( i )];
+        psWarpOptions->padfDstNoDataReal[i] = srcNoData[static_cast<size_t>( i )];
+      }
+    }
+  }
+
   return true;
 }
 
@@ -156,10 +188,9 @@ bool QgsImageWarper::createDestinationDataset(
     {
       GDALSetRasterNoDataValue( hDstBand, 0 );
     }
-    else
-    {
-      GDALSetRasterNoDataValue( hDstBand, static_cast<double>( backgroundValue ) );
-    }
+    // If source has no NoData and useZeroAsTrans is false, do NOT stamp a
+    // NoData value on the destination — doing so would mark legitimate pixels
+    // equal to backgroundValue (typically 0) as missing/transparent.
   }
 
   // Pre-fill destination with background value so warp holes show the requested fill.

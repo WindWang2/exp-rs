@@ -88,6 +88,16 @@ cv::Mat RsClassifierKMeans::predict( const cv::Mat &X ) const
     if ( data.type() != CV_32F )
       data.convertTo( data, CV_32F );
 
+    // Guard against heap over-read when input feature dimension differs from
+    // the fitted cluster centers (see Issue #405).
+    if ( data.cols != m_centers.cols )
+    {
+      SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                       QStringLiteral( "KMeans::predict — feature dimension mismatch: input has %1 cols, model expects %2" )
+                         .arg( data.cols ).arg( m_centers.cols ) );
+      return cv::Mat();
+    }
+
     const int nRows = data.rows;
     const int nCols = data.cols;
     const int nCenters = m_centers.rows;
@@ -127,3 +137,76 @@ cv::Mat RsClassifierKMeans::predict( const cv::Mat &X ) const
   }
   return out;
 }
+
+bool RsClassifierKMeans::save( const QString &path ) const
+{
+  if ( m_centers.empty() )
+    return false;
+  try
+  {
+    cv::FileStorage fs( path.toStdString(), cv::FileStorage::WRITE );
+    if ( !fs.isOpened() )
+      return false;
+    fs << "kmeans_model" << "{";
+    fs << "k" << m_k;
+    fs << "centers" << m_centers;
+    fs << "remapNeeded" << ( m_remapNeeded ? 1 : 0 );
+    fs << "}";
+    fs.release();
+    return true;
+  }
+  catch ( const cv::Exception &e )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                     QStringLiteral( "KMeans::save — OpenCV error: %1" ).arg( e.what() ) );
+    return false;
+  }
+  catch ( const std::exception &e )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                     QStringLiteral( "KMeans::save — error: %1" ).arg( e.what() ) );
+    return false;
+  }
+}
+
+bool RsClassifierKMeans::load( const QString &path )
+{
+  try
+  {
+    cv::FileStorage fs( path.toStdString(), cv::FileStorage::READ );
+    if ( !fs.isOpened() )
+      return false;
+    cv::FileNode node = fs["kmeans_model"];
+    if ( !node.empty() && node.isMap() )
+    {
+      node["k"] >> m_k;
+      node["centers"] >> m_centers;
+      int remap = 0;
+      node["remapNeeded"] >> remap;
+      m_remapNeeded = ( remap != 0 );
+    }
+    else
+    {
+      fs["k"] >> m_k;
+      fs["centers"] >> m_centers;
+      int remap = 0;
+      fs["remapNeeded"] >> remap;
+      m_remapNeeded = ( remap != 0 );
+    }
+    fs.release();
+    return !m_centers.empty();
+  }
+  catch ( const cv::Exception &e )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                     QStringLiteral( "KMeans::load — OpenCV error: %1" ).arg( e.what() ) );
+    return false;
+  }
+  catch ( const std::exception &e )
+  {
+    SICNU_LOG_ERROR( SicnuLogTags::Classification,
+                     QStringLiteral( "KMeans::load — error: %1" ).arg( e.what() ) );
+    return false;
+  }
+}
+

@@ -122,6 +122,9 @@ class RsGeoreferencingSession : public QObject
     void setDemZOffset( double z );
     double demZOffset() const { return mDemZOffset; }
 
+    void setDestinationCrs( const QgsCoordinateReferenceSystem &crs );
+    QgsCoordinateReferenceSystem destinationCrs() const { return mDestCrs; }
+
     void setGcps( const QVector<QgsGcpPoint> &gcps );
     const QVector<QgsGcpPoint> &gcps() const { return mGcps; }
     void clearGcps();
@@ -188,6 +191,7 @@ class RsGeoreferencingSession : public QObject
       QgsGcpTransformerInterface::TransformMethod::Linear;
     QString mDemPath;
     double mDemZOffset = 0.0;
+    QgsCoordinateReferenceSystem mDestCrs;
     QVector<QgsGcpPoint> mGcps;
     RsGeorefFitResult mLastFit;
 

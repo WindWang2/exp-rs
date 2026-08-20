@@ -54,6 +54,7 @@ class RsAccuracyPanel;
 class RsClassifierSetupBar;
 class RsClassifyStepperBar;
 class RsClassifyStepHost;
+class RsClassifyFlowchartWidget;
 class QgsTask;
 
 namespace sicnu
@@ -220,6 +221,8 @@ class QgsClassificationMainWindow : public QMainWindow
     RsClassifyStepperBar *m_stepper = nullptr;
     RsClassifyStepHost *m_stepHost = nullptr;
     QDockWidget *m_workflowDock = nullptr;
+    RsClassifyFlowchartWidget *m_flowchartWidget = nullptr;
+    QDockWidget *m_flowchartDock = nullptr;
 
     QLabel *m_stepClassCountLabel = nullptr;
     QLabel *m_stepSampleStatsLabel = nullptr;
