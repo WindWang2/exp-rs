@@ -42,8 +42,14 @@
 
 namespace sicnu::cli {
 
-extern volatile sig_atomic_t g_cliInterrupted;
-bool cliIsInterrupted();
+// Defined here (not in main_cli.cpp) so test_pipeline_runner — which links
+// this TU without the CLI entry point — resolves them (#455).
+volatile sig_atomic_t g_cliInterrupted = 0;
+
+bool cliIsInterrupted()
+{
+    return g_cliInterrupted != 0;
+}
 
 namespace {
 

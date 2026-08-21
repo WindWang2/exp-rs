@@ -23,13 +23,10 @@
 using namespace sicnu::cli;
 namespace operators = sicnu::operators;
 
+// g_cliInterrupted / cliIsInterrupted are defined in rs_pipeline_runner.cpp
+// so targets that link the runner without the CLI main() still resolve them (#455).
 namespace sicnu::cli {
-volatile sig_atomic_t g_cliInterrupted = 0;
-
-bool cliIsInterrupted()
-{
-    return g_cliInterrupted != 0;
-}
+extern volatile sig_atomic_t g_cliInterrupted;
 } // namespace sicnu::cli
 
 namespace {
