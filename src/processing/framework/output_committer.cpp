@@ -99,20 +99,55 @@ CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
 
   // Atomically publish: remove any stale stable target, then move the validated
   // temp output into place. QFile::rename is atomic when source and destination
-  // share a filesystem.
-  if ( QFile::exists( request.stablePath ) )
-    QFile::remove( request.stablePath );
-
+  // share a filesystem. Multi-file formats (shapefile .shx/.dbf/.prj/... sidecars
+  // beside the primary) move with the primary so the published dataset keeps its
+  // attributes and CRS (#462).
+  const QFileInfo tempInfo( request.tempPath );
   const QFileInfo stableInfo( request.stablePath );
   QDir().mkpath( stableInfo.absolutePath() );
 
-  if ( !QFile::rename( request.tempPath, request.stablePath ) )
+  // Collect the primary plus every same-stem sidecar that exists in the temp
+  // directory (e.g. scratch.shx/.dbf/.prj/.cpg/.qix/.shp.xml for scratch.shp).
+  struct PublishPair
   {
-    return CommitResult::failure( diagnostic(
-      QStringLiteral( "output.publish_failed" ),
-      QStringLiteral( "Failed to publish output to %1 (is the temp path on a "
-                      "different filesystem from the stable path?)" )
-        .arg( request.stablePath ) ) );
+    QString from;
+    QString to;
+  };
+  QVector<PublishPair> publishes;
+  publishes.append( { request.tempPath, request.stablePath } );
+  const QString tempBase = tempInfo.absolutePath() + QLatin1Char( '/' ) + tempInfo.completeBaseName();
+  const QString stableBase = stableInfo.absolutePath() + QLatin1Char( '/' ) + stableInfo.completeBaseName();
+  const QStringList sidecarSuffixes = { QStringLiteral( ".shx" ), QStringLiteral( ".dbf" ),
+                                        QStringLiteral( ".prj" ), QStringLiteral( ".cpg" ),
+                                        QStringLiteral( ".sbn" ), QStringLiteral( ".sbx" ),
+                                        QStringLiteral( ".qix" ), QStringLiteral( ".shp.xml" ),
+                                        QStringLiteral( ".tfw" ), QStringLiteral( ".aux" ) };
+  for ( const QString &suffix : sidecarSuffixes )
+  {
+    const QString from = tempBase + suffix;
+    if ( QFile::exists( from ) )
+      publishes.append( { from, stableBase + suffix } );
+  }
+
+  // Stage the move: stale targets away first, then rename each file. A failure
+  // midway rolls everything back to keep the stable tree free of half-published
+  // datasets.
+  QStringList renamed;
+  for ( const PublishPair &pair : publishes )
+  {
+    if ( QFile::exists( pair.to ) )
+      QFile::remove( pair.to );
+    if ( !QFile::rename( pair.from, pair.to ) )
+    {
+      for ( const QString &done : renamed )
+        QFile::remove( done );
+      return CommitResult::failure( diagnostic(
+        QStringLiteral( "output.publish_failed" ),
+        QStringLiteral( "Failed to publish output to %1 (is the temp path on a "
+                        "different filesystem from the stable path?)" )
+          .arg( request.stablePath ) ) );
+    }
+    renamed.append( pair.to );
   }
 
   SourceDescriptor source;
@@ -132,9 +167,11 @@ CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
   {
     // Registration failed AFTER the atomic publish succeeded. To honour
     // "the catalog never holds an apparently-valid output from an incomplete
-    // task", roll the publish back: remove the just-published stable file so
-    // there is no orphaned, apparently-valid output and nothing is registered.
-    QFile::remove( request.stablePath );
+    // task", roll the publish back: remove the just-published files (primary
+    // + sidecars, #462) so there is no orphaned, apparently-valid output and
+    // nothing is registered.
+    for ( const QString &published : renamed )
+      QFile::remove( published );
 
     const QVector<Diagnostic> detail = registered.diagnostics.isEmpty()
       ? QVector<Diagnostic>{ diagnostic(
