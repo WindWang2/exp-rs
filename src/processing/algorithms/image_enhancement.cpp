@@ -105,7 +105,8 @@ void ImageEnhancement::histogramEqualize(const float *input, float *output, size
         return;
     }
 
-    std::vector<int> hist(bins, 0);
+    // uint64 bin counters: a single bin can hold >2^31 pixels on >2Gpx rasters (#446)
+    std::vector<uint64_t> hist(bins, 0);
     float binWidth = (max - min) / bins;
 
     for (size_t i = 0; i < count; i++) {
@@ -117,7 +118,7 @@ void ImageEnhancement::histogramEqualize(const float *input, float *output, size
     }
 
     std::vector<float> cdf(bins);
-    size_t validCount = 0;
+    uint64_t validCount = 0;
     for (int i = 0; i < bins; i++) validCount += hist[i];
 
     // All pixels are nodata — output all nodata
@@ -242,6 +243,12 @@ static void separableConvolve(const float *input, float *output, int width, int 
                               const float *kernel1D, int kernelSize)
 {
     int half = kernelSize / 2;
+    // Zero-sum derivative kernels must not be weight-renormalized (see
+    // convolve); averaging kernels renormalize over finite neighbors.
+    float kernelSum = 0.0f;
+    for (int i = 0; i < kernelSize; ++i)
+        kernelSum += kernel1D[i];
+    const bool isAveragingKernel = kernelSum > 1e-6f;
     // Temporary buffer for horizontal pass
     std::vector<float> temp(static_cast<size_t>(width) * height);
 
@@ -260,6 +267,7 @@ static void separableConvolve(const float *input, float *output, int width, int 
                 }
                 float sum = 0.0f;
                 float wSum = 0.0f;
+                bool hasFinite = false;
                 for (int k = -half; k <= half; k++) {
                     int ix = std::clamp(x + k, 0, width - 1);
                     float val = input[rowOff + ix];
@@ -267,9 +275,13 @@ static void separableConvolve(const float *input, float *output, int width, int 
                         float w = kernel1D[k + half];
                         sum += val * w;
                         wSum += w;
+                        hasFinite = true;
                     }
                 }
-                temp[rowOff + x] = (wSum > 1e-6f) ? (sum / wSum) : std::numeric_limits<float>::quiet_NaN();
+                if (isAveragingKernel)
+                    temp[rowOff + x] = (wSum > 1e-6f) ? (sum / wSum) : std::numeric_limits<float>::quiet_NaN();
+                else
+                    temp[rowOff + x] = hasFinite ? sum : std::numeric_limits<float>::quiet_NaN();
             }
         }
     }
@@ -288,6 +300,7 @@ static void separableConvolve(const float *input, float *output, int width, int 
                 }
                 float sum = 0.0f;
                 float wSum = 0.0f;
+                bool hasFinite = false;
                 for (int k = -half; k <= half; k++) {
                     int iy = std::clamp(y + k, 0, height - 1);
                     float val = temp[static_cast<size_t>(iy) * width + x];
@@ -295,9 +308,13 @@ static void separableConvolve(const float *input, float *output, int width, int 
                         float w = kernel1D[k + half];
                         sum += val * w;
                         wSum += w;
+                        hasFinite = true;
                     }
                 }
-                output[rowOff + x] = (wSum > 1e-6f) ? (sum / wSum) : std::numeric_limits<float>::quiet_NaN();
+                if (isAveragingKernel)
+                    output[rowOff + x] = (wSum > 1e-6f) ? (sum / wSum) : std::numeric_limits<float>::quiet_NaN();
+                else
+                    output[rowOff + x] = hasFinite ? sum : std::numeric_limits<float>::quiet_NaN();
             }
         }
     }
@@ -307,6 +324,15 @@ void ImageEnhancement::convolve(const float *input, float *output, int width, in
                                 const float *kernel, int kernelSize)
 {
     int half = kernelSize / 2;
+
+    // Averaging kernels (positive total weight, e.g. box/Gaussian) renormalize
+    // by the finite-neighbor weight sum so NoData borders stay unbiased.
+    // Zero-sum derivative kernels (Sobel/Laplacian) must emit the raw sum —
+    // normalizing them yields NaN everywhere (#442).
+    float kernelSum = 0.0f;
+    for (int i = 0; i < kernelSize * kernelSize; ++i)
+        kernelSum += kernel[i];
+    const bool isAveragingKernel = kernelSum > 1e-6f;
 
     // Process in chunks for better cache locality
     const int chunkHeight = 256;
@@ -321,6 +347,7 @@ void ImageEnhancement::convolve(const float *input, float *output, int width, in
                 }
                 float sum = 0.0f;
                 float wSum = 0.0f;
+                bool hasFinite = false;
 
                 for (int ky = -half; ky <= half; ky++) {
                     for (int kx = -half; kx <= half; kx++) {
@@ -333,11 +360,15 @@ void ImageEnhancement::convolve(const float *input, float *output, int width, in
                             float kVal = kernel[(ky + half) * kernelSize + (kx + half)];
                             sum += pixel * kVal;
                             wSum += kVal;
+                            hasFinite = true;
                         }
                     }
                 }
 
-                output[y * width + x] = (wSum > 1e-6f) ? (sum / wSum) : std::numeric_limits<float>::quiet_NaN();
+                if (isAveragingKernel)
+                    output[y * width + x] = (wSum > 1e-6f) ? (sum / wSum) : std::numeric_limits<float>::quiet_NaN();
+                else
+                    output[y * width + x] = hasFinite ? sum : std::numeric_limits<float>::quiet_NaN();
             }
         }
     }

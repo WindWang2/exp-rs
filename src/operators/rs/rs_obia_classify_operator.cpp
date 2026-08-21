@@ -248,8 +248,8 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
 
     std::vector<std::vector<double>> sum(static_cast<size_t>(nSeg + 1),
                                          std::vector<double>(static_cast<size_t>(nFeat), 0.0));
-    std::vector<std::vector<int>> validCounts(static_cast<size_t>(nSeg + 1),
-                                              std::vector<int>(static_cast<size_t>(nFeat), 0));
+    std::vector<std::vector<int64_t>> validCounts(static_cast<size_t>(nSeg + 1),
+                                              std::vector<int64_t>(static_cast<size_t>(nFeat), 0));
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             const size_t pix = static_cast<size_t>(y) * width + x;
@@ -272,9 +272,9 @@ Json::Value RsObiaClassifyOperator::run(const Json::Value& params, RSOperatorCon
                                           std::vector<float>(static_cast<size_t>(nFeat), 0.0f));
     std::vector<bool> segHasValid(static_cast<size_t>(nSeg + 1), false);
     for (int s = 1; s <= nSeg; ++s) {
-        int totalValid = 0;
+        int64_t totalValid = 0;
         for (int f = 0; f < nFeat; ++f) {
-            const int cnt = validCounts[static_cast<size_t>(s)][static_cast<size_t>(f)];
+            const int64_t cnt = validCounts[static_cast<size_t>(s)][static_cast<size_t>(f)];
             totalValid += cnt;
             if (cnt > 0) {
                 feats[static_cast<size_t>(s)][static_cast<size_t>(f)] =

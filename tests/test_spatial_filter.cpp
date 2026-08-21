@@ -159,3 +159,31 @@ TEST_CASE("Spatial filters on larger kernels 5x5 and 7x7", "[spatial][kernels]")
         REQUIRE(outMed7[i] == Approx(42.0f).margin(1e-4f));
     }
 }
+
+TEST_CASE("Convolve NoData handling differs for averaging vs derivative kernels (#442)", "[spatial][convolve][nodata]")
+{
+    // 5x1 row (H=1 -> vertical neighbors clamp to the same row):
+    // in = [NaN, 10, 0, 10, 5]
+    const int W = 5, H = 1;
+    std::vector<float> in = {
+        std::numeric_limits<float>::quiet_NaN(), 10.0f, 0.0f, 10.0f, 5.0f,
+    };
+
+    std::vector<float> outAvg(W * H), outZero(W * H);
+    const float avg[9] = {0, 0, 0, 0, 1.0f, 0, 0, 0, 0}; // identity (sum=1)
+    const float lap[9] = {0, 1, 0, 1, -4, 1, 0, 1, 0};   // zero-sum derivative
+
+    ImageEnhancement::convolve(in.data(), outAvg.data(), W, H, avg, 3);
+    ImageEnhancement::convolve(in.data(), outZero.data(), W, H, lap, 3);
+
+    // Averaging kernel: NaN pixel propagates; finite pixels keep values.
+    REQUIRE(std::isnan(outAvg[0]));
+    CHECK(outAvg[2] == Approx(0.0f).margin(1e-5f));
+
+    // Zero-sum kernel: raw sum with NaN neighbors skipped (no renorm NaN):
+    // x=1: up(10) + down(10) + right(0) - 4*center(10) = -20  (left is NaN, skipped)
+    REQUIRE(std::isnan(outZero[0]));
+    CHECK(outZero[1] == Approx(-20.0f).margin(1e-4f));
+    // x=2 interior: up(0) + down(0) + left(10) + right(10) - 4*0 = 20
+    CHECK(outZero[2] == Approx(20.0f).margin(1e-4f));
+}

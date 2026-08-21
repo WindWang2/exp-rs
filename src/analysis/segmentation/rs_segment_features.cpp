@@ -102,7 +102,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         QVector<double> glcmCorrelation;
         QVector<double> glcmEnergy;
         QVector<double> glcmHomogeneity;
-        int count = 0;
+        int64_t count = 0;
     };
     std::vector<Acc> accVec;
     QMap<quint32, Acc> accMap; // fallback for sparse labels

@@ -17,7 +17,7 @@ float TerrainAnalysis::getCell( const float *dem, int width, int height,
 {
     if ( row < 0 || row >= height || col < 0 || col >= width )
         return nodata;
-    return dem[row * width + col];
+    return dem[static_cast<size_t>( row ) * width + col];
 }
 
 // ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
 
     // Border pixels: use getCell with bounds checking
     auto processBorder = [&]( int r, int c ) {
-        const int idx = r * width + c;
+        const size_t idx = static_cast<size_t>( r ) * width + c;
         const float z = dem[idx];
         if ( isInvalid( z ) ) { out[idx] = nodata; return; }
 
@@ -101,7 +101,7 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
 
     // Interior pixels: direct array access, no bounds checks
     auto processInterior = [&]( int r, int c ) {
-        const int idx = r * width + c;
+        const size_t idx = static_cast<size_t>( r ) * width + c;
         const float z = dem[idx];
         if ( isInvalid( z ) ) { out[idx] = nodata; return; }
 
@@ -194,7 +194,7 @@ bool TerrainAnalysis::aspect( const float *dem, float *out, int width, int heigh
     auto isInvalid = [nodata]( float v ) { return v == nodata || std::isnan( v ); };
 
     auto computeAspect = [&]( int r, int c, bool useBounds ) {
-        const int idx = r * width + c;
+        const size_t idx = static_cast<size_t>( r ) * width + c;
         const float z = dem[idx];
         if ( isInvalid( z ) ) { out[idx] = nodata; return; }
 
@@ -304,7 +304,7 @@ bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int he
 
     auto isInvalid = [nodata]( float v ) { return v == nodata || std::isnan( v ); };
     auto computeHillshade = [&]( int r, int c, bool useBounds ) {
-        const int idx = r * width + c;
+        const size_t idx = static_cast<size_t>( r ) * width + c;
         const float z = dem[idx];
         if ( isInvalid( z ) ) { out[idx] = nodata; return; }
 
@@ -403,7 +403,7 @@ bool TerrainAnalysis::roughness( const float *dem, float *out, int width, int he
     {
         for ( int c = 0; c < width; ++c )
         {
-            const int idx = r * width + c;
+            const size_t idx = static_cast<size_t>( r ) * width + c;
             const float z = dem[idx];
 
             if ( z == nodata || std::isnan( z ) )
@@ -453,7 +453,7 @@ bool TerrainAnalysis::tri( const float *dem, float *out, int width, int height,
     {
         for ( int c = 0; c < width; ++c )
         {
-            const int idx = r * width + c;
+            const size_t idx = static_cast<size_t>( r ) * width + c;
             const float z = dem[idx];
 
             if ( z == nodata || std::isnan( z ) )
@@ -504,7 +504,7 @@ bool TerrainAnalysis::tpi( const float *dem, float *out, int width, int height,
     {
         for ( int c = 0; c < width; ++c )
         {
-            const int idx = r * width + c;
+            const size_t idx = static_cast<size_t>( r ) * width + c;
             const float z = dem[idx];
 
             if ( z == nodata || std::isnan( z ) )

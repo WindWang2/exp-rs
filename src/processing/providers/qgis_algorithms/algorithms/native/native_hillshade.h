@@ -73,8 +73,10 @@ protected:
         QgsRasterDataProvider *dp = layer->dataProvider();
         const float nodata = static_cast<float>( dp->sourceNoDataValue( 1 ) );
 
-        QVector<float> demData( nCols * nRows );
-        QVector<float> hsData( nCols * nRows );
+        // 64-bit pixel count: int products overflow past 2^31 px (#446)
+        const size_t nPixels = static_cast<size_t>( nCols ) * static_cast<size_t>( nRows );
+        QVector<float> demData( static_cast<qsizetype>( nPixels ) );
+        QVector<float> hsData( static_cast<qsizetype>( nPixels ) );
 
         // Read block-by-block for progress reporting
         const int blockSize = 256;
@@ -103,7 +105,7 @@ protected:
                     for ( int c = 0; c < bw; ++c )
                     {
                         const double val = block->value( r, c );
-                        demData[( row + r ) * nCols + ( col + c )] = std::isnan( val ) ? nodata : static_cast<float>( val );
+                        demData[static_cast<size_t>( row + r ) * nCols + ( col + c )] = std::isnan( val ) ? nodata : static_cast<float>( val );
                     }
                 }
             }
@@ -162,7 +164,7 @@ protected:
                 {
                     for ( int c = 0; c < bw; ++c )
                     {
-                        outBlock.setValue( r, c, static_cast<double>( hsData[( row + r ) * nCols + ( col + c )] ) );
+                        outBlock.setValue( r, c, static_cast<double>( hsData[static_cast<size_t>( row + r ) * nCols + ( col + c )] ) );
                     }
                 }
                 outDp->writeBlock( &outBlock, 1, col, row );
