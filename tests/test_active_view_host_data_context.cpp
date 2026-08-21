@@ -3,6 +3,8 @@
 
 #include <QCoreApplication>
 #include <QFileInfo>
+
+#include "vector_test_fixtures.h"
 #include <QMap>
 #include <QTemporaryDir>
 
@@ -75,6 +77,10 @@ QString fixturePath( const QString &relative )
        relative == QLatin1String( "dem.hdr" ) )
   {
     return syntheticSample( relative );
+  }
+  if ( relative == QLatin1String( "test_vectors.geojson" ) )
+  {
+    return vector_test_fixtures::syntheticGeoJsonPath();
   }
   const QString here = QFileInfo( __FILE__ ).absolutePath();
   return QFileInfo( here + QStringLiteral( "/../data/" ) + relative ).absoluteFilePath();
@@ -267,7 +273,6 @@ TEST_CASE( "Project Context explicitly clears Data and Display state for a new "
 TEST_CASE( "Generic openPath delegates vector discovery to providers",
            "[active_view_host][data_context]" )
 {
-  SKIP( "test_vectors.geojson removed from VCS" );
   QgsProject *project = QgsProject::instance();
   project->clear();
 
