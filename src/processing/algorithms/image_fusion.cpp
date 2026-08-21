@@ -737,11 +737,30 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
         return false;
     }
 
+    // Resolve the working NoData sentinel from both inputs: prefer the pan's
+    // declared NoData, then the first MS band that declares one. Without any
+    // declaration there is no sentinel to mask against — use NaN so MS NoData
+    // pixels are never compared against a fabricated -9999 (#445).
     bool hasPanNodata = false;
     double panNodataVal = panDataset.bandNoDataValue( 1, &hasPanNodata );
-    const float nodata = hasPanNodata ? static_cast<float>( panNodataVal ) : -9999.0f;
+    if ( !hasPanNodata )
+    {
+        for ( int b = 1; b <= msBands; ++b )
+        {
+            bool hasMsNodata = false;
+            const double msNodataVal = msDataset.bandNoDataValue( b, &hasMsNodata );
+            if ( hasMsNodata )
+            {
+                panNodataVal = msNodataVal;
+                hasPanNodata = true;
+                break;
+            }
+        }
+    }
+    const float nodata = hasPanNodata ? static_cast<float>( panNodataVal )
+                                      : std::numeric_limits<float>::quiet_NaN();
     for ( int b = 0; b < nOutBands; ++b )
-        outDataset.setBandNoDataValue( b + 1, nodata );
+        outDataset.setBandNoDataValue( b + 1, static_cast<double>( nodata ) );
 
     const int tileW = std::max( 16, params.tileWidth <= 0 ? 512 : params.tileWidth );
     const int tileH = std::max( 16, params.tileHeight <= 0 ? 512 : params.tileHeight );

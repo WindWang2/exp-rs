@@ -22,6 +22,8 @@
 #include <gdal.h>
 #include <cpl_error.h>
 
+#include <limits>
+
 ContrastStretchDialog::ContrastStretchDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
 {
@@ -152,33 +154,59 @@ void ContrastStretchDialog::onRun()
 
     std::vector<std::vector<float>> outputBands( bandCount, std::vector<float>( pixelCount ) );
 
+    // Resolve each band's declared NoData (float-cast; NaN when undeclared) so
+    // stretches mask the real sentinel instead of a fabricated -9999 (#445).
+    std::vector<float> bandNodata( bandCount, std::numeric_limits<float>::quiet_NaN() );
     for ( int b = 0; b < bandCount; ++b )
     {
+      bool hasNd = false;
+      const double nd = srcDataset.bandNoDataValue( b + 1, &hasNd );
+      if ( hasNd && std::isfinite( nd ) )
+        bandNodata[b] = static_cast<float>( nd );
+    }
+
+    for ( int b = 0; b < bandCount; ++b )
+    {
+      const float ndF = bandNodata[b];
       switch ( methodIndex )
       {
         case 0:
           ImageEnhancement::piecewiseLinearStretch( allBands[b].data(), outputBands[b].data(),
-                                                    pixelCount, stdPoints );
+                                                    pixelCount, stdPoints, ndF );
           break;
         case 1:
         {
-          float minVal = *std::min_element( allBands[b].begin(), allBands[b].end() );
-          float maxVal = *std::max_element( allBands[b].begin(), allBands[b].end() );
+          // Min/max over valid pixels only: NaN/Inf and declared-NoData pixels
+          // must not seed the stretch bounds (#445).
+          float minVal = std::numeric_limits<float>::max();
+          float maxVal = std::numeric_limits<float>::lowest();
+          for ( float v : allBands[b] )
+          {
+            if ( !std::isfinite( v ) || v == ndF )
+              continue;
+            minVal = std::min( minVal, v );
+            maxVal = std::max( maxVal, v );
+          }
+          if ( minVal > maxVal )
+          {
+            minVal = 0.0f;
+            maxVal = 0.0f;
+          }
           ImageEnhancement::linearStretch( allBands[b].data(), outputBands[b].data(),
-                                           pixelCount, minVal, maxVal );
+                                           pixelCount, minVal, maxVal, ndF );
           break;
         }
         case 2:
           ImageEnhancement::percentClipStretch( allBands[b].data(), outputBands[b].data(),
-                                                pixelCount, static_cast<float>( clipValue ) );
+                                                pixelCount, static_cast<float>( clipValue ), ndF );
           break;
         case 3:
           ImageEnhancement::stddevStretch( allBands[b].data(), outputBands[b].data(),
-                                           pixelCount, static_cast<float>( stddevValue ) );
+                                           pixelCount, static_cast<float>( stddevValue ), ndF );
           break;
         case 4:
           ImageEnhancement::histogramEqualize( allBands[b].data(), outputBands[b].data(),
-                                               pixelCount );
+                                               pixelCount, 256, ndF );
           break;
       }
     }

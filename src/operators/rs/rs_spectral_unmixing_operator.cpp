@@ -204,7 +204,7 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
                                           " at (" + std::to_string(x) + "," + std::to_string(y) + ")");
                 for (size_t p = 0; p < tileSize; ++p) {
                     float val = bandData[p];
-                    if (bandNoData[bi].first && static_cast<double>(val) == bandNoData[bi].second)
+                    if (bandNoData[bi].first && val == static_cast<float>(bandNoData[bi].second))
                         val = std::numeric_limits<float>::quiet_NaN();
                     tilePixels[p * static_cast<size_t>(nBands) + bi] = val;
                 }

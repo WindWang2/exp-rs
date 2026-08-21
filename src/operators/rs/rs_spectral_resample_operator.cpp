@@ -217,6 +217,17 @@ Json::Value RsSpectralResampleOperator::run(const Json::Value& params,
     const float nan = std::numeric_limits<float>::quiet_NaN();
     const size_t pixelCount = static_cast<size_t>(width) * height;
 
+    // Per-band declared NoData (float-cast; NaN when undeclared): a source
+    // sentinel must not be interpolated into an output "value" (#445).
+    std::vector<float> bandNodata(static_cast<size_t>(bandCount), nan);
+    for (int b = 1; b <= bandCount; ++b)
+    {
+        bool hasNd = false;
+        const double nd = ds.bandNoDataValue(b, &hasNd);
+        if (hasNd && std::isfinite(nd))
+            bandNodata[static_cast<size_t>(b - 1)] = static_cast<float>(nd);
+    }
+
     QString outErr;
     GDALDatasetH outDs = createOutputTiff(QString::fromStdString(outputPath), width, height,
                                           dstBands, static_cast<int>(GDT_Float32),
@@ -272,6 +283,15 @@ Json::Value RsSpectralResampleOperator::run(const Json::Value& params,
                     }
                     const float lo = spectrum[e.srcLo];
                     const float hi = (e.srcLo + 1 < bandCount) ? spectrum[e.srcLo + 1] : lo;
+                    // Interpolating across a NoData sentinel produces a bogus
+                    // mid-value; propagate NoData instead (#445).
+                    if (!std::isfinite(lo) || !std::isfinite(hi) ||
+                        lo == bandNodata[static_cast<size_t>(e.srcLo)] ||
+                        hi == bandNodata[static_cast<size_t>(std::min(e.srcLo + 1, bandCount - 1))])
+                    {
+                        outSpectrum[t] = nan;
+                        continue;
+                    }
                     outSpectrum[t] = lo + e.frac * (hi - lo);
                 }
             }

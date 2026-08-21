@@ -388,9 +388,11 @@ bool processFileMultiBand(const QString &sourcePath, const QString &outputPath,
         }
         bool hasNoData = false;
         const double nodataVal = srcDataset.bandNoDataValue( b + 1, &hasNoData );
-        if ( hasNoData ) {
+        if ( hasNoData && std::isfinite( nodataVal ) ) {
+            // Float-space compare: large sentinels (-3.4e38) match exactly (#444).
+            const float nodataF = static_cast<float>( nodataVal );
             for ( size_t i = 0; i < pixelCount; ++i ) {
-                if ( !std::isnan( nodataVal ) ? std::abs( dnBands[b][i] - nodataVal ) < 1e-4f : std::isnan( dnBands[b][i] ) )
+                if ( !std::isfinite( dnBands[b][i] ) || dnBands[b][i] == nodataF )
                     dnBands[b][i] = std::numeric_limits<float>::quiet_NaN();
             }
         }

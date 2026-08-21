@@ -37,12 +37,17 @@ cv::Mat readRasterBandToMat(const std::string& inputPath,
         return {};
     }
 
-    const double nodata = ds.bandNoDataValue(band);
-    if (!std::isnan(nodata)) {
+    // Honor the hasNoData flag: an unset NoData returns an unspecified value
+    // (0.0 in practice), and masking against it would destroy every valid 0
+    // pixel (#444). Compare in float space so large sentinels match exactly.
+    bool hasNodata = false;
+    const double nodata = ds.bandNoDataValue(band, &hasNodata);
+    if (hasNodata && std::isfinite(nodata)) {
+        const float nodataF = static_cast<float>(nodata);
         float *ptr = mat.ptr<float>();
         const size_t n = static_cast<size_t>(w) * h;
         for (size_t i = 0; i < n; ++i) {
-            if (std::abs(ptr[i] - nodata) < 1e-4f)
+            if (!std::isfinite(ptr[i]) || ptr[i] == nodataF)
                 ptr[i] = std::numeric_limits<float>::quiet_NaN();
         }
     }
@@ -69,12 +74,14 @@ std::vector<cv::Mat> readRasterBandsToMats(const std::string& inputPath,
             if (errorMessage) *errorMessage = "Failed to read raster band " + std::to_string(b);
             return {};
         }
-        const double nodata = ds.bandNoDataValue(b);
-        if (!std::isnan(nodata)) {
+        bool hasNodata = false;
+        const double nodata = ds.bandNoDataValue(b, &hasNodata);
+        if (hasNodata && std::isfinite(nodata)) {
+            const float nodataF = static_cast<float>(nodata);
             float *ptr = bandMat.ptr<float>();
             const size_t n = static_cast<size_t>(w) * h;
             for (size_t i = 0; i < n; ++i) {
-                if (std::abs(ptr[i] - nodata) < 1e-4f)
+                if (!std::isfinite(ptr[i]) || ptr[i] == nodataF)
                     ptr[i] = std::numeric_limits<float>::quiet_NaN();
             }
         }
@@ -120,17 +127,23 @@ bool writeMatToRaster(const std::string& outputPath,
         return false;
     }
 
-    const double srcNodata = src.bandNoDataValue(1);
-    const double outNodata = !std::isnan(srcNodata) ? srcNodata : std::numeric_limits<double>::quiet_NaN();
+    // Only materialize NaN -> sentinel when the source actually declares a
+    // finite NoData; with no declaration the output keeps NaN pixels and is
+    // declared NoData=NaN (never a fabricated 0) (#445).
+    bool srcHasNodata = false;
+    const double srcNodata = src.bandNoDataValue(1, &srcHasNodata);
+    const bool srcNodataValid = srcHasNodata && std::isfinite(srcNodata);
+    const double outNodata = srcNodataValid ? srcNodata : std::numeric_limits<double>::quiet_NaN();
     GDALSetRasterNoDataValue(band, outNodata);
 
     cv::Mat bandMat = mat.isContinuous() ? mat : mat.clone();
-    if (!std::isnan(srcNodata)) {
+    if (srcNodataValid) {
+        const float nodataF = static_cast<float>(srcNodata);
         float *ptr = bandMat.ptr<float>();
         const size_t n = static_cast<size_t>(w) * h;
         for (size_t k = 0; k < n; ++k) {
             if (std::isnan(ptr[k]))
-                ptr[k] = static_cast<float>(srcNodata);
+                ptr[k] = nodataF;
         }
     }
 
@@ -197,17 +210,20 @@ bool writeMatsToRaster(const std::string& outputPath,
 
     for (int i = 0; i < bandCount; ++i) {
         GDALRasterBandH band = GDALGetRasterBand(outDs, i + 1);
-        const double srcNodata = src.bandNoDataValue(i + 1);
-        const double outNodata = !std::isnan(srcNodata) ? srcNodata : std::numeric_limits<double>::quiet_NaN();
+        bool srcHasNodata = false;
+        const double srcNodata = src.bandNoDataValue(i + 1, &srcHasNodata);
+        const bool srcNodataValid = srcHasNodata && std::isfinite(srcNodata);
+        const double outNodata = srcNodataValid ? srcNodata : std::numeric_limits<double>::quiet_NaN();
         GDALSetRasterNoDataValue(band, outNodata);
 
         cv::Mat bandMat = mats[i].isContinuous() ? mats[i] : mats[i].clone();
-        if (!std::isnan(srcNodata)) {
+        if (srcNodataValid) {
+            const float nodataF = static_cast<float>(srcNodata);
             float *ptr = bandMat.ptr<float>();
             const size_t n = static_cast<size_t>(w) * h;
             for (size_t k = 0; k < n; ++k) {
                 if (std::isnan(ptr[k]))
-                    ptr[k] = static_cast<float>(srcNodata);
+                    ptr[k] = nodataF;
             }
         }
 

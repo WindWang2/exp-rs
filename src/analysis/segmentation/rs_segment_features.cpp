@@ -79,7 +79,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         {
             if ( !validMask[i] ) continue;
             const float v = bandBuf[i];
-            if ( std::isnan( v ) || ( hasNoData[b] && static_cast<double>( v ) == bandNoData[b] ) )
+            if ( std::isnan( v ) || ( hasNoData[b] && v == static_cast<float>( bandNoData[b] ) ) )
                 validMask[i] = 0;
         }
     }
@@ -297,7 +297,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                     const float val1 = bandBuf[idx];
                     // validMask guarantees not NaN/NoData, but keep guard for safety
                     if ( std::isnan(val1) ) continue;
-                    if ( hasNoData[b] && static_cast<double>(val1) == bandNoData[b] ) continue;
+                    if ( hasNoData[b] && val1 == static_cast<float>( bandNoData[b] ) ) continue;
                     const size_t level1 = static_cast<size_t>( std::clamp( static_cast<int>( ( val1 - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 ) );
                     const int drs[] = { 0, 1 };
                     const int dcs[] = { 1, 0 };
@@ -311,7 +311,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                         if ( !validMask[nIdx] ) continue;
                         const float val2 = bandBuf[nIdx];
                         if ( std::isnan(val2) ) continue;
-                        if ( hasNoData[b] && static_cast<double>(val2) == bandNoData[b] ) continue;
+                        if ( hasNoData[b] && val2 == static_cast<float>( bandNoData[b] ) ) continue;
                         const size_t level2 = static_cast<size_t>( std::clamp( static_cast<int>( ( val2 - minV ) / rangeV * ( nLevels - 1 ) ), 0, nLevels - 1 ) );
                         glcm[level1][level2] += 1.0;
                         glcm[level2][level1] += 1.0;
