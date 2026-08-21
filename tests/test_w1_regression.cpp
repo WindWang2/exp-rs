@@ -14,11 +14,8 @@
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "cli/rs_pipeline_runner.h"
 
-#include <csignal>
-namespace sicnu::cli {
-volatile sig_atomic_t g_cliInterrupted = 0;
-bool cliIsInterrupted() { return g_cliInterrupted != 0; }
-}
+// g_cliInterrupted/cliIsInterrupted are defined in rs_pipeline_runner.cpp,
+// which this target compiles directly (#455) — no stub needed here anymore.
 
 using namespace sicnu::agent;
 
