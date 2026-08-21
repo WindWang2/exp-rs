@@ -144,13 +144,19 @@ void AtmosphericDialog::refreshMetadata()
   if ( band <= 0 )
     return;
 
+  // Full band-name map (descriptions first, synthetic B%1 fallback), matching
+  // RadiometricCalibration::processFile: a partial map previously degraded to
+  // identity auto-discovery for the other bands and could silently apply
+  // wrong-band coefficients on non-identity stacks (#448).
   QMap<int, QString> bandNames;
   GdalDatasetWrapper ds;
   if ( ds.open( m_rasterLayer->source() ) )
   {
-    const QString bandName = ds.bandDescription( band );
-    if ( !bandName.isEmpty() )
-      bandNames.insert( band, bandName );
+    for ( int b = 1; b <= ds.bandCount(); ++b )
+    {
+      const QString desc = ds.bandDescription( b );
+      bandNames.insert( b, desc.isEmpty() ? QStringLiteral( "B%1" ).arg( b ) : desc );
+    }
   }
 
   RadiometricCalibration::CalibrationMetadata meta;

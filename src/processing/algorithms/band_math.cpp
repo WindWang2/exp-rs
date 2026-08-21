@@ -687,16 +687,18 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
         }
         bool hasNodata = false;
         double nodataVal = srcDataset.bandNoDataValue(b, &hasNodata);
-        if (hasNodata && std::isfinite(nodataVal)) {
-            // Compare in float space: the pixels are float, so casting the
-            // declared NoData to float matches exactly regardless of magnitude.
-            // A fixed absolute tolerance (e.g. 1e-6) is far below one ULP for
-            // large sentinels like -3.4e38 and would never match them.
-            const float nodataF = static_cast<float>(nodataVal);
-            for (float &val : buffer) {
-                if (val == nodataF || std::isnan(val)) {
-                    val = std::numeric_limits<float>::quiet_NaN();
-                }
+        // Compare in float space: the pixels are float, so casting the
+        // declared NoData to float matches exactly regardless of magnitude.
+        // A fixed absolute tolerance (e.g. 1e-6) is far below one ULP for
+        // large sentinels like -3.4e38 and would never match them.
+        const float nodataF = static_cast<float>(nodataVal);
+        const bool nodataValid = hasNodata && std::isfinite(nodataVal);
+        for (float &val : buffer) {
+            // Mask Inf too (regardless of a NoData declaration): callFunction
+            // treats any non-finite operand as NoData, so file-level input
+            // must be uniformly finite-or-NaN (#449).
+            if (!std::isfinite(val) || (nodataValid && val == nodataF)) {
+                val = std::numeric_limits<float>::quiet_NaN();
             }
         }
         bands[b] = std::move(buffer);

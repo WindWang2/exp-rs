@@ -22,6 +22,7 @@
 #include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "operators/framework/rs_operator_registry.h"
+#include "agent/interaction_tool_registry.h"
 #include <qgsapplication.h>
 #include <processing/qgsprocessingregistry.h>
 #include <qgsproject.h>
@@ -228,7 +229,25 @@ TEST_CASE("MCP Server tests", "[agent][mcp]") {
         REQUIRE_THROWS_AS(server.testGetOperatorSchema("no:such_operator"), std::runtime_error);
     }
 
+    // Simulate a GUI host: headless hiding (6b64259fbf) only lists
+    // Interaction tools that are registered in the runtime registry.
+    auto registerGuiHost = []() {
+        auto &reg = sicnu::agent::InteractionToolRegistry::instance();
+        reg.reset();
+        sicnu::agent::InteractionToolDefinition view;
+        view.name = "view:get_state";
+        view.displayName = "Get view state";
+        view.category = "view";
+        reg.registerTool(view);
+        sicnu::agent::InteractionToolDefinition composite;
+        composite.name = "raster:set_band_composite";
+        composite.displayName = "Set band composite";
+        composite.category = "raster";
+        reg.registerTool(composite);
+    };
+
     SECTION("list_tools returns unified schema with category, name, description, schema") {
+        registerGuiHost();
         QVariantMap res = server.testListTools();
         QVariantList tools = res.value("tools").toList();
         REQUIRE_FALSE(tools.isEmpty());
@@ -257,6 +276,7 @@ TEST_CASE("MCP Server tests", "[agent][mcp]") {
     }
 
     SECTION("search_tools searches unified catalog by query") {
+        registerGuiHost();
         QVariantMap res = server.testSearchTools("show raster");
         QVariantList tools = res.value("tools").toList();
         REQUIRE_FALSE(tools.isEmpty());
@@ -269,6 +289,28 @@ TEST_CASE("MCP Server tests", "[agent][mcp]") {
             }
         }
         CHECK(foundBandComposite);
+    }
+
+    SECTION("headless MCP hides GUI-only interaction tools when registry is empty") {
+        sicnu::agent::InteractionToolRegistry::instance().reset();
+        QVariantMap res = server.testListTools();
+        QVariantList tools = res.value("tools").toList();
+        REQUIRE_FALSE(tools.isEmpty());
+        for (const QVariant &t : tools) {
+            const QString name = t.toMap().value("name").toString();
+            CHECK_FALSE(name.startsWith(QStringLiteral("view:")));
+            CHECK_FALSE(name.startsWith(QStringLiteral("roi:")));
+            CHECK_FALSE(name.startsWith(QStringLiteral("canvas:")));
+            CHECK_FALSE(name.startsWith(QStringLiteral("raster:")));
+        }
+        // And search cannot surface the hidden GUI tool either.
+        QVariantMap sres = server.testSearchTools("show raster");
+        QVariantList stools = sres.value("tools").toList();
+        for (const QVariant &t : stools) {
+            CHECK(t.toMap().value("name").toString() != QStringLiteral("raster:set_band_composite"));
+        }
+        // Restore a non-empty registry for later sections/tests.
+        sicnu::agent::InteractionToolRegistry::instance().reset();
     }
 
     SECTION("get_tool_schema returns schema for unified tools") {

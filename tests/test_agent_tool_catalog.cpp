@@ -185,9 +185,11 @@ TEST_CASE( "AgentToolCatalog: Search Capabilities", "[agent][tool_catalog][searc
     q1.group = "spectral";
     const auto spectralTools = catalog.searchTools( q1 );
     REQUIRE_FALSE( spectralTools.empty() );
+    // Group search is substring, case-insensitive (documented contract), so
+    // "spectral" also matches related groups like "hyperspectral".
     for ( const auto &t : spectralTools )
     {
-      CHECK( t.group == "spectral" );
+      CHECK( t.group.find( "spectral" ) != std::string::npos );
     }
 
     SearchQuery q2;

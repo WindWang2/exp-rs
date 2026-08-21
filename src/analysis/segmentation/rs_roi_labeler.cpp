@@ -160,9 +160,25 @@ QMap<quint32, int> RsRoiLabeler::labelByMajority( const RsSegmentMap &segMap,
         if ( coordTrans.handle )
         {
             clonedGeom = OGR_G_Clone( geom );
+            if ( !clonedGeom )
+            {
+                OGR_F_Destroy( feat );
+                GDALClose( vecDs );
+                return fail( QStringLiteral( "labelByMajority: geometry clone failed" ) );
+            }
             if ( OGR_G_Transform( clonedGeom, coordTrans.handle ) == OGRERR_NONE )
             {
                 geomToUse = clonedGeom;
+            }
+            else
+            {
+                // Fail closed: rasterizing an untransformed geometry against
+                // the raster grid silently votes wrong pixels (or none).
+                OGR_G_DestroyGeometry( clonedGeom );
+                OGR_F_Destroy( feat );
+                GDALClose( vecDs );
+                return fail( QStringLiteral(
+                    "labelByMajority: failed to reproject training geometry to the raster CRS" ) );
             }
         }
 

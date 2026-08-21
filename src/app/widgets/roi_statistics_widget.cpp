@@ -7,6 +7,7 @@
 #include <qgsrasterdataprovider.h>
 #include <qgsvectorlayer.h>
 #include <qgsgeometry.h>
+#include <qgspointxy.h>
 #include <qgsfeature.h>
 #include <qgsfeaturerequest.h>
 #include <qgsrectangle.h>
@@ -179,7 +180,11 @@ void RoiStatisticsWidget::computeStatistics()
                 const double cCenter = px + 0.5;
                 const double mapX = gt[0] + cCenter * gt[1] + rCenter * gt[2];
                 const double mapY = gt[3] + cCenter * gt[4] + rCenter * gt[5];
-                inside[static_cast<size_t>(y) * xSize + x] = roiGeom.contains(mapX, mapY) ? 1 : 0;
+                // intersects (not contains): GEOS Contains excludes points
+                // exactly on the boundary; include boundary-center pixels,
+                // consistent with the rasterizer's boundary handling (#449).
+                inside[static_cast<size_t>(y) * xSize + x] =
+                    roiGeom.intersects(QgsGeometry::fromPointXY(QgsPointXY(mapX, mapY))) ? 1 : 0;
             }
         }
     }
