@@ -14,6 +14,7 @@
 
 #include <cpl_conv.h>
 #include <gdal.h>
+#include <ogr_api.h>
 
 #include "data/asset_types.h"
 #include "data/data_asset.h"
@@ -294,6 +295,25 @@ TEST_CASE( "A committed vector output registers with the vector provider",
   CHECK( snapshot->kind() == AssetKind::Vector );
   CHECK( request.derivation.algorithmId ==
          manager.provenance( result.value() )->algorithmId );
+
+  // #462: the sidecars must publish with the primary — the stable dataset
+  // keeps its attributes and CRS, and the feature count survives.
+  for ( const QString &suffix : { QStringLiteral( ".shp" ), QStringLiteral( ".shx" ),
+                                  QStringLiteral( ".dbf" ), QStringLiteral( ".prj" ) } )
+  {
+    CHECK( QFile::exists( dir.filePath( QStringLiteral( "stable" ) + suffix ) ) );
+  }
+  GDALDatasetH stable = GDALOpenEx(
+      dir.filePath( QStringLiteral( "stable.shp" ) ).toUtf8().constData(),
+      GDAL_OF_VECTOR, nullptr, nullptr, nullptr );
+  REQUIRE( stable != nullptr );
+  OGRLayerH stableLayer = GDALDatasetGetLayer( stable, 0 );
+  REQUIRE( stableLayer != nullptr );
+  CHECK( OGR_L_GetFeatureCount( stableLayer, TRUE ) == 2 );
+  CHECK( OGR_L_GetLayerDefn( stableLayer ) != nullptr );
+  CHECK( OGR_F_GetFieldIndex(
+             OGR_L_GetNextFeature( stableLayer ), "class" ) >= 0 );
+  GDALClose( stable );
 }
 
 TEST_CASE( "A committed output defaults to opt-in display (no signal unless asked)",
