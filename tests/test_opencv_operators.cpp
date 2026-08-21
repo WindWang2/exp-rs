@@ -242,8 +242,11 @@ TEST_CASE("OpenCv operator cancellation", "[opencv]") {
     QTemporaryDir tempDir;
     REQUIRE(tempDir.isValid());
 
-    // Larger image to give cancellation time to take effect
-    QString input = createTestRaster(tempDir.path(), "in.tif", 256, 256, 10);
+    // Larger image to give cancellation time to take effect. 2048^2 x 10
+    // bands keeps the read+blur reliably above the 10 ms cancel delay — the
+    // old 256^2 raster could finish first once the NoData masking got faster
+    // (#444), turning the cancellation contract into a race.
+    QString input = createTestRaster(tempDir.path(), "in.tif", 2048, 2048, 10);
     QString output = tempDir.path() + QDir::separator() + "cancelled.tif";
 
     auto op = std::make_unique<OpenCvGaussianBlurOperator>();
