@@ -2,7 +2,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QCoreApplication>
+
+#include <chrono>
+#include <thread>
 #include "shell/gui_job_adapter.h"
+#include "jobs/job_engine.h"
+#include "operators/framework/rs_operator_context.h"
 #include "processing/framework/task_center.h"
 
 using namespace sicnu;
@@ -38,31 +43,37 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
     }
 
     SECTION("Successful task completion callback and signal emission") {
+        // Inject a synchronous executor: the test process never registers the
+        // app's fallback executor, so a bare "gdal:contrast_stretch" request
+        // fails asynchronously in the engine and races any manual state
+        // transitions — the source of this test's historical flakiness.
         jobs::JobRequest req;
-        req.algorithmId = "gdal:contrast_stretch";
+        req.algorithmId = "test:fast_success";
         req.params["OUTPUT"] = "/tmp/test_out.tif";
 
         bool successCalled = false;
         QString receivedPath;
 
-        long taskId = handle.submitJob(req, [&](const QString &outPath, const Json::Value &) {
-            successCalled = true;
-            receivedPath = outPath;
-        }, nullptr);
+        long taskId = handle.submitJob(
+            req,
+            [](const jobs::JobRequest &, sicnu::operators::RSOperatorContext &) {
+                Json::Value result(Json::objectValue);
+                result["output"] = "/tmp/test_out.tif";
+                return result;
+            },
+            nullptr, true,
+            [&](const QString &outPath, const Json::Value &) {
+                successCalled = true;
+                receivedPath = outPath;
+            },
+            nullptr);
 
+        // #453: the id of a submission that already reached a terminal state
+        // during catch-up must still be reported.
         REQUIRE(taskId > 0);
 
-        // Simulate TaskCenter completion
-        TaskCenter::instance().markTaskRunning(taskId);
-        Json::Value payload(Json::objectValue);
-        payload["output"] = "/tmp/test_out.tif";
-        TaskCenter::instance().markTaskCompleted(taskId, QVariantMap(), payload);
-
-        // Process pending Qt events to deliver QueuedConnection signal.
-        // Under parallel `ctest -j8` the queued signal can take several
-        // seconds to land on a contended event loop (see 8eb781cb51, which
-        // added the original retry loop); allow up to ~20 s so the callback
-        // window is not the flaky part under load.
+        // The engine worker resolves the job asynchronously; pump queued
+        // signals until the completion callback lands.
         for ( int i = 0; i < 2000 && !successCalled; ++i )
         {
           QCoreApplication::processEvents();
@@ -76,23 +87,32 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
 
     SECTION("Task failure callback and cancellation") {
         jobs::JobRequest req;
-        req.algorithmId = "gdal:contrast_stretch";
+        req.algorithmId = "test:fast_fail";
 
         bool failureCalled = false;
         bool reportedCanceled = false;
         QString errorReceived;
 
-        long taskId = handle.submitJob(req, nullptr, [&](const QString &err, bool wasCanceled) {
-            failureCalled = true;
-            errorReceived = err;
-            reportedCanceled = wasCanceled;
-        });
+        long taskId = handle.submitJob(
+            req,
+            [](const jobs::JobRequest &, sicnu::operators::RSOperatorContext &) -> Json::Value {
+                // Block until cancellation lands, mirroring a long job.
+                for ( int i = 0; i < 2000; ++i )
+                    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+                return Json::Value();
+            },
+            nullptr, true,
+            nullptr,
+            [&](const QString &err, bool wasCanceled) {
+                failureCalled = true;
+                errorReceived = err;
+                reportedCanceled = wasCanceled;
+            });
 
         REQUIRE(taskId > 0);
+        REQUIRE(handle.isRunning());
 
         handle.cancel();
-        // Same queued-signal window as the success SECTION above: allow ~20 s
-        // so the callback is not the flaky part under parallel load.
         for ( int i = 0; i < 2000 && !failureCalled; ++i )
         {
           QCoreApplication::processEvents();
@@ -103,4 +123,36 @@ TEST_CASE("GuiJobHandle - Lifecycle, Busy-Gating, and Callbacks", "[app][shell][
         CHECK(reportedCanceled);
         CHECK_FALSE(handle.isRunning());
     }
+}
+
+TEST_CASE("GuiJobHandle returns the submitted id even when the job is terminal on catch-up (#453)", "[jobs][guijob][453]") {
+    if (!QCoreApplication::instance()) {
+        int argc = 1;
+        static char arg0[] = "test_gui_job_adapter";
+        char *argv[] = { arg0, nullptr };
+        new QCoreApplication(argc, argv);
+    }
+
+    GuiJobHandle handle;
+    jobs::JobRequest req;
+    // Unknown algorithm: the engine fails the job immediately — the exact
+    // terminal-state catch-up window that used to swallow the returned id.
+    req.algorithmId = "no:such_algorithm";
+    req.title = "Fast fail";
+
+    bool failureCalled = false;
+    const long taskId = handle.submitJob(
+        req, nullptr,
+        [&](const QString &, bool) { failureCalled = true; });
+
+    // #453: the submission itself succeeded, so the id must be reported even
+    // though the engine fails the unknown algorithm asynchronously (and the
+    // catch-up window may already have resolved the task).
+    REQUIRE(taskId > 0);
+    for (int i = 0; i < 600 && !failureCalled; ++i) {
+        QCoreApplication::processEvents();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(failureCalled);
+    CHECK_FALSE(handle.isRunning());
 }
