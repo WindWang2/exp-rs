@@ -135,7 +135,7 @@ Json::Value RsSegmentStatsOperator::run(const Json::Value& params, RSOperatorCon
     context.reportProgress(0.5, "Accumulating per-segment statistics");
     struct Acc {
         std::vector<double> sum;
-        int count = 0;
+        int64_t count = 0;
     };
     std::map<int, Acc> acc;
     for (size_t i = 0; i < nPix; ++i) {
