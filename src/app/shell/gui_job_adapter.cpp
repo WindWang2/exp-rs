@@ -36,7 +36,8 @@ long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
   m_onFailure = std::move( onFailure );
   m_onProgress = std::move( onProgress );
 
-  m_taskId = m_taskCenter->submitJob( req );
+  const long submittedId = m_taskCenter->submitJob( req );
+  m_taskId = submittedId;
   if ( m_taskId < 0 )
   {
     m_onSuccess = nullptr;
@@ -50,10 +51,12 @@ long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
          || info.status == sicnu::TaskStatus::Failed
          || info.status == sicnu::TaskStatus::Canceled )
     {
+      // Catch-up may already have fired the callbacks and reset m_taskId;
+      // the caller still needs the id of the submission that succeeded (#453).
       onTaskUpdated( info );
     }
   }
-  return m_taskId;
+  return submittedId;
 }
 
 long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
@@ -71,7 +74,8 @@ long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
   m_onFailure = std::move( onFailure );
   m_onProgress = std::move( onProgress );
 
-  m_taskId = m_taskCenter->submitJob( req, std::move( executor ), std::move( cancelCallback ), autoLoad );
+  const long submittedId = m_taskCenter->submitJob( req, std::move( executor ), std::move( cancelCallback ), autoLoad );
+  m_taskId = submittedId;
   if ( m_taskId < 0 )
   {
     m_onSuccess = nullptr;
@@ -85,10 +89,12 @@ long GuiJobHandle::submitJob( const sicnu::jobs::JobRequest &req,
          || info.status == sicnu::TaskStatus::Failed
          || info.status == sicnu::TaskStatus::Canceled )
     {
+      // Catch-up may already have fired the callbacks and reset m_taskId;
+      // the caller still needs the id of the submission that succeeded (#453).
       onTaskUpdated( info );
     }
   }
-  return m_taskId;
+  return submittedId;
 }
 
 long GuiJobHandle::submitTask( const QString &algorithmId,
@@ -105,7 +111,8 @@ long GuiJobHandle::submitTask( const QString &algorithmId,
   m_onFailure = std::move( onFailure );
   m_onProgress = std::move( onProgress );
 
-  m_taskId = m_taskCenter->enqueueTask( algorithmId, params, autoLoad );
+  const long submittedId = m_taskCenter->enqueueTask( algorithmId, params, autoLoad );
+  m_taskId = submittedId;
   if ( m_taskId < 0 )
   {
     m_onSuccess = nullptr;
@@ -119,10 +126,12 @@ long GuiJobHandle::submitTask( const QString &algorithmId,
          || info.status == sicnu::TaskStatus::Failed
          || info.status == sicnu::TaskStatus::Canceled )
     {
+      // Catch-up may already have fired the callbacks and reset m_taskId;
+      // the caller still needs the id of the submission that succeeded (#453).
       onTaskUpdated( info );
     }
   }
-  return m_taskId;
+  return submittedId;
 }
 
 void GuiJobHandle::cancel()
