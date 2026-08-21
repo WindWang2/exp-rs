@@ -10,6 +10,7 @@
 
 #include <cpl_conv.h>
 #include <gdal.h>
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <vector>
 
@@ -279,6 +280,10 @@ TEST_CASE( "A failed run registers nothing and discards the temporary output",
 TEST_CASE( "Spectral index pipeline masks input NoData to NaN and declares output NoData (#298)",
            "[spectral_index_asset_pipeline]" )
 {
+    // Register GDAL drivers: ctest runs this case in isolation, where no
+    // earlier case has triggered registration yet (#298 flake).
+    ensureGdalInit();
+
   QTemporaryDir dir;
   DataManager manager;
   ProcessingAssetResolver resolver( &manager );
