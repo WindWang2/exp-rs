@@ -158,18 +158,20 @@ bool meanSpectrum( const QString &rasterPath, const QPolygonF &polygon,
                                windowW, windowH, GDT_Float32, 0, 0 ) != CE_None )
                 continue;
             const bool hasNd = bandHasNodata[b - 1];
-            const double nd = bandNodata[b - 1];
-            for ( int i = 0; i < windowW * windowH; ++i )
+            // Float-space compare: matches large sentinels exactly (#444).
+            const float ndF = static_cast<float>( bandNodata[b - 1] );
+            const size_t nWin = static_cast<size_t>( windowW ) * windowH;
+            for ( size_t i = 0; i < nWin; ++i )
             {
-                if ( !inside[static_cast<size_t>( i )] )
+                if ( !inside[i] )
                     continue;
-                const double value = window[static_cast<size_t>( i )];
+                const float value = window[i];
                 if ( !std::isfinite( value ) )
                     continue;
-                if ( hasNd && value == nd )
+                if ( hasNd && value == ndF )
                     continue;
                 sum[b - 1] += value;
-                sumSq[b - 1] += value * value;
+                sumSq[b - 1] += static_cast<double>( value ) * value;
                 ++validCount[b - 1];
             }
         }

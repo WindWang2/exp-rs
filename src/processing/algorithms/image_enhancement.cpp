@@ -1463,8 +1463,10 @@ bool ImageEnhancement::processPcaFile(const QString &sourcePath, const QString &
     }
 
     auto isPixelValid = [&](int b, float val) {
-        if (std::isnan(val)) return false;
-        if (bandNoData[b].first && static_cast<double>(val) == bandNoData[b].second) return false;
+        if (!std::isfinite(val)) return false;
+        // Float-space compare: the cast NoData matches large sentinels
+        // exactly where a double-space == never would (#444).
+        if (bandNoData[b].first && val == static_cast<float>(bandNoData[b].second)) return false;
         return true;
     };
 
@@ -1661,8 +1663,10 @@ bool ImageEnhancement::processMnfFile(const QString &sourcePath, const QString &
     }
 
     auto isPixelValid = [&](int b, float val) {
-        if (std::isnan(val)) return false;
-        if (bandNoData[b].first && static_cast<double>(val) == bandNoData[b].second) return false;
+        if (!std::isfinite(val)) return false;
+        // Float-space compare: the cast NoData matches large sentinels
+        // exactly where a double-space == never would (#444).
+        if (bandNoData[b].first && val == static_cast<float>(bandNoData[b].second)) return false;
         return true;
     };
 

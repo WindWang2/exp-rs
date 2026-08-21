@@ -726,6 +726,8 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
         const BandCoefficients &c = meta.bands.value(b);
         bool hasSrcNoData = false;
         const double bandNoData = srcDataset.bandNoDataValue(b, &hasSrcNoData);
+        const bool srcNoDataFValid = hasSrcNoData && std::isfinite(bandNoData);
+        const float srcNoDataF = srcNoDataFValid ? static_cast<float>(bandNoData) : 0.0f;
 
         std::vector<float> out;
         QString tileError;
@@ -750,8 +752,10 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
                     return false;
                 }
                 for (size_t i = 0; i < tileCount; ++i) {
-                    float v = pixels[i];
-                    if (!std::isfinite(v) || (hasSrcNoData && (!std::isnan(bandNoData) ? std::abs(v - bandNoData) < 1e-4f : std::isnan(v)))) {
+                    const float v = pixels[i];
+                    // Note: srcNoDataF only participates when the band declares a
+                    // finite NoData; float-space compare matches large sentinels (#444).
+                    if (!std::isfinite(v) || (hasSrcNoData && srcNoDataFValid && v == srcNoDataF)) {
                         out[i] = std::numeric_limits<float>::quiet_NaN();
                     }
                 }

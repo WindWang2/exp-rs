@@ -218,8 +218,12 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
         bool hasNodata = false;
         double nodataVal = ds.bandNoDataValue(bandNum, &hasNodata);
         if (hasNodata && std::isfinite(nodataVal)) {
+            // Compare in float space: the pixels are float, so the cast NoData
+            // matches exactly regardless of magnitude (a fixed double-space
+            // tolerance never matches large sentinels like -3.4028235e+38).
+            const float nodataF = static_cast<float>(nodataVal);
             for (float &val : buffer) {
-                if (std::abs(static_cast<double>(val) - nodataVal) < 1e-6 || std::isnan(val)) {
+                if (val == nodataF || !std::isfinite(val)) {
                     val = std::numeric_limits<float>::quiet_NaN();
                 }
             }

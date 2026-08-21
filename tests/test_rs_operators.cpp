@@ -2933,3 +2933,50 @@ TEST_CASE("GDAL athematic LAYER_TYPE is not treated as categorical", "[operators
     GDALClose(checkDS);
 }
 
+
+TEST_CASE("RS spectral index masks large-sentinel NoData (#444)", "[operators][rs][nodata][444]") {
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString inputPath = dir.filePath(QStringLiteral("nd_sentinel.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("ndvi_out.tif"));
+
+    // 2x1 raster, NIR band 1, red band 2. Pixel 1 carries the large float
+    // sentinel in BOTH bands (NoData pixel); pixel 0 is valid.
+    constexpr int W = 2, H = 1;
+    const float sentinel = -3.4028235e+38f;
+    std::vector<std::vector<float>> bands(2, std::vector<float>(W * H));
+    bands[0] = {100.0f, sentinel};  // NIR
+    bands[1] = {30.0f, sentinel};   // red
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    // Declare the large sentinel as NoData on both bands.
+    {
+        ensureGdalInit();
+        GDALDatasetH ds = GDALOpen(inputPath.toUtf8().constData(), GA_Update);
+        REQUIRE(ds != nullptr);
+        for (int b = 1; b <= 2; ++b)
+            GDALSetRasterNoDataValue(GDALGetRasterBand(ds, b), static_cast<double>(sentinel));
+        GDALClose(ds);
+    }
+
+    auto op = RSOperatorRegistry::instance().create("rs:spectral_index");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["index"] = "NDVI";
+    params["nir"] = 1;
+    params["red"] = 2;
+    RSOperatorContext ctx;
+    op->run(params, ctx);
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    std::vector<float> px(W);
+    REQUIRE(out.readBandData(1, px.data(), W, H));
+    const float expected = (100.0f - 30.0f) / (100.0f + 30.0f);
+    CHECK(px[0] == Catch::Approx(expected).epsilon(1e-4f));
+    // The sentinel pixel must be NaN (masked), not a garbage 0-ish index from
+    // (-3.4e38 - -3.4e38) / (-3.4e38 + -3.4e38).
+    CHECK(std::isnan(px[1]));
+}

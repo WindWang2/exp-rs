@@ -398,6 +398,18 @@ void ImageEnhancementPanel::onRun()
             }
         }
 
+        // Resolve each band's declared NoData (float-cast; NaN when undeclared)
+        // so stretches mask the real sentinel instead of a fabricated -9999 (#445).
+        std::vector<float> bandNodata(bands, std::numeric_limits<float>::quiet_NaN());
+        for (int b = 0; b < bands; ++b) {
+            GDALRasterBandH ndBand = GDALGetRasterBand(srcDs, b + 1);
+            if (!ndBand) continue;
+            int hasNd = 0;
+            const double nd = GDALGetRasterNoDataValue(ndBand, &hasNd);
+            if (hasNd && std::isfinite(nd))
+                bandNodata[b] = static_cast<float>(nd);
+        }
+
         // Process based on method
         std::vector<std::vector<float>> outputBands(bands);
         for (int b = 0; b < bands; ++b) outputBands[b].resize(w * h);
@@ -410,19 +422,27 @@ void ImageEnhancementPanel::onRun()
                 switch (stretchType) {
                 case 0: // Linear
                 {
-                    float minVal = *std::min_element(inputBands[b].begin(), inputBands[b].end());
-                    float maxVal = *std::max_element(inputBands[b].begin(), inputBands[b].end());
-                    ImageEnhancement::linearStretch(inputBands[b].data(), outputBands[b].data(), pixelCount, minVal, maxVal);
+                    // Min/max over valid pixels only (#445).
+                    const float ndF = bandNodata[b];
+                    float minVal = std::numeric_limits<float>::max();
+                    float maxVal = std::numeric_limits<float>::lowest();
+                    for (float v : inputBands[b]) {
+                        if (!std::isfinite(v) || v == ndF) continue;
+                        minVal = std::min(minVal, v);
+                        maxVal = std::max(maxVal, v);
+                    }
+                    if (minVal > maxVal) { minVal = 0.0f; maxVal = 0.0f; }
+                    ImageEnhancement::linearStretch(inputBands[b].data(), outputBands[b].data(), pixelCount, minVal, maxVal, ndF);
                     break;
                 }
                 case 1: // Percentage clip
-                    ImageEnhancement::percentClipStretch(inputBands[b].data(), outputBands[b].data(), pixelCount, static_cast<float>(clipPercent));
+                    ImageEnhancement::percentClipStretch(inputBands[b].data(), outputBands[b].data(), pixelCount, static_cast<float>(clipPercent), bandNodata[b]);
                     break;
                 case 2: // Std dev
-                    ImageEnhancement::stddevStretch(inputBands[b].data(), outputBands[b].data(), pixelCount, static_cast<float>(stddevMult));
+                    ImageEnhancement::stddevStretch(inputBands[b].data(), outputBands[b].data(), pixelCount, static_cast<float>(stddevMult), bandNodata[b]);
                     break;
                 case 3: // Histogram eq
-                    ImageEnhancement::histogramEqualize(inputBands[b].data(), outputBands[b].data(), pixelCount);
+                    ImageEnhancement::histogramEqualize(inputBands[b].data(), outputBands[b].data(), pixelCount, 256, bandNodata[b]);
                     break;
                 }
             }
@@ -458,9 +478,9 @@ void ImageEnhancementPanel::onRun()
                     float rv = inputBands[rIdx][i];
                     float gv = inputBands[gIdx][i];
                     float bv = inputBands[bIdx][i];
-                    // Mask invalid / NoData pixels: NaN or sentinel -9999
-                    if (std::isnan(rv) || std::isnan(gv) || std::isnan(bv) ||
-                        rv == -9999.f || gv == -9999.f || bv == -9999.f) {
+                    // Mask invalid / NoData pixels: non-finite or declared NoData
+                    if (!std::isfinite(rv) || !std::isfinite(gv) || !std::isfinite(bv) ||
+                        rv == bandNodata[rIdx] || gv == bandNodata[gIdx] || bv == bandNodata[bIdx]) {
                         outputBands[0][i] = std::numeric_limits<float>::quiet_NaN();
                         outputBands[1][i] = std::numeric_limits<float>::quiet_NaN();
                         outputBands[2][i] = std::numeric_limits<float>::quiet_NaN();

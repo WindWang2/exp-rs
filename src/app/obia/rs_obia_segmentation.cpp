@@ -9,6 +9,7 @@
 #include <gdal.h>
 
 #include <QObject>
+#include <limits>
 
 namespace
 {
@@ -85,8 +86,10 @@ RsObiaSegmentationResult runSimple( const RsObiaSegmentationConfig &cfg )
     float nodata = static_cast<float>( GDALGetRasterNoDataValue( firstBand, &hasNodata ) );
     GDALClose( ds );
 
-    if ( !hasNodata )
-        nodata = -9999.0f;
+    // Without a declared NoData use NaN: RsSimpleSegmenter also masks NaN, and
+    // a fabricated -9999 would silently drop valid pixels equal to it (#449).
+    if ( !hasNodata || !std::isfinite( nodata ) )
+        nodata = std::numeric_limits<float>::quiet_NaN();
 
     QVector<const float *> bandPtrs( nBands );
     for ( int b = 0; b < nBands; ++b )

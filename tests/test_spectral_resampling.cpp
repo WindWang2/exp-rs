@@ -204,3 +204,51 @@ TEST_CASE("SpectralResampling resampleSpectrumGaussian uses FWHM Gaussian weight
     CHECK(out[0] > 0.5f);
 }
 
+
+TEST_CASE("rs:spectral_resample propagates NoData sentinel instead of interpolating it (#445)", "[operators][rs][resample][nodata]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString inputPath = tmp.path() + "/input_nd.tif";
+    const QString outputPath = tmp.path() + "/resampled_nd.tif";
+
+    // 3 source bands; band at 500nm carries the NoData sentinel. Target 450nm
+    // interpolates between the 400 and 500 bands -> must be NaN, not (-9999+0.1)/2.
+    std::vector<std::vector<float>> bands = {
+        {0.1f}, {-9999.0f}, {0.5f},
+    };
+    std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+    QString err;
+    REQUIRE(writeGdalOutput(inputPath, 1, 1, bands, gt, "EPSG:32648", &err));
+    {
+        GDALDatasetH ds = GDALOpen(inputPath.toUtf8().constData(), GA_Update);
+        REQUIRE(ds != nullptr);
+        GDALSetRasterNoDataValue(GDALGetRasterBand(ds, 2), -9999.0);
+        GDALClose(ds);
+    }
+
+    auto op = RSOperatorRegistry::instance().create("rs:spectral_resample");
+    REQUIRE(op != nullptr);
+
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    Json::Value targets(Json::arrayValue);
+    targets.append(450.0);
+    params["wavelengths"] = targets;
+    Json::Value sources(Json::arrayValue);
+    sources.append(400.0);
+    sources.append(500.0);
+    sources.append(600.0);
+    params["sourceWavelengths"] = sources;
+
+    RSOperatorContext ctx;
+    op->run(params, ctx);
+
+    GdalDatasetWrapper ds;
+    REQUIRE(ds.open(outputPath));
+    std::vector<float> out(1);
+    REQUIRE(ds.readBandData(1, out.data(), 1, 1));
+    CHECK(std::isnan(out[0]));
+}

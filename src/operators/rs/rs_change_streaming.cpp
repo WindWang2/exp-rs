@@ -79,9 +79,12 @@ bool readTileBip( const GdalDatasetWrapper &beforeDs, const GdalDatasetWrapper &
             bool hasNd = false;
             double nd = beforeDs.bandNoDataValue( bb, &hasNd );
             if ( hasNd && std::isfinite( nd ) ) {
+                // Float-space compare: matches large sentinels (-3.4e38) exactly
+                // where a double-space absolute tolerance never would (#444).
+                const float ndF = static_cast<float>( nd );
                 for ( size_t p = 0; p < tilePixels; ++p ) {
                     float v = bandScratch[p];
-                    if ( std::isnan( v ) || std::abs( static_cast<double>( v ) - nd ) < 1e-6 )
+                    if ( !std::isfinite( v ) || v == ndF )
                         bandScratch[p] = nan;
                 }
             } else if ( hasNd && !std::isfinite( nd ) ) {
@@ -97,9 +100,12 @@ bool readTileBip( const GdalDatasetWrapper &beforeDs, const GdalDatasetWrapper &
             bool hasNd = false;
             double nd = afterDs.bandNoDataValue( ab, &hasNd );
             if ( hasNd && std::isfinite( nd ) ) {
+                // Float-space compare: matches large sentinels (-3.4e38) exactly
+                // where a double-space absolute tolerance never would (#444).
+                const float ndF = static_cast<float>( nd );
                 for ( size_t p = 0; p < tilePixels; ++p ) {
                     float v = bandScratch[p];
-                    if ( std::isnan( v ) || std::abs( static_cast<double>( v ) - nd ) < 1e-6 )
+                    if ( !std::isfinite( v ) || v == ndF )
                         bandScratch[p] = nan;
                 }
             } else if ( hasNd && !std::isfinite( nd ) ) {
@@ -622,9 +628,10 @@ MaskDerivation thresholdRasterToMask( const std::string &inputPath,
                 bool hasNd = false;
                 double nd = inputDs.bandNoDataValue( 1, &hasNd );
                 if ( hasNd && std::isfinite( nd ) ) {
+                    const float ndF = static_cast<float>( nd );
                     for ( size_t p = 0; p < n; ++p ) {
                         float v = tileBuf[p];
-                        if ( std::isnan( v ) || std::abs( static_cast<double>( v ) - nd ) < 1e-6 )
+                        if ( !std::isfinite( v ) || v == ndF )
                             tileBuf[p] = std::numeric_limits<float>::quiet_NaN();
                     }
                 }

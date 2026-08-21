@@ -242,8 +242,11 @@ TEST_CASE("OpenCv operator cancellation", "[opencv]") {
     QTemporaryDir tempDir;
     REQUIRE(tempDir.isValid());
 
-    // Larger image to give cancellation time to take effect
-    QString input = createTestRaster(tempDir.path(), "in.tif", 256, 256, 10);
+    // Larger image to give cancellation time to take effect. 2048^2 x 10
+    // bands keeps the read+blur reliably above the 10 ms cancel delay — the
+    // old 256^2 raster could finish first once the NoData masking got faster
+    // (#444), turning the cancellation contract into a race.
+    QString input = createTestRaster(tempDir.path(), "in.tif", 2048, 2048, 10);
     QString output = tempDir.path() + QDir::separator() + "cancelled.tif";
 
     auto op = std::make_unique<OpenCvGaussianBlurOperator>();
@@ -281,4 +284,79 @@ TEST_CASE("OpenCvMeanBlurOperator is registered and runs", "[opencv]") {
     Json::Value result = op->run(params, ctx);
     REQUIRE(result["output"].asString() == output.toStdString());
     verifyOutput(output, 16, 16, 1);
+}
+
+// ---------------------------------------------------------------------------
+// #444/#445: NoData semantics — large sentinels must match; undeclared NoData
+// must not fabricate a sentinel (valid 0 pixels preserved, output never
+// declared NoData=0).
+// ---------------------------------------------------------------------------
+#include "operators/opencv/opencv_utils.h"
+#include <opencv2/core.hpp>
+#include <QFile>
+
+TEST_CASE("opencv utils mask large-sentinel NoData and keep undeclared zeros (#444/#445)", "[operators][opencv][nodata]")
+{
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString path = tmp.filePath(QStringLiteral("nd.tif"));
+    ensureGdalInit();
+
+    constexpr int W = 4, H = 1;
+    const float sentinel = -3.4028235e+38f;
+    std::vector<std::vector<float>> bands(1, std::vector<float>{0.5f, sentinel, 0.0f, 0.25f});
+    const std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+    QString err;
+    REQUIRE(writeGdalOutput(path, W, H, bands, gt, QString(), &err, static_cast<double>(sentinel)));
+
+    // Declared large sentinel: masked to NaN; valid 0 pixel preserved.
+    cv::Mat m = sicnu::operators::opencv::readRasterBandToMat(path.toStdString(), 1);
+    REQUIRE(m.rows == H);
+    REQUIRE(m.cols == W);
+    const float *p = m.ptr<float>();
+    CHECK(p[0] == 0.5f);
+    CHECK(std::isnan(p[1]));
+    CHECK(p[2] == 0.0f);
+    CHECK(p[3] == 0.25f);
+
+    // Write through writeMatToRaster: source declares sentinel -> output
+    // declares it too and NaN pixels are materialized to the sentinel.
+    const QString outPath = tmp.filePath(QStringLiteral("nd_out.tif"));
+    REQUIRE(sicnu::operators::opencv::writeMatToRaster(outPath.toStdString(), m, path.toStdString()));
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outPath));
+    bool hasNd = false;
+    const double nd = out.bandNoDataValue(1, &hasNd);
+    CHECK(hasNd);
+    CHECK(static_cast<float>(nd) == sentinel);
+    std::vector<float> back(W);
+    REQUIRE(out.readBandData(1, back.data(), W, H));
+    CHECK(back[1] == sentinel);
+
+    // Undeclared NoData: valid 0 pixels must NOT be masked, and the output
+    // must not be declared NoData=0.
+    const QString path2 = tmp.filePath(QStringLiteral("nound.tif"));
+    std::vector<std::vector<float>> bands2(1, std::vector<float>{0.5f, 1.0f, 0.0f, 0.25f});
+    REQUIRE(writeGdalOutput(path2, W, H, bands2, gt, QString(), &err));
+    cv::Mat m2 = sicnu::operators::opencv::readRasterBandToMat(path2.toStdString(), 1);
+    const float *p2 = m2.ptr<float>();
+    CHECK(p2[0] == 0.5f);
+    CHECK(p2[2] == 0.0f);   // undeclared -> 0 stays a valid value
+    CHECK(!std::isnan(p2[2]));
+
+    const QString outPath2 = tmp.filePath(QStringLiteral("nound_out.tif"));
+    REQUIRE(sicnu::operators::opencv::writeMatToRaster(outPath2.toStdString(), m2, path2.toStdString()));
+    GdalDatasetWrapper out2;
+    REQUIRE(out2.open(outPath2));
+    bool hasNd2 = false;
+    out2.bandNoDataValue(1, &hasNd2);
+    if (hasNd2)
+    {
+        // If a NoData is declared for an undeclared source it must be NaN, never 0.
+        double nd2 = out2.bandNoDataValue(1, &hasNd2);
+        CHECK(std::isnan(nd2));
+    }
+    std::vector<float> back2(W);
+    REQUIRE(out2.readBandData(1, back2.data(), W, H));
+    CHECK(back2[2] == 0.0f);
 }

@@ -160,7 +160,8 @@ void TerrainDialog::onRun()
   params["cellSize"] = mCellSizeSpin->value();
   params["sunAzimuth"] = mSunAzimuthSpin->value();
   params["sunElevation"] = mSunElevationSpin->value();
-  params["nodata"] = -9999.0;
+  // No hardcoded nodata: the operator resolves the DEM's declared NoData and
+  // only falls back to -9999 when neither param nor metadata provides one (#445).
   runOperatorTask( QStringLiteral( "rs:terrain_analysis" ), params );
 }
 
