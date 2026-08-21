@@ -4,6 +4,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+
+#include "vector_test_fixtures.h"
 #include <QMap>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -98,6 +100,9 @@ QString fixturePath(const QString &relative) {
   if (relative.startsWith(QLatin1String("samples/")) ||
       relative == QLatin1String("phr_xs.tif")) {
     return syntheticSample(relative);
+  }
+  if (relative == QLatin1String("test_vectors.geojson")) {
+    return vector_test_fixtures::syntheticGeoJsonPath();
   }
   const QString here = QFileInfo(__FILE__).absolutePath();
   return QFileInfo(here + QStringLiteral("/../data/") + relative)
@@ -257,7 +262,6 @@ TEST_CASE("Removing a Display Layer releases only its view lease",
 
 TEST_CASE("Vector Data Assets materialize through the QGIS OGR adapter",
           "[qgis_display_manager]") {
-  SKIP("test_vectors.geojson removed from VCS");
   ensureQgisApplication();
   DataManager dataManager;
   QgsMapCanvas canvas;
@@ -515,7 +519,6 @@ TEST_CASE("Relocating an asset that stays missing keeps the Display Layer identi
 
 TEST_CASE("A Display Layer created while the asset is being edited is read-only",
           "[qgis_display_manager][edit_lease]") {
-  SKIP("test_vectors.geojson removed from VCS");
   ensureQgisApplication();
   DataManager dataManager;
   QgsMapCanvas canvas;

@@ -3,6 +3,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+
+#include "vector_test_fixtures.h"
 #include <QMap>
 #include <QSignalSpy>
 #include <QString>
@@ -257,23 +259,22 @@ TEST_CASE( "Commit refuses a missing temporary output", "[output_committer]" )
 TEST_CASE( "A committed vector output registers with the vector provider",
            "[output_committer]" )
 {
-  // This case stages a complete real shapefile (samples/test.shp/.shx/.dbf/.prj)
-  // to exercise the vector commit path. Those samples are no longer committed
-  // to VCS and there is no runtime vector generator yet, so the case is skipped
-  // until one exists.
-  SKIP( "samples/test.shp sample removed from VCS" );
-
   QTemporaryDir dir;
   DataManager manager;
   OutputCommitter committer( &manager );
 
-  // Stage the three shapefile components a vector source needs.
+  // Stage the shapefile components a vector source needs; the fixture is
+  // generated at runtime (the VCS sample was removed, see #460).
+  const QString generatedShp = vector_test_fixtures::syntheticShapefilePath();
+  REQUIRE_FALSE( generatedShp.isEmpty() );
+  const QString generatedBase = QFileInfo( generatedShp ).absolutePath() +
+                                QStringLiteral( "/test" );
   for ( const QString &suffix : { QStringLiteral( ".shp" ), QStringLiteral( ".shx" ),
                                   QStringLiteral( ".dbf" ), QStringLiteral( ".prj" ) } )
   {
-    const QString fixture = QStringLiteral( "samples/test" ) + suffix;
-    if ( QFile::exists( fixturePath( fixture ) ) )
-      REQUIRE( QFile::copy( fixturePath( fixture ),
+    const QString fixture = generatedBase + suffix;
+    if ( QFile::exists( fixture ) )
+      REQUIRE( QFile::copy( fixture,
                             dir.filePath( QStringLiteral( "scratch" ) + suffix ) ) );
   }
 

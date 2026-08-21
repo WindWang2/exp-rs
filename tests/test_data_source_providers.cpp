@@ -4,6 +4,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+
+#include "vector_test_fixtures.h"
 #include <QMap>
 #include <QString>
 #include <QTemporaryDir>
@@ -126,6 +128,10 @@ QString fixturePath( const QString &relative )
   {
     return syntheticEnviSample( relative );
   }
+  if ( relative == QLatin1String( "test_vectors.geojson" ) )
+  {
+    return vector_test_fixtures::syntheticGeoJsonPath();
+  }
   const QString here = QFileInfo( __FILE__ ).absolutePath();
   return QFileInfo( here + QStringLiteral( "/../data/" ) + relative ).absoluteFilePath();
 }
@@ -194,7 +200,6 @@ TEST_CASE( "GeoTIFF raster resolves structural metadata and capabilities",
 TEST_CASE( "OGR vector resolves structural metadata and capabilities",
            "[data_source_providers]" )
 {
-  SKIP( "test_vectors.geojson removed from VCS" );
   const OgrVectorSourceProvider provider;
   const SourceDescriptor source =
     ogrDescriptor( fixturePath( QStringLiteral( "test_vectors.geojson" ) ) );
@@ -232,7 +237,6 @@ TEST_CASE( "OGR vector resolves structural metadata and capabilities",
 TEST_CASE( "Read-only vector sources do not advertise editable features",
            "[data_source_providers]" )
 {
-  SKIP( "test_vectors.geojson removed from VCS" );
   QTemporaryDir temporaryDirectory;
   REQUIRE( temporaryDirectory.isValid() );
   const QString readOnlyPath =
