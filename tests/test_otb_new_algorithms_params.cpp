@@ -37,7 +37,8 @@ TEST_CASE( "OTB GLCM: algorithm metadata", "[otb][processing]" )
     REQUIRE( algo.name() == "otb_gray_level_cooccurrence_matrix" );
     REQUIRE( algo.displayName() == "Gray Level Co-occurrence Matrix" );
     REQUIRE( algo.group() == "Feature" );
-    REQUIRE( algo.applicationName() == "GrayLevelCooccurrenceMatrix" );
+    // 651bf2167c corrected the application to the real OTB 8.x name (#296)
+    REQUIRE( algo.applicationName() == "HaralickTextureExtraction" );
     REQUIRE( !algo.tags().isEmpty() );
 }
 
