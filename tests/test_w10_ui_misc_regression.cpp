@@ -23,7 +23,10 @@ void ensureApp()
   static int argc = 1;
   static char name[] = "test_w10_ui_misc_regression";
   static char *argv[] = { name, nullptr };
-  static QApplication app( argc, argv );
+  // Heap-allocated and intentionally leaked: a static QApplication destructs
+  // after other statics (widgets/settings) and segfaults at process exit
+  // even after every assertion passed.
+  new QApplication( argc, argv );
 }
 } // namespace
 
