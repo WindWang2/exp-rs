@@ -556,3 +556,36 @@ TEST_CASE("BandMath processFile masks large-magnitude float NoData sentinel (#43
     REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(2.0f, 0.001f));
     REQUIRE_THAT(out[3], Catch::Matchers::WithinAbs(2.6f, 0.001f));
 }
+
+TEST_CASE("BandMath processFile masks Inf pixels to NaN before evaluation (#449)", "[bandmath][gdal][449]")
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    const QString sourcePath = dir.filePath(QStringLiteral("inf.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("inf_out.tif"));
+    std::array<double, 6> gt = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+
+    GDALDatasetH srcDs = createOutputTiff(sourcePath, 2, 1, 1, GDT_Float32, gt, QString());
+    REQUIRE(srcDs != nullptr);
+
+    const float inf = std::numeric_limits<float>::infinity();
+    const std::vector<float> band1 = {inf, 1.0f};
+    GDALRasterBandH b1 = GDALGetRasterBand(srcDs, 1);
+    REQUIRE(GDALRasterIO(b1, GF_Write, 0, 0, 2, 1, const_cast<float *>(band1.data()),
+                          2, 1, GDT_Float32, 0, 0) == CE_None);
+    GDALClose(srcDs);
+
+    QString error;
+    REQUIRE(BandMath::processFile(sourcePath, outputPath, QStringLiteral("b1 * 2"), &error));
+
+    GdalDatasetWrapper outDs;
+    REQUIRE(outDs.open(outputPath));
+    std::vector<float> out(2);
+    REQUIRE(outDs.readBandData(1, out.data(), 2, 1));
+    // Inf operand must be masked to NaN so the expression never sees it
+    CHECK(std::isnan(out[0]));
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(2.0f, 0.001f));
+}

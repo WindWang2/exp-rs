@@ -206,9 +206,13 @@ Json::Value runAtmosphericCorrectionCore(const std::string& defaultMethod,
             GdalDatasetWrapper ds;
             QMap<int, QString> bandNames;
             if (ds.open(QString::fromStdString(inputPath))) {
-                const QString bandName = ds.bandDescription(band);
-                if (!bandName.isEmpty())
-                    bandNames.insert(band, bandName);
+                // Full map (descriptions first, synthetic B%1 fallback) so MTL
+                // coefficients resolve through the name mapping instead of the
+                // empty-map identity auto-discovery (#448).
+                for (int b = 1; b <= ds.bandCount(); ++b) {
+                    const QString desc = ds.bandDescription(b);
+                    bandNames.insert(b, desc.isEmpty() ? QStringLiteral("B%1").arg(b) : desc);
+                }
             }
             RadiometricCalibration::CalibrationMetadata meta;
             QString metaError;

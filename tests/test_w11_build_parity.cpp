@@ -2,13 +2,17 @@
 // Covers 337 BUILD-4, 383, 394, 366 (doc/CMake parity).
 // Not registered in CMake; orchestrator will register.
 #include <catch2/catch_test_macros.hpp>
+#include <QDir>
 #include <QFile>
 #include <QTextStream>
 #include <QString>
 
 static QString readFileText(const QString &path)
 {
-    QFile f(path);
+    // ctest runs from the build directory; resolve repo files against the
+    // compiled-in source root instead of the process CWD (#443).
+    const QString abs = QDir(CMAKE_SOURCE_DIR).filePath(path);
+    QFile f(QFile::exists(abs) ? abs : path);
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
         return {};
     QTextStream s(&f);
