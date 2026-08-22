@@ -22,6 +22,7 @@
 #include "data/derivation_record.h"
 #include "data/source_descriptor.h"
 #include "processing/framework/output_committer.h"
+#include "processing/framework/output_committer_task_center.h"
 #include "processing/framework/task_center.h"
 
 using sicnu::data::AssetId;
@@ -362,9 +363,9 @@ TEST_CASE( "commitTaskOutput commits a completed Task Center task via the seam",
   derivation.algorithmId = QStringLiteral( "sicnu:ndvi" );
 
   const CommitResult result =
-    committer.commitTaskOutput( &center, taskId, AssetKind::Raster, stablePath,
-                                PersistencePolicy::SessionTemporary, /*autoLoad=*/false,
-                                derivation );
+    sicnu::commitTaskOutput( committer, &center, taskId, AssetKind::Raster, stablePath,
+                             PersistencePolicy::SessionTemporary, /*autoLoad=*/false,
+                             derivation );
 
   REQUIRE( result );
   CHECK( manager.asset( result.value() ).has_value() );
@@ -396,10 +397,10 @@ TEST_CASE( "commitTaskOutput refuses an incomplete task and registers nothing",
   center.markTaskFailed( taskId, QStringLiteral( "simulated failure" ) );
 
   const CommitResult result =
-    committer.commitTaskOutput( &center, taskId, AssetKind::Raster,
-                                dir.filePath( QStringLiteral( "committed.tif" ) ),
-                                PersistencePolicy::SessionTemporary, false,
-                                DerivationRecord{} );
+    sicnu::commitTaskOutput( committer, &center, taskId, AssetKind::Raster,
+                             dir.filePath( QStringLiteral( "committed.tif" ) ),
+                             PersistencePolicy::SessionTemporary, false,
+                             DerivationRecord{} );
 
   REQUIRE_FALSE( result );
   CHECK( manager.assets().isEmpty() );

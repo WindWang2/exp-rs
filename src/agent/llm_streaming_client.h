@@ -12,6 +12,7 @@
 #include <QUrl>
 
 #include "llm_config_manager.h"
+#include "sicnu_agent_export.h"
 
 namespace sicnu::agent
 {
@@ -25,7 +26,7 @@ struct ChatRequestPayload
   QByteArray body;
 };
 
-class LlmStreamingClient : public QObject
+class SICNU_AGENT_EXPORT LlmStreamingClient : public QObject
 {
   Q_OBJECT
 

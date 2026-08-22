@@ -563,21 +563,14 @@ void QgsCollapsibleGroupBox::showEvent( QShowEvent *event )
 
 QString QgsCollapsibleGroupBox::saveKey() const
 {
-  if ( objectName().isEmpty() || ( mSettingGroup.isEmpty() && window()->objectName().isEmpty() ) )
+  QWidget *win = window();
+  if ( objectName().isEmpty() || ( mSettingGroup.isEmpty() && ( !win || win->objectName().isEmpty() ) ) )
     return QString(); // cannot get a valid key
 
   // save key for load/save state
   // currently QgsCollapsibleGroupBox/window()/object
   QString saveKey = '/' + objectName();
-  // QObject* parentWidget = parent();
-  // while ( parentWidget )
-  // {
-  //   saveKey = "/" + parentWidget->objectName() + saveKey;
-  //   parentWidget = parentWidget->parent();
-  // }
-  // if ( parent() )
-  //   saveKey = "/" + parent()->objectName() + saveKey;
-  const QString setgrp = mSettingGroup.isEmpty() ? window()->objectName() : mSettingGroup;
+  const QString setgrp = mSettingGroup.isEmpty() ? ( win ? win->objectName() : QString() ) : mSettingGroup;
   saveKey = '/' + setgrp + saveKey;
   saveKey = u"QgsCollapsibleGroupBox"_s + saveKey;
   return saveKey;

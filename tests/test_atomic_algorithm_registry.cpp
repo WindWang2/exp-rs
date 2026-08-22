@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "operators/framework/rs_operator_registry.h"
 #include "operators/rs/rs_spectral_index_operator.h"
 
 using namespace sicnu::processing;
@@ -11,6 +12,7 @@ using namespace sicnu::operators::rs;
 
 TEST_CASE( "AtomicAlgorithmRegistry singleton registers, looks up, and resets adapters", "[processing][registry]" )
 {
+  (void)sicnu::operators::RSOperatorRegistry::instance();
   auto &registry = AtomicAlgorithmRegistry::instance();
   registry.reset();
 

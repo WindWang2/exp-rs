@@ -206,6 +206,12 @@ TEST_CASE( "Reaping an asset whose file cannot be deleted still unloads and warn
   const AssetId id =
     registerDeletableTemporaryRaster( manager, path, PersistencePolicy::TaskTemporary );
 
+#ifdef _WIN32
+  QFile lockFile( path );
+  REQUIRE( lockFile.open( QIODevice::ReadWrite ) );
+  const ReapResult result = manager.reap( ReapRequest{ id } );
+  lockFile.close();
+#else
   // Make the file's parent directory non-writable so removal fails. On Unix,
   // removing a file requires write permission on its parent directory.
   const QDir parentDir( QFileInfo( path ).absolutePath() );
@@ -217,6 +223,7 @@ TEST_CASE( "Reaping an asset whose file cannot be deleted still unloads and warn
   // Restore permissions so QTemporaryDir can clean up.
   QFile::setPermissions( parentDir.absolutePath(),
             QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner );
+#endif
 
   CHECK( result.unloaded );        // catalog entry removed
   CHECK_FALSE( result.sourceDeleted );

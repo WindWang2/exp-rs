@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "operators/framework/rs_operator_registry.h"
 
 #include <QString>
 
@@ -14,6 +15,7 @@ using namespace sicnu::processing;
 
 TEST_CASE( "Tool catalog export stays within the context budget", "[agent][catalog][size]" )
 {
+    (void)sicnu::operators::RSOperatorRegistry::instance();
     auto &registry = AtomicAlgorithmRegistry::instance();
     registry.initialize();
 

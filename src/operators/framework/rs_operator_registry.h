@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rs_operator.h"
+#include "sicnu_operators_export.h"
 
 #include <functional>
 #include <memory>
@@ -21,7 +22,7 @@ namespace sicnu::operators {
  * implementations are typically registered at program startup using the
  * REGISTER_RS_OPERATOR macro.
  */
-class RSOperatorRegistry {
+class SICNU_OPERATORS_EXPORT RSOperatorRegistry {
 public:
     using FactoryFn = std::function<std::unique_ptr<RSOperator>()>;
 

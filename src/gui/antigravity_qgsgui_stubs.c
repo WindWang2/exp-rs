@@ -1,6 +1,8 @@
 // ANTIGRAVITY: Auto-generated weak stubs for libqgis_gui.so missing symbols
 // These satisfy dlopen at import time; none are called during P3 tests.
 
+#if defined(__GNUC__) || defined(__clang__)
+
 // non-virtual thunk to QgsAttributesFormBaseView::createExpressionContext() const
 void _ZThn40_NK25QgsAttributesFormBaseView23createExpressionContextEv(void) __attribute__((weak, visibility("default")));
 void _ZThn40_NK25QgsAttributesFormBaseView23createExpressionContextEv(void) {}
@@ -1251,3 +1253,5 @@ void _ZN13QsciScintilla16staticMetaObjectE(void) {}
 // QsciScintilla::textChanged()
 void _ZN13QsciScintilla11textChangedEv(void) __attribute__((weak, visibility("default")));
 void _ZN13QsciScintilla11textChangedEv(void) {}
+
+#endif

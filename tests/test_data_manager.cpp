@@ -833,10 +833,14 @@ TEST_CASE( "Commit or rollback without an active Edit Lease is rejected",
 
 TEST_CASE( "DataManager reap deletes file for DeletableSource temporary asset", "[data_manager][reap]" )
 {
-  QTemporaryFile tempFile;
-  REQUIRE( tempFile.open() );
-  const QString tempFilePath = tempFile.fileName();
-  tempFile.close();
+  QString tempFilePath;
+  {
+    QTemporaryFile tempFile;
+    tempFile.setAutoRemove( false );
+    REQUIRE( tempFile.open() );
+    tempFilePath = tempFile.fileName();
+    tempFile.close();
+  }
   REQUIRE( QFile::exists( tempFilePath ) );
 
   const auto manager = makeDataManager();

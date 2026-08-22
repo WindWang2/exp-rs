@@ -135,7 +135,7 @@ void ContrastStretchDialog::onRun()
   runGdalTask( [sourcePath, outputPath = outputPath(), methodIndex, clipValue, stddevValue, stdPoints]() -> QString {
     GdalDatasetWrapper srcDataset;
     if ( !srcDataset.open( sourcePath ) )
-      return QStringLiteral( "\x01SICNU_ERR\x01Failed to open GDAL dataset" );
+      return QStringLiteral( "\x01SICNU_ERR\x01" "Failed to open GDAL dataset" );
 
     int width = srcDataset.width();
     int height = srcDataset.height();
@@ -143,13 +143,13 @@ void ContrastStretchDialog::onRun()
     size_t pixelCount = static_cast<size_t>( width ) * static_cast<size_t>( height );
 
     if ( pixelCount > 500000000ULL || ( static_cast<uint64_t>( bandCount ) * pixelCount * sizeof( float ) ) > 2000000000ULL )
-      return QStringLiteral( "\x01SICNU_ERR\x01Image is too large for in-memory processing (>2GB memory requirement)" );
+      return QStringLiteral( "\x01SICNU_ERR\x01" "Image is too large for in-memory processing (>2GB memory requirement)" );
 
     std::vector<std::vector<float>> allBands( bandCount, std::vector<float>( pixelCount ) );
     for ( int b = 0; b < bandCount; ++b )
     {
       if ( !srcDataset.readBandData( b + 1, allBands[b].data(), width, height ) )
-        return QStringLiteral( "\x01SICNU_ERR\x01Failed to read band %1" ).arg( b + 1 );
+        return QStringLiteral( "\x01SICNU_ERR\x01" "Failed to read band %1" ).arg( b + 1 );
     }
 
     std::vector<std::vector<float>> outputBands( bandCount, std::vector<float>( pixelCount ) );

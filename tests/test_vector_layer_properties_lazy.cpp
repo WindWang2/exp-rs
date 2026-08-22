@@ -17,7 +17,17 @@
 
 #include <memory>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <shellapi.h>
+#include <vector>
+#include <string>
+#endif
+
 namespace {
+int fakeArgc = 1;
+char fakeArg0[] = "test_vector_layer_properties_lazy";
+char *fakeArgv[] = { fakeArg0, nullptr };
 
 class TestableVectorLayerProperties : public QgsVectorLayerProperties {
 public:
@@ -32,12 +42,39 @@ public:
 
 int main( int argc, char *argv[] )
 {
-  QgsApplication application( argc, argv, true );
+  QCoreApplication::setOrganizationName( "QGIS" );
+  QCoreApplication::setApplicationName( "QGIS" );
+  QgsApplication application( fakeArgc, fakeArgv, true );
   QgsApplication::initQgis();
+
+#ifdef _WIN32
+  int wargc = 0;
+  LPWSTR *wargv = CommandLineToArgvW( GetCommandLineW(), &wargc );
+  std::vector<std::string> utf8Args;
+  std::vector<char *> utf8Argv;
+  if ( wargv )
+  {
+    utf8Args.resize( wargc );
+    utf8Argv.resize( wargc + 1, nullptr );
+    for ( int i = 0; i < wargc; ++i )
+    {
+      int len = WideCharToMultiByte( CP_UTF8, 0, wargv[i], -1, nullptr, 0, nullptr, nullptr );
+      if ( len > 0 )
+      {
+        utf8Args[i].resize( len - 1 );
+        WideCharToMultiByte( CP_UTF8, 0, wargv[i], -1, &utf8Args[i][0], len, nullptr, nullptr );
+      }
+      utf8Argv[i] = const_cast<char *>( utf8Args[i].c_str() );
+    }
+    LocalFree( wargv );
+  }
+  const int result = Catch::Session().run( utf8Argv.empty() ? argc : static_cast<int>( utf8Argv.size() - 1 ),
+                                           utf8Argv.empty() ? argv : utf8Argv.data() );
+  _exit( result );
+#else
   const int result = Catch::Session().run( argc, argv );
-  QgsProject::instance()->clear();
-  QgsApplication::exitQgis();
   return result;
+#endif
 }
 
 TEST_CASE( "QgsVectorLayerProperties defers statistics computation (#324)", "[gui][vector][properties]" )

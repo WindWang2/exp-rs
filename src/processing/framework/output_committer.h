@@ -61,7 +61,9 @@ using CommitResult = sicnu::data::Result<sicnu::data::AssetId>;
 /// call `discardTemporary` instead, which removes the temp output and
 /// registers nothing — the catalog never holds an apparently-valid output from
 /// an incomplete task.
-class OutputCommitter : public QObject
+#include "sicnu_processing_export.h"
+
+class SICNU_PROCESSING_EXPORT OutputCommitter : public QObject
 {
   Q_OBJECT
 
@@ -71,21 +73,6 @@ class OutputCommitter : public QObject
     /// Commits `request` transactionally. On failure returns structured
     /// diagnostics and leaves the catalog and stable path untouched.
     CommitResult commit( const AlgorithmOutputRequest &request );
-
-    /// Commits the output of a completed Task Center task transactionally.
-    /// Reads the task's OUTPUT-keyed parameter (its `outputLayerPath`) as the
-    /// temporary path, validates/publishes/registers it, and attaches
-    /// `derivation`. Refuses if the task is not `Completed` — a failed or
-    /// cancelled task registers nothing; its caller should `discardTemporary`.
-    /// This is the Task Center seam: Task Center scheduling and cancellation
-    /// semantics are unchanged; the committer is driven by the task's result.
-    CommitResult commitTaskOutput( TaskCenter *taskCenter,
-                                   long taskId,
-                                   sicnu::data::AssetKind kind,
-                                   const QString &stablePath,
-                                   sicnu::data::PersistencePolicy persistence,
-                                   bool autoLoad,
-                                   const sicnu::data::DerivationRecord &derivation );
 
     /// Discards a temporary output from a failed or cancelled task. Removes
     /// `tempPath` if present. Registers nothing and publishes nothing.

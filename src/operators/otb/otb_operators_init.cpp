@@ -12,4 +12,6 @@ REGISTER_RS_OPERATOR(OtbSegmentationOperator, "otb:meanshift_segmentation")
 REGISTER_RS_OPERATOR(OtbSvmClassificationOperator, "otb:svm_classification")
 REGISTER_RS_OPERATOR(OtbComputeImagesStatisticsOperator, "otb:compute_images_statistics")
 
+void initBuiltinOtbOperators() {}
+
 } // namespace sicnu::operators::otb

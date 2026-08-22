@@ -1,6 +1,10 @@
 # SICNU GEO RS — Unit Tests (Catch2)
 include(Catch)
 
+if(WIN32 AND TARGET Catch2WithMain)
+  set_property(TARGET Catch2WithMain PROPERTY SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/sicnu_test_main.cpp")
+endif()
+
 # Wrapper around catch_discover_tests that injects LSAN_OPTIONS when sanitizers
 # are enabled, suppressing known singleton leaks (QgsExpression functions,
 # QgsNumericFormatRegistry, Nvidia EGL driver). Callers may pass extra
@@ -893,6 +897,7 @@ target_link_libraries(test_comparison_widget PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
+  sicnu_data
   GDAL::GDAL
 )
 target_include_directories(test_comparison_widget PRIVATE
@@ -1380,6 +1385,7 @@ target_link_libraries(test_georef_dual_window PRIVATE
   qgis_core
   qgis_analysis
   qgis_app_georef
+  sicnu_data
 )
 target_include_directories(test_georef_dual_window PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -1406,6 +1412,7 @@ target_link_libraries(test_georef_session_adapters PRIVATE
   qgis_app_georef
   sicnu_jobs
   sicnu_task_center
+  sicnu_data
 )
 target_include_directories(test_georef_session_adapters PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -1659,6 +1666,7 @@ target_link_libraries(test_rpc_transformer PRIVATE
   qgis_core
   qgis_analysis
   GDAL::GDAL
+  sicnu_data
 )
 target_include_directories(test_rpc_transformer PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -1684,6 +1692,7 @@ target_link_libraries(test_georef_window_rpc_mode PRIVATE
   qgis_analysis
   qgis_app_georef
   sicnu_jobs
+  sicnu_data
 )
 target_include_directories(test_georef_window_rpc_mode PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -2005,6 +2014,7 @@ target_link_libraries(test_band_ratio PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
+  sicnu_data
 )
 target_include_directories(test_band_ratio PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -2034,6 +2044,7 @@ if(TARGET qgis_app_classify)
     sicnu_task_center
     GDAL::GDAL
     ${OpenCV_LIBS}
+  sicnu_data
   )
   target_include_directories(test_classification_task_center PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -2069,6 +2080,7 @@ if(TARGET qgis_app_classify)
     Sicnu::session_map
     sicnu_jobs
     sicnu_task_center
+  sicnu_data
   )
   target_include_directories(test_classification_window PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -2456,6 +2468,7 @@ if(TARGET qgis_app_classify)
     Catch2::Catch2WithMain
     qgis_analysis
     Qt6::Core
+  sicnu_data
   )
   target_include_directories(test_classification_project PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -2475,6 +2488,7 @@ if(TARGET qgis_app_classify)
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
+  sicnu_data
   )
   target_include_directories(test_classify_session_state PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/classification
@@ -2492,6 +2506,7 @@ if(TARGET qgis_app_classify)
     qgis_app_classify
     Qt6::Core
     Qt6::Widgets
+  sicnu_data
   )
   target_include_directories(test_classify_workflow_controller PRIVATE
     ${CMAKE_SOURCE_DIR}/src/app/classification
@@ -3510,6 +3525,7 @@ target_link_libraries(test_processing_dialogs PRIVATE
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  sicnu_data
 )
 target_include_directories(test_processing_dialogs PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -3524,6 +3540,7 @@ target_link_libraries(test_dialog_edge_cases PRIVATE
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  sicnu_data
 )
 target_include_directories(test_dialog_edge_cases PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -3554,6 +3571,7 @@ target_link_libraries(test_raster_processing_dialog_base PRIVATE
   Qt6::Concurrent
   qgis_core
   qgis_gui
+  sicnu_data
 )
 target_include_directories(test_raster_processing_dialog_base PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -4619,6 +4637,7 @@ target_link_libraries(test_crs_selector PRIVATE
   Qt6::Widgets
   qgis_core
   qgis_gui
+  sicnu_data
 )
 target_include_directories(test_crs_selector PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -5230,6 +5249,7 @@ target_link_libraries(test_w8_obia_regression PRIVATE
   qgis_analysis
   qgis_app_georef
   GDAL::GDAL
+  sicnu_data
 )
 if(SICNU_HAS_OPENCV)
   target_link_libraries(test_w8_obia_regression PRIVATE ${OpenCV_LIBS})

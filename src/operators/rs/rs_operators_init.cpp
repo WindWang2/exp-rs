@@ -119,4 +119,8 @@ struct AtomicRsOperatorProviderRegistration {
 };
 static AtomicRsOperatorProviderRegistration sAtomicRsOperatorProviderReg;
 
+void initBuiltinRsOperators() {
+  (void)sAtomicRsOperatorProviderReg;
+}
+
 } // namespace sicnu::operators::rs

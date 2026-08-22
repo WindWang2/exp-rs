@@ -11,22 +11,7 @@
 
 #include <cstdlib>
 
-// Mirror tests/test_georef_window.cpp: bypass C++ destructor sequence to
-// avoid known QgsProjContext atexit crash in test processes that exercise
-// qgis_core/qgis_gui.
-namespace
-{
-  class FastExitListener : public Catch::EventListenerBase
-  {
-    public:
-      using Catch::EventListenerBase::EventListenerBase;
-      void testRunEnded( const Catch::TestRunStats &stats ) override
-      {
-        std::_Exit( stats.aborting || stats.totals.testCases.failed > 0 ? 1 : 0 );
-      }
-  };
-}
-CATCH_REGISTER_LISTENER( FastExitListener )
+
 
 namespace
 {

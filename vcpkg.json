@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "sicnu-geo-rs",
   "version-string": "1.0.0",
-  "builtin-baseline": "ea1a7396b05637a53bf23c078647ecc0edee4b80",
+  "builtin-baseline": "7f3781e19cc7d4e4882a4caec01668c6f7b5c163",
   "dependencies": [
     {
       "name": "gdal",

@@ -1,12 +1,25 @@
-/***************************************************************************
- * rs_operator_registry.cpp  —  RSOperatorRegistry implementation
- ***************************************************************************/
 #include "rs_operator_registry.h"
 
 namespace sicnu::operators {
 
+namespace rs { void initBuiltinRsOperators(); }
+namespace gdal { void initBuiltinGdalOperators(); }
+#ifdef SICNU_HAS_OPENCV
+namespace opencv { void initBuiltinOpenCvOperators(); }
+#endif
+namespace otb { void initBuiltinOtbOperators(); }
+
 RSOperatorRegistry& RSOperatorRegistry::instance() {
+    static std::once_flag initFlag;
     static RSOperatorRegistry registry;
+    std::call_once(initFlag, []() {
+        rs::initBuiltinRsOperators();
+        gdal::initBuiltinGdalOperators();
+#ifdef SICNU_HAS_OPENCV
+        opencv::initBuiltinOpenCvOperators();
+#endif
+        otb::initBuiltinOtbOperators();
+    });
     return registry;
 }
 

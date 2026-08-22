@@ -223,7 +223,6 @@ QgsVectorLayerProperties::QgsVectorLayerProperties( QgsMapCanvas *canvas, QgsMes
   QVBoxLayout *actionLayout = new QVBoxLayout( actionOptionsFrame );
   actionLayout->setContentsMargins( 0, 0, 0, 0 );
   mActionDialog = new QgsAttributeActionDialog( *mLayer->actions(), actionOptionsFrame );
-  mActionDialog->layout()->setContentsMargins( 0, 0, 0, 0 );
   actionLayout->addWidget( mActionDialog );
 
   mSourceFieldsPropertiesDialog = new QgsSourceFieldsProperties( mLayer, mSourceFieldsFrame );
@@ -1625,6 +1624,9 @@ void QgsVectorLayerProperties::pbnUpdateExtents_clicked()
 
 void QgsVectorLayerProperties::optionsStackedWidget_CurrentChanged( int index )
 {
+  if ( !mOptStackedWidget )
+    return;
+
   QgsLayerPropertiesDialog::optionsStackedWidget_CurrentChanged( index );
 
   QWidget *currentPage = mOptStackedWidget->widget( index );
@@ -1637,8 +1639,11 @@ void QgsVectorLayerProperties::optionsStackedWidget_CurrentChanged( int index )
   if ( ( currentPage == mOptsPage_Information || index == mOptStackedWidget->indexOf( mOptsPage_Information ) ) && !mMetadataFilled )
   {
     // set the metadata contents (which can be expensive)
-    teMetadataViewer->clear();
-    teMetadataViewer->setHtml( htmlMetadata() );
+    if ( teMetadataViewer )
+    {
+      teMetadataViewer->clear();
+      teMetadataViewer->setHtml( htmlMetadata() );
+    }
     mMetadataFilled = true;
   }
   else if ( currentPage == mOptsPage_Statistics && !mStatisticsFilled )
@@ -1648,12 +1653,13 @@ void QgsVectorLayerProperties::optionsStackedWidget_CurrentChanged( int index )
   else if ( index == mOptStackedWidget->indexOf( mOptsPage_SourceFields ) || index == mOptStackedWidget->indexOf( mOptsPage_Joins ) )
   {
     // store any edited attribute form field configuration to prevent loss of edits when adding/removing fields and/or joins
-    mAttributesFormPropertiesDialog->store();
+    if ( mAttributesFormPropertiesDialog )
+      mAttributesFormPropertiesDialog->store();
   }
   else if ( index == mOptStackedWidget->indexOf( mOptsPage_AttributesForm ) )
   {
     // Refresh actions in Available Widgets panel
-    if ( mActionDialog )
+    if ( mActionDialog && mAttributesFormPropertiesDialog )
     {
       mAttributesFormPropertiesDialog->initAvailableWidgetsActions( mActionDialog->actions() );
     }
