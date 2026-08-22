@@ -17,6 +17,9 @@
 
 #include "qgswinnative.h"
 
+#include <windows.h>
+#include <shellapi.h>
+#include <shlobj.h>
 #include <Dbt.h>
 #include <memory>
 #include <type_traits>

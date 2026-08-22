@@ -20,6 +20,7 @@
 #include "ui_qgssensorthingssubseteditorbase.h"
 
 #include "qgis.h"
+#include "qgis_gui.h"
 #include "qgsfields.h"
 #include "qgssubsetstringeditorinterface.h"
 
@@ -34,7 +35,7 @@ class QgsFieldProxyModel;
 
 ///@cond PRIVATE
 
-class QgsSensorThingsSubsetEditor : public QgsSubsetStringEditorInterface, private Ui::QgsSensorThingsSubsetEditorBase
+class GUI_EXPORT QgsSensorThingsSubsetEditor : public QgsSubsetStringEditorInterface, private Ui::QgsSensorThingsSubsetEditorBase
 {
     Q_OBJECT
 

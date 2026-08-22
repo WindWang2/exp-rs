@@ -25,39 +25,3 @@ QsciLexerSQL::~QsciLexerSQL() {}
 QsciLexerPython::~QsciLexerPython() {}
 QsciAPIs::~QsciAPIs() {}
 
-// --- staticMetaObject definition ---
-// QsciLexer has Q_OBJECT but its MOC is not compiled (header outside target source tree).
-// We must define the staticMetaObject data member that Q_OBJECT declares.
-// QMetaObject is an aggregate; initialize d with superdata pointing to QObject.
-const QMetaObject QsciLexer::staticMetaObject = { {
-    { &QObject::staticMetaObject },
-    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr
-} };
-
-// --- MOC key-function stubs ---
-// The "key function" for Q_OBJECT classes is metaObject(), which MOC would
-// normally generate. Since AUTOMOC can't see these headers (they're outside
-// the gui source tree), we provide manual definitions to anchor vtable/typeinfo.
-// NOTE: QsciScintillaBase and QsciScintilla already have AUTOMOC-generated
-// definitions (their headers ARE listed in the target sources), so we only
-// provide stubs for the classes whose MOC files are NOT compiled.
-
-const QMetaObject *QsciLexer::metaObject() const { return &QObject::staticMetaObject; }
-void *QsciLexer::qt_metacast(const char *) { return nullptr; }
-int QsciLexer::qt_metacall(QMetaObject::Call, int, void **) { return -1; }
-
-const QMetaObject *QsciLexerCSS::metaObject() const { return &QsciLexer::staticMetaObject; }
-void *QsciLexerCSS::qt_metacast(const char *) { return nullptr; }
-int QsciLexerCSS::qt_metacall(QMetaObject::Call, int, void **) { return -1; }
-
-const QMetaObject *QsciLexerSQL::metaObject() const { return &QsciLexer::staticMetaObject; }
-void *QsciLexerSQL::qt_metacast(const char *) { return nullptr; }
-int QsciLexerSQL::qt_metacall(QMetaObject::Call, int, void **) { return -1; }
-
-const QMetaObject *QsciLexerPython::metaObject() const { return &QsciLexer::staticMetaObject; }
-void *QsciLexerPython::qt_metacast(const char *) { return nullptr; }
-int QsciLexerPython::qt_metacall(QMetaObject::Call, int, void **) { return -1; }
-
-const QMetaObject *QsciAPIs::metaObject() const { return &QObject::staticMetaObject; }
-void *QsciAPIs::qt_metacast(const char *) { return nullptr; }
-int QsciAPIs::qt_metacall(QMetaObject::Call, int, void **) { return -1; }

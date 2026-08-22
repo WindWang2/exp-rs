@@ -14,7 +14,12 @@ using Catch::Approx;
 int main( int argc, char *argv[] )
 {
   QApplication app( argc, argv );
-  return Catch::Session().run( argc, argv );
+  const int result = Catch::Session().run( argc, argv );
+#ifdef _WIN32
+  _exit( result );
+#else
+  return result;
+#endif
 }
 
 TEST_CASE( "RsAccuracyPanel setResult and state transitions (#326)", "[classify][accuracy][panel]" )

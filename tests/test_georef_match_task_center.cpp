@@ -92,6 +92,7 @@ TEST_CASE( "Georef match Task Center completes template_match algorithm id",
 TEST_CASE( "Georef match Task Center cancel waits for worker exit",
            "[georef][match][task_center][cancel]" )
 {
+  auto workerStarted = std::make_shared<std::atomic<bool>>( false );
   auto release = std::make_shared<std::atomic<bool>>( false );
   auto canceledHook = std::make_shared<std::atomic<bool>>( false );
 
@@ -103,8 +104,9 @@ TEST_CASE( "Georef match Task Center cancel waits for worker exit",
 
   const long taskId = sicnu::TaskCenter::instance().submitJob(
     req,
-    [release]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
-      while ( !release->load() && !ctx.isCancelled() )
+    [workerStarted, release]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
+      workerStarted->store( true );
+      while ( !release->load() )
         std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
       if ( ctx.isCancelled() )
       {
@@ -119,12 +121,11 @@ TEST_CASE( "Georef match Task Center cancel waits for worker exit",
     false );
 
   REQUIRE( taskId > 0 );
-  for ( int i = 0; i < 500; ++i )
+  for ( int i = 0; i < 6000 && !workerStarted->load(); ++i )
   {
-    if ( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status == sicnu::TaskStatus::Running )
-      break;
     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
   }
+  REQUIRE( workerStarted->load() );
   REQUIRE( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status
            == sicnu::TaskStatus::Running );
 

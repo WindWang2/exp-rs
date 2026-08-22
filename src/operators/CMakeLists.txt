@@ -144,6 +144,7 @@ endif()
 set_target_properties(sicnu_operators PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
 install(TARGETS sicnu_operators

@@ -13,6 +13,9 @@
 #include <set>
 #include <string>
 
+#include "operators/framework/rs_operator_registry.h"
+#include <iostream>
+
 using namespace sicnu::processing;
 using namespace sicnu::operators;
 using namespace sicnu::operators::rs;

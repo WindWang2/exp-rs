@@ -128,7 +128,11 @@ int main(int argc, char *argv[]) {
   const int result = Catch::Session().run(argc, argv);
   QgsProject::instance()->clear();
   QgsApplication::exitQgis();
+#ifdef _WIN32
+  _exit(result);
+#else
   return result;
+#endif
 }
 
 TEST_CASE("SICNU project round trip preserves Data and Display identities",
@@ -434,9 +438,9 @@ TEST_CASE("Reopening after moving a source preserves the Asset and Display recor
   // Move the source away, then reopen the project.
   const QString movedRaster =
       dataDirectory.filePath(QStringLiteral("scene-moved.tif"));
+  REQUIRE(context->clearProject(*project));
   REQUIRE(QFile::rename(originalRaster, movedRaster));
 
-  REQUIRE(context->clearProject(*project));
   REQUIRE(project->read(projectPath));
   REQUIRE(readSucceeded);
 

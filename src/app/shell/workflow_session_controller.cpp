@@ -7,6 +7,7 @@
 
 #include "data/data_manager.h"
 #include "processing/framework/output_committer.h"
+#include "processing/framework/output_committer_task_center.h"
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "workflow/builtin_definitions.h"
@@ -485,13 +486,14 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
   if ( !outputPath.isEmpty() && m_dataManager )
   {
     sicnu::OutputCommitter committer( m_dataManager, this );
-    committer.commitTaskOutput( &sicnu::TaskCenter::instance(),
-                                info.taskId,
-                                sicnu::data::AssetKind::Raster,
-                                outputPath,
-                                sicnu::data::PersistencePolicy::TaskTemporary,
-                                /*autoLoad=*/false,
-                                {} );
+    sicnu::commitTaskOutput( &committer,
+                             &sicnu::TaskCenter::instance(),
+                             info.taskId,
+                             sicnu::data::AssetKind::Raster,
+                             outputPath,
+                             sicnu::data::PersistencePolicy::TaskTemporary,
+                             /*autoLoad=*/false,
+                             {} );
   }
 
   bool shouldLoadToMap = m_pendingLoadToMap;

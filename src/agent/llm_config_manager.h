@@ -6,6 +6,8 @@
 #include <QSettings>
 #include <QString>
 
+#include "sicnu_agent_export.h"
+
 namespace sicnu::agent
 {
 
@@ -26,7 +28,7 @@ struct LlmProviderProfile
   }
 };
 
-class LlmConfigManager : public QObject
+class SICNU_AGENT_EXPORT LlmConfigManager : public QObject
 {
     Q_OBJECT
   public:

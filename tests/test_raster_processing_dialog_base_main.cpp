@@ -11,6 +11,7 @@
 #include <catch2/catch_session.hpp>
 
 #include <QApplication>
+#include "processing/framework/task_center.h"
 
 namespace {
 int fakeArgc = 1;
@@ -26,5 +27,8 @@ int main(int argc, char *argv[])
     const int rc = session.applyCommandLine(argc, argv);
     if (rc != 0)
         return rc;
-    return session.run();
+    const int result = session.run();
+    sicnu::TaskCenter::instance().shutdown();
+    app.processEvents();
+    _exit(result);
 }

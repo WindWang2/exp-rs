@@ -14,4 +14,6 @@ REGISTER_RS_OPERATOR(GdalReprojectOperator, "gdal:reproject")
 REGISTER_RS_OPERATOR(GdalClipOperator, "gdal:clip")
 REGISTER_RS_OPERATOR(GdalPolygonizeOperator, "gdal:polygonize")
 
+void initBuiltinGdalOperators() {}
+
 } // namespace sicnu::operators::gdal

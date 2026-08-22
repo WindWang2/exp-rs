@@ -609,7 +609,7 @@ void QgsLayerPropertiesDialog::optionsStackedWidget_CurrentChanged( int index )
 {
   QgsOptionsDialogBase::optionsStackedWidget_CurrentChanged( index );
 
-  if ( mMetadataPage && mBtnStyle && mBtnMetadata )
+  if ( mOptStackedWidget && mMetadataPage && mBtnStyle && mBtnMetadata )
   {
     const bool isMetadataPanel = ( index == mOptStackedWidget->indexOf( mMetadataPage ) );
     mBtnStyle->setVisible( !isMetadataPanel );

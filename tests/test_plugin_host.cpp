@@ -31,7 +31,11 @@ int main( int argc, char *argv[] )
   const int result = Catch::Session().run( argc, argv );
   QgsProject::instance()->clear();
   QgsApplication::exitQgis();
+  #ifdef _WIN32
+  _exit( result );
+#else
   return result;
+#endif
 }
 
 TEST_CASE( "PluginHost loads plugins headlessly without GUI widgets", "[core][plugin_host]" )

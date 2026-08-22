@@ -290,6 +290,9 @@ void QgsOptionsDialogBase::setListToItemAtIndex( int index )
 
 void QgsOptionsDialogBase::resizeAlltabs( int index )
 {
+  if ( !mOptStackedWidget )
+    return;
+
   // Adjust size (GH issue #31449 and #32615)
   // make the stacked widget size to the current page only
   for ( int i = 0; i < mOptStackedWidget->count(); ++i )

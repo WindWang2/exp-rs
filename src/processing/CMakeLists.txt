@@ -205,6 +205,7 @@ endif()
 target_compile_definitions(sicnu_processing PUBLIC
     SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+set_target_properties(sicnu_processing PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 # Task Center (#26–#29): separate static lib so JobEngine can be linked without
 # a processing↔jobs↔operators cycle. OutputCommitter keeps only a TaskCenter*

@@ -39,15 +39,18 @@ target_link_libraries(sicnu_agent PUBLIC
   sicnu_qgis_display
   sicnu_processing
   sicnu_task_center
+  ${JSONCPP_LIBRARIES}
 )
 
 target_include_directories(sicnu_agent PUBLIC
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
+  ${JSONCPP_INCLUDE_DIRS}
 )
 
 set_target_properties(sicnu_agent PROPERTIES
   AUTOMOC ON
+  WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
 install(TARGETS sicnu_agent

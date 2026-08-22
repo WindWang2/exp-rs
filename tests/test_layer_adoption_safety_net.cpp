@@ -91,7 +91,11 @@ int main(int argc, char *argv[]) {
   const int result = Catch::Session().run(argc, argv);
   QgsProject::instance()->clear();
   QgsApplication::exitQgis();
+  #ifdef _WIN32
+  _exit( result );
+#else
   return result;
+#endif
 }
 
 TEST_CASE("A legacy direct QGIS layer is adopted and receives an Asset identity",

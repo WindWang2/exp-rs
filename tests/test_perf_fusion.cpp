@@ -14,7 +14,9 @@
 #include <cstdlib>
 #include <iostream>
 #include <vector>
+#if defined(__linux__) || defined(__APPLE__)
 #include <sys/resource.h>
+#endif
 
 #include <fstream>
 #include <random>
