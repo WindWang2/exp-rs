@@ -3,6 +3,8 @@
 #include "algorithm_tool_provider.h"
 #include "interaction_tool_provider.h"
 #include "data_tool_provider.h"
+#include "agent/spatial_tools/spatial_tool.h"
+#include "agent/spatial_tools/spatial_tool_provider.h"
 
 #include <algorithm>
 #include <cctype>
@@ -160,6 +162,12 @@ void AgentToolCatalog::initializeDefaults()
   mProviders.push_back( std::make_shared<AlgorithmToolProvider>() );
   mProviders.push_back( std::make_shared<InteractionToolProvider>() );
   mProviders.push_back( std::make_shared<DataToolProvider>() );
+
+  // ADR 0122: spatial inspection/catalog tools (spatial:*) join the unified
+  // catalog as descriptors; execution stays owned by SpatialToolRegistry
+  // (its own mutex — no interaction with mMutex).
+  sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerBuiltinTools();
+  mProviders.push_back( std::make_shared<sicnu::agent::spatial_tools::SpatialToolProvider>() );
 
   mCacheValid = false;
   mCachedTools.clear();

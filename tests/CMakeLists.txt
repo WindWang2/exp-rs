@@ -553,6 +553,9 @@ target_include_directories(test_agent_tool_catalog PRIVATE
 )
 sicnu_discover_tests(test_agent_tool_catalog)
 
+# Spatial tool framework tests (ADR 0122)
+sicnu_add_test(test_spatial_tools)
+
 # GDAL error handler tests
 add_executable(test_gdal_errors test_gdal_errors.cpp)
 target_link_libraries(test_gdal_errors PRIVATE

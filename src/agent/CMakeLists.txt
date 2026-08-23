@@ -27,6 +27,16 @@ add_library(sicnu_agent SHARED
   tool_catalog/data_tool_provider.h
   tool_catalog/agent_tool_catalog.cpp
   tool_catalog/agent_tool_catalog.h
+  spatial_tools/spatial_tool.cpp
+  spatial_tools/spatial_tool.h
+  spatial_tools/raster_inspect_tool.cpp
+  spatial_tools/raster_inspect_tool.h
+  spatial_tools/vector_inspect_tool.cpp
+  spatial_tools/vector_inspect_tool.h
+  spatial_tools/model_catalog_tool.cpp
+  spatial_tools/model_catalog_tool.h
+  spatial_tools/spatial_tool_provider.cpp
+  spatial_tools/spatial_tool_provider.h
 )
 
 target_link_libraries(sicnu_agent PUBLIC
@@ -39,6 +49,7 @@ target_link_libraries(sicnu_agent PUBLIC
   sicnu_qgis_display
   sicnu_processing
   sicnu_task_center
+  sicnu_operators
 )
 
 target_include_directories(sicnu_agent PUBLIC

@@ -106,6 +106,11 @@ protected:
     QVariantMap handleListInteractionTools();
     QVariantMap handleGetInteractionSchema(const QString &toolName);
 
+    // MCP Methods — Spatial workflow & spatial tool layer (ADR 0122)
+    QVariantMap handleRunWorkflow(const QVariantMap &arguments);
+    QVariantMap handleGetWorkflowStatus(long pipelineId);
+    QVariantMap handleSpatialToolCall(const QString &toolId, const QVariantMap &parameters);
+
 private:
     /// Unified tool execution helper routing calls through ToolCallDispatcher
     QVariantMap dispatchToolCall(const QString &toolId, const QVariantMap &parameters, bool isOperatorCall);

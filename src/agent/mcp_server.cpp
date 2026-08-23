@@ -8,6 +8,7 @@
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/framework/rs_operator.h"
 #include "processing/framework/atomic_algorithm_registry.h"
+#include "processing/framework/algorithm_meta_store.h"
 #include "processing/framework/json_params_converter.h"
 #include "processing/framework/algorithm_preflight.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -15,6 +16,7 @@
 #include "interaction_tool_registry.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "agent/tool_catalog/agent_tool.h"
+#include "agent/spatial_tools/spatial_tool.h"
 
 #include <iostream>
 #include <QJsonDocument>
@@ -87,6 +89,7 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("layer:"),  // agent interaction layer tools
         QStringLiteral("raster:"), // agent raster display tools
         QStringLiteral("data:"),   // data manager tools
+        QStringLiteral("spatial:"), // spatial inspection/catalog tools (ADR 0122)
     };
     for (const QString &prefix : kAllowed) {
         if (checkId.startsWith(prefix))
@@ -281,6 +284,19 @@ const MetaToolDef kMetaTools[] = {
     { "get_tool_schema",
       "Get parameter JSON Schema and metadata for any registered tool in the unified Agent Tool Catalog.",
       { { "tool_id", "string", "Unique ID of the tool, e.g. 'rs:spectral_index', 'canvas:draw_roi', 'data:list_layers'", true } } },
+    { "run_workflow",
+      "Submit an agent-generated spatial workflow (DAG) as pipeline JSON and execute it "
+      "through the Task Center: steps reference registered operators (e.g. "
+      "'rs:spectral_index'), connections declare the execution order, and upstream "
+      "outputs flow into downstream inputs. Returns the pipeline id and one "
+      "execution_id per step — poll them with get_execution_status or use "
+      "get_workflow_status for the aggregate view.",
+      { { "pipeline", "object", "Pipeline definition: {id, name, steps: [{id, title, operator, params, inputs: [{fromStepId, fromPort, toPort}]}]}. A JSON string is also accepted.", true },
+        { "auto_load", "boolean", "Auto-load finished outputs as layers (headless MCP default false).", false } } },
+    { "get_workflow_status",
+      "Get the aggregate status of a workflow submitted with run_workflow: overall "
+      "state plus per-step execution ids, statuses, and progress.",
+      { { "pipeline_id", "integer", "Pipeline id returned by run_workflow.", true } } },
 };
 
 QVariantMap metaToolInputSchema(const MetaToolDef &def)
@@ -331,6 +347,22 @@ QVariantMap executionStatusResponse( sicnu::data::DataManager *dataManager,
         }
     }
     return result;
+}
+
+/// Attaches the ADR 0122 algorithm catalog sidecar (task/input/output/gpu/
+/// accuracy) to a discovery entry when a manifest exists for the id. The
+/// store loads data/processing/algorithm_meta/*.json once per process.
+void attachCatalogEntry( QVariantMap &algMap, const QString &id )
+{
+    // One-time lazy load of data/processing/algorithm_meta/*.json.
+    static const bool kMetaLoaded = [] {
+        sicnu::processing::AlgorithmMetaStore::instance().loadDefaults();
+        return true;
+    }();
+    Q_UNUSED( kMetaLoaded )
+    const auto entry = sicnu::processing::AlgorithmMetaStore::instance().find( id.toStdString() );
+    if ( entry )
+        algMap[QStringLiteral("catalog")] = sicnu::processing::jsonValueToVariant( entry->toJson() );
 }
 
 } // namespace
@@ -513,6 +545,31 @@ void McpServer::handleRequest(const QVariantMap &request)
             tool[QStringLiteral("inputSchema")] = metaToolInputSchema(def);
             tools.append(tool);
         }
+        // ADR 0122: also expose the unified Agent Tool Catalog (algorithms,
+        // interaction, data, spatial tools) with full JSON Schemas so
+        // harness-side bridges (e.g. the Pi extension) enumerate one surface.
+        // Only tools that tools/call can actually dispatch are listed, and
+        // GUI-only interaction tools hidden in headless mode stay hidden here
+        // too (same rule as handleListTools).
+        const bool headlessNoGui = sicnu::agent::InteractionToolRegistry::instance().toolCount() == 0
+            || sicnu::agent::InteractionToolRegistry::instance().findTool("view:get_state") == std::nullopt;
+        for (const auto &catalogTool : sicnu::agent::tool_catalog::AgentToolCatalog::instance().listTools()) {
+            const QString id = QString::fromStdString(catalogTool.name);
+            if (!idHasAllowedPrefix(id, nullptr))
+                continue;
+            if (headlessNoGui && catalogTool.category == sicnu::agent::tool_catalog::ToolCategory::Interaction
+                && (id.startsWith(QStringLiteral("view:")) || id.startsWith(QStringLiteral("roi:"))
+                    || id.startsWith(QStringLiteral("canvas:")) || id.startsWith(QStringLiteral("layer:"))
+                    || id.startsWith(QStringLiteral("raster:")))
+                && !sicnu::agent::InteractionToolRegistry::instance().hasTool(catalogTool.name)) {
+                continue;
+            }
+            QVariantMap tool;
+            tool[QStringLiteral("name")] = id;
+            tool[QStringLiteral("description")] = QString::fromStdString(catalogTool.description);
+            tool[QStringLiteral("inputSchema")] = sicnu::processing::jsonValueToVariant(catalogTool.inputSchema);
+            tools.append(tool);
+        }
         result[QStringLiteral("tools")] = tools;
         sendResponse(id, result);
     }
@@ -615,6 +672,22 @@ void McpServer::handleRequest(const QVariantMap &request)
             else if (toolName == QStringLiteral("get_tool_schema"))
             {
                 resultData = handleGetToolSchema(arguments.value(QStringLiteral("tool_id")).toString());
+            }
+            else if (toolName == QStringLiteral("run_workflow"))
+            {
+                resultData = handleRunWorkflow(arguments);
+            }
+            else if (toolName == QStringLiteral("get_workflow_status"))
+            {
+                bool idOk = false;
+                const long pipelineId = arguments.value(QStringLiteral("pipeline_id")).toLongLong(&idOk);
+                if (!idOk || pipelineId < 0)
+                    throw std::runtime_error("Invalid or missing pipeline_id");
+                resultData = handleGetWorkflowStatus(pipelineId);
+            }
+            else if (toolName.startsWith(QStringLiteral("spatial:")))
+            {
+                resultData = handleSpatialToolCall(toolName, arguments);
             }
             else if (toolName.startsWith(QStringLiteral("view:")) ||
                      toolName.startsWith(QStringLiteral("roi:")) ||
@@ -761,6 +834,8 @@ QVariantMap McpServer::handleListAlgorithms()
             outList.append(outMap);
         }
         algMap[QStringLiteral("outputs")] = outList;
+
+        attachCatalogEntry( algMap, id );
 
         algList.append(algMap);
     }
@@ -961,7 +1036,7 @@ bool McpServer::isToolIdAllowed(const QString &toolId, QString *reason)
     if (reason) {
         *reason = QStringLiteral(
             "Tool id '%1' is not in the MCP allow-list "
-            "(rs:, gdal:, gdal_tools:, otb:, qgis:, qgis_algorithms:, opencv:).").arg(toolId);
+            "(rs:, gdal:, gdal_tools:, otb:, qgis:, qgis_algorithms:, opencv:, spatial:).").arg(toolId);
     }
     return false;
 }
@@ -1083,6 +1158,7 @@ QVariantMap McpServer::handleGetAlgorithmSchema(const QString &algorithmId)
     result[QStringLiteral("algorithm_id")] = algorithmId;
     result[QStringLiteral("outputs")] = sicnu::processing::jsonObjectToVariantMap(desc.toOutputSchema());
     result[QStringLiteral("metadata")] = sicnu::processing::jsonObjectToVariantMap(desc.agentMetadata.toJson());
+    attachCatalogEntry( result, algorithmId );
     return result;
 }
 
@@ -1454,4 +1530,117 @@ QVariantMap McpServer::handleGetToolSchema(const QString &toolId)
     result[QStringLiteral("description")] = QString::fromStdString(tool->description);
     result[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(tool->inputSchema);
     return result;
+}
+
+// ---------------------------------------------------------------------------
+// Spatial workflow & spatial tool layer (ADR 0122)
+// ---------------------------------------------------------------------------
+
+QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
+{
+    const QVariant pipelineArg = arguments.value(QStringLiteral("pipeline"));
+    QString pipelineJson;
+    if (pipelineArg.typeId() == QMetaType::QString) {
+        pipelineJson = pipelineArg.toString();
+    } else if (pipelineArg.canConvert<QVariantMap>()) {
+        const QJsonDocument doc(QJsonObject::fromVariantMap(pipelineArg.toMap()));
+        pipelineJson = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
+    }
+    if (pipelineJson.trimmed().isEmpty())
+        throw std::runtime_error("Missing required parameter: pipeline");
+
+    const bool autoLoad = arguments.value(QStringLiteral("auto_load")).toBool();
+
+    const long pipelineId = sicnu::TaskCenter::instance().submitPipelineJson(
+        pipelineJson.toStdString(), autoLoad);
+    if (pipelineId < 0)
+        throw std::runtime_error(
+            "Invalid pipeline definition: expected {id, steps: [{id, operator, params, inputs}]}");
+
+    QVariantMap result;
+    result[QStringLiteral("pipeline_id")] = static_cast<qlonglong>(pipelineId);
+
+    const sicnu::PipelineExecutionInfo info = sicnu::TaskCenter::instance().getPipelineInfo(pipelineId);
+    QVariantList steps;
+    for (const auto &stepId : info.orderedStepIds) {
+        const auto taskIdIt = info.stepToTaskId.find(stepId);
+        if (taskIdIt == info.stepToTaskId.end())
+            continue;
+        const sicnu::AlgorithmTaskInfo task =
+            sicnu::TaskCenter::instance().getTaskInfo(taskIdIt.value());
+        QVariantMap step;
+        step[QStringLiteral("step_id")] = QString::fromStdString(stepId);
+        step[QStringLiteral("execution_id")] = toExecutionId(taskIdIt.value());
+        step[QStringLiteral("algorithm_id")] = task.algorithmId;
+        step[QStringLiteral("status")] = mcpStatusForTask(task).value(QStringLiteral("status"));
+        steps.append(step);
+    }
+    result[QStringLiteral("steps")] = steps;
+    result[QStringLiteral("stepCount")] = steps.size();
+    result[QStringLiteral("status")] = QStringLiteral("running");
+    return result;
+}
+
+QVariantMap McpServer::handleGetWorkflowStatus(long pipelineId)
+{
+    const sicnu::PipelineExecutionInfo info =
+        sicnu::TaskCenter::instance().getPipelineInfo(pipelineId);
+    if (info.pipelineId < 0)
+        throw std::runtime_error(QStringLiteral("Unknown pipeline id: %1").arg(pipelineId).toStdString());
+
+    QVariantMap result;
+    result[QStringLiteral("pipeline_id")] = static_cast<qlonglong>(pipelineId);
+    result[QStringLiteral("definition_id")] = info.definitionId;
+    result[QStringLiteral("isCompleted")] = info.isCompleted;
+    result[QStringLiteral("isFailed")] = info.isFailed;
+    if (!info.errorMessage.isEmpty())
+        result[QStringLiteral("errorMessage")] = info.errorMessage;
+
+    QVariantList steps;
+    for (const auto &stepId : info.orderedStepIds) {
+        QVariantMap step;
+        step[QStringLiteral("step_id")] = QString::fromStdString(stepId);
+        const auto taskIdIt = info.stepToTaskId.find(stepId);
+        if (taskIdIt != info.stepToTaskId.end()) {
+            const sicnu::AlgorithmTaskInfo task =
+                sicnu::TaskCenter::instance().getTaskInfo(taskIdIt.value());
+            step[QStringLiteral("execution_id")] = toExecutionId(taskIdIt.value());
+            step[QStringLiteral("algorithm_id")] = task.algorithmId;
+            const QVariantMap status = mcpStatusForTask(task);
+            step[QStringLiteral("status")] = status.value(QStringLiteral("status"));
+            step[QStringLiteral("progress")] = status.value(QStringLiteral("progress"));
+        } else {
+            step[QStringLiteral("status")] = QStringLiteral("skipped");
+        }
+        steps.append(step);
+    }
+    result[QStringLiteral("steps")] = steps;
+    return result;
+}
+
+QVariantMap McpServer::handleSpatialToolCall(const QString &toolId, const QVariantMap &parameters)
+{
+    auto &registry = sicnu::agent::spatial_tools::SpatialToolRegistry::instance();
+    // Idempotent: a tools/call may arrive before anything constructed the
+    // AgentToolCatalog (which is what normally registers the built-ins).
+    registry.registerBuiltinTools();
+    const auto tool = registry.find(toolId.toStdString());
+    if (!tool)
+        throw std::runtime_error(QStringLiteral("Unknown spatial tool: %1").arg(toolId).toStdString());
+
+    const Json::Value input = sicnu::processing::variantToJsonValue(parameters);
+    const std::string schemaError =
+        sicnu::agent::spatial_tools::validateAgainstRequired(input, (*tool)->inputSchema());
+    if (!schemaError.empty())
+        throw std::runtime_error(toolId.toStdString() + ": " + schemaError);
+
+    SICNU_LOG_INFO(SicnuLogTags::MCP, QString("Executing spatial tool: %1").arg(toolId));
+    const auto result = (*tool)->execute(input);
+    if (!result.success)
+        throw std::runtime_error(toolId.toStdString() + ": " + result.error);
+
+    QVariantMap out;
+    out[QStringLiteral("status")] = QStringLiteral("ok");
+    out[QStringLiteral("result")] = sicnu::processing::jsonValueToVariant(result.output);
+    return out;
 }

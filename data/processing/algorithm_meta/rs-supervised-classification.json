@@ -1,0 +1,9 @@
+{
+  "id": "rs:supervised_classification",
+  "task": "classification",
+  "input": "raster",
+  "output": "raster",
+  "gpu": false,
+  "notes": "NormalBayes / SVM / KMeans with cross-validation, per-class metrics and probability outputs. Model sidecar records features and validation results for compatibility checks.",
+  "tags": ["classification", "supervised", "svm", "normalbayes"]
+}

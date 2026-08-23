@@ -1,0 +1,9 @@
+{
+  "id": "gdal:polygonize",
+  "task": "vectorization",
+  "input": "raster",
+  "output": "vector",
+  "gpu": false,
+  "notes": "Raster-to-vector conversion for segmentation maps and classified rasters. Typical workflow tail: segmentation or classification -> polygonize -> area filtering.",
+  "tags": ["vectorize", "polygon", "segmentation", "export"]
+}

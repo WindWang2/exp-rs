@@ -1,0 +1,9 @@
+{
+  "id": "rs:qa_mask",
+  "task": "quality-masking",
+  "input": "raster",
+  "output": "raster",
+  "gpu": false,
+  "notes": "Landsat QA_PIXEL / Sentinel-2 SCL / generic bitmask to cloud, cloud-shadow, snow masks. Runs before atmospheric correction in the lab.preprocess.optical DAG.",
+  "tags": ["qa", "cloud", "mask", "landsat", "sentinel-2"]
+}

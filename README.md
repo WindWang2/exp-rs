@@ -32,6 +32,25 @@ Professional remote sensing analysis platform built on the QGIS engine. Pure C++
 
 The desktop UI is task-centric: **导入产品 → 辐射定标 → QA 掩膜 → 大气校正 → 网格对齐/正射 → 应用掩膜 → 分析就绪 → 指数/分类/融合/变化检测 → 后分类比较 → 谱学分析 → 溯源**, with a reusable preprocessing DAG (`lab.preprocess.optical`: calibration → QA mask → atmospheric correction → apply mask → NDVI). The same operators run through the Processing Toolbox, TaskCenter workflows, the CLI, and the Agent/MCP interface.
 
+## Spatial Intelligence (Pi Agent Runtime)
+
+exp-rs doubles as the spatial capability provider for external agent
+runtimes ([ADR 0122](docs/adr/0122-pi-spatial-intelligence-layer.md)):
+
+- **`pi/exp-rs-spatial.ts`** — a [Pi](https://pi.dev) extension that spawns the
+  binary in `--mcp` mode and bridges every tool (discovery, spatial
+  inspection, execution, workflows, models) as first-class Pi tools. See
+  `pi/README.md`.
+- **Spatial tools** (`spatial:raster_inspect`, `spatial:vector_inspect`,
+  `spatial:list_models`) — fast read-only data understanding over one
+  `SpatialTool` contract (`name/description/input_schema/execute/output_schema`).
+- **Agent workflows** — MCP `run_workflow` submits agent-generated pipeline
+  DAGs through the Task Center; `get_workflow_status` aggregates per-step
+  execution.
+- **Capability manifests** — `data/processing/algorithm_meta/*.json`
+  (task/input/output/gpu/accuracy) and `models/*/model.json` (model runtime
+  catalog; `rs:infer` accepts catalog names).
+
 ## Prerequisites
 
 **一键安装所有依赖:**

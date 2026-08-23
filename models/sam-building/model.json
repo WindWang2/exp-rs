@@ -1,0 +1,12 @@
+{
+  "name": "sam-building",
+  "task": "segmentation",
+  "input": "raster",
+  "output": "polygon",
+  "framework": "onnx",
+  "path": "",
+  "gpu": true,
+  "accuracy": 0.89,
+  "description": "Template manifest: building extraction model (SAM-derived). Chain with gdal:polygonize for vector output.",
+  "tags": ["buildings", "segmentation", "template"]
+}
