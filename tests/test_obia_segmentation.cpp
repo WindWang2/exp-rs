@@ -4,6 +4,7 @@
 #ifdef SICNU_HAS_OPENCV
 
 #include "app/obia/rs_obia_segmentation.h"
+#include "analysis/segmentation/rs_segment_features.h"
 
 #include <gdal.h>
 
@@ -112,7 +113,6 @@ TEST_CASE( "ObiaSegmentation: cancel probe plumbed through OTB delegate", "[obia
     cfg.smoothKernel = 3;
     cfg.quantizeBins = 4;
     cfg.minRegionSize = 10;
-
     const RsObiaSegmentationResult result = RsObiaSegmentation::run( cfg, isCanceled );
     REQUIRE( result.ok );
     REQUIRE( result.segMap.segmentCount() > 0 );
@@ -122,6 +122,28 @@ TEST_CASE( "ObiaSegmentation: cancel probe plumbed through OTB delegate", "[obia
         REQUIRE( cancelCalls == 0 ); // never reached a running OTB process
         REQUIRE( !result.usedOtb );
     }
+}
+
+TEST_CASE( "OBIA segment features 64-bit label indexing safety (#472)", "[obia][segmentation][features][472]" )
+{
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+
+    const QString inputPath = createTestRaster( tempDir.path(), 8, 8 );
+    REQUIRE( !inputPath.isEmpty() );
+
+    // 8x8 label map with 2 segments
+    QVector<quint32> labels( 64, 1 );
+    for ( int i = 32; i < 64; ++i )
+        labels[i] = 2;
+    RsSegmentMap segMap( labels, 8, 8 );
+    REQUIRE( segMap.segmentCount() == 2 );
+
+    auto features = RsSegmentFeatures::extract( inputPath, segMap, { 1 } );
+    REQUIRE( features.contains( 1 ) );
+    REQUIRE( features.contains( 2 ) );
+    CHECK( features[1].area == 32.0 );
+    CHECK( features[2].area == 32.0 );
 }
 
 #endif // SICNU_HAS_OPENCV

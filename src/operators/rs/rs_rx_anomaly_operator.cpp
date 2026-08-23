@@ -197,7 +197,8 @@ Json::Value RsRxAnomalyOperator::run(const Json::Value& params,
                 {
                     if ( !std::isfinite( spectrum[b] )
                          || ( hasNoDataPerBand[static_cast<size_t>( b )]
-                              && std::abs( spectrum[b] - noDataPerBand[static_cast<size_t>( b )] ) < 1e-3f ) )
+                              && ( spectrum[b] == noDataPerBand[static_cast<size_t>( b )]
+                                   || std::isnan( spectrum[b] ) ) ) )
                     {
                         valid = false;
                         break;

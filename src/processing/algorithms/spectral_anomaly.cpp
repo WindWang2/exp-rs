@@ -99,7 +99,7 @@ void accumulateMean( const float *pixels, size_t count, int bands,
                 // declared NoData value (@a noDataBands, when provided and hasNoData is true).
                 const bool checkNd = noDataBands && ( !hasNoDataBands || hasNoDataBands[b] );
                 if ( !std::isfinite( v )
-                     || ( checkNd && std::abs( v - noDataBands[b] ) < 1e-3f ) )
+                     || ( checkNd && ( v == noDataBands[b] || std::isnan( v ) ) ) )
                 {
                     valid = false;
                     break;
@@ -149,7 +149,7 @@ void accumulateCovariance( const float *pixels, size_t count, int bands,
                 // declared NoData value (@a noDataBands, when provided and hasNoData is true).
                 const bool checkNd = noDataBands && ( !hasNoDataBands || hasNoDataBands[b] );
                 if ( !std::isfinite( v )
-                     || ( checkNd && std::abs( v - noDataBands[b] ) < 1e-3f ) )
+                     || ( checkNd && ( v == noDataBands[b] || std::isnan( v ) ) ) )
                 {
                     valid = false;
                     break;

@@ -88,7 +88,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
 
     quint32 maxLabel = 0;
     for ( size_t i = 0; i < nPixels; ++i )
-        maxLabel = std::max( maxLabel, labels[static_cast<int>(i)] );
+        maxLabel = std::max( maxLabel, labels[static_cast<qsizetype>(i)] );
 
     const bool useVector = maxLabel > 0
                            && static_cast<size_t>( maxLabel ) <= nPixels * 10;
@@ -141,7 +141,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         for ( int c = 0; c < w; ++c )
         {
             const size_t idx = static_cast<size_t>(r) * static_cast<size_t>(w) + static_cast<size_t>(c);
-            const quint32 segId = labels[static_cast<int>(idx)];
+            const quint32 segId = labels[static_cast<qsizetype>(idx)];
             if ( segId == 0 )
                 continue;
 
@@ -175,7 +175,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                     break;
                 }
                 const size_t nIdx = static_cast<size_t>(nr) * static_cast<size_t>(w) + static_cast<size_t>(nc);
-                if ( labels[static_cast<int>(nIdx)] != segId )
+                if ( labels[static_cast<qsizetype>(nIdx)] != segId )
                 {
                     isBoundary = true;
                     break;
@@ -206,7 +206,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         // Accumulate spectral stats for this band
         for ( size_t i = 0; i < nPixels; ++i )
         {
-            const quint32 segId = labels[static_cast<int>(i)];
+            const quint32 segId = labels[static_cast<qsizetype>(i)];
             if ( segId == 0 ) continue;
             if ( !validMask[i] ) continue;
             Acc *acc = accFor( segId );
@@ -256,7 +256,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
     for ( size_t i = 0; i < nPixels; ++i )
     {
         if ( !validMask[i] ) continue;
-        const quint32 segId = labels[static_cast<int>(i)];
+        const quint32 segId = labels[static_cast<qsizetype>(i)];
         if ( segId == 0 ) continue;
         Acc *acc = accFor( segId );
         if ( acc->sum.isEmpty() ) continue; // segment wholy invalid
@@ -292,7 +292,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                 for ( int c = box.minC; c <= box.maxC; ++c )
                 {
                     const size_t idx = static_cast<size_t>(r) * static_cast<size_t>(w) + static_cast<size_t>(c);
-                    if ( labels[static_cast<int>(idx)] != segId ) continue;
+                    if ( labels[static_cast<qsizetype>(idx)] != segId ) continue;
                     if ( !validMask[idx] ) continue;
                     const float val1 = bandBuf[idx];
                     // validMask guarantees not NaN/NoData, but keep guard for safety
@@ -307,7 +307,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                         const int nc = c + dcs[d];
                         if ( nr < box.minR || nr > box.maxR || nc < box.minC || nc > box.maxC ) continue;
                         const size_t nIdx = static_cast<size_t>(nr) * static_cast<size_t>(w) + static_cast<size_t>(nc);
-                        if ( labels[static_cast<int>(nIdx)] != segId ) continue;
+                        if ( labels[static_cast<qsizetype>(nIdx)] != segId ) continue;
                         if ( !validMask[nIdx] ) continue;
                         const float val2 = bandBuf[nIdx];
                         if ( std::isnan(val2) ) continue;

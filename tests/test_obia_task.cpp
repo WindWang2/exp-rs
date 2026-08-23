@@ -8,6 +8,7 @@
 #include "app/obia/rs_obia_task.h"
 #include "analysis/classification/rs_classifier_normalbayes.h"
 #include "analysis/classification/rs_classifier_kmeans.h"
+#include "analysis/classification/rs_classifier_mlp.h"
 
 #include <gdal.h>
 #include <cpl_error.h>
@@ -222,6 +223,51 @@ TEST_CASE( "ObiaTask: labeled pipeline fills training accuracy", "[obia][classif
         REQUIRE( task.result().accuracy.overallAccuracy >= 0.0 );
         REQUIRE( task.result().accuracy.overallAccuracy <= 1.0 );
         REQUIRE( QFile::exists( outputPath ) );
+    }
+}
+
+TEST_CASE( "NormalBayes predictProbabilities normalizes single-class posterior to 1.0 (#474)", "[obia][classification][normalbayes][474]" )
+{
+    RsClassifierNormalBayes nb;
+    cv::Mat X = ( cv::Mat_<float>( 4, 2 ) << 1.0f, 2.0f,
+                                            1.1f, 2.1f,
+                                            0.9f, 1.9f,
+                                            1.05f, 2.05f );
+    cv::Mat y = ( cv::Mat_<int>( 4, 1 ) << 1, 1, 1, 1 );
+    REQUIRE( nb.fit( X, y ) );
+
+    cv::Mat probs = nb.predictProbabilities( X );
+    REQUIRE( !probs.empty() );
+    REQUIRE( probs.rows == 4 );
+    REQUIRE( probs.cols == 1 );
+    for ( int i = 0; i < 4; ++i )
+    {
+        CHECK( probs.at<float>( i, 0 ) == 1.0f );
+    }
+}
+
+TEST_CASE( "ANN_MLP predictProbabilities handles trained models gracefully (#471)", "[obia][classification][mlp][471]" )
+{
+    RsMlpBackend mlp( 4, 50 );
+    cv::Mat X = ( cv::Mat_<float>( 6, 2 ) << 1.0f, 2.0f,
+                                            1.1f, 2.1f,
+                                            0.9f, 1.9f,
+                                            10.0f, 20.0f,
+                                            10.1f, 20.1f,
+                                            9.9f, 19.9f );
+    cv::Mat y = ( cv::Mat_<int>( 6, 1 ) << 1, 1, 1, 2, 2, 2 );
+    if ( mlp.fit( X, y ) )
+    {
+        cv::Mat probs = mlp.predictProbabilities( X );
+        REQUIRE( !probs.empty() );
+        REQUIRE( probs.rows == 6 );
+        REQUIRE( probs.cols == 2 );
+        for ( int i = 0; i < 6; ++i )
+        {
+            float sum = probs.at<float>( i, 0 ) + probs.at<float>( i, 1 );
+            CHECK( sum >= 0.99f );
+            CHECK( sum <= 1.01f );
+        }
     }
 }
 
