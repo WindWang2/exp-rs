@@ -440,3 +440,30 @@ TEST_CASE( "A registration failure after publish rolls back the stable output",
   CHECK( manager.assets().isEmpty() );
   CHECK_FALSE( QFile::exists( request.stablePath ) );
 }
+
+TEST_CASE( "OutputCommitter publishes across different directory trees safely (#466)",
+           "[output_committer][466]" )
+{
+  QTemporaryDir tempDir;
+  QTemporaryDir stableDir;
+  REQUIRE( tempDir.isValid() );
+  REQUIRE( stableDir.isValid() );
+
+  DataManager manager;
+  OutputCommitter committer( &manager );
+
+  const QString tempPath = tempDir.filePath( QStringLiteral( "cross_scratch.tif" ) );
+  REQUIRE( QFile::copy( fixturePath( QStringLiteral( "samples/dem_sample.tif" ) ), tempPath ) );
+
+  AlgorithmOutputRequest request;
+  request.kind = AssetKind::Raster;
+  request.tempPath = tempPath;
+  request.stablePath = stableDir.filePath( QStringLiteral( "cross_stable.tif" ) );
+  request.persistence = PersistencePolicy::SessionTemporary;
+
+  const CommitResult result = committer.commit( request );
+  REQUIRE( result );
+  CHECK( QFile::exists( request.stablePath ) );
+  CHECK_FALSE( QFile::exists( tempPath ) );
+}
+
