@@ -110,14 +110,17 @@ Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
         }
     }
 
-    float nodata = -9999.0f;
+    std::optional<double> outNodata;
+    float computeNodata = std::numeric_limits<float>::quiet_NaN();
     if (params.isMember("nodata") && params["nodata"].isNumeric()) {
-        nodata = static_cast<float>(params["nodata"].asDouble());
+        outNodata = params["nodata"].asDouble();
+        computeNodata = static_cast<float>(*outNodata);
     } else {
         bool hasNodata = false;
         double dsNodata = ds.bandNoDataValue(1, &hasNodata);
         if (hasNodata && std::isfinite(dsNodata)) {
-            nodata = static_cast<float>(dsNodata);
+            outNodata = dsNodata;
+            computeNodata = static_cast<float>(dsNodata);
         }
     }
 
@@ -141,18 +144,18 @@ Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
 
     bool ok = false;
     if (product == "slope") {
-        ok = TerrainAnalysis::slope(dem.data(), out.data(), width, height, cellSize, nodata);
+        ok = TerrainAnalysis::slope(dem.data(), out.data(), width, height, cellSize, computeNodata);
     } else if (product == "aspect") {
-        ok = TerrainAnalysis::aspect(dem.data(), out.data(), width, height, cellSize, nodata);
+        ok = TerrainAnalysis::aspect(dem.data(), out.data(), width, height, cellSize, computeNodata);
     } else if (product == "hillshade") {
-        ok = TerrainAnalysis::hillshade(dem.data(), out.data(), width, height, cellSize, nodata,
+        ok = TerrainAnalysis::hillshade(dem.data(), out.data(), width, height, cellSize, computeNodata,
                                         sunAzimuth, sunElevation);
     } else if (product == "roughness") {
-        ok = TerrainAnalysis::roughness(dem.data(), out.data(), width, height, nodata);
+        ok = TerrainAnalysis::roughness(dem.data(), out.data(), width, height, computeNodata);
     } else if (product == "tri") {
-        ok = TerrainAnalysis::tri(dem.data(), out.data(), width, height, nodata);
+        ok = TerrainAnalysis::tri(dem.data(), out.data(), width, height, computeNodata);
     } else if (product == "tpi") {
-        ok = TerrainAnalysis::tpi(dem.data(), out.data(), width, height, nodata);
+        ok = TerrainAnalysis::tpi(dem.data(), out.data(), width, height, computeNodata);
     }
 
     if (!ok) {
@@ -166,7 +169,7 @@ Json::Value RsTerrainAnalysisOperator::run(const Json::Value& params,
     std::vector<std::vector<float>> bands = {std::move(out)};
     QString errorMessage;
     if (!writeGdalOutput(QString::fromStdString(outputPath), width, height, bands,
-                         ds.geoTransform(), ds.projection(), &errorMessage, nodata)) {
+                         ds.geoTransform(), ds.projection(), &errorMessage, outNodata)) {
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to write output raster: " + errorMessage.toStdString());
     }

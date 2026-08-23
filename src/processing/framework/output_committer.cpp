@@ -129,22 +129,33 @@ CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
       publishes.append( { from, stableBase + suffix } );
   }
 
-  // Stage the move: stale targets away first, then rename each file. A failure
-  // midway rolls everything back to keep the stable tree free of half-published
-  // datasets.
+  // Stage the move: stale targets away first, then move/copy each file.
+  // Supports cross-filesystem boundaries (QFile::rename fallback to copy+remove).
+  // A failure midway rolls everything back to keep the stable tree free of
+  // half-published datasets.
+  auto moveOrCopy = []( const QString &from, const QString &to ) -> bool {
+    if ( QFile::rename( from, to ) )
+      return true;
+    if ( QFile::copy( from, to ) )
+    {
+      QFile::remove( from );
+      return true;
+    }
+    return false;
+  };
+
   QStringList renamed;
   for ( const PublishPair &pair : publishes )
   {
     if ( QFile::exists( pair.to ) )
       QFile::remove( pair.to );
-    if ( !QFile::rename( pair.from, pair.to ) )
+    if ( !moveOrCopy( pair.from, pair.to ) )
     {
       for ( const QString &done : renamed )
         QFile::remove( done );
       return CommitResult::failure( diagnostic(
         QStringLiteral( "output.publish_failed" ),
-        QStringLiteral( "Failed to publish output to %1 (is the temp path on a "
-                        "different filesystem from the stable path?)" )
+        QStringLiteral( "Failed to publish output to %1" )
           .arg( request.stablePath ) ) );
     }
     renamed.append( pair.to );
