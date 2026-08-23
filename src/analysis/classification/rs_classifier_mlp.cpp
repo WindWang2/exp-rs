@@ -161,8 +161,12 @@ cv::Mat RsMlpBackend::predictProbabilities( const cv::Mat &X ) const
       for ( int c = 0; c < numOut; ++c )
       {
         float val = rawOutput.at<float>( i, c );
-        float diff = std::isfinite( val ) ? ( val - maxVal ) : 0.0f;
-        float eVal = std::exp( std::clamp( diff, -20.0f, 0.0f ) );
+        float eVal = 0.0f;
+        if ( std::isfinite( val ) )
+        {
+          float diff = val - maxVal;
+          eVal = std::exp( std::clamp( diff, -20.0f, 0.0f ) );
+        }
         probs.at<float>( i, c ) = eVal;
         sumExp += eVal;
       }

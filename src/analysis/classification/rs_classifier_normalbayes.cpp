@@ -28,7 +28,7 @@ cv::Mat RsClassifierNormalBayes::predictProbabilities( const cv::Mat &X ) const
   // PDF values) that can exceed 1. Normalize each row to a proper posterior
   // (rows sum to 1) so the values are comparable to other backends and usable
   // as confidence in [0, 1]. Rows with all-zero/negative likelihoods stay 0.
-  if ( !probs.empty() && probs.rows > 0 && probs.cols > 1 )
+  if ( !probs.empty() && probs.rows > 0 && probs.cols >= 1 )
   {
     cv::Mat normalized( probs.rows, probs.cols, CV_32F );
     for ( int r = 0; r < probs.rows; ++r )
@@ -67,7 +67,7 @@ bool RsClassifierNormalBayes::predictWithProbabilities( const cv::Mat &X, cv::Ma
       return false;
     outputs.convertTo( outLabels, CV_32S );
     // Normalize probs same as predictProbabilities
-    if ( outProbs.rows > 0 && outProbs.cols > 1 )
+    if ( outProbs.rows > 0 && outProbs.cols >= 1 )
     {
       cv::Mat normalized( outProbs.rows, outProbs.cols, CV_32F );
       for ( int r = 0; r < outProbs.rows; ++r )
