@@ -20,11 +20,16 @@ namespace
   char *fake_argv[] = { fake_argv0, nullptr };
 
   // Singleton QApplication — Qt forbids two in one process.
+  // Heap-allocate and deliberately leak it: a static-lifetime QApplication
+  // object is destroyed during exit-time static destruction, after QGIS/Qt
+  // global resources it depends on are already gone (segfault at shutdown,
+  // same idiom as sicnu_geo_rs main.cpp).
   QApplication *ensureApp()
   {
     if ( !QCoreApplication::instance() )
     {
-      static QApplication app( fake_argc, fake_argv );
+      static QApplication *app = new QApplication( fake_argc, fake_argv );
+      Q_UNUSED( app );
     }
     // QSettings() with default ctor requires org/app names to actually
     // persist to disk — set them every call (idempotent).

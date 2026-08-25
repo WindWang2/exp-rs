@@ -44,7 +44,7 @@ Json::Value RsSpectralIndexOperator::schema() const {
     props["swir"] = makeIntegerParam("swir", "1-based SWIR/SWIR1 band number (optional; when omitted, resolved from the input's product band roles)", 5);
     props["swir2"] = makeIntegerParam("swir2", "1-based SWIR2 band number (optional; when omitted, resolved from the input's product band roles)", 6);
     props["rededge"] = makeIntegerParam("rededge", "1-based RedEdge band number (optional; when omitted, resolved from the input's product band roles)", 5);
-    props["postfire"] = makeRasterParam("postfire", "Optional post-fire raster path for dNBR computation");
+    props["postfire"] = makeRasterParam("postfire", "Optional post-fire raster path for dNBR computation", false);
 
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeRasterParam("output", "Output raster path");
