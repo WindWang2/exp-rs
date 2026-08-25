@@ -29,9 +29,10 @@
 QgsProcessingAlgRunnerTask::QgsProcessingAlgRunnerTask( const QgsProcessingAlgorithm *algorithm, const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback, Flags flags )
   : QgsTask( tr( "Executing “%1”" ).arg( algorithm->displayName() ), flags & ( !( algorithm->flags() & Qgis::ProcessingAlgorithmFlag::CanCancel ) ? ( ~QgsTask::CanCancel ) : ( ~QgsTask::Flags() ) ) )
   , mParameters( parameters )
-  , mContext( context )
+  , mOwnedContext( std::make_unique<QgsProcessingContext>() )
   , mFeedback( feedback )
 {
+  mOwnedContext->copyThreadSafeSettings( context );
   if ( !mFeedback )
   {
     mOwnedFeedback = std::make_unique<QgsProcessingFeedback>();
@@ -40,7 +41,7 @@ QgsProcessingAlgRunnerTask::QgsProcessingAlgRunnerTask( const QgsProcessingAlgor
   try
   {
     mAlgorithm.reset( algorithm->create() );
-    if ( !( mAlgorithm && mAlgorithm->prepare( mParameters, context, mFeedback ) ) )
+    if ( !( mAlgorithm && mAlgorithm->prepare( mParameters, *mOwnedContext, mFeedback ) ) )
       cancel();
   }
   catch ( QgsProcessingException &e )
@@ -67,7 +68,7 @@ bool QgsProcessingAlgRunnerTask::run()
   bool ok = false;
   try
   {
-    mResults = mAlgorithm->runPrepared( mParameters, mContext, mFeedback );
+    mResults = mAlgorithm->runPrepared( mParameters, *mOwnedContext, mFeedback );
     ok = true;
   }
   catch ( QgsProcessingException &e )
@@ -82,6 +83,6 @@ bool QgsProcessingAlgRunnerTask::run()
 void QgsProcessingAlgRunnerTask::finished( bool result )
 {
   Q_UNUSED( result )
-  const QVariantMap ppResults = mAlgorithm->postProcess( mContext, mFeedback, result );
+  const QVariantMap ppResults = mAlgorithm->postProcess( *mOwnedContext, mFeedback, result );
   emit executed( result, !ppResults.isEmpty() ? ppResults : mResults );
 }

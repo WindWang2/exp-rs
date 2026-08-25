@@ -65,14 +65,14 @@ bool QgsCopyFileTask::run()
     return false;
   }
 
-  const int size = fileSource.size();
-  const int chunkSize = std::clamp( size / 100, 1024, 1024 * 1024 );
+  const qint64 size = fileSource.size();
+  const qint64 chunkSize = std::clamp<qint64>( size / 100, 1024, 1024 * 1024 );
 
-  int bytesRead = 0;
+  qint64 bytesRead = 0;
   std::vector<char> data( chunkSize );
   while ( true )
   {
-    const int len = fileSource.read( data.data(), chunkSize );
+    const qint64 len = fileSource.read( data.data(), chunkSize );
     if ( len == -1 )
     {
       mErrorString = tr( "Fail reading from '%1'" ).arg( mSource );
@@ -90,7 +90,8 @@ bool QgsCopyFileTask::run()
     }
 
     bytesRead += len;
-    setProgress( static_cast<double>( bytesRead ) / size );
+    if ( size > 0 )
+      setProgress( ( static_cast<double>( bytesRead ) / size ) * 100.0 );
   }
 
   setProgress( 100 );

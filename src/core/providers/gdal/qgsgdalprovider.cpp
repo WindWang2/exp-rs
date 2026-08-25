@@ -3949,16 +3949,22 @@ void QgsGdalProvider::initBaseDataset()
 
   // Check if the dataset has a mask band, that applies to the whole dataset
   // If so then expose it as an alpha band.
-  int nMaskFlags = GDALGetMaskFlags( myGDALBand );
   const int bandCount = GDALGetRasterCount( mGdalDataset );
-  if ( ( nMaskFlags == 0 && bandCount == 1 ) || nMaskFlags == GMF_PER_DATASET )
+  if ( myGDALBand )
   {
-    mMaskBandExposedAsAlpha = true;
+    int nMaskFlags = GDALGetMaskFlags( myGDALBand );
+    if ( ( nMaskFlags == 0 && bandCount == 1 ) || nMaskFlags == GMF_PER_DATASET )
+    {
+      mMaskBandExposedAsAlpha = true;
+    }
   }
 
   mBandCount = bandCount + ( mMaskBandExposedAsAlpha ? 1 : 0 );
 
-  GDALGetBlockSize( GDALGetRasterBand( mGdalDataset, 1 ), &mXBlockSize, &mYBlockSize );
+  if ( bandCount > 0 && GDALGetRasterBand( mGdalDataset, 1 ) )
+  {
+    GDALGetBlockSize( GDALGetRasterBand( mGdalDataset, 1 ), &mXBlockSize, &mYBlockSize );
+  }
   //
   // Determine the nodata value and data type
   //

@@ -71,7 +71,7 @@ class CORE_EXPORT QgsProcessingAlgRunnerTask : public QgsTask
   private:
     QVariantMap mParameters;
     QVariantMap mResults;
-    QgsProcessingContext &mContext;
+    std::unique_ptr< QgsProcessingContext > mOwnedContext;
     QgsProcessingFeedback *mFeedback = nullptr;
     std::unique_ptr< QgsProcessingFeedback > mOwnedFeedback;
     std::unique_ptr< QgsProcessingAlgorithm > mAlgorithm;

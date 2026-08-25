@@ -455,13 +455,21 @@ bool QgsLayerTreeUtils::hasLegendFilterExpression( const QgsLayerTreeGroup &grou
 
 QgsLayerTreeLayer *QgsLayerTreeUtils::insertLayerBelow( QgsLayerTreeGroup *group, const QgsMapLayer *refLayer, QgsMapLayer *layerToInsert )
 {
+  if ( !group || !refLayer || !layerToInsert )
+    return nullptr;
+
   // get the index of the reflayer
   QgsLayerTreeLayer *inTree = group->findLayer( refLayer->id() );
   if ( !inTree )
     return nullptr;
 
+  QgsLayerTreeNode *parentNode = inTree->parent();
+  QgsLayerTreeGroup *parent = parentNode ? static_cast<QgsLayerTreeGroup *>( parentNode ) : group;
+  if ( !parent )
+    return nullptr;
+
   int idx = 0;
-  const auto constChildren = inTree->parent()->children();
+  const auto constChildren = parent->children();
   for ( QgsLayerTreeNode *vl : constChildren )
   {
     if ( vl->nodeType() == QgsLayerTreeNode::NodeLayer && static_cast<QgsLayerTreeLayer *>( vl )->layer() == refLayer )
@@ -471,7 +479,6 @@ QgsLayerTreeLayer *QgsLayerTreeUtils::insertLayerBelow( QgsLayerTreeGroup *group
     idx++;
   }
   // insert the new layer
-  QgsLayerTreeGroup *parent = static_cast<QgsLayerTreeGroup *>( inTree->parent() ) ? static_cast<QgsLayerTreeGroup *>( inTree->parent() ) : group;
   return parent->insertLayer( idx + 1, layerToInsert );
 }
 

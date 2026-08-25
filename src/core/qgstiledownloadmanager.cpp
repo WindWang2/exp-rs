@@ -238,6 +238,7 @@ QgsTileDownloadManagerReply *QgsTileDownloadManager::get( const QNetworkRequest 
     mWorker = new QgsTileDownloadManagerWorker( this );
     mWorker->moveToThread( mWorkerThread );
     QObject::connect( mWorkerThread, &QThread::finished, mWorker, &QObject::deleteLater );
+    QObject::connect( mWorkerThread, &QThread::finished, mWorkerThread, &QObject::deleteLater );
     mWorkerThread->start();
   }
 

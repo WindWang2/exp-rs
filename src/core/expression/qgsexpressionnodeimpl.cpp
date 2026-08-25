@@ -710,8 +710,12 @@ qlonglong QgsExpressionNodeBinaryOperator::computeInt( qlonglong x, qlonglong y 
     case boMul:
       return x * y;
     case boDiv:
+      if ( y == 0 || ( x == std::numeric_limits<qlonglong>::min() && y == -1 ) )
+        return 0;
       return x / y;
     case boMod:
+      if ( y == 0 || ( x == std::numeric_limits<qlonglong>::min() && y == -1 ) )
+        return 0;
       return x % y;
     default:
       Q_ASSERT( false );
