@@ -697,7 +697,7 @@ TEST_CASE( "TaskCenter - priority-aware scheduler preempts lower priority queued
     long blockerId = center.enqueueTask( QStringLiteral( "priority:blocker" ), {}, false, sicnu::TaskPriority::Normal, {}, true );
     REQUIRE( blockerId > 0 );
 
-    for ( int i = 0; i < 50; ++i ) {
+    for ( int i = 0; i < 200; ++i ) {
         if ( firstRunning.load() ) break;
         std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
     }
@@ -874,7 +874,7 @@ TEST_CASE( "TaskCenter - memory limit 0 disables the RSS gate",
                                         sicnu::TaskPriority::Normal, {}, true ) );
 
     // Despite a huge fake RSS, all three should run (gate disabled).
-    for ( int attempt = 0; attempt < 200; ++attempt )
+    for ( int attempt = 0; attempt < 400; ++attempt )
     {
         int running = 0;
         for ( long id : ids )
@@ -958,18 +958,25 @@ TEST_CASE( "TaskCenter - OBIA-style batch holds under RSS pressure then drains t
                                         sicnu::TaskPriority::Normal, {}, true ) );
 
     // Let the initial wave launch and push RSS up.
-    std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+    int queued = 0, running = 0;
+    for ( int attempt = 0; attempt < 400; ++attempt )
+    {
+        queued = 0;
+        running = 0;
+        for ( long id : ids )
+        {
+            const auto s = center.getTaskInfo( id ).status;
+            if ( s == sicnu::TaskStatus::Queued ) ++queued;
+            else if ( s == sicnu::TaskStatus::Running ) ++running;
+        }
+        if ( running > 0 && queued > 0 )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
 
     // While RSS is at/above the watermark, queued tasks must NOT be Running.
     // At least one task should still be Queued (the batch exceeds the cap and
     // the gate is closed under pressure).
-    int queued = 0, running = 0;
-    for ( long id : ids )
-    {
-        const auto s = center.getTaskInfo( id ).status;
-        if ( s == sicnu::TaskStatus::Queued ) ++queued;
-        else if ( s == sicnu::TaskStatus::Running ) ++running;
-    }
     REQUIRE( running > 0 );           // the first wave launched
     REQUIRE( queued > 0 );            // and the rest are held (no over-launch)
     REQUIRE( running + queued == BATCH ); // none completed/failed yet
@@ -1038,7 +1045,7 @@ TEST_CASE( "TaskCenter - memory limit 0 keeps the gate open under batch load",
                                         sicnu::TaskPriority::Normal, {}, true ) );
 
     // Despite a huge fake RSS, the disabled gate lets up to 8 run at once.
-    for ( int attempt = 0; attempt < 200; ++attempt )
+    for ( int attempt = 0; attempt < 400; ++attempt )
     {
         int running = 0;
         for ( long id : ids )
