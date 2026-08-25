@@ -55,15 +55,17 @@ class WorkflowRuntime
     void close( const std::string &sessionId );
 
   private:
-    WorkflowSession *sessionMut( const std::string &sessionId );
-    const WorkflowSession *sessionConst( const std::string &sessionId ) const;
+    /// Shared ownership keeps a session alive for the duration of an operation
+    /// even if close() runs concurrently on another thread.
+    std::shared_ptr<WorkflowSession> sessionMut( const std::string &sessionId );
+    std::shared_ptr<const WorkflowSession> sessionConst( const std::string &sessionId ) const;
 
     /// Per-session cooperative cancellation flag (created in open()).
     std::shared_ptr<std::atomic<bool>> cancelFlag( const std::string &sessionId );
 
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, WorkflowDefinition> m_defs;
-    std::unordered_map<std::string, std::unique_ptr<WorkflowSession>> m_sessions;
+    std::unordered_map<std::string, std::shared_ptr<WorkflowSession>> m_sessions;
     std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> m_cancelFlags;
     int m_nextId = 1;
 };

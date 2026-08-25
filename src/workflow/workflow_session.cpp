@@ -49,6 +49,12 @@ WorkflowSession::WorkflowSession( WorkflowDefinition def, std::string sessionId 
 
 SessionSnapshot WorkflowSession::snapshot() const
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return snapshotUnlocked();
+}
+
+SessionSnapshot WorkflowSession::snapshotUnlocked() const
+{
   SessionSnapshot snap;
   snap.sessionId = m_sessionId;
   snap.definitionId = m_def.id;
@@ -84,17 +90,25 @@ bool WorkflowSession::gotoStep( const std::string &stepId )
 {
   if ( !stepById( stepId ) )
     return false;
+  std::lock_guard<std::mutex> lock( m_mutex );
   m_currentStepId = stepId;
   return true;
 }
 
 void WorkflowSession::setParams( const std::string &stepId, const Json::Value &params )
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   m_paramsByStep[stepId] = params;
   m_dirty = true;
 }
 
 Json::Value WorkflowSession::paramsFor( const std::string &stepId ) const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return paramsForUnlocked( stepId );
+}
+
+Json::Value WorkflowSession::paramsForUnlocked( const std::string &stepId ) const
 {
   if ( !m_paramsByStep.isObject() || !m_paramsByStep.isMember( stepId ) )
     return Json::Value( Json::objectValue );
@@ -103,24 +117,30 @@ Json::Value WorkflowSession::paramsFor( const std::string &stepId ) const
 
 Json::Value WorkflowSession::resolveParams( const std::string &stepId ) const
 {
-  const Json::Value raw = paramsFor( stepId );
+  std::lock_guard<std::mutex> lock( m_mutex );
+
+  const Json::Value raw = paramsForUnlocked( stepId );
   if ( raw.isNull() || !raw.isObject() )
     return raw;
 
+  // Resolution priority: a qualified "step.port" artifact always wins over the
+  // step's generic artifactOnSuccess value, otherwise multi-output steps would
+  // resolve every port to the same artifact.
   auto resolver = [this]( const PlaceholderRef &ref ) -> std::string {
     if ( !ref.stepId.empty() )
     {
+      std::string qualifiedKey = ref.stepId + "." + ref.portName;
+      auto itKey = m_artifacts.find( qualifiedKey );
+      if ( itKey != m_artifacts.end() )
+        return itKey->second;
+
       const StepDef *s = stepById( ref.stepId );
-      if ( s && !s->artifactOnSuccess.empty() )
+      if ( s && ( ref.portName == "output" || ref.portName == s->artifactOnSuccess ) && !s->artifactOnSuccess.empty() )
       {
         auto it = m_artifacts.find( s->artifactOnSuccess );
         if ( it != m_artifacts.end() )
           return it->second;
       }
-      std::string qualifiedKey = ref.stepId + "." + ref.portName;
-      auto itKey = m_artifacts.find( qualifiedKey );
-      if ( itKey != m_artifacts.end() )
-        return itKey->second;
     }
     auto itPort = m_artifacts.find( ref.portName );
     if ( itPort != m_artifacts.end() )
@@ -138,17 +158,29 @@ Json::Value WorkflowSession::resolveParams( const std::string &stepId ) const
 
 void WorkflowSession::setArtifact( const std::string &name, const std::string &value )
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   m_artifacts[name] = value;
 }
 
 bool WorkflowSession::hasArtifact( const std::string &name ) const
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   return m_artifacts.find( name ) != m_artifacts.end();
+}
+
+std::string WorkflowSession::artifact( const std::string &name ) const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  const auto it = m_artifacts.find( name );
+  return it != m_artifacts.end() ? it->second : std::string {};
 }
 
 void WorkflowSession::markStepComplete( const std::string &stepId )
 {
-  if ( !stepById( stepId ) || m_completed.size() >= m_def.steps.size() )
+  if ( !stepById( stepId ) )
+    return;
+  std::lock_guard<std::mutex> lock( m_mutex );
+  if ( m_completed.size() >= m_def.steps.size() )
     return;
   if ( std::find( m_completed.begin(), m_completed.end(), stepId ) == m_completed.end() )
     m_completed.push_back( stepId );
@@ -156,12 +188,26 @@ void WorkflowSession::markStepComplete( const std::string &stepId )
 
 void WorkflowSession::setMode( SessionMode mode )
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   m_mode = mode;
 }
 
 void WorkflowSession::setDirty( bool d )
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   m_dirty = d;
+}
+
+void WorkflowSession::setPipelineId( long pipelineId )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_pipelineId = pipelineId;
+}
+
+long WorkflowSession::pipelineId() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_pipelineId;
 }
 
 const WorkflowDefinition &WorkflowSession::definition() const

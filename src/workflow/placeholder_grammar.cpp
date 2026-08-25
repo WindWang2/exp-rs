@@ -178,13 +178,7 @@ std::string substitutePlaceholders( const std::string &text,
   if ( !resolver || text.empty() )
     return text;
 
-  auto refs = parsePlaceholders( text );
-  if ( refs.empty() )
-    return text;
-
-  std::string result = text;
-  for ( const auto &ref : refs )
-  {
+  auto resolve = [&resolver]( const PlaceholderRef &ref ) -> std::string {
     std::string replacement = resolver( ref );
     if ( ( replacement.empty() || replacement == ref.rawRef ) && ref.isEnvVar )
     {
@@ -194,17 +188,96 @@ std::string substitutePlaceholders( const std::string &text,
         replacement = std::string( val );
       }
     }
-    if ( !replacement.empty() && replacement != ref.rawRef )
+    return replacement;
+  };
+
+  // Single left-to-right pass over the source text, substituting each
+  // placeholder occurrence exactly where its greedy parse ends. Substituting
+  // per-rawRef with repeated find()/replace() would corrupt prefix-overlapping
+  // placeholders such as "$in" appearing inside "$in.mask".
+  std::string out;
+  out.reserve( text.size() );
+  size_t i = 0;
+  const size_t len = text.size();
+
+  while ( i < len )
+  {
+    if ( text[i] != '$' )
     {
-      size_t pos = 0;
-      while ( ( pos = result.find( ref.rawRef, pos ) ) != std::string::npos )
+      out += text[i];
+      ++i;
+      continue;
+    }
+
+    const size_t startPos = i;
+    if ( i + 1 < len && text[i + 1] == '{' )
+    {
+      const size_t closePos = text.find( '}', i + 2 );
+      if ( closePos != std::string::npos )
       {
-        result.replace( pos, ref.rawRef.length(), replacement );
-        pos += replacement.length();
+        const std::string raw = text.substr( startPos, closePos - startPos + 1 );
+        const std::string content = text.substr( i + 2, closePos - ( i + 2 ) );
+        const PlaceholderRef ref = parseSingleBracedRef( raw, content );
+        i = closePos + 1;
+        if ( ref.isValid() )
+        {
+          const std::string replacement = resolve( ref );
+          out += ( !replacement.empty() && replacement != ref.rawRef ) ? replacement : raw;
+        }
+        else
+        {
+          out += raw;
+        }
+        continue;
       }
     }
+
+    // Unbraced form: $stepId.portName or $stepId (greedy, mirrors parsePlaceholders)
+    size_t j = i + 1;
+    while ( j < len && isIdChar( text[j] ) )
+    {
+      ++j;
+    }
+    if ( j > i + 1 )
+    {
+      std::string stepId = text.substr( i + 1, j - i - 1 );
+      std::string portName = "output";
+      size_t endPos = j;
+      if ( j < len && text[j] == '.' )
+      {
+        size_t k = j + 1;
+        while ( k < len && isIdChar( text[k] ) )
+        {
+          ++k;
+        }
+        if ( k > j + 1 )
+        {
+          portName = text.substr( j + 1, k - j - 1 );
+          endPos = k;
+        }
+      }
+      PlaceholderRef ref;
+      ref.rawRef = text.substr( startPos, endPos - startPos );
+      ref.stepId = std::move( stepId );
+      ref.portName = std::move( portName );
+      i = endPos;
+      if ( ref.isValid() )
+      {
+        const std::string replacement = resolve( ref );
+        out += ( !replacement.empty() && replacement != ref.rawRef ) ? replacement : ref.rawRef;
+      }
+      else
+      {
+        out += ref.rawRef;
+      }
+      continue;
+    }
+
+    out += text[i];
+    ++i;
   }
-  return result;
+
+  return out;
 }
 
 std::vector<StepConnection> inferStepConnections( const std::string &paramKey, const std::string &paramValue )

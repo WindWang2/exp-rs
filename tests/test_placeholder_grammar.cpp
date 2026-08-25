@@ -110,4 +110,25 @@ TEST_CASE("Placeholder Grammar - Substitution and edge inference", "[workflow][g
         auto connsEnv = inferStepConnections("input", "${LANDSAT_MTL_OR_SCENE_DIR}");
         CHECK(connsEnv.empty());
     }
+
+    SECTION("prefix-overlapping placeholders substitute independently (#504)") {
+        std::string input = "--in $in --mask $in.mask";
+        std::string resolved = substitutePlaceholders(input, [](const PlaceholderRef &ref) {
+            if (ref.rawRef == "$in") return std::string("/data/in.tif");
+            if (ref.rawRef == "$in.mask") return std::string("/data/mask.tif");
+            return ref.rawRef;
+        });
+        // The shorter "$in" must not corrupt the longer "$in.mask" token.
+        CHECK(resolved == "--in /data/in.tif --mask /data/mask.tif");
+    }
+
+    SECTION("braced prefix-overlapping placeholders substitute independently") {
+        std::string input = "${in} ${in.mask}";
+        std::string resolved = substitutePlaceholders(input, [](const PlaceholderRef &ref) {
+            if (ref.stepId == "in" && ref.portName == "output") return std::string("/a");
+            if (ref.stepId == "in" && ref.portName == "mask") return std::string("/b");
+            return ref.rawRef;
+        });
+        CHECK(resolved == "/a /b");
+    }
 }

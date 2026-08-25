@@ -82,19 +82,24 @@ std::vector<std::string> WorkflowRuntime::registeredDefinitionIds() const
 
 std::string WorkflowRuntime::open( const std::string &definitionId )
 {
-  const WorkflowDefinition *def = findDefinition( definitionId );
-  if ( !def )
+  // Hold the lock across lookup + session construction: registerDefinition()
+  // may rehash m_defs concurrently, so a definition pointer captured from
+  // findDefinition() must never be dereferenced outside the lock.
+  std::lock_guard<std::mutex> lock( m_mutex );
+  const auto it = m_defs.find( definitionId );
+  if ( it == m_defs.end() )
     return {};
 
+  WorkflowDefinition def = it->second;
   const std::string sessionId = "wf-" + std::to_string( m_nextId++ );
-  m_sessions[sessionId] = std::make_unique<WorkflowSession>( *def, sessionId );
+  m_sessions[sessionId] = std::make_shared<WorkflowSession>( std::move( def ), sessionId );
   m_cancelFlags[sessionId] = std::make_shared<std::atomic<bool>>( false );
   return sessionId;
 }
 
 SessionSnapshot WorkflowRuntime::state( const std::string &sessionId ) const
 {
-  const WorkflowSession *s = sessionConst( sessionId );
+  const std::shared_ptr<const WorkflowSession> s = sessionConst( sessionId );
   if ( !s )
     throw std::runtime_error( "Session not found: " + sessionId );
   return s->snapshot();
@@ -102,7 +107,7 @@ SessionSnapshot WorkflowRuntime::state( const std::string &sessionId ) const
 
 bool WorkflowRuntime::gotoStep( const std::string &sessionId, const std::string &stepId )
 {
-  WorkflowSession *s = sessionMut( sessionId );
+  const std::shared_ptr<WorkflowSession> s = sessionMut( sessionId );
   if ( !s )
     return false;
   return s->gotoStep( stepId );
@@ -110,7 +115,7 @@ bool WorkflowRuntime::gotoStep( const std::string &sessionId, const std::string 
 
 void WorkflowRuntime::setParams( const std::string &sessionId, const std::string &stepId, const Json::Value &params )
 {
-  WorkflowSession *s = sessionMut( sessionId );
+  const std::shared_ptr<WorkflowSession> s = sessionMut( sessionId );
   if ( !s )
     throw std::runtime_error( "Session not found: " + sessionId );
   s->setParams( stepId, params );
@@ -119,7 +124,7 @@ void WorkflowRuntime::setParams( const std::string &sessionId, const std::string
 CanRunResult WorkflowRuntime::canRun( const std::string &sessionId, const std::string &stepId ) const
 {
   CanRunResult result;
-  const WorkflowSession *s = sessionConst( sessionId );
+  const std::shared_ptr<const WorkflowSession> s = sessionConst( sessionId );
   if ( !s )
   {
     result.ok = false;
@@ -140,7 +145,7 @@ CanRunResult WorkflowRuntime::canRun( const std::string &sessionId, const std::s
 
 Json::Value WorkflowRuntime::runStep( const std::string &sessionId, const std::string &stepId )
 {
-  WorkflowSession *s = sessionMut( sessionId );
+  const std::shared_ptr<WorkflowSession> s = sessionMut( sessionId );
   if ( !s )
     throw std::runtime_error( "Session not found: " + sessionId );
 
@@ -221,7 +226,7 @@ Json::Value WorkflowRuntime::runStep( const std::string &sessionId, const std::s
 
 void WorkflowRuntime::markStepComplete( const std::string &sessionId, const std::string &stepId )
 {
-  WorkflowSession *s = sessionMut( sessionId );
+  const std::shared_ptr<WorkflowSession> s = sessionMut( sessionId );
   if ( !s )
     return;
   s->markStepComplete( stepId );
@@ -229,7 +234,7 @@ void WorkflowRuntime::markStepComplete( const std::string &sessionId, const std:
 
 void WorkflowRuntime::setArtifact( const std::string &sessionId, const std::string &name, const std::string &value )
 {
-  WorkflowSession *s = sessionMut( sessionId );
+  const std::shared_ptr<WorkflowSession> s = sessionMut( sessionId );
   if ( !s )
     return;
   s->setArtifact( name, value );
@@ -244,6 +249,7 @@ void WorkflowRuntime::requestCancel( const std::string &sessionId )
 
 void WorkflowRuntime::close( const std::string &sessionId )
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   m_sessions.erase( sessionId );
   m_cancelFlags.erase( sessionId );
 }
@@ -257,20 +263,22 @@ std::shared_ptr<std::atomic<bool>> WorkflowRuntime::cancelFlag( const std::strin
   return it->second;
 }
 
-WorkflowSession *WorkflowRuntime::sessionMut( const std::string &sessionId )
+std::shared_ptr<WorkflowSession> WorkflowRuntime::sessionMut( const std::string &sessionId )
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   const auto it = m_sessions.find( sessionId );
   if ( it == m_sessions.end() )
     return nullptr;
-  return it->second.get();
+  return it->second;
 }
 
-const WorkflowSession *WorkflowRuntime::sessionConst( const std::string &sessionId ) const
+std::shared_ptr<const WorkflowSession> WorkflowRuntime::sessionConst( const std::string &sessionId ) const
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   const auto it = m_sessions.find( sessionId );
   if ( it == m_sessions.end() )
     return nullptr;
-  return it->second.get();
+  return it->second;
 }
 
 } // namespace sicnu::workflow

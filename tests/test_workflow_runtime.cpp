@@ -14,6 +14,8 @@
 #include "workflow/workflow_types.h"
 
 #include <QCoreApplication>
+#include <atomic>
+#include <thread>
 #include <unordered_map>
 
 using namespace sicnu::workflow;
@@ -622,4 +624,99 @@ TEST_CASE( "Change-detection DAG aligns before aligning grids then diffs", "[wor
   CHECK( d->steps[1].params["method"].asString() == "difference" );
   REQUIRE( d->steps[1].gates.size() == 1 );
   CHECK( d->steps[1].gates[0].require == "paramNonEmpty:change.after" );
+}
+
+TEST_CASE( "resolveParams prefers qualified step.port artifact over artifactOnSuccess", "[workflow][placeholder]" )
+{
+  WorkflowDefinition d;
+  d.id = "tool.multi";
+  d.title = "Multi output";
+  d.host = HostKind::TaskPanel;
+
+  StepDef producer;
+  producer.id = "classify";
+  producer.title = "Classify";
+  producer.kind = StepKind::Operator;
+  producer.artifactOnSuccess = "output";
+
+  StepDef consumer;
+  consumer.id = "report";
+  consumer.title = "Report";
+  consumer.kind = StepKind::Operator;
+
+  d.steps = {producer, consumer};
+
+  WorkflowSession sess( d, "sess-multi" );
+  sess.setArtifact( "output", "/generic/output.tif" );
+  sess.setArtifact( "classify.confidence", "/specific/confidence.tif" );
+
+  Json::Value rawParams;
+  rawParams["confidence"] = "$classify.confidence";
+  rawParams["fallback"] = "$classify.missing_port";
+  sess.setParams( "report", rawParams );
+
+  Json::Value resolved = sess.resolveParams( "report" );
+  // The qualified key exists and must win over the generic "output" artifact.
+  CHECK( resolved["confidence"].asString() == "/specific/confidence.tif" );
+  // Unknown non-"output" ports do not silently resolve to artifactOnSuccess.
+  CHECK( resolved["fallback"].asString() == "$classify.missing_port" );
+}
+
+TEST_CASE( "Session state survives concurrent access from worker threads", "[workflow][threads]" )
+{
+  WorkflowDefinition d = makeTwoStep();
+  WorkflowSession session( d, "sess-race" );
+
+  constexpr int kIterations = 2000;
+  std::vector<std::thread> threads;
+  for ( int t = 0; t < 4; ++t )
+  {
+    threads.emplace_back( [&, t] {
+      for ( int i = 0; i < kIterations; ++i )
+      {
+        const std::string name = "artifact_" + std::to_string( ( t + i ) % 8 );
+        session.setArtifact( name, "/tmp/value" );
+        session.setParams( "step1", Json::Value{} );
+        session.markStepComplete( "step1" );
+        ( void )session.hasArtifact( name );
+        ( void )session.artifact( name );
+        const auto snap = session.snapshot();
+        ( void )snap;
+      }
+    } );
+  }
+  for ( auto &thread : threads )
+    thread.join();
+
+  REQUIRE( session.hasArtifact( "artifact_0" ) );
+}
+
+TEST_CASE( "Runtime open/close races with registerDefinition safely", "[workflow][threads]" )
+{
+  WorkflowRuntime rt;
+  rt.registerDefinition( makeTwoStep() );
+
+  std::atomic<bool> stop{false};
+  std::thread registrar( [&rt, &stop] {
+    int n = 0;
+    while ( !stop.load( std::memory_order_relaxed ) )
+    {
+      WorkflowDefinition def = makeTwoStep();
+      def.id = "dynamic.def." + std::to_string( ++n );
+      rt.registerDefinition( std::move( def ) );
+    }
+  } );
+
+  // open() must never observe a dangling definition pointer nor corrupt maps.
+  for ( int i = 0; i < 500; ++i )
+  {
+    const std::string id = rt.open( makeTwoStep().id );
+    REQUIRE_FALSE( id.empty() );
+    const auto snap = rt.state( id );
+    CHECK( snap.definitionId == makeTwoStep().id );
+    rt.close( id );
+  }
+
+  stop.store( true );
+  registrar.join();
 }

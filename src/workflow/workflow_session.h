@@ -4,6 +4,7 @@
 #include "workflow_types.h"
 
 #include <json/json.h>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -24,13 +25,16 @@ class WorkflowSession
 
     void setArtifact( const std::string &name, const std::string &value );
     bool hasArtifact( const std::string &name ) const;
+    /// Lightweight artifact lookup without deep-cloning a full snapshot.
+    /// @return artifact value, or empty string when missing
+    std::string artifact( const std::string &name ) const;
 
     void markStepComplete( const std::string &stepId );
     void setMode( SessionMode mode );
     void setDirty( bool d );
 
-    void setPipelineId( long pipelineId ) { m_pipelineId = pipelineId; }
-    long pipelineId() const { return m_pipelineId; }
+    void setPipelineId( long pipelineId );
+    long pipelineId() const;
 
     void setPipelineStatusResolver( PipelineStatusResolver resolver ) { m_pipelineResolver = std::move( resolver ); }
 
@@ -39,6 +43,9 @@ class WorkflowSession
     const StepDef *stepById( const std::string &id ) const;
 
   private:
+    Json::Value paramsForUnlocked( const std::string &stepId ) const;
+    SessionSnapshot snapshotUnlocked() const;
+
     WorkflowDefinition m_def;
     std::string m_sessionId;
     std::string m_currentStepId;
@@ -49,6 +56,10 @@ class WorkflowSession
     Json::Value m_paramsByStep;
     std::unordered_map<std::string, std::string> m_artifacts;
     PipelineStatusResolver m_pipelineResolver;
+
+    /// Guards all mutable session state below/above. Sessions may be touched
+    /// from worker threads while the runtime map is accessed concurrently.
+    mutable std::mutex m_mutex;
 };
 
 } // namespace sicnu::workflow
