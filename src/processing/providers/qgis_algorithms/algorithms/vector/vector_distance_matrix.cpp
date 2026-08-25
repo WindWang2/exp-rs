@@ -103,11 +103,22 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
     if ( !nearestOnly && outputType == 1 )
     {
         outputFields.append( QgsField( QStringLiteral( "InputID" ), QMetaType::Type::QString ) );
+        QSet<QString> usedFieldNames;
+        usedFieldNames.insert( QStringLiteral( "InputID" ) );
         for ( const auto &pair : targetFeatures )
         {
-            const QString tid = pair.second.attribute( targetFieldName ).toString();
+            QString tid = pair.second.attribute( targetFieldName ).toString();
+            if ( tid.isEmpty() )
+                tid = QString::number( pair.first );
+            QString colName = tid;
+            int counter = 1;
+            while ( usedFieldNames.contains( colName ) )
+            {
+                colName = QStringLiteral( "%1_%2" ).arg( tid ).arg( counter++ );
+            }
+            usedFieldNames.insert( colName );
             targetIds.push_back( tid );
-            outputFields.append( QgsField( tid, QMetaType::Type::Double ) );
+            outputFields.append( QgsField( colName, QMetaType::Type::Double ) );
         }
     }
     else

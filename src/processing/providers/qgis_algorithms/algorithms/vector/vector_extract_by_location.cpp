@@ -86,7 +86,12 @@ QVariantMap VectorExtractByLocationAlgorithm::processAlgorithm( const QVariantMa
                     g.transform( ct );
                     intersectFeat.setGeometry( g );
                 }
-                catch ( const QgsCsException & ) {}
+                catch ( const QgsCsException & )
+                {
+                    if ( feedback )
+                        feedback->reportError( QObject::tr( "Failed to transform intersect feature %1 geometry" ).arg( intersectFeat.id() ) );
+                    continue;
+                }
             }
             spatialIndex.addFeature( intersectFeat );
             intersectGeometries[intersectFeat.id()] = g;

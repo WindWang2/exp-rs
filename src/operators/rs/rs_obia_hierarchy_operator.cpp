@@ -219,6 +219,8 @@ Json::Value RsObiaHierarchyOperator::run(const Json::Value& params, RSOperatorCo
         // an inline normal_bayes/SVM branch here).
         std::unique_ptr<RsClassifierBackend> backend =
             RsClassifierBackendFactory::create(QString::fromStdString(method));
+        if (!backend)
+            throw RSOperatorError(ErrorCode::InvalidParameter, "Failed to create classifier backend: " + method);
 
         auto cls = RsObjectClassify::classify(
             feat.X, feat.meta.segmentIds, trainLabels, *backend);

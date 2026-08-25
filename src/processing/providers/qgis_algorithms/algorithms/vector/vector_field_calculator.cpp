@@ -83,7 +83,11 @@ QVariantMap VectorFieldCalculatorAlgorithm::processAlgorithm( const QVariantMap 
         case 2: metaType = QMetaType::Type::QString; break;
         default: metaType = QMetaType::Type::Double; break;
     }
-    outputFields.append( QgsField( fieldName, metaType, QString(), fieldLength, fieldPrecision ) );
+    const int existingIdx = outputFields.indexOf( fieldName );
+    if ( existingIdx >= 0 )
+        outputFields[existingIdx] = QgsField( fieldName, metaType, QString(), fieldLength, fieldPrecision );
+    else
+        outputFields.append( QgsField( fieldName, metaType, QString(), fieldLength, fieldPrecision ) );
 
     QString dest;
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
