@@ -9,6 +9,11 @@
 // still alive.
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch_session.hpp>
+#ifdef _WIN32
+#include <cstdlib>  // _exit
+#else
+#include <unistd.h>  // _exit
+#endif
 
 #include <QApplication>
 #include "processing/framework/task_center.h"

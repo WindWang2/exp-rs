@@ -148,7 +148,7 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
     return {};
   }
 
-  const StepDef *step = findStep( def, stepId );
+  const StepDef *step = findStep( def.get(), stepId );
   if ( !step )
     step = &def->steps.front();
 
