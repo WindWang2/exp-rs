@@ -6,6 +6,7 @@
 class QwtPlotCanvas;
 class QwtPlot;
 class QWT_EXPORT QwtPicker : public QObject {
+    Q_OBJECT
 public:
     explicit QwtPicker(QWidget *parent = nullptr) : QObject(parent) {}
     void setStateMachine(QwtPickerMachine *) {}
@@ -14,6 +15,7 @@ public:
     virtual ~QwtPicker() {}
 };
 class QWT_EXPORT QwtPlotPicker : public QwtPicker {
+    Q_OBJECT
 public:
     explicit QwtPlotPicker(QWidget *canvas) : QwtPicker(canvas) {}
     QwtPlotPicker(int xAxis, int yAxis, QWidget *canvas) : QwtPicker(canvas) { (void)xAxis; (void)yAxis; }

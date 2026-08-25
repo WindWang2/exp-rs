@@ -48,11 +48,11 @@ int main(int argc, char *argv[])
 {
     std::signal( SIGINT, handleSignal );
     std::signal( SIGTERM, handleSignal );
-    ShutdownGuard shutdownGuard;
 
     QgsApplication app(argc, argv, false);
     app.setApplicationName("sicnu_geo_rs_cli");
     QCoreApplication::setApplicationVersion("0.9.2-dev");
+    ShutdownGuard shutdownGuard;
 
     QCommandLineParser parser;
     parser.setApplicationDescription(

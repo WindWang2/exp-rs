@@ -283,6 +283,10 @@ void LlmStreamingClient::onReplyFinished()
 {
   if (!m_currentReply)
     return;
+  QNetworkReply *reply = m_currentReply;
+  m_currentReply = nullptr;
+  reply->deleteLater();
+
   if ( !m_buffer.isEmpty() )
   {
     QString line = QString::fromUtf8( m_buffer ).trimmed();
@@ -295,11 +299,11 @@ void LlmStreamingClient::onReplyFinished()
   // [DONE] path already emitted it — a parsed tool call is emitted exactly once.
   emitParsedToolCallOnce();
 
-  if (m_currentReply->error() != QNetworkReply::NoError && m_currentReply->error() != QNetworkReply::OperationCanceledError)
+  if (reply->error() != QNetworkReply::NoError && reply->error() != QNetworkReply::OperationCanceledError)
   {
     if (!m_finishedEmitted)
     {
-      emit errorOccurred(m_currentReply->errorString());
+      emit errorOccurred(reply->errorString());
     }
   }
   if ( !m_finishedEmitted )

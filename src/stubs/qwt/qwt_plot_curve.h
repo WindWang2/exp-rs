@@ -15,8 +15,8 @@ public:
     QwtPlotItem() = default;
     ~QwtPlotItem() override = default;
 
-    void attach(QwtPlot *) {}
-    void detach() {}
+    void attach(QwtPlot *plot) { setParent(reinterpret_cast<QObject*>(plot)); }
+    void detach() { setParent(nullptr); }
     void setTitle(const QString &title) { m_title = title; }
     void setZ(double z) { m_z = z; }
     void setVisible(bool visible) { m_visible = visible; }

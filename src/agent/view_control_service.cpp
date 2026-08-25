@@ -670,7 +670,11 @@ Json::Value ViewControlService::setRoi( const Json::Value &params )
       }
     }
 
-    delete m_roiRubberBand;
+    if ( m_roiRubberBand )
+    {
+      delete m_roiRubberBand;
+      m_roiRubberBand = nullptr;
+    }
     m_roiRubberBand = new QgsRubberBand( m_canvas, Qgis::GeometryType::Polygon );
     m_roiRubberBand->setColor( QColor( 255, 80, 0, 120 ) );
     m_roiRubberBand->setStrokeColor( QColor( 255, 80, 0 ) );

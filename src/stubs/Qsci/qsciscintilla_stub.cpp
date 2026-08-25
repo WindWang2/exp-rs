@@ -14,6 +14,9 @@
 #include "qscilexercss.h"
 #include "qscilexersql.h"
 #include "qscilexerpython.h"
+#include "qscilexerhtml.h"
+#include "qscilexerjavascript.h"
+#include "qscilexerjson.h"
 #include "qsciapis.h"
 
 // --- Destructors (force vtable/typeinfo via "key function" rule) ---
@@ -23,5 +26,21 @@ QsciLexer::~QsciLexer() {}
 QsciLexerCSS::~QsciLexerCSS() {}
 QsciLexerSQL::~QsciLexerSQL() {}
 QsciLexerPython::~QsciLexerPython() {}
+QsciLexerHTML::~QsciLexerHTML() {}
+QsciLexerJavaScript::~QsciLexerJavaScript() {}
+QsciLexerJSON::~QsciLexerJSON() {}
 QsciAPIs::~QsciAPIs() {}
+
+// --- MOC Stubs for classes outside AUTOMOC scan scope ---
+const QMetaObject *QsciLexerHTML::metaObject() const { return &QsciLexer::staticMetaObject; }
+void *QsciLexerHTML::qt_metacast( const char *c ) { return QsciLexer::qt_metacast( c ); }
+int QsciLexerHTML::qt_metacall( QMetaObject::Call c, int id, void **a ) { return QsciLexer::qt_metacall( c, id, a ); }
+
+const QMetaObject *QsciLexerJavaScript::metaObject() const { return &QsciLexer::staticMetaObject; }
+void *QsciLexerJavaScript::qt_metacast( const char *c ) { return QsciLexer::qt_metacast( c ); }
+int QsciLexerJavaScript::qt_metacall( QMetaObject::Call c, int id, void **a ) { return QsciLexer::qt_metacall( c, id, a ); }
+
+const QMetaObject *QsciLexerJSON::metaObject() const { return &QsciLexer::staticMetaObject; }
+void *QsciLexerJSON::qt_metacast( const char *c ) { return QsciLexer::qt_metacast( c ); }
+int QsciLexerJSON::qt_metacall( QMetaObject::Call c, int id, void **a ) { return QsciLexer::qt_metacall( c, id, a ); }
 
