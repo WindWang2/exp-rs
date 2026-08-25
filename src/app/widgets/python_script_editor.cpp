@@ -62,7 +62,9 @@ PythonScriptEditor::~PythonScriptEditor()
             m_runnerThread->setParent(nullptr);
             QObject::connect(m_runnerThread, &QThread::finished, m_runnerThread, &QObject::deleteLater);
             if (m_runner) {
-                QObject::connect(m_runnerThread, &QThread::finished, m_runner, &QObject::deleteLater);
+                if (QCoreApplication::instance())
+                    m_runner->moveToThread(QCoreApplication::instance()->thread());
+                m_runner->deleteLater();
                 m_runner = nullptr;
             }
             m_runnerThread = nullptr;

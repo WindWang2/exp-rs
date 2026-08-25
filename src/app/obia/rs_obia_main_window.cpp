@@ -730,8 +730,11 @@ void RsObiaMainWindow::cancelActiveTask()
         m_pendingSegWork.reset();
         m_pendingHierWork.reset();
         m_pendingHierClsWork.reset();
-        m_pendingLevelWork.reset();
-        m_pendingFlatTask = nullptr;
+        if ( m_pendingFlatTask )
+        {
+            m_pendingFlatTask->deleteLater();
+            m_pendingFlatTask = nullptr;
+        }
         m_pendingFlatOutputPath.clear();
         m_pendingCanceled.reset();
         finishPendingUi();

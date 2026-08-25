@@ -18,7 +18,9 @@ AsyncGdalRunner::~AsyncGdalRunner()
     disconnect(m_watcher, nullptr, this, nullptr);
     if (isRunning()) {
         m_watcher->cancel();
-        m_watcher->waitForFinished();
+        m_watcher->setParent(nullptr);
+        connect(m_watcher, &QFutureWatcher<QString>::finished, m_watcher, &QObject::deleteLater);
+        m_watcher = nullptr;
     }
 }
 

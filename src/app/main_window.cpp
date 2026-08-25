@@ -11,6 +11,10 @@
 #include "widgets/python_script_editor.h"
 #endif
 
+#include "classification/qgsclassificationmainwindow.h"
+#include "georeferencer/qgsgeoreferencermainwindow.h"
+#include "georeferencer/qgsgeoref_image_to_map_window.h"
+
 // Vector editing map tools
 #include "qgsmaptooladdfeature.h"
 #include "qgsmaptooladdpart.h"
@@ -224,13 +228,13 @@ QgisDesktopWindow::~QgisDesktopWindow()
         w->setParent(nullptr);
         w->deleteLater();
     };
-    disposeChildWindow(static_cast<QWidget *>(static_cast<void *>(m_classifyWindow)));
+    disposeChildWindow(m_classifyWindow);
     m_classifyWindow = nullptr;
     disposeChildWindow(m_obiaWindow);
     m_obiaWindow = nullptr;
-    disposeChildWindow(static_cast<QWidget *>(static_cast<void *>(m_georefI2I)));
+    disposeChildWindow(m_georefI2I);
     m_georefI2I = nullptr;
-    disposeChildWindow(static_cast<QWidget *>(static_cast<void *>(m_georefI2M)));
+    disposeChildWindow(m_georefI2M);
     m_georefI2M = nullptr;
 
     // Stop map jobs and release the active map tool before unique_ptr members

@@ -153,7 +153,16 @@ void RsDualViewportSyncController::applySync( QgsMapCanvas *source, QgsMapCanvas
     if ( mScaleSync )
     {
         // Full extent sync
-        const QgsRectangle sourceExtent = source->extent();
+        QgsRectangle sourceExtent = source->extent();
+        if ( source->mapSettings().destinationCrs() != target->mapSettings().destinationCrs() && source->mapSettings().destinationCrs().isValid() && target->mapSettings().destinationCrs().isValid() )
+        {
+            try
+            {
+                QgsCoordinateTransform ct( source->mapSettings().destinationCrs(), target->mapSettings().destinationCrs(), QgsProject::instance() );
+                sourceExtent = ct.transformBoundingBox( sourceExtent );
+            }
+            catch ( ... ) {}
+        }
         if ( target->extent() != sourceExtent )
         {
             target->setExtent( sourceExtent );
@@ -179,7 +188,16 @@ void RsDualViewportSyncController::applySync( QgsMapCanvas *source, QgsMapCanvas
     else
     {
         // Pan-center only sync: preserve target canvas's independent zoom scale / dimensions
-        const QgsPointXY sourceCenter = source->extent().center();
+        QgsPointXY sourceCenter = source->extent().center();
+        if ( source->mapSettings().destinationCrs() != target->mapSettings().destinationCrs() && source->mapSettings().destinationCrs().isValid() && target->mapSettings().destinationCrs().isValid() )
+        {
+            try
+            {
+                QgsCoordinateTransform ct( source->mapSettings().destinationCrs(), target->mapSettings().destinationCrs(), QgsProject::instance() );
+                sourceCenter = ct.transform( sourceCenter );
+            }
+            catch ( ... ) {}
+        }
         const QgsRectangle currentTargetExtent = target->extent();
         const QgsPointXY currentTargetCenter = currentTargetExtent.center();
         const double dx = sourceCenter.x() - currentTargetCenter.x();

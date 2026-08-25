@@ -172,6 +172,7 @@ void RoiStatisticsWidget::computeStatistics()
     const bool hasRoi = !roiGeom.isNull();
     std::vector<uint8_t> inside(static_cast<size_t>(xSize) * ySize, 1);
     if (hasRoi) {
+        const QgsRectangle roiBBox = roiGeom.boundingBox();
         for (int y = 0; y < ySize; ++y) {
             const int py = yOff + y;
             const double rCenter = py + 0.5;
@@ -180,6 +181,10 @@ void RoiStatisticsWidget::computeStatistics()
                 const double cCenter = px + 0.5;
                 const double mapX = gt[0] + cCenter * gt[1] + rCenter * gt[2];
                 const double mapY = gt[3] + cCenter * gt[4] + rCenter * gt[5];
+                if ( !roiBBox.contains( mapX, mapY ) ) {
+                    inside[static_cast<size_t>(y) * xSize + x] = 0;
+                    continue;
+                }
                 // intersects (not contains): GEOS Contains excludes points
                 // exactly on the boundary; include boundary-center pixels,
                 // consistent with the rasterizer's boundary handling (#449).

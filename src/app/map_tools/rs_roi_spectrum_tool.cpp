@@ -108,8 +108,8 @@ void RsRoiSpectrumTool::finishPolygon()
   const QString rasterName = m_rasterLayer->name();
   auto onResult = m_onResult;
 
-  auto *watcher = new QFutureWatcher<SpectrumTaskResult>();
-  QObject::connect( watcher, &QFutureWatcher<SpectrumTaskResult>::finished, [watcher, onResult]() {
+  auto *watcher = new QFutureWatcher<SpectrumTaskResult>( this );
+  QObject::connect( watcher, &QFutureWatcher<SpectrumTaskResult>::finished, this, [watcher, onResult]() {
     SpectrumTaskResult res = watcher->result();
     watcher->deleteLater();
     if ( onResult )

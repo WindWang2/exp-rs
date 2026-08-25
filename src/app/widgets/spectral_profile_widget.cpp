@@ -266,6 +266,8 @@ void SpectralProfileWidget::extractProfile( const QgsPointXY &point, QgsRasterLa
     }
     double x = srcPt.x();
     double y = srcPt.y();
+    if ( std::abs( adfGeoTransform[1] ) < 1e-12 || std::abs( adfGeoTransform[5] ) < 1e-12 )
+        return;
     double col = ( x - adfGeoTransform[0] ) / adfGeoTransform[1];
     double row = ( y - adfGeoTransform[3] ) / adfGeoTransform[5];
 
