@@ -593,3 +593,272 @@ TEST_CASE("BandMath processFile masks Inf pixels to NaN before evaluation (#449)
     CHECK(std::isnan(out[0]));
     REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(2.0f, 0.001f));
 }
+
+// --- Phase 2 M1: Error Diagnostic & Column Tracking Tests ---
+
+TEST_CASE("BandMath reports exact column offset on syntax and semantic errors", "[bandmath][diagnostics]")
+{
+    QString err;
+    int errCol = 0;
+
+    // Trailing operator
+    auto res1 = BandMath::BandMathBytecode::compile("b1 +", err, errCol);
+    REQUIRE_FALSE(res1.has_value());
+    CHECK(errCol >= 3);
+
+    // Unmatched opening parenthesis at column 1
+    auto res2 = BandMath::BandMathBytecode::compile("(b1 + b2", err, errCol);
+    REQUIRE_FALSE(res2.has_value());
+    CHECK(errCol == 1);
+
+    // Unknown function name
+    auto res3 = BandMath::BandMathBytecode::compile("unknown_function(b1)", err, errCol);
+    REQUIRE_FALSE(res3.has_value());
+    CHECK(errCol == 1);
+
+    // Function with wrong argument count (sqrt expects 1, got 2)
+    auto res4 = BandMath::BandMathBytecode::compile("sqrt(b1, b2)", err, errCol);
+    REQUIRE_FALSE(res4.has_value());
+    CHECK(errCol == 1);
+
+    // Invalid band reference index b0
+    auto res5 = BandMath::BandMathBytecode::compile("b0 + 1", err, errCol);
+    REQUIRE_FALSE(res5.has_value());
+    CHECK(errCol == 1);
+
+    // Unclosed ternary expression
+    auto res6 = BandMath::BandMathBytecode::compile("b1 > 0 ? b2", err, errCol);
+    REQUIRE_FALSE(res6.has_value());
+    CHECK(errCol >= 8);
+}
+
+// --- Phase 2 M1: Trigonometric, Math & Power Operators ---
+
+TEST_CASE("BandMath evaluates power operator (^) and modulo (%) and NOT (!)", "[bandmath][operators]")
+{
+    BandMath::BandData bands;
+    bands[1] = {2.0f, 3.0f, 0.0f, -4.0f};
+    bands[2] = {3.0f, 2.0f, 5.0f, 2.0f};
+    std::vector<float> out(4);
+
+    // Exponentiation ^
+    REQUIRE(BandMath::evaluate("b1 ^ 3", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(8.0f, 0.001f));
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(27.0f, 0.001f));
+
+    // Exponentiation between bands
+    REQUIRE(BandMath::evaluate("b1 ^ b2", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(8.0f, 0.001f));  // 2^3
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(9.0f, 0.001f));  // 3^2
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(0.0f, 0.001f));  // 0^5
+
+    // Floating-point modulo %
+    REQUIRE(BandMath::evaluate("b2 % b1", bands, out.data(), 2));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(1.0f, 0.001f));  // 3 % 2 = 1
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(2.0f, 0.001f));  // 2 % 3 = 2
+
+    // Logical NOT !
+    REQUIRE(BandMath::evaluate("!b1", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.0f, 0.001f));  // !2.0 = 0
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(1.0f, 0.001f));  // !0.0 = 1
+}
+
+TEST_CASE("BandMath evaluates advanced trigonometric and transcendental functions", "[bandmath][func]")
+{
+    BandMath::BandData bands;
+    bands[1] = {0.5f, 0.0f, -0.5f, 1.0f};
+    bands[2] = {0.5f, 1.0f, 0.0f, -1.0f};
+    std::vector<float> out(4);
+
+    // asin, acos, atan
+    REQUIRE(BandMath::evaluate("asin(b1)", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(std::asin(0.5f), 0.001f));
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(0.0f, 0.001f));
+
+    REQUIRE(BandMath::evaluate("acos(b1)", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(std::acos(0.5f), 0.001f));
+
+    REQUIRE(BandMath::evaluate("atan(b1)", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(std::atan(0.5f), 0.001f));
+
+    // atan2(y, x)
+    REQUIRE(BandMath::evaluate("atan2(b1, b2)", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(std::atan2(0.5f, 0.5f), 0.001f));
+
+    // tan, log10, cbrt
+    bands[1] = {100.0f, 8.0f, 27.0f, 1.0f};
+    REQUIRE(BandMath::evaluate("log10(b1)", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(2.0f, 0.001f));
+
+    REQUIRE(BandMath::evaluate("cbrt(b1)", bands, out.data(), 4));
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(3.0f, 0.001f));
+
+    // ceil, floor, round
+    bands[1] = {2.3f, 2.7f, -1.5f, 3.0f};
+    REQUIRE(BandMath::evaluate("ceil(b1)", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(3.0f, 0.001f));
+
+    REQUIRE(BandMath::evaluate("floor(b1)", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(2.0f, 0.001f));
+
+    REQUIRE(BandMath::evaluate("round(b1)", bands, out.data(), 4));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(3.0f, 0.001f));
+}
+
+// --- Phase 2 M1: Remote Sensing Built-in Macros & Clamping ---
+
+TEST_CASE("BandMath evaluates Remote Sensing macro functions (ndvi, evi, savi, mndwi, bsi, clamp, if)", "[bandmath][macros]")
+{
+    BandMath::BandData bands;
+    bands[1] = {0.6f, 0.4f}; // NIR
+    bands[2] = {0.2f, 0.1f}; // Red
+    bands[3] = {0.05f, 0.08f}; // Blue
+    bands[4] = {0.15f, 0.25f}; // SWIR
+    std::vector<float> out(2);
+
+    // ndvi(nir, red) -> (0.6 - 0.2) / (0.6 + 0.2) = 0.4 / 0.8 = 0.5
+    REQUIRE(BandMath::evaluate("ndvi(b1, b2)", bands, out.data(), 2));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(0.5f, 0.001f));
+    float expectedNdvi1 = (0.4f - 0.1f) / (0.4f + 0.1f);
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(expectedNdvi1, 0.001f));
+
+    // ndwi(green, nir)
+    REQUIRE(BandMath::evaluate("ndwi(b2, b1)", bands, out.data(), 2));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs((0.2f - 0.6f) / (0.2f + 0.6f), 0.001f));
+
+    // mndwi(green, swir)
+    REQUIRE(BandMath::evaluate("mndwi(b2, b4)", bands, out.data(), 2));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs((0.2f - 0.15f) / (0.2f + 0.15f), 0.001f));
+
+    // nbr(nir, swir)
+    REQUIRE(BandMath::evaluate("nbr(b1, b4)", bands, out.data(), 2));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs((0.6f - 0.15f) / (0.6f + 0.15f), 0.001f));
+
+    // evi(nir, red, blue) -> 2.5 * (nir - red) / (nir + 6*red - 7.5*blue + 1)
+    REQUIRE(BandMath::evaluate("evi(b1, b2, b3)", bands, out.data(), 2));
+    float expectedEvi = 2.5f * (0.6f - 0.2f) / (0.6f + 6.0f * 0.2f - 7.5f * 0.05f + 1.0f);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(expectedEvi, 0.001f));
+
+    // savi(nir, red, 0.5) -> (nir - red) * (1 + 0.5) / (nir + red + 0.5)
+    REQUIRE(BandMath::evaluate("savi(b1, b2, 0.5)", bands, out.data(), 2));
+    float expectedSavi = (0.6f - 0.2f) * 1.5f / (0.6f + 0.2f + 0.5f);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(expectedSavi, 0.001f));
+
+    // bsi(swir, red, nir, blue) -> ((swir + red) - (nir + blue)) / ((swir + red) + (nir + blue))
+    REQUIRE(BandMath::evaluate("bsi(b4, b2, b1, b3)", bands, out.data(), 2));
+    float numBsi = (0.15f + 0.2f) - (0.6f + 0.05f);
+    float denBsi = (0.15f + 0.2f) + (0.6f + 0.05f);
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(numBsi / denBsi, 0.001f));
+
+    // clamp(x, lo, hi)
+    bands[1] = {-0.5f, 0.5f, 1.5f, 0.8f};
+    std::vector<float> clampOut(4);
+    REQUIRE(BandMath::evaluate("clamp(b1, 0.0, 1.0)", bands, clampOut.data(), 4));
+    REQUIRE_THAT(clampOut[0], Catch::Matchers::WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(clampOut[1], Catch::Matchers::WithinAbs(0.5f, 0.001f));
+    REQUIRE_THAT(clampOut[2], Catch::Matchers::WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(clampOut[3], Catch::Matchers::WithinAbs(0.8f, 0.001f));
+
+    // if(cond, true_val, false_val)
+    REQUIRE(BandMath::evaluate("if(b1 > 0.0, b1 * 2, -1)", bands, clampOut.data(), 4));
+    REQUIRE_THAT(clampOut[0], Catch::Matchers::WithinAbs(-1.0f, 0.001f));
+    REQUIRE_THAT(clampOut[1], Catch::Matchers::WithinAbs(1.0f, 0.001f));
+}
+
+// --- Phase 2 M1: Engine & Evaluator API Contract ---
+
+TEST_CASE("BandMath::Engine compiles and evaluates polymorphic Evaluator", "[bandmath][engine]")
+{
+    BandMath::CompilationResult compResult;
+    auto evaluator = BandMath::Engine::compile("(b1 + b2) * 0.5", &compResult);
+    REQUIRE(evaluator != nullptr);
+    REQUIRE(compResult.ok);
+    REQUIRE(compResult.errorColumn == 0);
+    REQUIRE(compResult.referencedBands == std::vector<int>{1, 2});
+
+    std::vector<float> b1 = {1.0f, 2.0f, 3.0f};
+    std::vector<float> b2 = {3.0f, 4.0f, 5.0f};
+    std::map<int, const float*> ptrMap = {{1, b1.data()}, {2, b2.data()}};
+    std::vector<float> out(3);
+
+    REQUIRE(evaluator->evaluate(ptrMap, out.data(), 3));
+    REQUIRE_THAT(out[0], Catch::Matchers::WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(out[1], Catch::Matchers::WithinAbs(3.0f, 0.001f));
+    REQUIRE_THAT(out[2], Catch::Matchers::WithinAbs(4.0f, 0.001f));
+}
+
+// --- Phase 2 M1: High-Volume Differential Testing (SIMD vs Scalar Oracle) ---
+
+TEST_CASE("BandMath SIMD vs Scalar differential oracle testing over 10,000 points", "[bandmath][differential]")
+{
+    const size_t N = 10000;
+    std::vector<float> b1(N);
+    std::vector<float> b2(N);
+    std::vector<float> b3(N);
+    std::vector<float> b4(N);
+
+    // Deterministic pseudo-random generation with diverse floats (positive, negative, zeros, subnormals, NaNs)
+    for (size_t i = 0; i < N; i++) {
+        float x = static_cast<float>(i % 1000) / 100.0f - 5.0f;
+        float y = static_cast<float>((i * 7) % 1000) / 100.0f - 5.0f;
+        float z = static_cast<float>((i * 13) % 1000) / 100.0f - 5.0f;
+        // Extreme magnitudes: overflow-to-Inf chains and raw +/-Inf pixels must
+        // behave identically on the AVX2 and scalar kernels.
+        float w = static_cast<float>((i * 29) % 1000) / 100.0f - 5.0f;
+        if (i % 7 == 0) w = 1e30f;
+        if (i % 11 == 0) w = -1e30f;
+        if (i % 31 == 0) z = std::numeric_limits<float>::infinity();
+        if (i % 37 == 0) w = std::numeric_limits<float>::infinity();
+        if (i % 17 == 0) x = std::numeric_limits<float>::quiet_NaN();
+        if (i % 23 == 0) y = 0.0f;
+        b1[i] = x;
+        b2[i] = y;
+        b3[i] = z;
+        b4[i] = w;
+    }
+
+    BandMath::BandData bands;
+    bands[1] = b1;
+    bands[2] = b2;
+    bands[3] = b3;
+    bands[4] = b4;
+
+    std::vector<float> outSimd(N);
+    std::vector<float> outScalar(N);
+
+    const std::vector<QString> testExpressions = {
+        "(b1 - b2) / (b1 + b2 + 0.001)",
+        "2.5 * (b1 - b2) / (b1 + 6.0 * b2 - 7.5 * b3 + 1.0)",
+        "clamp(b1 * 2.0 - b2, 0.1, 0.9)",
+        "(b1 > 0.3 && b2 < 0.7) ? sqrt(abs(b1)) : b2 * 1.5",
+        "atan2(b2, b1)",
+        "min(max(b1, b2), b3)",
+        "if(b1 >= b2, b1 ^ 2, b2 ^ 0.5)",
+        // Non-finite parity: Inf input pixels and mid-expression overflow.
+        "b4 * b4",
+        "(b4 * b4) + 1.0",
+        "(b4 * b4) > 1e29 ? 1.0 : 0.0",
+        "2.5 / (b3 - 7.5 * b4)",
+        "abs(b4) * -1.0 + sqrt(abs(b4))",
+        "(b4 < 0) ? -b4 : b4"
+    };
+
+    for (const auto &expr : testExpressions) {
+        REQUIRE(BandMath::evaluate(expr, bands, outSimd.data(), N));
+        REQUIRE(BandMath::evaluateScalar(expr, bands, outScalar.data(), N));
+
+        for (size_t i = 0; i < N; i++) {
+            float s = outSimd[i];
+            float c = outScalar[i];
+            if (std::isnan(c)) {
+                CHECK(std::isnan(s));
+            } else if (std::isinf(c)) {
+                CHECK(std::isinf(s));
+            } else {
+                CHECK_THAT(s, Catch::Matchers::WithinAbs(c, 0.001f));
+            }
+        }
+    }
+}

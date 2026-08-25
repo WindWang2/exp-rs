@@ -1,6 +1,9 @@
 // src/processing/algorithms/band_math.h
 #pragma once
 
+#include "band_math_ast.h"
+#include "band_math_simd.h"
+
 #include <QString>
 #include <cstddef>
 #include <map>
@@ -12,36 +15,29 @@
  * Expression syntax:
  *   - Band references: b1, b2, ..., bN (1-based)
  *   - Constants: 42, 3.14, -1.5, 1e-6 (scientific notation supported)
- *   - Arithmetic operators: +, -, *, / (precedence: * / before + -)
- *   - Comparison operators: <, >, <=, >=, ==, != (return 1.0 / 0.0)
- *   - Logical operators: &&, || (non-zero = true; short-circuit evaluated)
- *   - Conditional: cond ? true_expr : false_expr
+ *   - Arithmetic operators: +, -, *, /, %, ^ (precedence: ^ before * / % before + -)
+ *   - Comparison operators: <, >, <=, >=, ==, != (return 1.0 / 0.0, NaN on non-finite)
+ *   - Logical operators: &&, ||, ! (non-zero = true)
+ *   - Conditional: cond ? true_expr : false_expr or if(cond, true_val, false_val)
  *   - Parentheses: (expr)
  *   - Functions:
- *       Single-arg: sin, cos, tan, exp, ln(log), log10, sqrt, abs, asin, acos, atan
+ *       Single-arg: sin, cos, tan, asin, acos, atan, sqrt, cbrt, exp, ln(log), log10, abs, ceil, floor, round
  *       Two-arg:    pow(base, exp), min(a, b), max(a, b), std::min(a, b), std::max(a, b), atan2(y, x)
+ *       Three-arg:  clamp(x, lo, hi), if(cond, true_val, false_val)
  *       Zero-arg:   pi()
+ *       Macros:     ndvi(nir, red), ndwi(green, nir), mndwi(green, swir), evi(nir, red, blue),
+ *                   savi(nir, red, L), nbr(nir, swir2), bsi(swir, red, nir, blue)
  *
- * Operator precedence (low → high):
- *   ||  →  &&  →  comparison  →  + -  →  * /  →  unary -  →  ternary ?:  →  primary
- *
- * Examples:
- *   "(b1 - b2) / (b1 + b2)"                          — NDVI
- *   "sqrt(b1*b1 + b2*b2)"                            — vector magnitude
- *   "b1 > 0.4 ? 1 : 0"                               — threshold mask
- *   "(b1 > 0.3 && b2 < 0.25) ? b1 : 0"               — conditional with logic
- *   "pow(b1 / (b1 + b2 + b3), 2)"                    — normalized ratio squared
+ * Operator precedence (low -> high):
+ *   ?: -> || -> && -> comparison -> + - -> * / % -> ^ -> unary - ! -> primary
  */
 namespace BandMath
 {
-    /// Map of band number (1-based) → pixel data array.
-    using BandData = std::map<int, std::vector<float>>;
-
     /**
-     * Evaluate an expression over multi-band pixel data.
+     * Evaluate an expression over multi-band pixel data using SIMD execution kernels.
      *
      * @param expression  The math expression string (e.g., "(b1 - b2) / (b1 + b2)")
-     * @param bands       Map of band number → pixel data (each must have >= count elements)
+     * @param bands       Map of band number -> pixel data (each must have >= count elements)
      * @param out         Output buffer (pre-allocated, size >= count)
      * @param count       Number of pixels to process
      * @return true on success, false on invalid arguments or parse error
@@ -51,7 +47,13 @@ namespace BandMath
     bool evaluate(const QString &expression, const BandData &bands, float *out, size_t count);
 
     /**
-     * Read a multi-band GeoTIFF, evaluate an expression, and write a single-band output.
+     * Evaluate an expression using scalar execution path for differential oracle verification.
+     */
+    bool evaluateScalar(const QString &expression, const BandData &bands, float *out, size_t count);
+
+    /**
+     * Read a multi-band GeoTIFF, evaluate an expression via bounded tile streaming (<64MB RAM),
+     * and write a single-band output GeoTIFF.
      * @return true on success; optional errorMessage receives failure reason.
      */
     bool processFile(const QString &sourcePath, const QString &outputPath,

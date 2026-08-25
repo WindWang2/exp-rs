@@ -12,6 +12,7 @@ add_library(sicnu_processing SHARED
     algorithms/spectral_indices.cpp
     algorithms/spectral_classification.cpp
     algorithms/band_math.cpp
+    algorithms/band_math_simd.cpp
     algorithms/atmospheric_correction.cpp
     algorithms/radiometric_calibration.cpp
     algorithms/change_detection.cpp
