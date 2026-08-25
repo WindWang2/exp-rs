@@ -211,14 +211,6 @@ bool RsSegmentMap::toGeoTIFF( const QString &path, const QString &refPath, QStri
     return true;
 }
 
-quint32 RsSegmentMap::labelAt( int row, int col ) const
-{
-    if ( row < 0 || row >= mHeight || col < 0 || col >= mWidth )
-        return 0;
-    const size_t idx = static_cast<size_t>(row) * static_cast<size_t>(mWidth) + static_cast<size_t>(col);
-    return mLabels[static_cast<qsizetype>( idx )];
-}
-
 QSet<quint32> RsSegmentMap::uniqueLabels() const
 {
     ensureSizeCache();

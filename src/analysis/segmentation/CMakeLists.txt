@@ -2,6 +2,7 @@ target_sources(qgis_analysis PRIVATE
     rs_segment_map.cpp
     rs_segment_features.cpp
     rs_simple_segmenter.cpp
+    rs_multires_segmenter.cpp
     # Hierarchical OBIA V1
     rs_parent_link.cpp
     rs_object_hierarchy.cpp

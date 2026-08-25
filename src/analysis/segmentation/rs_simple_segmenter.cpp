@@ -434,143 +434,168 @@ void RsSimpleSegmenter::mergeSmallRegions( QVector<quint32> &labels, int w, int 
     if ( maxLabel == 0 )
         return;
 
-    // Count region sizes using flat array
-    std::vector<int> sizeVec( maxLabel + 1, 0 );
-    for ( size_t i = 0; i < n; ++i )
+    // Chains of small regions (A absorbs B, both still under minSize) only
+    // reach the minimum over several passes; iterate to a fixpoint with a
+    // hard bound so pathological inputs cannot spin forever.
+    constexpr int kMaxMergePasses = 32;
+    for ( int mergePass = 0; mergePass < kMaxMergePasses; ++mergePass )
     {
-        if ( labels[i] != 0 )
-            sizeVec[labels[i]]++;
-    }
-
-    // Find small regions
-    std::vector<uint8_t> isSmall( maxLabel + 1, 0 );
-    size_t smallCount = 0;
-    for ( quint32 id = 1; id <= maxLabel; ++id )
-    {
-        if ( sizeVec[id] > 0 && sizeVec[id] < minSize )
+        // Count region sizes using flat array
+        std::vector<int> sizeVec( maxLabel + 1, 0 );
+        for ( size_t i = 0; i < n; ++i )
         {
-            isSmall[id] = 1;
-            ++smallCount;
+            if ( labels[i] != 0 )
+                sizeVec[labels[i]]++;
         }
-    }
 
-    if ( smallCount == 0 )
-        return;
-
-    SICNU_LOG_DEBUG( SicnuLogTags::Segmentation, QString( "Merging %1 small regions (minSize=%2)" )
-        .arg( smallCount ).arg( minSize ) );
-
-    // 4-connected boundary offsets
-    const int dr4[] = { -1, 1, 0, 0 };
-    const int dc4[] = { 0, 0, -1, 1 };
-
-    // Pass 1: For each small region pixel, count its non-small / different neighbors.
-    // Each small region (< minSize pixels) touches few distinct neighbors. A compact
-    // pair vector per small region avoids nested hash-map heap churn.
-    struct NeighborCount
-    {
-        quint32 neighbor = 0;
-        int count = 0;
-    };
-    std::unordered_map<quint32, std::vector<NeighborCount>> smallAdjacency;
-
-    for ( size_t i = 0; i < n; ++i )
-    {
-        if ( ( i & 0xFFFFu ) == 0 && isCanceled && isCanceled() )
-            return;
-        quint32 segId = labels[i];
-        if ( segId == 0 || !isSmall[segId] )
-            continue;
-        int r = static_cast<int>( i / static_cast<size_t>(w) );
-        int c = static_cast<int>( i % static_cast<size_t>(w) );
-        for ( int d = 0; d < 4; ++d )
+        // Find small regions
+        std::vector<uint8_t> isSmall( maxLabel + 1, 0 );
+        size_t smallCount = 0;
+        for ( quint32 id = 1; id <= maxLabel; ++id )
         {
-            int nr = r + dr4[d];
-            int nc = c + dc4[d];
-            if ( nr < 0 || nr >= h || nc < 0 || nc >= w )
-                continue;
-            quint32 neighbor = labels[static_cast<size_t>(nr) * static_cast<size_t>(w) + static_cast<size_t>(nc)];
-            if ( neighbor != 0 && neighbor != segId )
+            if ( sizeVec[id] > 0 && sizeVec[id] < minSize )
             {
-                auto &vec = smallAdjacency[segId];
-                bool found = false;
-                for ( auto &entry : vec )
+                isSmall[id] = 1;
+                ++smallCount;
+            }
+        }
+
+        if ( smallCount == 0 )
+            return;
+
+        SICNU_LOG_DEBUG( SicnuLogTags::Segmentation, QString( "Merging %1 small regions (minSize=%2)" )
+            .arg( smallCount ).arg( minSize ) );
+
+        // 4-connected boundary offsets
+        const int dr4[] = { -1, 1, 0, 0 };
+        const int dc4[] = { 0, 0, -1, 1 };
+
+        // Pass 1: For each small region pixel, count its non-small / different neighbors.
+        // Each small region (< minSize pixels) touches few distinct neighbors. A compact
+        // pair vector per small region avoids nested hash-map heap churn.
+        struct NeighborCount
+        {
+            quint32 neighbor = 0;
+            int count = 0;
+        };
+        std::unordered_map<quint32, std::vector<NeighborCount>> smallAdjacency;
+
+        for ( size_t i = 0; i < n; ++i )
+        {
+            if ( ( i & 0xFFFFu ) == 0 && isCanceled && isCanceled() )
+                return;
+            quint32 segId = labels[i];
+            if ( segId == 0 || !isSmall[segId] )
+                continue;
+            int r = static_cast<int>( i / static_cast<size_t>(w) );
+            int c = static_cast<int>( i % static_cast<size_t>(w) );
+            for ( int d = 0; d < 4; ++d )
+            {
+                int nr = r + dr4[d];
+                int nc = c + dc4[d];
+                if ( nr < 0 || nr >= h || nc < 0 || nc >= w )
+                    continue;
+                quint32 neighbor = labels[static_cast<size_t>(nr) * static_cast<size_t>(w) + static_cast<size_t>(nc)];
+                if ( neighbor != 0 && neighbor != segId )
                 {
-                    if ( entry.neighbor == neighbor )
+                    auto &vec = smallAdjacency[segId];
+                    bool found = false;
+                    for ( auto &entry : vec )
                     {
-                        entry.count++;
-                        found = true;
-                        break;
+                        if ( entry.neighbor == neighbor )
+                        {
+                            entry.count++;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if ( !found )
+                    {
+                        vec.push_back( { neighbor, 1 } );
                     }
                 }
-                if ( !found )
+            }
+        }
+
+        if ( isCanceled && isCanceled() )
+            return;
+
+        // Build merge map from adjacency (small -> preferred neighbor)
+        std::unordered_map<quint32, quint32> mergeMap;
+        for ( const auto &[segId, neighbors] : smallAdjacency )
+        {
+            quint32 bestNeighbor = 0;
+            int bestCount = 0;
+            for ( const auto &entry : neighbors )
+            {
+                if ( entry.count > bestCount )
                 {
-                    vec.push_back( { neighbor, 1 } );
+                    bestCount = entry.count;
+                    bestNeighbor = entry.neighbor;
                 }
             }
+            if ( bestNeighbor != 0 )
+                mergeMap[segId] = bestNeighbor;
         }
-    }
 
-    if ( isCanceled && isCanceled() )
-        return;
+        // Flat Union-Find with path compression
+        std::vector<quint32> parent( maxLabel + 1 );
+        std::iota( parent.begin(), parent.end(), 0 );
 
-    // Build merge map from adjacency (small -> preferred neighbor)
-    std::unordered_map<quint32, quint32> mergeMap;
-    for ( const auto &[segId, neighbors] : smallAdjacency )
-    {
-        quint32 bestNeighbor = 0;
-        int bestCount = 0;
-        for ( const auto &entry : neighbors )
-        {
-            if ( entry.count > bestCount )
+        auto findRoot = [&parent]( quint32 id ) -> quint32 {
+            quint32 root = id;
+            while ( root <= parent.size() - 1 && parent[root] != root )
+                root = parent[root];
+            // Path compression
+            quint32 cur = id;
+            while ( cur <= parent.size() - 1 && parent[cur] != root )
             {
-                bestCount = entry.count;
-                bestNeighbor = entry.neighbor;
+                quint32 nxt = parent[cur];
+                parent[cur] = root;
+                cur = nxt;
+            }
+            return root;
+        };
+
+        for ( const auto &[segId, target] : mergeMap )
+        {
+            quint32 r1 = findRoot( segId );
+            quint32 r2 = findRoot( target );
+            if ( r1 != r2 )
+            {
+                parent[r1] = r2;
             }
         }
-        if ( bestNeighbor != 0 )
-            mergeMap[segId] = bestNeighbor;
-    }
 
-    // Flat Union-Find with path compression
-    std::vector<quint32> parent( maxLabel + 1 );
-    std::iota( parent.begin(), parent.end(), 0 );
-
-    auto findRoot = [&parent]( quint32 id ) -> quint32 {
-        quint32 root = id;
-        while ( root <= parent.size() - 1 && parent[root] != root )
-            root = parent[root];
-        // Path compression
-        quint32 cur = id;
-        while ( cur <= parent.size() - 1 && parent[cur] != root )
+        // Apply fully-resolved merges in a single pass over the full image
+        for ( size_t i = 0; i < n; ++i )
         {
-            quint32 nxt = parent[cur];
-            parent[cur] = root;
-            cur = nxt;
+            if ( ( i & 0xFFFFu ) == 0 && isCanceled && isCanceled() )
+                return;
+            const quint32 lab = labels[i];
+            if ( lab == 0 )
+                continue;
+            const quint32 root = findRoot( lab );
+            if ( root != lab )
+                labels[i] = root;
         }
-        return root;
-    };
-
-    for ( const auto &[segId, target] : mergeMap )
-    {
-        quint32 r1 = findRoot( segId );
-        quint32 r2 = findRoot( target );
-        if ( r1 != r2 )
+        // Recount after applying merges; stop when nothing is under minSize.
+        std::fill( sizeVec.begin(), sizeVec.end(), 0 );
+        for ( size_t i = 0; i < n; ++i )
         {
-            parent[r1] = r2;
+            if ( labels[i] != 0 )
+                sizeVec[labels[i]]++;
         }
-    }
-
-    // Apply fully-resolved merges in a single pass over the full image
-    for ( size_t i = 0; i < n; ++i )
-    {
-        if ( ( i & 0xFFFFu ) == 0 && isCanceled && isCanceled() )
-            return;
-        const quint32 lab = labels[i];
-        if ( lab == 0 )
-            continue;
-        const quint32 root = findRoot( lab );
-        if ( root != lab )
-            labels[i] = root;
+        bool anySmall = false;
+        for ( quint32 id = 1; id <= maxLabel; ++id )
+        {
+            if ( sizeVec[id] > 0 && sizeVec[id] < minSize )
+            {
+                anySmall = true;
+                break;
+            }
+        }
+        if ( !anySmall )
+            break;
     }
 }
