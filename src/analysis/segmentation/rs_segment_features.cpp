@@ -33,6 +33,7 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         SICNU_LOG_ERROR( SicnuLogTags::Segmentation, QString( "Failed to open raster for feature extraction: %1" ).arg( rasterPath ) );
         return result;
     }
+    std::unique_ptr<void, decltype(&GDALClose)> dsGuard( ds, &GDALClose );
 
     const int w = segMap.width();
     const int h = segMap.height();
@@ -47,7 +48,6 @@ RsSegmentFeatures::extract( const QString &rasterPath,
         GDALRasterBandH band = GDALGetRasterBand( ds, bandIndices[b] );
         if ( !band )
         {
-            GDALClose( ds );
             return result;
         }
         int pbSuccess = 0;
@@ -72,7 +72,6 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                                    bandBuf.data(), w, h, GDT_Float32, 0, 0 );
         if ( err != CE_None )
         {
-            GDALClose( ds );
             return result;
         }
         for ( size_t i = 0; i < nPixels; ++i )
@@ -200,7 +199,6 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                                    bandBuf.data(), w, h, GDT_Float32, 0, 0 );
         if ( err != CE_None )
         {
-            GDALClose( ds );
             return result;
         }
         // Accumulate spectral stats for this band
@@ -272,7 +270,6 @@ RsSegmentFeatures::extract( const QString &rasterPath,
                                    bandBuf.data(), w, h, GDT_Float32, 0, 0 );
         if ( err != CE_None )
         {
-            GDALClose( ds );
             return result;
         }
 
@@ -378,8 +375,6 @@ RsSegmentFeatures::extract( const QString &rasterPath,
             }
         }
     }
-
-    GDALClose( ds );
 
     // Build final stats
     auto buildStat = [&]( quint32 segId, const Acc &acc, const SegBBox &box, int perimeter ) {

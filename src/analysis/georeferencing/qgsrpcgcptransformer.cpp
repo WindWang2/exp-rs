@@ -103,6 +103,8 @@ std::unique_ptr<QgsGcpTransformerInterface> QgsRpcGcpTransformer::clone() const
   c->mRefinementLonBias = mRefinementLonBias;
   c->mRefinementLatBias = mRefinementLatBias;
   c->mDestinationCrs = mDestinationCrs;
+  if ( mTransformArg )
+    c->updateParametersFromGcps( {}, {} );
   return c;
 }
 

@@ -459,6 +459,7 @@ void QgsGDALGeorefTransform::destroyGdalArgs()
       GDALDestroyTPSTransformer( mGDALTransformerArgs );
     else
       GDALDestroyGCPTransformer( mGDALTransformerArgs );
+    mGDALTransformerArgs = nullptr;
   }
 }
 

@@ -189,7 +189,7 @@ bool RsSegmentMap::toGeoTIFF( const QString &path, const QString &refPath, QStri
     {
         const size_t rowBase = static_cast<size_t>(r) * static_cast<size_t>(mWidth);
         for ( int c = 0; c < mWidth; ++c )
-            rowBuf[c] = labels[static_cast<int>(rowBase + static_cast<size_t>(c))];
+            rowBuf[c] = labels[static_cast<qsizetype>(rowBase + static_cast<size_t>(c))];
         if ( GDALRasterIO( outBand, GF_Write, 0, r, mWidth, 1,
                            rowBuf.data(), mWidth, 1, GDT_UInt32, 0, 0 ) != CE_None )
         {
@@ -216,7 +216,7 @@ quint32 RsSegmentMap::labelAt( int row, int col ) const
     if ( row < 0 || row >= mHeight || col < 0 || col >= mWidth )
         return 0;
     const size_t idx = static_cast<size_t>(row) * static_cast<size_t>(mWidth) + static_cast<size_t>(col);
-    return mLabels[static_cast<int>( idx )];
+    return mLabels[static_cast<qsizetype>( idx )];
 }
 
 QSet<quint32> RsSegmentMap::uniqueLabels() const
@@ -266,7 +266,7 @@ QVector<QPoint> RsSegmentMap::buildCoordsForSegment( quint32 segmentId ) const
         const size_t rowBase = static_cast<size_t>(r) * static_cast<size_t>(mWidth);
         for ( int c = 0; c < mWidth; ++c )
         {
-            if ( mLabels[static_cast<int>(rowBase + static_cast<size_t>(c))] == segmentId )
+            if ( mLabels[static_cast<qsizetype>(rowBase + static_cast<size_t>(c))] == segmentId )
                 coords.append( QPoint( c, r ) );
         }
     }
@@ -295,7 +295,7 @@ void RsSegmentMap::ensureCoordsIndex() const
         const size_t rowBase = static_cast<size_t>(r) * static_cast<size_t>(mWidth);
         for ( int c = 0; c < mWidth; ++c )
         {
-            const quint32 sid = mLabels[static_cast<int>(rowBase + static_cast<size_t>(c))];
+            const quint32 sid = mLabels[static_cast<qsizetype>(rowBase + static_cast<size_t>(c))];
             if ( sid == 0 ) continue;
             auto it = mCoordsCache.find( sid );
             if ( it != mCoordsCache.end() )
