@@ -41,6 +41,10 @@ class CORE_EXPORT QgsProcessingAlgRunnerTask : public QgsTask
      * and processing \a context.
      *
      * Since QGIS 3.26, the \a flags argument allows control over task flags.
+     *
+     * The task takes an internal thread-safe copy of \a context for background execution,
+     * however the caller must guarantee that \a context outlives the task, as it is used
+     * on the main thread during algorithm preparation and post-processing.
      */
     QgsProcessingAlgRunnerTask(
       const QgsProcessingAlgorithm *algorithm, const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback = nullptr, QgsTask::Flags flags = QgsTask::CanCancel
@@ -72,6 +76,8 @@ class CORE_EXPORT QgsProcessingAlgRunnerTask : public QgsTask
     QVariantMap mParameters;
     QVariantMap mResults;
     QgsProcessingContext &mContext;
+    //! Thread-safe copy of \a mContext used when the algorithm runs on a background thread
+    std::unique_ptr< QgsProcessingContext > mThreadSafeContext;
     QgsProcessingFeedback *mFeedback = nullptr;
     std::unique_ptr< QgsProcessingFeedback > mOwnedFeedback;
     std::unique_ptr< QgsProcessingAlgorithm > mAlgorithm;

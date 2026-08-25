@@ -3802,7 +3802,8 @@ void QgsGdalProvider::initBaseDataset()
                                                   && !GDALGetMetadata( mGdalBaseDataset, "RPC" )
                                                   && !GDALGetMetadata( mGdalBaseDataset, "GEOLOCATION" );
 
-    if ( !isSouthUpWithoutRotationGcpOrRPC && GDALGetMaskFlags( GDALGetRasterBand( mGdalBaseDataset, 1 ) ) == GMF_ALL_VALID )
+    GDALRasterBandH firstBaseDatasetBand = GDALGetRasterCount( mGdalBaseDataset ) > 0 ? GDALGetRasterBand( mGdalBaseDataset, 1 ) : nullptr;
+    if ( !isSouthUpWithoutRotationGcpOrRPC && firstBaseDatasetBand && GDALGetMaskFlags( firstBaseDatasetBand ) == GMF_ALL_VALID )
     {
       psWarpOptions->nDstAlphaBand = GDALGetRasterCount( mGdalBaseDataset ) + 1;
     }

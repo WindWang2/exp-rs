@@ -929,10 +929,11 @@ std::vector< LayerRenderJob > QgsMapRendererJob::prepareSecondPassJobs( std::vec
       // Note: we only need an alpha channel here, rather than a full RGBA image
       QImage *maskImage = nullptr;
       maskPainter = allocateImageAndPainter( u"label mask"_s, maskImage, &labelJob.context );
-      // FIXME ? when maskImage is let to nullptr in case of out-of-memory
-      // cppcheck-suppress nullPointer
-      maskImage->fill( 0 );
-      maskPaintDevice = maskImage;
+      if ( maskImage )
+      {
+        maskImage->fill( 0 );
+        maskPaintDevice = maskImage;
+      }
     }
 
     labelJob.context.setMaskPainter( maskPainter, maskId );
@@ -1020,8 +1021,11 @@ std::vector< LayerRenderJob > QgsMapRendererJob::prepareSecondPassJobs( std::vec
         // Note: we only need an alpha channel here, rather than a full RGBA image
         QImage *maskImage = nullptr;
         maskPainter = allocateImageAndPainter( job.layerId, maskImage, job.context() );
-        maskImage->fill( 0 );
-        maskPaintDevice = maskImage;
+        if ( maskImage )
+        {
+          maskImage->fill( 0 );
+          maskPaintDevice = maskImage;
+        }
       }
 
       job.context()->setMaskPainter( maskPainter );

@@ -32,6 +32,10 @@ QgsProcessingAlgRunnerTask::QgsProcessingAlgRunnerTask( const QgsProcessingAlgor
   , mContext( context )
   , mFeedback( feedback )
 {
+  // The algorithm is executed on a background thread by run(), which must not
+  // touch the caller-owned context (it may be destroyed while the task runs).
+  mThreadSafeContext = std::make_unique< QgsProcessingContext >();
+  mThreadSafeContext->copyThreadSafeSettings( context );
   if ( !mFeedback )
   {
     mOwnedFeedback = std::make_unique<QgsProcessingFeedback>();
@@ -67,7 +71,7 @@ bool QgsProcessingAlgRunnerTask::run()
   bool ok = false;
   try
   {
-    mResults = mAlgorithm->runPrepared( mParameters, mContext, mFeedback );
+    mResults = mAlgorithm->runPrepared( mParameters, *mThreadSafeContext, mFeedback );
     ok = true;
   }
   catch ( QgsProcessingException &e )

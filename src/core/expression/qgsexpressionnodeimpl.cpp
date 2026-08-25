@@ -26,6 +26,9 @@
 #include <QString>
 #include <QTime>
 
+#include <cmath>
+#include <limits>
+
 using namespace Qt::StringLiterals;
 
 const char *QgsExpressionNodeBinaryOperator::BINARY_OPERATOR_TEXT[] = {
@@ -493,7 +496,10 @@ QVariant QgsExpressionNodeBinaryOperator::evalNode( QgsExpression *parent, const
       ENSURE_NO_EVAL_ERROR
       if ( fR == 0. )
         return QVariant(); // silently handle division by zero and return NULL
-      return QVariant( qlonglong( std::floor( fL / fR ) ) );
+      const double val = std::floor( fL / fR );
+      if ( !std::isfinite( val ) ||  val < static_cast<double>( std::numeric_limits<qlonglong>::min() ) || val >= static_cast<double>( std::numeric_limits<qlonglong>::max() ) )
+        return QVariant();
+      return QVariant( qlonglong( val ) );
     }
     case boPow:
       if ( QgsExpressionUtils::isNull( vL ) || QgsExpressionUtils::isNull( vR ) )
@@ -710,8 +716,12 @@ qlonglong QgsExpressionNodeBinaryOperator::computeInt( qlonglong x, qlonglong y 
     case boMul:
       return x * y;
     case boDiv:
+      if ( y == 0 || ( y == -1 && x == std::numeric_limits<qlonglong>::min() ) )
+        return 0; // caller guards zero division; guard LLONG_MIN / -1 overflow
       return x / y;
     case boMod:
+      if ( y == 0 || ( y == -1 && x == std::numeric_limits<qlonglong>::min() ) )
+        return 0;
       return x % y;
     default:
       Q_ASSERT( false );

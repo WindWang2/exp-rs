@@ -75,10 +75,12 @@ void QgsAuthCrypto::passwordKeyHash( const QString &pass, QString *salt, QString
 
   if ( !key.isEmpty() )
   {
-    *salt = QCA::arrayToHex( saltiv.toByteArray() );
+    if ( salt )
+      *salt = QCA::arrayToHex( saltiv.toByteArray() );
     //qDebug( "salt hex: %s", qPrintable( *salt ) );
 
-    *hash = QCA::arrayToHex( key.toByteArray() );
+    if ( hash )
+      *hash = QCA::arrayToHex( key.toByteArray() );
     //qDebug( "hash hex: %s", qPrintable( *hash ) );
 
     if ( cipheriv )

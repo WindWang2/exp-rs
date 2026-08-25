@@ -460,8 +460,12 @@ QgsLayerTreeLayer *QgsLayerTreeUtils::insertLayerBelow( QgsLayerTreeGroup *group
   if ( !inTree )
     return nullptr;
 
+  QgsLayerTreeGroup *parent = inTree->parent() ? qobject_cast<QgsLayerTreeGroup *>( inTree->parent() ) : group;
+  if ( !parent )
+    return nullptr;
+
   int idx = 0;
-  const auto constChildren = inTree->parent()->children();
+  const auto constChildren = parent->children();
   for ( QgsLayerTreeNode *vl : constChildren )
   {
     if ( vl->nodeType() == QgsLayerTreeNode::NodeLayer && static_cast<QgsLayerTreeLayer *>( vl )->layer() == refLayer )
@@ -471,7 +475,6 @@ QgsLayerTreeLayer *QgsLayerTreeUtils::insertLayerBelow( QgsLayerTreeGroup *group
     idx++;
   }
   // insert the new layer
-  QgsLayerTreeGroup *parent = static_cast<QgsLayerTreeGroup *>( inTree->parent() ) ? static_cast<QgsLayerTreeGroup *>( inTree->parent() ) : group;
   return parent->insertLayer( idx + 1, layerToInsert );
 }
 
