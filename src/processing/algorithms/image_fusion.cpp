@@ -113,16 +113,25 @@ QVector<QVector<float>> ImageFusion::brovey(
 
     const size_t n = static_cast<size_t>(width) * height;
 
-    // Compute sum of MS bands per pixel
+    // Compute sum of MS bands per pixel and track validity across all bands
     QVector<float> msSum( n, 0.0f );
+    std::vector<bool> validPixel( n, true );
     for ( int b = 0; b < nBands; ++b )
     {
         if ( !msBands[b] )
             return result;
         for ( size_t i = 0; i < n; ++i )
         {
-            if ( msBands[b][i] != nodata && !std::isnan( msBands[b][i] ) )
+            if ( !validPixel[i] )
+                continue;
+            if ( msBands[b][i] == nodata || std::isnan( msBands[b][i] ) )
+            {
+                validPixel[i] = false;
+            }
+            else
+            {
                 msSum[i] += msBands[b][i];
+            }
         }
     }
 
@@ -133,7 +142,7 @@ QVector<QVector<float>> ImageFusion::brovey(
         result[b].resize( n );
         for ( size_t i = 0; i < n; ++i )
         {
-            if ( msBands[b][i] == nodata || std::isnan( msBands[b][i] ) ||
+            if ( !validPixel[i] ||
                  panBand[i] == nodata || std::isnan( panBand[i] ) ||
                  msSum[i] < 1e-10f )
             {

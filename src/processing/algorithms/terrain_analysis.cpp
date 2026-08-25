@@ -101,18 +101,19 @@ bool TerrainAnalysis::slope( const float *dem, float *out, int width, int height
 
     // Interior pixels: direct array access, no bounds checks
     auto processInterior = [&]( int r, int c ) {
-        const size_t idx = static_cast<size_t>( r ) * width + c;
+        const size_t w = static_cast<size_t>( width );
+        const size_t idx = static_cast<size_t>( r ) * w + static_cast<size_t>( c );
         const float z = dem[idx];
         if ( isInvalid( z ) ) { out[idx] = nodata; return; }
 
-        const float a = dem[( r - 1 ) * width + ( c - 1 )];
-        const float b = dem[( r - 1 ) * width + c];
-        const float c2 = dem[( r - 1 ) * width + ( c + 1 )];
-        const float d = dem[r * width + ( c - 1 )];
-        const float f = dem[r * width + ( c + 1 )];
-        const float g = dem[( r + 1 ) * width + ( c - 1 )];
-        const float h = dem[( r + 1 ) * width + c];
-        const float i = dem[( r + 1 ) * width + ( c + 1 )];
+        const float a = dem[( static_cast<size_t>( r ) - 1 ) * w + ( static_cast<size_t>( c ) - 1 )];
+        const float b = dem[( static_cast<size_t>( r ) - 1 ) * w + static_cast<size_t>( c )];
+        const float c2 = dem[( static_cast<size_t>( r ) - 1 ) * w + ( static_cast<size_t>( c ) + 1 )];
+        const float d = dem[static_cast<size_t>( r ) * w + ( static_cast<size_t>( c ) - 1 )];
+        const float f = dem[static_cast<size_t>( r ) * w + ( static_cast<size_t>( c ) + 1 )];
+        const float g = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) - 1 )];
+        const float h = dem[( static_cast<size_t>( r ) + 1 ) * w + static_cast<size_t>( c )];
+        const float i = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) + 1 )];
 
         bool hasNodata = ( isInvalid( a ) || isInvalid( b ) || isInvalid( c2 ) ||
                            isInvalid( d ) || isInvalid( f ) || isInvalid( g ) || isInvalid( h ) || isInvalid( i ) );
@@ -209,14 +210,15 @@ bool TerrainAnalysis::aspect( const float *dem, float *out, int width, int heigh
             h = getCell( dem, width, height, r + 1, c, nodata );
             i = getCell( dem, width, height, r + 1, c + 1, nodata );
         } else {
-            a = dem[( r - 1 ) * width + ( c - 1 )];
-            b = dem[( r - 1 ) * width + c];
-            c2 = dem[( r - 1 ) * width + ( c + 1 )];
-            d = dem[r * width + ( c - 1 )];
-            f = dem[r * width + ( c + 1 )];
-            g = dem[( r + 1 ) * width + ( c - 1 )];
-            h = dem[( r + 1 ) * width + c];
-            i = dem[( r + 1 ) * width + ( c + 1 )];
+            const size_t w = static_cast<size_t>( width );
+            a = dem[( static_cast<size_t>( r ) - 1 ) * w + ( static_cast<size_t>( c ) - 1 )];
+            b = dem[( static_cast<size_t>( r ) - 1 ) * w + static_cast<size_t>( c )];
+            c2 = dem[( static_cast<size_t>( r ) - 1 ) * w + ( static_cast<size_t>( c ) + 1 )];
+            d = dem[static_cast<size_t>( r ) * w + ( static_cast<size_t>( c ) - 1 )];
+            f = dem[static_cast<size_t>( r ) * w + ( static_cast<size_t>( c ) + 1 )];
+            g = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) - 1 )];
+            h = dem[( static_cast<size_t>( r ) + 1 ) * w + static_cast<size_t>( c )];
+            i = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) + 1 )];
         }
 
         bool hasNodata = ( isInvalid( a ) || isInvalid( b ) || isInvalid( c2 ) ||
@@ -319,14 +321,15 @@ bool TerrainAnalysis::hillshade( const float *dem, float *out, int width, int he
             h = getCell( dem, width, height, r + 1, c, nodata );
             i = getCell( dem, width, height, r + 1, c + 1, nodata );
         } else {
-            a = dem[( r - 1 ) * width + ( c - 1 )];
-            b = dem[( r - 1 ) * width + c];
-            c2 = dem[( r - 1 ) * width + ( c + 1 )];
-            d = dem[r * width + ( c - 1 )];
-            f = dem[r * width + ( c + 1 )];
-            g = dem[( r + 1 ) * width + ( c - 1 )];
-            h = dem[( r + 1 ) * width + c];
-            i = dem[( r + 1 ) * width + ( c + 1 )];
+            const size_t w = static_cast<size_t>( width );
+            a = dem[( static_cast<size_t>( r ) - 1 ) * w + ( static_cast<size_t>( c ) - 1 )];
+            b = dem[( static_cast<size_t>( r ) - 1 ) * w + static_cast<size_t>( c )];
+            c2 = dem[( static_cast<size_t>( r ) - 1 ) * w + ( static_cast<size_t>( c ) + 1 )];
+            d = dem[static_cast<size_t>( r ) * w + ( static_cast<size_t>( c ) - 1 )];
+            f = dem[static_cast<size_t>( r ) * w + ( static_cast<size_t>( c ) + 1 )];
+            g = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) - 1 )];
+            h = dem[( static_cast<size_t>( r ) + 1 ) * w + static_cast<size_t>( c )];
+            i = dem[( static_cast<size_t>( r ) + 1 ) * w + ( static_cast<size_t>( c ) + 1 )];
         }
 
         bool hasNodata = ( isInvalid( a ) || isInvalid( b ) || isInvalid( c2 ) ||

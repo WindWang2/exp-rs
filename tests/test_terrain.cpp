@@ -312,3 +312,28 @@ TEST_CASE( "Gradient scaling: isolated valid pixel with invalid neighbors yields
     // Center pixel has no valid neighbors -> dzdx = 0, dzdy = 0 -> slope = 0
     REQUIRE( slopeOut[1 * W + 1] == Approx( 0.0f ) );
 }
+
+TEST_CASE( "TerrainAnalysis: rectangular grid 64-bit index safety", "[terrain]" )
+{
+    const int W = 50, H = 20;
+    std::vector<float> dem( static_cast<size_t>( W ) * H, 100.0f );
+    // Set a known ramp
+    for ( int r = 0; r < H; ++r )
+        for ( int c = 0; c < W; ++c )
+            dem[static_cast<size_t>( r ) * W + c] = 100.0f + static_cast<float>( c ) * 2.0f;
+
+    std::vector<float> slopeOut( static_cast<size_t>( W ) * H );
+    std::vector<float> aspectOut( static_cast<size_t>( W ) * H );
+    std::vector<float> hsOut( static_cast<size_t>( W ) * H );
+
+    REQUIRE( TerrainAnalysis::slope( dem.data(), slopeOut.data(), W, H, 1.0f, NODATA ) );
+    REQUIRE( TerrainAnalysis::aspect( dem.data(), aspectOut.data(), W, H, 1.0f, NODATA ) );
+    REQUIRE( TerrainAnalysis::hillshade( dem.data(), hsOut.data(), W, H, 1.0f, NODATA, 315.0f, 45.0f ) );
+
+    // Interior check at r=10, c=25
+    const size_t testIdx = static_cast<size_t>( 10 ) * W + 25;
+    REQUIRE( slopeOut[testIdx] > 0.0f );
+    REQUIRE( aspectOut[testIdx] == Approx( 270.0f ).margin( 0.5f ) );
+    REQUIRE( hsOut[testIdx] >= 0.0f );
+    REQUIRE( hsOut[testIdx] <= 1.0f );
+}

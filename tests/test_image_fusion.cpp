@@ -66,9 +66,15 @@ TEST_CASE( "Brovey: nodata preserved", "[fusion]" )
     auto result = ImageFusion::brovey( msBands, 3, pan.data(), W, H, NODATA );
 
     REQUIRE( result[0][0] == NODATA );
+    REQUIRE( result[1][0] == NODATA );
+    REQUIRE( result[2][0] == NODATA );
     REQUIRE( result[0][1] == NODATA );
+    REQUIRE( result[1][1] == NODATA );
+    REQUIRE( result[2][1] == NODATA );
     // Other pixels should be valid
     REQUIRE( result[0][2] != NODATA );
+    REQUIRE( result[1][2] != NODATA );
+    REQUIRE( result[2][2] != NODATA );
 }
 
 TEST_CASE( "Brovey: null input returns empty", "[fusion]" )
