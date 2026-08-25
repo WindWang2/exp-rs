@@ -17,16 +17,26 @@ namespace sicnu::operators::rs {
  *   - NDWI  = (Green - NIR) / (Green + NIR)
  *   - NDBI  = (SWIR - NIR) / (SWIR + NIR)
  *   - MNDWI = (Green - SWIR) / (Green + SWIR)
+ *   - NBR   = (NIR - SWIR2) / (NIR + SWIR2)
+ *   - dNBR  = NBR(prefire) - NBR(postfire)
+ *   - BSI   = ((SWIR + Red) - (NIR + Blue)) / ((SWIR + Red) + (NIR + Blue))
+ *   - NDRE  = (NIR - RedEdge) / (NIR + RedEdge)
+ *   - CI    = (NIR / RedEdge) - 1.0
+ *   - NDSI  = (Green - SWIR) / (Green + SWIR)
+ *   - NDTI  = (SWIR1 - SWIR2) / (SWIR1 + SWIR2)
  *
  * Parameters:
  *   input    (string, required) Input raster path
  *   output   (string, required) Output raster path
- *   index    (string, required) One of: NDVI, EVI, SAVI, NDWI, NDBI, MNDWI
+ *   index    (string, required) One of: NDVI, EVI, SAVI, NDWI, NDBI, MNDWI, NBR, dNBR, BSI, NDRE, CI, NDSI, NDTI
  *   nir      (int, optional)    1-based NIR band number (default: 4)
  *   red      (int, optional)    1-based Red band number (default: 3)
  *   green    (int, optional)    1-based Green band number (default: 2)
  *   blue     (int, optional)    1-based Blue band number (default: 1)
- *   swir     (int, optional)    1-based SWIR band number (default: 5)
+ *   swir     (int, optional)    1-based SWIR/SWIR1 band number (default: 5)
+ *   swir2    (int, optional)    1-based SWIR2 band number (default: 6)
+ *   rededge  (int, optional)    1-based RedEdge band number (default: 5)
+ *   postfire (string, optional) Optional postfire raster path for dNBR
  *
  * Returns JSON object with:
  *   output  (string) Output raster path
@@ -40,7 +50,7 @@ public:
     std::string displayName() const override { return "Spectral Index"; }
     std::string group() const override { return "spectral"; }
     std::string description() const override {
-        return "Compute a spectral index (NDVI, EVI, SAVI, NDWI, NDBI, MNDWI) from raster bands.";
+        return "Compute a spectral index (NDVI, EVI, SAVI, NDWI, NDBI, MNDWI, NBR, dNBR, BSI, NDRE, CI, NDSI, NDTI) from raster bands.";
     }
 
     Json::Value schema() const override;

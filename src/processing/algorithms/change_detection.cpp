@@ -192,7 +192,12 @@ bool otsuThresholdFromHistogram(double minVal, double maxVal,
     double sumB = 0.0;
     double weightB = 0.0;
     double bestVariance = -1.0;
-    int bestBin = 0;
+    // Bins inside an empty gap between two clusters all yield the identical
+    // (bitwise-equal) between-class variance; averaging the tied maxima picks
+    // the middle of the gap instead of its first edge, which is the robust
+    // convention for well-separated bimodal distributions.
+    double bestBinSum = 0.0;
+    int bestBinCount = 0;
     for (int b = 0; b < bins; ++b) {
         weightB += hist[static_cast<size_t>(b)];
         if (weightB == 0.0)
@@ -206,10 +211,15 @@ bool otsuThresholdFromHistogram(double minVal, double maxVal,
         const double between = weightB * weightF * (meanB - meanF) * (meanB - meanF);
         if (between > bestVariance) {
             bestVariance = between;
-            bestBin = b;
+            bestBinSum = static_cast<double>(b);
+            bestBinCount = 1;
+        } else if (between == bestVariance) {
+            bestBinSum += static_cast<double>(b);
+            ++bestBinCount;
         }
     }
 
+    const double bestBin = (bestBinCount > 0) ? bestBinSum / bestBinCount : 0.0;
     *threshold = static_cast<float>(minVal + (bestBin + 0.5) * range / (bins - 1));
     return true;
 }
@@ -733,6 +743,522 @@ bool madChange(const float *const *beforeBands, const float *const *afterBands,
     }
 
     madTransformTile(beforeBip.data(), afterBip.data(), pixels, bandCount, state, out);
+    return true;
+}
+
+bool kittlerIllingworthThresholdFromHistogram(double minVal, double maxVal,
+                                              const std::vector<double> &hist,
+                                              size_t finiteCount, float *threshold)
+{
+    if (!threshold || hist.empty() || finiteCount == 0)
+        return false;
+    const double range = maxVal - minVal;
+    if (range <= 0.0) {
+        *threshold = static_cast<float>(minVal);
+        return true;
+    }
+    const int bins = static_cast<int>(hist.size());
+    if (bins < 2) {
+        *threshold = static_cast<float>(minVal);
+        return true;
+    }
+
+    const double total = static_cast<double>(finiteCount);
+    std::vector<double> p(bins);
+    for (int i = 0; i < bins; ++i) {
+        p[i] = hist[static_cast<size_t>(i)] / total;
+    }
+
+    // Cumulative weights, sums, squared sums
+    std::vector<double> P(bins, 0.0);
+    std::vector<double> S(bins, 0.0);
+    std::vector<double> SS(bins, 0.0);
+
+    P[0] = p[0];
+    S[0] = 0.0;
+    SS[0] = 0.0;
+    for (int i = 1; i < bins; ++i) {
+        P[i] = P[i - 1] + p[i];
+        S[i] = S[i - 1] + static_cast<double>(i) * p[i];
+        SS[i] = SS[i - 1] + static_cast<double>(i * i) * p[i];
+    }
+
+    const double totalP = P[bins - 1];
+    const double totalS = S[bins - 1];
+    const double totalSS = SS[bins - 1];
+
+    double bestCost = std::numeric_limits<double>::infinity();
+    int bestBin = 0;
+
+    for (int t = 0; t < bins - 1; ++t) {
+        const double p1 = P[t];
+        const double p2 = totalP - p1;
+        if (p1 < 1e-12 || p2 < 1e-12)
+            continue;
+
+        const double mu1 = S[t] / p1;
+        const double mu2 = (totalS - S[t]) / p2;
+
+        const double var1 = std::max((SS[t] / p1) - mu1 * mu1, 1e-6);
+        const double var2 = std::max(((totalSS - SS[t]) / p2) - mu2 * mu2, 1e-6);
+
+        // J(T) = 1 + 2*(P1*ln(sigma1) + P2*ln(sigma2)) - 2*(P1*ln(P1) + P2*ln(P2))
+        //      = 1 + P1*ln(var1) + P2*ln(var2) - 2*(P1*ln(P1) + P2*ln(P2))
+        const double cost = 1.0 + p1 * std::log(var1) + p2 * std::log(var2)
+                            - 2.0 * (p1 * std::log(p1) + p2 * std::log(p2));
+
+        if (cost < bestCost) {
+            bestCost = cost;
+            bestBin = t;
+        }
+    }
+
+    if (std::isinf(bestCost)) {
+        *threshold = static_cast<float>(minVal + 0.5 * range);
+    } else {
+        *threshold = static_cast<float>(minVal + (bestBin + 0.5) * range / (bins - 1));
+    }
+    return true;
+}
+
+bool kittlerIllingworthThreshold(const float *values, size_t count, float *threshold, int bins)
+{
+    if (!values || !threshold || count == 0)
+        return false;
+
+    double minVal = std::numeric_limits<double>::infinity();
+    double maxVal = -std::numeric_limits<double>::infinity();
+    size_t finite = 0;
+    for (size_t i = 0; i < count; ++i) {
+        const double v = values[i];
+        if (!std::isfinite(v))
+            continue;
+        minVal = std::min(minVal, v);
+        maxVal = std::max(maxVal, v);
+        ++finite;
+    }
+    if (finite == 0)
+        return false;
+    if (minVal == maxVal) {
+        *threshold = static_cast<float>(minVal);
+        return true;
+    }
+
+    bins = std::clamp(bins, 16, 1024);
+    const double range = maxVal - minVal;
+    std::vector<double> hist(static_cast<size_t>(bins), 0.0);
+    for (size_t i = 0; i < count; ++i) {
+        const double v = values[i];
+        if (!std::isfinite(v))
+            continue;
+        int bin = static_cast<int>((v - minVal) / range * (bins - 1));
+        bin = std::clamp(bin, 0, bins - 1);
+        hist[static_cast<size_t>(bin)] += 1.0;
+    }
+
+    return kittlerIllingworthThresholdFromHistogram(minVal, maxVal, hist, finite, threshold);
+}
+
+bool cvaMagnitudeAndAngle(const float *beforeBand1, const float *beforeBand2,
+                          const float *afterBand1, const float *afterBand2,
+                          size_t pixels, float *outMagnitude, float *outAngle,
+                          QString *errorMessage)
+{
+    if (!beforeBand1 || !beforeBand2 || !afterBand1 || !afterBand2 || !outMagnitude || !outAngle) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("cvaMagnitudeAndAngle: null pointer argument");
+        return false;
+    }
+    if (pixels == 0) return false;
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    for (size_t i = 0; i < pixels; ++i) {
+        const float b1 = beforeBand1[i];
+        const float b2 = beforeBand2[i];
+        const float a1 = afterBand1[i];
+        const float a2 = afterBand2[i];
+
+        if (!std::isfinite(b1) || !std::isfinite(b2) || !std::isfinite(a1) || !std::isfinite(a2)) {
+            outMagnitude[i] = nan;
+            outAngle[i] = nan;
+            continue;
+        }
+
+        const double d1 = static_cast<double>(a1) - static_cast<double>(b1);
+        const double d2 = static_cast<double>(a2) - static_cast<double>(b2);
+
+        const double mag = std::sqrt(d1 * d1 + d2 * d2);
+        const double angle = std::atan2(d2, d1);
+
+        outMagnitude[i] = static_cast<float>(mag);
+        outAngle[i] = static_cast<float>(angle);
+    }
+    return true;
+}
+
+bool cvaQuadrant(const float *beforeBand1, const float *beforeBand2,
+                 const float *afterBand1, const float *afterBand2,
+                 size_t pixels, uint8_t *outQuadrant,
+                 QString *errorMessage)
+{
+    if (!beforeBand1 || !beforeBand2 || !afterBand1 || !afterBand2 || !outQuadrant) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("cvaQuadrant: null pointer argument");
+        return false;
+    }
+    if (pixels == 0) return false;
+
+    for (size_t i = 0; i < pixels; ++i) {
+        const float b1 = beforeBand1[i];
+        const float b2 = beforeBand2[i];
+        const float a1 = afterBand1[i];
+        const float a2 = afterBand2[i];
+
+        if (!std::isfinite(b1) || !std::isfinite(b2) || !std::isfinite(a1) || !std::isfinite(a2)) {
+            outQuadrant[i] = 255; // NoData
+            continue;
+        }
+
+        const float d1 = a1 - b1;
+        const float d2 = a2 - b2;
+
+        if (d1 > 0.0f) {
+            outQuadrant[i] = (d2 > 0.0f) ? 1 : 4;
+        } else {
+            outQuadrant[i] = (d2 > 0.0f) ? 2 : 3;
+        }
+    }
+    return true;
+}
+
+bool samChangeAngle(const float *const *beforeBands, const float *const *afterBands,
+                    int bandCount, size_t pixels, float *outAngleRadians,
+                    QString *errorMessage)
+{
+    if (!beforeBands || !afterBands || !outAngleRadians || bandCount <= 0) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("samChangeAngle: null argument or invalid band count");
+        return false;
+    }
+    if (pixels == 0) return false;
+    for (int b = 0; b < bandCount; ++b) {
+        if (!beforeBands[b] || !afterBands[b]) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("samChangeAngle: null band buffer for band %1").arg(b + 1);
+            return false;
+        }
+    }
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    for (size_t p = 0; p < pixels; ++p) {
+        double dot = 0.0;
+        double normSqX = 0.0;
+        double normSqY = 0.0;
+        bool valid = true;
+
+        for (int b = 0; b < bandCount; ++b) {
+            const float bx = beforeBands[b][p];
+            const float by = afterBands[b][p];
+            if (!std::isfinite(bx) || !std::isfinite(by)) {
+                valid = false;
+                break;
+            }
+            const double x = static_cast<double>(bx);
+            const double y = static_cast<double>(by);
+            dot += x * y;
+            normSqX += x * x;
+            normSqY += y * y;
+        }
+
+        if (!valid) {
+            outAngleRadians[p] = nan;
+            continue;
+        }
+
+        const double denom = std::sqrt(normSqX * normSqY);
+        if (denom <= 1e-12) {
+            if (normSqX <= 1e-12 && normSqY <= 1e-12) {
+                outAngleRadians[p] = 0.0f;
+            } else {
+                outAngleRadians[p] = static_cast<float>(M_PI / 2.0);
+            }
+            continue;
+        }
+
+        const double cosAlpha = std::clamp(dot / denom, -1.0, 1.0);
+        outAngleRadians[p] = static_cast<float>(std::acos(cosAlpha));
+    }
+    return true;
+}
+
+bool logRatio(const float *before, const float *after, float *out,
+              size_t count, float epsilon)
+{
+    if (!before || !after || !out) {
+        SICNU_LOG_ERROR(SicnuLogTags::Algorithms, "logRatio: null pointer argument");
+        return false;
+    }
+    if (count == 0) return false;
+    if (epsilon <= 0.0f) epsilon = 1e-4f;
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    for (size_t i = 0; i < count; ++i) {
+        const float b = before[i];
+        const float a = after[i];
+        if (!std::isfinite(b) || !std::isfinite(a)) {
+            out[i] = nan;
+            continue;
+        }
+        const double valBefore = std::max(static_cast<double>(b), 0.0) + static_cast<double>(epsilon);
+        const double valAfter = std::max(static_cast<double>(a), 0.0) + static_cast<double>(epsilon);
+        out[i] = static_cast<float>(std::log(valAfter) - std::log(valBefore));
+    }
+    return true;
+}
+
+namespace {
+
+inline double chiSquareUpperCdf(double k, double x)
+{
+    if (x <= 0.0) return 1.0;
+    if (k <= 0.0) return 0.0;
+    const double a = k * 0.5;
+    const double z = x * 0.5;
+    if (k == 2.0) {
+        return std::exp(-z);
+    }
+    if (k == 1.0) {
+        return std::erfc(std::sqrt(z));
+    }
+    if (z < a + 1.0) {
+        double sum = 1.0 / a;
+        double term = 1.0 / a;
+        for (int n = 1; n < 100; ++n) {
+            term *= z / (a + n);
+            sum += term;
+            if (term < sum * 1e-12) break;
+        }
+        double lower = sum * std::exp(-z + a * std::log(z) - std::lgamma(a));
+        return std::clamp(1.0 - lower, 0.0, 1.0);
+    } else {
+        double b = z + 1.0 - a;
+        double c = 1.0 / 1e-30;
+        double d = 1.0 / b;
+        double h = d;
+        for (int n = 1; n < 100; ++n) {
+            double an = -static_cast<double>(n) * (static_cast<double>(n) - a);
+            b += 2.0;
+            d = an * d + b;
+            if (std::abs(d) < 1e-30) d = 1e-30;
+            c = b + an / c;
+            if (std::abs(c) < 1e-30) c = 1e-30;
+            d = 1.0 / d;
+            double delta = d * c;
+            h *= delta;
+            if (std::abs(delta - 1.0) < 1e-12) break;
+        }
+        double q = std::exp(-z + a * std::log(z) - std::lgamma(a)) * h;
+        return std::clamp(q, 0.0, 1.0);
+    }
+}
+
+} // namespace
+
+bool irMadChange(const float *const *beforeBands, const float *const *afterBands,
+                 int bandCount, size_t pixels, float *outChiSquare,
+                 int maxIterations, double convThreshold,
+                 QString *errorMessage)
+{
+    if (!beforeBands || !afterBands || !outChiSquare || bandCount <= 0 || pixels == 0) {
+        if (errorMessage) *errorMessage = QStringLiteral("Invalid input pointers or zero dimensions for IR-MAD.");
+        return false;
+    }
+    for (int b = 0; b < bandCount; ++b) {
+        if (!beforeBands[b] || !afterBands[b]) {
+            if (errorMessage) *errorMessage = QStringLiteral("Null band pointer for band %1").arg(b + 1);
+            return false;
+        }
+    }
+
+    const size_t B = static_cast<size_t>(bandCount);
+    std::vector<size_t> validIndices;
+    validIndices.reserve(pixels);
+
+    for (size_t p = 0; p < pixels; ++p) {
+        bool valid = true;
+        for (size_t b = 0; b < B; ++b) {
+            if (!std::isfinite(beforeBands[b][p]) || !std::isfinite(afterBands[b][p])) {
+                valid = false;
+                break;
+            }
+        }
+        if (valid)
+            validIndices.push_back(p);
+    }
+
+    const size_t N = validIndices.size();
+    if (N < B + 2) {
+        std::fill_n(outChiSquare, pixels, std::numeric_limits<float>::quiet_NaN());
+        if (errorMessage) *errorMessage = QStringLiteral("Insufficient valid pixels for IR-MAD calculation.");
+        return false;
+    }
+
+    std::vector<double> weights(N, 1.0);
+    std::vector<double> prevRho(B, 0.0);
+    cv::Mat A_final, B_final;
+    std::vector<double> varMad_final(B, 1.0);
+    std::vector<double> meanX_final(B, 0.0), meanY_final(B, 0.0);
+
+    maxIterations = std::clamp(maxIterations, 1, 100);
+    if (convThreshold <= 0.0) convThreshold = 1e-4;
+
+    for (int iter = 0; iter < maxIterations; ++iter) {
+        // Step 1: Weighted means
+        double sumW = 0.0;
+        double sumW2 = 0.0;
+        std::vector<double> sumX(B, 0.0), sumY(B, 0.0);
+
+        for (size_t i = 0; i < N; ++i) {
+            const double w = weights[i];
+            sumW += w;
+            sumW2 += w * w;
+            const size_t p = validIndices[i];
+            for (size_t b = 0; b < B; ++b) {
+                sumX[b] += w * static_cast<double>(beforeBands[b][p]);
+                sumY[b] += w * static_cast<double>(afterBands[b][p]);
+            }
+        }
+
+        if (sumW <= 1e-12) break;
+
+        const double invSumW = 1.0 / sumW;
+        std::vector<double> meanX(B), meanY(B);
+        for (size_t b = 0; b < B; ++b) {
+            meanX[b] = sumX[b] * invSumW;
+            meanY[b] = sumY[b] * invSumW;
+        }
+
+        // Step 2: Weighted covariance matrices
+        double denom = sumW - (sumW2 / sumW);
+        if (denom < 1.0) denom = 1.0;
+        const double covScale = 1.0 / denom;
+
+        cv::Mat SXX = cv::Mat::zeros(static_cast<int>(B), static_cast<int>(B), CV_64F);
+        cv::Mat SYY = cv::Mat::zeros(static_cast<int>(B), static_cast<int>(B), CV_64F);
+        cv::Mat SXY = cv::Mat::zeros(static_cast<int>(B), static_cast<int>(B), CV_64F);
+
+        std::vector<double> cx(B), cy(B);
+        for (size_t i = 0; i < N; ++i) {
+            const double w = weights[i];
+            const size_t p = validIndices[i];
+            for (size_t b = 0; b < B; ++b) {
+                cx[b] = static_cast<double>(beforeBands[b][p]) - meanX[b];
+                cy[b] = static_cast<double>(afterBands[b][p]) - meanY[b];
+            }
+            for (size_t r = 0; r < B; ++r) {
+                for (size_t c = 0; c < B; ++c) {
+                    SXX.at<double>(static_cast<int>(r), static_cast<int>(c)) += w * cx[r] * cx[c];
+                    SYY.at<double>(static_cast<int>(r), static_cast<int>(c)) += w * cy[r] * cy[c];
+                    SXY.at<double>(static_cast<int>(r), static_cast<int>(c)) += w * cx[r] * cy[c];
+                }
+            }
+        }
+
+        SXX *= covScale;
+        SYY *= covScale;
+        SXY *= covScale;
+
+        // Trace-scaled diagonal regularization
+        const double epsXX = 1e-6 * cv::trace(SXX)[0] / static_cast<double>(B);
+        const double epsYY = 1e-6 * cv::trace(SYY)[0] / static_cast<double>(B);
+        for (size_t b = 0; b < B; ++b) {
+            SXX.at<double>(static_cast<int>(b), static_cast<int>(b)) += std::max(epsXX, 1e-12);
+            SYY.at<double>(static_cast<int>(b), static_cast<int>(b)) += std::max(epsYY, 1e-12);
+        }
+
+        const cv::Mat SXXInvSqrt = madSqrtInv(SXX);
+        const cv::Mat SYYInvSqrt = madSqrtInv(SYY);
+
+        const cv::Mat H = SXXInvSqrt * SXY * SYYInvSqrt;
+        cv::Mat D, Uh, VhT;
+        cv::SVD::compute(H, D, Uh, VhT);
+
+        cv::Mat A = SXXInvSqrt * Uh;
+        cv::Mat Bmat = SYYInvSqrt * VhT.t();
+
+        // Ensure canonical variate pairs are positively correlated
+        for (size_t k = 0; k < B; ++k) {
+            const cv::Mat covK = A.col(static_cast<int>(k)).t() * SXY * Bmat.col(static_cast<int>(k));
+            if (covK.at<double>(0, 0) < 0.0)
+                Bmat.col(static_cast<int>(k)) *= -1.0;
+        }
+
+        std::vector<double> curRho(B);
+        std::vector<double> curVarMad(B);
+        for (size_t k = 0; k < B; ++k) {
+            curRho[k] = std::clamp(D.at<double>(static_cast<int>(k)), 0.0, 1.0);
+            curVarMad[k] = std::max(2.0 * (1.0 - curRho[k]), 1e-6);
+        }
+
+        A_final = A;
+        B_final = Bmat;
+        varMad_final = curVarMad;
+        meanX_final = meanX;
+        meanY_final = meanY;
+
+        // Check convergence
+        double maxDeltaRho = 0.0;
+        for (size_t k = 0; k < B; ++k) {
+            maxDeltaRho = std::max(maxDeltaRho, std::abs(curRho[k] - prevRho[k]));
+        }
+        prevRho = curRho;
+
+        if (iter > 0 && maxDeltaRho < convThreshold) {
+            break; // Converged!
+        }
+
+        if (iter + 1 < maxIterations) {
+            // Update Chi-square weights for next iteration
+            for (size_t i = 0; i < N; ++i) {
+                const size_t p = validIndices[i];
+                double chiSquare = 0.0;
+                for (size_t k = 0; k < B; ++k) {
+                    double uk = 0.0, vk = 0.0;
+                    for (size_t a = 0; a < B; ++a) {
+                        uk += A.at<double>(static_cast<int>(a), static_cast<int>(k))
+                              * (static_cast<double>(beforeBands[a][p]) - meanX[a]);
+                        vk += Bmat.at<double>(static_cast<int>(a), static_cast<int>(k))
+                              * (static_cast<double>(afterBands[a][p]) - meanY[a]);
+                    }
+                    const double m = uk - vk;
+                    chiSquare += (m * m) / curVarMad[k];
+                }
+                weights[i] = chiSquareUpperCdf(static_cast<double>(B), chiSquare);
+            }
+        }
+    }
+
+    // Final transformation
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    std::fill_n(outChiSquare, pixels, nan);
+
+    for (size_t i = 0; i < N; ++i) {
+        const size_t p = validIndices[i];
+        double chiSquare = 0.0;
+        for (size_t k = 0; k < B; ++k) {
+            double uk = 0.0, vk = 0.0;
+            for (size_t a = 0; a < B; ++a) {
+                uk += A_final.at<double>(static_cast<int>(a), static_cast<int>(k))
+                      * (static_cast<double>(beforeBands[a][p]) - meanX_final[a]);
+                vk += B_final.at<double>(static_cast<int>(a), static_cast<int>(k))
+                      * (static_cast<double>(afterBands[a][p]) - meanY_final[a]);
+            }
+            const double m = uk - vk;
+            chiSquare += (m * m) / varMad_final[k];
+        }
+        outChiSquare[p] = static_cast<float>(chiSquare);
+    }
+
     return true;
 }
 

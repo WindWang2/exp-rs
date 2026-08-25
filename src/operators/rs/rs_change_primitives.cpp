@@ -8,6 +8,8 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
+#include "processing/algorithms/change_detection.h"
+#include "processing/algorithms/math_utils.h"
 #include "processing/algorithms/satellite_products.h"
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -361,6 +363,533 @@ Json::Value RsChangeMadOperator::estimateExecution( const Json::Value &params ) 
 Json::Value RsChangeMadOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
     return runPrimitive( ChangeMetric::Mad, "mad", params, context );
+}
+
+// --- rs:change_cva_angle ----------------------------------------------------
+
+Json::Value RsChangeCvaAngleOperator::schema() const
+{
+    using namespace schema;
+    Json::Value props( Json::objectValue );
+    props["before"] = makeRasterParam( "before", "Before-date 2-band raster" );
+    props["after"] = makeRasterParam( "after", "After-date 2-band raster" );
+    props["output"] = makeOutputParam( "output", "Output change angle or quadrant raster", "tif" );
+    props["beforeBand1"] = makeIntegerParam( "beforeBand1", "1-based Band 1 on before image", 1 );
+    props["beforeBand2"] = makeIntegerParam( "beforeBand2", "1-based Band 2 on before image", 2 );
+    props["afterBand1"] = makeIntegerParam( "afterBand1", "1-based Band 1 on after image", 1 );
+    props["afterBand2"] = makeIntegerParam( "afterBand2", "1-based Band 2 on after image", 2 );
+    props["mode"] = makeEnumParam( "mode", "Output mode: 'angle' (radians [-pi, pi]) or 'quadrant' (1..4)",
+                                   { "angle", "quadrant" }, "angle" );
+
+    Json::Value outputs( Json::objectValue );
+    outputs["output"] = makeRasterParam( "output", "Output raster path" );
+    outputs["method"] = makeStringParam( "method", "Applied method", "cva_angle" );
+    outputs["mode"] = makeStringParam( "mode", "Angle or quadrant mode", "angle" );
+    outputs["width"] = makeIntegerParam( "width", "Raster width", 0 );
+    outputs["height"] = makeIntegerParam( "height", "Raster height", 0 );
+
+    Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
+    root["required"] = makeRequired( { "before", "after", "output" } );
+    return root;
+}
+
+Json::Value RsChangeCvaAngleOperator::metadata() const
+{
+    Json::Value meta( Json::objectValue );
+    meta["group"] = "temporal";
+    meta["displayName"] = displayName();
+    meta["description"] = description();
+    meta["tags"].append( "change-detection" );
+    meta["tags"].append( "cva" );
+    meta["tags"].append( "directional" );
+    meta["purpose"] = "Compute Change Vector Analysis directional angle (radians) or 4-quadrant sector classification.";
+    meta["prerequisites"].append( "Before and after rasters must be co-registered with identical dimensions." );
+    meta["facadeOf"] = "change_detection";
+    return meta;
+}
+
+Json::Value RsChangeCvaAngleOperator::executionEstimate() const
+{
+    Json::Value est( Json::objectValue );
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 16777216;
+    return est;
+}
+
+Json::Value RsChangeCvaAngleOperator::estimateExecution( const Json::Value &params ) const
+{
+    return primitiveEstimate( params );
+}
+
+Json::Value RsChangeCvaAngleOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+    if ( !params.isObject() )
+        throw RSOperatorError( ErrorCode::InvalidParameter, "Parameters must be a JSON object" );
+
+    const std::string beforePath = requireString( params, "before" );
+    const std::string afterPath = requireString( params, "after" );
+    const std::string outputPath = requireString( params, "output" );
+    const std::string mode = params.isMember( "mode" )
+                                 ? getEnum( params, "mode", { "angle", "quadrant" }, "angle" )
+                                 : "angle";
+
+    if ( !fileExists( beforePath ) )
+        throw RSOperatorError( ErrorCode::FileNotFound, "Before raster not found: " + beforePath );
+    if ( !fileExists( afterPath ) )
+        throw RSOperatorError( ErrorCode::FileNotFound, "After raster not found: " + afterPath );
+
+    ensureGdalInit();
+    GdalDatasetWrapper beforeDs, afterDs;
+    if ( !beforeDs.open( QString::fromStdString( beforePath ) ) )
+        throw RSOperatorError( ErrorCode::GdalError, "Failed to open before raster: " + beforePath );
+    if ( !afterDs.open( QString::fromStdString( afterPath ) ) )
+        throw RSOperatorError( ErrorCode::GdalError, "Failed to open after raster: " + afterPath );
+
+    const int width = beforeDs.width();
+    const int height = beforeDs.height();
+    if ( afterDs.width() != width || afterDs.height() != height )
+        throw RSOperatorError( ErrorCode::InvalidInputData, "Rasters must have identical dimensions" );
+
+    const int b1 = getInt( params, "beforeBand1", 1 );
+    const int b2 = getInt( params, "beforeBand2", 2 );
+    const int a1 = getInt( params, "afterBand1", 1 );
+    const int a2 = getInt( params, "afterBand2", 2 );
+
+    if ( b1 < 1 || b1 > beforeDs.bandCount() || b2 < 1 || b2 > beforeDs.bandCount() )
+        throw RSOperatorError( ErrorCode::InvalidParameter, "Before band numbers out of range" );
+    if ( a1 < 1 || a1 > afterDs.bandCount() || a2 < 1 || a2 > afterDs.bandCount() )
+        throw RSOperatorError( ErrorCode::InvalidParameter, "After band numbers out of range" );
+
+    const size_t pixels = static_cast<size_t>( width ) * height;
+    std::vector<float> beforeBuf1( pixels ), beforeBuf2( pixels );
+    std::vector<float> afterBuf1( pixels ), afterBuf2( pixels );
+
+    if ( !beforeDs.readBandData( b1, beforeBuf1.data(), width, height ) ||
+         !beforeDs.readBandData( b2, beforeBuf2.data(), width, height ) ||
+         !afterDs.readBandData( a1, afterBuf1.data(), width, height ) ||
+         !afterDs.readBandData( a2, afterBuf2.data(), width, height ) )
+    {
+        throw RSOperatorError( ErrorCode::GdalError, "Failed to read raster bands" );
+    }
+
+    std::vector<float> out( pixels );
+    QString err;
+    if ( mode == "quadrant" )
+    {
+        std::vector<uint8_t> quadBuf( pixels );
+        if ( !ChangeDetection::cvaQuadrant( beforeBuf1.data(), beforeBuf2.data(),
+                                            afterBuf1.data(), afterBuf2.data(),
+                                            pixels, quadBuf.data(), &err ) )
+        {
+            throw RSOperatorError( ErrorCode::ComputationError, "CVA quadrant calculation failed: " + err.toStdString() );
+        }
+        for ( size_t i = 0; i < pixels; ++i )
+            out[i] = static_cast<float>( quadBuf[i] );
+    }
+    else
+    {
+        std::vector<float> magBuf( pixels );
+        if ( !ChangeDetection::cvaMagnitudeAndAngle( beforeBuf1.data(), beforeBuf2.data(),
+                                                    afterBuf1.data(), afterBuf2.data(),
+                                                    pixels, magBuf.data(), out.data(), &err ) )
+        {
+            throw RSOperatorError( ErrorCode::ComputationError, "CVA angle calculation failed: " + err.toStdString() );
+        }
+    }
+
+    std::vector<std::vector<float>> outBands = { std::move( out ) };
+    QString writeErr;
+    const double nodataVal = ( mode == "quadrant" ) ? 255.0 : std::numeric_limits<double>::quiet_NaN();
+    if ( !writeGdalOutput( QString::fromStdString( outputPath ), width, height, outBands,
+                          beforeDs.geoTransform(), beforeDs.projection(), &writeErr, nodataVal ) )
+    {
+        throw RSOperatorError( ErrorCode::FileNotWritable, "Failed to write output raster: " + writeErr.toStdString() );
+    }
+
+    Json::Value result( Json::objectValue );
+    result["output"] = outputPath;
+    result["method"] = "cva_angle";
+    result["mode"] = mode;
+    result["width"] = width;
+    result["height"] = height;
+    return result;
+}
+
+// --- rs:change_sam ----------------------------------------------------------
+
+Json::Value RsChangeSamOperator::schema() const
+{
+    using namespace schema;
+    Json::Value props( Json::objectValue );
+    props["before"] = makeRasterParam( "before", "Before-date multi-band raster" );
+    props["after"] = makeRasterParam( "after", "After-date multi-band raster" );
+    props["output"] = makeOutputParam( "output", "Output spectral angle change raster (radians)", "tif" );
+
+    Json::Value outputs( Json::objectValue );
+    outputs["output"] = makeRasterParam( "output", "Output raster path" );
+    outputs["method"] = makeStringParam( "method", "Applied method", "sam" );
+    outputs["mean"] = makeNumberParam( "mean", "Mean spectral angle (rad)", 0.0 );
+    outputs["stddev"] = makeNumberParam( "stddev", "Stddev of spectral angle", 0.0 );
+
+    Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
+    root["required"] = makeRequired( { "before", "after", "output" } );
+    return root;
+}
+
+Json::Value RsChangeSamOperator::metadata() const
+{
+    Json::Value meta( Json::objectValue );
+    meta["group"] = "temporal";
+    meta["displayName"] = displayName();
+    meta["description"] = description();
+    meta["tags"].append( "change-detection" );
+    meta["tags"].append( "sam" );
+    meta["tags"].append( "spectral-angle" );
+    meta["purpose"] = "Spectral Angle Mapper (SAM) change detection measuring spectral shape divergence.";
+    meta["prerequisites"].append( "Before and after rasters must have equal band count and dimensions." );
+    meta["facadeOf"] = "change_detection";
+    return meta;
+}
+
+Json::Value RsChangeSamOperator::executionEstimate() const
+{
+    Json::Value est( Json::objectValue );
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 33554432;
+    return est;
+}
+
+Json::Value RsChangeSamOperator::estimateExecution( const Json::Value &params ) const
+{
+    return primitiveEstimate( params );
+}
+
+Json::Value RsChangeSamOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+    if ( !params.isObject() )
+        throw RSOperatorError( ErrorCode::InvalidParameter, "Parameters must be a JSON object" );
+
+    const std::string beforePath = requireString( params, "before" );
+    const std::string afterPath = requireString( params, "after" );
+    const std::string outputPath = requireString( params, "output" );
+
+    if ( !fileExists( beforePath ) )
+        throw RSOperatorError( ErrorCode::FileNotFound, "Before raster not found: " + beforePath );
+    if ( !fileExists( afterPath ) )
+        throw RSOperatorError( ErrorCode::FileNotFound, "After raster not found: " + afterPath );
+
+    ensureGdalInit();
+    GdalDatasetWrapper beforeDs, afterDs;
+    if ( !beforeDs.open( QString::fromStdString( beforePath ) ) )
+        throw RSOperatorError( ErrorCode::GdalError, "Failed to open before raster: " + beforePath );
+    if ( !afterDs.open( QString::fromStdString( afterPath ) ) )
+        throw RSOperatorError( ErrorCode::GdalError, "Failed to open after raster: " + afterPath );
+
+    const int width = beforeDs.width();
+    const int height = beforeDs.height();
+    const int bandCount = beforeDs.bandCount();
+    if ( afterDs.width() != width || afterDs.height() != height )
+        throw RSOperatorError( ErrorCode::InvalidInputData, "Rasters must have identical dimensions" );
+    if ( afterDs.bandCount() != bandCount )
+        throw RSOperatorError( ErrorCode::InvalidInputData, "SAM requires identical band counts on before and after rasters" );
+
+    const size_t pixels = static_cast<size_t>( width ) * height;
+    std::vector<std::vector<float>> beforeBands( bandCount, std::vector<float>( pixels ) );
+    std::vector<std::vector<float>> afterBands( bandCount, std::vector<float>( pixels ) );
+    std::vector<const float*> bPtrs( bandCount ), aPtrs( bandCount );
+
+    for ( int b = 0; b < bandCount; ++b )
+    {
+        if ( !beforeDs.readBandData( b + 1, beforeBands[b].data(), width, height ) ||
+             !afterDs.readBandData( b + 1, afterBands[b].data(), width, height ) )
+        {
+            throw RSOperatorError( ErrorCode::GdalError, "Failed to read band " + std::to_string( b + 1 ) );
+        }
+        bPtrs[b] = beforeBands[b].data();
+        aPtrs[b] = afterBands[b].data();
+    }
+
+    std::vector<float> out( pixels );
+    QString err;
+    if ( !ChangeDetection::samChangeAngle( bPtrs.data(), aPtrs.data(), bandCount, pixels, out.data(), &err ) )
+    {
+        throw RSOperatorError( ErrorCode::ComputationError, "SAM computation failed: " + err.toStdString() );
+    }
+
+    MathUtils::Stats stats = MathUtils::computeStats( out.data(), pixels );
+
+    std::vector<std::vector<float>> outBands = { std::move( out ) };
+    QString writeErr;
+    if ( !writeGdalOutput( QString::fromStdString( outputPath ), width, height, outBands,
+                          beforeDs.geoTransform(), beforeDs.projection(), &writeErr,
+                          std::numeric_limits<double>::quiet_NaN() ) )
+    {
+        throw RSOperatorError( ErrorCode::FileNotWritable, "Failed to write output raster: " + writeErr.toStdString() );
+    }
+
+    Json::Value result( Json::objectValue );
+    result["output"] = outputPath;
+    result["method"] = "sam";
+    result["width"] = width;
+    result["height"] = height;
+    result["mean"] = stats.mean;
+    result["stddev"] = stats.stddev;
+    return result;
+}
+
+// --- rs:change_log_ratio ----------------------------------------------------
+
+Json::Value RsChangeLogRatioOperator::schema() const
+{
+    using namespace schema;
+    Json::Value props( Json::objectValue );
+    props["before"] = makeRasterParam( "before", "Before-date raster" );
+    props["after"] = makeRasterParam( "after", "After-date raster" );
+    props["output"] = makeOutputParam( "output", "Output log ratio change raster", "tif" );
+    props["band"] = makeIntegerParam( "band", "1-based band for both images", 1 );
+    props["beforeBand"] = makeIntegerParam( "beforeBand", "1-based band on before image", 0 );
+    props["afterBand"] = makeIntegerParam( "afterBand", "1-based band on after image", 0 );
+    props["epsilon"] = makeNumberParam( "epsilon", "Small positive constant to prevent ln(0)", 1e-4 );
+
+    Json::Value outputs( Json::objectValue );
+    outputs["output"] = makeRasterParam( "output", "Output raster path" );
+    outputs["method"] = makeStringParam( "method", "Applied method", "log_ratio" );
+    outputs["mean"] = makeNumberParam( "mean", "Mean of log ratio change", 0.0 );
+    outputs["stddev"] = makeNumberParam( "stddev", "Stddev of log ratio change", 0.0 );
+
+    Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
+    root["required"] = makeRequired( { "before", "after", "output" } );
+    return root;
+}
+
+Json::Value RsChangeLogRatioOperator::metadata() const
+{
+    Json::Value meta( Json::objectValue );
+    meta["group"] = "temporal";
+    meta["displayName"] = displayName();
+    meta["description"] = description();
+    meta["tags"].append( "change-detection" );
+    meta["tags"].append( "log-ratio" );
+    meta["tags"].append( "sar" );
+    meta["purpose"] = "Log-Ratio change detection ln(after + eps) - ln(before + eps).";
+    meta["prerequisites"].append( "Before and after rasters must be co-registered and same size." );
+    meta["facadeOf"] = "change_detection";
+    return meta;
+}
+
+Json::Value RsChangeLogRatioOperator::executionEstimate() const
+{
+    Json::Value est( Json::objectValue );
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 16777216;
+    return est;
+}
+
+Json::Value RsChangeLogRatioOperator::estimateExecution( const Json::Value &params ) const
+{
+    return primitiveEstimate( params );
+}
+
+Json::Value RsChangeLogRatioOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+    if ( !params.isObject() )
+        throw RSOperatorError( ErrorCode::InvalidParameter, "Parameters must be a JSON object" );
+
+    const std::string beforePath = requireString( params, "before" );
+    const std::string afterPath = requireString( params, "after" );
+    const std::string outputPath = requireString( params, "output" );
+    const float epsilon = static_cast<float>( getDouble( params, "epsilon", 1e-4 ) );
+
+    if ( !fileExists( beforePath ) )
+        throw RSOperatorError( ErrorCode::FileNotFound, "Before raster not found: " + beforePath );
+    if ( !fileExists( afterPath ) )
+        throw RSOperatorError( ErrorCode::FileNotFound, "After raster not found: " + afterPath );
+
+    ensureGdalInit();
+    GdalDatasetWrapper beforeDs, afterDs;
+    if ( !beforeDs.open( QString::fromStdString( beforePath ) ) )
+        throw RSOperatorError( ErrorCode::GdalError, "Failed to open before raster: " + beforePath );
+    if ( !afterDs.open( QString::fromStdString( afterPath ) ) )
+        throw RSOperatorError( ErrorCode::GdalError, "Failed to open after raster: " + afterPath );
+
+    const int width = beforeDs.width();
+    const int height = beforeDs.height();
+    if ( afterDs.width() != width || afterDs.height() != height )
+        throw RSOperatorError( ErrorCode::InvalidInputData, "Rasters must have identical dimensions" );
+
+    const int defaultBand = getInt( params, "band", 1 );
+    const int bBand = getInt( params, "beforeBand", defaultBand );
+    const int aBand = getInt( params, "afterBand", defaultBand );
+
+    if ( bBand < 1 || bBand > beforeDs.bandCount() )
+        throw RSOperatorError( ErrorCode::InvalidParameter, "Before band out of range" );
+    if ( aBand < 1 || aBand > afterDs.bandCount() )
+        throw RSOperatorError( ErrorCode::InvalidParameter, "After band out of range" );
+
+    const size_t pixels = static_cast<size_t>( width ) * height;
+    std::vector<float> beforeBuf( pixels ), afterBuf( pixels ), out( pixels );
+
+    if ( !beforeDs.readBandData( bBand, beforeBuf.data(), width, height ) ||
+         !afterDs.readBandData( aBand, afterBuf.data(), width, height ) )
+    {
+        throw RSOperatorError( ErrorCode::GdalError, "Failed to read raster bands" );
+    }
+
+    if ( !ChangeDetection::logRatio( beforeBuf.data(), afterBuf.data(), out.data(), pixels, epsilon ) )
+    {
+        throw RSOperatorError( ErrorCode::ComputationError, "Log ratio calculation failed" );
+    }
+
+    MathUtils::Stats stats = MathUtils::computeStats( out.data(), pixels );
+
+    std::vector<std::vector<float>> outBands = { std::move( out ) };
+    QString writeErr;
+    if ( !writeGdalOutput( QString::fromStdString( outputPath ), width, height, outBands,
+                          beforeDs.geoTransform(), beforeDs.projection(), &writeErr,
+                          std::numeric_limits<double>::quiet_NaN() ) )
+    {
+        throw RSOperatorError( ErrorCode::FileNotWritable, "Failed to write output raster: " + writeErr.toStdString() );
+    }
+
+    Json::Value result( Json::objectValue );
+    result["output"] = outputPath;
+    result["method"] = "log_ratio";
+    result["width"] = width;
+    result["height"] = height;
+    result["mean"] = stats.mean;
+    result["stddev"] = stats.stddev;
+    return result;
+}
+
+// --- rs:change_irmad --------------------------------------------------------
+
+Json::Value RsChangeIrMadOperator::schema() const
+{
+    using namespace schema;
+    Json::Value props( Json::objectValue );
+    props["before"] = makeRasterParam( "before", "Before-date multi-band raster" );
+    props["after"] = makeRasterParam( "after", "After-date multi-band raster" );
+    props["output"] = makeOutputParam( "output", "Output IR-MAD Chi-Square change raster", "tif" );
+    props["maxIterations"] = makeIntegerParam( "maxIterations", "Maximum IR-MAD reweighting iterations", 20 );
+    props["convThreshold"] = makeNumberParam( "convThreshold", "Convergence threshold on max delta canonical correlation", 1e-4 );
+
+    Json::Value outputs( Json::objectValue );
+    outputs["output"] = makeRasterParam( "output", "Output raster path" );
+    outputs["method"] = makeStringParam( "method", "Applied method", "irmad" );
+    outputs["mean"] = makeNumberParam( "mean", "Mean of Chi-Square change distance", 0.0 );
+    outputs["stddev"] = makeNumberParam( "stddev", "Stddev of Chi-Square change distance", 0.0 );
+
+    Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
+    root["required"] = makeRequired( { "before", "after", "output" } );
+    return root;
+}
+
+Json::Value RsChangeIrMadOperator::metadata() const
+{
+    Json::Value meta( Json::objectValue );
+    meta["group"] = "temporal";
+    meta["displayName"] = displayName();
+    meta["description"] = description();
+    meta["tags"].append( "change-detection" );
+    meta["tags"].append( "irmad" );
+    meta["tags"].append( "canonical-correlation" );
+    meta["purpose"] = "Iteratively Reweighted Multivariate Alteration Detection (IR-MAD) with iterative Chi-Square sample weights.";
+    meta["prerequisites"].append( "Before and after rasters must have equal band count and dimensions." );
+    meta["facadeOf"] = "change_detection";
+    return meta;
+}
+
+Json::Value RsChangeIrMadOperator::executionEstimate() const
+{
+    Json::Value est( Json::objectValue );
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = 33554432;
+    return est;
+}
+
+Json::Value RsChangeIrMadOperator::estimateExecution( const Json::Value &params ) const
+{
+    return primitiveEstimate( params );
+}
+
+Json::Value RsChangeIrMadOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+    if ( !params.isObject() )
+        throw RSOperatorError( ErrorCode::InvalidParameter, "Parameters must be a JSON object" );
+
+    const std::string beforePath = requireString( params, "before" );
+    const std::string afterPath = requireString( params, "after" );
+    const std::string outputPath = requireString( params, "output" );
+    const int maxIterations = getInt( params, "maxIterations", 20 );
+    const double convThreshold = getDouble( params, "convThreshold", 1e-4 );
+
+    if ( !fileExists( beforePath ) )
+        throw RSOperatorError( ErrorCode::FileNotFound, "Before raster not found: " + beforePath );
+    if ( !fileExists( afterPath ) )
+        throw RSOperatorError( ErrorCode::FileNotFound, "After raster not found: " + afterPath );
+
+    ensureGdalInit();
+    GdalDatasetWrapper beforeDs, afterDs;
+    if ( !beforeDs.open( QString::fromStdString( beforePath ) ) )
+        throw RSOperatorError( ErrorCode::GdalError, "Failed to open before raster: " + beforePath );
+    if ( !afterDs.open( QString::fromStdString( afterPath ) ) )
+        throw RSOperatorError( ErrorCode::GdalError, "Failed to open after raster: " + afterPath );
+
+    const int width = beforeDs.width();
+    const int height = beforeDs.height();
+    const int bandCount = beforeDs.bandCount();
+    if ( afterDs.width() != width || afterDs.height() != height )
+        throw RSOperatorError( ErrorCode::InvalidInputData, "Rasters must have identical dimensions" );
+    if ( afterDs.bandCount() != bandCount )
+        throw RSOperatorError( ErrorCode::InvalidInputData, "IR-MAD requires identical band counts on before and after rasters" );
+
+    const size_t pixels = static_cast<size_t>( width ) * height;
+    std::vector<std::vector<float>> beforeBands( bandCount, std::vector<float>( pixels ) );
+    std::vector<std::vector<float>> afterBands( bandCount, std::vector<float>( pixels ) );
+    std::vector<const float*> bPtrs( bandCount ), aPtrs( bandCount );
+
+    for ( int b = 0; b < bandCount; ++b )
+    {
+        if ( !beforeDs.readBandData( b + 1, beforeBands[b].data(), width, height ) ||
+             !afterDs.readBandData( b + 1, afterBands[b].data(), width, height ) )
+        {
+            throw RSOperatorError( ErrorCode::GdalError, "Failed to read band " + std::to_string( b + 1 ) );
+        }
+        bPtrs[b] = beforeBands[b].data();
+        aPtrs[b] = afterBands[b].data();
+    }
+
+    std::vector<float> out( pixels );
+    QString err;
+    if ( !ChangeDetection::irMadChange( bPtrs.data(), aPtrs.data(), bandCount, pixels, out.data(),
+                                        maxIterations, convThreshold, &err ) )
+    {
+        throw RSOperatorError( ErrorCode::ComputationError, "IR-MAD computation failed: " + err.toStdString() );
+    }
+
+    MathUtils::Stats stats = MathUtils::computeStats( out.data(), pixels );
+
+    std::vector<std::vector<float>> outBands = { std::move( out ) };
+    QString writeErr;
+    if ( !writeGdalOutput( QString::fromStdString( outputPath ), width, height, outBands,
+                          beforeDs.geoTransform(), beforeDs.projection(), &writeErr,
+                          std::numeric_limits<double>::quiet_NaN() ) )
+    {
+        throw RSOperatorError( ErrorCode::FileNotWritable, "Failed to write output raster: " + writeErr.toStdString() );
+    }
+
+    Json::Value result( Json::objectValue );
+    result["output"] = outputPath;
+    result["method"] = "irmad";
+    result["width"] = width;
+    result["height"] = height;
+    result["mean"] = stats.mean;
+    result["stddev"] = stats.stddev;
+    return result;
 }
 
 } // namespace sicnu::operators::rs

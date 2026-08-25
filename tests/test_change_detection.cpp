@@ -4,6 +4,9 @@
 
 #include "processing/algorithms/change_detection.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "operators/rs/rs_spectral_index_operator.h"
+#include "operators/rs/rs_change_primitives.h"
+#include "operators/framework/rs_operator_context.h"
 
 #include <QTemporaryDir>
 #include <QString>
@@ -544,4 +547,327 @@ TEST_CASE("MAD streaming tiles match the legacy madChange result", "[processing]
         }
     }
     CHECK(nanCount > 0); // the NaN sprinkling was exercised
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 Change Detection & Extended Indices Tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ChangeDetection cvaMagnitudeAndAngle computes 4 quadrants correctly", "[processing][change_detection][cva]") {
+    // 4 pixels corresponding to 4 quadrants:
+    // Pixel 0: dx1 = 3, dx2 = 4 (Q1) -> mag = 5, angle = atan2(4, 3) > 0
+    // Pixel 1: dx1 = -3, dx2 = 4 (Q2) -> mag = 5, angle = atan2(4, -3) > pi/2
+    // Pixel 2: dx1 = -3, dx2 = -4 (Q3) -> mag = 5, angle = atan2(-4, -3) < -pi/2
+    // Pixel 3: dx1 = 3, dx2 = -4 (Q4) -> mag = 5, angle = atan2(-4, 3) < 0
+    const float b1[] = {10.0f, 10.0f, 10.0f, 10.0f};
+    const float b2[] = {20.0f, 20.0f, 20.0f, 20.0f};
+    const float a1[] = {13.0f,  7.0f,  7.0f, 13.0f};
+    const float a2[] = {24.0f, 24.0f, 16.0f, 16.0f};
+
+    float mag[4] = {};
+    float angle[4] = {};
+    uint8_t quad[4] = {};
+    QString err;
+
+    REQUIRE(cvaMagnitudeAndAngle(b1, b2, a1, a2, 4, mag, angle, &err));
+    REQUIRE(cvaQuadrant(b1, b2, a1, a2, 4, quad, &err));
+
+    for (int i = 0; i < 4; ++i) {
+        CHECK(mag[i] == Approx(5.0f));
+    }
+
+    CHECK(angle[0] == Approx(std::atan2(4.0, 3.0)));
+    CHECK(angle[1] == Approx(std::atan2(4.0, -3.0)));
+    CHECK(angle[2] == Approx(std::atan2(-4.0, -3.0)));
+    CHECK(angle[3] == Approx(std::atan2(-4.0, 3.0)));
+
+    CHECK(quad[0] == 1);
+    CHECK(quad[1] == 2);
+    CHECK(quad[2] == 3);
+    CHECK(quad[3] == 4);
+
+    SECTION("NaN handling") {
+        const float b1_nan[] = {std::numeric_limits<float>::quiet_NaN(), 10.0f};
+        const float b2_nan[] = {20.0f, 20.0f};
+        const float a1_nan[] = {13.0f, 7.0f};
+        const float a2_nan[] = {24.0f, std::numeric_limits<float>::quiet_NaN()};
+        float m[2] = {}, ang[2] = {};
+        uint8_t q[2] = {};
+        REQUIRE(cvaMagnitudeAndAngle(b1_nan, b2_nan, a1_nan, a2_nan, 2, m, ang, &err));
+        REQUIRE(cvaQuadrant(b1_nan, b2_nan, a1_nan, a2_nan, 2, q, &err));
+        CHECK(std::isnan(m[0]));
+        CHECK(std::isnan(ang[0]));
+        CHECK(q[0] == 255);
+        CHECK(std::isnan(m[1]));
+        CHECK(std::isnan(ang[1]));
+        CHECK(q[1] == 255);
+    }
+}
+
+TEST_CASE("ChangeDetection samChangeAngle computes spectral angle accurately", "[processing][change_detection][sam]") {
+    SECTION("Scale invariance (pure illumination change)") {
+        const float b0[] = {10.0f, 20.0f, 30.0f};
+        const float b1[] = {40.0f, 50.0f, 60.0f};
+        const float a0[] = {20.0f, 40.0f, 60.0f}; // 2x b0
+        const float a1[] = {80.0f, 100.0f, 120.0f}; // 2x b1
+        const float* before[] = {b0, b1};
+        const float* after[] = {a0, a1};
+        float angles[3] = {};
+        QString err;
+        REQUIRE(samChangeAngle(before, after, 2, 3, angles, &err));
+        for (int i = 0; i < 3; ++i) {
+            CHECK(angles[i] == Approx(0.0f).margin(1e-5f));
+        }
+    }
+
+    SECTION("Known geometric angles") {
+        // Pixel 0: orthogonal [1, 0] vs [0, 1] -> pi/2
+        // Pixel 1: 45 deg [1, 0] vs [1, 1] -> pi/4
+        // Pixel 2: identical [5, 5] vs [5, 5] -> 0
+        const float b0[] = {1.0f, 1.0f, 5.0f};
+        const float b1[] = {0.0f, 0.0f, 5.0f};
+        const float a0[] = {0.0f, 1.0f, 5.0f};
+        const float a1[] = {1.0f, 1.0f, 5.0f};
+        const float* before[] = {b0, b1};
+        const float* after[] = {a0, a1};
+        float angles[3] = {};
+        QString err;
+        REQUIRE(samChangeAngle(before, after, 2, 3, angles, &err));
+        CHECK(angles[0] == Approx(static_cast<float>(M_PI / 2.0)).margin(1e-4f));
+        CHECK(angles[1] == Approx(static_cast<float>(M_PI / 4.0)).margin(1e-4f));
+        CHECK(angles[2] == Approx(0.0f).margin(1e-5f));
+    }
+
+    SECTION("NaN in any band gives NaN") {
+        const float b0[] = {std::numeric_limits<float>::quiet_NaN()};
+        const float b1[] = {1.0f};
+        const float a0[] = {1.0f};
+        const float a1[] = {1.0f};
+        const float* before[] = {b0, b1};
+        const float* after[] = {a0, a1};
+        float angles[1] = {};
+        QString err;
+        REQUIRE(samChangeAngle(before, after, 2, 1, angles, &err));
+        CHECK(std::isnan(angles[0]));
+    }
+}
+
+TEST_CASE("ChangeDetection logRatio computes symmetric SAR change", "[processing][change_detection][log_ratio]") {
+    const float before[] = {10.0f, 100.0f, 50.0f, std::numeric_limits<float>::quiet_NaN()};
+    const float after[]  = {100.0f, 10.0f, 50.0f, 50.0f};
+    float out[4] = {};
+    REQUIRE(logRatio(before, after, out, 4, 1e-4f));
+    CHECK(out[0] == Approx(std::log(100.0001) - std::log(10.0001)).margin(1e-3f));
+    CHECK(out[1] == Approx(std::log(10.0001) - std::log(100.0001)).margin(1e-3f));
+    CHECK(out[2] == Approx(0.0f).margin(1e-4f));
+    CHECK(std::isnan(out[3]));
+}
+
+TEST_CASE("ChangeDetection kittlerIllingworthThreshold separates skewed bimodal mixtures", "[processing][change_detection][ki_met]") {
+    // Mixture: 90% background around 5 (stddev 1), 10% change around 25 (stddev 2)
+    std::vector<float> data;
+    data.reserve(1000);
+    for (int i = 0; i < 900; ++i) {
+        float val = 4.0f + 2.0f * (static_cast<float>(i % 100) / 100.0f);
+        data.push_back(val);
+    }
+    for (int i = 0; i < 100; ++i) {
+        float val = 22.0f + 6.0f * (static_cast<float>(i % 50) / 50.0f);
+        data.push_back(val);
+    }
+
+    float tKi = 0.0f;
+    float tOtsu = 0.0f;
+    REQUIRE(kittlerIllingworthThreshold(data.data(), data.size(), &tKi));
+    REQUIRE(otsuThreshold(data.data(), data.size(), &tOtsu));
+
+    // Both should find a threshold in the valley between 6 and 22
+    CHECK(tKi >= 6.0f);
+    CHECK(tKi <= 22.0f);
+    CHECK(tOtsu >= 6.0f);
+    CHECK(tOtsu <= 22.0f);
+}
+
+TEST_CASE("ChangeDetection irMadChange converges on multi-band scenes", "[processing][change_detection][irmad]") {
+    constexpr size_t N = 64;
+    constexpr int B = 3;
+
+    std::vector<std::vector<float>> beforeBands(B, std::vector<float>(N, 0.0f));
+    std::vector<std::vector<float>> afterBands(B, std::vector<float>(N, 0.0f));
+
+    for (size_t i = 0; i < N; ++i) {
+        float x = static_cast<float>(i + 1);
+        beforeBands[0][i] = x * 2.0f;
+        beforeBands[1][i] = x * 3.0f + 1.0f;
+        beforeBands[2][i] = x * 1.5f + 4.0f;
+
+        if (i < 58) {
+            // Unchanged with small noise
+            afterBands[0][i] = x * 2.0f + 0.1f * (i % 3);
+            afterBands[1][i] = x * 3.0f + 1.0f - 0.1f * (i % 2);
+            afterBands[2][i] = x * 1.5f + 4.0f + 0.05f * (i % 4);
+        } else {
+            // Strong multi-band change
+            afterBands[0][i] = x * 2.0f + 50.0f;
+            afterBands[1][i] = x * 3.0f - 40.0f;
+            afterBands[2][i] = x * 1.5f + 30.0f;
+        }
+    }
+
+    std::vector<const float*> bPtrs = {beforeBands[0].data(), beforeBands[1].data(), beforeBands[2].data()};
+    std::vector<const float*> aPtrs = {afterBands[0].data(), afterBands[1].data(), afterBands[2].data()};
+    std::vector<float> chiSq(N, 0.0f);
+    QString err;
+
+    REQUIRE(irMadChange(bPtrs.data(), aPtrs.data(), B, N, chiSq.data(), 20, 1e-4, &err));
+
+    float maxUnchanged = 0.0f;
+    for (size_t i = 0; i < 58; ++i) {
+        if (chiSq[i] > maxUnchanged) maxUnchanged = chiSq[i];
+    }
+    float minChanged = 1e9f;
+    for (size_t i = 58; i < N; ++i) {
+        if (chiSq[i] < minChanged) minChanged = chiSq[i];
+    }
+
+    CHECK(minChanged > maxUnchanged);
+}
+
+TEST_CASE("RsSpectralIndexOperator supports extended indices (NBR, dNBR, BSI, NDRE, CI, NDSI, NDTI)", "[operators][spectral_index]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    REQUIRE(driver != nullptr);
+
+    constexpr int W = 4, H = 4, B = 6;
+    const QString rasterPath = tmp.path() + "/synth_multiband.tif";
+    const QString postRasterPath = tmp.path() + "/synth_postfire.tif";
+
+    const auto makeRaster = [&](const QString &path, float factor) {
+        GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(), W, H, B, GDT_Float32, nullptr);
+        REQUIRE(ds != nullptr);
+        for (int b = 1; b <= B; ++b) {
+            std::vector<float> data(W * H);
+            for (size_t i = 0; i < W * H; ++i) {
+                float baseVal = (b == 1 ? 10.0f : b == 2 ? 20.0f : b == 3 ? 30.0f : b == 4 ? 80.0f : b == 5 ? 50.0f : 40.0f);
+                data[i] = baseVal * factor;
+            }
+            GDALRasterBandH band = GDALGetRasterBand(ds, b);
+            REQUIRE(GDALRasterIO(band, GF_Write, 0, 0, W, H, data.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+        }
+        GDALClose(ds);
+    };
+
+    makeRaster(rasterPath, 1.0f);
+    makeRaster(postRasterPath, 0.5f);
+
+    sicnu::operators::rs::RsSpectralIndexOperator op;
+    sicnu::operators::RSOperatorContext ctx;
+
+    const auto testIndex = [&](const std::string &idxName, const std::string &outName) {
+        Json::Value params(Json::objectValue);
+        params["input"] = rasterPath.toStdString();
+        params["output"] = (tmp.path() + "/" + QString::fromStdString(outName)).toStdString();
+        params["index"] = idxName;
+        params["blue"] = 1;
+        params["green"] = 2;
+        params["red"] = 3;
+        params["nir"] = 4;
+        params["swir"] = 5;
+        params["swir2"] = 6;
+        params["rededge"] = 5;
+        if (idxName == "dNBR") {
+            params["postfire"] = postRasterPath.toStdString();
+        }
+        Json::Value res = op.run(params, ctx);
+        CHECK(res["index"].asString() == idxName);
+        CHECK(res["width"].asInt() == W);
+        CHECK(res["height"].asInt() == H);
+    };
+
+    testIndex("NBR", "nbr.tif");
+    testIndex("dNBR", "dnbr.tif");
+    testIndex("BSI", "bsi.tif");
+    testIndex("NDRE", "ndre.tif");
+    testIndex("CI", "ci.tif");
+    testIndex("NDSI", "ndsi.tif");
+    testIndex("NDTI", "ndti.tif");
+}
+
+TEST_CASE("New change primitive operators execute and output valid rasters", "[operators][change_primitives]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    ensureGdalInit();
+    GDALDriverH driver = GDALGetDriverByName("GTiff");
+    REQUIRE(driver != nullptr);
+
+    constexpr int W = 4, H = 4, B = 2;
+    const QString beforePath = tmp.path() + "/prim_before.tif";
+    const QString afterPath = tmp.path() + "/prim_after.tif";
+
+    const auto make2BandRaster = [&](const QString &path, float b1Val, float b2Val) {
+        GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(), W, H, B, GDT_Float32, nullptr);
+        REQUIRE(ds != nullptr);
+        std::vector<float> data1(W * H, b1Val), data2(W * H, b2Val);
+        GDALRasterBandH band1 = GDALGetRasterBand(ds, 1);
+        GDALRasterBandH band2 = GDALGetRasterBand(ds, 2);
+        REQUIRE(GDALRasterIO(band1, GF_Write, 0, 0, W, H, data1.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+        REQUIRE(GDALRasterIO(band2, GF_Write, 0, 0, W, H, data2.data(), W, H, GDT_Float32, 0, 0) == CE_None);
+        GDALClose(ds);
+    };
+
+    make2BandRaster(beforePath, 10.0f, 20.0f);
+    make2BandRaster(afterPath, 15.0f, 25.0f);
+
+    sicnu::operators::RSOperatorContext ctx;
+
+    SECTION("RsChangeCvaAngleOperator angle & quadrant") {
+        sicnu::operators::rs::RsChangeCvaAngleOperator op;
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = (tmp.path() + "/cva_angle.tif").toStdString();
+        params["mode"] = "angle";
+        Json::Value res = op.run(params, ctx);
+        CHECK(res["method"].asString() == "cva_angle");
+
+        params["output"] = (tmp.path() + "/cva_quad.tif").toStdString();
+        params["mode"] = "quadrant";
+        Json::Value resQ = op.run(params, ctx);
+        CHECK(resQ["mode"].asString() == "quadrant");
+    }
+
+    SECTION("RsChangeSamOperator") {
+        sicnu::operators::rs::RsChangeSamOperator op;
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = (tmp.path() + "/sam.tif").toStdString();
+        Json::Value res = op.run(params, ctx);
+        CHECK(res["method"].asString() == "sam");
+    }
+
+    SECTION("RsChangeLogRatioOperator") {
+        sicnu::operators::rs::RsChangeLogRatioOperator op;
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = (tmp.path() + "/log_ratio.tif").toStdString();
+        Json::Value res = op.run(params, ctx);
+        CHECK(res["method"].asString() == "log_ratio");
+    }
+
+    SECTION("RsChangeIrMadOperator") {
+        sicnu::operators::rs::RsChangeIrMadOperator op;
+        Json::Value params(Json::objectValue);
+        params["before"] = beforePath.toStdString();
+        params["after"] = afterPath.toStdString();
+        params["output"] = (tmp.path() + "/irmad.tif").toStdString();
+        params["maxIterations"] = 5;
+        Json::Value res = op.run(params, ctx);
+        CHECK(res["method"].asString() == "irmad");
+    }
 }

@@ -106,4 +106,76 @@ public:
     Json::Value run( const Json::Value &params, RSOperatorContext &context ) override;
 };
 
+class RsChangeCvaAngleOperator : public RSOperator
+{
+public:
+    std::string name() const override { return "rs:change_cva_angle"; }
+    std::string displayName() const override { return "Change Vector Analysis Angle & Quadrant"; }
+    std::string group() const override { return "temporal"; }
+    std::string description() const override
+    {
+        return "Change Vector Analysis 2-band directional angle (radians) and semantic quadrant classification.";
+    }
+    RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::Streaming; }
+    Json::Value schema() const override;
+    Json::Value metadata() const override;
+    Json::Value executionEstimate() const override;
+    Json::Value estimateExecution(const Json::Value& params) const override;
+    Json::Value run( const Json::Value &params, RSOperatorContext &context ) override;
+};
+
+class RsChangeSamOperator : public RSOperator
+{
+public:
+    std::string name() const override { return "rs:change_sam"; }
+    std::string displayName() const override { return "Spectral Angle Mapper Change"; }
+    std::string group() const override { return "temporal"; }
+    std::string description() const override
+    {
+        return "Spectral Angle Mapper (SAM) change angle (radians) across multi-spectral bands.";
+    }
+    RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::Streaming; }
+    Json::Value schema() const override;
+    Json::Value metadata() const override;
+    Json::Value executionEstimate() const override;
+    Json::Value estimateExecution(const Json::Value& params) const override;
+    Json::Value run( const Json::Value &params, RSOperatorContext &context ) override;
+};
+
+class RsChangeLogRatioOperator : public RSOperator
+{
+public:
+    std::string name() const override { return "rs:change_log_ratio"; }
+    std::string displayName() const override { return "Change Log Ratio"; }
+    std::string group() const override { return "temporal"; }
+    std::string description() const override
+    {
+        return "Log-Ratio change metric ln(after + eps) - ln(before + eps).";
+    }
+    RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::Streaming; }
+    Json::Value schema() const override;
+    Json::Value metadata() const override;
+    Json::Value executionEstimate() const override;
+    Json::Value estimateExecution(const Json::Value& params) const override;
+    Json::Value run( const Json::Value &params, RSOperatorContext &context ) override;
+};
+
+class RsChangeIrMadOperator : public RSOperator
+{
+public:
+    std::string name() const override { return "rs:change_irmad"; }
+    std::string displayName() const override { return "Iteratively Reweighted MAD"; }
+    std::string group() const override { return "temporal"; }
+    std::string description() const override
+    {
+        return "Iteratively Reweighted Multivariate Alteration Detection (IR-MAD) with Chi-Square sample weights.";
+    }
+    RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::MultiPassStreaming; }
+    Json::Value schema() const override;
+    Json::Value metadata() const override;
+    Json::Value executionEstimate() const override;
+    Json::Value estimateExecution(const Json::Value& params) const override;
+    Json::Value run( const Json::Value &params, RSOperatorContext &context ) override;
+};
+
 } // namespace sicnu::operators::rs

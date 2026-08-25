@@ -174,6 +174,76 @@ void morphologicalCleanup(uint8_t *mask, int width, int height, int iterations,
                           MorphOp op);
 
 /**
+ * Kittler-Illingworth Minimum Error Thresholding (KI-MET) over a precomputed histogram.
+ * Assumes a mixture of two Gaussian distributions with unequal variances and priors.
+ * Minimizes J(T) = 1 + 2*(P1*ln(sigma1) + P2*ln(sigma2)) - 2*(P1*ln(P1) + P2*ln(P2)).
+ * Returns false when @p finiteCount is zero; returns @p minVal when all finite values coincide.
+ */
+bool kittlerIllingworthThresholdFromHistogram(double minVal, double maxVal,
+                                              const std::vector<double> &hist,
+                                              size_t finiteCount, float *threshold);
+
+/**
+ * Kittler-Illingworth Minimum Error Thresholding (KI-MET) over the finite values of @p values.
+ * @return true and the threshold when at least two distinct values exist;
+ *         false for null/empty/all-NaN input.
+ */
+bool kittlerIllingworthThreshold(const float *values, size_t count, float *threshold, int bins = 256);
+
+/**
+ * Change Vector Analysis magnitude and 2-band directional angle.
+ * Magnitude = sqrt((after1 - before1)^2 + (after2 - before2)^2).
+ * Angle = atan2(after2 - before2, after1 - before1) in radians [-pi, pi].
+ * If either band has NaN at pixel i, outMagnitude[i] and outAngle[i] are NaN.
+ */
+bool cvaMagnitudeAndAngle(const float *beforeBand1, const float *beforeBand2,
+                          const float *afterBand1, const float *afterBand2,
+                          size_t pixels, float *outMagnitude, float *outAngle,
+                          QString *errorMessage = nullptr);
+
+/**
+ * Change Vector Analysis semantic quadrant mapping (1..4) based on sign of deltas:
+ * - Quadrant 1 (1): delta1 > 0, delta2 > 0
+ * - Quadrant 2 (2): delta1 <= 0, delta2 > 0
+ * - Quadrant 3 (3): delta1 <= 0, delta2 <= 0
+ * - Quadrant 4 (4): delta1 > 0, delta2 <= 0
+ * Invalid/NaN pixels receive 255 (NoData).
+ */
+bool cvaQuadrant(const float *beforeBand1, const float *beforeBand2,
+                 const float *afterBand1, const float *afterBand2,
+                 size_t pixels, uint8_t *outQuadrant,
+                 QString *errorMessage = nullptr);
+
+/**
+ * Spectral Angle Mapper (SAM) change angle across @p bandCount spectral bands.
+ * Computes spectral angle alpha = arccos( (X_t1 . X_t2) / (||X_t1|| * ||X_t2||) ) in radians.
+ * Output is illumination-invariant (scaling band reflectances by constant leaves angle unchanged).
+ * Returns NaN for pixels with NaN or invalid values in any band.
+ */
+bool samChangeAngle(const float *const *beforeBands, const float *const *afterBands,
+                    int bandCount, size_t pixels, float *outAngleRadians,
+                    QString *errorMessage = nullptr);
+
+/**
+ * Log-Ratio change: out[i] = ln(max(after[i], 0) + eps) - ln(max(before[i], 0) + eps).
+ * Symmetric around 0, ideal for SAR and wide dynamic range sensors.
+ */
+bool logRatio(const float *before, const float *after, float *out,
+              size_t count, float epsilon = 1e-4f);
+
+/**
+ * Iteratively Reweighted Multivariate Alteration Detection (IR-MAD).
+ * Iteratively estimates canonical correlation analysis (CCA) transformation
+ * with Chi-Square sample weights w_i = 1 - P(Chi^2(B) <= Z_i) = P(Chi^2(B) > Z_i)
+ * until max canonical correlation delta < convThreshold or maxIterations reached.
+ * Returns Chi-Square change distance per pixel in @p outChiSquare.
+ */
+bool irMadChange(const float *const *beforeBands, const float *const *afterBands,
+                 int bandCount, size_t pixels, float *outChiSquare,
+                 int maxIterations = 20, double convThreshold = 1e-4,
+                 QString *errorMessage = nullptr);
+
+/**
  * Minimum mapping unit: removes every 8-connected component whose area is
  * below @p minArea pixels (0/1 mask; 255 = NoData never modified). This is a
  * no-op when @p minArea is 0. Returns false only on invalid arguments.
@@ -182,4 +252,3 @@ bool connectedComponentFilter(uint8_t *mask, int width, int height,
                               size_t minArea);
 
 }
-
