@@ -167,12 +167,15 @@ set(QGIS_GUI_SRCS
   codeeditors/qgscodeeditorsql.cpp
   codeeditors/qgscodeeditorexpression.cpp
   codeeditors/qgscodeeditorwidget.cpp
-  codeeditors/qscilexer_stubs_moc.cpp
-
   ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qsciscintilla_stub.cpp
   # Headers listed so AUTOMOC processes Q_OBJECT in stubs (needed for vtable/typeinfo)
   ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qsciscintillabase.h
   ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qsciscintilla.h
+  ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qscilexer.h
+  ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qscilexercss.h
+  ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qscilexersql.h
+  ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qscilexerpython.h
+  ${CMAKE_SOURCE_DIR}/src/stubs/Qsci/qsciapis.h
 
   devtools/qgsdevtoolsmodelnode.cpp
   devtools/qgsdevtoolwidget.cpp

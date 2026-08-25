@@ -3,6 +3,15 @@
 
 #include "workflow/placeholder_grammar.h"
 
+#ifdef _WIN32
+#include <cstdlib>
+static inline int test_setenv(const char *name, const char *value, int overwrite) {
+    if (!overwrite && getenv(name)) return 0;
+    return _putenv_s(name, value);
+}
+#define setenv test_setenv
+#endif
+
 using namespace sicnu::workflow;
 
 TEST_CASE("Placeholder Grammar - Parsing all supported syntax variants", "[workflow][grammar]") {

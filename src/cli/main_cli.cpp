@@ -39,6 +39,7 @@ struct ShutdownGuard {
     ~ShutdownGuard() {
         sicnu::TaskCenter::instance().shutdown();
         sicnu::jobs::JobEngine::instance().shutdown();
+        QgsApplication::exitQgis();
     }
 };
 }

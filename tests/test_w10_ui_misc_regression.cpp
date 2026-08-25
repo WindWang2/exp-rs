@@ -26,7 +26,9 @@ void ensureApp()
   // Heap-allocated and intentionally leaked: a static QApplication destructs
   // after other statics (widgets/settings) and segfaults at process exit
   // even after every assertion passed.
-  new QApplication( argc, argv );
+  auto *app = new QApplication( argc, argv );
+  app->setOrganizationName( "SICNU" );
+  app->setApplicationName( "GeoRS" );
 }
 } // namespace
 
@@ -140,6 +142,7 @@ TEST_CASE("PreferencesDialog defaultCrs persists preset selection", "[w10][397][
   // selection round-trips through QSettings (the U3 wire-up).
   QSettings settings;
   settings.setValue("preferences/defaultCrs", "EPSG:3857");
+  settings.sync();
   PreferencesDialog dlg;
   // loadSettings is called in ctor; verify preset is restored
   REQUIRE(dlg.defaultCrs() == "EPSG:3857");
@@ -147,6 +150,7 @@ TEST_CASE("PreferencesDialog defaultCrs persists preset selection", "[w10][397][
   REQUIRE(dlg.defaultCrs() == "EPSG:4326");
   // Verify that save persists non-empty and load restores
   dlg.saveSettings();
+  settings.sync();
   REQUIRE(settings.value("preferences/defaultCrs").toString() == "EPSG:4326");
 }
 

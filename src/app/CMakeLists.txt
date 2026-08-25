@@ -349,11 +349,17 @@ install(TARGETS sicnu_geo_rs
     LIBRARY DESTINATION lib
 )
 
-# Install resources
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources/fonts
-        DESTINATION share/sicnu_geo_rs/resources)
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources/icons
-        DESTINATION share/sicnu_geo_rs/resources)
+if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/resources/fonts)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources/fonts
+            DESTINATION share/sicnu_geo_rs/resources)
+endif()
+if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/resources/icons)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources/icons
+            DESTINATION share/sicnu_geo_rs/resources)
+elseif(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/images/icons)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/images/icons
+            DESTINATION share/sicnu_geo_rs/resources/icons)
+endif()
 install(FILES
         ${CMAKE_SOURCE_DIR}/resources/styles.qss
         ${CMAKE_SOURCE_DIR}/resources/styles-dark.qss

@@ -257,6 +257,11 @@ bool JobEngine::cancel( const std::string &jobId )
         rec.finishedAtMs = nowUnixMs();
         rec.statusMessage = "Cancelled";
         appendLog( rec, JobLogLevel::Info, "Cancelled while queued" );
+        auto bit = m_jobBodies.find( jobId );
+        if ( bit != m_jobBodies.end() && bit->second.onCancel )
+        {
+          cancelHook = std::move( bit->second.onCancel );
+        }
         m_jobBodies.erase( jobId );
         m_cancelFlags.erase( jobId );
         copy = rec;

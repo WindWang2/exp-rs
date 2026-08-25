@@ -32,10 +32,12 @@ class DataManager;
 class QgsMapCanvas;
 class QgsRubberBand;
 
+#include "sicnu_agent_export.h"
+
 namespace sicnu::agent
 {
 
-class AgentCopilotDockWidget : public QDockWidget
+class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
 {
   Q_OBJECT
 

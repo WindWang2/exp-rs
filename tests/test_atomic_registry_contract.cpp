@@ -13,12 +13,16 @@
 #include <set>
 #include <string>
 
+#include "operators/framework/rs_operator_registry.h"
+#include <iostream>
+
 using namespace sicnu::processing;
 using namespace sicnu::operators;
 using namespace sicnu::operators::rs;
 
 TEST_CASE( "Registry exposes unique ids and stable descriptors", "[processing][registry][contract]" )
 {
+    sicnu::operators::RSOperatorRegistry::instance();
     auto &registry = AtomicAlgorithmRegistry::instance();
     registry.initialize();
 
@@ -39,6 +43,7 @@ TEST_CASE( "Registry exposes unique ids and stable descriptors", "[processing][r
 
 TEST_CASE( "Legacy facade IDs remain registered and executable", "[processing][registry][compat]" )
 {
+    sicnu::operators::RSOperatorRegistry::instance();
     auto &registry = AtomicAlgorithmRegistry::instance();
     registry.initialize();
 

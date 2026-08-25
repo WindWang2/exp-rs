@@ -89,12 +89,11 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
     const size_t pixelCount = static_cast<size_t>( width ) * height;
 
     // Resolve the input nodata sentinel: prefer the raster-declared band-1
-    // nodata, falling back to -9999 when none is set. Continuum-removal output
-    // values are ratios in (0, 1], so the same sentinel is reused for output
-    // nodata (degenerate pixels) without collision.
+    // nodata, falling back to NaN (matching only NaN pixels) when none is set (#473).
+    // Continuum-removal output values are ratios in (0, 1].
     bool hasNodata = false;
     double srcNodata = ds.bandNoDataValue( 1, &hasNodata );
-    const float nodata = hasNodata ? static_cast<float>( srcNodata ) : -9999.0f;
+    const float nodata = hasNodata ? static_cast<float>( srcNodata ) : std::numeric_limits<float>::quiet_NaN();
 
     // Stream over 256x256 BIP tiles
     constexpr int kTile = 256;
@@ -113,11 +112,14 @@ Json::Value RsContinuumRemovalOperator::run( const Json::Value &params, RSOperat
         throw RSOperatorError( ErrorCode::FileNotWritable,
                               "Failed to create output raster: " + outErr.toStdString() );
 
-    for ( int b = 1; b <= bandCount; ++b )
+    if ( hasNodata )
     {
-        GDALRasterBandH hOutBand = GDALGetRasterBand( outDs, b );
-        if ( hOutBand )
-            GDALSetRasterNoDataValue( hOutBand, nodata );
+        for ( int b = 1; b <= bandCount; ++b )
+        {
+            GDALRasterBandH hOutBand = GDALGetRasterBand( outDs, b );
+            if ( hOutBand )
+                GDALSetRasterNoDataValue( hOutBand, nodata );
+        }
     }
 
     std::vector<float> spectrum( bandCount );

@@ -26,5 +26,10 @@ int main(int argc, char *argv[])
     const int rc = session.applyCommandLine(argc, argv);
     if (rc != 0)
         return rc;
-    return session.run();
+    const int result = session.run();
+#ifdef _WIN32
+  _exit( result );
+#else
+  return result;
+#endif
 }

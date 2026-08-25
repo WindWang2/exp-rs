@@ -171,7 +171,7 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
             const float v = spec[b];
             if (!std::isfinite(v))
                 return false;
-            if (hasNoData[b] && std::abs(v - noDataValues[b]) < 1e-3f)
+            if (hasNoData[b] && (v == noDataValues[b] || std::isnan(v)))
                 return false;
         }
         return true;

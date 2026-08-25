@@ -248,7 +248,11 @@ class TiffMakerOperator : public sicnu::operators::RSOperator
       GDALClose( ds );
       Json::Value result( Json::objectValue );
       result["output"] = output;
-      return result;
+      #ifdef _WIN32
+  _exit( result );
+#else
+  return result;
+#endif
     }
 };
 

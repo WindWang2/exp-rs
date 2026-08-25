@@ -15,6 +15,8 @@ REGISTER_RS_OPERATOR(OpenCvSobelOperator, "opencv:sobel")
 REGISTER_RS_OPERATOR(OpenCvLaplacianOperator, "opencv:laplacian")
 REGISTER_RS_OPERATOR(OpenCvCannyOperator, "opencv:canny")
 
+void initBuiltinOpenCvOperators() {}
+
 } // namespace sicnu::operators::opencv
 
 #endif // SICNU_HAS_OPENCV

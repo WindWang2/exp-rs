@@ -11,7 +11,12 @@
 
 int main( int argc, char *argv[] )
 {
-  return Catch::Session().run( argc, argv );
+  const int result = Catch::Session().run( argc, argv );
+#ifdef _WIN32
+  _exit( result );
+#else
+  return result;
+#endif
 }
 
 TEST_CASE( "WorkflowDefinition spatial UI metadata serialization", "[workflow][dag]" )

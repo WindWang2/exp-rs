@@ -312,7 +312,7 @@ QUrl QgsArcGisRestQueryUtils::parseUrl( const QUrl &url, bool *isTestEndpoint )
     // so we must restore it
     if ( modifiedUrlString[1] == '/' )
     {
-      modifiedUrlString = modifiedUrlString[0] + ":/" + modifiedUrlString.mid( 2 );
+      modifiedUrlString = QString( modifiedUrlString[0] ) + QStringLiteral( ":/" ) + modifiedUrlString.mid( 2 );
     }
 #endif
     modifiedUrlString = modifiedUrlString.mid( 0, modifiedUrlString.indexOf( '?' ) ) + args;

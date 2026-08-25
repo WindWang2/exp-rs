@@ -2980,3 +2980,139 @@ TEST_CASE("RS spectral index masks large-sentinel NoData (#444)", "[operators][r
     // (-3.4e38 - -3.4e38) / (-3.4e38 + -3.4e38).
     CHECK(std::isnan(px[1]));
 }
+
+TEST_CASE("RS terrain analysis preserves absent NoData without fabricating default tag (#465)", "[operators][rs][terrain][465]") {
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString inputPath = dir.filePath(QStringLiteral("dem_nodata_absent.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("slope_out.tif"));
+
+    constexpr int W = 4, H = 4;
+    std::vector<std::vector<float>> bands(1, std::vector<float>(W * H, 100.0f));
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    auto op = RSOperatorRegistry::instance().create("rs:terrain_analysis");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    params["product"] = "slope";
+    RSOperatorContext ctx;
+    op->run(params, ctx);
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    bool hasNodata = false;
+    out.bandNoDataValue(1, &hasNodata);
+    CHECK_FALSE(hasNodata);
+}
+
+TEST_CASE("RS endmember PPI ignores large sentinel NoData (#467)", "[operators][rs][endmember][467]") {
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString inputPath = dir.filePath(QStringLiteral("ppi_sentinel.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("ppi_out.tif"));
+
+    constexpr int W = 4, H = 4, B = 4;
+    const float sentinel = -3.4028235e+38f;
+    std::vector<std::vector<float>> bands(B, std::vector<float>(W * H, 10.0f));
+    for (int b = 0; b < B; ++b) {
+        bands[b][0] = sentinel; // Pixel 0 is NoData
+    }
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    {
+        ensureGdalInit();
+        GDALDatasetH ds = GDALOpen(inputPath.toUtf8().constData(), GA_Update);
+        REQUIRE(ds != nullptr);
+        for (int b = 1; b <= B; ++b)
+            GDALSetRasterNoDataValue(GDALGetRasterBand(ds, b), static_cast<double>(sentinel));
+        GDALClose(ds);
+    }
+
+    auto op = RSOperatorRegistry::instance().create("rs:endmember_extraction");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["nEndmembers"] = 2;
+    params["projections"] = 16;
+    params["threshold"] = 0.5;
+    RSOperatorContext ctx;
+    Json::Value res = op->run(params, ctx);
+    CHECK(res["endmembers"].isArray());
+    CHECK(res["endmembers"].size() == 2);
+}
+
+TEST_CASE("RS RX anomaly detection ignores large sentinel NoData (#470)", "[operators][rs][rx][470]") {
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString inputPath = dir.filePath(QStringLiteral("rx_sentinel.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("rx_out.tif"));
+
+    constexpr int W = 4, H = 4, B = 4;
+    const float sentinel = -3.4028235e+38f;
+    std::vector<std::vector<float>> bands(B, std::vector<float>(W * H, 10.0f));
+    for (int b = 0; b < B; ++b) {
+        bands[b][0] = sentinel; // Pixel 0 is NoData
+    }
+    // Make valid pixels have variation so covariance is not singular
+    bands[0][1] = 12.0f;
+    bands[1][2] = 15.0f;
+    bands[2][3] = 8.0f;
+    bands[3][4] = 20.0f;
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    {
+        ensureGdalInit();
+        GDALDatasetH ds = GDALOpen(inputPath.toUtf8().constData(), GA_Update);
+        REQUIRE(ds != nullptr);
+        for (int b = 1; b <= B; ++b)
+            GDALSetRasterNoDataValue(GDALGetRasterBand(ds, b), static_cast<double>(sentinel));
+        GDALClose(ds);
+    }
+
+    auto op = RSOperatorRegistry::instance().create("rs:rx_anomaly");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    RSOperatorContext ctx;
+    Json::Value res = op->run(params, ctx);
+    CHECK(res["output"].asString() == outputPath.toStdString());
+    CHECK(QFile::exists(outputPath));
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    std::vector<float> outData(W * H);
+    REQUIRE(out.readBandWindow(1, 0, 0, W, H, outData.data()));
+    CHECK(std::isnan(outData[0])); // Pixel 0 must be NaN
+}
+
+TEST_CASE("RS continuum removal preserves absent NoData without fabricating default tag (#473)", "[operators][rs][continuum][473]") {
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString inputPath = dir.filePath(QStringLiteral("cr_nodata_absent.tif"));
+    const QString outputPath = dir.filePath(QStringLiteral("cr_out.tif"));
+
+    constexpr int W = 4, H = 4, B = 4;
+    std::vector<std::vector<float>> bands(B, std::vector<float>(W * H, 0.5f));
+    bands[1] = std::vector<float>(W * H, 0.8f);
+    REQUIRE(writeTestRaster(inputPath, W, H, bands).empty());
+
+    auto op = RSOperatorRegistry::instance().create("rs:continuum_removal");
+    REQUIRE(op != nullptr);
+    Json::Value params(Json::objectValue);
+    params["input"] = inputPath.toStdString();
+    params["output"] = outputPath.toStdString();
+    RSOperatorContext ctx;
+    op->run(params, ctx);
+
+    GdalDatasetWrapper out;
+    REQUIRE(out.open(outputPath));
+    bool hasNodata = false;
+    out.bandNoDataValue(1, &hasNodata);
+    CHECK_FALSE(hasNodata);
+}
+
+
+

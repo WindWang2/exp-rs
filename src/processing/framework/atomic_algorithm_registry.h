@@ -2,6 +2,7 @@
 #pragma once
 
 #include "atomic_algorithm_adapter.h"
+#include "sicnu_processing_export.h"
 
 #include <mutex>
 #include <string>
@@ -10,7 +11,7 @@
 
 namespace sicnu::processing {
 
-class AtomicAlgorithmRegistry {
+class SICNU_PROCESSING_EXPORT AtomicAlgorithmRegistry {
 public:
   static AtomicAlgorithmRegistry& instance();
 

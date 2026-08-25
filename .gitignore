@@ -81,3 +81,5 @@ vendor/
 compile_flags.txt
 .scratch/
 user-history.db
+vcpkg_installed/
+run_sicnu_geo_rs.bat

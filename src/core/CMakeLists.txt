@@ -2928,6 +2928,7 @@ target_link_libraries(sicnu_core PUBLIC
   Qt6::Gui
   qgis_core
 )
+set_target_properties(sicnu_core PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 # Embedded-Python plugin hosting: PluginHost pulls in PythonPluginHost and the
 # headless ProjectContext/AppInterface seam (mirrors the app/CLI/test wiring).

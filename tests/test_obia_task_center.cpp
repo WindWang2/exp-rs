@@ -240,6 +240,7 @@ TEST_CASE( "OBIA Task Center flat classify algorithm id completes",
 TEST_CASE( "OBIA Task Center keeps cancellation running until the worker exits",
            "[obia][task_center][segment][cancel]" )
 {
+  auto workerStarted = std::make_shared<std::atomic<bool>>( false );
   auto release = std::make_shared<std::atomic<bool>>( false );
   auto canceledHook = std::make_shared<std::atomic<bool>>( false );
 
@@ -250,8 +251,9 @@ TEST_CASE( "OBIA Task Center keeps cancellation running until the worker exits",
 
   const long taskId = sicnu::TaskCenter::instance().submitJob(
     req,
-    [release]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
-      while ( !release->load() && !ctx.isCancelled() )
+    [workerStarted, release]( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext &ctx ) {
+      workerStarted->store( true );
+      while ( !release->load() )
         std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
       if ( ctx.isCancelled() )
       {
@@ -267,13 +269,12 @@ TEST_CASE( "OBIA Task Center keeps cancellation running until the worker exits",
 
   REQUIRE( taskId > 0 );
 
-  // Wait until Running
-  for ( int i = 0; i < 500; ++i )
+  // Wait until worker has started
+  for ( int i = 0; i < 6000 && !workerStarted->load(); ++i )
   {
-    if ( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status == sicnu::TaskStatus::Running )
-      break;
     std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
   }
+  REQUIRE( workerStarted->load() );
   REQUIRE( sicnu::TaskCenter::instance().getTaskInfo( taskId ).status
            == sicnu::TaskStatus::Running );
 

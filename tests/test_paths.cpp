@@ -12,7 +12,12 @@
 
 int main(int argc, char *argv[]) {
   QCoreApplication app(argc, argv);
-  return Catch::Session().run(argc, argv);
+  const int result = Catch::Session().run(argc, argv);
+#ifdef _WIN32
+  _exit( result );
+#else
+  return result;
+#endif
 }
 
 TEST_CASE("AppPaths::prefixPath returns valid path", "[paths]") {

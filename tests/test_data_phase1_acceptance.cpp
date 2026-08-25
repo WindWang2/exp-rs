@@ -97,7 +97,11 @@ int main(int argc, char *argv[]) {
   const int result = Catch::Session().run(argc, argv);
   QgsProject::instance()->clear();
   QgsApplication::exitQgis();
+#ifdef _WIN32
+  _exit(result);
+#else
   return result;
+#endif
 }
 
 // End-to-end Phase-1 lifecycle: one asset, two independently styled Display
@@ -213,9 +217,9 @@ TEST_CASE("Phase 1 first-deliverable data/display separation lifecycle",
   // -- 5. Move the source away, reopen, and confirm Missing survives with the
   //       Display Layer record; then relocate to recover.
   const QString movedRaster = ioDir.filePath(QStringLiteral("scene-moved.tif"));
+  REQUIRE(context->clearProject(*project));
   REQUIRE(QFile::rename(rasterCopy, movedRaster));
 
-  REQUIRE(context->clearProject(*project));
   REQUIRE(project->read(projectPath));
   REQUIRE(readOk);
 

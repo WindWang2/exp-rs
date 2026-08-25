@@ -17,7 +17,11 @@ TEST_CASE("QProcess MergedChannels captures stderr", "[gdal][tool][error]") {
     // Run a command that writes to stderr and fails
     QProcess proc;
     proc.setProcessChannelMode(QProcess::MergedChannels);
+#ifdef _WIN32
+    proc.start("cmd.exe", {"/c", "echo error message 1>&2 & exit 1"});
+#else
     proc.start("bash", {"-c", "echo 'error message' >&2; exit 1"});
+#endif
 
     REQUIRE(proc.waitForStarted(5000));
     proc.waitForFinished(5000);
@@ -35,7 +39,11 @@ TEST_CASE("QProcess MergedChannels captures stderr", "[gdal][tool][error]") {
 TEST_CASE("QProcess SeparateChannels keeps stderr separate", "[gdal][tool][error]") {
     QProcess proc;
     proc.setProcessChannelMode(QProcess::SeparateChannels);
+#ifdef _WIN32
+    proc.start("cmd.exe", {"/c", "echo error message 1>&2 & exit 1"});
+#else
     proc.start("bash", {"-c", "echo 'error message' >&2; exit 1"});
+#endif
 
     REQUIRE(proc.waitForStarted(5000));
     proc.waitForFinished(5000);
