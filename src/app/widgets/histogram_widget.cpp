@@ -12,6 +12,8 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QMouseEvent>
+#include <QFutureWatcher>
+#include <QtConcurrent>
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -45,11 +47,6 @@ HistogramWidget::~HistogramWidget()
 
 void HistogramWidget::closeDataset()
 {
-    if ( m_cachedDataset ) {
-        GDALClose( m_cachedDataset );
-        m_cachedDataset = nullptr;
-        m_cachedSource.clear();
-    }
     m_bandCache.clear();
 }
 
@@ -170,32 +167,14 @@ const HistogramWidget::BandData &HistogramWidget::activeBandData() const
     return m_singleBandData;
 }
 
-void HistogramWidget::computeSingleBandHistogram( int bandNum, BandData &data )
+HistogramWidget::BandData HistogramWidget::computeBandData( GDALDatasetH ds, int bandNum )
 {
-    if ( m_bandCache.contains( bandNum ) && m_bandCache[bandNum].valid )
-    {
-        data = m_bandCache[bandNum];
-        return;
-    }
-
+    BandData data;
     data.valid = false;
-    if ( !m_rasterLayer )
-        return;
 
-    const QString source = m_rasterLayer->source();
-    if ( !m_cachedDataset || m_cachedSource != source )
-    {
-        closeDataset();
-        m_cachedDataset = GDALOpen( source.toUtf8().constData(), GA_ReadOnly );
-        m_cachedSource = source;
-    }
-
-    if ( !m_cachedDataset )
-        return;
-
-    GDALRasterBandH hBand = GDALGetRasterBand( m_cachedDataset, bandNum );
+    GDALRasterBandH hBand = GDALGetRasterBand( ds, bandNum );
     if ( !hBand )
-        return;
+        return data;
 
     int bGotMin = 0, bGotMax = 0;
     double dfMin = GDALGetRasterMinimum( hBand, &bGotMin );
@@ -243,8 +222,8 @@ void HistogramWidget::computeSingleBandHistogram( int bandNum, BandData &data )
                 data.maxFreq = data.histogram[i];
         }
         data.valid = true;
-        m_bandCache[bandNum] = data;
     }
+    return data;
 }
 
 void HistogramWidget::computeHistograms()
@@ -252,23 +231,112 @@ void HistogramWidget::computeHistograms()
     if ( !m_rasterLayer )
         return;
 
-    computeSingleBandHistogram( m_band, m_singleBandData );
+    const QString source = m_rasterLayer->source();
 
+    // Serve everything already available from the cache immediately.
+    auto serveCached = [this]( int bandNum, BandData &target ) {
+        const auto it = m_bandCache.constFind( bandNum );
+        if ( it != m_bandCache.constEnd() && it->valid )
+            target = it.value();
+    };
+    serveCached( m_band, m_singleBandData );
     if ( m_rasterLayer->bandCount() >= 3 )
     {
-        computeSingleBandHistogram( m_redBand, m_redData );
-        computeSingleBandHistogram( m_greenBand, m_greenData );
-        computeSingleBandHistogram( m_blueBand, m_blueData );
+        serveCached( m_redBand, m_redData );
+        serveCached( m_greenBand, m_greenData );
+        serveCached( m_blueBand, m_blueData );
+    }
+    finalizeHistogramCompute();
+
+    // Collect the bands still missing; they are computed off the GUI thread —
+    // a full-resolution GDAL scan here would freeze the interface for seconds
+    // on multi-gigabyte rasters (#520).
+    QList<int> pending;
+    auto collectPending = [this, &pending]( int bandNum ) {
+        if ( bandNum < 1 || bandNum > m_rasterLayer->bandCount() )
+            return;
+        const auto it = m_bandCache.constFind( bandNum );
+        if ( it == m_bandCache.constEnd() || !it->valid )
+            pending.append( bandNum );
+    };
+    collectPending( m_band );
+    if ( m_rasterLayer->bandCount() >= 3 )
+    {
+        collectPending( m_redBand );
+        collectPending( m_greenBand );
+        collectPending( m_blueBand );
     }
 
-    if ( m_blackCutoff == 0.0 && m_whiteCutoff == 255.0 )
+    if ( pending.isEmpty() )
+        return;
+
+    if ( m_computeInProgress )
+    {
+        // A scan is running; re-run once it delivers so newly requested
+        // bands are picked up too.
+        m_recomputeWhenIdle = true;
+        return;
+    }
+    m_computeInProgress = true;
+
+    auto *watcher = new QFutureWatcher<QMap<int, BandData>>( this );
+    connect( watcher, &QFutureWatcher<QMap<int, BandData>>::finished, this, [this, watcher]() {
+        watcher->deleteLater();
+        m_computeInProgress = false;
+
+        const QMap<int, BandData> result = watcher->result();
+        for ( auto it = result.constBegin(); it != result.constEnd(); ++it )
+        {
+            if ( !it->valid )
+                continue;
+            m_bandCache[it.key()] = it.value();
+            if ( it.key() == m_band )
+                m_singleBandData = it.value();
+            if ( it.key() == m_redBand )
+                m_redData = it.value();
+            if ( it.key() == m_greenBand )
+                m_greenData = it.value();
+            if ( it.key() == m_blueBand )
+                m_blueData = it.value();
+        }
+        finalizeHistogramCompute();
+
+        SICNU_LOG_DEBUG( SicnuLogTags::Widgets,
+                         QString( "Histogram background computation finished: %1 bands" ).arg( result.size() ) );
+
+        if ( m_recomputeWhenIdle )
+        {
+            m_recomputeWhenIdle = false;
+            computeHistograms();
+        }
+    } );
+
+    watcher->setFuture( QtConcurrent::run( [source, pending]() -> QMap<int, BandData> {
+        QMap<int, BandData> out;
+        // Own dataset handle: the worker thread must not share the GUI-side
+        // GDAL cache, and GDALOpen cost is trivial next to the pixel scan.
+        GDALDatasetH ds = GDALOpen( source.toUtf8().constData(), GA_ReadOnly );
+        if ( !ds )
+            return out;
+        for ( int bandNum : pending )
+            out.insert( bandNum, computeBandData( ds, bandNum ) );
+        GDALClose( ds );
+        return out;
+    } ) );
+}
+
+void HistogramWidget::finalizeHistogramCompute()
+{
+    if ( m_blackCutoff == 0.0 && m_whiteCutoff == 255.0 && m_singleBandData.valid )
     {
         m_blackCutoff = m_singleBandData.minVal;
         m_whiteCutoff = m_singleBandData.maxVal;
     }
 
-    if ( m_piecewisePoints.isEmpty() )
+    if ( m_piecewisePoints.isEmpty() && m_singleBandData.valid )
         resetPiecewisePoints();
+
+    update();
 }
 
 QRect HistogramWidget::getChartRect() const

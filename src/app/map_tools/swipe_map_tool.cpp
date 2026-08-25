@@ -30,6 +30,10 @@ class SwipeCanvasItem : public QgsMapCanvasItem
         setZValue( 1000 ); // Draw on top of map content
     }
 
+    // QgsMapCanvasItem keeps its destructor protected; the tool is the sole
+    // owner of this item and removes it from the canvas scene on teardown.
+    ~SwipeCanvasItem() override = default;
+
     QRectF boundingRect() const override
     {
         if ( !mMapCanvas )
@@ -114,6 +118,12 @@ SwipeMapTool::SwipeMapTool( QgsMapCanvas *canvas )
 SwipeMapTool::~SwipeMapTool()
 {
     cancelRenderJob();
+    if ( m_swipeItem )
+    {
+        // QGraphicsItem removes itself from its scene on destruction.
+        delete static_cast<SwipeCanvasItem *>( m_swipeItem );
+        m_swipeItem = nullptr;
+    }
 }
 
 void SwipeMapTool::setBaseLayer( QgsMapLayer *layer )
@@ -173,6 +183,7 @@ void SwipeMapTool::canvasPressEvent( QgsMapMouseEvent *e )
 void SwipeMapTool::canvasReleaseEvent( QgsMapMouseEvent *e )
 {
     Q_UNUSED( e );
+    m_mouseFollow = false;
 }
 
 void SwipeMapTool::keyPressEvent( QKeyEvent *e )
@@ -231,6 +242,7 @@ void SwipeMapTool::activate()
 
 void SwipeMapTool::deactivate()
 {
+    m_mouseFollow = false;
     cancelRenderJob();
     if ( mCanvas )
     {

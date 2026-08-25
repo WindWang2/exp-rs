@@ -14,12 +14,14 @@ AsyncGdalRunner::~AsyncGdalRunner()
     if (!m_watcher)
         return;
 
-    // Disconnect before waiting so finished handlers cannot touch a dying dialog.
+    // Disconnect so finished handlers cannot touch a dying dialog, then
+    // request cooperative cancellation without blocking the GUI thread:
+    // GDAL/OTB tasks are not interruptible, and waitForFinished() here would
+    // freeze the UI until the external process completes (#513). The watcher
+    // is a QObject child, so it outlives the running future safely.
     disconnect(m_watcher, nullptr, this, nullptr);
-    if (isRunning()) {
+    if (isRunning())
         m_watcher->cancel();
-        m_watcher->waitForFinished();
-    }
 }
 
 void AsyncGdalRunner::run(const GdalTask &task)

@@ -10,6 +10,7 @@
 
 #include <qgsrasterlayer.h>
 
+typedef void *GDALRasterBandH;
 typedef void *GDALDatasetH;
 
 /**
@@ -99,8 +100,11 @@ private:
         PiecewisePoint
     };
 
+    /// Computes one band's statistics + 256-bin histogram on the given dataset.
+    /// Safe to call from a worker thread (no shared state touched).
+    static BandData computeBandData( GDALDatasetH ds, int bandNum );
     void computeHistograms();
-    void computeSingleBandHistogram( int bandNum, BandData &data );
+    void finalizeHistogramCompute();
     void drawChart( QPainter &painter, const QRect &chartRect );
     void drawAxes( QPainter &painter, const QRect &chartRect );
     void drawBars( QPainter &painter, const QRect &chartRect );
@@ -127,9 +131,11 @@ private:
 
     ChannelMode m_channelMode = ChannelMode::SingleBand;
 
-    GDALDatasetH m_cachedDataset = nullptr;
-    QString m_cachedSource;
     QMap<int, BandData> m_bandCache;
+
+    // Background computation state (#520): heavy GDAL scans run off the GUI thread.
+    bool m_computeInProgress = false;
+    bool m_recomputeWhenIdle = false;
 
     BandData m_singleBandData;
     BandData m_redData;

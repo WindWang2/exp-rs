@@ -6,7 +6,10 @@
 #include "rs_dual_viewport_sync_controller.h"
 
 #include "qgis.h"
+#include "qgscoordinatereferencesystem.h"
+#include "qgscoordinatetransform.h"
 #include "qgsmapcanvas.h"
+#include "qgsproject.h"
 #include "qgsrectangle.h"
 
 namespace
@@ -126,6 +129,32 @@ void RsDualViewportSyncController::applySync( QgsMapCanvas *source, QgsMapCanvas
 {
     if ( !source || !target || mApplying )
         return;
+
+    // Extents live in each canvas's CRS. When the two views diverge (e.g. a
+    // reprojected secondary view), copying coordinates verbatim produces
+    // invalid viewports — transform instead, and skip sync on failure (#518).
+    const QgsCoordinateReferenceSystem sourceCrs = source->mapSettings().destinationCrs();
+    const QgsCoordinateReferenceSystem targetCrs = target->mapSettings().destinationCrs();
+    if ( sourceCrs.isValid() && targetCrs.isValid() && sourceCrs != targetCrs )
+    {
+        try
+        {
+            const QgsCoordinateTransform ct( sourceCrs, targetCrs, QgsProject::instance()->transformContext() );
+            QgsRectangle transformed = ct.transformBoundingBox( source->extent() );
+            mApplying = true;
+            ++mStats.appliedSyncCount;
+            if ( target->extent() != transformed )
+            {
+                target->setExtent( transformed );
+            }
+            mApplying = false;
+        }
+        catch ( const QgsCsException & )
+        {
+            // Out-of-domain extents cannot be represented in the target CRS.
+        }
+        return;
+    }
 
     mApplying = true;
     ++mStats.appliedSyncCount;

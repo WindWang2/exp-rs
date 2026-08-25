@@ -725,17 +725,13 @@ void RsObiaMainWindow::cancelActiveTask()
     if ( m_pendingTaskId >= 0 )
     {
         sicnu::TaskCenter::instance().cancelTask( m_pendingTaskId );
-        m_pendingTaskId = -1;
-        m_pendingOp = PendingOp::None;
-        m_pendingSegWork.reset();
-        m_pendingHierWork.reset();
-        m_pendingHierClsWork.reset();
-        m_pendingLevelWork.reset();
-        m_pendingFlatTask = nullptr;
-        m_pendingFlatOutputPath.clear();
-        m_pendingCanceled.reset();
+        // Release the busy UI right away, but keep the pending state — most
+        // importantly m_pendingFlatTask and m_pendingTaskId — alive until the
+        // terminal taskUpdated(Canceled) event arrives. The worker lambda
+        // submitted to TaskCenter still uses the task object on a background
+        // thread, and onObiaTaskUpdated() owns its deleteLater() (#514).
         finishPendingUi();
-        statusBar()->showMessage( tr( "OBIA 任务已取消" ), 3000 );
+        statusBar()->showMessage( tr( "OBIA 任务取消中..." ), 3000 );
     }
 }
 

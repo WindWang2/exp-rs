@@ -43,6 +43,12 @@
 #include "qgsfeatureaction.h"
 #include "qgsguivectorlayertools.h"
 
+// Concrete child-window types: typed pointers must reach QWidget without a
+// void* round-trip (subobject offset must not be discarded, #517)
+#include "classification/qgsclassificationmainwindow.h"
+#include "georeferencer/qgsgeoref_image_to_map_window.h"
+#include "georeferencer/qgsgeoreferencermainwindow.h"
+
 #include <QAction>
 #include <QCoreApplication>
 #include <QDebug>
@@ -216,7 +222,6 @@ QgisDesktopWindow::~QgisDesktopWindow()
     }
 
     // Tear down child windows that rebind QgisApp / own canvases first.
-    // Use QWidget* so we don't need full type definitions here.
     auto disposeChildWindow = []( QWidget *w ) {
         if (!w)
             return;
@@ -224,13 +229,13 @@ QgisDesktopWindow::~QgisDesktopWindow()
         w->setParent(nullptr);
         w->deleteLater();
     };
-    disposeChildWindow(static_cast<QWidget *>(static_cast<void *>(m_classifyWindow)));
+    disposeChildWindow(m_classifyWindow);
     m_classifyWindow = nullptr;
     disposeChildWindow(m_obiaWindow);
     m_obiaWindow = nullptr;
-    disposeChildWindow(static_cast<QWidget *>(static_cast<void *>(m_georefI2I)));
+    disposeChildWindow(m_georefI2I);
     m_georefI2I = nullptr;
-    disposeChildWindow(static_cast<QWidget *>(static_cast<void *>(m_georefI2M)));
+    disposeChildWindow(m_georefI2M);
     m_georefI2M = nullptr;
 
     // Stop map jobs and release the active map tool before unique_ptr members

@@ -108,8 +108,11 @@ void RsRoiSpectrumTool::finishPolygon()
   const QString rasterName = m_rasterLayer->name();
   auto onResult = m_onResult;
 
-  auto *watcher = new QFutureWatcher<SpectrumTaskResult>();
-  QObject::connect( watcher, &QFutureWatcher<SpectrumTaskResult>::finished, [watcher, onResult]() {
+  // Parented to this tool and connected with it as receiver context: when the
+  // owning widget goes away mid-computation the connection is severed and the
+  // watcher destroyed instead of invoking a dangling callback (#511).
+  auto *watcher = new QFutureWatcher<SpectrumTaskResult>( this );
+  QObject::connect( watcher, &QFutureWatcher<SpectrumTaskResult>::finished, this, [watcher, onResult]() {
     SpectrumTaskResult res = watcher->result();
     watcher->deleteLater();
     if ( onResult )

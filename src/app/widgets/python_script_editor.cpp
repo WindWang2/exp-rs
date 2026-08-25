@@ -62,7 +62,12 @@ PythonScriptEditor::~PythonScriptEditor()
             m_runnerThread->setParent(nullptr);
             QObject::connect(m_runnerThread, &QThread::finished, m_runnerThread, &QObject::deleteLater);
             if (m_runner) {
-                QObject::connect(m_runnerThread, &QThread::finished, m_runner, &QObject::deleteLater);
+                // The runner lives in the worker thread whose event loop is
+                // already gone — a deleteLater posted there would never be
+                // delivered. Re-home it to the main thread (still alive) so
+                // deferred deletion actually runs (#519).
+                m_runner->moveToThread(QCoreApplication::instance()->thread());
+                m_runner->deleteLater();
                 m_runner = nullptr;
             }
             m_runnerThread = nullptr;

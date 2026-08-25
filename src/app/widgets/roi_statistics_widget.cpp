@@ -19,11 +19,23 @@
 #include <QLabel>
 #include <QHeaderView>
 #include <QFileDialog>
+#include <QPointer>
 #include <QTextStream>
 #include <QMessageBox>
+#include <QtConcurrent>
 
 #include <gdal.h>
 #include <cmath>
+
+namespace {
+
+struct RoiStatsResult
+{
+    QVector<RoiStatisticsWidget::BandStats> stats;
+    int bandCount = 0;
+};
+
+} // namespace
 
 RoiStatisticsWidget::RoiStatisticsWidget(QWidget *parent)
     : QWidget(parent)
@@ -102,10 +114,10 @@ void RoiStatisticsWidget::computeStatistics()
         return;
     }
 
-    int bandCount = m_rasterLayer->bandCount();
-    m_stats.resize(bandCount);
+    // Snapshot inputs for the background computation; the heavy GDAL scan and
+    // per-pixel GEOS containment tests must not run on the GUI thread (#515).
+    const QString rasterSource = m_rasterLayer->source();
 
-    // Get ROI geometry (union of all features)
     QgsGeometry roiGeom;
     if (m_roiLayer && m_roiLayer->isValid()) {
         QgsFeatureIterator iter = m_roiLayer->getFeatures();
@@ -119,117 +131,135 @@ void RoiStatisticsWidget::computeStatistics()
             }
         }
     }
+    const QgsRectangle bbox = roiGeom.isNull() ? m_rasterLayer->extent() : roiGeom.boundingBox();
 
-    // Get bounding box of ROI or full extent
-    QgsRectangle bbox = roiGeom.isNull() ? m_rasterLayer->extent() : roiGeom.boundingBox();
+    m_refreshBtn->setEnabled(false);
+    m_summaryLabel->setText(tr("Computing statistics..."));
 
-    // Read raster data
-    GDALDatasetH ds = GDALOpen(m_rasterLayer->source().toUtf8().constData(), GA_ReadOnly);
-    if (!ds) return;
+    auto *watcher = new QFutureWatcher<RoiStatsResult>(this);
+    connect(watcher, &QFutureWatcher<RoiStatsResult>::finished, this, [this, watcher]() {
+        watcher->deleteLater();
+        if (m_refreshBtn)
+            m_refreshBtn->setEnabled(true);
+        RoiStatsResult result = watcher->result();
+        m_stats = result.stats;
 
-    double gt[6];
-    if (GDALGetGeoTransform(ds, gt) != CE_None) {
-        gt[0] = 0; gt[1] = 1; gt[2] = 0;
-        gt[3] = 0; gt[4] = 0; gt[5] = 1;
-    }
+        const int displayPixels = m_stats.isEmpty() ? 0 : m_stats[0].pixelCount;
+        m_summaryLabel->setText(tr("Statistics computed for %1 bands, %2 pixels")
+                                    .arg(result.bandCount).arg(displayPixels));
+        updateTable();
 
-    double invGt[6];
-    if ( !GDALInvGeoTransform( gt, invGt ) ) {
-        invGt[0] = 0; invGt[1] = 1; invGt[2] = 0;
-        invGt[3] = 0; invGt[4] = 0; invGt[5] = 1;
-    }
+        SICNU_LOG_INFO(SicnuLogTags::Widgets,
+                       QString("ROI statistics computed: %1 bands, %2 pixels").arg(result.bandCount).arg(displayPixels));
+    });
 
-    const double xs[4] = { bbox.xMinimum(), bbox.xMaximum(), bbox.xMinimum(), bbox.xMaximum() };
-    const double ys[4] = { bbox.yMinimum(), bbox.yMinimum(), bbox.yMaximum(), bbox.yMaximum() };
-    double pxMin = std::numeric_limits<double>::infinity();
-    double pxMax = -std::numeric_limits<double>::infinity();
-    double pyMin = std::numeric_limits<double>::infinity();
-    double pyMax = -std::numeric_limits<double>::infinity();
+    watcher->setFuture(QtConcurrent::run([rasterSource, roiGeom, bbox]() -> RoiStatsResult {
+        RoiStatsResult out;
+        // Read raster data
+        GDALDatasetH ds = GDALOpen(rasterSource.toUtf8().constData(), GA_ReadOnly);
+        if (!ds) return out;
 
-    for ( int i = 0; i < 4; ++i ) {
-        const double px = invGt[0] + xs[i] * invGt[1] + ys[i] * invGt[2];
-        const double py = invGt[3] + xs[i] * invGt[4] + ys[i] * invGt[5];
-        pxMin = std::min( pxMin, px );
-        pxMax = std::max( pxMax, px );
-        pyMin = std::min( pyMin, py );
-        pyMax = std::max( pyMax, py );
-    }
+        const int bandCount = GDALGetRasterCount(ds);
+        out.bandCount = bandCount;
+        out.stats.resize(bandCount);
 
-    int rWidth = GDALGetRasterXSize(ds);
-    int rHeight = GDALGetRasterYSize(ds);
+        double gt[6];
+        if (GDALGetGeoTransform(ds, gt) != CE_None) {
+            gt[0] = 0; gt[1] = 1; gt[2] = 0;
+            gt[3] = 0; gt[4] = 0; gt[5] = 1;
+        }
 
-    int xOff = std::clamp(static_cast<int>(std::floor(pxMin)), 0, rWidth);
-    int yOff = std::clamp(static_cast<int>(std::floor(pyMin)), 0, rHeight);
-    int xSize = std::clamp(static_cast<int>(std::ceil(pxMax)) - xOff, 0, rWidth - xOff);
-    int ySize = std::clamp(static_cast<int>(std::ceil(pyMax)) - yOff, 0, rHeight - yOff);
+        double invGt[6];
+        if ( !GDALInvGeoTransform( gt, invGt ) ) {
+            invGt[0] = 0; invGt[1] = 1; invGt[2] = 0;
+            invGt[3] = 0; invGt[4] = 0; invGt[5] = 1;
+        }
 
-    if (xSize <= 0 || ySize <= 0) {
+        const double xs[4] = { bbox.xMinimum(), bbox.xMaximum(), bbox.xMinimum(), bbox.xMaximum() };
+        const double ys[4] = { bbox.yMinimum(), bbox.yMinimum(), bbox.yMaximum(), bbox.yMaximum() };
+        double pxMin = std::numeric_limits<double>::infinity();
+        double pxMax = -std::numeric_limits<double>::infinity();
+        double pyMin = std::numeric_limits<double>::infinity();
+        double pyMax = -std::numeric_limits<double>::infinity();
+
+        for ( int i = 0; i < 4; ++i ) {
+            const double px = invGt[0] + xs[i] * invGt[1] + ys[i] * invGt[2];
+            const double py = invGt[3] + xs[i] * invGt[4] + ys[i] * invGt[5];
+            pxMin = std::min( pxMin, px );
+            pxMax = std::max( pxMax, px );
+            pyMin = std::min( pyMin, py );
+            pyMax = std::max( pyMax, py );
+        }
+
+        const int rWidth = GDALGetRasterXSize(ds);
+        const int rHeight = GDALGetRasterYSize(ds);
+
+        int xOff = std::clamp(static_cast<int>(std::floor(pxMin)), 0, rWidth);
+        int yOff = std::clamp(static_cast<int>(std::floor(pyMin)), 0, rHeight);
+        int xSize = std::clamp(static_cast<int>(std::ceil(pxMax)) - xOff, 0, rWidth - xOff);
+        int ySize = std::clamp(static_cast<int>(std::ceil(pyMax)) - yOff, 0, rHeight - yOff);
+
+        if (xSize <= 0 || ySize <= 0 || bandCount <= 0) {
+            GDALClose(ds);
+            return out;
+        }
+
+        // Rasterize / test point-in-polygon mask if ROI geometry is present
+        const bool hasRoi = !roiGeom.isNull();
+        std::vector<uint8_t> inside(static_cast<size_t>(xSize) * ySize, 1);
+        if (hasRoi) {
+            for (int y = 0; y < ySize; ++y) {
+                const int py = yOff + y;
+                const double rCenter = py + 0.5;
+                for (int x = 0; x < xSize; ++x) {
+                    const int px = xOff + x;
+                    const double cCenter = px + 0.5;
+                    const double mapX = gt[0] + cCenter * gt[1] + rCenter * gt[2];
+                    const double mapY = gt[3] + cCenter * gt[4] + rCenter * gt[5];
+                    // intersects (not contains): GEOS Contains excludes points
+                    // exactly on the boundary; include boundary-center pixels,
+                    // consistent with the rasterizer's boundary handling (#449).
+                    inside[static_cast<size_t>(y) * xSize + x] =
+                        roiGeom.intersects(QgsGeometry::fromPointXY(QgsPointXY(mapX, mapY))) ? 1 : 0;
+                }
+            }
+        }
+
+        for (int b = 0; b < bandCount; ++b) {
+            GDALRasterBandH band = GDALGetRasterBand(ds, b + 1);
+            if (!band) continue;
+
+            std::vector<float> buf(static_cast<size_t>(xSize) * ySize);
+            GDALRasterIO(band, GF_Read, xOff, yOff, xSize, ySize, buf.data(), xSize, ySize, GDT_Float32, 0, 0);
+
+            int hasNoData = 0;
+            double noDataVal = GDALGetRasterNoDataValue(band, &hasNoData);
+
+            std::vector<float> roiPixels;
+            roiPixels.reserve(buf.size());
+            for (size_t i = 0; i < buf.size(); ++i) {
+                if (inside[i]) {
+                    roiPixels.push_back(buf[i]);
+                }
+            }
+
+            // Compute statistics using shared utility
+            MathUtils::Stats s;
+            if (hasNoData && std::isfinite(noDataVal)) {
+                s = MathUtils::computeStatsWithNodata(roiPixels.data(), roiPixels.size(), static_cast<float>(noDataVal));
+            } else {
+                s = MathUtils::computeStats(roiPixels.data(), roiPixels.size());
+            }
+
+            out.stats[b].pixelCount = static_cast<int>(s.validCount);
+            out.stats[b].mean = s.mean;
+            out.stats[b].stddev = s.stddev;
+            out.stats[b].min = s.min;
+            out.stats[b].max = s.max;
+        }
         GDALClose(ds);
-        return;
-    }
-
-    // Rasterize / test point-in-polygon mask if ROI geometry is present
-    const bool hasRoi = !roiGeom.isNull();
-    std::vector<uint8_t> inside(static_cast<size_t>(xSize) * ySize, 1);
-    if (hasRoi) {
-        for (int y = 0; y < ySize; ++y) {
-            const int py = yOff + y;
-            const double rCenter = py + 0.5;
-            for (int x = 0; x < xSize; ++x) {
-                const int px = xOff + x;
-                const double cCenter = px + 0.5;
-                const double mapX = gt[0] + cCenter * gt[1] + rCenter * gt[2];
-                const double mapY = gt[3] + cCenter * gt[4] + rCenter * gt[5];
-                // intersects (not contains): GEOS Contains excludes points
-                // exactly on the boundary; include boundary-center pixels,
-                // consistent with the rasterizer's boundary handling (#449).
-                inside[static_cast<size_t>(y) * xSize + x] =
-                    roiGeom.intersects(QgsGeometry::fromPointXY(QgsPointXY(mapX, mapY))) ? 1 : 0;
-            }
-        }
-    }
-
-    for (int b = 0; b < bandCount; ++b) {
-        GDALRasterBandH band = GDALGetRasterBand(ds, b + 1);
-        if (!band) continue;
-
-        std::vector<float> buf(static_cast<size_t>(xSize) * ySize);
-        GDALRasterIO(band, GF_Read, xOff, yOff, xSize, ySize, buf.data(), xSize, ySize, GDT_Float32, 0, 0);
-
-        int hasNoData = 0;
-        double noDataVal = GDALGetRasterNoDataValue(band, &hasNoData);
-
-        std::vector<float> roiPixels;
-        roiPixels.reserve(buf.size());
-        for (size_t i = 0; i < buf.size(); ++i) {
-            if (inside[i]) {
-                roiPixels.push_back(buf[i]);
-            }
-        }
-
-        // Compute statistics using shared utility
-        MathUtils::Stats s;
-        if (hasNoData && std::isfinite(noDataVal)) {
-            s = MathUtils::computeStatsWithNodata(roiPixels.data(), roiPixels.size(), static_cast<float>(noDataVal));
-        } else {
-            s = MathUtils::computeStats(roiPixels.data(), roiPixels.size());
-        }
-
-        m_stats[b].pixelCount = static_cast<int>(s.validCount);
-        m_stats[b].mean = s.mean;
-        m_stats[b].stddev = s.stddev;
-        m_stats[b].min = s.min;
-        m_stats[b].max = s.max;
-    }
-    GDALClose(ds);
-
-    const int displayPixels = m_stats.isEmpty() ? 0 : m_stats[0].pixelCount;
-    m_summaryLabel->setText(tr("Statistics computed for %1 bands, %2 pixels")
-                                .arg(bandCount).arg(displayPixels));
-    updateTable();
-
-    SICNU_LOG_INFO(SicnuLogTags::Widgets,
-                   QString("ROI statistics computed: %1 bands, %2 pixels").arg(bandCount).arg(displayPixels));
+        return out;
+    }));
 }
 
 void RoiStatisticsWidget::updateTable()
