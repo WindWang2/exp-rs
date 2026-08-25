@@ -57,6 +57,13 @@ QgsNative::Capabilities QgsWinNative::capabilities() const
   return mCapabilities;
 }
 
+QgsWinNative::~QgsWinNative()
+{
+  // Guarantee the native event filter is uninstalled even when cleanup() was
+  // never called explicitly (#489).
+  cleanup();
+}
+
 void QgsWinNative::initializeMainWindow( QWindow *window, const QString &applicationName, const QString &organizationName, const QString &version )
 {
   mWindow = window;
@@ -82,8 +89,20 @@ void QgsWinNative::initializeMainWindow( QWindow *window, const QString &applica
 
 void QgsWinNative::cleanup()
 {
+  if ( mNativeEventFilter )
+  {
+    // Uninstall before deleting: the dispatcher would otherwise keep a
+    // dangling filter pointer and crash on the next native event (#489).
+    if ( QAbstractEventDispatcher *dispatcher = QAbstractEventDispatcher::instance() )
+      dispatcher->removeNativeEventFilter( mNativeEventFilter );
+    delete mNativeEventFilter;
+    mNativeEventFilter = nullptr;
+  }
   if ( mWinToastInitialized )
+  {
     WinToastLib::WinToast::instance()->clear();
+    mWinToastInitialized = false;
+  }
   mWindow = nullptr;
 }
 
@@ -232,7 +251,9 @@ bool QgsWinNativeEventFilter::nativeEventFilter( const QByteArray &eventType, vo
 
       for ( const QString &drive : drives )
       {
-        emit usbStorageNotification( u"%1:/"_s.arg( drive ), wParam == DBT_DEVICEARRIVAL );
+        // drive already carries the "A:/" form — appending ":/" again would
+        // emit a malformed "A://" path (#490).
+        emit usbStorageNotification( drive, wParam == DBT_DEVICEARRIVAL );
       }
       return false;
     }

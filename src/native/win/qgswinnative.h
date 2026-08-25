@@ -48,6 +48,8 @@ class QgsWinNativeEventFilter : public QObject, public QAbstractNativeEventFilte
 class NATIVE_EXPORT QgsWinNative : public QgsNative
 {
   public:
+    ~QgsWinNative() override;
+
     Capabilities capabilities() const override;
     void initializeMainWindow( QWindow *window, const QString &applicationName, const QString &organizationName, const QString &version ) override;
     void cleanup() override;

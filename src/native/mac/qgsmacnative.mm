@@ -53,7 +53,15 @@ QgsMacNative::QgsMacNative()
 }
 
 QgsMacNative::~QgsMacNative() {
-  [mQgsUserNotificationCenter->_qgsUserNotificationCenter dealloc];
+  // Detach the global notification center's delegate BEFORE releasing it,
+  // otherwise the system retains a dangling pointer and crashes on the next
+  // notification event (#488). Use release (never dealloc directly).
+  [[NSUserNotificationCenter defaultUserNotificationCenter] setDelegate:nil];
+  [mQgsUserNotificationCenter->_qgsUserNotificationCenter release];
+  if (mQgsUserNotificationCenter->_qgisIcon) {
+    [mQgsUserNotificationCenter->_qgisIcon release];
+    mQgsUserNotificationCenter->_qgisIcon = nil;
+  }
   delete mQgsUserNotificationCenter;
 }
 
@@ -63,8 +71,11 @@ void QgsMacNative::setIconPath(const QString &iconPath) {
                                   size:NSZeroSize];
 }
 
-const char *QgsMacNative::currentAppLocalizedName() {
-  return [[[NSRunningApplication currentApplication] localizedName] UTF8String];
+QString QgsMacNative::currentAppLocalizedName() {
+  // localizedName is autoreleased; copying into a QString keeps the buffer
+  // alive after the surrounding autorelease pool drains (#487).
+  NSString *name = [[NSRunningApplication currentApplication] localizedName];
+  return QString::fromNSString(name);
 }
 
 void QgsMacNative::currentAppActivateIgnoringOtherApps() {

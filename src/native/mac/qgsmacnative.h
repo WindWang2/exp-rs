@@ -32,7 +32,9 @@ class NATIVE_EXPORT QgsMacNative : public QgsNative
     //! reset the application icon used in the notification
     void setIconPath( const QString &iconPath = QString() );
 
-    virtual const char *currentAppLocalizedName();
+    //! Returns the localized name of the running application as an owned
+    //! QString — never a borrowed UTF8 pointer into a transient NSString (#487)
+    virtual QString currentAppLocalizedName();
     void currentAppActivateIgnoringOtherApps() override;
     void openFileExplorerAndSelectFile( const QString &path ) override;
     QgsNative::Capabilities capabilities() const override;

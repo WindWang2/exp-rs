@@ -139,9 +139,20 @@ bool QgsLinuxNative::openTerminalAtPath( const QString &path )
     term = u"konsole"_s;
   }
 
+  // Terminal-specific working-directory flags (#490): the populated argument
+  // list was previously discarded and an empty list passed to startDetached.
   QStringList arguments;
-  arguments << u"--working-directory"_s << path;
-  return QProcess::startDetached( term, QStringList(), path );
+  if ( term == u"gnome-terminal"_s )
+  {
+    arguments << u"--working-directory"_s << path;
+  }
+  else if ( term == u"konsole"_s )
+  {
+    arguments << u"--workdir"_s << path;
+  }
+  // xterm / x-terminal-emulator have no portable cwd flag; the
+  // workingDirectory parameter of startDetached covers them.
+  return QProcess::startDetached( term, arguments, path );
 }
 
 /**
