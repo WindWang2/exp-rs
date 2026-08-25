@@ -98,6 +98,13 @@ ViewControlService::ViewControlService( sicnu::display::QgisDisplayManager *disp
   , m_canvas( canvas )
   , m_dataManager( dataManager )
 {
+  if ( m_canvas )
+  {
+    // See setMapCanvas(): keep m_roiRubberBand from dangling (#529).
+    connect( m_canvas, &QObject::destroyed, this, [this]() {
+      m_roiRubberBand = nullptr;
+    } );
+  }
 }
 
 ViewControlService::~ViewControlService()
@@ -124,6 +131,15 @@ void ViewControlService::setMapCanvas( QgsMapCanvas *canvas )
       m_roiRubberBand = nullptr;
     }
     m_canvas = canvas;
+    if ( m_canvas )
+    {
+      // QgsRubberBand is parented to the canvas scene, so it dies together
+      // with the canvas — null our raw pointer on destruction to keep
+      // clearRoi()/destructor from double-deleting (#529).
+      connect( m_canvas, &QObject::destroyed, this, [this]() {
+        m_roiRubberBand = nullptr;
+      } );
+    }
   }
 }
 

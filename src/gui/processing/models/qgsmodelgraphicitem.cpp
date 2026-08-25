@@ -80,7 +80,8 @@ QRectF QgsModelDesignerFlatButtonGraphicItem::boundingRect() const
 
 void QgsModelDesignerFlatButtonGraphicItem::hoverEnterEvent( QGraphicsSceneHoverEvent * )
 {
-  if ( view()->tool() && !view()->tool()->allowItemInteraction() )
+  QgsModelGraphicsView *v = view();
+  if ( v && v->tool() && !v->tool()->allowItemInteraction() )
     mHoverState = false;
   else
     mHoverState = true;
@@ -95,13 +96,15 @@ void QgsModelDesignerFlatButtonGraphicItem::hoverLeaveEvent( QGraphicsSceneHover
 
 void QgsModelDesignerFlatButtonGraphicItem::mousePressEvent( QGraphicsSceneMouseEvent * )
 {
-  if ( view()->tool() && view()->tool()->allowItemInteraction() )
+  QgsModelGraphicsView *v = view();
+  if ( v && v->tool() && v->tool()->allowItemInteraction() )
     emit clicked();
 }
 
 void QgsModelDesignerFlatButtonGraphicItem::modelHoverEnterEvent( QgsModelViewMouseEvent * )
 {
-  if ( view()->tool() && !view()->tool()->allowItemInteraction() )
+  QgsModelGraphicsView *v = view();
+  if ( v && v->tool() && !v->tool()->allowItemInteraction() )
     mHoverState = false;
   else
     mHoverState = true;
@@ -116,7 +119,8 @@ void QgsModelDesignerFlatButtonGraphicItem::modelHoverLeaveEvent( QgsModelViewMo
 
 void QgsModelDesignerFlatButtonGraphicItem::modelPressEvent( QgsModelViewMouseEvent *event )
 {
-  if ( view()->tool() && view()->tool()->allowItemInteraction() && event->button() == Qt::LeftButton )
+  QgsModelGraphicsView *v = view();
+  if ( v && v->tool() && v->tool()->allowItemInteraction() && event->button() == Qt::LeftButton )
   {
     QMetaObject::invokeMethod( this, "clicked", Qt::QueuedConnection );
     mHoverState = false;
@@ -133,6 +137,10 @@ void QgsModelDesignerFlatButtonGraphicItem::setPosition( const QPointF &position
 
 QgsModelGraphicsView *QgsModelDesignerFlatButtonGraphicItem::view()
 {
+  // The item may live in a scene with no attached view (offscreen rendering,
+  // closed designer window) — guard against a null scene / empty views list (#510).
+  if ( !scene() || scene()->views().isEmpty() )
+    return nullptr;
   return qobject_cast<QgsModelGraphicsView *>( scene()->views().first() );
 }
 

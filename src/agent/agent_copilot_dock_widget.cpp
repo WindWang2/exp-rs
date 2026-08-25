@@ -505,18 +505,30 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
     emit viewPlanInCanvasRequested( planJson );
   } );
 
-  connect( runBtn, &QPushButton::clicked, this, [this, planJson]() {
+  connect( runBtn, &QPushButton::clicked, this, [this, planJson, btn = QPointer<QPushButton>( runBtn )]() mutable {
+    // Re-entrancy guard: a second click while the plan is already executing
+    // would submit a duplicate pipeline to TaskCenter (#530).
+    if ( !btn->isEnabled() )
+      return;
+    btn->setEnabled( false );
+    btn->setText( QStringLiteral( "⏳ 执行中..." ) );
+
     // Execute the approved plan asynchronously. AgentWorkflowExecutor owns
     // pipeline watching and marshals the completion callback onto this
     // widget's thread — no detached std::thread (ADR 0047).
     m_workflowExecutor.executeAgentPlanAsync( processing::jsonValueFromQJson( planJson ),
-                                              [this]( const Json::Value &resultPayload ) {
+                                              [this, btn]( const Json::Value &resultPayload ) {
       // Completion payload shape is owned by the workflow executor; read it
       // in Json-land instead of round-tripping through QJson (ADR 0048).
       const Json::Value resultObj = resultPayload.isObject() ? resultPayload : Json::Value( Json::objectValue );
       if ( resultObj["status"].asString() != "success" )
       {
         appendErrorMessage( QString::fromStdString( resultObj["errorMessage"].asString() ) );
+      }
+      if ( btn )
+      {
+        btn->setEnabled( true );
+        btn->setText( QStringLiteral( "▶ 确认并执行" ) );
       }
     }, this );
   } );

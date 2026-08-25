@@ -1239,7 +1239,12 @@ void QgsAdvancedDigitizingDockWidget::constraintTextEdited( const QString &textV
 
 void QgsAdvancedDigitizingDockWidget::constraintFocusOut()
 {
-  QLineEdit *lineEdit = qobject_cast<QLineEdit *>( sender()->parent() );
+  // sender() is nullptr when the slot is invoked programmatically (#509).
+  const QObject *snd = sender();
+  if ( !snd || !snd->parent() )
+    return;
+
+  QLineEdit *lineEdit = qobject_cast<QLineEdit *>( snd->parent() );
   if ( !lineEdit )
     return;
 

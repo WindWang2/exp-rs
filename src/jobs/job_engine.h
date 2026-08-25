@@ -167,6 +167,9 @@ class JobEngine
 
     mutable std::mutex m_mutex;
     std::condition_variable m_cv;
+    /// Signalled when an in-progress shutdown() finishes joining its workers,
+    /// so concurrent shutdown callers block until teardown completes (#507).
+    std::condition_variable m_shutdownCv;
     std::deque<std::string> m_queue;
     std::unordered_map<std::string, JobRecord> m_jobs;
     std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> m_cancelFlags;
@@ -174,11 +177,16 @@ class JobEngine
     std::vector<std::pair<std::string, JobExecutor>> m_prefixExecutors;
     JobExecutor m_fallbackExecutor; // catch-all, tried after RSOperatorRegistry
     std::vector<std::thread> m_workers;
+    /// Workers retired by setMaxWorkers() shrink; they exit promptly but are
+    /// only joined from a non-critical path (shutdown) to avoid blocking the
+    /// caller on long-running jobs (#506).
+    std::vector<std::thread> m_retiredWorkers;
     Listener m_listener;
     int m_maxWorkers = 3;
     int m_running = 0;
     bool m_exclusiveRunning = false;
     bool m_shuttingDown = false;
+    bool m_shutdownDone = true;
     uint64_t m_generation = 0;
     std::atomic<bool> m_stop{false};
     std::atomic<uint64_t> m_nextId{1};

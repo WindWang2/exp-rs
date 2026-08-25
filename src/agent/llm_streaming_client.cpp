@@ -295,7 +295,8 @@ void LlmStreamingClient::onReplyFinished()
   // [DONE] path already emitted it — a parsed tool call is emitted exactly once.
   emitParsedToolCallOnce();
 
-  if (m_currentReply->error() != QNetworkReply::NoError && m_currentReply->error() != QNetworkReply::OperationCanceledError)
+  const QNetworkReply::NetworkError err = m_currentReply->error();
+  if (err != QNetworkReply::NoError && err != QNetworkReply::OperationCanceledError)
   {
     if (!m_finishedEmitted)
     {
@@ -307,19 +308,16 @@ void LlmStreamingClient::onReplyFinished()
     m_finishedEmitted = true;
     emit finished();
   }
+
+  // Release the reply: without this every completed conversation leaks its
+  // HTTP socket and response buffers (#528).
+  m_currentReply->deleteLater();
+  m_currentReply = nullptr;
 }
 
 void LlmStreamingClient::onReplyError( QNetworkReply::NetworkError code )
 {
-  if ( code != QNetworkReply::OperationCanceledError && m_currentReply )
-  {
-    emit errorOccurred( m_currentReply->errorString() );
-    if (!m_finishedEmitted)
-    {
-      m_finishedEmitted = true;
-      emit finished();
-    }
-  }
+  Q_UNUSED( code );
 }
 
 } // namespace sicnu::agent

@@ -48,13 +48,23 @@ void JobEngine::shutdown()
   std::vector<JobRecord> cancelledRecords;
   std::vector<std::function<void()>> cancelHooks;
   {
-    std::lock_guard<std::mutex> lock( m_mutex );
+    std::unique_lock<std::mutex> lock( m_mutex );
     if ( m_shuttingDown )
+    {
+      // Another thread is already tearing the engine down: block until its
+      // join completes so callers cannot race static destruction against
+      // still-running workers (#507).
+      m_shutdownCv.wait( lock, [this] { return m_shutdownDone; } );
       return;
+    }
     m_shuttingDown = true;
+    m_shutdownDone = false;
     m_stop.store( true );
     m_generation++;
     toJoin.swap( m_workers );
+    for ( auto &t : m_retiredWorkers )
+      toJoin.push_back( std::move( t ) );
+    m_retiredWorkers.clear();
 
     // Arm cancel flags of running jobs and collect cancel hooks
     for ( auto &kv : m_cancelFlags )
@@ -111,16 +121,36 @@ void JobEngine::shutdown()
   {
     std::lock_guard<std::mutex> lock( m_mutex );
     m_shuttingDown = false;
+    m_shutdownDone = true;
   }
+  m_shutdownCv.notify_all();
 }
 
 void JobEngine::setMaxWorkers( int n )
 {
-  std::lock_guard<std::mutex> lock( m_mutex );
-  m_maxWorkers = std::clamp( n, 2, 4 );
-  if ( !m_stop.load() )
-    ensureWorkersLocked();
-  m_cv.notify_all();
+  {
+    std::lock_guard<std::mutex> lock( m_mutex );
+    m_maxWorkers = std::clamp( n, 2, 4 );
+    if ( !m_stop.load() && !m_shuttingDown && static_cast<int>( m_workers.size() ) > m_maxWorkers )
+    {
+      // Shrink: retire surplus workers. Bumping the generation makes every
+      // current worker exit as soon as it finishes its in-flight job; spawn
+      // fresh replacements so capacity stays at m_maxWorkers (#506). The
+      // retired threads are joined later from shutdown(), not here.
+      m_generation++;
+      const uint64_t gen = m_generation;
+      for ( auto &t : m_workers )
+        m_retiredWorkers.push_back( std::move( t ) );
+      m_workers.clear();
+      while ( static_cast<int>( m_workers.size() ) < m_maxWorkers )
+        m_workers.emplace_back( [this, gen] { workerLoop( gen ); } );
+    }
+    else if ( !m_stop.load() )
+    {
+      ensureWorkersLocked();
+    }
+    m_cv.notify_all();
+  }
 }
 
 int JobEngine::maxWorkers() const
@@ -423,6 +453,9 @@ void JobEngine::shutdownForTests()
   {
     std::lock_guard<std::mutex> lock( m_mutex );
     toJoin.swap( m_workers );
+    for ( auto &t : m_retiredWorkers )
+      toJoin.push_back( std::move( t ) );
+    m_retiredWorkers.clear();
   }
   for ( auto &t : toJoin )
   {

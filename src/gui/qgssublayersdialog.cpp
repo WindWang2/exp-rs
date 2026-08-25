@@ -40,10 +40,23 @@ class SubLayerItem : public QTreeWidgetItem
 
     bool operator<( const QTreeWidgetItem &other ) const override
     {
-      QgsSublayersDialog *d = qobject_cast<QgsSublayersDialog *>( treeWidget()->parent() );
-      const int col = treeWidget()->sortColumn();
+      // treeWidget() is null for an item that has not been inserted yet, and
+      // the dialog may not be a direct parent when reparented (#510).
+      if ( !treeWidget() )
+        return false;
 
-      if ( col == 0 || ( col > 0 && d->countColumn() == col ) )
+      QgsSublayersDialog *d = nullptr;
+      for ( QWidget *p = treeWidget()->parentWidget(); p; p = p->parentWidget() )
+      {
+        if ( ( d = qobject_cast<QgsSublayersDialog *>( p ) ) )
+          break;
+      }
+
+      const int col = treeWidget()->sortColumn();
+      if ( col < 0 )
+        return false;
+
+      if ( col == 0 || ( d && col > 0 && d->countColumn() == col ) )
         return text( col ).toInt() < other.text( col ).toInt();
       else
         return text( col ) < other.text( col );
