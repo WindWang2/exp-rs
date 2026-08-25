@@ -13,12 +13,17 @@ namespace sicnu::agent::spatial_tools {
 
 /**
  * Result of a spatial tool execution. On success `output` conforms to the
- * tool's outputSchema; on failure `error` carries a user-facing message.
+ * tool's outputSchema; on failure `error` carries a user-facing message,
+ * accompanied by machine-readable error codes and categorization for agent
+ * planning (ADR 0122 / Harness deepening).
  */
 struct SpatialToolResult {
   bool success = false;
   Json::Value output;
   std::string error;
+  std::string errorCode;     ///< Machine-readable code, e.g. "NOT_FOUND", "INVALID_PARAMETER"
+  std::string errorCategory; ///< Error family: "validation" | "io" | "runtime"
+  bool retryable = false;    ///< Whether Pi/agent can retry the operation with adjusted parameters
 
   static SpatialToolResult ok( Json::Value output )
   {
@@ -28,12 +33,40 @@ struct SpatialToolResult {
     return r;
   }
 
-  static SpatialToolResult failure( std::string error )
+  static SpatialToolResult failure( std::string error,
+                                    std::string errorCode = "",
+                                    std::string errorCategory = "",
+                                    bool retryable = false )
   {
     SpatialToolResult r;
     r.success = false;
     r.error = std::move( error );
+    r.errorCode = std::move( errorCode );
+    r.errorCategory = std::move( errorCategory );
+    r.retryable = retryable;
     return r;
+  }
+
+  Json::Value toJson() const
+  {
+    Json::Value val( Json::objectValue );
+    val["success"] = success;
+    if ( success )
+    {
+      val["result"] = output;
+    }
+    else
+    {
+      Json::Value errObj( Json::objectValue );
+      errObj["message"] = error;
+      if ( !errorCode.empty() )
+        errObj["code"] = errorCode;
+      if ( !errorCategory.empty() )
+        errObj["category"] = errorCategory;
+      errObj["retryable"] = retryable;
+      val["error"] = errObj;
+    }
+    return val;
   }
 };
 

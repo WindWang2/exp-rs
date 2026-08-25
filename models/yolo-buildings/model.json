@@ -6,6 +6,17 @@
   "framework": "onnx",
   "path": "",
   "gpu": false,
+  "accuracy": 0.84,
+  "domain": {
+    "sensors": ["Sentinel-2", "Landsat-8", "PlanetScope"],
+    "resolution_range": [3.0, 30.0]
+  },
+  "runtime": {
+    "gpu": false,
+    "cpu_fallback": true,
+    "estimated_vram_mb": 0,
+    "supports_tiling": true
+  },
   "description": "Template manifest: building footprint detection (YOLO-derived).",
   "tags": ["buildings", "detection", "template"]
 }

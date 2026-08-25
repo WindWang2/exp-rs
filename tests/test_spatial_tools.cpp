@@ -264,7 +264,100 @@ TEST_CASE( "ModelCatalog scans manifests and the tool exposes them", "[agent][sp
 
     Json::Value byName( Json::objectValue );
     byName["name"] = "missing-model";
-    CHECK_FALSE( tool.execute( byName ).success );
+    const auto failRes = tool.execute( byName );
+    CHECK_FALSE( failRes.success );
+    CHECK( failRes.errorCode == "MODEL_NOT_FOUND" );
+    CHECK( failRes.errorCategory == "validation" );
+}
+
+TEST_CASE( "ModelCatalog multi-criteria ranking and compatibility evaluation", "[agent][spatial][models]" )
+{
+    QTemporaryDir dir;
+    QDir( dir.path() ).mkpath( "seg-s2" );
+    QFile m1( dir.filePath( "seg-s2/model.json" ) );
+    REQUIRE( m1.open( QIODevice::WriteOnly ) );
+    m1.write( R"({
+        "name": "seg-s2",
+        "task": "segmentation",
+        "input": "raster",
+        "output": "raster",
+        "accuracy": 0.92,
+        "domain": {
+            "sensors": ["Sentinel-2"],
+            "resolution_range": [10.0, 20.0]
+        },
+        "runtime": {
+            "gpu": true,
+            "estimated_vram_mb": 1024,
+            "cpu_fallback": true
+        }
+    })" );
+    m1.close();
+
+    QDir( dir.path() ).mkpath( "det-wv" );
+    QFile m2( dir.filePath( "det-wv/model.json" ) );
+    REQUIRE( m2.open( QIODevice::WriteOnly ) );
+    m2.write( R"({
+        "name": "det-wv",
+        "task": "detection",
+        "input": "raster",
+        "output": "vector",
+        "accuracy": 0.85,
+        "domain": {
+            "sensors": ["WorldView-3"],
+            "resolution_range": [0.3, 2.0]
+        },
+        "runtime": {
+            "gpu": false,
+            "estimated_vram_mb": 0,
+            "cpu_fallback": true
+        }
+    })" );
+    m2.close();
+
+    auto &catalog = sicnu::operators::ModelCatalog::instance();
+    catalog.setDirectory( dir.path().toStdString() );
+
+    sicnu::operators::ModelQueryCriteria criteria;
+    criteria.task = "segmentation";
+    criteria.sensor = "Sentinel-2";
+    criteria.resolutionMeters = 10.0;
+    criteria.gpuAvailable = true;
+    criteria.maxVramMb = 2048;
+
+    const auto ranked = catalog.rankModels( criteria );
+    REQUIRE( ranked.size() == 2 );
+    CHECK( ranked[0].model.name == "seg-s2" );
+    CHECK( ranked[0].compatible );
+    CHECK( ranked[0].score > 0.8 );
+    CHECK_FALSE( ranked[1].compatible ); // task mismatch
+
+    sicnu::agent::spatial_tools::ModelCatalogTool tool;
+    Json::Value query( Json::objectValue );
+    query["task"] = "segmentation";
+    query["sensor"] = "Sentinel-2";
+    query["gpu_available"] = true;
+    const auto res = tool.execute( query );
+    REQUIRE( res.success );
+    REQUIRE( res.output["candidates"].isArray() );
+    CHECK( res.output["candidates"].size() == 2 );
+    CHECK( res.output["candidates"][0]["model"]["name"].asString() == "seg-s2" );
+}
+
+TEST_CASE( "SpatialToolResult supports structured error codes and categorization", "[agent][spatial]" )
+{
+    using namespace sicnu::agent::spatial_tools;
+    SpatialToolResult r = SpatialToolResult::failure( "File missing", "FILE_NOT_FOUND", "io", false );
+    CHECK_FALSE( r.success );
+    CHECK( r.error == "File missing" );
+    CHECK( r.errorCode == "FILE_NOT_FOUND" );
+    CHECK( r.errorCategory == "io" );
+    CHECK_FALSE( r.retryable );
+
+    Json::Value json = r.toJson();
+    CHECK_FALSE( json["success"].asBool() );
+    CHECK( json["error"]["code"].asString() == "FILE_NOT_FOUND" );
+    CHECK( json["error"]["category"].asString() == "io" );
 }
 
 TEST_CASE( "AlgorithmMetaStore loads sidecar manifests", "[agent][spatial][meta]" )

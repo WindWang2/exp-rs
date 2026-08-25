@@ -7,6 +7,16 @@
   "path": "",
   "gpu": true,
   "accuracy": 0.89,
+  "domain": {
+    "sensors": ["Sentinel-2", "WorldView-3", "GF-2"],
+    "resolution_range": [0.3, 10.0]
+  },
+  "runtime": {
+    "gpu": true,
+    "cpu_fallback": true,
+    "estimated_vram_mb": 2048,
+    "supports_tiling": true
+  },
   "description": "Template manifest: building extraction model (SAM-derived). Chain with gdal:polygonize for vector output.",
   "tags": ["buildings", "segmentation", "template"]
 }
