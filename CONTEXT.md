@@ -41,8 +41,28 @@ The single deep seam between Agent-facing surfaces (Agent Copilot, MCP Server, H
 _Avoid_: Tool-call handler, Function-call runner, Agent executor
 
 **MCP Server**:
-The stateless external-agent JSON-RPC protocol adapter at the Task Center seam: it owns stdio framing, the tool allow-list / workspace-path security policy, the meta-tool catalog, and the `mcpStatusForTask` status mapping — but no execution machinery of its own. Single calls become Task Center tasks (`execution_id` = `"task-<taskId>"`); `rs:` operators route through the Tool Call Dispatcher, provider algorithms through `TaskCenter::enqueueTask`.
+The stateless external-agent JSON-RPC protocol adapter at the Task Center seam: it owns stdio framing, the tool allow-list / workspace-path security policy, the meta-tool catalog, and the `mcpStatusForTask` status mapping — but no execution machinery of its own. Single calls become Task Center tasks (`execution_id` = `"task-<taskId>"`); `rs:` operators route through the Tool Call Dispatcher, provider algorithms through `TaskCenter::enqueueTask`, and read-only `spatial:` tools execute inline (ADR 0122). `tools/list` enumerates the meta tools plus the unified Agent Tool Catalog (algorithms, interaction, data, spatial) with full JSON Schemas; `run_workflow` / `get_workflow_status` submit and aggregate agent-generated pipeline DAGs.
 _Avoid_: MCP worker, Agent runner, Tool executor
+
+**Spatial Tool**:
+An executable agent-facing spatial capability behind one synchronous contract (ADR 0122): `name` / `description` / `inputSchema` / `outputSchema` / `execute(input)`. Spatial Tools are fast and read-only (inspection, catalogs, queries) — unlike algorithms, they never enter the Task Center; long-running work stays an algorithm call.
+_Avoid_: Agent plugin, MCP function, Operator (an Operator is a Task Center algorithm; a Spatial Tool is an inline query)
+
+**Spatial Tool Registry**:
+The process-wide singleton (`SpatialToolRegistry`, `src/agent/spatial_tools/`) owning Spatial Tool instances. The `SpatialToolProvider` mirrors the registry into the Agent Tool Catalog as descriptors, so the copilot, CLI, and MCP `tools/list` see one catalog while execution stays owned by the registry.
+_Avoid_: Tool catalog (that is the unified AgentToolCatalog), Interaction Tool Registry
+
+**Model Catalog**:
+The model-runtime manifest registry (`ModelCatalog`, `src/operators/framework/`) scanning `models/*/model.json` (name, task, input/output contract, framework, GPU, accuracy, weight path). `rs:infer` resolves a catalog name to its weight path; `spatial:list_models` exposes it to agents. Weights are never committed — manifests document pluggable runtimes.
+_Avoid_: Model zoo, Weight manager, Inference backend
+
+**Algorithm Capability Sidecar**:
+An optional per-algorithm JSON manifest under `data/processing/algorithm_meta/` (task, input, output, gpu, accuracy, notes, tags) loaded by the `AlgorithmMetaStore` overlay and attached to MCP discovery responses as a `catalog` object. Descriptors stay untouched — the sidecar is pure capability documentation for agent task→algorithm matching.
+_Avoid_: Algorithm descriptor (that is the registry's schema object), toolbox manifest (that gates CI coverage)
+
+**Pi Bridge**:
+The external agent-runtime adapter (`pi/exp-rs-spatial.ts`, ADR 0122): a dependency-free Pi extension that spawns the desktop binary with `--mcp`, performs the JSON-RPC handshake, and registers every server tool as a Pi tool. Pi owns the agent loop / planning / memory / reasoning; exp-rs owns spatial understanding, algorithms, workflow execution, and models. Pi ships no MCP client by design, so the bridge owns the transport.
+_Avoid_: Pi plugin, MCP gateway, Agent harness (the harness is Pi itself)
 
 **Classification Pipeline**:
 The deep, GUI-free module in `src/analysis/classification` (`RsClassificationPipeline`) that owns the full pixel-classification flow: vector sample extraction from training polygons, feature scaling (`RsFeatureScaler`), stratified holdout split (`RsClassificationSplit`), classifier training & OpenCV backend creation, model persistence & superset sidecar parsing (`loadModelSidecar`), predict-only mode (`modelLoadPath`), tiled prediction with dtype escalation, class-map writing, and accuracy assessment (`RsAccuracyAssessment`). The GUI classification task and `RsSupervisedClassificationOperator` are thin adapters at its seam. Post-processing (sieve/majority/clump/recode) is a separate stage outside the pipeline.
@@ -473,3 +493,69 @@ _Avoid_: Workspace state map, Context dict, UI state dump
   4. **`RsClassifierBackend::needsLabelRemap()`** virtual — K-Means returns true only when fitted with real (non-zero) labels, so the pipeline gates the Hungarian remap on the backend: the `"KMeans"` string branches and the lowercase workaround are deleted; dead `canonicalMethod` / `readLegacyMethodFromMeta` helpers in the supervised operator deleted.
   5. **New remap test** trains K-Means with permuted label ids (5/9) and asserts predictions map to the training labels in the accuracy path and the written class map, with a lowercase `"kmeans"` methodName to pin the trap removal.
 - **Consequences**: one construction path, color formula, sampling policy and NoData discovery; remap semantics observably unchanged (identity when no table; the unsupervised operator's all-zero dummy trainY keeps raw 1..K cluster ids); `"kmeans"` strings now construct K-Means instead of falling back to SVM — only reachable via sidecar predict-only, which still fails cleanly (K-Means has no `load()`).
+
+### ADR 0062–0122: Index
+
+ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision, and consequences in each file). Titles for orientation:
+
+- **ADR 0062**: Unified Algorithm Execution Seam
+- **ADR 0063**: Task Center RSS Watermark Throttling
+- **ADR 0064**: Shared Memory Zero-Copy Data Channel
+- **ADR 0065**: Semantic Band Roles
+- **ADR 0066**: Raster Grid Compatibility
+- **ADR 0067**: QA Cloud Shadow Snow Masking
+- **ADR 0068**: Unified Product Import Dialog
+- **ADR 0069**: Radiometric Calibration Workflow Integration
+- **ADR 0070**: Atmospheric Correction Workflow Integration
+- **ADR 0071**: Orthorectification Dialog
+- **ADR 0072**: Change Detection 2 — Methods, Thresholds, Cleanup, Area
+- **ADR 0073**: Large Raster Memory Policy Classification
+- **ADR 0074**: Classification Model Metadata Compatibility
+- **ADR 0075**: Minimum Noise Fraction
+- **ADR 0076**: Spectral Information Divergence
+- **ADR 0077**: Linear Spectral Unmixing
+- **ADR 0078**: RX Anomaly Detection
+- **ADR 0079**: Spectral Resampling
+- **ADR 0080**: Endmember Extraction (PPI)
+- **ADR 0081**: Spectral Library Domain
+- **ADR 0082**: Wavelength-Aware Spectral Profile
+- **ADR 0083**: Reusable Preprocessing DAG
+- **ADR 0084**: ROI Mean Spectrum
+- **ADR 0085**: Fusion/PCA Scalability Review
+- **ADR 0086**: Provenance Lineage in the Data Manager Panel
+- **ADR 0087**: Semantic Band Roles in the Agent Workspace Snapshot
+- **ADR 0088**: Apply QA Mask to Product
+- **ADR 0089**: Post-Classification Change
+- **ADR 0090**: Semantic Band Roles in MCP describe_dataset
+- **ADR 0091**: Grid Harmonization — Reproject with Reference
+- **ADR 0092**: Spectral Library Matching Workbench
+- **ADR 0093**: Per-Class Classification Diagnostics
+- **ADR 0094**: Classification Probability Output
+- **ADR 0095**: Change Detection Align DAG
+- **ADR 0096**: Wavelength-Aware Library Matching
+- **ADR 0097**: ROI Mean-Spectrum Tool
+- **ADR 0098**: Shared Grid Builder
+- **ADR 0099**: Task-Centric RS Menu
+- **ADR 0100**: Continuum-Removal Profile View
+- **ADR 0101**: Post-Classification Dialog
+- **ADR 0102**: Shared Band-Role Combo
+- **ADR 0103**: Spectral Index Adopts Band-Role Combo
+- **ADR 0104**: Real Raster Previews in Comparison Dialog
+- **ADR 0105**: Code Review Remediation
+- **ADR 0106**: Apply-Mask Offset Precompute
+- **ADR 0107**: Shared Raster-Layer Combo
+- **ADR 0108**: Operator Result Summary in Dialogs
+- **ADR 0109**: Shared CRS Selector
+- **ADR 0110**: Batch Processing RS Operators
+- **ADR 0111**: Dialog Grid Preflight
+- **ADR 0112**: MCP Lineage Query
+- **ADR 0113**: Batch Parameter Overrides
+- **ADR 0114**: Radiometric State Metadata
+- **ADR 0115**: Change Detection Statistical Threshold & MMU
+- **ADR 0116**: Change Detection Dialog Alignment
+- **ADR 0117**: Execution Estimates
+- **ADR 0118**: Batch QGIS Parameters
+- **ADR 0119**: Review Remediation Round 2
+- **ADR 0120**: Agent-Ready Atomic Architecture
+- **ADR 0121**: Agent Interaction Layer
+- **ADR 0122**: Pi-Based Spatial Intelligence Layer

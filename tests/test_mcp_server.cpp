@@ -34,6 +34,7 @@
 #include <QThread>
 #include <QTimer>
 #include <gdal_priv.h>
+#include <ogrsf_frmts.h>
 
 // Helper subclass of McpServer to expose handlers directly for unit testing
 class TestMcpServer : public McpServer
@@ -78,6 +79,12 @@ public:
     }
     QVariantMap testGetExecutionStatus(const QString &id) { return handleGetExecutionStatus(id); }
     QVariantMap testCancelExecution(const QString &id) { return handleCancelExecution(id); }
+    QVariantMap testRunWorkflow(const QVariantMap &args) { return handleRunWorkflow(args); }
+    QVariantMap testGetWorkflowStatus(long pipelineId) { return handleGetWorkflowStatus(pipelineId); }
+    QVariantMap testSpatialToolCall(const QString &name, const QVariantMap &args)
+    {
+        return handleSpatialToolCall(name, args);
+    }
     QVariantMap testGetLineage(const QString &id) { return handleGetLineage(id); }
     QVariantMap testListTools(const QString &category = QString()) { return handleListTools(category); }
     QVariantMap testSearchTools(const QString &query, const QString &group = QString(),
@@ -758,4 +765,198 @@ TEST_CASE( "MCP Server protocol lifecycle handshake and meta handlers", "[agent]
   server.testHandleRequest( unknownReq );
   CHECK( server.lastErrorId.toInt() == 5 );
   CHECK( server.lastErrorCode == -32601 );
+}
+
+// ---------------------------------------------------------------------------
+// ADR 0122 — spatial intelligence layer: run_workflow, get_workflow_status,
+// spatial: tool dispatch, and catalog tools in tools/list.
+// ---------------------------------------------------------------------------
+#include <string>
+
+namespace {
+
+QString createWorkflowGeoJson( const QString &path )
+{
+    GDALAllRegister();
+    GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "GeoJSON" );
+    if ( !driver )
+        return QString();
+    GDALDataset *ds = driver->Create( path.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr );
+    if ( !ds )
+        return QString();
+    OGRLayer *layer = ds->CreateLayer( "points", nullptr, wkbPoint, nullptr );
+    OGRFieldDefn nameField( "name", OFTString );
+    layer->CreateField( &nameField );
+    for ( int i = 0; i < 2; ++i )
+    {
+        OGRFeature *feature = OGRFeature::CreateFeature( layer->GetLayerDefn() );
+        feature->SetField( "name", ( std::string( "p" ) + std::to_string( i ) ).c_str() );
+        OGRPoint point( 116.0 + i, 39.0 );
+        feature->SetGeometry( &point );
+        layer->CreateFeature( feature );
+        OGRFeature::DestroyFeature( feature );
+    }
+    GDALClose( ( GDALDatasetH )ds );
+    return path;
+}
+
+} // namespace
+
+TEST_CASE( "McpServer run_workflow executes agent-generated pipelines", "[agent][mcp][workflow]" )
+{
+    registerNoopOperator();
+    TestMcpServer server;
+
+    QVariantMap args;
+    args[QStringLiteral( "pipeline" )] = QStringLiteral( R"({
+        "id": "agent_pipeline",
+        "name": "noop chain",
+        "steps": [
+            {"id": "s1", "title": "first", "operator": "rs:mcp_noop", "params": {}},
+            {"id": "s2", "title": "second", "operator": "rs:mcp_noop", "params": {},
+             "inputs": [{"fromStepId": "s1", "fromPort": "output", "toPort": "input"}]}
+        ]
+    })" );
+
+    const QVariantMap submitted = server.testRunWorkflow( args );
+    const long pipelineId = submitted.value( QStringLiteral( "pipeline_id" ) ).toLongLong();
+    CHECK( pipelineId >= 0 );
+
+    const QVariantList steps = submitted.value( QStringLiteral( "steps" ) ).toList();
+    REQUIRE( steps.size() == 2 );
+    CHECK( steps[0].toMap().value( QStringLiteral( "execution_id" ) ).toString()
+               .startsWith( QStringLiteral( "task-" ) ) );
+    CHECK( steps[1].toMap().value( QStringLiteral( "algorithm_id" ) ).toString()
+               == QStringLiteral( "rs:mcp_noop" ) );
+
+    // Poll the aggregate workflow status to a terminal state.
+    bool completed = false;
+    for ( int attempt = 0; attempt < 600; ++attempt )
+    {
+        const QVariantMap status = server.testGetWorkflowStatus( pipelineId );
+        if ( status.value( QStringLiteral( "isCompleted" ) ).toBool() )
+        {
+            completed = true;
+            const QVariantList statusSteps = status.value( QStringLiteral( "steps" ) ).toList();
+            REQUIRE( statusSteps.size() == 2 );
+            for ( const QVariant &stepVar : statusSteps )
+            {
+                CHECK( stepVar.toMap().value( QStringLiteral( "status" ) ).toString()
+                           == QStringLiteral( "completed" ) );
+            }
+            break;
+        }
+        if ( status.value( QStringLiteral( "isFailed" ) ).toBool() )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+    CHECK( completed );
+
+    // Unknown pipeline ids surface a readable error.
+    bool threw = false;
+    try
+    {
+        server.testGetWorkflowStatus( 999999 );
+    }
+    catch ( const std::runtime_error & )
+    {
+        threw = true;
+    }
+    CHECK( threw );
+}
+
+TEST_CASE( "McpServer run_workflow rejects malformed pipelines", "[agent][mcp][workflow]" )
+{
+    TestMcpServer server;
+
+    QVariantMap args;
+    args[QStringLiteral( "pipeline" )] = QStringLiteral( "{not json" );
+    bool threw = false;
+    try
+    {
+        server.testRunWorkflow( args );
+    }
+    catch ( const std::runtime_error &e )
+    {
+        threw = true;
+        CHECK( QString::fromUtf8( e.what() ).contains( QStringLiteral( "Invalid pipeline" ) ) );
+    }
+    CHECK( threw );
+
+    QVariantMap missing;
+    bool threwMissing = false;
+    try
+    {
+        server.testRunWorkflow( missing );
+    }
+    catch ( const std::runtime_error & )
+    {
+        threwMissing = true;
+    }
+    CHECK( threwMissing );
+}
+
+TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][spatial]" )
+{
+    QTemporaryDir dir;
+    const QString geojsonPath = createWorkflowGeoJson( dir.filePath( "points.geojson" ) );
+    REQUIRE( !geojsonPath.isEmpty() );
+
+    TestMcpServer server;
+
+    // tools/call dispatch: full JSON-RPC path for a spatial: tool.
+    QVariantMap callReq;
+    callReq[QStringLiteral( "id" )] = 42;
+    callReq[QStringLiteral( "method" )] = QStringLiteral( "tools/call" );
+    QVariantMap callParams;
+    callParams[QStringLiteral( "name" )] = QStringLiteral( "spatial:vector_inspect" );
+    QVariantMap toolArgs;
+    toolArgs[QStringLiteral( "path" )] = geojsonPath;
+    callParams[QStringLiteral( "arguments" )] = toolArgs;
+    callReq[QStringLiteral( "params" )] = callParams;
+
+    server.testHandleRequest( callReq );
+    CHECK( server.lastResponseId.toInt() == 42 );
+    CHECK_FALSE( server.lastErrorId.isValid() );
+    const QVariantMap callResult = server.lastResponseResult;
+    REQUIRE( callResult.contains( QStringLiteral( "content" ) ) );
+    const QString payload = callResult.value( QStringLiteral( "content" ) )
+                                .toList()
+                                .first()
+                                .toMap()
+                                .value( QStringLiteral( "text" ) )
+                                .toString();
+    CHECK( payload.contains( QStringLiteral( "\"status\":" ) ) );
+    CHECK( payload.contains( QStringLiteral( "featureCount" ) ) );
+    CHECK( payload.contains( geojsonPath ) );
+
+    // Missing required parameter surfaces a tool-level error.
+    QVariantMap badReq = callReq;
+    badReq[QStringLiteral( "id" )] = 43;
+    QVariantMap badParams;
+    badParams[QStringLiteral( "name" )] = QStringLiteral( "spatial:vector_inspect" );
+    badReq[QStringLiteral( "params" )] = badParams;
+    server.lastErrorId = QVariant();
+    server.testHandleRequest( badReq );
+    CHECK( server.lastErrorId.toInt() == 43 );
+    CHECK( server.lastErrorMessage.contains( QStringLiteral( "path" ) ) );
+
+    // tools/list includes the spatial catalog tools alongside meta tools.
+    QVariantMap listReq;
+    listReq[QStringLiteral( "id" )] = 44;
+    listReq[QStringLiteral( "method" )] = QStringLiteral( "tools/list" );
+    server.testHandleRequest( listReq );
+    CHECK( server.lastResponseId.toInt() == 44 );
+    const QVariantList tools = server.lastResponseResult.value( QStringLiteral( "tools" ) ).toList();
+    bool hasRunWorkflow = false, hasRasterInspect = false;
+    for ( const QVariant &toolVar : tools )
+    {
+        const QString name = toolVar.toMap().value( QStringLiteral( "name" ) ).toString();
+        if ( name == QStringLiteral( "run_workflow" ) )
+            hasRunWorkflow = true;
+        if ( name == QStringLiteral( "spatial:raster_inspect" ) )
+            hasRasterInspect = true;
+    }
+    CHECK( hasRunWorkflow );
+    CHECK( hasRasterInspect );
 }

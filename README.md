@@ -21,6 +21,7 @@ Professional remote sensing analysis platform built on the QGIS engine. Pure C++
 - **Hyperspectral:** MNF, PCA, SAM/SID classification, spectral unmixing, endmember extraction (PPI), RX anomaly detection, spectral resampling, continuum removal
 - **OBIA:** Object-based image analysis with OTB MeanShift segmentation
 - **Processing Toolbox:** 70+ algorithms (GDAL, OTB, QGIS native) over one shared Processing Registry — the same operators power the GUI, TaskCenter DAGs, CLI, and Agent/MCP
+- **Spatial Intelligence (ADR 0122):** stdio MCP server (`--mcp`) with `spatial:*` inspection tools, algorithm capability sidecars, agent workflow submission (`run_workflow`), a model runtime catalog — and a [Pi](https://pi.dev) extension (`pi/exp-rs-spatial.ts`) bridging it all into an external agent runtime
 - **Provenance:** derived-asset lineage in the Data Manager; every derived raster records source, operator, parameters, and time
 - **Layer Properties:** Raster and vector layer dialogs with statistics
 - **Measurement Tools:** Geodesic distance and area measurement
@@ -31,6 +32,25 @@ Professional remote sensing analysis platform built on the QGIS engine. Pure C++
 ## Remote-Sensing Workflows
 
 The desktop UI is task-centric: **导入产品 → 辐射定标 → QA 掩膜 → 大气校正 → 网格对齐/正射 → 应用掩膜 → 分析就绪 → 指数/分类/融合/变化检测 → 后分类比较 → 谱学分析 → 溯源**, with a reusable preprocessing DAG (`lab.preprocess.optical`: calibration → QA mask → atmospheric correction → apply mask → NDVI). The same operators run through the Processing Toolbox, TaskCenter workflows, the CLI, and the Agent/MCP interface.
+
+## Spatial Intelligence (Pi Agent Runtime)
+
+exp-rs doubles as the spatial capability provider for external agent
+runtimes ([ADR 0122](docs/adr/0122-pi-spatial-intelligence-layer.md)):
+
+- **`pi/exp-rs-spatial.ts`** — a [Pi](https://pi.dev) extension that spawns the
+  binary in `--mcp` mode and bridges every tool (discovery, spatial
+  inspection, execution, workflows, models) as first-class Pi tools. See
+  `pi/README.md`.
+- **Spatial tools** (`spatial:raster_inspect`, `spatial:vector_inspect`,
+  `spatial:list_models`) — fast read-only data understanding over one
+  `SpatialTool` contract (`name/description/input_schema/execute/output_schema`).
+- **Agent workflows** — MCP `run_workflow` submits agent-generated pipeline
+  DAGs through the Task Center; `get_workflow_status` aggregates per-step
+  execution.
+- **Capability manifests** — `data/processing/algorithm_meta/*.json`
+  (task/input/output/gpu/accuracy) and `models/*/model.json` (model runtime
+  catalog; `rs:infer` accepts catalog names).
 
 ## Prerequisites
 
@@ -83,8 +103,8 @@ make -j$(nproc)
 QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 ```
 
-**1,401 tests** covering core algorithms, GDAL utilities, dialog UI, OBIA pipeline, TaskCenter DAG execution, and processing framework.
-Headless CLI binary built at `sicnu_geo_rs_cli` with `--list` operator discovery and `--schema` inspection.
+**1,758 Catch2 test cases** covering core algorithms, GDAL utilities, dialog UI, OBIA pipeline, TaskCenter DAG execution, the processing framework, and the spatial tool / MCP agent surface.
+Headless CLI binary built at `sicnu_geo_rs_cli` with `--list` operator discovery and `--schema` inspection. The desktop binary doubles as a stdio MCP server (`sicnu_geo_rs --mcp`).
 
 ### Toolbox coverage gate
 
@@ -148,15 +168,18 @@ LibSVM / MuParserX are auto-vendored when missing from the system.
 src/               Application + QGIS core/gui + processing
 ├── app/           Main window, dialogs, widgets
 ├── analysis/      Classification, georeferencing, segmentation
-├── agent/         MCP server, STAC client
+├── agent/         MCP server, LLM copilot, tool catalog, spatial tools
 ├── core/, gui/    QGIS libraries (vendored subset)
-├── processing/    GDAL/OTB/QGIS providers + utilities
+├── processing/    GDAL/OTB/QGIS providers + utilities + algorithm meta store
+├── operators/     RSOperator framework + rs:/gdal:/otb:/opencv: operators + model catalog
 └── …
+pi/                Pi agent-runtime extension (TypeScript MCP bridge) + knowledge base
+models/            Model runtime catalog (models/*/model.json)
 data/
-├── processing/    Toolbox manifest (tracked)
+├── processing/    Toolbox manifest + algorithm_meta/ capability sidecars (tracked)
 ├── tools/custom/  Generic CLI tool JSON (tracked)
 └── samples/       Lab sample datasets
-docs/              Design, architecture, labs, agent notes
+docs/              Design, architecture, ADRs (docs/adr/), labs, agent notes
 refs/              Optional local refs: qgis/, boost/ (gitignored)
 otb_ref/           Orfeo Toolbox v10 (CMake-coupled, stays at root)
 itk_ref/           ITK 5.4 via git subtree (stays at root)

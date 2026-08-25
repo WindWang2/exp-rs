@@ -1,0 +1,11 @@
+{
+  "name": "yolo-buildings",
+  "task": "detection",
+  "input": "raster",
+  "output": "vector",
+  "framework": "onnx",
+  "path": "",
+  "gpu": false,
+  "description": "Template manifest: building footprint detection (YOLO-derived).",
+  "tags": ["buildings", "detection", "template"]
+}

@@ -9,6 +9,7 @@ set(SICNU_OPERATORS_SOURCES
     framework/rs_operation_logger.cpp
     framework/rs_json_params.cpp
     framework/asset_index_pipeline.cpp
+    framework/model_catalog.cpp
 )
 
 # OpenCV-based operators (only when OpenCV imgproc is available)

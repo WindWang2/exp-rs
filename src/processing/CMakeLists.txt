@@ -38,6 +38,7 @@ add_library(sicnu_processing SHARED
     framework/algorithm_descriptor.cpp
     framework/schema_validator.cpp
     framework/algorithm_preflight.cpp
+    framework/algorithm_meta_store.cpp
     framework/algorithm_provider_adapter.h
     framework/qgs_processing_provider_adapter.cpp
     framework/qgs_processing_provider_adapter.h

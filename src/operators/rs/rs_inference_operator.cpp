@@ -7,6 +7,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
+#include "operators/framework/model_catalog.h"
 #include "opencv/opencv_utils.h"
 
 #include <opencv2/core.hpp>
@@ -25,7 +26,7 @@ Json::Value RsInferenceOperator::schema() const
     using namespace schema;
     Json::Value props( Json::objectValue );
     props["input"] = makeRasterParam( "input", "Input raster" );
-    props["model"] = makeStringParam( "model", "Path to an ONNX model readable by cv::dnn" );
+    props["model"] = makeStringParam( "model", "Path to an ONNX model readable by cv::dnn, or a model catalog name (see spatial:list_models)" );
     props["output"] = makeOutputParam( "output", "Output inference raster", "tif" );
     // `bands` is an optional array of 1-based band indices (default: all bands).
     // Described as a raw JSON-schema array (no array helper exists yet) so an
@@ -87,15 +88,27 @@ Json::Value RsInferenceOperator::run( const Json::Value &params, RSOperatorConte
                                "Operator parameters must be a JSON object" );
 
     const std::string inputPath = requireString( params, "input" );
-    const std::string modelPath = requireString( params, "model" );
+    std::string modelPath = requireString( params, "model" );
     const std::string outputPath = requireString( params, "output" );
 
     if ( !fileExists( inputPath ) )
         throw RSOperatorError( ErrorCode::FileNotFound,
                                "Input raster not found: " + inputPath );
+    // ADR 0122: `model` accepts a catalog name (models/<name>/model.json,
+    // spatial:list_models) as well as a direct path. The catalog lazy-loads
+    // on first use here so run_workflow / direct operator calls resolve
+    // names without a prior spatial:list_models call.
+    if ( !fileExists( modelPath ) )
+    {
+        auto &catalog = sicnu::operators::ModelCatalog::instance();
+        catalog.reload();
+        const auto model = catalog.find( modelPath );
+        if ( model && !model->path.empty() )
+            modelPath = model->path;
+    }
     if ( !fileExists( modelPath ) )
         throw RSOperatorError( ErrorCode::FileNotFound,
-                               "Model file not found: " + modelPath );
+                               "Model file not found (path or catalog name): " + modelPath );
 
     std::string errorMessage;
     context.reportProgress( 0.1, "Reading input raster bands" );

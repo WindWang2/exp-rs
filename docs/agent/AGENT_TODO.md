@@ -1,5 +1,10 @@
 # AGENT_TODO — 全自动任务队列
 
+> **状态（2026-08-24）：全部 P0–P2 任务已完成，本文件保留为历史记录。**
+> 当前 Agent 能力面（MCP meta tools、`spatial:*` 工具、算法目录、
+> `run_workflow`、模型目录、Pi 桥接）见 README "Spatial Intelligence" 一节、
+> `docs/adr/0120`–`0122` 与 `pi/README.md`。
+>
 > 生成时间：2026-07-16
 > 模式：Autopilot（全自动开发）
 > 依据：Phase 1 Deep Scan 结果

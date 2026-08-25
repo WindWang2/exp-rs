@@ -7,10 +7,12 @@ Design note: [superpowers/specs/2026-07-19-repo-layout-reorg-design.md](superpow
 
 | Path | Role |
 |------|------|
-| `README.md`, `CLAUDE.md` | Project entry docs |
+| `README.md`, `CLAUDE.md`, `CONTEXT.md` | Project entry docs (context = domain glossary + ADR index) |
 | `CMakeLists.txt`, `cmake/`, `cmake_templates/` | Build system |
 | `src/` | Application + libraries (all C++) |
 | `tests/` | Catch2 unit / integration tests |
+| `pi/` | Pi agent-runtime adapter (ADR 0122): `exp-rs-spatial.ts` MCP bridge + `knowledge/` |
+| `models/` | Model runtime catalog manifests (`models/*/model.json`; weights never committed) |
 | `external/` | Small vendored third-party sources |
 | `resources/`, `images/` | App + QGIS icon/resource packs |
 | `data/` | Config manifests, lab samples, local large rasters |
@@ -25,6 +27,7 @@ Design note: [superpowers/specs/2026-07-19-repo-layout-reorg-design.md](superpow
 
 | Path | Role |
 |------|------|
+| `docs/adr/` | ADR ledger `0001`–`0122` (one file per decision) |
 | `docs/design/` | Product design (`DESIGN.md`), UI mockups (`ui/`) |
 | `docs/architecture/` | QGIS/OTB implementation notes, phase reports |
 | `docs/labs/` | Course / tutorial lab writeups |
@@ -36,7 +39,7 @@ Design note: [superpowers/specs/2026-07-19-repo-layout-reorg-design.md](superpow
 
 | Path | Tracked? | Role |
 |------|----------|------|
-| `data/processing/` | Yes | Toolbox coverage manifest |
+| `data/processing/` | Yes | Toolbox coverage manifest + `algorithm_meta/` capability sidecars (ADR 0122) |
 | `data/tools/custom/` | Yes | Generic CLI tool descriptors |
 | `data/schemas/`, `data/pipelines/` | Prefer yes | Schemas / pipeline defs |
 | `data/samples/` | Yes (small) | Lab rasters/vectors (was `samples_data/`) |
@@ -61,6 +64,9 @@ Runtime resolvers try `refs/qgis` first, then legacy `qgis_ref` and install `sha
 | `src/app/data_project_serializer.*` | QGIS project (`.qgs/.qgz`) round trip: SICNU extension XML + standard-layer adoption. |
 | `src/app/panels/data_manager_panel.*` | Data Manager asset-catalog dock, a read-only projection of asset snapshots, separate from the layer tree. |
 | `src/app/active_view_host.*` | Active Display View host: open path / display asset on the active view (ex-LayerManager). |
+| `src/agent/spatial_tools/` | Spatial Tool framework (ADR 0122): `SpatialTool` contract + registry + `spatial:` inspection/catalog tools; bridged into the Agent Tool Catalog by `SpatialToolProvider`. |
+| `src/operators/framework/model_catalog.*` | Model runtime catalog (`ModelCatalog`) scanning `models/*/model.json`; `rs:infer` resolves catalog names. |
+| `src/processing/framework/algorithm_meta_store.*` | Algorithm capability sidecar store (`AlgorithmMetaStore`) over `data/processing/algorithm_meta/*.json`. |
 
 ## Icons symlink
 

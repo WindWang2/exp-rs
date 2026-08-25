@@ -1,0 +1,9 @@
+{
+  "id": "rs:infer",
+  "task": "inference",
+  "input": "raster",
+  "output": "raster",
+  "gpu": false,
+  "notes": "ONNX inference via cv::dnn (tracer bullet). Accepts a model path or a ModelCatalog name (spatial:list_models). No preprocessing/postprocessing: feed bands, write output.",
+  "tags": ["inference", "onnx", "deep-learning", "model"]
+}
