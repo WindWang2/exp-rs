@@ -1009,7 +1009,16 @@ target_link_libraries(test_change_detection PRIVATE
   qgis_core
   qgis_gui
   sicnu_processing
+  sicnu_operators
 )
+if(TARGET jsoncpp)
+  target_link_libraries(test_change_detection PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_change_detection PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_change_detection PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_change_detection PRIVATE jsoncpp)
+endif()
 target_include_directories(test_change_detection PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
@@ -5405,4 +5414,72 @@ target_include_directories(test_w12_regressions PRIVATE
 set_target_properties(test_w12_regressions PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_w12_regressions)
 
+add_executable(test_subsystem_stability test_subsystem_stability.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
+)
+target_link_libraries(test_subsystem_stability PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  sicnu_data
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_subsystem_stability PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_subsystem_stability PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_subsystem_stability PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_subsystem_stability PRIVATE jsoncpp)
+endif()
+target_include_directories(test_subsystem_stability PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_subsystem_stability PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_subsystem_stability)
 
+add_executable(test_e2e_phase2 test_e2e_phase2.cpp)
+target_link_libraries(test_e2e_phase2 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  qgis_analysis
+  sicnu_data
+  sicnu_processing
+  sicnu_jobs
+  sicnu_task_center
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_e2e_phase2 PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_e2e_phase2 PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_e2e_phase2 PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_e2e_phase2 PRIVATE jsoncpp)
+endif()
+target_include_directories(test_e2e_phase2 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_e2e_phase2 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_e2e_phase2)
