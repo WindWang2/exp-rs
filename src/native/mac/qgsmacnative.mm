@@ -53,7 +53,7 @@ QgsMacNative::QgsMacNative()
 }
 
 QgsMacNative::~QgsMacNative() {
-  [mQgsUserNotificationCenter->_qgsUserNotificationCenter dealloc];
+  [[NSUserNotificationCenter defaultUserNotificationCenter] setDelegate:nil];
   delete mQgsUserNotificationCenter;
 }
 
@@ -64,7 +64,14 @@ void QgsMacNative::setIconPath(const QString &iconPath) {
 }
 
 const char *QgsMacNative::currentAppLocalizedName() {
-  return [[[NSRunningApplication currentApplication] localizedName] UTF8String];
+  static std::string appName;
+  NSString *localized = [[NSRunningApplication currentApplication] localizedName];
+  if ( localized ) {
+    appName = [localized UTF8String];
+  } else {
+    appName.clear();
+  }
+  return appName.c_str();
 }
 
 void QgsMacNative::currentAppActivateIgnoringOtherApps() {

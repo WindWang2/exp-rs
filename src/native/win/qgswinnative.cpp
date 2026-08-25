@@ -82,6 +82,13 @@ void QgsWinNative::initializeMainWindow( QWindow *window, const QString &applica
 
 void QgsWinNative::cleanup()
 {
+  if ( mNativeEventFilter )
+  {
+    if ( QAbstractEventDispatcher::instance() )
+      QAbstractEventDispatcher::instance()->removeNativeEventFilter( mNativeEventFilter );
+    delete mNativeEventFilter;
+    mNativeEventFilter = nullptr;
+  }
   if ( mWinToastInitialized )
     WinToastLib::WinToast::instance()->clear();
   mWindow = nullptr;

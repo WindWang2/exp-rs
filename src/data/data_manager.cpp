@@ -885,7 +885,7 @@ Result<AssetId> DataManager::createVirtualRaster(
                               QCryptographicHash::Sha1 )
       .toHex() );
 
-  if ( !m_impl->vrtScratchDir )
+  if ( !m_impl->vrtScratchDir || !m_impl->vrtScratchDir->isValid() )
     m_impl->vrtScratchDir = std::make_unique<QTemporaryDir>();
   const QString vrtPath = QStringLiteral( "%1/vrt_%2.vrt" )
                             .arg( m_impl->vrtScratchDir->path(), recipeHash );
@@ -973,7 +973,7 @@ Result<AssetId> DataManager::restoreVirtualRaster(
                               QCryptographicHash::Sha1 )
       .toHex() );
 
-  if ( !m_impl->vrtScratchDir )
+  if ( !m_impl->vrtScratchDir || !m_impl->vrtScratchDir->isValid() )
     m_impl->vrtScratchDir = std::make_unique<QTemporaryDir>();
   const QString vrtPath = QStringLiteral( "%1/vrt_%2.vrt" )
                             .arg( m_impl->vrtScratchDir->path(), recipeHash );
@@ -1750,7 +1750,11 @@ Result<void> DataManager::unloadCollection( CollectionId id, bool cascade )
     }
   }
 
-  m_impl->collections.erase( collectionIt );
+  const auto freshCollectionIt = m_impl->findCollection( id );
+  if ( freshCollectionIt != m_impl->collections.end() )
+  {
+    m_impl->collections.erase( freshCollectionIt );
+  }
   m_impl->catalogGeneration++;
   emit collectionRemoved( id );
   return Result<void>::success();

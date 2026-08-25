@@ -141,7 +141,7 @@ bool QgsLinuxNative::openTerminalAtPath( const QString &path )
 
   QStringList arguments;
   arguments << u"--working-directory"_s << path;
-  return QProcess::startDetached( term, QStringList(), path );
+  return QProcess::startDetached( term, arguments, path );
 }
 
 /**
