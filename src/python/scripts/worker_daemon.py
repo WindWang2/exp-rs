@@ -287,12 +287,10 @@ def main():
                     }
                     s.sendall((json.dumps(err_resp) + "\n").encode("utf-8"))
                     continue
-            if _pending_proxy_lines and buffer.startswith(tuple(_pending_proxy_lines)):
-                pass  # already queued
-            data = s.recv(4096)
-            if not data:
-                break
-            buffer += data.decode("utf-8")
+            # Dispatch everything already buffered before blocking on the
+            # socket: after a proxy round-trip the host may be waiting for our
+            # reply and sends nothing further — recv() here would deadlock
+            # both sides (#524).
             while "\n" in buffer:
                 line, buffer = buffer.split("\n", 1)
                 line = line.strip()
@@ -611,6 +609,14 @@ def main():
                         "error": {"code": -32700, "message": str(ex)}
                     }
                     s.sendall((json.dumps(err_resp) + "\n").encode("utf-8"))
+            # Socket read comes last: only block when the buffer is fully
+            # drained and no proxy lines are queued for dispatch.
+            if _pending_proxy_lines:
+                continue
+            data = s.recv(4096)
+            if not data:
+                break
+            buffer += data.decode("utf-8")
         except Exception as e:
             sys.stderr.write(f"WorkerDaemon loop error: {e}\n")
             break

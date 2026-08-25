@@ -82,6 +82,9 @@ private:
     sicnu::python::isolated::WorkerNode *m_workerNode = nullptr;
     /// Bridge re-bind connection on worker restart (severed in unload()).
     QMetaObject::Connection m_restartRebindConnection;
+    /// workerCrashed logging connection (severed in unload(); the adapter is
+    /// not a QObject, so the pool would otherwise keep invoking a dead this).
+    QMetaObject::Connection m_workerCrashedConnection;
     std::unique_ptr<sicnu::python::isolated::AppInterfaceBridge> m_bridge;
     bool m_initialized = false;
 };

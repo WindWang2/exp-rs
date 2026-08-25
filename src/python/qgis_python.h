@@ -94,7 +94,7 @@ private:
     QgisPython &operator=(const QgisPython &) = delete;
 
     bool m_initialized = false;
-    mutable QMutex m_mutex;
+    mutable QRecursiveMutex m_mutex;
     OutputCallback m_outputCallback;
 
     // Python state

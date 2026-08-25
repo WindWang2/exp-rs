@@ -18,6 +18,9 @@ class PythonWorkerProcess : public QObject
 
     bool startWorker( const QString &socketName, const QString &pythonPath = QString(), const QString &scriptPath = QString() );
     void stopWorker();
+    /// Re-establish process signal connections after stopWorker()'s blanket
+    /// disconnect, so a reused instance keeps crash detection (#523).
+    void ensureSignalsConnected();
 
     bool isRunning() const;
     qint64 processId() const;

@@ -68,6 +68,9 @@ void PythonWorkerProcessPool::shutdown()
 
 WorkerNode *PythonWorkerProcessPool::acquireWorker()
 {
+  // processEvents() is only legal on the thread that owns the application
+  // object; background callers must not spin the GUI event loop (#527).
+  const bool onMainThread = QThread::currentThread() == QCoreApplication::instance()->thread();
   for ( int retry = 0; retry < 50; ++retry )
   {
     for ( WorkerNode *node : m_nodes )
@@ -78,7 +81,8 @@ WorkerNode *PythonWorkerProcessPool::acquireWorker()
         return node;
       }
     }
-    QCoreApplication::processEvents();
+    if ( onMainThread )
+      QCoreApplication::processEvents();
     std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
   }
   return nullptr;

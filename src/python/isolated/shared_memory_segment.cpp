@@ -72,7 +72,10 @@ bool SharedMemorySegment::create( int width, int height, int bands, DType dtype 
   m_shm->setNativeKey( m_key, QNativeIpcKey::Type::PosixRealtime );
 #endif
 
-  if ( !m_shm->create( static_cast<int>( totalSize ) ) )
+  // QSharedMemory::create takes qsizetype (64-bit): the legacy int cast
+  // wrapped negative for >2 GiB rasters (#526).
+  const qsizetype totalSizeQ = static_cast<qsizetype>( totalSize );
+  if ( totalSizeQ <= 0 || !m_shm->create( totalSizeQ ) )
   {
     m_shm.reset();
     m_key.clear();

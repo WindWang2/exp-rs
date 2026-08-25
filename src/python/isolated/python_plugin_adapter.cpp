@@ -46,6 +46,9 @@ PythonPluginAdapter::~PythonPluginAdapter()
     {
         unload();
     }
+    // Belt and braces: unload() early-returns when the plugin was never fully
+    // initialized, but the crash-logger connection may still be alive (#522).
+    QObject::disconnect( m_workerCrashedConnection );
 }
 
 bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
@@ -125,8 +128,10 @@ bool PythonPluginAdapter::initialize( SicnuAppInterface *iface )
     // keeps isBusy=true (reserved). Listen for workerCrashed to avoid re-using
     // a stale server pointer; the next RPC will fail and trigger re-acquire via
     // the normal error path. This prevents crossed IPC where a second plugin
-    // binds to the same server.
-    QObject::connect( m_pool, &PythonWorkerProcessPool::workerCrashed, m_pool,
+    // binds to the same server. The adapter is not a QObject: store the
+    // connection and sever it in unload()/#dtor, otherwise the lambda's
+    // captured this dangles once the adapter is destroyed (#522).
+    m_workerCrashedConnection = QObject::connect( m_pool, &PythonWorkerProcessPool::workerCrashed, m_pool,
                       [this]( int id ) {
                           if ( m_workerNode && m_workerNode->id == id )
                           {
@@ -212,6 +217,7 @@ void PythonPluginAdapter::unload()
     loop.exec();
 
     QObject::disconnect( m_restartRebindConnection );
+    QObject::disconnect( m_workerCrashedConnection );
     if ( m_bridge )
     {
         m_bridge.reset();

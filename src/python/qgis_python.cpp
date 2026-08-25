@@ -238,8 +238,19 @@ bool QgisPython::runString(const QString &command, QString &error)
         return false;
     }
 
+    // Serialize interpreter access and hold the GIL for every C-API call:
+    // these wrappers may be reached from JobEngine worker threads (#525).
+    QMutexLocker locker(&m_mutex);
+    if (!m_initialized) {
+        error = "Python not initialized";
+        return false;
+    }
+    PyGILState_STATE gilState = PyGILState_Ensure();
+
     QByteArray cmdBytes = command.toUtf8();
     int result = PyRun_SimpleStringFlags(cmdBytes.constData(), nullptr);
+
+    PyGILState_Release(gilState);
 
     if (result != 0) {
         if (PyErr_Occurred()) {
@@ -259,12 +270,20 @@ bool QgisPython::evalString(const QString &expression, QString &result, QString 
         return false;
     }
 
+    QMutexLocker locker(&m_mutex);
+    if (!m_initialized) {
+        error = "Python not initialized";
+        return false;
+    }
+    PyGILState_STATE gilState = PyGILState_Ensure();
+
     QByteArray exprBytes = expression.toUtf8();
     PyObject *mainDict = static_cast<PyObject *>(m_mainDict);
 
     PyObject *pyResult = PyRun_String(exprBytes.constData(), Py_eval_input, mainDict, mainDict);
     if (!pyResult) {
         PyErr_Print();
+        PyGILState_Release(gilState);
         error = "Python evaluation error";
         return false;
     }
@@ -280,6 +299,7 @@ bool QgisPython::evalString(const QString &expression, QString &result, QString 
     }
     Py_DECREF(pyResult);
 
+    PyGILState_Release(gilState);
     return true;
 }
 
@@ -302,7 +322,10 @@ bool QgisPython::runFile(const QString &filePath, QString &error)
         return false;
     }
 
+    QMutexLocker locker(&m_mutex);
+    PyGILState_STATE gilState = PyGILState_Ensure();
     int result = PyRun_SimpleFile(fp, pathBytes.constData());
+    PyGILState_Release(gilState);
     fclose(fp);
 
     if (result != 0) {

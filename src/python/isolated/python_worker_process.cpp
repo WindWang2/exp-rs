@@ -34,18 +34,30 @@ bool PythonWorkerProcess::startWorker( const QString &socketName, const QString 
   QString pythonExec = pythonPath;
   if ( pythonExec.isEmpty() )
   {
-    // Search for available python executable (python3, python)
-    const QStringList execCandidates = { QStringLiteral( "python3" ), QStringLiteral( "python" ), QStringLiteral( "python.exe" ) };
+    const QString envExec = QString::fromUtf8( qgetenv( "SICNU_PYTHON_EXECUTABLE" ) );
+    if ( !envExec.isEmpty() && QFileInfo::exists( envExec ) )
+      pythonExec = envExec;
+  }
+  if ( pythonExec.isEmpty() )
+  {
+    const QString envExec = QString::fromUtf8( qgetenv( "PYTHONEXECUTABLE" ) );
+    if ( !envExec.isEmpty() && QFileInfo::exists( envExec ) )
+      pythonExec = envExec;
+  }
+  if ( pythonExec.isEmpty() )
+  {
+    // Search for available python executable (/usr/bin/python3, python3, python)
+    const QStringList execCandidates = { QStringLiteral( "/usr/bin/python3" ), QStringLiteral( "python3" ), QStringLiteral( "python" ), QStringLiteral( "python.exe" ) };
     for ( const QString &cand : execCandidates )
     {
-      if ( !QStandardPaths::findExecutable( cand ).isEmpty() )
+      if ( QFileInfo::exists( cand ) || !QStandardPaths::findExecutable( cand ).isEmpty() )
       {
         pythonExec = cand;
         break;
       }
     }
     if ( pythonExec.isEmpty() )
-      pythonExec = QStringLiteral( "python" );
+      pythonExec = QStringLiteral( "python3" );
   }
 
   QString workerScript = scriptPath;
@@ -77,6 +89,7 @@ bool PythonWorkerProcess::startWorker( const QString &socketName, const QString 
   QStringList args;
   args << workerScript << QStringLiteral( "--socket" ) << socketName;
 
+  ensureSignalsConnected();
   m_process->start( pythonExec, args );
   if ( !m_process->waitForStarted( 500 ) )
   {
@@ -100,6 +113,15 @@ void PythonWorkerProcess::stopWorker()
       m_process->waitForFinished( 500 );
     }
   }
+}
+
+void PythonWorkerProcess::ensureSignalsConnected()
+{
+  // stopWorker() blanket-disconnects the QProcess; a reused instance would
+  // otherwise lose crash detection entirely (#523).
+  connect( m_process, QOverload<int, QProcess::ExitStatus>::of( &QProcess::finished ),
+           this, &PythonWorkerProcess::onProcessFinished, Qt::UniqueConnection );
+  connect( m_process, &QProcess::errorOccurred, this, &PythonWorkerProcess::onProcessError, Qt::UniqueConnection );
 }
 
 bool PythonWorkerProcess::isRunning() const
