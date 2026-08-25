@@ -244,6 +244,7 @@ void WorkflowRuntime::requestCancel( const std::string &sessionId )
 
 void WorkflowRuntime::close( const std::string &sessionId )
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   m_sessions.erase( sessionId );
   m_cancelFlags.erase( sessionId );
 }
@@ -259,6 +260,7 @@ std::shared_ptr<std::atomic<bool>> WorkflowRuntime::cancelFlag( const std::strin
 
 WorkflowSession *WorkflowRuntime::sessionMut( const std::string &sessionId )
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   const auto it = m_sessions.find( sessionId );
   if ( it == m_sessions.end() )
     return nullptr;
@@ -267,6 +269,7 @@ WorkflowSession *WorkflowRuntime::sessionMut( const std::string &sessionId )
 
 const WorkflowSession *WorkflowRuntime::sessionConst( const std::string &sessionId ) const
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   const auto it = m_sessions.find( sessionId );
   if ( it == m_sessions.end() )
     return nullptr;

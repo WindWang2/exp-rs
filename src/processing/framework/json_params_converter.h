@@ -15,6 +15,9 @@
 
 namespace sicnu::processing {
 
+inline QVariant jsonValueToVariant( const Json::Value &value );
+inline QVariantMap jsonObjectToVariantMap( const Json::Value &obj );
+
 /// Converts a JSON object to a QVariantMap for typed parameter handoff:
 /// strings → QString, bools → bool, integers → qint64, other numerics →
 /// double, anything else → its styled JSON string. Non-object input yields an
@@ -35,8 +38,10 @@ inline QVariantMap jsonParamsToVariantMap( const Json::Value &params )
       variantMap[QString::fromStdString( key )] = val.asBool();
     else if ( val.isInt() || val.isUInt() || val.isInt64() || val.isUInt64() )
       variantMap[QString::fromStdString( key )] = static_cast<qint64>( val.asInt64() );
-    else if ( val.isNumeric() )
+    else if ( val.isDouble() || val.isNumeric() )
       variantMap[QString::fromStdString( key )] = val.asDouble();
+    else if ( val.isArray() || val.isObject() )
+      variantMap[QString::fromStdString( key )] = jsonValueToVariant( val );
     else
       variantMap[QString::fromStdString( key )] = QString::fromStdString( val.toStyledString() );
   }

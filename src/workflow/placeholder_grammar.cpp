@@ -182,6 +182,10 @@ std::string substitutePlaceholders( const std::string &text,
   if ( refs.empty() )
     return text;
 
+  std::sort( refs.begin(), refs.end(), []( const PlaceholderRef &a, const PlaceholderRef &b ) {
+    return a.rawRef.length() > b.rawRef.length();
+  } );
+
   std::string result = text;
   for ( const auto &ref : refs )
   {

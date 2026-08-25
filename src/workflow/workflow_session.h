@@ -24,6 +24,7 @@ class WorkflowSession
 
     void setArtifact( const std::string &name, const std::string &value );
     bool hasArtifact( const std::string &name ) const;
+    std::string artifact( const std::string &name ) const;
 
     void markStepComplete( const std::string &stepId );
     void setMode( SessionMode mode );

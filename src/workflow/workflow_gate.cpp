@@ -30,11 +30,7 @@ bool isParamValueNonEmpty( const Json::Value &params, const std::string &key )
 
 bool artifactNonEmpty( const WorkflowSession &session, const std::string &name )
 {
-  if ( !session.hasArtifact( name ) )
-    return false;
-  const auto snap = session.snapshot();
-  const auto it = snap.artifacts.find( name );
-  return it != snap.artifacts.end() && !it->second.empty();
+  return !session.artifact( name ).empty();
 }
 
 std::string failHint( const GateDef &gate, const std::string &fallback )

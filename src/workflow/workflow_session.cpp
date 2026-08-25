@@ -110,6 +110,11 @@ Json::Value WorkflowSession::resolveParams( const std::string &stepId ) const
   auto resolver = [this]( const PlaceholderRef &ref ) -> std::string {
     if ( !ref.stepId.empty() )
     {
+      std::string qualifiedKey = ref.stepId + "." + ref.portName;
+      auto itKey = m_artifacts.find( qualifiedKey );
+      if ( itKey != m_artifacts.end() )
+        return itKey->second;
+
       const StepDef *s = stepById( ref.stepId );
       if ( s && !s->artifactOnSuccess.empty() )
       {
@@ -117,10 +122,6 @@ Json::Value WorkflowSession::resolveParams( const std::string &stepId ) const
         if ( it != m_artifacts.end() )
           return it->second;
       }
-      std::string qualifiedKey = ref.stepId + "." + ref.portName;
-      auto itKey = m_artifacts.find( qualifiedKey );
-      if ( itKey != m_artifacts.end() )
-        return itKey->second;
     }
     auto itPort = m_artifacts.find( ref.portName );
     if ( itPort != m_artifacts.end() )
@@ -144,6 +145,14 @@ void WorkflowSession::setArtifact( const std::string &name, const std::string &v
 bool WorkflowSession::hasArtifact( const std::string &name ) const
 {
   return m_artifacts.find( name ) != m_artifacts.end();
+}
+
+std::string WorkflowSession::artifact( const std::string &name ) const
+{
+  auto it = m_artifacts.find( name );
+  if ( it != m_artifacts.end() )
+    return it->second;
+  return {};
 }
 
 void WorkflowSession::markStepComplete( const std::string &stepId )
