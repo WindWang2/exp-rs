@@ -12,6 +12,8 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QMouseEvent>
+#include <QThreadPool>
+#include <QCoreApplication>
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -20,6 +22,16 @@
 #include <cmath>
 #include <limits>
 #include <algorithm>
+#include <atomic>
+#include <mutex>
+#include <unordered_map>
+
+namespace
+{
+static std::atomic<uint64_t> s_globalRequestId{ 1 };
+static std::mutex s_reqMutex;
+static std::unordered_map<const HistogramWidget *, uint64_t> s_activeRequests;
+} // namespace
 
 HistogramWidget::HistogramWidget( QWidget *parent )
     : QWidget( parent )
@@ -45,6 +57,10 @@ HistogramWidget::~HistogramWidget()
 
 void HistogramWidget::closeDataset()
 {
+    {
+        std::lock_guard<std::mutex> lock( s_reqMutex );
+        s_activeRequests.erase( this );
+    }
     if ( m_cachedDataset ) {
         GDALClose( m_cachedDataset );
         m_cachedDataset = nullptr;
@@ -252,23 +268,179 @@ void HistogramWidget::computeHistograms()
     if ( !m_rasterLayer )
         return;
 
-    computeSingleBandHistogram( m_band, m_singleBandData );
+    const QString source = m_rasterLayer->source();
+    if ( source.isEmpty() )
+        return;
 
+    // Check if required bands are all cached and valid
+    bool allCached = m_bandCache.contains( m_band ) && m_bandCache[m_band].valid;
     if ( m_rasterLayer->bandCount() >= 3 )
     {
-        computeSingleBandHistogram( m_redBand, m_redData );
-        computeSingleBandHistogram( m_greenBand, m_greenData );
-        computeSingleBandHistogram( m_blueBand, m_blueData );
+        allCached = allCached &&
+                    m_bandCache.contains( m_redBand ) && m_bandCache[m_redBand].valid &&
+                    m_bandCache.contains( m_greenBand ) && m_bandCache[m_greenBand].valid &&
+                    m_bandCache.contains( m_blueBand ) && m_bandCache[m_blueBand].valid;
     }
 
-    if ( m_blackCutoff == 0.0 && m_whiteCutoff == 255.0 )
+    if ( allCached )
     {
-        m_blackCutoff = m_singleBandData.minVal;
-        m_whiteCutoff = m_singleBandData.maxVal;
+        m_singleBandData = m_bandCache.value( m_band );
+        if ( m_rasterLayer->bandCount() >= 3 )
+        {
+            m_redData = m_bandCache.value( m_redBand );
+            m_greenData = m_bandCache.value( m_greenBand );
+            m_blueData = m_bandCache.value( m_blueBand );
+        }
+
+        if ( m_blackCutoff == 0.0 && m_whiteCutoff == 255.0 && m_singleBandData.valid )
+        {
+            m_blackCutoff = m_singleBandData.minVal;
+            m_whiteCutoff = m_singleBandData.maxVal;
+        }
+
+        if ( m_piecewisePoints.isEmpty() )
+            resetPiecewisePoints();
+        update();
+        return;
     }
 
-    if ( m_piecewisePoints.isEmpty() )
-        resetPiecewisePoints();
+    // Identify which bands need background computation
+    std::vector<int> bandsToFetch;
+    if ( !m_bandCache.contains( m_band ) || !m_bandCache[m_band].valid )
+        bandsToFetch.push_back( m_band );
+    if ( m_rasterLayer->bandCount() >= 3 )
+    {
+        if ( !m_bandCache.contains( m_redBand ) || !m_bandCache[m_redBand].valid )
+            bandsToFetch.push_back( m_redBand );
+        if ( !m_bandCache.contains( m_greenBand ) || !m_bandCache[m_greenBand].valid )
+            bandsToFetch.push_back( m_greenBand );
+        if ( !m_bandCache.contains( m_blueBand ) || !m_bandCache[m_blueBand].valid )
+            bandsToFetch.push_back( m_blueBand );
+    }
+    std::sort( bandsToFetch.begin(), bandsToFetch.end() );
+    bandsToFetch.erase( std::unique( bandsToFetch.begin(), bandsToFetch.end() ), bandsToFetch.end() );
+
+    const uint64_t reqId = ++s_globalRequestId;
+    {
+        std::lock_guard<std::mutex> lock( s_reqMutex );
+        s_activeRequests[this] = reqId;
+    }
+
+    QPointer<HistogramWidget> self = this;
+    QThreadPool::globalInstance()->start( [self, source, reqId, bandsToFetch]() {
+        struct BandResult
+        {
+            int bandNum;
+            BandData data;
+        };
+        std::vector<BandResult> results;
+
+        GDALDatasetH ds = GDALOpen( source.toUtf8().constData(), GA_ReadOnly );
+        if ( !ds )
+            return;
+
+        for ( int bandNum : bandsToFetch )
+        {
+            BandData data;
+            data.valid = false;
+            GDALRasterBandH hBand = GDALGetRasterBand( ds, bandNum );
+            if ( !hBand )
+                continue;
+
+            int bGotMin = 0, bGotMax = 0;
+            double dfMin = GDALGetRasterMinimum( hBand, &bGotMin );
+            double dfMax = GDALGetRasterMaximum( hBand, &bGotMax );
+
+            if ( !bGotMin || !bGotMax || dfMax <= dfMin )
+            {
+                double adfMinMax[2];
+                if ( GDALComputeRasterMinMax( hBand, TRUE, adfMinMax ) == CE_None && adfMinMax[1] > adfMinMax[0] )
+                {
+                    dfMin = adfMinMax[0];
+                    dfMax = adfMinMax[1];
+                }
+                else
+                {
+                    dfMin = 0.0;
+                    dfMax = 255.0;
+                }
+            }
+
+            data.minVal = dfMin;
+            data.maxVal = dfMax;
+
+            double dfMean = 0.0, dfStdDev = 0.0;
+            if ( GDALGetRasterStatistics( hBand, TRUE, TRUE, &dfMin, &dfMax, &dfMean, &dfStdDev ) == CE_None )
+            {
+                data.mean = dfMean;
+                data.stddev = dfStdDev;
+            }
+
+            const int nBuckets = 256;
+            GUIntBig panHistogram[256];
+            CPLErr err = GDALGetRasterHistogramEx( hBand, dfMin, dfMax, nBuckets, panHistogram, FALSE, TRUE, nullptr, nullptr );
+
+            data.histogram.resize( nBuckets );
+            data.maxFreq = 0.0;
+            data.binCount = nBuckets;
+
+            if ( err == CE_None )
+            {
+                for ( int i = 0; i < nBuckets; ++i )
+                {
+                    data.histogram[i] = static_cast<double>( panHistogram[i] );
+                    if ( data.histogram[i] > data.maxFreq )
+                        data.maxFreq = data.histogram[i];
+                }
+                data.valid = true;
+            }
+            results.push_back( { bandNum, std::move( data ) } );
+        }
+
+        GDALClose( ds );
+
+        QMetaObject::invokeMethod( qApp, [self, reqId, results = std::move( results )]() mutable {
+            if ( !self )
+                return;
+
+            {
+                std::lock_guard<std::mutex> lock( s_reqMutex );
+                auto it = s_activeRequests.find( self.data() );
+                if ( it == s_activeRequests.end() || it->second != reqId )
+                    return; // Stale request or canceled
+            }
+
+            for ( auto &r : results )
+            {
+                if ( r.data.valid )
+                    self->m_bandCache[r.bandNum] = std::move( r.data );
+            }
+
+            if ( self->m_bandCache.contains( self->m_band ) )
+                self->m_singleBandData = self->m_bandCache[self->m_band];
+
+            if ( self->m_rasterLayer && self->m_rasterLayer->bandCount() >= 3 )
+            {
+                if ( self->m_bandCache.contains( self->m_redBand ) )
+                    self->m_redData = self->m_bandCache[self->m_redBand];
+                if ( self->m_bandCache.contains( self->m_greenBand ) )
+                    self->m_greenData = self->m_bandCache[self->m_greenBand];
+                if ( self->m_bandCache.contains( self->m_blueBand ) )
+                    self->m_blueData = self->m_bandCache[self->m_blueBand];
+            }
+
+            if ( self->m_blackCutoff == 0.0 && self->m_whiteCutoff == 255.0 && self->m_singleBandData.valid )
+            {
+                self->m_blackCutoff = self->m_singleBandData.minVal;
+                self->m_whiteCutoff = self->m_singleBandData.maxVal;
+            }
+
+            if ( self->m_piecewisePoints.isEmpty() )
+                self->resetPiecewisePoints();
+
+            self->update();
+        }, Qt::QueuedConnection );
+    } );
 }
 
 QRect HistogramWidget::getChartRect() const

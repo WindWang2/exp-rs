@@ -25,6 +25,7 @@ class WorkflowRuntime
     void registerDefinition( WorkflowDefinition def );
     bool hasDefinition( const std::string &id ) const;
     const WorkflowDefinition *findDefinition( const std::string &id ) const;
+    std::shared_ptr<const WorkflowDefinition> findDefinitionShared( const std::string &id ) const;
     std::vector<std::string> registeredDefinitionIds() const;
 
     /// Open a session for a registered definition.
@@ -55,15 +56,14 @@ class WorkflowRuntime
     void close( const std::string &sessionId );
 
   private:
-    WorkflowSession *sessionMut( const std::string &sessionId );
-    const WorkflowSession *sessionConst( const std::string &sessionId ) const;
+    std::shared_ptr<WorkflowSession> session( const std::string &sessionId ) const;
 
     /// Per-session cooperative cancellation flag (created in open()).
     std::shared_ptr<std::atomic<bool>> cancelFlag( const std::string &sessionId );
 
     mutable std::mutex m_mutex;
-    std::unordered_map<std::string, WorkflowDefinition> m_defs;
-    std::unordered_map<std::string, std::unique_ptr<WorkflowSession>> m_sessions;
+    std::unordered_map<std::string, std::shared_ptr<WorkflowDefinition>> m_defs;
+    std::unordered_map<std::string, std::shared_ptr<WorkflowSession>> m_sessions;
     std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> m_cancelFlags;
     int m_nextId = 1;
 };

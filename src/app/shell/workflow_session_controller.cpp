@@ -130,7 +130,7 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
 
   m_activeSession = QString::fromStdString( sessionId );
 
-  const auto *def = m_runtime.findDefinition( defId );
+  const auto def = m_runtime.findDefinitionShared( defId );
   if ( !def || def->steps.empty() )
   {
     m_panel->setFailed( tr( "工作流无步骤：%1" ).arg( definitionId ) );
@@ -261,7 +261,8 @@ void WorkflowSessionController::onRunClicked()
     return;
   }
 
-  const StepDef *step = findStep( m_runtime.findDefinition( definitionId ), stepId );
+  const auto def = m_runtime.findDefinitionShared( definitionId );
+  const StepDef *step = findStep( def.get(), stepId );
   if ( !step || step->kind != StepKind::Operator || step->operatorId.empty() )
   {
     m_panel->setFailed( tr( "当前步骤不是可运行算子" ) );
@@ -313,7 +314,7 @@ void WorkflowSessionController::runFullWorkflow()
     return;
   }
 
-  const auto *def = m_runtime.findDefinition( definitionId );
+  const auto def = m_runtime.findDefinitionShared( definitionId );
   if ( !def )
     return;
 
@@ -351,7 +352,7 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
     return;
   }
 
-  const auto *def = m_runtime.findDefinition( definitionId );
+  const auto def = m_runtime.findDefinitionShared( definitionId );
   if ( !def )
     return;
 
@@ -560,7 +561,8 @@ void WorkflowSessionController::applyJobResultToSession( const std::string &sess
     return;
   }
 
-  const StepDef *step = findStep( m_runtime.findDefinition( definitionId ), stepId );
+  const auto def = m_runtime.findDefinitionShared( definitionId );
+  const StepDef *step = findStep( def.get(), stepId );
 
   // Mirror WorkflowRuntime::runStep artifact side-effects.
   if ( result.isMember( "output" ) && result["output"].isString() )
