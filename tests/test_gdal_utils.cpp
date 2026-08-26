@@ -57,11 +57,13 @@ TEST_CASE("writeGdalOutput", "[gdal_utils]")
 
     SECTION("empty bands returns false")
     {
+        QTemporaryDir dir;
+        REQUIRE(dir.isValid());
         std::vector<std::vector<float>> bands;
         std::array<double, 6> gt = {0, 1, 0, 0, 0, 1};
         QString error;
 
-        bool ok = writeGdalOutput("/tmp/test.tif", 10, 10, bands, gt, "", &error);
+        bool ok = writeGdalOutput(dir.filePath("test.tif"), 10, 10, bands, gt, "", &error);
         REQUIRE_FALSE(ok);
         REQUIRE(error.contains("No band data"));
     }

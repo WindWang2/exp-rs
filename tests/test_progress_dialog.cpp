@@ -5,10 +5,21 @@
 #include <QTimer>
 #include <app/widgets/progress_dialog.h>
 
+// Helper to ensure single QApplication instance
+static QApplication *ensureApp()
+{
+    if (!qApp) {
+        static int argc = 1;
+        static char appName[] = "test_runner";
+        static char *argv[] = { appName, nullptr };
+        new QApplication(argc, argv);
+    }
+    return static_cast<QApplication*>(qApp);
+}
+
+
 TEST_CASE("ProgressDialog creation", "[gui][progress]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     SECTION("Creates with default parameters") {
         ProgressDialog dialog;
@@ -26,9 +37,7 @@ TEST_CASE("ProgressDialog creation", "[gui][progress]") {
 }
 
 TEST_CASE("ProgressDialog setValue", "[gui][progress]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     ProgressDialog dialog;
 
@@ -49,9 +58,7 @@ TEST_CASE("ProgressDialog setValue", "[gui][progress]") {
 }
 
 TEST_CASE("ProgressDialog setRange", "[gui][progress]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     ProgressDialog dialog;
 
@@ -63,9 +70,7 @@ TEST_CASE("ProgressDialog setRange", "[gui][progress]") {
 }
 
 TEST_CASE("ProgressDialog cancel", "[gui][progress]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     ProgressDialog dialog;
 
@@ -87,9 +92,7 @@ TEST_CASE("ProgressDialog cancel", "[gui][progress]") {
 }
 
 TEST_CASE("ProgressDialog setLabelText", "[gui][progress]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     ProgressDialog dialog;
 
@@ -100,9 +103,7 @@ TEST_CASE("ProgressDialog setLabelText", "[gui][progress]") {
 }
 
 TEST_CASE("ProgressDialog elapsed time", "[gui][progress]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     ProgressDialog dialog;
 
@@ -113,9 +114,7 @@ TEST_CASE("ProgressDialog elapsed time", "[gui][progress]") {
 }
 
 TEST_CASE("ProgressDialog auto-close on 100%", "[gui][progress]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     ProgressDialog dialog;
 
@@ -130,9 +129,7 @@ TEST_CASE("ProgressDialog auto-close on 100%", "[gui][progress]") {
 }
 
 TEST_CASE("ProgressDialog cancel signal", "[gui][progress]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     ProgressDialog dialog;
     bool signalReceived = false;

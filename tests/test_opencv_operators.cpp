@@ -360,3 +360,34 @@ TEST_CASE("opencv utils mask large-sentinel NoData and keep undeclared zeros (#4
     REQUIRE(out2.readBandData(1, back2.data(), W, H));
     CHECK(back2[2] == 0.0f);
 }
+
+TEST_CASE("writeMatToRaster does not mutate caller's const cv::Mat containing NaNs (#569)", "[opencv][const_correctness]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString srcPath = tmp.filePath(QStringLiteral("src_nodata.tif"));
+    ensureGdalInit();
+
+    constexpr int W = 3, H = 3;
+    const float sentinel = -9999.0f;
+    std::vector<std::vector<float>> bands(1, std::vector<float>(W * H, 10.0f));
+    bands[0][0] = sentinel;
+    const std::array<double, 6> gt = {0, 1, 0, 0, 0, -1};
+    QString err;
+    REQUIRE(writeGdalOutput(srcPath, W, H, bands, gt, QString(), &err, static_cast<double>(sentinel)));
+
+    cv::Mat inputMat = sicnu::operators::opencv::readRasterBandToMat(srcPath.toStdString(), 1);
+    REQUIRE(inputMat.rows == H);
+    REQUIRE(inputMat.cols == W);
+    REQUIRE(std::isnan(inputMat.at<float>(0, 0)));
+
+    const QString outPath = tmp.filePath(QStringLiteral("dst_nodata.tif"));
+    REQUIRE(sicnu::operators::opencv::writeMatToRaster(outPath.toStdString(), inputMat, srcPath.toStdString()));
+
+    // Caller's inputMat MUST NOT have been mutated: (0, 0) must STILL be NaN!
+    CHECK(std::isnan(inputMat.at<float>(0, 0)));
+
+    std::vector<cv::Mat> vecMats = { inputMat };
+    const QString outPathVec = tmp.filePath(QStringLiteral("dst_nodata_vec.tif"));
+    REQUIRE(sicnu::operators::opencv::writeMatsToRaster(outPathVec.toStdString(), vecMats, srcPath.toStdString()));
+    CHECK(std::isnan(inputMat.at<float>(0, 0)));
+}

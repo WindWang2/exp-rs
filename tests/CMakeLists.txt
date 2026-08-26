@@ -50,6 +50,9 @@ function(sicnu_add_test NAME)
     ${CMAKE_SOURCE_DIR}/src/stubs
     ${CMAKE_BINARY_DIR}
   )
+  target_compile_definitions(${NAME} PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
   sicnu_discover_tests(${NAME})
 endfunction()
 
@@ -211,6 +214,26 @@ target_compile_definitions(test_ui_task_center_contract PRIVATE
 )
 sicnu_discover_tests(test_ui_task_center_contract)
 
+add_executable(test_async_algorithm_runner
+  test_async_algorithm_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_algorithm_runner.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/async_runner_base.cpp
+)
+target_link_libraries(test_async_algorithm_runner PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  sicnu_jobs
+  sicnu_task_center
+)
+target_include_directories(test_async_algorithm_runner PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_async_algorithm_runner)
+
 add_executable(test_theme_selector_parity
   test_theme_selector_parity.cpp
 )
@@ -273,6 +296,9 @@ target_link_libraries(test_paths PRIVATE
 target_include_directories(test_paths PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_paths PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 sicnu_discover_tests(test_paths)
 
@@ -2055,7 +2081,7 @@ if(TARGET qgis_app_classify)
     sicnu_jobs
     sicnu_task_center
     GDAL::GDAL
-    ${OpenCV_LIBS}
+    ${OpenCV_LIBRARIES}
   sicnu_data
   )
   target_include_directories(test_classification_task_center PRIVATE
@@ -2769,7 +2795,7 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
     sicnu_jobs
     sicnu_task_center
     GDAL::GDAL
-    ${OpenCV_LIBS}
+    ${OpenCV_LIBRARIES}
   )
   target_include_directories(test_obia_task_center PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -2857,7 +2883,7 @@ if(SICNU_HAS_OPENCV AND TARGET qgis_app_obia)
     sicnu_jobs
     sicnu_task_center
     GDAL::GDAL
-    ${OpenCV_LIBS}
+    ${OpenCV_LIBRARIES}
   )
   target_include_directories(test_obia_main_window PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -3947,10 +3973,11 @@ qt_add_executable(test_python_script_editor
   ${CMAKE_SOURCE_DIR}/src/app/active_view_host.cpp
 )
 target_link_libraries(test_python_script_editor PRIVATE
-  Catch2::Catch2
+  Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  Qt6::Test
   qgis_core
   qgis_gui
   Sicnu::qgis_display
@@ -3971,6 +3998,7 @@ target_compile_definitions(test_python_script_editor PRIVATE
   TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/data"
 )
 sicnu_discover_tests(test_python_script_editor RUN_SERIAL TRUE)
+endif()
 
 sicnu_add_test(test_llm_streaming_client)
 target_link_libraries(test_llm_streaming_client PRIVATE
@@ -4010,7 +4038,6 @@ target_include_directories(test_agent_canvas_sync PRIVATE
   ${CMAKE_SOURCE_DIR}/src/app/workflow
 )
 sicnu_discover_tests(test_agent_canvas_sync)
-endif()
 
 # Project persistence — SICNU Data identity plus standard QGIS presentation
 qt_add_executable(test_data_project_roundtrip

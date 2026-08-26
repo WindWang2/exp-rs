@@ -78,10 +78,21 @@ private:
     QLineEdit *m_otbPathEdit;
 };
 
+// Helper to ensure single QApplication instance
+static QApplication *ensureApp()
+{
+    if (!qApp) {
+        static int argc = 1;
+        static char appName[] = "test_runner";
+        static char *argv[] = { appName, nullptr };
+        new QApplication(argc, argv);
+    }
+    return static_cast<QApplication*>(qApp);
+}
+
+
 TEST_CASE("PreferencesDialog creation", "[gui][preferences]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     SECTION("Creates with correct title") {
         TestPreferencesDialog dialog;
@@ -98,9 +109,7 @@ TEST_CASE("PreferencesDialog creation", "[gui][preferences]") {
 }
 
 TEST_CASE("PreferencesDialog theme setting", "[gui][preferences]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     TestPreferencesDialog dialog;
 
@@ -115,9 +124,7 @@ TEST_CASE("PreferencesDialog theme setting", "[gui][preferences]") {
 }
 
 TEST_CASE("PreferencesDialog CRS setting", "[gui][preferences]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     TestPreferencesDialog dialog;
 
@@ -132,9 +139,7 @@ TEST_CASE("PreferencesDialog CRS setting", "[gui][preferences]") {
 }
 
 TEST_CASE("PreferencesDialog tool paths", "[gui][preferences]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     TestPreferencesDialog dialog;
 
@@ -155,9 +160,7 @@ TEST_CASE("PreferencesDialog tool paths", "[gui][preferences]") {
 }
 
 TEST_CASE("PreferencesDialog settings persistence", "[gui][preferences]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings settings;
@@ -181,9 +184,7 @@ TEST_CASE("PreferencesDialog settings persistence", "[gui][preferences]") {
 }
 
 TEST_CASE("Theme setting is read from QSettings on startup", "[gui][preferences][theme]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings settings;

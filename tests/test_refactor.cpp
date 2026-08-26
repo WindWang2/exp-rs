@@ -21,20 +21,15 @@ TEST_CASE("LayerTreeMenuProvider can be instantiated", "[refactor]") {
   });
 }
 
-TEST_CASE("main.cpp is minimal", "[refactor]") {
-  // This test documents the requirement: after refactoring, main.cpp should
-  // only contain the main() function and necessary includes.
-  //
-  // Before refactoring:
-  //   - QgisDesktopWindow class definition (~810 lines)
-  //   - LayerTreeMenuProvider class definition (~74 lines)
-  //   - main() function (~70 lines)
-  //   - Total: ~1058 lines
-  //
-  // After refactoring:
-  //   - main.cpp: only main() function + includes (~100 lines)
-  //   - main_window.h/cpp: QgisDesktopWindow class
-  //   - layer_tree_menu.h/cpp: LayerTreeMenuProvider class
+#include <QFile>
+#include <QString>
 
-  REQUIRE(true); // placeholder — actual verification is structure check
+TEST_CASE("main.cpp is minimal", "[refactor]") {
+  QFile file(QString::fromUtf8(CMAKE_SOURCE_DIR "/src/app/main.cpp"));
+  REQUIRE(file.open(QIODevice::ReadOnly | QIODevice::Text));
+  const QString content = QString::fromUtf8(file.readAll());
+  REQUIRE(content.contains("int main("));
+  REQUIRE(content.contains("QgisDesktopWindow"));
+  REQUIRE_FALSE(content.contains("class QgisDesktopWindow :"));
+  REQUIRE_FALSE(content.contains("class LayerTreeMenuProvider :"));
 }

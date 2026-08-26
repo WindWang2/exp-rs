@@ -100,4 +100,5 @@ private:
     // Python state
     void *m_mainModule = nullptr;    // PyObject*
     void *m_mainDict = nullptr;      // PyObject*
+    void *m_mainThreadState = nullptr; // PyThreadState*
 };

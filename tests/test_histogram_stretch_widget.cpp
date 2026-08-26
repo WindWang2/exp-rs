@@ -130,12 +130,22 @@ QString samplePath( const char *name )
     return candidates.first();
 }
 
+// Helper to ensure single QApplication instance
+static QApplication *ensureApp()
+{
+    if (!qApp) {
+        static int argc = 1;
+        static char appName[] = "test_runner";
+        static char *argv[] = { appName, nullptr };
+        new QApplication(argc, argv);
+    }
+    return static_cast<QApplication*>(qApp);
+}
+
 } // namespace
 
 TEST_CASE("HistogramStretchWidget creation and defaults", "[gui][histogram]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     HistogramStretchWidget widget;
     CHECK(widget.rasterLayer() == nullptr);
@@ -144,9 +154,7 @@ TEST_CASE("HistogramStretchWidget creation and defaults", "[gui][histogram]") {
 }
 
 TEST_CASE("HistogramStretchWidget setRasterLayer", "[gui][histogram]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     HistogramStretchWidget widget;
 
@@ -167,9 +175,7 @@ TEST_CASE("HistogramStretchWidget setRasterLayer", "[gui][histogram]") {
 }
 
 TEST_CASE("HistogramStretchWidget algorithm switching", "[gui][histogram]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     HistogramStretchWidget widget;
 
@@ -204,9 +210,7 @@ TEST_CASE("HistogramStretchWidget algorithm switching", "[gui][histogram]") {
 }
 
 TEST_CASE("HistogramStretchWidget band selection", "[gui][histogram]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     HistogramStretchWidget widget;
 
@@ -225,9 +229,7 @@ TEST_CASE("HistogramStretchWidget band selection", "[gui][histogram]") {
 }
 
 TEST_CASE("HistogramStretchWidget normalizes a master piecewise curve per RGB band", "[gui][histogram]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     auto *layer = new QgsRasterLayer(samplePath("landsat_sample.tif"), QStringLiteral("landsat"));
     if ( !layer->isValid() || layer->bandCount() < 3 ) {
@@ -260,9 +262,7 @@ TEST_CASE("HistogramStretchWidget normalizes a master piecewise curve per RGB ba
 }
 
 TEST_CASE("HistogramStretchWidget renders CCD1 piecewise output without a white fill", "[gui][histogram]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     auto *layer = new QgsRasterLayer(samplePath("CCD1.dat"), QStringLiteral("CCD1"));
     if ( !layer->isValid() || layer->bandCount() < 3 ) {
@@ -305,9 +305,7 @@ TEST_CASE("HistogramStretchWidget renders CCD1 piecewise output without a white 
 }
 
 TEST_CASE("Custom enhancement survives the renderer clone used by map rendering", "[gui][histogram][renderer-clone]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     auto *layer = new QgsRasterLayer(samplePath("CCD1.dat"), QStringLiteral("CCD1"));
     REQUIRE(layer->isValid());
@@ -386,9 +384,7 @@ TEST_CASE("Custom enhancement survives the renderer clone used by map rendering"
 }
 
 TEST_CASE("HistogramStretchWidget applies Photoshop gamma", "[gui][histogram]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     auto *layer = new QgsRasterLayer(samplePath("CCD1.dat"), QStringLiteral("CCD1"));
     REQUIRE(layer->isValid());
@@ -418,9 +414,7 @@ TEST_CASE("HistogramStretchWidget applies Photoshop gamma", "[gui][histogram]") 
 }
 
 TEST_CASE("HistogramStretchWidget histogram equalization differs from linear stretch", "[gui][histogram]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     auto *layer = new QgsRasterLayer(samplePath("CCD1.dat"), QStringLiteral("CCD1"));
     REQUIRE(layer->isValid());
@@ -445,13 +439,12 @@ TEST_CASE("HistogramStretchWidget histogram equalization differs from linear str
     auto *equalizedEnhancement = const_cast<QgsContrastEnhancement *>(equalizedRenderer->redContrastEnhancement());
     REQUIRE(equalizedEnhancement != nullptr);
     CHECK(equalizedEnhancement->enhanceContrast(34.0) != linearValue);
+    widget.setRasterLayer(nullptr);
     delete layer;
 }
 
 TEST_CASE("HistogramStretchWidget uses cumulative clipping and two sigma defaults", "[gui][histogram]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     auto *layer = new QgsRasterLayer(samplePath("CCD1.dat"), QStringLiteral("CCD1"));
     REQUIRE(layer->isValid());
@@ -481,9 +474,7 @@ TEST_CASE("HistogramStretchWidget uses cumulative clipping and two sigma default
 }
 
 TEST_CASE("HistogramStretchWidget reset removes stale piecewise points", "[gui][histogram]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     auto *layer = new QgsRasterLayer(samplePath("CCD1.dat"), QStringLiteral("CCD1"));
     REQUIRE(layer->isValid());
@@ -503,9 +494,7 @@ TEST_CASE("HistogramStretchWidget reset removes stale piecewise points", "[gui][
 }
 
 TEST_CASE("HistogramStretchWidget red channel does not alter green and blue", "[gui][histogram]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     auto *layer = new QgsRasterLayer(samplePath("CCD1.dat"), QStringLiteral("CCD1"));
     REQUIRE(layer->isValid());
@@ -527,9 +516,7 @@ TEST_CASE("HistogramStretchWidget red channel does not alter green and blue", "[
 }
 
 TEST_CASE("HistogramStretchWidget resetStretch", "[gui][histogram]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     HistogramStretchWidget widget;
 
@@ -548,9 +535,7 @@ TEST_CASE("HistogramStretchWidget resetStretch", "[gui][histogram]") {
 }
 
 TEST_CASE("HistogramStretchWidget survives deleted layer", "[gui][histogram]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     HistogramStretchWidget widget;
     auto *layer = new QgsRasterLayer(samplePath("dem_sample.tif"), QStringLiteral("dem"));

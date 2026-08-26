@@ -33,7 +33,8 @@
  */
 inline GDALDatasetH gdalSafeOpen(const char *path, GDALAccess access = GA_ReadOnly)
 {
-    GDALDatasetH ds = GDALOpen(path, access);
+    const unsigned int nOpenFlags = GDAL_OF_RASTER | (access == GA_Update ? GDAL_OF_UPDATE : GDAL_OF_READONLY);
+    GDALDatasetH ds = GDALOpenEx(path, nOpenFlags, nullptr, nullptr, nullptr);
     if (!ds) {
         const char *msg = CPLGetLastErrorMsg();
         if (msg && msg[0]) {

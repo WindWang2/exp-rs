@@ -10,10 +10,20 @@
 
 #include "app/widgets/python_script_editor.h"
 
+// Helper to ensure single QApplication instance
+static QApplication *ensureApp()
+{
+    if (!qApp) {
+        static int argc = 1;
+        static char appName[] = "test_runner";
+        static char *argv[] = { appName, nullptr };
+        new QApplication(argc, argv);
+    }
+    return static_cast<QApplication*>(qApp);
+}
+
 TEST_CASE("PythonScriptEditor creation", "[gui][python]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     Sicnu::PythonScriptEditor editor;
 
@@ -21,9 +31,7 @@ TEST_CASE("PythonScriptEditor creation", "[gui][python]") {
 }
 
 TEST_CASE("PythonScriptEditor setScript and getScript", "[gui][python]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     Sicnu::PythonScriptEditor editor;
 
@@ -39,9 +47,7 @@ TEST_CASE("PythonScriptEditor setScript and getScript", "[gui][python]") {
 }
 
 TEST_CASE("PythonScriptEditor clearOutput", "[gui][python]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     Sicnu::PythonScriptEditor editor;
     editor.appendOutput(QStringLiteral("some text"));
@@ -52,9 +58,7 @@ TEST_CASE("PythonScriptEditor clearOutput", "[gui][python]") {
 }
 
 TEST_CASE("PythonScriptEditor runs simple Python script", "[gui][python]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     Sicnu::PythonScriptEditor editor;
 
@@ -71,9 +75,7 @@ TEST_CASE("PythonScriptEditor runs simple Python script", "[gui][python]") {
 }
 
 TEST_CASE("PythonScriptEditor reports script errors", "[gui][python]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     Sicnu::PythonScriptEditor editor;
 

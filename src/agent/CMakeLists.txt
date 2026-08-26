@@ -53,10 +53,12 @@ target_link_libraries(sicnu_agent PUBLIC
   ${JSONCPP_LIBRARIES}
 )
 
-target_include_directories(sicnu_agent PUBLIC
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/src/app
-  ${JSONCPP_INCLUDE_DIRS}
+target_include_directories(sicnu_agent
+  PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+    ${JSONCPP_INCLUDE_DIRS}
+  PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/app
 )
 
 set_target_properties(sicnu_agent PROPERTIES

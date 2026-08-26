@@ -17,7 +17,6 @@ add_library(sicnu_processing SHARED
     algorithms/radiometric_calibration.cpp
     algorithms/change_detection.cpp
     algorithms/post_classification.cpp
-    gdal/gdal_grid_compat.cpp
     algorithms/qa_mask.cpp
     algorithms/math_utils.cpp
     algorithms/mosaic.cpp

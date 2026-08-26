@@ -45,10 +45,21 @@ public:
     }
 };
 
+// Helper to ensure single QApplication instance
+static QApplication *ensureApp()
+{
+    if (!qApp) {
+        static int argc = 1;
+        static char appName[] = "test_runner";
+        static char *argv[] = { appName, nullptr };
+        new QApplication(argc, argv);
+    }
+    return static_cast<QApplication*>(qApp);
+}
+
+
 TEST_CASE("Panel state save/restore", "[gui][persistence]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     // Use test organization to avoid polluting real settings
     QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -113,9 +124,7 @@ TEST_CASE("Panel state save/restore", "[gui][persistence]") {
 }
 
 TEST_CASE("Reset layout action exists", "[gui][persistence]") {
-    int argc = 0;
-    char *argv[] = { nullptr };
-    QApplication app(argc, argv);
+    ensureApp();
 
     TestMainWindow window;
 

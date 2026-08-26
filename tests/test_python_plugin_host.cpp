@@ -480,11 +480,9 @@ TEST_CASE( "SharedMemorySegment: N distinct segments on N workers read concurren
   PythonPluginAdapter *pluginAdapter = host.loadPlugin( pluginDir, &dataManager, nullptr, nullptr, &loadError );
   REQUIRE( pluginAdapter != nullptr );
 
-  // Gather N workers, each with its own IPC server. The plugin already holds
-  // one; acquire the rest from the pool.
+  // Gather N workers, each with its own IPC server.
   std::vector<WorkerNode *> nodes;
-  nodes.push_back( pluginAdapter->workerNode() );
-  for ( int i = 1; i < N; ++i )
+  for ( int i = 0; i < N; ++i )
   {
     WorkerNode *wn = host.pool()->acquireWorker();
     REQUIRE( wn != nullptr );
@@ -517,6 +515,7 @@ TEST_CASE( "SharedMemorySegment: N distinct segments on N workers read concurren
   std::vector<double> checksums( N, -1.0 );
   std::vector<AwaitStatus> statuses( N, AwaitStatus::Disconnected );
   std::vector<std::thread> threads;
+  std::atomic<int> completedCount{0};
   for ( int i = 0; i < N; ++i )
   {
     threads.emplace_back( [&, i]() {
@@ -532,7 +531,14 @@ TEST_CASE( "SharedMemorySegment: N distinct segments on N workers read concurren
         QStringLiteral( "shm.read" ), params, result, isError, 15000 );
       if ( statuses[i] == AwaitStatus::Ok && !isError )
         checksums[i] = result[QStringLiteral( "checksum" )].toDouble();
+      ++completedCount;
     } );
+  }
+
+  while ( completedCount.load() < N )
+  {
+    QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
   }
   for ( auto &t : threads ) t.join();
 
@@ -543,8 +549,8 @@ TEST_CASE( "SharedMemorySegment: N distinct segments on N workers read concurren
     REQUIRE( checksums[i] == Approx( segments[i].expectedSum ).margin( 1e-3 ) );
   }
 
-  // Release the workers we acquired directly (the plugin owns the first).
-  for ( int i = 1; i < N; ++i )
+  // Release the workers we acquired.
+  for ( int i = 0; i < N; ++i )
     host.pool()->releaseWorker( nodes[i] );
 }
 

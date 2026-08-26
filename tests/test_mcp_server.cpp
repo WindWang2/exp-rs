@@ -486,10 +486,13 @@ TEST_CASE("McpServer executes qgis processing algorithms to terminal state", "[a
 
     TestMcpServer server;
 
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
+
     QVariantMap params;
-    params["INPUT_LAYERS"] = QStringLiteral("/tmp/input.tif");
+    params["INPUT_LAYERS"] = tempDir.filePath("input.tif");
     params["EXPRESSION"] = QStringLiteral("A + 10");
-    params["OUTPUT"] = QStringLiteral("/tmp/band_math_out.tif");
+    params["OUTPUT"] = tempDir.filePath("band_math_out.tif");
 
     QVariantMap res = server.testExecuteAlgorithm("qgis_algorithms:rs_band_math", params);
     REQUIRE(res.value("status").toString() == "running");

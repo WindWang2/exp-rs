@@ -171,11 +171,13 @@ TEST_CASE("GdalOrthorectificationOperator orthorectifies GCP raster", "[gdal]") 
 }
 
 TEST_CASE("GdalOrthorectificationOperator rejects invalid resampling", "[gdal]") {
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
     auto op = std::make_unique<GdalOrthorectificationOperator>();
     RSOperatorContext ctx;
     Json::Value params(Json::objectValue);
     params["input"] = "/nonexistent/input.tif";
-    params["output"] = "/tmp/out.tif";
+    params["output"] = tempDir.filePath("out.tif").toStdString();
     params["resampling"] = "unsupported";
 
     try {
@@ -223,11 +225,13 @@ TEST_CASE("GdalReprojectOperator schema and metadata", "[gdal]") {
 }
 
 TEST_CASE("GdalReprojectOperator rejects missing dstCrs", "[gdal]") {
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
     auto op = std::make_unique<GdalReprojectOperator>();
     RSOperatorContext ctx;
     Json::Value params(Json::objectValue);
-    params["input"] = "/tmp/in.tif";
-    params["output"] = "/tmp/out.tif";
+    params["input"] = tempDir.filePath("in.tif").toStdString();
+    params["output"] = tempDir.filePath("out.tif").toStdString();
 
     try {
         op->run(params, ctx);
@@ -318,6 +322,8 @@ TEST_CASE("GdalReprojectOperator aligns output to a reference raster grid", "[gd
 }
 
 TEST_CASE("GdalClipOperator schema and rejects missing clip source", "[gdal]") {
+    QTemporaryDir tempDir;
+    REQUIRE(tempDir.isValid());
     auto op = std::make_unique<GdalClipOperator>();
     REQUIRE(op->name() == "gdal:clip");
 
@@ -327,8 +333,8 @@ TEST_CASE("GdalClipOperator schema and rejects missing clip source", "[gdal]") {
 
     RSOperatorContext ctx;
     Json::Value params(Json::objectValue);
-    params["input"] = "/tmp/in.tif";
-    params["output"] = "/tmp/out.tif";
+    params["input"] = tempDir.filePath("in.tif").toStdString();
+    params["output"] = tempDir.filePath("out.tif").toStdString();
 
     try {
         op->run(params, ctx);

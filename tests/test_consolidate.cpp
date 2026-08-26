@@ -17,8 +17,15 @@ TEST_CASE("QgisAlgorithms provider has all algorithms", "[consolidate]") {
 }
 
 TEST_CASE("SicnuNative provider no longer exists", "[consolidate]") {
-  // After consolidation, sicnu_native provider should be removed
-  // This test verifies the provider directory is gone
-  // (actual verification is file system check, not runtime)
-  REQUIRE(true); // placeholder
+  QgisAlgorithmsProvider provider;
+  provider.load();
+  REQUIRE(provider.id() == QStringLiteral("qgis_algorithms"));
+  REQUIRE(provider.name() == QStringLiteral("QGIS Basic Algorithms"));
+
+  auto algs = provider.algorithms();
+  REQUIRE_FALSE(algs.empty());
+  for (const auto *alg : algs) {
+    REQUIRE(alg != nullptr);
+    REQUIRE_FALSE(alg->id().startsWith("sicnu_native:"));
+  }
 }

@@ -136,7 +136,7 @@ bool writeMatToRaster(const std::string& outputPath,
     const double outNodata = srcNodataValid ? srcNodata : std::numeric_limits<double>::quiet_NaN();
     GDALSetRasterNoDataValue(band, outNodata);
 
-    cv::Mat bandMat = mat.isContinuous() ? mat : mat.clone();
+    cv::Mat bandMat = (srcNodataValid || !mat.isContinuous()) ? mat.clone() : mat;
     if (srcNodataValid) {
         const float nodataF = static_cast<float>(srcNodata);
         float *ptr = bandMat.ptr<float>();
@@ -216,7 +216,7 @@ bool writeMatsToRaster(const std::string& outputPath,
         const double outNodata = srcNodataValid ? srcNodata : std::numeric_limits<double>::quiet_NaN();
         GDALSetRasterNoDataValue(band, outNodata);
 
-        cv::Mat bandMat = mats[i].isContinuous() ? mats[i] : mats[i].clone();
+        cv::Mat bandMat = (srcNodataValid || !mats[i].isContinuous()) ? mats[i].clone() : mats[i];
         if (srcNodataValid) {
             const float nodataF = static_cast<float>(srcNodata);
             float *ptr = bandMat.ptr<float>();

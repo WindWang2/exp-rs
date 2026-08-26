@@ -67,19 +67,10 @@ TEST_CASE("AppPaths::samplesDataDir resolves bundled lab datasets", "[paths][sam
 }
 
 TEST_CASE("main.cpp does not use hardcoded paths", "[paths]") {
-  // This test documents the requirement: main.cpp must NOT contain
-  // hardcoded paths like "/home/kevin/projects/exp-rs".
-  //
-  // Verification is done by code review / grep, not runtime assertion.
-  //
-  // After refactoring, main.cpp should use:
-  //   AppPaths::prefixPath()
-  //   AppPaths::dataDir()
-  //   AppPaths::resolveDataPath("data/sample_crops.tif")
-  //
-  // NOT:
-  //   QgsApplication::setPrefixPath("/home/kevin/projects/exp-rs", true);
-  //   QString samplePath = "/home/kevin/projects/exp-rs/data/sample_crops.tif";
-
-  REQUIRE(true); // placeholder — actual verification is code review
+  QFile file(QString::fromUtf8(CMAKE_SOURCE_DIR "/src/app/main.cpp"));
+  REQUIRE(file.open(QIODevice::ReadOnly | QIODevice::Text));
+  const QString content = QString::fromUtf8(file.readAll());
+  REQUIRE_FALSE(content.isEmpty());
+  REQUIRE_FALSE(content.contains("/home/kevin/projects/exp-rs"));
+  REQUIRE(content.contains("AppPaths::"));
 }

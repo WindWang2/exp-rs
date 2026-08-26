@@ -123,7 +123,7 @@ target_link_libraries(sicnu_operators
 if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
     target_include_directories(sicnu_operators PUBLIC ${OpenCV_INCLUDE_DIRS})
     target_link_libraries(sicnu_operators PRIVATE
-        ${OpenCV_LIBS}
+        ${OpenCV_LIBRARIES}
     )
     target_compile_definitions(sicnu_operators PUBLIC SICNU_HAS_OPENCV=1)
 endif()
@@ -186,6 +186,7 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
         set_target_properties(_sicnu_operators PROPERTIES
             CXX_STANDARD 20
             CXX_STANDARD_REQUIRED ON
+            CXX_SCAN_FOR_MODULES OFF
         )
         install(TARGETS _sicnu_operators
             LIBRARY DESTINATION ${QGIS_LIB_SUBDIR}

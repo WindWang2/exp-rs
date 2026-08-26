@@ -12,6 +12,7 @@
 
 #include <set>
 #include <string>
+#include <QTemporaryDir>
 
 #include "operators/framework/rs_operator_registry.h"
 #include <iostream>
@@ -139,9 +140,12 @@ TEST_CASE( "Composition: primitive output satisfies the next algorithm's input c
     REQUIRE( thresholdIn != nullptr );
 
     // Feeding the change output path as the threshold input validates.
+    QTemporaryDir tempDir;
+    REQUIRE( tempDir.isValid() );
+
     Json::Value params( Json::objectValue );
-    params["input"] = "/tmp/magnitude.tif"; // shape-valid raster path
-    params["output"] = "/tmp/mask.tif";
+    params["input"] = tempDir.filePath("magnitude.tif").toStdString(); // shape-valid raster path
+    params["output"] = tempDir.filePath("mask.tif").toStdString();
     const auto result = validateParameters( params, thresholdDesc );
     REQUIRE( result.ok() );
 
@@ -180,8 +184,8 @@ TEST_CASE( "Composition: primitive output satisfies the next algorithm's input c
 
     // Validating ndvi params
     Json::Value ndviParams( Json::objectValue );
-    ndviParams["input"] = "/tmp/surface_reflectance.tif";
-    ndviParams["output"] = "/tmp/ndvi.tif";
+    ndviParams["input"] = tempDir.filePath("surface_reflectance.tif").toStdString();
+    ndviParams["output"] = tempDir.filePath("ndvi.tif").toStdString();
     ndviParams["nir"] = 4;
     ndviParams["red"] = 3;
     const auto ndviValidation = validateParameters( ndviParams, ndviDesc );

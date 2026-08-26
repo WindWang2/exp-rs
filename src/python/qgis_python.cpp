@@ -228,6 +228,7 @@ sys.modules['qgis.utils'] = qgis.utils
 
     QgsPythonRunner::setInstance( new SicnuPythonRunner() );
     qDebug() << "Python initialized:" << pythonVersion();
+    m_mainThreadState = static_cast<void *>(PyEval_SaveThread());
     return true;
 }
 
@@ -250,13 +251,16 @@ bool QgisPython::runString(const QString &command, QString &error)
     QByteArray cmdBytes = command.toUtf8();
     int result = PyRun_SimpleStringFlags(cmdBytes.constData(), nullptr);
 
-    PyGILState_Release(gilState);
-
     if (result != 0) {
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
         error = "Python execution error";
+    }
+
+    PyGILState_Release(gilState);
+
+    if (result != 0) {
         return false;
     }
 
@@ -325,12 +329,14 @@ bool QgisPython::runFile(const QString &filePath, QString &error)
     QMutexLocker locker(&m_mutex);
     PyGILState_STATE gilState = PyGILState_Ensure();
     int result = PyRun_SimpleFile(fp, pathBytes.constData());
+    if (result != 0) {
+        PyErr_Print();
+        error = "Python file execution error";
+    }
     PyGILState_Release(gilState);
     fclose(fp);
 
     if (result != 0) {
-        PyErr_Print();
-        error = "Python file execution error";
         return false;
     }
 
@@ -341,6 +347,10 @@ void QgisPython::finalize()
 {
     QMutexLocker locker(&m_mutex);
     if (m_initialized) {
+        if (m_mainThreadState) {
+            PyEval_RestoreThread(static_cast<PyThreadState *>(m_mainThreadState));
+            m_mainThreadState = nullptr;
+        }
         Py_Finalize();
         m_initialized = false;
         m_mainModule = nullptr;

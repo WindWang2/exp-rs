@@ -2167,10 +2167,10 @@ endif()
 target_compile_definitions(qgis_gui PRIVATE "CMAKE_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\"")
 target_compile_definitions(qgis_gui PRIVATE "QT_NO_FOREACH")
 
-add_definitions(-DQWT_DLL)
+target_compile_definitions(qgis_gui PRIVATE "QWT_DLL")
 
 if(WIN32)
-  add_definitions(-DQSCINTILLA_DLL)
+  target_compile_definitions(qgis_gui PRIVATE "QSCINTILLA_DLL")
 endif()
 
 # clang-tidy

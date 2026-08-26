@@ -2,38 +2,61 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QSignalSpy>
+#include "app/dialogs/async_algorithm_runner.h"
 
-// Forward declare to avoid including full headers
-class AsyncAlgorithmRunner;
-
-TEST_CASE("AsyncAlgorithmRunner construction", "[async][runner]")
+static QApplication *ensureApp()
 {
-    // Ensure QApplication exists
-    if (!QApplication::instance()) {
+    if (!qApp) {
         static int argc = 1;
-        static char arg0[] = "test";
-        static char *argv[] = {arg0, nullptr};
+        static char appName[] = "test_runner";
+        static char *argv[] = { appName, nullptr };
         new QApplication(argc, argv);
     }
+    return static_cast<QApplication*>(qApp);
+}
+
+TEST_CASE("AsyncAlgorithmRunner construction and state", "[async][runner]")
+{
+    ensureApp();
 
     SECTION("Can be created with null parent widget")
     {
-        // Just verify the header compiles and class exists
-        REQUIRE(true); // Placeholder - actual construction requires QWidget
+        AsyncAlgorithmRunner runner(nullptr);
+        REQUIRE_FALSE(runner.isRunning());
     }
 }
 
-TEST_CASE("AsyncAlgorithmRunner signal types", "[async][runner]")
+TEST_CASE("AsyncAlgorithmRunner signal connections", "[async][runner]")
 {
-    SECTION("completed signal exists")
+    ensureApp();
+
+    AsyncAlgorithmRunner runner(nullptr);
+
+    SECTION("completed signal spy is valid")
     {
-        // Verify signal signature compiles
-        REQUIRE(true);
+        QSignalSpy completedSpy(&runner, &AsyncAlgorithmRunner::completed);
+        REQUIRE(completedSpy.isValid());
+        REQUIRE(completedSpy.count() == 0);
     }
 
-    SECTION("failed signal exists")
+    SECTION("progressChanged signal spy is valid")
     {
-        // Verify signal signature compiles
-        REQUIRE(true);
+        QSignalSpy progressSpy(&runner, &AsyncAlgorithmRunner::progressChanged);
+        REQUIRE(progressSpy.isValid());
+        REQUIRE(progressSpy.count() == 0);
+    }
+
+    SECTION("failed signal spy is valid")
+    {
+        QSignalSpy failedSpy(&runner, &AsyncAlgorithmRunner::failed);
+        REQUIRE(failedSpy.isValid());
+        REQUIRE(failedSpy.count() == 0);
+    }
+
+    SECTION("cancel on idle runner does not crash")
+    {
+        runner.cancel();
+        REQUIRE_FALSE(runner.isRunning());
     }
 }

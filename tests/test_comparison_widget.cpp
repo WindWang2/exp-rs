@@ -15,6 +15,18 @@
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
 
+// Helper to ensure single QApplication instance
+static QApplication *ensureApp()
+{
+    if (!qApp) {
+        static int argc = 1;
+        static char appName[] = "test_runner";
+        static char *argv[] = { appName, nullptr };
+        new QApplication(argc, argv);
+    }
+    return static_cast<QApplication*>(qApp);
+}
+
 // Helper to create a test QPixmap with a specific color
 static QPixmap createTestPixmap(int width, int height, const QColor &color)
 {
@@ -24,8 +36,7 @@ static QPixmap createTestPixmap(int width, int height, const QColor &color)
 }
 
 TEST_CASE("ComparisonWidget initialization", "[comparison]") {
-    int argc = 0;
-    QApplication app(argc, nullptr);
+    ensureApp();
 
     ComparisonWidget widget;
     REQUIRE(widget.mode() == ComparisonWidget::ComparisonMode::SplitScreen);
@@ -33,8 +44,7 @@ TEST_CASE("ComparisonWidget initialization", "[comparison]") {
 }
 
 TEST_CASE("ComparisonWidget set/get mode", "[comparison]") {
-    int argc = 0;
-    QApplication app(argc, nullptr);
+    ensureApp();
 
     ComparisonWidget widget;
 
@@ -46,8 +56,7 @@ TEST_CASE("ComparisonWidget set/get mode", "[comparison]") {
 }
 
 TEST_CASE("ComparisonWidget flicker interval", "[comparison]") {
-    int argc = 0;
-    QApplication app(argc, nullptr);
+    ensureApp();
 
     ComparisonWidget widget;
 
@@ -59,8 +68,7 @@ TEST_CASE("ComparisonWidget flicker interval", "[comparison]") {
 }
 
 TEST_CASE("ComparisonWidget mode change signal", "[comparison]") {
-    int argc = 0;
-    QApplication app(argc, nullptr);
+    ensureApp();
 
     ComparisonWidget widget;
 
@@ -79,8 +87,7 @@ TEST_CASE("ComparisonWidget mode change signal", "[comparison]") {
 }
 
 TEST_CASE("ComparisonWidget flicker interval signal", "[comparison]") {
-    int argc = 0;
-    QApplication app(argc, nullptr);
+    ensureApp();
 
     ComparisonWidget widget;
 
@@ -99,8 +106,7 @@ TEST_CASE("ComparisonWidget flicker interval signal", "[comparison]") {
 }
 
 TEST_CASE("ComparisonWidget set images", "[comparison]") {
-    int argc = 0;
-    QApplication app(argc, nullptr);
+    ensureApp();
 
     ComparisonWidget widget;
 
@@ -110,13 +116,12 @@ TEST_CASE("ComparisonWidget set images", "[comparison]") {
     widget.setLeftImage(left);
     widget.setRightImage(right);
 
-    // No crash, images are set
-    REQUIRE(true);
+    REQUIRE(widget.hasLeftImage());
+    REQUIRE(widget.hasRightImage());
 }
 
 TEST_CASE("ComparisonWidget same mode no signal", "[comparison]") {
-    int argc = 0;
-    QApplication app(argc, nullptr);
+    ensureApp();
 
     ComparisonWidget widget;
 
@@ -130,8 +135,7 @@ TEST_CASE("ComparisonWidget same mode no signal", "[comparison]") {
 }
 
 TEST_CASE("ComparisonDialog renders real raster previews", "[comparison][dialog][render]") {
-    int argc = 0;
-    QApplication app(argc, nullptr);
+    ensureApp();
     QgsApplication::initQgis();
 
     QTemporaryDir dir;
