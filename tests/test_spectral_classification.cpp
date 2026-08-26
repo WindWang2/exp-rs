@@ -497,3 +497,22 @@ TEST_CASE( "SAM: numerical boundary clamping on collinear spectra", "[sam][numer
     CHECK( labels[0] == -1 );
     CHECK( std::isnan( angles[0] ) );
 }
+
+TEST_CASE( "SpectralClassification::samClassify Handles Infinite Values", "[spectral_classification][sam][inf]" )
+{
+    const float inf = std::numeric_limits<float>::infinity();
+    std::vector<float> refs = { 10.0f, 20.0f, 30.0f };
+    std::vector<float> pixels = { 10.0f, inf, 30.0f,
+                                  -inf, 20.0f, 30.0f };
+    std::vector<int> labels( 2, -99 );
+    std::vector<float> angles( 2, 0.0f );
+    bool ok = SpectralClassification::samClassify( pixels.data(), 2, 3,
+                                                   refs.data(), 1,
+                                                   labels.data(), angles.data(), NODATA );
+    REQUIRE( ok );
+    CHECK( labels[0] == -1 );
+    CHECK( labels[1] == -1 );
+    CHECK( std::isnan( angles[0] ) );
+    CHECK( std::isnan( angles[1] ) );
+}
+

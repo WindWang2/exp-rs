@@ -334,3 +334,15 @@ TEST_CASE( "rs:rx_anomaly operator preserves valid -9999 pixel when no NoData me
     // Pixel 0 (-9999.0f) should NOT be NaN because it was not declared as NoData
     CHECK( std::isfinite( scores[0] ) );
 }
+
+TEST_CASE( "SpectralAnomaly::rxDetector on All-NoData Input", "[spectral_anomaly][rx]" )
+{
+    constexpr size_t count = 16;
+    constexpr int bands = 3;
+    std::vector<float> nanPixels( count * bands, std::numeric_limits<float>::quiet_NaN() );
+    std::vector<float> rx;
+    QString err;
+    CHECK_FALSE( SpectralAnomaly::rxDetector( nanPixels.data(), count, bands, &rx, &err ) );
+    CHECK( err.contains( QStringLiteral( "No valid pixels" ) ) );
+}
+

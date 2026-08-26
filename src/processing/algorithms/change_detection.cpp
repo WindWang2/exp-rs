@@ -1178,6 +1178,9 @@ bool irMadChange(const float *const *beforeBands, const float *const *afterBands
 
         const cv::Mat SXXInvSqrt = madSqrtInv(SXX);
         const cv::Mat SYYInvSqrt = madSqrtInv(SYY);
+        if (cv::countNonZero(SXXInvSqrt) == 0 || cv::countNonZero(SYYInvSqrt) == 0) {
+            break;
+        }
 
         const cv::Mat H = SXXInvSqrt * SXY * SYYInvSqrt;
         cv::Mat D, Uh, VhT;
@@ -1236,6 +1239,14 @@ bool irMadChange(const float *const *beforeBands, const float *const *afterBands
                 weights[i] = chiSquareUpperCdf(static_cast<double>(B), chiSquare);
             }
         }
+    }
+
+    if ( A_final.empty() || B_final.empty() || varMad_final.empty() || meanX_final.empty() || meanY_final.empty() )
+    {
+        SICNU_LOG_ERROR( SicnuLogTags::Algorithms, "IR-MAD failed: degenerate weights or empty transformation matrix" );
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "IR-MAD failed: degenerate weights or empty transformation matrix" );
+        return false;
     }
 
     // Final transformation

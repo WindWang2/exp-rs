@@ -127,12 +127,12 @@ bool unmix( const float *pixels, size_t count, int bands,
     {
         const float *x = pixels + p * static_cast<size_t>( bands );
 
-        bool hasNan = false;
+        bool hasNonFinite = false;
         for ( int b = 0; b < bands; ++b )
         {
-            if ( std::isnan( x[b] ) ) { hasNan = true; break; }
+            if ( !std::isfinite( x[b] ) ) { hasNonFinite = true; break; }
         }
-        if ( hasNan )
+        if ( hasNonFinite )
         {
             for ( int e = 0; e < nEndmembers; ++e )
                 result->abundances[p * static_cast<size_t>( nEndmembers ) + e] =

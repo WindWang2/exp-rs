@@ -252,10 +252,17 @@ bool rxDetector( const float *pixels, size_t count, int bands,
     }
 
     BackgroundStats stats;
-    accumulateMean( pixels, count, bands, &stats );
+    accumulateMean( pixels, count, bands, &stats, true );
     finalizeMean( &stats );
-    accumulateCovariance( pixels, count, bands, &stats );
+    accumulateCovariance( pixels, count, bands, &stats, true );
     finalizeCovariance( &stats );
+
+    if ( stats.count == 0 )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "No valid pixels found for RX anomaly detection" );
+        return false;
+    }
 
     std::vector<double> invCov;
     if ( !invertCovariance( stats.covariance, bands, &invCov ) )

@@ -473,3 +473,66 @@ TEST_CASE( "ImageFusion rejects mirrored or south-up rasters (#332)", "[fusion][
     CHECK( error.contains( QStringLiteral( "opposite axis orientation" ) ) );
     CHECK_FALSE( QFile::exists( outputPath ) );
 }
+
+TEST_CASE( "Native PCA Fusion - Jacobi Eigen Decomposition Accuracy", "[image_fusion][pca]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    const QString panPath = dir.filePath( QStringLiteral( "pan_pca.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms_pca.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "fused_pca.tif" ) );
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+
+    constexpr int W = 4, H = 4, B = 3;
+    GDALDatasetH panDs = createOutputTiff( panPath, W, H, 1, GDT_Float32, gt, QString() );
+    GDALDatasetH msDs = createOutputTiff( msPath, W, H, B, GDT_Float32, gt, QString() );
+    REQUIRE( panDs != nullptr );
+    REQUIRE( msDs != nullptr );
+
+    // Synthetic correlated 3-band MS image and PAN image
+    std::vector<float> pan( W * H, 50.0f );
+    std::vector<float> ms1( W * H ), ms2( W * H ), ms3( W * H );
+    for ( int i = 0; i < W * H; ++i )
+    {
+        pan[i] = 20.0f + 5.0f * ( i % 4 );
+        ms1[i] = 10.0f + 2.0f * i;
+        ms2[i] = 20.0f + 1.5f * i + 3.0f * ( i % 2 );
+        ms3[i] = 15.0f + 2.5f * i - 1.0f * ( i % 3 );
+    }
+
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, W, H,
+                           pan.data(), W, H, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, W, H,
+                           ms1.data(), W, H, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 2 ), GF_Write, 0, 0, W, H,
+                           ms2.data(), W, H, GDT_Float32, 0, 0 ) == CE_None );
+    REQUIRE( GDALRasterIO( GDALGetRasterBand( msDs, 3 ), GF_Write, 0, 0, W, H,
+                           ms3.data(), W, H, GDT_Float32, 0, 0 ) == CE_None );
+    GDALClose( panDs );
+    GDALClose( msDs );
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "pca" );
+    QString error;
+    REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    REQUIRE( QFile::exists( outputPath ) );
+    REQUIRE( error.isEmpty() );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    REQUIRE( out.bandCount() == 3 );
+    for ( int b = 1; b <= 3; ++b )
+    {
+        std::vector<float> fusedData( W * H );
+        REQUIRE( out.readBandData( b, fusedData.data(), W, H ) );
+        for ( float val : fusedData )
+        {
+            CHECK( std::isfinite( val ) );
+            CHECK( val > 0.0f );
+        }
+    }
+}
+

@@ -222,7 +222,36 @@ CommitResult OutputCommitter::commit( const AlgorithmOutputRequest &request )
 void OutputCommitter::discardTemporary( const QString &tempPath )
 {
   if ( !tempPath.isEmpty() )
+  {
     QFile::remove( tempPath );
+    const QFileInfo fi( tempPath );
+    const QString base = fi.path() + QDir::separator() + fi.completeBaseName();
+    const QStringList sidecarExts = {
+      QStringLiteral( "shx" ),
+      QStringLiteral( "dbf" ),
+      QStringLiteral( "prj" ),
+      QStringLiteral( "cpg" ),
+      QStringLiteral( "sbn" ),
+      QStringLiteral( "sbx" ),
+      QStringLiteral( "qix" ),
+      QStringLiteral( "shp.xml" ),
+      QStringLiteral( "tfw" ),
+      QStringLiteral( "aux" )
+    };
+    for ( const QString &ext : sidecarExts )
+    {
+      const QString sidecarPath = base + QStringLiteral( "." ) + ext;
+      if ( QFile::exists( sidecarPath ) )
+      {
+        QFile::remove( sidecarPath );
+      }
+    }
+    const QString auxXml = tempPath + QStringLiteral( ".aux.xml" );
+    if ( QFile::exists( auxXml ) )
+    {
+      QFile::remove( auxXml );
+    }
+  }
 }
 
 } // namespace sicnu

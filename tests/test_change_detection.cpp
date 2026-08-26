@@ -733,6 +733,21 @@ TEST_CASE("ChangeDetection irMadChange converges on multi-band scenes", "[proces
     CHECK(minChanged > maxUnchanged);
 }
 
+TEST_CASE("ChangeDetection::irMadChange Degenerate Input Does Not Crash", "[change_detection][irmad]") {
+    constexpr size_t N = 16;
+    constexpr int B = 2;
+
+    std::vector<std::vector<float>> beforeBands(B, std::vector<float>(N, 0.0f));
+    std::vector<std::vector<float>> afterBands(B, std::vector<float>(N, 0.0f));
+
+    std::vector<const float*> bPtrs = {beforeBands[0].data(), beforeBands[1].data()};
+    std::vector<const float*> aPtrs = {afterBands[0].data(), afterBands[1].data()};
+    std::vector<float> chiSq(N, 0.0f);
+    QString err;
+
+    CHECK_FALSE(irMadChange(bPtrs.data(), aPtrs.data(), B, N, chiSq.data(), 20, 1e-4, &err));
+}
+
 TEST_CASE("RsSpectralIndexOperator supports extended indices (NBR, dNBR, BSI, NDRE, CI, NDSI, NDTI)", "[operators][spectral_index]") {
     QTemporaryDir tmp;
     REQUIRE(tmp.isValid());
@@ -811,7 +826,11 @@ TEST_CASE("New change primitive operators execute and output valid rasters", "[o
     const auto make2BandRaster = [&](const QString &path, float b1Val, float b2Val) {
         GDALDatasetH ds = GDALCreate(driver, path.toUtf8().constData(), W, H, B, GDT_Float32, nullptr);
         REQUIRE(ds != nullptr);
-        std::vector<float> data1(W * H, b1Val), data2(W * H, b2Val);
+        std::vector<float> data1(W * H), data2(W * H);
+        for (int i = 0; i < W * H; ++i) {
+            data1[i] = b1Val + static_cast<float>(i + 1);
+            data2[i] = b2Val + static_cast<float>(i * 2 + 1);
+        }
         GDALRasterBandH band1 = GDALGetRasterBand(ds, 1);
         GDALRasterBandH band2 = GDALGetRasterBand(ds, 2);
         REQUIRE(GDALRasterIO(band1, GF_Write, 0, 0, W, H, data1.data(), W, H, GDT_Float32, 0, 0) == CE_None);

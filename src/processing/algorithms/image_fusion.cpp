@@ -1169,20 +1169,30 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
             double c = std::cos( theta );
             double s = std::sin( theta );
 
-            for ( int i = 0; i < nMsBands; ++i )
+            double app = eigVal[p * nMsBands + p];
+            double aqq = eigVal[q * nMsBands + q];
+            double apq = eigVal[p * nMsBands + q];
+
+            double newApp = c * c * app + s * s * aqq + 2.0 * s * c * apq;
+            double newAqq = s * s * app + c * c * aqq - 2.0 * s * c * apq;
+
+            for ( int r = 0; r < nMsBands; ++r )
             {
-                double vp = eigVal[i * nMsBands + p];
-                double vq = eigVal[i * nMsBands + q];
-                eigVal[i * nMsBands + p] = c * vp + s * vq;
-                eigVal[i * nMsBands + q] = -s * vp + c * vq;
+                if ( r == p || r == q )
+                    continue;
+                double arp = eigVal[r * nMsBands + p];
+                double arq = eigVal[r * nMsBands + q];
+                eigVal[r * nMsBands + p] = c * arp + s * arq;
+                eigVal[p * nMsBands + r] = eigVal[r * nMsBands + p];
+                eigVal[r * nMsBands + q] = -s * arp + c * arq;
+                eigVal[q * nMsBands + r] = eigVal[r * nMsBands + q];
             }
-            for ( int i = 0; i < nMsBands; ++i )
-            {
-                double vp = eigVal[p * nMsBands + i];
-                double vq = eigVal[q * nMsBands + i];
-                eigVal[p * nMsBands + i] = c * vp + s * vq;
-                eigVal[q * nMsBands + i] = -s * vp + c * vq;
-            }
+
+            eigVal[p * nMsBands + p] = newApp;
+            eigVal[q * nMsBands + q] = newAqq;
+            eigVal[p * nMsBands + q] = 0.0;
+            eigVal[q * nMsBands + p] = 0.0;
+
             for ( int i = 0; i < nMsBands; ++i )
             {
                 double vp = eigVec[i * nMsBands + p];

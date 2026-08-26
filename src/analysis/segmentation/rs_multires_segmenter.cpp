@@ -353,7 +353,7 @@ RsSegmentMap RsMultiresSegmenter::segment(
             for ( int b = 0; b < bandCount; ++b )
             {
                 float val = bands[b][idx];
-                if ( std::isnan( val ) || ( !std::isnan( nodata ) && std::abs( val - nodata ) < 1e-6f ) )
+                if ( !std::isfinite( val ) || ( !std::isnan( nodata ) && std::abs( val - nodata ) < 1e-6f ) )
                 {
                     isPixelNodata = true;
                     break;

@@ -163,6 +163,8 @@ void PluginHost::unloadAll()
             it.value().instance->unload();
             if (it.value().loader) {
                 it.value().loader->unload();
+                delete it.value().loader;
+                it.value().loader = nullptr;
             }
             emit pluginUnloaded(it.key());
         }

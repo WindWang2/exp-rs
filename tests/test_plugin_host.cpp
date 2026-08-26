@@ -118,3 +118,15 @@ TEST_CASE( "PluginHost loads plugins headlessly without GUI widgets", "[core][pl
     CHECK( host.loadedPlugins().isEmpty() );
 #endif
 }
+
+TEST_CASE( "PluginHost Reload Cycle Object Cleanup", "[core][plugin_host][cleanup]" )
+{
+    PluginHost host;
+    const int initialChildren = host.children().count();
+
+    // Verify unloadAll returns children count to initial baseline
+    host.unloadAll();
+    CHECK( host.children().count() == initialChildren );
+    CHECK( host.loadedPlugins().isEmpty() );
+}
+

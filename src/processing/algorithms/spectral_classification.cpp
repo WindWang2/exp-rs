@@ -17,7 +17,7 @@ double spectralAngle( const float *t, const float *r, size_t bands, float nodata
     for ( size_t b = 0; b < bands; ++b )
     {
         if ( t[b] == nodata || r[b] == nodata ||
-             std::isnan( t[b] ) || std::isnan( r[b] ) )
+             !std::isfinite( t[b] ) || !std::isfinite( r[b] ) )
             return std::numeric_limits<double>::quiet_NaN();
         double tv = static_cast<double>( t[b] );
         double rv = static_cast<double>( r[b] );
@@ -44,7 +44,7 @@ double spectralDivergence( const float *t, const float *r, size_t bands, float n
     for ( size_t b = 0; b < bands; ++b )
     {
         if ( t[b] == nodata || r[b] == nodata ||
-             std::isnan( t[b] ) || std::isnan( r[b] ) )
+             !std::isfinite( t[b] ) || !std::isfinite( r[b] ) )
             return std::numeric_limits<double>::quiet_NaN();
         if ( t[b] < 0.0f || r[b] < 0.0f )
             return std::numeric_limits<double>::quiet_NaN(); // not reflectance-like
@@ -85,7 +85,7 @@ bool sidClassify( const float *pixels, size_t count, int bands,
         bool valid = true;
         for ( int b = 0; b < bands; ++b )
         {
-            if ( r[b] == nodata || std::isnan( r[b] ) || r[b] < 0.0f )
+            if ( r[b] == nodata || !std::isfinite( r[b] ) || r[b] < 0.0f )
             {
                 valid = false;
                 break;
@@ -115,7 +115,7 @@ bool sidClassify( const float *pixels, size_t count, int bands,
         double sumT = 0.0;
         for ( int b = 0; b < bands; ++b )
         {
-            if ( t[b] == nodata || std::isnan( t[b] ) || t[b] < 0.0f )
+            if ( t[b] == nodata || !std::isfinite( t[b] ) || t[b] < 0.0f )
             {
                 pixelValid = false;
                 break;
@@ -188,7 +188,7 @@ bool samClassify( const float *pixels, size_t count, int bands,
         bool valid = true;
         for ( int b = 0; b < bands; ++b )
         {
-            if ( r[b] == nodata || std::isnan( r[b] ) )
+            if ( r[b] == nodata || !std::isfinite( r[b] ) )
             {
                 valid = false;
                 break;
@@ -211,7 +211,7 @@ bool samClassify( const float *pixels, size_t count, int bands,
         double normT = 0.0;
         for ( int b = 0; b < bands; ++b )
         {
-            if ( t[b] == nodata || std::isnan( t[b] ) )
+            if ( t[b] == nodata || !std::isfinite( t[b] ) )
             {
                 pixelValid = false;
                 break;
@@ -293,7 +293,7 @@ bool continuumRemoval( const float *spectrum, const float *wavelengths, float *o
 
     // Reject if any nodata sample.
     for ( int i = 0; i < bands; ++i )
-        if ( spectrum[i] == nodata || std::isnan( spectrum[i] ) )
+        if ( spectrum[i] == nodata || !std::isfinite( spectrum[i] ) )
         {
             for ( int j = 0; j < bands; ++j )
                 out[j] = nodata;

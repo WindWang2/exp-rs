@@ -467,3 +467,35 @@ TEST_CASE( "OutputCommitter publishes across different directory trees safely (#
   CHECK_FALSE( QFile::exists( tempPath ) );
 }
 
+TEST_CASE( "OutputCommitter::discardTemporary Removes All Sidecars", "[processing][committer][sidecars]" )
+{
+  QTemporaryDir dir;
+  DataManager manager;
+  OutputCommitter committer( &manager );
+
+  const QString shpPath = dir.filePath( QStringLiteral( "temp_vector.shp" ) );
+  const QString shxPath = dir.filePath( QStringLiteral( "temp_vector.shx" ) );
+  const QString dbfPath = dir.filePath( QStringLiteral( "temp_vector.dbf" ) );
+  const QString prjPath = dir.filePath( QStringLiteral( "temp_vector.prj" ) );
+
+  {
+    QFile f1( shpPath ); REQUIRE( f1.open( QIODevice::WriteOnly ) ); f1.write( "shp" );
+    QFile f2( shxPath ); REQUIRE( f2.open( QIODevice::WriteOnly ) ); f2.write( "shx" );
+    QFile f3( dbfPath ); REQUIRE( f3.open( QIODevice::WriteOnly ) ); f3.write( "dbf" );
+    QFile f4( prjPath ); REQUIRE( f4.open( QIODevice::WriteOnly ) ); f4.write( "prj" );
+  }
+
+  REQUIRE( QFile::exists( shpPath ) );
+  REQUIRE( QFile::exists( shxPath ) );
+  REQUIRE( QFile::exists( dbfPath ) );
+  REQUIRE( QFile::exists( prjPath ) );
+
+  committer.discardTemporary( shpPath );
+
+  CHECK_FALSE( QFile::exists( shpPath ) );
+  CHECK_FALSE( QFile::exists( shxPath ) );
+  CHECK_FALSE( QFile::exists( dbfPath ) );
+  CHECK_FALSE( QFile::exists( prjPath ) );
+}
+
+
