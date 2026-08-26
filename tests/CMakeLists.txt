@@ -147,6 +147,35 @@ target_include_directories(test_tool_call_dispatcher PRIVATE
 )
 sicnu_discover_tests(test_tool_call_dispatcher)
 
+# Unified Execution Plane — the real spine (plane → TaskCenter → JobEngine →
+# registry adapter) with behavioral stub algorithms; covers the #559 deadlock
+# regression, exactly-once completion, cancel/timeout lifecycles, resource
+# admission and transactional output commit. Needs sicnu_data for the
+# DataManager/OutputCommitter path; QtCore-only otherwise.
+add_executable(test_execution_plane test_execution_plane.cpp)
+target_link_libraries(test_execution_plane PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  Sicnu::data
+  sicnu_processing
+  sicnu_task_center
+  sicnu_operators
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_execution_plane PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_execution_plane PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_execution_plane PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_execution_plane PRIVATE jsoncpp)
+endif()
+target_include_directories(test_execution_plane PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_execution_plane)
+
 # Performance & Benchmark test for Image Fusion (headless benchmark target)
 add_executable(test_perf_fusion test_perf_fusion.cpp)
 target_link_libraries(test_perf_fusion PRIVATE
