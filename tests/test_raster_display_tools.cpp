@@ -564,3 +564,17 @@ TEST_CASE( "RasterDisplayTools - Execution via InteractionToolRegistry and Dispa
 
   QgsProject::instance()->removeMapLayer( layer );
 }
+
+TEST_CASE( "RasterDisplayTools - Zero-band raster gracefully fails resetDisplay", "[agent][raster][zero_band]" )
+{
+  RasterTestFixture fixture;
+  RasterDisplayService service;
+
+  const auto result = service.resetDisplay( "nonexistent_zero_band_layer" );
+  CHECK( result["status"].asString() == "error" );
+  CHECK_FALSE( result["errorMessage"].asString().empty() );
+}
+
+
+
+

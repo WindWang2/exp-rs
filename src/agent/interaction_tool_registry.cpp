@@ -10,6 +10,7 @@
 #include <qgsrasterlayer.h>
 #include <qgsvectorlayer.h>
 #include <qgsrasterdataprovider.h>
+#include <algorithm>
 #include <sstream>
 
 namespace sicnu::agent {
@@ -856,11 +857,7 @@ Json::Value InteractionToolRegistry::exportOpenAiToolDefinitions() const
     Json::Value funcObj( Json::objectValue );
     // Normalize colon to underscore for OpenAI strict name compliance
     std::string funcName = def.name;
-    const auto colPos = funcName.find( ':' );
-    if ( colPos != std::string::npos )
-    {
-      funcName[colPos] = '_';
-    }
+    std::replace( funcName.begin(), funcName.end(), ':', '_' );
     funcObj["name"] = funcName;
     funcObj["description"] = def.description;
     funcObj["parameters"] = def.inputSchema.isObject() ? def.inputSchema : createEmptyObjectSchema();

@@ -583,3 +583,30 @@ TEST_CASE( "InteractionToolRegistry data tools execution (#312)", "[agent][inter
     QgsProject::instance()->removeMapLayer( layer->id() );
   }
 }
+
+TEST_CASE( "InteractionToolRegistry normalizes multi-colon tool names", "[agent][interaction_tools]" )
+{
+  TestAppFixture fixture;
+  auto &registry = InteractionToolRegistry::instance();
+  registry.reset();
+
+  InteractionToolDefinition tool;
+  tool.name = "gdal:sub:tool";
+  tool.category = "gdal";
+  tool.description = "Multi-colon test tool";
+  tool.handler = []( const Json::Value & ) { return Json::Value( Json::objectValue ); };
+  registry.registerTool( tool );
+
+  const Json::Value defs = registry.exportOpenAiToolDefinitions();
+  bool found = false;
+  for ( const auto &item : defs )
+  {
+    if ( item["function"]["name"].asString() == "gdal_sub_tool" )
+    {
+      found = true;
+      break;
+    }
+  }
+  REQUIRE( found );
+}
+

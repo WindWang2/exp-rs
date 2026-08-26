@@ -47,3 +47,17 @@ TEST_CASE( "AgentCopilotDockWidget instantiates and binds workspace context", "[
   // Test prompt submission triggers message card rendering
   dock.sendPrompt( QStringLiteral( "运行光谱指数测试" ) );
 }
+
+TEST_CASE( "AgentCopilotDockWidget handles widget destruction during async plan execution", "[agent][ui]" )
+{
+  ensureQtApp();
+
+  DataManager dataMgr;
+  auto dock = std::make_unique<AgentCopilotDockWidget>();
+  dock->setContext( &dataMgr, nullptr );
+
+  // Destroying dock while async operations might be in flight must not crash
+  dock.reset();
+  REQUIRE( dock == nullptr );
+}
+

@@ -7,10 +7,13 @@
 #include "task_center.h"
 
 #include "output_committer.h"
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDebug>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QJsonObject>
+#include <QThread>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -472,6 +475,30 @@ Json::Value ToolCallDispatcher::dispatchAndAwait( const Json::Value &envelope, s
     Json::Value errorResult( Json::objectValue );
     errorResult["status"] = "error";
     errorResult["errorMessage"] = error.toStdString();
+    return errorResult;
+  }
+
+  if ( QCoreApplication::instance() && QThread::currentThread() == QCoreApplication::instance()->thread() )
+  {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while ( true )
+    {
+      {
+        std::lock_guard<std::mutex> lock( state->mutex );
+        if ( state->done )
+          return state->captured;
+      }
+      if ( std::chrono::steady_clock::now() >= deadline )
+        break;
+      QCoreApplication::processEvents( QEventLoop::AllEvents, 50 );
+      std::unique_lock<std::mutex> lock( state->mutex );
+      state->cv.wait_for( lock, std::chrono::milliseconds( 10 ), [state]() { return state->done; } );
+      if ( state->done )
+        return state->captured;
+    }
+    Json::Value errorResult( Json::objectValue );
+    errorResult["status"] = "error";
+    errorResult["errorMessage"] = "Tool call timed out";
     return errorResult;
   }
 

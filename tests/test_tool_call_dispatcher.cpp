@@ -873,5 +873,36 @@ TEST_CASE( "ToolCallDispatcher routes canvas: actions to the handler, not the si
   }
 }
 
+TEST_CASE( "ToolCallDispatcher synchronous dispatchAndAwait does not deadlock on caller thread",
+           "[processing][dispatcher]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+  AtomicAlgorithmRegistry::instance().registerAdapter( std::make_unique<StubAdapter>( "stub:test_op" ) );
+
+  ToolCallDispatcher::SubmissionSink sink = []( const QString &, const QVariantMap & ) -> long {
+    return 42;
+  };
+  ToolCallDispatcher::CompletionWatcher watcher = []( long, ToolCallDispatcher::CompletionCallback onComplete ) {
+    std::thread( [cb = std::move( onComplete )]() {
+      Json::Value payload( Json::objectValue );
+      payload["status"] = "success";
+      payload["message"] = "done";
+      if ( cb )
+        cb( payload );
+    } ).detach();
+  };
+
+  ToolCallDispatcher dispatcher( sink, watcher );
+  Json::Value args( Json::objectValue );
+  const Json::Value envelope = objectEnvelope( "stub:test_op", "parameters", args );
+
+  const auto start = std::chrono::steady_clock::now();
+  const Json::Value result = dispatcher.dispatchAndAwait( envelope, std::chrono::milliseconds( 2000 ) );
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() - start );
+
+  REQUIRE( result["status"].asString() == "success" );
+  REQUIRE( elapsed.count() < 2000 );
+}
+
 
 

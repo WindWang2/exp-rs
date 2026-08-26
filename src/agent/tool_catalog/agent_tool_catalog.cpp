@@ -185,6 +185,9 @@ void AgentToolCatalog::registerProvider( ToolProviderPtr provider )
   if ( !provider ) return;
   std::lock_guard<std::mutex> lock( mMutex );
   mCacheValid = false;
+  mCachedTools.clear();
+  mCachedOpenAiDefs = Json::Value();
+  mCachedMcpTools = Json::Value();
 
   for ( auto it = mProviders.begin(); it != mProviders.end(); ++it )
   {
@@ -201,6 +204,9 @@ bool AgentToolCatalog::unregisterProvider( const std::string &providerName )
 {
   std::lock_guard<std::mutex> lock( mMutex );
   mCacheValid = false;
+  mCachedTools.clear();
+  mCachedOpenAiDefs = Json::Value();
+  mCachedMcpTools = Json::Value();
   for ( auto it = mProviders.begin(); it != mProviders.end(); ++it )
   {
     if ( ( *it )->providerName() == providerName )
@@ -233,6 +239,9 @@ void AgentToolCatalog::registerCustomTool( const AgentTool &tool )
 {
   std::lock_guard<std::mutex> lock( mMutex );
   mCacheValid = false;
+  mCachedTools.clear();
+  mCachedOpenAiDefs = Json::Value();
+  mCachedMcpTools = Json::Value();
   mCustomTools[tool.name] = tool;
 }
 
@@ -240,6 +249,9 @@ bool AgentToolCatalog::unregisterCustomTool( const std::string &toolName )
 {
   std::lock_guard<std::mutex> lock( mMutex );
   mCacheValid = false;
+  mCachedTools.clear();
+  mCachedOpenAiDefs = Json::Value();
+  mCachedMcpTools = Json::Value();
   return mCustomTools.erase( toolName ) > 0;
 }
 
@@ -466,53 +478,91 @@ bool AgentToolCatalog::hasDuplicates() const
 
 Json::Value AgentToolCatalog::exportOpenAiToolDefinitions( const std::vector<AgentTool> &tools ) const
 {
-  if ( tools.empty() )
+  if ( !tools.empty() )
   {
-    std::lock_guard<std::mutex> lock( mMutex );
-    if ( mCacheValid && !mCachedOpenAiDefs.isNull() )
+    Json::Value root( Json::arrayValue );
+    for ( const auto &tool : tools )
     {
-      return mCachedOpenAiDefs;
+      root.append( tool.toOpenAiToolDefinition() );
     }
+    return root;
   }
 
-  const auto toolList = tools.empty() ? listTools() : tools;
+  std::lock_guard<std::mutex> lock( mMutex );
+  if ( mCacheValid && !mCachedOpenAiDefs.isNull() && !mCachedOpenAiDefs.empty() )
+  {
+    return mCachedOpenAiDefs;
+  }
+
+  if ( !mCacheValid )
+  {
+    mCachedTools.clear();
+    for ( const auto &prov : mProviders )
+    {
+      auto provTools = prov->provideTools();
+      for ( auto &tool : provTools )
+      {
+        mCachedTools.push_back( std::move( tool ) );
+      }
+    }
+    for ( const auto &pair : mCustomTools )
+    {
+      mCachedTools.push_back( pair.second );
+    }
+    mCacheValid = true;
+  }
+
   Json::Value root( Json::arrayValue );
-  for ( const auto &tool : toolList )
+  for ( const auto &tool : mCachedTools )
   {
     root.append( tool.toOpenAiToolDefinition() );
   }
-
-  if ( tools.empty() )
-  {
-    std::lock_guard<std::mutex> lock( mMutex );
-    mCachedOpenAiDefs = root;
-  }
+  mCachedOpenAiDefs = root;
   return root;
 }
 
 Json::Value AgentToolCatalog::exportMcpTools( const std::vector<AgentTool> &tools ) const
 {
-  if ( tools.empty() )
+  if ( !tools.empty() )
   {
-    std::lock_guard<std::mutex> lock( mMutex );
-    if ( mCacheValid && !mCachedMcpTools.isNull() )
+    Json::Value root( Json::arrayValue );
+    for ( const auto &tool : tools )
     {
-      return mCachedMcpTools;
+      root.append( tool.toMcpToolDefinition() );
     }
+    return root;
   }
 
-  const auto toolList = tools.empty() ? listTools() : tools;
+  std::lock_guard<std::mutex> lock( mMutex );
+  if ( mCacheValid && !mCachedMcpTools.isNull() && !mCachedMcpTools.empty() )
+  {
+    return mCachedMcpTools;
+  }
+
+  if ( !mCacheValid )
+  {
+    mCachedTools.clear();
+    for ( const auto &prov : mProviders )
+    {
+      auto provTools = prov->provideTools();
+      for ( auto &tool : provTools )
+      {
+        mCachedTools.push_back( std::move( tool ) );
+      }
+    }
+    for ( const auto &pair : mCustomTools )
+    {
+      mCachedTools.push_back( pair.second );
+    }
+    mCacheValid = true;
+  }
+
   Json::Value root( Json::arrayValue );
-  for ( const auto &tool : toolList )
+  for ( const auto &tool : mCachedTools )
   {
     root.append( tool.toMcpToolDefinition() );
   }
-
-  if ( tools.empty() )
-  {
-    std::lock_guard<std::mutex> lock( mMutex );
-    mCachedMcpTools = root;
-  }
+  mCachedMcpTools = root;
   return root;
 }
 

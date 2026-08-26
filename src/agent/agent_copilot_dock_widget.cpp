@@ -17,6 +17,7 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QMessageBox>
+#include <QPointer>
 
 namespace sicnu::agent
 {
@@ -508,35 +509,48 @@ void AgentCopilotDockWidget::appendPlanApprovalCard( const QJsonObject &planJson
   connect( runBtn, &QPushButton::clicked, this, [this, planJson, runBtn]() {
     runBtn->setEnabled( false );
     runBtn->setText( QStringLiteral( "执行中…" ) );
+    QPointer<QPushButton> safeRunBtn = runBtn;
     // Execute the approved plan asynchronously. AgentWorkflowExecutor owns
     // pipeline watching and marshals the completion callback onto this
     // widget's thread — no detached std::thread (ADR 0047).
     m_workflowExecutor.executeAgentPlanAsync( processing::jsonValueFromQJson( planJson ),
-                                              [this, runBtn]( const Json::Value &resultPayload ) {
+                                              [this, safeRunBtn]( const Json::Value &resultPayload ) {
       // Completion payload shape is owned by the workflow executor; read it
       // in Json-land instead of round-tripping through QJson (ADR 0048).
       const Json::Value resultObj = resultPayload.isObject() ? resultPayload : Json::Value( Json::objectValue );
       if ( resultObj["status"].asString() != "success" )
       {
         appendErrorMessage( QString::fromStdString( resultObj["errorMessage"].asString() ) );
-        if ( runBtn )
+        if ( safeRunBtn )
         {
-          runBtn->setEnabled( true );
-          runBtn->setText( QStringLiteral( "重试执行" ) );
+          safeRunBtn->setEnabled( true );
+          safeRunBtn->setText( QStringLiteral( "重试执行" ) );
         }
       }
-      else if ( runBtn )
+      else if ( safeRunBtn )
       {
-        runBtn->setText( QStringLiteral( "已完成" ) );
+        safeRunBtn->setText( QStringLiteral( "已完成" ) );
       }
     }, this );
   } );
 }
 
+AgentCopilotDockWidget::~AgentCopilotDockWidget()
+{
+  if ( m_client )
+  {
+    m_client->disconnect( this );
+    m_client->cancel();
+  }
+}
+
 void AgentCopilotDockWidget::onLlmFinished()
 {
   m_isStreaming = false;
-  m_sendBtn->setText( QStringLiteral( "发送 ▶" ) );
+  if ( m_sendBtn )
+  {
+    m_sendBtn->setText( QStringLiteral( "发送 ▶" ) );
+  }
 }
 
 void AgentCopilotDockWidget::onErrorOccurred( const QString &errorMsg )

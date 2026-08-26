@@ -7,6 +7,8 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/rs/rs_spectral_index_operator.h"
+#include <atomic>
+#include <thread>
 
 using namespace sicnu::agent::tool_catalog;
 using namespace sicnu::processing;
@@ -320,3 +322,52 @@ TEST_CASE( "AgentToolCatalog: Duplicate Name Detection", "[agent][tool_catalog][
     CHECK_FALSE( catalog.hasDuplicates() );
   }
 }
+
+TEST_CASE( "AgentToolCatalog concurrent tool registration invalidates export caches", "[agent][tool_catalog]" )
+{
+  auto &catalog = AgentToolCatalog::instance();
+  catalog.reset();
+
+  std::atomic<bool> running{ true };
+  std::atomic<int> exportCount{ 0 };
+
+  std::thread reader( [&]() {
+    while ( running.load() )
+    {
+      const Json::Value defs = catalog.exportOpenAiToolDefinitions();
+      REQUIRE( defs.isArray() );
+      exportCount++;
+      std::this_thread::yield();
+    }
+  } );
+
+  for ( int i = 0; i < 50; ++i )
+  {
+    AgentTool tool;
+    tool.name = "custom:test_tool_" + std::to_string( i );
+    tool.displayName = "Test Tool";
+    tool.category = ToolCategory::Custom;
+    tool.description = "Test Description";
+    catalog.registerCustomTool( tool );
+
+    const Json::Value defs = catalog.exportOpenAiToolDefinitions();
+    bool found = false;
+    for ( const auto &item : defs )
+    {
+      if ( item.isObject() && item["function"]["name"].asString() == "custom_test_tool_" + std::to_string( i ) )
+      {
+        found = true;
+        break;
+      }
+    }
+    CHECK( found );
+
+    catalog.unregisterCustomTool( tool.name );
+  }
+
+  running.store( false );
+  reader.join();
+
+  CHECK( exportCount.load() > 0 );
+}
+

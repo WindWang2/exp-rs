@@ -222,6 +222,25 @@ TEST_CASE( "VectorInspectTool inspects a generated GeoJSON", "[agent][spatial][v
                != std::string::npos );
 }
 
+TEST_CASE( "VectorInspectTool supports /vsi virtual paths and connection strings", "[agent][spatial_tools]" )
+{
+    ensureGdalDrivers();
+    const std::string memPath = "/vsimem/test_vector.geojson";
+    createTestVector( QString::fromStdString( memPath ) );
+
+    sicnu::agent::spatial_tools::VectorInspectTool tool;
+    Json::Value input( Json::objectValue );
+    input["path"] = memPath;
+    input["max_features"] = 1;
+
+    const auto result = tool.execute( input );
+    REQUIRE( result.success );
+    CHECK( result.output["layerCount"].asInt() == 1 );
+    CHECK( result.output["driver"].asString() == "GeoJSON" );
+
+    VSIUnlink( memPath.c_str() );
+}
+
 TEST_CASE( "ModelCatalog scans manifests and the tool exposes them", "[agent][spatial][models]" )
 {
     QTemporaryDir dir;

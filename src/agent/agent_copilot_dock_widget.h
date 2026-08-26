@@ -43,7 +43,7 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
 
   public:
     explicit AgentCopilotDockWidget( QWidget *parent = nullptr );
-    ~AgentCopilotDockWidget() override = default;
+    ~AgentCopilotDockWidget() override;
 
     void setContext( data::DataManager *dataManager, QgsMapCanvas *canvas );
     void sendPrompt( const QString &promptText );
@@ -103,19 +103,19 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     QJsonArray m_messageHistory;
     QList<LlmProviderProfile> m_profiles;
 
-    QComboBox *m_providerCombo = nullptr;
-    QPushButton *m_settingsBtn = nullptr;
-    QPushButton *m_clearBtn = nullptr;
+    QPointer<QComboBox> m_providerCombo;
+    QPointer<QPushButton> m_settingsBtn;
+    QPointer<QPushButton> m_clearBtn;
 
-    QScrollArea *m_scrollArea = nullptr;
-    QWidget *m_chatContainer = nullptr;
-    QVBoxLayout *m_chatLayout = nullptr;
+    QPointer<QScrollArea> m_scrollArea;
+    QPointer<QWidget> m_chatContainer;
+    QPointer<QVBoxLayout> m_chatLayout;
 
-    QTextEdit *m_inputEdit = nullptr;
-    QPushButton *m_sendBtn = nullptr;
+    QPointer<QTextEdit> m_inputEdit;
+    QPointer<QPushButton> m_sendBtn;
 
-    QLabel *m_currentReasoningLabel = nullptr;
-    QLabel *m_currentContentLabel = nullptr;
+    QPointer<QLabel> m_currentReasoningLabel;
+    QPointer<QLabel> m_currentContentLabel;
     QString m_accumulatedReasoning;
     QString m_accumulatedContent;
     bool m_isStreaming = false;

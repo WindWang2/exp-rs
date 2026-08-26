@@ -203,7 +203,10 @@ SpatialToolResult VectorInspectTool::execute( const Json::Value &input )
                               ? input["max_features"].asInt()
                               : 0;
 
-  if ( !QFileInfo::exists( QString::fromStdString( path ) ) )
+  const bool isVirtual = path.rfind( "/vsi", 0 ) == 0;
+  const bool isConnStr = path.find( ':' ) != std::string::npos &&
+                         !QFileInfo( QString::fromStdString( path ) ).isAbsolute();
+  if ( !isVirtual && !isConnStr && !QFileInfo::exists( QString::fromStdString( path ) ) )
     return SpatialToolResult::failure( "Vector file not found: " + path );
 
   GDALDatasetUniquePtr ds( GDALDataset::Open( path.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY ) );

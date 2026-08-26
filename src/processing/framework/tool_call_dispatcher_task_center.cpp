@@ -4,6 +4,7 @@
 
 #include <QCoreApplication>
 #include <QObject>
+#include <QThread>
 
 #include <thread>
 
@@ -26,11 +27,20 @@ ToolCallDispatcher::ToolCallDispatcher()
         // watcher thread must never touch the catalog directly.
         if ( bridge && QCoreApplication::instance() )
         {
-          QMetaObject::invokeMethod( bridge.get(), [info, cb = std::move( cb ), committerHandler = std::move( committerHandler )]() mutable {
+          if ( bridge->thread() == QThread::currentThread() )
+          {
             const Json::Value payload = buildTaskResultPayload( info, committerHandler );
             if ( cb )
               cb( payload );
-          }, Qt::QueuedConnection );
+          }
+          else
+          {
+            QMetaObject::invokeMethod( bridge.get(), [info, cb = std::move( cb ), committerHandler = std::move( committerHandler )]() mutable {
+              const Json::Value payload = buildTaskResultPayload( info, committerHandler );
+              if ( cb )
+                cb( payload );
+            }, Qt::QueuedConnection );
+          }
         }
         else if ( cb )
         {

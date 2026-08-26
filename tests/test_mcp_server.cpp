@@ -93,6 +93,12 @@ public:
     {
         return handleSearchTools(query, group, tag, inputType, outputType);
     }
+    QVariantMap testSearchAlgorithms(const QString &query, const QString &group = QString(),
+                                     const QString &inputType = QString(), const QString &outputType = QString(),
+                                     bool largeRasterSafeOnly = false)
+    {
+        return handleSearchAlgorithms(query, group, inputType, outputType, largeRasterSafeOnly);
+    }
     QVariantMap testGetToolSchema(const QString &id) { return handleGetToolSchema(id); }
 };
 
@@ -960,3 +966,39 @@ TEST_CASE( "McpServer dispatches spatial: tools and lists them", "[agent][mcp][s
     CHECK( hasRunWorkflow );
     CHECK( hasRasterInspect );
 }
+
+TEST_CASE( "McpServer::handleSearchAlgorithms performs case-insensitive inputType and outputType matching", "[agent][mcp]" )
+{
+    if (!QgsApplication::processingRegistry()->providerById("qgis_algorithms"))
+    {
+        QgsApplication::processingRegistry()->addProvider(new QgisAlgorithmsProvider());
+    }
+    sicnu::processing::AtomicAlgorithmRegistry::instance().reset();
+    TestMcpServer server;
+
+    // Search with lowercase "raster" inputType
+    const QVariantMap res = server.testSearchAlgorithms( QString(), QString(), QStringLiteral( "raster" ) );
+    const QVariantList results = res.value( QStringLiteral( "algorithms" ) ).toList();
+    REQUIRE_FALSE( results.isEmpty() );
+
+    // Verify all returned algorithms have at least one Raster input port
+    for ( const QVariant &entryVar : results )
+    {
+        const QVariantMap entry = entryVar.toMap();
+        const QString id = entry.value( QStringLiteral( "id" ) ).toString();
+        const auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( id.toStdString() );
+        REQUIRE( adapter != nullptr );
+        bool hasRasterInput = false;
+        for ( const auto &port : adapter->descriptor().inputs )
+        {
+            if ( port.type == sicnu::processing::DataType::Raster )
+            {
+                hasRasterInput = true;
+                break;
+            }
+        }
+        CHECK( hasRasterInput );
+    }
+}
+
+

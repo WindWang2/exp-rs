@@ -26,7 +26,7 @@ import { existsSync } from "node:fs";
 
 /** Max characters of a tool result kept (tail preserved). */
 const MAX_RESULT_CHARS = 50_000;
-const REQUEST_TIMEOUT_MS = 10 * 60_1_000;
+const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 
 type Pending = {
   resolve: (value: any) => void;

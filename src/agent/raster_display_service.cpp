@@ -720,6 +720,13 @@ Json::Value RasterDisplayService::resetDisplay( const Json::Value &params )
     }
 
     const int bandCount = layer->bandCount();
+    if ( bandCount <= 0 )
+    {
+      result["status"] = "error";
+      result["errorMessage"] = "Raster layer has no bands.";
+      return result;
+    }
+
     if ( bandCount >= 3 )
     {
       auto renderer = std::make_unique<QgsMultiBandColorRenderer>(

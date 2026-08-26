@@ -928,7 +928,7 @@ QVariantMap McpServer::handleSearchAlgorithms(const QString &query, const QStrin
                 const auto &inputs = adapter->descriptor().inputs;
                 for (const auto &port : inputs)
                 {
-                    if (QString::fromUtf8(sicnu::processing::dataTypeToString(port.type).c_str()) == inputType)
+                    if (QString::compare(QString::fromUtf8(sicnu::processing::dataTypeToString(port.type).c_str()), inputType, Qt::CaseInsensitive) == 0)
                     { matched = true; break; }
                 }
             }
@@ -945,7 +945,7 @@ QVariantMap McpServer::handleSearchAlgorithms(const QString &query, const QStrin
                 const auto &outputs = adapter->descriptor().outputs;
                 for (const auto &port : outputs)
                 {
-                    if (QString::fromUtf8(sicnu::processing::dataTypeToString(port.type).c_str()) == outputType)
+                    if (QString::compare(QString::fromUtf8(sicnu::processing::dataTypeToString(port.type).c_str()), outputType, Qt::CaseInsensitive) == 0)
                     { matched = true; break; }
                 }
             }

@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
+#include <QPointer>
 #include <QSslError>
 
 namespace sicnu::agent
@@ -103,9 +104,13 @@ void LlmStreamingClient::cancel()
 {
   if ( m_currentReply )
   {
-    m_currentReply->abort();
-    m_currentReply->deleteLater();
+    QPointer<QNetworkReply> reply = m_currentReply;
     m_currentReply = nullptr;
+    reply->abort();
+    if ( reply )
+    {
+      reply->deleteLater();
+    }
   }
 }
 
