@@ -16,6 +16,7 @@
 #include "processing/framework/tool_call_dispatcher.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "processing/framework/task_center.h"
+#include "jobs/job_engine.h"
 #include "operators/rs/rs_spectral_index_operator.h"
 
 using namespace sicnu::processing;
@@ -906,3 +907,40 @@ TEST_CASE( "ToolCallDispatcher synchronous dispatchAndAwait does not deadlock on
 
 
 
+
+// ---------------------------------------------------------------------------
+// #559 regression: dispatchAndAwait through the production default
+// constructor must not deadlock. Old wiring delivered the completion payload
+// to the bridge thread via Qt::QueuedConnection while dispatchAndAwait blocked
+// that same thread in a condition-variable wait, hanging until the timeout.
+// The production wiring now rides the ExecutionPlane: the wakeup channel is
+// thread-safe (no event loop involved), so this completes headless, and it
+// equally completes with a live (non-pumped) QCoreApplication — see
+// test_execution_plane for that variant.
+// ---------------------------------------------------------------------------
+TEST_CASE( "ToolCallDispatcher default-constructor dispatchAndAwait completes without deadlocking",
+           "[processing][tool_call_dispatcher][dispatch_and_await][default_ctor]" )
+{
+  AtomicAlgorithmRegistry::instance().reset();
+  AtomicAlgorithmRegistry::instance().registerAdapter( std::make_shared<StubAdapter>( "stub:await" ) );
+  sicnu::jobs::JobEngine::instance().setFallbackExecutor(
+    []( const sicnu::jobs::JobRequest &req, sicnu::operators::RSOperatorContext &ctx ) -> Json::Value {
+      const auto adapter = AtomicAlgorithmRegistry::instance().findAdapter( req.algorithmId );
+      if ( !adapter )
+        throw std::runtime_error( "Unknown algorithm: " + req.algorithmId );
+      return adapter->execute( req.params, {}, [&ctx]() { return ctx.isCancelled(); } );
+    } );
+
+  ToolCallDispatcher dispatcher; // production wiring (sink/watcher/syncAwait on the plane)
+
+  const auto start = std::chrono::steady_clock::now();
+  const Json::Value result = dispatcher.dispatchAndAwait( objectEnvelope( "stub:await", "parameters", Json::Value( Json::objectValue ) ),
+                                                          std::chrono::seconds( 8 ) );
+  const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - start )
+                           .count();
+
+  INFO( "elapsed ms: " << elapsedMs << ", status: " << result["status"].asString() );
+  REQUIRE( result["status"].asString() == "success" );
+  REQUIRE( elapsedMs < 6000 );
+}

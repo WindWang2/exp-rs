@@ -1,55 +1,85 @@
 // src/processing/framework/tool_call_dispatcher_task_center.cpp
+//
+// Production wiring for the ToolCallDispatcher default constructor: the sink,
+// the completion watcher and the sync await all ride the ExecutionPlane on top
+// of TaskCenter/JobEngine.
+//
+// Issue #559 root cause, for the record: this file used to spawn a detached
+// watcher thread per submission that fetched the terminal task and then
+// unconditionally delivered the completion payload to m_commitBridge via
+// QMetaObject::invokeMethod(..., Qt::QueuedConnection). A caller that invoked
+// dispatchAndAwait() on the bridge's own thread blocked in a condition-variable
+// wait WITHOUT running that thread's event loop, so the queued meta-call never
+// executed, the condition variable was never notified, and the call hung until
+// its (30-minute) timeout. It also leaked one detached thread per watch.
+//
+// The wiring below removes both defects structurally:
+//   * the watcher registers a TaskCenter completion callback that fires on the
+//     terminal-transition thread (a JobEngine worker) — no detached threads;
+//   * async payload delivery still marshals onto the bridge thread via
+//     QueuedConnection (Data Manager affinity), which is safe because async
+//     consumers pump their event loops;
+//   * dispatchAndAwait() uses the plane's event-loop-free await (setSyncAwait):
+//     its wakeup rides the thread-safe completion channel and the transactional
+//     payload commit runs on the calling thread — the Data Manager's owning
+//     thread in every production caller — so a sync wait can never wedge a
+//     queued delivery, and the commit happens exactly once.
 #include "tool_call_dispatcher.h"
+#include "execution_plane.h"
 #include "task_center.h"
 
 #include <QCoreApplication>
 #include <QObject>
-#include <QThread>
-
-#include <thread>
 
 namespace sicnu::processing {
 
 ToolCallDispatcher::ToolCallDispatcher()
-  : mSink( []( const QString &algorithmId, const QVariantMap &params ) -> long {
-      return sicnu::TaskCenter::instance().enqueueTask(
-        algorithmId, params, /*autoLoad=*/true, sicnu::TaskPriority::Normal, {}, /*autoDispatch=*/true );
+  : mSink( [this]( const QString &algorithmId, const QVariantMap &params ) -> long {
+      ExecutionRequest request;
+      request.algorithmId = algorithmId;
+      request.params = params;
+      request.autoLoad = true;
+      request.source = mSourceTag;
+      return ExecutionPlane::instance().submit( request ).taskId();
     } )
   , m_commitBridge( std::make_shared<QObject>() )
   , mWatcher( [this]( long taskId, CompletionCallback onComplete ) {
       OutputCommitterHandler committerHandler = mOutputCommitterHandler;
       std::shared_ptr<QObject> bridge = m_commitBridge;
-      std::thread( [taskId, cb = std::move( onComplete ), committerHandler = std::move( committerHandler ), bridge]() mutable {
-        const auto info = sicnu::TaskCenter::instance().waitForTask( taskId );
-        // Payload construction commits outputs through the Data Manager, which
-        // enforces owning-thread access. Route it back to the construction
-        // thread (the Data Manager's thread in production); the detached
-        // watcher thread must never touch the catalog directly.
-        if ( bridge && QCoreApplication::instance() )
-        {
-          if ( bridge->thread() == QThread::currentThread() )
-          {
-            const Json::Value payload = buildTaskResultPayload( info, committerHandler );
-            if ( cb )
-              cb( payload );
-          }
-          else
-          {
-            QMetaObject::invokeMethod( bridge.get(), [info, cb = std::move( cb ), committerHandler = std::move( committerHandler )]() mutable {
-              const Json::Value payload = buildTaskResultPayload( info, committerHandler );
+      // deliver runs on the bridge (Data Manager owner) thread whenever
+      // needed; buildCommittedResultPayload applies the transactional commit
+      // exactly once per task, so a null callback still yields the committed
+      // asset (MCP relies on this side effect) and copilot-style duplicate
+      // builders reuse the cached payload instead of racing the commit.
+      ExecutionPlane::instance().watch(
+        taskId,
+        [bridge, cb = std::move( onComplete ), committerHandler = std::move( committerHandler )](
+          const sicnu::AlgorithmTaskInfo &info ) mutable {
+          ExecutionPlane::deliverOnAffinity(
+            bridge.get(),
+            [info, cb = std::move( cb ), committerHandler = std::move( committerHandler )]() mutable {
+              const Json::Value payload =
+                ExecutionPlane::instance().buildCommittedResultPayload( info, committerHandler );
               if ( cb )
                 cb( payload );
-            }, Qt::QueuedConnection );
-          }
-        }
-        else if ( cb )
-        {
-          const Json::Value payload = buildTaskResultPayload( info, nullptr );
-          cb( payload );
-        }
-      } ).detach();
+            } );
+        },
+        /*affinityContext=*/bridge.get() );
     } )
 {
+  std::shared_ptr<QObject> bridge = m_commitBridge;
+  mSyncAwait = [this, bridge]( long taskId, std::chrono::milliseconds timeout ) -> Json::Value {
+    // The handler is read at await time (setDataManager may run after the
+    // constructor); the commit then runs on the calling thread — the Data
+    // Manager's owning thread for every production caller of the sync path.
+    return ExecutionPlane::instance().awaitResult( taskId, timeout, mOutputCommitterHandler,
+                                                   bridge.get(), /*cancelOnTimeout=*/true );
+  };
+}
+
+Json::Value ToolCallDispatcher::buildCommittedResultPayload( const sicnu::AlgorithmTaskInfo &info ) const
+{
+  return ExecutionPlane::instance().buildCommittedResultPayload( info, mOutputCommitterHandler );
 }
 
 } // namespace sicnu::processing
