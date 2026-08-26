@@ -270,32 +270,8 @@ unsigned int TaskCenter::resolveEstimateMb( const std::string &algorithmId ) con
 Json::Value TaskCenter::variantMapToJsonParams( const QVariantMap &params )
 {
     Json::Value root( Json::objectValue );
-    for ( auto it = params.begin(); it != params.end(); ++it )
-    {
-        const QString key = it.key();
-        const QVariant &val = it.value();
-        switch ( val.typeId() )
-        {
-          case QMetaType::Bool:
-            root[key.toStdString()] = val.toBool();
-            break;
-          case QMetaType::Int:
-          case QMetaType::LongLong:
-          case QMetaType::UInt:
-          case QMetaType::ULongLong:
-          case QMetaType::Long:
-          case QMetaType::Short:
-            root[key.toStdString()] = static_cast<Json::Value::Int64>( val.toLongLong() );
-            break;
-          case QMetaType::Double:
-          case QMetaType::Float:
-            root[key.toStdString()] = val.toDouble();
-            break;
-          default:
-            root[key.toStdString()] = val.toString().toStdString();
-            break;
-        }
-    }
+    for ( auto it = params.constBegin(); it != params.constEnd(); ++it )
+        root[it.key().toStdString()] = processing::variantToJsonValue( it.value() );
     return root;
 }
 

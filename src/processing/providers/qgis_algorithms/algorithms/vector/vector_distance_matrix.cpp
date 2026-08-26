@@ -99,7 +99,7 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
 
     // Format fields: Linear (input_id, target_id, distance, [rank]) or Standard N x M (input_id, target1, target2, ...)
     QgsFields outputFields;
-    std::vector<QString> targetIds;
+    std::vector<std::pair<QgsFeatureId, QString>> targetColumns;
     if ( !nearestOnly && outputType == 1 )
     {
         outputFields.append( QgsField( QStringLiteral( "InputID" ), QMetaType::Type::QString ) );
@@ -109,7 +109,7 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
         {
             QString tid = pair.second.attribute( targetFieldName ).toString();
             if ( tid.isEmpty() )
-                tid = QString::number( pair.first );
+                tid = QStringLiteral( "target_%1" ).arg( pair.first );
             QString colName = tid;
             int counter = 1;
             while ( usedFieldNames.contains( colName ) )
@@ -117,7 +117,7 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
                 colName = QStringLiteral( "%1_%2" ).arg( tid ).arg( counter++ );
             }
             usedFieldNames.insert( colName );
-            targetIds.push_back( tid );
+            targetColumns.emplace_back( pair.first, colName );
             outputFields.append( QgsField( colName, QMetaType::Type::Double ) );
         }
     }
@@ -185,14 +185,16 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
             QgsFeature outputFeat;
             outputFeat.setFields( outputFields );
             outputFeat.setAttribute( QStringLiteral( "InputID" ), inputId );
-            for ( const auto &pair : targetFeatures )
+            for ( const auto &[targetId, colName] : targetColumns )
             {
-                const QString tid = pair.second.attribute( targetFieldName ).toString();
-                QgsPointXY targetPoint = pair.second.geometry().centroid().asPoint();
+                const auto targetIt = targetFeatures.find( targetId );
+                if ( targetIt == targetFeatures.end() )
+                    continue;
+                QgsPointXY targetPoint = targetIt->second.geometry().centroid().asPoint();
                 double dx = sourcePoint.x() - targetPoint.x();
                 double dy = sourcePoint.y() - targetPoint.y();
                 double dist = std::sqrt( dx * dx + dy * dy );
-                outputFeat.setAttribute( tid, dist );
+                outputFeat.setAttribute( colName, dist );
             }
             sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
         }

@@ -887,6 +887,13 @@ Result<AssetId> DataManager::createVirtualRaster(
 
   if ( !m_impl->vrtScratchDir || !m_impl->vrtScratchDir->isValid() )
     m_impl->vrtScratchDir = std::make_unique<QTemporaryDir>();
+  if ( !m_impl->vrtScratchDir->isValid() )
+  {
+    return Result<AssetId>::failure(
+      Diagnostic{ QStringLiteral( "virtual_raster.scratch_dir_unavailable" ),
+                  QStringLiteral( "Failed to create scratch directory for virtual raster" ),
+                  DiagnosticSeverity::Error } );
+  }
   const QString vrtPath = QStringLiteral( "%1/vrt_%2.vrt" )
                             .arg( m_impl->vrtScratchDir->path(), recipeHash );
 
