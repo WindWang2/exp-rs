@@ -6,6 +6,8 @@
 
 #include <QFileInfo>
 
+#include "qgsdatasourceresolver.h"
+
 #include <cstring>
 #include <string>
 
@@ -203,15 +205,12 @@ SpatialToolResult VectorInspectTool::execute( const Json::Value &input )
                               ? input["max_features"].asInt()
                               : 0;
 
-  const bool isVirtual = path.rfind( "/vsi", 0 ) == 0;
-  const bool isConnStr = path.find( ':' ) != std::string::npos &&
-                         !QFileInfo( QString::fromStdString( path ) ).isAbsolute();
-  if ( !isVirtual && !isConnStr && !QFileInfo::exists( QString::fromStdString( path ) ) )
-    return SpatialToolResult::failure( "Vector file not found: " + path );
+<  if ( QgsDataSourceResolver::requiresLocalExistenceCheck( QString::fromStdString( path ) ) && !QFileInfo::exists( QString::fromStdString( path ) ) )
+    return SpatialToolResult::failure( "Vector file not found: " + path, "local_file_not_found", "io", false );
 
   GDALDatasetUniquePtr ds( GDALDataset::Open( path.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY ) );
   if ( !ds )
-    return SpatialToolResult::failure( "OGR could not open vector dataset: " + path );
+    return SpatialToolResult::failure( "OGR could not open vector dataset: " + path, "provider_open_failed", "io", false );
 
   Json::Value out( Json::objectValue );
   out["path"] = path;
