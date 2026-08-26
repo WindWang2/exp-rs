@@ -796,4 +796,41 @@ TEST_CASE( "GeoreferencingSession: WorkflowRuntime mirror integration (ADR 0028)
   REQUIRE( std::find( completed.begin(), completed.end(), "gcp" ) != completed.end() );
 }
 
+TEST_CASE( "Georeferencer/Session: Destructor cancels running warp and cleans up RsWarpTask", "[georef][session]" )
+{
+  FakeWarpExecutor fake;
+  CustomWarpExecutor custom{
+    [&fake]( const sicnu::jobs::JobRequest &req,
+             const sicnu::TaskCenter::JobExecutor &exec,
+             const sicnu::TaskCenter::CancelHook &cancel ) {
+      return fake.submitWarp( req, exec, cancel );
+    },
+    [&fake]( long taskId ) {
+      return fake.cancelWarp( taskId );
+    }
+  };
+
+  {
+    RsGeoreferencingSession session( custom );
+    session.setSourceRasterPath( QStringLiteral( "/tmp/dummy_src.tif" ) );
+    session.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::Linear );
+    session.setGcps( linearGcps() );
+    REQUIRE( session.refit().ready );
+
+    const auto snap = session.createWarpSnapshot(
+      QStringLiteral( "/tmp/dummy_dst.tif" ),
+      QgsImageWarper::ResamplingMethod::NearestNeighbour,
+      QgsCoordinateReferenceSystem(), 0.0 );
+    REQUIRE( snap.has_value() );
+
+    long taskId = session.startWarpTask( *snap );
+    REQUIRE( taskId >= 0 );
+    REQUIRE( session.pendingWarpTaskId() == taskId );
+    REQUIRE( fake.submissions.size() == 1 );
+    REQUIRE( fake.cancelCalls.isEmpty() );
+  }
+
+  REQUIRE( fake.cancelCalls.size() == 1 );
+}
+
 #include "test_georeferencing_session.moc"

@@ -32,12 +32,16 @@ RsRoiSpectrumTool::RsRoiSpectrumTool( QgsMapCanvas *canvas, QgsRasterLayer *rast
   , m_rasterLayer( rasterLayer )
   , m_onResult( std::move( onResult ) )
 {
-  m_rubberBand = std::make_unique<QgsRubberBand>( canvas, Qgis::GeometryType::Polygon );
+  m_rubberBand = new QgsRubberBand( canvas, Qgis::GeometryType::Polygon );
   m_rubberBand->setColor( QColor( 255, 120, 0, 100 ) );
   m_rubberBand->setWidth( 2 );
 }
 
-RsRoiSpectrumTool::~RsRoiSpectrumTool() = default;
+RsRoiSpectrumTool::~RsRoiSpectrumTool()
+{
+  delete m_rubberBand;
+  m_rubberBand = nullptr;
+}
 
 void RsRoiSpectrumTool::canvasPressEvent( QgsMapMouseEvent *e )
 {

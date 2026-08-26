@@ -5334,6 +5334,8 @@ add_executable(test_w10_ui_misc_regression test_w10_ui_misc_regression.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/raster_layer_combo.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/band_role_combo.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/preferences_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/qgis_app_facade.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/qgsclipboard.cpp
 )
 target_link_libraries(test_w10_ui_misc_regression PRIVATE
   Catch2::Catch2WithMain

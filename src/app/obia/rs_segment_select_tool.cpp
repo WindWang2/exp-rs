@@ -14,6 +14,12 @@ RsSegmentSelectTool::RsSegmentSelectTool( QgsMapCanvas *canvas )
     setCursor( Qt::CrossCursor );
 }
 
+RsSegmentSelectTool::~RsSegmentSelectTool()
+{
+    delete mRubberBand;
+    mRubberBand = nullptr;
+}
+
 void RsSegmentSelectTool::setSegmentMap( const RsSegmentMap &segMap )
 {
     mSegMap = segMap;
@@ -31,7 +37,8 @@ void RsSegmentSelectTool::clearSelection()
     if ( mRubberBand )
     {
         mRubberBand->reset( Qgis::GeometryType::Polygon );
-        mRubberBand.reset();
+        delete mRubberBand;
+        mRubberBand = nullptr;
     }
     emit selectionCleared();
 }
@@ -67,7 +74,7 @@ void RsSegmentSelectTool::highlightSegment( quint32 segmentId )
     if ( !mRubberBand )
     {
         // MEDIUM #11 fix: use Point mode for correct per-pixel highlighting
-        mRubberBand = std::make_unique<QgsRubberBand>( canvas(), Qgis::GeometryType::Point );
+        mRubberBand = new QgsRubberBand( canvas(), Qgis::GeometryType::Point );
         mRubberBand->setIcon( QgsRubberBand::ICON_CIRCLE );
         mRubberBand->setIconSize( 6 );
         mRubberBand->setColor( QColor( 255, 255, 0, 180 ) );

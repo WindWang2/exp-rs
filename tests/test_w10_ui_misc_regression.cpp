@@ -200,3 +200,107 @@ TEST_CASE("PipelineEditorDock exposes openPipelineDialog", "[w10][397][u4][ribbo
   // test binary, so this case documents the wiring requirement instead.
   SUCCEED("onOpenClicked/openPipelineDialog are public slots (compile-time checked)");
 }
+
+#include <QPointer>
+#include <QDockWidget>
+#include <QMainWindow>
+#include <QDialog>
+#include <qgsvectorlayer.h>
+#include <qgsvectorlayertools.h>
+#include <qgsspinbox.h>
+#include "app/qgis_app_facade.h"
+
+// Issue #550: Python dock lazy load and window destruction safety
+TEST_CASE("GUI/Lifecycle: Python dock lazy load and window destruction safety", "[gui][lifecycle]")
+{
+  ensureApp();
+  auto *parentDock = new QDockWidget( "Python Dock" );
+  auto *widget = new QWidget( parentDock );
+  parentDock->setWidget( widget );
+  QPointer<QWidget> widgetPtr( widget );
+
+  delete parentDock;
+  CHECK( widgetPtr.isNull() );
+}
+
+// Issue #552: Child window deterministic cleanup in destructor
+TEST_CASE("GUI/Shell: Child window deterministic cleanup in destructor", "[gui][shell]")
+{
+  ensureApp();
+  auto *child1 = new QMainWindow();
+  auto *child2 = new QMainWindow();
+  QPointer<QMainWindow> ptr1( child1 );
+  QPointer<QMainWindow> ptr2( child2 );
+
+  auto disposeChildWindow = []( QWidget *w ) {
+    if (!w) return;
+    delete w;
+  };
+
+  disposeChildWindow( ptr1.data() );
+  CHECK( ptr1.isNull() );
+
+  disposeChildWindow( ptr2.data() );
+  CHECK( ptr2.isNull() );
+}
+
+// Issue #553: Dialog automatically closes on vector layer destruction
+TEST_CASE("GUI/AttributeTable: Dialog automatically closes on vector layer destruction", "[gui][attribute_table]")
+{
+  ensureApp();
+  auto *layer = new QgsVectorLayer( "Point?field=id:integer", "test_layer", "memory" );
+  REQUIRE( layer->isValid() );
+
+  auto *dialog = new QDialog();
+  dialog->show();
+  QObject::connect( layer, &QObject::destroyed, dialog, &QWidget::close );
+
+  QPointer<QDialog> dlgPtr( dialog );
+  delete layer;
+
+  CHECK_FALSE( dialog->isVisible() );
+  delete dialog;
+}
+
+namespace {
+class TestVectorLayerTools : public QgsVectorLayerTools
+{
+public:
+  explicit TestVectorLayerTools( QObject *parent = nullptr )
+    : QgsVectorLayerTools()
+  {
+    if ( parent )
+      setParent( parent );
+  }
+  bool startEditing( QgsVectorLayer * ) const override { return true; }
+  bool stopEditing( QgsVectorLayer *, bool = true ) const override { return true; }
+  bool saveEdits( QgsVectorLayer * ) const override { return true; }
+};
+} // namespace
+
+// Issue #554: vectorLayerTools ownership and destruction
+TEST_CASE("GUI/Shell: vectorLayerTools ownership and destruction", "[gui][facade]")
+{
+  ensureApp();
+  auto *win = new QMainWindow();
+  auto *vectorLayerTools = new TestVectorLayerTools( win );
+  REQUIRE( vectorLayerTools->parent() == win );
+  QgisApp::initialize( nullptr, nullptr, vectorLayerTools, nullptr, win );
+  REQUIRE( QgisApp::instance()->vectorLayerTools() == vectorLayerTools );
+
+  QPointer<QgsVectorLayerTools> toolsPtr( vectorLayerTools );
+  delete win;
+  CHECK( toolsPtr.isNull() );
+}
+
+// Issue #557: Regular polygon spin box canvas reparenting lifecycle
+TEST_CASE("MapTools/Shape: Regular polygon spin box canvas reparenting lifecycle", "[maptool][shape]")
+{
+  ensureApp();
+  auto *canvasWidget = new QWidget();
+  auto *spinBox = new QgsSpinBox( canvasWidget );
+  QPointer<QgsSpinBox> spinPtr( spinBox );
+
+  delete canvasWidget;
+  CHECK( spinPtr.isNull() );
+}

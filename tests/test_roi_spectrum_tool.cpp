@@ -136,3 +136,34 @@ TEST_CASE( "RsRoiSpectrumTool computes ROI spectrum asynchronously (#322)", "[ap
     CHECK( resultValues[1] == Approx( 105.5 ).margin( 0.1 ) );
     REQUIRE( resultLabels.size() == 2 );
 }
+
+TEST_CASE( "GUI/MapTools: RsRoiSpectrumTool lifecycle and canvas destruction", "[gui][maptool]" )
+{
+    TestAppFixture fixture;
+
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString rasterPath = tmp.filePath( QStringLiteral( "roi_test_lifecycle.tif" ) );
+    REQUIRE( makeRoiRaster( rasterPath ).isEmpty() );
+
+    auto rasterLayer = std::make_unique<QgsRasterLayer>( rasterPath, QStringLiteral( "roi_test_lifecycle" ) );
+    REQUIRE( rasterLayer->isValid() );
+
+    auto canvas = std::make_unique<QgsMapCanvas>();
+    canvas->setDestinationCrs( rasterLayer->crs() );
+    canvas->setExtent( rasterLayer->extent() );
+
+    auto tool = std::make_unique<TestableRsRoiSpectrumTool>(
+        canvas.get(), rasterLayer.get(),
+        []( const QVector<double> &, const QVector<double> &,
+            const QVector<QString> &, const QString & ) {} );
+
+    // Draw point
+    QPoint pt0 = canvas->mapSettings().mapToPixel().transform( QgsPointXY( 0.1, -0.1 ) ).toQPointF().toPoint();
+    QgsMapMouseEvent e0( canvas.get(), QEvent::MouseButtonPress, pt0, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier );
+    tool->canvasPressEvent( &e0 );
+
+    // Cleanly destroy tool and canvas without SIGSEGV or double free
+    tool.reset();
+    canvas.reset();
+}

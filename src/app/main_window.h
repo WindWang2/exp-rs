@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QPointer>
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QCloseEvent>
@@ -375,7 +376,7 @@ private:
     QgsMapToolZoom *m_zoomInTool = nullptr;
     QgsMapToolZoom *m_zoomOutTool = nullptr;
     CustomIdentifyTool *m_identifyTool = nullptr;
-    std::unique_ptr<RsRoiSpectrumTool> m_roiSpectrumTool;
+    QPointer<RsRoiSpectrumTool> m_roiSpectrumTool;
     MeasureTool *m_measureDistanceTool = nullptr;
     MeasureTool *m_measureAreaTool = nullptr;
     SwipeMapTool *m_swipeTool = nullptr;
@@ -515,9 +516,9 @@ private:
 
     // Lazy-loaded modules
 #ifdef SICNU_EMBED_PYTHON
-    std::unique_ptr<class SicnuPythonConsole> m_pythonConsole;
+    QPointer<class SicnuPythonConsole> m_pythonConsole;
     class QgsDockWidget *m_pythonDock = nullptr;
-    std::unique_ptr<Sicnu::PythonScriptEditor> m_pythonScriptEditor;
+    QPointer<Sicnu::PythonScriptEditor> m_pythonScriptEditor;
     class QgsDockWidget *m_pythonScriptEditorDock = nullptr;
 #endif
 

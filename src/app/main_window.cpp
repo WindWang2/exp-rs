@@ -224,9 +224,7 @@ QgisDesktopWindow::~QgisDesktopWindow()
     auto disposeChildWindow = []( QWidget *w ) {
         if (!w)
             return;
-        w->hide();
-        w->setParent(nullptr);
-        w->deleteLater();
+        delete w;
     };
     disposeChildWindow(m_classifyWindow);
     m_classifyWindow = nullptr;
@@ -333,7 +331,7 @@ void QgisDesktopWindow::setupMapCanvas()
     }
 
     // Initialize QgisApp facade for ported tools (wire clipboard so cut/copy/paste work)
-    auto *vectorLayerTools = new QgsGuiVectorLayerTools();
+    auto *vectorLayerTools = new QgsGuiVectorLayerTools( this );
     QgisApp::initialize( m_mapCanvas, m_cadDock, vectorLayerTools, m_messageBar, this, m_clipboard );
 
     // Map Tools Setup (Delegated to MapToolManager)

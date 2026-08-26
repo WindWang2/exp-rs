@@ -30,19 +30,20 @@ QgsMapToolShapeRegularPolygonAbstract::QgsMapToolShapeRegularPolygonAbstract( co
 void QgsMapToolShapeRegularPolygonAbstract::createNumberSidesSpinBox()
 {
   deleteNumberSidesSpinBox();
-  mNumberSidesSpinBox = std::make_unique<QgsSpinBox>();
+  mNumberSidesSpinBox = new QgsSpinBox();
   mNumberSidesSpinBox->setMaximum( 99999999 );
   mNumberSidesSpinBox->setMinimum( 3 );
   mNumberSidesSpinBox->setPrefix( tr( "Number of sides: " ) );
   mNumberSidesSpinBox->setValue( mNumberSides );
-  QgisApp::instance()->addUserInputWidget( mNumberSidesSpinBox.get() );
+  QgisApp::instance()->addUserInputWidget( mNumberSidesSpinBox.data() );
 }
 
 void QgsMapToolShapeRegularPolygonAbstract::deleteNumberSidesSpinBox()
 {
   if ( mNumberSidesSpinBox )
   {
-    mNumberSidesSpinBox.reset( nullptr );
+    delete mNumberSidesSpinBox.data();
+    mNumberSidesSpinBox = nullptr;
   }
 }
 

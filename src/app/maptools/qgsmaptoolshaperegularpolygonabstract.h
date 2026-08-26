@@ -20,6 +20,7 @@
 #include "qgsmaptoolshapeabstract.h"
 #include "qgsregularpolygon.h"
 #include "qgsspinbox.h"
+#include <QPointer>
 
 class QSpinBox;
 
@@ -35,7 +36,7 @@ class APP_EXPORT QgsMapToolShapeRegularPolygonAbstract : public QgsMapToolShapeA
   protected:
     void addRegularPolygonToParentTool();
 
-    std::unique_ptr<QgsSpinBox> mNumberSidesSpinBox;
+    QPointer<QgsSpinBox> mNumberSidesSpinBox;
     int mNumberSides = 6;
 
     //! (re-)create the spin box to enter the number of sides

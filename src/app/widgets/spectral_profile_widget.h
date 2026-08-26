@@ -4,6 +4,7 @@
 #include <QWidget>
 #include <QVector>
 #include <QString>
+#include <QPointer>
 
 #include <qgspointxy.h>
 
@@ -107,7 +108,7 @@ private:
     double xFractionForBand( int i, int bandCount ) const;
 
     QgsPointXY m_point;
-    QgsRasterLayer *m_rasterLayer = nullptr;
+    QPointer<QgsRasterLayer> m_rasterLayer;
 
     // Cached GDAL dataset handle — avoids reopening on every click
     GDALDatasetH m_cachedDataset = nullptr;

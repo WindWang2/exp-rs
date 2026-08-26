@@ -31,7 +31,12 @@ class QgsGuiVectorLayerTools : public QgsVectorLayerTools
     /**
      * Constructor for QgsGuiVectorLayerTools.
      */
-    QgsGuiVectorLayerTools() = default;
+    explicit QgsGuiVectorLayerTools( QObject *parent = nullptr )
+      : QgsVectorLayerTools()
+    {
+      if ( parent )
+        setParent( parent );
+    }
 
     /**
      * This method should be called, whenever a new feature is added to a layer

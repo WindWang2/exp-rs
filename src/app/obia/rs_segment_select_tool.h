@@ -21,6 +21,7 @@ class RsSegmentSelectTool : public QgsMapTool
     Q_OBJECT
   public:
     explicit RsSegmentSelectTool( QgsMapCanvas *canvas );
+    ~RsSegmentSelectTool() override;
 
     /// Set the segment map to use for selection.
     void setSegmentMap( const RsSegmentMap &segMap );
@@ -50,5 +51,5 @@ class RsSegmentSelectTool : public QgsMapTool
     RsSegmentMap mSegMap;
     double mGeoTransform[6] = { 0, 1, 0, 0, 0, 1 };
     quint32 mSelectedSegId = 0;
-    std::unique_ptr<QgsRubberBand> mRubberBand;
+    QgsRubberBand *mRubberBand = nullptr;
 };

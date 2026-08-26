@@ -321,7 +321,7 @@ void QgisDesktopWindow::activateRoiSpectrumTool()
     // Profile dock; afterwards the canvas returns to the identify tool. The
     // callback is the tool's sole owner — it always restores the tool and
     // releases (empty values carry an error message in layerName).
-    m_roiSpectrumTool.reset(new RsRoiSpectrumTool(
+    m_roiSpectrumTool = new RsRoiSpectrumTool(
       m_mapCanvas, rasterLayer,
       [this](const QVector<double> &values, const QVector<double> &wavelengths,
              const QVector<QString> &labels, const QString &layerName)
@@ -337,10 +337,11 @@ void QgisDesktopWindow::activateRoiSpectrumTool()
         if (m_mapCanvas && m_identifyTool)
           m_mapCanvas->setMapTool(m_identifyTool);
         // Safe asynchronous deletion: we are inside the tool's own callback.
-        m_roiSpectrumTool.release()->deleteLater();
-      }));
+        if (m_roiSpectrumTool)
+          m_roiSpectrumTool->deleteLater();
+      });
 
-    m_mapCanvas->setMapTool(m_roiSpectrumTool.get());
+    m_mapCanvas->setMapTool(m_roiSpectrumTool.data());
 }
 
 // ---------------------------------------------------------------------------

@@ -49,7 +49,7 @@ class RsRoiSpectrumTool : public QgsMapTool
 
     QPointer<QgsRasterLayer> m_rasterLayer;
     ResultCallback m_onResult;
-    std::unique_ptr<QgsRubberBand> m_rubberBand;
+    QgsRubberBand *m_rubberBand = nullptr;
     QPolygonF m_polygon;
     bool m_finished = false;
 };

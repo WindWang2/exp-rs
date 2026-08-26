@@ -95,4 +95,26 @@ TEST_CASE( "ObiaMainWindow: initial task state queries and cancelActiveTask", "[
     CHECK( window.pendingOp() == RsObiaMainWindow::PendingOp::None );
 }
 
+#include "app/obia/rs_segment_select_tool.h"
+#include <qgsmapcanvas.h>
+#include <qgsmapmouseevent.h>
+
+TEST_CASE( "OBIA/MapTools: RsSegmentSelectTool rubber band canvas destruction safety", "[obia][maptool]" )
+{
+    ensureApp();
+
+    auto canvas = std::make_unique<QgsMapCanvas>();
+    auto tool = std::make_unique<RsSegmentSelectTool>( canvas.get() );
+
+    QVector<quint32> labels = { 1, 1, 1, 1 };
+    RsSegmentMap segMap( labels, 2, 2 );
+    tool->setSegmentMap( segMap );
+
+    tool->clearSelection();
+
+    // Clean teardown: destroy tool before canvas
+    tool.reset();
+    canvas.reset();
+}
+
 #endif // SICNU_HAS_OPENCV

@@ -266,6 +266,7 @@ QgsAttributeTableDialog::QgsAttributeTableDialog(
     connect( mLayer, &QgsVectorLayer::editingStarted, this, &QgsAttributeTableDialog::editingToggled );
     connect( mLayer, &QgsVectorLayer::editingStopped, this, &QgsAttributeTableDialog::editingToggled );
     connect( mLayer, &QObject::destroyed, mMainView, &QgsDualView::cancelProgress );
+    connect( mLayer, &QObject::destroyed, this, &QWidget::close );
     connect( mLayer, &QgsVectorLayer::selectionChanged, this, &QgsAttributeTableDialog::updateTitle );
     connect( mLayer, &QgsVectorLayer::featureAdded, this, &QgsAttributeTableDialog::updateTitle );
     connect( mLayer, &QgsVectorLayer::featuresDeleted, this, &QgsAttributeTableDialog::updateTitle );

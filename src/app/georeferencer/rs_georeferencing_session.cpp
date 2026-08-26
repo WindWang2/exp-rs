@@ -39,7 +39,16 @@ RsGeoreferencingSession::RsGeoreferencingSession(
            this, &RsGeoreferencingSession::onTaskUpdated );
 }
 
-RsGeoreferencingSession::~RsGeoreferencingSession() = default;
+RsGeoreferencingSession::~RsGeoreferencingSession()
+{
+  if ( mPendingWarpTaskId >= 0 )
+    cancelWarpTask( mPendingWarpTaskId );
+  if ( mPendingWarpTask )
+  {
+    delete mPendingWarpTask;
+    mPendingWarpTask = nullptr;
+  }
+}
 
 void RsGeoreferencingSession::setLastPointsPath( const QString &path )
 {

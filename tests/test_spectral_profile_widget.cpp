@@ -335,3 +335,25 @@ TEST_CASE("SpectralProfileWidget exposes FWHM band metadata", "[widget][spectral
 
     delete layer;
 }
+
+TEST_CASE("Widgets/SpectralProfile: Layer destruction outside QgsProject resets pointer", "[widgets][spectral]") {
+    QgisFixture fixture;
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString path = dir.filePath("standalone.tif");
+    REQUIRE(makeTwoBandRaster(path).isEmpty());
+
+    auto *layer = new QgsRasterLayer(path, QStringLiteral("standalone_layer"));
+    REQUIRE(layer->isValid());
+
+    SpectralProfileWidget widget;
+    widget.setProfile(QgsPointXY(3.5, -2.5), layer);
+    REQUIRE(widget.hasData());
+
+    // Layer is destroyed directly (not via QgsProject)
+    delete layer;
+
+    // Widget reset / clear works cleanly
+    widget.clear();
+    CHECK_FALSE(widget.hasData());
+}

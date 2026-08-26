@@ -301,8 +301,8 @@ void QgisDesktopWindow::setupDockWidgets()
         connect(pythonAction, &QAction::triggered, this, [this]() {
             if (!m_pythonConsole) {
                 statusBar()->showMessage(tr("Initializing Python..."));
-                m_pythonConsole = std::make_unique<SicnuPythonConsole>(m_pythonDock);
-                m_pythonDock->setWidget(m_pythonConsole.get());
+                m_pythonConsole = new SicnuPythonConsole(m_pythonDock);
+                m_pythonDock->setWidget(m_pythonConsole.data());
                 statusBar()->showMessage(tr("Python ready"), 3000);
             }
             m_pythonDock->show();
@@ -315,12 +315,12 @@ void QgisDesktopWindow::setupDockWidgets()
         connect(scriptEditorAction, &QAction::triggered, this, [this]() {
             if (!m_pythonScriptEditor) {
                 statusBar()->showMessage(tr("Initializing Python script editor..."));
-                m_pythonScriptEditor = std::make_unique<Sicnu::PythonScriptEditor>(m_pythonScriptEditorDock);
-                connect(m_pythonScriptEditor.get(), &Sicnu::PythonScriptEditor::statusMessage,
+                m_pythonScriptEditor = new Sicnu::PythonScriptEditor(m_pythonScriptEditorDock);
+                connect(m_pythonScriptEditor.data(), &Sicnu::PythonScriptEditor::statusMessage,
                         this, [this](const QString &message) {
                             statusBar()->showMessage(message, 3000);
                         });
-                m_pythonScriptEditorDock->setWidget(m_pythonScriptEditor.get());
+                m_pythonScriptEditorDock->setWidget(m_pythonScriptEditor.data());
                 statusBar()->showMessage(tr("Python script editor ready"), 3000);
             }
             m_pythonScriptEditorDock->show();
