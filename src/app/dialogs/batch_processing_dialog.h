@@ -29,6 +29,11 @@ namespace sicnu::processing
 struct AlgorithmDescriptor;
 }
 
+namespace sicnu
+{
+struct AlgorithmTaskInfo;
+}
+
 /**
  * Dialog for batch processing - running the same algorithm on multiple files.
  */
@@ -70,6 +75,9 @@ private slots:
     void onBrowseOutputDir();
     void onRun();
     void onAlgorithmChanged(int index);
+    /// Advances the async batch: reacts to the current batch task's terminal
+    /// transition (TaskCenter::taskUpdated) and chains the next item.
+    void onBatchTaskUpdated(const sicnu::AlgorithmTaskInfo &info);
 
 private:
     void setupUi();
@@ -82,6 +90,13 @@ private:
     void rebuildQgisParamForm(const QgsProcessingAlgorithm *alg);
     /// Drops every widget in the parameter form.
     void clearParamForm();
+    /// Submits batch item \a m_batchIndex as a TaskCenter job (executor wraps
+    /// runBatchItem) and returns; completion continues in onBatchTaskUpdated.
+    void submitNextBatchItem();
+    /// Restores the dialog state after the last item and reports the summary.
+    void finishBatch();
+    /// Unique output path for the batch item (collision suffix policy).
+    QString uniqueOutputPath(const QString &inputFile) const;
 
     QComboBox *m_algorithmCombo = nullptr;
     QListWidget *m_fileList = nullptr;
@@ -106,6 +121,19 @@ private:
 
     bool m_isRunning = false;
     bool m_canceled = false;
+
+    // Async batch state (execution-plane goal: items run as TaskCenter jobs
+    // instead of a processEvents loop on the GUI thread, which starved user
+    // input — the Cancel button could not fire between items).
+    QStringList m_batchFiles;
+    int m_batchIndex = 0;
+    int m_batchSuccess = 0;
+    int m_batchFail = 0;
+    QStringList m_batchErrors;
+    QString m_batchAlgorithmId;
+    QVariantMap m_batchOverrides;
+    QString m_batchOutputExt = QStringLiteral( ".tif" );
+    long m_batchTaskId = -1;
 
     QStringList m_inputFiles;
     QString m_outputDir;
