@@ -11,6 +11,8 @@
 #include <limits>
 #include <mutex>
 
+#include "qgsdatasourceresolver.h"
+
 // Ensure GDAL drivers are registered (once per process, thread-safe)
 void ensureGdalInit()
 {
@@ -45,8 +47,9 @@ bool GdalDatasetWrapper::open(const QString &path)
     close();
     m_lastError.clear();
 
-    if (!QFile::exists(path)) {
-        m_lastError = QStringLiteral("File not found: %1").arg(path);
+    if ( QgsDataSourceResolver::requiresLocalExistenceCheck( path ) && !QFile::exists( path ) )
+    {
+        m_lastError = QStringLiteral( "File not found: %1" ).arg( path );
         return false;
     }
 

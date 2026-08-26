@@ -5,8 +5,12 @@
 #include "gdal/gdal_dataset_wrapper.h"
 #include "resource_estimation.h"
 #include "schema_validator.h"
+#include "qgsdatasourceresolver.h"
 
+#include <cpl_error.h>
 #include <gdal.h>
+
+#include <QString>
 
 #include <filesystem>
 #include <string>
@@ -30,48 +34,96 @@ std::string paramPathValue( const Json::Value &value )
 
 /// Lightweight GDAL probe of a raster file. Returns an object with size/bands/
 /// dtype/crs/radiometric-state; empty object when the file cannot be opened.
+/// For non-local sources (VSI / OGR connection / remote URI) the filesystem
+/// existence check is skipped and GDALOpenEx is used as the source of truth.
 Json::Value probeRasterDataset( const std::string &path )
 {
   Json::Value info( Json::objectValue );
-
-  std::error_code ec;
-  const bool exists = std::filesystem::exists( path, ec ) && !ec;
-  info["exists"] = exists;
-  if ( !exists )
-  {
-    info["path"] = path;
-    return info;
-  }
   info["path"] = path;
 
-  GdalDatasetWrapper ds;
-  if ( !ds.open( QString::fromStdString( path ) ) )
+  const QString qpath = QString::fromStdString( path );
+  const bool requiresLocal = QgsDataSourceResolver::requiresLocalExistenceCheck( qpath );
+
+  if ( requiresLocal )
   {
-    info["openError"] = ds.lastError().toStdString();
+    std::error_code ec;
+    const bool exists = std::filesystem::exists( path, ec ) && !ec;
+    info["exists"] = exists;
+    if ( !exists )
+      return info;
+
+    GdalDatasetWrapper ds;
+    if ( !ds.open( qpath ) )
+    {
+      info["openError"] = ds.lastError().toStdString();
+      return info;
+    }
+
+    info["width"] = ds.width();
+    info["height"] = ds.height();
+    info["bandCount"] = ds.bandCount();
+    if ( ds.bandCount() >= 1 )
+    {
+      const int dtype = ds.bandDataType( 1 );
+      info["dataType"] = gdalBytesPerSample( dtype ) > 0
+                           ? ( gdalBytesPerSample( dtype ) * 8 )
+                           : 0; // bit depth
+    }
+    info["crs"] = ds.projection().toStdString();
+
+    // Dataset-level radiometric state metadata (importers write this).
+    if ( void *h = ds.dataset() )
+    {
+      if ( const char *rs = GDALGetMetadataItem( static_cast<GDALDatasetH>( h ),
+                                                 "SICNU_RADIOMETRIC_STATE", nullptr ) )
+      {
+        info["radiometricState"] = rs;
+      }
+    }
     return info;
   }
 
-  info["width"] = ds.width();
-  info["height"] = ds.height();
-  info["bandCount"] = ds.bandCount();
-  if ( ds.bandCount() >= 1 )
+  // Non-local (VSI / connection string / remote URI): probe via GDAL directly.
+  GDALAllRegister();
+  CPLErrorReset();
+  GDALDatasetH hDS = GDALOpenEx( path.c_str(),
+                                 GDAL_OF_RASTER | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR,
+                                 nullptr, nullptr, nullptr );
+  if ( !hDS )
   {
-    const int dtype = ds.bandDataType( 1 );
-    info["dataType"] = gdalBytesPerSample( dtype ) > 0
-                         ? ( gdalBytesPerSample( dtype ) * 8 )
-                         : 0; // bit depth
+    info["exists"] = false;
+    info["open_attempted"] = true;
+    const char *msg = CPLGetLastErrorMsg();
+    if ( msg && msg[0] )
+      info["openError"] = msg;
+    CPLErrorReset();
+    return info;
   }
-  info["crs"] = ds.projection().toStdString();
 
-  // Dataset-level radiometric state metadata (importers write this).
-  if ( void *h = ds.dataset() )
+  info["exists"] = true;
+  info["open_attempted"] = true;
+  info["width"] = GDALGetRasterXSize( hDS );
+  info["height"] = GDALGetRasterYSize( hDS );
+  info["bandCount"] = GDALGetRasterCount( hDS );
+  if ( GDALGetRasterCount( hDS ) >= 1 )
   {
-    if ( const char *rs = GDALGetMetadataItem( static_cast<GDALDatasetH>( h ),
-                                               "SICNU_RADIOMETRIC_STATE", nullptr ) )
+    GDALRasterBandH band = GDALGetRasterBand( hDS, 1 );
+    if ( band )
     {
-      info["radiometricState"] = rs;
+      const GDALDataType dt = GDALGetRasterDataType( band );
+      const int bytes = GDALGetDataTypeSizeBytes( dt );
+      info["dataType"] = bytes > 0 ? bytes * 8 : 0;
     }
   }
+  if ( const char *proj = GDALGetProjectionRef( hDS ) )
+    info["crs"] = proj;
+  else
+    info["crs"] = "";
+  if ( const char *rs = GDALGetMetadataItem( hDS, "SICNU_RADIOMETRIC_STATE", nullptr ) )
+    info["radiometricState"] = rs;
+
+  GDALClose( hDS );
+  CPLErrorReset();
   return info;
 }
 
@@ -158,8 +210,36 @@ Json::Value preflightAdapter( const AtomicAlgorithmAdapter &adapter, const Json:
     {
       Json::Value info( Json::objectValue );
       info["path"] = path;
-      std::error_code ec;
-      info["exists"] = std::filesystem::exists( path, ec ) && !ec;
+      const QString qpath = QString::fromStdString( path );
+      if ( QgsDataSourceResolver::requiresLocalExistenceCheck( qpath ) )
+      {
+        std::error_code ec;
+        info["exists"] = std::filesystem::exists( path, ec ) && !ec;
+      }
+      else
+      {
+        GDALAllRegister();
+        CPLErrorReset();
+        GDALDatasetH hDS = GDALOpenEx( path.c_str(),
+                                       GDAL_OF_VECTOR | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR,
+                                       nullptr, nullptr, nullptr );
+        if ( hDS )
+        {
+          info["exists"] = true;
+          info["open_attempted"] = true;
+          GDALClose( hDS );
+          CPLErrorReset();
+        }
+        else
+        {
+          info["exists"] = false;
+          info["open_attempted"] = true;
+          const char *msg = CPLGetLastErrorMsg();
+          if ( msg && msg[0] )
+            info["openError"] = msg;
+          CPLErrorReset();
+        }
+      }
       datasets[port.name] = info;
     }
   }
@@ -254,14 +334,25 @@ Json::Value preflightAdapter( const AtomicAlgorithmAdapter &adapter, const Json:
     }
   }
 
-  // File existence blockers.
+  // File existence / open blockers. Non-local sources that were probed via
+  // GDALOpenEx and failed produce gdal_open_failed; local files keep
+  // input_not_found. The open_attempted flag distinguishes the two.
   for ( auto it = datasets.begin(); it != datasets.end(); ++it )
   {
     const Json::Value &info = *it;
     if ( info.isMember( "exists" ) && !info["exists"].asBool() )
     {
-      addIssue( compatIssues, "input_not_found",
-                "Input file does not exist: " + info["path"].asString() );
+      const bool isGdalProbe = info.isMember( "open_attempted" ) && info["open_attempted"].asBool();
+      if ( isGdalProbe )
+      {
+        addIssue( compatIssues, "gdal_open_failed",
+                  "GDAL/OGR could not open datasource: " + info["path"].asString() );
+      }
+      else
+      {
+        addIssue( compatIssues, "input_not_found",
+                  "Input file does not exist: " + info["path"].asString() );
+      }
     }
   }
 
