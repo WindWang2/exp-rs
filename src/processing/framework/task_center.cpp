@@ -275,6 +275,121 @@ Json::Value TaskCenter::variantMapToJsonParams( const QVariantMap &params )
     return root;
 }
 
+long TaskCenter::addTaskCompletionCallback( long taskId, TaskCompletionCallback callback )
+{
+    if ( !callback )
+        return 0;
+    QMutexLocker locker( &m_mutex );
+    auto it = m_tasks.find( taskId );
+    if ( it == m_tasks.end() )
+        return 0;
+    if ( isTerminalStatus( it->status ) )
+    {
+        // Already terminal: fire inline on the calling thread. Nothing is
+        // registered, so there is nothing to remove later.
+        AlgorithmTaskInfo snapshot = *it;
+        locker.unlock();
+        callback( snapshot );
+        return 0;
+    }
+    const long token = m_nextCompletionToken++;
+    m_completionCallbacks[taskId][token] = std::move( callback );
+    return token;
+}
+
+void TaskCenter::removeTaskCompletionCallback( long taskId, long token )
+{
+    QMutexLocker locker( &m_mutex );
+    auto it = m_completionCallbacks.find( taskId );
+    if ( it == m_completionCallbacks.end() )
+        return;
+    it->remove( token );
+    if ( it->isEmpty() )
+        m_completionCallbacks.erase( it );
+}
+
+void TaskCenter::fireTaskCompletionCallbacks( long taskId )
+{
+    QMap<long, TaskCompletionCallback> toFire;
+    AlgorithmTaskInfo snapshot;
+    bool deliver = false;
+    {
+        QMutexLocker locker( &m_mutex );
+        auto it = m_completionCallbacks.find( taskId );
+        if ( it == m_completionCallbacks.end() )
+            return;
+        toFire = it.value(); // copy…
+        m_completionCallbacks.erase( it ); // …then erase: exactly-once even if a callback re-registers
+        const auto infoIt = m_tasks.find( taskId );
+        if ( infoIt != m_tasks.end() )
+        {
+            snapshot = infoIt.value();
+            deliver = true;
+        }
+    }
+    if ( !deliver )
+        return; // task pruned between erase and snapshot: nothing meaningful to deliver
+    for ( const auto &cb : toFire )
+        cb( snapshot );
+}
+
+TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
+                                                     unsigned int resourceEstimateOverrideMb ) const
+{
+    TaskAdmissionSnapshot snap;
+    QMutexLocker locker( &m_mutex );
+
+    snap.budgetMb = m_resourceBudget.budgetMb();
+    snap.globalLimit = m_globalConcurrencyLimit > 0
+                         ? m_globalConcurrencyLimit
+                         : defaultLimitForProfile( ProviderResourceProfile::InProcessThread );
+
+    const ProviderResourceProfile profile = resolveResourceProfile( algorithmId );
+    unsigned int runningInProfile = 0;
+    for ( const auto &t : m_tasks )
+    {
+        if ( t.status != TaskStatus::Running && t.status != TaskStatus::Cancelling )
+            continue;
+        snap.runningCount += 1;
+        snap.runningMb += taskEstimateMbLocked( t );
+        if ( t.resourceProfile == profile )
+            ++runningInProfile;
+    }
+
+    snap.candidateMb = resourceEstimateOverrideMb > 0
+                         ? resourceEstimateOverrideMb
+                         : m_resourceBudget.resolve( algorithmId.toStdString() ).ramMb;
+
+    if ( snap.runningCount >= snap.globalLimit )
+    {
+        snap.reason = QStringLiteral( "Global worker slots exhausted (%1/%2)." )
+                          .arg( snap.runningCount )
+                          .arg( snap.globalLimit );
+        return snap;
+    }
+    const unsigned int profileMax = limitForProfileLocked( profile );
+    if ( runningInProfile >= profileMax )
+    {
+        snap.reason = QStringLiteral( "Profile worker slots exhausted (%1/%2)." ).arg( runningInProfile ).arg( profileMax );
+        return snap;
+    }
+    if ( m_resourceMonitor.memoryPressureHigh() )
+    {
+        snap.rssHold = true;
+        snap.reason = QStringLiteral( "Process RSS at/above the watermark." );
+        return snap;
+    }
+    if ( !m_resourceBudget.canLaunch( snap.runningMb, snap.candidateMb ) )
+    {
+        snap.reason = QStringLiteral( "RAM budget: projected %1 MiB > budget %2 MiB." )
+                          .arg( snap.runningMb + snap.candidateMb )
+                          .arg( snap.budgetMb );
+        return snap;
+    }
+    snap.wouldAdmit = true;
+    return snap;
+}
+
 void TaskCenter::queueTaskAddedLocked( long taskId )
 {
     if ( m_tasks.contains( taskId ) )
@@ -448,7 +563,9 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
                               bool autoLoad,
                               TaskPriority priority,
                               const QList<long> &parentTaskIds,
-                              bool autoDispatch )
+                              bool autoDispatch,
+                              unsigned int resourceEstimateOverrideMb,
+                              const QString &source )
 {
     long id = -1;
     {
@@ -461,6 +578,8 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         info.parentTaskIds = parentTaskIds;
         info.autoDispatch = autoDispatch;
         info.resourceProfile = resolveResourceProfile( algorithmId );
+        info.resourceEstimateOverrideMb = resourceEstimateOverrideMb;
+        info.source = source;
 
         auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( algorithmId.toStdString() );
         if ( adapter )
@@ -636,6 +755,13 @@ void TaskCenter::processJobRecord( long taskId, const sicnu::jobs::JobRecord &re
     m_taskByJobId.remove( record.id );
 }
 
+unsigned int TaskCenter::taskEstimateMbLocked( const AlgorithmTaskInfo &task ) const
+{
+    if ( task.resourceEstimateOverrideMb > 0 )
+        return task.resourceEstimateOverrideMb;
+    return m_resourceBudget.resolve( task.algorithmId.toStdString() ).ramMb;
+}
+
 void TaskCenter::processNextQueuedTasks()
 {
     // Called with m_mutex held. Only stages work; callers must flushPendingLaunches() outside the lock.
@@ -648,22 +774,23 @@ void TaskCenter::processNextQueuedTasks()
     unsigned int runningTotalMb = 0; // RAM estimate sum of Running tasks (resource-aware gate)
 
     // Pending launches already have status Running; count only Running tasks once.
+    // Cancelling tasks still occupy their worker slot until the job reports
+    // its terminal record, so they count toward every limit.
     for ( const auto &t : m_tasks )
     {
-        if ( t.status != TaskStatus::Running )
+        if ( t.status != TaskStatus::Running && t.status != TaskStatus::Cancelling )
             continue;
-        runningByProfile[t.resourceProfile] = runningByProfile.value( t.resourceProfile, 0u ) + 1;
+        runningByProfile[t.resourceProfile] = runningByProfile.value( t.resourceProfile, 0u ) + 1u;
         ++totalRunning;
-        runningTotalMb += m_resourceBudget.resolve( t.algorithmId.toStdString() ).ramMb;
+        runningTotalMb += taskEstimateMbLocked( t );
     }
-
-    if ( totalRunning >= globalMax )
-        return;
 
     QList<long> eligibleIds;
     for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
     {
-        if ( it.value().status != TaskStatus::Queued )
+        // WaitingResource tasks are launch-eligible candidates held by resource
+        // admission on a previous pass; they compete with Queued tasks here.
+        if ( it.value().status != TaskStatus::Queued && it.value().status != TaskStatus::WaitingResource )
             continue;
 
         bool parentsSatisfied = true;
@@ -686,10 +813,18 @@ void TaskCenter::processNextQueuedTasks()
         return m_tasks[a].taskId < m_tasks[b].taskId;
     } );
 
+    QList<long> resourceBlockedIds;
+    QString globalHoldReason;
+
     for ( long id : eligibleIds )
     {
         if ( totalRunning >= globalMax )
+        {
+            globalHoldReason = QStringLiteral( "Waiting for a worker slot (%1/%2 running)." )
+                                   .arg( totalRunning )
+                                   .arg( globalMax );
             break;
+        }
 
         applyPlaceholdersForTask( id );
 
@@ -697,21 +832,25 @@ void TaskCenter::processNextQueuedTasks()
             continue;
         if ( !m_tasks[id].jobId.empty() )
             continue;
-        if ( m_tasks[id].status != TaskStatus::Queued )
+        if ( m_tasks[id].status != TaskStatus::Queued && m_tasks[id].status != TaskStatus::WaitingResource )
             continue;
 
         const ProviderResourceProfile profile = m_tasks[id].resourceProfile;
         const unsigned int profileMax = limitForProfileLocked( profile );
         if ( runningByProfile.value( profile, 0u ) >= profileMax )
-            continue; // leave queued; another profile may still launch
+        {
+            resourceBlockedIds.append( id ); // leave queued; another profile may still launch
+            continue;
+        }
 
         // ADR 0063: hold all launches when the process RSS is at/above the
         // watermark. Memory pressure is global, so break rather than continue
         // - remaining eligible tasks cannot run either. Blocked tasks stay
-        // Queued and are re-evaluated when a running task finishes (each
-        // terminal transition re-enters processNextQueuedTasks).
+        // Queued/WaitingResource and are re-evaluated when a running task
+        // finishes (each terminal transition re-enters processNextQueuedTasks).
         if ( m_resourceMonitor.memoryPressureHigh() )
         {
+            globalHoldReason = QStringLiteral( "Waiting for memory: process RSS at/above the watermark." );
             if ( totalRunning == 0 && QCoreApplication::instance() )
             {
                 QTimer::singleShot( 250, QCoreApplication::instance(), [this]() {
@@ -731,13 +870,15 @@ void TaskCenter::processNextQueuedTasks()
         // UNLESS nothing at all is running (global never-starve: a wrong or
         // missing estimate must not permanently block all work). A budget of 0
         // disables this gate (legacy behavior). Like the RSS gate this only
-        // DELAYS — the task stays Queued and is re-evaluated on the next
+        // DELAYS — the task stays queued and is re-evaluated on the next
         // terminal transition. `continue` (not break): a later, lighter
         // eligible task may still fit within the budget this pass.
-        const unsigned int candidateMb =
-            m_resourceBudget.resolve( m_tasks[id].algorithmId.toStdString() ).ramMb;
+        const unsigned int candidateMb = taskEstimateMbLocked( m_tasks[id] );
         if ( !m_resourceBudget.canLaunch( runningTotalMb, candidateMb ) )
+        {
+            resourceBlockedIds.append( id );
             continue;
+        }
 
         m_tasks[id].status = TaskStatus::Running;
         m_tasks[id].logBuffer.append(
@@ -750,7 +891,9 @@ void TaskCenter::processNextQueuedTasks()
         launch.taskId = id;
         launch.request.algorithmId = m_tasks[id].algorithmId.toStdString();
         launch.request.title = m_tasks[id].algorithmName.toStdString();
-        launch.request.source = m_tasks[id].pipelineId >= 0 ? "pipeline" : "task_center";
+        launch.request.source = m_tasks[id].source.isEmpty()
+                                  ? ( m_tasks[id].pipelineId >= 0 ? "pipeline" : "task_center" )
+                                  : m_tasks[id].source.toStdString();
         launch.request.params = variantMapToJsonParams( m_tasks[id].parameterMap );
         if ( m_tasks[id].hasJobRequest && m_tasks[id].jobExecutor )
         {
@@ -767,9 +910,41 @@ void TaskCenter::processNextQueuedTasks()
 
         queueTaskUpdatedLocked( id );
         m_pendingLaunches.append( std::move( launch ) );
-        runningByProfile[profile] = runningByProfile.value( profile, 0u ) + 1;
+        runningByProfile[profile] = runningByProfile.value( profile, 0u ) + 1u;
         ++totalRunning;
         runningTotalMb += candidateMb;
+    }
+
+    // Admission outcome bookkeeping: launch-eligible candidates that did not
+    // launch this pass are waiting on resources (worker slots, RSS watermark
+    // or the RAM budget), not on pipeline gating. Surface that as an explicit
+    // WaitingResource status so entries, panels and tests can distinguish
+    // "queued behind the DAG" from "held for admission". Log only on the
+    // Queued → WaitingResource transition to avoid spamming re-evaluations.
+    for ( long id : eligibleIds )
+    {
+        if ( m_tasks[id].status != TaskStatus::Queued && m_tasks[id].status != TaskStatus::WaitingResource )
+            continue;
+        if ( !m_tasks[id].autoDispatch || !m_tasks[id].jobId.empty() )
+            continue;
+
+        const bool blockedByIdentifiedResource = resourceBlockedIds.contains( id ) || !globalHoldReason.isEmpty();
+        if ( blockedByIdentifiedResource && m_tasks[id].status == TaskStatus::Queued )
+        {
+            m_tasks[id].status = TaskStatus::WaitingResource;
+            m_tasks[id].logBuffer.append( QStringLiteral( "Waiting for resources (admission held)." ) );
+            updatePipelineForTaskLocked( id );
+            queueTaskUpdatedLocked( id );
+        }
+        else if ( !blockedByIdentifiedResource && m_tasks[id].status == TaskStatus::WaitingResource )
+        {
+            // Held only by DAG gating now (parents not yet Completed on a
+            // re-evaluation): fall back to plain Queued so the status stays
+            // truthful. This can happen when a parent was re-queued/retried.
+            m_tasks[id].status = TaskStatus::Queued;
+            updatePipelineForTaskLocked( id );
+            queueTaskUpdatedLocked( id );
+        }
     }
 }
 
@@ -845,7 +1020,15 @@ void TaskCenter::updateTaskProgress( long taskId, double progress )
         if ( !m_tasks.contains( taskId ) || isTerminalStatus( m_tasks[taskId].status ) )
             return;
         m_tasks[taskId].progressPercentage = progress;
-        m_tasks[taskId].status = TaskStatus::Running;
+        // Progress from a job that is winding down after a cancel request must
+        // not overwrite the Cancelling state (the UI shows "cancelling" until
+        // the worker's terminal record arrives).
+        if ( m_tasks[taskId].status == TaskStatus::Queued
+             || m_tasks[taskId].status == TaskStatus::WaitingResource
+             || m_tasks[taskId].status == TaskStatus::Running )
+        {
+            m_tasks[taskId].status = TaskStatus::Running;
+        }
         updatePipelineForTaskLocked( taskId );
         queueTaskUpdatedLocked( taskId );
     }
@@ -929,6 +1112,7 @@ void TaskCenter::markTaskCompleted( long taskId,
     }
     flushPendingLaunches();
     flushPendingSignals();
+    fireTaskCompletionCallbacks( taskId );
 
     if ( shouldAutoLoad && !autoLoadPath.isEmpty() )
         emit layerAutoLoadRequested( autoLoadPath );
@@ -936,6 +1120,7 @@ void TaskCenter::markTaskCompleted( long taskId,
 
 void TaskCenter::markTaskFailed( long taskId, const QString &error )
 {
+    QList<long> cascadeCanceledIds;
     {
         QMutexLocker locker( &m_mutex );
         // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
@@ -952,7 +1137,9 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         QList<long> keys = m_tasks.keys();
         for ( long id : keys )
         {
-            if ( m_tasks[id].parentTaskIds.contains( taskId ) && m_tasks[id].status == TaskStatus::Queued )
+            if ( m_tasks[id].parentTaskIds.contains( taskId )
+                 && ( m_tasks[id].status == TaskStatus::Queued
+                      || m_tasks[id].status == TaskStatus::WaitingResource ) )
             {
                 m_tasks[id].status = TaskStatus::Canceled;
                 m_tasks[id].endTime = QDateTime::currentDateTime();
@@ -960,6 +1147,7 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
                 m_tasks[id].logBuffer.append( QStringLiteral( "Canceled due to upstream parent task failure." ) );
                 updatePipelineForTaskLocked( id );
                 queueTaskUpdatedLocked( id );
+                cascadeCanceledIds.append( id );
             }
         }
 
@@ -967,6 +1155,9 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
     }
     flushPendingLaunches();
     flushPendingSignals();
+    fireTaskCompletionCallbacks( taskId );
+    for ( long id : cascadeCanceledIds )
+        fireTaskCompletionCallbacks( id );
 }
 
 void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
@@ -987,6 +1178,7 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
     }
     flushPendingLaunches();
     flushPendingSignals();
+    fireTaskCompletionCallbacks( taskId );
 }
 
 bool TaskCenter::cancelTask( long taskId )
@@ -1035,6 +1227,10 @@ bool TaskCenter::cancelTask( long taskId )
 
             if ( !info.jobId.empty() )
             {
+                // Dispatched work: the worker observes the cancel flag and the
+                // terminal Canceled record arrives via the listener. Track the
+                // in-between explicitly so entries/UI can show "cancelling".
+                info.status = TaskStatus::Cancelling;
                 jobIdsToCancel.push_back( info.jobId );
                 info.logBuffer.append( ( targetId == taskId )
                                          ? QStringLiteral( "Cancellation requested by user." )

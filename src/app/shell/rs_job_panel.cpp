@@ -102,7 +102,9 @@ void collectStringPaths( const Json::Value &v, QStringList &out )
 bool isActiveStatus( sicnu::TaskStatus status )
 {
   return status == sicnu::TaskStatus::Queued
+         || status == sicnu::TaskStatus::WaitingResource
          || status == sicnu::TaskStatus::Running
+         || status == sicnu::TaskStatus::Cancelling
          || status == sicnu::TaskStatus::Paused;
 }
 
@@ -123,6 +125,8 @@ QColor statusColor( sicnu::TaskStatus status, bool isDark )
       case sicnu::TaskStatus::Completed: return QColor( 0x3d, 0xcf, 0x6a ); // green
       case sicnu::TaskStatus::Failed:    return QColor( 0xf0, 0x71, 0x67 ); // red
       case sicnu::TaskStatus::Paused:    return QColor( 0xe0, 0xa8, 0x2e ); // amber
+      case sicnu::TaskStatus::WaitingResource: return QColor( 0xb0, 0x8a, 0xd0 ); // violet
+      case sicnu::TaskStatus::Cancelling: return QColor( 0xd9, 0x7b, 0x0f ); // deep amber
       case sicnu::TaskStatus::Queued:
       case sicnu::TaskStatus::Canceled:  return QColor( 0xa8, 0xb0, 0xbc ); // gray
     }
@@ -135,6 +139,8 @@ QColor statusColor( sicnu::TaskStatus status, bool isDark )
       case sicnu::TaskStatus::Completed: return QColor( 0x1a, 0x7f, 0x37 ); // green
       case sicnu::TaskStatus::Failed:    return QColor( 0xcf, 0x22, 0x2e ); // red
       case sicnu::TaskStatus::Paused:    return QColor( 0x8c, 0x5b, 0x00 ); // amber
+      case sicnu::TaskStatus::WaitingResource: return QColor( 0x6f, 0x42, 0xc1 ); // violet
+      case sicnu::TaskStatus::Cancelling: return QColor( 0xbf, 0x68, 0x00 ); // deep amber
       case sicnu::TaskStatus::Queued:
       case sicnu::TaskStatus::Canceled:  return QColor( 0x5a, 0x65, 0x73 ); // gray
     }
@@ -312,8 +318,12 @@ QString RsJobPanel::statusToString( sicnu::TaskStatus status )
   {
     case sicnu::TaskStatus::Queued:
       return QObject::tr( "排队" );
+    case sicnu::TaskStatus::WaitingResource:
+      return QObject::tr( "等待资源" );
     case sicnu::TaskStatus::Running:
       return QObject::tr( "运行中" );
+    case sicnu::TaskStatus::Cancelling:
+      return QObject::tr( "取消中" );
     case sicnu::TaskStatus::Paused:
       return QObject::tr( "已暂停" );
     case sicnu::TaskStatus::Completed:

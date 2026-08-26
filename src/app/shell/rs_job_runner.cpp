@@ -15,10 +15,13 @@ sicnu::jobs::JobState mapStatus( TaskStatus status )
   switch ( status )
   {
     case TaskStatus::Queued:
+    case TaskStatus::WaitingResource:
       return JobState::Queued;
     case TaskStatus::Running:
     case TaskStatus::Paused:
       return JobState::Running;
+    case TaskStatus::Cancelling:
+      return JobState::Cancelled;
     case TaskStatus::Completed:
       return JobState::Succeeded;
     case TaskStatus::Canceled:
