@@ -205,7 +205,7 @@ SpatialToolResult VectorInspectTool::execute( const Json::Value &input )
                               ? input["max_features"].asInt()
                               : 0;
 
-<  if ( QgsDataSourceResolver::requiresLocalExistenceCheck( QString::fromStdString( path ) ) && !QFileInfo::exists( QString::fromStdString( path ) ) )
+  if ( QgsDataSourceResolver::requiresLocalExistenceCheck( QString::fromStdString( path ) ) && !QFileInfo::exists( QString::fromStdString( path ) ) )
     return SpatialToolResult::failure( "Vector file not found: " + path, "local_file_not_found", "io", false );
 
   GDALDatasetUniquePtr ds( GDALDataset::Open( path.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY ) );
