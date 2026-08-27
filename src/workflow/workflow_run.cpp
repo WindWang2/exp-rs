@@ -1,8 +1,11 @@
 #include "workflow_run.h"
 #include "workflow_definition.h"
 
+#include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <iomanip>
+#include <random>
 #include <sstream>
 #include <algorithm>
 
@@ -21,9 +24,18 @@ std::string currentIsoTimestamp()
 
 std::string generateDefaultRunId()
 {
+  // Milliseconds alone collide when two runs are created within the same
+  // millisecond; a process-wide sequence plus random suffix keeps ids unique
+  // across threads and across processes started in the same millisecond.
+  static std::atomic<uint64_t> s_sequence{ 0 };
   const auto now = std::chrono::system_clock::now();
   const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>( now.time_since_epoch() ).count();
-  return "run-" + std::to_string( ms );
+  const uint64_t seq = s_sequence.fetch_add( 1 ) + 1;
+  std::random_device rd;
+  const uint32_t noise = ( rd() ^ static_cast<uint32_t>( seq << 16 ) );
+  char suffix[16];
+  std::snprintf( suffix, sizeof( suffix ), "%08x", noise );
+  return "run-" + std::to_string( ms ) + "-" + std::to_string( seq ) + "-" + suffix;
 }
 
 } // namespace
@@ -48,17 +60,40 @@ std::string workflowRunStateToString( WorkflowRunState state )
 
 WorkflowRunState workflowRunStateFromString( const std::string &str )
 {
-  if ( str == "Created" ) return WorkflowRunState::Created;
-  if ( str == "Planning" ) return WorkflowRunState::Planning;
-  if ( str == "Ready" ) return WorkflowRunState::Ready;
-  if ( str == "Running" ) return WorkflowRunState::Running;
-  if ( str == "WaitingResource" ) return WorkflowRunState::WaitingResource;
-  if ( str == "Interrupted" ) return WorkflowRunState::Interrupted;
-  if ( str == "Cancelling" ) return WorkflowRunState::Cancelling;
-  if ( str == "Canceled" ) return WorkflowRunState::Canceled;
-  if ( str == "Failed" ) return WorkflowRunState::Failed;
-  if ( str == "Completed" ) return WorkflowRunState::Completed;
-  return WorkflowRunState::Created;
+  WorkflowRunState state = WorkflowRunState::Created;
+  tryParseWorkflowRunState( str, state );
+  return state;
+}
+
+bool tryParseWorkflowRunState( const std::string &str, WorkflowRunState &out )
+{
+  if ( str == "Created" ) { out = WorkflowRunState::Created; return true; }
+  if ( str == "Planning" ) { out = WorkflowRunState::Planning; return true; }
+  if ( str == "Ready" ) { out = WorkflowRunState::Ready; return true; }
+  if ( str == "Running" ) { out = WorkflowRunState::Running; return true; }
+  if ( str == "WaitingResource" ) { out = WorkflowRunState::WaitingResource; return true; }
+  if ( str == "Interrupted" ) { out = WorkflowRunState::Interrupted; return true; }
+  if ( str == "Cancelling" ) { out = WorkflowRunState::Cancelling; return true; }
+  if ( str == "Canceled" ) { out = WorkflowRunState::Canceled; return true; }
+  if ( str == "Failed" ) { out = WorkflowRunState::Failed; return true; }
+  if ( str == "Completed" ) { out = WorkflowRunState::Completed; return true; }
+  return false;
+}
+
+bool isValidRunId( const std::string &runId )
+{
+  if ( runId.empty() || runId.size() > 128 )
+    return false;
+  if ( runId.front() == '.' )
+    return false;
+  for ( const char c : runId )
+  {
+    const bool ok = ( c >= 'A' && c <= 'Z' ) || ( c >= 'a' && c <= 'z' )
+                    || ( c >= '0' && c <= '9' ) || c == '.' || c == '_' || c == '-';
+    if ( !ok )
+      return false;
+  }
+  return true;
 }
 
 bool isTerminalRunState( WorkflowRunState state )
@@ -157,18 +192,33 @@ Json::Value StepPlan::toJson() const
   return root;
 }
 
-StepPlan StepPlan::fromJson( const Json::Value &json )
+StepPlan StepPlan::fromJson( const Json::Value &json, std::string *error )
 {
   StepPlan plan;
   if ( !json.isObject() )
+  {
+    if ( error )
+      *error = "StepPlan root must be an object";
     return plan;
+  }
 
   if ( json.isMember( "stepId" ) && json["stepId"].isString() )
     plan.stepId = json["stepId"].asString();
   if ( json.isMember( "operatorId" ) && json["operatorId"].isString() )
     plan.operatorId = json["operatorId"].asString();
   if ( json.isMember( "kind" ) && json["kind"].isInt() )
-    plan.kind = static_cast<StepKind>( json["kind"].asInt() );
+  {
+    const int kindValue = json["kind"].asInt();
+    if ( kindValue < static_cast<int>( StepKind::Operator )
+         || kindValue > static_cast<int>( StepKind::Composite ) )
+    {
+      if ( error )
+        *error = "StepPlan '" + plan.stepId + "': invalid kind value "
+                 + std::to_string( kindValue );
+      return plan;
+    }
+    plan.kind = static_cast<StepKind>( kindValue );
+  }
   if ( json.isMember( "rawParams" ) )
     plan.rawParams = json["rawParams"];
   if ( json.isMember( "resolvedParams" ) )
@@ -212,6 +262,9 @@ StepPlan StepPlan::fromJson( const Json::Value &json )
 std::unique_ptr<WorkflowRun> WorkflowRun::createFromDefinition( const WorkflowDefinition &def,
                                                                 const std::string &runId )
 {
+  if ( !runId.empty() && !isValidRunId( runId ) )
+    return nullptr; // caller-provided ids must be filename-safe (checkpoint paths derive from them)
+
   auto run = std::make_unique<WorkflowRun>();
   run->m_runId = runId.empty() ? generateDefaultRunId() : runId;
   run->m_workflowId = def.id;
@@ -242,17 +295,140 @@ std::unique_ptr<WorkflowRun> WorkflowRun::createFromDefinition( const WorkflowDe
   return run;
 }
 
+std::string WorkflowRun::runId() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_runId;
+}
+
+bool WorkflowRun::setRunId( const std::string &id )
+{
+  if ( !isValidRunId( id ) )
+    return false;
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_runId = id;
+  touchLocked();
+  return true;
+}
+
+std::string WorkflowRun::workflowId() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_workflowId;
+}
+
+void WorkflowRun::setWorkflowId( const std::string &id )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_workflowId = id;
+  touchLocked();
+}
+
+WorkflowRunState WorkflowRun::state() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_state;
+}
+
 bool WorkflowRun::transitionTo( WorkflowRunState newState )
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
   if ( !isValidRunStateTransition( m_state, newState ) )
     return false;
 
   m_state = newState;
-  m_updatedAt = currentIsoTimestamp();
+  touchLocked();
+  return true;
+}
+
+void WorkflowRun::forceSetState( WorkflowRunState state_ )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_state = state_;
+  touchLocked();
+}
+
+const WorkflowDefinition &WorkflowRun::definition() const
+{
+  return m_definition; // escapes the internal lock: single-writer model
+}
+
+void WorkflowRun::setDefinition( const WorkflowDefinition &def )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_definition = def;
+  touchLocked();
+}
+
+std::vector<StepPlan> WorkflowRun::stepPlans() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_stepPlans;
+}
+
+void WorkflowRun::setStepPlans( const std::vector<StepPlan> &plans )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_stepPlans = plans;
+  recalculateProgressLocked();
+  touchLocked();
+}
+
+std::optional<StepPlan> WorkflowRun::stepPlan( const std::string &stepId ) const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  for ( const auto &plan : m_stepPlans )
+  {
+    if ( plan.stepId == stepId )
+      return plan;
+  }
+  return std::nullopt;
+}
+
+bool WorkflowRun::updateStepPlan( const StepPlan &plan )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  StepPlan *existing = findStepPlanLocked( plan.stepId );
+  if ( !existing )
+    return false;
+  *existing = plan;
+  recalculateProgressLocked();
+  touchLocked();
+  return true;
+}
+
+bool WorkflowRun::setStepStatus( const std::string &stepId, const std::string &status )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  StepPlan *plan = findStepPlanLocked( stepId );
+  if ( !plan )
+    return false;
+  if ( plan->status == status )
+    return true;
+  plan->status = status;
+  recalculateProgressLocked();
+  touchLocked();
   return true;
 }
 
 StepPlan *WorkflowRun::findStepPlan( const std::string &stepId )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return findStepPlanLocked( stepId ); // escapes the lock: single-writer model
+}
+
+const StepPlan *WorkflowRun::findStepPlan( const std::string &stepId ) const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  for ( const auto &plan : m_stepPlans )
+  {
+    if ( plan.stepId == stepId )
+      return &plan;
+  }
+  return nullptr;
+}
+
+StepPlan *WorkflowRun::findStepPlanLocked( const std::string &stepId )
 {
   for ( auto &plan : m_stepPlans )
   {
@@ -262,25 +438,88 @@ StepPlan *WorkflowRun::findStepPlan( const std::string &stepId )
   return nullptr;
 }
 
-const StepPlan *WorkflowRun::findStepPlan( const std::string &stepId ) const
+std::map<std::string, std::string> WorkflowRun::artifacts() const
 {
-  for ( const auto &plan : m_stepPlans )
-  {
-    if ( plan.stepId == stepId )
-      return &plan;
-  }
-  return nullptr;
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_artifacts;
 }
 
-std::string WorkflowRun::getArtifact( const std::string &name ) const
+void WorkflowRun::setArtifact( const std::string &name, const std::string &value )
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_artifacts[name] = value;
+  touchLocked();
+}
+
+std::string WorkflowRun::artifact( const std::string &name ) const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
   const auto it = m_artifacts.find( name );
-  if ( it != m_artifacts.end() )
-    return it->second;
-  return "";
+  return it != m_artifacts.end() ? it->second : std::string();
+}
+
+std::string WorkflowRun::errorMessage() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_errorMessage;
+}
+
+void WorkflowRun::setErrorMessage( const std::string &msg )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_errorMessage = msg;
+  touchLocked();
+}
+
+double WorkflowRun::progress() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_progress;
+}
+
+void WorkflowRun::setProgress( double p )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_progress = p;
+  touchLocked();
 }
 
 void WorkflowRun::recalculateProgress()
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  recalculateProgressLocked();
+}
+
+std::string WorkflowRun::createdAt() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_createdAt;
+}
+
+void WorkflowRun::setCreatedAt( const std::string &ts )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_createdAt = ts;
+}
+
+std::string WorkflowRun::updatedAt() const
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  return m_updatedAt;
+}
+
+void WorkflowRun::setUpdatedAt( const std::string &ts )
+{
+  std::lock_guard<std::mutex> lock( m_mutex );
+  m_updatedAt = ts;
+}
+
+void WorkflowRun::touchLocked()
+{
+  m_updatedAt = currentIsoTimestamp();
+}
+
+void WorkflowRun::recalculateProgressLocked()
 {
   if ( m_stepPlans.empty() )
   {
@@ -299,7 +538,10 @@ void WorkflowRun::recalculateProgress()
 
 Json::Value WorkflowRun::toJson() const
 {
+  std::lock_guard<std::mutex> lock( m_mutex );
+
   Json::Value root( Json::objectValue );
+  root["version"] = kWorkflowRunSerializationVersion;
   root["runId"] = m_runId;
   root["workflowId"] = m_workflowId;
   root["state"] = workflowRunStateToString( m_state );
@@ -334,14 +576,50 @@ std::unique_ptr<WorkflowRun> WorkflowRun::fromJson( const Json::Value &json, std
     return nullptr;
   }
 
+  if ( !json.isMember( "version" ) || !json["version"].isInt() )
+  {
+    error = "Invalid checkpoint: missing serialization version";
+    return nullptr;
+  }
+  if ( json["version"].asInt() != kWorkflowRunSerializationVersion )
+  {
+    error = "Unsupported checkpoint version " + std::to_string( json["version"].asInt() )
+            + " (expected " + std::to_string( kWorkflowRunSerializationVersion ) + ")";
+    return nullptr;
+  }
+
+  if ( !json.isMember( "runId" ) || !json["runId"].isString()
+       || !isValidRunId( json["runId"].asString() ) )
+  {
+    error = "Invalid checkpoint: missing or unsafe runId";
+    return nullptr;
+  }
+
+  if ( !json.isMember( "definition" ) || !json["definition"].isObject() )
+  {
+    error = "Invalid checkpoint: missing definition";
+    return nullptr;
+  }
+
+  if ( !json.isMember( "stepPlans" ) || !json["stepPlans"].isArray() )
+  {
+    error = "Invalid checkpoint: missing stepPlans";
+    return nullptr;
+  }
+
   auto run = std::make_unique<WorkflowRun>();
 
-  if ( json.isMember( "runId" ) && json["runId"].isString() )
-    run->m_runId = json["runId"].asString();
+  run->m_runId = json["runId"].asString();
   if ( json.isMember( "workflowId" ) && json["workflowId"].isString() )
     run->m_workflowId = json["workflowId"].asString();
   if ( json.isMember( "state" ) && json["state"].isString() )
-    run->m_state = workflowRunStateFromString( json["state"].asString() );
+  {
+    if ( !tryParseWorkflowRunState( json["state"].asString(), run->m_state ) )
+    {
+      error = "Invalid checkpoint: unknown run state '" + json["state"].asString() + "'";
+      return nullptr;
+    }
+  }
   if ( json.isMember( "errorMessage" ) && json["errorMessage"].isString() )
     run->m_errorMessage = json["errorMessage"].asString();
   if ( json.isMember( "progress" ) && json["progress"].isNumeric() )
@@ -351,7 +629,6 @@ std::unique_ptr<WorkflowRun> WorkflowRun::fromJson( const Json::Value &json, std
   if ( json.isMember( "updatedAt" ) && json["updatedAt"].isString() )
     run->m_updatedAt = json["updatedAt"].asString();
 
-  if ( json.isMember( "definition" ) && json["definition"].isObject() )
   {
     std::string defError;
     if ( !workflowDefinitionFromJson( json["definition"], run->m_definition, defError ) )
@@ -361,10 +638,16 @@ std::unique_ptr<WorkflowRun> WorkflowRun::fromJson( const Json::Value &json, std
     }
   }
 
-  if ( json.isMember( "stepPlans" ) && json["stepPlans"].isArray() )
+  for ( const auto &stepJson : json["stepPlans"] )
   {
-    for ( const auto &stepJson : json["stepPlans"] )
-      run->m_stepPlans.push_back( StepPlan::fromJson( stepJson ) );
+    std::string stepError;
+    StepPlan plan = StepPlan::fromJson( stepJson, &stepError );
+    if ( !stepError.empty() )
+    {
+      error = "Failed to parse StepPlan: " + stepError;
+      return nullptr;
+    }
+    run->m_stepPlans.push_back( std::move( plan ) );
   }
 
   if ( json.isMember( "artifacts" ) && json["artifacts"].isObject() )

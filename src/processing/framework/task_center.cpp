@@ -2,9 +2,12 @@
 
 #include <QCoreApplication>
 #include <QFile>
+#include <QMetaObject>
 #include <QMutexLocker>
 #include <QSet>
 #include <QTimer>
+#include <utility>
+
 #include "framework/json_params_converter.h"
 #include "atomic_algorithm_registry.h"
 #include "jobs/job_engine.h"
@@ -440,60 +443,81 @@ void TaskCenter::flushPendingSignals()
 
 QList<long> TaskCenter::collectTransitiveDescendantsLocked( long rootTaskId ) const
 {
+    // Invert the parent links once, then a single BFS from the root: O(V+E)
+    // with a small map, instead of the previous iterate-until-no-change scan
+    // whose worst case was quadratic in live tasks - all while holding
+    // m_mutex on every failure/cancel path.
+    QHash<long, QVector<long>> childrenOf;
+    for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
+    {
+        if ( isTerminalStatus( it.value().status ) )
+            continue;
+        for ( long parentId : it.value().parentTaskIds )
+            childrenOf[parentId].append( it.key() );
+    }
+
     QList<long> descendants;
     QSet<long> visited;
     visited.insert( rootTaskId );
-    bool addedNew = true;
-    while ( addedNew )
+    QVector<long> frontier{ rootTaskId };
+    while ( !frontier.isEmpty() )
     {
-        addedNew = false;
-        for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
+        const long current = frontier.takeLast();
+        for ( long childId : childrenOf.value( current ) )
         {
-            if ( isTerminalStatus( it.value().status ) )
+            if ( visited.contains( childId ) )
                 continue;
-            if ( visited.contains( it.key() ) )
-                continue;
-            for ( long parentId : it.value().parentTaskIds )
-            {
-                if ( visited.contains( parentId ) )
-                {
-                    visited.insert( it.key() );
-                    descendants.append( it.key() );
-                    addedNew = true;
-                    break;
-                }
-            }
+            visited.insert( childId );
+            descendants.append( childId );
+            frontier.append( childId );
         }
     }
     return descendants;
 }
 
 QVariant TaskCenter::substituteVariantRecursive( const QVariant &value,
-                                                const std::function<std::string( const sicnu::workflow::PlaceholderRef & )> &resolver )
+                                                const std::function<std::string( const sicnu::workflow::PlaceholderRef & )> &resolver,
+                                                bool *changed )
 {
     if ( value.typeId() == QMetaType::QString )
     {
         const std::string raw = value.toString().toStdString();
         const std::string sub = sicnu::workflow::substitutePlaceholders( raw, resolver );
+        if ( sub == raw )
+            return value; // no substitution: return the shared original, no detach
+        if ( changed )
+            *changed = true;
         return QString::fromStdString( sub );
     }
     if ( value.typeId() == QMetaType::QVariantList )
     {
         QVariantList list = value.toList();
+        bool mutated = false;
         for ( int i = 0; i < list.size(); ++i )
         {
-            list[i] = substituteVariantRecursive( list[i], resolver );
+            const QVariant substituted = substituteVariantRecursive( list[i], resolver, changed );
+            if ( substituted != list[i] )
+            {
+                list[i] = substituted;
+                mutated = true;
+            }
         }
-        return list;
+        return mutated ? list : value; // unchanged tree: keep the COW-shared original
     }
     if ( value.typeId() == QMetaType::QVariantMap )
     {
         QVariantMap map = value.toMap();
+        bool mutated = false;
         for ( auto it = map.begin(); it != map.end(); ++it )
         {
-            it.value() = substituteVariantRecursive( it.value(), resolver );
+            const QVariant substituted = substituteVariantRecursive( it.value(), resolver, changed );
+            if ( substituted != it.value() )
+            {
+                it.value() = substituted;
+                mutated = true;
+            }
         }
-        return map;
+        return mutated ? map : value;
     }
     return value;
 }
@@ -554,12 +578,19 @@ void TaskCenter::applyPlaceholdersForTask( long taskId )
     };
 
     QVariantMap &pMap = m_tasks[taskId].parameterMap;
+    bool paramsChanged = false;
     for ( auto pIt = pMap.begin(); pIt != pMap.end(); ++pIt )
     {
-        pIt.value() = substituteVariantRecursive( pIt.value(), resolveRef );
+        const QVariant substituted = substituteVariantRecursive( pIt.value(), resolveRef, &paramsChanged );
+        if ( substituted != pIt.value() )
+            pIt.value() = substituted;
     }
 
-    if ( m_tasks[taskId].hasJobRequest )
+    // Only re-serialize the seeded JobRequest when a substitution actually
+    // changed the parameters: the launch path re-serializes on its own, so
+    // paying the map->JSON conversion on every scheduling pass for unchanged
+    // parameters is pure overhead.
+    if ( m_tasks[taskId].hasJobRequest && paramsChanged )
     {
         sicnu::jobs::JobRequest &req = m_tasks[taskId].jobRequest;
         req.params = variantMapToJsonParams( pMap );
@@ -1180,10 +1211,112 @@ void TaskCenter::markTaskCompleted( long taskId,
         emit layerAutoLoadRequested( autoLoadPath );
 }
 
+void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long userRootId,
+                                             const QString &upstreamCause, bool cleanupScratchOutputs,
+                                             QList<long> &cascadeCanceledIds,
+                                             std::vector<std::pair<std::string, long>> &jobCancelTargets,
+                                             QList<QPointer<QgsTask>> &handlesToCancel )
+{
+    for ( long targetId : targets )
+    {
+        auto &info = m_tasks[targetId];
+        if ( isTerminalStatus( info.status ) )
+            continue;
+
+        if ( info.taskHandle )
+            handlesToCancel.append( info.taskHandle );
+
+        const bool isUserRoot = ( targetId == userRootId );
+        if ( !info.jobId.empty() )
+        {
+            // Dispatched work: the worker observes the cancel flag and the
+            // terminal Canceled record arrives via the listener. Track the
+            // in-between explicitly so entries/UI can show "cancelling".
+            info.status = TaskStatus::Cancelling;
+            jobCancelTargets.emplace_back( info.jobId, targetId );
+            info.logBuffer.append( isUserRoot
+                                     ? QStringLiteral( "Cancellation requested by user." )
+                                     : QStringLiteral( "Cancellation requested due to upstream parent task %1." ).arg( upstreamCause ) );
+        }
+        else
+        {
+            info.status = TaskStatus::Canceled;
+            info.errorMessage = isUserRoot
+                                  ? QStringLiteral( "Task canceled" )
+                                  : QStringLiteral( "Canceled due to upstream parent task %1." ).arg( upstreamCause );
+            info.endTime = QDateTime::currentDateTime();
+            info.logBuffer.append( isUserRoot
+                                     ? QStringLiteral( "Task canceled by user." )
+                                     : QStringLiteral( "Canceled due to upstream parent task %1." ).arg( upstreamCause ) );
+            cascadeCanceledIds.append( targetId );
+
+            if ( cleanupScratchOutputs && !info.outputLayerPath.isEmpty() && QFile::exists( info.outputLayerPath ) )
+            {
+                if ( info.outputLayerPath.startsWith( QStringLiteral( "/tmp/" ) )
+                     || info.outputLayerPath.contains( QStringLiteral( ".scratch" ) ) )
+                {
+                    QFile::remove( info.outputLayerPath );
+                }
+            }
+        }
+
+        updatePipelineForTaskLocked( targetId );
+        queueTaskUpdatedLocked( targetId );
+    }
+}
+
+void TaskCenter::dispatchPendingCancels( const QList<QPointer<QgsTask>> &handlesToCancel,
+                                         const std::vector<std::pair<std::string, long>> &jobCancelTargets,
+                                         const QString &strandedReason )
+{
+    // Attached QgsTask objects are owned by the main thread and cancel() has
+    // no thread-safety guarantee; marshal the call onto the handle's own
+    // thread instead of calling it from whatever worker thread got here.
+    for ( const QPointer<QgsTask> &handle : handlesToCancel )
+    {
+        if ( handle )
+        {
+            QMetaObject::invokeMethod( handle, [handle]() { if ( handle ) handle->cancel(); },
+                                       Qt::QueuedConnection );
+        }
+    }
+
+    for ( const auto &[jobId, targetId] : jobCancelTargets )
+    {
+        if ( sicnu::jobs::JobEngine::instance().cancel( jobId ) )
+            continue;
+
+        // The engine no longer knows this job (stale/expired id): no terminal
+        // record will arrive via the listener, so the task would strand in
+        // Cancelling forever and starve waiters. Finalize it here.
+        bool fireCallbacks = false;
+        {
+            QMutexLocker locker( &m_mutex );
+            if ( m_tasks.contains( targetId ) && m_tasks[targetId].status == TaskStatus::Cancelling )
+            {
+                auto &info = m_tasks[targetId];
+                info.status = TaskStatus::Canceled;
+                info.errorMessage = strandedReason;
+                info.endTime = QDateTime::currentDateTime();
+                info.logBuffer.append( strandedReason );
+                updatePipelineForTaskLocked( targetId );
+                queueTaskUpdatedLocked( targetId );
+                fireCallbacks = true;
+            }
+        }
+        if ( fireCallbacks )
+        {
+            flushPendingSignals();
+            fireTaskCompletionCallbacks( targetId );
+        }
+    }
+}
+
 void TaskCenter::markTaskFailed( long taskId, const QString &error )
 {
     QList<long> cascadeCanceledIds;
-    std::vector<std::string> jobIdsToCancel;
+    std::vector<std::pair<std::string, long>> jobCancelTargets;
+    QList<QPointer<QgsTask>> handlesToCancel;
     {
         QMutexLocker locker( &m_mutex );
         // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
@@ -1198,41 +1331,16 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         queueTaskUpdatedLocked( taskId );
 
         const QList<long> descendants = collectTransitiveDescendantsLocked( taskId );
-        for ( long targetId : descendants )
-        {
-            auto &info = m_tasks[targetId];
-            if ( isTerminalStatus( info.status ) )
-                continue;
-
-            if ( info.taskHandle )
-                info.taskHandle->cancel();
-
-            if ( !info.jobId.empty() )
-            {
-                info.status = TaskStatus::Cancelling;
-                jobIdsToCancel.push_back( info.jobId );
-                info.logBuffer.append( QStringLiteral( "Cancellation requested due to upstream parent task failure." ) );
-            }
-            else
-            {
-                info.status = TaskStatus::Canceled;
-                info.errorMessage = QStringLiteral( "Canceled due to upstream parent task failure." );
-                info.endTime = QDateTime::currentDateTime();
-                info.logBuffer.append( QStringLiteral( "Canceled due to upstream parent task failure." ) );
-                cascadeCanceledIds.append( targetId );
-            }
-
-            updatePipelineForTaskLocked( targetId );
-            queueTaskUpdatedLocked( targetId );
-        }
+        cascadeCancelTargetsLocked( descendants, -1, QStringLiteral( "failure" ), false,
+                                    cascadeCanceledIds, jobCancelTargets, handlesToCancel );
 
         processNextQueuedTasks();
     }
     flushPendingLaunches();
     flushPendingSignals();
 
-    for ( const auto &jId : jobIdsToCancel )
-        sicnu::jobs::JobEngine::instance().cancel( jId );
+    dispatchPendingCancels( handlesToCancel, jobCancelTargets,
+                            QStringLiteral( "Job no longer known to the engine; task canceled after upstream failure." ) );
 
     fireTaskCompletionCallbacks( taskId );
     for ( long id : cascadeCanceledIds )
@@ -1242,7 +1350,8 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
 void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
 {
     QList<long> cascadeCanceledIds;
-    std::vector<std::string> jobIdsToCancel;
+    std::vector<std::pair<std::string, long>> jobCancelTargets;
+    QList<QPointer<QgsTask>> handlesToCancel;
     {
         QMutexLocker locker( &m_mutex );
         // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
@@ -1257,41 +1366,16 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
         queueTaskUpdatedLocked( taskId );
 
         const QList<long> descendants = collectTransitiveDescendantsLocked( taskId );
-        for ( long targetId : descendants )
-        {
-            auto &info = m_tasks[targetId];
-            if ( isTerminalStatus( info.status ) )
-                continue;
-
-            if ( info.taskHandle )
-                info.taskHandle->cancel();
-
-            if ( !info.jobId.empty() )
-            {
-                info.status = TaskStatus::Cancelling;
-                jobIdsToCancel.push_back( info.jobId );
-                info.logBuffer.append( QStringLiteral( "Cancellation requested due to upstream parent task cancellation." ) );
-            }
-            else
-            {
-                info.status = TaskStatus::Canceled;
-                info.errorMessage = QStringLiteral( "Canceled due to upstream parent task cancellation." );
-                info.endTime = QDateTime::currentDateTime();
-                info.logBuffer.append( QStringLiteral( "Canceled due to upstream parent task cancellation." ) );
-                cascadeCanceledIds.append( targetId );
-            }
-
-            updatePipelineForTaskLocked( targetId );
-            queueTaskUpdatedLocked( targetId );
-        }
+        cascadeCancelTargetsLocked( descendants, -1, QStringLiteral( "cancellation" ), false,
+                                    cascadeCanceledIds, jobCancelTargets, handlesToCancel );
 
         processNextQueuedTasks();
     }
     flushPendingLaunches();
     flushPendingSignals();
 
-    for ( const auto &jId : jobIdsToCancel )
-        sicnu::jobs::JobEngine::instance().cancel( jId );
+    dispatchPendingCancels( handlesToCancel, jobCancelTargets,
+                            QStringLiteral( "Job no longer known to the engine; task canceled." ) );
 
     fireTaskCompletionCallbacks( taskId );
     for ( long id : cascadeCanceledIds )
@@ -1300,8 +1384,9 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
 
 bool TaskCenter::cancelTask( long taskId )
 {
-    std::vector<std::string> jobIdsToCancel;
+    std::vector<std::pair<std::string, long>> jobCancelTargets;
     QList<long> cascadeCanceledIds;
+    QList<QPointer<QgsTask>> handlesToCancel;
     {
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) )
@@ -1313,59 +1398,16 @@ bool TaskCenter::cancelTask( long taskId )
         targets.append( taskId );
         targets.append( collectTransitiveDescendantsLocked( taskId ) );
 
-        for ( long targetId : targets )
-        {
-            auto &info = m_tasks[targetId];
-            if ( isTerminalStatus( info.status ) )
-                continue;
-
-            if ( info.taskHandle )
-                info.taskHandle->cancel();
-
-            if ( !info.jobId.empty() )
-            {
-                // Dispatched work: the worker observes the cancel flag and the
-                // terminal Canceled record arrives via the listener. Track the
-                // in-between explicitly so entries/UI can show "cancelling".
-                info.status = TaskStatus::Cancelling;
-                jobIdsToCancel.push_back( info.jobId );
-                info.logBuffer.append( ( targetId == taskId )
-                                         ? QStringLiteral( "Cancellation requested by user." )
-                                         : QStringLiteral( "Cancellation requested due to upstream parent task cancellation." ) );
-            }
-            else
-            {
-                info.status = TaskStatus::Canceled;
-                info.errorMessage = ( targetId == taskId )
-                                      ? QStringLiteral( "Task canceled" )
-                                      : QStringLiteral( "Canceled due to upstream parent task cancellation." );
-                info.endTime = QDateTime::currentDateTime();
-                info.logBuffer.append( ( targetId == taskId )
-                                         ? QStringLiteral( "Task canceled by user." )
-                                         : QStringLiteral( "Canceled due to upstream parent task cancellation." ) );
-                cascadeCanceledIds.append( targetId );
-
-                if ( !info.outputLayerPath.isEmpty() && QFile::exists( info.outputLayerPath ) )
-                {
-                    if ( info.outputLayerPath.startsWith( QStringLiteral( "/tmp/" ) )
-                         || info.outputLayerPath.contains( QStringLiteral( ".scratch" ) ) )
-                    {
-                        QFile::remove( info.outputLayerPath );
-                    }
-                }
-            }
-
-            updatePipelineForTaskLocked( targetId );
-            queueTaskUpdatedLocked( targetId );
-        }
+        cascadeCancelTargetsLocked( targets, taskId, QStringLiteral( "cancellation" ), true,
+                                    cascadeCanceledIds, jobCancelTargets, handlesToCancel );
 
         processNextQueuedTasks();
     }
     flushPendingLaunches();
     flushPendingSignals();
 
-    for ( const auto &jId : jobIdsToCancel )
-        sicnu::jobs::JobEngine::instance().cancel( jId );
+    dispatchPendingCancels( handlesToCancel, jobCancelTargets,
+                            QStringLiteral( "Job no longer known to the engine; task canceled." ) );
 
     for ( long id : cascadeCanceledIds )
         fireTaskCompletionCallbacks( id );

@@ -12,6 +12,8 @@
 #include <memory>
 #include <string>
 #include <functional>
+#include <utility>
+#include <vector>
 
 #include "qgstaskmanager.h"
 #include "algorithm_engine.h"
@@ -278,8 +280,30 @@ private:
     void fireTaskCompletionCallbacks( long taskId );
     QList<long> collectTransitiveDescendantsLocked( long rootTaskId ) const;
     static QVariant substituteVariantRecursive( const QVariant &value,
-                                                const std::function<std::string( const sicnu::workflow::PlaceholderRef & )> &resolver );
+                                                const std::function<std::string( const sicnu::workflow::PlaceholderRef & )> &resolver,
+                                                bool *changed = nullptr );
     void applyPlaceholdersForTask(long taskId);
+    /// Shared descendant-cascade body for markTaskFailed / markTaskCanceled /
+    /// cancelTask. Must be called with m_mutex held. @a userRootId is the
+    /// caller-facing root task (gets the "by user" messages) or -1 when the
+    /// root was already marked by the caller. @a upstreamCause is "failure" or
+    /// "cancellation". @a cleanupScratchOutputs enables cancelTask's
+    /// scratch-file removal. Cancelling targets are appended to
+    /// @a jobCancelTargets as (jobId, taskId) pairs; attached QgsTask handles
+    /// are collected in @a handlesToCancel for thread-marshaled cancellation.
+    void cascadeCancelTargetsLocked( const QList<long> &targets, long userRootId,
+                                     const QString &upstreamCause, bool cleanupScratchOutputs,
+                                     QList<long> &cascadeCanceledIds,
+                                     std::vector<std::pair<std::string, long>> &jobCancelTargets,
+                                     QList<QPointer<QgsTask>> &handlesToCancel );
+    /// Post-lock half of the cascade: marshals attached QgsTask cancellation
+    /// to the handle's own thread, asks JobEngine to cancel dispatched jobs,
+    /// and finalizes tasks whose job id the engine no longer knows (they
+    /// would otherwise strand in Cancelling forever). Must be called without
+    /// m_mutex held.
+    void dispatchPendingCancels( const QList<QPointer<QgsTask>> &handlesToCancel,
+                                 const std::vector<std::pair<std::string, long>> &jobCancelTargets,
+                                 const QString &strandedReason );
     void updatePipelineForTaskLocked(long taskId);
     long submitJobImpl(const sicnu::jobs::JobRequest& request,
                        JobExecutor executor,

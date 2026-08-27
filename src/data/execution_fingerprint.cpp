@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QHash>
 #include <algorithm>
+#include <cmath>
 #include <mutex>
 
 namespace sicnu::data
@@ -70,17 +71,33 @@ QByteArray canonicalizeJsonValue( const QJsonValue &val )
     return val.toBool() ? "true" : "false";
   if ( val.isDouble() )
   {
-    double d = val.toDouble();
-    if ( d == static_cast<qint64>( d ) )
+    const double d = val.toDouble();
+    if ( d == 0.0 )
+      return std::signbit( d ) ? "-0" : "0"; // ES6 distinguishes -0 from 0
+    // Integer-valued doubles within the qint64 range serialize exactly. The
+    // range guard also avoids UB on the static_cast for |d| >= 2^63.
+    if ( std::fabs( d ) < 9.2233720368547758e18 && d == static_cast<qint64>( d ) )
       return QByteArray::number( static_cast<qint64>( d ) );
-    return QByteArray::number( d, 'g', 16 );
+    // Shortest round-trip (ES6-style): a fixed 16-digit format provably
+    // collides - 0.3 and 0.30000000000000004 both print "0.3" at 'g',16,
+    // which would make distinct parameters hash to the same fingerprint and
+    // silently reuse a wrong cached result. Emit the fewest significant
+    // digits whose parse reproduces the exact double (doubles need up to 17).
+    for ( int precision = 1; precision <= 17; ++precision )
+    {
+      const QByteArray candidate = QByteArray::number( d, 'g', precision );
+      bool ok = false;
+      if ( candidate.toDouble( &ok ) == d && ok )
+        return candidate;
+    }
+    return QByteArray::number( d, 'g', 17 );
   }
   if ( val.isString() )
   {
-    QJsonArray wrap{ val.toString() };
+    QJsonArray wrap = { val.toString() };
     QByteArray s = QJsonDocument( wrap ).toJson( QJsonDocument::Compact );
     if ( s.startsWith( '[' ) && s.endsWith( ']' ) )
-      return s.mid( 1, s.length() - 2 );
+      return s.mid( 1, s.size() - 2 );
     return s;
   }
   if ( val.isArray() )
@@ -105,10 +122,10 @@ QByteArray canonicalizeJsonValue( const QJsonValue &val )
     {
       if ( i > 0 ) out.append( ',' );
       const QString &k = keys[i];
-      QJsonArray wrap{ k };
+      QJsonArray wrap = { k };
       QByteArray keyStr = QJsonDocument( wrap ).toJson( QJsonDocument::Compact );
       if ( keyStr.startsWith( '[' ) && keyStr.endsWith( ']' ) )
-        keyStr = keyStr.mid( 1, keyStr.length() - 2 );
+        keyStr = keyStr.mid( 1, keyStr.size() - 2 );
       out.append( keyStr );
       out.append( ':' );
       out.append( canonicalizeJsonValue( obj.value( k ) ) );
@@ -154,7 +171,23 @@ ExecutionFingerprint makeExecutionFingerprintV2( const QString &algorithmId,
     if ( a.toPort != b.toPort ) return a.toPort < b.toPort;
     if ( a.fromPort != b.fromPort ) return a.fromPort < b.fromPort;
     if ( a.assetId != b.assetId ) return a.assetId.toString() < b.assetId.toString();
-    return a.revision.value() < b.revision.value();
+    if ( a.revision.value() != b.revision.value() )
+      return a.revision.value() < b.revision.value();
+    // The four fields above do not uniquely identify an input: two inputs may
+    // share (toPort, fromPort, assetId, revision) yet differ in bands, value
+    // domain, or content digest. Order over ALL serialized fields so the
+    // concatenated form is independent of the caller's list order.
+    const auto joinedBands = []( const QStringList &bands ) {
+      QStringList sorted = bands;
+      sorted.sort();
+      return sorted.join( u',' );
+    };
+    const QString aBands = joinedBands( a.bandReferences );
+    const QString bBands = joinedBands( b.bandReferences );
+    if ( aBands != bBands ) return aBands < bBands;
+    if ( a.valueDomain != b.valueDomain ) return a.valueDomain < b.valueDomain;
+    if ( a.lazyContentDigest != b.lazyContentDigest ) return a.lazyContentDigest < b.lazyContentDigest;
+    return false;
   } );
 
   for ( const auto &in : sortedInputs )

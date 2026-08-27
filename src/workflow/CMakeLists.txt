@@ -1,15 +1,32 @@
-# SICNU GEO RS — Workflow engine (Qt-free runtime)
-set(SICNU_WORKFLOW_SOURCES
+# SICNU GEO RS — Workflow engine.
+#
+# Two targets:
+#  - sicnu_workflow (SHARED): the self-contained core - definitions, gates,
+#    sessions, placeholder grammar, and the Workflow Engine 2.0 run/checkpoint
+#    aggregate. Shared like sicnu_processing/sicnu_operators because shared
+#    consumers (artifact_gc in sicnu_processing) need the run's out-of-line
+#    accessors resolvable at final link, which a static archive cannot
+#    provide without duplicating the objects (and their static state).
+#  - sicnu_workflow_runtime (STATIC): WorkflowRuntime + built-in workflow
+#    registrations. These reference ExecutionPlane (sicnu_task_center) and
+#    OutputVerifier (sicnu_agent) and deliberately keep the historical
+#    static-deferral contract: symbols resolve at final link time in the
+#    executables/tests, which link those libs directly.
+set(SICNU_WORKFLOW_CORE_SOURCES
   workflow_definition.cpp
   workflow_gate.cpp
   workflow_session.cpp
-  workflow_runtime.cpp
-  builtin_definitions.cpp
   placeholder_grammar.cpp
   workflow_run.cpp
   workflow_checkpoint.cpp
 )
-add_library(sicnu_workflow STATIC ${SICNU_WORKFLOW_SOURCES})
+set(SICNU_WORKFLOW_RUNTIME_SOURCES
+  workflow_runtime.cpp
+  builtin_definitions.cpp
+)
+add_library(sicnu_workflow SHARED ${SICNU_WORKFLOW_CORE_SOURCES})
+add_library(sicnu_workflow_runtime STATIC ${SICNU_WORKFLOW_RUNTIME_SOURCES})
+target_link_libraries(sicnu_workflow_runtime PUBLIC sicnu_workflow)
 target_include_directories(sicnu_workflow PUBLIC
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/processing
@@ -30,8 +47,22 @@ if(TARGET sicnu_operators)
   target_link_libraries(sicnu_workflow PUBLIC sicnu_operators)
 endif()
 
+# Deliberately NO link from sicnu_workflow itself to task_center/processing/
+# agent: task_center PUBLIC-links sicnu_workflow, so adding the reverse edge
+# would form a cycle. workflow_runtime.cpp's ExecutionPlane/OutputVerifier
+# references stay unresolved in that archive and are resolved at final link
+# time; the PUBLIC provider links below propagate the resolving libraries to
+# every executable that uses the runtime (the "final executables link those
+# libs directly" contract, encoded once instead of per-consumer). Static ->
+# static propagation only puts archive/library paths on exe link lines:
+# nothing is embedded into a shared library (no state duplication), and
+# task_center never references sicnu_workflow_runtime, so the graph stays
+# acyclic.
 if(TARGET sicnu_task_center)
-  target_link_libraries(sicnu_workflow PUBLIC sicnu_task_center sicnu_processing)
+  target_link_libraries(sicnu_workflow_runtime PUBLIC sicnu_task_center sicnu_processing)
+endif()
+if(TARGET sicnu_agent)
+  target_link_libraries(sicnu_workflow_runtime PUBLIC sicnu_agent)
 endif()
 
 
@@ -39,4 +70,5 @@ set_target_properties(sicnu_workflow PROPERTIES
   CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
   POSITION_INDEPENDENT_CODE ON
+  WINDOWS_EXPORT_ALL_SYMBOLS ON
 )

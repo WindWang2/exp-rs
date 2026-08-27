@@ -299,6 +299,7 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     sicnu_processing
     sicnu_operators
     sicnu_workflow
+    sicnu_workflow_runtime
     sicnu_jobs
     sicnu_task_center
     sicnu_agent

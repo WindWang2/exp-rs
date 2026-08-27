@@ -61,11 +61,15 @@ struct ExecutionFingerprint
   bool operator==( const ExecutionFingerprint & ) const = default;
 };
 
-/// Tagged derivation input for RFC 8785 execution fingerprints (Workflow Engine 2.0).
+/// Tagged derivation input for canonical execution fingerprints (Workflow Engine 2.0).
+/// @a revision has no default on purpose: a forgotten revision would hash two
+/// materially different inputs identically and silently reuse a wrong cached
+/// result. Callers must state it explicitly (use AssetRevision::initial() for
+/// genuinely-initial assets).
 struct TaggedDerivationInput
 {
   AssetId assetId;
-  AssetRevision revision = AssetRevision::initial();
+  AssetRevision revision;
   QString fromPort;
   QString toPort;
   QStringList bandReferences;
@@ -75,7 +79,9 @@ struct TaggedDerivationInput
   bool operator==( const TaggedDerivationInput & ) const = default;
 };
 
-/// RFC 8785 JSON Canonicalization Scheme serializer with strictly sorted UTF-16 code point keys.
+/// Canonical JSON serializer with strictly sorted keys and ES6-style
+/// shortest-round-trip number formatting (the number serialization mandated
+/// by RFC 8785 / JCS), suitable for hashing.
 QByteArray canonicalizeJsonRfc8785( const QJsonObject &obj );
 
 /// Build a fingerprint from the components. @a parameters is normalized (sorted

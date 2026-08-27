@@ -452,3 +452,38 @@ TEST_CASE( "Degenerate and empty pipelines complete immediately in TaskCenter wi
     }
 }
 
+
+
+// Restored regression (formerly tests/test_w1_regression.cpp #313, deleted
+// with the legacy W-suites): pipeline paths must stay inside
+// SICNU_PIPELINE_WORKSPACE after placeholder expansion.
+TEST_CASE("CLI workspace containment enforced post-expansion", "[cli][pipeline][workspace][313]") {
+    QTemporaryDir ws;
+    REQUIRE(ws.isValid());
+    qputenv("SICNU_PIPELINE_WORKSPACE", ws.path().toUtf8());
+
+    QTemporaryDir outside;
+    REQUIRE(outside.isValid());
+    qputenv("W1_SECRET_OUT", outside.path().toUtf8());
+
+    Json::Value pipeline(Json::objectValue);
+    Json::Value steps(Json::arrayValue);
+    Json::Value step(Json::objectValue);
+    step["operator"] = "rs:spectral_index";
+    Json::Value params(Json::objectValue);
+    params["input"] = std::string("${W1_SECRET_OUT}/outside.tif");
+    params["output"] = std::string(ws.path().toStdString() + "/out.tif");
+    step["params"] = params;
+    steps.append(step);
+    pipeline["steps"] = steps;
+
+    sicnu::cli::RsPipelineRunner runner;
+    auto result = runner.runFromJson(pipeline);
+
+    // The env-expanded input escapes the workspace: the run must fail
+    // containment validation instead of touching files outside ws.
+    CHECK(!result.success);
+
+    qunsetenv("SICNU_PIPELINE_WORKSPACE");
+    qunsetenv("W1_SECRET_OUT");
+}

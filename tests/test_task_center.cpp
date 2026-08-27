@@ -112,6 +112,33 @@ TEST_CASE("TaskCenter - Upstream Failure Cascade Cancellation", "[processing][ta
     REQUIRE(childInfo.logBuffer.last().contains(QStringLiteral("upstream parent task failure")));
 }
 
+TEST_CASE("TaskCenter - Upstream External Cancellation Cascades to Descendants", "[processing][task_center][cancellation_cascade]") {
+    auto& center = sicnu::TaskCenter::instance();
+
+    QVariantMap parentParams;
+    long parentId = center.enqueueTask(QStringLiteral("parent_cancel_algo"), parentParams, true);
+
+    QVariantMap childParams;
+    QList<long> parentIds = { parentId };
+    long childId = center.enqueueTask(QStringLiteral("child_cancel_algo"), childParams, true, sicnu::TaskPriority::Normal, parentIds);
+    long grandchildId = center.enqueueTask(QStringLiteral("grandchild_cancel_algo"), childParams, true, sicnu::TaskPriority::Normal, { childId });
+
+    // Mark parent canceled (listener-side external cancellation path)
+    center.markTaskCanceled(parentId, QStringLiteral("Externally canceled"));
+
+    auto parentInfo = center.getTaskInfo(parentId);
+    REQUIRE(parentInfo.status == sicnu::TaskStatus::Canceled);
+
+    // Both descendants cascade to Canceled with the upstream-cancellation wording
+    auto childInfo = center.getTaskInfo(childId);
+    REQUIRE(childInfo.status == sicnu::TaskStatus::Canceled);
+    REQUIRE(childInfo.errorMessage.contains(QStringLiteral("upstream parent task cancellation")));
+
+    auto grandchildInfo = center.getTaskInfo(grandchildId);
+    REQUIRE(grandchildInfo.status == sicnu::TaskStatus::Canceled);
+    REQUIRE(grandchildInfo.logBuffer.last().contains(QStringLiteral("upstream parent task cancellation")));
+}
+
 TEST_CASE("TaskCenter - Executes an Algorithm Task through JobEngine", "[processing][task_center]") {
     auto& engine = sicnu::jobs::JobEngine::instance();
     engine.shutdownForTests();

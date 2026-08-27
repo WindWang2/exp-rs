@@ -2,7 +2,14 @@
 
 ## Status
 
-Accepted
+Accepted (phase 1 — library layer only)
+
+> **Integration status**: the WorkflowRun / WorkflowCheckpointManager /
+> ArtifactGC / ExecutionResultCache v2 surface ships as a library + test
+> suite only. No production entry point drives it yet (production pipelines
+> still run through `TaskCenter::submitPipeline`). Wiring the v2 orchestrator
+> into a runner is the follow-up tracked in issue #589; until then the
+> surface must be treated as API-in-progress.
 
 ## Context
 
