@@ -86,6 +86,10 @@ class SICNU_AGENT_EXPORT AgentCopilotDockWidget : public QDockWidget
     /// Registers a completion callback for a tool-call task; invokes it
     /// immediately when the task is already terminal.
     void watchToolCallCompletion( long taskId, processing::ToolCallDispatcher::CompletionCallback onComplete );
+    /// Sends the tool-call result back to the LLM as a function message and
+    /// asks for the final answer.  Failures are surfaced explicitly so the
+    /// model cannot hallucinate success.
+    void sendToolResultFollowUp( const QJsonObject &toolCallJson, const Json::Value &resultPayload );
     /// Handles a `canvas:` action (draw_roi). Draws a QgsRubberBand on the
     /// active canvas and stores the ROI geometry (in canvas CRS) for later tool
     /// calls to consume. Returns a result payload (status + WKT). The agent→

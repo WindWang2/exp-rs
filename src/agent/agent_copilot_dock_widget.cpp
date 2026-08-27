@@ -432,24 +432,90 @@ void AgentCopilotDockWidget::onToolCallParsed( const QJsonObject &toolCallJson )
   {
     return;
   }
-  if (taskId > 0)
+  if ( taskId > 0 )
   {
     auto guard = m_completionGuard;
-    watchToolCallCompletion(taskId, [guard, this]( const Json::Value &resultPayload ) {
+    watchToolCallCompletion( taskId, [guard, this, toolCallJson]( const Json::Value &resultPayload ) mutable {
       if ( !guard || !*guard )
         return;
-      if ( resultPayload.isObject() && resultPayload.isMember( "status" ) && resultPayload["status"].asString() == "error" )
-      {
-        const std::string msg = resultPayload.isMember( "errorMessage" ) ? resultPayload["errorMessage"].asString() : "Tool execution failed";
-        appendErrorMessage( QString::fromStdString( msg ) );
-      }
-    });
+      sendToolResultFollowUp( toolCallJson, resultPayload );
+    } );
   }
 }
 
 void AgentCopilotDockWidget::handleToolCallRejection( const QString &errorMsg )
 {
   appendErrorMessage( errorMsg.isEmpty() ? QStringLiteral( "工具调用失败。" ) : errorMsg );
+}
+
+void AgentCopilotDockWidget::sendToolResultFollowUp( const QJsonObject &toolCallJson,
+                                                     const Json::Value &resultPayload )
+{
+  if ( !m_client )
+    return;
+
+  // Surface failures explicitly; do not let the model assume success.
+  QString content;
+  const bool ok = resultPayload.isObject()
+                  && resultPayload.isMember( "status" )
+                  && resultPayload["status"].asString() == "success";
+  const bool verified = resultPayload.isMember( "verified" ) ? resultPayload["verified"].asBool() : ok;
+
+  if ( !ok )
+  {
+    const QString error = resultPayload.isMember( "errorMessage" )
+                          ? QString::fromStdString( resultPayload["errorMessage"].asString() )
+                          : QStringLiteral( "unknown error" );
+    content = QStringLiteral( "工具执行失败: %1" ).arg( error );
+  }
+  else if ( !verified )
+  {
+    QStringList issues;
+    if ( resultPayload.isMember( "verificationIssues" ) && resultPayload["verificationIssues"].isArray() )
+    {
+      for ( const auto &issue : resultPayload["verificationIssues"] )
+        issues.append( QString::fromStdString( issue.asString() ) );
+    }
+    content = QStringLiteral( "工具执行完成，但输出验证未通过: %1" ).arg( issues.join( QStringLiteral( "; " ) ) );
+  }
+  else
+  {
+    content = QString::fromStdString( resultPayload.toStyledString() );
+  }
+
+  QJsonArray toolCalls;
+  toolCalls.append( toolCallJson );
+
+  QJsonObject assistantMsg;
+  assistantMsg[QStringLiteral( "role" )] = QStringLiteral( "assistant" );
+  assistantMsg[QStringLiteral( "content" )] = QString();
+  assistantMsg[QStringLiteral( "tool_calls" )] = toolCalls;
+
+  QJsonObject toolMsg;
+  toolMsg[QStringLiteral( "role" )] = QStringLiteral( "tool" );
+  toolMsg[QStringLiteral( "tool_call_id" )] = toolCallJson[QStringLiteral( "id" )].toString();
+  toolMsg[QStringLiteral( "content" )] = content;
+
+  QJsonArray followUpMessages = m_messageHistory;
+  followUpMessages.append( assistantMsg );
+  followUpMessages.append( toolMsg );
+
+  // Ask the model to produce the final answer based on the execution evidence.
+  QJsonObject finalUserMsg;
+  finalUserMsg[QStringLiteral( "role" )] = QStringLiteral( "user" );
+  finalUserMsg[QStringLiteral( "content" )] = QStringLiteral(
+    "请根据上述工具执行结果生成最终回答。如果执行失败或验证未通过，必须明确说明失败原因，"
+    "不得报喜。" );
+  followUpMessages.append( finalUserMsg );
+
+  m_isStreaming = true;
+  if ( m_sendBtn )
+    m_sendBtn->setText( QStringLiteral( "停止 ⏹" ) );
+
+  const Json::Value cppTools = tool_catalog::AgentToolCatalog::instance().exportOpenAiToolDefinitions();
+  const QJsonArray tools = QJsonArray::fromVariantList( processing::jsonValueToVariant( cppTools ).toList() );
+
+  m_client->sendChatCompletion( followUpMessages, tools );
 }
 
 void AgentCopilotDockWidget::watchToolCallCompletion( long taskId, processing::ToolCallDispatcher::CompletionCallback onComplete )

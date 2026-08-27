@@ -631,6 +631,23 @@ target_include_directories(test_output_verifier PRIVATE
 )
 sicnu_discover_tests(test_output_verifier)
 
+# Agent run coordinator state machine + bounded repair
+add_executable(test_agent_run_coordinator test_agent_run_coordinator.cpp)
+target_link_libraries(test_agent_run_coordinator PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_agent
+  sicnu_processing
+  sicnu_task_center
+)
+target_include_directories(test_agent_run_coordinator PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_agent_run_coordinator)
+
 # Unified datasource resolver contract (GH #560)
 sicnu_add_test(test_datasource_resolver)
 
